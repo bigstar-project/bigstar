@@ -54,6 +54,7 @@
 #include "Savestate.h"
 
 #include "EmuInstance.h"
+#include "NsmbNetplayPoC.h"
 
 using namespace melonDS;
 
@@ -252,10 +253,21 @@ void EmuThread::run()
             }
 
             // process input and hotkeys
-            emuInstance->nds->SetKeyMask(emuInstance->inputMask);
+            NsmbNetplayPoC::InputState inputState {
+                emuInstance->inputMask,
+                emuInstance->isTouching,
+                emuInstance->touchX,
+                emuInstance->touchY,
+            };
+            inputState = NsmbNetplayPoC::BeforeRunFrame(
+                emuInstance->instanceID,
+                emuInstance->nds->NumFrames,
+                inputState);
 
-            if (emuInstance->isTouching)
-                emuInstance->nds->TouchScreen(emuInstance->touchX, emuInstance->touchY);
+            emuInstance->nds->SetKeyMask(inputState.KeyMask);
+
+            if (inputState.Touching)
+                emuInstance->nds->TouchScreen(inputState.TouchX, inputState.TouchY);
             else
                 emuInstance->nds->ReleaseScreen();
 
@@ -308,7 +320,12 @@ void EmuThread::run()
             }
             else
             {
+                const u32 frameBeforeRun = emuInstance->nds->NumFrames;
                 nlines = emuInstance->nds->RunFrame();
+                NsmbNetplayPoC::AfterRunFrame(
+                    emuInstance->instanceID,
+                    frameBeforeRun,
+                    emuInstance->nds);
             }
 
             if (emuInstance->ndsSave)

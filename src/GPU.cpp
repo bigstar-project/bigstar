@@ -314,7 +314,8 @@ void GPU::DoSavestate(Savestate* file) noexcept
 
 void GPU::SetRenderer(std::unique_ptr<Renderer>&& renderer) noexcept
 {
-    SyncAllVRAMCaptures();
+    if (Rend)
+        SyncAllVRAMCaptures();
 
     bool good = false;
     if (renderer)

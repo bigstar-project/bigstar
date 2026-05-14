@@ -1,4 +1,5 @@
 build*/
+vcpkg/
 bin
 obj
 *.depend
@@ -25,3 +26,5 @@ CMakeCache.txt
 freebios/FreeBIOS_Data.h
 freebios/bios*
 freebios/build/
+
+roms/
