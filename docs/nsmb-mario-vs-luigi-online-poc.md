@@ -311,3 +311,94 @@ melonDSフォークでのPoCは現実的。
 ただし、成功の鍵は「オンライン通信部分」そのものではなく、同じ初期状態と同じ入力列で、2台分のDSローカル通信を含むエミュレーションがPC間で決定論的に一致するかどうか。
 
 そのため、最初は完成度よりも desync 検出と再現性を重視する。
+
+## 2026-05-14 作業ログ
+
+### 完了
+
+- 入力同期/自動検証ハーネスを `27b71d34 test: add NSMB netplay smoke harness` としてコミットした
+- テストモードで2つの `EmuInstance` を同一プロセス内に自動起動するため、`MELONDS_NSML_TEST_INSTANCES` の実装を開始した
+- 2つの `EmuInstance` で同じROMを開き、両方の状態hashが出ることを確認する `scripts/run-nsmb-two-instance-smoke.ps1` を追加した
+
+### 現在の確認対象
+
+- `MELONDS_NSML_TEST_INSTANCES=2` で `roms/nsmb.nds` を2つの `EmuInstance` にロードできるか
+- `MELONDS_NSML_HASH_LOG` に instance `0` と `1` の両方の行が出るか
+- 指定フレーム数で自動終了できるか
+- 初回確認では2つの `EmuInstance` が180フレームまで到達し、両方のhashは出た。ただしQt終了処理中に `0xC0000005` アクセス違反が出たため、テストモードではフレーム上限到達後にログをflushして即終了する方針に変更した
+
+### 次にやること
+
+1. VS2022/ClangのDebugビルドを通す
+2. `scripts/run-nsmb-two-instance-smoke.ps1 -Frames 180` を実行する
+3. 失敗した場合はstdout/hashログから、2つ目の `EmuInstance` 起動かROMロードか終了制御のどこで止まっているか切り分ける
+4. 成功後、Mario vs Luigi到達用の入力スクリプト作成手順を整理する
+
+### ブロッカー
+
+- 現時点ではなし
+- Mario vs Luigiのメニュー導線自動化には、最初の入力タイミング/画面状態の対応付けが必要。必要なら次の段階でスクリーンショットダンプ用のテストフックを追加する
+
+### 入力スクリプトの作り方
+
+現在の入力スクリプトは `MELONDS_NSML_INPUT_SCRIPT` で指定する。サンプルは `tests/nsmb_smoke.inputs`。
+
+形式:
+
+```text
+start-end buttons [touchX,touchY]
+```
+
+例:
+
+```text
+# 0から119フレームまでは何もしない
+0-119 NONE
+
+# 120から125フレームまでSTARTを押す
+120-125 START
+
+# 180から185フレームまでAを押す
+180-185 A
+
+# 240から245フレームまで十字キー右とAを同時押し
+240-245 RIGHT+A
+
+# タッチ入力が必要な場合。座標はDSタッチスクリーン座標
+300-305 NONE 128,96
+```
+
+使えるボタン:
+
+```text
+A, B, SELECT, START, RIGHT, LEFT, UP, DOWN, R, L, X, Y
+```
+
+複数ボタンは `+` で結合する。入力なしは `NONE` または `NEUTRAL`。
+
+実行例:
+
+```powershell
+$env:MELONDS_NSML_TEST="1"
+$env:MELONDS_NSML_TEST_INSTANCES="2"
+$env:MELONDS_NSML_TEST_FRAMES="600"
+$env:MELONDS_NSML_INPUT_SCRIPT="tests\nsmb_mario_vs_luigi.inputs"
+$env:MELONDS_NSML_HASH_LOG="logs\nsmb-mvl.hash.csv"
+.\build\debug-windows-x86_64\melonDS.exe .\roms\nsmb.nds
+```
+
+現時点では画面内容を自動判定するフックはまだないため、Mario vs Luigi開始までの初回スクリプト作成には、人間が画面を見て「何フレーム目にどの入力を入れるか」を決める必要がある。
+
+ただし、次の段階でスクリーンショット/フレームバッファダンプを追加すれば、Codex側で `入力スクリプト修正 -> 実行 -> 画面確認 -> 再修正` のループを回せるようになる。
+
+### 2インスタンスsmoke結果
+
+`scripts/run-nsmb-two-instance-smoke.ps1 -Frames 180` は成功。
+
+確認できたこと:
+
+- 1プロセス内で2つの `EmuInstance` を自動起動できる
+- 2つの `EmuInstance` が `roms/nsmb.nds` をロードできる
+- instance `0` と `1` の両方が180フレームまで進む
+- instance `0` と `1` の両方のhashログが `logs/nsmb-two-instance.hash.csv` に出る
+- テスト完了後のアクセス違反ダイアログは、テストモード専用の即終了経路で回避した

@@ -23,6 +23,7 @@
 
 #include <optional>
 #include <string>
+#include <algorithm>
 
 #include <QApplication>
 #include <QStyle>
@@ -84,6 +85,13 @@ Net net;
 
 
 QElapsedTimer sysTimer;
+
+static int envInt(const char* name, int fallback)
+{
+    const char* value = getenv(name);
+    if (!value || !value[0]) return fallback;
+    return atoi(value);
+}
 
 
 void NetInit()
@@ -386,6 +394,10 @@ int main(int argc, char** argv)
 
     createEmuInstance();
 
+    const int testInstances = std::clamp(envInt("MELONDS_NSML_TEST_INSTANCES", 1), 1, kMaxEmuInstances);
+    for (int i = 1; i < testInstances; i++)
+        createEmuInstance();
+
     {
         MainWindow* win = emuInstances[0]->getMainWindow();
         bool memberSyntaxUsed = false;
@@ -408,7 +420,11 @@ int main(int argc, char** argv)
 
         if (memberSyntaxUsed) printf("Warning: use the a.zip|b.nds format at your own risk!\n");
 
-        win->preloadROMs(dsfile, gbafile, options->boot);
+        for (int i = 0; i < testInstances; i++)
+        {
+            MainWindow* instWin = emuInstances[i]->getMainWindow();
+            instWin->preloadROMs(dsfile, gbafile, options->boot);
+        }
 
         if (options->fullscreen)
             win->toggleFullscreen();

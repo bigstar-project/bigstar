@@ -77,6 +77,7 @@ struct State
     int Port = 8065;
     const char* PeerHost = "127.0.0.1";
     melonDS::u32 TestFrames = kNoFrameLimit;
+    int TestInstanceCount = 1;
     int HashInterval = 60;
     int TestWaitTimeoutMs = 5000;
     std::string InputScriptPath;
@@ -426,6 +427,7 @@ void InitFromEnvironment()
     G.Enabled = EnvFlag("MELONDS_NSML_POC");
     G.TestEnabled = EnvFlag("MELONDS_NSML_TEST");
     G.TestFrames = static_cast<melonDS::u32>(std::max(0, EnvInt("MELONDS_NSML_TEST_FRAMES", 0)));
+    G.TestInstanceCount = std::clamp(EnvInt("MELONDS_NSML_TEST_INSTANCES", 1), 1, 16);
     G.HashInterval = std::max(1, EnvInt("MELONDS_NSML_HASH_INTERVAL", 60));
     G.TestWaitTimeoutMs = std::max(0, EnvInt("MELONDS_NSML_WAIT_TIMEOUT_MS", 5000));
 
@@ -453,8 +455,9 @@ void InitFromEnvironment()
             }
         }
 
-        std::printf("NSMB Test: enabled frames=%u input=%s hashLog=%s interval=%d waitTimeoutMs=%d\n",
+        std::printf("NSMB Test: enabled frames=%u instances=%d input=%s hashLog=%s interval=%d waitTimeoutMs=%d\n",
             G.TestFrames,
+            G.TestInstanceCount,
             G.InputScriptPath.empty() ? "<none>" : G.InputScriptPath.c_str(),
             G.HashLogPath.empty() ? "<none>" : G.HashLogPath.c_str(),
             G.HashInterval,
@@ -595,14 +598,24 @@ bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
 {
     InitFromEnvironment();
     if (!G.TestEnabled || G.TestFrames == kNoFrameLimit) return false;
-    if (instanceID != 0) return false;
+    if (instanceID != G.TestInstanceCount - 1) return false;
     if (G.TestFrameCount[instanceID] < G.TestFrames) return false;
 
     std::lock_guard<std::mutex> lock(G.Mutex);
+    for (int i = 0; i < G.TestInstanceCount; i++)
+    {
+        if (G.TestFrameCount[i] < G.TestFrames)
+            return false;
+    }
+
     if (!G.TestAnnouncedQuit)
     {
         G.TestAnnouncedQuit = true;
-        std::printf("NSMB Test: frame limit reached at frame=%u\n", G.TestFrameCount[instanceID]);
+        std::printf("NSMB Test: frame limit reached at frame=%u instances=%d\n",
+            G.TestFrames,
+            G.TestInstanceCount);
+        std::fflush(nullptr);
+        std::_Exit(0);
     }
     return true;
 }
