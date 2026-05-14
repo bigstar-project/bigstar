@@ -22,10 +22,14 @@
 #include <fstream>
 #include <map>
 #include <mutex>
+#include <filesystem>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <QImage>
+#include <QString>
 
 #include <enet/enet.h>
 
@@ -82,7 +86,9 @@ struct State
     int TestWaitTimeoutMs = 5000;
     std::string InputScriptPath;
     std::string HashLogPath;
+    std::string ScreenshotDir;
     std::ofstream HashLog;
+    int ScreenshotInterval = 0;
     ENetHost* Host = nullptr;
     ENetPeer* Peer = nullptr;
     bool ENetInitialized = false;
@@ -94,6 +100,7 @@ struct State
 
 struct InputSpan
 {
+    int Instance = -1;
     melonDS::u32 Start = 0;
     melonDS::u32 End = 0;
     InputState Input;
@@ -214,10 +221,36 @@ bool LoadInputScriptLocked()
         if (line.empty()) continue;
 
         std::stringstream ss(line);
+        std::string target;
         std::string range;
         std::string buttons;
         std::string touch;
-        ss >> range >> buttons >> touch;
+        ss >> target >> range >> buttons >> touch;
+
+        InputSpan span;
+        if (target.find('-') != std::string::npos)
+        {
+            touch = buttons;
+            buttons = range;
+            range = target;
+        }
+        else
+        {
+            const std::string upperTarget = Upper(target);
+            if (upperTarget != "ALL")
+            {
+                const std::string prefix = "INST";
+                melonDS::u32 targetInstance = 0;
+                if (upperTarget.rfind(prefix, 0) != 0 ||
+                    !ParseU32(upperTarget.substr(prefix.size()), targetInstance) ||
+                    targetInstance >= 16)
+                {
+                    std::printf("NSMB Test: invalid input target at %s:%d\n", G.InputScriptPath.c_str(), lineNo);
+                    return false;
+                }
+                span.Instance = static_cast<int>(targetInstance);
+            }
+        }
 
         const auto dash = range.find('-');
         if (dash == std::string::npos)
@@ -226,7 +259,6 @@ bool LoadInputScriptLocked()
             return false;
         }
 
-        InputSpan span;
         if (!ParseU32(range.substr(0, dash), span.Start) ||
             !ParseU32(range.substr(dash + 1), span.End) ||
             span.End < span.Start ||
@@ -262,13 +294,14 @@ bool LoadInputScriptLocked()
     return true;
 }
 
-InputState ApplyInputScript(melonDS::u32 frame, const InputState& fallback)
+InputState ApplyInputScript(int instanceID, melonDS::u32 frame, const InputState& fallback)
 {
     if (!G.TestEnabled || GInputScript.empty()) return fallback;
 
     for (const InputSpan& span : GInputScript)
     {
-        if (frame >= span.Start && frame <= span.End)
+        if ((span.Instance < 0 || span.Instance == instanceID) &&
+            frame >= span.Start && frame <= span.End)
             return span.Input;
     }
 
@@ -410,6 +443,37 @@ melonDS::u64 HashNDS(melonDS::NDS* nds)
     return hash;
 }
 
+void SaveScreenshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (G.ScreenshotDir.empty() || G.ScreenshotInterval <= 0) return;
+    if ((frame % static_cast<melonDS::u32>(G.ScreenshotInterval)) != 0) return;
+
+    void* topBuffer = nullptr;
+    void* bottomBuffer = nullptr;
+    if (!nds->GPU.GetFramebuffers(&topBuffer, &bottomBuffer)) return;
+    if (!topBuffer || !bottomBuffer) return;
+
+    std::error_code ec;
+    std::filesystem::create_directories(G.ScreenshotDir, ec);
+    if (ec)
+    {
+        std::printf("NSMB Test: failed to create screenshot dir: %s (%s)\n",
+            G.ScreenshotDir.c_str(),
+            ec.message().c_str());
+        return;
+    }
+
+    QImage image(256, 384, QImage::Format_RGB32);
+    std::memcpy(image.scanLine(0), topBuffer, 256 * 192 * 4);
+    std::memcpy(image.scanLine(192), bottomBuffer, 256 * 192 * 4);
+
+    char filename[256];
+    std::snprintf(filename, sizeof(filename), "inst%d_frame%06u.png", instanceID, frame);
+    const std::filesystem::path path = std::filesystem::path(G.ScreenshotDir) / filename;
+    if (!image.save(QString::fromStdWString(path.wstring())))
+        std::printf("NSMB Test: failed to save screenshot: %ls\n", path.c_str());
+}
+
 }
 
 bool IsEnabled()
@@ -437,6 +501,10 @@ void InitFromEnvironment()
     const char* hashLog = std::getenv("MELONDS_NSML_HASH_LOG");
     if (hashLog && hashLog[0]) G.HashLogPath = hashLog;
 
+    const char* screenshotDir = std::getenv("MELONDS_NSML_SCREENSHOT_DIR");
+    if (screenshotDir && screenshotDir[0]) G.ScreenshotDir = screenshotDir;
+    G.ScreenshotInterval = std::max(0, EnvInt("MELONDS_NSML_SCREENSHOT_INTERVAL", 0));
+
     if (G.TestEnabled)
     {
         if (!LoadInputScriptLocked())
@@ -455,12 +523,14 @@ void InitFromEnvironment()
             }
         }
 
-        std::printf("NSMB Test: enabled frames=%u instances=%d input=%s hashLog=%s interval=%d waitTimeoutMs=%d\n",
+        std::printf("NSMB Test: enabled frames=%u instances=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d waitTimeoutMs=%d\n",
             G.TestFrames,
             G.TestInstanceCount,
             G.InputScriptPath.empty() ? "<none>" : G.InputScriptPath.c_str(),
             G.HashLogPath.empty() ? "<none>" : G.HashLogPath.c_str(),
             G.HashInterval,
+            G.ScreenshotDir.empty() ? "<none>" : G.ScreenshotDir.c_str(),
+            G.ScreenshotInterval,
             G.TestWaitTimeoutMs);
     }
 
@@ -525,7 +595,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, const InputState& 
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16)
         inputFrame = G.TestFrameCount[instanceID];
 
-    const InputState testInput = ApplyInputScript(inputFrame, polledInput);
+    const InputState testInput = ApplyInputScript(instanceID, inputFrame, polledInput);
     const melonDS::u32 syncFrame = G.TestEnabled ? inputFrame : frame;
 
     if (!G.Enabled || !G.Ready) return testInput;
@@ -573,6 +643,8 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     melonDS::u32 logFrame = frame;
     if (G.TestEnabled)
         logFrame = ++G.TestFrameCount[instanceID];
+
+    SaveScreenshot(instanceID, logFrame, nds);
 
     if ((logFrame % static_cast<melonDS::u32>(G.HashInterval)) != 0) return;
 

@@ -402,3 +402,67 @@ $env:MELONDS_NSML_HASH_LOG="logs\nsmb-mvl.hash.csv"
 - instance `0` と `1` の両方が180フレームまで進む
 - instance `0` と `1` の両方のhashログが `logs/nsmb-two-instance.hash.csv` に出る
 - テスト完了後のアクセス違反ダイアログは、テストモード専用の即終了経路で回避した
+
+## 2026-05-14 スクリーンショットフック作業
+
+### 目的
+
+Codex側で画面状態を確認しながら、NSMBのメニュー入力を調整して Mario vs Luigi まで到達できるようにする。
+
+### 実装予定
+
+- `MELONDS_NSML_SCREENSHOT_DIR` でPNG出力先を指定する
+- `MELONDS_NSML_SCREENSHOT_INTERVAL` で何フレームごとに保存するか指定する
+- 各 `EmuInstance` の上画面/下画面を縦に連結した `256x384` PNGを保存する
+- ファイル名に instance ID と frame を入れる
+
+### 現在の次アクション
+
+1. `NDS::GPU.GetFramebuffers()` からソフトウェアフレームバッファを取得してPNG保存する
+2. neutral入力でタイトル画面までのスクリーンショットを確認する
+3. 入力スクリプトを段階的に追加し、Mario vs Luigi導線を進める
+
+### 完了
+
+- `MELONDS_NSML_SCREENSHOT_DIR` と `MELONDS_NSML_SCREENSHOT_INTERVAL` を追加した
+- テストモードで各 `EmuInstance` の上画面/下画面を縦に連結した `256x384` PNGを出力できるようにした
+- 入力スクリプトに `inst0` / `inst1` / `all` のインスタンス別指定を追加した
+- `tests/nsmb_mario_vs_luigi.inputs` を追加し、以下の導線を自動化した
+  - タイトルメニューで「マリオVSルイージ」を選択
+  - Multi-Card Play側の「ソフトを持っている人と対戦」を選択
+  - instance 0 はマリオ、instance 1 はルイージを選択
+  - 検索/承認画面で両者を接続
+  - 対戦設定をOK
+  - 最初のコースを選択
+- `logs/screens-mvl-route7/inst0_frame004200.png` と `logs/screens-mvl-route7/inst1_frame004200.png` で、Mario vs Luigiの対戦画面に入っていることを確認した
+- 再現用スクリプト `scripts/run-nsmb-mvl-route-smoke.ps1` を追加した
+
+### 検証コマンド
+
+```powershell
+.\scripts\run-nsmb-mvl-route-smoke.ps1 -Frames 4200
+```
+
+検証結果:
+
+- 成功: `NSMB Mario vs Luigi route smoke passed: frames=4200 rows=28 screenshots=70`
+- 最終確認画像: `logs/screens-mvl-route/inst0_frame004200.png`, `logs/screens-mvl-route/inst1_frame004200.png`
+- 4200フレーム時点で両インスタンスとも対戦ステージに入っている
+
+### 入力スクリプトのインスタンス別指定
+
+既存形式:
+
+```text
+620-627 DOWN
+```
+
+インスタンス別形式:
+
+```text
+inst0 1260-1267 A
+inst1 1260-1267 DOWN
+all 1328-1499 NONE
+```
+
+`inst0` は1つ目の `EmuInstance`、`inst1` は2つ目の `EmuInstance`。指定がない行は従来通り全インスタンスに適用される。
