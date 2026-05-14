@@ -80,6 +80,8 @@ struct State
     int LocalInstance = 0;
     int Port = 8065;
     const char* PeerHost = "127.0.0.1";
+    melonDS::u32 NetplayStartFrame = 0;
+    bool LocalWaitsForRemote = true;
     melonDS::u32 TestFrames = kNoFrameLimit;
     int TestInstanceCount = 1;
     int HashInterval = 60;
@@ -541,6 +543,8 @@ void InitFromEnvironment()
     G.Delay = std::max(0, EnvInt("MELONDS_NSML_DELAY", kDefaultDelay));
     G.Port = EnvInt("MELONDS_NSML_PORT", 8065);
     G.LocalInstance = EnvInt("MELONDS_NSML_LOCAL_INSTANCE", G.NetRole == Role::Host ? 0 : 1);
+    G.NetplayStartFrame = static_cast<melonDS::u32>(std::max(0, EnvInt("MELONDS_NSML_NETPLAY_START_FRAME", 0)));
+    G.LocalWaitsForRemote = !EnvFlag("MELONDS_NSML_NO_LOCAL_WAIT");
 
     const char* peer = std::getenv("MELONDS_NSML_PEER");
     if (peer && peer[0]) G.PeerHost = peer;
@@ -580,12 +584,14 @@ void InitFromEnvironment()
     }
 
     G.Ready = true;
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d localInstance=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d localInstance=%d netplayStartFrame=%u localWait=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
         G.Delay,
-        G.LocalInstance);
+        G.LocalInstance,
+        G.NetplayStartFrame,
+        G.LocalWaitsForRemote ? 1 : 0);
 }
 
 InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, const InputState& polledInput)
@@ -601,15 +607,22 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, const InputState& 
     if (!G.Enabled || !G.Ready) return testInput;
 
     const bool isLocal = (instanceID == G.LocalInstance);
+    const bool netplayActive = (G.NetplayStartFrame == 0 || syncFrame >= G.NetplayStartFrame);
 
     if (isLocal)
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         PumpNetworkLocked();
-        G.LocalInputs.emplace(syncFrame, testInput);
-        for (const auto& [inputFrame, input] : G.LocalInputs)
-            SendInputLocked(inputFrame, input);
+        if (netplayActive)
+        {
+            G.LocalInputs.emplace(syncFrame, testInput);
+            for (const auto& [inputFrame, input] : G.LocalInputs)
+                SendInputLocked(inputFrame, input);
+        }
     }
+
+    if (!netplayActive)
+        return testInput;
 
     const melonDS::u32 targetFrame = syncFrame >= static_cast<melonDS::u32>(G.Delay)
         ? syncFrame - static_cast<melonDS::u32>(G.Delay)
@@ -618,7 +631,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, const InputState& 
     if (syncFrame < static_cast<melonDS::u32>(G.Delay))
         return NeutralInput();
 
-    const InputState remoteInput = WaitForRemoteInput(targetFrame);
+    if (G.NetplayStartFrame != 0 && targetFrame < G.NetplayStartFrame)
+        return testInput;
 
     if (isLocal)
     {
@@ -626,6 +640,17 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, const InputState& 
         if (targetFrame > 120)
             PruneInputHistoryLocked(targetFrame - 120);
 
+        auto it = G.LocalInputs.find(targetFrame);
+        const InputState delayedLocalInput = it != G.LocalInputs.end() ? it->second : NeutralInput();
+        if (!G.LocalWaitsForRemote)
+            return delayedLocalInput;
+    }
+
+    const InputState remoteInput = WaitForRemoteInput(targetFrame);
+
+    if (isLocal)
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
         auto it = G.LocalInputs.find(targetFrame);
         return it != G.LocalInputs.end() ? it->second : NeutralInput();
     }

@@ -466,3 +466,51 @@ all 1328-1499 NONE
 ```
 
 `inst0` は1つ目の `EmuInstance`、`inst1` は2つ目の `EmuInstance`。指定がない行は従来通り全インスタンスに適用される。
+
+## 2026-05-14 route + netplay 結合作業
+
+### 目的
+
+各PC/各プロセスで同じ Mario vs Luigi 試合状態まで進めた後、そこから先だけ入力同期netplayへ切り替える。
+
+### 実装方針
+
+- `MELONDS_NSML_NETPLAY_START_FRAME` を追加する
+- `syncFrame < MELONDS_NSML_NETPLAY_START_FRAME` の間は、ネット入力ではなくローカルの入力スクリプトをそのまま使う
+- 開始フレーム以降は、既存の `MELONDS_NSML_LOCAL_INSTANCE` に従ってローカル側入力を送信し、非ローカル側インスタンスにはリモート入力を注入する
+- route smokeではhostを `localInstance=0`、clientを `localInstance=1` にする
+
+### 現在の次アクション
+
+1. `NsmbNetplayPoC` に `MELONDS_NSML_NETPLAY_START_FRAME` を追加する
+2. host/client両プロセスで `tests/nsmb_mario_vs_luigi.inputs` を再生するrunnerを作る
+3. 4200フレーム到達後に両プロセスが接続済みで、以降もフレーム上限まで進むことを確認する
+
+### 完了
+
+- `MELONDS_NSML_NETPLAY_START_FRAME` を追加した
+- netplay開始フレームまではroute入力をそのまま使い、開始後は `MELONDS_NSML_LOCAL_INSTANCE` に応じて入力送受信へ切り替えるようにした
+- 2インスタンス同時実行時のテスト用に `MELONDS_NSML_NO_LOCAL_WAIT=1` を追加した
+  - ローカル操作側インスタンスは入力送信を継続し、リモート操作側インスタンスだけリモート入力待ちを行う
+  - これはroute+netplay結合PoC用の暫定モード。完全なロックステップには、2つの `EmuInstance` を同じcoordinatorでフレーム同期させる追加実装が必要
+- `scripts/run-nsmb-mvl-netplay-route-smoke.ps1` を追加した
+- host/client両プロセスで `tests/nsmb_mario_vs_luigi.inputs` を再生し、4500フレームからnetplay入力同期へ切り替えるsmokeを通した
+
+### 検証コマンド
+
+```powershell
+.\scripts\run-nsmb-mvl-netplay-route-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500 -Port 8070
+```
+
+検証結果:
+
+- 成功: `NSMB Mario vs Luigi netplay route smoke passed: frames=5100 start=4500 compareFrame=5100`
+- host/client双方で `peer connected` を確認
+- host/client双方で `frame limit reached at frame=5100 instances=2` を確認
+- `remote input timeout` は出ていない
+- `logs/screens-mvl-netplay-host/` と `logs/screens-mvl-netplay-client/` にnetplay開始後のスクリーンショットを出力済み
+
+### 残課題
+
+- full RAM hashはhost/client間でまだ一致しない。RTC、Wi-Fiタイミング、Local MP同期タイミングなどの差分が含まれるため、次の段階で決定性固定が必要
+- 現在のroute+netplay smokeは「route後に入力同期へ切り替えて進行できる」ことの検証であり、「完全ロックステップで両PCが同一状態を保つ」検証ではない
