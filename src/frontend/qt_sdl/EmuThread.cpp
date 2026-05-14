@@ -28,6 +28,9 @@
 
 #include <SDL2/SDL.h>
 
+#include <QCoreApplication>
+#include <QMetaObject>
+
 #include "main.h"
 
 #include "types.h"
@@ -326,6 +329,8 @@ void EmuThread::run()
                     emuInstance->instanceID,
                     frameBeforeRun,
                     emuInstance->nds);
+                if (NsmbNetplayPoC::ShouldQuitAfterFrame(emuInstance->instanceID, frameBeforeRun))
+                    QMetaObject::invokeMethod(qApp, "quit", Qt::QueuedConnection);
             }
 
             if (emuInstance->ndsSave)

@@ -1,0 +1,10 @@
+# Frame ranges are inclusive.
+# Format:
+#   start-end buttons [touchX,touchY]
+#
+# Buttons: A, B, SELECT, START, RIGHT, LEFT, UP, DOWN, R, L, X, Y.
+# Combine buttons with '+', or use NONE/NEUTRAL.
+#
+# This first script intentionally does nothing. It is useful for automated
+# boot/hash/exit smoke tests before recording menu navigation.
+0-360 NONE

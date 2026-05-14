@@ -15,12 +15,17 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <map>
 #include <mutex>
+#include <sstream>
+#include <string>
 #include <thread>
+#include <vector>
 
 #include <enet/enet.h>
 
@@ -36,6 +41,7 @@ constexpr melonDS::u32 kMagic = 0x4C4D534E; // "NSML", little endian
 constexpr melonDS::u32 kVersion = 1;
 constexpr int kDefaultDelay = 6;
 constexpr int kMaxPumpEvents = 64;
+constexpr melonDS::u32 kNoFrameLimit = 0;
 
 enum class Role
 {
@@ -63,20 +69,37 @@ struct State
     bool EnvChecked = false;
     bool Enabled = false;
     bool Ready = false;
+    bool TestEnabled = false;
+    bool TestAnnouncedQuit = false;
     Role NetRole = Role::Host;
     int Delay = kDefaultDelay;
     int LocalInstance = 0;
     int Port = 8065;
     const char* PeerHost = "127.0.0.1";
+    melonDS::u32 TestFrames = kNoFrameLimit;
+    int HashInterval = 60;
+    int TestWaitTimeoutMs = 5000;
+    std::string InputScriptPath;
+    std::string HashLogPath;
+    std::ofstream HashLog;
     ENetHost* Host = nullptr;
     ENetPeer* Peer = nullptr;
     bool ENetInitialized = false;
     std::map<melonDS::u32, InputState> LocalInputs;
     std::map<melonDS::u32, InputState> RemoteInputs;
     melonDS::u64 LastLoggedHashFrame[16] {};
+    melonDS::u32 TestFrameCount[16] {};
+};
+
+struct InputSpan
+{
+    melonDS::u32 Start = 0;
+    melonDS::u32 End = 0;
+    InputState Input;
 };
 
 State G;
+std::vector<InputSpan> GInputScript;
 
 bool EnvFlag(const char* name)
 {
@@ -89,6 +112,166 @@ int EnvInt(const char* name, int fallback)
     const char* value = std::getenv(name);
     if (!value || !value[0]) return fallback;
     return std::atoi(value);
+}
+
+InputState NeutralInput()
+{
+    return {};
+}
+
+std::string Trim(std::string value)
+{
+    const auto first = value.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return {};
+    const auto last = value.find_last_not_of(" \t\r\n");
+    return value.substr(first, last - first + 1);
+}
+
+std::string Upper(std::string value)
+{
+    for (char& ch : value)
+        ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+    return value;
+}
+
+bool ParseU32(const std::string& text, melonDS::u32& out)
+{
+    char* end = nullptr;
+    unsigned long value = std::strtoul(text.c_str(), &end, 0);
+    if (!end || *end != '\0') return false;
+    out = static_cast<melonDS::u32>(value);
+    return true;
+}
+
+int ButtonBit(const std::string& name)
+{
+    const std::string key = Upper(name);
+    if (key == "A") return 0;
+    if (key == "B") return 1;
+    if (key == "SELECT") return 2;
+    if (key == "START") return 3;
+    if (key == "RIGHT") return 4;
+    if (key == "LEFT") return 5;
+    if (key == "UP") return 6;
+    if (key == "DOWN") return 7;
+    if (key == "R") return 8;
+    if (key == "L") return 9;
+    if (key == "X") return 10;
+    if (key == "Y") return 11;
+    return -1;
+}
+
+bool ParseInputSpec(const std::string& spec, InputState& input)
+{
+    input = NeutralInput();
+
+    if (spec.empty() || Upper(spec) == "NONE" || Upper(spec) == "NEUTRAL")
+        return true;
+
+    if (spec.rfind("mask=", 0) == 0 || spec.rfind("MASK=", 0) == 0)
+    {
+        melonDS::u32 mask = 0;
+        if (!ParseU32(spec.substr(5), mask)) return false;
+        input.KeyMask = mask & 0xFFF;
+        return true;
+    }
+
+    std::stringstream ss(spec);
+    std::string button;
+    while (std::getline(ss, button, '+'))
+    {
+        button = Trim(button);
+        const int bit = ButtonBit(button);
+        if (bit < 0) return false;
+        input.KeyMask &= ~(1u << bit);
+    }
+
+    return true;
+}
+
+bool LoadInputScriptLocked()
+{
+    if (G.InputScriptPath.empty()) return true;
+
+    std::ifstream file(G.InputScriptPath);
+    if (!file)
+    {
+        std::printf("NSMB Test: failed to open input script: %s\n", G.InputScriptPath.c_str());
+        return false;
+    }
+
+    std::string line;
+    int lineNo = 0;
+    while (std::getline(file, line))
+    {
+        lineNo++;
+
+        const auto comment = line.find('#');
+        if (comment != std::string::npos)
+            line.resize(comment);
+        line = Trim(line);
+        if (line.empty()) continue;
+
+        std::stringstream ss(line);
+        std::string range;
+        std::string buttons;
+        std::string touch;
+        ss >> range >> buttons >> touch;
+
+        const auto dash = range.find('-');
+        if (dash == std::string::npos)
+        {
+            std::printf("NSMB Test: invalid range at %s:%d\n", G.InputScriptPath.c_str(), lineNo);
+            return false;
+        }
+
+        InputSpan span;
+        if (!ParseU32(range.substr(0, dash), span.Start) ||
+            !ParseU32(range.substr(dash + 1), span.End) ||
+            span.End < span.Start ||
+            !ParseInputSpec(buttons, span.Input))
+        {
+            std::printf("NSMB Test: invalid input line at %s:%d\n", G.InputScriptPath.c_str(), lineNo);
+            return false;
+        }
+
+        if (!touch.empty())
+        {
+            const auto comma = touch.find(',');
+            melonDS::u32 x = 0;
+            melonDS::u32 y = 0;
+            if (comma == std::string::npos ||
+                !ParseU32(touch.substr(0, comma), x) ||
+                !ParseU32(touch.substr(comma + 1), y))
+            {
+                std::printf("NSMB Test: invalid touch at %s:%d\n", G.InputScriptPath.c_str(), lineNo);
+                return false;
+            }
+            span.Input.Touching = true;
+            span.Input.TouchX = static_cast<melonDS::u16>(std::min<melonDS::u32>(x, 255));
+            span.Input.TouchY = static_cast<melonDS::u16>(std::min<melonDS::u32>(y, 191));
+        }
+
+        GInputScript.push_back(span);
+    }
+
+    std::printf("NSMB Test: loaded %zu input spans from %s\n",
+        GInputScript.size(),
+        G.InputScriptPath.c_str());
+    return true;
+}
+
+InputState ApplyInputScript(melonDS::u32 frame, const InputState& fallback)
+{
+    if (!G.TestEnabled || GInputScript.empty()) return fallback;
+
+    for (const InputSpan& span : GInputScript)
+    {
+        if (frame >= span.Start && frame <= span.End)
+            return span.Input;
+    }
+
+    return fallback;
 }
 
 void PumpNetworkLocked()
@@ -159,11 +342,6 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
     enet_host_flush(G.Host);
 }
 
-InputState NeutralInput()
-{
-    return {};
-}
-
 void PruneInputHistoryLocked(melonDS::u32 keepFromFrame)
 {
     G.LocalInputs.erase(G.LocalInputs.begin(), G.LocalInputs.lower_bound(keepFromFrame));
@@ -172,6 +350,7 @@ void PruneInputHistoryLocked(melonDS::u32 keepFromFrame)
 
 InputState WaitForRemoteInput(melonDS::u32 targetFrame)
 {
+    const auto start = std::chrono::steady_clock::now();
     for (;;)
     {
         {
@@ -181,6 +360,19 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
             auto it = G.RemoteInputs.find(targetFrame);
             if (it != G.RemoteInputs.end())
                 return it->second;
+        }
+
+        if (G.TestEnabled && G.TestWaitTimeoutMs > 0)
+        {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            if (elapsed >= G.TestWaitTimeoutMs)
+            {
+                std::printf("NSMB Test: remote input timeout frame=%u waitedMs=%d\n",
+                    targetFrame,
+                    G.TestWaitTimeoutMs);
+                return NeutralInput();
+            }
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -232,6 +424,43 @@ void InitFromEnvironment()
     G.EnvChecked = true;
 
     G.Enabled = EnvFlag("MELONDS_NSML_POC");
+    G.TestEnabled = EnvFlag("MELONDS_NSML_TEST");
+    G.TestFrames = static_cast<melonDS::u32>(std::max(0, EnvInt("MELONDS_NSML_TEST_FRAMES", 0)));
+    G.HashInterval = std::max(1, EnvInt("MELONDS_NSML_HASH_INTERVAL", 60));
+    G.TestWaitTimeoutMs = std::max(0, EnvInt("MELONDS_NSML_WAIT_TIMEOUT_MS", 5000));
+
+    const char* inputScript = std::getenv("MELONDS_NSML_INPUT_SCRIPT");
+    if (inputScript && inputScript[0]) G.InputScriptPath = inputScript;
+
+    const char* hashLog = std::getenv("MELONDS_NSML_HASH_LOG");
+    if (hashLog && hashLog[0]) G.HashLogPath = hashLog;
+
+    if (G.TestEnabled)
+    {
+        if (!LoadInputScriptLocked())
+            G.TestEnabled = false;
+
+        if (!G.HashLogPath.empty())
+        {
+            G.HashLog.open(G.HashLogPath, std::ios::out | std::ios::trunc);
+            if (!G.HashLog)
+            {
+                std::printf("NSMB Test: failed to open hash log: %s\n", G.HashLogPath.c_str());
+            }
+            else
+            {
+                G.HashLog << "instance,frame,hash\n";
+            }
+        }
+
+        std::printf("NSMB Test: enabled frames=%u input=%s hashLog=%s interval=%d waitTimeoutMs=%d\n",
+            G.TestFrames,
+            G.InputScriptPath.empty() ? "<none>" : G.InputScriptPath.c_str(),
+            G.HashLogPath.empty() ? "<none>" : G.HashLogPath.c_str(),
+            G.HashInterval,
+            G.TestWaitTimeoutMs);
+    }
+
     if (!G.Enabled) return;
 
     const char* role = std::getenv("MELONDS_NSML_ROLE");
@@ -289,7 +518,14 @@ void InitFromEnvironment()
 InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, const InputState& polledInput)
 {
     InitFromEnvironment();
-    if (!G.Enabled || !G.Ready) return polledInput;
+    melonDS::u32 inputFrame = frame;
+    if (G.TestEnabled && instanceID >= 0 && instanceID < 16)
+        inputFrame = G.TestFrameCount[instanceID];
+
+    const InputState testInput = ApplyInputScript(inputFrame, polledInput);
+    const melonDS::u32 syncFrame = G.TestEnabled ? inputFrame : frame;
+
+    if (!G.Enabled || !G.Ready) return testInput;
 
     const bool isLocal = (instanceID == G.LocalInstance);
 
@@ -297,15 +533,16 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, const InputState& 
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         PumpNetworkLocked();
-        G.LocalInputs.emplace(frame, polledInput);
-        SendInputLocked(frame, polledInput);
+        G.LocalInputs.emplace(syncFrame, testInput);
+        for (const auto& [inputFrame, input] : G.LocalInputs)
+            SendInputLocked(inputFrame, input);
     }
 
-    const melonDS::u32 targetFrame = frame >= static_cast<melonDS::u32>(G.Delay)
-        ? frame - static_cast<melonDS::u32>(G.Delay)
+    const melonDS::u32 targetFrame = syncFrame >= static_cast<melonDS::u32>(G.Delay)
+        ? syncFrame - static_cast<melonDS::u32>(G.Delay)
         : 0;
 
-    if (frame < static_cast<melonDS::u32>(G.Delay))
+    if (syncFrame < static_cast<melonDS::u32>(G.Delay))
         return NeutralInput();
 
     const InputState remoteInput = WaitForRemoteInput(targetFrame);
@@ -326,19 +563,48 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, const InputState& 
 void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     InitFromEnvironment();
-    if (!G.Enabled || !nds) return;
+    if ((!G.Enabled && !G.TestEnabled) || !nds) return;
 
-    if ((frame % 60) != 0) return;
     if (instanceID < 0 || instanceID >= 16) return;
 
+    melonDS::u32 logFrame = frame;
+    if (G.TestEnabled)
+        logFrame = ++G.TestFrameCount[instanceID];
+
+    if ((logFrame % static_cast<melonDS::u32>(G.HashInterval)) != 0) return;
+
     const melonDS::u64 hash = HashNDS(nds);
-    if (G.LastLoggedHashFrame[instanceID] == frame) return;
-    G.LastLoggedHashFrame[instanceID] = frame;
+    if (G.LastLoggedHashFrame[instanceID] == logFrame) return;
+    G.LastLoggedHashFrame[instanceID] = logFrame;
 
     std::printf("NSMB PoC: inst=%d frame=%u hash=%016llX\n",
         instanceID,
-        frame,
+        logFrame,
         static_cast<unsigned long long>(hash));
+
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    if (G.HashLog)
+    {
+        G.HashLog << instanceID << ',' << logFrame << ','
+                  << std::hex << hash << std::dec << '\n';
+        G.HashLog.flush();
+    }
+}
+
+bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
+{
+    InitFromEnvironment();
+    if (!G.TestEnabled || G.TestFrames == kNoFrameLimit) return false;
+    if (instanceID != 0) return false;
+    if (G.TestFrameCount[instanceID] < G.TestFrames) return false;
+
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    if (!G.TestAnnouncedQuit)
+    {
+        G.TestAnnouncedQuit = true;
+        std::printf("NSMB Test: frame limit reached at frame=%u\n", G.TestFrameCount[instanceID]);
+    }
+    return true;
 }
 
 void Shutdown()
@@ -357,6 +623,9 @@ void Shutdown()
         enet_deinitialize();
         G.ENetInitialized = false;
     }
+
+    if (G.HashLog)
+        G.HashLog.close();
 }
 
 }

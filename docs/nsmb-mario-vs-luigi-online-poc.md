@@ -211,21 +211,50 @@ you're building against version 1927.
 - `GPU::SetRenderer()` を、既存rendererがある場合だけ `SyncAllVRAMCaptures()` するよう修正
 - 修正後にDebugビルド成功
 - `roms/nsmb.nds` をコマンドライン起動して10秒間維持できることを確認。以前の `GPU::SyncAllVRAMCaptures()` アクセス違反は再発しなかった
+- テストモード実装を追加開始
+  - `MELONDS_NSML_TEST=1`
+  - `MELONDS_NSML_TEST_FRAMES`
+  - `MELONDS_NSML_INPUT_SCRIPT`
+  - `MELONDS_NSML_HASH_LOG`
+  - `MELONDS_NSML_HASH_INTERVAL`
+- サンプル入力スクリプト `tests/nsmb_smoke.inputs` を追加
+- `scripts/run-nsmb-smoke.ps1` を追加
+- `scripts/run-nsmb-netplay-smoke.ps1` を追加
+- 単体smoke test成功: `scripts/run-nsmb-smoke.ps1 -Frames 180`
+- 2プロセスnetplay smoke test成功: `scripts/run-nsmb-netplay-smoke.ps1 -Frames 180 -Port 8065`
+- netplay smokeではhost/clientのhashログが180フレームまで一致
 
 ### 現在のブロッカー
 
 - ROM起動クラッシュはコマンドライン起動では解消確認済み
 - ユーザー操作での「Open ROM...」導線でも同じく落ちないか確認が必要
-- CLI smoke testは未確定。GUI起動と2プロセスHost/Client接続確認が次のブロッカー
+- 自動テスト基盤の最初の段階は通った
+- まだ「1プロセス内2インスタンス + Local MP + 入力振り分け」の自動検証は未実装
 - 実ROMなしではNSMB Mario vs LuigiのMulti-Card Play到達確認とdesync検証はできない
 
 ### 次にやること
 
-1. GUIの `Open ROM...` 操作で `roms/nsmb.nds` が落ちずに起動するか確認する
-2. `MELONDS_NSML_POC=1` でmelonDSを2プロセス起動し、Host/Client接続ログが出るか確認する
-3. 実ROMを使って2インスタンス/Multi-Card Playの導線を確認する
-4. 同一savestate開始でdesync検証を行う
-5. 実行確認で問題が出たらPoCコードを修正する
+1. 1プロセス内で2つのEmuInstanceを自動起動できるテスト導線を作る
+2. 2つのEmuInstanceで同じROMを開き、Local MPが有効な状態まで自動化する
+3. NSMBのメニュー入力を記録/調整してMario vs LuigiのMulti-Card Play導線を入力スクリプト化する
+4. 2台分の状態hashをログ化し、host/client間で比較する
+5. desyncが出た場合はRTC/MAC/firmware/save/JIT/rendererなどの固定化を進める
+
+## 自動検証方針
+
+最終的にCodexだけでMario vs Luigi到達まで確認できるように、Qt/SDLのGUIを外からクリックするのではなく、melonDS内部へテスト用フックを入れる。
+
+追加予定のテスト機能:
+
+- `MELONDS_NSML_TEST=1` でテストモードを有効化
+- `MELONDS_NSML_TEST_FRAMES` で指定フレーム後に自動終了
+- `MELONDS_NSML_INPUT_SCRIPT` でフレーム範囲ごとの入力を再生
+- `MELONDS_NSML_HASH_LOG` へ一定間隔で状態ハッシュを書き出す
+- `MELONDS_NSML_HASH_INTERVAL` でhash間隔を指定
+- `MELONDS_NSML_WAIT_TIMEOUT_MS` でテスト時のリモート入力待ち上限を指定
+- PowerShellからhost/clientプロセスを起動し、終了コード、stdout、Windows EventLog、hashログを比較する
+
+この形にすると、Codexが `build -> run -> log確認 -> 修正 -> rerun` のループを自分で回せる。
 
 ## 主要リスク
 
