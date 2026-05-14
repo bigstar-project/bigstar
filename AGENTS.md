@@ -17,3 +17,10 @@ The tracking document should show:
 - requirements from the user, such as ROM or tool installation needs
 
 Do not leave implementation progress only in chat.
+
+Before the final response of any turn that changes implementation status, review the tracking document for stale or contradictory content. Compact or update old sections instead of only appending new notes. In particular:
+
+- remove or rewrite "next actions" that are already completed
+- move obsolete blockers into completed/resolved notes or remove them
+- keep the current blocker and next action easy to find near the top
+- avoid long chronological append-only logs when a concise current-state summary is clearer
