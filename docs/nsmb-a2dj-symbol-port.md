@@ -140,6 +140,13 @@ Initial star seed injection:
   - frame `002800`: `count=0x00`, `value=0x12345678`, `branch=0x020CBF24`
   - frame `002850`: `count=0x91`, `value=0x2D4F3DCB`, `branch=0x020B4460`
   - frame `002900`: `count=0x92`, `value=0x24EB777B`, `branch=0x0212D41C`
+- Match seed network distribution:
+  - `MELONDS_NSML_POC=1` host now sends a reliable seed packet to the client.
+  - Host uses `MELONDS_NSML_MATCH_SEED` when provided, otherwise generates a session seed.
+  - Client receives the seed and enables `Net::random.value` auto injection with that value.
+  - Localhost host/client validation with `MELONDS_NSML_MATCH_SEED=0x12345678` confirmed both processes reached the same RNG timeline:
+    - frame `002800`: `count=0x00`, `value=0x12345678`, `branch=0x020CBF24`
+    - frame `002900`: `count=0x92`, `value=0x24EB777B`, `branch=0x0212D41C`
 - With `MELONDS_NSML_NET_RANDOM_VALUE=0x12345678` at frame `2800`, two runs matched:
   - frame `002850`: `count=0x91`, `value=0x2D4F3DCB`, `branch=0x020B4460`
   - frame `002900`: `count=0x92`, `value=0x24EB777B`, `branch=0x0212D41C`
@@ -193,8 +200,9 @@ Expected RNG synchronization contract:
 ## Current Next Actions
 
 1. 8コインアイテム取得用の入力スクリプトを追加し、同じ `Net::random` timeline で消費箇所を確認する。
-2. netplay開始時にhostがseedを決め、clientへ送り、両PCの2インスタンスへ同じ値を注入するプロトコルへ接続する。
-3. `0x0212D418` のBig Star選択処理はROMパッチ候補として保持するが、直接固定するより、まずはmatch seed固定を優先する。
+2. seed配布済みのhost/client 2プロセスで、入力同期開始後のremote input timeoutを減らす。
+3. seed配布済みの2プロセスでスター取得まで走らせ、再生成スターのRNG timelineもhost/clientで一致するか確認する。
+4. `0x0212D418` のBig Star選択処理はROMパッチ候補として保持するが、直接固定するより、まずはmatch seed固定を優先する。
 
 ## Next Actions
 

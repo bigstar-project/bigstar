@@ -25,6 +25,7 @@
 #include <mutex>
 #include <filesystem>
 #include <iterator>
+#include <random>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -72,6 +73,18 @@ struct WireInput
 
 static_assert(sizeof(WireInput) == 24);
 
+struct WireSeed
+{
+    melonDS::u32 Magic;
+    melonDS::u32 Version;
+    melonDS::u32 Kind;
+    melonDS::u32 Seed;
+};
+
+constexpr melonDS::u32 kWireKindSeed = 0x44454553; // "SEED", little endian
+
+static_assert(sizeof(WireSeed) == 16);
+
 struct State
 {
     std::mutex Mutex;
@@ -112,6 +125,9 @@ struct State
     melonDS::u32 NetRandomPatchFrame = 0;
     melonDS::u32 NetRandomPatchValue = 0;
     bool NetRandomPatchApplied[16] {};
+    bool MatchSeedConfigured = false;
+    bool MatchSeedSent = false;
+    melonDS::u32 MatchSeed = 0;
     melonDS::u32 StateSaveFrame = 0;
     melonDS::u32 StateLoadFrame = 0;
     bool StateLoadFrameSet = false;
@@ -167,6 +183,13 @@ int EnvInt(const char* name, int fallback)
     const char* value = std::getenv(name);
     if (!value || !value[0]) return fallback;
     return std::atoi(value);
+}
+
+melonDS::u32 GenerateMatchSeed()
+{
+    const auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    std::random_device rd;
+    return static_cast<melonDS::u32>(now) ^ (static_cast<melonDS::u32>(rd()) * 0x45D9F3Bu);
 }
 
 InputState NeutralInput()
@@ -403,6 +426,7 @@ void PumpNetworkLocked()
         {
         case ENET_EVENT_TYPE_CONNECT:
             G.Peer = event.peer;
+            G.MatchSeedSent = false;
             std::printf("NSMB PoC: peer connected\n");
             break;
 
@@ -421,6 +445,20 @@ void PumpNetworkLocked()
                     };
                 }
             }
+            else if (event.packet->dataLength == sizeof(WireSeed))
+            {
+                WireSeed packet;
+                std::memcpy(&packet, event.packet->data, sizeof(packet));
+                if (packet.Magic == kMagic && packet.Version == kVersion && packet.Kind == kWireKindSeed)
+                {
+                    G.MatchSeed = packet.Seed;
+                    G.MatchSeedConfigured = true;
+                    G.NetRandomPatchValue = packet.Seed;
+                    G.NetRandomPatchEnabled = true;
+                    G.NetRandomPatchAuto = true;
+                    std::printf("NSMB PoC: received match seed 0x%08X\n", packet.Seed);
+                }
+            }
             enet_packet_destroy(event.packet);
             break;
 
@@ -437,9 +475,31 @@ void PumpNetworkLocked()
     enet_host_flush(G.Host);
 }
 
+void SendMatchSeedLocked()
+{
+    if (!G.Peer || G.NetRole != Role::Host || !G.MatchSeedConfigured || G.MatchSeedSent)
+        return;
+
+    WireSeed packet {};
+    packet.Magic = kMagic;
+    packet.Version = kVersion;
+    packet.Kind = kWireKindSeed;
+    packet.Seed = G.MatchSeed;
+
+    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE);
+    if (!enetPacket) return;
+
+    enet_peer_send(G.Peer, 0, enetPacket);
+    enet_host_flush(G.Host);
+    G.MatchSeedSent = true;
+    std::printf("NSMB PoC: sent match seed 0x%08X\n", G.MatchSeed);
+}
+
 void SendInputLocked(melonDS::u32 frame, const InputState& input)
 {
     if (!G.Peer) return;
+
+    SendMatchSeedLocked();
 
     WireInput packet {};
     packet.Magic = kMagic;
@@ -1240,6 +1300,13 @@ void InitFromEnvironment()
             std::max(0, EnvInt("MELONDS_NSML_NET_RANDOM_FRAME", 0)));
     }
 
+    const char* matchSeed = std::getenv("MELONDS_NSML_MATCH_SEED");
+    if (matchSeed && matchSeed[0])
+    {
+        G.MatchSeed = static_cast<melonDS::u32>(std::strtoul(matchSeed, nullptr, 0));
+        G.MatchSeedConfigured = true;
+    }
+
     const char* stateSaveDir = std::getenv("MELONDS_NSML_STATE_SAVE_DIR");
     if (stateSaveDir && stateSaveDir[0]) G.StateSaveDir = stateSaveDir;
     G.StateSaveFrame = static_cast<melonDS::u32>(std::max(0, EnvInt("MELONDS_NSML_STATE_SAVE_FRAME", 0)));
@@ -1311,6 +1378,19 @@ void InitFromEnvironment()
     const char* peer = std::getenv("MELONDS_NSML_PEER");
     if (peer && peer[0]) G.PeerHost = peer;
 
+    if (G.NetRole == Role::Host && !G.MatchSeedConfigured)
+    {
+        G.MatchSeed = GenerateMatchSeed();
+        G.MatchSeedConfigured = true;
+    }
+
+    if (G.NetRole == Role::Host && G.MatchSeedConfigured)
+    {
+        G.NetRandomPatchEnabled = true;
+        G.NetRandomPatchAuto = true;
+        G.NetRandomPatchValue = G.MatchSeed;
+    }
+
     if (enet_initialize() != 0)
     {
         std::printf("NSMB PoC: ENet initialization failed\n");
@@ -1346,14 +1426,16 @@ void InitFromEnvironment()
     }
 
     G.Ready = true;
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d localInstance=%d netplayStartFrame=%u localWait=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d localInstance=%d netplayStartFrame=%u localWait=%d matchSeed=0x%08X seedConfigured=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
         G.Delay,
         G.LocalInstance,
         G.NetplayStartFrame,
-        G.LocalWaitsForRemote ? 1 : 0);
+        G.LocalWaitsForRemote ? 1 : 0,
+        G.MatchSeed,
+        G.MatchSeedConfigured ? 1 : 0);
 }
 
 InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, const InputState& polledInput)
@@ -1369,7 +1451,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyMemPatch(instanceID, inputFrame, nds);
 
-    if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ApplyNetRandomPatch(instanceID, inputFrame, nds);
 
     WaitForSerialRunTurn(instanceID, inputFrame);
@@ -1387,6 +1469,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         PumpNetworkLocked();
+        SendMatchSeedLocked();
         if (netplayActive)
         {
             G.LocalInputs.emplace(syncFrame, testInput);
