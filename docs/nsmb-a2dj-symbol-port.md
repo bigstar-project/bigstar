@@ -102,6 +102,29 @@ Star pickup RNG verification:
   - frame `002900`: `Net::randomCallCount=0x92`, `Net::random.value=0x413B3BAA`, `Net::randomBranchAddress=0x0212D41C`
   - frame `005071`: `Net::randomCallCount=0x93`, `Net::random.value=0xF9D72FCA`, `Net::randomBranchAddress=0x0212D41C`
 - Interpretation: first-star collection / next-star spawn consumes the shared `Net::random` stream once. `0x0212D41C` is likely the return address for the random caller, so the associated BL site is around `0x0212D418`.
+- Disassembly around `0x0212D418` confirms this is star-slot selection:
+  - `0x0212D418: bl 0x0200E5A0`
+  - the result is masked/multiplied by slot count from `[r8+0x47A]`
+  - occupied slots are checked with bitmask `[r8+0x460]`
+  - selected slot coordinates are loaded from tables near `0x020C8878` / `0x020C88CC`
+  - actor creation is called with `r0=0x22`
+- A second run using the same input route reproduced frame `005071` with `Net::randomCallCount=0x93`, `Net::random.value=0xF9D72FCA`, `Net::randomBranchAddress=0x0212D41C`, and the same next-star minimap position at frame `006400`.
+
+Seed/value patch experiment:
+
+- A melonDS memory patch at frame `5000` that changes only `Net::random.value` (`0x02088088-0x0208808B`) from `0x413B3BAA` to `0x12345678` changes the next RNG output.
+- Dedicated test hook added:
+  - `MELONDS_NSML_NET_RANDOM_FRAME=5000`
+  - `MELONDS_NSML_NET_RANDOM_VALUE=0x12345678`
+  - This writes A2DJ `Net::random.value` for each test instance without a MainRAM patch file.
+- Value-only patch command shape:
+  - `MELONDS_NSML_MEM_PATCH_FRAME=5000`
+  - `MELONDS_NSML_MEM_PATCH_RANGES=0x088088-0x08808B`
+  - source file is a MainRAM-sized binary with only that 4-byte value changed.
+- Observed patched transition:
+  - frame `005000`: `count=0x92`, `value=0x413B3BAA`
+  - frame `005071`: `count=0x93`, `value=0x7544F5D5`
+- Interpretation: the Big Star respawn path uses the shared `Net::random.value`; changing the stream state before the respawn changes the generated RNG result without directly patching the star actor.
 
 ## Randomness Scope and Fix Strategy
 
@@ -146,10 +169,9 @@ Expected RNG synchronization contract:
 
 ## Current Next Actions
 
-1. `0x0212D418` 周辺を逆アセンブルして、Big Star再配置の呼び出し元か確認する。
-2. 同じ入力スクリプトを2回実行し、frame `005071` の `Net::randomCallCount` / `Net::random.value` / 次スター位置が完全一致するか確認する。
-3. 8コインアイテム取得用の入力スクリプトを追加し、同じ `Net::random` timeline で消費箇所を確認する。
-4. ROMパッチ前に、melonDS側メモリパッチで `Net::random.value` / `Net::randomCallCount` を固定して、スター再配置が再現できるか検証する。
+1. 8コインアイテム取得用の入力スクリプトを追加し、同じ `Net::random` timeline で消費箇所を確認する。
+2. match開始前またはMvsLロード直後に `Net::random.value` を両インスタンスへ同一値で注入するフックを作り、スター初期位置と再生成位置が安定するか確認する。
+3. `0x0212D418` のBig Star選択処理はROMパッチ候補として保持するが、直接固定するより、まずはmatch seed固定を優先する。
 
 ## Next Actions
 

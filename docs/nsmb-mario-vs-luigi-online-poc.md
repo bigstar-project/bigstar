@@ -7,13 +7,15 @@
 - `tests/nsmb_mario_vs_luigi_star_probe.inputs` で、Mario vs Luigi開始後にinst0/Marioが最初のスターを取り、次スターを再生成するところまで自動化した。
 - `tools/nsmb_mvl_ram_probe.py --a2dj-rng-timeline --rng-timeline-only ...` で、MainRAM dump列から `Net::randomCallCount` / `Net::random.value` / `Net::randomBranchAddress` の遷移を抽出できる。
 - 直近の検証では、スター取得後の次スター生成で frame `005071` に `Net::randomCallCount` が `0x92 -> 0x93` に進み、`Net::random.value` が `0x413B3BAA -> 0xF9D72FCA` に変化した。`Net::randomBranchAddress=0x0212D41C` なので、関連する呼び出し元は `0x0212D418` 周辺と見ている。
+- `0x0212D418` 周辺の逆アセンブルで、ここがBig Starの空き配置スロット選択処理だと確認した。同じ入力ルートの2回目でも frame `005071` のRNG値と frame `006400` の次スター位置が再現した。
+- frame `5000` に `Net::random.value` の4バイトだけを `0x12345678` へメモリパッチすると、次のRNG出力が `0x7544F5D5` に変わった。Big Star再生成は共有 `Net::random` streamに従っている。
+- `MELONDS_NSML_NET_RANDOM_FRAME` / `MELONDS_NSML_NET_RANDOM_VALUE` を追加し、MainRAMパッチファイルなしで両インスタンスの `Net::random.value` を同一値へ注入できるようにした。frame `5000` で `0x12345678` を注入する検証は成功。
 
 ## Current Blockers / Next Actions
 
-1. `0x0212D418` 周辺を逆アセンブルして、Big Star再配置の呼び出し元か確認する。
-2. 同じスター取得スクリプトを複数回実行し、RNG遷移フレーム・値・次スター位置が一致するか確認する。
-3. 8コインアイテム取得スクリプトを追加し、スター以外のランダム消費も同じtimelineで確認する。
-4. ROMパッチ前に、melonDS側のメモリパッチで `Net::random.value` / `Net::randomCallCount` を固定して、スター再配置の再現性を検証する。
+1. 8コインアイテム取得スクリプトを追加し、スター以外のランダム消費も同じtimelineで確認する。
+2. MvsLロード直後のより早いフレームで `Net::random.value` を注入し、スター初期位置から安定するか確認する。
+3. `0x0212D418` のBig Star選択処理はROMパッチ候補として保持するが、まずはmatch seed固定を優先する。
 
 ## 方針転換: NSMB特化解析・パッチ方向
 

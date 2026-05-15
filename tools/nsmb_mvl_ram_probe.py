@@ -317,7 +317,7 @@ def main() -> int:
         if find_bl_to:
             print_arm_bl_hits(dump.as_posix(), data, find_bl_to)
 
-    if len(loaded) == 2:
+    if len(loaded) == 2 and not args.rng_timeline_only:
         print_diff(loaded[0][0], loaded[0][1], loaded[1][0], loaded[1][1], scan_start, scan_end)
     if args.a2dj_rng_timeline:
         print_a2dj_rng_timeline(loaded)

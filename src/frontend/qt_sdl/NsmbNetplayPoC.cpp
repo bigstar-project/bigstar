@@ -107,6 +107,10 @@ struct State
     melonDS::u32 MemPatchFrame = 0;
     bool MemPatchFrameSet = false;
     bool MemPatchApplied[16] {};
+    bool NetRandomPatchEnabled = false;
+    melonDS::u32 NetRandomPatchFrame = 0;
+    melonDS::u32 NetRandomPatchValue = 0;
+    bool NetRandomPatchApplied[16] {};
     melonDS::u32 StateSaveFrame = 0;
     melonDS::u32 StateLoadFrame = 0;
     bool StateLoadFrameSet = false;
@@ -777,6 +781,24 @@ void ApplyMemPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     G.MemPatchApplied[instanceID] = true;
 }
 
+void ApplyNetRandomPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    constexpr melonDS::u32 kNetRandomValueOffset = 0x02088088 - 0x02000000;
+
+    if (!nds || !nds->MainRAM || !G.NetRandomPatchEnabled) return;
+    if (instanceID < 0 || instanceID >= 16) return;
+    if (frame != G.NetRandomPatchFrame || G.NetRandomPatchApplied[instanceID]) return;
+    if (kNetRandomValueOffset + sizeof(melonDS::u32) > nds->MainRAMMask + 1) return;
+
+    std::memcpy(&nds->MainRAM[kNetRandomValueOffset], &G.NetRandomPatchValue, sizeof(G.NetRandomPatchValue));
+    G.NetRandomPatchApplied[instanceID] = true;
+
+    std::printf("NSMB Test: patched Net::random.value inst=%d frame=%u value=0x%08X\n",
+        instanceID,
+        frame,
+        G.NetRandomPatchValue);
+}
+
 std::filesystem::path StatePath(const std::string& dir, int instanceID)
 {
     char filename[64];
@@ -1191,6 +1213,15 @@ void InitFromEnvironment()
         G.MemPatchRanges.clear();
     }
 
+    const char* netRandomValue = std::getenv("MELONDS_NSML_NET_RANDOM_VALUE");
+    if (netRandomValue && netRandomValue[0])
+    {
+        G.NetRandomPatchEnabled = true;
+        G.NetRandomPatchValue = static_cast<melonDS::u32>(std::strtoul(netRandomValue, nullptr, 0));
+        G.NetRandomPatchFrame = static_cast<melonDS::u32>(
+            std::max(0, EnvInt("MELONDS_NSML_NET_RANDOM_FRAME", 0)));
+    }
+
     const char* stateSaveDir = std::getenv("MELONDS_NSML_STATE_SAVE_DIR");
     if (stateSaveDir && stateSaveDir[0]) G.StateSaveDir = stateSaveDir;
     G.StateSaveFrame = static_cast<melonDS::u32>(std::max(0, EnvInt("MELONDS_NSML_STATE_SAVE_FRAME", 0)));
@@ -1222,7 +1253,7 @@ void InitFromEnvironment()
             }
         }
 
-        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d\n",
+        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d\n",
             G.TestFrames,
             G.TestInstanceCount,
             G.FrameBarrierEnabled ? 1 : 0,
@@ -1238,6 +1269,9 @@ void InitFromEnvironment()
             G.MemPatchFile.empty() ? "<none>" : G.MemPatchFile.c_str(),
             G.MemPatchFrameSet ? G.MemPatchFrame : 0,
             G.MemPatchRanges.size(),
+            G.NetRandomPatchEnabled ? 1 : 0,
+            G.NetRandomPatchFrame,
+            G.NetRandomPatchValue,
             G.StateSaveDir.empty() ? "<none>" : G.StateSaveDir.c_str(),
             G.StateSaveFrame,
             G.StateLoadDir.empty() ? "<none>" : G.StateLoadDir.c_str(),
@@ -1315,6 +1349,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyMemPatch(instanceID, inputFrame, nds);
+
+    if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyNetRandomPatch(instanceID, inputFrame, nds);
 
     WaitForSerialRunTurn(instanceID, inputFrame);
     WaitAtFrameBarrier(GBeforeFrameBarrier, instanceID, inputFrame, "before");
