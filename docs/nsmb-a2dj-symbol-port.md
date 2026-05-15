@@ -126,6 +126,29 @@ Seed/value patch experiment:
   - frame `005071`: `count=0x93`, `value=0x7544F5D5`
 - Interpretation: the Big Star respawn path uses the shared `Net::random.value`; changing the stream state before the respawn changes the generated RNG result without directly patching the star actor.
 
+Initial star seed injection:
+
+- `MELONDS_NSML_NET_RANDOM_FRAME=2800` is early enough to affect the initial MvsL star placement.
+- `MELONDS_NSML_NET_RANDOM_FRAME=2900` is too late for the initial star; it leaves the initial placement unchanged and only affects later RNG state.
+- `MELONDS_NSML_NET_RANDOM_AUTO=1` now injects the seed automatically when the JP MvsL state is detected:
+  - `Game::stageGroup == 9`
+  - `Game::vsMode == 1`
+  - `Net::ggid == 0x42`
+  - `Net::randomCallCount == 0`
+- With auto injection and `MELONDS_NSML_NET_RANDOM_VALUE=0x12345678`, the hook fired at frame `2676` for inst0 and frame `2659` for inst1, before the initial star RNG consumption.
+- Auto injection reproduced the fixed-frame `2800` result:
+  - frame `002800`: `count=0x00`, `value=0x12345678`, `branch=0x020CBF24`
+  - frame `002850`: `count=0x91`, `value=0x2D4F3DCB`, `branch=0x020B4460`
+  - frame `002900`: `count=0x92`, `value=0x24EB777B`, `branch=0x0212D41C`
+- With `MELONDS_NSML_NET_RANDOM_VALUE=0x12345678` at frame `2800`, two runs matched:
+  - frame `002850`: `count=0x91`, `value=0x2D4F3DCB`, `branch=0x020B4460`
+  - frame `002900`: `count=0x92`, `value=0x24EB777B`, `branch=0x0212D41C`
+  - frame `004100` screenshot shows the same initial star position.
+- With `MELONDS_NSML_NET_RANDOM_VALUE=0x87654321` at frame `2800`, the initial star position changed, and the RNG timeline became:
+  - frame `002850`: `count=0x91`, `value=0x3B5FB922`, `branch=0x020B4460`
+  - frame `002900`: `count=0x92`, `value=0x7866CA1D`, `branch=0x0212D41C`
+- Interpretation: injecting the shared match seed around frame `2800` controls the initial star placement as well as later respawn RNG.
+
 ## Randomness Scope and Fix Strategy
 
 Randomness should be split into two layers.
@@ -170,7 +193,7 @@ Expected RNG synchronization contract:
 ## Current Next Actions
 
 1. 8コインアイテム取得用の入力スクリプトを追加し、同じ `Net::random` timeline で消費箇所を確認する。
-2. match開始前またはMvsLロード直後に `Net::random.value` を両インスタンスへ同一値で注入するフックを作り、スター初期位置と再生成位置が安定するか確認する。
+2. netplay開始時にhostがseedを決め、clientへ送り、両PCの2インスタンスへ同じ値を注入するプロトコルへ接続する。
 3. `0x0212D418` のBig Star選択処理はROMパッチ候補として保持するが、直接固定するより、まずはmatch seed固定を優先する。
 
 ## Next Actions

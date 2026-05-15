@@ -108,6 +108,7 @@ struct State
     bool MemPatchFrameSet = false;
     bool MemPatchApplied[16] {};
     bool NetRandomPatchEnabled = false;
+    bool NetRandomPatchAuto = false;
     melonDS::u32 NetRandomPatchFrame = 0;
     melonDS::u32 NetRandomPatchValue = 0;
     bool NetRandomPatchApplied[16] {};
@@ -784,19 +785,35 @@ void ApplyMemPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 void ApplyNetRandomPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     constexpr melonDS::u32 kNetRandomValueOffset = 0x02088088 - 0x02000000;
+    constexpr melonDS::u32 kNetRandomCallCountOffset = 0x02088068 - 0x02000000;
+    constexpr melonDS::u32 kNetGGIDOffset = 0x02087E78 - 0x02000000;
+    constexpr melonDS::u32 kGameStageGroupOffset = 0x02085058 - 0x02000000;
+    constexpr melonDS::u32 kGameVsModeOffset = 0x020850C4 - 0x02000000;
 
     if (!nds || !nds->MainRAM || !G.NetRandomPatchEnabled) return;
     if (instanceID < 0 || instanceID >= 16) return;
-    if (frame != G.NetRandomPatchFrame || G.NetRandomPatchApplied[instanceID]) return;
+    if (G.NetRandomPatchApplied[instanceID]) return;
     if (kNetRandomValueOffset + sizeof(melonDS::u32) > nds->MainRAMMask + 1) return;
+
+    bool shouldPatch = frame == G.NetRandomPatchFrame;
+    if (G.NetRandomPatchAuto)
+    {
+        const melonDS::u32 stageGroup = nds->ARM9Read32(0x02000000 + kGameStageGroupOffset);
+        const melonDS::u32 vsMode = nds->ARM9Read32(0x02000000 + kGameVsModeOffset);
+        const melonDS::u32 ggid = nds->ARM9Read32(0x02000000 + kNetGGIDOffset);
+        const melonDS::u8 randomCallCount = nds->ARM9Read8(0x02000000 + kNetRandomCallCountOffset);
+        shouldPatch = stageGroup == 9 && vsMode == 1 && ggid == 0x42 && randomCallCount == 0;
+    }
+    if (!shouldPatch) return;
 
     std::memcpy(&nds->MainRAM[kNetRandomValueOffset], &G.NetRandomPatchValue, sizeof(G.NetRandomPatchValue));
     G.NetRandomPatchApplied[instanceID] = true;
 
-    std::printf("NSMB Test: patched Net::random.value inst=%d frame=%u value=0x%08X\n",
+    std::printf("NSMB Test: patched Net::random.value inst=%d frame=%u value=0x%08X auto=%d\n",
         instanceID,
         frame,
-        G.NetRandomPatchValue);
+        G.NetRandomPatchValue,
+        G.NetRandomPatchAuto ? 1 : 0);
 }
 
 std::filesystem::path StatePath(const std::string& dir, int instanceID)
@@ -1217,6 +1234,7 @@ void InitFromEnvironment()
     if (netRandomValue && netRandomValue[0])
     {
         G.NetRandomPatchEnabled = true;
+        G.NetRandomPatchAuto = EnvFlag("MELONDS_NSML_NET_RANDOM_AUTO");
         G.NetRandomPatchValue = static_cast<melonDS::u32>(std::strtoul(netRandomValue, nullptr, 0));
         G.NetRandomPatchFrame = static_cast<melonDS::u32>(
             std::max(0, EnvInt("MELONDS_NSML_NET_RANDOM_FRAME", 0)));
@@ -1253,7 +1271,7 @@ void InitFromEnvironment()
             }
         }
 
-        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d\n",
+        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d\n",
             G.TestFrames,
             G.TestInstanceCount,
             G.FrameBarrierEnabled ? 1 : 0,
@@ -1270,6 +1288,7 @@ void InitFromEnvironment()
             G.MemPatchFrameSet ? G.MemPatchFrame : 0,
             G.MemPatchRanges.size(),
             G.NetRandomPatchEnabled ? 1 : 0,
+            G.NetRandomPatchAuto ? 1 : 0,
             G.NetRandomPatchFrame,
             G.NetRandomPatchValue,
             G.StateSaveDir.empty() ? "<none>" : G.StateSaveDir.c_str(),

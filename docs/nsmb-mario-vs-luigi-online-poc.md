@@ -10,11 +10,13 @@
 - `0x0212D418` 周辺の逆アセンブルで、ここがBig Starの空き配置スロット選択処理だと確認した。同じ入力ルートの2回目でも frame `005071` のRNG値と frame `006400` の次スター位置が再現した。
 - frame `5000` に `Net::random.value` の4バイトだけを `0x12345678` へメモリパッチすると、次のRNG出力が `0x7544F5D5` に変わった。Big Star再生成は共有 `Net::random` streamに従っている。
 - `MELONDS_NSML_NET_RANDOM_FRAME` / `MELONDS_NSML_NET_RANDOM_VALUE` を追加し、MainRAMパッチファイルなしで両インスタンスの `Net::random.value` を同一値へ注入できるようにした。frame `5000` で `0x12345678` を注入する検証は成功。
+- frame `2800` に `Net::random.value=0x12345678` を注入すると、初期スター位置まで制御できた。同じseedの2回実行で frame `002850` / `002900` のRNG timelineと frame `004100` の初期スター位置が一致した。別seed `0x87654321` では初期スター位置が変わった。
+- `MELONDS_NSML_NET_RANDOM_AUTO=1` を追加し、固定フレームではなくMvsL状態検出でseed注入できるようにした。`0x12345678` のauto注入は inst0 frame `2676` / inst1 frame `2659` で発火し、frame `2800` 固定注入と同じRNG timeline・初期スター位置になった。
 
 ## Current Blockers / Next Actions
 
 1. 8コインアイテム取得スクリプトを追加し、スター以外のランダム消費も同じtimelineで確認する。
-2. MvsLロード直後のより早いフレームで `Net::random.value` を注入し、スター初期位置から安定するか確認する。
+2. netplay開始時にhostがseedを決め、clientへ送り、両PCの2インスタンスへ同じ値を注入するプロトコルへ接続する。
 3. `0x0212D418` のBig Star選択処理はROMパッチ候補として保持するが、まずはmatch seed固定を優先する。
 
 ## 方針転換: NSMB特化解析・パッチ方向
