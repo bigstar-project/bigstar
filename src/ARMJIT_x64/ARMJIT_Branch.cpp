@@ -25,6 +25,8 @@ using namespace Gen;
 namespace melonDS
 {
 
+bool TraceNSMLRandomCallFromJIT(ARM* cpu, u32 instrAddr, u32 lr);
+
 template <typename T>
 int squeezePointer(T* ptr)
 {
@@ -203,6 +205,16 @@ void Compiler::A_Comp_BranchImm()
 
     if (link)
         MOV(32, MapReg(14), Imm32(R15 - 4));
+
+    if (link && (target == 0x0200E5A0 || target == 0x0200E550))
+    {
+        PushRegs(true, true);
+        MOV(64, R(ABI_PARAM1), R(RCPU));
+        MOV(32, R(ABI_PARAM2), Imm32(target));
+        MOV(32, R(ABI_PARAM3), Imm32(R15 - 4));
+        ABI_CallFunction(TraceNSMLRandomCallFromJIT);
+        PopRegs(true, true);
+    }
 
     Comp_JumpTo(target);
 }

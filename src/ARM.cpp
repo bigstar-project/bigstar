@@ -18,6 +18,8 @@
 
 #include <stdio.h>
 #include <assert.h>
+#include <stdlib.h>
+#include <string.h>
 #include <algorithm>
 #include "NDS.h"
 #include "DSi.h"
@@ -33,6 +35,112 @@ namespace melonDS
 {
 using Platform::Log;
 using Platform::LogLevel;
+
+static bool TraceNSMLRandomCallImpl(ARM* cpu, u32 instrAddr, u32 lr, bool hasLR)
+{
+    struct RandomTraceConfig
+    {
+        bool Checked = false;
+        bool Enabled = false;
+        u32 Addr = 0x0200E5A0;
+        u32 Addrs[256] {};
+        int AddrCount = 0;
+        u32 RandomValueAddr = 0x02088088;
+        u32 RandomCallCountAddr = 0x02088068;
+        u32 StartFrame = 0;
+        u32 EndFrame = 0xFFFFFFFF;
+        FILE* LogFile = nullptr;
+    };
+
+    static RandomTraceConfig cfg;
+    if (!cfg.Checked)
+    {
+        cfg.Checked = true;
+        cfg.Enabled = getenv("MELONDS_NSML_RANDOM_TRACE") != nullptr;
+        if (const char* addr = getenv("MELONDS_NSML_RANDOM_TRACE_ADDR"))
+            cfg.Addr = static_cast<u32>(strtoul(addr, nullptr, 0));
+        cfg.Addrs[cfg.AddrCount++] = cfg.Addr;
+        if (const char* addrs = getenv("MELONDS_NSML_RANDOM_TRACE_ADDRS"))
+        {
+            char buf[4096];
+            strncpy(buf, addrs, sizeof(buf) - 1);
+            buf[sizeof(buf) - 1] = '\0';
+            for (char* tok = strtok(buf, ", \t\r\n"); tok && cfg.AddrCount < 256; tok = strtok(nullptr, ", \t\r\n"))
+                cfg.Addrs[cfg.AddrCount++] = static_cast<u32>(strtoul(tok, nullptr, 0));
+        }
+        if (const char* randomValueAddr = getenv("MELONDS_NSML_RANDOM_TRACE_VALUE_ADDR"))
+            cfg.RandomValueAddr = static_cast<u32>(strtoul(randomValueAddr, nullptr, 0));
+        if (const char* randomCallCountAddr = getenv("MELONDS_NSML_RANDOM_TRACE_CALLCOUNT_ADDR"))
+            cfg.RandomCallCountAddr = static_cast<u32>(strtoul(randomCallCountAddr, nullptr, 0));
+        if (const char* startFrame = getenv("MELONDS_NSML_RANDOM_TRACE_START_FRAME"))
+            cfg.StartFrame = static_cast<u32>(strtoul(startFrame, nullptr, 0));
+        if (const char* endFrame = getenv("MELONDS_NSML_RANDOM_TRACE_END_FRAME"))
+            cfg.EndFrame = static_cast<u32>(strtoul(endFrame, nullptr, 0));
+        if (const char* logPath = getenv("MELONDS_NSML_RANDOM_TRACE_LOG"))
+        {
+            if (logPath[0])
+            {
+                cfg.LogFile = fopen(logPath, "w");
+                if (cfg.LogFile)
+                    fprintf(cfg.LogFile, "nds,frame,pc,caller,lr,random_value,random_call_count\n");
+            }
+        }
+    }
+
+    if (!cfg.Enabled || !cpu || cpu->Num != 0) return false;
+    bool matched = false;
+    for (int i = 0; i < cfg.AddrCount; i++)
+    {
+        if (instrAddr == cfg.Addrs[i])
+        {
+            matched = true;
+            break;
+        }
+    }
+    if (!matched) return false;
+    if (cpu->NDS.NumFrames < cfg.StartFrame || cpu->NDS.NumFrames > cfg.EndFrame) return false;
+
+    const u32 randomValue = cpu->NDS.ARM9Read32(cfg.RandomValueAddr);
+    const u8 randomCallCount = cpu->NDS.ARM9Read8(cfg.RandomCallCountAddr);
+    if (!hasLR)
+        lr = cpu->R[14];
+    const u32 caller = lr >= 4 ? lr - 4 : lr;
+    if (cfg.LogFile)
+    {
+        fprintf(cfg.LogFile,
+            "%p,%u,%08X,%08X,%08X,%08X,%02X\n",
+            static_cast<void*>(&cpu->NDS),
+            cpu->NDS.NumFrames,
+            instrAddr,
+            caller,
+            lr,
+            randomValue,
+            randomCallCount);
+        fflush(cfg.LogFile);
+    }
+    else
+    {
+        printf("NSMB Random: nds=%p frame=%u pc=%08X caller=%08X lr=%08X random=%08X count=%02X\n",
+            static_cast<void*>(&cpu->NDS),
+            cpu->NDS.NumFrames,
+            instrAddr,
+            caller,
+            lr,
+            randomValue,
+            randomCallCount);
+    }
+    return true;
+}
+
+bool TraceNSMLRandomCall(ARM* cpu, u32 instrAddr)
+{
+    return TraceNSMLRandomCallImpl(cpu, instrAddr, 0, false);
+}
+
+bool TraceNSMLRandomCallFromJIT(ARM* cpu, u32 instrAddr, u32 lr)
+{
+    return TraceNSMLRandomCallImpl(cpu, instrAddr, lr, true);
+}
 
 #ifdef GDBSTUB_ENABLED
 void ARM::GdbCheckA()
@@ -620,6 +728,7 @@ void ARMv5::Execute()
         if constexpr (mode == CPUExecuteMode::JIT)
         {
             u32 instrAddr = R[15] - ((CPSR&0x20)?2:4);
+            TraceNSMLRandomCall(this, instrAddr);
 
             if ((instrAddr < FastBlockLookupStart || instrAddr >= (FastBlockLookupStart + FastBlockLookupSize))
                 && !NDS.JIT.SetupExecutableRegion(0, instrAddr, FastBlockLookup, FastBlockLookupStart, FastBlockLookupSize))
@@ -661,6 +770,7 @@ void ARMv5::Execute()
             {
                 if constexpr (mode == CPUExecuteMode::InterpreterGDB)
                     GdbCheckC();
+                TraceNSMLRandomCall(this, R[15] - 2);
 
                 // prefetch
                 R[15] += 2;
@@ -677,6 +787,7 @@ void ARMv5::Execute()
             {
                 if constexpr (mode == CPUExecuteMode::InterpreterGDB)
                     GdbCheckC();
+                TraceNSMLRandomCall(this, R[15] - 4);
 
                 // prefetch
                 R[15] += 4;
@@ -760,6 +871,7 @@ void ARMv4::Execute()
         if constexpr (mode == CPUExecuteMode::JIT)
         {
             u32 instrAddr = R[15] - ((CPSR&0x20)?2:4);
+            TraceNSMLRandomCall(this, instrAddr);
 
             if ((instrAddr < FastBlockLookupStart || instrAddr >= (FastBlockLookupStart + FastBlockLookupSize))
                 && !NDS.JIT.SetupExecutableRegion(1, instrAddr, FastBlockLookup, FastBlockLookupStart, FastBlockLookupSize))

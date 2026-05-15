@@ -1,5 +1,20 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Current Status
+
+- 方針は、汎用DSローカル通信netplayではなく、NSMB Mario vs Luigi専用の同期・解析・必要ならROM/メモリパッチへ寄せている。
+- 日本版ROM `A2DJ` を対象に、`Net::random` 主要シンボルと `Net::getRandom()` 周辺関数を優先解析中。
+- `tests/nsmb_mario_vs_luigi_star_probe.inputs` で、Mario vs Luigi開始後にinst0/Marioが最初のスターを取り、次スターを再生成するところまで自動化した。
+- `tools/nsmb_mvl_ram_probe.py --a2dj-rng-timeline --rng-timeline-only ...` で、MainRAM dump列から `Net::randomCallCount` / `Net::random.value` / `Net::randomBranchAddress` の遷移を抽出できる。
+- 直近の検証では、スター取得後の次スター生成で frame `005071` に `Net::randomCallCount` が `0x92 -> 0x93` に進み、`Net::random.value` が `0x413B3BAA -> 0xF9D72FCA` に変化した。`Net::randomBranchAddress=0x0212D41C` なので、関連する呼び出し元は `0x0212D418` 周辺と見ている。
+
+## Current Blockers / Next Actions
+
+1. `0x0212D418` 周辺を逆アセンブルして、Big Star再配置の呼び出し元か確認する。
+2. 同じスター取得スクリプトを複数回実行し、RNG遷移フレーム・値・次スター位置が一致するか確認する。
+3. 8コインアイテム取得スクリプトを追加し、スター以外のランダム消費も同じtimelineで確認する。
+4. ROMパッチ前に、melonDS側のメモリパッチで `Net::random.value` / `Net::randomCallCount` を固定して、スター再配置の再現性を検証する。
+
 ## 方針転換: NSMB特化解析・パッチ方向
 
 2026-05-14 時点で、melonDS側だけでDSローカル通信を完全決定化する方向は、最終的なWAN越し2PC対戦の安定化に対してリスクが高いと判断する。
@@ -85,12 +100,25 @@ NSMB Central Wiki の Mario vs Luigi ページに、今回の方針に直結す�
 - ROMは `A2DJ` と判定され、US版シンボルは要移植と警告された。
 - `python tools\nsmb_mvl_ram_probe.py --rom roms\nsmb.nds --a2dj-symbols logs\ram-gamepatch-a\inst0_frame005000_mainram.bin logs\ram-gamepatch-a\inst1_frame005000_mainram.bin` は成功。
 - `Game` / `Stage` グローバル群はUS版から `-0x9C0`、`Net` グローバル群はUS版から `-0x9E0` のshiftで、MvsL route RAM dumpと整合した。
+- Net系の優先関数はUS版から `-0x154` のshiftで、JP版の復号済みARM9コードと整合した。
+- `Net::getRandom()` は `0x0200E5A0`、`Net::getRandom12()` は `0x0200E550`、`Net::syncRandomFull()` は `0x0200E5E8`、`Net::syncRandomFast()` は `0x0200E5F4`、`Net::Core::shareRandomSeed()` は `0x02010F04`。
+- 復号済みRAM上で `Net::getRandom()` への ARM `BL` call site は 61 個見つかった。Big Star / Item actor に近い呼び出し元を次に絞る。
+- `MELONDS_NSML_RANDOM_TRACE` を追加し、A2DJ `Net::getRandom()` 入口で `caller`、`Net::random.value`、`Net::randomCallCount` をCSVログ化できるようにした。
+- `MELONDS_NSML_RANDOM_TRACE` 有効時はJITを自動で無効化する。
 - `Game::localPlayerID` は inst0 が `0`、inst1 が `1` で、`Game::stageGroup` は `9`、`Game::vsMode` は `1`。
 - `Net::ggid` はJPの game group id `0x42`、`Net::random.value` 候補は inst0/inst1 で同一値。
 - `Game::random.value`、`Net::random.value`、`Net::randomBranchAddress` のwatchでは、現在の自動ルート中に書き込みは出なかった。これは候補否定ではなく、乱数共有/初期ランダム化がwatch対象期間外で終わっているか、現在の入力スクリプトが追加ランダムイベントを起こしていない可能性がある。
 - 次の検証では、8コインアイテムまたはスター取得後の再生成を意図的に起こす入力スクリプトが必要。
 - `0x00d2` は RAM dump 内で複数ヒットしたが、現時点では「どれが実際のMvsL Big Star actor instanceか」は未確定。
 - `0x0208xxxx` 近辺の差分は引き続き見えるが、100フレーム刻みdumpでは値がフレーム経過に追従して変わるため、スター位置そのものと断定しない。
+
+ランダム要素の扱い:
+
+- 事前選択のランダム性と、試合中gameplayのランダム性を分けて扱う。
+- ランダムステージ選択のような事前選択は、乱数状態ではなく選択結果そのものを固定する。
+- Big Star配置、8コインアイテム、tile/object randomization、actor effect/drop系は `Stage::getRandom()` / `Net::getRandom()` に集約して同期する。
+- 最終的には個別のスター/アイテム座標を毎回固定するのではなく、`Net::random` のseedと消費順を一致させる方針。
+- 61箇所の `Net::getRandom()` 呼び出し元分類は、全部を個別制御するためではなく、乱数消費順がズレたときにどのゲームシステムが余計に/不足して乱数を消費したかを特定するため。
 
 ## 目的
 

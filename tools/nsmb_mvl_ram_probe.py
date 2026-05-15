@@ -9,6 +9,7 @@ first pass deliberately heuristic: it looks for the known MvsL Big Star actor ID
 from __future__ import annotations
 
 import argparse
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,6 +50,19 @@ A2DJ_SYMBOLS = {
     "Net::marker": 0x0208806C,
     "Net::randomShareStep": 0x02088070,
     "Net::random.value": 0x02088088,
+}
+
+A2DJ_FUNCTIONS = {
+    # US Net function symbols shifted by -0x154. Verified against decrypted
+    # runtime ARM9 code in MainRAM dumps.
+    "Net::getRandom12()": 0x0200E550,
+    "Net::getRandom()": 0x0200E5A0,
+    "Net::syncRandomFull()": 0x0200E5E8,
+    "Net::syncRandomFast()": 0x0200E5F4,
+    "Net::onPacketPollingDefault()": 0x02010810,
+    "Net::onRenderSignalStrengthDefault()": 0x02010828,
+    "Net::setDefaultHandlers()": 0x02010930,
+    "Net::Core::shareRandomSeed()": 0x02010F04,
 }
 
 
@@ -162,6 +176,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rom", type=Path)
     parser.add_argument("--us-symbols", action="store_true")
     parser.add_argument("--a2dj-symbols", action="store_true")
+    parser.add_argument("--a2dj-functions", action="store_true")
+    parser.add_argument("--a2dj-rng-timeline", action="store_true")
+    parser.add_argument("--rng-timeline-only", action="store_true")
+    parser.add_argument("--find-arm-bl-to", default="")
     parser.add_argument("--scan-start", default="0x080000")
     parser.add_argument("--scan-end", default="0x090000")
     return parser.parse_args()
@@ -195,24 +213,114 @@ def print_symbols(label: str, data: bytes, symbols: dict[str, int], symbol_label
         )
 
 
+def print_functions(label: str, data: bytes, functions: dict[str, int], function_label: str) -> None:
+    print(f"== {function_label} function probe {label} ==")
+    for name, addr in functions.items():
+        off = addr - MAIN_RAM_BASE
+        if off < 0 or off + 8 > len(data):
+            print(f"  {name} addr=0x{addr:08x} out_of_dump")
+            continue
+        print(
+            f"  {name} addr=0x{addr:08x} "
+            f"head32=0x{u32(data, off):08x},0x{u32(data, off + 4):08x}"
+        )
+
+
+def print_arm_bl_hits(label: str, data: bytes, target: int) -> None:
+    print(f"== ARM BL hits {label} target=0x{target:08x} ==")
+    hits: list[int] = []
+    for off in range(0, len(data) - 4, 4):
+        word = u32(data, off)
+        if (word & 0x0F000000) != 0x0B000000:
+            continue
+        imm = word & 0x00FFFFFF
+        if imm & 0x00800000:
+            imm -= 0x01000000
+        dest = (MAIN_RAM_BASE + off + 8 + (imm << 2)) & 0xFFFFFFFF
+        if dest == target:
+            hits.append(MAIN_RAM_BASE + off)
+    print(f"count={len(hits)}")
+    for addr in hits[:128]:
+        print(f"  0x{addr:08x}")
+    if len(hits) > 128:
+        print(f"  ... {len(hits) - 128} more")
+
+
+def frame_from_label(label: str) -> int:
+    match = re.search(r"frame(\d+)", label)
+    if not match:
+        return -1
+    return int(match.group(1))
+
+
+def print_a2dj_rng_timeline(loaded: list[tuple[str, bytes]]) -> None:
+    rows = []
+    for label, data in loaded:
+        count_off = A2DJ_SYMBOLS["Net::randomCallCount"] - MAIN_RAM_BASE
+        value_off = A2DJ_SYMBOLS["Net::random.value"] - MAIN_RAM_BASE
+        branch_off = A2DJ_SYMBOLS["Net::randomBranchAddress"] - MAIN_RAM_BASE
+        if max(count_off, value_off + 3, branch_off + 3) >= len(data):
+            continue
+        rows.append(
+            (
+                frame_from_label(label),
+                label,
+                data[count_off],
+                u32(data, value_off),
+                u32(data, branch_off),
+            )
+        )
+
+    rows.sort(key=lambda row: (row[0], row[1]))
+    print("== A2DJ Net RNG timeline ==")
+    last: tuple[int, int, int] | None = None
+    for frame, label, count, value, branch in rows:
+        current = (count, value, branch)
+        if current == last:
+            continue
+        frame_text = f"{frame:06d}" if frame >= 0 else "unknown"
+        print(
+            f"  frame={frame_text} count=0x{count:02x} "
+            f"value=0x{value:08x} branch=0x{branch:08x} file={label}"
+        )
+        last = current
+
+
 def main() -> int:
     args = parse_args()
     scan_start = int(args.scan_start, 0)
     scan_end = int(args.scan_end, 0)
+    find_bl_to = int(args.find_arm_bl_to, 0) if args.find_arm_bl_to else 0
     print_rom_info(args.rom)
 
     loaded: list[tuple[str, bytes]] = []
+    dumps: list[Path] = []
     for dump in args.dumps:
+        if any(ch in dump.as_posix() for ch in "*?[]"):
+            matches = sorted(dump.parent.glob(dump.name))
+            dumps.extend(matches)
+        else:
+            dumps.append(dump)
+
+    for dump in dumps:
         data = dump.read_bytes()
         loaded.append((dump.as_posix(), data))
+        if args.rng_timeline_only:
+            continue
         print_dump_summary(dump.as_posix(), data, scan_start, scan_end)
         if args.us_symbols:
             print_symbols(dump.as_posix(), data, US_SYMBOLS, "US")
         if args.a2dj_symbols:
             print_symbols(dump.as_posix(), data, A2DJ_SYMBOLS, "A2DJ")
+        if args.a2dj_functions:
+            print_functions(dump.as_posix(), data, A2DJ_FUNCTIONS, "A2DJ")
+        if find_bl_to:
+            print_arm_bl_hits(dump.as_posix(), data, find_bl_to)
 
     if len(loaded) == 2:
         print_diff(loaded[0][0], loaded[0][1], loaded[1][0], loaded[1][1], scan_start, scan_end)
+    if args.a2dj_rng_timeline:
+        print_a2dj_rng_timeline(loaded)
     return 0
 
 
