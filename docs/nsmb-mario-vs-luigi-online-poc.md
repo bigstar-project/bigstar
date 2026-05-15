@@ -27,17 +27,17 @@ Client PC:
 - localhostの2プロセス検証で、hostが送ったmatch seedをclientが受信し、両側で同じRNG timelineになることを確認済み。
 - 入力遅延lockstepを、`syncFrame + delay` のfuture input送信方式へ寄せた。
 - テスト時のlockstep開始ウォームアップと終了graceを追加し、短い3200フレームのhost/client検証はremote input timeoutなしで完走する。
+- プロセス内でremote担当インスタンスが先にlockstep待ちへ入っても、テスト時はlocal担当入力を先行送信するようにした。これにより6500フレームのhost/client検証もtimeoutなしで完走する。
 
 ## 現在のブロッカー
 
 1. **入力同期timeout**
-   - 3200フレームの短距離検証では解消済み。
-   - 6500フレームの長距離検証では、hostが先行して完走し、clientが途中でhost入力を待つケースが残っている。
-   - 次は双方向のinput packet受信ログを追加し、host側がclient入力を受け取れていない原因を特定する。
+   - 3200フレームと6500フレームのhost/client 2プロセス検証では解消済み。
+   - ただし実ゲーム操作として十分かはまだ未確定。今後は長時間化、WAN遅延、切断時の挙動を追加で見る。
 
 2. **試合中の長時間同期未検証**
    - 初期seed同期とRNG timeline一致までは確認済み。
-   - 6500フレーム検証自体は走らせたが、入力遅延により既存スター取得スクリプトのタイミングがずれ、スター取得後の再生成RNG消費までは確認できていない。
+   - 6500フレーム検証自体はtimeoutなしで完走したが、入力同期下では既存スター取得スクリプトでスター取得後の再生成RNG消費までは確認できていない。
    - lockstepを安定させた後、入力スクリプトを入力遅延込みに調整して再検証する。
 
 3. **Big Star以外のランダム要素**
@@ -47,8 +47,8 @@ Client PC:
 ## 今後の大まかな道筋
 
 1. 入力同期timeoutを直す。
-   - まずhost側がclient入力を受信できていない/lockstepへ入っていない原因をログで特定する。
-   - 両プロセス・両インスタンスが同じタイミングでlockstepへ入り、片側だけ先行完走しないようにする。
+   - 現在のlocalhost 6500フレーム検証では解消済み。
+   - 次はこの状態を保ったまま、スター取得入力スクリプトを調整する。
 
 2. ローカル疑似2PCテストを安定させる。
    - 1台のPCでhostプロセスとclientプロセスを起動する。
@@ -79,6 +79,8 @@ Client PC:
   - 入力遅延future-frame送信
   - lockstep開始ウォームアップ
   - テスト終了時のENet flush grace
+  - input packet送受信trace
+  - テスト時のlocal入力先行送信
   - スクリーンショット/RAM dump/hash/random trace
 - `tools/nsmb_mvl_ram_probe.py`
   - ROM gamecode確認
@@ -115,7 +117,9 @@ Client PC:
 - `Net::random.value` を共通seedへ注入すると、初期Big Star位置とRNG timelineを制御できた。
 - host/client間のmatch seed配布により、localhost 2プロセスでframe `002800` / `002900` のRNG timeline一致を確認した。
 - 2026-05-15の追加検証で、3200フレームのhost/client入力同期テストはremote input timeoutなしで完走した。
-- 6500フレームのhost/client検証は、host側が先行完走しclient側がframe `4953` 付近でhost入力を待つ状態になった。現在残っている最大の実装問題は、seed同期ではなく双方向入力受信とlockstep開始/進行制御。
+- input traceにより、host側はclient入力を受信していたが、lockstep開始前に対象フレームを取り逃がして先行していることが分かった。
+- テスト時のlocal入力先行送信を追加した後、6500フレームのhost/client検証もremote input timeoutなしで完走した。
+- ただし6500フレーム検証のRNG timelineではframe `002900` 以降の `Net::randomCallCount` 増加が見えず、スター取得後の再生成まではまだ確認できていない。現在残っている最大の実装問題は、入力同期下でMarioをスター取得まで動かす入力スクリプトの調整。
 
 ## 検証コマンド
 
@@ -155,6 +159,8 @@ Client PC:
 - `MELONDS_NSML_NET_RANDOM_VALUE`: 注入するRNG seed。
 - `MELONDS_NSML_NET_RANDOM_FRAME`: 固定フレームでRNG seedを注入する検証用。
 - `MELONDS_NSML_RANDOM_TRACE`: `Net::getRandom()` のcaller/value/countをCSV出力。
+- `MELONDS_NSML_INPUT_TRACE`: input packetの送受信をログ出力。
+- `MELONDS_NSML_INPUT_TRACE_INTERVAL`: input packet traceのフレーム間隔。
 - `MELONDS_NSML_RAM_DUMP_DIR`: MainRAM dump出力先。
 - `MELONDS_NSML_RAM_DUMP_FRAMES`: dump対象フレーム。
 - `MELONDS_NSML_SCREENSHOT_DIR`: PNG出力先。

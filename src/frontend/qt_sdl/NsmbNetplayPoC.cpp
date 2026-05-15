@@ -108,6 +108,8 @@ struct State
     int HashInterval = 60;
     int TestWaitTimeoutMs = 5000;
     int TestQuitGraceMs = 0;
+    bool InputTraceEnabled = false;
+    int InputTraceInterval = 60;
     std::string InputScriptPath;
     std::string HashLogPath;
     std::string ScreenshotDir;
@@ -140,6 +142,8 @@ struct State
     bool ENetInitialized = false;
     std::map<melonDS::u32, InputState> LocalInputs;
     std::map<melonDS::u32, InputState> RemoteInputs;
+    melonDS::u32 LastTracedSentInputFrame = kNoFrameLimit;
+    melonDS::u32 LastTracedReceivedInputFrame = kNoFrameLimit;
     std::vector<std::pair<melonDS::u32, melonDS::u32>> RamDumpRanges;
     std::vector<std::pair<melonDS::u32, melonDS::u32>> MemPatchRanges;
     melonDS::u64 LastLoggedHashFrame[16] {};
@@ -447,6 +451,16 @@ void PumpNetworkLocked()
                         packet.TouchX,
                         packet.TouchY,
                     };
+                    if (G.InputTraceEnabled
+                        && packet.Frame != G.LastTracedReceivedInputFrame
+                        && (G.InputTraceInterval <= 1 || (packet.Frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
+                    {
+                        G.LastTracedReceivedInputFrame = packet.Frame;
+                        std::printf("NSMB PoC: recv input frame=%u keys=0x%03X remoteQueue=%zu\n",
+                            packet.Frame,
+                            packet.KeyMask,
+                            G.RemoteInputs.size());
+                    }
                 }
             }
             else if (event.packet->dataLength == sizeof(WireSeed))
@@ -519,6 +533,17 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
 
     enet_peer_send(G.Peer, 0, enetPacket);
     enet_host_flush(G.Host);
+
+    if (G.InputTraceEnabled
+        && frame != G.LastTracedSentInputFrame
+        && (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
+    {
+        G.LastTracedSentInputFrame = frame;
+        std::printf("NSMB PoC: sent input frame=%u keys=0x%03X localQueue=%zu\n",
+            frame,
+            input.KeyMask,
+            G.LocalInputs.size());
+    }
 }
 
 void PruneInputHistoryLocked(melonDS::u32 keepFromFrame)
@@ -1267,6 +1292,8 @@ void InitFromEnvironment()
     G.HashInterval = std::max(1, EnvInt("MELONDS_NSML_HASH_INTERVAL", 60));
     G.TestWaitTimeoutMs = std::max(0, EnvInt("MELONDS_NSML_WAIT_TIMEOUT_MS", 5000));
     G.TestQuitGraceMs = std::max(0, EnvInt("MELONDS_NSML_QUIT_GRACE_MS", 0));
+    G.InputTraceEnabled = EnvFlag("MELONDS_NSML_INPUT_TRACE");
+    G.InputTraceInterval = std::max(1, EnvInt("MELONDS_NSML_INPUT_TRACE_INTERVAL", 60));
 
     const char* inputScript = std::getenv("MELONDS_NSML_INPUT_SCRIPT");
     if (inputScript && inputScript[0]) G.InputScriptPath = inputScript;
@@ -1350,7 +1377,7 @@ void InitFromEnvironment()
             }
         }
 
-        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d\n",
+        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d\n",
             G.TestFrames,
             G.TestInstanceCount,
             G.FrameBarrierEnabled ? 1 : 0,
@@ -1374,7 +1401,10 @@ void InitFromEnvironment()
             G.StateSaveFrame,
             G.StateLoadDir.empty() ? "<none>" : G.StateLoadDir.c_str(),
             G.StateLoadFrameSet ? G.StateLoadFrame : 0,
-            G.TestWaitTimeoutMs);
+            G.TestWaitTimeoutMs,
+            G.TestQuitGraceMs,
+            G.InputTraceEnabled ? 1 : 0,
+            G.InputTraceInterval);
     }
 
     if (!G.Enabled) return;
@@ -1484,15 +1514,19 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     const bool netplaySendActive = (G.NetplayStartFrame == 0 || syncFrame >= sendStartFrame);
     const bool netplayApplyActive = (G.NetplayStartFrame == 0 || syncFrame >= G.NetplayStartFrame);
 
-    if (isLocal)
+    if (isLocal || G.TestEnabled)
     {
+        InputState localInput = testInput;
+        if (!isLocal && G.TestEnabled)
+            localInput = ApplyInputScript(G.LocalInstance, syncFrame, NeutralInput());
+
         std::lock_guard<std::mutex> lock(G.Mutex);
         PumpNetworkLocked();
         SendMatchSeedLocked();
         if (netplaySendActive)
         {
             const melonDS::u32 effectiveFrame = syncFrame + delay;
-            G.LocalInputs.emplace(effectiveFrame, testInput);
+            G.LocalInputs.emplace(effectiveFrame, localInput);
             for (const auto& [storedFrame, input] : G.LocalInputs)
                 SendInputLocked(storedFrame, input);
         }
@@ -1512,10 +1546,18 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && !G.NetplayLockstepStarted[instanceID])
     {
+        bool needsInitialRemoteInput = false;
+        {
+            std::lock_guard<std::mutex> lock(G.Mutex);
+            PumpNetworkLocked();
+            needsInitialRemoteInput =
+                !G.NetplayAnyLockstepStarted && G.RemoteInputs.find(targetFrame) == G.RemoteInputs.end();
+        }
+
+        if (needsInitialRemoteInput)
+            (void)WaitForRemoteInput(targetFrame);
+
         std::lock_guard<std::mutex> lock(G.Mutex);
-        PumpNetworkLocked();
-        if (!G.NetplayAnyLockstepStarted && G.RemoteInputs.find(targetFrame) == G.RemoteInputs.end())
-            return testInput;
 
         G.NetplayLockstepStarted[instanceID] = true;
         G.NetplayAnyLockstepStarted = true;
