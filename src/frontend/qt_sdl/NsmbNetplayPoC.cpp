@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -23,6 +24,7 @@
 #include <map>
 #include <mutex>
 #include <filesystem>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -34,6 +36,9 @@
 #include <enet/enet.h>
 
 #include "NDS.h"
+#include "Savestate.h"
+#include "LocalMP.h"
+#include "MPInterface.h"
 
 namespace NsmbNetplayPoC
 {
@@ -75,6 +80,8 @@ struct State
     bool Ready = false;
     bool TestEnabled = false;
     bool TestAnnouncedQuit = false;
+    bool FrameBarrierEnabled = false;
+    bool SerialRunEnabled = false;
     Role NetRole = Role::Host;
     int Delay = kDefaultDelay;
     int LocalInstance = 0;
@@ -89,15 +96,38 @@ struct State
     std::string InputScriptPath;
     std::string HashLogPath;
     std::string ScreenshotDir;
+    std::string StateSaveDir;
+    std::string StateLoadDir;
+    std::string RamDumpDir;
+    std::string MemPatchFile;
     std::ofstream HashLog;
     int ScreenshotInterval = 0;
+    int RamDumpInterval = 0;
+    int MemPatchInstance = -1;
+    melonDS::u32 MemPatchFrame = 0;
+    bool MemPatchFrameSet = false;
+    bool MemPatchApplied[16] {};
+    melonDS::u32 StateSaveFrame = 0;
+    melonDS::u32 StateLoadFrame = 0;
+    bool StateLoadFrameSet = false;
     ENetHost* Host = nullptr;
     ENetPeer* Peer = nullptr;
     bool ENetInitialized = false;
     std::map<melonDS::u32, InputState> LocalInputs;
     std::map<melonDS::u32, InputState> RemoteInputs;
+    std::vector<std::pair<melonDS::u32, melonDS::u32>> RamDumpRanges;
+    std::vector<std::pair<melonDS::u32, melonDS::u32>> MemPatchRanges;
     melonDS::u64 LastLoggedHashFrame[16] {};
     melonDS::u32 TestFrameCount[16] {};
+    bool StateSaved[16] {};
+    bool StateLoaded[16] {};
+    bool LocalMPSaved = false;
+    bool LocalMPLoadStarted = false;
+    bool LocalMPLoadFinished = false;
+    bool LocalMPLoaded = false;
+    melonDS::u32 SerialFrame = 0;
+    int SerialInstance = 0;
+    std::condition_variable BarrierCond;
 };
 
 struct InputSpan
@@ -110,6 +140,16 @@ struct InputSpan
 
 State G;
 std::vector<InputSpan> GInputScript;
+
+struct FrameBarrier
+{
+    bool Waiting[16] {};
+    melonDS::u32 Frame[16] {};
+    int Generation = 0;
+};
+
+FrameBarrier GBeforeFrameBarrier;
+FrameBarrier GAfterFrameBarrier;
 
 bool EnvFlag(const char* name)
 {
@@ -296,6 +336,40 @@ bool LoadInputScriptLocked()
     return true;
 }
 
+bool ParseFrameRanges(const char* value, std::vector<std::pair<melonDS::u32, melonDS::u32>>& out)
+{
+    if (!value || !value[0]) return true;
+
+    std::stringstream ss(value);
+    std::string token;
+    while (std::getline(ss, token, ','))
+    {
+        token = Trim(token);
+        if (token.empty()) continue;
+
+        melonDS::u32 start = 0;
+        melonDS::u32 end = 0;
+        const auto dash = token.find('-');
+        if (dash == std::string::npos)
+        {
+            if (!ParseU32(token, start))
+                return false;
+            end = start;
+        }
+        else
+        {
+            if (!ParseU32(token.substr(0, dash), start) ||
+                !ParseU32(token.substr(dash + 1), end) ||
+                end < start)
+                return false;
+        }
+
+        out.emplace_back(start, end);
+    }
+
+    return true;
+}
+
 InputState ApplyInputScript(int instanceID, melonDS::u32 frame, const InputState& fallback)
 {
     if (!G.TestEnabled || GInputScript.empty()) return fallback;
@@ -415,6 +489,126 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
     }
 }
 
+bool WaitAtFrameBarrier(FrameBarrier& barrier, int instanceID, melonDS::u32 frame, const char* name)
+{
+    if (!G.TestEnabled || !G.FrameBarrierEnabled || G.TestInstanceCount <= 1)
+        return true;
+    if (instanceID < 0 || instanceID >= G.TestInstanceCount)
+        return true;
+
+    std::unique_lock<std::mutex> lock(G.Mutex);
+    const int generation = barrier.Generation;
+    barrier.Waiting[instanceID] = true;
+    barrier.Frame[instanceID] = frame;
+
+    const auto allArrived = [&]() {
+        for (int i = 0; i < G.TestInstanceCount; i++)
+        {
+            if (!barrier.Waiting[i] || barrier.Frame[i] != frame)
+                return false;
+        }
+        return true;
+    };
+
+    const auto release = [&]() {
+        for (int i = 0; i < G.TestInstanceCount; i++)
+            barrier.Waiting[i] = false;
+        barrier.Generation++;
+        G.BarrierCond.notify_all();
+    };
+
+    if (allArrived())
+    {
+        release();
+        return true;
+    }
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(G.TestWaitTimeoutMs);
+    while (barrier.Generation == generation)
+    {
+        if (G.TestWaitTimeoutMs > 0)
+        {
+            if (G.BarrierCond.wait_until(lock, deadline) == std::cv_status::timeout)
+            {
+                std::printf("NSMB Test: %s frame barrier timeout inst=%d frame=%u waitedMs=%d\n",
+                    name,
+                    instanceID,
+                    frame,
+                    G.TestWaitTimeoutMs);
+                barrier.Waiting[instanceID] = false;
+                G.BarrierCond.notify_all();
+                return false;
+            }
+        }
+        else
+        {
+            G.BarrierCond.wait(lock);
+        }
+
+        if (allArrived())
+        {
+            release();
+            return true;
+        }
+    }
+
+    return true;
+}
+
+bool WaitForSerialRunTurn(int instanceID, melonDS::u32 frame)
+{
+    if (!G.TestEnabled || !G.SerialRunEnabled || G.TestInstanceCount <= 1)
+        return true;
+    if (instanceID < 0 || instanceID >= G.TestInstanceCount)
+        return true;
+
+    std::unique_lock<std::mutex> lock(G.Mutex);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(G.TestWaitTimeoutMs);
+    for (;;)
+    {
+        if (G.SerialFrame == frame && G.SerialInstance == instanceID)
+            return true;
+
+        if (G.TestWaitTimeoutMs > 0)
+        {
+            if (G.BarrierCond.wait_until(lock, deadline) == std::cv_status::timeout)
+            {
+                std::printf("NSMB Test: serial run timeout inst=%d frame=%u expectedInst=%d expectedFrame=%u waitedMs=%d\n",
+                    instanceID,
+                    frame,
+                    G.SerialInstance,
+                    G.SerialFrame,
+                    G.TestWaitTimeoutMs);
+                return false;
+            }
+        }
+        else
+        {
+            G.BarrierCond.wait(lock);
+        }
+    }
+}
+
+void AdvanceSerialRunTurn(int instanceID, melonDS::u32 frame)
+{
+    if (!G.TestEnabled || !G.SerialRunEnabled || G.TestInstanceCount <= 1)
+        return;
+    if (instanceID < 0 || instanceID >= G.TestInstanceCount)
+        return;
+
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    if (G.SerialFrame != frame || G.SerialInstance != instanceID)
+        return;
+
+    G.SerialInstance++;
+    if (G.SerialInstance >= G.TestInstanceCount)
+    {
+        G.SerialInstance = 0;
+        G.SerialFrame++;
+    }
+    G.BarrierCond.notify_all();
+}
+
 melonDS::u64 HashNDS(melonDS::NDS* nds)
 {
     // FNV-1a over the state that most quickly reveals gameplay divergence.
@@ -476,6 +670,470 @@ void SaveScreenshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         std::printf("NSMB Test: failed to save screenshot: %ls\n", path.c_str());
 }
 
+void SaveRamDump(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (G.RamDumpDir.empty()) return;
+
+    bool shouldDump = false;
+    if (G.RamDumpInterval > 0 &&
+        (frame % static_cast<melonDS::u32>(G.RamDumpInterval)) == 0)
+        shouldDump = true;
+
+    for (const auto& [start, end] : G.RamDumpRanges)
+    {
+        if (frame >= start && frame <= end)
+        {
+            shouldDump = true;
+            break;
+        }
+    }
+
+    if (!shouldDump) return;
+    if (!nds->MainRAM) return;
+
+    std::error_code ec;
+    std::filesystem::create_directories(G.RamDumpDir, ec);
+    if (ec)
+    {
+        std::printf("NSMB Test: failed to create RAM dump dir: %s (%s)\n",
+            G.RamDumpDir.c_str(),
+            ec.message().c_str());
+        return;
+    }
+
+    char filename[256];
+    std::snprintf(filename, sizeof(filename), "inst%d_frame%06u_mainram.bin", instanceID, frame);
+    const std::filesystem::path path = std::filesystem::path(G.RamDumpDir) / filename;
+
+    const melonDS::u32 len = std::min<melonDS::u32>(nds->MainRAMMask + 1, 0x400000);
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file)
+    {
+        std::printf("NSMB Test: failed to open RAM dump for write: %ls\n", path.c_str());
+        return;
+    }
+
+    file.write(reinterpret_cast<const char*>(nds->MainRAM), len);
+    if (!file)
+        std::printf("NSMB Test: failed to write RAM dump: %ls\n", path.c_str());
+}
+
+void ApplyMemPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!nds || !nds->MainRAM || G.MemPatchFile.empty() || !G.MemPatchFrameSet) return;
+    if (frame != G.MemPatchFrame || G.MemPatchApplied[instanceID]) return;
+    if (G.MemPatchInstance >= 0 && G.MemPatchInstance != instanceID) return;
+    if (G.MemPatchRanges.empty()) return;
+
+    std::string patchFile = G.MemPatchFile;
+    const std::string instToken = "{inst}";
+    if (const auto pos = patchFile.find(instToken); pos != std::string::npos)
+        patchFile.replace(pos, instToken.size(), std::to_string(instanceID));
+
+    std::ifstream file(patchFile, std::ios::binary);
+    if (!file)
+    {
+        std::printf("NSMB Test: failed to open memory patch source: %s\n", patchFile.c_str());
+        return;
+    }
+
+    std::vector<char> source(
+        (std::istreambuf_iterator<char>(file)),
+        std::istreambuf_iterator<char>());
+    if (source.empty())
+    {
+        std::printf("NSMB Test: memory patch source is empty: %s\n", patchFile.c_str());
+        return;
+    }
+
+    const melonDS::u32 ramLen = std::min<melonDS::u32>(nds->MainRAMMask + 1, 0x400000);
+    for (const auto& [start, end] : G.MemPatchRanges)
+    {
+        if (end < start || start >= ramLen)
+            continue;
+
+        const melonDS::u32 clampedEnd = std::min(end, ramLen - 1);
+        const melonDS::u32 len = clampedEnd - start + 1;
+        if (static_cast<size_t>(clampedEnd) >= source.size())
+        {
+            std::printf("NSMB Test: memory patch range outside source: 0x%06X-0x%06X sourceBytes=%zu\n",
+                start,
+                clampedEnd,
+                source.size());
+            continue;
+        }
+
+        std::memcpy(&nds->MainRAM[start], &source[start], len);
+        nds->JIT.CheckAndInvalidate<0, melonDS::ARMJIT_Memory::memregion_MainRAM>(0x02000000 + start);
+        nds->JIT.CheckAndInvalidate<1, melonDS::ARMJIT_Memory::memregion_MainRAM>(0x02000000 + start);
+        std::printf("NSMB Test: patched memory inst=%d frame=%u range=0x%06X-0x%06X source=%s\n",
+            instanceID,
+            frame,
+            start,
+            clampedEnd,
+            patchFile.c_str());
+    }
+
+    G.MemPatchApplied[instanceID] = true;
+}
+
+std::filesystem::path StatePath(const std::string& dir, int instanceID)
+{
+    char filename[64];
+    std::snprintf(filename, sizeof(filename), "inst%d.mln", instanceID);
+    return std::filesystem::path(dir) / filename;
+}
+
+std::filesystem::path LocalMPStatePath(const std::string& dir)
+{
+    return std::filesystem::path(dir) / "localmp.bin";
+}
+
+bool SaveState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (G.StateSaveDir.empty() || G.StateSaveFrame == 0) return false;
+    if (frame != G.StateSaveFrame || G.StateSaved[instanceID]) return false;
+
+    std::error_code ec;
+    std::filesystem::create_directories(G.StateSaveDir, ec);
+    if (ec)
+    {
+        std::printf("NSMB Test: failed to create state save dir: %s (%s)\n",
+            G.StateSaveDir.c_str(),
+            ec.message().c_str());
+        return false;
+    }
+
+    melonDS::Savestate state;
+    if (state.Error || !nds->DoSavestate(&state) || state.Error)
+    {
+        std::printf("NSMB Test: failed to create savestate inst=%d frame=%u\n", instanceID, frame);
+        return false;
+    }
+
+    const std::filesystem::path path = StatePath(G.StateSaveDir, instanceID);
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file)
+    {
+        std::printf("NSMB Test: failed to open savestate for write: %ls\n", path.c_str());
+        return false;
+    }
+
+    file.write(reinterpret_cast<const char*>(state.Buffer()), state.Length());
+    if (!file)
+    {
+        std::printf("NSMB Test: failed to write savestate: %ls\n", path.c_str());
+        return false;
+    }
+
+    G.StateSaved[instanceID] = true;
+    std::printf("NSMB Test: saved state inst=%d frame=%u path=%ls bytes=%u\n",
+        instanceID,
+        frame,
+        path.c_str(),
+        state.Length());
+    return true;
+}
+
+bool WaitForStateSaveBarrier(int instanceID)
+{
+    if (G.TestInstanceCount <= 1) return true;
+
+    const auto start = std::chrono::steady_clock::now();
+    for (;;)
+    {
+        {
+            std::lock_guard<std::mutex> lock(G.Mutex);
+            bool allSaved = true;
+            for (int i = 0; i < G.TestInstanceCount; i++)
+            {
+                if (!G.StateSaved[i])
+                {
+                    allSaved = false;
+                    break;
+                }
+            }
+            if (allSaved) return true;
+        }
+
+        if (G.TestWaitTimeoutMs > 0)
+        {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            if (elapsed >= G.TestWaitTimeoutMs)
+            {
+                std::printf("NSMB Test: state save barrier timeout inst=%d waitedMs=%d\n",
+                    instanceID,
+                    G.TestWaitTimeoutMs);
+                return false;
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+bool SaveLocalMPState(melonDS::u32 frame)
+{
+    std::string stateSaveDir;
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        if (G.StateSaveDir.empty() || G.StateSaveFrame == 0) return false;
+        if (frame != G.StateSaveFrame || G.LocalMPSaved) return false;
+        for (int i = 0; i < G.TestInstanceCount; i++)
+        {
+            if (!G.StateSaved[i])
+                return false;
+        }
+        G.LocalMPSaved = true;
+        stateSaveDir = G.StateSaveDir;
+    }
+
+    if (melonDS::MPInterface::GetType() != melonDS::MPInterface_Local)
+    {
+        std::printf("NSMB Test: LocalMP snapshot skipped because MPInterface is not Local\n");
+        return false;
+    }
+
+    auto* localMP = dynamic_cast<melonDS::LocalMP*>(&melonDS::MPInterface::Get());
+    if (!localMP)
+    {
+        std::printf("NSMB Test: LocalMP snapshot failed because LocalMP cast failed\n");
+        return false;
+    }
+
+    std::vector<melonDS::u8> buffer;
+    if (!localMP->SnapshotForTest(buffer) || buffer.empty())
+    {
+        std::printf("NSMB Test: LocalMP snapshot failed\n");
+        return false;
+    }
+
+    const std::filesystem::path path = LocalMPStatePath(stateSaveDir);
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file)
+    {
+        std::printf("NSMB Test: failed to open LocalMP state for write: %ls\n", path.c_str());
+        return false;
+    }
+
+    file.write(reinterpret_cast<const char*>(buffer.data()), static_cast<std::streamsize>(buffer.size()));
+    if (!file)
+    {
+        std::printf("NSMB Test: failed to write LocalMP state: %ls\n", path.c_str());
+        return false;
+    }
+
+    std::printf("NSMB Test: saved LocalMP state frame=%u path=%ls bytes=%zu\n",
+        frame,
+        path.c_str(),
+        buffer.size());
+    return true;
+}
+
+bool WaitForLocalMPSaveBarrier(int instanceID)
+{
+    const auto start = std::chrono::steady_clock::now();
+    for (;;)
+    {
+        {
+            std::lock_guard<std::mutex> lock(G.Mutex);
+            if (G.LocalMPSaved) return true;
+        }
+
+        if (G.TestWaitTimeoutMs > 0)
+        {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            if (elapsed >= G.TestWaitTimeoutMs)
+            {
+                std::printf("NSMB Test: LocalMP save barrier timeout inst=%d waitedMs=%d\n",
+                    instanceID,
+                    G.TestWaitTimeoutMs);
+                return false;
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+bool WaitForStateLoadBarrier(int instanceID)
+{
+    if (G.TestInstanceCount <= 1) return true;
+
+    const auto start = std::chrono::steady_clock::now();
+    for (;;)
+    {
+        {
+            std::lock_guard<std::mutex> lock(G.Mutex);
+            bool allLoaded = true;
+            for (int i = 0; i < G.TestInstanceCount; i++)
+            {
+                if (!G.StateLoaded[i])
+                {
+                    allLoaded = false;
+                    break;
+                }
+            }
+            if (allLoaded) return true;
+        }
+
+        if (G.TestWaitTimeoutMs > 0)
+        {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            if (elapsed >= G.TestWaitTimeoutMs)
+            {
+                std::printf("NSMB Test: state load barrier timeout inst=%d waitedMs=%d\n",
+                    instanceID,
+                    G.TestWaitTimeoutMs);
+                return false;
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+bool WaitForLocalMPLoadFinished(int instanceID)
+{
+    const auto start = std::chrono::steady_clock::now();
+    for (;;)
+    {
+        {
+            std::lock_guard<std::mutex> lock(G.Mutex);
+            if (G.LocalMPLoadFinished)
+                return G.LocalMPLoaded;
+        }
+
+        if (G.TestWaitTimeoutMs > 0)
+        {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            if (elapsed >= G.TestWaitTimeoutMs)
+            {
+                std::printf("NSMB Test: LocalMP load barrier timeout inst=%d waitedMs=%d\n",
+                    instanceID,
+                    G.TestWaitTimeoutMs);
+                return false;
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+bool LoadLocalMPStateOnce(int instanceID)
+{
+    std::string stateLoadDir;
+    bool shouldLoad = false;
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        if (G.StateLoadDir.empty() || !G.StateLoadFrameSet) return false;
+        if (!G.LocalMPLoadStarted)
+        {
+            G.LocalMPLoadStarted = true;
+            shouldLoad = true;
+            stateLoadDir = G.StateLoadDir;
+        }
+    }
+
+    if (!shouldLoad)
+        return WaitForLocalMPLoadFinished(instanceID);
+
+    bool loaded = false;
+    const std::filesystem::path path = LocalMPStatePath(stateLoadDir);
+    std::ifstream file(path, std::ios::binary);
+    if (!file)
+    {
+        std::printf("NSMB Test: failed to open LocalMP state for read: %ls\n", path.c_str());
+    }
+    else
+    {
+        std::vector<melonDS::u8> buffer(
+            (std::istreambuf_iterator<char>(file)),
+            std::istreambuf_iterator<char>());
+
+        if (melonDS::MPInterface::GetType() != melonDS::MPInterface_Local)
+        {
+            std::printf("NSMB Test: LocalMP restore skipped because MPInterface is not Local\n");
+        }
+        else if (auto* localMP = dynamic_cast<melonDS::LocalMP*>(&melonDS::MPInterface::Get()))
+        {
+            loaded = localMP->RestoreForTest(buffer.data(), buffer.size());
+            std::printf("NSMB Test: loaded LocalMP state path=%ls bytes=%zu ok=%d\n",
+                path.c_str(),
+                buffer.size(),
+                loaded ? 1 : 0);
+        }
+        else
+        {
+            std::printf("NSMB Test: LocalMP restore failed because LocalMP cast failed\n");
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        G.LocalMPLoaded = loaded;
+        G.LocalMPLoadFinished = true;
+    }
+    return loaded;
+}
+
+bool LoadState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    std::string stateLoadDir;
+    melonDS::u32 stateLoadFrame = 0;
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        if (G.StateLoadDir.empty() || !G.StateLoadFrameSet) return false;
+        if (frame != G.StateLoadFrame || G.StateLoaded[instanceID]) return false;
+        stateLoadDir = G.StateLoadDir;
+        stateLoadFrame = G.StateLoadFrame;
+    }
+
+    const std::filesystem::path path = StatePath(stateLoadDir, instanceID);
+    std::ifstream file(path, std::ios::binary);
+    if (!file)
+    {
+        std::printf("NSMB Test: failed to open savestate for read: %ls\n", path.c_str());
+        return false;
+    }
+
+    std::vector<char> buffer(
+        (std::istreambuf_iterator<char>(file)),
+        std::istreambuf_iterator<char>());
+    if (buffer.empty())
+    {
+        std::printf("NSMB Test: savestate is empty: %ls\n", path.c_str());
+        return false;
+    }
+
+    melonDS::Savestate state(buffer.data(), static_cast<melonDS::u32>(buffer.size()), false);
+    if (state.Error || !nds->DoSavestate(&state) || state.Error)
+    {
+        std::printf("NSMB Test: failed to load savestate inst=%d frame=%u path=%ls\n",
+            instanceID,
+            stateLoadFrame,
+            path.c_str());
+        return false;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        G.StateLoaded[instanceID] = true;
+    }
+    std::printf("NSMB Test: loaded state inst=%d frame=%u path=%ls bytes=%zu\n",
+        instanceID,
+        stateLoadFrame,
+        path.c_str(),
+        buffer.size());
+    WaitForStateLoadBarrier(instanceID);
+    LoadLocalMPStateOnce(instanceID);
+    return true;
+}
+
 }
 
 bool IsEnabled()
@@ -494,6 +1152,8 @@ void InitFromEnvironment()
     G.TestEnabled = EnvFlag("MELONDS_NSML_TEST");
     G.TestFrames = static_cast<melonDS::u32>(std::max(0, EnvInt("MELONDS_NSML_TEST_FRAMES", 0)));
     G.TestInstanceCount = std::clamp(EnvInt("MELONDS_NSML_TEST_INSTANCES", 1), 1, 16);
+    G.FrameBarrierEnabled = EnvFlag("MELONDS_NSML_FRAME_BARRIER");
+    G.SerialRunEnabled = EnvFlag("MELONDS_NSML_SERIAL_RUN");
     G.HashInterval = std::max(1, EnvInt("MELONDS_NSML_HASH_INTERVAL", 60));
     G.TestWaitTimeoutMs = std::max(0, EnvInt("MELONDS_NSML_WAIT_TIMEOUT_MS", 5000));
 
@@ -506,6 +1166,43 @@ void InitFromEnvironment()
     const char* screenshotDir = std::getenv("MELONDS_NSML_SCREENSHOT_DIR");
     if (screenshotDir && screenshotDir[0]) G.ScreenshotDir = screenshotDir;
     G.ScreenshotInterval = std::max(0, EnvInt("MELONDS_NSML_SCREENSHOT_INTERVAL", 0));
+
+    const char* ramDumpDir = std::getenv("MELONDS_NSML_RAM_DUMP_DIR");
+    if (ramDumpDir && ramDumpDir[0]) G.RamDumpDir = ramDumpDir;
+    G.RamDumpInterval = std::max(0, EnvInt("MELONDS_NSML_RAM_DUMP_INTERVAL", 0));
+    if (!ParseFrameRanges(std::getenv("MELONDS_NSML_RAM_DUMP_FRAMES"), G.RamDumpRanges))
+    {
+        std::printf("NSMB Test: invalid RAM dump frame list\n");
+        G.RamDumpRanges.clear();
+    }
+
+    const char* memPatchFile = std::getenv("MELONDS_NSML_MEM_PATCH_FILE");
+    if (memPatchFile && memPatchFile[0]) G.MemPatchFile = memPatchFile;
+    const char* memPatchFrame = std::getenv("MELONDS_NSML_MEM_PATCH_FRAME");
+    if (memPatchFrame && memPatchFrame[0])
+    {
+        G.MemPatchFrame = static_cast<melonDS::u32>(std::max(0, std::atoi(memPatchFrame)));
+        G.MemPatchFrameSet = true;
+    }
+    G.MemPatchInstance = EnvInt("MELONDS_NSML_MEM_PATCH_INSTANCE", -1);
+    if (!ParseFrameRanges(std::getenv("MELONDS_NSML_MEM_PATCH_RANGES"), G.MemPatchRanges))
+    {
+        std::printf("NSMB Test: invalid memory patch range list\n");
+        G.MemPatchRanges.clear();
+    }
+
+    const char* stateSaveDir = std::getenv("MELONDS_NSML_STATE_SAVE_DIR");
+    if (stateSaveDir && stateSaveDir[0]) G.StateSaveDir = stateSaveDir;
+    G.StateSaveFrame = static_cast<melonDS::u32>(std::max(0, EnvInt("MELONDS_NSML_STATE_SAVE_FRAME", 0)));
+
+    const char* stateLoadDir = std::getenv("MELONDS_NSML_STATE_LOAD_DIR");
+    if (stateLoadDir && stateLoadDir[0]) G.StateLoadDir = stateLoadDir;
+    const char* stateLoadFrame = std::getenv("MELONDS_NSML_STATE_LOAD_FRAME");
+    if (stateLoadFrame && stateLoadFrame[0])
+    {
+        G.StateLoadFrame = static_cast<melonDS::u32>(std::max(0, std::atoi(stateLoadFrame)));
+        G.StateLoadFrameSet = true;
+    }
 
     if (G.TestEnabled)
     {
@@ -525,14 +1222,26 @@ void InitFromEnvironment()
             }
         }
 
-        std::printf("NSMB Test: enabled frames=%u instances=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d waitTimeoutMs=%d\n",
+        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d\n",
             G.TestFrames,
             G.TestInstanceCount,
+            G.FrameBarrierEnabled ? 1 : 0,
+            G.SerialRunEnabled ? 1 : 0,
             G.InputScriptPath.empty() ? "<none>" : G.InputScriptPath.c_str(),
             G.HashLogPath.empty() ? "<none>" : G.HashLogPath.c_str(),
             G.HashInterval,
             G.ScreenshotDir.empty() ? "<none>" : G.ScreenshotDir.c_str(),
             G.ScreenshotInterval,
+            G.RamDumpDir.empty() ? "<none>" : G.RamDumpDir.c_str(),
+            G.RamDumpInterval,
+            G.RamDumpRanges.size(),
+            G.MemPatchFile.empty() ? "<none>" : G.MemPatchFile.c_str(),
+            G.MemPatchFrameSet ? G.MemPatchFrame : 0,
+            G.MemPatchRanges.size(),
+            G.StateSaveDir.empty() ? "<none>" : G.StateSaveDir.c_str(),
+            G.StateSaveFrame,
+            G.StateLoadDir.empty() ? "<none>" : G.StateLoadDir.c_str(),
+            G.StateLoadFrameSet ? G.StateLoadFrame : 0,
             G.TestWaitTimeoutMs);
     }
 
@@ -594,12 +1303,21 @@ void InitFromEnvironment()
         G.LocalWaitsForRemote ? 1 : 0);
 }
 
-InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, const InputState& polledInput)
+InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, const InputState& polledInput)
 {
     InitFromEnvironment();
     melonDS::u32 inputFrame = frame;
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16)
         inputFrame = G.TestFrameCount[instanceID];
+
+    if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
+        LoadState(instanceID, inputFrame, nds);
+
+    if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyMemPatch(instanceID, inputFrame, nds);
+
+    WaitForSerialRunTurn(instanceID, inputFrame);
+    WaitAtFrameBarrier(GBeforeFrameBarrier, instanceID, inputFrame, "before");
 
     const InputState testInput = ApplyInputScript(instanceID, inputFrame, polledInput);
     const melonDS::u32 syncFrame = G.TestEnabled ? inputFrame : frame;
@@ -669,7 +1387,17 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if (G.TestEnabled)
         logFrame = ++G.TestFrameCount[instanceID];
 
+    WaitAtFrameBarrier(GAfterFrameBarrier, instanceID, logFrame, "after");
+    AdvanceSerialRunTurn(instanceID, logFrame - 1);
+
+    if (SaveState(instanceID, logFrame, nds))
+    {
+        WaitForStateSaveBarrier(instanceID);
+        SaveLocalMPState(logFrame);
+        WaitForLocalMPSaveBarrier(instanceID);
+    }
     SaveScreenshot(instanceID, logFrame, nds);
+    SaveRamDump(instanceID, logFrame, nds);
 
     if ((logFrame % static_cast<melonDS::u32>(G.HashInterval)) != 0) return;
 

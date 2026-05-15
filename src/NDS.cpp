@@ -18,6 +18,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
 #include "NDS.h"
@@ -51,6 +52,58 @@ using namespace Platform;
 
 const s32 kMaxIterationCycles = 64;
 const s32 kIterationCycleMargin = 8;
+
+bool TraceNSMLWatchWrite(NDS* nds, const char* cpu, u32 pc, u32 addr, u32 width, u32 val)
+{
+    struct WatchConfig
+    {
+        bool Checked = false;
+        bool Enabled = false;
+        u32 Addr = 0;
+        u32 Len = 4;
+        u32 StartFrame = 0;
+        u32 EndFrame = 0xFFFFFFFF;
+    };
+
+    static WatchConfig cfg;
+    if (!cfg.Checked)
+    {
+        cfg.Checked = true;
+        if (const char* watchAddr = getenv("MELONDS_NSML_WATCH_ADDR"))
+        {
+            char* end = nullptr;
+            cfg.Addr = static_cast<u32>(strtoul(watchAddr, &end, 0));
+            cfg.Enabled = end && *end == '\0';
+        }
+        if (const char* watchLen = getenv("MELONDS_NSML_WATCH_LEN"))
+            cfg.Len = static_cast<u32>(strtoul(watchLen, nullptr, 0));
+        if (cfg.Len == 0) cfg.Len = 4;
+        if (const char* startFrame = getenv("MELONDS_NSML_WATCH_START_FRAME"))
+            cfg.StartFrame = static_cast<u32>(strtoul(startFrame, nullptr, 0));
+        if (const char* endFrame = getenv("MELONDS_NSML_WATCH_END_FRAME"))
+            cfg.EndFrame = static_cast<u32>(strtoul(endFrame, nullptr, 0));
+    }
+
+    if (!cfg.Enabled || !nds) return false;
+    if (nds->NumFrames < cfg.StartFrame || nds->NumFrames > cfg.EndFrame) return false;
+
+    const u32 writeOffset = addr & nds->MainRAMMask;
+    const u32 watchOffset = cfg.Addr & nds->MainRAMMask;
+    const u32 writeEnd = writeOffset + width - 1;
+    const u32 watchEnd = watchOffset + cfg.Len - 1;
+    if (writeEnd < watchOffset || writeOffset > watchEnd) return false;
+
+    printf("NSMB Watch: nds=%p frame=%u cpu=%s pc=%08X addr=%08X offset=%06X width=%u val=%08X\n",
+        static_cast<void*>(nds),
+        nds->NumFrames,
+        cpu,
+        pc,
+        addr,
+        writeOffset,
+        width,
+        val);
+    return true;
+}
 
 // timing notes
 //
@@ -2161,6 +2214,7 @@ void NDS::ARM9Write8(u32 addr, u8 val)
     {
     case 0x02000000:
         JIT.CheckAndInvalidate<0, ARMJIT_Memory::memregion_MainRAM>(addr);
+        TraceNSMLWatchWrite(this, "ARM9", ARM9.R[15], addr, 1, val);
         *(u8*)&MainRAM[addr & MainRAMMask] = val;
         return;
 
@@ -2202,6 +2256,7 @@ void NDS::ARM9Write16(u32 addr, u16 val)
     {
     case 0x02000000:
         JIT.CheckAndInvalidate<0, ARMJIT_Memory::memregion_MainRAM>(addr);
+        TraceNSMLWatchWrite(this, "ARM9", ARM9.R[15], addr, 2, val);
         *(u16*)&MainRAM[addr & MainRAMMask] = val;
         return;
 
@@ -2262,6 +2317,7 @@ void NDS::ARM9Write32(u32 addr, u32 val)
     {
     case 0x02000000:
         JIT.CheckAndInvalidate<0, ARMJIT_Memory::memregion_MainRAM>(addr);
+        TraceNSMLWatchWrite(this, "ARM9", ARM9.R[15], addr, 4, val);
         *(u32*)&MainRAM[addr & MainRAMMask] = val;
         return ;
 
@@ -2557,6 +2613,7 @@ void NDS::ARM7Write8(u32 addr, u8 val)
     case 0x02000000:
     case 0x02800000:
         JIT.CheckAndInvalidate<1, ARMJIT_Memory::memregion_MainRAM>(addr);
+        TraceNSMLWatchWrite(this, "ARM7", ARM7.R[15], addr, 1, val);
         *(u8*)&MainRAM[addr & MainRAMMask] = val;
         return;
 
@@ -2616,6 +2673,7 @@ void NDS::ARM7Write16(u32 addr, u16 val)
     case 0x02000000:
     case 0x02800000:
         JIT.CheckAndInvalidate<1, ARMJIT_Memory::memregion_MainRAM>(addr);
+        TraceNSMLWatchWrite(this, "ARM7", ARM7.R[15], addr, 2, val);
         *(u16*)&MainRAM[addr & MainRAMMask] = val;
         return;
 
@@ -2686,6 +2744,7 @@ void NDS::ARM7Write32(u32 addr, u32 val)
     case 0x02000000:
     case 0x02800000:
         JIT.CheckAndInvalidate<1, ARMJIT_Memory::memregion_MainRAM>(addr);
+        TraceNSMLWatchWrite(this, "ARM7", ARM7.R[15], addr, 4, val);
         *(u32*)&MainRAM[addr & MainRAMMask] = val;
         return;
 

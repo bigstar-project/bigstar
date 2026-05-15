@@ -265,6 +265,7 @@ void EmuThread::run()
             inputState = NsmbNetplayPoC::BeforeRunFrame(
                 emuInstance->instanceID,
                 emuInstance->nds->NumFrames,
+                emuInstance->nds,
                 inputState);
 
             emuInstance->nds->SetKeyMask(inputState.KeyMask);

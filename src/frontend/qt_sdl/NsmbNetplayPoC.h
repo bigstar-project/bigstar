@@ -28,7 +28,7 @@ struct InputState
 
 bool IsEnabled();
 void InitFromEnvironment();
-InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, const InputState& polledInput);
+InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, const InputState& polledInput);
 void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
 bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame);
 void Shutdown();

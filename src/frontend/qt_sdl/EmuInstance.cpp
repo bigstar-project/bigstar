@@ -19,6 +19,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include <codecvt>
 #include <locale>
@@ -1205,6 +1206,21 @@ void EmuInstance::saveRTCData()
 
 void EmuInstance::setDateTime()
 {
+    if (const char* fixedRtc = getenv("MELONDS_NSML_FIXED_RTC"))
+    {
+        int year = 0;
+        int month = 0;
+        int day = 0;
+        int hour = 0;
+        int minute = 0;
+        int second = 0;
+        if (sscanf(fixedRtc, "%d-%d-%dT%d:%d:%d", &year, &month, &day, &hour, &minute, &second) == 6)
+        {
+            nds->RTC.SetDateTime(year, month, day, hour, minute, second);
+            return;
+        }
+    }
+
     QDateTime hosttime = QDateTime::currentDateTime();
     QDateTime time = hosttime.addSecs(localCfg.GetInt64("RTC.Offset"));
 
@@ -1279,6 +1295,8 @@ bool EmuInstance::updateConsole() noexcept
             jitopt.GetBool("FastMemory"),
     };
     auto jitargs = jitopt.GetBool("Enable") ? std::make_optional(_jitargs) : std::nullopt;
+    if (getenv("MELONDS_NSML_DISABLE_JIT") || getenv("MELONDS_NSML_WATCH_ADDR"))
+        jitargs = std::nullopt;
 #else
     std::optional<JITArgs> jitargs = std::nullopt;
 #endif

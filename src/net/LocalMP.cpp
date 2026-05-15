@@ -16,7 +16,10 @@
     with melonDS. If not, see http://www.gnu.org/licenses/.
 */
 
+#include <chrono>
+#include <cstdlib>
 #include <cstring>
+#include <thread>
 
 #include "LocalMP.h"
 
@@ -28,6 +31,80 @@ using Platform::LogLevel;
 
 namespace melonDS
 {
+
+namespace
+{
+
+constexpr u32 kLocalMPTestStateMagic = 0x4C4D5053; // "SPML", little endian
+constexpr u32 kLocalMPTestStateVersion = 1;
+
+struct LocalMPTestState
+{
+    u32 Magic;
+    u32 Version;
+    MPStatusData Status;
+    u32 PacketReadOffset[16];
+    u32 ReplyReadOffset[16];
+    s32 LastHostID;
+    u8 MPPacketQueue[kPacketQueueSize];
+    u8 MPReplyQueue[kReplyQueueSize];
+};
+
+struct LocalMPTestConfig
+{
+    bool Checked = false;
+    bool StrictWait = false;
+    bool LogTimeouts = false;
+    bool FixedTimestamp = false;
+    u64 TimestampValue = 0;
+    int StrictWaitTimeoutMs = 5000;
+};
+
+LocalMPTestConfig& TestConfig()
+{
+    static LocalMPTestConfig cfg;
+    if (!cfg.Checked)
+    {
+        cfg.Checked = true;
+        cfg.StrictWait = getenv("MELONDS_NSML_LOCALMP_STRICT_WAIT") != nullptr;
+        cfg.LogTimeouts = getenv("MELONDS_NSML_LOCALMP_LOG_TIMEOUTS") != nullptr;
+        if (const char* fixedTimestamp = getenv("MELONDS_NSML_LOCALMP_FIXED_TIMESTAMP"))
+        {
+            cfg.TimestampValue = strtoull(fixedTimestamp, nullptr, 0);
+            cfg.FixedTimestamp = cfg.TimestampValue != 0;
+        }
+        if (const char* timeout = getenv("MELONDS_NSML_LOCALMP_STRICT_WAIT_MS"))
+            cfg.StrictWaitTimeoutMs = atoi(timeout);
+        if (cfg.StrictWaitTimeoutMs < 0)
+            cfg.StrictWaitTimeoutMs = 0;
+    }
+    return cfg;
+}
+
+bool WaitSemaphoreForTest(Platform::Semaphore* sem, int timeoutMs, bool strictWait)
+{
+    if (!strictWait)
+        return Semaphore_TryWait(sem, timeoutMs);
+
+    const auto start = std::chrono::steady_clock::now();
+    for (;;)
+    {
+        if (Semaphore_TryWait(sem, 0))
+            return true;
+
+        if (timeoutMs > 0)
+        {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            if (elapsed >= timeoutMs)
+                return false;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+}
 
 LocalMP::LocalMP() noexcept :
     MPQueueLock(Mutex_Create())
@@ -151,6 +228,7 @@ void LocalMP::FIFOWrite(int inst, int fifo, void* buf, int len) noexcept
 
 int LocalMP::SendPacketGeneric(int inst, u32 type, u8* packet, int len, u64 timestamp) noexcept
 {
+    LocalMPTestConfig& cfg = TestConfig();
     if (len > kMaxFrameSize)
     {
         Log(LogLevel::Warn, "wifi: attempting to send frame too big (len=%d max=%d)\n", len, kMaxFrameSize);
@@ -168,7 +246,7 @@ int LocalMP::SendPacketGeneric(int inst, u32 type, u8* packet, int len, u64 time
     pktheader.SenderID = inst;
     pktheader.Type = type;
     pktheader.Length = len;
-    pktheader.Timestamp = timestamp;
+    pktheader.Timestamp = cfg.FixedTimestamp ? cfg.TimestampValue : timestamp;
 
     type &= 0xFFFF;
     int nfifo = (type == 2) ? 1 : 0;
@@ -210,10 +288,15 @@ int LocalMP::SendPacketGeneric(int inst, u32 type, u8* packet, int len, u64 time
 
 int LocalMP::RecvPacketGeneric(int inst, u8* packet, bool block, u64* timestamp) noexcept
 {
+    LocalMPTestConfig& cfg = TestConfig();
     for (;;)
     {
-        if (!Semaphore_TryWait(SemPool[inst], block ? RecvTimeout : 0))
+        const int timeout = block ? (cfg.StrictWait ? cfg.StrictWaitTimeoutMs : RecvTimeout) : 0;
+        if (!WaitSemaphoreForTest(SemPool[inst], timeout, block && cfg.StrictWait))
         {
+            if (cfg.LogTimeouts && block)
+                Log(LogLevel::Debug, "LocalMP timeout: recv host inst=%d timeout=%d strict=%d\n",
+                    inst, timeout, cfg.StrictWait ? 1 : 0);
             return 0;
         }
 
@@ -298,6 +381,7 @@ int LocalMP::RecvHostPacket(int inst, u8* packet, u64* timestamp)
 
 u16 LocalMP::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
 {
+    LocalMPTestConfig& cfg = TestConfig();
     u16 ret = 0;
     u16 myinstmask = (1 << inst);
     u16 curinstmask;
@@ -310,9 +394,18 @@ u16 LocalMP::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
 
     for (;;)
     {
-        if (!Semaphore_TryWait(SemPool[16+inst], RecvTimeout))
+        const int timeout = cfg.StrictWait ? cfg.StrictWaitTimeoutMs : RecvTimeout;
+        if (!WaitSemaphoreForTest(SemPool[16+inst], timeout, cfg.StrictWait))
         {
             // no more replies available
+            if (cfg.LogTimeouts)
+                Log(LogLevel::Debug, "LocalMP timeout: recv replies inst=%d timestamp=%016llX aidmask=%04X ret=%04X timeout=%d strict=%d\n",
+                    inst,
+                    timestamp,
+                    aidmask,
+                    ret,
+                    timeout,
+                    cfg.StrictWait ? 1 : 0);
             return ret;
         }
 
@@ -361,6 +454,61 @@ u16 LocalMP::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
 
         Mutex_Unlock(MPQueueLock);
     }
+}
+
+bool LocalMP::SnapshotForTest(std::vector<u8>& out) noexcept
+{
+    out.resize(sizeof(LocalMPTestState));
+    auto* state = reinterpret_cast<LocalMPTestState*>(out.data());
+
+    Mutex_Lock(MPQueueLock);
+    state->Magic = kLocalMPTestStateMagic;
+    state->Version = kLocalMPTestStateVersion;
+    state->Status = MPStatus;
+    memcpy(state->PacketReadOffset, PacketReadOffset, sizeof(PacketReadOffset));
+    memcpy(state->ReplyReadOffset, ReplyReadOffset, sizeof(ReplyReadOffset));
+    state->LastHostID = LastHostID;
+    memcpy(state->MPPacketQueue, MPPacketQueue, sizeof(MPPacketQueue));
+    memcpy(state->MPReplyQueue, MPReplyQueue, sizeof(MPReplyQueue));
+    Mutex_Unlock(MPQueueLock);
+
+    return true;
+}
+
+bool LocalMP::RestoreForTest(const u8* data, std::size_t len) noexcept
+{
+    if (!data || len != sizeof(LocalMPTestState))
+        return false;
+
+    const auto* state = reinterpret_cast<const LocalMPTestState*>(data);
+    if (state->Magic != kLocalMPTestStateMagic ||
+        state->Version != kLocalMPTestStateVersion)
+        return false;
+
+    Mutex_Lock(MPQueueLock);
+    MPStatus = state->Status;
+    memcpy(PacketReadOffset, state->PacketReadOffset, sizeof(PacketReadOffset));
+    memcpy(ReplyReadOffset, state->ReplyReadOffset, sizeof(ReplyReadOffset));
+    LastHostID = state->LastHostID;
+    memcpy(MPPacketQueue, state->MPPacketQueue, sizeof(MPPacketQueue));
+    memcpy(MPReplyQueue, state->MPReplyQueue, sizeof(MPReplyQueue));
+    Mutex_Unlock(MPQueueLock);
+
+    for (int i = 0; i < 32; i++)
+        Semaphore_Reset(SemPool[i]);
+
+    for (int i = 0; i < 16; i++)
+    {
+        if ((MPStatus.ConnectedBitmask & (1 << i)) &&
+            PacketReadOffset[i] != MPStatus.PacketWriteOffset)
+            Semaphore_Post(SemPool[i]);
+    }
+
+    if (MPStatus.MPHostinst < 16 &&
+        ReplyReadOffset[MPStatus.MPHostinst] != MPStatus.ReplyWriteOffset)
+        Semaphore_Post(SemPool[16 + MPStatus.MPHostinst]);
+
+    return true;
 }
 
 }
