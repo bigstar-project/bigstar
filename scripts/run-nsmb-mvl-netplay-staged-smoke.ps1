@@ -4,6 +4,9 @@ param(
     [int]$Port = 8071,
     [int]$WaitTimeoutMs = 180000,
     [string]$Seed = "0x00000100",
+    [switch]$GameStateTrace,
+    [int]$GameStateTraceInterval = 60,
+    [switch]$GameStateTraceExtended,
     [switch]$WaitForPeerAtNetplayStart,
     [switch]$NoLocalWait,
     [string]$Exe = "build\debug-windows-x86_64\melonDS.exe",
@@ -45,7 +48,10 @@ $hostHash = Join-Path $logRoot "host.hash.csv"
 $clientHash = Join-Path $logRoot "client.hash.csv"
 $hostScreens = Join-Path $logRoot "screens-host"
 $clientScreens = Join-Path $logRoot "screens-client"
+$hostGameStateTrace = Join-Path $logRoot "host.game-state.csv"
+$clientGameStateTrace = Join-Path $logRoot "client.game-state.csv"
 Remove-Item -Force $hostOut, $clientOut, $hostHash, $clientHash, "$hostOut.err", "$clientOut.err" -ErrorAction SilentlyContinue
+Remove-Item -Force $hostGameStateTrace, $clientGameStateTrace -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force $hostScreens, $clientScreens -ErrorAction SilentlyContinue
 
 function Start-MelonStagedProcess {
@@ -55,7 +61,8 @@ function Start-MelonStagedProcess {
         [string]$RoleRom,
         [string]$Stdout,
         [string]$HashLog,
-        [string]$ScreenshotDir
+        [string]$ScreenshotDir,
+        [string]$GameStateTracePath
     )
 
     $env:MELONDS_NSML_TEST = "1"
@@ -66,6 +73,19 @@ function Start-MelonStagedProcess {
     $env:MELONDS_NSML_HASH_INTERVAL = "300"
     $env:MELONDS_NSML_SCREENSHOT_DIR = $ScreenshotDir
     $env:MELONDS_NSML_SCREENSHOT_INTERVAL = "600"
+    if ($GameStateTrace) {
+        $env:MELONDS_NSML_GAME_STATE_TRACE = $GameStateTracePath
+        $env:MELONDS_NSML_GAME_STATE_TRACE_INTERVAL = "$GameStateTraceInterval"
+        if ($GameStateTraceExtended) {
+            $env:MELONDS_NSML_GAME_STATE_TRACE_EXTENDED = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_GAME_STATE_TRACE_EXTENDED -ErrorAction SilentlyContinue
+        }
+    } else {
+        Remove-Item Env:\MELONDS_NSML_GAME_STATE_TRACE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_GAME_STATE_TRACE_INTERVAL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_GAME_STATE_TRACE_EXTENDED -ErrorAction SilentlyContinue
+    }
     $env:MELONDS_NSML_WAIT_TIMEOUT_MS = "$WaitTimeoutMs"
     $env:MELONDS_NSML_SEED_WAIT_TIMEOUT_MS = "$WaitTimeoutMs"
     $env:MELONDS_NSML_QUIT_GRACE_MS = "3000"
@@ -172,13 +192,13 @@ function Complete-MelonStagedProcess {
 $hostProc = $null
 $clientProc = $null
 try {
-    $hostProc = Start-MelonStagedProcess -Role "host" -LocalInstance 0 -RoleRom $hostRom -Stdout $hostOut -HashLog $hostHash -ScreenshotDir $hostScreens
+    $hostProc = Start-MelonStagedProcess -Role "host" -LocalInstance 0 -RoleRom $hostRom -Stdout $hostOut -HashLog $hostHash -ScreenshotDir $hostScreens -GameStateTracePath $hostGameStateTrace
     if ($WaitForPeerAtNetplayStart) {
         Wait-LogPattern -Path $hostOut -Pattern "waiting for peer at netplay start" -TimeoutMs $WaitTimeoutMs
     } else {
         Wait-HashFrame -Path $hostHash -Frame $NetplayStartFrame -TimeoutMs $WaitTimeoutMs
     }
-    $clientProc = Start-MelonStagedProcess -Role "client" -LocalInstance 1 -RoleRom $clientRom -Stdout $clientOut -HashLog $clientHash -ScreenshotDir $clientScreens
+    $clientProc = Start-MelonStagedProcess -Role "client" -LocalInstance 1 -RoleRom $clientRom -Stdout $clientOut -HashLog $clientHash -ScreenshotDir $clientScreens -GameStateTracePath $clientGameStateTrace
 
     Complete-MelonStagedProcess $clientProc
     Complete-MelonStagedProcess $hostProc

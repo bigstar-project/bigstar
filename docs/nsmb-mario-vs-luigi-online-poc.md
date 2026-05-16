@@ -97,6 +97,9 @@ Local MPの完全決定性だけに賭ける方針は採らない。
 
 # staged route + netplay smoke
 .\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500 -Port 8071
+
+# staged route + netplay smoke with lightweight game-state trace
+.\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500 -Port 8071 -GameStateTrace
 ```
 
 ## 主要な環境変数
@@ -150,3 +153,7 @@ Local MPの完全決定性だけに賭ける方針は採らない。
   - player/global/candidate hashを常時出すとLocal MP到達が揺れるケースがあった。
   - 拡張traceは `MELONDS_NSML_GAME_STATE_TRACE_EXTENDED=1` の明示指定時だけ有効。
   - 軽量trace有効の固定RNG route 4200フレームは成功。
+- staged netplay smokeに `-GameStateTrace` を追加し、host/client別の軽量ゲーム状態CSVを出せるようにした。
+  - `logs\staged-netplay-game-state-trace` では5100フレーム完走。
+  - host/client間の `stageID` / `stageGroup` / `vsMode` / `localPlayerID` / `ggid` / `Net::random` は入力同期開始前後で一致。
+  - ただしスクリーンショットhashはまだ完全一致しない。次は軽量状態では見えていないplayer/actor/render stateの差分を切り分ける。
