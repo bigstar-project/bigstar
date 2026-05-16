@@ -16,6 +16,10 @@
     with melonDS. If not, see http://www.gnu.org/licenses/.
 */
 
+#include <cstdlib>
+#include <cstdint>
+#include <fstream>
+#include <mutex>
 #include <stdio.h>
 #include <string.h>
 #include "NDS.h"
@@ -37,6 +41,67 @@ using Platform::LogLevel;
 
 #define IOPORT(x) IO[(x)>>1]
 #define IOPORT8(x) ((u8*)IO)[x]
+
+namespace
+{
+struct MPReplyTraceConfig
+{
+    bool Checked = false;
+    bool Enabled = false;
+    std::ofstream File;
+    std::mutex Mutex;
+    u64 Seq = 0;
+};
+
+MPReplyTraceConfig& GetMPReplyTraceConfig()
+{
+    static MPReplyTraceConfig cfg;
+    if (!cfg.Checked)
+    {
+        cfg.Checked = true;
+        if (const char* path = std::getenv("MELONDS_NSML_WIFI_MP_REPLY_TRACE"))
+        {
+            cfg.File.open(path, std::ios::out | std::ios::trunc);
+            cfg.Enabled = cfg.File.is_open();
+            if (cfg.Enabled)
+            {
+                cfg.File << "seq,wifi,aid,clienttime,clientmask,reply1Before,reply2Before,reply2After,valid,length,duration,usedDefault,force,txBusy,cmdCounter,usCounter,usTimestamp\n";
+            }
+        }
+    }
+    return cfg;
+}
+
+void TraceMPReply(Wifi* wifi, u16 aid, u16 clienttime, u16 clientmask,
+                  u16 reply1Before, u16 reply2Before, u16 reply2After,
+                  bool valid, u32 length, u32 duration, bool usedDefault, bool force,
+                  u16 txBusy, u32 cmdCounter, u64 usCounter, u64 usTimestamp)
+{
+    auto& cfg = GetMPReplyTraceConfig();
+    if (!cfg.Enabled)
+        return;
+
+    std::lock_guard<std::mutex> lock(cfg.Mutex);
+    cfg.File << cfg.Seq++ << ','
+             << std::hex << reinterpret_cast<uintptr_t>(wifi) << std::dec << ','
+             << aid << ','
+             << clienttime << ','
+             << clientmask << ','
+             << reply1Before << ','
+             << reply2Before << ','
+             << reply2After << ','
+             << (valid ? 1 : 0) << ','
+             << length << ','
+             << duration << ','
+             << (usedDefault ? 1 : 0) << ','
+             << (force ? 1 : 0) << ','
+             << txBusy << ','
+             << cmdCounter << ','
+             << usCounter << ','
+             << usTimestamp << '\n';
+    cfg.File.flush();
+}
+}
 
 // destination MACs for MP frames
 const u8 Wifi::MPCmdMAC[6]   = {0x03, 0x09, 0xBF, 0x00, 0x00, 0x00};
@@ -830,6 +895,9 @@ void Wifi::SendMPReply(u16 clienttime, u16 clientmask)
 {
     const bool forceReplyValidForTest = getenv("MELONDS_NSML_WIFI_MP_FORCE_REPLY_VALID") != nullptr;
     TXSlot* slot = &TXSlots[5];
+    const u16 reply1Before = IOPORT(W_TXSlotReply1);
+    const u16 reply2Before = IOPORT(W_TXSlotReply2);
+    u32 duration = 0;
 
     // mark the last packet as success. dunno what the MSB is, it changes.
     //if (slot->Valid)
@@ -856,7 +924,7 @@ void Wifi::SendMPReply(u16 clienttime, u16 clientmask)
         slot->Length = *(u16*)&RAM[slot->Addr + 0xA] & 0x3FFF;
 
         // the packet is entirely ignored if it lasts longer than the maximum reply time
-        u32 duration = PreambleLen(slot->Rate) + (slot->Length * (slot->Rate==2 ? 4:8));
+        duration = PreambleLen(slot->Rate) + (slot->Length * (slot->Rate==2 ? 4:8));
         if (!forceReplyValidForTest && duration > clienttime)
             slot->Valid = false;
     }
@@ -875,6 +943,23 @@ void Wifi::SendMPReply(u16 clienttime, u16 clientmask)
 
         SendMPDefaultReply();
     }
+
+    TraceMPReply(this,
+        IOPORT(W_AIDLow),
+        clienttime,
+        clientmask,
+        reply1Before,
+        reply2Before,
+        IOPORT(W_TXSlotReply2),
+        slot->Valid,
+        slot->Length,
+        duration,
+        !slot->Valid,
+        forceReplyValidForTest,
+        IOPORT(W_TXBusy),
+        CmdCounter,
+        USCounter,
+        USTimestamp);
 
     u16 clientnum = 0;
     for (int i = 1; i < IOPORT(W_AIDLow); i++)

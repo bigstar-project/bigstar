@@ -65,6 +65,7 @@ Client PC:
   - `MELONDS_NSML_LOCALMP_TRACE=<csv>` で `send` / `recv` / `replies` の順序、timestamp、packet長、packet本文hashを出力する。
   - 最初の差分は、同じpacketをinst0/inst1のどちらが先に読むかの順序差として現れ、その後inst1のMP replyが40バイトdefault replyになるか42バイト実replyになるかで分岐する。
   - `Wifi::SendMPDefaultReply()` / `Wifi::SendMPAck()` のローカルpacket配列に未初期化バイトが混ざる問題を修正した。ただしこれだけでは通常routeの完全決定性はまだ達成できていない。
+  - `MELONDS_NSML_WIFI_MP_REPLY_TRACE=<csv>` で `Wifi::SendMPReply()` のreply slot状態を出力できるようにした。比較結果では、同じタイミングで `W_TXSlotReply1` がreadyになっている実行とreadyでない実行に分岐しており、default reply/実replyの揺れはWi-Fi reply slot準備タイミングの非決定性として追う方針。
   - `MELONDS_NSML_WIFI_MP_FORCE_REPLY_VALID=1` でreply時間超過判定を無視する実験は、handshakeを崩すケースがあるため現時点では採用しない。
 
 ## 現在のブロッカー
@@ -73,7 +74,8 @@ Client PC:
    - 同一PC、同一ROM/save、同一入力、固定RTC、JIT無効、同一seedでも、通常routeのRAM hashが実行ごとに一致しない。
    - この状態ではWAN入力同期を入れても最終的にdesyncする。
    - Local MP trace上では、inst1のMP replyがdefault reply/実replyのどちらになるかが実行ごとに揺れている。
-   - 次は2つの `EmuInstance` の実行順、Local MP packet/reply処理、Wi-Fi reply slot timingをさらに固定する必要がある。
+   - `Wifi::SendMPReply()` trace上では、`W_TXSlotReply1` のready状態が実行ごとにずれている。
+   - 次は `W_TXSlotReply1` / `W_TXSlotReply2` の書き込みとclearのタイミングをtraceし、2つの `EmuInstance` の実行順、Local MP packet/reply処理、Wi-Fi reply slot timingをさらに固定する必要がある。
 
 2. **savestate復元後のLocal MP通信切断**
    - `inst0.mln`、`inst1.mln`、`localmp.bin` は保存/ロードできる。
@@ -193,6 +195,7 @@ Client PC:
 - `MELONDS_NSML_LOCALMP_STRICT_WAIT=1`: Local MP受信待ちをテスト用に厳密化。
 - `MELONDS_NSML_LOCALMP_FIXED_TIMESTAMP`: Local MP packet timestampを固定する。現時点ではこれだけでは通常routeの非決定性は解消しない。
 - `MELONDS_NSML_LOCALMP_TRACE`: Local MP packet送受信順序とpacket本文hashをCSV出力する。
+- `MELONDS_NSML_WIFI_MP_REPLY_TRACE`: `Wifi::SendMPReply()` 時点のreply slot状態をCSV出力する。
 - `MELONDS_NSML_WIFI_MP_FORCE_REPLY_VALID=1`: reply slotの時間超過判定を無視する実験用。現時点ではhandshakeを崩すケースがあるため常用しない。
 
 ## ユーザー依存
