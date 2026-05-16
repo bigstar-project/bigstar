@@ -120,11 +120,17 @@ struct WireGameState
     melonDS::u32 NetRandomValue;
     melonDS::u32 NetRandomCallCount;
     melonDS::u32 NetRandomBranchAddress;
-    melonDS::u32 StateHashLo;
-    melonDS::u32 StateHashHi;
+    melonDS::u32 BasicHashLo;
+    melonDS::u32 BasicHashHi;
+    melonDS::u32 PlayerGlobalHashLo;
+    melonDS::u32 PlayerGlobalHashHi;
+    melonDS::u32 ActorCandidateHashLo;
+    melonDS::u32 ActorCandidateHashHi;
+    melonDS::u32 RenderCandidateHashLo;
+    melonDS::u32 RenderCandidateHashHi;
 };
 
-static_assert(sizeof(WireGameState) == 60);
+static_assert(sizeof(WireGameState) == 84);
 
 struct GameStateSample
 {
@@ -137,6 +143,14 @@ struct GameStateSample
     melonDS::u32 NetRandomCallCount = 0;
     melonDS::u32 NetRandomBranchAddress = 0;
     melonDS::u64 Hash = 0;
+};
+
+struct GameStateSyncHashes
+{
+    melonDS::u64 Basic = 0;
+    melonDS::u64 PlayerGlobal = 0;
+    melonDS::u64 ActorCandidate = 0;
+    melonDS::u64 RenderCandidate = 0;
 };
 
 struct State
@@ -167,6 +181,7 @@ struct State
     bool ScreenHashEnabled = false;
     bool GameStateTraceExtended = false;
     bool GameStateSyncEnabled = false;
+    bool GameStateSyncExtended = false;
     int GameStateSyncInterval = 60;
     int SeedWaitTimeoutMs = 10000;
     bool WaitForPeerBeforeStart = false;
@@ -211,8 +226,8 @@ struct State
     bool ENetInitialized = false;
     std::map<melonDS::u32, InputState> LocalInputs;
     std::map<melonDS::u32, InputState> RemoteInputs;
-    std::map<melonDS::u64, melonDS::u64> LocalGameStateHashes;
-    std::map<melonDS::u64, melonDS::u64> RemoteGameStateHashes;
+    std::map<melonDS::u64, GameStateSyncHashes> LocalGameStateHashes;
+    std::map<melonDS::u64, GameStateSyncHashes> RemoteGameStateHashes;
     bool GameStateMismatchSeen = false;
     melonDS::u32 LastTracedSentInputFrame = kNoFrameLimit;
     melonDS::u32 LastTracedReceivedInputFrame = kNoFrameLimit;
@@ -481,9 +496,20 @@ bool ParseFrameRanges(const char* value, std::vector<std::pair<melonDS::u32, mel
     return true;
 }
 
+void MixGameStateValue(melonDS::u64& hash, melonDS::u64 value);
+
 melonDS::u64 GameStateKey(int instanceID, melonDS::u32 frame)
 {
     return (static_cast<melonDS::u64>(static_cast<melonDS::u32>(instanceID)) << 32) | frame;
+}
+
+melonDS::u64 CombinedGameStateHash(const GameStateSyncHashes& hashes)
+{
+    melonDS::u64 combined = hashes.Basic;
+    MixGameStateValue(combined, hashes.PlayerGlobal);
+    MixGameStateValue(combined, hashes.ActorCandidate);
+    MixGameStateValue(combined, hashes.RenderCandidate);
+    return combined;
 }
 
 void CompareGameStateLocked(int instanceID, melonDS::u32 frame)
@@ -493,15 +519,34 @@ void CompareGameStateLocked(int instanceID, melonDS::u32 frame)
     auto remote = G.RemoteGameStateHashes.find(key);
     if (local == G.LocalGameStateHashes.end() || remote == G.RemoteGameStateHashes.end())
         return;
-    if (local->second == remote->second)
+    const GameStateSyncHashes& lhs = local->second;
+    const GameStateSyncHashes& rhs = remote->second;
+    if (lhs.Basic == rhs.Basic
+        && lhs.PlayerGlobal == rhs.PlayerGlobal
+        && lhs.ActorCandidate == rhs.ActorCandidate
+        && lhs.RenderCandidate == rhs.RenderCandidate)
         return;
 
     G.GameStateMismatchSeen = true;
-    std::printf("NSMB PoC: game state mismatch inst=%d frame=%u local=%016llX remote=%016llX\n",
+    std::printf("NSMB PoC: game state mismatch inst=%d frame=%u local=%016llX remote=%016llX basic=%d playerGlobal=%d actorCandidate=%d renderCandidate=%d\n",
         instanceID,
         frame,
-        static_cast<unsigned long long>(local->second),
-        static_cast<unsigned long long>(remote->second));
+        static_cast<unsigned long long>(CombinedGameStateHash(lhs)),
+        static_cast<unsigned long long>(CombinedGameStateHash(rhs)),
+        lhs.Basic == rhs.Basic ? 1 : 0,
+        lhs.PlayerGlobal == rhs.PlayerGlobal ? 1 : 0,
+        lhs.ActorCandidate == rhs.ActorCandidate ? 1 : 0,
+        lhs.RenderCandidate == rhs.RenderCandidate ? 1 : 0);
+    std::printf("NSMB PoC: game state components local basic=%016llX playerGlobal=%016llX actorCandidate=%016llX renderCandidate=%016llX\n",
+        static_cast<unsigned long long>(lhs.Basic),
+        static_cast<unsigned long long>(lhs.PlayerGlobal),
+        static_cast<unsigned long long>(lhs.ActorCandidate),
+        static_cast<unsigned long long>(lhs.RenderCandidate));
+    std::printf("NSMB PoC: game state components remote basic=%016llX playerGlobal=%016llX actorCandidate=%016llX renderCandidate=%016llX\n",
+        static_cast<unsigned long long>(rhs.Basic),
+        static_cast<unsigned long long>(rhs.PlayerGlobal),
+        static_cast<unsigned long long>(rhs.ActorCandidate),
+        static_cast<unsigned long long>(rhs.RenderCandidate));
 }
 
 InputState ApplyInputScript(int instanceID, melonDS::u32 frame, const InputState& fallback)
@@ -581,8 +626,12 @@ void PumpNetworkLocked()
                 std::memcpy(&packet, event.packet->data, sizeof(packet));
                 if (packet.Magic == kMagic && packet.Version == kVersion && packet.Kind == kWireKindState)
                 {
-                    const melonDS::u64 hash = (static_cast<melonDS::u64>(packet.StateHashHi) << 32) | packet.StateHashLo;
-                    G.RemoteGameStateHashes[GameStateKey(static_cast<int>(packet.Instance), packet.Frame)] = hash;
+                    GameStateSyncHashes hashes;
+                    hashes.Basic = (static_cast<melonDS::u64>(packet.BasicHashHi) << 32) | packet.BasicHashLo;
+                    hashes.PlayerGlobal = (static_cast<melonDS::u64>(packet.PlayerGlobalHashHi) << 32) | packet.PlayerGlobalHashLo;
+                    hashes.ActorCandidate = (static_cast<melonDS::u64>(packet.ActorCandidateHashHi) << 32) | packet.ActorCandidateHashLo;
+                    hashes.RenderCandidate = (static_cast<melonDS::u64>(packet.RenderCandidateHashHi) << 32) | packet.RenderCandidateHashLo;
+                    G.RemoteGameStateHashes[GameStateKey(static_cast<int>(packet.Instance), packet.Frame)] = hashes;
                     CompareGameStateLocked(static_cast<int>(packet.Instance), packet.Frame);
                 }
             }
@@ -1054,6 +1103,12 @@ void MixGameStateValue(melonDS::u64& hash, melonDS::u32 value)
     }
 }
 
+void MixGameStateValue(melonDS::u64& hash, melonDS::u64 value)
+{
+    MixGameStateValue(hash, static_cast<melonDS::u32>(value & 0xFFFFFFFFu));
+    MixGameStateValue(hash, static_cast<melonDS::u32>(value >> 32));
+}
+
 GameStateSample ReadGameStateSample(melonDS::NDS* nds)
 {
     GameStateSample sample;
@@ -1327,11 +1382,20 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if ((frame % static_cast<melonDS::u32>(G.GameStateSyncInterval)) != 0) return;
 
     const GameStateSample sample = ReadGameStateSample(nds);
+    GameStateSyncHashes hashes;
+    hashes.Basic = sample.Hash;
+    if (G.GameStateSyncExtended)
+    {
+        hashes.PlayerGlobal = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, 0xC0);
+        hashes.ActorCandidate = HashMainRAMRange(nds, kGameCandidateActorBlockAddr, 0x2200);
+        hashes.RenderCandidate = HashMainRAMRange(nds, kGameCandidateRenderBlockAddr, 0x240);
+    }
+
     std::lock_guard<std::mutex> lock(G.Mutex);
     if (G.LastSentGameStateFrame[instanceID] == frame) return;
     G.LastSentGameStateFrame[instanceID] = frame;
 
-    G.LocalGameStateHashes[GameStateKey(instanceID, frame)] = sample.Hash;
+    G.LocalGameStateHashes[GameStateKey(instanceID, frame)] = hashes;
     CompareGameStateLocked(instanceID, frame);
 
     if (!G.Peer) return;
@@ -1350,8 +1414,14 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     packet.NetRandomValue = sample.NetRandomValue;
     packet.NetRandomCallCount = sample.NetRandomCallCount;
     packet.NetRandomBranchAddress = sample.NetRandomBranchAddress;
-    packet.StateHashLo = static_cast<melonDS::u32>(sample.Hash & 0xFFFFFFFFu);
-    packet.StateHashHi = static_cast<melonDS::u32>(sample.Hash >> 32);
+    packet.BasicHashLo = static_cast<melonDS::u32>(hashes.Basic & 0xFFFFFFFFu);
+    packet.BasicHashHi = static_cast<melonDS::u32>(hashes.Basic >> 32);
+    packet.PlayerGlobalHashLo = static_cast<melonDS::u32>(hashes.PlayerGlobal & 0xFFFFFFFFu);
+    packet.PlayerGlobalHashHi = static_cast<melonDS::u32>(hashes.PlayerGlobal >> 32);
+    packet.ActorCandidateHashLo = static_cast<melonDS::u32>(hashes.ActorCandidate & 0xFFFFFFFFu);
+    packet.ActorCandidateHashHi = static_cast<melonDS::u32>(hashes.ActorCandidate >> 32);
+    packet.RenderCandidateHashLo = static_cast<melonDS::u32>(hashes.RenderCandidate & 0xFFFFFFFFu);
+    packet.RenderCandidateHashHi = static_cast<melonDS::u32>(hashes.RenderCandidate >> 32);
 
     ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE);
     if (enetPacket)
@@ -1715,6 +1785,7 @@ void InitFromEnvironment()
     G.GameStateTraceInterval = std::max(1, EnvInt("MELONDS_NSML_GAME_STATE_TRACE_INTERVAL", 60));
     G.GameStateTraceExtended = EnvFlag("MELONDS_NSML_GAME_STATE_TRACE_EXTENDED");
     G.GameStateSyncEnabled = EnvFlag("MELONDS_NSML_STATE_SYNC");
+    G.GameStateSyncExtended = EnvFlag("MELONDS_NSML_STATE_SYNC_EXTENDED");
     G.GameStateSyncInterval = std::max(1, EnvInt("MELONDS_NSML_STATE_SYNC_INTERVAL", 60));
 
     const char* memPatchFile = std::getenv("MELONDS_NSML_MEM_PATCH_FILE");
