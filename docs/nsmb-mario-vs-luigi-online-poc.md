@@ -139,3 +139,5 @@ Local MPの完全決定性だけに賭ける方針は採らない。
   - `applocal.ps1` が `dumpbin` / `llvm-objdump` / `objdump` 不在警告を出すが、実行ファイルのリンク自体は成功している。
 - `MELONDS_NSML_GAME_STATE_TRACE` を有効にして `.\scripts\run-nsmb-mvl-route-smoke.ps1 -Frames 600` が成功。
   - `logs\game-state-trace-smoke\game-state.csv` に両インスタンスのゲーム状態traceが出力された。
+- trace無効時はゲーム状態読み取り自体を行わないようにした。Local MPルートへの不要なタイミング影響を避けるため。
+- 現在のDebugビルドでは `run-nsmb-mvl-route-smoke.ps1 -Frames 1800` が1500フレーム付近でアクセス違反終了する。trace有効/無効の両方で再現するため、ゲーム状態trace追加そのものとは別の既存不安定要素として扱う。

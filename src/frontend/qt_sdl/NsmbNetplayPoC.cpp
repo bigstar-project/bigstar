@@ -1112,6 +1112,7 @@ void ApplyNetRandomPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
 void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
+    if (G.GameStateTracePath.empty()) return;
     if (!nds || !nds->MainRAM) return;
     if (instanceID < 0 || instanceID >= 16) return;
     if ((frame % static_cast<melonDS::u32>(G.GameStateTraceInterval)) != 0) return;
