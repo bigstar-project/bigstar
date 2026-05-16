@@ -61,13 +61,19 @@ Client PC:
   - 固定RTC、JIT無効、`0x00000100` seed注入でも1500フレーム以降で差分が出る。
   - `MELONDS_NSML_LOCALMP_FIXED_TIMESTAMP` だけでは解消しない。
   - 現在の主ブロッカーはWAN入力同期ではなく、1プロセス内2インスタンスLocal MPルート自体の決定性不足。
+- Local MP traceを追加し、送信packet列の差分を追えるようにした。
+  - `MELONDS_NSML_LOCALMP_TRACE=<csv>` で `send` / `recv` / `replies` の順序、timestamp、packet長、packet本文hashを出力する。
+  - 最初の差分は、同じpacketをinst0/inst1のどちらが先に読むかの順序差として現れ、その後inst1のMP replyが40バイトdefault replyになるか42バイト実replyになるかで分岐する。
+  - `Wifi::SendMPDefaultReply()` / `Wifi::SendMPAck()` のローカルpacket配列に未初期化バイトが混ざる問題を修正した。ただしこれだけでは通常routeの完全決定性はまだ達成できていない。
+  - `MELONDS_NSML_WIFI_MP_FORCE_REPLY_VALID=1` でreply時間超過判定を無視する実験は、handshakeを崩すケースがあるため現時点では採用しない。
 
 ## 現在のブロッカー
 
 1. **Local MPルート自体の非決定性**
    - 同一PC、同一ROM/save、同一入力、固定RTC、JIT無効、同一seedでも、通常routeのRAM hashが実行ごとに一致しない。
    - この状態ではWAN入力同期を入れても最終的にdesyncする。
-   - 次は2つの `EmuInstance` の実行順、Local MP packet/reply処理、Wi-Fi timestamp/timeoutをさらに固定する必要がある。
+   - Local MP trace上では、inst1のMP replyがdefault reply/実replyのどちらになるかが実行ごとに揺れている。
+   - 次は2つの `EmuInstance` の実行順、Local MP packet/reply処理、Wi-Fi reply slot timingをさらに固定する必要がある。
 
 2. **savestate復元後のLocal MP通信切断**
    - `inst0.mln`、`inst1.mln`、`localmp.bin` は保存/ロードできる。
@@ -88,7 +94,7 @@ Client PC:
 1. 通常route単体の決定性を固める。
    - 同一条件で `run-nsmb-mvl-route-smoke.ps1` を2回走らせ、RAM hashと主要スクリーンショットが一致する状態を目標にする。
    - `SERIAL_RUN` は現状かなり遅いので、全フレーム逐次実行ではなく、Local MP送受信タイミングだけを安定化できないか見る。
-   - Local MPの `RecvReplies` / `RecvHostPacket` のtimeout、packet timestamp、host/client packet順を重点的に追う。
+   - Local MPの `RecvReplies` / `RecvHostPacket` のtimeout、packet timestamp、host/client packet順、`Wifi::SendMPReply()` のdefault reply分岐を重点的に追う。
 2. 通常routeが一致したら、staged netplay smokeでhost/clientの4800/5100フレームを一致させる。
 3. host/clientの終了合意を追加する。
    - 片側だけがframe limitへ到達してpeer disconnectし、もう片側がremote input timeoutになる状態をなくす。
@@ -186,6 +192,8 @@ Client PC:
 - `MELONDS_NSML_DISABLE_JIT=1`: JIT無効化。
 - `MELONDS_NSML_LOCALMP_STRICT_WAIT=1`: Local MP受信待ちをテスト用に厳密化。
 - `MELONDS_NSML_LOCALMP_FIXED_TIMESTAMP`: Local MP packet timestampを固定する。現時点ではこれだけでは通常routeの非決定性は解消しない。
+- `MELONDS_NSML_LOCALMP_TRACE`: Local MP packet送受信順序とpacket本文hashをCSV出力する。
+- `MELONDS_NSML_WIFI_MP_FORCE_REPLY_VALID=1`: reply slotの時間超過判定を無視する実験用。現時点ではhandshakeを崩すケースがあるため常用しない。
 
 ## ユーザー依存
 

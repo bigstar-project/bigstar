@@ -795,7 +795,7 @@ void Wifi::FireTX()
 
 void Wifi::SendMPDefaultReply()
 {
-    u8 reply[12 + 28];
+    u8 reply[12 + 28] {};
 
     *(u16*)&reply[0xA] = 28; // length
 
@@ -828,6 +828,7 @@ void Wifi::SendMPDefaultReply()
 
 void Wifi::SendMPReply(u16 clienttime, u16 clientmask)
 {
+    const bool forceReplyValidForTest = getenv("MELONDS_NSML_WIFI_MP_FORCE_REPLY_VALID") != nullptr;
     TXSlot* slot = &TXSlots[5];
 
     // mark the last packet as success. dunno what the MSB is, it changes.
@@ -856,7 +857,7 @@ void Wifi::SendMPReply(u16 clienttime, u16 clientmask)
 
         // the packet is entirely ignored if it lasts longer than the maximum reply time
         u32 duration = PreambleLen(slot->Rate) + (slot->Length * (slot->Rate==2 ? 4:8));
-        if (duration > clienttime)
+        if (!forceReplyValidForTest && duration > clienttime)
             slot->Valid = false;
     }
 
@@ -889,7 +890,7 @@ void Wifi::SendMPReply(u16 clienttime, u16 clientmask)
 
 void Wifi::SendMPAck(u16 cmdcount, u16 clientfail)
 {
-    u8 ack[12 + 32];
+    u8 ack[12 + 32] {};
 
     *(u16*)&ack[0xA] = 32; // length
 

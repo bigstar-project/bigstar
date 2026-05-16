@@ -19,6 +19,9 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <mutex>
+#include <string>
 #include <thread>
 
 #include "LocalMP.h"
@@ -56,8 +59,14 @@ struct LocalMPTestConfig
     bool StrictWait = false;
     bool LogTimeouts = false;
     bool FixedTimestamp = false;
+    bool NormalizeAckTiming = false;
     u64 TimestampValue = 0;
     int StrictWaitTimeoutMs = 5000;
+    bool TraceEnabled = false;
+    std::string TracePath;
+    std::ofstream Trace;
+    std::mutex TraceMutex;
+    u64 TraceSeq = 0;
 };
 
 LocalMPTestConfig& TestConfig()
@@ -68,6 +77,7 @@ LocalMPTestConfig& TestConfig()
         cfg.Checked = true;
         cfg.StrictWait = getenv("MELONDS_NSML_LOCALMP_STRICT_WAIT") != nullptr;
         cfg.LogTimeouts = getenv("MELONDS_NSML_LOCALMP_LOG_TIMEOUTS") != nullptr;
+        cfg.NormalizeAckTiming = getenv("MELONDS_NSML_LOCALMP_NORMALIZE_ACK_TIMING") != nullptr;
         if (const char* fixedTimestamp = getenv("MELONDS_NSML_LOCALMP_FIXED_TIMESTAMP"))
         {
             cfg.TimestampValue = strtoull(fixedTimestamp, nullptr, 0);
@@ -77,8 +87,53 @@ LocalMPTestConfig& TestConfig()
             cfg.StrictWaitTimeoutMs = atoi(timeout);
         if (cfg.StrictWaitTimeoutMs < 0)
             cfg.StrictWaitTimeoutMs = 0;
+        if (const char* tracePath = getenv("MELONDS_NSML_LOCALMP_TRACE"))
+        {
+            cfg.TracePath = tracePath;
+            cfg.Trace.open(cfg.TracePath, std::ios::out | std::ios::trunc);
+            cfg.TraceEnabled = cfg.Trace.is_open();
+            if (cfg.TraceEnabled)
+                cfg.Trace << "seq,event,inst,type,len,timestamp,ret,aidmask,dataHash,packetRead,replyRead,packetWrite,replyWrite,connected,lastHost\n";
+        }
     }
     return cfg;
+}
+
+void TraceLocalMP(LocalMPTestConfig& cfg, const char* event, int inst, u32 type, int len,
+                  u64 timestamp, u16 ret, u16 aidmask, u64 dataHash, const MPStatusData& status,
+                  const u32* packetReadOffset, const u32* replyReadOffset, int lastHost)
+{
+    if (!cfg.TraceEnabled)
+        return;
+
+    std::lock_guard<std::mutex> lock(cfg.TraceMutex);
+    cfg.Trace << cfg.TraceSeq++ << ','
+              << event << ','
+              << inst << ','
+              << type << ','
+              << len << ','
+              << timestamp << ','
+              << ret << ','
+              << aidmask << ','
+              << std::hex << dataHash << std::dec << ','
+              << packetReadOffset[inst] << ','
+              << replyReadOffset[inst] << ','
+              << status.PacketWriteOffset << ','
+              << status.ReplyWriteOffset << ','
+              << status.ConnectedBitmask << ','
+              << lastHost << '\n';
+    cfg.Trace.flush();
+}
+
+u64 HashBytes(const u8* data, int len)
+{
+    u64 hash = 1469598103934665603ull;
+    for (int i = 0; i < len; i++)
+    {
+        hash ^= data[i];
+        hash *= 1099511628211ull;
+    }
+    return hash;
 }
 
 bool WaitSemaphoreForTest(Platform::Semaphore* sem, int timeoutMs, bool strictWait)
@@ -241,6 +296,18 @@ int LocalMP::SendPacketGeneric(int inst, u32 type, u8* packet, int len, u64 time
 
     // TODO: check if the FIFO is full!
 
+    type &= 0xFFFF;
+    if (cfg.NormalizeAckTiming && type == 3 && len >= 4)
+    {
+        *(u32*)&packet[0] = 0;
+        if (len >= 0xC + 0x1C)
+        {
+            *(u16*)&packet[0xC + 0x16] = 0;
+            *(u16*)&packet[0xC + 0x18] = 0;
+            *(u16*)&packet[0xC + 0x1A] = 0;
+        }
+    }
+
     MPPacketHeader pktheader;
     pktheader.Magic = 0x4946494E;
     pktheader.SenderID = inst;
@@ -248,7 +315,6 @@ int LocalMP::SendPacketGeneric(int inst, u32 type, u8* packet, int len, u64 time
     pktheader.Length = len;
     pktheader.Timestamp = cfg.FixedTimestamp ? cfg.TimestampValue : timestamp;
 
-    type &= 0xFFFF;
     int nfifo = (type == 2) ? 1 : 0;
     FIFOWrite(inst, nfifo, &pktheader, sizeof(pktheader));
     if (len)
@@ -267,6 +333,10 @@ int LocalMP::SendPacketGeneric(int inst, u32 type, u8* packet, int len, u64 time
     {
         MPStatus.MPReplyBitmask |= (1 << inst);
     }
+
+    TraceLocalMP(cfg, "send", inst, type, len, pktheader.Timestamp, MPStatus.MPReplyBitmask, 0,
+        HashBytes(packet, len),
+        MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
 
     Mutex_Unlock(MPQueueLock);
 
@@ -321,6 +391,9 @@ int LocalMP::RecvPacketGeneric(int inst, u8* packet, bool block, u64* timestamp)
             if (PacketReadOffset[inst] >= kPacketQueueSize)
                 PacketReadOffset[inst] -= kPacketQueueSize;
 
+            TraceLocalMP(cfg, "recv-skip-self", inst, pktheader.Type, pktheader.Length,
+                pktheader.Timestamp, 0, 0, 0, MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
+
             Mutex_Unlock(MPQueueLock);
             continue;
         }
@@ -334,6 +407,9 @@ int LocalMP::RecvPacketGeneric(int inst, u8* packet, bool block, u64* timestamp)
         }
 
         if (timestamp) *timestamp = pktheader.Timestamp;
+        TraceLocalMP(cfg, "recv", inst, pktheader.Type, pktheader.Length, pktheader.Timestamp,
+            0, 0, pktheader.Length ? HashBytes(packet, pktheader.Length) : 0,
+            MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
         Mutex_Unlock(MPQueueLock);
         return pktheader.Length;
     }
@@ -431,6 +507,9 @@ u16 LocalMP::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
             if (ReplyReadOffset[inst] >= kReplyQueueSize)
                 ReplyReadOffset[inst] -= kReplyQueueSize;
 
+            TraceLocalMP(cfg, "reply-skip", inst, pktheader.Type, pktheader.Length,
+                pktheader.Timestamp, ret, aidmask, 0, MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
+
             Mutex_Unlock(MPQueueLock);
             continue;
         }
@@ -448,9 +527,19 @@ u16 LocalMP::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
         {
             // all the clients have sent their reply
 
+            TraceLocalMP(cfg, "replies", inst, pktheader.Type, pktheader.Length,
+                pktheader.Timestamp, ret, aidmask,
+                pktheader.Length ? HashBytes(&packets[((pktheader.Type >> 16)-1)*1024], pktheader.Length) : 0,
+                MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
+
             Mutex_Unlock(MPQueueLock);
             return ret;
         }
+
+        TraceLocalMP(cfg, "reply-partial", inst, pktheader.Type, pktheader.Length,
+            pktheader.Timestamp, ret, aidmask,
+            pktheader.Length ? HashBytes(&packets[((pktheader.Type >> 16)-1)*1024], pktheader.Length) : 0,
+            MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
 
         Mutex_Unlock(MPQueueLock);
     }
