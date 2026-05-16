@@ -7,6 +7,8 @@ param(
     [switch]$GameStateTrace,
     [int]$GameStateTraceInterval = 60,
     [switch]$GameStateTraceExtended,
+    [switch]$StateSync,
+    [int]$StateSyncInterval = 60,
     [switch]$WaitForPeerAtNetplayStart,
     [switch]$NoLocalWait,
     [string]$Exe = "build\debug-windows-x86_64\melonDS.exe",
@@ -85,6 +87,13 @@ function Start-MelonStagedProcess {
         Remove-Item Env:\MELONDS_NSML_GAME_STATE_TRACE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_GAME_STATE_TRACE_INTERVAL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_GAME_STATE_TRACE_EXTENDED -ErrorAction SilentlyContinue
+    }
+    if ($StateSync) {
+        $env:MELONDS_NSML_STATE_SYNC = "1"
+        $env:MELONDS_NSML_STATE_SYNC_INTERVAL = "$StateSyncInterval"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_STATE_SYNC -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_STATE_SYNC_INTERVAL -ErrorAction SilentlyContinue
     }
     $env:MELONDS_NSML_WAIT_TIMEOUT_MS = "$WaitTimeoutMs"
     $env:MELONDS_NSML_SEED_WAIT_TIMEOUT_MS = "$WaitTimeoutMs"
@@ -227,6 +236,10 @@ foreach ($item in @(
 
 if (Select-String -Path $hostOut, $clientOut -Pattern "remote input timeout" -Quiet) {
     throw "remote input timeout was reported. See $logRoot"
+}
+
+if (Select-String -Path $hostOut, $clientOut -Pattern "game state mismatch" -Quiet) {
+    throw "game state mismatch was reported. See $logRoot"
 }
 
 Write-Host "NSMB Mario vs Luigi staged netplay smoke passed: frames=$Frames start=$NetplayStartFrame seed=$Seed"

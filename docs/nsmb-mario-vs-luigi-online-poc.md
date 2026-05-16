@@ -120,6 +120,8 @@ Local MPの完全決定性だけに賭ける方針は採らない。
 - `MELONDS_NSML_GAME_STATE_TRACE`: `stageID` / `stageGroup` / `vsMode` / `ggid` / `Net::random` 状態をCSV出力。
 - `MELONDS_NSML_GAME_STATE_TRACE_INTERVAL`: ゲーム状態traceの出力間隔。デフォルトは60フレーム。
 - `MELONDS_NSML_GAME_STATE_TRACE_EXTENDED=1`: player系グローバルと候補領域hashもCSV出力。重いので差分調査時だけ使う。
+- `MELONDS_NSML_STATE_SYNC=1`: netplay中に軽量ゲーム状態hashを相互送信し、mismatchをログに出す。
+- `MELONDS_NSML_STATE_SYNC_INTERVAL`: 状態hash送信間隔。デフォルトは60フレーム。
 - `MELONDS_NSML_HASH_LOG`: RAM hash CSV。
 - `MELONDS_NSML_SCREEN_HASH=1`: hash CSVへframebuffer hashを追加。負荷でタイミングが変わる可能性があるため必要時のみ使う。
 - `MELONDS_NSML_RAM_DUMP_DIR`: MainRAM dump出力先。
@@ -157,3 +159,6 @@ Local MPの完全決定性だけに賭ける方針は採らない。
   - `logs\staged-netplay-game-state-trace` では5100フレーム完走。
   - host/client間の `stageID` / `stageGroup` / `vsMode` / `localPlayerID` / `ggid` / `Net::random` は入力同期開始前後で一致。
   - ただしスクリーンショットhashはまだ完全一致しない。次は軽量状態では見えていないplayer/actor/render stateの差分を切り分ける。
+- `MELONDS_NSML_STATE_SYNC=1` を追加し、netplay中に軽量ゲーム状態hashを相互送信できるようにした。
+  - `logs\staged-netplay-state-sync-built` では `-GameStateTrace -StateSync` 付き5100フレームstaged smokeが成功。
+  - 軽量状態hash mismatchは出ていない。
