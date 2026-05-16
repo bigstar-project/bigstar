@@ -1470,7 +1470,9 @@ void ApplyVsStarSnap(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if (G.VsStarSnapApplied[instanceID]) return;
     if (!nds || !nds->MainRAM) return;
 
-    const ObjectScanSample star = FindVsBattleStarCandidate(nds);
+    ObjectScanSample star = FindObjectByIDAndSettings(nds, kVsBattleStarActorObjectID, kVsBattleStarActorSettings);
+    if (!star.Found)
+        star = FindVsBattleStarCandidate(nds);
     const PlayerActorScanSample players = FindPlayerActors(nds);
     const ObjectScanSample& player = (G.VsStarSnapPlayerSlot == 1) ? players.Actor1 : players.Actor0;
     if (!star.Found || !player.Found)
@@ -1509,7 +1511,9 @@ void ApplyPlayerSnapToStar(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
     if (G.PlayerSnapToStarApplied[instanceID]) return;
     if (!nds || !nds->MainRAM) return;
 
-    const ObjectScanSample star = FindVsBattleStarCandidate(nds);
+    ObjectScanSample star = FindObjectByIDAndSettings(nds, kVsBattleStarActorObjectID, kVsBattleStarActorSettings);
+    if (!star.Found)
+        star = FindVsBattleStarCandidate(nds);
     const PlayerActorScanSample players = FindPlayerActors(nds);
     const ObjectScanSample& player = (G.PlayerSnapToStarSlot == 1) ? players.Actor1 : players.Actor0;
     if (!star.Found || !player.Found)
@@ -1526,7 +1530,7 @@ void ApplyPlayerSnapToStar(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
     const melonDS::u32 playerOffset = player.Base - kMainRAMBase;
     WriteMainRAMU32(nds, playerOffset + 0x5C, star.PosX);
     WriteMainRAMU32(nds, playerOffset + 0x60, star.PosY);
-    WriteMainRAMU32(nds, playerOffset + 0x64, player.PosZ);
+    WriteMainRAMU32(nds, playerOffset + 0x64, star.PosZ);
     G.PlayerSnapToStarApplied[instanceID] = true;
 
     std::printf("NSMB Test: snapped player to VS star inst=%d frame=%u slot=%d playerGuid=0x%X starGuid=0x%X pos=0x%08X,0x%08X,0x%08X\n",
@@ -1537,7 +1541,7 @@ void ApplyPlayerSnapToStar(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
         star.GUID,
         star.PosX,
         star.PosY,
-        player.PosZ);
+        star.PosZ);
 }
 
 bool WriteObjectPositionByGUID(melonDS::NDS* nds, melonDS::u32 guid, melonDS::u32 posX, melonDS::u32 posY, melonDS::u32 posZ)

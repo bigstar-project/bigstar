@@ -114,7 +114,7 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 - Player Actor座標traceにより、`tests\nsmb_mario_vs_luigi_star_probe.inputs` ではframe4380以降に操作対象がスター近傍へ寄ることを確認。
 - `tests\nsmb_mario_vs_luigi_star_collect_after6000.inputs` を追加した。frame6000以降に左へ戻して、Star ActorのGUID変化を再現する診断用。
 - 診断用の `MELONDS_NSML_VS_STAR_SNAP_FRAME` は、星Actor位置を書き換えられるが、それだけでは取得判定・再生成までは起きなかった。`id=0x010c` が単純な取得当たり判定本体ではない、または追加内部状態/別Actor/処理タイミングが必要な可能性がある。
-- 診断用の `MELONDS_NSML_PLAYER_SNAP_TO_STAR_FRAME` も追加した。`logs\route-player-snap-to-star-4380` ではPlayer ActorをStar Actor座標へ寄せても取得状態は確認できなかった。これにより、`id=0x010c` の座標だけでは取得判定を起こせない可能性が高まった。
+- 診断用の `MELONDS_NSML_PLAYER_SNAP_TO_STAR_FRAME` も追加した。`logs\route-player-snap-to-star-4380` ではPlayer Actorを `id=0x010c` 座標へ、`logs\route-player-snap-to-star-actor-z-4380` では `id=0x0022 settings=1` 座標へ寄せたが、どちらも取得状態は確認できなかった。座標だけでは取得判定を起こせず、追加内部状態/速度/当たり判定処理/manager slot状態が必要な可能性が高い。
 - RNGパッチなしの過去ログではframe5071でスター取得・再生成由来らしい `Net::random` 消費が観測されているが、現行のクリーンroute再現では条件が一致しなかった。以後は固定RTC/JIT無効/RNG seed明示を前提に再検証する。
 - savestate loadからの短いstaged netplayは、melonDSの状態hashとしては通るが、現状ではゲーム内通信復元に失敗している。
   - `logs\staged-netplay-state-load-no-rng-repatch`: 900フレーム、`-StateSync` mismatchなし。
