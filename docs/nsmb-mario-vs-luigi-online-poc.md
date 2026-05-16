@@ -2,160 +2,86 @@
 
 ## 目的
 
-New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード「Mario vs Luigi」を、melonDSフォーク上でオンライン対戦できる形にする。
+New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード「Mario vs Luigi」を、melonDSフォーク上でWAN越しに対戦できる形へ近づける。
 
-狙う方式は、DSローカル無線通信をWAN越しに中継する方式ではない。各PC上で2台分のDSを起動し、PC内のLocal MPでMario vs Luigiを成立させたうえで、PC間では入力と試合開始時の同期情報だけを交換する。
+最終的な狙いは「DSローカル無線フレームをそのままWANへ流す」ことではなく、NSMBの対戦で意味のあるゲーム状態と入力を同期し、2PC間で同じ試合を維持すること。
 
-```text
-Host PC:
-  inst0: Mario側DS  <- hostのローカル入力
-  inst1: Luigi側DS  <- client入力をネットワーク経由で注入
+## 現在の方針
 
-Client PC:
-  inst0: Mario側DS  <- host入力をネットワーク経由で注入
-  inst1: Luigi側DS  <- clientのローカル入力
-```
+Local MPの完全決定性だけに賭ける方針は採らない。
 
-## 現在の到達点
+これまでの検証で、同一PC・同一ROM/save・固定RTC・JIT無効・固定RNG seedでも、melonDSの2 EmuInstance + Local MP経路は実行ごとに揺れることが分かった。Wi-Fi reply slotの準備タイミングやCMD受信順がずれ、Mario vs Luigi到達後のRAM hashや画面状態が一致しないことがある。
 
-- melonDS側にNSMB Mario vs Luigi用の自動検証フックと入力同期PoCを追加済み。
-- 1プロセス内で2つの `EmuInstance` を起動し、Mario vs Luigiへ到達する入力スクリプトを実行できる。
-- スクリーンショット、RAM dump、RAM hash、savestate、Local MP共有状態保存、固定RTC、フレームバリア、random traceを追加済み。
-- 日本版 `A2DJ` 向けに `Net::random` / `Net::getRandom()` 周辺の主要アドレスを移植済み。
-- `MELONDS_NSML_NET_RANDOM_AUTO=1` により、Mario vs Luigi状態を検出して `Net::random.value` へ共通seedを自動注入できる。
-- host/client間でmatch seedを配布するENetパケットを追加済み。
-- 入力遅延lockstepは `syncFrame + delay` のfuture input送信方式に寄せ、短い入力同期テストはtimeoutなしで完走する。
-- `MELONDS_NSML_NET_RANDOM_VALUE` を指定した場合、その値を起動前に確定済みmatch seedとして扱うようにした。起動後のseed待機でLocal MP進行を乱さないため。
-- `MELONDS_NSML_WAIT_FOR_PEER=1` を指定した場合だけhostが開始前peer待機するようにした。通常のPoCでは、ロビー段階でseedを確定してからエミュレーションを走らせる方針。
-- `MELONDS_NSML_DEFER_NETWORK_UNTIL_START=1` で、`NetplayStartFrame` 直前までENet pump/seed送信を遅延できる。
-- `MELONDS_NSML_NETPLAY_FRAME_BARRIER=1` で、入力同期区間だけ2インスタンスをフレーム境界で揃えられる。
-- `scripts/run-nsmb-mvl-netplay-staged-smoke.ps1` で、hostを先にMario vs Luigi状態まで進めてからclientを起動する疑似2PC検証を自動化した。
+そのため、今後は次の方針に寄せる。
 
-## 現在の検証結果
+1. **2 EmuInstance + Local MPは足場として使う**
+   - Mario vs Luigiへ到達するための起動・観測・テスト基盤として維持する。
+   - ただし、最終的な対戦の正しさをLocal MPの完全決定性には依存させない。
 
-- `0x00000100` は、既存スター取得スクリプトで取れる初期Big Star位置として有効。
-  - Marioの左側に出る、ミニマップ上では右端寄りの位置。
-  - `logs/star-seed-00000100-baseline/screens/inst0_frame004000.png` で確認済み。
-- 1プロセスbaselineでは、`0x00000100` 注入後にスター取得と次Big Star再生成RNG消費まで到達できた。
-  - frame 2800: `count=0x00 value=0x00000100 branch=0x020CBF24`
-  - frame 2900: `count=0x92 value=0xE79BEE4F branch=0x0212D41C`
-  - frame 6400: `count=0x93 value=0x661B81F0 branch=0x0212D41C`
-- localhost 2プロセス検証では、ROM/saveを共有するとLocal MP到達や乱数注入の結果が壊れる。実2PC相当の検証では、host/clientでROMコピーとsave派生ファイルを分離する必要がある。
-- ROM/saveを分離してhost/clientを並行起動すると、CPU負荷やスケジューリングの影響で片側がMario vs Luigi前の相手待ちに残ることがある。
-- 単独起動の `role=client` ではMario vs Luigiへ到達できるため、client roleそのものではなく、localhost上の疑似2PC検証方法の問題として扱っている。
-- `logs/mvl-seed-00000100-state-source/state-frame4100` に、`0x00000100` 注入後のMario vs Luigi状態から `inst0.mln`、`inst1.mln`、`localmp.bin` を保存済み。
-- 上記savestateの単独ロード自体は成功するが、復元後にNSMB側が通信切断扱いになる。Local MP snapshotとNDS savestateの保存タイミング、または復元時のLocal MP内部状態がまだ不十分。
-- savestate保存は、保存後に片方のインスタンスを待機させるとLocal MP進行を乱すため、非ブロッキング保存へ変更した。
-- frame 5000での保存元作成は成功したが、ロード後は引き続き通信切断になる。savestate方式は検証補助として保留し、最終目標に近い「通常ルートで試合開始後にnetplayへ入る」方向を優先する。
-- localhost疑似2PCの負荷回避として、hostを先に進めてからclientを起動する段階起動を採用した。
-- `MELONDS_NSML_WAIT_FOR_PEER_AT_NETPLAY_START=1` でエミュレーション途中にhostを止める方式は、Local MP進行を崩すため保留。現在はhostが `NetplayStartFrame` に到達したことをhash CSVで確認してからclientを起動する。
-- `scripts/run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500` は完走する。
-  - 最新確認ログ: `logs/netplay-staged-fixedrtc-nojit-00000100`、`logs/netplay-staged-netplaybarrier-00000100`
-  - host/clientとも `0x00000100` 注入、peer接続、lockstep開始、frame limit到達を確認済み。
-  - remote input timeoutは出ていない。
-- ただし、入力同期開始後のスクリーンショット/RAM hashはまだhost/clientで完全一致していない。
-  - Big Star位置は揃うが、4800フレーム時点でMarioの姿勢/表示状態がズレる。
-  - `MELONDS_NSML_NO_LOCAL_WAIT` を外し、`MELONDS_NSML_NETPLAY_FRAME_BARRIER=1`、固定RTC、JIT無効を入れても完全一致には至っていない。
-- netplayなしの通常routeを同一条件で2回走らせてもRAM hashが一致しないことを確認した。
-  - `logs/route-determinism-a` vs `logs/route-determinism-b`
-  - 固定RTC、JIT無効、`0x00000100` seed注入でも1500フレーム以降で差分が出る。
-  - `MELONDS_NSML_LOCALMP_FIXED_TIMESTAMP` だけでは解消しない。
-  - 現在の主ブロッカーはWAN入力同期ではなく、1プロセス内2インスタンスLocal MPルート自体の決定性不足。
-- Local MP traceを追加し、送信packet列の差分を追えるようにした。
-  - `MELONDS_NSML_LOCALMP_TRACE=<csv>` で `send` / `recv` / `replies` の順序、timestamp、packet長、packet本文hashを出力する。
-  - 最初の差分は、同じpacketをinst0/inst1のどちらが先に読むかの順序差として現れ、その後inst1のMP replyが40バイトdefault replyになるか42バイト実replyになるかで分岐する。
-  - `Wifi::SendMPDefaultReply()` / `Wifi::SendMPAck()` のローカルpacket配列に未初期化バイトが混ざる問題を修正した。ただしこれだけでは通常routeの完全決定性はまだ達成できていない。
-  - `MELONDS_NSML_WIFI_MP_REPLY_TRACE=<csv>` で `Wifi::SendMPReply()` のreply slot状態を出力できるようにした。比較結果では、同じタイミングで `W_TXSlotReply1` がreadyになっている実行とreadyでない実行に分岐しており、default reply/実replyの揺れはWi-Fi reply slot準備タイミングの非決定性として追う方針。
-  - `MELONDS_NSML_WIFI_MP_SLOT_TRACE=<csv>` で `W_TXSlotReply1` 書き込み、`W_RXCnt` によるreply slot移動、`W_TXSlotReset` によるclearを出力できるようにした。
-  - slot trace比較では、NSMB側の `reply1-write` とホストCMD受信に伴う `SendMPReply()` の相対位相が実行ごとにずれる。つまり、reply slotの値そのものより、2インスタンス実行順とWi-Fi emulated timer進行の揺れが原因になっている。
-  - `MELONDS_NSML_WIFI_MP_STICKY_REPLY1=1` で消費済みreply slotを保持する実験を追加したが、1800フレームrouteのRAM hash一致には至らなかったため、現時点では解決策として採用しない。
-  - `MELONDS_NSML_WIFI_MP_FORCE_REPLY_VALID=1` でreply時間超過判定を無視する実験は、handshakeを崩すケースがあるため現時点では採用しない。
-- `MELONDS_NSML_SCREEN_HASH=1` でhash CSVにフレームバッファhashを追加できるようにした。RAM全体hashはWi-Fi/通信バッファの揺れも拾うため、画面上の状態一致と切り分ける目的。
-- 実験結果:
-  - Wi-Fi packet/beacon timestampを強制固定する案は、画面hashの一致には効くケースがあったが、Mario vs Luigi状態検出/RNG patch到達を壊すため本線から外した。
-  - Local MP通常packet pollに短いwaitを入れる案も、実行進行を歪めてinst0だけが先行するケースがあったため本線から外した。
-  - screenHash計算はLocal MPのタイミングに影響しうるため、デフォルト無効の検証オプションにした。
-- 最新のstaged smoke再実行では、peer接続とlockstep開始までは進むが、host/clientのRNG patch到達チェックが失敗するケースが続いている。直近の次作業は、現在のinstrumentation下でMario vs Luigi状態へ安定到達できる条件を復旧すること。
-- `test: Wi-Fi reply slot書き込みtraceを追加` と `test: 画面hash検証を追加` を一時revertしてstaged smokeを再実行してもRNG patch未到達は再現した。したがって、直近の計測フックそのものが壊したというより、Local MPルートのレースで到達可否が揺れていると判断する。
+2. **NSMB側の重要状態同期を本筋にする**
+   - stage / match setup
+   - `Net::random` seed、call count、RNG消費順
+   - Big Starや8コインアイテムなどのランダム生成結果
+   - player / actor / score / timer / win state
+   - これらをROMパッチ、メモリパッチ、またはmelonDS側のフックで固定・同期する。
+
+3. **入力同期netplayは残すが、入力だけ同期では終わらせない**
+   - 入力遅延lockstepは引き続き使う。
+   - ただし、入力列が同じでもLocal MPやゲーム内部状態がずれる場合は、NSMB側の状態同期で補正する。
+
+4. **長期的にはLocal MP依存を減らす**
+   - まずはLocal MPで試合開始まで進め、重要状態を観測・固定する。
+   - 必要なら段階的に、対戦中の重要状態をゲーム側同期へ置き換える。
+   - 最終形は「NSMB Mario vs Luigi専用netplay runner / patch」に近いものになる可能性が高い。
+
+## 実装済み
+
+- NSMB Mario vs Luigi向け自動検証フック。
+- 1プロセス内2 EmuInstance起動テスト。
+- 入力スクリプト実行。
+- スクリーンショット、RAM dump、RAM hash、任意フレームsavestate。
+- 固定RTC、JIT無効化、frame barrier、netplay frame barrier。
+- ENetによる入力遅延lockstep PoC。
+- host/client match seed配布。
+- `MELONDS_NSML_NET_RANDOM_AUTO=1` によるMario vs Luigi状態検出時の `Net::random.value` 注入。
+- 日本版 `A2DJ` 向けの主要シンボル移植。
+- `Net::getRandom()` / `Net::getRandom12()` / `Net::syncRandom*()` 周辺の解析メモ。
+- Local MP packet / Wi-Fi MP reply slot trace。
+- optional screen hash。
+- `MELONDS_NSML_GAME_STATE_TRACE` によるNSMBゲーム状態CSV trace。
+
+## 重要な解析済みアドレス
+
+対象ROMは日本版 `A2DJ`。
+
+| 項目 | アドレス | 状態 |
+| --- | --- | --- |
+| `Game::stageID` | `0x02085054` | verified |
+| `Game::stageGroup` | `0x02085058` | verified |
+| `Game::vsMode` | `0x020850C4` | verified |
+| `Net::ggid` | `0x02087E78` | verified |
+| `Net::randomBranchAddress` | `0x02087E7C` | candidate |
+| `Net::randomCallCount` | `0x02088068` | candidate |
+| `Net::random.value` | `0x02088088` | candidate |
+| `Net::getRandom12()` | `0x0200E550` | verified |
+| `Net::getRandom()` | `0x0200E5A0` | verified |
+| `Net::syncRandomFull()` | `0x0200E5E8` | verified |
+| `Net::syncRandomFast()` | `0x0200E5F4` | verified |
+| `Net::Core::shareRandomSeed()` | `0x02010F04` | verified |
 
 ## 現在のブロッカー
 
-1. **Local MPルート自体の非決定性**
-   - 同一PC、同一ROM/save、同一入力、固定RTC、JIT無効、同一seedでも、通常routeのRAM hashが実行ごとに一致しない。
-   - この状態ではWAN入力同期を入れても最終的にdesyncする。
-   - Local MP trace上では、inst1のMP replyがdefault reply/実replyのどちらになるかが実行ごとに揺れている。
-   - `Wifi::SendMPReply()` trace上では、`W_TXSlotReply1` のready状態が実行ごとにずれている。
-   - `W_TXSlotReply1` の書き込みtrace上では、reply書き込みとCMD受信の相対位相が揺れている。次は個別のreply slot補正ではなく、2つの `EmuInstance` の実行順とWi-Fi emulated timer進行を揃える必要がある。
-   - trace/screenHashのような軽い検証処理でも到達結果が変わるため、計測フックはデフォルト無効にし、通常ルートへの影響を最小化する必要がある。
-
-2. **savestate復元後のLocal MP通信切断**
-   - `inst0.mln`、`inst1.mln`、`localmp.bin` は保存/ロードできる。
-   - ただしロード後に「通信がせつだんされました」画面になる。
-   - 最終実装に必須ではないので、現時点では深追いしない。必要になったらLocal MPだけでなくWi-Fi側の復元状態も見る。
-
-3. **入力同期後のhost/client状態不一致**
-   - staged smokeはtimeoutなしで完走するが、4800フレーム時点のスクリーンショット/RAM hashが一致しない。
-   - 現状ではBig Star位置は揃っているが、プレイヤー表示/状態がズレる。
-   - 通常route単体の決定性不足が先にあるため、まずLocal MP determinismを固める。
-
-4. **Big Star以外のランダム要素**
-   - 8コイン取得時アイテムなども `Net::random` / `Stage::getRandom()` の消費順に依存する可能性がある。
-   - ただし8コインアイテム自動化は一旦保留。まずはBig Star取得/再生成と入力同期の安定化を優先する。
+- Local MP経路は試合開始の足場としてまだ揺れる。これは最終方針の中核ブロッカーではないが、観測自動化の安定性には影響する。
+- `Net::random.value` を固定しても、RNG消費順やゲーム上重要な状態が同じ順に進まない場合はスターやアイテムがずれる。
+- Big Star以外に、8コインアイテム、ランダムステージ、actor生成順なども同期対象になり得る。
+- どの状態を同期すれば対戦として成立するか、ゲーム側の状態traceを増やして分類する必要がある。
 
 ## 次にやること
 
-1. 通常route単体の決定性を固める。
-   - 同一条件で `run-nsmb-mvl-route-smoke.ps1` を2回走らせ、RAM hashと主要スクリーンショットが一致する状態を目標にする。
-   - `SERIAL_RUN` は現状かなり遅いので、全フレーム逐次実行ではなく、Local MP送受信タイミングだけを安定化できないか見る。
-   - Local MPの `RecvReplies` / `RecvHostPacket` のtimeout、packet timestamp、host/client packet順、`Wifi::SendMPReply()` のdefault reply分岐を重点的に追う。
-   - まず現在の計測フック込みのビルドで、RNG patch到達が安定していたコミット/条件との差分を潰す。
-2. 通常routeが一致したら、staged netplay smokeでhost/clientの4800/5100フレームを一致させる。
-3. host/clientの終了合意を追加する。
-   - 片側だけがframe limitへ到達してpeer disconnectし、もう片側がremote input timeoutになる状態をなくす。
-4. localhost疑似2PCの試合中入力同期が安定したら、同一LAN、WANの順に入力遅延とtimeoutを調整する。
-
-## 実装済みの重要機能
-
-- `src/frontend/qt_sdl/NsmbNetplayPoC.*`
-  - 自動検証フック
-  - 2インスタンス起動テスト
-  - ENet入力同期PoC
-  - host/client match seed配布
-  - preconfigured match seed
-  - netplay開始フレームでhostがpeer接続を待つ段階起動用フック
-  - netplay開始直前までENet処理を遅延する検証フック
-  - netplay区間だけの2インスタンスフレームバリア
-  - NSMB `Net::random.value` 自動注入
-  - 入力遅延future-frame送信
-  - lockstep開始ウォームアップ
-  - テスト終了時のENet flush grace
-  - input packet送受信trace
-  - スクリーンショット/RAM dump/hash/random trace
-- `tools/nsmb_mvl_ram_probe.py`
-  - ROM gamecode確認
-  - `A2DJ` シンボル表示
-  - RNG timeline抽出
-  - Big Star actor ID候補検出
-- `tests/nsmb_mario_vs_luigi_star_probe.inputs`
-  - Mario vs Luigi開始後、inst0/Marioが初期スターを取り、次スター再生成まで進める入力スクリプト。
-- `docs/nsmb-a2dj-symbol-port.md`
-  - 日本版 `A2DJ` 向けの移植済みシンボルと解析メモ。
-
-## A2DJ解析メモ
-
-- 対象ROMは日本版 `A2DJ`。
-- 公開 `MammaMiaTeam/NSMB-Code-Reference` はUS版向けなので、固定アドレスはそのまま使えない。
-- 現在の重要アドレス:
-  - `Net::getRandom()` = `0x0200E5A0`
-  - `Net::getRandom12()` = `0x0200E550`
-  - `Net::syncRandomFull()` = `0x0200E5E8`
-  - `Net::syncRandomFast()` = `0x0200E5F4`
-  - `Net::Core::shareRandomSeed()` = `0x02010F04`
-  - `Net::random.value` = `0x02088088`
-  - `Net::randomCallCount` = `0x02088068`
-- `Net::getRandom()` へのARM `BL` call siteは61個見つかっている。
-- Big Star再生成時の関連呼び出し先は `0x0212D418` 周辺。
-- MvsL seed注入点は現在、`Game::stageGroup == 9`、`Game::vsMode == 1`、`Net::ggid == 0x42` を満たす最初のタイミングとしている。注入時に `Net::randomCallCount` を0へ戻す。
+1. `MELONDS_NSML_GAME_STATE_TRACE` を使い、Mario vs Luigi到達、RNG seed注入、スター生成前後で、host/clientと複数runの状態差分を比較する。
+2. 差分がRNG streamだけなら `Net::random` 同期を強化する。
+3. 差分がactor/player/state machine側なら、次の同期対象アドレスを特定する。
+4. 8コインアイテムは自動化が難しいため、Big Starと試合開始状態の安定化後に扱う。
 
 ## よく使う検証コマンド
 
@@ -169,56 +95,47 @@ Client PC:
 # Mario vs Luigi route smoke
 .\scripts\run-nsmb-mvl-route-smoke.ps1 -Frames 4200
 
-# route + netplay smoke
-.\scripts\run-nsmb-mvl-netplay-route-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500 -Port 8070
-
 # staged route + netplay smoke
 .\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500 -Port 8071
 ```
 
-## 重要な環境変数
+## 主要な環境変数
 
 - `MELONDS_NSML_TEST=1`: 自動検証フックを有効化。
 - `MELONDS_NSML_TEST_INSTANCES`: 起動するテスト用インスタンス数。
 - `MELONDS_NSML_TEST_FRAMES`: 自動終了フレーム。
 - `MELONDS_NSML_INPUT_SCRIPT`: 入力スクリプト。
-- `MELONDS_NSML_POC=1`: NSMB netplay PoCを有効化。
+- `MELONDS_NSML_POC=1`: 入力同期netplay PoCを有効化。
 - `MELONDS_NSML_ROLE=host|client`: netplay role。
 - `MELONDS_NSML_PEER`: client側の接続先。
-- `MELONDS_NSML_PORT`: ENetポート。
+- `MELONDS_NSML_PORT`: ENet port。
 - `MELONDS_NSML_LOCAL_INSTANCE`: ローカル入力を担当するインスタンス。
 - `MELONDS_NSML_NETPLAY_START_FRAME`: 入力同期開始フレーム。
-- `MELONDS_NSML_NETPLAY_WARMUP_FRAMES`: 入力同期開始直後にremote waitへ入る前のウォームアップフレーム数。
-- `MELONDS_NSML_QUIT_GRACE_MS`: テスト終了前にENetをpump/flushする猶予時間。
-- `MELONDS_NSML_MATCH_SEED`: hostが配布するmatch seed。
-- `MELONDS_NSML_NET_RANDOM_AUTO=1`: MvsL状態検出時に `Net::random.value` を自動注入。
-- `MELONDS_NSML_NET_RANDOM_VALUE`: 注入するRNG seed。指定時はpreconfigured match seedとしても扱う。
-- `MELONDS_NSML_WAIT_FOR_PEER=1`: hostがframe 0でpeer接続を待つ。通常は使わず、ロビー段階でseedを事前確定する。
-- `MELONDS_NSML_WAIT_FOR_PEER_AT_NETPLAY_START=1`: hostが `MELONDS_NSML_NETPLAY_START_FRAME` でpeer接続を待つ。localhost疑似2PCでhostを先行させる検証用。
-- `MELONDS_NSML_DEFER_NETWORK_UNTIL_START=1`: `NetplayStartFrame` 直前までENet pump/seed送信を遅延する。
-- `MELONDS_NSML_NETPLAY_FRAME_BARRIER=1`: 入力同期区間だけ2インスタンスを同じフレーム境界で揃える。
+- `MELONDS_NSML_NET_RANDOM_AUTO=1`: Mario vs Luigi状態検出時に `Net::random.value` を自動注入。
+- `MELONDS_NSML_NET_RANDOM_VALUE`: 注入するRNG seed。
 - `MELONDS_NSML_RANDOM_TRACE`: `Net::getRandom()` のcaller/value/countをCSV出力。
-- `MELONDS_NSML_INPUT_TRACE`: input packetの送受信をログ出力。
+- `MELONDS_NSML_GAME_STATE_TRACE`: `stageID` / `stageGroup` / `vsMode` / `ggid` / `Net::random` 状態をCSV出力。
+- `MELONDS_NSML_GAME_STATE_TRACE_INTERVAL`: ゲーム状態traceの出力間隔。デフォルトは60フレーム。
+- `MELONDS_NSML_HASH_LOG`: RAM hash CSV。
+- `MELONDS_NSML_SCREEN_HASH=1`: hash CSVへframebuffer hashを追加。負荷でタイミングが変わる可能性があるため必要時のみ使う。
 - `MELONDS_NSML_RAM_DUMP_DIR`: MainRAM dump出力先。
-- `MELONDS_NSML_RAM_DUMP_FRAMES`: dump対象フレーム。
 - `MELONDS_NSML_SCREENSHOT_DIR`: PNG出力先。
 - `MELONDS_NSML_FIXED_RTC`: RTC固定。
 - `MELONDS_NSML_DISABLE_JIT=1`: JIT無効化。
-- `MELONDS_NSML_LOCALMP_STRICT_WAIT=1`: Local MP受信待ちをテスト用に厳密化。
-- `MELONDS_NSML_LOCALMP_FIXED_TIMESTAMP`: Local MP packet timestampを固定する。現時点ではこれだけでは通常routeの非決定性は解消しない。
-- `MELONDS_NSML_LOCALMP_TRACE`: Local MP packet送受信順序とpacket本文hashをCSV出力する。
-- `MELONDS_NSML_WIFI_MP_REPLY_TRACE`: `Wifi::SendMPReply()` 時点のreply slot状態をCSV出力する。
-- `MELONDS_NSML_WIFI_MP_SLOT_TRACE`: `W_TXSlotReply1` 書き込み、reply slot移動、reply slot clearをCSV出力する。
-- `MELONDS_NSML_SCREEN_HASH=1`: hash CSVに `screenHash` 列を追加する。検証負荷でLocal MPタイミングが変わりうるため、必要時だけ使う。
-- `MELONDS_NSML_WIFI_MP_STICKY_REPLY1=1`: reply slot消費後も `W_TXSlotReply1` を保持する実験用。route determinismは改善しきれなかったため常用しない。
-- `MELONDS_NSML_WIFI_MP_FORCE_REPLY_VALID=1`: reply slotの時間超過判定を無視する実験用。現時点ではhandshakeを崩すケースがあるため常用しない。
 
 ## ユーザー依存
 
 - ROMは `roms/nsmb.nds` に配置済みの日本版 `A2DJ` を前提にする。
-- 実2PC/WAN検証に進む段階では、相手PC側にも同じmelonDSビルド、同じROM、同じ設定、必要なBIOS/firmware/セーブ状態が必要。
+- 実PC/WAN検証に進む段階では、相手PC側にも同じmelonDSビルド、同じROM、同じ設定、必要なBIOS/firmware/save状態が必要。
 
 ## 運用ルール
 
-- 実装状況が変わったら、このファイルの「現在の到達点」「現在の検証結果」「現在のブロッカー」「次にやること」を更新する。
-- 古い検証ログは長く追記し続けず、必要な結論だけを「現在の検証結果」に統合する。
+- 実装状況、ブロッカー、次の作業はこのファイルを最新化する。
+- 古い「次にやること」や解消済みブロッカーは残し続けず、現在の状態に合わせて書き換える。
+
+## 直近の検証
+
+- `cmake --build build\debug-windows-x86_64 --target melonDS --config Debug` は成功。
+  - `applocal.ps1` が `dumpbin` / `llvm-objdump` / `objdump` 不在警告を出すが、実行ファイルのリンク自体は成功している。
+- `MELONDS_NSML_GAME_STATE_TRACE` を有効にして `.\scripts\run-nsmb-mvl-route-smoke.ps1 -Frames 600` が成功。
+  - `logs\game-state-trace-smoke\game-state.csv` に両インスタンスのゲーム状態traceが出力された。

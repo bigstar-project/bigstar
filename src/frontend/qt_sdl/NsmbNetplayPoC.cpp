@@ -52,6 +52,14 @@ constexpr melonDS::u32 kVersion = 1;
 constexpr int kDefaultDelay = 6;
 constexpr int kMaxPumpEvents = 64;
 constexpr melonDS::u32 kNoFrameLimit = 0;
+constexpr melonDS::u32 kMainRAMBase = 0x02000000;
+constexpr melonDS::u32 kGameStageIDAddr = 0x02085054;
+constexpr melonDS::u32 kGameStageGroupAddr = 0x02085058;
+constexpr melonDS::u32 kGameVsModeAddr = 0x020850C4;
+constexpr melonDS::u32 kNetGGIDAddr = 0x02087E78;
+constexpr melonDS::u32 kNetRandomBranchAddressAddr = 0x02087E7C;
+constexpr melonDS::u32 kNetRandomCallCountAddr = 0x02088068;
+constexpr melonDS::u32 kNetRandomValueAddr = 0x02088088;
 
 enum class Role
 {
@@ -126,9 +134,12 @@ struct State
     std::string StateLoadDir;
     std::string RamDumpDir;
     std::string MemPatchFile;
+    std::string GameStateTracePath;
     std::ofstream HashLog;
+    std::ofstream GameStateTrace;
     int ScreenshotInterval = 0;
     int RamDumpInterval = 0;
+    int GameStateTraceInterval = 60;
     int MemPatchInstance = -1;
     melonDS::u32 MemPatchFrame = 0;
     bool MemPatchFrameSet = false;
@@ -156,6 +167,7 @@ struct State
     std::vector<std::pair<melonDS::u32, melonDS::u32>> RamDumpRanges;
     std::vector<std::pair<melonDS::u32, melonDS::u32>> MemPatchRanges;
     melonDS::u64 LastLoggedHashFrame[16] {};
+    melonDS::u64 LastLoggedGameStateFrame[16] {};
     melonDS::u32 TestFrameCount[16] {};
     bool StateSaved[16] {};
     bool StateLoaded[16] {};
@@ -1066,11 +1078,8 @@ void ApplyMemPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
 void ApplyNetRandomPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    constexpr melonDS::u32 kNetRandomValueOffset = 0x02088088 - 0x02000000;
-    constexpr melonDS::u32 kNetRandomCallCountOffset = 0x02088068 - 0x02000000;
-    constexpr melonDS::u32 kNetGGIDOffset = 0x02087E78 - 0x02000000;
-    constexpr melonDS::u32 kGameStageGroupOffset = 0x02085058 - 0x02000000;
-    constexpr melonDS::u32 kGameVsModeOffset = 0x020850C4 - 0x02000000;
+    constexpr melonDS::u32 kNetRandomValueOffset = kNetRandomValueAddr - kMainRAMBase;
+    constexpr melonDS::u32 kNetRandomCallCountOffset = kNetRandomCallCountAddr - kMainRAMBase;
 
     if (!nds || !nds->MainRAM || !G.NetRandomPatchEnabled) return;
     if (instanceID < 0 || instanceID >= 16) return;
@@ -1081,10 +1090,10 @@ void ApplyNetRandomPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     melonDS::u8 randomCallCountBeforePatch = 0;
     if (G.NetRandomPatchAuto)
     {
-        const melonDS::u32 stageGroup = nds->ARM9Read32(0x02000000 + kGameStageGroupOffset);
-        const melonDS::u32 vsMode = nds->ARM9Read32(0x02000000 + kGameVsModeOffset);
-        const melonDS::u32 ggid = nds->ARM9Read32(0x02000000 + kNetGGIDOffset);
-        randomCallCountBeforePatch = nds->ARM9Read8(0x02000000 + kNetRandomCallCountOffset);
+        const melonDS::u32 stageGroup = nds->ARM9Read32(kGameStageGroupAddr);
+        const melonDS::u32 vsMode = nds->ARM9Read32(kGameVsModeAddr);
+        const melonDS::u32 ggid = nds->ARM9Read32(kNetGGIDAddr);
+        randomCallCountBeforePatch = nds->ARM9Read8(kNetRandomCallCountAddr);
         shouldPatch = stageGroup == 9 && vsMode == 1 && ggid == 0x42;
     }
     if (!shouldPatch) return;
@@ -1099,6 +1108,38 @@ void ApplyNetRandomPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         G.NetRandomPatchValue,
         G.NetRandomPatchAuto ? 1 : 0,
         randomCallCountBeforePatch);
+}
+
+void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!nds || !nds->MainRAM) return;
+    if (instanceID < 0 || instanceID >= 16) return;
+    if ((frame % static_cast<melonDS::u32>(G.GameStateTraceInterval)) != 0) return;
+    if ((kNetRandomValueAddr - kMainRAMBase) + sizeof(melonDS::u32) > nds->MainRAMMask + 1) return;
+
+    const melonDS::u32 stageID = nds->ARM9Read32(kGameStageIDAddr);
+    const melonDS::u32 stageGroup = nds->ARM9Read32(kGameStageGroupAddr);
+    const melonDS::u32 vsMode = nds->ARM9Read32(kGameVsModeAddr);
+    const melonDS::u32 ggid = nds->ARM9Read32(kNetGGIDAddr);
+    const melonDS::u32 randomValue = nds->ARM9Read32(kNetRandomValueAddr);
+    const melonDS::u8 randomCallCount = nds->ARM9Read8(kNetRandomCallCountAddr);
+    const melonDS::u32 randomBranchAddress = nds->ARM9Read32(kNetRandomBranchAddressAddr);
+
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    if (!G.GameStateTrace) return;
+    if (G.LastLoggedGameStateFrame[instanceID] == frame) return;
+    G.LastLoggedGameStateFrame[instanceID] = frame;
+
+    G.GameStateTrace << std::dec << instanceID << ',' << frame
+                     << ",0x" << std::hex << stageID
+                     << ",0x" << stageGroup
+                     << ",0x" << vsMode
+                     << ",0x" << ggid
+                     << ",0x" << randomValue
+                     << ",0x" << static_cast<unsigned int>(randomCallCount)
+                     << ",0x" << randomBranchAddress
+                     << std::dec << '\n';
+    G.GameStateTrace.flush();
 }
 
 std::filesystem::path StatePath(const std::string& dir, int instanceID)
@@ -1453,6 +1494,10 @@ void InitFromEnvironment()
         G.RamDumpRanges.clear();
     }
 
+    const char* gameStateTrace = std::getenv("MELONDS_NSML_GAME_STATE_TRACE");
+    if (gameStateTrace && gameStateTrace[0]) G.GameStateTracePath = gameStateTrace;
+    G.GameStateTraceInterval = std::max(1, EnvInt("MELONDS_NSML_GAME_STATE_TRACE_INTERVAL", 60));
+
     const char* memPatchFile = std::getenv("MELONDS_NSML_MEM_PATCH_FILE");
     if (memPatchFile && memPatchFile[0]) G.MemPatchFile = memPatchFile;
     const char* memPatchFrame = std::getenv("MELONDS_NSML_MEM_PATCH_FRAME");
@@ -1500,6 +1545,19 @@ void InitFromEnvironment()
         G.StateLoadFrameSet = true;
     }
 
+    if ((G.TestEnabled || G.Enabled) && !G.GameStateTracePath.empty())
+    {
+        G.GameStateTrace.open(G.GameStateTracePath, std::ios::out | std::ios::trunc);
+        if (!G.GameStateTrace)
+        {
+            std::printf("NSMB Test: failed to open game state trace: %s\n", G.GameStateTracePath.c_str());
+        }
+        else
+        {
+            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,ggid,netRandomValue,netRandomCallCount,netRandomBranchAddress\n";
+        }
+    }
+
     if (G.TestEnabled)
     {
         if (!LoadInputScriptLocked())
@@ -1521,7 +1579,7 @@ void InitFromEnvironment()
             }
         }
 
-        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d\n",
+        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d\n",
             G.TestFrames,
             G.TestInstanceCount,
             G.FrameBarrierEnabled ? 1 : 0,
@@ -1534,6 +1592,8 @@ void InitFromEnvironment()
             G.RamDumpDir.empty() ? "<none>" : G.RamDumpDir.c_str(),
             G.RamDumpInterval,
             G.RamDumpRanges.size(),
+            G.GameStateTracePath.empty() ? "<none>" : G.GameStateTracePath.c_str(),
+            G.GameStateTraceInterval,
             G.MemPatchFile.empty() ? "<none>" : G.MemPatchFile.c_str(),
             G.MemPatchFrameSet ? G.MemPatchFrame : 0,
             G.MemPatchRanges.size(),
@@ -1775,6 +1835,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     SaveLocalMPState(logFrame);
     SaveScreenshot(instanceID, logFrame, nds);
     SaveRamDump(instanceID, logFrame, nds);
+    TraceGameState(instanceID, logFrame, nds);
 
     if ((logFrame % static_cast<melonDS::u32>(G.HashInterval)) != 0) return;
 
@@ -1868,6 +1929,9 @@ void Shutdown()
 
     if (G.HashLog)
         G.HashLog.close();
+
+    if (G.GameStateTrace)
+        G.GameStateTrace.close();
 }
 
 }
