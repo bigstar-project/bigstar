@@ -296,8 +296,9 @@ int LocalMP::SendPacketGeneric(int inst, u32 type, u8* packet, int len, u64 time
 
     // TODO: check if the FIFO is full!
 
-    type &= 0xFFFF;
-    if (cfg.NormalizeAckTiming && type == 3 && len >= 4)
+    const u32 packetType = type;
+    const u32 baseType = type & 0xFFFF;
+    if (cfg.NormalizeAckTiming && baseType == 3 && len >= 4)
     {
         *(u32*)&packet[0] = 0;
         if (len >= 0xC + 0x1C)
@@ -311,16 +312,16 @@ int LocalMP::SendPacketGeneric(int inst, u32 type, u8* packet, int len, u64 time
     MPPacketHeader pktheader;
     pktheader.Magic = 0x4946494E;
     pktheader.SenderID = inst;
-    pktheader.Type = type;
+    pktheader.Type = packetType;
     pktheader.Length = len;
     pktheader.Timestamp = cfg.FixedTimestamp ? cfg.TimestampValue : timestamp;
 
-    int nfifo = (type == 2) ? 1 : 0;
+    int nfifo = (baseType == 2) ? 1 : 0;
     FIFOWrite(inst, nfifo, &pktheader, sizeof(pktheader));
     if (len)
         FIFOWrite(inst, nfifo, packet, len);
 
-    if (type == 1)
+    if (baseType == 1)
     {
         // NOTE: this is not guarded against, say, multiple multiplay games happening on the same machine
         // we would need to pass the packet's SenderID through the wifi module for that
@@ -329,18 +330,21 @@ int LocalMP::SendPacketGeneric(int inst, u32 type, u8* packet, int len, u64 time
         ReplyReadOffset[inst] = MPStatus.ReplyWriteOffset;
         Semaphore_Reset(SemPool[16 + inst]);
     }
-    else if (type == 2)
+    else if (baseType == 2)
     {
         MPStatus.MPReplyBitmask |= (1 << inst);
     }
 
-    TraceLocalMP(cfg, "send", inst, type, len, pktheader.Timestamp, MPStatus.MPReplyBitmask, 0,
-        HashBytes(packet, len),
-        MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
+    if (cfg.TraceEnabled)
+    {
+        TraceLocalMP(cfg, "send", inst, packetType, len, pktheader.Timestamp, MPStatus.MPReplyBitmask, 0,
+            len ? HashBytes(packet, len) : 0,
+            MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
+    }
 
     Mutex_Unlock(MPQueueLock);
 
-    if (type == 2)
+    if (baseType == 2)
     {
         Semaphore_Post(SemPool[16 +  MPStatus.MPHostinst]);
     }
@@ -407,9 +411,12 @@ int LocalMP::RecvPacketGeneric(int inst, u8* packet, bool block, u64* timestamp)
         }
 
         if (timestamp) *timestamp = pktheader.Timestamp;
-        TraceLocalMP(cfg, "recv", inst, pktheader.Type, pktheader.Length, pktheader.Timestamp,
-            0, 0, pktheader.Length ? HashBytes(packet, pktheader.Length) : 0,
-            MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
+        if (cfg.TraceEnabled)
+        {
+            TraceLocalMP(cfg, "recv", inst, pktheader.Type, pktheader.Length, pktheader.Timestamp,
+                0, 0, pktheader.Length ? HashBytes(packet, pktheader.Length) : 0,
+                MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
+        }
         Mutex_Unlock(MPQueueLock);
         return pktheader.Length;
     }
@@ -527,19 +534,31 @@ u16 LocalMP::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
         {
             // all the clients have sent their reply
 
-            TraceLocalMP(cfg, "replies", inst, pktheader.Type, pktheader.Length,
-                pktheader.Timestamp, ret, aidmask,
-                pktheader.Length ? HashBytes(&packets[((pktheader.Type >> 16)-1)*1024], pktheader.Length) : 0,
-                MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
+            if (cfg.TraceEnabled)
+            {
+                const u32 aid = pktheader.Type >> 16;
+                const u64 dataHash = (pktheader.Length && aid > 0)
+                    ? HashBytes(&packets[(aid - 1) * 1024], pktheader.Length)
+                    : 0;
+                TraceLocalMP(cfg, "replies", inst, pktheader.Type, pktheader.Length,
+                    pktheader.Timestamp, ret, aidmask, dataHash,
+                    MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
+            }
 
             Mutex_Unlock(MPQueueLock);
             return ret;
         }
 
-        TraceLocalMP(cfg, "reply-partial", inst, pktheader.Type, pktheader.Length,
-            pktheader.Timestamp, ret, aidmask,
-            pktheader.Length ? HashBytes(&packets[((pktheader.Type >> 16)-1)*1024], pktheader.Length) : 0,
-            MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
+        if (cfg.TraceEnabled)
+        {
+            const u32 aid = pktheader.Type >> 16;
+            const u64 dataHash = (pktheader.Length && aid > 0)
+                ? HashBytes(&packets[(aid - 1) * 1024], pktheader.Length)
+                : 0;
+            TraceLocalMP(cfg, "reply-partial", inst, pktheader.Type, pktheader.Length,
+                pktheader.Timestamp, ret, aidmask, dataHash,
+                MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
+        }
 
         Mutex_Unlock(MPQueueLock);
     }

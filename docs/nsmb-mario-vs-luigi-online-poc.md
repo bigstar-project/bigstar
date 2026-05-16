@@ -140,4 +140,8 @@ Local MPの完全決定性だけに賭ける方針は採らない。
 - `MELONDS_NSML_GAME_STATE_TRACE` を有効にして `.\scripts\run-nsmb-mvl-route-smoke.ps1 -Frames 600` が成功。
   - `logs\game-state-trace-smoke\game-state.csv` に両インスタンスのゲーム状態traceが出力された。
 - trace無効時はゲーム状態読み取り自体を行わないようにした。Local MPルートへの不要なタイミング影響を避けるため。
-- 現在のDebugビルドでは `run-nsmb-mvl-route-smoke.ps1 -Frames 1800` が1500フレーム付近でアクセス違反終了する。trace有効/無効の両方で再現するため、ゲーム状態trace追加そのものとは別の既存不安定要素として扱う。
+- Debugビルドの1500フレーム付近アクセス違反は解消済み。
+  - `65d2995e` と `798b2475` は `run-nsmb-mvl-route-smoke.ps1 -Frames 1800` 成功。
+  - `18017082` で初回再現。原因は `LocalMP::SendPacketGeneric()` の `type &= 0xFFFF` をヘッダ作成前へ移動したことで、reply packetの上位16bit AIDが消えたこと。
+  - その結果 `RecvReplies()` が `aid=0` と解釈し、`packets[(aid-1)*1024]` へ書いてメモリ破壊していた。
+  - 修正後、通常route 4200フレーム、ゲーム状態trace有効1800フレーム、Local MP trace有効1800フレームが成功。
