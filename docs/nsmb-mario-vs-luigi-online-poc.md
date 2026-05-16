@@ -81,6 +81,9 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
   - `0x0208BE00..0x0208DFFF` は、公開シンボルのUSアドレスからJP移植オフセットを戻すと `Wifi::parentsBssDesc` 周辺に相当する。actor本体ではなくLocal MP/Wi-Fi側のBSS差分と見る。
   - render block `0x023F8300..0x023F853F` は描画リスト/プロセスリスト順序らしき差分。
   - このため、現時点で見えているextended mismatchは、ゲーム上重要なスター・スコア・プレイヤー状態の不一致とはまだ判断しない。
+- `tools/nsmb_mvl_ram_probe.py --a2dj-process-lists` でJP process listを辿る診断を追加した。
+  - `logs\staged-netplay-ramdump-4500` のhost/client inst0/inst1では、execute/render/create process listの意味的なobject集合は一致。
+  - 少なくともこのフレームでは、top-level process list差分ではなくWi-Fi/描画内部リスト差分が主に見えている。
 
 ## Debugビルドクラッシュの原因と修正
 
@@ -132,6 +135,9 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 
 # 指定フレームのMainRAM dump付き
 .\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500 -Port 8071 -GameStateTrace -RamDumpFrames 4500
+
+# RAM dumpからA2DJ process listを比較
+python tools\nsmb_mvl_ram_probe.py --rng-timeline-only --a2dj-process-lists logs\staged-netplay-ramdump-4500\ram-host\inst0_frame004500_mainram.bin logs\staged-netplay-ramdump-4500\ram-client\inst0_frame004500_mainram.bin
 ```
 
 ## 主要な環境変数
