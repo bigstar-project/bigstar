@@ -92,23 +92,24 @@ Call-site scan:
   - `0x021547C0`
 - This confirms that `Net::getRandom()` is the shared random primitive used by many stage/actor paths. The next step is to map the call sites around Big Star and Item actors specifically.
 
-Star pickup RNG verification:
+Star-related RNG verification:
 
-- `tests/nsmb_mario_vs_luigi_star_probe.inputs` reaches the match, moves inst0/Mario, collects the first visible star, and causes the next star to spawn.
+- `tests/nsmb_mario_vs_luigi_star_probe.inputs` reaches the match and moves inst0/Mario near the first visible star.
+- Earlier notes treated frame `005071` as star pickup / next-star spawn, but later Actor/state trace did not confirm a score/star-count pickup there. Treat this as a star-area RNG/Actor transition until the actual pickup state is isolated.
 - RAM timeline command:
   - `python tools\nsmb_mvl_ram_probe.py --a2dj-rng-timeline --rng-timeline-only logs\ram-star-rng-window\inst0_frame*_mainram.bin`
 - Observed transition:
   - frame `002850`: `Net::randomCallCount=0x91`, `Net::random.value=0x97C1D7D6`, `Net::randomBranchAddress=0x020B4460`
   - frame `002900`: `Net::randomCallCount=0x92`, `Net::random.value=0x413B3BAA`, `Net::randomBranchAddress=0x0212D41C`
   - frame `005071`: `Net::randomCallCount=0x93`, `Net::random.value=0xF9D72FCA`, `Net::randomBranchAddress=0x0212D41C`
-- Interpretation: first-star collection / next-star spawn consumes the shared `Net::random` stream once. `0x0212D41C` is likely the return address for the random caller, so the associated BL site is around `0x0212D418`.
+- Interpretation: a star-area transition consumes the shared `Net::random` stream once. `0x0212D41C` is likely the return address for the random caller, so the associated BL site is around `0x0212D418`.
 - Disassembly around `0x0212D418` confirms this is star-slot selection:
   - `0x0212D418: bl 0x0200E5A0`
   - the result is masked/multiplied by slot count from `[r8+0x47A]`
   - occupied slots are checked with bitmask `[r8+0x460]`
   - selected slot coordinates are loaded from tables near `0x020C8878` / `0x020C88CC`
   - actor creation is called with `r0=0x22`
-- A second run using the same input route reproduced frame `005071` with `Net::randomCallCount=0x93`, `Net::random.value=0xF9D72FCA`, `Net::randomBranchAddress=0x0212D41C`, and the same next-star minimap position at frame `006400`.
+- A second run using the same input route reproduced frame `005071` with `Net::randomCallCount=0x93`, `Net::random.value=0xF9D72FCA`, `Net::randomBranchAddress=0x0212D41C`, and the same minimap/star-area position at frame `006400`.
 
 Seed/value patch experiment:
 
