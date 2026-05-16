@@ -110,6 +110,14 @@ struct State
     int TestQuitGraceMs = 0;
     bool InputTraceEnabled = false;
     int InputTraceInterval = 60;
+    int SeedWaitTimeoutMs = 10000;
+    bool WaitForPeerBeforeStart = false;
+    bool WaitForPeerAtNetplayStart = false;
+    bool WaitedForPeerAtNetplayStart = false;
+    bool NetplayStartWaitArrived[16] {};
+    bool NetplayStartWaitComplete = false;
+    bool DeferNetworkUntilStart = false;
+    bool NetplayFrameBarrierEnabled = false;
     std::string InputScriptPath;
     std::string HashLogPath;
     std::string ScreenshotDir;
@@ -179,6 +187,7 @@ struct FrameBarrier
 
 FrameBarrier GBeforeFrameBarrier;
 FrameBarrier GAfterFrameBarrier;
+FrameBarrier GNetplayFrameBarrier;
 
 bool EnvFlag(const char* name)
 {
@@ -590,6 +599,160 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
     }
 }
 
+void WaitForMatchSeedIfNeeded()
+{
+    if (!G.Enabled || G.NetRole != Role::Client || G.MatchSeedConfigured)
+        return;
+
+    const auto start = std::chrono::steady_clock::now();
+    for (;;)
+    {
+        {
+            std::lock_guard<std::mutex> lock(G.Mutex);
+            PumpNetworkLocked();
+            if (G.MatchSeedConfigured)
+                return;
+        }
+
+        if (G.SeedWaitTimeoutMs > 0)
+        {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            if (elapsed >= G.SeedWaitTimeoutMs)
+            {
+                std::printf("NSMB PoC: match seed wait timeout waitedMs=%d\n", G.SeedWaitTimeoutMs);
+                return;
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+void WaitForPeerIfNeeded(bool force = false)
+{
+    if (!G.Enabled || (!force && !G.WaitForPeerBeforeStart) || G.NetRole != Role::Host || G.Peer)
+        return;
+
+    const auto start = std::chrono::steady_clock::now();
+    for (;;)
+    {
+        {
+            std::lock_guard<std::mutex> lock(G.Mutex);
+            PumpNetworkLocked();
+            if (G.Peer)
+                return;
+        }
+
+        if (G.SeedWaitTimeoutMs > 0)
+        {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            if (elapsed >= G.SeedWaitTimeoutMs)
+            {
+                std::printf("NSMB PoC: peer wait timeout waitedMs=%d\n", G.SeedWaitTimeoutMs);
+                return;
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+bool ShouldPumpNetworkAtFrame(melonDS::u32 syncFrame, melonDS::u32 sendStartFrame)
+{
+    return !G.DeferNetworkUntilStart || G.NetplayStartFrame == 0 || syncFrame >= sendStartFrame;
+}
+
+bool AllNetplayStartWaitArrivedLocked()
+{
+    const int count = std::max(1, std::min(G.TestInstanceCount, 16));
+    for (int i = 0; i < count; i++)
+    {
+        if (!G.NetplayStartWaitArrived[i])
+            return false;
+    }
+    return true;
+}
+
+void WaitForPeerAtNetplayStartBarrier(int instanceID, melonDS::u32 syncFrame)
+{
+    if (!G.Enabled || !G.WaitForPeerAtNetplayStart || G.NetRole != Role::Host
+        || G.NetplayStartFrame == 0 || syncFrame != G.NetplayStartFrame
+        || instanceID < 0 || instanceID >= 16)
+    {
+        return;
+    }
+
+    const bool isLocal = (instanceID == G.LocalInstance);
+    {
+        std::unique_lock<std::mutex> lock(G.Mutex);
+        if (G.NetplayStartWaitComplete)
+            return;
+
+        G.NetplayStartWaitArrived[instanceID] = true;
+        G.BarrierCond.notify_all();
+
+        const auto deadline = std::chrono::steady_clock::now()
+            + std::chrono::milliseconds(G.SeedWaitTimeoutMs);
+
+        if (isLocal)
+        {
+            while (!AllNetplayStartWaitArrivedLocked())
+            {
+                if (G.SeedWaitTimeoutMs > 0)
+                {
+                    if (G.BarrierCond.wait_until(lock, deadline) == std::cv_status::timeout)
+                    {
+                        std::printf("NSMB PoC: netplay start local barrier timeout inst=%d frame=%u waitedMs=%d\n",
+                            instanceID,
+                            syncFrame,
+                            G.SeedWaitTimeoutMs);
+                        break;
+                    }
+                }
+                else
+                {
+                    G.BarrierCond.wait(lock);
+                }
+            }
+        }
+        else
+        {
+            while (!G.NetplayStartWaitComplete)
+            {
+                if (G.SeedWaitTimeoutMs > 0)
+                {
+                    if (G.BarrierCond.wait_until(lock, deadline) == std::cv_status::timeout)
+                    {
+                        std::printf("NSMB PoC: netplay start peer wait barrier timeout inst=%d frame=%u waitedMs=%d\n",
+                            instanceID,
+                            syncFrame,
+                            G.SeedWaitTimeoutMs);
+                        return;
+                    }
+                }
+                else
+                {
+                    G.BarrierCond.wait(lock);
+                }
+            }
+            return;
+        }
+    }
+
+    std::printf("NSMB PoC: waiting for peer at netplay start frame=%u\n", syncFrame);
+    WaitForPeerIfNeeded(true);
+
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        G.WaitedForPeerAtNetplayStart = true;
+        G.NetplayStartWaitComplete = true;
+        G.BarrierCond.notify_all();
+    }
+    std::printf("NSMB PoC: peer wait at netplay start finished frame=%u\n", syncFrame);
+}
+
 bool WaitAtFrameBarrier(FrameBarrier& barrier, int instanceID, melonDS::u32 frame, const char* name)
 {
     if (!G.TestEnabled || !G.FrameBarrierEnabled || G.TestInstanceCount <= 1)
@@ -892,24 +1055,27 @@ void ApplyNetRandomPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if (kNetRandomValueOffset + sizeof(melonDS::u32) > nds->MainRAMMask + 1) return;
 
     bool shouldPatch = frame == G.NetRandomPatchFrame;
+    melonDS::u8 randomCallCountBeforePatch = 0;
     if (G.NetRandomPatchAuto)
     {
         const melonDS::u32 stageGroup = nds->ARM9Read32(0x02000000 + kGameStageGroupOffset);
         const melonDS::u32 vsMode = nds->ARM9Read32(0x02000000 + kGameVsModeOffset);
         const melonDS::u32 ggid = nds->ARM9Read32(0x02000000 + kNetGGIDOffset);
-        const melonDS::u8 randomCallCount = nds->ARM9Read8(0x02000000 + kNetRandomCallCountOffset);
-        shouldPatch = stageGroup == 9 && vsMode == 1 && ggid == 0x42 && randomCallCount == 0;
+        randomCallCountBeforePatch = nds->ARM9Read8(0x02000000 + kNetRandomCallCountOffset);
+        shouldPatch = stageGroup == 9 && vsMode == 1 && ggid == 0x42;
     }
     if (!shouldPatch) return;
 
     std::memcpy(&nds->MainRAM[kNetRandomValueOffset], &G.NetRandomPatchValue, sizeof(G.NetRandomPatchValue));
+    nds->MainRAM[kNetRandomCallCountOffset] = 0;
     G.NetRandomPatchApplied[instanceID] = true;
 
-    std::printf("NSMB Test: patched Net::random.value inst=%d frame=%u value=0x%08X auto=%d\n",
+    std::printf("NSMB Test: patched Net::random.value inst=%d frame=%u value=0x%08X auto=%d oldCount=0x%02X resetCount=1\n",
         instanceID,
         frame,
         G.NetRandomPatchValue,
-        G.NetRandomPatchAuto ? 1 : 0);
+        G.NetRandomPatchAuto ? 1 : 0,
+        randomCallCountBeforePatch);
 }
 
 std::filesystem::path StatePath(const std::string& dir, int instanceID)
@@ -961,7 +1127,10 @@ bool SaveState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         return false;
     }
 
-    G.StateSaved[instanceID] = true;
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        G.StateSaved[instanceID] = true;
+    }
     std::printf("NSMB Test: saved state inst=%d frame=%u path=%ls bytes=%u\n",
         instanceID,
         frame,
@@ -970,42 +1139,14 @@ bool SaveState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     return true;
 }
 
-bool WaitForStateSaveBarrier(int instanceID)
+bool AllStatesSavedLocked()
 {
-    if (G.TestInstanceCount <= 1) return true;
-
-    const auto start = std::chrono::steady_clock::now();
-    for (;;)
+    for (int i = 0; i < G.TestInstanceCount; i++)
     {
-        {
-            std::lock_guard<std::mutex> lock(G.Mutex);
-            bool allSaved = true;
-            for (int i = 0; i < G.TestInstanceCount; i++)
-            {
-                if (!G.StateSaved[i])
-                {
-                    allSaved = false;
-                    break;
-                }
-            }
-            if (allSaved) return true;
-        }
-
-        if (G.TestWaitTimeoutMs > 0)
-        {
-            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - start).count();
-            if (elapsed >= G.TestWaitTimeoutMs)
-            {
-                std::printf("NSMB Test: state save barrier timeout inst=%d waitedMs=%d\n",
-                    instanceID,
-                    G.TestWaitTimeoutMs);
-                return false;
-            }
-        }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (!G.StateSaved[i])
+            return false;
     }
+    return true;
 }
 
 bool SaveLocalMPState(melonDS::u32 frame)
@@ -1015,11 +1156,7 @@ bool SaveLocalMPState(melonDS::u32 frame)
         std::lock_guard<std::mutex> lock(G.Mutex);
         if (G.StateSaveDir.empty() || G.StateSaveFrame == 0) return false;
         if (frame != G.StateSaveFrame || G.LocalMPSaved) return false;
-        for (int i = 0; i < G.TestInstanceCount; i++)
-        {
-            if (!G.StateSaved[i])
-                return false;
-        }
+        if (!AllStatesSavedLocked()) return false;
         G.LocalMPSaved = true;
         stateSaveDir = G.StateSaveDir;
     }
@@ -1064,33 +1201,6 @@ bool SaveLocalMPState(melonDS::u32 frame)
         path.c_str(),
         buffer.size());
     return true;
-}
-
-bool WaitForLocalMPSaveBarrier(int instanceID)
-{
-    const auto start = std::chrono::steady_clock::now();
-    for (;;)
-    {
-        {
-            std::lock_guard<std::mutex> lock(G.Mutex);
-            if (G.LocalMPSaved) return true;
-        }
-
-        if (G.TestWaitTimeoutMs > 0)
-        {
-            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - start).count();
-            if (elapsed >= G.TestWaitTimeoutMs)
-            {
-                std::printf("NSMB Test: LocalMP save barrier timeout inst=%d waitedMs=%d\n",
-                    instanceID,
-                    G.TestWaitTimeoutMs);
-                return false;
-            }
-        }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
 }
 
 bool WaitForStateLoadBarrier(int instanceID)
@@ -1294,6 +1404,11 @@ void InitFromEnvironment()
     G.TestQuitGraceMs = std::max(0, EnvInt("MELONDS_NSML_QUIT_GRACE_MS", 0));
     G.InputTraceEnabled = EnvFlag("MELONDS_NSML_INPUT_TRACE");
     G.InputTraceInterval = std::max(1, EnvInt("MELONDS_NSML_INPUT_TRACE_INTERVAL", 60));
+    G.SeedWaitTimeoutMs = std::max(0, EnvInt("MELONDS_NSML_SEED_WAIT_TIMEOUT_MS", 10000));
+    G.WaitForPeerBeforeStart = EnvFlag("MELONDS_NSML_WAIT_FOR_PEER");
+    G.WaitForPeerAtNetplayStart = EnvFlag("MELONDS_NSML_WAIT_FOR_PEER_AT_NETPLAY_START");
+    G.DeferNetworkUntilStart = EnvFlag("MELONDS_NSML_DEFER_NETWORK_UNTIL_START");
+    G.NetplayFrameBarrierEnabled = EnvFlag("MELONDS_NSML_NETPLAY_FRAME_BARRIER");
 
     const char* inputScript = std::getenv("MELONDS_NSML_INPUT_SCRIPT");
     if (inputScript && inputScript[0]) G.InputScriptPath = inputScript;
@@ -1337,6 +1452,8 @@ void InitFromEnvironment()
         G.NetRandomPatchValue = static_cast<melonDS::u32>(std::strtoul(netRandomValue, nullptr, 0));
         G.NetRandomPatchFrame = static_cast<melonDS::u32>(
             std::max(0, EnvInt("MELONDS_NSML_NET_RANDOM_FRAME", 0)));
+        G.MatchSeed = G.NetRandomPatchValue;
+        G.MatchSeedConfigured = true;
     }
 
     const char* matchSeed = std::getenv("MELONDS_NSML_MATCH_SEED");
@@ -1377,7 +1494,7 @@ void InitFromEnvironment()
             }
         }
 
-        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d\n",
+        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d\n",
             G.TestFrames,
             G.TestInstanceCount,
             G.FrameBarrierEnabled ? 1 : 0,
@@ -1404,7 +1521,12 @@ void InitFromEnvironment()
             G.TestWaitTimeoutMs,
             G.TestQuitGraceMs,
             G.InputTraceEnabled ? 1 : 0,
-            G.InputTraceInterval);
+            G.InputTraceInterval,
+            G.SeedWaitTimeoutMs,
+            G.WaitForPeerBeforeStart ? 1 : 0,
+            G.WaitForPeerAtNetplayStart ? 1 : 0,
+            G.DeferNetworkUntilStart ? 1 : 0,
+            G.NetplayFrameBarrierEnabled ? 1 : 0);
     }
 
     if (!G.Enabled) return;
@@ -1469,7 +1591,7 @@ void InitFromEnvironment()
     }
 
     G.Ready = true;
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d matchSeed=0x%08X seedConfigured=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d matchSeed=0x%08X seedConfigured=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -1478,6 +1600,10 @@ void InitFromEnvironment()
         G.LocalInstance,
         G.NetplayStartFrame,
         G.LocalWaitsForRemote ? 1 : 0,
+        G.WaitForPeerBeforeStart ? 1 : 0,
+        G.WaitForPeerAtNetplayStart ? 1 : 0,
+        G.DeferNetworkUntilStart ? 1 : 0,
+        G.NetplayFrameBarrierEnabled ? 1 : 0,
         G.MatchSeed,
         G.MatchSeedConfigured ? 1 : 0);
 }
@@ -1505,6 +1631,11 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     const melonDS::u32 syncFrame = G.TestEnabled ? inputFrame : frame;
 
     if (!G.Enabled || !G.Ready) return testInput;
+    if (syncFrame == 0)
+    {
+        WaitForPeerIfNeeded();
+        WaitForMatchSeedIfNeeded();
+    }
 
     const bool isLocal = (instanceID == G.LocalInstance);
     const melonDS::u32 delay = static_cast<melonDS::u32>(G.Delay);
@@ -1513,8 +1644,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         : 0;
     const bool netplaySendActive = (G.NetplayStartFrame == 0 || syncFrame >= sendStartFrame);
     const bool netplayApplyActive = (G.NetplayStartFrame == 0 || syncFrame >= G.NetplayStartFrame);
+    const bool networkPumpActive = ShouldPumpNetworkAtFrame(syncFrame, sendStartFrame);
 
-    if (isLocal || G.TestEnabled)
+    if ((isLocal || G.TestEnabled) && networkPumpActive)
     {
         InputState localInput = testInput;
         if (!isLocal && G.TestEnabled)
@@ -1543,6 +1675,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     }
 
     const melonDS::u32 targetFrame = syncFrame;
+
+    if (G.NetplayFrameBarrierEnabled)
+        WaitAtFrameBarrier(GNetplayFrameBarrier, instanceID, targetFrame, "netplay");
 
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && !G.NetplayLockstepStarted[instanceID])
     {
@@ -1607,13 +1742,10 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     WaitAtFrameBarrier(GAfterFrameBarrier, instanceID, logFrame, "after");
     AdvanceSerialRunTurn(instanceID, logFrame - 1);
+    WaitForPeerAtNetplayStartBarrier(instanceID, logFrame);
 
-    if (SaveState(instanceID, logFrame, nds))
-    {
-        WaitForStateSaveBarrier(instanceID);
-        SaveLocalMPState(logFrame);
-        WaitForLocalMPSaveBarrier(instanceID);
-    }
+    SaveState(instanceID, logFrame, nds);
+    SaveLocalMPState(logFrame);
     SaveScreenshot(instanceID, logFrame, nds);
     SaveRamDump(instanceID, logFrame, nds);
 
