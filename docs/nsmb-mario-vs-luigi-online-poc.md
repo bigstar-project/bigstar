@@ -63,6 +63,7 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 | `Net::randomBranchAddress` | `0x02087E7C` | candidate |
 | `Net::randomCallCount` | `0x02088068` | candidate |
 | `Net::random.value` | `0x02088088` | candidate |
+| VS 8-coin HUD count | `0x0208A994` | candidate, traced |
 | player global candidate block | `0x0208A964..0x0208AA23` | candidate, current trace target |
 | Wi-Fi/MB candidate block | `0x0208BE00..0x0208DFFF` | candidate, current diff target |
 | render/process candidate block | `0x023F8300..0x023F853F` | candidate, current diff target |
@@ -140,7 +141,11 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 - `logs\staged-retry-7000\attempt-02` では7000フレーム検証がpassしたが、スクリーンショット上はhost/clientのStageCamera/表示がまだズレる。
   - Player Actor、実体Star Actor、星数、RNG call countは一致している。
   - `logs\staged-retry-6700-ram6600\attempt-02` のRAM dump比較では、StageCamera `id=0x013c` と `MvsLObject267 id=0x010b` 周辺に差分が出ている。
-  - 次はStageCamera / MvsLObject267 / stage表示状態をStateApply対象に追加する。
+  - StageCamera / StageSceneの一部フィールドをStateApply対象に入れたが、`logs\staged-retry-6700-camera-sync\attempt-01` では画面差分はまだ残る。MvsLObject267やstage表示状態の追加解析が必要。
+- VSの8コインHUD count候補として `0x0208A994` を特定した。
+  - `logs\staged-retry-6700-camera-sync\attempt-01` のRAM dumpではhost `2` / client `0` で、スクリーンショットの `2/8` / `0/8` と一致。
+  - `WireGameState` / `StateApply` / staged trace比較へ `vsCoinCount` を追加した。
+  - `logs\staged-retry-6200-vscoin\attempt-02` ではhost/clientとも `vsCoinCount=0x1` で一致し、6200フレーム検証がpass。
 - `id=0x010c` は再生成タイミングがhost/clientで1 trace tick程度ずれることがあるため、strictなStateApply比較からは外した。実体スター同期の判定は `id=0x0022/settings=1` のStar Actor座標とプレイヤーglobal状態を優先する。
 - RNGパッチなしの過去ログではframe5071でスター取得・再生成由来らしい `Net::random` 消費が観測されているが、現行のクリーンroute再現では条件が一致しなかった。以後は固定RTC/JIT無効/RNG seed明示を前提に再検証する。
 - savestate loadからの短いstaged netplayは、melonDSの状態hashとしては通るが、現状ではゲーム内通信復元に失敗している。

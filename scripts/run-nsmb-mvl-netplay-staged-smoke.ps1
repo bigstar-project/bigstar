@@ -371,7 +371,8 @@ if ($StateApply -and $GameStateTrace) {
             "player0Deaths",
             "player1Deaths",
             "player0CollectedStars",
-            "player1CollectedStars"
+            "player1CollectedStars",
+            "vsCoinCount"
         )
     }
 

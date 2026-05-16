@@ -70,12 +70,15 @@ constexpr melonDS::u32 kGamePlayerScoreAddr = 0x0208A9C4;
 constexpr melonDS::u32 kGamePlayerDisplayedStarsAddr = 0x0208A9CC;
 constexpr melonDS::u32 kGamePlayerDeathsAddr = 0x0208A9D4;
 constexpr melonDS::u32 kGamePlayerCollectedStarsAddr = 0x0208A9DC;
+constexpr melonDS::u32 kGameVsCoinCountAddr = 0x0208A994;
 constexpr melonDS::u32 kGameCandidateWifiBlockAddr = 0x0208BE00;
 constexpr melonDS::u32 kGameCandidateRenderBlockAddr = 0x023F8300;
 constexpr melonDS::u16 kPlayerObjectID = 0x0015;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
 constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
+constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
+constexpr melonDS::u16 kStageCameraObjectID = 0x013C;
 
 enum class Role
 {
@@ -180,6 +183,15 @@ struct WireGameState
     melonDS::u32 Player1Deaths;
     melonDS::u32 Player0CollectedStars;
     melonDS::u32 Player1CollectedStars;
+    melonDS::u32 VsCoinCount;
+    melonDS::u32 StageCameraFound;
+    melonDS::u32 StageCameraWord190;
+    melonDS::u32 StageCameraWord194;
+    melonDS::u32 StageCameraWord19C;
+    melonDS::u32 StageCameraWord1A0;
+    melonDS::u32 StageSceneFound;
+    melonDS::u32 StageSceneWord154;
+    melonDS::u32 StageSceneWord160;
     melonDS::u32 BasicHashLo;
     melonDS::u32 BasicHashHi;
     melonDS::u32 PlayerGlobalHashLo;
@@ -190,7 +202,7 @@ struct WireGameState
     melonDS::u32 RenderCandidateHashHi;
 };
 
-static_assert(sizeof(WireGameState) == 304);
+static_assert(sizeof(WireGameState) == 340);
 
 struct GameStateSample
 {
@@ -257,6 +269,15 @@ struct GameStateSample
     melonDS::u32 Player1Deaths = 0;
     melonDS::u32 Player0CollectedStars = 0;
     melonDS::u32 Player1CollectedStars = 0;
+    melonDS::u32 VsCoinCount = 0;
+    melonDS::u32 StageCameraFound = 0;
+    melonDS::u32 StageCameraWord190 = 0;
+    melonDS::u32 StageCameraWord194 = 0;
+    melonDS::u32 StageCameraWord19C = 0;
+    melonDS::u32 StageCameraWord1A0 = 0;
+    melonDS::u32 StageSceneFound = 0;
+    melonDS::u32 StageSceneWord154 = 0;
+    melonDS::u32 StageSceneWord160 = 0;
     melonDS::u64 Hash = 0;
 };
 
@@ -853,6 +874,15 @@ void PumpNetworkLocked()
                     sample.Player1Deaths = packet.Player1Deaths;
                     sample.Player0CollectedStars = packet.Player0CollectedStars;
                     sample.Player1CollectedStars = packet.Player1CollectedStars;
+                    sample.VsCoinCount = packet.VsCoinCount;
+                    sample.StageCameraFound = packet.StageCameraFound;
+                    sample.StageCameraWord190 = packet.StageCameraWord190;
+                    sample.StageCameraWord194 = packet.StageCameraWord194;
+                    sample.StageCameraWord19C = packet.StageCameraWord19C;
+                    sample.StageCameraWord1A0 = packet.StageCameraWord1A0;
+                    sample.StageSceneFound = packet.StageSceneFound;
+                    sample.StageSceneWord154 = packet.StageSceneWord154;
+                    sample.StageSceneWord160 = packet.StageSceneWord160;
                     sample.Hash = hashes.Basic;
                     G.RemoteGameStateSamples[key] = sample;
                     CompareGameStateLocked(static_cast<int>(packet.Instance), packet.Frame);
@@ -1608,6 +1638,33 @@ void WriteObjectTransform(melonDS::NDS* nds, const ObjectScanSample& actor, melo
     }
 }
 
+bool ReadObjectWordByIDAndSettings(
+    melonDS::NDS* nds,
+    melonDS::u16 expectedObjectID,
+    melonDS::u32 expectedSettings,
+    melonDS::u32 relativeOffset,
+    melonDS::u32& value)
+{
+    const ObjectScanSample actor = FindObjectByIDAndSettings(nds, expectedObjectID, expectedSettings);
+    if (!actor.Found || actor.Base < kMainRAMBase)
+        return false;
+    return ReadMainRAMU32(nds, actor.Base - kMainRAMBase + relativeOffset, value);
+}
+
+bool WriteObjectWordByIDAndSettings(
+    melonDS::NDS* nds,
+    melonDS::u16 expectedObjectID,
+    melonDS::u32 expectedSettings,
+    melonDS::u32 relativeOffset,
+    melonDS::u32 value)
+{
+    const ObjectScanSample actor = FindObjectByIDAndSettings(nds, expectedObjectID, expectedSettings);
+    if (!actor.Found || actor.Base < kMainRAMBase)
+        return false;
+    WriteMainRAMU32(nds, actor.Base - kMainRAMBase + relativeOffset, value);
+    return true;
+}
+
 void ApplyPlayerSnapToStar(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (G.PlayerSnapToStarFrame == 0) return;
@@ -1882,6 +1939,20 @@ void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     nds->ARM9Write32(kGamePlayerDeathsAddr + sizeof(melonDS::u32), sample.Player1Deaths);
     nds->ARM9Write32(kGamePlayerCollectedStarsAddr, sample.Player0CollectedStars);
     nds->ARM9Write32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32), sample.Player1CollectedStars);
+    nds->ARM9Write32(kGameVsCoinCountAddr, sample.VsCoinCount);
+
+    if (sample.StageCameraFound)
+    {
+        WriteObjectWordByIDAndSettings(nds, kStageCameraObjectID, 0, 0x190, sample.StageCameraWord190);
+        WriteObjectWordByIDAndSettings(nds, kStageCameraObjectID, 0, 0x194, sample.StageCameraWord194);
+        WriteObjectWordByIDAndSettings(nds, kStageCameraObjectID, 0, 0x19C, sample.StageCameraWord19C);
+        WriteObjectWordByIDAndSettings(nds, kStageCameraObjectID, 0, 0x1A0, sample.StageCameraWord1A0);
+    }
+    if (sample.StageSceneFound)
+    {
+        WriteObjectWordByIDAndSettings(nds, kStageSceneObjectID, 0x00B5FF00, 0x154, sample.StageSceneWord154);
+        WriteObjectWordByIDAndSettings(nds, kStageSceneObjectID, 0x00B5FF00, 0x160, sample.StageSceneWord160);
+    }
 
     if (sample.VsStarFound)
     {
@@ -2022,6 +2093,23 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.Player1Deaths = nds->ARM9Read32(kGamePlayerDeathsAddr + sizeof(melonDS::u32));
     sample.Player0CollectedStars = nds->ARM9Read32(kGamePlayerCollectedStarsAddr);
     sample.Player1CollectedStars = nds->ARM9Read32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32));
+    sample.VsCoinCount = nds->ARM9Read32(kGameVsCoinCountAddr);
+
+    melonDS::u32 stageWord = 0;
+    if (ReadObjectWordByIDAndSettings(nds, kStageCameraObjectID, 0, 0x190, stageWord))
+    {
+        sample.StageCameraFound = 1;
+        sample.StageCameraWord190 = stageWord;
+        ReadObjectWordByIDAndSettings(nds, kStageCameraObjectID, 0, 0x194, sample.StageCameraWord194);
+        ReadObjectWordByIDAndSettings(nds, kStageCameraObjectID, 0, 0x19C, sample.StageCameraWord19C);
+        ReadObjectWordByIDAndSettings(nds, kStageCameraObjectID, 0, 0x1A0, sample.StageCameraWord1A0);
+    }
+    if (ReadObjectWordByIDAndSettings(nds, kStageSceneObjectID, 0x00B5FF00, 0x154, stageWord))
+    {
+        sample.StageSceneFound = 1;
+        sample.StageSceneWord154 = stageWord;
+        ReadObjectWordByIDAndSettings(nds, kStageSceneObjectID, 0x00B5FF00, 0x160, sample.StageSceneWord160);
+    }
 
     sample.Hash = 1469598103934665603ull;
     MixGameStateValue(sample.Hash, sample.StageID);
@@ -2085,6 +2173,15 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.Player1Deaths);
     MixGameStateValue(sample.Hash, sample.Player0CollectedStars);
     MixGameStateValue(sample.Hash, sample.Player1CollectedStars);
+    MixGameStateValue(sample.Hash, sample.VsCoinCount);
+    MixGameStateValue(sample.Hash, sample.StageCameraFound);
+    MixGameStateValue(sample.Hash, sample.StageCameraWord190);
+    MixGameStateValue(sample.Hash, sample.StageCameraWord194);
+    MixGameStateValue(sample.Hash, sample.StageCameraWord19C);
+    MixGameStateValue(sample.Hash, sample.StageCameraWord1A0);
+    MixGameStateValue(sample.Hash, sample.StageSceneFound);
+    MixGameStateValue(sample.Hash, sample.StageSceneWord154);
+    MixGameStateValue(sample.Hash, sample.StageSceneWord160);
     return sample;
 }
 
@@ -2334,6 +2431,7 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                          << ",0x" << sample.Player1Deaths
                          << ",0x" << sample.Player0CollectedStars
                          << ",0x" << sample.Player1CollectedStars
+                         << ",0x" << sample.VsCoinCount
                          << ",0x" << playerGlobalHash
                          << ",0x" << wifiCandidateHash
                          << ",0x" << renderCandidateHash;
@@ -2438,6 +2536,15 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     packet.Player1Deaths = sample.Player1Deaths;
     packet.Player0CollectedStars = sample.Player0CollectedStars;
     packet.Player1CollectedStars = sample.Player1CollectedStars;
+    packet.VsCoinCount = sample.VsCoinCount;
+    packet.StageCameraFound = sample.StageCameraFound;
+    packet.StageCameraWord190 = sample.StageCameraWord190;
+    packet.StageCameraWord194 = sample.StageCameraWord194;
+    packet.StageCameraWord19C = sample.StageCameraWord19C;
+    packet.StageCameraWord1A0 = sample.StageCameraWord1A0;
+    packet.StageSceneFound = sample.StageSceneFound;
+    packet.StageSceneWord154 = sample.StageSceneWord154;
+    packet.StageSceneWord160 = sample.StageSceneWord160;
     packet.BasicHashLo = static_cast<melonDS::u32>(hashes.Basic & 0xFFFFFFFFu);
     packet.BasicHashHi = static_cast<melonDS::u32>(hashes.Basic >> 32);
     packet.PlayerGlobalHashLo = static_cast<melonDS::u32>(hashes.PlayerGlobal & 0xFFFFFFFFu);
@@ -2887,7 +2994,7 @@ void InitFromEnvironment()
         {
             G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,ggid,netRandomValue,netRandomCallCount,netRandomBranchAddress,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Settings,playerActor0X,playerActor0Y,playerActor0Z,playerActor1Found,playerActor1Guid,playerActor1Settings,playerActor1X,playerActor1Y,playerActor1Z";
             if (G.GameStateTraceExtended)
-                G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,playerGlobalHash,wifiCandidateHash,renderCandidateHash";
+                G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,playerGlobalHash,wifiCandidateHash,renderCandidateHash";
             G.GameStateTrace << '\n';
         }
     }
