@@ -8,6 +8,8 @@ param(
     [int]$GameStateTraceInterval = 60,
     [switch]$GameStateTraceExtended,
     [switch]$StateSync,
+    [switch]$StateApply,
+    [switch]$AllowStateMismatch,
     [int]$StateSyncInterval = 60,
     [switch]$StateSyncExtended,
     [string]$RamDumpFrames = "",
@@ -129,6 +131,11 @@ function Start-MelonStagedProcess {
     if ($StateSync) {
         $env:MELONDS_NSML_STATE_SYNC = "1"
         $env:MELONDS_NSML_STATE_SYNC_INTERVAL = "$StateSyncInterval"
+        if ($StateApply) {
+            $env:MELONDS_NSML_STATE_APPLY = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_STATE_APPLY -ErrorAction SilentlyContinue
+        }
         if ($StateSyncExtended) {
             $env:MELONDS_NSML_STATE_SYNC_EXTENDED = "1"
         } else {
@@ -136,6 +143,7 @@ function Start-MelonStagedProcess {
         }
     } else {
         Remove-Item Env:\MELONDS_NSML_STATE_SYNC -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_STATE_APPLY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_STATE_SYNC_INTERVAL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_STATE_SYNC_EXTENDED -ErrorAction SilentlyContinue
     }
@@ -297,8 +305,60 @@ if (Select-String -Path $hostOut, $clientOut -Pattern "remote input timeout" -Qu
     throw "remote input timeout was reported. See $logRoot"
 }
 
-if (Select-String -Path $hostOut, $clientOut -Pattern "game state mismatch" -Quiet) {
+if (-not $AllowStateMismatch -and (Select-String -Path $hostOut, $clientOut -Pattern "game state mismatch" -Quiet)) {
     throw "game state mismatch was reported. See $logRoot"
+}
+
+if ($StateApply -and $GameStateTrace) {
+    $hostRows = Import-Csv $hostGameStateTrace
+    $clientRows = Import-Csv $clientGameStateTrace
+    $clientByKey = @{}
+    foreach ($row in $clientRows) {
+        $clientByKey["$($row.instance):$($row.frame)"] = $row
+    }
+
+    $stateApplyColumns = @(
+        "stageID",
+        "stageGroup",
+        "vsMode",
+        "ggid",
+        "netRandomValue",
+        "netRandomCallCount",
+        "netRandomBranchAddress",
+        "vsStarFound",
+        "vsStarGuid",
+        "vsStarX",
+        "vsStarY",
+        "vsStarZ",
+        "playerActor0Guid",
+        "playerActor0X",
+        "playerActor0Y",
+        "playerActor0Z",
+        "playerActor1Guid",
+        "playerActor1X",
+        "playerActor1Y",
+        "playerActor1Z"
+    )
+
+    $checked = 0
+    foreach ($row in $hostRows) {
+        if ([int]$row.frame -lt $NetplayStartFrame) {
+            continue
+        }
+        $other = $clientByKey["$($row.instance):$($row.frame)"]
+        if (-not $other) {
+            continue
+        }
+        $checked++
+        foreach ($column in $stateApplyColumns) {
+            if ($row.$column -ne $other.$column) {
+                throw "state apply trace mismatch at instance=$($row.instance) frame=$($row.frame) column=$column host=$($row.$column) client=$($other.$column). See $logRoot"
+            }
+        }
+    }
+    if ($checked -eq 0) {
+        throw "state apply trace comparison had no common rows. See $logRoot"
+    }
 }
 
 Write-Host "NSMB Mario vs Luigi staged netplay smoke passed: frames=$Frames start=$NetplayStartFrame seed=$Seed"

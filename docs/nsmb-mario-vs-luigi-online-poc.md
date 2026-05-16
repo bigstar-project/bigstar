@@ -87,6 +87,10 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
   - `logs\staged-player-vsstar-trace` では、星座標は一致する一方で、Player ActorのX/Yがframe4500以降にhost/clientでズレる。
   - これは「星の初期位置が一致しても、プレイヤー物理状態まで入力だけで完全一致する」とは言えないことを示す。
   - 以後はPlayer Actor位置も重要状態同期の候補に含める。
+- `MELONDS_NSML_STATE_APPLY=1` のhost権威補正PoCを追加した。
+  - WireGameStateにStar/Player/RNGの実値を載せ、client側で受信済み状態をMainRAMへ書き戻せる。
+  - `logs\staged-state-apply-verified` では、host/clientのゲーム状態trace上のPlayer Actor座標が一致し、staged smokeのStateApply用trace比較もpass。
+  - ただし既存の `game state mismatch` ログは「適用前に送られた状態」との比較でも出るため、StateApplyの成否判定にはtrace比較を使う必要がある。
 - `-StateSyncExtended` ではmismatchが出るが、分解結果では `basic=1`、`playerGlobal=1`、`wifiCandidate=0`、`renderCandidate=0`。
 - つまり、現在見えている差分はプレイヤーの得点・星・コイン等のglobal状態ではなく、Wi-Fi/MB候補領域とrender/process候補領域に集中している。
 - frame 4500 RAM dump比較では以下の傾向。
@@ -133,7 +137,7 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 
 1. 過去ログのframe5071付近と現行ログを比較し、スター取得・再生成時に変わるActor/manager状態を特定する。
 2. VS Battle Star `id=0x010c` が取得判定本体なのか、spawn marker/manager側状態なのかを切り分ける。
-3. Player Actor座標のズレを、入力同期開始前の揺れなのか、入力同期適用後も残るズレなのかに分解する。
+3. Player Actor補正がプレイ継続・スクリーンショット・次のスター再生成へ悪影響を出さないか確認する。
 4. スター/プレイヤーの重要状態がズレる場合は、Actor座標・settings・RNG seed/call count・manager slot状態のどこを同期すべきか切り分け、最小メモリパッチを作る。
 5. 8コインアイテムは自動化が難しいため一旦保留し、スター同期の見通しが立ってから同じActor trace方式で対象を特定する。
 6. ランダムステージ、勝敗・タイマー・スコアなど、対戦で同期すべき状態を個別に特定する。
@@ -169,6 +173,9 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 
 # VS Battle Star候補Actor込みのstaged trace
 .\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500 -Port 8071 -InputScript tests\nsmb_mario_vs_luigi_star_probe.inputs -GameStateTrace -StateSync
+
+# host権威の重要状態適用PoC。mismatchログは適用前比較でも出るため許容し、traceを比較する。
+.\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500 -Port 8071 -InputScript tests\nsmb_mario_vs_luigi_star_probe.inputs -GameStateTrace -StateSync -StateApply -StateSyncInterval 10 -AllowStateMismatch
 
 # 候補領域別hash同期。mismatch検出用なので失敗が期待結果になることがある。
 .\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500 -Port 8071 -GameStateTrace -StateSync -StateSyncExtended

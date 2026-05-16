@@ -123,6 +123,27 @@ struct WireGameState
     melonDS::u32 NetRandomValue;
     melonDS::u32 NetRandomCallCount;
     melonDS::u32 NetRandomBranchAddress;
+    melonDS::u32 VsStarFound;
+    melonDS::u32 VsStarGUID;
+    melonDS::u32 VsStarBase;
+    melonDS::u32 VsStarSettings;
+    melonDS::u32 VsStarStateType;
+    melonDS::u32 VsStarFlags;
+    melonDS::u32 VsStarPosX;
+    melonDS::u32 VsStarPosY;
+    melonDS::u32 VsStarPosZ;
+    melonDS::u32 PlayerActor0Found;
+    melonDS::u32 PlayerActor0GUID;
+    melonDS::u32 PlayerActor0Settings;
+    melonDS::u32 PlayerActor0PosX;
+    melonDS::u32 PlayerActor0PosY;
+    melonDS::u32 PlayerActor0PosZ;
+    melonDS::u32 PlayerActor1Found;
+    melonDS::u32 PlayerActor1GUID;
+    melonDS::u32 PlayerActor1Settings;
+    melonDS::u32 PlayerActor1PosX;
+    melonDS::u32 PlayerActor1PosY;
+    melonDS::u32 PlayerActor1PosZ;
     melonDS::u32 BasicHashLo;
     melonDS::u32 BasicHashHi;
     melonDS::u32 PlayerGlobalHashLo;
@@ -133,7 +154,7 @@ struct WireGameState
     melonDS::u32 RenderCandidateHashHi;
 };
 
-static_assert(sizeof(WireGameState) == 84);
+static_assert(sizeof(WireGameState) == 168);
 
 struct GameStateSample
 {
@@ -225,6 +246,7 @@ struct State
     bool GameStateTraceExtended = false;
     bool GameStateSyncEnabled = false;
     bool GameStateSyncExtended = false;
+    bool GameStateApplyEnabled = false;
     int GameStateSyncInterval = 60;
     int SeedWaitTimeoutMs = 10000;
     bool WaitForPeerBeforeStart = false;
@@ -274,6 +296,7 @@ struct State
     std::map<melonDS::u32, InputState> RemoteInputs;
     std::map<melonDS::u64, GameStateSyncHashes> LocalGameStateHashes;
     std::map<melonDS::u64, GameStateSyncHashes> RemoteGameStateHashes;
+    std::map<melonDS::u64, GameStateSample> RemoteGameStateSamples;
     bool GameStateMismatchSeen = false;
     melonDS::u32 LastTracedSentInputFrame = kNoFrameLimit;
     melonDS::u32 LastTracedReceivedInputFrame = kNoFrameLimit;
@@ -680,7 +703,42 @@ void PumpNetworkLocked()
                     hashes.PlayerGlobal = (static_cast<melonDS::u64>(packet.PlayerGlobalHashHi) << 32) | packet.PlayerGlobalHashLo;
                     hashes.WifiCandidate = (static_cast<melonDS::u64>(packet.WifiCandidateHashHi) << 32) | packet.WifiCandidateHashLo;
                     hashes.RenderCandidate = (static_cast<melonDS::u64>(packet.RenderCandidateHashHi) << 32) | packet.RenderCandidateHashLo;
-                    G.RemoteGameStateHashes[GameStateKey(static_cast<int>(packet.Instance), packet.Frame)] = hashes;
+                    const int packetInstance = static_cast<int>(packet.Instance);
+                    const melonDS::u64 key = GameStateKey(packetInstance, packet.Frame);
+                    G.RemoteGameStateHashes[key] = hashes;
+
+                    GameStateSample sample;
+                    sample.StageID = packet.StageID;
+                    sample.StageGroup = packet.StageGroup;
+                    sample.VsMode = packet.VsMode;
+                    sample.LocalPlayerID = packet.LocalPlayerID;
+                    sample.GGID = packet.GGID;
+                    sample.NetRandomValue = packet.NetRandomValue;
+                    sample.NetRandomCallCount = packet.NetRandomCallCount;
+                    sample.NetRandomBranchAddress = packet.NetRandomBranchAddress;
+                    sample.VsStarFound = packet.VsStarFound;
+                    sample.VsStarGUID = packet.VsStarGUID;
+                    sample.VsStarBase = packet.VsStarBase;
+                    sample.VsStarSettings = packet.VsStarSettings;
+                    sample.VsStarStateType = packet.VsStarStateType;
+                    sample.VsStarFlags = packet.VsStarFlags;
+                    sample.VsStarPosX = packet.VsStarPosX;
+                    sample.VsStarPosY = packet.VsStarPosY;
+                    sample.VsStarPosZ = packet.VsStarPosZ;
+                    sample.PlayerActor0Found = packet.PlayerActor0Found;
+                    sample.PlayerActor0GUID = packet.PlayerActor0GUID;
+                    sample.PlayerActor0Settings = packet.PlayerActor0Settings;
+                    sample.PlayerActor0PosX = packet.PlayerActor0PosX;
+                    sample.PlayerActor0PosY = packet.PlayerActor0PosY;
+                    sample.PlayerActor0PosZ = packet.PlayerActor0PosZ;
+                    sample.PlayerActor1Found = packet.PlayerActor1Found;
+                    sample.PlayerActor1GUID = packet.PlayerActor1GUID;
+                    sample.PlayerActor1Settings = packet.PlayerActor1Settings;
+                    sample.PlayerActor1PosX = packet.PlayerActor1PosX;
+                    sample.PlayerActor1PosY = packet.PlayerActor1PosY;
+                    sample.PlayerActor1PosZ = packet.PlayerActor1PosZ;
+                    sample.Hash = hashes.Basic;
+                    G.RemoteGameStateSamples[key] = sample;
                     CompareGameStateLocked(static_cast<int>(packet.Instance), packet.Frame);
                 }
             }
@@ -1359,6 +1417,108 @@ void ApplyVsStarSnap(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         player.PosZ);
 }
 
+bool WriteObjectPositionByGUID(melonDS::NDS* nds, melonDS::u32 guid, melonDS::u32 posX, melonDS::u32 posY, melonDS::u32 posZ)
+{
+    if (!nds || !nds->MainRAM || guid == 0)
+        return false;
+
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (ramLen < 0x120)
+        return false;
+
+    for (melonDS::u32 off = 0; off <= ramLen - 0x120; off += 4)
+    {
+        melonDS::u32 candidateGUID = 0;
+        if (!ReadMainRAMU32(nds, off + 4, candidateGUID) || candidateGUID != guid)
+            continue;
+
+        melonDS::u32 vtable = 0;
+        melonDS::u16 objectID = 0;
+        melonDS::u16 stateType = 0;
+        melonDS::u32 flags = 0;
+        if (!ReadMainRAMU32(nds, off, vtable) ||
+            !ReadMainRAMU16(nds, off + 0x0C, objectID) ||
+            !ReadMainRAMU16(nds, off + 0x0E, stateType) ||
+            !ReadMainRAMU32(nds, off + 0x10, flags))
+            continue;
+
+        if (vtable < kMainRAMBase || vtable >= kMainRAMBase + ramLen)
+            continue;
+        if (objectID == 0 || objectID >= 0x400)
+            continue;
+        if (stateType != 1 && stateType != 2 && stateType != 3)
+            continue;
+        if (flags >= 0x01000000)
+            continue;
+
+        WriteMainRAMU32(nds, off + 0x5C, posX);
+        WriteMainRAMU32(nds, off + 0x60, posY);
+        WriteMainRAMU32(nds, off + 0x64, posZ);
+        return true;
+    }
+
+    return false;
+}
+
+bool FindLatestRemoteGameStateLocked(int instanceID, melonDS::u32 frame, GameStateSample& sample, melonDS::u32& sampleFrame)
+{
+    bool found = false;
+    melonDS::u32 bestFrame = 0;
+    const melonDS::u64 instancePrefix = static_cast<melonDS::u64>(static_cast<melonDS::u32>(instanceID)) << 32;
+    for (const auto& [key, value] : G.RemoteGameStateSamples)
+    {
+        if ((key & 0xFFFFFFFF00000000ull) != instancePrefix)
+            continue;
+        const melonDS::u32 candidateFrame = static_cast<melonDS::u32>(key & 0xFFFFFFFFu);
+        if (candidateFrame > frame)
+            continue;
+        if (found && candidateFrame <= bestFrame)
+            continue;
+        found = true;
+        bestFrame = candidateFrame;
+        sample = value;
+    }
+
+    sampleFrame = bestFrame;
+    return found;
+}
+
+void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.Enabled || !G.GameStateApplyEnabled || G.NetRole != Role::Client) return;
+    if (instanceID < 0 || instanceID >= 16 || !nds || !nds->MainRAM) return;
+    if (frame < G.NetplayStartFrame) return;
+
+    GameStateSample sample;
+    melonDS::u32 sampleFrame = 0;
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        PumpNetworkLocked();
+        if (!FindLatestRemoteGameStateLocked(instanceID, frame, sample, sampleFrame))
+            return;
+    }
+
+    nds->ARM9Write32(kNetRandomValueAddr, sample.NetRandomValue);
+    nds->ARM9Write8(kNetRandomCallCountAddr, static_cast<melonDS::u8>(sample.NetRandomCallCount & 0xFF));
+    nds->ARM9Write32(kNetRandomBranchAddressAddr, sample.NetRandomBranchAddress);
+
+    if (sample.VsStarFound)
+        WriteObjectPositionByGUID(nds, sample.VsStarGUID, sample.VsStarPosX, sample.VsStarPosY, sample.VsStarPosZ);
+    if (sample.PlayerActor0Found)
+        WriteObjectPositionByGUID(nds, sample.PlayerActor0GUID, sample.PlayerActor0PosX, sample.PlayerActor0PosY, sample.PlayerActor0PosZ);
+    if (sample.PlayerActor1Found)
+        WriteObjectPositionByGUID(nds, sample.PlayerActor1GUID, sample.PlayerActor1PosX, sample.PlayerActor1PosY, sample.PlayerActor1PosZ);
+
+    if (G.InputTraceEnabled &&
+        (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
+    {
+        std::printf("NSMB PoC: applied remote game state inst=%d frame=%u sampleFrame=%u\n",
+            instanceID,
+            frame,
+            sampleFrame);
+    }
+}
+
 GameStateSample ReadGameStateSample(melonDS::NDS* nds)
 {
     GameStateSample sample;
@@ -1730,6 +1890,27 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     packet.NetRandomValue = sample.NetRandomValue;
     packet.NetRandomCallCount = sample.NetRandomCallCount;
     packet.NetRandomBranchAddress = sample.NetRandomBranchAddress;
+    packet.VsStarFound = sample.VsStarFound;
+    packet.VsStarGUID = sample.VsStarGUID;
+    packet.VsStarBase = sample.VsStarBase;
+    packet.VsStarSettings = sample.VsStarSettings;
+    packet.VsStarStateType = sample.VsStarStateType;
+    packet.VsStarFlags = sample.VsStarFlags;
+    packet.VsStarPosX = sample.VsStarPosX;
+    packet.VsStarPosY = sample.VsStarPosY;
+    packet.VsStarPosZ = sample.VsStarPosZ;
+    packet.PlayerActor0Found = sample.PlayerActor0Found;
+    packet.PlayerActor0GUID = sample.PlayerActor0GUID;
+    packet.PlayerActor0Settings = sample.PlayerActor0Settings;
+    packet.PlayerActor0PosX = sample.PlayerActor0PosX;
+    packet.PlayerActor0PosY = sample.PlayerActor0PosY;
+    packet.PlayerActor0PosZ = sample.PlayerActor0PosZ;
+    packet.PlayerActor1Found = sample.PlayerActor1Found;
+    packet.PlayerActor1GUID = sample.PlayerActor1GUID;
+    packet.PlayerActor1Settings = sample.PlayerActor1Settings;
+    packet.PlayerActor1PosX = sample.PlayerActor1PosX;
+    packet.PlayerActor1PosY = sample.PlayerActor1PosY;
+    packet.PlayerActor1PosZ = sample.PlayerActor1PosZ;
     packet.BasicHashLo = static_cast<melonDS::u32>(hashes.Basic & 0xFFFFFFFFu);
     packet.BasicHashHi = static_cast<melonDS::u32>(hashes.Basic >> 32);
     packet.PlayerGlobalHashLo = static_cast<melonDS::u32>(hashes.PlayerGlobal & 0xFFFFFFFFu);
@@ -2107,6 +2288,7 @@ void InitFromEnvironment()
     G.GameStateTraceExtended = EnvFlag("MELONDS_NSML_GAME_STATE_TRACE_EXTENDED");
     G.GameStateSyncEnabled = EnvFlag("MELONDS_NSML_STATE_SYNC");
     G.GameStateSyncExtended = EnvFlag("MELONDS_NSML_STATE_SYNC_EXTENDED");
+    G.GameStateApplyEnabled = EnvFlag("MELONDS_NSML_STATE_APPLY");
     G.GameStateSyncInterval = std::max(1, EnvInt("MELONDS_NSML_STATE_SYNC_INTERVAL", 60));
 
     const char* memPatchFile = std::getenv("MELONDS_NSML_MEM_PATCH_FILE");
@@ -2195,7 +2377,7 @@ void InitFromEnvironment()
             }
         }
 
-        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateSyncInterval=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d\n",
+        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d\n",
             G.TestFrames,
             G.TestInstanceCount,
             G.FrameBarrierEnabled ? 1 : 0,
@@ -2211,6 +2393,7 @@ void InitFromEnvironment()
             G.GameStateTracePath.empty() ? "<none>" : G.GameStateTracePath.c_str(),
             G.GameStateTraceInterval,
             G.GameStateSyncEnabled ? 1 : 0,
+            G.GameStateApplyEnabled ? 1 : 0,
             G.GameStateSyncInterval,
             G.MemPatchFile.empty() ? "<none>" : G.MemPatchFile.c_str(),
             G.MemPatchFrameSet ? G.MemPatchFrame : 0,
@@ -2332,6 +2515,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyVsStarSnap(instanceID, inputFrame, nds);
 
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyRemoteGameState(instanceID, inputFrame, nds);
+
     WaitForSerialRunTurn(instanceID, inputFrame);
     WaitAtFrameBarrier(GBeforeFrameBarrier, instanceID, inputFrame, "before");
 
@@ -2451,6 +2637,9 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     WaitAtFrameBarrier(GAfterFrameBarrier, instanceID, logFrame, "after");
     AdvanceSerialRunTurn(instanceID, logFrame - 1);
     WaitForPeerAtNetplayStartBarrier(instanceID, logFrame);
+
+    if (G.Enabled)
+        ApplyRemoteGameState(instanceID, logFrame, nds);
 
     SaveState(instanceID, logFrame, nds);
     SaveLocalMPState(logFrame);
