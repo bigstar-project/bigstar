@@ -40,6 +40,37 @@ inst0 2640-2647 A
 inst0 2760-2767 A
 2768-3099 NONE
 
+# Local MP discovery timing can drift in PoC host/client runs. Keep retrying
+# the menu confirmations before and during the early movement probe.
+inst0 3120-3127 A
+inst0 3240-3247 A
+inst0 3360-3367 A
+inst0 3480-3487 A
+inst0 3600-3607 A
+inst0 3720-3727 A
+inst0 3840-3847 A
+inst0 3960-3967 A
+inst0 4080-4087 A
+inst0 4200-4207 A
+inst0 4320-4327 A
+inst0 4440-4447 A
+inst0 4560-4567 A
+inst0 4680-4687 A
+inst0 4800-4807 A
+inst0 4920-4927 A
+inst0 5040-5047 A
+inst0 5160-5167 A
+inst0 5280-5287 A
+inst0 5400-5407 A
+inst0 5520-5527 A
+inst1 3120-3127 A
+inst1 3240-3247 A
+inst1 3360-3367 A
+inst1 3480-3487 A
+inst1 3600-3607 A
+inst1 3720-3727 A
+inst1 3840-3847 A
+
 # Trial movement: wait for the match to be safely running, then try jumps
 # around the first visible star.
 inst0 3100-4199 NONE

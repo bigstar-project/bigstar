@@ -131,6 +131,13 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 - Star Actorはhost/clientでGUIDが異なる再生成ケースがあるため、StateApply時にGUID一致で見つからない場合は `id=0x0022/settings=1` のローカルActorへ座標適用するフォールバックを追加した。
   - `logs\staged-state-apply-current-star-score-regression`: 最新コードでもスター取得相当の4700フレームstaged検証はpass。
   - `logs\staged-state-apply-star-fallback-respawn-7000`: 7000フレームstaged自体はpassしたが、この実行ではスター取得が起きていなかったため、再生成同期の確定証拠には使わない。
+- staged host/clientの到達ルートはまだLocal MP探索タイミングに揺れがある。
+  - 失敗時はクラッシュではなく、片側が「ルイージをさがしています」または参加確認画面に残る。
+  - `tests\nsmb_mario_vs_luigi_star_probe.inputs` にMario/Luigi両側の確認A再送を追加し、`logs\staged-state-apply-menu-retries-6200` では6200フレーム検証がpass。
+  - この6200フレーム検証では、スター取得後もhost/client双方で `player0BattleStars=0x4`、実体Star Actor座標、RNG call countが一致した。
+  - `scripts\run-nsmb-mvl-netplay-staged-retry.ps1` を追加した。`logs\staged-retry-6200` では1回目が到達フレークで失敗し、2回目で6200フレーム検証がpass。
+  - ただしLocal MP探索の揺れ自体は残っているため、長期的には起動到達の自動リトライ、またはNSMB側patchで参加確認を短絡する必要がある。
+- `id=0x010c` は再生成タイミングがhost/clientで1 trace tick程度ずれることがあるため、strictなStateApply比較からは外した。実体スター同期の判定は `id=0x0022/settings=1` のStar Actor座標とプレイヤーglobal状態を優先する。
 - RNGパッチなしの過去ログではframe5071でスター取得・再生成由来らしい `Net::random` 消費が観測されているが、現行のクリーンroute再現では条件が一致しなかった。以後は固定RTC/JIT無効/RNG seed明示を前提に再検証する。
 - savestate loadからの短いstaged netplayは、melonDSの状態hashとしては通るが、現状ではゲーム内通信復元に失敗している。
   - `logs\staged-netplay-state-load-no-rng-repatch`: 900フレーム、`-StateSync` mismatchなし。
@@ -159,14 +166,15 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 
 ## 次にやること
 
-1. StateApplyの適用ラグをさらに減らす。現状はフレーム4385付近に短いmismatchが残る。
-2. スター取得後に次スターが再生成されるまで長く走らせ、Star Actor / `id=0x010c` / RNG timelineがhost/clientで揃うか確認する。7000フレームstagedでは取得が起きない実行もあるため、まず取得を安定化する。
-3. 診断フックなしの入力スクリプトでスター取得できるルートを作る。難しければ、しばらくはstick診断を回帰テストとして使う。
-4. Star Actor側も必要なら前フレーム座標・速度・stateTypeをStateApply対象に拡張する。
-5. 8コインアイテムは自動化が難しいため一旦保留し、スター同期の見通しが立ってから同じActor trace方式で対象を特定する。
-6. ランダムステージ、勝敗・タイマー・スコアなど、対戦で同期すべき状態を個別に特定する。
-7. 入力同期netplayと重要状態同期を結合し、ローカル2プロセスで2PC相当の検証を継続する。
-8. state-load経路は必要になった場合だけ追加調査する。現時点では最終対戦実現の主経路にしない。
+1. staged host/clientがMvsLへ入れない揺れを減らす。まずは入力再送・起動待ち・自動リトライで検証足場を安定化し、必要ならNSMB側patchで参加確認を短絡する。
+2. スター取得後に次スターが再生成されるまで長く走らせ、実体Star Actor / RNG timeline / player globalがhost/clientで揃うか確認する。
+3. StateApplyの適用ラグをさらに減らす。現状は通信経由の補正なので、trace上は数フレーム遅れのmismatchがあり得る。
+4. 診断フックなしの入力スクリプトでスター取得できるルートを作る。難しければ、しばらくはstick診断を回帰テストとして使う。
+5. Star Actor側も必要なら前フレーム座標・速度・stateTypeをStateApply対象に拡張する。
+6. 8コインアイテムは自動化が難しいため一旦保留し、スター同期の見通しが立ってから同じActor trace方式で対象を特定する。
+7. ランダムステージ、勝敗・タイマー・スコアなど、対戦で同期すべき状態を個別に特定する。
+8. 入力同期netplayと重要状態同期を結合し、ローカル2プロセスで2PC相当の検証を継続する。
+9. state-load経路は必要になった場合だけ追加調査する。現時点では最終対戦実現の主経路にしない。
 
 ## よく使う検証コマンド
 
@@ -212,6 +220,9 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 
 # スター取得相当の星数増加を含むStateApply検証
 .\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 4700 -NetplayStartFrame 4200 -Port 8071 -InputScript tests\nsmb_mario_vs_luigi_star_probe.inputs -GameStateTrace -GameStateTraceInterval 10 -GameStateTraceExtended -StateSync -StateApply -StateApplyCompareStartFrame 4670 -StateSyncInterval 5 -AllowStateMismatch -PlayerStickToStarStartFrame 4380 -PlayerStickToStarEndFrame 4440 -PlayerStickToStarSlot 0
+
+# Local MP到達フレークを自動リトライしながら6200フレームまで検証
+.\scripts\run-nsmb-mvl-netplay-staged-retry.ps1 -Attempts 2 -Frames 6200 -Port 8140 -LogDir logs\staged-retry-6200 -WaitTimeoutMs 480000
 
 # 候補領域別hash同期。mismatch検出用なので失敗が期待結果になることがある。
 .\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500 -Port 8071 -GameStateTrace -StateSync -StateSyncExtended
