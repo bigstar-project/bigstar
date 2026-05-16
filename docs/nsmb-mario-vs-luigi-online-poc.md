@@ -66,6 +66,9 @@ Client PC:
   - 最初の差分は、同じpacketをinst0/inst1のどちらが先に読むかの順序差として現れ、その後inst1のMP replyが40バイトdefault replyになるか42バイト実replyになるかで分岐する。
   - `Wifi::SendMPDefaultReply()` / `Wifi::SendMPAck()` のローカルpacket配列に未初期化バイトが混ざる問題を修正した。ただしこれだけでは通常routeの完全決定性はまだ達成できていない。
   - `MELONDS_NSML_WIFI_MP_REPLY_TRACE=<csv>` で `Wifi::SendMPReply()` のreply slot状態を出力できるようにした。比較結果では、同じタイミングで `W_TXSlotReply1` がreadyになっている実行とreadyでない実行に分岐しており、default reply/実replyの揺れはWi-Fi reply slot準備タイミングの非決定性として追う方針。
+  - `MELONDS_NSML_WIFI_MP_SLOT_TRACE=<csv>` で `W_TXSlotReply1` 書き込み、`W_RXCnt` によるreply slot移動、`W_TXSlotReset` によるclearを出力できるようにした。
+  - slot trace比較では、NSMB側の `reply1-write` とホストCMD受信に伴う `SendMPReply()` の相対位相が実行ごとにずれる。つまり、reply slotの値そのものより、2インスタンス実行順とWi-Fi emulated timer進行の揺れが原因になっている。
+  - `MELONDS_NSML_WIFI_MP_STICKY_REPLY1=1` で消費済みreply slotを保持する実験を追加したが、1800フレームrouteのRAM hash一致には至らなかったため、現時点では解決策として採用しない。
   - `MELONDS_NSML_WIFI_MP_FORCE_REPLY_VALID=1` でreply時間超過判定を無視する実験は、handshakeを崩すケースがあるため現時点では採用しない。
 
 ## 現在のブロッカー
@@ -75,7 +78,7 @@ Client PC:
    - この状態ではWAN入力同期を入れても最終的にdesyncする。
    - Local MP trace上では、inst1のMP replyがdefault reply/実replyのどちらになるかが実行ごとに揺れている。
    - `Wifi::SendMPReply()` trace上では、`W_TXSlotReply1` のready状態が実行ごとにずれている。
-   - 次は `W_TXSlotReply1` / `W_TXSlotReply2` の書き込みとclearのタイミングをtraceし、2つの `EmuInstance` の実行順、Local MP packet/reply処理、Wi-Fi reply slot timingをさらに固定する必要がある。
+   - `W_TXSlotReply1` の書き込みtrace上では、reply書き込みとCMD受信の相対位相が揺れている。次は個別のreply slot補正ではなく、2つの `EmuInstance` の実行順とWi-Fi emulated timer進行を揃える必要がある。
 
 2. **savestate復元後のLocal MP通信切断**
    - `inst0.mln`、`inst1.mln`、`localmp.bin` は保存/ロードできる。
@@ -196,6 +199,8 @@ Client PC:
 - `MELONDS_NSML_LOCALMP_FIXED_TIMESTAMP`: Local MP packet timestampを固定する。現時点ではこれだけでは通常routeの非決定性は解消しない。
 - `MELONDS_NSML_LOCALMP_TRACE`: Local MP packet送受信順序とpacket本文hashをCSV出力する。
 - `MELONDS_NSML_WIFI_MP_REPLY_TRACE`: `Wifi::SendMPReply()` 時点のreply slot状態をCSV出力する。
+- `MELONDS_NSML_WIFI_MP_SLOT_TRACE`: `W_TXSlotReply1` 書き込み、reply slot移動、reply slot clearをCSV出力する。
+- `MELONDS_NSML_WIFI_MP_STICKY_REPLY1=1`: reply slot消費後も `W_TXSlotReply1` を保持する実験用。route determinismは改善しきれなかったため常用しない。
 - `MELONDS_NSML_WIFI_MP_FORCE_REPLY_VALID=1`: reply slotの時間超過判定を無視する実験用。現時点ではhandshakeを崩すケースがあるため常用しない。
 
 ## ユーザー依存
