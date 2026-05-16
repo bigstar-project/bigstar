@@ -14,7 +14,10 @@ param(
     [int]$VsStarSnapFrame = 0,
     [int]$VsStarSnapPlayerSlot = 0,
     [int]$PlayerSnapToStarFrame = 0,
-    [int]$PlayerSnapToStarSlot = 0
+    [int]$PlayerSnapToStarSlot = 0,
+    [int]$PlayerStickToStarStartFrame = 0,
+    [int]$PlayerStickToStarEndFrame = 0,
+    [int]$PlayerStickToStarSlot = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -53,7 +56,10 @@ foreach ($name in @(
     "MELONDS_NSML_STATE_SAVE_DIR",
     "MELONDS_NSML_STATE_SAVE_FRAME",
     "MELONDS_NSML_PLAYER_SNAP_TO_STAR_FRAME",
-    "MELONDS_NSML_PLAYER_SNAP_TO_STAR_SLOT"
+    "MELONDS_NSML_PLAYER_SNAP_TO_STAR_SLOT",
+    "MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME",
+    "MELONDS_NSML_PLAYER_STICK_TO_STAR_END_FRAME",
+    "MELONDS_NSML_PLAYER_STICK_TO_STAR_SLOT"
 )) {
     Remove-Item "Env:\$name" -ErrorAction SilentlyContinue
 }
@@ -110,6 +116,19 @@ if ($PlayerSnapToStarFrame -gt 0) {
 } else {
     Remove-Item Env:\MELONDS_NSML_PLAYER_SNAP_TO_STAR_FRAME -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_PLAYER_SNAP_TO_STAR_SLOT -ErrorAction SilentlyContinue
+}
+if ($PlayerStickToStarStartFrame -gt 0) {
+    $env:MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME = "$PlayerStickToStarStartFrame"
+    if ($PlayerStickToStarEndFrame -gt 0) {
+        $env:MELONDS_NSML_PLAYER_STICK_TO_STAR_END_FRAME = "$PlayerStickToStarEndFrame"
+    } else {
+        $env:MELONDS_NSML_PLAYER_STICK_TO_STAR_END_FRAME = "$PlayerStickToStarStartFrame"
+    }
+    $env:MELONDS_NSML_PLAYER_STICK_TO_STAR_SLOT = "$PlayerStickToStarSlot"
+} else {
+    Remove-Item Env:\MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_PLAYER_STICK_TO_STAR_END_FRAME -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_PLAYER_STICK_TO_STAR_SLOT -ErrorAction SilentlyContinue
 }
 
 & (Resolve-Path $Exe).Path (Resolve-Path $Rom).Path *> $stdout

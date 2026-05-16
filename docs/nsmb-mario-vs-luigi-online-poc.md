@@ -41,9 +41,12 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 - staged netplay smokeでhost/client別のゲーム状態traceとRAM dumpを出せるようにした。
 - route smokeでもゲーム状態traceとRAM dumpを指定できるようにした。
 - route smokeでRNG seed、RNGパッチ無効、VS Battle Star snap診断フックを指定できるようにした。
+- PlayerをVS Battle Starへ複数フレーム固定する診断フックを追加した。現在位置、前フレーム位置、速度をまとめて補正する。
 - route smokeが過去のstaged netplay環境変数を引き継がないようにし、固定RTC/JIT無効も明示した。
 - staged netplay smokeでsavestate load/saveを指定できるようにした。到達済みMvsL状態から短い同期テストを回すための検証用。ただし、現状はWi-Fi/Local MP試合の継続復元には使えない。
 - `tests/nsmb_after_state_star_probe.inputs` を追加した。frame-5000 MvL savestateから相対入力でスター取得を試す診断用。
+- `WireGameState` / `StateApply` にプレイヤーの星数、コイン、スコア、表示星数、死亡数、取得星候補を追加した。
+- `tools/nsmb_mvl_ram_probe.py --a2dj-object-dump` を追加し、指定Actorの周辺メモリをフレーム間比較できるようにした。
 
 ## 重要な解析済みアドレス
 
@@ -115,6 +118,12 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 - `tests\nsmb_mario_vs_luigi_star_collect_after6000.inputs` を追加した。frame6000以降に左へ戻して、Star ActorのGUID変化を再現する診断用。
 - 診断用の `MELONDS_NSML_VS_STAR_SNAP_FRAME` は、星Actor位置を書き換えられるが、それだけでは取得判定・再生成までは起きなかった。`id=0x010c` が単純な取得当たり判定本体ではない、または追加内部状態/別Actor/処理タイミングが必要な可能性がある。
 - 診断用の `MELONDS_NSML_PLAYER_SNAP_TO_STAR_FRAME` も追加した。`logs\route-player-snap-to-star-4380` ではPlayer Actorを `id=0x010c` 座標へ、`logs\route-player-snap-to-star-actor-z-4380` では `id=0x0022 settings=1` 座標へ寄せたが、どちらも取得状態は確認できなかった。座標だけでは取得判定を起こせず、追加内部状態/速度/当たり判定処理/manager slot状態が必要な可能性が高い。
+- `MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME` / `END_FRAME` でPlayerをスター位置へ数十フレーム固定すると、`player0BattleStars` が `0x1` から `0x2` へ増えるケースを再現できた。
+  - `logs\route-player-stick-state-fields-4380-4440`: route smokeでframe4640以降に星数増加を確認。
+  - 1フレームsnapだけでは不十分で、前フレーム座標と速度を含めた継続補正が必要だった。
+- `StateApply` はプレイヤーglobal状態込みで、スター取得後の重要状態をhost/client間で揃えられるところまで進んだ。
+  - `logs\staged-state-apply-player-star-score-start4200-pass4670`: netplay開始4200、スター取得診断4380-4440、比較開始4670でpass。
+  - 取得直後から数十フレームは受信済み状態の適用ラグが見えるため、StateApplyの検証では補正ウォームアップ後のtrace比較を使う。
 - RNGパッチなしの過去ログではframe5071でスター取得・再生成由来らしい `Net::random` 消費が観測されているが、現行のクリーンroute再現では条件が一致しなかった。以後は固定RTC/JIT無効/RNG seed明示を前提に再検証する。
 - savestate loadからの短いstaged netplayは、melonDSの状態hashとしては通るが、現状ではゲーム内通信復元に失敗している。
   - `logs\staged-netplay-state-load-no-rng-repatch`: 900フレーム、`-StateSync` mismatchなし。
@@ -139,13 +148,14 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 - `.\scripts\run-nsmb-mvl-route-smoke.ps1 -Frames 1800`
 - `.\scripts\run-nsmb-mvl-route-smoke.ps1 -Frames 4200`
 - Local MP trace有効の1800フレームroute smoke
+- 2026-05-16に最新コードでも `.\scripts\run-nsmb-mvl-route-smoke.ps1 -Frames 1800 -LogDir logs\debug-crash-regression-1800 -Seed 0x00000100` がpass。
 
 ## 次にやること
 
-1. 過去ログのframe5071付近と現行ログを比較し、スター取得・再生成時に変わるActor/manager状態を特定する。
-2. VS Battle Star `id=0x010c` が取得判定本体なのか、spawn marker/manager側状態なのかを切り分ける。
-3. スター取得そのものを自動入力または追加フックで再現し、スコア/星数が増えるケースでStateApplyが保てるか確認する。
-4. スター/プレイヤーの重要状態がズレる場合は、Actor座標・settings・RNG seed/call count・manager slot状態のどこを同期すべきか切り分け、最小メモリパッチを作る。
+1. StateApplyの適用ラグを減らす。現状は「最新の受信済み状態を適用」しているため、数十フレーム遅れて一致する場面がある。
+2. Player Actorの座標だけでなく、前フレーム座標・速度などのtransformをStateApply対象に含めるか検証する。
+3. スター取得後に次スターが再生成されるまで長く走らせ、Star Actor / `id=0x010c` / RNG timelineがhost/clientで揃うか確認する。
+4. 診断フックなしの入力スクリプトでスター取得できるルートを作る。難しければ、しばらくはstick診断を回帰テストとして使う。
 5. 8コインアイテムは自動化が難しいため一旦保留し、スター同期の見通しが立ってから同じActor trace方式で対象を特定する。
 6. ランダムステージ、勝敗・タイマー・スコアなど、対戦で同期すべき状態を個別に特定する。
 7. 入力同期netplayと重要状態同期を結合し、ローカル2プロセスで2PC相当の検証を継続する。
@@ -172,6 +182,9 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 # route smokeで診断用にPlayer ActorをVS Battle Star候補座標へ寄せる
 .\scripts\run-nsmb-mvl-route-smoke.ps1 -Frames 5300 -InputScript tests\nsmb_mario_vs_luigi_star_probe.inputs -LogDir logs\route-player-snap-to-star-4380 -GameStateTrace -GameStateTraceInterval 10 -PlayerSnapToStarFrame 4380 -PlayerSnapToStarSlot 0
 
+# route smokeで診断用にPlayer ActorをVS Battle Starへ固定し、スター取得相当の星数増加を確認する
+.\scripts\run-nsmb-mvl-route-smoke.ps1 -Frames 4700 -InputScript tests\nsmb_mario_vs_luigi_star_probe.inputs -LogDir logs\route-player-stick-state-fields-4380-4440 -GameStateTrace -GameStateTraceInterval 10 -GameStateTraceExtended -PlayerStickToStarStartFrame 4380 -PlayerStickToStarEndFrame 4440 -PlayerStickToStarSlot 0
+
 # staged route + netplay smoke
 .\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500 -Port 8071
 
@@ -190,6 +203,9 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 # Star Actor GUID変化を含む長めのStateApply検証
 .\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 7000 -NetplayStartFrame 4500 -Port 8071 -InputScript tests\nsmb_mario_vs_luigi_star_collect_after6000.inputs -GameStateTrace -StateSync -StateApply -StateSyncInterval 10 -AllowStateMismatch
 
+# スター取得相当の星数増加を含むStateApply検証
+.\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 4700 -NetplayStartFrame 4200 -Port 8071 -InputScript tests\nsmb_mario_vs_luigi_star_probe.inputs -GameStateTrace -GameStateTraceInterval 10 -GameStateTraceExtended -StateSync -StateApply -StateApplyCompareStartFrame 4670 -StateSyncInterval 5 -AllowStateMismatch -PlayerStickToStarStartFrame 4380 -PlayerStickToStarEndFrame 4440 -PlayerStickToStarSlot 0
+
 # 候補領域別hash同期。mismatch検出用なので失敗が期待結果になることがある。
 .\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500 -Port 8071 -GameStateTrace -StateSync -StateSyncExtended
 
@@ -204,6 +220,9 @@ python tools\nsmb_mvl_ram_probe.py --rng-timeline-only --a2dj-process-lists logs
 
 # RAM dumpからA2DJ object候補を比較
 python tools\nsmb_mvl_ram_probe.py --rng-timeline-only --a2dj-object-scan logs\mvl-seed-00000100-state-source-frame5000\ram\inst0_frame004100_mainram.bin logs\mvl-seed-00000100-state-source-frame5000\ram\inst0_frame005000_mainram.bin
+
+# 指定Actorの周辺メモリをフレーム間比較
+python tools\nsmb_mvl_ram_probe.py --rng-timeline-only --a2dj-object-dump --object-id 0x0022 --object-settings 0x1 --object-size 0x120 logs\route-player-stick-star-4380-4440-long\ram-mvl-route\inst0_frame004440_mainram.bin logs\route-player-stick-star-4380-4440-long\ram-mvl-route\inst0_frame004455_mainram.bin
 ```
 
 ## 主要な環境変数
@@ -227,6 +246,9 @@ python tools\nsmb_mvl_ram_probe.py --rng-timeline-only --a2dj-object-scan logs\m
 - `MELONDS_NSML_STATE_SYNC=1`: netplay中に軽量ゲーム状態hashを相互送信。
 - `MELONDS_NSML_STATE_SYNC_EXTENDED=1`: player/Wi-Fi/render候補領域hashも相互送信。
 - `MELONDS_NSML_STATE_SYNC_INTERVAL`: 状態hash送信間隔。デフォルト60フレーム。
+- `MELONDS_NSML_STATE_APPLY=1`: client側でhostから受け取った重要状態をMainRAMへ適用。
+- `MELONDS_NSML_PLAYER_SNAP_TO_STAR_FRAME`: 診断用に指定フレームでPlayerをスター位置へ移動。
+- `MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME` / `END_FRAME`: 診断用にPlayerをスター位置へ継続固定。
 - `MELONDS_NSML_HASH_LOG`: RAM hash CSV。
 - `MELONDS_NSML_SCREEN_HASH=1`: hash CSVへframebuffer hashを追加。
 - `MELONDS_NSML_RAM_DUMP_DIR`: MainRAM dump出力先。

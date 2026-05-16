@@ -225,6 +225,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--a2dj-rng-timeline", action="store_true")
     parser.add_argument("--a2dj-process-lists", action="store_true")
     parser.add_argument("--a2dj-object-scan", action="store_true")
+    parser.add_argument("--a2dj-object-dump", action="store_true")
+    parser.add_argument("--object-guid", default="")
+    parser.add_argument("--object-id", default="")
+    parser.add_argument("--object-settings", default="")
+    parser.add_argument("--object-size", default="0x120")
     parser.add_argument("--rng-timeline-only", action="store_true")
     parser.add_argument("--find-arm-bl-to", default="")
     parser.add_argument("--scan-start", default="0x080000")
@@ -519,6 +524,91 @@ def print_a2dj_object_scan(loaded: list[tuple[str, bytes]]) -> None:
                 print("    b: <missing>")
 
 
+def find_a2dj_object_for_dump(
+    data: bytes,
+    guid: int | None,
+    object_id: int | None,
+    settings: int | None,
+) -> dict[str, int] | None:
+    for entry in a2dj_object_scan_entries(data):
+        if guid is not None and entry["guid"] != guid:
+            continue
+        if object_id is not None and entry["object_id"] != object_id:
+            continue
+        if settings is not None and entry["settings"] != settings:
+            continue
+        return entry
+    return None
+
+
+def object_dump_words(data: bytes, base: int, size: int) -> list[int]:
+    off = base - MAIN_RAM_BASE
+    if off < 0 or off >= len(data):
+        return []
+    end = min(off + size, len(data))
+    end -= (end - off) % 4
+    return [u32(data, pos) for pos in range(off, end, 4)]
+
+
+def print_a2dj_object_dump(
+    loaded: list[tuple[str, bytes]],
+    guid_text: str,
+    object_id_text: str,
+    settings_text: str,
+    size_text: str,
+) -> None:
+    guid = int(guid_text, 0) if guid_text else None
+    object_id = int(object_id_text, 0) if object_id_text else None
+    settings = int(settings_text, 0) if settings_text else None
+    size = int(size_text, 0)
+
+    print("== A2DJ object dump ==")
+    print(
+        "selector="
+        f"guid={guid_text or '*'} object_id={object_id_text or '*'} "
+        f"settings={settings_text or '*'} size=0x{size:x}"
+    )
+
+    previous_label = ""
+    previous_entry: dict[str, int] | None = None
+    previous_words: list[int] | None = None
+    for label, data in loaded:
+        entry = find_a2dj_object_for_dump(data, guid, object_id, settings)
+        print(f"-- {label} --")
+        if not entry:
+            print("  <missing>")
+            previous_label = label
+            previous_entry = None
+            previous_words = None
+            continue
+
+        print_entry_summary("  ", entry)
+        words = object_dump_words(data, entry["base"], size)
+        for index, word in enumerate(words):
+            rel = index * 4
+            print(f"    +0x{rel:03x}: 0x{word:08x}")
+
+        if previous_words is not None and previous_entry is not None:
+            print(f"  diff_vs={previous_label}")
+            max_words = max(len(previous_words), len(words))
+            changed = 0
+            for index in range(max_words):
+                prev = previous_words[index] if index < len(previous_words) else None
+                cur = words[index] if index < len(words) else None
+                if prev == cur:
+                    continue
+                rel = index * 4
+                prev_text = "<missing>" if prev is None else f"0x{prev:08x}"
+                cur_text = "<missing>" if cur is None else f"0x{cur:08x}"
+                print(f"    +0x{rel:03x}: {prev_text} -> {cur_text}")
+                changed += 1
+            print(f"  changed_words={changed}")
+
+        previous_label = label
+        previous_entry = entry
+        previous_words = words
+
+
 def main() -> int:
     args = parse_args()
     scan_start = int(args.scan_start, 0)
@@ -558,6 +648,14 @@ def main() -> int:
         print_a2dj_process_lists(loaded)
     if args.a2dj_object_scan:
         print_a2dj_object_scan(loaded)
+    if args.a2dj_object_dump:
+        print_a2dj_object_dump(
+            loaded,
+            args.object_guid,
+            args.object_id,
+            args.object_settings,
+            args.object_size,
+        )
     return 0
 
 

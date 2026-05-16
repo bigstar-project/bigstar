@@ -9,6 +9,7 @@ param(
     [switch]$GameStateTraceExtended,
     [switch]$StateSync,
     [switch]$StateApply,
+    [int]$StateApplyCompareStartFrame = -1,
     [switch]$AllowStateMismatch,
     [int]$StateSyncInterval = 60,
     [switch]$StateSyncExtended,
@@ -21,6 +22,9 @@ param(
     [switch]$SkipRngPatchCheck,
     [switch]$WaitForPeerAtNetplayStart,
     [switch]$NoLocalWait,
+    [int]$PlayerStickToStarStartFrame = 0,
+    [int]$PlayerStickToStarEndFrame = 0,
+    [int]$PlayerStickToStarSlot = 0,
     [string]$Exe = "build\debug-windows-x86_64\melonDS.exe",
     [string]$Rom = "roms\nsmb.nds",
     [string]$InputScript = "tests\nsmb_mario_vs_luigi.inputs",
@@ -146,6 +150,19 @@ function Start-MelonStagedProcess {
         Remove-Item Env:\MELONDS_NSML_STATE_APPLY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_STATE_SYNC_INTERVAL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_STATE_SYNC_EXTENDED -ErrorAction SilentlyContinue
+    }
+    if ($PlayerStickToStarStartFrame -gt 0) {
+        $env:MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME = "$PlayerStickToStarStartFrame"
+        if ($PlayerStickToStarEndFrame -gt 0) {
+            $env:MELONDS_NSML_PLAYER_STICK_TO_STAR_END_FRAME = "$PlayerStickToStarEndFrame"
+        } else {
+            $env:MELONDS_NSML_PLAYER_STICK_TO_STAR_END_FRAME = "$PlayerStickToStarStartFrame"
+        }
+        $env:MELONDS_NSML_PLAYER_STICK_TO_STAR_SLOT = "$PlayerStickToStarSlot"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PLAYER_STICK_TO_STAR_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PLAYER_STICK_TO_STAR_SLOT -ErrorAction SilentlyContinue
     }
     $env:MELONDS_NSML_WAIT_TIMEOUT_MS = "$WaitTimeoutMs"
     $env:MELONDS_NSML_SEED_WAIT_TIMEOUT_MS = "$WaitTimeoutMs"
@@ -310,6 +327,9 @@ if (-not $AllowStateMismatch -and (Select-String -Path $hostOut, $clientOut -Pat
 }
 
 if ($StateApply -and $GameStateTrace) {
+    if ($StateApplyCompareStartFrame -lt 0) {
+        $StateApplyCompareStartFrame = $NetplayStartFrame
+    }
     $hostRows = Import-Csv $hostGameStateTrace
     $clientRows = Import-Csv $clientGameStateTrace
     $clientByKey = @{}
@@ -344,10 +364,27 @@ if ($StateApply -and $GameStateTrace) {
         "playerActor1Y",
         "playerActor1Z"
     )
+    if ($GameStateTraceExtended) {
+        $stateApplyColumns += @(
+            "playerCount",
+            "player0BattleStars",
+            "player1BattleStars",
+            "player0Coins",
+            "player1Coins",
+            "player0Score",
+            "player1Score",
+            "player0DisplayedStars",
+            "player1DisplayedStars",
+            "player0Deaths",
+            "player1Deaths",
+            "player0CollectedStars",
+            "player1CollectedStars"
+        )
+    }
 
     $checked = 0
     foreach ($row in $hostRows) {
-        if ([int]$row.frame -lt $NetplayStartFrame) {
+        if ([int]$row.frame -lt $StateApplyCompareStartFrame) {
             continue
         }
         $other = $clientByKey["$($row.instance):$($row.frame)"]
