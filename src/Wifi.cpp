@@ -62,6 +62,13 @@ struct MPSlotTraceConfig
     u64 Seq = 0;
 };
 
+struct MPReplyOptionConfig
+{
+    bool Checked = false;
+    bool ForceReplyValid = false;
+    bool StickyReply1 = false;
+};
+
 MPReplyTraceConfig& GetMPReplyTraceConfig()
 {
     static MPReplyTraceConfig cfg;
@@ -77,6 +84,23 @@ MPReplyTraceConfig& GetMPReplyTraceConfig()
                 cfg.File << "seq,wifi,aid,clienttime,clientmask,reply1Before,reply2Before,reply2After,valid,length,duration,usedDefault,force,txBusy,cmdCounter,usCounter,usTimestamp\n";
             }
         }
+    }
+    return cfg;
+}
+
+bool MPReplyTraceEnabled()
+{
+    return GetMPReplyTraceConfig().Enabled;
+}
+
+MPReplyOptionConfig& GetMPReplyOptionConfig()
+{
+    static MPReplyOptionConfig cfg;
+    if (!cfg.Checked)
+    {
+        cfg.Checked = true;
+        cfg.ForceReplyValid = std::getenv("MELONDS_NSML_WIFI_MP_FORCE_REPLY_VALID") != nullptr;
+        cfg.StickyReply1 = std::getenv("MELONDS_NSML_WIFI_MP_STICKY_REPLY1") != nullptr;
     }
     return cfg;
 }
@@ -98,6 +122,11 @@ MPSlotTraceConfig& GetMPSlotTraceConfig()
         }
     }
     return cfg;
+}
+
+bool MPSlotTraceEnabled()
+{
+    return GetMPSlotTraceConfig().Enabled;
 }
 
 void TraceMPReply(Wifi* wifi, u16 aid, u16 clienttime, u16 clientmask,
@@ -947,8 +976,9 @@ void Wifi::SendMPDefaultReply()
 
 void Wifi::SendMPReply(u16 clienttime, u16 clientmask)
 {
-    const bool forceReplyValidForTest = getenv("MELONDS_NSML_WIFI_MP_FORCE_REPLY_VALID") != nullptr;
-    const bool stickyReply1ForTest = getenv("MELONDS_NSML_WIFI_MP_STICKY_REPLY1") != nullptr;
+    auto& replyOptions = GetMPReplyOptionConfig();
+    const bool forceReplyValidForTest = replyOptions.ForceReplyValid;
+    const bool stickyReply1ForTest = replyOptions.StickyReply1;
     TXSlot* slot = &TXSlots[5];
     const u16 reply1Before = IOPORT(W_TXSlotReply1);
     const u16 reply2Before = IOPORT(W_TXSlotReply2);
@@ -1000,22 +1030,25 @@ void Wifi::SendMPReply(u16 clienttime, u16 clientmask)
         SendMPDefaultReply();
     }
 
-    TraceMPReply(this,
-        IOPORT(W_AIDLow),
-        clienttime,
-        clientmask,
-        reply1Before,
-        reply2Before,
-        IOPORT(W_TXSlotReply2),
-        slot->Valid,
-        slot->Length,
-        duration,
-        !slot->Valid,
-        forceReplyValidForTest,
-        IOPORT(W_TXBusy),
-        CmdCounter,
-        USCounter,
-        USTimestamp);
+    if (MPReplyTraceEnabled())
+    {
+        TraceMPReply(this,
+            IOPORT(W_AIDLow),
+            clienttime,
+            clientmask,
+            reply1Before,
+            reply2Before,
+            IOPORT(W_TXSlotReply2),
+            slot->Valid,
+            slot->Length,
+            duration,
+            !slot->Valid,
+            forceReplyValidForTest,
+            IOPORT(W_TXBusy),
+            CmdCounter,
+            USCounter,
+            USTimestamp);
+    }
 
     u16 clientnum = 0;
     for (int i = 1; i < IOPORT(W_AIDLow); i++)
@@ -2473,9 +2506,12 @@ void Wifi::Write(u32 addr, u16 val)
             const u16 reply2Before = IOPORT(W_TXSlotReply2);
             IOPORT(W_TXSlotReply2) = IOPORT(W_TXSlotReply1);
             IOPORT(W_TXSlotReply1) = 0;
-            TraceMPSlot(this, "rxcnt-shift", IOPORT(W_AIDLow), addr, val,
-                reply1Before, reply2Before, IOPORT(W_TXSlotReply1), IOPORT(W_TXSlotReply2),
-                IOPORT(W_TXBusy), CmdCounter, USCounter, USTimestamp);
+            if (MPSlotTraceEnabled())
+            {
+                TraceMPSlot(this, "rxcnt-shift", IOPORT(W_AIDLow), addr, val,
+                    reply1Before, reply2Before, IOPORT(W_TXSlotReply1), IOPORT(W_TXSlotReply2),
+                    IOPORT(W_TXBusy), CmdCounter, USCounter, USTimestamp);
+            }
         }
         if (val & 0x8000)
         {
@@ -2526,7 +2562,7 @@ void Wifi::Write(u32 addr, u16 val)
         // checkme: any bits affecting the beacon slot?
         if (val & 0x0040) IOPORT(W_TXSlotReply2) &= 0x7FFF;
         if (val & 0x0080) IOPORT(W_TXSlotReply1) &= 0x7FFF;
-        if (val & 0x00C0)
+        if ((val & 0x00C0) && MPSlotTraceEnabled())
             TraceMPSlot(this, "txslot-reset", IOPORT(W_AIDLow), addr, val,
                 reply1Before, reply2Before, IOPORT(W_TXSlotReply1), IOPORT(W_TXSlotReply2),
                 IOPORT(W_TXBusy), CmdCounter, USCounter, USTimestamp);
@@ -2576,9 +2612,12 @@ void Wifi::Write(u32 addr, u16 val)
             const u16 reply1Before = IOPORT(W_TXSlotReply1);
             const u16 reply2Before = IOPORT(W_TXSlotReply2);
             IOPORT(W_TXSlotReply1) = val;
-            TraceMPSlot(this, "reply1-write", IOPORT(W_AIDLow), addr, val,
-                reply1Before, reply2Before, IOPORT(W_TXSlotReply1), IOPORT(W_TXSlotReply2),
-                IOPORT(W_TXBusy), CmdCounter, USCounter, USTimestamp);
+            if (MPSlotTraceEnabled())
+            {
+                TraceMPSlot(this, "reply1-write", IOPORT(W_AIDLow), addr, val,
+                    reply1Before, reply2Before, IOPORT(W_TXSlotReply1), IOPORT(W_TXSlotReply2),
+                    IOPORT(W_TXBusy), CmdCounter, USCounter, USTimestamp);
+            }
         }
         return;
 

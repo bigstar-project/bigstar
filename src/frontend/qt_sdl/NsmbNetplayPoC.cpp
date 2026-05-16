@@ -110,6 +110,7 @@ struct State
     int TestQuitGraceMs = 0;
     bool InputTraceEnabled = false;
     int InputTraceInterval = 60;
+    bool ScreenHashEnabled = false;
     int SeedWaitTimeoutMs = 10000;
     bool WaitForPeerBeforeStart = false;
     bool WaitForPeerAtNetplayStart = false;
@@ -903,6 +904,28 @@ melonDS::u64 HashNDS(melonDS::NDS* nds)
     return hash;
 }
 
+melonDS::u64 HashFramebuffers(melonDS::NDS* nds)
+{
+    void* topBuffer = nullptr;
+    void* bottomBuffer = nullptr;
+    if (!nds || !nds->GPU.GetFramebuffers(&topBuffer, &bottomBuffer) || !topBuffer || !bottomBuffer)
+        return 0;
+
+    melonDS::u64 hash = 1469598103934665603ull;
+    const auto mixBytes = [&](const void* data, std::size_t len) {
+        const auto* bytes = reinterpret_cast<const melonDS::u8*>(data);
+        for (std::size_t i = 0; i < len; i++)
+        {
+            hash ^= bytes[i];
+            hash *= 1099511628211ull;
+        }
+    };
+
+    mixBytes(topBuffer, 256 * 192 * 4);
+    mixBytes(bottomBuffer, 256 * 192 * 4);
+    return hash;
+}
+
 void SaveScreenshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (G.ScreenshotDir.empty() || G.ScreenshotInterval <= 0) return;
@@ -1404,6 +1427,7 @@ void InitFromEnvironment()
     G.TestQuitGraceMs = std::max(0, EnvInt("MELONDS_NSML_QUIT_GRACE_MS", 0));
     G.InputTraceEnabled = EnvFlag("MELONDS_NSML_INPUT_TRACE");
     G.InputTraceInterval = std::max(1, EnvInt("MELONDS_NSML_INPUT_TRACE_INTERVAL", 60));
+    G.ScreenHashEnabled = EnvFlag("MELONDS_NSML_SCREEN_HASH");
     G.SeedWaitTimeoutMs = std::max(0, EnvInt("MELONDS_NSML_SEED_WAIT_TIMEOUT_MS", 10000));
     G.WaitForPeerBeforeStart = EnvFlag("MELONDS_NSML_WAIT_FOR_PEER");
     G.WaitForPeerAtNetplayStart = EnvFlag("MELONDS_NSML_WAIT_FOR_PEER_AT_NETPLAY_START");
@@ -1490,7 +1514,10 @@ void InitFromEnvironment()
             }
             else
             {
-                G.HashLog << "instance,frame,hash\n";
+                if (G.ScreenHashEnabled)
+                    G.HashLog << "instance,frame,hash,screenHash\n";
+                else
+                    G.HashLog << "instance,frame,hash\n";
             }
         }
 
@@ -1752,19 +1779,34 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if ((logFrame % static_cast<melonDS::u32>(G.HashInterval)) != 0) return;
 
     const melonDS::u64 hash = HashNDS(nds);
+    const melonDS::u64 screenHash = G.ScreenHashEnabled ? HashFramebuffers(nds) : 0;
     if (G.LastLoggedHashFrame[instanceID] == logFrame) return;
     G.LastLoggedHashFrame[instanceID] = logFrame;
 
-    std::printf("NSMB PoC: inst=%d frame=%u hash=%016llX\n",
-        instanceID,
-        logFrame,
-        static_cast<unsigned long long>(hash));
+    if (G.ScreenHashEnabled)
+    {
+        std::printf("NSMB PoC: inst=%d frame=%u hash=%016llX screen=%016llX\n",
+            instanceID,
+            logFrame,
+            static_cast<unsigned long long>(hash),
+            static_cast<unsigned long long>(screenHash));
+    }
+    else
+    {
+        std::printf("NSMB PoC: inst=%d frame=%u hash=%016llX\n",
+            instanceID,
+            logFrame,
+            static_cast<unsigned long long>(hash));
+    }
 
     std::lock_guard<std::mutex> lock(G.Mutex);
     if (G.HashLog)
     {
         G.HashLog << instanceID << ',' << logFrame << ','
-                  << std::hex << hash << std::dec << '\n';
+                  << std::hex << hash;
+        if (G.ScreenHashEnabled)
+            G.HashLog << ',' << screenHash;
+        G.HashLog << std::dec << '\n';
         G.HashLog.flush();
     }
 }

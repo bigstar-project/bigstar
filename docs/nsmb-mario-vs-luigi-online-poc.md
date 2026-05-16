@@ -70,6 +70,12 @@ Client PC:
   - slot trace比較では、NSMB側の `reply1-write` とホストCMD受信に伴う `SendMPReply()` の相対位相が実行ごとにずれる。つまり、reply slotの値そのものより、2インスタンス実行順とWi-Fi emulated timer進行の揺れが原因になっている。
   - `MELONDS_NSML_WIFI_MP_STICKY_REPLY1=1` で消費済みreply slotを保持する実験を追加したが、1800フレームrouteのRAM hash一致には至らなかったため、現時点では解決策として採用しない。
   - `MELONDS_NSML_WIFI_MP_FORCE_REPLY_VALID=1` でreply時間超過判定を無視する実験は、handshakeを崩すケースがあるため現時点では採用しない。
+- `MELONDS_NSML_SCREEN_HASH=1` でhash CSVにフレームバッファhashを追加できるようにした。RAM全体hashはWi-Fi/通信バッファの揺れも拾うため、画面上の状態一致と切り分ける目的。
+- 実験結果:
+  - Wi-Fi packet/beacon timestampを強制固定する案は、画面hashの一致には効くケースがあったが、Mario vs Luigi状態検出/RNG patch到達を壊すため本線から外した。
+  - Local MP通常packet pollに短いwaitを入れる案も、実行進行を歪めてinst0だけが先行するケースがあったため本線から外した。
+  - screenHash計算はLocal MPのタイミングに影響しうるため、デフォルト無効の検証オプションにした。
+- 最新のstaged smoke再実行では、peer接続とlockstep開始までは進むが、host/clientのRNG patch到達チェックが失敗するケースが続いている。直近の次作業は、現在のinstrumentation下でMario vs Luigi状態へ安定到達できる条件を復旧すること。
 
 ## 現在のブロッカー
 
@@ -79,6 +85,7 @@ Client PC:
    - Local MP trace上では、inst1のMP replyがdefault reply/実replyのどちらになるかが実行ごとに揺れている。
    - `Wifi::SendMPReply()` trace上では、`W_TXSlotReply1` のready状態が実行ごとにずれている。
    - `W_TXSlotReply1` の書き込みtrace上では、reply書き込みとCMD受信の相対位相が揺れている。次は個別のreply slot補正ではなく、2つの `EmuInstance` の実行順とWi-Fi emulated timer進行を揃える必要がある。
+   - trace/screenHashのような軽い検証処理でも到達結果が変わるため、計測フックはデフォルト無効にし、通常ルートへの影響を最小化する必要がある。
 
 2. **savestate復元後のLocal MP通信切断**
    - `inst0.mln`、`inst1.mln`、`localmp.bin` は保存/ロードできる。
@@ -100,6 +107,7 @@ Client PC:
    - 同一条件で `run-nsmb-mvl-route-smoke.ps1` を2回走らせ、RAM hashと主要スクリーンショットが一致する状態を目標にする。
    - `SERIAL_RUN` は現状かなり遅いので、全フレーム逐次実行ではなく、Local MP送受信タイミングだけを安定化できないか見る。
    - Local MPの `RecvReplies` / `RecvHostPacket` のtimeout、packet timestamp、host/client packet順、`Wifi::SendMPReply()` のdefault reply分岐を重点的に追う。
+   - まず現在の計測フック込みのビルドで、RNG patch到達が安定していたコミット/条件との差分を潰す。
 2. 通常routeが一致したら、staged netplay smokeでhost/clientの4800/5100フレームを一致させる。
 3. host/clientの終了合意を追加する。
    - 片側だけがframe limitへ到達してpeer disconnectし、もう片側がremote input timeoutになる状態をなくす。
@@ -200,6 +208,7 @@ Client PC:
 - `MELONDS_NSML_LOCALMP_TRACE`: Local MP packet送受信順序とpacket本文hashをCSV出力する。
 - `MELONDS_NSML_WIFI_MP_REPLY_TRACE`: `Wifi::SendMPReply()` 時点のreply slot状態をCSV出力する。
 - `MELONDS_NSML_WIFI_MP_SLOT_TRACE`: `W_TXSlotReply1` 書き込み、reply slot移動、reply slot clearをCSV出力する。
+- `MELONDS_NSML_SCREEN_HASH=1`: hash CSVに `screenHash` 列を追加する。検証負荷でLocal MPタイミングが変わりうるため、必要時だけ使う。
 - `MELONDS_NSML_WIFI_MP_STICKY_REPLY1=1`: reply slot消費後も `W_TXSlotReply1` を保持する実験用。route determinismは改善しきれなかったため常用しない。
 - `MELONDS_NSML_WIFI_MP_FORCE_REPLY_VALID=1`: reply slotの時間超過判定を無視する実験用。現時点ではhandshakeを崩すケースがあるため常用しない。
 
