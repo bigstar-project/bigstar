@@ -33,10 +33,12 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 - `Net::getRandom()` / `Net::getRandom12()` / `Net::syncRandom*()` 周辺の解析メモ。
 - Local MP packet / Wi-Fi MP reply slot trace。
 - `MELONDS_NSML_GAME_STATE_TRACE` による軽量ゲーム状態CSV trace。
+- 軽量ゲーム状態traceにVS Battle Star候補Actor `id=0x010c` の出現有無、GUID、座標を追加。
 - `MELONDS_NSML_GAME_STATE_TRACE_EXTENDED=1` による重い候補領域trace。
 - `MELONDS_NSML_STATE_SYNC=1` によるnetplay中の軽量ゲーム状態hash交換。
 - `MELONDS_NSML_STATE_SYNC_EXTENDED=1` による候補領域別hash交換。
 - staged netplay smokeでhost/client別のゲーム状態traceとRAM dumpを出せるようにした。
+- route smokeでもゲーム状態traceとRAM dumpを指定できるようにした。
 - staged netplay smokeでsavestate load/saveを指定できるようにした。到達済みMvsL状態から短い同期テストを回すための検証用。ただし、現状はWi-Fi/Local MP試合の継続復元には使えない。
 - `tests/nsmb_after_state_star_probe.inputs` を追加した。frame-5000 MvL savestateから相対入力でスター取得を試す診断用。
 
@@ -62,6 +64,7 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 | `Net::syncRandomFull()` | `0x0200E5E8` | verified |
 | `Net::syncRandomFast()` | `0x0200E5F4` | verified |
 | `Net::Core::shareRandomSeed()` | `0x02010F04` | verified |
+| VS Battle Star candidate actor | object id `0x010c` | candidate, traced |
 
 ## 現在分かっていること
 
@@ -75,7 +78,7 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
   - `Net::random.value`
   - `Net::randomCallCount`
   - `Net::randomBranchAddress`
-- `-StateSync` の軽量hashは5100フレームまでmismatchなしで通る。
+- `-StateSync` の軽量hashはVS Battle Star候補Actor座標込みで5100フレームまでmismatchなしで通る。
 - `-StateSyncExtended` ではmismatchが出るが、分解結果では `basic=1`、`playerGlobal=1`、`wifiCandidate=0`、`renderCandidate=0`。
 - つまり、現在見えている差分はプレイヤーの得点・星・コイン等のglobal状態ではなく、Wi-Fi/MB候補領域とrender/process候補領域に集中している。
 - frame 4500 RAM dump比較では以下の傾向。
@@ -89,7 +92,8 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 - `tools/nsmb_mvl_ram_probe.py --a2dj-object-scan` でheap上のBase/Actor風オブジェクトを直接列挙できるようにした。
   - `logs\mvl-seed-00000100-state-source-frame5000` のframe4100 -> frame5000比較では、frame5000で `id=0x010c` が新規出現する。
   - `id=0x010c` は座標 `x=0x00348000, y=0xfff28000, z=0x00080000` で、スクリーンショット上のVS Battle Star位置と対応する候補。
-  - 現時点では `MvsLObject268/VSBattleStarCandidate` として扱い、次に生成・取得・再生成時の同期対象にする。
+  - `logs\route-vsstar-trace` と `logs\staged-vsstar-trace` では、frame4380以降の `id=0x010c` がhost/clientおよび2 EmuInstance間で同じ `guid=0x23`、同じ座標になることを確認。
+  - 現時点では `MvsLObject268/VSBattleStarCandidate` として扱い、次に取得・再生成時の同期対象にする。
 - savestate loadからの短いstaged netplayは、melonDSの状態hashとしては通るが、現状ではゲーム内通信復元に失敗している。
   - `logs\staged-netplay-state-load-no-rng-repatch`: 900フレーム、`-StateSync` mismatchなし。
   - ただしスクリーンショットは「通信が切断されました」画面。
@@ -116,11 +120,12 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 
 ## 次にやること
 
-1. Big Star actor、8コインアイテム、ランダムステージ、勝敗・タイマー・スコアなど、対戦で同期すべき状態を個別に特定する。
-2. render/process候補領域の差分をさらに分類し、ゲーム上重要なactor状態か、単なるリスト順序・描画順序かを切り分ける。
-3. 重要状態だけを同期・固定するメモリパッチまたはROMパッチの最小実装を作る。
-4. 入力同期netplayと重要状態同期を結合し、ローカル2プロセスで2PC相当の検証を継続する。
-5. state-load経路は必要になった場合だけ追加調査する。現時点では最終対戦実現の主経路にしない。
+1. VS Battle Star `id=0x010c` の取得・消滅・次スター再生成をtraceし、再生成後もhost/clientで座標が一致するか確認する。
+2. スターの重要状態がズレる場合は、Actor座標・settings・RNG seed/call countのどこを同期すべきか切り分け、最小メモリパッチを作る。
+3. 8コインアイテムは自動化が難しいため一旦保留し、スター同期の見通しが立ってから同じActor trace方式で対象を特定する。
+4. ランダムステージ、勝敗・タイマー・スコアなど、対戦で同期すべき状態を個別に特定する。
+5. 入力同期netplayと重要状態同期を結合し、ローカル2プロセスで2PC相当の検証を継続する。
+6. state-load経路は必要になった場合だけ追加調査する。現時点では最終対戦実現の主経路にしない。
 
 ## よく使う検証コマンド
 
@@ -134,6 +139,9 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 # Mario vs Luigi route smoke
 .\scripts\run-nsmb-mvl-route-smoke.ps1 -Frames 4200
 
+# route smokeでVS Battle Star候補Actor traceとRAM dumpを取る
+.\scripts\run-nsmb-mvl-route-smoke.ps1 -Frames 5100 -InputScript tests\nsmb_mario_vs_luigi_star_probe.inputs -LogDir logs\route-vsstar-trace -GameStateTrace -GameStateTraceInterval 60 -RamDumpFrames 5000
+
 # staged route + netplay smoke
 .\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500 -Port 8071
 
@@ -142,6 +150,9 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 
 # 軽量ゲーム状態hash同期付き
 .\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500 -Port 8071 -GameStateTrace -StateSync
+
+# VS Battle Star候補Actor込みのstaged trace
+.\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500 -Port 8071 -InputScript tests\nsmb_mario_vs_luigi_star_probe.inputs -GameStateTrace -StateSync
 
 # 候補領域別hash同期。mismatch検出用なので失敗が期待結果になることがある。
 .\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500 -Port 8071 -GameStateTrace -StateSync -StateSyncExtended

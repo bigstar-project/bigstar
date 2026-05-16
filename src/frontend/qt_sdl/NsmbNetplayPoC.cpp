@@ -72,6 +72,7 @@ constexpr melonDS::u32 kGamePlayerDeathsAddr = 0x0208A9D4;
 constexpr melonDS::u32 kGamePlayerCollectedStarsAddr = 0x0208A9DC;
 constexpr melonDS::u32 kGameCandidateWifiBlockAddr = 0x0208BE00;
 constexpr melonDS::u32 kGameCandidateRenderBlockAddr = 0x023F8300;
+constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
 
 enum class Role
 {
@@ -143,7 +144,29 @@ struct GameStateSample
     melonDS::u32 NetRandomValue = 0;
     melonDS::u32 NetRandomCallCount = 0;
     melonDS::u32 NetRandomBranchAddress = 0;
+    melonDS::u32 VsStarFound = 0;
+    melonDS::u32 VsStarGUID = 0;
+    melonDS::u32 VsStarBase = 0;
+    melonDS::u32 VsStarSettings = 0;
+    melonDS::u32 VsStarStateType = 0;
+    melonDS::u32 VsStarFlags = 0;
+    melonDS::u32 VsStarPosX = 0;
+    melonDS::u32 VsStarPosY = 0;
+    melonDS::u32 VsStarPosZ = 0;
     melonDS::u64 Hash = 0;
+};
+
+struct ObjectScanSample
+{
+    melonDS::u32 Found = 0;
+    melonDS::u32 GUID = 0;
+    melonDS::u32 Base = 0;
+    melonDS::u32 Settings = 0;
+    melonDS::u32 StateType = 0;
+    melonDS::u32 Flags = 0;
+    melonDS::u32 PosX = 0;
+    melonDS::u32 PosY = 0;
+    melonDS::u32 PosZ = 0;
 };
 
 struct GameStateSyncHashes
@@ -1115,6 +1138,87 @@ void MixGameStateValue(melonDS::u64& hash, melonDS::u64 value)
     MixGameStateValue(hash, static_cast<melonDS::u32>(value >> 32));
 }
 
+bool ReadMainRAMU16(melonDS::NDS* nds, melonDS::u32 offset, melonDS::u16& value)
+{
+    if (!nds || !nds->MainRAM)
+        return false;
+    if (offset + sizeof(value) > nds->MainRAMMask + 1)
+        return false;
+
+    std::memcpy(&value, &nds->MainRAM[offset], sizeof(value));
+    return true;
+}
+
+bool ReadMainRAMU32(melonDS::NDS* nds, melonDS::u32 offset, melonDS::u32& value)
+{
+    if (!nds || !nds->MainRAM)
+        return false;
+    if (offset + sizeof(value) > nds->MainRAMMask + 1)
+        return false;
+
+    std::memcpy(&value, &nds->MainRAM[offset], sizeof(value));
+    return true;
+}
+
+ObjectScanSample FindVsBattleStarCandidate(melonDS::NDS* nds)
+{
+    ObjectScanSample sample;
+    if (!nds || !nds->MainRAM)
+        return sample;
+
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (ramLen < 0x120)
+        return sample;
+
+    for (melonDS::u32 off = 0; off <= ramLen - 0x120; off += 4)
+    {
+        melonDS::u32 vtable = 0;
+        melonDS::u32 guid = 0;
+        melonDS::u16 objectID = 0;
+        melonDS::u16 stateType = 0;
+        melonDS::u32 flags = 0;
+        if (!ReadMainRAMU32(nds, off, vtable) ||
+            !ReadMainRAMU32(nds, off + 4, guid) ||
+            !ReadMainRAMU16(nds, off + 0x0C, objectID) ||
+            !ReadMainRAMU16(nds, off + 0x0E, stateType) ||
+            !ReadMainRAMU32(nds, off + 0x10, flags))
+            continue;
+
+        if (vtable < kMainRAMBase || vtable >= kMainRAMBase + ramLen)
+            continue;
+        if (guid == 0 || guid >= 0x10000)
+            continue;
+        if (objectID != kVsBattleStarCandidateObjectID)
+            continue;
+        if (stateType != 1 && stateType != 2 && stateType != 3)
+            continue;
+        if (flags >= 0x01000000)
+            continue;
+
+        melonDS::u32 settings = 0;
+        melonDS::u32 posX = 0;
+        melonDS::u32 posY = 0;
+        melonDS::u32 posZ = 0;
+        ReadMainRAMU32(nds, off + 8, settings);
+        ReadMainRAMU32(nds, off + 0x5C, posX);
+        ReadMainRAMU32(nds, off + 0x60, posY);
+        ReadMainRAMU32(nds, off + 0x64, posZ);
+
+        sample.Found = 1;
+        sample.GUID = guid;
+        sample.Base = kMainRAMBase + off;
+        sample.Settings = settings;
+        sample.StateType = stateType;
+        sample.Flags = flags;
+        sample.PosX = posX;
+        sample.PosY = posY;
+        sample.PosZ = posZ;
+        return sample;
+    }
+
+    return sample;
+}
+
 GameStateSample ReadGameStateSample(melonDS::NDS* nds)
 {
     GameStateSample sample;
@@ -1130,6 +1234,17 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.NetRandomCallCount = nds->ARM9Read8(kNetRandomCallCountAddr);
     sample.NetRandomBranchAddress = nds->ARM9Read32(kNetRandomBranchAddressAddr);
 
+    const ObjectScanSample star = FindVsBattleStarCandidate(nds);
+    sample.VsStarFound = star.Found;
+    sample.VsStarGUID = star.GUID;
+    sample.VsStarBase = star.Base;
+    sample.VsStarSettings = star.Settings;
+    sample.VsStarStateType = star.StateType;
+    sample.VsStarFlags = star.Flags;
+    sample.VsStarPosX = star.PosX;
+    sample.VsStarPosY = star.PosY;
+    sample.VsStarPosZ = star.PosZ;
+
     sample.Hash = 1469598103934665603ull;
     MixGameStateValue(sample.Hash, sample.StageID);
     MixGameStateValue(sample.Hash, sample.StageGroup);
@@ -1139,6 +1254,14 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.NetRandomValue);
     MixGameStateValue(sample.Hash, sample.NetRandomCallCount);
     MixGameStateValue(sample.Hash, sample.NetRandomBranchAddress);
+    MixGameStateValue(sample.Hash, sample.VsStarFound);
+    MixGameStateValue(sample.Hash, sample.VsStarGUID);
+    MixGameStateValue(sample.Hash, sample.VsStarSettings);
+    MixGameStateValue(sample.Hash, sample.VsStarStateType);
+    MixGameStateValue(sample.Hash, sample.VsStarFlags);
+    MixGameStateValue(sample.Hash, sample.VsStarPosX);
+    MixGameStateValue(sample.Hash, sample.VsStarPosY);
+    MixGameStateValue(sample.Hash, sample.VsStarPosZ);
     return sample;
 }
 
@@ -1337,7 +1460,16 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                      << ",0x" << sample.GGID
                      << ",0x" << sample.NetRandomValue
                      << ",0x" << sample.NetRandomCallCount
-                     << ",0x" << sample.NetRandomBranchAddress;
+                     << ",0x" << sample.NetRandomBranchAddress
+                     << ",0x" << sample.VsStarFound
+                     << ",0x" << sample.VsStarGUID
+                     << ",0x" << sample.VsStarBase
+                     << ",0x" << sample.VsStarSettings
+                     << ",0x" << sample.VsStarStateType
+                     << ",0x" << sample.VsStarFlags
+                     << ",0x" << sample.VsStarPosX
+                     << ",0x" << sample.VsStarPosY
+                     << ",0x" << sample.VsStarPosZ;
 
     if (G.GameStateTraceExtended)
     {
@@ -1855,7 +1987,7 @@ void InitFromEnvironment()
         }
         else
         {
-            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,ggid,netRandomValue,netRandomCallCount,netRandomBranchAddress";
+            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,ggid,netRandomValue,netRandomCallCount,netRandomBranchAddress,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ";
             if (G.GameStateTraceExtended)
                 G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,playerGlobalHash,wifiCandidateHash,renderCandidateHash";
             G.GameStateTrace << '\n';
