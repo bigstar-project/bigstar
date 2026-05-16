@@ -68,6 +68,7 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 | `Net::syncRandomFast()` | `0x0200E5F4` | verified |
 | `Net::Core::shareRandomSeed()` | `0x02010F04` | verified |
 | Player actor | object id `0x0015` | traced |
+| VS Battle Star actor candidate | object id `0x0022`, settings `0x00000001` | candidate, traced |
 | VS Battle Star candidate actor | object id `0x010c` | candidate, traced |
 
 ## 現在分かっていること
@@ -107,6 +108,9 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
   - `id=0x010c` は座標 `x=0x00348000, y=0xfff28000, z=0x00080000` で、スクリーンショット上のVS Battle Star位置と対応する候補。
   - `logs\route-vsstar-trace` と `logs\staged-vsstar-trace` では、frame4380以降の `id=0x010c` がhost/clientおよび2 EmuInstance間で同じ `guid=0x23`、同じ座標になることを確認。
   - 現時点では `MvsLObject268/VSBattleStarCandidate` として扱い、次に取得・再生成時の同期対象にする。
+- 逆アセンブルの `actor creation r0=0x22` とRAM scanから、スター実体に近い候補として `id=0x0022 settings=0x00000001` を追加した。
+  - `logs\route-vsstar-actor-trace` では `guid=0x1b, x=0x00370000, y=0xffef0000` として出現し、画面上のスター位置と対応する。
+  - `logs\staged-state-apply-vsstar-actor` では、このActor候補をStateApply trace比較に含めても5100フレームまでpass。
 - Player Actor座標traceにより、`tests\nsmb_mario_vs_luigi_star_probe.inputs` ではframe4380以降に操作対象がスター近傍へ寄ることを確認。
 - `tests\nsmb_mario_vs_luigi_star_collect_after6000.inputs` を追加した。frame6000以降に左へ戻して、Star ActorのGUID変化を再現する診断用。
 - 診断用の `MELONDS_NSML_VS_STAR_SNAP_FRAME` は、星Actor位置を書き換えられるが、それだけでは取得判定・再生成までは起きなかった。`id=0x010c` が単純な取得当たり判定本体ではない、または追加内部状態/別Actor/処理タイミングが必要な可能性がある。

@@ -73,6 +73,8 @@ constexpr melonDS::u32 kGamePlayerCollectedStarsAddr = 0x0208A9DC;
 constexpr melonDS::u32 kGameCandidateWifiBlockAddr = 0x0208BE00;
 constexpr melonDS::u32 kGameCandidateRenderBlockAddr = 0x023F8300;
 constexpr melonDS::u16 kPlayerObjectID = 0x0015;
+constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
+constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
 constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
 
 enum class Role
@@ -132,6 +134,15 @@ struct WireGameState
     melonDS::u32 VsStarPosX;
     melonDS::u32 VsStarPosY;
     melonDS::u32 VsStarPosZ;
+    melonDS::u32 VsStarActorFound;
+    melonDS::u32 VsStarActorGUID;
+    melonDS::u32 VsStarActorBase;
+    melonDS::u32 VsStarActorSettings;
+    melonDS::u32 VsStarActorStateType;
+    melonDS::u32 VsStarActorFlags;
+    melonDS::u32 VsStarActorPosX;
+    melonDS::u32 VsStarActorPosY;
+    melonDS::u32 VsStarActorPosZ;
     melonDS::u32 PlayerActor0Found;
     melonDS::u32 PlayerActor0GUID;
     melonDS::u32 PlayerActor0Settings;
@@ -154,7 +165,7 @@ struct WireGameState
     melonDS::u32 RenderCandidateHashHi;
 };
 
-static_assert(sizeof(WireGameState) == 168);
+static_assert(sizeof(WireGameState) == 204);
 
 struct GameStateSample
 {
@@ -175,6 +186,15 @@ struct GameStateSample
     melonDS::u32 VsStarPosX = 0;
     melonDS::u32 VsStarPosY = 0;
     melonDS::u32 VsStarPosZ = 0;
+    melonDS::u32 VsStarActorFound = 0;
+    melonDS::u32 VsStarActorGUID = 0;
+    melonDS::u32 VsStarActorBase = 0;
+    melonDS::u32 VsStarActorSettings = 0;
+    melonDS::u32 VsStarActorStateType = 0;
+    melonDS::u32 VsStarActorFlags = 0;
+    melonDS::u32 VsStarActorPosX = 0;
+    melonDS::u32 VsStarActorPosY = 0;
+    melonDS::u32 VsStarActorPosZ = 0;
     melonDS::u32 PlayerActor0Found = 0;
     melonDS::u32 PlayerActor0GUID = 0;
     melonDS::u32 PlayerActor0Settings = 0;
@@ -728,6 +748,15 @@ void PumpNetworkLocked()
                     sample.VsStarPosX = packet.VsStarPosX;
                     sample.VsStarPosY = packet.VsStarPosY;
                     sample.VsStarPosZ = packet.VsStarPosZ;
+                    sample.VsStarActorFound = packet.VsStarActorFound;
+                    sample.VsStarActorGUID = packet.VsStarActorGUID;
+                    sample.VsStarActorBase = packet.VsStarActorBase;
+                    sample.VsStarActorSettings = packet.VsStarActorSettings;
+                    sample.VsStarActorStateType = packet.VsStarActorStateType;
+                    sample.VsStarActorFlags = packet.VsStarActorFlags;
+                    sample.VsStarActorPosX = packet.VsStarActorPosX;
+                    sample.VsStarActorPosY = packet.VsStarActorPosY;
+                    sample.VsStarActorPosZ = packet.VsStarActorPosZ;
                     sample.PlayerActor0Found = packet.PlayerActor0Found;
                     sample.PlayerActor0GUID = packet.PlayerActor0GUID;
                     sample.PlayerActor0Settings = packet.PlayerActor0Settings;
@@ -1313,6 +1342,58 @@ ObjectScanSample FindVsBattleStarCandidate(melonDS::NDS* nds)
     return sample;
 }
 
+ObjectScanSample FindObjectByIDAndSettings(melonDS::NDS* nds, melonDS::u16 expectedObjectID, melonDS::u32 expectedSettings)
+{
+    ObjectScanSample sample;
+    if (!nds || !nds->MainRAM)
+        return sample;
+
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (ramLen < 0x120)
+        return sample;
+
+    for (melonDS::u32 off = 0; off <= ramLen - 0x120; off += 4)
+    {
+        melonDS::u32 vtable = 0;
+        melonDS::u32 guid = 0;
+        melonDS::u32 settings = 0;
+        melonDS::u16 objectID = 0;
+        melonDS::u16 stateType = 0;
+        melonDS::u32 flags = 0;
+        if (!ReadMainRAMU32(nds, off, vtable) ||
+            !ReadMainRAMU32(nds, off + 4, guid) ||
+            !ReadMainRAMU32(nds, off + 8, settings) ||
+            !ReadMainRAMU16(nds, off + 0x0C, objectID) ||
+            !ReadMainRAMU16(nds, off + 0x0E, stateType) ||
+            !ReadMainRAMU32(nds, off + 0x10, flags))
+            continue;
+
+        if (vtable < kMainRAMBase || vtable >= kMainRAMBase + ramLen)
+            continue;
+        if (guid == 0 || guid >= 0x10000)
+            continue;
+        if (objectID != expectedObjectID || settings != expectedSettings)
+            continue;
+        if (stateType != 1 && stateType != 2 && stateType != 3)
+            continue;
+        if (flags >= 0x01000000)
+            continue;
+
+        sample.Found = 1;
+        sample.GUID = guid;
+        sample.Base = kMainRAMBase + off;
+        sample.Settings = settings;
+        sample.StateType = stateType;
+        sample.Flags = flags;
+        ReadMainRAMU32(nds, off + 0x5C, sample.PosX);
+        ReadMainRAMU32(nds, off + 0x60, sample.PosY);
+        ReadMainRAMU32(nds, off + 0x64, sample.PosZ);
+        return sample;
+    }
+
+    return sample;
+}
+
 void InsertPlayerActorByGUID(PlayerActorScanSample& players, const ObjectScanSample& actor)
 {
     if (!actor.Found)
@@ -1546,6 +1627,8 @@ void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     if (sample.VsStarFound)
         WriteObjectPositionByGUID(nds, sample.VsStarGUID, sample.VsStarPosX, sample.VsStarPosY, sample.VsStarPosZ);
+    if (sample.VsStarActorFound)
+        WriteObjectPositionByGUID(nds, sample.VsStarActorGUID, sample.VsStarActorPosX, sample.VsStarActorPosY, sample.VsStarActorPosZ);
     if (sample.PlayerActor0Found)
         WriteObjectPositionByGUID(nds, sample.PlayerActor0GUID, sample.PlayerActor0PosX, sample.PlayerActor0PosY, sample.PlayerActor0PosZ);
     if (sample.PlayerActor1Found)
@@ -1587,6 +1670,17 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.VsStarPosY = star.PosY;
     sample.VsStarPosZ = star.PosZ;
 
+    const ObjectScanSample starActor = FindObjectByIDAndSettings(nds, kVsBattleStarActorObjectID, kVsBattleStarActorSettings);
+    sample.VsStarActorFound = starActor.Found;
+    sample.VsStarActorGUID = starActor.GUID;
+    sample.VsStarActorBase = starActor.Base;
+    sample.VsStarActorSettings = starActor.Settings;
+    sample.VsStarActorStateType = starActor.StateType;
+    sample.VsStarActorFlags = starActor.Flags;
+    sample.VsStarActorPosX = starActor.PosX;
+    sample.VsStarActorPosY = starActor.PosY;
+    sample.VsStarActorPosZ = starActor.PosZ;
+
     const PlayerActorScanSample players = FindPlayerActors(nds);
     sample.PlayerActor0Found = players.Actor0.Found;
     sample.PlayerActor0GUID = players.Actor0.GUID;
@@ -1618,6 +1712,14 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.VsStarPosX);
     MixGameStateValue(sample.Hash, sample.VsStarPosY);
     MixGameStateValue(sample.Hash, sample.VsStarPosZ);
+    MixGameStateValue(sample.Hash, sample.VsStarActorFound);
+    MixGameStateValue(sample.Hash, sample.VsStarActorGUID);
+    MixGameStateValue(sample.Hash, sample.VsStarActorSettings);
+    MixGameStateValue(sample.Hash, sample.VsStarActorStateType);
+    MixGameStateValue(sample.Hash, sample.VsStarActorFlags);
+    MixGameStateValue(sample.Hash, sample.VsStarActorPosX);
+    MixGameStateValue(sample.Hash, sample.VsStarActorPosY);
+    MixGameStateValue(sample.Hash, sample.VsStarActorPosZ);
     MixGameStateValue(sample.Hash, sample.PlayerActor0Found);
     MixGameStateValue(sample.Hash, sample.PlayerActor0GUID);
     MixGameStateValue(sample.Hash, sample.PlayerActor0Settings);
@@ -1838,6 +1940,15 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                      << ",0x" << sample.VsStarPosX
                      << ",0x" << sample.VsStarPosY
                      << ",0x" << sample.VsStarPosZ
+                     << ",0x" << sample.VsStarActorFound
+                     << ",0x" << sample.VsStarActorGUID
+                     << ",0x" << sample.VsStarActorBase
+                     << ",0x" << sample.VsStarActorSettings
+                     << ",0x" << sample.VsStarActorStateType
+                     << ",0x" << sample.VsStarActorFlags
+                     << ",0x" << sample.VsStarActorPosX
+                     << ",0x" << sample.VsStarActorPosY
+                     << ",0x" << sample.VsStarActorPosZ
                      << ",0x" << sample.PlayerActor0Found
                      << ",0x" << sample.PlayerActor0GUID
                      << ",0x" << sample.PlayerActor0Settings
@@ -1941,6 +2052,15 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     packet.VsStarPosX = sample.VsStarPosX;
     packet.VsStarPosY = sample.VsStarPosY;
     packet.VsStarPosZ = sample.VsStarPosZ;
+    packet.VsStarActorFound = sample.VsStarActorFound;
+    packet.VsStarActorGUID = sample.VsStarActorGUID;
+    packet.VsStarActorBase = sample.VsStarActorBase;
+    packet.VsStarActorSettings = sample.VsStarActorSettings;
+    packet.VsStarActorStateType = sample.VsStarActorStateType;
+    packet.VsStarActorFlags = sample.VsStarActorFlags;
+    packet.VsStarActorPosX = sample.VsStarActorPosX;
+    packet.VsStarActorPosY = sample.VsStarActorPosY;
+    packet.VsStarActorPosZ = sample.VsStarActorPosZ;
     packet.PlayerActor0Found = sample.PlayerActor0Found;
     packet.PlayerActor0GUID = sample.PlayerActor0GUID;
     packet.PlayerActor0Settings = sample.PlayerActor0Settings;
@@ -2393,7 +2513,7 @@ void InitFromEnvironment()
         }
         else
         {
-            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,ggid,netRandomValue,netRandomCallCount,netRandomBranchAddress,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,playerActor0Found,playerActor0Guid,playerActor0Settings,playerActor0X,playerActor0Y,playerActor0Z,playerActor1Found,playerActor1Guid,playerActor1Settings,playerActor1X,playerActor1Y,playerActor1Z";
+            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,ggid,netRandomValue,netRandomCallCount,netRandomBranchAddress,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Settings,playerActor0X,playerActor0Y,playerActor0Z,playerActor1Found,playerActor1Guid,playerActor1Settings,playerActor1X,playerActor1Y,playerActor1Z";
             if (G.GameStateTraceExtended)
                 G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,playerGlobalHash,wifiCandidateHash,renderCandidateHash";
             G.GameStateTrace << '\n';
