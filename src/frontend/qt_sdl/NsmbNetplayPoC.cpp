@@ -276,6 +276,9 @@ struct State
     melonDS::u32 VsStarSnapFrame = 0;
     int VsStarSnapPlayerSlot = 0;
     bool VsStarSnapApplied[16] {};
+    melonDS::u32 PlayerSnapToStarFrame = 0;
+    int PlayerSnapToStarSlot = 0;
+    bool PlayerSnapToStarApplied[16] {};
     bool NetRandomPatchEnabled = false;
     bool NetRandomPatchAuto = false;
     melonDS::u32 NetRandomPatchFrame = 0;
@@ -1417,6 +1420,45 @@ void ApplyVsStarSnap(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         player.PosZ);
 }
 
+void ApplyPlayerSnapToStar(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (G.PlayerSnapToStarFrame == 0) return;
+    if (frame != G.PlayerSnapToStarFrame) return;
+    if (instanceID < 0 || instanceID >= 16) return;
+    if (G.PlayerSnapToStarApplied[instanceID]) return;
+    if (!nds || !nds->MainRAM) return;
+
+    const ObjectScanSample star = FindVsBattleStarCandidate(nds);
+    const PlayerActorScanSample players = FindPlayerActors(nds);
+    const ObjectScanSample& player = (G.PlayerSnapToStarSlot == 1) ? players.Actor1 : players.Actor0;
+    if (!star.Found || !player.Found)
+    {
+        std::printf("NSMB Test: player snap to VS star skipped inst=%d frame=%u star=%u player=%u\n",
+            instanceID,
+            frame,
+            star.Found,
+            player.Found);
+        G.PlayerSnapToStarApplied[instanceID] = true;
+        return;
+    }
+
+    const melonDS::u32 playerOffset = player.Base - kMainRAMBase;
+    WriteMainRAMU32(nds, playerOffset + 0x5C, star.PosX);
+    WriteMainRAMU32(nds, playerOffset + 0x60, star.PosY);
+    WriteMainRAMU32(nds, playerOffset + 0x64, player.PosZ);
+    G.PlayerSnapToStarApplied[instanceID] = true;
+
+    std::printf("NSMB Test: snapped player to VS star inst=%d frame=%u slot=%d playerGuid=0x%X starGuid=0x%X pos=0x%08X,0x%08X,0x%08X\n",
+        instanceID,
+        frame,
+        G.PlayerSnapToStarSlot,
+        player.GUID,
+        star.GUID,
+        star.PosX,
+        star.PosY,
+        player.PosZ);
+}
+
 bool WriteObjectPositionByGUID(melonDS::NDS* nds, melonDS::u32 guid, melonDS::u32 posX, melonDS::u32 posY, melonDS::u32 posZ)
 {
     if (!nds || !nds->MainRAM || guid == 0)
@@ -2307,6 +2349,8 @@ void InitFromEnvironment()
     }
     G.VsStarSnapFrame = static_cast<melonDS::u32>(std::max(0, EnvInt("MELONDS_NSML_VS_STAR_SNAP_FRAME", 0)));
     G.VsStarSnapPlayerSlot = std::clamp(EnvInt("MELONDS_NSML_VS_STAR_SNAP_PLAYER_SLOT", 0), 0, 1);
+    G.PlayerSnapToStarFrame = static_cast<melonDS::u32>(std::max(0, EnvInt("MELONDS_NSML_PLAYER_SNAP_TO_STAR_FRAME", 0)));
+    G.PlayerSnapToStarSlot = std::clamp(EnvInt("MELONDS_NSML_PLAYER_SNAP_TO_STAR_SLOT", 0), 0, 1);
 
     const char* netRandomValue = std::getenv("MELONDS_NSML_NET_RANDOM_VALUE");
     if (netRandomValue && netRandomValue[0])
@@ -2514,6 +2558,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyVsStarSnap(instanceID, inputFrame, nds);
+
+    if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyPlayerSnapToStar(instanceID, inputFrame, nds);
 
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteGameState(instanceID, inputFrame, nds);

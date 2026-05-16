@@ -12,7 +12,9 @@ param(
     [string]$RamDumpFrames = "",
     [int]$RamDumpInterval = 0,
     [int]$VsStarSnapFrame = 0,
-    [int]$VsStarSnapPlayerSlot = 0
+    [int]$VsStarSnapPlayerSlot = 0,
+    [int]$PlayerSnapToStarFrame = 0,
+    [int]$PlayerSnapToStarSlot = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -49,7 +51,9 @@ foreach ($name in @(
     "MELONDS_NSML_STATE_LOAD_DIR",
     "MELONDS_NSML_STATE_LOAD_FRAME",
     "MELONDS_NSML_STATE_SAVE_DIR",
-    "MELONDS_NSML_STATE_SAVE_FRAME"
+    "MELONDS_NSML_STATE_SAVE_FRAME",
+    "MELONDS_NSML_PLAYER_SNAP_TO_STAR_FRAME",
+    "MELONDS_NSML_PLAYER_SNAP_TO_STAR_SLOT"
 )) {
     Remove-Item "Env:\$name" -ErrorAction SilentlyContinue
 }
@@ -99,6 +103,13 @@ if ($VsStarSnapFrame -gt 0) {
 } else {
     Remove-Item Env:\MELONDS_NSML_VS_STAR_SNAP_FRAME -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_VS_STAR_SNAP_PLAYER_SLOT -ErrorAction SilentlyContinue
+}
+if ($PlayerSnapToStarFrame -gt 0) {
+    $env:MELONDS_NSML_PLAYER_SNAP_TO_STAR_FRAME = "$PlayerSnapToStarFrame"
+    $env:MELONDS_NSML_PLAYER_SNAP_TO_STAR_SLOT = "$PlayerSnapToStarSlot"
+} else {
+    Remove-Item Env:\MELONDS_NSML_PLAYER_SNAP_TO_STAR_FRAME -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_PLAYER_SNAP_TO_STAR_SLOT -ErrorAction SilentlyContinue
 }
 
 & (Resolve-Path $Exe).Path (Resolve-Path $Rom).Path *> $stdout
