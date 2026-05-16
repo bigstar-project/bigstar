@@ -34,11 +34,14 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 - Local MP packet / Wi-Fi MP reply slot trace。
 - `MELONDS_NSML_GAME_STATE_TRACE` による軽量ゲーム状態CSV trace。
 - 軽量ゲーム状態traceにVS Battle Star候補Actor `id=0x010c` の出現有無、GUID、座標を追加。
+- 軽量ゲーム状態traceにPlayer Actor `id=0x0015` 2体のGUID、settings、座標を追加。
 - `MELONDS_NSML_GAME_STATE_TRACE_EXTENDED=1` による重い候補領域trace。
 - `MELONDS_NSML_STATE_SYNC=1` によるnetplay中の軽量ゲーム状態hash交換。
 - `MELONDS_NSML_STATE_SYNC_EXTENDED=1` による候補領域別hash交換。
 - staged netplay smokeでhost/client別のゲーム状態traceとRAM dumpを出せるようにした。
 - route smokeでもゲーム状態traceとRAM dumpを指定できるようにした。
+- route smokeでRNG seed、RNGパッチ無効、VS Battle Star snap診断フックを指定できるようにした。
+- route smokeが過去のstaged netplay環境変数を引き継がないようにし、固定RTC/JIT無効も明示した。
 - staged netplay smokeでsavestate load/saveを指定できるようにした。到達済みMvsL状態から短い同期テストを回すための検証用。ただし、現状はWi-Fi/Local MP試合の継続復元には使えない。
 - `tests/nsmb_after_state_star_probe.inputs` を追加した。frame-5000 MvL savestateから相対入力でスター取得を試す診断用。
 
@@ -64,6 +67,7 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 | `Net::syncRandomFull()` | `0x0200E5E8` | verified |
 | `Net::syncRandomFast()` | `0x0200E5F4` | verified |
 | `Net::Core::shareRandomSeed()` | `0x02010F04` | verified |
+| Player actor | object id `0x0015` | traced |
 | VS Battle Star candidate actor | object id `0x010c` | candidate, traced |
 
 ## 現在分かっていること
@@ -78,7 +82,11 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
   - `Net::random.value`
   - `Net::randomCallCount`
   - `Net::randomBranchAddress`
-- `-StateSync` の軽量hashはVS Battle Star候補Actor座標込みで5100フレームまでmismatchなしで通る。
+- `-StateSync` の軽量hashはVS Battle Star候補Actor座標込みでは5100フレームまでmismatchなしで通った。
+- Player Actor座標も軽量hashへ入れると、staged netplayではmismatchが出る。
+  - `logs\staged-player-vsstar-trace` では、星座標は一致する一方で、Player ActorのX/Yがframe4500以降にhost/clientでズレる。
+  - これは「星の初期位置が一致しても、プレイヤー物理状態まで入力だけで完全一致する」とは言えないことを示す。
+  - 以後はPlayer Actor位置も重要状態同期の候補に含める。
 - `-StateSyncExtended` ではmismatchが出るが、分解結果では `basic=1`、`playerGlobal=1`、`wifiCandidate=0`、`renderCandidate=0`。
 - つまり、現在見えている差分はプレイヤーの得点・星・コイン等のglobal状態ではなく、Wi-Fi/MB候補領域とrender/process候補領域に集中している。
 - frame 4500 RAM dump比較では以下の傾向。
@@ -94,6 +102,9 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
   - `id=0x010c` は座標 `x=0x00348000, y=0xfff28000, z=0x00080000` で、スクリーンショット上のVS Battle Star位置と対応する候補。
   - `logs\route-vsstar-trace` と `logs\staged-vsstar-trace` では、frame4380以降の `id=0x010c` がhost/clientおよび2 EmuInstance間で同じ `guid=0x23`、同じ座標になることを確認。
   - 現時点では `MvsLObject268/VSBattleStarCandidate` として扱い、次に取得・再生成時の同期対象にする。
+- Player Actor座標traceにより、`tests\nsmb_mario_vs_luigi_star_probe.inputs` ではframe4380以降に操作対象がスター近傍へ寄ることを確認。
+- 診断用の `MELONDS_NSML_VS_STAR_SNAP_FRAME` は、星Actor位置を書き換えられるが、それだけでは取得判定・再生成までは起きなかった。`id=0x010c` が単純な取得当たり判定本体ではない、または追加内部状態/別Actor/処理タイミングが必要な可能性がある。
+- RNGパッチなしの過去ログではframe5071でスター取得・再生成由来らしい `Net::random` 消費が観測されているが、現行のクリーンroute再現では条件が一致しなかった。以後は固定RTC/JIT無効/RNG seed明示を前提に再検証する。
 - savestate loadからの短いstaged netplayは、melonDSの状態hashとしては通るが、現状ではゲーム内通信復元に失敗している。
   - `logs\staged-netplay-state-load-no-rng-repatch`: 900フレーム、`-StateSync` mismatchなし。
   - ただしスクリーンショットは「通信が切断されました」画面。
@@ -120,12 +131,14 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 
 ## 次にやること
 
-1. VS Battle Star `id=0x010c` の取得・消滅・次スター再生成をtraceし、再生成後もhost/clientで座標が一致するか確認する。
-2. スターの重要状態がズレる場合は、Actor座標・settings・RNG seed/call countのどこを同期すべきか切り分け、最小メモリパッチを作る。
-3. 8コインアイテムは自動化が難しいため一旦保留し、スター同期の見通しが立ってから同じActor trace方式で対象を特定する。
-4. ランダムステージ、勝敗・タイマー・スコアなど、対戦で同期すべき状態を個別に特定する。
-5. 入力同期netplayと重要状態同期を結合し、ローカル2プロセスで2PC相当の検証を継続する。
-6. state-load経路は必要になった場合だけ追加調査する。現時点では最終対戦実現の主経路にしない。
+1. 過去ログのframe5071付近と現行ログを比較し、スター取得・再生成時に変わるActor/manager状態を特定する。
+2. VS Battle Star `id=0x010c` が取得判定本体なのか、spawn marker/manager側状態なのかを切り分ける。
+3. Player Actor座標のズレを、入力同期開始前の揺れなのか、入力同期適用後も残るズレなのかに分解する。
+4. スター/プレイヤーの重要状態がズレる場合は、Actor座標・settings・RNG seed/call count・manager slot状態のどこを同期すべきか切り分け、最小メモリパッチを作る。
+5. 8コインアイテムは自動化が難しいため一旦保留し、スター同期の見通しが立ってから同じActor trace方式で対象を特定する。
+6. ランダムステージ、勝敗・タイマー・スコアなど、対戦で同期すべき状態を個別に特定する。
+7. 入力同期netplayと重要状態同期を結合し、ローカル2プロセスで2PC相当の検証を継続する。
+8. state-load経路は必要になった場合だけ追加調査する。現時点では最終対戦実現の主経路にしない。
 
 ## よく使う検証コマンド
 
@@ -141,6 +154,9 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 
 # route smokeでVS Battle Star候補Actor traceとRAM dumpを取る
 .\scripts\run-nsmb-mvl-route-smoke.ps1 -Frames 5100 -InputScript tests\nsmb_mario_vs_luigi_star_probe.inputs -LogDir logs\route-vsstar-trace -GameStateTrace -GameStateTraceInterval 60 -RamDumpFrames 5000
+
+# route smokeで診断用にVS Battle Star候補ActorをPlayer Actor座標へ寄せる
+.\scripts\run-nsmb-mvl-route-smoke.ps1 -Frames 5600 -InputScript tests\nsmb_mario_vs_luigi_star_probe.inputs -LogDir logs\route-star-snap-4440-clean -GameStateTrace -GameStateTraceInterval 10 -VsStarSnapFrame 4440 -VsStarSnapPlayerSlot 0
 
 # staged route + netplay smoke
 .\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500 -Port 8071

@@ -72,6 +72,7 @@ constexpr melonDS::u32 kGamePlayerDeathsAddr = 0x0208A9D4;
 constexpr melonDS::u32 kGamePlayerCollectedStarsAddr = 0x0208A9DC;
 constexpr melonDS::u32 kGameCandidateWifiBlockAddr = 0x0208BE00;
 constexpr melonDS::u32 kGameCandidateRenderBlockAddr = 0x023F8300;
+constexpr melonDS::u16 kPlayerObjectID = 0x0015;
 constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
 
 enum class Role
@@ -153,6 +154,18 @@ struct GameStateSample
     melonDS::u32 VsStarPosX = 0;
     melonDS::u32 VsStarPosY = 0;
     melonDS::u32 VsStarPosZ = 0;
+    melonDS::u32 PlayerActor0Found = 0;
+    melonDS::u32 PlayerActor0GUID = 0;
+    melonDS::u32 PlayerActor0Settings = 0;
+    melonDS::u32 PlayerActor0PosX = 0;
+    melonDS::u32 PlayerActor0PosY = 0;
+    melonDS::u32 PlayerActor0PosZ = 0;
+    melonDS::u32 PlayerActor1Found = 0;
+    melonDS::u32 PlayerActor1GUID = 0;
+    melonDS::u32 PlayerActor1Settings = 0;
+    melonDS::u32 PlayerActor1PosX = 0;
+    melonDS::u32 PlayerActor1PosY = 0;
+    melonDS::u32 PlayerActor1PosZ = 0;
     melonDS::u64 Hash = 0;
 };
 
@@ -167,6 +180,12 @@ struct ObjectScanSample
     melonDS::u32 PosX = 0;
     melonDS::u32 PosY = 0;
     melonDS::u32 PosZ = 0;
+};
+
+struct PlayerActorScanSample
+{
+    ObjectScanSample Actor0;
+    ObjectScanSample Actor1;
 };
 
 struct GameStateSyncHashes
@@ -232,6 +251,9 @@ struct State
     melonDS::u32 MemPatchFrame = 0;
     bool MemPatchFrameSet = false;
     bool MemPatchApplied[16] {};
+    melonDS::u32 VsStarSnapFrame = 0;
+    int VsStarSnapPlayerSlot = 0;
+    bool VsStarSnapApplied[16] {};
     bool NetRandomPatchEnabled = false;
     bool NetRandomPatchAuto = false;
     melonDS::u32 NetRandomPatchFrame = 0;
@@ -1160,6 +1182,17 @@ bool ReadMainRAMU32(melonDS::NDS* nds, melonDS::u32 offset, melonDS::u32& value)
     return true;
 }
 
+bool WriteMainRAMU32(melonDS::NDS* nds, melonDS::u32 offset, melonDS::u32 value)
+{
+    if (!nds || !nds->MainRAM)
+        return false;
+    if (offset + sizeof(value) > nds->MainRAMMask + 1)
+        return false;
+
+    std::memcpy(&nds->MainRAM[offset], &value, sizeof(value));
+    return true;
+}
+
 ObjectScanSample FindVsBattleStarCandidate(melonDS::NDS* nds)
 {
     ObjectScanSample sample;
@@ -1219,6 +1252,113 @@ ObjectScanSample FindVsBattleStarCandidate(melonDS::NDS* nds)
     return sample;
 }
 
+void InsertPlayerActorByGUID(PlayerActorScanSample& players, const ObjectScanSample& actor)
+{
+    if (!actor.Found)
+        return;
+    if (!players.Actor0.Found || actor.GUID < players.Actor0.GUID)
+    {
+        players.Actor1 = players.Actor0;
+        players.Actor0 = actor;
+        return;
+    }
+    if ((!players.Actor1.Found || actor.GUID < players.Actor1.GUID) &&
+        actor.GUID != players.Actor0.GUID)
+    {
+        players.Actor1 = actor;
+    }
+}
+
+PlayerActorScanSample FindPlayerActors(melonDS::NDS* nds)
+{
+    PlayerActorScanSample players;
+    if (!nds || !nds->MainRAM)
+        return players;
+
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (ramLen < 0x120)
+        return players;
+
+    for (melonDS::u32 off = 0; off <= ramLen - 0x120; off += 4)
+    {
+        melonDS::u32 vtable = 0;
+        melonDS::u32 guid = 0;
+        melonDS::u16 objectID = 0;
+        melonDS::u16 stateType = 0;
+        melonDS::u32 flags = 0;
+        if (!ReadMainRAMU32(nds, off, vtable) ||
+            !ReadMainRAMU32(nds, off + 4, guid) ||
+            !ReadMainRAMU16(nds, off + 0x0C, objectID) ||
+            !ReadMainRAMU16(nds, off + 0x0E, stateType) ||
+            !ReadMainRAMU32(nds, off + 0x10, flags))
+            continue;
+
+        if (vtable < kMainRAMBase || vtable >= kMainRAMBase + ramLen)
+            continue;
+        if (guid == 0 || guid >= 0x10000)
+            continue;
+        if (objectID != kPlayerObjectID)
+            continue;
+        if (stateType != 1 && stateType != 2 && stateType != 3)
+            continue;
+        if (flags >= 0x01000000)
+            continue;
+
+        ObjectScanSample actor;
+        actor.Found = 1;
+        actor.GUID = guid;
+        actor.Base = kMainRAMBase + off;
+        actor.StateType = stateType;
+        actor.Flags = flags;
+        ReadMainRAMU32(nds, off + 8, actor.Settings);
+        ReadMainRAMU32(nds, off + 0x5C, actor.PosX);
+        ReadMainRAMU32(nds, off + 0x60, actor.PosY);
+        ReadMainRAMU32(nds, off + 0x64, actor.PosZ);
+        InsertPlayerActorByGUID(players, actor);
+    }
+
+    return players;
+}
+
+void ApplyVsStarSnap(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (G.VsStarSnapFrame == 0) return;
+    if (frame != G.VsStarSnapFrame) return;
+    if (instanceID < 0 || instanceID >= 16) return;
+    if (G.VsStarSnapApplied[instanceID]) return;
+    if (!nds || !nds->MainRAM) return;
+
+    const ObjectScanSample star = FindVsBattleStarCandidate(nds);
+    const PlayerActorScanSample players = FindPlayerActors(nds);
+    const ObjectScanSample& player = (G.VsStarSnapPlayerSlot == 1) ? players.Actor1 : players.Actor0;
+    if (!star.Found || !player.Found)
+    {
+        std::printf("NSMB Test: VS star snap skipped inst=%d frame=%u star=%u player=%u\n",
+            instanceID,
+            frame,
+            star.Found,
+            player.Found);
+        G.VsStarSnapApplied[instanceID] = true;
+        return;
+    }
+
+    const melonDS::u32 starOffset = star.Base - kMainRAMBase;
+    WriteMainRAMU32(nds, starOffset + 0x5C, player.PosX);
+    WriteMainRAMU32(nds, starOffset + 0x60, player.PosY);
+    WriteMainRAMU32(nds, starOffset + 0x64, player.PosZ);
+    G.VsStarSnapApplied[instanceID] = true;
+
+    std::printf("NSMB Test: snapped VS star to player inst=%d frame=%u slot=%d starGuid=0x%X playerGuid=0x%X pos=0x%08X,0x%08X,0x%08X\n",
+        instanceID,
+        frame,
+        G.VsStarSnapPlayerSlot,
+        star.GUID,
+        player.GUID,
+        player.PosX,
+        player.PosY,
+        player.PosZ);
+}
+
 GameStateSample ReadGameStateSample(melonDS::NDS* nds)
 {
     GameStateSample sample;
@@ -1245,6 +1385,20 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.VsStarPosY = star.PosY;
     sample.VsStarPosZ = star.PosZ;
 
+    const PlayerActorScanSample players = FindPlayerActors(nds);
+    sample.PlayerActor0Found = players.Actor0.Found;
+    sample.PlayerActor0GUID = players.Actor0.GUID;
+    sample.PlayerActor0Settings = players.Actor0.Settings;
+    sample.PlayerActor0PosX = players.Actor0.PosX;
+    sample.PlayerActor0PosY = players.Actor0.PosY;
+    sample.PlayerActor0PosZ = players.Actor0.PosZ;
+    sample.PlayerActor1Found = players.Actor1.Found;
+    sample.PlayerActor1GUID = players.Actor1.GUID;
+    sample.PlayerActor1Settings = players.Actor1.Settings;
+    sample.PlayerActor1PosX = players.Actor1.PosX;
+    sample.PlayerActor1PosY = players.Actor1.PosY;
+    sample.PlayerActor1PosZ = players.Actor1.PosZ;
+
     sample.Hash = 1469598103934665603ull;
     MixGameStateValue(sample.Hash, sample.StageID);
     MixGameStateValue(sample.Hash, sample.StageGroup);
@@ -1262,6 +1416,18 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.VsStarPosX);
     MixGameStateValue(sample.Hash, sample.VsStarPosY);
     MixGameStateValue(sample.Hash, sample.VsStarPosZ);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0Found);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0GUID);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0Settings);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0PosX);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0PosY);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0PosZ);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1Found);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1GUID);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1Settings);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1PosX);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1PosY);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1PosZ);
     return sample;
 }
 
@@ -1469,7 +1635,19 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                      << ",0x" << sample.VsStarFlags
                      << ",0x" << sample.VsStarPosX
                      << ",0x" << sample.VsStarPosY
-                     << ",0x" << sample.VsStarPosZ;
+                     << ",0x" << sample.VsStarPosZ
+                     << ",0x" << sample.PlayerActor0Found
+                     << ",0x" << sample.PlayerActor0GUID
+                     << ",0x" << sample.PlayerActor0Settings
+                     << ",0x" << sample.PlayerActor0PosX
+                     << ",0x" << sample.PlayerActor0PosY
+                     << ",0x" << sample.PlayerActor0PosZ
+                     << ",0x" << sample.PlayerActor1Found
+                     << ",0x" << sample.PlayerActor1GUID
+                     << ",0x" << sample.PlayerActor1Settings
+                     << ",0x" << sample.PlayerActor1PosX
+                     << ",0x" << sample.PlayerActor1PosY
+                     << ",0x" << sample.PlayerActor1PosZ;
 
     if (G.GameStateTraceExtended)
     {
@@ -1945,6 +2123,8 @@ void InitFromEnvironment()
         std::printf("NSMB Test: invalid memory patch range list\n");
         G.MemPatchRanges.clear();
     }
+    G.VsStarSnapFrame = static_cast<melonDS::u32>(std::max(0, EnvInt("MELONDS_NSML_VS_STAR_SNAP_FRAME", 0)));
+    G.VsStarSnapPlayerSlot = std::clamp(EnvInt("MELONDS_NSML_VS_STAR_SNAP_PLAYER_SLOT", 0), 0, 1);
 
     const char* netRandomValue = std::getenv("MELONDS_NSML_NET_RANDOM_VALUE");
     if (netRandomValue && netRandomValue[0])
@@ -1987,7 +2167,7 @@ void InitFromEnvironment()
         }
         else
         {
-            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,ggid,netRandomValue,netRandomCallCount,netRandomBranchAddress,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ";
+            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,ggid,netRandomValue,netRandomCallCount,netRandomBranchAddress,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,playerActor0Found,playerActor0Guid,playerActor0Settings,playerActor0X,playerActor0Y,playerActor0Z,playerActor1Found,playerActor1Guid,playerActor1Settings,playerActor1X,playerActor1Y,playerActor1Z";
             if (G.GameStateTraceExtended)
                 G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,playerGlobalHash,wifiCandidateHash,renderCandidateHash";
             G.GameStateTrace << '\n';
@@ -2148,6 +2328,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ApplyNetRandomPatch(instanceID, inputFrame, nds);
+
+    if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyVsStarSnap(instanceID, inputFrame, nds);
 
     WaitForSerialRunTurn(instanceID, inputFrame);
     WaitAtFrameBarrier(GBeforeFrameBarrier, instanceID, inputFrame, "before");

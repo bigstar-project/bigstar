@@ -3,12 +3,16 @@ param(
     [string]$Exe = "build\debug-windows-x86_64\melonDS.exe",
     [string]$Rom = "roms\nsmb.nds",
     [string]$InputScript = "tests\nsmb_mario_vs_luigi.inputs",
+    [string]$Seed = "0x00000100",
+    [switch]$NoRngPatch,
     [string]$LogDir = "logs",
     [switch]$GameStateTrace,
     [int]$GameStateTraceInterval = 60,
     [switch]$GameStateTraceExtended,
     [string]$RamDumpFrames = "",
-    [int]$RamDumpInterval = 0
+    [int]$RamDumpInterval = 0,
+    [int]$VsStarSnapFrame = 0,
+    [int]$VsStarSnapPlayerSlot = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,6 +28,31 @@ Remove-Item -Force $stdout, $hashLog, $gameStateTracePath -ErrorAction SilentlyC
 Remove-Item -Recurse -Force $screenDir -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force $ramDumpDir -ErrorAction SilentlyContinue
 
+foreach ($name in @(
+    "MELONDS_NSML_POC",
+    "MELONDS_NSML_ROLE",
+    "MELONDS_NSML_PEER",
+    "MELONDS_NSML_PORT",
+    "MELONDS_NSML_LOCAL_INSTANCE",
+    "MELONDS_NSML_DELAY",
+    "MELONDS_NSML_NETPLAY_START_FRAME",
+    "MELONDS_NSML_NETPLAY_WARMUP_FRAMES",
+    "MELONDS_NSML_NO_LOCAL_WAIT",
+    "MELONDS_NSML_WAIT_FOR_PEER",
+    "MELONDS_NSML_WAIT_FOR_PEER_AT_NETPLAY_START",
+    "MELONDS_NSML_DEFER_NETWORK_UNTIL_START",
+    "MELONDS_NSML_NETPLAY_FRAME_BARRIER",
+    "MELONDS_NSML_STATE_SYNC",
+    "MELONDS_NSML_STATE_SYNC_INTERVAL",
+    "MELONDS_NSML_STATE_SYNC_EXTENDED",
+    "MELONDS_NSML_STATE_LOAD_DIR",
+    "MELONDS_NSML_STATE_LOAD_FRAME",
+    "MELONDS_NSML_STATE_SAVE_DIR",
+    "MELONDS_NSML_STATE_SAVE_FRAME"
+)) {
+    Remove-Item "Env:\$name" -ErrorAction SilentlyContinue
+}
+
 $env:MELONDS_NSML_TEST = "1"
 $env:MELONDS_NSML_TEST_INSTANCES = "2"
 $env:MELONDS_NSML_TEST_FRAMES = "$Frames"
@@ -32,6 +61,15 @@ $env:MELONDS_NSML_HASH_LOG = (Join-Path (Resolve-Path $LogDir).Path "nsmb-mvl-ro
 $env:MELONDS_NSML_HASH_INTERVAL = "300"
 $env:MELONDS_NSML_SCREENSHOT_DIR = (Join-Path (Resolve-Path $LogDir).Path "screens-mvl-route")
 $env:MELONDS_NSML_SCREENSHOT_INTERVAL = "120"
+$env:MELONDS_NSML_FIXED_RTC = "2020-01-01T00:00:00"
+$env:MELONDS_NSML_DISABLE_JIT = "1"
+if ($NoRngPatch) {
+    Remove-Item Env:\MELONDS_NSML_NET_RANDOM_AUTO -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_NET_RANDOM_VALUE -ErrorAction SilentlyContinue
+} else {
+    $env:MELONDS_NSML_NET_RANDOM_AUTO = "1"
+    $env:MELONDS_NSML_NET_RANDOM_VALUE = $Seed
+}
 if ($GameStateTrace) {
     $env:MELONDS_NSML_GAME_STATE_TRACE = (Join-Path (Resolve-Path $LogDir).Path "nsmb-mvl-route.game-state.csv")
     $env:MELONDS_NSML_GAME_STATE_TRACE_INTERVAL = "$GameStateTraceInterval"
@@ -53,6 +91,13 @@ if ($RamDumpFrames -or $RamDumpInterval -gt 0) {
     Remove-Item Env:\MELONDS_NSML_RAM_DUMP_DIR -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_RAM_DUMP_FRAMES -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_RAM_DUMP_INTERVAL -ErrorAction SilentlyContinue
+}
+if ($VsStarSnapFrame -gt 0) {
+    $env:MELONDS_NSML_VS_STAR_SNAP_FRAME = "$VsStarSnapFrame"
+    $env:MELONDS_NSML_VS_STAR_SNAP_PLAYER_SLOT = "$VsStarSnapPlayerSlot"
+} else {
+    Remove-Item Env:\MELONDS_NSML_VS_STAR_SNAP_FRAME -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_VS_STAR_SNAP_PLAYER_SLOT -ErrorAction SilentlyContinue
 }
 
 & (Resolve-Path $Exe).Path (Resolve-Path $Rom).Path *> $stdout
