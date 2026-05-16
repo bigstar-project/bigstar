@@ -76,6 +76,7 @@ Client PC:
   - Local MP通常packet pollに短いwaitを入れる案も、実行進行を歪めてinst0だけが先行するケースがあったため本線から外した。
   - screenHash計算はLocal MPのタイミングに影響しうるため、デフォルト無効の検証オプションにした。
 - 最新のstaged smoke再実行では、peer接続とlockstep開始までは進むが、host/clientのRNG patch到達チェックが失敗するケースが続いている。直近の次作業は、現在のinstrumentation下でMario vs Luigi状態へ安定到達できる条件を復旧すること。
+- `test: Wi-Fi reply slot書き込みtraceを追加` と `test: 画面hash検証を追加` を一時revertしてstaged smokeを再実行してもRNG patch未到達は再現した。したがって、直近の計測フックそのものが壊したというより、Local MPルートのレースで到達可否が揺れていると判断する。
 
 ## 現在のブロッカー
 
