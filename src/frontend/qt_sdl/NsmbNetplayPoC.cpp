@@ -40,6 +40,7 @@
 #include "Savestate.h"
 #include "LocalMP.h"
 #include "MPInterface.h"
+#include "Platform.h"
 
 namespace NsmbNetplayPoC
 {
@@ -614,9 +615,12 @@ void PumpNetworkLocked()
                 {
                     G.MatchSeed = packet.Seed;
                     G.MatchSeedConfigured = true;
-                    G.NetRandomPatchValue = packet.Seed;
-                    G.NetRandomPatchEnabled = true;
-                    G.NetRandomPatchAuto = true;
+                    if (G.StateLoadDir.empty())
+                    {
+                        G.NetRandomPatchValue = packet.Seed;
+                        G.NetRandomPatchEnabled = true;
+                        G.NetRandomPatchAuto = true;
+                    }
                     std::printf("NSMB PoC: received match seed 0x%08X\n", packet.Seed);
                 }
             }
@@ -1717,6 +1721,11 @@ bool LoadState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         return false;
     }
 
+    // NDS savestate loading restores Wifi::PowerOn before Wifi::SetPowerCnt()
+    // runs, so the normal power-on side effect can be skipped. Re-register the
+    // instance with LocalMP before restoring the shared LocalMP queue snapshot.
+    melonDS::Platform::MP_Begin(nds->UserData);
+
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         G.StateLoaded[instanceID] = true;
@@ -1933,7 +1942,7 @@ void InitFromEnvironment()
         G.MatchSeedConfigured = true;
     }
 
-    if (G.NetRole == Role::Host && G.MatchSeedConfigured)
+    if (G.NetRole == Role::Host && G.MatchSeedConfigured && G.StateLoadDir.empty())
     {
         G.NetRandomPatchEnabled = true;
         G.NetRandomPatchAuto = true;

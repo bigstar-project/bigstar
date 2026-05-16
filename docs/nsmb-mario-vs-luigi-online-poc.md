@@ -37,7 +37,7 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 - `MELONDS_NSML_STATE_SYNC=1` によるnetplay中の軽量ゲーム状態hash交換。
 - `MELONDS_NSML_STATE_SYNC_EXTENDED=1` による候補領域別hash交換。
 - staged netplay smokeでhost/client別のゲーム状態traceとRAM dumpを出せるようにした。
-- staged netplay smokeでsavestate load/saveを指定できるようにした。到達済みMvsL状態から短い同期テストを回すための検証用。
+- staged netplay smokeでsavestate load/saveを指定できるようにした。到達済みMvsL状態から短い同期テストを回すための検証用。ただし、現状はWi-Fi/Local MP試合の継続復元には使えない。
 - `tests/nsmb_after_state_star_probe.inputs` を追加した。frame-5000 MvL savestateから相対入力でスター取得を試す診断用。
 
 ## 重要な解析済みアドレス
@@ -86,10 +86,12 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 - `tools/nsmb_mvl_ram_probe.py --a2dj-process-lists` でJP process listを辿る診断を追加した。
   - `logs\staged-netplay-ramdump-4500` のhost/client inst0/inst1では、execute/render/create process listの意味的なobject集合は一致。
   - 少なくともこのフレームでは、top-level process list差分ではなくWi-Fi/描画内部リスト差分が主に見えている。
-- savestate loadからの短いstaged netplayは成功。
-  - `logs\staged-netplay-state-load-neutral-nopatch`: 900フレーム、`-StateSync` mismatchなし。
-  - `logs\staged-netplay-state-load-star-probe-nopatch`: 2200フレーム、`-StateSync` mismatchなし。
-  - ただし後者では現時点の相対入力では `Net::randomCallCount` が進まず、スター取得・再生成までは確認できていない。
+- savestate loadからの短いstaged netplayは、melonDSの状態hashとしては通るが、現状ではゲーム内通信復元に失敗している。
+  - `logs\staged-netplay-state-load-no-rng-repatch`: 900フレーム、`-StateSync` mismatchなし。
+  - ただしスクリーンショットは「通信が切断されました」画面。
+  - state-load時にmatch seedが `Net::random.value` へ再注入される問題は修正済み。
+  - savestate load直後に `MP_Begin` を補っても通信断は解消しなかった。
+  - melonDS本体の `Wifi::DoSavestate()` にもWi-Fiとsavestateの相性問題が示されているため、state-load経路は本筋ではなく診断用に留める。
 
 ## Debugビルドクラッシュの原因と修正
 
@@ -110,10 +112,11 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 
 ## 次にやること
 
-1. render/process候補領域の差分をさらに分類し、ゲーム上重要なactor状態か、単なるリスト順序・描画順序かを切り分ける。
-2. Big Star actor、8コインアイテム、ランダムステージ、勝敗・タイマー・スコアなど、対戦で同期すべき状態を個別に特定する。
+1. Big Star actor、8コインアイテム、ランダムステージ、勝敗・タイマー・スコアなど、対戦で同期すべき状態を個別に特定する。
+2. render/process候補領域の差分をさらに分類し、ゲーム上重要なactor状態か、単なるリスト順序・描画順序かを切り分ける。
 3. 重要状態だけを同期・固定するメモリパッチまたはROMパッチの最小実装を作る。
 4. 入力同期netplayと重要状態同期を結合し、ローカル2プロセスで2PC相当の検証を継続する。
+5. state-load経路は必要になった場合だけ追加調査する。現時点では最終対戦実現の主経路にしない。
 
 ## よく使う検証コマンド
 
