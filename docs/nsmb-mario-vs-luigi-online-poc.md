@@ -137,6 +137,10 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
   - この6200フレーム検証では、スター取得後もhost/client双方で `player0BattleStars=0x4`、実体Star Actor座標、RNG call countが一致した。
   - `scripts\run-nsmb-mvl-netplay-staged-retry.ps1` を追加した。`logs\staged-retry-6200` では1回目が到達フレークで失敗し、2回目で6200フレーム検証がpass。
   - ただしLocal MP探索の揺れ自体は残っているため、長期的には起動到達の自動リトライ、またはNSMB側patchで参加確認を短絡する必要がある。
+- `logs\staged-retry-7000\attempt-02` では7000フレーム検証がpassしたが、スクリーンショット上はhost/clientのStageCamera/表示がまだズレる。
+  - Player Actor、実体Star Actor、星数、RNG call countは一致している。
+  - `logs\staged-retry-6700-ram6600\attempt-02` のRAM dump比較では、StageCamera `id=0x013c` と `MvsLObject267 id=0x010b` 周辺に差分が出ている。
+  - 次はStageCamera / MvsLObject267 / stage表示状態をStateApply対象に追加する。
 - `id=0x010c` は再生成タイミングがhost/clientで1 trace tick程度ずれることがあるため、strictなStateApply比較からは外した。実体スター同期の判定は `id=0x0022/settings=1` のStar Actor座標とプレイヤーglobal状態を優先する。
 - RNGパッチなしの過去ログではframe5071でスター取得・再生成由来らしい `Net::random` 消費が観測されているが、現行のクリーンroute再現では条件が一致しなかった。以後は固定RTC/JIT無効/RNG seed明示を前提に再検証する。
 - savestate loadからの短いstaged netplayは、melonDSの状態hashとしては通るが、現状ではゲーム内通信復元に失敗している。
@@ -167,14 +171,15 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 ## 次にやること
 
 1. staged host/clientがMvsLへ入れない揺れを減らす。まずは入力再送・起動待ち・自動リトライで検証足場を安定化し、必要ならNSMB側patchで参加確認を短絡する。
-2. スター取得後に次スターが再生成されるまで長く走らせ、実体Star Actor / RNG timeline / player globalがhost/clientで揃うか確認する。
-3. StateApplyの適用ラグをさらに減らす。現状は通信経由の補正なので、trace上は数フレーム遅れのmismatchがあり得る。
-4. 診断フックなしの入力スクリプトでスター取得できるルートを作る。難しければ、しばらくはstick診断を回帰テストとして使う。
-5. Star Actor側も必要なら前フレーム座標・速度・stateTypeをStateApply対象に拡張する。
-6. 8コインアイテムは自動化が難しいため一旦保留し、スター同期の見通しが立ってから同じActor trace方式で対象を特定する。
-7. ランダムステージ、勝敗・タイマー・スコアなど、対戦で同期すべき状態を個別に特定する。
-8. 入力同期netplayと重要状態同期を結合し、ローカル2プロセスで2PC相当の検証を継続する。
-9. state-load経路は必要になった場合だけ追加調査する。現時点では最終対戦実現の主経路にしない。
+2. StageCamera / MvsLObject267 / stage表示状態をStateApply対象に追加し、スクリーンショット上のhost/client差分を減らす。
+3. スター取得後に次スターが再生成されるまで長く走らせ、実体Star Actor / RNG timeline / player global / 画面表示がhost/clientで揃うか確認する。
+4. StateApplyの適用ラグをさらに減らす。現状は通信経由の補正なので、trace上は数フレーム遅れのmismatchがあり得る。
+5. 診断フックなしの入力スクリプトでスター取得できるルートを作る。難しければ、しばらくはstick診断を回帰テストとして使う。
+6. Star Actor側も必要なら前フレーム座標・速度・stateTypeをStateApply対象に拡張する。
+7. 8コインアイテムは自動化が難しいため一旦保留し、スター同期の見通しが立ってから同じActor trace方式で対象を特定する。
+8. ランダムステージ、勝敗・タイマー・スコアなど、対戦で同期すべき状態を個別に特定する。
+9. 入力同期netplayと重要状態同期を結合し、ローカル2プロセスで2PC相当の検証を継続する。
+10. state-load経路は必要になった場合だけ追加調査する。現時点では最終対戦実現の主経路にしない。
 
 ## よく使う検証コマンド
 

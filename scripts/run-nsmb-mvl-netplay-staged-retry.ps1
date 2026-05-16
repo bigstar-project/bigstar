@@ -9,6 +9,8 @@ param(
     [string]$InputScript = "tests\nsmb_mario_vs_luigi_star_probe.inputs",
     [int]$StateApplyCompareStartFrame = 5100,
     [int]$StateSyncInterval = 5,
+    [string]$RamDumpFrames = "",
+    [int]$RamDumpInterval = 0,
     [int]$PlayerStickToStarStartFrame = 4380,
     [int]$PlayerStickToStarEndFrame = 4440,
     [int]$PlayerStickToStarSlot = 0
@@ -40,6 +42,8 @@ for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
             -StateApply `
             -StateApplyCompareStartFrame $StateApplyCompareStartFrame `
             -StateSyncInterval $StateSyncInterval `
+            -RamDumpFrames $RamDumpFrames `
+            -RamDumpInterval $RamDumpInterval `
             -AllowStateMismatch `
             -PlayerStickToStarStartFrame $PlayerStickToStarStartFrame `
             -PlayerStickToStarEndFrame $PlayerStickToStarEndFrame `
