@@ -69,7 +69,7 @@ constexpr melonDS::u32 kGamePlayerScoreAddr = 0x0208A9C4;
 constexpr melonDS::u32 kGamePlayerDisplayedStarsAddr = 0x0208A9CC;
 constexpr melonDS::u32 kGamePlayerDeathsAddr = 0x0208A9D4;
 constexpr melonDS::u32 kGamePlayerCollectedStarsAddr = 0x0208A9DC;
-constexpr melonDS::u32 kGameCandidateActorBlockAddr = 0x0208BE00;
+constexpr melonDS::u32 kGameCandidateWifiBlockAddr = 0x0208BE00;
 constexpr melonDS::u32 kGameCandidateRenderBlockAddr = 0x023F8300;
 
 enum class Role
@@ -124,8 +124,8 @@ struct WireGameState
     melonDS::u32 BasicHashHi;
     melonDS::u32 PlayerGlobalHashLo;
     melonDS::u32 PlayerGlobalHashHi;
-    melonDS::u32 ActorCandidateHashLo;
-    melonDS::u32 ActorCandidateHashHi;
+    melonDS::u32 WifiCandidateHashLo;
+    melonDS::u32 WifiCandidateHashHi;
     melonDS::u32 RenderCandidateHashLo;
     melonDS::u32 RenderCandidateHashHi;
 };
@@ -149,7 +149,7 @@ struct GameStateSyncHashes
 {
     melonDS::u64 Basic = 0;
     melonDS::u64 PlayerGlobal = 0;
-    melonDS::u64 ActorCandidate = 0;
+    melonDS::u64 WifiCandidate = 0;
     melonDS::u64 RenderCandidate = 0;
 };
 
@@ -507,7 +507,7 @@ melonDS::u64 CombinedGameStateHash(const GameStateSyncHashes& hashes)
 {
     melonDS::u64 combined = hashes.Basic;
     MixGameStateValue(combined, hashes.PlayerGlobal);
-    MixGameStateValue(combined, hashes.ActorCandidate);
+    MixGameStateValue(combined, hashes.WifiCandidate);
     MixGameStateValue(combined, hashes.RenderCandidate);
     return combined;
 }
@@ -523,29 +523,29 @@ void CompareGameStateLocked(int instanceID, melonDS::u32 frame)
     const GameStateSyncHashes& rhs = remote->second;
     if (lhs.Basic == rhs.Basic
         && lhs.PlayerGlobal == rhs.PlayerGlobal
-        && lhs.ActorCandidate == rhs.ActorCandidate
+        && lhs.WifiCandidate == rhs.WifiCandidate
         && lhs.RenderCandidate == rhs.RenderCandidate)
         return;
 
     G.GameStateMismatchSeen = true;
-    std::printf("NSMB PoC: game state mismatch inst=%d frame=%u local=%016llX remote=%016llX basic=%d playerGlobal=%d actorCandidate=%d renderCandidate=%d\n",
+    std::printf("NSMB PoC: game state mismatch inst=%d frame=%u local=%016llX remote=%016llX basic=%d playerGlobal=%d wifiCandidate=%d renderCandidate=%d\n",
         instanceID,
         frame,
         static_cast<unsigned long long>(CombinedGameStateHash(lhs)),
         static_cast<unsigned long long>(CombinedGameStateHash(rhs)),
         lhs.Basic == rhs.Basic ? 1 : 0,
         lhs.PlayerGlobal == rhs.PlayerGlobal ? 1 : 0,
-        lhs.ActorCandidate == rhs.ActorCandidate ? 1 : 0,
+        lhs.WifiCandidate == rhs.WifiCandidate ? 1 : 0,
         lhs.RenderCandidate == rhs.RenderCandidate ? 1 : 0);
-    std::printf("NSMB PoC: game state components local basic=%016llX playerGlobal=%016llX actorCandidate=%016llX renderCandidate=%016llX\n",
+    std::printf("NSMB PoC: game state components local basic=%016llX playerGlobal=%016llX wifiCandidate=%016llX renderCandidate=%016llX\n",
         static_cast<unsigned long long>(lhs.Basic),
         static_cast<unsigned long long>(lhs.PlayerGlobal),
-        static_cast<unsigned long long>(lhs.ActorCandidate),
+        static_cast<unsigned long long>(lhs.WifiCandidate),
         static_cast<unsigned long long>(lhs.RenderCandidate));
-    std::printf("NSMB PoC: game state components remote basic=%016llX playerGlobal=%016llX actorCandidate=%016llX renderCandidate=%016llX\n",
+    std::printf("NSMB PoC: game state components remote basic=%016llX playerGlobal=%016llX wifiCandidate=%016llX renderCandidate=%016llX\n",
         static_cast<unsigned long long>(rhs.Basic),
         static_cast<unsigned long long>(rhs.PlayerGlobal),
-        static_cast<unsigned long long>(rhs.ActorCandidate),
+        static_cast<unsigned long long>(rhs.WifiCandidate),
         static_cast<unsigned long long>(rhs.RenderCandidate));
 }
 
@@ -629,7 +629,7 @@ void PumpNetworkLocked()
                     GameStateSyncHashes hashes;
                     hashes.Basic = (static_cast<melonDS::u64>(packet.BasicHashHi) << 32) | packet.BasicHashLo;
                     hashes.PlayerGlobal = (static_cast<melonDS::u64>(packet.PlayerGlobalHashHi) << 32) | packet.PlayerGlobalHashLo;
-                    hashes.ActorCandidate = (static_cast<melonDS::u64>(packet.ActorCandidateHashHi) << 32) | packet.ActorCandidateHashLo;
+                    hashes.WifiCandidate = (static_cast<melonDS::u64>(packet.WifiCandidateHashHi) << 32) | packet.WifiCandidateHashLo;
                     hashes.RenderCandidate = (static_cast<melonDS::u64>(packet.RenderCandidateHashHi) << 32) | packet.RenderCandidateHashLo;
                     G.RemoteGameStateHashes[GameStateKey(static_cast<int>(packet.Instance), packet.Frame)] = hashes;
                     CompareGameStateLocked(static_cast<int>(packet.Instance), packet.Frame);
@@ -1349,7 +1349,7 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         const melonDS::u32 player0CollectedStars = nds->ARM9Read32(kGamePlayerCollectedStarsAddr);
         const melonDS::u32 player1CollectedStars = nds->ARM9Read32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32));
         const melonDS::u64 playerGlobalHash = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, 0xC0);
-        const melonDS::u64 actorCandidateHash = HashMainRAMRange(nds, kGameCandidateActorBlockAddr, 0x2200);
+        const melonDS::u64 wifiCandidateHash = HashMainRAMRange(nds, kGameCandidateWifiBlockAddr, 0x2200);
         const melonDS::u64 renderCandidateHash = HashMainRAMRange(nds, kGameCandidateRenderBlockAddr, 0x240);
 
         G.GameStateTrace << ",0x" << playerCount
@@ -1366,7 +1366,7 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                          << ",0x" << player0CollectedStars
                          << ",0x" << player1CollectedStars
                          << ",0x" << playerGlobalHash
-                         << ",0x" << actorCandidateHash
+                         << ",0x" << wifiCandidateHash
                          << ",0x" << renderCandidateHash;
     }
 
@@ -1387,7 +1387,7 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if (G.GameStateSyncExtended)
     {
         hashes.PlayerGlobal = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, 0xC0);
-        hashes.ActorCandidate = HashMainRAMRange(nds, kGameCandidateActorBlockAddr, 0x2200);
+        hashes.WifiCandidate = HashMainRAMRange(nds, kGameCandidateWifiBlockAddr, 0x2200);
         hashes.RenderCandidate = HashMainRAMRange(nds, kGameCandidateRenderBlockAddr, 0x240);
     }
 
@@ -1418,8 +1418,8 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     packet.BasicHashHi = static_cast<melonDS::u32>(hashes.Basic >> 32);
     packet.PlayerGlobalHashLo = static_cast<melonDS::u32>(hashes.PlayerGlobal & 0xFFFFFFFFu);
     packet.PlayerGlobalHashHi = static_cast<melonDS::u32>(hashes.PlayerGlobal >> 32);
-    packet.ActorCandidateHashLo = static_cast<melonDS::u32>(hashes.ActorCandidate & 0xFFFFFFFFu);
-    packet.ActorCandidateHashHi = static_cast<melonDS::u32>(hashes.ActorCandidate >> 32);
+    packet.WifiCandidateHashLo = static_cast<melonDS::u32>(hashes.WifiCandidate & 0xFFFFFFFFu);
+    packet.WifiCandidateHashHi = static_cast<melonDS::u32>(hashes.WifiCandidate >> 32);
     packet.RenderCandidateHashLo = static_cast<melonDS::u32>(hashes.RenderCandidate & 0xFFFFFFFFu);
     packet.RenderCandidateHashHi = static_cast<melonDS::u32>(hashes.RenderCandidate >> 32);
 
@@ -1846,7 +1846,7 @@ void InitFromEnvironment()
         {
             G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,ggid,netRandomValue,netRandomCallCount,netRandomBranchAddress";
             if (G.GameStateTraceExtended)
-                G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,playerGlobalHash,actorCandidateHash,renderCandidateHash";
+                G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,playerGlobalHash,wifiCandidateHash,renderCandidateHash";
             G.GameStateTrace << '\n';
         }
     }

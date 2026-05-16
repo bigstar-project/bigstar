@@ -10,7 +10,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード�
 
 Local MPの完全な決定性だけに依存する方針は採用しない。
 
-これまでの検証で、同一PC、同一ROM/save、固定RTC、JIT無効、固定RNG seedでも、melonDSの2 EmuInstance + Local MP経路は実行ごとに揺れることが分かった。試合開始や基本状態までは揃えられるが、RAM hashや描画順序、actor候補領域は一致しないことがある。
+これまでの検証で、同一PC、同一ROM/save、固定RTC、JIT無効、固定RNG seedでも、melonDSの2 EmuInstance + Local MP経路は実行ごとに揺れることが分かった。試合開始や基本状態までは揃えられるが、RAM hashやWi-Fi/描画リスト系の内部状態は一致しないことがある。
 
 そのため、今後は次の方針に寄せる。
 
@@ -53,7 +53,7 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 | `Net::randomCallCount` | `0x02088068` | candidate |
 | `Net::random.value` | `0x02088088` | candidate |
 | player global candidate block | `0x0208A964..0x0208AA23` | candidate, current trace target |
-| actor candidate block | `0x0208BE00..0x0208DFFF` | candidate, current diff target |
+| Wi-Fi/MB candidate block | `0x0208BE00..0x0208DFFF` | candidate, current diff target |
 | render/process candidate block | `0x023F8300..0x023F853F` | candidate, current diff target |
 | `Net::getRandom12()` | `0x0200E550` | verified |
 | `Net::getRandom()` | `0x0200E5A0` | verified |
@@ -74,12 +74,13 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
   - `Net::randomCallCount`
   - `Net::randomBranchAddress`
 - `-StateSync` の軽量hashは5100フレームまでmismatchなしで通る。
-- `-StateSyncExtended` ではmismatchが出るが、分解結果では `basic=1`、`playerGlobal=1`、`actorCandidate=0`、`renderCandidate=0`。
-- つまり、現在見えている差分はプレイヤーの得点・星・コイン等のglobal状態ではなく、actor候補領域とrender/process候補領域に集中している。
+- `-StateSyncExtended` ではmismatchが出るが、分解結果では `basic=1`、`playerGlobal=1`、`wifiCandidate=0`、`renderCandidate=0`。
+- つまり、現在見えている差分はプレイヤーの得点・星・コイン等のglobal状態ではなく、Wi-Fi/MB候補領域とrender/process候補領域に集中している。
 - frame 4500 RAM dump比較では以下の傾向。
   - player block `0x0208A964..0x0208AA23` はhost/clientで差分0。
-  - actor block `0x0208BE00..0x0208DFFF` は少数のID/ポインタ/リスト順序らしき差分。
+  - `0x0208BE00..0x0208DFFF` は、公開シンボルのUSアドレスからJP移植オフセットを戻すと `Wifi::parentsBssDesc` 周辺に相当する。actor本体ではなくLocal MP/Wi-Fi側のBSS差分と見る。
   - render block `0x023F8300..0x023F853F` は描画リスト/プロセスリスト順序らしき差分。
+  - このため、現時点で見えているextended mismatchは、ゲーム上重要なスター・スコア・プレイヤー状態の不一致とはまだ判断しない。
 
 ## Debugビルドクラッシュの原因と修正
 
@@ -100,7 +101,7 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 
 ## 次にやること
 
-1. actor/render候補領域の差分をさらに分類し、ゲーム上重要なactor状態か、単なるリスト順序・描画順序かを切り分ける。
+1. render/process候補領域の差分をさらに分類し、ゲーム上重要なactor状態か、単なるリスト順序・描画順序かを切り分ける。
 2. Big Star actor、8コインアイテム、ランダムステージ、勝敗・タイマー・スコアなど、対戦で同期すべき状態を個別に特定する。
 3. 重要状態だけを同期・固定するメモリパッチまたはROMパッチの最小実装を作る。
 4. 入力同期netplayと重要状態同期を結合し、ローカル2プロセスで2PC相当の検証を継続する。
@@ -152,7 +153,7 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 - `MELONDS_NSML_GAME_STATE_TRACE_INTERVAL`: ゲーム状態trace間隔。デフォルト60フレーム。
 - `MELONDS_NSML_GAME_STATE_TRACE_EXTENDED=1`: 重い候補領域hashもCSV出力。通常検証では使わない。
 - `MELONDS_NSML_STATE_SYNC=1`: netplay中に軽量ゲーム状態hashを相互送信。
-- `MELONDS_NSML_STATE_SYNC_EXTENDED=1`: player/actor/render候補領域hashも相互送信。
+- `MELONDS_NSML_STATE_SYNC_EXTENDED=1`: player/Wi-Fi/render候補領域hashも相互送信。
 - `MELONDS_NSML_STATE_SYNC_INTERVAL`: 状態hash送信間隔。デフォルト60フレーム。
 - `MELONDS_NSML_HASH_LOG`: RAM hash CSV。
 - `MELONDS_NSML_SCREEN_HASH=1`: hash CSVへframebuffer hashを追加。
