@@ -72,6 +72,23 @@ A2DJ_PROCESS_LISTS = {
     "create": 0x0208F188,
 }
 
+A2DJ_OBJECT_NAMES = {
+    0x0003: "StageScene",
+    0x0012: "StageFX",
+    0x0015: "Player",
+    0x001F: "Item",
+    0x0021: "Actor33",
+    0x0022: "Actor34",
+    0x0053: "Goomba",
+    0x005E: "KoopaTroopa",
+    0x010B: "MvsLObject267",
+    0x010C: "MvsLObject268/VSBattleStarCandidate",
+    0x012F: "StageActorManager",
+    0x0130: "StageController",
+    0x013C: "StageCamera",
+    0x0145: "StageLayout",
+}
+
 
 def u16(data: bytes, off: int) -> int:
     return int.from_bytes(data[off : off + 2], "little")
@@ -93,6 +110,13 @@ def read_u32_addr(data: bytes, addr: int) -> int | None:
     if off < 0 or off + 4 > len(data):
         return None
     return u32(data, off)
+
+
+def ptr_in_mainram(data: bytes, addr: int | None) -> bool:
+    if not addr:
+        return False
+    off = addr - MAIN_RAM_BASE
+    return 0 <= off < len(data)
 
 
 def hexdump16(data: bytes, off: int, size: int = 0x20) -> str:
@@ -200,6 +224,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--a2dj-functions", action="store_true")
     parser.add_argument("--a2dj-rng-timeline", action="store_true")
     parser.add_argument("--a2dj-process-lists", action="store_true")
+    parser.add_argument("--a2dj-object-scan", action="store_true")
     parser.add_argument("--rng-timeline-only", action="store_true")
     parser.add_argument("--find-arm-bl-to", default="")
     parser.add_argument("--scan-start", default="0x080000")
@@ -346,6 +371,46 @@ def a2dj_process_entries(data: bytes, list_addr: int) -> list[dict[str, int]]:
     return entries
 
 
+def read_base_entry(data: bytes, base: int, node: int = 0, depth: int = 0) -> dict[str, int]:
+    return {
+        "node": node,
+        "depth": depth,
+        "base": base,
+        "vtable": read_u32_addr(data, base) or 0,
+        "guid": read_u32_addr(data, base + 4) or 0,
+        "settings": read_u32_addr(data, base + 8) or 0,
+        "object_id": read_u16_addr(data, base + 0x0C) or 0,
+        "state_type": read_u16_addr(data, base + 0x0E) or 0,
+        "flags": read_u32_addr(data, base + 0x10) or 0,
+        "pos_x": read_u32_addr(data, base + 0x5C) or 0,
+        "pos_y": read_u32_addr(data, base + 0x60) or 0,
+        "pos_z": read_u32_addr(data, base + 0x64) or 0,
+    }
+
+
+def a2dj_object_scan_entries(data: bytes) -> list[dict[str, int]]:
+    entries: list[dict[str, int]] = []
+    for off in range(0, len(data) - 0x120, 4):
+        base = MAIN_RAM_BASE + off
+        vtable = u32(data, off)
+        guid = u32(data, off + 4)
+        object_id = u16(data, off + 0x0C)
+        state_type = u16(data, off + 0x0E)
+        flags = u32(data, off + 0x10)
+        if not (MAIN_RAM_BASE <= vtable < MAIN_RAM_BASE + len(data)):
+            continue
+        if not (0 < guid < 0x10000):
+            continue
+        if not (0 < object_id < 0x400):
+            continue
+        if state_type not in (1, 2, 3):
+            continue
+        if flags >= 0x01000000:
+            continue
+        entries.append(read_base_entry(data, base))
+    return entries
+
+
 def process_semantic_key(entry: dict[str, int]) -> tuple[int, ...]:
     return (
         entry["vtable"],
@@ -399,6 +464,61 @@ def print_a2dj_process_lists(loaded: list[tuple[str, bytes]]) -> None:
                 print(f"    only_b={only_b}")
 
 
+def print_entry_summary(prefix: str, entry: dict[str, int]) -> None:
+    name = A2DJ_OBJECT_NAMES.get(entry["object_id"], "unknown")
+    print(
+        f"{prefix}base=0x{entry['base']:08x} guid=0x{entry['guid']:08x} "
+        f"id=0x{entry['object_id']:04x}({name}) state=0x{entry['state_type']:04x} "
+        f"flags=0x{entry['flags']:08x} settings=0x{entry['settings']:08x} "
+        f"pos=0x{entry['pos_x']:08x},0x{entry['pos_y']:08x},0x{entry['pos_z']:08x} "
+        f"vtable=0x{entry['vtable']:08x}"
+    )
+
+
+def print_a2dj_object_scan(loaded: list[tuple[str, bytes]]) -> None:
+    print("== A2DJ object scan ==")
+    per_dump: list[tuple[str, list[dict[str, int]]]] = []
+    for label, data in loaded:
+        entries = a2dj_object_scan_entries(data)
+        per_dump.append((label, entries))
+        print(f"-- {label} --")
+        print(f"  count={len(entries)}")
+        for index, entry in enumerate(entries[:128]):
+            print_entry_summary(f"  {index:03d} ", entry)
+        if len(entries) > 128:
+            print(f"  ... {len(entries) - 128} more")
+
+    if len(per_dump) == 2:
+        (label_a, entries_a), (label_b, entries_b) = per_dump
+        by_guid_a = {entry["guid"]: entry for entry in entries_a if entry["guid"]}
+        by_guid_b = {entry["guid"]: entry for entry in entries_b if entry["guid"]}
+        print(f"== A2DJ object scan diff {label_a} vs {label_b} ==")
+        for guid in sorted(set(by_guid_a) | set(by_guid_b)):
+            a = by_guid_a.get(guid)
+            b = by_guid_b.get(guid)
+            if a and b:
+                key_a = (
+                    a["vtable"], a["settings"], a["object_id"], a["state_type"],
+                    a["flags"], a["pos_x"], a["pos_y"], a["pos_z"],
+                )
+                key_b = (
+                    b["vtable"], b["settings"], b["object_id"], b["state_type"],
+                    b["flags"], b["pos_x"], b["pos_y"], b["pos_z"],
+                )
+                if key_a == key_b:
+                    continue
+
+            print(f"  guid=0x{guid:08x}")
+            if a:
+                print_entry_summary("    a: ", a)
+            else:
+                print("    a: <missing>")
+            if b:
+                print_entry_summary("    b: ", b)
+            else:
+                print("    b: <missing>")
+
+
 def main() -> int:
     args = parse_args()
     scan_start = int(args.scan_start, 0)
@@ -436,6 +556,8 @@ def main() -> int:
         print_a2dj_rng_timeline(loaded)
     if args.a2dj_process_lists:
         print_a2dj_process_lists(loaded)
+    if args.a2dj_object_scan:
+        print_a2dj_object_scan(loaded)
     return 0
 
 

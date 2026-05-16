@@ -86,6 +86,10 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 - `tools/nsmb_mvl_ram_probe.py --a2dj-process-lists` でJP process listを辿る診断を追加した。
   - `logs\staged-netplay-ramdump-4500` のhost/client inst0/inst1では、execute/render/create process listの意味的なobject集合は一致。
   - 少なくともこのフレームでは、top-level process list差分ではなくWi-Fi/描画内部リスト差分が主に見えている。
+- `tools/nsmb_mvl_ram_probe.py --a2dj-object-scan` でheap上のBase/Actor風オブジェクトを直接列挙できるようにした。
+  - `logs\mvl-seed-00000100-state-source-frame5000` のframe4100 -> frame5000比較では、frame5000で `id=0x010c` が新規出現する。
+  - `id=0x010c` は座標 `x=0x00348000, y=0xfff28000, z=0x00080000` で、スクリーンショット上のVS Battle Star位置と対応する候補。
+  - 現時点では `MvsLObject268/VSBattleStarCandidate` として扱い、次に生成・取得・再生成時の同期対象にする。
 - savestate loadからの短いstaged netplayは、melonDSの状態hashとしては通るが、現状ではゲーム内通信復元に失敗している。
   - `logs\staged-netplay-state-load-no-rng-repatch`: 900フレーム、`-StateSync` mismatchなし。
   - ただしスクリーンショットは「通信が切断されました」画面。
@@ -150,6 +154,9 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 
 # RAM dumpからA2DJ process listを比較
 python tools\nsmb_mvl_ram_probe.py --rng-timeline-only --a2dj-process-lists logs\staged-netplay-ramdump-4500\ram-host\inst0_frame004500_mainram.bin logs\staged-netplay-ramdump-4500\ram-client\inst0_frame004500_mainram.bin
+
+# RAM dumpからA2DJ object候補を比較
+python tools\nsmb_mvl_ram_probe.py --rng-timeline-only --a2dj-object-scan logs\mvl-seed-00000100-state-source-frame5000\ram\inst0_frame004100_mainram.bin logs\mvl-seed-00000100-state-source-frame5000\ram\inst0_frame005000_mainram.bin
 ```
 
 ## 主要な環境変数
