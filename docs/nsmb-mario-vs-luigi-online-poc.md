@@ -116,6 +116,7 @@ Local MPの完全決定性だけに賭ける方針は採らない。
 - `MELONDS_NSML_RANDOM_TRACE`: `Net::getRandom()` のcaller/value/countをCSV出力。
 - `MELONDS_NSML_GAME_STATE_TRACE`: `stageID` / `stageGroup` / `vsMode` / `ggid` / `Net::random` 状態をCSV出力。
 - `MELONDS_NSML_GAME_STATE_TRACE_INTERVAL`: ゲーム状態traceの出力間隔。デフォルトは60フレーム。
+- `MELONDS_NSML_GAME_STATE_TRACE_EXTENDED=1`: player系グローバルと候補領域hashもCSV出力。重いので差分調査時だけ使う。
 - `MELONDS_NSML_HASH_LOG`: RAM hash CSV。
 - `MELONDS_NSML_SCREEN_HASH=1`: hash CSVへframebuffer hashを追加。負荷でタイミングが変わる可能性があるため必要時のみ使う。
 - `MELONDS_NSML_RAM_DUMP_DIR`: MainRAM dump出力先。
@@ -145,3 +146,7 @@ Local MPの完全決定性だけに賭ける方針は採らない。
   - `18017082` で初回再現。原因は `LocalMP::SendPacketGeneric()` の `type &= 0xFFFF` をヘッダ作成前へ移動したことで、reply packetの上位16bit AIDが消えたこと。
   - その結果 `RecvReplies()` が `aid=0` と解釈し、`packets[(aid-1)*1024]` へ書いてメモリ破壊していた。
   - 修正後、通常route 4200フレーム、ゲーム状態trace有効1800フレーム、Local MP trace有効1800フレームが成功。
+- ゲーム状態traceは軽量版をデフォルトに戻した。
+  - player/global/candidate hashを常時出すとLocal MP到達が揺れるケースがあった。
+  - 拡張traceは `MELONDS_NSML_GAME_STATE_TRACE_EXTENDED=1` の明示指定時だけ有効。
+  - 軽量trace有効の固定RNG route 4200フレームは成功。

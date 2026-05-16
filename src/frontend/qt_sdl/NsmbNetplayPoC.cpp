@@ -55,11 +55,22 @@ constexpr melonDS::u32 kNoFrameLimit = 0;
 constexpr melonDS::u32 kMainRAMBase = 0x02000000;
 constexpr melonDS::u32 kGameStageIDAddr = 0x02085054;
 constexpr melonDS::u32 kGameStageGroupAddr = 0x02085058;
+constexpr melonDS::u32 kGameLocalPlayerIDAddr = 0x020850BC;
 constexpr melonDS::u32 kGameVsModeAddr = 0x020850C4;
 constexpr melonDS::u32 kNetGGIDAddr = 0x02087E78;
 constexpr melonDS::u32 kNetRandomBranchAddressAddr = 0x02087E7C;
 constexpr melonDS::u32 kNetRandomCallCountAddr = 0x02088068;
 constexpr melonDS::u32 kNetRandomValueAddr = 0x02088088;
+constexpr melonDS::u32 kGamePlayerGlobalBlockAddr = 0x0208A964;
+constexpr melonDS::u32 kGamePlayerCountAddr = 0x0208A988;
+constexpr melonDS::u32 kGamePlayerBattleStarsAddr = 0x0208A9AC;
+constexpr melonDS::u32 kGamePlayerCoinsAddr = 0x0208A9BC;
+constexpr melonDS::u32 kGamePlayerScoreAddr = 0x0208A9C4;
+constexpr melonDS::u32 kGamePlayerDisplayedStarsAddr = 0x0208A9CC;
+constexpr melonDS::u32 kGamePlayerDeathsAddr = 0x0208A9D4;
+constexpr melonDS::u32 kGamePlayerCollectedStarsAddr = 0x0208A9DC;
+constexpr melonDS::u32 kGameCandidateActorBlockAddr = 0x0208BE00;
+constexpr melonDS::u32 kGameCandidateRenderBlockAddr = 0x023F8300;
 
 enum class Role
 {
@@ -119,6 +130,7 @@ struct State
     bool InputTraceEnabled = false;
     int InputTraceInterval = 60;
     bool ScreenHashEnabled = false;
+    bool GameStateTraceExtended = false;
     int SeedWaitTimeoutMs = 10000;
     bool WaitForPeerBeforeStart = false;
     bool WaitForPeerAtNetplayStart = false;
@@ -938,6 +950,26 @@ melonDS::u64 HashFramebuffers(melonDS::NDS* nds)
     return hash;
 }
 
+melonDS::u64 HashMainRAMRange(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 len)
+{
+    if (!nds || !nds->MainRAM || addr < kMainRAMBase)
+        return 0;
+
+    const melonDS::u32 offset = addr - kMainRAMBase;
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (offset >= ramLen)
+        return 0;
+
+    len = std::min(len, ramLen - offset);
+    melonDS::u64 hash = 1469598103934665603ull;
+    for (melonDS::u32 i = 0; i < len; i++)
+    {
+        hash ^= nds->MainRAM[offset + i];
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
 void SaveScreenshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (G.ScreenshotDir.empty() || G.ScreenshotInterval <= 0) return;
@@ -1121,6 +1153,7 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     const melonDS::u32 stageID = nds->ARM9Read32(kGameStageIDAddr);
     const melonDS::u32 stageGroup = nds->ARM9Read32(kGameStageGroupAddr);
     const melonDS::u32 vsMode = nds->ARM9Read32(kGameVsModeAddr);
+    const melonDS::u32 localPlayerID = nds->ARM9Read32(kGameLocalPlayerIDAddr);
     const melonDS::u32 ggid = nds->ARM9Read32(kNetGGIDAddr);
     const melonDS::u32 randomValue = nds->ARM9Read32(kNetRandomValueAddr);
     const melonDS::u8 randomCallCount = nds->ARM9Read8(kNetRandomCallCountAddr);
@@ -1135,11 +1168,50 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                      << ",0x" << std::hex << stageID
                      << ",0x" << stageGroup
                      << ",0x" << vsMode
+                     << ",0x" << localPlayerID
                      << ",0x" << ggid
                      << ",0x" << randomValue
                      << ",0x" << static_cast<unsigned int>(randomCallCount)
-                     << ",0x" << randomBranchAddress
-                     << std::dec << '\n';
+                     << ",0x" << randomBranchAddress;
+
+    if (G.GameStateTraceExtended)
+    {
+        const melonDS::u32 playerCount = nds->ARM9Read32(kGamePlayerCountAddr);
+        const melonDS::u32 player0BattleStars = nds->ARM9Read32(kGamePlayerBattleStarsAddr);
+        const melonDS::u32 player1BattleStars = nds->ARM9Read32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32));
+        const melonDS::u32 player0Coins = nds->ARM9Read32(kGamePlayerCoinsAddr);
+        const melonDS::u32 player1Coins = nds->ARM9Read32(kGamePlayerCoinsAddr + sizeof(melonDS::u32));
+        const melonDS::u32 player0Score = nds->ARM9Read32(kGamePlayerScoreAddr);
+        const melonDS::u32 player1Score = nds->ARM9Read32(kGamePlayerScoreAddr + sizeof(melonDS::u32));
+        const melonDS::u32 player0DisplayedStars = nds->ARM9Read32(kGamePlayerDisplayedStarsAddr);
+        const melonDS::u32 player1DisplayedStars = nds->ARM9Read32(kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32));
+        const melonDS::u32 player0Deaths = nds->ARM9Read32(kGamePlayerDeathsAddr);
+        const melonDS::u32 player1Deaths = nds->ARM9Read32(kGamePlayerDeathsAddr + sizeof(melonDS::u32));
+        const melonDS::u32 player0CollectedStars = nds->ARM9Read32(kGamePlayerCollectedStarsAddr);
+        const melonDS::u32 player1CollectedStars = nds->ARM9Read32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32));
+        const melonDS::u64 playerGlobalHash = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, 0xC0);
+        const melonDS::u64 actorCandidateHash = HashMainRAMRange(nds, kGameCandidateActorBlockAddr, 0x2200);
+        const melonDS::u64 renderCandidateHash = HashMainRAMRange(nds, kGameCandidateRenderBlockAddr, 0x240);
+
+        G.GameStateTrace << ",0x" << playerCount
+                         << ",0x" << player0BattleStars
+                         << ",0x" << player1BattleStars
+                         << ",0x" << player0Coins
+                         << ",0x" << player1Coins
+                         << ",0x" << player0Score
+                         << ",0x" << player1Score
+                         << ",0x" << player0DisplayedStars
+                         << ",0x" << player1DisplayedStars
+                         << ",0x" << player0Deaths
+                         << ",0x" << player1Deaths
+                         << ",0x" << player0CollectedStars
+                         << ",0x" << player1CollectedStars
+                         << ",0x" << playerGlobalHash
+                         << ",0x" << actorCandidateHash
+                         << ",0x" << renderCandidateHash;
+    }
+
+    G.GameStateTrace << std::dec << '\n';
     G.GameStateTrace.flush();
 }
 
@@ -1498,6 +1570,7 @@ void InitFromEnvironment()
     const char* gameStateTrace = std::getenv("MELONDS_NSML_GAME_STATE_TRACE");
     if (gameStateTrace && gameStateTrace[0]) G.GameStateTracePath = gameStateTrace;
     G.GameStateTraceInterval = std::max(1, EnvInt("MELONDS_NSML_GAME_STATE_TRACE_INTERVAL", 60));
+    G.GameStateTraceExtended = EnvFlag("MELONDS_NSML_GAME_STATE_TRACE_EXTENDED");
 
     const char* memPatchFile = std::getenv("MELONDS_NSML_MEM_PATCH_FILE");
     if (memPatchFile && memPatchFile[0]) G.MemPatchFile = memPatchFile;
@@ -1555,7 +1628,10 @@ void InitFromEnvironment()
         }
         else
         {
-            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,ggid,netRandomValue,netRandomCallCount,netRandomBranchAddress\n";
+            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,ggid,netRandomValue,netRandomCallCount,netRandomBranchAddress";
+            if (G.GameStateTraceExtended)
+                G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,playerGlobalHash,actorCandidateHash,renderCandidateHash";
+            G.GameStateTrace << '\n';
         }
     }
 
