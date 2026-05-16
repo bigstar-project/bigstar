@@ -37,6 +37,8 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 - `MELONDS_NSML_STATE_SYNC=1` によるnetplay中の軽量ゲーム状態hash交換。
 - `MELONDS_NSML_STATE_SYNC_EXTENDED=1` による候補領域別hash交換。
 - staged netplay smokeでhost/client別のゲーム状態traceとRAM dumpを出せるようにした。
+- staged netplay smokeでsavestate load/saveを指定できるようにした。到達済みMvsL状態から短い同期テストを回すための検証用。
+- `tests/nsmb_after_state_star_probe.inputs` を追加した。frame-5000 MvL savestateから相対入力でスター取得を試す診断用。
 
 ## 重要な解析済みアドレス
 
@@ -84,6 +86,10 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 - `tools/nsmb_mvl_ram_probe.py --a2dj-process-lists` でJP process listを辿る診断を追加した。
   - `logs\staged-netplay-ramdump-4500` のhost/client inst0/inst1では、execute/render/create process listの意味的なobject集合は一致。
   - 少なくともこのフレームでは、top-level process list差分ではなくWi-Fi/描画内部リスト差分が主に見えている。
+- savestate loadからの短いstaged netplayは成功。
+  - `logs\staged-netplay-state-load-neutral-nopatch`: 900フレーム、`-StateSync` mismatchなし。
+  - `logs\staged-netplay-state-load-star-probe-nopatch`: 2200フレーム、`-StateSync` mismatchなし。
+  - ただし後者では現時点の相対入力では `Net::randomCallCount` が進まず、スター取得・再生成までは確認できていない。
 
 ## Debugビルドクラッシュの原因と修正
 
@@ -136,6 +142,9 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 # 指定フレームのMainRAM dump付き
 .\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500 -Port 8071 -GameStateTrace -RamDumpFrames 4500
 
+# MvL到達済みsavestateから短いnetplay同期テスト
+.\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 900 -NetplayStartFrame 120 -Port 8071 -InputScript tests\nsmb_after_state_neutral.inputs -StateLoadDir logs\mvl-seed-00000100-state-source-frame5000\state-frame5000 -StateLoadFrame 1 -GameStateTrace -StateSync -WaitForPeerAtNetplayStart
+
 # RAM dumpからA2DJ process listを比較
 python tools\nsmb_mvl_ram_probe.py --rng-timeline-only --a2dj-process-lists logs\staged-netplay-ramdump-4500\ram-host\inst0_frame004500_mainram.bin logs\staged-netplay-ramdump-4500\ram-client\inst0_frame004500_mainram.bin
 ```
@@ -166,6 +175,10 @@ python tools\nsmb_mvl_ram_probe.py --rng-timeline-only --a2dj-process-lists logs
 - `MELONDS_NSML_RAM_DUMP_DIR`: MainRAM dump出力先。
 - `MELONDS_NSML_RAM_DUMP_FRAMES`: RAM dump対象フレームまたは範囲。
 - `MELONDS_NSML_SCREENSHOT_DIR`: PNG出力先。
+- `MELONDS_NSML_STATE_LOAD_DIR`: savestate load元ディレクトリ。
+- `MELONDS_NSML_STATE_LOAD_FRAME`: savestate loadを行うテストフレーム。
+- `MELONDS_NSML_STATE_SAVE_DIR`: savestate save先ディレクトリ。
+- `MELONDS_NSML_STATE_SAVE_FRAME`: savestate saveを行うテストフレーム。
 - `MELONDS_NSML_FIXED_RTC`: RTC固定。
 - `MELONDS_NSML_DISABLE_JIT=1`: JIT無効化。
 

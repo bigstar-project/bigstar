@@ -891,6 +891,7 @@ void WaitForPeerAtNetplayStartBarrier(int instanceID, melonDS::u32 syncFrame)
     }
 
     std::printf("NSMB PoC: waiting for peer at netplay start frame=%u\n", syncFrame);
+    std::fflush(stdout);
     WaitForPeerIfNeeded(true);
 
     {
@@ -900,6 +901,7 @@ void WaitForPeerAtNetplayStartBarrier(int instanceID, melonDS::u32 syncFrame)
         G.BarrierCond.notify_all();
     }
     std::printf("NSMB PoC: peer wait at netplay start finished frame=%u\n", syncFrame);
+    std::fflush(stdout);
 }
 
 bool WaitAtFrameBarrier(FrameBarrier& barrier, int instanceID, melonDS::u32 frame, const char* name)

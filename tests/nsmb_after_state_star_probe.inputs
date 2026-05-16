@@ -1,0 +1,10 @@
+# Star probe after loading a Mario vs Luigi savestate.
+# The loaded state is expected to be the frame-5000 MvsL seed source state.
+0-99 NONE
+100-350 LEFT
+351-550 LEFT+B
+551-800 RIGHT
+801-1000 RIGHT+B
+1001-1250 LEFT+B
+1251-1500 RIGHT+B
+1501-2200 NONE

@@ -12,6 +12,11 @@ param(
     [switch]$StateSyncExtended,
     [string]$RamDumpFrames = "",
     [int]$RamDumpInterval = 0,
+    [string]$StateLoadDir = "",
+    [int]$StateLoadFrame = -1,
+    [string]$StateSaveDir = "",
+    [int]$StateSaveFrame = 0,
+    [switch]$SkipRngPatchCheck,
     [switch]$WaitForPeerAtNetplayStart,
     [switch]$NoLocalWait,
     [string]$Exe = "build\debug-windows-x86_64\melonDS.exe",
@@ -90,6 +95,24 @@ function Start-MelonStagedProcess {
         Remove-Item Env:\MELONDS_NSML_RAM_DUMP_FRAMES -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_RAM_DUMP_INTERVAL -ErrorAction SilentlyContinue
     }
+    if ($StateLoadDir) {
+        if ($StateLoadFrame -lt 0) {
+            $StateLoadFrame = 1
+        }
+        $env:MELONDS_NSML_STATE_LOAD_DIR = (Resolve-Path $StateLoadDir).Path
+        $env:MELONDS_NSML_STATE_LOAD_FRAME = "$StateLoadFrame"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_STATE_LOAD_DIR -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_STATE_LOAD_FRAME -ErrorAction SilentlyContinue
+    }
+    if ($StateSaveDir -and $StateSaveFrame -gt 0) {
+        New-Item -ItemType Directory -Force -Path $StateSaveDir | Out-Null
+        $env:MELONDS_NSML_STATE_SAVE_DIR = (Resolve-Path $StateSaveDir).Path
+        $env:MELONDS_NSML_STATE_SAVE_FRAME = "$StateSaveFrame"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_STATE_SAVE_DIR -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_STATE_SAVE_FRAME -ErrorAction SilentlyContinue
+    }
     if ($GameStateTrace) {
         $env:MELONDS_NSML_GAME_STATE_TRACE = $GameStateTracePath
         $env:MELONDS_NSML_GAME_STATE_TRACE_INTERVAL = "$GameStateTraceInterval"
@@ -130,8 +153,13 @@ function Start-MelonStagedProcess {
     } else {
         Remove-Item Env:\MELONDS_NSML_NO_LOCAL_WAIT -ErrorAction SilentlyContinue
     }
-    $env:MELONDS_NSML_NET_RANDOM_AUTO = "1"
-    $env:MELONDS_NSML_NET_RANDOM_VALUE = $Seed
+    if ($StateLoadDir) {
+        Remove-Item Env:\MELONDS_NSML_NET_RANDOM_AUTO -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_NET_RANDOM_VALUE -ErrorAction SilentlyContinue
+    } else {
+        $env:MELONDS_NSML_NET_RANDOM_AUTO = "1"
+        $env:MELONDS_NSML_NET_RANDOM_VALUE = $Seed
+    }
     $env:MELONDS_NSML_DEFER_NETWORK_UNTIL_START = "1"
     $env:MELONDS_NSML_NETPLAY_FRAME_BARRIER = "1"
     $env:MELONDS_NSML_FIXED_RTC = "2020-01-01T00:00:00"
@@ -241,15 +269,25 @@ try {
     throw
 }
 
-foreach ($item in @(
+if ($StateLoadDir) {
+    $SkipRngPatchCheck = $true
+}
+
+$requiredPatterns = @(
     @{ Path = $hostOut; Pattern = "peer connected"; Name = "host peer connection" },
-    @{ Path = $hostOut; Pattern = "patched Net::random.value inst=0"; Name = "host inst0 RNG patch" },
-    @{ Path = $hostOut; Pattern = "patched Net::random.value inst=1"; Name = "host inst1 RNG patch" },
-    @{ Path = $clientOut; Pattern = "patched Net::random.value inst=0"; Name = "client inst0 RNG patch" },
-    @{ Path = $clientOut; Pattern = "patched Net::random.value inst=1"; Name = "client inst1 RNG patch" },
     @{ Path = $hostOut; Pattern = "frame limit reached"; Name = "host frame limit" },
     @{ Path = $clientOut; Pattern = "frame limit reached"; Name = "client frame limit" }
-)) {
+)
+if (-not $SkipRngPatchCheck) {
+    $requiredPatterns += @(
+        @{ Path = $hostOut; Pattern = "patched Net::random.value inst=0"; Name = "host inst0 RNG patch" },
+        @{ Path = $hostOut; Pattern = "patched Net::random.value inst=1"; Name = "host inst1 RNG patch" },
+        @{ Path = $clientOut; Pattern = "patched Net::random.value inst=0"; Name = "client inst0 RNG patch" },
+        @{ Path = $clientOut; Pattern = "patched Net::random.value inst=1"; Name = "client inst1 RNG patch" }
+    )
+}
+
+foreach ($item in $requiredPatterns) {
     if (-not (Select-String -Path $item.Path -Pattern $item.Pattern -Quiet)) {
         throw "missing $($item.Name). See $($item.Path)"
     }
