@@ -128,6 +128,9 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 - Player Actorの前フレーム座標・速度をStateApplyへ含めた後も、スター取得相当のstaged検証はpass。
   - `logs\staged-state-apply-player-transform-star-score`: 比較開始4670でpass。
   - 既存の `game state mismatch` ログはframe4385付近だけになり、座標traceは4440以降でhost/clientが一致している。
+- Star Actorはhost/clientでGUIDが異なる再生成ケースがあるため、StateApply時にGUID一致で見つからない場合は `id=0x0022/settings=1` のローカルActorへ座標適用するフォールバックを追加した。
+  - `logs\staged-state-apply-current-star-score-regression`: 最新コードでもスター取得相当の4700フレームstaged検証はpass。
+  - `logs\staged-state-apply-star-fallback-respawn-7000`: 7000フレームstaged自体はpassしたが、この実行ではスター取得が起きていなかったため、再生成同期の確定証拠には使わない。
 - RNGパッチなしの過去ログではframe5071でスター取得・再生成由来らしい `Net::random` 消費が観測されているが、現行のクリーンroute再現では条件が一致しなかった。以後は固定RTC/JIT無効/RNG seed明示を前提に再検証する。
 - savestate loadからの短いstaged netplayは、melonDSの状態hashとしては通るが、現状ではゲーム内通信復元に失敗している。
   - `logs\staged-netplay-state-load-no-rng-repatch`: 900フレーム、`-StateSync` mismatchなし。
@@ -157,7 +160,7 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 ## 次にやること
 
 1. StateApplyの適用ラグをさらに減らす。現状はフレーム4385付近に短いmismatchが残る。
-2. スター取得後に次スターが再生成されるまで長く走らせ、Star Actor / `id=0x010c` / RNG timelineがhost/clientで揃うか確認する。
+2. スター取得後に次スターが再生成されるまで長く走らせ、Star Actor / `id=0x010c` / RNG timelineがhost/clientで揃うか確認する。7000フレームstagedでは取得が起きない実行もあるため、まず取得を安定化する。
 3. 診断フックなしの入力スクリプトでスター取得できるルートを作る。難しければ、しばらくはstick診断を回帰テストとして使う。
 4. Star Actor側も必要なら前フレーム座標・速度・stateTypeをStateApply対象に拡張する。
 5. 8コインアイテムは自動化が難しいため一旦保留し、スター同期の見通しが立ってから同じActor trace方式で対象を特定する。

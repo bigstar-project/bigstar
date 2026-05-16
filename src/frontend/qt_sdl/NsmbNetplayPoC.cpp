@@ -1730,6 +1730,44 @@ bool WriteObjectPositionByGUID(melonDS::NDS* nds, melonDS::u32 guid, melonDS::u3
     return false;
 }
 
+bool WriteObjectPositionByIDAndSettings(
+    melonDS::NDS* nds,
+    melonDS::u16 expectedObjectID,
+    melonDS::u32 expectedSettings,
+    melonDS::u32 posX,
+    melonDS::u32 posY,
+    melonDS::u32 posZ)
+{
+    ObjectScanSample actor = FindObjectByIDAndSettings(nds, expectedObjectID, expectedSettings);
+    if (!actor.Found || actor.Base < kMainRAMBase)
+        return false;
+
+    const melonDS::u32 off = actor.Base - kMainRAMBase;
+    WriteMainRAMU32(nds, off + 0x5C, posX);
+    WriteMainRAMU32(nds, off + 0x60, posY);
+    WriteMainRAMU32(nds, off + 0x64, posZ);
+    WriteMainRAMU32(nds, off + 0x68, posX);
+    WriteMainRAMU32(nds, off + 0x6C, posY);
+    WriteMainRAMU32(nds, off + 0x70, posZ);
+    return true;
+}
+
+bool WriteVsBattleStarCandidatePosition(melonDS::NDS* nds, melonDS::u32 posX, melonDS::u32 posY, melonDS::u32 posZ)
+{
+    ObjectScanSample actor = FindVsBattleStarCandidate(nds);
+    if (!actor.Found || actor.Base < kMainRAMBase)
+        return false;
+
+    const melonDS::u32 off = actor.Base - kMainRAMBase;
+    WriteMainRAMU32(nds, off + 0x5C, posX);
+    WriteMainRAMU32(nds, off + 0x60, posY);
+    WriteMainRAMU32(nds, off + 0x64, posZ);
+    WriteMainRAMU32(nds, off + 0x68, posX);
+    WriteMainRAMU32(nds, off + 0x6C, posY);
+    WriteMainRAMU32(nds, off + 0x70, posZ);
+    return true;
+}
+
 bool WriteObjectTransformByGUID(
     melonDS::NDS* nds,
     melonDS::u32 guid,
@@ -1846,9 +1884,31 @@ void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     nds->ARM9Write32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32), sample.Player1CollectedStars);
 
     if (sample.VsStarFound)
-        WriteObjectPositionByGUID(nds, sample.VsStarGUID, sample.VsStarPosX, sample.VsStarPosY, sample.VsStarPosZ);
+    {
+        if (!WriteObjectPositionByGUID(nds, sample.VsStarGUID, sample.VsStarPosX, sample.VsStarPosY, sample.VsStarPosZ))
+            WriteVsBattleStarCandidatePosition(nds, sample.VsStarPosX, sample.VsStarPosY, sample.VsStarPosZ);
+    }
+    else
+    {
+        WriteVsBattleStarCandidatePosition(nds, 0, 0, 0);
+    }
     if (sample.VsStarActorFound)
-        WriteObjectPositionByGUID(nds, sample.VsStarActorGUID, sample.VsStarActorPosX, sample.VsStarActorPosY, sample.VsStarActorPosZ);
+    {
+        if (!WriteObjectPositionByGUID(nds, sample.VsStarActorGUID, sample.VsStarActorPosX, sample.VsStarActorPosY, sample.VsStarActorPosZ))
+        {
+            WriteObjectPositionByIDAndSettings(
+                nds,
+                kVsBattleStarActorObjectID,
+                kVsBattleStarActorSettings,
+                sample.VsStarActorPosX,
+                sample.VsStarActorPosY,
+                sample.VsStarActorPosZ);
+        }
+    }
+    else
+    {
+        WriteObjectPositionByIDAndSettings(nds, kVsBattleStarActorObjectID, kVsBattleStarActorSettings, 0, 0, 0);
+    }
     if (sample.PlayerActor0Found)
         WriteObjectTransformByGUID(
             nds,
