@@ -90,6 +90,7 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 - `MELONDS_NSML_STATE_APPLY=1` のhost権威補正PoCを追加した。
   - WireGameStateにStar/Player/RNGの実値を載せ、client側で受信済み状態をMainRAMへ書き戻せる。
   - `logs\staged-state-apply-verified` では、host/clientのゲーム状態trace上のPlayer Actor座標が一致し、staged smokeのStateApply用trace比較もpass。
+  - `logs\staged-state-apply-6500` と `logs\staged-state-apply-star-after6000` でも6500/7000フレームまで通信断なしでpass。後者ではStar Actor GUIDが `0x23` から `0x2c` へ変わる再ロード/再生成らしき状態もhost/clientで一致。
   - ただし既存の `game state mismatch` ログは「適用前に送られた状態」との比較でも出るため、StateApplyの成否判定にはtrace比較を使う必要がある。
 - `-StateSyncExtended` ではmismatchが出るが、分解結果では `basic=1`、`playerGlobal=1`、`wifiCandidate=0`、`renderCandidate=0`。
 - つまり、現在見えている差分はプレイヤーの得点・星・コイン等のglobal状態ではなく、Wi-Fi/MB候補領域とrender/process候補領域に集中している。
@@ -107,6 +108,7 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
   - `logs\route-vsstar-trace` と `logs\staged-vsstar-trace` では、frame4380以降の `id=0x010c` がhost/clientおよび2 EmuInstance間で同じ `guid=0x23`、同じ座標になることを確認。
   - 現時点では `MvsLObject268/VSBattleStarCandidate` として扱い、次に取得・再生成時の同期対象にする。
 - Player Actor座標traceにより、`tests\nsmb_mario_vs_luigi_star_probe.inputs` ではframe4380以降に操作対象がスター近傍へ寄ることを確認。
+- `tests\nsmb_mario_vs_luigi_star_collect_after6000.inputs` を追加した。frame6000以降に左へ戻して、Star ActorのGUID変化を再現する診断用。
 - 診断用の `MELONDS_NSML_VS_STAR_SNAP_FRAME` は、星Actor位置を書き換えられるが、それだけでは取得判定・再生成までは起きなかった。`id=0x010c` が単純な取得当たり判定本体ではない、または追加内部状態/別Actor/処理タイミングが必要な可能性がある。
 - RNGパッチなしの過去ログではframe5071でスター取得・再生成由来らしい `Net::random` 消費が観測されているが、現行のクリーンroute再現では条件が一致しなかった。以後は固定RTC/JIT無効/RNG seed明示を前提に再検証する。
 - savestate loadからの短いstaged netplayは、melonDSの状態hashとしては通るが、現状ではゲーム内通信復元に失敗している。
@@ -137,7 +139,7 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 
 1. 過去ログのframe5071付近と現行ログを比較し、スター取得・再生成時に変わるActor/manager状態を特定する。
 2. VS Battle Star `id=0x010c` が取得判定本体なのか、spawn marker/manager側状態なのかを切り分ける。
-3. Player Actor補正がプレイ継続・スクリーンショット・次のスター再生成へ悪影響を出さないか確認する。
+3. スター取得そのものを自動入力または追加フックで再現し、スコア/星数が増えるケースでStateApplyが保てるか確認する。
 4. スター/プレイヤーの重要状態がズレる場合は、Actor座標・settings・RNG seed/call count・manager slot状態のどこを同期すべきか切り分け、最小メモリパッチを作る。
 5. 8コインアイテムは自動化が難しいため一旦保留し、スター同期の見通しが立ってから同じActor trace方式で対象を特定する。
 6. ランダムステージ、勝敗・タイマー・スコアなど、対戦で同期すべき状態を個別に特定する。
@@ -176,6 +178,9 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 
 # host権威の重要状態適用PoC。mismatchログは適用前比較でも出るため許容し、traceを比較する。
 .\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500 -Port 8071 -InputScript tests\nsmb_mario_vs_luigi_star_probe.inputs -GameStateTrace -StateSync -StateApply -StateSyncInterval 10 -AllowStateMismatch
+
+# Star Actor GUID変化を含む長めのStateApply検証
+.\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 7000 -NetplayStartFrame 4500 -Port 8071 -InputScript tests\nsmb_mario_vs_luigi_star_collect_after6000.inputs -GameStateTrace -StateSync -StateApply -StateSyncInterval 10 -AllowStateMismatch
 
 # 候補領域別hash同期。mismatch検出用なので失敗が期待結果になることがある。
 .\scripts\run-nsmb-mvl-netplay-staged-smoke.ps1 -Frames 5100 -NetplayStartFrame 4500 -Port 8071 -GameStateTrace -StateSync -StateSyncExtended
