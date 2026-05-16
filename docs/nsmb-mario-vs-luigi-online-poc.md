@@ -46,6 +46,7 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 - staged netplay smokeでsavestate load/saveを指定できるようにした。到達済みMvsL状態から短い同期テストを回すための検証用。ただし、現状はWi-Fi/Local MP試合の継続復元には使えない。
 - `tests/nsmb_after_state_star_probe.inputs` を追加した。frame-5000 MvL savestateから相対入力でスター取得を試す診断用。
 - `WireGameState` / `StateApply` にプレイヤーの星数、コイン、スコア、表示星数、死亡数、取得星候補を追加した。
+- `WireGameState` / `StateApply` にPlayer Actorの前フレーム座標と速度を追加した。
 - `tools/nsmb_mvl_ram_probe.py --a2dj-object-dump` を追加し、指定Actorの周辺メモリをフレーム間比較できるようにした。
 
 ## 重要な解析済みアドレス
@@ -124,6 +125,9 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 - `StateApply` はプレイヤーglobal状態込みで、スター取得後の重要状態をhost/client間で揃えられるところまで進んだ。
   - `logs\staged-state-apply-player-star-score-start4200-pass4670`: netplay開始4200、スター取得診断4380-4440、比較開始4670でpass。
   - 取得直後から数十フレームは受信済み状態の適用ラグが見えるため、StateApplyの検証では補正ウォームアップ後のtrace比較を使う。
+- Player Actorの前フレーム座標・速度をStateApplyへ含めた後も、スター取得相当のstaged検証はpass。
+  - `logs\staged-state-apply-player-transform-star-score`: 比較開始4670でpass。
+  - 既存の `game state mismatch` ログはframe4385付近だけになり、座標traceは4440以降でhost/clientが一致している。
 - RNGパッチなしの過去ログではframe5071でスター取得・再生成由来らしい `Net::random` 消費が観測されているが、現行のクリーンroute再現では条件が一致しなかった。以後は固定RTC/JIT無効/RNG seed明示を前提に再検証する。
 - savestate loadからの短いstaged netplayは、melonDSの状態hashとしては通るが、現状ではゲーム内通信復元に失敗している。
   - `logs\staged-netplay-state-load-no-rng-repatch`: 900フレーム、`-StateSync` mismatchなし。
@@ -152,10 +156,10 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 
 ## 次にやること
 
-1. StateApplyの適用ラグを減らす。現状は「最新の受信済み状態を適用」しているため、数十フレーム遅れて一致する場面がある。
-2. Player Actorの座標だけでなく、前フレーム座標・速度などのtransformをStateApply対象に含めるか検証する。
-3. スター取得後に次スターが再生成されるまで長く走らせ、Star Actor / `id=0x010c` / RNG timelineがhost/clientで揃うか確認する。
-4. 診断フックなしの入力スクリプトでスター取得できるルートを作る。難しければ、しばらくはstick診断を回帰テストとして使う。
+1. StateApplyの適用ラグをさらに減らす。現状はフレーム4385付近に短いmismatchが残る。
+2. スター取得後に次スターが再生成されるまで長く走らせ、Star Actor / `id=0x010c` / RNG timelineがhost/clientで揃うか確認する。
+3. 診断フックなしの入力スクリプトでスター取得できるルートを作る。難しければ、しばらくはstick診断を回帰テストとして使う。
+4. Star Actor側も必要なら前フレーム座標・速度・stateTypeをStateApply対象に拡張する。
 5. 8コインアイテムは自動化が難しいため一旦保留し、スター同期の見通しが立ってから同じActor trace方式で対象を特定する。
 6. ランダムステージ、勝敗・タイマー・スコアなど、対戦で同期すべき状態を個別に特定する。
 7. 入力同期netplayと重要状態同期を結合し、ローカル2プロセスで2PC相当の検証を継続する。

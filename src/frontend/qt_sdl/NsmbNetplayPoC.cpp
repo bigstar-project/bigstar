@@ -149,12 +149,24 @@ struct WireGameState
     melonDS::u32 PlayerActor0PosX;
     melonDS::u32 PlayerActor0PosY;
     melonDS::u32 PlayerActor0PosZ;
+    melonDS::u32 PlayerActor0PrevX;
+    melonDS::u32 PlayerActor0PrevY;
+    melonDS::u32 PlayerActor0PrevZ;
+    melonDS::u32 PlayerActor0VelX;
+    melonDS::u32 PlayerActor0VelY;
+    melonDS::u32 PlayerActor0VelZ;
     melonDS::u32 PlayerActor1Found;
     melonDS::u32 PlayerActor1GUID;
     melonDS::u32 PlayerActor1Settings;
     melonDS::u32 PlayerActor1PosX;
     melonDS::u32 PlayerActor1PosY;
     melonDS::u32 PlayerActor1PosZ;
+    melonDS::u32 PlayerActor1PrevX;
+    melonDS::u32 PlayerActor1PrevY;
+    melonDS::u32 PlayerActor1PrevZ;
+    melonDS::u32 PlayerActor1VelX;
+    melonDS::u32 PlayerActor1VelY;
+    melonDS::u32 PlayerActor1VelZ;
     melonDS::u32 PlayerCount;
     melonDS::u32 Player0BattleStars;
     melonDS::u32 Player1BattleStars;
@@ -178,7 +190,7 @@ struct WireGameState
     melonDS::u32 RenderCandidateHashHi;
 };
 
-static_assert(sizeof(WireGameState) == 256);
+static_assert(sizeof(WireGameState) == 304);
 
 struct GameStateSample
 {
@@ -214,12 +226,24 @@ struct GameStateSample
     melonDS::u32 PlayerActor0PosX = 0;
     melonDS::u32 PlayerActor0PosY = 0;
     melonDS::u32 PlayerActor0PosZ = 0;
+    melonDS::u32 PlayerActor0PrevX = 0;
+    melonDS::u32 PlayerActor0PrevY = 0;
+    melonDS::u32 PlayerActor0PrevZ = 0;
+    melonDS::u32 PlayerActor0VelX = 0;
+    melonDS::u32 PlayerActor0VelY = 0;
+    melonDS::u32 PlayerActor0VelZ = 0;
     melonDS::u32 PlayerActor1Found = 0;
     melonDS::u32 PlayerActor1GUID = 0;
     melonDS::u32 PlayerActor1Settings = 0;
     melonDS::u32 PlayerActor1PosX = 0;
     melonDS::u32 PlayerActor1PosY = 0;
     melonDS::u32 PlayerActor1PosZ = 0;
+    melonDS::u32 PlayerActor1PrevX = 0;
+    melonDS::u32 PlayerActor1PrevY = 0;
+    melonDS::u32 PlayerActor1PrevZ = 0;
+    melonDS::u32 PlayerActor1VelX = 0;
+    melonDS::u32 PlayerActor1VelY = 0;
+    melonDS::u32 PlayerActor1VelZ = 0;
     melonDS::u32 PlayerCount = 0;
     melonDS::u32 Player0BattleStars = 0;
     melonDS::u32 Player1BattleStars = 0;
@@ -247,6 +271,12 @@ struct ObjectScanSample
     melonDS::u32 PosX = 0;
     melonDS::u32 PosY = 0;
     melonDS::u32 PosZ = 0;
+    melonDS::u32 PrevX = 0;
+    melonDS::u32 PrevY = 0;
+    melonDS::u32 PrevZ = 0;
+    melonDS::u32 VelX = 0;
+    melonDS::u32 VelY = 0;
+    melonDS::u32 VelZ = 0;
 };
 
 struct PlayerActorScanSample
@@ -792,12 +822,24 @@ void PumpNetworkLocked()
                     sample.PlayerActor0PosX = packet.PlayerActor0PosX;
                     sample.PlayerActor0PosY = packet.PlayerActor0PosY;
                     sample.PlayerActor0PosZ = packet.PlayerActor0PosZ;
+                    sample.PlayerActor0PrevX = packet.PlayerActor0PrevX;
+                    sample.PlayerActor0PrevY = packet.PlayerActor0PrevY;
+                    sample.PlayerActor0PrevZ = packet.PlayerActor0PrevZ;
+                    sample.PlayerActor0VelX = packet.PlayerActor0VelX;
+                    sample.PlayerActor0VelY = packet.PlayerActor0VelY;
+                    sample.PlayerActor0VelZ = packet.PlayerActor0VelZ;
                     sample.PlayerActor1Found = packet.PlayerActor1Found;
                     sample.PlayerActor1GUID = packet.PlayerActor1GUID;
                     sample.PlayerActor1Settings = packet.PlayerActor1Settings;
                     sample.PlayerActor1PosX = packet.PlayerActor1PosX;
                     sample.PlayerActor1PosY = packet.PlayerActor1PosY;
                     sample.PlayerActor1PosZ = packet.PlayerActor1PosZ;
+                    sample.PlayerActor1PrevX = packet.PlayerActor1PrevX;
+                    sample.PlayerActor1PrevY = packet.PlayerActor1PrevY;
+                    sample.PlayerActor1PrevZ = packet.PlayerActor1PrevZ;
+                    sample.PlayerActor1VelX = packet.PlayerActor1VelX;
+                    sample.PlayerActor1VelY = packet.PlayerActor1VelY;
+                    sample.PlayerActor1VelZ = packet.PlayerActor1VelZ;
                     sample.PlayerCount = packet.PlayerCount;
                     sample.Player0BattleStars = packet.Player0BattleStars;
                     sample.Player1BattleStars = packet.Player1BattleStars;
@@ -1325,6 +1367,19 @@ bool WriteMainRAMU32(melonDS::NDS* nds, melonDS::u32 offset, melonDS::u32 value)
     return true;
 }
 
+void ReadObjectTransform(melonDS::NDS* nds, melonDS::u32 off, ObjectScanSample& sample)
+{
+    ReadMainRAMU32(nds, off + 0x5C, sample.PosX);
+    ReadMainRAMU32(nds, off + 0x60, sample.PosY);
+    ReadMainRAMU32(nds, off + 0x64, sample.PosZ);
+    ReadMainRAMU32(nds, off + 0x68, sample.PrevX);
+    ReadMainRAMU32(nds, off + 0x6C, sample.PrevY);
+    ReadMainRAMU32(nds, off + 0x70, sample.PrevZ);
+    ReadMainRAMU32(nds, off + 0x74, sample.VelX);
+    ReadMainRAMU32(nds, off + 0x78, sample.VelY);
+    ReadMainRAMU32(nds, off + 0x7C, sample.VelZ);
+}
+
 ObjectScanSample FindVsBattleStarCandidate(melonDS::NDS* nds)
 {
     ObjectScanSample sample;
@@ -1361,13 +1416,7 @@ ObjectScanSample FindVsBattleStarCandidate(melonDS::NDS* nds)
             continue;
 
         melonDS::u32 settings = 0;
-        melonDS::u32 posX = 0;
-        melonDS::u32 posY = 0;
-        melonDS::u32 posZ = 0;
         ReadMainRAMU32(nds, off + 8, settings);
-        ReadMainRAMU32(nds, off + 0x5C, posX);
-        ReadMainRAMU32(nds, off + 0x60, posY);
-        ReadMainRAMU32(nds, off + 0x64, posZ);
 
         sample.Found = 1;
         sample.GUID = guid;
@@ -1375,9 +1424,7 @@ ObjectScanSample FindVsBattleStarCandidate(melonDS::NDS* nds)
         sample.Settings = settings;
         sample.StateType = stateType;
         sample.Flags = flags;
-        sample.PosX = posX;
-        sample.PosY = posY;
-        sample.PosZ = posZ;
+        ReadObjectTransform(nds, off, sample);
         return sample;
     }
 
@@ -1427,9 +1474,7 @@ ObjectScanSample FindObjectByIDAndSettings(melonDS::NDS* nds, melonDS::u16 expec
         sample.Settings = settings;
         sample.StateType = stateType;
         sample.Flags = flags;
-        ReadMainRAMU32(nds, off + 0x5C, sample.PosX);
-        ReadMainRAMU32(nds, off + 0x60, sample.PosY);
-        ReadMainRAMU32(nds, off + 0x64, sample.PosZ);
+        ReadObjectTransform(nds, off, sample);
         return sample;
     }
 
@@ -1495,9 +1540,7 @@ PlayerActorScanSample FindPlayerActors(melonDS::NDS* nds)
         actor.StateType = stateType;
         actor.Flags = flags;
         ReadMainRAMU32(nds, off + 8, actor.Settings);
-        ReadMainRAMU32(nds, off + 0x5C, actor.PosX);
-        ReadMainRAMU32(nds, off + 0x60, actor.PosY);
-        ReadMainRAMU32(nds, off + 0x64, actor.PosZ);
+        ReadObjectTransform(nds, off, actor);
         InsertPlayerActorByGUID(players, actor);
     }
 
@@ -1687,6 +1730,66 @@ bool WriteObjectPositionByGUID(melonDS::NDS* nds, melonDS::u32 guid, melonDS::u3
     return false;
 }
 
+bool WriteObjectTransformByGUID(
+    melonDS::NDS* nds,
+    melonDS::u32 guid,
+    melonDS::u32 posX,
+    melonDS::u32 posY,
+    melonDS::u32 posZ,
+    melonDS::u32 prevX,
+    melonDS::u32 prevY,
+    melonDS::u32 prevZ,
+    melonDS::u32 velX,
+    melonDS::u32 velY,
+    melonDS::u32 velZ)
+{
+    if (!nds || !nds->MainRAM || guid == 0)
+        return false;
+
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (ramLen < 0x120)
+        return false;
+
+    for (melonDS::u32 off = 0; off <= ramLen - 0x120; off += 4)
+    {
+        melonDS::u32 candidateGUID = 0;
+        if (!ReadMainRAMU32(nds, off + 4, candidateGUID) || candidateGUID != guid)
+            continue;
+
+        melonDS::u32 vtable = 0;
+        melonDS::u16 objectID = 0;
+        melonDS::u16 stateType = 0;
+        melonDS::u32 flags = 0;
+        if (!ReadMainRAMU32(nds, off, vtable) ||
+            !ReadMainRAMU16(nds, off + 0x0C, objectID) ||
+            !ReadMainRAMU16(nds, off + 0x0E, stateType) ||
+            !ReadMainRAMU32(nds, off + 0x10, flags))
+            continue;
+
+        if (vtable < kMainRAMBase || vtable >= kMainRAMBase + ramLen)
+            continue;
+        if (objectID == 0 || objectID >= 0x400)
+            continue;
+        if (stateType != 1 && stateType != 2 && stateType != 3)
+            continue;
+        if (flags >= 0x01000000)
+            continue;
+
+        WriteMainRAMU32(nds, off + 0x5C, posX);
+        WriteMainRAMU32(nds, off + 0x60, posY);
+        WriteMainRAMU32(nds, off + 0x64, posZ);
+        WriteMainRAMU32(nds, off + 0x68, prevX);
+        WriteMainRAMU32(nds, off + 0x6C, prevY);
+        WriteMainRAMU32(nds, off + 0x70, prevZ);
+        WriteMainRAMU32(nds, off + 0x74, velX);
+        WriteMainRAMU32(nds, off + 0x78, velY);
+        WriteMainRAMU32(nds, off + 0x7C, velZ);
+        return true;
+    }
+
+    return false;
+}
+
 bool FindLatestRemoteGameStateLocked(int instanceID, melonDS::u32 frame, GameStateSample& sample, melonDS::u32& sampleFrame)
 {
     bool found = false;
@@ -1747,9 +1850,31 @@ void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if (sample.VsStarActorFound)
         WriteObjectPositionByGUID(nds, sample.VsStarActorGUID, sample.VsStarActorPosX, sample.VsStarActorPosY, sample.VsStarActorPosZ);
     if (sample.PlayerActor0Found)
-        WriteObjectPositionByGUID(nds, sample.PlayerActor0GUID, sample.PlayerActor0PosX, sample.PlayerActor0PosY, sample.PlayerActor0PosZ);
+        WriteObjectTransformByGUID(
+            nds,
+            sample.PlayerActor0GUID,
+            sample.PlayerActor0PosX,
+            sample.PlayerActor0PosY,
+            sample.PlayerActor0PosZ,
+            sample.PlayerActor0PrevX,
+            sample.PlayerActor0PrevY,
+            sample.PlayerActor0PrevZ,
+            sample.PlayerActor0VelX,
+            sample.PlayerActor0VelY,
+            sample.PlayerActor0VelZ);
     if (sample.PlayerActor1Found)
-        WriteObjectPositionByGUID(nds, sample.PlayerActor1GUID, sample.PlayerActor1PosX, sample.PlayerActor1PosY, sample.PlayerActor1PosZ);
+        WriteObjectTransformByGUID(
+            nds,
+            sample.PlayerActor1GUID,
+            sample.PlayerActor1PosX,
+            sample.PlayerActor1PosY,
+            sample.PlayerActor1PosZ,
+            sample.PlayerActor1PrevX,
+            sample.PlayerActor1PrevY,
+            sample.PlayerActor1PrevZ,
+            sample.PlayerActor1VelX,
+            sample.PlayerActor1VelY,
+            sample.PlayerActor1VelZ);
 
     if (G.InputTraceEnabled &&
         (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
@@ -1805,12 +1930,24 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.PlayerActor0PosX = players.Actor0.PosX;
     sample.PlayerActor0PosY = players.Actor0.PosY;
     sample.PlayerActor0PosZ = players.Actor0.PosZ;
+    sample.PlayerActor0PrevX = players.Actor0.PrevX;
+    sample.PlayerActor0PrevY = players.Actor0.PrevY;
+    sample.PlayerActor0PrevZ = players.Actor0.PrevZ;
+    sample.PlayerActor0VelX = players.Actor0.VelX;
+    sample.PlayerActor0VelY = players.Actor0.VelY;
+    sample.PlayerActor0VelZ = players.Actor0.VelZ;
     sample.PlayerActor1Found = players.Actor1.Found;
     sample.PlayerActor1GUID = players.Actor1.GUID;
     sample.PlayerActor1Settings = players.Actor1.Settings;
     sample.PlayerActor1PosX = players.Actor1.PosX;
     sample.PlayerActor1PosY = players.Actor1.PosY;
     sample.PlayerActor1PosZ = players.Actor1.PosZ;
+    sample.PlayerActor1PrevX = players.Actor1.PrevX;
+    sample.PlayerActor1PrevY = players.Actor1.PrevY;
+    sample.PlayerActor1PrevZ = players.Actor1.PrevZ;
+    sample.PlayerActor1VelX = players.Actor1.VelX;
+    sample.PlayerActor1VelY = players.Actor1.VelY;
+    sample.PlayerActor1VelZ = players.Actor1.VelZ;
 
     sample.PlayerCount = nds->ARM9Read32(kGamePlayerCountAddr);
     sample.Player0BattleStars = nds->ARM9Read32(kGamePlayerBattleStarsAddr);
@@ -1857,12 +1994,24 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.PlayerActor0PosX);
     MixGameStateValue(sample.Hash, sample.PlayerActor0PosY);
     MixGameStateValue(sample.Hash, sample.PlayerActor0PosZ);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0PrevX);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0PrevY);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0PrevZ);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0VelX);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0VelY);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0VelZ);
     MixGameStateValue(sample.Hash, sample.PlayerActor1Found);
     MixGameStateValue(sample.Hash, sample.PlayerActor1GUID);
     MixGameStateValue(sample.Hash, sample.PlayerActor1Settings);
     MixGameStateValue(sample.Hash, sample.PlayerActor1PosX);
     MixGameStateValue(sample.Hash, sample.PlayerActor1PosY);
     MixGameStateValue(sample.Hash, sample.PlayerActor1PosZ);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1PrevX);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1PrevY);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1PrevZ);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1VelX);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1VelY);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1VelZ);
     MixGameStateValue(sample.Hash, sample.PlayerCount);
     MixGameStateValue(sample.Hash, sample.Player0BattleStars);
     MixGameStateValue(sample.Hash, sample.Player1BattleStars);
@@ -2198,12 +2347,24 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     packet.PlayerActor0PosX = sample.PlayerActor0PosX;
     packet.PlayerActor0PosY = sample.PlayerActor0PosY;
     packet.PlayerActor0PosZ = sample.PlayerActor0PosZ;
+    packet.PlayerActor0PrevX = sample.PlayerActor0PrevX;
+    packet.PlayerActor0PrevY = sample.PlayerActor0PrevY;
+    packet.PlayerActor0PrevZ = sample.PlayerActor0PrevZ;
+    packet.PlayerActor0VelX = sample.PlayerActor0VelX;
+    packet.PlayerActor0VelY = sample.PlayerActor0VelY;
+    packet.PlayerActor0VelZ = sample.PlayerActor0VelZ;
     packet.PlayerActor1Found = sample.PlayerActor1Found;
     packet.PlayerActor1GUID = sample.PlayerActor1GUID;
     packet.PlayerActor1Settings = sample.PlayerActor1Settings;
     packet.PlayerActor1PosX = sample.PlayerActor1PosX;
     packet.PlayerActor1PosY = sample.PlayerActor1PosY;
     packet.PlayerActor1PosZ = sample.PlayerActor1PosZ;
+    packet.PlayerActor1PrevX = sample.PlayerActor1PrevX;
+    packet.PlayerActor1PrevY = sample.PlayerActor1PrevY;
+    packet.PlayerActor1PrevZ = sample.PlayerActor1PrevZ;
+    packet.PlayerActor1VelX = sample.PlayerActor1VelX;
+    packet.PlayerActor1VelY = sample.PlayerActor1VelY;
+    packet.PlayerActor1VelZ = sample.PlayerActor1VelZ;
     packet.PlayerCount = sample.PlayerCount;
     packet.Player0BattleStars = sample.Player0BattleStars;
     packet.Player1BattleStars = sample.Player1BattleStars;
