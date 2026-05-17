@@ -154,6 +154,21 @@ void NSML_PushMarioVsLuigiRemotePacket(NDS* nds, u32 player, const u8 packet[52]
     }
 }
 
+bool NSML_HasMarioVsLuigiRemotePacket(NDS* nds, u32 player, u32 tick)
+{
+    if (!nds || player > 1)
+        return false;
+
+    tick &= 0xFFFF;
+    std::lock_guard<std::mutex> lock(NSMLPacketBridgeMutex);
+    auto ndsIt = NSMLLiveReplayPackets.find(nds);
+    if (ndsIt == NSMLLiveReplayPackets.end())
+        return false;
+
+    auto packetIt = ndsIt->second.find(tick);
+    return packetIt != ndsIt->second.end() && packetIt->second.Valid[player];
+}
+
 static std::vector<std::string> SplitNSMLCsvLine(const std::string& line)
 {
     std::vector<std::string> out;

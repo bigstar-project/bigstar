@@ -71,12 +71,15 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード�
   - 受信packetはlive replay bufferへ入り、`Net::getConsoleKeys()` / `Net::getPacketByte()` / `Net::getPacketTick()` から参照できる。
   - `MELONDS_NSML_PACKET_BRIDGE_ONLY=1` で、既存の入力lockstepを動かさずpacket bridgeだけを動かせる。
   - `MELONDS_NSML_PACKET_BRIDGE_REPLAY_TICK_OFFSET` で、受信packetを何tick後のreplay lookupに使うか実験できる。
+  - `MELONDS_NSML_PACKET_BRIDGE_WAIT` で、対象tickのremote packetが揃うまで短時間pumpして待つ実験ができる。
 - LAN route smokeにpacket bridge検証オプションを追加済み。
   - `-PacketBridge`
   - `-PacketBridgeTrace`
   - `-PacketBridgeStartFrame`
   - `-HostPacketBridgeReplayTickOffset`
   - `-ClientPacketBridgeReplayTickOffset`
+  - `-PacketBridgeWait`
+  - `-PacketBridgeWaitTimeoutMs`
 - ARM側packet bridge設定の二重mutex取得による実行停止を修正済み。
 
 ## 直近の検証結果
@@ -101,6 +104,7 @@ cmake --build build\debug-windows-x86_64 --target melonDS --config Debug
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 5100 -HostStartupDelayMs 50 -LogDir logs\lan-route-5100-after-bridge-deadlock-fix -GameStateTrace -GameStateTraceInterval 60
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 5100 -HostStartupDelayMs 50 -LogDir logs\lan-route-5100-live-packet-bridge-start3000-noseedwait -GameStateTrace -GameStateTraceInterval 60 -PacketBridge -PacketBridgeTrace -PacketBridgeStartFrame 3000
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 3400 -HostStartupDelayMs 50 -LogDir logs\lan-route-3400-live-packet-bridge-role-offsets -GameStateTrace -GameStateTraceInterval 60 -PacketBridge -PacketBridgeTrace -PacketBridgeStartFrame 3000 -HostPacketBridgeReplayTickOffset 3 -ClientPacketBridgeReplayTickOffset 2
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 3400 -HostStartupDelayMs 50 -LogDir logs\lan-route-3400-live-packet-bridge-wait5 -GameStateTrace -GameStateTraceInterval 60 -PacketBridge -PacketBridgeTrace -PacketBridgeStartFrame 3000 -HostPacketBridgeReplayTickOffset 3 -ClientPacketBridgeReplayTickOffset 2 -PacketBridgeWait -PacketBridgeWaitTimeoutMs 5
 ```
 
 重要な確認:
@@ -131,18 +135,22 @@ cmake --build build\debug-windows-x86_64 --target melonDS --config Debug
   - host側はremote player 1の `byte` が12682 hits、`keys` が373 hits。
   - client側はremote player 0の `byte` が13328 hits、`keys` が392 hits。
   - 現状はLAN通信を残した補助検証であり、packet bridge単独ではまだない。
+- `logs\lan-route-3400-live-packet-bridge-wait5` で、短時間wait hookを試した。
+  - route自体はMario vs Luigiへ到達した。
+  - wait timeoutが序盤に24回出た。
+  - client側hit数は固定offsetのみの検証より減ったため、単純な「現在tickを待つ」だけでは不十分。次は開始時のwarmup/遅延tick基準を分ける必要がある。
 
 ## 現在の課題
 
 - 既存 `LAN` MPInterfaceはDSローカル無線フレーム相当をENetで運ぶため、WAN遅延にそのまま耐える保証はない。
 - ただし、1 EmuInstance * 2プロセスでMario vs Luigiへ到達できる自動検証基盤としては有効。
 - live packet bridgeは送受信とhook hitまで確認できたが、packetが同tickの `getPacket*` 呼び出し後に届く場合がある。
-- そのため、LANなしに進む前に、tick/frame基準の待ち、遅延、buffer、timeoutを設計する必要がある。
+- そのため、LANなしに進む前に、tick/frame基準の待ち、遅延、buffer、timeoutを設計する必要がある。単純に現在tickを待つだけでは、片側の進行を止めて相手のpacket生成も遅らせるため不十分。
 - player 2/3向けの `getPacket*` missは2P MvLでは不要な可能性が高いので、strict化時はplayer 0/1に限定する。
 
 ## 次にやること
 
-1. packet bridgeのtick offset実験を、固定offsetではなく「remote packetが揃うまで待つ/遅延する」制御へ進める。
+1. packet bridgeの固定offset/現在tick waitを、開始warmupつきの「N tick遅れのremote packetを使う」制御へ整理する。
 2. replay hookのstrict条件をplayer 0/1に限定して整理する。
 3. LAN通信を残したまま、packet bridgeがゲーム状態へ与える影響を比較する。
 4. LAN/LocalMP payloadを切った状態で、packet bridge単独でMario vs Luigi状態を維持できるか検証する。
@@ -183,6 +191,9 @@ python tools\nsmb_packet_capture_compare.py logs\lan-route-4900-packet-capture\c
 
 # live packet bridge検証（LAN routeを残した補助検証）
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 3400 -HostStartupDelayMs 50 -LogDir logs\lan-route-3400-live-packet-bridge-role-offsets -GameStateTrace -GameStateTraceInterval 60 -PacketBridge -PacketBridgeTrace -PacketBridgeStartFrame 3000 -HostPacketBridgeReplayTickOffset 3 -ClientPacketBridgeReplayTickOffset 2
+
+# packet bridge wait実験
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 3400 -HostStartupDelayMs 50 -LogDir logs\lan-route-3400-live-packet-bridge-wait5 -GameStateTrace -GameStateTraceInterval 60 -PacketBridge -PacketBridgeTrace -PacketBridgeStartFrame 3000 -HostPacketBridgeReplayTickOffset 3 -ClientPacketBridgeReplayTickOffset 2 -PacketBridgeWait -PacketBridgeWaitTimeoutMs 5
 
 # setPacketByte traceとLocal MP payloadの対応確認
 python tools\nsmb_packet_trace_probe.py logs\route-combined-setpacket-localmp-2925\nsmb-mvl-route.call-trace.csv --localmp logs\route-combined-setpacket-localmp-2925.csv
