@@ -8,16 +8,18 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード�
 
 ## 現在の方針
 
-Local MPの完全な決定性だけに依存する方針は採用しない。
+Local MPの2 EmuInstance * 2プロセス構成を最終形として伸ばす方針は優先度を下げる。
 
-これまでの検証で、同一PC、同一ROM/save、固定RTC、JIT無効、固定RNG seedでも、melonDSの2 EmuInstance + Local MP経路は実行ごとに揺れることが分かった。試合開始や基本状態までは揃えられるが、RAM hashやWi-Fi/描画リスト系の内部状態は一致しないことがある。
+これまでの検証で、同一PC、同一ROM/save、固定RTC、JIT無効、固定RNG seedでも、melonDSの2 EmuInstance + Local MP経路は実行ごとに揺れることが分かった。StateApplyでPlayer、Star、VS coin、StageCamera候補などを補正すると一部traceは一致するが、画面・土管/ステージ表示・カメラ・一部Actor状態はまだズレる。これをさらに進めると、NSMB本来の通信を活かすのではなく、host権威でゲーム内オブジェクトを外側から大量に複製する実装になり、最終的なWAN対戦として壊れやすい。
 
-そのため、今後は次の方針に寄せる。
+そのため、今後の本筋は「NSMB Mario vs Luigiのローカル無線上で送受信されるゲームレベル通信を特定し、その送受信口をWAN向けbridgeへ差し替える」方向に寄せる。
 
-1. 2 EmuInstance + Local MPは起動・到達・観測用の土台として使う。
-2. 対戦の正しさはNSMB側の重要状態同期で担保する。
-3. 入力同期netplayは残すが、入力だけで全状態が一致する前提にはしない。
-4. 長期的には、Local MP依存を減らし、NSMB Mario vs Luigi専用 runner / patch に寄せる。
+当面の役割分担:
+
+1. 2 EmuInstance + Local MPは、NSMBが本来送受信しているpacket/buffer/functionを観測するための解析土台として使う。
+2. StateApplyは、同期対象の見当をつける診断用に留め、最終形として無限に対象を増やす方向へは進めない。
+3. 最終形は、改造ROMまたはmelonDS側A2DJ専用hookにより、1 EmuInstance * 2PCでMario vs Luigiを動かす構成を目指す。
+4. WAN遅延対策は、DS無線フレームの中継ではなく、NSMBのゲームレベルpacketにframe index / buffering / timeout緩和を足す方向で検討する。
 
 ## 実装済み
 
@@ -48,6 +50,9 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 - `WireGameState` / `StateApply` にプレイヤーの星数、コイン、スコア、表示星数、死亡数、取得星候補を追加した。
 - `WireGameState` / `StateApply` にPlayer Actorの前フレーム座標と速度を追加した。
 - `tools/nsmb_mvl_ram_probe.py --a2dj-object-dump` を追加し、指定Actorの周辺メモリをフレーム間比較できるようにした。
+- 汎用ARM9 call trace `MELONDS_NSML_CALL_TRACE` を追加した。A2DJのNet関数候補に入った時点の `r0..r3` とMainRAM pointer dumpをCSVへ出せる。
+- Local MP traceにpayload hex dumpを追加した。`MELONDS_NSML_LOCALMP_TRACE_DUMP_LEN` で先頭byte数を指定できる。
+- `tools/nsmb_localmp_trace_probe.py` を追加した。Local MP traceからpacket種別ごとの可変offsetとカウンタ候補を出す。
 
 ## 重要な解析済みアドレス
 
@@ -71,6 +76,10 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
 | `Net::getRandom()` | `0x0200E5A0` | verified |
 | `Net::syncRandomFull()` | `0x0200E5E8` | verified |
 | `Net::syncRandomFast()` | `0x0200E5F4` | verified |
+| `Net::Core::readUserInfo(MBUserInfo*)` | `0x0200F320` | candidate, traced |
+| `Net::Core::transferPacket(Net::PacketAction)` | `0x0200F98C` | candidate, traced |
+| `Net::update()` | `0x0200FF40` | candidate, traced |
+| `Net::updatePacket()` | `0x020101E4` | candidate, traced |
 | `Net::Core::shareRandomSeed()` | `0x02010F04` | verified |
 | Player actor | object id `0x0015` | traced |
 | VS Battle Star actor candidate | object id `0x0022`, settings `0x00000001` | candidate, traced |
@@ -154,6 +163,13 @@ Local MPの完全な決定性だけに依存する方針は採用しない。
   - state-load時にmatch seedが `Net::random.value` へ再注入される問題は修正済み。
   - savestate load直後に `MP_Begin` を補っても通信断は解消しなかった。
   - melonDS本体の `Wifi::DoSavestate()` にもWi-Fiとsavestateの相性問題が示されているため、state-load経路は本筋ではなく診断用に留める。
+- 新方針向けの通信観測を開始した。
+  - `logs\route-localmp-payload-4200.csv` でLocal MP payload dumpを取得。
+  - MvL中にhost側 `type=1 len=302`、client reply側 `type=65538 len=106`、ack側 `type=3 len=44` が高頻度で流れる。
+  - `tools\nsmb_localmp_trace_probe.py` の解析では、host cmd 302 bytesに `0x22/0x2e` 付近、client reply 106 bytesに `0x22/0x26` 付近のカウンタ候補がある。
+  - NSMB Code ReferenceのUSシンボルと照合し、`0x0200F320` は `Net::Core::readUserInfo(MBUserInfo*)`、`0x0200F98C` は `Net::Core::transferPacket(Net::PacketAction)`、`0x0200FF40` は `Net::update()`、`0x020101E4` は `Net::updatePacket()` のA2DJ候補として扱う。
+  - `0x02012284` はUS側 `SND::loop()` に対応する可能性が高く、通信候補から外す。
+  - ただし、これはまだDS無線フレーム寄りの観測であり、NSMBのゲームレベル送受信bufferそのものは未確定。
 
 ## Debugビルドクラッシュの原因と修正
 
@@ -175,16 +191,14 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 
 ## 次にやること
 
-1. staged host/clientがMvsLへ入れない揺れを減らす。まずは入力再送・起動待ち・自動リトライで検証足場を安定化し、必要ならNSMB側patchで参加確認を短絡する。
-2. StageCamera / MvsLObject267 / stage表示状態をStateApply対象に追加し、スクリーンショット上のhost/client差分を減らす。
-3. スター取得後に次スターが再生成されるまで長く走らせ、実体Star Actor / RNG timeline / player global / 画面表示がhost/clientで揃うか確認する。
-4. StateApplyの適用ラグをさらに減らす。現状は通信経由の補正なので、trace上は数フレーム遅れのmismatchがあり得る。
-5. 診断フックなしの入力スクリプトでスター取得できるルートを作る。難しければ、しばらくはstick診断を回帰テストとして使う。
-6. Star Actor側も必要なら前フレーム座標・速度・stateTypeをStateApply対象に拡張する。
-7. 8コインアイテムは自動化が難しいため一旦保留し、スター同期の見通しが立ってから同じActor trace方式で対象を特定する。
-8. ランダムステージ、勝敗・タイマー・スコアなど、対戦で同期すべき状態を個別に特定する。
-9. 入力同期netplayと重要状態同期を結合し、ローカル2プロセスで2PC相当の検証を継続する。
-10. state-load経路は必要になった場合だけ追加調査する。現時点では最終対戦実現の主経路にしない。
+1. `Net::Core::transferPacket(Net::PacketAction)` / `Net::updatePacket()` / `Net::Core::readUserInfo(MBUserInfo*)` 周辺をさらに追い、どこから `PacketSequenceBuilder` / `packetFreeBytes` へゲーム状態が書かれるかを特定する。
+2. call traceとwrite watchを組み合わせ、host cmd 302 bytes / client reply 106 bytesのどの範囲がNSMBゲームレベルpayloadなのかを切り出す。
+3. 切り出したpayloadをLocal MP traceから録画し、同一プロセス内でreplay注入できるかを試す。ここが通れば、Local MPを使わない1 DS構成へ進める。
+4. host/clientの2プロセス各1 EmuInstanceで、NSMBのゲームレベルpayloadだけをENetで交換する最小bridgeを作る。
+5. WAN向けには、payloadのframe index、入力遅延、受信buffer、通信timeout緩和をNSMB patch/hook側で扱う。DS無線フレームそのもののWAN中継は本筋にしない。
+6. 8コインアイテム、ランダムステージ、勝敗・タイマー・スコアは、ゲームレベル通信が特定できた後に、そのpayloadで自然に同期されるかを確認する。不足があれば個別patch対象にする。
+7. MvsLObject267などのStateApply追加は診断用に留める。最終形としてこの方向を広げ続けない。
+8. state-load経路は診断用に留める。現時点では最終対戦実現の主経路にしない。
 
 ## よく使う検証コマンド
 
@@ -251,6 +265,10 @@ python tools\nsmb_mvl_ram_probe.py --rng-timeline-only --a2dj-object-scan logs\m
 
 # 指定Actorの周辺メモリをフレーム間比較
 python tools\nsmb_mvl_ram_probe.py --rng-timeline-only --a2dj-object-dump --object-id 0x0022 --object-settings 0x1 --object-size 0x120 logs\route-player-stick-star-4380-4440-long\ram-mvl-route\inst0_frame004440_mainram.bin logs\route-player-stick-star-4380-4440-long\ram-mvl-route\inst0_frame004455_mainram.bin
+
+# Local MP payload traceを解析
+python tools\nsmb_localmp_trace_probe.py logs\route-localmp-payload-4200.csv --type 1 --len 302 --inst 0
+python tools\nsmb_localmp_trace_probe.py logs\route-localmp-payload-4200.csv --type 65538 --len 106 --inst 1
 ```
 
 ## 主要な環境変数
@@ -288,6 +306,12 @@ python tools\nsmb_mvl_ram_probe.py --rng-timeline-only --a2dj-object-dump --obje
 - `MELONDS_NSML_STATE_SAVE_FRAME`: savestate saveを行うテストフレーム。
 - `MELONDS_NSML_FIXED_RTC`: RTC固定。
 - `MELONDS_NSML_DISABLE_JIT=1`: JIT無効化。
+- `MELONDS_NSML_CALL_TRACE=1`: A2DJ関数候補の呼び出しtraceをCSV/標準出力へ出す。JITは自動的に無効化される。
+- `MELONDS_NSML_CALL_TRACE_ADDRS`: call trace対象アドレスのカンマ区切りリスト。
+- `MELONDS_NSML_CALL_TRACE_LOG`: call trace CSV出力先。
+- `MELONDS_NSML_CALL_TRACE_DUMP_LEN`: `r0` / `r1` がMainRAM pointerだった場合にdumpする最大byte数。
+- `MELONDS_NSML_LOCALMP_TRACE`: Local MP packet trace CSV出力先。
+- `MELONDS_NSML_LOCALMP_TRACE_DUMP_LEN`: Local MP payload dumpの最大byte数。
 
 ## ユーザー依存
 

@@ -16,6 +16,7 @@
     with melonDS. If not, see http://www.gnu.org/licenses/.
 */
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -63,6 +64,7 @@ struct LocalMPTestConfig
     u64 TimestampValue = 0;
     int StrictWaitTimeoutMs = 5000;
     bool TraceEnabled = false;
+    int TraceDumpLen = 0;
     std::string TracePath;
     std::ofstream Trace;
     std::mutex TraceMutex;
@@ -93,14 +95,18 @@ LocalMPTestConfig& TestConfig()
             cfg.Trace.open(cfg.TracePath, std::ios::out | std::ios::trunc);
             cfg.TraceEnabled = cfg.Trace.is_open();
             if (cfg.TraceEnabled)
-                cfg.Trace << "seq,event,inst,type,len,timestamp,ret,aidmask,dataHash,packetRead,replyRead,packetWrite,replyWrite,connected,lastHost\n";
+                cfg.Trace << "seq,event,inst,type,len,timestamp,ret,aidmask,dataHash,dataHex,packetRead,replyRead,packetWrite,replyWrite,connected,lastHost\n";
         }
+        if (const char* dumpLen = getenv("MELONDS_NSML_LOCALMP_TRACE_DUMP_LEN"))
+            cfg.TraceDumpLen = atoi(dumpLen);
+        if (cfg.TraceDumpLen < 0) cfg.TraceDumpLen = 0;
+        if (cfg.TraceDumpLen > 512) cfg.TraceDumpLen = 512;
     }
     return cfg;
 }
 
 void TraceLocalMP(LocalMPTestConfig& cfg, const char* event, int inst, u32 type, int len,
-                  u64 timestamp, u16 ret, u16 aidmask, u64 dataHash, const MPStatusData& status,
+                  u64 timestamp, u16 ret, u16 aidmask, u64 dataHash, const u8* data, const MPStatusData& status,
                   const u32* packetReadOffset, const u32* replyReadOffset, int lastHost)
 {
     if (!cfg.TraceEnabled)
@@ -116,6 +122,18 @@ void TraceLocalMP(LocalMPTestConfig& cfg, const char* event, int inst, u32 type,
               << ret << ','
               << aidmask << ','
               << std::hex << dataHash << std::dec << ','
+              << std::hex;
+    if (data && len > 0 && cfg.TraceDumpLen > 0)
+    {
+        const int dumpLen = std::min(len, cfg.TraceDumpLen);
+        for (int i = 0; i < dumpLen; i++)
+        {
+            const int byte = data[i];
+            cfg.Trace << "0123456789ABCDEF"[(byte >> 4) & 0xF]
+                      << "0123456789ABCDEF"[byte & 0xF];
+        }
+    }
+    cfg.Trace << std::dec << ','
               << packetReadOffset[inst] << ','
               << replyReadOffset[inst] << ','
               << status.PacketWriteOffset << ','
@@ -339,6 +357,7 @@ int LocalMP::SendPacketGeneric(int inst, u32 type, u8* packet, int len, u64 time
     {
         TraceLocalMP(cfg, "send", inst, packetType, len, pktheader.Timestamp, MPStatus.MPReplyBitmask, 0,
             len ? HashBytes(packet, len) : 0,
+            len ? packet : nullptr,
             MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
     }
 
@@ -396,7 +415,7 @@ int LocalMP::RecvPacketGeneric(int inst, u8* packet, bool block, u64* timestamp)
                 PacketReadOffset[inst] -= kPacketQueueSize;
 
             TraceLocalMP(cfg, "recv-skip-self", inst, pktheader.Type, pktheader.Length,
-                pktheader.Timestamp, 0, 0, 0, MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
+                pktheader.Timestamp, 0, 0, 0, nullptr, MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
 
             Mutex_Unlock(MPQueueLock);
             continue;
@@ -415,6 +434,7 @@ int LocalMP::RecvPacketGeneric(int inst, u8* packet, bool block, u64* timestamp)
         {
             TraceLocalMP(cfg, "recv", inst, pktheader.Type, pktheader.Length, pktheader.Timestamp,
                 0, 0, pktheader.Length ? HashBytes(packet, pktheader.Length) : 0,
+                pktheader.Length ? packet : nullptr,
                 MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
         }
         Mutex_Unlock(MPQueueLock);
@@ -515,7 +535,7 @@ u16 LocalMP::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
                 ReplyReadOffset[inst] -= kReplyQueueSize;
 
             TraceLocalMP(cfg, "reply-skip", inst, pktheader.Type, pktheader.Length,
-                pktheader.Timestamp, ret, aidmask, 0, MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
+                pktheader.Timestamp, ret, aidmask, 0, nullptr, MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
 
             Mutex_Unlock(MPQueueLock);
             continue;
@@ -542,6 +562,7 @@ u16 LocalMP::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
                     : 0;
                 TraceLocalMP(cfg, "replies", inst, pktheader.Type, pktheader.Length,
                     pktheader.Timestamp, ret, aidmask, dataHash,
+                    (pktheader.Length && aid > 0) ? &packets[(aid - 1) * 1024] : nullptr,
                     MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
             }
 
@@ -557,6 +578,7 @@ u16 LocalMP::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
                 : 0;
             TraceLocalMP(cfg, "reply-partial", inst, pktheader.Type, pktheader.Length,
                 pktheader.Timestamp, ret, aidmask, dataHash,
+                (pktheader.Length && aid > 0) ? &packets[(aid - 1) * 1024] : nullptr,
                 MPStatus, PacketReadOffset, ReplyReadOffset, LastHostID);
         }
 

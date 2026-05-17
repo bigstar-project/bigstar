@@ -1295,7 +1295,7 @@ bool EmuInstance::updateConsole() noexcept
             jitopt.GetBool("FastMemory"),
     };
     auto jitargs = jitopt.GetBool("Enable") ? std::make_optional(_jitargs) : std::nullopt;
-    if (getenv("MELONDS_NSML_DISABLE_JIT") || getenv("MELONDS_NSML_WATCH_ADDR"))
+    if (getenv("MELONDS_NSML_DISABLE_JIT") || getenv("MELONDS_NSML_WATCH_ADDR") || getenv("MELONDS_NSML_CALL_TRACE"))
         jitargs = std::nullopt;
 #else
     std::optional<JITArgs> jitargs = std::nullopt;

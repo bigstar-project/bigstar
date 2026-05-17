@@ -34,6 +34,10 @@ Net系の優先関数は、JP RAM上の復号済みARM9コードで先頭命令�
 | `Net::getRandom()` | `0x0200E5A0` | verified | US `0x0200E6F4 - 0x154`; reads `Net::randomCallCount`, `Net::randomBranchAddress`, `Net::random.value` |
 | `Net::syncRandomFull()` | `0x0200E5E8` | verified | veneer to `Net::Core::shareRandomSeed()` |
 | `Net::syncRandomFast()` | `0x0200E5F4` | verified | references `Net::randomShareStep`, `Net::random.value`, `Net::randomCallCount` |
+| `Net::Core::readUserInfo(MBUserInfo*)` | `0x0200F320` | candidate | Local MP payload/write-watch candidate; US `0x0200F474` |
+| `Net::Core::transferPacket(Net::PacketAction)` | `0x0200F98C` | candidate | Local MP payload/write-watch candidate; US `0x0200FAE0` |
+| `Net::update()` | `0x0200FF40` | candidate | Local MP payload/write-watch candidate; US `0x02010094` |
+| `Net::updatePacket()` | `0x020101E4` | candidate | calls A2DJ `Net::Core::readUserInfo`; US `0x0201031C` |
 | `Net::onPacketPollingDefault()` | `0x02010810` | verified | stored in `Net::onPacketPolling` during `setDefaultHandlers()` |
 | `Net::onRenderSignalStrengthDefault()` | `0x02010828` | verified | stored in `Net::onRenderSignalStrength` during `setDefaultHandlers()` |
 | `Net::setDefaultHandlers()` | `0x02010930` | verified | loads `0x02010810`, `0x020173B0`, `0x02010828` and branches through handler setter |

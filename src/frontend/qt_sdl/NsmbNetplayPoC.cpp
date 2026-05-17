@@ -1953,7 +1953,6 @@ void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         WriteObjectWordByIDAndSettings(nds, kStageSceneObjectID, 0x00B5FF00, 0x154, sample.StageSceneWord154);
         WriteObjectWordByIDAndSettings(nds, kStageSceneObjectID, 0x00B5FF00, 0x160, sample.StageSceneWord160);
     }
-
     if (sample.VsStarFound)
     {
         if (!WriteObjectPositionByGUID(nds, sample.VsStarGUID, sample.VsStarPosX, sample.VsStarPosY, sample.VsStarPosZ))
@@ -2110,7 +2109,6 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         sample.StageSceneWord154 = stageWord;
         ReadObjectWordByIDAndSettings(nds, kStageSceneObjectID, 0x00B5FF00, 0x160, sample.StageSceneWord160);
     }
-
     sample.Hash = 1469598103934665603ull;
     MixGameStateValue(sample.Hash, sample.StageID);
     MixGameStateValue(sample.Hash, sample.StageGroup);

@@ -132,8 +132,125 @@ static bool TraceNSMLRandomCallImpl(ARM* cpu, u32 instrAddr, u32 lr, bool hasLR)
     return true;
 }
 
+static bool IsNSMLMainRAMAddress(u32 addr)
+{
+    return (addr & 0xFF000000) == 0x02000000;
+}
+
+static void WriteNSMLHexDump(FILE* file, ARM* cpu, u32 addr, u32 len)
+{
+    if (!file || !cpu || !IsNSMLMainRAMAddress(addr) || len == 0)
+    {
+        fputc('-', file);
+        return;
+    }
+
+    for (u32 i = 0; i < len; i++)
+        fprintf(file, "%02X", cpu->NDS.ARM9Read8(addr + i));
+}
+
+static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
+{
+    struct CallTraceConfig
+    {
+        bool Checked = false;
+        bool Enabled = false;
+        u32 Addrs[256] {};
+        int AddrCount = 0;
+        u32 StartFrame = 0;
+        u32 EndFrame = 0xFFFFFFFF;
+        u32 DumpLen = 32;
+        FILE* LogFile = nullptr;
+    };
+
+    static CallTraceConfig cfg;
+    if (!cfg.Checked)
+    {
+        cfg.Checked = true;
+        cfg.Enabled = getenv("MELONDS_NSML_CALL_TRACE") != nullptr;
+
+        // Useful A2DJ Net entry points by default. Override or extend with
+        // MELONDS_NSML_CALL_TRACE_ADDRS while narrowing the packet boundary.
+        cfg.Addrs[cfg.AddrCount++] = 0x0200E5E8; // Net::syncRandomFull()
+        cfg.Addrs[cfg.AddrCount++] = 0x0200E5F4; // Net::syncRandomFast()
+        cfg.Addrs[cfg.AddrCount++] = 0x02010810; // Net::onPacketPollingDefault()
+        cfg.Addrs[cfg.AddrCount++] = 0x02010828; // Net::onRenderSignalStrengthDefault()
+        cfg.Addrs[cfg.AddrCount++] = 0x02010930; // Net::setDefaultHandlers()
+        cfg.Addrs[cfg.AddrCount++] = 0x02010F04; // Net::Core::shareRandomSeed()
+
+        if (const char* addrs = getenv("MELONDS_NSML_CALL_TRACE_ADDRS"))
+        {
+            cfg.AddrCount = 0;
+            char buf[4096];
+            strncpy(buf, addrs, sizeof(buf) - 1);
+            buf[sizeof(buf) - 1] = '\0';
+            for (char* tok = strtok(buf, ", \t\r\n"); tok && cfg.AddrCount < 256; tok = strtok(nullptr, ", \t\r\n"))
+                cfg.Addrs[cfg.AddrCount++] = static_cast<u32>(strtoul(tok, nullptr, 0));
+        }
+        if (const char* startFrame = getenv("MELONDS_NSML_CALL_TRACE_START_FRAME"))
+            cfg.StartFrame = static_cast<u32>(strtoul(startFrame, nullptr, 0));
+        if (const char* endFrame = getenv("MELONDS_NSML_CALL_TRACE_END_FRAME"))
+            cfg.EndFrame = static_cast<u32>(strtoul(endFrame, nullptr, 0));
+        if (const char* dumpLen = getenv("MELONDS_NSML_CALL_TRACE_DUMP_LEN"))
+            cfg.DumpLen = static_cast<u32>(strtoul(dumpLen, nullptr, 0));
+        if (cfg.DumpLen > 256) cfg.DumpLen = 256;
+        if (const char* logPath = getenv("MELONDS_NSML_CALL_TRACE_LOG"))
+        {
+            if (logPath[0])
+            {
+                cfg.LogFile = fopen(logPath, "w");
+                if (cfg.LogFile)
+                    fprintf(cfg.LogFile, "nds,frame,pc,caller,lr,r0,r1,r2,r3,r0_dump,r1_dump\n");
+            }
+        }
+    }
+
+    if (!cfg.Enabled || !cpu || cpu->Num != 0) return false;
+    if (cpu->NDS.NumFrames < cfg.StartFrame || cpu->NDS.NumFrames > cfg.EndFrame) return false;
+
+    bool matched = false;
+    for (int i = 0; i < cfg.AddrCount; i++)
+    {
+        if (instrAddr == cfg.Addrs[i])
+        {
+            matched = true;
+            break;
+        }
+    }
+    if (!matched) return false;
+
+    const u32 lr = cpu->R[14];
+    const u32 caller = lr >= 4 ? lr - 4 : lr;
+    const u32 r0 = cpu->R[0];
+    const u32 r1 = cpu->R[1];
+    const u32 r2 = cpu->R[2];
+    const u32 r3 = cpu->R[3];
+    u32 dumpLen = cfg.DumpLen;
+    if (r2 > 0 && r2 < dumpLen) dumpLen = r2;
+
+    FILE* out = cfg.LogFile ? cfg.LogFile : stdout;
+    fprintf(out,
+        "%p,%u,%08X,%08X,%08X,%08X,%08X,%08X,%08X,",
+        static_cast<void*>(&cpu->NDS),
+        cpu->NDS.NumFrames,
+        instrAddr,
+        caller,
+        lr,
+        r0,
+        r1,
+        r2,
+        r3);
+    WriteNSMLHexDump(out, cpu, r0, dumpLen);
+    fputc(',', out);
+    WriteNSMLHexDump(out, cpu, r1, dumpLen);
+    fputc('\n', out);
+    fflush(out);
+    return true;
+}
+
 bool TraceNSMLRandomCall(ARM* cpu, u32 instrAddr)
 {
+    TraceNSMLCallImpl(cpu, instrAddr);
     return TraceNSMLRandomCallImpl(cpu, instrAddr, 0, false);
 }
 

@@ -17,7 +17,12 @@ param(
     [int]$PlayerSnapToStarSlot = 0,
     [int]$PlayerStickToStarStartFrame = 0,
     [int]$PlayerStickToStarEndFrame = 0,
-    [int]$PlayerStickToStarSlot = 0
+    [int]$PlayerStickToStarSlot = 0,
+    [switch]$CallTrace,
+    [string]$CallTraceAddrs = "",
+    [int]$CallTraceStartFrame = 0,
+    [int]$CallTraceEndFrame = -1,
+    [int]$CallTraceDumpLen = 32
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,9 +32,10 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $stdout = Join-Path $LogDir "nsmb-mvl-route.stdout.txt"
 $hashLog = Join-Path $LogDir "nsmb-mvl-route.hash.csv"
 $gameStateTracePath = Join-Path $LogDir "nsmb-mvl-route.game-state.csv"
+$callTracePath = Join-Path $LogDir "nsmb-mvl-route.call-trace.csv"
 $screenDir = Join-Path $LogDir "screens-mvl-route"
 $ramDumpDir = Join-Path $LogDir "ram-mvl-route"
-Remove-Item -Force $stdout, $hashLog, $gameStateTracePath -ErrorAction SilentlyContinue
+Remove-Item -Force $stdout, $hashLog, $gameStateTracePath, $callTracePath -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force $screenDir -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force $ramDumpDir -ErrorAction SilentlyContinue
 
@@ -59,7 +65,13 @@ foreach ($name in @(
     "MELONDS_NSML_PLAYER_SNAP_TO_STAR_SLOT",
     "MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME",
     "MELONDS_NSML_PLAYER_STICK_TO_STAR_END_FRAME",
-    "MELONDS_NSML_PLAYER_STICK_TO_STAR_SLOT"
+    "MELONDS_NSML_PLAYER_STICK_TO_STAR_SLOT",
+    "MELONDS_NSML_CALL_TRACE",
+    "MELONDS_NSML_CALL_TRACE_LOG",
+    "MELONDS_NSML_CALL_TRACE_ADDRS",
+    "MELONDS_NSML_CALL_TRACE_START_FRAME",
+    "MELONDS_NSML_CALL_TRACE_END_FRAME",
+    "MELONDS_NSML_CALL_TRACE_DUMP_LEN"
 )) {
     Remove-Item "Env:\$name" -ErrorAction SilentlyContinue
 }
@@ -129,6 +141,29 @@ if ($PlayerStickToStarStartFrame -gt 0) {
     Remove-Item Env:\MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_PLAYER_STICK_TO_STAR_END_FRAME -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_PLAYER_STICK_TO_STAR_SLOT -ErrorAction SilentlyContinue
+}
+if ($CallTrace) {
+    $env:MELONDS_NSML_CALL_TRACE = "1"
+    $env:MELONDS_NSML_CALL_TRACE_LOG = (Join-Path (Resolve-Path $LogDir).Path "nsmb-mvl-route.call-trace.csv")
+    if ($CallTraceAddrs) {
+        $env:MELONDS_NSML_CALL_TRACE_ADDRS = $CallTraceAddrs
+    } else {
+        Remove-Item Env:\MELONDS_NSML_CALL_TRACE_ADDRS -ErrorAction SilentlyContinue
+    }
+    $env:MELONDS_NSML_CALL_TRACE_START_FRAME = "$CallTraceStartFrame"
+    if ($CallTraceEndFrame -ge 0) {
+        $env:MELONDS_NSML_CALL_TRACE_END_FRAME = "$CallTraceEndFrame"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_CALL_TRACE_END_FRAME -ErrorAction SilentlyContinue
+    }
+    $env:MELONDS_NSML_CALL_TRACE_DUMP_LEN = "$CallTraceDumpLen"
+} else {
+    Remove-Item Env:\MELONDS_NSML_CALL_TRACE -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_CALL_TRACE_LOG -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_CALL_TRACE_ADDRS -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_CALL_TRACE_START_FRAME -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_CALL_TRACE_END_FRAME -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_CALL_TRACE_DUMP_LEN -ErrorAction SilentlyContinue
 }
 
 & (Resolve-Path $Exe).Path (Resolve-Path $Rom).Path *> $stdout
