@@ -18,6 +18,10 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <algorithm>
+#include <cstdlib>
+#include <fstream>
+#include <mutex>
 
 #ifdef __WIN32__
     #include <winsock2.h>
@@ -47,6 +51,87 @@
 
 namespace melonDS
 {
+
+namespace
+{
+
+struct LANTraceConfig
+{
+    bool Checked = false;
+    bool Enabled = false;
+    int DumpLen = 0;
+    std::ofstream Trace;
+    std::mutex Mutex;
+    u64 Seq = 0;
+};
+
+LANTraceConfig& TraceConfig()
+{
+    static LANTraceConfig cfg;
+    if (!cfg.Checked)
+    {
+        cfg.Checked = true;
+        if (const char* tracePath = getenv("MELONDS_NSML_LANMP_TRACE"))
+        {
+            cfg.Trace.open(tracePath, std::ios::out | std::ios::trunc);
+            cfg.Enabled = cfg.Trace.is_open();
+            if (cfg.Enabled)
+                cfg.Trace << "seq,event,inst,type,len,timestamp,ret,aidmask,dataHash,dataHex,packetRead,replyRead,packetWrite,replyWrite,connected,lastHost\n";
+        }
+        if (const char* dumpLen = getenv("MELONDS_NSML_LANMP_TRACE_DUMP_LEN"))
+            cfg.DumpLen = atoi(dumpLen);
+        if (cfg.DumpLen < 0) cfg.DumpLen = 0;
+        if (cfg.DumpLen > 512) cfg.DumpLen = 512;
+    }
+    return cfg;
+}
+
+u64 HashBytes(const u8* data, int len)
+{
+    u64 hash = 1469598103934665603ull;
+    for (int i = 0; i < len; i++)
+    {
+        hash ^= data[i];
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+void TraceLANMP(const char* event, int inst, u32 type, int len, u64 timestamp,
+                u16 ret, u16 aidmask, const u8* data, u16 connected, int lastHost)
+{
+    LANTraceConfig& cfg = TraceConfig();
+    if (!cfg.Enabled)
+        return;
+
+    std::lock_guard<std::mutex> lock(cfg.Mutex);
+    cfg.Trace << cfg.Seq++ << ','
+              << event << ','
+              << inst << ','
+              << type << ','
+              << len << ','
+              << timestamp << ','
+              << ret << ','
+              << aidmask << ','
+              << std::hex << ((data && len > 0) ? HashBytes(data, len) : 0) << std::dec << ','
+              << std::hex;
+    if (data && len > 0 && cfg.DumpLen > 0)
+    {
+        const int dumpLen = std::min(len, cfg.DumpLen);
+        for (int i = 0; i < dumpLen; i++)
+        {
+            const int byte = data[i];
+            cfg.Trace << "0123456789ABCDEF"[(byte >> 4) & 0xF]
+                      << "0123456789ABCDEF"[byte & 0xF];
+        }
+    }
+    cfg.Trace << std::dec << ",0,0,0,0,"
+              << connected << ','
+              << lastHost << '\n';
+    cfg.Trace.flush();
+}
+
+}
 
 const u32 kDiscoveryMagic = 0x444E414C; // LAND
 const u32 kLANMagic = 0x504E414C; // LANP
@@ -964,6 +1049,9 @@ int LAN::SendPacketGeneric(u32 type, u8* packet, int len, u64 timestamp)
         enet_host_broadcast(Host, Chan_MP, enetpacket);
     enet_host_flush(Host);
 
+    TraceLANMP("send", MyPlayer.ID, type, len, pktheader.Timestamp, 0, 0,
+        len ? packet : nullptr, ConnectedBitmask, LastHostID);
+
     return len;
 }
 
@@ -993,6 +1081,8 @@ int LAN::RecvPacketGeneric(u8* packet, bool block, u64* timestamp)
     }
 
     if (timestamp) *timestamp = header->Timestamp;
+    TraceLANMP("recv", MyPlayer.ID, header->Type, header->Length, header->Timestamp, 0, 0,
+        len ? packet : nullptr, ConnectedBitmask, LastHostID);
     enet_packet_destroy(enetpacket);
     return len;
 }
@@ -1068,12 +1158,14 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
         if (good)
         {
             u32 len = header->Length;
+            const u8* replyData = nullptr;
             if (len)
             {
                 if (len > 1024) len = 1024;
 
                 u32 aid = header->Type >> 16;
                 memcpy(&packets[(aid-1)*1024], &enetpacket->data[sizeof(MPPacketHeader)], len);
+                replyData = &packets[(aid-1)*1024];
 
                 ret |= (1<<aid);
             }
@@ -1083,9 +1175,19 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
                 ((ret & aidmask) == aidmask))
             {
                 // all the clients have sent their reply
+                TraceLANMP("replies", MyPlayer.ID, header->Type, len, header->Timestamp, ret, aidmask,
+                    replyData, ConnectedBitmask, LastHostID);
                 enet_packet_destroy(enetpacket);
                 return ret;
             }
+
+            TraceLANMP("reply-partial", MyPlayer.ID, header->Type, len, header->Timestamp, ret, aidmask,
+                replyData, ConnectedBitmask, LastHostID);
+        }
+        else
+        {
+            TraceLANMP("reply-skip", MyPlayer.ID, header->Type, header->Length, header->Timestamp, ret, aidmask,
+                nullptr, ConnectedBitmask, LastHostID);
         }
 
         enet_packet_destroy(enetpacket);

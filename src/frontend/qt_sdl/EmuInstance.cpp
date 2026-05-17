@@ -1650,7 +1650,10 @@ pair<unique_ptr<Firmware>, string> EmuInstance::generateDefaultFirmware()
 
 bool EmuInstance::parseMacAddress(void* data)
 {
-    const std::string mac_in = localCfg.GetString("Firmware.MAC");
+    const char* envMac = getenv("MELONDS_NSML_FIRMWARE_MAC");
+    const std::string mac_in = (envMac && envMac[0])
+        ? std::string(envMac)
+        : localCfg.GetString("Firmware.MAC");
     u8* mac_out = (u8*)data;
 
     int o = 0;
