@@ -209,6 +209,8 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
         bool Checked = false;
         bool Enabled = false;
         bool Strict = false;
+        bool StrictPlayer[2] { true, true };
+        u32 StrictStartFrame = 0;
         FILE* LogFile = nullptr;
         std::map<u32, NSMLPacketReplayEntry> Packets;
     };
@@ -220,6 +222,22 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
         if (!cfg.Checked)
         {
             cfg.Strict = getenv("MELONDS_NSML_PACKET_REPLAY_STRICT") != nullptr;
+            if (const char* strictPlayers = getenv("MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS"))
+            {
+                cfg.StrictPlayer[0] = false;
+                cfg.StrictPlayer[1] = false;
+                char buf[32];
+                strncpy(buf, strictPlayers, sizeof(buf) - 1);
+                buf[sizeof(buf) - 1] = '\0';
+                for (char* tok = strtok(buf, ", \t\r\n"); tok; tok = strtok(nullptr, ", \t\r\n"))
+                {
+                    const u32 strictPlayer = static_cast<u32>(strtoul(tok, nullptr, 0));
+                    if (strictPlayer <= 1)
+                        cfg.StrictPlayer[strictPlayer] = true;
+                }
+            }
+            if (const char* strictStartFrame = getenv("MELONDS_NSML_PACKET_REPLAY_STRICT_START_FRAME"))
+                cfg.StrictStartFrame = static_cast<u32>(strtoul(strictStartFrame, nullptr, 0));
             const char* path = getenv("MELONDS_NSML_PACKET_REPLAY_FILE");
             const bool bridgeEnabled = NSMLPacketBridgeEnabled();
             if (const char* logPath = getenv("MELONDS_NSML_PACKET_REPLAY_LOG"))
@@ -374,7 +392,27 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
     }
 
     if (!hit)
-        return cfg.Strict;
+    {
+        if (!cfg.Strict || player > 1 || !cfg.StrictPlayer[player] || cpu->NDS.NumFrames < cfg.StrictStartFrame)
+            return false;
+
+        switch (op)
+        {
+        case Op::Keys:
+        case Op::Byte:
+            value = 0;
+            break;
+        case Op::Tick:
+            value = tick;
+            break;
+        case Op::Action:
+            value = 0x03;
+            break;
+        case Op::None:
+            value = 0;
+            break;
+        }
+    }
 
     cpu->R[0] = value;
     cpu->JumpTo(cpu->R[14]);

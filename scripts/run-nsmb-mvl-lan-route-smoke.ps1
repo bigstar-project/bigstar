@@ -23,6 +23,8 @@ param(
     [int]$ClientPacketBridgeReplayTickOffset = -1,
     [switch]$PacketBridgeWait,
     [int]$PacketBridgeWaitTimeoutMs = 5,
+    [switch]$PacketBridgeStrictRemote,
+    [int]$PacketBridgeStrictStartFrame = 0,
     [int]$HostStartupDelayMs = 1000,
     [string]$LogDir = "logs\nsmb-mvl-lan-route"
 )
@@ -193,6 +195,23 @@ function Start-MelonLANProcess {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
         }
+        if ($PacketBridgeStrictRemote) {
+            $env:MELONDS_NSML_PACKET_REPLAY_STRICT = "1"
+            if ($PacketBridgeStrictStartFrame -gt 0) {
+                $env:MELONDS_NSML_PACKET_REPLAY_STRICT_START_FRAME = "$PacketBridgeStrictStartFrame"
+            } else {
+                Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT_START_FRAME -ErrorAction SilentlyContinue
+            }
+            if ($Role -eq "host") {
+                $env:MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS = "1"
+            } else {
+                $env:MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS = "0"
+            }
+        } elseif (-not $PacketReplayFile) {
+            Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT_START_FRAME -ErrorAction SilentlyContinue
+        }
         Remove-Item Env:\MELONDS_NSML_WAIT_FOR_PEER -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SEED_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
         if ($PacketBridgeStartFrame -gt 0) {
@@ -227,6 +246,9 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_REPLAY_TICK_OFFSET -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_TRACE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WAIT_FOR_PEER -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SEED_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
