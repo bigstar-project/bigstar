@@ -68,6 +68,20 @@ def find_windows(payload: bytes, data: bytes) -> list[int]:
     return [off for off in range(0, len(data) - len(payload) + 1) if data[off : off + len(payload)] == payload]
 
 
+def describe_full_packet(data: bytes, payload_off: int) -> str:
+    start = payload_off - 8
+    if start < 0 or start + 8 > len(data):
+        return f"payload_off={payload_off}"
+    tick = data[start] | (data[start + 1] << 8)
+    keys = data[start + 2] | (data[start + 3] << 8)
+    action = data[start + 4]
+    action_hi = data[start + 5]
+    return (
+        f"payload_off={payload_off}:full_off={start}:"
+        f"tick=0x{tick:04X}:keys=0x{keys:04X}:action=0x{action:02X}:action_hi=0x{action_hi:02X}"
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("call_trace", type=Path)
@@ -102,7 +116,7 @@ def main() -> int:
                     windows.append((seq, event, inst, off, len(data)))
             if windows:
                 shown = " ".join(
-                    f"seq={seq}:{event}:inst{inst}:off{off}:len{length}"
+                    f"seq={seq}:{event}:inst{inst}:{describe_full_packet(next(data for lseq, _, _, data in localmp if lseq == seq), off)}:len{length}"
                     for seq, event, inst, off, length in windows[:8]
                 )
                 print(f"window frame={packet.frame:06d} nds={packet.nds} {shown}")

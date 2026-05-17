@@ -68,6 +68,8 @@ A2DJ_FUNCTIONS = {
     "Net::getRandom()": 0x0200E5A0,
     "Net::syncRandomFull()": 0x0200E5E8,
     "Net::syncRandomFast()": 0x0200E5F4,
+    "Net::getConsoleKeys(u16)": 0x0200E700,
+    "Net::getConsoleTouchPad(u16)": 0x0200E67C,
     "Net::getPacketByte(u16,u32)": 0x0200E978,
     "Net::setPacketByte(u32,u8)": 0x0200E9AC,
     "Net::getPacketTick(u16)": 0x0200E9BC,

@@ -76,6 +76,8 @@ Local MPの2 EmuInstance * 2プロセス構成を最終形として伸ばす方�
 | `Net::getRandom()` | `0x0200E5A0` | verified |
 | `Net::syncRandomFull()` | `0x0200E5E8` | verified |
 | `Net::syncRandomFast()` | `0x0200E5F4` | verified |
+| `Net::getConsoleTouchPad(u16)` | `0x0200E67C` | candidate |
+| `Net::getConsoleKeys(u16)` | `0x0200E700` | candidate |
 | `Net::getPacketByte(u16,u32)` | `0x0200E978` | candidate |
 | `Net::setPacketByte(u32,u8)` | `0x0200E9AC` | candidate |
 | `Net::getPacketTick(u16)` | `0x0200E9BC` | candidate |
@@ -202,6 +204,8 @@ Local MPの2 EmuInstance * 2プロセス構成を最終形として伸ばす方�
   - host cmd `type=1 len=302` ではoffset `54` と `116` に44 byte packetが現れる。
   - client reply `type=65538 len=106` ではoffset `46` に44 byte packetが現れる。
   - これは「DS無線フレーム全体」ではなく、NSMBのゲームレベルpacketだけを切り出して扱える見込みが出たことを意味する。
+  - 入力は `Net::getConsoleKeys(u16)` がpacket header offset `+2` から読む。`setPacketByte()` が書くfree-byte payloadだけでは不十分で、bridge対象はtick/keys/actionを含むpacket全体として扱う必要がある。
+  - Local MP内では、44 byte payloadの8 byte手前にtick/keys/action相当のheaderがある。例: host cmd payload offset `54` ならfull packet startはoffset `46`、client reply payload offset `46` ならfull packet startはoffset `38`。
 
 ## Debugビルドクラッシュの原因と修正
 
@@ -223,7 +227,7 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 
 ## 次にやること
 
-1. `Net::setPacketByte()` / `Net::getPacketByte()` の入口を使い、44 byteゲームpacketをmelonDS側でcapture/replayできる最小hookを作る。
+1. `Net::getConsoleKeys()` / `Net::setPacketByte()` / `Net::getPacketByte()` の入口を使い、tick/keys/action/free-byte payloadを含むゲームpacketをmelonDS側でcapture/replayできる最小hookを作る。
 2. まず同一プロセス2 EmuInstanceで、Local MP payloadから切り出した44 byte packetをreplay注入できるかを試す。ここが通れば、Local MPを使わない1 DS構成へ進める。
 3. host/clientの2プロセス各1 EmuInstanceで、NSMBのゲームレベルpacketだけをENetで交換する最小bridgeを作る。
 4. WAN向けには、packetのframe index、入力遅延、受信buffer、通信timeout緩和をNSMB patch/hook側で扱う。DS無線フレームそのもののWAN中継は本筋にしない。

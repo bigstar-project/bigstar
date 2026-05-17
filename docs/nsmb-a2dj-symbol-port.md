@@ -38,6 +38,8 @@ Net系の優先関数は、JP RAM上の復号済みARM9コードで先頭命令�
 | `Net::getRandom()` | `0x0200E5A0` | verified | US `0x0200E6F4 - 0x154`; reads `Net::randomCallCount`, `Net::randomBranchAddress`, `Net::random.value` |
 | `Net::syncRandomFull()` | `0x0200E5E8` | verified | veneer to `Net::Core::shareRandomSeed()` |
 | `Net::syncRandomFast()` | `0x0200E5F4` | verified | references `Net::randomShareStep`, `Net::random.value`, `Net::randomCallCount` |
+| `Net::getConsoleTouchPad(u16)` | `0x0200E67C` | candidate | US `0x0200E7D0 - 0x154`; packet input helper |
+| `Net::getConsoleKeys(u16)` | `0x0200E700` | candidate | US `0x0200E854 - 0x154`; reads packet header offset `+2` |
 | `Net::getPacketByte(u16,u32)` | `0x0200E978` | candidate | US `0x0200EACC - 0x154`; byte read from wireless packet buffer |
 | `Net::setPacketByte(u32,u8)` | `0x0200E9AC` | candidate | US `0x0200EB00 - 0x154`; byte write into wireless packet buffer |
 | `Net::getPacketTick(u16)` | `0x0200E9BC` | candidate | US `0x0200EB10 - 0x154`; packet helper |
