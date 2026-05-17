@@ -590,6 +590,7 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
         bool StrictPlayer[2] { true, true };
         u32 StrictStartFrame = 0;
         u32 StrictRequireLead = 0;
+        u32 LookupTickDelay = 0;
         u32 LiveFallbackWindow = 0;
         bool ReturnLookupTick = false;
         bool ReplayOpEnabled[4] { true, true, true, true };
@@ -622,6 +623,8 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
                 cfg.StrictStartFrame = static_cast<u32>(strtoul(strictStartFrame, nullptr, 0));
             if (const char* strictRequireLead = getenv("MELONDS_NSML_PACKET_REPLAY_STRICT_REQUIRE_LEAD"))
                 cfg.StrictRequireLead = static_cast<u32>(strtoul(strictRequireLead, nullptr, 0));
+            if (const char* lookupTickDelay = getenv("MELONDS_NSML_PACKET_REPLAY_LOOKUP_TICK_DELAY"))
+                cfg.LookupTickDelay = static_cast<u32>(strtoul(lookupTickDelay, nullptr, 0));
             if (const char* liveFallbackWindow = getenv("MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW"))
                 cfg.LiveFallbackWindow = static_cast<u32>(strtoul(liveFallbackWindow, nullptr, 0));
             cfg.ReturnLookupTick = getenv("MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK") != nullptr;
@@ -730,7 +733,8 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
     if (cfg.Strict && cpu->NDS.NumFrames < cfg.StrictStartFrame)
         return false;
 
-    const u32 tick = NSMLPacketBridgeCanonicalTick(cpu->NDS);
+    const u32 currentTick = NSMLPacketBridgeCanonicalTick(cpu->NDS);
+    const u32 tick = (currentTick - cfg.LookupTickDelay) & 0xFFFF;
     if (NSMLPacketBridgeEnabled())
         NSMLWriteLiveReplayPacketsToLocalMPSlots(cpu->NDS, tick, cfg.LiveFallbackWindow, cfg.ReturnLookupTick);
     u32 value = 0;

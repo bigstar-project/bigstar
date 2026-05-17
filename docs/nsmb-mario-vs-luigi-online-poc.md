@@ -15,6 +15,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - 上記の `disconnect skip + transferPacket result=8` ルートでは、黒画面・abort・明示的な切断表示なしで 4200/5520/6600 frame まで到達できる。
 - `ForceTick` を RAM 書き込みだけでなく packet生成/replay 側の canonical tick として使う修正により、同一 frame で host/client が読む replay tick は一致するようになった。
 - `-NetRandomValue 0x00000100 -NetRandomAuto` で両プロセスに同じ `Net::random.value` を入れられるようにした。固定RNG自体は star/RNG 一致に効く。
+- `-PacketBridgeLookupTickDelay` を追加し、replay が現在tickではなく指定tick数前の packet を読む実験ができるようにした。
 - ただし movement 入力を入れると host/client の player 座標や global hash はまだズレる。現時点の主 blocker は「黒画面」ではなく、DropMP 後に必要な remote packet が同じ simulation frame の replay までに届いている保証がないこと。
 
 ## 実装済み
@@ -29,6 +30,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - transfer 成功強制: `-PacketBridgeForceTransferResult`, `-PacketBridgeForceTransferStartFrame`, `-PacketBridgeForceTransferResultValue`。
   - 進行差制限: `-PacketBridgeMaxFrameLead`, `-PacketBridgeThrottleTimeoutMs`。
   - RNG固定: `-NetRandomValue`, `-NetRandomFrame`, `-NetRandomAuto`。
+  - replay tick delay: `-PacketBridgeLookupTickDelay`。
 - melonDS hook
   - `Net::getConsoleKeys()` / `Net::getPacketByte()` / `Net::getPacketTick()` / `Net::getPacketAction()` の packet replay。
   - `Net::update()` disconnect branch skip。
@@ -73,6 +75,10 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - `-NetRandomValue 0x00000100 -NetRandomAuto` あり。
   - 4200 frame 到達、host/client の star と RNG は一致。
   - no framelead では host 側が client packet を replay 時点で受け取れず、host の player1 hit が 0 になる frame がある。
+- `logs\lan-route-4200-dropmp3600-force-transfer8-canonicaltick-fixedrng100-lookupdelay240-attempt1`
+  - lookup delay 240 tick あり。
+  - 4200 frame 到達。
+  - no framelead では host が client より大きく先行するため、delay しても host 側の player1 packet miss は解消しない。
 - `logs\lan-route-6600-dropmp3600-force-transfer8-movement-framelead60-attempt1`
   - movement 入力あり。
   - 6600 frame 到達、黒画面・abort・peer disconnect なし。
@@ -85,6 +91,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `force-active` mode で `0x02087E20=0x0004` を戻すと、一部 packet 呼び出しは戻るが黒画面に落ちる。
 - 単純な frame lead throttle は速度差を抑えられるが、同一 frame での状態一致までは保証しない。
 - `fixedrng100 + framelead60` は client が 3578 frame 付近で止まり、host が frame throttle timeout を繰り返した。固定RNG自体ではなく、待つ位置と進行制御の設計が悪い可能性が高い。
+- `fixedrng100 + framelead60/300` は trace有無に関係なく timeout しやすい。client が 3580 frame 前後で進まず、host は remoteFrame が更新されないまま throttle timeout を繰り返す。現行の framelead throttle は DropMP 後の同期制御として不適切。
 
 ## 次にやること
 
