@@ -209,10 +209,88 @@ static bool HandleNSMLNetDisconnectBypass(ARM* cpu, u32 instrAddr)
     return false;
 }
 
+static u32 NSMLPacketBridgeEnvFrame(const char* name, u32 fallback)
+{
+    if (const char* value = getenv(name))
+        return static_cast<u32>(strtoul(value, nullptr, 0));
+    return fallback;
+}
+
+static u32 NSMLPacketBridgeCanonicalTick(NDS& nds)
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK") ? 1 : 0;
+    if (!enabled || !NSMLPacketBridgeEnabled())
+        return nds.ARM9Read16(0x02087F00);
+
+    static u32 startFrame = 0xFFFFFFFF;
+    if (startFrame == 0xFFFFFFFF)
+        startFrame = NSMLPacketBridgeEnvFrame("MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME", 0);
+    if (nds.NumFrames < startFrame)
+        return nds.ARM9Read16(0x02087F00);
+
+    static int baseSet = -1;
+    static u32 base = 0;
+    if (baseSet < 0)
+    {
+        if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE"))
+        {
+            base = static_cast<u32>(strtoul(value, nullptr, 0));
+            baseSet = 1;
+        }
+        else
+        {
+            baseSet = 0;
+        }
+    }
+
+    if (!baseSet)
+        return nds.ARM9Read16(0x02087F00);
+
+    return (base + (nds.NumFrames - startFrame)) & 0xFFFF;
+}
+
+static bool HandleNSMLTransferPacketBypass(ARM* cpu, u32 instrAddr)
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT") ? 1 : 0;
+    if (!enabled || !cpu || cpu->Num != 0 || instrAddr != 0x0200F98C)
+        return false;
+    if (!NSMLPacketBridgeEnabled() || !IsNSMLMarioVsLuigiGameplay(cpu->NDS))
+        return false;
+
+    static u32 startFrame = 0xFFFFFFFF;
+    if (startFrame == 0xFFFFFFFF)
+        startFrame = NSMLPacketBridgeEnvFrame("MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_START_FRAME", 0);
+    if (cpu->NDS.NumFrames < startFrame)
+        return false;
+
+    static u32 result = 0xFFFFFFFF;
+    if (result == 0xFFFFFFFF)
+        result = NSMLPacketBridgeEnvFrame("MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT_VALUE", 8);
+
+    static int logCount = 0;
+    if (logCount < 16)
+    {
+        printf("NSMB PacketBridge: force transferPacket result at %08X frame=%u lr=%08X result=0x%08X\n",
+            instrAddr,
+            cpu->NDS.NumFrames,
+            cpu->R[14],
+            result);
+        logCount++;
+    }
+
+    cpu->R[0] = result;
+    cpu->JumpTo(cpu->R[14]);
+    return true;
+}
+
 static void BuildNSMLMarioVsLuigiPacket(NDS& nds, std::array<u8, 52>& packet, u32& tick, u32& keys)
 {
     packet.fill(0);
-    tick = nds.ARM9Read16(0x02087F00);
+    tick = NSMLPacketBridgeCanonicalTick(nds);
     keys = nds.ARM9Read16(0x02087F02);
     packet[0] = static_cast<u8>(tick & 0xFF);
     packet[1] = static_cast<u8>((tick >> 8) & 0xFF);
@@ -652,7 +730,7 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
     if (cfg.Strict && cpu->NDS.NumFrames < cfg.StrictStartFrame)
         return false;
 
-    const u32 tick = cpu->NDS.ARM9Read16(0x02087F00);
+    const u32 tick = NSMLPacketBridgeCanonicalTick(cpu->NDS);
     if (NSMLPacketBridgeEnabled())
         NSMLWriteLiveReplayPacketsToLocalMPSlots(cpu->NDS, tick, cfg.LiveFallbackWindow, cfg.ReturnLookupTick);
     u32 value = 0;
@@ -793,17 +871,16 @@ static void TraceNSMLPacketCapture(ARM* cpu, u32 instrAddr)
     if (!IsNSMLMarioVsLuigiGameplay(cpu->NDS))
         return;
 
-    const u32 tick = cpu->NDS.ARM9Read16(0x02087F00);
-    const void* ndsKey = static_cast<const void*>(&cpu->NDS);
-    auto last = cfg.LastTickByNDS.find(const_cast<void*>(ndsKey));
-    if (last != cfg.LastTickByNDS.end() && last->second == tick)
-        return;
-    cfg.LastTickByNDS[const_cast<void*>(ndsKey)] = tick;
-
     std::array<u8, 52> packet {};
     u32 builtTick = 0;
     u32 keys = 0;
     BuildNSMLMarioVsLuigiPacket(cpu->NDS, packet, builtTick, keys);
+
+    const void* ndsKey = static_cast<const void*>(&cpu->NDS);
+    auto last = cfg.LastTickByNDS.find(const_cast<void*>(ndsKey));
+    if (last != cfg.LastTickByNDS.end() && last->second == builtTick)
+        return;
+    cfg.LastTickByNDS[const_cast<void*>(ndsKey)] = builtTick;
 
     if (cfg.BridgeEnabled)
     {
@@ -1700,6 +1777,11 @@ void ARMv5::Execute()
                     GdbCheckC();
                 const u32 instrAddr = R[15] - 2;
                 TraceNSMLPacketCapture(this, instrAddr);
+                if (HandleNSMLTransferPacketBypass(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
                 if (HandleNSMLNetDisconnectBypass(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;
@@ -1734,6 +1816,11 @@ void ARMv5::Execute()
                     GdbCheckC();
                 const u32 instrAddr = R[15] - 4;
                 TraceNSMLPacketCapture(this, instrAddr);
+                if (HandleNSMLTransferPacketBypass(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
                 if (HandleNSMLNetDisconnectBypass(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;

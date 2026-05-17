@@ -42,6 +42,12 @@ param(
     [switch]$PacketBridgeBypassNetDisconnect,
     [int]$PacketBridgeBypassNetDisconnectStartFrame = 0,
     [string]$PacketBridgeBypassNetDisconnectMode = "skip",
+    [switch]$PacketBridgeForceTransferResult,
+    [int]$PacketBridgeForceTransferStartFrame = 0,
+    [int]$PacketBridgeForceTransferResultValue = 8,
+    [string]$NetRandomValue = "",
+    [int]$NetRandomFrame = 0,
+    [switch]$NetRandomAuto,
     [int]$PacketBridgeMaxTickLead = -1,
     [int]$PacketBridgeMaxFrameLead = -1,
     [int]$PacketBridgeThrottleTimeoutMs = 5000,
@@ -211,6 +217,19 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_LANMP_TRACE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_LANMP_TRACE_DUMP_LEN -ErrorAction SilentlyContinue
     }
+    if ($NetRandomValue) {
+        $env:MELONDS_NSML_NET_RANDOM_VALUE = $NetRandomValue
+        $env:MELONDS_NSML_NET_RANDOM_FRAME = "$NetRandomFrame"
+        if ($NetRandomAuto) {
+            $env:MELONDS_NSML_NET_RANDOM_AUTO = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_NET_RANDOM_AUTO -ErrorAction SilentlyContinue
+        }
+    } else {
+        Remove-Item Env:\MELONDS_NSML_NET_RANDOM_VALUE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_NET_RANDOM_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_NET_RANDOM_AUTO -ErrorAction SilentlyContinue
+    }
     if ($PacketReplayFile) {
         $env:MELONDS_NSML_PACKET_REPLAY_FILE = (Resolve-Path $PacketReplayFile).Path
         $env:MELONDS_NSML_PACKET_REPLAY_LOG = "$Stdout.packet-replay.csv"
@@ -296,6 +315,21 @@ function Start-MelonLANProcess {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT_MODE -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT_START_FRAME -ErrorAction SilentlyContinue
+        }
+        if ($PacketBridgeForceTransferResult) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT = "1"
+            if ($PacketBridgeForceTransferStartFrame -gt 0) {
+                $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_START_FRAME = "$PacketBridgeForceTransferStartFrame"
+            } elseif ($DropMPAfterFrame -gt 0) {
+                $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_START_FRAME = "$DropMPAfterFrame"
+            } else {
+                Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_START_FRAME -ErrorAction SilentlyContinue
+            }
+            $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT_VALUE = "$PacketBridgeForceTransferResultValue"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_START_FRAME -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT_VALUE -ErrorAction SilentlyContinue
         }
         if ($PacketBridgeMaxTickLead -ge 0) {
             $env:MELONDS_NSML_PACKET_BRIDGE_MAX_TICK_LEAD = "$PacketBridgeMaxTickLead"
@@ -397,8 +431,14 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT_MODE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT_VALUE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAX_TICK_LEAD -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_THROTTLE_TIMEOUT_MS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_NET_RANDOM_VALUE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_NET_RANDOM_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_NET_RANDOM_AUTO -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT_START_FRAME -ErrorAction SilentlyContinue
