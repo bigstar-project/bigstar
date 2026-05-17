@@ -133,6 +133,22 @@ bool NSML_TakeMarioVsLuigiLocalPacket(NDS* nds, u8 outPacket[52], u32* outTick, 
     return true;
 }
 
+bool NSML_BuildMarioVsLuigiLocalPacket(NDS* nds, u8 outPacket[52], u32* outTick, u32* outKeys)
+{
+    if (!nds || !outPacket || !IsNSMLMarioVsLuigiGameplay(*nds))
+        return false;
+
+    std::array<u8, 52> packet {};
+    u32 tick = 0;
+    u32 keys = 0;
+    BuildNSMLMarioVsLuigiPacket(*nds, packet, tick, keys);
+
+    memcpy(outPacket, packet.data(), packet.size());
+    if (outTick) *outTick = tick;
+    if (outKeys) *outKeys = keys;
+    return true;
+}
+
 void NSML_PushMarioVsLuigiRemotePacket(NDS* nds, u32 player, const u8 packet[52])
 {
     if (!nds || !packet || player > 1)
@@ -236,6 +252,7 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
         bool StrictPlayer[2] { true, true };
         u32 StrictStartFrame = 0;
         u32 StrictRequireLead = 0;
+        u32 LiveFallbackWindow = 0;
         FILE* LogFile = nullptr;
         std::map<u32, NSMLPacketReplayEntry> Packets;
     };
@@ -265,6 +282,8 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
                 cfg.StrictStartFrame = static_cast<u32>(strtoul(strictStartFrame, nullptr, 0));
             if (const char* strictRequireLead = getenv("MELONDS_NSML_PACKET_REPLAY_STRICT_REQUIRE_LEAD"))
                 cfg.StrictRequireLead = static_cast<u32>(strtoul(strictRequireLead, nullptr, 0));
+            if (const char* liveFallbackWindow = getenv("MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW"))
+                cfg.LiveFallbackWindow = static_cast<u32>(strtoul(liveFallbackWindow, nullptr, 0));
             const char* path = getenv("MELONDS_NSML_PACKET_REPLAY_FILE");
             const bool bridgeEnabled = NSMLPacketBridgeEnabled();
             if (const char* logPath = getenv("MELONDS_NSML_PACKET_REPLAY_LOG"))
@@ -361,6 +380,21 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
                 {
                     selectedPacket = liveIt->second.Packet[player];
                     packetValid = true;
+                }
+                else if (cfg.LiveFallbackWindow > 0)
+                {
+                    const u32 window = std::min<u32>(cfg.LiveFallbackWindow, 120);
+                    for (u32 age = 1; age <= window; age++)
+                    {
+                        const u32 fallbackTick = (tick - age) & 0xFFFF;
+                        auto fallbackIt = ndsIt->second.find(fallbackTick);
+                        if (fallbackIt != ndsIt->second.end() && fallbackIt->second.Valid[player])
+                        {
+                            selectedPacket = fallbackIt->second.Packet[player];
+                            packetValid = true;
+                            break;
+                        }
+                    }
                 }
             }
         }
