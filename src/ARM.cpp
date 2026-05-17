@@ -253,6 +253,8 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
         u32 StrictStartFrame = 0;
         u32 StrictRequireLead = 0;
         u32 LiveFallbackWindow = 0;
+        bool ReturnLookupTick = false;
+        bool ReplayOpEnabled[4] { true, true, true, true };
         FILE* LogFile = nullptr;
         std::map<u32, NSMLPacketReplayEntry> Packets;
     };
@@ -284,6 +286,24 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
                 cfg.StrictRequireLead = static_cast<u32>(strtoul(strictRequireLead, nullptr, 0));
             if (const char* liveFallbackWindow = getenv("MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW"))
                 cfg.LiveFallbackWindow = static_cast<u32>(strtoul(liveFallbackWindow, nullptr, 0));
+            cfg.ReturnLookupTick = getenv("MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK") != nullptr;
+            if (const char* replayOps = getenv("MELONDS_NSML_PACKET_REPLAY_OPS"))
+            {
+                cfg.ReplayOpEnabled[0] = false;
+                cfg.ReplayOpEnabled[1] = false;
+                cfg.ReplayOpEnabled[2] = false;
+                cfg.ReplayOpEnabled[3] = false;
+                char buf[64];
+                strncpy(buf, replayOps, sizeof(buf) - 1);
+                buf[sizeof(buf) - 1] = '\0';
+                for (char* tok = strtok(buf, ", \t\r\n"); tok; tok = strtok(nullptr, ", \t\r\n"))
+                {
+                    if (!_stricmp(tok, "keys")) cfg.ReplayOpEnabled[0] = true;
+                    else if (!_stricmp(tok, "byte")) cfg.ReplayOpEnabled[1] = true;
+                    else if (!_stricmp(tok, "tick")) cfg.ReplayOpEnabled[2] = true;
+                    else if (!_stricmp(tok, "action")) cfg.ReplayOpEnabled[3] = true;
+                }
+            }
             const char* path = getenv("MELONDS_NSML_PACKET_REPLAY_FILE");
             const bool bridgeEnabled = NSMLPacketBridgeEnabled();
             if (const char* logPath = getenv("MELONDS_NSML_PACKET_REPLAY_LOG"))
@@ -357,6 +377,14 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
     else
         return false;
 
+    const int opIndex =
+        op == Op::Keys ? 0 :
+        op == Op::Byte ? 1 :
+        op == Op::Tick ? 2 :
+        op == Op::Action ? 3 : -1;
+    if (opIndex < 0 || !cfg.ReplayOpEnabled[opIndex])
+        return false;
+
     const u32 player = cpu->R[0] & 0xFFFF;
     const u32 offset = cpu->R[1];
     if (!IsNSMLMarioVsLuigiGameplay(cpu->NDS))
@@ -427,7 +455,7 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
             }
             break;
         case Op::Tick:
-            value = packet[0] | (packet[1] << 8);
+            value = cfg.ReturnLookupTick ? tick : (packet[0] | (packet[1] << 8));
             hit = true;
             break;
         case Op::Action:

@@ -7,6 +7,7 @@ param(
     [switch]$GameStateTrace,
     [int]$GameStateTraceInterval = 60,
     [switch]$GameStateTraceExtended,
+    [int]$ScreenshotInterval = 600,
     [string]$RamDumpFrames = "",
     [int]$RamDumpInterval = 0,
     [switch]$LanMPTrace,
@@ -27,6 +28,8 @@ param(
     [int]$PacketBridgeStrictStartFrame = 0,
     [int]$PacketBridgeStrictRequireLead = 0,
     [int]$PacketBridgeLiveFallbackWindow = 0,
+    [switch]$PacketBridgeReplayReturnLookupTick,
+    [string]$PacketBridgeReplayOps = "",
     [switch]$PacketBridgeDirectCapture,
     [switch]$PacketBridgeForceTick,
     [int]$PacketBridgeForceTickStartFrame = 0,
@@ -34,6 +37,7 @@ param(
     [int]$PacketBridgeThrottleTimeoutMs = 5000,
     [int]$DropMPAfterFrame = 0,
     [int]$HostStartupDelayMs = 1000,
+    [switch]$SkipDisconnectScreenshotCheck,
     [string]$LogDir = "logs\nsmb-mvl-lan-route"
 )
 
@@ -140,7 +144,7 @@ function Start-MelonLANProcess {
     $env:MELONDS_NSML_HASH_LOG = $HashLog
     $env:MELONDS_NSML_HASH_INTERVAL = "300"
     $env:MELONDS_NSML_SCREENSHOT_DIR = $ScreenshotDir
-    $env:MELONDS_NSML_SCREENSHOT_INTERVAL = "600"
+    $env:MELONDS_NSML_SCREENSHOT_INTERVAL = "$ScreenshotInterval"
     if ($GameStateTrace) {
         $env:MELONDS_NSML_GAME_STATE_TRACE = $GameStateTracePath
         $env:MELONDS_NSML_GAME_STATE_TRACE_INTERVAL = "$GameStateTraceInterval"
@@ -250,6 +254,16 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW -ErrorAction SilentlyContinue
         }
+        if ($PacketBridgeReplayReturnLookupTick) {
+            $env:MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK -ErrorAction SilentlyContinue
+        }
+        if ($PacketBridgeReplayOps) {
+            $env:MELONDS_NSML_PACKET_REPLAY_OPS = $PacketBridgeReplayOps
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_OPS -ErrorAction SilentlyContinue
+        }
         Remove-Item Env:\MELONDS_NSML_WAIT_FOR_PEER -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SEED_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
         if ($PacketBridgeStartFrame -gt 0) {
@@ -294,6 +308,8 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT_REQUIRE_LEAD -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_OPS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_TRACE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WAIT_FOR_PEER -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SEED_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
@@ -410,6 +426,59 @@ foreach ($screenDir in @($hostScreens, $clientScreens)) {
     $screens = Get-ChildItem $screenDir -Filter "inst0_*.png" -ErrorAction SilentlyContinue
     if (-not $screens) {
         throw "expected screenshots in $screenDir"
+    }
+}
+
+function Test-DisconnectLikeScreenshot {
+    param([string]$Path)
+
+    Add-Type -AssemblyName System.Drawing
+    $bitmap = [System.Drawing.Bitmap]::FromFile($Path)
+    try {
+        $sampleCount = 0
+        $blackCount = 0
+        $brightCount = 0
+        for ($y = 0; $y -lt $bitmap.Height; $y += 4) {
+            for ($x = 0; $x -lt $bitmap.Width; $x += 4) {
+                $pixel = $bitmap.GetPixel($x, $y)
+                $sampleCount++
+                if ($pixel.R -lt 18 -and $pixel.G -lt 18 -and $pixel.B -lt 18) {
+                    $blackCount++
+                } elseif ($pixel.R -gt 150 -and $pixel.G -gt 150 -and $pixel.B -gt 150) {
+                    $brightCount++
+                }
+            }
+        }
+
+        if ($sampleCount -eq 0) {
+            return $false
+        }
+
+        $blackRatio = $blackCount / $sampleCount
+        $brightRatio = $brightCount / $sampleCount
+        return ($blackRatio -gt 0.82 -and $brightRatio -gt 0.004 -and $brightRatio -lt 0.20)
+    } finally {
+        $bitmap.Dispose()
+    }
+}
+
+if (-not $SkipDisconnectScreenshotCheck) {
+    foreach ($screenDir in @($hostScreens, $clientScreens)) {
+        $screens = Get-ChildItem $screenDir -Filter "inst0_frame*.png" -ErrorAction SilentlyContinue
+        foreach ($screen in $screens) {
+            if ($screen.Name -notmatch "frame(\d+)\.png") {
+                continue
+            }
+
+            $frame = [int]$matches[1]
+            if ($frame -lt 3000) {
+                continue
+            }
+
+            if (Test-DisconnectLikeScreenshot -Path $screen.FullName) {
+                throw "disconnect-like screenshot detected at frame=${frame}: $($screen.FullName)"
+            }
+        }
     }
 }
 

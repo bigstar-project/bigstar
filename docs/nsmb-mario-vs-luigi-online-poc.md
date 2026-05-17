@@ -45,6 +45,12 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード�
   - `MELONDS_NSML_PACKET_BRIDGE_MAX_TICK_LEAD`
   - `MELONDS_NSML_PACKET_BRIDGE_THROTTLE_TIMEOUT_MS`
   - `MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW`
+  - `MELONDS_NSML_PACKET_REPLAY_OPS`
+  - `MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK`
+- smoke script の視覚検証を強化済み。
+  - post-start screenshot から黒背景 + 白文字の「通信が切断されました」画面を検出し、成功扱いしない。
+  - `-ScreenshotInterval` でスクリーンショット間隔を細かくできる。
+  - `-SkipDisconnectScreenshotCheck` は調査用にだけ使う。
 
 ## 直近の検証結果
 
@@ -62,40 +68,44 @@ cmake --build build\debug-windows-x86_64 --target melonDS --config Debug
 
 結果: pass。
 
-MP drop 後の packet bridge 継続検証:
+MP drop 後の packet bridge 継続検証として以前使っていたコマンド:
 
 ```powershell
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 7200 -HostStartupDelayMs 50 -LogDir logs\lan-route-7200-live-packet-bridge-dropmp3100-forcetick-direct-throttle4-fallback8 -GameStateTrace -GameStateTraceInterval 120 -PacketBridge -PacketBridgeTrace -PacketBridgeStartFrame 3000 -HostPacketBridgeReplayTickOffset 3 -ClientPacketBridgeReplayTickOffset 2 -PacketBridgeStrictRemote -PacketBridgeStrictRequireLead 3 -PacketBridgeLiveFallbackWindow 8 -DropMPAfterFrame 3100 -PacketBridgeDirectCapture -PacketBridgeForceTick -PacketBridgeForceTickStartFrame 3100 -PacketBridgeMaxTickLead 4 -PacketBridgeThrottleTimeoutMs 5000
 ```
 
-結果:
+現在の評価:
 
-- smoke pass。
-- frame 3100 以降に MP send/recv を止めても、packet tick は停止せず 7200 frame まで進行。
-- 終盤 20000 replay log 行で remote player の replay miss は host/client とも 0。
-  - host remote player 1: hits 4865 / miss 0
-  - client remote player 0: hits 4849 / miss 0
-- host/client とも最終 frame 7200 で `stageGroup=0x9`, `vsMode=0x1` を維持。
-
-重要な解釈:
-
-- 以前の `DropMPAfterFrame 3100` では画面状態は維持しても `0x02087F00` packet tick が止まっていた。
-- 今回の direct capture + force tick + tick lead throttle + live fallback により、少なくともテストハーネス上では MP 停止後も remote packet replay が継続できる状態まで進んだ。
-- ただし、まだ LAN MPInterface で Mario vs Luigi 到達後に MP を drop する検証であり、完全な LAN-free 起動・WAN 対戦完成ではない。
+- この検証は、視覚検証を入れる前は pass 扱いになっていたが、実際には「通信が切断されました」画面になっていたため成功ではない。
+- 細かい screenshot 検証では、`PacketBridgeStrictRemote` を有効にすると host/client とも frame 3060 で切断画面に入る。
+- `DropMPAfterFrame 3100` より前に切断しているため、現時点の主因は MP drop ではなく strict replay の remote packet 差し替え。
+- packet bridge を動かすだけで strict replay しない場合は、3300 frame まで切断しない。ただしその場合は `getPacket*` の実戻り値は元のLAN処理に任せているため、bridgeがゲーム状態へ影響しているわけではない。
+- `getPacketTick()` にpacket内tickではなくlookup tickを返す実験も、frame 3060 の切断を解消しなかった。
+- op別切り分け結果:
+  - `keys` のみ strict replay: 3300 frame まで切断なし。
+  - `byte` のみ strict replay: 3300 frame まで切断なし。
+  - `action` のみ strict replay: 3300 frame まで切断なし。
+  - `tick` のみ strict replay: frame 3060 で切断。
+  - `tick` のみ + lookup tick返却: frame 3060 で切断。
+  - `keys,byte,action` strict replay、tickは元処理: 4200 frame まで切断なし。
+  - `keys,byte,action` strict replay + `DropMPAfterFrame 3100`: frame 3360 で切断。
 
 ## 現在の課題
 
+- strict replay で差し替えている live bridge packet が、NSMB が実LAN時に remote slot として読んでいる値と一致していない可能性が高い。
+- `Net::getPacketTick()` は単純な戻り値hookでは代替できていない。tick helperの戻り値だけでなく、LAN/recv sequencer側の内部状態更新が通信継続判定に関わっている可能性が高い。
+- MP drop後は、tickをhookしない構成でも切断する。LAN側のrecv副作用、最終受信時刻、ack/sequence更新などを別途再現する必要がある。
+- `stageGroup=0x9` / `vsMode=0x1` は切断画面でもRAMに残ることがあるため、成功判定には使えるが十分ではない。スクリーンショット検証が必須。
 - direct capture + force tick はまだ実験的。NSMB 本来の `Net::updatePacket()` / `processSendPacket()` / `processRecvPacket()` の副作用を完全に代替できているかは未確定。
-- replay fallback は短時間の jitter/offset 吸収には効くが、packet が古すぎる場合の挙動や実プレイ入力での影響は未検証。
-- 現在は LAN MPInterface で対戦状態に入った後に MP を drop している。次は「LAN MP なしで対戦状態を成立・維持できるか」を切り分ける必要がある。
+- 現在は LAN MPInterface で対戦状態に入った後に packet replay を試している。次は「live bridge packet」と「実LANでhost/clientが見ているremote slot」の一致確認が必要。
 - Star / 8コイン item / ランダム stage などのランダム要素は、最終的には同じ seed と同じ packet/tick 進行で一致させる必要がある。
 
 ## 次にやること
 
-1. MP drop 後の replay hit だけでなく、remote player の座標・アニメーション・スター取得など、ゲーム上重要な状態が自然に進むかを検証する。
-2. `processRecvPacket()` 側の副作用候補を追い、現在の replay hook だけで不足しているゲーム状態更新がないか調べる。
-3. LAN MP で到達した直後に drop する段階から、drop frame をさらに早めて、どの初期化処理が必須かを特定する。
-4. 最終的に、1 EmuInstance * 2PC で LAN MPInterface に依存しない packet bridge test route を作る。
+1. `Net::getPacketTick()` の呼び出し元と戻り値利用箇所を追い、どの条件で切断判定に入るか特定する。
+2. `processRecvPacket()` / recv sequencer / ack / last receive tick らしき状態を追い、MP drop後に止まる必須副作用を見つける。
+3. strict replay時のlive bridge packetと、実LAN時に `getPacket*` が読むremote slot値を比較する。
+4. 切断画面検出を常に通した上で、LAN MPInterface依存を減らす packet bridge route を再設計する。
 
 ## よく使うコマンド
 
