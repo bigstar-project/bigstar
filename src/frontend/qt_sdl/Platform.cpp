@@ -469,44 +469,96 @@ void MP_End(void* userdata)
     MPInterface::Get().End(inst);
 }
 
+static bool NSML_DropMPForTest(void* userdata)
+{
+    struct DropMPConfig
+    {
+        bool Checked = false;
+        bool Enabled = false;
+        u32 Frame = 0;
+    };
+
+    static DropMPConfig cfg;
+    if (!cfg.Checked)
+    {
+        if (const char* frame = getenv("MELONDS_NSML_DROP_MP_AFTER_FRAME"))
+        {
+            cfg.Frame = static_cast<u32>(strtoul(frame, nullptr, 0));
+            cfg.Enabled = cfg.Frame > 0;
+        }
+        cfg.Checked = true;
+    }
+
+    if (!cfg.Enabled || !userdata)
+        return false;
+
+    EmuInstance* inst = static_cast<EmuInstance*>(userdata);
+    auto* nds = inst->getNDS();
+    if (!nds)
+        return false;
+
+    return nds->NumFrames >= cfg.Frame;
+}
+
 int MP_SendPacket(u8* data, int len, u64 timestamp, void* userdata)
 {
+    if (NSML_DropMPForTest(userdata))
+        return 0;
+
     int inst = ((EmuInstance*)userdata)->getInstanceID();
     return MPInterface::Get().SendPacket(inst, data, len, timestamp);
 }
 
 int MP_RecvPacket(u8* data, u64* timestamp, void* userdata)
 {
+    if (NSML_DropMPForTest(userdata))
+        return 0;
+
     int inst = ((EmuInstance*)userdata)->getInstanceID();
     return MPInterface::Get().RecvPacket(inst, data, timestamp);
 }
 
 int MP_SendCmd(u8* data, int len, u64 timestamp, void* userdata)
 {
+    if (NSML_DropMPForTest(userdata))
+        return 0;
+
     int inst = ((EmuInstance*)userdata)->getInstanceID();
     return MPInterface::Get().SendCmd(inst, data, len, timestamp);
 }
 
 int MP_SendReply(u8* data, int len, u64 timestamp, u16 aid, void* userdata)
 {
+    if (NSML_DropMPForTest(userdata))
+        return 0;
+
     int inst = ((EmuInstance*)userdata)->getInstanceID();
     return MPInterface::Get().SendReply(inst, data, len, timestamp, aid);
 }
 
 int MP_SendAck(u8* data, int len, u64 timestamp, void* userdata)
 {
+    if (NSML_DropMPForTest(userdata))
+        return 0;
+
     int inst = ((EmuInstance*)userdata)->getInstanceID();
     return MPInterface::Get().SendAck(inst, data, len, timestamp);
 }
 
 int MP_RecvHostPacket(u8* data, u64* timestamp, void* userdata)
 {
+    if (NSML_DropMPForTest(userdata))
+        return 0;
+
     int inst = ((EmuInstance*)userdata)->getInstanceID();
     return MPInterface::Get().RecvHostPacket(inst, data, timestamp);
 }
 
 u16 MP_RecvReplies(u8* data, u64 timestamp, u16 aidmask, void* userdata)
 {
+    if (NSML_DropMPForTest(userdata))
+        return 0;
+
     int inst = ((EmuInstance*)userdata)->getInstanceID();
     return MPInterface::Get().RecvReplies(inst, data, timestamp, aidmask);
 }

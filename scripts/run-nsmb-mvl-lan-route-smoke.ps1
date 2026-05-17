@@ -26,6 +26,7 @@ param(
     [switch]$PacketBridgeStrictRemote,
     [int]$PacketBridgeStrictStartFrame = 0,
     [int]$PacketBridgeStrictRequireLead = 0,
+    [int]$DropMPAfterFrame = 0,
     [int]$HostStartupDelayMs = 1000,
     [string]$LogDir = "logs\nsmb-mvl-lan-route"
 )
@@ -265,6 +266,11 @@ function Start-MelonLANProcess {
     }
     $env:MELONDS_NSML_FIXED_RTC = "2020-01-01T00:00:00"
     $env:MELONDS_NSML_DISABLE_JIT = "1"
+    if ($DropMPAfterFrame -gt 0) {
+        $env:MELONDS_NSML_DROP_MP_AFTER_FRAME = "$DropMPAfterFrame"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_DROP_MP_AFTER_FRAME -ErrorAction SilentlyContinue
+    }
     $env:MELONDS_NSML_MP_INTERFACE = "lan"
     $env:MELONDS_NSML_LAN_ROLE = $Role
     $env:MELONDS_NSML_LAN_PLAYERS = "2"
