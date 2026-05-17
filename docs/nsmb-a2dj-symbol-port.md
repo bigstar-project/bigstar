@@ -25,6 +25,10 @@ Net系の優先関数は、JP RAM上の復号済みARM9コードで先頭命令�
 | `Net::marker` | `0x0208806C` | candidate | US `0x02088A4C - 0x9E0` |
 | `Net::randomShareStep` | `0x02088070` | candidate | US `0x02088A50 - 0x9E0` |
 | `Net::random.value` | `0x02088088` | candidate | US `0x02088A68 - 0x9E0`; same value on inst0/inst1 at frame 5000 |
+| `Net::packetFreeBytesRecvBitmap` | `0x020880A4` | candidate | US `0x02088A84 - 0x9E0`; packet API trace target |
+| `Net::packetFreeBytes` | `0x020880B4` | candidate | US `0x02088A94 - 0x9E0`; packet API trace target |
+| `Net::packetSequenceBuilder` | `0x020880D4` | candidate | US `0x02088AB4 - 0x9E0`; packet API trace target |
+| `Net::packetSequencers` | `0x020880FC` | candidate | US `0x02088ADC - 0x9E0`; packet API trace target |
 
 ## A2DJ Priority Functions
 
@@ -34,6 +38,11 @@ Net系の優先関数は、JP RAM上の復号済みARM9コードで先頭命令�
 | `Net::getRandom()` | `0x0200E5A0` | verified | US `0x0200E6F4 - 0x154`; reads `Net::randomCallCount`, `Net::randomBranchAddress`, `Net::random.value` |
 | `Net::syncRandomFull()` | `0x0200E5E8` | verified | veneer to `Net::Core::shareRandomSeed()` |
 | `Net::syncRandomFast()` | `0x0200E5F4` | verified | references `Net::randomShareStep`, `Net::random.value`, `Net::randomCallCount` |
+| `Net::getPacketByte(u16,u32)` | `0x0200E978` | candidate | US `0x0200EACC - 0x154`; byte read from wireless packet buffer |
+| `Net::setPacketByte(u32,u8)` | `0x0200E9AC` | candidate | US `0x0200EB00 - 0x154`; byte write into wireless packet buffer |
+| `Net::getPacketTick(u16)` | `0x0200E9BC` | candidate | US `0x0200EB10 - 0x154`; packet helper |
+| `Net::getPacketAction(u16)` | `0x0200E9DC` | candidate | US `0x0200EB30 - 0x154`; packet helper |
+| `Net::getPacket(u16)` | `0x0200E9FC` | candidate | US `0x0200EB50 - 0x154`; packet helper |
 | `Net::Core::readUserInfo(MBUserInfo*)` | `0x0200F320` | candidate | Local MP payload/write-watch candidate; US `0x0200F474` |
 | `Net::Core::transferPacket(Net::PacketAction)` | `0x0200F98C` | candidate | Local MP payload/write-watch candidate; US `0x0200FAE0` |
 | `Net::update()` | `0x0200FF40` | candidate | Local MP payload/write-watch candidate; US `0x02010094` |
@@ -41,7 +50,20 @@ Net系の優先関数は、JP RAM上の復号済みARM9コードで先頭命令�
 | `Net::onPacketPollingDefault()` | `0x02010810` | verified | stored in `Net::onPacketPolling` during `setDefaultHandlers()` |
 | `Net::onRenderSignalStrengthDefault()` | `0x02010828` | verified | stored in `Net::onRenderSignalStrength` during `setDefaultHandlers()` |
 | `Net::setDefaultHandlers()` | `0x02010930` | verified | loads `0x02010810`, `0x020173B0`, `0x02010828` and branches through handler setter |
+| `Net::Core::createPacketSequencer(u8**,u8,callback,void*)` | `0x02010D0C` | candidate | US `0x02010E60 - 0x154`; packet sequencer setup target |
+| `Net::Core::readPacketInt(u16,u32)` | `0x02010DAC` | candidate | US `0x02010F00 - 0x154`; packet API trace target |
+| `Net::Core::readPacketByte(u16,u32)` | `0x02010E14` | candidate | US `0x02010F68 - 0x154`; packet API trace target |
+| `Net::Core::writePacketInt(u32,u32)` | `0x02010E4C` | candidate | US `0x02010FA0 - 0x154`; packet API trace target |
+| `Net::Core::writePacketByte(u32,u8)` | `0x02010E80` | candidate | US `0x02010FD4 - 0x154`; packet API trace target |
+| `Net::Core::freePacketBytes(u32,u32)` | `0x02010E90` | candidate | US `0x02010FE4 - 0x154`; packet free-byte management target |
+| `Net::Core::allocPacketBytes(u32)` | `0x02010EBC` | candidate | US `0x02011010 - 0x154`; packet free-byte management target |
 | `Net::Core::shareRandomSeed()` | `0x02010F04` | verified | target of `Net::syncRandomFull()` veneer |
+| `Net::Core::processRecvPacket()` | `0x02011360` | candidate | US `0x020114B4 - 0x154`; receives `Net::sendPacket`-shaped buffer |
+| `Net::Core::processSendPacket()` | `0x02011428` | candidate | US `0x0201157C - 0x154`; sends `Net::sendPacket`-shaped buffer |
+| `Net::Core::clearPacket()` | `0x02011504` | candidate | US `0x02011658 - 0x154`; packet API trace target |
+| `Net::Core::initPacket()` | `0x020115A8` | candidate | US `0x020116FC - 0x154`; packet API trace target |
+| `Net::PacketSequenceBuilder::nextByte()` | `0x0201166C` | candidate | US `0x020117C0 - 0x154`; high-frequency packet sequencer helper |
+| `Net::PacketSequenceBuilder::pushPacket(u8,u8,const u8*)` | `0x02011748` | candidate | US `0x0201189C - 0x154`; packet sequence builder entry |
 
 ## Shift Notes
 

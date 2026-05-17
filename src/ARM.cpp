@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <algorithm>
+#include <mutex>
 #include "NDS.h"
 #include "DSi.h"
 #include "ARM.h"
@@ -35,6 +36,9 @@ namespace melonDS
 {
 using Platform::Log;
 using Platform::LogLevel;
+
+static std::mutex NSMLTraceConfigMutex;
+static std::mutex NSMLTraceOutputMutex;
 
 static bool TraceNSMLRandomCallImpl(ARM* cpu, u32 instrAddr, u32 lr, bool hasLR)
 {
@@ -55,35 +59,39 @@ static bool TraceNSMLRandomCallImpl(ARM* cpu, u32 instrAddr, u32 lr, bool hasLR)
     static RandomTraceConfig cfg;
     if (!cfg.Checked)
     {
-        cfg.Checked = true;
-        cfg.Enabled = getenv("MELONDS_NSML_RANDOM_TRACE") != nullptr;
-        if (const char* addr = getenv("MELONDS_NSML_RANDOM_TRACE_ADDR"))
-            cfg.Addr = static_cast<u32>(strtoul(addr, nullptr, 0));
-        cfg.Addrs[cfg.AddrCount++] = cfg.Addr;
-        if (const char* addrs = getenv("MELONDS_NSML_RANDOM_TRACE_ADDRS"))
+        std::lock_guard<std::mutex> configLock(NSMLTraceConfigMutex);
+        if (!cfg.Checked)
         {
-            char buf[4096];
-            strncpy(buf, addrs, sizeof(buf) - 1);
-            buf[sizeof(buf) - 1] = '\0';
-            for (char* tok = strtok(buf, ", \t\r\n"); tok && cfg.AddrCount < 256; tok = strtok(nullptr, ", \t\r\n"))
-                cfg.Addrs[cfg.AddrCount++] = static_cast<u32>(strtoul(tok, nullptr, 0));
-        }
-        if (const char* randomValueAddr = getenv("MELONDS_NSML_RANDOM_TRACE_VALUE_ADDR"))
-            cfg.RandomValueAddr = static_cast<u32>(strtoul(randomValueAddr, nullptr, 0));
-        if (const char* randomCallCountAddr = getenv("MELONDS_NSML_RANDOM_TRACE_CALLCOUNT_ADDR"))
-            cfg.RandomCallCountAddr = static_cast<u32>(strtoul(randomCallCountAddr, nullptr, 0));
-        if (const char* startFrame = getenv("MELONDS_NSML_RANDOM_TRACE_START_FRAME"))
-            cfg.StartFrame = static_cast<u32>(strtoul(startFrame, nullptr, 0));
-        if (const char* endFrame = getenv("MELONDS_NSML_RANDOM_TRACE_END_FRAME"))
-            cfg.EndFrame = static_cast<u32>(strtoul(endFrame, nullptr, 0));
-        if (const char* logPath = getenv("MELONDS_NSML_RANDOM_TRACE_LOG"))
-        {
-            if (logPath[0])
+            cfg.Enabled = getenv("MELONDS_NSML_RANDOM_TRACE") != nullptr;
+            if (const char* addr = getenv("MELONDS_NSML_RANDOM_TRACE_ADDR"))
+                cfg.Addr = static_cast<u32>(strtoul(addr, nullptr, 0));
+            cfg.Addrs[cfg.AddrCount++] = cfg.Addr;
+            if (const char* addrs = getenv("MELONDS_NSML_RANDOM_TRACE_ADDRS"))
             {
-                cfg.LogFile = fopen(logPath, "w");
-                if (cfg.LogFile)
-                    fprintf(cfg.LogFile, "nds,frame,pc,caller,lr,random_value,random_call_count\n");
+                char buf[4096];
+                strncpy(buf, addrs, sizeof(buf) - 1);
+                buf[sizeof(buf) - 1] = '\0';
+                for (char* tok = strtok(buf, ", \t\r\n"); tok && cfg.AddrCount < 256; tok = strtok(nullptr, ", \t\r\n"))
+                    cfg.Addrs[cfg.AddrCount++] = static_cast<u32>(strtoul(tok, nullptr, 0));
             }
+            if (const char* randomValueAddr = getenv("MELONDS_NSML_RANDOM_TRACE_VALUE_ADDR"))
+                cfg.RandomValueAddr = static_cast<u32>(strtoul(randomValueAddr, nullptr, 0));
+            if (const char* randomCallCountAddr = getenv("MELONDS_NSML_RANDOM_TRACE_CALLCOUNT_ADDR"))
+                cfg.RandomCallCountAddr = static_cast<u32>(strtoul(randomCallCountAddr, nullptr, 0));
+            if (const char* startFrame = getenv("MELONDS_NSML_RANDOM_TRACE_START_FRAME"))
+                cfg.StartFrame = static_cast<u32>(strtoul(startFrame, nullptr, 0));
+            if (const char* endFrame = getenv("MELONDS_NSML_RANDOM_TRACE_END_FRAME"))
+                cfg.EndFrame = static_cast<u32>(strtoul(endFrame, nullptr, 0));
+            if (const char* logPath = getenv("MELONDS_NSML_RANDOM_TRACE_LOG"))
+            {
+                if (logPath[0])
+                {
+                    cfg.LogFile = fopen(logPath, "w");
+                    if (cfg.LogFile)
+                        fprintf(cfg.LogFile, "nds,frame,pc,caller,lr,random_value,random_call_count\n");
+                }
+            }
+            cfg.Checked = true;
         }
     }
 
@@ -107,6 +115,7 @@ static bool TraceNSMLRandomCallImpl(ARM* cpu, u32 instrAddr, u32 lr, bool hasLR)
     const u32 caller = lr >= 4 ? lr - 4 : lr;
     if (cfg.LogFile)
     {
+        std::lock_guard<std::mutex> outputLock(NSMLTraceOutputMutex);
         fprintf(cfg.LogFile,
             "%p,%u,%08X,%08X,%08X,%08X,%02X\n",
             static_cast<void*>(&cpu->NDS),
@@ -120,6 +129,7 @@ static bool TraceNSMLRandomCallImpl(ARM* cpu, u32 instrAddr, u32 lr, bool hasLR)
     }
     else
     {
+        std::lock_guard<std::mutex> outputLock(NSMLTraceOutputMutex);
         printf("NSMB Random: nds=%p frame=%u pc=%08X caller=%08X lr=%08X random=%08X count=%02X\n",
             static_cast<void*>(&cpu->NDS),
             cpu->NDS.NumFrames,
@@ -166,42 +176,46 @@ static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
     static CallTraceConfig cfg;
     if (!cfg.Checked)
     {
-        cfg.Checked = true;
-        cfg.Enabled = getenv("MELONDS_NSML_CALL_TRACE") != nullptr;
-
-        // Useful A2DJ Net entry points by default. Override or extend with
-        // MELONDS_NSML_CALL_TRACE_ADDRS while narrowing the packet boundary.
-        cfg.Addrs[cfg.AddrCount++] = 0x0200E5E8; // Net::syncRandomFull()
-        cfg.Addrs[cfg.AddrCount++] = 0x0200E5F4; // Net::syncRandomFast()
-        cfg.Addrs[cfg.AddrCount++] = 0x02010810; // Net::onPacketPollingDefault()
-        cfg.Addrs[cfg.AddrCount++] = 0x02010828; // Net::onRenderSignalStrengthDefault()
-        cfg.Addrs[cfg.AddrCount++] = 0x02010930; // Net::setDefaultHandlers()
-        cfg.Addrs[cfg.AddrCount++] = 0x02010F04; // Net::Core::shareRandomSeed()
-
-        if (const char* addrs = getenv("MELONDS_NSML_CALL_TRACE_ADDRS"))
+        std::lock_guard<std::mutex> configLock(NSMLTraceConfigMutex);
+        if (!cfg.Checked)
         {
-            cfg.AddrCount = 0;
-            char buf[4096];
-            strncpy(buf, addrs, sizeof(buf) - 1);
-            buf[sizeof(buf) - 1] = '\0';
-            for (char* tok = strtok(buf, ", \t\r\n"); tok && cfg.AddrCount < 256; tok = strtok(nullptr, ", \t\r\n"))
-                cfg.Addrs[cfg.AddrCount++] = static_cast<u32>(strtoul(tok, nullptr, 0));
-        }
-        if (const char* startFrame = getenv("MELONDS_NSML_CALL_TRACE_START_FRAME"))
-            cfg.StartFrame = static_cast<u32>(strtoul(startFrame, nullptr, 0));
-        if (const char* endFrame = getenv("MELONDS_NSML_CALL_TRACE_END_FRAME"))
-            cfg.EndFrame = static_cast<u32>(strtoul(endFrame, nullptr, 0));
-        if (const char* dumpLen = getenv("MELONDS_NSML_CALL_TRACE_DUMP_LEN"))
-            cfg.DumpLen = static_cast<u32>(strtoul(dumpLen, nullptr, 0));
-        if (cfg.DumpLen > 256) cfg.DumpLen = 256;
-        if (const char* logPath = getenv("MELONDS_NSML_CALL_TRACE_LOG"))
-        {
-            if (logPath[0])
+            cfg.Enabled = getenv("MELONDS_NSML_CALL_TRACE") != nullptr;
+
+            // Useful A2DJ Net entry points by default. Override or extend with
+            // MELONDS_NSML_CALL_TRACE_ADDRS while narrowing the packet boundary.
+            cfg.Addrs[cfg.AddrCount++] = 0x0200E5E8; // Net::syncRandomFull()
+            cfg.Addrs[cfg.AddrCount++] = 0x0200E5F4; // Net::syncRandomFast()
+            cfg.Addrs[cfg.AddrCount++] = 0x02010810; // Net::onPacketPollingDefault()
+            cfg.Addrs[cfg.AddrCount++] = 0x02010828; // Net::onRenderSignalStrengthDefault()
+            cfg.Addrs[cfg.AddrCount++] = 0x02010930; // Net::setDefaultHandlers()
+            cfg.Addrs[cfg.AddrCount++] = 0x02010F04; // Net::Core::shareRandomSeed()
+
+            if (const char* addrs = getenv("MELONDS_NSML_CALL_TRACE_ADDRS"))
             {
-                cfg.LogFile = fopen(logPath, "w");
-                if (cfg.LogFile)
-                    fprintf(cfg.LogFile, "nds,frame,pc,caller,lr,r0,r1,r2,r3,r0_dump,r1_dump\n");
+                cfg.AddrCount = 0;
+                char buf[4096];
+                strncpy(buf, addrs, sizeof(buf) - 1);
+                buf[sizeof(buf) - 1] = '\0';
+                for (char* tok = strtok(buf, ", \t\r\n"); tok && cfg.AddrCount < 256; tok = strtok(nullptr, ", \t\r\n"))
+                    cfg.Addrs[cfg.AddrCount++] = static_cast<u32>(strtoul(tok, nullptr, 0));
             }
+            if (const char* startFrame = getenv("MELONDS_NSML_CALL_TRACE_START_FRAME"))
+                cfg.StartFrame = static_cast<u32>(strtoul(startFrame, nullptr, 0));
+            if (const char* endFrame = getenv("MELONDS_NSML_CALL_TRACE_END_FRAME"))
+                cfg.EndFrame = static_cast<u32>(strtoul(endFrame, nullptr, 0));
+            if (const char* dumpLen = getenv("MELONDS_NSML_CALL_TRACE_DUMP_LEN"))
+                cfg.DumpLen = static_cast<u32>(strtoul(dumpLen, nullptr, 0));
+            if (cfg.DumpLen > 512) cfg.DumpLen = 512;
+            if (const char* logPath = getenv("MELONDS_NSML_CALL_TRACE_LOG"))
+            {
+                if (logPath[0])
+                {
+                    cfg.LogFile = fopen(logPath, "w");
+                    if (cfg.LogFile)
+                        fprintf(cfg.LogFile, "nds,frame,pc,caller,lr,r0,r1,r2,r3,r0_dump,r1_dump,r2_dump,r3_dump\n");
+                }
+            }
+            cfg.Checked = true;
         }
     }
 
@@ -229,6 +243,7 @@ static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
     if (r2 > 0 && r2 < dumpLen) dumpLen = r2;
 
     FILE* out = cfg.LogFile ? cfg.LogFile : stdout;
+    std::lock_guard<std::mutex> outputLock(NSMLTraceOutputMutex);
     fprintf(out,
         "%p,%u,%08X,%08X,%08X,%08X,%08X,%08X,%08X,",
         static_cast<void*>(&cpu->NDS),
@@ -243,6 +258,10 @@ static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
     WriteNSMLHexDump(out, cpu, r0, dumpLen);
     fputc(',', out);
     WriteNSMLHexDump(out, cpu, r1, dumpLen);
+    fputc(',', out);
+    WriteNSMLHexDump(out, cpu, r2, dumpLen);
+    fputc(',', out);
+    WriteNSMLHexDump(out, cpu, r3, dumpLen);
     fputc('\n', out);
     fflush(out);
     return true;

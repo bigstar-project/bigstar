@@ -520,6 +520,9 @@ void NDS::Reset()
     ARM9Timestamp = 0; ARM9Target = 0;
     ARM7Timestamp = 0; ARM7Target = 0;
     SysTimestamp = 0;
+    NumFrames = 0;
+    NumLagFrames = 0;
+    LagFrameFlag = false;
 
     InitTimings();
 

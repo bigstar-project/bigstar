@@ -76,11 +76,28 @@ Local MPの2 EmuInstance * 2プロセス構成を最終形として伸ばす方�
 | `Net::getRandom()` | `0x0200E5A0` | verified |
 | `Net::syncRandomFull()` | `0x0200E5E8` | verified |
 | `Net::syncRandomFast()` | `0x0200E5F4` | verified |
+| `Net::getPacketByte(u16,u32)` | `0x0200E978` | candidate |
+| `Net::setPacketByte(u32,u8)` | `0x0200E9AC` | candidate |
+| `Net::getPacketTick(u16)` | `0x0200E9BC` | candidate |
+| `Net::getPacketAction(u16)` | `0x0200E9DC` | candidate |
+| `Net::getPacket(u16)` | `0x0200E9FC` | candidate |
 | `Net::Core::readUserInfo(MBUserInfo*)` | `0x0200F320` | candidate, traced |
 | `Net::Core::transferPacket(Net::PacketAction)` | `0x0200F98C` | candidate, traced |
 | `Net::update()` | `0x0200FF40` | candidate, traced |
 | `Net::updatePacket()` | `0x020101E4` | candidate, traced |
+| `Net::Core::createPacketSequencer(u8**,u8,callback,void*)` | `0x02010D0C` | candidate |
+| `Net::Core::writePacketByte(u32,u8)` | `0x02010E80` | candidate, traced |
+| `Net::Core::writePacketInt(u32,u32)` | `0x02010E4C` | candidate, traced |
+| `Net::Core::freePacketBytes(u32,u32)` | `0x02010E90` | candidate |
+| `Net::Core::allocPacketBytes(u32)` | `0x02010EBC` | candidate |
 | `Net::Core::shareRandomSeed()` | `0x02010F04` | verified |
+| `Net::Core::processRecvPacket()` | `0x02011360` | candidate, traced |
+| `Net::Core::processSendPacket()` | `0x02011428` | candidate, traced |
+| `Net::PacketSequenceBuilder::nextByte()` | `0x0201166C` | candidate, traced |
+| `Net::PacketSequenceBuilder::pushPacket(u8,u8,const u8*)` | `0x02011748` | candidate, traced |
+| `Net::packetFreeBytes` | `0x020880B4` | candidate |
+| `Net::packetSequenceBuilder` | `0x020880D4` | candidate |
+| `Net::packetSequencers` | `0x020880FC` | candidate |
 | Player actor | object id `0x0015` | traced |
 | VS Battle Star actor candidate | object id `0x0022`, settings `0x00000001` | candidate, traced |
 | VS Battle Star candidate actor | object id `0x010c` | candidate, traced |
@@ -170,6 +187,21 @@ Local MPの2 EmuInstance * 2プロセス構成を最終形として伸ばす方�
   - NSMB Code ReferenceのUSシンボルと照合し、`0x0200F320` は `Net::Core::readUserInfo(MBUserInfo*)`、`0x0200F98C` は `Net::Core::transferPacket(Net::PacketAction)`、`0x0200FF40` は `Net::update()`、`0x020101E4` は `Net::updatePacket()` のA2DJ候補として扱う。
   - `0x02012284` はUS側 `SND::loop()` に対応する可能性が高く、通信候補から外す。
   - ただし、これはまだDS無線フレーム寄りの観測であり、NSMBのゲームレベル送受信bufferそのものは未確定。
+- NSMBのpacket API候補をA2DJへ追加移植した。
+  - `Net::Core::processSendPacket()` / `processRecvPacket()` / `writePacketByte()` / `writePacketInt()` / `PacketSequenceBuilder::pushPacket()` をcall trace対象にした。
+  - 初回traceでは `processSendPacket` と `processRecvPacket` が高頻度で呼ばれ、`writePacketByte` は少数のゲーム側callerから呼ばれることを確認した。
+  - `writePacketByte` の主なcaller候補は `0x020BA8B4`、`0x020AD1B4`、`0x020AD198`。次はここを逆アセンブルして、`packetFreeBytes` のどのoffsetにどのゲーム状態を書いているかを見る。
+  - 複数EmuInstanceが同じcall trace CSVへ同時書き込みし、CSV行が壊れることがあったため、trace初期化と出力を排他する修正を入れた。
+  - call traceの `frame` が巨大な未初期化値になる問題は、`NDS::Reset()` で `NumFrames` / `NumLagFrames` / `LagFrameFlag` を初期化して修正した。
+  - call traceは `r0` / `r1` だけでなく、`r2` / `r3` がMainRAM pointerの場合の先頭dumpも出すようにした。`PacketSequenceBuilder::pushPacket()` のpayload pointerを観測するため。
+  - `MELONDS_NSML_CALL_TRACE_DUMP_LEN` の上限を512 byteへ広げた。Local MP payload `len=302` と対応を取るため。
+  - `processSendPacket()` は `Net::setPacketByte()` を大量に呼んでpacket bufferへ1 byteずつ書き込む。次は `setPacketByte()` traceからframeごとの送信packetを再構成し、Local MP payloadと対応を取る。
+- `tools/nsmb_packet_trace_probe.py` を追加した。
+  - `Net::setPacketByte()` call traceから44 byteのゲームpacketをframeごとに再構成できる。
+  - `logs\route-combined-setpacket-localmp-2925` の同時traceで、再構成した44 byte packetがLocal MP payload内にそのまま埋まっていることを確認した。
+  - host cmd `type=1 len=302` ではoffset `54` と `116` に44 byte packetが現れる。
+  - client reply `type=65538 len=106` ではoffset `46` に44 byte packetが現れる。
+  - これは「DS無線フレーム全体」ではなく、NSMBのゲームレベルpacketだけを切り出して扱える見込みが出たことを意味する。
 
 ## Debugビルドクラッシュの原因と修正
 
@@ -191,12 +223,12 @@ DebugビルドでNSMB起動中に落ちていた問題は解消済み。
 
 ## 次にやること
 
-1. `Net::Core::transferPacket(Net::PacketAction)` / `Net::updatePacket()` / `Net::Core::readUserInfo(MBUserInfo*)` 周辺をさらに追い、どこから `PacketSequenceBuilder` / `packetFreeBytes` へゲーム状態が書かれるかを特定する。
-2. call traceとwrite watchを組み合わせ、host cmd 302 bytes / client reply 106 bytesのどの範囲がNSMBゲームレベルpayloadなのかを切り出す。
-3. 切り出したpayloadをLocal MP traceから録画し、同一プロセス内でreplay注入できるかを試す。ここが通れば、Local MPを使わない1 DS構成へ進める。
-4. host/clientの2プロセス各1 EmuInstanceで、NSMBのゲームレベルpayloadだけをENetで交換する最小bridgeを作る。
-5. WAN向けには、payloadのframe index、入力遅延、受信buffer、通信timeout緩和をNSMB patch/hook側で扱う。DS無線フレームそのもののWAN中継は本筋にしない。
-6. 8コインアイテム、ランダムステージ、勝敗・タイマー・スコアは、ゲームレベル通信が特定できた後に、そのpayloadで自然に同期されるかを確認する。不足があれば個別patch対象にする。
+1. `Net::setPacketByte()` / `Net::getPacketByte()` の入口を使い、44 byteゲームpacketをmelonDS側でcapture/replayできる最小hookを作る。
+2. まず同一プロセス2 EmuInstanceで、Local MP payloadから切り出した44 byte packetをreplay注入できるかを試す。ここが通れば、Local MPを使わない1 DS構成へ進める。
+3. host/clientの2プロセス各1 EmuInstanceで、NSMBのゲームレベルpacketだけをENetで交換する最小bridgeを作る。
+4. WAN向けには、packetのframe index、入力遅延、受信buffer、通信timeout緩和をNSMB patch/hook側で扱う。DS無線フレームそのもののWAN中継は本筋にしない。
+5. `writePacketByte` caller候補 `0x020BA8B4`、`0x020AD1B4`、`0x020AD198` はfree-byte handshake候補として保持し、ゲームpayload本体とは分けて扱う。
+6. 8コインアイテム、ランダムステージ、勝敗・タイマー・スコアは、ゲームレベルpacket bridge後に自然に同期されるかを確認する。不足があれば個別patch対象にする。
 7. MvsLObject267などのStateApply追加は診断用に留める。最終形としてこの方向を広げ続けない。
 8. state-load経路は診断用に留める。現時点では最終対戦実現の主経路にしない。
 
@@ -309,7 +341,7 @@ python tools\nsmb_localmp_trace_probe.py logs\route-localmp-payload-4200.csv --t
 - `MELONDS_NSML_CALL_TRACE=1`: A2DJ関数候補の呼び出しtraceをCSV/標準出力へ出す。JITは自動的に無効化される。
 - `MELONDS_NSML_CALL_TRACE_ADDRS`: call trace対象アドレスのカンマ区切りリスト。
 - `MELONDS_NSML_CALL_TRACE_LOG`: call trace CSV出力先。
-- `MELONDS_NSML_CALL_TRACE_DUMP_LEN`: `r0` / `r1` がMainRAM pointerだった場合にdumpする最大byte数。
+- `MELONDS_NSML_CALL_TRACE_DUMP_LEN`: `r0` / `r1` / `r2` / `r3` がMainRAM pointerだった場合にdumpする最大byte数。
 - `MELONDS_NSML_LOCALMP_TRACE`: Local MP packet trace CSV出力先。
 - `MELONDS_NSML_LOCALMP_TRACE_DUMP_LEN`: Local MP payload dumpの最大byte数。
 
