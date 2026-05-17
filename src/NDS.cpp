@@ -93,11 +93,13 @@ bool TraceNSMLWatchWrite(NDS* nds, const char* cpu, u32 pc, u32 addr, u32 width,
     const u32 watchEnd = watchOffset + cfg.Len - 1;
     if (writeEnd < watchOffset || writeOffset > watchEnd) return false;
 
-    printf("NSMB Watch: nds=%p frame=%u cpu=%s pc=%08X addr=%08X offset=%06X width=%u val=%08X\n",
+    const u32 lr = !strcmp(cpu, "ARM9") ? nds->ARM9.R[14] : nds->ARM7.R[14];
+    printf("NSMB Watch: nds=%p frame=%u cpu=%s pc=%08X lr=%08X addr=%08X offset=%06X width=%u val=%08X\n",
         static_cast<void*>(nds),
         nds->NumFrames,
         cpu,
         pc,
+        lr,
         addr,
         writeOffset,
         width,

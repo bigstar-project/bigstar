@@ -2,57 +2,63 @@
 
 ## 目的
 
-New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード「Mario vs Luigi」を、最終的に WAN 越しの 2PC で遊べる形にする。
+New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `Mario vs Luigi` を、最終的に WAN 越しの 2PC で遊べる形にする。
 
-現在の本命方針は、melonDS の Local MP をそのまま WAN 越しに流すことではなく、NSMB が対戦中に扱うゲームレベルの 52 byte packet を特定し、1 EmuInstance * 2PC の構成でその packet を WAN 向けに中継・再生する方式。
+本命方針は、melonDS の Local MP をそのまま WAN に流すのではなく、NSMB が対戦中に扱うゲームレベルのpacketと接続状態を置換し、`1 EmuInstance * 2PC` で再現すること。
 
-## 現在の方針
+## 現在の結論
 
-1. 既存 melonDS の LAN MPInterface は、Mario vs Luigi 到達と packet 解析のためのテストハーネスとして使う。
-2. 最終形では 2 EmuInstance * 2PC ではなく、1 EmuInstance * 2PC を目指す。
-3. DS ローカル無線フレーム全体ではなく、NSMB の 52 byte gameplay packet を bridge する。
-4. MP 通信を途中で止めても、NSMB 側の packet tick と remote packet replay が進み続けるかを検証する。
+- 画面が `通信が切断されました` になっている場合は失敗扱い。RAM上の `stageGroup=9` / `vsMode=1` だけでは成功判定に使わない。
+- 完全な黒画面も失敗扱い。以前の `DropMPAfterFrame 3600` + `PacketBridgeSuppressDisconnect` の 6000/6600 frame通過は、黒画面を検出できていなかったため成功扱いしない。
+- `Net::getPacketTick()` をremote slotだけでstrict replayすると、player間tick比較が崩れてframe 3060付近で切断画面になる。
+- LAN harness中の `getPacket(0/1)` はLocalMP受信slotを読むため、両player slotをbridge replay対象にする必要がある。
+- 両player slotをstrict対象にし、`getPacketTick()` にlookup tickを返すと、LocalMPが生きている間は切断せずに進む。
+- LocalMPを停止すると、NSMB内部のLocalMP packet slot statusが0になり、disconnect state/flagsが立つ。
+- bridge中にdisconnect state/flagsを抑制する検証フックだけでは不十分。`DropMPAfterFrame 3600` 後、host/clientの進行フレーム差が大きくなり、片側が必要なremote packetを受け取れず黒画面へ落ちる。
+- `DropMPAfterFrame 3600` 後はpacket slot/statusを維持しても、NSMBの低レベルNet/描画状態がリセットされる。MainRAM上のplayer/starは残るが、render/display側が黒画面またはHUDのみへ落ちる。
+- LocalMPを接続維持用に残し、ゲームが読むpacketだけをstrict bridgeで置換する経路では、movement script込みで 6600 frame まで通り、host/clientのplayer座標とstar座標は一致した。
+- packet traceではmovement開始後、host local packet keys=`0x0010`、client local packet keys=`0x0020` が毎frame送受信されている。入力packetはbridge上を流れている。
+- `-PacketBridgeMaxFrameLead` は同期精度と速度のトレードオフ。`4` は同期は強いが遅すぎる。`20` / `60` は完走するが、同一frame番号でのplayer座標は一時的にズレ、数百frame後に収束する。
+- つまり「ゲームレベルpacket置換」は前進している。未解決の本丸は、`1 EmuInstance * 2PC` 向けにLocalMPなしでもNSMBの接続シェルを維持するROM/hook設計。
 
 ## 実装済み
 
-- 日本版 `A2DJ` 向けの主要シンボルを移植済み。
-  - `Net::getRandom()` / `Net::getRandom12()` / `Net::syncRandom*()`
-  - `Net::getConsoleKeys()` / `Net::getPacketByte()` / `Net::getPacketTick()` / `Net::getPacketAction()`
-  - `Net::Core::processSendPacket()` / `processRecvPacket()` 周辺
-- 1 EmuInstance * 2プロセスで LAN MPInterface を使い、Mario vs Luigi へ自動到達する smoke script を追加済み。
-  - `scripts/run-nsmb-mvl-lan-route-smoke.ps1`
-- LAN MP payload trace から NSMB 52 byte packet を抽出する tooling を追加済み。
-  - `tools/nsmb_localmp_packet_extract.py`
-  - `tools/nsmb_packet_stream_compare.py`
-- packet replay hook を追加済み。
+- `scripts/run-nsmb-mvl-lan-route-smoke.ps1`
+  - post-start screenshotから黒背景+白文字の切断画面を検出する。
+  - 完全な黒画面を検出し、失敗扱いにする。
+  - `-ScreenshotInterval` でスクリーンショット間隔を調整できる。
+  - `-SkipDisconnectScreenshotCheck` は調査用のみ。成功判定には使わない。
+  - `-LanStartAttempts` でLAN start、未到達、未完走時だけ自動retryできる。
+  - retry時は `LogDir-attemptN` に分けて出力する。
+- packet bridge / replay hook
   - `Net::getConsoleKeys()`
   - `Net::getPacketByte()`
   - `Net::getPacketTick()`
   - `Net::getPacketAction()`
-- live packet bridge を追加済み。
-  - `MELONDS_NSML_PACKET_BRIDGE=1`
-  - `MELONDS_NSML_PACKET_BRIDGE_ONLY=1`
-  - `MELONDS_NSML_PACKET_BRIDGE_REPLAY_TICK_OFFSET`
-  - `MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS`
-  - `MELONDS_NSML_PACKET_REPLAY_STRICT_REQUIRE_LEAD`
-- MP drop 実験フックを追加済み。
-  - `MELONDS_NSML_DROP_MP_AFTER_FRAME`
-- 今回追加した bridge 単独化向けフック。
-  - `NSML_BuildMarioVsLuigiLocalPacket()`
-  - `MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE`
-  - `MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK`
-  - `MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME`
-  - `MELONDS_NSML_PACKET_BRIDGE_MAX_TICK_LEAD`
-  - `MELONDS_NSML_PACKET_BRIDGE_THROTTLE_TIMEOUT_MS`
-  - `MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW`
-  - `MELONDS_NSML_PACKET_REPLAY_OPS`
-  - `MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK`
-- smoke script の視覚検証を強化済み。
-  - post-start screenshot から黒背景 + 白文字の「通信が切断されました」画面を検出し、成功扱いしない。
-  - `-ScreenshotInterval` でスクリーンショット間隔を細かくできる。
-  - `-SkipDisconnectScreenshotCheck` は調査用にだけ使う。
+- bridge補助
+  - local packetもlive replay表へ登録する。
+  - `-PacketBridgeStrictPlayers "0,1"` で両slotをstrict対象にできる。
+  - `-PacketBridgeReplayReturnLookupTick` で `getPacketTick()` にlookup tickを返せる。
+  - `NSML_RefreshMarioVsLuigiPacketSlots()` でbridge packetをNSMBのLocalMP packet slotへ反映する。
+  - `-PacketBridgeSuppressDisconnect` でLocalMP停止時のdisconnect state/flagsを抑制する。
+  - `-PacketBridgeForceTickBase` でDropMP後のpacket tick基準値を固定できる。
+  - `-PacketBridgeMaxFrameLead` でpacket bridgeの進行フレーム先行量を制限できる。
+  - `-PacketBridgePreserveNetPointers` / `-PacketBridgeSuppressBlackout` は失敗切り分け用の実験フック。現時点ではDropMP後の正常描画維持には不十分。
+- 検証補助
+  - 黒画面時にDISPCNT/BLD/Net stateをstdoutへ出す。
+  - `MELONDS_NSML_SCREENSHOT_REG_TRACE=1` でスクリーンショット保存時の表示レジスタを出せる。
+  - `MELONDS_NSML_WATCH_*` のwatchログにLRも出す。
 
-## 直近の検証結果
+## 重要アドレス
+
+- `Net::getPacketTick(u16)`: `0x0200E9BC`
+- `Net::getPacket(u16)`: `0x0200E9FC`
+- LocalMP packet slot status: `0x0208AE50`
+- LocalMP packet buffer: `0x0208B040 + player * 0x3E`
+- NSMB disconnect flags候補: `0x02087E5C`
+- NSMB network state候補: `0x02087E1C`
+
+## 検証結果
 
 ビルド:
 
@@ -60,70 +66,66 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード�
 cmake --build build\debug-windows-x86_64 --target melonDS --config Debug
 ```
 
-通常 smoke:
+LocalMPあり、両slot strict replay:
 
 ```powershell
-.\scripts\run-nsmb-smoke.ps1 -Frames 600 -LogDir logs\single-smoke-after-packet-bridge-throttle
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 4200 -HostStartupDelayMs 50 -ScreenshotInterval 60 -LogDir logs\lan-route-4200-strict-both-allops-slotwrite-nodrop -GameStateTrace -GameStateTraceInterval 60 -PacketBridge -PacketBridgePort 8191 -PacketBridgeStartFrame 3000 -HostPacketBridgeReplayTickOffset 3 -ClientPacketBridgeReplayTickOffset 2 -PacketBridgeStrictPlayers "0,1" -PacketBridgeStrictStartFrame 3120 -PacketBridgeStrictRequireLead 0 -PacketBridgeLiveFallbackWindow 8 -PacketBridgeReplayReturnLookupTick
 ```
 
-結果: pass。
-
-MP drop 後の packet bridge 継続検証として以前使っていたコマンド:
+DropMP後の失敗例。切断文字列は抑制できるが、黒画面検出により失敗:
 
 ```powershell
-.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 7200 -HostStartupDelayMs 50 -LogDir logs\lan-route-7200-live-packet-bridge-dropmp3100-forcetick-direct-throttle4-fallback8 -GameStateTrace -GameStateTraceInterval 120 -PacketBridge -PacketBridgeTrace -PacketBridgeStartFrame 3000 -HostPacketBridgeReplayTickOffset 3 -ClientPacketBridgeReplayTickOffset 2 -PacketBridgeStrictRemote -PacketBridgeStrictRequireLead 3 -PacketBridgeLiveFallbackWindow 8 -DropMPAfterFrame 3100 -PacketBridgeDirectCapture -PacketBridgeForceTick -PacketBridgeForceTickStartFrame 3100 -PacketBridgeMaxTickLead 4 -PacketBridgeThrottleTimeoutMs 5000
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -LanStartAttempts 6 -Frames 4800 -HostStartupDelayMs 1000 -ScreenshotInterval 60 -LogDir logs\lan-route-4800-neutralfix-dropmp3600-forcebase08aa -GameStateTrace -GameStateTraceInterval 60 -PacketBridge -PacketBridgePort 8213 -PacketBridgeStartFrame 3000 -HostPacketBridgeReplayTickOffset 3 -ClientPacketBridgeReplayTickOffset 2 -PacketBridgeStrictPlayers "0,1" -PacketBridgeStrictStartFrame 3120 -PacketBridgeStrictRequireLead 0 -PacketBridgeLiveFallbackWindow 8 -PacketBridgeReplayReturnLookupTick -DropMPAfterFrame 3600 -PacketBridgeDirectCapture -PacketBridgeForceTick -PacketBridgeForceTickStartFrame 3600 -PacketBridgeForceTickBase 0x08AA -PacketBridgeSuppressDisconnect
 ```
 
-現在の評価:
+DropMP後movementありの以前の検証は、黒画面検出前の結果なので成功扱いしない:
 
-- この検証は、視覚検証を入れる前は pass 扱いになっていたが、実際には「通信が切断されました」画面になっていたため成功ではない。
-- 細かい screenshot 検証では、`PacketBridgeStrictRemote` を有効にすると host/client とも frame 3060 で切断画面に入る。
-- `DropMPAfterFrame 3100` より前に切断しているため、現時点の主因は MP drop ではなく strict replay の remote packet 差し替え。
-- packet bridge を動かすだけで strict replay しない場合は、3300 frame まで切断しない。ただしその場合は `getPacket*` の実戻り値は元のLAN処理に任せているため、bridgeがゲーム状態へ影響しているわけではない。
-- `getPacketTick()` にpacket内tickではなくlookup tickを返す実験も、frame 3060 の切断を解消しなかった。
-- op別切り分け結果:
-  - `keys` のみ strict replay: 3300 frame まで切断なし。
-  - `byte` のみ strict replay: 3300 frame まで切断なし。
-  - `action` のみ strict replay: 3300 frame まで切断なし。
-  - `tick` のみ strict replay: frame 3060 で切断。
-  - `tick` のみ + lookup tick返却: frame 3060 で切断。
-  - `keys,byte,action` strict replay、tickは元処理: 4200 frame まで切断なし。
-  - `keys,byte,action` strict replay + `DropMPAfterFrame 3100`: frame 3360 で切断。
+```powershell
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -LanStartAttempts 4 -Frames 6600 -HostStartupDelayMs 50 -ScreenshotInterval 120 -InputScript tests\nsmb_mario_vs_luigi_afterdrop_movement.inputs -LogDir logs\lan-route-6600-dropmp3600-suppressdisconnect-movement5200-attempted -GameStateTrace -GameStateTraceInterval 120 -PacketBridge -PacketBridgePort 8204 -PacketBridgeStartFrame 3000 -HostPacketBridgeReplayTickOffset 3 -ClientPacketBridgeReplayTickOffset 2 -PacketBridgeStrictPlayers "0,1" -PacketBridgeStrictStartFrame 3120 -PacketBridgeStrictRequireLead 0 -PacketBridgeLiveFallbackWindow 8 -PacketBridgeReplayReturnLookupTick -DropMPAfterFrame 3600 -PacketBridgeDirectCapture -PacketBridgeForceTick -PacketBridgeForceTickStartFrame 3600 -PacketBridgeSuppressDisconnect
+```
 
-## 現在の課題
+LocalMPを残したまま、ゲームpacket読みにstrict bridgeを適用したmovement検証:
 
-- strict replay で差し替えている live bridge packet が、NSMB が実LAN時に remote slot として読んでいる値と一致していない可能性が高い。
-- `Net::getPacketTick()` は単純な戻り値hookでは代替できていない。tick helperの戻り値だけでなく、LAN/recv sequencer側の内部状態更新が通信継続判定に関わっている可能性が高い。
-- MP drop後は、tickをhookしない構成でも切断する。LAN側のrecv副作用、最終受信時刻、ack/sequence更新などを別途再現する必要がある。
-- `stageGroup=0x9` / `vsMode=0x1` は切断画面でもRAMに残ることがあるため、成功判定には使えるが十分ではない。スクリーンショット検証が必須。
-- direct capture + force tick はまだ実験的。NSMB 本来の `Net::updatePacket()` / `processSendPacket()` / `processRecvPacket()` の副作用を完全に代替できているかは未確定。
-- 現在は LAN MPInterface で対戦状態に入った後に packet replay を試している。次は「live bridge packet」と「実LANでhost/clientが見ているremote slot」の一致確認が必要。
-- Star / 8コイン item / ランダム stage などのランダム要素は、最終的には同じ seed と同じ packet/tick 進行で一致させる必要がある。
+```powershell
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -LanStartAttempts 6 -Frames 6600 -HostStartupDelayMs 1000 -ScreenshotInterval 120 -InputScript tests\nsmb_mario_vs_luigi_afterdrop_movement.inputs -LogDir logs\lan-route-6600-nodrop-strictbridge-movement5200 -GameStateTrace -GameStateTraceInterval 120 -GameStateTraceExtended -PacketBridge -PacketBridgePort 8228 -PacketBridgeStartFrame 3000 -HostPacketBridgeReplayTickOffset 3 -ClientPacketBridgeReplayTickOffset 2 -PacketBridgeStrictPlayers "0,1" -PacketBridgeStrictStartFrame 3120 -PacketBridgeStrictRequireLead 0 -PacketBridgeLiveFallbackWindow 512 -PacketBridgeReplayReturnLookupTick -PacketBridgeDirectCapture -PacketBridgeForceTick -PacketBridgeForceTickStartFrame 3600 -PacketBridgeForceTickBase 0x08AA
+```
+
+結果:
+
+- `logs\lan-route-6600-nodrop-strictbridge-movement5200-attempt2`
+- 6600 frame完走。
+- host/clientで `playerActor0X=0x128fff`, `playerActor1X=0xfffd8000`, `vsStarActorX=0x1a0000` が一致。
+- 画面のカメラ位置はlocal player基準なのでhost/clientで見た目は異なるが、ゲーム状態としてのplayer/star座標は一致している。
+
+短縮trace:
+
+- `logs\lan-route-5520-nodrop-strictbridge-movement-tracekeys-attempt2`
+- host送信: player0 `keys=0x0010`
+- client送信: player1 `keys=0x0020`
+- 5520 frame時点でhost/clientの `playerActor0X=0x128fff`, `playerActor1X=0xfffd8000` が一致。
+- 5280/5400 frameでは同一frame番号の座標に一時差が出る。これはpacket bridgeがまだ完全なロックステップではなく、プロセス間に数十frameの進行差が残るため。
+
+frame lead制限:
+
+- `logs\lan-route-5520-nodrop-strictbridge-movement-framelead60-attempt1`: 118.7秒で完走。中間座標差は残るが5520で収束。
+- `logs\lan-route-5520-nodrop-strictbridge-movement-framelead20-attempt1`: 165.5秒で完走。中間座標差は残るが5520で収束。
+- `logs\lan-route-5520-nodrop-strictbridge-movement-framelead4-attempt1`: 同期は強いが遅すぎて既定timeout内に5520まで届かなかった。
+
+失敗/未解決:
+
+- `-PacketBridgeSuppressDisconnect` なしでLocalMPを停止すると、frame 3900付近で切断画面になる。
+- `-PacketBridgeSuppressDisconnect` ありでも、黒画面検出を入れるとhost frame 3900付近、client frame 3840付近で失敗する。
+- `-PacketBridgeLiveFallbackWindow 512` でpacket slot/statusを維持しても黒画面は解消しない。
+- `-PacketBridgeSuppressBlackout` でDISPCNTを通常値に戻しても、地形/キャラクター描画は戻らずHUDだけになる。
+- watch結果:
+  - Net内部状態はhost frame 3842 / client frame 3808付近で `0x0200EE5C` などから0化される。
+  - render tableはhost frame 3840 / client frame 3815付近で汎用memset `0x0200B288` と描画登録処理 `0x0200D3A0` により黒画面向けの内容へ変わる。
+- LAN route smokeはまだ `LAN client start ok=0` や未到達で失敗することがある。`-LanStartAttempts` で実用上はretryできるが、根本原因は未解消。
 
 ## 次にやること
 
-1. `Net::getPacketTick()` の呼び出し元と戻り値利用箇所を追い、どの条件で切断判定に入るか特定する。
-2. `processRecvPacket()` / recv sequencer / ack / last receive tick らしき状態を追い、MP drop後に止まる必須副作用を見つける。
-3. strict replay時のlive bridge packetと、実LAN時に `getPacket*` が読むremote slot値を比較する。
-4. 切断画面検出を常に通した上で、LAN MPInterface依存を減らす packet bridge route を再設計する。
-
-## よく使うコマンド
-
-```powershell
-# build
-cmake --build build\debug-windows-x86_64 --target melonDS --config Debug
-
-# single smoke
-.\scripts\run-nsmb-smoke.ps1 -Frames 600 -LogDir logs\single-smoke
-
-# LAN route smoke
-.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 5100 -HostStartupDelayMs 50 -LogDir logs\lan-route-5100 -GameStateTrace -GameStateTraceInterval 60
-
-# packet bridge + MP drop current best experiment
-.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 7200 -HostStartupDelayMs 50 -LogDir logs\lan-route-7200-live-packet-bridge-dropmp3100-forcetick-direct-throttle4-fallback8 -GameStateTrace -GameStateTraceInterval 120 -PacketBridge -PacketBridgeTrace -PacketBridgeStartFrame 3000 -HostPacketBridgeReplayTickOffset 3 -ClientPacketBridgeReplayTickOffset 2 -PacketBridgeStrictRemote -PacketBridgeStrictRequireLead 3 -PacketBridgeLiveFallbackWindow 8 -DropMPAfterFrame 3100 -PacketBridgeDirectCapture -PacketBridgeForceTick -PacketBridgeForceTickStartFrame 3100 -PacketBridgeMaxTickLead 4 -PacketBridgeThrottleTimeoutMs 5000
-```
-
-## ユーザー依存
-
-- `roms/nsmb.nds` に日本版 `A2DJ` ROM が配置済み。
-- WAN 実機検証に進む段階では、相手PC側にも同じ melonDS build、同じ ROM、同じ基本設定、別 MAC が必要。
+1. `Net::update()` / `Net::Core::transferPacket()` 周辺で、LocalMP失敗時にNet状態とrender状態を落とす分岐を特定する。
+2. その分岐をmelonDS hookで一時的に抑制し、DropMP後も黒画面なしで進むか確認する。
+3. 抑制できたら、同じ考え方をROM patch候補として整理する。
+4. packet bridgeのフレーム同期は、単純なsleep throttleではなく、送信済みpacket frameを使った軽量barrierまたは固定入力遅延方式へ寄せる。
+5. LAN start flakeの根本原因を調べ、検証のretry依存を減らす。

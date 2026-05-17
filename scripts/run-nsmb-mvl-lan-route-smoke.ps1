@@ -25,6 +25,7 @@ param(
     [switch]$PacketBridgeWait,
     [int]$PacketBridgeWaitTimeoutMs = 5,
     [switch]$PacketBridgeStrictRemote,
+    [string]$PacketBridgeStrictPlayers = "",
     [int]$PacketBridgeStrictStartFrame = 0,
     [int]$PacketBridgeStrictRequireLead = 0,
     [int]$PacketBridgeLiveFallbackWindow = 0,
@@ -33,15 +34,47 @@ param(
     [switch]$PacketBridgeDirectCapture,
     [switch]$PacketBridgeForceTick,
     [int]$PacketBridgeForceTickStartFrame = 0,
+    [int]$PacketBridgeForceTickBase = -1,
+    [switch]$PacketBridgeSuppressDisconnect,
+    [switch]$PacketBridgeSuppressBlackout,
+    [switch]$PacketBridgePreserveNetPointers,
     [int]$PacketBridgeMaxTickLead = -1,
+    [int]$PacketBridgeMaxFrameLead = -1,
     [int]$PacketBridgeThrottleTimeoutMs = 5000,
     [int]$DropMPAfterFrame = 0,
     [int]$HostStartupDelayMs = 1000,
+    [int]$LanStartAttempts = 1,
     [switch]$SkipDisconnectScreenshotCheck,
     [string]$LogDir = "logs\nsmb-mvl-lan-route"
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($LanStartAttempts -gt 1) {
+    for ($attempt = 1; $attempt -le $LanStartAttempts; $attempt++) {
+        $attemptParams = @{} + $PSBoundParameters
+        $attemptParams["LanStartAttempts"] = 1
+        $attemptParams["LogDir"] = "$LogDir-attempt$attempt"
+        try {
+            & $PSCommandPath @attemptParams
+            return
+        } catch {
+            $message = $_.Exception.Message
+            $retryable =
+                $message -like "*LAN start*" -or
+                $message -like "*missing client LAN start*" -or
+                $message -like "*missing host LAN start*" -or
+                $message -like "*missing client frame limit*" -or
+                $message -like "*missing host frame limit*" -or
+                $message -like "*stageGroup=0x0 vsMode=0x0*"
+            if (-not $retryable -or $attempt -ge $LanStartAttempts) {
+                throw
+            }
+            Write-Host "retrying LAN route smoke after retryable startup failure: attempt $attempt/$LanStartAttempts"
+            Start-Sleep -Milliseconds 500
+        }
+    }
+}
 
 $exePath = (Resolve-Path $Exe).Path
 $romPath = (Resolve-Path $Rom).Path
@@ -215,18 +248,47 @@ function Start-MelonLANProcess {
         if ($PacketBridgeForceTick) {
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK = "1"
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME = "$PacketBridgeForceTickStartFrame"
+            if ($PacketBridgeForceTickBase -ge 0) {
+                $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE = "$PacketBridgeForceTickBase"
+            } else {
+                Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE -ErrorAction SilentlyContinue
+            }
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE -ErrorAction SilentlyContinue
+        }
+        if ($PacketBridgeSuppressDisconnect) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_SUPPRESS_DISCONNECT = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_SUPPRESS_DISCONNECT -ErrorAction SilentlyContinue
+        }
+        if ($PacketBridgeSuppressBlackout) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_SUPPRESS_BLACKOUT = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_SUPPRESS_BLACKOUT -ErrorAction SilentlyContinue
+        }
+        if ($PacketBridgePreserveNetPointers) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_PRESERVE_NET_POINTERS = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_PRESERVE_NET_POINTERS -ErrorAction SilentlyContinue
         }
         if ($PacketBridgeMaxTickLead -ge 0) {
             $env:MELONDS_NSML_PACKET_BRIDGE_MAX_TICK_LEAD = "$PacketBridgeMaxTickLead"
             $env:MELONDS_NSML_PACKET_BRIDGE_THROTTLE_TIMEOUT_MS = "$PacketBridgeThrottleTimeoutMs"
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAX_TICK_LEAD -ErrorAction SilentlyContinue
+        }
+        if ($PacketBridgeMaxFrameLead -ge 0) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_MAX_FRAME_LEAD = "$PacketBridgeMaxFrameLead"
+            $env:MELONDS_NSML_PACKET_BRIDGE_THROTTLE_TIMEOUT_MS = "$PacketBridgeThrottleTimeoutMs"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAX_FRAME_LEAD -ErrorAction SilentlyContinue
+        }
+        if ($PacketBridgeMaxTickLead -lt 0 -and $PacketBridgeMaxFrameLead -lt 0) {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_THROTTLE_TIMEOUT_MS -ErrorAction SilentlyContinue
         }
-        if ($PacketBridgeStrictRemote) {
+        if ($PacketBridgeStrictRemote -or $PacketBridgeStrictPlayers) {
             $env:MELONDS_NSML_PACKET_REPLAY_STRICT = "1"
             if ($PacketBridgeStrictStartFrame -gt 0) {
                 $env:MELONDS_NSML_PACKET_REPLAY_STRICT_START_FRAME = "$PacketBridgeStrictStartFrame"
@@ -238,7 +300,9 @@ function Start-MelonLANProcess {
             } else {
                 Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT_REQUIRE_LEAD -ErrorAction SilentlyContinue
             }
-            if ($Role -eq "host") {
+            if ($PacketBridgeStrictPlayers) {
+                $env:MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS = $PacketBridgeStrictPlayers
+            } elseif ($Role -eq "host") {
                 $env:MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS = "1"
             } else {
                 $env:MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS = "0"
@@ -301,6 +365,8 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_SUPPRESS_DISCONNECT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAX_TICK_LEAD -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_THROTTLE_TIMEOUT_MS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT -ErrorAction SilentlyContinue
@@ -462,6 +528,39 @@ function Test-DisconnectLikeScreenshot {
     }
 }
 
+function Test-BlankLikeScreenshot {
+    param([string]$Path)
+
+    Add-Type -AssemblyName System.Drawing
+    $bitmap = [System.Drawing.Bitmap]::FromFile($Path)
+    try {
+        $sampleCount = 0
+        $blackCount = 0
+        $brightCount = 0
+        for ($y = 0; $y -lt $bitmap.Height; $y += 4) {
+            for ($x = 0; $x -lt $bitmap.Width; $x += 4) {
+                $pixel = $bitmap.GetPixel($x, $y)
+                $sampleCount++
+                if ($pixel.R -lt 18 -and $pixel.G -lt 18 -and $pixel.B -lt 18) {
+                    $blackCount++
+                } elseif ($pixel.R -gt 150 -and $pixel.G -gt 150 -and $pixel.B -gt 150) {
+                    $brightCount++
+                }
+            }
+        }
+
+        if ($sampleCount -eq 0) {
+            return $false
+        }
+
+        $blackRatio = $blackCount / $sampleCount
+        $brightRatio = $brightCount / $sampleCount
+        return ($blackRatio -gt 0.995 -and $brightRatio -lt 0.001)
+    } finally {
+        $bitmap.Dispose()
+    }
+}
+
 if (-not $SkipDisconnectScreenshotCheck) {
     foreach ($screenDir in @($hostScreens, $clientScreens)) {
         $screens = Get-ChildItem $screenDir -Filter "inst0_frame*.png" -ErrorAction SilentlyContinue
@@ -477,6 +576,9 @@ if (-not $SkipDisconnectScreenshotCheck) {
 
             if (Test-DisconnectLikeScreenshot -Path $screen.FullName) {
                 throw "disconnect-like screenshot detected at frame=${frame}: $($screen.FullName)"
+            }
+            if (Test-BlankLikeScreenshot -Path $screen.FullName) {
+                throw "blank-like screenshot detected at frame=${frame}: $($screen.FullName)"
             }
         }
     }

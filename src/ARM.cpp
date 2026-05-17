@@ -64,6 +64,7 @@ struct NSMLLocalPacketCapture
 
 static std::map<NDS*, NSMLLocalPacketCapture> NSMLLocalPackets;
 static std::map<NDS*, std::map<u32, NSMLPacketReplayEntry>> NSMLLiveReplayPackets;
+static std::map<NDS*, std::map<u32, u32>> NSMLPreservedNetWords;
 
 static bool NSMLEnvFlag(const char* name)
 {
@@ -207,6 +208,156 @@ static bool NSMLLiveReplayHasLead(NDS* nds, u32 player, u32 tick, u32 lead)
             return true;
     }
     return false;
+}
+
+static bool NSMLFindLiveReplayPacketLocked(
+    NDS* nds,
+    u32 player,
+    u32 tick,
+    u32 fallbackWindow,
+    std::array<u8, 52>& outPacket)
+{
+    if (!nds || player > 1)
+        return false;
+
+    auto ndsIt = NSMLLiveReplayPackets.find(nds);
+    if (ndsIt == NSMLLiveReplayPackets.end())
+        return false;
+
+    auto liveIt = ndsIt->second.find(tick);
+    if (liveIt != ndsIt->second.end() && liveIt->second.Valid[player])
+    {
+        outPacket = liveIt->second.Packet[player];
+        return true;
+    }
+
+    if (fallbackWindow == 0)
+        return false;
+
+    const u32 window = std::min<u32>(fallbackWindow, 512);
+    for (u32 age = 1; age <= window; age++)
+    {
+        const u32 fallbackTick = (tick - age) & 0xFFFF;
+        auto fallbackIt = ndsIt->second.find(fallbackTick);
+        if (fallbackIt != ndsIt->second.end() && fallbackIt->second.Valid[player])
+        {
+            outPacket = fallbackIt->second.Packet[player];
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void NSMLWriteLiveReplayPacketsToLocalMPSlots(
+    NDS& nds,
+    u32 tick,
+    u32 fallbackWindow,
+    bool normalizePacketTick)
+{
+    std::array<std::array<u8, 52>, 2> packets {};
+    bool valid[2] {};
+    {
+        std::lock_guard<std::mutex> lock(NSMLPacketBridgeMutex);
+        for (u32 player = 0; player < 2; player++)
+            valid[player] = NSMLFindLiveReplayPacketLocked(&nds, player, tick, fallbackWindow, packets[player]);
+    }
+
+    for (u32 player = 0; player < 2; player++)
+    {
+        if (!valid[player])
+            continue;
+
+        if (normalizePacketTick)
+        {
+            packets[player][0] = static_cast<u8>(tick & 0xFF);
+            packets[player][1] = static_cast<u8>((tick >> 8) & 0xFF);
+        }
+
+        nds.ARM9Write32(0x0208AE50 + player * 4, 1);
+        const u32 packetAddr = 0x0208B040 + player * 0x3E;
+        for (u32 i = 0; i < packets[player].size(); i++)
+            nds.ARM9Write8(packetAddr + i, packets[player][i]);
+    }
+}
+
+void NSML_RefreshMarioVsLuigiPacketSlots(NDS* nds)
+{
+    if (!nds || !NSMLPacketBridgeEnabled() || !IsNSMLMarioVsLuigiGameplay(*nds))
+        return;
+
+    static int fallbackWindow = -1;
+    static int normalizeTick = -1;
+    static int suppressDisconnect = -1;
+    static int suppressBlackout = -1;
+    static int preserveNetPointers = -1;
+    if (fallbackWindow < 0)
+    {
+        if (const char* value = getenv("MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW"))
+            fallbackWindow = std::max(0, atoi(value));
+        else
+            fallbackWindow = 0;
+    }
+    if (normalizeTick < 0)
+        normalizeTick = NSMLEnvFlag("MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK") ? 1 : 0;
+    if (suppressDisconnect < 0)
+        suppressDisconnect = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_SUPPRESS_DISCONNECT") ? 1 : 0;
+    if (suppressBlackout < 0)
+        suppressBlackout = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_SUPPRESS_BLACKOUT") ? 1 : 0;
+    if (preserveNetPointers < 0)
+        preserveNetPointers = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_PRESERVE_NET_POINTERS") ? 1 : 0;
+
+    const u32 tick = nds->ARM9Read16(0x02087F00);
+    NSMLWriteLiveReplayPacketsToLocalMPSlots(
+        *nds,
+        tick,
+        static_cast<u32>(fallbackWindow),
+        normalizeTick != 0);
+
+    if (suppressDisconnect)
+    {
+        const u16 flags = nds->ARM9Read16(0x02087E5C);
+        nds->ARM9Write16(0x02087E5C, flags & static_cast<u16>(~0xC390));
+        if (nds->ARM9Read8(0x02087E1C) == 9)
+            nds->ARM9Write8(0x02087E1C, 6);
+    }
+
+    if (preserveNetPointers)
+    {
+        static constexpr u32 addrs[] = {
+            0x02087E0C,
+            0x02087E90,
+            0x02087ED8,
+            0x02087EDC,
+            0x02088020,
+        };
+        auto& saved = NSMLPreservedNetWords[nds];
+        for (const u32 addr : addrs)
+        {
+            const u32 current = nds->ARM9Read32(addr);
+            auto it = saved.find(addr);
+            if (current != 0)
+            {
+                saved[addr] = current;
+            }
+            else if (it != saved.end() && it->second != 0)
+            {
+                nds->ARM9Write32(addr, it->second);
+            }
+        }
+    }
+
+    if (suppressBlackout)
+    {
+        // MvL disables display layers when the underlying LocalMP path disappears.
+        // Keep the normal gameplay display setup while the packet bridge supplies game packets.
+        nds->ARM9Write32(0x04000000, 0xC8211F3D);
+        nds->ARM9Write32(0x04001000, 0x00011E10);
+        nds->ARM9Write16(0x04000050, 0x3F40);
+        nds->ARM9Write16(0x04000054, 0x0000);
+        nds->ARM9Write16(0x04001050, 0x00FF);
+        nds->ARM9Write16(0x04001054, 0x0000);
+    }
 }
 
 static std::vector<std::string> SplitNSMLCsvLine(const std::string& line)
@@ -389,8 +540,12 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
     const u32 offset = cpu->R[1];
     if (!IsNSMLMarioVsLuigiGameplay(cpu->NDS))
         return false;
+    if (cfg.Strict && cpu->NDS.NumFrames < cfg.StrictStartFrame)
+        return false;
 
     const u32 tick = cpu->NDS.ARM9Read16(0x02087F00);
+    if (NSMLPacketBridgeEnabled())
+        NSMLWriteLiveReplayPacketsToLocalMPSlots(cpu->NDS, tick, cfg.LiveFallbackWindow, cfg.ReturnLookupTick);
     u32 value = 0;
     bool hit = false;
 
@@ -400,31 +555,12 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
     {
         {
             std::lock_guard<std::mutex> lock(NSMLPacketBridgeMutex);
-            auto ndsIt = NSMLLiveReplayPackets.find(&cpu->NDS);
-            if (ndsIt != NSMLLiveReplayPackets.end())
-            {
-                auto liveIt = ndsIt->second.find(tick);
-                if (liveIt != ndsIt->second.end() && liveIt->second.Valid[player])
-                {
-                    selectedPacket = liveIt->second.Packet[player];
-                    packetValid = true;
-                }
-                else if (cfg.LiveFallbackWindow > 0)
-                {
-                    const u32 window = std::min<u32>(cfg.LiveFallbackWindow, 120);
-                    for (u32 age = 1; age <= window; age++)
-                    {
-                        const u32 fallbackTick = (tick - age) & 0xFFFF;
-                        auto fallbackIt = ndsIt->second.find(fallbackTick);
-                        if (fallbackIt != ndsIt->second.end() && fallbackIt->second.Valid[player])
-                        {
-                            selectedPacket = fallbackIt->second.Packet[player];
-                            packetValid = true;
-                            break;
-                        }
-                    }
-                }
-            }
+            packetValid = NSMLFindLiveReplayPacketLocked(
+                &cpu->NDS,
+                player,
+                tick,
+                cfg.LiveFallbackWindow,
+                selectedPacket);
         }
 
         if (!packetValid)
