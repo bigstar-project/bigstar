@@ -37,6 +37,7 @@
 #include <enet/enet.h>
 
 #include "NDS.h"
+#include "ARM.h"
 #include "Savestate.h"
 #include "LocalMP.h"
 #include "MPInterface.h"
@@ -110,8 +111,22 @@ struct WireSeed
 
 constexpr melonDS::u32 kWireKindSeed = 0x44454553; // "SEED", little endian
 constexpr melonDS::u32 kWireKindState = 0x54415453; // "STAT", little endian
+constexpr melonDS::u32 kWireKindPacket = 0x4B434150; // "PACK", little endian
 
 static_assert(sizeof(WireSeed) == 16);
+
+struct WireNSMLPacket
+{
+    melonDS::u32 Magic;
+    melonDS::u32 Version;
+    melonDS::u32 Kind;
+    melonDS::u32 Frame;
+    melonDS::u32 Player;
+    melonDS::u32 Tick;
+    melonDS::u8 Packet[52];
+};
+
+static_assert(sizeof(WireNSMLPacket) == 76);
 
 struct WireGameState
 {
@@ -353,6 +368,10 @@ struct State
     bool NetplayStartWaitComplete = false;
     bool DeferNetworkUntilStart = false;
     bool NetplayFrameBarrierEnabled = false;
+    bool PacketBridgeEnabled = false;
+    bool PacketBridgeOnly = false;
+    bool PacketBridgeTraceEnabled = false;
+    bool PacketBridgeSendLocalPlayerOnly = true;
     std::string InputScriptPath;
     std::string HashLogPath;
     std::string ScreenshotDir;
@@ -400,9 +419,12 @@ struct State
     std::map<melonDS::u64, GameStateSyncHashes> LocalGameStateHashes;
     std::map<melonDS::u64, GameStateSyncHashes> RemoteGameStateHashes;
     std::map<melonDS::u64, GameStateSample> RemoteGameStateSamples;
+    std::vector<WireNSMLPacket> PendingNSMLPackets;
     bool GameStateMismatchSeen = false;
     melonDS::u32 LastTracedSentInputFrame = kNoFrameLimit;
     melonDS::u32 LastTracedReceivedInputFrame = kNoFrameLimit;
+    melonDS::u32 LastSentNSMLPacketTick = 0xFFFFFFFF;
+    melonDS::u32 LastReceivedNSMLPacketTick[2] { 0xFFFFFFFF, 0xFFFFFFFF };
     std::vector<std::pair<melonDS::u32, melonDS::u32>> RamDumpRanges;
     std::vector<std::pair<melonDS::u32, melonDS::u32>> MemPatchRanges;
     melonDS::u64 LastLoggedHashFrame[16] {};
@@ -735,7 +757,7 @@ InputState ApplyInputScript(int instanceID, melonDS::u32 frame, const InputState
     return fallback;
 }
 
-void PumpNetworkLocked()
+void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kNoFrameLimit)
 {
     if (!G.Host) return;
 
@@ -793,6 +815,29 @@ void PumpNetworkLocked()
                         G.NetRandomPatchAuto = true;
                     }
                     std::printf("NSMB PoC: received match seed 0x%08X\n", packet.Seed);
+                }
+            }
+            else if (event.packet->dataLength == sizeof(WireNSMLPacket))
+            {
+                WireNSMLPacket packet;
+                std::memcpy(&packet, event.packet->data, sizeof(packet));
+                if (packet.Magic == kMagic && packet.Version == kVersion && packet.Kind == kWireKindPacket
+                    && packet.Player <= 1)
+                {
+                    if (G.PacketBridgeEnabled && nds)
+                        melonDS::NSML_PushMarioVsLuigiRemotePacket(nds, packet.Player, packet.Packet);
+                    else
+                        G.PendingNSMLPackets.push_back(packet);
+                    if (G.PacketBridgeTraceEnabled && packet.Tick != G.LastReceivedNSMLPacketTick[packet.Player])
+                    {
+                        G.LastReceivedNSMLPacketTick[packet.Player] = packet.Tick;
+                        std::printf("NSMB PacketBridge: recv player=%u tick=0x%04X remoteFrame=%u localFrame=%u pending=%zu\n",
+                            packet.Player,
+                            packet.Tick,
+                            packet.Frame,
+                            localFrame,
+                            G.PendingNSMLPackets.size());
+                    }
                 }
             }
             else if (event.packet->dataLength == sizeof(WireGameState))
@@ -955,6 +1000,72 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
             input.KeyMask,
             G.LocalInputs.size());
     }
+}
+
+melonDS::u32 LocalPlayerID(melonDS::NDS* nds)
+{
+    if (!nds)
+        return 0;
+
+    return nds->ARM9Read32(kGameLocalPlayerIDAddr) & 1;
+}
+
+void ApplyPendingNSMLPacketsLocked(melonDS::NDS* nds)
+{
+    if (!G.PacketBridgeEnabled || !nds || G.PendingNSMLPackets.empty())
+        return;
+
+    for (const WireNSMLPacket& packet : G.PendingNSMLPackets)
+        melonDS::NSML_PushMarioVsLuigiRemotePacket(nds, packet.Player, packet.Packet);
+    G.PendingNSMLPackets.clear();
+}
+
+void SendNSMLPacketLocked(melonDS::u32 frame, melonDS::u32 player, melonDS::u32 tick, const melonDS::u8 packetBytes[52])
+{
+    if (!G.PacketBridgeEnabled || !G.Peer || !packetBytes || player > 1)
+        return;
+
+    SendMatchSeedLocked();
+
+    WireNSMLPacket packet {};
+    packet.Magic = kMagic;
+    packet.Version = kVersion;
+    packet.Kind = kWireKindPacket;
+    packet.Frame = frame;
+    packet.Player = player;
+    packet.Tick = tick;
+    std::memcpy(packet.Packet, packetBytes, sizeof(packet.Packet));
+
+    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), 0);
+    if (!enetPacket)
+        return;
+
+    enet_peer_send(G.Peer, 0, enetPacket);
+    enet_host_flush(G.Host);
+
+    if (G.PacketBridgeTraceEnabled && tick != G.LastSentNSMLPacketTick)
+    {
+        G.LastSentNSMLPacketTick = tick;
+        std::printf("NSMB PacketBridge: send player=%u tick=0x%04X frame=%u\n",
+            player,
+            tick,
+            frame);
+    }
+}
+
+void CaptureAndSendNSMLPacketLocked(melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.PacketBridgeEnabled || !nds)
+        return;
+
+    melonDS::u8 packet[52] {};
+    melonDS::u32 tick = 0;
+    melonDS::u32 keys = 0;
+    if (!melonDS::NSML_TakeMarioVsLuigiLocalPacket(nds, packet, &tick, &keys))
+        return;
+
+    (void)keys;
+    SendNSMLPacketLocked(frame, LocalPlayerID(nds), tick, packet);
 }
 
 void PruneInputHistoryLocked(melonDS::u32 keepFromFrame)
@@ -2894,6 +3005,10 @@ void InitFromEnvironment()
     G.WaitForPeerAtNetplayStart = EnvFlag("MELONDS_NSML_WAIT_FOR_PEER_AT_NETPLAY_START");
     G.DeferNetworkUntilStart = EnvFlag("MELONDS_NSML_DEFER_NETWORK_UNTIL_START");
     G.NetplayFrameBarrierEnabled = EnvFlag("MELONDS_NSML_NETPLAY_FRAME_BARRIER");
+    G.PacketBridgeEnabled = EnvFlag("MELONDS_NSML_PACKET_BRIDGE");
+    G.PacketBridgeOnly = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_ONLY");
+    G.PacketBridgeTraceEnabled = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_TRACE");
+    G.PacketBridgeSendLocalPlayerOnly = !EnvFlag("MELONDS_NSML_PACKET_BRIDGE_SEND_ALL");
 
     const char* inputScript = std::getenv("MELONDS_NSML_INPUT_SCRIPT");
     if (inputScript && inputScript[0]) G.InputScriptPath = inputScript;
@@ -3018,7 +3133,7 @@ void InitFromEnvironment()
             }
         }
 
-        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d\n",
+        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgeTrace=%d\n",
             G.TestFrames,
             G.TestInstanceCount,
             G.FrameBarrierEnabled ? 1 : 0,
@@ -3055,7 +3170,11 @@ void InitFromEnvironment()
             G.WaitForPeerBeforeStart ? 1 : 0,
             G.WaitForPeerAtNetplayStart ? 1 : 0,
             G.DeferNetworkUntilStart ? 1 : 0,
-            G.NetplayFrameBarrierEnabled ? 1 : 0);
+            G.NetplayFrameBarrierEnabled ? 1 : 0,
+            G.PacketBridgeEnabled ? 1 : 0,
+            G.PacketBridgeOnly ? 1 : 0,
+            G.PacketBridgeTraceEnabled ? 1 : 0);
+        std::fflush(stdout);
     }
 
     if (!G.Enabled) return;
@@ -3078,7 +3197,7 @@ void InitFromEnvironment()
         G.MatchSeedConfigured = true;
     }
 
-    if (G.NetRole == Role::Host && G.MatchSeedConfigured && G.StateLoadDir.empty())
+    if (G.NetRole == Role::Host && G.MatchSeedConfigured && G.StateLoadDir.empty() && !G.PacketBridgeOnly)
     {
         G.NetRandomPatchEnabled = true;
         G.NetRandomPatchAuto = true;
@@ -3120,7 +3239,7 @@ void InitFromEnvironment()
     }
 
     G.Ready = true;
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d matchSeed=0x%08X seedConfigured=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgeTrace=%d matchSeed=0x%08X seedConfigured=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -3133,8 +3252,12 @@ void InitFromEnvironment()
         G.WaitForPeerAtNetplayStart ? 1 : 0,
         G.DeferNetworkUntilStart ? 1 : 0,
         G.NetplayFrameBarrierEnabled ? 1 : 0,
+        G.PacketBridgeEnabled ? 1 : 0,
+        G.PacketBridgeOnly ? 1 : 0,
+        G.PacketBridgeTraceEnabled ? 1 : 0,
         G.MatchSeed,
         G.MatchSeedConfigured ? 1 : 0);
+    std::fflush(stdout);
 }
 
 InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, const InputState& polledInput)
@@ -3172,10 +3295,24 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     const melonDS::u32 syncFrame = G.TestEnabled ? inputFrame : frame;
 
     if (!G.Enabled || !G.Ready) return testInput;
-    if (syncFrame == 0)
+    if (syncFrame == 0 && !G.PacketBridgeOnly)
     {
         WaitForPeerIfNeeded();
         WaitForMatchSeedIfNeeded();
+    }
+
+    if (G.PacketBridgeEnabled && G.PacketBridgeOnly)
+    {
+        const bool bridgeNetworkActive =
+            !G.DeferNetworkUntilStart || G.NetplayStartFrame == 0 || syncFrame >= G.NetplayStartFrame;
+        if (bridgeNetworkActive)
+        {
+            std::lock_guard<std::mutex> lock(G.Mutex);
+            PumpNetworkLocked(nds, syncFrame);
+            ApplyPendingNSMLPacketsLocked(nds);
+            SendMatchSeedLocked();
+        }
+        return testInput;
     }
 
     const bool isLocal = (instanceID == G.LocalInstance);
@@ -3194,7 +3331,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
             localInput = ApplyInputScript(G.LocalInstance, syncFrame, NeutralInput());
 
         std::lock_guard<std::mutex> lock(G.Mutex);
-        PumpNetworkLocked();
+        PumpNetworkLocked(nds, syncFrame);
+        ApplyPendingNSMLPacketsLocked(nds);
         SendMatchSeedLocked();
         if (netplaySendActive)
         {
@@ -3225,7 +3363,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         bool needsInitialRemoteInput = false;
         {
             std::lock_guard<std::mutex> lock(G.Mutex);
-            PumpNetworkLocked();
+            PumpNetworkLocked(nds, targetFrame);
+            ApplyPendingNSMLPacketsLocked(nds);
             needsInitialRemoteInput =
                 !G.NetplayAnyLockstepStarted && G.RemoteInputs.find(targetFrame) == G.RemoteInputs.end();
         }
@@ -3287,6 +3426,16 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     if (G.Enabled)
         ApplyRemoteGameState(instanceID, logFrame, nds);
+
+    const bool bridgeNetworkActive =
+        !G.DeferNetworkUntilStart || G.NetplayStartFrame == 0 || logFrame >= G.NetplayStartFrame;
+    if (G.Enabled && G.PacketBridgeEnabled && bridgeNetworkActive)
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        PumpNetworkLocked(nds, logFrame);
+        ApplyPendingNSMLPacketsLocked(nds);
+        CaptureAndSendNSMLPacketLocked(logFrame, nds);
+    }
 
     SaveState(instanceID, logFrame, nds);
     SaveLocalMPState(logFrame);

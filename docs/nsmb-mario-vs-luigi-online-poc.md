@@ -66,6 +66,18 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード�
   - `Net::sendPacket` 周辺のtick/keys/payloadと、MvL gameplay action `0x03` からpacketを再構築する。
 - `tools/nsmb_packet_capture_compare.py` を追加済み。
   - capture hook出力と、LAN/LocalMP payloadから抽出したpacket CSVが一致するか検証できる。
+- live packet bridgeの最小版を追加済み。
+  - `MELONDS_NSML_PACKET_BRIDGE=1` で、capture hookが取ったlocal 52 byte packetを既存ENet PoC経由で相手プロセスへ送れる。
+  - 受信packetはlive replay bufferへ入り、`Net::getConsoleKeys()` / `Net::getPacketByte()` / `Net::getPacketTick()` から参照できる。
+  - `MELONDS_NSML_PACKET_BRIDGE_ONLY=1` で、既存の入力lockstepを動かさずpacket bridgeだけを動かせる。
+  - `MELONDS_NSML_PACKET_BRIDGE_REPLAY_TICK_OFFSET` で、受信packetを何tick後のreplay lookupに使うか実験できる。
+- LAN route smokeにpacket bridge検証オプションを追加済み。
+  - `-PacketBridge`
+  - `-PacketBridgeTrace`
+  - `-PacketBridgeStartFrame`
+  - `-HostPacketBridgeReplayTickOffset`
+  - `-ClientPacketBridgeReplayTickOffset`
+- ARM側packet bridge設定の二重mutex取得による実行停止を修正済み。
 
 ## 直近の検証結果
 
@@ -85,6 +97,10 @@ cmake --build build\debug-windows-x86_64 --target melonDS --config Debug
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 5100 -LogDir logs\lan-route-5100-lanmp-trace -GameStateTrace -GameStateTraceInterval 60 -LanMPTrace
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 5100 -LogDir logs\lan-route-5100-packet-replay-hook-gated -GameStateTrace -GameStateTraceInterval 60 -HostPacketReplayFile logs\lan-route-5100-lanmp-trace\host.replay.csv -ClientPacketReplayFile logs\lan-route-5100-lanmp-trace\client.replay.csv
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 4900 -LogDir logs\lan-route-4900-packet-capture -GameStateTrace -GameStateTraceInterval 60 -LanMPTrace -PacketCapture
+.\scripts\run-nsmb-smoke.ps1 -Frames 600 -LogDir logs\single-smoke-after-bridge-deadlock-fix
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 5100 -HostStartupDelayMs 50 -LogDir logs\lan-route-5100-after-bridge-deadlock-fix -GameStateTrace -GameStateTraceInterval 60
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 5100 -HostStartupDelayMs 50 -LogDir logs\lan-route-5100-live-packet-bridge-start3000-noseedwait -GameStateTrace -GameStateTraceInterval 60 -PacketBridge -PacketBridgeTrace -PacketBridgeStartFrame 3000
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 3400 -HostStartupDelayMs 50 -LogDir logs\lan-route-3400-live-packet-bridge-role-offsets -GameStateTrace -GameStateTraceInterval 60 -PacketBridge -PacketBridgeTrace -PacketBridgeStartFrame 3000 -HostPacketBridgeReplayTickOffset 3 -ClientPacketBridgeReplayTickOffset 2
 ```
 
 重要な確認:
@@ -108,20 +124,28 @@ cmake --build build\debug-windows-x86_64 --target melonDS --config Debug
 - `logs\lan-route-4900-packet-capture` で、ゲーム側capture hookから作った52 byte packetがLANに実際に出たpacketと一致することを確認済み。
   - host capture vs host `send type=1 slot0`: 2288 ticks, errors=0
   - client capture vs client `send type=65538 slot0`: 2289 ticks, errors=0
+- `logs\single-smoke-after-bridge-deadlock-fix` で、packet bridge追加後も単体smokeが通ることを確認済み。
+- `logs\lan-route-5100-after-bridge-deadlock-fix` で、packet bridge追加後も既存LAN routeがMario vs Luigiへ到達することを確認済み。
+- `logs\lan-route-5100-live-packet-bridge-start3000-noseedwait` で、LAN routeを残したままlive packet bridgeをframe 3000から動かし、host/client間で52 byte packetを送受信できることを確認済み。
+- `logs\lan-route-3400-live-packet-bridge-role-offsets` で、role別tick offsetを入れるとlive bridge由来packetがreplay hookでhitすることを確認済み。
+  - host側はremote player 1の `byte` が12682 hits、`keys` が373 hits。
+  - client側はremote player 0の `byte` が13328 hits、`keys` が392 hits。
+  - 現状はLAN通信を残した補助検証であり、packet bridge単独ではまだない。
 
 ## 現在の課題
 
 - 既存 `LAN` MPInterfaceはDSローカル無線フレーム相当をENetで運ぶため、WAN遅延にそのまま耐える保証はない。
 - ただし、1 EmuInstance * 2プロセスでMario vs Luigiへ到達できる自動検証基盤としては有効。
-- LAN経路上でもNSMBの52 byte packetは観測済み。
-- 次はDS無線フレーム全体ではなく52 byte packetだけを交換する専用bridge/hookへ進む。
+- live packet bridgeは送受信とhook hitまで確認できたが、packetが同tickの `getPacket*` 呼び出し後に届く場合がある。
+- そのため、LANなしに進む前に、tick/frame基準の待ち、遅延、buffer、timeoutを設計する必要がある。
+- player 2/3向けの `getPacket*` missは2P MvLでは不要な可能性が高いので、strict化時はplayer 0/1に限定する。
 
 ## 次にやること
 
-1. capture hookとreplay hookをENetでつなぎ、LAN/LocalMP payloadを経由しないpacket専用bridge PoCを作る。
-2. replay hookのmiss分類を整理し、player 0/1についてstrictにできる条件を詰める。
-3. WAN向けにpacketのframe/tick基準、入力遅延、受信buffer、timeout処理を設計する。
-4. packet bridge単独でMario vs Luigi状態が維持できるか、既存LAN通信を切って検証する。
+1. packet bridgeのtick offset実験を、固定offsetではなく「remote packetが揃うまで待つ/遅延する」制御へ進める。
+2. replay hookのstrict条件をplayer 0/1に限定して整理する。
+3. LAN通信を残したまま、packet bridgeがゲーム状態へ与える影響を比較する。
+4. LAN/LocalMP payloadを切った状態で、packet bridge単独でMario vs Luigi状態を維持できるか検証する。
 
 ## よく使うコマンド
 
@@ -156,6 +180,9 @@ python tools\nsmb_packet_replay_build.py logs\lan-route-5100-lanmp-trace\client.
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 4900 -LogDir logs\lan-route-4900-packet-capture -GameStateTrace -GameStateTraceInterval 60 -LanMPTrace -PacketCapture
 python tools\nsmb_packet_capture_compare.py logs\lan-route-4900-packet-capture\host.packet-capture.csv logs\lan-route-4900-packet-capture\host.packets.csv --event send --type 1 --slot 0
 python tools\nsmb_packet_capture_compare.py logs\lan-route-4900-packet-capture\client.packet-capture.csv logs\lan-route-4900-packet-capture\client.packets.csv --event send --type 65538 --slot 0
+
+# live packet bridge検証（LAN routeを残した補助検証）
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 3400 -HostStartupDelayMs 50 -LogDir logs\lan-route-3400-live-packet-bridge-role-offsets -GameStateTrace -GameStateTraceInterval 60 -PacketBridge -PacketBridgeTrace -PacketBridgeStartFrame 3000 -HostPacketBridgeReplayTickOffset 3 -ClientPacketBridgeReplayTickOffset 2
 
 # setPacketByte traceとLocal MP payloadの対応確認
 python tools\nsmb_packet_trace_probe.py logs\route-combined-setpacket-localmp-2925\nsmb-mvl-route.call-trace.csv --localmp logs\route-combined-setpacket-localmp-2925.csv

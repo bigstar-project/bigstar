@@ -14,6 +14,14 @@ param(
     [string]$HostPacketReplayFile = "",
     [string]$ClientPacketReplayFile = "",
     [switch]$PacketCapture,
+    [switch]$PacketBridge,
+    [switch]$PacketBridgeTrace,
+    [int]$PacketBridgePort = 8165,
+    [int]$PacketBridgeStartFrame = 0,
+    [int]$PacketBridgeReplayTickOffset = 0,
+    [int]$HostPacketBridgeReplayTickOffset = -1,
+    [int]$ClientPacketBridgeReplayTickOffset = -1,
+    [int]$HostStartupDelayMs = 1000,
     [string]$LogDir = "logs\nsmb-mvl-lan-route"
 )
 
@@ -162,6 +170,58 @@ function Start-MelonLANProcess {
     } else {
         Remove-Item Env:\MELONDS_NSML_PACKET_CAPTURE_LOG -ErrorAction SilentlyContinue
     }
+    if ($PacketBridge) {
+        $env:MELONDS_NSML_POC = "1"
+        $env:MELONDS_NSML_ROLE = $Role
+        $env:MELONDS_NSML_PORT = "$PacketBridgePort"
+        $env:MELONDS_NSML_LOCAL_INSTANCE = "0"
+        $env:MELONDS_NSML_PACKET_BRIDGE = "1"
+        $env:MELONDS_NSML_PACKET_BRIDGE_ONLY = "1"
+        $roleReplayOffset = $PacketBridgeReplayTickOffset
+        if ($Role -eq "host" -and $HostPacketBridgeReplayTickOffset -ge 0) {
+            $roleReplayOffset = $HostPacketBridgeReplayTickOffset
+        } elseif ($Role -eq "client" -and $ClientPacketBridgeReplayTickOffset -ge 0) {
+            $roleReplayOffset = $ClientPacketBridgeReplayTickOffset
+        }
+        $env:MELONDS_NSML_PACKET_BRIDGE_REPLAY_TICK_OFFSET = "$roleReplayOffset"
+        Remove-Item Env:\MELONDS_NSML_WAIT_FOR_PEER -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SEED_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
+        if ($PacketBridgeStartFrame -gt 0) {
+            $env:MELONDS_NSML_DEFER_NETWORK_UNTIL_START = "1"
+            $env:MELONDS_NSML_NETPLAY_START_FRAME = "$PacketBridgeStartFrame"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_DEFER_NETWORK_UNTIL_START -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_NETPLAY_START_FRAME -ErrorAction SilentlyContinue
+        }
+        if ($Role -eq "client") {
+            $env:MELONDS_NSML_PEER = "127.0.0.1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PEER -ErrorAction SilentlyContinue
+        }
+        if ($PacketBridgeTrace) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_TRACE = "1"
+            $env:MELONDS_NSML_PACKET_REPLAY_LOG = "$Stdout.packet-replay.csv"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_TRACE -ErrorAction SilentlyContinue
+            if (-not $PacketReplayFile) {
+                Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LOG -ErrorAction SilentlyContinue
+            }
+        }
+    } else {
+        Remove-Item Env:\MELONDS_NSML_POC -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PEER -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PORT -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_LOCAL_INSTANCE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_REPLAY_TICK_OFFSET -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_TRACE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WAIT_FOR_PEER -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SEED_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DEFER_NETWORK_UNTIL_START -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_NETPLAY_START_FRAME -ErrorAction SilentlyContinue
+    }
     $env:MELONDS_NSML_FIXED_RTC = "2020-01-01T00:00:00"
     $env:MELONDS_NSML_DISABLE_JIT = "1"
     $env:MELONDS_NSML_MP_INTERFACE = "lan"
@@ -174,12 +234,6 @@ function Start-MelonLANProcess {
     } else {
         $env:MELONDS_NSML_FIRMWARE_MAC = "00:09:BF:11:22:43"
     }
-    Remove-Item Env:\MELONDS_NSML_POC -ErrorAction SilentlyContinue
-    Remove-Item Env:\MELONDS_NSML_ROLE -ErrorAction SilentlyContinue
-    Remove-Item Env:\MELONDS_NSML_PEER -ErrorAction SilentlyContinue
-    Remove-Item Env:\MELONDS_NSML_PORT -ErrorAction SilentlyContinue
-    Remove-Item Env:\MELONDS_NSML_LOCAL_INSTANCE -ErrorAction SilentlyContinue
-
     $err = "$Stdout.err"
     $process = Start-Process -FilePath $exePath `
         -ArgumentList "`"$RoleRom`"" `
@@ -234,7 +288,7 @@ $hostProc = $null
 $clientProc = $null
 try {
     $hostProc = Start-MelonLANProcess -Role "host" -RoleRom $hostRom -RoleInput $hostInput -Stdout $hostOut -HashLog $hostHash -ScreenshotDir $hostScreens -GameStateTracePath $hostGameStateTrace -LanMPTracePath $hostLanMPTrace -PacketReplayFile $HostPacketReplayFile -PacketCapturePath $hostPacketCapture -RamDumpDir $hostRamDumps
-    Wait-LogPattern -Path $hostOut -Pattern "LAN host start .* ok=1" -TimeoutMs 10000
+    Start-Sleep -Milliseconds $HostStartupDelayMs
     $clientProc = Start-MelonLANProcess -Role "client" -RoleRom $clientRom -RoleInput $clientInput -Stdout $clientOut -HashLog $clientHash -ScreenshotDir $clientScreens -GameStateTracePath $clientGameStateTrace -LanMPTracePath $clientLanMPTrace -PacketReplayFile $ClientPacketReplayFile -PacketCapturePath $clientPacketCapture -RamDumpDir $clientRamDumps
 
     Complete-MelonLANProcess $clientProc

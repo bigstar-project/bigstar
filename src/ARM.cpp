@@ -45,6 +45,114 @@ using Platform::LogLevel;
 
 static std::mutex NSMLTraceConfigMutex;
 static std::mutex NSMLTraceOutputMutex;
+static std::mutex NSMLPacketBridgeMutex;
+
+struct NSMLPacketReplayEntry
+{
+    bool Valid[2] {};
+    std::array<u8, 52> Packet[2] {};
+};
+
+struct NSMLLocalPacketCapture
+{
+    bool Available = false;
+    u32 Tick = 0;
+    u32 Keys = 0;
+    u32 Frame = 0;
+    std::array<u8, 52> Packet {};
+};
+
+static std::map<NDS*, NSMLLocalPacketCapture> NSMLLocalPackets;
+static std::map<NDS*, std::map<u32, NSMLPacketReplayEntry>> NSMLLiveReplayPackets;
+
+static bool NSMLEnvFlag(const char* name)
+{
+    const char* value = getenv(name);
+    return value && value[0] && strcmp(value, "0") != 0;
+}
+
+static bool NSMLPacketBridgeEnabled()
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE") ? 1 : 0;
+    return enabled != 0;
+}
+
+static int NSMLPacketBridgeReplayTickOffset()
+{
+    static int offset = 0x7FFFFFFF;
+    if (offset == 0x7FFFFFFF)
+    {
+        if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_REPLAY_TICK_OFFSET"))
+            offset = atoi(value);
+        else
+            offset = 0;
+    }
+    return offset;
+}
+
+static bool IsNSMLMarioVsLuigiGameplay(NDS& nds)
+{
+    return nds.ARM9Read32(0x02085058) == 9
+        && nds.ARM9Read32(0x020850C4) == 1
+        && nds.ARM9Read32(0x02087E78) == 0x42;
+}
+
+static void BuildNSMLMarioVsLuigiPacket(NDS& nds, std::array<u8, 52>& packet, u32& tick, u32& keys)
+{
+    packet.fill(0);
+    tick = nds.ARM9Read16(0x02087F00);
+    keys = nds.ARM9Read16(0x02087F02);
+    packet[0] = static_cast<u8>(tick & 0xFF);
+    packet[1] = static_cast<u8>((tick >> 8) & 0xFF);
+    packet[2] = static_cast<u8>(keys & 0xFF);
+    packet[3] = static_cast<u8>((keys >> 8) & 0xFF);
+    packet[4] = 0x03; // MvL gameplay packet action.
+    packet[5] = 0x00;
+    packet[6] = 0xFF;
+    packet[7] = 0xFF;
+    for (u32 i = 0; i < 44; i++)
+        packet[8 + i] = nds.ARM9Read8(0x02087F08 + i);
+}
+
+bool NSML_TakeMarioVsLuigiLocalPacket(NDS* nds, u8 outPacket[52], u32* outTick, u32* outKeys)
+{
+    if (!nds || !outPacket)
+        return false;
+
+    std::lock_guard<std::mutex> lock(NSMLPacketBridgeMutex);
+    auto it = NSMLLocalPackets.find(nds);
+    if (it == NSMLLocalPackets.end() || !it->second.Available)
+        return false;
+
+    memcpy(outPacket, it->second.Packet.data(), it->second.Packet.size());
+    if (outTick) *outTick = it->second.Tick;
+    if (outKeys) *outKeys = it->second.Keys;
+    it->second.Available = false;
+    return true;
+}
+
+void NSML_PushMarioVsLuigiRemotePacket(NDS* nds, u32 player, const u8 packet[52])
+{
+    if (!nds || !packet || player > 1)
+        return;
+
+    const u32 packetTick = packet[0] | (packet[1] << 8);
+    const int offset = NSMLPacketBridgeReplayTickOffset();
+    const u32 tick = static_cast<u32>((static_cast<int>(packetTick) + offset) & 0xFFFF);
+    std::lock_guard<std::mutex> lock(NSMLPacketBridgeMutex);
+    auto& packets = NSMLLiveReplayPackets[nds];
+    auto& entry = packets[tick];
+    memcpy(entry.Packet[player].data(), packet, entry.Packet[player].size());
+    entry.Valid[player] = true;
+
+    if (packets.size() > 512)
+    {
+        const u32 keepFrom = tick > 256 ? tick - 256 : 0;
+        packets.erase(packets.begin(), packets.lower_bound(keepFrom));
+    }
+}
 
 static std::vector<std::string> SplitNSMLCsvLine(const std::string& line)
 {
@@ -81,19 +189,13 @@ static bool ParseNSMLHexPacket(const std::string& hex, std::array<u8, 52>& out)
 
 static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
 {
-    struct PacketReplayEntry
-    {
-        bool Valid[2] {};
-        std::array<u8, 52> Packet[2] {};
-    };
-
     struct PacketReplayConfig
     {
         bool Checked = false;
         bool Enabled = false;
         bool Strict = false;
         FILE* LogFile = nullptr;
-        std::map<u32, PacketReplayEntry> Packets;
+        std::map<u32, NSMLPacketReplayEntry> Packets;
     };
 
     static PacketReplayConfig cfg;
@@ -104,6 +206,7 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
         {
             cfg.Strict = getenv("MELONDS_NSML_PACKET_REPLAY_STRICT") != nullptr;
             const char* path = getenv("MELONDS_NSML_PACKET_REPLAY_FILE");
+            const bool bridgeEnabled = NSMLPacketBridgeEnabled();
             if (const char* logPath = getenv("MELONDS_NSML_PACKET_REPLAY_LOG"))
             {
                 if (logPath[0])
@@ -145,6 +248,8 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
                 else
                     Log(LogLevel::Warn, "NSMB packet replay: no packets loaded from %s\n", path);
             }
+            if (bridgeEnabled)
+                cfg.Enabled = true;
             cfg.Checked = true;
         }
     }
@@ -175,20 +280,45 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
 
     const u32 player = cpu->R[0] & 0xFFFF;
     const u32 offset = cpu->R[1];
-    const u32 stageGroup = cpu->NDS.ARM9Read32(0x02085058);
-    const u32 vsMode = cpu->NDS.ARM9Read32(0x020850C4);
-    const u32 ggid = cpu->NDS.ARM9Read32(0x02087E78);
-    if (stageGroup != 9 || vsMode != 1 || ggid != 0x42)
+    if (!IsNSMLMarioVsLuigiGameplay(cpu->NDS))
         return false;
 
     const u32 tick = cpu->NDS.ARM9Read16(0x02087F00);
     u32 value = 0;
     bool hit = false;
 
-    auto it = cfg.Packets.find(tick);
-    if (player <= 1 && it != cfg.Packets.end() && it->second.Valid[player])
+    std::array<u8, 52> selectedPacket {};
+    bool packetValid = false;
+    if (player <= 1)
     {
-        const auto& packet = it->second.Packet[player];
+        {
+            std::lock_guard<std::mutex> lock(NSMLPacketBridgeMutex);
+            auto ndsIt = NSMLLiveReplayPackets.find(&cpu->NDS);
+            if (ndsIt != NSMLLiveReplayPackets.end())
+            {
+                auto liveIt = ndsIt->second.find(tick);
+                if (liveIt != ndsIt->second.end() && liveIt->second.Valid[player])
+                {
+                    selectedPacket = liveIt->second.Packet[player];
+                    packetValid = true;
+                }
+            }
+        }
+
+        if (!packetValid)
+        {
+            auto it = cfg.Packets.find(tick);
+            if (it != cfg.Packets.end() && it->second.Valid[player])
+            {
+                selectedPacket = it->second.Packet[player];
+                packetValid = true;
+            }
+        }
+    }
+
+    if (packetValid)
+    {
+        const auto& packet = selectedPacket;
         switch (op)
         {
         case Op::Keys:
@@ -242,6 +372,7 @@ static void TraceNSMLPacketCapture(ARM* cpu, u32 instrAddr)
     {
         bool Checked = false;
         bool Enabled = false;
+        bool BridgeEnabled = false;
         FILE* LogFile = nullptr;
         std::map<void*, u32> LastTickByNDS;
     };
@@ -256,10 +387,11 @@ static void TraceNSMLPacketCapture(ARM* cpu, u32 instrAddr)
             {
                 if (logPath[0])
                     cfg.LogFile = fopen(logPath, "w");
-                cfg.Enabled = cfg.LogFile != nullptr;
-                if (cfg.Enabled)
+                if (cfg.LogFile)
                     fprintf(cfg.LogFile, "nds,frame,tick,keys,action,packet_hex\n");
             }
+            cfg.BridgeEnabled = NSMLPacketBridgeEnabled();
+            cfg.Enabled = cfg.LogFile != nullptr || cfg.BridgeEnabled;
             cfg.Checked = true;
         }
     }
@@ -269,10 +401,7 @@ static void TraceNSMLPacketCapture(ARM* cpu, u32 instrAddr)
     if (instrAddr != 0x02011428) // Net::Core::processSendPacket()
         return;
 
-    const u32 stageGroup = cpu->NDS.ARM9Read32(0x02085058);
-    const u32 vsMode = cpu->NDS.ARM9Read32(0x020850C4);
-    const u32 ggid = cpu->NDS.ARM9Read32(0x02087E78);
-    if (stageGroup != 9 || vsMode != 1 || ggid != 0x42)
+    if (!IsNSMLMarioVsLuigiGameplay(cpu->NDS))
         return;
 
     const u32 tick = cpu->NDS.ARM9Read16(0x02087F00);
@@ -283,28 +412,34 @@ static void TraceNSMLPacketCapture(ARM* cpu, u32 instrAddr)
     cfg.LastTickByNDS[const_cast<void*>(ndsKey)] = tick;
 
     std::array<u8, 52> packet {};
-    packet[0] = static_cast<u8>(tick & 0xFF);
-    packet[1] = static_cast<u8>((tick >> 8) & 0xFF);
-    const u32 keys = cpu->NDS.ARM9Read16(0x02087F02);
-    packet[2] = static_cast<u8>(keys & 0xFF);
-    packet[3] = static_cast<u8>((keys >> 8) & 0xFF);
-    packet[4] = 0x03; // MvL gameplay packet action.
-    packet[5] = 0x00;
-    packet[6] = 0xFF;
-    packet[7] = 0xFF;
-    for (u32 i = 0; i < 44; i++)
-        packet[8 + i] = cpu->NDS.ARM9Read8(0x02087F08 + i);
+    u32 builtTick = 0;
+    u32 keys = 0;
+    BuildNSMLMarioVsLuigiPacket(cpu->NDS, packet, builtTick, keys);
 
-    std::lock_guard<std::mutex> outputLock(NSMLTraceOutputMutex);
-    fprintf(cfg.LogFile, "%p,%u,0x%04X,0x%04X,0x03,",
-        static_cast<void*>(&cpu->NDS),
-        cpu->NDS.NumFrames,
-        tick,
-        keys);
-    for (u8 byte : packet)
-        fprintf(cfg.LogFile, "%02X", byte);
-    fputc('\n', cfg.LogFile);
-    fflush(cfg.LogFile);
+    if (cfg.BridgeEnabled)
+    {
+        std::lock_guard<std::mutex> lock(NSMLPacketBridgeMutex);
+        auto& local = NSMLLocalPackets[&cpu->NDS];
+        local.Available = true;
+        local.Tick = builtTick;
+        local.Keys = keys;
+        local.Frame = cpu->NDS.NumFrames;
+        local.Packet = packet;
+    }
+
+    if (cfg.LogFile)
+    {
+        std::lock_guard<std::mutex> outputLock(NSMLTraceOutputMutex);
+        fprintf(cfg.LogFile, "%p,%u,0x%04X,0x%04X,0x03,",
+            static_cast<void*>(&cpu->NDS),
+            cpu->NDS.NumFrames,
+            builtTick,
+            keys);
+        for (u8 byte : packet)
+            fprintf(cfg.LogFile, "%02X", byte);
+        fputc('\n', cfg.LogFile);
+        fflush(cfg.LogFile);
+    }
 }
 
 static bool TraceNSMLRandomCallImpl(ARM* cpu, u32 instrAddr, u32 lr, bool hasLR)
