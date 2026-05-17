@@ -11,6 +11,8 @@ param(
     [int]$RamDumpInterval = 0,
     [switch]$LanMPTrace,
     [int]$LanMPTraceDumpLen = 512,
+    [string]$HostPacketReplayFile = "",
+    [string]$ClientPacketReplayFile = "",
     [string]$LogDir = "logs\nsmb-mvl-lan-route"
 )
 
@@ -103,6 +105,7 @@ function Start-MelonLANProcess {
         [string]$ScreenshotDir,
         [string]$GameStateTracePath,
         [string]$LanMPTracePath,
+        [string]$PacketReplayFile,
         [string]$RamDumpDir
     )
 
@@ -142,6 +145,13 @@ function Start-MelonLANProcess {
     } else {
         Remove-Item Env:\MELONDS_NSML_LANMP_TRACE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_LANMP_TRACE_DUMP_LEN -ErrorAction SilentlyContinue
+    }
+    if ($PacketReplayFile) {
+        $env:MELONDS_NSML_PACKET_REPLAY_FILE = (Resolve-Path $PacketReplayFile).Path
+        $env:MELONDS_NSML_PACKET_REPLAY_LOG = "$Stdout.packet-replay.csv"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_FILE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LOG -ErrorAction SilentlyContinue
     }
     $env:MELONDS_NSML_FIXED_RTC = "2020-01-01T00:00:00"
     $env:MELONDS_NSML_DISABLE_JIT = "1"
@@ -214,9 +224,9 @@ function Complete-MelonLANProcess {
 $hostProc = $null
 $clientProc = $null
 try {
-    $hostProc = Start-MelonLANProcess -Role "host" -RoleRom $hostRom -RoleInput $hostInput -Stdout $hostOut -HashLog $hostHash -ScreenshotDir $hostScreens -GameStateTracePath $hostGameStateTrace -LanMPTracePath $hostLanMPTrace -RamDumpDir $hostRamDumps
+    $hostProc = Start-MelonLANProcess -Role "host" -RoleRom $hostRom -RoleInput $hostInput -Stdout $hostOut -HashLog $hostHash -ScreenshotDir $hostScreens -GameStateTracePath $hostGameStateTrace -LanMPTracePath $hostLanMPTrace -PacketReplayFile $HostPacketReplayFile -RamDumpDir $hostRamDumps
     Wait-LogPattern -Path $hostOut -Pattern "LAN host start .* ok=1" -TimeoutMs 10000
-    $clientProc = Start-MelonLANProcess -Role "client" -RoleRom $clientRom -RoleInput $clientInput -Stdout $clientOut -HashLog $clientHash -ScreenshotDir $clientScreens -GameStateTracePath $clientGameStateTrace -LanMPTracePath $clientLanMPTrace -RamDumpDir $clientRamDumps
+    $clientProc = Start-MelonLANProcess -Role "client" -RoleRom $clientRom -RoleInput $clientInput -Stdout $clientOut -HashLog $clientHash -ScreenshotDir $clientScreens -GameStateTracePath $clientGameStateTrace -LanMPTracePath $clientLanMPTrace -PacketReplayFile $ClientPacketReplayFile -RamDumpDir $clientRamDumps
 
     Complete-MelonLANProcess $clientProc
     Complete-MelonLANProcess $hostProc

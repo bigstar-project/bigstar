@@ -52,6 +52,15 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード�
   - `MELONDS_NSML_LANMP_TRACE` / `MELONDS_NSML_LANMP_TRACE_DUMP_LEN`
   - `scripts/run-nsmb-mvl-lan-route-smoke.ps1 -LanMPTrace` でhost/client別に `host.lanmp.csv` / `client.lanmp.csv` を出力できる。
   - 既存の `tools/nsmb_localmp_packet_extract.py` でLAN traceからも52 byte NSMB packetを抽出できる。
+- `tools/nsmb_packet_stream_compare.py` を追加済み。
+  - host/clientの抽出済みpacket CSVを比較し、host command slotとclient reply/recvの対応を検証できる。
+- packet replay hookの最小版を追加済み。
+  - `MELONDS_NSML_PACKET_REPLAY_FILE` で `tick,player,packet_hex` CSVを読み込む。
+  - MvL状態 (`stageGroup=9`, `vsMode=1`, `ggid=0x42`) に入ってからだけ有効化する。
+  - `Net::getConsoleKeys()` / `Net::getPacketByte()` / `Net::getPacketTick()` / `Net::getPacketAction()` の戻り値を、現在tick/playerに対応するpacketから返せる。
+  - `MELONDS_NSML_PACKET_REPLAY_LOG` でhit/missをCSV出力する。
+- `tools/nsmb_packet_replay_build.py` を追加済み。
+  - 抽出済みpacket CSVからreplay hook用の `tick,player,packet_hex` CSVを生成できる。
 
 ## 直近の検証結果
 
@@ -69,6 +78,7 @@ cmake --build build\debug-windows-x86_64 --target melonDS --config Debug
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 4200 -LogDir logs\lan-route-4200
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 5100 -LogDir logs\lan-route-5100-validated -GameStateTrace -GameStateTraceInterval 60
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 5100 -LogDir logs\lan-route-5100-lanmp-trace -GameStateTrace -GameStateTraceInterval 60 -LanMPTrace
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 5100 -LogDir logs\lan-route-5100-packet-replay-hook-gated -GameStateTrace -GameStateTraceInterval 60 -HostPacketReplayFile logs\lan-route-5100-lanmp-trace\host.replay.csv -ClientPacketReplayFile logs\lan-route-5100-lanmp-trace\client.replay.csv
 ```
 
 重要な確認:
@@ -81,6 +91,14 @@ cmake --build build\debug-windows-x86_64 --target melonDS --config Debug
   - host側: `host.packets.csv` 10556 rows
   - client側: `client.packets.csv` 10666 rows
   - MvL中は `action=0x03`、tick増加、keys反映あり。
+- `tools\nsmb_packet_stream_compare.py` で `action=0x03` の3226 tickを比較し、errors=0を確認済み。
+  - host `send type=1 slot0` == client `recv type=1 slot0`
+  - host `send type=1 slot1` == client `recv type=1 slot1`
+  - host `replies type=65538 slot0` == client `send type=65538 slot0`
+  - host command slot1 == client reply
+- `logs\lan-route-5100-packet-replay-hook-gated` で、実LAN通信を残したままpacket helper戻り値をreplay CSVで上書きしてもMario vs Luigi状態へ到達することを確認済み。
+  - pre-matchで同じtick番号に誤爆しないよう、MvL状態gateが必要だった。
+  - replay hookのmissは主にplayer 2/3やCSV範囲外で、現状は非strict fallbackで元処理へ戻す。
 
 ## 現在の課題
 
@@ -91,8 +109,8 @@ cmake --build build\debug-windows-x86_64 --target melonDS --config Debug
 
 ## 次にやること
 
-1. `Net::getConsoleKeys()` / `Net::getPacketByte()` / `Net::setPacketByte()` 付近に、NSMB packet capture/replay用の最小hookを作る。
-2. まずはLAN traceから抽出したpacket列をreplayできるか、片側プロセスで検証する。
+1. replay hookのmiss分類を整理し、player 0/1についてstrictにできる条件を詰める。
+2. `setPacketByte()` / `Net::sendPacket` 側からローカル52 byte packetをcaptureする軽量hookを作る。
 3. Local MP/LANを経由しない、NSMB packet専用bridgeのPoCへ進む。
 4. WAN向けにpacketのframe/tick基準、入力遅延、受信buffer、timeout処理を設計する。
 
@@ -114,6 +132,16 @@ python tools\nsmb_localmp_packet_extract.py logs\route-combined-setpacket-localm
 # LAN MP traceから52 byte NSMB packetを抽出
 python tools\nsmb_localmp_packet_extract.py logs\lan-route-5100-lanmp-trace\host.lanmp.csv --out logs\lan-route-5100-lanmp-trace\host.packets.csv
 python tools\nsmb_localmp_packet_extract.py logs\lan-route-5100-lanmp-trace\client.lanmp.csv --out logs\lan-route-5100-lanmp-trace\client.packets.csv
+
+# 抽出済みhost/client packet streamの対応確認
+python tools\nsmb_packet_stream_compare.py logs\lan-route-5100-lanmp-trace\host.packets.csv logs\lan-route-5100-lanmp-trace\client.packets.csv
+
+# replay hook用CSVを生成
+python tools\nsmb_packet_replay_build.py logs\lan-route-5100-lanmp-trace\host.packets.csv --out logs\lan-route-5100-lanmp-trace\host.replay.csv --event send --action 0x03
+python tools\nsmb_packet_replay_build.py logs\lan-route-5100-lanmp-trace\client.packets.csv --out logs\lan-route-5100-lanmp-trace\client.replay.csv --event recv --action 0x03
+
+# replay hook検証
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 5100 -LogDir logs\lan-route-5100-packet-replay-hook-gated -GameStateTrace -GameStateTraceInterval 60 -HostPacketReplayFile logs\lan-route-5100-lanmp-trace\host.replay.csv -ClientPacketReplayFile logs\lan-route-5100-lanmp-trace\client.replay.csv
 
 # setPacketByte traceとLocal MP payloadの対応確認
 python tools\nsmb_packet_trace_probe.py logs\route-combined-setpacket-localmp-2925\nsmb-mvl-route.call-trace.csv --localmp logs\route-combined-setpacket-localmp-2925.csv

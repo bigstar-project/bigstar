@@ -21,7 +21,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <algorithm>
+#include <array>
+#include <fstream>
+#include <map>
 #include <mutex>
+#include <sstream>
+#include <string>
+#include <vector>
 #include "NDS.h"
 #include "DSi.h"
 #include "ARM.h"
@@ -39,6 +45,196 @@ using Platform::LogLevel;
 
 static std::mutex NSMLTraceConfigMutex;
 static std::mutex NSMLTraceOutputMutex;
+
+static std::vector<std::string> SplitNSMLCsvLine(const std::string& line)
+{
+    std::vector<std::string> out;
+    std::stringstream ss(line);
+    std::string item;
+    while (std::getline(ss, item, ','))
+        out.push_back(item);
+    return out;
+}
+
+static int FindNSMLCsvColumn(const std::vector<std::string>& header, const char* name)
+{
+    for (int i = 0; i < static_cast<int>(header.size()); i++)
+    {
+        if (header[i] == name)
+            return i;
+    }
+    return -1;
+}
+
+static bool ParseNSMLHexPacket(const std::string& hex, std::array<u8, 52>& out)
+{
+    if (hex.size() < out.size() * 2)
+        return false;
+
+    for (size_t i = 0; i < out.size(); i++)
+    {
+        char tmp[3] { hex[i * 2], hex[i * 2 + 1], '\0' };
+        out[i] = static_cast<u8>(strtoul(tmp, nullptr, 16));
+    }
+    return true;
+}
+
+static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
+{
+    struct PacketReplayEntry
+    {
+        bool Valid[2] {};
+        std::array<u8, 52> Packet[2] {};
+    };
+
+    struct PacketReplayConfig
+    {
+        bool Checked = false;
+        bool Enabled = false;
+        bool Strict = false;
+        FILE* LogFile = nullptr;
+        std::map<u32, PacketReplayEntry> Packets;
+    };
+
+    static PacketReplayConfig cfg;
+    if (!cfg.Checked)
+    {
+        std::lock_guard<std::mutex> configLock(NSMLTraceConfigMutex);
+        if (!cfg.Checked)
+        {
+            cfg.Strict = getenv("MELONDS_NSML_PACKET_REPLAY_STRICT") != nullptr;
+            const char* path = getenv("MELONDS_NSML_PACKET_REPLAY_FILE");
+            if (const char* logPath = getenv("MELONDS_NSML_PACKET_REPLAY_LOG"))
+            {
+                if (logPath[0])
+                    cfg.LogFile = fopen(logPath, "w");
+                if (cfg.LogFile)
+                    fprintf(cfg.LogFile, "frame,pc,tick,player,op,offset,value,hit\n");
+            }
+            if (path && path[0])
+            {
+                std::ifstream file(path);
+                std::string line;
+                if (std::getline(file, line))
+                {
+                    const auto header = SplitNSMLCsvLine(line);
+                    const int tickCol = FindNSMLCsvColumn(header, "tick");
+                    const int playerCol = FindNSMLCsvColumn(header, "player");
+                    const int packetCol = FindNSMLCsvColumn(header, "packet_hex");
+                    while (tickCol >= 0 && playerCol >= 0 && packetCol >= 0 && std::getline(file, line))
+                    {
+                        const auto cols = SplitNSMLCsvLine(line);
+                        if (tickCol >= static_cast<int>(cols.size()) ||
+                            playerCol >= static_cast<int>(cols.size()) ||
+                            packetCol >= static_cast<int>(cols.size()))
+                            continue;
+
+                        const u32 tick = static_cast<u32>(strtoul(cols[tickCol].c_str(), nullptr, 0));
+                        const u32 player = static_cast<u32>(strtoul(cols[playerCol].c_str(), nullptr, 0));
+                        if (player > 1)
+                            continue;
+
+                        auto& entry = cfg.Packets[tick];
+                        if (ParseNSMLHexPacket(cols[packetCol], entry.Packet[player]))
+                            entry.Valid[player] = true;
+                    }
+                }
+                cfg.Enabled = !cfg.Packets.empty();
+                if (cfg.Enabled)
+                    Log(LogLevel::Info, "NSMB packet replay: loaded %zu ticks from %s\n", cfg.Packets.size(), path);
+                else
+                    Log(LogLevel::Warn, "NSMB packet replay: no packets loaded from %s\n", path);
+            }
+            cfg.Checked = true;
+        }
+    }
+
+    if (!cfg.Enabled || !cpu || cpu->Num != 0)
+        return false;
+
+    enum class Op
+    {
+        None,
+        Keys,
+        Byte,
+        Tick,
+        Action,
+    };
+
+    Op op = Op::None;
+    if (instrAddr == 0x0200E700)
+        op = Op::Keys;
+    else if (instrAddr == 0x0200E978)
+        op = Op::Byte;
+    else if (instrAddr == 0x0200E9BC)
+        op = Op::Tick;
+    else if (instrAddr == 0x0200E9DC)
+        op = Op::Action;
+    else
+        return false;
+
+    const u32 player = cpu->R[0] & 0xFFFF;
+    const u32 offset = cpu->R[1];
+    const u32 stageGroup = cpu->NDS.ARM9Read32(0x02085058);
+    const u32 vsMode = cpu->NDS.ARM9Read32(0x020850C4);
+    const u32 ggid = cpu->NDS.ARM9Read32(0x02087E78);
+    if (stageGroup != 9 || vsMode != 1 || ggid != 0x42)
+        return false;
+
+    const u32 tick = cpu->NDS.ARM9Read16(0x02087F00);
+    u32 value = 0;
+    bool hit = false;
+
+    auto it = cfg.Packets.find(tick);
+    if (player <= 1 && it != cfg.Packets.end() && it->second.Valid[player])
+    {
+        const auto& packet = it->second.Packet[player];
+        switch (op)
+        {
+        case Op::Keys:
+            value = packet[2] | (packet[3] << 8);
+            hit = true;
+            break;
+        case Op::Byte:
+            if (offset < 44)
+            {
+                value = packet[8 + offset];
+                hit = true;
+            }
+            break;
+        case Op::Tick:
+            value = packet[0] | (packet[1] << 8);
+            hit = true;
+            break;
+        case Op::Action:
+            value = packet[4];
+            hit = true;
+            break;
+        case Op::None:
+            break;
+        }
+    }
+
+    if (cfg.LogFile)
+    {
+        std::lock_guard<std::mutex> outputLock(NSMLTraceOutputMutex);
+        const char* opname =
+            op == Op::Keys ? "keys" :
+            op == Op::Byte ? "byte" :
+            op == Op::Tick ? "tick" :
+            op == Op::Action ? "action" : "none";
+        fprintf(cfg.LogFile, "%u,%08X,%04X,%u,%s,%u,%08X,%d\n",
+            cpu->NDS.NumFrames, instrAddr, tick, player, opname, offset, value, hit ? 1 : 0);
+        fflush(cfg.LogFile);
+    }
+
+    if (!hit)
+        return cfg.Strict;
+
+    cpu->R[0] = value;
+    cpu->JumpTo(cpu->R[14]);
+    return true;
+}
 
 static bool TraceNSMLRandomCallImpl(ARM* cpu, u32 instrAddr, u32 lr, bool hasLR)
 {
@@ -906,7 +1102,13 @@ void ARMv5::Execute()
             {
                 if constexpr (mode == CPUExecuteMode::InterpreterGDB)
                     GdbCheckC();
-                TraceNSMLRandomCall(this, R[15] - 2);
+                const u32 instrAddr = R[15] - 2;
+                if (HandleNSMLPacketReplay(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                TraceNSMLRandomCall(this, instrAddr);
 
                 // prefetch
                 R[15] += 2;
@@ -923,7 +1125,13 @@ void ARMv5::Execute()
             {
                 if constexpr (mode == CPUExecuteMode::InterpreterGDB)
                     GdbCheckC();
-                TraceNSMLRandomCall(this, R[15] - 4);
+                const u32 instrAddr = R[15] - 4;
+                if (HandleNSMLPacketReplay(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                TraceNSMLRandomCall(this, instrAddr);
 
                 // prefetch
                 R[15] += 4;
