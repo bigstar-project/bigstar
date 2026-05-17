@@ -85,6 +85,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード�
   - strict miss時も戻り値を設定してLRへ戻るようにした。
   - `MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS` でstrict対象をplayer 0/1の片側だけに絞れる。
   - `MELONDS_NSML_PACKET_REPLAY_STRICT_START_FRAME` でstrict開始frameを遅らせられる。
+  - `MELONDS_NSML_PACKET_REPLAY_STRICT_REQUIRE_LEAD` で、live bufferが指定tick先まで溜まるまではstrict missをfallbackさせられる。
 
 ## 直近の検証結果
 
@@ -110,6 +111,7 @@ cmake --build build\debug-windows-x86_64 --target melonDS --config Debug
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 3400 -HostStartupDelayMs 50 -LogDir logs\lan-route-3400-live-packet-bridge-role-offsets -GameStateTrace -GameStateTraceInterval 60 -PacketBridge -PacketBridgeTrace -PacketBridgeStartFrame 3000 -HostPacketBridgeReplayTickOffset 3 -ClientPacketBridgeReplayTickOffset 2
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 3400 -HostStartupDelayMs 50 -LogDir logs\lan-route-3400-live-packet-bridge-wait5 -GameStateTrace -GameStateTraceInterval 60 -PacketBridge -PacketBridgeTrace -PacketBridgeStartFrame 3000 -HostPacketBridgeReplayTickOffset 3 -ClientPacketBridgeReplayTickOffset 2 -PacketBridgeWait -PacketBridgeWaitTimeoutMs 5
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 3400 -HostStartupDelayMs 50 -LogDir logs\lan-route-3400-live-packet-bridge-strict-remote-start3100 -GameStateTrace -GameStateTraceInterval 60 -PacketBridge -PacketBridgeTrace -PacketBridgeStartFrame 3000 -HostPacketBridgeReplayTickOffset 3 -ClientPacketBridgeReplayTickOffset 2 -PacketBridgeStrictRemote -PacketBridgeStrictStartFrame 3100
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 3400 -HostStartupDelayMs 50 -LogDir logs\lan-route-3400-live-packet-bridge-strict-lead3 -GameStateTrace -GameStateTraceInterval 60 -PacketBridge -PacketBridgeTrace -PacketBridgeStartFrame 3000 -HostPacketBridgeReplayTickOffset 3 -ClientPacketBridgeReplayTickOffset 2 -PacketBridgeStrictRemote -PacketBridgeStrictRequireLead 3
 ```
 
 重要な確認:
@@ -147,6 +149,9 @@ cmake --build build\debug-windows-x86_64 --target melonDS --config Debug
 - `logs\lan-route-3400-live-packet-bridge-strict-remote-start3100` で、remote playerだけをstrict対象にし、strict開始をframe 3100まで遅らせるとMario vs Luigi状態を維持できることを確認済み。
   - strictをframe 3000直後から有効化すると、初期packet不足でhost側が試合状態から落ちた。
   - strictにもwarmup/開始条件が必要。
+- `logs\lan-route-3400-live-packet-bridge-strict-lead3` で、strict開始frameではなくbuffer lead 3 tickを条件にした場合もMario vs Luigi状態を維持できることを確認済み。
+  - hit数はrole別offset検証と同程度。
+  - これは固定frameより良い開始条件だが、LANなし成立の保証にはまだ足りない。
 
 ## 現在の課題
 
@@ -155,14 +160,14 @@ cmake --build build\debug-windows-x86_64 --target melonDS --config Debug
 - live packet bridgeは送受信とhook hitまで確認できたが、packetが同tickの `getPacket*` 呼び出し後に届く場合がある。
 - そのため、LANなしに進む前に、tick/frame基準の待ち、遅延、buffer、timeoutを設計する必要がある。単純に現在tickを待つだけでは、片側の進行を止めて相手のpacket生成も遅らせるため不十分。
 - player 2/3向けの `getPacket*` missは2P MvLでは不要な可能性が高いので、strict化時はplayer 0/1に限定する。
-- strict remoteはframe 3100開始ならLAN補助ありで維持できるが、LANなし検証にはまだ足りない。remote packetが十分溜まったことを開始条件にする必要がある。
+- strict remoteはbuffer lead条件ならLAN補助ありで維持できるが、LANなし検証にはまだ足りない。次はLAN payloadを止めた時に不足するpacket/関数を特定する。
 
 ## 次にやること
 
 1. packet bridgeの固定offset/現在tick waitを、開始warmupつきの「N tick遅れのremote packetを使う」制御へ整理する。
-2. strict開始条件を固定frameではなく、remote packet bufferの充足状態で決める。
-3. LAN通信を残したまま、packet bridgeがゲーム状態へ与える影響を比較する。
-4. LAN/LocalMP payloadを切った状態で、packet bridge単独でMario vs Luigi状態を維持できるか検証する。
+2. LAN通信を残したまま、packet bridgeがゲーム状態へ与える影響を比較する。
+3. LAN/LocalMP payloadを切った状態で、packet bridge単独でMario vs Luigi状態を維持できるか検証する。
+4. packet bridge単独で不足するpacket helper / recv side effect / handshake処理を特定する。
 
 ## よく使うコマンド
 
@@ -206,6 +211,9 @@ python tools\nsmb_packet_capture_compare.py logs\lan-route-4900-packet-capture\c
 
 # remote player strict実験
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 3400 -HostStartupDelayMs 50 -LogDir logs\lan-route-3400-live-packet-bridge-strict-remote-start3100 -GameStateTrace -GameStateTraceInterval 60 -PacketBridge -PacketBridgeTrace -PacketBridgeStartFrame 3000 -HostPacketBridgeReplayTickOffset 3 -ClientPacketBridgeReplayTickOffset 2 -PacketBridgeStrictRemote -PacketBridgeStrictStartFrame 3100
+
+# buffer lead条件つきstrict実験
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 3400 -HostStartupDelayMs 50 -LogDir logs\lan-route-3400-live-packet-bridge-strict-lead3 -GameStateTrace -GameStateTraceInterval 60 -PacketBridge -PacketBridgeTrace -PacketBridgeStartFrame 3000 -HostPacketBridgeReplayTickOffset 3 -ClientPacketBridgeReplayTickOffset 2 -PacketBridgeStrictRemote -PacketBridgeStrictRequireLead 3
 
 # setPacketByte traceとLocal MP payloadの対応確認
 python tools\nsmb_packet_trace_probe.py logs\route-combined-setpacket-localmp-2925\nsmb-mvl-route.call-trace.csv --localmp logs\route-combined-setpacket-localmp-2925.csv

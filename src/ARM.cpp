@@ -169,6 +169,30 @@ bool NSML_HasMarioVsLuigiRemotePacket(NDS* nds, u32 player, u32 tick)
     return packetIt != ndsIt->second.end() && packetIt->second.Valid[player];
 }
 
+static bool NSMLLiveReplayHasLead(NDS* nds, u32 player, u32 tick, u32 lead)
+{
+    if (!nds || player > 1 || lead == 0)
+        return true;
+
+    tick &= 0xFFFF;
+    std::lock_guard<std::mutex> lock(NSMLPacketBridgeMutex);
+    auto ndsIt = NSMLLiveReplayPackets.find(nds);
+    if (ndsIt == NSMLLiveReplayPackets.end())
+        return false;
+
+    const u32 required = (tick + lead) & 0xFFFF;
+    for (const auto& [packetTick, entry] : ndsIt->second)
+    {
+        if (!entry.Valid[player])
+            continue;
+
+        const u32 distance = (packetTick - tick) & 0xFFFF;
+        if (distance <= 0x7FFF && packetTick == required)
+            return true;
+    }
+    return false;
+}
+
 static std::vector<std::string> SplitNSMLCsvLine(const std::string& line)
 {
     std::vector<std::string> out;
@@ -211,6 +235,7 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
         bool Strict = false;
         bool StrictPlayer[2] { true, true };
         u32 StrictStartFrame = 0;
+        u32 StrictRequireLead = 0;
         FILE* LogFile = nullptr;
         std::map<u32, NSMLPacketReplayEntry> Packets;
     };
@@ -238,6 +263,8 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
             }
             if (const char* strictStartFrame = getenv("MELONDS_NSML_PACKET_REPLAY_STRICT_START_FRAME"))
                 cfg.StrictStartFrame = static_cast<u32>(strtoul(strictStartFrame, nullptr, 0));
+            if (const char* strictRequireLead = getenv("MELONDS_NSML_PACKET_REPLAY_STRICT_REQUIRE_LEAD"))
+                cfg.StrictRequireLead = static_cast<u32>(strtoul(strictRequireLead, nullptr, 0));
             const char* path = getenv("MELONDS_NSML_PACKET_REPLAY_FILE");
             const bool bridgeEnabled = NSMLPacketBridgeEnabled();
             if (const char* logPath = getenv("MELONDS_NSML_PACKET_REPLAY_LOG"))
@@ -394,6 +421,8 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
     if (!hit)
     {
         if (!cfg.Strict || player > 1 || !cfg.StrictPlayer[player] || cpu->NDS.NumFrames < cfg.StrictStartFrame)
+            return false;
+        if (!NSMLLiveReplayHasLead(&cpu->NDS, player, tick, cfg.StrictRequireLead))
             return false;
 
         switch (op)
