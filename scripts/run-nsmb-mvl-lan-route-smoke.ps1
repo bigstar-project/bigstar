@@ -13,6 +13,7 @@ param(
     [int]$LanMPTraceDumpLen = 512,
     [string]$HostPacketReplayFile = "",
     [string]$ClientPacketReplayFile = "",
+    [switch]$PacketCapture,
     [string]$LogDir = "logs\nsmb-mvl-lan-route"
 )
 
@@ -87,12 +88,14 @@ $hostGameStateTrace = Join-Path $logRoot "host.game-state.csv"
 $clientGameStateTrace = Join-Path $logRoot "client.game-state.csv"
 $hostLanMPTrace = Join-Path $logRoot "host.lanmp.csv"
 $clientLanMPTrace = Join-Path $logRoot "client.lanmp.csv"
+$hostPacketCapture = Join-Path $logRoot "host.packet-capture.csv"
+$clientPacketCapture = Join-Path $logRoot "client.packet-capture.csv"
 $hostRamDumps = Join-Path $logRoot "ram-host"
 $clientRamDumps = Join-Path $logRoot "ram-client"
 $hostScreens = Join-Path $logRoot "screens-host"
 $clientScreens = Join-Path $logRoot "screens-client"
 Remove-Item -Force $hostOut, $clientOut, $hostHash, $clientHash, "$hostOut.err", "$clientOut.err" -ErrorAction SilentlyContinue
-Remove-Item -Force $hostGameStateTrace, $clientGameStateTrace, $hostLanMPTrace, $clientLanMPTrace -ErrorAction SilentlyContinue
+Remove-Item -Force $hostGameStateTrace, $clientGameStateTrace, $hostLanMPTrace, $clientLanMPTrace, $hostPacketCapture, $clientPacketCapture -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force $hostScreens, $clientScreens, $hostRamDumps, $clientRamDumps -ErrorAction SilentlyContinue
 
 function Start-MelonLANProcess {
@@ -106,6 +109,7 @@ function Start-MelonLANProcess {
         [string]$GameStateTracePath,
         [string]$LanMPTracePath,
         [string]$PacketReplayFile,
+        [string]$PacketCapturePath,
         [string]$RamDumpDir
     )
 
@@ -152,6 +156,11 @@ function Start-MelonLANProcess {
     } else {
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_FILE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LOG -ErrorAction SilentlyContinue
+    }
+    if ($PacketCapture) {
+        $env:MELONDS_NSML_PACKET_CAPTURE_LOG = $PacketCapturePath
+    } else {
+        Remove-Item Env:\MELONDS_NSML_PACKET_CAPTURE_LOG -ErrorAction SilentlyContinue
     }
     $env:MELONDS_NSML_FIXED_RTC = "2020-01-01T00:00:00"
     $env:MELONDS_NSML_DISABLE_JIT = "1"
@@ -224,9 +233,9 @@ function Complete-MelonLANProcess {
 $hostProc = $null
 $clientProc = $null
 try {
-    $hostProc = Start-MelonLANProcess -Role "host" -RoleRom $hostRom -RoleInput $hostInput -Stdout $hostOut -HashLog $hostHash -ScreenshotDir $hostScreens -GameStateTracePath $hostGameStateTrace -LanMPTracePath $hostLanMPTrace -PacketReplayFile $HostPacketReplayFile -RamDumpDir $hostRamDumps
+    $hostProc = Start-MelonLANProcess -Role "host" -RoleRom $hostRom -RoleInput $hostInput -Stdout $hostOut -HashLog $hostHash -ScreenshotDir $hostScreens -GameStateTracePath $hostGameStateTrace -LanMPTracePath $hostLanMPTrace -PacketReplayFile $HostPacketReplayFile -PacketCapturePath $hostPacketCapture -RamDumpDir $hostRamDumps
     Wait-LogPattern -Path $hostOut -Pattern "LAN host start .* ok=1" -TimeoutMs 10000
-    $clientProc = Start-MelonLANProcess -Role "client" -RoleRom $clientRom -RoleInput $clientInput -Stdout $clientOut -HashLog $clientHash -ScreenshotDir $clientScreens -GameStateTracePath $clientGameStateTrace -LanMPTracePath $clientLanMPTrace -PacketReplayFile $ClientPacketReplayFile -RamDumpDir $clientRamDumps
+    $clientProc = Start-MelonLANProcess -Role "client" -RoleRom $clientRom -RoleInput $clientInput -Stdout $clientOut -HashLog $clientHash -ScreenshotDir $clientScreens -GameStateTracePath $clientGameStateTrace -LanMPTracePath $clientLanMPTrace -PacketReplayFile $ClientPacketReplayFile -PacketCapturePath $clientPacketCapture -RamDumpDir $clientRamDumps
 
     Complete-MelonLANProcess $clientProc
     Complete-MelonLANProcess $hostProc

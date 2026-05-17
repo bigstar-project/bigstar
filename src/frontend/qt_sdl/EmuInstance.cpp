@@ -1298,7 +1298,8 @@ bool EmuInstance::updateConsole() noexcept
     if (getenv("MELONDS_NSML_DISABLE_JIT") ||
         getenv("MELONDS_NSML_WATCH_ADDR") ||
         getenv("MELONDS_NSML_CALL_TRACE") ||
-        getenv("MELONDS_NSML_PACKET_REPLAY_FILE"))
+        getenv("MELONDS_NSML_PACKET_REPLAY_FILE") ||
+        getenv("MELONDS_NSML_PACKET_CAPTURE_LOG"))
         jitargs = std::nullopt;
 #else
     std::optional<JITArgs> jitargs = std::nullopt;

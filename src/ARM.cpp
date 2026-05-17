@@ -236,6 +236,77 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
     return true;
 }
 
+static void TraceNSMLPacketCapture(ARM* cpu, u32 instrAddr)
+{
+    struct PacketCaptureConfig
+    {
+        bool Checked = false;
+        bool Enabled = false;
+        FILE* LogFile = nullptr;
+        std::map<void*, u32> LastTickByNDS;
+    };
+
+    static PacketCaptureConfig cfg;
+    if (!cfg.Checked)
+    {
+        std::lock_guard<std::mutex> configLock(NSMLTraceConfigMutex);
+        if (!cfg.Checked)
+        {
+            if (const char* logPath = getenv("MELONDS_NSML_PACKET_CAPTURE_LOG"))
+            {
+                if (logPath[0])
+                    cfg.LogFile = fopen(logPath, "w");
+                cfg.Enabled = cfg.LogFile != nullptr;
+                if (cfg.Enabled)
+                    fprintf(cfg.LogFile, "nds,frame,tick,keys,action,packet_hex\n");
+            }
+            cfg.Checked = true;
+        }
+    }
+
+    if (!cfg.Enabled || !cpu || cpu->Num != 0)
+        return;
+    if (instrAddr != 0x02011428) // Net::Core::processSendPacket()
+        return;
+
+    const u32 stageGroup = cpu->NDS.ARM9Read32(0x02085058);
+    const u32 vsMode = cpu->NDS.ARM9Read32(0x020850C4);
+    const u32 ggid = cpu->NDS.ARM9Read32(0x02087E78);
+    if (stageGroup != 9 || vsMode != 1 || ggid != 0x42)
+        return;
+
+    const u32 tick = cpu->NDS.ARM9Read16(0x02087F00);
+    const void* ndsKey = static_cast<const void*>(&cpu->NDS);
+    auto last = cfg.LastTickByNDS.find(const_cast<void*>(ndsKey));
+    if (last != cfg.LastTickByNDS.end() && last->second == tick)
+        return;
+    cfg.LastTickByNDS[const_cast<void*>(ndsKey)] = tick;
+
+    std::array<u8, 52> packet {};
+    packet[0] = static_cast<u8>(tick & 0xFF);
+    packet[1] = static_cast<u8>((tick >> 8) & 0xFF);
+    const u32 keys = cpu->NDS.ARM9Read16(0x02087F02);
+    packet[2] = static_cast<u8>(keys & 0xFF);
+    packet[3] = static_cast<u8>((keys >> 8) & 0xFF);
+    packet[4] = 0x03; // MvL gameplay packet action.
+    packet[5] = 0x00;
+    packet[6] = 0xFF;
+    packet[7] = 0xFF;
+    for (u32 i = 0; i < 44; i++)
+        packet[8 + i] = cpu->NDS.ARM9Read8(0x02087F08 + i);
+
+    std::lock_guard<std::mutex> outputLock(NSMLTraceOutputMutex);
+    fprintf(cfg.LogFile, "%p,%u,0x%04X,0x%04X,0x03,",
+        static_cast<void*>(&cpu->NDS),
+        cpu->NDS.NumFrames,
+        tick,
+        keys);
+    for (u8 byte : packet)
+        fprintf(cfg.LogFile, "%02X", byte);
+    fputc('\n', cfg.LogFile);
+    fflush(cfg.LogFile);
+}
+
 static bool TraceNSMLRandomCallImpl(ARM* cpu, u32 instrAddr, u32 lr, bool hasLR)
 {
     struct RandomTraceConfig
@@ -1060,6 +1131,7 @@ void ARMv5::Execute()
         if constexpr (mode == CPUExecuteMode::JIT)
         {
             u32 instrAddr = R[15] - ((CPSR&0x20)?2:4);
+            TraceNSMLPacketCapture(this, instrAddr);
             TraceNSMLRandomCall(this, instrAddr);
 
             if ((instrAddr < FastBlockLookupStart || instrAddr >= (FastBlockLookupStart + FastBlockLookupSize))
@@ -1103,6 +1175,7 @@ void ARMv5::Execute()
                 if constexpr (mode == CPUExecuteMode::InterpreterGDB)
                     GdbCheckC();
                 const u32 instrAddr = R[15] - 2;
+                TraceNSMLPacketCapture(this, instrAddr);
                 if (HandleNSMLPacketReplay(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;
@@ -1126,6 +1199,7 @@ void ARMv5::Execute()
                 if constexpr (mode == CPUExecuteMode::InterpreterGDB)
                     GdbCheckC();
                 const u32 instrAddr = R[15] - 4;
+                TraceNSMLPacketCapture(this, instrAddr);
                 if (HandleNSMLPacketReplay(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;

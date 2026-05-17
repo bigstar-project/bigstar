@@ -61,6 +61,11 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード�
   - `MELONDS_NSML_PACKET_REPLAY_LOG` でhit/missをCSV出力する。
 - `tools/nsmb_packet_replay_build.py` を追加済み。
   - 抽出済みpacket CSVからreplay hook用の `tick,player,packet_hex` CSVを生成できる。
+- packet capture hookの最小版を追加済み。
+  - `MELONDS_NSML_PACKET_CAPTURE_LOG` で、MvsL中の `Net::Core::processSendPacket()` 入口からローカル52 byte packetをCSV出力できる。
+  - `Net::sendPacket` 周辺のtick/keys/payloadと、MvL gameplay action `0x03` からpacketを再構築する。
+- `tools/nsmb_packet_capture_compare.py` を追加済み。
+  - capture hook出力と、LAN/LocalMP payloadから抽出したpacket CSVが一致するか検証できる。
 
 ## 直近の検証結果
 
@@ -79,6 +84,7 @@ cmake --build build\debug-windows-x86_64 --target melonDS --config Debug
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 5100 -LogDir logs\lan-route-5100-validated -GameStateTrace -GameStateTraceInterval 60
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 5100 -LogDir logs\lan-route-5100-lanmp-trace -GameStateTrace -GameStateTraceInterval 60 -LanMPTrace
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 5100 -LogDir logs\lan-route-5100-packet-replay-hook-gated -GameStateTrace -GameStateTraceInterval 60 -HostPacketReplayFile logs\lan-route-5100-lanmp-trace\host.replay.csv -ClientPacketReplayFile logs\lan-route-5100-lanmp-trace\client.replay.csv
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 4900 -LogDir logs\lan-route-4900-packet-capture -GameStateTrace -GameStateTraceInterval 60 -LanMPTrace -PacketCapture
 ```
 
 重要な確認:
@@ -99,6 +105,9 @@ cmake --build build\debug-windows-x86_64 --target melonDS --config Debug
 - `logs\lan-route-5100-packet-replay-hook-gated` で、実LAN通信を残したままpacket helper戻り値をreplay CSVで上書きしてもMario vs Luigi状態へ到達することを確認済み。
   - pre-matchで同じtick番号に誤爆しないよう、MvL状態gateが必要だった。
   - replay hookのmissは主にplayer 2/3やCSV範囲外で、現状は非strict fallbackで元処理へ戻す。
+- `logs\lan-route-4900-packet-capture` で、ゲーム側capture hookから作った52 byte packetがLANに実際に出たpacketと一致することを確認済み。
+  - host capture vs host `send type=1 slot0`: 2288 ticks, errors=0
+  - client capture vs client `send type=65538 slot0`: 2289 ticks, errors=0
 
 ## 現在の課題
 
@@ -109,10 +118,10 @@ cmake --build build\debug-windows-x86_64 --target melonDS --config Debug
 
 ## 次にやること
 
-1. replay hookのmiss分類を整理し、player 0/1についてstrictにできる条件を詰める。
-2. `setPacketByte()` / `Net::sendPacket` 側からローカル52 byte packetをcaptureする軽量hookを作る。
-3. Local MP/LANを経由しない、NSMB packet専用bridgeのPoCへ進む。
-4. WAN向けにpacketのframe/tick基準、入力遅延、受信buffer、timeout処理を設計する。
+1. capture hookとreplay hookをENetでつなぎ、LAN/LocalMP payloadを経由しないpacket専用bridge PoCを作る。
+2. replay hookのmiss分類を整理し、player 0/1についてstrictにできる条件を詰める。
+3. WAN向けにpacketのframe/tick基準、入力遅延、受信buffer、timeout処理を設計する。
+4. packet bridge単独でMario vs Luigi状態が維持できるか、既存LAN通信を切って検証する。
 
 ## よく使うコマンド
 
@@ -142,6 +151,11 @@ python tools\nsmb_packet_replay_build.py logs\lan-route-5100-lanmp-trace\client.
 
 # replay hook検証
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 5100 -LogDir logs\lan-route-5100-packet-replay-hook-gated -GameStateTrace -GameStateTraceInterval 60 -HostPacketReplayFile logs\lan-route-5100-lanmp-trace\host.replay.csv -ClientPacketReplayFile logs\lan-route-5100-lanmp-trace\client.replay.csv
+
+# capture hook検証
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -Frames 4900 -LogDir logs\lan-route-4900-packet-capture -GameStateTrace -GameStateTraceInterval 60 -LanMPTrace -PacketCapture
+python tools\nsmb_packet_capture_compare.py logs\lan-route-4900-packet-capture\host.packet-capture.csv logs\lan-route-4900-packet-capture\host.packets.csv --event send --type 1 --slot 0
+python tools\nsmb_packet_capture_compare.py logs\lan-route-4900-packet-capture\client.packet-capture.csv logs\lan-route-4900-packet-capture\client.packets.csv --event send --type 65538 --slot 0
 
 # setPacketByte traceとLocal MP payloadの対応確認
 python tools\nsmb_packet_trace_probe.py logs\route-combined-setpacket-localmp-2925\nsmb-mvl-route.call-trace.csv --localmp logs\route-combined-setpacket-localmp-2925.csv
