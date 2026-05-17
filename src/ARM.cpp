@@ -100,6 +100,115 @@ static bool IsNSMLMarioVsLuigiGameplay(NDS& nds)
         && nds.ARM9Read32(0x02087E78) == 0x42;
 }
 
+static bool HandleNSMLNetResetBypass(ARM* cpu, u32 instrAddr)
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_RESET") ? 1 : 0;
+    if (!enabled || !cpu || cpu->Num != 0)
+        return false;
+    if (instrAddr != 0x0200EDF8 && instrAddr != 0x0200EE00)
+        return false;
+    if (!NSMLPacketBridgeEnabled() || !IsNSMLMarioVsLuigiGameplay(cpu->NDS))
+        return false;
+
+    static int logCount = 0;
+    if (logCount < 16)
+    {
+        printf("NSMB PacketBridge: bypass Net reset function at %08X frame=%u lr=%08X\n",
+            instrAddr,
+            cpu->NDS.NumFrames,
+            cpu->R[14]);
+        logCount++;
+    }
+
+    if (instrAddr == 0x0200EE00)
+    {
+        // 0x0200EE00 is after the function prologue at 0x0200EDF8. If a build
+        // reaches this address directly, undo the pushed r4/lr before returning.
+        cpu->R[13] += 8;
+    }
+    cpu->JumpTo(cpu->R[14]);
+    return true;
+}
+
+static bool HandleNSMLNetDisconnectBypass(ARM* cpu, u32 instrAddr)
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT") ? 1 : 0;
+    if (!enabled || !cpu || cpu->Num != 0)
+        return false;
+    if (!NSMLPacketBridgeEnabled() || !IsNSMLMarioVsLuigiGameplay(cpu->NDS))
+        return false;
+
+    static u32 startFrame = 0xFFFFFFFF;
+    if (startFrame == 0xFFFFFFFF)
+    {
+        if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT_START_FRAME"))
+            startFrame = static_cast<u32>(strtoul(value, nullptr, 0));
+        else
+            startFrame = 0;
+    }
+    if (cpu->NDS.NumFrames < startFrame)
+        return false;
+
+    static int mode = -1;
+    if (mode < 0)
+    {
+        mode = 0;
+        if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT_MODE"))
+        {
+            if (!strcmp(value, "force-active"))
+                mode = 1;
+        }
+    }
+
+    if (mode == 0)
+    {
+        if (instrAddr != 0x02010174)
+            return false;
+
+        static int skipLogCount = 0;
+        if (skipLogCount < 16)
+        {
+            const u32 flags = cpu->NDS.ARM9Read16(0x02087E20);
+            printf("NSMB PacketBridge: skip Net disconnect branch at %08X frame=%u lr=%08X flags=0x%04X\n",
+                instrAddr,
+                cpu->NDS.NumFrames,
+                cpu->R[14],
+                flags);
+            skipLogCount++;
+        }
+
+        cpu->JumpTo(0x0201019C);
+        return true;
+    }
+
+    if (instrAddr != 0x02010130)
+        return false;
+
+    const u32 flags = cpu->NDS.ARM9Read16(0x02087E20);
+    if (flags != 0x0002)
+        return false;
+
+    static int logCount = 0;
+    if (logCount < 16)
+    {
+        printf("NSMB PacketBridge: force Net active flags at %08X frame=%u lr=%08X\n",
+            instrAddr,
+            cpu->NDS.NumFrames,
+            cpu->R[14]);
+        printf("NSMB PacketBridge: Net flags old=0x%04X new=0x%04X\n",
+            flags,
+            0x0004);
+        logCount++;
+    }
+
+    cpu->NDS.ARM9Write16(0x02087E20, 0x0004);
+    return false;
+}
+
 static void BuildNSMLMarioVsLuigiPacket(NDS& nds, std::array<u8, 52>& packet, u32& tick, u32& keys)
 {
     packet.fill(0);
@@ -1591,6 +1700,16 @@ void ARMv5::Execute()
                     GdbCheckC();
                 const u32 instrAddr = R[15] - 2;
                 TraceNSMLPacketCapture(this, instrAddr);
+                if (HandleNSMLNetDisconnectBypass(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLNetResetBypass(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
                 if (HandleNSMLPacketReplay(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;
@@ -1615,6 +1734,16 @@ void ARMv5::Execute()
                     GdbCheckC();
                 const u32 instrAddr = R[15] - 4;
                 TraceNSMLPacketCapture(this, instrAddr);
+                if (HandleNSMLNetDisconnectBypass(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLNetResetBypass(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
                 if (HandleNSMLPacketReplay(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;

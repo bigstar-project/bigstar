@@ -16,6 +16,8 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - LocalMPを停止すると、NSMB内部のLocalMP packet slot statusが0になり、disconnect state/flagsが立つ。
 - bridge中にdisconnect state/flagsを抑制する検証フックだけでは不十分。`DropMPAfterFrame 3600` 後、host/clientの進行フレーム差が大きくなり、片側が必要なremote packetを受け取れず黒画面へ落ちる。
 - `DropMPAfterFrame 3600` 後はpacket slot/statusを維持しても、NSMBの低レベルNet/描画状態がリセットされる。MainRAM上のplayer/starは残るが、render/display側が黒画面またはHUDのみへ落ちる。
+- `Net::update()` の切断分岐は A2DJ `0x02010174` 付近。ここをskipしてepilogueへ戻すmelonDS hookでは、DropMP後も黒画面/abortなしで4200 frameまで通る。ただし `Net::getPacket*()` 呼び出しは3840 frame付近で実質止まり、5200 frame以降の移動入力は反映されないため、対戦成立にはまだ足りない。
+- `0x02087E20` を `0x0004` に戻して切断分岐前の判定を通す `force-active` 実験では、`getConsoleKeys()` は一部戻るが黒画面が再発する。現時点では成功ルートではなく、低レベルtransfer失敗の切り分け用。
 - LocalMPを接続維持用に残し、ゲームが読むpacketだけをstrict bridgeで置換する経路では、movement script込みで 6600 frame まで通り、host/clientのplayer座標とstar座標は一致した。
 - packet traceではmovement開始後、host local packet keys=`0x0010`、client local packet keys=`0x0020` が毎frame送受信されている。入力packetはbridge上を流れている。
 - `-PacketBridgeMaxFrameLead` は同期精度と速度のトレードオフ。`4` は同期は強いが遅すぎる。`20` / `60` は完走するが、同一frame番号でのplayer座標は一時的にズレ、数百frame後に収束する。
@@ -44,6 +46,9 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - `-PacketBridgeForceTickBase` でDropMP後のpacket tick基準値を固定できる。
   - `-PacketBridgeMaxFrameLead` でpacket bridgeの進行フレーム先行量を制限できる。
   - `-PacketBridgePreserveNetPointers` / `-PacketBridgeSuppressBlackout` は失敗切り分け用の実験フック。現時点ではDropMP後の正常描画維持には不十分。
+  - `-PacketBridgeBypassNetDisconnect` で `Net::update()` の切断分岐をskipできる。
+  - `-PacketBridgeBypassNetDisconnectMode skip` は黒画面回避用の現行実験ルート。
+  - `-PacketBridgeBypassNetDisconnectMode force-active` は `0x02087E20=0x0004` を強制する切り分け用。黒画面が再発するため成功扱いしない。
 - 検証補助
   - 黒画面時にDISPCNT/BLD/Net stateをstdoutへ出す。
   - `MELONDS_NSML_SCREENSHOT_REG_TRACE=1` でスクリーンショット保存時の表示レジスタを出せる。
@@ -117,6 +122,13 @@ frame lead制限:
 - `-PacketBridgeSuppressDisconnect` ありでも、黒画面検出を入れるとhost frame 3900付近、client frame 3840付近で失敗する。
 - `-PacketBridgeLiveFallbackWindow 512` でpacket slot/statusを維持しても黒画面は解消しない。
 - `-PacketBridgeSuppressBlackout` でDISPCNTを通常値に戻しても、地形/キャラクター描画は戻らずHUDだけになる。
+- `-PacketBridgeBypassNetDisconnect -PacketBridgeBypassNetDisconnectMode skip -PacketBridgeBypassNetDisconnectStartFrame 3600`
+  - `logs\lan-route-4200-dropmp3600-bypass-netdisconnect-skip-attempt1`
+  - host frame 3842 / client frame 3819 で `0x02010174` の切断分岐をskipし、4200 frameまで黒画面/切断表示/abortなしで完走。
+  - ただしpacket replay traceは3840 frame付近で止まり、DropMP後の継続的な入力packet処理には戻っていない。
+- `-PacketBridgeBypassNetDisconnectMode force-active`
+  - `logs\lan-route-4200-dropmp3600-force-netactive-start3600-trace-attempt1`
+  - `0x02087E20` を `0x0004` へ戻すと、`getConsoleKeys()` 呼び出しは3840 frame付近で見えるが、frame 3960付近で黒画面に落ちる。
 - watch結果:
   - Net内部状態はhost frame 3842 / client frame 3808付近で `0x0200EE5C` などから0化される。
   - render tableはhost frame 3840 / client frame 3815付近で汎用memset `0x0200B288` と描画登録処理 `0x0200D3A0` により黒画面向けの内容へ変わる。
@@ -124,8 +136,9 @@ frame lead制限:
 
 ## 次にやること
 
-1. `Net::update()` / `Net::Core::transferPacket()` 周辺で、LocalMP失敗時にNet状態とrender状態を落とす分岐を特定する。
-2. その分岐をmelonDS hookで一時的に抑制し、DropMP後も黒画面なしで進むか確認する。
-3. 抑制できたら、同じ考え方をROM patch候補として整理する。
-4. packet bridgeのフレーム同期は、単純なsleep throttleではなく、送信済みpacket frameを使った軽量barrierまたは固定入力遅延方式へ寄せる。
-5. LAN start flakeの根本原因を調べ、検証のretry依存を減らす。
+1. `Net::Core::transferPacket()` / `Net::Core::processRecvPacket()` 側で、LocalMP停止後に `Net::getPacket*()` が止まる原因を特定する。
+2. `skip` modeで黒画面を避けたまま、transfer成功/受信済みpacketありに見せるhookを追加し、3840 frame以降もpacket処理が継続するか確認する。
+3. 3840 frame以降もpacket処理が継続したら、movement scriptで5200 frame以降のRIGHT/LEFTがplayer座標へ反映されるか検証する。
+4. 抑制できたら、同じ考え方をROM patch候補として整理する。
+5. packet bridgeのフレーム同期は、単純なsleep throttleではなく、送信済みpacket frameを使った軽量barrierまたは固定入力遅延方式へ寄せる。
+6. LAN start flakeの根本原因を調べ、検証のretry依存を減らす。
