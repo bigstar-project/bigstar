@@ -78,6 +78,8 @@ constexpr melonDS::u16 kPlayerObjectID = 0x0015;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
 constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
+constexpr melonDS::u16 kVsMovingHazardObjectID = 0x0053;
+constexpr melonDS::u32 kVsMovingHazardSettings = 0x00000000;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
 constexpr melonDS::u16 kStageCameraObjectID = 0x013C;
 
@@ -207,6 +209,16 @@ struct WireGameState
     melonDS::u32 StageSceneFound;
     melonDS::u32 StageSceneWord154;
     melonDS::u32 StageSceneWord160;
+    melonDS::u32 MovingHazardFound;
+    melonDS::u32 MovingHazardGUID;
+    melonDS::u32 MovingHazardSettings;
+    melonDS::u32 MovingHazardStateType;
+    melonDS::u32 MovingHazardFlags;
+    melonDS::u32 MovingHazardPosX;
+    melonDS::u32 MovingHazardPosY;
+    melonDS::u32 MovingHazardPosZ;
+    melonDS::u32 MovingHazardVelX;
+    melonDS::u32 MovingHazardVelY;
     melonDS::u32 BasicHashLo;
     melonDS::u32 BasicHashHi;
     melonDS::u32 PlayerGlobalHashLo;
@@ -217,7 +229,7 @@ struct WireGameState
     melonDS::u32 RenderCandidateHashHi;
 };
 
-static_assert(sizeof(WireGameState) == 340);
+static_assert(sizeof(WireGameState) == 380);
 
 struct GameStateSample
 {
@@ -293,6 +305,16 @@ struct GameStateSample
     melonDS::u32 StageSceneFound = 0;
     melonDS::u32 StageSceneWord154 = 0;
     melonDS::u32 StageSceneWord160 = 0;
+    melonDS::u32 MovingHazardFound = 0;
+    melonDS::u32 MovingHazardGUID = 0;
+    melonDS::u32 MovingHazardSettings = 0;
+    melonDS::u32 MovingHazardStateType = 0;
+    melonDS::u32 MovingHazardFlags = 0;
+    melonDS::u32 MovingHazardPosX = 0;
+    melonDS::u32 MovingHazardPosY = 0;
+    melonDS::u32 MovingHazardPosZ = 0;
+    melonDS::u32 MovingHazardVelX = 0;
+    melonDS::u32 MovingHazardVelY = 0;
     melonDS::u64 Hash = 0;
 };
 
@@ -359,6 +381,10 @@ struct State
     bool GameStateSyncEnabled = false;
     bool GameStateSyncExtended = false;
     bool GameStateApplyEnabled = false;
+    bool GameStateApplyCriticalGlobals = true;
+    bool GameStateApplyStarObjects = true;
+    bool GameStateApplyStageObjects = true;
+    bool GameStateApplyPlayerActors = true;
     int GameStateSyncInterval = 60;
     int SeedWaitTimeoutMs = 10000;
     bool WaitForPeerBeforeStart = false;
@@ -950,6 +976,16 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     sample.StageSceneFound = packet.StageSceneFound;
                     sample.StageSceneWord154 = packet.StageSceneWord154;
                     sample.StageSceneWord160 = packet.StageSceneWord160;
+                    sample.MovingHazardFound = packet.MovingHazardFound;
+                    sample.MovingHazardGUID = packet.MovingHazardGUID;
+                    sample.MovingHazardSettings = packet.MovingHazardSettings;
+                    sample.MovingHazardStateType = packet.MovingHazardStateType;
+                    sample.MovingHazardFlags = packet.MovingHazardFlags;
+                    sample.MovingHazardPosX = packet.MovingHazardPosX;
+                    sample.MovingHazardPosY = packet.MovingHazardPosY;
+                    sample.MovingHazardPosZ = packet.MovingHazardPosZ;
+                    sample.MovingHazardVelX = packet.MovingHazardVelX;
+                    sample.MovingHazardVelY = packet.MovingHazardVelY;
                     sample.Hash = hashes.Basic;
                     G.RemoteGameStateSamples[key] = sample;
                     CompareGameStateLocked(static_cast<int>(packet.Instance), packet.Frame);
@@ -2284,46 +2320,64 @@ void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             return;
     }
 
-    nds->ARM9Write32(kNetRandomValueAddr, sample.NetRandomValue);
-    nds->ARM9Write8(kNetRandomCallCountAddr, static_cast<melonDS::u8>(sample.NetRandomCallCount & 0xFF));
-    nds->ARM9Write32(kNetRandomBranchAddressAddr, sample.NetRandomBranchAddress);
-    nds->ARM9Write32(kGamePlayerCountAddr, sample.PlayerCount);
-    nds->ARM9Write32(kGamePlayerBattleStarsAddr, sample.Player0BattleStars);
-    nds->ARM9Write32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32), sample.Player1BattleStars);
-    nds->ARM9Write32(kGamePlayerCoinsAddr, sample.Player0Coins);
-    nds->ARM9Write32(kGamePlayerCoinsAddr + sizeof(melonDS::u32), sample.Player1Coins);
-    nds->ARM9Write32(kGamePlayerScoreAddr, sample.Player0Score);
-    nds->ARM9Write32(kGamePlayerScoreAddr + sizeof(melonDS::u32), sample.Player1Score);
-    nds->ARM9Write32(kGamePlayerDisplayedStarsAddr, sample.Player0DisplayedStars);
-    nds->ARM9Write32(kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32), sample.Player1DisplayedStars);
-    nds->ARM9Write32(kGamePlayerDeathsAddr, sample.Player0Deaths);
-    nds->ARM9Write32(kGamePlayerDeathsAddr + sizeof(melonDS::u32), sample.Player1Deaths);
-    nds->ARM9Write32(kGamePlayerCollectedStarsAddr, sample.Player0CollectedStars);
-    nds->ARM9Write32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32), sample.Player1CollectedStars);
-    nds->ARM9Write32(kGameVsCoinCountAddr, sample.VsCoinCount);
+    if (G.GameStateApplyCriticalGlobals)
+    {
+        nds->ARM9Write32(kNetRandomValueAddr, sample.NetRandomValue);
+        nds->ARM9Write8(kNetRandomCallCountAddr, static_cast<melonDS::u8>(sample.NetRandomCallCount & 0xFF));
+        nds->ARM9Write32(kNetRandomBranchAddressAddr, sample.NetRandomBranchAddress);
+        nds->ARM9Write32(kGamePlayerCountAddr, sample.PlayerCount);
+        nds->ARM9Write32(kGamePlayerBattleStarsAddr, sample.Player0BattleStars);
+        nds->ARM9Write32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32), sample.Player1BattleStars);
+        nds->ARM9Write32(kGamePlayerCoinsAddr, sample.Player0Coins);
+        nds->ARM9Write32(kGamePlayerCoinsAddr + sizeof(melonDS::u32), sample.Player1Coins);
+        nds->ARM9Write32(kGamePlayerScoreAddr, sample.Player0Score);
+        nds->ARM9Write32(kGamePlayerScoreAddr + sizeof(melonDS::u32), sample.Player1Score);
+        nds->ARM9Write32(kGamePlayerDisplayedStarsAddr, sample.Player0DisplayedStars);
+        nds->ARM9Write32(kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32), sample.Player1DisplayedStars);
+        nds->ARM9Write32(kGamePlayerDeathsAddr, sample.Player0Deaths);
+        nds->ARM9Write32(kGamePlayerDeathsAddr + sizeof(melonDS::u32), sample.Player1Deaths);
+        nds->ARM9Write32(kGamePlayerCollectedStarsAddr, sample.Player0CollectedStars);
+        nds->ARM9Write32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32), sample.Player1CollectedStars);
+        nds->ARM9Write32(kGameVsCoinCountAddr, sample.VsCoinCount);
+    }
 
-    if (sample.StageCameraFound)
+    if (G.GameStateApplyStageObjects && sample.StageCameraFound)
     {
         WriteObjectWordByIDAndSettings(nds, kStageCameraObjectID, 0, 0x190, sample.StageCameraWord190);
         WriteObjectWordByIDAndSettings(nds, kStageCameraObjectID, 0, 0x194, sample.StageCameraWord194);
         WriteObjectWordByIDAndSettings(nds, kStageCameraObjectID, 0, 0x19C, sample.StageCameraWord19C);
         WriteObjectWordByIDAndSettings(nds, kStageCameraObjectID, 0, 0x1A0, sample.StageCameraWord1A0);
     }
-    if (sample.StageSceneFound)
+    if (G.GameStateApplyStageObjects && sample.StageSceneFound)
     {
         WriteObjectWordByIDAndSettings(nds, kStageSceneObjectID, 0x00B5FF00, 0x154, sample.StageSceneWord154);
         WriteObjectWordByIDAndSettings(nds, kStageSceneObjectID, 0x00B5FF00, 0x160, sample.StageSceneWord160);
     }
-    if (sample.VsStarFound)
+    if (G.GameStateApplyStageObjects && sample.MovingHazardFound)
+    {
+        WriteObjectTransformByGUID(
+            nds,
+            sample.MovingHazardGUID,
+            sample.MovingHazardPosX,
+            sample.MovingHazardPosY,
+            sample.MovingHazardPosZ,
+            sample.MovingHazardPosX,
+            sample.MovingHazardPosY,
+            sample.MovingHazardPosZ,
+            sample.MovingHazardVelX,
+            sample.MovingHazardVelY,
+            0);
+    }
+    if (G.GameStateApplyStarObjects && sample.VsStarFound)
     {
         if (!WriteObjectPositionByGUID(nds, sample.VsStarGUID, sample.VsStarPosX, sample.VsStarPosY, sample.VsStarPosZ))
             WriteVsBattleStarCandidatePosition(nds, sample.VsStarPosX, sample.VsStarPosY, sample.VsStarPosZ);
     }
-    else
+    else if (G.GameStateApplyStarObjects)
     {
         WriteVsBattleStarCandidatePosition(nds, 0, 0, 0);
     }
-    if (sample.VsStarActorFound)
+    if (G.GameStateApplyStarObjects && sample.VsStarActorFound)
     {
         if (!WriteObjectPositionByGUID(nds, sample.VsStarActorGUID, sample.VsStarActorPosX, sample.VsStarActorPosY, sample.VsStarActorPosZ))
         {
@@ -2336,11 +2390,11 @@ void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                 sample.VsStarActorPosZ);
         }
     }
-    else
+    else if (G.GameStateApplyStarObjects)
     {
         WriteObjectPositionByIDAndSettings(nds, kVsBattleStarActorObjectID, kVsBattleStarActorSettings, 0, 0, 0);
     }
-    if (sample.PlayerActor0Found)
+    if (G.GameStateApplyPlayerActors && sample.PlayerActor0Found)
         WriteObjectTransformByGUID(
             nds,
             sample.PlayerActor0GUID,
@@ -2353,7 +2407,7 @@ void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             sample.PlayerActor0VelX,
             sample.PlayerActor0VelY,
             sample.PlayerActor0VelZ);
-    if (sample.PlayerActor1Found)
+    if (G.GameStateApplyPlayerActors && sample.PlayerActor1Found)
         WriteObjectTransformByGUID(
             nds,
             sample.PlayerActor1GUID,
@@ -2470,6 +2524,18 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         sample.StageSceneWord154 = stageWord;
         ReadObjectWordByIDAndSettings(nds, kStageSceneObjectID, 0x00B5FF00, 0x160, sample.StageSceneWord160);
     }
+    const ObjectScanSample movingHazard = FindObjectByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
+    sample.MovingHazardFound = movingHazard.Found;
+    sample.MovingHazardGUID = movingHazard.GUID;
+    sample.MovingHazardSettings = movingHazard.Settings;
+    sample.MovingHazardStateType = movingHazard.StateType;
+    sample.MovingHazardFlags = movingHazard.Flags;
+    sample.MovingHazardPosX = movingHazard.PosX;
+    sample.MovingHazardPosY = movingHazard.PosY;
+    sample.MovingHazardPosZ = movingHazard.PosZ;
+    sample.MovingHazardVelX = movingHazard.VelX;
+    sample.MovingHazardVelY = movingHazard.VelY;
+
     sample.Hash = 1469598103934665603ull;
     MixGameStateValue(sample.Hash, sample.StageID);
     MixGameStateValue(sample.Hash, sample.StageGroup);
@@ -2541,6 +2607,16 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.StageSceneFound);
     MixGameStateValue(sample.Hash, sample.StageSceneWord154);
     MixGameStateValue(sample.Hash, sample.StageSceneWord160);
+    MixGameStateValue(sample.Hash, sample.MovingHazardFound);
+    MixGameStateValue(sample.Hash, sample.MovingHazardGUID);
+    MixGameStateValue(sample.Hash, sample.MovingHazardSettings);
+    MixGameStateValue(sample.Hash, sample.MovingHazardStateType);
+    MixGameStateValue(sample.Hash, sample.MovingHazardFlags);
+    MixGameStateValue(sample.Hash, sample.MovingHazardPosX);
+    MixGameStateValue(sample.Hash, sample.MovingHazardPosY);
+    MixGameStateValue(sample.Hash, sample.MovingHazardPosZ);
+    MixGameStateValue(sample.Hash, sample.MovingHazardVelX);
+    MixGameStateValue(sample.Hash, sample.MovingHazardVelY);
     return sample;
 }
 
@@ -2823,7 +2899,17 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                      << ",0x" << sample.PlayerActor1Settings
                      << ",0x" << sample.PlayerActor1PosX
                      << ",0x" << sample.PlayerActor1PosY
-                     << ",0x" << sample.PlayerActor1PosZ;
+                     << ",0x" << sample.PlayerActor1PosZ
+                     << ",0x" << sample.MovingHazardFound
+                     << ",0x" << sample.MovingHazardGUID
+                     << ",0x" << sample.MovingHazardSettings
+                     << ",0x" << sample.MovingHazardStateType
+                     << ",0x" << sample.MovingHazardFlags
+                     << ",0x" << sample.MovingHazardPosX
+                     << ",0x" << sample.MovingHazardPosY
+                     << ",0x" << sample.MovingHazardPosZ
+                     << ",0x" << sample.MovingHazardVelX
+                     << ",0x" << sample.MovingHazardVelY;
 
     if (G.GameStateTraceExtended)
     {
@@ -2958,6 +3044,16 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     packet.StageSceneFound = sample.StageSceneFound;
     packet.StageSceneWord154 = sample.StageSceneWord154;
     packet.StageSceneWord160 = sample.StageSceneWord160;
+    packet.MovingHazardFound = sample.MovingHazardFound;
+    packet.MovingHazardGUID = sample.MovingHazardGUID;
+    packet.MovingHazardSettings = sample.MovingHazardSettings;
+    packet.MovingHazardStateType = sample.MovingHazardStateType;
+    packet.MovingHazardFlags = sample.MovingHazardFlags;
+    packet.MovingHazardPosX = sample.MovingHazardPosX;
+    packet.MovingHazardPosY = sample.MovingHazardPosY;
+    packet.MovingHazardPosZ = sample.MovingHazardPosZ;
+    packet.MovingHazardVelX = sample.MovingHazardVelX;
+    packet.MovingHazardVelY = sample.MovingHazardVelY;
     packet.BasicHashLo = static_cast<melonDS::u32>(hashes.Basic & 0xFFFFFFFFu);
     packet.BasicHashHi = static_cast<melonDS::u32>(hashes.Basic >> 32);
     packet.PlayerGlobalHashLo = static_cast<melonDS::u32>(hashes.PlayerGlobal & 0xFFFFFFFFu);
@@ -3353,6 +3449,28 @@ void InitFromEnvironment()
     G.GameStateSyncEnabled = EnvFlag("MELONDS_NSML_STATE_SYNC");
     G.GameStateSyncExtended = EnvFlag("MELONDS_NSML_STATE_SYNC_EXTENDED");
     G.GameStateApplyEnabled = EnvFlag("MELONDS_NSML_STATE_APPLY");
+    G.GameStateApplyCriticalGlobals = true;
+    G.GameStateApplyStarObjects = true;
+    G.GameStateApplyStageObjects = true;
+    G.GameStateApplyPlayerActors = true;
+    if (const char* applyMode = std::getenv("MELONDS_NSML_STATE_APPLY_MODE"))
+    {
+        if (!std::strcmp(applyMode, "critical"))
+        {
+            G.GameStateApplyStageObjects = false;
+            G.GameStateApplyPlayerActors = false;
+        }
+        else if (!std::strcmp(applyMode, "globals"))
+        {
+            G.GameStateApplyStarObjects = false;
+            G.GameStateApplyStageObjects = false;
+            G.GameStateApplyPlayerActors = false;
+        }
+        else if (!std::strcmp(applyMode, "objects"))
+        {
+            G.GameStateApplyCriticalGlobals = false;
+        }
+    }
     G.GameStateSyncInterval = std::max(1, EnvInt("MELONDS_NSML_STATE_SYNC_INTERVAL", 60));
 
     const char* memPatchFile = std::getenv("MELONDS_NSML_MEM_PATCH_FILE");
@@ -3422,7 +3540,7 @@ void InitFromEnvironment()
         }
         else
         {
-            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,ggid,netRandomValue,netRandomCallCount,netRandomBranchAddress,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Settings,playerActor0X,playerActor0Y,playerActor0Z,playerActor1Found,playerActor1Guid,playerActor1Settings,playerActor1X,playerActor1Y,playerActor1Z";
+            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,ggid,netRandomValue,netRandomCallCount,netRandomBranchAddress,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Settings,playerActor0X,playerActor0Y,playerActor0Z,playerActor1Found,playerActor1Guid,playerActor1Settings,playerActor1X,playerActor1Y,playerActor1Z,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY";
             if (G.GameStateTraceExtended)
                 G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,playerGlobalHash,wifiCandidateHash,renderCandidateHash";
             G.GameStateTrace << '\n';

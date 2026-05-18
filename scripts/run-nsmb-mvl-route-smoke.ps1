@@ -11,6 +11,8 @@ param(
     [switch]$GameStateTraceExtended,
     [string]$RamDumpFrames = "",
     [int]$RamDumpInterval = 0,
+    [string]$StateSaveDir = "",
+    [int]$StateSaveFrame = 0,
     [int]$VsStarSnapFrame = 0,
     [int]$VsStarSnapPlayerSlot = 0,
     [int]$PlayerSnapToStarFrame = 0,
@@ -18,6 +20,8 @@ param(
     [int]$PlayerStickToStarStartFrame = 0,
     [int]$PlayerStickToStarEndFrame = 0,
     [int]$PlayerStickToStarSlot = 0,
+    [switch]$FrameBarrier,
+    [switch]$SerialRun,
     [switch]$CallTrace,
     [string]$CallTraceAddrs = "",
     [int]$CallTraceStartFrame = 0,
@@ -52,6 +56,8 @@ foreach ($name in @(
     "MELONDS_NSML_WAIT_FOR_PEER",
     "MELONDS_NSML_WAIT_FOR_PEER_AT_NETPLAY_START",
     "MELONDS_NSML_DEFER_NETWORK_UNTIL_START",
+    "MELONDS_NSML_FRAME_BARRIER",
+    "MELONDS_NSML_SERIAL_RUN",
     "MELONDS_NSML_NETPLAY_FRAME_BARRIER",
     "MELONDS_NSML_STATE_SYNC",
     "MELONDS_NSML_STATE_APPLY",
@@ -86,6 +92,16 @@ $env:MELONDS_NSML_SCREENSHOT_DIR = (Join-Path (Resolve-Path $LogDir).Path "scree
 $env:MELONDS_NSML_SCREENSHOT_INTERVAL = "120"
 $env:MELONDS_NSML_FIXED_RTC = "2020-01-01T00:00:00"
 $env:MELONDS_NSML_DISABLE_JIT = "1"
+if ($FrameBarrier) {
+    $env:MELONDS_NSML_FRAME_BARRIER = "1"
+} else {
+    Remove-Item Env:\MELONDS_NSML_FRAME_BARRIER -ErrorAction SilentlyContinue
+}
+if ($SerialRun) {
+    $env:MELONDS_NSML_SERIAL_RUN = "1"
+} else {
+    Remove-Item Env:\MELONDS_NSML_SERIAL_RUN -ErrorAction SilentlyContinue
+}
 if ($NoRngPatch) {
     Remove-Item Env:\MELONDS_NSML_NET_RANDOM_AUTO -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_NET_RANDOM_VALUE -ErrorAction SilentlyContinue
@@ -114,6 +130,14 @@ if ($RamDumpFrames -or $RamDumpInterval -gt 0) {
     Remove-Item Env:\MELONDS_NSML_RAM_DUMP_DIR -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_RAM_DUMP_FRAMES -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_RAM_DUMP_INTERVAL -ErrorAction SilentlyContinue
+}
+if ($StateSaveDir -and $StateSaveFrame -gt 0) {
+    New-Item -ItemType Directory -Force -Path $StateSaveDir | Out-Null
+    $env:MELONDS_NSML_STATE_SAVE_DIR = (Resolve-Path $StateSaveDir).Path
+    $env:MELONDS_NSML_STATE_SAVE_FRAME = "$StateSaveFrame"
+} else {
+    Remove-Item Env:\MELONDS_NSML_STATE_SAVE_DIR -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_STATE_SAVE_FRAME -ErrorAction SilentlyContinue
 }
 if ($VsStarSnapFrame -gt 0) {
     $env:MELONDS_NSML_VS_STAR_SNAP_FRAME = "$VsStarSnapFrame"

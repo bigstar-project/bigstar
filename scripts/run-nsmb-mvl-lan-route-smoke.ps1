@@ -7,9 +7,18 @@ param(
     [switch]$GameStateTrace,
     [int]$GameStateTraceInterval = 60,
     [switch]$GameStateTraceExtended,
+    [switch]$StateSync,
+    [switch]$StateApply,
+    [int]$StateSyncInterval = 60,
+    [switch]$StateSyncExtended,
+    [string]$StateApplyMode = "",
     [int]$ScreenshotInterval = 600,
     [string]$RamDumpFrames = "",
     [int]$RamDumpInterval = 0,
+    [string]$StateSaveDir = "",
+    [int]$StateSaveFrame = 0,
+    [string]$StateLoadDir = "",
+    [int]$StateLoadFrame = -1,
     [switch]$LanMPTrace,
     [int]$LanMPTraceDumpLen = 512,
     [string]$HostPacketReplayFile = "",
@@ -203,6 +212,31 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_GAME_STATE_TRACE_INTERVAL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_GAME_STATE_TRACE_EXTENDED -ErrorAction SilentlyContinue
     }
+    if ($StateSync) {
+        $env:MELONDS_NSML_STATE_SYNC = "1"
+        $env:MELONDS_NSML_STATE_SYNC_INTERVAL = "$StateSyncInterval"
+        if ($StateApply) {
+            $env:MELONDS_NSML_STATE_APPLY = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_STATE_APPLY -ErrorAction SilentlyContinue
+        }
+        if ($StateSyncExtended) {
+            $env:MELONDS_NSML_STATE_SYNC_EXTENDED = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_STATE_SYNC_EXTENDED -ErrorAction SilentlyContinue
+        }
+        if ($StateApplyMode) {
+            $env:MELONDS_NSML_STATE_APPLY_MODE = $StateApplyMode
+        } else {
+            Remove-Item Env:\MELONDS_NSML_STATE_APPLY_MODE -ErrorAction SilentlyContinue
+        }
+    } else {
+        Remove-Item Env:\MELONDS_NSML_STATE_SYNC -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_STATE_APPLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_STATE_SYNC_INTERVAL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_STATE_SYNC_EXTENDED -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_STATE_APPLY_MODE -ErrorAction SilentlyContinue
+    }
     if ($RamDumpFrames -or $RamDumpInterval -gt 0) {
         $env:MELONDS_NSML_RAM_DUMP_DIR = $RamDumpDir
         $env:MELONDS_NSML_RAM_DUMP_FRAMES = $RamDumpFrames
@@ -211,6 +245,31 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_RAM_DUMP_DIR -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_RAM_DUMP_FRAMES -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_RAM_DUMP_INTERVAL -ErrorAction SilentlyContinue
+    }
+    if ($StateSaveDir -and $StateSaveFrame -gt 0) {
+        $roleStateSaveDir = Join-Path $StateSaveDir $Role
+        New-Item -ItemType Directory -Force -Path $roleStateSaveDir | Out-Null
+        $env:MELONDS_NSML_STATE_SAVE_DIR = (Resolve-Path $roleStateSaveDir).Path
+        $env:MELONDS_NSML_STATE_SAVE_FRAME = "$StateSaveFrame"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_STATE_SAVE_DIR -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_STATE_SAVE_FRAME -ErrorAction SilentlyContinue
+    }
+    if ($StateLoadDir) {
+        $roleStateLoadDir = Join-Path $StateLoadDir $Role
+        if (Test-Path $roleStateLoadDir) {
+            $env:MELONDS_NSML_STATE_LOAD_DIR = (Resolve-Path $roleStateLoadDir).Path
+        } else {
+            $env:MELONDS_NSML_STATE_LOAD_DIR = (Resolve-Path $StateLoadDir).Path
+        }
+        if ($StateLoadFrame -lt 0) {
+            $env:MELONDS_NSML_STATE_LOAD_FRAME = "1"
+        } else {
+            $env:MELONDS_NSML_STATE_LOAD_FRAME = "$StateLoadFrame"
+        }
+    } else {
+        Remove-Item Env:\MELONDS_NSML_STATE_LOAD_DIR -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_STATE_LOAD_FRAME -ErrorAction SilentlyContinue
     }
     if ($LanMPTrace) {
         $env:MELONDS_NSML_LANMP_TRACE = $LanMPTracePath
@@ -465,6 +524,21 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_SEED_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_DEFER_NETWORK_UNTIL_START -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_NETPLAY_START_FRAME -ErrorAction SilentlyContinue
+    }
+    if (-not $StateSync) {
+        Remove-Item Env:\MELONDS_NSML_STATE_SYNC -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_STATE_APPLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_STATE_SYNC_INTERVAL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_STATE_SYNC_EXTENDED -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_STATE_APPLY_MODE -ErrorAction SilentlyContinue
+    }
+    if (-not $StateSaveDir) {
+        Remove-Item Env:\MELONDS_NSML_STATE_SAVE_DIR -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_STATE_SAVE_FRAME -ErrorAction SilentlyContinue
+    }
+    if (-not $StateLoadDir) {
+        Remove-Item Env:\MELONDS_NSML_STATE_LOAD_DIR -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_STATE_LOAD_FRAME -ErrorAction SilentlyContinue
     }
     $env:MELONDS_NSML_FIXED_RTC = "2020-01-01T00:00:00"
     $env:MELONDS_NSML_DISABLE_JIT = "1"
