@@ -24,6 +24,7 @@ param(
     [string]$HostPacketReplayFile = "",
     [string]$ClientPacketReplayFile = "",
     [switch]$PacketCapture,
+    [switch]$PacketCaptureAllowPreGame,
     [switch]$PacketBridge,
     [switch]$PacketBridgeAllowPreGame,
     [switch]$PacketBridgeTrace,
@@ -99,6 +100,10 @@ param(
     [string]$CallTraceAddrs = "",
     [int]$CallTraceStartFrame = 0,
     [int]$CallTraceEndFrame = 0,
+    [switch]$WriteTrace,
+    [string]$WriteTraceAddrs = "",
+    [int]$WriteTraceStartFrame = 0,
+    [int]$WriteTraceEndFrame = 0,
     [int]$HostStartupDelayMs = 1000,
     [int]$LanStartAttempts = 1,
     [switch]$SkipDisconnectScreenshotCheck,
@@ -284,6 +289,19 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_CALL_TRACE_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_CALL_TRACE_END_FRAME -ErrorAction SilentlyContinue
     }
+    if ($WriteTrace) {
+        $env:MELONDS_NSML_WRITE_TRACE = "1"
+        $env:MELONDS_NSML_WRITE_TRACE_LOG = "$Stdout.write-trace.csv"
+        if ($WriteTraceAddrs) { $env:MELONDS_NSML_WRITE_TRACE_ADDRS = $WriteTraceAddrs } else { Remove-Item Env:\MELONDS_NSML_WRITE_TRACE_ADDRS -ErrorAction SilentlyContinue }
+        if ($WriteTraceStartFrame -gt 0) { $env:MELONDS_NSML_WRITE_TRACE_START_FRAME = "$WriteTraceStartFrame" } else { Remove-Item Env:\MELONDS_NSML_WRITE_TRACE_START_FRAME -ErrorAction SilentlyContinue }
+        if ($WriteTraceEndFrame -gt 0) { $env:MELONDS_NSML_WRITE_TRACE_END_FRAME = "$WriteTraceEndFrame" } else { Remove-Item Env:\MELONDS_NSML_WRITE_TRACE_END_FRAME -ErrorAction SilentlyContinue }
+    } else {
+        Remove-Item Env:\MELONDS_NSML_WRITE_TRACE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WRITE_TRACE_LOG -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WRITE_TRACE_ADDRS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WRITE_TRACE_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WRITE_TRACE_END_FRAME -ErrorAction SilentlyContinue
+    }
     if ($GameStateTrace) {
         $env:MELONDS_NSML_GAME_STATE_TRACE = $GameStateTracePath
         $env:MELONDS_NSML_GAME_STATE_TRACE_INTERVAL = "$GameStateTraceInterval"
@@ -385,8 +403,14 @@ function Start-MelonLANProcess {
     }
     if ($PacketCapture) {
         $env:MELONDS_NSML_PACKET_CAPTURE_LOG = $PacketCapturePath
+        if ($PacketCaptureAllowPreGame) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME = "1"
+        }
     } else {
         Remove-Item Env:\MELONDS_NSML_PACKET_CAPTURE_LOG -ErrorAction SilentlyContinue
+        if (-not $PacketBridge) {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME -ErrorAction SilentlyContinue
+        }
     }
     if ($PacketBridge) {
         $env:MELONDS_NSML_POC = "1"
@@ -610,7 +634,9 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_LOCAL_INSTANCE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME -ErrorAction SilentlyContinue
+        if (-not ($PacketCapture -and $PacketCaptureAllowPreGame)) {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME -ErrorAction SilentlyContinue
+        }
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_REPLAY_TICK_OFFSET -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue

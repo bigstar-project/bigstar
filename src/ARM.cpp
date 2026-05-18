@@ -488,6 +488,62 @@ static void NSMLWriteLiveReplayPacketsToLocalMPSlots(
     }
 }
 
+static void NSMLWriteReplayEntryToLocalMPSlots(
+    NDS& nds,
+    const NSMLPacketReplayEntry& entry,
+    u32 tick,
+    bool normalizePacketTick)
+{
+    for (u32 player = 0; player < 2; player++)
+    {
+        if (!entry.Valid[player])
+            continue;
+
+        std::array<u8, 52> packet = entry.Packet[player];
+        if (normalizePacketTick)
+        {
+            packet[0] = static_cast<u8>(tick & 0xFF);
+            packet[1] = static_cast<u8>((tick >> 8) & 0xFF);
+        }
+
+        nds.ARM9Write32(0x0208AE50 + player * 4, 1);
+        const u32 packetAddr = 0x0208B040 + player * 0x3E;
+        for (u32 i = 0; i < packet.size(); i++)
+            nds.ARM9Write8(packetAddr + i, packet[i]);
+    }
+}
+
+static bool NSMLFindReplayEntryForTick(
+    const std::map<u32, NSMLPacketReplayEntry>& packets,
+    u32 tick,
+    u32 fallbackWindow,
+    const NSMLPacketReplayEntry** outEntry,
+    u32* outTick)
+{
+    auto it = packets.find(tick);
+    if (it != packets.end())
+    {
+        if (outEntry) *outEntry = &it->second;
+        if (outTick) *outTick = tick;
+        return true;
+    }
+
+    const u32 window = std::min<u32>(fallbackWindow, 512);
+    for (u32 age = 1; age <= window; age++)
+    {
+        const u32 fallbackTick = (tick - age) & 0xFFFF;
+        it = packets.find(fallbackTick);
+        if (it != packets.end())
+        {
+            if (outEntry) *outEntry = &it->second;
+            if (outTick) *outTick = fallbackTick;
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void NSML_RefreshMarioVsLuigiPacketSlots(NDS* nds)
 {
     if (!nds || !NSMLPacketBridgeEnabled() || !IsNSMLMarioVsLuigiPacketContext(*nds))
@@ -757,6 +813,18 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
     const u32 tick = (currentTick - cfg.LookupTickDelay) & 0xFFFF;
     if (NSMLPacketBridgeEnabled())
         NSMLWriteLiveReplayPacketsToLocalMPSlots(cpu->NDS, tick, cfg.LiveFallbackWindow, cfg.ReturnLookupTick);
+
+    const NSMLPacketReplayEntry* replaySlotEntry = nullptr;
+    u32 replaySlotTick = tick;
+    if (NSMLFindReplayEntryForTick(cfg.Packets, tick, cfg.LiveFallbackWindow, &replaySlotEntry, &replaySlotTick))
+    {
+        NSMLWriteReplayEntryToLocalMPSlots(
+            cpu->NDS,
+            *replaySlotEntry,
+            cfg.ReturnLookupTick ? tick : replaySlotTick,
+            cfg.ReturnLookupTick);
+    }
+
     u32 value = 0;
     bool hit = false;
 
@@ -776,10 +844,17 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
 
         if (!packetValid)
         {
-            auto it = cfg.Packets.find(tick);
-            if (it != cfg.Packets.end() && it->second.Valid[player])
+            const NSMLPacketReplayEntry* replayEntry = nullptr;
+            u32 replayTick = tick;
+            if (NSMLFindReplayEntryForTick(cfg.Packets, tick, cfg.LiveFallbackWindow, &replayEntry, &replayTick)
+                && replayEntry->Valid[player])
             {
-                selectedPacket = it->second.Packet[player];
+                selectedPacket = replayEntry->Packet[player];
+                if (cfg.ReturnLookupTick)
+                {
+                    selectedPacket[0] = static_cast<u8>(tick & 0xFF);
+                    selectedPacket[1] = static_cast<u8>((tick >> 8) & 0xFF);
+                }
                 packetValid = true;
             }
         }
@@ -1050,6 +1125,97 @@ static void WriteNSMLHexDump(FILE* file, ARM* cpu, u32 addr, u32 len)
 
     for (u32 i = 0; i < len; i++)
         fprintf(file, "%02X", cpu->NDS.ARM9Read8(addr + i));
+}
+
+static bool ParseNSMLU32List(const char* value, std::vector<u32>& out)
+{
+    out.clear();
+    if (!value || !value[0])
+        return false;
+
+    char buf[1024];
+    strncpy(buf, value, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+    for (char* tok = strtok(buf, ", \t\r\n"); tok; tok = strtok(nullptr, ", \t\r\n"))
+        out.push_back(static_cast<u32>(strtoul(tok, nullptr, 0)));
+    return !out.empty();
+}
+
+static void TraceNSMLWrite(ARM* cpu, u32 addr, u32 value, u32 size)
+{
+    struct WriteTraceConfig
+    {
+        bool Checked = false;
+        bool Enabled = false;
+        u32 StartFrame = 0;
+        u32 EndFrame = 0;
+        std::vector<u32> Addrs;
+        FILE* LogFile = nullptr;
+    };
+
+    static WriteTraceConfig cfg;
+    if (!cfg.Checked)
+    {
+        std::lock_guard<std::mutex> configLock(NSMLTraceConfigMutex);
+        if (!cfg.Checked)
+        {
+            cfg.Enabled = getenv("MELONDS_NSML_WRITE_TRACE") != nullptr;
+            ParseNSMLU32List(getenv("MELONDS_NSML_WRITE_TRACE_ADDRS"), cfg.Addrs);
+            if (const char* startFrame = getenv("MELONDS_NSML_WRITE_TRACE_START_FRAME"))
+                cfg.StartFrame = static_cast<u32>(strtoul(startFrame, nullptr, 0));
+            if (const char* endFrame = getenv("MELONDS_NSML_WRITE_TRACE_END_FRAME"))
+                cfg.EndFrame = static_cast<u32>(strtoul(endFrame, nullptr, 0));
+            if (const char* logPath = getenv("MELONDS_NSML_WRITE_TRACE_LOG"))
+            {
+                if (logPath[0])
+                    cfg.LogFile = fopen(logPath, "w");
+                if (cfg.LogFile)
+                    fprintf(cfg.LogFile, "nds,frame,pc,lr,addr,size,value,old\n");
+            }
+            cfg.Enabled = cfg.Enabled && cfg.LogFile && !cfg.Addrs.empty();
+            cfg.Checked = true;
+        }
+    }
+
+    if (!cfg.Enabled || !cpu || cpu->Num != 0)
+        return;
+    if (cpu->NDS.NumFrames < cfg.StartFrame)
+        return;
+    if (cfg.EndFrame != 0 && cpu->NDS.NumFrames > cfg.EndFrame)
+        return;
+
+    bool matched = false;
+    for (u32 watchAddr : cfg.Addrs)
+    {
+        if (addr <= watchAddr && watchAddr < addr + (size / 8))
+        {
+            matched = true;
+            break;
+        }
+    }
+    if (!matched)
+        return;
+
+    u32 oldValue = 0;
+    if (size == 8)
+        oldValue = cpu->NDS.ARM9Read8(addr);
+    else if (size == 16)
+        oldValue = cpu->NDS.ARM9Read16(addr);
+    else
+        oldValue = cpu->NDS.ARM9Read32(addr);
+
+    const u32 pc = cpu->R[15] - ((cpu->CPSR & 0x20) ? 2 : 4);
+    std::lock_guard<std::mutex> outputLock(NSMLTraceOutputMutex);
+    fprintf(cfg.LogFile, "%p,%u,%08X,%08X,%08X,%u,%08X,%08X\n",
+        static_cast<void*>(&cpu->NDS),
+        cpu->NDS.NumFrames,
+        pc,
+        cpu->R[14],
+        addr,
+        size,
+        value,
+        oldValue);
+    fflush(cfg.LogFile);
 }
 
 static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
@@ -2457,16 +2623,19 @@ u32 ARMv5::BusRead32(u32 addr)
 
 void ARMv5::BusWrite8(u32 addr, u8 val)
 {
+    TraceNSMLWrite(this, addr, val, 8);
     NDS.ARM9Write8(addr, val);
 }
 
 void ARMv5::BusWrite16(u32 addr, u16 val)
 {
+    TraceNSMLWrite(this, addr, val, 16);
     NDS.ARM9Write16(addr, val);
 }
 
 void ARMv5::BusWrite32(u32 addr, u32 val)
 {
+    TraceNSMLWrite(this, addr, val, 32);
     NDS.ARM9Write32(addr, val);
 }
 

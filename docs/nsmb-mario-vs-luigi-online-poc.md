@@ -70,20 +70,30 @@ NSMB側にはローカル通信時の入力/packet同期処理があるため、
 - `updateLoadGameSM` の `word144=7` 直書きは誤り。case6内の `0x020130A8 -> 0x02011CE8` を含む処理を通す必要がある。
 - `object manager create` の直接呼び出しはARM9 abortしやすく、安定ルートではない。
 - `scene request apply` / `scene transition` の直接呼び出しは実行できるが、通信tickが止まっている状態ではCourseSelect生成まで到達しない。
+- 通常LANのpre-game packet captureを取れるようにし、成功ルートではhostが action `0x01 -> 0x02 -> 0x03`、clientが action `0x00 -> 0x02 -> 0x03` へ進むことを確認した。
+- PacketBridgeOnlyではhostが action `0x01`、clientが action `0x00` のまま止まり、`netState1C=3/4` から進まない。
+- 成功LANのpacket列をNoLanMP/PacketBridge環境へCSV replayしても、`Net::getPacket*` の戻り値だけではCourseSelectへ進まない。replay時にLocalMP packet slot (`0x0208AE50`, `0x0208B040 + player * 0x3E`) へも書くフックを追加したが、それでも `vsConnectWord078/07C` が通常LANのように `3` へ進まない。
+- `transferPacket` の戻り値は通常LAN成功時も主に `0`。以前の `0x8` 強制は接続完了条件としては不適切。`0` 強制でも改善しない。
+- `ForceNetReady` + `ForceLoadGameSM` は `vsMode=1` / `netState1C=6` までは作れるが、host側でARM9 abortが出やすく、CourseSelect生成までは未到達。
+- ARM9 write traceを追加し、通常LANでは `0x02150DAC/0x02150DB0` が `VSConnect word078/07C` を `3` へ上げ、その後 `word144` が `1 -> 7` へ進むことを確認した。
+- `DirectBoot + startLoadLevel` はhost/clientとも `stageGroup=9` へ到達するが、player actor / star actor が生成されず、clientの `localPlayerID` も期待通りではない。これは「試合開始成功」ではなく、ロード状態へ無理に入れただけ。
+- `DirectBoot + Game::loadLevel` は現行の状態検査を通る場合があるが、ARM9 abortが出てplayer actorが生成されず、スクリーンショットも黒画面に近い。成功判定を `stageGroup/vsMode/localPlayerID` だけに依存してはいけない。
 
 ## 現在のブロッカー
 
-WAN遅延を入れると、client側のNSMB通信tickが止まる。これにより、NSMB側の接続/ロビー state machine は一部進められても、最終的なCourseSelect生成と `stageGroup=9` への遷移が消費されない。
+WAN adapter開始時に、NSMBのpacket値だけでなく、接続/ロビー state machine が期待しているLocalMP由来の状態遷移も再現する必要がある。現状は packet replay / slot write を入れても `VSConnect` が通常LANと同じ完了状態に進まず、最終的なCourseSelect生成と `stageGroup=9` への遷移が消費されない。
 
-次に見るべき本筋は、NSMBの状態を無理に進めることではなく、raw MP frameを遅延させる方式をどこまで捨て、NSMBのpacket/input同期層に近い場所でWAN adapter化できるかを判断すること。
+次に見るべき本筋は、通常LANで `vsConnectWord078/07C` が `1 -> 3` へ変わる条件を特定し、それをWAN adapter開始時にも自然に満たすこと。無理なstate直書きはabortや不整合を生みやすいので、関数境界と必要な副作用を絞る。
 
 ## 次にやること
 
-1. raw MP frame方式を続ける場合は、Wi-Fi channel scanとMP reply生成がなぜ遅延時に止まるかを `Wifi.cpp` 側で追う。
-2. より本筋として、`Net::getPacket*` / `transferPacket` 近辺のNSMB packet層でWAN packetを注入する方向へ戻る。
-3. MvsL接続段階のNSMB packet形式を特定し、LocalMPを通さず同じpacket列をhost/clientへ渡せるか試す。
-4. clientの `netPacketTick` が通常LANと同じように進む状態を作る。
-5. そのうえでCourseSelect生成、`stageGroup=9`、試合開始、スター/アイテム等のランダム要素一致を再検証する。
+1. 通常LANで `VSConnect` が `word078/07C=3` へ進む直前の関数呼び出しとメモリ書き込みをtraceする。
+2. PacketBridgeOnlyで同じ関数/書き込みが欠けている箇所を比較する。
+3. 欠けている副作用がLocalMP slot由来ならslot emulationを拡張し、NSMB関数由来なら該当関数を安全なタイミングで呼ぶ。
+4. `ForceLoadGameSMRunUpdate` のARM9 abort原因を潰す。直接trampolineを繰り返し呼ぶ方式は不安定なので、必要なら一回だけの関数呼び出し/return先管理に変える。
+5. smoke testの成功条件に `playerActor0/1Found`, `playerCount`, `vsStarActorFound`, disconnect/blackout検出を加え、黒画面や未ロード状態を成功扱いしない。
+6. `netState1C=6`, `vsMode=1`, `VSConnect word144=7` の状態からCourseSelect生成、`stageGroup=9`、試合開始へ進むかを再検証する。
+7. 試合開始後にスター/8コインアイテム等のランダム要素一致を確認する。
 
 ## 必要なもの
 
