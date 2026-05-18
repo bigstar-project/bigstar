@@ -67,6 +67,7 @@ struct MPReplyOptionConfig
     bool Checked = false;
     bool ForceReplyValid = false;
     bool StickyReply1 = false;
+    bool AcceptAnyMPChannel = false;
 };
 
 MPReplyTraceConfig& GetMPReplyTraceConfig()
@@ -101,6 +102,7 @@ MPReplyOptionConfig& GetMPReplyOptionConfig()
         cfg.Checked = true;
         cfg.ForceReplyValid = std::getenv("MELONDS_NSML_WIFI_MP_FORCE_REPLY_VALID") != nullptr;
         cfg.StickyReply1 = std::getenv("MELONDS_NSML_WIFI_MP_STICKY_REPLY1") != nullptr;
+        cfg.AcceptAnyMPChannel = std::getenv("MELONDS_NSML_WIFI_MP_ACCEPT_ANY_CHANNEL") != nullptr;
     }
     return cfg;
 }
@@ -1782,8 +1784,17 @@ bool Wifi::CheckRX(int type) // 0=regular 1=MP replies 2=MP host frames
         chan = RXBuffer[9];
         if (chan != CurChannel || CurChannel == 0)
         {
+            if (CurChannel != 0 && GetMPReplyOptionConfig().AcceptAnyMPChannel)
+            {
+                Log(LogLevel::Debug, "received MP frame on channel %d while tuned to %d; accepting for WAN adapter\n", chan, CurChannel);
+                RXBuffer[9] = CurChannel;
+                chan = CurChannel;
+            }
+            else
+            {
             Log(LogLevel::Debug, "received frame but bad channel %d (expected %d)\n", chan, CurChannel);
             continue;
+            }
         }
 
         // hack: ignore MP frames if not engaged in a MP comm

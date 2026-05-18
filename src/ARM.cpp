@@ -317,8 +317,11 @@ static void BuildNSMLMarioVsLuigiPacket(NDS& nds, std::array<u8, 52>& packet, u3
     packet[5] = nds.ARM9Read8(0x02087F05);
     packet[6] = nds.ARM9Read8(0x02087F06);
     packet[7] = nds.ARM9Read8(0x02087F07);
-    for (u32 i = 0; i < 44; i++)
-        packet[8 + i] = nds.ARM9Read8(0x02087F08 + i);
+    if (IsNSMLMarioVsLuigiGameplay(nds))
+    {
+        for (u32 i = 0; i < 44; i++)
+            packet[8 + i] = nds.ARM9Read8(0x02087F08 + i);
+    }
 }
 
 bool NSML_TakeMarioVsLuigiLocalPacket(NDS* nds, u8 outPacket[52], u32* outTick, u32* outKeys)
