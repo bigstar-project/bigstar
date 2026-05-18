@@ -61,7 +61,11 @@ NSMB側にはローカル通信時の入力/packet同期処理があるため、
 - 通常LANルートは `4200` フレームまで通る。
 - `LanMPAcceptAnyChannel` だけでは通常LANは壊れない。
 - raw LAN + 人工遅延 `LanMPSendDelayMs=20` では、hostは `vsMode=1` まで進むが、clientの `netPacketTick` が `0xb1` 前後で止まり、CourseSelect生成と `stageGroup=9` に進まない。
+- `LanMPSendDelayMs=5` でも接続段階で崩れる。raw MP frameを単純にWAN遅延させる方向はかなり弱い。
+- host側だけ20ms、client側だけ20ms、両方向20msのいずれでも接続段階で崩れる。片方向だけの返信遅延問題ではなく、DS MP通信のスキャン/返信窓全体が遅延に弱い。
+- `LanMPStaleMs=1000` でも改善しない。単純なstale破棄だけが原因ではない。
 - `-LanWanMode` の単純適用はさらに重く、clientが接続段階で停滞しやすい。
+- LAN MP traceでは、hostはMP frameを送り続け、clientもhost frameを受信している。ただしclientからのMP送信/返信はほぼ出ず、NSMB接続状態は `netState1C=3/4` 付近で止まる。
 - `VSConnect::updateLoadGameSM` をclient側で明示的に回すと `word144=7` までは進むが、clientの `netPacketTick` が止まったままなので CourseSelect / stage 遷移はまだ消費されない。
 - `updateLoadGameSM` の `word144=7` 直書きは誤り。case6内の `0x020130A8 -> 0x02011CE8` を含む処理を通す必要がある。
 - `object manager create` の直接呼び出しはARM9 abortしやすく、安定ルートではない。
@@ -71,13 +75,13 @@ NSMB側にはローカル通信時の入力/packet同期処理があるため、
 
 WAN遅延を入れると、client側のNSMB通信tickが止まる。これにより、NSMB側の接続/ロビー state machine は一部進められても、最終的なCourseSelect生成と `stageGroup=9` への遷移が消費されない。
 
-次に見るべき本筋は、NSMBの状態を無理に進めることではなく、LAN adapter側で「clientがhost MP frameをWAN遅延下でも継続して受け取れる状態」を作ること。
+次に見るべき本筋は、NSMBの状態を無理に進めることではなく、raw MP frameを遅延させる方式をどこまで捨て、NSMBのpacket/input同期層に近い場所でWAN adapter化できるかを判断すること。
 
 ## 次にやること
 
-1. `LAN.cpp` の MP frame 送受信 trace を使い、遅延時にclient側の host frame がどこで止まるか確認する。
-2. `RecvHostPacket` / `RecvPacketGeneric` / `ProcessLAN` の待ち方、stale判定、reliable/unsequenced指定を見直す。
-3. WAN向けには「古いframeを捨てる」より「NSMBに見せるhost frameを途切れさせない」方向を優先する。
+1. raw MP frame方式を続ける場合は、Wi-Fi channel scanとMP reply生成がなぜ遅延時に止まるかを `Wifi.cpp` 側で追う。
+2. より本筋として、`Net::getPacket*` / `transferPacket` 近辺のNSMB packet層でWAN packetを注入する方向へ戻る。
+3. MvsL接続段階のNSMB packet形式を特定し、LocalMPを通さず同じpacket列をhost/clientへ渡せるか試す。
 4. clientの `netPacketTick` が通常LANと同じように進む状態を作る。
 5. そのうえでCourseSelect生成、`stageGroup=9`、試合開始、スター/アイテム等のランダム要素一致を再検証する。
 

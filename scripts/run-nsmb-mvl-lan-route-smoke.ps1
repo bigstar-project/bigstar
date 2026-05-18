@@ -77,6 +77,8 @@ param(
     [int]$LanMPMiscRecvTimeoutMs = -1,
     [int]$LanMPStaleMs = -1,
     [int]$LanMPSendDelayMs = -1,
+    [int]$HostLanMPSendDelayMs = -1,
+    [int]$ClientLanMPSendDelayMs = -1,
     [switch]$LanMPReliable,
     [switch]$LanMPAcceptAnyChannel,
     [switch]$DirectMvlBoot,
@@ -734,8 +736,14 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_LAN_MP_STALE_MS -ErrorAction SilentlyContinue
         }
-        if ($LanMPSendDelayMs -ge 0) {
-            $env:MELONDS_NSML_LAN_MP_SEND_DELAY_MS = "$LanMPSendDelayMs"
+        $roleSendDelay = $LanMPSendDelayMs
+        if ($Role -eq "host" -and $HostLanMPSendDelayMs -ge 0) {
+            $roleSendDelay = $HostLanMPSendDelayMs
+        } elseif ($Role -eq "client" -and $ClientLanMPSendDelayMs -ge 0) {
+            $roleSendDelay = $ClientLanMPSendDelayMs
+        }
+        if ($roleSendDelay -ge 0) {
+            $env:MELONDS_NSML_LAN_MP_SEND_DELAY_MS = "$roleSendDelay"
         } else {
             Remove-Item Env:\MELONDS_NSML_LAN_MP_SEND_DELAY_MS -ErrorAction SilentlyContinue
         }
