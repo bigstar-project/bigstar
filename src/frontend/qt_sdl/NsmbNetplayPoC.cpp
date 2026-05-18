@@ -378,6 +378,7 @@ struct State
     bool PacketBridgeForceTickEnabled = false;
     melonDS::u32 PacketBridgeForceTickStartFrame = 0;
     int PacketBridgeForceTickBase = -1;
+    int PacketBridgeMaxPumpEvents = kMaxPumpEvents;
     int PacketBridgeMaxTickLead = -1;
     int PacketBridgeMaxFrameLead = -1;
     int PacketBridgeThrottleTimeoutMs = 5000;
@@ -778,7 +779,8 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
     if (!G.Host) return;
 
     ENetEvent event;
-    for (int i = 0; i < kMaxPumpEvents; i++)
+    const int maxEvents = std::clamp(G.PacketBridgeMaxPumpEvents, 1, kMaxPumpEvents);
+    for (int i = 0; i < maxEvents; i++)
     {
         int result = enet_host_service(G.Host, &event, 0);
         if (result <= 0) break;
@@ -1267,6 +1269,8 @@ void ThrottleNSMLPacketBridgeFrameLead(melonDS::NDS* nds, melonDS::u32 frame)
         }
 
         if (remoteFrame == 0xFFFFFFFF)
+            return;
+        if (G.PacketBridgeForceTickEnabled && remoteFrame < G.PacketBridgeForceTickStartFrame)
             return;
 
         const int lead = static_cast<int>(frame) - static_cast<int>(remoteFrame);
@@ -3316,6 +3320,8 @@ void InitFromEnvironment()
     G.PacketBridgeForceTickStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME", 0)));
     G.PacketBridgeForceTickBase = EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE", -1);
+    G.PacketBridgeMaxPumpEvents = std::clamp(
+        EnvInt("MELONDS_NSML_PACKET_BRIDGE_MAX_PUMP_EVENTS", kMaxPumpEvents), 1, kMaxPumpEvents);
     G.PacketBridgeMaxTickLead = EnvInt("MELONDS_NSML_PACKET_BRIDGE_MAX_TICK_LEAD", -1);
     G.PacketBridgeMaxFrameLead = EnvInt("MELONDS_NSML_PACKET_BRIDGE_MAX_FRAME_LEAD", -1);
     G.PacketBridgeThrottleTimeoutMs = std::max(
