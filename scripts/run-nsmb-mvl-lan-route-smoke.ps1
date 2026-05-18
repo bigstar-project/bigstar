@@ -25,6 +25,7 @@ param(
     [string]$ClientPacketReplayFile = "",
     [switch]$PacketCapture,
     [switch]$PacketBridge,
+    [switch]$PacketBridgeAllowPreGame,
     [switch]$PacketBridgeTrace,
     [int]$PacketBridgePort = 8165,
     [int]$PacketBridgeStartFrame = 0,
@@ -44,6 +45,10 @@ param(
     [switch]$PacketBridgeForceTick,
     [int]$PacketBridgeForceTickStartFrame = 0,
     [int]$PacketBridgeForceTickBase = -1,
+    [switch]$PacketBridgeForceNetReady,
+    [int]$PacketBridgeForceNetReadyStartFrame = 0,
+    [switch]$PacketBridgeForceLoadGameSM,
+    [int]$PacketBridgeForceLoadGameSMStartFrame = 0,
     [int]$PacketBridgeLookupTickDelay = 0,
     [int]$PacketBridgeMaxPumpEvents = 64,
     [switch]$PacketBridgeSuppressDisconnect,
@@ -63,6 +68,22 @@ param(
     [int]$PacketBridgeMaxFrameLead = -1,
     [int]$PacketBridgeThrottleTimeoutMs = 5000,
     [int]$DropMPAfterFrame = 0,
+    [switch]$LanWanMode,
+    [switch]$NoLanMP,
+    [int]$LanMPRecvTimeoutMs = -1,
+    [int]$LanMPMiscRecvTimeoutMs = -1,
+    [int]$LanMPStaleMs = -1,
+    [int]$LanMPSendDelayMs = -1,
+    [switch]$LanMPReliable,
+    [switch]$DirectMvlBoot,
+    [int]$DirectMvlBootFrame = 900,
+    [int]$DirectMvlBootStage = 0,
+    [switch]$DirectMvlBootLoadSM,
+    [switch]$DirectMvlBootPatchLoadSMOnly,
+    [switch]$DirectMvlBootCallUpdateSM,
+    [switch]$DirectMvlBootCallStartLoad,
+    [switch]$DirectMvlBootCallCourseSelect,
+    [switch]$DirectMvlBootCallObjectCourseSelect,
     [int]$HostStartupDelayMs = 1000,
     [int]$LanStartAttempts = 1,
     [switch]$SkipDisconnectScreenshotCheck,
@@ -199,6 +220,29 @@ function Start-MelonLANProcess {
     $env:MELONDS_NSML_HASH_INTERVAL = "300"
     $env:MELONDS_NSML_SCREENSHOT_DIR = $ScreenshotDir
     $env:MELONDS_NSML_SCREENSHOT_INTERVAL = "$ScreenshotInterval"
+    if ($DirectMvlBoot) {
+        $env:MELONDS_NSML_DIRECT_MVL_BOOT = "1"
+        $env:MELONDS_NSML_DIRECT_MVL_BOOT_FRAME = "$DirectMvlBootFrame"
+        $env:MELONDS_NSML_DIRECT_MVL_BOOT_STAGE = "$DirectMvlBootStage"
+        $env:MELONDS_NSML_DIRECT_MVL_BOOT_PLAYER_ID = $(if ($Role -eq "client") { "1" } else { "0" })
+        if ($DirectMvlBootLoadSM) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_LOAD_SM = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_LOAD_SM -ErrorAction SilentlyContinue }
+        if ($DirectMvlBootPatchLoadSMOnly) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_PATCH_LOAD_SM_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_PATCH_LOAD_SM_ONLY -ErrorAction SilentlyContinue }
+        if ($DirectMvlBootCallUpdateSM) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_CALL_UPDATE_SM = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_UPDATE_SM -ErrorAction SilentlyContinue }
+        if ($DirectMvlBootCallStartLoad) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_CALL_START_LOAD = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_START_LOAD -ErrorAction SilentlyContinue }
+        if ($DirectMvlBootCallCourseSelect) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT -ErrorAction SilentlyContinue }
+        if ($DirectMvlBootCallObjectCourseSelect) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT -ErrorAction SilentlyContinue }
+    } else {
+        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_STAGE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_PLAYER_ID -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_LOAD_SM -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_PATCH_LOAD_SM_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_UPDATE_SM -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_START_LOAD -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT -ErrorAction SilentlyContinue
+    }
     if ($GameStateTrace) {
         $env:MELONDS_NSML_GAME_STATE_TRACE = $GameStateTracePath
         $env:MELONDS_NSML_GAME_STATE_TRACE_INTERVAL = "$GameStateTraceInterval"
@@ -307,9 +351,18 @@ function Start-MelonLANProcess {
         $env:MELONDS_NSML_POC = "1"
         $env:MELONDS_NSML_ROLE = $Role
         $env:MELONDS_NSML_PORT = "$PacketBridgePort"
-        $env:MELONDS_NSML_LOCAL_INSTANCE = "0"
+        if ($PacketBridgeAllowPreGame -and $Role -eq "client") {
+            $env:MELONDS_NSML_LOCAL_INSTANCE = "1"
+        } else {
+            $env:MELONDS_NSML_LOCAL_INSTANCE = "0"
+        }
         $env:MELONDS_NSML_PACKET_BRIDGE = "1"
         $env:MELONDS_NSML_PACKET_BRIDGE_ONLY = "1"
+        if ($PacketBridgeAllowPreGame) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME -ErrorAction SilentlyContinue
+        }
         $roleReplayOffset = $PacketBridgeReplayTickOffset
         if ($Role -eq "host" -and $HostPacketBridgeReplayTickOffset -ge 0) {
             $roleReplayOffset = $HostPacketBridgeReplayTickOffset
@@ -341,6 +394,20 @@ function Start-MelonLANProcess {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE -ErrorAction SilentlyContinue
+        }
+        if ($PacketBridgeForceNetReady) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY = "1"
+            $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME = "$PacketBridgeForceNetReadyStartFrame"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME -ErrorAction SilentlyContinue
+        }
+        if ($PacketBridgeForceLoadGameSM) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM = "1"
+            $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_START_FRAME = "$PacketBridgeForceLoadGameSMStartFrame"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_START_FRAME -ErrorAction SilentlyContinue
         }
         if ($PacketBridgeLookupTickDelay -gt 0) {
             $env:MELONDS_NSML_PACKET_REPLAY_LOOKUP_TICK_DELAY = "$PacketBridgeLookupTickDelay"
@@ -488,6 +555,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_LOCAL_INSTANCE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_REPLAY_TICK_OFFSET -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
@@ -495,6 +563,10 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LOOKUP_TICK_DELAY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAX_PUMP_EVENTS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_SUPPRESS_DISCONNECT -ErrorAction SilentlyContinue
@@ -547,11 +619,55 @@ function Start-MelonLANProcess {
     } else {
         Remove-Item Env:\MELONDS_NSML_DROP_MP_AFTER_FRAME -ErrorAction SilentlyContinue
     }
-    $env:MELONDS_NSML_MP_INTERFACE = "lan"
-    $env:MELONDS_NSML_LAN_ROLE = $Role
-    $env:MELONDS_NSML_LAN_PLAYERS = "2"
-    $env:MELONDS_NSML_LAN_HOST = "127.0.0.1"
-    $env:MELONDS_NSML_LAN_PLAYER = "codex-$Role"
+    if ($NoLanMP) {
+        Remove-Item Env:\MELONDS_NSML_MP_INTERFACE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_LAN_ROLE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_LAN_PLAYERS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_LAN_HOST -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_LAN_PLAYER -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_LAN_WAN_MODE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_LAN_MP_RECV_TIMEOUT_MS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_LAN_MP_MISC_RECV_TIMEOUT_MS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_LAN_MP_STALE_MS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_LAN_MP_SEND_DELAY_MS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_LAN_MP_RELIABLE -ErrorAction SilentlyContinue
+    } else {
+        $env:MELONDS_NSML_MP_INTERFACE = "lan"
+        $env:MELONDS_NSML_LAN_ROLE = $Role
+        $env:MELONDS_NSML_LAN_PLAYERS = "2"
+        $env:MELONDS_NSML_LAN_HOST = "127.0.0.1"
+        $env:MELONDS_NSML_LAN_PLAYER = "codex-$Role"
+        if ($LanWanMode) {
+            $env:MELONDS_NSML_LAN_WAN_MODE = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_LAN_WAN_MODE -ErrorAction SilentlyContinue
+        }
+        if ($LanMPRecvTimeoutMs -ge 0) {
+            $env:MELONDS_NSML_LAN_MP_RECV_TIMEOUT_MS = "$LanMPRecvTimeoutMs"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_LAN_MP_RECV_TIMEOUT_MS -ErrorAction SilentlyContinue
+        }
+        if ($LanMPMiscRecvTimeoutMs -ge 0) {
+            $env:MELONDS_NSML_LAN_MP_MISC_RECV_TIMEOUT_MS = "$LanMPMiscRecvTimeoutMs"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_LAN_MP_MISC_RECV_TIMEOUT_MS -ErrorAction SilentlyContinue
+        }
+        if ($LanMPStaleMs -ge 0) {
+            $env:MELONDS_NSML_LAN_MP_STALE_MS = "$LanMPStaleMs"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_LAN_MP_STALE_MS -ErrorAction SilentlyContinue
+        }
+        if ($LanMPSendDelayMs -ge 0) {
+            $env:MELONDS_NSML_LAN_MP_SEND_DELAY_MS = "$LanMPSendDelayMs"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_LAN_MP_SEND_DELAY_MS -ErrorAction SilentlyContinue
+        }
+        if ($LanMPReliable) {
+            $env:MELONDS_NSML_LAN_MP_RELIABLE = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_LAN_MP_RELIABLE -ErrorAction SilentlyContinue
+        }
+    }
     if ($Role -eq "host") {
         $env:MELONDS_NSML_FIRMWARE_MAC = "00:09:BF:11:22:33"
     } else {
@@ -625,12 +741,18 @@ try {
     throw
 }
 
-foreach ($item in @(
-    @{ Path = $hostOut; Pattern = "LAN host start .* ok=1"; Name = "host LAN start" },
-    @{ Path = $clientOut; Pattern = "LAN client start .* ok=1"; Name = "client LAN start" },
+$requiredPatterns = @(
     @{ Path = $hostOut; Pattern = "frame limit reached"; Name = "host frame limit" },
     @{ Path = $clientOut; Pattern = "frame limit reached"; Name = "client frame limit" }
-)) {
+)
+if (-not $NoLanMP) {
+    $requiredPatterns = @(
+        @{ Path = $hostOut; Pattern = "LAN host start .* ok=1"; Name = "host LAN start" },
+        @{ Path = $clientOut; Pattern = "LAN client start .* ok=1"; Name = "client LAN start" }
+    ) + $requiredPatterns
+}
+
+foreach ($item in $requiredPatterns) {
     if (-not (Select-String -Path $item.Path -Pattern $item.Pattern -Quiet)) {
         throw "missing $($item.Name). See $($item.Path)"
     }

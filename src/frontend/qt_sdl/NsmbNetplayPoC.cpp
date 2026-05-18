@@ -59,8 +59,20 @@ constexpr melonDS::u32 kGameStageIDAddr = 0x02085054;
 constexpr melonDS::u32 kGameStageGroupAddr = 0x02085058;
 constexpr melonDS::u32 kGameLocalPlayerIDAddr = 0x020850BC;
 constexpr melonDS::u32 kGameVsModeAddr = 0x020850C4;
+constexpr melonDS::u32 kNetStateBaseAddr = 0x02087E00;
+constexpr melonDS::u32 kNetState14Addr = 0x02087E14;
+constexpr melonDS::u32 kNetState1CAddr = 0x02087E1C;
+constexpr melonDS::u32 kNetState20Addr = 0x02087E20;
+constexpr melonDS::u32 kNetState24Addr = 0x02087E24;
+constexpr melonDS::u32 kNetState5CAddr = 0x02087E5C;
 constexpr melonDS::u32 kNetGGIDAddr = 0x02087E78;
 constexpr melonDS::u32 kNetRandomBranchAddressAddr = 0x02087E7C;
+constexpr melonDS::u32 kNetPacketTickAddr = 0x02087F00;
+constexpr melonDS::u32 kNetPacketKeysAddr = 0x02087F02;
+constexpr melonDS::u32 kNetPacketActionAddr = 0x02087F04;
+constexpr melonDS::u32 kNetPacketByte5Addr = 0x02087F05;
+constexpr melonDS::u32 kNetPacketByte6Addr = 0x02087F06;
+constexpr melonDS::u32 kNetPacketByte7Addr = 0x02087F07;
 constexpr melonDS::u32 kNetRandomCallCountAddr = 0x02088068;
 constexpr melonDS::u32 kNetRandomValueAddr = 0x02088088;
 constexpr melonDS::u32 kGamePlayerGlobalBlockAddr = 0x0208A964;
@@ -81,6 +93,8 @@ constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
 constexpr melonDS::u16 kVsMovingHazardObjectID = 0x0053;
 constexpr melonDS::u32 kVsMovingHazardSettings = 0x00000000;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
+constexpr melonDS::u16 kVsConnectObjectID = 0x0006;
+constexpr melonDS::u16 kCourseSelectObjectID = 0x0005;
 constexpr melonDS::u16 kStageCameraObjectID = 0x013C;
 constexpr melonDS::u32 kA2DJGameLoadLevelAddr = 0x020068A8;
 constexpr melonDS::u32 kA2DJVSConnectCreateLoadGameSMAddr = 0x021515B4;
@@ -246,6 +260,17 @@ struct GameStateSample
     melonDS::u32 VsMode = 0;
     melonDS::u32 LocalPlayerID = 0;
     melonDS::u32 GGID = 0;
+    melonDS::u32 NetState14 = 0;
+    melonDS::u32 NetState1C = 0;
+    melonDS::u32 NetState20 = 0;
+    melonDS::u32 NetState24 = 0;
+    melonDS::u32 NetState5C = 0;
+    melonDS::u32 NetPacketTick = 0;
+    melonDS::u32 NetPacketKeys = 0;
+    melonDS::u32 NetPacketAction = 0;
+    melonDS::u32 NetPacketByte5 = 0;
+    melonDS::u32 NetPacketByte6 = 0;
+    melonDS::u32 NetPacketByte7 = 0;
     melonDS::u32 NetRandomValue = 0;
     melonDS::u32 NetRandomCallCount = 0;
     melonDS::u32 NetRandomBranchAddress = 0;
@@ -313,6 +338,21 @@ struct GameStateSample
     melonDS::u32 StageSceneFound = 0;
     melonDS::u32 StageSceneWord154 = 0;
     melonDS::u32 StageSceneWord160 = 0;
+    melonDS::u32 VsConnectFound = 0;
+    melonDS::u32 VsConnectBase = 0;
+    melonDS::u32 VsConnectWord078 = 0;
+    melonDS::u32 VsConnectWord07C = 0;
+    melonDS::u32 VsConnectWord114 = 0;
+    melonDS::u32 VsConnectWord118 = 0;
+    melonDS::u32 VsConnectWord120 = 0;
+    melonDS::u32 VsConnectWord128 = 0;
+    melonDS::u32 VsConnectWord144 = 0;
+    melonDS::u32 VsConnectWord148 = 0;
+    melonDS::u32 VsConnectWord154 = 0;
+    melonDS::u32 CourseSelectFound = 0;
+    melonDS::u32 CourseSelectBase = 0;
+    melonDS::u32 CourseSelectWord078 = 0;
+    melonDS::u32 CourseSelectWord07C = 0;
     melonDS::u32 MovingHazardFound = 0;
     melonDS::u32 MovingHazardGUID = 0;
     melonDS::u32 MovingHazardSettings = 0;
@@ -359,6 +399,9 @@ struct GameStateSyncHashes
     melonDS::u64 RenderCandidate = 0;
 };
 
+melonDS::u32 FindObjectBaseByID(melonDS::NDS* nds, melonDS::u16 objectID);
+bool WriteARM9U32(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 value);
+
 struct State
 {
     std::mutex Mutex;
@@ -404,6 +447,7 @@ struct State
     bool NetplayFrameBarrierEnabled = false;
     bool PacketBridgeEnabled = false;
     bool PacketBridgeOnly = false;
+    bool PacketBridgeAllowPreGame = false;
     bool PacketBridgeTraceEnabled = false;
     bool PacketBridgeSendLocalPlayerOnly = true;
     bool PacketBridgeWaitEnabled = false;
@@ -412,6 +456,10 @@ struct State
     bool PacketBridgeForceTickEnabled = false;
     melonDS::u32 PacketBridgeForceTickStartFrame = 0;
     int PacketBridgeForceTickBase = -1;
+    bool PacketBridgeForceNetReady = false;
+    melonDS::u32 PacketBridgeForceNetReadyStartFrame = 0;
+    bool PacketBridgeForceLoadGameSM = false;
+    melonDS::u32 PacketBridgeForceLoadGameSMStartFrame = 0;
     int PacketBridgeMaxPumpEvents = kMaxPumpEvents;
     int PacketBridgeMaxTickLead = -1;
     int PacketBridgeMaxFrameLead = -1;
@@ -1085,6 +1133,12 @@ melonDS::u32 LocalPlayerID(melonDS::NDS* nds)
     if (!nds)
         return 0;
 
+    const bool inGameplay = nds->ARM9Read32(kGameStageGroupAddr) == 9
+        && nds->ARM9Read32(kGameVsModeAddr) == 1
+        && nds->ARM9Read32(0x02087E78) == 0x42;
+    if (G.PacketBridgeEnabled && G.PacketBridgeAllowPreGame && !inGameplay)
+        return static_cast<melonDS::u32>(G.LocalInstance & 1);
+
     return nds->ARM9Read32(kGameLocalPlayerIDAddr) & 1;
 }
 
@@ -1175,6 +1229,62 @@ void ForceNSMLPacketBridgeTickIfNeeded(int instanceID, melonDS::u32 frame, melon
     if (G.PacketBridgeTraceEnabled && (frame % 60) == 0)
     {
         std::printf("NSMB PacketBridge: force tick=0x%04X frame=%u\n", tick, frame);
+        std::fflush(stdout);
+    }
+}
+
+void ForceNSMLPacketBridgeNetReadyIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.PacketBridgeForceNetReady || !G.PacketBridgeEnabled || !nds || instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.PacketBridgeForceNetReadyStartFrame)
+        return;
+    if (nds->ARM9Read32(kNetGGIDAddr) != 0x42)
+        return;
+
+    nds->ARM9Write32(kNetState14Addr, 0x00000001);
+    nds->ARM9Write32(kNetState1CAddr, 0x00000006);
+    nds->ARM9Write32(kNetState20Addr, 0x00000002);
+    nds->ARM9Write32(kNetState24Addr, 0x00000002);
+    nds->ARM9Write32(kGameVsModeAddr, 0x00000001);
+
+    if (G.PacketBridgeTraceEnabled && (frame % 60) == 0)
+    {
+        std::printf("NSMB PacketBridge: force net ready inst=%d frame=%u\n", instanceID, frame);
+        std::fflush(stdout);
+    }
+}
+
+void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.PacketBridgeForceLoadGameSM || !G.PacketBridgeEnabled || !nds || instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.PacketBridgeForceLoadGameSMStartFrame)
+        return;
+    if (nds->ARM9Read32(kNetGGIDAddr) != 0x42)
+        return;
+
+    const melonDS::u32 vsConnectBase = FindObjectBaseByID(nds, kVsConnectObjectID);
+    if (vsConnectBase == 0)
+        return;
+
+    WriteARM9U32(nds, vsConnectBase + 0x078, 0x00000003);
+    WriteARM9U32(nds, vsConnectBase + 0x07C, 0x00000003);
+    WriteARM9U32(nds, vsConnectBase + 0x114, 0x00000000);
+    WriteARM9U32(nds, vsConnectBase + 0x118, kA2DJVSConnectCreateLoadGameSMAddr);
+    WriteARM9U32(nds, vsConnectBase + 0x120, kA2DJVSConnectUpdateLoadGameSMAddr);
+    WriteARM9U32(nds, vsConnectBase + 0x128, kA2DJVSConnectRenderLoadGameSMAddr);
+    WriteARM9U32(nds, vsConnectBase + 0x134, 0x02156678);
+    WriteARM9U32(nds, vsConnectBase + 0x144, 0x00000007);
+    WriteARM9U32(nds, vsConnectBase + 0x148, 0x00000030);
+    WriteARM9U32(nds, vsConnectBase + 0x154, 0x00030000);
+
+    if (G.PacketBridgeTraceEnabled && (frame % 60) == 0)
+    {
+        std::printf("NSMB PacketBridge: force load-game SM inst=%d frame=%u vsConnect=%08X\n",
+            instanceID,
+            frame,
+            vsConnectBase);
         std::fflush(stdout);
     }
 }
@@ -1914,7 +2024,7 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
         WriteARM9U32(nds, vsConnectBase + 0x128, kA2DJVSConnectRenderLoadGameSMAddr);
         WriteARM9U32(nds, vsConnectBase + 0x134, 0x02156678);
         WriteARM9U32(nds, vsConnectBase + 0x144, 0x00000007);
-        WriteARM9U32(nds, vsConnectBase + 0x148, 0x00000032);
+        WriteARM9U32(nds, vsConnectBase + 0x148, 0x00000030);
         WriteARM9U32(nds, vsConnectBase + 0x154, 0x00030000);
         WriteARM9U32(nds, 0x02087E14, 0x00000001);
         WriteARM9U32(nds, 0x02087E1C, 0x00000006);
@@ -2690,6 +2800,17 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.VsMode = nds->ARM9Read32(kGameVsModeAddr);
     sample.LocalPlayerID = nds->ARM9Read32(kGameLocalPlayerIDAddr);
     sample.GGID = nds->ARM9Read32(kNetGGIDAddr);
+    sample.NetState14 = nds->ARM9Read32(kNetState14Addr);
+    sample.NetState1C = nds->ARM9Read32(kNetState1CAddr);
+    sample.NetState20 = nds->ARM9Read32(kNetState20Addr);
+    sample.NetState24 = nds->ARM9Read32(kNetState24Addr);
+    sample.NetState5C = nds->ARM9Read16(kNetState5CAddr);
+    sample.NetPacketTick = nds->ARM9Read16(kNetPacketTickAddr);
+    sample.NetPacketKeys = nds->ARM9Read16(kNetPacketKeysAddr);
+    sample.NetPacketAction = nds->ARM9Read8(kNetPacketActionAddr);
+    sample.NetPacketByte5 = nds->ARM9Read8(kNetPacketByte5Addr);
+    sample.NetPacketByte6 = nds->ARM9Read8(kNetPacketByte6Addr);
+    sample.NetPacketByte7 = nds->ARM9Read8(kNetPacketByte7Addr);
     sample.NetRandomValue = nds->ARM9Read32(kNetRandomValueAddr);
     sample.NetRandomCallCount = nds->ARM9Read8(kNetRandomCallCountAddr);
     sample.NetRandomBranchAddress = nds->ARM9Read32(kNetRandomBranchAddressAddr);
@@ -2772,6 +2893,27 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         sample.StageSceneWord154 = stageWord;
         ReadObjectWordByIDAndSettings(nds, kStageSceneObjectID, 0x00B5FF00, 0x160, sample.StageSceneWord160);
     }
+    sample.VsConnectBase = FindObjectBaseByID(nds, kVsConnectObjectID);
+    if (sample.VsConnectBase != 0)
+    {
+        sample.VsConnectFound = 1;
+        sample.VsConnectWord078 = nds->ARM9Read32(sample.VsConnectBase + 0x078);
+        sample.VsConnectWord07C = nds->ARM9Read32(sample.VsConnectBase + 0x07C);
+        sample.VsConnectWord114 = nds->ARM9Read32(sample.VsConnectBase + 0x114);
+        sample.VsConnectWord118 = nds->ARM9Read32(sample.VsConnectBase + 0x118);
+        sample.VsConnectWord120 = nds->ARM9Read32(sample.VsConnectBase + 0x120);
+        sample.VsConnectWord128 = nds->ARM9Read32(sample.VsConnectBase + 0x128);
+        sample.VsConnectWord144 = nds->ARM9Read32(sample.VsConnectBase + 0x144);
+        sample.VsConnectWord148 = nds->ARM9Read32(sample.VsConnectBase + 0x148);
+        sample.VsConnectWord154 = nds->ARM9Read32(sample.VsConnectBase + 0x154);
+    }
+    sample.CourseSelectBase = FindObjectBaseByID(nds, kCourseSelectObjectID);
+    if (sample.CourseSelectBase != 0)
+    {
+        sample.CourseSelectFound = 1;
+        sample.CourseSelectWord078 = nds->ARM9Read32(sample.CourseSelectBase + 0x078);
+        sample.CourseSelectWord07C = nds->ARM9Read32(sample.CourseSelectBase + 0x07C);
+    }
     const ObjectScanSample movingHazard = FindObjectByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
     sample.MovingHazardFound = movingHazard.Found;
     sample.MovingHazardGUID = movingHazard.GUID;
@@ -2790,6 +2932,17 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.VsMode);
     MixGameStateValue(sample.Hash, sample.LocalPlayerID);
     MixGameStateValue(sample.Hash, sample.GGID);
+    MixGameStateValue(sample.Hash, sample.NetState14);
+    MixGameStateValue(sample.Hash, sample.NetState1C);
+    MixGameStateValue(sample.Hash, sample.NetState20);
+    MixGameStateValue(sample.Hash, sample.NetState24);
+    MixGameStateValue(sample.Hash, sample.NetState5C);
+    MixGameStateValue(sample.Hash, sample.NetPacketTick);
+    MixGameStateValue(sample.Hash, sample.NetPacketKeys);
+    MixGameStateValue(sample.Hash, sample.NetPacketAction);
+    MixGameStateValue(sample.Hash, sample.NetPacketByte5);
+    MixGameStateValue(sample.Hash, sample.NetPacketByte6);
+    MixGameStateValue(sample.Hash, sample.NetPacketByte7);
     MixGameStateValue(sample.Hash, sample.NetRandomValue);
     MixGameStateValue(sample.Hash, sample.NetRandomCallCount);
     MixGameStateValue(sample.Hash, sample.NetRandomBranchAddress);
@@ -2855,6 +3008,19 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.StageSceneFound);
     MixGameStateValue(sample.Hash, sample.StageSceneWord154);
     MixGameStateValue(sample.Hash, sample.StageSceneWord160);
+    MixGameStateValue(sample.Hash, sample.VsConnectFound);
+    MixGameStateValue(sample.Hash, sample.VsConnectWord078);
+    MixGameStateValue(sample.Hash, sample.VsConnectWord07C);
+    MixGameStateValue(sample.Hash, sample.VsConnectWord114);
+    MixGameStateValue(sample.Hash, sample.VsConnectWord118);
+    MixGameStateValue(sample.Hash, sample.VsConnectWord120);
+    MixGameStateValue(sample.Hash, sample.VsConnectWord128);
+    MixGameStateValue(sample.Hash, sample.VsConnectWord144);
+    MixGameStateValue(sample.Hash, sample.VsConnectWord148);
+    MixGameStateValue(sample.Hash, sample.VsConnectWord154);
+    MixGameStateValue(sample.Hash, sample.CourseSelectFound);
+    MixGameStateValue(sample.Hash, sample.CourseSelectWord078);
+    MixGameStateValue(sample.Hash, sample.CourseSelectWord07C);
     MixGameStateValue(sample.Hash, sample.MovingHazardFound);
     MixGameStateValue(sample.Hash, sample.MovingHazardGUID);
     MixGameStateValue(sample.Hash, sample.MovingHazardSettings);
@@ -3115,6 +3281,17 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                      << ",0x" << sample.VsMode
                      << ",0x" << sample.LocalPlayerID
                      << ",0x" << sample.GGID
+                     << ",0x" << sample.NetState14
+                     << ",0x" << sample.NetState1C
+                     << ",0x" << sample.NetState20
+                     << ",0x" << sample.NetState24
+                     << ",0x" << sample.NetState5C
+                     << ",0x" << sample.NetPacketTick
+                     << ",0x" << sample.NetPacketKeys
+                     << ",0x" << sample.NetPacketAction
+                     << ",0x" << sample.NetPacketByte5
+                     << ",0x" << sample.NetPacketByte6
+                     << ",0x" << sample.NetPacketByte7
                      << ",0x" << sample.NetRandomValue
                      << ",0x" << sample.NetRandomCallCount
                      << ",0x" << sample.NetRandomBranchAddress
@@ -3148,6 +3325,21 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                      << ",0x" << sample.PlayerActor1PosX
                      << ",0x" << sample.PlayerActor1PosY
                      << ",0x" << sample.PlayerActor1PosZ
+                     << ",0x" << sample.VsConnectFound
+                     << ",0x" << sample.VsConnectBase
+                     << ",0x" << sample.VsConnectWord078
+                     << ",0x" << sample.VsConnectWord07C
+                     << ",0x" << sample.VsConnectWord114
+                     << ",0x" << sample.VsConnectWord118
+                     << ",0x" << sample.VsConnectWord120
+                     << ",0x" << sample.VsConnectWord128
+                     << ",0x" << sample.VsConnectWord144
+                     << ",0x" << sample.VsConnectWord148
+                     << ",0x" << sample.VsConnectWord154
+                     << ",0x" << sample.CourseSelectFound
+                     << ",0x" << sample.CourseSelectBase
+                     << ",0x" << sample.CourseSelectWord078
+                     << ",0x" << sample.CourseSelectWord07C
                      << ",0x" << sample.MovingHazardFound
                      << ",0x" << sample.MovingHazardGUID
                      << ",0x" << sample.MovingHazardSettings
@@ -3164,6 +3356,7 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         const melonDS::u64 playerGlobalHash = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, 0xC0);
         const melonDS::u64 wifiCandidateHash = HashMainRAMRange(nds, kGameCandidateWifiBlockAddr, 0x2200);
         const melonDS::u64 renderCandidateHash = HashMainRAMRange(nds, kGameCandidateRenderBlockAddr, 0x240);
+        const melonDS::u64 netStateHash = HashMainRAMRange(nds, kNetStateBaseAddr, 0x180);
 
         G.GameStateTrace << ",0x" << sample.PlayerCount
                          << ",0x" << sample.Player0BattleStars
@@ -3181,7 +3374,8 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                          << ",0x" << sample.VsCoinCount
                          << ",0x" << playerGlobalHash
                          << ",0x" << wifiCandidateHash
-                         << ",0x" << renderCandidateHash;
+                         << ",0x" << renderCandidateHash
+                         << ",0x" << netStateHash;
     }
 
     G.GameStateTrace << std::dec << '\n';
@@ -3655,6 +3849,7 @@ void InitFromEnvironment()
     G.NetplayFrameBarrierEnabled = EnvFlag("MELONDS_NSML_NETPLAY_FRAME_BARRIER");
     G.PacketBridgeEnabled = EnvFlag("MELONDS_NSML_PACKET_BRIDGE");
     G.PacketBridgeOnly = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_ONLY");
+    G.PacketBridgeAllowPreGame = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME");
     G.PacketBridgeTraceEnabled = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_TRACE");
     G.PacketBridgeSendLocalPlayerOnly = !EnvFlag("MELONDS_NSML_PACKET_BRIDGE_SEND_ALL");
     G.PacketBridgeWaitEnabled = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_WAIT");
@@ -3664,6 +3859,12 @@ void InitFromEnvironment()
     G.PacketBridgeForceTickStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME", 0)));
     G.PacketBridgeForceTickBase = EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE", -1);
+    G.PacketBridgeForceNetReady = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY");
+    G.PacketBridgeForceNetReadyStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME", 0)));
+    G.PacketBridgeForceLoadGameSM = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM");
+    G.PacketBridgeForceLoadGameSMStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_START_FRAME", 0)));
     G.PacketBridgeMaxPumpEvents = std::clamp(
         EnvInt("MELONDS_NSML_PACKET_BRIDGE_MAX_PUMP_EVENTS", kMaxPumpEvents), 1, kMaxPumpEvents);
     G.PacketBridgeMaxTickLead = EnvInt("MELONDS_NSML_PACKET_BRIDGE_MAX_TICK_LEAD", -1);
@@ -3800,9 +4001,9 @@ void InitFromEnvironment()
         }
         else
         {
-            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,ggid,netRandomValue,netRandomCallCount,netRandomBranchAddress,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Settings,playerActor0X,playerActor0Y,playerActor0Z,playerActor1Found,playerActor1Guid,playerActor1Settings,playerActor1X,playerActor1Y,playerActor1Z,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY";
+            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,ggid,netState14,netState1C,netState20,netState24,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Settings,playerActor0X,playerActor0Y,playerActor0Z,playerActor1Found,playerActor1Guid,playerActor1Settings,playerActor1X,playerActor1Y,playerActor1Z,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord144,vsConnectWord148,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectWord078,courseSelectWord07C,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY";
             if (G.GameStateTraceExtended)
-                G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,playerGlobalHash,wifiCandidateHash,renderCandidateHash";
+                G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash";
             G.GameStateTrace << '\n';
         }
     }
@@ -3828,7 +4029,7 @@ void InitFromEnvironment()
             }
         }
 
-        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
+        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
             G.TestFrames,
             G.TestInstanceCount,
             G.FrameBarrierEnabled ? 1 : 0,
@@ -3868,6 +4069,7 @@ void InitFromEnvironment()
             G.NetplayFrameBarrierEnabled ? 1 : 0,
             G.PacketBridgeEnabled ? 1 : 0,
             G.PacketBridgeOnly ? 1 : 0,
+            G.PacketBridgeAllowPreGame ? 1 : 0,
             G.PacketBridgeTraceEnabled ? 1 : 0,
             G.PacketBridgeWaitEnabled ? 1 : 0,
             G.PacketBridgeWaitTimeoutMs,
@@ -3950,7 +4152,7 @@ void InitFromEnvironment()
     }
 
     G.Ready = true;
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -3965,6 +4167,7 @@ void InitFromEnvironment()
         G.NetplayFrameBarrierEnabled ? 1 : 0,
         G.PacketBridgeEnabled ? 1 : 0,
         G.PacketBridgeOnly ? 1 : 0,
+        G.PacketBridgeAllowPreGame ? 1 : 0,
         G.PacketBridgeTraceEnabled ? 1 : 0,
         G.PacketBridgeWaitEnabled ? 1 : 0,
         G.PacketBridgeWaitTimeoutMs,
@@ -4042,6 +4245,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
                 PumpNSMLPacketBridgeLocked(nds, syncFrame);
                 ForceNSMLPacketBridgeTickIfNeeded(instanceID, syncFrame, nds);
             }
+            ForceNSMLPacketBridgeNetReadyIfNeeded(instanceID, syncFrame, nds);
+            ForceNSMLPacketBridgeLoadGameSMIfNeeded(instanceID, syncFrame, nds);
             melonDS::NSML_RefreshMarioVsLuigiPacketSlots(nds);
             ThrottleNSMLPacketBridgeLead(nds, syncFrame);
             WaitForNSMLPacketBridgeRemote(nds, syncFrame);

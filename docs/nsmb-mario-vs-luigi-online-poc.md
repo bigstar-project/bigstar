@@ -2,54 +2,58 @@
 
 ## 目的
 
-New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `Mario vs Luigi` を、最終的に WAN 越しの `1 EmuInstance * 2PC` で遊べる形にする。
+New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `Mario vs Luigi` を、最終的に WAN 越しの `1 melonDS instance * 2PC` で遊べる形にする。
 
 ## 現在の方針
 
-最終形から `LocalMP 2インスタンス * 2プロセス`、savestate同期、DropMP、途中WAN切替を外す。次は、NSMBが本来持っているローカル通信の同期処理を活かし、melonDSのMP transportを最初からWAN向けに差し替える方針を主軸にする。
+`LocalMP 2インスタンス * 2プロセス`、savestate同期、DropMP、試合途中WAN切替は本筋から外す。現実的な本命は次のどちらか。
 
-優先順位:
+1. MvsLの接続/ロビー段階から、LocalMPの代わりにWAN packet adapterを使う。
+2. NSMB側をさらに解析し、UI操作やLocalMPを経ずにMvsL開始状態を作る。
 
-1. `MPInterface_LAN` を起動直後から使う2プロセス構成をWAN前提で安定化する。
-2. 受信packetの16ms stale破棄や25ms待ちなど、LAN前提の短すぎるタイムアウトをPoC用に可変化する。
-3. それでもMvL開始経路がUI/接続状態に依存して不安定なら、NSMB側をさらに解析してUI操作なしでMvL開始状態を作る。
+今は1を優先している。理由は、NSMB側にはローカル通信時の入力/packet同期処理があり、それを可能な限り流用できれば、melonDS側で2台分のゲーム状態を無理に同期するより最終形に近いから。
 
 ## 採用しない方針
 
-- savestate方式: 表面上の座標が一致しても、stage objectや内部状態が一致せず、対戦の土台にならない。
-- DropMP方式: LocalMP由来の接続/transfer状態を途中で止めると、NSMB側の接続状態やobject状態が崩れる。
-- 途中までLocalMPで進めてWANへ切り替える方式: 切替時の停止や状態差分がゲーム上重要なズレになる。
-- 死亡演出や見た目だけの一致を成功判定にしない。判定は接続状態、stage/player/object状態、packet trace、game-state traceを主に見る。
+- savestate方式: 表示座標は揃ってもstage/object全体が一致せず、対戦基盤として弱い。
+- DropMP方式: 途中でLocalMPから切り替えるとNSMB側の接続状態やobject状態が壊れる。
+- raw NiFi/MP frameの単純WAN転送: 60ms程度の遅延でDS Wi-Fi channel scanがずれ、`received frame but bad channel` が出て接続段階を越えにくい。
+- 死亡演出や目視スクショだけで成功判定すること: host/clientで一致しない表示があり得るため、内部状態、packet trace、game-state traceを優先する。
 
 ## 実装済み
 
 - 自動検証フック
   - 入力スクリプト再生
-  - screenshot / framebuffer dump
+  - screenshot/framebuffer dump
   - MainRAM dump
   - game-state trace
-  - ARM call trace
-  - A2DJ向けメモリprobe
+  - packet trace / packet bridge trace
 - NSMB packet系hook
   - `Net::getConsoleKeys()`
   - `Net::getPacketByte()`
   - `Net::getPacketTick()`
   - `Net::getPacketAction()`
   - `Net::Core::transferPacket()`
-  - disconnect branch skip検証
+  - disconnect/reset bypass検証
 - RNG検証hook
-  - `Net::getRandom()`固定patch
-  - Big Star actor ID `0x00D2` 周辺dump/probe
-- DirectBoot検証hook
-  - `Game::loadLevel` 直接呼び出し
-  - VSConnect load-game submenu状態patch
-  - VSConnect完了処理 `0x0214E0C0` 呼び出し
-  - CourseSelect生成候補 `0x0214F830` 呼び出し
-  - object manager `0x0204BF8C(id=5,r1=0,r2=1,r3=1)` 呼び出し
-- 2プロセスLAN自動起動
-  - `MELONDS_NSML_MP_INTERFACE=lan`
-  - `MELONDS_NSML_LAN_ROLE=host/client`
-  - `scripts/run-nsmb-mvl-lan-route-smoke.ps1`
+  - `Net::getRandom()` 固定patch
+  - Big Star actor ID `0x00D2` 周辺probe
+- LAN/WAN adapter検証
+  - `MPInterface_LAN` のWAN mode
+  - recv/stale/reliable/send delayのenv化
+  - `scripts/run-nsmb-mvl-lan-route-smoke.ps1` のLAN/NoLAN/PacketBridge検証オプション
+- NoLAN PacketBridge検証
+  - pre-game packet context対応
+  - role別 `LOCAL_INSTANCE` 修正
+  - `ggid=0x42` 以前/以後のpacket bridge許可
+  - `Net ready` 強制フック
+  - VSConnect load-game state machine強制フック
+  - DirectBoot系envをテストスクリプトから渡せるようにした
+- game-state trace拡張
+  - Net global: `0x02087E14/1C/20/24/5C`
+  - packet buffer: `0x02087F00/02/04..07`
+  - VSConnect object主要フィールド
+  - CourseSelect object検出
 
 ## 重要アドレス
 
@@ -70,26 +74,28 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 
 ## 直近の検証結果
 
-- `0x0214E0C0` を呼ぶと `Game::loadLevel` には到達するが、CourseSelect/Gameplay object生成までは成立しない。
-- 実LocalMP経路では CourseSelect は `0x0204BF8C(5,0,1,1)` から生成され、その後 `0x0214F830` に入る。
-- `0x0204BF8C(5,0,1,1)` をDirectBootから強制呼び出しすると object は作られ始めるが、`ARM9 data abort (02064508)` で落ちる。つまりobject manager呼び出しだけでは、scene/list/resource状態が足りない。
-- この結果から、DirectBootでUIを飛ばす方向はまだ重い。先に「最初からWAN transport」の実装と検証を優先する。
+- 通常LANルートは4200フレームまで到達し、`stageGroup=0x9, vsMode=0x1` に入る。
+- raw MP WAN modeは無遅延なら通る場合があるが、`LanMPSendDelayMs=60` でchannel scanが崩れてMvsL状態に入れない。
+- NoLAN + pre-game PacketBridgeは、host/client間でMvsL packetを交換できる。
+- NoLAN + PacketBridgeだけでは `ggid=0x42` までは入るが、hostは `netState1C=3`、clientは `netState1C=4` 付近で止まり、`vsMode/stageGroup` が進まない。
+- `Net ready` 強制により `vsMode=1` までは進むが、`stageGroup=9` には入らない。
+- 成功LANルートでは、VSConnectが `word078/07C=3`、関数ポインタが `createLoadGameSM/updateLoadGameSM/renderLoadGameSM`、`word144=7, word148=0x30, word154=0x30000` になった後、CourseSelectが生成され、`stageGroup=9` に進む。
+- NoLANでVSConnect load-game state machineを強制しても、CourseSelectはまだ生成されない。
+- DirectBoot trampolineで `updateLoadGameSM` や object manager CourseSelect生成を直接呼ぶと、現状はARM9 abortし、安定ルートにはなっていない。
 
 ## 現在のblocker
 
-melonDSの既存 `LAN` MPInterface は同一LAN前提で、MP packet受信キューのstale判定が約16ms、MP reply待ちが25msになっている。WAN相当の遅延ではNSMBに届く前にpacketを捨てる可能性が高い。
+NoLAN/WAN adapterルートで、NSMBの接続状態は `ggid=0x42` と `Net ready` まで作れるが、成功LANルートで起きるVSConnectからCourseSelect生成への遷移が再現できていない。
 
 ## 次にやること
 
-1. `LAN` MPInterfaceにPoC用WAN設定を追加する。
-   - stale破棄時間を可変化する。
-   - MP recv timeoutを可変化する。
-   - 必要ならMP data channelのreliable送信を切り替え可能にする。
-2. `run-nsmb-mvl-lan-route-smoke.ps1` にWAN modeオプションを追加する。
-3. 2プロセスを最初からLAN/WAN MPInterfaceで起動し、接続切断画面ではなくgame-state traceとpacket traceで成功/失敗を判定する。
-4. これでロビー/接続段階が通らなければ、NSMB側の接続開始処理をさらに解析し、UI操作なしのMvL開始patchへ戻る。
+1. 成功LANルートのRAM dumpを、VSConnectがload-game state machineへ変わる前後とCourseSelect生成前後で取る。
+2. NoLAN + ForceNetReady/ForceLoadGameSMルートの同フレーム帯RAM dumpと比較する。
+3. VSConnect以外にCourseSelect生成条件になっているglobal/object/list/resource状態を特定する。
+4. DirectBoot trampolineは復帰PC/CPU状態が危険なので、継続するなら呼び出し規約を見直す。安定しない場合はROM patch側で本来の分岐/呼び出しを差し替える方向に寄せる。
+5. CourseSelect生成後に `stageGroup=9` へ入れたら、PacketBridgeの入力packet同期と内部状態traceで、死亡演出ではなくゲーム状態が一致するか確認する。
 
 ## 必要なもの
 
-- 検証はユーザー提供の `roms/nsmb.nds` を前提にする。
-- ROM patch化する段階では、日本版 `A2DJ` 向けのpatch生成/適用手順を別途作る。
+- 検証にはユーザー提供の `roms/nsmb.nds` を使用する。
+- ROM patch化へ進む場合は、日本版 `A2DJ` 向けのpatch生成/適用手順を別途作る。

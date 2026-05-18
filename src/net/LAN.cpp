@@ -97,6 +97,28 @@ u64 HashBytes(const u8* data, int len)
     return hash;
 }
 
+int EnvInt(const char* name, int fallback)
+{
+    const char* value = getenv(name);
+    if (!value || !value[0])
+        return fallback;
+
+    return atoi(value);
+}
+
+bool EnvBool(const char* name, bool fallback = false)
+{
+    const char* value = getenv(name);
+    if (!value || !value[0])
+        return fallback;
+
+    if (!strcmp(value, "0"))
+        return false;
+    if (!strcmp(value, "false") || !strcmp(value, "FALSE"))
+        return false;
+    return true;
+}
+
 void TraceLANMP(const char* event, int inst, u32 type, int len, u64 timestamp,
                 u16 ret, u16 aidmask, const u8* data, u16 connected, int lastHost)
 {
@@ -180,7 +202,18 @@ LAN::LAN() noexcept : Inited(false)
 
     ConnectedBitmask = 0;
 
-    MPRecvTimeout = 25;
+    const bool wanMode = EnvBool("MELONDS_NSML_LAN_WAN_MODE");
+    MPRecvTimeout = std::max(0, EnvInt("MELONDS_NSML_LAN_MP_RECV_TIMEOUT_MS", wanMode ? 1000 : 25));
+    MPMiscRecvTimeout = std::max(0, EnvInt("MELONDS_NSML_LAN_MP_MISC_RECV_TIMEOUT_MS", wanMode ? 100 : 0));
+    MPStaleTimeout = EnvInt("MELONDS_NSML_LAN_MP_STALE_MS", wanMode ? 1000 : 16);
+    MPUseReliable = EnvBool("MELONDS_NSML_LAN_MP_RELIABLE", wanMode);
+    MPSendDelayMs = std::max(0, EnvInt("MELONDS_NSML_LAN_MP_SEND_DELAY_MS", 0));
+    Platform::Log(Platform::LogLevel::Info,
+        "LAN MP config: recvTimeout=%d staleTimeout=%d reliable=%d sendDelay=%d\n",
+        MPRecvTimeout, MPStaleTimeout, MPUseReliable ? 1 : 0, MPSendDelayMs);
+    Platform::Log(Platform::LogLevel::Info,
+        "LAN MP config: miscRecvTimeout=%d\n",
+        MPMiscRecvTimeout);
     LastHostID = -1;
     LastHostPeer = nullptr;
 
@@ -469,6 +502,12 @@ void LAN::EndSession()
         RXQueue.pop();
         enet_packet_destroy(packet);
     }
+    for (PendingTX& pending : PendingTXQueue)
+    {
+        if (pending.Packet)
+            enet_packet_destroy(pending.Packet);
+    }
+    PendingTXQueue.clear();
 
     for (int i = 0; i < 16; i++)
     {
@@ -877,6 +916,34 @@ void LAN::ProcessEvent(ENetEvent& event)
         ProcessClientEvent(event);
 }
 
+void LAN::FlushPendingTX()
+{
+    if (!Host || PendingTXQueue.empty())
+        return;
+
+    const u32 now = (u32)Platform::GetMSCount();
+    for (auto it = PendingTXQueue.begin(); it != PendingTXQueue.end();)
+    {
+        const bool due = (it->DueTick <= now) || ((it->DueTick - now) > 0x80000000u);
+        if (!due)
+        {
+            ++it;
+            continue;
+        }
+
+        if (it->Broadcast)
+            enet_host_broadcast(Host, Chan_MP, it->Packet);
+        else if (it->Peer)
+            enet_peer_send(it->Peer, Chan_MP, it->Packet);
+        else
+            enet_packet_destroy(it->Packet);
+
+        it = PendingTXQueue.erase(it);
+    }
+
+    enet_host_flush(Host);
+}
+
 // 0 = per-frame processing of events and eventual misc. frame
 // 1 = checking if a misc. frame has arrived
 // 2 = waiting for a MP frame
@@ -884,19 +951,22 @@ void LAN::ProcessLAN(int type)
 {
     if (!Host) return;
 
+    FlushPendingTX();
+
     u32 time_last = (u32)Platform::GetMSCount();
 
-    // see if we have queued packets already, get rid of the stale ones
-    // any incoming packet should be consumed by the core quickly, so if
-    // they've been sitting in the queue for more than one frame's time,
-    // we can assume they're stale
+    // See if we have queued packets already, get rid of stale ones.
+    // For WAN-oriented PoC runs this window is intentionally configurable:
+    // NSMB can tolerate stalls better than silently dropped MP frames.
     while (!RXQueue.empty())
     {
         ENetPacket* enetpacket = RXQueue.front();
         MPPacketHeader* header = (MPPacketHeader*)&enetpacket->data[0];
         u32 packettime = header->Magic;
 
-        if ((packettime > time_last) || (packettime < (time_last - 16)))
+        const bool stale = MPStaleTimeout > 0 &&
+            ((packettime > time_last) || ((time_last - packettime) > (u32)MPStaleTimeout));
+        if (stale)
         {
             RXQueue.pop();
             enet_packet_destroy(enetpacket);
@@ -919,7 +989,7 @@ void LAN::ProcessLAN(int type)
         }
     }
 
-    int timeout = (type == 2) ? MPRecvTimeout : 0;
+    int timeout = (type == 2) ? MPRecvTimeout : (type == 1) ? MPMiscRecvTimeout : 0;
     time_last = (u32)Platform::GetMSCount();
 
     ENetEvent event;
@@ -959,7 +1029,7 @@ void LAN::ProcessLAN(int type)
             ProcessEvent(event);
         }
 
-        if (type == 2)
+        if (timeout > 0)
         {
             u32 time = (u32)Platform::GetMSCount();
             if (time < time_last) return;
@@ -974,6 +1044,7 @@ void LAN::Process()
 {
     if (!Active) return;
 
+    FlushPendingTX();
     ProcessDiscovery();
     ProcessLAN(0);
 
@@ -1027,9 +1098,7 @@ int LAN::SendPacketGeneric(u32 type, u8* packet, int len, u64 timestamp)
 {
     if (!Host) return 0;
 
-    // TODO make the reliable part optional?
-    //u32 flags = ENET_PACKET_FLAG_RELIABLE;
-    u32 flags = ENET_PACKET_FLAG_UNSEQUENCED;
+    const u32 flags = MPUseReliable ? ENET_PACKET_FLAG_RELIABLE : ENET_PACKET_FLAG_UNSEQUENCED;
 
     ENetPacket* enetpacket = enet_packet_create(nullptr, sizeof(MPPacketHeader)+len, flags);
 
@@ -1043,11 +1112,26 @@ int LAN::SendPacketGeneric(u32 type, u8* packet, int len, u64 timestamp)
     if (len)
         memcpy(&enetpacket->data[sizeof(MPPacketHeader)], packet, len);
 
-    if (((type & 0xFFFF) == 2) && LastHostPeer)
+    const bool sendToHostPeer = ((type & 0xFFFF) == 2) && LastHostPeer;
+    if (MPSendDelayMs > 0)
+    {
+        PendingTX pending {};
+        pending.Packet = enetpacket;
+        pending.Peer = sendToHostPeer ? LastHostPeer : nullptr;
+        pending.Broadcast = !sendToHostPeer;
+        pending.DueTick = (u32)Platform::GetMSCount() + (u32)MPSendDelayMs;
+        PendingTXQueue.push_back(pending);
+    }
+    else if (sendToHostPeer)
+    {
         enet_peer_send(LastHostPeer, Chan_MP, enetpacket);
+        enet_host_flush(Host);
+    }
     else
+    {
         enet_host_broadcast(Host, Chan_MP, enetpacket);
-    enet_host_flush(Host);
+        enet_host_flush(Host);
+    }
 
     TraceLANMP("send", MyPlayer.ID, type, len, pktheader.Timestamp, 0, 0,
         len ? packet : nullptr, ConnectedBitmask, LastHostID);
