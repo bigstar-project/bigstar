@@ -88,6 +88,7 @@ constexpr melonDS::u32 kA2DJVSConnectUpdateLoadGameSMAddr = 0x021512B8;
 constexpr melonDS::u32 kA2DJVSConnectRenderLoadGameSMAddr = 0x0215125C;
 constexpr melonDS::u32 kA2DJVSConnectStartLoadLevelAddr = 0x0214E0C0;
 constexpr melonDS::u32 kA2DJVSCreateCourseSelectAddr = 0x0214F830;
+constexpr melonDS::u32 kA2DJCreateObjectAddr = 0x0204BF8C;
 constexpr melonDS::u32 kDirectBootTrampolineAddr = 0x023C0000;
 
 enum class Role
@@ -425,6 +426,7 @@ struct State
     bool DirectMvlBootCallUpdateLoadGameSM = false;
     bool DirectMvlBootCallStartLoadLevel = false;
     bool DirectMvlBootCallCreateCourseSelect = false;
+    bool DirectMvlBootCallObjectCourseSelect = false;
     bool DirectMvlBootApplied[16] {};
     std::string InputScriptPath;
     std::string HashLogPath;
@@ -1970,19 +1972,34 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
     }
     else
     {
-        EmitARM(code, 0xE59F000Cu); // ldr r0, [pc, #12]
-        EmitARM(code, 0xE59FC00Cu); // ldr ip, [pc, #12]
-        EmitARM(code, 0xE28FE00Cu); // add lr, pc, #12
-        EmitARM(code, 0xE12FFF1Cu); // bx ip
-        EmitARM(code, 0xE1A00000u); // nop
-        EmitARM(code, vsConnectBase);
-        EmitARM(code, G.DirectMvlBootCallCreateCourseSelect
-            ? kA2DJVSCreateCourseSelectAddr
-            : G.DirectMvlBootCallStartLoadLevel
-            ? kA2DJVSConnectStartLoadLevelAddr
-            : G.DirectMvlBootCallUpdateLoadGameSM
-            ? kA2DJVSConnectUpdateLoadGameSMAddr
-            : kA2DJVSConnectCreateLoadGameSMAddr);
+        if (G.DirectMvlBootCallObjectCourseSelect)
+        {
+            EmitMovImm(code, 0, 0x05);
+            EmitMovImm(code, 1, 0x00);
+            EmitMovImm(code, 2, 0x01);
+            EmitMovImm(code, 3, 0x01);
+            EmitARM(code, 0xE59FC008u); // ldr ip, [pc, #8]
+            EmitARM(code, 0xE28FE008u); // add lr, pc, #8
+            EmitARM(code, 0xE12FFF1Cu); // bx ip
+            EmitARM(code, 0xE1A00000u); // nop
+            EmitARM(code, kA2DJCreateObjectAddr);
+        }
+        else
+        {
+            EmitARM(code, 0xE59F000Cu); // ldr r0, [pc, #12]
+            EmitARM(code, 0xE59FC00Cu); // ldr ip, [pc, #12]
+            EmitARM(code, 0xE28FE00Cu); // add lr, pc, #12
+            EmitARM(code, 0xE12FFF1Cu); // bx ip
+            EmitARM(code, 0xE1A00000u); // nop
+            EmitARM(code, vsConnectBase);
+            EmitARM(code, G.DirectMvlBootCallCreateCourseSelect
+                ? kA2DJVSCreateCourseSelectAddr
+                : G.DirectMvlBootCallStartLoadLevel
+                ? kA2DJVSConnectStartLoadLevelAddr
+                : G.DirectMvlBootCallUpdateLoadGameSM
+                ? kA2DJVSConnectUpdateLoadGameSMAddr
+                : kA2DJVSConnectCreateLoadGameSMAddr);
+        }
     }
     if (!G.DirectMvlBootUseLoadGameSM)
         EmitARM(code, 0xE28DD034u); // add sp, sp, #0x34
@@ -2008,7 +2025,9 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
         kDirectBootTrampolineAddr,
         returnPC,
         G.DirectMvlBootUseLoadGameSM
-            ? (G.DirectMvlBootCallCreateCourseSelect
+            ? (G.DirectMvlBootCallObjectCourseSelect
+                ? "objectCourseSelect"
+                : G.DirectMvlBootCallCreateCourseSelect
                 ? "createCourseSelect"
                 : G.DirectMvlBootCallStartLoadLevel
                 ? "startLoadLevel"
@@ -3662,6 +3681,7 @@ void InitFromEnvironment()
     G.DirectMvlBootCallUpdateLoadGameSM = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_CALL_UPDATE_SM");
     G.DirectMvlBootCallStartLoadLevel = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_CALL_START_LOAD");
     G.DirectMvlBootCallCreateCourseSelect = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT");
+    G.DirectMvlBootCallObjectCourseSelect = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT");
 
     const char* inputScript = std::getenv("MELONDS_NSML_INPUT_SCRIPT");
     if (inputScript && inputScript[0]) G.InputScriptPath = inputScript;
