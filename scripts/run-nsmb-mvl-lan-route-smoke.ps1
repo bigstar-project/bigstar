@@ -107,6 +107,7 @@ param(
     [int]$HostStartupDelayMs = 1000,
     [int]$LanStartAttempts = 1,
     [switch]$SkipDisconnectScreenshotCheck,
+    [switch]$SkipGameplayActorCheck,
     [string]$LogDir = "logs\nsmb-mvl-lan-route"
 )
 
@@ -996,6 +997,12 @@ if ($GameStateTrace) {
 
         if ($last.stageGroup -ne "0x9" -or $last.vsMode -ne "0x1" -or $last.localPlayerID -ne $item.LocalPlayerID) {
             throw "Mario vs Luigi state check failed for $($item.Role): stageGroup=$($last.stageGroup) vsMode=$($last.vsMode) localPlayerID=$($last.localPlayerID). See $($item.Path)"
+        }
+
+        if (-not $SkipGameplayActorCheck) {
+            if ($last.playerActor0Found -ne "0x1" -or $last.playerActor1Found -ne "0x1" -or $last.vsStarActorFound -ne "0x1") {
+                throw "Mario vs Luigi gameplay actor check failed for $($item.Role): playerActor0=$($last.playerActor0Found) playerActor1=$($last.playerActor1Found) vsStarActor=$($last.vsStarActorFound). See $($item.Path)"
+            }
         }
     }
 }

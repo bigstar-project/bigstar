@@ -78,6 +78,7 @@ NSMB側にはローカル通信時の入力/packet同期処理があるため、
 - ARM9 write traceを追加し、通常LANでは `0x02150DAC/0x02150DB0` が `VSConnect word078/07C` を `3` へ上げ、その後 `word144` が `1 -> 7` へ進むことを確認した。
 - `DirectBoot + startLoadLevel` はhost/clientとも `stageGroup=9` へ到達するが、player actor / star actor が生成されず、clientの `localPlayerID` も期待通りではない。これは「試合開始成功」ではなく、ロード状態へ無理に入れただけ。
 - `DirectBoot + Game::loadLevel` は現行の状態検査を通る場合があるが、ARM9 abortが出てplayer actorが生成されず、スクリーンショットも黒画面に近い。成功判定を `stageGroup/vsMode/localPlayerID` だけに依存してはいけない。
+- smoke testのgame-state成功条件に `playerActor0Found`, `playerActor1Found`, `vsStarActorFound` を追加した。通常LANはこの厳しい判定でも通り、`DirectBoot + Game::loadLevel` の黒画面/未ロード状態は期待通り失敗する。
 
 ## 現在のブロッカー
 
@@ -91,7 +92,7 @@ WAN adapter開始時に、NSMBのpacket値だけでなく、接続/ロビー sta
 2. PacketBridgeOnlyで同じ関数/書き込みが欠けている箇所を比較する。
 3. 欠けている副作用がLocalMP slot由来ならslot emulationを拡張し、NSMB関数由来なら該当関数を安全なタイミングで呼ぶ。
 4. `ForceLoadGameSMRunUpdate` のARM9 abort原因を潰す。直接trampolineを繰り返し呼ぶ方式は不安定なので、必要なら一回だけの関数呼び出し/return先管理に変える。
-5. smoke testの成功条件に `playerActor0/1Found`, `playerCount`, `vsStarActorFound`, disconnect/blackout検出を加え、黒画面や未ロード状態を成功扱いしない。
+5. スクリーンショット側のblackout検出も、`SkipDisconnectScreenshotCheck` に頼りすぎない形へ分離する。
 6. `netState1C=6`, `vsMode=1`, `VSConnect word144=7` の状態からCourseSelect生成、`stageGroup=9`、試合開始へ進むかを再検証する。
 7. 試合開始後にスター/8コインアイテム等のランダム要素一致を確認する。
 
