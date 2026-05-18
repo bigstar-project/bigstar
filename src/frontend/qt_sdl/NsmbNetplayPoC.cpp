@@ -82,6 +82,13 @@ constexpr melonDS::u16 kVsMovingHazardObjectID = 0x0053;
 constexpr melonDS::u32 kVsMovingHazardSettings = 0x00000000;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
 constexpr melonDS::u16 kStageCameraObjectID = 0x013C;
+constexpr melonDS::u32 kA2DJGameLoadLevelAddr = 0x020068A8;
+constexpr melonDS::u32 kA2DJVSConnectCreateLoadGameSMAddr = 0x021515B4;
+constexpr melonDS::u32 kA2DJVSConnectUpdateLoadGameSMAddr = 0x021512B8;
+constexpr melonDS::u32 kA2DJVSConnectRenderLoadGameSMAddr = 0x0215125C;
+constexpr melonDS::u32 kA2DJVSConnectStartLoadLevelAddr = 0x0214E0C0;
+constexpr melonDS::u32 kA2DJVSCreateCourseSelectAddr = 0x0214F830;
+constexpr melonDS::u32 kDirectBootTrampolineAddr = 0x023C0000;
 
 enum class Role
 {
@@ -408,6 +415,17 @@ struct State
     int PacketBridgeMaxTickLead = -1;
     int PacketBridgeMaxFrameLead = -1;
     int PacketBridgeThrottleTimeoutMs = 5000;
+    bool DirectMvlBootEnabled = false;
+    melonDS::u32 DirectMvlBootFrame = 0;
+    int DirectMvlBootScene = 0x0F;
+    int DirectMvlBootStage = 0;
+    int DirectMvlBootPlayerID = -1;
+    bool DirectMvlBootUseLoadGameSM = false;
+    bool DirectMvlBootPatchLoadGameSMOnly = false;
+    bool DirectMvlBootCallUpdateLoadGameSM = false;
+    bool DirectMvlBootCallStartLoadLevel = false;
+    bool DirectMvlBootCallCreateCourseSelect = false;
+    bool DirectMvlBootApplied[16] {};
     std::string InputScriptPath;
     std::string HashLogPath;
     std::string ScreenshotDir;
@@ -1791,6 +1809,217 @@ bool WriteMainRAMU32(melonDS::NDS* nds, melonDS::u32 offset, melonDS::u32 value)
         return false;
 
     std::memcpy(&nds->MainRAM[offset], &value, sizeof(value));
+    return true;
+}
+
+bool WriteARM9U32(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 value)
+{
+    if (!nds || (addr & 3) != 0)
+        return false;
+
+    nds->ARM9Write32(addr, value);
+    return true;
+}
+
+melonDS::u32 FindObjectBaseByID(melonDS::NDS* nds, melonDS::u16 objectID)
+{
+    if (!nds || !nds->MainRAM)
+        return 0;
+
+    for (melonDS::u32 off = 0x080000; off + 0x80 <= nds->MainRAMMask + 1; off += 4)
+    {
+        melonDS::u32 vtable = 0;
+        melonDS::u16 candidateID = 0;
+        melonDS::u16 stateType = 0;
+        melonDS::u32 flags = 0;
+        if (!ReadMainRAMU32(nds, off, vtable) ||
+            !ReadMainRAMU16(nds, off + 0x0C, candidateID) ||
+            !ReadMainRAMU16(nds, off + 0x0E, stateType) ||
+            !ReadMainRAMU32(nds, off + 0x10, flags))
+            continue;
+        if (candidateID != objectID || stateType == 0 || stateType > 2)
+            continue;
+        if (vtable < 0x02000000 || vtable >= 0x02400000)
+            continue;
+        if ((flags & 0xFFFF0000u) == 0)
+            continue;
+        return kMainRAMBase + off;
+    }
+    return 0;
+}
+
+void EmitARM(std::vector<melonDS::u32>& code, melonDS::u32 instr)
+{
+    code.push_back(instr);
+}
+
+void EmitMovImm(std::vector<melonDS::u32>& code, int reg, melonDS::u32 value)
+{
+    EmitARM(code, 0xE3A00000u | (static_cast<melonDS::u32>(reg & 0xF) << 12) | (value & 0xFF));
+}
+
+void EmitMvnImm(std::vector<melonDS::u32>& code, int reg, melonDS::u32 value)
+{
+    EmitARM(code, 0xE3E00000u | (static_cast<melonDS::u32>(reg & 0xF) << 12) | (value & 0xFF));
+}
+
+void EmitStrR4SP(std::vector<melonDS::u32>& code, melonDS::u32 offset)
+{
+    EmitARM(code, 0xE58D4000u | (offset & 0xFFF));
+}
+
+void EmitStackArg(std::vector<melonDS::u32>& code, melonDS::u32 offset, melonDS::u32 value)
+{
+    if (value <= 0xFF)
+        EmitMovImm(code, 4, value);
+    else if (value == 0xFFFFFFFFu)
+        EmitMvnImm(code, 4, 0);
+    else
+        EmitMovImm(code, 4, 0);
+    EmitStrR4SP(code, offset);
+}
+
+bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.DirectMvlBootEnabled || !nds || instanceID < 0 || instanceID >= 16)
+        return false;
+    if (G.DirectMvlBootApplied[instanceID] || frame != G.DirectMvlBootFrame)
+        return false;
+
+    const int playerID = std::clamp(
+        G.DirectMvlBootPlayerID >= 0 ? G.DirectMvlBootPlayerID : instanceID,
+        0,
+        1);
+    const int scene = std::clamp(G.DirectMvlBootScene, 0, 0xFFFF);
+    const int stage = std::clamp(G.DirectMvlBootStage, 0, 4);
+    melonDS::u32 vsConnectBase = 0;
+    if (G.DirectMvlBootUseLoadGameSM)
+    {
+        vsConnectBase = FindObjectBaseByID(nds, 0x0006);
+        if (vsConnectBase == 0)
+        {
+            std::printf("NSMB DirectBoot: inst=%d frame=%u loadGameSM skipped: VSConnect object not found\n", instanceID, frame);
+            std::fflush(stdout);
+            return false;
+        }
+        WriteARM9U32(nds, vsConnectBase + 0x000, 0x0208489C);
+        WriteARM9U32(nds, vsConnectBase + 0x00C, 0x00020006);
+        WriteARM9U32(nds, vsConnectBase + 0x078, 0x00000003);
+        WriteARM9U32(nds, vsConnectBase + 0x07C, 0x00000003);
+        WriteARM9U32(nds, vsConnectBase + 0x114, 0x00000000);
+        WriteARM9U32(nds, vsConnectBase + 0x118, kA2DJVSConnectCreateLoadGameSMAddr);
+        WriteARM9U32(nds, vsConnectBase + 0x120, kA2DJVSConnectUpdateLoadGameSMAddr);
+        WriteARM9U32(nds, vsConnectBase + 0x128, kA2DJVSConnectRenderLoadGameSMAddr);
+        WriteARM9U32(nds, vsConnectBase + 0x134, 0x02156678);
+        WriteARM9U32(nds, vsConnectBase + 0x144, 0x00000007);
+        WriteARM9U32(nds, vsConnectBase + 0x148, 0x00000032);
+        WriteARM9U32(nds, vsConnectBase + 0x154, 0x00030000);
+        WriteARM9U32(nds, 0x02087E14, 0x00000001);
+        WriteARM9U32(nds, 0x02087E1C, 0x00000006);
+        WriteARM9U32(nds, 0x02087E20, 0x00000002);
+        WriteARM9U32(nds, 0x02087E24, 0x00000002);
+        WriteARM9U32(nds, 0x020850C4, 0x00000001);
+        WriteARM9U32(nds, 0x020850C8, 0x0000001C);
+        if (G.DirectMvlBootPatchLoadGameSMOnly)
+        {
+            G.DirectMvlBootApplied[instanceID] = true;
+            std::printf(
+                "NSMB DirectBoot: inst=%d frame=%u mode=patchLoadGameSM vsConnect=%08X player=%d stage=%d\n",
+                instanceID,
+                frame,
+                vsConnectBase,
+                playerID,
+                stage);
+            std::fflush(stdout);
+            return true;
+        }
+    }
+    const melonDS::u32 oldPC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
+    const melonDS::u32 returnPC = oldPC | ((nds->ARM9.CPSR & 0x20) ? 1u : 0u);
+
+    std::vector<melonDS::u32> code;
+    code.reserve(64);
+    EmitARM(code, 0xE92D5FFFu); // push {r0-r12, lr}
+    EmitARM(code, 0xE10F5000u); // mrs r5, cpsr
+    EmitARM(code, 0xE92D0020u); // push {r5}
+    if (!G.DirectMvlBootUseLoadGameSM)
+    {
+        EmitARM(code, 0xE24DD034u); // sub sp, sp, #0x34
+        EmitMovImm(code, 0, static_cast<melonDS::u32>(scene));
+        EmitMovImm(code, 1, 0x01); // vs
+        EmitMovImm(code, 2, 0x09); // StageGroups::MvsL
+        EmitMovImm(code, 3, static_cast<melonDS::u32>(stage));
+        EmitStackArg(code, 0x00, 0x00); // act
+        EmitStackArg(code, 0x04, static_cast<melonDS::u32>(playerID));
+        EmitStackArg(code, 0x08, 0x03); // playerMask
+        EmitStackArg(code, 0x0C, 0x00); // character1
+        EmitStackArg(code, 0x10, 0x01); // character2
+        EmitStackArg(code, 0x14, 0x00); // powerup
+        EmitStackArg(code, 0x18, 0xFF); // entrance
+        EmitStackArg(code, 0x1C, 0x01); // flag
+        EmitStackArg(code, 0x20, 0x01); // unused/control flag observed in VSConnect
+        EmitStackArg(code, 0x24, 0xFF);
+        EmitStackArg(code, 0x28, 0x00);
+        EmitStackArg(code, 0x2C, 0x00);
+        EmitStackArg(code, 0x30, 0xFFFFFFFFu); // rngSeed: let NSMB keep its random path
+        EmitARM(code, 0xE59FC008u); // ldr ip, [pc, #8]
+        EmitARM(code, 0xE28FE008u); // add lr, pc, #8
+        EmitARM(code, 0xE12FFF1Cu); // bx ip
+        EmitARM(code, 0xE1A00000u); // nop
+        EmitARM(code, kA2DJGameLoadLevelAddr);
+    }
+    else
+    {
+        EmitARM(code, 0xE59F000Cu); // ldr r0, [pc, #12]
+        EmitARM(code, 0xE59FC00Cu); // ldr ip, [pc, #12]
+        EmitARM(code, 0xE28FE00Cu); // add lr, pc, #12
+        EmitARM(code, 0xE12FFF1Cu); // bx ip
+        EmitARM(code, 0xE1A00000u); // nop
+        EmitARM(code, vsConnectBase);
+        EmitARM(code, G.DirectMvlBootCallCreateCourseSelect
+            ? kA2DJVSCreateCourseSelectAddr
+            : G.DirectMvlBootCallStartLoadLevel
+            ? kA2DJVSConnectStartLoadLevelAddr
+            : G.DirectMvlBootCallUpdateLoadGameSM
+            ? kA2DJVSConnectUpdateLoadGameSMAddr
+            : kA2DJVSConnectCreateLoadGameSMAddr);
+    }
+    if (!G.DirectMvlBootUseLoadGameSM)
+        EmitARM(code, 0xE28DD034u); // add sp, sp, #0x34
+    EmitARM(code, 0xE8BD0020u); // pop {r5}
+    EmitARM(code, 0xE128F005u); // msr apsr_nzcvq, r5
+    EmitARM(code, 0xE8BD5FFFu); // pop {r0-r12, lr}
+    EmitARM(code, 0xE59FC004u); // ldr ip, [pc, #4]
+    EmitARM(code, 0xE12FFF1Cu); // bx ip
+    EmitARM(code, 0xE1A00000u); // nop
+    EmitARM(code, returnPC);
+
+    for (size_t i = 0; i < code.size(); i++)
+    {
+        if (!WriteARM9U32(nds, kDirectBootTrampolineAddr + static_cast<melonDS::u32>(i * sizeof(melonDS::u32)), code[i]))
+            return false;
+    }
+
+    G.DirectMvlBootApplied[instanceID] = true;
+    std::printf(
+        "NSMB DirectBoot: inst=%d frame=%u trampoline=%08X return=%08X mode=%s vsConnect=%08X scene=%d player=%d stage=%d\n",
+        instanceID,
+        frame,
+        kDirectBootTrampolineAddr,
+        returnPC,
+        G.DirectMvlBootUseLoadGameSM
+            ? (G.DirectMvlBootCallCreateCourseSelect
+                ? "createCourseSelect"
+                : G.DirectMvlBootCallStartLoadLevel
+                ? "startLoadLevel"
+                : (G.DirectMvlBootCallUpdateLoadGameSM ? "updateLoadGameSM" : "loadGameSM"))
+            : "loadLevel",
+        vsConnectBase,
+        scene,
+        playerID,
+        stage);
+    std::fflush(stdout);
+    nds->ARM9.JumpTo(kDirectBootTrampolineAddr);
     return true;
 }
 
@@ -3422,6 +3651,17 @@ void InitFromEnvironment()
     G.PacketBridgeMaxFrameLead = EnvInt("MELONDS_NSML_PACKET_BRIDGE_MAX_FRAME_LEAD", -1);
     G.PacketBridgeThrottleTimeoutMs = std::max(
         0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_THROTTLE_TIMEOUT_MS", 5000));
+    G.DirectMvlBootEnabled = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT");
+    G.DirectMvlBootFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_DIRECT_MVL_BOOT_FRAME", 900)));
+    G.DirectMvlBootScene = std::clamp(EnvInt("MELONDS_NSML_DIRECT_MVL_BOOT_SCENE", 0x0F), 0, 0xFFFF);
+    G.DirectMvlBootStage = std::clamp(EnvInt("MELONDS_NSML_DIRECT_MVL_BOOT_STAGE", 0), 0, 4);
+    G.DirectMvlBootPlayerID = EnvInt("MELONDS_NSML_DIRECT_MVL_BOOT_PLAYER_ID", -1);
+    G.DirectMvlBootUseLoadGameSM = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_LOAD_SM");
+    G.DirectMvlBootPatchLoadGameSMOnly = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_PATCH_LOAD_SM_ONLY");
+    G.DirectMvlBootCallUpdateLoadGameSM = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_CALL_UPDATE_SM");
+    G.DirectMvlBootCallStartLoadLevel = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_CALL_START_LOAD");
+    G.DirectMvlBootCallCreateCourseSelect = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT");
 
     const char* inputScript = std::getenv("MELONDS_NSML_INPUT_SCRIPT");
     if (inputScript && inputScript[0]) G.InputScriptPath = inputScript;
@@ -3568,7 +3808,7 @@ void InitFromEnvironment()
             }
         }
 
-        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d\n",
+        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
             G.TestFrames,
             G.TestInstanceCount,
             G.FrameBarrierEnabled ? 1 : 0,
@@ -3616,7 +3856,15 @@ void InitFromEnvironment()
             G.PacketBridgeForceTickStartFrame,
             G.PacketBridgeMaxTickLead,
             G.PacketBridgeMaxFrameLead,
-            G.PacketBridgeThrottleTimeoutMs);
+            G.PacketBridgeThrottleTimeoutMs,
+            G.DirectMvlBootEnabled ? 1 : 0,
+            G.DirectMvlBootFrame,
+            G.DirectMvlBootScene,
+            G.DirectMvlBootStage,
+            G.DirectMvlBootPlayerID,
+            G.DirectMvlBootUseLoadGameSM ? 1 : 0,
+            G.DirectMvlBootPatchLoadGameSMOnly ? 1 : 0,
+            G.DirectMvlBootCallUpdateLoadGameSM ? 1 : 0);
         std::fflush(stdout);
     }
 
@@ -3682,7 +3930,7 @@ void InitFromEnvironment()
     }
 
     G.Ready = true;
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d matchSeed=0x%08X seedConfigured=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -3707,7 +3955,15 @@ void InitFromEnvironment()
         G.PacketBridgeMaxFrameLead,
         G.PacketBridgeThrottleTimeoutMs,
         G.MatchSeed,
-        G.MatchSeedConfigured ? 1 : 0);
+        G.MatchSeedConfigured ? 1 : 0,
+        G.DirectMvlBootEnabled ? 1 : 0,
+        G.DirectMvlBootFrame,
+        G.DirectMvlBootScene,
+        G.DirectMvlBootStage,
+        G.DirectMvlBootPlayerID,
+        G.DirectMvlBootUseLoadGameSM ? 1 : 0,
+        G.DirectMvlBootPatchLoadGameSMOnly ? 1 : 0,
+        G.DirectMvlBootCallUpdateLoadGameSM ? 1 : 0);
     std::fflush(stdout);
 }
 
@@ -3720,6 +3976,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
         LoadState(instanceID, inputFrame, nds);
+
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        InjectDirectMvlBootCall(instanceID, inputFrame, nds);
 
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyMemPatch(instanceID, inputFrame, nds);

@@ -265,6 +265,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--object-size", default="0x120")
     parser.add_argument("--rng-timeline-only", action="store_true")
     parser.add_argument("--find-arm-bl-to", default="")
+    parser.add_argument("--hexdump-addr", default="")
+    parser.add_argument("--hexdump-len", default="0x80")
     parser.add_argument("--scan-start", default="0x080000")
     parser.add_argument("--scan-end", default="0x090000")
     return parser.parse_args()
@@ -309,6 +311,20 @@ def print_functions(label: str, data: bytes, functions: dict[str, int], function
             f"  {name} addr=0x{addr:08x} "
             f"head32=0x{u32(data, off):08x},0x{u32(data, off + 4):08x}"
         )
+
+
+def print_hexdump(label: str, data: bytes, addr: int, length: int) -> None:
+    print(f"== hexdump {label} addr=0x{addr:08x} len=0x{length:x} ==")
+    off = addr - MAIN_RAM_BASE
+    if off < 0 or off >= len(data):
+        print("out_of_dump")
+        return
+    end = min(off + length, len(data))
+    for row in range(off, end, 16):
+        chunk = data[row:min(row + 16, end)]
+        hex_bytes = " ".join(f"{byte:02x}" for byte in chunk)
+        ascii_text = "".join(chr(byte) if 0x20 <= byte < 0x7F else "." for byte in chunk)
+        print(f"  0x{MAIN_RAM_BASE + row:08x}: {hex_bytes:<47} {ascii_text}")
 
 
 def print_arm_bl_hits(label: str, data: bytes, target: int) -> None:
@@ -670,6 +686,8 @@ def main() -> int:
             print_symbols(dump.as_posix(), data, A2DJ_SYMBOLS, "A2DJ")
         if args.a2dj_functions:
             print_functions(dump.as_posix(), data, A2DJ_FUNCTIONS, "A2DJ")
+        if args.hexdump_addr:
+            print_hexdump(dump.as_posix(), data, int(args.hexdump_addr, 0), int(args.hexdump_len, 0))
         if find_bl_to:
             print_arm_bl_hits(dump.as_posix(), data, find_bl_to)
 

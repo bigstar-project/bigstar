@@ -1084,7 +1084,7 @@ static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
                 {
                     cfg.LogFile = fopen(logPath, "w");
                     if (cfg.LogFile)
-                        fprintf(cfg.LogFile, "nds,frame,pc,caller,lr,r0,r1,r2,r3,r0_dump,r1_dump,r2_dump,r3_dump\n");
+                        fprintf(cfg.LogFile, "nds,frame,pc,caller,lr,sp,cpsr,r0,r1,r2,r3,r0_dump,r1_dump,r2_dump,r3_dump,sp_dump\n");
                 }
             }
             cfg.Checked = true;
@@ -1111,18 +1111,22 @@ static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
     const u32 r1 = cpu->R[1];
     const u32 r2 = cpu->R[2];
     const u32 r3 = cpu->R[3];
+    const u32 sp = cpu->R[13];
+    const u32 cpsr = cpu->CPSR;
     u32 dumpLen = cfg.DumpLen;
     if (r2 > 0 && r2 < dumpLen) dumpLen = r2;
 
     FILE* out = cfg.LogFile ? cfg.LogFile : stdout;
     std::lock_guard<std::mutex> outputLock(NSMLTraceOutputMutex);
     fprintf(out,
-        "%p,%u,%08X,%08X,%08X,%08X,%08X,%08X,%08X,",
+        "%p,%u,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,",
         static_cast<void*>(&cpu->NDS),
         cpu->NDS.NumFrames,
         instrAddr,
         caller,
         lr,
+        sp,
+        cpsr,
         r0,
         r1,
         r2,
@@ -1134,6 +1138,8 @@ static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
     WriteNSMLHexDump(out, cpu, r2, dumpLen);
     fputc(',', out);
     WriteNSMLHexDump(out, cpu, r3, dumpLen);
+    fputc(',', out);
+    WriteNSMLHexDump(out, cpu, sp, cfg.DumpLen);
     fputc('\n', out);
     fflush(out);
     return true;
