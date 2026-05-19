@@ -176,6 +176,7 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         enabled = (NSMLEnvFlag("MELONDS_NSML_SAFE_START_LOAD_CALL")
             || NSMLEnvFlag("MELONDS_NSML_SAFE_LOAD_LEVEL_CALL")
             || NSMLEnvFlag("MELONDS_NSML_SAFE_COURSE_SELECT_CALL")
+            || NSMLEnvFlag("MELONDS_NSML_SAFE_COURSE_SELECT_FACTORY_CALL")
             || NSMLEnvFlag("MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL")) ? 1 : 0;
     if (!enabled || !cpu || cpu->Num != 0)
         return false;
@@ -186,16 +187,22 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     static int courseSelect = -1;
     if (courseSelect < 0)
         courseSelect = NSMLEnvFlag("MELONDS_NSML_SAFE_COURSE_SELECT_CALL") ? 1 : 0;
+    static int courseSelectFactory = -1;
+    if (courseSelectFactory < 0)
+        courseSelectFactory = NSMLEnvFlag("MELONDS_NSML_SAFE_COURSE_SELECT_FACTORY_CALL") ? 1 : 0;
     static int updateLoadGame = -1;
     if (updateLoadGame < 0)
         updateLoadGame = NSMLEnvFlag("MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL") ? 1 : 0;
 
+    static bool triggerConfigured = false;
     static u32 triggerPC = 0;
     static u32 startFrame = 0;
-    if (triggerPC == 0)
+    if (!triggerConfigured)
     {
         if (const char* value = getenv(updateLoadGame
                 ? "MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL_PC"
+                : courseSelectFactory
+                ? "MELONDS_NSML_SAFE_COURSE_SELECT_FACTORY_CALL_PC"
                 : courseSelect
                 ? "MELONDS_NSML_SAFE_COURSE_SELECT_CALL_PC"
                 : loadLevel
@@ -206,6 +213,8 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
             triggerPC = 0x0200F944;
         if (const char* value = getenv(updateLoadGame
                 ? "MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL_FRAME"
+                : courseSelectFactory
+                ? "MELONDS_NSML_SAFE_COURSE_SELECT_FACTORY_CALL_FRAME"
                 : courseSelect
                 ? "MELONDS_NSML_SAFE_COURSE_SELECT_CALL_FRAME"
                 : loadLevel
@@ -214,8 +223,13 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
             startFrame = static_cast<u32>(strtoul(value, nullptr, 0));
         else
             startFrame = 0;
+        triggerConfigured = true;
     }
-    if (instrAddr != triggerPC || cpu->NDS.NumFrames < startFrame)
+    if (cpu->NDS.NumFrames < startFrame)
+        return false;
+    if (triggerPC != 0 && instrAddr != triggerPC)
+        return false;
+    if (triggerPC == 0 && (instrAddr < 0x02000000 || instrAddr >= 0x02400000))
         return false;
     if (!loadLevel && !IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
         return false;
@@ -238,6 +252,7 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     constexpr u32 loadLevelAddr = 0x020068A8;
     constexpr u32 startLoadLevelAddr = 0x0214E0C0;
     constexpr u32 createCourseSelectAddr = 0x0214F858;
+    constexpr u32 courseSelectFactoryAddr = 0x020130A8;
     constexpr u32 updateLoadGameSMAddr = 0x021512B8;
     const u32 returnPC = instrAddr | ((cpu->CPSR & 0x20) ? 1u : 0u);
     u32 playerID = cpu->NDS.ARM9Read32(0x020850BC);
@@ -282,9 +297,20 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         NSMLEmitMovImm(code, 0, vsConnectBase);
         NSMLEmitBLViaIP(code, createCourseSelectAddr);
     }
+    else if (courseSelectFactory)
+    {
+        NSMLEmitMovImm(code, 0, 0x05);
+        NSMLEmitMovImm(code, 1, 0x01);
+        NSMLEmitMovImm(code, 2, 0x02186A78);
+        NSMLEmitMovImm(code, 3, 0x04);
+        NSMLEmitBLViaIP(code, courseSelectFactoryAddr);
+    }
     else if (updateLoadGame)
     {
         NSMLEmitMovImm(code, 0, vsConnectBase);
+        NSMLEmitMovImm(code, 1, updateLoadGameSMAddr);
+        NSMLEmitMovImm(code, 2, 0);
+        NSMLEmitMovImm(code, 3, vsConnectBase + 0x120);
         NSMLEmitBLViaIP(code, updateLoadGameSMAddr);
     }
     else
@@ -308,7 +334,7 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     else
         applied[&cpu->NDS] = true;
     printf("NSMB SafeCall: %s frame=%u pc=%08X return=%08X vsConnect=%08X player=%u\n",
-        loadLevel ? "loadLevel" : courseSelect ? "createCourseSelect" : updateLoadGame ? "updateLoadGameSM" : "startLoadLevel",
+        loadLevel ? "loadLevel" : courseSelectFactory ? "courseSelectFactory" : courseSelect ? "createCourseSelect" : updateLoadGame ? "updateLoadGameSM" : "startLoadLevel",
         cpu->NDS.NumFrames,
         instrAddr,
         returnPC,
@@ -317,6 +343,29 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     fflush(stdout);
     cpu->JumpTo(trampolineAddr);
     return true;
+}
+
+static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
+{
+    static int enabled = -1;
+    static u32 startFrame = 0;
+    if (enabled < 0)
+    {
+        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY") ? 1 : 0;
+        if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME"))
+            startFrame = static_cast<u32>(strtoul(value, nullptr, 0));
+    }
+    if (!enabled || !cpu || cpu->Num != 0)
+        return;
+    if (cpu->NDS.NumFrames < startFrame)
+        return;
+    if (instrAddr != 0x021512B8) // VSConnect::updateLoadGameSM()
+        return;
+    if (!IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
+        return;
+
+    cpu->NDS.ARM9Write32(0x020880A4, 0x00000003); // Net::packetFreeBytesRecvBitmap
+    cpu->NDS.ARM9Write32(0x020880A8, 0x00000003);
 }
 
 static bool HandleNSMLNetResetBypass(ARM* cpu, u32 instrAddr)
@@ -1613,7 +1662,7 @@ static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
                 {
                     cfg.LogFile = fopen(logPath, "w");
                     if (cfg.LogFile)
-                        fprintf(cfg.LogFile, "nds,frame,pc,caller,lr,sp,cpsr,r0,r1,r2,r3,r0_dump,r1_dump,r2_dump,r3_dump,sp_dump\n");
+                        fprintf(cfg.LogFile, "nds,frame,pc,caller,lr,sp,cpsr,r0,r1,r2,r3,net_tick,net_action,net_seq_ids,net_seq_cursors,net_send_bitmap,net_seq_lengths,net_recv_bitmap,net_random,vs_step,vs_timer,vs_flags,r0_dump,r1_dump,r2_dump,r3_dump,sp_dump\n");
                 }
             }
             cfg.Checked = true;
@@ -1642,13 +1691,25 @@ static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
     const u32 r3 = cpu->R[3];
     const u32 sp = cpu->R[13];
     const u32 cpsr = cpu->CPSR;
+    const u32 netTick = cpu->NDS.ARM9Read16(0x02087F00);
+    const u32 netAction = cpu->NDS.ARM9Read8(0x02087F04);
+    const u32 netSeqIDs = cpu->NDS.ARM9Read32(0x02088078);
+    const u32 netSeqCursors = cpu->NDS.ARM9Read32(0x0208807C);
+    const u32 netSendBitmap = cpu->NDS.ARM9Read32(0x02088080);
+    const u32 netSeqLengths = cpu->NDS.ARM9Read32(0x02088084);
+    const u32 netRecvBitmap = cpu->NDS.ARM9Read32(0x020880A4);
+    const u32 netRandom = cpu->NDS.ARM9Read32(0x02088088);
+    const bool r0IsVsConnect = IsNSMLMainRAMAddress(r0) && cpu->NDS.ARM9Read16(r0 + 0x0C) == 0x0006;
+    const u32 vsStep = r0IsVsConnect ? cpu->NDS.ARM9Read32(r0 + 0x144) : 0;
+    const u32 vsTimer = r0IsVsConnect ? cpu->NDS.ARM9Read32(r0 + 0x148) : 0;
+    const u32 vsFlags = r0IsVsConnect ? cpu->NDS.ARM9Read32(r0 + 0x154) : 0;
     u32 dumpLen = cfg.DumpLen;
     if (r2 > 0 && r2 < dumpLen) dumpLen = r2;
 
     FILE* out = cfg.LogFile ? cfg.LogFile : stdout;
     std::lock_guard<std::mutex> outputLock(NSMLTraceOutputMutex);
     fprintf(out,
-        "%p,%u,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,",
+        "%p,%u,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%04X,%02X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,",
         static_cast<void*>(&cpu->NDS),
         cpu->NDS.NumFrames,
         instrAddr,
@@ -1659,7 +1720,18 @@ static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
         r0,
         r1,
         r2,
-        r3);
+        r3,
+        netTick,
+        netAction,
+        netSeqIDs,
+        netSeqCursors,
+        netSendBitmap,
+        netSeqLengths,
+        netRecvBitmap,
+        netRandom,
+        vsStep,
+        vsTimer,
+        vsFlags);
     WriteNSMLHexDump(out, cpu, r0, dumpLen);
     fputc(',', out);
     WriteNSMLHexDump(out, cpu, r1, dumpLen);
@@ -2271,6 +2343,7 @@ void ARMv5::Execute()
         if constexpr (mode == CPUExecuteMode::JIT)
         {
             u32 instrAddr = R[15] - ((CPSR&0x20)?2:4);
+            HandleNSMLNetReadyHotPatch(this, instrAddr);
             TraceNSMLPacketCapture(this, instrAddr);
             if (HandleNSMLSafeLevelCall(this, instrAddr))
             {
@@ -2325,6 +2398,7 @@ void ARMv5::Execute()
                 if constexpr (mode == CPUExecuteMode::InterpreterGDB)
                     GdbCheckC();
                 const u32 instrAddr = R[15] - 2;
+                HandleNSMLNetReadyHotPatch(this, instrAddr);
                 TraceNSMLPacketCapture(this, instrAddr);
                 if (HandleNSMLSafeLevelCall(this, instrAddr))
                 {
@@ -2374,6 +2448,7 @@ void ARMv5::Execute()
                 if constexpr (mode == CPUExecuteMode::InterpreterGDB)
                     GdbCheckC();
                 const u32 instrAddr = R[15] - 4;
+                HandleNSMLNetReadyHotPatch(this, instrAddr);
                 TraceNSMLPacketCapture(this, instrAddr);
                 if (HandleNSMLSafeLevelCall(this, instrAddr))
                 {

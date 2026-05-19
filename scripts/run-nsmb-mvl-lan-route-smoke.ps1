@@ -101,9 +101,16 @@ param(
     [switch]$SafeCourseSelectCall,
     [int]$SafeCourseSelectCallFrame = 1900,
     [string]$SafeCourseSelectCallPC = "0x0200F944",
+    [switch]$SafeCourseSelectFactoryCall,
+    [int]$SafeCourseSelectFactoryCallFrame = 1900,
+    [string]$SafeCourseSelectFactoryCallPC = "0x0200F944",
+    [string]$HostSafeCourseSelectFactoryCallPC = "",
+    [string]$ClientSafeCourseSelectFactoryCallPC = "",
     [switch]$SafeUpdateLoadGameCall,
     [int]$SafeUpdateLoadGameCallFrame = 1900,
     [string]$SafeUpdateLoadGameCallPC = "0x0200F944",
+    [string]$HostSafeUpdateLoadGameCallPC = "",
+    [string]$ClientSafeUpdateLoadGameCallPC = "",
     [switch]$ForceCourseSelectFactory,
     [switch]$ForceCourseSelectFactoryClientOnly,
     [int]$ForceCourseSelectFactoryFrame = 2300,
@@ -142,6 +149,7 @@ if ($LanStartAttempts -gt 1) {
                 $message -like "*missing host LAN start*" -or
                 $message -like "*missing client frame limit*" -or
                 $message -like "*missing host frame limit*" -or
+                $message -like "*connection-dialog screenshot detected*" -or
                 $message -like "*stageGroup=0x0 vsMode=0x0*"
             if (-not $retryable -or $attempt -ge $LanStartAttempts) {
                 throw
@@ -306,10 +314,31 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_SAFE_COURSE_SELECT_CALL_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_COURSE_SELECT_CALL_PC -ErrorAction SilentlyContinue
     }
+    if ($SafeCourseSelectFactoryCall) {
+        $env:MELONDS_NSML_SAFE_COURSE_SELECT_FACTORY_CALL = "1"
+        $env:MELONDS_NSML_SAFE_COURSE_SELECT_FACTORY_CALL_FRAME = "$SafeCourseSelectFactoryCallFrame"
+        $roleSafeCourseSelectFactoryCallPC = $SafeCourseSelectFactoryCallPC
+        if ($Role -eq "host" -and $HostSafeCourseSelectFactoryCallPC) {
+            $roleSafeCourseSelectFactoryCallPC = $HostSafeCourseSelectFactoryCallPC
+        } elseif ($Role -eq "client" -and $ClientSafeCourseSelectFactoryCallPC) {
+            $roleSafeCourseSelectFactoryCallPC = $ClientSafeCourseSelectFactoryCallPC
+        }
+        $env:MELONDS_NSML_SAFE_COURSE_SELECT_FACTORY_CALL_PC = "$roleSafeCourseSelectFactoryCallPC"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_SAFE_COURSE_SELECT_FACTORY_CALL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_COURSE_SELECT_FACTORY_CALL_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_COURSE_SELECT_FACTORY_CALL_PC -ErrorAction SilentlyContinue
+    }
     if ($SafeUpdateLoadGameCall) {
         $env:MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL = "1"
         $env:MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL_FRAME = "$SafeUpdateLoadGameCallFrame"
-        $env:MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL_PC = "$SafeUpdateLoadGameCallPC"
+        $roleSafeUpdateLoadGameCallPC = $SafeUpdateLoadGameCallPC
+        if ($Role -eq "host" -and $HostSafeUpdateLoadGameCallPC) {
+            $roleSafeUpdateLoadGameCallPC = $HostSafeUpdateLoadGameCallPC
+        } elseif ($Role -eq "client" -and $ClientSafeUpdateLoadGameCallPC) {
+            $roleSafeUpdateLoadGameCallPC = $ClientSafeUpdateLoadGameCallPC
+        }
+        $env:MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL_PC = "$roleSafeUpdateLoadGameCallPC"
     } else {
         Remove-Item Env:\MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL_FRAME -ErrorAction SilentlyContinue
@@ -1019,6 +1048,43 @@ function Test-BlankLikeScreenshot {
     }
 }
 
+function Test-ConnectionDialogScreenshot {
+    param([string]$Path)
+
+    Add-Type -AssemblyName System.Drawing
+    $bitmap = [System.Drawing.Bitmap]::FromFile($Path)
+    try {
+        $sampleCount = 0
+        $blackCount = 0
+        $brightCount = 0
+        $x0 = [Math]::Max(0, [int]($bitmap.Width * 0.08))
+        $x1 = [Math]::Min($bitmap.Width - 1, [int]($bitmap.Width * 0.92))
+        $y0 = [Math]::Max(0, [int]($bitmap.Height * 0.11))
+        $y1 = [Math]::Min($bitmap.Height - 1, [int]($bitmap.Height * 0.43))
+        for ($y = $y0; $y -le $y1; $y += 4) {
+            for ($x = $x0; $x -le $x1; $x += 4) {
+                $pixel = $bitmap.GetPixel($x, $y)
+                $sampleCount++
+                if ($pixel.R -lt 22 -and $pixel.G -lt 22 -and $pixel.B -lt 22) {
+                    $blackCount++
+                } elseif ($pixel.R -gt 170 -and $pixel.G -gt 170 -and $pixel.B -gt 170) {
+                    $brightCount++
+                }
+            }
+        }
+
+        if ($sampleCount -eq 0) {
+            return $false
+        }
+
+        $blackRatio = $blackCount / $sampleCount
+        $brightRatio = $brightCount / $sampleCount
+        return ($blackRatio -gt 0.55 -and $brightRatio -gt 0.01)
+    } finally {
+        $bitmap.Dispose()
+    }
+}
+
 if (-not $SkipDisconnectScreenshotCheck) {
     foreach ($screenDir in @($hostScreens, $clientScreens)) {
         $screens = Get-ChildItem $screenDir -Filter "inst0_frame*.png" -ErrorAction SilentlyContinue
@@ -1037,6 +1103,9 @@ if (-not $SkipDisconnectScreenshotCheck) {
             }
             if (Test-BlankLikeScreenshot -Path $screen.FullName) {
                 throw "blank-like screenshot detected at frame=${frame}: $($screen.FullName)"
+            }
+            if (Test-ConnectionDialogScreenshot -Path $screen.FullName) {
+                throw "connection-dialog screenshot detected at frame=${frame}: $($screen.FullName)"
             }
         }
     }

@@ -57,13 +57,19 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 
 ## 現在の到達点
 
-通常LANは最新検証でも `3300` frame まで成功し、`stageGroup=9`, `vsMode=1`, player actors, star actor を確認済み。
+最終形は `1 melonDS instance * 2PC`。現時点で一番筋が良い候補は、NSMBの接続処理を途中から奪うのではなく、melonDS既存の `MPInterface_LAN` を「最初からWAN transport」として使う方向。
 
-NoLanMP + PacketBridge では、`Net::getPacket*` だけを返しても接続は進まない。`transferPacket()` が lower MP の packet pointer を通して内部 buffer valid byte を立てる必要があるため、`0204619C`, `0204622C`, `02046480` を hook する下層MP bridgeを追加した。
+`MPInterface_LAN` は LocalMP と同じ `SendCmd` / `SendReply` / `RecvHostPacket` API を ENet で運ぶ実装なので、NSMB側のローカル通信state-machineを最も壊しにくい。自動テストでは、遅延なしのLAN経路は `LanStartAttempts` 付きで `3600` frame まで成功し、`stageGroup=9`, `vsMode=1`, player actors, star actor を確認できる。
 
-下層MP bridgeにより、remote packet は NSMB の `transferPacket()` に届くようになった。pregame中に action `0x01` を強制する実験では、host は `netState24=2`, `VSConnect word078/07C=3/3` まで進む。さらに `ForceNetReady` を併用すると、両側を通常LANに近い `vsMode=1`, `netState1C=6`, `netState20=2`, `netState24=2` に揃えられる。
+一方、WAN想定の単純な設定変更はまだ失敗している。
 
-ただし、まだ PacketBridge だけでは CourseSelect 生成と `stageGroup=9` への自然遷移には届いていない。`ForceLoadGameSM` は通常LANで観測した `VSConnect +0x144/+0x148/+0x154` に近い値を設定できるようになったが、それだけでは CourseSelect は生成されない。
+- `MELONDS_NSML_LAN_WAN_MODE` / reliable / 長いtimeout: 遅延なしでも接続探索段階で失敗する。
+- `MELONDS_NSML_LAN_MP_STALE_MS=1000`: hostが「ルイージをさがしています」で止まる。
+- `MELONDS_NSML_LAN_MP_SEND_DELAY_MS=5`: hostが探索中、clientが「melonDSマリオがあらわれました / たいせんしますか？」で止まる。
+
+このため、単にtimeoutやstale windowを伸ばすだけでは不十分。NSMBの探索/承諾UIとMP frameの鮮度管理が強く結びついているため、WAN化するなら `LAN.cpp` のMPキュー処理を「古いframeをどう捨てるか」「CMD/reply/ackをどこまで待つか」「探索中の固定入力をどう待たせるか」まで含めて調整する必要がある。
+
+NoLanMP + PacketBridge / ForceLoadGameSM / SafeCall 系は、接続途中から状態を作る実験としては有用だったが、自然なCourseSelect生成や実ステージactor生成には届いていない。今後の本筋からは外し、必要な解析補助としてだけ使う。
 
 
 ## 新しい重要な知見
@@ -91,30 +97,28 @@ NoLanMP + PacketBridge では、`Net::getPacket*` だけを返しても接続は
 
 このため `ForceLoadGameSM` の補助値を通常LAN相当に修正し、client 側では `localPlayerID=1` も補正するようにした。
 
-一方、以下は失敗として確認済み。
+追加で確認したこと:
 
-- `UpdateLoadGameSM` を両側で無理に呼ぶと `ARM9 data abort (023C0008)` が出る。
-- `CourseSelectFactory` 直接呼び出しは host 側で `ARM9 data abort (0204C004)` が出る場合があり、CourseSelect object は生成されない。
-- `Game::loadLevel()` を SafeCall で直接呼ぶと `stageGroup=9` と `READY!` 画面までは到達するが、5200 frame まで待っても player actors / star actor が生成されない。つまり「面IDだけを切り替える」だけでは試合開始状態として不十分。
+- `SafeUpdateLoadGameCall` は、host/client別の安定PC (`0200E700` / `02010810`) で呼ぶとabortは避けられるが、NoLan状態ではCourseSelect生成へ進まない。
+- 正常LAN packet captureをreplayしても、NoLan + ForceLoadGameSM ではLoadGameSMが自然遷移しない。接続初期化の副作用が足りない。
+- `CourseSelectFactory` 直接呼び出しはhostでCourseSelect生成まで進む場合があるが、clientでは同じ引数でも生成されない。呼び出し文脈依存が強い。
+- `Game::loadLevel()` をSafeCallで直接呼ぶと `stageGroup=9` と `READY!` 画面までは到達するが、player actors / star actor が生成されない。つまり「面IDだけを切り替える」だけでは試合開始状態として不十分。
+- `run-nsmb-mvl-lan-route-smoke.ps1` に接続ダイアログ検出を追加した。「通信が切断されました」だけでなく、「相手がいなくなりました」「相手を探しています」「たいせんしますか？」で止まる画面も失敗扱いにする。
 
 
 ## 現在のブロッカー
 
-WAN adapterが packet を渡すだけでは、CourseSelect 生成と実ステージ actor 生成に自然到達しない。
+`MPInterface_LAN` を最初から使うルートは正常LANでは動くが、WAN想定の遅延・長い待ち・長いstale windowを入れると接続探索/承諾段階で止まる。
 
-不足しているものは以下のどちらか、または両方の可能性が高い。
-
-- LocalMP由来の副作用がまだ不足している。
-- pre-game action `0x02/0x03` の生成条件、tickジャンプ、VSConnect内部状態のどれかを再現できていない。
-- UI bypass の場合も、`Game::loadLevel()` の前後に必要な scene transition / object manager / ready countdown 状態が不足している。
+特に、host/clientの固定入力スクリプトは相手発見タイミングに追従できない。実装面でも、LAN MPの `RXQueue` stale処理、CMD/reply/ack待ち、ENet reliable/unsequencedの使い分けがNSMBの期待するローカル通信テンポから外れると切断扱いになる。
 
 
 ## 次にやること
 
-1. 通常LANの `stageGroup=9` 到達前後と、SafeLoadLevelの `READY!` 固着状態の RAM dump / process list を比較し、actor生成に必要な scene/object 状態を特定する。
-2. call trace は通常LANのWi-Fiタイミングを壊しやすいので、まず write trace と RAM dump 差分を優先する。
-3. UI bypass ルートでは、`Game::loadLevel()` 直呼びではなく、通常LANが作る scene transition / CourseSelect / ready countdown 状態を再現する。
-4. それでも UI bypass が詰まる場合は、pre-game中だけ通常LANの action/tick 遷移を模した synthetic packet mode に戻る。
+1. `MPInterface_LAN` ルートを本筋にする。NoLan後付けForceではなく、最初からLAN/WAN transportでNSMBの接続処理を走らせる。
+2. 固定入力スクリプトを改善し、clientの「たいせんしますか？」表示を待ってからAを押す、hostの探索中を待つ、という画面/状態待ち型に近づける。
+3. `LAN.cpp` のMP挙動を調整する。まずは `RecvHostPacket` / `RecvReplies` のtimeout、stale破棄、CMD/reply/ack別の待ちをログで分類し、5ms遅延で止まる理由を特定する。
+4. 5ms送信遅延で `stageGroup=9` 到達を目標にする。そこを越えたら10ms、20msと上げる。
 5. gameplay到達後、入力同期netplayと乱数固定/検証へ戻る。
 
 
