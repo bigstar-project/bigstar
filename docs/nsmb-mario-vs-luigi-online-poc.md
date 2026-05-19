@@ -6,12 +6,14 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 
 現在の主方針は、melonDS の LocalMP を WAN 越しにそのまま延長するのではなく、NSMB がローカル通信時に扱う MvL packet / 接続 state-machine を解析し、LocalMP の代わりに WAN adapter から同等の packet と最低限の状態遷移を供給すること。
 
+
 ## 採用しない方針
 
 - savestate 同期方式: 表示座標だけでは stage/object/通信状態が一致せず、対戦基盤として弱い。
 - DropMP / 途中WAN切り替え: 切り替え時に NSMB 側の接続状態が壊れやすい。
 - `2インスタンス * 2PC` の状態同期: 重く、最終形から遠い。検証用としてのみ使う。
 - スクリーンショットだけの成功判定: 死亡演出や黒画面を誤判定しやすいため、game-state trace / actor presence / packet trace を優先する。
+
 
 ## 実装済みの検証基盤
 
@@ -25,6 +27,8 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - smoke test の厳格判定: `playerActor0Found`, `playerActor1Found`, `vsStarActorFound`
 - `run-nsmb-mvl-lan-route-smoke.ps1` の LAN / NoLanMP / PacketBridge 検証オプション
 - WAN packet adapter の下層MPフック実験
+- `ForceNetReady` / `ForceLoadGameSM` 補助フック
+
 
 ## 重要アドレス
 
@@ -50,6 +54,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - scene request apply: `0x02007ACC`
   - scene transition: `0x02011CE8`
 
+
 ## 現在の到達点
 
 通常LANは最新検証でも `3300` frame まで成功し、`stageGroup=9`, `vsMode=1`, player actors, star actor を確認済み。
@@ -58,7 +63,8 @@ NoLanMP + PacketBridge では、`Net::getPacket*` だけを返しても接続は
 
 下層MP bridgeにより、remote packet は NSMB の `transferPacket()` に届くようになった。pregame中に action `0x01` を強制する実験では、host は `netState24=2`, `VSConnect word078/07C=3/3` まで進む。さらに `ForceNetReady` を併用すると、両側を通常LANに近い `vsMode=1`, `netState1C=6`, `netState20=2`, `netState24=2` に揃えられる。
 
-ただし、まだ CourseSelect 生成と `stageGroup=9` への遷移には届いていない。`ForceLoadGameSM` / `ForceCourseSelectFactory` は現状では補助として不十分で、RunUpdateを無理に呼ぶと ARM9 abort を起こす場合がある。
+ただし、まだ PacketBridge だけでは CourseSelect 生成と `stageGroup=9` への自然遷移には届いていない。`ForceLoadGameSM` は通常LANで観測した `VSConnect +0x144/+0x148/+0x154` に近い値を設定できるようになったが、それだけでは CourseSelect は生成されない。
+
 
 ## 新しい重要な知見
 
@@ -78,22 +84,39 @@ NoLanMP + PacketBridge では、`Net::getPacket*` だけを返しても接続は
 
 つまり接続段階では host/client の packet tick は常に同一ではない。action `0x03` 付近で揃う。したがって、接続開始から強制的に共通 tick にする実験は NSMB の handshake 条件を壊す可能性がある。最終的には「接続段階はNSMBの自然なtick/action遷移を尊重し、gameplay開始後に入力同期用のtick管理へ寄せる」設計が必要そう。
 
+通常LANの write trace では、CourseSelect生成前に以下の状態へ進むことを確認した。
+
+- host: `VSConnect +0x144=7`, `+0x148=0x30`, `+0x154=0x00030000`
+- client: `VSConnect +0x144=7`, `+0x148=0x27`, `+0x154=0x00030001`
+
+このため `ForceLoadGameSM` の補助値を通常LAN相当に修正し、client 側では `localPlayerID=1` も補正するようにした。
+
+一方、以下は失敗として確認済み。
+
+- `UpdateLoadGameSM` を両側で無理に呼ぶと `ARM9 data abort (023C0008)` が出る。
+- `CourseSelectFactory` 直接呼び出しは host 側で `ARM9 data abort (0204C004)` が出る場合があり、CourseSelect object は生成されない。
+- `Game::loadLevel()` を SafeCall で直接呼ぶと `stageGroup=9` と `READY!` 画面までは到達するが、5200 frame まで待っても player actors / star actor が生成されない。つまり「面IDだけを切り替える」だけでは試合開始状態として不十分。
+
+
 ## 現在のブロッカー
 
-WAN adapterが packet を渡すだけでは、VSConnect の `word144=7` と CourseSelect 生成に自然到達しない。
+WAN adapterが packet を渡すだけでは、CourseSelect 生成と実ステージ actor 生成に自然到達しない。
 
 不足しているものは以下のどちらか、または両方の可能性が高い。
 
 - LocalMP由来の副作用がまだ不足している。
 - pre-game action `0x02/0x03` の生成条件、tickジャンプ、VSConnect内部状態のどれかを再現できていない。
+- UI bypass の場合も、`Game::loadLevel()` の前後に必要な scene transition / object manager / ready countdown 状態が不足している。
+
 
 ## 次にやること
 
-1. 通常LANで action `0x02/0x03` へ変わる直前の write/call trace を取り、どの関数/状態が `VSConnect word144=7` と CourseSelect 生成を起こしているか特定する。
-2. PacketBridgeOnlyで同じ関数/書き込みが欠けている箇所を比較する。
-3. pre-game中だけ、通常LANの action/tick 遷移を模した synthetic packet mode を試す。
-4. CourseSelect生成後に `stageGroup=9`、player actors、star actor まで行くかを smoke test で確認する。
+1. 通常LANの `stageGroup=9` 到達前後と、SafeLoadLevelの `READY!` 固着状態の RAM dump / process list を比較し、actor生成に必要な scene/object 状態を特定する。
+2. call trace は通常LANのWi-Fiタイミングを壊しやすいので、まず write trace と RAM dump 差分を優先する。
+3. UI bypass ルートでは、`Game::loadLevel()` 直呼びではなく、通常LANが作る scene transition / CourseSelect / ready countdown 状態を再現する。
+4. それでも UI bypass が詰まる場合は、pre-game中だけ通常LANの action/tick 遷移を模した synthetic packet mode に戻る。
 5. gameplay到達後、入力同期netplayと乱数固定/検証へ戻る。
+
 
 ## 必要なもの
 

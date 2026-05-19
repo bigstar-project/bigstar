@@ -101,7 +101,7 @@ constexpr melonDS::u32 kA2DJVSConnectCreateLoadGameSMAddr = 0x021515B4;
 constexpr melonDS::u32 kA2DJVSConnectUpdateLoadGameSMAddr = 0x021512B8;
 constexpr melonDS::u32 kA2DJVSConnectRenderLoadGameSMAddr = 0x0215125C;
 constexpr melonDS::u32 kA2DJVSConnectStartLoadLevelAddr = 0x0214E0C0;
-constexpr melonDS::u32 kA2DJVSCreateCourseSelectAddr = 0x0214F830;
+constexpr melonDS::u32 kA2DJVSCreateCourseSelectAddr = 0x0214F858;
 constexpr melonDS::u32 kA2DJCourseSelectFactoryAddr = 0x020130A8;
 constexpr melonDS::u32 kA2DJApplySceneRequestAddr = 0x02007ACC;
 constexpr melonDS::u32 kA2DJStartSceneTransitionAddr = 0x02011CE8;
@@ -464,6 +464,7 @@ struct State
     bool PacketBridgeForceLoadGameSM = false;
     melonDS::u32 PacketBridgeForceLoadGameSMStartFrame = 0;
     melonDS::u32 PacketBridgeForceLoadGameSMStep = 3;
+    int PacketBridgeForceLoadGameSMTimer = -1;
     bool PacketBridgeForceLoadGameSMRunUpdate = false;
     bool PacketBridgeForceLoadGameSMRunUpdateClientOnly = true;
     int PacketBridgeMaxPumpEvents = kMaxPumpEvents;
@@ -1264,6 +1265,7 @@ void ForceNSMLPacketBridgeNetReadyIfNeeded(int instanceID, melonDS::u32 frame, m
     nds->ARM9Write32(kNetState20Addr, 0x00000002);
     nds->ARM9Write32(kNetState24Addr, 0x00000002);
     nds->ARM9Write32(kNetState5CAddr, 0x00000000);
+    nds->ARM9Write32(kGameLocalPlayerIDAddr, (G.NetRole == Role::Client) ? 1 : 0);
     nds->ARM9Write32(kGameVsModeAddr, 0x00000001);
     nds->ARM9Write32(0x02087E0C, 0x00000001);
     nds->ARM9Write32(0x02087E90, 0x023DF000);
@@ -1304,13 +1306,22 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
     {
         WriteARM9U32(nds, vsConnectBase + 0x078, 0x00000003);
         WriteARM9U32(nds, vsConnectBase + 0x07C, 0x00000003);
+        WriteARM9U32(nds, vsConnectBase + 0x080, 0x00000107);
+        WriteARM9U32(nds, vsConnectBase + 0x098, 0x00000004);
+        WriteARM9U32(nds, vsConnectBase + 0x09C, 0x00000004);
+        WriteARM9U32(nds, vsConnectBase + 0x10C, 0x00000000);
+        WriteARM9U32(nds, vsConnectBase + 0x110, 0x00000000);
         WriteARM9U32(nds, vsConnectBase + 0x114, 0x00000000);
         WriteARM9U32(nds, vsConnectBase + 0x118, kA2DJVSConnectCreateLoadGameSMAddr);
         WriteARM9U32(nds, vsConnectBase + 0x120, kA2DJVSConnectUpdateLoadGameSMAddr);
         WriteARM9U32(nds, vsConnectBase + 0x128, kA2DJVSConnectRenderLoadGameSMAddr);
         WriteARM9U32(nds, vsConnectBase + 0x134, 0x02156678);
+        WriteARM9U32(nds, vsConnectBase + 0x140, 0x00000001);
+        const melonDS::u32 loadGameTimer = (G.PacketBridgeForceLoadGameSMTimer >= 0)
+            ? static_cast<melonDS::u32>(G.PacketBridgeForceLoadGameSMTimer)
+            : ((G.NetRole == Role::Client) ? 0x00000027u : 0x00000030u);
         WriteARM9U32(nds, vsConnectBase + 0x144, targetStep);
-        WriteARM9U32(nds, vsConnectBase + 0x148, 0x00000000);
+        WriteARM9U32(nds, vsConnectBase + 0x148, loadGameTimer);
         const melonDS::u32 loadGameFlags = (G.NetRole == Role::Client) ? 0x00030001 : 0x00030000;
         WriteARM9U32(nds, vsConnectBase + 0x154, loadGameFlags);
     }
@@ -4012,7 +4023,9 @@ void InitFromEnvironment()
     G.PacketBridgeForceLoadGameSMStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_START_FRAME", 0)));
     G.PacketBridgeForceLoadGameSMStep = static_cast<melonDS::u32>(
-        std::clamp(EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_STEP", 3), 0, 6));
+        std::clamp(EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_STEP", 3), 0, 7));
+    G.PacketBridgeForceLoadGameSMTimer =
+        EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_TIMER", -1);
     G.PacketBridgeForceLoadGameSMRunUpdate = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_RUN_UPDATE");
     G.PacketBridgeForceLoadGameSMRunUpdateClientOnly =
         !EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_RUN_UPDATE_ALL");

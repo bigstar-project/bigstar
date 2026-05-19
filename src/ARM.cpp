@@ -173,23 +173,44 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
 {
     static int enabled = -1;
     if (enabled < 0)
-        enabled = (NSMLEnvFlag("MELONDS_NSML_SAFE_START_LOAD_CALL") || NSMLEnvFlag("MELONDS_NSML_SAFE_LOAD_LEVEL_CALL")) ? 1 : 0;
+        enabled = (NSMLEnvFlag("MELONDS_NSML_SAFE_START_LOAD_CALL")
+            || NSMLEnvFlag("MELONDS_NSML_SAFE_LOAD_LEVEL_CALL")
+            || NSMLEnvFlag("MELONDS_NSML_SAFE_COURSE_SELECT_CALL")
+            || NSMLEnvFlag("MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL")) ? 1 : 0;
     if (!enabled || !cpu || cpu->Num != 0)
         return false;
 
     static int loadLevel = -1;
     if (loadLevel < 0)
         loadLevel = NSMLEnvFlag("MELONDS_NSML_SAFE_LOAD_LEVEL_CALL") ? 1 : 0;
+    static int courseSelect = -1;
+    if (courseSelect < 0)
+        courseSelect = NSMLEnvFlag("MELONDS_NSML_SAFE_COURSE_SELECT_CALL") ? 1 : 0;
+    static int updateLoadGame = -1;
+    if (updateLoadGame < 0)
+        updateLoadGame = NSMLEnvFlag("MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL") ? 1 : 0;
 
     static u32 triggerPC = 0;
     static u32 startFrame = 0;
     if (triggerPC == 0)
     {
-        if (const char* value = getenv(loadLevel ? "MELONDS_NSML_SAFE_LOAD_LEVEL_CALL_PC" : "MELONDS_NSML_SAFE_START_LOAD_CALL_PC"))
+        if (const char* value = getenv(updateLoadGame
+                ? "MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL_PC"
+                : courseSelect
+                ? "MELONDS_NSML_SAFE_COURSE_SELECT_CALL_PC"
+                : loadLevel
+                ? "MELONDS_NSML_SAFE_LOAD_LEVEL_CALL_PC"
+                : "MELONDS_NSML_SAFE_START_LOAD_CALL_PC"))
             triggerPC = static_cast<u32>(strtoul(value, nullptr, 0));
         else
             triggerPC = 0x0200F944;
-        if (const char* value = getenv(loadLevel ? "MELONDS_NSML_SAFE_LOAD_LEVEL_CALL_FRAME" : "MELONDS_NSML_SAFE_START_LOAD_CALL_FRAME"))
+        if (const char* value = getenv(updateLoadGame
+                ? "MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL_FRAME"
+                : courseSelect
+                ? "MELONDS_NSML_SAFE_COURSE_SELECT_CALL_FRAME"
+                : loadLevel
+                ? "MELONDS_NSML_SAFE_LOAD_LEVEL_CALL_FRAME"
+                : "MELONDS_NSML_SAFE_START_LOAD_CALL_FRAME"))
             startFrame = static_cast<u32>(strtoul(value, nullptr, 0));
         else
             startFrame = 0;
@@ -200,7 +221,13 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         return false;
 
     static std::map<NDS*, bool> applied;
-    if (applied[&cpu->NDS])
+    static std::map<NDS*, u32> appliedFrame;
+    if (updateLoadGame)
+    {
+        if (appliedFrame[&cpu->NDS] == cpu->NDS.NumFrames)
+            return false;
+    }
+    else if (applied[&cpu->NDS])
         return false;
 
     const u32 vsConnectBase = NSMLFindObjectBaseByID(cpu->NDS, 0x0006);
@@ -210,6 +237,8 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     constexpr u32 trampolineAddr = 0x023C0000;
     constexpr u32 loadLevelAddr = 0x020068A8;
     constexpr u32 startLoadLevelAddr = 0x0214E0C0;
+    constexpr u32 createCourseSelectAddr = 0x0214F858;
+    constexpr u32 updateLoadGameSMAddr = 0x021512B8;
     const u32 returnPC = instrAddr | ((cpu->CPSR & 0x20) ? 1u : 0u);
     u32 playerID = cpu->NDS.ARM9Read32(0x020850BC);
     if (const char* value = getenv("MELONDS_NSML_SAFE_LOAD_LEVEL_PLAYER_ID"))
@@ -248,6 +277,16 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         NSMLEmitBLViaIP(code, loadLevelAddr);
         code.push_back(0xE28DD034u); // add sp, sp, #0x34
     }
+    else if (courseSelect)
+    {
+        NSMLEmitMovImm(code, 0, vsConnectBase);
+        NSMLEmitBLViaIP(code, createCourseSelectAddr);
+    }
+    else if (updateLoadGame)
+    {
+        NSMLEmitMovImm(code, 0, vsConnectBase);
+        NSMLEmitBLViaIP(code, updateLoadGameSMAddr);
+    }
     else
     {
         NSMLEmitMovImm(code, 0, vsConnectBase);
@@ -264,9 +303,12 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     for (size_t i = 0; i < code.size(); i++)
         cpu->NDS.ARM9Write32(trampolineAddr + static_cast<u32>(i * sizeof(u32)), code[i]);
 
-    applied[&cpu->NDS] = true;
+    if (updateLoadGame)
+        appliedFrame[&cpu->NDS] = cpu->NDS.NumFrames;
+    else
+        applied[&cpu->NDS] = true;
     printf("NSMB SafeCall: %s frame=%u pc=%08X return=%08X vsConnect=%08X player=%u\n",
-        loadLevel ? "loadLevel" : "startLoadLevel",
+        loadLevel ? "loadLevel" : courseSelect ? "createCourseSelect" : updateLoadGame ? "updateLoadGameSM" : "startLoadLevel",
         cpu->NDS.NumFrames,
         instrAddr,
         returnPC,

@@ -51,6 +51,7 @@ param(
     [switch]$PacketBridgeForceLoadGameSM,
     [int]$PacketBridgeForceLoadGameSMStartFrame = 0,
     [int]$PacketBridgeForceLoadGameSMStep = 3,
+    [int]$PacketBridgeForceLoadGameSMTimer = -1,
     [switch]$PacketBridgeForceLoadGameSMRunUpdate,
     [switch]$PacketBridgeForceLoadGameSMRunUpdateAll,
     [int]$PacketBridgeLookupTickDelay = 0,
@@ -97,6 +98,12 @@ param(
     [switch]$SafeLoadLevelCall,
     [int]$SafeLoadLevelCallFrame = 1600,
     [string]$SafeLoadLevelCallPC = "0x0200F944",
+    [switch]$SafeCourseSelectCall,
+    [int]$SafeCourseSelectCallFrame = 1900,
+    [string]$SafeCourseSelectCallPC = "0x0200F944",
+    [switch]$SafeUpdateLoadGameCall,
+    [int]$SafeUpdateLoadGameCallFrame = 1900,
+    [string]$SafeUpdateLoadGameCallPC = "0x0200F944",
     [switch]$ForceCourseSelectFactory,
     [switch]$ForceCourseSelectFactoryClientOnly,
     [int]$ForceCourseSelectFactoryFrame = 2300,
@@ -289,6 +296,24 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_SAFE_LOAD_LEVEL_CALL_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_LOAD_LEVEL_CALL_PC -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_LOAD_LEVEL_PLAYER_ID -ErrorAction SilentlyContinue
+    }
+    if ($SafeCourseSelectCall) {
+        $env:MELONDS_NSML_SAFE_COURSE_SELECT_CALL = "1"
+        $env:MELONDS_NSML_SAFE_COURSE_SELECT_CALL_FRAME = "$SafeCourseSelectCallFrame"
+        $env:MELONDS_NSML_SAFE_COURSE_SELECT_CALL_PC = "$SafeCourseSelectCallPC"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_SAFE_COURSE_SELECT_CALL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_COURSE_SELECT_CALL_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_COURSE_SELECT_CALL_PC -ErrorAction SilentlyContinue
+    }
+    if ($SafeUpdateLoadGameCall) {
+        $env:MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL = "1"
+        $env:MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL_FRAME = "$SafeUpdateLoadGameCallFrame"
+        $env:MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL_PC = "$SafeUpdateLoadGameCallPC"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL_PC -ErrorAction SilentlyContinue
     }
     if ($ForceCourseSelectFactory -and (-not $ForceCourseSelectFactoryClientOnly -or $Role -eq "client")) {
         $env:MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY = "1"
@@ -498,6 +523,11 @@ function Start-MelonLANProcess {
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM = "1"
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_START_FRAME = "$PacketBridgeForceLoadGameSMStartFrame"
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_STEP = "$PacketBridgeForceLoadGameSMStep"
+            if ($PacketBridgeForceLoadGameSMTimer -ge 0) {
+                $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_TIMER = "$PacketBridgeForceLoadGameSMTimer"
+            } else {
+                Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_TIMER -ErrorAction SilentlyContinue
+            }
             if ($PacketBridgeForceLoadGameSMRunUpdate) {
                 $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_RUN_UPDATE = "1"
             } else {
@@ -512,6 +542,7 @@ function Start-MelonLANProcess {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_START_FRAME -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_STEP -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_TIMER -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_RUN_UPDATE -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_RUN_UPDATE_ALL -ErrorAction SilentlyContinue
         }
@@ -676,6 +707,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_STEP -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_TIMER -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_RUN_UPDATE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_RUN_UPDATE_ALL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LOOKUP_TICK_DELAY -ErrorAction SilentlyContinue
@@ -717,6 +749,9 @@ function Start-MelonLANProcess {
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM = "1"
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_START_FRAME = "$PacketBridgeForceLoadGameSMStartFrame"
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_STEP = "$PacketBridgeForceLoadGameSMStep"
+            if ($PacketBridgeForceLoadGameSMTimer -ge 0) {
+                $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_TIMER = "$PacketBridgeForceLoadGameSMTimer"
+            }
             if ($PacketBridgeForceLoadGameSMRunUpdate) {
                 $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_RUN_UPDATE = "1"
             }
