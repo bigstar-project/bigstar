@@ -134,6 +134,7 @@ private:
     int MPMiscRecvTimeout;
     int MPStaleTimeout;
     bool MPUseReliable;
+    bool MPDropOldRegular;
     int LastHostID;
     ENetPeer* LastHostPeer;
     std::queue<ENetPacket*> RXQueue;

@@ -82,6 +82,7 @@ param(
     [int]$HostLanMPSendDelayMs = -1,
     [int]$ClientLanMPSendDelayMs = -1,
     [switch]$LanMPReliable,
+    [switch]$LanMPDropOldRegular,
     [switch]$LanMPAcceptAnyChannel,
     [switch]$DirectMvlBoot,
     [int]$DirectMvlBootFrame = 900,
@@ -826,6 +827,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_LAN_MP_STALE_MS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_LAN_MP_SEND_DELAY_MS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_LAN_MP_RELIABLE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_LAN_MP_DROP_OLD_REGULAR -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WIFI_MP_ACCEPT_ANY_CHANNEL -ErrorAction SilentlyContinue
     } else {
         $env:MELONDS_NSML_MP_INTERFACE = "lan"
@@ -868,6 +870,11 @@ function Start-MelonLANProcess {
             $env:MELONDS_NSML_LAN_MP_RELIABLE = "1"
         } else {
             Remove-Item Env:\MELONDS_NSML_LAN_MP_RELIABLE -ErrorAction SilentlyContinue
+        }
+        if ($LanMPDropOldRegular) {
+            $env:MELONDS_NSML_LAN_MP_DROP_OLD_REGULAR = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_LAN_MP_DROP_OLD_REGULAR -ErrorAction SilentlyContinue
         }
         if ($LanMPAcceptAnyChannel) {
             $env:MELONDS_NSML_WIFI_MP_ACCEPT_ANY_CHANNEL = "1"

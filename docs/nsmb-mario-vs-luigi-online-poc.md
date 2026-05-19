@@ -66,6 +66,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `MELONDS_NSML_LAN_WAN_MODE` / reliable / 長いtimeout: 遅延なしでも接続探索段階で失敗する。
 - `MELONDS_NSML_LAN_MP_STALE_MS=1000`: hostが「ルイージをさがしています」で止まる。
 - `MELONDS_NSML_LAN_MP_SEND_DELAY_MS=5`: hostが探索中、clientが「melonDSマリオがあらわれました / たいせんしますか？」で止まる。
+- clientのA入力を長時間パルスするWAN待ち入力スクリプトでも、5ms送信遅延ではclientが承諾後に「しばらくおまちください」へ進み、その後「melonDSマリオがいなくなりました」で落ちる。
 
 このため、単にtimeoutやstale windowを伸ばすだけでは不十分。NSMBの探索/承諾UIとMP frameの鮮度管理が強く結びついているため、WAN化するなら `LAN.cpp` のMPキュー処理を「古いframeをどう捨てるか」「CMD/reply/ackをどこまで待つか」「探索中の固定入力をどう待たせるか」まで含めて調整する必要がある。
 
@@ -104,6 +105,9 @@ NoLanMP + PacketBridge / ForceLoadGameSM / SafeCall 系は、接続途中から�
 - `CourseSelectFactory` 直接呼び出しはhostでCourseSelect生成まで進む場合があるが、clientでは同じ引数でも生成されない。呼び出し文脈依存が強い。
 - `Game::loadLevel()` をSafeCallで直接呼ぶと `stageGroup=9` と `READY!` 画面までは到達するが、player actors / star actor が生成されない。つまり「面IDだけを切り替える」だけでは試合開始状態として不十分。
 - `run-nsmb-mvl-lan-route-smoke.ps1` に接続ダイアログ検出を追加した。「通信が切断されました」だけでなく、「相手がいなくなりました」「相手を探しています」「たいせんしますか？」で止まる画面も失敗扱いにする。
+- WAN待ち用入力スクリプト `tests/nsmb_mario_vs_luigi_wan_wait.inputs` を追加した。
+- `LAN.cpp` に control event trace と `MELONDS_NSML_LAN_MP_DROP_OLD_REGULAR` を追加した。古いregular frameを捨てても5ms遅延はまだ突破できない。
+- 5ms遅延失敗時のtraceでは、正常時に出る `type=1` CMD / `type=65538` reply 段階へ入る前に止まる。clientはhost regular frameを受け、承諾後に少数のregular frameを送るが、host側は探索中のままになる。
 
 
 ## 現在のブロッカー
@@ -117,8 +121,8 @@ NoLanMP + PacketBridge / ForceLoadGameSM / SafeCall 系は、接続途中から�
 
 1. `MPInterface_LAN` ルートを本筋にする。NoLan後付けForceではなく、最初からLAN/WAN transportでNSMBの接続処理を走らせる。
 2. 固定入力スクリプトを改善し、clientの「たいせんしますか？」表示を待ってからAを押す、hostの探索中を待つ、という画面/状態待ち型に近づける。
-3. `LAN.cpp` のMP挙動を調整する。まずは `RecvHostPacket` / `RecvReplies` のtimeout、stale破棄、CMD/reply/ack別の待ちをログで分類し、5ms遅延で止まる理由を特定する。
-4. 5ms送信遅延で `stageGroup=9` 到達を目標にする。そこを越えたら10ms、20msと上げる。
+3. `LAN.cpp` のMP挙動を調整する。control trace と MP trace を使い、探索regular frameから `type=1` CMDへ移る条件を特定する。
+4. 5ms送信遅延で `type=1` CMD / reply段階へ到達させる。次に `stageGroup=9` 到達を目標にする。
 5. gameplay到達後、入力同期netplayと乱数固定/検証へ戻る。
 
 
