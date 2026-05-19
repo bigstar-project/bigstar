@@ -25,14 +25,19 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦モード `Mario 
 - RAM 比較で、`vsConnect` 本体は通常 LAN と WAN adapter で一致する一方、Net 管理領域の `0x02087F30` と `0x0208806C` が不足していることを確認し、`ForceNetReady` で補うようにした。
 - `VSConnect::updateLoadGameSM` の PC 範囲トレースにより、通常 LAN は `0x021514E4` 直前の Net readiness result が `r0=1`、WAN adapter は `r0=0` になって `CourseSelectFactory` をスキップすることを特定した。
 - pregame WAN adapter では `0x021514E4` の readiness result を満たす hotpatch により、host 側は自然に `CourseSelectFactory(0x020130A8)` を呼び、CourseSelect object 生成まで到達できる。
+- CourseSelect state byte (`courseSelect+0x64`) の write trace により、通常 LAN は `1 -> 0x0B -> 2 -> 3 ... -> 9` と進むが、bridge は `1` で止まることを確認した。
+- CourseSelect state `1` の PC 範囲トレースにより、通常 LAN は `0x0214ED18` 直前の readiness result が `r0=1`、bridge は `r0=0` になって次 state に進まないことを特定した。
+- `0x0214ED18` の readiness result を満たす hotpatch により、host 側は `StartLoadLevel` / `Game::loadLevel` まで自然到達し、`stageGroup=9` へ進むようになった。
 
 ## 現在のブロッカー
 
-host は CourseSelect object 生成まで進むが、client は `VSConnect` の `step 6` 状態を書けていても `updateLoadGameSM` が自然に呼ばれず、CourseSelect object 生成まで進まない。
+host は `stageGroup=9` まで進むが、player actors / Big Star actor はまだ生成されず、host 側で `ARM9 data abort (0205545C)` が出る。
+
+client は `VSConnect` の `step 6/7` 状態を書けていても `updateLoadGameSM` が自然に呼ばれず、CourseSelect 系 state も作れない。`SafeCourseSelectFactoryCall` を 1900f / 1878f で入れても client 側は CourseSelect object として検出されず、`stageGroup=9` へ進まない。
 
 client-only `RunUpdate` 注入は `ARM9 data abort` になったため不採用。`SafeStartLoadCall` は host/client とも `stageGroup=9` へ進めるが、host は data abort と黒画面に入り、player actors / Big Star actor が生成されないため成功扱いにしない。
 
-次は、client 側で `VSConnect::updateLoadGameSM` が自然に呼ばれない理由と、CourseSelect から `StartLoadLevel` へ安全に進むために不足している state を追う。
+次は、client 側で通常 LAN と同等の CourseSelect / load state が作られない理由と、host の `Game::loadLevel` 後に actor 生成へ進まない理由を追う。
 
 ## 実装済みの主なフック
 
@@ -78,11 +83,14 @@ client-only `RunUpdate` 注入は `ARM9 data abort` になったため不採用�
 - WAN adapter PC 範囲 trace: `logs/nsmvl-bridge-pcrange-loadsm-20260520-continue`
 - Net readiness result hotpatch で host CourseSelect 到達: `logs/nsmvl-bridge-force-netready-result-20260520-continue`
 - `SafeStartLoadCall` 検証、stageGroup=9 だが actor 未生成: `logs/nsmvl-bridge-force-startload-after-course-20260520-continue`
+- CourseSelect state byte write trace: `logs/nsmvl-baseline-course064-writetrace-20260520-continue`, `logs/nsmvl-bridge-course064-writetrace-20260520-continue`
+- CourseSelect state1 readiness trace: `logs/nsmvl-baseline-course-state1-pcrange-20260520-continue`, `logs/nsmvl-bridge-course-state1-pcrange-20260520-continue`
+- CourseSelect state1 ready hotpatch で host が `Game::loadLevel` 到達: `logs/nsmvl-bridge-course-state1-ready-20260520-continue`
 
 ## 次にやること
 
-1. client 側で `VSConnect::updateLoadGameSM` が自然に呼ばれない原因を、object action/state と callback pointer 周辺の通常 LAN 差分から特定する。
-2. host CourseSelect object 生成後に `StartLoadLevel` へ自然遷移しない理由を、CourseSelect object と Net packet/action state の差分から特定する。
+1. client 側で通常 LAN と同等の CourseSelect / load state が作られない原因を、object action/state と callback pointer 周辺の通常 LAN 差分から特定する。
+2. host の `Game::loadLevel` 後に player actors / Big Star actor が生成されず data abort する原因を、通常 LAN の load 後 RAM / call trace と比較する。
 3. `SafeStartLoadCall` のような強制ロードではなく、NSMB の接続 state-machine が期待する readiness / packet / object state を adapter 側で満たす。
 4. host/client 両方で player actors と Big Star actor が生成されたら、keys-only WAN packet bridge と結合し、入力が双方で反映されるか確認する。
 

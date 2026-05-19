@@ -412,6 +412,24 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
         }
         return;
     }
+    if (instrAddr == 0x0214ED18 && IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
+    {
+        const u32 courseSelectBase = NSMLFindObjectBaseByID(cpu->NDS, 0x0005);
+        if (courseSelectBase != 0 && cpu->NDS.ARM9Read8(courseSelectBase + 0x64) == 1)
+        {
+            cpu->R[0] = 1;
+            static int logCount = 0;
+            if (logCount < 8)
+            {
+                printf("NSMB PacketBridge: force CourseSelect state1 ready result frame=%u courseSelect=%08X\n",
+                    cpu->NDS.NumFrames,
+                    courseSelectBase);
+                fflush(stdout);
+                logCount++;
+            }
+        }
+        return;
+    }
     if (instrAddr != 0x021512B8) // VSConnect::updateLoadGameSM()
         return;
     if (!IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
