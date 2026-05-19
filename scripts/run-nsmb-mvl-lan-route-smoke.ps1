@@ -78,6 +78,7 @@ param(
     [int]$LanMPRecvTimeoutMs = -1,
     [int]$LanMPMiscRecvTimeoutMs = -1,
     [int]$LanMPStaleMs = -1,
+    [int]$LanMPReplySlackUs = -1,
     [int]$LanMPSendDelayMs = -1,
     [int]$HostLanMPSendDelayMs = -1,
     [int]$ClientLanMPSendDelayMs = -1,
@@ -825,6 +826,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_LAN_MP_RECV_TIMEOUT_MS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_LAN_MP_MISC_RECV_TIMEOUT_MS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_LAN_MP_STALE_MS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_LAN_MP_REPLY_TIMESTAMP_SLACK_US -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_LAN_MP_SEND_DELAY_MS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_LAN_MP_RELIABLE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_LAN_MP_DROP_OLD_REGULAR -ErrorAction SilentlyContinue
@@ -854,6 +856,11 @@ function Start-MelonLANProcess {
             $env:MELONDS_NSML_LAN_MP_STALE_MS = "$LanMPStaleMs"
         } else {
             Remove-Item Env:\MELONDS_NSML_LAN_MP_STALE_MS -ErrorAction SilentlyContinue
+        }
+        if ($LanMPReplySlackUs -ge 0) {
+            $env:MELONDS_NSML_LAN_MP_REPLY_TIMESTAMP_SLACK_US = "$LanMPReplySlackUs"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_LAN_MP_REPLY_TIMESTAMP_SLACK_US -ErrorAction SilentlyContinue
         }
         $roleSendDelay = $LanMPSendDelayMs
         if ($Role -eq "host" -and $HostLanMPSendDelayMs -ge 0) {

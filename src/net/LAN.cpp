@@ -211,12 +211,13 @@ LAN::LAN() noexcept : Inited(false)
     MPRecvTimeout = std::max(0, EnvInt("MELONDS_NSML_LAN_MP_RECV_TIMEOUT_MS", wanMode ? 1000 : 25));
     MPMiscRecvTimeout = std::max(0, EnvInt("MELONDS_NSML_LAN_MP_MISC_RECV_TIMEOUT_MS", wanMode ? 100 : 0));
     MPStaleTimeout = EnvInt("MELONDS_NSML_LAN_MP_STALE_MS", wanMode ? 1000 : 16);
+    MPReplyTimestampSlack = std::max(0, EnvInt("MELONDS_NSML_LAN_MP_REPLY_TIMESTAMP_SLACK_US", wanMode ? 20000 : 32));
     MPUseReliable = EnvBool("MELONDS_NSML_LAN_MP_RELIABLE", wanMode);
     MPDropOldRegular = EnvBool("MELONDS_NSML_LAN_MP_DROP_OLD_REGULAR", false);
     MPSendDelayMs = std::max(0, EnvInt("MELONDS_NSML_LAN_MP_SEND_DELAY_MS", 0));
     Platform::Log(Platform::LogLevel::Info,
-        "LAN MP config: recvTimeout=%d staleTimeout=%d reliable=%d dropOldRegular=%d sendDelay=%d\n",
-        MPRecvTimeout, MPStaleTimeout, MPUseReliable ? 1 : 0, MPDropOldRegular ? 1 : 0, MPSendDelayMs);
+        "LAN MP config: recvTimeout=%d staleTimeout=%d replyTimestampSlack=%d reliable=%d dropOldRegular=%d sendDelay=%d\n",
+        MPRecvTimeout, MPStaleTimeout, MPReplyTimestampSlack, MPUseReliable ? 1 : 0, MPDropOldRegular ? 1 : 0, MPSendDelayMs);
     Platform::Log(Platform::LogLevel::Info,
         "LAN MP config: miscRecvTimeout=%d\n",
         MPMiscRecvTimeout);
@@ -1269,7 +1270,7 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
         bool good = true;
         if ((header->Type & 0xFFFF) != 2)
             good = false;
-        else if (header->Timestamp < (timestamp - 32))
+        else if (header->Timestamp < (timestamp - (u64)MPReplyTimestampSlack))
             good = false;
 
         if (good)

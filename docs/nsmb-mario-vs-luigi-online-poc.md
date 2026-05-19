@@ -4,7 +4,7 @@
 
 New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `Mario vs Luigi` を、最終的に WAN 越しの `1 melonDS instance * 2PC` で遊べる形にする。
 
-現在の主方針は、melonDS の LocalMP を WAN 越しにそのまま延長するのではなく、NSMB がローカル通信時に扱う MvL packet / 接続 state-machine を解析し、LocalMP の代わりに WAN adapter から同等の packet と最低限の状態遷移を供給すること。
+現在の主方針は、`1 melonDS instance * 2PC` を維持しつつ、NSMB がローカル通信時に扱う MvL packet / 接続 state-machine を解析し、WAN 越しでも同じ入力通信へ到達できる adapter または ROM 側パッチを作ること。
 
 
 ## 採用しない方針
@@ -28,6 +28,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `run-nsmb-mvl-lan-route-smoke.ps1` の LAN / NoLanMP / PacketBridge 検証オプション
 - WAN packet adapter の下層MPフック実験
 - `ForceNetReady` / `ForceLoadGameSM` 補助フック
+- LAN MP control trace / reply timestamp slack / old regular drop 検証
 
 
 ## 重要アドレス
@@ -57,18 +58,19 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 
 ## 現在の到達点
 
-最終形は `1 melonDS instance * 2PC`。現時点で一番筋が良い候補は、NSMBの接続処理を途中から奪うのではなく、melonDS既存の `MPInterface_LAN` を「最初からWAN transport」として使う方向。
+最終形は `1 melonDS instance * 2PC`。直近では、NSMBの接続処理を途中から奪うのではなく、melonDS既存の `MPInterface_LAN` を「最初からWAN transport」として使う方向を検証した。
 
 `MPInterface_LAN` は LocalMP と同じ `SendCmd` / `SendReply` / `RecvHostPacket` API を ENet で運ぶ実装なので、NSMB側のローカル通信state-machineを最も壊しにくい。自動テストでは、遅延なしのLAN経路は `LanStartAttempts` 付きで `3600` frame まで成功し、`stageGroup=9`, `vsMode=1`, player actors, star actor を確認できる。
 
-一方、WAN想定の単純な設定変更はまだ失敗している。
+一方、WAN想定の単純な設定変更は失敗している。
 
 - `MELONDS_NSML_LAN_WAN_MODE` / reliable / 長いtimeout: 遅延なしでも接続探索段階で失敗する。
 - `MELONDS_NSML_LAN_MP_STALE_MS=1000`: hostが「ルイージをさがしています」で止まる。
 - `MELONDS_NSML_LAN_MP_SEND_DELAY_MS=5`: hostが探索中、clientが「melonDSマリオがあらわれました / たいせんしますか？」で止まる。
 - clientのA入力を長時間パルスするWAN待ち入力スクリプトでも、5ms送信遅延ではclientが承諾後に「しばらくおまちください」へ進み、その後「melonDSマリオがいなくなりました」で落ちる。
+- `MELONDS_NSML_LAN_MP_REPLY_TIMESTAMP_SLACK_US=20000` を追加し、遅延時の `reply-skip` は減らせた。ただし 1ms client送信遅延でも `action 0x02` 止まり、`stageGroup=9` へは進まない。
 
-このため、単にtimeoutやstale windowを伸ばすだけでは不十分。NSMBの探索/承諾UIとMP frameの鮮度管理が強く結びついているため、WAN化するなら `LAN.cpp` のMPキュー処理を「古いframeをどう捨てるか」「CMD/reply/ackをどこまで待つか」「探索中の固定入力をどう待たせるか」まで含めて調整する必要がある。
+このため、単にtimeoutやstale window、reply timestamp slackを伸ばすだけでは不十分。NSMBの探索/承諾UIとMP frameの鮮度管理が強く結びついているため、`MPInterface_LAN` をそのままWAN化するだけで安定対戦まで行く見込みは低くなった。
 
 NoLanMP + PacketBridge / ForceLoadGameSM / SafeCall 系は、接続途中から状態を作る実験としては有用だったが、自然なCourseSelect生成や実ステージactor生成には届いていない。今後の本筋からは外し、必要な解析補助としてだけ使う。
 
@@ -108,22 +110,24 @@ NoLanMP + PacketBridge / ForceLoadGameSM / SafeCall 系は、接続途中から�
 - WAN待ち用入力スクリプト `tests/nsmb_mario_vs_luigi_wan_wait.inputs` を追加した。
 - `LAN.cpp` に control event trace と `MELONDS_NSML_LAN_MP_DROP_OLD_REGULAR` を追加した。古いregular frameを捨てても5ms遅延はまだ突破できない。
 - 5ms遅延失敗時のtraceでは、正常時に出る `type=1` CMD / `type=65538` reply 段階へ入る前に止まる。clientはhost regular frameを受け、承諾後に少数のregular frameを送るが、host側は探索中のままになる。
+- 片方向遅延の切り分けでは、host送信だけ遅延するとhostがclient regular frameを受け取れず、client送信だけ遅延するとCMD/reply段階へ入る場合がある。ただしNSMBのactionは `0x03` へ進まず、試合開始には届かない。
+- host側 `RecvReplies` は返信timestampが現在timestampより32us以上古いと `reply-skip` する。遅延時は正しい返信でもここで落ちるため、`MELONDS_NSML_LAN_MP_REPLY_TIMESTAMP_SLACK_US` を追加した。しかしこれは必要条件であって十分条件ではなかった。
 
 
 ## 現在のブロッカー
 
-`MPInterface_LAN` を最初から使うルートは正常LANでは動くが、WAN想定の遅延・長い待ち・長いstale windowを入れると接続探索/承諾段階で止まる。
+`MPInterface_LAN` を最初から使うルートは正常LANでは動くが、WAN想定の遅延・長い待ち・長いstale window・reply slackを入れると接続探索/承諾段階で止まる。
 
-特に、host/clientの固定入力スクリプトは相手発見タイミングに追従できない。実装面でも、LAN MPの `RXQueue` stale処理、CMD/reply/ack待ち、ENet reliable/unsequencedの使い分けがNSMBの期待するローカル通信テンポから外れると切断扱いになる。
+特に、NSMB側の接続UIは「ローカル無線の短い応答テンポ」を前提にしており、ENetでMPInterfaceを遠隔化するだけでは、発見、承諾、CMD/reply、load-game遷移が同じタイミングで成立しない。最終目標を考えると、次はNSMB側の接続段階を短絡または置換し、gameplay中の入力packet通信へ直接入る設計を優先する。
 
 
 ## 次にやること
 
-1. `MPInterface_LAN` ルートを本筋にする。NoLan後付けForceではなく、最初からLAN/WAN transportでNSMBの接続処理を走らせる。
-2. 固定入力スクリプトを改善し、clientの「たいせんしますか？」表示を待ってからAを押す、hostの探索中を待つ、という画面/状態待ち型に近づける。
-3. `LAN.cpp` のMP挙動を調整する。control trace と MP trace を使い、探索regular frameから `type=1` CMDへ移る条件を特定する。
-4. 5ms送信遅延で `type=1` CMD / reply段階へ到達させる。次に `stageGroup=9` 到達を目標にする。
-5. gameplay到達後、入力同期netplayと乱数固定/検証へ戻る。
+1. 正常LANの `action 0x03` 直前/直後で、VSConnectの状態、load-game遷移、CourseSelect生成に必要な最小状態をさらに特定する。
+2. UI操作を経ずに MvL gameplay へ入る ROM/メモリ側パッチ候補を作る。目標は `stageGroup=9`, `vsMode=1`, player actors, star actor が自然生成されること。
+3. gameplay到達後、NSMBの入力packetをWAN adapterで交換する。ここではNSMB既存の入力同期処理を使い、LocalMPの探索/承諾UIは通さない。
+4. 乱数固定は `Net::getRandom()` の戻り列を同期する方針を維持する。Big Starだけでなく、8コインアイテムやランダムステージ選択も対象にする。
+5. `MPInterface_LAN` の遅延耐性検証は補助に下げる。reply slackなどの知見は使うが、最終ルートの本筋にはしない。
 
 
 ## 必要なもの

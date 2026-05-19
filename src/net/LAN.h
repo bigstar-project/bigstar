@@ -133,6 +133,7 @@ private:
     int MPRecvTimeout;
     int MPMiscRecvTimeout;
     int MPStaleTimeout;
+    int MPReplyTimestampSlack;
     bool MPUseReliable;
     bool MPDropOldRegular;
     int LastHostID;
