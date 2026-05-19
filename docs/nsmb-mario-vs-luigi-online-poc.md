@@ -29,6 +29,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - WAN packet adapter の下層MPフック実験
 - `ForceNetReady` / `ForceLoadGameSM` 補助フック
 - LAN MP control trace / reply timestamp slack / old regular drop 検証
+- game-state trace の開始/終了フレーム指定
 
 
 ## 重要アドレス
@@ -112,6 +113,11 @@ NoLanMP + PacketBridge / ForceLoadGameSM / SafeCall 系は、接続途中から�
 - 5ms遅延失敗時のtraceでは、正常時に出る `type=1` CMD / `type=65538` reply 段階へ入る前に止まる。clientはhost regular frameを受け、承諾後に少数のregular frameを送るが、host側は探索中のままになる。
 - 片方向遅延の切り分けでは、host送信だけ遅延するとhostがclient regular frameを受け取れず、client送信だけ遅延するとCMD/reply段階へ入る場合がある。ただしNSMBのactionは `0x03` へ進まず、試合開始には届かない。
 - host側 `RecvReplies` は返信timestampが現在timestampより32us以上古いと `reply-skip` する。遅延時は正しい返信でもここで落ちるため、`MELONDS_NSML_LAN_MP_REPLY_TIMESTAMP_SLACK_US` を追加した。しかしこれは必要条件であって十分条件ではなかった。
+- 正常LANの高密度traceでは、hostはおおよそ frame `1840` で `vsMode=1` と LoadGameSM 関数ポインタへ切り替わり、`+0x144` が `3 -> 5 -> 6 -> 7`、`+0x154` が `0x10000 -> 0x30000`、frame `1960` で CourseSelect が生成される。
+- clientはhostより少し早く同様の遷移を行い、正常時の最終値は `localPlayerID=1`, `VSConnect +0x148=0x27`, `+0x154=0x30001`。DirectBoot LoadGameSM側にもこのrole別補正を追加した。
+- NoLanMP上でLoadGameSMへ直行すると、role別補正後もCourseSelectは生成されない。step7へ直行するだけでは足りず、step3/5/6の途中副作用が必要。
+- ForceLoadGameSMをstep3から走らせる実験では、timerが増え続けてstep5付近で止まる。`ForceNetReady`の常時上書きは状態遷移を潰すため、開始/終了フレーム指定を追加した。
+- `RunUpdateAll`でhost/client両方からLoadGameSM updateを強制呼び出しするとARM9 data abortが出るため、現在のtrampoline呼び出し方式はhost側では不安定。
 
 
 ## 現在のブロッカー
@@ -124,7 +130,7 @@ NoLanMP + PacketBridge / ForceLoadGameSM / SafeCall 系は、接続途中から�
 ## 次にやること
 
 1. 正常LANの `action 0x03` 直前/直後で、VSConnectの状態、load-game遷移、CourseSelect生成に必要な最小状態をさらに特定する。
-2. UI操作を経ずに MvL gameplay へ入る ROM/メモリ側パッチ候補を作る。目標は `stageGroup=9`, `vsMode=1`, player actors, star actor が自然生成されること。
+2. UI操作を経ずに MvL gameplay へ入る ROM/メモリ側パッチ候補を作る。次は「関数を外から呼ぶ」より、正常LANで実行される分岐条件・状態変数を追い、LoadGameSM自身がCourseSelect生成へ進む条件を特定する。
 3. gameplay到達後、NSMBの入力packetをWAN adapterで交換する。ここではNSMB既存の入力同期処理を使い、LocalMPの探索/承諾UIは通さない。
 4. 乱数固定は `Net::getRandom()` の戻り列を同期する方針を維持する。Big Starだけでなく、8コインアイテムやランダムステージ選択も対象にする。
 5. `MPInterface_LAN` の遅延耐性検証は補助に下げる。reply slackなどの知見は使うが、最終ルートの本筋にはしない。

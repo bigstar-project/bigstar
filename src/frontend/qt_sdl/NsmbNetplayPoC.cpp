@@ -432,6 +432,8 @@ struct State
     int InputTraceInterval = 60;
     bool ScreenHashEnabled = false;
     bool GameStateTraceExtended = false;
+    melonDS::u32 GameStateTraceStartFrame = 0;
+    melonDS::u32 GameStateTraceEndFrame = 0;
     bool GameStateSyncEnabled = false;
     bool GameStateSyncExtended = false;
     bool GameStateApplyEnabled = false;
@@ -461,12 +463,14 @@ struct State
     int PacketBridgeForceTickBase = -1;
     bool PacketBridgeForceNetReady = false;
     melonDS::u32 PacketBridgeForceNetReadyStartFrame = 0;
+    melonDS::u32 PacketBridgeForceNetReadyEndFrame = 0;
     bool PacketBridgeForceLoadGameSM = false;
     melonDS::u32 PacketBridgeForceLoadGameSMStartFrame = 0;
     melonDS::u32 PacketBridgeForceLoadGameSMStep = 3;
     int PacketBridgeForceLoadGameSMTimer = -1;
     bool PacketBridgeForceLoadGameSMRunUpdate = false;
     bool PacketBridgeForceLoadGameSMRunUpdateClientOnly = true;
+    bool PacketBridgeForceLoadGameSMPulseAction = false;
     int PacketBridgeMaxPumpEvents = kMaxPumpEvents;
     int PacketBridgeMaxTickLead = -1;
     int PacketBridgeMaxFrameLead = -1;
@@ -1257,6 +1261,8 @@ void ForceNSMLPacketBridgeNetReadyIfNeeded(int instanceID, melonDS::u32 frame, m
         return;
     if (frame < G.PacketBridgeForceNetReadyStartFrame)
         return;
+    if (G.PacketBridgeForceNetReadyEndFrame != 0 && frame > G.PacketBridgeForceNetReadyEndFrame)
+        return;
     if (nds->ARM9Read32(kNetGGIDAddr) != 0x42)
         return;
 
@@ -1340,6 +1346,12 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
         WriteARM9U32(nds, 0x02088078, 0x00000001);
         WriteARM9U32(nds, 0x0208807C, 0x00000002);
         WriteARM9U32(nds, 0x02088084, 0x00000002);
+    }
+    if (G.PacketBridgeForceLoadGameSMPulseAction)
+    {
+        const melonDS::u32 rel = frame - G.PacketBridgeForceLoadGameSMStartFrame;
+        if ((rel % 25u) < 5u)
+            nds->ARM9Write8(kNetPacketActionAddr, 0x03);
     }
 
     if (G.PacketBridgeForceLoadGameSMRunUpdate
@@ -2121,13 +2133,23 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
         WriteARM9U32(nds, vsConnectBase + 0x120, kA2DJVSConnectUpdateLoadGameSMAddr);
         WriteARM9U32(nds, vsConnectBase + 0x128, kA2DJVSConnectRenderLoadGameSMAddr);
         WriteARM9U32(nds, vsConnectBase + 0x134, 0x02156678);
+        WriteARM9U32(nds, vsConnectBase + 0x140, playerID == 1 ? 0x00000002 : 0x00000001);
         WriteARM9U32(nds, vsConnectBase + 0x144, 0x00000007);
-        WriteARM9U32(nds, vsConnectBase + 0x148, 0x00000030);
-        WriteARM9U32(nds, vsConnectBase + 0x154, 0x00030000);
+        WriteARM9U32(nds, vsConnectBase + 0x148, playerID == 1 ? 0x00000027 : 0x00000030);
+        WriteARM9U32(nds, vsConnectBase + 0x154, 0x00030000 | static_cast<melonDS::u32>(playerID));
+        if (playerID == 1)
+        {
+            WriteARM9U32(nds, vsConnectBase + 0x13C, 0x00000258);
+            WriteARM9U32(nds, vsConnectBase + 0x14C, 0x11BF0900);
+            WriteARM9U32(nds, vsConnectBase + 0x150, 0x00003322);
+            WriteARM9U32(nds, vsConnectBase + 0x158, 0x00000001);
+        }
         WriteARM9U32(nds, 0x02087E14, 0x00000001);
         WriteARM9U32(nds, 0x02087E1C, 0x00000006);
         WriteARM9U32(nds, 0x02087E20, 0x00000002);
         WriteARM9U32(nds, 0x02087E24, 0x00000002);
+        WriteARM9U32(nds, kGameLocalPlayerIDAddr, static_cast<melonDS::u32>(playerID));
+        WriteARM9U32(nds, kGameVsModeAddr, 0x00000001);
         WriteARM9U32(nds, 0x020850C4, 0x00000001);
         WriteARM9U32(nds, 0x020850C8, 0x0000001C);
         if (G.DirectMvlBootPatchLoadGameSMOnly)
@@ -3438,6 +3460,8 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if (G.GameStateTracePath.empty()) return;
     if (!nds || !nds->MainRAM) return;
     if (instanceID < 0 || instanceID >= 16) return;
+    if (frame < G.GameStateTraceStartFrame) return;
+    if (G.GameStateTraceEndFrame != 0 && frame > G.GameStateTraceEndFrame) return;
     if ((frame % static_cast<melonDS::u32>(G.GameStateTraceInterval)) != 0) return;
     if ((kNetRandomValueAddr - kMainRAMBase) + sizeof(melonDS::u32) > nds->MainRAMMask + 1) return;
 
@@ -4035,6 +4059,8 @@ void InitFromEnvironment()
     G.PacketBridgeForceNetReady = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY");
     G.PacketBridgeForceNetReadyStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME", 0)));
+    G.PacketBridgeForceNetReadyEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_END_FRAME", 0)));
     G.PacketBridgeForceLoadGameSM = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM");
     G.PacketBridgeForceLoadGameSMStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_START_FRAME", 0)));
@@ -4045,6 +4071,8 @@ void InitFromEnvironment()
     G.PacketBridgeForceLoadGameSMRunUpdate = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_RUN_UPDATE");
     G.PacketBridgeForceLoadGameSMRunUpdateClientOnly =
         !EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_RUN_UPDATE_ALL");
+    G.PacketBridgeForceLoadGameSMPulseAction =
+        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_PULSE_ACTION");
     G.PacketBridgeMaxPumpEvents = std::clamp(
         EnvInt("MELONDS_NSML_PACKET_BRIDGE_MAX_PUMP_EVENTS", kMaxPumpEvents), 1, kMaxPumpEvents);
     G.PacketBridgeMaxTickLead = EnvInt("MELONDS_NSML_PACKET_BRIDGE_MAX_TICK_LEAD", -1);
@@ -4090,6 +4118,10 @@ void InitFromEnvironment()
     const char* gameStateTrace = std::getenv("MELONDS_NSML_GAME_STATE_TRACE");
     if (gameStateTrace && gameStateTrace[0]) G.GameStateTracePath = gameStateTrace;
     G.GameStateTraceInterval = std::max(1, EnvInt("MELONDS_NSML_GAME_STATE_TRACE_INTERVAL", 60));
+    G.GameStateTraceStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_GAME_STATE_TRACE_START_FRAME", 0)));
+    G.GameStateTraceEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_GAME_STATE_TRACE_END_FRAME", 0)));
     G.GameStateTraceExtended = EnvFlag("MELONDS_NSML_GAME_STATE_TRACE_EXTENDED");
     G.GameStateSyncEnabled = EnvFlag("MELONDS_NSML_STATE_SYNC");
     G.GameStateSyncExtended = EnvFlag("MELONDS_NSML_STATE_SYNC_EXTENDED");
