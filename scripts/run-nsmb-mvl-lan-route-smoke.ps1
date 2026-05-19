@@ -45,6 +45,7 @@ param(
     [switch]$PacketBridgeReplayReturnLookupTick,
     [string]$PacketBridgeReplayOps = "",
     [switch]$PacketBridgeDirectCapture,
+    [int]$PacketBridgeLowerStatusResult = -1,
     [switch]$PacketBridgeForceTick,
     [int]$PacketBridgeForceTickStartFrame = 0,
     [int]$PacketBridgeForceTickBase = -1,
@@ -544,6 +545,11 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE -ErrorAction SilentlyContinue
         }
+        if ($PacketBridgeLowerStatusResult -ge 0) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT = "$PacketBridgeLowerStatusResult"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT -ErrorAction SilentlyContinue
+        }
         if ($PacketBridgeForceTick) {
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK = "1"
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME = "$PacketBridgeForceTickStartFrame"
@@ -763,6 +769,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE -ErrorAction SilentlyContinue
@@ -807,6 +814,34 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_NETPLAY_START_FRAME -ErrorAction SilentlyContinue
     }
     if (-not $PacketBridge) {
+        if ($PacketBridgeLookupTickDelay -gt 0) {
+            $env:MELONDS_NSML_PACKET_REPLAY_LOOKUP_TICK_DELAY = "$PacketBridgeLookupTickDelay"
+        }
+        if ($PacketBridgeStrictRemote -or $PacketBridgeStrictPlayers) {
+            $env:MELONDS_NSML_PACKET_REPLAY_STRICT = "1"
+            if ($PacketBridgeStrictStartFrame -gt 0) {
+                $env:MELONDS_NSML_PACKET_REPLAY_STRICT_START_FRAME = "$PacketBridgeStrictStartFrame"
+            }
+            if ($PacketBridgeStrictRequireLead -gt 0) {
+                $env:MELONDS_NSML_PACKET_REPLAY_STRICT_REQUIRE_LEAD = "$PacketBridgeStrictRequireLead"
+            }
+            if ($PacketBridgeStrictPlayers) {
+                $env:MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS = $PacketBridgeStrictPlayers
+            } elseif ($Role -eq "host") {
+                $env:MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS = "1"
+            } else {
+                $env:MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS = "0"
+            }
+        }
+        if ($PacketBridgeLiveFallbackWindow -gt 0) {
+            $env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW = "$PacketBridgeLiveFallbackWindow"
+        }
+        if ($PacketBridgeReplayReturnLookupTick) {
+            $env:MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK = "1"
+        }
+        if ($PacketBridgeReplayOps) {
+            $env:MELONDS_NSML_PACKET_REPLAY_OPS = $PacketBridgeReplayOps
+        }
         if ($PacketBridgeAllowPreGame) {
             $env:MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME = "1"
         }

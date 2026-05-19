@@ -1333,14 +1333,12 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
         WriteARM9U32(nds, vsConnectBase + 0x140, (G.NetRole == Role::Client) ? 0x00000002 : 0x00000001);
         const melonDS::u32 loadGameTimer = (G.PacketBridgeForceLoadGameSMTimer >= 0)
             ? static_cast<melonDS::u32>(G.PacketBridgeForceLoadGameSMTimer)
-            : ((targetStep < 7)
-                ? ((G.NetRole == Role::Client) ? 0x0000001Fu : 0x0000002Au)
-                : ((G.NetRole == Role::Client) ? 0x00000027u : 0x00000030u));
+            : ((targetStep < 7) ? 0u : ((G.NetRole == Role::Client) ? 0x00000027u : 0x00000030u));
         WriteARM9U32(nds, vsConnectBase + 0x144, targetStep);
         WriteARM9U32(nds, vsConnectBase + 0x148, loadGameTimer);
         const melonDS::u32 loadGameFlagsBase = (G.PacketBridgeForceLoadGameSMFlags >= 0)
             ? static_cast<melonDS::u32>(G.PacketBridgeForceLoadGameSMFlags)
-            : ((targetStep < 7) ? 0x00010000 : 0x00030000);
+            : ((targetStep < 7) ? 0x00000000 : 0x00030000);
         const melonDS::u32 loadGameFlags = loadGameFlagsBase
             | ((G.NetRole == Role::Client) ? 1u : 0u);
         WriteARM9U32(nds, vsConnectBase + 0x154, loadGameFlags);
@@ -1354,6 +1352,7 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
     }
     if (targetStep < 7)
     {
+        nds->ARM9Write8(kNetPacketActionAddr, 0x00);
         WriteARM9U32(nds, 0x02088078, 0x00000001);
         WriteARM9U32(nds, 0x0208807C, 0x00000002);
         WriteARM9U32(nds, 0x02088084, 0x00000002);

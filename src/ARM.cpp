@@ -798,14 +798,23 @@ static bool HandleNSMLLowerMPBridge(ARM* cpu, u32 instrAddr)
         // transferPacket() enters the packet-copy path when this lower-MP
         // status probe returns false. PacketBridge supplies packets through
         // the per-player pointer hook below, so keep that path active.
+        static int statusResult = -1;
+        if (statusResult < 0)
+        {
+            if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT"))
+                statusResult = atoi(value) != 0 ? 1 : 0;
+            else
+                statusResult = 0;
+        }
         static u32 traceCount = 0;
         if (traceLower && (traceCount < 24 || (traceCount % 300) == 0))
-            printf("NSMB PacketBridge lower: statusProbe 0204619C frame=%u tick=0x%04X lr=%08X -> 0\n",
+            printf("NSMB PacketBridge lower: statusProbe 0204619C frame=%u tick=0x%04X lr=%08X -> %d\n",
                 cpu->NDS.NumFrames,
                 NSMLPacketBridgeCanonicalTick(cpu->NDS) & 0xFFFF,
-                cpu->R[14]);
+                cpu->R[14],
+                statusResult);
         traceCount++;
-        cpu->R[0] = 0;
+        cpu->R[0] = static_cast<u32>(statusResult);
         cpu->JumpTo(cpu->R[14]);
         return true;
     }
