@@ -51,6 +51,8 @@ param(
     [switch]$PacketBridgeForceNetReady,
     [int]$PacketBridgeForceNetReadyStartFrame = 0,
     [int]$PacketBridgeForceNetReadyEndFrame = 0,
+    [switch]$PacketBridgeForceNetReadyState10,
+    [switch]$PacketBridgeForceNetReadyState10ClientOnly,
     [switch]$PacketBridgeForceLoadGameSM,
     [int]$PacketBridgeForceLoadGameSMStartFrame = 0,
     [int]$PacketBridgeForceLoadGameSMStep = 3,
@@ -69,6 +71,7 @@ param(
     [int]$PacketBridgeBypassNetDisconnectStartFrame = 0,
     [string]$PacketBridgeBypassNetDisconnectMode = "skip",
     [switch]$PacketBridgeForceTransferResult,
+    [switch]$PacketBridgeForceTransferClientOnly,
     [int]$PacketBridgeForceTransferStartFrame = 0,
     [int]$PacketBridgeForceTransferResultValue = 8,
     [string]$NetRandomValue = "",
@@ -134,6 +137,7 @@ param(
     [int]$HostStartupDelayMs = 1000,
     [int]$LanStartAttempts = 1,
     [switch]$SkipDisconnectScreenshotCheck,
+    [switch]$SkipBlankScreenshotCheck,
     [switch]$SkipGameplayActorCheck,
     [string]$LogDir = "logs\nsmb-mvl-lan-route"
 )
@@ -556,9 +560,15 @@ function Start-MelonLANProcess {
         if ($PacketBridgeForceNetReady) {
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY = "1"
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME = "$PacketBridgeForceNetReadyStartFrame"
+            if ($PacketBridgeForceNetReadyEndFrame -gt 0) { $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_END_FRAME = "$PacketBridgeForceNetReadyEndFrame" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_END_FRAME -ErrorAction SilentlyContinue }
+            if ($PacketBridgeForceNetReadyState10) { $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10 = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10 -ErrorAction SilentlyContinue }
+            if ($PacketBridgeForceNetReadyState10ClientOnly) { $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10_CLIENT_ONLY -ErrorAction SilentlyContinue }
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_END_FRAME -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10 -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10_CLIENT_ONLY -ErrorAction SilentlyContinue
         }
         if ($PacketBridgeForceLoadGameSM) {
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM = "1"
@@ -645,6 +655,7 @@ function Start-MelonLANProcess {
         }
         if ($PacketBridgeForceTransferResult) {
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT = "1"
+            if ($PacketBridgeForceTransferClientOnly) { $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_CLIENT_ONLY -ErrorAction SilentlyContinue }
             if ($PacketBridgeForceTransferStartFrame -gt 0) {
                 $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_START_FRAME = "$PacketBridgeForceTransferStartFrame"
             } elseif ($DropMPAfterFrame -gt 0) {
@@ -655,6 +666,7 @@ function Start-MelonLANProcess {
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT_VALUE = "$PacketBridgeForceTransferResultValue"
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_CLIENT_ONLY -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_START_FRAME -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT_VALUE -ErrorAction SilentlyContinue
         }
@@ -773,6 +785,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT_MODE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_CLIENT_ONLY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT_VALUE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAX_TICK_LEAD -ErrorAction SilentlyContinue
@@ -794,10 +807,15 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_NETPLAY_START_FRAME -ErrorAction SilentlyContinue
     }
     if (-not $PacketBridge) {
+        if ($PacketBridgeAllowPreGame) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME = "1"
+        }
         if ($PacketBridgeForceNetReady) {
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY = "1"
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME = "$PacketBridgeForceNetReadyStartFrame"
             if ($PacketBridgeForceNetReadyEndFrame -gt 0) { $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_END_FRAME = "$PacketBridgeForceNetReadyEndFrame" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_END_FRAME -ErrorAction SilentlyContinue }
+            if ($PacketBridgeForceNetReadyState10) { $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10 = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10 -ErrorAction SilentlyContinue }
+            if ($PacketBridgeForceNetReadyState10ClientOnly) { $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10_CLIENT_ONLY -ErrorAction SilentlyContinue }
         }
         if ($PacketBridgeForceLoadGameSM) {
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM = "1"
@@ -818,6 +836,16 @@ function Start-MelonLANProcess {
             if ($PacketBridgeForceLoadGameSMPulseAction) {
                 $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_PULSE_ACTION = "1"
             }
+        }
+        if ($PacketBridgeForceTransferResult) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT = "1"
+            if ($PacketBridgeForceTransferClientOnly) { $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_CLIENT_ONLY -ErrorAction SilentlyContinue }
+            if ($PacketBridgeForceTransferStartFrame -gt 0) {
+                $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_START_FRAME = "$PacketBridgeForceTransferStartFrame"
+            } elseif ($DropMPAfterFrame -gt 0) {
+                $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_START_FRAME = "$DropMPAfterFrame"
+            }
+            $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT_VALUE = "$PacketBridgeForceTransferResultValue"
         }
         if ($PacketBridgeTrace) {
             $env:MELONDS_NSML_PACKET_BRIDGE_TRACE = "1"
@@ -1129,28 +1157,29 @@ function Test-ConnectionDialogScreenshot {
     }
 }
 
-if (-not $SkipDisconnectScreenshotCheck) {
-    foreach ($screenDir in @($hostScreens, $clientScreens)) {
-        $screens = Get-ChildItem $screenDir -Filter "inst0_frame*.png" -ErrorAction SilentlyContinue
-        foreach ($screen in $screens) {
-            if ($screen.Name -notmatch "frame(\d+)\.png") {
-                continue
-            }
+foreach ($screenDir in @($hostScreens, $clientScreens)) {
+    $screens = Get-ChildItem $screenDir -Filter "inst0_frame*.png" -ErrorAction SilentlyContinue
+    foreach ($screen in $screens) {
+        if ($screen.Name -notmatch "frame(\d+)\.png") {
+            continue
+        }
 
-            $frame = [int]$matches[1]
-            if ($frame -lt 3000) {
-                continue
-            }
+        $frame = [int]$matches[1]
+        if ($frame -lt 3000) {
+            continue
+        }
 
+        if (-not $SkipDisconnectScreenshotCheck) {
             if (Test-DisconnectLikeScreenshot -Path $screen.FullName) {
                 throw "disconnect-like screenshot detected at frame=${frame}: $($screen.FullName)"
-            }
-            if (Test-BlankLikeScreenshot -Path $screen.FullName) {
-                throw "blank-like screenshot detected at frame=${frame}: $($screen.FullName)"
             }
             if (Test-ConnectionDialogScreenshot -Path $screen.FullName) {
                 throw "connection-dialog screenshot detected at frame=${frame}: $($screen.FullName)"
             }
+        }
+
+        if (-not $SkipBlankScreenshotCheck -and (Test-BlankLikeScreenshot -Path $screen.FullName)) {
+            throw "blank-like screenshot detected at frame=${frame}: $($screen.FullName)"
         }
     }
 }

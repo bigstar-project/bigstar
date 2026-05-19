@@ -526,7 +526,13 @@ static bool HandleNSMLTransferPacketBypass(ARM* cpu, u32 instrAddr)
         enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT") ? 1 : 0;
     if (!enabled || !cpu || cpu->Num != 0 || instrAddr != 0x0200F98C)
         return false;
-    if (!NSMLPacketBridgeEnabled() || !IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
+    if (NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_CLIENT_ONLY"))
+    {
+        const char* role = getenv("MELONDS_NSML_ROLE");
+        if (!role || strcmp(role, "client") != 0)
+            return false;
+    }
+    if (!IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
         return false;
 
     static u32 startFrame = 0xFFFFFFFF;

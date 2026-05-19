@@ -464,6 +464,8 @@ struct State
     bool PacketBridgeForceNetReady = false;
     melonDS::u32 PacketBridgeForceNetReadyStartFrame = 0;
     melonDS::u32 PacketBridgeForceNetReadyEndFrame = 0;
+    bool PacketBridgeForceNetReadyState10 = false;
+    bool PacketBridgeForceNetReadyState10ClientOnly = false;
     bool PacketBridgeForceLoadGameSM = false;
     melonDS::u32 PacketBridgeForceLoadGameSMStartFrame = 0;
     melonDS::u32 PacketBridgeForceLoadGameSMStep = 3;
@@ -1275,6 +1277,11 @@ void ForceNSMLPacketBridgeNetReadyIfNeeded(int instanceID, melonDS::u32 frame, m
     nds->ARM9Write32(kGameLocalPlayerIDAddr, (G.NetRole == Role::Client) ? 1 : 0);
     nds->ARM9Write32(kGameVsModeAddr, 0x00000001);
     nds->ARM9Write32(0x02087E0C, 0x00000001);
+    if (G.PacketBridgeForceNetReadyState10
+        && (!G.PacketBridgeForceNetReadyState10ClientOnly || G.NetRole == Role::Client))
+    {
+        nds->ARM9Write32(0x02087E10, 0x00000001);
+    }
     nds->ARM9Write32(0x02087E90, 0x023DF000);
     nds->ARM9Write32(0x02087ED8, 0x02087FA8);
     nds->ARM9Write32(0x02087EDC, 0x02087FA8);
@@ -1360,6 +1367,7 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
 
     if (G.PacketBridgeForceLoadGameSMRunUpdate
         && (!G.PacketBridgeForceLoadGameSMRunUpdateClientOnly || G.NetRole == Role::Client)
+        && nds->ARM9Read32(vsConnectBase + 0x144) < 7
         && !(G.ForceCourseSelectFactory && frame == G.ForceCourseSelectFactoryFrame))
     {
         const melonDS::u32 oldPC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
@@ -4065,6 +4073,10 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME", 0)));
     G.PacketBridgeForceNetReadyEndFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_END_FRAME", 0)));
+    G.PacketBridgeForceNetReadyState10 =
+        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10");
+    G.PacketBridgeForceNetReadyState10ClientOnly =
+        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10_CLIENT_ONLY");
     G.PacketBridgeForceLoadGameSM = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM");
     G.PacketBridgeForceLoadGameSMStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_START_FRAME", 0)));
