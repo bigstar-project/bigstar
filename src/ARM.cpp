@@ -225,6 +225,29 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
             startFrame = 0;
         triggerConfigured = true;
     }
+    static bool combinedStartLoadConfigured = false;
+    static u32 combinedStartLoadFrame = 0;
+    if (!combinedStartLoadConfigured)
+    {
+        if (const char* value = getenv("MELONDS_NSML_SAFE_START_LOAD_CALL_FRAME"))
+            combinedStartLoadFrame = static_cast<u32>(strtoul(value, nullptr, 0));
+        else
+            combinedStartLoadFrame = 0;
+        combinedStartLoadConfigured = true;
+    }
+
+    const bool combinedCourseSelectThenStartLoad =
+        courseSelectFactory && NSMLEnvFlag("MELONDS_NSML_SAFE_START_LOAD_CALL");
+    const bool effectiveStartLoad =
+        (!loadLevel && !courseSelectFactory && !courseSelect && !updateLoadGame)
+        || (combinedCourseSelectThenStartLoad && cpu->NDS.NumFrames >= combinedStartLoadFrame);
+    const bool effectiveCourseSelectFactory =
+        courseSelectFactory && !effectiveStartLoad;
+    const bool effectiveCourseSelect =
+        courseSelect && !effectiveStartLoad && !effectiveCourseSelectFactory;
+    const bool effectiveLoadLevel = loadLevel;
+    const bool effectiveUpdateLoadGame = updateLoadGame;
+
     if (cpu->NDS.NumFrames < startFrame)
         return false;
     if (triggerPC != 0 && instrAddr != triggerPC)
@@ -234,18 +257,24 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     if (!loadLevel && !IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
         return false;
 
-    static std::map<NDS*, bool> applied;
+    static std::map<NDS*, u32> appliedMask;
     static std::map<NDS*, u32> appliedFrame;
-    if (updateLoadGame)
+    const u32 modeMask =
+        effectiveLoadLevel ? 0x01 :
+        effectiveCourseSelectFactory ? 0x02 :
+        effectiveCourseSelect ? 0x04 :
+        effectiveUpdateLoadGame ? 0x08 :
+        0x10;
+    if (effectiveUpdateLoadGame)
     {
         if (appliedFrame[&cpu->NDS] == cpu->NDS.NumFrames)
             return false;
     }
-    else if (applied[&cpu->NDS])
+    else if ((appliedMask[&cpu->NDS] & modeMask) != 0)
         return false;
 
     const u32 vsConnectBase = NSMLFindObjectBaseByID(cpu->NDS, 0x0006);
-    if (vsConnectBase == 0 && !loadLevel)
+    if (vsConnectBase == 0 && !effectiveLoadLevel)
         return false;
 
     constexpr u32 trampolineAddr = 0x023C0000;
@@ -269,7 +298,7 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     code.push_back(0xE92D5FFFu); // push {r0-r12, lr}
     code.push_back(0xE10F5000u); // mrs r5, cpsr
     code.push_back(0xE92D0020u); // push {r5}
-    if (loadLevel)
+    if (effectiveLoadLevel)
     {
         code.push_back(0xE24DD034u); // sub sp, sp, #0x34
         NSMLEmitMovImm(code, 0, 0x0F); // scene
@@ -292,12 +321,12 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         NSMLEmitBLViaIP(code, loadLevelAddr);
         code.push_back(0xE28DD034u); // add sp, sp, #0x34
     }
-    else if (courseSelect)
+    else if (effectiveCourseSelect)
     {
         NSMLEmitMovImm(code, 0, vsConnectBase);
         NSMLEmitBLViaIP(code, createCourseSelectAddr);
     }
-    else if (courseSelectFactory)
+    else if (effectiveCourseSelectFactory)
     {
         NSMLEmitMovImm(code, 0, 0x05);
         NSMLEmitMovImm(code, 1, 0x01);
@@ -305,7 +334,7 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         NSMLEmitMovImm(code, 3, 0x04);
         NSMLEmitBLViaIP(code, courseSelectFactoryAddr);
     }
-    else if (updateLoadGame)
+    else if (effectiveUpdateLoadGame)
     {
         NSMLEmitMovImm(code, 0, vsConnectBase);
         NSMLEmitMovImm(code, 1, updateLoadGameSMAddr);
@@ -315,7 +344,10 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     }
     else
     {
-        NSMLEmitMovImm(code, 0, vsConnectBase);
+        NSMLEmitMovImm(code, 0, vsConnectBase + 0x218);
+        NSMLEmitMovImm(code, 1, startLoadLevelAddr);
+        NSMLEmitMovImm(code, 2, 0);
+        NSMLEmitMovImm(code, 3, 0x02156488);
         NSMLEmitBLViaIP(code, startLoadLevelAddr);
     }
     code.push_back(0xE8BD0020u); // pop {r5}
@@ -329,12 +361,12 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     for (size_t i = 0; i < code.size(); i++)
         cpu->NDS.ARM9Write32(trampolineAddr + static_cast<u32>(i * sizeof(u32)), code[i]);
 
-    if (updateLoadGame)
+    if (effectiveUpdateLoadGame)
         appliedFrame[&cpu->NDS] = cpu->NDS.NumFrames;
     else
-        applied[&cpu->NDS] = true;
+        appliedMask[&cpu->NDS] |= modeMask;
     printf("NSMB SafeCall: %s frame=%u pc=%08X return=%08X vsConnect=%08X player=%u\n",
-        loadLevel ? "loadLevel" : courseSelectFactory ? "courseSelectFactory" : courseSelect ? "createCourseSelect" : updateLoadGame ? "updateLoadGameSM" : "startLoadLevel",
+        effectiveLoadLevel ? "loadLevel" : effectiveCourseSelectFactory ? "courseSelectFactory" : effectiveCourseSelect ? "createCourseSelect" : effectiveUpdateLoadGame ? "updateLoadGameSM" : "startLoadLevel",
         cpu->NDS.NumFrames,
         instrAddr,
         returnPC,

@@ -4,35 +4,34 @@
 
 New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦モード `Mario vs Luigi` を、最終的に WAN 越しの `1 melonDS instance * 2PC` で遊べる形にする。
 
-現在の主方針は、DS LocalMP全体をWANへ伸ばすことではなく、NSMBのMvLが使う入力中心packetと接続state-machineを解析し、LocalMPの代わりにWAN adapterで必要packetを渡す方向。
+現在の本筋は、DS LocalMP 全体を WAN に流すのではなく、NSMB の MvL が使う入力中心 packet と接続 state-machine を解析し、LocalMP の代わりに WAN adapter から必要な packet/state を渡す方式。
 
 ## 採用しない方針
 
-- `2 instances * 2PC` の決定論同期: 重く、LocalMP間でもactor/objectのズレが残る。
-- savestate同期: 表示や座標だけ合わせても通信状態とactor生成状態が一致しない。
-- DropMP / 試合途中WAN切替: 切替瞬間の停止でhost/client状態が壊れやすい。
-- `MPInterface_LAN` の単純WAN化: LANなら成功するが、WAN相当の遅延で接続/承認段階が崩れる。
-- UI操作なしの単純 `loadLevel` / `StartLoadLevel` 呼び出し: `stageGroup=9` までは作れるが、player actor/star actorが生成されず黒画面扱いになる。
+- `2 instances * 2PC` を最終形にする方針: LocalMP 間の actor/object 差分が残り、重く、検証速度も悪い。
+- savestate 同期を最終形にする方針: 表示や座標を合わせても通信状態と actor lifecycle が一致しない。
+- DropMP / 試合途中 WAN 切替: 切替時の停止で host/client state が壊れやすい。
+- `MPInterface_LAN` を単純に WAN 化する方針: LAN なら動くが、WAN 相当の遅延で接続承認段階が崩れる。
+- UI 操作なしの単純 `loadLevel` / `StartLoadLevel` 呼び出し: `stageGroup=9` までは作れるが、player actor / Big Star actor が生成されない。
 
 ## 現在の到達点
 
-- 通常LAN経路は `stageGroup=9`, `vsMode=1`, player actors, Big Star actor まで到達できる。
-- NSMB Centralの記述どおり、gameplay中のMvL packetは入力中心に見える。通常LAN captureでは `byte0-1=tick`, `byte2-3=keys`, `byte4=action`, `byte5=0`, `byte6-7=0xFFFF` が安定している。
-- packet captureをreplay CSVへ変換する `scripts/convert-nsmb-packet-capture-to-replay.ps1` を追加した。
-- 通常LAN上でのreplay検証では、full packet replayは接続状態を壊すが、`keys` のみのreplayは4200フレーム通過した。つまり、入力置換は有効だが、tick/action/周辺byteを丸ごと上書きするのは危険。
-- NoLanMP + packet bridge from start は、host/client双方でpacket送受信できるが、自然には接続完了へ進まない。
-- `ForceNetReady` により `vsMode=1`, player ID, `netState14=1`, `netState1C=6`, `netState20=2` までは作れる。
-- `PacketBridgeForceTick` により、client側のpacket tick停止は解消できた。
-- `ForceLoadGameSM` のstep 3初期値を通常LAN寄りに修正した。flags/timer/actionの不自然な値は減ったが、まだ自然なstage loadには進まない。
-- safe `StartLoadLevel` 呼び出しでhost/clientとも `stageGroup=9` までは到達できる。ただし player actors と Big Star actor は生成されないため、成功扱いにしない。
+- 通常 LocalMP LAN ルートは、`stageGroup=9`, `vsMode=1`, player actors, Big Star actor まで到達できる。
+- 通常 LAN capture では MvL gameplay packet は `tick`, `keys`, `action` を中心に構成される。keys-only replay は 4200 frame 通過済みで、入力置換自体は有効。
+- NoLanMP + PacketBridge from start では、host/client 双方で packet 送受信はできる。
+- `PacketBridgeForceTick` により、client 側 packet tick の停止は回避できる。
+- pregame の `localPlayerID` を早く client=1 にすると通常 LAN とズレるため、`stageGroup=9` 前は host/client とも `localPlayerID=0` に寄せた。
+- `ForceLoadGameSM step 3` から自然 update を回すと `VSConnect::updateLoadGameSM` は呼ばれるが、bridge では `vs_flags` が通常 LAN と同じタイミングで立たず、`CourseSelectFactory` / `StartLoadLevel` に自然到達しない。
+- `SafeCourseSelectFactoryCall` は host 側では CourseSelect object を作れるが、client 側では同じ引数でも CourseSelect object が作られない。
+- `SafeStartLoadCall` は `stageGroup=9` まで進められるが、player actors / Big Star actor は生成されないため成功扱いにしない。
 
-## 現在の主要ブロッカー
+## 現在のブロッカー
 
-NoLanMP + WAN packet bridge from start では、NSMBの接続完了後に必要な「gameplay開始前の内部状態」がまだ不足している。
+通常 LAN では `VSConnect::updateLoadGameSM` が `step 3 -> 5 -> 6 -> CourseSelectFactory -> StartLoadLevel -> Game::loadLevel` と進むが、NoLanMP + WAN adapter では `step 5` の timer だけが増え、`vs_flags` が `0x00010000` / `0x00030000` に進まない。
 
-具体的には、通常LANでは `VSConnect::updateLoadGameSM` が `step 3 -> 5 -> 7` へ進み、その後 `StartLoadLevel(0x0214E0C0)` と `Game::loadLevel(0x020068A8)` に到達する。bridge強制ルートでは、この遷移を手で作っても `stageGroup=9` だけが立ち、actor生成まで進まない。
+通常 LAN の call trace では、flags が立つ瞬間に net sequence 状態も `net_seq_ids=1`, `net_seq_cursors=2`, `net_seq_lengths=2` へ進んでいる。bridge 側は packet/action を合わせても flags が立たないため、次はこの sequence/state 条件を追う。
 
-## 実装済みフック
+## 実装済みの主なフック
 
 - 入力スクリプト再生
 - screenshot / framebuffer dump
@@ -40,11 +39,11 @@ NoLanMP + WAN packet bridge from start では、NSMBの接続完了後に必要�
 - call trace / write trace
 - MainRAM dump
 - packet capture / packet replay / packet bridge trace
-- Big Star actor ID `0x00D2` 周辺probe
-- `ForceNetReady`, `ForceLoadGameSM`, `ForceTransferResult`
+- Big Star actor ID `0x00D2` 周辺 probe
 - `PacketBridgeForceTick`
-- `SafeStartLoadCall`, `SafeCourseSelectFactoryCall`
-- 黒画面検出と通信切断風画面検出の分離
+- `ForceNetReady`, `ForceLoadGameSM`, `ForceTransferResult`
+- `SafeStartLoadCall`, `SafeCourseSelectCall`, `SafeCourseSelectFactoryCall`
+- 黒画面検出、通信切断画面検出、gameplay actor 検出
 
 ## 重要アドレス
 
@@ -67,23 +66,24 @@ NoLanMP + WAN packet bridge from start では、NSMBの接続完了後に必要�
 
 ## 直近の検証ログ
 
-- 通常LAN packet capture: `logs/nsmvl-baseline-packetcapture-gameplay-inputs-20260519-215929-attempt1`
-- keys-only replay成功: `logs/nsmvl-replay-keys-only-baseline-20260519-continue2`
-- bridge from start + ForceNetReady: `logs/nsmvl-bridge-from-start-force-netready-20260519-continue`
-- bridge from start + ForceTick + ForceLoadGameSM: `logs/nsmvl-bridge-start-forcetick-loadgamesm-patched-20260519-continue`
-- bridge from start + safe StartLoadLevel: `logs/nsmvl-bridge-start-step7-safe-startload-20260519-continue`
+- 通常 LAN packet capture: `logs/nsmvl-baseline-packetcapture-gameplay-inputs-20260519-215929-attempt1`
+- keys-only replay 成功: `logs/nsmvl-replay-keys-only-baseline-20260519-continue2`
+- 通常 LAN level-load call trace: `logs/nsmvl-baseline-calltrace-level-load-20260519-220149-attempt1`
+- pregame localPlayerID/action 補正後の step3 trace: `logs/nsmvl-bridge-step3-action3-pregame-idfix-20260520-continue`
+- 通常 LAN flags 参考 trace: `logs/nsmvl-baseline-writetrace-vsflags-20260520-continue-attempt2`
 
 ## 次にやること
 
-1. 通常LANの `VSConnect::updateLoadGameSM` 周辺で、actor生成に必要な追加状態を書き出す。
-2. `stageGroup=9` 直後に不足しているglobal/scene/player生成条件を、通常LANとbridge強制ルートで比較する。
-3. `SafeStartLoadCall` でstageGroupだけ立つ原因を特定し、player actor/star actor生成に必要な状態を最小限で補う。
-4. actor生成まで到達したら、keys-only WAN packet bridgeと結合して、入力が双方で反映されるか確認する。
+1. `VSConnect::updateLoadGameSM` の flags 更新条件を、通常 LAN と bridge の call trace / net sequence 状態差分から特定する。
+2. bridge 側で不足している net sequence / receive 状態を、LocalMP ではなく packet adapter 側で補えるか試す。
+3. 自然に `CourseSelectFactory` へ進むかを確認する。直接 `SafeCourseSelectFactoryCall` に頼る場合も、client 側で object が作られない原因を先に潰す。
+4. `StartLoadLevel` / `Game::loadLevel` へ自然到達したら、player actors と Big Star actor の生成確認を必須条件に戻す。
+5. actor 生成後に keys-only WAN packet bridge と結合し、入力が双方で反映されるか確認する。
 
 ## 必要なもの
 
 - 検証にはユーザー提供の `roms/nsmb.nds` を使う。
-- ROMパッチ生成へ進む場合は、日本版 `A2DJ` 専用の差分パッチとして、元ROMを含めない形で管理する。
+- ROM パッチ生成へ進む場合も、差分パッチとして管理し、元 ROM は含めない。
 
 ## 参考
 

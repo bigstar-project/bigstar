@@ -1274,7 +1274,9 @@ void ForceNSMLPacketBridgeNetReadyIfNeeded(int instanceID, melonDS::u32 frame, m
     nds->ARM9Write32(kNetState20Addr, 0x00000002);
     nds->ARM9Write32(kNetState24Addr, 0x00000002);
     nds->ARM9Write32(kNetState5CAddr, 0x00000000);
-    nds->ARM9Write32(kGameLocalPlayerIDAddr, (G.NetRole == Role::Client) ? 1 : 0);
+    const bool inMvlGameplay = nds->ARM9Read32(kGameStageGroupAddr) == 9
+        && nds->ARM9Read32(kGameVsModeAddr) == 1;
+    nds->ARM9Write32(kGameLocalPlayerIDAddr, (inMvlGameplay && G.NetRole == Role::Client) ? 1 : 0);
     nds->ARM9Write32(kGameVsModeAddr, 0x00000001);
     nds->ARM9Write32(0x02087E0C, 0x00000001);
     if (G.PacketBridgeForceNetReadyState10
@@ -1350,9 +1352,9 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
             WriteARM9U32(nds, vsConnectBase + 0x158, 0x00000001);
         }
     }
-    if (targetStep < 7)
+    if (targetStep < 7 || nds->ARM9Read32(kGameStageGroupAddr) != 9)
     {
-        nds->ARM9Write8(kNetPacketActionAddr, 0x00);
+        nds->ARM9Write8(kNetPacketActionAddr, targetStep >= 3 ? 0x03 : 0x00);
         WriteARM9U32(nds, 0x02088078, 0x00000001);
         WriteARM9U32(nds, 0x0208807C, 0x00000002);
         WriteARM9U32(nds, 0x02088084, 0x00000002);
