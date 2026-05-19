@@ -474,6 +474,7 @@ struct State
     bool PacketBridgeForceLoadGameSMRunUpdate = false;
     bool PacketBridgeForceLoadGameSMRunUpdateClientOnly = true;
     bool PacketBridgeForceLoadGameSMPulseAction = false;
+    bool PacketBridgeForceLoadGameSMBaselineFlags = false;
     int PacketBridgeMaxPumpEvents = kMaxPumpEvents;
     int PacketBridgeMaxTickLead = -1;
     int PacketBridgeMaxFrameLead = -1;
@@ -1287,7 +1288,9 @@ void ForceNSMLPacketBridgeNetReadyIfNeeded(int instanceID, melonDS::u32 frame, m
     nds->ARM9Write32(0x02087E90, 0x023DF000);
     nds->ARM9Write32(0x02087ED8, 0x02087FA8);
     nds->ARM9Write32(0x02087EDC, 0x02087FA8);
+    nds->ARM9Write32(0x02087F30, 0x00000100);
     nds->ARM9Write32(0x02088020, 0x02087ED8);
+    nds->ARM9Write32(0x0208806C, 0x00000001);
     nds->ARM9Write32(0x02088078, 0x00000101);
     nds->ARM9Write32(0x0208807C, 0x00000202);
     nds->ARM9Write32(0x02088084, 0x00000202);
@@ -1364,6 +1367,48 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
         const melonDS::u32 rel = frame - G.PacketBridgeForceLoadGameSMStartFrame;
         if ((rel % 25u) < 5u)
             nds->ARM9Write8(kNetPacketActionAddr, 0x03);
+    }
+    if (G.PacketBridgeForceLoadGameSMBaselineFlags && targetStep == 3)
+    {
+        const melonDS::u32 rel = frame - G.PacketBridgeForceLoadGameSMStartFrame;
+        const melonDS::u32 roleBit = (G.NetRole == Role::Client) ? 1u : 0u;
+        const melonDS::u32 currentTimer = nds->ARM9Read32(vsConnectBase + 0x148);
+        if (G.NetRole == Role::Client)
+        {
+            if (rel >= 30 && nds->ARM9Read32(vsConnectBase + 0x144) < 5)
+            {
+                WriteARM9U32(nds, vsConnectBase + 0x144, 5);
+                WriteARM9U32(nds, vsConnectBase + 0x148, std::max<melonDS::u32>(currentTimer, 0x19));
+                WriteARM9U32(nds, vsConnectBase + 0x154, 0x00010000 | roleBit);
+            }
+            if (rel >= 48)
+            {
+                const melonDS::u32 beforeStep = nds->ARM9Read32(vsConnectBase + 0x144);
+                WriteARM9U32(nds, vsConnectBase + 0x144, 6);
+                if (beforeStep < 6)
+                    WriteARM9U32(nds, vsConnectBase + 0x148, 0x24);
+                WriteARM9U32(nds, vsConnectBase + 0x154, 0x00030000 | roleBit);
+                WriteARM9U32(nds, 0x02088078, 0x00000101);
+                WriteARM9U32(nds, 0x0208807C, 0x00000202);
+                WriteARM9U32(nds, 0x02088084, 0x00000202);
+            }
+        }
+        else
+        {
+            if (rel >= 51)
+                WriteARM9U32(nds, vsConnectBase + 0x154, 0x00010000 | roleBit);
+            if (rel >= 66)
+            {
+                const melonDS::u32 beforeStep = nds->ARM9Read32(vsConnectBase + 0x144);
+                WriteARM9U32(nds, vsConnectBase + 0x144, std::max<melonDS::u32>(beforeStep, 6));
+                if (beforeStep < 6)
+                    WriteARM9U32(nds, vsConnectBase + 0x148, 0x2D);
+                WriteARM9U32(nds, vsConnectBase + 0x154, 0x00030000 | roleBit);
+                WriteARM9U32(nds, 0x02088078, 0x00000101);
+                WriteARM9U32(nds, 0x0208807C, 0x00000202);
+                WriteARM9U32(nds, 0x02088084, 0x00000202);
+            }
+        }
     }
 
     if (G.PacketBridgeForceLoadGameSMRunUpdate
@@ -4092,6 +4137,8 @@ void InitFromEnvironment()
         !EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_RUN_UPDATE_ALL");
     G.PacketBridgeForceLoadGameSMPulseAction =
         EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_PULSE_ACTION");
+    G.PacketBridgeForceLoadGameSMBaselineFlags =
+        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_BASELINE_FLAGS");
     G.PacketBridgeMaxPumpEvents = std::clamp(
         EnvInt("MELONDS_NSML_PACKET_BRIDGE_MAX_PUMP_EVENTS", kMaxPumpEvents), 1, kMaxPumpEvents);
     G.PacketBridgeMaxTickLead = EnvInt("MELONDS_NSML_PACKET_BRIDGE_MAX_TICK_LEAD", -1);

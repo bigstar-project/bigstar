@@ -391,6 +391,27 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
         return;
     if (cpu->NDS.NumFrames < startFrame)
         return;
+    if (instrAddr == 0x021514E4 && IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
+    {
+        const u32 vsConnectBase = NSMLFindObjectBaseByID(cpu->NDS, 0x0006);
+        if (vsConnectBase != 0
+            && cpu->NDS.ARM9Read32(vsConnectBase + 0x120) == 0x021512B8
+            && cpu->NDS.ARM9Read32(vsConnectBase + 0x144) == 6
+            && (cpu->NDS.ARM9Read32(vsConnectBase + 0x154) & 0x00030000) == 0x00030000)
+        {
+            cpu->R[0] = 1;
+            static int logCount = 0;
+            if (logCount < 8)
+            {
+                printf("NSMB PacketBridge: force load-game net-ready result frame=%u vsConnect=%08X\n",
+                    cpu->NDS.NumFrames,
+                    vsConnectBase);
+                fflush(stdout);
+                logCount++;
+            }
+        }
+        return;
+    }
     if (instrAddr != 0x021512B8) // VSConnect::updateLoadGameSM()
         return;
     if (!IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
