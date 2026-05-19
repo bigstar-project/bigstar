@@ -468,6 +468,7 @@ struct State
     melonDS::u32 PacketBridgeForceLoadGameSMStartFrame = 0;
     melonDS::u32 PacketBridgeForceLoadGameSMStep = 3;
     int PacketBridgeForceLoadGameSMTimer = -1;
+    int PacketBridgeForceLoadGameSMFlags = -1;
     bool PacketBridgeForceLoadGameSMRunUpdate = false;
     bool PacketBridgeForceLoadGameSMRunUpdateClientOnly = true;
     bool PacketBridgeForceLoadGameSMPulseAction = false;
@@ -1330,7 +1331,10 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
                 : ((G.NetRole == Role::Client) ? 0x00000027u : 0x00000030u));
         WriteARM9U32(nds, vsConnectBase + 0x144, targetStep);
         WriteARM9U32(nds, vsConnectBase + 0x148, loadGameTimer);
-        const melonDS::u32 loadGameFlags = ((targetStep < 7) ? 0x00010000 : 0x00030000)
+        const melonDS::u32 loadGameFlagsBase = (G.PacketBridgeForceLoadGameSMFlags >= 0)
+            ? static_cast<melonDS::u32>(G.PacketBridgeForceLoadGameSMFlags)
+            : ((targetStep < 7) ? 0x00010000 : 0x00030000);
+        const melonDS::u32 loadGameFlags = loadGameFlagsBase
             | ((G.NetRole == Role::Client) ? 1u : 0u);
         WriteARM9U32(nds, vsConnectBase + 0x154, loadGameFlags);
         if (G.NetRole == Role::Client)
@@ -4068,6 +4072,8 @@ void InitFromEnvironment()
         std::clamp(EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_STEP", 3), 0, 7));
     G.PacketBridgeForceLoadGameSMTimer =
         EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_TIMER", -1);
+    G.PacketBridgeForceLoadGameSMFlags =
+        EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_FLAGS", -1);
     G.PacketBridgeForceLoadGameSMRunUpdate = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_RUN_UPDATE");
     G.PacketBridgeForceLoadGameSMRunUpdateClientOnly =
         !EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_RUN_UPDATE_ALL");

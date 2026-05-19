@@ -118,6 +118,9 @@ NoLanMP + PacketBridge / ForceLoadGameSM / SafeCall 系は、接続途中から�
 - NoLanMP上でLoadGameSMへ直行すると、role別補正後もCourseSelectは生成されない。step7へ直行するだけでは足りず、step3/5/6の途中副作用が必要。
 - ForceLoadGameSMをstep3から走らせる実験では、timerが増え続けてstep5付近で止まる。`ForceNetReady`の常時上書きは状態遷移を潰すため、開始/終了フレーム指定を追加した。
 - `RunUpdateAll`でhost/client両方からLoadGameSM updateを強制呼び出しするとARM9 data abortが出るため、現在のtrampoline呼び出し方式はhost側では不安定。
+- `VSConnectUpdateLoadGameSM` の逆アセンブルで、step5は `VSConnect +0x156` のbit0/bit1、つまり `+0x154` の `0x30000` 相当が揃うまで進まないことを確認した。
+- ForceLoadGameSMにflags指定を追加し、`step=5`, `timer=35`, `flags=0x30000` で開始すると、hostはNoLanMPでも `CourseSelectFound=1` を経て `stageGroup=9` へ到達する。
+- clientはrole環境変数を維持する修正により `localPlayerID=1`, `+0x154=0x30001`, step7 までは進む。ただしCourseSelectが生成されず、`stageGroup=9` へ未到達。client側には `CourseSelectFactory` 前後の追加グローバル条件が残っている。
 
 
 ## 現在のブロッカー
@@ -129,8 +132,8 @@ NoLanMP + PacketBridge / ForceLoadGameSM / SafeCall 系は、接続途中から�
 
 ## 次にやること
 
-1. 正常LANの `action 0x03` 直前/直後で、VSConnectの状態、load-game遷移、CourseSelect生成に必要な最小状態をさらに特定する。
-2. UI操作を経ずに MvL gameplay へ入る ROM/メモリ側パッチ候補を作る。次は「関数を外から呼ぶ」より、正常LANで実行される分岐条件・状態変数を追い、LoadGameSM自身がCourseSelect生成へ進む条件を特定する。
+1. client側で `CourseSelectFactory(0x020130A8)` が呼ばれない/生成されない条件を追う。正常LANのclientとNoLanMP強制clientで、`0200E658`, `0200E664`, `0200E5F4`, `0200EAD8`, `0201DAF4` 周辺の戻り値・グローバル差分を見る。
+2. UI操作を経ずに host/client 両方で `CourseSelectFound=1`、その後 `stageGroup=9` へ入る ROM/メモリ側パッチ候補を作る。
 3. gameplay到達後、NSMBの入力packetをWAN adapterで交換する。ここではNSMB既存の入力同期処理を使い、LocalMPの探索/承諾UIは通さない。
 4. 乱数固定は `Net::getRandom()` の戻り列を同期する方針を維持する。Big Starだけでなく、8コインアイテムやランダムステージ選択も対象にする。
 5. `MPInterface_LAN` の遅延耐性検証は補助に下げる。reply slackなどの知見は使うが、最終ルートの本筋にはしない。

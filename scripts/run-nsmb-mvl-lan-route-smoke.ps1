@@ -55,6 +55,7 @@ param(
     [int]$PacketBridgeForceLoadGameSMStartFrame = 0,
     [int]$PacketBridgeForceLoadGameSMStep = 3,
     [int]$PacketBridgeForceLoadGameSMTimer = -1,
+    [int]$PacketBridgeForceLoadGameSMFlags = -1,
     [switch]$PacketBridgeForceLoadGameSMRunUpdate,
     [switch]$PacketBridgeForceLoadGameSMRunUpdateAll,
     [switch]$PacketBridgeForceLoadGameSMPulseAction,
@@ -263,6 +264,7 @@ function Start-MelonLANProcess {
     $env:MELONDS_NSML_TEST = "1"
     $env:MELONDS_NSML_TEST_INSTANCES = "1"
     $env:MELONDS_NSML_TEST_FRAMES = "$Frames"
+    $env:MELONDS_NSML_ROLE = $Role
     $env:MELONDS_NSML_INPUT_SCRIPT = $RoleInput
     $env:MELONDS_NSML_HASH_LOG = $HashLog
     $env:MELONDS_NSML_HASH_INTERVAL = "300"
@@ -567,6 +569,11 @@ function Start-MelonLANProcess {
             } else {
                 Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_TIMER -ErrorAction SilentlyContinue
             }
+            if ($PacketBridgeForceLoadGameSMFlags -ge 0) {
+                $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_FLAGS = "$PacketBridgeForceLoadGameSMFlags"
+            } else {
+                Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_FLAGS -ErrorAction SilentlyContinue
+            }
             if ($PacketBridgeForceLoadGameSMRunUpdate) {
                 $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_RUN_UPDATE = "1"
             } else {
@@ -799,6 +806,9 @@ function Start-MelonLANProcess {
             if ($PacketBridgeForceLoadGameSMTimer -ge 0) {
                 $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_TIMER = "$PacketBridgeForceLoadGameSMTimer"
             }
+            if ($PacketBridgeForceLoadGameSMFlags -ge 0) {
+                $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_FLAGS = "$PacketBridgeForceLoadGameSMFlags"
+            }
             if ($PacketBridgeForceLoadGameSMRunUpdate) {
                 $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_RUN_UPDATE = "1"
             }
@@ -828,6 +838,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_STATE_LOAD_DIR -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_STATE_LOAD_FRAME -ErrorAction SilentlyContinue
     }
+    $env:MELONDS_NSML_ROLE = $Role
     $env:MELONDS_NSML_FIXED_RTC = "2020-01-01T00:00:00"
     $env:MELONDS_NSML_DISABLE_JIT = "1"
     if ($DropMPAfterFrame -gt 0) {
