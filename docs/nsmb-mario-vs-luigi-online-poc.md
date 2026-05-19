@@ -22,6 +22,8 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦モード `Mario 
 - `ForceLoadGameSMRunUpdate` を step7 到達後も呼び続けると `ARM9 data abort (023C0008)` を起こすため、step7未満の補助に限定した。
 - `0x02087E10=1` をhost/client両方へ常時書くとhostのCourseSelect生成が壊れる。必要な場合だけ、client限定で試せるフックにした。
 - スクリーンショット判定は、通信切断風画面と黒画面を分けた。`-SkipDisconnectScreenshotCheck` を使っても黒画面は検出する。
+- NSMB Centralの解析情報どおり、MvL gameplay中の通常packetは入力中心に見える。通常LAN packet captureでは `byte0-1=tick`, `byte2-3=keys`, `byte4=action`, `byte5=0`, `byte6-7=0xFFFF` が安定しており、RIGHT/LEFT/B入力は `keys` にそのまま出る。
+- 通常LANのlevel loadは `StartLoadLevel(0x0214E0C0)` -> `Game::loadLevel(0x020068A8)` で、主要引数は `r0=0x0F`, `r1=1`, `r2=9`, `r3=0`。stack引数も既存の直接呼び出しと概ね一致している。黒画面原因はloadLevel引数そのものより、直前のscene/connect状態不足が濃い。
 
 ## 実装済みの検証フック
 
@@ -37,6 +39,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦モード `Mario 
 - `ForceNetReadyState10` と client-only 指定
 - `ForceTransferResult` の client-only 指定
 - 黒画面検出を通信切断検出から分離
+- gameplay入力付きpacket capture用 `tests/nsmb_mario_vs_luigi_gameplay_inputs.inputs`
 
 ## 重要アドレス
 
@@ -54,6 +57,10 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦モード `Mario 
 - `VSConnect::updateLoadGameSM`: `0x021512B8`
 - `CourseSelectFactory`: `0x020130A8`
 - scene request/current object globals: `0x02084FB4`, `0x0203B480`, `0x02088554`, `0x02088558`
+
+## 参考情報
+
+- NSMB Central: https://bookstack.nsmbcentral.net/books/new-super-mario-bros/page/mario-vs-luigi
 
 ## 次にやること
 
