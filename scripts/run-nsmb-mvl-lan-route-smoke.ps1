@@ -91,6 +91,12 @@ param(
     [switch]$DirectMvlBootCallStartLoad,
     [switch]$DirectMvlBootCallCourseSelect,
     [switch]$DirectMvlBootCallObjectCourseSelect,
+    [switch]$SafeStartLoadCall,
+    [int]$SafeStartLoadCallFrame = 1900,
+    [string]$SafeStartLoadCallPC = "0x0200F944",
+    [switch]$SafeLoadLevelCall,
+    [int]$SafeLoadLevelCallFrame = 1600,
+    [string]$SafeLoadLevelCallPC = "0x0200F944",
     [switch]$ForceCourseSelectFactory,
     [switch]$ForceCourseSelectFactoryClientOnly,
     [int]$ForceCourseSelectFactoryFrame = 2300,
@@ -263,6 +269,26 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_START_LOAD -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT -ErrorAction SilentlyContinue
+    }
+    if ($SafeStartLoadCall) {
+        $env:MELONDS_NSML_SAFE_START_LOAD_CALL = "1"
+        $env:MELONDS_NSML_SAFE_START_LOAD_CALL_FRAME = "$SafeStartLoadCallFrame"
+        $env:MELONDS_NSML_SAFE_START_LOAD_CALL_PC = "$SafeStartLoadCallPC"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_SAFE_START_LOAD_CALL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_START_LOAD_CALL_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_START_LOAD_CALL_PC -ErrorAction SilentlyContinue
+    }
+    if ($SafeLoadLevelCall) {
+        $env:MELONDS_NSML_SAFE_LOAD_LEVEL_CALL = "1"
+        $env:MELONDS_NSML_SAFE_LOAD_LEVEL_CALL_FRAME = "$SafeLoadLevelCallFrame"
+        $env:MELONDS_NSML_SAFE_LOAD_LEVEL_CALL_PC = "$SafeLoadLevelCallPC"
+        $env:MELONDS_NSML_SAFE_LOAD_LEVEL_PLAYER_ID = $(if ($Role -eq "client") { "1" } else { "0" })
+    } else {
+        Remove-Item Env:\MELONDS_NSML_SAFE_LOAD_LEVEL_CALL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_LOAD_LEVEL_CALL_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_LOAD_LEVEL_CALL_PC -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_LOAD_LEVEL_PLAYER_ID -ErrorAction SilentlyContinue
     }
     if ($ForceCourseSelectFactory -and (-not $ForceCourseSelectFactoryClientOnly -or $Role -eq "client")) {
         $env:MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY = "1"

@@ -4,99 +4,98 @@
 
 New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `Mario vs Luigi` を、最終的に WAN 越しの `1 melonDS instance * 2PC` で遊べる形にする。
 
-現時点では、`LocalMP 2インスタンス * 2プロセス`、savestate同期、途中DropMP、途中WAN切り替えは本筋から外している。理由は、スター位置やオブジェクト状態の不一致、切断判定、fps低下が重く、最終形に近くないため。
-
-## 現在の方針
-
-優先方針は「MvsLの接続/ロビー段階からWAN adapterを使う」こと。
-
-NSMB側にはローカル通信時の入力/packet同期処理があるため、それをできるだけ使い、melonDS側は LocalMP の代わりに WAN 経由のMP packetを渡す adapter として振る舞う。必要に応じてNSMB側の状態を解析し、最小限のROM/メモリ側補助に寄せる。
+現在の主方針は、melonDS の LocalMP を WAN 越しにそのまま延長するのではなく、NSMB がローカル通信時に扱う MvL packet / 接続 state-machine を解析し、LocalMP の代わりに WAN adapter から同等の packet と最低限の状態遷移を供給すること。
 
 ## 採用しない方針
 
-- savestate方式: 表示座標だけでなく stage/object 全体が一致しない。対戦基盤として弱い。
-- DropMP/途中WAN切り替え: 切替瞬間にNSMB側の接続状態やobject状態が壊れやすい。
-- `2インスタンス * 2PC` の状態同期: 重く、最終形から遠い。検証補助としてのみ使う。
-- 死亡演出やスクリーンショットだけで成功判定すること: host/clientで表示が一致しないケースがあるため、game-state trace / packet trace / RAM dumpを優先する。
+- savestate 同期方式: 表示座標だけでは stage/object/通信状態が一致せず、対戦基盤として弱い。
+- DropMP / 途中WAN切り替え: 切り替え時に NSMB 側の接続状態が壊れやすい。
+- `2インスタンス * 2PC` の状態同期: 重く、最終形から遠い。検証用としてのみ使う。
+- スクリーンショットだけの成功判定: 死亡演出や黒画面を誤判定しやすいため、game-state trace / actor presence / packet trace を優先する。
 
 ## 実装済みの検証基盤
 
-- 自動入力スクリプト再生
+- 入力スクリプト再生
 - screenshot / framebuffer dump
 - MainRAM dump
 - game-state trace
-- call trace
-- packet trace / packet bridge trace
-- `Net::getRandom()` 固定検証
-- Big Star actor ID `0x00D2` 周辺probe
-- `MPInterface_LAN` の WAN 検証オプション
-- LAN MP 受信/送信 delay、stale、reliable、trace
-- Wi-Fi MP channel mismatch をWAN検証用に受け入れる `MELONDS_NSML_WIFI_MP_ACCEPT_ANY_CHANNEL`
-- `run-nsmb-mvl-lan-route-smoke.ps1` のLAN/NoLAN/PacketBridge検証オプション
-- VSConnect load-game state machine 補助フック
-- CourseSelect生成条件を追う実験フック
+- call/write/random trace
+- packet capture / packet bridge trace
+- Big Star actor ID `0x00D2` 周辺 probe
+- smoke test の厳格判定: `playerActor0Found`, `playerActor1Found`, `vsStarActorFound`
+- `run-nsmb-mvl-lan-route-smoke.ps1` の LAN / NoLanMP / PacketBridge 検証オプション
+- WAN packet adapter の下層MPフック実験
 
 ## 重要アドレス
 
-- `VSConnect::createLoadGameSM`: `0x021515B4`
-- `VSConnect::updateLoadGameSM`: `0x021512B8`
-- `VSConnect::renderLoadGameSM`: `0x0215125C`
-- VSConnect完了/開始系: `0x0214E0C0`
-- CourseSelect生成関連: `0x0214F830`
-- scene request: `0x020130A8`
-- scene request apply: `0x02007ACC`
-- scene transition: `0x02011CE8`
-- object manager create: `0x0204BF8C`
 - `Net::getConsoleKeys(u16)`: `0x0200E700`
 - `Net::getPacketByte(u16,u32)`: `0x0200E978`
 - `Net::getPacketTick(u16)`: `0x0200E9BC`
 - `Net::getPacketAction(u16)`: `0x0200E9DC`
-- packet tick/key buffer: `0x02087F00`
+- `Net::Core::transferPacket`: `0x0200F98C`
+- lower MP status probe: `0x0204619C`
+- lower MP hasPacket: `0x0204622C`
+- lower MP getPacket: `0x02046480`
+- packet tick/key/action buffer: `0x02087F00`
 - net state base: `0x02087E00`
 - LocalMP packet slot status: `0x0208AE50`
 - LocalMP packet buffer: `0x0208B040 + player * 0x3E`
+- VSConnect load-game:
+  - create: `0x021515B4`
+  - update: `0x021512B8`
+  - render: `0x0215125C`
+- CourseSelect 関連:
+  - create: `0x0214F830`
+  - factory/request: `0x020130A8`
+  - scene request apply: `0x02007ACC`
+  - scene transition: `0x02011CE8`
 
-## 現在の検証結果
+## 現在の到達点
 
-- 通常LANルートは `4200` フレームまで通る。
-- `LanMPAcceptAnyChannel` だけでは通常LANは壊れない。
-- raw LAN + 人工遅延 `LanMPSendDelayMs=20` では、hostは `vsMode=1` まで進むが、clientの `netPacketTick` が `0xb1` 前後で止まり、CourseSelect生成と `stageGroup=9` に進まない。
-- `LanMPSendDelayMs=5` でも接続段階で崩れる。raw MP frameを単純にWAN遅延させる方向はかなり弱い。
-- host側だけ20ms、client側だけ20ms、両方向20msのいずれでも接続段階で崩れる。片方向だけの返信遅延問題ではなく、DS MP通信のスキャン/返信窓全体が遅延に弱い。
-- `LanMPStaleMs=1000` でも改善しない。単純なstale破棄だけが原因ではない。
-- `-LanWanMode` の単純適用はさらに重く、clientが接続段階で停滞しやすい。
-- LAN MP traceでは、hostはMP frameを送り続け、clientもhost frameを受信している。ただしclientからのMP送信/返信はほぼ出ず、NSMB接続状態は `netState1C=3/4` 付近で止まる。
-- `VSConnect::updateLoadGameSM` をclient側で明示的に回すと `word144=7` までは進むが、clientの `netPacketTick` が止まったままなので CourseSelect / stage 遷移はまだ消費されない。
-- `updateLoadGameSM` の `word144=7` 直書きは誤り。case6内の `0x020130A8 -> 0x02011CE8` を含む処理を通す必要がある。
-- `object manager create` の直接呼び出しはARM9 abortしやすく、安定ルートではない。
-- `scene request apply` / `scene transition` の直接呼び出しは実行できるが、通信tickが止まっている状態ではCourseSelect生成まで到達しない。
-- 通常LANのpre-game packet captureを取れるようにし、成功ルートではhostが action `0x01 -> 0x02 -> 0x03`、clientが action `0x00 -> 0x02 -> 0x03` へ進むことを確認した。
-- PacketBridgeOnlyではhostが action `0x01`、clientが action `0x00` のまま止まり、`netState1C=3/4` から進まない。
-- 成功LANのpacket列をNoLanMP/PacketBridge環境へCSV replayしても、`Net::getPacket*` の戻り値だけではCourseSelectへ進まない。replay時にLocalMP packet slot (`0x0208AE50`, `0x0208B040 + player * 0x3E`) へも書くフックを追加したが、それでも `vsConnectWord078/07C` が通常LANのように `3` へ進まない。
-- `transferPacket` の戻り値は通常LAN成功時も主に `0`。以前の `0x8` 強制は接続完了条件としては不適切。`0` 強制でも改善しない。
-- `ForceNetReady` + `ForceLoadGameSM` は `vsMode=1` / `netState1C=6` までは作れるが、host側でARM9 abortが出やすく、CourseSelect生成までは未到達。
-- ARM9 write traceを追加し、通常LANでは `0x02150DAC/0x02150DB0` が `VSConnect word078/07C` を `3` へ上げ、その後 `word144` が `1 -> 7` へ進むことを確認した。
-- `DirectBoot + startLoadLevel` はhost/clientとも `stageGroup=9` へ到達するが、player actor / star actor が生成されず、clientの `localPlayerID` も期待通りではない。これは「試合開始成功」ではなく、ロード状態へ無理に入れただけ。
-- `DirectBoot + Game::loadLevel` は現行の状態検査を通る場合があるが、ARM9 abortが出てplayer actorが生成されず、スクリーンショットも黒画面に近い。成功判定を `stageGroup/vsMode/localPlayerID` だけに依存してはいけない。
-- smoke testのgame-state成功条件に `playerActor0Found`, `playerActor1Found`, `vsStarActorFound` を追加した。通常LANはこの厳しい判定でも通り、`DirectBoot + Game::loadLevel` の黒画面/未ロード状態は期待通り失敗する。
+通常LANは最新検証でも `3300` frame まで成功し、`stageGroup=9`, `vsMode=1`, player actors, star actor を確認済み。
+
+NoLanMP + PacketBridge では、`Net::getPacket*` だけを返しても接続は進まない。`transferPacket()` が lower MP の packet pointer を通して内部 buffer valid byte を立てる必要があるため、`0204619C`, `0204622C`, `02046480` を hook する下層MP bridgeを追加した。
+
+下層MP bridgeにより、remote packet は NSMB の `transferPacket()` に届くようになった。pregame中に action `0x01` を強制する実験では、host は `netState24=2`, `VSConnect word078/07C=3/3` まで進む。さらに `ForceNetReady` を併用すると、両側を通常LANに近い `vsMode=1`, `netState1C=6`, `netState20=2`, `netState24=2` に揃えられる。
+
+ただし、まだ CourseSelect 生成と `stageGroup=9` への遷移には届いていない。`ForceLoadGameSM` / `ForceCourseSelectFactory` は現状では補助として不十分で、RunUpdateを無理に呼ぶと ARM9 abort を起こす場合がある。
+
+## 新しい重要な知見
+
+通常LANの pre-game packet capture では、接続段階の packet action は以下のように遷移する。
+
+- host: `0x00 -> 0x01 -> 0x02 -> 0x03`
+- client: `0x00 -> 0x01 -> 0x02 -> 0x03`
+
+代表的な遷移:
+
+- host action `0x01`: frame `1303`, tick `0x0001`
+- host action `0x02`: frame `1803`, tick `0x01F0`
+- host action `0x03`: frame `1812`, tick `0x01F5`
+- client action `0x01`: frame `1542`, tick `0x00B3`
+- client action `0x02`: frame `1761`, tick `0x0189`
+- client action `0x03`: frame `1767`, tick `0x01F5`
+
+つまり接続段階では host/client の packet tick は常に同一ではない。action `0x03` 付近で揃う。したがって、接続開始から強制的に共通 tick にする実験は NSMB の handshake 条件を壊す可能性がある。最終的には「接続段階はNSMBの自然なtick/action遷移を尊重し、gameplay開始後に入力同期用のtick管理へ寄せる」設計が必要そう。
 
 ## 現在のブロッカー
 
-WAN adapter開始時に、NSMBのpacket値だけでなく、接続/ロビー state machine が期待しているLocalMP由来の状態遷移も再現する必要がある。現状は packet replay / slot write を入れても `VSConnect` が通常LANと同じ完了状態に進まず、最終的なCourseSelect生成と `stageGroup=9` への遷移が消費されない。
+WAN adapterが packet を渡すだけでは、VSConnect の `word144=7` と CourseSelect 生成に自然到達しない。
 
-次に見るべき本筋は、通常LANで `vsConnectWord078/07C` が `1 -> 3` へ変わる条件を特定し、それをWAN adapter開始時にも自然に満たすこと。無理なstate直書きはabortや不整合を生みやすいので、関数境界と必要な副作用を絞る。
+不足しているものは以下のどちらか、または両方の可能性が高い。
+
+- LocalMP由来の副作用がまだ不足している。
+- pre-game action `0x02/0x03` の生成条件、tickジャンプ、VSConnect内部状態のどれかを再現できていない。
 
 ## 次にやること
 
-1. 通常LANで `VSConnect` が `word078/07C=3` へ進む直前の関数呼び出しとメモリ書き込みをtraceする。
+1. 通常LANで action `0x02/0x03` へ変わる直前の write/call trace を取り、どの関数/状態が `VSConnect word144=7` と CourseSelect 生成を起こしているか特定する。
 2. PacketBridgeOnlyで同じ関数/書き込みが欠けている箇所を比較する。
-3. 欠けている副作用がLocalMP slot由来ならslot emulationを拡張し、NSMB関数由来なら該当関数を安全なタイミングで呼ぶ。
-4. `ForceLoadGameSMRunUpdate` のARM9 abort原因を潰す。直接trampolineを繰り返し呼ぶ方式は不安定なので、必要なら一回だけの関数呼び出し/return先管理に変える。
-5. スクリーンショット側のblackout検出も、`SkipDisconnectScreenshotCheck` に頼りすぎない形へ分離する。
-6. `netState1C=6`, `vsMode=1`, `VSConnect word144=7` の状態からCourseSelect生成、`stageGroup=9`、試合開始へ進むかを再検証する。
-7. 試合開始後にスター/8コインアイテム等のランダム要素一致を確認する。
+3. pre-game中だけ、通常LANの action/tick 遷移を模した synthetic packet mode を試す。
+4. CourseSelect生成後に `stageGroup=9`、player actors、star actor まで行くかを smoke test で確認する。
+5. gameplay到達後、入力同期netplayと乱数固定/検証へ戻る。
 
 ## 必要なもの
 
 - 検証にはユーザー提供の `roms/nsmb.nds` を使う。
-- ROM patch化へ進む場合は、日本版 `A2DJ` 向けのpatch生成/適用手順を別途作る。
+- ROM patch化へ進む場合は、日本版 `A2DJ` 向けの patch 生成/適用手順を別途作る。

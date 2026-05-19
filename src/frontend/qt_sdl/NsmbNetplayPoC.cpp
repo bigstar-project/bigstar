@@ -1217,6 +1217,19 @@ void CaptureAndSendNSMLPacketLocked(melonDS::u32 frame, melonDS::NDS* nds)
     SendNSMLPacketLocked(frame, localPlayer, tick, packet);
 }
 
+melonDS::u32 PacketBridgeCanonicalTick(melonDS::NDS* nds, melonDS::u32 frame)
+{
+    if (G.PacketBridgeForceTickEnabled
+        && frame >= G.PacketBridgeForceTickStartFrame
+        && G.PacketBridgeForceTickBase >= 0)
+    {
+        return (static_cast<melonDS::u32>(G.PacketBridgeForceTickBase)
+            + (frame - G.PacketBridgeForceTickStartFrame)) & 0xFFFF;
+    }
+
+    return nds ? nds->ARM9Read16(0x02087F00) : 0;
+}
+
 void ForceNSMLPacketBridgeTickIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.PacketBridgeForceTickEnabled || !nds || instanceID < 0 || instanceID >= 16)
@@ -1226,13 +1239,7 @@ void ForceNSMLPacketBridgeTickIfNeeded(int instanceID, melonDS::u32 frame, melon
     if (G.LastPacketBridgeForcedTickFrame[instanceID] == frame)
         return;
 
-    melonDS::u8 probePacket[52] {};
-    if (!melonDS::NSML_BuildMarioVsLuigiLocalPacket(nds, probePacket, nullptr, nullptr))
-        return;
-
-    const melonDS::u32 tick = G.PacketBridgeForceTickBase >= 0
-        ? (static_cast<melonDS::u32>(G.PacketBridgeForceTickBase) + (frame - G.PacketBridgeForceTickStartFrame)) & 0xFFFF
-        : (nds->ARM9Read16(0x02087F00) + 1) & 0xFFFF;
+    const melonDS::u32 tick = PacketBridgeCanonicalTick(nds, frame);
     nds->ARM9Write16(0x02087F00, static_cast<melonDS::u16>(tick));
     G.LastPacketBridgeForcedTickFrame[instanceID] = frame;
 
@@ -1291,7 +1298,8 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
 
     const melonDS::u32 currentUpdate = nds->ARM9Read32(vsConnectBase + 0x120);
     const melonDS::u32 currentStep = nds->ARM9Read32(vsConnectBase + 0x144);
-    const bool alreadyLoadGameSM = currentUpdate == kA2DJVSConnectUpdateLoadGameSMAddr && currentStep >= 3;
+    const melonDS::u32 targetStep = std::clamp<melonDS::u32>(G.PacketBridgeForceLoadGameSMStep, 0, 7);
+    const bool alreadyLoadGameSM = currentUpdate == kA2DJVSConnectUpdateLoadGameSMAddr && currentStep >= targetStep;
     if (!alreadyLoadGameSM)
     {
         WriteARM9U32(nds, vsConnectBase + 0x078, 0x00000003);
@@ -1301,9 +1309,10 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
         WriteARM9U32(nds, vsConnectBase + 0x120, kA2DJVSConnectUpdateLoadGameSMAddr);
         WriteARM9U32(nds, vsConnectBase + 0x128, kA2DJVSConnectRenderLoadGameSMAddr);
         WriteARM9U32(nds, vsConnectBase + 0x134, 0x02156678);
-        WriteARM9U32(nds, vsConnectBase + 0x144, std::clamp<melonDS::u32>(G.PacketBridgeForceLoadGameSMStep, 0, 6));
+        WriteARM9U32(nds, vsConnectBase + 0x144, targetStep);
         WriteARM9U32(nds, vsConnectBase + 0x148, 0x00000000);
-        WriteARM9U32(nds, vsConnectBase + 0x154, 0x00030000);
+        const melonDS::u32 loadGameFlags = (G.NetRole == Role::Client) ? 0x00030001 : 0x00030000;
+        WriteARM9U32(nds, vsConnectBase + 0x154, loadGameFlags);
     }
 
     if (G.PacketBridgeForceLoadGameSMRunUpdate
@@ -1364,7 +1373,7 @@ void WaitForNSMLPacketBridgeRemote(melonDS::NDS* nds, melonDS::u32 frame)
         return;
 
     const melonDS::u32 remotePlayer = LocalPlayerID(nds) ^ 1;
-    const melonDS::u32 tick = nds->ARM9Read16(0x02087F00);
+    const melonDS::u32 tick = PacketBridgeCanonicalTick(nds, frame);
     if (melonDS::NSML_HasMarioVsLuigiRemotePacket(nds, remotePlayer, tick))
         return;
 
@@ -1428,7 +1437,7 @@ void ThrottleNSMLPacketBridgeLead(melonDS::NDS* nds, melonDS::u32 frame)
         if (remoteTick == 0xFFFFFFFF)
             return;
 
-        const melonDS::u32 localTick = nds->ARM9Read16(0x02087F00);
+        const melonDS::u32 localTick = PacketBridgeCanonicalTick(nds, frame);
         const int lead = NSMLPacketTickLead(localTick, remoteTick);
         if (lead <= G.PacketBridgeMaxTickLead)
             return;
