@@ -111,6 +111,11 @@ constexpr melonDS::u32 kA2DJApplySceneRequestAddr = 0x02007ACC;
 constexpr melonDS::u32 kA2DJStartSceneTransitionAddr = 0x02011CE8;
 constexpr melonDS::u32 kA2DJCreateObjectAddr = 0x0204BF8C;
 constexpr melonDS::u32 kDirectBootTrampolineAddr = 0x023C0000;
+constexpr melonDS::u32 kSceneIsSceneActiveAddr = 0x0203B478;
+constexpr melonDS::u32 kScenePreviousSceneIDAddr = 0x0203B47C;
+constexpr melonDS::u32 kSceneNextSceneIDAddr = 0x0203B480;
+constexpr melonDS::u32 kSceneCurrentSceneIDAddr = 0x0203B484;
+constexpr melonDS::u32 kSceneNextSceneSettingsAddr = 0x02088578;
 
 enum class Role
 {
@@ -281,6 +286,11 @@ struct GameStateSample
     melonDS::u32 NetRandomValue = 0;
     melonDS::u32 NetRandomCallCount = 0;
     melonDS::u32 NetRandomBranchAddress = 0;
+    melonDS::u32 SceneIsSceneActive = 0;
+    melonDS::u32 ScenePreviousSceneID = 0;
+    melonDS::u32 SceneNextSceneID = 0;
+    melonDS::u32 SceneCurrentSceneID = 0;
+    melonDS::u32 SceneNextSceneSettings = 0;
     melonDS::u32 VsStarFound = 0;
     melonDS::u32 VsStarGUID = 0;
     melonDS::u32 VsStarBase = 0;
@@ -2530,19 +2540,32 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
         }
         else
         {
-            EmitARM(code, 0xE59F000Cu); // ldr r0, [pc, #12]
-            EmitARM(code, 0xE59FC00Cu); // ldr ip, [pc, #12]
-            EmitARM(code, 0xE28FE00Cu); // add lr, pc, #12
-            EmitARM(code, 0xE12FFF1Cu); // bx ip
-            EmitARM(code, 0xE1A00000u); // nop
-            EmitARM(code, vsConnectBase);
-            EmitARM(code, G.DirectMvlBootCallCreateCourseSelect
-                ? kA2DJVSCreateCourseSelectAddr
-                : G.DirectMvlBootCallStartLoadLevel
-                ? kA2DJVSConnectStartLoadLevelAddr
-                : G.DirectMvlBootCallUpdateLoadGameSM
-                ? kA2DJVSConnectUpdateLoadGameSMAddr
-                : kA2DJVSConnectCreateLoadGameSMAddr);
+            if (G.DirectMvlBootCallStartLoadLevel)
+            {
+                EmitMovImm(code, 0, vsConnectBase + 0x218);
+                EmitMovImm(code, 1, kA2DJVSConnectStartLoadLevelAddr);
+                EmitMovImm(code, 2, 0);
+                EmitMovImm(code, 3, 0x02156488);
+                EmitARM(code, 0xE59FC008u); // ldr ip, [pc, #8]
+                EmitARM(code, 0xE28FE008u); // add lr, pc, #8
+                EmitARM(code, 0xE12FFF1Cu); // bx ip
+                EmitARM(code, 0xE1A00000u); // nop
+                EmitARM(code, kA2DJVSConnectStartLoadLevelAddr);
+            }
+            else
+            {
+                EmitARM(code, 0xE59F000Cu); // ldr r0, [pc, #12]
+                EmitARM(code, 0xE59FC00Cu); // ldr ip, [pc, #12]
+                EmitARM(code, 0xE28FE00Cu); // add lr, pc, #12
+                EmitARM(code, 0xE12FFF1Cu); // bx ip
+                EmitARM(code, 0xE1A00000u); // nop
+                EmitARM(code, vsConnectBase);
+                EmitARM(code, G.DirectMvlBootCallCreateCourseSelect
+                    ? kA2DJVSCreateCourseSelectAddr
+                    : G.DirectMvlBootCallUpdateLoadGameSM
+                    ? kA2DJVSConnectUpdateLoadGameSMAddr
+                    : kA2DJVSConnectCreateLoadGameSMAddr);
+            }
         }
     }
     if (!G.DirectMvlBootUseLoadGameSM)
@@ -3323,6 +3346,11 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.NetRandomValue = nds->ARM9Read32(kNetRandomValueAddr);
     sample.NetRandomCallCount = nds->ARM9Read8(kNetRandomCallCountAddr);
     sample.NetRandomBranchAddress = nds->ARM9Read32(kNetRandomBranchAddressAddr);
+    sample.SceneIsSceneActive = nds->ARM9Read32(kSceneIsSceneActiveAddr);
+    sample.ScenePreviousSceneID = nds->ARM9Read16(kScenePreviousSceneIDAddr);
+    sample.SceneNextSceneID = nds->ARM9Read16(kSceneNextSceneIDAddr);
+    sample.SceneCurrentSceneID = nds->ARM9Read16(kSceneCurrentSceneIDAddr);
+    sample.SceneNextSceneSettings = nds->ARM9Read32(kSceneNextSceneSettingsAddr);
 
     const ObjectScanSample star = FindVsBattleStarCandidate(nds);
     sample.VsStarFound = star.Found;
@@ -3806,6 +3834,11 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                      << ",0x" << sample.NetRandomValue
                      << ",0x" << sample.NetRandomCallCount
                      << ",0x" << sample.NetRandomBranchAddress
+                     << ",0x" << sample.SceneIsSceneActive
+                     << ",0x" << sample.ScenePreviousSceneID
+                     << ",0x" << sample.SceneNextSceneID
+                     << ",0x" << sample.SceneCurrentSceneID
+                     << ",0x" << sample.SceneNextSceneSettings
                      << ",0x" << sample.VsStarFound
                      << ",0x" << sample.VsStarGUID
                      << ",0x" << sample.VsStarBase
@@ -4551,7 +4584,7 @@ void InitFromEnvironment()
         }
         else
         {
-            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,ggid,netState14,netState1C,netState20,netState24,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Settings,playerActor0X,playerActor0Y,playerActor0Z,playerActor1Found,playerActor1Guid,playerActor1Settings,playerActor1X,playerActor1Y,playerActor1Z,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord144,vsConnectWord148,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectWord078,courseSelectWord07C,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY";
+            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,ggid,netState14,netState1C,netState20,netState24,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Settings,playerActor0X,playerActor0Y,playerActor0Z,playerActor1Found,playerActor1Guid,playerActor1Settings,playerActor1X,playerActor1Y,playerActor1Z,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord144,vsConnectWord148,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectWord078,courseSelectWord07C,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY";
             if (G.GameStateTraceExtended)
                 G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash";
             G.GameStateTrace << '\n';

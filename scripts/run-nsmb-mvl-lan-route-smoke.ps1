@@ -118,6 +118,8 @@ param(
     [switch]$SafeStartLoadCall,
     [int]$SafeStartLoadCallFrame = 1900,
     [string]$SafeStartLoadCallPC = "0x0200F944",
+    [string]$HostSafeStartLoadCallPC = "",
+    [string]$ClientSafeStartLoadCallPC = "",
     [switch]$SafeLoadLevelCall,
     [int]$SafeLoadLevelCallFrame = 1600,
     [string]$SafeLoadLevelCallPC = "0x0200F944",
@@ -134,6 +136,21 @@ param(
     [string]$SafeUpdateLoadGameCallPC = "0x0200F944",
     [string]$HostSafeUpdateLoadGameCallPC = "",
     [string]$ClientSafeUpdateLoadGameCallPC = "",
+    [switch]$SafeTryChangeSceneCall,
+    [int]$SafeTryChangeSceneCallFrame = 1960,
+    [string]$SafeTryChangeSceneCallPC = "0",
+    [string]$HostSafeTryChangeSceneCallPC = "",
+    [string]$ClientSafeTryChangeSceneCallPC = "",
+    [switch]$SafeStageSceneFactoryCall,
+    [int]$SafeStageSceneFactoryCallFrame = 2700,
+    [string]$SafeStageSceneFactoryCallPC = "0",
+    [string]$HostSafeStageSceneFactoryCallPC = "",
+    [string]$ClientSafeStageSceneFactoryCallPC = "",
+    [string]$SafeCallMinSP = "",
+    [switch]$SafeCallProbe,
+    [switch]$SafeCallProbeOnly,
+    [string]$SafeCallProbeMinSP = "",
+    [int]$SafeCallProbeMax = 80,
     [switch]$PacketBridgeSafeCreateLoadGameSM,
     [int]$PacketBridgeSafeCreateLoadGameSMFrame = 0,
     [string]$PacketBridgeSafeCreateLoadGameSMPC = "0x021512B8",
@@ -321,7 +338,13 @@ function Start-MelonLANProcess {
     if ($SafeStartLoadCall) {
         $env:MELONDS_NSML_SAFE_START_LOAD_CALL = "1"
         $env:MELONDS_NSML_SAFE_START_LOAD_CALL_FRAME = "$SafeStartLoadCallFrame"
-        $env:MELONDS_NSML_SAFE_START_LOAD_CALL_PC = "$SafeStartLoadCallPC"
+        $roleSafeStartLoadCallPC = $SafeStartLoadCallPC
+        if ($Role -eq "host" -and $HostSafeStartLoadCallPC) {
+            $roleSafeStartLoadCallPC = $HostSafeStartLoadCallPC
+        } elseif ($Role -eq "client" -and $ClientSafeStartLoadCallPC) {
+            $roleSafeStartLoadCallPC = $ClientSafeStartLoadCallPC
+        }
+        $env:MELONDS_NSML_SAFE_START_LOAD_CALL_PC = "$roleSafeStartLoadCallPC"
     } else {
         Remove-Item Env:\MELONDS_NSML_SAFE_START_LOAD_CALL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_START_LOAD_CALL_FRAME -ErrorAction SilentlyContinue
@@ -376,6 +399,52 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL_PC -ErrorAction SilentlyContinue
+    }
+    if ($SafeTryChangeSceneCall) {
+        $env:MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_CALL = "1"
+        $env:MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_CALL_FRAME = "$SafeTryChangeSceneCallFrame"
+        $roleSafeTryChangeSceneCallPC = $SafeTryChangeSceneCallPC
+        if ($Role -eq "host" -and $HostSafeTryChangeSceneCallPC) {
+            $roleSafeTryChangeSceneCallPC = $HostSafeTryChangeSceneCallPC
+        } elseif ($Role -eq "client" -and $ClientSafeTryChangeSceneCallPC) {
+            $roleSafeTryChangeSceneCallPC = $ClientSafeTryChangeSceneCallPC
+        }
+        $env:MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_CALL_PC = "$roleSafeTryChangeSceneCallPC"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_CALL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_CALL_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_CALL_PC -ErrorAction SilentlyContinue
+    }
+    if ($SafeStageSceneFactoryCall) {
+        $env:MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL = "1"
+        $env:MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL_FRAME = "$SafeStageSceneFactoryCallFrame"
+        $roleSafeStageSceneFactoryCallPC = $SafeStageSceneFactoryCallPC
+        if ($Role -eq "host" -and $HostSafeStageSceneFactoryCallPC) {
+            $roleSafeStageSceneFactoryCallPC = $HostSafeStageSceneFactoryCallPC
+        } elseif ($Role -eq "client" -and $ClientSafeStageSceneFactoryCallPC) {
+            $roleSafeStageSceneFactoryCallPC = $ClientSafeStageSceneFactoryCallPC
+        }
+        $env:MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL_PC = "$roleSafeStageSceneFactoryCallPC"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL_PC -ErrorAction SilentlyContinue
+    }
+    if ($SafeCallMinSP) {
+        $env:MELONDS_NSML_SAFE_CALL_MIN_SP = "$SafeCallMinSP"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_SAFE_CALL_MIN_SP -ErrorAction SilentlyContinue
+    }
+    if ($SafeCallProbe) {
+        $env:MELONDS_NSML_SAFE_CALL_PROBE = "1"
+        $env:MELONDS_NSML_SAFE_CALL_PROBE_MAX = "$SafeCallProbeMax"
+        if ($SafeCallProbeOnly) { $env:MELONDS_NSML_SAFE_CALL_PROBE_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_SAFE_CALL_PROBE_ONLY -ErrorAction SilentlyContinue }
+        if ($SafeCallProbeMinSP) { $env:MELONDS_NSML_SAFE_CALL_PROBE_MIN_SP = "$SafeCallProbeMinSP" } else { Remove-Item Env:\MELONDS_NSML_SAFE_CALL_PROBE_MIN_SP -ErrorAction SilentlyContinue }
+    } else {
+        Remove-Item Env:\MELONDS_NSML_SAFE_CALL_PROBE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_CALL_PROBE_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_CALL_PROBE_MIN_SP -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_CALL_PROBE_MAX -ErrorAction SilentlyContinue
     }
     if ($PacketBridgeSafeCreateLoadGameSM) {
         $safeCreateLoadFrame = $PacketBridgeSafeCreateLoadGameSMFrame

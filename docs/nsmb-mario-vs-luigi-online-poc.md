@@ -20,14 +20,15 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦モード `Mario 
 - NoLanMP + PacketBridge from start で host/client 双方の packet 送受信自体は可能。
 - `VSConnect::updateLoadGameSM` 周辺の hotpatch と trace により、host 側は WAN adapter 経路から `Game::loadLevel` まで自然到達できる。
 - `ForceLoadGameSMBaselineFlags` により、通常 LAN 相当の `step`, `timer`, `vs_flags`, net sequence fields を再現できる。
-- 2026-05-20 時点の最新テストでは、host 側は `Game::loadLevel` 後に player actors と Big Star actor が生成される。
-- client 側は `stageGroup=9` へ入れる場合があるが、スクリーンショットでは「マリオをさがしています」の待機画面で止まり、`netPacketTick=1` のまま actor が生成されない。
+- 2026-05-20 の追加検証で、`SafeStartLoadCall` を `0206B83C` から呼ぶと client 側も `VSStageIntro` scene `0x0F` の `READY!` 画面まで到達する。
+- `SafeStartLoadCall` と別 safe-call を同時に使えるようにし、`localPlayerID` / `stageGroup` / `vsMode` を startLoad 前後で保持する補正を追加済み。
+- stage scene `0x03` の factory 呼び出しを追加し、host/client 双方で `sceneCurrentSceneID=0x3` までは到達する。
 
 ## 現在のブロッカー
 
-client 側が MvL 試合本体へ入れていない。
+stage scene `0x03` 生成後に gameplay actor が生成されない。
 
-具体的には、host は gameplay actor / Big Star actor まで生成される一方、client は `Game::loadLevel` を直接呼んでも player actors / Big Star actor が生成されず、待機画面に残る。`PacketBridgeForceTick` を入れても client の観測上の packet tick は進んでいない。
+具体的には、`SafeStartLoadCall` で `READY!` 画面、`SafeStageSceneFactoryCall` で `sceneCurrentSceneID=0x3` までは進むが、その直後に ARM9 data abort (`pc=0205545C`) が発生し、player actors / Big Star actor は出ない。単純な stage scene factory 直呼びでは、Stage scene 初期化に必要な前段状態またはリソース状態が足りていない可能性が高い。
 
 ## 直近の検証結果
 
@@ -43,6 +44,11 @@ client 側が MvL 試合本体へ入れていない。
   - `PacketBridgeForceTick` を足しても client の `netPacketTick` は `0x1` のまま。
 - `logs/nsmvl-loadsm-step7-preload-20260520`
   - `loadMvsLFilesThread` の強制preloadは発火するが、target step 7 + preload だけでは host/client とも開始に進まない。
+- `logs/nsmvl-safestart-localplayer-fix-20260520`
+  - client は `SafeStartLoadCall` 後に `stageGroup=9`, `localPlayerID=1`, `sceneCurrentSceneID=0xF` へ到達し、スクリーンショット上も `READY!` 画面になる。
+- `logs/nsmvl-both-safestart-stagefactory-20260520`
+  - host/client 双方で `SafeStageSceneFactoryCall` により `sceneCurrentSceneID=0x3` へ到達。
+  - ただし両側とも `pc=0205545C` で data abort し、actor 生成までは進まない。
 
 ## 実装済みの主なテストフック
 
@@ -58,6 +64,8 @@ client 側が MvL 試合本体へ入れていない。
 - role scoped `ForceNetReady`
 - `ForceLoadGameSMBaselineFlags`
 - `SafeStartLoadCall`, `SafeCourseSelectCall`, `SafeCourseSelectFactoryCall`
+- `SafeStageSceneFactoryCall`
+- `SafeCallProbe`, `SafeCallProbeOnly`
 - `SafeUpdateLoadGameCall`, `SafeCreateLoadGameSM`
 - role scoped `DirectMvlBoot`
 - 黒画面検出、切断待機画面検出、gameplay actor 検証
@@ -81,14 +89,15 @@ client 側が MvL 試合本体へ入れていない。
 - `VSConnect::startLoadLevel`: `0x0214E0C0`
 - `Game::loadLevel`: `0x020068A8`
 - `CourseSelectFactory`: `0x020130A8`
+- `Scene::tryChangeScene`: `0x020131DC`
 
 ## 次にやること
 
-1. client の「マリオをさがしています」待機画面を抜ける条件を特定する。
-2. client 側で `netPacketTick=1` のまま止まる理由を、packet bridge の受信/適用経路から追う。
-3. 通常 LAN client と WAN adapter client の `Net` 管理領域差分を、`stageGroup=9` 直後の frame で比較する。
-4. client に必要な packet/action/tick/peer-ready 状態を最小補正し、actor / Big Star actor 生成まで到達させる。
-5. host/client 両方で actor が出たら、切断画面ではないことをスクリーンショットで確認し、入力同期の検証へ戻す。
+1. 通常 LAN の `VSStageIntro -> Stage` 遷移で `0214C3D4` 周辺が factory 呼び出し前に設定している状態を特定する。
+2. `SafeStageSceneFactoryCall` の直呼びではなく、VSStageIntro の自然な遷移関数または必要な前段 state を再現する。
+3. `pc=0205545C` data abort の原因になっている null/未初期化参照を RAM dump / call trace で特定する。
+4. host/client 両方で player actors / Big Star actor が出るまで進め、黒画面・切断画面ではないことをスクリーンショットで確認する。
+5. actor 生成後に gameplay packet の `tick`, `keys`, `action` 同期検証へ戻す。
 
 ## 必要なもの
 
