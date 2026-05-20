@@ -176,6 +176,13 @@ static void NSMLEmitStoreImm32(std::vector<u32>& code, u32 addr, u32 value)
     code.push_back(0xE5864000u); // str r4, [r6]
 }
 
+static void NSMLEmitStoreImm8(std::vector<u32>& code, u32 addr, u32 value)
+{
+    NSMLEmitMovImm(code, 4, value & 0xFFu);
+    NSMLEmitMovImm(code, 6, addr);
+    code.push_back(0xE5C64000u); // strb r4, [r6]
+}
+
 static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
 {
     static int enabled = -1;
@@ -188,9 +195,43 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
             || NSMLEnvFlag("MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL")
             || NSMLEnvFlag("MELONDS_NSML_SAFE_SCHEDULE_LOAD_GAME_CALL")
             || NSMLEnvFlag("MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL")
-            || NSMLEnvFlag("MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_CALL")) ? 1 : 0;
+            || NSMLEnvFlag("MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_CALL")
+            || NSMLEnvFlag("MELONDS_NSML_SCENE_AUTO_ACTIVE_CLEAR")) ? 1 : 0;
     if (!enabled || !cpu || cpu->Num != 0)
         return false;
+
+    if (instrAddr == 0x0201314C && IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
+    {
+        static bool configured = false;
+        static u32 loadMinFrame = 2850;
+        static u32 stageMinFrame = 3050;
+        if (!configured)
+        {
+            if (const char* value = getenv("MELONDS_NSML_SCENE_AUTO_ACTIVE_CLEAR_LOAD_FRAME"))
+                loadMinFrame = static_cast<u32>(strtoul(value, nullptr, 0));
+            if (const char* value = getenv("MELONDS_NSML_SCENE_AUTO_ACTIVE_CLEAR_STAGE_FRAME"))
+                stageMinFrame = static_cast<u32>(strtoul(value, nullptr, 0));
+            configured = true;
+        }
+        static std::map<NDS*, u32> activeClearMask;
+        const u16 currentScene = cpu->NDS.ARM9Read16(0x0203B484);
+        const u16 nextScene = cpu->NDS.ARM9Read16(0x0203B480);
+        if (currentScene == 0x0005 && nextScene == 0x000F && cpu->NDS.NumFrames >= loadMinFrame && (activeClearMask[&cpu->NDS] & 0x1) == 0)
+        {
+            cpu->NDS.ARM9Write8(0x0203B478, 0);
+            activeClearMask[&cpu->NDS] |= 0x1;
+            printf("NSMB SceneAutoActiveClear: load frame=%u current=%04X next=%04X\n", cpu->NDS.NumFrames, currentScene, nextScene);
+            fflush(stdout);
+        }
+        else if (currentScene == 0x000F && nextScene == 0x0003 && cpu->NDS.NumFrames >= stageMinFrame && (activeClearMask[&cpu->NDS] & 0x2) == 0)
+        {
+            cpu->NDS.ARM9Write8(0x0203B478, 0);
+            activeClearMask[&cpu->NDS] |= 0x2;
+            printf("NSMB SceneAutoActiveClear: stage frame=%u current=%04X next=%04X\n", cpu->NDS.NumFrames, currentScene, nextScene);
+            fflush(stdout);
+        }
+        return false;
+    }
 
     static int loadLevel = -1;
     if (loadLevel < 0)
@@ -223,7 +264,11 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     static bool triggerConfigured = false;
     static u32 triggerPC = 0;
     static u32 startLoadTriggerPC = 0;
+    static u32 stageSceneFactoryTriggerPC = 0;
+    static u32 tryChangeTriggerPC = 0;
     static u32 startFrame = 0;
+    static u32 stageSceneFactoryFrame = 0;
+    static u32 tryChangeFrame = 0;
     static u32 minSP = 0;
     static int probe = -1;
     static int probeOnly = -1;
@@ -260,6 +305,14 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
             startLoadTriggerPC = static_cast<u32>(strtoul(value, nullptr, 0));
         else
             startLoadTriggerPC = 0x0200F944;
+        if (const char* value = getenv("MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL_PC"))
+            stageSceneFactoryTriggerPC = static_cast<u32>(strtoul(value, nullptr, 0));
+        else
+            stageSceneFactoryTriggerPC = 0x0200F944;
+        if (const char* value = getenv("MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_CALL_PC"))
+            tryChangeTriggerPC = static_cast<u32>(strtoul(value, nullptr, 0));
+        else
+            tryChangeTriggerPC = 0x0200F944;
         if (const char* value = getenv(updateLoadGame
                 ? "MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL_FRAME"
                 : courseSelectFactory
@@ -280,6 +333,14 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
             startFrame = static_cast<u32>(strtoul(value, nullptr, 0));
         else
             startFrame = 0;
+        if (const char* value = getenv("MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL_FRAME"))
+            stageSceneFactoryFrame = static_cast<u32>(strtoul(value, nullptr, 0));
+        else
+            stageSceneFactoryFrame = 0;
+        if (const char* value = getenv("MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_CALL_FRAME"))
+            tryChangeFrame = static_cast<u32>(strtoul(value, nullptr, 0));
+        else
+            tryChangeFrame = 0;
         if (const char* value = getenv("MELONDS_NSML_SAFE_CALL_MIN_SP"))
             minSP = static_cast<u32>(strtoul(value, nullptr, 0));
         probe = NSMLEnvFlag("MELONDS_NSML_SAFE_CALL_PROBE") ? 1 : 0;
@@ -323,24 +384,28 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     static std::map<NDS*, u32> appliedMask;
     static std::map<NDS*, u32> appliedFrame;
     const bool startLoadAlreadyApplied = (appliedMask[&cpu->NDS] & 0x10) != 0;
+    const bool courseSelectFactoryAlreadyApplied = (appliedMask[&cpu->NDS] & 0x02) != 0;
+    const bool tryChangeAlreadyApplied = (appliedMask[&cpu->NDS] & 0x80) != 0;
     const bool effectiveStartLoad =
-        (!loadLevel && !courseSelectFactory && !courseSelect && !createLoadGame && !updateLoadGame && !scheduleLoadGame && !stageSceneFactory && !tryChangeScene)
-        || (combinedCourseSelectThenStartLoad && cpu->NDS.NumFrames >= combinedStartLoadFrame)
+        (!loadLevel && !courseSelectFactory && !courseSelect && !createLoadGame && !updateLoadGame && !scheduleLoadGame && !stageSceneFactory && !tryChangeScene && !startLoadCall)
+        || (startLoadCall && !combinedCourseSelectThenStartLoad && !combinedStartLoadThenTryChange && !combinedStartLoadThenStageScene && !startLoadAlreadyApplied && cpu->NDS.NumFrames >= combinedStartLoadFrame)
+        || (combinedCourseSelectThenStartLoad && !startLoadAlreadyApplied && cpu->NDS.NumFrames >= combinedStartLoadFrame)
         || (combinedStartLoadThenTryChange && !startLoadAlreadyApplied && cpu->NDS.NumFrames >= combinedStartLoadFrame)
         || (combinedStartLoadThenStageScene && !startLoadAlreadyApplied && cpu->NDS.NumFrames >= combinedStartLoadFrame);
     const bool effectiveCourseSelectFactory =
-        courseSelectFactory && !effectiveStartLoad;
+        courseSelectFactory && !courseSelectFactoryAlreadyApplied && !effectiveStartLoad;
     const bool effectiveCourseSelect =
         courseSelect && !effectiveStartLoad && !effectiveCourseSelectFactory;
     const bool effectiveLoadLevel = loadLevel;
     const bool effectiveCreateLoadGame = createLoadGame;
     const bool effectiveUpdateLoadGame = updateLoadGame;
     const bool effectiveScheduleLoadGame = scheduleLoadGame;
-    const bool effectiveStageSceneFactory = stageSceneFactory && !effectiveStartLoad;
-    const bool effectiveTryChangeScene = tryChangeScene && !effectiveStartLoad;
+    const bool effectiveStageSceneFactory =
+        stageSceneFactory && !effectiveStartLoad && !effectiveCourseSelectFactory && (!tryChangeScene || tryChangeAlreadyApplied);
+    const bool effectiveTryChangeScene = tryChangeScene && !effectiveStartLoad && !effectiveCourseSelectFactory;
 
-    const u32 effectiveStartFrame = effectiveStartLoad ? combinedStartLoadFrame : startFrame;
-    const u32 effectiveTriggerPC = effectiveStartLoad ? startLoadTriggerPC : triggerPC;
+    const u32 effectiveStartFrame = effectiveStartLoad ? combinedStartLoadFrame : effectiveStageSceneFactory ? stageSceneFactoryFrame : effectiveTryChangeScene ? tryChangeFrame : startFrame;
+    const u32 effectiveTriggerPC = effectiveStartLoad ? startLoadTriggerPC : effectiveStageSceneFactory ? stageSceneFactoryTriggerPC : effectiveTryChangeScene ? tryChangeTriggerPC : triggerPC;
 
     if (cpu->NDS.NumFrames < effectiveStartFrame)
         return false;
@@ -379,7 +444,7 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         return false;
     if (!effectiveStartLoad && requiredMode != 0xFFFFFFFFu && (cpu->CPSR & 0x1Fu) != requiredMode)
         return false;
-    if (!loadLevel && !IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
+    if (!loadLevel && !effectiveStartLoad && !effectiveCourseSelectFactory && !IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
         return false;
 
     const u32 modeMask =
@@ -413,7 +478,9 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     constexpr u32 updateLoadGameSMAddr = 0x02151E94;
     constexpr u32 scheduleSubMenuChangeAddr = 0x021528A0;
     constexpr u32 loadGameSMSubMenuAddr = 0x02156624;
-    constexpr u32 tryChangeSceneAddr = 0x020131DC;
+    constexpr u32 tryChangeSceneAddr = 0x0201314C;
+    constexpr u32 applySceneRequestAddr = 0x02007ACC;
+    constexpr u32 startSceneTransitionAddr = 0x02011CE8;
     const u32 returnPC = instrAddr | ((cpu->CPSR & 0x20) ? 1u : 0u);
     u32 playerID = cpu->NDS.ARM9Read32(0x020850BC);
     if (const char* value = getenv("MELONDS_NSML_SAFE_LOAD_LEVEL_PLAYER_ID"))
@@ -521,11 +588,22 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         NSMLEmitStoreImm32(code, 0x0208B044, 0xFFFF0003);
         NSMLEmitStoreImm32(code, 0x0208B048, 0x00000000);
         NSMLEmitStoreImm32(code, 0x0208B04C, 0x00000000);
+        NSMLEmitMovImm(code, 0, 0x02088568);
+        NSMLEmitMovImm(code, 1, 0x00B5FF00);
+        NSMLEmitMovImm(code, 2, 0x02088558);
+        NSMLEmitMovImm(code, 3, 0x02084FB4);
+        NSMLEmitBLViaIP(code, applySceneRequestAddr);
+        NSMLEmitMovImm(code, 0, 0x1E);
+        NSMLEmitBLViaIP(code, startSceneTransitionAddr);
         NSMLEmitMovImm(code, 0, 0x03);
         NSMLEmitMovImm(code, 1, 0x00B5FF00);
         NSMLEmitMovImm(code, 2, 0x0208B040);
         NSMLEmitMovImm(code, 3, 0x01);
         NSMLEmitBLViaIP(code, courseSelectFactoryAddr);
+        NSMLEmitStoreImm32(code, 0x0203B478, 0x00000001); // Scene::isSceneActive
+        NSMLEmitStoreImm32(code, 0x0203B47C, 0x0000000F); // Scene::previousSceneID
+        NSMLEmitStoreImm32(code, 0x0203B480, 0x00000181); // Scene::nextSceneID
+        NSMLEmitStoreImm32(code, 0x0203B484, 0x00000003); // Scene::currentSceneID
     }
     else if (effectiveTryChangeScene)
     {
@@ -533,6 +611,10 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     }
     else
     {
+        cpu->NDS.ARM9Write32(vsConnectBase + 0x218 + 0x008, 0x00000001);
+        cpu->NDS.ARM9Write32(vsConnectBase + 0x218 + 0x064, 0x00000409);
+        cpu->NDS.ARM9Write32(vsConnectBase + 0x218 + 0x078, 0x00000000);
+        cpu->NDS.ARM9Write32(vsConnectBase + 0x218 + 0x07C, 0x020177AC);
         NSMLEmitStoreImm32(code, 0x02085058, 0x09); // Game::stageGroup
         NSMLEmitStoreImm32(code, 0x020850BC, playerID); // Game::localPlayerID
         NSMLEmitStoreImm32(code, 0x020850C4, 0x01); // Game::vsMode
@@ -541,9 +623,23 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         NSMLEmitMovImm(code, 2, 0);
         NSMLEmitMovImm(code, 3, 0x02156488);
         NSMLEmitBLViaIP(code, startLoadLevelAddr);
+        NSMLEmitStoreImm32(code, 0x02087E14, 0x01);
+        NSMLEmitStoreImm32(code, 0x02087E1C, 0x06);
+        NSMLEmitStoreImm32(code, 0x02087E20, 0x02);
+        NSMLEmitStoreImm32(code, 0x02087E24, 0x02);
+        NSMLEmitStoreImm32(code, 0x02087E78, 0x42);
         NSMLEmitStoreImm32(code, 0x02085058, 0x09);
         NSMLEmitStoreImm32(code, 0x020850BC, playerID);
         NSMLEmitStoreImm32(code, 0x020850C4, 0x01);
+        NSMLEmitStoreImm32(code, vsConnectBase + 0x144, 0x00000007);
+        NSMLEmitStoreImm32(code, vsConnectBase + 0x148, 0x0000002C);
+        NSMLEmitStoreImm32(code, vsConnectBase + 0x154, 0x00030000);
+        NSMLEmitStoreImm32(code, vsConnectBase + 0x218 + 0x078, 0x00000000);
+        NSMLEmitStoreImm32(code, vsConnectBase + 0x218 + 0x07C, 0x020177AC);
+        NSMLEmitStoreImm32(code, 0x0203B478, 0x00000000); // Scene::isSceneActive
+        NSMLEmitStoreImm32(code, 0x0203B47C, 0x00000005); // Scene::previousSceneID
+        NSMLEmitStoreImm32(code, 0x0203B480, 0x0000000F); // Scene::nextSceneID
+        NSMLEmitStoreImm32(code, 0x0203B484, 0x0000000F); // Scene::currentSceneID
     }
     code.push_back(0xE8BD0020u); // pop {r5}
     code.push_back(0xE128F005u); // msr apsr_nzcvq, r5

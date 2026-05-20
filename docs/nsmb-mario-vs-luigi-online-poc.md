@@ -22,7 +22,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦モード `Mario 
 - `PacketBridgeWait` は、まだ一度も remote packet を受け取っていない段階では待たないよう修正済み。
 - `NoLanMP + PacketBridgeSubMenuSchedule` を追加し、自然 LAN で観測した VSConnect サブメニュー列をスクリプトから注入できるようにした。
 - サブメニューの direct-change も追加した。任意PCから create 関数を呼ぶと data abort するため、デフォルトは current create/update/render ポインタの差し替えだけにしている。
-- direct-change と stage-start field forcing により、`NoLanMP` でも VSConnect の stage-start state から scene 5 `CourseSelect` までは到達できる。
+- direct-change と safe scene call により、`NoLanMP` でも scene 5 `CourseSelect` object 作成、`VSConnect::startLoadLevel`、`Game::stageGroup=9` / `vsMode=1` までは再現できる。
 
 ## 最新の重要な発見
 
@@ -42,11 +42,16 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦モード `Mario 
 
 ## 現在のブロッカー
 
-`NoLanMP + PacketBridge from start` は、自然 LocalMP と同じ MvL stage load へまだ入れていない。
+`NoLanMP + PacketBridge from start` は、自然 LocalMP と同じ MvL stage scene / gameplay actors へまだ入れていない。
 
-直近の診断では、VSConnect stage-start state から scene 5 `CourseSelect` までは進めたが、自然 LAN のように `sceneNext=0x0F` を立てる CourseSelect 更新処理が走らない。`DirectMvlBoot` で `Game::loadLevel` を強制すると `stageGroup=9` は立つが、`pc=020448C0` 付近で ARM9 data abort し、scene 5 から進まない。
+直近の診断で分かったこと:
 
-`020448C0` は Code Reference 上では `MTX::rotateX` 付近なので、乱数や packet そのものではなく、ステージ/メニュー遷移を不自然に飛ばした結果、初期化されていない object/resource へ描画・行列処理が入っている可能性が高い。
+- `SafeCourseSelectFactoryCall` を `Scene::tryChangeScene` entry `0x0201314C` 上で実行すると、自然 LAN と同じ `CourseSelect` object base `0x021BE9D8` を作れる。
+- `SafeStartLoadCall` を `0x02064F80` 上で実行し、`VSConnect+0x144/0x148/0x154` と `CourseSelect+0x078/0x07C` を自然値へ戻すと、`stageGroup=9`, `vsMode=1`, `currentScene=0x0F` までは安定する。
+- `SafeTryChangeSceneCall` で `nextScene=3` を処理させると `currentScene=3` までは進む。
+- ただし、stage scene object の create/update が自然遷移と同じ形でリンクされておらず、`playerActor0/1` と Big Star actor はまだ出ない。画面も blank / 「しばらくおまちください」判定になる。
+
+つまり現在の主ブロッカーは「scene ID を 3 にすること」ではなく、自然の scene switch が行っている旧 CourseSelect scene の破棄、新 Stage scene object の登録、StageScene `onCreate` 実行を再現できていないこと。
 
 ## 主な実装済みテストフック
 
@@ -61,6 +66,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦モード `Mario 
 - `ForceNetReady`, `ForceLoadGameSM`, `ForceTransferResult`
 - `SafeStartLoadCall`, `SafeCourseSelectCall`, `SafeCourseSelectFactoryCall`
 - `SafeStageSceneFactoryCall`
+- `SafeTryChangeSceneCall`
 - `SafeCallProbe`, `SafeCallProbeOnly`
 - `SafeUpdateLoadGameCall`, `SafeCreateLoadGameSM`
 - `PacketBridgeForceStagePacketWords`
@@ -88,15 +94,16 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦モード `Mario 
 - `loadMvsLFilesThread`: `0x02152E18`
 - `VSConnect::startLoadLevel`: `0x0214E0C0`
 - `Game::loadLevel`: `0x020068A8`
-- `Scene::tryChangeScene`: `0x020131DC`
+- `Scene::tryChangeScene` entry: `0x0201314C`
+- `Scene::tryChangeScene` transition block: `0x020131DC`
 - `MTX::rotateX` 付近: `0x020448C0`
 
 ## 次にやること
 
-1. 自然 LAN の scene 5 `CourseSelect` 更新から `sceneNext=0x0F` / `Game::loadLevel` へ進む caller と条件を call trace / write trace で特定する。
-2. `NoLanMP` 側で CourseSelect scene 5 へ入ったあと、自然 caller の前提フィールドだけを再現して stage load へ進めるか確認する。
-3. `020448C0` abort 時の `r0=null` がどの object/resource 由来か、自然 LAN と forced route のレジスタ・周辺メモリ差分で切り分ける。
-4. MvL stage 到達後、gameplay packet の `tick/keys/action` 一致と「通信が切断されました」画面の非発生を自動判定に入れる。
+1. 自然 LAN の `0x020131DC` / `0x020131FC` 周辺を RAM dump から追い、scene switch 時にどの object pointer / global が更新されるか特定する。
+2. `Object::spawnScene` 相当の standalone 呼び出しではなく、自然 scene switch と同じ経路で Stage scene object を登録できるか確認する。
+3. `NoLanMP` ルートで `playerActor0/1` と Big Star actor が出るまで、blank / connection dialog / disconnect 判定を必ず有効にして検証する。
+4. MvL stage 到達後、gameplay packet の `tick/keys/action` 一致を確認する。
 5. stage 内同期が確認できたら、WAN adapter の待ち制御を NSMB の input tick 要求に合わせて調整する。
 
 ## 必要なもの

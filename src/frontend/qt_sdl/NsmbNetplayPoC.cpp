@@ -2776,6 +2776,19 @@ void EmitMovImm(std::vector<melonDS::u32>& code, int reg, melonDS::u32 value)
     EmitARM(code, 0xE3A00000u | (static_cast<melonDS::u32>(reg & 0xF) << 12) | (value & 0xFF));
 }
 
+void EmitLoadImm(std::vector<melonDS::u32>& code, int reg, melonDS::u32 value)
+{
+    if (value <= 0xFF)
+    {
+        EmitMovImm(code, reg, value);
+        return;
+    }
+
+    EmitARM(code, 0xE59F0000u | (static_cast<melonDS::u32>(reg & 0xF) << 12)); // ldr reg, [pc]
+    EmitARM(code, 0xEA000000u); // skip literal
+    EmitARM(code, value);
+}
+
 void EmitMvnImm(std::vector<melonDS::u32>& code, int reg, melonDS::u32 value)
 {
     EmitARM(code, 0xE3E00000u | (static_cast<melonDS::u32>(reg & 0xF) << 12) | (value & 0xFF));
@@ -2918,15 +2931,32 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
         {
             if (G.DirectMvlBootCallStartLoadLevel)
             {
-                EmitMovImm(code, 0, vsConnectBase + 0x218);
-                EmitMovImm(code, 1, kA2DJVSConnectStartLoadLevelAddr);
-                EmitMovImm(code, 2, 0);
-                EmitMovImm(code, 3, 0x02156488);
+                WriteARM9U32(nds, vsConnectBase + 0x218 + 0x008, 0x00000001);
+                WriteARM9U32(nds, vsConnectBase + 0x218 + 0x064, 0x00000409);
+                EmitLoadImm(code, 0, vsConnectBase + 0x218);
+                EmitLoadImm(code, 1, kA2DJVSConnectStartLoadLevelAddr);
+                EmitLoadImm(code, 2, 0);
+                EmitLoadImm(code, 3, 0x02156488);
                 EmitARM(code, 0xE59FC008u); // ldr ip, [pc, #8]
                 EmitARM(code, 0xE28FE008u); // add lr, pc, #8
                 EmitARM(code, 0xE12FFF1Cu); // bx ip
                 EmitARM(code, 0xE1A00000u); // nop
                 EmitARM(code, kA2DJVSConnectStartLoadLevelAddr);
+                EmitLoadImm(code, 4, 0x01);
+                EmitLoadImm(code, 6, 0x02087E14);
+                EmitARM(code, 0xE5864000u); // str r4, [r6]
+                EmitLoadImm(code, 4, 0x06);
+                EmitLoadImm(code, 6, 0x02087E1C);
+                EmitARM(code, 0xE5864000u);
+                EmitLoadImm(code, 4, 0x02);
+                EmitLoadImm(code, 6, 0x02087E20);
+                EmitARM(code, 0xE5864000u);
+                EmitLoadImm(code, 4, 0x02);
+                EmitLoadImm(code, 6, 0x02087E24);
+                EmitARM(code, 0xE5864000u);
+                EmitLoadImm(code, 4, 0x42);
+                EmitLoadImm(code, 6, 0x02087E78);
+                EmitARM(code, 0xE5864000u);
             }
             else
             {
