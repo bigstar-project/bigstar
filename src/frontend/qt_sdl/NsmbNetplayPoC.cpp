@@ -101,6 +101,10 @@ constexpr melonDS::u32 kA2DJVSConnectCreateLoadGameSMAddr = 0x021515B4;
 constexpr melonDS::u32 kA2DJVSConnectUpdateLoadGameSMAddr = 0x021512B8;
 constexpr melonDS::u32 kA2DJVSConnectRenderLoadGameSMAddr = 0x0215125C;
 constexpr melonDS::u32 kA2DJVSConnectStartLoadLevelAddr = 0x0214E0C0;
+constexpr melonDS::u32 kA2DJLoadMvsLFilesThreadAddr = 0x02152E18;
+constexpr melonDS::u32 kA2DJVSConnectScheduleSubMenuChangeAddr = 0x021528A0;
+constexpr melonDS::u32 kA2DJVSConnectLoadGameSMSubMenuAddr = 0x02156678;
+constexpr melonDS::u32 kA2DJFSCacheLoadFileAddr = 0x02009C64;
 constexpr melonDS::u32 kA2DJVSCreateCourseSelectAddr = 0x0214F858;
 constexpr melonDS::u32 kA2DJCourseSelectFactoryAddr = 0x020130A8;
 constexpr melonDS::u32 kA2DJApplySceneRequestAddr = 0x02007ACC;
@@ -477,11 +481,19 @@ struct State
     bool PacketBridgeForceLoadGameSMRunUpdateClientOnly = true;
     bool PacketBridgeForceLoadGameSMPulseAction = false;
     bool PacketBridgeForceLoadGameSMBaselineFlags = false;
+    bool PacketBridgeForceLoadGameSMPreload = false;
+    bool PacketBridgeForceLoadGameSMCreateApplied[16] {};
+    bool PacketBridgeScheduleLoadGameSM = false;
+    bool PacketBridgeScheduleLoadGameSMApplied[16] {};
+    bool PacketBridgeForceMvlFileCache = false;
+    bool PacketBridgeForceMvlFileCacheApplied[16] {};
     int PacketBridgeMaxPumpEvents = kMaxPumpEvents;
     int PacketBridgeMaxTickLead = -1;
     int PacketBridgeMaxFrameLead = -1;
     int PacketBridgeThrottleTimeoutMs = 5000;
     bool DirectMvlBootEnabled = false;
+    bool DirectMvlBootHostOnly = false;
+    bool DirectMvlBootClientOnly = false;
     melonDS::u32 DirectMvlBootFrame = 0;
     int DirectMvlBootScene = 0x0F;
     int DirectMvlBootStage = 0;
@@ -1310,6 +1322,165 @@ void ForceNSMLPacketBridgeNetReadyIfNeeded(int instanceID, melonDS::u32 frame, m
     }
 }
 
+bool InjectNSMLPacketBridgeMvlFileCache(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.PacketBridgeForceMvlFileCache || !nds || instanceID < 0 || instanceID >= 16)
+        return false;
+    if (G.PacketBridgeForceMvlFileCacheApplied[instanceID])
+        return false;
+    if (frame < G.PacketBridgeForceLoadGameSMStartFrame)
+        return false;
+    if (nds->ARM9Read32(kNetGGIDAddr) != 0x42)
+        return false;
+    if (FindObjectBaseByID(nds, kVsConnectObjectID) == 0)
+        return false;
+
+    struct FileSpec
+    {
+        melonDS::u32 FileID;
+        bool Compressed;
+    };
+
+    static constexpr FileSpec kMvlFiles[] =
+    {
+        {0x07A6, false},
+        {0x0615, true},
+        {0x05A2, false},
+        {0x05A3, false},
+        {0x0529, false},
+        {0x06DE, true},
+        {0x06CF, true},
+        {0x06D1, true},
+        {0x06D0, true},
+        {0x06D3, true},
+        {0x06D2, true},
+        {0x06D5, true},
+        {0x06D4, true},
+        {0x06D7, true},
+        {0x06D9, true},
+        {0x06D8, true},
+        {0x06DB, true},
+        {0x06DA, true},
+        {0x06DD, true},
+        {0x06E5, true},
+        {0x06E2, true},
+        {0x06D6, true},
+        {0x06DC, true},
+        {0x06E1, true},
+        {0x06E3, true},
+        {0x0694, true},
+        {0x0697, true},
+        {0x06A2, true},
+        {0x06A1, true},
+        {0x069F, true},
+        {0x06A0, true},
+        {0x0117, true},
+        {0x0116, true},
+        {0x0113, true},
+        {0x0115, true},
+        {0xC92B, false},
+        {0x0798, false},
+    };
+
+    const melonDS::u32 oldPC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
+    const melonDS::u32 returnPC = oldPC | ((nds->ARM9.CPSR & 0x20) ? 1u : 0u);
+    std::vector<melonDS::u32> code;
+    code.reserve(16 + (std::size(kMvlFiles) * 5));
+    const auto emitBL = [&code](melonDS::u32 target)
+    {
+        const melonDS::u32 pc = kDirectBootTrampolineAddr + static_cast<melonDS::u32>(code.size() * sizeof(melonDS::u32)) + 8u;
+        const melonDS::s32 offset = static_cast<melonDS::s32>(target - pc) >> 2;
+        code.push_back(0xEB000000u | (static_cast<melonDS::u32>(offset) & 0x00FFFFFFu));
+    };
+
+    code.push_back(0xE92D5FFFu); // push {r0-r12, lr}
+    code.push_back(0xE10F5000u); // mrs r5, cpsr
+    code.push_back(0xE92D0020u); // push {r5}
+    for (const FileSpec& file : kMvlFiles)
+    {
+        code.push_back(0xE59F0008u); // ldr r0, [pc, #8]
+        code.push_back(file.Compressed ? 0xE3A01001u : 0xE3A01000u); // mov r1, #compressed
+        emitBL(kA2DJFSCacheLoadFileAddr);
+        code.push_back(0xEA000000u); // b over literal
+        code.push_back(file.FileID);
+    }
+    code.push_back(0xE8BD0020u); // pop {r5}
+    code.push_back(0xE128F005u); // msr apsr_nzcvq, r5
+    code.push_back(0xE8BD5FFFu); // pop {r0-r12, lr}
+    code.push_back(0xE59FC004u); // ldr ip, [pc, #4]
+    code.push_back(0xE12FFF1Cu); // bx ip
+    code.push_back(0xE1A00000u); // nop
+    code.push_back(returnPC);
+
+    bool wrote = true;
+    for (size_t i = 0; i < code.size(); i++)
+        wrote = WriteARM9U32(nds, kDirectBootTrampolineAddr + static_cast<melonDS::u32>(i * sizeof(melonDS::u32)), code[i]) && wrote;
+    if (!wrote)
+        return false;
+
+    G.PacketBridgeForceMvlFileCacheApplied[instanceID] = true;
+    std::printf("NSMB PacketBridge: force MvL file cache inst=%d frame=%u files=%zu\n",
+        instanceID,
+        frame,
+        std::size(kMvlFiles));
+    std::fflush(stdout);
+    nds->ARM9.JumpTo(kDirectBootTrampolineAddr);
+    return true;
+}
+
+bool InjectNSMLPacketBridgeScheduleLoadGameSM(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, melonDS::u32 vsConnectBase)
+{
+    if (!G.PacketBridgeScheduleLoadGameSM || !nds || instanceID < 0 || instanceID >= 16 || vsConnectBase == 0)
+        return false;
+    if (G.PacketBridgeScheduleLoadGameSMApplied[instanceID])
+        return false;
+
+    const melonDS::u32 oldPC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
+    const melonDS::u32 returnPC = oldPC | ((nds->ARM9.CPSR & 0x20) ? 1u : 0u);
+    std::vector<melonDS::u32> code;
+    code.reserve(20);
+    const auto emitBL = [&code](melonDS::u32 target)
+    {
+        const melonDS::u32 pc = kDirectBootTrampolineAddr + static_cast<melonDS::u32>(code.size() * sizeof(melonDS::u32)) + 8u;
+        const melonDS::s32 offset = static_cast<melonDS::s32>(target - pc) >> 2;
+        code.push_back(0xEB000000u | (static_cast<melonDS::u32>(offset) & 0x00FFFFFFu));
+    };
+
+    code.push_back(0xE92D5FFFu); // push {r0-r12, lr}
+    code.push_back(0xE10F5000u); // mrs r5, cpsr
+    code.push_back(0xE92D0020u); // push {r5}
+    code.push_back(0xE59F0028u); // ldr r0, [pc, #40]
+    code.push_back(0xE59F1028u); // ldr r1, [pc, #40]
+    code.push_back(0xE3A02000u); // mov r2, #0
+    code.push_back(0xE3A03001u); // mov r3, #1
+    emitBL(kA2DJVSConnectScheduleSubMenuChangeAddr);
+    code.push_back(0xE8BD0020u); // pop {r5}
+    code.push_back(0xE128F005u); // msr apsr_nzcvq, r5
+    code.push_back(0xE8BD5FFFu); // pop {r0-r12, lr}
+    code.push_back(0xE59FC004u); // ldr ip, [pc, #4]
+    code.push_back(0xE12FFF1Cu); // bx ip
+    code.push_back(0xE1A00000u); // nop
+    code.push_back(returnPC);
+    code.push_back(vsConnectBase);
+    code.push_back(kA2DJVSConnectLoadGameSMSubMenuAddr);
+
+    bool wrote = true;
+    for (size_t i = 0; i < code.size(); i++)
+        wrote = WriteARM9U32(nds, kDirectBootTrampolineAddr + static_cast<melonDS::u32>(i * sizeof(melonDS::u32)), code[i]) && wrote;
+    if (!wrote)
+        return false;
+
+    G.PacketBridgeScheduleLoadGameSMApplied[instanceID] = true;
+    std::printf("NSMB PacketBridge: schedule loadGameSM inst=%d frame=%u vsConnect=%08X submenu=%08X\n",
+        instanceID,
+        frame,
+        vsConnectBase,
+        kA2DJVSConnectLoadGameSMSubMenuAddr);
+    std::fflush(stdout);
+    nds->ARM9.JumpTo(kDirectBootTrampolineAddr);
+    return true;
+}
+
 void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.PacketBridgeForceLoadGameSM || !nds || instanceID < 0 || instanceID >= 16)
@@ -1324,6 +1495,8 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
         nds->ARM9Write32(kGameLocalPlayerIDAddr, (G.NetRole == Role::Client) ? 1 : 0);
         return;
     }
+    if (FindObjectBaseByID(nds, kCourseSelectObjectID) != 0)
+        return;
 
     const melonDS::u32 vsConnectBase = FindObjectBaseByID(nds, kVsConnectObjectID);
     if (vsConnectBase == 0)
@@ -1335,6 +1508,61 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
     const bool alreadyLoadGameSM = currentUpdate == kA2DJVSConnectUpdateLoadGameSMAddr && currentStep >= targetStep;
     if (!alreadyLoadGameSM)
     {
+        if (InjectNSMLPacketBridgeScheduleLoadGameSM(instanceID, frame, nds, vsConnectBase))
+            return;
+        if (G.PacketBridgeScheduleLoadGameSM)
+            return;
+
+        if (InjectNSMLPacketBridgeMvlFileCache(instanceID, frame, nds))
+            return;
+
+        if (G.PacketBridgeForceLoadGameSMPreload && !G.PacketBridgeForceLoadGameSMCreateApplied[instanceID])
+        {
+            const melonDS::u32 oldPC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
+            const melonDS::u32 returnPC = oldPC | ((nds->ARM9.CPSR & 0x20) ? 1u : 0u);
+            std::vector<melonDS::u32> code;
+            code.reserve(24);
+            const auto emitBL = [&code](melonDS::u32 target)
+            {
+                const melonDS::u32 pc = kDirectBootTrampolineAddr + static_cast<melonDS::u32>(code.size() * sizeof(melonDS::u32)) + 8u;
+                const melonDS::s32 offset = static_cast<melonDS::s32>(target - pc) >> 2;
+                code.push_back(0xEB000000u | (static_cast<melonDS::u32>(offset) & 0x00FFFFFFu));
+            };
+
+            code.push_back(0xE92D5FFFu); // push {r0-r12, lr}
+            code.push_back(0xE10F5000u); // mrs r5, cpsr
+            code.push_back(0xE92D0020u); // push {r5}
+            code.push_back(0xE59F0028u); // ldr r0, [pc, #40]
+            code.push_back(0xE3A01001u); // mov r1, #1
+            code.push_back(0xE59F2024u); // ldr r2, [pc, #36]
+            code.push_back(0xE3A03000u); // mov r3, #0
+            emitBL(kA2DJLoadMvsLFilesThreadAddr);
+            code.push_back(0xE8BD0020u); // pop {r5}
+            code.push_back(0xE128F005u); // msr apsr_nzcvq, r5
+            code.push_back(0xE8BD5FFFu); // pop {r0-r12, lr}
+            code.push_back(0xE59FC004u); // ldr ip, [pc, #4]
+            code.push_back(0xE12FFF1Cu); // bx ip
+            code.push_back(0xE1A00000u); // nop
+            code.push_back(returnPC);
+            code.push_back(0x0208A478u);
+            code.push_back(0x4753454Du); // "MSEG", matches normal thread-entry register state
+
+            bool wrote = true;
+            for (size_t i = 0; i < code.size(); i++)
+                wrote = WriteARM9U32(nds, kDirectBootTrampolineAddr + static_cast<melonDS::u32>(i * sizeof(melonDS::u32)), code[i]) && wrote;
+            if (wrote)
+            {
+                G.PacketBridgeForceLoadGameSMCreateApplied[instanceID] = true;
+                std::printf("NSMB PacketBridge: call MvL file preload inst=%d frame=%u vsConnect=%08X\n",
+                    instanceID,
+                    frame,
+                    vsConnectBase);
+                std::fflush(stdout);
+                nds->ARM9.JumpTo(kDirectBootTrampolineAddr);
+            }
+            return;
+        }
+
         WriteARM9U32(nds, vsConnectBase + 0x078, 0x00000003);
         WriteARM9U32(nds, vsConnectBase + 0x07C, 0x00000003);
         WriteARM9U32(nds, vsConnectBase + 0x080, 0x00000107);
@@ -1380,7 +1608,7 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
         if ((rel % 25u) < 5u)
             nds->ARM9Write8(kNetPacketActionAddr, 0x03);
     }
-    if (G.PacketBridgeForceLoadGameSMBaselineFlags && targetStep == 3)
+    if (G.PacketBridgeForceLoadGameSMBaselineFlags && targetStep >= 1)
     {
         const melonDS::u32 rel = frame - G.PacketBridgeForceLoadGameSMStartFrame;
         const melonDS::u32 roleBit = (G.NetRole == Role::Client) ? 1u : 0u;
@@ -1404,6 +1632,12 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
                 WriteARM9U32(nds, 0x0208807C, 0x00000202);
                 WriteARM9U32(nds, 0x02088084, 0x00000202);
             }
+            if (rel >= 72)
+            {
+                WriteARM9U32(nds, vsConnectBase + 0x144, 7);
+                WriteARM9U32(nds, vsConnectBase + 0x148, 0x28);
+                WriteARM9U32(nds, vsConnectBase + 0x154, 0x00030000 | roleBit);
+            }
         }
         else
         {
@@ -1419,6 +1653,12 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
                 WriteARM9U32(nds, 0x02088078, 0x00000101);
                 WriteARM9U32(nds, 0x0208807C, 0x00000202);
                 WriteARM9U32(nds, 0x02088084, 0x00000202);
+            }
+            if (rel >= 85)
+            {
+                WriteARM9U32(nds, vsConnectBase + 0x144, 7);
+                WriteARM9U32(nds, vsConnectBase + 0x148, 0x31);
+                WriteARM9U32(nds, vsConnectBase + 0x154, 0x00030000 | roleBit);
             }
         }
     }
@@ -2174,6 +2414,10 @@ void EmitStackArg(std::vector<melonDS::u32>& code, melonDS::u32 offset, melonDS:
 bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.DirectMvlBootEnabled || !nds || instanceID < 0 || instanceID >= 16)
+        return false;
+    if (G.DirectMvlBootHostOnly && G.NetRole != Role::Host)
+        return false;
+    if (G.DirectMvlBootClientOnly && G.NetRole != Role::Client)
         return false;
     if (G.DirectMvlBootApplied[instanceID] || frame != G.DirectMvlBootFrame)
         return false;
@@ -4155,6 +4399,12 @@ void InitFromEnvironment()
         EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_PULSE_ACTION");
     G.PacketBridgeForceLoadGameSMBaselineFlags =
         EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_BASELINE_FLAGS");
+    G.PacketBridgeForceLoadGameSMPreload =
+        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_PRELOAD");
+    G.PacketBridgeScheduleLoadGameSM =
+        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_SCHEDULE_LOAD_GAME_SM");
+    G.PacketBridgeForceMvlFileCache =
+        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_FILE_CACHE");
     G.PacketBridgeMaxPumpEvents = std::clamp(
         EnvInt("MELONDS_NSML_PACKET_BRIDGE_MAX_PUMP_EVENTS", kMaxPumpEvents), 1, kMaxPumpEvents);
     G.PacketBridgeMaxTickLead = EnvInt("MELONDS_NSML_PACKET_BRIDGE_MAX_TICK_LEAD", -1);
@@ -4162,6 +4412,8 @@ void InitFromEnvironment()
     G.PacketBridgeThrottleTimeoutMs = std::max(
         0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_THROTTLE_TIMEOUT_MS", 5000));
     G.DirectMvlBootEnabled = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT");
+    G.DirectMvlBootHostOnly = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_HOST_ONLY");
+    G.DirectMvlBootClientOnly = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_CLIENT_ONLY");
     G.DirectMvlBootFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_DIRECT_MVL_BOOT_FRAME", 900)));
     G.DirectMvlBootScene = std::clamp(EnvInt("MELONDS_NSML_DIRECT_MVL_BOOT_SCENE", 0x0F), 0, 0xFFFF);

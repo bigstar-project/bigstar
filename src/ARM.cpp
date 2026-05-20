@@ -177,7 +177,9 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
             || NSMLEnvFlag("MELONDS_NSML_SAFE_LOAD_LEVEL_CALL")
             || NSMLEnvFlag("MELONDS_NSML_SAFE_COURSE_SELECT_CALL")
             || NSMLEnvFlag("MELONDS_NSML_SAFE_COURSE_SELECT_FACTORY_CALL")
-            || NSMLEnvFlag("MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL")) ? 1 : 0;
+            || NSMLEnvFlag("MELONDS_NSML_SAFE_CREATE_LOAD_GAME_CALL")
+            || NSMLEnvFlag("MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL")
+            || NSMLEnvFlag("MELONDS_NSML_SAFE_SCHEDULE_LOAD_GAME_CALL")) ? 1 : 0;
     if (!enabled || !cpu || cpu->Num != 0)
         return false;
 
@@ -190,9 +192,15 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     static int courseSelectFactory = -1;
     if (courseSelectFactory < 0)
         courseSelectFactory = NSMLEnvFlag("MELONDS_NSML_SAFE_COURSE_SELECT_FACTORY_CALL") ? 1 : 0;
+    static int createLoadGame = -1;
+    if (createLoadGame < 0)
+        createLoadGame = NSMLEnvFlag("MELONDS_NSML_SAFE_CREATE_LOAD_GAME_CALL") ? 1 : 0;
     static int updateLoadGame = -1;
     if (updateLoadGame < 0)
         updateLoadGame = NSMLEnvFlag("MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL") ? 1 : 0;
+    static int scheduleLoadGame = -1;
+    if (scheduleLoadGame < 0)
+        scheduleLoadGame = NSMLEnvFlag("MELONDS_NSML_SAFE_SCHEDULE_LOAD_GAME_CALL") ? 1 : 0;
 
     static bool triggerConfigured = false;
     static u32 triggerPC = 0;
@@ -203,10 +211,14 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
                 ? "MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL_PC"
                 : courseSelectFactory
                 ? "MELONDS_NSML_SAFE_COURSE_SELECT_FACTORY_CALL_PC"
+                : createLoadGame
+                ? "MELONDS_NSML_SAFE_CREATE_LOAD_GAME_CALL_PC"
                 : courseSelect
                 ? "MELONDS_NSML_SAFE_COURSE_SELECT_CALL_PC"
                 : loadLevel
                 ? "MELONDS_NSML_SAFE_LOAD_LEVEL_CALL_PC"
+                : scheduleLoadGame
+                ? "MELONDS_NSML_SAFE_SCHEDULE_LOAD_GAME_CALL_PC"
                 : "MELONDS_NSML_SAFE_START_LOAD_CALL_PC"))
             triggerPC = static_cast<u32>(strtoul(value, nullptr, 0));
         else
@@ -215,10 +227,14 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
                 ? "MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL_FRAME"
                 : courseSelectFactory
                 ? "MELONDS_NSML_SAFE_COURSE_SELECT_FACTORY_CALL_FRAME"
+                : createLoadGame
+                ? "MELONDS_NSML_SAFE_CREATE_LOAD_GAME_CALL_FRAME"
                 : courseSelect
                 ? "MELONDS_NSML_SAFE_COURSE_SELECT_CALL_FRAME"
                 : loadLevel
                 ? "MELONDS_NSML_SAFE_LOAD_LEVEL_CALL_FRAME"
+                : scheduleLoadGame
+                ? "MELONDS_NSML_SAFE_SCHEDULE_LOAD_GAME_CALL_FRAME"
                 : "MELONDS_NSML_SAFE_START_LOAD_CALL_FRAME"))
             startFrame = static_cast<u32>(strtoul(value, nullptr, 0));
         else
@@ -239,14 +255,16 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     const bool combinedCourseSelectThenStartLoad =
         courseSelectFactory && NSMLEnvFlag("MELONDS_NSML_SAFE_START_LOAD_CALL");
     const bool effectiveStartLoad =
-        (!loadLevel && !courseSelectFactory && !courseSelect && !updateLoadGame)
+        (!loadLevel && !courseSelectFactory && !courseSelect && !createLoadGame && !updateLoadGame && !scheduleLoadGame)
         || (combinedCourseSelectThenStartLoad && cpu->NDS.NumFrames >= combinedStartLoadFrame);
     const bool effectiveCourseSelectFactory =
         courseSelectFactory && !effectiveStartLoad;
     const bool effectiveCourseSelect =
         courseSelect && !effectiveStartLoad && !effectiveCourseSelectFactory;
     const bool effectiveLoadLevel = loadLevel;
+    const bool effectiveCreateLoadGame = createLoadGame;
     const bool effectiveUpdateLoadGame = updateLoadGame;
+    const bool effectiveScheduleLoadGame = scheduleLoadGame;
 
     if (cpu->NDS.NumFrames < startFrame)
         return false;
@@ -263,7 +281,9 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         effectiveLoadLevel ? 0x01 :
         effectiveCourseSelectFactory ? 0x02 :
         effectiveCourseSelect ? 0x04 :
+        effectiveCreateLoadGame ? 0x40 :
         effectiveUpdateLoadGame ? 0x08 :
+        effectiveScheduleLoadGame ? 0x20 :
         0x10;
     if (effectiveUpdateLoadGame)
     {
@@ -282,7 +302,10 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     constexpr u32 startLoadLevelAddr = 0x0214E0C0;
     constexpr u32 createCourseSelectAddr = 0x0214F858;
     constexpr u32 courseSelectFactoryAddr = 0x020130A8;
+    constexpr u32 createLoadGameSMAddr = 0x021515B4;
     constexpr u32 updateLoadGameSMAddr = 0x021512B8;
+    constexpr u32 scheduleSubMenuChangeAddr = 0x021528A0;
+    constexpr u32 loadGameSMSubMenuAddr = 0x02156678;
     const u32 returnPC = instrAddr | ((cpu->CPSR & 0x20) ? 1u : 0u);
     u32 playerID = cpu->NDS.ARM9Read32(0x020850BC);
     if (const char* value = getenv("MELONDS_NSML_SAFE_LOAD_LEVEL_PLAYER_ID"))
@@ -334,6 +357,14 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         NSMLEmitMovImm(code, 3, 0x04);
         NSMLEmitBLViaIP(code, courseSelectFactoryAddr);
     }
+    else if (effectiveCreateLoadGame)
+    {
+        NSMLEmitMovImm(code, 0, vsConnectBase);
+        NSMLEmitMovImm(code, 1, createLoadGameSMAddr);
+        NSMLEmitMovImm(code, 2, 0);
+        NSMLEmitMovImm(code, 3, vsConnectBase + 0x118);
+        NSMLEmitBLViaIP(code, createLoadGameSMAddr);
+    }
     else if (effectiveUpdateLoadGame)
     {
         NSMLEmitMovImm(code, 0, vsConnectBase);
@@ -341,6 +372,14 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         NSMLEmitMovImm(code, 2, 0);
         NSMLEmitMovImm(code, 3, vsConnectBase + 0x120);
         NSMLEmitBLViaIP(code, updateLoadGameSMAddr);
+    }
+    else if (effectiveScheduleLoadGame)
+    {
+        NSMLEmitMovImm(code, 0, vsConnectBase);
+        NSMLEmitMovImm(code, 1, loadGameSMSubMenuAddr);
+        NSMLEmitMovImm(code, 2, 0);
+        NSMLEmitMovImm(code, 3, 1);
+        NSMLEmitBLViaIP(code, scheduleSubMenuChangeAddr);
     }
     else
     {
@@ -366,7 +405,7 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     else
         appliedMask[&cpu->NDS] |= modeMask;
     printf("NSMB SafeCall: %s frame=%u pc=%08X return=%08X vsConnect=%08X player=%u\n",
-        effectiveLoadLevel ? "loadLevel" : effectiveCourseSelectFactory ? "courseSelectFactory" : effectiveCourseSelect ? "createCourseSelect" : effectiveUpdateLoadGame ? "updateLoadGameSM" : "startLoadLevel",
+        effectiveLoadLevel ? "loadLevel" : effectiveCourseSelectFactory ? "courseSelectFactory" : effectiveCourseSelect ? "createCourseSelect" : effectiveCreateLoadGame ? "createLoadGameSM" : effectiveUpdateLoadGame ? "updateLoadGameSM" : effectiveScheduleLoadGame ? "scheduleLoadGameSM" : "startLoadLevel",
         cpu->NDS.NumFrames,
         instrAddr,
         returnPC,
@@ -381,28 +420,77 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
 {
     static int enabled = -1;
     static int forceStageSceneArg = -1;
+    static int forceScheduleLoadGameSMArgs = -1;
     static u32 startFrame = 0;
+    static u32 forceScheduleLoadGameSMArgsFrame = 0;
     if (enabled < 0)
     {
-        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY") ? 1 : 0;
+        const bool forceNetReady = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY");
+        const bool forceScheduleLoadGameSM = NSMLEnvFlag("MELONDS_NSML_FORCE_SCHEDULE_LOAD_GAME_SM_ARGS");
+        enabled = (forceNetReady || forceScheduleLoadGameSM) ? 1 : 0;
         forceStageSceneArg = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_SCENE_ARG") ? 1 : 0;
+        forceScheduleLoadGameSMArgs = forceScheduleLoadGameSM ? 1 : 0;
         if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME"))
             startFrame = static_cast<u32>(strtoul(value, nullptr, 0));
+        if (const char* value = getenv("MELONDS_NSML_FORCE_SCHEDULE_LOAD_GAME_SM_ARGS_FRAME"))
+            forceScheduleLoadGameSMArgsFrame = static_cast<u32>(strtoul(value, nullptr, 0));
+        printf("NSMB PacketBridge: net hotpatch config forceNetReady=%d forceScheduleLoadGameSMArgs=%d scheduleFrame=%u\n",
+            forceNetReady ? 1 : 0,
+            forceScheduleLoadGameSMArgs,
+            forceScheduleLoadGameSMArgsFrame);
+        fflush(stdout);
     }
     if (!enabled || !cpu || cpu->Num != 0)
         return;
+    if (forceScheduleLoadGameSMArgs && cpu->NDS.NumFrames >= forceScheduleLoadGameSMArgsFrame
+        && instrAddr == 0x021528A0)
+    {
+        cpu->R[1] = 0x02156678;
+        cpu->R[2] = 0;
+        cpu->R[3] = 1;
+        static int logCount = 0;
+        if (logCount < 8)
+        {
+            printf("NSMB PacketBridge: redirect scheduleSubMenuChange to loadGameSM frame=%u vsConnect=%08X\n",
+                cpu->NDS.NumFrames,
+                cpu->R[0]);
+            fflush(stdout);
+            logCount++;
+        }
+    }
     if (cpu->NDS.NumFrames < startFrame)
         return;
     if (instrAddr == 0x020068A8 && IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
     {
-        if (cpu->R[0] == 0x0F && cpu->R[2] == 9 && cpu->R[1] == 0)
+        if (cpu->R[0] == 0x0F && cpu->R[2] == 9)
         {
-            cpu->R[1] = 1;
+            static int roleClient = -1;
+            if (roleClient < 0)
+            {
+                const char* role = getenv("MELONDS_NSML_ROLE");
+                roleClient = (role && strcmp(role, "client") == 0) ? 1 : 0;
+            }
+            const u32 sp = cpu->R[13];
+            cpu->R[1] = 1; // vs
+            cpu->DataWrite32(sp + 0x00, 0); // act
+            cpu->DataWrite32(sp + 0x04, roleClient ? 1 : 0); // playerID
+            cpu->DataWrite32(sp + 0x08, 3); // playerMask
+            cpu->DataWrite32(sp + 0x0C, 0); // character1: Mario
+            cpu->DataWrite32(sp + 0x10, 1); // character2: Luigi
+            cpu->DataWrite32(sp + 0x14, 0); // powerup
+            cpu->DataWrite32(sp + 0x18, 0xFF); // entrance
+            cpu->DataWrite32(sp + 0x1C, 1); // flag
+            cpu->DataWrite32(sp + 0x20, 1); // unused1, matches normal MvL load path
+            cpu->DataWrite32(sp + 0x24, 0xFF); // controlOptions
+            cpu->DataWrite32(sp + 0x28, 0); // unused2
+            cpu->DataWrite32(sp + 0x2C, 0); // challengeMode
+            cpu->DataWrite32(sp + 0x30, 0xFFFFFFFFu); // rngSeed: use network/random state
             static int logCount = 0;
             if (logCount < 8)
             {
-                printf("NSMB PacketBridge: force Game::loadLevel vs arg frame=%u\n",
-                    cpu->NDS.NumFrames);
+                printf("NSMB PacketBridge: force Game::loadLevel MvL args frame=%u playerID=%u\n",
+                    cpu->NDS.NumFrames,
+                    roleClient ? 1u : 0u);
                 fflush(stdout);
                 logCount++;
             }
@@ -1628,16 +1716,28 @@ static bool IsNSMLMainRAMAddress(u32 addr)
     return (addr & 0xFF000000) == 0x02000000;
 }
 
+static bool IsNSMLDTCMAddress(ARM* cpu, u32 addr)
+{
+    return cpu && cpu->Num == 0 && cpu->NDS.ARM9.DTCM && ((addr & cpu->NDS.ARM9.DTCMMask) == cpu->NDS.ARM9.DTCMBase);
+}
+
+static u8 ReadNSMLTraceByte(ARM* cpu, u32 addr)
+{
+    if (IsNSMLDTCMAddress(cpu, addr))
+        return cpu->NDS.ARM9.DTCM[addr & 0x3FFF];
+    return cpu->NDS.ARM9Read8(addr);
+}
+
 static void WriteNSMLHexDump(FILE* file, ARM* cpu, u32 addr, u32 len)
 {
-    if (!file || !cpu || !IsNSMLMainRAMAddress(addr) || len == 0)
+    if (!file || !cpu || (!IsNSMLMainRAMAddress(addr) && !IsNSMLDTCMAddress(cpu, addr)) || len == 0)
     {
         fputc('-', file);
         return;
     }
 
     for (u32 i = 0; i < len; i++)
-        fprintf(file, "%02X", cpu->NDS.ARM9Read8(addr + i));
+        fprintf(file, "%02X", ReadNSMLTraceByte(cpu, addr + i));
 }
 
 static bool ParseNSMLU32List(const char* value, std::vector<u32>& out)
@@ -2417,7 +2517,15 @@ void ARMv5::PrefetchAbort()
 
 void ARMv5::DataAbort()
 {
-    Log(LogLevel::Warn, "ARM9: data abort (%08X)\n", R[15]);
+    Log(LogLevel::Warn,
+        "ARM9: data abort (pc=%08X lr=%08X sp=%08X r0=%08X r1=%08X r2=%08X r3=%08X)\n",
+        R[15],
+        R[14],
+        R[13],
+        R[0],
+        R[1],
+        R[2],
+        R[3]);
 
     u32 oldcpsr = CPSR;
     CPSR &= ~0xBF;
