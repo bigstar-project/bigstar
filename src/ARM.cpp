@@ -412,7 +412,7 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     constexpr u32 createLoadGameSMAddr = 0x021515B4;
     constexpr u32 updateLoadGameSMAddr = 0x021512B8;
     constexpr u32 scheduleSubMenuChangeAddr = 0x021528A0;
-    constexpr u32 loadGameSMSubMenuAddr = 0x02156678;
+    constexpr u32 loadGameSMSubMenuAddr = 0x02156624;
     constexpr u32 tryChangeSceneAddr = 0x020131DC;
     const u32 returnPC = instrAddr | ((cpu->CPSR & 0x20) ? 1u : 0u);
     u32 playerID = cpu->NDS.ARM9Read32(0x020850BC);
@@ -511,7 +511,7 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     {
         NSMLEmitMovImm(code, 0, vsConnectBase);
         NSMLEmitMovImm(code, 1, loadGameSMSubMenuAddr);
-        NSMLEmitMovImm(code, 2, 0);
+        NSMLEmitMovImm(code, 2, 0x1E);
         NSMLEmitMovImm(code, 3, 1);
         NSMLEmitBLViaIP(code, scheduleSubMenuChangeAddr);
     }
@@ -604,8 +604,8 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
     if (forceScheduleLoadGameSMArgs && cpu->NDS.NumFrames >= forceScheduleLoadGameSMArgsFrame
         && instrAddr == 0x021528A0)
     {
-        cpu->R[1] = 0x02156678;
-        cpu->R[2] = 0;
+        cpu->R[1] = 0x02156624;
+        cpu->R[2] = 0x1E;
         cpu->R[3] = 1;
         static int logCount = 0;
         if (logCount < 8)
@@ -2677,14 +2677,26 @@ void ARMv5::PrefetchAbort()
 void ARMv5::DataAbort()
 {
     Log(LogLevel::Warn,
-        "ARM9: data abort (pc=%08X lr=%08X sp=%08X r0=%08X r1=%08X r2=%08X r3=%08X)\n",
+        "ARM9: data abort (pc=%08X lr=%08X sp=%08X cpsr=%08X instr=%08X fault=%08X r0=%08X r1=%08X r2=%08X r3=%08X r4=%08X r5=%08X r6=%08X r7=%08X r8=%08X r9=%08X r10=%08X r11=%08X r12=%08X)\n",
         R[15],
         R[14],
         R[13],
+        CPSR,
+        CurInstr,
+        DataRegion,
         R[0],
         R[1],
         R[2],
-        R[3]);
+        R[3],
+        R[4],
+        R[5],
+        R[6],
+        R[7],
+        R[8],
+        R[9],
+        R[10],
+        R[11],
+        R[12]);
 
     u32 oldcpsr = CPSR;
     CPSR &= ~0xBF;
