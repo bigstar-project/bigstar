@@ -28,16 +28,20 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦モード `Mario 
 - CourseSelect state byte (`courseSelect+0x64`) の write trace により、通常 LAN は `1 -> 0x0B -> 2 -> 3 ... -> 9` と進むが、bridge は `1` で止まることを確認した。
 - CourseSelect state `1` の PC 範囲トレースにより、通常 LAN は `0x0214ED18` 直前の readiness result が `r0=1`、bridge は `r0=0` になって次 state に進まないことを特定した。
 - `0x0214ED18` の readiness result を満たす hotpatch により、host 側は `StartLoadLevel` / `Game::loadLevel` まで自然到達し、`stageGroup=9` へ進むようになった。
+- `ForceLoadGameSMBaselineFlags` の client 側が `step=7` へ自然遷移した後も `step=6` へ戻し続ける問題を修正した。
+- `ForceNetReady` は host-only で使うのが現状の正解。client に同じ `0x02087F30` / `Net::marker` 補正を入れると通常 LAN と違う状態になり、CourseSelect / load へ進まない。
+- host-only `ForceNetReady` + loadSM 補正により、client も `CourseSelect` 経由で `stageGroup=9` まで到達するようになった。
+- `Game::loadLevel` の call trace により、通常 LAN は host/client とも `vs=1` で呼ぶが、WAN adapter client は `vs=0` で呼んでいたことを特定した。`group=9` の `Game::loadLevel` entry で `vs` 引数を 1 に補正する diagnostic hotpatch を追加した。
 
 ## 現在のブロッカー
 
-host は `stageGroup=9` まで進むが、player actors / Big Star actor はまだ生成されず、host 側で `ARM9 data abort (0205545C)` が出る。
+host/client とも `stageGroup=9`, `vsMode=1`, role 別 `localPlayerID` までは到達する。ただし player actors / Big Star actor はまだ生成されない。通常 LAN では 2900f 前後で player actors と Big Star actor が揃うが、WAN adapter では 3600f でも 0 のまま。
 
-client は `VSConnect` の `step 6/7` 状態を書けていても `updateLoadGameSM` が自然に呼ばれず、CourseSelect 系 state も作れない。`SafeCourseSelectFactoryCall` を 1900f / 1878f で入れても client 側は CourseSelect object として検出されず、`stageGroup=9` へ進まない。
+host 側では `ARM9 data abort (0205545C)` が残る。`CreateObject(id=3, settings=0x00B5FF00)` の第3引数が通常 LAN の `0x0208B040` に対し、WAN adapter host では `0x00000006` になる差分を見つけた。診断用スイッチ `PacketBridgeForceStageSceneArg` でこの引数を `0x0208B040` へ補正しても actor 生成は戻らなかったため、`Game::loadLevel` の残り引数または stage init 前提状態にまだ差分がある。
 
 client-only `RunUpdate` 注入は `ARM9 data abort` になったため不採用。`SafeStartLoadCall` は host/client とも `stageGroup=9` へ進めるが、host は data abort と黒画面に入り、player actors / Big Star actor が生成されないため成功扱いにしない。
 
-次は、client 側で通常 LAN と同等の CourseSelect / load state が作られない理由と、host の `Game::loadLevel` 後に actor 生成へ進まない理由を追う。
+次は、`external/NSMB-Code-Reference` の `Game::loadLevel` signature と entity/object生成構造を使い、`loadLevel` の stack 引数または stage scene 初期化前提状態の差分を追う。
 
 ## 実装済みの主なフック
 
@@ -50,6 +54,7 @@ client-only `RunUpdate` 注入は `ARM9 data abort` になったため不採用�
 - Big Star actor ID `0x00D2` 周辺 probe
 - `PacketBridgeForceTick`
 - `ForceNetReady`, `ForceLoadGameSM`, `ForceTransferResult`
+- role scoped `ForceNetReady` (`host-only` / `client-only`)
 - `ForceLoadGameSMBaselineFlags`
 - `SafeStartLoadCall`, `SafeCourseSelectCall`, `SafeCourseSelectFactoryCall`
 - 黒画面検査、通信切断画面検査、gameplay actor 検査
@@ -86,12 +91,15 @@ client-only `RunUpdate` 注入は `ARM9 data abort` になったため不採用�
 - CourseSelect state byte write trace: `logs/nsmvl-baseline-course064-writetrace-20260520-continue`, `logs/nsmvl-bridge-course064-writetrace-20260520-continue`
 - CourseSelect state1 readiness trace: `logs/nsmvl-baseline-course-state1-pcrange-20260520-continue`, `logs/nsmvl-bridge-course-state1-pcrange-20260520-continue`
 - CourseSelect state1 ready hotpatch で host が `Game::loadLevel` 到達: `logs/nsmvl-bridge-course-state1-ready-20260520-continue`
+- host-only `ForceNetReady` で client も `stageGroup=9` 到達: `logs/nsmvl-bridge-loadsm-hostonly-stop-after-stage-20260520-continue`
+- `Game::loadLevel` 引数比較: `logs/nsmvl-baseline-loadlevel-args-20260520-continue`, `logs/nsmvl-bridge-loadlevel-args-20260520-continue`
+- `Game::loadLevel(vs=1)` と stage scene arg 補正検証: `logs/nsmvl-bridge-loadlevel-vsarg-20260520-continue`, `logs/nsmvl-bridge-stage-scene-arg-20260520-continue`
 
 ## 次にやること
 
-1. client 側で通常 LAN と同等の CourseSelect / load state が作られない原因を、object action/state と callback pointer 周辺の通常 LAN 差分から特定する。
-2. host の `Game::loadLevel` 後に player actors / Big Star actor が生成されず data abort する原因を、通常 LAN の load 後 RAM / call trace と比較する。
-3. `SafeStartLoadCall` のような強制ロードではなく、NSMB の接続 state-machine が期待する readiness / packet / object state を adapter 側で満たす。
+1. `Game::loadLevel` の stack 引数を読める trace hook を追加し、通常 LAN と WAN adapter の `playerID`, `playerMask`, `character1/2`, `rngSeed` などを比較する。
+2. `CreateObject(id=3, settings=0x00B5FF00)` 以降の stage scene 初期化で、通常 LAN と WAN adapter の最初の差分を call trace / RAM dump で追う。
+3. player actors / Big Star actor が生成されたら、actor検査をスキップしない smoke に戻す。
 4. host/client 両方で player actors と Big Star actor が生成されたら、keys-only WAN packet bridge と結合し、入力が双方で反映されるか確認する。
 
 ## 必要なもの

@@ -464,6 +464,8 @@ struct State
     bool PacketBridgeForceNetReady = false;
     melonDS::u32 PacketBridgeForceNetReadyStartFrame = 0;
     melonDS::u32 PacketBridgeForceNetReadyEndFrame = 0;
+    bool PacketBridgeForceNetReadyHostOnly = false;
+    bool PacketBridgeForceNetReadyClientOnly = false;
     bool PacketBridgeForceNetReadyState10 = false;
     bool PacketBridgeForceNetReadyState10ClientOnly = false;
     bool PacketBridgeForceLoadGameSM = false;
@@ -1267,6 +1269,10 @@ void ForceNSMLPacketBridgeNetReadyIfNeeded(int instanceID, melonDS::u32 frame, m
         return;
     if (G.PacketBridgeForceNetReadyEndFrame != 0 && frame > G.PacketBridgeForceNetReadyEndFrame)
         return;
+    if (G.PacketBridgeForceNetReadyHostOnly && G.NetRole != Role::Host)
+        return;
+    if (G.PacketBridgeForceNetReadyClientOnly && G.NetRole != Role::Client)
+        return;
     if (nds->ARM9Read32(kNetGGIDAddr) != 0x42)
         return;
 
@@ -1312,6 +1318,12 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
         return;
     if (nds->ARM9Read32(kNetGGIDAddr) != 0x42)
         return;
+    if (nds->ARM9Read32(kGameStageGroupAddr) == 9)
+    {
+        nds->ARM9Write32(kGameVsModeAddr, 0x00000001);
+        nds->ARM9Write32(kGameLocalPlayerIDAddr, (G.NetRole == Role::Client) ? 1 : 0);
+        return;
+    }
 
     const melonDS::u32 vsConnectBase = FindObjectBaseByID(nds, kVsConnectObjectID);
     if (vsConnectBase == 0)
@@ -1384,7 +1396,7 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
             if (rel >= 48)
             {
                 const melonDS::u32 beforeStep = nds->ARM9Read32(vsConnectBase + 0x144);
-                WriteARM9U32(nds, vsConnectBase + 0x144, 6);
+                WriteARM9U32(nds, vsConnectBase + 0x144, std::max<melonDS::u32>(beforeStep, 6));
                 if (beforeStep < 6)
                     WriteARM9U32(nds, vsConnectBase + 0x148, 0x24);
                 WriteARM9U32(nds, vsConnectBase + 0x154, 0x00030000 | roleBit);
@@ -4119,6 +4131,10 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME", 0)));
     G.PacketBridgeForceNetReadyEndFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_END_FRAME", 0)));
+    G.PacketBridgeForceNetReadyHostOnly =
+        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_HOST_ONLY");
+    G.PacketBridgeForceNetReadyClientOnly =
+        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_CLIENT_ONLY");
     G.PacketBridgeForceNetReadyState10 =
         EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10");
     G.PacketBridgeForceNetReadyState10ClientOnly =

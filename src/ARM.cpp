@@ -380,10 +380,12 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
 static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
 {
     static int enabled = -1;
+    static int forceStageSceneArg = -1;
     static u32 startFrame = 0;
     if (enabled < 0)
     {
         enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY") ? 1 : 0;
+        forceStageSceneArg = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_SCENE_ARG") ? 1 : 0;
         if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME"))
             startFrame = static_cast<u32>(strtoul(value, nullptr, 0));
     }
@@ -391,6 +393,40 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
         return;
     if (cpu->NDS.NumFrames < startFrame)
         return;
+    if (instrAddr == 0x020068A8 && IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
+    {
+        if (cpu->R[0] == 0x0F && cpu->R[2] == 9 && cpu->R[1] == 0)
+        {
+            cpu->R[1] = 1;
+            static int logCount = 0;
+            if (logCount < 8)
+            {
+                printf("NSMB PacketBridge: force Game::loadLevel vs arg frame=%u\n",
+                    cpu->NDS.NumFrames);
+                fflush(stdout);
+                logCount++;
+            }
+        }
+        return;
+    }
+    if (forceStageSceneArg && instrAddr == 0x020130A8 && IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
+    {
+        if (cpu->R[0] == 0x00000003
+            && cpu->R[1] == 0x00B5FF00
+            && (cpu->R[2] < 0x02000000 || cpu->R[2] >= 0x02400000))
+        {
+            cpu->R[2] = 0x0208B040;
+            static int logCount = 0;
+            if (logCount < 8)
+            {
+                printf("NSMB PacketBridge: force stage scene create arg frame=%u\n",
+                    cpu->NDS.NumFrames);
+                fflush(stdout);
+                logCount++;
+            }
+        }
+        return;
+    }
     if (instrAddr == 0x021514E4 && IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
     {
         const u32 vsConnectBase = NSMLFindObjectBaseByID(cpu->NDS, 0x0006);
