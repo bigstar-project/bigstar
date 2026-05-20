@@ -77,6 +77,11 @@ param(
     [int]$PacketBridgeDummyAllocSize = 0,
     [switch]$PacketBridgeScheduleLoadGameSM,
     [int]$PacketBridgeScheduleLoadGameSMFrame = 0,
+    [string]$PacketBridgeSubMenuSchedule = "",
+    [switch]$PacketBridgeSubMenuDirect,
+    [switch]$PacketBridgeSubMenuCallCreate,
+    [switch]$PacketBridgeForceStageStartSMFields,
+    [int]$PacketBridgeForceStageStartSMFieldsStartFrame = 0,
     [switch]$PacketBridgeForceMvlFileCache,
     [int]$PacketBridgeLookupTickDelay = 0,
     [int]$PacketBridgeMaxPumpEvents = 64,
@@ -164,7 +169,7 @@ param(
     [int]$SafeCallProbeMax = 80,
     [switch]$PacketBridgeSafeCreateLoadGameSM,
     [int]$PacketBridgeSafeCreateLoadGameSMFrame = 0,
-    [string]$PacketBridgeSafeCreateLoadGameSMPC = "0x021512B8",
+    [string]$PacketBridgeSafeCreateLoadGameSMPC = "0x02151E94",
     [switch]$ForceCourseSelectFactory,
     [switch]$ForceCourseSelectFactoryClientOnly,
     [int]$ForceCourseSelectFactoryFrame = 2300,
@@ -503,6 +508,28 @@ function Start-MelonLANProcess {
     } else {
         Remove-Item Env:\MELONDS_NSML_FORCE_SCHEDULE_LOAD_GAME_SM_ARGS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_SCHEDULE_LOAD_GAME_SM_ARGS_FRAME -ErrorAction SilentlyContinue
+    }
+    if ($PacketBridgeSubMenuSchedule) {
+        $env:MELONDS_NSML_PACKET_BRIDGE_SUBMENU_SCHEDULE = "$PacketBridgeSubMenuSchedule"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_SUBMENU_SCHEDULE -ErrorAction SilentlyContinue
+    }
+    if ($PacketBridgeSubMenuDirect) {
+        $env:MELONDS_NSML_PACKET_BRIDGE_SUBMENU_DIRECT = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_SUBMENU_DIRECT -ErrorAction SilentlyContinue
+    }
+    if ($PacketBridgeSubMenuCallCreate) {
+        $env:MELONDS_NSML_PACKET_BRIDGE_SUBMENU_CALL_CREATE = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_SUBMENU_CALL_CREATE -ErrorAction SilentlyContinue
+    }
+    if ($PacketBridgeForceStageStartSMFields) {
+        $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_FIELDS = "1"
+        $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_FIELDS_START_FRAME = "$PacketBridgeForceStageStartSMFieldsStartFrame"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_FIELDS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_FIELDS_START_FRAME -ErrorAction SilentlyContinue
     }
     if ($ForceCourseSelectFactory -and (-not $ForceCourseSelectFactoryClientOnly -or $Role -eq "client")) {
         $env:MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY = "1"
@@ -1291,6 +1318,11 @@ function Start-MelonLANProcess {
         "scheduleSwitch=$PacketBridgeScheduleLoadGameSM"
         "scheduleEnv=$($env:MELONDS_NSML_FORCE_SCHEDULE_LOAD_GAME_SM_ARGS)"
         "scheduleFrame=$($env:MELONDS_NSML_FORCE_SCHEDULE_LOAD_GAME_SM_ARGS_FRAME)"
+        "submenuSchedule=$($env:MELONDS_NSML_PACKET_BRIDGE_SUBMENU_SCHEDULE)"
+        "submenuDirect=$($env:MELONDS_NSML_PACKET_BRIDGE_SUBMENU_DIRECT)"
+        "submenuCallCreate=$($env:MELONDS_NSML_PACKET_BRIDGE_SUBMENU_CALL_CREATE)"
+        "forceStageStartSMFields=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_FIELDS)"
+        "forceStageStartSMFieldsStart=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_FIELDS_START_FRAME)"
     ) |
         Set-Content -Encoding UTF8 "$Stdout.env.txt"
     $err = "$Stdout.err"

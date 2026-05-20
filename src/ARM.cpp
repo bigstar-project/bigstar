@@ -409,8 +409,8 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     constexpr u32 startLoadLevelAddr = 0x0214E0C0;
     constexpr u32 createCourseSelectAddr = 0x0214F858;
     constexpr u32 courseSelectFactoryAddr = 0x020130A8;
-    constexpr u32 createLoadGameSMAddr = 0x021515B4;
-    constexpr u32 updateLoadGameSMAddr = 0x021512B8;
+    constexpr u32 createLoadGameSMAddr = 0x021520A0;
+    constexpr u32 updateLoadGameSMAddr = 0x02151E94;
     constexpr u32 scheduleSubMenuChangeAddr = 0x021528A0;
     constexpr u32 loadGameSMSubMenuAddr = 0x02156624;
     constexpr u32 tryChangeSceneAddr = 0x020131DC;
@@ -678,7 +678,7 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
     {
         const u32 vsConnectBase = NSMLFindObjectBaseByID(cpu->NDS, 0x0006);
         if (vsConnectBase != 0
-            && cpu->NDS.ARM9Read32(vsConnectBase + 0x120) == 0x021512B8
+            && cpu->NDS.ARM9Read32(vsConnectBase + 0x120) == 0x02151E94
             && cpu->NDS.ARM9Read32(vsConnectBase + 0x144) == 6
             && (cpu->NDS.ARM9Read32(vsConnectBase + 0x154) & 0x00030000) == 0x00030000)
         {
@@ -713,7 +713,7 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
         }
         return;
     }
-    if (instrAddr != 0x021512B8) // VSConnect::updateLoadGameSM()
+    if (instrAddr != 0x02151E94) // VSConnect::updateLoadGameSM()
         return;
     if (!IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
         return;
@@ -2001,6 +2001,7 @@ static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
         u32 StartFrame = 0;
         u32 EndFrame = 0xFFFFFFFF;
         u32 DumpLen = 32;
+        bool UseR2AsDumpLen = false;
         FILE* LogFile = nullptr;
     };
 
@@ -2037,6 +2038,7 @@ static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
             if (const char* dumpLen = getenv("MELONDS_NSML_CALL_TRACE_DUMP_LEN"))
                 cfg.DumpLen = static_cast<u32>(strtoul(dumpLen, nullptr, 0));
             if (cfg.DumpLen > 512) cfg.DumpLen = 512;
+            cfg.UseR2AsDumpLen = NSMLEnvFlag("MELONDS_NSML_CALL_TRACE_USE_R2_DUMP_LEN");
             if (const char* logPath = getenv("MELONDS_NSML_CALL_TRACE_LOG"))
             {
                 if (logPath[0])
@@ -2085,7 +2087,7 @@ static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
     const u32 vsTimer = r0IsVsConnect ? cpu->NDS.ARM9Read32(r0 + 0x148) : 0;
     const u32 vsFlags = r0IsVsConnect ? cpu->NDS.ARM9Read32(r0 + 0x154) : 0;
     u32 dumpLen = cfg.DumpLen;
-    if (r2 > 0 && r2 < dumpLen) dumpLen = r2;
+    if (cfg.UseR2AsDumpLen && r2 > 0 && r2 < dumpLen) dumpLen = r2;
 
     FILE* out = cfg.LogFile ? cfg.LogFile : stdout;
     std::lock_guard<std::mutex> outputLock(NSMLTraceOutputMutex);

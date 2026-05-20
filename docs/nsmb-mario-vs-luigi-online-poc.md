@@ -2,85 +2,70 @@
 
 ## 目的
 
-New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦モード `Mario vs Luigi` を、最終的に `1 melonDS instance * 2PC` で WAN 越しに遊べる形にする。
+New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` で WAN 越しに遊べる形へ持っていく。
 
-現在の本命方針は、DS LocalMP 全体を WAN に流すのではなく、NSMB の MvL が使う接続 state-machine と gameplay packet を解析し、LocalMP の代わりに WAN adapter から必要な packet/state を渡す方式。
+現方針は、`LocalMP` や `2インスタンス * 2プロセス` を最終形にしない。NSMB 側の MvL 接続 state-machine と gameplay packet を解析し、ローカル無線の代わりに WAN adapter から必要な packet/state を渡す。
 
 ## 採用しない方針
 
-- `2 instances * 2PC` を最終形にする方針: LocalMP 間の actor/object 差分が残り、重く、検証も遅い。
-- savestate 同期を最終形にする方針: 通信状態と actor lifecycle が揃わず、切断やズレが残る。
-- 試合途中で LocalMP から WAN に切り替える方針: 切り替え時の停止で host/client state が壊れやすい。
-- `MPInterface_LAN` を単純に WAN 化する方針: LAN 前提の遅延で接続/開始段階が崩れる。
+- `2 instances * 2PC` を最終形にする方針: LocalMP 間でも actor/object 差分が残り、重く、WAN 検証のフィードバックループが遅い。
+- savestate 同期を最終形にする方針: 通信状態と actor lifecycle が噛み合わず、切断やズレが残る。
+- 試合開始後に LocalMP から WAN へ切り替える方針: 切り替え時の停止で host/client state が崩れやすい。
+- `MPInterface_LAN` を単純に WAN 化する方針: LAN 前提の遅延で接続開始段階が崩れる。
 
 ## 現在の到達点
 
 - 通常 LocalMP LAN ルートでは `stageGroup=9`, `vsMode=1`, player actors, Big Star actor まで到達できる。
-- NSMB Central の情報と実測から、MvL gameplay packet は主に `tick`, `keys`, `action` を中心に構成されることを確認済み。
-- NoLanMP + PacketBridge from start で host/client 双方の packet 送受信自体は可能。
-- `SafeStartLoadCall` を `0206B83C` から呼ぶと host/client とも `VSStageIntro` scene `0x0F` の `READY!` 画面まで到達する。
-- scene request 方式で `scenePrevious=0x5`, `sceneNext=0x3` を立てると、host/client とも stage scene `0x03` までは進む。
-- `PacketBridgeForceStagePacketWords` を追加し、自然 LAN と違っていた stage packet words を host/client とも `0xFFFF0003` 系に維持できるようにした。
-- Data abort ログを拡張し、fault address / CPSR / 命令 / r0-r12 を出せるようにした。
+- NSMB Central と実測から、MvL gameplay packet は主に `tick`, `keys`, `action` を持つ入力同期パケットであることを確認済み。
+- `NoLanMP + PacketBridge from start` で packet 送受信自体は可能。
+- PacketBridge の `WireNSMLPacket` は ENet reliable packet に変更済み。localhost でも tick 欠落が出ていたため、ここは reliable が妥当。
+- `PacketBridgeWait` は、まだ一度も remote packet を受け取っていない段階では待たないよう修正済み。
+- `NoLanMP + PacketBridgeSubMenuSchedule` を追加し、自然 LAN で観測した VSConnect サブメニュー列をスクリプトから注入できるようにした。
+- サブメニューの direct-change も追加した。任意PCから create 関数を呼ぶと data abort するため、デフォルトは current create/update/render ポインタの差し替えだけにしている。
+- direct-change と stage-start field forcing により、`NoLanMP` でも VSConnect の stage-start state から scene 5 `CourseSelect` までは到達できる。
+
+## 最新の重要な発見
+
+`A2DJ` の VSConnect サブメニューアドレスは、US/Code Reference の値をそのまま使えない。自然 LocalMP の trace から、少なくとも以下を確認した。
+
+- `0x02156624`: create `0x021520A0`, update `0x02151E94`, render `0x02151E54`
+- `0x02156640`: create `0x02151D74`, update `0x021519F0`, render `0x021519B0`
+- `0x02156678`: create `0x021515B4`, update `0x021512B8`, render `0x0215125C`
+- `0x02156694`: create `0x02151950`, update `0x021517A4`, render `0x02151764`
+
+自然遷移のサブメニュー列:
+
+- host: `0x02156624 -> 0x02156640 -> 0x02156678`
+- client: `0x02156624 -> 0x02156640 -> 0x02156694 -> 0x02156678`
+
+`0x02156624` へ直接 `scheduleSubMenuChange(..., 0x1E, 1)` しても、自然遷移と同じにはならない。任意PCからの create 呼び出しも data abort する。現在は create を呼ばずに current sub-menu pointer を差し替え、必要な前提フィールドを最小限だけ再現する方向で追っている。
 
 ## 現在のブロッカー
 
-stage scene `0x03` 生成後に gameplay actor が生成されず、ARM9 data abort で止まる。
+`NoLanMP + PacketBridge from start` は、自然 LocalMP と同じ MvL stage load へまだ入れていない。
 
-現在の abort は以下の形:
+直近の診断では、VSConnect stage-start state から scene 5 `CourseSelect` までは進めたが、自然 LAN のように `sceneNext=0x0F` を立てる CourseSelect 更新処理が走らない。`DirectMvlBoot` で `Game::loadLevel` を強制すると `stageGroup=9` は立つが、`pc=020448C0` 付近で ARM9 data abort し、scene 5 から進まない。
 
-- `pc=0205545C`
-- `lr=02044388`
-- `instr=E510000C`
-- `fault=FFFFFFF4`
-- `r0=00000000`
+`020448C0` は Code Reference 上では `MTX::rotateX` 付近なので、乱数や packet そのものではなく、ステージ/メニュー遷移を不自然に飛ばした結果、初期化されていない object/resource へ描画・行列処理が入っている可能性が高い。
 
-Code Reference と call trace から、これは乱数 seed そのものではなく、`Random::Random` 周辺から heap backend に入り、stage 生成中に参照する resource / heap block の管理ヘッダが自然 LAN と一致していない問題と見ている。
-
-## 直近の重要な検証
-
-- `logs/nsmvl-force-stage-packet-words-postrefresh-20260520`
-  - host/client とも `0x02087F04`, `0x0208B044`, `0x0208B048..54`, `0x02186A88` を自然 LAN 相当に揃えられた。
-  - ただし actor は出ず、同じ data abort が残った。
-- `logs/nsmvl-abort-calltrace-20260520`
-  - forced route の abort 直前に `Random::Random` が `r1=0228E720` を参照していることを確認。
-- `logs/nsmvl-natural-calltrace-random-20260520`
-  - 自然 LAN では対応する初回参照が `r1=0228F080` になり、その後 actor 生成まで進む。
-- `logs/nsmvl-forced-heapheader-dump-20260520` / `logs/nsmvl-natural-heapheader-dump2-20260520`
-  - forced route の resource block は自然 LAN と heap allocation の位置・管理ヘッダが異なる。
-  - そのため stage scene 生成時の `sizeOf` / heap backend 相当の参照で null/不正ヘッダへ落ちる可能性が高い。
-- `logs/nsmvl-natural-loadfiles-trace-20260520`
-  - 自然 LAN では `loadMvsLFilesThread(0x0208A478, 1, 'MSEG', 0)` が host `1887` / client `1896` 付近で一度走る。
-  - その後 `FS::Cache::loadFile(0x02085470, 0x80, ...)` が stage 生成前に呼ばれる。
-- `logs/nsmvl-natural-loadsm-sequence-20260520`
-  - 自然 LAN の `VSConnect::scheduleSubMenuChange` では load-game 系候補として `r1=02156624`, `r2=0x1E`, `r3=1` が使われる。
-  - 旧仮説の `0x02156678` は不採用に更新。
-- `logs/nsmvl-schedule-loadsm-2156624-hotpatchfix-20260520` / `logs/nsmvl-schedule-loadsm-delay1e-20260520`
-  - 外部 trampoline から `scheduleSubMenuChange(0x02156624, 0x1E, 1)` を呼んでも `VSConnect` state は `0x02151E94` のまま進まず、自然 caller と同等にはならない。
-- `logs/nsmvl-dummyalloc-0960-20260520` / `logs/nsmvl-dummycachealloc-0960-20260520`
-  - heap 位置合わせ目的の dummy allocation を試したが、`Memory::allocate` 直呼びは `prefetch abort(00000004)`、`FS::Cache::loadData` 直呼びは `pc=02009F7C` の data abort になる。
-  - cache/heap を単発関数呼び出しで無理に進めるより、自然 LAN の上位 state-machine を通す必要がある。
-
-## 実装済みの主なテストフック
+## 主な実装済みテストフック
 
 - 入力スクリプト再生
 - screenshot / framebuffer dump
 - game-state trace
 - call trace / write trace
 - MainRAM dump
-- packet capture / packet replay / packet bridge trace
-- Big Star actor ID `0x00D2` 周辺 probe
+- packet capture / replay / bridge trace
+- Big Star actor probe
 - `PacketBridgeForceTick`
 - `ForceNetReady`, `ForceLoadGameSM`, `ForceTransferResult`
-- role scoped `ForceNetReady`
-- `ForceLoadGameSMBaselineFlags`
 - `SafeStartLoadCall`, `SafeCourseSelectCall`, `SafeCourseSelectFactoryCall`
 - `SafeStageSceneFactoryCall`
-- `SafeCallProbe`, `SafeCallProbeOnly`, CPSR mode フィルタ
-- `SafeTryChangeSceneTarget`, `SafeTryChangeSceneSetOnly`
+- `SafeCallProbe`, `SafeCallProbeOnly`
 - `SafeUpdateLoadGameCall`, `SafeCreateLoadGameSM`
 - `PacketBridgeForceStagePacketWords`
-- `PacketBridgeDummyAlloc`
+- `PacketBridgeSubMenuSchedule`, `PacketBridgeSubMenuDirect`
+- `PacketBridgeForceStageStartSMFields`
 - Data abort register/fault-address logging
 
 ## 重要アドレス
@@ -95,26 +80,29 @@ Code Reference と call trace から、これは乱数 seed そのものでは�
 - `Game::stageGroup`: `0x02085058`
 - `Game::localPlayerID`: `0x020850BC`
 - `Game::vsMode`: `0x020850C4`
-- `VSConnect::createLoadGameSM`: `0x021515B4`
-- `VSConnect::updateLoadGameSM`: `0x021512B8`
 - `VSConnect::scheduleSubMenuChange`: `0x021528A0`
-- MvL load-game submenu candidate: `0x02156624`
+- `VSConnect loadGameSM SubMenu`: `0x02156624`
+- `VSConnect post-load SubMenu`: `0x02156640`
+- `VSConnect stage-start SubMenu`: `0x02156678`
+- `VSConnect client-confirm SubMenu`: `0x02156694`
 - `loadMvsLFilesThread`: `0x02152E18`
 - `VSConnect::startLoadLevel`: `0x0214E0C0`
 - `Game::loadLevel`: `0x020068A8`
 - `Scene::tryChangeScene`: `0x020131DC`
+- `MTX::rotateX` 付近: `0x020448C0`
 
 ## 次にやること
 
-1. `VSConnect::scheduleSubMenuChange(0x02156624, 0x1E, 1)` を自然 caller から発火させる上位 state-machine を特定する。外部 trampoline 直呼びは state が進まないため本筋から外す。
-2. `loadMvsLFilesThread` を thread entry として自然に起動する上位処理を特定する。直呼びは `prefetch abort(00000004)` になるため避ける。
-3. forced route で `Random::Random` に渡る resource pointer / heap header を自然 LAN と同じ形にする。
-4. actor 生成後に gameplay packet の `tick`, `keys`, `action` 同期検証へ戻る。
+1. 自然 LAN の scene 5 `CourseSelect` 更新から `sceneNext=0x0F` / `Game::loadLevel` へ進む caller と条件を call trace / write trace で特定する。
+2. `NoLanMP` 側で CourseSelect scene 5 へ入ったあと、自然 caller の前提フィールドだけを再現して stage load へ進めるか確認する。
+3. `020448C0` abort 時の `r0=null` がどの object/resource 由来か、自然 LAN と forced route のレジスタ・周辺メモリ差分で切り分ける。
+4. MvL stage 到達後、gameplay packet の `tick/keys/action` 一致と「通信が切断されました」画面の非発生を自動判定に入れる。
+5. stage 内同期が確認できたら、WAN adapter の待ち制御を NSMB の input tick 要求に合わせて調整する。
 
 ## 必要なもの
 
 - 検証にはユーザー提供の `roms/nsmb.nds` を使う。
-- ROM パッチへ進む場合も差分パッチとして管理し、元 ROM は含めない。
+- ROM パッチへ進む場合も、差分パッチとして管理し、元 ROM はリポジトリに含めない。
 
 ## 参考
 
