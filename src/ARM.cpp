@@ -229,6 +229,11 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     static int probeOnly = -1;
     static u32 probeMinSP = 0;
     static u32 probeMax = 0;
+    static u32 requiredMode = 0xFFFFFFFFu;
+    static u32 probeMode = 0xFFFFFFFFu;
+    static u32 tryChangeTargetScene = 0xFFFFFFFFu;
+    static u32 tryChangePreviousScene = 0xFFFFFFFFu;
+    static int tryChangeSetOnly = -1;
     if (!triggerConfigured)
     {
         if (const char* value = getenv(updateLoadGame
@@ -287,6 +292,15 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
             probeMax = static_cast<u32>(strtoul(value, nullptr, 0));
         else
             probeMax = 80;
+        if (const char* value = getenv("MELONDS_NSML_SAFE_CALL_REQUIRED_MODE"))
+            requiredMode = static_cast<u32>(strtoul(value, nullptr, 0)) & 0x1Fu;
+        if (const char* value = getenv("MELONDS_NSML_SAFE_CALL_PROBE_MODE"))
+            probeMode = static_cast<u32>(strtoul(value, nullptr, 0)) & 0x1Fu;
+        if (const char* value = getenv("MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_TARGET"))
+            tryChangeTargetScene = static_cast<u32>(strtoul(value, nullptr, 0)) & 0xFFFFu;
+        if (const char* value = getenv("MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_PREVIOUS"))
+            tryChangePreviousScene = static_cast<u32>(strtoul(value, nullptr, 0)) & 0xFFFFu;
+        tryChangeSetOnly = NSMLEnvFlag("MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_SET_ONLY") ? 1 : 0;
         triggerConfigured = true;
     }
     static bool combinedStartLoadConfigured = false;
@@ -339,6 +353,7 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         static std::map<NDS*, u32> probeCount;
         static std::map<NDS*, std::map<u32, u32>> probeSeenPCs;
         if (cpu->R[13] >= probeMinSP
+            && (probeMode == 0xFFFFFFFFu || (cpu->CPSR & 0x1Fu) == probeMode)
             && probeCount[&cpu->NDS] < probeMax
             && probeSeenPCs[&cpu->NDS][instrAddr] == 0)
         {
@@ -361,6 +376,8 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
             return false;
     }
     if (minSP != 0 && cpu->R[13] < minSP)
+        return false;
+    if (!effectiveStartLoad && requiredMode != 0xFFFFFFFFu && (cpu->CPSR & 0x1Fu) != requiredMode)
         return false;
     if (!loadLevel && !IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
         return false;
@@ -405,6 +422,32 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     {
         if (!strcmp(role, "client"))
             playerID = 1;
+    }
+    if (effectiveTryChangeScene && tryChangeTargetScene != 0xFFFFFFFFu)
+    {
+        if (tryChangePreviousScene != 0xFFFFFFFFu)
+            cpu->NDS.ARM9Write16(0x0203B47C, static_cast<u16>(tryChangePreviousScene));
+        cpu->NDS.ARM9Write16(0x0203B480, static_cast<u16>(tryChangeTargetScene));
+        cpu->NDS.ARM9Write32(0x02088578, 0);
+        cpu->NDS.ARM9Write8(0x02087F04, 3);
+        cpu->NDS.ARM9Write32(0x02087F04, 0xFFFF0003);
+        cpu->NDS.ARM9Write32(0x0208B044, 0xFFFF0003);
+        cpu->NDS.ARM9Write32(0x0208B048, 0);
+        cpu->NDS.ARM9Write32(0x0208B04C, 0);
+        if (tryChangeSetOnly > 0)
+        {
+            appliedMask[&cpu->NDS] |= modeMask;
+            printf("NSMB SafeCall: setSceneRequest frame=%u pc=%08X sp=%08X lr=%08X cpsr=%08X prev=%04X next=%04X\n",
+                cpu->NDS.NumFrames,
+                instrAddr,
+                cpu->R[13],
+                cpu->R[14],
+                cpu->CPSR,
+                cpu->NDS.ARM9Read16(0x0203B47C),
+                cpu->NDS.ARM9Read16(0x0203B480));
+            fflush(stdout);
+            return false;
+        }
     }
 
     std::vector<u32> code;
@@ -474,6 +517,10 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     }
     else if (effectiveStageSceneFactory)
     {
+        NSMLEmitStoreImm32(code, 0x02087F04, 0xFFFF0003);
+        NSMLEmitStoreImm32(code, 0x0208B044, 0xFFFF0003);
+        NSMLEmitStoreImm32(code, 0x0208B048, 0x00000000);
+        NSMLEmitStoreImm32(code, 0x0208B04C, 0x00000000);
         NSMLEmitMovImm(code, 0, 0x03);
         NSMLEmitMovImm(code, 1, 0x00B5FF00);
         NSMLEmitMovImm(code, 2, 0x0208B040);
@@ -513,11 +560,14 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         appliedFrame[&cpu->NDS] = cpu->NDS.NumFrames;
     else
         appliedMask[&cpu->NDS] |= modeMask;
-    printf("NSMB SafeCall: %s frame=%u pc=%08X return=%08X vsConnect=%08X player=%u\n",
+    printf("NSMB SafeCall: %s frame=%u pc=%08X return=%08X sp=%08X lr=%08X cpsr=%08X vsConnect=%08X player=%u\n",
         effectiveLoadLevel ? "loadLevel" : effectiveCourseSelectFactory ? "courseSelectFactory" : effectiveCourseSelect ? "createCourseSelect" : effectiveCreateLoadGame ? "createLoadGameSM" : effectiveUpdateLoadGame ? "updateLoadGameSM" : effectiveScheduleLoadGame ? "scheduleLoadGameSM" : effectiveStageSceneFactory ? "stageSceneFactory" : effectiveTryChangeScene ? "tryChangeScene" : "startLoadLevel",
         cpu->NDS.NumFrames,
         instrAddr,
         returnPC,
+        cpu->R[13],
+        cpu->R[14],
+        cpu->CPSR,
         vsConnectBase,
         playerID);
     fflush(stdout);

@@ -28,7 +28,9 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦モード `Mario 
 
 stage scene `0x03` 生成後に gameplay actor が生成されない。
 
-具体的には、`SafeStartLoadCall` で `READY!` 画面、`SafeStageSceneFactoryCall` で `sceneCurrentSceneID=0x3` までは進むが、その直後に ARM9 data abort (`pc=0205545C`) が発生し、player actors / Big Star actor は出ない。単純な stage scene factory 直呼びでは、Stage scene 初期化に必要な前段状態またはリソース状態が足りていない可能性が高い。
+具体的には、`SafeStartLoadCall` で `READY!` 画面、`SafeStageSceneFactoryCall` または scene request 方式で `sceneCurrentSceneID=0x3` までは進むが、その直後に ARM9 data abort (`pc=0205545C`, `lr=02044388`) が発生し、player actors / Big Star actor は出ない。
+
+2026-05-20 の追加検証で、単純な stage scene factory 直呼びだけでなく、`sceneNext=0x3` を立てて NSMB 本来の scene manager に遷移させる方式でも同じ abort になることを確認した。現在の有力仮説は、Stage scene 生成前に必要な MvL リソースロードまたは loadGameSM state がまだ自然 LAN と一致していないこと。
 
 ## 直近の検証結果
 
@@ -49,6 +51,15 @@ stage scene `0x03` 生成後に gameplay actor が生成されない。
 - `logs/nsmvl-both-safestart-stagefactory-20260520`
   - host/client 双方で `SafeStageSceneFactoryCall` により `sceneCurrentSceneID=0x3` へ到達。
   - ただし両側とも `pc=0205545C` で data abort し、actor 生成までは進まない。
+- `logs/nsmvl-vsstageintro-system-probe-mode1f-20260520`
+  - `SafeCallProbeMode=0x1F` で VSStageIntro 中の System mode 候補 PC を取得。
+  - ただし System mode から stage factory を呼んでも `pc=0205545C` の data abort は解消しない。
+- `logs/nsmvl-set-scene-request-only-20260520`
+  - `scenePrevious=0x5`, `sceneNext=0x3` を設定し、外部から `tryChangeScene` を直接呼ばずに NSMB の scene manager に任せる方式を検証。
+  - host/client とも `sceneCurrentSceneID=0x3` へ進むが、`sceneIsSceneActive=0` のまま actor は生成されず、同じ data abort が出る。
+- `logs/nsmvl-loadsm-preload-setscene-20260520`
+  - `ForceLoadGameSMBaselineFlags + Preload` と scene request 方式の組み合わせを検証。
+  - `VSConnect` state は `3/3` に近づくが、scene 6 から進まず prefetch abort になり、この組み合わせは現状不採用。
 
 ## 実装済みの主なテストフック
 
@@ -65,7 +76,8 @@ stage scene `0x03` 生成後に gameplay actor が生成されない。
 - `ForceLoadGameSMBaselineFlags`
 - `SafeStartLoadCall`, `SafeCourseSelectCall`, `SafeCourseSelectFactoryCall`
 - `SafeStageSceneFactoryCall`
-- `SafeCallProbe`, `SafeCallProbeOnly`
+- `SafeCallProbe`, `SafeCallProbeOnly`, CPSR mode フィルタ
+- `SafeTryChangeSceneTarget`, `SafeTryChangeSceneSetOnly`
 - `SafeUpdateLoadGameCall`, `SafeCreateLoadGameSM`
 - role scoped `DirectMvlBoot`
 - 黒画面検出、切断待機画面検出、gameplay actor 検証
@@ -93,9 +105,9 @@ stage scene `0x03` 生成後に gameplay actor が生成されない。
 
 ## 次にやること
 
-1. 通常 LAN の `VSStageIntro -> Stage` 遷移で `0214C3D4` 周辺が factory 呼び出し前に設定している状態を特定する。
-2. `SafeStageSceneFactoryCall` の直呼びではなく、VSStageIntro の自然な遷移関数または必要な前段 state を再現する。
-3. `pc=0205545C` data abort の原因になっている null/未初期化参照を RAM dump / call trace で特定する。
+1. `pc=0205545C` / `lr=02044388` data abort の参照元を特定する。特に `Random` 初期化、Stage scene のリソース未ロード、object profile 参照のどれが null になっているかを切り分ける。
+2. 通常 LAN と PacketBridge ルートの Stage 遷移直前 RAM を比較し、scene globals 以外に不足している loadGameSM/resource state を特定する。
+3. `SafeStartLoadCall` の直呼びから離れ、`VSConnect::createLoadGameSM/updateLoadGameSM/loadMvsLFilesThread/startLoadLevel` の自然な順序を再現する。
 4. host/client 両方で player actors / Big Star actor が出るまで進め、黒画面・切断画面ではないことをスクリーンショットで確認する。
 5. actor 生成後に gameplay packet の `tick`, `keys`, `action` 同期検証へ戻す。
 

@@ -141,15 +141,20 @@ param(
     [string]$SafeTryChangeSceneCallPC = "0",
     [string]$HostSafeTryChangeSceneCallPC = "",
     [string]$ClientSafeTryChangeSceneCallPC = "",
+    [string]$SafeTryChangeSceneTarget = "",
+    [string]$SafeTryChangeScenePrevious = "",
+    [switch]$SafeTryChangeSceneSetOnly,
     [switch]$SafeStageSceneFactoryCall,
     [int]$SafeStageSceneFactoryCallFrame = 2700,
     [string]$SafeStageSceneFactoryCallPC = "0",
     [string]$HostSafeStageSceneFactoryCallPC = "",
     [string]$ClientSafeStageSceneFactoryCallPC = "",
     [string]$SafeCallMinSP = "",
+    [string]$SafeCallRequiredMode = "",
     [switch]$SafeCallProbe,
     [switch]$SafeCallProbeOnly,
     [string]$SafeCallProbeMinSP = "",
+    [string]$SafeCallProbeMode = "",
     [int]$SafeCallProbeMax = 80,
     [switch]$PacketBridgeSafeCreateLoadGameSM,
     [int]$PacketBridgeSafeCreateLoadGameSMFrame = 0,
@@ -410,10 +415,16 @@ function Start-MelonLANProcess {
             $roleSafeTryChangeSceneCallPC = $ClientSafeTryChangeSceneCallPC
         }
         $env:MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_CALL_PC = "$roleSafeTryChangeSceneCallPC"
+        if ($SafeTryChangeSceneTarget) { $env:MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_TARGET = "$SafeTryChangeSceneTarget" } else { Remove-Item Env:\MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_TARGET -ErrorAction SilentlyContinue }
+        if ($SafeTryChangeScenePrevious) { $env:MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_PREVIOUS = "$SafeTryChangeScenePrevious" } else { Remove-Item Env:\MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_PREVIOUS -ErrorAction SilentlyContinue }
+        if ($SafeTryChangeSceneSetOnly) { $env:MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_SET_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_SET_ONLY -ErrorAction SilentlyContinue }
     } else {
         Remove-Item Env:\MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_CALL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_CALL_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_CALL_PC -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_TARGET -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_PREVIOUS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_SET_ONLY -ErrorAction SilentlyContinue
     }
     if ($SafeStageSceneFactoryCall) {
         $env:MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL = "1"
@@ -435,15 +446,22 @@ function Start-MelonLANProcess {
     } else {
         Remove-Item Env:\MELONDS_NSML_SAFE_CALL_MIN_SP -ErrorAction SilentlyContinue
     }
+    if ($SafeCallRequiredMode) {
+        $env:MELONDS_NSML_SAFE_CALL_REQUIRED_MODE = "$SafeCallRequiredMode"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_SAFE_CALL_REQUIRED_MODE -ErrorAction SilentlyContinue
+    }
     if ($SafeCallProbe) {
         $env:MELONDS_NSML_SAFE_CALL_PROBE = "1"
         $env:MELONDS_NSML_SAFE_CALL_PROBE_MAX = "$SafeCallProbeMax"
         if ($SafeCallProbeOnly) { $env:MELONDS_NSML_SAFE_CALL_PROBE_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_SAFE_CALL_PROBE_ONLY -ErrorAction SilentlyContinue }
         if ($SafeCallProbeMinSP) { $env:MELONDS_NSML_SAFE_CALL_PROBE_MIN_SP = "$SafeCallProbeMinSP" } else { Remove-Item Env:\MELONDS_NSML_SAFE_CALL_PROBE_MIN_SP -ErrorAction SilentlyContinue }
+        if ($SafeCallProbeMode) { $env:MELONDS_NSML_SAFE_CALL_PROBE_MODE = "$SafeCallProbeMode" } else { Remove-Item Env:\MELONDS_NSML_SAFE_CALL_PROBE_MODE -ErrorAction SilentlyContinue }
     } else {
         Remove-Item Env:\MELONDS_NSML_SAFE_CALL_PROBE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_CALL_PROBE_ONLY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_CALL_PROBE_MIN_SP -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_CALL_PROBE_MODE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_CALL_PROBE_MAX -ErrorAction SilentlyContinue
     }
     if ($PacketBridgeSafeCreateLoadGameSM) {
