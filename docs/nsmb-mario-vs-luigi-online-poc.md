@@ -2,77 +2,56 @@
 
 ## 目的
 
-New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` で WAN 越しに遊べる形へ持っていく。
+New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` でWAN越しに遊べる形へ持っていく。
 
-現方針は、`LocalMP` や `2インスタンス * 2プロセス` を最終形にしない。NSMB 側の MvL 接続 state-machine と gameplay packet を解析し、ローカル無線の代わりに WAN adapter から必要な packet/state を渡す。
-
-## 採用しない方針
-
-- `2 instances * 2PC` を最終形にする方針: LocalMP 間でも actor/object 差分が残り、重く、WAN 検証のフィードバックループが遅い。
-- savestate 同期を最終形にする方針: 通信状態と actor lifecycle が噛み合わず、切断やズレが残る。
-- 試合開始後に LocalMP から WAN へ切り替える方針: 切り替え時の停止で host/client state が崩れやすい。
-- `MPInterface_LAN` を単純に WAN 化する方針: LAN 前提の遅延で接続開始段階が崩れる。
+現在の主方針は、melonDS の LocalMP 2インスタンス同期を最終形にしない。NSMB側が元々持っているMvL接続/同期/state machineを活かし、ローカル無線の代わりにWAN adapter / PacketBridgeから必要なpacketを渡す。
 
 ## 現在の到達点
 
-- 通常 LocalMP LAN ルートでは `stageGroup=9`, `vsMode=1`, player actors, Big Star actor まで到達できる。
-- NSMB Central と実測から、MvL gameplay packet は主に `tick`, `keys`, `action` を持つ入力同期パケットであることを確認済み。
-- `NoLanMP + PacketBridge from start` で packet 送受信自体は可能。
-- PacketBridge の `WireNSMLPacket` は ENet reliable packet に変更済み。localhost でも tick 欠落が出ていたため、ここは reliable が妥当。
-- `PacketBridgeWait` は、まだ一度も remote packet を受け取っていない段階では待たないよう修正済み。
-- `NoLanMP + PacketBridgeSubMenuSchedule` を追加し、自然 LAN で観測した VSConnect サブメニュー列をスクリプトから注入できるようにした。
-- サブメニューの direct-change も追加した。任意PCから create 関数を呼ぶと data abort するため、デフォルトは current create/update/render ポインタの差し替えだけにしている。
-- direct-change と safe scene call により、`NoLanMP` でも scene 5 `CourseSelect` object 作成、`VSConnect::startLoadLevel`、`Game::stageGroup=9` / `vsMode=1` までは再現できる。
+- `NoLanMP + PacketBridge from start` で、起動直後からローカル無線なしのPacketBridge経路を使う検証ルートを構築済み。
+- `PacketBridgeSubMenuSchedule` / `PacketBridgeSubMenuDirect` で、自然LANで観測したVSConnectサブメニュー遷移を注入できる。
+- `SafeCourseSelectFactoryCall` により、`CourseSelect` object生成までは再現できる。
+- `VSConnect::startLoadLevel` と `Game::loadLevel(scene=0x0F, stageGroup=9, vsMode=1, ggid=0x42)` まではNoLanMP経路で再現できる。
+- `CourseSelect` update内の自然なstage requestを特定し、`0x0214C3D4 -> 0x020130A8(scene=3, settings=00B5FF00)` でStage sceneへ遷移しようとするところまで再現できる。
 
-## 最新の重要な発見
+## 直近で分かったこと
 
-`A2DJ` の VSConnect サブメニューアドレスは、US/Code Reference の値をそのまま使えない。自然 LocalMP の trace から、少なくとも以下を確認した。
+- `0x0214C3D4` はVSConnectのstage-start updateではなく、overlay 52内のCourseSelect updateが `Scene::tryChangeScene` 相当を呼ぶ場所だった。
+- そのため、外から無理にscene 3へ飛ばすより、CourseSelect updateのready判定を自然タイミングで通す方が筋が良い。
+- `loadMvsLFilesThread` の日本版A2DJアドレスは `0x02152E04`。以前使っていた `0x02152E18` は関数入口ではなく、完了フラグ `0x0208A478=1` を書く途中命令だった。
+- MvLファイルロード本体は直接呼ぶものではなく、StageStartSMが `02004BFC(entry=0x02152E04, stackSize=0x1000)` でロード用スレッドを作る。
+- ただし、PacketBridge側から単純にロードスレッドを早期起動しても `02009B94` 付近のcache loadで実質停止する。ロード前提状態または呼び出しタイミングが自然StageStartSMとまだ一致していない。
 
-- `0x02156624`: create `0x021520A0`, update `0x02151E94`, render `0x02151E54`
-- `0x02156640`: create `0x02151D74`, update `0x021519F0`, render `0x021519B0`
-- `0x02156678`: create `0x021515B4`, update `0x021512B8`, render `0x0215125C`
-- `0x02156694`: create `0x02151950`, update `0x021517A4`, render `0x02151764`
+## 現在の主ブロッカー
 
-自然遷移のサブメニュー列:
+NoLanMP + PacketBridge経路でStage sceneへ入る直前のリソース準備が自然LANと一致していない。
 
-- host: `0x02156624 -> 0x02156640 -> 0x02156678`
-- client: `0x02156624 -> 0x02156640 -> 0x02156694 -> 0x02156678`
+具体的には、ファイルロードを省略するとStage初期化中に `0205545C` 付近でdata abortする。逆にロード関数/ロードスレッドを単純に呼ぶと、`02009B94` 付近で非常に長く止まり、VSConnect scene 6から先へ進まない。
 
-`0x02156624` へ直接 `scheduleSubMenuChange(..., 0x1E, 1)` しても、自然遷移と同じにはならない。任意PCからの create 呼び出しも data abort する。現在は create を呼ばずに current sub-menu pointer を差し替え、必要な前提フィールドを最小限だけ再現する方向で追っている。
+## 次にやること
 
-## 現在のブロッカー
+1. 自然StageStartSMのstep遷移を再現する。
+   - `createStageStartSM=0x021515B4`
+   - `updateStageStartSM=0x021512B8`
+   - step 2の `02004BFC(entry=0x02152E04)` を、自然の前提状態で踏ませる。
+2. 早期ロードスレッドを単独で呼ぶのではなく、StageStartSMの`0x140/0x144/0x148/0x154`などを自然値に寄せて、NSMB自身のupdateにロード開始させる。
+3. Stage scene遷移後に `playerActor0/1` と Big Star actor が出ることを、game-state traceとスクリーンショットで確認する。
+4. actor出現後、host/client双方でpacket tick/keys/actionが一致するかを確認する。
 
-`NoLanMP + PacketBridge from start` は、自然 LocalMP と同じ MvL stage scene / gameplay actors へまだ入れていない。
+## 実装済みの主なテストフック
 
-直近の診断で分かったこと:
-
-- `SafeCourseSelectFactoryCall` を `Scene::tryChangeScene` entry `0x0201314C` 上で実行すると、自然 LAN と同じ `CourseSelect` object base `0x021BE9D8` を作れる。
-- `SafeStartLoadCall` を `0x02064F80` 上で実行し、`VSConnect+0x144/0x148/0x154` と `CourseSelect+0x078/0x07C` を自然値へ戻すと、`stageGroup=9`, `vsMode=1`, `currentScene=0x0F` までは安定する。
-- `SafeTryChangeSceneCall` で `nextScene=3` を処理させると `currentScene=3` までは進む。
-- ただし、stage scene object の create/update が自然遷移と同じ形でリンクされておらず、`playerActor0/1` と Big Star actor はまだ出ない。画面も blank / 「しばらくおまちください」判定になる。
-
-つまり現在の主ブロッカーは「scene ID を 3 にすること」ではなく、自然の scene switch が行っている旧 CourseSelect scene の破棄、新 Stage scene object の登録、StageScene `onCreate` 実行を再現できていないこと。
-
-## 主な実装済みテストフック
-
-- 入力スクリプト再生
+- input script replay
 - screenshot / framebuffer dump
 - game-state trace
 - call trace / write trace
 - MainRAM dump
 - packet capture / replay / bridge trace
-- Big Star actor probe
-- `PacketBridgeForceTick`
-- `ForceNetReady`, `ForceLoadGameSM`, `ForceTransferResult`
-- `SafeStartLoadCall`, `SafeCourseSelectCall`, `SafeCourseSelectFactoryCall`
-- `SafeStageSceneFactoryCall`
-- `SafeTryChangeSceneCall`
-- `SafeCallProbe`, `SafeCallProbeOnly`
-- `SafeUpdateLoadGameCall`, `SafeCreateLoadGameSM`
-- `PacketBridgeForceStagePacketWords`
 - `PacketBridgeSubMenuSchedule`, `PacketBridgeSubMenuDirect`
-- `PacketBridgeForceStageStartSMFields`
-- Data abort register/fault-address logging
+- `SafeCourseSelectFactoryCall`, `SafeStartLoadCall`, `SafeTryChangeSceneCall`
+- `PacketBridgeForceLoadGameSM`
+- `PacketBridgeForceCourseSelectReady`
+- `PacketBridgeForceMvlLoadThread`
+- data abort register/fault-address logging
 
 ## 重要アドレス
 
@@ -91,25 +70,19 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦モード `Mario 
 - `VSConnect post-load SubMenu`: `0x02156640`
 - `VSConnect stage-start SubMenu`: `0x02156678`
 - `VSConnect client-confirm SubMenu`: `0x02156694`
-- `loadMvsLFilesThread`: `0x02152E18`
 - `VSConnect::startLoadLevel`: `0x0214E0C0`
 - `Game::loadLevel`: `0x020068A8`
+- `CourseSelect update`: `0x0214C380`
+- `CourseSelect natural stage request`: `0x0214C3D4`
+- `loadMvsLFilesThread`: `0x02152E04`
+- `Thread create used by StageStartSM`: `0x02004BFC`
 - `Scene::tryChangeScene` entry: `0x0201314C`
-- `Scene::tryChangeScene` transition block: `0x020131DC`
-- `MTX::rotateX` 付近: `0x020448C0`
-
-## 次にやること
-
-1. 自然 LAN の `0x020131DC` / `0x020131FC` 周辺を RAM dump から追い、scene switch 時にどの object pointer / global が更新されるか特定する。
-2. `Object::spawnScene` 相当の standalone 呼び出しではなく、自然 scene switch と同じ経路で Stage scene object を登録できるか確認する。
-3. `NoLanMP` ルートで `playerActor0/1` と Big Star actor が出るまで、blank / connection dialog / disconnect 判定を必ず有効にして検証する。
-4. MvL stage 到達後、gameplay packet の `tick/keys/action` 一致を確認する。
-5. stage 内同期が確認できたら、WAN adapter の待ち制御を NSMB の input tick 要求に合わせて調整する。
+- Stage init abort point currently observed: `0x0205545C`
 
 ## 必要なもの
 
-- 検証にはユーザー提供の `roms/nsmb.nds` を使う。
-- ROM パッチへ進む場合も、差分パッチとして管理し、元 ROM はリポジトリに含めない。
+- 検証にはユーザー提供の `roms/nsmb.nds` を使用する。
+- ROM本体や商用資産はリポジトリに含めない。
 
 ## 参考
 

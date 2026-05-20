@@ -58,6 +58,8 @@ param(
     [switch]$PacketBridgeForceNetReadyClientOnly,
     [switch]$PacketBridgeForceNetReadyState10,
     [switch]$PacketBridgeForceNetReadyState10ClientOnly,
+    [switch]$PacketBridgeForceCourseSelectReady,
+    [int]$PacketBridgeForceCourseSelectReadyStartFrame = 0,
     [switch]$PacketBridgeForceStageSceneArg,
     [switch]$PacketBridgeForceLoadGameSM,
     [int]$PacketBridgeForceLoadGameSMStartFrame = 0,
@@ -69,6 +71,7 @@ param(
     [switch]$PacketBridgeForceLoadGameSMPulseAction,
     [switch]$PacketBridgeForceLoadGameSMBaselineFlags,
     [switch]$PacketBridgeForceLoadGameSMPreload,
+    [switch]$PacketBridgeForceLoadGameSMAllowCourseSelect,
     [switch]$PacketBridgeForceStagePacketWords,
     [int]$PacketBridgeForceStagePacketWordsStartFrame = 0,
     [int]$PacketBridgeForceStagePacketWordsEndFrame = 0,
@@ -83,6 +86,9 @@ param(
     [switch]$PacketBridgeForceStageStartSMFields,
     [int]$PacketBridgeForceStageStartSMFieldsStartFrame = 0,
     [switch]$PacketBridgeForceMvlFileCache,
+    [int]$PacketBridgeForceMvlFileCacheStartFrame = 0,
+    [switch]$PacketBridgeForceMvlLoadThread,
+    [int]$PacketBridgeForceMvlLoadThreadStartFrame = 0,
     [int]$PacketBridgeLookupTickDelay = 0,
     [int]$PacketBridgeMaxPumpEvents = 64,
     [switch]$PacketBridgeSuppressDisconnect,
@@ -754,6 +760,7 @@ function Start-MelonLANProcess {
             if ($PacketBridgeForceStageSceneArg) { $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_SCENE_ARG = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_SCENE_ARG -ErrorAction SilentlyContinue }
             if ($PacketBridgeForceNetReadyState10) { $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10 = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10 -ErrorAction SilentlyContinue }
             if ($PacketBridgeForceNetReadyState10ClientOnly) { $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10_CLIENT_ONLY -ErrorAction SilentlyContinue }
+            if ($PacketBridgeForceCourseSelectReady) { $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_COURSE_SELECT_READY = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_COURSE_SELECT_READY -ErrorAction SilentlyContinue }
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME -ErrorAction SilentlyContinue
@@ -763,6 +770,14 @@ function Start-MelonLANProcess {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_SCENE_ARG -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10 -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10_CLIENT_ONLY -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_COURSE_SELECT_READY -ErrorAction SilentlyContinue
+        }
+        if ($PacketBridgeForceCourseSelectReady) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_COURSE_SELECT_READY = "1"
+            $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_COURSE_SELECT_READY_START_FRAME = "$PacketBridgeForceCourseSelectReadyStartFrame"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_COURSE_SELECT_READY -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_COURSE_SELECT_READY_START_FRAME -ErrorAction SilentlyContinue
         }
         if ($PacketBridgeForceLoadGameSM) {
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM = "1"
@@ -803,6 +818,11 @@ function Start-MelonLANProcess {
             } else {
                 Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_PRELOAD -ErrorAction SilentlyContinue
             }
+            if ($PacketBridgeForceLoadGameSMAllowCourseSelect) {
+                $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_ALLOW_COURSE_SELECT = "1"
+            } else {
+                Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_ALLOW_COURSE_SELECT -ErrorAction SilentlyContinue
+            }
             if ($PacketBridgeForceStagePacketWords) {
                 $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_PACKET_WORDS = "1"
                 $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_PACKET_WORDS_START_FRAME = "$PacketBridgeForceStagePacketWordsStartFrame"
@@ -823,8 +843,17 @@ function Start-MelonLANProcess {
             }
             if ($PacketBridgeForceMvlFileCache) {
                 $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_FILE_CACHE = "1"
+                $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_FILE_CACHE_START_FRAME = "$PacketBridgeForceMvlFileCacheStartFrame"
             } else {
                 Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_FILE_CACHE -ErrorAction SilentlyContinue
+                Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_FILE_CACHE_START_FRAME -ErrorAction SilentlyContinue
+            }
+            if ($PacketBridgeForceMvlLoadThread) {
+                $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_LOAD_THREAD = "1"
+                $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_LOAD_THREAD_START_FRAME = "$PacketBridgeForceMvlLoadThreadStartFrame"
+            } else {
+                Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_LOAD_THREAD -ErrorAction SilentlyContinue
+                Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_LOAD_THREAD_START_FRAME -ErrorAction SilentlyContinue
             }
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM -ErrorAction SilentlyContinue
@@ -832,9 +861,12 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_PULSE_ACTION -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_BASELINE_FLAGS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_PRELOAD -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_ALLOW_COURSE_SELECT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_PACKET_WORDS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_PACKET_WORDS_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_PACKET_WORDS_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_LOAD_THREAD -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_LOAD_THREAD_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_CREATE_LOAD_GAME_CALL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_CREATE_LOAD_GAME_CALL_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_CREATE_LOAD_GAME_CALL_PC -ErrorAction SilentlyContinue
@@ -1125,6 +1157,14 @@ function Start-MelonLANProcess {
             if ($PacketBridgeForceStageSceneArg) { $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_SCENE_ARG = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_SCENE_ARG -ErrorAction SilentlyContinue }
             if ($PacketBridgeForceNetReadyState10) { $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10 = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10 -ErrorAction SilentlyContinue }
             if ($PacketBridgeForceNetReadyState10ClientOnly) { $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10_CLIENT_ONLY -ErrorAction SilentlyContinue }
+            if ($PacketBridgeForceCourseSelectReady) { $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_COURSE_SELECT_READY = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_COURSE_SELECT_READY -ErrorAction SilentlyContinue }
+        }
+        if ($PacketBridgeForceCourseSelectReady) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_COURSE_SELECT_READY = "1"
+            $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_COURSE_SELECT_READY_START_FRAME = "$PacketBridgeForceCourseSelectReadyStartFrame"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_COURSE_SELECT_READY -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_COURSE_SELECT_READY_START_FRAME -ErrorAction SilentlyContinue
         }
         if ($PacketBridgeForceLoadGameSM) {
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM = "1"
@@ -1151,6 +1191,9 @@ function Start-MelonLANProcess {
             if ($PacketBridgeForceLoadGameSMPreload) {
                 $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_PRELOAD = "1"
             }
+            if ($PacketBridgeForceLoadGameSMAllowCourseSelect) {
+                $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_ALLOW_COURSE_SELECT = "1"
+            }
             if ($PacketBridgeForceStagePacketWords) {
                 $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_PACKET_WORDS = "1"
                 $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_PACKET_WORDS_START_FRAME = "$PacketBridgeForceStagePacketWordsStartFrame"
@@ -1165,6 +1208,14 @@ function Start-MelonLANProcess {
             }
             if ($PacketBridgeForceMvlFileCache) {
                 $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_FILE_CACHE = "1"
+                $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_FILE_CACHE_START_FRAME = "$PacketBridgeForceMvlFileCacheStartFrame"
+            }
+            if ($PacketBridgeForceMvlLoadThread) {
+                $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_LOAD_THREAD = "1"
+                $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_LOAD_THREAD_START_FRAME = "$PacketBridgeForceMvlLoadThreadStartFrame"
+            } else {
+                Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_LOAD_THREAD -ErrorAction SilentlyContinue
+                Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_LOAD_THREAD_START_FRAME -ErrorAction SilentlyContinue
             }
         }
         if ($PacketBridgeForceStagePacketWords) {

@@ -444,7 +444,11 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         return false;
     if (!effectiveStartLoad && requiredMode != 0xFFFFFFFFu && (cpu->CPSR & 0x1Fu) != requiredMode)
         return false;
-    if (!loadLevel && !effectiveStartLoad && !effectiveCourseSelectFactory && !IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
+    if (!loadLevel
+        && !effectiveStartLoad
+        && !effectiveCourseSelectFactory
+        && !effectiveStageSceneFactory
+        && !IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
         return false;
 
     const u32 modeMask =
@@ -584,6 +588,14 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     }
     else if (effectiveStageSceneFactory)
     {
+        NSMLEmitStoreImm32(code, 0x02085058, 0x00000009); // Game::stageGroup
+        NSMLEmitStoreImm32(code, 0x020850BC, playerID); // Game::localPlayerID
+        NSMLEmitStoreImm32(code, 0x020850C4, 0x00000001); // Game::vsMode
+        NSMLEmitStoreImm32(code, 0x02087E14, 0x00000001);
+        NSMLEmitStoreImm32(code, 0x02087E1C, 0x00000006);
+        NSMLEmitStoreImm32(code, 0x02087E20, 0x00000002);
+        NSMLEmitStoreImm32(code, 0x02087E24, 0x00000002);
+        NSMLEmitStoreImm32(code, 0x02087E78, 0x00000042);
         NSMLEmitStoreImm32(code, 0x02087F04, 0xFFFF0003);
         NSMLEmitStoreImm32(code, 0x0208B044, 0xFFFF0003);
         NSMLEmitStoreImm32(code, 0x0208B048, 0x00000000);
@@ -601,9 +613,9 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         NSMLEmitMovImm(code, 3, 0x01);
         NSMLEmitBLViaIP(code, courseSelectFactoryAddr);
         NSMLEmitStoreImm32(code, 0x0203B478, 0x00000001); // Scene::isSceneActive
-        NSMLEmitStoreImm32(code, 0x0203B47C, 0x0000000F); // Scene::previousSceneID
-        NSMLEmitStoreImm32(code, 0x0203B480, 0x00000181); // Scene::nextSceneID
-        NSMLEmitStoreImm32(code, 0x0203B484, 0x00000003); // Scene::currentSceneID
+        NSMLEmitStoreImm32(code, 0x0203B47C, 0x00000005); // Scene::previousSceneID
+        NSMLEmitStoreImm32(code, 0x0203B480, 0x00000003); // Scene::nextSceneID
+        NSMLEmitStoreImm32(code, 0x0203B484, 0x0000000F); // Scene::currentSceneID
     }
     else if (effectiveTryChangeScene)
     {
@@ -676,22 +688,29 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
     static int enabled = -1;
     static int forceStageSceneArg = -1;
     static int forceScheduleLoadGameSMArgs = -1;
+    static int forceCourseSelectReady = -1;
     static u32 startFrame = 0;
     static u32 forceScheduleLoadGameSMArgsFrame = 0;
+    static u32 forceCourseSelectReadyStartFrame = 0;
     if (enabled < 0)
     {
         const bool forceNetReady = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY");
         const bool forceScheduleLoadGameSM = NSMLEnvFlag("MELONDS_NSML_FORCE_SCHEDULE_LOAD_GAME_SM_ARGS");
-        enabled = (forceNetReady || forceScheduleLoadGameSM) ? 1 : 0;
+        const bool forceCourseSelectReadyFlag = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_COURSE_SELECT_READY");
+        enabled = (forceNetReady || forceScheduleLoadGameSM || forceCourseSelectReadyFlag) ? 1 : 0;
         forceStageSceneArg = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_SCENE_ARG") ? 1 : 0;
         forceScheduleLoadGameSMArgs = forceScheduleLoadGameSM ? 1 : 0;
+        forceCourseSelectReady = forceCourseSelectReadyFlag ? 1 : 0;
         if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME"))
             startFrame = static_cast<u32>(strtoul(value, nullptr, 0));
         if (const char* value = getenv("MELONDS_NSML_FORCE_SCHEDULE_LOAD_GAME_SM_ARGS_FRAME"))
             forceScheduleLoadGameSMArgsFrame = static_cast<u32>(strtoul(value, nullptr, 0));
-        printf("NSMB PacketBridge: net hotpatch config forceNetReady=%d forceScheduleLoadGameSMArgs=%d scheduleFrame=%u\n",
+        if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_FORCE_COURSE_SELECT_READY_START_FRAME"))
+            forceCourseSelectReadyStartFrame = static_cast<u32>(strtoul(value, nullptr, 0));
+        printf("NSMB PacketBridge: net hotpatch config forceNetReady=%d forceScheduleLoadGameSMArgs=%d forceCourseSelectReady=%d scheduleFrame=%u\n",
             forceNetReady ? 1 : 0,
             forceScheduleLoadGameSMArgs,
+            forceCourseSelectReady,
             forceScheduleLoadGameSMArgsFrame);
         fflush(stdout);
     }
@@ -713,9 +732,35 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
             logCount++;
         }
     }
+    if (forceCourseSelectReady && instrAddr == 0x0214C3C4)
+    {
+        const u32 courseSelectBase = NSMLFindObjectBaseByID(cpu->NDS, 0x0005);
+        if (NSMLPacketBridgeEnabled()
+            && cpu->NDS.NumFrames >= forceCourseSelectReadyStartFrame
+            && courseSelectBase != 0
+            && cpu->NDS.ARM9Read32(0x02085058) == 9
+            && cpu->NDS.ARM9Read16(0x0203B484) == 0x000F)
+        {
+            cpu->R[0] = 1;
+            static int logCount = 0;
+            if (logCount < 16)
+            {
+                printf("NSMB PacketBridge: force CourseSelect ready result frame=%u courseSelect=%08X timer=%u settings=%08X\n",
+                    cpu->NDS.NumFrames,
+                    courseSelectBase,
+                    cpu->NDS.ARM9Read32(courseSelectBase + 0x64),
+                    cpu->NDS.ARM9Read32(courseSelectBase + 0x08));
+                fflush(stdout);
+                logCount++;
+            }
+        }
+        return;
+    }
     if (cpu->NDS.NumFrames < startFrame)
         return;
-    if (instrAddr == 0x020068A8 && IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
+    if (instrAddr == 0x020068A8
+        && (IsNSMLMarioVsLuigiPacketContext(cpu->NDS)
+            || (NSMLPacketBridgeEnabled() && cpu->R[0] == 0x0F && cpu->R[2] == 9)))
     {
         if (cpu->R[0] == 0x0F && cpu->R[2] == 9)
         {
@@ -740,6 +785,7 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
             cpu->DataWrite32(sp + 0x28, 0); // unused2
             cpu->DataWrite32(sp + 0x2C, 0); // challengeMode
             cpu->DataWrite32(sp + 0x30, 0xFFFFFFFFu); // rngSeed: use network/random state
+            cpu->NDS.ARM9Write32(0x02087E78, 0x42);
             static int logCount = 0;
             if (logCount < 8)
             {
