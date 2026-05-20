@@ -55,6 +55,11 @@ Code Reference と call trace から、これは乱数 seed そのものでは�
 - `logs/nsmvl-natural-loadsm-sequence-20260520`
   - 自然 LAN の `VSConnect::scheduleSubMenuChange` では load-game 系候補として `r1=02156624`, `r2=0x1E`, `r3=1` が使われる。
   - 旧仮説の `0x02156678` は不採用に更新。
+- `logs/nsmvl-schedule-loadsm-2156624-hotpatchfix-20260520` / `logs/nsmvl-schedule-loadsm-delay1e-20260520`
+  - 外部 trampoline から `scheduleSubMenuChange(0x02156624, 0x1E, 1)` を呼んでも `VSConnect` state は `0x02151E94` のまま進まず、自然 caller と同等にはならない。
+- `logs/nsmvl-dummyalloc-0960-20260520` / `logs/nsmvl-dummycachealloc-0960-20260520`
+  - heap 位置合わせ目的の dummy allocation を試したが、`Memory::allocate` 直呼びは `prefetch abort(00000004)`、`FS::Cache::loadData` 直呼びは `pc=02009F7C` の data abort になる。
+  - cache/heap を単発関数呼び出しで無理に進めるより、自然 LAN の上位 state-machine を通す必要がある。
 
 ## 実装済みの主なテストフック
 
@@ -75,6 +80,7 @@ Code Reference と call trace から、これは乱数 seed そのものでは�
 - `SafeTryChangeSceneTarget`, `SafeTryChangeSceneSetOnly`
 - `SafeUpdateLoadGameCall`, `SafeCreateLoadGameSM`
 - `PacketBridgeForceStagePacketWords`
+- `PacketBridgeDummyAlloc`
 - Data abort register/fault-address logging
 
 ## 重要アドレス
@@ -100,7 +106,7 @@ Code Reference と call trace から、これは乱数 seed そのものでは�
 
 ## 次にやること
 
-1. `VSConnect::scheduleSubMenuChange(0x02156624, 0x1E, 1)` を外部 trampoline から呼んでも state が進まない理由を特定する。自然呼び出し時の caller / CPSR / SP / object state との差分を見る。
+1. `VSConnect::scheduleSubMenuChange(0x02156624, 0x1E, 1)` を自然 caller から発火させる上位 state-machine を特定する。外部 trampoline 直呼びは state が進まないため本筋から外す。
 2. `loadMvsLFilesThread` を thread entry として自然に起動する上位処理を特定する。直呼びは `prefetch abort(00000004)` になるため避ける。
 3. forced route で `Random::Random` に渡る resource pointer / heap header を自然 LAN と同じ形にする。
 4. actor 生成後に gameplay packet の `tick`, `keys`, `action` 同期検証へ戻る。

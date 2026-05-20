@@ -72,6 +72,9 @@ param(
     [switch]$PacketBridgeForceStagePacketWords,
     [int]$PacketBridgeForceStagePacketWordsStartFrame = 0,
     [int]$PacketBridgeForceStagePacketWordsEndFrame = 0,
+    [switch]$PacketBridgeDummyAlloc,
+    [int]$PacketBridgeDummyAllocFrame = 0,
+    [int]$PacketBridgeDummyAllocSize = 0,
     [switch]$PacketBridgeScheduleLoadGameSM,
     [int]$PacketBridgeScheduleLoadGameSMFrame = 0,
     [switch]$PacketBridgeForceMvlFileCache,
@@ -835,6 +838,15 @@ function Start-MelonLANProcess {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_PACKET_WORDS_START_FRAME -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_PACKET_WORDS_END_FRAME -ErrorAction SilentlyContinue
         }
+        if ($PacketBridgeDummyAlloc) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_DUMMY_ALLOC = "1"
+            $env:MELONDS_NSML_PACKET_BRIDGE_DUMMY_ALLOC_FRAME = "$PacketBridgeDummyAllocFrame"
+            $env:MELONDS_NSML_PACKET_BRIDGE_DUMMY_ALLOC_SIZE = "$PacketBridgeDummyAllocSize"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_DUMMY_ALLOC -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_DUMMY_ALLOC_FRAME -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_DUMMY_ALLOC_SIZE -ErrorAction SilentlyContinue
+        }
         if ($PacketBridgeLookupTickDelay -gt 0) {
             $env:MELONDS_NSML_PACKET_REPLAY_LOOKUP_TICK_DELAY = "$PacketBridgeLookupTickDelay"
         } else {
@@ -1140,6 +1152,15 @@ function Start-MelonLANProcess {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_PACKET_WORDS -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_PACKET_WORDS_START_FRAME -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_PACKET_WORDS_END_FRAME -ErrorAction SilentlyContinue
+        }
+        if ($PacketBridgeDummyAlloc) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_DUMMY_ALLOC = "1"
+            $env:MELONDS_NSML_PACKET_BRIDGE_DUMMY_ALLOC_FRAME = "$PacketBridgeDummyAllocFrame"
+            $env:MELONDS_NSML_PACKET_BRIDGE_DUMMY_ALLOC_SIZE = "$PacketBridgeDummyAllocSize"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_DUMMY_ALLOC -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_DUMMY_ALLOC_FRAME -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_DUMMY_ALLOC_SIZE -ErrorAction SilentlyContinue
         }
         if ($PacketBridgeForceTransferResult) {
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT = "1"

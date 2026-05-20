@@ -105,6 +105,7 @@ constexpr melonDS::u32 kA2DJLoadMvsLFilesThreadAddr = 0x02152E18;
 constexpr melonDS::u32 kA2DJVSConnectScheduleSubMenuChangeAddr = 0x021528A0;
 constexpr melonDS::u32 kA2DJVSConnectLoadGameSMSubMenuAddr = 0x02156624;
 constexpr melonDS::u32 kA2DJFSCacheLoadFileAddr = 0x02009C64;
+constexpr melonDS::u32 kA2DJFSCacheLoadDataAddr = 0x02009BC8;
 constexpr melonDS::u32 kA2DJVSCreateCourseSelectAddr = 0x0214F858;
 constexpr melonDS::u32 kA2DJCourseSelectFactoryAddr = 0x020130A8;
 constexpr melonDS::u32 kA2DJApplySceneRequestAddr = 0x02007ACC;
@@ -496,6 +497,10 @@ struct State
     bool PacketBridgeForceStagePacketWords = false;
     melonDS::u32 PacketBridgeForceStagePacketWordsStartFrame = 0;
     melonDS::u32 PacketBridgeForceStagePacketWordsEndFrame = 0;
+    bool PacketBridgeDummyAlloc = false;
+    melonDS::u32 PacketBridgeDummyAllocFrame = 0;
+    melonDS::u32 PacketBridgeDummyAllocSize = 0;
+    bool PacketBridgeDummyAllocApplied[16] {};
     bool PacketBridgeScheduleLoadGameSM = false;
     bool PacketBridgeScheduleLoadGameSMApplied[16] {};
     bool PacketBridgeForceMvlFileCache = false;
@@ -1489,6 +1494,58 @@ bool InjectNSMLPacketBridgeScheduleLoadGameSM(int instanceID, melonDS::u32 frame
         frame,
         vsConnectBase,
         kA2DJVSConnectLoadGameSMSubMenuAddr);
+    std::fflush(stdout);
+    nds->ARM9.JumpTo(kDirectBootTrampolineAddr);
+    return true;
+}
+
+bool InjectNSMLPacketBridgeDummyAlloc(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.PacketBridgeDummyAlloc || !nds || instanceID < 0 || instanceID >= 16)
+        return false;
+    if (G.PacketBridgeDummyAllocApplied[instanceID])
+        return false;
+    if (frame < G.PacketBridgeDummyAllocFrame || G.PacketBridgeDummyAllocSize == 0)
+        return false;
+    if (nds->ARM9Read32(kNetGGIDAddr) != 0x42)
+        return false;
+
+    const melonDS::u32 oldPC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
+    const melonDS::u32 returnPC = oldPC | ((nds->ARM9.CPSR & 0x20) ? 1u : 0u);
+    std::vector<melonDS::u32> code;
+    code.reserve(16);
+    const auto emitBL = [&code](melonDS::u32 target)
+    {
+        const melonDS::u32 pc = kDirectBootTrampolineAddr + static_cast<melonDS::u32>(code.size() * sizeof(melonDS::u32)) + 8u;
+        const melonDS::s32 offset = static_cast<melonDS::s32>(target - pc) >> 2;
+        code.push_back(0xEB000000u | (static_cast<melonDS::u32>(offset) & 0x00FFFFFFu));
+    };
+
+    code.push_back(0xE92D5FFFu); // push {r0-r12, lr}
+    code.push_back(0xE10F5000u); // mrs r5, cpsr
+    code.push_back(0xE92D0020u); // push {r5}
+    code.push_back(0xE59F001Cu); // ldr r0, [pc, #28]
+    emitBL(kA2DJFSCacheLoadDataAddr);
+    code.push_back(0xE8BD0020u); // pop {r5}
+    code.push_back(0xE128F005u); // msr apsr_nzcvq, r5
+    code.push_back(0xE8BD5FFFu); // pop {r0-r12, lr}
+    code.push_back(0xE59FC004u); // ldr ip, [pc, #4]
+    code.push_back(0xE12FFF1Cu); // bx ip
+    code.push_back(0xE1A00000u); // nop
+    code.push_back(returnPC);
+    code.push_back(G.PacketBridgeDummyAllocSize);
+
+    bool wrote = true;
+    for (size_t i = 0; i < code.size(); i++)
+        wrote = WriteARM9U32(nds, kDirectBootTrampolineAddr + static_cast<melonDS::u32>(i * sizeof(melonDS::u32)), code[i]) && wrote;
+    if (!wrote)
+        return false;
+
+    G.PacketBridgeDummyAllocApplied[instanceID] = true;
+    std::printf("NSMB PacketBridge: dummy alloc inst=%d frame=%u size=0x%X\n",
+        instanceID,
+        frame,
+        G.PacketBridgeDummyAllocSize);
     std::fflush(stdout);
     nds->ARM9.JumpTo(kDirectBootTrampolineAddr);
     return true;
@@ -4463,6 +4520,12 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_PACKET_WORDS_START_FRAME", 0)));
     G.PacketBridgeForceStagePacketWordsEndFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_PACKET_WORDS_END_FRAME", 0)));
+    G.PacketBridgeDummyAlloc =
+        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_DUMMY_ALLOC");
+    G.PacketBridgeDummyAllocFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_DUMMY_ALLOC_FRAME", 0)));
+    G.PacketBridgeDummyAllocSize = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_DUMMY_ALLOC_SIZE", 0)));
     G.PacketBridgeScheduleLoadGameSM =
         EnvFlag("MELONDS_NSML_PACKET_BRIDGE_SCHEDULE_LOAD_GAME_SM");
     G.PacketBridgeForceMvlFileCache =
@@ -4828,6 +4891,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
     {
+        if (InjectNSMLPacketBridgeDummyAlloc(instanceID, inputFrame, nds))
+            return polledInput;
         ForceNSMLPacketBridgeNetReadyIfNeeded(instanceID, inputFrame, nds);
         ForceNSMLPacketBridgeLoadGameSMIfNeeded(instanceID, inputFrame, nds);
         ForceNSMLStagePacketWordsIfNeeded(inputFrame, nds);
@@ -4870,6 +4935,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
                 ForceNSMLPacketBridgeTickIfNeeded(instanceID, syncFrame, nds);
             }
             ForceNSMLPacketBridgeNetReadyIfNeeded(instanceID, syncFrame, nds);
+            if (InjectNSMLPacketBridgeDummyAlloc(instanceID, syncFrame, nds))
+                return testInput;
             ForceNSMLPacketBridgeLoadGameSMIfNeeded(instanceID, syncFrame, nds);
             ForceNSMLStagePacketWordsIfNeeded(syncFrame, nds);
             melonDS::NSML_RefreshMarioVsLuigiPacketSlots(nds);
