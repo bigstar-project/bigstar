@@ -32,6 +32,8 @@ param(
     [switch]$PacketBridgeTrace,
     [int]$PacketBridgePort = 8165,
     [int]$PacketBridgeStartFrame = 0,
+    [string]$HostPacketBridgeLocalPlayer = "",
+    [string]$ClientPacketBridgeLocalPlayer = "",
     [int]$PacketBridgeReplayTickOffset = 0,
     [int]$HostPacketBridgeReplayTickOffset = [int]::MinValue,
     [int]$ClientPacketBridgeReplayTickOffset = [int]::MinValue,
@@ -145,6 +147,9 @@ param(
     [switch]$SafeLoadLevelCall,
     [int]$SafeLoadLevelCallFrame = 1600,
     [string]$SafeLoadLevelCallPC = "0x0200F944",
+    [switch]$SafeLoadLevelSessionReady,
+    [string]$HostSafeLoadLevelPlayerID = "",
+    [string]$ClientSafeLoadLevelPlayerID = "",
     [switch]$SafeCourseSelectCall,
     [int]$SafeCourseSelectCallFrame = 1900,
     [string]$SafeCourseSelectCallPC = "0x0200F944",
@@ -169,6 +174,7 @@ param(
     [switch]$SafeStageSceneFactoryCall,
     [int]$SafeStageSceneFactoryCallFrame = 2700,
     [string]$SafeStageSceneFactoryCallPC = "0",
+    [switch]$SafeStageSceneFactoryInactive,
     [string]$HostSafeStageSceneFactoryCallPC = "",
     [string]$ClientSafeStageSceneFactoryCallPC = "",
     [string]$SafeCallMinSP = "",
@@ -381,11 +387,23 @@ function Start-MelonLANProcess {
         $env:MELONDS_NSML_SAFE_LOAD_LEVEL_CALL = "1"
         $env:MELONDS_NSML_SAFE_LOAD_LEVEL_CALL_FRAME = "$SafeLoadLevelCallFrame"
         $env:MELONDS_NSML_SAFE_LOAD_LEVEL_CALL_PC = "$SafeLoadLevelCallPC"
-        $env:MELONDS_NSML_SAFE_LOAD_LEVEL_PLAYER_ID = $(if ($Role -eq "client") { "1" } else { "0" })
+        if ($SafeLoadLevelSessionReady) {
+            $env:MELONDS_NSML_SAFE_LOAD_LEVEL_SESSION_READY = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_SAFE_LOAD_LEVEL_SESSION_READY -ErrorAction SilentlyContinue
+        }
+        if ($Role -eq "client" -and $ClientSafeLoadLevelPlayerID) {
+            $env:MELONDS_NSML_SAFE_LOAD_LEVEL_PLAYER_ID = $ClientSafeLoadLevelPlayerID
+        } elseif ($Role -eq "host" -and $HostSafeLoadLevelPlayerID) {
+            $env:MELONDS_NSML_SAFE_LOAD_LEVEL_PLAYER_ID = $HostSafeLoadLevelPlayerID
+        } else {
+            $env:MELONDS_NSML_SAFE_LOAD_LEVEL_PLAYER_ID = $(if ($Role -eq "client") { "1" } else { "0" })
+        }
     } else {
         Remove-Item Env:\MELONDS_NSML_SAFE_LOAD_LEVEL_CALL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_LOAD_LEVEL_CALL_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_LOAD_LEVEL_CALL_PC -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_LOAD_LEVEL_SESSION_READY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_LOAD_LEVEL_PLAYER_ID -ErrorAction SilentlyContinue
     }
     if ($SafeCourseSelectCall) {
@@ -458,10 +476,16 @@ function Start-MelonLANProcess {
             $roleSafeStageSceneFactoryCallPC = $ClientSafeStageSceneFactoryCallPC
         }
         $env:MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL_PC = "$roleSafeStageSceneFactoryCallPC"
+        if ($SafeStageSceneFactoryInactive) {
+            $env:MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_INACTIVE = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_INACTIVE -ErrorAction SilentlyContinue
+        }
     } else {
         Remove-Item Env:\MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL_PC -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_INACTIVE -ErrorAction SilentlyContinue
     }
     if ($SafeCallMinSP) {
         $env:MELONDS_NSML_SAFE_CALL_MIN_SP = "$SafeCallMinSP"
@@ -710,6 +734,13 @@ function Start-MelonLANProcess {
         }
         $env:MELONDS_NSML_PACKET_BRIDGE = "1"
         $env:MELONDS_NSML_PACKET_BRIDGE_ONLY = "1"
+        if ($Role -eq "host" -and $HostPacketBridgeLocalPlayer) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER = $HostPacketBridgeLocalPlayer
+        } elseif ($Role -eq "client" -and $ClientPacketBridgeLocalPlayer) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER = $ClientPacketBridgeLocalPlayer
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER -ErrorAction SilentlyContinue
+        }
         if ($PacketBridgeAllowPreGame) {
             $env:MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME = "1"
         } else {
@@ -1081,6 +1112,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_LOCAL_INSTANCE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER -ErrorAction SilentlyContinue
         if (-not ($PacketCapture -and $PacketCaptureAllowPreGame)) {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME -ErrorAction SilentlyContinue
         }
@@ -1402,11 +1434,17 @@ function Start-MelonLANProcess {
         "role=$Role"
         "packetBridge=$PacketBridge"
         "packetBridgeReplayTickOffset=$($env:MELONDS_NSML_PACKET_BRIDGE_REPLAY_TICK_OFFSET)"
+        "packetBridgeLocalPlayer=$($env:MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER)"
         "packetBridgeLiveFallbackWindow=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW)"
         "packetBridgeLiveFallbackNearest=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST)"
         "packetBridgeMaintainPacketFreeBytes=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_PACKET_FREE_BYTES)"
         "packetBridgeMaintainSessionPeers=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS)"
         "packetBridgeStageStartReadyProbe=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_READY_PROBE)"
+        "safeLoadLevel=$($env:MELONDS_NSML_SAFE_LOAD_LEVEL_CALL)"
+        "safeLoadLevelPlayerID=$($env:MELONDS_NSML_SAFE_LOAD_LEVEL_PLAYER_ID)"
+        "safeLoadLevelSessionReady=$($env:MELONDS_NSML_SAFE_LOAD_LEVEL_SESSION_READY)"
+        "safeStageSceneFactory=$($env:MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL)"
+        "safeStageSceneFactoryInactive=$($env:MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_INACTIVE)"
         "forceLoadSwitch=$PacketBridgeForceLoadGameSM"
         "forceLoadEnv=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM)"
         "forceLoadFrame=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_START_FRAME)"
