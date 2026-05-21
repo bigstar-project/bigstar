@@ -46,6 +46,7 @@ param(
     [switch]$PacketBridgeReplayReturnLookupTick,
     [switch]$PacketBridgeMaintainPacketFreeBytes,
     [switch]$PacketBridgeMaintainSessionPeers,
+    [switch]$PacketBridgeStageStartReadyProbe,
     [string]$PacketBridgeReplayOps = "",
     [switch]$PacketBridgeDirectCapture,
     [int]$PacketBridgeLowerStatusResult = -1,
@@ -1039,6 +1040,11 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS -ErrorAction SilentlyContinue
         }
+        if ($PacketBridgeStageStartReadyProbe) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_READY_PROBE = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_READY_PROBE -ErrorAction SilentlyContinue
+        }
         if ($PacketBridgeReplayOps) {
             $env:MELONDS_NSML_PACKET_REPLAY_OPS = $PacketBridgeReplayOps
         } else {
@@ -1133,6 +1139,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_PACKET_FREE_BYTES -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_READY_PROBE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_OPS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_TRACE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WAIT_FOR_PEER -ErrorAction SilentlyContinue
@@ -1174,6 +1181,9 @@ function Start-MelonLANProcess {
         }
         if ($PacketBridgeMaintainSessionPeers) {
             $env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS = "1"
+        }
+        if ($PacketBridgeStageStartReadyProbe) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_READY_PROBE = "1"
         }
         if ($PacketBridgeReplayOps) {
             $env:MELONDS_NSML_PACKET_REPLAY_OPS = $PacketBridgeReplayOps
@@ -1396,6 +1406,7 @@ function Start-MelonLANProcess {
         "packetBridgeLiveFallbackNearest=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST)"
         "packetBridgeMaintainPacketFreeBytes=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_PACKET_FREE_BYTES)"
         "packetBridgeMaintainSessionPeers=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS)"
+        "packetBridgeStageStartReadyProbe=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_READY_PROBE)"
         "forceLoadSwitch=$PacketBridgeForceLoadGameSM"
         "forceLoadEnv=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM)"
         "forceLoadFrame=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_START_FRAME)"

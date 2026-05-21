@@ -164,6 +164,14 @@ static void NSMLMaintainSessionPeers(NDS& nds)
     }
 }
 
+static bool NSMLPacketBridgeStageStartReadyProbe()
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_READY_PROBE") ? 1 : 0;
+    return enabled != 0;
+}
+
 static bool IsNSMLMarioVsLuigiGameplay(NDS& nds)
 {
     return nds.ARM9Read32(0x02085058) == 9
@@ -210,6 +218,24 @@ static u32 NSMLFindObjectBaseByID(NDS& nds, u16 objectID)
     }
 
     return 0;
+}
+
+static void NSMLProbeStageStartReadyBits(NDS& nds)
+{
+    if (!NSMLPacketBridgeStageStartReadyProbe() || !IsNSMLMarioVsLuigiPacketContext(nds))
+        return;
+    if (nds.ARM9Read16(0x0203B484) != 0x0006)
+        return;
+
+    const u32 vsConnectBase = NSMLFindObjectBaseByID(nds, 0x0006);
+    if (vsConnectBase == 0)
+        return;
+    if (nds.ARM9Read32(vsConnectBase + 0x120) != 0x021512B8)
+        return;
+    if (nds.ARM9Read32(vsConnectBase + 0x144) < 5)
+        return;
+
+    nds.ARM9Write8(vsConnectBase + 0x156, 0x03);
 }
 
 static void NSMLEmitMovImm(std::vector<u32>& code, int reg, u32 value)
@@ -1141,16 +1167,13 @@ static void BuildNSMLMarioVsLuigiPacket(NDS& nds, std::array<u8, 52>& packet, u3
     packet[5] = nds.ARM9Read8(0x02087F05);
     packet[6] = nds.ARM9Read8(0x02087F06);
     packet[7] = nds.ARM9Read8(0x02087F07);
+    for (u32 i = 0; i < 44; i++)
+        packet[8 + i] = nds.ARM9Read8(0x02087F08 + i);
     if (NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_PREGAME_ACTION1")
         && NSMLPacketBridgeAllowPreGame()
         && !IsNSMLMarioVsLuigiGameplay(nds))
     {
         packet[4] = 1;
-    }
-    if (IsNSMLMarioVsLuigiGameplay(nds))
-    {
-        for (u32 i = 0; i < 44; i++)
-            packet[8 + i] = nds.ARM9Read8(0x02087F08 + i);
     }
 }
 
@@ -1573,6 +1596,7 @@ void NSML_RefreshMarioVsLuigiPacketSlots(NDS* nds)
     const u32 tick = nds->ARM9Read16(0x02087F00);
     NSMLMaintainPacketFreeBytes(*nds);
     NSMLMaintainSessionPeers(*nds);
+    NSMLProbeStageStartReadyBits(*nds);
     NSMLWriteLiveReplayPacketsToLocalMPSlots(
         *nds,
         tick,

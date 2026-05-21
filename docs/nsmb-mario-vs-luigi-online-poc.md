@@ -31,6 +31,9 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `updateLoadGameSM` をA2DJ実コードから逆アセンブルし、host側は `0x02087E24 == 2` とpeer entry、client側は `0x0208B6C0` 系のpeer recordを待つことを確認した。
 - `PacketBridgeMaintainPacketFreeBytes` と `PacketBridgeMaintainSessionPeers` を追加した。これは上位VSConnect/CourseSelectを直接進めるForce系ではなく、LocalMPが本来維持する下位Netのpacket free-byte bitmapとpeer/session tableをPacketBridge側で補う診断フラグ。
 - session peer補完ありでは、hostは `loadGameSM -> post-load -> StageStartSM` まで自然に進み、`vsMode=1` になる。ただし `StageStartSM` のstep 5で `VSConnect + 0x156` のready bitが両player分立つのを待ち続け、まだ `startLoadLevel` には到達しない。
+- PacketBridgeのローカルpacket生成を修正し、gameplay中だけでなくpre-game/StageStart中も `0x02087F08..0x02087F33` を含む52 byte全体を送るようにした。これによりmarker byte `0x29` やpacket sequencer payloadをWAN adapterへ載せられる。
+- 診断用 `PacketBridgeStageStartReadyProbe` を追加した。これは `StageStartSM` step 5で `VSConnect + 0x156` にready bitを直接立てる仮説検証フラグで、最終実装ではない。
+- full packet化 + session peer補完 + ready probeでは、hostが `0200E664`、`VSConnect::startLoadLevel=0x0214E0C0`、`Game::loadLevel=0x020068A8` まで到達し、`stageGroup=0x9` / `vsMode=1` / player actor生成まで進むことを確認した。ただしclientはまだStageStartSMにそろわず、`sceneCurrentSceneID=0x6` / `vsMode=0` で待機側に残る。
 - `PacketBridgeSubMenuSchedule` / `PacketBridgeSubMenuDirect` で、自然LANで観測したVSConnectサブメニュー遷移を注入できる。
 - `SafeCourseSelectFactoryCall` により、`CourseSelect` object生成までは再現できる。
 - `VSConnect::startLoadLevel` と `Game::loadLevel(scene=0x0F, stageGroup=9, vsMode=1, ggid=0x42)` まではNoLanMP経路で再現できる。
@@ -42,6 +45,9 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - LoadGameSM停滞中は `Net::Core::advancePacketSequencer` / `processRecvPacket` / `processSendPacket` が大量に呼ばれる一方、`readPacketByte/readPacketInt/freePacketBytes/allocPacketBytes` 系の呼び出しは観測できていない。
 - `packetFreeBytesRecvBitmap` だけを維持してもLoadGameSM停滞は解消しなかった。peer/session tableまで維持するとhostはStageStartSMへ進むため、現時点の境界不足は「packet payload + free-byte bitmap」ではなく「session/peer state + packet sequencer完了通知」まで含む。
 - StageStartSM step 5は `VSConnect + 0x156` のbit 0/1を待つ。write traceではこのready bitへの自然書き込みはまだ発生していない。hostだけが先にStageStartSMへ進み、clientが別サブメニューに残るため、StageStart以降のpacket tick差が固定offsetでは吸収できないほど広がる。
+- `0200E670(0)` はmarker 0を立て、`0200E658(0)` はpacket byte `0x29` のmarker 0がactive peer分そろったかを見る同期バリアだった。full packet化前はbyte `0x29` が常に0になっており、ready probe後もhostがここで詰まっていた。
+- full packet化後は、ready probeありのhostがmarker barrierを抜けて `startLoadLevel` まで進む。したがってhost側StageStartの残課題は、ready bitを本来立てるpacket sequencer complete callbackをPacketBridge境界で再現すること。
+- ただしclientはまだStageStartSMへ自然到達していないため、hostだけを進めても最終対戦にはならない。client側のLoadGameSM/PostLoad/StageStart遷移条件を下位Net/session側から満たす必要がある。
 - tick差を吸収するための診断として `PacketBridgeLiveFallbackNearest` を追加したが、広い前後fallbackを接続前段階から使うと古い/未来のpacketを拾いすぎ、hostがStageStartSM中に `netState1C=9` へ落ちる。無条件のnearest fallbackは本筋にしない。
 - `0x0214C3D4` はVSConnectのstage-start updateではなく、overlay 52内のCourseSelect updateが `Scene::tryChangeScene` 相当を呼ぶ場所だった。
 - そのため、外から無理にscene 3へ飛ばすより、CourseSelect updateのready判定を自然タイミングで通す方が筋が良い。
@@ -53,9 +59,9 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 
 NoLanMP + PacketBridge経路で、接続/ロード開始に必要な下位Net状態が自然LANと一致していない。
 
-純粋adapter寄りの構成では、接続ロビーからhostのStageStartSMまでは自然に起きるが、host/clientが同じサブメニュー段階にそろわず、StageStartSMのready bitが立たない。
+純粋adapter寄りの構成では、接続ロビーからhostのStageStartSMまでは自然に起きるが、host/clientが同じサブメニュー段階にそろわず、StageStartSMのready bitが自然には立たない。
 
-`advancePacketSequencer` は回っているため、次はpacket本体だけでなく、packet sequencerの完了通知、ready bit相当のcallback、またはclient側のLoadGameSM/StageStartSM遷移条件をadapter境界に含める必要があるかを検証する。
+full packet化でpre-game/StageStartのmarker/payload欠落は解消した。ready bitを診断的に立てるとhostは `startLoadLevel` まで進むため、次の主ブロッカーは「packet sequencer complete callbackを自然に発火させること」と「client側もhostと同じLoadGameSM/PostLoad/StageStart段階へ進めること」。
 
 補助診断として、過去のstate注入ルートではStage sceneへ入る直前のリソース準備も自然LANと一致していないことが分かっている。ファイルロードを省略するとStage初期化中に `0205545C` 付近でdata abortする。逆にロード関数/ロードスレッドを単純に呼ぶと、`02009B94` 付近で非常に長く止まり、VSConnect scene 6から先へ進まない。
 
@@ -66,7 +72,9 @@ NoLanMP + PacketBridge経路で、接続/ロード開始に必要な下位Net状
 1. 現行PacketBridgeで「純粋adapter」と呼べる範囲を切り分ける。
    - `ForceNetReady` / `SubMenuDirect` / `CourseSelectFactory` / `LoadGameSM` などの内部state注入なしで、host/clientとも `loadGameSM` までは自然到達することを確認済み。
    - `packetFreeBytesRecvBitmap` だけでは不足。peer/session table補完でhostはStageStartSMまで進むことを確認済み。
-   - 次は client側も同じStageStartSMへ自然到達させる条件、またはStageStartSM ready bitを本来立てるpacket sequencer callbackを特定する。
+   - pre-game/StageStart中も52 byte packet全体を送るように修正済み。ready probe併用でhostが `startLoadLevel` / `Game::loadLevel` まで進むことを確認済み。
+   - 次はStageStartSM ready bitを本来立てるpacket sequencer callbackを特定し、診断probeではなくadapter境界で再現する。
+   - 並行して、client側も同じStageStartSMへ自然到達させる条件を特定する。
    - tick fallbackを使う場合は、接続/ロビー全体ではなく、packet sequencerの対象action/phaseに限定する。
 2. 差し替え境界を下げる候補を調べる。
    - `Net::Core::transferPacket` の返り値だけでなく、副作用・下位MP API・session状態を含めて置き換えられるかを調べる。
