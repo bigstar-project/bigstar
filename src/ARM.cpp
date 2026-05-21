@@ -1491,6 +1491,18 @@ static bool NSMLLiveReplayHasLead(NDS* nds, u32 player, u32 tick, u32 lead)
     return false;
 }
 
+static bool NSMLLiveReplayLatestBeforeFallbackEnabled(NDS* nds)
+{
+    static int enabled = -1;
+    static u32 startFrame = 0xFFFFFFFF;
+    if (enabled < 0)
+        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_LATEST_BEFORE") ? 1 : 0;
+    if (startFrame == 0xFFFFFFFF)
+        startFrame = NSMLPacketBridgeEnvFrame("MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_START_FRAME", 0);
+
+    return enabled != 0 && (!nds || nds->NumFrames >= startFrame);
+}
+
 static bool NSMLFindLiveReplayPacketLocked(
     NDS* nds,
     u32 player,
@@ -1513,11 +1525,61 @@ static bool NSMLFindLiveReplayPacketLocked(
     }
 
     if (fallbackWindow == 0)
-        return false;
+    {
+        if (!NSMLLiveReplayLatestBeforeFallbackEnabled(nds))
+            return false;
+
+        u32 bestAge = 0x8000;
+        const NSMLPacketReplayEntry* bestEntry = nullptr;
+        for (const auto& [packetTick, entry] : ndsIt->second)
+        {
+            if (!entry.Valid[player])
+                continue;
+
+            const u32 age = (tick - packetTick) & 0xFFFF;
+            if (age == 0 || age > 0x7FFF || age >= bestAge)
+                continue;
+
+            bestAge = age;
+            bestEntry = &entry;
+        }
+
+        if (!bestEntry)
+            return false;
+
+        outPacket = bestEntry->Packet[player];
+        return true;
+    }
 
     static int nearestFallback = -1;
     if (nearestFallback < 0)
         nearestFallback = NSMLEnvFlag("MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST") ? 1 : 0;
+
+    if (NSMLLiveReplayLatestBeforeFallbackEnabled(nds))
+    {
+        u32 bestAge = 0x8000;
+        const NSMLPacketReplayEntry* bestEntry = nullptr;
+        for (const auto& [packetTick, entry] : ndsIt->second)
+        {
+            if (!entry.Valid[player])
+                continue;
+
+            const u32 age = (tick - packetTick) & 0xFFFF;
+            if (age == 0 || age > 0x7FFF || age >= bestAge)
+                continue;
+            if (age > fallbackWindow)
+                continue;
+
+            bestAge = age;
+            bestEntry = &entry;
+        }
+
+        if (bestEntry)
+        {
+            outPacket = bestEntry->Packet[player];
+            return true;
+        }
+    }
 
     const u32 window = std::min<u32>(fallbackWindow, 4096);
     for (u32 age = 1; age <= window; age++)

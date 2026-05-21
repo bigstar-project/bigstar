@@ -37,9 +37,11 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - `ForcePlayerCount`
   - `ForceStageSceneRuntimeWords`
   - `ForceStageActorFreezeFlag`
+  - `PacketBridgeLiveFallbackLatestBefore` / `PacketBridgeLiveFallbackStartFrame`
   - `SafeMvlLoadThreadCall`
   - `SafeLoadLevelCall`
   - `SafeStageSceneFactoryCall`
+- `scripts/run-nsmb-mvl-lan-route-smoke.ps1` は、デフォルトでARM data/prefetch abortを検出して失敗扱いにする。
 
 ## 現在わかっていること
 
@@ -58,10 +60,13 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - host限定で `Stage::actorFreezeFlag` 候補を `0` に固定すると、hostのlocal player0は動く。
   - `logs/nsmvl-force-actor-freeze-flag-hostonly-20260522-attempt1`
   - host 2300f: `playerActor0X=0x35FF0`, `playerActor0VelX=0x1800`
-- ただし、hostが動くようになった後はclient側remote player0がまだ動かない。
 - PacketBridge trace上、hostは `keys=0x0010` のplayer0 packetを送信し、clientも受信できている。
 - client側の問題は、受信そのものではなく、`getPacket` lookup tickが受信済みtickより先へ進み `action=0xFF` になること。
-- client側は2600f付近で `pc=01FF8C28` のdata abortを起こすことがある。これはplayer更新が走った後に、まだ不足しているscene/player初期化条件へ到達している可能性が高い。
+- `PacketBridgeLiveFallbackLatestBefore` をstage生成後の2300fから有効化すると、client側もhostの右入力を消費し、remote player0が動く。
+  - `logs/nsmvl-freeze-flag-latest-before-start2300-20260522-attempt1`
+  - client 2400f: `inputPlayer0Held=0x10`, `playerActor0X=0x8070`
+  - client 2500f: `playerActor0X=0x1FD70`, `playerActor0VelX=0x14B0`
+- ただし同じrunでclient側が `pc=01FF8C28` のARM9 data abortを起こす。これはplayer更新が走った後に、まだ不足しているscene/player初期化条件へ到達している可能性が高い。
 
 ## 直近の検証ログ
 
@@ -85,19 +90,23 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - clientも受信するが、lookup tick先行で試合中packetとして消費できない。
 - `logs/nsmvl-freeze-flag-fallback-20260522-attempt1`
   - 近傍tick fallback window 8ではclient消費はまだ改善せず。
+- `logs/nsmvl-freeze-flag-latest-before-start2300-20260522-attempt1`
+  - 2300f以降のみ、受信済み最新packetをlookup tickへ正規化して返す。
+  - host local player0とclient remote player0が同じ右入力で動くことを確認。
+  - clientでARM9 data abortが発生するため、まだ成功扱いにはしない。
 
 ## 現在のブロッカー
 
 直接stage開始ルートでhost local player actorを動かす条件は `Stage::actorFreezeFlag` 候補まで絞れた。
 
-次のブロッカーは、hostが送ったplayer0 input packetをclientが試合中packet lookupで安定して消費できないこと。実際には受信済みだが、client側lookup tickが数tick先行して `action=0xFF` になっている。tick pacing、lookup tick正規化、またはNSMBのpacket sequencer状態の追加同期が必要。
+次のブロッカーは、packet消費を動かした後にclient側で `pc=01FF8C28` のARM9 data abortが出ること。host local player0とclient remote player0の移動までは到達したので、次はplayer更新後に不足しているscene/player/packet初期化条件を特定する。
 
 ## 次にやること
 
-1. freeze flag修正を前提に、client側remote packet消費のtick先行を解消する。
-2. `PacketBridgeWait` / `PacketBridgeMaxTickLead` / lookup tick正規化の組み合わせを、stage後に限定して再評価する。
-3. tick同期が改善したら、host local player0とclient remote player0が同じ入力で動くか確認する。
-4. その後、client側data abortの直前状態を、player更新開始後の不足初期化条件として切り分ける。
+1. client側 `pc=01FF8C28` data abortの直前状態を、RAM dump/call trace/write traceで切り分ける。
+2. `PacketBridgeLiveFallbackLatestBefore` の適用開始フレームを、stage/player生成後だけに絞ったまま安定化する。
+3. abort原因が不足初期化条件なら、scene/player/packet sequencerのどのfieldが必要かを特定して最小patch化する。
+4. ARM abortなしでhost local player0とclient remote player0が同じ入力で動くrunを作る。
 5. 条件が固まったら、診断patchをROM patchまたは下位MP adapterへ縮小する。
 
 ## 重要アドレス

@@ -50,6 +50,8 @@ param(
     [int]$PacketBridgeStrictRequireLead = 0,
     [int]$PacketBridgeLiveFallbackWindow = 0,
     [switch]$PacketBridgeLiveFallbackNearest,
+    [switch]$PacketBridgeLiveFallbackLatestBefore,
+    [int]$PacketBridgeLiveFallbackStartFrame = 0,
     [switch]$PacketBridgeReplayReturnLookupTick,
     [switch]$PacketBridgeMaintainPacketFreeBytes,
     [switch]$PacketBridgeMaintainSessionPeers,
@@ -253,6 +255,7 @@ param(
     [switch]$SkipDisconnectScreenshotCheck,
     [switch]$SkipBlankScreenshotCheck,
     [switch]$SkipGameplayActorCheck,
+    [switch]$SkipArmAbortCheck,
     [string]$LogDir = "logs\nsmb-mvl-lan-route"
 )
 
@@ -1239,6 +1242,16 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST -ErrorAction SilentlyContinue
         }
+        if ($PacketBridgeLiveFallbackLatestBefore) {
+            $env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_LATEST_BEFORE = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_LATEST_BEFORE -ErrorAction SilentlyContinue
+        }
+        if ($PacketBridgeLiveFallbackStartFrame -gt 0) {
+            $env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_START_FRAME = "$PacketBridgeLiveFallbackStartFrame"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_START_FRAME -ErrorAction SilentlyContinue
+        }
         if ($PacketBridgeReplayReturnLookupTick) {
             $env:MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK = "1"
         } else {
@@ -1388,6 +1401,12 @@ function Start-MelonLANProcess {
         }
         if ($PacketBridgeLiveFallbackNearest) {
             $env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST = "1"
+        }
+        if ($PacketBridgeLiveFallbackLatestBefore) {
+            $env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_LATEST_BEFORE = "1"
+        }
+        if ($PacketBridgeLiveFallbackStartFrame -gt 0) {
+            $env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_START_FRAME = "$PacketBridgeLiveFallbackStartFrame"
         }
         if ($PacketBridgeReplayReturnLookupTick) {
             $env:MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK = "1"
@@ -1653,6 +1672,8 @@ function Start-MelonLANProcess {
         "packetBridgeLocalPlayer=$($env:MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER)"
         "packetBridgeLiveFallbackWindow=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW)"
         "packetBridgeLiveFallbackNearest=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST)"
+        "packetBridgeLiveFallbackLatestBefore=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_LATEST_BEFORE)"
+        "packetBridgeLiveFallbackStartFrame=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_START_FRAME)"
         "packetBridgeWaitStartFrame=$($env:MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME)"
         "packetBridgeMaintainPacketFreeBytes=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_PACKET_FREE_BYTES)"
         "packetBridgeMaintainSessionPeers=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS)"
@@ -1927,6 +1948,22 @@ foreach ($screenDir in @($hostScreens, $clientScreens)) {
 
         if (-not $SkipBlankScreenshotCheck -and (Test-BlankLikeScreenshot -Path $screen.FullName)) {
             throw "blank-like screenshot detected at frame=${frame}: $($screen.FullName)"
+        }
+    }
+}
+
+if (-not $SkipArmAbortCheck) {
+    foreach ($item in @(
+        @{ Path = $hostStdout; Role = "host" },
+        @{ Path = $clientStdout; Role = "client" }
+    )) {
+        if (-not (Test-Path $item.Path)) {
+            continue
+        }
+
+        $abort = Select-String -Path $item.Path -Pattern "ARM[79]: data abort|ARM[79]: prefetch abort" -CaseSensitive:$false | Select-Object -First 1
+        if ($abort) {
+            throw "ARM abort detected for $($item.Role): $($abort.Line.Trim()). See $($item.Path)"
         }
     }
 }
