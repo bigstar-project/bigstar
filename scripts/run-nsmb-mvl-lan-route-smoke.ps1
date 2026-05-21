@@ -42,6 +42,7 @@ param(
     [int]$PacketBridgeStrictStartFrame = 0,
     [int]$PacketBridgeStrictRequireLead = 0,
     [int]$PacketBridgeLiveFallbackWindow = 0,
+    [switch]$PacketBridgeLiveFallbackNearest,
     [switch]$PacketBridgeReplayReturnLookupTick,
     [switch]$PacketBridgeMaintainPacketFreeBytes,
     [switch]$PacketBridgeMaintainSessionPeers,
@@ -1018,6 +1019,11 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW -ErrorAction SilentlyContinue
         }
+        if ($PacketBridgeLiveFallbackNearest) {
+            $env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST -ErrorAction SilentlyContinue
+        }
         if ($PacketBridgeReplayReturnLookupTick) {
             $env:MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK = "1"
         } else {
@@ -1123,6 +1129,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT_REQUIRE_LEAD -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_PACKET_FREE_BYTES -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS -ErrorAction SilentlyContinue
@@ -1155,6 +1162,9 @@ function Start-MelonLANProcess {
         }
         if ($PacketBridgeLiveFallbackWindow -gt 0) {
             $env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW = "$PacketBridgeLiveFallbackWindow"
+        }
+        if ($PacketBridgeLiveFallbackNearest) {
+            $env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST = "1"
         }
         if ($PacketBridgeReplayReturnLookupTick) {
             $env:MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK = "1"
@@ -1382,6 +1392,8 @@ function Start-MelonLANProcess {
         "role=$Role"
         "packetBridge=$PacketBridge"
         "packetBridgeReplayTickOffset=$($env:MELONDS_NSML_PACKET_BRIDGE_REPLAY_TICK_OFFSET)"
+        "packetBridgeLiveFallbackWindow=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW)"
+        "packetBridgeLiveFallbackNearest=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST)"
         "packetBridgeMaintainPacketFreeBytes=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_PACKET_FREE_BYTES)"
         "packetBridgeMaintainSessionPeers=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS)"
         "forceLoadSwitch=$PacketBridgeForceLoadGameSM"

@@ -42,6 +42,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - LoadGameSM停滞中は `Net::Core::advancePacketSequencer` / `processRecvPacket` / `processSendPacket` が大量に呼ばれる一方、`readPacketByte/readPacketInt/freePacketBytes/allocPacketBytes` 系の呼び出しは観測できていない。
 - `packetFreeBytesRecvBitmap` だけを維持してもLoadGameSM停滞は解消しなかった。peer/session tableまで維持するとhostはStageStartSMへ進むため、現時点の境界不足は「packet payload + free-byte bitmap」ではなく「session/peer state + packet sequencer完了通知」まで含む。
 - StageStartSM step 5は `VSConnect + 0x156` のbit 0/1を待つ。write traceではこのready bitへの自然書き込みはまだ発生していない。hostだけが先にStageStartSMへ進み、clientが別サブメニューに残るため、StageStart以降のpacket tick差が固定offsetでは吸収できないほど広がる。
+- tick差を吸収するための診断として `PacketBridgeLiveFallbackNearest` を追加したが、広い前後fallbackを接続前段階から使うと古い/未来のpacketを拾いすぎ、hostがStageStartSM中に `netState1C=9` へ落ちる。無条件のnearest fallbackは本筋にしない。
 - `0x0214C3D4` はVSConnectのstage-start updateではなく、overlay 52内のCourseSelect updateが `Scene::tryChangeScene` 相当を呼ぶ場所だった。
 - そのため、外から無理にscene 3へ飛ばすより、CourseSelect updateのready判定を自然タイミングで通す方が筋が良い。
 - `loadMvsLFilesThread` の日本版A2DJアドレスは `0x02152E04`。以前使っていた `0x02152E18` は関数入口ではなく、完了フラグ `0x0208A478=1` を書く途中命令だった。
@@ -66,6 +67,7 @@ NoLanMP + PacketBridge経路で、接続/ロード開始に必要な下位Net状
    - `ForceNetReady` / `SubMenuDirect` / `CourseSelectFactory` / `LoadGameSM` などの内部state注入なしで、host/clientとも `loadGameSM` までは自然到達することを確認済み。
    - `packetFreeBytesRecvBitmap` だけでは不足。peer/session table補完でhostはStageStartSMまで進むことを確認済み。
    - 次は client側も同じStageStartSMへ自然到達させる条件、またはStageStartSM ready bitを本来立てるpacket sequencer callbackを特定する。
+   - tick fallbackを使う場合は、接続/ロビー全体ではなく、packet sequencerの対象action/phaseに限定する。
 2. 差し替え境界を下げる候補を調べる。
    - `Net::Core::transferPacket` の返り値だけでなく、副作用・下位MP API・session状態を含めて置き換えられるかを調べる。
    - `0204619C` / `0204622C` / `02046480` だけで足りるか、さらに下の送受信/状態APIが必要かを確認する。

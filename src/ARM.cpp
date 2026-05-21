@@ -1271,7 +1271,11 @@ static bool NSMLFindLiveReplayPacketLocked(
     if (fallbackWindow == 0)
         return false;
 
-    const u32 window = std::min<u32>(fallbackWindow, 512);
+    static int nearestFallback = -1;
+    if (nearestFallback < 0)
+        nearestFallback = NSMLEnvFlag("MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST") ? 1 : 0;
+
+    const u32 window = std::min<u32>(fallbackWindow, 4096);
     for (u32 age = 1; age <= window; age++)
     {
         const u32 fallbackTick = (tick - age) & 0xFFFF;
@@ -1280,6 +1284,17 @@ static bool NSMLFindLiveReplayPacketLocked(
         {
             outPacket = fallbackIt->second.Packet[player];
             return true;
+        }
+
+        if (nearestFallback)
+        {
+            const u32 futureTick = (tick + age) & 0xFFFF;
+            auto futureIt = ndsIt->second.find(futureTick);
+            if (futureIt != ndsIt->second.end() && futureIt->second.Valid[player])
+            {
+                outPacket = futureIt->second.Packet[player];
+                return true;
+            }
         }
     }
 
@@ -1513,7 +1528,7 @@ static bool NSMLFindReplayEntryForTick(
         return true;
     }
 
-    const u32 window = std::min<u32>(fallbackWindow, 512);
+    const u32 window = std::min<u32>(fallbackWindow, 4096);
     for (u32 age = 1; age <= window; age++)
     {
         const u32 fallbackTick = (tick - age) & 0xFFFF;
