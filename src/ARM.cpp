@@ -23,10 +23,12 @@
 #include <algorithm>
 #include <array>
 #include <fstream>
+#include <chrono>
 #include <map>
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 #include "NDS.h"
 #include "DSi.h"
@@ -91,6 +93,21 @@ static int NSMLPacketBridgeReplayTickOffset()
             offset = 0;
     }
     return offset;
+}
+
+static u32 NSMLPacketBridgeLocalPlayer()
+{
+    if (const char* role = getenv("MELONDS_NSML_ROLE"))
+    {
+        if (!strcmp(role, "client"))
+            return 1;
+    }
+    if (const char* role = getenv("MELONDS_NSML_LAN_ROLE"))
+    {
+        if (!strcmp(role, "client"))
+            return 1;
+    }
+    return 0;
 }
 
 static bool NSMLPacketBridgeMaintainPacketFreeBytes()
@@ -170,6 +187,19 @@ static bool NSMLPacketBridgeStageStartReadyProbe()
     if (enabled < 0)
         enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_READY_PROBE") ? 1 : 0;
     return enabled != 0;
+}
+
+static u32 NSMLPacketBridgeWaitTimeoutMs()
+{
+    static u32 timeout = 0xFFFFFFFF;
+    if (timeout == 0xFFFFFFFF)
+    {
+        if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS"))
+            timeout = static_cast<u32>(strtoul(value, nullptr, 0));
+        else
+            timeout = 0;
+    }
+    return timeout;
 }
 
 static bool IsNSMLMarioVsLuigiGameplay(NDS& nds)
@@ -1344,24 +1374,10 @@ static bool NSMLSelectBridgePacketForPlayer(
     if (normalizeTick < 0)
         normalizeTick = NSMLEnvFlag("MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK") ? 1 : 0;
 
-    static int localPlayer = -1;
-    if (localPlayer < 0)
-    {
-        localPlayer = 0;
-        if (const char* role = getenv("MELONDS_NSML_ROLE"))
-        {
-            if (!strcmp(role, "client"))
-                localPlayer = 1;
-        }
-        if (const char* role = getenv("MELONDS_NSML_LAN_ROLE"))
-        {
-            if (!strcmp(role, "client"))
-                localPlayer = 1;
-        }
-    }
+    const u32 localPlayer = NSMLPacketBridgeLocalPlayer();
 
     const u32 tick = NSMLPacketBridgeCanonicalTick(nds);
-    if (static_cast<int>(player) == localPlayer)
+    if (player == localPlayer)
     {
         u32 ignoredTick = 0;
         u32 ignoredKeys = 0;
@@ -1369,13 +1385,25 @@ static bool NSMLSelectBridgePacketForPlayer(
         return true;
     }
 
-    std::lock_guard<std::mutex> lock(NSMLPacketBridgeMutex);
-    const bool found = NSMLFindLiveReplayPacketLocked(
-        &nds,
-        player,
-        tick,
-        static_cast<u32>(fallbackWindow),
-        packet);
+    bool found = false;
+    const u32 waitTimeoutMs = NSMLPacketBridgeWaitTimeoutMs();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(waitTimeoutMs);
+    do
+    {
+        {
+            std::lock_guard<std::mutex> lock(NSMLPacketBridgeMutex);
+            found = NSMLFindLiveReplayPacketLocked(
+                &nds,
+                player,
+                tick,
+                static_cast<u32>(fallbackWindow),
+                packet);
+        }
+        if (found || waitTimeoutMs == 0)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    } while (std::chrono::steady_clock::now() < deadline);
+
     if (found && normalizeTick)
     {
         packet[0] = static_cast<u8>(tick & 0xFF);

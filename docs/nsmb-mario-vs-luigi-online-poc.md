@@ -48,6 +48,8 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `0200E670(0)` はmarker 0を立て、`0200E658(0)` はpacket byte `0x29` のmarker 0がactive peer分そろったかを見る同期バリアだった。full packet化前はbyte `0x29` が常に0になっており、ready probe後もhostがここで詰まっていた。
 - full packet化後は、ready probeありのhostがmarker barrierを抜けて `startLoadLevel` まで進む。したがってhost側StageStartの残課題は、ready bitを本来立てるpacket sequencer complete callbackをPacketBridge境界で再現すること。
 - ただしclientはまだStageStartSMへ自然到達していないため、hostだけを進めても最終対戦にはならない。client側のLoadGameSM/PostLoad/StageStart遷移条件を下位Net/session側から満たす必要がある。
+- `PacketBridgeWait` のcore側実装を追加したが、全remote packet取得で20ms待つ構成は重すぎ、host/clientともpost-load付近で停滞してプロセスタイムアウトした。WAN adapterとして待ちは必要だが、無条件waitではなく対象phase/packet種別を絞る必要がある。
+- `0x02087E10` / `Game::localPlayerID=0x020850BC` をroleに合わせて常時維持する試験は、host側StageStart後にscene状態を壊したため不採用。local aid/player ID補完は接続前段階へ常時書くのではなく、開始状態を作るROM/メモリpatch側で扱う方がよい。
 - tick差を吸収するための診断として `PacketBridgeLiveFallbackNearest` を追加したが、広い前後fallbackを接続前段階から使うと古い/未来のpacketを拾いすぎ、hostがStageStartSM中に `netState1C=9` へ落ちる。無条件のnearest fallbackは本筋にしない。
 - `0x0214C3D4` はVSConnectのstage-start updateではなく、overlay 52内のCourseSelect updateが `Scene::tryChangeScene` 相当を呼ぶ場所だった。
 - そのため、外から無理にscene 3へ飛ばすより、CourseSelect updateのready判定を自然タイミングで通す方が筋が良い。
@@ -75,7 +77,7 @@ full packet化でpre-game/StageStartのmarker/payload欠落は解消した。rea
    - pre-game/StageStart中も52 byte packet全体を送るように修正済み。ready probe併用でhostが `startLoadLevel` / `Game::loadLevel` まで進むことを確認済み。
    - 次はStageStartSM ready bitを本来立てるpacket sequencer callbackを特定し、診断probeではなくadapter境界で再現する。
    - 並行して、client側も同じStageStartSMへ自然到達させる条件を特定する。
-   - tick fallbackを使う場合は、接続/ロビー全体ではなく、packet sequencerの対象action/phaseに限定する。
+   - tick fallbackやpacket waitを使う場合は、接続/ロビー全体ではなく、packet sequencerの対象action/phaseに限定する。
 2. 差し替え境界を下げる候補を調べる。
    - `Net::Core::transferPacket` の返り値だけでなく、副作用・下位MP API・session状態を含めて置き換えられるかを調べる。
    - `0204619C` / `0204622C` / `02046480` だけで足りるか、さらに下の送受信/状態APIが必要かを確認する。
