@@ -43,6 +43,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - game-state CSVにplayer actorのbase/state/flags/prev/vel列を追加し、actorが生成されているだけか、実際に更新されているかをRAM dumpなしで確認できるようにした。
 - game-state CSVにstage scene objectのbase/state/flags/word154/word160列を追加し、直接stage診断ルートのscene状態を追いやすくした。
 - 診断用に `MELONDS_NSML_FORCE_PLAYER_COUNT` と `MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS` を追加し、stage後のplayer更新条件を切り分けられるようにした。
+- `scripts/run-nsmb-mvl-lan-route-smoke.ps1` から `ForcePlayerCount` / `ForceStageSceneRuntimeWords` 系オプションを指定できるようにした。
 
 ## 現在のブロッカー
 

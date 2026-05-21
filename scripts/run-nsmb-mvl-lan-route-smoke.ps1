@@ -125,6 +125,19 @@ param(
     [int]$PacketBridgeMaxFrameLead = -1,
     [int]$PacketBridgeThrottleTimeoutMs = 5000,
     [int]$PacketBridgeThrottleStartFrame = 0,
+    [switch]$ForcePlayerCount,
+    [switch]$ForcePlayerCountHostOnly,
+    [switch]$ForcePlayerCountClientOnly,
+    [int]$ForcePlayerCountStartFrame = 0,
+    [int]$ForcePlayerCountEndFrame = 0,
+    [int]$ForcePlayerCountValue = 2,
+    [switch]$ForceStageSceneRuntimeWords,
+    [switch]$ForceStageSceneRuntimeWordsHostOnly,
+    [switch]$ForceStageSceneRuntimeWordsClientOnly,
+    [int]$ForceStageSceneRuntimeWordsStartFrame = 0,
+    [int]$ForceStageSceneRuntimeWordsEndFrame = 0,
+    [string]$ForceStageSceneWord154 = "1",
+    [string]$ForceStageSceneWord160 = "0xDA",
     [int]$DropMPAfterFrame = 0,
     [switch]$LanWanMode,
     [switch]$NoLanMP,
@@ -798,6 +811,38 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_NET_RANDOM_VALUE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_NET_RANDOM_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_NET_RANDOM_AUTO -ErrorAction SilentlyContinue
+    }
+    if ($ForcePlayerCount) {
+        $env:MELONDS_NSML_FORCE_PLAYER_COUNT = "1"
+        if ($ForcePlayerCountHostOnly) { $env:MELONDS_NSML_FORCE_PLAYER_COUNT_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COUNT_HOST_ONLY -ErrorAction SilentlyContinue }
+        if ($ForcePlayerCountClientOnly) { $env:MELONDS_NSML_FORCE_PLAYER_COUNT_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COUNT_CLIENT_ONLY -ErrorAction SilentlyContinue }
+        $env:MELONDS_NSML_FORCE_PLAYER_COUNT_START_FRAME = "$ForcePlayerCountStartFrame"
+        $env:MELONDS_NSML_FORCE_PLAYER_COUNT_END_FRAME = "$ForcePlayerCountEndFrame"
+        $env:MELONDS_NSML_FORCE_PLAYER_COUNT_VALUE = "$ForcePlayerCountValue"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COUNT -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COUNT_HOST_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COUNT_CLIENT_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COUNT_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COUNT_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COUNT_VALUE -ErrorAction SilentlyContinue
+    }
+    if ($ForceStageSceneRuntimeWords) {
+        $env:MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS = "1"
+        if ($ForceStageSceneRuntimeWordsHostOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_HOST_ONLY -ErrorAction SilentlyContinue }
+        if ($ForceStageSceneRuntimeWordsClientOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_CLIENT_ONLY -ErrorAction SilentlyContinue }
+        $env:MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_START_FRAME = "$ForceStageSceneRuntimeWordsStartFrame"
+        $env:MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_END_FRAME = "$ForceStageSceneRuntimeWordsEndFrame"
+        $env:MELONDS_NSML_FORCE_STAGE_SCENE_WORD154 = "$ForceStageSceneWord154"
+        $env:MELONDS_NSML_FORCE_STAGE_SCENE_WORD160 = "$ForceStageSceneWord160"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_HOST_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_CLIENT_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_WORD154 -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_WORD160 -ErrorAction SilentlyContinue
     }
     if ($PacketReplayFile) {
         $env:MELONDS_NSML_PACKET_REPLAY_FILE = (Resolve-Path $PacketReplayFile).Path
