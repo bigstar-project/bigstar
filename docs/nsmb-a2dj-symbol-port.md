@@ -18,6 +18,9 @@ Net系の優先関数は、JP RAM上の復号済みARM9コードで先頭命令�
 | `Game::random.value` | `0x020850B0` | candidate | US `0x02085A70 - 0x9C0`; currently `1` in MvsL dump |
 | `Game::localPlayerID` | `0x020850BC` | verified | inst0 is `0`, inst1 is `1` |
 | `Game::vsMode` | `0x020850C4` | verified | MvsL route has `1` |
+| `Input::consoleKeys` | `0x02086C90` | candidate | US `0x02087650 - 0x9C0`; game-state trace shows held keys during scripted input |
+| `Input::playerKeysHeld` | `0x02086CA0` | candidate | US `0x02087660 - 0x9C0`; host/client both show `0x10` for scripted RIGHT input |
+| `Input::playerKeysPressed` | `0x02086CA4` | candidate | US `0x02087664 - 0x9C0`; added to game-state trace for local/remote input diagnosis |
 | `Net::ggid` | `0x02087E78` | verified | JP game group id `0x42` |
 | `Net::randomBranchAddress` | `0x02087E7C` | candidate | US `0x0208885C - 0x9E0`; pointer-like value |
 | `Net::sendPacket` | `0x02087F00` | verified | packet-like bytes differ per console and match active transfer state |

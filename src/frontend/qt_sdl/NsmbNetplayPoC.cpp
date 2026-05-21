@@ -75,6 +75,9 @@ constexpr melonDS::u32 kNetPacketByte6Addr = 0x02087F06;
 constexpr melonDS::u32 kNetPacketByte7Addr = 0x02087F07;
 constexpr melonDS::u32 kNetRandomCallCountAddr = 0x02088068;
 constexpr melonDS::u32 kNetRandomValueAddr = 0x02088088;
+constexpr melonDS::u32 kInputConsoleKeysAddr = 0x02086C90;
+constexpr melonDS::u32 kInputPlayerKeysHeldAddr = 0x02086CA0;
+constexpr melonDS::u32 kInputPlayerKeysPressedAddr = 0x02086CA4;
 constexpr melonDS::u32 kGamePlayerGlobalBlockAddr = 0x0208A964;
 constexpr melonDS::u32 kGamePlayerCountAddr = 0x0208A988;
 constexpr melonDS::u32 kGamePlayerBattleStarsAddr = 0x0208A9AC;
@@ -291,6 +294,14 @@ struct GameStateSample
     melonDS::u32 NetRandomValue = 0;
     melonDS::u32 NetRandomCallCount = 0;
     melonDS::u32 NetRandomBranchAddress = 0;
+    melonDS::u32 InputConsole0Held = 0;
+    melonDS::u32 InputConsole0Pressed = 0;
+    melonDS::u32 InputConsole1Held = 0;
+    melonDS::u32 InputConsole1Pressed = 0;
+    melonDS::u32 InputPlayer0Held = 0;
+    melonDS::u32 InputPlayer1Held = 0;
+    melonDS::u32 InputPlayer0Pressed = 0;
+    melonDS::u32 InputPlayer1Pressed = 0;
     melonDS::u32 SceneIsSceneActive = 0;
     melonDS::u32 ScenePreviousSceneID = 0;
     melonDS::u32 SceneNextSceneID = 0;
@@ -3629,8 +3640,7 @@ void ForceStageSceneRuntimeWordsIfNeeded(int instanceID, melonDS::u32 frame, mel
             G.ForceStageSceneWord160,
             wrote154 ? 1 : 0,
             wrote160 ? 1 : 0);
-        if (wrote154 || wrote160)
-            G.ForceStageSceneRuntimeWordsLogged[instanceID] = true;
+        G.ForceStageSceneRuntimeWordsLogged[instanceID] = true;
     }
 }
 
@@ -3949,6 +3959,14 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.NetRandomValue = nds->ARM9Read32(kNetRandomValueAddr);
     sample.NetRandomCallCount = nds->ARM9Read8(kNetRandomCallCountAddr);
     sample.NetRandomBranchAddress = nds->ARM9Read32(kNetRandomBranchAddressAddr);
+    sample.InputConsole0Held = nds->ARM9Read16(kInputConsoleKeysAddr + 0x0);
+    sample.InputConsole0Pressed = nds->ARM9Read16(kInputConsoleKeysAddr + 0x2);
+    sample.InputConsole1Held = nds->ARM9Read16(kInputConsoleKeysAddr + 0x4);
+    sample.InputConsole1Pressed = nds->ARM9Read16(kInputConsoleKeysAddr + 0x6);
+    sample.InputPlayer0Held = nds->ARM9Read16(kInputPlayerKeysHeldAddr + 0x0);
+    sample.InputPlayer1Held = nds->ARM9Read16(kInputPlayerKeysHeldAddr + 0x2);
+    sample.InputPlayer0Pressed = nds->ARM9Read16(kInputPlayerKeysPressedAddr + 0x0);
+    sample.InputPlayer1Pressed = nds->ARM9Read16(kInputPlayerKeysPressedAddr + 0x2);
     sample.SceneIsSceneActive = nds->ARM9Read32(kSceneIsSceneActiveAddr);
     sample.ScenePreviousSceneID = nds->ARM9Read16(kScenePreviousSceneIDAddr);
     sample.SceneNextSceneID = nds->ARM9Read16(kSceneNextSceneIDAddr);
@@ -4099,6 +4117,14 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.NetRandomValue);
     MixGameStateValue(sample.Hash, sample.NetRandomCallCount);
     MixGameStateValue(sample.Hash, sample.NetRandomBranchAddress);
+    MixGameStateValue(sample.Hash, sample.InputConsole0Held);
+    MixGameStateValue(sample.Hash, sample.InputConsole0Pressed);
+    MixGameStateValue(sample.Hash, sample.InputConsole1Held);
+    MixGameStateValue(sample.Hash, sample.InputConsole1Pressed);
+    MixGameStateValue(sample.Hash, sample.InputPlayer0Held);
+    MixGameStateValue(sample.Hash, sample.InputPlayer1Held);
+    MixGameStateValue(sample.Hash, sample.InputPlayer0Pressed);
+    MixGameStateValue(sample.Hash, sample.InputPlayer1Pressed);
     MixGameStateValue(sample.Hash, sample.VsStarFound);
     MixGameStateValue(sample.Hash, sample.VsStarGUID);
     MixGameStateValue(sample.Hash, sample.VsStarSettings);
@@ -4450,6 +4476,14 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                      << ",0x" << sample.NetRandomValue
                      << ",0x" << sample.NetRandomCallCount
                      << ",0x" << sample.NetRandomBranchAddress
+                     << ",0x" << sample.InputConsole0Held
+                     << ",0x" << sample.InputConsole0Pressed
+                     << ",0x" << sample.InputConsole1Held
+                     << ",0x" << sample.InputConsole1Pressed
+                     << ",0x" << sample.InputPlayer0Held
+                     << ",0x" << sample.InputPlayer1Held
+                     << ",0x" << sample.InputPlayer0Pressed
+                     << ",0x" << sample.InputPlayer1Pressed
                      << ",0x" << sample.SceneIsSceneActive
                      << ",0x" << sample.ScenePreviousSceneID
                      << ",0x" << sample.SceneNextSceneID
@@ -5287,7 +5321,7 @@ void InitFromEnvironment()
         }
         else
         {
-            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,ggid,netState14,netState1C,netState20,netState24,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord144,vsConnectWord148,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectWord078,courseSelectWord07C,stageSceneFound,stageSceneBase,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY";
+            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,ggid,netState14,netState1C,netState20,netState24,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord144,vsConnectWord148,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectWord078,courseSelectWord07C,stageSceneFound,stageSceneBase,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY";
             if (G.GameStateTraceExtended)
                 G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash";
             G.GameStateTrace << '\n';

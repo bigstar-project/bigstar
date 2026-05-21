@@ -4,138 +4,85 @@
 
 New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` でWAN越しに遊べる形へ持っていく。
 
-現在の主方針は、melonDSのLocalMPをWANへそのまま伸ばすことではなく、NSMB側のMvL接続・同期・試合中packet処理をできるだけ活かし、必要箇所だけをWAN adapter / PacketBridge / ROMまたはメモリpatchで差し替えること。
+現在はmelonDS LocalMPをWANへ伸ばす方針ではなく、NSMBが使うMvL通信境界を特定し、必要な部分だけをWAN adapter / PacketBridge / ROMまたはメモリpatchで差し替える方針。
 
 ## 現在の方針
 
-1. **下位MP API / packet境界のadapter化**
+1. **下位MP API / packet境界をadapter化する**
    - `Net::getConsoleKeys/getPacketByte/getPacketTick/getPacketAction` だけでなく、packet availability、session/peer状態、packet sequencer完了条件まで含めてNSMBが期待する状態を再現する。
-   - 既知入口は `0204619C` / `0204622C` / `02046480` / `Net::Core::transferPacket`。ここで足りなければさらに下位の送受信/状態APIを追う。
-2. **MvL開始状態を直接作る診断ルート**
-   - UI操作、LocalMPロビー、CourseSelect、StageStartSMを外から完全再現するのは重いので、診断として `Game::loadLevel`、MvLファイルロード、scene factoryを呼び、試合中packet同期へ入れる最小状態を探す。
-   - 最終実装では、この診断で分かった必要条件をROM patchまたはより狭いメモリpatchへ落とす。
-3. **試合中packet同期の検証**
-   - NSMB Centralの情報どおり試合中が入力packet中心なら、stage開始後のpacketだけをWAN adapterへ流す。
-   - Big Star、8コインアイテム、ランダムステージなどの乱数要素は `Net::getRandom()` 系またはMvL開始時seedを同期する方向で固定する。
+   - 既知入口は `Net::Core::transferPacket`、`Net::updatePacket`、`Net::Core::processRecvPacket/processSendPacket`、`Net::Core::checkAllPacketBits/advancePacketSequencer`。
 
-## 完了したこと
+2. **MvL開始状態を直接作る診断ルートを使う**
+   - UI操作、LocalMPロビー、CourseSelect、StageStartSMの自然再現は重い。
+   - 診断では `loadMvsLFilesThread`、`Game::loadLevel`、stage scene factoryを安全呼び出しし、試合中packet同期へ入る最小条件を探す。
+   - 最終実装では、ここで見つけた条件をROM patchまたはより狭いメモリpatchへ落とす。
 
-- 自動検証用の入力スクリプト、スクリーンショット、framebuffer/black screen検出、game-state trace、packet capture/replay/bridge traceを追加済み。
-- `NoLanMP + PacketBridge from start` の検証ルートを作成済み。
-- PacketBridgeのpre-game/StageStart packetを52 byte全体で流すよう修正済み。marker byte `0x29` 欠落は解消済み。
-- `PacketBridgeStageStartReadyProbe` 診断により、host側は `VSConnect::startLoadLevel`、`Game::loadLevel`、stage scene、player actor、Big Star actor生成まで到達できることを確認済み。
-- `SafeLoadLevelCall`、`SafeTryChangeSceneCall`、`SafeStageSceneFactoryCall` の診断フックを整理し、複数SafeCall併用時の優先順位バグを修正済み。
-- `SafeLoadLevelCall + SafeStageSceneFactoryCall` により、hostは直接stage sceneへ入り、player actorとBig Star actor生成まで到達できることを確認済み。
-- host成功状態とclient停止状態のMainRAM dump / object dumpを取得済み。hostは stage scene object `0x0003`、player actor `0x0015`、Big Star actor `0x0022` を持つ一方、clientは `VSConnect 0x0006` と load scene `0x000F` に残る。
-- 古い検証ログを削除し、直近の判断に必要なログだけ残した。
-- `PacketBridgeForceMvlLoadThread` / `PacketBridgeForceMvlFileCache` が `ForceLoadGameSM` なしでも効くよう、検証スクリプトのenv設定を修正した。
-- `SafeMvlLoadThreadCall` を追加し、client側でも `loadMvsLFilesThread` 入口 `02152E04` から完了地点 `02152E1C` まで通せることを確認した。
-- `SafeStageSceneFactoryCreateObject` / `SafeStageSceneFactorySceneSwitch` 診断フックを追加し、client側でstage scene生成を直接押した場合の失敗条件を切り分けた。
-- `PacketBridgeForceStagePacketWords` をrole限定で試せるようにし、clientだけstage packet wordを `action=0x03` に固定できることを確認した。
-- `PacketBridgeWaitStartFrame` / `PacketBridgeThrottleStartFrame` を追加し、pre-game区間でwait/throttleが誤発火して検証を止める問題を避けられるようにした。
-- smoke scriptに `HostFrames` / `ClientFrames` を追加し、片方だけwaitで遅れる検証でも相手プロセスを長く走らせられるようにした。
-- A2DJの下位Net packet関数をCallTraceのデフォルト対象へ追加した。`processRecvPacket/processSendPacket/advancePacketSequencer/checkAllPacketBits` などを明示的なaddr指定なしで追える。
-- clientがstage遷移前に `Net::Core::transferPacket` 内部の完了待ちで詰まり、`Net::updatePacket/processRecvPacket/processSendPacket` を呼ばなくなることを確認した。
-- client限定 `PacketBridgeForceTransferResult` により、clientもstage sceneへ入り、player actorとBig Star actor生成まで到達することを確認した。
-- `Net::random.value=0x00000100` のstage開始時固定を組み合わせると、host/clientのBig Star初期位置が一致することを確認した。
-- stage後入力検証用の `tests/nsmb_mario_vs_luigi_stage_move.inputs` を追加した。
-- `getConsoleKeys/getPacket*` のpacket replay hookがPacketBridgeのlocal/remote選択を通るように修正し、host側local player入力もhook上でhitするようにした。
-- game-state CSVにplayer actorのbase/state/flags/prev/vel列を追加し、actorが生成されているだけか、実際に更新されているかをRAM dumpなしで確認できるようにした。
-- game-state CSVにstage scene objectのbase/state/flags/word154/word160列を追加し、直接stage診断ルートのscene状態を追いやすくした。
-- 診断用に `MELONDS_NSML_FORCE_PLAYER_COUNT` と `MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS` を追加し、stage後のplayer更新条件を切り分けられるようにした。
-- `scripts/run-nsmb-mvl-lan-route-smoke.ps1` から `ForcePlayerCount` / `ForceStageSceneRuntimeWords` 系オプションを指定できるようにした。
+3. **試合中packet同期に寄せる**
+   - NSMB Centralの解析どおり、試合中は入力packet中心の同期で進める想定。
+   - 乱数は個別actor座標を無理に合わせるのではなく、`Net::random.value` / `Net::getRandom()` 系の共有シードで合わせる。
+
+## 実装済み
+
+- 自動検証用の入力スクリプト、スクリーンショット、framebuffer/hash、RAM dump、game-state CSV、packet capture/replay/bridge traceを追加。
+- `NoLanMP + PacketBridge from start` の検証ルートを作成。
+- A2DJ向けに主要Net関数・グローバルを移植。
+- `Net::random.value` のmatch seed配布と自動注入で、初期Big Star位置がhost/clientで一致することを確認。
+- `PacketBridgeForceTransferResult` client限定で、client側もstage scene、player actor、Big Star actor生成まで到達可能にした。
+- game-state CSVに以下を追加済み。
+  - player actor base/state/flags/prev/vel
+  - stage scene base/state/flags/word154/word160
+  - `Input::consoleKeys` / `Input::playerKeysHeld` / `Input::playerKeysPressed` 候補値
+- 診断用env / script optionを追加済み。
+  - `ForcePlayerCount`
+  - `ForceStageSceneRuntimeWords`
+  - `SafeMvlLoadThreadCall`
+  - `SafeLoadLevelCall`
+  - `SafeStageSceneFactoryCall`
+
+## 現在わかっていること
+
+- host/clientともstage scene、player actor、Big Star actorを生成できる。
+- `Net::random.value=0x00000100` などで初期Big Star位置は一致させられる。
+- `playerCount=2` と stage scene runtime words `word154=1, word160=0xDA` は、試合中player更新を動かす有力条件。
+- ただし現在の直接stage開始ルートでは、hostのlocal player0が動かない。
+- 2026-05-22の再検証では、host/clientとも `inputPlayer0Held=0x10` まで入っているため、問題は入力注入ではない。
+- client側のremote player0は同じ入力で動く。
+  - client 2500f: `playerActor0X=0x1FD70`, `playerActor0VelX=0x14B0`
+- host側のlocal player0は同じ入力でも動かない。
+  - host 2500f: `playerActor0X=0x8000`, `playerActor0VelX=0`
+- write traceではclientのplayer0座標/速度に `PC=0209FD70/0209FD88` から毎フレーム書き込みがある。
+- 同じ期間、hostのplayer0座標/速度には書き込み自体がない。
+- つまり現在の直接stage開始ルートでは、host側player actorの移動更新ループまたはlocal player更新条件が立っていない。
+- client側は2600f付近で `pc=01FF8C28` のdata abortを起こすことがある。これはplayer更新が走った後に、まだ不足しているscene/player初期化条件へ到達している可能性が高い。
+
+## 直近の検証ログ
+
+- `logs/nsmvl-input-global-trace-20260522-attempt1`
+  - host/clientのInputグローバル候補をCSVで確認。
+  - host/clientとも `inputPlayer0Held=0x10`。
+  - actor更新はclientだけ進む。
+- `logs/nsmvl-player-write-trace-20260522-attempt1`
+  - client player0の座標/速度writeを確認。
+  - host player0の座標/速度writeはなし。
+- `logs/nsmvl-player-actor-dump-20260522-attempt1`
+  - 2300f/2500fのRAM dumpを取得。
+  - host/clientのactor0構造体差分を比較可能。
+- `logs/nsmvl-host-remote-player0-probe-20260522-attempt1`
+  - host側 `localPlayerID=1` 診断はhost player0移動にはつながらず、client actor生成も崩れる。
 
 ## 現在のブロッカー
 
-- 直接stage開始診断ルートでは、client限定 `transferPacket` 結果強制でstage sceneへ入れるようになった。ただしこれはまだ診断フックで、最終的には下位MP adapterまたはROM patchへ落とす必要がある。
-- host/clientともstage scene、player actor、Big Star actorまでは生成できるが、直接stage開始診断ルートでは `playerCount=0` のまま、player actorの座標と内部領域が更新されない。試合中入力以前に、NSMBのplayer/gameplay更新状態が完全には立ち上がっていない可能性が高い。
-- stage後にhost側 `RIGHT` 入力を入れると、PacketBridge hook上はhost local playerでも `keys=0x0010/0x0012` がhitし、A2DJ `Input::playerKeysHeld` 近傍にも値が反映される。ただしplayer actorは動かないため、remote packet注入だけではなく、stage開始/scene/player管理の初期化条件をさらに下げて追う必要がある。
-- `playerCount=2` とstage scene runtime words `word154=1, word160=0xDA` を補うとplayer actor更新が動き始めるケースがある。つまり、直接stage診断ルートはactor生成だけでなくstage runtime初期化も不足している。
-- `transferPacket` 結果強制はclient限定ならstage到達に効くが、hostにも適用するとactor生成自体が壊れる。host側は自然なtransfer経路を残す必要がある。
-- `Net::random.value` 固定でBig Star初期位置は一致したが、以後のBig Star再生成、8コインアイテム、ランダムステージ選択では、`Net::randomCallCount` と呼び出し順が一致し続けることを別途確認する必要がある。
-- `PacketBridgeWait` / throttleで2プロセスの実時間進行差を吸収しようとすると、host/clientの片側だけが極端に遅くなり、検証時間が破綻する。WAN本番の快適性にも直結しないため、これは補助診断に留める。
-- 単純な `sceneActive=0` 強制は危険。全体に適用するとhost側でdata abortした。role限定・タイミング限定でないと使えない。
+直接stage開始ルートで、host local player actorの移動更新が走っていない。
 
-## 直近の検証結果
-
-- `logs/nsmvl-direct-loadlevel-safe-client-loadthread-mainsp-20260521`
-  - client-only `SafeMvlLoadThreadCall`、`minSP=0x027E3000`、`mode=0x1F` で `02152E04 -> 02152E1C` 到達。
-  - clientも `SafeLoadLevelCall` と `SafeStageSceneFactoryCall` は発火。
-  - ただし clientは `playerActor0Found=0`、`vsStarActorFound=0` のまま。
-- `logs/nsmvl-direct-loadlevel-safe-client-loadthread-autoclear-20260521`
-  - `SceneAutoActiveClear` を全体適用するとhostでdata abort。単純なscene active強制は採用しない。
-- `logs/nsmvl-direct-loadlevel-safe-client-loadthread-dumps-20260521`
-  - 1938/1980/1997/2000/2020fのRAM dumpを取得。1980fのload scene object自体はhost/clientでほぼ一致し、差分は主に `0208B040` と小さなtimer差分。
-- `logs/nsmvl-direct-loadlevel-safe-client-loadthread-patchb040-20260521`
-  - clientにhost 1980f由来の `0208B040` をpatchしてもstage scene生成には進まない。
-- `logs/nsmvl-direct-loadlevel-safe-client-loadthread-client-active0-20260521`
-  - clientだけ `sceneActive=0` にしてもstage scene生成には進まない。
-- `logs/nsmvl-direct-loadlevel-safe-client-loadthread-client-sceneheader-20260521`
-  - clientだけsceneヘッダをhost 2000f相当にしてもstage scene/player/star actorは生成されない。
-- `logs/nsmvl-direct-loadlevel-client-create-stageobject-20260521`
-  - clientだけ `0204BF8C(objectID=0x0003, settings=0x00B5FF00)` を直接呼ぶ診断を追加。call trace上は呼べるが、player/star actorは生成されない。
-- `logs/nsmvl-direct-loadlevel-client-create-stageobject-dumps-20260521`
-  - direct create後のRAM dumpを確認。host 2020fにはstage scene object `0x0003` が残るが、client側には同じpatternのobjectが残らない。
-- `logs/nsmvl-direct-loadlevel-client-sceneswitch-20260521`
-  - `020131A0` を通常関数のように直接呼ぶとclientの `sceneCurrent` が `0x0208` へ壊れる。ここは関数入口ではなく、scene factory内部の分岐先に近いため直接呼び出し対象から外す。
-- `logs/nsmvl-direct-loadlevel-client-stagefactory-late-20260521`
-  - client-onlyでstage factory/direct createを2020fへ遅らせてもstage scene objectは残らない。
-- `logs/nsmvl-direct-loadlevel-client-stagefactory-late-patchedheader-20260521`
-  - stage factory直前にclientへhost 2000f相当のscene headerをpatchしてもstage scene objectは残らない。
-- `logs/nsmvl-direct-loadlevel-client-player0-20260521`
-  - clientの `localPlayerID` を0に寄せてもstage scene生成には進まない。player ID差分だけが原因ではない。
-- `logs/nsmvl-direct-loadscene-state-timer-patch-20260521`
-  - load scene objectの `state word(+0x0C)` と `timer/step(+0x64)` をhost 1997f相当にpatchしてもdestroyは発火しない。
-- `logs/nsmvl-force-stage-packet-words-clientonly-20260521`
-  - client local packetの `action=0x03` 固定には成功。ただしhost側はclient packetをtick不一致で拾えず、clientもstage sceneへ進まない。
-- `logs/nsmvl-force-stage-packet-words-clientonly-forcedtick-20260521`
-  - tick基準を固定しても、host/clientの進行速度差でremote packetがlookup tickに届かず、host側は `player=1` を `action=0xFF` として扱う場面が残る。
-- `logs/nsmvl-force-stage-packet-words-clientonly-throttle-20260521`
-  - 既存tick throttleはpre-game tick差にも反応し、stage同期前の1290f付近で長時間待機する。throttle開始フレームをstage同期区間に限定する必要がある。
-- `logs/nsmvl-force-stage-packet-words-clientonly-livefallback-20260521`
-  - 近傍tick fallbackでhostが古い/未来のclient packetを拾えるか試したが、host側がstage開始途中で壊れ、clientはload sceneに残った。tick不一致を雑に許容するだけでは安定しない。
-- `logs/nsmvl-force-stage-packet-words-clientonly-waitstart-20260521`
-  - 1850f以降だけexact waitを有効化。pre-game待ちは避けられ、hostはstage scene/Big Starまで進むが、clientは `sceneCurrent=0x0F` のまま。hostはclient packetが届かないtickでwait timeoutを連発する。
-- `logs/nsmvl-force-stage-packet-words-clientonly-waitstart-clientlong-20260521`
-  - clientだけ長く走らせても、実時間進行差が大きく、hostがstage前のtick待ちでほぼ停止する。waitで外側から足並みを揃える方式はフィードバックループが遅すぎる。
-- `logs/nsmvl-lower-net-default-calltrace-20260521`
-  - clientは1980fで `Net::Core::transferPacket` に入った後、`Net::updatePacket/processRecvPacket/processSendPacket` が止まり、`onPacketPollingDefault` だけを呼び続ける。clientがstage sceneへ進まない主因は、transfer完了待ちで止まることに寄っている可能性が高い。
-- `logs/nsmvl-client-transfer-bypass-20260521`
-  - client限定 `PacketBridgeForceTransferResult` でclientもstage sceneへ進む。2120f以降、client側にもplayer actorとBig Star actorが出る。ただしRNG未固定ではBig Star座標がhost/clientで異なる。
-- `logs/nsmvl-client-transfer-bypass-netrandom-20260521`
-  - `Net::random.value=0x00000100` をstage開始時に両側へpatchすると、2140f以降のBig Star座標がhost/clientで `x=0x370000, y=0xFFEF0000, z=0x180000` に一致する。
-- `logs/nsmvl-stage-move-host-right-20260521`
-  - stage後にhost inputで `RIGHT` を入れる検証。client側player0は2420f以降にX座標が動くが、host側player0は動かず、clientは2600f付近でdata abort。入力packetは一部伝わっている可能性があるが、local/remote双方のpacket消費とgameplay状態がまだ揃っていない。
-- `logs/nsmvl-stage-move-host-right-packettrace-20260521`
-  - client側では `player=0 keys=0x0010` がhitし、hostのRIGHT入力packetを読めている。host側は `netPacketKeys=0x10` を持つが、packet replay hook上はhitせず、player0 actorも動かない。hostのlocal入力消費経路とstage playable状態の追加確認が必要。
-- `logs/nsmvl-stage-move-host-right-transfer-both-20260521`
-  - `transferPacket` 結果強制をhost/client両方に適用すると、player/star actorが検出されずstage生成が壊れる。client限定bypassを維持する。
-- `logs/nsmvl-stage-move-host-right-bridge-selector-20260521`
-  - `getConsoleKeys/getPacket*` replay hookをPacketBridge selector経由に変更した後、host側でも `player=0 keys=0x0010 hit=1` が出るようになった。2450fまではdata abortなし。
-- `logs/nsmvl-stage-move-host-right-long-bridge-selector-20260521`
-  - `RIGHT` 入力を3600fまで延長して3200fまで走らせても、host/clientのplayer actor座標は初期位置のまま。packet入力は読めているが、actor更新が動いていない。
-- `logs/nsmvl-gameplay-inputs-bridge-selector-20260521`
-  - 既存gameplay入力スクリプトでタッチ/A後に移動入力を入れてもplayer actorは動かない。host側は `keys=0x0010/0x0012`、client側は `keys=0x0020/0x0022` をhook上で読める。
-- `logs/nsmvl-input-globals-dump-20260521`
-  - RAM dumpで `0x02086CA0` 近傍のInput player key領域も入力に応じて変化することを確認した。一方、player actor objectの位置/末尾状態は3000/3100/3200fで不変。直接stage診断ルートはplayer更新ループまで自然到達していない。
-- `logs/nsmvl-gamestate-player-fields-smoke-20260521`
-  - 追加したgame-state列の短時間スモーク。2300f時点でplayer actorのbase/state/flags/prev/velがCSVへ出ることを確認した。
-- `logs/nsmvl-gamestate-stage-fields-smoke-20260521`
-  - stage scene診断列の短時間スモーク。2300f時点で `stageSceneFound=1`、`stageSceneBase=0x021B94CC`、`stageSceneFlags=0x10000` がCSVへ出ることを確認した。
-- `logs/nsmvl-force-player-count-20260521`
-  - `playerCount=2` だけを2200-3600fで固定。client側はhost入力由来でplayer0が動くが、host側は動かない。`playerCount` 単体では不足。
-- `logs/nsmvl-force-player-count-stagewords-20260521`
-  - `playerCount=2` に加えてstage scene `word154=1, word160=0xDA` を固定。host側player actorは動き始めるが、host/clientの挙動は一致しない。
-- `logs/nsmvl-force-player-count-stagewords-hostonly-20260521`
-  - stage scene runtime wordsをhost-onlyにするとhost側も動かない。両側のstage runtime状態とpacket同期が相互依存している可能性がある。
+これはWAN adapter本体の問題ではなく、診断ルートで作っているMvL開始状態がまだ自然な試合中状態に足りていないことを示す。次は、client remote playerが動く状態とhost local playerが止まる状態のactor/stage runtime差分から、不足しているplayer更新条件を絞る。
 
 ## 次にやること
 
-1. client限定 `transferPacket` 結果強制を、現在の診断フックから「WAN adapterが返すべき完了条件」として整理する。戻り値 `8` が正しい完了値なのか、他の戻り値やflagsが必要かを確認する。
-2. 直接stage開始診断ルートで不足しているstage runtime初期化をさらに絞る。`playerCount=2` とstage scene `word154=1, word160=0xDA` は有力候補だが、両PCで同じplayer更新になる条件はまだ未確定。
-3. RNGについて、Big Star初期位置以外に、Big Star再生成、8コインアイテム、ランダムステージ選択で `Net::random` 呼び出し順が一致するかをtraceする。
-4. 直接stage開始診断ルートの依存フックを縮小し、最終的にROM patch入口または下位MP adapterへ置き換える。
-5. 安定した単位でコミットする。
+1. `logs/nsmvl-player-actor-dump-20260522-attempt1` のactor構造体差分から、host local playerを止めている候補フィールドを絞る。
+2. `PC=0209FD70/0209FD88` の処理をA2DJ/USシンボル・RAM disasmで追い、player移動更新がどの条件で呼ばれるか確認する。
+3. host側で不足している条件を最小patchとして試す。
+4. client側data abortの直前状態を、player更新開始後の不足初期化条件として別途切り分ける。
+5. 条件が固まったら、診断patchをROM patchまたは下位MP adapterへ縮小する。
 
 ## 重要アドレス
 
@@ -144,30 +91,31 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `Net::getPacketTick(u16)`: `0x0200E9BC`
 - `Net::getPacketAction(u16)`: `0x0200E9DC`
 - `Net::Core::transferPacket`: `0x0200F98C`
+- `Net::updatePacket`: `0x020101E4`
 - `Net::Core::processRecvPacket`: `0x02011360`
 - `Net::Core::processSendPacket`: `0x02011428`
 - `Net::Core::checkAllPacketBits`: `0x020110E4`
 - `Net::Core::advancePacketSequencer`: `0x0201122C`
-- packet tick/key/action buffer: `0x02087F00`
-- `Net::packetFreeBytesRecvBitmap`: `0x020880A4`
-- `Net::packetFreeBytes`: `0x020880B4`
-- `Net::packetSequenceBuilder`: `0x020880D4`
-- `Net::packetSequencers`: `0x020880FC`
+- packet buffer: `0x02087F00`
 - net state base: `0x02087E00`
 - `Game::stageGroup`: `0x02085058`
 - `Game::localPlayerID`: `0x020850BC`
 - `Game::vsMode`: `0x020850C4`
-- `VSConnect::scheduleSubMenuChange`: `0x021528A0`
-- `VSConnect::startLoadLevel`: `0x0214E0C0`
+- `Game::playerCount`: `0x0208A988`
+- `Input::consoleKeys` A2DJ候補: `0x02086C90`
+- `Input::playerKeysHeld` A2DJ候補: `0x02086CA0`
+- `Input::playerKeysPressed` A2DJ候補: `0x02086CA4`
 - `Game::loadLevel`: `0x020068A8`
+- `VSConnect::startLoadLevel`: `0x0214E0C0`
 - `createStageStartSM`: `0x021515B4`
-- `updateStageStartSM`: `0x021512B8`
 - `loadMvsLFilesThread`: `0x02152E04`
-- `Scene::tryChangeScene`: `0x0201314C`
+- stage scene object ID: `0x0003`, settings `0x00B5FF00`
+- player actor object ID: `0x0015`
+- Big Star actor ID: `0x0022`
 
 ## 検証に必要なもの
 
-- ユーザー提供の `roms/nsmb.nds` を使用する。
+- ユーザー提供の `roms/nsmb.nds` を使う。
 - ROM本体や商用素材はリポジトリに含めない。
 
 ## 参考
