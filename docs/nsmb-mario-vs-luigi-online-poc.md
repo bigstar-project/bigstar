@@ -32,6 +32,8 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `SafeMvlLoadThreadCall` を追加し、client側でも `loadMvsLFilesThread` 入口 `02152E04` から完了地点 `02152E1C` まで通せることを確認した。
 - `SafeStageSceneFactoryCreateObject` / `SafeStageSceneFactorySceneSwitch` 診断フックを追加し、client側でstage scene生成を直接押した場合の失敗条件を切り分けた。
 - `PacketBridgeForceStagePacketWords` をrole限定で試せるようにし、clientだけstage packet wordを `action=0x03` に固定できることを確認した。
+- `PacketBridgeWaitStartFrame` / `PacketBridgeThrottleStartFrame` を追加し、pre-game区間でwait/throttleが誤発火して検証を止める問題を避けられるようにした。
+- smoke scriptに `HostFrames` / `ClientFrames` を追加し、片方だけwaitで遅れる検証でも相手プロセスを長く走らせられるようにした。
 
 ## 現在のブロッカー
 
@@ -40,6 +42,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - clientは同じstage requestを投げても、stage factory後にこの自然なscene遷移へ進まない。
 - clientで `0204BF8C(objectID=0x0003)` を直接呼んでも、stage scene objectはMainRAM上のobject listに残らない。単純なobject spawnではなく、load sceneのdestroy完了、scene manager内部状態、またはStageStart/LoadGameSM由来の追加状態が必要。
 - client local packetを `action=0x03` にしても、hostから見るclient packet tickが遅れているとremote packetとして使われない。packet actionだけでなくtick/進行同期も必要。
+- `PacketBridgeWait` / throttleで2プロセスの実時間進行差を吸収しようとすると、host/clientの片側だけが極端に遅くなり、検証時間が破綻する。WAN本番の快適性にも直結しないため、これは補助診断に留める。
 - 単純な `sceneActive=0` 強制は危険。全体に適用するとhost側でdata abortした。role限定・タイミング限定でないと使えない。
 
 ## 直近の検証結果
@@ -78,13 +81,19 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - tick基準を固定しても、host/clientの進行速度差でremote packetがlookup tickに届かず、host側は `player=1` を `action=0xFF` として扱う場面が残る。
 - `logs/nsmvl-force-stage-packet-words-clientonly-throttle-20260521`
   - 既存tick throttleはpre-game tick差にも反応し、stage同期前の1290f付近で長時間待機する。throttle開始フレームをstage同期区間に限定する必要がある。
+- `logs/nsmvl-force-stage-packet-words-clientonly-livefallback-20260521`
+  - 近傍tick fallbackでhostが古い/未来のclient packetを拾えるか試したが、host側がstage開始途中で壊れ、clientはload sceneに残った。tick不一致を雑に許容するだけでは安定しない。
+- `logs/nsmvl-force-stage-packet-words-clientonly-waitstart-20260521`
+  - 1850f以降だけexact waitを有効化。pre-game待ちは避けられ、hostはstage scene/Big Starまで進むが、clientは `sceneCurrent=0x0F` のまま。hostはclient packetが届かないtickでwait timeoutを連発する。
+- `logs/nsmvl-force-stage-packet-words-clientonly-waitstart-clientlong-20260521`
+  - clientだけ長く走らせても、実時間進行差が大きく、hostがstage前のtick待ちでほぼ停止する。waitで外側から足並みを揃える方式はフィードバックループが遅すぎる。
 
 ## 次にやること
 
-1. PacketBridgeのtick/進行同期をstage同期区間だけで制御できるようにする。既存throttleはpre-gameで効きすぎるため、開始フレームまたはcontext条件を追加する。
-2. hostがclient packetをremote packetとして拾える状態を作り、client load scene destroyが進むか確認する。
-3. それでも進まない場合、hostで `02013588` がload scene object `0x021BEAB0` に対して呼ばれる直前条件を、object state、destroy flag、pending flags、scene graph link、LoadGameSM/StageStartSM状態まで広げて比較する。
-4. 直接stage開始診断ルートのpatch範囲が大きくなりすぎる場合は、下位MP API adapter化またはROM patch入口作成へ戻す。
+1. 待ち/throttleで外側から同期させるのではなく、`Net::Core::processRecvPacket/processSendPacket`、packet sequencer、session/peer状態を含む下位MP境界を調べる。
+2. `external/NSMB-Code-Reference` のUS symbolsからA2DJへ、`Net::Core::processRecvPacket`、`processSendPacket`、`checkAllPacketBits`、`packetSequencer*`、`packetFreeBytes*` のアドレスと状態変数を整理する。
+3. `0204619C` / `0204622C` / `02046480` だけでなく、下位packet処理関数のcall trace / read-write traceを追加し、MvL開始時にNSMBがどの完了条件を待っているかを特定する。
+4. 直接stage開始診断ルートは、必要条件を見つけるための補助に限定する。patch範囲が広がる場合はROM patch入口作成へ戻す。
 5. 安定した単位でコミットする。
 
 ## 重要アドレス
@@ -94,7 +103,15 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `Net::getPacketTick(u16)`: `0x0200E9BC`
 - `Net::getPacketAction(u16)`: `0x0200E9DC`
 - `Net::Core::transferPacket`: `0x0200F98C`
+- `Net::Core::processRecvPacket`: `0x02011360`
+- `Net::Core::processSendPacket`: `0x02011428`
+- `Net::Core::checkAllPacketBits`: `0x020110E4`
+- `Net::Core::advancePacketSequencer`: `0x0201122C`
 - packet tick/key/action buffer: `0x02087F00`
+- `Net::packetFreeBytesRecvBitmap`: `0x020880A4`
+- `Net::packetFreeBytes`: `0x020880B4`
+- `Net::packetSequenceBuilder`: `0x020880D4`
+- `Net::packetSequencers`: `0x020880FC`
 - net state base: `0x02087E00`
 - `Game::stageGroup`: `0x02085058`
 - `Game::localPlayerID`: `0x020850BC`

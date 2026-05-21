@@ -204,6 +204,19 @@ static u32 NSMLPacketBridgeWaitTimeoutMs()
     return timeout;
 }
 
+static u32 NSMLPacketBridgeWaitStartFrame()
+{
+    static u32 frame = 0xFFFFFFFF;
+    if (frame == 0xFFFFFFFF)
+    {
+        if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME"))
+            frame = static_cast<u32>(strtoul(value, nullptr, 0));
+        else
+            frame = 0;
+    }
+    return frame;
+}
+
 static bool IsNSMLMarioVsLuigiGameplay(NDS& nds)
 {
     return nds.ARM9Read32(0x02085058) == 9
@@ -1564,7 +1577,9 @@ static bool NSMLSelectBridgePacketForPlayer(
     }
 
     bool found = false;
-    const u32 waitTimeoutMs = NSMLPacketBridgeWaitTimeoutMs();
+    const u32 waitTimeoutMs = nds.NumFrames >= NSMLPacketBridgeWaitStartFrame()
+        ? NSMLPacketBridgeWaitTimeoutMs()
+        : 0;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(waitTimeoutMs);
     do
     {

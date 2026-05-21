@@ -1,5 +1,7 @@
 param(
     [int]$Frames = 4200,
+    [int]$HostFrames = 0,
+    [int]$ClientFrames = 0,
     [int]$WaitTimeoutMs = 240000,
     [string]$Exe = "build\debug-windows-x86_64\melonDS.exe",
     [string]$Rom = "roms\nsmb.nds",
@@ -41,6 +43,7 @@ param(
     [int]$ClientPacketBridgeReplayTickOffset = [int]::MinValue,
     [switch]$PacketBridgeWait,
     [int]$PacketBridgeWaitTimeoutMs = 5,
+    [int]$PacketBridgeWaitStartFrame = 0,
     [switch]$PacketBridgeStrictRemote,
     [string]$PacketBridgeStrictPlayers = "",
     [int]$PacketBridgeStrictStartFrame = 0,
@@ -121,6 +124,7 @@ param(
     [int]$PacketBridgeMaxTickLead = -1,
     [int]$PacketBridgeMaxFrameLead = -1,
     [int]$PacketBridgeThrottleTimeoutMs = 5000,
+    [int]$PacketBridgeThrottleStartFrame = 0,
     [int]$DropMPAfterFrame = 0,
     [switch]$LanWanMode,
     [switch]$NoLanMP,
@@ -358,7 +362,13 @@ function Start-MelonLANProcess {
 
     $env:MELONDS_NSML_TEST = "1"
     $env:MELONDS_NSML_TEST_INSTANCES = "1"
-    $env:MELONDS_NSML_TEST_FRAMES = "$Frames"
+    $roleFrames = $Frames
+    if ($Role -eq "host" -and $HostFrames -gt 0) {
+        $roleFrames = $HostFrames
+    } elseif ($Role -eq "client" -and $ClientFrames -gt 0) {
+        $roleFrames = $ClientFrames
+    }
+    $env:MELONDS_NSML_TEST_FRAMES = "$roleFrames"
     $env:MELONDS_NSML_ROLE = $Role
     $env:MELONDS_NSML_INPUT_SCRIPT = $RoleInput
     $env:MELONDS_NSML_HASH_LOG = $HashLog
@@ -844,9 +854,11 @@ function Start-MelonLANProcess {
         if ($PacketBridgeWait) {
             $env:MELONDS_NSML_PACKET_BRIDGE_WAIT = "1"
             $env:MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS = "$PacketBridgeWaitTimeoutMs"
+            $env:MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME = "$PacketBridgeWaitStartFrame"
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME -ErrorAction SilentlyContinue
         }
         if ($PacketBridgeDirectCapture) {
             $env:MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE = "1"
@@ -1111,17 +1123,20 @@ function Start-MelonLANProcess {
         if ($PacketBridgeMaxTickLead -ge 0) {
             $env:MELONDS_NSML_PACKET_BRIDGE_MAX_TICK_LEAD = "$PacketBridgeMaxTickLead"
             $env:MELONDS_NSML_PACKET_BRIDGE_THROTTLE_TIMEOUT_MS = "$PacketBridgeThrottleTimeoutMs"
+            $env:MELONDS_NSML_PACKET_BRIDGE_THROTTLE_START_FRAME = "$PacketBridgeThrottleStartFrame"
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAX_TICK_LEAD -ErrorAction SilentlyContinue
         }
         if ($PacketBridgeMaxFrameLead -ge 0) {
             $env:MELONDS_NSML_PACKET_BRIDGE_MAX_FRAME_LEAD = "$PacketBridgeMaxFrameLead"
             $env:MELONDS_NSML_PACKET_BRIDGE_THROTTLE_TIMEOUT_MS = "$PacketBridgeThrottleTimeoutMs"
+            $env:MELONDS_NSML_PACKET_BRIDGE_THROTTLE_START_FRAME = "$PacketBridgeThrottleStartFrame"
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAX_FRAME_LEAD -ErrorAction SilentlyContinue
         }
         if ($PacketBridgeMaxTickLead -lt 0 -and $PacketBridgeMaxFrameLead -lt 0) {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_THROTTLE_TIMEOUT_MS -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_THROTTLE_START_FRAME -ErrorAction SilentlyContinue
         }
         if ($PacketBridgeStrictRemote -or $PacketBridgeStrictPlayers) {
             $env:MELONDS_NSML_PACKET_REPLAY_STRICT = "1"
@@ -1221,6 +1236,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_REPLAY_TICK_OFFSET -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK -ErrorAction SilentlyContinue
@@ -1571,6 +1587,7 @@ function Start-MelonLANProcess {
         "packetBridgeLocalPlayer=$($env:MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER)"
         "packetBridgeLiveFallbackWindow=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW)"
         "packetBridgeLiveFallbackNearest=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST)"
+        "packetBridgeWaitStartFrame=$($env:MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME)"
         "packetBridgeMaintainPacketFreeBytes=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_PACKET_FREE_BYTES)"
         "packetBridgeMaintainSessionPeers=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS)"
         "packetBridgeStageStartReadyProbe=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_READY_PROBE)"
@@ -1613,6 +1630,7 @@ function Start-MelonLANProcess {
         "submenuCallCreate=$($env:MELONDS_NSML_PACKET_BRIDGE_SUBMENU_CALL_CREATE)"
         "forceStageStartSMFields=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_FIELDS)"
         "forceStageStartSMFieldsStart=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_FIELDS_START_FRAME)"
+        "packetBridgeThrottleStartFrame=$($env:MELONDS_NSML_PACKET_BRIDGE_THROTTLE_START_FRAME)"
     ) |
         Set-Content -Encoding UTF8 "$Stdout.env.txt"
     $err = "$Stdout.err"
