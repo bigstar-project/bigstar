@@ -34,14 +34,16 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `PacketBridgeForceStagePacketWords` をrole限定で試せるようにし、clientだけstage packet wordを `action=0x03` に固定できることを確認した。
 - `PacketBridgeWaitStartFrame` / `PacketBridgeThrottleStartFrame` を追加し、pre-game区間でwait/throttleが誤発火して検証を止める問題を避けられるようにした。
 - smoke scriptに `HostFrames` / `ClientFrames` を追加し、片方だけwaitで遅れる検証でも相手プロセスを長く走らせられるようにした。
+- A2DJの下位Net packet関数をCallTraceのデフォルト対象へ追加した。`processRecvPacket/processSendPacket/advancePacketSequencer/checkAllPacketBits` などを明示的なaddr指定なしで追える。
+- clientがstage遷移前に `Net::Core::transferPacket` 内部の完了待ちで詰まり、`Net::updatePacket/processRecvPacket/processSendPacket` を呼ばなくなることを確認した。
+- client限定 `PacketBridgeForceTransferResult` により、clientもstage sceneへ入り、player actorとBig Star actor生成まで到達することを確認した。
+- `Net::random.value=0x00000100` のstage開始時固定を組み合わせると、host/clientのBig Star初期位置が一致することを確認した。
 
 ## 現在のブロッカー
 
-- clientは `loadMvsLFilesThread` 完了後も、`sceneCurrent=0x0F`、`sceneNext=0x03` のままstage sceneへ進まない。
-- hostはstage request後に自然に `02013588 -> 020131A0/020131A4 -> 02013218/0201321C` へ進み、stage scene objectとplayer/star actorを生成する。
-- clientは同じstage requestを投げても、stage factory後にこの自然なscene遷移へ進まない。
-- clientで `0204BF8C(objectID=0x0003)` を直接呼んでも、stage scene objectはMainRAM上のobject listに残らない。単純なobject spawnではなく、load sceneのdestroy完了、scene manager内部状態、またはStageStart/LoadGameSM由来の追加状態が必要。
-- client local packetを `action=0x03` にしても、hostから見るclient packet tickが遅れているとremote packetとして使われない。packet actionだけでなくtick/進行同期も必要。
+- 直接stage開始診断ルートでは、client限定 `transferPacket` 結果強制でstage sceneへ入れるようになった。ただしこれはまだ診断フックで、最終的には下位MP adapterまたはROM patchへ落とす必要がある。
+- host/clientともstage scene、player actor、Big Star actorまでは生成できるが、試合中の入力packet同期はまだ本実装ではない。
+- `Net::random.value` 固定でBig Star初期位置は一致したが、以後のBig Star再生成、8コインアイテム、ランダムステージ選択では、`Net::randomCallCount` と呼び出し順が一致し続けることを別途確認する必要がある。
 - `PacketBridgeWait` / throttleで2プロセスの実時間進行差を吸収しようとすると、host/clientの片側だけが極端に遅くなり、検証時間が破綻する。WAN本番の快適性にも直結しないため、これは補助診断に留める。
 - 単純な `sceneActive=0` 強制は危険。全体に適用するとhost側でdata abortした。role限定・タイミング限定でないと使えない。
 
@@ -87,13 +89,19 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - 1850f以降だけexact waitを有効化。pre-game待ちは避けられ、hostはstage scene/Big Starまで進むが、clientは `sceneCurrent=0x0F` のまま。hostはclient packetが届かないtickでwait timeoutを連発する。
 - `logs/nsmvl-force-stage-packet-words-clientonly-waitstart-clientlong-20260521`
   - clientだけ長く走らせても、実時間進行差が大きく、hostがstage前のtick待ちでほぼ停止する。waitで外側から足並みを揃える方式はフィードバックループが遅すぎる。
+- `logs/nsmvl-lower-net-default-calltrace-20260521`
+  - clientは1980fで `Net::Core::transferPacket` に入った後、`Net::updatePacket/processRecvPacket/processSendPacket` が止まり、`onPacketPollingDefault` だけを呼び続ける。clientがstage sceneへ進まない主因は、transfer完了待ちで止まることに寄っている可能性が高い。
+- `logs/nsmvl-client-transfer-bypass-20260521`
+  - client限定 `PacketBridgeForceTransferResult` でclientもstage sceneへ進む。2120f以降、client側にもplayer actorとBig Star actorが出る。ただしRNG未固定ではBig Star座標がhost/clientで異なる。
+- `logs/nsmvl-client-transfer-bypass-netrandom-20260521`
+  - `Net::random.value=0x00000100` をstage開始時に両側へpatchすると、2140f以降のBig Star座標がhost/clientで `x=0x370000, y=0xFFEF0000, z=0x180000` に一致する。
 
 ## 次にやること
 
-1. 待ち/throttleで外側から同期させるのではなく、`Net::Core::processRecvPacket/processSendPacket`、packet sequencer、session/peer状態を含む下位MP境界を調べる。
-2. `external/NSMB-Code-Reference` のUS symbolsからA2DJへ、`Net::Core::processRecvPacket`、`processSendPacket`、`checkAllPacketBits`、`packetSequencer*`、`packetFreeBytes*` のアドレスと状態変数を整理する。
-3. `0204619C` / `0204622C` / `02046480` だけでなく、下位packet処理関数のcall trace / read-write traceを追加し、MvL開始時にNSMBがどの完了条件を待っているかを特定する。
-4. 直接stage開始診断ルートは、必要条件を見つけるための補助に限定する。patch範囲が広がる場合はROM patch入口作成へ戻す。
+1. client限定 `transferPacket` 結果強制を、現在の診断フックから「WAN adapterが返すべき完了条件」として整理する。戻り値 `8` が正しい完了値なのか、他の戻り値やflagsが必要かを確認する。
+2. stage開始後の入力packet同期へ進む。まずはhost/client双方が同じstage/Big Star位置にいる状態で、`Net::getConsoleKeys/getPacket*` へPacketBridgeのremote packetを供給し、プレイヤー操作が相手側に反映されるか確認する。
+3. RNGについて、Big Star初期位置以外に、Big Star再生成、8コインアイテム、ランダムステージ選択で `Net::random` 呼び出し順が一致するかをtraceする。
+4. 直接stage開始診断ルートの依存フックを縮小し、最終的にROM patch入口または下位MP adapterへ置き換える。
 5. 安定した単位でコミットする。
 
 ## 重要アドレス
