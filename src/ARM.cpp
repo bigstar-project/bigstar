@@ -2079,6 +2079,10 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
     bool packetValid = false;
     if (player <= 1)
     {
+        if (NSMLPacketBridgeEnabled())
+            packetValid = NSMLSelectBridgePacketForPlayer(cpu->NDS, player, selectedPacket);
+
+        if (!packetValid)
         {
             std::lock_guard<std::mutex> lock(NSMLPacketBridgeMutex);
             packetValid = NSMLFindLiveReplayPacketLocked(
