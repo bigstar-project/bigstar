@@ -97,6 +97,8 @@ param(
     [switch]$PacketBridgeForceMvlFileCache,
     [int]$PacketBridgeForceMvlFileCacheStartFrame = 0,
     [switch]$PacketBridgeForceMvlLoadThread,
+    [switch]$PacketBridgeForceMvlLoadThreadHostOnly,
+    [switch]$PacketBridgeForceMvlLoadThreadClientOnly,
     [int]$PacketBridgeForceMvlLoadThreadStartFrame = 0,
     [int]$PacketBridgeLookupTickDelay = 0,
     [int]$PacketBridgeMaxPumpEvents = 64,
@@ -180,6 +182,13 @@ param(
     [switch]$SafeStageSceneFactoryInactive,
     [string]$HostSafeStageSceneFactoryCallPC = "",
     [string]$ClientSafeStageSceneFactoryCallPC = "",
+    [switch]$SafeMvlLoadThreadCall,
+    [switch]$SafeMvlLoadThreadCallHostOnly,
+    [switch]$SafeMvlLoadThreadCallClientOnly,
+    [int]$SafeMvlLoadThreadCallFrame = 1833,
+    [string]$SafeMvlLoadThreadCallPC = "0",
+    [string]$SafeMvlLoadThreadCallMinSP = "",
+    [string]$SafeMvlLoadThreadCallMode = "",
     [string]$SafeCallMinSP = "",
     [string]$SafeCallRequiredMode = "",
     [switch]$SafeCallProbe,
@@ -204,6 +213,10 @@ param(
     [string]$WriteTraceAddrs = "",
     [int]$WriteTraceStartFrame = 0,
     [int]$WriteTraceEndFrame = 0,
+    [string]$HostMemPatchFile = "",
+    [string]$ClientMemPatchFile = "",
+    [string]$MemPatchFrame = "",
+    [string]$MemPatchRanges = "",
     [int]$HostStartupDelayMs = 1000,
     [int]$LanStartAttempts = 1,
     [switch]$SkipDisconnectScreenshotCheck,
@@ -505,6 +518,34 @@ function Start-MelonLANProcess {
         $env:MELONDS_NSML_SAFE_CALL_REQUIRED_MODE = "$SafeCallRequiredMode"
     } else {
         Remove-Item Env:\MELONDS_NSML_SAFE_CALL_REQUIRED_MODE -ErrorAction SilentlyContinue
+    }
+    $safeMvlLoadThreadForRole = $SafeMvlLoadThreadCall
+    if ($SafeMvlLoadThreadCallHostOnly -and $Role -ne "host") {
+        $safeMvlLoadThreadForRole = $false
+    }
+    if ($SafeMvlLoadThreadCallClientOnly -and $Role -ne "client") {
+        $safeMvlLoadThreadForRole = $false
+    }
+    if ($safeMvlLoadThreadForRole) {
+        $env:MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL = "1"
+        $env:MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL_FRAME = "$SafeMvlLoadThreadCallFrame"
+        $env:MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL_PC = "$SafeMvlLoadThreadCallPC"
+        if ($SafeMvlLoadThreadCallMinSP) {
+            $env:MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL_MIN_SP = "$SafeMvlLoadThreadCallMinSP"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL_MIN_SP -ErrorAction SilentlyContinue
+        }
+        if ($SafeMvlLoadThreadCallMode) {
+            $env:MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL_MODE = "$SafeMvlLoadThreadCallMode"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL_MODE -ErrorAction SilentlyContinue
+        }
+    } else {
+        Remove-Item Env:\MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL_PC -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL_MIN_SP -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL_MODE -ErrorAction SilentlyContinue
     }
     if ($SafeCallProbe) {
         $env:MELONDS_NSML_SAFE_CALL_PROBE = "1"
@@ -1438,10 +1479,41 @@ function Start-MelonLANProcess {
             Remove-Item Env:\MELONDS_NSML_WIFI_MP_ACCEPT_ANY_CHANNEL -ErrorAction SilentlyContinue
         }
     }
+    if ($PacketBridge -and $PacketBridgeForceMvlFileCache) {
+        $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_FILE_CACHE = "1"
+        $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_FILE_CACHE_START_FRAME = "$PacketBridgeForceMvlFileCacheStartFrame"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_FILE_CACHE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_FILE_CACHE_START_FRAME -ErrorAction SilentlyContinue
+    }
+    $forceMvlLoadThreadForRole = $PacketBridgeForceMvlLoadThread
+    if ($PacketBridgeForceMvlLoadThreadHostOnly -and $Role -ne "host") {
+        $forceMvlLoadThreadForRole = $false
+    }
+    if ($PacketBridgeForceMvlLoadThreadClientOnly -and $Role -ne "client") {
+        $forceMvlLoadThreadForRole = $false
+    }
+    if ($PacketBridge -and $forceMvlLoadThreadForRole) {
+        $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_LOAD_THREAD = "1"
+        $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_LOAD_THREAD_START_FRAME = "$PacketBridgeForceMvlLoadThreadStartFrame"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_LOAD_THREAD -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_LOAD_THREAD_START_FRAME -ErrorAction SilentlyContinue
+    }
     if ($Role -eq "host") {
         $env:MELONDS_NSML_FIRMWARE_MAC = "00:09:BF:11:22:33"
     } else {
         $env:MELONDS_NSML_FIRMWARE_MAC = "00:09:BF:11:22:43"
+    }
+    $roleMemPatchFile = if ($Role -eq "host") { $HostMemPatchFile } else { $ClientMemPatchFile }
+    if ($roleMemPatchFile -and $MemPatchFrame -and $MemPatchRanges) {
+        $env:MELONDS_NSML_MEM_PATCH_FILE = (Resolve-Path $roleMemPatchFile).Path
+        $env:MELONDS_NSML_MEM_PATCH_FRAME = "$MemPatchFrame"
+        $env:MELONDS_NSML_MEM_PATCH_RANGES = "$MemPatchRanges"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_MEM_PATCH_FILE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_MEM_PATCH_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_MEM_PATCH_RANGES -ErrorAction SilentlyContinue
     }
     @(
         "role=$Role"
@@ -1460,10 +1532,25 @@ function Start-MelonLANProcess {
         "safeLoadLevelFilesReady=$($env:MELONDS_NSML_SAFE_LOAD_LEVEL_FILES_READY)"
         "safeStageSceneFactory=$($env:MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL)"
         "safeStageSceneFactoryInactive=$($env:MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_INACTIVE)"
+        "safeMvlLoadThread=$($env:MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL)"
+        "safeMvlLoadThreadFrame=$($env:MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL_FRAME)"
+        "safeMvlLoadThreadPC=$($env:MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL_PC)"
+        "safeMvlLoadThreadMinSP=$($env:MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL_MIN_SP)"
+        "safeMvlLoadThreadMode=$($env:MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL_MODE)"
         "forceLoadSwitch=$PacketBridgeForceLoadGameSM"
         "forceLoadEnv=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM)"
         "forceLoadFrame=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_START_FRAME)"
         "forceLoadStep=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_STEP)"
+        "forceMvlFileCache=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_FILE_CACHE)"
+        "forceMvlFileCacheStart=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_FILE_CACHE_START_FRAME)"
+        "forceMvlLoadThreadSwitch=$PacketBridgeForceMvlLoadThread"
+        "forceMvlLoadThreadHostOnly=$PacketBridgeForceMvlLoadThreadHostOnly"
+        "forceMvlLoadThreadClientOnly=$PacketBridgeForceMvlLoadThreadClientOnly"
+        "forceMvlLoadThread=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_LOAD_THREAD)"
+        "forceMvlLoadThreadStart=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_LOAD_THREAD_START_FRAME)"
+        "memPatchFile=$($env:MELONDS_NSML_MEM_PATCH_FILE)"
+        "memPatchFrame=$($env:MELONDS_NSML_MEM_PATCH_FRAME)"
+        "memPatchRanges=$($env:MELONDS_NSML_MEM_PATCH_RANGES)"
         "safeCreateSwitch=$PacketBridgeSafeCreateLoadGameSM"
         "safeCreateEnv=$($env:MELONDS_NSML_SAFE_CREATE_LOAD_GAME_CALL)"
         "safeCreateFrame=$($env:MELONDS_NSML_SAFE_CREATE_LOAD_GAME_CALL_FRAME)"

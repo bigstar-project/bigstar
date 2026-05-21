@@ -875,6 +875,92 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     return true;
 }
 
+static bool HandleNSMLSafeMvlLoadThreadCall(ARM* cpu, u32 instrAddr)
+{
+    static int enabled = -1;
+    static u32 startFrame = 0;
+    static u32 triggerPC = 0;
+    static u32 minSP = 0;
+    static u32 requiredMode = 0xFFFFFFFFu;
+    if (enabled < 0)
+    {
+        enabled = NSMLEnvFlag("MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL") ? 1 : 0;
+        if (const char* value = getenv("MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL_FRAME"))
+            startFrame = static_cast<u32>(strtoul(value, nullptr, 0));
+        if (const char* value = getenv("MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL_PC"))
+            triggerPC = static_cast<u32>(strtoul(value, nullptr, 0));
+        if (const char* value = getenv("MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL_MIN_SP"))
+            minSP = static_cast<u32>(strtoul(value, nullptr, 0));
+        if (const char* value = getenv("MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL_MODE"))
+            requiredMode = static_cast<u32>(strtoul(value, nullptr, 0)) & 0x1Fu;
+    }
+    if (enabled <= 0 || !cpu || cpu->Num != 0)
+        return false;
+
+    static std::map<NDS*, u32> applied;
+    if (applied[&cpu->NDS] != 0)
+        return false;
+    if (cpu->NDS.NumFrames < startFrame)
+        return false;
+    if (triggerPC != 0 && instrAddr != triggerPC)
+        return false;
+    if (triggerPC == 0 && instrAddr >= 0x023C0000 && instrAddr < 0x023C1000)
+        return false;
+    if (triggerPC == 0 && cpu->R[14] >= 0x023C0000 && cpu->R[14] < 0x023C1000)
+        return false;
+    if (triggerPC == 0 && (instrAddr < 0x02000000 || instrAddr >= 0x02400000))
+        return false;
+    if (minSP != 0 && cpu->R[13] < minSP)
+        return false;
+    if (requiredMode != 0xFFFFFFFFu && (cpu->CPSR & 0x1Fu) != requiredMode)
+        return false;
+    if (NSMLFindObjectBaseByID(cpu->NDS, 0x0006) == 0)
+        return false;
+
+    constexpr u32 trampolineAddr = 0x023C0000;
+    constexpr u32 createThreadAddr = 0x02004BFC;
+    constexpr u32 loadMvsLFilesThreadAddr = 0x02152E04;
+    const u32 returnPC = instrAddr | ((cpu->CPSR & 0x20) ? 1u : 0u);
+
+    std::vector<u32> code;
+    code.reserve(32);
+    code.push_back(0xE92D5FFFu); // push {r0-r12, lr}
+    code.push_back(0xE10F5000u); // mrs r5, cpsr
+    code.push_back(0xE92D0020u); // push {r5}
+    code.push_back(0xE24DD004u); // sub sp, sp, #4
+    NSMLEmitMovImm(code, 0, 1);
+    code.push_back(0xE1A00600u); // lsl r0, r0, #12
+    code.push_back(0xE58D0000u); // str r0, [sp]
+    NSMLEmitMovImm(code, 0, loadMvsLFilesThreadAddr);
+    NSMLEmitMovImm(code, 1, 0);
+    NSMLEmitMovImm(code, 2, 0x14);
+    NSMLEmitMovImm(code, 3, 0);
+    NSMLEmitBLViaIP(code, createThreadAddr);
+    code.push_back(0xE28DD004u); // add sp, sp, #4
+    code.push_back(0xE8BD0020u); // pop {r5}
+    code.push_back(0xE128F005u); // msr apsr_nzcvq, r5
+    code.push_back(0xE8BD5FFFu); // pop {r0-r12, lr}
+    code.push_back(0xE59FC004u); // ldr ip, [pc, #4]
+    code.push_back(0xE12FFF1Cu); // bx ip
+    code.push_back(0xE1A00000u); // nop
+    code.push_back(returnPC);
+
+    for (size_t i = 0; i < code.size(); i++)
+        cpu->NDS.ARM9Write32(trampolineAddr + static_cast<u32>(i * sizeof(u32)), code[i]);
+
+    applied[&cpu->NDS] = 1;
+    printf("NSMB SafeCall: mvlLoadThread frame=%u pc=%08X return=%08X sp=%08X lr=%08X cpsr=%08X\n",
+        cpu->NDS.NumFrames,
+        instrAddr,
+        returnPC,
+        cpu->R[13],
+        cpu->R[14],
+        cpu->CPSR);
+    fflush(stdout);
+    cpu->JumpTo(trampolineAddr);
+    return true;
+}
+
 static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
 {
     static int enabled = -1;
@@ -3107,6 +3193,11 @@ void ARMv5::Execute()
             u32 instrAddr = R[15] - ((CPSR&0x20)?2:4);
             HandleNSMLNetReadyHotPatch(this, instrAddr);
             TraceNSMLPacketCapture(this, instrAddr);
+            if (HandleNSMLSafeMvlLoadThreadCall(this, instrAddr))
+            {
+                NDS.ARM9Timestamp++;
+                continue;
+            }
             if (HandleNSMLSafeLevelCall(this, instrAddr))
             {
                 NDS.ARM9Timestamp++;
@@ -3162,6 +3253,11 @@ void ARMv5::Execute()
                 const u32 instrAddr = R[15] - 2;
                 HandleNSMLNetReadyHotPatch(this, instrAddr);
                 TraceNSMLPacketCapture(this, instrAddr);
+                if (HandleNSMLSafeMvlLoadThreadCall(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
                 if (HandleNSMLSafeLevelCall(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;
@@ -3212,6 +3308,11 @@ void ARMv5::Execute()
                 const u32 instrAddr = R[15] - 4;
                 HandleNSMLNetReadyHotPatch(this, instrAddr);
                 TraceNSMLPacketCapture(this, instrAddr);
+                if (HandleNSMLSafeMvlLoadThreadCall(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
                 if (HandleNSMLSafeLevelCall(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;

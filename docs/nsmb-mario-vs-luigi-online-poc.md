@@ -4,21 +4,19 @@
 
 New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` でWAN越しに遊べる形へ持っていく。
 
-現時点の中心方針は、melonDSのLocalMPをWANへそのまま伸ばすことではない。NSMB側が持っているMvLの接続・同期・試合中packet処理をできるだけ活かし、ローカル無線境界をWAN adapter / PacketBridgeへ差し替える。必要に応じて、ロビーや開始処理はROM/メモリpatchで短絡し、試合中の入力packet同期へ早く到達する。
+現在の主方針は、melonDSのLocalMPをWANへそのまま伸ばすことではなく、NSMB側のMvL接続・同期・試合中packet処理をできるだけ活かし、必要箇所だけをWAN adapter / PacketBridge / ROMまたはメモリpatchで差し替えること。
 
 ## 現在の方針
 
 1. **下位MP API / packet境界のadapter化**
-   - `Net::getConsoleKeys/getPacketByte/getPacketTick/getPacketAction` だけでなく、packet availability、session/peer状態、packet sequencer完了条件まで含めて、NSMBが期待する下位通信状態を再現する。
-   - 既知の入口は `0204619C` / `0204622C` / `02046480` / `Net::Core::transferPacket`。ここで足りなければさらに下の送受信/状態APIを特定する。
-
+   - `Net::getConsoleKeys/getPacketByte/getPacketTick/getPacketAction` だけでなく、packet availability、session/peer状態、packet sequencer完了条件まで含めてNSMBが期待する状態を再現する。
+   - 既知入口は `0204619C` / `0204622C` / `02046480` / `Net::Core::transferPacket`。ここで足りなければさらに下位の送受信/状態APIを追う。
 2. **MvL開始状態を直接作る診断ルート**
-   - UI操作、LocalMPロビー、CourseSelect、StageStartSMを外から完全再現するのは重いので、診断として `Game::loadLevel` や scene factory を呼び、試合中packet同期へ入れる最小状態を探す。
-   - 最終実装は、この診断で分かった必要条件をROM patchまたはより狭いメモリpatchに落とす。
-
+   - UI操作、LocalMPロビー、CourseSelect、StageStartSMを外から完全再現するのは重いので、診断として `Game::loadLevel`、MvLファイルロード、scene factoryを呼び、試合中packet同期へ入れる最小状態を探す。
+   - 最終実装では、この診断で分かった必要条件をROM patchまたはより狭いメモリpatchへ落とす。
 3. **試合中packet同期の検証**
-   - NSMB Centralの情報どおり、試合中が入力packet中心なら、stage開始後のpacketだけをWAN adapterに流す。
-   - Big Star、8コインアイテム、ランダムステージなどの乱数要素は、`Net::getRandom()` 系またはMvL開始時seedを同期させる方向で固定する。
+   - NSMB Centralの情報どおり試合中が入力packet中心なら、stage開始後のpacketだけをWAN adapterへ流す。
+   - Big Star、8コインアイテム、ランダムステージなどの乱数要素は `Net::getRandom()` 系またはMvL開始時seedを同期する方向で固定する。
 
 ## 完了したこと
 
@@ -26,26 +24,43 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `NoLanMP + PacketBridge from start` の検証ルートを作成済み。
 - PacketBridgeのpre-game/StageStart packetを52 byte全体で流すよう修正済み。marker byte `0x29` 欠落は解消済み。
 - `PacketBridgeStageStartReadyProbe` 診断により、host側は `VSConnect::startLoadLevel`、`Game::loadLevel`、stage scene、player actor、Big Star actor生成まで到達できることを確認済み。
-- PacketBridgeのremote waitを追加したが、広い20ms waitは重すぎてpost-load付近で止まるため、phase/packet種別を絞る必要があると判定済み。
 - `SafeLoadLevelCall`、`SafeTryChangeSceneCall`、`SafeStageSceneFactoryCall` の診断フックを整理し、複数SafeCall併用時の優先順位バグを修正済み。
-- `SafeLoadLevelCall + SafeStageSceneFactoryCall` により、hostは直接stage sceneへ入り、player actorとBig Star actor生成まで到達できることを再確認済み。
-- host成功状態とclient停止状態のMainRAM dumpを取得し、object dump比較を実施済み。hostは stage scene object `0x0003`、player actor `0x0015`、Big Star actor `0x0022` を持つ一方、clientは `VSConnect 0x0006` と load scene `0x000F` に残る。
-- write traceにより、hostは `scene 0x0F -> 0x03` 遷移時に `02013588`、`020131A0`、`020131A4` の自然なscene更新へ進むが、clientはstage request後にその更新へ進まないことを確認済み。
+- `SafeLoadLevelCall + SafeStageSceneFactoryCall` により、hostは直接stage sceneへ入り、player actorとBig Star actor生成まで到達できることを確認済み。
+- host成功状態とclient停止状態のMainRAM dump / object dumpを取得済み。hostは stage scene object `0x0003`、player actor `0x0015`、Big Star actor `0x0022` を持つ一方、clientは `VSConnect 0x0006` と load scene `0x000F` に残る。
+- 古い検証ログを削除し、直近の判断に必要なログだけ残した。
+- `PacketBridgeForceMvlLoadThread` / `PacketBridgeForceMvlFileCache` が `ForceLoadGameSM` なしでも効くよう、検証スクリプトのenv設定を修正した。
+- `SafeMvlLoadThreadCall` を追加し、client側でも `loadMvsLFilesThread` 入口 `02152E04` から完了地点 `02152E1C` まで通せることを確認した。
 
 ## 現在のブロッカー
 
-- client側は `SafeLoadLevelCall + SafeStageSceneFactoryCall` でも `sceneCurrent=0x0F`、`sceneNext=0x03`、`VSConnect` 残存のまま止まり、player actor / Big Star actorが生成されない。
-- `SafeStageSceneFactoryInactive` で `sceneActive=0` を強制するとhostも壊れるため、単純なactive clearでは足りない。
-- `SafeLoadLevelSessionReady` でhost型のNet状態をloadLevel前後に書くと、clientは逆にVSConnect sceneから進まなくなる。常時/広域のstate維持ではなく、より正確な開始条件の特定が必要。
-- `0x0208A478` のMvLファイルロード完了フラグはhost=1、client=0で差がある。ただしこのフラグをstage factory時点またはloadLevel前後で立てるだけではclientのstage object生成には届かなかった。
+- clientは `loadMvsLFilesThread` 完了後も、`sceneCurrent=0x0F`、`sceneNext=0x03` のままstage sceneへ進まない。
+- hostはstage request後に自然に `02013588 -> 020131A0/020131A4 -> 02013218/0201321C` へ進み、stage scene objectとplayer/star actorを生成する。
+- clientは同じstage requestを投げても、stage factory後にこの自然なscene遷移へ進まない。
+- 単純な `sceneActive=0` 強制は危険。全体に適用するとhost側でdata abortした。role限定・タイミング限定でないと使えない。
+
+## 直近の検証結果
+
+- `logs/nsmvl-direct-loadlevel-safe-client-loadthread-mainsp-20260521`
+  - client-only `SafeMvlLoadThreadCall`、`minSP=0x027E3000`、`mode=0x1F` で `02152E04 -> 02152E1C` 到達。
+  - clientも `SafeLoadLevelCall` と `SafeStageSceneFactoryCall` は発火。
+  - ただし clientは `playerActor0Found=0`、`vsStarActorFound=0` のまま。
+- `logs/nsmvl-direct-loadlevel-safe-client-loadthread-autoclear-20260521`
+  - `SceneAutoActiveClear` を全体適用するとhostでdata abort。単純なscene active強制は採用しない。
+- `logs/nsmvl-direct-loadlevel-safe-client-loadthread-dumps-20260521`
+  - 1938/1980/1997/2000/2020fのRAM dumpを取得。1980fのload scene object自体はhost/clientでほぼ一致し、差分は主に `0208B040` と小さなtimer差分。
+- `logs/nsmvl-direct-loadlevel-safe-client-loadthread-patchb040-20260521`
+  - clientにhost 1980f由来の `0208B040` をpatchしてもstage scene生成には進まない。
+- `logs/nsmvl-direct-loadlevel-safe-client-loadthread-client-active0-20260521`
+  - clientだけ `sceneActive=0` にしてもstage scene生成には進まない。
+- `logs/nsmvl-direct-loadlevel-safe-client-loadthread-client-sceneheader-20260521`
+  - clientだけsceneヘッダをhost 2000f相当にしてもstage scene/player/star actorは生成されない。
 
 ## 次にやること
 
-1. hostで `0x0208A478` が立つ前後のロード関連write traceを取り、`loadMvsLFilesThread` 完了時に他に更新される状態を特定する。
-2. clientのload scene `0x000F` objectが何を待っているか、`0x02152E04` 周辺と `02013588 -> 020131A0/020131A4` へ進む条件を追う。
-3. clientに必要な開始条件が少数なら、診断フックを「状態丸ごと同期」ではなく「ロード完了/scene transitionに必要な条件補正」に絞る。
-4. 条件が大きすぎる場合、直接stage開始ルートは診断専用に戻し、下位MP API adapter化またはROM patchで自然なロード完了処理を通す方向へ戻る。
-5. 実装がまとまった単位でコミットする。
+1. `020130A8` scene factory / scene object生成パスをcall traceし、clientでstage scene objectが生成されない理由を特定する。
+2. `02013588 -> 020131A0/020131A4` に入る条件を、scene manager側の内部キュー/scene list/transition objectまで広げて追う。
+3. 直接stage開始診断ルートのpatch範囲が大きくなりすぎる場合は、下位MP API adapter化またはROM patch入口作成へ戻す。
+4. 安定した単位でコミットする。
 
 ## 重要アドレス
 
@@ -72,7 +87,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - ユーザー提供の `roms/nsmb.nds` を使用する。
 - ROM本体や商用素材はリポジトリに含めない。
 
-## 参照
+## 参考
 
 - NSMB Central: https://bookstack.nsmbcentral.net/books/new-super-mario-bros/page/mario-vs-luigi
 - `external/NSMB-Code-Reference`
