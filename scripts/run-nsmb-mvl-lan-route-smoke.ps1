@@ -138,6 +138,12 @@ param(
     [int]$ForceStageSceneRuntimeWordsEndFrame = 0,
     [string]$ForceStageSceneWord154 = "1",
     [string]$ForceStageSceneWord160 = "0xDA",
+    [switch]$ForceStageActorFreezeFlag,
+    [switch]$ForceStageActorFreezeFlagHostOnly,
+    [switch]$ForceStageActorFreezeFlagClientOnly,
+    [int]$ForceStageActorFreezeFlagStartFrame = 0,
+    [int]$ForceStageActorFreezeFlagEndFrame = 0,
+    [string]$ForceStageActorFreezeFlagValue = "0",
     [int]$DropMPAfterFrame = 0,
     [switch]$LanWanMode,
     [switch]$NoLanMP,
@@ -843,6 +849,21 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_END_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_WORD154 -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_WORD160 -ErrorAction SilentlyContinue
+    }
+    if ($ForceStageActorFreezeFlag) {
+        $env:MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG = "1"
+        if ($ForceStageActorFreezeFlagHostOnly) { $env:MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_HOST_ONLY -ErrorAction SilentlyContinue }
+        if ($ForceStageActorFreezeFlagClientOnly) { $env:MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_CLIENT_ONLY -ErrorAction SilentlyContinue }
+        $env:MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_START_FRAME = "$ForceStageActorFreezeFlagStartFrame"
+        $env:MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_END_FRAME = "$ForceStageActorFreezeFlagEndFrame"
+        $env:MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_VALUE = "$ForceStageActorFreezeFlagValue"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_HOST_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_CLIENT_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_VALUE -ErrorAction SilentlyContinue
     }
     if ($PacketReplayFile) {
         $env:MELONDS_NSML_PACKET_REPLAY_FILE = (Resolve-Path $PacketReplayFile).Path

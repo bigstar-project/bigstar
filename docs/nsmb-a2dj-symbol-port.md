@@ -32,6 +32,7 @@ Net系の優先関数は、JP RAM上の復号済みARM9コードで先頭命令�
 | `Net::packetFreeBytes` | `0x020880B4` | candidate | US `0x02088A94 - 0x9E0`; packet API trace target |
 | `Net::packetSequenceBuilder` | `0x020880D4` | candidate | US `0x02088AB4 - 0x9E0`; packet API trace target |
 | `Net::packetSequencers` | `0x020880FC` | candidate | US `0x02088ADC - 0x9E0`; packet API trace target |
+| `Stage::actorFreezeFlag` | `0x020C9250` | candidate | literal read in actor update path around `0x0209FD38`; host value `0x26` blocked player movement until forced to `0` |
 
 ## A2DJ Priority Functions
 

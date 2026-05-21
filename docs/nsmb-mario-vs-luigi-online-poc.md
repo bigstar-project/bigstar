@@ -32,9 +32,11 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - player actor base/state/flags/prev/vel
   - stage scene base/state/flags/word154/word160
   - `Input::consoleKeys` / `Input::playerKeysHeld` / `Input::playerKeysPressed` 候補値
+  - `Stage::actorFreezeFlag` A2DJ候補値
 - 診断用env / script optionを追加済み。
   - `ForcePlayerCount`
   - `ForceStageSceneRuntimeWords`
+  - `ForceStageActorFreezeFlag`
   - `SafeMvlLoadThreadCall`
   - `SafeLoadLevelCall`
   - `SafeStageSceneFactoryCall`
@@ -51,8 +53,14 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - host側のlocal player0は同じ入力でも動かない。
   - host 2500f: `playerActor0X=0x8000`, `playerActor0VelX=0`
 - write traceではclientのplayer0座標/速度に `PC=0209FD70/0209FD88` から毎フレーム書き込みがある。
-- 同じ期間、hostのplayer0座標/速度には書き込み自体がない。
-- つまり現在の直接stage開始ルートでは、host側player actorの移動更新ループまたはlocal player更新条件が立っていない。
+- `0209FD18` 周辺の逆アセンブルでは、`0x020C9250` のbyte値とactor側freeze maskのANDで早期returnする。
+- `0x020C9250` はUS `Stage::actorFreezeFlag` 相当のA2DJ候補。hostでは `0x26`、clientでは `0x00` になっていた。
+- host限定で `Stage::actorFreezeFlag` 候補を `0` に固定すると、hostのlocal player0は動く。
+  - `logs/nsmvl-force-actor-freeze-flag-hostonly-20260522-attempt1`
+  - host 2300f: `playerActor0X=0x35FF0`, `playerActor0VelX=0x1800`
+- ただし、hostが動くようになった後はclient側remote player0がまだ動かない。
+- PacketBridge trace上、hostは `keys=0x0010` のplayer0 packetを送信し、clientも受信できている。
+- client側の問題は、受信そのものではなく、`getPacket` lookup tickが受信済みtickより先へ進み `action=0xFF` になること。
 - client側は2600f付近で `pc=01FF8C28` のdata abortを起こすことがある。これはplayer更新が走った後に、まだ不足しているscene/player初期化条件へ到達している可能性が高い。
 
 ## 直近の検証ログ
@@ -69,19 +77,27 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - host/clientのactor0構造体差分を比較可能。
 - `logs/nsmvl-host-remote-player0-probe-20260522-attempt1`
   - host側 `localPlayerID=1` 診断はhost player0移動にはつながらず、client actor生成も崩れる。
+- `logs/nsmvl-force-actor-freeze-flag-hostonly-20260522-attempt1`
+  - host限定で `Stage::actorFreezeFlag` 候補を0固定。
+  - host local player0の移動更新が走ることを確認。
+- `logs/nsmvl-freeze-flag-packettrace-20260522-attempt1`
+  - freeze flag修正後もhostは `keys=0x0010` のpacketを送信できる。
+  - clientも受信するが、lookup tick先行で試合中packetとして消費できない。
+- `logs/nsmvl-freeze-flag-fallback-20260522-attempt1`
+  - 近傍tick fallback window 8ではclient消費はまだ改善せず。
 
 ## 現在のブロッカー
 
-直接stage開始ルートで、host local player actorの移動更新が走っていない。
+直接stage開始ルートでhost local player actorを動かす条件は `Stage::actorFreezeFlag` 候補まで絞れた。
 
-これはWAN adapter本体の問題ではなく、診断ルートで作っているMvL開始状態がまだ自然な試合中状態に足りていないことを示す。次は、client remote playerが動く状態とhost local playerが止まる状態のactor/stage runtime差分から、不足しているplayer更新条件を絞る。
+次のブロッカーは、hostが送ったplayer0 input packetをclientが試合中packet lookupで安定して消費できないこと。実際には受信済みだが、client側lookup tickが数tick先行して `action=0xFF` になっている。tick pacing、lookup tick正規化、またはNSMBのpacket sequencer状態の追加同期が必要。
 
 ## 次にやること
 
-1. `logs/nsmvl-player-actor-dump-20260522-attempt1` のactor構造体差分から、host local playerを止めている候補フィールドを絞る。
-2. `PC=0209FD70/0209FD88` の処理をA2DJ/USシンボル・RAM disasmで追い、player移動更新がどの条件で呼ばれるか確認する。
-3. host側で不足している条件を最小patchとして試す。
-4. client側data abortの直前状態を、player更新開始後の不足初期化条件として別途切り分ける。
+1. freeze flag修正を前提に、client側remote packet消費のtick先行を解消する。
+2. `PacketBridgeWait` / `PacketBridgeMaxTickLead` / lookup tick正規化の組み合わせを、stage後に限定して再評価する。
+3. tick同期が改善したら、host local player0とclient remote player0が同じ入力で動くか確認する。
+4. その後、client側data abortの直前状態を、player更新開始後の不足初期化条件として切り分ける。
 5. 条件が固まったら、診断patchをROM patchまたは下位MP adapterへ縮小する。
 
 ## 重要アドレス
@@ -105,6 +121,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `Input::consoleKeys` A2DJ候補: `0x02086C90`
 - `Input::playerKeysHeld` A2DJ候補: `0x02086CA0`
 - `Input::playerKeysPressed` A2DJ候補: `0x02086CA4`
+- `Stage::actorFreezeFlag` A2DJ候補: `0x020C9250`
 - `Game::loadLevel`: `0x020068A8`
 - `VSConnect::startLoadLevel`: `0x0214E0C0`
 - `createStageStartSM`: `0x021515B4`

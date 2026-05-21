@@ -78,6 +78,7 @@ constexpr melonDS::u32 kNetRandomValueAddr = 0x02088088;
 constexpr melonDS::u32 kInputConsoleKeysAddr = 0x02086C90;
 constexpr melonDS::u32 kInputPlayerKeysHeldAddr = 0x02086CA0;
 constexpr melonDS::u32 kInputPlayerKeysPressedAddr = 0x02086CA4;
+constexpr melonDS::u32 kStageActorFreezeFlagAddr = 0x020C9250;
 constexpr melonDS::u32 kGamePlayerGlobalBlockAddr = 0x0208A964;
 constexpr melonDS::u32 kGamePlayerCountAddr = 0x0208A988;
 constexpr melonDS::u32 kGamePlayerBattleStarsAddr = 0x0208A9AC;
@@ -302,6 +303,7 @@ struct GameStateSample
     melonDS::u32 InputPlayer1Held = 0;
     melonDS::u32 InputPlayer0Pressed = 0;
     melonDS::u32 InputPlayer1Pressed = 0;
+    melonDS::u32 StageActorFreezeFlag = 0;
     melonDS::u32 SceneIsSceneActive = 0;
     melonDS::u32 ScenePreviousSceneID = 0;
     melonDS::u32 SceneNextSceneID = 0;
@@ -615,6 +617,13 @@ struct State
     melonDS::u32 ForceStageSceneWord154 = 1;
     melonDS::u32 ForceStageSceneWord160 = 0xDA;
     bool ForceStageSceneRuntimeWordsLogged[16] {};
+    bool ForceStageActorFreezeFlagEnabled = false;
+    bool ForceStageActorFreezeFlagHostOnly = false;
+    bool ForceStageActorFreezeFlagClientOnly = false;
+    melonDS::u32 ForceStageActorFreezeFlagStartFrame = 0;
+    melonDS::u32 ForceStageActorFreezeFlagEndFrame = 0;
+    melonDS::u32 ForceStageActorFreezeFlagValue = 0;
+    bool ForceStageActorFreezeFlagLogged[16] {};
     bool NetRandomPatchEnabled = false;
     bool NetRandomPatchAuto = false;
     melonDS::u32 NetRandomPatchFrame = 0;
@@ -3644,6 +3653,35 @@ void ForceStageSceneRuntimeWordsIfNeeded(int instanceID, melonDS::u32 frame, mel
     }
 }
 
+void ForceStageActorFreezeFlagIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForceStageActorFreezeFlagEnabled || !nds || !nds->MainRAM)
+        return;
+    if (frame < G.ForceStageActorFreezeFlagStartFrame)
+        return;
+    if (G.ForceStageActorFreezeFlagEndFrame != 0 && frame > G.ForceStageActorFreezeFlagEndFrame)
+        return;
+    if (G.ForceStageActorFreezeFlagHostOnly && G.NetRole != Role::Host)
+        return;
+    if (G.ForceStageActorFreezeFlagClientOnly && G.NetRole != Role::Client)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+
+    nds->ARM9Write8(kStageActorFreezeFlagAddr, static_cast<melonDS::u8>(G.ForceStageActorFreezeFlagValue & 0xFF));
+    if (!G.ForceStageActorFreezeFlagLogged[instanceID])
+    {
+        std::printf(
+            "NSMB Test: force stage actor freeze flag inst=%d frame=%u range=%u-%u value=0x%02X\n",
+            instanceID,
+            frame,
+            G.ForceStageActorFreezeFlagStartFrame,
+            G.ForceStageActorFreezeFlagEndFrame,
+            G.ForceStageActorFreezeFlagValue & 0xFF);
+        G.ForceStageActorFreezeFlagLogged[instanceID] = true;
+    }
+}
+
 bool WriteObjectPositionByGUID(melonDS::NDS* nds, melonDS::u32 guid, melonDS::u32 posX, melonDS::u32 posY, melonDS::u32 posZ)
 {
     if (!nds || !nds->MainRAM || guid == 0)
@@ -3967,6 +4005,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.InputPlayer1Held = nds->ARM9Read16(kInputPlayerKeysHeldAddr + 0x2);
     sample.InputPlayer0Pressed = nds->ARM9Read16(kInputPlayerKeysPressedAddr + 0x0);
     sample.InputPlayer1Pressed = nds->ARM9Read16(kInputPlayerKeysPressedAddr + 0x2);
+    sample.StageActorFreezeFlag = nds->ARM9Read8(kStageActorFreezeFlagAddr);
     sample.SceneIsSceneActive = nds->ARM9Read32(kSceneIsSceneActiveAddr);
     sample.ScenePreviousSceneID = nds->ARM9Read16(kScenePreviousSceneIDAddr);
     sample.SceneNextSceneID = nds->ARM9Read16(kSceneNextSceneIDAddr);
@@ -4125,6 +4164,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.InputPlayer1Held);
     MixGameStateValue(sample.Hash, sample.InputPlayer0Pressed);
     MixGameStateValue(sample.Hash, sample.InputPlayer1Pressed);
+    MixGameStateValue(sample.Hash, sample.StageActorFreezeFlag);
     MixGameStateValue(sample.Hash, sample.VsStarFound);
     MixGameStateValue(sample.Hash, sample.VsStarGUID);
     MixGameStateValue(sample.Hash, sample.VsStarSettings);
@@ -4484,6 +4524,7 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                      << ",0x" << sample.InputPlayer1Held
                      << ",0x" << sample.InputPlayer0Pressed
                      << ",0x" << sample.InputPlayer1Pressed
+                     << ",0x" << sample.StageActorFreezeFlag
                      << ",0x" << sample.SceneIsSceneActive
                      << ",0x" << sample.ScenePreviousSceneID
                      << ",0x" << sample.SceneNextSceneID
@@ -5279,6 +5320,16 @@ void InitFromEnvironment()
     G.ForceStageSceneWord160 = static_cast<melonDS::u32>(
         std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_WORD160")
             ? std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_WORD160") : "0xDA", nullptr, 0));
+    G.ForceStageActorFreezeFlagEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG");
+    G.ForceStageActorFreezeFlagHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_HOST_ONLY");
+    G.ForceStageActorFreezeFlagClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_CLIENT_ONLY");
+    G.ForceStageActorFreezeFlagStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_START_FRAME", 0)));
+    G.ForceStageActorFreezeFlagEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_END_FRAME", 0)));
+    G.ForceStageActorFreezeFlagValue = static_cast<melonDS::u32>(
+        std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_VALUE")
+            ? std::getenv("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_VALUE") : "0", nullptr, 0));
 
     const char* netRandomValue = std::getenv("MELONDS_NSML_NET_RANDOM_VALUE");
     if (netRandomValue && netRandomValue[0])
@@ -5321,7 +5372,7 @@ void InitFromEnvironment()
         }
         else
         {
-            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,ggid,netState14,netState1C,netState20,netState24,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord144,vsConnectWord148,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectWord078,courseSelectWord07C,stageSceneFound,stageSceneBase,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY";
+            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,ggid,netState14,netState1C,netState20,netState24,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,stageActorFreezeFlag,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord144,vsConnectWord148,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectWord078,courseSelectWord07C,stageSceneFound,stageSceneBase,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY";
             if (G.GameStateTraceExtended)
                 G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash";
             G.GameStateTrace << '\n';
@@ -5563,6 +5614,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         ForcePlayerCountIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageSceneRuntimeWordsIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForceStageActorFreezeFlagIfNeeded(instanceID, inputFrame, nds);
 
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteGameState(instanceID, inputFrame, nds);
