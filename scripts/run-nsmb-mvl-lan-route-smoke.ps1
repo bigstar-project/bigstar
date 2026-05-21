@@ -81,6 +81,8 @@ param(
     [switch]$PacketBridgeForceLoadGameSMPreload,
     [switch]$PacketBridgeForceLoadGameSMAllowCourseSelect,
     [switch]$PacketBridgeForceStagePacketWords,
+    [switch]$PacketBridgeForceStagePacketWordsHostOnly,
+    [switch]$PacketBridgeForceStagePacketWordsClientOnly,
     [int]$PacketBridgeForceStagePacketWordsStartFrame = 0,
     [int]$PacketBridgeForceStagePacketWordsEndFrame = 0,
     [switch]$PacketBridgeDummyAlloc,
@@ -947,7 +949,14 @@ function Start-MelonLANProcess {
             } else {
                 Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_ALLOW_COURSE_SELECT -ErrorAction SilentlyContinue
             }
-            if ($PacketBridgeForceStagePacketWords) {
+            $forceStagePacketWordsForRole = $PacketBridgeForceStagePacketWords
+            if ($PacketBridgeForceStagePacketWordsHostOnly -and $Role -ne "host") {
+                $forceStagePacketWordsForRole = $false
+            }
+            if ($PacketBridgeForceStagePacketWordsClientOnly -and $Role -ne "client") {
+                $forceStagePacketWordsForRole = $false
+            }
+            if ($forceStagePacketWordsForRole) {
                 $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_PACKET_WORDS = "1"
                 $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_PACKET_WORDS_START_FRAME = "$PacketBridgeForceStagePacketWordsStartFrame"
                 if ($PacketBridgeForceStagePacketWordsEndFrame -gt 0) {
@@ -1008,7 +1017,14 @@ function Start-MelonLANProcess {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_RUN_UPDATE -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_LOAD_GAME_SM_RUN_UPDATE_ALL -ErrorAction SilentlyContinue
         }
-        if ($PacketBridgeForceStagePacketWords) {
+        $forceStagePacketWordsForRole = $PacketBridgeForceStagePacketWords
+        if ($PacketBridgeForceStagePacketWordsHostOnly -and $Role -ne "host") {
+            $forceStagePacketWordsForRole = $false
+        }
+        if ($PacketBridgeForceStagePacketWordsClientOnly -and $Role -ne "client") {
+            $forceStagePacketWordsForRole = $false
+        }
+        if ($forceStagePacketWordsForRole) {
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_PACKET_WORDS = "1"
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_PACKET_WORDS_START_FRAME = "$PacketBridgeForceStagePacketWordsStartFrame"
             if ($PacketBridgeForceStagePacketWordsEndFrame -gt 0) {

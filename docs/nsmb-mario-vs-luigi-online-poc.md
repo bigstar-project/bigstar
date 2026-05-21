@@ -31,6 +31,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `PacketBridgeForceMvlLoadThread` / `PacketBridgeForceMvlFileCache` が `ForceLoadGameSM` なしでも効くよう、検証スクリプトのenv設定を修正した。
 - `SafeMvlLoadThreadCall` を追加し、client側でも `loadMvsLFilesThread` 入口 `02152E04` から完了地点 `02152E1C` まで通せることを確認した。
 - `SafeStageSceneFactoryCreateObject` / `SafeStageSceneFactorySceneSwitch` 診断フックを追加し、client側でstage scene生成を直接押した場合の失敗条件を切り分けた。
+- `PacketBridgeForceStagePacketWords` をrole限定で試せるようにし、clientだけstage packet wordを `action=0x03` に固定できることを確認した。
 
 ## 現在のブロッカー
 
@@ -38,6 +39,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - hostはstage request後に自然に `02013588 -> 020131A0/020131A4 -> 02013218/0201321C` へ進み、stage scene objectとplayer/star actorを生成する。
 - clientは同じstage requestを投げても、stage factory後にこの自然なscene遷移へ進まない。
 - clientで `0204BF8C(objectID=0x0003)` を直接呼んでも、stage scene objectはMainRAM上のobject listに残らない。単純なobject spawnではなく、load sceneのdestroy完了、scene manager内部状態、またはStageStart/LoadGameSM由来の追加状態が必要。
+- client local packetを `action=0x03` にしても、hostから見るclient packet tickが遅れているとremote packetとして使われない。packet actionだけでなくtick/進行同期も必要。
 - 単純な `sceneActive=0` 強制は危険。全体に適用するとhost側でdata abortした。role限定・タイミング限定でないと使えない。
 
 ## 直近の検証結果
@@ -68,13 +70,22 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - stage factory直前にclientへhost 2000f相当のscene headerをpatchしてもstage scene objectは残らない。
 - `logs/nsmvl-direct-loadlevel-client-player0-20260521`
   - clientの `localPlayerID` を0に寄せてもstage scene生成には進まない。player ID差分だけが原因ではない。
+- `logs/nsmvl-direct-loadscene-state-timer-patch-20260521`
+  - load scene objectの `state word(+0x0C)` と `timer/step(+0x64)` をhost 1997f相当にpatchしてもdestroyは発火しない。
+- `logs/nsmvl-force-stage-packet-words-clientonly-20260521`
+  - client local packetの `action=0x03` 固定には成功。ただしhost側はclient packetをtick不一致で拾えず、clientもstage sceneへ進まない。
+- `logs/nsmvl-force-stage-packet-words-clientonly-forcedtick-20260521`
+  - tick基準を固定しても、host/clientの進行速度差でremote packetがlookup tickに届かず、host側は `player=1` を `action=0xFF` として扱う場面が残る。
+- `logs/nsmvl-force-stage-packet-words-clientonly-throttle-20260521`
+  - 既存tick throttleはpre-game tick差にも反応し、stage同期前の1290f付近で長時間待機する。throttle開始フレームをstage同期区間に限定する必要がある。
 
 ## 次にやること
 
-1. hostで `02013588` がload scene object `0x021BEAB0` に対して呼ばれる直前条件を、object state、destroy flag、pending flags、scene graph link、LoadGameSM/StageStartSM状態まで広げて比較する。
-2. clientでload scene destroyを自然発火させる下位条件を探す。直接 `020131A0` は使わない。
-3. 直接stage開始診断ルートのpatch範囲が大きくなりすぎる場合は、下位MP API adapter化またはROM patch入口作成へ戻す。
-4. 安定した単位でコミットする。
+1. PacketBridgeのtick/進行同期をstage同期区間だけで制御できるようにする。既存throttleはpre-gameで効きすぎるため、開始フレームまたはcontext条件を追加する。
+2. hostがclient packetをremote packetとして拾える状態を作り、client load scene destroyが進むか確認する。
+3. それでも進まない場合、hostで `02013588` がload scene object `0x021BEAB0` に対して呼ばれる直前条件を、object state、destroy flag、pending flags、scene graph link、LoadGameSM/StageStartSM状態まで広げて比較する。
+4. 直接stage開始診断ルートのpatch範囲が大きくなりすぎる場合は、下位MP API adapter化またはROM patch入口作成へ戻す。
+5. 安定した単位でコミットする。
 
 ## 重要アドレス
 
