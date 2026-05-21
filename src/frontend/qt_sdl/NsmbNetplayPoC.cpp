@@ -523,6 +523,7 @@ struct State
     bool PacketBridgeForceStageStartSMFields = false;
     melonDS::u32 PacketBridgeForceStageStartSMFieldsStartFrame = 0;
     melonDS::u32 PacketBridgeStageStartSMBaseFrame[16] {};
+    bool PacketBridgeForceStageStartSMUseLoadStep = false;
     bool PacketBridgeForceMvlFileCache = false;
     melonDS::u32 PacketBridgeForceMvlFileCacheStartFrame = 0;
     bool PacketBridgeForceMvlFileCacheApplied[16] {};
@@ -1655,7 +1656,8 @@ bool InjectNSMLPacketBridgeDirectSubMenuChange(
     melonDS::u32 frame,
     melonDS::NDS* nds,
     melonDS::u32 vsConnectBase,
-    melonDS::u32 subMenu)
+    melonDS::u32 subMenu,
+    bool callCreate)
 {
     if (!nds || instanceID < 0 || instanceID >= 16 || vsConnectBase == 0 || subMenu == 0)
         return false;
@@ -1691,10 +1693,10 @@ bool InjectNSMLPacketBridgeDirectSubMenuChange(
         createAddr,
         updateAddr,
         renderAddr,
-        G.PacketBridgeSubMenuCallCreate ? 1 : 0);
+        callCreate ? 1 : 0);
     std::fflush(stdout);
 
-    if (!G.PacketBridgeSubMenuCallCreate)
+    if (!callCreate)
         return true;
 
     const melonDS::u32 oldPC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
@@ -1773,7 +1775,8 @@ bool InjectNSMLPacketBridgeScheduledSubMenus(int instanceID, melonDS::u32 frame,
                 frame,
                 nds,
                 vsConnectBase,
-                entry.SubMenu)
+                entry.SubMenu,
+                G.PacketBridgeSubMenuCallCreate || entry.Create != 0)
             : InjectNSMLPacketBridgeScheduleSubMenu(
                 instanceID,
                 frame,
@@ -1836,7 +1839,12 @@ void ForceNSMLPacketBridgeStageStartSMFieldsIfNeeded(int instanceID, melonDS::u3
     melonDS::u32 step = 3;
     melonDS::u32 timer = client ? 0x03u : 0x10u;
     melonDS::u32 flags = roleBit;
-    if (!client && rel >= 60)
+    if (G.PacketBridgeForceStageStartSMUseLoadStep && rel <= 35)
+    {
+        step = 2;
+        timer = 0;
+    }
+    else if (!client && rel >= 60)
     {
         step = 5;
         timer = 0x21;
@@ -4957,6 +4965,8 @@ void InitFromEnvironment()
         EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_FIELDS");
     G.PacketBridgeForceStageStartSMFieldsStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_FIELDS_START_FRAME", 0)));
+    G.PacketBridgeForceStageStartSMUseLoadStep =
+        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_USE_LOAD_STEP");
     G.PacketBridgeForceMvlFileCache =
         EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_FILE_CACHE");
     G.PacketBridgeForceMvlFileCacheStartFrame = static_cast<melonDS::u32>(

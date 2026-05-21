@@ -85,6 +85,7 @@ param(
     [switch]$PacketBridgeSubMenuCallCreate,
     [switch]$PacketBridgeForceStageStartSMFields,
     [int]$PacketBridgeForceStageStartSMFieldsStartFrame = 0,
+    [switch]$PacketBridgeForceStageStartSMUseLoadStep,
     [switch]$PacketBridgeForceMvlFileCache,
     [int]$PacketBridgeForceMvlFileCacheStartFrame = 0,
     [switch]$PacketBridgeForceMvlLoadThread,
@@ -533,9 +534,11 @@ function Start-MelonLANProcess {
     if ($PacketBridgeForceStageStartSMFields) {
         $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_FIELDS = "1"
         $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_FIELDS_START_FRAME = "$PacketBridgeForceStageStartSMFieldsStartFrame"
+        if ($PacketBridgeForceStageStartSMUseLoadStep) { $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_USE_LOAD_STEP = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_USE_LOAD_STEP -ErrorAction SilentlyContinue }
     } else {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_FIELDS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_FIELDS_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_USE_LOAD_STEP -ErrorAction SilentlyContinue
     }
     if ($ForceCourseSelectFactory -and (-not $ForceCourseSelectFactoryClientOnly -or $Role -eq "client")) {
         $env:MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY = "1"
