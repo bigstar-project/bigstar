@@ -38,11 +38,13 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - clientがstage遷移前に `Net::Core::transferPacket` 内部の完了待ちで詰まり、`Net::updatePacket/processRecvPacket/processSendPacket` を呼ばなくなることを確認した。
 - client限定 `PacketBridgeForceTransferResult` により、clientもstage sceneへ入り、player actorとBig Star actor生成まで到達することを確認した。
 - `Net::random.value=0x00000100` のstage開始時固定を組み合わせると、host/clientのBig Star初期位置が一致することを確認した。
+- stage後入力検証用の `tests/nsmb_mario_vs_luigi_stage_move.inputs` を追加した。
 
 ## 現在のブロッカー
 
 - 直接stage開始診断ルートでは、client限定 `transferPacket` 結果強制でstage sceneへ入れるようになった。ただしこれはまだ診断フックで、最終的には下位MP adapterまたはROM patchへ落とす必要がある。
 - host/clientともstage scene、player actor、Big Star actorまでは生成できるが、試合中の入力packet同期はまだ本実装ではない。
+- stage後にhost側 `RIGHT` 入力を入れると、client側ではplayer0が動く兆候がある一方、host側のplayer0は同じように動かず、clientは後半でdata abortした。remote packet注入だけでは、まだ双方の試合状態は同期していない。
 - `Net::random.value` 固定でBig Star初期位置は一致したが、以後のBig Star再生成、8コインアイテム、ランダムステージ選択では、`Net::randomCallCount` と呼び出し順が一致し続けることを別途確認する必要がある。
 - `PacketBridgeWait` / throttleで2プロセスの実時間進行差を吸収しようとすると、host/clientの片側だけが極端に遅くなり、検証時間が破綻する。WAN本番の快適性にも直結しないため、これは補助診断に留める。
 - 単純な `sceneActive=0` 強制は危険。全体に適用するとhost側でdata abortした。role限定・タイミング限定でないと使えない。
@@ -95,11 +97,13 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - client限定 `PacketBridgeForceTransferResult` でclientもstage sceneへ進む。2120f以降、client側にもplayer actorとBig Star actorが出る。ただしRNG未固定ではBig Star座標がhost/clientで異なる。
 - `logs/nsmvl-client-transfer-bypass-netrandom-20260521`
   - `Net::random.value=0x00000100` をstage開始時に両側へpatchすると、2140f以降のBig Star座標がhost/clientで `x=0x370000, y=0xFFEF0000, z=0x180000` に一致する。
+- `logs/nsmvl-stage-move-host-right-20260521`
+  - stage後にhost inputで `RIGHT` を入れる検証。client側player0は2420f以降にX座標が動くが、host側player0は動かず、clientは2600f付近でdata abort。入力packetは一部伝わっている可能性があるが、local/remote双方のpacket消費とgameplay状態がまだ揃っていない。
 
 ## 次にやること
 
 1. client限定 `transferPacket` 結果強制を、現在の診断フックから「WAN adapterが返すべき完了条件」として整理する。戻り値 `8` が正しい完了値なのか、他の戻り値やflagsが必要かを確認する。
-2. stage開始後の入力packet同期へ進む。まずはhost/client双方が同じstage/Big Star位置にいる状態で、`Net::getConsoleKeys/getPacket*` へPacketBridgeのremote packetを供給し、プレイヤー操作が相手側に反映されるか確認する。
+2. stage開始後の入力packet同期を修正する。`RIGHT` 入力検証でclient側だけplayer0が動くため、host側がなぜ自分の入力をgameplayへ反映しないか、client側がなぜ後半でdata abortするかを `getConsoleKeys/getPacket*` traceで切り分ける。
 3. RNGについて、Big Star初期位置以外に、Big Star再生成、8コインアイテム、ランダムステージ選択で `Net::random` 呼び出し順が一致するかをtraceする。
 4. 直接stage開始診断ルートの依存フックを縮小し、最終的にROM patch入口または下位MP adapterへ置き換える。
 5. 安定した単位でコミットする。
