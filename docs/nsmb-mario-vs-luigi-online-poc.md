@@ -29,19 +29,22 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - PacketBridgeのremote waitを追加したが、広い20ms waitは重すぎてpost-load付近で止まるため、phase/packet種別を絞る必要があると判定済み。
 - `SafeLoadLevelCall`、`SafeTryChangeSceneCall`、`SafeStageSceneFactoryCall` の診断フックを整理し、複数SafeCall併用時の優先順位バグを修正済み。
 - `SafeLoadLevelCall + SafeStageSceneFactoryCall` により、hostは直接stage sceneへ入り、player actorとBig Star actor生成まで到達できることを再確認済み。
+- host成功状態とclient停止状態のMainRAM dumpを取得し、object dump比較を実施済み。hostは stage scene object `0x0003`、player actor `0x0015`、Big Star actor `0x0022` を持つ一方、clientは `VSConnect 0x0006` と load scene `0x000F` に残る。
+- write traceにより、hostは `scene 0x0F -> 0x03` 遷移時に `02013588`、`020131A0`、`020131A4` の自然なscene更新へ進むが、clientはstage request後にその更新へ進まないことを確認済み。
 
 ## 現在のブロッカー
 
 - client側は `SafeLoadLevelCall + SafeStageSceneFactoryCall` でも `sceneCurrent=0x0F`、`sceneNext=0x03`、`VSConnect` 残存のまま止まり、player actor / Big Star actorが生成されない。
 - `SafeStageSceneFactoryInactive` で `sceneActive=0` を強制するとhostも壊れるため、単純なactive clearでは足りない。
 - `SafeLoadLevelSessionReady` でhost型のNet状態をloadLevel前後に書くと、clientは逆にVSConnect sceneから進まなくなる。常時/広域のstate維持ではなく、より正確な開始条件の特定が必要。
+- `0x0208A478` のMvLファイルロード完了フラグはhost=1、client=0で差がある。ただしこのフラグをstage factory時点またはloadLevel前後で立てるだけではclientのstage object生成には届かなかった。
 
 ## 次にやること
 
-1. hostがactor生成に成功した `SafeLoadLevelCall + SafeStageSceneFactoryCall` の成功経路と、clientが止まる経路をMainRAM dumpで比較する。
-2. 特に `VSConnect` オブジェクト、scene transition関連、object manager / scene factory引数、packet sequencer stateを比較し、clientが `scene 0x0F -> 0x03` を完了できない最小差分を特定する。
-3. 差分が小さければ、診断フックを「状態丸ごと同期」ではなく「開始時に必要な少数の条件補正」に絞る。
-4. 差分が大きければ、直接stage開始ルートは診断専用に戻し、下位MP API adapter化の解析へ戻る。
+1. hostで `0x0208A478` が立つ前後のロード関連write traceを取り、`loadMvsLFilesThread` 完了時に他に更新される状態を特定する。
+2. clientのload scene `0x000F` objectが何を待っているか、`0x02152E04` 周辺と `02013588 -> 020131A0/020131A4` へ進む条件を追う。
+3. clientに必要な開始条件が少数なら、診断フックを「状態丸ごと同期」ではなく「ロード完了/scene transitionに必要な条件補正」に絞る。
+4. 条件が大きすぎる場合、直接stage開始ルートは診断専用に戻し、下位MP API adapter化またはROM patchで自然なロード完了処理を通す方向へ戻る。
 5. 実装がまとまった単位でコミットする。
 
 ## 重要アドレス

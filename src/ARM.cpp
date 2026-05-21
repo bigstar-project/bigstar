@@ -368,6 +368,9 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     static int loadLevelSessionReady = -1;
     if (loadLevelSessionReady < 0)
         loadLevelSessionReady = NSMLEnvFlag("MELONDS_NSML_SAFE_LOAD_LEVEL_SESSION_READY") ? 1 : 0;
+    static int loadLevelFilesReady = -1;
+    if (loadLevelFilesReady < 0)
+        loadLevelFilesReady = NSMLEnvFlag("MELONDS_NSML_SAFE_LOAD_LEVEL_FILES_READY") ? 1 : 0;
     static int courseSelect = -1;
     if (courseSelect < 0)
         courseSelect = NSMLEnvFlag("MELONDS_NSML_SAFE_COURSE_SELECT_CALL") ? 1 : 0;
@@ -678,6 +681,11 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     code.push_back(0xE92D0020u); // push {r5}
     if (effectiveLoadLevel)
     {
+        if (loadLevelFilesReady > 0)
+        {
+            NSMLEmitStoreImm32(code, 0x0208A474, 0x00000100);
+            NSMLEmitStoreImm32(code, 0x0208A478, 0x00000001);
+        }
         if (loadLevelSessionReady > 0)
         {
             NSMLEmitStoreImm32(code, 0x02087E14, 0x00000001);
@@ -710,6 +718,11 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         NSMLEmitStackArg(code, 0x30, 0xFFFFFFFFu);
         NSMLEmitBLViaIP(code, loadLevelAddr);
         code.push_back(0xE28DD034u); // add sp, sp, #0x34
+        if (loadLevelFilesReady > 0)
+        {
+            NSMLEmitStoreImm32(code, 0x0208A474, 0x00000100);
+            NSMLEmitStoreImm32(code, 0x0208A478, 0x00000001);
+        }
         if (loadLevelSessionReady > 0)
         {
             NSMLEmitStoreImm32(code, 0x02087E14, 0x00000001);
@@ -774,6 +787,8 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         NSMLEmitStoreImm32(code, 0x0208B044, 0xFFFF0003);
         NSMLEmitStoreImm32(code, 0x0208B048, 0x00000000);
         NSMLEmitStoreImm32(code, 0x0208B04C, 0x00000000);
+        NSMLEmitStoreImm32(code, 0x0208A474, 0x00000100);
+        NSMLEmitStoreImm32(code, 0x0208A478, 0x00000001);
         NSMLEmitMovImm(code, 0, 0x02088568);
         NSMLEmitMovImm(code, 1, 0x00B5FF00);
         NSMLEmitMovImm(code, 2, 0x02088558);
@@ -786,6 +801,9 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         NSMLEmitMovImm(code, 2, 0x0208B040);
         NSMLEmitMovImm(code, 3, 0x01);
         NSMLEmitBLViaIP(code, courseSelectFactoryAddr);
+        NSMLEmitStoreImm32(code, 0x0208B044, 0xFFFF0003);
+        NSMLEmitStoreImm32(code, 0x0208B048, 0x00000000);
+        NSMLEmitStoreImm32(code, 0x0208B04C, 0x00000000);
         NSMLEmitStoreImm32(code, 0x0203B478, stageSceneFactoryInactive > 0 ? 0x00000000 : 0x00000001); // Scene::isSceneActive
         NSMLEmitStoreImm32(code, 0x0203B47C, 0x00000005); // Scene::previousSceneID
         NSMLEmitStoreImm32(code, 0x0203B480, 0x00000003); // Scene::nextSceneID
