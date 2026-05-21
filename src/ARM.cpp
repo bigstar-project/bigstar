@@ -2433,8 +2433,15 @@ static bool IsNSMLDTCMAddress(ARM* cpu, u32 addr)
     return cpu && cpu->Num == 0 && cpu->NDS.ARM9.DTCM && ((addr & cpu->NDS.ARM9.DTCMMask) == cpu->NDS.ARM9.DTCMBase);
 }
 
+static bool IsNSMLITCMAddress(ARM* cpu, u32 addr)
+{
+    return cpu && cpu->Num == 0 && addr < cpu->NDS.ARM9.ITCMSize;
+}
+
 static u8 ReadNSMLTraceByte(ARM* cpu, u32 addr)
 {
+    if (IsNSMLITCMAddress(cpu, addr))
+        return cpu->NDS.ARM9.ITCM[addr & (ITCMPhysicalSize - 1)];
     if (IsNSMLDTCMAddress(cpu, addr))
         return cpu->NDS.ARM9.DTCM[addr & 0x3FFF];
     return cpu->NDS.ARM9Read8(addr);
@@ -2450,7 +2457,7 @@ static u32 ReadNSMLTrace32(ARM* cpu, u32 addr)
 
 static void WriteNSMLHexDump(FILE* file, ARM* cpu, u32 addr, u32 len)
 {
-    if (!file || !cpu || (!IsNSMLMainRAMAddress(addr) && !IsNSMLDTCMAddress(cpu, addr)) || len == 0)
+    if (!file || !cpu || (!IsNSMLMainRAMAddress(addr) && !IsNSMLDTCMAddress(cpu, addr) && !IsNSMLITCMAddress(cpu, addr)) || len == 0)
     {
         fputc('-', file);
         return;
@@ -3304,6 +3311,26 @@ void ARMv5::DataAbort()
             ReadNSMLTrace32(this, R[10] + 0x04),
             ReadNSMLTrace32(this, R[10] + 0x08),
             ReadNSMLTrace32(this, R[10] + 0x0C));
+        Log(LogLevel::Warn,
+            "ARM9: abort tcm frame=%u itcmSize=%08X itcmSetting=%08X dtcmBase=%08X dtcmMask=%08X dtcmSetting=%08X\n",
+            NDS.NumFrames,
+            ITCMSize,
+            ITCMSetting,
+            DTCMBase,
+            DTCMMask,
+            DTCMSetting);
+        Log(LogLevel::Warn,
+            "ARM9: abort code frame=%u pc=%08X [%08X %08X %08X %08X %08X %08X %08X %08X]\n",
+            NDS.NumFrames,
+            R[15],
+            ReadNSMLTrace32(this, R[15] - 0x10),
+            ReadNSMLTrace32(this, R[15] - 0x0C),
+            ReadNSMLTrace32(this, R[15] - 0x08),
+            ReadNSMLTrace32(this, R[15] - 0x04),
+            ReadNSMLTrace32(this, R[15] + 0x00),
+            ReadNSMLTrace32(this, R[15] + 0x04),
+            ReadNSMLTrace32(this, R[15] + 0x08),
+            ReadNSMLTrace32(this, R[15] + 0x0C));
     }
 
     u32 oldcpsr = CPSR;

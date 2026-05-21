@@ -42,7 +42,8 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - `SafeLoadLevelCall`
   - `SafeStageSceneFactoryCall`
 - `scripts/run-nsmb-mvl-lan-route-smoke.ps1` は、デフォルトでARM data/prefetch abortを検出して失敗扱いにする。
-- ARM data/prefetch abortログにframe番号を出すようにした。ARM9 data abort時はDTCM-awareなstack/ref診断も出す。
+- `scripts/run-nsmb-mvl-lan-route-smoke.ps1` に `RequireClientRemotePlayer0Movement` を追加。frame到達だけで成功扱いにせず、client側がremote player0入力を消費して移動したかを検証できる。
+- ARM data/prefetch abortログにframe番号を出すようにした。ARM9 data abort時はDTCM-awareなstack/refに加え、ITCM-awareなTCM設定/code window診断も出す。
 
 ## 現在わかっていること
 
@@ -70,6 +71,9 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - ただし同じrunでclient側が `pc=01FF8C28` のARM9 data abortを起こす。これはplayer更新が走った後に、まだ不足しているscene/player初期化条件へ到達している可能性が高い。
 - `Stage::actorFreezeFlag` 診断writeはstageGroup 9 / vsMode 1中だけに制限した。stage外で同じアドレスを触るとclientのstage遷移を壊す可能性があるため。
 - 両側で `Stage::actorFreezeFlag=0`、latest-before fallbackをstage後に有効化すると、host local player0とclient remote player0が動くrunはある。ただしclient側 `pc=01FF8C28` abortが再現するrunもある。
+- `pc=01FF8C28` は `external/NSMB-Code-Reference` 上の `updateHintVec_+0x48` 付近。ITCM-aware code windowでは、実際には `pc-8` 相当の `ldrne ip, [r0, lr, lsl #2]` が `r0=0x000021D5` を参照してdata abortしている。
+- つまり `01FF8xxx` のコード未ロードではなく、3D描画/モデル側へ渡っているrender/model状態の一部が低アドレス化している可能性が高い。
+- `PacketBridgeForceMvlFileCache` を単独で呼べるようにし、復帰PC / CPSR / SPガードを追加した。ただし現状のframe hookからFS cache loadを呼ぶと `pc=00000098` などのprefetch abortを起こすため、このルートはまだ安全な解決策ではない。
 
 ## 直近の検証ログ
 
@@ -103,19 +107,26 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `logs/nsmvl-abort-near2430-dump-retry-20260522-attempt1`
   - 2440fまでabortなしでhost/client双方のplayer移動を確認したrun。
   - 同条件でも再現性に揺れがあるため、直接stage開始ルートの不足初期化条件がまだ残っている。
+- `logs/nsmvl-require-client-move-20260522`
+  - `RequireClientRemotePlayer0Movement` を有効にし、remote player0移動を成功条件に入れたrun。
+  - client remote player0が動いた後、`frame=2439 pc=01FF8C28` のARM9 data abortを検出。
+  - ITCM code windowから、abort箇所は `updateHintVec_+0x48` 付近で、低アドレス `0x21D5` 参照が原因と確認。
+- `logs/nsmvl-mvl-cache-safe-guard-20260522`
+  - MvL file cache強制ロードを単独化し、PC/mode/SP guard付きで試したrun。
+  - `force MvL file cache` 後に `pc=00000098` prefetch abort。frame hookからのFS cache load呼び出しはまだ不安全。
 
 ## 現在のブロッカー
 
 直接stage開始ルートでhost local player actorを動かす条件は `Stage::actorFreezeFlag` 候補まで絞れた。
 
-次のブロッカーは、packet消費を動かした後にclient側で `pc=01FF8C28` のARM9 data abortが出ること、および同じ条件でもclientがstage遷移に失敗するrunがあること。host local player0とclient remote player0の移動までは到達したので、次は直接stage開始ルートの不足初期化条件を潰す。
+次のブロッカーは、packet消費を動かした後にclient側で `updateHintVec_+0x48` のARM9 data abortが出ること、および同じ条件でもclientがstage遷移に失敗するrunがあること。host local player0とclient remote player0の移動までは到達したが、render/model初期化またはplayer model状態がまだ自然なMvL開始状態と一致していない。
 
 ## 次にやること
 
-1. client側 `pc=01FF8C28` data abortの直前状態を、DTCM-aware abort stack/ref、RAM dump、call trace/write traceで切り分ける。
-2. clientがstageGroup 9 / player actor生成へ安定して入るために必要な初期化fieldを特定する。
-3. abort原因が不足初期化条件なら、scene/player/packet sequencerのどのfieldが必要かを特定して最小patch化する。
-4. ARM abortなしでhost local player0とclient remote player0が同じ入力で動くrunを作る。
+1. `updateHintVec_+0x48` に渡るrender/model pointerの出所を、call traceとplayer/model構造体dumpで追う。
+2. direct stage routeで不足しているplayer model / render object / MvL file cache初期化条件を特定する。
+3. frame hookからのFS cache loadは不安全なので、自然な呼び出し地点を探すか、ROM/メモリpatch側で安全な初期化入口へ寄せる。
+4. ARM abortなしでhost local player0とclient remote player0が同じ入力で動くrunを作る。smokeでは `RequireClientRemotePlayer0Movement` を使い、偽陽性を避ける。
 5. 条件が固まったら、診断patchをROM patchまたは下位MP adapterへ縮小する。
 
 ## 重要アドレス

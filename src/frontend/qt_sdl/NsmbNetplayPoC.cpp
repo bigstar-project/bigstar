@@ -446,6 +446,11 @@ struct GameStateSyncHashes
 melonDS::u32 FindObjectBaseByID(melonDS::NDS* nds, melonDS::u16 objectID);
 bool WriteARM9U32(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 value);
 
+bool IsARM9MainRAMAddress(melonDS::u32 addr)
+{
+    return (addr & 0xFF000000u) == 0x02000000u;
+}
+
 struct State
 {
     std::mutex Mutex;
@@ -1523,6 +1528,12 @@ bool InjectNSMLPacketBridgeMvlFileCache(int instanceID, melonDS::u32 frame, melo
 
     const melonDS::u32 oldPC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
     const melonDS::u32 returnPC = oldPC | ((nds->ARM9.CPSR & 0x20) ? 1u : 0u);
+    const bool isKnownITCMCode = oldPC >= 0x01FF8000u && oldPC < nds->ARM9.ITCMSize;
+    if (!IsARM9MainRAMAddress(oldPC) && !isKnownITCMCode)
+        return false;
+    if ((nds->ARM9.CPSR & 0x1Fu) != 0x1Fu || nds->ARM9.R[13] < 0x027E3000u)
+        return false;
+
     std::vector<melonDS::u32> code;
     code.reserve(16 + (std::size(kMvlFiles) * 5));
     const auto emitBL = [&code](melonDS::u32 target)
@@ -1975,7 +1986,7 @@ bool InjectNSMLPacketBridgeDummyAlloc(int instanceID, melonDS::u32 frame, melonD
 
 void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (!G.PacketBridgeForceLoadGameSM || !nds || instanceID < 0 || instanceID >= 16)
+    if (!nds || instanceID < 0 || instanceID >= 16)
         return;
     if (frame < G.PacketBridgeForceLoadGameSMStartFrame)
         return;
@@ -1990,12 +2001,16 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
     if (vsConnectBase == 0)
         return;
 
+    if (InjectNSMLPacketBridgeMvlFileCache(instanceID, frame, nds))
+        return;
+
+    if (!G.PacketBridgeForceLoadGameSM)
+        return;
+
     const melonDS::u32 currentUpdate = nds->ARM9Read32(vsConnectBase + 0x120);
     const melonDS::u32 currentStep = nds->ARM9Read32(vsConnectBase + 0x144);
     const melonDS::u32 targetStep = std::clamp<melonDS::u32>(G.PacketBridgeForceLoadGameSMStep, 0, 7);
     const bool alreadyLoadGameSM = currentUpdate == kA2DJVSConnectUpdateLoadGameSMAddr && currentStep >= targetStep;
-    if (InjectNSMLPacketBridgeMvlFileCache(instanceID, frame, nds))
-        return;
     if (!alreadyLoadGameSM)
     {
         if (InjectNSMLPacketBridgeScheduleLoadGameSM(instanceID, frame, nds, vsConnectBase))

@@ -256,6 +256,7 @@ param(
     [switch]$SkipBlankScreenshotCheck,
     [switch]$SkipGameplayActorCheck,
     [switch]$SkipArmAbortCheck,
+    [switch]$RequireClientRemotePlayer0Movement,
     [string]$LogDir = "logs\nsmb-mvl-lan-route"
 )
 
@@ -1925,6 +1926,21 @@ function Test-ConnectionDialogScreenshot {
     }
 }
 
+function Convert-TraceHexToInt64 {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return 0
+    }
+
+    $text = $Value.Trim()
+    if ($text.StartsWith("0x", [StringComparison]::OrdinalIgnoreCase)) {
+        return [Convert]::ToInt64($text.Substring(2), 16)
+    }
+
+    return [Convert]::ToInt64($text, 10)
+}
+
 foreach ($screenDir in @($hostScreens, $clientScreens)) {
     $screens = Get-ChildItem $screenDir -Filter "inst0_frame*.png" -ErrorAction SilentlyContinue
     foreach ($screen in $screens) {
@@ -1990,6 +2006,37 @@ if ($GameStateTrace -and ($GameStateTraceEndFrame -le 0 -or $GameStateTraceEndFr
             if ($last.playerActor0Found -ne "0x1" -or $last.playerActor1Found -ne "0x1" -or $last.vsStarActorFound -ne "0x1") {
                 throw "Mario vs Luigi gameplay actor check failed for $($item.Role): playerActor0=$($last.playerActor0Found) playerActor1=$($last.playerActor1Found) vsStarActor=$($last.vsStarActorFound). See $($item.Path)"
             }
+        }
+    }
+
+    if ($RequireClientRemotePlayer0Movement) {
+        if (-not (Test-Path $clientGameStateTrace)) {
+            throw "client game state trace was not created: $clientGameStateTrace"
+        }
+
+        $clientRows = @(Import-Csv $clientGameStateTrace)
+        if ($clientRows.Count -eq 0) {
+            throw "client game state trace is empty: $clientGameStateTrace"
+        }
+
+        $movementStartFrame = $PacketBridgeLiveFallbackStartFrame
+        if ($movementStartFrame -le 0) {
+            $movementStartFrame = $GameStateTraceStartFrame
+        }
+
+        $candidateRows = @($clientRows | Where-Object { [int]$_.frame -ge $movementStartFrame })
+        if ($candidateRows.Count -eq 0) {
+            throw "client remote movement check has no rows at or after frame $movementStartFrame. See $clientGameStateTrace"
+        }
+
+        $first = $candidateRows[0]
+        $firstX = Convert-TraceHexToInt64 $first.playerActor0X
+        $inputRows = @($candidateRows | Where-Object { (Convert-TraceHexToInt64 $_.inputPlayer0Held) -ne 0 })
+        $movedRows = @($candidateRows | Where-Object { (Convert-TraceHexToInt64 $_.playerActor0X) -ne $firstX })
+
+        if ($inputRows.Count -eq 0 -or $movedRows.Count -eq 0) {
+            $last = $candidateRows[-1]
+            throw "client remote player0 movement check failed: rows=$($candidateRows.Count) inputRows=$($inputRows.Count) movedRows=$($movedRows.Count) firstX=$($first.playerActor0X) lastX=$($last.playerActor0X) lastInput=$($last.inputPlayer0Held). See $clientGameStateTrace"
         }
     }
 }
