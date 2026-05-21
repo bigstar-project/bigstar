@@ -42,12 +42,14 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `getConsoleKeys/getPacket*` のpacket replay hookがPacketBridgeのlocal/remote選択を通るように修正し、host側local player入力もhook上でhitするようにした。
 - game-state CSVにplayer actorのbase/state/flags/prev/vel列を追加し、actorが生成されているだけか、実際に更新されているかをRAM dumpなしで確認できるようにした。
 - game-state CSVにstage scene objectのbase/state/flags/word154/word160列を追加し、直接stage診断ルートのscene状態を追いやすくした。
+- 診断用に `MELONDS_NSML_FORCE_PLAYER_COUNT` と `MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS` を追加し、stage後のplayer更新条件を切り分けられるようにした。
 
 ## 現在のブロッカー
 
 - 直接stage開始診断ルートでは、client限定 `transferPacket` 結果強制でstage sceneへ入れるようになった。ただしこれはまだ診断フックで、最終的には下位MP adapterまたはROM patchへ落とす必要がある。
 - host/clientともstage scene、player actor、Big Star actorまでは生成できるが、直接stage開始診断ルートでは `playerCount=0` のまま、player actorの座標と内部領域が更新されない。試合中入力以前に、NSMBのplayer/gameplay更新状態が完全には立ち上がっていない可能性が高い。
 - stage後にhost側 `RIGHT` 入力を入れると、PacketBridge hook上はhost local playerでも `keys=0x0010/0x0012` がhitし、A2DJ `Input::playerKeysHeld` 近傍にも値が反映される。ただしplayer actorは動かないため、remote packet注入だけではなく、stage開始/scene/player管理の初期化条件をさらに下げて追う必要がある。
+- `playerCount=2` とstage scene runtime words `word154=1, word160=0xDA` を補うとplayer actor更新が動き始めるケースがある。つまり、直接stage診断ルートはactor生成だけでなくstage runtime初期化も不足している。
 - `transferPacket` 結果強制はclient限定ならstage到達に効くが、hostにも適用するとactor生成自体が壊れる。host側は自然なtransfer経路を残す必要がある。
 - `Net::random.value` 固定でBig Star初期位置は一致したが、以後のBig Star再生成、8コインアイテム、ランダムステージ選択では、`Net::randomCallCount` と呼び出し順が一致し続けることを別途確認する必要がある。
 - `PacketBridgeWait` / throttleで2プロセスの実時間進行差を吸収しようとすると、host/clientの片側だけが極端に遅くなり、検証時間が破綻する。WAN本番の快適性にも直結しないため、これは補助診断に留める。
@@ -119,11 +121,17 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - 追加したgame-state列の短時間スモーク。2300f時点でplayer actorのbase/state/flags/prev/velがCSVへ出ることを確認した。
 - `logs/nsmvl-gamestate-stage-fields-smoke-20260521`
   - stage scene診断列の短時間スモーク。2300f時点で `stageSceneFound=1`、`stageSceneBase=0x021B94CC`、`stageSceneFlags=0x10000` がCSVへ出ることを確認した。
+- `logs/nsmvl-force-player-count-20260521`
+  - `playerCount=2` だけを2200-3600fで固定。client側はhost入力由来でplayer0が動くが、host側は動かない。`playerCount` 単体では不足。
+- `logs/nsmvl-force-player-count-stagewords-20260521`
+  - `playerCount=2` に加えてstage scene `word154=1, word160=0xDA` を固定。host側player actorは動き始めるが、host/clientの挙動は一致しない。
+- `logs/nsmvl-force-player-count-stagewords-hostonly-20260521`
+  - stage scene runtime wordsをhost-onlyにするとhost側も動かない。両側のstage runtime状態とpacket同期が相互依存している可能性がある。
 
 ## 次にやること
 
 1. client限定 `transferPacket` 結果強制を、現在の診断フックから「WAN adapterが返すべき完了条件」として整理する。戻り値 `8` が正しい完了値なのか、他の戻り値やflagsが必要かを確認する。
-2. 直接stage開始診断ルートで不足しているplayer/gameplay更新条件を特定する。現状はpacket入力とInput globalsまでは変化するが、player actorが更新されないため、scene/player managerの初期化・stage start状態・player count周辺を追う。
+2. 直接stage開始診断ルートで不足しているstage runtime初期化をさらに絞る。`playerCount=2` とstage scene `word154=1, word160=0xDA` は有力候補だが、両PCで同じplayer更新になる条件はまだ未確定。
 3. RNGについて、Big Star初期位置以外に、Big Star再生成、8コインアイテム、ランダムステージ選択で `Net::random` 呼び出し順が一致するかをtraceする。
 4. 直接stage開始診断ルートの依存フックを縮小し、最終的にROM patch入口または下位MP adapterへ置き換える。
 5. 安定した単位でコミットする。

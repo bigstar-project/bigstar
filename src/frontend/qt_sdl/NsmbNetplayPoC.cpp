@@ -589,6 +589,21 @@ struct State
     melonDS::u32 PlayerStickToStarStartFrame = 0;
     melonDS::u32 PlayerStickToStarEndFrame = 0;
     int PlayerStickToStarSlot = 0;
+    bool ForcePlayerCountEnabled = false;
+    bool ForcePlayerCountHostOnly = false;
+    bool ForcePlayerCountClientOnly = false;
+    melonDS::u32 ForcePlayerCountStartFrame = 0;
+    melonDS::u32 ForcePlayerCountEndFrame = 0;
+    melonDS::u32 ForcePlayerCountValue = 2;
+    bool ForcePlayerCountLogged[16] {};
+    bool ForceStageSceneRuntimeWordsEnabled = false;
+    bool ForceStageSceneRuntimeWordsHostOnly = false;
+    bool ForceStageSceneRuntimeWordsClientOnly = false;
+    melonDS::u32 ForceStageSceneRuntimeWordsStartFrame = 0;
+    melonDS::u32 ForceStageSceneRuntimeWordsEndFrame = 0;
+    melonDS::u32 ForceStageSceneWord154 = 1;
+    melonDS::u32 ForceStageSceneWord160 = 0xDA;
+    bool ForceStageSceneRuntimeWordsLogged[16] {};
     bool NetRandomPatchEnabled = false;
     bool NetRandomPatchAuto = false;
     melonDS::u32 NetRandomPatchFrame = 0;
@@ -3548,6 +3563,77 @@ void ApplyPlayerStickToStar(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
     }
 }
 
+void ForcePlayerCountIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForcePlayerCountEnabled || !nds)
+        return;
+    if (frame < G.ForcePlayerCountStartFrame)
+        return;
+    if (G.ForcePlayerCountEndFrame != 0 && frame > G.ForcePlayerCountEndFrame)
+        return;
+    if (G.ForcePlayerCountHostOnly && G.NetRole != Role::Host)
+        return;
+    if (G.ForcePlayerCountClientOnly && G.NetRole != Role::Client)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+
+    nds->ARM9Write32(kGamePlayerCountAddr, G.ForcePlayerCountValue);
+    if (!G.ForcePlayerCountLogged[instanceID])
+    {
+        std::printf("NSMB Test: force playerCount inst=%d frame=%u value=%u range=%u-%u\n",
+            instanceID,
+            frame,
+            G.ForcePlayerCountValue,
+            G.ForcePlayerCountStartFrame,
+            G.ForcePlayerCountEndFrame);
+        G.ForcePlayerCountLogged[instanceID] = true;
+    }
+}
+
+void ForceStageSceneRuntimeWordsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForceStageSceneRuntimeWordsEnabled || !nds || !nds->MainRAM)
+        return;
+    if (frame < G.ForceStageSceneRuntimeWordsStartFrame)
+        return;
+    if (G.ForceStageSceneRuntimeWordsEndFrame != 0 && frame > G.ForceStageSceneRuntimeWordsEndFrame)
+        return;
+    if (G.ForceStageSceneRuntimeWordsHostOnly && G.NetRole != Role::Host)
+        return;
+    if (G.ForceStageSceneRuntimeWordsClientOnly && G.NetRole != Role::Client)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+
+    const bool wrote154 = WriteObjectWordByIDAndSettings(
+        nds,
+        kStageSceneObjectID,
+        0x00B5FF00,
+        0x154,
+        G.ForceStageSceneWord154);
+    const bool wrote160 = WriteObjectWordByIDAndSettings(
+        nds,
+        kStageSceneObjectID,
+        0x00B5FF00,
+        0x160,
+        G.ForceStageSceneWord160);
+    if (!G.ForceStageSceneRuntimeWordsLogged[instanceID])
+    {
+        std::printf("NSMB Test: force stage scene runtime words inst=%d frame=%u range=%u-%u word154=0x%08X word160=0x%08X wrote=%d/%d\n",
+            instanceID,
+            frame,
+            G.ForceStageSceneRuntimeWordsStartFrame,
+            G.ForceStageSceneRuntimeWordsEndFrame,
+            G.ForceStageSceneWord154,
+            G.ForceStageSceneWord160,
+            wrote154 ? 1 : 0,
+            wrote160 ? 1 : 0);
+        if (wrote154 || wrote160)
+            G.ForceStageSceneRuntimeWordsLogged[instanceID] = true;
+    }
+}
+
 bool WriteObjectPositionByGUID(melonDS::NDS* nds, melonDS::u32 guid, melonDS::u32 posX, melonDS::u32 posY, melonDS::u32 posZ)
 {
     if (!nds || !nds->MainRAM || guid == 0)
@@ -5137,6 +5223,28 @@ void InitFromEnvironment()
     if (G.PlayerStickToStarEndFrame < G.PlayerStickToStarStartFrame)
         std::swap(G.PlayerStickToStarStartFrame, G.PlayerStickToStarEndFrame);
     G.PlayerStickToStarSlot = std::clamp(EnvInt("MELONDS_NSML_PLAYER_STICK_TO_STAR_SLOT", 0), 0, 1);
+    G.ForcePlayerCountEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_COUNT");
+    G.ForcePlayerCountHostOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_COUNT_HOST_ONLY");
+    G.ForcePlayerCountClientOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_COUNT_CLIENT_ONLY");
+    G.ForcePlayerCountStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_COUNT_START_FRAME", 0)));
+    G.ForcePlayerCountEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_COUNT_END_FRAME", 0)));
+    G.ForcePlayerCountValue = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_COUNT_VALUE", 2)));
+    G.ForceStageSceneRuntimeWordsEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS");
+    G.ForceStageSceneRuntimeWordsHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_HOST_ONLY");
+    G.ForceStageSceneRuntimeWordsClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_CLIENT_ONLY");
+    G.ForceStageSceneRuntimeWordsStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_START_FRAME", 0)));
+    G.ForceStageSceneRuntimeWordsEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_END_FRAME", 0)));
+    G.ForceStageSceneWord154 = static_cast<melonDS::u32>(
+        std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_WORD154")
+            ? std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_WORD154") : "1", nullptr, 0));
+    G.ForceStageSceneWord160 = static_cast<melonDS::u32>(
+        std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_WORD160")
+            ? std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_WORD160") : "0xDA", nullptr, 0));
 
     const char* netRandomValue = std::getenv("MELONDS_NSML_NET_RANDOM_VALUE");
     if (netRandomValue && netRandomValue[0])
@@ -5417,6 +5525,10 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyPlayerStickToStar(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForcePlayerCountIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForceStageSceneRuntimeWordsIfNeeded(instanceID, inputFrame, nds);
 
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteGameState(instanceID, inputFrame, nds);
