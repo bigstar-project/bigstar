@@ -179,6 +179,12 @@ param(
     [switch]$SafeStageSceneFactoryCall,
     [int]$SafeStageSceneFactoryCallFrame = 2700,
     [string]$SafeStageSceneFactoryCallPC = "0",
+    [switch]$SafeStageSceneFactoryCreateObject,
+    [switch]$SafeStageSceneFactoryCreateObjectHostOnly,
+    [switch]$SafeStageSceneFactoryCreateObjectClientOnly,
+    [switch]$SafeStageSceneFactorySceneSwitch,
+    [switch]$SafeStageSceneFactorySceneSwitchHostOnly,
+    [switch]$SafeStageSceneFactorySceneSwitchClientOnly,
     [switch]$SafeStageSceneFactoryInactive,
     [string]$HostSafeStageSceneFactoryCallPC = "",
     [string]$ClientSafeStageSceneFactoryCallPC = "",
@@ -498,6 +504,30 @@ function Start-MelonLANProcess {
             $roleSafeStageSceneFactoryCallPC = $ClientSafeStageSceneFactoryCallPC
         }
         $env:MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL_PC = "$roleSafeStageSceneFactoryCallPC"
+        $safeStageFactoryCreateObjectForRole = $SafeStageSceneFactoryCreateObject
+        if ($SafeStageSceneFactoryCreateObjectHostOnly -and $Role -ne "host") {
+            $safeStageFactoryCreateObjectForRole = $false
+        }
+        if ($SafeStageSceneFactoryCreateObjectClientOnly -and $Role -ne "client") {
+            $safeStageFactoryCreateObjectForRole = $false
+        }
+        if ($safeStageFactoryCreateObjectForRole) {
+            $env:MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CREATE_OBJECT = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CREATE_OBJECT -ErrorAction SilentlyContinue
+        }
+        $safeStageFactorySceneSwitchForRole = $SafeStageSceneFactorySceneSwitch
+        if ($SafeStageSceneFactorySceneSwitchHostOnly -and $Role -ne "host") {
+            $safeStageFactorySceneSwitchForRole = $false
+        }
+        if ($SafeStageSceneFactorySceneSwitchClientOnly -and $Role -ne "client") {
+            $safeStageFactorySceneSwitchForRole = $false
+        }
+        if ($safeStageFactorySceneSwitchForRole) {
+            $env:MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_SCENE_SWITCH = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_SCENE_SWITCH -ErrorAction SilentlyContinue
+        }
         if ($SafeStageSceneFactoryInactive) {
             $env:MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_INACTIVE = "1"
         } else {
@@ -507,6 +537,8 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL_PC -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CREATE_OBJECT -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_SCENE_SWITCH -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_INACTIVE -ErrorAction SilentlyContinue
     }
     if ($SafeCallMinSP) {
@@ -1531,6 +1563,8 @@ function Start-MelonLANProcess {
         "safeLoadLevelSessionReady=$($env:MELONDS_NSML_SAFE_LOAD_LEVEL_SESSION_READY)"
         "safeLoadLevelFilesReady=$($env:MELONDS_NSML_SAFE_LOAD_LEVEL_FILES_READY)"
         "safeStageSceneFactory=$($env:MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL)"
+        "safeStageSceneFactoryCreateObject=$($env:MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CREATE_OBJECT)"
+        "safeStageSceneFactorySceneSwitch=$($env:MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_SCENE_SWITCH)"
         "safeStageSceneFactoryInactive=$($env:MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_INACTIVE)"
         "safeMvlLoadThread=$($env:MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL)"
         "safeMvlLoadThreadFrame=$($env:MELONDS_NSML_SAFE_MVL_LOAD_THREAD_CALL_FRAME)"

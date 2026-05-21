@@ -30,12 +30,14 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - 古い検証ログを削除し、直近の判断に必要なログだけ残した。
 - `PacketBridgeForceMvlLoadThread` / `PacketBridgeForceMvlFileCache` が `ForceLoadGameSM` なしでも効くよう、検証スクリプトのenv設定を修正した。
 - `SafeMvlLoadThreadCall` を追加し、client側でも `loadMvsLFilesThread` 入口 `02152E04` から完了地点 `02152E1C` まで通せることを確認した。
+- `SafeStageSceneFactoryCreateObject` / `SafeStageSceneFactorySceneSwitch` 診断フックを追加し、client側でstage scene生成を直接押した場合の失敗条件を切り分けた。
 
 ## 現在のブロッカー
 
 - clientは `loadMvsLFilesThread` 完了後も、`sceneCurrent=0x0F`、`sceneNext=0x03` のままstage sceneへ進まない。
 - hostはstage request後に自然に `02013588 -> 020131A0/020131A4 -> 02013218/0201321C` へ進み、stage scene objectとplayer/star actorを生成する。
 - clientは同じstage requestを投げても、stage factory後にこの自然なscene遷移へ進まない。
+- clientで `0204BF8C(objectID=0x0003)` を直接呼んでも、stage scene objectはMainRAM上のobject listに残らない。単純なobject spawnではなく、load sceneのdestroy完了、scene manager内部状態、またはStageStart/LoadGameSM由来の追加状態が必要。
 - 単純な `sceneActive=0` 強制は危険。全体に適用するとhost側でdata abortした。role限定・タイミング限定でないと使えない。
 
 ## 直近の検証結果
@@ -54,11 +56,23 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - clientだけ `sceneActive=0` にしてもstage scene生成には進まない。
 - `logs/nsmvl-direct-loadlevel-safe-client-loadthread-client-sceneheader-20260521`
   - clientだけsceneヘッダをhost 2000f相当にしてもstage scene/player/star actorは生成されない。
+- `logs/nsmvl-direct-loadlevel-client-create-stageobject-20260521`
+  - clientだけ `0204BF8C(objectID=0x0003, settings=0x00B5FF00)` を直接呼ぶ診断を追加。call trace上は呼べるが、player/star actorは生成されない。
+- `logs/nsmvl-direct-loadlevel-client-create-stageobject-dumps-20260521`
+  - direct create後のRAM dumpを確認。host 2020fにはstage scene object `0x0003` が残るが、client側には同じpatternのobjectが残らない。
+- `logs/nsmvl-direct-loadlevel-client-sceneswitch-20260521`
+  - `020131A0` を通常関数のように直接呼ぶとclientの `sceneCurrent` が `0x0208` へ壊れる。ここは関数入口ではなく、scene factory内部の分岐先に近いため直接呼び出し対象から外す。
+- `logs/nsmvl-direct-loadlevel-client-stagefactory-late-20260521`
+  - client-onlyでstage factory/direct createを2020fへ遅らせてもstage scene objectは残らない。
+- `logs/nsmvl-direct-loadlevel-client-stagefactory-late-patchedheader-20260521`
+  - stage factory直前にclientへhost 2000f相当のscene headerをpatchしてもstage scene objectは残らない。
+- `logs/nsmvl-direct-loadlevel-client-player0-20260521`
+  - clientの `localPlayerID` を0に寄せてもstage scene生成には進まない。player ID差分だけが原因ではない。
 
 ## 次にやること
 
-1. `020130A8` scene factory / scene object生成パスをcall traceし、clientでstage scene objectが生成されない理由を特定する。
-2. `02013588 -> 020131A0/020131A4` に入る条件を、scene manager側の内部キュー/scene list/transition objectまで広げて追う。
+1. hostで `02013588` がload scene object `0x021BEAB0` に対して呼ばれる直前条件を、object state、destroy flag、pending flags、scene graph link、LoadGameSM/StageStartSM状態まで広げて比較する。
+2. clientでload scene destroyを自然発火させる下位条件を探す。直接 `020131A0` は使わない。
 3. 直接stage開始診断ルートのpatch範囲が大きくなりすぎる場合は、下位MP API adapter化またはROM patch入口作成へ戻す。
 4. 安定した単位でコミットする。
 

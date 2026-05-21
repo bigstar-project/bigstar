@@ -389,6 +389,12 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     static int stageSceneFactory = -1;
     if (stageSceneFactory < 0)
         stageSceneFactory = NSMLEnvFlag("MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL") ? 1 : 0;
+    static int stageSceneFactoryCreateObject = -1;
+    if (stageSceneFactoryCreateObject < 0)
+        stageSceneFactoryCreateObject = NSMLEnvFlag("MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CREATE_OBJECT") ? 1 : 0;
+    static int stageSceneFactorySceneSwitch = -1;
+    if (stageSceneFactorySceneSwitch < 0)
+        stageSceneFactorySceneSwitch = NSMLEnvFlag("MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_SCENE_SWITCH") ? 1 : 0;
     static int stageSceneFactoryInactive = -1;
     if (stageSceneFactoryInactive < 0)
         stageSceneFactoryInactive = NSMLEnvFlag("MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_INACTIVE") ? 1 : 0;
@@ -638,6 +644,8 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     constexpr u32 tryChangeSceneAddr = 0x0201314C;
     constexpr u32 applySceneRequestAddr = 0x02007ACC;
     constexpr u32 startSceneTransitionAddr = 0x02011CE8;
+    constexpr u32 createObjectAddr = 0x0204BF8C;
+    constexpr u32 sceneSwitchStepAddr = 0x020131A0;
     const u32 returnPC = instrAddr | ((cpu->CPSR & 0x20) ? 1u : 0u);
     u32 playerID = cpu->NDS.ARM9Read32(0x020850BC);
     if (const char* role = getenv("MELONDS_NSML_ROLE"))
@@ -801,13 +809,32 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         NSMLEmitMovImm(code, 2, 0x0208B040);
         NSMLEmitMovImm(code, 3, 0x01);
         NSMLEmitBLViaIP(code, courseSelectFactoryAddr);
-        NSMLEmitStoreImm32(code, 0x0208B044, 0xFFFF0003);
-        NSMLEmitStoreImm32(code, 0x0208B048, 0x00000000);
-        NSMLEmitStoreImm32(code, 0x0208B04C, 0x00000000);
-        NSMLEmitStoreImm32(code, 0x0203B478, stageSceneFactoryInactive > 0 ? 0x00000000 : 0x00000001); // Scene::isSceneActive
-        NSMLEmitStoreImm32(code, 0x0203B47C, 0x00000005); // Scene::previousSceneID
-        NSMLEmitStoreImm32(code, 0x0203B480, 0x00000003); // Scene::nextSceneID
-        NSMLEmitStoreImm32(code, 0x0203B484, 0x0000000F); // Scene::currentSceneID
+        if (stageSceneFactorySceneSwitch > 0)
+        {
+            NSMLEmitMovImm(code, 0, 0x02084FB4);
+            NSMLEmitMovImm(code, 1, 0x0203B47C);
+            NSMLEmitMovImm(code, 2, 0x0203B484);
+            NSMLEmitMovImm(code, 3, 0x02);
+            NSMLEmitBLViaIP(code, sceneSwitchStepAddr);
+        }
+        else if (stageSceneFactoryCreateObject > 0)
+        {
+            NSMLEmitMovImm(code, 0, 0x03);
+            NSMLEmitMovImm(code, 1, 0x00);
+            NSMLEmitMovImm(code, 2, 0x00B5FF00);
+            NSMLEmitMovImm(code, 3, 0x01);
+            NSMLEmitBLViaIP(code, createObjectAddr);
+        }
+        if (stageSceneFactorySceneSwitch <= 0)
+        {
+            NSMLEmitStoreImm32(code, 0x0208B044, 0xFFFF0003);
+            NSMLEmitStoreImm32(code, 0x0208B048, 0x00000000);
+            NSMLEmitStoreImm32(code, 0x0208B04C, 0x00000000);
+            NSMLEmitStoreImm32(code, 0x0203B478, stageSceneFactoryInactive > 0 ? 0x00000000 : 0x00000001); // Scene::isSceneActive
+            NSMLEmitStoreImm32(code, 0x0203B47C, 0x00000005); // Scene::previousSceneID
+            NSMLEmitStoreImm32(code, 0x0203B480, 0x00000003); // Scene::nextSceneID
+            NSMLEmitStoreImm32(code, 0x0203B484, 0x0000000F); // Scene::currentSceneID
+        }
     }
     else if (effectiveTryChangeScene)
     {
