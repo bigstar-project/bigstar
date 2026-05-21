@@ -26,6 +26,11 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 ## 現在の到達点
 
 - `NoLanMP + PacketBridge from start` で、起動直後からローカル無線なしのPacketBridge経路を使う検証ルートを構築済み。
+- `NoLanMP + PacketBridge + AllowPreGame` に `HostTickOffset=+52 / ClientTickOffset=-51 / ReturnLookupTick` を組み合わせると、`ForceNetReady` / `SubMenuDirect` / `CourseSelectFactory` / `LoadGameSM` なしで、host/clientとも `VSConnect::scheduleSubMenuChange(loadGameSM)` まで自然到達する。
+- その状態では `VSConnect::updateLoadGameSM` が継続して呼ばれるが、`VSConnect` のload stepが `1` 付近で止まり、`VSConnect::startLoadLevel` と `Game::loadLevel` にはまだ到達しない。
+- `updateLoadGameSM` をA2DJ実コードから逆アセンブルし、host側は `0x02087E24 == 2` とpeer entry、client側は `0x0208B6C0` 系のpeer recordを待つことを確認した。
+- `PacketBridgeMaintainPacketFreeBytes` と `PacketBridgeMaintainSessionPeers` を追加した。これは上位VSConnect/CourseSelectを直接進めるForce系ではなく、LocalMPが本来維持する下位Netのpacket free-byte bitmapとpeer/session tableをPacketBridge側で補う診断フラグ。
+- session peer補完ありでは、hostは `loadGameSM -> post-load -> StageStartSM` まで自然に進み、`vsMode=1` になる。ただし `StageStartSM` のstep 5で `VSConnect + 0x156` のready bitが両player分立つのを待ち続け、まだ `startLoadLevel` には到達しない。
 - `PacketBridgeSubMenuSchedule` / `PacketBridgeSubMenuDirect` で、自然LANで観測したVSConnectサブメニュー遷移を注入できる。
 - `SafeCourseSelectFactoryCall` により、`CourseSelect` object生成までは再現できる。
 - `VSConnect::startLoadLevel` と `Game::loadLevel(scene=0x0F, stageGroup=9, vsMode=1, ggid=0x42)` まではNoLanMP経路で再現できる。
@@ -33,6 +38,10 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 
 ## 直近で分かったこと
 
+- 純粋PacketBridge寄りの最新検証では、host/clientのpacket tickが約51-52フレームずれていた。role別replay tick offsetと、返却packetのtickをlookup tickへ正規化する処理を入れたことで、少なくともLoadGameSMへの自然遷移までは進むようになった。
+- LoadGameSM停滞中は `Net::Core::advancePacketSequencer` / `processRecvPacket` / `processSendPacket` が大量に呼ばれる一方、`readPacketByte/readPacketInt/freePacketBytes/allocPacketBytes` 系の呼び出しは観測できていない。
+- `packetFreeBytesRecvBitmap` だけを維持してもLoadGameSM停滞は解消しなかった。peer/session tableまで維持するとhostはStageStartSMへ進むため、現時点の境界不足は「packet payload + free-byte bitmap」ではなく「session/peer state + packet sequencer完了通知」まで含む。
+- StageStartSM step 5は `VSConnect + 0x156` のbit 0/1を待つ。write traceではこのready bitへの自然書き込みはまだ発生していない。hostだけが先にStageStartSMへ進み、clientが別サブメニューに残るため、StageStart以降のpacket tick差が固定offsetでは吸収できないほど広がる。
 - `0x0214C3D4` はVSConnectのstage-start updateではなく、overlay 52内のCourseSelect updateが `Scene::tryChangeScene` 相当を呼ぶ場所だった。
 - そのため、外から無理にscene 3へ飛ばすより、CourseSelect updateのready判定を自然タイミングで通す方が筋が良い。
 - `loadMvsLFilesThread` の日本版A2DJアドレスは `0x02152E04`。以前使っていた `0x02152E18` は関数入口ではなく、完了フラグ `0x0208A478=1` を書く途中命令だった。
@@ -41,17 +50,22 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 
 ## 現在の主ブロッカー
 
-NoLanMP + PacketBridge経路でStage sceneへ入る直前のリソース準備が自然LANと一致していない。
+NoLanMP + PacketBridge経路で、接続/ロード開始に必要な下位Net状態が自然LANと一致していない。
 
-具体的には、ファイルロードを省略するとStage初期化中に `0205545C` 付近でdata abortする。逆にロード関数/ロードスレッドを単純に呼ぶと、`02009B94` 付近で非常に長く止まり、VSConnect scene 6から先へ進まない。
+純粋adapter寄りの構成では、接続ロビーからhostのStageStartSMまでは自然に起きるが、host/clientが同じサブメニュー段階にそろわず、StageStartSMのready bitが立たない。
+
+`advancePacketSequencer` は回っているため、次はpacket本体だけでなく、packet sequencerの完了通知、ready bit相当のcallback、またはclient側のLoadGameSM/StageStartSM遷移条件をadapter境界に含める必要があるかを検証する。
+
+補助診断として、過去のstate注入ルートではStage sceneへ入る直前のリソース準備も自然LANと一致していないことが分かっている。ファイルロードを省略するとStage初期化中に `0205545C` 付近でdata abortする。逆にロード関数/ロードスレッドを単純に呼ぶと、`02009B94` 付近で非常に長く止まり、VSConnect scene 6から先へ進まない。
 
 より大きい設計上のブロッカーは、現行PacketBridgeの差し替え境界が高すぎる可能性があること。`Net::getConsoleKeys/getPacketByte/getPacketTick/getPacketAction` とpacket slot差し替えだけでは、MvL接続前の下位通信状態、接続確立、player ID、ロビー、ロード開始条件まで自然に作れない可能性が高い。
 
 ## 次にやること
 
 1. 現行PacketBridgeで「純粋adapter」と呼べる範囲を切り分ける。
-   - `ForceNetReady` / `SubMenuDirect` / `CourseSelectFactory` / `LoadGameSM` などの内部state注入なしで、どこまでNSMB側が自然に進むかを再確認する。
-   - 進まない場合、現在のhook境界は高すぎると判断する。
+   - `ForceNetReady` / `SubMenuDirect` / `CourseSelectFactory` / `LoadGameSM` などの内部state注入なしで、host/clientとも `loadGameSM` までは自然到達することを確認済み。
+   - `packetFreeBytesRecvBitmap` だけでは不足。peer/session table補完でhostはStageStartSMまで進むことを確認済み。
+   - 次は client側も同じStageStartSMへ自然到達させる条件、またはStageStartSM ready bitを本来立てるpacket sequencer callbackを特定する。
 2. 差し替え境界を下げる候補を調べる。
    - `Net::Core::transferPacket` の返り値だけでなく、副作用・下位MP API・session状態を含めて置き換えられるかを調べる。
    - `0204619C` / `0204622C` / `02046480` だけで足りるか、さらに下の送受信/状態APIが必要かを確認する。
