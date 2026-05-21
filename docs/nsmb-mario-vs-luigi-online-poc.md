@@ -41,6 +41,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - stage後入力検証用の `tests/nsmb_mario_vs_luigi_stage_move.inputs` を追加した。
 - `getConsoleKeys/getPacket*` のpacket replay hookがPacketBridgeのlocal/remote選択を通るように修正し、host側local player入力もhook上でhitするようにした。
 - game-state CSVにplayer actorのbase/state/flags/prev/vel列を追加し、actorが生成されているだけか、実際に更新されているかをRAM dumpなしで確認できるようにした。
+- game-state CSVにstage scene objectのbase/state/flags/word154/word160列を追加し、直接stage診断ルートのscene状態を追いやすくした。
 
 ## 現在のブロッカー
 
@@ -116,6 +117,8 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - RAM dumpで `0x02086CA0` 近傍のInput player key領域も入力に応じて変化することを確認した。一方、player actor objectの位置/末尾状態は3000/3100/3200fで不変。直接stage診断ルートはplayer更新ループまで自然到達していない。
 - `logs/nsmvl-gamestate-player-fields-smoke-20260521`
   - 追加したgame-state列の短時間スモーク。2300f時点でplayer actorのbase/state/flags/prev/velがCSVへ出ることを確認した。
+- `logs/nsmvl-gamestate-stage-fields-smoke-20260521`
+  - stage scene診断列の短時間スモーク。2300f時点で `stageSceneFound=1`、`stageSceneBase=0x021B94CC`、`stageSceneFlags=0x10000` がCSVへ出ることを確認した。
 
 ## 次にやること
 
