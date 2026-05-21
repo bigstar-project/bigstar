@@ -45,6 +45,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - 直接stage開始診断ルートでは、client限定 `transferPacket` 結果強制でstage sceneへ入れるようになった。ただしこれはまだ診断フックで、最終的には下位MP adapterまたはROM patchへ落とす必要がある。
 - host/clientともstage scene、player actor、Big Star actorまでは生成できるが、試合中の入力packet同期はまだ本実装ではない。
 - stage後にhost側 `RIGHT` 入力を入れると、client側ではplayer0が動く兆候がある一方、host側のplayer0は同じように動かず、clientは後半でdata abortした。remote packet注入だけでは、まだ双方の試合状態は同期していない。
+- `transferPacket` 結果強制はclient限定ならstage到達に効くが、hostにも適用するとactor生成自体が壊れる。host側は自然なtransfer経路を残す必要がある。
 - `Net::random.value` 固定でBig Star初期位置は一致したが、以後のBig Star再生成、8コインアイテム、ランダムステージ選択では、`Net::randomCallCount` と呼び出し順が一致し続けることを別途確認する必要がある。
 - `PacketBridgeWait` / throttleで2プロセスの実時間進行差を吸収しようとすると、host/clientの片側だけが極端に遅くなり、検証時間が破綻する。WAN本番の快適性にも直結しないため、これは補助診断に留める。
 - 単純な `sceneActive=0` 強制は危険。全体に適用するとhost側でdata abortした。role限定・タイミング限定でないと使えない。
@@ -99,6 +100,10 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - `Net::random.value=0x00000100` をstage開始時に両側へpatchすると、2140f以降のBig Star座標がhost/clientで `x=0x370000, y=0xFFEF0000, z=0x180000` に一致する。
 - `logs/nsmvl-stage-move-host-right-20260521`
   - stage後にhost inputで `RIGHT` を入れる検証。client側player0は2420f以降にX座標が動くが、host側player0は動かず、clientは2600f付近でdata abort。入力packetは一部伝わっている可能性があるが、local/remote双方のpacket消費とgameplay状態がまだ揃っていない。
+- `logs/nsmvl-stage-move-host-right-packettrace-20260521`
+  - client側では `player=0 keys=0x0010` がhitし、hostのRIGHT入力packetを読めている。host側は `netPacketKeys=0x10` を持つが、packet replay hook上はhitせず、player0 actorも動かない。hostのlocal入力消費経路とstage playable状態の追加確認が必要。
+- `logs/nsmvl-stage-move-host-right-transfer-both-20260521`
+  - `transferPacket` 結果強制をhost/client両方に適用すると、player/star actorが検出されずstage生成が壊れる。client限定bypassを維持する。
 
 ## 次にやること
 
