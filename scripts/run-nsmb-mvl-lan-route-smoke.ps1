@@ -1954,8 +1954,8 @@ foreach ($screenDir in @($hostScreens, $clientScreens)) {
 
 if (-not $SkipArmAbortCheck) {
     foreach ($item in @(
-        @{ Path = $hostStdout; Role = "host" },
-        @{ Path = $clientStdout; Role = "client" }
+        @{ Path = $hostOut; Role = "host" },
+        @{ Path = $clientOut; Role = "client" }
     )) {
         if (-not (Test-Path $item.Path)) {
             continue

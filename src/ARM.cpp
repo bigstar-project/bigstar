@@ -2440,6 +2440,14 @@ static u8 ReadNSMLTraceByte(ARM* cpu, u32 addr)
     return cpu->NDS.ARM9Read8(addr);
 }
 
+static u32 ReadNSMLTrace32(ARM* cpu, u32 addr)
+{
+    return static_cast<u32>(ReadNSMLTraceByte(cpu, addr))
+        | (static_cast<u32>(ReadNSMLTraceByte(cpu, addr + 1)) << 8)
+        | (static_cast<u32>(ReadNSMLTraceByte(cpu, addr + 2)) << 16)
+        | (static_cast<u32>(ReadNSMLTraceByte(cpu, addr + 3)) << 24);
+}
+
 static void WriteNSMLHexDump(FILE* file, ARM* cpu, u32 addr, u32 len)
 {
     if (!file || !cpu || (!IsNSMLMainRAMAddress(addr) && !IsNSMLDTCMAddress(cpu, addr)) || len == 0)
@@ -3223,7 +3231,7 @@ void ARM::TriggerIRQ()
 
 void ARMv5::PrefetchAbort()
 {
-    Log(LogLevel::Warn, "ARM9: prefetch abort (%08X)\n", R[15]);
+    Log(LogLevel::Warn, "ARM%d: prefetch abort (frame=%u pc=%08X)\n", Num == 1 ? 7 : 9, NDS.NumFrames, R[15]);
 
     u32 oldcpsr = CPSR;
     CPSR &= ~0xBF;
@@ -3247,7 +3255,9 @@ void ARMv5::PrefetchAbort()
 void ARMv5::DataAbort()
 {
     Log(LogLevel::Warn,
-        "ARM9: data abort (pc=%08X lr=%08X sp=%08X cpsr=%08X instr=%08X fault=%08X r0=%08X r1=%08X r2=%08X r3=%08X r4=%08X r5=%08X r6=%08X r7=%08X r8=%08X r9=%08X r10=%08X r11=%08X r12=%08X)\n",
+        "ARM%d: data abort (frame=%u pc=%08X lr=%08X sp=%08X cpsr=%08X instr=%08X fault=%08X r0=%08X r1=%08X r2=%08X r3=%08X r4=%08X r5=%08X r6=%08X r7=%08X r8=%08X r9=%08X r10=%08X r11=%08X r12=%08X)\n",
+        Num == 1 ? 7 : 9,
+        NDS.NumFrames,
         R[15],
         R[14],
         R[13],
@@ -3267,6 +3277,34 @@ void ARMv5::DataAbort()
         R[10],
         R[11],
         R[12]);
+    if (Num == 0)
+    {
+        Log(LogLevel::Warn,
+            "ARM9: abort stack frame=%u sp=%08X [%08X %08X %08X %08X %08X %08X %08X %08X]\n",
+            NDS.NumFrames,
+            R[13],
+            ReadNSMLTrace32(this, R[13] + 0x00),
+            ReadNSMLTrace32(this, R[13] + 0x04),
+            ReadNSMLTrace32(this, R[13] + 0x08),
+            ReadNSMLTrace32(this, R[13] + 0x0C),
+            ReadNSMLTrace32(this, R[13] + 0x10),
+            ReadNSMLTrace32(this, R[13] + 0x14),
+            ReadNSMLTrace32(this, R[13] + 0x18),
+            ReadNSMLTrace32(this, R[13] + 0x1C));
+        Log(LogLevel::Warn,
+            "ARM9: abort refs frame=%u r9=%08X [%08X %08X %08X %08X] r10=%08X [%08X %08X %08X %08X]\n",
+            NDS.NumFrames,
+            R[9],
+            ReadNSMLTrace32(this, R[9] + 0x00),
+            ReadNSMLTrace32(this, R[9] + 0x04),
+            ReadNSMLTrace32(this, R[9] + 0x08),
+            ReadNSMLTrace32(this, R[9] + 0x0C),
+            R[10],
+            ReadNSMLTrace32(this, R[10] + 0x00),
+            ReadNSMLTrace32(this, R[10] + 0x04),
+            ReadNSMLTrace32(this, R[10] + 0x08),
+            ReadNSMLTrace32(this, R[10] + 0x0C));
+    }
 
     u32 oldcpsr = CPSR;
     CPSR &= ~0xBF;

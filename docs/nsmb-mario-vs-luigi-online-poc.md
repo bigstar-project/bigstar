@@ -42,6 +42,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - `SafeLoadLevelCall`
   - `SafeStageSceneFactoryCall`
 - `scripts/run-nsmb-mvl-lan-route-smoke.ps1` は、デフォルトでARM data/prefetch abortを検出して失敗扱いにする。
+- ARM data/prefetch abortログにframe番号を出すようにした。ARM9 data abort時はDTCM-awareなstack/ref診断も出す。
 
 ## 現在わかっていること
 
@@ -67,6 +68,8 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - client 2400f: `inputPlayer0Held=0x10`, `playerActor0X=0x8070`
   - client 2500f: `playerActor0X=0x1FD70`, `playerActor0VelX=0x14B0`
 - ただし同じrunでclient側が `pc=01FF8C28` のARM9 data abortを起こす。これはplayer更新が走った後に、まだ不足しているscene/player初期化条件へ到達している可能性が高い。
+- `Stage::actorFreezeFlag` 診断writeはstageGroup 9 / vsMode 1中だけに制限した。stage外で同じアドレスを触るとclientのstage遷移を壊す可能性があるため。
+- 両側で `Stage::actorFreezeFlag=0`、latest-before fallbackをstage後に有効化すると、host local player0とclient remote player0が動くrunはある。ただしclient側 `pc=01FF8C28` abortが再現するrunもある。
 
 ## 直近の検証ログ
 
@@ -94,17 +97,23 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - 2300f以降のみ、受信済み最新packetをlookup tickへ正規化して返す。
   - host local player0とclient remote player0が同じ右入力で動くことを確認。
   - clientでARM9 data abortが発生するため、まだ成功扱いにはしない。
+- `logs/nsmvl-both-freeze0-guarded-latest-before-20260522-attempt2`
+  - 両側stage中のみ `Stage::actorFreezeFlag=0`。
+  - client abortは `frame=2430 pc=01FF8C28`。abort直前にplayer0が動き始めている。
+- `logs/nsmvl-abort-near2430-dump-retry-20260522-attempt1`
+  - 2440fまでabortなしでhost/client双方のplayer移動を確認したrun。
+  - 同条件でも再現性に揺れがあるため、直接stage開始ルートの不足初期化条件がまだ残っている。
 
 ## 現在のブロッカー
 
 直接stage開始ルートでhost local player actorを動かす条件は `Stage::actorFreezeFlag` 候補まで絞れた。
 
-次のブロッカーは、packet消費を動かした後にclient側で `pc=01FF8C28` のARM9 data abortが出ること。host local player0とclient remote player0の移動までは到達したので、次はplayer更新後に不足しているscene/player/packet初期化条件を特定する。
+次のブロッカーは、packet消費を動かした後にclient側で `pc=01FF8C28` のARM9 data abortが出ること、および同じ条件でもclientがstage遷移に失敗するrunがあること。host local player0とclient remote player0の移動までは到達したので、次は直接stage開始ルートの不足初期化条件を潰す。
 
 ## 次にやること
 
-1. client側 `pc=01FF8C28` data abortの直前状態を、RAM dump/call trace/write traceで切り分ける。
-2. `PacketBridgeLiveFallbackLatestBefore` の適用開始フレームを、stage/player生成後だけに絞ったまま安定化する。
+1. client側 `pc=01FF8C28` data abortの直前状態を、DTCM-aware abort stack/ref、RAM dump、call trace/write traceで切り分ける。
+2. clientがstageGroup 9 / player actor生成へ安定して入るために必要な初期化fieldを特定する。
 3. abort原因が不足初期化条件なら、scene/player/packet sequencerのどのfieldが必要かを特定して最小patch化する。
 4. ARM abortなしでhost local player0とclient remote player0が同じ入力で動くrunを作る。
 5. 条件が固まったら、診断patchをROM patchまたは下位MP adapterへ縮小する。

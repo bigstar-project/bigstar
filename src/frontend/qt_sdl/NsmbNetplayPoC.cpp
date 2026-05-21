@@ -3667,6 +3667,8 @@ void ForceStageActorFreezeFlagIfNeeded(int instanceID, melonDS::u32 frame, melon
         return;
     if (instanceID < 0 || instanceID >= 16)
         return;
+    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
+        return;
 
     nds->ARM9Write8(kStageActorFreezeFlagAddr, static_cast<melonDS::u8>(G.ForceStageActorFreezeFlagValue & 0xFF));
     if (!G.ForceStageActorFreezeFlagLogged[instanceID])
