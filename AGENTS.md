@@ -8,6 +8,8 @@ When work starts, changes direction, completes a meaningful step, or hits a bloc
 
 - `docs/nsmb-mario-vs-luigi-online-poc.md`
 
+When reading Japanese text in PowerShell, it may sometimes appear garbled, but this is due to the character encoding; the content itself is normal.
+
 The tracking document should show:
 
 - completed work
