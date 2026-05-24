@@ -4,153 +4,71 @@
 
 New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` でWAN越しに遊べる形へ持っていく。
 
-現在はmelonDS LocalMPをWANへ伸ばす方針ではなく、NSMBが使うMvL通信境界を特定し、必要な部分だけをWAN adapter / PacketBridge / ROMまたはメモリpatchで差し替える方針。
+LocalMPをWANへそのまま伸ばす方針、melonDS 2インスタンス * 2プロセスの同期方針、試合開始後にWANへ切り替えるsavestate/dropmp方針は、desync・切断・低FPS・不自然なstage/model初期化が重く、主方針から外した。
 
 ## 現在の方針
 
-1. **下位MP API / packet境界をadapter化する**
-   - `Net::getConsoleKeys/getPacketByte/getPacketTick/getPacketAction` だけでなく、packet availability、session/peer状態、packet sequencer完了条件まで含めてNSMBが期待する状態を再現する。
-   - 既知入口は `Net::Core::transferPacket`、`Net::updatePacket`、`Net::Core::processRecvPacket/processSendPacket`、`Net::Core::checkAllPacketBits/advancePacketSequencer`。
+1. **接続/ロビー段階から下位MP API / packet境界をWAN adapter化する**
+   - NSMBのMvL同期ロジック自体はできるだけそのまま使う。
+   - 対象は `Net::getPacket*` だけでなく、packet availability、session/peer状態、packet sequencer、peer/user info、stage開始条件まで含める。
+   - 既知入口は `Net::Core::transferPacket`、`Net::updatePacket`、`Net::Core::processRecvPacket/processSendPacket`、`Net::Core::checkAllPacketBits/advancePacketSequencer`、lower MP status/getPacket系。
 
-2. **MvL開始状態を直接作る診断ルートを使う**
-   - UI操作、LocalMPロビー、CourseSelect、StageStartSMの自然再現は重い。
-   - 診断では `loadMvsLFilesThread`、`Game::loadLevel`、stage scene factoryを安全呼び出しし、試合中packet同期へ入る最小条件を探す。
-   - 最終実装では、ここで見つけた条件をROM patchまたはより狭いメモリpatchへ落とす。
+2. **MvL開始状態を直接作るルートは診断専用**
+   - `loadMvsLFilesThread`、`Game::loadLevel`、stage scene factory、render pointer guardなどは、試合中packet同期の先を見るための診断道具。
+   - 最終実装としては、個別actor座標やrender/model状態を後付け同期する方向には進めない。
 
-3. **試合中packet同期に寄せる**
-   - NSMB Centralの解析どおり、試合中は入力packet中心の同期で進める想定。
-   - 乱数は個別actor座標を無理に合わせるのではなく、`Net::random.value` / `Net::getRandom()` 系の共有シードで合わせる。
-
-## 実装済み
-
-- 自動検証用の入力スクリプト、スクリーンショット、framebuffer/hash、RAM dump、game-state CSV、packet capture/replay/bridge traceを追加。
-- `NoLanMP + PacketBridge from start` の検証ルートを作成。
-- A2DJ向けに主要Net関数・グローバルを移植。
-- `Net::random.value` のmatch seed配布と自動注入で、初期Big Star位置がhost/clientで一致することを確認。
-- `PacketBridgeForceTransferResult` client限定で、client側もstage scene、player actor、Big Star actor生成まで到達可能にした。
-- game-state CSVに以下を追加済み。
-  - player actor base/state/flags/prev/vel
-  - stage scene base/state/flags/word154/word160
-  - `Input::consoleKeys` / `Input::playerKeysHeld` / `Input::playerKeysPressed` 候補値
-  - `Stage::actorFreezeFlag` A2DJ候補値
-- 診断用env / script optionを追加済み。
-  - `ForcePlayerCount`
-  - `ForceStageSceneRuntimeWords`
-  - `ForceStageActorFreezeFlag`
-  - `PacketBridgeLiveFallbackLatestBefore` / `PacketBridgeLiveFallbackStartFrame`
-  - `SafeMvlLoadThreadCall`
-  - `SafeLoadLevelCall`
-  - `SafeStageSceneFactoryCall`
-- `scripts/run-nsmb-mvl-lan-route-smoke.ps1` は、デフォルトでARM data/prefetch abortを検出して失敗扱いにする。
-- `scripts/run-nsmb-mvl-lan-route-smoke.ps1` に `RequireClientRemotePlayer0Movement` を追加。frame到達だけで成功扱いにせず、client側がremote player0入力を消費して移動したかを検証できる。
-- ARM data/prefetch abortログにframe番号を出すようにした。ARM9 data abort時はDTCM-awareなstack/refに加え、ITCM-awareなTCM設定/code window診断も出す。
-- 任意PCのcall traceが実際に効くように、ARM9実行ループ側から `TraceNSMLCallImpl` を呼ぶようにした。従来はrandom call trace経路に依存しており、指定PCのtraceとして不十分だった。
-- ARM9 data abort診断に `r1` 引数構造体dumpと `updateHintVec_` ITCM code dumpを追加した。
-- call trace CSVに `r4` から `r12` までを追加した。`PlayerModel::render` のようにcallee-saved register保持が疑わしい箇所を追える。
-- 診断限定の `GuardPlayerModelRenderPtrs` / `MELONDS_NSML_GUARD_PLAYER_MODEL_RENDER_PTRS` を追加した。`PlayerModel::render` でhead model pointerを保持する `r4` が低アドレス化した場合だけ、`PlayerModel` 構造体上の有効なhead model pointerから復元する。
-
-## 現在わかっていること
-
-- host/clientともstage scene、player actor、Big Star actorを生成できる。
-- `Net::random.value=0x00000100` などで初期Big Star位置は一致させられる。
-- `playerCount=2` と stage scene runtime words `word154=1, word160=0xDA` は、試合中player更新を動かす有力条件。
-- 2026-05-22の再検証では、host/clientとも `inputPlayer0Held=0x10` まで入っているため、問題は入力注入ではない。
-- 当初host側のlocal player0は同じ入力でも動かなかったが、`Stage::actorFreezeFlag` 候補をstage中だけ `0` に固定すると移動更新が走る。
-- client側のremote player0は、`PacketBridgeLiveFallbackLatestBefore` をstage生成後から有効化するとhost入力を消費して動く。
-  - client 2500f: `playerActor0X=0x1FD70`, `playerActor0VelX=0x14B0`
-- write traceではclientのplayer0座標/速度に `PC=0209FD70/0209FD88` から毎フレーム書き込みがある。
-- `0209FD18` 周辺の逆アセンブルでは、`0x020C9250` のbyte値とactor側freeze maskのANDで早期returnする。
-- `0x020C9250` はUS `Stage::actorFreezeFlag` 相当のA2DJ候補。hostでは `0x26`、clientでは `0x00` になっていた。
-- host限定で `Stage::actorFreezeFlag` 候補を `0` に固定すると、hostのlocal player0は動く。
-  - `logs/nsmvl-force-actor-freeze-flag-hostonly-20260522-attempt1`
-  - host 2300f: `playerActor0X=0x35FF0`, `playerActor0VelX=0x1800`
-- PacketBridge trace上、hostは `keys=0x0010` のplayer0 packetを送信し、clientも受信できている。
-- client側の問題は、受信そのものではなく、`getPacket` lookup tickが受信済みtickより先へ進み `action=0xFF` になること。
-- `PacketBridgeLiveFallbackLatestBefore` をstage生成後の2300fから有効化すると、client側もhostの右入力を消費し、remote player0が動く。
-  - `logs/nsmvl-freeze-flag-latest-before-start2300-20260522-attempt1`
-  - client 2400f: `inputPlayer0Held=0x10`, `playerActor0X=0x8070`
-  - client 2500f: `playerActor0X=0x1FD70`, `playerActor0VelX=0x14B0`
-- ただし同じrunでclient側が `pc=01FF8C28` のARM9 data abortを起こす。これはplayer更新が走った後に、まだ不足しているscene/player初期化条件へ到達している可能性が高い。
-- `Stage::actorFreezeFlag` 診断writeはstageGroup 9 / vsMode 1中だけに制限した。stage外で同じアドレスを触るとclientのstage遷移を壊す可能性があるため。
-- 両側で `Stage::actorFreezeFlag=0`、latest-before fallbackをstage後に有効化すると、host local player0とclient remote player0が動くrunはある。ただしclient側 `pc=01FF8C28` abortが再現するrunもある。
-- `pc=01FF8C28` は `external/NSMB-Code-Reference` 上の `updateHintVec_+0x48` 付近。ITCM-aware code windowでは、実際には `pc-8` 相当の `ldrne ip, [r0, lr, lsl #2]` が `r0=0x000021D5` を参照してdata abortしている。
-- つまり `01FF8xxx` のコード未ロードではなく、3D描画/モデル側へ渡っているrender/model状態の一部が低アドレス化している可能性が高い。
-- `updateHintVec_` 自体のITCM dumpから、abort箇所は `r0` をhint bit vectorとして扱うループ内の `ldrne ip, [r0, lr, lsl #2]` と確定した。
-- abort時stackでは `020572F8` から `updateHintVec_` が呼ばれており、`r5=0x00002199`、`r0=r5+0x3c=0x000021D5` の形で低アドレスが渡っている。
-- さらに前段の戻り先は `02128AC4` で、PlayerModel/render系の関数内で `r4+4` を `020572B8` へ渡している。ここで `r4=0x00002195` になっているため、次はこの低アドレス化したmodel/render pointerの出所を追う。
-- `PacketBridgeForceMvlFileCache` を単独で呼べるようにし、復帰PC / CPSR / SPガードを追加した。ただし現状のframe hookからFS cache loadを呼ぶと `pc=00000098` などのprefetch abortを起こすため、このルートはまだ安全な解決策ではない。
-- write traceでは `PlayerModel::models[1].heads[0]` 相当フィールド自体は有効なModel pointerに初期化されたままだった。低アドレス化は構造体メモリ破壊ではなく、`PlayerModel::render` 中で保持している `r4` が描画系呼び出し後に壊れる症状として出ている。
-- `GuardPlayerModelRenderPtrs` を入れると `updateHintVec_+0x48` abortは回避できるrunがある。ただし2600f時点でもhost/clientの画面状態は一致せず、3200fではclientがメニューへ戻るrunを確認した。したがってrender guardは診断の先送りには使えるが、直接stage開始ルートの根本解決ではない。
-
-## 直近の検証ログ
-
-- `logs/nsmvl-input-global-trace-20260522-attempt1`
-  - host/clientのInputグローバル候補をCSVで確認。
-  - host/clientとも `inputPlayer0Held=0x10`。
-  - actor更新はclientだけ進む。
-- `logs/nsmvl-player-write-trace-20260522-attempt1`
-  - client player0の座標/速度writeを確認。
-  - host player0の座標/速度writeはなし。
-- `logs/nsmvl-player-actor-dump-20260522-attempt1`
-  - 2300f/2500fのRAM dumpを取得。
-  - host/clientのactor0構造体差分を比較可能。
-- `logs/nsmvl-host-remote-player0-probe-20260522-attempt1`
-  - host側 `localPlayerID=1` 診断はhost player0移動にはつながらず、client actor生成も崩れる。
-- `logs/nsmvl-force-actor-freeze-flag-hostonly-20260522-attempt1`
-  - host限定で `Stage::actorFreezeFlag` 候補を0固定。
-  - host local player0の移動更新が走ることを確認。
-- `logs/nsmvl-freeze-flag-packettrace-20260522-attempt1`
-  - freeze flag修正後もhostは `keys=0x0010` のpacketを送信できる。
-  - clientも受信するが、lookup tick先行で試合中packetとして消費できない。
-- `logs/nsmvl-freeze-flag-fallback-20260522-attempt1`
-  - 近傍tick fallback window 8ではclient消費はまだ改善せず。
-- `logs/nsmvl-freeze-flag-latest-before-start2300-20260522-attempt1`
-  - 2300f以降のみ、受信済み最新packetをlookup tickへ正規化して返す。
-  - host local player0とclient remote player0が同じ右入力で動くことを確認。
-  - clientでARM9 data abortが発生するため、まだ成功扱いにはしない。
-- `logs/nsmvl-both-freeze0-guarded-latest-before-20260522-attempt2`
-  - 両側stage中のみ `Stage::actorFreezeFlag=0`。
-  - client abortは `frame=2430 pc=01FF8C28`。abort直前にplayer0が動き始めている。
-- `logs/nsmvl-abort-near2430-dump-retry-20260522-attempt1`
-  - 2440fまでabortなしでhost/client双方のplayer移動を確認したrun。
-  - 同条件でも再現性に揺れがあるため、直接stage開始ルートの不足初期化条件がまだ残っている。
-- `logs/nsmvl-require-client-move-20260522`
-  - `RequireClientRemotePlayer0Movement` を有効にし、remote player0移動を成功条件に入れたrun。
-  - client remote player0が動いた後、`frame=2439 pc=01FF8C28` のARM9 data abortを検出。
-  - ITCM code windowから、abort箇所は `updateHintVec_+0x48` 付近で、低アドレス `0x21D5` 参照が原因と確認。
-- `logs/nsmvl-mvl-cache-safe-guard-20260522`
-  - MvL file cache強制ロードを単独化し、PC/mode/SP guard付きで試したrun。
-  - `force MvL file cache` 後に `pc=00000098` prefetch abort。frame hookからのFS cache load呼び出しはまだ不安全。
-- `logs/nsmvl-abort-updatehint-code-20260522`
-  - client abort時に `r1` 引数構造体と `updateHintVec_` ITCM codeをdump。
-  - `updateHintVec_` の未ロードではなく、callerから渡ったhint vector pointer `r0=0x000021D5` が不正と確定。
-  - 直前callerは `020572B8` 系、さらに前段は `02128AC0` 付近のPlayerModel/render系処理。
-- `logs/nsmvl-model-head-write-trace-20260524`
-  - `PlayerModel::models[1].heads[0]` 周辺のwrite traceを取得。
-  - 該当フィールドはframe 2005で有効Model pointerへ初期化され、その後の破壊writeは見えない。
-- `logs/nsmvl-render-guard-2600-20260524`
-  - `GuardPlayerModelRenderPtrs` でclient側の `updateHintVec_+0x48` abortを回避し、2600fまで到達。
-  - ただしスクリーンショット上、host/clientの画面状態は一致していない。
-- `logs/nsmvl-render-guard-3200-20260524`
-  - 3200fまで延長するとclientがメニューへ戻り、MvL state checkに失敗。
-  - hostはstage内に残っているため、直接stage開始ルートはセッション維持条件がまだ不足している。
+3. **試合中はNSMBのinput packet同期に寄せる**
+   - NSMB Centralの解析どおり、試合中は入力packet中心の同期で進む想定。
+   - 乱数は個別actorを直接合わせず、`Net::random.value` / `Net::getRandom()` 系の共有シードと消費順を合わせる。
 
 ## 現在のブロッカー
 
-直接stage開始ルートでhost local player actorを動かす条件は `Stage::actorFreezeFlag` 候補まで絞れた。
+- `NoLanMP + PacketBridge + AllowPreGame` でhostはCourseSelectからstageへ進めるが、clientは `VSConnect::updateLoadGameSM` に入り、`stageGroup=0` / VSConnect sceneのまま止まる。
+- `localAid=1` はclientをsearchSMからloadGameSMへ進める重要条件だが、それだけではstage開始に到達しない。
+- clientを直接 `StageStartSM` へ入れる診断ではCourseSelect生成までは進むが、stage sceneへ遷移せず、処理が重くなってtimeoutする。
+- `LoadGameSM` 周辺のcall traceでは、clientが `VSConnect::updateLoadGameSM -> func_02151074 -> 020108E8` までは到達する。想定したpeer info境界 `02001050/0200102C` はまだclientで捕まっていない。
 
-次のブロッカーは、packet消費を動かした後にclient側で `updateHintVec_+0x48` のARM9 data abortが出ること、および同じ条件でもclientがstage遷移に失敗するrunがあること。host local player0とclient remote player0の移動までは到達したが、render/model初期化またはplayer model状態がまだ自然なMvL開始状態と一致していない。
+## 直近で実装/検証したこと
 
-現時点では、`updateHintVec_` に渡るhint vector pointerが `0x000021D5` という低アドレスになっていることまで確定した。これは `020572B8` 系callerの `r5=0x00002199`、さらにPlayerModel/render系処理の `r4=0x00002195` から来ている。
+- game-state CSVにVSConnect詳細とNetグローバルを追加。
+  - `Net::localAid/currentLanguage/expectedConsoleCount/sessionState/moduleState/maxSessionChildren/maxConsoleCount`
+  - VSConnect `+0x0E2/+0x106/+0x138/+0x13C/+0x140/+0x144/+0x148/+0x153..0x158`
+- game-state CSVヘッダの `playerActor0VelZ/playerActor1VelZ` 欠落を修正。これ以前の拡張CSVはVSConnect列が2列ずれて読める可能性がある。
+- `PacketBridgeFakePeerInfo` 診断フックを追加。
+  - env: `MELONDS_NSML_PACKET_BRIDGE_FAKE_PEER_INFO`
+  - script option: `-PacketBridgeFakePeerInfo`
+  - LocalMPが返すpeer/user infoの最小スタブを試すためのもの。
+- 短いcall traceで、clientのLoadGameSM初回更新が `020108E8` を呼ぶことを確認。
 
-ただしwrite trace上、`PlayerModel` 構造体内のhead model pointerは破壊されていない。低アドレス化は `PlayerModel::render` の途中で保持レジスタが壊れる形で出ており、直接stage開始ルートが自然な描画/モデル初期化状態を作れていない可能性が高い。guardでabortを避けてもclientが後でメニューへ戻るため、このルートを最終形にするのは筋が悪い。
+## 主要な検証ログ
+
+- `logs/nsmvl-ui-wan-extended-vsconnect-fixed-20260524`
+  - hostは `StageStartSM -> CourseSelect` へ進む。
+  - clientは `LoadGameSM` のまま。`vsConnectWord140=2`, `vsConnectWord144=1`, `vsConnectWord154=1`。
+- `logs/nsmvl-ui-wan-client-stage-direct-20260524`
+  - clientを直接 `StageStartSM` へ入れるとCourseSelect生成までは進む。
+  - ただしstage sceneへ遷移せず、clientが遅くなってtimeout。
+- `logs/nsmvl-ui-wan-fake-peer-info-20260524`
+  - fake peer infoを入れてもclientはLoadGameSMから抜けない。
+  - fake peer info hook自体のログが出ていないため、まだ狙った境界に到達していない。
+- `logs/nsmvl-ui-wan-fake-peer-calltrace-20260524`
+  - client初回LoadGameSM更新で `020108E8` 呼び出しを確認。
+
+## 実装済み基盤
+
+- 自動検証用の入力スクリプト、スクリーンショット、framebuffer/hash、RAM dump、game-state CSV、packet capture/replay/bridge trace。
+- `NoLanMP + PacketBridge from start` 検証ルート。
+- A2DJ向け主要Net関数・グローバル移植。
+- `Net::random.value` match seed配布と自動注入。
+- ARM data/prefetch abort検出、ITCM/DTCM aware dump、call/write trace。
+- 診断用の直接stage開始、MvL file load、stage scene factory、player/render guard系フック。
 
 ## 次にやること
 
-1. 直接stage開始ルートは診断専用と割り切る。`GuardPlayerModelRenderPtrs` はpacket同期の先を見るための一時ガードであり、最終実装にはしない。
-2. clientがメニューへ戻る原因を、下位MP/session状態またはscene遷移条件の不足として追う。特に stage中に `stageGroup/vsMode/stageSceneBase` が0へ戻る直前のNet/session writeを調べる。
-3. 最終方針としては、自然なMvL開始状態を作るROM/メモリpatch、または接続/ロビー段階からの下位MP adapterへ寄せる。直接stage開始後に個別状態を継ぎ足す方針は優先度を下げる。
-4. smokeでは `RequireClientRemotePlayer0Movement` とスクリーンショット確認を継続し、frame到達だけの偽陽性を避ける。
+1. `020108E8` / `0201090C` / `020108C0` 周辺を解析し、LoadGameSMの「peer/session ready」判定を下位MP adapterとして再現できるか確認する。
+2. `VSConnect::updateLoadGameSM` step 1で本来呼ばれるpeer/user info経路を、clientで確実にtraceできる条件を作る。
+3. hostからclientへstage選択/開始情報がどのpacket byte / sequencerで渡るかを、`Net::PacketBuffer` / `PacketSequencer` 側から追う。
+4. 直接StageStartSMやrender guardは、必要条件の確認にだけ使い、最終形へは持ち込まない。
 
 ## 重要アドレス
 
@@ -162,24 +80,16 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `Net::updatePacket`: `0x020101E4`
 - `Net::Core::processRecvPacket`: `0x02011360`
 - `Net::Core::processSendPacket`: `0x02011428`
-- `Net::Core::checkAllPacketBits`: `0x020110E4`
-- `Net::Core::advancePacketSequencer`: `0x0201122C`
 - packet buffer: `0x02087F00`
 - net state base: `0x02087E00`
 - `Game::stageGroup`: `0x02085058`
 - `Game::localPlayerID`: `0x020850BC`
 - `Game::vsMode`: `0x020850C4`
-- `Game::playerCount`: `0x0208A988`
-- `Input::consoleKeys` A2DJ候補: `0x02086C90`
-- `Input::playerKeysHeld` A2DJ候補: `0x02086CA0`
-- `Input::playerKeysPressed` A2DJ候補: `0x02086CA4`
-- `Stage::actorFreezeFlag` A2DJ候補: `0x020C9250`
-- `Game::loadLevel`: `0x020068A8`
-- `VSConnect::startLoadLevel`: `0x0214E0C0`
-- `createStageStartSM`: `0x021515B4`
-- `loadMvsLFilesThread`: `0x02152E04`
-- stage scene object ID: `0x0003`, settings `0x00B5FF00`
-- player actor object ID: `0x0015`
+- `VSConnect::updateLoadGameSM`: `0x02151E94`
+- `VSConnect::createLoadGameSM`: `0x021520A0`
+- `VSConnect::updateStageStartSM`: `0x021512B8`
+- `VSConnect::createStageStartSM`: `0x021515B4`
+- `VSConnect::loadMvsLFilesThread`: `0x02152E04`
 - Big Star actor ID: `0x0022`
 
 ## 検証に必要なもの

@@ -1291,6 +1291,52 @@ static bool HandleNSMLNetDisconnectBypass(ARM* cpu, u32 instrAddr)
     return false;
 }
 
+static bool HandleNSMLFakePeerInfo(ARM* cpu, u32 instrAddr)
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FAKE_PEER_INFO") ? 1 : 0;
+    if (!enabled || !cpu || cpu->Num != 0)
+        return false;
+    if (instrAddr != 0x02001050 && instrAddr != 0x0200102C)
+        return false;
+    if (!NSMLPacketBridgeEnabled() || !IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
+        return false;
+
+    const u32 aid = cpu->R[0] & 0x3;
+    const u32 localPlayer = NSMLPacketBridgeLocalPlayer();
+    if (aid == localPlayer)
+    {
+        cpu->R[0] = 0;
+        cpu->JumpTo(cpu->R[14]);
+        return true;
+    }
+
+    constexpr u32 fakeInfoAddr = 0x023C1800;
+    constexpr u32 fakeNameAddr = 0x023C1820;
+    const char fakeName[6] = { 'W', 'A', 'N', 'P', '0', '\0' };
+    for (u32 i = 0; i < sizeof(fakeName); i++)
+        cpu->NDS.ARM9Write8(fakeNameAddr + i, static_cast<u8>(fakeName[i]));
+    cpu->NDS.ARM9Write32(fakeInfoAddr + 0x00, 1);
+    cpu->NDS.ARM9Write32(fakeInfoAddr + 0x04, fakeNameAddr);
+
+    static u32 logCount = 0;
+    if (logCount < 24)
+    {
+        printf("NSMB PacketBridge: fake peer info at %08X frame=%u aid=%u local=%u -> %08X\n",
+            instrAddr,
+            cpu->NDS.NumFrames,
+            aid,
+            localPlayer,
+            instrAddr == 0x0200102C ? fakeNameAddr : fakeInfoAddr);
+        logCount++;
+    }
+
+    cpu->R[0] = instrAddr == 0x0200102C ? fakeNameAddr : fakeInfoAddr;
+    cpu->JumpTo(cpu->R[14]);
+    return true;
+}
+
 static u32 NSMLPacketBridgeEnvFrame(const char* name, u32 fallback)
 {
     if (const char* value = getenv(name))
@@ -3517,6 +3563,11 @@ void ARMv5::Execute()
                 NDS.ARM9Timestamp++;
                 continue;
             }
+            if (HandleNSMLFakePeerInfo(this, instrAddr))
+            {
+                NDS.ARM9Timestamp++;
+                continue;
+            }
             PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
             TraceNSMLCallImpl(this, instrAddr);
             TraceNSMLRandomCall(this, instrAddr);
@@ -3579,6 +3630,11 @@ void ARMv5::Execute()
                     NDS.ARM9Timestamp++;
                     continue;
                 }
+                if (HandleNSMLFakePeerInfo(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
                 if (HandleNSMLTransferPacketBypass(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;
@@ -3632,6 +3688,11 @@ void ARMv5::Execute()
                     continue;
                 }
                 if (HandleNSMLLowerMPBridge(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLFakePeerInfo(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;
                     continue;

@@ -58,6 +58,7 @@ param(
     [switch]$PacketBridgeStageStartReadyProbe,
     [string]$PacketBridgeReplayOps = "",
     [switch]$PacketBridgeDirectCapture,
+    [switch]$PacketBridgeFakePeerInfo,
     [int]$PacketBridgeLowerStatusResult = -1,
     [switch]$PacketBridgeForceTick,
     [int]$PacketBridgeForceTickStartFrame = 0,
@@ -947,6 +948,11 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE -ErrorAction SilentlyContinue
         }
+        if ($PacketBridgeFakePeerInfo) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_FAKE_PEER_INFO = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FAKE_PEER_INFO -ErrorAction SilentlyContinue
+        }
         if ($PacketBridgeLowerStatusResult -ge 0) {
             $env:MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT = "$PacketBridgeLowerStatusResult"
         } else {
@@ -1330,6 +1336,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FAKE_PEER_INFO -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME -ErrorAction SilentlyContinue
