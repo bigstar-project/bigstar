@@ -8,87 +8,97 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 
 ## 現在の方針
 
-1. NSMBが使うローカル通信境界を下側からWAN adapter化する。
-   - 試合中packetだけでなく、接続、検索、peer情報、session state、packet availability、packet tickを含めて置き換える。
-   - NSMB側のMvL同期ロジックはできるだけそのまま使う。
+1. NSMBが使っているローカル通信境界を、できるだけ下位からWAN adapter化する。
+   - 接続、peer情報、session state、packet availability、packet tickを含めて置き換える。
+   - NSMB側のMvL同期ロジックは可能な限りそのまま使う。
    - 個別actor座標や描画状態を外から同期する方向には戻らない。
 2. 必要に応じてROM/メモリpatchでロビーや開始処理を短絡する。
    - UI操作やLocalMP接続の完全再現にこだわらず、MvL開始へ自然に入る入口を探す。
-   - ただし任意PCから `Game::loadLevel` を直接呼ぶ方式はARM9 abortしたため、現状は不採用。
-3. 試合中はNSMB Centralの記述どおり、入力packet中心の同期に寄せる。
-   - RNGは `Net::random.value` / `Net::getRandom()` の共有seedと消費順一致で扱う。
-   - スター、8コインアイテム、ランダムステージなどは後続の検証対象。
+   - 任意PCからの直接 `Game::loadLevel` はARM9 abortや黒画面化の原因になるため、自然な呼び出し文脈を優先する。
+3. 試合中は入力packet中心の同期に寄せる。
+   - RNGは `Net::random.value` / `Net::getRandom()` のseedと消費順一致で扱う。
+   - ビッグスター、8コインアイテム、ランダムステージは後続の検証対象。
 
 ## 現在の到達点
 
-- `Wifi::startChildScan` / `Wifi::startParent` / `Wifi::connectToParent` 相当をWAN adapter側で成功扱いにする診断経路を追加済み。
-- `0204619C` lower status probeを `1` にすると、host/clientとも `VSConnect::LoadGameSM` の継続更新に入ることを確認済み。
-- `PacketBridgeFakePeerInfo` でclientが「Marioがみつかりました」系の確認待ちへ進むことを確認済み。
-- `ClientConfirmToStageStart` により、client確認待ちの戻り先を診断用に `StageStartSM` へ差し替えられることを確認済み。
-- `StageStartSM` で `Net state1C=3`, `state20=0`, `state24=1`, `state2C=0`, `state34=0` を維持すると、host/clientとも `updateStageStartSM (021512B8)` が自然に呼ばれるところまで到達した。
-- `updateStageStartSM` の実命令をRAM dumpから逆アセンブルし、step 3は `02087E20` の下位byteが `2` になることと、`02004B74` の完了戻り値を待っていることを確認した。
-- ただし `state20=2` を最初から維持するとStageStartのcreate/render直後に黒画面・低速化へ入り、`updateStageStartSM` が継続しない。
-- `state20=0` でstep 3まで進め、step 3以降だけ `state20=2` にする診断フックも追加したが、現状は黒画面・低速化が残り、`stageGroup=9`、stage scene、player actor生成にはまだ到達していない。
-- 以前の `Net state1C=6`, `state20=2`, `state24=2` では `updateStageStartSM` が呼ばれず、`しばらくおまちください` のFontRenderer描画待ちへ張り付くことを確認済み。
-- `PacketBridgeStageStartPacketAction=3` 単独では改善しないことを確認済み。
+- `Wifi::startChildScan` / `Wifi::startParent` / `Wifi::connectToParent` 相当をWAN adapter側で成功扱いにする診断経路を実装済み。
+- `PacketBridgeFakePeerInfo` でhost/clientとも相手peerを見つけた状態へ進められる。
+- `PacketBridgeClientConfirmToStageStart` でclient確認待ち後に `VSConnect::updateStageStartSM` へ差し替えられる。
+- `StageStartSM` は `state1C=3`, `state20=0`, `state24=1`, `state2C=0`, `state34=0` で自然に呼ばれる。
+- `StageStartSM` step 3は `02087E20 == 2` 相当のチェックを待っていることをRAM dumpとdispatch traceから確認済み。
+- `02087E20` をグローバルに `2` へ固定すると黒画面や低速化を起こすため不採用。
+- `02151454` のstep 3比較命令だけを狭く上書きする `PacketBridgeStageStartNet20Check` を追加し、step 6まで進むことを確認済み。
+- `0200E658` のstep 6 close待ちだけを狭く成功扱いにする `PacketBridgeStageStartStep6Close` を追加し、`vsConnect+0x144=7` まで進むことを確認済み。
+- CourseSelect状態のCSV診断フィールドを拡張済み。
+- `PacketBridgeForceCourseSelectReady` の `0214ED18` フックが開始フレーム指定前にも発火していたため、開始フレーム以降に制限した。
+- `tests/nsmb_mario_vs_luigi_wan_course_select.inputs` を追加し、CourseSelect後にもA入力を入れる検証ができる。
+
+## 最新の検証結果
+
+### CourseSelect到達
+
+ログ: `logs/nsmvl-ui-wan-course-select-fields-20260525`
+
+- host/clientとも `sceneCurrentSceneID=0x5`, `courseSelectFound=1`。
+- スクリーンショットは「たいせんほうほう / せんたくちゅう」画面。
+- `stageID=0`, `stageGroup=0`, player actorなし。まだ試合開始ではない。
+
+### CourseSelect ready遅延フック
+
+ログ: `logs/nsmvl-ui-wan-course-select-force-ready-delayed-20260525`
+
+- `PacketBridgeForceCourseSelectReadyStartFrame=3300` 以降に制限すると黒画面化せず、CourseSelect内部状態が `0x1 -> 0x3` に進む。
+- スクリーンショットは「コースせんたくちゅう」画面。
+- ただしA入力がないとそのまま選択画面に留まる。
+
+### CourseSelect後A入力
+
+ログ: `logs/nsmvl-ui-wan-load-black-ram-20260525`
+
+- A入力でコース選択画面から `Game::loadLevel` の自然呼び出し付近まで進む。
+- frame 4860付近で `sceneCurrentSceneID=0x5`, `sceneNextSceneID=0xF`, `stageGroup=9`。
+- その後 `sceneCurrentSceneID=0x3`, `stageGroup=9` へ移るが、画面は黒、`playerActor0/1` と `stageScene` は未生成。
+- frame 5100 RAM dumpではStageController、StageActorManager、Goombaなど一部のstage系objectは見えるが、player actorとStageSceneはまだ見えない。
+- これは成功ではない。現ブロッカーは「ロード開始後にステージ/プレイヤー生成まで進まない」こと。
 
 ## 現在のブロッカー
 
-`StageStartSM` step 3から先へ進まない。`vsConnect+0x144=3` までは入るが、`02087E20=2` を見せるタイミングを間違えると黒画面・低速化へ入る。
+`CourseSelect -> Game::loadLevel -> sceneCurrent=0x3` までは進むが、黒画面のまま `stageSceneFound=0`, `playerActor0Found=0`, `playerActor1Found=0` に留まる。
 
-次に見るべきものは、LocalMP時に `02087E20` が `2` へ変わる自然な条件と、`02004B74` が完了を返すまでのファイルロード/スレッド状態。単に値だけを強制すると、StageStart render/updateの順序が崩れる可能性が高い。
+疑っている点:
 
-## 失敗済みまたは非採用の経路
-
-- 既存LocalMPの2台状態を後からWANへ切り替える方式
-  - 切り替え時の停止、desync、通信切断、低FPSが重く、最終形に向かない。
-- savestate方式
-  - LocalMP状態を保存・復帰しても通信切断や初期状態不一致を解決できない。
-- actor座標やrender/model stateの外部同期
-  - アニメーションや内部状態が揃わず、NSMBの同期ロジックを壊す。
-- 任意フレームからの直接 `Game::loadLevel`
-  - frame 933付近でARM9 abort。安全な呼び出し文脈ではない。
-- `StageStartSM` / `VSConnect::onUpdate` の直接呼び出し
-  - 再入文脈が不正でARM9 abort。診断用としても常用しない。
-
-## 実装済みの主な診断フック
-
-- game-state CSV拡張
-  - Net globals、VSConnect fields、App sleep fields、ARM9 PC/LR/SP/CPSR。
-- `PacketBridgeFakePeerInfo`
-  - peer nickname / identityを安定した値として返す。
-- `PacketBridgeBypassWifiStart`
-  - Wifi start/connect系を成功扱いにする。
-- `MaintainSessionPeers`
-  - peer表、connected count、expected count、session completeを維持する。
-- `PacketBridgeLowerStatusResult`
-  - `0204619C` lower status probeの戻り値を固定する。
-- `PacketBridgeClientConfirmToStageStart`
-  - client確認待ちの戻り先を診断用に `StageStartSM` へ差し替える。
-- `PacketBridgeStageStartReadyProbe`
-  - StageStart中の下位Net ready状態と `Game::vsMode/localPlayerID` を維持する。
-  - `state1C/state20/state24/state2C/state34` を環境変数・スクリプト引数から変更可能。
-- `StageStartDispatchTrace`
-  - `VSConnect` / `StageStartSM` 近辺のPC、LR、VSConnect fields、Net stateをCSVに出す。
+- `Scene::current/next/isSceneActive` の遷移が自然経路とずれている。
+- `StageActorFreezeFlag=0x26` のまま stage actor / player生成が止まっている可能性。
+- StageStart/CourseSelectで強制しているNet状態が、ロード後のstage packet / RNG / scene setup条件と矛盾している可能性。
+- debug/releaseどちらも長時間検証は重く、Release presetはPATH上のclang前提で失敗したため、フルパス指定でRelease構成を作成した。
 
 ## 次にやること
 
-1. `updateStageStartSM (021512B8)` step 3の分岐条件を追う。
-   - compact/full dispatch traceは追加済み。step 3条件は `02087E20 == 2` と `02004B74 != 0`。
-   - 次はLocalMPまたはより下位のNet/Wifi遷移から、`02087E20` とロードスレッド完了が自然にどう変わるかを比較する。
-2. step 3で待っているNet stateまたはpacket条件が分かったら、下位adapter側の状態遷移へ戻す。
-   - 診断用の強制値で進めるだけでなく、最終的には自然なWAN packet adapterの状態機械として扱う。
-3. stage sceneに到達したら、host/clientの `stageGroup`, `localPlayerID`, player actor, star/RNG seed, packet tickを比較する。
-4. 試合中input packet同期へ接続する。
-   - 死亡演出や通信切断を成功扱いしない。
-   - スクリーンショットとstate traceで確認する。
+1. 黒画面ロード中の自然待ち条件を特定する。
+   - `sceneCurrent=0x3`, `sceneNext=0x181`, `sceneIsSceneActive=1` の意味を追う。
+   - `StageActorFreezeFlag=0x26` が自然値か異常値かを比較する。
+   - `stageID/stageGroup/vsMode/localPlayerID` と stage packet words の関係を確認する。
+2. `Game::loadLevel` 呼び出し時の引数を、US symbol / A2DJ port / RAM dumpで再確認する。
+   - 現在の `force Game::loadLevel MvL args` が自然呼び出しを壊していないか確認する。
+3. 必要ならCourseSelectからのloadLevel後だけ、最小限の下位Net/scene条件を補う。
+   - ただしactor座標同期や描画状態の外部同期には戻らない。
+4. stage scene / player actorが生成されたら、入力packet同期とRNG一致検証に戻る。
 
-## 検証条件
+## 失敗済み・非採用の経路
 
-- ユーザー提供の `roms/nsmb.nds` を使用する。
-- ROM本体や商用素材はリポジトリへ含めない。
-- 「通信が切断されました」は失敗として扱う。
-- スター取得やゲーム進行はスクリーンショットとstate traceで確認し、死亡や別演出を誤判定しない。
+- LocalMP状態を作ってからWANへ切り替える方式。
+- savestateでLocalMP状態を共有してからWAN化する方式。
+- actor座標やrender/model stateを外から同期する方式。
+- 任意フレーム・任意PCからの直接 `Game::loadLevel`。
+- `02087E20=2` のグローバル固定。
+- `StageStartSM` / `VSConnect::onUpdate` の無理な直接呼び出し。
+
+## 検証ルール
+
+- `通信が切断されました` は失敗として扱う。
+- 黒画面、低速化、死亡演出、敵接触をスター取得や試合成功と誤判定しない。
+- スクリーンショットとgame-state CSVの両方で確認する。
+- player actor、stage scene、star/RNG、packet tickを確認するまで「対戦開始成功」とは呼ばない。
 
 ## 参照
 

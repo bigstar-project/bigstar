@@ -448,8 +448,20 @@ struct GameStateSample
     melonDS::u32 VsConnectWord154 = 0;
     melonDS::u32 CourseSelectFound = 0;
     melonDS::u32 CourseSelectBase = 0;
+    melonDS::u32 CourseSelectSettings = 0;
+    melonDS::u32 CourseSelectWord060 = 0;
+    melonDS::u32 CourseSelectWord064 = 0;
+    melonDS::u32 CourseSelectWord068 = 0;
+    melonDS::u32 CourseSelectWord06C = 0;
+    melonDS::u32 CourseSelectWord070 = 0;
+    melonDS::u32 CourseSelectWord074 = 0;
     melonDS::u32 CourseSelectWord078 = 0;
     melonDS::u32 CourseSelectWord07C = 0;
+    melonDS::u32 CourseSelectWord080 = 0;
+    melonDS::u32 CourseSelectWord084 = 0;
+    melonDS::u32 CourseSelectWord088 = 0;
+    melonDS::u32 CourseSelectWord08C = 0;
+    melonDS::u32 CourseSelectWord090 = 0;
     melonDS::u32 MovingHazardFound = 0;
     melonDS::u32 MovingHazardGUID = 0;
     melonDS::u32 MovingHazardSettings = 0;
@@ -4359,8 +4371,20 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     if (sample.CourseSelectBase != 0)
     {
         sample.CourseSelectFound = 1;
+        sample.CourseSelectSettings = nds->ARM9Read32(sample.CourseSelectBase + 0x008);
+        sample.CourseSelectWord060 = nds->ARM9Read32(sample.CourseSelectBase + 0x060);
+        sample.CourseSelectWord064 = nds->ARM9Read32(sample.CourseSelectBase + 0x064);
+        sample.CourseSelectWord068 = nds->ARM9Read32(sample.CourseSelectBase + 0x068);
+        sample.CourseSelectWord06C = nds->ARM9Read32(sample.CourseSelectBase + 0x06C);
+        sample.CourseSelectWord070 = nds->ARM9Read32(sample.CourseSelectBase + 0x070);
+        sample.CourseSelectWord074 = nds->ARM9Read32(sample.CourseSelectBase + 0x074);
         sample.CourseSelectWord078 = nds->ARM9Read32(sample.CourseSelectBase + 0x078);
         sample.CourseSelectWord07C = nds->ARM9Read32(sample.CourseSelectBase + 0x07C);
+        sample.CourseSelectWord080 = nds->ARM9Read32(sample.CourseSelectBase + 0x080);
+        sample.CourseSelectWord084 = nds->ARM9Read32(sample.CourseSelectBase + 0x084);
+        sample.CourseSelectWord088 = nds->ARM9Read32(sample.CourseSelectBase + 0x088);
+        sample.CourseSelectWord08C = nds->ARM9Read32(sample.CourseSelectBase + 0x08C);
+        sample.CourseSelectWord090 = nds->ARM9Read32(sample.CourseSelectBase + 0x090);
     }
     const ObjectScanSample movingHazard = FindObjectByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
     sample.MovingHazardFound = movingHazard.Found;
@@ -4476,8 +4500,20 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.VsConnectWord148);
     MixGameStateValue(sample.Hash, sample.VsConnectWord154);
     MixGameStateValue(sample.Hash, sample.CourseSelectFound);
+    MixGameStateValue(sample.Hash, sample.CourseSelectSettings);
+    MixGameStateValue(sample.Hash, sample.CourseSelectWord060);
+    MixGameStateValue(sample.Hash, sample.CourseSelectWord064);
+    MixGameStateValue(sample.Hash, sample.CourseSelectWord068);
+    MixGameStateValue(sample.Hash, sample.CourseSelectWord06C);
+    MixGameStateValue(sample.Hash, sample.CourseSelectWord070);
+    MixGameStateValue(sample.Hash, sample.CourseSelectWord074);
     MixGameStateValue(sample.Hash, sample.CourseSelectWord078);
     MixGameStateValue(sample.Hash, sample.CourseSelectWord07C);
+    MixGameStateValue(sample.Hash, sample.CourseSelectWord080);
+    MixGameStateValue(sample.Hash, sample.CourseSelectWord084);
+    MixGameStateValue(sample.Hash, sample.CourseSelectWord088);
+    MixGameStateValue(sample.Hash, sample.CourseSelectWord08C);
+    MixGameStateValue(sample.Hash, sample.CourseSelectWord090);
     MixGameStateValue(sample.Hash, sample.MovingHazardFound);
     MixGameStateValue(sample.Hash, sample.MovingHazardGUID);
     MixGameStateValue(sample.Hash, sample.MovingHazardSettings);
@@ -4862,8 +4898,20 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                      << ",0x" << sample.VsConnectWord154
                      << ",0x" << sample.CourseSelectFound
                      << ",0x" << sample.CourseSelectBase
+                     << ",0x" << sample.CourseSelectSettings
+                     << ",0x" << sample.CourseSelectWord060
+                     << ",0x" << sample.CourseSelectWord064
+                     << ",0x" << sample.CourseSelectWord068
+                     << ",0x" << sample.CourseSelectWord06C
+                     << ",0x" << sample.CourseSelectWord070
+                     << ",0x" << sample.CourseSelectWord074
                      << ",0x" << sample.CourseSelectWord078
                      << ",0x" << sample.CourseSelectWord07C
+                     << ",0x" << sample.CourseSelectWord080
+                     << ",0x" << sample.CourseSelectWord084
+                     << ",0x" << sample.CourseSelectWord088
+                     << ",0x" << sample.CourseSelectWord08C
+                     << ",0x" << sample.CourseSelectWord090
                      << ",0x" << sample.StageSceneFound
                      << ",0x" << sample.StageSceneBase
                      << ",0x" << sample.StageSceneStateType
@@ -5651,7 +5699,7 @@ void InitFromEnvironment()
         }
         else
         {
-            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,arm9PC,arm9LR,arm9SP,arm9CPSR,appFrameLength,appUpdateTask,appSleepPhase,appSleepControl,appSleeping,appSleepPhaseTimer,appSleepWakeUpTimer,appBootParam,appBootTarget,appBootScene,ggid,netCurrentLanguage,netLocalAid,netState14,netState1C,netState20,netState24,netExpectedConsoleCount,netMultiBootSession,netSessionState,netModuleState,netMaxSessionChildren,netMaxConsoleCount,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,stageActorFreezeFlag,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectByte0E2,vsConnectByte106,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord138,vsConnectWord13C,vsConnectWord140,vsConnectWord144,vsConnectWord148,vsConnectByte153,vsConnectByte154,vsConnectByte155,vsConnectByte156,vsConnectByte157,vsConnectByte158,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectWord078,courseSelectWord07C,stageSceneFound,stageSceneBase,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY";
+            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,arm9PC,arm9LR,arm9SP,arm9CPSR,appFrameLength,appUpdateTask,appSleepPhase,appSleepControl,appSleeping,appSleepPhaseTimer,appSleepWakeUpTimer,appBootParam,appBootTarget,appBootScene,ggid,netCurrentLanguage,netLocalAid,netState14,netState1C,netState20,netState24,netExpectedConsoleCount,netMultiBootSession,netSessionState,netModuleState,netMaxSessionChildren,netMaxConsoleCount,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,stageActorFreezeFlag,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectByte0E2,vsConnectByte106,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord138,vsConnectWord13C,vsConnectWord140,vsConnectWord144,vsConnectWord148,vsConnectByte153,vsConnectByte154,vsConnectByte155,vsConnectByte156,vsConnectByte157,vsConnectByte158,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectSettings,courseSelectWord060,courseSelectWord064,courseSelectWord068,courseSelectWord06C,courseSelectWord070,courseSelectWord074,courseSelectWord078,courseSelectWord07C,courseSelectWord080,courseSelectWord084,courseSelectWord088,courseSelectWord08C,courseSelectWord090,stageSceneFound,stageSceneBase,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY";
             if (G.GameStateTraceExtended)
                 G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash";
             G.GameStateTrace << '\n';

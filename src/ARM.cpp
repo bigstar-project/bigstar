@@ -316,6 +316,22 @@ static u32 NSMLStageStartDispatchTraceEndFrame()
     return endFrame;
 }
 
+static bool NSMLStageStartNet20CheckOverride()
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_CHECK") ? 1 : 0;
+    return enabled != 0;
+}
+
+static bool NSMLStageStartStep6CloseOverride()
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_STEP6_CLOSE") ? 1 : 0;
+    return enabled != 0;
+}
+
 static u32 NSMLPacketBridgeWaitTimeoutMs()
 {
     static u32 timeout = 0xFFFFFFFF;
@@ -584,6 +600,56 @@ static bool HandleNSMLStageStartReadyProbeCall(ARM* cpu, u32 instrAddr)
     return true;
 }
 
+static void PatchNSMLStageStartNet20Check(ARM* cpu, u32 instrAddr)
+{
+    if (!cpu || cpu->Num != 0 || !NSMLStageStartNet20CheckOverride())
+        return;
+    if (instrAddr != 0x02151454)
+        return;
+    if (!IsNSMLStageStartSM(cpu->NDS))
+        return;
+
+    const u32 vsConnectBase = NSMLFindObjectBaseByID(cpu->NDS, 0x0006);
+    if (vsConnectBase == 0)
+        return;
+    if (cpu->NDS.ARM9Read32(vsConnectBase + 0x144) != 3)
+        return;
+
+    const u32 timer = cpu->NDS.ARM9Read32(vsConnectBase + 0x148);
+    const u32 minTimer = NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_CHECK_MIN_TIMER", 0);
+    if (timer < minTimer)
+        return;
+
+    // Keep the global lower-Net memory untouched; only satisfy the StageStartSM
+    // local comparison. Writing 02087E20 globally also affects render/sleep paths.
+    cpu->R[0] = 2;
+}
+
+static bool HandleNSMLStageStartStep6CloseCall(ARM* cpu, u32 instrAddr)
+{
+    if (!cpu || cpu->Num != 0 || !NSMLStageStartStep6CloseOverride())
+        return false;
+    if (instrAddr != 0x0200E658)
+        return false;
+    if (!IsNSMLStageStartSM(cpu->NDS))
+        return false;
+
+    const u32 vsConnectBase = NSMLFindObjectBaseByID(cpu->NDS, 0x0006);
+    if (vsConnectBase == 0)
+        return false;
+    if (cpu->NDS.ARM9Read32(vsConnectBase + 0x144) != 6)
+        return false;
+
+    const u32 timer = cpu->NDS.ARM9Read32(vsConnectBase + 0x148);
+    const u32 minTimer = NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_STEP6_CLOSE_MIN_TIMER", 0);
+    if (timer < minTimer)
+        return false;
+
+    cpu->R[0] = 1;
+    cpu->JumpTo(cpu->R[14]);
+    return true;
+}
+
 static void NSMLProbeStageStartReadyBits(NDS& nds)
 {
     if (!NSMLPacketBridgeStageStartReadyProbe() || !IsNSMLMarioVsLuigiPacketContext(nds))
@@ -604,7 +670,12 @@ static void NSMLProbeStageStartReadyBits(NDS& nds)
     const u32 vsStep = nds.ARM9Read32(vsConnectBase + 0x144);
     u32 net20 = NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20", 2);
     if (vsStep >= 3)
-        net20 = NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_STEP3", net20);
+    {
+        const u32 step3Timer = nds.ARM9Read32(vsConnectBase + 0x148);
+        const u32 step3MinTimer = NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_STEP3_MIN_TIMER", 0);
+        if (step3Timer >= step3MinTimer)
+            net20 = NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_STEP3", net20);
+    }
 
     nds.ARM9Write32(0x02087E14, NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET14", 1));
     nds.ARM9Write8(0x02087E1C, static_cast<u8>(NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET1C", 6)));
@@ -1504,7 +1575,10 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
         }
         return;
     }
-    if (instrAddr == 0x0214ED18 && IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
+    if (forceCourseSelectReady
+        && cpu->NDS.NumFrames >= forceCourseSelectReadyStartFrame
+        && instrAddr == 0x0214ED18
+        && IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
     {
         const u32 courseSelectBase = NSMLFindObjectBaseByID(cpu->NDS, 0x0005);
         if (courseSelectBase != 0 && cpu->NDS.ARM9Read8(courseSelectBase + 0x64) == 1)
@@ -3993,6 +4067,11 @@ void ARMv5::Execute()
                 NDS.ARM9Timestamp++;
                 continue;
             }
+            if (HandleNSMLStageStartStep6CloseCall(this, instrAddr))
+            {
+                NDS.ARM9Timestamp++;
+                continue;
+            }
             if (HandleNSMLLowerMPBridge(this, instrAddr))
             {
                 NDS.ARM9Timestamp++;
@@ -4013,6 +4092,7 @@ void ARMv5::Execute()
                 NDS.ARM9Timestamp++;
                 continue;
             }
+            PatchNSMLStageStartNet20Check(this, instrAddr);
             PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
             TraceNSMLStageStartDispatch(this, instrAddr);
             TraceNSMLCallImpl(this, instrAddr);
@@ -4076,6 +4156,11 @@ void ARMv5::Execute()
                     NDS.ARM9Timestamp++;
                     continue;
                 }
+                if (HandleNSMLStageStartStep6CloseCall(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
                 if (HandleNSMLLowerMPBridge(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;
@@ -4117,6 +4202,7 @@ void ARMv5::Execute()
                     continue;
                 }
                 PatchNSMLClientConfirmSchedule(this, instrAddr);
+                PatchNSMLStageStartNet20Check(this, instrAddr);
                 PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
                 TraceNSMLStageStartDispatch(this, instrAddr);
                 TraceNSMLCallImpl(this, instrAddr);
@@ -4155,6 +4241,11 @@ void ARMv5::Execute()
                     NDS.ARM9Timestamp++;
                     continue;
                 }
+                if (HandleNSMLStageStartStep6CloseCall(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
                 if (HandleNSMLLowerMPBridge(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;
@@ -4196,6 +4287,7 @@ void ARMv5::Execute()
                     continue;
                 }
                 PatchNSMLClientConfirmSchedule(this, instrAddr);
+                PatchNSMLStageStartNet20Check(this, instrAddr);
                 PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
                 TraceNSMLStageStartDispatch(this, instrAddr);
                 TraceNSMLCallImpl(this, instrAddr);
