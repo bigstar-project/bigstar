@@ -74,6 +74,8 @@ static bool NSMLEnvFlag(const char* name)
     return value && value[0] && strcmp(value, "0") != 0;
 }
 
+static u32 NSMLPacketBridgeEnvFrame(const char* name, u32 fallback);
+
 static bool NSMLPacketBridgeEnabled()
 {
     static int enabled = -1;
@@ -158,6 +160,8 @@ static void NSMLMaintainSessionPeers(NDS& nds)
     // packet payloads. Populate the two-player peer entries that LocalMP would
     // normally maintain, while leaving higher VSConnect state alone.
     nds.ARM9Write32(0x02087E24, 0x00000002);
+    nds.ARM9Write8(0x02087E2C, 2);
+    nds.ARM9Write8(0x02087E34, 2);
 
     const u32 compactPeerBase = nds.ARM9Read32(0x02087E70);
     if (compactPeerBase >= 0x02000000 && compactPeerBase < 0x02400000)
@@ -1300,25 +1304,33 @@ static bool HandleNSMLFakePeerInfo(ARM* cpu, u32 instrAddr)
         return false;
     if (instrAddr != 0x02001050 && instrAddr != 0x0200102C)
         return false;
-    if (!NSMLPacketBridgeEnabled() || !IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
+    if (!NSMLPacketBridgeEnabled() ||
+        (!IsNSMLMarioVsLuigiPacketContext(cpu->NDS) && !NSMLPacketBridgeAllowPreGame()))
         return false;
 
     const u32 aid = cpu->R[0] & 0x3;
     const u32 localPlayer = NSMLPacketBridgeLocalPlayer();
-    if (aid == localPlayer)
+    const u32 remotePlayer = localPlayer == 0 ? 1 : 0;
+    if (aid != remotePlayer)
     {
         cpu->R[0] = 0;
         cpu->JumpTo(cpu->R[14]);
         return true;
     }
 
-    constexpr u32 fakeInfoAddr = 0x023C1800;
-    constexpr u32 fakeNameAddr = 0x023C1820;
-    const char fakeName[6] = { 'W', 'A', 'N', 'P', '0', '\0' };
-    for (u32 i = 0; i < sizeof(fakeName); i++)
-        cpu->NDS.ARM9Write8(fakeNameAddr + i, static_cast<u8>(fakeName[i]));
-    cpu->NDS.ARM9Write32(fakeInfoAddr + 0x00, 1);
-    cpu->NDS.ARM9Write32(fakeInfoAddr + 0x04, fakeNameAddr);
+    constexpr u32 fakeNicknameAddr = 0x023C1800;
+    constexpr u32 fakeStableIdAddr = 0x023C1820;
+    const char nickname[] = { 'M', 'a', 'r', 'i', 'o' };
+    cpu->NDS.ARM9Write8(fakeNicknameAddr + 0x00, 0);
+    cpu->NDS.ARM9Write8(fakeNicknameAddr + 0x01, static_cast<u8>(sizeof(nickname)));
+    for (u32 i = 0; i < sizeof(nickname); i++)
+        cpu->NDS.ARM9Write16(fakeNicknameAddr + 0x02 + (i * 2), static_cast<u16>(nickname[i]));
+    for (u32 i = sizeof(nickname); i < 10; i++)
+        cpu->NDS.ARM9Write16(fakeNicknameAddr + 0x02 + (i * 2), 0);
+
+    const u8 stableId[6] = { 0x02, 0x4D, 0x56, 0x4C, static_cast<u8>(localPlayer), static_cast<u8>(remotePlayer) };
+    for (u32 i = 0; i < sizeof(stableId); i++)
+        cpu->NDS.ARM9Write8(fakeStableIdAddr + i, stableId[i]);
 
     static u32 logCount = 0;
     if (logCount < 24)
@@ -1328,11 +1340,84 @@ static bool HandleNSMLFakePeerInfo(ARM* cpu, u32 instrAddr)
             cpu->NDS.NumFrames,
             aid,
             localPlayer,
-            instrAddr == 0x0200102C ? fakeNameAddr : fakeInfoAddr);
+            instrAddr == 0x0200102C ? fakeStableIdAddr : fakeNicknameAddr);
         logCount++;
     }
 
-    cpu->R[0] = instrAddr == 0x0200102C ? fakeNameAddr : fakeInfoAddr;
+    cpu->R[0] = instrAddr == 0x0200102C ? fakeStableIdAddr : fakeNicknameAddr;
+    cpu->JumpTo(cpu->R[14]);
+    return true;
+}
+
+static bool HandleNSMLStartConnectionBypass(ARM* cpu, u32 instrAddr)
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_BYPASS_START_CONNECTION") ? 1 : 0;
+    if (!enabled || !cpu || cpu->Num != 0)
+        return false;
+    if (instrAddr != 0x020108C0 && instrAddr != 0x020108E8 && instrAddr != 0x0201090C)
+        return false;
+    static u32 startFrame = 0xFFFFFFFF;
+    if (startFrame == 0xFFFFFFFF)
+        startFrame = NSMLPacketBridgeEnvFrame("MELONDS_NSML_PACKET_BRIDGE_BYPASS_START_CONNECTION_START_FRAME", 0);
+    if (cpu->NDS.NumFrames < startFrame)
+        return false;
+    if (NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_BYPASS_START_CONNECTION_CLIENT_ONLY"))
+    {
+        const char* role = getenv("MELONDS_NSML_ROLE");
+        if (!role || strcmp(role, "client") != 0)
+            return false;
+    }
+    if (!NSMLPacketBridgeEnabled() ||
+        (!IsNSMLMarioVsLuigiPacketContext(cpu->NDS) && !NSMLPacketBridgeAllowPreGame()))
+        return false;
+
+    static u32 logCount = 0;
+    if (logCount < 24)
+    {
+        printf("NSMB PacketBridge: bypass Net start connection at %08X frame=%u lr=%08X\n",
+            instrAddr,
+            cpu->NDS.NumFrames,
+            cpu->R[14]);
+        logCount++;
+    }
+
+    cpu->R[0] = 1;
+    cpu->JumpTo(cpu->R[14]);
+    return true;
+}
+
+static bool HandleNSMLWifiStartBypass(ARM* cpu, u32 instrAddr)
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_BYPASS_WIFI_START") ? 1 : 0;
+    if (!enabled || !cpu || cpu->Num != 0)
+        return false;
+    if (instrAddr != 0x020465C4 && instrAddr != 0x02046788 && instrAddr != 0x020469A4)
+        return false;
+    if (!NSMLPacketBridgeEnabled() ||
+        (!IsNSMLMarioVsLuigiPacketContext(cpu->NDS) && !NSMLPacketBridgeAllowPreGame()))
+        return false;
+
+    static u32 startFrame = 0xFFFFFFFF;
+    if (startFrame == 0xFFFFFFFF)
+        startFrame = NSMLPacketBridgeEnvFrame("MELONDS_NSML_PACKET_BRIDGE_BYPASS_WIFI_START_START_FRAME", 0);
+    if (cpu->NDS.NumFrames < startFrame)
+        return false;
+
+    static u32 logCount = 0;
+    if (logCount < 32)
+    {
+        printf("NSMB PacketBridge: bypass Wifi start/connect at %08X frame=%u lr=%08X\n",
+            instrAddr,
+            cpu->NDS.NumFrames,
+            cpu->R[14]);
+        logCount++;
+    }
+
+    cpu->R[0] = 1;
     cpu->JumpTo(cpu->R[14]);
     return true;
 }
@@ -3568,6 +3653,16 @@ void ARMv5::Execute()
                 NDS.ARM9Timestamp++;
                 continue;
             }
+            if (HandleNSMLStartConnectionBypass(this, instrAddr))
+            {
+                NDS.ARM9Timestamp++;
+                continue;
+            }
+            if (HandleNSMLWifiStartBypass(this, instrAddr))
+            {
+                NDS.ARM9Timestamp++;
+                continue;
+            }
             PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
             TraceNSMLCallImpl(this, instrAddr);
             TraceNSMLRandomCall(this, instrAddr);
@@ -3635,6 +3730,16 @@ void ARMv5::Execute()
                     NDS.ARM9Timestamp++;
                     continue;
                 }
+                if (HandleNSMLStartConnectionBypass(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLWifiStartBypass(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
                 if (HandleNSMLTransferPacketBypass(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;
@@ -3693,6 +3798,16 @@ void ARMv5::Execute()
                     continue;
                 }
                 if (HandleNSMLFakePeerInfo(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLStartConnectionBypass(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLWifiStartBypass(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;
                     continue;
