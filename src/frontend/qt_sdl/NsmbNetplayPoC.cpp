@@ -98,6 +98,16 @@ constexpr melonDS::u32 kGamePlayerCollectedStarsAddr = 0x0208A9DC;
 constexpr melonDS::u32 kGameVsCoinCountAddr = 0x0208A994;
 constexpr melonDS::u32 kGameCandidateWifiBlockAddr = 0x0208BE00;
 constexpr melonDS::u32 kGameCandidateRenderBlockAddr = 0x023F8300;
+constexpr melonDS::u32 kAppFrameLengthAddr = 0x02038F60;
+constexpr melonDS::u32 kAppUpdateTaskAddr = 0x02038F74;
+constexpr melonDS::u32 kAppSleepPhaseAddr = 0x02084FAC;
+constexpr melonDS::u32 kAppSleepControlAddr = 0x02084FB4;
+constexpr melonDS::u32 kAppSleepingAddr = 0x02084FB8;
+constexpr melonDS::u32 kAppSleepPhaseTimerAddr = 0x02084FBC;
+constexpr melonDS::u32 kAppSleepWakeUpTimerAddr = 0x02084FC0;
+constexpr melonDS::u32 kAppBootParamAddr = 0x02084FCC;
+constexpr melonDS::u32 kAppBootTargetAddr = 0x02084FD0;
+constexpr melonDS::u32 kAppBootSceneAddr = 0x02084FD4;
 constexpr melonDS::u16 kPlayerObjectID = 0x0015;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
@@ -112,6 +122,7 @@ constexpr melonDS::u32 kA2DJGameLoadLevelAddr = 0x020068A8;
 constexpr melonDS::u32 kA2DJVSConnectCreateLoadGameSMAddr = 0x021520A0;
 constexpr melonDS::u32 kA2DJVSConnectUpdateLoadGameSMAddr = 0x02151E94;
 constexpr melonDS::u32 kA2DJVSConnectRenderLoadGameSMAddr = 0x02151E54;
+constexpr melonDS::u32 kA2DJVSConnectUpdateStageStartSMAddr = 0x021512B8;
 constexpr melonDS::u32 kA2DJVSConnectStartLoadLevelAddr = 0x0214E0C0;
 constexpr melonDS::u32 kA2DJLoadMvsLFilesThreadAddr = 0x02152E04;
 constexpr melonDS::u32 kA2DJCreateThreadAddr = 0x02004BFC;
@@ -120,6 +131,7 @@ constexpr melonDS::u32 kA2DJVSConnectLoadGameSMSubMenuAddr = 0x02156624;
 constexpr melonDS::u32 kA2DJVSConnectPostLoadGameSMSubMenuAddr = 0x02156640;
 constexpr melonDS::u32 kA2DJVSConnectStageStartSMSubMenuAddr = 0x02156678;
 constexpr melonDS::u32 kA2DJVSConnectClientConfirmSMSubMenuAddr = 0x02156694;
+constexpr melonDS::u32 kA2DJVSConnectOnUpdateAddr = 0x021529FC;
 constexpr melonDS::u32 kA2DJFSCacheLoadFileAddr = 0x02009C64;
 constexpr melonDS::u32 kA2DJFSCacheLoadDataAddr = 0x02009BC8;
 constexpr melonDS::u32 kA2DJVSCreateCourseSelectAddr = 0x0214F858;
@@ -288,6 +300,20 @@ struct GameStateSample
     melonDS::u32 StageGroup = 0;
     melonDS::u32 VsMode = 0;
     melonDS::u32 LocalPlayerID = 0;
+    melonDS::u32 Arm9PC = 0;
+    melonDS::u32 Arm9LR = 0;
+    melonDS::u32 Arm9SP = 0;
+    melonDS::u32 Arm9CPSR = 0;
+    melonDS::u32 AppFrameLength = 0;
+    melonDS::u32 AppUpdateTask = 0;
+    melonDS::u32 AppSleepPhase = 0;
+    melonDS::u32 AppSleepControl = 0;
+    melonDS::u32 AppSleeping = 0;
+    melonDS::u32 AppSleepPhaseTimer = 0;
+    melonDS::u32 AppSleepWakeUpTimer = 0;
+    melonDS::u32 AppBootParam = 0;
+    melonDS::u32 AppBootTarget = 0;
+    melonDS::u32 AppBootScene = 0;
     melonDS::u32 GGID = 0;
     melonDS::u32 NetCurrentLanguage = 0;
     melonDS::u32 NetLocalAid = 0;
@@ -579,6 +605,12 @@ struct State
     melonDS::u32 PacketBridgeForceStageStartSMFieldsStartFrame = 0;
     melonDS::u32 PacketBridgeStageStartSMBaseFrame[16] {};
     bool PacketBridgeForceStageStartSMUseLoadStep = false;
+    bool PacketBridgeRunStageStartSMUpdate = false;
+    melonDS::u32 PacketBridgeRunStageStartSMUpdateStartFrame = 0;
+    melonDS::u32 PacketBridgeRunStageStartSMUpdateLastFrame[16] {};
+    bool PacketBridgeRunVSConnectOnUpdate = false;
+    melonDS::u32 PacketBridgeRunVSConnectOnUpdateStartFrame = 0;
+    melonDS::u32 PacketBridgeRunVSConnectOnUpdateLastFrame[16] {};
     bool PacketBridgeForceMvlFileCache = false;
     melonDS::u32 PacketBridgeForceMvlFileCacheStartFrame = 0;
     bool PacketBridgeForceMvlFileCacheApplied[16] {};
@@ -1957,6 +1989,135 @@ void ForceNSMLPacketBridgeStageStartSMFieldsIfNeeded(int instanceID, melonDS::u3
             flags);
         std::fflush(stdout);
     }
+}
+
+bool InjectNSMLPacketBridgeStageStartSMUpdateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.PacketBridgeRunStageStartSMUpdate || !nds || instanceID < 0 || instanceID >= 16)
+        return false;
+    if (frame < G.PacketBridgeRunStageStartSMUpdateStartFrame)
+        return false;
+    if (G.PacketBridgeRunStageStartSMUpdateLastFrame[instanceID] == frame)
+        return false;
+    if (nds->ARM9Read32(kGameStageGroupAddr) == 9)
+        return false;
+    if (nds->ARM9Read16(kSceneCurrentSceneIDAddr) != 0x0006)
+        return false;
+
+    const melonDS::u32 vsConnectBase = FindObjectBaseByID(nds, kVsConnectObjectID);
+    if (vsConnectBase == 0)
+        return false;
+    if (nds->ARM9Read32(vsConnectBase + 0x120) != kA2DJVSConnectUpdateStageStartSMAddr)
+        return false;
+
+    const melonDS::u32 oldPC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
+    const melonDS::u32 returnPC = oldPC | ((nds->ARM9.CPSR & 0x20) ? 1u : 0u);
+    std::vector<melonDS::u32> code;
+    code.reserve(16);
+    const auto emitBL = [&code](melonDS::u32 target)
+    {
+        const melonDS::u32 pc = kDirectBootTrampolineAddr + static_cast<melonDS::u32>(code.size() * sizeof(melonDS::u32)) + 8u;
+        const melonDS::s32 offset = static_cast<melonDS::s32>(target - pc) >> 2;
+        code.push_back(0xEB000000u | (static_cast<melonDS::u32>(offset) & 0x00FFFFFFu));
+    };
+
+    code.push_back(0xE92D5FFFu); // push {r0-r12, lr}
+    code.push_back(0xE10F5000u); // mrs r5, cpsr
+    code.push_back(0xE92D0020u); // push {r5}
+    code.push_back(0xE59F001Cu); // ldr r0, [pc, #28]
+    emitBL(kA2DJVSConnectUpdateStageStartSMAddr);
+    code.push_back(0xE8BD0020u); // pop {r5}
+    code.push_back(0xE128F005u); // msr apsr_nzcvq, r5
+    code.push_back(0xE8BD5FFFu); // pop {r0-r12, lr}
+    code.push_back(0xE59FC004u); // ldr ip, [pc, #4]
+    code.push_back(0xE12FFF1Cu); // bx ip
+    code.push_back(0xE1A00000u); // nop
+    code.push_back(returnPC);
+    code.push_back(vsConnectBase);
+
+    bool wrote = true;
+    for (size_t i = 0; i < code.size(); i++)
+        wrote = WriteARM9U32(nds, kDirectBootTrampolineAddr + static_cast<melonDS::u32>(i * sizeof(melonDS::u32)), code[i]) && wrote;
+    if (!wrote)
+        return false;
+
+    G.PacketBridgeRunStageStartSMUpdateLastFrame[instanceID] = frame;
+    if (G.PacketBridgeTraceEnabled && (frame % 30) == 0)
+    {
+        std::printf("NSMB PacketBridge: run stage-start SM update inst=%d frame=%u vsConnect=%08X\n",
+            instanceID,
+            frame,
+            vsConnectBase);
+        std::fflush(stdout);
+    }
+    nds->ARM9.JumpTo(kDirectBootTrampolineAddr);
+    return true;
+}
+
+bool InjectNSMLPacketBridgeVSConnectOnUpdateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.PacketBridgeRunVSConnectOnUpdate || !nds || instanceID < 0 || instanceID >= 16)
+        return false;
+    if (frame < G.PacketBridgeRunVSConnectOnUpdateStartFrame)
+        return false;
+    if (G.PacketBridgeRunVSConnectOnUpdateLastFrame[instanceID] == frame)
+        return false;
+    if (nds->ARM9Read32(kGameStageGroupAddr) == 9)
+        return false;
+    if (nds->ARM9Read16(kSceneCurrentSceneIDAddr) != 0x0006)
+        return false;
+
+    const melonDS::u32 vsConnectBase = FindObjectBaseByID(nds, kVsConnectObjectID);
+    if (vsConnectBase == 0)
+        return false;
+    if (nds->ARM9Read32(vsConnectBase + 0x120) != kA2DJVSConnectUpdateStageStartSMAddr)
+        return false;
+
+    const melonDS::u32 oldPC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
+    const melonDS::u32 returnPC = oldPC | ((nds->ARM9.CPSR & 0x20) ? 1u : 0u);
+    if ((nds->ARM9.CPSR & 0x1Fu) != 0x1Fu || nds->ARM9.R[13] < 0x02000000u || nds->ARM9.R[13] >= 0x02800000u)
+        return false;
+
+    std::vector<melonDS::u32> code;
+    code.reserve(16);
+    const auto emitBL = [&code](melonDS::u32 target)
+    {
+        const melonDS::u32 pc = kDirectBootTrampolineAddr + static_cast<melonDS::u32>(code.size() * sizeof(melonDS::u32)) + 8u;
+        const melonDS::s32 offset = static_cast<melonDS::s32>(target - pc) >> 2;
+        code.push_back(0xEB000000u | (static_cast<melonDS::u32>(offset) & 0x00FFFFFFu));
+    };
+
+    code.push_back(0xE92D5FFFu); // push {r0-r12, lr}
+    code.push_back(0xE10F5000u); // mrs r5, cpsr
+    code.push_back(0xE92D0020u); // push {r5}
+    code.push_back(0xE59F001Cu); // ldr r0, [pc, #28]
+    emitBL(kA2DJVSConnectOnUpdateAddr);
+    code.push_back(0xE8BD0020u); // pop {r5}
+    code.push_back(0xE128F005u); // msr apsr_nzcvq, r5
+    code.push_back(0xE8BD5FFFu); // pop {r0-r12, lr}
+    code.push_back(0xE59FC004u); // ldr ip, [pc, #4]
+    code.push_back(0xE12FFF1Cu); // bx ip
+    code.push_back(0xE1A00000u); // nop
+    code.push_back(returnPC);
+    code.push_back(vsConnectBase);
+
+    bool wrote = true;
+    for (size_t i = 0; i < code.size(); i++)
+        wrote = WriteARM9U32(nds, kDirectBootTrampolineAddr + static_cast<melonDS::u32>(i * sizeof(melonDS::u32)), code[i]) && wrote;
+    if (!wrote)
+        return false;
+
+    G.PacketBridgeRunVSConnectOnUpdateLastFrame[instanceID] = frame;
+    if (G.PacketBridgeTraceEnabled && (frame % 30) == 0)
+    {
+        std::printf("NSMB PacketBridge: run VSConnect onUpdate inst=%d frame=%u vsConnect=%08X\n",
+            instanceID,
+            frame,
+            vsConnectBase);
+        std::fflush(stdout);
+    }
+    nds->ARM9.JumpTo(kDirectBootTrampolineAddr);
+    return true;
 }
 
 bool InjectNSMLPacketBridgeDummyAlloc(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -4026,6 +4187,20 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.StageGroup = nds->ARM9Read32(kGameStageGroupAddr);
     sample.VsMode = nds->ARM9Read32(kGameVsModeAddr);
     sample.LocalPlayerID = nds->ARM9Read32(kGameLocalPlayerIDAddr);
+    sample.Arm9PC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
+    sample.Arm9LR = nds->ARM9.R[14];
+    sample.Arm9SP = nds->ARM9.R[13];
+    sample.Arm9CPSR = nds->ARM9.CPSR;
+    sample.AppFrameLength = nds->ARM9Read8(kAppFrameLengthAddr);
+    sample.AppUpdateTask = nds->ARM9Read32(kAppUpdateTaskAddr);
+    sample.AppSleepPhase = nds->ARM9Read8(kAppSleepPhaseAddr);
+    sample.AppSleepControl = nds->ARM9Read8(kAppSleepControlAddr);
+    sample.AppSleeping = nds->ARM9Read8(kAppSleepingAddr);
+    sample.AppSleepPhaseTimer = nds->ARM9Read16(kAppSleepPhaseTimerAddr);
+    sample.AppSleepWakeUpTimer = nds->ARM9Read16(kAppSleepWakeUpTimerAddr);
+    sample.AppBootParam = nds->ARM9Read32(kAppBootParamAddr);
+    sample.AppBootTarget = nds->ARM9Read32(kAppBootTargetAddr);
+    sample.AppBootScene = nds->ARM9Read32(kAppBootSceneAddr);
     sample.GGID = nds->ARM9Read32(kNetGGIDAddr);
     sample.NetCurrentLanguage = nds->ARM9Read32(kNetCurrentLanguageAddr);
     sample.NetLocalAid = nds->ARM9Read32(kNetLocalAidAddr);
@@ -4564,6 +4739,20 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                      << ",0x" << sample.StageGroup
                      << ",0x" << sample.VsMode
                      << ",0x" << sample.LocalPlayerID
+                     << ",0x" << sample.Arm9PC
+                     << ",0x" << sample.Arm9LR
+                     << ",0x" << sample.Arm9SP
+                     << ",0x" << sample.Arm9CPSR
+                     << ",0x" << sample.AppFrameLength
+                     << ",0x" << sample.AppUpdateTask
+                     << ",0x" << sample.AppSleepPhase
+                     << ",0x" << sample.AppSleepControl
+                     << ",0x" << sample.AppSleeping
+                     << ",0x" << sample.AppSleepPhaseTimer
+                     << ",0x" << sample.AppSleepWakeUpTimer
+                     << ",0x" << sample.AppBootParam
+                     << ",0x" << sample.AppBootTarget
+                     << ",0x" << sample.AppBootScene
                      << ",0x" << sample.GGID
                      << ",0x" << sample.NetCurrentLanguage
                      << ",0x" << sample.NetLocalAid
@@ -5266,6 +5455,14 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_FIELDS_START_FRAME", 0)));
     G.PacketBridgeForceStageStartSMUseLoadStep =
         EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_USE_LOAD_STEP");
+    G.PacketBridgeRunStageStartSMUpdate =
+        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_RUN_STAGE_START_SM_UPDATE");
+    G.PacketBridgeRunStageStartSMUpdateStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_RUN_STAGE_START_SM_UPDATE_START_FRAME", 0)));
+    G.PacketBridgeRunVSConnectOnUpdate =
+        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_RUN_VSCONNECT_ON_UPDATE");
+    G.PacketBridgeRunVSConnectOnUpdateStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_RUN_VSCONNECT_ON_UPDATE_START_FRAME", 0)));
     G.PacketBridgeForceMvlFileCache =
         EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_FILE_CACHE");
     G.PacketBridgeForceMvlFileCacheStartFrame = static_cast<melonDS::u32>(
@@ -5454,7 +5651,7 @@ void InitFromEnvironment()
         }
         else
         {
-            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,ggid,netCurrentLanguage,netLocalAid,netState14,netState1C,netState20,netState24,netExpectedConsoleCount,netMultiBootSession,netSessionState,netModuleState,netMaxSessionChildren,netMaxConsoleCount,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,stageActorFreezeFlag,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectByte0E2,vsConnectByte106,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord138,vsConnectWord13C,vsConnectWord140,vsConnectWord144,vsConnectWord148,vsConnectByte153,vsConnectByte154,vsConnectByte155,vsConnectByte156,vsConnectByte157,vsConnectByte158,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectWord078,courseSelectWord07C,stageSceneFound,stageSceneBase,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY";
+            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,arm9PC,arm9LR,arm9SP,arm9CPSR,appFrameLength,appUpdateTask,appSleepPhase,appSleepControl,appSleeping,appSleepPhaseTimer,appSleepWakeUpTimer,appBootParam,appBootTarget,appBootScene,ggid,netCurrentLanguage,netLocalAid,netState14,netState1C,netState20,netState24,netExpectedConsoleCount,netMultiBootSession,netSessionState,netModuleState,netMaxSessionChildren,netMaxConsoleCount,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,stageActorFreezeFlag,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectByte0E2,vsConnectByte106,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord138,vsConnectWord13C,vsConnectWord140,vsConnectWord144,vsConnectWord148,vsConnectByte153,vsConnectByte154,vsConnectByte155,vsConnectByte156,vsConnectByte157,vsConnectByte158,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectWord078,courseSelectWord07C,stageSceneFound,stageSceneBase,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY";
             if (G.GameStateTraceExtended)
                 G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash";
             G.GameStateTrace << '\n';
@@ -5680,6 +5877,10 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         if (InjectNSMLPacketBridgeMvlLoadThread(instanceID, inputFrame, nds))
             return polledInput;
         ForceNSMLPacketBridgeStageStartSMFieldsIfNeeded(instanceID, inputFrame, nds);
+        if (InjectNSMLPacketBridgeVSConnectOnUpdateIfNeeded(instanceID, inputFrame, nds))
+            return polledInput;
+        if (InjectNSMLPacketBridgeStageStartSMUpdateIfNeeded(instanceID, inputFrame, nds))
+            return polledInput;
         ForceNSMLPacketBridgeLoadGameSMIfNeeded(instanceID, inputFrame, nds);
         ForceNSMLStagePacketWordsIfNeeded(inputFrame, nds);
     }
@@ -5733,6 +5934,10 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
             if (InjectNSMLPacketBridgeMvlLoadThread(instanceID, syncFrame, nds))
                 return testInput;
             ForceNSMLPacketBridgeStageStartSMFieldsIfNeeded(instanceID, syncFrame, nds);
+            if (InjectNSMLPacketBridgeVSConnectOnUpdateIfNeeded(instanceID, syncFrame, nds))
+                return testInput;
+            if (InjectNSMLPacketBridgeStageStartSMUpdateIfNeeded(instanceID, syncFrame, nds))
+                return testInput;
             ForceNSMLPacketBridgeLoadGameSMIfNeeded(instanceID, syncFrame, nds);
             ForceNSMLStagePacketWordsIfNeeded(syncFrame, nds);
             melonDS::NSML_RefreshMarioVsLuigiPacketSlots(nds);

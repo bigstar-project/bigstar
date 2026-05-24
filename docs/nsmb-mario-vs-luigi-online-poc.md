@@ -4,132 +4,93 @@
 
 New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` でWAN越しに遊べる形へ持っていく。
 
-これまで試した `melonDS LocalMP 2インスタンス * 2プロセス`、savestate/dropmp、試合開始後にWANへ切り替える方式は、desync、切断判定、低FPS、stage/model初期化不一致が重く、主方針から外した。
+過去に試した `LocalMP 2インスタンス * 2プロセス`、savestate、試合開始後のWAN切り替え、actor座標の外部同期は、desync、通信切断、低FPS、初期状態不一致が重く、最終形としては採用しない。
 
 ## 現在の方針
 
-1. **NSMBが使うローカル通信境界をWAN adapterへ置き換える**
-   - NSMBのMvL同期ロジックはできるだけそのまま使う。
-   - 対象は試合中packetだけでなく、接続、検索、peer/user info、session state、packet availability、packet sequencerまで含める。
-   - `Net::start*`全体を丸ごとバイパスするより、`Wifi::*`下位APIを差し替えて `Net::Core` の状態機械を自然に走らせる方向を優先する。
+1. NSMBが使うローカル通信境界を下側からWAN adapter化する。
+   - 試合中packetだけでなく、接続、検索、peer情報、session state、packet availability、packet tickを含めて置き換える。
+   - NSMB側のMvL同期ロジックはできるだけそのまま使う。
+   - 個別actor座標や描画状態を外から同期する方向には戻らない。
+2. 必要に応じてROM/メモリpatchでロビーや開始処理を短絡する。
+   - UI操作やLocalMP接続の完全再現にこだわらず、MvL開始へ自然に入る入口を探す。
+   - ただし任意PCから `Game::loadLevel` を直接呼ぶ方式はARM9 abortしたため、現状は不採用。
+3. 試合中はNSMB Centralの記述どおり、入力packet中心の同期に寄せる。
+   - RNGは `Net::random.value` / `Net::getRandom()` の共有seedと消費順一致で扱う。
+   - スター、8コインアイテム、ランダムステージなどは後続の検証対象。
 
-2. **直接stage開始は診断用に限定する**
-   - `StageStartSM`やstage sceneへ直接入れるフックは、必要条件の切り分け用。
-   - 最終形では、actor座標やrender/model stateを後付け同期する方向へは寄せない。
+## 現在の到達点
 
-3. **試合中はNSMBのinput packet同期へ寄せる**
-   - NSMB Centralの解析どおり、試合中が入力packet中心なら、そこをWAN packet bridgeに接続する。
-   - 乱数は個別actorを書き換えず、`Net::random.value` / `Net::getRandom()` の共有seedと消費順一致で扱う。
+- `Wifi::startChildScan` / `Wifi::startParent` / `Wifi::connectToParent` 相当をWAN adapter側で成功扱いにする診断経路を追加済み。
+- `0204619C` lower status probeを `1` にすると、host/clientとも `VSConnect::LoadGameSM` の継続更新に入ることを確認済み。
+- `PacketBridgeFakePeerInfo` でclientが「Marioがみつかりました」系の確認待ちへ進むことを確認済み。
+- `ClientConfirmToStageStart` により、client確認待ちの戻り先を診断用に `StageStartSM` へ差し替えられることを確認済み。
+- `StageStartSM` で `Net state1C=3`, `state20=0`, `state24=1`, `state2C=0`, `state34=0` を維持すると、host/clientとも `updateStageStartSM (021512B8)` が自然に呼ばれるところまで到達した。
+- `updateStageStartSM` の実命令をRAM dumpから逆アセンブルし、step 3は `02087E20` の下位byteが `2` になることと、`02004B74` の完了戻り値を待っていることを確認した。
+- ただし `state20=2` を最初から維持するとStageStartのcreate/render直後に黒画面・低速化へ入り、`updateStageStartSM` が継続しない。
+- `state20=0` でstep 3まで進め、step 3以降だけ `state20=2` にする診断フックも追加したが、現状は黒画面・低速化が残り、`stageGroup=9`、stage scene、player actor生成にはまだ到達していない。
+- 以前の `Net state1C=6`, `state20=2`, `state24=2` では `updateStageStartSM` が呼ばれず、`しばらくおまちください` のFontRenderer描画待ちへ張り付くことを確認済み。
+- `PacketBridgeStageStartPacketAction=3` 単独では改善しないことを確認済み。
 
-## 現在の状態
+## 現在のブロッカー
 
-- `Wifi::startChildScan` / `Wifi::startParent` / `Wifi::connectToParent` 相当をWAN adapter側で成功扱いにし、`0204619C` lower status probeを `1` にすると、host/clientとも `VSConnect::LoadGameSM` の継続更新に入る。
-- `PacketBridgeFakePeerInfo` により、clientは `getOpponentNickname()` 経由で「Marioがみつかりました」系の確認待ちへ進む。
-- `MaintainSessionPeers` は早すぎると接続探索を壊すため、現在は frame 1472 以降の診断として使う。
-- `PacketBridgeLiveFallbackLatestBefore + window=180` で、clientが要求する現在tickにhost packetがまだ無い場合も、直近の過去packetを渡せるようになった。
-- 診断用 `ClientConfirmToStageStart` により、clientのhost確認待ちタイムアウト時に `LoadGameSM` へ戻らず `StageStartSM` へ進ませるところまで確認した。
-- 最新の到達点は、host/clientとも `StageStartSM` へ入るが、まだstage scene開始には到達しない状態。
-  - `StageStartReadyProbe` で `Net state1C/state20/state24` と `Game::vsMode/localPlayerID` をStageStart中だけ維持できる。
-  - step 1からstep 2へ進めるための診断固定は入ったが、step 2以降で `stageGroup=9` / gameplay actor生成には未到達。
-  - `02046260` はStageStart前のLoadGame側で呼ばれているが、StageStart中にはまだ到達していない。
-  - `createStageStartSM (021515B4)` と `renderStageStartSM (0215125C)` は呼ばれるが、`updateStageStartSM (021512B8)` が呼ばれていないことをCallTraceで確認した。
-  - 次の境界は、VSConnect dispatcherがStageStartのupdateを呼ばない理由。`021528xx` / `021529xx` 近辺のsub menu transition/update条件を追う。
+`StageStartSM` step 3から先へ進まない。`vsConnect+0x144=3` までは入るが、`02087E20=2` を見せるタイミングを間違えると黒画面・低速化へ入る。
 
-## 実装済みの診断フック
+次に見るべきものは、LocalMP時に `02087E20` が `2` へ変わる自然な条件と、`02004B74` が完了を返すまでのファイルロード/スレッド状態。単に値だけを強制すると、StageStart render/updateの順序が崩れる可能性が高い。
+
+## 失敗済みまたは非採用の経路
+
+- 既存LocalMPの2台状態を後からWANへ切り替える方式
+  - 切り替え時の停止、desync、通信切断、低FPSが重く、最終形に向かない。
+- savestate方式
+  - LocalMP状態を保存・復帰しても通信切断や初期状態不一致を解決できない。
+- actor座標やrender/model stateの外部同期
+  - アニメーションや内部状態が揃わず、NSMBの同期ロジックを壊す。
+- 任意フレームからの直接 `Game::loadLevel`
+  - frame 933付近でARM9 abort。安全な呼び出し文脈ではない。
+- `StageStartSM` / `VSConnect::onUpdate` の直接呼び出し
+  - 再入文脈が不正でARM9 abort。診断用としても常用しない。
+
+## 実装済みの主な診断フック
 
 - game-state CSV拡張
-  - Net globals: `localAid`, `expectedConsoleCount`, `sessionState`, `moduleState` など。
-  - VSConnect fields: `+0x13C`, `+0x140`, `+0x144`, `+0x148`, `+0x153..0x158` など。
+  - Net globals、VSConnect fields、App sleep fields、ARM9 PC/LR/SP/CPSR。
 - `PacketBridgeFakePeerInfo`
-  - env: `MELONDS_NSML_PACKET_BRIDGE_FAKE_PEER_INFO`
-  - script option: `-PacketBridgeFakePeerInfo`
-  - `02001050`: fake `NicknameInfo` を返す。
-  - `0200102C`: fake stable 6-byte identityを返す。
-- `PacketBridgeBypassStartConnection`
-  - env: `MELONDS_NSML_PACKET_BRIDGE_BYPASS_START_CONNECTION`
-  - script option: `-PacketBridgeBypassStartConnection`
-  - `Net::startChildScan` / `Net::startParentBroadcast` wrapperを成功返しにする古い診断。現在は主方針ではない。
+  - peer nickname / identityを安定した値として返す。
 - `PacketBridgeBypassWifiStart`
-  - env: `MELONDS_NSML_PACKET_BRIDGE_BYPASS_WIFI_START`
-  - script option: `-PacketBridgeBypassWifiStart`
-  - `Wifi::connectToParent` / `Wifi::startChildScan` / `Wifi::startParent` 相当だけを成功返しにする新しい診断。
+  - Wifi start/connect系を成功扱いにする。
 - `MaintainSessionPeers`
-  - peer表、connected count、expected count、session completeを維持する診断。
+  - peer表、connected count、expected count、session completeを維持する。
 - `PacketBridgeLowerStatusResult`
-  - env: `MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT`
-  - script option: `-PacketBridgeLowerStatusResult`
-  - `0204619C` lower status probeの戻り値を固定する。host側は `1` にしないと `LoadGameSM` 更新が続かない。
+  - `0204619C` lower status probeの戻り値を固定する。
 - `PacketBridgeClientConfirmToStageStart`
-  - env: `MELONDS_NSML_PACKET_BRIDGE_CLIENT_CONFIRM_TO_STAGE_START`
-  - script option: `-PacketBridgeClientConfirmToStageStart`
-  - clientの確認待ちが `LoadGameSM` に戻る直前の `scheduleSubMenuChange(loadGameSM)` を、診断用に `StageStartSM` へ差し替える。
+  - client確認待ちの戻り先を診断用に `StageStartSM` へ差し替える。
 - `PacketBridgeStageStartReadyProbe`
-  - env: `MELONDS_NSML_PACKET_BRIDGE_STAGE_START_READY_PROBE`
-  - script option: `-PacketBridgeStageStartReadyProbe`
-  - `StageStartSM` 中だけ、下位Net ready状態と `Game::vsMode/localPlayerID` を維持する診断。
-- `SkipMvlStateCheck`
-  - script option: `-SkipMvlStateCheck`
-  - StageStart境界の診断では `stageGroup=9` 未到達が期待値なので、MvL state checkだけを明示的にskipする。disconnect/blank/ARM abortの検出とは分ける。
-
-## 主要検証ログ
-
-- `logs/nsmvl-ui-wan-wifi-status-one-script-trace-20260524`
-  - `0204619C -> 1` でhostも `02152018 -> 02150F70` に到達し、`LoadGameSM` が継続更新されることを確認。
-- `logs/nsmvl-ui-wan-wifi-status-one-maintain-both1472-20260524`
-  - frame 1472以降のsession peer維持でhostはStageStartSMへ進むが、clientは確認待ちから再スキャンへ戻る。
-- `logs/nsmvl-ui-wan-wifi-fallback180-20260524`
-  - live packet fallbackでclientがhost packetを読めるようになったが、host確認待ちはまだ自然成立しない。
-- `logs/nsmvl-ui-wan-client-confirm-stage-20260524`
-  - client確認待ちの戻り先を診断用にStageStartSMへ差し替え、clientもStageStartSMへ入ることを確認。
-- `logs/nsmvl-ui-wan-stage-step-trace-20260524`
-  - `StageStartSM` step 2で止まる。次はロード準備系の関数境界をさらに絞る。
-- `logs/nsmvl-ui-wan-stage-probe-call-bypass-20260524`
-  - StageStart中の `02046260 -> 0` / `02046C7C -> 1` 診断を追加しても、`StageStartSM` step 2からstage sceneへは未到達。
-- `logs/nsmvl-ui-wan-stage-calltrace-20260525`
-  - `02046260` はStageStart前のLoadGame側だけで呼ばれていた。StageStart中の待ちはこのprobe戻り値ではない。
-- `logs/nsmvl-ui-wan-stage-range-calltrace-20260525`
-  - `createStageStartSM` と `renderStageStartSM` は呼ばれるが、`updateStageStartSM` は呼ばれていない。
-- `logs/nsmvl-ui-wan-stage-dispatcher-calltrace-20260525`
-  - `021528xx` / `021529xx` dispatcher近辺を確認。次はsub menu transition/update抑制条件を絞る。
+  - StageStart中の下位Net ready状態と `Game::vsMode/localPlayerID` を維持する。
+  - `state1C/state20/state24/state2C/state34` を環境変数・スクリプト引数から変更可能。
+- `StageStartDispatchTrace`
+  - `VSConnect` / `StageStartSM` 近辺のPC、LR、VSConnect fields、Net stateをCSVに出す。
 
 ## 次にやること
 
-1. VSConnect dispatcherが `updateStageStartSM` を呼ばない理由を特定する。
-   - 優先トレース対象: `021528xx`, `021529xx`, `02152Axx`, VSConnect transition fields。
-   - `create/render` だけ呼ばれ、`update` が抑制される条件を確認する。
-2. `updateStageStartSM` が呼ばれる状態に戻してから、`02046260`, `0200EAD8`, `02046C7C`, `02004BFC`, `02004B74`, `020109E0` のロード準備境界を再確認する。
-3. StageStartの診断フックを、できるだけ下位Net/Wifi境界のadapterへ戻す。
-   - `ClientConfirmToStageStart` は最終形ではなく、host確認packet境界を特定するための一時フック。
-4. stage sceneに到達したら、host/clientの `stageGroup`, `localPlayerID`, player actor, star/RNG seed, packet tickを比較する。
-5. その後、試合中input packet同期に入り、local actor stateの直接書き換えに戻らず安定化する。
+1. `updateStageStartSM (021512B8)` step 3の分岐条件を追う。
+   - compact/full dispatch traceは追加済み。step 3条件は `02087E20 == 2` と `02004B74 != 0`。
+   - 次はLocalMPまたはより下位のNet/Wifi遷移から、`02087E20` とロードスレッド完了が自然にどう変わるかを比較する。
+2. step 3で待っているNet stateまたはpacket条件が分かったら、下位adapter側の状態遷移へ戻す。
+   - 診断用の強制値で進めるだけでなく、最終的には自然なWAN packet adapterの状態機械として扱う。
+3. stage sceneに到達したら、host/clientの `stageGroup`, `localPlayerID`, player actor, star/RNG seed, packet tickを比較する。
+4. 試合中input packet同期へ接続する。
+   - 死亡演出や通信切断を成功扱いしない。
+   - スクリーンショットとstate traceで確認する。
 
-## 重要アドレス
-
-- `Net::Core::startChildScan`: `0x0200F55C`
-- `Net::Core::childScanState`: `0x0200FD90`
-- `Net::connectToParent`: `0x0200F060`
-- `Net::startChildScan`: `0x020108E8`
-- `Net::startParentBroadcast`: `0x0201090C`
-- `Wifi::connectToParent` candidate: `0x020465C4`
-- `Wifi::startChildScan` candidate: `0x02046788`
-- `Wifi::startParent` candidate: `0x020469A4`
-- `VSConnect::updateLoadGameSM`: `0x02151E94`
-- `VSConnect::getOpponentNickname` helper: `0x02150F70`
-- `VSConnect::createLoadGameSM`: `0x021520A0`
-- `VSConnect::createStageStartSM`: `0x021515B4`
-- `Net::packet buffer`: `0x02087F00`
-- `Net state base`: `0x02087E00`
-- `Game::stageGroup`: `0x02085058`
-- `Game::localPlayerID`: `0x020850BC`
-- `Game::vsMode`: `0x020850C4`
-- Big Star actor ID: `0x0022`
-
-## 検証に必要なもの
+## 検証条件
 
 - ユーザー提供の `roms/nsmb.nds` を使用する。
-- ROM本体や商用素材はリポジトリに含めない。
+- ROM本体や商用素材はリポジトリへ含めない。
+- 「通信が切断されました」は失敗として扱う。
+- スター取得やゲーム進行はスクリーンショットとstate traceで確認し、死亡や別演出を誤判定しない。
 
-## 参考
+## 参照
 
 - NSMB Central: https://bookstack.nsmbcentral.net/books/new-super-mario-bros/page/mario-vs-luigi
 - `external/NSMB-Code-Reference`

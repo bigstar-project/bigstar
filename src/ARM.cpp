@@ -272,6 +272,50 @@ static bool NSMLPacketBridgeStageStartReadyProbe()
     return enabled != 0;
 }
 
+static int NSMLPacketBridgeStageStartPacketAction()
+{
+    static int action = -2;
+    if (action == -2)
+    {
+        if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_PACKET_ACTION"))
+            action = static_cast<int>(strtol(value, nullptr, 0));
+        else
+            action = -1;
+    }
+    return action;
+}
+
+static u32 NSMLPacketBridgeStageStartEnvU32(const char* name, u32 fallback)
+{
+    if (const char* value = getenv(name))
+        return static_cast<u32>(strtoul(value, nullptr, 0));
+    return fallback;
+}
+
+static bool NSMLStageStartDispatchTraceEnabled()
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = NSMLEnvFlag("MELONDS_NSML_STAGE_START_DISPATCH_TRACE") ? 1 : 0;
+    return enabled != 0;
+}
+
+static u32 NSMLStageStartDispatchTraceStartFrame()
+{
+    static u32 startFrame = 0xFFFFFFFF;
+    if (startFrame == 0xFFFFFFFF)
+        startFrame = NSMLPacketBridgeEnvFrame("MELONDS_NSML_STAGE_START_DISPATCH_TRACE_START_FRAME", 0);
+    return startFrame;
+}
+
+static u32 NSMLStageStartDispatchTraceEndFrame()
+{
+    static u32 endFrame = 0xFFFFFFFF;
+    if (endFrame == 0xFFFFFFFF)
+        endFrame = NSMLPacketBridgeEnvFrame("MELONDS_NSML_STAGE_START_DISPATCH_TRACE_END_FRAME", 0);
+    return endFrame;
+}
+
 static u32 NSMLPacketBridgeWaitTimeoutMs()
 {
     static u32 timeout = 0xFFFFFFFF;
@@ -354,6 +398,152 @@ static bool IsNSMLStageStartSM(NDS& nds)
     return vsConnectBase != 0 && nds.ARM9Read32(vsConnectBase + 0x120) == 0x021512B8;
 }
 
+static void TraceNSMLStageStartDispatch(ARM* cpu, u32 instrAddr)
+{
+    if (!cpu || cpu->Num != 0 || !NSMLStageStartDispatchTraceEnabled())
+        return;
+    if (instrAddr < 0x02151200 || instrAddr > 0x02152B00)
+        return;
+
+    static int fullTrace = -1;
+    if (fullTrace < 0)
+        fullTrace = NSMLEnvFlag("MELONDS_NSML_STAGE_START_DISPATCH_TRACE_FULL") ? 1 : 0;
+    if (!fullTrace
+        && ((instrAddr > 0x02151320 && instrAddr < 0x02151580)
+            || (instrAddr > 0x02151620 && instrAddr < 0x02152800)))
+    {
+        return;
+    }
+    if (!fullTrace)
+    {
+        switch (instrAddr)
+        {
+        case 0x0215125C: // renderStageStartSM entry
+        case 0x021512B8: // updateStageStartSM entry
+        case 0x021515B4: // createStageStartSM entry
+        case 0x0215280C: // apply scheduled submenu data
+        case 0x0215281C: // write create callback
+        case 0x0215282C: // write update callback
+        case 0x0215283C: // write render callback
+        case 0x02152894: // call create callback
+        case 0x02152978: // VSConnect onRender entry
+        case 0x02152998: // render callback dispatch setup
+        case 0x021529C0: // call render callback
+        case 0x021529FC: // VSConnect onUpdate entry
+        case 0x02152A48: // decrement transition delay
+        case 0x02152A5C: // scheduled submenu transition
+        case 0x02152A94: // call update callback
+            break;
+        default:
+            return;
+        }
+    }
+
+    const u32 frame = cpu->NDS.NumFrames;
+    if (frame < NSMLStageStartDispatchTraceStartFrame())
+        return;
+    const u32 endFrame = NSMLStageStartDispatchTraceEndFrame();
+    if (endFrame != 0 && frame > endFrame)
+        return;
+
+    struct TraceConfig
+    {
+        bool Checked = false;
+        FILE* LogFile = nullptr;
+    };
+    static TraceConfig cfg;
+    if (!cfg.Checked)
+    {
+        std::lock_guard<std::mutex> configLock(NSMLTraceConfigMutex);
+        if (!cfg.Checked)
+        {
+            if (const char* logPath = getenv("MELONDS_NSML_STAGE_START_DISPATCH_TRACE_LOG"))
+            {
+                if (logPath[0])
+                    cfg.LogFile = fopen(logPath, "w");
+            }
+            if (cfg.LogFile)
+            {
+                fprintf(cfg.LogFile,
+                    "nds,frame,pc,lr,sp,cpsr,r0,r1,r2,r3,scene_current,scene_next,net_tick,net_action,vs_base,"
+                    "f118,f120,f128,f134,f138,f13c,f140,f144,f148,f154,f158,f15c,f160\n");
+            }
+            cfg.Checked = true;
+        }
+    }
+    if (!cfg.LogFile)
+        return;
+
+    struct BaseCache
+    {
+        u32 Frame = 0xFFFFFFFF;
+        u32 Base = 0;
+    };
+    static std::map<NDS*, BaseCache> baseCache;
+    BaseCache& cached = baseCache[&cpu->NDS];
+    if (cached.Frame != frame)
+    {
+        cached.Frame = frame;
+        cached.Base = NSMLFindObjectBaseByID(cpu->NDS, 0x0006);
+    }
+    const u32 base = cached.Base;
+    if (base == 0)
+        return;
+
+    const u32 f118 = cpu->NDS.ARM9Read32(base + 0x118);
+    const u32 f120 = cpu->NDS.ARM9Read32(base + 0x120);
+    const u32 f128 = cpu->NDS.ARM9Read32(base + 0x128);
+    const u32 f134 = cpu->NDS.ARM9Read32(base + 0x134);
+    const u32 f138 = cpu->NDS.ARM9Read32(base + 0x138);
+    const bool stageStartRelated =
+        f118 == 0x021515B4 || f120 == 0x021512B8 || f128 == 0x0215125C ||
+        f134 == 0x02156678 || f138 == 0x02156678 ||
+        (instrAddr >= 0x02151200 && instrAddr <= 0x02151320) ||
+        (instrAddr >= 0x02152800 && instrAddr <= 0x02152B00);
+    if (!stageStartRelated && !IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
+        return;
+
+    static std::map<NDS*, std::map<u32, u32>> lastLoggedFrameByPC;
+    u32& lastFrame = lastLoggedFrameByPC[&cpu->NDS][instrAddr];
+    if (lastFrame == frame)
+        return;
+    lastFrame = frame;
+
+    std::lock_guard<std::mutex> outputLock(NSMLTraceOutputMutex);
+    fprintf(cfg.LogFile,
+        "%p,%u,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%04X,%04X,%04X,%02X,%08X,"
+        "%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X\n",
+        static_cast<void*>(&cpu->NDS),
+        frame,
+        instrAddr,
+        cpu->R[14],
+        cpu->R[13],
+        cpu->CPSR,
+        cpu->R[0],
+        cpu->R[1],
+        cpu->R[2],
+        cpu->R[3],
+        cpu->NDS.ARM9Read16(0x0203B484),
+        cpu->NDS.ARM9Read16(0x0203B480),
+        cpu->NDS.ARM9Read16(0x02087F00),
+        cpu->NDS.ARM9Read8(0x02087F04),
+        base,
+        f118,
+        f120,
+        f128,
+        f134,
+        f138,
+        cpu->NDS.ARM9Read32(base + 0x13C),
+        cpu->NDS.ARM9Read32(base + 0x140),
+        cpu->NDS.ARM9Read32(base + 0x144),
+        cpu->NDS.ARM9Read32(base + 0x148),
+        cpu->NDS.ARM9Read32(base + 0x154),
+        cpu->NDS.ARM9Read32(base + 0x158),
+        cpu->NDS.ARM9Read32(base + 0x15C),
+        cpu->NDS.ARM9Read32(base + 0x160));
+    fflush(cfg.LogFile);
+}
+
 static bool HandleNSMLStageStartReadyProbeCall(ARM* cpu, u32 instrAddr)
 {
     if (!cpu || cpu->Num != 0)
@@ -411,12 +601,22 @@ static void NSMLProbeStageStartReadyBits(NDS& nds)
     // the same "ready for stage transition" state that LocalMP would provide.
     // Keep this scoped to StageStartSM so the earlier search/confirm flow can
     // still exercise the WAN adapter path naturally.
-    nds.ARM9Write8(0x02087E1C, 2);
-    nds.ARM9Write16(0x02087E20, 2);
-    nds.ARM9Write8(0x02087E24, 2);
+    const u32 vsStep = nds.ARM9Read32(vsConnectBase + 0x144);
+    u32 net20 = NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20", 2);
+    if (vsStep >= 3)
+        net20 = NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_STEP3", net20);
+
+    nds.ARM9Write32(0x02087E14, NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET14", 1));
+    nds.ARM9Write8(0x02087E1C, static_cast<u8>(NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET1C", 6)));
+    nds.ARM9Write16(0x02087E20, static_cast<u16>(net20));
+    nds.ARM9Write8(0x02087E24, static_cast<u8>(NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET24", 2)));
+    nds.ARM9Write32(0x02087E2C, NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET2C", 0));
+    nds.ARM9Write8(0x02087E34, static_cast<u8>(NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET34", 0)));
+    const int packetAction = NSMLPacketBridgeStageStartPacketAction();
+    nds.ARM9Write32(0x02087F04, packetAction >= 0 ? (0xFFFF0000u | (static_cast<u32>(packetAction) & 0xFFu)) : 0u);
     nds.ARM9Write32(0x0208ADD8, 0);
 
-    if (nds.ARM9Read32(vsConnectBase + 0x144) == 1)
+    if (vsStep == 1)
     {
         const char* role = getenv("MELONDS_NSML_ROLE");
         const bool isClient = role && strcmp(role, "client") == 0;
@@ -3814,6 +4014,7 @@ void ARMv5::Execute()
                 continue;
             }
             PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
+            TraceNSMLStageStartDispatch(this, instrAddr);
             TraceNSMLCallImpl(this, instrAddr);
             TraceNSMLRandomCall(this, instrAddr);
 
@@ -3917,6 +4118,7 @@ void ARMv5::Execute()
                 }
                 PatchNSMLClientConfirmSchedule(this, instrAddr);
                 PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
+                TraceNSMLStageStartDispatch(this, instrAddr);
                 TraceNSMLCallImpl(this, instrAddr);
                 TraceNSMLRandomCall(this, instrAddr);
 
@@ -3995,6 +4197,7 @@ void ARMv5::Execute()
                 }
                 PatchNSMLClientConfirmSchedule(this, instrAddr);
                 PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
+                TraceNSMLStageStartDispatch(this, instrAddr);
                 TraceNSMLCallImpl(this, instrAddr);
                 TraceNSMLRandomCall(this, instrAddr);
 
