@@ -46,18 +46,18 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - ARM data/prefetch abortログにframe番号を出すようにした。ARM9 data abort時はDTCM-awareなstack/refに加え、ITCM-awareなTCM設定/code window診断も出す。
 - 任意PCのcall traceが実際に効くように、ARM9実行ループ側から `TraceNSMLCallImpl` を呼ぶようにした。従来はrandom call trace経路に依存しており、指定PCのtraceとして不十分だった。
 - ARM9 data abort診断に `r1` 引数構造体dumpと `updateHintVec_` ITCM code dumpを追加した。
+- call trace CSVに `r4` から `r12` までを追加した。`PlayerModel::render` のようにcallee-saved register保持が疑わしい箇所を追える。
+- 診断限定の `GuardPlayerModelRenderPtrs` / `MELONDS_NSML_GUARD_PLAYER_MODEL_RENDER_PTRS` を追加した。`PlayerModel::render` でhead model pointerを保持する `r4` が低アドレス化した場合だけ、`PlayerModel` 構造体上の有効なhead model pointerから復元する。
 
 ## 現在わかっていること
 
 - host/clientともstage scene、player actor、Big Star actorを生成できる。
 - `Net::random.value=0x00000100` などで初期Big Star位置は一致させられる。
 - `playerCount=2` と stage scene runtime words `word154=1, word160=0xDA` は、試合中player更新を動かす有力条件。
-- ただし現在の直接stage開始ルートでは、hostのlocal player0が動かない。
 - 2026-05-22の再検証では、host/clientとも `inputPlayer0Held=0x10` まで入っているため、問題は入力注入ではない。
-- client側のremote player0は同じ入力で動く。
+- 当初host側のlocal player0は同じ入力でも動かなかったが、`Stage::actorFreezeFlag` 候補をstage中だけ `0` に固定すると移動更新が走る。
+- client側のremote player0は、`PacketBridgeLiveFallbackLatestBefore` をstage生成後から有効化するとhost入力を消費して動く。
   - client 2500f: `playerActor0X=0x1FD70`, `playerActor0VelX=0x14B0`
-- host側のlocal player0は同じ入力でも動かない。
-  - host 2500f: `playerActor0X=0x8000`, `playerActor0VelX=0`
 - write traceではclientのplayer0座標/速度に `PC=0209FD70/0209FD88` から毎フレーム書き込みがある。
 - `0209FD18` 周辺の逆アセンブルでは、`0x020C9250` のbyte値とactor側freeze maskのANDで早期returnする。
 - `0x020C9250` はUS `Stage::actorFreezeFlag` 相当のA2DJ候補。hostでは `0x26`、clientでは `0x00` になっていた。
@@ -79,6 +79,8 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - abort時stackでは `020572F8` から `updateHintVec_` が呼ばれており、`r5=0x00002199`、`r0=r5+0x3c=0x000021D5` の形で低アドレスが渡っている。
 - さらに前段の戻り先は `02128AC4` で、PlayerModel/render系の関数内で `r4+4` を `020572B8` へ渡している。ここで `r4=0x00002195` になっているため、次はこの低アドレス化したmodel/render pointerの出所を追う。
 - `PacketBridgeForceMvlFileCache` を単独で呼べるようにし、復帰PC / CPSR / SPガードを追加した。ただし現状のframe hookからFS cache loadを呼ぶと `pc=00000098` などのprefetch abortを起こすため、このルートはまだ安全な解決策ではない。
+- write traceでは `PlayerModel::models[1].heads[0]` 相当フィールド自体は有効なModel pointerに初期化されたままだった。低アドレス化は構造体メモリ破壊ではなく、`PlayerModel::render` 中で保持している `r4` が描画系呼び出し後に壊れる症状として出ている。
+- `GuardPlayerModelRenderPtrs` を入れると `updateHintVec_+0x48` abortは回避できるrunがある。ただし2600f時点でもhost/clientの画面状態は一致せず、3200fではclientがメニューへ戻るrunを確認した。したがってrender guardは診断の先送りには使えるが、直接stage開始ルートの根本解決ではない。
 
 ## 直近の検証ログ
 
@@ -123,6 +125,15 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - client abort時に `r1` 引数構造体と `updateHintVec_` ITCM codeをdump。
   - `updateHintVec_` の未ロードではなく、callerから渡ったhint vector pointer `r0=0x000021D5` が不正と確定。
   - 直前callerは `020572B8` 系、さらに前段は `02128AC0` 付近のPlayerModel/render系処理。
+- `logs/nsmvl-model-head-write-trace-20260524`
+  - `PlayerModel::models[1].heads[0]` 周辺のwrite traceを取得。
+  - 該当フィールドはframe 2005で有効Model pointerへ初期化され、その後の破壊writeは見えない。
+- `logs/nsmvl-render-guard-2600-20260524`
+  - `GuardPlayerModelRenderPtrs` でclient側の `updateHintVec_+0x48` abortを回避し、2600fまで到達。
+  - ただしスクリーンショット上、host/clientの画面状態は一致していない。
+- `logs/nsmvl-render-guard-3200-20260524`
+  - 3200fまで延長するとclientがメニューへ戻り、MvL state checkに失敗。
+  - hostはstage内に残っているため、直接stage開始ルートはセッション維持条件がまだ不足している。
 
 ## 現在のブロッカー
 
@@ -130,15 +141,16 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 
 次のブロッカーは、packet消費を動かした後にclient側で `updateHintVec_+0x48` のARM9 data abortが出ること、および同じ条件でもclientがstage遷移に失敗するrunがあること。host local player0とclient remote player0の移動までは到達したが、render/model初期化またはplayer model状態がまだ自然なMvL開始状態と一致していない。
 
-現時点では、`updateHintVec_` に渡るhint vector pointerが `0x000021D5` という低アドレスになっていることまで確定した。これは `020572B8` 系callerの `r5=0x00002199`、さらにPlayerModel/render系処理の `r4=0x00002195` から来ているため、モデルリソース選択またはplayer model object初期化の不足を疑う。
+現時点では、`updateHintVec_` に渡るhint vector pointerが `0x000021D5` という低アドレスになっていることまで確定した。これは `020572B8` 系callerの `r5=0x00002199`、さらにPlayerModel/render系処理の `r4=0x00002195` から来ている。
+
+ただしwrite trace上、`PlayerModel` 構造体内のhead model pointerは破壊されていない。低アドレス化は `PlayerModel::render` の途中で保持レジスタが壊れる形で出ており、直接stage開始ルートが自然な描画/モデル初期化状態を作れていない可能性が高い。guardでabortを避けてもclientが後でメニューへ戻るため、このルートを最終形にするのは筋が悪い。
 
 ## 次にやること
 
-1. `02128674` 付近のPlayerModel/render系関数で、`r4=0x00002195` がどこから来るかを追う。特に `sl/r10=021ACF18` 配下のmodel pointer配列、`0201965C` 呼び出し、`020572B8` へ渡す直前の値を重点的に見る。
-2. direct stage routeで不足しているplayer model / render object / MvL file cache初期化条件を特定する。
-3. frame hookからのFS cache loadは不安全なので、自然な呼び出し地点を探すか、ROM/メモリpatch側で安全な初期化入口へ寄せる。
-4. ARM abortなしでhost local player0とclient remote player0が同じ入力で動くrunを作る。smokeでは `RequireClientRemotePlayer0Movement` を使い、偽陽性を避ける。
-5. 条件が固まったら、診断patchをROM patchまたは下位MP adapterへ縮小する。
+1. 直接stage開始ルートは診断専用と割り切る。`GuardPlayerModelRenderPtrs` はpacket同期の先を見るための一時ガードであり、最終実装にはしない。
+2. clientがメニューへ戻る原因を、下位MP/session状態またはscene遷移条件の不足として追う。特に stage中に `stageGroup/vsMode/stageSceneBase` が0へ戻る直前のNet/session writeを調べる。
+3. 最終方針としては、自然なMvL開始状態を作るROM/メモリpatch、または接続/ロビー段階からの下位MP adapterへ寄せる。直接stage開始後に個別状態を継ぎ足す方針は優先度を下げる。
+4. smokeでは `RequireClientRemotePlayer0Movement` とスクリーンショット確認を継続し、frame到達だけの偽陽性を避ける。
 
 ## 重要アドレス
 

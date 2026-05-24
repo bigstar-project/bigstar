@@ -146,6 +146,9 @@ param(
     [int]$ForceStageActorFreezeFlagStartFrame = 0,
     [int]$ForceStageActorFreezeFlagEndFrame = 0,
     [string]$ForceStageActorFreezeFlagValue = "0",
+    [switch]$GuardPlayerModelRenderPtrs,
+    [int]$GuardPlayerModelRenderPtrsStartFrame = 0,
+    [int]$GuardPlayerModelRenderPtrsEndFrame = 0,
     [int]$DropMPAfterFrame = 0,
     [switch]$LanWanMode,
     [switch]$NoLanMP,
@@ -697,6 +700,15 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY_PLAYER_ARG -ErrorAction SilentlyContinue
+    }
+    if ($GuardPlayerModelRenderPtrs) {
+        $env:MELONDS_NSML_GUARD_PLAYER_MODEL_RENDER_PTRS = "1"
+        if ($GuardPlayerModelRenderPtrsStartFrame -gt 0) { $env:MELONDS_NSML_GUARD_PLAYER_MODEL_RENDER_PTRS_START_FRAME = "$GuardPlayerModelRenderPtrsStartFrame" } else { Remove-Item Env:\MELONDS_NSML_GUARD_PLAYER_MODEL_RENDER_PTRS_START_FRAME -ErrorAction SilentlyContinue }
+        if ($GuardPlayerModelRenderPtrsEndFrame -gt 0) { $env:MELONDS_NSML_GUARD_PLAYER_MODEL_RENDER_PTRS_END_FRAME = "$GuardPlayerModelRenderPtrsEndFrame" } else { Remove-Item Env:\MELONDS_NSML_GUARD_PLAYER_MODEL_RENDER_PTRS_END_FRAME -ErrorAction SilentlyContinue }
+    } else {
+        Remove-Item Env:\MELONDS_NSML_GUARD_PLAYER_MODEL_RENDER_PTRS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_GUARD_PLAYER_MODEL_RENDER_PTRS_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_GUARD_PLAYER_MODEL_RENDER_PTRS_END_FRAME -ErrorAction SilentlyContinue
     }
     if ($CallTrace) {
         $env:MELONDS_NSML_CALL_TRACE = "1"

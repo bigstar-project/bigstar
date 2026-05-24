@@ -2628,7 +2628,7 @@ static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
                 {
                     cfg.LogFile = fopen(logPath, "w");
                     if (cfg.LogFile)
-                        fprintf(cfg.LogFile, "nds,frame,pc,caller,lr,sp,cpsr,r0,r1,r2,r3,net_tick,net_action,net_seq_ids,net_seq_cursors,net_send_bitmap,net_seq_lengths,net_recv_bitmap,net_random,vs_step,vs_timer,vs_flags,r0_dump,r1_dump,r2_dump,r3_dump,sp_dump\n");
+                        fprintf(cfg.LogFile, "nds,frame,pc,caller,lr,sp,cpsr,r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12,net_tick,net_action,net_seq_ids,net_seq_cursors,net_send_bitmap,net_seq_lengths,net_recv_bitmap,net_random,vs_step,vs_timer,vs_flags,r0_dump,r1_dump,r2_dump,r3_dump,sp_dump\n");
                 }
             }
             cfg.Checked = true;
@@ -2675,7 +2675,7 @@ static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
     FILE* out = cfg.LogFile ? cfg.LogFile : stdout;
     std::lock_guard<std::mutex> outputLock(NSMLTraceOutputMutex);
     fprintf(out,
-        "%p,%u,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%04X,%02X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,",
+        "%p,%u,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%04X,%02X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,",
         static_cast<void*>(&cpu->NDS),
         cpu->NDS.NumFrames,
         instrAddr,
@@ -2687,6 +2687,15 @@ static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
         r1,
         r2,
         r3,
+        cpu->R[4],
+        cpu->R[5],
+        cpu->R[6],
+        cpu->R[7],
+        cpu->R[8],
+        cpu->R[9],
+        cpu->R[10],
+        cpu->R[11],
+        cpu->R[12],
         netTick,
         netAction,
         netSeqIDs,
@@ -2715,6 +2724,80 @@ static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
 bool TraceNSMLRandomCall(ARM* cpu, u32 instrAddr)
 {
     return TraceNSMLRandomCallImpl(cpu, instrAddr, 0, false);
+}
+
+static void PatchNSMLPlayerModelRenderPtrs(ARM* cpu, u32 instrAddr)
+{
+    struct Config
+    {
+        bool Checked = false;
+        bool Enabled = false;
+        u32 StartFrame = 0;
+        u32 EndFrame = 0xFFFFFFFF;
+    };
+
+    static Config cfg;
+    if (!cfg.Checked)
+    {
+        std::lock_guard<std::mutex> configLock(NSMLTraceConfigMutex);
+        if (!cfg.Checked)
+        {
+            cfg.Enabled = NSMLEnvFlag("MELONDS_NSML_GUARD_PLAYER_MODEL_RENDER_PTRS");
+            if (const char* startFrame = getenv("MELONDS_NSML_GUARD_PLAYER_MODEL_RENDER_PTRS_START_FRAME"))
+                cfg.StartFrame = static_cast<u32>(strtoul(startFrame, nullptr, 0));
+            if (const char* endFrame = getenv("MELONDS_NSML_GUARD_PLAYER_MODEL_RENDER_PTRS_END_FRAME"))
+                cfg.EndFrame = static_cast<u32>(strtoul(endFrame, nullptr, 0));
+            cfg.Checked = true;
+        }
+    }
+
+    if (!cfg.Enabled || !cpu || cpu->Num != 0) return;
+    if (cpu->NDS.NumFrames < cfg.StartFrame || cpu->NDS.NumFrames > cfg.EndFrame) return;
+    if (instrAddr != 0x02128AB4 && instrAddr != 0x02128AC0) return;
+
+    const u32 playerModel = cpu->R[10];
+    if (!IsNSMLMainRAMAddress(playerModel)) return;
+
+    const s32 modelState = static_cast<s8>(ReadNSMLTraceByte(cpu, playerModel + 0x3C1));
+    u32 headState = ReadNSMLTraceByte(cpu, playerModel + 0x3C2);
+    if (modelState < 0 || modelState > 1) return;
+    if (headState > 3) headState = 0;
+
+    const u32 modelCollection = playerModel + 0x40 + (static_cast<u32>(modelState) * 0x14);
+    const u32 bodyModel = ReadNSMLTrace32(cpu, modelCollection);
+    const u32 headModel = ReadNSMLTrace32(cpu, modelCollection + 0x04 + (headState * 0x04));
+    if (!IsNSMLMainRAMAddress(headModel)) return;
+
+    bool patched = false;
+    const u32 oldR4 = cpu->R[4];
+    const u32 oldR0 = cpu->R[0];
+    if (!IsNSMLMainRAMAddress(cpu->R[4]))
+    {
+        cpu->R[4] = headModel;
+        patched = true;
+    }
+    if (instrAddr == 0x02128AC0 && !IsNSMLMainRAMAddress(cpu->R[0]))
+    {
+        cpu->R[0] = headModel + 0x04;
+        patched = true;
+    }
+
+    if (patched)
+    {
+        Log(LogLevel::Warn,
+            "NSMB guard: repaired PlayerModel render ptr frame=%u pc=%08X playerModel=%08X modelState=%d headState=%u body=%08X head=%08X oldR4=%08X newR4=%08X oldR0=%08X newR0=%08X\n",
+            cpu->NDS.NumFrames,
+            instrAddr,
+            playerModel,
+            modelState,
+            headState,
+            bodyModel,
+            headModel,
+            oldR4,
+            cpu->R[4],
+            oldR0,
+            cpu->R[0]);
+    }
 }
 
 bool TraceNSMLRandomCallFromJIT(ARM* cpu, u32 instrAddr, u32 lr)
@@ -3434,6 +3517,7 @@ void ARMv5::Execute()
                 NDS.ARM9Timestamp++;
                 continue;
             }
+            PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
             TraceNSMLCallImpl(this, instrAddr);
             TraceNSMLRandomCall(this, instrAddr);
 
@@ -3515,6 +3599,7 @@ void ARMv5::Execute()
                     NDS.ARM9Timestamp++;
                     continue;
                 }
+                PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
                 TraceNSMLCallImpl(this, instrAddr);
                 TraceNSMLRandomCall(this, instrAddr);
 
@@ -3571,6 +3656,7 @@ void ARMv5::Execute()
                     NDS.ARM9Timestamp++;
                     continue;
                 }
+                PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
                 TraceNSMLCallImpl(this, instrAddr);
                 TraceNSMLRandomCall(this, instrAddr);
 
