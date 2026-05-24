@@ -2714,7 +2714,6 @@ static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
 
 bool TraceNSMLRandomCall(ARM* cpu, u32 instrAddr)
 {
-    TraceNSMLCallImpl(cpu, instrAddr);
     return TraceNSMLRandomCallImpl(cpu, instrAddr, 0, false);
 }
 
@@ -3312,6 +3311,26 @@ void ARMv5::DataAbort()
             ReadNSMLTrace32(this, R[10] + 0x08),
             ReadNSMLTrace32(this, R[10] + 0x0C));
         Log(LogLevel::Warn,
+            "ARM9: abort args frame=%u r1=%08X [%08X %08X %08X %08X %08X %08X %08X %08X] r1+20 [%08X %08X %08X %08X %08X %08X %08X %08X]\n",
+            NDS.NumFrames,
+            R[1],
+            ReadNSMLTrace32(this, R[1] + 0x00),
+            ReadNSMLTrace32(this, R[1] + 0x04),
+            ReadNSMLTrace32(this, R[1] + 0x08),
+            ReadNSMLTrace32(this, R[1] + 0x0C),
+            ReadNSMLTrace32(this, R[1] + 0x10),
+            ReadNSMLTrace32(this, R[1] + 0x14),
+            ReadNSMLTrace32(this, R[1] + 0x18),
+            ReadNSMLTrace32(this, R[1] + 0x1C),
+            ReadNSMLTrace32(this, R[1] + 0x20),
+            ReadNSMLTrace32(this, R[1] + 0x24),
+            ReadNSMLTrace32(this, R[1] + 0x28),
+            ReadNSMLTrace32(this, R[1] + 0x2C),
+            ReadNSMLTrace32(this, R[1] + 0x30),
+            ReadNSMLTrace32(this, R[1] + 0x34),
+            ReadNSMLTrace32(this, R[1] + 0x38),
+            ReadNSMLTrace32(this, R[1] + 0x3C));
+        Log(LogLevel::Warn,
             "ARM9: abort tcm frame=%u itcmSize=%08X itcmSetting=%08X dtcmBase=%08X dtcmMask=%08X dtcmSetting=%08X\n",
             NDS.NumFrames,
             ITCMSize,
@@ -3331,6 +3350,25 @@ void ARMv5::DataAbort()
             ReadNSMLTrace32(this, R[15] + 0x04),
             ReadNSMLTrace32(this, R[15] + 0x08),
             ReadNSMLTrace32(this, R[15] + 0x0C));
+        Log(LogLevel::Warn,
+            "ARM9: abort updateHintVec frame=%u [%08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X]\n",
+            NDS.NumFrames,
+            ReadNSMLTrace32(this, 0x01FF8BE0),
+            ReadNSMLTrace32(this, 0x01FF8BE4),
+            ReadNSMLTrace32(this, 0x01FF8BE8),
+            ReadNSMLTrace32(this, 0x01FF8BEC),
+            ReadNSMLTrace32(this, 0x01FF8BF0),
+            ReadNSMLTrace32(this, 0x01FF8BF4),
+            ReadNSMLTrace32(this, 0x01FF8BF8),
+            ReadNSMLTrace32(this, 0x01FF8BFC),
+            ReadNSMLTrace32(this, 0x01FF8C00),
+            ReadNSMLTrace32(this, 0x01FF8C04),
+            ReadNSMLTrace32(this, 0x01FF8C08),
+            ReadNSMLTrace32(this, 0x01FF8C0C),
+            ReadNSMLTrace32(this, 0x01FF8C10),
+            ReadNSMLTrace32(this, 0x01FF8C14),
+            ReadNSMLTrace32(this, 0x01FF8C18),
+            ReadNSMLTrace32(this, 0x01FF8C1C));
     }
 
     u32 oldcpsr = CPSR;
@@ -3396,6 +3434,7 @@ void ARMv5::Execute()
                 NDS.ARM9Timestamp++;
                 continue;
             }
+            TraceNSMLCallImpl(this, instrAddr);
             TraceNSMLRandomCall(this, instrAddr);
 
             if ((instrAddr < FastBlockLookupStart || instrAddr >= (FastBlockLookupStart + FastBlockLookupSize))
@@ -3476,6 +3515,7 @@ void ARMv5::Execute()
                     NDS.ARM9Timestamp++;
                     continue;
                 }
+                TraceNSMLCallImpl(this, instrAddr);
                 TraceNSMLRandomCall(this, instrAddr);
 
                 // prefetch
@@ -3531,6 +3571,7 @@ void ARMv5::Execute()
                     NDS.ARM9Timestamp++;
                     continue;
                 }
+                TraceNSMLCallImpl(this, instrAddr);
                 TraceNSMLRandomCall(this, instrAddr);
 
                 // prefetch

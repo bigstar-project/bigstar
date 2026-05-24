@@ -44,6 +44,8 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `scripts/run-nsmb-mvl-lan-route-smoke.ps1` は、デフォルトでARM data/prefetch abortを検出して失敗扱いにする。
 - `scripts/run-nsmb-mvl-lan-route-smoke.ps1` に `RequireClientRemotePlayer0Movement` を追加。frame到達だけで成功扱いにせず、client側がremote player0入力を消費して移動したかを検証できる。
 - ARM data/prefetch abortログにframe番号を出すようにした。ARM9 data abort時はDTCM-awareなstack/refに加え、ITCM-awareなTCM設定/code window診断も出す。
+- 任意PCのcall traceが実際に効くように、ARM9実行ループ側から `TraceNSMLCallImpl` を呼ぶようにした。従来はrandom call trace経路に依存しており、指定PCのtraceとして不十分だった。
+- ARM9 data abort診断に `r1` 引数構造体dumpと `updateHintVec_` ITCM code dumpを追加した。
 
 ## 現在わかっていること
 
@@ -73,6 +75,9 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - 両側で `Stage::actorFreezeFlag=0`、latest-before fallbackをstage後に有効化すると、host local player0とclient remote player0が動くrunはある。ただしclient側 `pc=01FF8C28` abortが再現するrunもある。
 - `pc=01FF8C28` は `external/NSMB-Code-Reference` 上の `updateHintVec_+0x48` 付近。ITCM-aware code windowでは、実際には `pc-8` 相当の `ldrne ip, [r0, lr, lsl #2]` が `r0=0x000021D5` を参照してdata abortしている。
 - つまり `01FF8xxx` のコード未ロードではなく、3D描画/モデル側へ渡っているrender/model状態の一部が低アドレス化している可能性が高い。
+- `updateHintVec_` 自体のITCM dumpから、abort箇所は `r0` をhint bit vectorとして扱うループ内の `ldrne ip, [r0, lr, lsl #2]` と確定した。
+- abort時stackでは `020572F8` から `updateHintVec_` が呼ばれており、`r5=0x00002199`、`r0=r5+0x3c=0x000021D5` の形で低アドレスが渡っている。
+- さらに前段の戻り先は `02128AC4` で、PlayerModel/render系の関数内で `r4+4` を `020572B8` へ渡している。ここで `r4=0x00002195` になっているため、次はこの低アドレス化したmodel/render pointerの出所を追う。
 - `PacketBridgeForceMvlFileCache` を単独で呼べるようにし、復帰PC / CPSR / SPガードを追加した。ただし現状のframe hookからFS cache loadを呼ぶと `pc=00000098` などのprefetch abortを起こすため、このルートはまだ安全な解決策ではない。
 
 ## 直近の検証ログ
@@ -114,6 +119,10 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `logs/nsmvl-mvl-cache-safe-guard-20260522`
   - MvL file cache強制ロードを単独化し、PC/mode/SP guard付きで試したrun。
   - `force MvL file cache` 後に `pc=00000098` prefetch abort。frame hookからのFS cache load呼び出しはまだ不安全。
+- `logs/nsmvl-abort-updatehint-code-20260522`
+  - client abort時に `r1` 引数構造体と `updateHintVec_` ITCM codeをdump。
+  - `updateHintVec_` の未ロードではなく、callerから渡ったhint vector pointer `r0=0x000021D5` が不正と確定。
+  - 直前callerは `020572B8` 系、さらに前段は `02128AC0` 付近のPlayerModel/render系処理。
 
 ## 現在のブロッカー
 
@@ -121,9 +130,11 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 
 次のブロッカーは、packet消費を動かした後にclient側で `updateHintVec_+0x48` のARM9 data abortが出ること、および同じ条件でもclientがstage遷移に失敗するrunがあること。host local player0とclient remote player0の移動までは到達したが、render/model初期化またはplayer model状態がまだ自然なMvL開始状態と一致していない。
 
+現時点では、`updateHintVec_` に渡るhint vector pointerが `0x000021D5` という低アドレスになっていることまで確定した。これは `020572B8` 系callerの `r5=0x00002199`、さらにPlayerModel/render系処理の `r4=0x00002195` から来ているため、モデルリソース選択またはplayer model object初期化の不足を疑う。
+
 ## 次にやること
 
-1. `updateHintVec_+0x48` に渡るrender/model pointerの出所を、call traceとplayer/model構造体dumpで追う。
+1. `02128674` 付近のPlayerModel/render系関数で、`r4=0x00002195` がどこから来るかを追う。特に `sl/r10=021ACF18` 配下のmodel pointer配列、`0201965C` 呼び出し、`020572B8` へ渡す直前の値を重点的に見る。
 2. direct stage routeで不足しているplayer model / render object / MvL file cache初期化条件を特定する。
 3. frame hookからのFS cache loadは不安全なので、自然な呼び出し地点を探すか、ROM/メモリpatch側で安全な初期化入口へ寄せる。
 4. ARM abortなしでhost local player0とclient remote player0が同じ入力で動くrunを作る。smokeでは `RequireClientRemotePlayer0Movement` を使い、偽陽性を避ける。
