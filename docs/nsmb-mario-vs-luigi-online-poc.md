@@ -29,6 +29,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `02087E20` をグローバルに `2` へ固定すると黒画面や低速化を起こすため不採用。
 - `02151454` のstep 3比較命令だけを狭く上書きする `PacketBridgeStageStartNet20Check` を追加し、step 6まで進むことを確認済み。
 - `0200E658` のstep 6 close待ちだけを狭く成功扱いにする `PacketBridgeStageStartStep6Close` を追加し、`vsConnect+0x144=7` まで進むことを確認済み。
+- StageScene::onCreate内の `0200E658(0)` ready待ちだけを狭く成功扱いにする `PacketBridgeStageSceneReadyClose` を追加した。
 - CourseSelect状態のCSV診断フィールドを拡張済み。
 - `PacketBridgeForceCourseSelectReady` の `0214ED18` フックが開始フレーム指定前にも発火していたため、開始フレーム以降に制限した。
 - `tests/nsmb_mario_vs_luigi_wan_course_select.inputs` を追加し、CourseSelect後にもA入力を入れる検証ができる。
@@ -70,35 +71,51 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `ForceStageSceneActive + ForceStageActorFreezeFlag=0 + ForcePlayerCount=2` はclient側で背景表示まで進むが、host側はHUDのみ/黒画面になり、object生成順やStageCamera状態もhost/clientで一致しない。
 - そのためStageSceneのstateを外からActiveにするのは診断用途のみ。最終方式としては採用しない。
 
+### StageScene ready close
+
+主なログ:
+
+- `logs/nsmvl-stage-scene-oncreate-trace-20260525`
+- `logs/nsmvl-stage-scene-return-trace-20260525`
+- `logs/nsmvl-stage-scene-ready-close-20260525`
+- `logs/nsmvl-stage-scene-ready-close-dump-20260525`
+
+確認できたこと:
+
+- StageScene vtable `0x020C5864` の先頭slotから、A2DJのStageScene::onCreate候補は `0x020A2224`。
+- StageScene::onCreateは `0200E658(0)` のready待ちで `BaseReturnState::Minus1` 相当を返し続け、Base::processCreateが毎フレームcreate処理を再試行していた。
+- `PacketBridgeStageSceneReadyClose` で `instrAddr=0x0200E658`, `LR=0x020A2348` の呼び出しだけ成功扱いにすると、StageSceneは `state=1` へ進む。
+- force activeなしでhostは地形つきMvsL画面を表示できた。
+- clientもStageScene/StageLayout/player/star系objectはActive化するが、frame 5100時点では上画面が空中心で地形が表示されない。これは成功ではない。
+- RAM dumpではStageLayoutはhost/client両方に存在する。差分はGoombaの有無、StageFX settings、StageController/StageFXのGUID割当などに残っている。
+
 ## 現在のブロッカー
 
-`CourseSelect -> Game::loadLevel -> sceneCurrent=0x3` までは進み、StageScene/player/star系objectの生成も始まるが、StageSceneが自然にActive化しない。
+`CourseSelect -> Game::loadLevel -> sceneCurrent=0x3` までは進み、StageScene/player/star系objectもActive化できるところまで来たが、host/clientの画面・object setがまだ一致しない。
 
 現時点で分かっている実体:
 
 - real StageScene: `objectID=0x0003`, `settings=0x00B5FF00`, `base=0x021B94CC` 付近。
-- natural state: `state=0`, `type=1`, `skipFlags=5`。
-- forced activeは描画を部分的に進めるが、host/client間のobject setやStageCamera内部状態がずれる。
+- `PacketBridgeStageSceneReadyClose` 後のstate: `state=1`, `flags=0x00010000`。
+- forced activeは描画を部分的に進めるが、host/client間のobject setやStageCamera内部状態がずれるため、引き続き診断専用。
 
 疑っている点:
 
-- `Scene::current/next/isSceneActive` の遷移が自然経路とずれている。
-- StageScene `onCreate` / Base `processCreate` が何かの待ち条件で完了していない。
-- `StageActorFreezeFlag=0x26` や `playerCount=0` は原因ではなく、StageScene未Active化の結果である可能性。
+- StageScene::onCreate完了後も、stage object生成順やstage packet bitの到着順がhost/clientでずれている。
+- `StageActorFreezeFlag=0x26` や `playerCount=0` が残っており、試合開始の最終ready条件がまだ満たせていない可能性。
 - StageStart/CourseSelectで強制しているNet状態が、ロード後のstage packet / RNG / scene setup条件と矛盾している可能性。
 - debug/releaseどちらも長時間検証は重い。診断は短いフレーム範囲とRAM dumpで回す。
 
 ## 次にやること
 
-1. StageSceneのvtableから `onCreate` / `processCreate` 周辺を特定する。
-   - `external/NSMB-Code-Reference` の `Base` / `Object` / `Scene` virtual layoutを使う。
-   - RAM dumpの `0x020C5864` 付近からA2DJ実アドレスを読む。
-2. StageSceneが `state=0`, `skipFlags=5` に留まる直接原因を追う。
-   - `onCreate` の戻り値、ファイルロード待ち、Net待ち、scene setup待ちを切り分ける。
-   - 必要ならStageSceneのstate/skipFlagsへのwrite traceを入れる。
-3. StageSceneを外からActive化せず、自然な完了条件だけを最小限補う。
-   - actor座標同期やrender/model state同期には戻らない。
-4. StageSceneが自然Active化したら、入力packet同期、RNG seed/消費順、star/8コインアイテムの一致検証に戻る。
+1. StageScene Active後のhost/client差分をさらに下位packet境界から追う。
+   - `0200E658/0200E670` 系のpacket bit番号と、host/clientで不足しているbitを特定する。
+   - Goomba/StageFX/StageControllerの生成差がpacket順、RNG順、localPlayer差のどれかを切り分ける。
+2. client上画面が空中心になる原因を確認する。
+   - StageLayoutは存在するため、camera/view/register/VRAM側の差分も見る。
+   - localPlayer入れ替えテストはtimeout/黒画面で失敗したため、再実施するなら短い条件でやり直す。
+3. `StageActorFreezeFlag=0x26` と `playerCount=0` が解消される自然条件を追う。
+4. host/clientで同じMvsL画面まで安定して到達できたら、入力packet同期、RNG seed/消費順、star/8コインアイテムの一致検証に戻る。
 
 ## 失敗済み・非採用の経路
 

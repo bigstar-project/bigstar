@@ -332,6 +332,14 @@ static bool NSMLStageStartStep6CloseOverride()
     return enabled != 0;
 }
 
+static bool NSMLStageSceneReadyCloseOverride()
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE") ? 1 : 0;
+    return enabled != 0;
+}
+
 static u32 NSMLPacketBridgeWaitTimeoutMs()
 {
     static u32 timeout = 0xFFFFFFFF;
@@ -647,6 +655,36 @@ static bool HandleNSMLStageStartStep6CloseCall(ARM* cpu, u32 instrAddr)
 
     cpu->R[0] = 1;
     cpu->JumpTo(cpu->R[14]);
+    return true;
+}
+
+static bool HandleNSMLStageSceneReadyCloseCall(ARM* cpu, u32 instrAddr)
+{
+    if (!cpu || cpu->Num != 0 || !NSMLStageSceneReadyCloseOverride())
+        return false;
+    if (instrAddr != 0x0200E658)
+        return false;
+    if (cpu->R[14] != 0x020A2348)
+        return false;
+    if (!IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
+        return false;
+
+    const u32 startFrame = NSMLPacketBridgeEnvFrame("MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE_START_FRAME", 0);
+    if (cpu->NDS.NumFrames < startFrame)
+        return false;
+
+    cpu->R[0] = 1;
+    cpu->JumpTo(cpu->R[14]);
+
+    static int logCount = 0;
+    if (logCount < 8)
+    {
+        printf("NSMB PacketBridge: stage scene ready close frame=%u lr=%08X\n",
+            cpu->NDS.NumFrames,
+            cpu->R[14]);
+        fflush(stdout);
+        logCount++;
+    }
     return true;
 }
 
@@ -4067,6 +4105,11 @@ void ARMv5::Execute()
                 NDS.ARM9Timestamp++;
                 continue;
             }
+            if (HandleNSMLStageSceneReadyCloseCall(this, instrAddr))
+            {
+                NDS.ARM9Timestamp++;
+                continue;
+            }
             if (HandleNSMLLowerMPBridge(this, instrAddr))
             {
                 NDS.ARM9Timestamp++;
@@ -4156,6 +4199,11 @@ void ARMv5::Execute()
                     NDS.ARM9Timestamp++;
                     continue;
                 }
+                if (HandleNSMLStageSceneReadyCloseCall(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
                 if (HandleNSMLLowerMPBridge(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;
@@ -4237,6 +4285,11 @@ void ARMv5::Execute()
                     continue;
                 }
                 if (HandleNSMLStageStartStep6CloseCall(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLStageSceneReadyCloseCall(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;
                     continue;
