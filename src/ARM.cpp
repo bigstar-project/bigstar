@@ -141,6 +141,14 @@ static bool NSMLPacketBridgeMaintainSessionPeers()
     return enabled != 0;
 }
 
+static u32 NSMLPacketBridgeMaintainSessionPeersStartFrame()
+{
+    static u32 startFrame = 0xFFFFFFFF;
+    if (startFrame == 0xFFFFFFFF)
+        startFrame = NSMLPacketBridgeEnvFrame("MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_START_FRAME", 0);
+    return startFrame;
+}
+
 static void NSMLWritePeerIdentity(NDS& nds, u32 addr, u32 player)
 {
     static constexpr u8 kPeerIdentity[2][6] = {
@@ -154,6 +162,21 @@ static void NSMLWritePeerIdentity(NDS& nds, u32 addr, u32 player)
 static void NSMLMaintainSessionPeers(NDS& nds)
 {
     if (!NSMLPacketBridgeMaintainSessionPeers())
+        return;
+    if (nds.NumFrames < NSMLPacketBridgeMaintainSessionPeersStartFrame())
+        return;
+    static int hostOnly = -1;
+    static int clientOnly = -1;
+    if (hostOnly < 0)
+    {
+        hostOnly = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_HOST_ONLY") ? 1 : 0;
+        clientOnly = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_CLIENT_ONLY") ? 1 : 0;
+    }
+    const char* role = getenv("MELONDS_NSML_ROLE");
+    const bool isClient = role && strcmp(role, "client") == 0;
+    if (hostOnly && isClient)
+        return;
+    if (clientOnly && !isClient)
         return;
 
     // LoadGameSM waits for the lower Net peer/session tables, not only for
@@ -185,6 +208,60 @@ static void NSMLMaintainSessionPeers(NDS& nds)
         nds.ARM9Write8(entry + 0x51, 6);
         NSMLWritePeerIdentity(nds, entry + 0x52, player);
     }
+}
+
+static bool NSMLPacketBridgeClientConfirmToStageStart()
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_CLIENT_CONFIRM_TO_STAGE_START") ? 1 : 0;
+    return enabled != 0;
+}
+
+static u32 NSMLPacketBridgeClientConfirmToStageStartFrame()
+{
+    static u32 startFrame = 0xFFFFFFFF;
+    if (startFrame == 0xFFFFFFFF)
+        startFrame = NSMLPacketBridgeEnvFrame("MELONDS_NSML_PACKET_BRIDGE_CLIENT_CONFIRM_TO_STAGE_START_FRAME", 0);
+    return startFrame;
+}
+
+static bool IsNSMLMarioVsLuigiPacketContext(NDS& nds);
+
+static void PatchNSMLClientConfirmSchedule(ARM* cpu, u32 instrAddr)
+{
+    if (!cpu || cpu->Num != 0 || instrAddr != 0x021528A0)
+        return;
+    if (!NSMLPacketBridgeClientConfirmToStageStart())
+        return;
+    if (cpu->NDS.NumFrames < NSMLPacketBridgeClientConfirmToStageStartFrame())
+        return;
+    const char* role = getenv("MELONDS_NSML_ROLE");
+    if (!role || strcmp(role, "client") != 0)
+        return;
+    if (!NSMLPacketBridgeEnabled() || !IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
+        return;
+
+    constexpr u32 loadGameSMSubMenu = 0x02156624;
+    constexpr u32 stageStartSMSubMenu = 0x02156678;
+    const bool fromClientConfirmTimeout =
+        cpu->R[1] == loadGameSMSubMenu &&
+        cpu->R[2] == 0x1E &&
+        cpu->R[3] == 1 &&
+        cpu->R[14] >= 0x021516E8 &&
+        cpu->R[14] <= 0x021516F0;
+    if (!fromClientConfirmTimeout)
+        return;
+
+    static u32 logCount = 0;
+    if (logCount < 8)
+    {
+        printf("NSMB PacketBridge: client confirm schedule redirected LoadGameSM -> StageStartSM frame=%u lr=%08X\n",
+            cpu->NDS.NumFrames,
+            cpu->R[14]);
+        logCount++;
+    }
+    cpu->R[1] = stageStartSMSubMenu;
 }
 
 static bool NSMLPacketBridgeStageStartReadyProbe()
@@ -281,6 +358,25 @@ static void NSMLProbeStageStartReadyBits(NDS& nds)
         return;
     if (nds.ARM9Read32(vsConnectBase + 0x120) != 0x021512B8)
         return;
+
+    // StageStartSM step 1 waits for the lower Net/Wifi state machine to report
+    // the same "ready for stage transition" state that LocalMP would provide.
+    // Keep this scoped to StageStartSM so the earlier search/confirm flow can
+    // still exercise the WAN adapter path naturally.
+    nds.ARM9Write8(0x02087E1C, 2);
+    nds.ARM9Write16(0x02087E20, 2);
+    nds.ARM9Write8(0x02087E24, 2);
+
+    if (nds.ARM9Read32(vsConnectBase + 0x144) == 1)
+    {
+        const char* role = getenv("MELONDS_NSML_ROLE");
+        const bool isClient = role && strcmp(role, "client") == 0;
+        nds.ARM9Write32(0x020850C4, 1); // Game::vsMode
+        nds.ARM9Write32(0x020850BC, isClient ? 1 : 0); // Game::localPlayerID
+        nds.ARM9Write32(vsConnectBase + 0x144, 2);
+        nds.ARM9Write32(vsConnectBase + 0x148, 0);
+    }
+
     if (nds.ARM9Read32(vsConnectBase + 0x144) < 5)
         return;
 
@@ -3760,6 +3856,7 @@ void ARMv5::Execute()
                     NDS.ARM9Timestamp++;
                     continue;
                 }
+                PatchNSMLClientConfirmSchedule(this, instrAddr);
                 PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
                 TraceNSMLCallImpl(this, instrAddr);
                 TraceNSMLRandomCall(this, instrAddr);
@@ -3832,6 +3929,7 @@ void ARMv5::Execute()
                     NDS.ARM9Timestamp++;
                     continue;
                 }
+                PatchNSMLClientConfirmSchedule(this, instrAddr);
                 PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
                 TraceNSMLCallImpl(this, instrAddr);
                 TraceNSMLRandomCall(this, instrAddr);
