@@ -346,6 +346,54 @@ static u32 NSMLFindObjectBaseByID(NDS& nds, u16 objectID)
     return 0;
 }
 
+static bool IsNSMLStageStartSM(NDS& nds)
+{
+    if (!NSMLPacketBridgeStageStartReadyProbe() || !IsNSMLMarioVsLuigiPacketContext(nds))
+        return false;
+    const u32 vsConnectBase = NSMLFindObjectBaseByID(nds, 0x0006);
+    return vsConnectBase != 0 && nds.ARM9Read32(vsConnectBase + 0x120) == 0x021512B8;
+}
+
+static bool HandleNSMLStageStartReadyProbeCall(ARM* cpu, u32 instrAddr)
+{
+    if (!cpu || cpu->Num != 0)
+        return false;
+    if (instrAddr != 0x02046260 && instrAddr != 0x02046C7C)
+        return false;
+    if (!IsNSMLStageStartSM(cpu->NDS))
+        return false;
+
+    static u32 transferProbeLogs = 0;
+    static u32 readyProbeLogs = 0;
+    if (instrAddr == 0x02046260)
+    {
+        if (transferProbeLogs < 8)
+        {
+            printf("NSMB PacketBridge: StageStart probe 02046260 -> 0 frame=%u lr=%08X\n",
+                cpu->NDS.NumFrames,
+                cpu->R[14]);
+            fflush(stdout);
+            transferProbeLogs++;
+        }
+        cpu->R[0] = 0;
+    }
+    else
+    {
+        if (readyProbeLogs < 8)
+        {
+            printf("NSMB PacketBridge: StageStart probe 02046C7C -> 1 frame=%u lr=%08X\n",
+                cpu->NDS.NumFrames,
+                cpu->R[14]);
+            fflush(stdout);
+            readyProbeLogs++;
+        }
+        cpu->R[0] = 1;
+    }
+
+    cpu->JumpTo(cpu->R[14]);
+    return true;
+}
+
 static void NSMLProbeStageStartReadyBits(NDS& nds)
 {
     if (!NSMLPacketBridgeStageStartReadyProbe() || !IsNSMLMarioVsLuigiPacketContext(nds))
@@ -366,6 +414,7 @@ static void NSMLProbeStageStartReadyBits(NDS& nds)
     nds.ARM9Write8(0x02087E1C, 2);
     nds.ARM9Write16(0x02087E20, 2);
     nds.ARM9Write8(0x02087E24, 2);
+    nds.ARM9Write32(0x0208ADD8, 0);
 
     if (nds.ARM9Read32(vsConnectBase + 0x144) == 1)
     {
@@ -3739,6 +3788,11 @@ void ARMv5::Execute()
                 NDS.ARM9Timestamp++;
                 continue;
             }
+            if (HandleNSMLStageStartReadyProbeCall(this, instrAddr))
+            {
+                NDS.ARM9Timestamp++;
+                continue;
+            }
             if (HandleNSMLLowerMPBridge(this, instrAddr))
             {
                 NDS.ARM9Timestamp++;
@@ -3816,6 +3870,11 @@ void ARMv5::Execute()
                     NDS.ARM9Timestamp++;
                     continue;
                 }
+                if (HandleNSMLStageStartReadyProbeCall(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
                 if (HandleNSMLLowerMPBridge(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;
@@ -3885,6 +3944,11 @@ void ARMv5::Execute()
                     continue;
                 }
                 if (HandleNSMLSafeLevelCall(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLStageStartReadyProbeCall(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;
                     continue;

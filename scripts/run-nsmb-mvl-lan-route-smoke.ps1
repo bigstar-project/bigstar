@@ -268,6 +268,7 @@ param(
     [int]$LanStartAttempts = 1,
     [switch]$SkipDisconnectScreenshotCheck,
     [switch]$SkipBlankScreenshotCheck,
+    [switch]$SkipMvlStateCheck,
     [switch]$SkipGameplayActorCheck,
     [switch]$SkipArmAbortCheck,
     [switch]$RequireClientRemotePlayer0Movement,
@@ -2077,7 +2078,7 @@ if (-not $SkipArmAbortCheck) {
     }
 }
 
-if ($GameStateTrace -and ($GameStateTraceEndFrame -le 0 -or $GameStateTraceEndFrame -ge $Frames)) {
+if ($GameStateTrace -and -not $SkipMvlStateCheck -and ($GameStateTraceEndFrame -le 0 -or $GameStateTraceEndFrame -ge $Frames)) {
     foreach ($item in @(
         @{ Path = $hostGameStateTrace; Role = "host"; LocalPlayerID = "0x0" },
         @{ Path = $clientGameStateTrace; Role = "client"; LocalPlayerID = "0x1" }

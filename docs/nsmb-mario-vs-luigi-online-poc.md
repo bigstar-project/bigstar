@@ -30,8 +30,10 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - 診断用 `ClientConfirmToStageStart` により、clientのhost確認待ちタイムアウト時に `LoadGameSM` へ戻らず `StageStartSM` へ進ませるところまで確認した。
 - 最新の到達点は、host/clientとも `StageStartSM` へ入るが、まだstage scene開始には到達しない状態。
   - `StageStartReadyProbe` で `Net state1C/state20/state24` と `Game::vsMode/localPlayerID` をStageStart中だけ維持できる。
-  - それでも `StageStartSM` step 2 以降のロード準備関数が自然成立せず、`stageGroup=9` / gameplay actor生成には未到達。
-  - 次の境界は `StageStartSM` 内の `02046260`、`0200EAD8`、`02046C7C`、`02004BFC`、`02004B74`、`020109E0` のどこで待っているか。
+  - step 1からstep 2へ進めるための診断固定は入ったが、step 2以降で `stageGroup=9` / gameplay actor生成には未到達。
+  - `02046260` はStageStart前のLoadGame側で呼ばれているが、StageStart中にはまだ到達していない。
+  - `createStageStartSM (021515B4)` と `renderStageStartSM (0215125C)` は呼ばれるが、`updateStageStartSM (021512B8)` が呼ばれていないことをCallTraceで確認した。
+  - 次の境界は、VSConnect dispatcherがStageStartのupdateを呼ばない理由。`021528xx` / `021529xx` 近辺のsub menu transition/update条件を追う。
 
 ## 実装済みの診断フック
 
@@ -65,6 +67,9 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - env: `MELONDS_NSML_PACKET_BRIDGE_STAGE_START_READY_PROBE`
   - script option: `-PacketBridgeStageStartReadyProbe`
   - `StageStartSM` 中だけ、下位Net ready状態と `Game::vsMode/localPlayerID` を維持する診断。
+- `SkipMvlStateCheck`
+  - script option: `-SkipMvlStateCheck`
+  - StageStart境界の診断では `stageGroup=9` 未到達が期待値なので、MvL state checkだけを明示的にskipする。disconnect/blank/ARM abortの検出とは分ける。
 
 ## 主要検証ログ
 
@@ -78,15 +83,25 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - client確認待ちの戻り先を診断用にStageStartSMへ差し替え、clientもStageStartSMへ入ることを確認。
 - `logs/nsmvl-ui-wan-stage-step-trace-20260524`
   - `StageStartSM` step 2で止まる。次はロード準備系の関数境界をさらに絞る。
+- `logs/nsmvl-ui-wan-stage-probe-call-bypass-20260524`
+  - StageStart中の `02046260 -> 0` / `02046C7C -> 1` 診断を追加しても、`StageStartSM` step 2からstage sceneへは未到達。
+- `logs/nsmvl-ui-wan-stage-calltrace-20260525`
+  - `02046260` はStageStart前のLoadGame側だけで呼ばれていた。StageStart中の待ちはこのprobe戻り値ではない。
+- `logs/nsmvl-ui-wan-stage-range-calltrace-20260525`
+  - `createStageStartSM` と `renderStageStartSM` は呼ばれるが、`updateStageStartSM` は呼ばれていない。
+- `logs/nsmvl-ui-wan-stage-dispatcher-calltrace-20260525`
+  - `021528xx` / `021529xx` dispatcher近辺を確認。次はsub menu transition/update抑制条件を絞る。
 
 ## 次にやること
 
-1. `StageStartSM` step 2以降の待ち条件を特定する。
-   - 優先トレース対象: `02046260`, `0200EAD8`, `02046C7C`, `02004BFC`, `02004B74`, `020109E0`。
-2. StageStartの診断フックを、できるだけ下位Net/Wifi境界のadapterへ戻す。
+1. VSConnect dispatcherが `updateStageStartSM` を呼ばない理由を特定する。
+   - 優先トレース対象: `021528xx`, `021529xx`, `02152Axx`, VSConnect transition fields。
+   - `create/render` だけ呼ばれ、`update` が抑制される条件を確認する。
+2. `updateStageStartSM` が呼ばれる状態に戻してから、`02046260`, `0200EAD8`, `02046C7C`, `02004BFC`, `02004B74`, `020109E0` のロード準備境界を再確認する。
+3. StageStartの診断フックを、できるだけ下位Net/Wifi境界のadapterへ戻す。
    - `ClientConfirmToStageStart` は最終形ではなく、host確認packet境界を特定するための一時フック。
-3. stage sceneに到達したら、host/clientの `stageGroup`, `localPlayerID`, player actor, star/RNG seed, packet tickを比較する。
-4. その後、試合中input packet同期に入り、local actor stateの直接書き換えに戻らず安定化する。
+4. stage sceneに到達したら、host/clientの `stageGroup`, `localPlayerID`, player actor, star/RNG seed, packet tickを比較する。
+5. その後、試合中input packet同期に入り、local actor stateの直接書き換えに戻らず安定化する。
 
 ## 重要アドレス
 
