@@ -1502,16 +1502,11 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
     {
         if (cpu->R[0] == 0x0F && cpu->R[2] == 9)
         {
-            static int roleClient = -1;
-            if (roleClient < 0)
-            {
-                const char* role = getenv("MELONDS_NSML_ROLE");
-                roleClient = (role && strcmp(role, "client") == 0) ? 1 : 0;
-            }
+            const u32 localPlayer = NSMLPacketBridgeLocalPlayer();
             const u32 sp = cpu->R[13];
             cpu->R[1] = 1; // vs
             cpu->DataWrite32(sp + 0x00, 0); // act
-            cpu->DataWrite32(sp + 0x04, roleClient ? 1 : 0); // playerID
+            cpu->DataWrite32(sp + 0x04, localPlayer); // playerID
             cpu->DataWrite32(sp + 0x08, 3); // playerMask
             cpu->DataWrite32(sp + 0x0C, 0); // character1: Mario
             cpu->DataWrite32(sp + 0x10, 1); // character2: Luigi
@@ -1529,7 +1524,7 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
             {
                 printf("NSMB PacketBridge: force Game::loadLevel MvL args frame=%u playerID=%u\n",
                     cpu->NDS.NumFrames,
-                    roleClient ? 1u : 0u);
+                    localPlayer);
                 fflush(stdout);
                 logCount++;
             }

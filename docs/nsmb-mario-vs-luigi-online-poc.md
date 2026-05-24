@@ -51,38 +51,54 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - スクリーンショットは「コースせんたくちゅう」画面。
 - ただしA入力がないとそのまま選択画面に留まる。
 
-### CourseSelect後A入力
+### CourseSelect後A入力からStageScene生成まで
 
-ログ: `logs/nsmvl-ui-wan-load-black-ram-20260525`
+主なログ:
 
-- A入力でコース選択画面から `Game::loadLevel` の自然呼び出し付近まで進む。
-- frame 4860付近で `sceneCurrentSceneID=0x5`, `sceneNextSceneID=0xF`, `stageGroup=9`。
-- その後 `sceneCurrentSceneID=0x3`, `stageGroup=9` へ移るが、画面は黒、`playerActor0/1` と `stageScene` は未生成。
-- frame 5100 RAM dumpではStageController、StageActorManager、Goombaなど一部のstage系objectは見えるが、player actorとStageSceneはまだ見えない。
-- これは成功ではない。現ブロッカーは「ロード開始後にステージ/プレイヤー生成まで進まない」こと。
+- `logs/nsmvl-ui-wan-load-calltrace-20260525`
+- `logs/nsmvl-ui-wan-load-ramdump-20260525`
+- `logs/nsmvl-ui-wan-force-stage-active-early-dump-20260525`
+
+確認できたこと:
+
+- A入力でコース選択画面から自然な `Game::loadLevel` 呼び出しまで進む。
+- frame 4833付近で `Game::loadLevel(r0=0xF, r1=1, r2=9, playerID=localPlayer)` が呼ばれる。
+- frame 4870以降に `sceneCurrentSceneID=0x3`, `stageGroup=9` へ移る。
+- StageScene本体は `id=0x0003`, `settings=0x00B5FF00` として生成される。実測baseは `0x021B94CC`。
+- player actor、Star、StageCamera、StageController、StageActorManager、MvlObject267も生成される。
+- ただし自然経路ではStageSceneが `state=0`, `skipFlags=5` のままActive化せず、画面は黒のまま。
+- `ForceStageSceneActive + ForceStageActorFreezeFlag=0 + ForcePlayerCount=2` はclient側で背景表示まで進むが、host側はHUDのみ/黒画面になり、object生成順やStageCamera状態もhost/clientで一致しない。
+- そのためStageSceneのstateを外からActiveにするのは診断用途のみ。最終方式としては採用しない。
 
 ## 現在のブロッカー
 
-`CourseSelect -> Game::loadLevel -> sceneCurrent=0x3` までは進むが、黒画面のまま `stageSceneFound=0`, `playerActor0Found=0`, `playerActor1Found=0` に留まる。
+`CourseSelect -> Game::loadLevel -> sceneCurrent=0x3` までは進み、StageScene/player/star系objectの生成も始まるが、StageSceneが自然にActive化しない。
+
+現時点で分かっている実体:
+
+- real StageScene: `objectID=0x0003`, `settings=0x00B5FF00`, `base=0x021B94CC` 付近。
+- natural state: `state=0`, `type=1`, `skipFlags=5`。
+- forced activeは描画を部分的に進めるが、host/client間のobject setやStageCamera内部状態がずれる。
 
 疑っている点:
 
 - `Scene::current/next/isSceneActive` の遷移が自然経路とずれている。
-- `StageActorFreezeFlag=0x26` のまま stage actor / player生成が止まっている可能性。
+- StageScene `onCreate` / Base `processCreate` が何かの待ち条件で完了していない。
+- `StageActorFreezeFlag=0x26` や `playerCount=0` は原因ではなく、StageScene未Active化の結果である可能性。
 - StageStart/CourseSelectで強制しているNet状態が、ロード後のstage packet / RNG / scene setup条件と矛盾している可能性。
-- debug/releaseどちらも長時間検証は重く、Release presetはPATH上のclang前提で失敗したため、フルパス指定でRelease構成を作成した。
+- debug/releaseどちらも長時間検証は重い。診断は短いフレーム範囲とRAM dumpで回す。
 
 ## 次にやること
 
-1. 黒画面ロード中の自然待ち条件を特定する。
-   - `sceneCurrent=0x3`, `sceneNext=0x181`, `sceneIsSceneActive=1` の意味を追う。
-   - `StageActorFreezeFlag=0x26` が自然値か異常値かを比較する。
-   - `stageID/stageGroup/vsMode/localPlayerID` と stage packet words の関係を確認する。
-2. `Game::loadLevel` 呼び出し時の引数を、US symbol / A2DJ port / RAM dumpで再確認する。
-   - 現在の `force Game::loadLevel MvL args` が自然呼び出しを壊していないか確認する。
-3. 必要ならCourseSelectからのloadLevel後だけ、最小限の下位Net/scene条件を補う。
-   - ただしactor座標同期や描画状態の外部同期には戻らない。
-4. stage scene / player actorが生成されたら、入力packet同期とRNG一致検証に戻る。
+1. StageSceneのvtableから `onCreate` / `processCreate` 周辺を特定する。
+   - `external/NSMB-Code-Reference` の `Base` / `Object` / `Scene` virtual layoutを使う。
+   - RAM dumpの `0x020C5864` 付近からA2DJ実アドレスを読む。
+2. StageSceneが `state=0`, `skipFlags=5` に留まる直接原因を追う。
+   - `onCreate` の戻り値、ファイルロード待ち、Net待ち、scene setup待ちを切り分ける。
+   - 必要ならStageSceneのstate/skipFlagsへのwrite traceを入れる。
+3. StageSceneを外からActive化せず、自然な完了条件だけを最小限補う。
+   - actor座標同期やrender/model state同期には戻らない。
+4. StageSceneが自然Active化したら、入力packet同期、RNG seed/消費順、star/8コインアイテムの一致検証に戻る。
 
 ## 失敗済み・非採用の経路
 

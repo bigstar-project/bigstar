@@ -172,6 +172,11 @@ param(
     [int]$ForceStageSceneRuntimeWordsEndFrame = 0,
     [string]$ForceStageSceneWord154 = "1",
     [string]$ForceStageSceneWord160 = "0xDA",
+    [switch]$ForceStageSceneActive,
+    [switch]$ForceStageSceneActiveHostOnly,
+    [switch]$ForceStageSceneActiveClientOnly,
+    [int]$ForceStageSceneActiveStartFrame = 0,
+    [int]$ForceStageSceneActiveEndFrame = 0,
     [switch]$ForceStageActorFreezeFlag,
     [switch]$ForceStageActorFreezeFlagHostOnly,
     [switch]$ForceStageActorFreezeFlagClientOnly,
@@ -912,6 +917,19 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_END_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_WORD154 -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_WORD160 -ErrorAction SilentlyContinue
+    }
+    if ($ForceStageSceneActive) {
+        $env:MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE = "1"
+        if ($ForceStageSceneActiveHostOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_HOST_ONLY -ErrorAction SilentlyContinue }
+        if ($ForceStageSceneActiveClientOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_CLIENT_ONLY -ErrorAction SilentlyContinue }
+        $env:MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_START_FRAME = "$ForceStageSceneActiveStartFrame"
+        $env:MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_END_FRAME = "$ForceStageSceneActiveEndFrame"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_HOST_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_CLIENT_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_END_FRAME -ErrorAction SilentlyContinue
     }
     if ($ForceStageActorFreezeFlag) {
         $env:MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG = "1"
