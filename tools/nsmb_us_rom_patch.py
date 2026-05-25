@@ -269,9 +269,30 @@ def patch_fake_opponent(
     *,
     force_confirm_load: bool,
     force_loadgame_progress: bool,
+    mirror_packets: bool,
 ) -> list[str]:
+    arm9 = rom.loadArm9()
     overlays = rom.loadArm9Overlays()
     changes: list[str] = []
+
+    if mirror_packets:
+        # Diagnostic lower-boundary adapter: make Net::getPacket(consoleID)
+        # return the live local sendPacket for console 0 and 1. This does not
+        # create real remote input yet, but it lets NSMB's own packet readers
+        # see a second console packet instead of nullptr.
+        addr = symbols["_ZN3Net9getPacketEt"]
+        words = [
+            encode_cmp_imm(0, 2),              # cmp r0, #2
+            0x359F0004,                        # ldrlo r0, [pc, #4]
+            with_cond(encode_mov_imm(0, 0), 2), # movhs r0, #0
+            BX_LR,
+            symbols["_ZN3Net10sendPacketE"],
+        ]
+        old = patch_arm9_words(arm9, addr, words)
+        changes.append(
+            f"Net::getPacket mirror local packet @ 0x{addr:08X}: "
+            f"{old.hex()} -> {words_hex(words)}"
+        )
 
     # Return a small static fake NicknameInfo-like buffer in overlay code RAM.
     # updateSearchSM only needs a non-null pointer, then reads byte 1 as the
@@ -363,6 +384,7 @@ def patch_fake_opponent(
             f"{old.hex()} -> {struct.pack('<I', NOP).hex()}"
         )
 
+    rom.arm9 = arm9.save(compress=True)
     save_overlays(rom, overlays)
     return changes
 
@@ -385,6 +407,7 @@ def main() -> int:
     p_fake = sub.add_parser("fake-opponent")
     p_fake.add_argument("--force-confirm-load", action="store_true")
     p_fake.add_argument("--force-loadgame-progress", action="store_true")
+    p_fake.add_argument("--mirror-packets", action="store_true")
     args = ap.parse_args()
 
     symbols = load_symbols(Path(args.symbols))
@@ -409,6 +432,7 @@ def main() -> int:
             symbols,
             force_confirm_load=args.force_confirm_load,
             force_loadgame_progress=args.force_loadgame_progress,
+            mirror_packets=args.mirror_packets,
         )
     else:
         raise AssertionError(args.cmd)

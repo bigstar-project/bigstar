@@ -55,60 +55,60 @@ constexpr int kDefaultDelay = 6;
 constexpr int kMaxPumpEvents = 64;
 constexpr melonDS::u32 kNoFrameLimit = 0;
 constexpr melonDS::u32 kMainRAMBase = 0x02000000;
-constexpr melonDS::u32 kGameStageIDAddr = 0x02085054;
-constexpr melonDS::u32 kGameStageGroupAddr = 0x02085058;
-constexpr melonDS::u32 kGameLocalPlayerIDAddr = 0x020850BC;
-constexpr melonDS::u32 kGameVsModeAddr = 0x020850C4;
-constexpr melonDS::u32 kNetStateBaseAddr = 0x02087E00;
-constexpr melonDS::u32 kNetCurrentLanguageAddr = 0x02087E08;
-constexpr melonDS::u32 kNetLocalAidAddr = 0x02087E10;
-constexpr melonDS::u32 kNetState14Addr = 0x02087E14;
-constexpr melonDS::u32 kNetState1CAddr = 0x02087E1C;
-constexpr melonDS::u32 kNetState20Addr = 0x02087E20;
-constexpr melonDS::u32 kNetState24Addr = 0x02087E24;
-constexpr melonDS::u32 kNetExpectedConsoleCountAddr = 0x02087E2C;
-constexpr melonDS::u32 kNetMultiBootSessionAddr = 0x02087E30;
-constexpr melonDS::u32 kNetSessionStateAddr = 0x02087E34;
-constexpr melonDS::u32 kNetModuleStateAddr = 0x02087E38;
-constexpr melonDS::u32 kNetMaxSessionChildrenAddr = 0x02087E3C;
-constexpr melonDS::u32 kNetMaxConsoleCountAddr = 0x02087E4C;
-constexpr melonDS::u32 kNetState5CAddr = 0x02087E5C;
-constexpr melonDS::u32 kNetGGIDAddr = 0x02087E78;
-constexpr melonDS::u32 kNetRandomBranchAddressAddr = 0x02087E7C;
-constexpr melonDS::u32 kNetPacketTickAddr = 0x02087F00;
-constexpr melonDS::u32 kNetPacketKeysAddr = 0x02087F02;
-constexpr melonDS::u32 kNetPacketActionAddr = 0x02087F04;
-constexpr melonDS::u32 kNetPacketByte5Addr = 0x02087F05;
-constexpr melonDS::u32 kNetPacketByte6Addr = 0x02087F06;
-constexpr melonDS::u32 kNetPacketByte7Addr = 0x02087F07;
-constexpr melonDS::u32 kNetRandomCallCountAddr = 0x02088068;
-constexpr melonDS::u32 kNetRandomValueAddr = 0x02088088;
-constexpr melonDS::u32 kInputConsoleKeysAddr = 0x02086C90;
-constexpr melonDS::u32 kInputPlayerKeysHeldAddr = 0x02086CA0;
-constexpr melonDS::u32 kInputPlayerKeysPressedAddr = 0x02086CA4;
-constexpr melonDS::u32 kStageActorFreezeFlagAddr = 0x020C9250;
-constexpr melonDS::u32 kGamePlayerGlobalBlockAddr = 0x0208A964;
-constexpr melonDS::u32 kGamePlayerTransitionStatusAddr = 0x0208A96C;
-constexpr melonDS::u32 kGamePlayerCountAddr = 0x0208A988;
-constexpr melonDS::u32 kGamePlayerBattleStarsAddr = 0x0208A9AC;
-constexpr melonDS::u32 kGamePlayerCoinsAddr = 0x0208A9BC;
-constexpr melonDS::u32 kGamePlayerScoreAddr = 0x0208A9C4;
-constexpr melonDS::u32 kGamePlayerDisplayedStarsAddr = 0x0208A9CC;
-constexpr melonDS::u32 kGamePlayerDeathsAddr = 0x0208A9D4;
-constexpr melonDS::u32 kGamePlayerCollectedStarsAddr = 0x0208A9DC;
-constexpr melonDS::u32 kGameVsCoinCountAddr = 0x0208A994;
-constexpr melonDS::u32 kGameCandidateWifiBlockAddr = 0x0208BE00;
+constexpr melonDS::u32 kGameStageIDAddr = 0x02085A14;
+constexpr melonDS::u32 kGameStageGroupAddr = 0x02085A18;
+constexpr melonDS::u32 kGameLocalPlayerIDAddr = 0x02085A7C;
+constexpr melonDS::u32 kGameVsModeAddr = 0x02085A84;
+constexpr melonDS::u32 kNetStateBaseAddr = 0x020887E8;
+constexpr melonDS::u32 kNetCurrentLanguageAddr = 0x020887E8;
+constexpr melonDS::u32 kNetLocalAidAddr = 0x020887F0;
+constexpr melonDS::u32 kNetState14Addr = 0x020887FC; // Net::connectionState
+constexpr melonDS::u32 kNetState1CAddr = 0x02088804; // Net::connectedConsoleCount
+constexpr melonDS::u32 kNetState20Addr = 0x02088808;
+constexpr melonDS::u32 kNetState24Addr = 0x0208880C; // Net::expectedConsoleCount
+constexpr melonDS::u32 kNetExpectedConsoleCountAddr = 0x0208880C;
+constexpr melonDS::u32 kNetMultiBootSessionAddr = 0x02088810;
+constexpr melonDS::u32 kNetSessionStateAddr = 0x02088814;
+constexpr melonDS::u32 kNetModuleStateAddr = 0x02088818;
+constexpr melonDS::u32 kNetMaxSessionChildrenAddr = 0x0208881C;
+constexpr melonDS::u32 kNetMaxConsoleCountAddr = 0x0208882C;
+constexpr melonDS::u32 kNetState5CAddr = 0x0208883C; // Net::errorState
+constexpr melonDS::u32 kNetGGIDAddr = 0x02088858;
+constexpr melonDS::u32 kNetRandomBranchAddressAddr = 0x0208885C;
+constexpr melonDS::u32 kNetPacketTickAddr = 0x020888E0;
+constexpr melonDS::u32 kNetPacketKeysAddr = 0x020888E2;
+constexpr melonDS::u32 kNetPacketActionAddr = 0x020888E4;
+constexpr melonDS::u32 kNetPacketByte5Addr = 0x020888E5;
+constexpr melonDS::u32 kNetPacketByte6Addr = 0x020888E6;
+constexpr melonDS::u32 kNetPacketByte7Addr = 0x020888E7;
+constexpr melonDS::u32 kNetRandomCallCountAddr = 0x02088A48;
+constexpr melonDS::u32 kNetRandomValueAddr = 0x02088A68;
+constexpr melonDS::u32 kInputConsoleKeysAddr = 0x02087650;
+constexpr melonDS::u32 kInputPlayerKeysHeldAddr = 0x02087660;
+constexpr melonDS::u32 kInputPlayerKeysPressedAddr = 0x02087664;
+constexpr melonDS::u32 kStageActorFreezeFlagAddr = 0x020CA28C;
+constexpr melonDS::u32 kGamePlayerGlobalBlockAddr = 0x0208B324;
+constexpr melonDS::u32 kGamePlayerTransitionStatusAddr = 0x0208B354; // Game::playerVSPipeState
+constexpr melonDS::u32 kGamePlayerCountAddr = 0x0208B348;
+constexpr melonDS::u32 kGamePlayerBattleStarsAddr = 0x0208B36C;
+constexpr melonDS::u32 kGamePlayerCoinsAddr = 0x0208B37C;
+constexpr melonDS::u32 kGamePlayerScoreAddr = 0x0208B384;
+constexpr melonDS::u32 kGamePlayerDisplayedStarsAddr = 0x0208B38C;
+constexpr melonDS::u32 kGamePlayerDeathsAddr = 0x0208B394;
+constexpr melonDS::u32 kGamePlayerCollectedStarsAddr = 0x0208B39C;
+constexpr melonDS::u32 kGameVsCoinCountAddr = 0x0208B37C;
+constexpr melonDS::u32 kGameCandidateWifiBlockAddr = 0x0208B7A0;
 constexpr melonDS::u32 kGameCandidateRenderBlockAddr = 0x023F8300;
-constexpr melonDS::u32 kAppFrameLengthAddr = 0x02038F60;
-constexpr melonDS::u32 kAppUpdateTaskAddr = 0x02038F74;
-constexpr melonDS::u32 kAppSleepPhaseAddr = 0x02084FAC;
-constexpr melonDS::u32 kAppSleepControlAddr = 0x02084FB4;
-constexpr melonDS::u32 kAppSleepingAddr = 0x02084FB8;
-constexpr melonDS::u32 kAppSleepPhaseTimerAddr = 0x02084FBC;
-constexpr melonDS::u32 kAppSleepWakeUpTimerAddr = 0x02084FC0;
-constexpr melonDS::u32 kAppBootParamAddr = 0x02084FCC;
-constexpr melonDS::u32 kAppBootTargetAddr = 0x02084FD0;
-constexpr melonDS::u32 kAppBootSceneAddr = 0x02084FD4;
+constexpr melonDS::u32 kAppFrameLengthAddr = 0x02039810;
+constexpr melonDS::u32 kAppUpdateTaskAddr = 0x02039824;
+constexpr melonDS::u32 kAppSleepPhaseAddr = 0x0208596C;
+constexpr melonDS::u32 kAppSleepControlAddr = 0x02085974;
+constexpr melonDS::u32 kAppSleepingAddr = 0x02085978;
+constexpr melonDS::u32 kAppSleepPhaseTimerAddr = 0x0208597C;
+constexpr melonDS::u32 kAppSleepWakeUpTimerAddr = 0x02085980;
+constexpr melonDS::u32 kAppBootParamAddr = 0x0208598C;
+constexpr melonDS::u32 kAppBootTargetAddr = 0x02085990;
+constexpr melonDS::u32 kAppBootSceneAddr = 0x02085994;
 constexpr melonDS::u16 kPlayerObjectID = 0x0015;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
@@ -116,8 +116,9 @@ constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
 constexpr melonDS::u16 kVsMovingHazardObjectID = 0x0053;
 constexpr melonDS::u32 kVsMovingHazardSettings = 0x00000000;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
-constexpr melonDS::u32 kStageSceneUpdateDispatchTableAddr = 0x020C933C;
-constexpr melonDS::u32 kStageSceneRenderDispatchTableAddr = 0x020C935C;
+constexpr melonDS::u32 kMvlStageSceneSettings = 0x00B4FF00;
+constexpr melonDS::u32 kStageSceneUpdateDispatchTableAddr = 0x020CA378;
+constexpr melonDS::u32 kStageSceneRenderDispatchTableAddr = 0x020CA398;
 constexpr melonDS::u16 kStageActorManagerObjectID = 0x012F;
 constexpr melonDS::u16 kStageControllerObjectID = 0x0130;
 constexpr melonDS::u16 kMvlObject267ID = 0x010B;
@@ -146,11 +147,11 @@ constexpr melonDS::u32 kA2DJApplySceneRequestAddr = 0x02007ACC;
 constexpr melonDS::u32 kA2DJStartSceneTransitionAddr = 0x02011CE8;
 constexpr melonDS::u32 kA2DJCreateObjectAddr = 0x0204BF8C;
 constexpr melonDS::u32 kDirectBootTrampolineAddr = 0x023C0000;
-constexpr melonDS::u32 kSceneIsSceneActiveAddr = 0x0203B478;
-constexpr melonDS::u32 kScenePreviousSceneIDAddr = 0x0203B47C;
-constexpr melonDS::u32 kSceneNextSceneIDAddr = 0x0203B480;
-constexpr melonDS::u32 kSceneCurrentSceneIDAddr = 0x0203B484;
-constexpr melonDS::u32 kSceneNextSceneSettingsAddr = 0x02088578;
+constexpr melonDS::u32 kSceneIsSceneActiveAddr = 0x0203BD28;
+constexpr melonDS::u32 kScenePreviousSceneIDAddr = 0x0203BD2C;
+constexpr melonDS::u32 kSceneNextSceneIDAddr = 0x0203BD30;
+constexpr melonDS::u32 kSceneCurrentSceneIDAddr = 0x0203BD34;
+constexpr melonDS::u32 kSceneNextSceneSettingsAddr = 0x02088F38;
 
 enum class Role
 {
@@ -2577,7 +2578,7 @@ void ForceNSMLStagePacketWordsIfNeeded(melonDS::u32 frame, melonDS::NDS* nds)
 
     if (G.PacketBridgeForceStageNet20OnStageScene
         && nds->ARM9Read16(kSceneCurrentSceneIDAddr) == 0x0003
-        && FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, 0x00B5FF00).Found)
+        && FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, kMvlStageSceneSettings).Found)
         nds->ARM9Write16(kNetState20Addr, 2);
 }
 
@@ -4134,13 +4135,13 @@ void ForceStageSceneRuntimeWordsIfNeeded(int instanceID, melonDS::u32 frame, mel
     const bool wrote154 = WriteObjectWordByIDAndSettings(
         nds,
         kStageSceneObjectID,
-        0x00B5FF00,
+        kMvlStageSceneSettings,
         0x154,
         G.ForceStageSceneWord154);
     const bool wrote160 = WriteObjectWordByIDAndSettings(
         nds,
         kStageSceneObjectID,
-        0x00B5FF00,
+        kMvlStageSceneSettings,
         0x160,
         G.ForceStageSceneWord160);
     if (!G.ForceStageSceneRuntimeWordsLogged[instanceID])
@@ -4175,7 +4176,7 @@ void ForceStageSceneActiveIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
     if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
         return;
 
-    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, 0x00B5FF00);
+    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, kMvlStageSceneSettings);
     if (!stageScene.Found || !IsARM9MainRAMAddress(stageScene.Base))
     {
         if (!G.ForceStageSceneActiveLogged[instanceID])
@@ -4326,7 +4327,7 @@ void ForceStageSceneStartGateIfNeeded(int instanceID, melonDS::u32 frame, melonD
     if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
         return;
 
-    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, 0x00B5FF00);
+    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, kMvlStageSceneSettings);
     if (!stageScene.Found || !IsARM9MainRAMAddress(stageScene.Base))
     {
         if (!G.ForceStageSceneStartGateLogged[instanceID])
@@ -4385,7 +4386,7 @@ void ForceStageSceneContinueGateIfNeeded(int instanceID, melonDS::u32 frame, mel
     if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
         return;
 
-    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, 0x00B5FF00);
+    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, kMvlStageSceneSettings);
     if (!stageScene.Found || !IsARM9MainRAMAddress(stageScene.Base))
     {
         if (!G.ForceStageSceneContinueGateLogged[instanceID])
@@ -4753,8 +4754,8 @@ void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     }
     if (G.GameStateApplyStageObjects && sample.StageSceneFound)
     {
-        WriteObjectWordByIDAndSettings(nds, kStageSceneObjectID, 0x00B5FF00, 0x154, sample.StageSceneWord154);
-        WriteObjectWordByIDAndSettings(nds, kStageSceneObjectID, 0x00B5FF00, 0x160, sample.StageSceneWord160);
+        WriteObjectWordByIDAndSettings(nds, kStageSceneObjectID, kMvlStageSceneSettings, 0x154, sample.StageSceneWord154);
+        WriteObjectWordByIDAndSettings(nds, kStageSceneObjectID, kMvlStageSceneSettings, 0x160, sample.StageSceneWord160);
     }
     if (G.GameStateApplyStageObjects && sample.MovingHazardFound)
     {
@@ -5021,9 +5022,9 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         ReadObjectWordByIDAndSettings(nds, kStageCameraObjectID, 0, 0x19C, sample.StageCameraWord19C);
         ReadObjectWordByIDAndSettings(nds, kStageCameraObjectID, 0, 0x1A0, sample.StageCameraWord1A0);
     }
-    ObjectScanSample stageScene = FindObjectByIDAndSettings(nds, kStageSceneObjectID, 0x00B5FF00);
+    ObjectScanSample stageScene = FindObjectByIDAndSettings(nds, kStageSceneObjectID, kMvlStageSceneSettings);
     if (!stageScene.Found)
-        stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, 0x00B5FF00);
+        stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, kMvlStageSceneSettings);
     if (stageScene.Found)
     {
         sample.StageSceneFound = 1;
@@ -5052,14 +5053,14 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
                 sample.StageSceneRenderDispatchFunc = nds->ARM9Read32(kStageSceneRenderDispatchTableAddr + dispatchOffset);
                 sample.StageSceneRenderDispatchArg = nds->ARM9Read32(kStageSceneRenderDispatchTableAddr + dispatchOffset + 4);
             }
-            sample.StageSceneGlobal9280 = nds->ARM9Read8(0x020C9280);
-            sample.StageSceneGlobal9284 = nds->ARM9Read8(0x020C9284);
-            sample.StageSceneGlobal928C = nds->ARM9Read8(0x020C928C);
-            sample.StageSceneGlobal92B4 = nds->ARM9Read32(0x020C92B4);
-            sample.StageSceneGlobal92C0 = nds->ARM9Read32(0x020C92C0);
-            sample.StageSceneGlobal92C8 = nds->ARM9Read32(0x020C92C8);
-            sample.StageSceneGlobal92CC = nds->ARM9Read32(0x020C92CC);
-            sample.StageSceneGlobal92D0 = nds->ARM9Read32(0x020C92D0);
+            sample.StageSceneGlobal9280 = nds->ARM9Read8(0x020CA2BC);
+            sample.StageSceneGlobal9284 = nds->ARM9Read8(0x020CA2C0);
+            sample.StageSceneGlobal928C = nds->ARM9Read8(0x020CA2C8);
+            sample.StageSceneGlobal92B4 = nds->ARM9Read32(0x020CA2F0);
+            sample.StageSceneGlobal92C0 = nds->ARM9Read32(0x020CA2FC);
+            sample.StageSceneGlobal92C8 = nds->ARM9Read32(0x020CA304);
+            sample.StageSceneGlobal92CC = nds->ARM9Read32(0x020CA308);
+            sample.StageSceneGlobal92D0 = nds->ARM9Read32(0x020CA30C);
         }
     }
     sample.VsConnectBase = FindObjectBaseByID(nds, kVsConnectObjectID);
@@ -5118,12 +5119,12 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.MvlObject267Found = mvlObject267.Found;
     sample.MvlObject267Base = mvlObject267.Base;
     sample.MvlObject267StateType = mvlObject267.StateType;
-    sample.MvlGlobal965C = nds->ARM9Read8(0x020C965C);
-    sample.MvlGlobal9670 = nds->ARM9Read8(0x020C9670);
-    sample.MvlGlobal9674 = nds->ARM9Read8(0x020C9674);
-    sample.MvlGlobal9694_0 = nds->ARM9Read8(0x020C9694);
-    sample.MvlGlobal9694_1 = nds->ARM9Read8(0x020C9695);
-    sample.MvlManagerBase = nds->ARM9Read32(0x020C96F0);
+    sample.MvlGlobal965C = nds->ARM9Read8(0x020CA698);
+    sample.MvlGlobal9670 = nds->ARM9Read8(0x020CA6AC);
+    sample.MvlGlobal9674 = nds->ARM9Read8(0x020CA6B0);
+    sample.MvlGlobal9694_0 = nds->ARM9Read8(0x020CA6D0);
+    sample.MvlGlobal9694_1 = nds->ARM9Read8(0x020CA6D1);
+    sample.MvlManagerBase = nds->ARM9Read32(0x020CA72C);
     if (IsARM9MainRAMAddress(sample.MvlManagerBase))
     {
         sample.MvlManagerWordA8CC = nds->ARM9Read32(sample.MvlManagerBase + 0xA8CC);

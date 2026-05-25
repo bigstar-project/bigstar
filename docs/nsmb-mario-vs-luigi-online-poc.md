@@ -4,110 +4,76 @@
 
 New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` でWAN越しに遊べる形へ持っていく。
 
-過去に試した `LocalMP 2インスタンス * 2プロセス`、savestate共有、試合開始後のWAN切り替え、actor座標や描画状態の外部同期は、desync、通信切断、低FPS、内部状態不一致が大きく、最終方式としては採用しない。
+過去に試した `LocalMP 2インスタンス * 2プロセス`、savestate共有、試合開始後のWAN切り替え、actor座標や外部状態の強制同期は、desync、通信切断、低FPS、内部状態不一致が大きく、最終方式としては採用しない。
 
 ## 現在の方針
 
-主対象はUS版ROM `roms/nsmb-us.nds` (`A2DE`)。`external/NSMB-Code-Reference` がUS版前提で、ROMパッチに必要な関数名、構造体、シンボルを直接使えるため。日本版 `A2DJ` はUS版PoC成立後に移植対象とする。
+主対象はUS版ROM `roms/nsmb-us.nds` (`A2DE`)。`external/NSMB-Code-Reference` がUS版前提であり、ROMパッチに必要な関数名・構造体・シンボルを直接使えるため。
 
-当面の本筋:
+本筋は次の2段階。
 
 1. ROMパッチで、LocalMP接続UIに依存しない `Mario vs Luigi` 専用入口を作る。
-2. 試合中の2P入力境界を特定し、WAN adapterからリモート入力を渡す。
+2. 試合中のpacket/input境界をWAN adapterへ差し替え、NSMB側の同期処理はできるだけそのまま使う。
 
-重要な制約:
+NSMB Centralの情報では、MvsLはRNG seedを接続時に一度同期し、その後は入力情報中心で通信する。したがって、最終的には「NSMBが読む対戦packetをWAN由来のpacketに置き換える」方向を優先する。
 
-- actor座標、スター位置、freeze flagなどを外部から力技で同期しない。
-- NSMB側の試合中ロジックと入力同期処理をできるだけそのまま使う。
-- `通信が切断されました`、黒画面、死亡演出だけ、片側だけ進行、HUDだけ一致、actor不一致は成功扱いにしない。
-- スクリーンショットとCSV/ログの両方で検証する。
+参考: https://bookstack.nsmbcentral.net/books/new-super-mario-bros/page/mario-vs-luigi
 
-## 現在の到達点
+## 実装済み
 
-US版ROMパッチの診断ルートで、1インスタンスのまま `VSConnect -> VSMenu -> VSStageIntro -> Stage` まで到達した。
-
-確認済みログ:
-
-- `logs/nsmvl-us-fake-opponent-stage-entry-20260525`
-
-確認できた遷移:
-
-- `VSConnectScene::updateLoadGameSM` の通信/session待ちを診断NOPで抜ける。
-- `Scene::switchScene(5, 1)` で `VSMenu` へ入る。
-- VSMenu側の転送待ちを診断NOPで抜け、OK入力後にコース選択へ入る。
-- `Game::loadLevel(scene=0x0F, vs=1, group=9, stage=0)` が呼ばれる。
-- `Scene::switchScene(0x0F, settings)` で `VSStageIntro` へ入る。
-- VSStageIntroのReady待ちを診断NOPで抜ける。
-- `Scene::switchScene(3, settings)` で `Stage` へ入り、スクリーンショット上でMvsLステージとHUDを確認。
-
-ただし、これはまだ「診断用に複数の待ち条件を強制的に抜けた」状態であり、最終形ではない。次は、これらの待ち条件をWAN adapter/ROM側の自然なsession状態で満たす条件と、試合中2P入力境界を分けて特定する。
-
-## 実装済みツール
-
-- `tools/nsmb_us_rom_tool.py`
-  - US版 `symbols9.x` のシンボル解決
-  - ARM9/overlayの展開
-  - アドレスmapと逆アセンブル
-  - ARM9圧縮コードは `ndspy.codeCompression.decompress` 経由で扱う
-- `tools/nsmb_us_rom_patch.py`
+- US版ROM解析ツール `tools/nsmb_us_rom_tool.py`
+  - `symbols9.x` のシンボル解決
+  - ARM9/overlayの逆アセンブル
+  - 圧縮ARM9を `ndspy.codeCompression.decompress` 経由で扱う
+- US版ROMパッチツール `tools/nsmb_us_rom_patch.py`
   - `rng-constant`
-  - ARM9/overlay命令パッチ基盤
-  - overlay再圧縮時の `arm9OverlayTable` 更新
   - `direct-mvl-entry`
   - `fake-opponent`
   - `fake-opponent --force-confirm-load --force-loadgame-progress`
-- `tests/nsmb_us_fake_opponent_load_progress.inputs`
-  - US版fake-opponent診断ルート用の自動入力
+  - `fake-opponent --mirror-packets`
+  - overlay再保存時に `arm9OverlayTable` を更新
+- 自動検証フック
+  - 入力スクリプト
+  - スクリーンショット出力
+  - RAMダンプ
+  - calltrace
+  - game state trace
+- US版診断ルート
+  - `VSConnect -> VSMenu -> VSStageIntro -> Stage` 到達を確認
+  - `Game::loadLevel(scene=0x0F, vs=1, group=9, stage=0)` 呼び出しを確認
+  - `Scene::switchScene(3, settings)` でStage sceneに入ることを確認
 
-## 重要シンボル
+## 現在分かっていること
 
-- `Game::loadLevel = 0x0200696C`
-- `Scene::switchScene = 0x020131FC`
-- `Scene::prepareFirstScene = 0x020133A4`
-- `VSConnectScene::updateLoadGameSM = 0x021577EC`
-- `VSConnectScene::getOpponentNickname = 0x021574A4`
-- `VSConnectScene::loadGameSME = 0x0215CAF8`
-- `VSConnectScene::selectModeSME = 0x0215CB30`
+- 1インスタンス診断ROMでMvsLステージ/HUD/ミニマップ表示までは到達する。
+- `Input::update`、`Input::updatePlayerInput`、StageSceneの `onUpdate` はStage到達後も毎フレーム呼ばれている。
+- 入力スクリプトの `RIGHT` は `Input::consoleKeys` と `Input::playerKeysHeld` まで届いている。
+- `--mirror-packets` で `Net::getPacket(consoleID)` が2P側にもpacketを返すようにした場合、`inputPlayer1Held` にも同じ入力が入る。
+- それでも画面上のプレイヤーは動かない。現在のfake-opponentルートは、ステージ表示には届くが、実試合として必要な内部状態がまだ自然に成立していない可能性が高い。
+- RAM上のBig Star検出はruntime class ID `0x22` / settings `1` で拾えている。NSMB CentralのObject ID 210とは表記レイヤーが違う可能性がある。
 
-Scene ID:
+## 現在の主な問題
 
-- `Stage = 3`
-- `VSMenu = 5`
-- `VSConnect = 6`
-- `VSStageIntro = 15`
+fake-opponent + 強制進行パッチは、複数の通信/session/ready待ちをNOPで抜けている。そのため、ステージ表示まで行けても、実際の試合開始状態としては不完全な可能性がある。
 
-## 診断パッチで現在外している待ち条件
+特に次を確認する必要がある。
 
-`fake-opponent --force-confirm-load --force-loadgame-progress` は、現在以下を診断用に強制している。
-
-- `VSConnectScene::getOpponentNickname()` が空の偽NicknameInfoを返す。
-- confirm中の `playerLeftSME` 遷移を `loadGameSME` に差し替える。
-- `updateLoadGameSM` state1のsession byte待ちを外す。
-- `updateLoadGameSM` state3のsession byte待ちを外す。
-- `updateLoadGameSM` state4の内部完了待ちを強制的にstate5へ進める。
-- `updateLoadGameSM` state5の2プレイヤーready bit待ちを外す。
-- `updateLoadGameSM` state6の完了待ちを外す。
-- VSMenu post-load transfer待ちを外す。
-- VSStageIntro ready待ちを外す。
-
-これらは「どこで止まるか」を見るための診断パッチであり、最終的には必要最小限に戻す。
+- NSMBが試合中に必要とするsession/ready/player状態のうち、どれを自然に満たすべきか
+- `Net::getPacket` だけで足りるのか、それより下の接続/session境界もadapter化する必要があるのか
+- Stage内でプレイヤーが描画・操作可能にならない直接原因
+- Big Star、8コインアイテム、ステージランダム選択などのRNG seed同期方法
 
 ## 次にやること
 
-1. Stage到達後、1P入力がゲーム内で反映されるかをスクリーンショット/座標ログで確認する。
-2. Stage中の2P入力データがどこから読まれているかを特定する。
-3. 診断NOPのうち、WAN adapter側で自然に満たすべきsession/ready条件と、ROM側で短絡してよい条件を分類する。
-4. 2P入力境界をWAN adapterに接続する最小PoCを作る。
-5. 2PC相当のローカルhost/clientで、同一ステージ・同一スター位置・入力反映・通信切断なしを確認する。
+1. `fake-opponent --mirror-packets` の結果を基準に、Stage内の「入力は届くがプレイヤーが動かない」原因を特定する。
+2. `VSConnectScene::updateLoadGameSM` のNOPを減らし、可能な限りNet/Wifi/sessionグローバルを自然な値にして進める診断ROMを作る。
+3. `Net::getPacket` より下のsession/packet境界を特定し、WAN adapterの差し替え点を決める。
+4. 1インスタンスで「操作可能なMvsL試合」へ到達できたら、WAN由来の2P packetを流す最小PoCへ進む。
 
 ## 検証ルール
 
 - `frame limit reached` だけでは成功扱いにしない。
-- 黒画面、prefetch/data abort、通信切断表示、片側だけ進行は失敗。
-- `Ready!` 到達だけでは成功扱いにしない。`Stage` sceneで実際のMvsLステージ/HUD/入力反映を確認する。
-- ROM生成物、savestate、古い巨大ログはgitに含めない。
-
-## 参照
-
-- NSMB Central: https://bookstack.nsmbcentral.net/books/new-super-mario-bros/page/mario-vs-luigi
-- `external/NSMB-Code-Reference`
+- 黒画面、prefetch/data abort、通信切断表示、片側だけ進行、HUDだけ一致、actor不一致は失敗扱い。
+- スクリーンショットとCSV/RAM/calltraceの両方で検証する。
+- ROM生成物、savestate、巨大ログはgitに含めない。
+- docsは古い追記を残し続けず、現在の方針・到達点・問題・次作業がすぐ分かる形に保つ。
