@@ -340,6 +340,22 @@ static bool NSMLStageSceneReadyCloseOverride()
     return enabled != 0;
 }
 
+static bool NSMLPacketBridgeReadPacketByteOverride()
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_READ_PACKET_BYTE") ? 1 : 0;
+    return enabled != 0;
+}
+
+static bool NSMLPacketBridgeCheckPacketBitsOverride()
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_CHECK_PACKET_BITS") ? 1 : 0;
+    return enabled != 0;
+}
+
 static u32 NSMLPacketBridgeWaitTimeoutMs()
 {
     static u32 timeout = 0xFFFFFFFF;
@@ -1973,6 +1989,10 @@ static void BuildNSMLMarioVsLuigiPacket(NDS& nds, std::array<u8, 52>& packet, u3
     packet[7] = nds.ARM9Read8(0x02087F07);
     for (u32 i = 0; i < 44; i++)
         packet[8 + i] = nds.ARM9Read8(0x02087F08 + i);
+    // NSMB's send path copies the packet-bit byte at 0x0208806C into packet
+    // offset 0x29. Build the WAN packet from the same source so ready-bit
+    // waits such as StageScene::onCreate can observe peer progress.
+    packet[0x29] = nds.ARM9Read8(0x0208806C);
     if (NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_PREGAME_ACTION1")
         && NSMLPacketBridgeAllowPreGame()
         && !IsNSMLMarioVsLuigiGameplay(nds))
@@ -2257,6 +2277,107 @@ static u32 NSMLWriteBridgePacketScratch(NDS& nds, u32 player, const std::array<u
     for (u32 i = 0; i < packet.size(); i++)
         nds.ARM9Write8(addr + i, packet[i]);
     return addr;
+}
+
+static bool HandleNSMLPacketReadByteBridge(ARM* cpu, u32 instrAddr)
+{
+    if (!cpu || cpu->Num != 0 || !NSMLPacketBridgeReadPacketByteOverride())
+        return false;
+    if (instrAddr != 0x0200E978)
+        return false;
+    if (!NSMLPacketBridgeEnabled() || !IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
+        return false;
+
+    const u32 player = cpu->R[0] & 0xFF;
+    const u32 offset = cpu->R[1] & 0xFF;
+    if (player > 1 || offset >= 52)
+        return false;
+
+    std::array<u8, 52> packet {};
+    if (!NSMLSelectBridgePacketForPlayer(cpu->NDS, player, packet))
+        return false;
+
+    static int traceLower = -1;
+    if (traceLower < 0)
+    {
+        traceLower = (NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_TRACE")
+            || NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_READ_PACKET_BYTE_TRACE")) ? 1 : 0;
+    }
+
+    const u32 value = packet[offset];
+    static u32 traceCount = 0;
+    if (traceLower && (traceCount < 64 || offset == 0x29 || (traceCount % 600) == 0))
+    {
+        printf("NSMB PacketBridge lower: readPacketByte 0200E978 player=%u off=0x%02X frame=%u tick=0x%04X pktTick=0x%04X action=0x%02X -> 0x%02X lr=%08X\n",
+            player,
+            offset,
+            cpu->NDS.NumFrames,
+            NSMLPacketBridgeCanonicalTick(cpu->NDS) & 0xFFFF,
+            static_cast<u32>(packet[0] | (packet[1] << 8)),
+            packet[4],
+            value,
+            cpu->R[14]);
+    }
+    traceCount++;
+
+    cpu->R[0] = value;
+    cpu->JumpTo(cpu->R[14]);
+    return true;
+}
+
+static bool HandleNSMLCheckPacketBitsBridge(ARM* cpu, u32 instrAddr)
+{
+    if (!cpu || cpu->Num != 0 || !NSMLPacketBridgeCheckPacketBitsOverride())
+        return false;
+    if (instrAddr != 0x020111D4)
+        return false;
+    if (!NSMLPacketBridgeEnabled() || !IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
+        return false;
+
+    const u32 bitIndex = cpu->R[0] & 0xFF;
+    if (bitIndex >= 8)
+        return false;
+
+    const u8 mask = static_cast<u8>(1u << bitIndex);
+    bool ready = true;
+    u32 values[2] {};
+    for (u32 player = 0; player < 2; player++)
+    {
+        std::array<u8, 52> packet {};
+        if (!NSMLSelectBridgePacketForPlayer(cpu->NDS, player, packet))
+        {
+            ready = false;
+            values[player] = 0xFFFFFFFF;
+            continue;
+        }
+        values[player] = packet[0x29];
+        if ((packet[0x29] & mask) == 0)
+            ready = false;
+    }
+
+    static int traceLower = -1;
+    if (traceLower < 0)
+    {
+        traceLower = (NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_TRACE")
+            || NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_CHECK_PACKET_BITS_TRACE")) ? 1 : 0;
+    }
+    static u32 traceCount = 0;
+    if (traceLower && (traceCount < 64 || ready || (traceCount % 300) == 0))
+    {
+        printf("NSMB PacketBridge lower: checkPacketBits 020111D4 bit=%u frame=%u tick=0x%04X values=%02X/%02X -> %u lr=%08X\n",
+            bitIndex,
+            cpu->NDS.NumFrames,
+            NSMLPacketBridgeCanonicalTick(cpu->NDS) & 0xFFFF,
+            values[0] & 0xFF,
+            values[1] & 0xFF,
+            ready ? 1 : 0,
+            cpu->R[14]);
+    }
+    traceCount++;
+
+    cpu->R[0] = ready ? 1 : 0;
+    cpu->JumpTo(cpu->R[14]);
+    return true;
 }
 
 static bool HandleNSMLLowerMPBridge(ARM* cpu, u32 instrAddr)
@@ -4110,6 +4231,16 @@ void ARMv5::Execute()
                 NDS.ARM9Timestamp++;
                 continue;
             }
+            if (HandleNSMLCheckPacketBitsBridge(this, instrAddr))
+            {
+                NDS.ARM9Timestamp++;
+                continue;
+            }
+            if (HandleNSMLPacketReadByteBridge(this, instrAddr))
+            {
+                NDS.ARM9Timestamp++;
+                continue;
+            }
             if (HandleNSMLLowerMPBridge(this, instrAddr))
             {
                 NDS.ARM9Timestamp++;
@@ -4204,6 +4335,16 @@ void ARMv5::Execute()
                     NDS.ARM9Timestamp++;
                     continue;
                 }
+                if (HandleNSMLCheckPacketBitsBridge(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLPacketReadByteBridge(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
                 if (HandleNSMLLowerMPBridge(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;
@@ -4290,6 +4431,16 @@ void ARMv5::Execute()
                     continue;
                 }
                 if (HandleNSMLStageSceneReadyCloseCall(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLCheckPacketBitsBridge(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLPacketReadByteBridge(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;
                     continue;

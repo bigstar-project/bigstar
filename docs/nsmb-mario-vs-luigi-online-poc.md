@@ -30,6 +30,8 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `02151454` のstep 3比較命令だけを狭く上書きする `PacketBridgeStageStartNet20Check` を追加し、step 6まで進むことを確認済み。
 - `0200E658` のstep 6 close待ちだけを狭く成功扱いにする `PacketBridgeStageStartStep6Close` を追加し、`vsConnect+0x144=7` まで進むことを確認済み。
 - StageScene::onCreate内の `0200E658(0)` ready待ちだけを狭く成功扱いにする `PacketBridgeStageSceneReadyClose` を追加した。
+- PacketBridgeが送る52byte packetに、NSMB送信処理と同じ `0x0208806C -> packet[0x29]` のready bitを明示的に載せるようにした。
+- 診断用に `PacketBridgeReadPacketByte` と `PacketBridgeCheckPacketBits` を追加した。どちらも下位packet境界をadapter化するための実験フックで、現時点では単独成功していない。
 - CourseSelect状態のCSV診断フィールドを拡張済み。
 - `PacketBridgeForceCourseSelectReady` の `0214ED18` フックが開始フレーム指定前にも発火していたため、開始フレーム以降に制限した。
 - `tests/nsmb_mario_vs_luigi_wan_course_select.inputs` を追加し、CourseSelect後にもA入力を入れる検証ができる。
@@ -89,6 +91,27 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - clientもStageScene/StageLayout/player/star系objectはActive化するが、frame 5100時点では上画面が空中心で地形が表示されない。これは成功ではない。
 - RAM dumpではStageLayoutはhost/client両方に存在する。差分はGoombaの有無、StageFX settings、StageController/StageFXのGUID割当などに残っている。
 
+### packet bit / packet byte adapter検証
+
+主なログ:
+
+- `logs/nsmvl-stage-scene-ready-close-delay4920-20260525`
+- `logs/nsmvl-stage-ready-packet-calltrace-20260525`
+- `logs/nsmvl-read-packet-byte-no-readyclose-20260525`
+- `logs/nsmvl-read-packet-byte-with-readyclose-20260525`
+- `logs/nsmvl-packet-ready-byte-no-readhook-20260525`
+- `logs/nsmvl-check-packet-bits-natural-20260525`
+
+確認できたこと:
+
+- `StageSceneReadyCloseStartFrame=4920` でhost/clientを同じ絶対frameまで待たせても、hostは地形あり、clientは空中心のままで改善しなかった。
+- StageScene::onCreateの前半はhost frame 4883、client frame 4910付近で `0200E670(0)` を呼び、`0x0208806C` のbit 0を立てている。
+- `0200E658(0)` は `020111D4 -> 020110E4` に入り、packet byte `0x29` のbit 0を全peer分チェックしている。
+- `PacketBridgeReadPacketByte` で `0200E978` をbridge packetから直接読むようにしても、StageSceneは自然にはActive化せず黒画面のまま。
+- `packet[0x29] = [0x0208806C]` をWAN packetへ載せても、既存の内部packet sequencerだけではStageScene ready待ちは自然に閉じなかった。
+- `PacketBridgeCheckPacketBits` で `020111D4` をbridge packetの `0x29` から判定する試行はtimeoutした。現状のbridge packet選択・tick検索・ready bitのタイミングがまだ自然なNSMB側期待と噛み合っていない。
+- `PacketBridgeReadPacketByte + StageSceneReadyClose` でもhost/clientのGoomba有無、StageFX settings、StageController GUID差分は残った。
+
 ## 現在のブロッカー
 
 `CourseSelect -> Game::loadLevel -> sceneCurrent=0x3` までは進み、StageScene/player/star系objectもActive化できるところまで来たが、host/clientの画面・object setがまだ一致しない。
@@ -101,21 +124,23 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 
 疑っている点:
 
-- StageScene::onCreate完了後も、stage object生成順やstage packet bitの到着順がhost/clientでずれている。
+- StageScene::onCreate完了前後のpacket bit到着順、packet tick検索、内部packet sequencerの状態がhost/clientでずれている。
+- `0x0208806C -> packet[0x29]` のready bitをWAN packetへ載せるだけでは、NSMB内部の `processRecvPacket` / `checkAllPacketBits` の期待状態を満たせていない。
 - `StageActorFreezeFlag=0x26` や `playerCount=0` が残っており、試合開始の最終ready条件がまだ満たせていない可能性。
 - StageStart/CourseSelectで強制しているNet状態が、ロード後のstage packet / RNG / scene setup条件と矛盾している可能性。
 - debug/releaseどちらも長時間検証は重い。診断は短いフレーム範囲とRAM dumpで回す。
 
 ## 次にやること
 
-1. StageScene Active後のhost/client差分をさらに下位packet境界から追う。
-   - `0200E658/0200E670` 系のpacket bit番号と、host/clientで不足しているbitを特定する。
-   - Goomba/StageFX/StageControllerの生成差がpacket順、RNG順、localPlayer差のどれかを切り分ける。
-2. client上画面が空中心になる原因を確認する。
+1. `020110E4` / `02011360` / `02011428` 周辺を基準に、NSMBのpacket bit送受信状態をもう一段正確にadapter化する。
+   - 直接 `020111D4` を成功扱いにするのではなく、packet sequencerが期待する内部buffer/bitmapへbridge packetを自然に入れる方法を探す。
+   - `PacketBridgeCheckPacketBits` はtimeoutしたため、次は値の強制ではなく内部buffer更新点を追う。
+2. StageScene Active後のhost/client差分を、Goomba/StageFX/StageController生成前の分岐から追う。
+   - 生成差がpacket順、RNG順、localPlayer差、StageFX character設定のどれかを切り分ける。
+3. client上画面が空中心になる原因を確認する。
    - StageLayoutは存在するため、camera/view/register/VRAM側の差分も見る。
-   - localPlayer入れ替えテストはtimeout/黒画面で失敗したため、再実施するなら短い条件でやり直す。
-3. `StageActorFreezeFlag=0x26` と `playerCount=0` が解消される自然条件を追う。
-4. host/clientで同じMvsL画面まで安定して到達できたら、入力packet同期、RNG seed/消費順、star/8コインアイテムの一致検証に戻る。
+4. `StageActorFreezeFlag=0x26` と `playerCount=0` が解消される自然条件を追う。
+5. host/clientで同じMvsL画面まで安定して到達できたら、入力packet同期、RNG seed/消費順、star/8コインアイテムの一致検証に戻る。
 
 ## 失敗済み・非採用の経路
 
@@ -125,6 +150,8 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - 任意フレーム・任意PCからの直接 `Game::loadLevel`。
 - `02087E20=2` のグローバル固定。
 - `StageStartSM` / `VSConnect::onUpdate` の無理な直接呼び出し。
+- `PacketBridgeReadPacketByte` 単独で `0200E978` をbridge packetへ差し替える方式。
+- `PacketBridgeCheckPacketBits` 単独で `020111D4` をbridge packetから判定する方式。
 
 ## 検証ルール
 
