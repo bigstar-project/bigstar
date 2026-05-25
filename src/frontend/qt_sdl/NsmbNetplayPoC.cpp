@@ -88,6 +88,7 @@ constexpr melonDS::u32 kInputPlayerKeysHeldAddr = 0x02086CA0;
 constexpr melonDS::u32 kInputPlayerKeysPressedAddr = 0x02086CA4;
 constexpr melonDS::u32 kStageActorFreezeFlagAddr = 0x020C9250;
 constexpr melonDS::u32 kGamePlayerGlobalBlockAddr = 0x0208A964;
+constexpr melonDS::u32 kGamePlayerTransitionStatusAddr = 0x0208A96C;
 constexpr melonDS::u32 kGamePlayerCountAddr = 0x0208A988;
 constexpr melonDS::u32 kGamePlayerBattleStarsAddr = 0x0208A9AC;
 constexpr melonDS::u32 kGamePlayerCoinsAddr = 0x0208A9BC;
@@ -389,6 +390,15 @@ struct GameStateSample
     melonDS::u32 PlayerActor0VelX = 0;
     melonDS::u32 PlayerActor0VelY = 0;
     melonDS::u32 PlayerActor0VelZ = 0;
+    melonDS::u32 PlayerActor0PlayerID = 0;
+    melonDS::u32 PlayerActor0TransitionStep = 0;
+    melonDS::u32 PlayerActor0SignalLock = 0;
+    melonDS::u32 PlayerActor0Flag192 = 0;
+    melonDS::u32 PlayerActor0Flags728 = 0;
+    melonDS::u32 PlayerActor0Flags72C = 0;
+    melonDS::u32 PlayerActor0Flags730 = 0;
+    melonDS::u32 PlayerActor0TransitFunc = 0;
+    melonDS::u32 PlayerActor0TransitArg = 0;
     melonDS::u32 PlayerActor1Found = 0;
     melonDS::u32 PlayerActor1GUID = 0;
     melonDS::u32 PlayerActor1Base = 0;
@@ -404,7 +414,18 @@ struct GameStateSample
     melonDS::u32 PlayerActor1VelX = 0;
     melonDS::u32 PlayerActor1VelY = 0;
     melonDS::u32 PlayerActor1VelZ = 0;
+    melonDS::u32 PlayerActor1PlayerID = 0;
+    melonDS::u32 PlayerActor1TransitionStep = 0;
+    melonDS::u32 PlayerActor1SignalLock = 0;
+    melonDS::u32 PlayerActor1Flag192 = 0;
+    melonDS::u32 PlayerActor1Flags728 = 0;
+    melonDS::u32 PlayerActor1Flags72C = 0;
+    melonDS::u32 PlayerActor1Flags730 = 0;
+    melonDS::u32 PlayerActor1TransitFunc = 0;
+    melonDS::u32 PlayerActor1TransitArg = 0;
     melonDS::u32 PlayerCount = 0;
+    melonDS::u32 PlayerTransitionStatus0 = 0;
+    melonDS::u32 PlayerTransitionStatus1 = 0;
     melonDS::u32 Player0BattleStars = 0;
     melonDS::u32 Player1BattleStars = 0;
     melonDS::u32 Player0Coins = 0;
@@ -4753,8 +4774,55 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.PlayerActor1VelX = players.Actor1.VelX;
     sample.PlayerActor1VelY = players.Actor1.VelY;
     sample.PlayerActor1VelZ = players.Actor1.VelZ;
+    auto readPlayerTransitionFields = [nds](const ObjectScanSample& actor,
+                                            melonDS::u32& playerID,
+                                            melonDS::u32& transitionStep,
+                                            melonDS::u32& signalLock,
+                                            melonDS::u32& flag192,
+                                            melonDS::u32& flags728,
+                                            melonDS::u32& flags72C,
+                                            melonDS::u32& flags730,
+                                            melonDS::u32& transitFunc,
+                                            melonDS::u32& transitArg)
+    {
+        if (!actor.Found || !IsARM9MainRAMAddress(actor.Base))
+            return;
+        playerID = nds->ARM9Read8(actor.Base + 0x0EE);
+        transitionStep = nds->ARM9Read8(actor.Base + 0xB2D);
+        signalLock = nds->ARM9Read8(actor.Base + 0x75C);
+        flag192 = nds->ARM9Read8(actor.Base + 0x192);
+        flags728 = nds->ARM9Read32(actor.Base + 0x728);
+        flags72C = nds->ARM9Read32(actor.Base + 0x72C);
+        flags730 = nds->ARM9Read32(actor.Base + 0x730);
+        transitFunc = nds->ARM9Read32(actor.Base + 0x910);
+        transitArg = nds->ARM9Read32(actor.Base + 0x914);
+    };
+    readPlayerTransitionFields(
+        players.Actor0,
+        sample.PlayerActor0PlayerID,
+        sample.PlayerActor0TransitionStep,
+        sample.PlayerActor0SignalLock,
+        sample.PlayerActor0Flag192,
+        sample.PlayerActor0Flags728,
+        sample.PlayerActor0Flags72C,
+        sample.PlayerActor0Flags730,
+        sample.PlayerActor0TransitFunc,
+        sample.PlayerActor0TransitArg);
+    readPlayerTransitionFields(
+        players.Actor1,
+        sample.PlayerActor1PlayerID,
+        sample.PlayerActor1TransitionStep,
+        sample.PlayerActor1SignalLock,
+        sample.PlayerActor1Flag192,
+        sample.PlayerActor1Flags728,
+        sample.PlayerActor1Flags72C,
+        sample.PlayerActor1Flags730,
+        sample.PlayerActor1TransitFunc,
+        sample.PlayerActor1TransitArg);
 
     sample.PlayerCount = nds->ARM9Read32(kGamePlayerCountAddr);
+    sample.PlayerTransitionStatus0 = nds->ARM9Read32(kGamePlayerTransitionStatusAddr);
+    sample.PlayerTransitionStatus1 = nds->ARM9Read32(kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32));
     sample.Player0BattleStars = nds->ARM9Read32(kGamePlayerBattleStarsAddr);
     sample.Player1BattleStars = nds->ARM9Read32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32));
     sample.Player0Coins = nds->ARM9Read32(kGamePlayerCoinsAddr);
@@ -5350,6 +5418,15 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                      << ",0x" << sample.PlayerActor0VelX
                      << ",0x" << sample.PlayerActor0VelY
                      << ",0x" << sample.PlayerActor0VelZ
+                     << ",0x" << sample.PlayerActor0PlayerID
+                     << ",0x" << sample.PlayerActor0TransitionStep
+                     << ",0x" << sample.PlayerActor0SignalLock
+                     << ",0x" << sample.PlayerActor0Flag192
+                     << ",0x" << sample.PlayerActor0Flags728
+                     << ",0x" << sample.PlayerActor0Flags72C
+                     << ",0x" << sample.PlayerActor0Flags730
+                     << ",0x" << sample.PlayerActor0TransitFunc
+                     << ",0x" << sample.PlayerActor0TransitArg
                      << ",0x" << sample.PlayerActor1Found
                      << ",0x" << sample.PlayerActor1GUID
                      << ",0x" << sample.PlayerActor1Base
@@ -5365,6 +5442,17 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                      << ",0x" << sample.PlayerActor1VelX
                      << ",0x" << sample.PlayerActor1VelY
                      << ",0x" << sample.PlayerActor1VelZ
+                     << ",0x" << sample.PlayerActor1PlayerID
+                     << ",0x" << sample.PlayerActor1TransitionStep
+                     << ",0x" << sample.PlayerActor1SignalLock
+                     << ",0x" << sample.PlayerActor1Flag192
+                     << ",0x" << sample.PlayerActor1Flags728
+                     << ",0x" << sample.PlayerActor1Flags72C
+                     << ",0x" << sample.PlayerActor1Flags730
+                     << ",0x" << sample.PlayerActor1TransitFunc
+                     << ",0x" << sample.PlayerActor1TransitArg
+                     << ",0x" << sample.PlayerTransitionStatus0
+                     << ",0x" << sample.PlayerTransitionStatus1
                      << ",0x" << sample.VsConnectFound
                      << ",0x" << sample.VsConnectBase
                      << ",0x" << sample.VsConnectWord078
@@ -6264,7 +6352,7 @@ void InitFromEnvironment()
         }
         else
         {
-            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,arm9PC,arm9LR,arm9SP,arm9CPSR,appFrameLength,appUpdateTask,appSleepPhase,appSleepControl,appSleeping,appSleepPhaseTimer,appSleepWakeUpTimer,appBootParam,appBootTarget,appBootScene,ggid,netCurrentLanguage,netLocalAid,netState14,netState1C,netState20,netState24,netExpectedConsoleCount,netMultiBootSession,netSessionState,netModuleState,netMaxSessionChildren,netMaxConsoleCount,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,stageActorFreezeFlag,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectByte0E2,vsConnectByte106,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord138,vsConnectWord13C,vsConnectWord140,vsConnectWord144,vsConnectWord148,vsConnectByte153,vsConnectByte154,vsConnectByte155,vsConnectByte156,vsConnectByte157,vsConnectByte158,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectSettings,courseSelectWord060,courseSelectWord064,courseSelectWord068,courseSelectWord06C,courseSelectWord070,courseSelectWord074,courseSelectWord078,courseSelectWord07C,courseSelectWord080,courseSelectWord084,courseSelectWord088,courseSelectWord08C,courseSelectWord090,stageCameraFound,stageCameraWord190,stageCameraWord194,stageCameraWord19C,stageCameraWord1A0,stageActorManagerFound,stageActorManagerBase,stageActorManagerStateType,stageControllerFound,stageControllerBase,stageControllerStateType,mvlObject267Found,mvlObject267Base,mvlObject267StateType,stageSceneFound,stageSceneBase,stageSceneSettings,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,stageSceneWord5618,stageSceneWord561C,stageSceneWord563C,stageSceneByte5643,stageSceneByte5644,stageSceneByte5645,stageSceneByte5646,stageSceneByte5648,stageSceneByte5649,stageSceneUpdateDispatchFunc,stageSceneUpdateDispatchArg,stageSceneRenderDispatchFunc,stageSceneRenderDispatchArg,stageSceneGlobal9280,stageSceneGlobal9284,stageSceneGlobal928C,stageSceneGlobal92CC,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY";
+            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,arm9PC,arm9LR,arm9SP,arm9CPSR,appFrameLength,appUpdateTask,appSleepPhase,appSleepControl,appSleeping,appSleepPhaseTimer,appSleepWakeUpTimer,appBootParam,appBootTarget,appBootScene,ggid,netCurrentLanguage,netLocalAid,netState14,netState1C,netState20,netState24,netExpectedConsoleCount,netMultiBootSession,netSessionState,netModuleState,netMaxSessionChildren,netMaxConsoleCount,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,stageActorFreezeFlag,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor0PlayerID,playerActor0TransitionStep,playerActor0SignalLock,playerActor0Flag192,playerActor0Flags728,playerActor0Flags72C,playerActor0Flags730,playerActor0TransitFunc,playerActor0TransitArg,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,playerActor1PlayerID,playerActor1TransitionStep,playerActor1SignalLock,playerActor1Flag192,playerActor1Flags728,playerActor1Flags72C,playerActor1Flags730,playerActor1TransitFunc,playerActor1TransitArg,playerTransitionStatus0,playerTransitionStatus1,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectByte0E2,vsConnectByte106,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord138,vsConnectWord13C,vsConnectWord140,vsConnectWord144,vsConnectWord148,vsConnectByte153,vsConnectByte154,vsConnectByte155,vsConnectByte156,vsConnectByte157,vsConnectByte158,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectSettings,courseSelectWord060,courseSelectWord064,courseSelectWord068,courseSelectWord06C,courseSelectWord070,courseSelectWord074,courseSelectWord078,courseSelectWord07C,courseSelectWord080,courseSelectWord084,courseSelectWord08C,courseSelectWord090,stageCameraFound,stageCameraWord190,stageCameraWord194,stageCameraWord19C,stageCameraWord1A0,stageActorManagerFound,stageActorManagerBase,stageActorManagerStateType,stageControllerFound,stageControllerBase,stageControllerStateType,mvlObject267Found,mvlObject267Base,mvlObject267StateType,stageSceneFound,stageSceneBase,stageSceneSettings,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,stageSceneWord5618,stageSceneWord561C,stageSceneWord563C,stageSceneByte5643,stageSceneByte5644,stageSceneByte5645,stageSceneByte5646,stageSceneByte5648,stageSceneByte5649,stageSceneUpdateDispatchFunc,stageSceneUpdateDispatchArg,stageSceneRenderDispatchFunc,stageSceneRenderDispatchArg,stageSceneGlobal9280,stageSceneGlobal9284,stageSceneGlobal928C,stageSceneGlobal92CC,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY";
             if (G.GameStateTraceExtended)
                 G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash";
             G.GameStateTrace << '\n';

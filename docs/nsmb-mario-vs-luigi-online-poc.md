@@ -33,6 +33,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - state 1 update: `0x020A14D8`
   - state 2 update: `0x020A0C68`
 - StageScene state/dispatch/関連グローバルを game-state CSV に出す診断列を追加済み。
+- player transition状態 (`player+0xB2D`, `+0x75C`, `+0x910`, `0x0208A96C/970`) を game-state CSV に出す診断列を追加済み。
 - `ARM.cpp` にwrite trace拡張と bad jump trace を追加済み。
 
 ## 最新の重要な発見
@@ -56,19 +57,24 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - state 2は `StageScene+0x5649` を見ており、ここへ一発ラッチを入れるとstate 2からさらに進むが、現状は `state=1 / word561C=2` へ戻って安定しない。開始ラッチを外から足すだけでは不十分。
 - `StageScene+0x5645` と `+0x5649` を長く強制すると state 1/2 を往復する。これは診断フックが自然な入力ラッチを毎フレーム再投入しているためで、最終方式としては使わない。
 - `ForceStageActorFreezeFlag=0` は危険。host側で `ARM9: prefetch abort pc=FFFFF004` を起こすため不採用。
+- `logs/nsmvl-signal-calltrace-20260525` の結果、通常WAN routeでは `signalLocked()` は各Playerに2回ずつ呼ばれるが、`signalUnlocked()` (`0x02126E90`) は一度も呼ばれていない。
+- `Player` の土管出口遷移候補 `0x02117C80` は `player+0xB2D=0 -> 1` にし、`0x0208A96C[playerID]=2` を待つ構造。
+- `logs/nsmvl-transition-table-trace-20260525` では `0x0208A96C/970` は後で `1 -> 2` へ進むが、`player+0xB2D` は1のまま残る。
+- `logs/nsmvl-player-update-trace-20260525` では、Playerの遷移更新入口候補 `0x0211A56C` がWAN route中に呼ばれていない。つまり、遷移完了通知は立っているが、それを消費してPlayerを次段へ進める更新側が止まっている可能性が高い。
 
 ## 現在のブロッカー
 
-- StageScene state 1を自然に閉じる条件がまだ特定できていない。`signalLocked()`解除、state1入力ラッチ、state2継続ラッチがそれぞれ別条件になっている。
+- StageScene state 1を自然に閉じる条件がまだ特定できていない。`signalLocked()`解除、state1入力ラッチ、state2継続ラッチ、Player遷移更新がそれぞれ別条件になっている。
+- `0x0208A96C/970` の遷移完了値は立つが、Player側が `player+0xB2D=1` から進まず、`signalUnlocked()` が呼ばれない。
 - 診断的に state 2 へ進めても、state machineが自然な試合開始状態へ収束せず、まだplayer actorは操作可能になっていない。
 - デバッグビルドの実行が遅く、3300F前後のWAN route検証はタイムアウトしやすい。CSVの部分結果は使えるが、成功判定は厳密に見る必要がある。
 
 ## 次にやること
 
-1. `0x02117CDC` / `0x0211A650` 周辺をさらに追い、どのPlayer遷移が `signalLocked()` を呼んでいるかを確定する。
-2. `signalUnlocked()` (`0x02126E90`) が自然に呼ばれるべき条件を、Player遷移state / pipe transition / StageScene stateの関係から追う。
+1. Player遷移更新入口 `0x0211A56C` が呼ばれない理由を追う。特に `Stage::actorFreezeFlag=0x26`、`0x020C9280=0x18`、StageScene state 1の関係を見る。
+2. `player+0xB2D=1` かつ `0x0208A96C/970=2` の状態から、NSMBが本来どの経路で `signalUnlocked()` または通常操作状態へ戻すかを特定する。
 3. StageScene state 1 (`0x020A14D8`) の `StageScene+0x5645` と、state 2 (`0x020A0C68`) の `StageScene+0x5649` がどの入力/packet条件で自然に立つかを特定する。
-4. 診断フックではなく、WAN adapterのpacket/input APIから同じ状態へ自然に到達させる。
+4. 診断フックではなく、WAN adapterのpacket/input API、またはROM/メモリpatchの正しい開始短絡点から同じ状態へ自然に到達させる。
 5. freeze解除後に、左右移動とジャンプがhost/client双方で反映されるか確認する。
 6. その後、RNG seed/消費順、ビッグスター、8コインアイテム、ランダムステージを確認する。
 
@@ -99,6 +105,14 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - `signalUnlocked()` 相当の解除だけではstate 1から進まないことを確認。
 - `logs/nsmvl-player-unlock-two-gate-pulse-20260525`
   - state1/state2のラッチを一発ずつ入れても自然な試合開始にはならず、state machineが戻ることを確認。
+- `logs/nsmvl-signal-calltrace-20260525`
+  - WAN routeでは `signalLocked()` だけが呼ばれ、`signalUnlocked()` は呼ばれないことを確認。
+- `logs/nsmvl-transition-table-trace-20260525`
+  - Player遷移完了テーブル `0x0208A96C/970` は `2` になるが、Playerの `+0xB2D` は1のまま進まないことを確認。
+- `logs/nsmvl-player-update-trace-20260525`
+  - Player遷移更新入口候補 `0x0211A56C` がWAN route中に呼ばれていないことを確認。
+- `logs/nsmvl-transition-fields-csv-20260525`
+  - game-state CSVへPlayer遷移フィールドを追加し、host/client双方で `transitionStatus=2`, `transitionStep=1`, `signalLock=1` が観測できることを確認。
 
 ## 参考
 
