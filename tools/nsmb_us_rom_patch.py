@@ -3,6 +3,7 @@ import argparse
 import struct
 from pathlib import Path
 
+from ndspy.code import saveOverlayTable
 from ndspy.rom import NintendoDSRom
 
 from nsmb_us_rom_tool import load_symbols
@@ -24,6 +25,10 @@ def encode_mov_imm(rd: int, imm: int) -> int:
 
 def encode_add_sp_imm(imm: int) -> int:
     return 0xE28DD000 | encode_arm_imm12(imm)
+
+
+def encode_add_imm(rd: int, rn: int, imm: int) -> int:
+    return 0xE2800000 | (rn << 16) | (rd << 12) | encode_arm_imm12(imm)
 
 
 def encode_sub_sp_imm(imm: int) -> int:
@@ -119,6 +124,7 @@ def patch_overlay_words(overlays: dict[int, object], addr: int, words: list[int]
 def save_overlays(rom: NintendoDSRom, overlays: dict[int, object]) -> None:
     for overlay in overlays.values():
         rom.files[overlay.fileID] = overlay.save(compress=overlay.compressed)
+    rom.arm9OverlayTable = saveOverlayTable(overlays)
 
 
 def words_hex(words: list[int]) -> str:
@@ -254,6 +260,73 @@ def patch_direct_mvl_entry(
     return changes
 
 
+NOP = 0xE1A00000
+
+
+def patch_fake_opponent(
+    rom: NintendoDSRom,
+    symbols: dict[str, int],
+    *,
+    force_confirm_load: bool,
+    force_loadgame_progress: bool,
+) -> list[str]:
+    overlays = rom.loadArm9Overlays()
+    changes: list[str] = []
+
+    # Return a small static fake NicknameInfo-like buffer in overlay code RAM.
+    # updateSearchSM only needs a non-null pointer, then reads byte 1 as the
+    # nickname length and bytes from +2 for display text. Use length 0 to avoid
+    # copying arbitrary memory while still advancing to confirmSM.
+    addr = symbols["_ZN14VSConnectScene19getOpponentNicknameEv"]
+    fake_data_addr = addr + 0x10
+    words = [
+        0xE59F0000,  # ldr r0, [pc, #0]
+        BX_LR,
+        fake_data_addr,
+        0,
+        0,
+        0,
+    ]
+    ov_id, old = patch_overlay_words(overlays, addr, words)
+    changes.append(
+        f"VSConnectScene::getOpponentNickname fake peer overlay{ov_id} @ 0x{addr:08X}: "
+        f"{old.hex()} -> {words_hex(words)}"
+    )
+
+    if force_confirm_load:
+        # In the fake-peer diagnostic route, confirmSM quickly decides the peer
+        # has left because no real local-wireless/session state exists. Redirect
+        # that playerLeftSME literal to loadGameSME to expose the next missing
+        # prerequisite without editing the whole state machine.
+        literal_addr = 0x021582B4
+        target = symbols["_ZN14VSConnectScene10loadGameSME"]
+        ov_id, old = patch_overlay_words(overlays, literal_addr, [target])
+        changes.append(
+            f"VSConnectScene confirm playerLeft literal -> loadGameSME overlay{ov_id} @ 0x{literal_addr:08X}: "
+            f"{old.hex()} -> {struct.pack('<I', target).hex()}"
+        )
+
+    if force_loadgame_progress:
+        # updateLoadGameSM state 1 waits for a communication/session byte at
+        # 0x02088800 to become 2. In the fake-peer route that never happens, so
+        # bypass only this wait branch to expose the next real prerequisite.
+        wait_branch_addr = 0x021578B0
+        ov_id, old = patch_overlay_words(overlays, wait_branch_addr, [NOP])
+        changes.append(
+            f"VSConnectScene::updateLoadGameSM state1 wait branch NOP overlay{ov_id} @ 0x{wait_branch_addr:08X}: "
+            f"{old.hex()} -> {struct.pack('<I', NOP).hex()}"
+        )
+        wait_branch2_addr = 0x021578D0
+        ov_id, old = patch_overlay_words(overlays, wait_branch2_addr, [NOP])
+        changes.append(
+            f"VSConnectScene::updateLoadGameSM state1 secondary wait branch NOP overlay{ov_id} @ 0x{wait_branch2_addr:08X}: "
+            f"{old.hex()} -> {struct.pack('<I', NOP).hex()}"
+        )
+
+    save_overlays(rom, overlays)
+    return changes
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rom", default="roms/nsmb-us.nds")
@@ -269,6 +342,9 @@ def main() -> int:
     p_direct.add_argument("--rng-seed", type=lambda x: int(x, 0), default=0x100)
     p_direct.add_argument("--first-scene", type=lambda x: int(x, 0), default=6)
     p_direct.add_argument("--skip-direct-loadlevel", action="store_true")
+    p_fake = sub.add_parser("fake-opponent")
+    p_fake.add_argument("--force-confirm-load", action="store_true")
+    p_fake.add_argument("--force-loadgame-progress", action="store_true")
     args = ap.parse_args()
 
     symbols = load_symbols(Path(args.symbols))
@@ -286,6 +362,13 @@ def main() -> int:
             rng_seed=args.rng_seed,
             first_scene=args.first_scene,
             skip_direct_loadlevel=args.skip_direct_loadlevel,
+        )
+    elif args.cmd == "fake-opponent":
+        changes = patch_fake_opponent(
+            rom,
+            symbols,
+            force_confirm_load=args.force_confirm_load,
+            force_loadgame_progress=args.force_loadgame_progress,
         )
     else:
         raise AssertionError(args.cmd)

@@ -38,6 +38,8 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   - `Net::getRandom()` / `Game::getRandom()` を固定返却へ差し替える `rng-constant`
   - ARM9/overlayの命令パッチ基盤
   - `direct-mvl-entry` の初期PoC
+  - overlay再圧縮時に `arm9OverlayTable` の `compressedSize` も更新するよう修正済み
+  - 診断用 `fake-opponent` パッチを追加済み
 - `roms/nsmb-us-rng100.nds` を生成し、Debug smokeで起動成功を確認済み。
   - 生成ROMは `roms/` 配下なのでgitには含めない。
 - `Game::loadLevel` のUS版アドレスを確認済み。
@@ -62,6 +64,8 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 逆アセンブル上のパッチ生成は成功している。
 
+overlayを再圧縮するパッチでは、overlay file本体だけでなくoverlay tableの `compressedSize` も更新する必要がある。これを更新していなかったため、初期のoverlay52パッチROMは黒画面/prefetch abortを起こしていた可能性が高い。現在の `save_overlays()` は `ndspy.code.saveOverlayTable()` でtableも更新する。
+
 ### 実行結果
 
 `roms/nsmb-us-direct-mvl-entry.nds`:
@@ -74,15 +78,50 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 `roms/nsmb-us-loadgame-sm-entry.nds`:
 
-- `updateLoadGameSM` は元のままにして、初期サブメニューだけ `loadGameSME` にした。
-- これも `Mario Vs. Luigi` 選択後に黒画面化し、prefetch abortになる。
-- 結論: `VSConnectScene::onCreate` 直後に `loadGameSME` へ入れるだけでも早すぎる。通常のselect/search/confirm/char selectでセットされる内部フィールドか通信/session状態が不足している。
+- `updateLoadGameSM` は元のままにして、初期サブメニューだけ `loadGameSME` にした診断ROM。
+- overlay table修正前の結果は黒画面/prefetch abortだったため、古い結果は信頼しない。
+- ただし `VSConnectScene::onCreate` 直後に `loadGameSME` へ入る方針は、通常のselect/search/confirm/char selectでセットされる内部フィールドを飛ばすため、現時点では本筋から外す。
+
+US vanilla通常入力:
+
+- `tests/nsmb_mario_vs_luigi.inputs` で `Mario Vs. Luigi` を選択し、`selectModeSME -> charSelectSME -> searchSME` まで自然に到達する。
+- LocalMP peerがいないため `Searching for Luigi...` で待つ。
+- call traceで確認した通常遷移:
+  - `745`: `changeSubMenu(selectModeSME)`
+  - `900`: `scheduleSubMenuChange(charSelectSME)`
+  - `932`: `changeSubMenu(charSelectSME)`
+  - `1260`: `scheduleSubMenuChange(searchSME)`
+  - `1290`: `changeSubMenu(searchSME)`
+
+`roms/nsmb-us-fake-opponent.nds`:
+
+- `VSConnectScene::getOpponentNickname()` を、overlay内の長さ0 nickname構造を返すようにパッチ。
+- `searchSME -> confirmSME` までは進む。
+- 実通信/sessionがないため、confirm後すぐ `playerLeftSME` に落ちる。
+
+`roms/nsmb-us-fake-opponent-load.nds`:
+
+- `fake-opponent` に加え、confirm中の `playerLeftSME` literalを `loadGameSME` に差し替え。
+- `loadGameSME` へ入り、画面は `Please wait.` になる。
+- `updateLoadGameSM` は毎フレーム走るが、`Game::loadLevel` にはまだ到達しない。
+- RAM dumpでは `VSConnectScene+0x16C=1`、`+0x170` のtimerだけが増える。
+- つまり `updateLoadGameSM` state1内の通信/session条件が未成立。
+
+`roms/nsmb-us-fake-opponent-load-progress.nds`:
+
+- `updateLoadGameSM` state1の待ち分岐を診断用に2箇所NOP化。
+  - `0x021578B0`
+  - `0x021578D0`
+- まだ `Please wait.` から進まず、`Game::loadLevel` 呼び出しは未確認。
+- 次はstate1を抜けた後の追加条件、またはstate遷移自体が起きていない原因をRAM dumpで追う。
 
 主なログ:
 
-- `logs/nsmvl-us-direct-mvl-entry-smoke-20260525`
-- `logs/nsmvl-us-direct-mvl-entry-align-menu-20260525`
-- `logs/nsmvl-us-loadgame-sm-entry-menu-20260525`
+- `logs/nsmvl-us-vanilla-vsconnect-calltrace-20260525`
+- `logs/nsmvl-us-fake-opponent-fixed-ovt-20260525`
+- `logs/nsmvl-us-fake-opponent-load-20260525`
+- `logs/nsmvl-us-fake-opponent-load-progress2-20260525`
+- `logs/nsmvl-us-fake-opponent-load-progress-ram-20260525`
 
 ## 現在のブロッカー
 
@@ -90,22 +129,17 @@ LocalMPを使わずにMvLを開始する入口をまだ作れていない。
 
 原因候補:
 
-- `VSConnectScene::loadGameSME` に入る前に、通常フローで初期化されるフィールドが不足している。
-- `loadGameSM` 内のファイルロード、通信marker、packet buffer、player/character/stage選択情報の前提が満たせていない。
+- `loadGameSM` 内の通信/session byteやmarker条件が未成立。
+- `fake-opponent` はUI上の相手検出だけを偽装しており、Net packet buffer、marker、player ready、random syncまでは偽装していない。
 - `Game::loadLevel` 直呼びでは、MvL専用のfile cacheやstage start関連状態が揃わない。
 
 ## 次にやること
 
-1. `VSConnectScene` の通常フローを壊さず、どのサブメニュー遷移で `loadGameSME` に入るのが安全かを追う。
-   - `selectModeSME`
-   - `charSelectSME`
-   - `confirmSME`
-   - `waitHostConfirmSME`
-   - `loadGameSME`
-2. `loadGameSME` に入る直前までにセットされる `VSConnectScene` フィールドを、通常LocalMPルートのRAM/traceから洗い出す。
-3. ROMパッチで「不足フィールドを最小限セットしてからloadGameSMEへ入る」入口を試す。
-4. それでも重い場合は、`Game::loadLevel` ではなく `CourseSelect -> Game::loadLevel` の既存経路を利用する入口へ切り替える。
-5. MvL gameplayに入れた後で、試合中2P入力境界を特定し、WAN adapterと接続する。
+1. `fake-opponent-load-progress` のRAM dumpを読み、`updateLoadGameSM` がstate1から進まない理由を確定する。
+2. `updateLoadGameSM` state2以降の条件を、ROMパッチで順に診断NOP/固定値化して `Game::loadLevel` まで到達できるか確認する。
+3. forceしている条件を、最終的にWAN adapterから自然に満たすべき条件と、ROM側で固定してよい条件に分類する。
+4. MvL gameplayに入れた後で、試合中2P入力境界を特定し、WAN adapterと接続する。
+5. US版PoC成立後に日本版 `A2DJ` へ移植する。
 
 ## 検証ルール
 
