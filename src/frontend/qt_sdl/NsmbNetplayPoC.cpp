@@ -513,6 +513,8 @@ struct PlayerActorScanSample
     ObjectScanSample Actor1;
 };
 
+ObjectScanSample FindObjectByIDAndSettingsLoose(melonDS::NDS* nds, melonDS::u16 expectedObjectID, melonDS::u32 expectedSettings);
+
 struct GameStateSyncHashes
 {
     melonDS::u64 Basic = 0;
@@ -608,6 +610,9 @@ struct State
     bool PacketBridgeForceStagePacketWords = false;
     melonDS::u32 PacketBridgeForceStagePacketWordsStartFrame = 0;
     melonDS::u32 PacketBridgeForceStagePacketWordsEndFrame = 0;
+    bool PacketBridgeForceStageNet20OnStageScene = false;
+    int PacketBridgeForceGameLocalPlayerID = -1;
+    melonDS::u32 PacketBridgeForceGameLocalPlayerIDStartFrame = 0;
     bool PacketBridgeDummyAlloc = false;
     melonDS::u32 PacketBridgeDummyAllocFrame = 0;
     melonDS::u32 PacketBridgeDummyAllocSize = 0;
@@ -2462,6 +2467,23 @@ void ForceNSMLStagePacketWordsIfNeeded(melonDS::u32 frame, melonDS::NDS* nds)
     WriteARM9U32(nds, 0x0208B050u, 0x00000000u);
     WriteARM9U32(nds, 0x0208B054u, 0x00000000u);
     WriteARM9U32(nds, 0x02186A88u, 0x00000303u);
+
+    if (G.PacketBridgeForceStageNet20OnStageScene
+        && nds->ARM9Read16(kSceneCurrentSceneIDAddr) == 0x0003
+        && FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, 0x00B5FF00).Found)
+        nds->ARM9Write16(kNetState20Addr, 2);
+}
+
+void ForceNSMLGameLocalPlayerIDIfNeeded(melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!nds || G.PacketBridgeForceGameLocalPlayerID < 0)
+        return;
+    if (frame < G.PacketBridgeForceGameLocalPlayerIDStartFrame)
+        return;
+    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
+        return;
+
+    nds->ARM9Write32(kGameLocalPlayerIDAddr, static_cast<melonDS::u32>(G.PacketBridgeForceGameLocalPlayerID & 1));
 }
 
 void PumpNSMLPacketBridgeLocked(melonDS::NDS* nds, melonDS::u32 frame)
@@ -5725,6 +5747,12 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_PACKET_WORDS_START_FRAME", 0)));
     G.PacketBridgeForceStagePacketWordsEndFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_PACKET_WORDS_END_FRAME", 0)));
+    G.PacketBridgeForceStageNet20OnStageScene =
+        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_NET20_ON_STAGE_SCENE");
+    G.PacketBridgeForceGameLocalPlayerID =
+        EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID", -1);
+    G.PacketBridgeForceGameLocalPlayerIDStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_START_FRAME", 0)));
     G.PacketBridgeDummyAlloc =
         EnvFlag("MELONDS_NSML_PACKET_BRIDGE_DUMMY_ALLOC");
     G.PacketBridgeDummyAllocFrame = static_cast<melonDS::u32>(
@@ -6185,6 +6213,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
             return polledInput;
         ForceNSMLPacketBridgeLoadGameSMIfNeeded(instanceID, inputFrame, nds);
         ForceNSMLStagePacketWordsIfNeeded(inputFrame, nds);
+        ForceNSMLGameLocalPlayerIDIfNeeded(inputFrame, nds);
     }
 
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
@@ -6244,8 +6273,10 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
                 return testInput;
             ForceNSMLPacketBridgeLoadGameSMIfNeeded(instanceID, syncFrame, nds);
             ForceNSMLStagePacketWordsIfNeeded(syncFrame, nds);
+            ForceNSMLGameLocalPlayerIDIfNeeded(syncFrame, nds);
             melonDS::NSML_RefreshMarioVsLuigiPacketSlots(nds);
             ForceNSMLStagePacketWordsIfNeeded(syncFrame, nds);
+            ForceNSMLGameLocalPlayerIDIfNeeded(syncFrame, nds);
             ThrottleNSMLPacketBridgeLead(nds, syncFrame);
             WaitForNSMLPacketBridgeRemote(nds, syncFrame);
         }
@@ -6371,13 +6402,16 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         std::lock_guard<std::mutex> lock(G.Mutex);
         PumpNSMLPacketBridgeLocked(nds, logFrame);
         ForceNSMLStagePacketWordsIfNeeded(logFrame, nds);
+        ForceNSMLGameLocalPlayerIDIfNeeded(logFrame, nds);
         CaptureAndSendNSMLPacketLocked(logFrame, nds);
     }
     if (G.Enabled && G.PacketBridgeEnabled && bridgeNetworkActive)
     {
         ForceNSMLStagePacketWordsIfNeeded(logFrame, nds);
+        ForceNSMLGameLocalPlayerIDIfNeeded(logFrame, nds);
         melonDS::NSML_RefreshMarioVsLuigiPacketSlots(nds);
         ForceNSMLStagePacketWordsIfNeeded(logFrame, nds);
+        ForceNSMLGameLocalPlayerIDIfNeeded(logFrame, nds);
     }
     if (G.Enabled && G.PacketBridgeEnabled && bridgeNetworkActive)
         ThrottleNSMLPacketBridgeFrameLead(nds, logFrame);

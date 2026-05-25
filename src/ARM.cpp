@@ -1556,7 +1556,9 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
     {
         if (cpu->R[0] == 0x0F && cpu->R[2] == 9)
         {
-            const u32 localPlayer = NSMLPacketBridgeLocalPlayer();
+            u32 localPlayer = NSMLPacketBridgeLocalPlayer();
+            if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_LOAD_LEVEL_PLAYER_ID"))
+                localPlayer = static_cast<u32>(strtoul(value, nullptr, 0)) & 1;
             const u32 sp = cpu->R[13];
             cpu->R[1] = 1; // vs
             cpu->DataWrite32(sp + 0x00, 0); // act
