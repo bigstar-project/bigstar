@@ -218,6 +218,12 @@ param(
     [int]$ForceStageSceneState3GateStartFrame = 0,
     [int]$ForceStageSceneState3GateEndFrame = 0,
     [string]$ForceStageSceneState3GateValue = "1",
+    [switch]$ForceStageSceneEventFlags,
+    [switch]$ForceStageSceneEventFlagsHostOnly,
+    [switch]$ForceStageSceneEventFlagsClientOnly,
+    [int]$ForceStageSceneEventFlagsStartFrame = 0,
+    [int]$ForceStageSceneEventFlagsEndFrame = 0,
+    [string]$ForceStageSceneEventFlagsValue = "0",
     [switch]$GuardPlayerModelRenderPtrs,
     [int]$GuardPlayerModelRenderPtrsStartFrame = 0,
     [int]$GuardPlayerModelRenderPtrsEndFrame = 0,
@@ -1048,6 +1054,21 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_END_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_VALUE -ErrorAction SilentlyContinue
+    }
+    if ($ForceStageSceneEventFlags) {
+        $env:MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS = "1"
+        if ($ForceStageSceneEventFlagsHostOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_HOST_ONLY -ErrorAction SilentlyContinue }
+        if ($ForceStageSceneEventFlagsClientOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_CLIENT_ONLY -ErrorAction SilentlyContinue }
+        $env:MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_START_FRAME = "$ForceStageSceneEventFlagsStartFrame"
+        $env:MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_END_FRAME = "$ForceStageSceneEventFlagsEndFrame"
+        $env:MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_VALUE = "$ForceStageSceneEventFlagsValue"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_HOST_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_CLIENT_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_VALUE -ErrorAction SilentlyContinue
     }
     if ($PacketReplayFile) {
         $env:MELONDS_NSML_PACKET_REPLAY_FILE = (Resolve-Path $PacketReplayFile).Path

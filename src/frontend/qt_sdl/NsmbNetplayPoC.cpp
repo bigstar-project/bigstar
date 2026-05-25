@@ -797,6 +797,13 @@ struct State
     melonDS::u32 ForceStageSceneState3GateEndFrame = 0;
     melonDS::u32 ForceStageSceneState3GateValue = 1;
     bool ForceStageSceneState3GateLogged[16] {};
+    bool ForceStageSceneEventFlagsEnabled = false;
+    bool ForceStageSceneEventFlagsHostOnly = false;
+    bool ForceStageSceneEventFlagsClientOnly = false;
+    melonDS::u32 ForceStageSceneEventFlagsStartFrame = 0;
+    melonDS::u32 ForceStageSceneEventFlagsEndFrame = 0;
+    melonDS::u32 ForceStageSceneEventFlagsValue = 0;
+    bool ForceStageSceneEventFlagsLogged[16] {};
     bool NetRandomPatchEnabled = false;
     bool NetRandomPatchAuto = false;
     melonDS::u32 NetRandomPatchFrame = 0;
@@ -4414,6 +4421,42 @@ void ForceStageSceneState3GateIfNeeded(int instanceID, melonDS::u32 frame, melon
     }
 }
 
+void ForceStageSceneEventFlagsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForceStageSceneEventFlagsEnabled || !nds || !nds->MainRAM)
+        return;
+    if (frame < G.ForceStageSceneEventFlagsStartFrame)
+        return;
+    if (G.ForceStageSceneEventFlagsEndFrame != 0 && frame > G.ForceStageSceneEventFlagsEndFrame)
+        return;
+    if (G.ForceStageSceneEventFlagsHostOnly && G.NetRole != Role::Host)
+        return;
+    if (G.ForceStageSceneEventFlagsClientOnly && G.NetRole != Role::Client)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
+        return;
+
+    const melonDS::u32 oldValue = nds->ARM9Read32(0x020C92D0);
+    const melonDS::u32 newValue = oldValue | G.ForceStageSceneEventFlagsValue;
+    nds->ARM9Write32(0x020C92D0, newValue);
+
+    if (!G.ForceStageSceneEventFlagsLogged[instanceID])
+    {
+        std::printf(
+            "NSMB Test: force stage scene event flags inst=%d frame=%u range=%u-%u old=0x%08X or=0x%08X new=0x%08X\n",
+            instanceID,
+            frame,
+            G.ForceStageSceneEventFlagsStartFrame,
+            G.ForceStageSceneEventFlagsEndFrame,
+            oldValue,
+            G.ForceStageSceneEventFlagsValue,
+            newValue);
+        G.ForceStageSceneEventFlagsLogged[instanceID] = true;
+    }
+}
+
 bool WriteObjectPositionByGUID(melonDS::NDS* nds, melonDS::u32 guid, melonDS::u32 posX, melonDS::u32 posY, melonDS::u32 posZ)
 {
     if (!nds || !nds->MainRAM || guid == 0)
@@ -6373,6 +6416,16 @@ void InitFromEnvironment()
     G.ForceStageSceneState3GateValue = static_cast<melonDS::u32>(
         std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_VALUE")
             ? std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_VALUE") : "1", nullptr, 0));
+    G.ForceStageSceneEventFlagsEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS");
+    G.ForceStageSceneEventFlagsHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_HOST_ONLY");
+    G.ForceStageSceneEventFlagsClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_CLIENT_ONLY");
+    G.ForceStageSceneEventFlagsStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_START_FRAME", 0)));
+    G.ForceStageSceneEventFlagsEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_END_FRAME", 0)));
+    G.ForceStageSceneEventFlagsValue = static_cast<melonDS::u32>(
+        std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_VALUE")
+            ? std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_VALUE") : "0", nullptr, 0));
 
     const char* netRandomValue = std::getenv("MELONDS_NSML_NET_RANDOM_VALUE");
     if (netRandomValue && netRandomValue[0])
@@ -6668,6 +6721,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         ForceStageSceneStartGateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageSceneContinueGateIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForceStageSceneEventFlagsIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageSceneState3GateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)

@@ -61,21 +61,27 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - Player main update候補 `0x020F90D4` / 遷移更新呼び出し点 `0x020F91C8` / 遷移更新入口候補 `0x0211A56C` は現在のWAN route中に呼ばれていない。Player遷移関数以前にactor update側が止まっている。
 - `Stage::actorFreezeFlag` (`0x020C9250`) は `0x0214C9B0` で `0x26` に設定される。直接0へ戻す診断は過去に `ARM9: prefetch abort pc=FFFFF004` を起こしており、最終方式としては使わない。
 - game-state CSVに `0x020C92B4/92C0/92C8/92D0` を追加した。state3ゲートと周辺状態をCSVで追える。
+- StageScene state 1 は `0x020C92D0` のイベントフラグを見て `Stage::actorFreezeFlag` を変更している。
+  - `0x020C92D0 & 0x100`: `Stage::actorFreezeFlag |= 0x2e`
+  - `0x020C92D0 & 0x200`: `Stage::actorFreezeFlag &= ~0x2e`
+- 診断用に `MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS` を追加した。これは `0x020C92D0` に指定bitをORし、StageScene本来のイベント消費経路でfreeze解除を踏ませるためのフック。
+- `logs/nsmvl-stage-event-92d0-clear-freeze-20260525` では、host側で `0x020C92D0 |= 0x200` が `0x020A18D4 -> 0x020A18F4` に消費され、直接freeze書き換えなしで `Stage::actorFreezeFlag=0` と `player+0xB2D=2` まで進むことを確認した。
+- `logs/nsmvl-stage-event-92d0-no-state3-force-20260525` では、`0x020C92D0 |= 0x200` だけでもPlayer updateと `signalUnlocked()` は走るが、`0x020C92C0 & 3` が立たないため state3 へ自然には入らず、state1/state2 の循環へ戻ることを確認した。
 
 ## 現在のブロッカー
 
 - `0x020C92C0 & 3` が本来どの関数、packet、session状態で立つのか未特定。
-- 診断的に state3へ入っても `Stage::actorFreezeFlag=0x26` が残り、Player main updateが走らない。
-- `0x0208A96C/970` の遷移完了値は立つが、Player側が `player+0xB2D=1` から進まず、`signalUnlocked()` が呼ばれない。
-- StageScene state遷移、Player遷移、actor freeze解除の3つがまだ自然な順番で接続できていない。
+- `0x020C92D0 & 0x200` がfreeze解除の自然経路であることは見えたが、現在のWAN routeでそのイベントが自然発生する条件は未特定。
+- freeze解除後はPlayer updateが走るが、state3開始ゲート `0x020C92C0 & 3` が立たない限り、自然な試合開始へは進まない。
+- StageScene state遷移、Player遷移、actor freeze解除の3つがまだ自然な順番で接続できていない。特に `0x020C92C0` と `0x020C92D0` の発生源を、下位通信/session境界から追う必要がある。
 - デバッグビルドの実行が遅く、3300F前後のWAN route検証はタイムアウトしやすい。CSVの部分結果は使えるが、成功判定は厳密に見る必要がある。
 
 ## 次にやること
 
 1. `0x020C92C0` を自然に立てる書き込み元/呼び出し条件を特定する。
-2. state3 (`0x020A096C`) に入った後、`Stage::actorFreezeFlag=0x26` がどの条件で解除されるべきかを追う。
-3. `player+0xB2D=1` かつ `0x0208A96C/970=2` の状態から、NSMBが本来どの経路で `signalUnlocked()` または通常操作状態へ戻すかを特定する。
-4. 診断フックではなく、WAN adapterのpacket/input API、またはROM/メモリpatchの正しい開始短絡点から同じ状態へ自然に到達させる。
+2. `0x020C92D0 & 0x200` を自然に立てる経路、またはROM/メモリpatchで安全に発生させる入口を特定する。
+3. `0x020C92C0` / `0x020C92D0` を直接いじる診断フックではなく、WAN adapterのpacket/input API、またはROM/メモリpatchの正しい開始短絡点から同じ状態へ自然に到達させる。
+4. state3遷移とfreeze解除が揃った状態で、Playerが通常操作状態へ戻るか確認する。
 5. freeze解除後に、左右移動とジャンプがhost/client双方で反映されるか確認する。
 6. その後、RNG seed/消費順、ビッグスター、8コインアイテム、ランダムステージを確認する。
 
@@ -130,6 +136,10 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - state1からstate3へ進む正規分岐が `0x020C92C0 & 3` であること、現在のWAN routeでは `0x020C92C0` が自然に立たないことを確認。
 - `logs/nsmvl-stage-state3-gate-force-20260525`
   - 診断的に `0x020C92C0=1` を入れるとstate3へ入るが、`Stage::actorFreezeFlag=0x26` が残りPlayer更新はまだ走らないことを確認。
+- `logs/nsmvl-stage-event-92d0-clear-freeze-20260525`
+  - `0x020C92D0 |= 0x200` がStageScene state1本来のイベント処理で消費され、host側でfreeze解除とPlayer遷移更新再開が起きることを確認。
+- `logs/nsmvl-stage-event-92d0-no-state3-force-20260525`
+  - freeze解除イベントだけではPlayer updateと `signalUnlocked()` は走るが、`0x020C92C0 & 3` が立たず、自然なstate3開始には到達しないことを確認。
 
 ## 参考
 
