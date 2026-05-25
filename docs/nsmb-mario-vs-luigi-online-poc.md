@@ -50,6 +50,8 @@ NSMB Centralの情報では、MvsLはRNG seedを接続時に一度同期し、�
 - 入力スクリプトの `RIGHT` は `Input::consoleKeys` と `Input::playerKeysHeld` まで届いている。
 - `--mirror-packets` で `Net::getPacket(consoleID)` が2P側にもpacketを返すようにした場合、`inputPlayer1Held` にも同じ入力が入る。
 - それでも画面上のプレイヤーは動かない。現在のfake-opponentルートは、ステージ表示には届くが、実試合として必要な内部状態がまだ自然に成立していない可能性が高い。
+- `--fake-net-state` を `Net::getPacket` 内で常時適用すると、起動初期からNet状態を書き換えて白画面で固まる。
+- `--fake-net-state-on-nickname` で検索後だけNet状態を2台接続済みに見せると、`Connection interrupted` へ落ちる。calltraceでは `Net::Core::setConnectionState(3)` と `Net::Core::transferPacket(1)` の直後に切断系の流れへ入る。
 - RAM上のBig Star検出はruntime class ID `0x22` / settings `1` で拾えている。NSMB CentralのObject ID 210とは表記レイヤーが違う可能性がある。
 
 ## 現在の主な問題
@@ -66,9 +68,10 @@ fake-opponent + 強制進行パッチは、複数の通信/session/ready待ち�
 ## 次にやること
 
 1. `fake-opponent --mirror-packets` の結果を基準に、Stage内の「入力は届くがプレイヤーが動かない」原因を特定する。
-2. `VSConnectScene::updateLoadGameSM` のNOPを減らし、可能な限りNet/Wifi/sessionグローバルを自然な値にして進める診断ROMを作る。
-3. `Net::getPacket` より下のsession/packet境界を特定し、WAN adapterの差し替え点を決める。
-4. 1インスタンスで「操作可能なMvsL試合」へ到達できたら、WAN由来の2P packetを流す最小PoCへ進む。
+2. `Connection interrupted` へ落ちる直接原因を、`Net::Core::transferPacket` / `setConnectionState` / error handler周辺から特定する。
+3. `VSConnectScene::updateLoadGameSM` のNOPを減らし、可能な限りNet/Wifi/sessionグローバルを自然な値にして進める診断ROMを作る。
+4. `Net::getPacket` より下のsession/packet境界を特定し、WAN adapterの差し替え点を決める。
+5. 1インスタンスで「操作可能なMvsL試合」へ到達できたら、WAN由来の2P packetを流す最小PoCへ進む。
 
 ## 検証ルール
 

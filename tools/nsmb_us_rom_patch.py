@@ -131,6 +131,106 @@ def words_hex(words: list[int]) -> str:
     return "".join(struct.pack("<I", w).hex() for w in words)
 
 
+def encode_ldr_pc_literal(rd: int, instruction_addr: int, literal_addr: int, *, cond: int = 0xE) -> int:
+    pc = instruction_addr + 8
+    off = literal_addr - pc
+    if off < 0 or off > 0xFFF or off % 4:
+        raise ValueError(
+            f"LDR literal target 0x{literal_addr:08X} out of range from 0x{instruction_addr:08X}"
+        )
+    return (cond << 28) | 0x059F0000 | (rd << 12) | off
+
+
+def build_getpacket_mirror_stub(
+    start_addr: int,
+    *,
+    send_packet_addr: int,
+    fake_state: bool,
+) -> list[int]:
+    words: list[int] = []
+    literals: list[int] = []
+    literal_refs: list[tuple[int, int, int, int]] = []
+
+    def emit_ldr_literal(rd: int, value: int, *, cond: int = 0xE) -> None:
+        literal_index = len(literals)
+        literals.append(value)
+        word_index = len(words)
+        words.append(0)
+        literal_refs.append((word_index, rd, literal_index, cond))
+
+    if fake_state:
+        words.append(encode_mov_imm(2, 2))
+        for addr in (
+            0x020887FC,  # Net::connectionState
+            0x02088800,  # Net::packetTransIntegrity / loadGameSM state1 gate
+            0x02088804,  # Net::connectedConsoleCount
+            0x0208880C,  # Net::expectedConsoleCount
+            0x02088814,  # Net::sessionState
+            0x0208881C,  # Net::maxSessionChildren
+            0x0208882C,  # Net::maxConsoleCount
+        ):
+            emit_ldr_literal(1, addr)
+            words.append(encode_str_imm(2, 1, 0))
+
+    words.append(encode_cmp_imm(0, 2))
+    emit_ldr_literal(0, send_packet_addr, cond=3) # ldrlo
+    words.append(with_cond(encode_mov_imm(0, 0), 2)) # movhs r0, #0
+    words.append(BX_LR)
+
+    literal_start_addr = start_addr + (len(words) * 4)
+    for word_index, rd, literal_index, cond in literal_refs:
+        instruction_addr = start_addr + (word_index * 4)
+        literal_addr = literal_start_addr + (literal_index * 4)
+        words[word_index] = encode_ldr_pc_literal(rd, instruction_addr, literal_addr, cond=cond)
+
+    words.extend(literals)
+    return words
+
+
+def build_fake_nickname_stub(start_addr: int, *, fake_net_state: bool) -> list[int]:
+    words: list[int] = []
+    literals: list[int] = []
+    literal_refs: list[tuple[int, int, int, int]] = []
+
+    def emit_ldr_literal(rd: int, value: int, *, cond: int = 0xE) -> int:
+        literal_index = len(literals)
+        literals.append(value)
+        word_index = len(words)
+        words.append(0)
+        literal_refs.append((word_index, rd, literal_index, cond))
+        return literal_index
+
+    if fake_net_state:
+        words.append(encode_mov_imm(2, 2))
+        for addr in (
+            0x020887FC,  # Net::connectionState
+            0x02088800,  # Net::packetTransIntegrity / loadGameSM state1 gate
+            0x02088804,  # Net::connectedConsoleCount
+            0x0208880C,  # Net::expectedConsoleCount
+            0x02088814,  # Net::sessionState
+            0x0208881C,  # Net::maxSessionChildren
+            0x0208882C,  # Net::maxConsoleCount
+        ):
+            emit_ldr_literal(1, addr)
+            words.append(encode_str_imm(2, 1, 0))
+
+    fake_data_literal_index = emit_ldr_literal(0, 0)
+    words.append(BX_LR)
+
+    literal_start_addr = start_addr + (len(words) * 4)
+    fake_data_addr = literal_start_addr + ((len(literals) + 0) * 4)
+    literals[fake_data_literal_index] = fake_data_addr
+
+    for word_index, rd, literal_index, cond in literal_refs:
+        instruction_addr = start_addr + (word_index * 4)
+        literal_addr = literal_start_addr + (literal_index * 4)
+        words[word_index] = encode_ldr_pc_literal(rd, instruction_addr, literal_addr, cond=cond)
+
+    words.extend(literals)
+    words.extend([0, 0, 0, 0])
+    return words
+
+
 def patch_rng_constant(rom: NintendoDSRom, symbols: dict[str, int], value: int) -> list[str]:
     arm9 = rom.loadArm9()
     words = [
@@ -270,6 +370,8 @@ def patch_fake_opponent(
     force_confirm_load: bool,
     force_loadgame_progress: bool,
     mirror_packets: bool,
+    fake_net_state: bool,
+    fake_net_state_on_nickname: bool,
 ) -> list[str]:
     arm9 = rom.loadArm9()
     overlays = rom.loadArm9Overlays()
@@ -281,13 +383,11 @@ def patch_fake_opponent(
         # create real remote input yet, but it lets NSMB's own packet readers
         # see a second console packet instead of nullptr.
         addr = symbols["_ZN3Net9getPacketEt"]
-        words = [
-            encode_cmp_imm(0, 2),              # cmp r0, #2
-            0x359F0004,                        # ldrlo r0, [pc, #4]
-            with_cond(encode_mov_imm(0, 0), 2), # movhs r0, #0
-            BX_LR,
-            symbols["_ZN3Net10sendPacketE"],
-        ]
+        words = build_getpacket_mirror_stub(
+            addr,
+            send_packet_addr=symbols["_ZN3Net10sendPacketE"],
+            fake_state=fake_net_state,
+        )
         old = patch_arm9_words(arm9, addr, words)
         changes.append(
             f"Net::getPacket mirror local packet @ 0x{addr:08X}: "
@@ -299,15 +399,7 @@ def patch_fake_opponent(
     # nickname length and bytes from +2 for display text. Use length 0 to avoid
     # copying arbitrary memory while still advancing to confirmSM.
     addr = symbols["_ZN14VSConnectScene19getOpponentNicknameEv"]
-    fake_data_addr = addr + 0x10
-    words = [
-        0xE59F0000,  # ldr r0, [pc, #0]
-        BX_LR,
-        fake_data_addr,
-        0,
-        0,
-        0,
-    ]
+    words = build_fake_nickname_stub(addr, fake_net_state=fake_net_state_on_nickname)
     ov_id, old = patch_overlay_words(overlays, addr, words)
     changes.append(
         f"VSConnectScene::getOpponentNickname fake peer overlay{ov_id} @ 0x{addr:08X}: "
@@ -408,6 +500,8 @@ def main() -> int:
     p_fake.add_argument("--force-confirm-load", action="store_true")
     p_fake.add_argument("--force-loadgame-progress", action="store_true")
     p_fake.add_argument("--mirror-packets", action="store_true")
+    p_fake.add_argument("--fake-net-state", action="store_true")
+    p_fake.add_argument("--fake-net-state-on-nickname", action="store_true")
     args = ap.parse_args()
 
     symbols = load_symbols(Path(args.symbols))
@@ -433,6 +527,8 @@ def main() -> int:
             force_confirm_load=args.force_confirm_load,
             force_loadgame_progress=args.force_loadgame_progress,
             mirror_packets=args.mirror_packets,
+            fake_net_state=args.fake_net_state,
+            fake_net_state_on_nickname=args.fake_net_state_on_nickname,
         )
     else:
         raise AssertionError(args.cmd)
