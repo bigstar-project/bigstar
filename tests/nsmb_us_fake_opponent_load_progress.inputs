@@ -1,0 +1,19 @@
+# US NSMB fake-opponent diagnostic route.
+# Reaches Mario vs Luigi search, lets the ROM patch force loadGameSM through to
+# VSMenu, then touches the VSMenu OK button.
+
+0-619 NONE
+620-627 DOWN
+628-659 NONE
+660-667 A
+668-899 NONE
+900-907 A
+908-1259 NONE
+1260-1267 A
+1268-1599 NONE
+1600-1607 NONE 128,165
+1608-1719 NONE
+1720-1727 NONE 128,165
+1728-1839 NONE
+1840-1847 A
+1848-3200 NONE

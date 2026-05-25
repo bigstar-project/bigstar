@@ -322,6 +322,46 @@ def patch_fake_opponent(
             f"VSConnectScene::updateLoadGameSM state1 secondary wait branch NOP overlay{ov_id} @ 0x{wait_branch2_addr:08X}: "
             f"{old.hex()} -> {struct.pack('<I', NOP).hex()}"
         )
+        wait_branch3_addr = 0x02157998
+        ov_id, old = patch_overlay_words(overlays, wait_branch3_addr, [NOP])
+        changes.append(
+            f"VSConnectScene::updateLoadGameSM state3 session wait branch NOP overlay{ov_id} @ 0x{wait_branch3_addr:08X}: "
+            f"{old.hex()} -> {struct.pack('<I', NOP).hex()}"
+        )
+        force_state4_addr = 0x021579C0
+        force_state4_words = [
+            encode_mov_imm(0, 5),
+            encode_str_imm(0, 4, 0x16C),
+        ]
+        ov_id, old = patch_overlay_words(overlays, force_state4_addr, force_state4_words)
+        changes.append(
+            f"VSConnectScene::updateLoadGameSM state4 force state5 overlay{ov_id} @ 0x{force_state4_addr:08X}: "
+            f"{old.hex()} -> {words_hex(force_state4_words)}"
+        )
+        wait_branch5_addr = 0x021579F8
+        ov_id, old = patch_overlay_words(overlays, wait_branch5_addr, [NOP])
+        changes.append(
+            f"VSConnectScene::updateLoadGameSM state5 ready-bit wait branch NOP overlay{ov_id} @ 0x{wait_branch5_addr:08X}: "
+            f"{old.hex()} -> {struct.pack('<I', NOP).hex()}"
+        )
+        wait_branch6_addr = 0x02157A1C
+        ov_id, old = patch_overlay_words(overlays, wait_branch6_addr, [NOP])
+        changes.append(
+            f"VSConnectScene::updateLoadGameSM state6 completion wait branch NOP overlay{ov_id} @ 0x{wait_branch6_addr:08X}: "
+            f"{old.hex()} -> {struct.pack('<I', NOP).hex()}"
+        )
+        vs_menu_wait_addr = 0x021551F8
+        ov_id, old = patch_overlay_words(overlays, vs_menu_wait_addr, [NOP])
+        changes.append(
+            f"VSMenu post-load transfer wait branch NOP overlay{ov_id} @ 0x{vs_menu_wait_addr:08X}: "
+            f"{old.hex()} -> {struct.pack('<I', NOP).hex()}"
+        )
+        vs_stage_intro_wait_addr = 0x02152888
+        ov_id, old = patch_overlay_words(overlays, vs_stage_intro_wait_addr, [NOP])
+        changes.append(
+            f"VSStageIntro ready wait branch NOP overlay{ov_id} @ 0x{vs_stage_intro_wait_addr:08X}: "
+            f"{old.hex()} -> {struct.pack('<I', NOP).hex()}"
+        )
 
     save_overlays(rom, overlays)
     return changes
