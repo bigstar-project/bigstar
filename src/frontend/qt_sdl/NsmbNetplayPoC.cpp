@@ -548,6 +548,18 @@ struct GameStateSample
     melonDS::u32 MovingHazardPosZ = 0;
     melonDS::u32 MovingHazardVelX = 0;
     melonDS::u32 MovingHazardVelY = 0;
+    melonDS::u32 ObjectScanTotal = 0;
+    melonDS::u32 ObjectNotCreatedCount = 0;
+    melonDS::u32 ObjectActiveCount = 0;
+    melonDS::u32 ObjectDeadCount = 0;
+    melonDS::u32 ObjectSkipUpdateCount = 0;
+    melonDS::u32 ObjectSkipRenderCount = 0;
+    melonDS::u32 ObjectFirstNotCreatedID = 0;
+    melonDS::u32 ObjectFirstNotCreatedBase = 0;
+    melonDS::u32 ObjectFirstNotCreatedFlags = 0;
+    melonDS::u32 ObjectSecondNotCreatedID = 0;
+    melonDS::u32 ObjectSecondNotCreatedBase = 0;
+    melonDS::u32 ObjectSecondNotCreatedFlags = 0;
     melonDS::u64 Hash = 0;
 };
 
@@ -574,6 +586,22 @@ struct PlayerActorScanSample
 {
     ObjectScanSample Actor0;
     ObjectScanSample Actor1;
+};
+
+struct ObjectLifecycleSummary
+{
+    melonDS::u32 Total = 0;
+    melonDS::u32 NotCreated = 0;
+    melonDS::u32 Active = 0;
+    melonDS::u32 Dead = 0;
+    melonDS::u32 SkipUpdate = 0;
+    melonDS::u32 SkipRender = 0;
+    melonDS::u32 FirstNotCreatedID = 0;
+    melonDS::u32 FirstNotCreatedBase = 0;
+    melonDS::u32 FirstNotCreatedFlags = 0;
+    melonDS::u32 SecondNotCreatedID = 0;
+    melonDS::u32 SecondNotCreatedBase = 0;
+    melonDS::u32 SecondNotCreatedFlags = 0;
 };
 
 ObjectScanSample FindObjectByIDAndSettingsLoose(melonDS::NDS* nds, melonDS::u16 expectedObjectID, melonDS::u32 expectedSettings);
@@ -3218,6 +3246,17 @@ bool ReadMainRAMU16(melonDS::NDS* nds, melonDS::u32 offset, melonDS::u16& value)
     return true;
 }
 
+bool ReadMainRAMU8(melonDS::NDS* nds, melonDS::u32 offset, melonDS::u8& value)
+{
+    if (!nds || !nds->MainRAM)
+        return false;
+    if (offset + sizeof(value) > nds->MainRAMMask + 1)
+        return false;
+
+    value = nds->MainRAM[offset];
+    return true;
+}
+
 bool ReadMainRAMU32(melonDS::NDS* nds, melonDS::u32 offset, melonDS::u32& value)
 {
     if (!nds || !nds->MainRAM)
@@ -3920,6 +3959,82 @@ PlayerActorScanSample FindPlayerActors(melonDS::NDS* nds)
     }
 
     return players;
+}
+
+ObjectLifecycleSummary SummarizeObjectLifecycle(melonDS::NDS* nds)
+{
+    ObjectLifecycleSummary summary;
+    if (!nds || !nds->MainRAM)
+        return summary;
+
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (ramLen < 0x5C)
+        return summary;
+
+    for (melonDS::u32 off = 0; off <= ramLen - 0x5C; off += 4)
+    {
+        melonDS::u32 vtable = 0;
+        melonDS::u32 guid = 0;
+        melonDS::u16 objectID = 0;
+        melonDS::u8 state = 0;
+        melonDS::u8 type = 0;
+        melonDS::u8 skipFlags = 0;
+        if (!ReadMainRAMU32(nds, off, vtable) ||
+            !ReadMainRAMU32(nds, off + 4, guid) ||
+            !ReadMainRAMU16(nds, off + 0x0C, objectID) ||
+            !ReadMainRAMU8(nds, off + 0x0E, state) ||
+            !ReadMainRAMU8(nds, off + 0x12, type) ||
+            !ReadMainRAMU8(nds, off + 0x13, skipFlags))
+            continue;
+
+        if (vtable < kMainRAMBase || vtable >= kMainRAMBase + ramLen)
+            continue;
+        if (guid == 0 || guid >= 0x10000)
+            continue;
+        if (objectID == 0 || objectID >= 0x400)
+            continue;
+        if (state > 2)
+            continue;
+        if (type > 2)
+            continue;
+
+        summary.Total++;
+        if (state == 0)
+        {
+            summary.NotCreated++;
+            const melonDS::u32 base = kMainRAMBase + off;
+            const melonDS::u32 flags =
+                (static_cast<melonDS::u32>(type) << 16) |
+                (static_cast<melonDS::u32>(skipFlags) << 24);
+            if (summary.FirstNotCreatedBase == 0)
+            {
+                summary.FirstNotCreatedID = objectID;
+                summary.FirstNotCreatedBase = base;
+                summary.FirstNotCreatedFlags = flags;
+            }
+            else if (summary.SecondNotCreatedBase == 0)
+            {
+                summary.SecondNotCreatedID = objectID;
+                summary.SecondNotCreatedBase = base;
+                summary.SecondNotCreatedFlags = flags;
+            }
+        }
+        else if (state == 1)
+        {
+            summary.Active++;
+        }
+        else if (state == 2)
+        {
+            summary.Dead++;
+        }
+
+        if ((skipFlags & 0x02) != 0)
+            summary.SkipUpdate++;
+        if ((skipFlags & 0x08) != 0)
+            summary.SkipRender++;
+    }
+
+    return summary;
 }
 
 void ApplyVsStarSnap(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -5152,6 +5267,20 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.MovingHazardVelX = movingHazard.VelX;
     sample.MovingHazardVelY = movingHazard.VelY;
 
+    const ObjectLifecycleSummary objectSummary = SummarizeObjectLifecycle(nds);
+    sample.ObjectScanTotal = objectSummary.Total;
+    sample.ObjectNotCreatedCount = objectSummary.NotCreated;
+    sample.ObjectActiveCount = objectSummary.Active;
+    sample.ObjectDeadCount = objectSummary.Dead;
+    sample.ObjectSkipUpdateCount = objectSummary.SkipUpdate;
+    sample.ObjectSkipRenderCount = objectSummary.SkipRender;
+    sample.ObjectFirstNotCreatedID = objectSummary.FirstNotCreatedID;
+    sample.ObjectFirstNotCreatedBase = objectSummary.FirstNotCreatedBase;
+    sample.ObjectFirstNotCreatedFlags = objectSummary.FirstNotCreatedFlags;
+    sample.ObjectSecondNotCreatedID = objectSummary.SecondNotCreatedID;
+    sample.ObjectSecondNotCreatedBase = objectSummary.SecondNotCreatedBase;
+    sample.ObjectSecondNotCreatedFlags = objectSummary.SecondNotCreatedFlags;
+
     sample.Hash = 1469598103934665603ull;
     MixGameStateValue(sample.Hash, sample.StageID);
     MixGameStateValue(sample.Hash, sample.StageGroup);
@@ -5761,7 +5890,19 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                      << ",0x" << sample.MovingHazardPosY
                      << ",0x" << sample.MovingHazardPosZ
                      << ",0x" << sample.MovingHazardVelX
-                     << ",0x" << sample.MovingHazardVelY;
+                     << ",0x" << sample.MovingHazardVelY
+                     << ",0x" << sample.ObjectScanTotal
+                     << ",0x" << sample.ObjectNotCreatedCount
+                     << ",0x" << sample.ObjectActiveCount
+                     << ",0x" << sample.ObjectDeadCount
+                     << ",0x" << sample.ObjectSkipUpdateCount
+                     << ",0x" << sample.ObjectSkipRenderCount
+                     << ",0x" << sample.ObjectFirstNotCreatedID
+                     << ",0x" << sample.ObjectFirstNotCreatedBase
+                     << ",0x" << sample.ObjectFirstNotCreatedFlags
+                     << ",0x" << sample.ObjectSecondNotCreatedID
+                     << ",0x" << sample.ObjectSecondNotCreatedBase
+                     << ",0x" << sample.ObjectSecondNotCreatedFlags;
 
     if (G.GameStateTraceExtended)
     {
@@ -6609,7 +6750,7 @@ void InitFromEnvironment()
         }
         else
         {
-            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,arm9PC,arm9LR,arm9SP,arm9CPSR,appFrameLength,appUpdateTask,appSleepPhase,appSleepControl,appSleeping,appSleepPhaseTimer,appSleepWakeUpTimer,appBootParam,appBootTarget,appBootScene,ggid,netCurrentLanguage,netLocalAid,netState14,netState1C,netState20,netState24,netExpectedConsoleCount,netMultiBootSession,netSessionState,netModuleState,netMaxSessionChildren,netMaxConsoleCount,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,stageActorFreezeFlag,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor0PlayerID,playerActor0TransitionStep,playerActor0SignalLock,playerActor0Flag192,playerActor0Flags728,playerActor0Flags72C,playerActor0Flags730,playerActor0TransitFunc,playerActor0TransitArg,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,playerActor1PlayerID,playerActor1TransitionStep,playerActor1SignalLock,playerActor1Flag192,playerActor1Flags728,playerActor1Flags72C,playerActor1Flags730,playerActor1TransitFunc,playerActor1TransitArg,playerTransitionStatus0,playerTransitionStatus1,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectByte0E2,vsConnectByte106,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord138,vsConnectWord13C,vsConnectWord140,vsConnectWord144,vsConnectWord148,vsConnectByte153,vsConnectByte154,vsConnectByte155,vsConnectByte156,vsConnectByte157,vsConnectByte158,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectSettings,courseSelectWord060,courseSelectWord064,courseSelectWord068,courseSelectWord06C,courseSelectWord070,courseSelectWord074,courseSelectWord078,courseSelectWord07C,courseSelectWord080,courseSelectWord084,courseSelectWord088,courseSelectWord08C,courseSelectWord090,stageCameraFound,stageCameraWord190,stageCameraWord194,stageCameraWord19C,stageCameraWord1A0,stageActorManagerFound,stageActorManagerBase,stageActorManagerStateType,stageControllerFound,stageControllerBase,stageControllerStateType,mvlObject267Found,mvlObject267Base,mvlObject267StateType,mvlGlobal965C,mvlGlobal9670,mvlGlobal9674,mvlGlobal9694_0,mvlGlobal9694_1,mvlManagerBase,mvlManagerWordA8CC,mvlManagerWordA8D0,mvlManagerWordA8D4,mvlManagerWordA8D8,mvlManagerWordA8DC,mvlManagerWordA8E0,mvlManagerWordA8E4,mvlManagerHalfA8E8,mvlManagerHalfA8EA,mvlManagerByteA8EC,mvlManagerHalf494,mvlManagerHalf4A0,stageSceneFound,stageSceneBase,stageSceneSettings,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,stageSceneWord5618,stageSceneWord561C,stageSceneWord563C,stageSceneByte5643,stageSceneByte5644,stageSceneByte5645,stageSceneByte5646,stageSceneByte5648,stageSceneByte5649,stageSceneUpdateDispatchFunc,stageSceneUpdateDispatchArg,stageSceneRenderDispatchFunc,stageSceneRenderDispatchArg,stageSceneGlobal9280,stageSceneGlobal9284,stageSceneGlobal928C,stageSceneGlobal92B4,stageSceneGlobal92C0,stageSceneGlobal92C8,stageSceneGlobal92CC,stageSceneGlobal92D0,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY";
+            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,arm9PC,arm9LR,arm9SP,arm9CPSR,appFrameLength,appUpdateTask,appSleepPhase,appSleepControl,appSleeping,appSleepPhaseTimer,appSleepWakeUpTimer,appBootParam,appBootTarget,appBootScene,ggid,netCurrentLanguage,netLocalAid,netState14,netState1C,netState20,netState24,netExpectedConsoleCount,netMultiBootSession,netSessionState,netModuleState,netMaxSessionChildren,netMaxConsoleCount,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,stageActorFreezeFlag,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor0PlayerID,playerActor0TransitionStep,playerActor0SignalLock,playerActor0Flag192,playerActor0Flags728,playerActor0Flags72C,playerActor0Flags730,playerActor0TransitFunc,playerActor0TransitArg,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,playerActor1PlayerID,playerActor1TransitionStep,playerActor1SignalLock,playerActor1Flag192,playerActor1Flags728,playerActor1Flags72C,playerActor1Flags730,playerActor1TransitFunc,playerActor1TransitArg,playerTransitionStatus0,playerTransitionStatus1,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectByte0E2,vsConnectByte106,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord138,vsConnectWord13C,vsConnectWord140,vsConnectWord144,vsConnectWord148,vsConnectByte153,vsConnectByte154,vsConnectByte155,vsConnectByte156,vsConnectByte157,vsConnectByte158,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectSettings,courseSelectWord060,courseSelectWord064,courseSelectWord068,courseSelectWord06C,courseSelectWord070,courseSelectWord074,courseSelectWord078,courseSelectWord07C,courseSelectWord080,courseSelectWord084,courseSelectWord088,courseSelectWord08C,courseSelectWord090,stageCameraFound,stageCameraWord190,stageCameraWord194,stageCameraWord19C,stageCameraWord1A0,stageActorManagerFound,stageActorManagerBase,stageActorManagerStateType,stageControllerFound,stageControllerBase,stageControllerStateType,mvlObject267Found,mvlObject267Base,mvlObject267StateType,mvlGlobal965C,mvlGlobal9670,mvlGlobal9674,mvlGlobal9694_0,mvlGlobal9694_1,mvlManagerBase,mvlManagerWordA8CC,mvlManagerWordA8D0,mvlManagerWordA8D4,mvlManagerWordA8D8,mvlManagerWordA8DC,mvlManagerWordA8E0,mvlManagerWordA8E4,mvlManagerHalfA8E8,mvlManagerHalfA8EA,mvlManagerByteA8EC,mvlManagerHalf494,mvlManagerHalf4A0,stageSceneFound,stageSceneBase,stageSceneSettings,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,stageSceneWord5618,stageSceneWord561C,stageSceneWord563C,stageSceneByte5643,stageSceneByte5644,stageSceneByte5645,stageSceneByte5646,stageSceneByte5648,stageSceneByte5649,stageSceneUpdateDispatchFunc,stageSceneUpdateDispatchArg,stageSceneRenderDispatchFunc,stageSceneRenderDispatchArg,stageSceneGlobal9280,stageSceneGlobal9284,stageSceneGlobal928C,stageSceneGlobal92B4,stageSceneGlobal92C0,stageSceneGlobal92C8,stageSceneGlobal92CC,stageSceneGlobal92D0,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY,objectScanTotal,objectNotCreatedCount,objectActiveCount,objectDeadCount,objectSkipUpdateCount,objectSkipRenderCount,objectFirstNotCreatedId,objectFirstNotCreatedBase,objectFirstNotCreatedFlags,objectSecondNotCreatedId,objectSecondNotCreatedBase,objectSecondNotCreatedFlags";
             if (G.GameStateTraceExtended)
                 G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash";
             G.GameStateTrace << '\n';

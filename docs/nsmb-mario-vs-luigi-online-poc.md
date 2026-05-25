@@ -4,85 +4,83 @@
 
 New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` でWAN越しに遊べる形へ持っていく。
 
-過去に試した `LocalMP 2インスタンス * 2プロセス`、savestate共有、試合開始後のWAN切り替え、actor座標や外部状態の強制同期は、desync、通信切断、低FPS、内部状態不一致が大きく、最終方式としては採用しない。
+過去に試した `LocalMP 2インスタンス * 2プロセス`、savestate共有、試合開始後のWAN切り替え、actor/state強制同期は、desync・通信切断・低FPS・内部状態不一致が大きく、最終方式としては採用しない。
 
 ## 現在の方針
 
-主対象はUS版ROM `roms/nsmb-us.nds` (`A2DE`)。`external/NSMB-Code-Reference` がUS版前提であり、ROMパッチに必要な関数名・構造体・シンボルを直接使えるため。
+US版ROM `roms/nsmb-us.nds` (`A2DE`) を主対象にする。`external/NSMB-Code-Reference` がUS版前提で、ROMパッチに必要な関数名・構造体・シンボルを直接使いやすいため。
 
 本筋は次の2段階。
 
-1. ROMパッチで、LocalMP接続UIに依存しない `Mario vs Luigi` 専用入口を作る。
+1. ROMパッチまたは低レベルadapterで、LocalMP接続UIに依存しない `Mario vs Luigi` 専用入口を作る。
 2. 試合中のpacket/input境界をWAN adapterへ差し替え、NSMB側の同期処理はできるだけそのまま使う。
 
-NSMB Centralの情報では、MvsLはRNG seedを接続時に一度同期し、その後は入力情報中心で通信する。したがって、最終的には「NSMBが読む対戦packetをWAN由来のpacketに置き換える」方向を優先する。
+NSMB Centralの情報では、MvsLは接続時にRNG seedを一度同期し、その後は主に入力packetを通信する。したがって、最終的には「ゲーム重要状態を外から強制同期する」のではなく、「NSMBが読む対戦packetをWAN由来のpacketに置き換える」方向を優先する。
 
-参考: https://bookstack.nsmbcentral.net/books/new-super-mario-bros/page/mario-vs-luigi
+参照: https://bookstack.nsmbcentral.net/books/new-super-mario-bros/page/mario-vs-luigi
 
 ## 実装済み
 
 - US版ROM解析ツール `tools/nsmb_us_rom_tool.py`
   - `symbols9.x` のシンボル解決
   - ARM9/overlayの逆アセンブル
-  - 圧縮ARM9を `ndspy.codeCompression.decompress` 経由で扱う
+  - 圧縮ARM9/overlayの展開対応
 - US版ROMパッチツール `tools/nsmb_us_rom_patch.py`
   - `rng-constant`
   - `direct-mvl-entry`
   - `fake-opponent`
-  - `fake-opponent --force-confirm-load --force-loadgame-progress`
-  - `fake-opponent --mirror-packets`
-  - `fake-opponent --fake-net-state-on-nickname`
-  - `fake-opponent --force-transfer-result`
-  - overlay再保存時に `arm9OverlayTable` を更新
+  - `--force-confirm-load`
+  - `--force-loadgame-progress`
+  - `--mirror-packets`
+  - `--fake-net-state-on-nickname`
+  - `--force-transfer-result`
+  - overlay保存時の `arm9OverlayTable` 更新
 - 自動検証フック
   - 入力スクリプト
   - スクリーンショット出力
-  - RAMダンプ
-  - calltrace
+  - RAM dump
   - game state trace
+  - calltrace
+  - object lifecycle summary
 - US版診断ルート
-  - `VSConnect -> VSMenu -> VSStageIntro -> Stage` 到達を確認
-  - `Game::loadLevel(scene=0x0F, vs=1, group=9, stage=0)` 呼び出しを確認
-  - `Scene::switchScene(3, settings)` でStage sceneに入ることを確認
+  - `VSConnect -> VSMenu -> VSStageIntro -> Stage` の到達確認
+  - `Game::loadLevel(scene=0x0F, vs=1, group=9, stage=0)` 呼び出し確認
+  - `Scene::switchScene(3, settings)` でStage sceneへ入ることを確認
+  - `Stage::stageLayout = 0x020CAD40` に修正済み
 
 ## 現在分かっていること
 
-- 1インスタンス診断ROMでMvsLステージ/HUD/ミニマップ表示までは到達する。
-- `Input::update`、`Input::updatePlayerInput`、StageSceneの `onUpdate` はStage到達後も毎フレーム呼ばれている。
-- 入力スクリプトの `RIGHT` は `Input::consoleKeys` と `Input::playerKeysHeld` まで届いている。
-- `--mirror-packets` で `Net::getPacket(consoleID)` が2P側にもpacketを返すようにした場合、`inputPlayer1Held` にも同じ入力が入る。
-- それでも画面上のプレイヤーは動かない。現在のfake-opponentルートは、ステージ表示には届くが、実試合として必要な内部状態がまだ自然に成立していない可能性が高い。
-- `--fake-net-state` を `Net::getPacket` 内で常時適用すると、起動初期からNet状態を書き換えて白画面で固まる。
-- `--fake-net-state-on-nickname` で検索後だけNet状態を2台接続済みに見せると、`Connection interrupted` へ落ちる。calltraceでは `Net::Core::setConnectionState(3)` と `Net::Core::transferPacket(1)` の直後に切断系の流れへ入る。
-- `Net::Core::transferPacket` の戻り値を `0x08` 固定にしても、単独では `Connection interrupted` は解消しない。
-- `netState5C=0x10` の直接原因は `Net::update()` が per-console session flag 配列の bit0 未設定を検出することだった。fake peer生成時にその配列を `active | paired` 相当にすると、切断表示は消えて `Please wait` / `CourseSelect` まで進む。
-- session flag補完 + loadGame待ち解除 + CourseSelect決定で `Scene 3` / `stageGroup=9` には入るが、画面は黒い。
-- `mvlManagerBase=0` はUS版への観測アドレス移植漏れだった。`Stage::stageLayout` は `0x020CAD40` で、修正後は `mvlManagerBase=0x21B75B8`、Player actor、Big Star actorが存在することを確認した。
-- 黒画面ルートでは `stageSceneStateType=0` / `stageSceneFlags=0x5010000`、旧HUD表示ルートでは `stageSceneStateType=1` / `stageSceneFlags=0x10000`。次の問題はStageSceneがactive状態へ進まないこと。
-- RAM上のBig Star検出はruntime class ID `0x22` / settings `1` で拾えている。NSMB CentralのObject ID 210とは表記レイヤーが違う可能性がある。
+- 旧forcedルート `fake-opponent --force-confirm-load --force-loadgame-progress` は、1インスタンスでMvsLステージ/HUD/ミニマップ表示まで到達する。
+- `--mirror-packets` で `Net::getPacket(consoleID)` が1P側にもpacketを返すと、`inputPlayer1Held` にも同じ入力が入る。
+- ただし、画面上の2Pプレイヤーはまだ自然には動かない。ステージ表示に到達しても、実試合として必要な内部ready/session状態が自然成立しているとは限らない。
+- `--fake-net-state-on-nickname` とsession flag補完で `Connection interrupted` は避けられるが、このsessionルートは `Scene 3` / `stageGroup=9` / player actor / Big Star actor 生成後も黒画面になる。
+- 黒画面sessionルートでは `StageScene` の主要フィールドは可視ルートとかなり近いが、`stageSceneStateType=0` / `skipFlags=0x05` のまま create process に残り続ける。
+- `MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE` で `StageScene` と子objectの `state/skipFlags` を強制すると、CSV上はactive化するが画面は黒いまま。単純なstate/skipFlags強制では不十分。
+- `appSleepControl` を旧ルート値に合わせても、Net状態ブロックを旧ルートからコピーしても、黒画面は解消しなかった。
+- calltraceを入口単位に見直した結果、`020A3310` は関数入口ではなく `020A32C0` 内部命令の可能性が高い。現在の本質は `StageScene` がcreate processから抜けないこと。
+- object lifecycle summaryにより、可視ルートは `objectSkipUpdate/Render=2` 程度、黒画面sessionルートは `0xE` 程度のobjectがskip状態で止まることを確認した。
 
 ## 現在の主な問題
 
-fake-opponent + 強制進行パッチは、複数の通信/session/ready待ちをNOPで抜けている。そのため、ステージ表示まで行けても、実際の試合開始状態としては不完全な可能性がある。
+fake-opponent + 強制進行パッチは、複数の通信/session/ready待ちをNOPまたは偽状態で抜けている。そのため、ステージ表示やactor生成に到達しても、実試合として必要な内部状態が自然に成立していない可能性が高い。
 
-特に次を確認する必要がある。
+最終目標に対しては、actor座標やスター状態を外から同期する方向ではなく、次を特定する必要がある。
 
-- StageSceneがactive状態へ進まない直接原因
-- StageIntroまたはStageScene内で、描画開始前に待っているready/session/packet条件
-- `Net::getPacket` だけで足りるのか、それより下の接続/session境界もadapter化する必要があるのか
-- Big Star、8コインアイテム、ステージランダム選択などのRNG seed同期方法
+- MvsL開始時に本当に必要なsession/ready/seed/packet条件
+- `StageScene` がcreate processから抜けるために必要な条件
+- 試合中にNSMBが読むpacket/input境界
 
 ## 次にやること
 
-1. `Scene 3` 到達後に `stageSceneStateType` が0のままになる原因を、StageIntro/StageSceneのcalltraceとRAM watchで特定する。
-2. loadGame待ち解除NOPを減らし、session flag補完だけでどの状態まで自然に進むかを確認する。
-3. MvL manager生成に必要なready bit / marker / packet actionを特定し、ROMパッチで最小限だけ補う。
-4. 1インスタンスで「操作可能なMvsL試合」へ到達できたら、WAN由来の2P packetを流す最小PoCへ進む。
+1. 可視旧forcedルートを「実験用の最低到達ルート」として維持し、黒画面sessionルートの追跡は原因特定に限定する。
+2. `StageScene` がcreate processに残る直接条件を、`Base::processCreate` / create process executor / StageScene onCreate後の戻り値から確認する。
+3. ROMパッチ側では、UI/LocalMPを自然再現するより、MvsL開始状態を作る最小入口と、試合中packet境界の差し替えに寄せる。
+4. `Net::getPacket` より下の接続/session APIを置換すべきか、試合中packetだけで足りるかを、US版シンボルとcalltraceで切り分ける。
 
 ## 検証ルール
 
 - `frame limit reached` だけでは成功扱いにしない。
 - 黒画面、prefetch/data abort、通信切断表示、片側だけ進行、HUDだけ一致、actor不一致は失敗扱い。
-- スクリーンショットとCSV/RAM/calltraceの両方で検証する。
+- スクリーンショットとCSV/RAM/calltraceの両方で確認する。
 - ROM生成物、savestate、巨大ログはgitに含めない。
 - docsは古い追記を残し続けず、現在の方針・到達点・問題・次作業がすぐ分かる形に保つ。
