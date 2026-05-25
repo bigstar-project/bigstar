@@ -69,6 +69,8 @@ NSMB Central の解析では、MvL は接続時に RNG seed を同期し、試�
 - `MELONDS_NSML_FORCE_ACTOR_CATEGORY_MASK=1` かつ value `0` の診断では、`StageEntity::onUpdate` と `Player::onUpdate` が自然な vtable 経路で呼ばれ、player 座標/速度/死亡カウントが変化することを確認済み。
 - write trace により、`loadMvsLFilesThread` overlay52 `0x02152E64-0x02152E74` が `0x020CA850` に `0x26` を書くことを確認済み。
 - `fake-opponent --clear-actor-category-mask` ROM では、runtime force なしで `Player::onUpdate` が呼ばれ、player 座標/速度/死亡カウントが変化することを確認済み。
+- `tests/nsmb_us_fake_opponent_gameplay_probe.inputs` で、mask 解除済み ROM 上の Mario/Luigi が画面内に出て動作し、敵接触/死亡まで進むことを screenshot で確認済み。
+- 一方で CSV の player X が見た目ほど変化していないため、state trace の player transform 取得オフセットは再確認が必要。
 - `direct-mvl-entry` は入力スクリプト併用で `Ready!` 画面まで到達した。`--force-ready-progress` だけ、または `--force-ready-progress --force-transfer-result 8` では Select a Game へ戻るため、VSStageIntro の待ち以外にも自然な session/scene 状態が必要。
 - 黒画面 session ルートは StageScene/process link が自然ルートと一致せず、現時点では補助診断扱い。
 
@@ -83,9 +85,10 @@ NSMB Central の解析では、MvL は接続時に RNG seed を同期し、試�
 ## 次にやること
 
 1. category mask 解除後の状態で、packet mirror 入力が横移動/ジャンプ/死亡/スター取得にどう反映されるかを短い入力スクリプトで検証する。
-2. `getConsoleKeys` / `getPacketByte` / `getPacketTick` / `getPacketAction` を含む packet 境界を分類し、mirror ではなく WAN 受信 packet を返す形へ近づける。
-3. `0x020CA850` の自然な解除条件も継続して追い、`--clear-actor-category-mask` が恒久 patch として妥当か、それとも session 値を作るべきか判断する。
-4. direct ROM patch 側は、`VSStageIntro` から Select a Game に戻る分岐条件を追い、UI 操作なし起動に必要な session 値を最小化する。
+2. screenshot と CSV の player 座標が一致しない理由を確認し、game state trace の transform 取得を直す。
+3. `getConsoleKeys` / `getPacketByte` / `getPacketTick` / `getPacketAction` を含む packet 境界を分類し、mirror ではなく WAN 受信 packet を返す形へ近づける。
+4. `0x020CA850` の自然な解除条件も継続して追い、`--clear-actor-category-mask` が恒久 patch として妥当か、それとも session 値を作るべきか判断する。
+5. direct ROM patch 側は、`VSStageIntro` から Select a Game に戻る分岐条件を追い、UI 操作なし起動に必要な session 値を最小化する。
 
 ## 検証ルール
 

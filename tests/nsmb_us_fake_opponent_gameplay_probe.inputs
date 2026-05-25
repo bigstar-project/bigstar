@@ -1,0 +1,23 @@
+# US NSMB fake-opponent route with a gameplay probe after MvL stage appears.
+# Use with a ROM patched by:
+#   fake-opponent --force-confirm-load --force-loadgame-progress --mirror-packets --force-transfer-result 8 --clear-actor-category-mask
+
+0-619 NONE
+620-627 DOWN
+628-659 NONE
+660-667 A
+668-899 NONE
+900-907 A
+908-1259 NONE
+1260-1267 A
+1268-1599 NONE
+1600-1607 NONE 128,165
+1608-1719 NONE
+1720-1727 NONE 128,165
+1728-1839 NONE
+1840-1847 A
+1848-1979 NONE
+1980-2239 RIGHT+A
+2240-2519 RIGHT+B
+2520-2800 RIGHT
+2801-3200 NONE
