@@ -41,6 +41,12 @@ def encode_str_imm(rd: int, rn: int, off: int) -> int:
     return 0xE5800000 | (rn << 16) | (rd << 12) | off
 
 
+def encode_strb_imm(rd: int, rn: int, off: int) -> int:
+    if off < 0 or off > 0xFFF:
+        raise ValueError(f"STRB offset 0x{off:X} is out of range")
+    return 0xE5C00000 | (rn << 16) | (rd << 12) | off
+
+
 def encode_ldr_imm(rd: int, rn: int, off: int) -> int:
     if off < 0 or off > 0xFFF:
         raise ValueError(f"LDR offset 0x{off:X} is out of range")
@@ -214,6 +220,18 @@ def build_fake_nickname_stub(start_addr: int, *, fake_net_state: bool) -> list[i
             emit_ldr_literal(1, addr)
             words.append(encode_str_imm(2, 1, 0))
 
+        # Net::update() treats missing bit0 in the per-console session flags as
+        # a disconnect condition. The real lower MP path sets these flags while
+        # pairing consoles; the fake peer route must provide the same minimum
+        # session liveness signal or VSConnect immediately enters
+        # connectionInterruptedSM.
+        emit_ldr_literal(1, 0x02088854) # pointer to per-console session flags
+        words.append(encode_ldr_imm(1, 1, 0))
+        words.append(encode_mov_imm(2, 3)) # active | paired
+        words.append(encode_cmp_imm(1, 0))
+        words.append(with_cond(encode_strb_imm(2, 1, 0), 1)) # strbne
+        words.append(with_cond(encode_strb_imm(2, 1, 1), 1)) # strbne
+
     fake_data_literal_index = emit_ldr_literal(0, 0)
     words.append(BX_LR)
 
@@ -372,6 +390,7 @@ def patch_fake_opponent(
     mirror_packets: bool,
     fake_net_state: bool,
     fake_net_state_on_nickname: bool,
+    force_transfer_result: int | None,
 ) -> list[str]:
     arm9 = rom.loadArm9()
     overlays = rom.loadArm9Overlays()
@@ -391,6 +410,22 @@ def patch_fake_opponent(
         old = patch_arm9_words(arm9, addr, words)
         changes.append(
             f"Net::getPacket mirror local packet @ 0x{addr:08X}: "
+            f"{old.hex()} -> {words_hex(words)}"
+        )
+
+    if force_transfer_result is not None:
+        # Diagnostic only. This tells whether VSConnect/NetCore is failing on
+        # transferPacket's status bits before we spend more time fabricating the
+        # lower MP packet stream. 0x08 is the normal "all peer action packets
+        # observed" bit in transferPacket().
+        addr = symbols["_ZN3Net4Core14transferPacketENS_12PacketActionE"]
+        words = [
+            encode_mov_imm(0, force_transfer_result),
+            BX_LR,
+        ]
+        old = patch_arm9_words(arm9, addr, words)
+        changes.append(
+            f"Net::Core::transferPacket forced result 0x{force_transfer_result:X} @ 0x{addr:08X}: "
             f"{old.hex()} -> {words_hex(words)}"
         )
 
@@ -502,6 +537,7 @@ def main() -> int:
     p_fake.add_argument("--mirror-packets", action="store_true")
     p_fake.add_argument("--fake-net-state", action="store_true")
     p_fake.add_argument("--fake-net-state-on-nickname", action="store_true")
+    p_fake.add_argument("--force-transfer-result", type=lambda x: int(x, 0))
     args = ap.parse_args()
 
     symbols = load_symbols(Path(args.symbols))
@@ -529,6 +565,7 @@ def main() -> int:
             mirror_packets=args.mirror_packets,
             fake_net_state=args.fake_net_state,
             fake_net_state_on_nickname=args.fake_net_state_on_nickname,
+            force_transfer_result=args.force_transfer_result,
         )
     else:
         raise AssertionError(args.cmd)

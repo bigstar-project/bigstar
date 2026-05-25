@@ -1,0 +1,23 @@
+# US NSMB fake-opponent route with session-flag diagnostics.
+# It reaches VSConnect, lets the patch advance through loadGameSM to CourseSelect,
+# then confirms the default course settings.
+
+0-619 NONE
+620-627 DOWN
+628-659 NONE
+660-667 A
+668-899 NONE
+900-907 A
+908-1259 NONE
+1260-1267 A
+1268-1599 NONE
+1600-1607 NONE 128,165
+1608-1719 NONE
+1720-1727 NONE 128,165
+1728-4199 NONE
+4200-4215 A 128,165
+4216-4499 NONE
+4500-4515 A 128,165
+4516-4799 NONE
+4800-4815 A 128,165
+4816-6200 NONE

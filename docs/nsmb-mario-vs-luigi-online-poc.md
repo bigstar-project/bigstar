@@ -31,6 +31,8 @@ NSMB Centralの情報では、MvsLはRNG seedを接続時に一度同期し、�
   - `fake-opponent`
   - `fake-opponent --force-confirm-load --force-loadgame-progress`
   - `fake-opponent --mirror-packets`
+  - `fake-opponent --fake-net-state-on-nickname`
+  - `fake-opponent --force-transfer-result`
   - overlay再保存時に `arm9OverlayTable` を更新
 - 自動検証フック
   - 入力スクリプト
@@ -52,6 +54,9 @@ NSMB Centralの情報では、MvsLはRNG seedを接続時に一度同期し、�
 - それでも画面上のプレイヤーは動かない。現在のfake-opponentルートは、ステージ表示には届くが、実試合として必要な内部状態がまだ自然に成立していない可能性が高い。
 - `--fake-net-state` を `Net::getPacket` 内で常時適用すると、起動初期からNet状態を書き換えて白画面で固まる。
 - `--fake-net-state-on-nickname` で検索後だけNet状態を2台接続済みに見せると、`Connection interrupted` へ落ちる。calltraceでは `Net::Core::setConnectionState(3)` と `Net::Core::transferPacket(1)` の直後に切断系の流れへ入る。
+- `Net::Core::transferPacket` の戻り値を `0x08` 固定にしても、単独では `Connection interrupted` は解消しない。
+- `netState5C=0x10` の直接原因は `Net::update()` が per-console session flag 配列の bit0 未設定を検出することだった。fake peer生成時にその配列を `active | paired` 相当にすると、切断表示は消えて `Please wait` / `CourseSelect` まで進む。
+- session flag補完 + loadGame待ち解除 + CourseSelect決定で `Scene 3` / `stageGroup=9` には入るが、画面は黒く、`mvlManagerBase=0` のまま。Stage sceneとPlayer actorは作られているが、Mario vs Luigiの実試合管理オブジェクト初期化がまだ成立していない。
 - RAM上のBig Star検出はruntime class ID `0x22` / settings `1` で拾えている。NSMB CentralのObject ID 210とは表記レイヤーが違う可能性がある。
 
 ## 現在の主な問題
@@ -60,18 +65,17 @@ fake-opponent + 強制進行パッチは、複数の通信/session/ready待ち�
 
 特に次を確認する必要がある。
 
-- NSMBが試合中に必要とするsession/ready/player状態のうち、どれを自然に満たすべきか
+- `mvlManagerBase` が生成されない直接原因
+- StageIntroまたはStageScene内で、MvL manager生成前に待っているready/session/packet条件
 - `Net::getPacket` だけで足りるのか、それより下の接続/session境界もadapter化する必要があるのか
-- Stage内でプレイヤーが描画・操作可能にならない直接原因
 - Big Star、8コインアイテム、ステージランダム選択などのRNG seed同期方法
 
 ## 次にやること
 
-1. `fake-opponent --mirror-packets` の結果を基準に、Stage内の「入力は届くがプレイヤーが動かない」原因を特定する。
-2. `Connection interrupted` へ落ちる直接原因を、`Net::Core::transferPacket` / `setConnectionState` / error handler周辺から特定する。
-3. `VSConnectScene::updateLoadGameSM` のNOPを減らし、可能な限りNet/Wifi/sessionグローバルを自然な値にして進める診断ROMを作る。
-4. `Net::getPacket` より下のsession/packet境界を特定し、WAN adapterの差し替え点を決める。
-5. 1インスタンスで「操作可能なMvsL試合」へ到達できたら、WAN由来の2P packetを流す最小PoCへ進む。
+1. `Scene 3` 到達後に `mvlManagerBase` が0のままになる原因を、StageIntro/StageScene/MvL manager生成処理のcalltraceとRAM watchで特定する。
+2. loadGame待ち解除NOPを減らし、session flag補完だけでどの状態まで自然に進むかを確認する。
+3. MvL manager生成に必要なready bit / marker / packet actionを特定し、ROMパッチで最小限だけ補う。
+4. 1インスタンスで「操作可能なMvsL試合」へ到達できたら、WAN由来の2P packetを流す最小PoCへ進む。
 
 ## 検証ルール
 
