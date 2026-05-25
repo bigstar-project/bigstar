@@ -34,6 +34,7 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - state 2 update: `0x020A0C68`
 - StageScene state/dispatch/関連グローバルを game-state CSV に出す診断列を追加済み。
 - player transition状態 (`player+0xB2D`, `+0x75C`, `+0x910`, `0x0208A96C/970`) を game-state CSV に出す診断列を追加済み。
+- game-state CSV の既存ヘッダー漏れ (`courseSelectWord088`) を修正済み。以後のCSVではStageScene列を正しい位置で読める。
 - `ARM.cpp` にwrite trace拡張と bad jump trace を追加済み。
 
 ## 最新の重要な発見
@@ -61,6 +62,9 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `Player` の土管出口遷移候補 `0x02117C80` は `player+0xB2D=0 -> 1` にし、`0x0208A96C[playerID]=2` を待つ構造。
 - `logs/nsmvl-transition-table-trace-20260525` では `0x0208A96C/970` は後で `1 -> 2` へ進むが、`player+0xB2D` は1のまま残る。
 - `logs/nsmvl-player-update-trace-20260525` では、Playerの遷移更新入口候補 `0x0211A56C` がWAN route中に呼ばれていない。つまり、遷移完了通知は立っているが、それを消費してPlayerを次段へ進める更新側が止まっている可能性が高い。
+- `logs/nsmvl-player-main-update-trace-20260525` では、Player main update候補 `0x020F90D4` と遷移更新呼び出し点 `0x020F91C8` が呼ばれていない。Player遷移関数以前にactor update側が止まっている。
+- `logs/nsmvl-freeze-flag-write-trace-20260525` では、`Stage::actorFreezeFlag` (`0x020C9250`) は `0x0214C9B0` で `0x26` に設定される。これはStageScene初期化付近の処理で、以後Player main updateを止める直接要因になっている。
+- CSVヘッダーずれ修正後の短いsmokeで、ヘッダー列数と行列数が一致することを確認済み。
 
 ## 現在のブロッカー
 
@@ -113,6 +117,12 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - Player遷移更新入口候補 `0x0211A56C` がWAN route中に呼ばれていないことを確認。
 - `logs/nsmvl-transition-fields-csv-20260525`
   - game-state CSVへPlayer遷移フィールドを追加し、host/client双方で `transitionStatus=2`, `transitionStep=1`, `signalLock=1` が観測できることを確認。
+- `logs/nsmvl-player-main-update-trace-20260525`
+  - Player main update候補 `0x020F90D4` / `0x020F91C8` が呼ばれず、Player遷移更新以前で止まっていることを確認。
+- `logs/nsmvl-freeze-flag-write-trace-20260525`
+  - `Stage::actorFreezeFlag=0x26` の書き込み元が `0x0214C9B0` であることを確認。
+- `logs/nsmvl-csv-header-smoke-20260525`
+  - game-state CSVのヘッダー/行の列数一致を確認。
 
 ## 参考
 
