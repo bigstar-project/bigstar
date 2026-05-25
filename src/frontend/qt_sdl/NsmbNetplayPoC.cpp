@@ -3666,15 +3666,17 @@ bool InjectCourseSelectFactoryCall(int instanceID, melonDS::u32 frame, melonDS::
 
 void ReadObjectTransform(melonDS::NDS* nds, melonDS::u32 off, ObjectScanSample& sample)
 {
-    ReadMainRAMU32(nds, off + 0x5C, sample.PosX);
-    ReadMainRAMU32(nds, off + 0x60, sample.PosY);
-    ReadMainRAMU32(nds, off + 0x64, sample.PosZ);
-    ReadMainRAMU32(nds, off + 0x68, sample.PrevX);
-    ReadMainRAMU32(nds, off + 0x6C, sample.PrevY);
-    ReadMainRAMU32(nds, off + 0x70, sample.PrevZ);
-    ReadMainRAMU32(nds, off + 0x74, sample.VelX);
-    ReadMainRAMU32(nds, off + 0x78, sample.VelY);
-    ReadMainRAMU32(nds, off + 0x7C, sample.VelZ);
+    // Actor embeds Vec3 objects with a 4-byte vtable followed by x/y/z.
+    // position starts at 0x5C, so its numeric coordinates are 0x60/0x64/0x68.
+    ReadMainRAMU32(nds, off + 0x60, sample.PosX);
+    ReadMainRAMU32(nds, off + 0x64, sample.PosY);
+    ReadMainRAMU32(nds, off + 0x68, sample.PosZ);
+    ReadMainRAMU32(nds, off + 0x70, sample.PrevX);
+    ReadMainRAMU32(nds, off + 0x74, sample.PrevY);
+    ReadMainRAMU32(nds, off + 0x78, sample.PrevZ);
+    ReadMainRAMU32(nds, off + 0xD0, sample.VelX);
+    ReadMainRAMU32(nds, off + 0xD4, sample.VelY);
+    ReadMainRAMU32(nds, off + 0xD8, sample.VelZ);
 }
 
 ObjectScanSample FindVsBattleStarCandidate(melonDS::NDS* nds)
@@ -4087,9 +4089,9 @@ void ApplyVsStarSnap(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     }
 
     const melonDS::u32 starOffset = star.Base - kMainRAMBase;
-    WriteMainRAMU32(nds, starOffset + 0x5C, player.PosX);
-    WriteMainRAMU32(nds, starOffset + 0x60, player.PosY);
-    WriteMainRAMU32(nds, starOffset + 0x64, player.PosZ);
+    WriteMainRAMU32(nds, starOffset + 0x60, player.PosX);
+    WriteMainRAMU32(nds, starOffset + 0x64, player.PosY);
+    WriteMainRAMU32(nds, starOffset + 0x68, player.PosZ);
     G.VsStarSnapApplied[instanceID] = true;
 
     std::printf("NSMB Test: snapped VS star to player inst=%d frame=%u slot=%d starGuid=0x%X playerGuid=0x%X pos=0x%08X,0x%08X,0x%08X\n",
@@ -4109,17 +4111,20 @@ void WriteObjectTransform(melonDS::NDS* nds, const ObjectScanSample& actor, melo
         return;
 
     const melonDS::u32 off = actor.Base - kMainRAMBase;
-    WriteMainRAMU32(nds, off + 0x5C, posX);
-    WriteMainRAMU32(nds, off + 0x60, posY);
-    WriteMainRAMU32(nds, off + 0x64, posZ);
-    WriteMainRAMU32(nds, off + 0x68, posX);
-    WriteMainRAMU32(nds, off + 0x6C, posY);
-    WriteMainRAMU32(nds, off + 0x70, posZ);
+    WriteMainRAMU32(nds, off + 0x60, posX);
+    WriteMainRAMU32(nds, off + 0x64, posY);
+    WriteMainRAMU32(nds, off + 0x68, posZ);
+    WriteMainRAMU32(nds, off + 0x70, posX);
+    WriteMainRAMU32(nds, off + 0x74, posY);
+    WriteMainRAMU32(nds, off + 0x78, posZ);
     if (clearVelocity)
     {
-        WriteMainRAMU32(nds, off + 0x74, 0);
-        WriteMainRAMU32(nds, off + 0x78, 0);
-        WriteMainRAMU32(nds, off + 0x7C, 0);
+        WriteMainRAMU32(nds, off + 0x80, 0);
+        WriteMainRAMU32(nds, off + 0x84, 0);
+        WriteMainRAMU32(nds, off + 0x88, 0);
+        WriteMainRAMU32(nds, off + 0xD0, 0);
+        WriteMainRAMU32(nds, off + 0xD4, 0);
+        WriteMainRAMU32(nds, off + 0xD8, 0);
     }
 }
 
@@ -4949,9 +4954,9 @@ bool WriteObjectPositionByGUID(melonDS::NDS* nds, melonDS::u32 guid, melonDS::u3
         if (flags >= 0x10000000)
             continue;
 
-        WriteMainRAMU32(nds, off + 0x5C, posX);
-        WriteMainRAMU32(nds, off + 0x60, posY);
-        WriteMainRAMU32(nds, off + 0x64, posZ);
+        WriteMainRAMU32(nds, off + 0x60, posX);
+        WriteMainRAMU32(nds, off + 0x64, posY);
+        WriteMainRAMU32(nds, off + 0x68, posZ);
         return true;
     }
 
@@ -4971,12 +4976,12 @@ bool WriteObjectPositionByIDAndSettings(
         return false;
 
     const melonDS::u32 off = actor.Base - kMainRAMBase;
-    WriteMainRAMU32(nds, off + 0x5C, posX);
-    WriteMainRAMU32(nds, off + 0x60, posY);
-    WriteMainRAMU32(nds, off + 0x64, posZ);
-    WriteMainRAMU32(nds, off + 0x68, posX);
-    WriteMainRAMU32(nds, off + 0x6C, posY);
-    WriteMainRAMU32(nds, off + 0x70, posZ);
+    WriteMainRAMU32(nds, off + 0x60, posX);
+    WriteMainRAMU32(nds, off + 0x64, posY);
+    WriteMainRAMU32(nds, off + 0x68, posZ);
+    WriteMainRAMU32(nds, off + 0x70, posX);
+    WriteMainRAMU32(nds, off + 0x74, posY);
+    WriteMainRAMU32(nds, off + 0x78, posZ);
     return true;
 }
 
@@ -4987,12 +4992,12 @@ bool WriteVsBattleStarCandidatePosition(melonDS::NDS* nds, melonDS::u32 posX, me
         return false;
 
     const melonDS::u32 off = actor.Base - kMainRAMBase;
-    WriteMainRAMU32(nds, off + 0x5C, posX);
-    WriteMainRAMU32(nds, off + 0x60, posY);
-    WriteMainRAMU32(nds, off + 0x64, posZ);
-    WriteMainRAMU32(nds, off + 0x68, posX);
-    WriteMainRAMU32(nds, off + 0x6C, posY);
-    WriteMainRAMU32(nds, off + 0x70, posZ);
+    WriteMainRAMU32(nds, off + 0x60, posX);
+    WriteMainRAMU32(nds, off + 0x64, posY);
+    WriteMainRAMU32(nds, off + 0x68, posZ);
+    WriteMainRAMU32(nds, off + 0x70, posX);
+    WriteMainRAMU32(nds, off + 0x74, posY);
+    WriteMainRAMU32(nds, off + 0x78, posZ);
     return true;
 }
 
@@ -5041,15 +5046,15 @@ bool WriteObjectTransformByGUID(
         if (flags >= 0x10000000)
             continue;
 
-        WriteMainRAMU32(nds, off + 0x5C, posX);
-        WriteMainRAMU32(nds, off + 0x60, posY);
-        WriteMainRAMU32(nds, off + 0x64, posZ);
-        WriteMainRAMU32(nds, off + 0x68, prevX);
-        WriteMainRAMU32(nds, off + 0x6C, prevY);
-        WriteMainRAMU32(nds, off + 0x70, prevZ);
-        WriteMainRAMU32(nds, off + 0x74, velX);
-        WriteMainRAMU32(nds, off + 0x78, velY);
-        WriteMainRAMU32(nds, off + 0x7C, velZ);
+        WriteMainRAMU32(nds, off + 0x60, posX);
+        WriteMainRAMU32(nds, off + 0x64, posY);
+        WriteMainRAMU32(nds, off + 0x68, posZ);
+        WriteMainRAMU32(nds, off + 0x70, prevX);
+        WriteMainRAMU32(nds, off + 0x74, prevY);
+        WriteMainRAMU32(nds, off + 0x78, prevZ);
+        WriteMainRAMU32(nds, off + 0xD0, velX);
+        WriteMainRAMU32(nds, off + 0xD4, velY);
+        WriteMainRAMU32(nds, off + 0xD8, velZ);
         return true;
     }
 
