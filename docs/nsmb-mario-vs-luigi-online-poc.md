@@ -2,19 +2,23 @@
 
 ## 目的
 
-New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` でWAN越しに遊べる形へ持っていく。
+New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` でWAN越しに遊べる形へ持っていく。
+
+2026-05-25時点で、実装PoCの主対象をUS版ROM `roms/nsmb-us.nds` に切り替える。理由は `external/NSMB-Code-Reference` がUS版を前提にしており、ROMパッチで必要な関数名、構造体、シンボルを直接使えるため。日本版 `A2DJ` で蓄積した実行時解析は、挙動理解と最終的な日本版移植の参照として残す。
 
 過去に試した `LocalMP 2インスタンス * 2プロセス`、savestate共有、試合開始後のWAN切り替え、actor座標や描画状態の外部同期は、desync、通信切断、低FPS、内部状態不一致が重く、最終方式としては採用しない。
 
 ## 現在の方針
 
-1. NSMBが使うローカル通信境界を、できるだけ下位でWAN adapterへ差し替える。
-   - 接続、peer/session、packet availability、packet tick、試合中入力packetまで含めて追う。
-   - NSMB側の同期ロジック、RNG消費、MvL試合進行は可能な限りそのまま使う。
-2. 必要ならROM/メモリpatchでロビーや開始処理を短絡する。
-   - UI操作やLocalMP接続の完全再現にこだわらない。
-   - ただし、試合中はNSMB Centralの記述どおり入力packet中心の同期へ寄せる。
-3. 直接的なactor座標同期、描画状態同期、乱暴なfreeze解除は診断用に限定する。
+1. US版ROMで、LocalMP接続/UI再現に依存しない `Mario vs Luigi` 専用ROMパッチPoCを作る。
+   - まずは `external/NSMB-Code-Reference` のUS版シンボルを使い、MvLステージ開始、Player生成、RNG固定、入力注入の境界を特定する。
+   - 目標は「LocalMPなしに2PがいるMvL gameplayを起動し、相手側入力バッファを外部から動かせる」状態。
+2. その後、相手プレイヤー入力をWAN adapterからROM/メモリ境界へ渡す。
+   - NSMB本来のLocalMP接続/ロビー/StageStartを完全再現する方針は捨てる。
+   - 試合中の同期は、可能ならNSMB Centralの記述どおり入力packet中心のロジックへ寄せる。
+3. 日本版 `A2DJ` はUS版PoC成立後に移植する。
+   - 既存のJPアドレス解析は移植時の対応表として使う。
+4. 直接的なactor座標同期、描画状態同期、乱暴なfreeze解除は診断用に限定する。
 
 ## 到達済み
 
@@ -36,6 +40,12 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - player transition状態 (`player+0xB2D`, `+0x75C`, `+0x910`, `0x0208A96C/970`) を game-state CSV に出す診断列を追加済み。
 - game-state CSV の既存ヘッダー漏れ (`courseSelectWord088`) を修正済み。以後のCSVではStageScene列を正しい位置で読める。
 - `ARM.cpp` にwrite trace拡張と bad jump trace を追加済み。
+- US版ROM `roms/nsmb-us.nds` のヘッダーを確認済み。gamecodeは `A2DE`。
+- `tools/nsmb_us_rom_tool.py` を追加し、US版 `symbols9.x` のシンボルをARM9/overlayの展開済みコードへ対応付け、逆アセンブルできるようにした。
+  - ARM9本体は圧縮されているため、ROM上の単純オフセットをそのまま逆アセンブルすると壊れる。`ndspy.codeCompression` で展開して扱う。
+- `tools/nsmb_us_rom_patch.py` を追加し、圧縮ARM9を展開、書換、再圧縮してROMを保存する最小パッチパイプラインを作った。
+  - 検証用に `Net::getRandom()` と `Game::getRandom()` を `0x100` 固定返却へ差し替えた `roms/nsmb-us-rng100.nds` を生成し、Debug smokeで起動成功を確認した。
+  - 生成ROMは `roms/` 配下なのでgitには含めない。
 
 ## 最新の重要な発見
 
@@ -72,23 +82,34 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - 既知の直接call siteは `0x020A0C30`, `0x020A1248`, `0x02114EBC`, `0x02115AFC`, `0x02116D48`, `0x0212693C`。
   - ただし現時点で見えている直接callは `r0=0/1/4/9` で、`r0=2` を自然に渡す経路はまだ見えていない。
 - このため、`0x020C92C0 & 3` を「試合開始に必須」と決め打ちするのは危険。`state1` でも `Stage::actorFreezeFlag` が0ならPlayer updateは走るため、まずは `0x020C92D0 & 0x200` 経由のfreeze解除後に通常操作へ入れるかを検証する。
+- `0x020AD460` が `0x020C92D0 |= 0x200` を行う自然な書き込み元候補。
+  - これは `0x020AD33C` の内部で、`mvlGlobal9670` (`0x020C9670`) が5のときに実行される。
+  - `0x020AD33C` は `0x02006ED4` から呼ばれ、`0x020C96F0` が指すMvL manager本体を引数に取る。
+  - `020AF1DC` は `mvlGlobal9670` を見て `020C9930` の状態関数テーブルを呼ぶ。通常routeでも `020AF1DC` 自体は呼ばれている。
+  - 通常routeで進まない直接原因は、manager側のプレイヤーready halfword `manager+0x494/+0x4A0` が0のままなこと。ここが `0xFF00` でないと `020AF1DC` は状態関数へ入らない。
+  - 診断用に `MELONDS_NSML_FORCE_MVL_PLAYER_READY` を追加し、`manager+0x494/+0x4A0=0xFF00` と `manager+0xA8EC=0xFF` を短時間だけ入れると、host/client双方で `mvlGlobal9670: 0 -> 1 -> 2 -> 3 -> 4 -> 5` が走り、`0x020AD460` による `0x020C92D0 |= 0x200` が自然発生することを確認した。
+  - 細粒度traceでは、`0x020C92D0 |= 0x200` はStageScene state1で消費され、同フレームで `Stage::actorFreezeFlag=0` になる。ただし直後に `020AF5FC` が `0x020C92D0 |= 0x100` を再発行し、次フレームで `Stage::actorFreezeFlag=0x2e` に再ロックされる。
+  - つまり現時点の主問題は「freeze解除イベントが起きない」ではなく、「MvL manager状態機械が開始直後に再ロック側へ戻る」こと。
+- game-state CSVに `mvlGlobal965C/9670/9674/9694` と `mvlManagerBase`, `mvlManager+0x494/+0x4A0`, `mvlManager+0xA8CC..0xA8EC` の診断列を追加した。
 
 ## 現在のブロッカー
 
 - `0x020C92C0 & 3` が本来どの局面で立つのか未特定。現時点では開始ゲートではなく、StageSceneのイベント/結果ゲートの可能性もある。
-- `0x020C92D0 & 0x200` がfreeze解除の自然経路であることは見えたが、現在のWAN routeでそのイベントが自然発生する条件は未特定。
-- freeze解除後はPlayer updateが走る。通常操作へ入るかどうかは、3000F以降の移動入力まで到達して確認する必要がある。
+- `0x020C92D0 & 0x200` の自然発生経路は見えたが、現状は診断フックで `manager+0x494/+0x4A0` と `+0xA8EC` を補助している。最終方式では、これらを本来どの通信/session/開始処理がセットするのか特定する必要がある。
+- `mvlGlobal9670=5` 到達後に `0x020C92D0 |= 0x200` は走るが、その直後に `0x020C92D0 |= 0x100` が走ってfreezeが再ロックされる。開始状態機械を無理に進めている副作用か、本来のhandshake/ready条件不足かを切り分ける必要がある。
+- freeze解除後の通常操作確認より先に、`020AF5FC` が再ロックイベントを出す条件を特定する必要がある。
 - StageScene state遷移、Player遷移、actor freeze解除の3つがまだ自然な順番で接続できていない。特に `0x020C92D0 & 0x200` の自然発生源を、下位通信/session境界から追う必要がある。
 - デバッグビルドの実行が遅く、3300F前後のWAN route検証はタイムアウトしやすい。CSVの部分結果は使えるが、成功判定は厳密に見る必要がある。
 
 ## 次にやること
 
-1. `0x020C92D0 & 0x200` を自然に立てる経路、またはROM/メモリpatchで安全に発生させる入口を特定する。
-2. `0x020C92D0 & 0x200` 経由のfreeze解除後に、左右移動とジャンプがhost/client双方で反映されるか確認する。
-3. `0x020C92C0` 低bitは、開始必須条件ではなくイベント/結果ゲートとして扱い直し、`0x020A07EC` の呼び出し条件を分類する。
-4. `0x020C92D0` を直接いじる診断フックではなく、WAN adapterのpacket/input API、またはROM/メモリpatchの正しい開始短絡点から同じ状態へ自然に到達させる。
-5. 検証速度改善のため、探索時だけJITを許可できる `-AllowJit` を使う。ただし最終判定はJIT無効でも再確認する。
-6. その後、RNG seed/消費順、ビッグスター、8コインアイテム、ランダムステージを確認する。
+1. `manager+0x494/+0x4A0=0xFF00` を本来自然に立てる処理を特定する。候補はMvL manager初期化、Player土管出口遷移、StageStart/StageScene開始処理。
+2. `manager+0xA8EC` が自然に変化しない原因を追う。診断では `0xFF` を一回入れると `020AF5FC` が進むため、ここは初回tick/ready差分の不足が疑わしい。
+3. `020AF5FC` が `0x020C92D0 |= 0x100` を再発行する条件を特定する。`manager+0xA8EC` と tick bucket の差分、ready halfword、player transition状態を優先して見る。
+4. US版ROMパッチPoCとして、まず `VSConnectScene` / `CourseSelect` / `Game::loadLevel` の既存経路を使い、LocalMPなしでMvLステージへ直接入る入口を作る。
+5. 入口ができたら、2P生成、Player VSPipe状態、actor freeze、入力バッファの順に、試合中操作へ必要な最小状態をROMパッチ側で整える。
+6. `0x020C92C0` 低bitは、開始必須条件ではなくイベント/結果ゲートとして扱い直し、必要になった時点で `0x020A07EC` の呼び出し条件を分類する。
+7. その後、RNG seed/消費順、ビッグスター、8コインアイテム、ランダムステージを確認する。
 
 ## 検証ルール
 
@@ -149,6 +170,15 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - `0x020C92D0 |= 0x200` のみでhost側はfreeze解除し、Playerが土管出口遷移を進めていることを確認。ただしdebug実行が遅く、3000F以降の移動入力までは到達できていない。
 - `logs/nsmvl-stage-event-movement-debug-allowjit-20260525`
   - 探索用に `-AllowJit` を使ったが、同じくタイムアウト。host側は2940Fまで到達し、freeze解除後にPlayerのY座標/速度が更新され、`0x020C92D0=0x4` が観測された。
+- `logs/nsmvl-mvl-manager-state-trace-20260525`
+  - `mvlGlobal9670` とMvL manager内部状態をCSVへ出すための短距離検証。host/clientとも2950Fまで到達したが、`mvlGlobal9670=0`、manager内部 `+0xA8CC..0xA8EC=0` のままで、manager状態機械が起動していないことを確認。
+- `logs/nsmvl-mvl-natural-event-fine-trace-20260525`
+  - `manager+0x494/+0x4A0=0xFF00` と `manager+0xA8EC=0xFF` の診断補助下で、hostは2964F、clientは2971Fに `mvlGlobal9670=5 -> 0`、`0x020C92D0 |= 0x200`、StageSceneによる `Stage::actorFreezeFlag=0` を確認。
+  - 同じ開始シーケンスが直後に再開し、`020AF5FC` が `0x020C92D0 |= 0x100` を出すため、次フレームで `Stage::actorFreezeFlag=0x2e` に戻ることを確認。
+- `logs/nsmvl-us-vanilla-debug-smoke-20260525`
+  - US版vanilla ROM `roms/nsmb-us.nds` が既存Debug smokeで起動できることを確認。
+- `logs/nsmvl-us-rng-rompatch-debug-smoke-20260525`
+  - `Net::getRandom()` / `Game::getRandom()` を `0x100` 固定返却にしたUS版ROMパッチが起動できることを確認。
 
 ## 参考
 
