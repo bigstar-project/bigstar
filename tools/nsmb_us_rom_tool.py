@@ -102,6 +102,13 @@ def find_segment(segments: list[Segment], addr: int) -> Segment | None:
     return matches[0]
 
 
+def find_overlay_segment(segments: list[Segment], overlay_id: int, addr: int) -> Segment | None:
+    for seg in segments:
+        if seg.overlay_id == overlay_id and seg.contains(addr):
+            return seg
+    return None
+
+
 def print_info(rom: bytes, segments: list[Segment]) -> None:
     print(f"title={rom[0:12]!r}")
     print(f"gamecode={rom[12:16].decode('ascii', errors='replace')}")
@@ -144,6 +151,7 @@ def main() -> int:
     p_dis = sub.add_parser("disasm")
     p_dis.add_argument("addr")
     p_dis.add_argument("--size", type=lambda x: int(x, 0), default=0x80)
+    p_dis.add_argument("--overlay-id", type=lambda x: int(x, 0))
     args = ap.parse_args()
 
     rom = Path(args.rom).read_bytes()
@@ -166,9 +174,10 @@ def main() -> int:
 
     if args.cmd == "disasm":
         label, addr = resolve_addr(args.addr, symbols)
-        seg = find_segment(segments, addr)
+        seg = find_overlay_segment(segments, args.overlay_id, addr) if args.overlay_id is not None else find_segment(segments, addr)
         if not seg:
-            raise SystemExit(f"{label}: addr=0x{addr:08X} segment not found")
+            suffix = "" if args.overlay_id is None else f" in overlay{args.overlay_id}"
+            raise SystemExit(f"{label}: addr=0x{addr:08X} segment not found{suffix}")
         disasm(rom, seg, addr, args.size)
         return 0
 

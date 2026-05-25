@@ -87,6 +87,7 @@ constexpr melonDS::u32 kInputConsoleKeysAddr = 0x02087650;
 constexpr melonDS::u32 kInputPlayerKeysHeldAddr = 0x02087660;
 constexpr melonDS::u32 kInputPlayerKeysPressedAddr = 0x02087664;
 constexpr melonDS::u32 kStageActorFreezeFlagAddr = 0x020CA28C;
+constexpr melonDS::u32 kActorCategoryMaskAddr = 0x020CA850;
 constexpr melonDS::u32 kGamePlayerGlobalBlockAddr = 0x0208B324;
 constexpr melonDS::u32 kGamePlayerTransitionStatusAddr = 0x0208B354; // Game::playerVSPipeState
 constexpr melonDS::u32 kGamePlayerCountAddr = 0x0208B348;
@@ -820,12 +821,31 @@ struct State
     melonDS::u32 ForceStageActorFreezeFlagEndFrame = 0;
     melonDS::u32 ForceStageActorFreezeFlagValue = 0;
     bool ForceStageActorFreezeFlagLogged[16] {};
+    bool ForceStageActorPreUpdateGateEnabled = false;
+    bool ForceStageActorPreUpdateGateHostOnly = false;
+    bool ForceStageActorPreUpdateGateClientOnly = false;
+    melonDS::u32 ForceStageActorPreUpdateGateStartFrame = 0;
+    melonDS::u32 ForceStageActorPreUpdateGateEndFrame = 0;
+    bool ForceStageActorPreUpdateGateLogged[16] {};
+    bool ForceActorCategoryMaskEnabled = false;
+    bool ForceActorCategoryMaskHostOnly = false;
+    bool ForceActorCategoryMaskClientOnly = false;
+    melonDS::u32 ForceActorCategoryMaskStartFrame = 0;
+    melonDS::u32 ForceActorCategoryMaskEndFrame = 0;
+    melonDS::u32 ForceActorCategoryMaskValue = 0;
+    bool ForceActorCategoryMaskLogged[16] {};
     bool ForcePlayerSignalUnlockEnabled = false;
     bool ForcePlayerSignalUnlockHostOnly = false;
     bool ForcePlayerSignalUnlockClientOnly = false;
     melonDS::u32 ForcePlayerSignalUnlockStartFrame = 0;
     melonDS::u32 ForcePlayerSignalUnlockEndFrame = 0;
     bool ForcePlayerSignalUnlockLogged[16] {};
+    bool ForcePlayerUpdateEnableEnabled = false;
+    bool ForcePlayerUpdateEnableHostOnly = false;
+    bool ForcePlayerUpdateEnableClientOnly = false;
+    melonDS::u32 ForcePlayerUpdateEnableStartFrame = 0;
+    melonDS::u32 ForcePlayerUpdateEnableEndFrame = 0;
+    bool ForcePlayerUpdateEnableLogged[16] {};
     bool ForceStageSceneStartGateEnabled = false;
     bool ForceStageSceneStartGateHostOnly = false;
     bool ForceStageSceneStartGateClientOnly = false;
@@ -4454,6 +4474,83 @@ void ForceStageActorFreezeFlagIfNeeded(int instanceID, melonDS::u32 frame, melon
     }
 }
 
+void ForceStageActorPreUpdateGateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForceStageActorPreUpdateGateEnabled || !nds || !nds->MainRAM)
+        return;
+    if (frame < G.ForceStageActorPreUpdateGateStartFrame)
+        return;
+    if (G.ForceStageActorPreUpdateGateEndFrame != 0 && frame > G.ForceStageActorPreUpdateGateEndFrame)
+        return;
+    if (G.ForceStageActorPreUpdateGateHostOnly && G.NetRole != Role::Host)
+        return;
+    if (G.ForceStageActorPreUpdateGateClientOnly && G.NetRole != Role::Client)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
+        return;
+
+    // StageActor::preUpdate calls 02007CB0(0x02088F48) and returns false when
+    // both per-player gate bytes at +0x5BE/+0x5BF have bit0 set. Clear them
+    // for diagnosis so the normal onUpdate dispatch can be tested.
+    constexpr melonDS::u32 kStageActorPreUpdateGate0 = 0x02089506u;
+    constexpr melonDS::u32 kStageActorPreUpdateGate1 = 0x02089507u;
+    const melonDS::u8 old0 = nds->ARM9Read8(kStageActorPreUpdateGate0);
+    const melonDS::u8 old1 = nds->ARM9Read8(kStageActorPreUpdateGate1);
+    nds->ARM9Write8(kStageActorPreUpdateGate0, static_cast<melonDS::u8>(old0 & ~0x01));
+    nds->ARM9Write8(kStageActorPreUpdateGate1, static_cast<melonDS::u8>(old1 & ~0x01));
+
+    if (!G.ForceStageActorPreUpdateGateLogged[instanceID])
+    {
+        std::printf(
+            "NSMB Test: force stage actor preupdate gate inst=%d frame=%u range=%u-%u gate0=%02X->%02X gate1=%02X->%02X\n",
+            instanceID,
+            frame,
+            G.ForceStageActorPreUpdateGateStartFrame,
+            G.ForceStageActorPreUpdateGateEndFrame,
+            old0,
+            nds->ARM9Read8(kStageActorPreUpdateGate0),
+            old1,
+            nds->ARM9Read8(kStageActorPreUpdateGate1));
+        G.ForceStageActorPreUpdateGateLogged[instanceID] = true;
+    }
+}
+
+void ForceActorCategoryMaskIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForceActorCategoryMaskEnabled || !nds || !nds->MainRAM)
+        return;
+    if (frame < G.ForceActorCategoryMaskStartFrame)
+        return;
+    if (G.ForceActorCategoryMaskEndFrame != 0 && frame > G.ForceActorCategoryMaskEndFrame)
+        return;
+    if (G.ForceActorCategoryMaskHostOnly && G.NetRole != Role::Host)
+        return;
+    if (G.ForceActorCategoryMaskClientOnly && G.NetRole != Role::Client)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
+        return;
+
+    const melonDS::u8 oldValue = nds->ARM9Read8(kActorCategoryMaskAddr);
+    nds->ARM9Write8(kActorCategoryMaskAddr, static_cast<melonDS::u8>(G.ForceActorCategoryMaskValue & 0xFF));
+
+    if (!G.ForceActorCategoryMaskLogged[instanceID])
+    {
+        std::printf(
+            "NSMB Test: force actor category mask inst=%d frame=%u range=%u-%u old=0x%02X value=0x%02X\n",
+            instanceID,
+            frame,
+            G.ForceActorCategoryMaskStartFrame,
+            G.ForceActorCategoryMaskEndFrame,
+            oldValue,
+            G.ForceActorCategoryMaskValue & 0xFF);
+        G.ForceActorCategoryMaskLogged[instanceID] = true;
+    }
+}
+
 void ForcePlayerSignalUnlockIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.ForcePlayerSignalUnlockEnabled || !nds || !nds->MainRAM)
@@ -4521,6 +4618,65 @@ void ForcePlayerSignalUnlockIfNeeded(int instanceID, melonDS::u32 frame, melonDS
             global9298,
             nds->ARM9Read8(0x020C9298));
         G.ForcePlayerSignalUnlockLogged[instanceID] = true;
+    }
+}
+
+void ForcePlayerUpdateEnableIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForcePlayerUpdateEnableEnabled || !nds || !nds->MainRAM)
+        return;
+    if (frame < G.ForcePlayerUpdateEnableStartFrame)
+        return;
+    if (G.ForcePlayerUpdateEnableEndFrame != 0 && frame > G.ForcePlayerUpdateEnableEndFrame)
+        return;
+    if (G.ForcePlayerUpdateEnableHostOnly && G.NetRole != Role::Host)
+        return;
+    if (G.ForcePlayerUpdateEnableClientOnly && G.NetRole != Role::Client)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
+        return;
+
+    const PlayerActorScanSample players = FindPlayerActors(nds);
+    melonDS::u32 playerBases[2] {};
+    int playerCount = 0;
+    if (players.Actor0.Found && IsARM9MainRAMAddress(players.Actor0.Base))
+        playerBases[playerCount++] = players.Actor0.Base;
+    if (players.Actor1.Found && IsARM9MainRAMAddress(players.Actor1.Base))
+        playerBases[playerCount++] = players.Actor1.Base;
+
+    int changed = 0;
+    melonDS::u8 oldFlags[2] {};
+    melonDS::u8 newFlags[2] {};
+    for (int i = 0; i < playerCount; i++)
+    {
+        oldFlags[i] = nds->ARM9Read8(playerBases[i] + 0x13);
+        newFlags[i] = static_cast<melonDS::u8>(oldFlags[i] & ~0x02);
+        if (newFlags[i] != oldFlags[i])
+        {
+            nds->ARM9Write8(playerBases[i] + 0x13, newFlags[i]);
+            changed++;
+        }
+    }
+
+    if (!G.ForcePlayerUpdateEnableLogged[instanceID])
+    {
+        std::printf(
+            "NSMB Test: force player update enable inst=%d frame=%u range=%u-%u players=%d changed=%d p0=%08X %02X->%02X p1=%08X %02X->%02X\n",
+            instanceID,
+            frame,
+            G.ForcePlayerUpdateEnableStartFrame,
+            G.ForcePlayerUpdateEnableEndFrame,
+            playerCount,
+            changed,
+            playerCount > 0 ? playerBases[0] : 0,
+            playerCount > 0 ? oldFlags[0] : 0,
+            playerCount > 0 ? newFlags[0] : 0,
+            playerCount > 1 ? playerBases[1] : 0,
+            playerCount > 1 ? oldFlags[1] : 0,
+            playerCount > 1 ? newFlags[1] : 0);
+        G.ForcePlayerUpdateEnableLogged[instanceID] = true;
     }
 }
 
@@ -6749,6 +6905,23 @@ void InitFromEnvironment()
     G.ForceStageActorFreezeFlagValue = static_cast<melonDS::u32>(
         std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_VALUE")
             ? std::getenv("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_VALUE") : "0", nullptr, 0));
+    G.ForceStageActorPreUpdateGateEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_ACTOR_PREUPDATE_GATE");
+    G.ForceStageActorPreUpdateGateHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_ACTOR_PREUPDATE_GATE_HOST_ONLY");
+    G.ForceStageActorPreUpdateGateClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_ACTOR_PREUPDATE_GATE_CLIENT_ONLY");
+    G.ForceStageActorPreUpdateGateStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_ACTOR_PREUPDATE_GATE_START_FRAME", 0)));
+    G.ForceStageActorPreUpdateGateEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_ACTOR_PREUPDATE_GATE_END_FRAME", 0)));
+    G.ForceActorCategoryMaskEnabled = EnvFlag("MELONDS_NSML_FORCE_ACTOR_CATEGORY_MASK");
+    G.ForceActorCategoryMaskHostOnly = EnvFlag("MELONDS_NSML_FORCE_ACTOR_CATEGORY_MASK_HOST_ONLY");
+    G.ForceActorCategoryMaskClientOnly = EnvFlag("MELONDS_NSML_FORCE_ACTOR_CATEGORY_MASK_CLIENT_ONLY");
+    G.ForceActorCategoryMaskStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_ACTOR_CATEGORY_MASK_START_FRAME", 0)));
+    G.ForceActorCategoryMaskEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_ACTOR_CATEGORY_MASK_END_FRAME", 0)));
+    G.ForceActorCategoryMaskValue = static_cast<melonDS::u32>(
+        std::strtoul(std::getenv("MELONDS_NSML_FORCE_ACTOR_CATEGORY_MASK_VALUE")
+            ? std::getenv("MELONDS_NSML_FORCE_ACTOR_CATEGORY_MASK_VALUE") : "0", nullptr, 0));
     G.ForcePlayerSignalUnlockEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK");
     G.ForcePlayerSignalUnlockHostOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_HOST_ONLY");
     G.ForcePlayerSignalUnlockClientOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_CLIENT_ONLY");
@@ -6756,6 +6929,13 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_START_FRAME", 0)));
     G.ForcePlayerSignalUnlockEndFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_END_FRAME", 0)));
+    G.ForcePlayerUpdateEnableEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_UPDATE_ENABLE");
+    G.ForcePlayerUpdateEnableHostOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_UPDATE_ENABLE_HOST_ONLY");
+    G.ForcePlayerUpdateEnableClientOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_UPDATE_ENABLE_CLIENT_ONLY");
+    G.ForcePlayerUpdateEnableStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_UPDATE_ENABLE_START_FRAME", 0)));
+    G.ForcePlayerUpdateEnableEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_UPDATE_ENABLE_END_FRAME", 0)));
     G.ForceStageSceneStartGateEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE");
     G.ForceStageSceneStartGateHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_HOST_ONLY");
     G.ForceStageSceneStartGateClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_CLIENT_ONLY");
@@ -7121,7 +7301,13 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageActorFreezeFlagIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForceStageActorPreUpdateGateIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForceActorCategoryMaskIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerSignalUnlockIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForcePlayerUpdateEnableIfNeeded(instanceID, inputFrame, nds);
 
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteGameState(instanceID, inputFrame, nds);

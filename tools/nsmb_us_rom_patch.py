@@ -331,6 +331,9 @@ def patch_direct_mvl_entry(
     rng_seed: int,
     first_scene: int,
     skip_direct_loadlevel: bool,
+    force_ready_progress: bool,
+    force_transfer_result: int | None,
+    clear_actor_category_mask: bool,
 ) -> list[str]:
     arm9 = rom.loadArm9()
     overlays = rom.loadArm9Overlays()
@@ -373,6 +376,45 @@ def patch_direct_mvl_entry(
             f"{old.hex()} -> {words_hex(stub)}"
         )
 
+    if force_ready_progress:
+        # Direct loadLevel reaches VSStageIntro, but without a real LocalMP
+        # session the ready synchronization never completes. Reuse the same
+        # wait bypass used by the fake-opponent diagnostic path.
+        vs_stage_intro_wait_addr = 0x02152888
+        ov_id, old = patch_overlay_words(overlays, vs_stage_intro_wait_addr, [NOP])
+        changes.append(
+            f"VSStageIntro ready wait branch NOP overlay{ov_id} @ 0x{vs_stage_intro_wait_addr:08X}: "
+            f"{old.hex()} -> {struct.pack('<I', NOP).hex()}"
+        )
+
+    if force_transfer_result is not None:
+        # Direct-entry diagnostic equivalent of the fake-opponent transfer
+        # bypass. This tells whether VSStageIntro can progress when the game
+        # observes the expected peer action packet bits.
+        addr = symbols["_ZN3Net4Core14transferPacketENS_12PacketActionE"]
+        words = [
+            encode_mov_imm(0, force_transfer_result),
+            BX_LR,
+        ]
+        old = patch_arm9_words(arm9, addr, words)
+        changes.append(
+            f"Net::Core::transferPacket forced result 0x{force_transfer_result:X} @ 0x{addr:08X}: "
+            f"{old.hex()} -> {words_hex(words)}"
+        )
+
+    if clear_actor_category_mask:
+        # loadMvsLFilesThread normally writes 0x26 to Actor::category mask
+        # at 0x020CA850, freezing categories until the VS ready flow clears it.
+        # The fake/direct PoC paths can miss that clear, so make the initial
+        # value zero for diagnostic ROMs.
+        addr = 0x02152E64
+        word = encode_mov_imm(1, 0)
+        ov_id, old = patch_overlay_words(overlays, addr, [word])
+        changes.append(
+            f"loadMvsLFilesThread actor category mask value overlay{ov_id} @ 0x{addr:08X}: "
+            f"{old.hex()} -> {struct.pack('<I', word).hex()}"
+        )
+
     rom.arm9 = arm9.save(compress=True)
     save_overlays(rom, overlays)
     return changes
@@ -391,6 +433,7 @@ def patch_fake_opponent(
     fake_net_state: bool,
     fake_net_state_on_nickname: bool,
     force_transfer_result: int | None,
+    clear_actor_category_mask: bool,
 ) -> list[str]:
     arm9 = rom.loadArm9()
     overlays = rom.loadArm9Overlays()
@@ -511,6 +554,15 @@ def patch_fake_opponent(
             f"{old.hex()} -> {struct.pack('<I', NOP).hex()}"
         )
 
+    if clear_actor_category_mask:
+        addr = 0x02152E64
+        word = encode_mov_imm(1, 0)
+        ov_id, old = patch_overlay_words(overlays, addr, [word])
+        changes.append(
+            f"loadMvsLFilesThread actor category mask value overlay{ov_id} @ 0x{addr:08X}: "
+            f"{old.hex()} -> {struct.pack('<I', word).hex()}"
+        )
+
     rom.arm9 = arm9.save(compress=True)
     save_overlays(rom, overlays)
     return changes
@@ -531,6 +583,9 @@ def main() -> int:
     p_direct.add_argument("--rng-seed", type=lambda x: int(x, 0), default=0x100)
     p_direct.add_argument("--first-scene", type=lambda x: int(x, 0), default=6)
     p_direct.add_argument("--skip-direct-loadlevel", action="store_true")
+    p_direct.add_argument("--force-ready-progress", action="store_true")
+    p_direct.add_argument("--force-transfer-result", type=lambda x: int(x, 0))
+    p_direct.add_argument("--clear-actor-category-mask", action="store_true")
     p_fake = sub.add_parser("fake-opponent")
     p_fake.add_argument("--force-confirm-load", action="store_true")
     p_fake.add_argument("--force-loadgame-progress", action="store_true")
@@ -538,6 +593,7 @@ def main() -> int:
     p_fake.add_argument("--fake-net-state", action="store_true")
     p_fake.add_argument("--fake-net-state-on-nickname", action="store_true")
     p_fake.add_argument("--force-transfer-result", type=lambda x: int(x, 0))
+    p_fake.add_argument("--clear-actor-category-mask", action="store_true")
     args = ap.parse_args()
 
     symbols = load_symbols(Path(args.symbols))
@@ -555,6 +611,9 @@ def main() -> int:
             rng_seed=args.rng_seed,
             first_scene=args.first_scene,
             skip_direct_loadlevel=args.skip_direct_loadlevel,
+            force_ready_progress=args.force_ready_progress,
+            force_transfer_result=args.force_transfer_result,
+            clear_actor_category_mask=args.clear_actor_category_mask,
         )
     elif args.cmd == "fake-opponent":
         changes = patch_fake_opponent(
@@ -566,6 +625,7 @@ def main() -> int:
             fake_net_state=args.fake_net_state,
             fake_net_state_on_nickname=args.fake_net_state_on_nickname,
             force_transfer_result=args.force_transfer_result,
+            clear_actor_category_mask=args.clear_actor_category_mask,
         )
     else:
         raise AssertionError(args.cmd)

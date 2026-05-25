@@ -2,30 +2,30 @@
 
 ## 目的
 
-New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` でWAN越しに遊べる形へ持っていく。
+New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` で WAN 越しに対戦できる形へ持っていく。
 
-過去に試した `LocalMP 2インスタンス * 2プロセス`、savestate共有、試合開始後のWAN切り替え、actor/state強制同期は、通信切断、desync、内部状態不一致、低FPSが大きく、最終方針としては採用しない。
+過去に試した `LocalMP 2インスタンス * 2プロセス`、savestate 共有、試合開始後の WAN 切り替え、actor/state 強制同期は、通信切断、desync、内部状態不一致、低 FPS が大きく、最終方針としては採用しない。
 
 ## 現在の方針
 
-US版ROM `roms/nsmb-us.nds` (`A2DE`) を主対象にする。`external/NSMB-Code-Reference` がUS版前提で、関数名・構造体・シンボルを直接活用しやすいため。
+US 版 ROM `roms/nsmb-us.nds` (`A2DE`) を主対象にする。`external/NSMB-Code-Reference` が US 版シンボルなので、ROM パッチと逆アセンブルの精度を優先する。
 
-本筋は次の2段階。
+主方針は次の2本。
 
-1. ROMパッチまたは低レベルadapterで、LocalMP接続UIに依存しない `Mario vs Luigi` 専用入口を作る。
-2. 試合中にNSMBが読むpacket/input境界をWAN adapterへ差し替え、NSMB側の同期処理をできるだけそのまま使う。
+1. ROM パッチまたは低レベル adapter で、LocalMP UI/接続処理に依存しない MvL 専用入口を作る。
+2. 試合中に NSMB が読む packet/input 境界を WAN adapter に差し替え、NSMB 側の同期処理をできるだけそのまま使う。
 
-NSMB CentralのMvsL資料では、接続時にRNG seedを同期し、その後は主に入力だけを送ると説明されている。したがって、外から座標やスター状態を強制同期するのではなく、NSMBが読む対戦packetをWAN由来のpacketへ置き換える方向を優先する。
+NSMB Central の解析では、MvL は接続時に RNG seed を同期し、試合中は主に入力情報を通信する。したがって、外から座標やスター状態を強制同期するより、`Net::getPacket` / `getConsoleKeys` / packet tick/action/byte を正しく差し替える方が本筋。
 
-参照: https://bookstack.nsmbcentral.net/books/new-super-mario-bros/page/mario-vs-luigi
+参考: https://bookstack.nsmbcentral.net/books/new-super-mario-bros/page/mario-vs-luigi
 
 ## 実装済み
 
-- US版ROM解析ツール `tools/nsmb_us_rom_tool.py`
+- US 版 ROM 解析ツール `tools/nsmb_us_rom_tool.py`
   - `symbols9.x` のシンボル解決
-  - ARM9/overlayの逆アセンブル
-  - 圧縮ARM9/overlayの展開対応
-- US版ROMパッチツール `tools/nsmb_us_rom_patch.py`
+  - ARM9/overlay 逆アセンブル
+  - 重複 overlay 対策の `disasm --overlay-id`
+- US 版 ROM パッチツール `tools/nsmb_us_rom_patch.py`
   - `rng-constant`
   - `direct-mvl-entry`
   - `fake-opponent`
@@ -34,60 +34,63 @@ NSMB CentralのMvsL資料では、接続時にRNG seedを同期し、その後�
   - `--mirror-packets`
   - `--fake-net-state-on-nickname`
   - `--force-transfer-result`
-  - overlay保存時の `arm9OverlayTable` 更新
+  - `direct-mvl-entry --force-ready-progress`
+  - `direct-mvl-entry --force-transfer-result`
+  - `--clear-actor-category-mask`
 - 自動検証フック
   - 入力スクリプト
-  - スクリーンショット
+  - screenshot
   - RAM dump
   - game state trace
   - calltrace
   - object lifecycle summary
-- US版の主要アドレス確認
+  - actor category mask 強制診断
+- 主要 US アドレス確認
   - `Game::loadLevel = 0x0200696C`
+  - `Scene::switchScene = 0x020131FC`
   - `Net::getPacket = 0x0200EB50`
   - `Net::getConsoleKeys = 0x0200E854`
+  - `Net::getPacketByte = 0x0200EACC`
+  - `Net::getPacketTick = 0x0200EB10`
+  - `Net::getPacketAction = 0x0200EB30`
   - `Net::updatePacket = 0x0201031C`
   - `Net::Core::transferPacket = 0x0200FAE0`
   - `Stage::stageLayout = 0x020CAD40`
-- 可視forcedルート
-  - `fake-opponent --force-confirm-load --force-loadgame-progress` 系で、1インスタンスのMvsLステージ/HUD/ミニマップ表示まで到達。
-  - `--mirror-packets` で `Net::getPacket(consoleID)` がローカル `sendPacket` を返す診断経路を作成。
-  - `inputPlayer1Held` にも入力が入ることを確認済み。ただし画面上の2Pが自然に動くところまでは未達。
-- 黒画面sessionルート診断
-  - `--fake-net-state-on-nickname` とsession flag補完で `Connection interrupted` は回避。
-  - `Scene 3` / `stageGroup=9` / player actor / Big Star actor 生成までは到達。
-  - ただし黒画面のまま。
-  - `StageScene` の主要フィールドは可視ルートと近いが、`stageSceneStateType=0` / `skipFlags=0x05` のままcreate processに残り続ける。
-  - `StageScene` と子objectの `state/skipFlags` を強制しても黒画面は解消しない。
-  - 可視ルートではStageSceneのprocess linkが成立し、`0204D204` のpostCreate callbackが呼ばれてactive化する。
-  - 黒画面sessionルートではStageSceneのprocess link前後関係が欠けており、同callbackを自然に呼べない。直接呼びはdata abortになるため、単純な後付けpostCreateでは解決しない。
+  - `Player::onUpdate = 0x020FD1D4` in overlay10
+  - `Actor::preUpdate` category mask = `0x020CA850`
 
-## 現在分かっていること
+## 分かっていること
 
-- 可視forcedルートは、試合画面までの自動到達ルートとして使える。
-- 黒画面sessionルートは、通信/session状態を自然に再現しようとしているが、StageSceneがprocess listに正しく入らない。現時点では本筋ではなく補助診断扱いにする。
-- NSMB側のMvsL同期を使うには、actor座標やスター状態を外から合わせるより、`Net::getPacket` / `Net::getConsoleKeys` / packet tick/action/byte の境界を安定して差し替える方が筋が良い。
-- 2Pが自然に動かない現在の問題は、単に同じkeysを返すだけでは不足しており、packet tick/action、local player ID、player mapping、または試合中ready/session状態のどこかがまだ足りない可能性が高い。
+- `fake-opponent --force-confirm-load --force-loadgame-progress` ルートでは、1インスタンスで MvL のステージ/HUD/ミニマップ表示まで到達できる。
+- `--mirror-packets` により `Net::getPacket(consoleID)` がローカル `sendPacket` を返す診断ルートは作成済み。
+- `inputPlayer1Held` に 2P 入力相当の値が入ることは確認済み。ただし、2P actor はまだ自然には動かない。
+- `Player::onUpdate` を method body として直接呼ぶ診断は abort する。自然な process/update 文脈なしに直接呼ぶのは不適切。
+- fake-opponent 可視ルートで Player が動かなかった主因の一つは `Actor::preUpdate` の category mask。`0x020CA850` が `0x26` のままだと `Actor::preUpdate` が false を返し、`StageEntity::onUpdate` / `Player::onUpdate` に進まない。
+- `MELONDS_NSML_FORCE_ACTOR_CATEGORY_MASK=1` かつ value `0` の診断では、`StageEntity::onUpdate` と `Player::onUpdate` が自然な vtable 経路で呼ばれ、player 座標/速度/死亡カウントが変化することを確認済み。
+- write trace により、`loadMvsLFilesThread` overlay52 `0x02152E64-0x02152E74` が `0x020CA850` に `0x26` を書くことを確認済み。
+- `fake-opponent --clear-actor-category-mask` ROM では、runtime force なしで `Player::onUpdate` が呼ばれ、player 座標/速度/死亡カウントが変化することを確認済み。
+- `direct-mvl-entry` は入力スクリプト併用で `Ready!` 画面まで到達した。`--force-ready-progress` だけ、または `--force-ready-progress --force-transfer-result 8` では Select a Game へ戻るため、VSStageIntro の待ち以外にも自然な session/scene 状態が必要。
+- 黒画面 session ルートは StageScene/process link が自然ルートと一致せず、現時点では補助診断扱い。
 
-## 現在の主な課題
+## 現在の課題
 
-1. 可視forcedルート上で、NSMBが2P入力として実際に参照しているpacket/input境界を確定する。
-2. `Net::getPacket` だけで足りるか、`getConsoleKeys` / `getPacketByte` / `getPacketTick` / `getPacketAction` も一貫して差し替える必要があるかを確認する。
-3. WAN adapterに渡す最小packet形式を決める。
-4. 接続開始時のRNG seed、stage、player ID、character、player maskを固定またはWAN handshakeで同期する。
-5. 可視forcedルートから、UI操作なしでMvsL開始できるROMパッチ入口へ整理する。
+1. `fake-opponent` の可視ステージ到達ルートで、2P actor が自然に update process に入らない原因を特定する。
+2. category mask `0x020CA850` が本来どの scene/session 条件で解除されるかを追う。暫定 ROM patch では `--clear-actor-category-mask` で初期値を 0 にする。
+3. `Net::getPacket` だけでは足りないため、`getConsoleKeys` / `getPacketByte` / `getPacketTick` / `getPacketAction` を含めた packet 境界を分類する。
+4. `direct-mvl-entry` を UI 操作なしの MvL 入口に育てる。単純な ready wait bypass では Select a Game へ戻るため、VSStageIntro/VSMenu の session 前提を追加で特定する。
+5. WAN adapter に渡す最小 packet 形式を決める。
 
 ## 次にやること
 
-1. 可視forcedルートを主軸に戻し、`Net::getPacket` / `getConsoleKeys` / `getPacketByte` / `getPacketTick` / `getPacketAction` の呼び出しをcalltraceで分類する。
-2. 1P入力を2P packetへミラーするだけでなく、tick/action/packet byteを旧LocalMP相当の値にそろえる診断パッチを作る。
-3. 2P actorが自然に動くかをスクリーンショットとCSVで確認する。
-4. 動いたら、ミラー入力をローカル入力ではなくWAN受信入力へ置き換える。
+1. category mask 解除後の状態で、packet mirror 入力が横移動/ジャンプ/死亡/スター取得にどう反映されるかを短い入力スクリプトで検証する。
+2. `getConsoleKeys` / `getPacketByte` / `getPacketTick` / `getPacketAction` を含む packet 境界を分類し、mirror ではなく WAN 受信 packet を返す形へ近づける。
+3. `0x020CA850` の自然な解除条件も継続して追い、`--clear-actor-category-mask` が恒久 patch として妥当か、それとも session 値を作るべきか判断する。
+4. direct ROM patch 側は、`VSStageIntro` から Select a Game に戻る分岐条件を追い、UI 操作なし起動に必要な session 値を最小化する。
 
 ## 検証ルール
 
 - `frame limit reached` だけでは成功扱いにしない。
-- 黒画面、prefetch/data abort、通信切断表示、片側だけ進行、HUD不一致、actor不一致は失敗扱い。
-- スクリーンショットとCSV/RAM/calltraceの両方で確認する。
-- ROM生成物、savestate、巨大ログはgitに含めない。
-- docsは古い追記を残し続けず、現在の方針・到達点・課題・次作業がすぐ分かる形に保つ。
+- 黒画面、通信切断表示、片側だけ進行、HUD 不一致、actor 不一致は失敗扱いにする。
+- screenshot と CSV/RAM/calltrace の両方で確認する。
+- ROM 生成物、savestate、巨大ログは git に含めない。
+- docs は古い追記を残し続けず、現在の方針、到達点、課題、次作業が分かる形に保つ。
