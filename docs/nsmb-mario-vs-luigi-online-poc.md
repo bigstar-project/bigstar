@@ -40,60 +40,44 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 ## 最新の重要な発見
 
 - 通常のWAN adapter routeでは StageScene が state 0 から state 1 へ進んだあと、`Stage::actorFreezeFlag=0x26` のまま停止する。
-- state 1 の実体は `0x020A14D8`。ここは先頭付近で `0x020C9280` を見ており、非ゼロだと入力ラッチ処理へ進まずスキップする。
-- 現在のWAN adapter routeでは `0x020C9280=0x18` になっているため、state 1 が閉じている。
-- 診断用に `0x020C9280=0`, `StageScene+0x5645=1`, `0x020C928C=0` を入れると state 2 (`0x020A0C68`) へ進む。
-- state 2 へ進んでも `Stage::actorFreezeFlag` は `0xA6` になり、まだplayer actorは動かない。
-- state 2 では `StageScene+0x5643=0x3C` が立っており、次はここから自然にカウントダウン/開始へ進む条件を追う必要がある。
-- `0x020C9280` write trace の結果:
-  - `0x0214CA68` が StageScene初期化付近で `0x08` を書く。
-  - `0x02126F04` が player系overlayから `0x18` を書く。
-  - これはstate 1を閉じている直接要因だが、単純に毎フレーム0へ戻すとstate machineを壊すため、どの条件で自然に解除されるべきかを追う必要がある。
-- `0x02126F04` は JP版 `PlayerBase::signalLocked()` 相当の `0x02126EDC` 内の書き込み点。US版 `NSMB-Code-Reference` の `PlayerBase::signalLocked()` / `signalUnlocked()` と対応する。
+- StageScene state:
+  - state 1: `0x020A14D8`
+  - state 2: `0x020A0C68`
+  - state 3: `0x020A096C`
+- state 1からstate 2へ進むには、`0x020C9280` のロック解除と `StageScene+0x5645` 相当の入力/開始ラッチが必要。
+- state 2の `StageScene+0x5649` は確認/closeラッチ。late A/START入力でhost/client双方が `0x020A0E64` または近い分岐を踏めるが、結果はgameplay開始ではなく `StageScene+0x561C=2` / `StageScene+0x5618=1` へ戻るだけ。
+- state 1からstate 3へ進む正規分岐は `0x020C92C0 & 3`。以前の `0x020C9280 & 3` という仮説は誤り。
+- `logs/nsmvl-stage-state3-92c0-write-trace-20260525` では、`0x020C92C0` は `0x0214CA70` で初期化時に0を書かれるだけで、現在のWAN routeでは自然にbit0/bit1が立たない。
+- 診断用に `MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE` を追加した。これは `0x020C92C0` へ値を書いて state1 -> state3 の分岐を踏ませるためのフック。
+- `logs/nsmvl-stage-state3-gate-force-20260525` では、`0x020C92C0=1` を一発入れるとhost/clientとも最終的に `StageScene+0x5618=3` へ入る。
+  - ただし `Stage::actorFreezeFlag=0x26` は残り、`player+0xB2D=1` のままPlayer更新は進まない。
+  - つまり「state3へ入れた」だけでは試合開始成功ではない。
+- `PlayerBase::signalLocked()` / `signalUnlocked()` について:
   - JP `PlayerBase::signalLocked()` 候補: `0x02126EDC`
   - JP `PlayerBase::signalUnlocked()` 候補: `0x02126E90`
-  - trace上の呼び出し元は `0x02117CDC` と `0x0211A650`。どちらもPlayer系overlayで、MvsL開始時の土管/遷移ロックに近い。
-- `PlayerBase::signalUnlocked()` 相当のビット解除だけを診断注入すると、`0x020C9280` は `0x18 -> 0x08` へ落ちるが、StageSceneはstate 1のまま止まる。
-- state 1の後段には別の入力/開始ラッチがあり、診断的に `StageScene+0x5645=1` を一発入れるとstate 2へ進む。
-- state 2は `StageScene+0x5649` を見ており、ここへ一発ラッチを入れるとstate 2からさらに進むが、現状は `state=1 / word561C=2` へ戻って安定しない。開始ラッチを外から足すだけでは不十分。
-- `StageScene+0x5645` と `+0x5649` を長く強制すると state 1/2 を往復する。これは診断フックが自然な入力ラッチを毎フレーム再投入しているためで、最終方式としては使わない。
-- `ForceStageActorFreezeFlag=0` は危険。host側で `ARM9: prefetch abort pc=FFFFF004` を起こすため不採用。
-- `logs/nsmvl-signal-calltrace-20260525` の結果、通常WAN routeでは `signalLocked()` は各Playerに2回ずつ呼ばれるが、`signalUnlocked()` (`0x02126E90`) は一度も呼ばれていない。
+  - 通常WAN routeでは `signalLocked()` は各Playerに2回ずつ呼ばれるが、`signalUnlocked()` は一度も呼ばれていない。
 - `Player` の土管出口遷移候補 `0x02117C80` は `player+0xB2D=0 -> 1` にし、`0x0208A96C[playerID]=2` を待つ構造。
-- `logs/nsmvl-transition-table-trace-20260525` では `0x0208A96C/970` は後で `1 -> 2` へ進むが、`player+0xB2D` は1のまま残る。
-- `logs/nsmvl-player-update-trace-20260525` では、Playerの遷移更新入口候補 `0x0211A56C` がWAN route中に呼ばれていない。つまり、遷移完了通知は立っているが、それを消費してPlayerを次段へ進める更新側が止まっている可能性が高い。
-- `logs/nsmvl-player-main-update-trace-20260525` では、Player main update候補 `0x020F90D4` と遷移更新呼び出し点 `0x020F91C8` が呼ばれていない。Player遷移関数以前にactor update側が止まっている。
-- `logs/nsmvl-freeze-flag-write-trace-20260525` では、`Stage::actorFreezeFlag` (`0x020C9250`) は `0x0214C9B0` で `0x26` に設定される。これはStageScene初期化付近の処理で、以後Player main updateを止める直接要因になっている。
-- CSVヘッダーずれ修正後の短いsmokeで、ヘッダー列数と行列数が一致することを確認済み。
-- `logs/nsmvl-post-transition-gate-pulse-20260525` では、`0x0208A96C/970=2` 後に `signalLocked` 相当を解除してからstate1/state2ラッチを入れると、state2へは入る。
-  - ただし `Stage::actorFreezeFlag=0xA6` のまま、`player+0xB2D=1` / `transitFunc=0x02117C80` は変わらない。
-  - state2継続ラッチ後は `Stage::actorFreezeFlag=0x26`, `StageScene state=1`, `StageScene+0x561C=2` に戻る。遷移完了後タイミングでも、外部ラッチだけでは自然な試合開始にはならない。
-- `logs/nsmvl-stage-scene-byte-write-trace-20260525` では、StageScene state2の主要フィールド更新元を確認した。
-  - state2初期化では `0x020A1864/1868/1874/188C/189C/18A4/18AC` が `+0x563C=0x1000`, `+0x561C=1`, `+0x5643=0x3C`, `+0x5649=0`, `+0x5618=2` などを書く。
-  - client側だけは frame 2925 に `0x020A0E64` が `StageScene+0x5649=1` を自然に書いた。host側は同じ期間に自然書き込みせず、frame 3020 の診断ラッチで進めた。
-  - `+0x5649=1` 後は `0x020A147C/1480` が `+0x563C=0`, `+0x561C=2` を書き、次フレームの `0x020A0D0C` で `+0x5618=1` へ戻る。
-  - このため、state2は単なる時間経過ではなく、`0x020A0E64` に入るための入力または通信状態を待っている可能性が高い。ただし、現状はそこを通っても自然なgameplay stateへは入らずstate1へ戻る。
-- `logs/nsmvl-state2-late-confirm-20260525` では、state2期間へ明示的にA/STARTを置いた入力スクリプトを追加し、host/client双方で `0x020A0E64` または近い `0x020A0E2C` 分岐を踏めることを確認した。
-  - ただし結果はgameplay開始ではなく、state2の確認を閉じて `StageScene+0x561C=2` / `StageScene+0x5618=1` へ戻るだけだった。
-  - state1 (`0x020A14D8`) には `0x020C9280 & 3` が立つとstate3 (`0x020A096C`) へ進む分岐がある。現状の診断ルートでは `0x020C9280` は `0x18` または `0x0` で、bit0/bit1が立たないためstate3へ入らない。
-  - 次の焦点は、`0x020C9280` のbit0/bit1が本来どの関数・packet・入力状態で立つかを特定すること。
+- `0x0208A96C/970` は後で `1 -> 2` へ進むが、Player側は `player+0xB2D=1` のまま残る。
+- Player main update候補 `0x020F90D4` / 遷移更新呼び出し点 `0x020F91C8` / 遷移更新入口候補 `0x0211A56C` は現在のWAN route中に呼ばれていない。Player遷移関数以前にactor update側が止まっている。
+- `Stage::actorFreezeFlag` (`0x020C9250`) は `0x0214C9B0` で `0x26` に設定される。直接0へ戻す診断は過去に `ARM9: prefetch abort pc=FFFFF004` を起こしており、最終方式としては使わない。
+- game-state CSVに `0x020C92B4/92C0/92C8/92D0` を追加した。state3ゲートと周辺状態をCSVで追える。
 
 ## 現在のブロッカー
 
-- StageScene state 1を自然に閉じる条件がまだ特定できていない。`signalLocked()`解除、state1入力ラッチ、state2継続ラッチ、Player遷移更新がそれぞれ別条件になっている。
+- `0x020C92C0 & 3` が本来どの関数、packet、session状態で立つのか未特定。
+- 診断的に state3へ入っても `Stage::actorFreezeFlag=0x26` が残り、Player main updateが走らない。
 - `0x0208A96C/970` の遷移完了値は立つが、Player側が `player+0xB2D=1` から進まず、`signalUnlocked()` が呼ばれない。
-- 診断的に state 2 へ進めても、state machineが自然な試合開始状態へ収束せず、まだplayer actorは操作可能になっていない。
+- StageScene state遷移、Player遷移、actor freeze解除の3つがまだ自然な順番で接続できていない。
 - デバッグビルドの実行が遅く、3300F前後のWAN route検証はタイムアウトしやすい。CSVの部分結果は使えるが、成功判定は厳密に見る必要がある。
 
 ## 次にやること
 
-1. Player遷移更新入口 `0x0211A56C` が呼ばれない理由を追う。特に `Stage::actorFreezeFlag=0x26`、`0x020C9280=0x18`、StageScene state 1の関係を見る。
-2. `0x020C9280` のbit0/bit1が本来どこで立つかをwrite traceする。state1からstate3 (`0x020A096C`) へ進む正規条件の候補。
-3. StageScene state 2 (`0x020A0C68`) の `+0x5649` は確認ラッチとして扱い、これ単体を試合開始条件とは見なさない。必要に応じて入力/packet状態との関係だけを追う。
-4. `player+0xB2D=1` かつ `0x0208A96C/970=2` の状態から、NSMBが本来どの経路で `signalUnlocked()` または通常操作状態へ戻すかを特定する。
-5. 診断フックではなく、WAN adapterのpacket/input API、またはROM/メモリpatchの正しい開始短絡点から同じ状態へ自然に到達させる。
-6. freeze解除後に、左右移動とジャンプがhost/client双方で反映されるか確認する。
-7. その後、RNG seed/消費順、ビッグスター、8コインアイテム、ランダムステージを確認する。
+1. `0x020C92C0` を自然に立てる書き込み元/呼び出し条件を特定する。
+2. state3 (`0x020A096C`) に入った後、`Stage::actorFreezeFlag=0x26` がどの条件で解除されるべきかを追う。
+3. `player+0xB2D=1` かつ `0x0208A96C/970=2` の状態から、NSMBが本来どの経路で `signalUnlocked()` または通常操作状態へ戻すかを特定する。
+4. 診断フックではなく、WAN adapterのpacket/input API、またはROM/メモリpatchの正しい開始短絡点から同じ状態へ自然に到達させる。
+5. freeze解除後に、左右移動とジャンプがhost/client双方で反映されるか確認する。
+6. その後、RNG seed/消費順、ビッグスター、8コインアイテム、ランダムステージを確認する。
 
 ## 検証ルール
 
@@ -142,6 +126,10 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - StageScene state2の主要書き込み元と、clientだけが `0x020A0E64` で `+0x5649` を自然に立てることを確認。
 - `logs/nsmvl-state2-late-confirm-20260525`
   - late A/START入力でhost/client双方がstate2確認分岐を踏めるが、state3へは進まずstate1/2を往復することを確認。
+- `logs/nsmvl-stage-state3-92c0-write-trace-20260525`
+  - state1からstate3へ進む正規分岐が `0x020C92C0 & 3` であること、現在のWAN routeでは `0x020C92C0` が自然に立たないことを確認。
+- `logs/nsmvl-stage-state3-gate-force-20260525`
+  - 診断的に `0x020C92C0=1` を入れるとstate3へ入るが、`Stage::actorFreezeFlag=0x26` が残りPlayer更新はまだ走らないことを確認。
 
 ## 参考
 

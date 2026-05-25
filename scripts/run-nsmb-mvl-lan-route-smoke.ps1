@@ -212,6 +212,12 @@ param(
     [int]$ForceStageSceneContinueGateStartFrame = 0,
     [int]$ForceStageSceneContinueGateEndFrame = 0,
     [string]$ForceStageSceneContinueGateValue = "1",
+    [switch]$ForceStageSceneState3Gate,
+    [switch]$ForceStageSceneState3GateHostOnly,
+    [switch]$ForceStageSceneState3GateClientOnly,
+    [int]$ForceStageSceneState3GateStartFrame = 0,
+    [int]$ForceStageSceneState3GateEndFrame = 0,
+    [string]$ForceStageSceneState3GateValue = "1",
     [switch]$GuardPlayerModelRenderPtrs,
     [int]$GuardPlayerModelRenderPtrsStartFrame = 0,
     [int]$GuardPlayerModelRenderPtrsEndFrame = 0,
@@ -1027,6 +1033,21 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_END_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_VALUE -ErrorAction SilentlyContinue
+    }
+    if ($ForceStageSceneState3Gate) {
+        $env:MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE = "1"
+        if ($ForceStageSceneState3GateHostOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_HOST_ONLY -ErrorAction SilentlyContinue }
+        if ($ForceStageSceneState3GateClientOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_CLIENT_ONLY -ErrorAction SilentlyContinue }
+        $env:MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_START_FRAME = "$ForceStageSceneState3GateStartFrame"
+        $env:MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_END_FRAME = "$ForceStageSceneState3GateEndFrame"
+        $env:MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_VALUE = "$ForceStageSceneState3GateValue"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_HOST_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_CLIENT_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_VALUE -ErrorAction SilentlyContinue
     }
     if ($PacketReplayFile) {
         $env:MELONDS_NSML_PACKET_REPLAY_FILE = (Resolve-Path $PacketReplayFile).Path

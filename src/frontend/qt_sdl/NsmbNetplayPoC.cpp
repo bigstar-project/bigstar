@@ -467,7 +467,11 @@ struct GameStateSample
     melonDS::u32 StageSceneGlobal9280 = 0;
     melonDS::u32 StageSceneGlobal9284 = 0;
     melonDS::u32 StageSceneGlobal928C = 0;
+    melonDS::u32 StageSceneGlobal92B4 = 0;
+    melonDS::u32 StageSceneGlobal92C0 = 0;
+    melonDS::u32 StageSceneGlobal92C8 = 0;
     melonDS::u32 StageSceneGlobal92CC = 0;
+    melonDS::u32 StageSceneGlobal92D0 = 0;
     melonDS::u32 VsConnectFound = 0;
     melonDS::u32 VsConnectBase = 0;
     melonDS::u32 VsConnectWord078 = 0;
@@ -786,6 +790,13 @@ struct State
     melonDS::u32 ForceStageSceneContinueGateEndFrame = 0;
     melonDS::u32 ForceStageSceneContinueGateValue = 1;
     bool ForceStageSceneContinueGateLogged[16] {};
+    bool ForceStageSceneState3GateEnabled = false;
+    bool ForceStageSceneState3GateHostOnly = false;
+    bool ForceStageSceneState3GateClientOnly = false;
+    melonDS::u32 ForceStageSceneState3GateStartFrame = 0;
+    melonDS::u32 ForceStageSceneState3GateEndFrame = 0;
+    melonDS::u32 ForceStageSceneState3GateValue = 1;
+    bool ForceStageSceneState3GateLogged[16] {};
     bool NetRandomPatchEnabled = false;
     bool NetRandomPatchAuto = false;
     melonDS::u32 NetRandomPatchFrame = 0;
@@ -4369,6 +4380,40 @@ void ForceStageSceneContinueGateIfNeeded(int instanceID, melonDS::u32 frame, mel
     }
 }
 
+void ForceStageSceneState3GateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForceStageSceneState3GateEnabled || !nds || !nds->MainRAM)
+        return;
+    if (frame < G.ForceStageSceneState3GateStartFrame)
+        return;
+    if (G.ForceStageSceneState3GateEndFrame != 0 && frame > G.ForceStageSceneState3GateEndFrame)
+        return;
+    if (G.ForceStageSceneState3GateHostOnly && G.NetRole != Role::Host)
+        return;
+    if (G.ForceStageSceneState3GateClientOnly && G.NetRole != Role::Client)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
+        return;
+
+    const melonDS::u32 oldValue = nds->ARM9Read32(0x020C92C0);
+    nds->ARM9Write32(0x020C92C0, G.ForceStageSceneState3GateValue);
+
+    if (!G.ForceStageSceneState3GateLogged[instanceID])
+    {
+        std::printf(
+            "NSMB Test: force stage scene state3 gate inst=%d frame=%u range=%u-%u old=0x%08X value=0x%08X\n",
+            instanceID,
+            frame,
+            G.ForceStageSceneState3GateStartFrame,
+            G.ForceStageSceneState3GateEndFrame,
+            oldValue,
+            G.ForceStageSceneState3GateValue);
+        G.ForceStageSceneState3GateLogged[instanceID] = true;
+    }
+}
+
 bool WriteObjectPositionByGUID(melonDS::NDS* nds, melonDS::u32 guid, melonDS::u32 posX, melonDS::u32 posY, melonDS::u32 posZ)
 {
     if (!nds || !nds->MainRAM || guid == 0)
@@ -4880,7 +4925,11 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
             sample.StageSceneGlobal9280 = nds->ARM9Read8(0x020C9280);
             sample.StageSceneGlobal9284 = nds->ARM9Read8(0x020C9284);
             sample.StageSceneGlobal928C = nds->ARM9Read8(0x020C928C);
+            sample.StageSceneGlobal92B4 = nds->ARM9Read32(0x020C92B4);
+            sample.StageSceneGlobal92C0 = nds->ARM9Read32(0x020C92C0);
+            sample.StageSceneGlobal92C8 = nds->ARM9Read32(0x020C92C8);
             sample.StageSceneGlobal92CC = nds->ARM9Read32(0x020C92CC);
+            sample.StageSceneGlobal92D0 = nds->ARM9Read32(0x020C92D0);
         }
     }
     sample.VsConnectBase = FindObjectBaseByID(nds, kVsConnectObjectID);
@@ -5528,7 +5577,11 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                      << ",0x" << sample.StageSceneGlobal9280
                      << ",0x" << sample.StageSceneGlobal9284
                      << ",0x" << sample.StageSceneGlobal928C
+                     << ",0x" << sample.StageSceneGlobal92B4
+                     << ",0x" << sample.StageSceneGlobal92C0
+                     << ",0x" << sample.StageSceneGlobal92C8
                      << ",0x" << sample.StageSceneGlobal92CC
+                     << ",0x" << sample.StageSceneGlobal92D0
                      << ",0x" << sample.MovingHazardFound
                      << ",0x" << sample.MovingHazardGUID
                      << ",0x" << sample.MovingHazardSettings
@@ -6310,6 +6363,16 @@ void InitFromEnvironment()
     G.ForceStageSceneContinueGateValue = static_cast<melonDS::u32>(
         std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_VALUE")
             ? std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_VALUE") : "1", nullptr, 0));
+    G.ForceStageSceneState3GateEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE");
+    G.ForceStageSceneState3GateHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_HOST_ONLY");
+    G.ForceStageSceneState3GateClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_CLIENT_ONLY");
+    G.ForceStageSceneState3GateStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_START_FRAME", 0)));
+    G.ForceStageSceneState3GateEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_END_FRAME", 0)));
+    G.ForceStageSceneState3GateValue = static_cast<melonDS::u32>(
+        std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_VALUE")
+            ? std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_VALUE") : "1", nullptr, 0));
 
     const char* netRandomValue = std::getenv("MELONDS_NSML_NET_RANDOM_VALUE");
     if (netRandomValue && netRandomValue[0])
@@ -6352,7 +6415,7 @@ void InitFromEnvironment()
         }
         else
         {
-            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,arm9PC,arm9LR,arm9SP,arm9CPSR,appFrameLength,appUpdateTask,appSleepPhase,appSleepControl,appSleeping,appSleepPhaseTimer,appSleepWakeUpTimer,appBootParam,appBootTarget,appBootScene,ggid,netCurrentLanguage,netLocalAid,netState14,netState1C,netState20,netState24,netExpectedConsoleCount,netMultiBootSession,netSessionState,netModuleState,netMaxSessionChildren,netMaxConsoleCount,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,stageActorFreezeFlag,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor0PlayerID,playerActor0TransitionStep,playerActor0SignalLock,playerActor0Flag192,playerActor0Flags728,playerActor0Flags72C,playerActor0Flags730,playerActor0TransitFunc,playerActor0TransitArg,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,playerActor1PlayerID,playerActor1TransitionStep,playerActor1SignalLock,playerActor1Flag192,playerActor1Flags728,playerActor1Flags72C,playerActor1Flags730,playerActor1TransitFunc,playerActor1TransitArg,playerTransitionStatus0,playerTransitionStatus1,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectByte0E2,vsConnectByte106,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord138,vsConnectWord13C,vsConnectWord140,vsConnectWord144,vsConnectWord148,vsConnectByte153,vsConnectByte154,vsConnectByte155,vsConnectByte156,vsConnectByte157,vsConnectByte158,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectSettings,courseSelectWord060,courseSelectWord064,courseSelectWord068,courseSelectWord06C,courseSelectWord070,courseSelectWord074,courseSelectWord078,courseSelectWord07C,courseSelectWord080,courseSelectWord084,courseSelectWord088,courseSelectWord08C,courseSelectWord090,stageCameraFound,stageCameraWord190,stageCameraWord194,stageCameraWord19C,stageCameraWord1A0,stageActorManagerFound,stageActorManagerBase,stageActorManagerStateType,stageControllerFound,stageControllerBase,stageControllerStateType,mvlObject267Found,mvlObject267Base,mvlObject267StateType,stageSceneFound,stageSceneBase,stageSceneSettings,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,stageSceneWord5618,stageSceneWord561C,stageSceneWord563C,stageSceneByte5643,stageSceneByte5644,stageSceneByte5645,stageSceneByte5646,stageSceneByte5648,stageSceneByte5649,stageSceneUpdateDispatchFunc,stageSceneUpdateDispatchArg,stageSceneRenderDispatchFunc,stageSceneRenderDispatchArg,stageSceneGlobal9280,stageSceneGlobal9284,stageSceneGlobal928C,stageSceneGlobal92CC,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY";
+            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,arm9PC,arm9LR,arm9SP,arm9CPSR,appFrameLength,appUpdateTask,appSleepPhase,appSleepControl,appSleeping,appSleepPhaseTimer,appSleepWakeUpTimer,appBootParam,appBootTarget,appBootScene,ggid,netCurrentLanguage,netLocalAid,netState14,netState1C,netState20,netState24,netExpectedConsoleCount,netMultiBootSession,netSessionState,netModuleState,netMaxSessionChildren,netMaxConsoleCount,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,stageActorFreezeFlag,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor0PlayerID,playerActor0TransitionStep,playerActor0SignalLock,playerActor0Flag192,playerActor0Flags728,playerActor0Flags72C,playerActor0Flags730,playerActor0TransitFunc,playerActor0TransitArg,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,playerActor1PlayerID,playerActor1TransitionStep,playerActor1SignalLock,playerActor1Flag192,playerActor1Flags728,playerActor1Flags72C,playerActor1Flags730,playerActor1TransitFunc,playerActor1TransitArg,playerTransitionStatus0,playerTransitionStatus1,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectByte0E2,vsConnectByte106,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord138,vsConnectWord13C,vsConnectWord140,vsConnectWord144,vsConnectWord148,vsConnectByte153,vsConnectByte154,vsConnectByte155,vsConnectByte156,vsConnectByte157,vsConnectByte158,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectSettings,courseSelectWord060,courseSelectWord064,courseSelectWord068,courseSelectWord06C,courseSelectWord070,courseSelectWord074,courseSelectWord078,courseSelectWord07C,courseSelectWord080,courseSelectWord084,courseSelectWord088,courseSelectWord08C,courseSelectWord090,stageCameraFound,stageCameraWord190,stageCameraWord194,stageCameraWord19C,stageCameraWord1A0,stageActorManagerFound,stageActorManagerBase,stageActorManagerStateType,stageControllerFound,stageControllerBase,stageControllerStateType,mvlObject267Found,mvlObject267Base,mvlObject267StateType,stageSceneFound,stageSceneBase,stageSceneSettings,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,stageSceneWord5618,stageSceneWord561C,stageSceneWord563C,stageSceneByte5643,stageSceneByte5644,stageSceneByte5645,stageSceneByte5646,stageSceneByte5648,stageSceneByte5649,stageSceneUpdateDispatchFunc,stageSceneUpdateDispatchArg,stageSceneRenderDispatchFunc,stageSceneRenderDispatchArg,stageSceneGlobal9280,stageSceneGlobal9284,stageSceneGlobal928C,stageSceneGlobal92B4,stageSceneGlobal92C0,stageSceneGlobal92C8,stageSceneGlobal92CC,stageSceneGlobal92D0,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY";
             if (G.GameStateTraceExtended)
                 G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash";
             G.GameStateTrace << '\n';
@@ -6605,6 +6668,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         ForceStageSceneStartGateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageSceneContinueGateIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForceStageSceneState3GateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageActorFreezeFlagIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
