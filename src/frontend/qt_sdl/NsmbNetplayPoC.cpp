@@ -4502,7 +4502,7 @@ void ForceMvlPlayerReadyIfNeeded(int instanceID, melonDS::u32 frame, melonDS::ND
     if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
         return;
 
-    const melonDS::u32 managerBase = nds->ARM9Read32(0x020C96F0);
+    const melonDS::u32 managerBase = nds->ARM9Read32(0x020CAD40);
     if (!IsARM9MainRAMAddress(managerBase))
     {
         if (!G.ForceMvlPlayerReadyLogged[instanceID])
@@ -5124,7 +5124,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.MvlGlobal9674 = nds->ARM9Read8(0x020CA6B0);
     sample.MvlGlobal9694_0 = nds->ARM9Read8(0x020CA6D0);
     sample.MvlGlobal9694_1 = nds->ARM9Read8(0x020CA6D1);
-    sample.MvlManagerBase = nds->ARM9Read32(0x020CA72C);
+    sample.MvlManagerBase = nds->ARM9Read32(0x020CAD40);
     if (IsARM9MainRAMAddress(sample.MvlManagerBase))
     {
         sample.MvlManagerWordA8CC = nds->ARM9Read32(sample.MvlManagerBase + 0xA8CC);

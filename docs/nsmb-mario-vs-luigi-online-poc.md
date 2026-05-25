@@ -56,7 +56,9 @@ NSMB Centralの情報では、MvsLはRNG seedを接続時に一度同期し、�
 - `--fake-net-state-on-nickname` で検索後だけNet状態を2台接続済みに見せると、`Connection interrupted` へ落ちる。calltraceでは `Net::Core::setConnectionState(3)` と `Net::Core::transferPacket(1)` の直後に切断系の流れへ入る。
 - `Net::Core::transferPacket` の戻り値を `0x08` 固定にしても、単独では `Connection interrupted` は解消しない。
 - `netState5C=0x10` の直接原因は `Net::update()` が per-console session flag 配列の bit0 未設定を検出することだった。fake peer生成時にその配列を `active | paired` 相当にすると、切断表示は消えて `Please wait` / `CourseSelect` まで進む。
-- session flag補完 + loadGame待ち解除 + CourseSelect決定で `Scene 3` / `stageGroup=9` には入るが、画面は黒く、`mvlManagerBase=0` のまま。Stage sceneとPlayer actorは作られているが、Mario vs Luigiの実試合管理オブジェクト初期化がまだ成立していない。
+- session flag補完 + loadGame待ち解除 + CourseSelect決定で `Scene 3` / `stageGroup=9` には入るが、画面は黒い。
+- `mvlManagerBase=0` はUS版への観測アドレス移植漏れだった。`Stage::stageLayout` は `0x020CAD40` で、修正後は `mvlManagerBase=0x21B75B8`、Player actor、Big Star actorが存在することを確認した。
+- 黒画面ルートでは `stageSceneStateType=0` / `stageSceneFlags=0x5010000`、旧HUD表示ルートでは `stageSceneStateType=1` / `stageSceneFlags=0x10000`。次の問題はStageSceneがactive状態へ進まないこと。
 - RAM上のBig Star検出はruntime class ID `0x22` / settings `1` で拾えている。NSMB CentralのObject ID 210とは表記レイヤーが違う可能性がある。
 
 ## 現在の主な問題
@@ -65,14 +67,14 @@ fake-opponent + 強制進行パッチは、複数の通信/session/ready待ち�
 
 特に次を確認する必要がある。
 
-- `mvlManagerBase` が生成されない直接原因
-- StageIntroまたはStageScene内で、MvL manager生成前に待っているready/session/packet条件
+- StageSceneがactive状態へ進まない直接原因
+- StageIntroまたはStageScene内で、描画開始前に待っているready/session/packet条件
 - `Net::getPacket` だけで足りるのか、それより下の接続/session境界もadapter化する必要があるのか
 - Big Star、8コインアイテム、ステージランダム選択などのRNG seed同期方法
 
 ## 次にやること
 
-1. `Scene 3` 到達後に `mvlManagerBase` が0のままになる原因を、StageIntro/StageScene/MvL manager生成処理のcalltraceとRAM watchで特定する。
+1. `Scene 3` 到達後に `stageSceneStateType` が0のままになる原因を、StageIntro/StageSceneのcalltraceとRAM watchで特定する。
 2. loadGame待ち解除NOPを減らし、session flag補完だけでどの状態まで自然に進むかを確認する。
 3. MvL manager生成に必要なready bit / marker / packet actionを特定し、ROMパッチで最小限だけ補う。
 4. 1インスタンスで「操作可能なMvsL試合」へ到達できたら、WAN由来の2P packetを流す最小PoCへ進む。
