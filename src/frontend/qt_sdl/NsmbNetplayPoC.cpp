@@ -115,6 +115,8 @@ constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
 constexpr melonDS::u16 kVsMovingHazardObjectID = 0x0053;
 constexpr melonDS::u32 kVsMovingHazardSettings = 0x00000000;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
+constexpr melonDS::u32 kStageSceneUpdateDispatchTableAddr = 0x020C933C;
+constexpr melonDS::u32 kStageSceneRenderDispatchTableAddr = 0x020C935C;
 constexpr melonDS::u16 kStageActorManagerObjectID = 0x012F;
 constexpr melonDS::u16 kStageControllerObjectID = 0x0130;
 constexpr melonDS::u16 kMvlObject267ID = 0x010B;
@@ -428,6 +430,23 @@ struct GameStateSample
     melonDS::u32 StageSceneFlags = 0;
     melonDS::u32 StageSceneWord154 = 0;
     melonDS::u32 StageSceneWord160 = 0;
+    melonDS::u32 StageSceneWord5618 = 0;
+    melonDS::u32 StageSceneWord561C = 0;
+    melonDS::u32 StageSceneWord563C = 0;
+    melonDS::u32 StageSceneByte5643 = 0;
+    melonDS::u32 StageSceneByte5644 = 0;
+    melonDS::u32 StageSceneByte5645 = 0;
+    melonDS::u32 StageSceneByte5646 = 0;
+    melonDS::u32 StageSceneByte5648 = 0;
+    melonDS::u32 StageSceneByte5649 = 0;
+    melonDS::u32 StageSceneUpdateDispatchFunc = 0;
+    melonDS::u32 StageSceneUpdateDispatchArg = 0;
+    melonDS::u32 StageSceneRenderDispatchFunc = 0;
+    melonDS::u32 StageSceneRenderDispatchArg = 0;
+    melonDS::u32 StageSceneGlobal9280 = 0;
+    melonDS::u32 StageSceneGlobal9284 = 0;
+    melonDS::u32 StageSceneGlobal928C = 0;
+    melonDS::u32 StageSceneGlobal92CC = 0;
     melonDS::u32 VsConnectFound = 0;
     melonDS::u32 VsConnectBase = 0;
     melonDS::u32 VsConnectWord078 = 0;
@@ -724,6 +743,15 @@ struct State
     melonDS::u32 ForceStageActorFreezeFlagEndFrame = 0;
     melonDS::u32 ForceStageActorFreezeFlagValue = 0;
     bool ForceStageActorFreezeFlagLogged[16] {};
+    bool ForceStageSceneStartGateEnabled = false;
+    bool ForceStageSceneStartGateHostOnly = false;
+    bool ForceStageSceneStartGateClientOnly = false;
+    bool ForceStageSceneFadeReady = false;
+    bool ForceStageSceneInputLatchEnabled = false;
+    melonDS::u32 ForceStageSceneStartGateStartFrame = 0;
+    melonDS::u32 ForceStageSceneStartGateEndFrame = 0;
+    melonDS::u32 ForceStageSceneStartGateValue = 1;
+    bool ForceStageSceneStartGateLogged[16] {};
     bool NetRandomPatchEnabled = false;
     bool NetRandomPatchAuto = false;
     melonDS::u32 NetRandomPatchFrame = 0;
@@ -4132,6 +4160,65 @@ void ForceStageActorFreezeFlagIfNeeded(int instanceID, melonDS::u32 frame, melon
     }
 }
 
+void ForceStageSceneStartGateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForceStageSceneStartGateEnabled || !nds || !nds->MainRAM)
+        return;
+    if (frame < G.ForceStageSceneStartGateStartFrame)
+        return;
+    if (G.ForceStageSceneStartGateEndFrame != 0 && frame > G.ForceStageSceneStartGateEndFrame)
+        return;
+    if (G.ForceStageSceneStartGateHostOnly && G.NetRole != Role::Host)
+        return;
+    if (G.ForceStageSceneStartGateClientOnly && G.NetRole != Role::Client)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
+        return;
+
+    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, 0x00B5FF00);
+    if (!stageScene.Found || !IsARM9MainRAMAddress(stageScene.Base))
+    {
+        if (!G.ForceStageSceneStartGateLogged[instanceID])
+        {
+            std::printf("NSMB Test: force stage scene start gate skipped inst=%d frame=%u no stage scene\n",
+                instanceID,
+                frame);
+            G.ForceStageSceneStartGateLogged[instanceID] = true;
+        }
+        return;
+    }
+
+    if (G.ForceStageSceneFadeReady)
+    {
+        nds->ARM9Write32(stageScene.Base + 0x561C, 1);
+        nds->ARM9Write32(stageScene.Base + 0x563C, 0x1000);
+    }
+    if (G.ForceStageSceneInputLatchEnabled)
+    {
+        nds->ARM9Write8(0x020C9280, 0);
+        nds->ARM9Write8(stageScene.Base + 0x5645, 1);
+        nds->ARM9Write8(0x020C928C, 0);
+    }
+    nds->ARM9Write8(stageScene.Base + 0x5649, static_cast<melonDS::u8>(G.ForceStageSceneStartGateValue & 0xFF));
+
+    if (!G.ForceStageSceneStartGateLogged[instanceID])
+    {
+        std::printf(
+            "NSMB Test: force stage scene start gate inst=%d frame=%u range=%u-%u base=%08X value=0x%02X fadeReady=%d inputLatch=%d\n",
+            instanceID,
+            frame,
+            G.ForceStageSceneStartGateStartFrame,
+            G.ForceStageSceneStartGateEndFrame,
+            stageScene.Base,
+            G.ForceStageSceneStartGateValue & 0xFF,
+            G.ForceStageSceneFadeReady ? 1 : 0,
+            G.ForceStageSceneInputLatchEnabled ? 1 : 0);
+        G.ForceStageSceneStartGateLogged[instanceID] = true;
+    }
+}
+
 bool WriteObjectPositionByGUID(melonDS::NDS* nds, melonDS::u32 guid, melonDS::u32 posX, melonDS::u32 posY, melonDS::u32 posZ)
 {
     if (!nds || !nds->MainRAM || guid == 0)
@@ -4576,6 +4663,27 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         {
             sample.StageSceneWord154 = nds->ARM9Read32(stageScene.Base + 0x154);
             sample.StageSceneWord160 = nds->ARM9Read32(stageScene.Base + 0x160);
+            sample.StageSceneWord5618 = nds->ARM9Read32(stageScene.Base + 0x5618);
+            sample.StageSceneWord561C = nds->ARM9Read32(stageScene.Base + 0x561C);
+            sample.StageSceneWord563C = nds->ARM9Read32(stageScene.Base + 0x563C);
+            sample.StageSceneByte5643 = nds->ARM9Read8(stageScene.Base + 0x5643);
+            sample.StageSceneByte5644 = nds->ARM9Read8(stageScene.Base + 0x5644);
+            sample.StageSceneByte5645 = nds->ARM9Read8(stageScene.Base + 0x5645);
+            sample.StageSceneByte5646 = nds->ARM9Read8(stageScene.Base + 0x5646);
+            sample.StageSceneByte5648 = nds->ARM9Read8(stageScene.Base + 0x5648);
+            sample.StageSceneByte5649 = nds->ARM9Read8(stageScene.Base + 0x5649);
+            if (sample.StageSceneWord5618 < 16)
+            {
+                const melonDS::u32 dispatchOffset = sample.StageSceneWord5618 * 8;
+                sample.StageSceneUpdateDispatchFunc = nds->ARM9Read32(kStageSceneUpdateDispatchTableAddr + dispatchOffset);
+                sample.StageSceneUpdateDispatchArg = nds->ARM9Read32(kStageSceneUpdateDispatchTableAddr + dispatchOffset + 4);
+                sample.StageSceneRenderDispatchFunc = nds->ARM9Read32(kStageSceneRenderDispatchTableAddr + dispatchOffset);
+                sample.StageSceneRenderDispatchArg = nds->ARM9Read32(kStageSceneRenderDispatchTableAddr + dispatchOffset + 4);
+            }
+            sample.StageSceneGlobal9280 = nds->ARM9Read8(0x020C9280);
+            sample.StageSceneGlobal9284 = nds->ARM9Read8(0x020C9284);
+            sample.StageSceneGlobal928C = nds->ARM9Read8(0x020C928C);
+            sample.StageSceneGlobal92CC = nds->ARM9Read32(0x020C92CC);
         }
     }
     sample.VsConnectBase = FindObjectBaseByID(nds, kVsConnectObjectID);
@@ -5187,6 +5295,23 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                      << ",0x" << sample.StageSceneFlags
                      << ",0x" << sample.StageSceneWord154
                      << ",0x" << sample.StageSceneWord160
+                     << ",0x" << sample.StageSceneWord5618
+                     << ",0x" << sample.StageSceneWord561C
+                     << ",0x" << sample.StageSceneWord563C
+                     << ",0x" << sample.StageSceneByte5643
+                     << ",0x" << sample.StageSceneByte5644
+                     << ",0x" << sample.StageSceneByte5645
+                     << ",0x" << sample.StageSceneByte5646
+                     << ",0x" << sample.StageSceneByte5648
+                     << ",0x" << sample.StageSceneByte5649
+                     << ",0x" << sample.StageSceneUpdateDispatchFunc
+                     << ",0x" << sample.StageSceneUpdateDispatchArg
+                     << ",0x" << sample.StageSceneRenderDispatchFunc
+                     << ",0x" << sample.StageSceneRenderDispatchArg
+                     << ",0x" << sample.StageSceneGlobal9280
+                     << ",0x" << sample.StageSceneGlobal9284
+                     << ",0x" << sample.StageSceneGlobal928C
+                     << ",0x" << sample.StageSceneGlobal92CC
                      << ",0x" << sample.MovingHazardFound
                      << ",0x" << sample.MovingHazardGUID
                      << ",0x" << sample.MovingHazardSettings
@@ -5939,6 +6064,18 @@ void InitFromEnvironment()
     G.ForceStageActorFreezeFlagValue = static_cast<melonDS::u32>(
         std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_VALUE")
             ? std::getenv("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_VALUE") : "0", nullptr, 0));
+    G.ForceStageSceneStartGateEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE");
+    G.ForceStageSceneStartGateHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_HOST_ONLY");
+    G.ForceStageSceneStartGateClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_CLIENT_ONLY");
+    G.ForceStageSceneFadeReady = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_FADE_READY");
+    G.ForceStageSceneInputLatchEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_INPUT_LATCH");
+    G.ForceStageSceneStartGateStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_START_FRAME", 0)));
+    G.ForceStageSceneStartGateEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_END_FRAME", 0)));
+    G.ForceStageSceneStartGateValue = static_cast<melonDS::u32>(
+        std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_VALUE")
+            ? std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_VALUE") : "1", nullptr, 0));
 
     const char* netRandomValue = std::getenv("MELONDS_NSML_NET_RANDOM_VALUE");
     if (netRandomValue && netRandomValue[0])
@@ -5981,7 +6118,7 @@ void InitFromEnvironment()
         }
         else
         {
-            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,arm9PC,arm9LR,arm9SP,arm9CPSR,appFrameLength,appUpdateTask,appSleepPhase,appSleepControl,appSleeping,appSleepPhaseTimer,appSleepWakeUpTimer,appBootParam,appBootTarget,appBootScene,ggid,netCurrentLanguage,netLocalAid,netState14,netState1C,netState20,netState24,netExpectedConsoleCount,netMultiBootSession,netSessionState,netModuleState,netMaxSessionChildren,netMaxConsoleCount,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,stageActorFreezeFlag,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectByte0E2,vsConnectByte106,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord138,vsConnectWord13C,vsConnectWord140,vsConnectWord144,vsConnectWord148,vsConnectByte153,vsConnectByte154,vsConnectByte155,vsConnectByte156,vsConnectByte157,vsConnectByte158,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectSettings,courseSelectWord060,courseSelectWord064,courseSelectWord068,courseSelectWord06C,courseSelectWord070,courseSelectWord074,courseSelectWord078,courseSelectWord07C,courseSelectWord080,courseSelectWord084,courseSelectWord088,courseSelectWord08C,courseSelectWord090,stageCameraFound,stageCameraWord190,stageCameraWord194,stageCameraWord19C,stageCameraWord1A0,stageActorManagerFound,stageActorManagerBase,stageActorManagerStateType,stageControllerFound,stageControllerBase,stageControllerStateType,mvlObject267Found,mvlObject267Base,mvlObject267StateType,stageSceneFound,stageSceneBase,stageSceneSettings,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY";
+            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,arm9PC,arm9LR,arm9SP,arm9CPSR,appFrameLength,appUpdateTask,appSleepPhase,appSleepControl,appSleeping,appSleepPhaseTimer,appSleepWakeUpTimer,appBootParam,appBootTarget,appBootScene,ggid,netCurrentLanguage,netLocalAid,netState14,netState1C,netState20,netState24,netExpectedConsoleCount,netMultiBootSession,netSessionState,netModuleState,netMaxSessionChildren,netMaxConsoleCount,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,stageActorFreezeFlag,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectByte0E2,vsConnectByte106,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord138,vsConnectWord13C,vsConnectWord140,vsConnectWord144,vsConnectWord148,vsConnectByte153,vsConnectByte154,vsConnectByte155,vsConnectByte156,vsConnectByte157,vsConnectByte158,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectSettings,courseSelectWord060,courseSelectWord064,courseSelectWord068,courseSelectWord06C,courseSelectWord070,courseSelectWord074,courseSelectWord078,courseSelectWord07C,courseSelectWord080,courseSelectWord084,courseSelectWord088,courseSelectWord08C,courseSelectWord090,stageCameraFound,stageCameraWord190,stageCameraWord194,stageCameraWord19C,stageCameraWord1A0,stageActorManagerFound,stageActorManagerBase,stageActorManagerStateType,stageControllerFound,stageControllerBase,stageControllerStateType,mvlObject267Found,mvlObject267Base,mvlObject267StateType,stageSceneFound,stageSceneBase,stageSceneSettings,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,stageSceneWord5618,stageSceneWord561C,stageSceneWord563C,stageSceneByte5643,stageSceneByte5644,stageSceneByte5645,stageSceneByte5646,stageSceneByte5648,stageSceneByte5649,stageSceneUpdateDispatchFunc,stageSceneUpdateDispatchArg,stageSceneRenderDispatchFunc,stageSceneRenderDispatchArg,stageSceneGlobal9280,stageSceneGlobal9284,stageSceneGlobal928C,stageSceneGlobal92CC,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY";
             if (G.GameStateTraceExtended)
                 G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash";
             G.GameStateTrace << '\n';
@@ -6230,6 +6367,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         ForceStageSceneRuntimeWordsIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageSceneActiveIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForceStageSceneStartGateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageActorFreezeFlagIfNeeded(instanceID, inputFrame, nds);
 

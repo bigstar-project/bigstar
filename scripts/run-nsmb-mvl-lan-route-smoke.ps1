@@ -193,6 +193,14 @@ param(
     [int]$ForceStageActorFreezeFlagStartFrame = 0,
     [int]$ForceStageActorFreezeFlagEndFrame = 0,
     [string]$ForceStageActorFreezeFlagValue = "0",
+    [switch]$ForceStageSceneStartGate,
+    [switch]$ForceStageSceneStartGateHostOnly,
+    [switch]$ForceStageSceneStartGateClientOnly,
+    [switch]$ForceStageSceneFadeReady,
+    [switch]$ForceStageSceneInputLatch,
+    [int]$ForceStageSceneStartGateStartFrame = 0,
+    [int]$ForceStageSceneStartGateEndFrame = 0,
+    [string]$ForceStageSceneStartGateValue = "1",
     [switch]$GuardPlayerModelRenderPtrs,
     [int]$GuardPlayerModelRenderPtrsStartFrame = 0,
     [int]$GuardPlayerModelRenderPtrsEndFrame = 0,
@@ -296,6 +304,7 @@ param(
     [string]$WriteTraceAddrs = "",
     [int]$WriteTraceStartFrame = 0,
     [int]$WriteTraceEndFrame = 0,
+    [switch]$BadJumpTrace,
     [string]$HostMemPatchFile = "",
     [string]$ClientMemPatchFile = "",
     [string]$MemPatchFrame = "",
@@ -800,6 +809,11 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_WRITE_TRACE_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WRITE_TRACE_END_FRAME -ErrorAction SilentlyContinue
     }
+    if ($BadJumpTrace) {
+        $env:MELONDS_NSML_BAD_JUMP_TRACE = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_BAD_JUMP_TRACE -ErrorAction SilentlyContinue
+    }
     if ($GameStateTrace) {
         $env:MELONDS_NSML_GAME_STATE_TRACE = $GameStateTracePath
         $env:MELONDS_NSML_GAME_STATE_TRACE_INTERVAL = "$GameStateTraceInterval"
@@ -955,6 +969,25 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_END_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_VALUE -ErrorAction SilentlyContinue
+    }
+    if ($ForceStageSceneStartGate) {
+        $env:MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE = "1"
+        if ($ForceStageSceneStartGateHostOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_HOST_ONLY -ErrorAction SilentlyContinue }
+        if ($ForceStageSceneStartGateClientOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_CLIENT_ONLY -ErrorAction SilentlyContinue }
+        if ($ForceStageSceneFadeReady) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_FADE_READY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_FADE_READY -ErrorAction SilentlyContinue }
+        if ($ForceStageSceneInputLatch) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_INPUT_LATCH = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_INPUT_LATCH -ErrorAction SilentlyContinue }
+        $env:MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_START_FRAME = "$ForceStageSceneStartGateStartFrame"
+        $env:MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_END_FRAME = "$ForceStageSceneStartGateEndFrame"
+        $env:MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_VALUE = "$ForceStageSceneStartGateValue"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_HOST_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_CLIENT_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_FADE_READY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_INPUT_LATCH -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_VALUE -ErrorAction SilentlyContinue
     }
     if ($PacketReplayFile) {
         $env:MELONDS_NSML_PACKET_REPLAY_FILE = (Resolve-Path $PacketReplayFile).Path

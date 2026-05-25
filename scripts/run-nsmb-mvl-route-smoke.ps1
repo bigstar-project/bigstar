@@ -26,7 +26,12 @@ param(
     [string]$CallTraceAddrs = "",
     [int]$CallTraceStartFrame = 0,
     [int]$CallTraceEndFrame = -1,
-    [int]$CallTraceDumpLen = 32
+    [int]$CallTraceDumpLen = 32,
+    [switch]$WriteTrace,
+    [string]$WriteTraceAddrs = "",
+    [int]$WriteTraceStartFrame = 0,
+    [int]$WriteTraceEndFrame = 0,
+    [switch]$BadJumpTrace
 )
 
 $ErrorActionPreference = "Stop"
@@ -37,9 +42,10 @@ $stdout = Join-Path $LogDir "nsmb-mvl-route.stdout.txt"
 $hashLog = Join-Path $LogDir "nsmb-mvl-route.hash.csv"
 $gameStateTracePath = Join-Path $LogDir "nsmb-mvl-route.game-state.csv"
 $callTracePath = Join-Path $LogDir "nsmb-mvl-route.call-trace.csv"
+$writeTracePath = Join-Path $LogDir "nsmb-mvl-route.write-trace.csv"
 $screenDir = Join-Path $LogDir "screens-mvl-route"
 $ramDumpDir = Join-Path $LogDir "ram-mvl-route"
-Remove-Item -Force $stdout, $hashLog, $gameStateTracePath, $callTracePath -ErrorAction SilentlyContinue
+Remove-Item -Force $stdout, $hashLog, $gameStateTracePath, $callTracePath, $writeTracePath -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force $screenDir -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force $ramDumpDir -ErrorAction SilentlyContinue
 
@@ -78,6 +84,12 @@ foreach ($name in @(
     "MELONDS_NSML_CALL_TRACE_START_FRAME",
     "MELONDS_NSML_CALL_TRACE_END_FRAME",
     "MELONDS_NSML_CALL_TRACE_DUMP_LEN",
+    "MELONDS_NSML_WRITE_TRACE",
+    "MELONDS_NSML_WRITE_TRACE_LOG",
+    "MELONDS_NSML_WRITE_TRACE_ADDRS",
+    "MELONDS_NSML_WRITE_TRACE_START_FRAME",
+    "MELONDS_NSML_WRITE_TRACE_END_FRAME",
+    "MELONDS_NSML_BAD_JUMP_TRACE",
     "MELONDS_NSML_DIRECT_MVL_BOOT",
     "MELONDS_NSML_DIRECT_MVL_BOOT_FRAME",
     "MELONDS_NSML_DIRECT_MVL_BOOT_SCENE",
@@ -199,6 +211,36 @@ if ($CallTrace) {
     Remove-Item Env:\MELONDS_NSML_CALL_TRACE_START_FRAME -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_CALL_TRACE_END_FRAME -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_CALL_TRACE_DUMP_LEN -ErrorAction SilentlyContinue
+}
+if ($WriteTrace) {
+    $env:MELONDS_NSML_WRITE_TRACE = "1"
+    $env:MELONDS_NSML_WRITE_TRACE_LOG = (Join-Path (Resolve-Path $LogDir).Path "nsmb-mvl-route.write-trace.csv")
+    if ($WriteTraceAddrs) {
+        $env:MELONDS_NSML_WRITE_TRACE_ADDRS = $WriteTraceAddrs
+    } else {
+        Remove-Item Env:\MELONDS_NSML_WRITE_TRACE_ADDRS -ErrorAction SilentlyContinue
+    }
+    if ($WriteTraceStartFrame -gt 0) {
+        $env:MELONDS_NSML_WRITE_TRACE_START_FRAME = "$WriteTraceStartFrame"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_WRITE_TRACE_START_FRAME -ErrorAction SilentlyContinue
+    }
+    if ($WriteTraceEndFrame -gt 0) {
+        $env:MELONDS_NSML_WRITE_TRACE_END_FRAME = "$WriteTraceEndFrame"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_WRITE_TRACE_END_FRAME -ErrorAction SilentlyContinue
+    }
+} else {
+    Remove-Item Env:\MELONDS_NSML_WRITE_TRACE -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_WRITE_TRACE_LOG -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_WRITE_TRACE_ADDRS -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_WRITE_TRACE_START_FRAME -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_WRITE_TRACE_END_FRAME -ErrorAction SilentlyContinue
+}
+if ($BadJumpTrace) {
+    $env:MELONDS_NSML_BAD_JUMP_TRACE = "1"
+} else {
+    Remove-Item Env:\MELONDS_NSML_BAD_JUMP_TRACE -ErrorAction SilentlyContinue
 }
 
 & (Resolve-Path $Exe).Path (Resolve-Path $Rom).Path *> $stdout

@@ -3216,7 +3216,7 @@ static void TraceNSMLWrite(ARM* cpu, u32 addr, u32 value, u32 size)
                 if (logPath[0])
                     cfg.LogFile = fopen(logPath, "w");
                 if (cfg.LogFile)
-                    fprintf(cfg.LogFile, "nds,frame,pc,lr,addr,size,value,old\n");
+                    fprintf(cfg.LogFile, "nds,frame,pc,lr,sp,cpsr,r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12,addr,size,value,old,pc_dump,sp_dump\n");
             }
             cfg.Enabled = cfg.Enabled && cfg.LogFile && !cfg.Addrs.empty();
             cfg.Checked = true;
@@ -3252,15 +3252,35 @@ static void TraceNSMLWrite(ARM* cpu, u32 addr, u32 value, u32 size)
 
     const u32 pc = cpu->R[15] - ((cpu->CPSR & 0x20) ? 2 : 4);
     std::lock_guard<std::mutex> outputLock(NSMLTraceOutputMutex);
-    fprintf(cfg.LogFile, "%p,%u,%08X,%08X,%08X,%u,%08X,%08X\n",
+    fprintf(cfg.LogFile,
+        "%p,%u,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%u,%08X,%08X,",
         static_cast<void*>(&cpu->NDS),
         cpu->NDS.NumFrames,
         pc,
         cpu->R[14],
+        cpu->R[13],
+        cpu->CPSR,
+        cpu->R[0],
+        cpu->R[1],
+        cpu->R[2],
+        cpu->R[3],
+        cpu->R[4],
+        cpu->R[5],
+        cpu->R[6],
+        cpu->R[7],
+        cpu->R[8],
+        cpu->R[9],
+        cpu->R[10],
+        cpu->R[11],
+        cpu->R[12],
         addr,
         size,
         value,
         oldValue);
+    WriteNSMLHexDump(cfg.LogFile, cpu, pc >= 32 ? pc - 32 : pc, 96);
+    fputc(',', cfg.LogFile);
+    WriteNSMLHexDump(cfg.LogFile, cpu, cpu->R[13], 64);
+    fputc('\n', cfg.LogFile);
     fflush(cfg.LogFile);
 }
 
@@ -3770,6 +3790,10 @@ void ARM::SetupCodeMem(u32 addr)
 
 void ARMv5::JumpTo(u32 addr, bool restorecpsr)
 {
+    const u32 sourcePC = R[15];
+    const u32 sourceLR = R[14];
+    const u32 sourceSP = R[13];
+    const u32 sourceCPSR = CPSR;
     if (restorecpsr)
     {
         RestoreCPSR();
@@ -3784,6 +3808,42 @@ void ARMv5::JumpTo(u32 addr, bool restorecpsr)
 
     u32 oldregion = R[15] >> 24;
     u32 newregion = addr >> 24;
+    const u32 targetBase = addr & ((addr & 0x1) ? ~0x1u : ~0x3u);
+
+    if (Num == 0 && NSMLEnvFlag("MELONDS_NSML_BAD_JUMP_TRACE")
+        && !(PU_Map[targetBase >> 12] & 0x04))
+    {
+        Log(LogLevel::Warn,
+            "NSMB BadJump: frame=%u from=%08X target=%08X lr=%08X sp=%08X cpsr=%08X instr=%08X "
+            "r0=%08X r1=%08X r2=%08X r3=%08X r4=%08X r5=%08X r6=%08X r7=%08X r8=%08X r9=%08X r10=%08X r11=%08X r12=%08X restore=%d\n",
+            NDS.NumFrames,
+            sourcePC,
+            addr,
+            sourceLR,
+            sourceSP,
+            sourceCPSR,
+            CurInstr,
+            R[0],
+            R[1],
+            R[2],
+            R[3],
+            R[4],
+            R[5],
+            R[6],
+            R[7],
+            R[8],
+            R[9],
+            R[10],
+            R[11],
+            R[12],
+            restorecpsr ? 1 : 0);
+        fputs("NSMB BadJump from_dump=", stdout);
+        WriteNSMLHexDump(stdout, this, sourcePC >= 512 ? sourcePC - 512 : sourcePC, 768);
+        fputs(" stack_dump=", stdout);
+        WriteNSMLHexDump(stdout, this, sourceSP >= 128 ? sourceSP - 128 : sourceSP, 256);
+        fputc('\n', stdout);
+        fflush(stdout);
+    }
 
     RegionCodeCycles = MemTimings[addr >> 12][0];
 
