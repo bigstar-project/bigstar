@@ -68,6 +68,15 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `logs/nsmvl-post-transition-gate-pulse-20260525` では、`0x0208A96C/970=2` 後に `signalLocked` 相当を解除してからstate1/state2ラッチを入れると、state2へは入る。
   - ただし `Stage::actorFreezeFlag=0xA6` のまま、`player+0xB2D=1` / `transitFunc=0x02117C80` は変わらない。
   - state2継続ラッチ後は `Stage::actorFreezeFlag=0x26`, `StageScene state=1`, `StageScene+0x561C=2` に戻る。遷移完了後タイミングでも、外部ラッチだけでは自然な試合開始にはならない。
+- `logs/nsmvl-stage-scene-byte-write-trace-20260525` では、StageScene state2の主要フィールド更新元を確認した。
+  - state2初期化では `0x020A1864/1868/1874/188C/189C/18A4/18AC` が `+0x563C=0x1000`, `+0x561C=1`, `+0x5643=0x3C`, `+0x5649=0`, `+0x5618=2` などを書く。
+  - client側だけは frame 2925 に `0x020A0E64` が `StageScene+0x5649=1` を自然に書いた。host側は同じ期間に自然書き込みせず、frame 3020 の診断ラッチで進めた。
+  - `+0x5649=1` 後は `0x020A147C/1480` が `+0x563C=0`, `+0x561C=2` を書き、次フレームの `0x020A0D0C` で `+0x5618=1` へ戻る。
+  - このため、state2は単なる時間経過ではなく、`0x020A0E64` に入るための入力または通信状態を待っている可能性が高い。ただし、現状はそこを通っても自然なgameplay stateへは入らずstate1へ戻る。
+- `logs/nsmvl-state2-late-confirm-20260525` では、state2期間へ明示的にA/STARTを置いた入力スクリプトを追加し、host/client双方で `0x020A0E64` または近い `0x020A0E2C` 分岐を踏めることを確認した。
+  - ただし結果はgameplay開始ではなく、state2の確認を閉じて `StageScene+0x561C=2` / `StageScene+0x5618=1` へ戻るだけだった。
+  - state1 (`0x020A14D8`) には `0x020C9280 & 3` が立つとstate3 (`0x020A096C`) へ進む分岐がある。現状の診断ルートでは `0x020C9280` は `0x18` または `0x0` で、bit0/bit1が立たないためstate3へ入らない。
+  - 次の焦点は、`0x020C9280` のbit0/bit1が本来どの関数・packet・入力状態で立つかを特定すること。
 
 ## 現在のブロッカー
 
@@ -79,11 +88,12 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 ## 次にやること
 
 1. Player遷移更新入口 `0x0211A56C` が呼ばれない理由を追う。特に `Stage::actorFreezeFlag=0x26`、`0x020C9280=0x18`、StageScene state 1の関係を見る。
-2. StageScene state 2 (`0x020A0C68`) が `StageScene+0x5649` を自然に立てる条件、または `StageScene+0x561C=2` からstate1へ戻る理由を追う。
-3. `player+0xB2D=1` かつ `0x0208A96C/970=2` の状態から、NSMBが本来どの経路で `signalUnlocked()` または通常操作状態へ戻すかを特定する。
-4. 診断フックではなく、WAN adapterのpacket/input API、またはROM/メモリpatchの正しい開始短絡点から同じ状態へ自然に到達させる。
-5. freeze解除後に、左右移動とジャンプがhost/client双方で反映されるか確認する。
-6. その後、RNG seed/消費順、ビッグスター、8コインアイテム、ランダムステージを確認する。
+2. `0x020C9280` のbit0/bit1が本来どこで立つかをwrite traceする。state1からstate3 (`0x020A096C`) へ進む正規条件の候補。
+3. StageScene state 2 (`0x020A0C68`) の `+0x5649` は確認ラッチとして扱い、これ単体を試合開始条件とは見なさない。必要に応じて入力/packet状態との関係だけを追う。
+4. `player+0xB2D=1` かつ `0x0208A96C/970=2` の状態から、NSMBが本来どの経路で `signalUnlocked()` または通常操作状態へ戻すかを特定する。
+5. 診断フックではなく、WAN adapterのpacket/input API、またはROM/メモリpatchの正しい開始短絡点から同じ状態へ自然に到達させる。
+6. freeze解除後に、左右移動とジャンプがhost/client双方で反映されるか確認する。
+7. その後、RNG seed/消費順、ビッグスター、8コインアイテム、ランダムステージを確認する。
 
 ## 検証ルール
 
@@ -128,6 +138,10 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - game-state CSVのヘッダー/行の列数一致を確認。
 - `logs/nsmvl-post-transition-gate-pulse-20260525`
   - Player遷移完了後に強制ラッチしても、state2から自然な試合開始へ収束しないことを確認。
+- `logs/nsmvl-stage-scene-byte-write-trace-20260525`
+  - StageScene state2の主要書き込み元と、clientだけが `0x020A0E64` で `+0x5649` を自然に立てることを確認。
+- `logs/nsmvl-state2-late-confirm-20260525`
+  - late A/START入力でhost/client双方がstate2確認分岐を踏めるが、state3へは進まずstate1/2を往復することを確認。
 
 ## 参考
 
