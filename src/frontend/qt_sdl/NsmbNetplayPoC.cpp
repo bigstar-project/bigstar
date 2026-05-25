@@ -808,6 +808,11 @@ struct State
     melonDS::u32 ForceStageSceneActiveStartFrame = 0;
     melonDS::u32 ForceStageSceneActiveEndFrame = 0;
     bool ForceStageSceneActiveLogged[16] {};
+    bool CallStageScenePostCreateEnabled = false;
+    bool CallStageScenePostCreateHostOnly = false;
+    bool CallStageScenePostCreateClientOnly = false;
+    melonDS::u32 CallStageScenePostCreateFrame = 0;
+    bool CallStageScenePostCreateApplied[16] {};
     bool ForceStageActorFreezeFlagEnabled = false;
     bool ForceStageActorFreezeFlagHostOnly = false;
     bool ForceStageActorFreezeFlagClientOnly = false;
@@ -4324,6 +4329,100 @@ void ForceStageSceneActiveIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
     }
 }
 
+bool CallStageScenePostCreateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.CallStageScenePostCreateEnabled || !nds || instanceID < 0 || instanceID >= 16)
+        return false;
+    if (G.CallStageScenePostCreateHostOnly && G.NetRole != Role::Host)
+        return false;
+    if (G.CallStageScenePostCreateClientOnly && G.NetRole != Role::Client)
+        return false;
+    if (G.CallStageScenePostCreateApplied[instanceID] || frame < G.CallStageScenePostCreateFrame)
+        return false;
+
+    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(
+        nds,
+        kStageSceneObjectID,
+        kMvlStageSceneSettings);
+    if (!stageScene.Found || !IsARM9MainRAMAddress(stageScene.Base))
+    {
+        std::printf(
+            "NSMB StageScenePostCreate: inst=%d frame=%u skipped: stage scene not found\n",
+            instanceID,
+            frame);
+        std::fflush(stdout);
+        return false;
+    }
+
+    const melonDS::u32 processLink = stageScene.Base + 0x28;
+    const melonDS::u32 prevLinkBase = nds->ARM9Read32(stageScene.Base + 0x2C);
+    const melonDS::u32 objectID = nds->ARM9Read16(stageScene.Base + 0x0C);
+    if (!IsARM9MainRAMAddress(prevLinkBase))
+    {
+        G.CallStageScenePostCreateApplied[instanceID] = true;
+        std::printf(
+            "NSMB StageScenePostCreate: inst=%d frame=%u skipped: stage scene is not linked for process callback base=%08X link=%08X prev=%08X id=%u\n",
+            instanceID,
+            frame,
+            stageScene.Base,
+            processLink,
+            prevLinkBase,
+            objectID);
+        std::fflush(stdout);
+        return false;
+    }
+
+    const melonDS::u32 oldPC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
+    const melonDS::u32 returnPC = oldPC | ((nds->ARM9.CPSR & 0x20) ? 1u : 0u);
+
+    std::vector<melonDS::u32> code;
+    code.reserve(24);
+    EmitARM(code, 0xE92D5FFFu); // push {r0-r12, lr}
+    EmitARM(code, 0xE10F5000u); // mrs r5, cpsr
+    EmitARM(code, 0xE92D0020u); // push {r5}
+    // 0x0204D204 is the Base process-list postCreate callback, not an
+    // object method. Match the register shape observed on the visible US
+    // route for StageScene: r0=Success, r1=object link, r2=previous link,
+    // r3=object ID.
+    EmitLoadImm(code, 0, 1);
+    EmitLoadImm(code, 1, processLink);
+    EmitLoadImm(code, 2, prevLinkBase);
+    EmitLoadImm(code, 3, objectID);
+    EmitARM(code, 0xE59FC008u); // ldr ip, [pc, #8]
+    EmitARM(code, 0xE28FE008u); // add lr, pc, #8
+    EmitARM(code, 0xE12FFF1Cu); // bx ip
+    EmitARM(code, 0xE1A00000u); // nop
+    EmitARM(code, 0x0204D204u); // Base process-list postCreate callback in US/A2DE
+    EmitARM(code, 0xE8BD0020u); // pop {r5}
+    EmitARM(code, 0xE128F005u); // msr apsr_nzcvq, r5
+    EmitARM(code, 0xE8BD5FFFu); // pop {r0-r12, lr}
+    EmitARM(code, 0xE59FC004u); // ldr ip, [pc, #4]
+    EmitARM(code, 0xE12FFF1Cu); // bx ip
+    EmitARM(code, 0xE1A00000u); // nop
+    EmitARM(code, returnPC);
+
+    for (size_t i = 0; i < code.size(); i++)
+    {
+        if (!WriteARM9U32(nds, kDirectBootTrampolineAddr + static_cast<melonDS::u32>(i * sizeof(melonDS::u32)), code[i]))
+            return false;
+    }
+
+    G.CallStageScenePostCreateApplied[instanceID] = true;
+    std::printf(
+        "NSMB StageScenePostCreate: inst=%d frame=%u base=%08X link=%08X prev=%08X id=%u trampoline=%08X return=%08X\n",
+        instanceID,
+        frame,
+        stageScene.Base,
+        processLink,
+        prevLinkBase,
+        objectID,
+        kDirectBootTrampolineAddr,
+        returnPC);
+    std::fflush(stdout);
+    nds->ARM9.JumpTo(kDirectBootTrampolineAddr);
+    return true;
+}
+
 void ForceStageActorFreezeFlagIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.ForceStageActorFreezeFlagEnabled || !nds || !nds->MainRAM)
@@ -6635,6 +6734,11 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_START_FRAME", 0)));
     G.ForceStageSceneActiveEndFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_END_FRAME", 0)));
+    G.CallStageScenePostCreateEnabled = EnvFlag("MELONDS_NSML_CALL_STAGE_SCENE_POST_CREATE");
+    G.CallStageScenePostCreateHostOnly = EnvFlag("MELONDS_NSML_CALL_STAGE_SCENE_POST_CREATE_HOST_ONLY");
+    G.CallStageScenePostCreateClientOnly = EnvFlag("MELONDS_NSML_CALL_STAGE_SCENE_POST_CREATE_CLIENT_ONLY");
+    G.CallStageScenePostCreateFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_CALL_STAGE_SCENE_POST_CREATE_FRAME", 0)));
     G.ForceStageActorFreezeFlagEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG");
     G.ForceStageActorFreezeFlagHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_HOST_ONLY");
     G.ForceStageActorFreezeFlagClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_CLIENT_ONLY");
@@ -6999,6 +7103,11 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         ForceStageSceneRuntimeWordsIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageSceneActiveIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+    {
+        if (CallStageScenePostCreateIfNeeded(instanceID, inputFrame, nds))
+            return polledInput;
+    }
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageSceneStartGateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
