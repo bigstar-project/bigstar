@@ -54,6 +54,28 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 
 これは成功ではなく、次の検証入口。まだ実際の入力同期対戦、長時間安定、RNG/アイテム一致は未確認。
 
+## 入力検証の最新結果
+
+試合画面到達後の入力確認用に `tests/nsmb_mario_vs_luigi_wan_gameplay_probe.inputs` を追加した。
+
+ログ:
+
+- `logs/nsmvl-gameplay-probe-loadlevel0-local1-20260525`
+- `logs/nsmvl-gameplay-probe-unfreeze-playercount-20260525`
+
+結果:
+
+- freeze解除なしでは、frame 5160以降に入力packetは変化するが、`StageActorFreezeFlag=0x26` が残るためplayer actorは動かない。
+- `ForceStageActorFreezeFlag=0` と `ForcePlayerCount=2` をframe 5000以降に入れると、host側ではMarioが実際に動き、スクショ上も移動を確認できた。
+- ただしこの強制解除ルートはhost側で `ARM9: prefetch abort (frame=5191 pc=FFFFF004)` を起こしたため失敗。
+- client側は同じ検証でframe 5100以降のスクショ/CSVまで安定到達しておらず、host/client同期検証にはまだ使えない。
+
+結論:
+
+- 入力がplayer actorへ届く経路自体は一部確認できた。
+- ただし、`StageActorFreezeFlag` や `playerCount` を外から雑に解除するのは不安定。
+- 次はfreezeを直接0にするのではなく、StageStart/StageSceneの自然な開始条件、countdown、packet-ready、player/session stateのどれがfreeze解除を担当しているかを追う。
+
 ## 現在のブロッカー
 
 - StageScene readyを自然なpacket sequencerだけで閉じられていない。
@@ -67,9 +89,10 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 
 1. `Game::loadLevel playerID=0` と `localPlayerID=role` の分離を前提に、frame 5100以降で入力packet同期を再開する。
 2. host/clientでplayer actorの操作主体、HUD、packet送受信player番号が破綻していないか確認する。
-3. `StageSceneReadyClose` なしで同じ状態へ行くため、`020110E4` / `02011360` / `02011428` 周辺のpacket buffer/bitmap更新点を追う。
-4. MvL画面到達後、短い入力スクリプトで左右移動やジャンプが双方に反映されるかを確認する。
-5. その後、RNG seed/消費順、スター位置、8コインアイテム、ランダムステージを検証する。
+3. `StageActorFreezeFlag=0x26` が自然に解除される条件を追う。
+4. `StageSceneReadyClose` なしで同じ状態へ行くため、`020110E4` / `02011360` / `02011428` 周辺のpacket buffer/bitmap更新点を追う。
+5. MvL画面到達後、短い入力スクリプトで左右移動やジャンプが双方に反映されるかを確認する。
+6. その後、RNG seed/消費順、スター位置、8コインアイテム、ランダムステージを検証する。
 
 ## 失敗済み・非採用のルート
 
