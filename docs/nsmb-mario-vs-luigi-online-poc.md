@@ -65,6 +65,9 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 - `logs/nsmvl-player-main-update-trace-20260525` では、Player main update候補 `0x020F90D4` と遷移更新呼び出し点 `0x020F91C8` が呼ばれていない。Player遷移関数以前にactor update側が止まっている。
 - `logs/nsmvl-freeze-flag-write-trace-20260525` では、`Stage::actorFreezeFlag` (`0x020C9250`) は `0x0214C9B0` で `0x26` に設定される。これはStageScene初期化付近の処理で、以後Player main updateを止める直接要因になっている。
 - CSVヘッダーずれ修正後の短いsmokeで、ヘッダー列数と行列数が一致することを確認済み。
+- `logs/nsmvl-post-transition-gate-pulse-20260525` では、`0x0208A96C/970=2` 後に `signalLocked` 相当を解除してからstate1/state2ラッチを入れると、state2へは入る。
+  - ただし `Stage::actorFreezeFlag=0xA6` のまま、`player+0xB2D=1` / `transitFunc=0x02117C80` は変わらない。
+  - state2継続ラッチ後は `Stage::actorFreezeFlag=0x26`, `StageScene state=1`, `StageScene+0x561C=2` に戻る。遷移完了後タイミングでも、外部ラッチだけでは自然な試合開始にはならない。
 
 ## 現在のブロッカー
 
@@ -76,8 +79,8 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
 ## 次にやること
 
 1. Player遷移更新入口 `0x0211A56C` が呼ばれない理由を追う。特に `Stage::actorFreezeFlag=0x26`、`0x020C9280=0x18`、StageScene state 1の関係を見る。
-2. `player+0xB2D=1` かつ `0x0208A96C/970=2` の状態から、NSMBが本来どの経路で `signalUnlocked()` または通常操作状態へ戻すかを特定する。
-3. StageScene state 1 (`0x020A14D8`) の `StageScene+0x5645` と、state 2 (`0x020A0C68`) の `StageScene+0x5649` がどの入力/packet条件で自然に立つかを特定する。
+2. StageScene state 2 (`0x020A0C68`) が `StageScene+0x5649` を自然に立てる条件、または `StageScene+0x561C=2` からstate1へ戻る理由を追う。
+3. `player+0xB2D=1` かつ `0x0208A96C/970=2` の状態から、NSMBが本来どの経路で `signalUnlocked()` または通常操作状態へ戻すかを特定する。
 4. 診断フックではなく、WAN adapterのpacket/input API、またはROM/メモリpatchの正しい開始短絡点から同じ状態へ自然に到達させる。
 5. freeze解除後に、左右移動とジャンプがhost/client双方で反映されるか確認する。
 6. その後、RNG seed/消費順、ビッグスター、8コインアイテム、ランダムステージを確認する。
@@ -123,6 +126,8 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - `Stage::actorFreezeFlag=0x26` の書き込み元が `0x0214C9B0` であることを確認。
 - `logs/nsmvl-csv-header-smoke-20260525`
   - game-state CSVのヘッダー/行の列数一致を確認。
+- `logs/nsmvl-post-transition-gate-pulse-20260525`
+  - Player遷移完了後に強制ラッチしても、state2から自然な試合開始へ収束しないことを確認。
 
 ## 参考
 
