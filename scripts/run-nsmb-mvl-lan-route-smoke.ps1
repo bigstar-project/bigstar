@@ -328,6 +328,7 @@ param(
     [int]$WriteTraceStartFrame = 0,
     [int]$WriteTraceEndFrame = 0,
     [switch]$BadJumpTrace,
+    [switch]$AllowJit,
     [string]$HostMemPatchFile = "",
     [string]$ClientMemPatchFile = "",
     [string]$MemPatchFrame = "",
@@ -1971,7 +1972,11 @@ function Start-MelonLANProcess {
     }
     $env:MELONDS_NSML_ROLE = $Role
     $env:MELONDS_NSML_FIXED_RTC = "2020-01-01T00:00:00"
-    $env:MELONDS_NSML_DISABLE_JIT = "1"
+    if ($AllowJit) {
+        Remove-Item Env:\MELONDS_NSML_DISABLE_JIT -ErrorAction SilentlyContinue
+    } else {
+        $env:MELONDS_NSML_DISABLE_JIT = "1"
+    }
     if ($DropMPAfterFrame -gt 0) {
         $env:MELONDS_NSML_DROP_MP_AFTER_FRAME = "$DropMPAfterFrame"
     } else {
