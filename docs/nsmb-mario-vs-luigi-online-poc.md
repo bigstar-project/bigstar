@@ -47,22 +47,30 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - `0x0214CA68` が StageScene初期化付近で `0x08` を書く。
   - `0x02126F04` が player系overlayから `0x18` を書く。
   - これはstate 1を閉じている直接要因だが、単純に毎フレーム0へ戻すとstate machineを壊すため、どの条件で自然に解除されるべきかを追う必要がある。
+- `0x02126F04` は JP版 `PlayerBase::signalLocked()` 相当の `0x02126EDC` 内の書き込み点。US版 `NSMB-Code-Reference` の `PlayerBase::signalLocked()` / `signalUnlocked()` と対応する。
+  - JP `PlayerBase::signalLocked()` 候補: `0x02126EDC`
+  - JP `PlayerBase::signalUnlocked()` 候補: `0x02126E90`
+  - trace上の呼び出し元は `0x02117CDC` と `0x0211A650`。どちらもPlayer系overlayで、MvsL開始時の土管/遷移ロックに近い。
+- `PlayerBase::signalUnlocked()` 相当のビット解除だけを診断注入すると、`0x020C9280` は `0x18 -> 0x08` へ落ちるが、StageSceneはstate 1のまま止まる。
+- state 1の後段には別の入力/開始ラッチがあり、診断的に `StageScene+0x5645=1` を一発入れるとstate 2へ進む。
+- state 2は `StageScene+0x5649` を見ており、ここへ一発ラッチを入れるとstate 2からさらに進むが、現状は `state=1 / word561C=2` へ戻って安定しない。開始ラッチを外から足すだけでは不十分。
 - `StageScene+0x5645` と `+0x5649` を長く強制すると state 1/2 を往復する。これは診断フックが自然な入力ラッチを毎フレーム再投入しているためで、最終方式としては使わない。
 - `ForceStageActorFreezeFlag=0` は危険。host側で `ARM9: prefetch abort pc=FFFFF004` を起こすため不採用。
 
 ## 現在のブロッカー
 
-- StageScene state 1 を自然に閉じる packet/input/session 条件がまだ特定できていない。
-- 診断的に state 2 へ進めても、まだ freeze が解除されず、試合開始状態には到達していない。
+- StageScene state 1を自然に閉じる条件がまだ特定できていない。`signalLocked()`解除、state1入力ラッチ、state2継続ラッチがそれぞれ別条件になっている。
+- 診断的に state 2 へ進めても、state machineが自然な試合開始状態へ収束せず、まだplayer actorは操作可能になっていない。
 - デバッグビルドの実行が遅く、3300F前後のWAN route検証はタイムアウトしやすい。CSVの部分結果は使えるが、成功判定は厳密に見る必要がある。
 
 ## 次にやること
 
-1. `0x02126F04` を呼んで `0x020C9280=0x18` にしている player/actor処理と、対応する解除関数 `0x02126E90` の呼び出し条件を追う。
-2. state 2 (`0x020A0C68`) の `StageScene+0x5643` / `+0x561C` / `+0x563C` と、関連packet/input条件を追う。
-3. 診断フックではなく、WAN adapterのpacket/input APIから同じ状態へ自然に到達させる。
-4. freeze解除後に、左右移動とジャンプがhost/client双方で反映されるか確認する。
-5. その後、RNG seed/消費順、ビッグスター、8コインアイテム、ランダムステージを確認する。
+1. `0x02117CDC` / `0x0211A650` 周辺をさらに追い、どのPlayer遷移が `signalLocked()` を呼んでいるかを確定する。
+2. `signalUnlocked()` (`0x02126E90`) が自然に呼ばれるべき条件を、Player遷移state / pipe transition / StageScene stateの関係から追う。
+3. StageScene state 1 (`0x020A14D8`) の `StageScene+0x5645` と、state 2 (`0x020A0C68`) の `StageScene+0x5649` がどの入力/packet条件で自然に立つかを特定する。
+4. 診断フックではなく、WAN adapterのpacket/input APIから同じ状態へ自然に到達させる。
+5. freeze解除後に、左右移動とジャンプがhost/client双方で反映されるか確認する。
+6. その後、RNG seed/消費順、ビッグスター、8コインアイテム、ランダムステージを確認する。
 
 ## 検証ルール
 
@@ -85,6 +93,12 @@ New Super Mario Bros. DS 日本版 `A2DJ` のローカル対戦専用モード `
   - `+0x5645/+0x5649` の長時間強制は state 1/2 往復になり、自然開始にはならないことを確認。
 - `logs/nsmvl-gameplay-probe-unfreeze-playercount-20260525`
   - 直接freeze解除が危険であることを確認。
+- `logs/nsmvl-stage-scene-lock-ramdump-20260525`
+  - JP版実RAMから `PlayerBase::signalLocked()` / `signalUnlocked()` 相当の実装とリテラルを確認。
+- `logs/nsmvl-player-unlock-stage-start-20260525`
+  - `signalUnlocked()` 相当の解除だけではstate 1から進まないことを確認。
+- `logs/nsmvl-player-unlock-two-gate-pulse-20260525`
+  - state1/state2のラッチを一発ずつ入れても自然な試合開始にはならず、state machineが戻ることを確認。
 
 ## 参考
 

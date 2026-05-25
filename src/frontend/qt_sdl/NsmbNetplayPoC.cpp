@@ -743,6 +743,12 @@ struct State
     melonDS::u32 ForceStageActorFreezeFlagEndFrame = 0;
     melonDS::u32 ForceStageActorFreezeFlagValue = 0;
     bool ForceStageActorFreezeFlagLogged[16] {};
+    bool ForcePlayerSignalUnlockEnabled = false;
+    bool ForcePlayerSignalUnlockHostOnly = false;
+    bool ForcePlayerSignalUnlockClientOnly = false;
+    melonDS::u32 ForcePlayerSignalUnlockStartFrame = 0;
+    melonDS::u32 ForcePlayerSignalUnlockEndFrame = 0;
+    bool ForcePlayerSignalUnlockLogged[16] {};
     bool ForceStageSceneStartGateEnabled = false;
     bool ForceStageSceneStartGateHostOnly = false;
     bool ForceStageSceneStartGateClientOnly = false;
@@ -752,6 +758,13 @@ struct State
     melonDS::u32 ForceStageSceneStartGateEndFrame = 0;
     melonDS::u32 ForceStageSceneStartGateValue = 1;
     bool ForceStageSceneStartGateLogged[16] {};
+    bool ForceStageSceneContinueGateEnabled = false;
+    bool ForceStageSceneContinueGateHostOnly = false;
+    bool ForceStageSceneContinueGateClientOnly = false;
+    melonDS::u32 ForceStageSceneContinueGateStartFrame = 0;
+    melonDS::u32 ForceStageSceneContinueGateEndFrame = 0;
+    melonDS::u32 ForceStageSceneContinueGateValue = 1;
+    bool ForceStageSceneContinueGateLogged[16] {};
     bool NetRandomPatchEnabled = false;
     bool NetRandomPatchAuto = false;
     melonDS::u32 NetRandomPatchFrame = 0;
@@ -4160,6 +4173,76 @@ void ForceStageActorFreezeFlagIfNeeded(int instanceID, melonDS::u32 frame, melon
     }
 }
 
+void ForcePlayerSignalUnlockIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForcePlayerSignalUnlockEnabled || !nds || !nds->MainRAM)
+        return;
+    if (frame < G.ForcePlayerSignalUnlockStartFrame)
+        return;
+    if (G.ForcePlayerSignalUnlockEndFrame != 0 && frame > G.ForcePlayerSignalUnlockEndFrame)
+        return;
+    if (G.ForcePlayerSignalUnlockHostOnly && G.NetRole != Role::Host)
+        return;
+    if (G.ForcePlayerSignalUnlockClientOnly && G.NetRole != Role::Client)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
+        return;
+
+    // Diagnostic equivalent of PlayerBase::signalUnlocked(): clear the global
+    // player lock bits and each Player actor's local lock flags.
+    const melonDS::u8 global9280 = nds->ARM9Read8(0x020C9280);
+    const melonDS::u8 global9298 = nds->ARM9Read8(0x020C9298);
+    nds->ARM9Write8(0x020C9280, static_cast<melonDS::u8>(global9280 & ~0x10));
+    nds->ARM9Write8(0x020C9298, static_cast<melonDS::u8>(global9298 & ~0x40));
+
+    const melonDS::u32 ramLen = std::min<melonDS::u32>(nds->MainRAMMask + 1, 0x400000);
+    int clearedPlayers = 0;
+    for (melonDS::u32 off = 0; off + 0x7C4 <= ramLen; off += 4)
+    {
+        melonDS::u32 vtable = 0;
+        melonDS::u16 objectID = 0;
+        melonDS::u16 stateType = 0;
+        melonDS::u32 flags = 0;
+        if (!ReadMainRAMU32(nds, off, vtable) ||
+            !ReadMainRAMU16(nds, off + 0x0C, objectID) ||
+            !ReadMainRAMU16(nds, off + 0x0E, stateType) ||
+            !ReadMainRAMU32(nds, off + 0x10, flags))
+            continue;
+        if (objectID != kPlayerObjectID)
+            continue;
+        if (vtable < kMainRAMBase || vtable >= kMainRAMBase + ramLen)
+            continue;
+        if (stateType != 1 && stateType != 2 && stateType != 3)
+            continue;
+        if (flags >= 0x10000000)
+            continue;
+
+        const melonDS::u32 base = kMainRAMBase + off;
+        nds->ARM9Write8(base + 0x75C, 0);
+        const melonDS::u8 flag192 = nds->ARM9Read8(base + 0x192);
+        nds->ARM9Write8(base + 0x192, static_cast<melonDS::u8>(flag192 & ~0x01));
+        clearedPlayers++;
+    }
+
+    if (!G.ForcePlayerSignalUnlockLogged[instanceID])
+    {
+        std::printf(
+            "NSMB Test: force player signal unlock inst=%d frame=%u range=%u-%u players=%d global9280=%02X->%02X global9298=%02X->%02X\n",
+            instanceID,
+            frame,
+            G.ForcePlayerSignalUnlockStartFrame,
+            G.ForcePlayerSignalUnlockEndFrame,
+            clearedPlayers,
+            global9280,
+            nds->ARM9Read8(0x020C9280),
+            global9298,
+            nds->ARM9Read8(0x020C9298));
+        G.ForcePlayerSignalUnlockLogged[instanceID] = true;
+    }
+}
+
 void ForceStageSceneStartGateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.ForceStageSceneStartGateEnabled || !nds || !nds->MainRAM)
@@ -4216,6 +4299,52 @@ void ForceStageSceneStartGateIfNeeded(int instanceID, melonDS::u32 frame, melonD
             G.ForceStageSceneFadeReady ? 1 : 0,
             G.ForceStageSceneInputLatchEnabled ? 1 : 0);
         G.ForceStageSceneStartGateLogged[instanceID] = true;
+    }
+}
+
+void ForceStageSceneContinueGateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForceStageSceneContinueGateEnabled || !nds || !nds->MainRAM)
+        return;
+    if (frame < G.ForceStageSceneContinueGateStartFrame)
+        return;
+    if (G.ForceStageSceneContinueGateEndFrame != 0 && frame > G.ForceStageSceneContinueGateEndFrame)
+        return;
+    if (G.ForceStageSceneContinueGateHostOnly && G.NetRole != Role::Host)
+        return;
+    if (G.ForceStageSceneContinueGateClientOnly && G.NetRole != Role::Client)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
+        return;
+
+    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, 0x00B5FF00);
+    if (!stageScene.Found || !IsARM9MainRAMAddress(stageScene.Base))
+    {
+        if (!G.ForceStageSceneContinueGateLogged[instanceID])
+        {
+            std::printf("NSMB Test: force stage scene continue gate skipped inst=%d frame=%u no stage scene\n",
+                instanceID,
+                frame);
+            G.ForceStageSceneContinueGateLogged[instanceID] = true;
+        }
+        return;
+    }
+
+    nds->ARM9Write8(stageScene.Base + 0x5649, static_cast<melonDS::u8>(G.ForceStageSceneContinueGateValue & 0xFF));
+    if (!G.ForceStageSceneContinueGateLogged[instanceID])
+    {
+        std::printf(
+            "NSMB Test: force stage scene continue gate inst=%d frame=%u range=%u-%u base=%08X state=%u value=0x%02X\n",
+            instanceID,
+            frame,
+            G.ForceStageSceneContinueGateStartFrame,
+            G.ForceStageSceneContinueGateEndFrame,
+            stageScene.Base,
+            nds->ARM9Read32(stageScene.Base + 0x5618),
+            G.ForceStageSceneContinueGateValue & 0xFF);
+        G.ForceStageSceneContinueGateLogged[instanceID] = true;
     }
 }
 
@@ -6064,6 +6193,13 @@ void InitFromEnvironment()
     G.ForceStageActorFreezeFlagValue = static_cast<melonDS::u32>(
         std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_VALUE")
             ? std::getenv("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_VALUE") : "0", nullptr, 0));
+    G.ForcePlayerSignalUnlockEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK");
+    G.ForcePlayerSignalUnlockHostOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_HOST_ONLY");
+    G.ForcePlayerSignalUnlockClientOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_CLIENT_ONLY");
+    G.ForcePlayerSignalUnlockStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_START_FRAME", 0)));
+    G.ForcePlayerSignalUnlockEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_END_FRAME", 0)));
     G.ForceStageSceneStartGateEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE");
     G.ForceStageSceneStartGateHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_HOST_ONLY");
     G.ForceStageSceneStartGateClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_CLIENT_ONLY");
@@ -6076,6 +6212,16 @@ void InitFromEnvironment()
     G.ForceStageSceneStartGateValue = static_cast<melonDS::u32>(
         std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_VALUE")
             ? std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_VALUE") : "1", nullptr, 0));
+    G.ForceStageSceneContinueGateEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE");
+    G.ForceStageSceneContinueGateHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_HOST_ONLY");
+    G.ForceStageSceneContinueGateClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_CLIENT_ONLY");
+    G.ForceStageSceneContinueGateStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_START_FRAME", 0)));
+    G.ForceStageSceneContinueGateEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_END_FRAME", 0)));
+    G.ForceStageSceneContinueGateValue = static_cast<melonDS::u32>(
+        std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_VALUE")
+            ? std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_VALUE") : "1", nullptr, 0));
 
     const char* netRandomValue = std::getenv("MELONDS_NSML_NET_RANDOM_VALUE");
     if (netRandomValue && netRandomValue[0])
@@ -6370,7 +6516,11 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageSceneStartGateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForceStageSceneContinueGateIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageActorFreezeFlagIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForcePlayerSignalUnlockIfNeeded(instanceID, inputFrame, nds);
 
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteGameState(instanceID, inputFrame, nds);
