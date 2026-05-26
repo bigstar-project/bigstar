@@ -54,7 +54,9 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - player powerup / inventory / dead / character / battle star / collected star などを extended game-state trace に追加済み。
   - `scripts/verify-nsmb-mvl-lan-result.ps1` で actor 座標、死亡状態、スター actor、battle/collected star の host/client 一致を検証可能。
   - `-RequireStarPickup` / `-RequireStarRespawn` を追加し、スター取得と次スター再生成を状態値で必須チェックできる。
+  - `-HostLogDir` / `-ClientLogDir` を追加し、host/client を別々の script invocation で起動したログも比較可能にした。
   - LAN smoke script から `-VsStarSnapFrame` / `-PlayerSnapToStarFrame` / `-PlayerStickToStarStartFrame` を指定可能にした。これは自然操作ではなく、RNG/再生成同期の制御検証用。
+  - LAN smoke script に `-RunRole both|host|client`, `-Peer`, `-LanHost` を追加。2PC相当の片側起動が可能。
   - host/client 別入力スクリプトを追加済み。
     - `tests/nsmb_us_direct_mvl_host_right.inputs`
     - `tests/nsmb_us_direct_mvl_client_right.inputs`
@@ -115,6 +117,11 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `logs/nsmvl-us-direct-entry-star-stick-delay4-jitter4-canonical-local0-3600-20260526`: `delay=4`, `jitter=4`, `LookupTickDelay=10`, `-RequireStarPickup -RequireStarRespawn` 通過。
   - `logs/nsmvl-us-direct-entry-star-stick-delay12-jitter8-lookup16-canonical-local0-3600-20260526`: `delay=12`, `jitter=8`, `LookupTickDelay=16`, `-RequireStarPickup -RequireStarRespawn` 通過。
   - 少なくとも reliable packet 前提の遅延/ジッタ注入では、スター取得と再生成RNGは正準packet同期で維持できている。
+- 2PC相当の分割起動:
+  - `-RunRole host` と `-RunRole client -Peer 127.0.0.1` を別々の PowerShell invocation で起動できることを確認。
+  - `logs/nsmvl-us-direct-entry-runrole-split-host-1800-20260526` と `logs/nsmvl-us-direct-entry-runrole-split-client-1800-20260526`: frame 1800 まで split mismatch `0`。
+  - `logs/nsmvl-us-direct-entry-runrole-split-star-host-3600-20260526` と `logs/nsmvl-us-direct-entry-runrole-split-star-client-3600-20260526`: split 起動でも `-RequireStarPickup -RequireStarRespawn` 通過。
+  - 実2PCでは client 側に `-Peer <host-ip>` を渡す想定。
 - 自然入力のスター取得 route:
   - `tests/nsmb_us_direct_mvl_star_collect_left.inputs` を direct MvL 起動手順込みに修正。
   - `logs/nsmvl-us-direct-entry-star-left-route-packet-only-canonical-local0-7200-20260526` は mismatch `0` で完走したが、`player*BattleStars` / `player*CollectedStars` は変化せず、スター取得は未達。
@@ -202,7 +209,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 1. packet loss注入を追加するか、ENet reliable前提で遅延/ジッタ中心に評価するかを決める。
 2. 自然入力でスターを取得できる route は別途調整する。成功判定は必ず `player*BattleStars` / `player*CollectedStars` / star actor 再生成で行う。
 3. 表示・操作上、clientが `Game::localPlayerID=0` のままで問題ないかをスクリーンショットと操作ログで確認する。
-4. 次の本筋として、2PC相当の起動手順を `localhost` ではなく実LAN IP指定でも再現できるように script option を整理する。
+4. 実LAN上の2PCで `-RunRole host` / `-RunRole client -Peer <host-ip>` を使ったログ取得を行い、split verifier で比較する。
 
 ## 検証ルール
 

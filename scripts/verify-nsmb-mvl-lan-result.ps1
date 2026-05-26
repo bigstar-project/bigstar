@@ -1,6 +1,7 @@
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$LogDir,
+    [string]$LogDir = "",
+    [string]$HostLogDir = "",
+    [string]$ClientLogDir = "",
     [int]$FromFrame = 200,
     [int]$ToFrame = 0,
     [int]$PositionTolerance = 0,
@@ -50,11 +51,24 @@ function Assert-Close($frame, $field, $a, $b, $tolerance) {
     }
 }
 
-$root = Resolve-Path $LogDir
-$hostStdout = Join-Path $root "host.stdout.txt"
-$clientStdout = Join-Path $root "client.stdout.txt"
-$hostStatePath = Join-Path $root "host.game-state.csv"
-$clientStatePath = Join-Path $root "client.game-state.csv"
+if (!$HostLogDir -and !$ClientLogDir) {
+    if (!$LogDir) {
+        Fail "LogDir or both HostLogDir/ClientLogDir must be provided"
+    }
+    $HostLogDir = $LogDir
+    $ClientLogDir = $LogDir
+}
+
+if (!$HostLogDir -or !$ClientLogDir) {
+    Fail "both HostLogDir and ClientLogDir must be provided when using split logs"
+}
+
+$hostRoot = Resolve-Path $HostLogDir
+$clientRoot = Resolve-Path $ClientLogDir
+$hostStdout = Join-Path $hostRoot "host.stdout.txt"
+$clientStdout = Join-Path $clientRoot "client.stdout.txt"
+$hostStatePath = Join-Path $hostRoot "host.game-state.csv"
+$clientStatePath = Join-Path $clientRoot "client.game-state.csv"
 
 foreach ($path in @($hostStdout, $clientStdout)) {
     if (!(Test-Path $path)) {
@@ -114,8 +128,8 @@ if ($checked -eq 0) {
 }
 
 if ($RequireRemoteInputHits) {
-    $hostReplay = Join-Path $root "host.stdout.txt.packet-replay.csv"
-    $clientReplay = Join-Path $root "client.stdout.txt.packet-replay.csv"
+    $hostReplay = Join-Path $hostRoot "host.stdout.txt.packet-replay.csv"
+    $clientReplay = Join-Path $clientRoot "client.stdout.txt.packet-replay.csv"
     foreach ($path in @($hostReplay, $clientReplay)) {
         if (!(Test-Path $path)) {
             Fail "missing packet replay log: $path"

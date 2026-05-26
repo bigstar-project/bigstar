@@ -361,6 +361,10 @@ param(
     [string]$ClientMemPatchFile = "",
     [string]$MemPatchFrame = "",
     [string]$MemPatchRanges = "",
+    [ValidateSet("both", "host", "client")]
+    [string]$RunRole = "both",
+    [string]$Peer = "127.0.0.1",
+    [string]$LanHost = "",
     [int]$HostStartupDelayMs = 1000,
     [int]$LanStartAttempts = 1,
     [switch]$SkipDisconnectScreenshotCheck,
@@ -1747,7 +1751,7 @@ function Start-MelonLANProcess {
             Remove-Item Env:\MELONDS_NSML_NETPLAY_START_FRAME -ErrorAction SilentlyContinue
         }
         if ($Role -eq "client") {
-            $env:MELONDS_NSML_PEER = "127.0.0.1"
+            $env:MELONDS_NSML_PEER = $Peer
         } else {
             Remove-Item Env:\MELONDS_NSML_PEER -ErrorAction SilentlyContinue
         }
@@ -2135,7 +2139,11 @@ function Start-MelonLANProcess {
         $env:MELONDS_NSML_MP_INTERFACE = "lan"
         $env:MELONDS_NSML_LAN_ROLE = $Role
         $env:MELONDS_NSML_LAN_PLAYERS = "2"
-        $env:MELONDS_NSML_LAN_HOST = "127.0.0.1"
+        if ($LanHost) {
+            $env:MELONDS_NSML_LAN_HOST = $LanHost
+        } else {
+            $env:MELONDS_NSML_LAN_HOST = $Peer
+        }
         $env:MELONDS_NSML_LAN_PLAYER = "codex-$Role"
         if ($LanWanMode) {
             $env:MELONDS_NSML_LAN_WAN_MODE = "1"
@@ -2227,6 +2235,9 @@ function Start-MelonLANProcess {
     }
     @(
         "role=$Role"
+        "runRole=$RunRole"
+        "peer=$Peer"
+        "lanHost=$($env:MELONDS_NSML_LAN_HOST)"
         "packetBridge=$PacketBridge"
         "localInstance=$($env:MELONDS_NSML_LOCAL_INSTANCE)"
         "packetBridgeReplayTickOffset=$($env:MELONDS_NSML_PACKET_BRIDGE_REPLAY_TICK_OFFSET)"
@@ -2379,12 +2390,22 @@ function Complete-MelonLANProcess {
 $hostProc = $null
 $clientProc = $null
 try {
-    $hostProc = Start-MelonLANProcess -Role "host" -RoleRom $hostRom -RoleInput $hostInput -Stdout $hostOut -HashLog $hostHash -ScreenshotDir $hostScreens -GameStateTracePath $hostGameStateTrace -LanMPTracePath $hostLanMPTrace -PacketReplayFile $HostPacketReplayFile -PacketCapturePath $hostPacketCapture -RamDumpDir $hostRamDumps
-    Start-Sleep -Milliseconds $HostStartupDelayMs
-    $clientProc = Start-MelonLANProcess -Role "client" -RoleRom $clientRom -RoleInput $clientInput -Stdout $clientOut -HashLog $clientHash -ScreenshotDir $clientScreens -GameStateTracePath $clientGameStateTrace -LanMPTracePath $clientLanMPTrace -PacketReplayFile $ClientPacketReplayFile -PacketCapturePath $clientPacketCapture -RamDumpDir $clientRamDumps
+    if ($RunRole -eq "both" -or $RunRole -eq "host") {
+        $hostProc = Start-MelonLANProcess -Role "host" -RoleRom $hostRom -RoleInput $hostInput -Stdout $hostOut -HashLog $hostHash -ScreenshotDir $hostScreens -GameStateTracePath $hostGameStateTrace -LanMPTracePath $hostLanMPTrace -PacketReplayFile $HostPacketReplayFile -PacketCapturePath $hostPacketCapture -RamDumpDir $hostRamDumps
+    }
+    if ($RunRole -eq "both") {
+        Start-Sleep -Milliseconds $HostStartupDelayMs
+    }
+    if ($RunRole -eq "both" -or $RunRole -eq "client") {
+        $clientProc = Start-MelonLANProcess -Role "client" -RoleRom $clientRom -RoleInput $clientInput -Stdout $clientOut -HashLog $clientHash -ScreenshotDir $clientScreens -GameStateTracePath $clientGameStateTrace -LanMPTracePath $clientLanMPTrace -PacketReplayFile $ClientPacketReplayFile -PacketCapturePath $clientPacketCapture -RamDumpDir $clientRamDumps
+    }
 
-    Complete-MelonLANProcess $clientProc
-    Complete-MelonLANProcess $hostProc
+    if ($clientProc) {
+        Complete-MelonLANProcess $clientProc
+    }
+    if ($hostProc) {
+        Complete-MelonLANProcess $hostProc
+    }
 } catch {
     foreach ($started in @($hostProc, $clientProc)) {
         if ($null -ne $started -and $null -ne $started.Process -and -not $started.Process.HasExited) {
@@ -2394,15 +2415,40 @@ try {
     throw
 }
 
-$requiredPatterns = @(
-    @{ Path = $hostOut; Pattern = "frame limit reached"; Name = "host frame limit" },
-    @{ Path = $clientOut; Pattern = "frame limit reached"; Name = "client frame limit" }
-)
+$roleInfos = @()
+if ($RunRole -eq "both" -or $RunRole -eq "host") {
+    $roleInfos += @{
+        Role = "host"
+        Out = $hostOut
+        Hash = $hostHash
+        Screens = $hostScreens
+        GameState = $hostGameStateTrace
+        LanStartPattern = "LAN host start .* ok=1"
+        LanStartName = "host LAN start"
+        LocalPlayerID = "0x0"
+    }
+}
+if ($RunRole -eq "both" -or $RunRole -eq "client") {
+    $roleInfos += @{
+        Role = "client"
+        Out = $clientOut
+        Hash = $clientHash
+        Screens = $clientScreens
+        GameState = $clientGameStateTrace
+        LanStartPattern = "LAN client start .* ok=1"
+        LanStartName = "client LAN start"
+        LocalPlayerID = "0x1"
+    }
+}
+
+$requiredPatterns = @()
+foreach ($info in $roleInfos) {
+    $requiredPatterns += @{ Path = $info.Out; Pattern = "frame limit reached"; Name = "$($info.Role) frame limit" }
+}
 if (-not $NoLanMP) {
-    $requiredPatterns = @(
-        @{ Path = $hostOut; Pattern = "LAN host start .* ok=1"; Name = "host LAN start" },
-        @{ Path = $clientOut; Pattern = "LAN client start .* ok=1"; Name = "client LAN start" }
-    ) + $requiredPatterns
+    foreach ($info in $roleInfos) {
+        $requiredPatterns = @(@{ Path = $info.Out; Pattern = $info.LanStartPattern; Name = $info.LanStartName }) + $requiredPatterns
+    }
 }
 
 foreach ($item in $requiredPatterns) {
@@ -2411,7 +2457,7 @@ foreach ($item in $requiredPatterns) {
     }
 }
 
-foreach ($hashLog in @($hostHash, $clientHash)) {
+foreach ($hashLog in @($roleInfos | ForEach-Object { $_.Hash })) {
     if (-not (Test-Path $hashLog)) {
         throw "hash log was not created: $hashLog"
     }
@@ -2421,7 +2467,7 @@ foreach ($hashLog in @($hostHash, $clientHash)) {
     }
 }
 
-foreach ($screenDir in @($hostScreens, $clientScreens)) {
+foreach ($screenDir in @($roleInfos | ForEach-Object { $_.Screens })) {
     $screens = Get-ChildItem $screenDir -Filter "inst0_*.png" -ErrorAction SilentlyContinue
     if (-not $screens) {
         throw "expected screenshots in $screenDir"
@@ -2546,7 +2592,7 @@ function Convert-TraceHexToInt64 {
     return [Convert]::ToInt64($text, 10)
 }
 
-foreach ($screenDir in @($hostScreens, $clientScreens)) {
+foreach ($screenDir in @($roleInfos | ForEach-Object { $_.Screens })) {
     $screens = Get-ChildItem $screenDir -Filter "inst0_frame*.png" -ErrorAction SilentlyContinue
     foreach ($screen in $screens) {
         if ($screen.Name -notmatch "frame(\d+)\.png") {
@@ -2574,10 +2620,7 @@ foreach ($screenDir in @($hostScreens, $clientScreens)) {
 }
 
 if (-not $SkipArmAbortCheck) {
-    foreach ($item in @(
-        @{ Path = $hostOut; Role = "host" },
-        @{ Path = $clientOut; Role = "client" }
-    )) {
+    foreach ($item in @($roleInfos | ForEach-Object { @{ Path = $_.Out; Role = $_.Role } })) {
         if (-not (Test-Path $item.Path)) {
             continue
         }
@@ -2590,10 +2633,7 @@ if (-not $SkipArmAbortCheck) {
 }
 
 if ($GameStateTrace -and -not $SkipMvlStateCheck -and ($GameStateTraceEndFrame -le 0 -or $GameStateTraceEndFrame -ge $Frames)) {
-    foreach ($item in @(
-        @{ Path = $hostGameStateTrace; Role = "host"; LocalPlayerID = "0x0" },
-        @{ Path = $clientGameStateTrace; Role = "client"; LocalPlayerID = "0x1" }
-    )) {
+    foreach ($item in @($roleInfos | ForEach-Object { @{ Path = $_.GameState; Role = $_.Role; LocalPlayerID = $_.LocalPlayerID } })) {
         if (-not (Test-Path $item.Path)) {
             throw "game state trace was not created for $($item.Role): $($item.Path)"
         }
