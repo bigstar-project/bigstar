@@ -158,6 +158,9 @@ constexpr melonDS::u32 kScenePreviousSceneIDAddr = 0x0203BD2C;
 constexpr melonDS::u32 kSceneNextSceneIDAddr = 0x0203BD30;
 constexpr melonDS::u32 kSceneCurrentSceneIDAddr = 0x0203BD34;
 constexpr melonDS::u32 kSceneNextSceneSettingsAddr = 0x02088F38;
+constexpr melonDS::u32 kEntranceSpawnEntranceIDAddr = 0x0208B094;
+constexpr melonDS::u32 kEntranceTransitionFlagsAddr = 0x0208B098;
+constexpr melonDS::u32 kEntranceSpawnEntranceAddr = 0x0208B0A0;
 
 bool IsMarioVsLuigiGGID(melonDS::u32 value)
 {
@@ -446,6 +449,12 @@ struct GameStateSample
     melonDS::u32 PlayerCount = 0;
     melonDS::u32 PlayerTransitionStatus0 = 0;
     melonDS::u32 PlayerTransitionStatus1 = 0;
+    melonDS::u32 EntranceSpawnID0 = 0;
+    melonDS::u32 EntranceSpawnID1 = 0;
+    melonDS::u32 EntranceTransitionFlags0 = 0;
+    melonDS::u32 EntranceTransitionFlags1 = 0;
+    melonDS::u32 EntranceSpawnPtr0 = 0;
+    melonDS::u32 EntranceSpawnPtr1 = 0;
     melonDS::u32 Player0Powerup = 0;
     melonDS::u32 Player1Powerup = 0;
     melonDS::u32 Player0InventoryPowerup = 0;
@@ -946,6 +955,23 @@ struct State
     melonDS::u32 ForcePlayerActorIDsStartFrame = 0;
     melonDS::u32 ForcePlayerActorIDsEndFrame = 0;
     bool ForcePlayerActorIDsLogged[16] {};
+    bool ForcePlayerTransitionStatusEnabled = false;
+    bool ForcePlayerTransitionStatusHostOnly = false;
+    bool ForcePlayerTransitionStatusClientOnly = false;
+    melonDS::u32 ForcePlayerTransitionStatusStartFrame = 0;
+    melonDS::u32 ForcePlayerTransitionStatusEndFrame = 0;
+    melonDS::u32 ForcePlayerTransitionStatusValue = 2;
+    bool ForcePlayerTransitionStatusLogged[16] {};
+    bool ForceEntranceSpawnPointersEnabled = false;
+    bool ForceEntranceSpawnPointersHostOnly = false;
+    bool ForceEntranceSpawnPointersClientOnly = false;
+    melonDS::u32 ForceEntranceSpawnPointersStartFrame = 0;
+    melonDS::u32 ForceEntranceSpawnPointersEndFrame = 0;
+    melonDS::u32 ForceEntranceSpawnPtr0 = 0;
+    melonDS::u32 ForceEntranceSpawnPtr1 = 0;
+    melonDS::u32 ForceEntranceSpawnID0 = 0;
+    melonDS::u32 ForceEntranceSpawnID1 = 1;
+    bool ForceEntranceSpawnPointersLogged[16] {};
     bool ForceMvlStageLayoutGateEnabled = false;
     bool ForceMvlStageLayoutGateHostOnly = false;
     bool ForceMvlStageLayoutGateClientOnly = false;
@@ -4115,6 +4141,72 @@ void ForcePlayerActorIDsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::ND
     }
 }
 
+void ForcePlayerTransitionStatusIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForcePlayerTransitionStatusEnabled || !nds)
+        return;
+    if (G.ForcePlayerTransitionStatusHostOnly && G.NetRole != Role::Host)
+        return;
+    if (G.ForcePlayerTransitionStatusClientOnly && G.NetRole != Role::Client)
+        return;
+    if (frame < G.ForcePlayerTransitionStatusStartFrame)
+        return;
+    if (G.ForcePlayerTransitionStatusEndFrame != 0 && frame > G.ForcePlayerTransitionStatusEndFrame)
+        return;
+
+    const melonDS::u32 value = G.ForcePlayerTransitionStatusValue;
+    nds->ARM9Write32(kGamePlayerTransitionStatusAddr, value);
+    nds->ARM9Write32(kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32), value);
+
+    if (instanceID >= 0 && instanceID < 16 && !G.ForcePlayerTransitionStatusLogged[instanceID])
+    {
+        G.ForcePlayerTransitionStatusLogged[instanceID] = true;
+        std::printf(
+            "NSMB Test: force player transition status inst=%d frame=%u range=%u-%u value=0x%08X\n",
+            instanceID,
+            frame,
+            G.ForcePlayerTransitionStatusStartFrame,
+            G.ForcePlayerTransitionStatusEndFrame,
+            value);
+    }
+}
+
+void ForceEntranceSpawnPointersIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForceEntranceSpawnPointersEnabled || !nds)
+        return;
+    if (G.ForceEntranceSpawnPointersHostOnly && G.NetRole != Role::Host)
+        return;
+    if (G.ForceEntranceSpawnPointersClientOnly && G.NetRole != Role::Client)
+        return;
+    if (frame < G.ForceEntranceSpawnPointersStartFrame)
+        return;
+    if (G.ForceEntranceSpawnPointersEndFrame != 0 && frame > G.ForceEntranceSpawnPointersEndFrame)
+        return;
+
+    nds->ARM9Write8(kEntranceSpawnEntranceIDAddr, static_cast<melonDS::u8>(G.ForceEntranceSpawnID0 & 0xFF));
+    nds->ARM9Write8(kEntranceSpawnEntranceIDAddr + 1, static_cast<melonDS::u8>(G.ForceEntranceSpawnID1 & 0xFF));
+    nds->ARM9Write8(kEntranceTransitionFlagsAddr, 0);
+    nds->ARM9Write8(kEntranceTransitionFlagsAddr + 1, 0);
+    nds->ARM9Write32(kEntranceSpawnEntranceAddr, G.ForceEntranceSpawnPtr0);
+    nds->ARM9Write32(kEntranceSpawnEntranceAddr + sizeof(melonDS::u32), G.ForceEntranceSpawnPtr1);
+
+    if (instanceID >= 0 && instanceID < 16 && !G.ForceEntranceSpawnPointersLogged[instanceID])
+    {
+        G.ForceEntranceSpawnPointersLogged[instanceID] = true;
+        std::printf(
+            "NSMB Test: force entrance spawn pointers inst=%d frame=%u range=%u-%u ptr0=%08X ptr1=%08X id0=%u id1=%u\n",
+            instanceID,
+            frame,
+            G.ForceEntranceSpawnPointersStartFrame,
+            G.ForceEntranceSpawnPointersEndFrame,
+            G.ForceEntranceSpawnPtr0,
+            G.ForceEntranceSpawnPtr1,
+            G.ForceEntranceSpawnID0,
+            G.ForceEntranceSpawnID1);
+    }
+}
+
 ObjectLifecycleSummary SummarizeObjectLifecycle(melonDS::NDS* nds)
 {
     ObjectLifecycleSummary summary;
@@ -5693,6 +5785,12 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.PlayerCount = nds->ARM9Read32(kGamePlayerCountAddr);
     sample.PlayerTransitionStatus0 = nds->ARM9Read32(kGamePlayerTransitionStatusAddr);
     sample.PlayerTransitionStatus1 = nds->ARM9Read32(kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32));
+    sample.EntranceSpawnID0 = nds->ARM9Read8(kEntranceSpawnEntranceIDAddr);
+    sample.EntranceSpawnID1 = nds->ARM9Read8(kEntranceSpawnEntranceIDAddr + 1);
+    sample.EntranceTransitionFlags0 = nds->ARM9Read8(kEntranceTransitionFlagsAddr);
+    sample.EntranceTransitionFlags1 = nds->ARM9Read8(kEntranceTransitionFlagsAddr + 1);
+    sample.EntranceSpawnPtr0 = nds->ARM9Read32(kEntranceSpawnEntranceAddr);
+    sample.EntranceSpawnPtr1 = nds->ARM9Read32(kEntranceSpawnEntranceAddr + sizeof(melonDS::u32));
     sample.Player0Powerup = nds->ARM9Read8(kGamePlayerPowerupAddr);
     sample.Player1Powerup = nds->ARM9Read8(kGamePlayerPowerupAddr + 1);
     sample.Player0InventoryPowerup = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr);
@@ -6568,6 +6666,12 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                          << ",0x" << sample.Player0CollectedStars
                          << ",0x" << sample.Player1CollectedStars
                          << ",0x" << sample.VsCoinCount
+                         << ",0x" << sample.EntranceSpawnID0
+                         << ",0x" << sample.EntranceSpawnID1
+                         << ",0x" << sample.EntranceTransitionFlags0
+                         << ",0x" << sample.EntranceTransitionFlags1
+                         << ",0x" << sample.EntranceSpawnPtr0
+                         << ",0x" << sample.EntranceSpawnPtr1
                          << ",0x" << playerGlobalHash
                          << ",0x" << wifiCandidateHash
                          << ",0x" << renderCandidateHash
@@ -7398,6 +7502,35 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_ACTOR_IDS_START_FRAME", 0)));
     G.ForcePlayerActorIDsEndFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_ACTOR_IDS_END_FRAME", 0)));
+    G.ForcePlayerTransitionStatusEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_TRANSITION_STATUS");
+    G.ForcePlayerTransitionStatusHostOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_TRANSITION_STATUS_HOST_ONLY");
+    G.ForcePlayerTransitionStatusClientOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_TRANSITION_STATUS_CLIENT_ONLY");
+    G.ForcePlayerTransitionStatusStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_TRANSITION_STATUS_START_FRAME", 0)));
+    G.ForcePlayerTransitionStatusEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_TRANSITION_STATUS_END_FRAME", 0)));
+    G.ForcePlayerTransitionStatusValue = static_cast<melonDS::u32>(
+        std::strtoul(std::getenv("MELONDS_NSML_FORCE_PLAYER_TRANSITION_STATUS_VALUE")
+            ? std::getenv("MELONDS_NSML_FORCE_PLAYER_TRANSITION_STATUS_VALUE") : "2", nullptr, 0));
+    G.ForceEntranceSpawnPointersEnabled = EnvFlag("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_POINTERS");
+    G.ForceEntranceSpawnPointersHostOnly = EnvFlag("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_POINTERS_HOST_ONLY");
+    G.ForceEntranceSpawnPointersClientOnly = EnvFlag("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_POINTERS_CLIENT_ONLY");
+    G.ForceEntranceSpawnPointersStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_POINTERS_START_FRAME", 0)));
+    G.ForceEntranceSpawnPointersEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_POINTERS_END_FRAME", 0)));
+    G.ForceEntranceSpawnPtr0 = static_cast<melonDS::u32>(
+        std::strtoul(std::getenv("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_PTR0")
+            ? std::getenv("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_PTR0") : "0", nullptr, 0));
+    G.ForceEntranceSpawnPtr1 = static_cast<melonDS::u32>(
+        std::strtoul(std::getenv("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_PTR1")
+            ? std::getenv("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_PTR1") : "0", nullptr, 0));
+    G.ForceEntranceSpawnID0 = static_cast<melonDS::u32>(
+        std::strtoul(std::getenv("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_ID0")
+            ? std::getenv("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_ID0") : "0", nullptr, 0));
+    G.ForceEntranceSpawnID1 = static_cast<melonDS::u32>(
+        std::strtoul(std::getenv("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_ID1")
+            ? std::getenv("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_ID1") : "1", nullptr, 0));
     G.ForceMvlStageLayoutGateEnabled = EnvFlag("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_GATE");
     G.ForceMvlStageLayoutGateHostOnly = EnvFlag("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_GATE_HOST_ONLY");
     G.ForceMvlStageLayoutGateClientOnly = EnvFlag("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_GATE_CLIENT_ONLY");
@@ -7470,7 +7603,7 @@ void InitFromEnvironment()
         {
             G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,arm9PC,arm9LR,arm9SP,arm9CPSR,appFrameLength,appUpdateTask,appSleepPhase,appSleepControl,appSleeping,appSleepPhaseTimer,appSleepWakeUpTimer,appBootParam,appBootTarget,appBootScene,ggid,netCurrentLanguage,netLocalAid,netState14,netState1C,netState20,netState24,netExpectedConsoleCount,netMultiBootSession,netSessionState,netModuleState,netMaxSessionChildren,netMaxConsoleCount,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,stageActorFreezeFlag,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor0PlayerID,playerActor0TransitionStep,playerActor0SignalLock,playerActor0Flag192,playerActor0Flags728,playerActor0Flags72C,playerActor0Flags730,playerActor0TransitFunc,playerActor0TransitArg,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,playerActor1PlayerID,playerActor1TransitionStep,playerActor1SignalLock,playerActor1Flag192,playerActor1Flags728,playerActor1Flags72C,playerActor1Flags730,playerActor1TransitFunc,playerActor1TransitArg,playerTransitionStatus0,playerTransitionStatus1,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectByte0E2,vsConnectByte106,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord138,vsConnectWord13C,vsConnectWord140,vsConnectWord144,vsConnectWord148,vsConnectByte153,vsConnectByte154,vsConnectByte155,vsConnectByte156,vsConnectByte157,vsConnectByte158,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectSettings,courseSelectWord060,courseSelectWord064,courseSelectWord068,courseSelectWord06C,courseSelectWord070,courseSelectWord074,courseSelectWord078,courseSelectWord07C,courseSelectWord080,courseSelectWord084,courseSelectWord088,courseSelectWord08C,courseSelectWord090,stageCameraFound,stageCameraWord190,stageCameraWord194,stageCameraWord19C,stageCameraWord1A0,stageActorManagerFound,stageActorManagerBase,stageActorManagerStateType,stageControllerFound,stageControllerBase,stageControllerStateType,mvlObject267Found,mvlObject267Base,mvlObject267StateType,mvlGlobal965C,mvlGlobal9670,mvlGlobal9674,mvlGlobal9694_0,mvlGlobal9694_1,mvlStageLayoutGateCAC6C,mvlStageLayoutGateCAC74,mvlStageLayoutGateCAC7C,mvlStageLayoutGateCACDC,mvlStageLayoutGateCAE80,mvlStageLayoutGateCAE74,mvlStageLayoutGateCAEB8,mvlStageLayoutGateCAF20,mvlStageLayoutGateCAF40,mvlStageLayoutGateCA8C0,mvlStageLayoutGateCA8D0,mvlStageLayoutGateCAD30,mvlManagerBase,mvlManagerVTable,mvlManagerGuid,mvlManagerSettings,mvlManagerObjectId,mvlManagerStateType,mvlManagerFlags,mvlManagerUnk54,mvlManagerResourcesHeap,mvlManagerWordA8CC,mvlManagerWordA8D0,mvlManagerWordA8D4,mvlManagerWordA8D8,mvlManagerWordA8DC,mvlManagerWordA8E0,mvlManagerWordA8E4,mvlManagerHalfA8E8,mvlManagerHalfA8EA,mvlManagerByteA8EC,mvlManagerHalf494,mvlManagerHalf4A0,stageSceneFound,stageSceneBase,stageSceneSettings,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,stageSceneWord5618,stageSceneWord561C,stageSceneWord563C,stageSceneByte5643,stageSceneByte5644,stageSceneByte5645,stageSceneByte5646,stageSceneByte5648,stageSceneByte5649,stageSceneUpdateDispatchFunc,stageSceneUpdateDispatchArg,stageSceneRenderDispatchFunc,stageSceneRenderDispatchArg,stageSceneGlobal9280,stageSceneGlobal9284,stageSceneGlobal928C,stageSceneGlobal92B4,stageSceneGlobal92C0,stageSceneGlobal92C8,stageSceneGlobal92CC,stageSceneGlobal92D0,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY,objectScanTotal,objectNotCreatedCount,objectActiveCount,objectDeadCount,objectSkipUpdateCount,objectSkipRenderCount,objectFirstNotCreatedId,objectFirstNotCreatedBase,objectFirstNotCreatedFlags,objectSecondNotCreatedId,objectSecondNotCreatedBase,objectSecondNotCreatedFlags";
             if (G.GameStateTraceExtended)
-                G.GameStateTrace << ",playerCount,player0Powerup,player1Powerup,player0InventoryPowerup,player1InventoryPowerup,player0Dead,player1Dead,player0Character,player1Character,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash";
+                G.GameStateTrace << ",playerCount,player0Powerup,player1Powerup,player0InventoryPowerup,player1InventoryPowerup,player0Dead,player1Dead,player0Character,player1Character,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,entranceSpawnID0,entranceSpawnID1,entranceTransitionFlags0,entranceTransitionFlags1,entranceSpawnPtr0,entranceSpawnPtr1,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash";
             G.GameStateTrace << '\n';
         }
     }
@@ -7732,6 +7865,10 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         ForceMvlPlayerReadyIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceMvlRuntimeStateIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForcePlayerTransitionStatusIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForceEntranceSpawnPointersIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerActorIDsIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)

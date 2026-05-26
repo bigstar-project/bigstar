@@ -2563,6 +2563,15 @@ static void NSMLWriteReplayEntryToLocalMPSlots(
     }
 }
 
+static bool NSMLShouldMirrorPacketsToLocalMPSlots(NDS& nds)
+{
+    static int writeGameplayLocalMPSlots = -1;
+    if (writeGameplayLocalMPSlots < 0)
+        writeGameplayLocalMPSlots =
+            NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_WRITE_GAMEPLAY_LOCAL_MP_SLOTS") ? 1 : 0;
+    return !IsNSMLMarioVsLuigiGameplay(nds) || writeGameplayLocalMPSlots != 0;
+}
+
 static bool NSMLFindReplayEntryForTick(
     const std::map<u32, NSMLPacketReplayEntry>& packets,
     u32 tick,
@@ -2624,11 +2633,21 @@ void NSML_RefreshMarioVsLuigiPacketSlots(NDS* nds)
     NSMLMaintainPacketFreeBytes(*nds);
     NSMLMaintainSessionPeers(*nds);
     NSMLProbeStageStartReadyBits(*nds);
-    NSMLWriteLiveReplayPacketsToLocalMPSlots(
-        *nds,
-        tick,
-        static_cast<u32>(fallbackWindow),
-        normalizeTick != 0);
+
+    // The old local-MP slot mirror uses 0x0208B040 + player * 0x3E. In US
+    // direct MvL gameplay the player1 range overlaps Entrance globals
+    // (spawnEntranceID/transitionFlags/spawnEntrance at 0x0208B094+), so writing
+    // it corrupts entrance transition state and eventually crashes
+    // Player::viewTransitState. During gameplay, prefer the lower packet API
+    // hooks that return scratch packets from 0x023C1000.
+    if (NSMLShouldMirrorPacketsToLocalMPSlots(*nds))
+    {
+        NSMLWriteLiveReplayPacketsToLocalMPSlots(
+            *nds,
+            tick,
+            static_cast<u32>(fallbackWindow),
+            normalizeTick != 0);
+    }
 
     if (suppressDisconnect)
     {
@@ -2864,18 +2883,21 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
 
     const u32 currentTick = NSMLPacketBridgeCanonicalTick(cpu->NDS);
     const u32 tick = (currentTick - cfg.LookupTickDelay) & 0xFFFF;
-    if (NSMLPacketBridgeEnabled())
+    if (NSMLPacketBridgeEnabled() && NSMLShouldMirrorPacketsToLocalMPSlots(cpu->NDS))
         NSMLWriteLiveReplayPacketsToLocalMPSlots(cpu->NDS, tick, cfg.LiveFallbackWindow, cfg.ReturnLookupTick);
 
     const NSMLPacketReplayEntry* replaySlotEntry = nullptr;
     u32 replaySlotTick = tick;
     if (NSMLFindReplayEntryForTick(cfg.Packets, tick, cfg.LiveFallbackWindow, &replaySlotEntry, &replaySlotTick))
     {
-        NSMLWriteReplayEntryToLocalMPSlots(
-            cpu->NDS,
-            *replaySlotEntry,
-            cfg.ReturnLookupTick ? tick : replaySlotTick,
-            cfg.ReturnLookupTick);
+        if (NSMLShouldMirrorPacketsToLocalMPSlots(cpu->NDS))
+        {
+            NSMLWriteReplayEntryToLocalMPSlots(
+                cpu->NDS,
+                *replaySlotEntry,
+                cfg.ReturnLookupTick ? tick : replaySlotTick,
+                cfg.ReturnLookupTick);
+        }
     }
 
     u32 value = 0;
