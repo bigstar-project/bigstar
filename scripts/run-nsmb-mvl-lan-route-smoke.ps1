@@ -5,6 +5,8 @@ param(
     [int]$WaitTimeoutMs = 240000,
     [string]$Exe = "build\debug-windows-x86_64\melonDS.exe",
     [string]$Rom = "roms\nsmb.nds",
+    [string]$HostRom = "",
+    [string]$ClientRom = "",
     [string]$InputScript = "tests\nsmb_mario_vs_luigi.inputs",
     [switch]$GameStateTrace,
     [int]$GameStateTraceInterval = 60,
@@ -151,6 +153,8 @@ param(
     [switch]$PacketBridgeForceMvlLoadThreadClientOnly,
     [int]$PacketBridgeForceMvlLoadThreadStartFrame = 0,
     [int]$PacketBridgeLookupTickDelay = 0,
+    [int]$PacketBridgeLocalInputDelay = -1,
+    [switch]$PacketBridgeNeutralizeLocalInput,
     [int]$PacketBridgeMaxPumpEvents = 64,
     [switch]$PacketBridgeSuppressDisconnect,
     [switch]$PacketBridgeSuppressBlackout,
@@ -390,6 +394,8 @@ if ($LanStartAttempts -gt 1) {
 
 $exePath = (Resolve-Path $Exe).Path
 $romPath = (Resolve-Path $Rom).Path
+$hostSourceRomPath = if ($HostRom) { (Resolve-Path $HostRom).Path } else { $romPath }
+$clientSourceRomPath = if ($ClientRom) { (Resolve-Path $ClientRom).Path } else { $romPath }
 $sourceInputPath = (Resolve-Path $InputScript).Path
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $logRoot = (Resolve-Path $LogDir).Path
@@ -399,19 +405,27 @@ $clientRoot = Join-Path $logRoot "client-rom"
 New-Item -ItemType Directory -Force -Path $hostRoot, $clientRoot | Out-Null
 $hostRom = Join-Path $hostRoot "nsmb.nds"
 $clientRom = Join-Path $clientRoot "nsmb.nds"
-Copy-Item -Force $romPath $hostRom
-Copy-Item -Force $romPath $clientRom
+Copy-Item -Force $hostSourceRomPath $hostRom
+Copy-Item -Force $clientSourceRomPath $clientRom
 
-$romBase = [System.IO.Path]::Combine(
-    [System.IO.Path]::GetDirectoryName($romPath),
-    [System.IO.Path]::GetFileNameWithoutExtension($romPath))
-foreach ($suffix in @(".sav", ".sav.2")) {
-    $source = "$romBase$suffix"
-    if (Test-Path $source) {
-        Copy-Item -Force $source (Join-Path $hostRoot "nsmb$suffix")
-        Copy-Item -Force $source (Join-Path $clientRoot "nsmb$suffix")
+function Copy-SaveSiblings {
+    param(
+        [string]$SourceRom,
+        [string]$TargetRoot
+    )
+
+    $base = [System.IO.Path]::Combine(
+        [System.IO.Path]::GetDirectoryName($SourceRom),
+        [System.IO.Path]::GetFileNameWithoutExtension($SourceRom))
+    foreach ($suffix in @(".sav", ".sav.2")) {
+        $source = "$base$suffix"
+        if (Test-Path $source) {
+            Copy-Item -Force $source (Join-Path $TargetRoot "nsmb$suffix")
+        }
     }
 }
+Copy-SaveSiblings -SourceRom $hostSourceRomPath -TargetRoot $hostRoot
+Copy-SaveSiblings -SourceRom $clientSourceRomPath -TargetRoot $clientRoot
 
 $hostInput = Join-Path $logRoot "host.inputs"
 $clientInput = Join-Path $logRoot "client.inputs"
@@ -1441,6 +1455,20 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LOOKUP_TICK_DELAY -ErrorAction SilentlyContinue
         }
+        $effectivePacketBridgeLocalInputDelay = $PacketBridgeLocalInputDelay
+        if ($effectivePacketBridgeLocalInputDelay -lt 0) {
+            $effectivePacketBridgeLocalInputDelay = $PacketBridgeLookupTickDelay
+        }
+        if ($effectivePacketBridgeLocalInputDelay -gt 0) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_LOCAL_INPUT_DELAY = "$effectivePacketBridgeLocalInputDelay"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOCAL_INPUT_DELAY -ErrorAction SilentlyContinue
+        }
+        if ($PacketBridgeNeutralizeLocalInput) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_NEUTRALIZE_LOCAL_INPUT = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_NEUTRALIZE_LOCAL_INPUT -ErrorAction SilentlyContinue
+        }
         if ($PacketBridgeMaxPumpEvents -gt 0) {
             $env:MELONDS_NSML_PACKET_BRIDGE_MAX_PUMP_EVENTS = "$PacketBridgeMaxPumpEvents"
         } else {
@@ -1754,6 +1782,8 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT_VALUE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAX_TICK_LEAD -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_THROTTLE_TIMEOUT_MS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOCAL_INPUT_DELAY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_NEUTRALIZE_LOCAL_INPUT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_NET_RANDOM_VALUE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_NET_RANDOM_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_NET_RANDOM_AUTO -ErrorAction SilentlyContinue
@@ -1801,6 +1831,8 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_NETPLAY_START_FRAME -ErrorAction SilentlyContinue
     }
     if (-not $PacketBridge) {
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOCAL_INPUT_DELAY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_NEUTRALIZE_LOCAL_INPUT -ErrorAction SilentlyContinue
         if ($PacketBridgeLookupTickDelay -gt 0) {
             $env:MELONDS_NSML_PACKET_REPLAY_LOOKUP_TICK_DELAY = "$PacketBridgeLookupTickDelay"
         }
@@ -2152,6 +2184,8 @@ function Start-MelonLANProcess {
         "packetBridgeLoadLevelPlayerID=$($env:MELONDS_NSML_PACKET_BRIDGE_LOAD_LEVEL_PLAYER_ID)"
         "packetBridgeForceGameLocalPlayerID=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID)"
         "packetBridgeForceGameLocalPlayerIDStartFrame=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_START_FRAME)"
+        "packetBridgeLocalInputDelay=$($env:MELONDS_NSML_PACKET_BRIDGE_LOCAL_INPUT_DELAY)"
+        "packetBridgeNeutralizeLocalInput=$($env:MELONDS_NSML_PACKET_BRIDGE_NEUTRALIZE_LOCAL_INPUT)"
         "packetBridgeLiveFallbackWindow=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW)"
         "packetBridgeLiveFallbackNearest=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST)"
         "packetBridgeLiveFallbackLatestBefore=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_LATEST_BEFORE)"

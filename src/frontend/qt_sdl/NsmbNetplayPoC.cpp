@@ -800,6 +800,9 @@ struct State
     int PacketBridgeMaxFrameLead = -1;
     int PacketBridgeThrottleTimeoutMs = 5000;
     melonDS::u32 PacketBridgeThrottleStartFrame = 0;
+    int PacketBridgeLocalInputDelay = 0;
+    bool PacketBridgeNeutralizeLocalInput = false;
+    std::map<melonDS::u32, InputState> PacketBridgePacketInputs;
     bool DirectMvlBootEnabled = false;
     bool DirectMvlBootHostOnly = false;
     bool DirectMvlBootClientOnly = false;
@@ -1751,10 +1754,32 @@ void CaptureAndSendNSMLPacketLocked(melonDS::u32 frame, melonDS::NDS* nds)
     if (!captured)
         return;
 
+    auto overrideInput = G.PacketBridgePacketInputs.find(frame);
+    if (overrideInput == G.PacketBridgePacketInputs.end() && frame > 0)
+        overrideInput = G.PacketBridgePacketInputs.find(frame - 1);
+    if (overrideInput != G.PacketBridgePacketInputs.end())
+    {
+        keys = (~overrideInput->second.KeyMask) & 0x0FFF;
+        packet[2] = static_cast<melonDS::u8>(keys & 0xFF);
+        packet[3] = static_cast<melonDS::u8>((keys >> 8) & 0xFF);
+    }
+
     (void)keys;
     const melonDS::u32 localPlayer = LocalPlayerID(nds);
     melonDS::NSML_PushMarioVsLuigiRemotePacket(nds, localPlayer, packet);
     SendNSMLPacketLocked(frame, localPlayer, tick, packet);
+
+    if (!G.PacketBridgePacketInputs.empty())
+    {
+        const melonDS::u32 keepFrom = frame > 240 ? frame - 240 : 0;
+        for (auto it = G.PacketBridgePacketInputs.begin(); it != G.PacketBridgePacketInputs.end(); )
+        {
+            if (it->first < keepFrom)
+                it = G.PacketBridgePacketInputs.erase(it);
+            else
+                ++it;
+        }
+    }
 }
 
 melonDS::u32 PacketBridgeCanonicalTick(melonDS::NDS* nds, melonDS::u32 frame)
@@ -7256,6 +7281,10 @@ void InitFromEnvironment()
         0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_THROTTLE_TIMEOUT_MS", 5000));
     G.PacketBridgeThrottleStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_THROTTLE_START_FRAME", 0)));
+    G.PacketBridgeLocalInputDelay = std::max(
+        0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_LOCAL_INPUT_DELAY", 0));
+    G.PacketBridgeNeutralizeLocalInput =
+        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_NEUTRALIZE_LOCAL_INPUT");
     G.DirectMvlBootEnabled = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT");
     G.DirectMvlBootHostOnly = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_HOST_ONLY");
     G.DirectMvlBootClientOnly = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_CLIENT_ONLY");
@@ -7919,6 +7948,30 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     {
         const bool bridgeNetworkActive =
             !G.DeferNetworkUntilStart || G.NetplayStartFrame == 0 || syncFrame >= G.NetplayStartFrame;
+        InputState packetBridgeInput = testInput;
+        if (bridgeNetworkActive && G.PacketBridgeLocalInputDelay > 0)
+        {
+            const melonDS::u32 inputDelay = static_cast<melonDS::u32>(G.PacketBridgeLocalInputDelay);
+            std::lock_guard<std::mutex> lock(G.Mutex);
+            G.LocalInputs.emplace(syncFrame + inputDelay, testInput);
+            auto delayed = G.LocalInputs.find(syncFrame);
+            packetBridgeInput = delayed != G.LocalInputs.end() ? delayed->second : NeutralInput();
+
+            const melonDS::u32 keepFrom = syncFrame > 180 ? syncFrame - 180 : 0;
+            for (auto it = G.LocalInputs.begin(); it != G.LocalInputs.end(); )
+            {
+                if (it->first < keepFrom)
+                    it = G.LocalInputs.erase(it);
+                else
+                    ++it;
+            }
+        }
+        if (bridgeNetworkActive && G.PacketBridgeNeutralizeLocalInput)
+        {
+            std::lock_guard<std::mutex> lock(G.Mutex);
+            G.PacketBridgePacketInputs[syncFrame] = testInput;
+            packetBridgeInput = NeutralInput();
+        }
         if (bridgeNetworkActive)
         {
             {
@@ -7946,7 +7999,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
             ThrottleNSMLPacketBridgeLead(nds, syncFrame);
             WaitForNSMLPacketBridgeRemote(nds, syncFrame);
         }
-        return testInput;
+        return packetBridgeInput;
     }
 
     const bool isLocal = (instanceID == G.LocalInstance);

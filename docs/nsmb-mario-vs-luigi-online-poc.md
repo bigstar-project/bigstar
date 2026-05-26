@@ -10,10 +10,13 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 US 版 ROM `roms/nsmb-us.nds` (`A2DE`) を主対象にする。`external/NSMB-Code-Reference` が US 版のシンボルを持つため、ROM patch と通信 API 解析の精度を優先する。
 
-方針は次の 2 本。
+現在の有望ルートは「全ピアが同じ正準シミュレーションを持ち、入力だけを player packet として交換する」形。
 
-1. ROM patch で LocalMP UI/接続処理に依存しない MvL 専用入口を作る。
-2. 試合中に NSMB が読む packet/input API を WAN adapter に差し替え、NSMB 側の同期処理をできるだけそのまま使う。
+- ROM patch で LocalMP UI/接続処理に依存しない MvL 専用入口を作る。
+- 試合中に NSMB が読む packet/input API を WAN adapter に差し替える。
+- host/client のゲーム内 `Game::localPlayerID` は両方 `0` に固定する。
+- ただし WAN adapter 上の送信者は host=player0、client=player1 として扱う。
+- ローカル実入力は NSMB に直接渡さず、packet としてだけ送る。
 
 NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、試合中は主に入力情報 packet を通信している前提で進める。
 
@@ -43,6 +46,8 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - direct MvL では Net GGID が `0` になるため、試合中 context 判定を `stageGroup=9 && vsMode=1` でも許可。
   - `-PacketBridgeStartFrame` を ARM hook 側にも反映し、StageStart/Scene 切り替え中に adapter が早すぎて介入しないようにした。
   - local player も remote player と同じ `LookupTickDelay` の packet を読むように修正済み。
+  - `-PacketBridgeNeutralizeLocalInput` を追加。ローカル実入力を直接NSMBへ渡さず、送信packetのkeysだけに反映する。
+  - `-HostRom` / `-ClientRom` を追加し、role別ROMを検証可能にした。ただし role別 direct ROM は client 側の player actor 生成が安定せず、現時点の本筋から外す。
   - US direct MvL gameplay 中は legacy LocalMP packet slot mirror を止めるように修正済み。`0x0208B040 + player * 0x3E` の player1 slot が `Entrance::spawnEntrance*` (`0x0208B094+`) と重なり、PacketBridge 開始後に `Player::viewTransitState` で data abort していたため。
 - 自動検証
   - screenshot / game-state trace / packet replay log / packet bridge trace に対応。
@@ -75,12 +80,16 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ### 入力 packet 差し替え
 
-成功済み。
+大きく前進。
 
 - host/player0 の RIGHT/A/B 入力が client 側 `player=0` packet として読まれる。
 - client/player1 の RIGHT/A/B 入力が host 側 `player=1` packet として読まれる。
-- host/player0 RIGHT、client/player1 LEFT の同時入力で、frame 3600 まで主要 actor/input/star 関連 trace の mismatch は `0`。
-- ログ: `logs/nsmvl-us-direct-entry-both-different-3600-20260526`
+- `PacketBridgeStartFrame=1500` でpacketを事前に溜めると、gameplay開始後の `Net::getPacketByte` / `Net::getConsoleKeys` は host/client で同じ値を返す。
+- ただし `Game::localPlayerID` を host=0/client=1 にすると、packet APIが一致していても local/remote 処理差で player actor がズレる。
+- `Game::localPlayerID` を両方 `0` に固定し、clientは送信上だけ `player=1` packet を出すと、frame 3600 まで player0/player1座標、死亡状態、スター位置の mismatch は `0`。
+- ログ: `logs/nsmvl-us-direct-entry-both-different-packet-only-canonical-local0-3600-20260526`
+
+この結果から、当面は「各ピアのゲーム内 local player は正準化する。操作プレイヤーの違いはWAN adapter側だけで表現する」方針で進める。
 
 ### MvL 管理状態とスター生成
 
@@ -151,17 +160,18 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ## 現在の課題
 
-1. US direct MvL + shared `Net::random` + PacketBridge で、frame 3000 まで host/client のスター位置と `Entrance::spawnEntrance*` 維持を確認済み。
-2. 次は無操作ではなく、host/client の実入力を WAN packet API 経由で流した状態で、actor 座標、スター取得、スター再生成が自然に進むかを検証する。
-3. 8コインアイテム取得は自動化が難しいため後回し。まずスター取得/再生成を trace ベースで確認する。
-4. まだ実 WAN 遅延条件では未検証。ローカル 2プロセスで packet adapter の安定性を上げてから、遅延/packet loss 条件へ進む。
+1. 3600 frame の双方向入力同期は成立したが、これはローカル2プロセス、固定遅延、packet lossなしの条件。
+2. `Game::localPlayerID=0` 正準化でプレイ表示、カメラ、UI、勝敗処理が実用上問題ないかは未確認。
+3. まだスター取得/再生成、死亡/復帰後の長時間同期、実WAN遅延/packet loss条件は未検証。
+4. 8コインアイテム取得は自動化が難しいため後回し。
 
 ## 次にやること
 
-1. `host_right` / `client_right` / `both_different` 系の入力あり検証を、slot overlap 修正後の US direct MvL ROM で再実行する。
-2. スター取得スクリプトを修正し、取得判定を `player*BattleStars` / `player*CollectedStars` / star actor 再生成で確認する。死亡演出や見た目だけで成功判定しない。
-3. `flag=1 + shared seed + PacketBridge` で 3600 frame 以上、host/client とも data abort / disconnect なしに進むことを確認する。
-4. その後、8コインアイテム、死亡/復帰、長時間プレイ、WAN 遅延条件を順に検証する。
+1. canonical local0 + packet-only 構成で `host_right` / `client_right` 単独入力も確認する。
+2. 3600 frame より長い同期検証を行い、死亡/復帰後も mismatch しないか確認する。
+3. スター取得スクリプトを修正し、取得判定を `player*BattleStars` / `player*CollectedStars` / star actor 再生成で確認する。死亡演出や見た目だけで成功判定しない。
+4. WAN想定の遅延/packet loss/ジッタをスクリプトまたはENet層で注入し、必要な入力遅延と待機条件を決める。
+5. 表示・操作上、clientが `Game::localPlayerID=0` のままで問題ないかをスクリーンショットと操作ログで確認する。
 
 ## 検証ルール
 
