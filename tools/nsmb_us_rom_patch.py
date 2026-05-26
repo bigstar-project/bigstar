@@ -272,6 +272,8 @@ def build_direct_loadlevel_stub(
     stage: int,
     player_id: int,
     rng_seed: int,
+    force_scene_settings: int | None = None,
+    load_mvl_files_addr: int | None = None,
 ) -> list[int]:
     stack_values = [
         0,          # act
@@ -298,12 +300,27 @@ def build_direct_loadlevel_stub(
         with_cond(POP_PC | (1 << 4), 0),    # popeq {r4, pc}
         encode_mov_imm(12, 0x77),
         encode_str_imm(12, 4, 0x16C),
+    ]
+    if load_mvl_files_addr is not None:
+        bl_load_files_addr = start_addr + len(words) * 4
+        words.append(encode_bl(bl_load_files_addr, load_mvl_files_addr))
+    words.extend([
         encode_sub_sp_imm(0x38),
         encode_mov_imm(0, scene),
         encode_mov_imm(1, 1),          # vs mode
         encode_mov_imm(2, 9),          # MvL stage group
         encode_mov_imm(3, stage),
-    ]
+    ])
+    literals: list[int] = []
+    literal_refs: list[tuple[int, int, int, int]] = []
+
+    def emit_ldr_literal(rd: int, value: int, *, cond: int = 0xE) -> None:
+        literal_index = len(literals)
+        literals.append(value)
+        word_index = len(words)
+        words.append(0)
+        literal_refs.append((word_index, rd, literal_index, cond))
+
     current_ip_value: int | None = None
     for i, value in enumerate(stack_values):
         if current_ip_value != value:
@@ -312,12 +329,23 @@ def build_direct_loadlevel_stub(
         words.append(encode_str_imm(12, 13, i * 4))
 
     bl_addr = start_addr + len(words) * 4
+    words.append(encode_bl(bl_addr, load_level_addr))
+    if force_scene_settings is not None:
+        emit_ldr_literal(0, 0x02088F38)  # Scene::nextSceneSettings
+        emit_ldr_literal(1, force_scene_settings)
+        words.append(encode_str_imm(1, 0, 0))
     words.extend([
-        encode_bl(bl_addr, load_level_addr),
         encode_add_sp_imm(0x38),
         encode_mov_imm(0, 1),
         POP_PC | (1 << 4),             # pop {r4, pc}
     ])
+
+    literal_start_addr = start_addr + (len(words) * 4)
+    for word_index, rd, literal_index, cond in literal_refs:
+        instruction_addr = start_addr + (word_index * 4)
+        literal_addr = literal_start_addr + (literal_index * 4)
+        words[word_index] = encode_ldr_pc_literal(rd, instruction_addr, literal_addr, cond=cond)
+    words.extend(literals)
     return words
 
 
@@ -334,6 +362,8 @@ def patch_direct_mvl_entry(
     force_ready_progress: bool,
     force_transfer_result: int | None,
     clear_actor_category_mask: bool,
+    force_scene_settings: int | None,
+    call_load_mvl_files: bool,
 ) -> list[str]:
     arm9 = rom.loadArm9()
     overlays = rom.loadArm9Overlays()
@@ -369,6 +399,9 @@ def patch_direct_mvl_entry(
             stage=stage,
             player_id=player_id,
             rng_seed=rng_seed,
+            force_scene_settings=force_scene_settings,
+            load_mvl_files_addr=symbols["_ZN14VSConnectScene19loadMvsLFilesThreadEv"]
+            if call_load_mvl_files else None,
         )
         ov_id, old = patch_overlay_words(overlays, update_addr, stub)
         changes.append(
@@ -586,6 +619,8 @@ def main() -> int:
     p_direct.add_argument("--force-ready-progress", action="store_true")
     p_direct.add_argument("--force-transfer-result", type=lambda x: int(x, 0))
     p_direct.add_argument("--clear-actor-category-mask", action="store_true")
+    p_direct.add_argument("--force-scene-settings", type=lambda x: int(x, 0), default=None)
+    p_direct.add_argument("--call-load-mvsl-files", action="store_true")
     p_fake = sub.add_parser("fake-opponent")
     p_fake.add_argument("--force-confirm-load", action="store_true")
     p_fake.add_argument("--force-loadgame-progress", action="store_true")
@@ -614,6 +649,8 @@ def main() -> int:
             force_ready_progress=args.force_ready_progress,
             force_transfer_result=args.force_transfer_result,
             clear_actor_category_mask=args.clear_actor_category_mask,
+            force_scene_settings=args.force_scene_settings,
+            call_load_mvl_files=args.call_load_mvsl_files,
         )
     elif args.cmd == "fake-opponent":
         changes = patch_fake_opponent(

@@ -92,23 +92,30 @@ NSMB Central の解析では、MvL は接続時に RNG seed を同期し、試�
   - ただし tick ahead 待ちは timeout が増え、片側が遅れるため本命ではない。
   - `MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_LATEST_BEFORE` + `MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK` の方が、入力packetを「届かないフレームでは直近入力を再利用する」形になり、WAN adapter として筋が良い。
   - フロント側の packet 送信 player ID はゲーム内 `localPlayerID` に引きずられず、`MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER` を優先するよう修正済み。
+- direct MvL ROM patch がステージ開始まで進む条件を一部特定した。
+  - `Game::loadLevel` 後の `Scene::nextSceneSettings` は `0x00B4FF00` が必要。`0x00B40000` のままだと StageScene が生成されず黒画面になる。
+  - `VSConnectScene::loadMvsLFilesThread` を direct load 前に呼ぶ必要がある。呼ばないとStageScene生成後にリソース/heap系の null 参照で落ちる。
+  - `tools/nsmb_us_rom_patch.py direct-mvl-entry` に `--force-scene-settings` と `--call-load-mvsl-files` を追加済み。
+  - 生成例: `roms/nsmb-us-direct-mvl-entry-ready-transfer-clear-mask-settings-files.nds`
+  - 単体検証では frame 900 以降に `stageGroup=9, vsMode=1, scene=3, StageScene/ActorManager/Player2体` まで到達。
+  - 2プロセス PacketBridge 検証でも frame 1400 まで両側が同じステージ状態へ到達。
 
 ## 現在の課題
 
-1. lower PacketBridge 自体は送受信できるが、現在の fake-opponent/手動UI進行ルートでは長めに進めると scene/session の不自然さで abort する。
+1. lower PacketBridge 自体は送受信できるが、fake-opponent/手動UI進行ルートでは長めに進めると scene/session の不自然さで abort する。
    - 例: `logs/nsmvl-us-packetbridge-two-proc-force-game-playerid-20260526`
    - host は frame 1453 付近、client は frame 1916 付近で data abort。
    - client は `stageGroup=9, vsMode=1, scene=3` まで到達するが、player actor 出現前に落ちる。
 2. exact tick 方式はWANでは脆い。直近packet fallback + lookup tick正規化を前提にする。
 3. category mask `0x020CA850` が本来どの scene/session 条件で解除されるかは未解決。暫定 ROM patch では `--clear-actor-category-mask` で初期値を 0 にする。
-4. UI 操作なし MvL 入口は未完成。fake-opponent経由で自然遷移を無理に再現するより、ROM patch 側で MvL 開始状態を作る方向へ寄せる。
+4. direct ROM patch でステージ開始までは届いたが、host/client の screenshot でHUDアイテム表示差分がある。localPlayer別表示なのか、実state desyncなのか未分類。
 
 ## 次にやること
 
-1. `latest-before fallback + lookup tick正規化 + player ID固定` を標準検証設定にする。
-2. scene/session abort の原因を追う。特に fake-opponent UI進行に依存せず、ROM patch で MvL 開始状態を直接作る方向を優先する。
-3. `VSStageIntro` / `StageScene` に必要な session 値、manager/global 値、actor category mask の自然条件を特定する。
-4. lower PacketBridge は、UI開始ルートが安定した後に長時間検証へ戻す。
+1. direct ROM patch で `latest-before fallback + lookup tick正規化 + player ID固定` を標準検証設定にする。
+2. extended state trace を使い、frame 1200 付近のHUDアイテム差分が localPlayer 別表示か、ゲーム状態のdesyncかを切り分ける。
+3. 入力が入る frame 1980 以降まで2プロセス検証を伸ばし、remote inputが相手playerの移動に反映されるか確認する。
+4. `VSStageIntro` / `StageScene` に必要な残りの session 値、manager/global 値、actor category mask の自然条件を特定する。
 5. `0x020CA850` の自然な解除条件も継続して追い、`--clear-actor-category-mask` が恒久 patch として妥当か、それとも session 値を作るべきか判断する。
 
 ## 検証ルール
