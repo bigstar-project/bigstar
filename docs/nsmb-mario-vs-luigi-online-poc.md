@@ -4,124 +4,115 @@
 
 New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` で WAN 越しに対戦できる形へ持っていく。
 
-過去に試した `LocalMP 2インスタンス * 2プロセス`、savestate 共有、試合開始後の WAN 切り替え、actor/state 強制同期は、通信切断、desync、内部状態不一致、低 FPS が大きく、最終方針としては採用しない。
+過去に試した `LocalMP 2インスタンス * 2プロセス`、savestate共有、試合開始後のWAN切替、actor/state強制同期は、通信切断・desync・不自然な内部状態・低FPSの問題が大きいため、最終方針から外す。
 
 ## 現在の方針
 
-US 版 ROM `roms/nsmb-us.nds` (`A2DE`) を主対象にする。`external/NSMB-Code-Reference` が US 版シンボルなので、ROM パッチと逆アセンブルの精度を優先する。
+US版 ROM `roms/nsmb-us.nds` (`A2DE`) を主対象にする。`external/NSMB-Code-Reference` が US 版のシンボルを持つため、ROM patch と通信API解析の精度を優先する。
 
-主方針は次の2本。
+主方針は次の2つ。
 
-1. ROM パッチまたは低レベル adapter で、LocalMP UI/接続処理に依存しない MvL 専用入口を作る。
-2. 試合中に NSMB が読む packet/input 境界を WAN adapter に差し替え、NSMB 側の同期処理をできるだけそのまま使う。
+1. ROM patch または低レベル adapter で、LocalMP UI/接続処理に依存しない MvL 専用入口を作る。
+2. 試合中に NSMB が読む packet/input API を WAN adapter に差し替え、NSMB 側の同期処理をできるだけそのまま使う。
 
-NSMB Central の解析では、MvL は接続時に RNG seed を同期し、試合中は主に入力情報を通信する。したがって、外から座標やスター状態を強制同期するより、`Net::getPacket` / `getConsoleKeys` / packet tick/action/byte を正しく差し替える方が本筋。
+NSMB Central の解析どおり、MvL は接続時に RNG seed を同期し、試合中は主に入力情報 packet を通信している前提で進める。
 
 参考: https://bookstack.nsmbcentral.net/books/new-super-mario-bros/page/mario-vs-luigi
 
 ## 実装済み
 
-- US 版 ROM 解析ツール `tools/nsmb_us_rom_tool.py`
-  - `symbols9.x` のシンボル解決
-  - ARM9/overlay 逆アセンブル
-  - 重複 overlay 対策の `disasm --overlay-id`
-- US 版 ROM パッチツール `tools/nsmb_us_rom_patch.py`
-  - `rng-constant`
+- US版 ROM 解析/patch tooling
+  - `tools/nsmb_us_rom_tool.py`
+  - `tools/nsmb_us_rom_patch.py`
   - `direct-mvl-entry`
-  - `fake-opponent`
-  - `--force-confirm-load`
-  - `--force-loadgame-progress`
-  - `--mirror-packets`
-  - `--fake-net-state-on-nickname`
+  - `--force-ready-progress`
   - `--force-transfer-result`
-  - `direct-mvl-entry --force-ready-progress`
-  - `direct-mvl-entry --force-transfer-result`
   - `--clear-actor-category-mask`
-- 自動検証フック
-  - 入力スクリプト
-  - screenshot
-  - RAM dump
-  - game state trace
-  - calltrace
-  - object lifecycle summary
-  - actor category mask 強制診断
-- 主要 US アドレス確認
-  - `Game::loadLevel = 0x0200696C`
-  - `Scene::switchScene = 0x020131FC`
-  - `Net::getPacket = 0x0200EB50`
-  - `Net::getConsoleKeys = 0x0200E854`
-  - `Net::getPacketByte = 0x0200EACC`
-  - `Net::getPacketTick = 0x0200EB10`
-  - `Net::getPacketAction = 0x0200EB30`
-  - `Net::updatePacket = 0x0201031C`
-  - `Net::Core::transferPacket = 0x0200FAE0`
-  - `Stage::stageLayout = 0x020CAD40`
-  - `Player::onUpdate = 0x020FD1D4` in overlay10
-  - `Actor::preUpdate` category mask = `0x020CA850`
-- US 版 PacketBridge の主要アドレス移植
-  - MvL GGID は US/A2DE runtime では `0x00400150`。過去診断用の `0x42` と両方を MvL 判定として扱う。
-  - Net/session 周辺の A2DJ アドレスを US/A2DE に移植済み。
-  - US 下位 Wifi API hook を追加済み。
-    - `Wifi::isConsoleCommunicating = 0x02046C44`
-    - `Wifi::getSharedData = 0x02046E98`
-    - `Wifi::updateSharedData = 0x02046ECC`
-  - `MELONDS_NSML_PACKET_BRIDGE_ONLY=1` でも `MELONDS_NSML_WAIT_FOR_PEER=1` を尊重し、host が client 接続前に先行しすぎないようにした。
+  - `--force-scene-settings`
+  - `--call-load-mvsl-files`
+- direct MvL ROM
+  - 生成物: `roms/nsmb-us-direct-mvl-entry-ready-transfer-clear-mask-settings-files.nds`
+  - `Game::loadLevel` 後の `Scene::nextSceneSettings=0x00B4FF00` が必要。
+  - `VSConnectScene::loadMvsLFilesThread` 呼び出しが必要。
+  - single process で MvL stage / HUD / player actors 到達済み。
+- PacketBridge
+  - US版下位 Wifi API hook を移植済み。
+  - `Net::getConsoleKeys`
+  - `Net::getPacketByte`
+  - `Net::getPacketTick`
+  - `Net::getPacketAction`
+  - direct MvL では Net GGID が `0` になるため、試合中 context 判定は `stageGroup=9 && vsMode=1` を許容するよう修正。
+  - `-PacketBridgeStartFrame` を ARM 側 hook にも反映し、StageStart/Scene切替中に adapter が早すぎて介入しないようにした。
+- 自動検証
+  - host/client 別入力スクリプト対応済み。
+  - screenshot / game-state trace / packet replay log / packet bridge trace 対応済み。
+  - player powerup / inventory powerup / dead / character を extended game-state trace に追加済み。
 
-## 分かっていること
+## 最新の検証結果
 
-- `fake-opponent --force-confirm-load --force-loadgame-progress` ルートでは、1インスタンスで MvL のステージ/HUD/ミニマップ表示まで到達できる。
-- `--mirror-packets` により `Net::getPacket(consoleID)` がローカル `sendPacket` を返す診断ルートは作成済み。
-- `inputPlayer1Held` に 2P 入力相当の値が入ることは確認済み。ただし、2P actor はまだ自然には動かない。
-- `Player::onUpdate` を method body として直接呼ぶ診断は abort する。自然な process/update 文脈なしに直接呼ぶのは不適切。
-- fake-opponent 可視ルートで Player が動かなかった主因の一つは `Actor::preUpdate` の category mask。`0x020CA850` が `0x26` のままだと `Actor::preUpdate` が false を返し、`StageEntity::onUpdate` / `Player::onUpdate` に進まない。
-- `MELONDS_NSML_FORCE_ACTOR_CATEGORY_MASK=1` かつ value `0` の診断では、`StageEntity::onUpdate` と `Player::onUpdate` が自然な vtable 経路で呼ばれ、player 座標/速度/死亡カウントが変化することを確認済み。
-- write trace により、`loadMvsLFilesThread` overlay52 `0x02152E64-0x02152E74` が `0x020CA850` に `0x26` を書くことを確認済み。
-- `fake-opponent --clear-actor-category-mask` ROM では、runtime force なしで `Player::onUpdate` が呼ばれ、player 座標/速度/死亡カウントが変化することを確認済み。
-- `tests/nsmb_us_fake_opponent_gameplay_probe.inputs` で、mask 解除済み ROM 上の Mario/Luigi が画面内に出て動作し、敵接触/死亡まで進むことを screenshot で確認済み。
-- state trace の player transform オフセットを修正済み。NSMB の `Vec3` は実メモリ上で 16 byte で、先頭4 byte が vtable、座標は `+4/+8/+12` にある。従来は `position.x` の代わりに `Vec3` vtable を読んでいた。
-- 修正後の `logs/nsmvl-us-visible-clear-mask-gameplay-probe-fixed-transform-20260525` では、screenshot 上の横移動と CSV の `playerActor*X` が対応することを確認済み。
-- `direct-mvl-entry` は入力スクリプト併用で `Ready!` 画面まで到達した。`--force-ready-progress` だけ、または `--force-ready-progress --force-transfer-result 8` では Select a Game へ戻るため、VSStageIntro の待ち以外にも自然な session/scene 状態が必要。
-- 黒画面 session ルートは StageScene/process link が自然ルートと一致せず、現時点では補助診断扱い。
-- US 版下位 Wifi PacketBridge は hook が発火する段階まで到達した。
-  - single process smoke では `02046ECC` / `02046C44` / `02046E98` の lower hook 発火を確認済み。
-  - two process smoke では ENet 経由の packet 送受信を確認済み。
-  - host 側は local/remote 両 player の `hasPacket` / `getPacket` が成立するケースを確認済み。
-  - client 側は remote packet 受信と `hasPacket(player=0)` 成立までは見えているが、同じ早期フレーム帯で `getPacket(player=0)` が安定して ptr を返すところまでは未確認。
-- lower PacketBridge の tick ずれ対策を追加した。
-  - `MELONDS_NSML_PACKET_BRIDGE_WAIT_TICK_AHEAD` を追加し、RunFrame 前に数 tick 先の remote packet を待てるようにした。
-  - ただし tick ahead 待ちは timeout が増え、片側が遅れるため本命ではない。
-  - `MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_LATEST_BEFORE` + `MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK` の方が、入力packetを「届かないフレームでは直近入力を再利用する」形になり、WAN adapter として筋が良い。
-  - フロント側の packet 送信 player ID はゲーム内 `localPlayerID` に引きずられず、`MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER` を優先するよう修正済み。
-- direct MvL ROM patch がステージ開始まで進む条件を一部特定した。
-  - `Game::loadLevel` 後の `Scene::nextSceneSettings` は `0x00B4FF00` が必要。`0x00B40000` のままだと StageScene が生成されず黒画面になる。
-  - `VSConnectScene::loadMvsLFilesThread` を direct load 前に呼ぶ必要がある。呼ばないとStageScene生成後にリソース/heap系の null 参照で落ちる。
-  - `tools/nsmb_us_rom_patch.py direct-mvl-entry` に `--force-scene-settings` と `--call-load-mvsl-files` を追加済み。
-  - 生成例: `roms/nsmb-us-direct-mvl-entry-ready-transfer-clear-mask-settings-files.nds`
-  - 単体検証では frame 900 以降に `stageGroup=9, vsMode=1, scene=3, StageScene/ActorManager/Player2体` まで到達。
-  - 2プロセス PacketBridge 検証でも frame 1400 まで両側が同じステージ状態へ到達。
+標準に近い検証設定:
+
+- direct ROM
+- `-PacketBridgeStartFrame 1800`
+- `-PacketBridgeMaxFrameLead 8`
+- `-PacketBridgeLookupTickDelay 10`
+- `-PacketBridgeLiveFallbackLatestBefore`
+- `-PacketBridgeReplayReturnLookupTick`
+
+### host入力 -> client側player0
+
+ログ:
+
+- `logs/nsmvl-us-direct-entry-host-right-delay10-20260526`
+
+結果:
+
+- host が player0 に `RIGHT+A` / `RIGHT+B` / `RIGHT` を入力。
+- client 側 replay hook で `player=0`, `keys=0x11/0x12`, `hit=1` を確認。
+- client 側 `inputPlayer0Held` が `0x11/0x12` に変化。
+- client 側 player0 actor 座標が移動。
+- data abort / fatal / remote input timeout なし。
+
+### client入力 -> host側player1
+
+ログ:
+
+- `logs/nsmvl-us-direct-entry-client-right-delay10-20260526`
+
+結果:
+
+- client が player1 に `RIGHT+A` / `RIGHT+B` / `RIGHT` を入力。
+- host 側 replay hook で `player=1`, `keys=0x11/0x12`, `hit=1` を確認。
+- host 側 `inputPlayer1Held` が `0x11/0x12` に変化。
+- host 側 player1 actor 座標が移動。
+- data abort / fatal / remote input timeout なし。
+
+この時点で、`melonDS 1インスタンス * 2プロセス` の localhost WAN adapter で、試合中の双方向入力packet差し替えが成立し始めている。
 
 ## 現在の課題
 
-1. lower PacketBridge 自体は送受信できるが、fake-opponent/手動UI進行ルートでは長めに進めると scene/session の不自然さで abort する。
-   - 例: `logs/nsmvl-us-packetbridge-two-proc-force-game-playerid-20260526`
-   - host は frame 1453 付近、client は frame 1916 付近で data abort。
-   - client は `stageGroup=9, vsMode=1, scene=3` まで到達するが、player actor 出現前に落ちる。
-2. exact tick 方式はWANでは脆い。直近packet fallback + lookup tick正規化を前提にする。
-3. category mask `0x020CA850` が本来どの scene/session 条件で解除されるかは未解決。暫定 ROM patch では `--clear-actor-category-mask` で初期値を 0 にする。
-4. direct ROM patch でステージ開始までは届いたが、host/client の screenshot でHUDアイテム表示差分がある。localPlayer別表示なのか、実state desyncなのか未分類。
+1. まだ短時間の非対称入力検証のみ。実戦に近い長時間走行で desync / disconnect / black screen が出ないか未確認。
+2. `PacketBridgeLookupTickDelay=10` は暫定値。WAN遅延に対して固定値で足りるか、動的調整が必要かを検証する。
+3. host/client の actor 座標は近いが完全一致ではないフレームがある。入力遅延・tick正規化・フレーム先行制御のどれで詰めるべきか追加検証が必要。
+4. HUDアイテム差分は `playerInventoryPowerup` trace で分類できるようになったが、長めの試合でまだ確認していない。
+5. direct ROM 起動はまだメニュー入力スクリプトに依存している。最終的には UI 操作なしで MvL 開始状態へ入る ROM patch に寄せたい。
 
 ## 次にやること
 
-1. direct ROM patch で `latest-before fallback + lookup tick正規化 + player ID固定` を標準検証設定にする。
-2. extended state trace を使い、frame 1200 付近のHUDアイテム差分が localPlayer 別表示か、ゲーム状態のdesyncかを切り分ける。
-3. 入力が入る frame 1980 以降まで2プロセス検証を伸ばし、remote inputが相手playerの移動に反映されるか確認する。
-4. `VSStageIntro` / `StageScene` に必要な残りの session 値、manager/global 値、actor category mask の自然条件を特定する。
-5. `0x020CA850` の自然な解除条件も継続して追い、`--clear-actor-category-mask` が恒久 patch として妥当か、それとも session 値を作るべきか判断する。
+1. `host_right` / `client_right` の検証を 3000〜5000 frame に伸ばし、actor座標・input・inventory・star状態の一致/差分を確認する。
+2. `PacketBridgeLookupTickDelay` と `PacketBridgeMaxFrameLead` の組み合わせを整理し、最小限の入力遅延で安定する設定を探す。
+3. 片方だけでなく、両者が同時に異なる入力を入れるスクリプトを追加する。
+4. UI操作を減らす direct MvL ROM patch を進める。
+5. 必要なら `Net::getPacket` そのものを返す hook も追加し、byte/tick/action/keys の個別hookだけで不足する場面を潰す。
 
 ## 検証ルール
 
 - `frame limit reached` だけでは成功扱いにしない。
-- 黒画面、通信切断表示、片側だけ進行、HUD 不一致、actor 不一致は失敗扱いにする。
-- screenshot と CSV/RAM/calltrace の両方で確認する。
-- ROM 生成物、savestate、巨大ログは git に含めない。
-- docs は古い追記を残し続けず、現在の方針、到達点、課題、次作業が分かる形に保つ。
+- 成功条件は、少なくとも次を確認する。
+  - data abort / fatal / undefined がない。
+  - 「通信が切断されました」画面が出ない。
+  - host/client で想定した player input が game-state trace に出る。
+  - 対応する actor 座標が動く。
+  - screenshot が MvL stage として読める。
+- ROM生成物、savestate、巨大ログは git に含めない。
+- docs は古い追記を残し続けず、現在の方針・達成済み・課題・次作業がすぐ読める形に保つ。

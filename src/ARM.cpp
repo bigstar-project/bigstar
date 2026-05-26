@@ -391,9 +391,12 @@ static bool IsNSMLMarioVsLuigiGGID(u32 value)
 
 static bool IsNSMLMarioVsLuigiGameplay(NDS& nds)
 {
+    // Direct-MvL ROM patches can enter the VS stage without preserving the
+    // normal Net GGID slot. In gameplay, stageGroup=9 and vsMode=1 are the
+    // stronger signal for this PoC path; requiring GGID here disables the WAN
+    // packet adapter exactly when the stage has started.
     return nds.ARM9Read32(0x02085A18) == 9
-        && nds.ARM9Read32(0x02085A84) == 1
-        && IsNSMLMarioVsLuigiGGID(nds.ARM9Read32(0x02088858));
+        && nds.ARM9Read32(0x02085A84) == 1;
 }
 
 static bool NSMLPacketBridgeAllowPreGame()
@@ -404,8 +407,26 @@ static bool NSMLPacketBridgeAllowPreGame()
     return enabled != 0;
 }
 
+static bool NSMLPacketBridgeActiveForFrame(NDS& nds)
+{
+    if (!NSMLPacketBridgeEnabled())
+        return false;
+
+    static int deferUntilStart = -1;
+    static u32 startFrame = 0xFFFFFFFF;
+    if (deferUntilStart < 0)
+        deferUntilStart = NSMLEnvFlag("MELONDS_NSML_DEFER_NETWORK_UNTIL_START") ? 1 : 0;
+    if (startFrame == 0xFFFFFFFF)
+        startFrame = NSMLPacketBridgeEnvFrame("MELONDS_NSML_NETPLAY_START_FRAME", 0);
+
+    return !deferUntilStart || nds.NumFrames >= startFrame;
+}
+
 static bool IsNSMLMarioVsLuigiPacketContext(NDS& nds)
 {
+    if (NSMLPacketBridgeEnabled() && !NSMLPacketBridgeActiveForFrame(nds))
+        return false;
+
     if (IsNSMLMarioVsLuigiGameplay(nds))
         return true;
 
@@ -2816,13 +2837,13 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
     };
 
     Op op = Op::None;
-    if (instrAddr == 0x0200E700)
+    if (instrAddr == 0x0200E854) // Net::getConsoleKeys(unsigned short)
         op = Op::Keys;
-    else if (instrAddr == 0x0200E978)
+    else if (instrAddr == 0x0200EACC) // Net::getPacketByte(unsigned short, unsigned long)
         op = Op::Byte;
-    else if (instrAddr == 0x0200E9BC)
+    else if (instrAddr == 0x0200EB10) // Net::getPacketTick(unsigned short)
         op = Op::Tick;
-    else if (instrAddr == 0x0200E9DC)
+    else if (instrAddr == 0x0200EB30) // Net::getPacketAction(unsigned short)
         op = Op::Action;
     else
         return false;

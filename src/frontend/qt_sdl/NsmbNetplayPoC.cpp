@@ -89,6 +89,10 @@ constexpr melonDS::u32 kInputPlayerKeysPressedAddr = 0x02087664;
 constexpr melonDS::u32 kStageActorFreezeFlagAddr = 0x020CA28C;
 constexpr melonDS::u32 kActorCategoryMaskAddr = 0x020CA850;
 constexpr melonDS::u32 kGamePlayerGlobalBlockAddr = 0x0208B324;
+constexpr melonDS::u32 kGamePlayerPowerupAddr = 0x0208B324;
+constexpr melonDS::u32 kGamePlayerDeadAddr = 0x0208B328;
+constexpr melonDS::u32 kGamePlayerInventoryPowerupAddr = 0x0208B32C;
+constexpr melonDS::u32 kGamePlayerCharacterAddr = 0x0208B330;
 constexpr melonDS::u32 kGamePlayerTransitionStatusAddr = 0x0208B354; // Game::playerVSPipeState
 constexpr melonDS::u32 kGamePlayerCountAddr = 0x0208B348;
 constexpr melonDS::u32 kGamePlayerBattleStarsAddr = 0x0208B36C;
@@ -434,6 +438,14 @@ struct GameStateSample
     melonDS::u32 PlayerCount = 0;
     melonDS::u32 PlayerTransitionStatus0 = 0;
     melonDS::u32 PlayerTransitionStatus1 = 0;
+    melonDS::u32 Player0Powerup = 0;
+    melonDS::u32 Player1Powerup = 0;
+    melonDS::u32 Player0InventoryPowerup = 0;
+    melonDS::u32 Player1InventoryPowerup = 0;
+    melonDS::u32 Player0Dead = 0;
+    melonDS::u32 Player1Dead = 0;
+    melonDS::u32 Player0Character = 0;
+    melonDS::u32 Player1Character = 0;
     melonDS::u32 Player0BattleStars = 0;
     melonDS::u32 Player1BattleStars = 0;
     melonDS::u32 Player0Coins = 0;
@@ -5396,6 +5408,14 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.PlayerCount = nds->ARM9Read32(kGamePlayerCountAddr);
     sample.PlayerTransitionStatus0 = nds->ARM9Read32(kGamePlayerTransitionStatusAddr);
     sample.PlayerTransitionStatus1 = nds->ARM9Read32(kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32));
+    sample.Player0Powerup = nds->ARM9Read8(kGamePlayerPowerupAddr);
+    sample.Player1Powerup = nds->ARM9Read8(kGamePlayerPowerupAddr + 1);
+    sample.Player0InventoryPowerup = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr);
+    sample.Player1InventoryPowerup = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr + 1);
+    sample.Player0Dead = nds->ARM9Read8(kGamePlayerDeadAddr);
+    sample.Player1Dead = nds->ARM9Read8(kGamePlayerDeadAddr + 1);
+    sample.Player0Character = nds->ARM9Read8(kGamePlayerCharacterAddr);
+    sample.Player1Character = nds->ARM9Read8(kGamePlayerCharacterAddr + 1);
     sample.Player0BattleStars = nds->ARM9Read32(kGamePlayerBattleStarsAddr);
     sample.Player1BattleStars = nds->ARM9Read32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32));
     sample.Player0Coins = nds->ARM9Read32(kGamePlayerCoinsAddr);
@@ -5633,6 +5653,14 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.PlayerActor1VelY);
     MixGameStateValue(sample.Hash, sample.PlayerActor1VelZ);
     MixGameStateValue(sample.Hash, sample.PlayerCount);
+    MixGameStateValue(sample.Hash, sample.Player0Powerup);
+    MixGameStateValue(sample.Hash, sample.Player1Powerup);
+    MixGameStateValue(sample.Hash, sample.Player0InventoryPowerup);
+    MixGameStateValue(sample.Hash, sample.Player1InventoryPowerup);
+    MixGameStateValue(sample.Hash, sample.Player0Dead);
+    MixGameStateValue(sample.Hash, sample.Player1Dead);
+    MixGameStateValue(sample.Hash, sample.Player0Character);
+    MixGameStateValue(sample.Hash, sample.Player1Character);
     MixGameStateValue(sample.Hash, sample.Player0BattleStars);
     MixGameStateValue(sample.Hash, sample.Player1BattleStars);
     MixGameStateValue(sample.Hash, sample.Player0Coins);
@@ -6194,6 +6222,14 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         const melonDS::u64 netStateHash = HashMainRAMRange(nds, kNetStateBaseAddr, 0x180);
 
         G.GameStateTrace << ",0x" << sample.PlayerCount
+                         << ",0x" << sample.Player0Powerup
+                         << ",0x" << sample.Player1Powerup
+                         << ",0x" << sample.Player0InventoryPowerup
+                         << ",0x" << sample.Player1InventoryPowerup
+                         << ",0x" << sample.Player0Dead
+                         << ",0x" << sample.Player1Dead
+                         << ",0x" << sample.Player0Character
+                         << ",0x" << sample.Player1Character
                          << ",0x" << sample.Player0BattleStars
                          << ",0x" << sample.Player1BattleStars
                          << ",0x" << sample.Player0Coins
@@ -7064,7 +7100,7 @@ void InitFromEnvironment()
         {
             G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,arm9PC,arm9LR,arm9SP,arm9CPSR,appFrameLength,appUpdateTask,appSleepPhase,appSleepControl,appSleeping,appSleepPhaseTimer,appSleepWakeUpTimer,appBootParam,appBootTarget,appBootScene,ggid,netCurrentLanguage,netLocalAid,netState14,netState1C,netState20,netState24,netExpectedConsoleCount,netMultiBootSession,netSessionState,netModuleState,netMaxSessionChildren,netMaxConsoleCount,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,stageActorFreezeFlag,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor0PlayerID,playerActor0TransitionStep,playerActor0SignalLock,playerActor0Flag192,playerActor0Flags728,playerActor0Flags72C,playerActor0Flags730,playerActor0TransitFunc,playerActor0TransitArg,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,playerActor1PlayerID,playerActor1TransitionStep,playerActor1SignalLock,playerActor1Flag192,playerActor1Flags728,playerActor1Flags72C,playerActor1Flags730,playerActor1TransitFunc,playerActor1TransitArg,playerTransitionStatus0,playerTransitionStatus1,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectByte0E2,vsConnectByte106,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord138,vsConnectWord13C,vsConnectWord140,vsConnectWord144,vsConnectWord148,vsConnectByte153,vsConnectByte154,vsConnectByte155,vsConnectByte156,vsConnectByte157,vsConnectByte158,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectSettings,courseSelectWord060,courseSelectWord064,courseSelectWord068,courseSelectWord06C,courseSelectWord070,courseSelectWord074,courseSelectWord078,courseSelectWord07C,courseSelectWord080,courseSelectWord084,courseSelectWord088,courseSelectWord08C,courseSelectWord090,stageCameraFound,stageCameraWord190,stageCameraWord194,stageCameraWord19C,stageCameraWord1A0,stageActorManagerFound,stageActorManagerBase,stageActorManagerStateType,stageControllerFound,stageControllerBase,stageControllerStateType,mvlObject267Found,mvlObject267Base,mvlObject267StateType,mvlGlobal965C,mvlGlobal9670,mvlGlobal9674,mvlGlobal9694_0,mvlGlobal9694_1,mvlManagerBase,mvlManagerWordA8CC,mvlManagerWordA8D0,mvlManagerWordA8D4,mvlManagerWordA8D8,mvlManagerWordA8DC,mvlManagerWordA8E0,mvlManagerWordA8E4,mvlManagerHalfA8E8,mvlManagerHalfA8EA,mvlManagerByteA8EC,mvlManagerHalf494,mvlManagerHalf4A0,stageSceneFound,stageSceneBase,stageSceneSettings,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,stageSceneWord5618,stageSceneWord561C,stageSceneWord563C,stageSceneByte5643,stageSceneByte5644,stageSceneByte5645,stageSceneByte5646,stageSceneByte5648,stageSceneByte5649,stageSceneUpdateDispatchFunc,stageSceneUpdateDispatchArg,stageSceneRenderDispatchFunc,stageSceneRenderDispatchArg,stageSceneGlobal9280,stageSceneGlobal9284,stageSceneGlobal928C,stageSceneGlobal92B4,stageSceneGlobal92C0,stageSceneGlobal92C8,stageSceneGlobal92CC,stageSceneGlobal92D0,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY,objectScanTotal,objectNotCreatedCount,objectActiveCount,objectDeadCount,objectSkipUpdateCount,objectSkipRenderCount,objectFirstNotCreatedId,objectFirstNotCreatedBase,objectFirstNotCreatedFlags,objectSecondNotCreatedId,objectSecondNotCreatedBase,objectSecondNotCreatedFlags";
             if (G.GameStateTraceExtended)
-                G.GameStateTrace << ",playerCount,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash";
+                G.GameStateTrace << ",playerCount,player0Powerup,player1Powerup,player0InventoryPowerup,player1InventoryPowerup,player0Dead,player1Dead,player0Character,player1Character,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash";
             G.GameStateTrace << '\n';
         }
     }
