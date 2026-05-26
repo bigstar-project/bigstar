@@ -4,7 +4,9 @@ param(
     [int]$FromFrame = 200,
     [int]$ToFrame = 0,
     [int]$PositionTolerance = 0,
-    [switch]$RequireRemoteInputHits
+    [switch]$RequireRemoteInputHits,
+    [switch]$RequireStarPickup,
+    [switch]$RequireStarRespawn
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,8 +30,8 @@ function HexToInt64($value) {
     $text = [string]$value
     if ($text.StartsWith("0x")) {
         $raw = [Convert]::ToUInt32($text.Substring(2), 16)
-        if ($raw -ge 0x80000000) {
-            return [int64]$raw - 0x100000000
+        if ([uint64]$raw -ge [uint64]2147483648) {
+            return [int64]$raw - [int64]4294967296
         }
         return [int64]$raw
     }
@@ -87,7 +89,19 @@ foreach ($hostRow in $hostRows) {
     foreach ($field in @("playerActor0X", "playerActor0Y", "playerActor1X", "playerActor1Y")) {
         Assert-Close $frame $field $hostRow.$field $client.$field $PositionTolerance
     }
-    foreach ($field in @("player0BattleStars", "player1BattleStars", "player0Coins", "player1Coins")) {
+    foreach ($field in @(
+        "player0BattleStars",
+        "player1BattleStars",
+        "player0CollectedStars",
+        "player1CollectedStars",
+        "player0Coins",
+        "player1Coins",
+        "player0Dead",
+        "player1Dead",
+        "vsStarActorFound",
+        "vsStarActorX",
+        "vsStarActorY"
+    )) {
         if ($hostRow.$field -ne $client.$field) {
             Fail "frame $frame $field mismatch: host=$($hostRow.$field) client=$($client.$field)"
         }
@@ -122,4 +136,42 @@ if ($RequireRemoteInputHits) {
     }
 }
 
-Write-Host "NSMB MvL LAN result verified: frames=$checked from=$FromFrame tolerance=$PositionTolerance remoteInputHits=$($RequireRemoteInputHits.IsPresent)"
+if ($RequireStarPickup) {
+    $pickup = $hostRows | Where-Object {
+        (HexToInt64 ($_.player0BattleStars)) -gt 0 -or
+        (HexToInt64 ($_.player1BattleStars)) -gt 0 -or
+        (HexToInt64 ($_.player0CollectedStars)) -gt 0 -or
+        (HexToInt64 ($_.player1CollectedStars)) -gt 0
+    } | Select-Object -First 1
+    if (!$pickup) {
+        Fail "star pickup was required but no battle/collected star counter changed"
+    }
+}
+
+if ($RequireStarRespawn) {
+    $firstPickup = $hostRows | Where-Object {
+        (HexToInt64 ($_.player0BattleStars)) -gt 0 -or
+        (HexToInt64 ($_.player1BattleStars)) -gt 0 -or
+        (HexToInt64 ($_.player0CollectedStars)) -gt 0 -or
+        (HexToInt64 ($_.player1CollectedStars)) -gt 0
+    } | Select-Object -First 1
+    if (!$firstPickup) {
+        Fail "star respawn was required but no pickup was observed first"
+    }
+
+    $initialStar = $hostRows | Where-Object { $_.vsStarActorFound -eq "0x1" } | Select-Object -First 1
+    if (!$initialStar) {
+        Fail "star respawn was required but no initial star actor was observed"
+    }
+
+    $respawn = $hostRows | Where-Object {
+        [int]$_.frame -gt [int]$firstPickup.frame -and
+        $_.vsStarActorFound -eq "0x1" -and
+        ($_.vsStarActorX -ne $initialStar.vsStarActorX -or $_.vsStarActorY -ne $initialStar.vsStarActorY)
+    } | Select-Object -First 1
+    if (!$respawn) {
+        Fail "star respawn was required but no later star actor position change was observed after frame $($firstPickup.frame)"
+    }
+}
+
+Write-Host "NSMB MvL LAN result verified: frames=$checked from=$FromFrame tolerance=$PositionTolerance remoteInputHits=$($RequireRemoteInputHits.IsPresent) starPickup=$($RequireStarPickup.IsPresent) starRespawn=$($RequireStarRespawn.IsPresent)"

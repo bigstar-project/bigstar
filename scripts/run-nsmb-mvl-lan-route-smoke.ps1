@@ -25,6 +25,13 @@ param(
     [int]$StateSaveFrame = 0,
     [string]$StateLoadDir = "",
     [int]$StateLoadFrame = -1,
+    [int]$VsStarSnapFrame = 0,
+    [int]$VsStarSnapPlayerSlot = 0,
+    [int]$PlayerSnapToStarFrame = 0,
+    [int]$PlayerSnapToStarSlot = 0,
+    [int]$PlayerStickToStarStartFrame = 0,
+    [int]$PlayerStickToStarEndFrame = 0,
+    [int]$PlayerStickToStarSlot = 0,
     [switch]$LanMPTrace,
     [int]$LanMPTraceDumpLen = 512,
     [string]$HostPacketReplayFile = "",
@@ -944,6 +951,33 @@ function Start-MelonLANProcess {
     } else {
         Remove-Item Env:\MELONDS_NSML_STATE_LOAD_DIR -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_STATE_LOAD_FRAME -ErrorAction SilentlyContinue
+    }
+    if ($VsStarSnapFrame -gt 0) {
+        $env:MELONDS_NSML_VS_STAR_SNAP_FRAME = "$VsStarSnapFrame"
+        $env:MELONDS_NSML_VS_STAR_SNAP_PLAYER_SLOT = "$VsStarSnapPlayerSlot"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_VS_STAR_SNAP_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_VS_STAR_SNAP_PLAYER_SLOT -ErrorAction SilentlyContinue
+    }
+    if ($PlayerSnapToStarFrame -gt 0) {
+        $env:MELONDS_NSML_PLAYER_SNAP_TO_STAR_FRAME = "$PlayerSnapToStarFrame"
+        $env:MELONDS_NSML_PLAYER_SNAP_TO_STAR_SLOT = "$PlayerSnapToStarSlot"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_PLAYER_SNAP_TO_STAR_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PLAYER_SNAP_TO_STAR_SLOT -ErrorAction SilentlyContinue
+    }
+    if ($PlayerStickToStarStartFrame -gt 0) {
+        $env:MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME = "$PlayerStickToStarStartFrame"
+        if ($PlayerStickToStarEndFrame -gt 0) {
+            $env:MELONDS_NSML_PLAYER_STICK_TO_STAR_END_FRAME = "$PlayerStickToStarEndFrame"
+        } else {
+            $env:MELONDS_NSML_PLAYER_STICK_TO_STAR_END_FRAME = "$PlayerStickToStarStartFrame"
+        }
+        $env:MELONDS_NSML_PLAYER_STICK_TO_STAR_SLOT = "$PlayerStickToStarSlot"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PLAYER_STICK_TO_STAR_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PLAYER_STICK_TO_STAR_SLOT -ErrorAction SilentlyContinue
     }
     if ($LanMPTrace) {
         $env:MELONDS_NSML_LANMP_TRACE = $LanMPTracePath
@@ -2270,6 +2304,13 @@ function Start-MelonLANProcess {
         "memPatchFile=$($env:MELONDS_NSML_MEM_PATCH_FILE)"
         "memPatchFrame=$($env:MELONDS_NSML_MEM_PATCH_FRAME)"
         "memPatchRanges=$($env:MELONDS_NSML_MEM_PATCH_RANGES)"
+        "vsStarSnapFrame=$($env:MELONDS_NSML_VS_STAR_SNAP_FRAME)"
+        "vsStarSnapPlayerSlot=$($env:MELONDS_NSML_VS_STAR_SNAP_PLAYER_SLOT)"
+        "playerSnapToStarFrame=$($env:MELONDS_NSML_PLAYER_SNAP_TO_STAR_FRAME)"
+        "playerSnapToStarSlot=$($env:MELONDS_NSML_PLAYER_SNAP_TO_STAR_SLOT)"
+        "playerStickToStarStartFrame=$($env:MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME)"
+        "playerStickToStarEndFrame=$($env:MELONDS_NSML_PLAYER_STICK_TO_STAR_END_FRAME)"
+        "playerStickToStarSlot=$($env:MELONDS_NSML_PLAYER_STICK_TO_STAR_SLOT)"
         "safeCreateSwitch=$PacketBridgeSafeCreateLoadGameSM"
         "safeCreateEnv=$($env:MELONDS_NSML_SAFE_CREATE_LOAD_GAME_CALL)"
         "safeCreateFrame=$($env:MELONDS_NSML_SAFE_CREATE_LOAD_GAME_CALL_FRAME)"

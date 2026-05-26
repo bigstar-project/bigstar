@@ -52,10 +52,14 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - 自動検証
   - screenshot / game-state trace / packet replay log / packet bridge trace に対応。
   - player powerup / inventory / dead / character / battle star / collected star などを extended game-state trace に追加済み。
+  - `scripts/verify-nsmb-mvl-lan-result.ps1` で actor 座標、死亡状態、スター actor、battle/collected star の host/client 一致を検証可能。
+  - `-RequireStarPickup` / `-RequireStarRespawn` を追加し、スター取得と次スター再生成を状態値で必須チェックできる。
+  - LAN smoke script から `-VsStarSnapFrame` / `-PlayerSnapToStarFrame` / `-PlayerStickToStarStartFrame` を指定可能にした。これは自然操作ではなく、RNG/再生成同期の制御検証用。
   - host/client 別入力スクリプトを追加済み。
     - `tests/nsmb_us_direct_mvl_host_right.inputs`
     - `tests/nsmb_us_direct_mvl_client_right.inputs`
     - `tests/nsmb_us_direct_mvl_both_different.inputs`
+    - `tests/nsmb_us_direct_mvl_star_collect_left.inputs`
 - 追加した検証フック
   - `ForceMvlPlayerReady` を PowerShell script から指定可能にした。
   - `ForceMvlRuntimeState` を追加し、US direct entry と自然ルートの差分だった MvL runtime state byte `0x020CA6AC` を検証用に強制できるようにした。
@@ -101,6 +105,16 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `logs/nsmvl-us-direct-entry-send-delay4-lookup10-2400-20260526`: `delay=4`, `LookupTickDelay=10`, mismatch `0`
   - `logs/nsmvl-us-direct-entry-send-delay12-lookup10-wallrelease-2400-20260526`: `delay=12`, `LookupTickDelay=10`, mismatch `0`
   - `logs/nsmvl-us-direct-entry-delay4-jitter4-lookup10-2400-20260526`: `delay=4`, `jitter=4`, `LookupTickDelay=10`, mismatch `0`
+- スター取得/再生成の制御検証:
+  - `PlayerStickToStar` hook で player0 を同じ frame にスター位置へ吸着し、`player0BattleStars=0x1` になることを確認。
+  - 次スターが `0x3c0000,0xfff50000` に再生成され、host/client で一致することを確認。
+  - verifier の `-RequireStarPickup -RequireStarRespawn` も通過。
+  - ログ: `logs/nsmvl-us-direct-entry-star-stick-p0-script-option-canonical-local0-3600-20260526`
+  - これは自然入力の成功ではなく、RNG と再生成処理が正準packet同期で一致するかの制御テスト。
+- 自然入力のスター取得 route:
+  - `tests/nsmb_us_direct_mvl_star_collect_left.inputs` を direct MvL 起動手順込みに修正。
+  - `logs/nsmvl-us-direct-entry-star-left-route-packet-only-canonical-local0-7200-20260526` は mismatch `0` で完走したが、`player*BattleStars` / `player*CollectedStars` は変化せず、スター取得は未達。
+  - frame 6000 付近の勝利表示はスター取得ではなく player1 の死亡/勝敗状態によるものとして扱う。
 
 この結果から、当面は「各ピアのゲーム内 local player は正準化する。操作プレイヤーの違いはWAN adapter側だけで表現する」方針で進める。
 
@@ -173,16 +187,17 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ## 現在の課題
 
-1. 7200 frame の双方向入力同期は成立したが、これはローカル2プロセス、固定遅延、packet lossなしの条件。
-2. `Game::localPlayerID=0` 正準化でプレイ表示、カメラ、UI、勝敗処理が実用上問題ないかは未確認。
-3. まだスター取得/再生成、死亡/復帰後の長時間同期、実WAN遅延/packet loss条件は未検証。
-4. 8コインアイテム取得は自動化が難しいため後回し。
+1. 7200 frame の双方向入力同期と、制御hookによるスター取得/再生成同期は成立したが、これはローカル2プロセス、固定遅延、packet lossなしの条件。
+2. 自然操作でスターを取りに行く入力 script はまだ未完成。死亡/勝利表示をスター取得と誤判定しないよう、状態値で検証する。
+3. `Game::localPlayerID=0` 正準化でプレイ表示、カメラ、UI、勝敗処理が実用上問題ないかは未確認。
+4. 死亡/復帰後の長時間同期、実WAN遅延/packet loss条件は未検証。
+5. 8コインアイテム取得は自動化が難しいため後回し。
 
 ## 次にやること
 
-1. `-PacketBridgeSendDelayFrames` / `-PacketBridgeSendJitterFrames` をより長いframe数と長時間条件で試し、実行速度と同期維持の限界を測る。
+1. `-PacketBridgeSendDelayFrames` / `-PacketBridgeSendJitterFrames` と `-RequireStarPickup -RequireStarRespawn` を組み合わせ、遅延/ジッタ下でもスター取得/再生成が一致するか確認する。
 2. packet loss注入を追加するか、ENet reliable前提で遅延/ジッタ中心に評価するかを決める。
-3. スター取得スクリプトを修正し、取得判定を `player*BattleStars` / `player*CollectedStars` / star actor 再生成で確認する。死亡演出や見た目だけで成功判定しない。
+3. 自然入力でスターを取得できる route は別途調整する。成功判定は必ず `player*BattleStars` / `player*CollectedStars` / star actor 再生成で行う。
 4. 表示・操作上、clientが `Game::localPlayerID=0` のままで問題ないかをスクリーンショットと操作ログで確認する。
 
 ## 検証ルール
