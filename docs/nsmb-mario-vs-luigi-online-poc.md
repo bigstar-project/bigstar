@@ -57,6 +57,8 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `-HostLogDir` / `-ClientLogDir` を追加し、host/client を別々の script invocation で起動したログも比較可能にした。
   - LAN smoke script から `-VsStarSnapFrame` / `-PlayerSnapToStarFrame` / `-PlayerStickToStarStartFrame` を指定可能にした。これは自然操作ではなく、RNG/再生成同期の制御検証用。
   - LAN smoke script に `-RunRole both|host|client`, `-Peer`, `-LanHost` を追加。2PC相当の片側起動が可能。
+  - 標準split検証用の `scripts/run-nsmb-mvl-standard-split.ps1` を追加。host normal ROM / client camera-full-p1 ROM / `-PacketBridgeDirectCapture` / canonical local0 の長い起動条件をまとめた。
+  - helper script は `logs/nsmvl-standard-helper-client-right-host-1800-20260527`, `logs/nsmvl-standard-helper-client-right-client-1800-20260527` で smoke と split verifier 通過。
   - host/client 別入力スクリプトを追加済み。
     - `tests/nsmb_us_direct_mvl_host_right.inputs`
     - `tests/nsmb_us_direct_mvl_client_right.inputs`
@@ -228,8 +230,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 1. 実WAN相当の評価は、ENet reliable 前提で遅延/ジッタ中心に続ける。packet lossは「reliable retransmitによる遅延」としてまず扱う。
 2. 自然入力でスターを取得できる route は別途調整する。成功判定は必ず `player*BattleStars` / `player*CollectedStars` / star actor 再生成で行う。
-3. 現在の PowerShell split 起動コマンドが長いので、標準条件を短い helper script にまとめる。
-4. 実LAN上の2PCで `-RunRole host` / `-RunRole client -Peer <host-ip>` を使ったログ取得を行い、split verifier で比較する。
+3. 実LAN上の2PCで `scripts/run-nsmb-mvl-standard-split.ps1 -Peer <host-ip>` 相当のログ取得を行い、split verifier で比較する。
 
 ## 検証ルール
 
