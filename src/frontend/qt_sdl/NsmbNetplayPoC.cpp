@@ -154,6 +154,12 @@ constexpr melonDS::u32 kSceneNextSceneIDAddr = 0x0203BD30;
 constexpr melonDS::u32 kSceneCurrentSceneIDAddr = 0x0203BD34;
 constexpr melonDS::u32 kSceneNextSceneSettingsAddr = 0x02088F38;
 
+bool IsMarioVsLuigiGGID(melonDS::u32 value)
+{
+    // A2DJ diagnostics used 0x42. US A2DE keeps the MvL GGID as 0x00400150.
+    return value == 0x42 || value == 0x00400150;
+}
+
 enum class Role
 {
     Host,
@@ -1566,7 +1572,7 @@ melonDS::u32 LocalPlayerID(melonDS::NDS* nds)
 
     const bool inGameplay = nds->ARM9Read32(kGameStageGroupAddr) == 9
         && nds->ARM9Read32(kGameVsModeAddr) == 1
-        && nds->ARM9Read32(0x02087E78) == 0x42;
+        && IsMarioVsLuigiGGID(nds->ARM9Read32(kNetGGIDAddr));
     if (G.PacketBridgeEnabled && G.PacketBridgeAllowPreGame && !inGameplay)
         return static_cast<melonDS::u32>(G.LocalInstance & 1);
 
@@ -1648,7 +1654,7 @@ melonDS::u32 PacketBridgeCanonicalTick(melonDS::NDS* nds, melonDS::u32 frame)
             + (frame - G.PacketBridgeForceTickStartFrame)) & 0xFFFF;
     }
 
-    return nds ? nds->ARM9Read16(0x02087F00) : 0;
+    return nds ? nds->ARM9Read16(0x020888E0) : 0;
 }
 
 void ForceNSMLPacketBridgeTickIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -1661,7 +1667,7 @@ void ForceNSMLPacketBridgeTickIfNeeded(int instanceID, melonDS::u32 frame, melon
         return;
 
     const melonDS::u32 tick = PacketBridgeCanonicalTick(nds, frame);
-    nds->ARM9Write16(0x02087F00, static_cast<melonDS::u16>(tick));
+    nds->ARM9Write16(0x020888E0, static_cast<melonDS::u16>(tick));
     G.LastPacketBridgeForcedTickFrame[instanceID] = frame;
 
     if (G.PacketBridgeTraceEnabled && (frame % 60) == 0)
@@ -1683,7 +1689,7 @@ void ForceNSMLPacketBridgeNetReadyIfNeeded(int instanceID, melonDS::u32 frame, m
         return;
     if (G.PacketBridgeForceNetReadyClientOnly && G.NetRole != Role::Client)
         return;
-    if (nds->ARM9Read32(kNetGGIDAddr) != 0x42)
+    if (!IsMarioVsLuigiGGID(nds->ARM9Read32(kNetGGIDAddr)))
         return;
 
     nds->ARM9Write32(kNetState14Addr, 0x00000001);
@@ -1695,23 +1701,23 @@ void ForceNSMLPacketBridgeNetReadyIfNeeded(int instanceID, melonDS::u32 frame, m
         && nds->ARM9Read32(kGameVsModeAddr) == 1;
     nds->ARM9Write32(kGameLocalPlayerIDAddr, (inMvlGameplay && G.NetRole == Role::Client) ? 1 : 0);
     nds->ARM9Write32(kGameVsModeAddr, 0x00000001);
-    nds->ARM9Write32(0x02087E0C, 0x00000001);
+    nds->ARM9Write32(0x020887F4, 0x00000001);
     if (G.PacketBridgeForceNetReadyState10
         && (!G.PacketBridgeForceNetReadyState10ClientOnly || G.NetRole == Role::Client))
     {
-        nds->ARM9Write32(0x02087E10, 0x00000001);
+        nds->ARM9Write32(0x020887F8, 0x00000001);
     }
-    nds->ARM9Write32(0x02087E90, 0x023DF000);
-    nds->ARM9Write32(0x02087ED8, 0x02087FA8);
-    nds->ARM9Write32(0x02087EDC, 0x02087FA8);
-    nds->ARM9Write32(0x02087F30, 0x00000100);
-    nds->ARM9Write32(0x02088020, 0x02087ED8);
-    nds->ARM9Write32(0x0208806C, 0x00000001);
-    nds->ARM9Write32(0x02088078, 0x00000101);
-    nds->ARM9Write32(0x0208807C, 0x00000202);
-    nds->ARM9Write32(0x02088084, 0x00000202);
-    nds->ARM9Write32(0x020880A4, 0x00000003);
-    nds->ARM9Write32(0x020880A8, 0x00000003);
+    nds->ARM9Write32(0x02088878, 0x023DF000);
+    nds->ARM9Write32(0x020888C0, 0x02088988);
+    nds->ARM9Write32(0x020888C4, 0x02088988);
+    nds->ARM9Write32(0x02088910, 0x00000100);
+    nds->ARM9Write32(0x02088A00, 0x020888C0);
+    nds->ARM9Write32(0x02088A4C, 0x00000001);
+    nds->ARM9Write32(0x02088A58, 0x00000101);
+    nds->ARM9Write32(0x02088A5C, 0x00000202);
+    nds->ARM9Write32(0x02088A64, 0x00000202);
+    nds->ARM9Write32(0x02088A84, 0x00000003);
+    nds->ARM9Write32(0x02088A88, 0x00000003);
 
     if (G.PacketBridgeTraceEnabled && (frame % 60) == 0)
     {
@@ -1730,7 +1736,7 @@ bool InjectNSMLPacketBridgeMvlFileCache(int instanceID, melonDS::u32 frame, melo
         return false;
     if (frame < G.PacketBridgeForceLoadGameSMStartFrame)
         return false;
-    if (nds->ARM9Read32(kNetGGIDAddr) != 0x42)
+    if (!IsMarioVsLuigiGGID(nds->ARM9Read32(kNetGGIDAddr)))
         return false;
     if (FindObjectBaseByID(nds, kVsConnectObjectID) == 0)
         return false;
@@ -2325,7 +2331,7 @@ bool InjectNSMLPacketBridgeDummyAlloc(int instanceID, melonDS::u32 frame, melonD
         return false;
     if (frame < G.PacketBridgeDummyAllocFrame || G.PacketBridgeDummyAllocSize == 0)
         return false;
-    if (nds->ARM9Read32(kNetGGIDAddr) != 0x42)
+    if (!IsMarioVsLuigiGGID(nds->ARM9Read32(kNetGGIDAddr)))
         return false;
 
     const melonDS::u32 oldPC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
@@ -2376,7 +2382,7 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
     if (frame < G.PacketBridgeForceLoadGameSMStartFrame)
         return;
 
-    if (nds->ARM9Read32(kNetGGIDAddr) != 0x42)
+    if (!IsMarioVsLuigiGGID(nds->ARM9Read32(kNetGGIDAddr)))
         return;
     if (!G.PacketBridgeForceLoadGameSMAllowCourseSelect
         && FindObjectBaseByID(nds, kCourseSelectObjectID) != 0)
@@ -2499,9 +2505,9 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
     if (targetStep < 7 || nds->ARM9Read32(kGameStageGroupAddr) != 9)
     {
         nds->ARM9Write8(kNetPacketActionAddr, targetStep >= 3 ? 0x03 : 0x00);
-        WriteARM9U32(nds, 0x02088078, 0x00000001);
-        WriteARM9U32(nds, 0x0208807C, 0x00000002);
-        WriteARM9U32(nds, 0x02088084, 0x00000002);
+        WriteARM9U32(nds, 0x02088A58, 0x00000001);
+        WriteARM9U32(nds, 0x02088A5C, 0x00000002);
+        WriteARM9U32(nds, 0x02088A64, 0x00000002);
     }
     if (G.PacketBridgeForceLoadGameSMPulseAction)
     {
@@ -2529,9 +2535,9 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
                 if (beforeStep < 6)
                     WriteARM9U32(nds, vsConnectBase + 0x148, 0x24);
                 WriteARM9U32(nds, vsConnectBase + 0x154, 0x00030000 | roleBit);
-                WriteARM9U32(nds, 0x02088078, 0x00000101);
-                WriteARM9U32(nds, 0x0208807C, 0x00000202);
-                WriteARM9U32(nds, 0x02088084, 0x00000202);
+                WriteARM9U32(nds, 0x02088A58, 0x00000101);
+                WriteARM9U32(nds, 0x02088A5C, 0x00000202);
+                WriteARM9U32(nds, 0x02088A64, 0x00000202);
             }
             if (rel >= 72)
             {
@@ -2551,9 +2557,9 @@ void ForceNSMLPacketBridgeLoadGameSMIfNeeded(int instanceID, melonDS::u32 frame,
                 if (beforeStep < 6)
                     WriteARM9U32(nds, vsConnectBase + 0x148, 0x2D);
                 WriteARM9U32(nds, vsConnectBase + 0x154, 0x00030000 | roleBit);
-                WriteARM9U32(nds, 0x02088078, 0x00000101);
-                WriteARM9U32(nds, 0x0208807C, 0x00000202);
-                WriteARM9U32(nds, 0x02088084, 0x00000202);
+                WriteARM9U32(nds, 0x02088A58, 0x00000101);
+                WriteARM9U32(nds, 0x02088A5C, 0x00000202);
+                WriteARM9U32(nds, 0x02088A64, 0x00000202);
             }
             if (rel >= 85)
             {
@@ -2621,7 +2627,7 @@ void ForceNSMLStagePacketWordsIfNeeded(melonDS::u32 frame, melonDS::NDS* nds)
     if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
         return;
 
-    WriteARM9U32(nds, 0x02087F04u, 0xFFFF0003u);
+    WriteARM9U32(nds, 0x020888E4u, 0xFFFF0003u);
     WriteARM9U32(nds, 0x0208B044u, 0xFFFF0003u);
     WriteARM9U32(nds, 0x0208B048u, 0x00000000u);
     WriteARM9U32(nds, 0x0208B04Cu, 0x00000000u);
@@ -3431,14 +3437,14 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
             WriteARM9U32(nds, vsConnectBase + 0x150, 0x00003322);
             WriteARM9U32(nds, vsConnectBase + 0x158, 0x00000001);
         }
-        WriteARM9U32(nds, 0x02087E14, 0x00000001);
-        WriteARM9U32(nds, 0x02087E1C, 0x00000006);
-        WriteARM9U32(nds, 0x02087E20, 0x00000002);
-        WriteARM9U32(nds, 0x02087E24, 0x00000002);
+        WriteARM9U32(nds, 0x020887FC, 0x00000001);
+        WriteARM9U32(nds, 0x02088804, 0x00000006);
+        WriteARM9U32(nds, 0x02088808, 0x00000002);
+        WriteARM9U32(nds, 0x0208880C, 0x00000002);
         WriteARM9U32(nds, kGameLocalPlayerIDAddr, static_cast<melonDS::u32>(playerID));
         WriteARM9U32(nds, kGameVsModeAddr, 0x00000001);
-        WriteARM9U32(nds, 0x020850C4, 0x00000001);
-        WriteARM9U32(nds, 0x020850C8, 0x0000001C);
+        WriteARM9U32(nds, 0x02085A84, 0x00000001);
+        WriteARM9U32(nds, 0x02085A88, 0x0000001C);
         if (G.DirectMvlBootPatchLoadGameSMOnly)
         {
             G.DirectMvlBootApplied[instanceID] = true;
@@ -3517,19 +3523,19 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
                 EmitARM(code, 0xE1A00000u); // nop
                 EmitARM(code, kA2DJVSConnectStartLoadLevelAddr);
                 EmitLoadImm(code, 4, 0x01);
-                EmitLoadImm(code, 6, 0x02087E14);
+                EmitLoadImm(code, 6, 0x020887FC);
                 EmitARM(code, 0xE5864000u); // str r4, [r6]
                 EmitLoadImm(code, 4, 0x06);
-                EmitLoadImm(code, 6, 0x02087E1C);
+                EmitLoadImm(code, 6, 0x02088804);
                 EmitARM(code, 0xE5864000u);
                 EmitLoadImm(code, 4, 0x02);
-                EmitLoadImm(code, 6, 0x02087E20);
+                EmitLoadImm(code, 6, 0x02088808);
                 EmitARM(code, 0xE5864000u);
                 EmitLoadImm(code, 4, 0x02);
-                EmitLoadImm(code, 6, 0x02087E24);
+                EmitLoadImm(code, 6, 0x0208880C);
                 EmitARM(code, 0xE5864000u);
-                EmitLoadImm(code, 4, 0x42);
-                EmitLoadImm(code, 6, 0x02087E78);
+                EmitLoadImm(code, 4, 0x00400150);
+                EmitLoadImm(code, 6, 0x02088858);
                 EmitARM(code, 0xE5864000u);
             }
             else
@@ -3597,7 +3603,7 @@ bool InjectCourseSelectFactoryCall(int instanceID, melonDS::u32 frame, melonDS::
         return false;
     if (nds->ARM9Read32(kGameVsModeAddr) != 1 || nds->ARM9Read32(kGameStageGroupAddr) == 9)
         return false;
-    if (nds->ARM9Read32(kNetGGIDAddr) != 0x42)
+    if (!IsMarioVsLuigiGGID(nds->ARM9Read32(kNetGGIDAddr)))
         return false;
     if (FindObjectBaseByID(nds, kCourseSelectObjectID) != 0)
         return false;
@@ -5731,8 +5737,8 @@ void SaveScreenshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             nds->ARM9Read16(0x04000054),
             nds->ARM9Read16(0x04001050),
             nds->ARM9Read16(0x04001054),
-            nds->ARM9Read8(0x02087E1C),
-            nds->ARM9Read16(0x02087E5C));
+            nds->ARM9Read8(0x02088804),
+            nds->ARM9Read16(0x0208883C));
         std::fflush(stdout);
     }
     else if (EnvFlag("MELONDS_NSML_SCREENSHOT_REG_TRACE"))
@@ -5747,8 +5753,8 @@ void SaveScreenshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             nds->ARM9Read16(0x04000054),
             nds->ARM9Read16(0x04001050),
             nds->ARM9Read16(0x04001054),
-            nds->ARM9Read8(0x02087E1C),
-            nds->ARM9Read16(0x02087E5C),
+            nds->ARM9Read8(0x02088804),
+            nds->ARM9Read16(0x0208883C),
             blackPixels,
             brightPixels);
         std::fflush(stdout);
@@ -5886,7 +5892,7 @@ void ApplyNetRandomPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         const melonDS::u32 vsMode = nds->ARM9Read32(kGameVsModeAddr);
         const melonDS::u32 ggid = nds->ARM9Read32(kNetGGIDAddr);
         randomCallCountBeforePatch = nds->ARM9Read8(kNetRandomCallCountAddr);
-        shouldPatch = stageGroup == 9 && vsMode == 1 && ggid == 0x42;
+        shouldPatch = stageGroup == 9 && vsMode == 1 && IsMarioVsLuigiGGID(ggid);
     }
     if (!shouldPatch) return;
 
@@ -7324,7 +7330,11 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     const melonDS::u32 syncFrame = G.TestEnabled ? inputFrame : frame;
 
     if (!G.Enabled || !G.Ready) return testInput;
-    if (syncFrame == 0 && !G.PacketBridgeOnly)
+    if (syncFrame == 0 && G.PacketBridgeOnly)
+    {
+        WaitForPeerIfNeeded();
+    }
+    else if (syncFrame == 0)
     {
         WaitForPeerIfNeeded();
         WaitForMatchSeedIfNeeded();

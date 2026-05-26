@@ -58,6 +58,14 @@ NSMB Central の解析では、MvL は接続時に RNG seed を同期し、試�
   - `Stage::stageLayout = 0x020CAD40`
   - `Player::onUpdate = 0x020FD1D4` in overlay10
   - `Actor::preUpdate` category mask = `0x020CA850`
+- US 版 PacketBridge の主要アドレス移植
+  - MvL GGID は US/A2DE runtime では `0x00400150`。過去診断用の `0x42` と両方を MvL 判定として扱う。
+  - Net/session 周辺の A2DJ アドレスを US/A2DE に移植済み。
+  - US 下位 Wifi API hook を追加済み。
+    - `Wifi::isConsoleCommunicating = 0x02046C44`
+    - `Wifi::getSharedData = 0x02046E98`
+    - `Wifi::updateSharedData = 0x02046ECC`
+  - `MELONDS_NSML_PACKET_BRIDGE_ONLY=1` でも `MELONDS_NSML_WAIT_FOR_PEER=1` を尊重し、host が client 接続前に先行しすぎないようにした。
 
 ## 分かっていること
 
@@ -74,20 +82,26 @@ NSMB Central の解析では、MvL は接続時に RNG seed を同期し、試�
 - 修正後の `logs/nsmvl-us-visible-clear-mask-gameplay-probe-fixed-transform-20260525` では、screenshot 上の横移動と CSV の `playerActor*X` が対応することを確認済み。
 - `direct-mvl-entry` は入力スクリプト併用で `Ready!` 画面まで到達した。`--force-ready-progress` だけ、または `--force-ready-progress --force-transfer-result 8` では Select a Game へ戻るため、VSStageIntro の待ち以外にも自然な session/scene 状態が必要。
 - 黒画面 session ルートは StageScene/process link が自然ルートと一致せず、現時点では補助診断扱い。
+- US 版下位 Wifi PacketBridge は hook が発火する段階まで到達した。
+  - single process smoke では `02046ECC` / `02046C44` / `02046E98` の lower hook 発火を確認済み。
+  - two process smoke では ENet 経由の packet 送受信を確認済み。
+  - host 側は local/remote 両 player の `hasPacket` / `getPacket` が成立するケースを確認済み。
+  - client 側は remote packet 受信と `hasPacket(player=0)` 成立までは見えているが、同じ早期フレーム帯で `getPacket(player=0)` が安定して ptr を返すところまでは未確認。
 
 ## 現在の課題
 
-1. category mask `0x020CA850` が本来どの scene/session 条件で解除されるかを追う。暫定 ROM patch では `--clear-actor-category-mask` で初期値を 0 にする。
-2. `Net::getPacket` だけでは足りないため、`getConsoleKeys` / `getPacketByte` / `getPacketTick` / `getPacketAction` を含めた packet 境界を分類する。
-3. `direct-mvl-entry` を UI 操作なしの MvL 入口に育てる。単純な ready wait bypass では Select a Game へ戻るため、VSStageIntro/VSMenu の session 前提を追加で特定する。
-4. WAN adapter に渡す最小 packet 形式を決める。
+1. client 側で remote packet が届いているのに `getPacket(player=0)` が安定して ptr を返さない。tick が完全一致していない、呼び出し順で受信が1フレーム遅い、または NSMB 側が `hasPacket` 後に別条件で `getPacket` へ進んでいない可能性がある。
+2. lower Wifi API を WAN adapter に差し替える場合、exact tick 方式だけで足りるか、数 tick の受信バッファ/lookup delay が必要かを決める必要がある。
+3. category mask `0x020CA850` が本来どの scene/session 条件で解除されるかは未解決。暫定 ROM patch では `--clear-actor-category-mask` で初期値を 0 にする。
+4. UI 操作なし MvL 入口は未完成。`direct-mvl-entry` の単純な ready wait bypass では Select a Game へ戻るため、VSStageIntro/VSMenu の session 前提を追加で特定する。
 
 ## 次にやること
 
-1. 修正済み transform trace を使い、packet mirror 入力が横移動/ジャンプ/死亡/スター取得にどう反映されるかを継続検証する。
-2. `getConsoleKeys` / `getPacketByte` / `getPacketTick` / `getPacketAction` を含む packet 境界を分類し、mirror ではなく WAN 受信 packet を返す形へ近づける。
-3. `0x020CA850` の自然な解除条件も継続して追い、`--clear-actor-category-mask` が恒久 patch として妥当か、それとも session 値を作るべきか判断する。
-4. direct ROM patch 側は、`VSStageIntro` から Select a Game に戻る分岐条件を追い、UI 操作なし起動に必要な session 値を最小化する。
+1. two process PacketBridge で、client 側 `hasPacket(player=0)` 成立後に `getPacket(player=0)` が進まない理由をログと counter で特定する。
+2. 必要なら lower packet lookup に tick delay / nearest fallback / latest-before fallback を入れ、WAN 遅延を NSMB の下位 Wifi 境界で吸収できるか検証する。
+3. 1360 frame 以降まで進め、通信切断表示なし、両側ステージ進行、screenshot/CSV 一致を確認する。
+4. PacketBridge lower route が安定したら、ROM patch 側の UI なし MvL 入口と接続し、LocalMP 依存を減らす。
+5. `0x020CA850` の自然な解除条件も継続して追い、`--clear-actor-category-mask` が恒久 patch として妥当か、それとも session 値を作るべきか判断する。
 
 ## 検証ルール
 

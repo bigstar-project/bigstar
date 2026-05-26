@@ -129,8 +129,8 @@ static void NSMLMaintainPacketFreeBytes(NDS& nds)
 
     // PacketBridge supplies remote packets below LocalMP. Keep the Net packet
     // free-byte receive bitmap consistent with the two-player packet stream.
-    nds.ARM9Write32(0x020880A4, 0x00000003);
-    nds.ARM9Write32(0x020880A8, 0x00000003);
+    nds.ARM9Write32(0x02088A84, 0x00000003);
+    nds.ARM9Write32(0x02088A88, 0x00000003);
 }
 
 static bool NSMLPacketBridgeMaintainSessionPeers()
@@ -182,11 +182,11 @@ static void NSMLMaintainSessionPeers(NDS& nds)
     // LoadGameSM waits for the lower Net peer/session tables, not only for
     // packet payloads. Populate the two-player peer entries that LocalMP would
     // normally maintain, while leaving higher VSConnect state alone.
-    nds.ARM9Write32(0x02087E24, 0x00000002);
-    nds.ARM9Write8(0x02087E2C, 2);
-    nds.ARM9Write8(0x02087E34, 2);
+    nds.ARM9Write32(0x0208880C, 0x00000002);
+    nds.ARM9Write8(0x02088814, 2);
+    nds.ARM9Write8(0x0208881C, 2);
 
-    const u32 compactPeerBase = nds.ARM9Read32(0x02087E70);
+    const u32 compactPeerBase = nds.ARM9Read32(0x02088850);
     if (compactPeerBase >= 0x02000000 && compactPeerBase < 0x02400000)
     {
         for (u32 player = 0; player < 2; player++)
@@ -382,11 +382,18 @@ static u32 NSMLPacketBridgeWaitStartFrame()
     return frame;
 }
 
+static bool IsNSMLMarioVsLuigiGGID(u32 value)
+{
+    // A2DJ traces used the compact 0x42 GGID. US A2DE keeps the MvL group
+    // identifier as 0x00400150 in the same runtime slot.
+    return value == 0x42 || value == 0x00400150;
+}
+
 static bool IsNSMLMarioVsLuigiGameplay(NDS& nds)
 {
-    return nds.ARM9Read32(0x02085058) == 9
-        && nds.ARM9Read32(0x020850C4) == 1
-        && nds.ARM9Read32(0x02087E78) == 0x42;
+    return nds.ARM9Read32(0x02085A18) == 9
+        && nds.ARM9Read32(0x02085A84) == 1
+        && IsNSMLMarioVsLuigiGGID(nds.ARM9Read32(0x02088858));
 }
 
 static bool NSMLPacketBridgeAllowPreGame()
@@ -403,7 +410,7 @@ static bool IsNSMLMarioVsLuigiPacketContext(NDS& nds)
         return true;
 
     return NSMLPacketBridgeAllowPreGame()
-        && nds.ARM9Read32(0x02087E78) == 0x42;
+        && IsNSMLMarioVsLuigiGGID(nds.ARM9Read32(0x02088858));
 }
 
 static u32 NSMLFindObjectBaseByID(NDS& nds, u16 objectID)
@@ -565,8 +572,8 @@ static void TraceNSMLStageStartDispatch(ARM* cpu, u32 instrAddr)
         cpu->R[3],
         cpu->NDS.ARM9Read16(0x0203B484),
         cpu->NDS.ARM9Read16(0x0203B480),
-        cpu->NDS.ARM9Read16(0x02087F00),
-        cpu->NDS.ARM9Read8(0x02087F04),
+        cpu->NDS.ARM9Read16(0x020888E0),
+        cpu->NDS.ARM9Read8(0x020888E4),
         base,
         f118,
         f120,
@@ -645,7 +652,8 @@ static void PatchNSMLStageStartNet20Check(ARM* cpu, u32 instrAddr)
         return;
 
     // Keep the global lower-Net memory untouched; only satisfy the StageStartSM
-    // local comparison. Writing 02087E20 globally also affects render/sleep paths.
+    // local comparison. Writing the lower Net flags globally also affects
+    // render/sleep paths.
     cpu->R[0] = 2;
 }
 
@@ -731,22 +739,22 @@ static void NSMLProbeStageStartReadyBits(NDS& nds)
             net20 = NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_STEP3", net20);
     }
 
-    nds.ARM9Write32(0x02087E14, NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET14", 1));
-    nds.ARM9Write8(0x02087E1C, static_cast<u8>(NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET1C", 6)));
-    nds.ARM9Write16(0x02087E20, static_cast<u16>(net20));
-    nds.ARM9Write8(0x02087E24, static_cast<u8>(NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET24", 2)));
-    nds.ARM9Write32(0x02087E2C, NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET2C", 0));
-    nds.ARM9Write8(0x02087E34, static_cast<u8>(NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET34", 0)));
+    nds.ARM9Write32(0x020887FC, NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET14", 1));
+    nds.ARM9Write8(0x02088804, static_cast<u8>(NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET1C", 6)));
+    nds.ARM9Write16(0x02088808, static_cast<u16>(net20));
+    nds.ARM9Write8(0x0208880C, static_cast<u8>(NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET24", 2)));
+    nds.ARM9Write32(0x02088814, NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET2C", 0));
+    nds.ARM9Write8(0x0208881C, static_cast<u8>(NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET34", 0)));
     const int packetAction = NSMLPacketBridgeStageStartPacketAction();
-    nds.ARM9Write32(0x02087F04, packetAction >= 0 ? (0xFFFF0000u | (static_cast<u32>(packetAction) & 0xFFu)) : 0u);
+    nds.ARM9Write32(0x020888E4, packetAction >= 0 ? (0xFFFF0000u | (static_cast<u32>(packetAction) & 0xFFu)) : 0u);
     nds.ARM9Write32(0x0208ADD8, 0);
 
     if (vsStep == 1)
     {
         const char* role = getenv("MELONDS_NSML_ROLE");
         const bool isClient = role && strcmp(role, "client") == 0;
-        nds.ARM9Write32(0x020850C4, 1); // Game::vsMode
-        nds.ARM9Write32(0x020850BC, isClient ? 1 : 0); // Game::localPlayerID
+        nds.ARM9Write32(0x02085A84, 1); // Game::vsMode
+        nds.ARM9Write32(0x02085A7C, isClient ? 1 : 0); // Game::localPlayerID
         nds.ARM9Write32(vsConnectBase + 0x144, 2);
         nds.ARM9Write32(vsConnectBase + 0x148, 0);
     }
@@ -1134,7 +1142,7 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     constexpr u32 createObjectAddr = 0x0204BF8C;
     constexpr u32 sceneSwitchStepAddr = 0x020131A0;
     const u32 returnPC = instrAddr | ((cpu->CPSR & 0x20) ? 1u : 0u);
-    u32 playerID = cpu->NDS.ARM9Read32(0x020850BC);
+    u32 playerID = cpu->NDS.ARM9Read32(0x02085A7C);
     if (const char* role = getenv("MELONDS_NSML_ROLE"))
     {
         if (!strcmp(role, "client"))
@@ -1148,8 +1156,8 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
             cpu->NDS.ARM9Write16(0x0203B47C, static_cast<u16>(tryChangePreviousScene));
         cpu->NDS.ARM9Write16(0x0203B480, static_cast<u16>(tryChangeTargetScene));
         cpu->NDS.ARM9Write32(0x02088578, 0);
-        cpu->NDS.ARM9Write8(0x02087F04, 3);
-        cpu->NDS.ARM9Write32(0x02087F04, 0xFFFF0003);
+        cpu->NDS.ARM9Write8(0x020888E4, 3);
+        cpu->NDS.ARM9Write32(0x020888E4, 0xFFFF0003);
         cpu->NDS.ARM9Write32(0x0208B044, 0xFFFF0003);
         cpu->NDS.ARM9Write32(0x0208B048, 0);
         cpu->NDS.ARM9Write32(0x0208B04C, 0);
@@ -1183,12 +1191,12 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         }
         if (loadLevelSessionReady > 0)
         {
-            NSMLEmitStoreImm32(code, 0x02087E14, 0x00000001);
-            NSMLEmitStoreImm32(code, 0x02087E1C, 0x00000006);
-            NSMLEmitStoreImm32(code, 0x02087E20, 0x00000002);
-            NSMLEmitStoreImm32(code, 0x02087E24, 0x00000002);
-            NSMLEmitStoreImm32(code, 0x02087E78, 0x00000042);
-            NSMLEmitStoreImm32(code, 0x02087F04, 0xFFFF0003);
+            NSMLEmitStoreImm32(code, 0x020887FC, 0x00000001);
+            NSMLEmitStoreImm32(code, 0x02088804, 0x00000006);
+            NSMLEmitStoreImm32(code, 0x02088808, 0x00000002);
+            NSMLEmitStoreImm32(code, 0x0208880C, 0x00000002);
+            NSMLEmitStoreImm32(code, 0x02088858, 0x00000042);
+            NSMLEmitStoreImm32(code, 0x020888E4, 0xFFFF0003);
             NSMLEmitStoreImm32(code, 0x0208B044, 0xFFFF0003);
             NSMLEmitStoreImm32(code, 0x0208B048, 0x00000000);
             NSMLEmitStoreImm32(code, 0x0208B04C, 0x00000000);
@@ -1220,12 +1228,12 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         }
         if (loadLevelSessionReady > 0)
         {
-            NSMLEmitStoreImm32(code, 0x02087E14, 0x00000001);
-            NSMLEmitStoreImm32(code, 0x02087E1C, 0x00000006);
-            NSMLEmitStoreImm32(code, 0x02087E20, 0x00000002);
-            NSMLEmitStoreImm32(code, 0x02087E24, 0x00000002);
-            NSMLEmitStoreImm32(code, 0x02087E78, 0x00000042);
-            NSMLEmitStoreImm32(code, 0x02087F04, 0xFFFF0003);
+            NSMLEmitStoreImm32(code, 0x020887FC, 0x00000001);
+            NSMLEmitStoreImm32(code, 0x02088804, 0x00000006);
+            NSMLEmitStoreImm32(code, 0x02088808, 0x00000002);
+            NSMLEmitStoreImm32(code, 0x0208880C, 0x00000002);
+            NSMLEmitStoreImm32(code, 0x02088858, 0x00000042);
+            NSMLEmitStoreImm32(code, 0x020888E4, 0xFFFF0003);
             NSMLEmitStoreImm32(code, 0x0208B044, 0xFFFF0003);
             NSMLEmitStoreImm32(code, 0x0208B048, 0x00000000);
             NSMLEmitStoreImm32(code, 0x0208B04C, 0x00000000);
@@ -1270,15 +1278,15 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
     }
     else if (effectiveStageSceneFactory)
     {
-        NSMLEmitStoreImm32(code, 0x02085058, 0x00000009); // Game::stageGroup
-        NSMLEmitStoreImm32(code, 0x020850BC, playerID); // Game::localPlayerID
-        NSMLEmitStoreImm32(code, 0x020850C4, 0x00000001); // Game::vsMode
-        NSMLEmitStoreImm32(code, 0x02087E14, 0x00000001);
-        NSMLEmitStoreImm32(code, 0x02087E1C, 0x00000006);
-        NSMLEmitStoreImm32(code, 0x02087E20, 0x00000002);
-        NSMLEmitStoreImm32(code, 0x02087E24, 0x00000002);
-        NSMLEmitStoreImm32(code, 0x02087E78, 0x00000042);
-        NSMLEmitStoreImm32(code, 0x02087F04, 0xFFFF0003);
+        NSMLEmitStoreImm32(code, 0x02085A18, 0x00000009); // Game::stageGroup
+        NSMLEmitStoreImm32(code, 0x02085A7C, playerID); // Game::localPlayerID
+        NSMLEmitStoreImm32(code, 0x02085A84, 0x00000001); // Game::vsMode
+        NSMLEmitStoreImm32(code, 0x020887FC, 0x00000001);
+        NSMLEmitStoreImm32(code, 0x02088804, 0x00000006);
+        NSMLEmitStoreImm32(code, 0x02088808, 0x00000002);
+        NSMLEmitStoreImm32(code, 0x0208880C, 0x00000002);
+        NSMLEmitStoreImm32(code, 0x02088858, 0x00000042);
+        NSMLEmitStoreImm32(code, 0x020888E4, 0xFFFF0003);
         NSMLEmitStoreImm32(code, 0x0208B044, 0xFFFF0003);
         NSMLEmitStoreImm32(code, 0x0208B048, 0x00000000);
         NSMLEmitStoreImm32(code, 0x0208B04C, 0x00000000);
@@ -1333,22 +1341,22 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         cpu->NDS.ARM9Write32(vsConnectBase + 0x218 + 0x064, 0x00000409);
         cpu->NDS.ARM9Write32(vsConnectBase + 0x218 + 0x078, 0x00000000);
         cpu->NDS.ARM9Write32(vsConnectBase + 0x218 + 0x07C, 0x020177AC);
-        NSMLEmitStoreImm32(code, 0x02085058, 0x09); // Game::stageGroup
-        NSMLEmitStoreImm32(code, 0x020850BC, playerID); // Game::localPlayerID
-        NSMLEmitStoreImm32(code, 0x020850C4, 0x01); // Game::vsMode
+        NSMLEmitStoreImm32(code, 0x02085A18, 0x09); // Game::stageGroup
+        NSMLEmitStoreImm32(code, 0x02085A7C, playerID); // Game::localPlayerID
+        NSMLEmitStoreImm32(code, 0x02085A84, 0x01); // Game::vsMode
         NSMLEmitMovImm(code, 0, vsConnectBase + 0x218);
         NSMLEmitMovImm(code, 1, startLoadLevelAddr);
         NSMLEmitMovImm(code, 2, 0);
         NSMLEmitMovImm(code, 3, 0x02156488);
         NSMLEmitBLViaIP(code, startLoadLevelAddr);
-        NSMLEmitStoreImm32(code, 0x02087E14, 0x01);
-        NSMLEmitStoreImm32(code, 0x02087E1C, 0x06);
-        NSMLEmitStoreImm32(code, 0x02087E20, 0x02);
-        NSMLEmitStoreImm32(code, 0x02087E24, 0x02);
-        NSMLEmitStoreImm32(code, 0x02087E78, 0x42);
-        NSMLEmitStoreImm32(code, 0x02085058, 0x09);
-        NSMLEmitStoreImm32(code, 0x020850BC, playerID);
-        NSMLEmitStoreImm32(code, 0x020850C4, 0x01);
+        NSMLEmitStoreImm32(code, 0x020887FC, 0x01);
+        NSMLEmitStoreImm32(code, 0x02088804, 0x06);
+        NSMLEmitStoreImm32(code, 0x02088808, 0x02);
+        NSMLEmitStoreImm32(code, 0x0208880C, 0x02);
+        NSMLEmitStoreImm32(code, 0x02088858, 0x00400150);
+        NSMLEmitStoreImm32(code, 0x02085A18, 0x09);
+        NSMLEmitStoreImm32(code, 0x02085A7C, playerID);
+        NSMLEmitStoreImm32(code, 0x02085A84, 0x01);
         NSMLEmitStoreImm32(code, vsConnectBase + 0x144, 0x00000007);
         NSMLEmitStoreImm32(code, vsConnectBase + 0x148, 0x0000002C);
         NSMLEmitStoreImm32(code, vsConnectBase + 0x154, 0x00030000);
@@ -1530,7 +1538,7 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
         if (NSMLPacketBridgeEnabled()
             && cpu->NDS.NumFrames >= forceCourseSelectReadyStartFrame
             && courseSelectBase != 0
-            && cpu->NDS.ARM9Read32(0x02085058) == 9
+            && cpu->NDS.ARM9Read32(0x02085A18) == 9
             && cpu->NDS.ARM9Read16(0x0203B484) == 0x000F)
         {
             cpu->R[0] = 1;
@@ -1574,7 +1582,7 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
             cpu->DataWrite32(sp + 0x28, 0); // unused2
             cpu->DataWrite32(sp + 0x2C, 0); // challengeMode
             cpu->DataWrite32(sp + 0x30, 0xFFFFFFFFu); // rngSeed: use network/random state
-            cpu->NDS.ARM9Write32(0x02087E78, 0x42);
+            cpu->NDS.ARM9Write32(0x02088858, 0x00400150);
             static int logCount = 0;
             if (logCount < 8)
             {
@@ -1652,8 +1660,8 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
     if (!IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
         return;
 
-    cpu->NDS.ARM9Write32(0x020880A4, 0x00000003); // Net::packetFreeBytesRecvBitmap
-    cpu->NDS.ARM9Write32(0x020880A8, 0x00000003);
+    cpu->NDS.ARM9Write32(0x02088A84, 0x00000003); // Net::packetFreeBytesRecvBitmap
+    cpu->NDS.ARM9Write32(0x02088A88, 0x00000003);
 }
 
 static bool HandleNSMLNetResetBypass(ARM* cpu, u32 instrAddr)
@@ -1728,7 +1736,7 @@ static bool HandleNSMLNetDisconnectBypass(ARM* cpu, u32 instrAddr)
         static int skipLogCount = 0;
         if (skipLogCount < 16)
         {
-            const u32 flags = cpu->NDS.ARM9Read16(0x02087E20);
+            const u32 flags = cpu->NDS.ARM9Read16(0x02088808);
             printf("NSMB PacketBridge: skip Net disconnect branch at %08X frame=%u lr=%08X flags=0x%04X\n",
                 instrAddr,
                 cpu->NDS.NumFrames,
@@ -1744,7 +1752,7 @@ static bool HandleNSMLNetDisconnectBypass(ARM* cpu, u32 instrAddr)
     if (instrAddr != 0x02010130)
         return false;
 
-    const u32 flags = cpu->NDS.ARM9Read16(0x02087E20);
+    const u32 flags = cpu->NDS.ARM9Read16(0x02088808);
     if (flags != 0x0002)
         return false;
 
@@ -1761,7 +1769,7 @@ static bool HandleNSMLNetDisconnectBypass(ARM* cpu, u32 instrAddr)
         logCount++;
     }
 
-    cpu->NDS.ARM9Write16(0x02087E20, 0x0004);
+    cpu->NDS.ARM9Write16(0x02088808, 0x0004);
     return false;
 }
 
@@ -1905,13 +1913,13 @@ static u32 NSMLPacketBridgeCanonicalTick(NDS& nds)
     if (enabled < 0)
         enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK") ? 1 : 0;
     if (!enabled || !NSMLPacketBridgeEnabled())
-        return nds.ARM9Read16(0x02087F00);
+        return nds.ARM9Read16(0x020888E0);
 
     static u32 startFrame = 0xFFFFFFFF;
     if (startFrame == 0xFFFFFFFF)
         startFrame = NSMLPacketBridgeEnvFrame("MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME", 0);
     if (nds.NumFrames < startFrame)
-        return nds.ARM9Read16(0x02087F00);
+        return nds.ARM9Read16(0x020888E0);
 
     static int baseSet = -1;
     static u32 base = 0;
@@ -1929,7 +1937,7 @@ static u32 NSMLPacketBridgeCanonicalTick(NDS& nds)
     }
 
     if (!baseSet)
-        return nds.ARM9Read16(0x02087F00);
+        return nds.ARM9Read16(0x020888E0);
 
     return (base + (nds.NumFrames - startFrame)) & 0xFFFF;
 }
@@ -1980,21 +1988,21 @@ static void BuildNSMLMarioVsLuigiPacket(NDS& nds, std::array<u8, 52>& packet, u3
 {
     packet.fill(0);
     tick = NSMLPacketBridgeCanonicalTick(nds);
-    keys = nds.ARM9Read16(0x02087F02);
+    keys = nds.ARM9Read16(0x020888E2);
     packet[0] = static_cast<u8>(tick & 0xFF);
     packet[1] = static_cast<u8>((tick >> 8) & 0xFF);
     packet[2] = static_cast<u8>(keys & 0xFF);
     packet[3] = static_cast<u8>((keys >> 8) & 0xFF);
-    packet[4] = nds.ARM9Read8(0x02087F04);
-    packet[5] = nds.ARM9Read8(0x02087F05);
-    packet[6] = nds.ARM9Read8(0x02087F06);
-    packet[7] = nds.ARM9Read8(0x02087F07);
+    packet[4] = nds.ARM9Read8(0x020888E4);
+    packet[5] = nds.ARM9Read8(0x020888E5);
+    packet[6] = nds.ARM9Read8(0x020888E6);
+    packet[7] = nds.ARM9Read8(0x020888E7);
     for (u32 i = 0; i < 44; i++)
-        packet[8 + i] = nds.ARM9Read8(0x02087F08 + i);
-    // NSMB's send path copies the packet-bit byte at 0x0208806C into packet
+        packet[8 + i] = nds.ARM9Read8(0x020888E8 + i);
+    // NSMB's send path copies the packet-bit byte at 0x02088A4C into packet
     // offset 0x29. Build the WAN packet from the same source so ready-bit
     // waits such as StageScene::onCreate can observe peer progress.
-    packet[0x29] = nds.ARM9Read8(0x0208806C);
+    packet[0x29] = nds.ARM9Read8(0x02088A4C);
     if (NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_PREGAME_ACTION1")
         && NSMLPacketBridgeAllowPreGame()
         && !IsNSMLMarioVsLuigiGameplay(nds))
@@ -2399,22 +2407,26 @@ static bool HandleNSMLLowerMPBridge(ARM* cpu, u32 instrAddr)
             || NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_LOWER_TRACE")) ? 1 : 0;
     }
 
-    if (instrAddr == 0x0204619C)
+    const bool oldStatusProbe = instrAddr == 0x0204619C;
+    const bool usUpdateSharedData = instrAddr == 0x02046ECC;
+    if (oldStatusProbe || usUpdateSharedData)
     {
-        // transferPacket() enters the packet-copy path when this lower-MP
-        // status probe returns false. PacketBridge supplies packets through
-        // the per-player pointer hook below, so keep that path active.
+        // A2DJ used a lower-MP status probe where false kept the packet-copy
+        // path active. US A2DE calls Wifi::updateSharedData(), where true
+        // enters the packet-copy path in Net::Core::transferPacket().
         static int statusResult = -1;
         if (statusResult < 0)
         {
             if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT"))
                 statusResult = atoi(value) != 0 ? 1 : 0;
             else
-                statusResult = 0;
+                statusResult = usUpdateSharedData ? 1 : 0;
         }
         static u32 traceCount = 0;
         if (traceLower && (traceCount < 24 || (traceCount % 300) == 0))
-            printf("NSMB PacketBridge lower: statusProbe 0204619C frame=%u tick=0x%04X lr=%08X -> %d\n",
+            printf("NSMB PacketBridge lower: %s %08X frame=%u tick=0x%04X lr=%08X -> %d\n",
+                usUpdateSharedData ? "updateSharedData" : "statusProbe",
+                instrAddr,
                 cpu->NDS.NumFrames,
                 NSMLPacketBridgeCanonicalTick(cpu->NDS) & 0xFFFF,
                 cpu->R[14],
@@ -2425,7 +2437,11 @@ static bool HandleNSMLLowerMPBridge(ARM* cpu, u32 instrAddr)
         return true;
     }
 
-    if (instrAddr != 0x0204622C && instrAddr != 0x02046480)
+    const bool oldHasPacket = instrAddr == 0x0204622C;
+    const bool oldGetPacket = instrAddr == 0x02046480;
+    const bool usHasPacket = instrAddr == 0x02046C44;
+    const bool usGetPacket = instrAddr == 0x02046E98;
+    if (!oldHasPacket && !oldGetPacket && !usHasPacket && !usGetPacket)
         return false;
 
     const u32 player = cpu->R[0] & 0xFF;
@@ -2433,11 +2449,12 @@ static bool HandleNSMLLowerMPBridge(ARM* cpu, u32 instrAddr)
     const bool hasPacket = NSMLSelectBridgePacketForPlayer(cpu->NDS, player, packet);
     const u32 tick = NSMLPacketBridgeCanonicalTick(cpu->NDS) & 0xFFFF;
 
-    if (instrAddr == 0x0204622C)
+    if (oldHasPacket || usHasPacket)
     {
         static u32 traceCount[2] {};
         if (traceLower && player < 2 && (traceCount[player] < 32 || (traceCount[player] % 300) == 0))
-            printf("NSMB PacketBridge lower: hasPacket 0204622C player=%u frame=%u tick=0x%04X action=0x%02X pktTick=0x%04X -> %u\n",
+            printf("NSMB PacketBridge lower: hasPacket %08X player=%u frame=%u tick=0x%04X action=0x%02X pktTick=0x%04X -> %u\n",
+                instrAddr,
                 player,
                 cpu->NDS.NumFrames,
                 tick,
@@ -2454,7 +2471,8 @@ static bool HandleNSMLLowerMPBridge(ARM* cpu, u32 instrAddr)
     const u32 packetPtr = hasPacket ? NSMLWriteBridgePacketScratch(cpu->NDS, player, packet) : 0;
     static u32 traceCount[2] {};
     if (traceLower && player < 2 && (traceCount[player] < 32 || (traceCount[player] % 300) == 0))
-        printf("NSMB PacketBridge lower: getPacket 02046480 player=%u frame=%u tick=0x%04X action=0x%02X pktTick=0x%04X -> %08X\n",
+        printf("NSMB PacketBridge lower: getPacket %08X player=%u frame=%u tick=0x%04X action=0x%02X pktTick=0x%04X -> %08X\n",
+            instrAddr,
             player,
             cpu->NDS.NumFrames,
             tick,
@@ -2582,7 +2600,7 @@ void NSML_RefreshMarioVsLuigiPacketSlots(NDS* nds)
     if (preserveNetPointers < 0)
         preserveNetPointers = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_PRESERVE_NET_POINTERS") ? 1 : 0;
 
-    const u32 tick = nds->ARM9Read16(0x02087F00);
+    const u32 tick = nds->ARM9Read16(0x020888E0);
     NSMLMaintainPacketFreeBytes(*nds);
     NSMLMaintainSessionPeers(*nds);
     NSMLProbeStageStartReadyBits(*nds);
@@ -2594,20 +2612,20 @@ void NSML_RefreshMarioVsLuigiPacketSlots(NDS* nds)
 
     if (suppressDisconnect)
     {
-        const u16 flags = nds->ARM9Read16(0x02087E5C);
-        nds->ARM9Write16(0x02087E5C, flags & static_cast<u16>(~0xC390));
-        if (nds->ARM9Read8(0x02087E1C) == 9)
-            nds->ARM9Write8(0x02087E1C, 6);
+        const u16 flags = nds->ARM9Read16(0x0208883C);
+        nds->ARM9Write16(0x0208883C, flags & static_cast<u16>(~0xC390));
+        if (nds->ARM9Read8(0x02088804) == 9)
+            nds->ARM9Write8(0x02088804, 6);
     }
 
     if (preserveNetPointers)
     {
         static constexpr u32 addrs[] = {
-            0x02087E0C,
-            0x02087E90,
-            0x02087ED8,
-            0x02087EDC,
-            0x02088020,
+            0x020887F4,
+            0x02088878,
+            0x020888C0,
+            0x020888C4,
+            0x02088A00,
         };
         auto& saved = NSMLPreservedNetWords[nds];
         for (const u32 addr : addrs)
@@ -2938,7 +2956,7 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
             value = tick;
             break;
         case Op::Action:
-            value = cpu->NDS.ARM9Read8(0x02087F04);
+            value = cpu->NDS.ARM9Read8(0x020888E4);
             break;
         case Op::None:
             value = 0;
@@ -3036,8 +3054,8 @@ static bool TraceNSMLRandomCallImpl(ARM* cpu, u32 instrAddr, u32 lr, bool hasLR)
         u32 Addr = 0x0200E5A0;
         u32 Addrs[256] {};
         int AddrCount = 0;
-        u32 RandomValueAddr = 0x02088088;
-        u32 RandomCallCountAddr = 0x02088068;
+        u32 RandomValueAddr = 0x02088A68;
+        u32 RandomCallCountAddr = 0x02088A48;
         u32 StartFrame = 0;
         u32 EndFrame = 0xFFFFFFFF;
         FILE* LogFile = nullptr;
@@ -3383,14 +3401,14 @@ static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
     const u32 r3 = cpu->R[3];
     const u32 sp = cpu->R[13];
     const u32 cpsr = cpu->CPSR;
-    const u32 netTick = cpu->NDS.ARM9Read16(0x02087F00);
-    const u32 netAction = cpu->NDS.ARM9Read8(0x02087F04);
-    const u32 netSeqIDs = cpu->NDS.ARM9Read32(0x02088078);
-    const u32 netSeqCursors = cpu->NDS.ARM9Read32(0x0208807C);
-    const u32 netSendBitmap = cpu->NDS.ARM9Read32(0x02088080);
-    const u32 netSeqLengths = cpu->NDS.ARM9Read32(0x02088084);
-    const u32 netRecvBitmap = cpu->NDS.ARM9Read32(0x020880A4);
-    const u32 netRandom = cpu->NDS.ARM9Read32(0x02088088);
+    const u32 netTick = cpu->NDS.ARM9Read16(0x020888E0);
+    const u32 netAction = cpu->NDS.ARM9Read8(0x020888E4);
+    const u32 netSeqIDs = cpu->NDS.ARM9Read32(0x02088A58);
+    const u32 netSeqCursors = cpu->NDS.ARM9Read32(0x02088A5C);
+    const u32 netSendBitmap = cpu->NDS.ARM9Read32(0x02088A60);
+    const u32 netSeqLengths = cpu->NDS.ARM9Read32(0x02088A64);
+    const u32 netRecvBitmap = cpu->NDS.ARM9Read32(0x02088A84);
+    const u32 netRandom = cpu->NDS.ARM9Read32(0x02088A68);
     const bool r0IsVsConnect = IsNSMLMainRAMAddress(r0) && cpu->NDS.ARM9Read16(r0 + 0x0C) == 0x0006;
     const u32 vsStep = r0IsVsConnect ? cpu->NDS.ARM9Read32(r0 + 0x144) : 0;
     const u32 vsTimer = r0IsVsConnect ? cpu->NDS.ARM9Read32(r0 + 0x148) : 0;
