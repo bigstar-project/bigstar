@@ -91,6 +91,9 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - 同じ canonical local0 + packet-only 構成で単独入力も確認済み。
   - `logs/nsmvl-us-direct-entry-host-right-packet-only-canonical-local0-3600-20260526`: mismatch `0`
   - `logs/nsmvl-us-direct-entry-client-right-packet-only-canonical-local0-3600-20260526`: mismatch `0`
+- 長めの検証:
+  - `logs/nsmvl-us-direct-entry-both-different-packet-only-canonical-local0-7200-20260526`: mismatch `0`
+  - player0/player1 座標、死亡状態、スター座標は trace 間隔内で一致。
 
 この結果から、当面は「各ピアのゲーム内 local player は正準化する。操作プレイヤーの違いはWAN adapter側だけで表現する」方針で進める。
 
@@ -163,17 +166,16 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ## 現在の課題
 
-1. 3600 frame の双方向入力同期は成立したが、これはローカル2プロセス、固定遅延、packet lossなしの条件。
+1. 7200 frame の双方向入力同期は成立したが、これはローカル2プロセス、固定遅延、packet lossなしの条件。
 2. `Game::localPlayerID=0` 正準化でプレイ表示、カメラ、UI、勝敗処理が実用上問題ないかは未確認。
 3. まだスター取得/再生成、死亡/復帰後の長時間同期、実WAN遅延/packet loss条件は未検証。
 4. 8コインアイテム取得は自動化が難しいため後回し。
 
 ## 次にやること
 
-1. canonical local0 + packet-only 構成で 3600 frame より長い同期検証を行い、死亡/復帰後も mismatch しないか確認する。
+1. WAN想定の遅延/packet loss/ジッタをスクリプトまたはENet層で注入し、必要な入力遅延と待機条件を決める。
 2. スター取得スクリプトを修正し、取得判定を `player*BattleStars` / `player*CollectedStars` / star actor 再生成で確認する。死亡演出や見た目だけで成功判定しない。
-3. WAN想定の遅延/packet loss/ジッタをスクリプトまたはENet層で注入し、必要な入力遅延と待機条件を決める。
-4. 表示・操作上、clientが `Game::localPlayerID=0` のままで問題ないかをスクリーンショットと操作ログで確認する。
+3. 表示・操作上、clientが `Game::localPlayerID=0` のままで問題ないかをスクリーンショットと操作ログで確認する。
 
 ## 検証ルール
 
