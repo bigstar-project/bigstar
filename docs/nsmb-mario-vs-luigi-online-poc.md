@@ -132,6 +132,8 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `StageCamera` state function 側の `Game::localPlayerID` 参照を player1 にする ROM patch を追加し、client ROM だけに適用すると、ゲーム状態同期を壊さず client 表示を Luigi/player1 寄りにできることを確認。
   - `StageCamera` state + display camera X の両方を player1 にする結合ROMでも、frame 2700 まで verifier は mismatch `0`。
   - ログ: `logs/nsmvl-us-direct-entry-client-camera-full-p1-rom-canonical-local0-2700-20260527`
+  - host normal ROM / client camera-full-p1 ROM の 2PC相当 split 起動でも frame 1800 まで smoke と split verifier が通過。
+  - ログ: `logs/nsmvl-us-direct-entry-split-camera-full-host-1800-20260527`, `logs/nsmvl-us-direct-entry-split-camera-full-client-1800-20260527`
   - これは client 表示専用ROM patch として扱う。ゲーム内 `Game::localPlayerID` は引き続き host/client とも `0` に正準化する。
 
 この結果から、当面は「各ピアのゲーム内 local player は正準化する。操作プレイヤーの違いはWAN adapter側だけで表現する」方針で進める。
@@ -213,11 +215,10 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ## 次にやること
 
-1. client 表示ROM patch を使った split 起動検証を行い、host normal ROM / client camera-full-p1 ROM の組み合わせで状態同期とスクリーンショットを確認する。
-2. script の localPlayerID チェックは、`-HostPacketBridgeForceGameLocalPlayerID` / `-ClientPacketBridgeForceGameLocalPlayerID` が指定された場合にその値を期待値として扱うよう修正済み。次のsmokeでこの修正を実走確認する。
-3. 実WAN相当の評価は、ENet reliable 前提で遅延/ジッタ中心に続ける。packet lossは「reliable retransmitによる遅延」としてまず扱う。
-4. 自然入力でスターを取得できる route は別途調整する。成功判定は必ず `player*BattleStars` / `player*CollectedStars` / star actor 再生成で行う。
-5. 実LAN上の2PCで `-RunRole host` / `-RunRole client -Peer <host-ip>` を使ったログ取得を行い、split verifier で比較する。
+1. client camera-full-p1 ROM で 3600 frame 以上の split 起動検証を行い、player1入力、死亡/復帰、表示カメラが破綻しないか見る。
+2. 実WAN相当の評価は、ENet reliable 前提で遅延/ジッタ中心に続ける。packet lossは「reliable retransmitによる遅延」としてまず扱う。
+3. 自然入力でスターを取得できる route は別途調整する。成功判定は必ず `player*BattleStars` / `player*CollectedStars` / star actor 再生成で行う。
+4. 実LAN上の2PCで `-RunRole host` / `-RunRole client -Peer <host-ip>` を使ったログ取得を行い、split verifier で比較する。
 
 ## 検証ルール
 
