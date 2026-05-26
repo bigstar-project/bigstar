@@ -96,6 +96,7 @@ NSMB Central の解析どおり、MvL は接続時に RNG seed を同期し、�
 ログ:
 
 - `logs/nsmvl-us-direct-entry-both-different-localdelay-20260526`
+- `logs/nsmvl-us-direct-entry-both-different-3600-20260526`
 
 結果:
 
@@ -104,21 +105,22 @@ NSMB Central の解析どおり、MvL は接続時に RNG seed を同期し、�
 - host/client 両方で replay hook が `player=0`, `player=1` とも `hit=1`。
 - host/client 両方で `inputPlayer0Held=0x11/0x12/0x10`、`inputPlayer1Held=0x21/0x22/0x20`。
 - local player も remote player と同じ `LookupTickDelay` で読むように修正した後、frame 2600 まで host/client の player actor 座標が一致。
+- 追加の 3600 frame 検証でも、frame 1800 以降の `inputPlayer*Held`、player actor 座標/速度、inventory、battle star、star actor 関連の突き合わせで mismatch `0`。
 - data abort / fatal / remote input timeout なし。
 
 ## 現在の課題
 
 1. まだ短時間の非対称入力検証のみ。実戦に近い長時間走行で desync / disconnect / black screen が出ないか未確認。
 2. `PacketBridgeLookupTickDelay=10` は暫定値。WAN遅延に対して固定値で足りるか、動的調整が必要かを検証する。
-3. 同時異方向入力では frame 2600 まで actor 座標一致を確認したが、より長い試合・スター取得・アイテム取得では未確認。
+3. 同時異方向入力では frame 3600 まで actor 座標一致を確認したが、スター取得・アイテム取得では未確認。
 4. HUDアイテム差分は `playerInventoryPowerup` trace で分類できるようになったが、長めの試合でまだ確認していない。
 5. direct ROM 起動はまだメニュー入力スクリプトに依存している。最終的には UI 操作なしで MvL 開始状態へ入る ROM patch に寄せたい。
 
 ## 次にやること
 
-1. `both_different` の検証を 3000〜5000 frame に伸ばし、actor座標・input・inventory・star状態の一致/差分を確認する。
+1. スター取得・8コインアイテム取得に進む入力スクリプトを作り、ランダム要素が一致するか確認する。
 2. `PacketBridgeLookupTickDelay` と `PacketBridgeMaxFrameLead` の組み合わせを整理し、最小限の入力遅延で安定する設定を探す。
-3. スター取得・8コインアイテム取得に進む入力スクリプトを作り、ランダム要素が一致するか確認する。
+3. `both_different` の検証をさらに長く伸ばし、通常プレイ中に発生する死亡/復帰/画面外状態でも一致するか確認する。
 4. UI操作を減らす direct MvL ROM patch を進める。
 5. 必要なら `Net::getPacket` そのものを返す hook も追加し、byte/tick/action/keys の個別hookだけで不足する場面を潰す。
 
