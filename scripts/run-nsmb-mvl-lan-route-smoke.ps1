@@ -49,6 +49,7 @@ param(
     [switch]$PacketBridgeWait,
     [int]$PacketBridgeWaitTimeoutMs = 5,
     [int]$PacketBridgeWaitStartFrame = 0,
+    [int]$PacketBridgeWaitTickAhead = 0,
     [switch]$PacketBridgeStrictRemote,
     [string]$PacketBridgeStrictPlayers = "",
     [int]$PacketBridgeStrictStartFrame = 0,
@@ -1144,10 +1145,12 @@ function Start-MelonLANProcess {
             $env:MELONDS_NSML_PACKET_BRIDGE_WAIT = "1"
             $env:MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS = "$PacketBridgeWaitTimeoutMs"
             $env:MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME = "$PacketBridgeWaitStartFrame"
+            $env:MELONDS_NSML_PACKET_BRIDGE_WAIT_TICK_AHEAD = "$PacketBridgeWaitTickAhead"
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_TICK_AHEAD -ErrorAction SilentlyContinue
         }
         if ($PacketBridgeDirectCapture) {
             $env:MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE = "1"
@@ -1654,6 +1657,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_TICK_AHEAD -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FAKE_PEER_INFO -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_START_CONNECTION -ErrorAction SilentlyContinue

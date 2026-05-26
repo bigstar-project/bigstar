@@ -682,6 +682,7 @@ struct State
     bool PacketBridgeWaitEnabled = false;
     int PacketBridgeWaitTimeoutMs = 0;
     melonDS::u32 PacketBridgeWaitStartFrame = 0;
+    int PacketBridgeWaitTickAhead = 0;
     bool PacketBridgeDirectCaptureEnabled = false;
     bool PacketBridgeForceTickEnabled = false;
     melonDS::u32 PacketBridgeForceTickStartFrame = 0;
@@ -1569,6 +1570,20 @@ melonDS::u32 LocalPlayerID(melonDS::NDS* nds)
 {
     if (!nds)
         return 0;
+
+    if (G.PacketBridgeEnabled)
+    {
+        static int packetBridgeLocalPlayer = -1;
+        if (packetBridgeLocalPlayer < 0)
+        {
+            if (const char* value = std::getenv("MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER"))
+                packetBridgeLocalPlayer = std::clamp(std::atoi(value), 0, 1);
+            else
+                packetBridgeLocalPlayer = 2;
+        }
+        if (packetBridgeLocalPlayer <= 1)
+            return static_cast<melonDS::u32>(packetBridgeLocalPlayer);
+    }
 
     const bool inGameplay = nds->ARM9Read32(kGameStageGroupAddr) == 9
         && nds->ARM9Read32(kGameVsModeAddr) == 1
@@ -2668,7 +2683,8 @@ void WaitForNSMLPacketBridgeRemote(melonDS::NDS* nds, melonDS::u32 frame)
         return;
 
     const melonDS::u32 remotePlayer = LocalPlayerID(nds) ^ 1;
-    const melonDS::u32 tick = PacketBridgeCanonicalTick(nds, frame);
+    const melonDS::u32 currentTick = PacketBridgeCanonicalTick(nds, frame);
+    const melonDS::u32 tick = (currentTick + static_cast<melonDS::u32>(G.PacketBridgeWaitTickAhead)) & 0xFFFF;
     if (melonDS::NSML_HasMarioVsLuigiRemotePacket(nds, remotePlayer, tick))
         return;
     {
@@ -6675,6 +6691,7 @@ void InitFromEnvironment()
     G.PacketBridgeWaitTimeoutMs = std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS", 0));
     G.PacketBridgeWaitStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME", 0)));
+    G.PacketBridgeWaitTickAhead = std::clamp(EnvInt("MELONDS_NSML_PACKET_BRIDGE_WAIT_TICK_AHEAD", 0), 0, 32);
     G.PacketBridgeDirectCaptureEnabled = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE");
     G.PacketBridgeForceTickEnabled = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK");
     G.PacketBridgeForceTickStartFrame = static_cast<melonDS::u32>(
@@ -7073,7 +7090,7 @@ void InitFromEnvironment()
             }
         }
 
-        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
+        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
             G.TestFrames,
             G.TestInstanceCount,
             G.FrameBarrierEnabled ? 1 : 0,
@@ -7118,6 +7135,7 @@ void InitFromEnvironment()
             G.PacketBridgeWaitEnabled ? 1 : 0,
             G.PacketBridgeWaitTimeoutMs,
             G.PacketBridgeWaitStartFrame,
+            G.PacketBridgeWaitTickAhead,
             G.PacketBridgeDirectCaptureEnabled ? 1 : 0,
             G.PacketBridgeForceTickEnabled ? 1 : 0,
             G.PacketBridgeForceTickStartFrame,
@@ -7201,7 +7219,7 @@ void InitFromEnvironment()
     }
 
     G.Ready = true;
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -7221,6 +7239,7 @@ void InitFromEnvironment()
         G.PacketBridgeWaitEnabled ? 1 : 0,
         G.PacketBridgeWaitTimeoutMs,
         G.PacketBridgeWaitStartFrame,
+        G.PacketBridgeWaitTickAhead,
         G.PacketBridgeDirectCaptureEnabled ? 1 : 0,
         G.PacketBridgeForceTickEnabled ? 1 : 0,
         G.PacketBridgeForceTickStartFrame,

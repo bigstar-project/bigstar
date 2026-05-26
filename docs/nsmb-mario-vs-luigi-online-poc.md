@@ -87,20 +87,28 @@ NSMB Central の解析では、MvL は接続時に RNG seed を同期し、試�
   - two process smoke では ENet 経由の packet 送受信を確認済み。
   - host 側は local/remote 両 player の `hasPacket` / `getPacket` が成立するケースを確認済み。
   - client 側は remote packet 受信と `hasPacket(player=0)` 成立までは見えているが、同じ早期フレーム帯で `getPacket(player=0)` が安定して ptr を返すところまでは未確認。
+- lower PacketBridge の tick ずれ対策を追加した。
+  - `MELONDS_NSML_PACKET_BRIDGE_WAIT_TICK_AHEAD` を追加し、RunFrame 前に数 tick 先の remote packet を待てるようにした。
+  - ただし tick ahead 待ちは timeout が増え、片側が遅れるため本命ではない。
+  - `MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_LATEST_BEFORE` + `MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK` の方が、入力packetを「届かないフレームでは直近入力を再利用する」形になり、WAN adapter として筋が良い。
+  - フロント側の packet 送信 player ID はゲーム内 `localPlayerID` に引きずられず、`MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER` を優先するよう修正済み。
 
 ## 現在の課題
 
-1. client 側で remote packet が届いているのに `getPacket(player=0)` が安定して ptr を返さない。tick が完全一致していない、呼び出し順で受信が1フレーム遅い、または NSMB 側が `hasPacket` 後に別条件で `getPacket` へ進んでいない可能性がある。
-2. lower Wifi API を WAN adapter に差し替える場合、exact tick 方式だけで足りるか、数 tick の受信バッファ/lookup delay が必要かを決める必要がある。
+1. lower PacketBridge 自体は送受信できるが、現在の fake-opponent/手動UI進行ルートでは長めに進めると scene/session の不自然さで abort する。
+   - 例: `logs/nsmvl-us-packetbridge-two-proc-force-game-playerid-20260526`
+   - host は frame 1453 付近、client は frame 1916 付近で data abort。
+   - client は `stageGroup=9, vsMode=1, scene=3` まで到達するが、player actor 出現前に落ちる。
+2. exact tick 方式はWANでは脆い。直近packet fallback + lookup tick正規化を前提にする。
 3. category mask `0x020CA850` が本来どの scene/session 条件で解除されるかは未解決。暫定 ROM patch では `--clear-actor-category-mask` で初期値を 0 にする。
-4. UI 操作なし MvL 入口は未完成。`direct-mvl-entry` の単純な ready wait bypass では Select a Game へ戻るため、VSStageIntro/VSMenu の session 前提を追加で特定する。
+4. UI 操作なし MvL 入口は未完成。fake-opponent経由で自然遷移を無理に再現するより、ROM patch 側で MvL 開始状態を作る方向へ寄せる。
 
 ## 次にやること
 
-1. two process PacketBridge で、client 側 `hasPacket(player=0)` 成立後に `getPacket(player=0)` が進まない理由をログと counter で特定する。
-2. 必要なら lower packet lookup に tick delay / nearest fallback / latest-before fallback を入れ、WAN 遅延を NSMB の下位 Wifi 境界で吸収できるか検証する。
-3. 1360 frame 以降まで進め、通信切断表示なし、両側ステージ進行、screenshot/CSV 一致を確認する。
-4. PacketBridge lower route が安定したら、ROM patch 側の UI なし MvL 入口と接続し、LocalMP 依存を減らす。
+1. `latest-before fallback + lookup tick正規化 + player ID固定` を標準検証設定にする。
+2. scene/session abort の原因を追う。特に fake-opponent UI進行に依存せず、ROM patch で MvL 開始状態を直接作る方向を優先する。
+3. `VSStageIntro` / `StageScene` に必要な session 値、manager/global 値、actor category mask の自然条件を特定する。
+4. lower PacketBridge は、UI開始ルートが安定した後に長時間検証へ戻す。
 5. `0x020CA850` の自然な解除条件も継続して追い、`--clear-actor-category-mask` が恒久 patch として妥当か、それとも session 値を作るべきか判断する。
 
 ## 検証ルール
