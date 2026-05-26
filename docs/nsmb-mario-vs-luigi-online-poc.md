@@ -127,6 +127,9 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `logs/nsmvl-us-direct-entry-runrole-split-host-1800-20260526` と `logs/nsmvl-us-direct-entry-runrole-split-client-1800-20260526`: frame 1800 まで split mismatch `0`。
   - `logs/nsmvl-us-direct-entry-runrole-split-star-host-3600-20260526` と `logs/nsmvl-us-direct-entry-runrole-split-star-client-3600-20260526`: split 起動でも `-RequireStarPickup -RequireStarRespawn` 通過。
   - 実2PCでは client 側に `-Peer <host-ip>` を渡す想定。
+  - client camera-full-p1 ROM + `-PacketBridgeDirectCapture` の split 双方向入力でも frame 3600 まで split verifier 通過。
+  - ログ: `logs/nsmvl-us-direct-entry-split-camera-full-both-different-host-3600-20260527`, `logs/nsmvl-us-direct-entry-split-camera-full-both-different-client-3600-20260527`
+  - `inputPlayer0Held` / `inputPlayer1Held` はどちらも13 trace rowsで確認。最終 player actor 座標も host/client で一致。
 - 自然入力のスター取得 route:
   - `tests/nsmb_us_direct_mvl_star_collect_left.inputs` を direct MvL 起動手順込みに修正。
   - `logs/nsmvl-us-direct-entry-star-left-route-packet-only-canonical-local0-7200-20260526` は mismatch `0` で完走したが、`player*BattleStars` / `player*CollectedStars` は変化せず、スター取得は未達。
@@ -223,9 +226,9 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ## 次にやること
 
-1. client camera-full-p1 ROM + `-PacketBridgeDirectCapture` を標準条件にして、自然操作を含む player0/player1 双方向入力ルートを split 起動で再確認する。
-2. 実WAN相当の評価は、ENet reliable 前提で遅延/ジッタ中心に続ける。packet lossは「reliable retransmitによる遅延」としてまず扱う。
-3. 自然入力でスターを取得できる route は別途調整する。成功判定は必ず `player*BattleStars` / `player*CollectedStars` / star actor 再生成で行う。
+1. 実WAN相当の評価は、ENet reliable 前提で遅延/ジッタ中心に続ける。packet lossは「reliable retransmitによる遅延」としてまず扱う。
+2. 自然入力でスターを取得できる route は別途調整する。成功判定は必ず `player*BattleStars` / `player*CollectedStars` / star actor 再生成で行う。
+3. 現在の PowerShell split 起動コマンドが長いので、標準条件を短い helper script にまとめる。
 4. 実LAN上の2PCで `-RunRole host` / `-RunRole client -Peer <host-ip>` を使ったログ取得を行い、split verifier で比較する。
 
 ## 検証ルール
