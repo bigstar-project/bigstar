@@ -94,6 +94,8 @@ EmuInstance::EmuInstance(int inst) : deleting(false),
     cheatsOn = localCfg.GetBool("EnableCheats");
 
     doLimitFPS = globalCfg.GetBool("LimitFPS");
+    if (getenv("MELONDS_NSML_DISABLE_FRAME_LIMIT"))
+        doLimitFPS = false;
 
     double val = globalCfg.GetDouble("TargetFPS");
     if (val == 0.0)
@@ -102,6 +104,14 @@ EmuInstance::EmuInstance(int inst) : deleting(false),
         targetFPS = 60.0;
     }
     else targetFPS = val;
+    if (const char* nsmlTargetFPS = getenv("MELONDS_NSML_TARGET_FPS"))
+    {
+        const double parsedTargetFPS = atof(nsmlTargetFPS);
+        if (parsedTargetFPS > 0.0)
+            targetFPS = parsedTargetFPS;
+    }
+    if (getenv("MELONDS_NSML_TEST") || getenv("MELONDS_NSML_POC"))
+        std::printf("NSMB Test: targetFPS %.2f limitFPS=%d\n", targetFPS, doLimitFPS ? 1 : 0);
     curFPS = targetFPS;
 
     val = globalCfg.GetDouble("FastForwardFPS");
@@ -1294,14 +1304,26 @@ bool EmuInstance::updateConsole() noexcept
             jitopt.GetBool("BranchOptimisations"),
             jitopt.GetBool("FastMemory"),
     };
-    auto jitargs = jitopt.GetBool("Enable") ? std::make_optional(_jitargs) : std::nullopt;
+    const bool packetBridgeAllowsJIT =
+        getenv("MELONDS_NSML_PACKET_BRIDGE") &&
+        getenv("MELONDS_NSML_PACKET_BRIDGE_ALLOW_JIT");
+    auto jitargs = (jitopt.GetBool("Enable") || packetBridgeAllowsJIT)
+        ? std::make_optional(_jitargs)
+        : std::nullopt;
     if (getenv("MELONDS_NSML_DISABLE_JIT") ||
         getenv("MELONDS_NSML_WATCH_ADDR") ||
         getenv("MELONDS_NSML_CALL_TRACE") ||
         getenv("MELONDS_NSML_PACKET_REPLAY_FILE") ||
         getenv("MELONDS_NSML_PACKET_CAPTURE_LOG") ||
-        getenv("MELONDS_NSML_PACKET_BRIDGE"))
+        (getenv("MELONDS_NSML_PACKET_BRIDGE") && !packetBridgeAllowsJIT))
         jitargs = std::nullopt;
+    if (getenv("MELONDS_NSML_TEST") || getenv("MELONDS_NSML_POC"))
+    {
+        std::printf("NSMB Test: JIT %s packetBridge=%d packetBridgeAllowJit=%d\n",
+            jitargs ? "enabled" : "disabled",
+            getenv("MELONDS_NSML_PACKET_BRIDGE") ? 1 : 0,
+            packetBridgeAllowsJIT ? 1 : 0);
+    }
 #else
     std::optional<JITArgs> jitargs = std::nullopt;
 #endif

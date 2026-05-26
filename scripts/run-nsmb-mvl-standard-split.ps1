@@ -13,11 +13,19 @@ param(
     [int]$LookupTickDelay = 10,
     [int]$SendDelayFrames = 0,
     [int]$SendJitterFrames = 0,
+    [int]$MaxFrameLead = 8,
     [int]$ScreenshotInterval = 900,
     [int]$GameStateTraceInterval = 60,
     [int]$WaitTimeoutMs = 720000,
     [int]$JobTimeoutSeconds = 780,
     [switch]$NoDirectCapture,
+    [switch]$NoGameStateTrace,
+    [switch]$NoScreenshots,
+    [switch]$NoHashLog,
+    [switch]$NoFrameLimit,
+    [switch]$FixedFrameTime,
+    [double]$TargetFps = 0.0,
+    [switch]$AllowJitWithPacketBridge,
     [int]$PlayerStickToStarStartFrame = 0,
     [int]$PlayerStickToStarEndFrame = 0,
     [int]$PlayerStickToStarSlot = 0
@@ -49,10 +57,6 @@ $common = @(
     "-InputScript", $InputScript,
     "-Frames", "$Frames",
     "-WaitTimeoutMs", "$WaitTimeoutMs",
-    "-GameStateTrace",
-    "-GameStateTraceExtended",
-    "-GameStateTraceInterval", "$GameStateTraceInterval",
-    "-ScreenshotInterval", "$ScreenshotInterval",
     "-PacketBridge",
     "-PacketBridgePort", "$Port",
     "-PacketBridgeStartFrame", "1500",
@@ -66,14 +70,46 @@ $common = @(
     "-ClientPacketBridgeLocalPlayer", "1",
     "-HostPacketBridgeForceGameLocalPlayerID", "0",
     "-ClientPacketBridgeForceGameLocalPlayerID", "0",
-    "-PacketBridgeMaxFrameLead", "8",
     "-PacketBridgeThrottleStartFrame", "1500",
     "-NetRandomValue", "0x12345678",
     "-NetRandomAuto"
 )
 
+if ($MaxFrameLead -ge 0) {
+    $common += @("-PacketBridgeMaxFrameLead", "$MaxFrameLead")
+}
+
+if (-not $NoGameStateTrace) {
+    $common += @(
+        "-GameStateTrace",
+        "-GameStateTraceExtended",
+        "-GameStateTraceInterval", "$GameStateTraceInterval"
+    )
+}
+
+if ($NoScreenshots) {
+    $common += @("-ScreenshotInterval", "0")
+} else {
+    $common += @("-ScreenshotInterval", "$ScreenshotInterval")
+}
+
 if (-not $NoDirectCapture) {
     $common += "-PacketBridgeDirectCapture"
+}
+if ($NoHashLog) {
+    $common += "-NoHashLog"
+}
+if ($NoFrameLimit) {
+    $common += "-NoFrameLimit"
+}
+if ($FixedFrameTime) {
+    $common += "-FixedFrameTime"
+}
+if ($TargetFps -gt 0.0) {
+    $common += @("-TargetFps", $TargetFps.ToString([System.Globalization.CultureInfo]::InvariantCulture))
+}
+if ($AllowJitWithPacketBridge) {
+    $common += "-PacketBridgeAllowJit"
 }
 if ($SendDelayFrames -gt 0) {
     $common += @("-PacketBridgeSendDelayFrames", "$SendDelayFrames")
@@ -102,6 +138,7 @@ $clientCmd = "& .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 " + (($clientArgs | F
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $jobs = @()
+$startedAt = Get-Date
 if ($RunRole -eq "both" -or $RunRole -eq "host") {
     $jobs += Start-Job -ScriptBlock {
         param($Root, $Command)
@@ -140,4 +177,11 @@ Remove-Job $jobs -Force
 
 if ($failed.Count -gt 0) {
     throw "standard split smoke job failed or timed out"
+}
+
+$finishedAt = Get-Date
+$elapsed = ($finishedAt - $startedAt).TotalSeconds
+if ($elapsed -gt 0) {
+    $effectiveFps = [double]$Frames / $elapsed
+    Write-Host ("NSMB MvL standard split timing: frames={0} elapsedSec={1:n2} effectiveFps={2:n2} runRole={3}" -f $Frames, $elapsed, $effectiveFps, $RunRole)
 }

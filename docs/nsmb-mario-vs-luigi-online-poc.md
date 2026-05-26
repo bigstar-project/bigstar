@@ -22,6 +22,15 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 参考: https://bookstack.nsmbcentral.net/books/new-super-mario-bros/page/mario-vs-luigi
 
+## 現在の最優先課題
+
+ユーザー観察ベースで、次の4点を優先して潰す。
+
+- host/client の上画面で Mario/Luigi の初期位置が違って見える。trace上の world座標差と、client表示用camera ROMによる screen座標差を分けて確認する。
+- 開始直後に Luigi が死亡してから始まる。direct MvL entry の player1 spawn/transition/dead state を確認し、初期化またはROM patchで自然な開始状態に寄せる。
+- FPSが低い。trace/screenshot ではなく、JIT OFF、ハッシュ計算、フレームリミッタ、PacketBridge処理が主因。現在はJITあり・hashなし・traceなしで内部55fps前後、無制限では68fps前後まで回復。固定60fps化は継続調整中。
+- Luigi死亡中に敵やブロックアニメが止まるように見える。NSMB本来の死亡/リスポーン停止なのか、direct entry/PacketBridgeの副作用なのかを trace とスクリーンショットで分ける。
+
 ## 実装済み
 
 - US 版 ROM 解析/patch tooling
@@ -60,6 +69,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - LAN smoke script に `-RunRole both|host|client`, `-Peer`, `-LanHost` を追加。2PC相当の片側起動が可能。
   - 標準split検証用の `scripts/run-nsmb-mvl-standard-split.ps1` を追加。host normal ROM / client camera-full-p1 ROM / `-PacketBridgeDirectCapture` / canonical local0 の長い起動条件をまとめた。
   - helper は `-RunRole both|host|client` に対応。ローカル2ジョブ検証では `both`、実2PCでは host側 `host`、client側 `client -Peer <host-ip>` を使う。
+  - helper にFPS切り分け用の `-NoGameStateTrace`, `-NoScreenshots`, `-NoHashLog`, `-NoFrameLimit`, `-FixedFrameTime`, `-TargetFps`, `-AllowJitWithPacketBridge` を追加。
   - default の client camera ROM が無い場合、helper が `tools/nsmb_us_rom_patch.py` で自動生成する。生成ROMは git には含めない。
   - helper script は `logs/nsmvl-standard-helper-client-right-host-1800-20260527`, `logs/nsmvl-standard-helper-client-right-client-1800-20260527` で smoke と split verifier 通過。
   - host/client 別入力スクリプトを追加済み。
@@ -75,6 +85,20 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_BUFFER` を追加し、`StageLayout + 0xA8CC` に診断用 0x2000 byte buffer を差し込めるようにした。
 
 ## 最新の検証結果
+
+### FPS / 検証速度
+
+2026-05-27時点の切り分け:
+
+- 旧release buildは `ENABLE_JIT=OFF` だったため、PacketBridge検証は実質インタプリタ実行になっていた。
+- `cmake -S . -B build\release-windows-x86_64 -DENABLE_JIT=ON` で release を再構成し、`-AllowJitWithPacketBridge` で PacketBridge 使用時もJITを許可するようにした。
+- `-NoGameStateTrace -NoScreenshots` だけでは約11fpsのまま。trace/screenshotは主因ではない。
+- `-NoHashLog` はCSVを止めるだけでなく、`MELONDS_NSML_DISABLE_HASH=1` でハッシュ計算自体も止めるようにした。
+- JIT有効 + hash/trace/screenshotなし:
+  - `logs/smvl-fps-jit-nohash-host-1800-20260527`: host内部 `52.76fps`
+  - `logs/smvl-fps-jit-nohash-client-1800-20260527`: client内部 `53.61fps`
+- `-NoFrameLimit` ではhost単体 `68.84fps` まで出るため、CPUが常に10fps相当しか出ない状態ではない。
+- `-FixedFrameTime` / `-TargetFps` は追加済みだが、PacketBridgeありの長め検証ではまだ実測60fpsへ張り付かない。次はPacketBridge per-frame処理と描画/SaveManager flushのどちらが残りの差分かを測る。
 
 標準に近い検証条件:
 
@@ -223,17 +247,21 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ## 現在の課題
 
-1. client 表示カメラは player1 寄りにでき、split 3600 frame で player1入力も成立したが、UI、勝敗表示、復帰後表示まで実用上問題ないかは未検証。
-2. client表示ROM込みのsplit構成でもスター取得/再生成同期は成立したが、これは制御hookによる取得であり、自然操作では未達。
-3. 自然操作でスターを取りに行く入力 script はまだ未完成。死亡/勝利表示をスター取得と誤判定しないよう、状態値で検証する。
-4. 死亡/復帰後の長時間同期、実WAN遅延/packet loss条件は未検証。
-5. 8コインアイテム取得は自動化が難しいため後回し。
+1. client 表示カメラは player1 寄りにできたが、上画面で Mario/Luigi の初期表示位置が host/client で違って見える。trace上のworld座標ズレか、カメラ差によるscreen座標差かを切り分ける。
+2. 現在の direct MvL 入口では開始直後に Luigi/player1 が一度死亡状態になることがある。最終対戦としては unacceptable なので、開始状態または spawn/transition 初期化を修正する。
+3. 検証中の実効FPSが10程度まで落ちる。trace/screenshot/hashの負荷なのか、PacketBridge待機/スロットリング/JIT設定なのかを測定可能にし、通常プレイ条件で60fpsを目指す。
+4. Luigi がクリボーで死亡した後、復帰まで stage 全体の動きが止まるように見える。NSMB本来の同期停止なのか、PacketBridge/Direct入口の不具合なのかを検証する。
+5. client表示ROM込みのsplit構成でもスター取得/再生成同期は成立したが、これは制御hookによる取得であり、自然操作では未達。
+6. 自然操作でスターを取りに行く入力 script はまだ未完成。死亡/勝利表示をスター取得と誤判定しないよう、状態値で検証する。
+7. 8コインアイテム取得は自動化が難しいため後回し。
 
 ## 次にやること
 
-1. 実WAN相当の評価は、ENet reliable 前提で遅延/ジッタ中心に続ける。packet lossは「reliable retransmitによる遅延」としてまず扱う。
-2. 自然入力でスターを取得できる route は別途調整する。成功判定は必ず `player*BattleStars` / `player*CollectedStars` / star actor 再生成で行う。
-3. 実LAN上の2PCで `scripts/run-nsmb-mvl-standard-split.ps1 -RunRole host` と `scripts/run-nsmb-mvl-standard-split.ps1 -RunRole client -Peer <host-ip>` のログ取得を行い、split verifier で比較する。
+1. 標準split helperにFPS/実行時間計測を追加し、trace/screenshotあり・なしの差を測る。
+2. 開始直後の player1 death を traceで最小再現し、spawn/transition/global初期値のどれが原因か特定する。
+3. host/clientの上画面差を、world座標・camera値・screenshot上の見え方に分けて確認する。
+4. Luigi死亡後のstage停止が `Stage::actorFreezeFlag` や player transition status によるものか確認する。
+5. 実WAN相当の評価は、ENet reliable 前提で遅延/ジッタ中心に続ける。packet lossは「reliable retransmitによる遅延」としてまず扱う。
 
 ## 検証ルール
 

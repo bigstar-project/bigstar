@@ -403,6 +403,9 @@ void EmuThread::run()
                 emuInstance->audioSync();
 
             double frametimeStep = nlines / (emuInstance->curFPS * 263.0);
+            const bool nsmlFixedFrameTimestep = getenv("MELONDS_NSML_FIXED_FRAME_TIMESTEP");
+            if (nsmlFixedFrameTimestep)
+                frametimeStep = 1.0 / emuInstance->curFPS;
 
             if (frametimeStep < 0.001) frametimeStep = 0.001;
 
@@ -410,13 +413,44 @@ void EmuThread::run()
             {
                 double curtime = SDL_GetPerformanceCounter() * perfCountsSec;
 
+                if (nsmlFixedFrameTimestep)
+                {
+                    lastTime += frametimeStep;
+                    if (lastTime < curtime - frametimeStep)
+                        lastTime = curtime;
+                    for (;;)
+                    {
+                        curtime = SDL_GetPerformanceCounter() * perfCountsSec;
+                        const double remaining = lastTime - curtime;
+                        if (remaining <= 0.0)
+                            break;
+                        (void)remaining;
+                    }
+                    frameLimitError = 0.0;
+                    goto frame_limit_done;
+                }
+
                 frameLimitError += frametimeStep - (curtime - lastTime);
                 if (frameLimitError < -frametimeStep)
                     frameLimitError = -frametimeStep;
                 if (frameLimitError > frametimeStep)
                     frameLimitError = frametimeStep;
 
-                if (round(frameLimitError * 1000.0) > 0.0)
+                if (nsmlFixedFrameTimestep && frameLimitError > 0.0)
+                {
+                    const double targetTime = curtime + frameLimitError;
+                    for (;;)
+                    {
+                        curtime = SDL_GetPerformanceCounter() * perfCountsSec;
+                        const double remaining = targetTime - curtime;
+                        if (remaining <= 0.0)
+                            break;
+                        if (remaining > 0.003)
+                            SDL_Delay(1);
+                    }
+                    frameLimitError = 0.0;
+                }
+                else if (round(frameLimitError * 1000.0) > 0.0)
                 {
                     SDL_Delay(round(frameLimitError * 1000.0));
                     double timeBeforeSleep = curtime;
@@ -426,6 +460,7 @@ void EmuThread::run()
 
                 lastTime = curtime;
             }
+frame_limit_done:
 
             nframes++;
             if (nframes >= 30)

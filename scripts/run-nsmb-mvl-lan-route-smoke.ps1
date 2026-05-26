@@ -34,11 +34,16 @@ param(
     [int]$PlayerStickToStarSlot = 0,
     [switch]$LanMPTrace,
     [int]$LanMPTraceDumpLen = 512,
+    [switch]$NoHashLog,
+    [switch]$NoFrameLimit,
+    [switch]$FixedFrameTime,
+    [double]$TargetFps = 0.0,
     [string]$HostPacketReplayFile = "",
     [string]$ClientPacketReplayFile = "",
     [switch]$PacketCapture,
     [switch]$PacketCaptureAllowPreGame,
     [switch]$PacketBridge,
+    [switch]$PacketBridgeAllowJit,
     [switch]$PacketBridgeAllowPreGame,
     [switch]$PacketBridgeTrace,
     [int]$PacketBridgePort = 8165,
@@ -520,8 +525,30 @@ function Start-MelonLANProcess {
     $env:MELONDS_NSML_TEST_FRAMES = "$roleFrames"
     $env:MELONDS_NSML_ROLE = $Role
     $env:MELONDS_NSML_INPUT_SCRIPT = $RoleInput
-    $env:MELONDS_NSML_HASH_LOG = $HashLog
-    $env:MELONDS_NSML_HASH_INTERVAL = "300"
+    if ($NoFrameLimit) {
+        $env:MELONDS_NSML_DISABLE_FRAME_LIMIT = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_DISABLE_FRAME_LIMIT -ErrorAction SilentlyContinue
+    }
+    if ($FixedFrameTime) {
+        $env:MELONDS_NSML_FIXED_FRAME_TIMESTEP = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FIXED_FRAME_TIMESTEP -ErrorAction SilentlyContinue
+    }
+    if ($TargetFps -gt 0.0) {
+        $env:MELONDS_NSML_TARGET_FPS = $TargetFps.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+    } else {
+        Remove-Item Env:\MELONDS_NSML_TARGET_FPS -ErrorAction SilentlyContinue
+    }
+    if ($NoHashLog) {
+        $env:MELONDS_NSML_DISABLE_HASH = "1"
+        Remove-Item Env:\MELONDS_NSML_HASH_LOG -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_HASH_INTERVAL -ErrorAction SilentlyContinue
+    } else {
+        Remove-Item Env:\MELONDS_NSML_DISABLE_HASH -ErrorAction SilentlyContinue
+        $env:MELONDS_NSML_HASH_LOG = $HashLog
+        $env:MELONDS_NSML_HASH_INTERVAL = "300"
+    }
     $env:MELONDS_NSML_SCREENSHOT_DIR = $ScreenshotDir
     $env:MELONDS_NSML_SCREENSHOT_INTERVAL = "$ScreenshotInterval"
     if ($DirectMvlBoot) {
@@ -1207,6 +1234,11 @@ function Start-MelonLANProcess {
         }
         $env:MELONDS_NSML_PACKET_BRIDGE = "1"
         $env:MELONDS_NSML_PACKET_BRIDGE_ONLY = "1"
+        if ($PacketBridgeAllowJit) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_ALLOW_JIT = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ALLOW_JIT -ErrorAction SilentlyContinue
+        }
         if ($Role -eq "host" -and $HostPacketBridgeLocalPlayer) {
             $env:MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER = $HostPacketBridgeLocalPlayer
         } elseif ($Role -eq "client" -and $ClientPacketBridgeLocalPlayer) {
@@ -1772,6 +1804,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_LOCAL_INSTANCE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ALLOW_JIT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOAD_LEVEL_PLAYER_ID -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID -ErrorAction SilentlyContinue
@@ -2110,7 +2143,7 @@ function Start-MelonLANProcess {
     }
     $env:MELONDS_NSML_ROLE = $Role
     $env:MELONDS_NSML_FIXED_RTC = "2020-01-01T00:00:00"
-    if ($AllowJit) {
+    if ($AllowJit -or $PacketBridgeAllowJit) {
         Remove-Item Env:\MELONDS_NSML_DISABLE_JIT -ErrorAction SilentlyContinue
     } else {
         $env:MELONDS_NSML_DISABLE_JIT = "1"
@@ -2249,6 +2282,10 @@ function Start-MelonLANProcess {
         "packetBridgeNeutralizeLocalInput=$($env:MELONDS_NSML_PACKET_BRIDGE_NEUTRALIZE_LOCAL_INPUT)"
         "packetBridgeSendDelayFrames=$($env:MELONDS_NSML_PACKET_BRIDGE_SEND_DELAY_FRAMES)"
         "packetBridgeSendJitterFrames=$($env:MELONDS_NSML_PACKET_BRIDGE_SEND_JITTER_FRAMES)"
+        "disableFrameLimit=$($env:MELONDS_NSML_DISABLE_FRAME_LIMIT)"
+        "fixedFrameTime=$($env:MELONDS_NSML_FIXED_FRAME_TIMESTEP)"
+        "targetFps=$($env:MELONDS_NSML_TARGET_FPS)"
+        "disableHash=$($env:MELONDS_NSML_DISABLE_HASH)"
         "packetBridgeLiveFallbackWindow=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW)"
         "packetBridgeLiveFallbackNearest=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST)"
         "packetBridgeLiveFallbackLatestBefore=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_LATEST_BEFORE)"
@@ -2473,20 +2510,24 @@ foreach ($item in $requiredPatterns) {
     }
 }
 
-foreach ($hashLog in @($roleInfos | ForEach-Object { $_.Hash })) {
-    if (-not (Test-Path $hashLog)) {
-        throw "hash log was not created: $hashLog"
-    }
-    $rows = Import-Csv $hashLog
-    if (-not ($rows | Where-Object { $_.instance -eq "0" })) {
-        throw "hash log did not contain instance 0 rows: $hashLog"
+if (-not $NoHashLog) {
+    foreach ($hashLog in @($roleInfos | ForEach-Object { $_.Hash })) {
+        if (-not (Test-Path $hashLog)) {
+            throw "hash log was not created: $hashLog"
+        }
+        $rows = Import-Csv $hashLog
+        if (-not ($rows | Where-Object { $_.instance -eq "0" })) {
+            throw "hash log did not contain instance 0 rows: $hashLog"
+        }
     }
 }
 
-foreach ($screenDir in @($roleInfos | ForEach-Object { $_.Screens })) {
-    $screens = Get-ChildItem $screenDir -Filter "inst0_*.png" -ErrorAction SilentlyContinue
-    if (-not $screens) {
-        throw "expected screenshots in $screenDir"
+if ($ScreenshotInterval -gt 0) {
+    foreach ($screenDir in @($roleInfos | ForEach-Object { $_.Screens })) {
+        $screens = Get-ChildItem $screenDir -Filter "inst0_*.png" -ErrorAction SilentlyContinue
+        if (-not $screens) {
+            throw "expected screenshots in $screenDir"
+        }
     }
 }
 
@@ -2608,29 +2649,31 @@ function Convert-TraceHexToInt64 {
     return [Convert]::ToInt64($text, 10)
 }
 
-foreach ($screenDir in @($roleInfos | ForEach-Object { $_.Screens })) {
-    $screens = Get-ChildItem $screenDir -Filter "inst0_frame*.png" -ErrorAction SilentlyContinue
-    foreach ($screen in $screens) {
-        if ($screen.Name -notmatch "frame(\d+)\.png") {
-            continue
-        }
-
-        $frame = [int]$matches[1]
-        if ($frame -lt 3000) {
-            continue
-        }
-
-        if (-not $SkipDisconnectScreenshotCheck) {
-            if (Test-DisconnectLikeScreenshot -Path $screen.FullName) {
-                throw "disconnect-like screenshot detected at frame=${frame}: $($screen.FullName)"
+if ($ScreenshotInterval -gt 0) {
+    foreach ($screenDir in @($roleInfos | ForEach-Object { $_.Screens })) {
+        $screens = Get-ChildItem $screenDir -Filter "inst0_frame*.png" -ErrorAction SilentlyContinue
+        foreach ($screen in $screens) {
+            if ($screen.Name -notmatch "frame(\d+)\.png") {
+                continue
             }
-            if (Test-ConnectionDialogScreenshot -Path $screen.FullName) {
-                throw "connection-dialog screenshot detected at frame=${frame}: $($screen.FullName)"
-            }
-        }
 
-        if (-not $SkipBlankScreenshotCheck -and (Test-BlankLikeScreenshot -Path $screen.FullName)) {
-            throw "blank-like screenshot detected at frame=${frame}: $($screen.FullName)"
+            $frame = [int]$matches[1]
+            if ($frame -lt 3000) {
+                continue
+            }
+
+            if (-not $SkipDisconnectScreenshotCheck) {
+                if (Test-DisconnectLikeScreenshot -Path $screen.FullName) {
+                    throw "disconnect-like screenshot detected at frame=${frame}: $($screen.FullName)"
+                }
+                if (Test-ConnectionDialogScreenshot -Path $screen.FullName) {
+                    throw "connection-dialog screenshot detected at frame=${frame}: $($screen.FullName)"
+                }
+            }
+
+            if (-not $SkipBlankScreenshotCheck -and (Test-BlankLikeScreenshot -Path $screen.FullName)) {
+                throw "blank-like screenshot detected at frame=${frame}: $($screen.FullName)"
+            }
         }
     }
 }

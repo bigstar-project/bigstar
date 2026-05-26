@@ -735,7 +735,10 @@ struct State
     bool LocalWaitsForRemote = true;
     melonDS::u32 TestFrames = kNoFrameLimit;
     int TestInstanceCount = 1;
+    bool TestTimerStarted = false;
+    std::chrono::steady_clock::time_point TestTimerStart;
     int HashInterval = 60;
+    bool HashEnabled = true;
     int TestWaitTimeoutMs = 5000;
     int TestQuitGraceMs = 0;
     bool InputTraceEnabled = false;
@@ -7298,6 +7301,7 @@ void InitFromEnvironment()
     G.TestInstanceCount = std::clamp(EnvInt("MELONDS_NSML_TEST_INSTANCES", 1), 1, 16);
     G.FrameBarrierEnabled = EnvFlag("MELONDS_NSML_FRAME_BARRIER");
     G.SerialRunEnabled = EnvFlag("MELONDS_NSML_SERIAL_RUN");
+    G.HashEnabled = !EnvFlag("MELONDS_NSML_DISABLE_HASH");
     G.HashInterval = std::max(1, EnvInt("MELONDS_NSML_HASH_INTERVAL", 60));
     G.TestWaitTimeoutMs = std::max(0, EnvInt("MELONDS_NSML_WAIT_TIMEOUT_MS", 5000));
     G.TestQuitGraceMs = std::max(0, EnvInt("MELONDS_NSML_QUIT_GRACE_MS", 0));
@@ -8246,7 +8250,18 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     melonDS::u32 logFrame = frame;
     if (G.TestEnabled)
+    {
         logFrame = ++G.TestFrameCount[instanceID];
+        if (logFrame == 1)
+        {
+            std::lock_guard<std::mutex> lock(G.Mutex);
+            if (!G.TestTimerStarted)
+            {
+                G.TestTimerStarted = true;
+                G.TestTimerStart = std::chrono::steady_clock::now();
+            }
+        }
+    }
 
     WaitAtFrameBarrier(GAfterFrameBarrier, instanceID, logFrame, "after");
     AdvanceSerialRunTurn(instanceID, logFrame - 1);
@@ -8283,6 +8298,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     TraceGameState(instanceID, logFrame, nds);
     SyncGameState(instanceID, logFrame, nds);
 
+    if (!G.HashEnabled) return;
     if ((logFrame % static_cast<melonDS::u32>(G.HashInterval)) != 0) return;
 
     const melonDS::u64 hash = HashNDS(nds);
@@ -8335,9 +8351,18 @@ bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
     if (!G.TestAnnouncedQuit)
     {
         G.TestAnnouncedQuit = true;
-        std::printf("NSMB Test: frame limit reached at frame=%u instances=%d\n",
+        const auto elapsedMs = G.TestTimerStarted
+            ? std::chrono::duration_cast<std::chrono::milliseconds>(
+                  std::chrono::steady_clock::now() - G.TestTimerStart).count()
+            : 0;
+        const double fps = elapsedMs > 0
+            ? (static_cast<double>(G.TestFrames) * 1000.0) / static_cast<double>(elapsedMs)
+            : 0.0;
+        std::printf("NSMB Test: frame limit reached at frame=%u instances=%d elapsedMs=%lld fps=%.2f\n",
             G.TestFrames,
-            G.TestInstanceCount);
+            G.TestInstanceCount,
+            static_cast<long long>(elapsedMs),
+            fps);
         std::fflush(nullptr);
         if (G.Enabled && G.TestQuitGraceMs > 0)
         {
