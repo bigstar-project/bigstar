@@ -165,6 +165,13 @@ bool IsMarioVsLuigiGGID(melonDS::u32 value)
     return value == 0x42 || value == 0x00400150;
 }
 
+bool IsMarioVsLuigiGameplay(melonDS::NDS* nds)
+{
+    if (!nds) return false;
+    return nds->ARM9Read32(kGameStageGroupAddr) == 9
+        && nds->ARM9Read32(kGameVsModeAddr) == 1;
+}
+
 enum class Role
 {
     Host,
@@ -933,6 +940,12 @@ struct State
     melonDS::u32 ForceMvlRuntimeStateEndFrame = 0;
     melonDS::u32 ForceMvlRuntimeStateValue = 3;
     bool ForceMvlRuntimeStateLogged[16] {};
+    bool ForcePlayerActorIDsEnabled = false;
+    bool ForcePlayerActorIDsHostOnly = false;
+    bool ForcePlayerActorIDsClientOnly = false;
+    melonDS::u32 ForcePlayerActorIDsStartFrame = 0;
+    melonDS::u32 ForcePlayerActorIDsEndFrame = 0;
+    bool ForcePlayerActorIDsLogged[16] {};
     bool ForceMvlStageLayoutGateEnabled = false;
     bool ForceMvlStageLayoutGateHostOnly = false;
     bool ForceMvlStageLayoutGateClientOnly = false;
@@ -1646,9 +1659,7 @@ melonDS::u32 LocalPlayerID(melonDS::NDS* nds)
             return static_cast<melonDS::u32>(packetBridgeLocalPlayer);
     }
 
-    const bool inGameplay = nds->ARM9Read32(kGameStageGroupAddr) == 9
-        && nds->ARM9Read32(kGameVsModeAddr) == 1
-        && IsMarioVsLuigiGGID(nds->ARM9Read32(kNetGGIDAddr));
+    const bool inGameplay = IsMarioVsLuigiGameplay(nds);
     if (G.PacketBridgeEnabled && G.PacketBridgeAllowPreGame && !inGameplay)
         return static_cast<melonDS::u32>(G.LocalInstance & 1);
 
@@ -4071,6 +4082,39 @@ PlayerActorScanSample FindPlayerActors(melonDS::NDS* nds)
     return players;
 }
 
+void ForcePlayerActorIDsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForcePlayerActorIDsEnabled || !nds)
+        return;
+    if (G.ForcePlayerActorIDsHostOnly && G.NetRole != Role::Host)
+        return;
+    if (G.ForcePlayerActorIDsClientOnly && G.NetRole != Role::Client)
+        return;
+    if (frame < G.ForcePlayerActorIDsStartFrame)
+        return;
+    if (G.ForcePlayerActorIDsEndFrame != 0 && frame > G.ForcePlayerActorIDsEndFrame)
+        return;
+
+    const PlayerActorScanSample players = FindPlayerActors(nds);
+    if (players.Actor0.Found)
+        nds->ARM9Write8(players.Actor0.Base + 0x11E, 0);
+    if (players.Actor1.Found)
+        nds->ARM9Write8(players.Actor1.Base + 0x11E, 1);
+
+    if (instanceID >= 0 && instanceID < 16 && !G.ForcePlayerActorIDsLogged[instanceID])
+    {
+        G.ForcePlayerActorIDsLogged[instanceID] = true;
+        std::printf(
+            "NSMB Test: force player actor IDs inst=%d frame=%u range=%u-%u p0=%08X p1=%08X\n",
+            instanceID,
+            frame,
+            G.ForcePlayerActorIDsStartFrame,
+            G.ForcePlayerActorIDsEndFrame,
+            players.Actor0.Base,
+            players.Actor1.Base);
+    }
+}
+
 ObjectLifecycleSummary SummarizeObjectLifecycle(melonDS::NDS* nds)
 {
     ObjectLifecycleSummary summary;
@@ -5613,7 +5657,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     {
         if (!actor.Found || !IsARM9MainRAMAddress(actor.Base))
             return;
-        playerID = nds->ARM9Read8(actor.Base + 0x0EE);
+        playerID = nds->ARM9Read8(actor.Base + 0x11E);
         transitionStep = nds->ARM9Read8(actor.Base + 0xB2D);
         signalLock = nds->ARM9Read8(actor.Base + 0x75C);
         flag192 = nds->ARM9Read8(actor.Base + 0x192);
@@ -6195,11 +6239,9 @@ void ApplyNetRandomPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     melonDS::u8 randomCallCountBeforePatch = 0;
     if (G.NetRandomPatchAuto)
     {
-        const melonDS::u32 stageGroup = nds->ARM9Read32(kGameStageGroupAddr);
-        const melonDS::u32 vsMode = nds->ARM9Read32(kGameVsModeAddr);
         const melonDS::u32 ggid = nds->ARM9Read32(kNetGGIDAddr);
         randomCallCountBeforePatch = nds->ARM9Read8(kNetRandomCallCountAddr);
-        shouldPatch = stageGroup == 9 && vsMode == 1 && IsMarioVsLuigiGGID(ggid);
+        shouldPatch = IsMarioVsLuigiGameplay(nds) || IsMarioVsLuigiGGID(ggid);
     }
     if (!shouldPatch) return;
 
@@ -7349,6 +7391,13 @@ void InitFromEnvironment()
     G.ForceMvlRuntimeStateValue = static_cast<melonDS::u32>(
         std::strtoul(std::getenv("MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_VALUE")
             ? std::getenv("MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_VALUE") : "3", nullptr, 0));
+    G.ForcePlayerActorIDsEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_ACTOR_IDS");
+    G.ForcePlayerActorIDsHostOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_ACTOR_IDS_HOST_ONLY");
+    G.ForcePlayerActorIDsClientOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_ACTOR_IDS_CLIENT_ONLY");
+    G.ForcePlayerActorIDsStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_ACTOR_IDS_START_FRAME", 0)));
+    G.ForcePlayerActorIDsEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_ACTOR_IDS_END_FRAME", 0)));
     G.ForceMvlStageLayoutGateEnabled = EnvFlag("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_GATE");
     G.ForceMvlStageLayoutGateHostOnly = EnvFlag("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_GATE_HOST_ONLY");
     G.ForceMvlStageLayoutGateClientOnly = EnvFlag("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_GATE_CLIENT_ONLY");
@@ -7683,6 +7732,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         ForceMvlPlayerReadyIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceMvlRuntimeStateIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForcePlayerActorIDsIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
     {
         if (CallMvlStageLayoutInitIfNeeded(instanceID, inputFrame, nds))

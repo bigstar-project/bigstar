@@ -1,4 +1,4 @@
-# NSMB Mario vs Luigi Online PoC
+﻿# NSMB Mario vs Luigi Online PoC
 
 ## 目的
 
@@ -83,70 +83,61 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ### MvL 管理状態とスター生成
 
-未解決。
+一部解決。US direct MvL ROM の `Game::loadLevel` 引数を切り分けた結果、`flag=1` がスター生成に必要な最小条件に見える。
 
-direct ROM は MvL stage / HUD / player actor までは表示できるが、frame 4800 でも `vsStarActorFound=0` のまま。
+- `flag=1` 単独: スター actor が出る。
+- `unused1=1` 単独: スター actor は出ない。
+- `controlOptions=0xFF` 単独: スター actor は出ない。
+- `entrance=0xFF` 単独: `stageSceneSettings=0xB4FF00` にはなるが、スター actor は出ない。
+- `entrance=0xFF + flag=1`: スター actor は出るが、host が `Player::viewTransitState` 周辺で停止する。
 
-自然にスターが出た過去ログでは、StageLayout (`Stage::stageLayout`) 周辺に次の状態が見えている。
+また、direct route では host/client の初期 `Net::random.value` が違うため、`flag=1` だけではスター位置が一致しない。`MELONDS_NSML_NET_RANDOM_VALUE=0x12345678` と `MELONDS_NSML_NET_RANDOM_AUTO=1` を direct MvL gameplay 判定でも効くように修正したところ、host/client の初期スター座標は一致した。
 
-- `mvlGlobal9670=0x3`
-- `mvlManagerBase=Stage::stageLayout`
-- `mvlManagerHalf494=0xff00`
-- `mvlManagerHalf4A0=0xff00`
-- `mvlManagerByteA8EC=0xff`
-- `vsStarActorFound=0x1`
+検証済みログ:
 
-一方で、`mvlObject267` は `Stage::objectIDTable[0x010B] == 0x0145` から来る見かけ上の値で、`Stage::spawnStageObject` は profile `0x0145` を即 return する。したがって `mvlObject267` を試合管理 actor として追うのは誤りで、現在は StageLayout の MvL 固有 lifecycle/field 初期化を本筋として追う。
+- `logs/nsmvl-us-direct-entry-flag-only-seed1234-auto-2400-20260526`
+  - frame 2400 まで到達。
+  - host/client とも `vsStarActorFound=1`。
+  - host/client とも `vsStarActorX=0x2c0000`, `vsStarActorY=0xfff30000`。
+- `logs/nsmvl-us-direct-entry-unused1-only-seed1234-1200-20260526`
+  - `vsStarActorFound=0`。
+- `logs/nsmvl-us-direct-entry-controlff-only-seed1234-1200-20260526`
+  - `vsStarActorFound=0`。
+- `logs/nsmvl-us-direct-entry-flag-only-seed1234-nomove-3600-20260526`
+  - 入力なしでも host が frame 3120 付近で `arm9PC=0xFFFF0104`, `arm9LR=0x02118BE4`。
+- `logs/nsmvl-us-direct-entry-entranceff-flag1-seed1234-nomove-3000-20260526`
+  - `stageSceneSettings=0xB4FF00` かつスター actor あり。
+  - host が frame 2400 付近で `arm9PC=0xFFFF0104`, `arm9LR=0x02118BE4`。
 
-今回の direct ROM に対して検証用に次を強制したが、スター actor はまだ出ていない。
+`0x02118BE4` は overlay10 の `Player::viewTransitState(void*)` 内。data abort の戻り値として見ると、実際の fault は直前の `Entrance::spawnEntrance` 系 pointer 参照で起きている可能性が高い。つまり現在の direct route はスター生成 seed までは作れているが、正規 MvL の entrance / player transition 初期化がまだ足りない。
 
-- `ForceStageSceneRuntimeWords`
-- `ForceMvlPlayerReady`
-- `ForceMvlRuntimeState`
-- `MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_GATE`
-- `MELONDS_NSML_CALL_MVL_STAGE_LAYOUT_INIT`
+追加した診断:
 
-ログ:
+- `tools/nsmb_us_rom_patch.py` の `direct-mvl-entry` に `act`, `entrance`, `flag`, `unused1`, `controlOptions`, `unused2`, `challengeMode` を明示指定できるオプションを追加。
+- `0xFFFFFFFF` など `mov` で表現できない即値を扱うため、ROM patch stub の即値ロードに `mvn` fallback を追加。
+- `MELONDS_NSML_NET_RANDOM_AUTO` を GGID なしの direct MvL gameplay (`stageGroup=9 && vsMode=1`) でも適用するように修正。
+- player actor の診断用 player ID trace を `Player + 0x11E` に修正。
+- `MELONDS_NSML_FORCE_PLAYER_ACTOR_IDS` を追加。`Player + 0x11E` を actor0=0, actor1=1 に補正できるが、これだけでは `0x02118BE4` の停止は解消しなかった。
 
-- `logs/nsmvl-us-direct-entry-runtimewords-4800-20260526`
-- `logs/nsmvl-us-direct-entry-runtimewords-ready-3600-20260526`
-- `logs/nsmvl-us-direct-entry-runtime-state-3600-20260526`
-- `logs/nsmvl-us-direct-entry-stagelayout-gates-2400-20260526`
-- `logs/nsmvl-us-direct-entry-force-stagelayout-gate-3600-20260526`
-- `logs/nsmvl-us-direct-entry-call-stagelayout-init-3600-20260526`
-- `logs/nsmvl-us-direct-entry-call-stagelayout-init-1800-2400-20260526`
-- `logs/nsmvl-us-vsconnect-natural-loadgame-2400-20260526`
-- `logs/nsmvl-us-vsconnect-natural-loadgame-progress-only-3000-20260526`
-- `logs/nsmvl-us-direct-entry-loadfiles-after-3000-20260526`
+過去の false lead:
 
-StageLayout 関連の確認事項:
-
-- `0x020AE7C0` は StageLayout update 系の MvL branch で、`0x020CAC74 == 5` を gate にして `StageLayout + 0xA8CC` の 0x2000 byte buffer を読む。
-- direct entry で `0x020CAC74=5` を強制すると、`StageLayout + 0xA8CC` が未初期化のまま MvL branch に入り data abort する。
-- `0x020B0714` は StageLayout MvL init に見えるが、direct entry 後に単発で呼んでも一部フィールドしか揃わず、black/stall になり、スター生成には到達しない。
-- `Stage::stageLayout` 自体は direct entry でも存在する。frame 2100 時点で `mvlManagerBase=0x021B75B8`, `mvlManagerVTable=0x020C940C`, `mvlManagerObjectId=0x12F`, `mvlManagerStateType=1`。
-- ただし direct entry では `mvlManagerResourcesHeap=0`, `mvlManagerWordA8CC=0`, `0x020CAC74=0`, `0x020CAE74=0` のままで、MvsL 固有 branch が自然に起動していない。
-- 診断用に `StageLayout + 0xA8CC` へ `0x023C8000` のゼロ初期化 buffer を差し込み、`0x020CAC74=5` を開いたが、frame 1860 付近で ARM9 が `0xFFFF0104` 側に落ちて停止した。null buffer だけが原因ではなく、MvL branch に入る前の StageLayout/MvL lifecycle 前提が不足している。
-- `--skip-direct-loadlevel` で `VSConnectScene::updateLoadGameSM` を自然に残す ROM も試したが、`sceneCurrentSceneID=6` / `VSConnectScene` のまま進まず、StageLayout 作成前で止まる。
-- `updateLoadGameSM` の待ち枝 NOP だけを重ねた ROM は `sceneCurrentSceneID=3`, `stageGroup=9`, `vsMode=1` までは進むが、`Stage::stageLayout=0` のまま `0xFFFF0104` 側に落ちる。正規 flow を少し残すだけでは足りず、stage setup / `loadMvsLFilesThread` / `Game::loadLevel` 呼び出し条件のどこかがまだ欠けている。
-- direct stub で `loadMvsLFilesThread` を `Game::loadLevel` 後に呼ぶ ROM も試したが、frame 3000 まで `mvlManagerWordA8CC=0`, `0x020CAC74=0`, `0x020CAE74=0`, `vsStarActorFound=0` のまま。`loadMvsLFilesThread` の呼び出し順だけでは不足を解消できない。
-
-このため、現在の direct entry は「見た目のステージ開始」には到達しているが、MvsL の試合管理 actor / StageLayout 周辺の初期化が自然ルートとまだ一致していない。
+- `mvlObject267` は `Stage::objectIDTable[0x010B] == 0x0145` から来る見かけ上の値で、`Stage::spawnStageObject` は profile `0x0145` を即 return する。試合管理 actor として追わない。
+- `loadMvsLFilesThread` を `Game::loadLevel` 前後に呼ぶだけでは StageLayout / player transition 初期化は揃わない。
 
 ## 現在の課題
 
-1. direct ROM の MvL 初期化が不足しており、スター生成が始まらない。
-2. `ForceMvlPlayerReady` と `ForceMvlRuntimeState` を足しても不足しているため、StageLayout の MvL branch が自然に動く lifecycle を特定する必要がある。
-3. direct entry 側の強制 ready は client の actor 座標を壊すケースがある。試合開始状態を自然化するまでは、これを最終実装に入れない。
-4. 8コインアイテム取得は自動化が難しいため後回し。まずスター生成/取得が自然に進む状態を優先する。
+1. `flag=1 + shared Net::random seed` でスター生成と初期スター位置一致までは到達した。
+2. ただし direct ROM の player transition / entrance 初期化が不足しており、host が `Player::viewTransitState` で停止する。
+3. `Player + 0x11E` の actor ID を 0/1 に補正しても停止は解消しないため、`Entrance::spawnEntrance` や transition status/function の正規初期化が次の焦点。
+4. 8コインアイテム取得は自動化が難しいため後回し。まずスター生成済み状態で長時間停止しないことと、スター取得/再生成が自然に進む状態を優先する。
 
 ## 次にやること
 
-1. `0x020AE7C0` / `0x020B0714` / vtable entry 周辺の caller と lifecycle を静的解析し、ROM patch 側で自然に通すべき入口を特定する。
-2. `VSConnectScene::updateLoadGameSM` のどの state で `Game::loadLevel` 引数と scene transition が作られるかを追い、direct stub で再現していない値を特定する。
-3. `loadMvsLFilesThread` 周辺で scene 3 に入る直前に落ちている箇所を追い、StageLayout が生成されない原因が resource load 失敗なのか、scene transition 引数不足なのかを切り分ける。
-4. スター actor が自然に出るようになったら、入力スクリプトでスター取得を検証する。取得判定はスクショではなく `player*BattleStars` / `player*CollectedStars` / star actor の再生成で行う。
-5. その後、8コインアイテム、死亡/復帰、長時間プレイ、WAN 遅延条件を順に検証する。
+1. `Player::viewTransitState` が参照する `Entrance::spawnEntrance` / `Entrance::transitionFlags` / `playerTransitionStatus` の自然 route 値を特定する。
+2. direct ROM の stub で `Game::loadLevel` 後に不足している entrance / transition 初期化を ROM patch として再現する。
+3. `flag=1 + shared seed` で 3600 frame 以上、host/client とも data abort なしに進むことを確認する。
+4. その後、スター取得を検証する。取得判定はスクショではなく `player*BattleStars` / `player*CollectedStars` / star actor の再生成で行う。
+5. 最後に 8コインアイテム、死亡/復帰、長時間プレイ、WAN 遅延条件を順に検証する。
 
 ## 検証ルール
 

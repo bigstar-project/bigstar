@@ -23,6 +23,16 @@ def encode_mov_imm(rd: int, imm: int) -> int:
     raise ValueError(f"immediate 0x{imm:X} is not encodable as ARM mov immediate")
 
 
+def encode_load_imm(rd: int, imm: int) -> int:
+    imm &= 0xFFFFFFFF
+    try:
+        return encode_mov_imm(rd, imm)
+    except ValueError:
+        inverse = (~imm) & 0xFFFFFFFF
+        imm12 = encode_arm_imm12(inverse)
+        return 0xE3E00000 | (rd << 12) | imm12
+
+
 def encode_add_sp_imm(imm: int) -> int:
     return 0xE28DD000 | encode_arm_imm12(imm)
 
@@ -270,25 +280,32 @@ def build_direct_loadlevel_stub(
     *,
     scene: int,
     stage: int,
+    act: int,
     player_id: int,
+    entrance: int,
+    flag: int,
+    unused1: int,
+    control_options: int,
+    unused2: int,
+    challenge_mode: int,
     rng_seed: int,
     force_scene_settings: int | None = None,
     load_mvl_files_before_addr: int | None = None,
     load_mvl_files_after_addr: int | None = None,
 ) -> list[int]:
     stack_values = [
-        0,          # act
+        act,        # act
         player_id,  # playerID
         3,          # playerMask
         0,          # character1: Mario
         1,          # character2: Luigi
         0,          # powerup
-        0,          # entrance
-        0,          # flag
-        0,          # unused1
-        0,          # controlOptions
-        0,          # unused2
-        0,          # challengeMode
+        entrance,   # entrance
+        flag,       # flag
+        unused1,    # unused1
+        control_options,  # controlOptions
+        unused2,    # unused2
+        challenge_mode,  # challengeMode
         rng_seed,   # rngSeed
     ]
 
@@ -325,7 +342,7 @@ def build_direct_loadlevel_stub(
     current_ip_value: int | None = None
     for i, value in enumerate(stack_values):
         if current_ip_value != value:
-            words.append(encode_mov_imm(12, value))
+            words.append(encode_load_imm(12, value))
             current_ip_value = value
         words.append(encode_str_imm(12, 13, i * 4))
 
@@ -359,7 +376,14 @@ def patch_direct_mvl_entry(
     *,
     scene: int,
     stage: int,
+    act: int,
     player_id: int,
+    entrance: int,
+    flag: int,
+    unused1: int,
+    control_options: int,
+    unused2: int,
+    challenge_mode: int,
     rng_seed: int,
     first_scene: int,
     skip_direct_loadlevel: bool,
@@ -402,7 +426,14 @@ def patch_direct_mvl_entry(
             symbols["_ZN4Game9loadLevelEtmhhhhhhhhhhhhhhm"],
             scene=scene,
             stage=stage,
+            act=act,
             player_id=player_id,
+            entrance=entrance,
+            flag=flag,
+            unused1=unused1,
+            control_options=control_options,
+            unused2=unused2,
+            challenge_mode=challenge_mode,
             rng_seed=rng_seed,
             force_scene_settings=force_scene_settings,
             load_mvl_files_before_addr=symbols["_ZN14VSConnectScene19loadMvsLFilesThreadEv"]
@@ -619,7 +650,14 @@ def main() -> int:
     p_direct = sub.add_parser("direct-mvl-entry")
     p_direct.add_argument("--scene", type=lambda x: int(x, 0), default=0x0F)
     p_direct.add_argument("--stage", type=lambda x: int(x, 0), default=0)
+    p_direct.add_argument("--act", type=lambda x: int(x, 0), default=0)
     p_direct.add_argument("--player-id", type=lambda x: int(x, 0), default=0)
+    p_direct.add_argument("--entrance", type=lambda x: int(x, 0), default=0)
+    p_direct.add_argument("--flag", type=lambda x: int(x, 0), default=0)
+    p_direct.add_argument("--unused1", type=lambda x: int(x, 0), default=0)
+    p_direct.add_argument("--control-options", type=lambda x: int(x, 0), default=0)
+    p_direct.add_argument("--unused2", type=lambda x: int(x, 0), default=0)
+    p_direct.add_argument("--challenge-mode", type=lambda x: int(x, 0), default=0)
     p_direct.add_argument("--rng-seed", type=lambda x: int(x, 0), default=0x100)
     p_direct.add_argument("--first-scene", type=lambda x: int(x, 0), default=6)
     p_direct.add_argument("--skip-direct-loadlevel", action="store_true")
@@ -650,7 +688,14 @@ def main() -> int:
             symbols,
             scene=args.scene,
             stage=args.stage,
+            act=args.act,
             player_id=args.player_id,
+            entrance=args.entrance,
+            flag=args.flag,
+            unused1=args.unused1,
+            control_options=args.control_options,
+            unused2=args.unused2,
+            challenge_mode=args.challenge_mode,
             rng_seed=args.rng_seed,
             first_scene=args.first_scene,
             skip_direct_loadlevel=args.skip_direct_loadlevel,
