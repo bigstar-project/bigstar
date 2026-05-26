@@ -94,6 +94,11 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - 長めの検証:
   - `logs/nsmvl-us-direct-entry-both-different-packet-only-canonical-local0-7200-20260526`: mismatch `0`
   - player0/player1 座標、死亡状態、スター座標は trace 間隔内で一致。
+- WAN遅延の初期検証:
+  - `-PacketBridgeSendDelayFrames` を追加し、NSML packet 送信を人工的に遅らせられるようにした。
+  - 初期実装は release をframe基準だけにしていたため、frame lead待機中にrelease frameへ進めず `delay=12` で詰まった。壁時計時間でもreleaseするように修正。
+  - `logs/nsmvl-us-direct-entry-send-delay4-lookup10-2400-20260526`: `delay=4`, `LookupTickDelay=10`, mismatch `0`
+  - `logs/nsmvl-us-direct-entry-send-delay12-lookup10-wallrelease-2400-20260526`: `delay=12`, `LookupTickDelay=10`, mismatch `0`
 
 この結果から、当面は「各ピアのゲーム内 local player は正準化する。操作プレイヤーの違いはWAN adapter側だけで表現する」方針で進める。
 
@@ -173,9 +178,10 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ## 次にやること
 
-1. WAN想定の遅延/packet loss/ジッタをスクリプトまたはENet層で注入し、必要な入力遅延と待機条件を決める。
-2. スター取得スクリプトを修正し、取得判定を `player*BattleStars` / `player*CollectedStars` / star actor 再生成で確認する。死亡演出や見た目だけで成功判定しない。
-3. 表示・操作上、clientが `Game::localPlayerID=0` のままで問題ないかをスクリーンショットと操作ログで確認する。
+1. `-PacketBridgeSendDelayFrames` をより長いframe数と長時間条件で試し、実行速度と同期維持の限界を測る。
+2. packet loss/ジッタ注入を追加し、WAN条件で必要な入力遅延と待機条件を決める。
+3. スター取得スクリプトを修正し、取得判定を `player*BattleStars` / `player*CollectedStars` / star actor 再生成で確認する。死亡演出や見た目だけで成功判定しない。
+4. 表示・操作上、clientが `Game::localPlayerID=0` のままで問題ないかをスクリーンショットと操作ログで確認する。
 
 ## 検証ルール
 

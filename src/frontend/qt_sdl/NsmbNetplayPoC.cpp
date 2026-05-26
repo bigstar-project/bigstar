@@ -222,6 +222,13 @@ struct WireNSMLPacket
 
 static_assert(sizeof(WireNSMLPacket) == 76);
 
+struct DelayedWireNSMLPacket
+{
+    melonDS::u32 ReleaseFrame = 0;
+    std::chrono::steady_clock::time_point ReleaseTime {};
+    WireNSMLPacket Packet {};
+};
+
 struct WireGameState
 {
     melonDS::u32 Magic;
@@ -802,7 +809,9 @@ struct State
     melonDS::u32 PacketBridgeThrottleStartFrame = 0;
     int PacketBridgeLocalInputDelay = 0;
     bool PacketBridgeNeutralizeLocalInput = false;
+    int PacketBridgeSendDelayFrames = 0;
     std::map<melonDS::u32, InputState> PacketBridgePacketInputs;
+    std::vector<DelayedWireNSMLPacket> DelayedNSMLPackets;
     bool DirectMvlBootEnabled = false;
     bool DirectMvlBootHostOnly = false;
     bool DirectMvlBootClientOnly = false;
@@ -1705,6 +1714,35 @@ void ApplyPendingNSMLPacketsLocked(melonDS::NDS* nds)
     G.PendingNSMLPackets.clear();
 }
 
+void SendNSMLWirePacketNowLocked(const WireNSMLPacket& packet)
+{
+    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE);
+    if (!enetPacket)
+        return;
+
+    enet_peer_send(G.Peer, 0, enetPacket);
+    enet_host_flush(G.Host);
+}
+
+void FlushDelayedNSMLPacketsLocked(melonDS::u32 frame)
+{
+    if (!G.PacketBridgeEnabled || !G.Peer || G.DelayedNSMLPackets.empty())
+        return;
+
+    for (auto it = G.DelayedNSMLPackets.begin(); it != G.DelayedNSMLPackets.end(); )
+    {
+        if (it->ReleaseFrame <= frame || std::chrono::steady_clock::now() >= it->ReleaseTime)
+        {
+            SendNSMLWirePacketNowLocked(it->Packet);
+            it = G.DelayedNSMLPackets.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
+
 void SendNSMLPacketLocked(melonDS::u32 frame, melonDS::u32 player, melonDS::u32 tick, const melonDS::u8 packetBytes[52])
 {
     if (!G.PacketBridgeEnabled || !G.Peer || !packetBytes || player > 1)
@@ -1721,12 +1759,19 @@ void SendNSMLPacketLocked(melonDS::u32 frame, melonDS::u32 player, melonDS::u32 
     packet.Tick = tick;
     std::memcpy(packet.Packet, packetBytes, sizeof(packet.Packet));
 
-    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE);
-    if (!enetPacket)
-        return;
-
-    enet_peer_send(G.Peer, 0, enetPacket);
-    enet_host_flush(G.Host);
+    if (G.PacketBridgeSendDelayFrames > 0)
+    {
+        G.DelayedNSMLPackets.push_back({
+            frame + static_cast<melonDS::u32>(G.PacketBridgeSendDelayFrames),
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(
+                (G.PacketBridgeSendDelayFrames * 1000 + 59) / 60),
+            packet,
+        });
+    }
+    else
+    {
+        SendNSMLWirePacketNowLocked(packet);
+    }
 
     if (G.PacketBridgeTraceEnabled && tick != G.LastSentNSMLPacketTick)
     {
@@ -2793,6 +2838,7 @@ void ForceNSMLGameLocalPlayerIDIfNeeded(melonDS::u32 frame, melonDS::NDS* nds)
 
 void PumpNSMLPacketBridgeLocked(melonDS::NDS* nds, melonDS::u32 frame)
 {
+    FlushDelayedNSMLPacketsLocked(frame);
     PumpNetworkLocked(nds, frame);
     ApplyPendingNSMLPacketsLocked(nds);
     SendMatchSeedLocked();
@@ -7285,6 +7331,8 @@ void InitFromEnvironment()
         0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_LOCAL_INPUT_DELAY", 0));
     G.PacketBridgeNeutralizeLocalInput =
         EnvFlag("MELONDS_NSML_PACKET_BRIDGE_NEUTRALIZE_LOCAL_INPUT");
+    G.PacketBridgeSendDelayFrames = std::max(
+        0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_SEND_DELAY_FRAMES", 0));
     G.DirectMvlBootEnabled = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT");
     G.DirectMvlBootHostOnly = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_HOST_ONLY");
     G.DirectMvlBootClientOnly = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_CLIENT_ONLY");
