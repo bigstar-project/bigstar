@@ -46,7 +46,9 @@ NSMB Central の解析どおり、MvL は接続時に RNG seed を同期し、�
 - 自動検証
   - host/client 別入力スクリプト対応済み。
   - screenshot / game-state trace / packet replay log / packet bridge trace 対応済み。
-  - player powerup / inventory powerup / dead / character を extended game-state trace に追加済み。
+- player powerup / inventory powerup / dead / character を extended game-state trace に追加済み。
+- 両者同時入力用スクリプトを追加済み。
+  - `tests/nsmb_us_direct_mvl_both_different.inputs`
 
 ## 最新の検証結果
 
@@ -89,19 +91,34 @@ NSMB Central の解析どおり、MvL は接続時に RNG seed を同期し、�
 
 この時点で、`melonDS 1インスタンス * 2プロセス` の localhost WAN adapter で、試合中の双方向入力packet差し替えが成立し始めている。
 
+### 同時異方向入力
+
+ログ:
+
+- `logs/nsmvl-us-direct-entry-both-different-localdelay-20260526`
+
+結果:
+
+- host/player0 が `RIGHT+A` / `RIGHT+B` / `RIGHT`。
+- client/player1 が `LEFT+A` / `LEFT+B` / `LEFT`。
+- host/client 両方で replay hook が `player=0`, `player=1` とも `hit=1`。
+- host/client 両方で `inputPlayer0Held=0x11/0x12/0x10`、`inputPlayer1Held=0x21/0x22/0x20`。
+- local player も remote player と同じ `LookupTickDelay` で読むように修正した後、frame 2600 まで host/client の player actor 座標が一致。
+- data abort / fatal / remote input timeout なし。
+
 ## 現在の課題
 
 1. まだ短時間の非対称入力検証のみ。実戦に近い長時間走行で desync / disconnect / black screen が出ないか未確認。
 2. `PacketBridgeLookupTickDelay=10` は暫定値。WAN遅延に対して固定値で足りるか、動的調整が必要かを検証する。
-3. host/client の actor 座標は近いが完全一致ではないフレームがある。入力遅延・tick正規化・フレーム先行制御のどれで詰めるべきか追加検証が必要。
+3. 同時異方向入力では frame 2600 まで actor 座標一致を確認したが、より長い試合・スター取得・アイテム取得では未確認。
 4. HUDアイテム差分は `playerInventoryPowerup` trace で分類できるようになったが、長めの試合でまだ確認していない。
 5. direct ROM 起動はまだメニュー入力スクリプトに依存している。最終的には UI 操作なしで MvL 開始状態へ入る ROM patch に寄せたい。
 
 ## 次にやること
 
-1. `host_right` / `client_right` の検証を 3000〜5000 frame に伸ばし、actor座標・input・inventory・star状態の一致/差分を確認する。
+1. `both_different` の検証を 3000〜5000 frame に伸ばし、actor座標・input・inventory・star状態の一致/差分を確認する。
 2. `PacketBridgeLookupTickDelay` と `PacketBridgeMaxFrameLead` の組み合わせを整理し、最小限の入力遅延で安定する設定を探す。
-3. 片方だけでなく、両者が同時に異なる入力を入れるスクリプトを追加する。
+3. スター取得・8コインアイテム取得に進む入力スクリプトを作り、ランダム要素が一致するか確認する。
 4. UI操作を減らす direct MvL ROM patch を進める。
 5. 必要なら `Net::getPacket` そのものを返す hook も追加し、byte/tick/action/keys の個別hookだけで不足する場面を潰す。
 

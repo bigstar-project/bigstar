@@ -2244,6 +2244,7 @@ static bool NSMLFindLiveReplayPacketLocked(
 static bool NSMLSelectBridgePacketForPlayer(
     NDS& nds,
     u32 player,
+    u32 tick,
     std::array<u8, 52>& packet)
 {
     if (player > 1 || !NSMLPacketBridgeEnabled() || !IsNSMLMarioVsLuigiPacketContext(nds))
@@ -2260,17 +2261,6 @@ static bool NSMLSelectBridgePacketForPlayer(
     }
     if (normalizeTick < 0)
         normalizeTick = NSMLEnvFlag("MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK") ? 1 : 0;
-
-    const u32 localPlayer = NSMLPacketBridgeLocalPlayer();
-
-    const u32 tick = NSMLPacketBridgeCanonicalTick(nds);
-    if (player == localPlayer)
-    {
-        u32 ignoredTick = 0;
-        u32 ignoredKeys = 0;
-        BuildNSMLMarioVsLuigiPacket(nds, packet, ignoredTick, ignoredKeys);
-        return true;
-    }
 
     bool found = false;
     const u32 waitTimeoutMs = nds.NumFrames >= NSMLPacketBridgeWaitStartFrame()
@@ -2298,6 +2288,15 @@ static bool NSMLSelectBridgePacketForPlayer(
         packet[0] = static_cast<u8>(tick & 0xFF);
         packet[1] = static_cast<u8>((tick >> 8) & 0xFF);
     }
+
+    if (!found && player == NSMLPacketBridgeLocalPlayer())
+    {
+        u32 ignoredTick = 0;
+        u32 ignoredKeys = 0;
+        BuildNSMLMarioVsLuigiPacket(nds, packet, ignoredTick, ignoredKeys);
+        found = true;
+    }
+
     return found;
 }
 
@@ -2325,7 +2324,7 @@ static bool HandleNSMLPacketReadByteBridge(ARM* cpu, u32 instrAddr)
         return false;
 
     std::array<u8, 52> packet {};
-    if (!NSMLSelectBridgePacketForPlayer(cpu->NDS, player, packet))
+    if (!NSMLSelectBridgePacketForPlayer(cpu->NDS, player, NSMLPacketBridgeCanonicalTick(cpu->NDS), packet))
         return false;
 
     static int traceLower = -1;
@@ -2375,7 +2374,7 @@ static bool HandleNSMLCheckPacketBitsBridge(ARM* cpu, u32 instrAddr)
     for (u32 player = 0; player < 2; player++)
     {
         std::array<u8, 52> packet {};
-        if (!NSMLSelectBridgePacketForPlayer(cpu->NDS, player, packet))
+        if (!NSMLSelectBridgePacketForPlayer(cpu->NDS, player, NSMLPacketBridgeCanonicalTick(cpu->NDS), packet))
         {
             ready = false;
             values[player] = 0xFFFFFFFF;
@@ -2467,7 +2466,7 @@ static bool HandleNSMLLowerMPBridge(ARM* cpu, u32 instrAddr)
 
     const u32 player = cpu->R[0] & 0xFF;
     std::array<u8, 52> packet {};
-    const bool hasPacket = NSMLSelectBridgePacketForPlayer(cpu->NDS, player, packet);
+    const bool hasPacket = NSMLSelectBridgePacketForPlayer(cpu->NDS, player, NSMLPacketBridgeCanonicalTick(cpu->NDS), packet);
     const u32 tick = NSMLPacketBridgeCanonicalTick(cpu->NDS) & 0xFFFF;
 
     if (oldHasPacket || usHasPacket)
@@ -2887,7 +2886,7 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
     if (player <= 1)
     {
         if (NSMLPacketBridgeEnabled())
-            packetValid = NSMLSelectBridgePacketForPlayer(cpu->NDS, player, selectedPacket);
+            packetValid = NSMLSelectBridgePacketForPlayer(cpu->NDS, player, tick, selectedPacket);
 
         if (!packetValid)
         {
