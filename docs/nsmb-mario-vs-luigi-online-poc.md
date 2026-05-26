@@ -52,6 +52,9 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - 追加した検証フック
   - `ForceMvlPlayerReady` を PowerShell script から指定可能にした。
   - `ForceMvlRuntimeState` を追加し、US direct entry と自然ルートの差分だった MvL runtime state byte `0x020CA6AC` を検証用に強制できるようにした。
+  - StageLayout MvL branch のゲート/内部フィールドを trace に追加した。
+  - `MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_GATE` と `MELONDS_NSML_CALL_MVL_STAGE_LAYOUT_INIT` を追加し、StageLayout MvL 初期化を単発で検証できるようにした。
+  - `MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_BUFFER` を追加し、`StageLayout + 0xA8CC` に診断用 0x2000 byte buffer を差し込めるようにした。
 
 ## 最新の検証結果
 
@@ -83,41 +86,58 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 direct ROM は MvL stage / HUD / player actor までは表示できるが、frame 4800 でも `vsStarActorFound=0` のまま。
 
-自然にスターが出た過去ログでは次の状態が見えている。
+自然にスターが出た過去ログでは、StageLayout (`Stage::stageLayout`) 周辺に次の状態が見えている。
 
-- `mvlObject267StateType=0x1`
 - `mvlGlobal9670=0x3`
+- `mvlManagerBase=Stage::stageLayout`
 - `mvlManagerHalf494=0xff00`
 - `mvlManagerHalf4A0=0xff00`
 - `mvlManagerByteA8EC=0xff`
 - `vsStarActorFound=0x1`
+
+一方で、`mvlObject267` は `Stage::objectIDTable[0x010B] == 0x0145` から来る見かけ上の値で、`Stage::spawnStageObject` は profile `0x0145` を即 return する。したがって `mvlObject267` を試合管理 actor として追うのは誤りで、現在は StageLayout の MvL 固有 lifecycle/field 初期化を本筋として追う。
 
 今回の direct ROM に対して検証用に次を強制したが、スター actor はまだ出ていない。
 
 - `ForceStageSceneRuntimeWords`
 - `ForceMvlPlayerReady`
 - `ForceMvlRuntimeState`
+- `MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_GATE`
+- `MELONDS_NSML_CALL_MVL_STAGE_LAYOUT_INIT`
 
 ログ:
 
 - `logs/nsmvl-us-direct-entry-runtimewords-4800-20260526`
 - `logs/nsmvl-us-direct-entry-runtimewords-ready-3600-20260526`
 - `logs/nsmvl-us-direct-entry-runtime-state-3600-20260526`
+- `logs/nsmvl-us-direct-entry-stagelayout-gates-2400-20260526`
+- `logs/nsmvl-us-direct-entry-force-stagelayout-gate-3600-20260526`
+- `logs/nsmvl-us-direct-entry-call-stagelayout-init-3600-20260526`
+- `logs/nsmvl-us-direct-entry-call-stagelayout-init-1800-2400-20260526`
+
+StageLayout 関連の確認事項:
+
+- `0x020AE7C0` は StageLayout update 系の MvL branch で、`0x020CAC74 == 5` を gate にして `StageLayout + 0xA8CC` の 0x2000 byte buffer を読む。
+- direct entry で `0x020CAC74=5` を強制すると、`StageLayout + 0xA8CC` が未初期化のまま MvL branch に入り data abort する。
+- `0x020B0714` は StageLayout MvL init に見えるが、direct entry 後に単発で呼んでも一部フィールドしか揃わず、black/stall になり、スター生成には到達しない。
+- `Stage::stageLayout` 自体は direct entry でも存在する。frame 2100 時点で `mvlManagerBase=0x021B75B8`, `mvlManagerVTable=0x020C940C`, `mvlManagerObjectId=0x12F`, `mvlManagerStateType=1`。
+- ただし direct entry では `mvlManagerResourcesHeap=0`, `mvlManagerWordA8CC=0`, `0x020CAC74=0`, `0x020CAE74=0` のままで、MvsL 固有 branch が自然に起動していない。
+- 診断用に `StageLayout + 0xA8CC` へ `0x023C8000` のゼロ初期化 buffer を差し込み、`0x020CAC74=5` を開いたが、frame 1860 付近で ARM9 が `0xFFFF0104` 側に落ちて停止した。null buffer だけが原因ではなく、MvL branch に入る前の StageLayout/MvL lifecycle 前提が不足している。
 
 このため、現在の direct entry は「見た目のステージ開始」には到達しているが、MvsL の試合管理 actor / StageLayout 周辺の初期化が自然ルートとまだ一致していない。
 
 ## 現在の課題
 
 1. direct ROM の MvL 初期化が不足しており、スター生成が始まらない。
-2. `ForceMvlPlayerReady` と `ForceMvlRuntimeState` を足しても不足しているため、`mvlObject267` または StageLayout 周辺の追加初期化を特定する必要がある。
+2. `ForceMvlPlayerReady` と `ForceMvlRuntimeState` を足しても不足しているため、StageLayout の MvL branch が自然に動く lifecycle を特定する必要がある。
 3. direct entry 側の強制 ready は client の actor 座標を壊すケースがある。試合開始状態を自然化するまでは、これを最終実装に入れない。
 4. 8コインアイテム取得は自動化が難しいため後回し。まずスター生成/取得が自然に進む状態を優先する。
 
 ## 次にやること
 
-1. US direct entry と、スターが出た自然ルートの `mvlObject267` / StageLayout 周辺フィールドをさらに比較する。
-2. `mvlObject267` の更新関数または初期化関数を US シンボル/逆アセンブルから追い、ROM patch 側で自然に呼ぶべき関数を特定する。
-3. 必要なら direct ROM の `Game::loadLevel` 直呼びを見直し、`VSStageIntro` / `VSConnectScene::updateLoadGameSM` に近い経路で開始する。
+1. `0x020AE7C0` / `0x020B0714` / vtable entry 周辺の caller と lifecycle を静的解析し、ROM patch 側で自然に通すべき入口を特定する。
+2. direct `Game::loadLevel` だけでは StageLayout MvL lifecycle が不足するため、`VSStageIntro` または `VSConnectScene::updateLoadGameSM` の正規 flow をより多く残す ROM patch を検討する。
+3. 必要なら direct ROM の `Game::loadLevel` 直呼びを見直し、`VSStageIntro` / `VSConnectScene::updateLoadGameSM` または StageLayout の正規 create/update 経路に近い形で開始する。
 4. スター actor が自然に出るようになったら、入力スクリプトでスター取得を検証する。取得判定はスクショではなく `player*BattleStars` / `player*CollectedStars` / star actor の再生成で行う。
 5. その後、8コインアイテム、死亡/復帰、長時間プレイ、WAN 遅延条件を順に検証する。
 
