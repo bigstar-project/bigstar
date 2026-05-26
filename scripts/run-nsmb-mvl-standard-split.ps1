@@ -1,6 +1,8 @@
 param(
     [int]$Frames = 3600,
     [int]$Port = 8181,
+    [ValidateSet("both", "host", "client")]
+    [string]$RunRole = "both",
     [string]$Peer = "127.0.0.1",
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-entranceff-flag1.nds",
@@ -89,23 +91,29 @@ $hostCmd = "& .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 " + (($hostArgs | ForEa
 $clientCmd = "& .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 " + (($clientArgs | ForEach-Object { Format-Arg $_ }) -join " ")
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$hostJob = Start-Job -ScriptBlock {
-    param($Root, $Command)
-    Set-Location $Root
-    Invoke-Expression $Command
-} -ArgumentList $repoRoot, $hostCmd
+$jobs = @()
+if ($RunRole -eq "both" -or $RunRole -eq "host") {
+    $jobs += Start-Job -ScriptBlock {
+        param($Root, $Command)
+        Set-Location $Root
+        Invoke-Expression $Command
+    } -ArgumentList $repoRoot, $hostCmd
+}
 
-Start-Sleep -Seconds 3
+if ($RunRole -eq "both") {
+    Start-Sleep -Seconds 3
+}
 
-$clientJob = Start-Job -ScriptBlock {
-    param($Root, $Command)
-    Set-Location $Root
-    Invoke-Expression $Command
-} -ArgumentList $repoRoot, $clientCmd
+if ($RunRole -eq "both" -or $RunRole -eq "client") {
+    $jobs += Start-Job -ScriptBlock {
+        param($Root, $Command)
+        Set-Location $Root
+        Invoke-Expression $Command
+    } -ArgumentList $repoRoot, $clientCmd
+}
 
-Wait-Job $hostJob, $clientJob -Timeout $JobTimeoutSeconds | Out-Null
+Wait-Job $jobs -Timeout $JobTimeoutSeconds | Out-Null
 
-$jobs = @($hostJob, $clientJob)
 $failed = @()
 foreach ($job in $jobs) {
     if ($job.State -eq "Running") {
