@@ -120,6 +120,8 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - client camera-full-p1 ROM を含む split 構成でも、no-movement route + `PlayerStickToStar` + `delay=4` + `jitter=4` で `-RequireStarPickup -RequireStarRespawn` 通過。
   - ログ: `logs/nsmvl-us-direct-entry-split-camera-full-star-nomove-delay4-jitter4-host-3600-20260527`, `logs/nsmvl-us-direct-entry-split-camera-full-star-nomove-delay4-jitter4-client-3600-20260527`
   - 最終状態は host/client とも `player0BattleStars=0x1`, 次スター座標 `0x3c0000,0xfff50000`。
+  - 同じ表示ROM込み split 構成で `delay=12`, `jitter=8`, `LookupTickDelay=16` でも `-RequireStarPickup -RequireStarRespawn` 通過。
+  - ログ: `logs/nsmvl-us-direct-entry-split-camera-full-star-nomove-delay12-jitter8-host-3600-20260527`, `logs/nsmvl-us-direct-entry-split-camera-full-star-nomove-delay12-jitter8-client-3600-20260527`
 - 2PC相当の分割起動:
   - `-RunRole host` と `-RunRole client -Peer 127.0.0.1` を別々の PowerShell invocation で起動できることを確認。
   - `logs/nsmvl-us-direct-entry-runrole-split-host-1800-20260526` と `logs/nsmvl-us-direct-entry-runrole-split-client-1800-20260526`: frame 1800 まで split mismatch `0`。
@@ -221,7 +223,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ## 次にやること
 
-1. client camera-full-p1 ROM + `-PacketBridgeDirectCapture` を標準条件にして、より強い遅延/ジッタ条件 (`delay=12`, `jitter=8`, `LookupTickDelay=16`) を split 起動で再実行する。
+1. client camera-full-p1 ROM + `-PacketBridgeDirectCapture` を標準条件にして、自然操作を含む player0/player1 双方向入力ルートを split 起動で再確認する。
 2. 実WAN相当の評価は、ENet reliable 前提で遅延/ジッタ中心に続ける。packet lossは「reliable retransmitによる遅延」としてまず扱う。
 3. 自然入力でスターを取得できる route は別途調整する。成功判定は必ず `player*BattleStars` / `player*CollectedStars` / star actor 再生成で行う。
 4. 実LAN上の2PCで `-RunRole host` / `-RunRole client -Peer <host-ip>` を使ったログ取得を行い、split verifier で比較する。
