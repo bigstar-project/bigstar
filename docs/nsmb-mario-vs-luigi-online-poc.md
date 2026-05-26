@@ -114,6 +114,8 @@ direct ROM は MvL stage / HUD / player actor までは表示できるが、fram
 - `logs/nsmvl-us-direct-entry-force-stagelayout-gate-3600-20260526`
 - `logs/nsmvl-us-direct-entry-call-stagelayout-init-3600-20260526`
 - `logs/nsmvl-us-direct-entry-call-stagelayout-init-1800-2400-20260526`
+- `logs/nsmvl-us-vsconnect-natural-loadgame-2400-20260526`
+- `logs/nsmvl-us-vsconnect-natural-loadgame-progress-only-3000-20260526`
 
 StageLayout 関連の確認事項:
 
@@ -123,6 +125,8 @@ StageLayout 関連の確認事項:
 - `Stage::stageLayout` 自体は direct entry でも存在する。frame 2100 時点で `mvlManagerBase=0x021B75B8`, `mvlManagerVTable=0x020C940C`, `mvlManagerObjectId=0x12F`, `mvlManagerStateType=1`。
 - ただし direct entry では `mvlManagerResourcesHeap=0`, `mvlManagerWordA8CC=0`, `0x020CAC74=0`, `0x020CAE74=0` のままで、MvsL 固有 branch が自然に起動していない。
 - 診断用に `StageLayout + 0xA8CC` へ `0x023C8000` のゼロ初期化 buffer を差し込み、`0x020CAC74=5` を開いたが、frame 1860 付近で ARM9 が `0xFFFF0104` 側に落ちて停止した。null buffer だけが原因ではなく、MvL branch に入る前の StageLayout/MvL lifecycle 前提が不足している。
+- `--skip-direct-loadlevel` で `VSConnectScene::updateLoadGameSM` を自然に残す ROM も試したが、`sceneCurrentSceneID=6` / `VSConnectScene` のまま進まず、StageLayout 作成前で止まる。
+- `updateLoadGameSM` の待ち枝 NOP だけを重ねた ROM は `sceneCurrentSceneID=3`, `stageGroup=9`, `vsMode=1` までは進むが、`Stage::stageLayout=0` のまま `0xFFFF0104` 側に落ちる。正規 flow を少し残すだけでは足りず、stage setup / `loadMvsLFilesThread` / `Game::loadLevel` 呼び出し条件のどこかがまだ欠けている。
 
 このため、現在の direct entry は「見た目のステージ開始」には到達しているが、MvsL の試合管理 actor / StageLayout 周辺の初期化が自然ルートとまだ一致していない。
 
@@ -136,8 +140,8 @@ StageLayout 関連の確認事項:
 ## 次にやること
 
 1. `0x020AE7C0` / `0x020B0714` / vtable entry 周辺の caller と lifecycle を静的解析し、ROM patch 側で自然に通すべき入口を特定する。
-2. direct `Game::loadLevel` だけでは StageLayout MvL lifecycle が不足するため、`VSStageIntro` または `VSConnectScene::updateLoadGameSM` の正規 flow をより多く残す ROM patch を検討する。
-3. 必要なら direct ROM の `Game::loadLevel` 直呼びを見直し、`VSStageIntro` / `VSConnectScene::updateLoadGameSM` または StageLayout の正規 create/update 経路に近い形で開始する。
+2. `VSConnectScene::updateLoadGameSM` のどの state で `Game::loadLevel` 引数と scene transition が作られるかを追い、direct stub で再現していない値を特定する。
+3. `loadMvsLFilesThread` 周辺で scene 3 に入る直前に落ちている箇所を追い、StageLayout が生成されない原因が resource load 失敗なのか、scene transition 引数不足なのかを切り分ける。
 4. スター actor が自然に出るようになったら、入力スクリプトでスター取得を検証する。取得判定はスクショではなく `player*BattleStars` / `player*CollectedStars` / star actor の再生成で行う。
 5. その後、8コインアイテム、死亡/復帰、長時間プレイ、WAN 遅延条件を順に検証する。
 
