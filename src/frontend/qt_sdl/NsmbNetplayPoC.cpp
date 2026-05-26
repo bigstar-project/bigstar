@@ -810,6 +810,7 @@ struct State
     int PacketBridgeLocalInputDelay = 0;
     bool PacketBridgeNeutralizeLocalInput = false;
     int PacketBridgeSendDelayFrames = 0;
+    int PacketBridgeSendJitterFrames = 0;
     std::map<melonDS::u32, InputState> PacketBridgePacketInputs;
     std::vector<DelayedWireNSMLPacket> DelayedNSMLPackets;
     bool DirectMvlBootEnabled = false;
@@ -1759,12 +1760,16 @@ void SendNSMLPacketLocked(melonDS::u32 frame, melonDS::u32 player, melonDS::u32 
     packet.Tick = tick;
     std::memcpy(packet.Packet, packetBytes, sizeof(packet.Packet));
 
-    if (G.PacketBridgeSendDelayFrames > 0)
+    const int jitterFrames = G.PacketBridgeSendJitterFrames > 0
+        ? static_cast<int>(frame % static_cast<melonDS::u32>(G.PacketBridgeSendJitterFrames + 1))
+        : 0;
+    const int sendDelayFrames = G.PacketBridgeSendDelayFrames + jitterFrames;
+    if (sendDelayFrames > 0)
     {
         G.DelayedNSMLPackets.push_back({
-            frame + static_cast<melonDS::u32>(G.PacketBridgeSendDelayFrames),
+            frame + static_cast<melonDS::u32>(sendDelayFrames),
             std::chrono::steady_clock::now() + std::chrono::milliseconds(
-                (G.PacketBridgeSendDelayFrames * 1000 + 59) / 60),
+                (sendDelayFrames * 1000 + 59) / 60),
             packet,
         });
     }
@@ -7333,6 +7338,8 @@ void InitFromEnvironment()
         EnvFlag("MELONDS_NSML_PACKET_BRIDGE_NEUTRALIZE_LOCAL_INPUT");
     G.PacketBridgeSendDelayFrames = std::max(
         0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_SEND_DELAY_FRAMES", 0));
+    G.PacketBridgeSendJitterFrames = std::max(
+        0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_SEND_JITTER_FRAMES", 0));
     G.DirectMvlBootEnabled = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT");
     G.DirectMvlBootHostOnly = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_HOST_ONLY");
     G.DirectMvlBootClientOnly = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_CLIENT_ONLY");
