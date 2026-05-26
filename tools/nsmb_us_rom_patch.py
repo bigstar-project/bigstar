@@ -137,6 +137,19 @@ def patch_overlay_words(overlays: dict[int, object], addr: int, words: list[int]
     return overlay_id, old
 
 
+def patch_overlay_words_by_id(overlays: dict[int, object], overlay_id: int, addr: int, words: list[int]) -> bytes:
+    overlay = overlays[overlay_id]
+    start = overlay.ramAddress
+    end = start + len(overlay.data)
+    if not (start <= addr < end):
+        raise ValueError(f"address 0x{addr:08X} is not in overlay{overlay_id}")
+    off = addr - start
+    old = bytes(overlay.data[off:off + len(words) * 4])
+    for i, word in enumerate(words):
+        struct.pack_into("<I", overlay.data, off + i * 4, word)
+    return old
+
+
 def save_overlays(rom: NintendoDSRom, overlays: dict[int, object]) -> None:
     for overlay in overlays.values():
         rom.files[overlay.fileID] = overlay.save(compress=overlay.compressed)
@@ -274,6 +287,56 @@ def patch_rng_constant(rom: NintendoDSRom, symbols: dict[str, int], value: int) 
     return patched
 
 
+def patch_stage_camera_player_id(overlays: dict[int, object], player_id: int) -> list[str]:
+    # StageCamera::onUpdate normally reads Game::localPlayerID and selects
+    # Stage::cameraX[localPlayerID]. For client-display experiments, force only
+    # this display-side choice without changing the gameplay localPlayerID.
+    player_id &= 1
+    changes: list[str] = []
+    mov_addr = 0x020CE438
+    load_addr = 0x020CE440
+    mov_word = encode_mov_imm(0, player_id)
+
+    ov_id = 10
+    old = patch_overlay_words_by_id(overlays, ov_id, mov_addr, [mov_word])
+    changes.append(
+        f"StageCamera::onUpdate display player mov overlay{ov_id} @ 0x{mov_addr:08X}: "
+        f"{old.hex()} -> {struct.pack('<I', mov_word).hex()}"
+    )
+
+    old = patch_overlay_words_by_id(overlays, ov_id, load_addr, [NOP])
+    changes.append(
+        f"StageCamera::onUpdate display player load NOP overlay{ov_id} @ 0x{load_addr:08X}: "
+        f"{old.hex()} -> {struct.pack('<I', NOP).hex()}"
+    )
+    return changes
+
+
+def patch_stage_camera_state_player_id(overlays: dict[int, object], player_id: int) -> list[str]:
+    # The camera state functions build the OrthoView fields from
+    # Stage::cameraX/Y/width/height[Game::localPlayerID]. For the client display,
+    # force only these state-function array indexes without changing gameplay state.
+    player_id &= 1
+    changes: list[str] = []
+    ov_id = 10
+    mov_ip = encode_mov_imm(12, player_id)
+    mov_r2 = encode_mov_imm(2, player_id)
+    mov_r4 = encode_mov_imm(4, player_id)
+    patches = [
+        (0x020CE25C, mov_ip, "StageCamera state0 localPlayerID load #1"),
+        (0x020CE284, mov_ip, "StageCamera state0 localPlayerID load #2"),
+        (0x020CE298, mov_r2, "StageCamera state0 localPlayerID load #3"),
+        (0x020CE314, mov_r4, "StageCamera state1 localPlayerID load"),
+    ]
+    for addr, word, label in patches:
+        old = patch_overlay_words_by_id(overlays, ov_id, addr, [word])
+        changes.append(
+            f"{label} overlay{ov_id} @ 0x{addr:08X}: "
+            f"{old.hex()} -> {struct.pack('<I', word).hex()}"
+        )
+    return changes
+
+
 def build_direct_loadlevel_stub(
     start_addr: int,
     load_level_addr: int,
@@ -393,6 +456,8 @@ def patch_direct_mvl_entry(
     force_scene_settings: int | None,
     call_load_mvl_files: bool,
     call_load_mvl_files_after: bool,
+    stage_camera_player_id: int | None,
+    stage_camera_state_player_id: int | None,
 ) -> list[str]:
     arm9 = rom.loadArm9()
     overlays = rom.loadArm9Overlays()
@@ -485,6 +550,11 @@ def patch_direct_mvl_entry(
             f"loadMvsLFilesThread actor category mask value overlay{ov_id} @ 0x{addr:08X}: "
             f"{old.hex()} -> {struct.pack('<I', word).hex()}"
         )
+
+    if stage_camera_player_id is not None:
+        changes.extend(patch_stage_camera_player_id(overlays, stage_camera_player_id))
+    if stage_camera_state_player_id is not None:
+        changes.extend(patch_stage_camera_state_player_id(overlays, stage_camera_state_player_id))
 
     rom.arm9 = arm9.save(compress=True)
     save_overlays(rom, overlays)
@@ -647,6 +717,10 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     p_rng = sub.add_parser("rng-constant")
     p_rng.add_argument("--value", type=lambda x: int(x, 0), default=0x100)
+    p_camera = sub.add_parser("stage-camera-player-id")
+    p_camera.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
+    p_camera_state = sub.add_parser("stage-camera-state-player-id")
+    p_camera_state.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_direct = sub.add_parser("direct-mvl-entry")
     p_direct.add_argument("--scene", type=lambda x: int(x, 0), default=0x0F)
     p_direct.add_argument("--stage", type=lambda x: int(x, 0), default=0)
@@ -667,6 +741,8 @@ def main() -> int:
     p_direct.add_argument("--force-scene-settings", type=lambda x: int(x, 0), default=None)
     p_direct.add_argument("--call-load-mvsl-files", action="store_true")
     p_direct.add_argument("--call-load-mvsl-files-after", action="store_true")
+    p_direct.add_argument("--stage-camera-player-id", type=lambda x: int(x, 0), default=None)
+    p_direct.add_argument("--stage-camera-state-player-id", type=lambda x: int(x, 0), default=None)
     p_fake = sub.add_parser("fake-opponent")
     p_fake.add_argument("--force-confirm-load", action="store_true")
     p_fake.add_argument("--force-loadgame-progress", action="store_true")
@@ -682,6 +758,14 @@ def main() -> int:
 
     if args.cmd == "rng-constant":
         changes = patch_rng_constant(rom, symbols, args.value)
+    elif args.cmd == "stage-camera-player-id":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_stage_camera_player_id(overlays, args.player_id)
+        save_overlays(rom, overlays)
+    elif args.cmd == "stage-camera-state-player-id":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_stage_camera_state_player_id(overlays, args.player_id)
+        save_overlays(rom, overlays)
     elif args.cmd == "direct-mvl-entry":
         changes = patch_direct_mvl_entry(
             rom,
@@ -705,6 +789,8 @@ def main() -> int:
             force_scene_settings=args.force_scene_settings,
             call_load_mvl_files=args.call_load_mvsl_files,
             call_load_mvl_files_after=args.call_load_mvsl_files_after,
+            stage_camera_player_id=args.stage_camera_player_id,
+            stage_camera_state_player_id=args.stage_camera_state_player_id,
         )
     elif args.cmd == "fake-opponent":
         changes = patch_fake_opponent(

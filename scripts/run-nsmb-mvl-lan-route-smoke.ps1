@@ -2416,6 +2416,22 @@ try {
 }
 
 $roleInfos = @()
+function Convert-ExpectedLocalPlayerID {
+    param(
+        [string]$Value,
+        [string]$Default
+    )
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $Default
+    }
+    $text = $Value.Trim()
+    if ($text.StartsWith("0x", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return ("0x{0:x}" -f [Convert]::ToInt32($text.Substring(2), 16))
+    }
+    return ("0x{0:x}" -f [Convert]::ToInt32($text, 10))
+}
+$expectedHostLocalPlayerID = Convert-ExpectedLocalPlayerID -Value $HostPacketBridgeForceGameLocalPlayerID -Default "0x0"
+$expectedClientLocalPlayerID = Convert-ExpectedLocalPlayerID -Value $ClientPacketBridgeForceGameLocalPlayerID -Default "0x1"
 if ($RunRole -eq "both" -or $RunRole -eq "host") {
     $roleInfos += @{
         Role = "host"
@@ -2425,7 +2441,7 @@ if ($RunRole -eq "both" -or $RunRole -eq "host") {
         GameState = $hostGameStateTrace
         LanStartPattern = "LAN host start .* ok=1"
         LanStartName = "host LAN start"
-        LocalPlayerID = "0x0"
+        LocalPlayerID = $expectedHostLocalPlayerID
     }
 }
 if ($RunRole -eq "both" -or $RunRole -eq "client") {
@@ -2437,7 +2453,7 @@ if ($RunRole -eq "both" -or $RunRole -eq "client") {
         GameState = $clientGameStateTrace
         LanStartPattern = "LAN client start .* ok=1"
         LanStartName = "client LAN start"
-        LocalPlayerID = "0x1"
+        LocalPlayerID = $expectedClientLocalPlayerID
     }
 }
 
