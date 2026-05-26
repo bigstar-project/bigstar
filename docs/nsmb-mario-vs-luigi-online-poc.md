@@ -4,24 +4,24 @@
 
 New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` で WAN 越しに対戦できる形へ持っていく。
 
-過去に試した `LocalMP 2インスタンス * 2プロセス`、savestate共有、試合開始後のWAN切替、actor/state強制同期は、通信切断・desync・不自然な内部状態・低FPSの問題が大きいため、最終方針から外す。
+過去に試した `LocalMP 2インスタンス * 2プロセス`、savestate 共有、試合開始後の WAN 切り替え、actor/state 強制同期は、切断、desync、不自然な内部状態、低 FPS の問題が大きいため最終方針から外す。
 
 ## 現在の方針
 
-US版 ROM `roms/nsmb-us.nds` (`A2DE`) を主対象にする。`external/NSMB-Code-Reference` が US 版のシンボルを持つため、ROM patch と通信API解析の精度を優先する。
+US 版 ROM `roms/nsmb-us.nds` (`A2DE`) を主対象にする。`external/NSMB-Code-Reference` が US 版のシンボルを持つため、ROM patch と通信 API 解析の精度を優先する。
 
-主方針は次の2つ。
+方針は次の 2 本。
 
-1. ROM patch または低レベル adapter で、LocalMP UI/接続処理に依存しない MvL 専用入口を作る。
+1. ROM patch で LocalMP UI/接続処理に依存しない MvL 専用入口を作る。
 2. 試合中に NSMB が読む packet/input API を WAN adapter に差し替え、NSMB 側の同期処理をできるだけそのまま使う。
 
-NSMB Central の解析どおり、MvL は接続時に RNG seed を同期し、試合中は主に入力情報 packet を通信している前提で進める。
+NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、試合中は主に入力情報 packet を通信している前提で進める。
 
 参考: https://bookstack.nsmbcentral.net/books/new-super-mario-bros/page/mario-vs-luigi
 
 ## 実装済み
 
-- US版 ROM 解析/patch tooling
+- US 版 ROM 解析/patch tooling
   - `tools/nsmb_us_rom_tool.py`
   - `tools/nsmb_us_rom_patch.py`
   - `direct-mvl-entry`
@@ -30,29 +30,32 @@ NSMB Central の解析どおり、MvL は接続時に RNG seed を同期し、�
   - `--clear-actor-category-mask`
   - `--force-scene-settings`
   - `--call-load-mvsl-files`
-- direct MvL ROM
+- direct MvL ROM 生成
   - 生成物: `roms/nsmb-us-direct-mvl-entry-ready-transfer-clear-mask-settings-files.nds`
-  - `Game::loadLevel` 後の `Scene::nextSceneSettings=0x00B4FF00` が必要。
-  - `VSConnectScene::loadMvsLFilesThread` 呼び出しが必要。
-  - single process で MvL stage / HUD / player actors 到達済み。
+  - git には含めない。
 - PacketBridge
-  - US版下位 Wifi API hook を移植済み。
+  - US 版の下位 packet 読み取り API hook を移植済み。
   - `Net::getConsoleKeys`
   - `Net::getPacketByte`
   - `Net::getPacketTick`
   - `Net::getPacketAction`
-  - direct MvL では Net GGID が `0` になるため、試合中 context 判定は `stageGroup=9 && vsMode=1` を許容するよう修正。
-  - `-PacketBridgeStartFrame` を ARM 側 hook にも反映し、StageStart/Scene切替中に adapter が早すぎて介入しないようにした。
+  - direct MvL では Net GGID が `0` になるため、試合中 context 判定を `stageGroup=9 && vsMode=1` でも許可。
+  - `-PacketBridgeStartFrame` を ARM hook 側にも反映し、StageStart/Scene 切り替え中に adapter が早すぎて介入しないようにした。
+  - local player も remote player と同じ `LookupTickDelay` の packet を読むように修正済み。
 - 自動検証
-  - host/client 別入力スクリプト対応済み。
-  - screenshot / game-state trace / packet replay log / packet bridge trace 対応済み。
-- player powerup / inventory powerup / dead / character を extended game-state trace に追加済み。
-- 両者同時入力用スクリプトを追加済み。
-  - `tests/nsmb_us_direct_mvl_both_different.inputs`
+  - screenshot / game-state trace / packet replay log / packet bridge trace に対応。
+  - player powerup / inventory / dead / character / battle star / collected star などを extended game-state trace に追加済み。
+  - host/client 別入力スクリプトを追加済み。
+    - `tests/nsmb_us_direct_mvl_host_right.inputs`
+    - `tests/nsmb_us_direct_mvl_client_right.inputs`
+    - `tests/nsmb_us_direct_mvl_both_different.inputs`
+- 追加した検証フック
+  - `ForceMvlPlayerReady` を PowerShell script から指定可能にした。
+  - `ForceMvlRuntimeState` を追加し、US direct entry と自然ルートの差分だった MvL runtime state byte `0x020CA6AC` を検証用に強制できるようにした。
 
 ## 最新の検証結果
 
-標準に近い検証設定:
+標準に近い検証条件:
 
 - direct ROM
 - `-PacketBridgeStartFrame 1800`
@@ -60,78 +63,73 @@ NSMB Central の解析どおり、MvL は接続時に RNG seed を同期し、�
 - `-PacketBridgeLookupTickDelay 10`
 - `-PacketBridgeLiveFallbackLatestBefore`
 - `-PacketBridgeReplayReturnLookupTick`
+- `-PacketBridgeReplayOps keys,byte,tick,action`
+- `-PacketBridgeDirectCapture`
+- host local player `0`
+- client local player `1`
 
-### host入力 -> client側player0
+### 入力 packet 差し替え
+
+成功済み。
+
+- host/player0 の RIGHT/A/B 入力が client 側 `player=0` packet として読まれる。
+- client/player1 の RIGHT/A/B 入力が host 側 `player=1` packet として読まれる。
+- host/player0 RIGHT、client/player1 LEFT の同時入力で、frame 3600 まで主要 actor/input/star 関連 trace の mismatch は `0`。
+- ログ: `logs/nsmvl-us-direct-entry-both-different-3600-20260526`
+
+### MvL 管理状態とスター生成
+
+未解決。
+
+direct ROM は MvL stage / HUD / player actor までは表示できるが、frame 4800 でも `vsStarActorFound=0` のまま。
+
+自然にスターが出た過去ログでは次の状態が見えている。
+
+- `mvlObject267StateType=0x1`
+- `mvlGlobal9670=0x3`
+- `mvlManagerHalf494=0xff00`
+- `mvlManagerHalf4A0=0xff00`
+- `mvlManagerByteA8EC=0xff`
+- `vsStarActorFound=0x1`
+
+今回の direct ROM に対して検証用に次を強制したが、スター actor はまだ出ていない。
+
+- `ForceStageSceneRuntimeWords`
+- `ForceMvlPlayerReady`
+- `ForceMvlRuntimeState`
 
 ログ:
 
-- `logs/nsmvl-us-direct-entry-host-right-delay10-20260526`
+- `logs/nsmvl-us-direct-entry-runtimewords-4800-20260526`
+- `logs/nsmvl-us-direct-entry-runtimewords-ready-3600-20260526`
+- `logs/nsmvl-us-direct-entry-runtime-state-3600-20260526`
 
-結果:
-
-- host が player0 に `RIGHT+A` / `RIGHT+B` / `RIGHT` を入力。
-- client 側 replay hook で `player=0`, `keys=0x11/0x12`, `hit=1` を確認。
-- client 側 `inputPlayer0Held` が `0x11/0x12` に変化。
-- client 側 player0 actor 座標が移動。
-- data abort / fatal / remote input timeout なし。
-
-### client入力 -> host側player1
-
-ログ:
-
-- `logs/nsmvl-us-direct-entry-client-right-delay10-20260526`
-
-結果:
-
-- client が player1 に `RIGHT+A` / `RIGHT+B` / `RIGHT` を入力。
-- host 側 replay hook で `player=1`, `keys=0x11/0x12`, `hit=1` を確認。
-- host 側 `inputPlayer1Held` が `0x11/0x12` に変化。
-- host 側 player1 actor 座標が移動。
-- data abort / fatal / remote input timeout なし。
-
-この時点で、`melonDS 1インスタンス * 2プロセス` の localhost WAN adapter で、試合中の双方向入力packet差し替えが成立し始めている。
-
-### 同時異方向入力
-
-ログ:
-
-- `logs/nsmvl-us-direct-entry-both-different-localdelay-20260526`
-- `logs/nsmvl-us-direct-entry-both-different-3600-20260526`
-
-結果:
-
-- host/player0 が `RIGHT+A` / `RIGHT+B` / `RIGHT`。
-- client/player1 が `LEFT+A` / `LEFT+B` / `LEFT`。
-- host/client 両方で replay hook が `player=0`, `player=1` とも `hit=1`。
-- host/client 両方で `inputPlayer0Held=0x11/0x12/0x10`、`inputPlayer1Held=0x21/0x22/0x20`。
-- local player も remote player と同じ `LookupTickDelay` で読むように修正した後、frame 2600 まで host/client の player actor 座標が一致。
-- 追加の 3600 frame 検証でも、frame 1800 以降の `inputPlayer*Held`、player actor 座標/速度、inventory、battle star、star actor 関連の突き合わせで mismatch `0`。
-- data abort / fatal / remote input timeout なし。
+このため、現在の direct entry は「見た目のステージ開始」には到達しているが、MvsL の試合管理 actor / StageLayout 周辺の初期化が自然ルートとまだ一致していない。
 
 ## 現在の課題
 
-1. まだ短時間の非対称入力検証のみ。実戦に近い長時間走行で desync / disconnect / black screen が出ないか未確認。
-2. `PacketBridgeLookupTickDelay=10` は暫定値。WAN遅延に対して固定値で足りるか、動的調整が必要かを検証する。
-3. 同時異方向入力では frame 3600 まで actor 座標一致を確認したが、スター取得・アイテム取得では未確認。
-4. HUDアイテム差分は `playerInventoryPowerup` trace で分類できるようになったが、長めの試合でまだ確認していない。
-5. direct ROM 起動はまだメニュー入力スクリプトに依存している。最終的には UI 操作なしで MvL 開始状態へ入る ROM patch に寄せたい。
+1. direct ROM の MvL 初期化が不足しており、スター生成が始まらない。
+2. `ForceMvlPlayerReady` と `ForceMvlRuntimeState` を足しても不足しているため、`mvlObject267` または StageLayout 周辺の追加初期化を特定する必要がある。
+3. direct entry 側の強制 ready は client の actor 座標を壊すケースがある。試合開始状態を自然化するまでは、これを最終実装に入れない。
+4. 8コインアイテム取得は自動化が難しいため後回し。まずスター生成/取得が自然に進む状態を優先する。
 
 ## 次にやること
 
-1. スター取得・8コインアイテム取得に進む入力スクリプトを作り、ランダム要素が一致するか確認する。
-2. `PacketBridgeLookupTickDelay` と `PacketBridgeMaxFrameLead` の組み合わせを整理し、最小限の入力遅延で安定する設定を探す。
-3. `both_different` の検証をさらに長く伸ばし、通常プレイ中に発生する死亡/復帰/画面外状態でも一致するか確認する。
-4. UI操作を減らす direct MvL ROM patch を進める。
-5. 必要なら `Net::getPacket` そのものを返す hook も追加し、byte/tick/action/keys の個別hookだけで不足する場面を潰す。
+1. US direct entry と、スターが出た自然ルートの `mvlObject267` / StageLayout 周辺フィールドをさらに比較する。
+2. `mvlObject267` の更新関数または初期化関数を US シンボル/逆アセンブルから追い、ROM patch 側で自然に呼ぶべき関数を特定する。
+3. 必要なら direct ROM の `Game::loadLevel` 直呼びを見直し、`VSStageIntro` / `VSConnectScene::updateLoadGameSM` に近い経路で開始する。
+4. スター actor が自然に出るようになったら、入力スクリプトでスター取得を検証する。取得判定はスクショではなく `player*BattleStars` / `player*CollectedStars` / star actor の再生成で行う。
+5. その後、8コインアイテム、死亡/復帰、長時間プレイ、WAN 遅延条件を順に検証する。
 
 ## 検証ルール
 
 - `frame limit reached` だけでは成功扱いにしない。
-- 成功条件は、少なくとも次を確認する。
+- 成功条件は少なくとも次を確認する。
   - data abort / fatal / undefined がない。
-  - 「通信が切断されました」画面が出ない。
+  - 「通信が切断されました」画面がない。
   - host/client で想定した player input が game-state trace に出る。
   - 対応する actor 座標が動く。
   - screenshot が MvL stage として読める。
-- ROM生成物、savestate、巨大ログは git に含めない。
-- docs は古い追記を残し続けず、現在の方針・達成済み・課題・次作業がすぐ読める形に保つ。
+  - スター取得は `player*BattleStars` などの状態値で確認する。
+- ROM 生成物、savestate、巨大ログは git に含めない。
+- docs は古い追記を残し続けず、現在の方針、達成済み、課題、次作業が上から読める形に保つ。

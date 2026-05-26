@@ -225,6 +225,20 @@ param(
     [int]$ForceStageSceneEventFlagsStartFrame = 0,
     [int]$ForceStageSceneEventFlagsEndFrame = 0,
     [string]$ForceStageSceneEventFlagsValue = "0",
+    [switch]$ForceMvlPlayerReady,
+    [switch]$ForceMvlPlayerReadyHostOnly,
+    [switch]$ForceMvlPlayerReadyClientOnly,
+    [int]$ForceMvlPlayerReadyStartFrame = 0,
+    [int]$ForceMvlPlayerReadyEndFrame = 0,
+    [string]$ForceMvlPlayerReadyValue = "0xFF00",
+    [switch]$ForceMvlPlayerReadySetA8EC,
+    [string]$ForceMvlPlayerReadyA8ECValue = "0xFF",
+    [switch]$ForceMvlRuntimeState,
+    [switch]$ForceMvlRuntimeStateHostOnly,
+    [switch]$ForceMvlRuntimeStateClientOnly,
+    [int]$ForceMvlRuntimeStateStartFrame = 0,
+    [int]$ForceMvlRuntimeStateEndFrame = 0,
+    [string]$ForceMvlRuntimeStateValue = "3",
     [switch]$GuardPlayerModelRenderPtrs,
     [int]$GuardPlayerModelRenderPtrsStartFrame = 0,
     [int]$GuardPlayerModelRenderPtrsEndFrame = 0,
@@ -1071,6 +1085,40 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_END_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_VALUE -ErrorAction SilentlyContinue
+    }
+    if ($ForceMvlPlayerReady) {
+        $env:MELONDS_NSML_FORCE_MVL_PLAYER_READY = "1"
+        if ($ForceMvlPlayerReadyHostOnly) { $env:MELONDS_NSML_FORCE_MVL_PLAYER_READY_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY_HOST_ONLY -ErrorAction SilentlyContinue }
+        if ($ForceMvlPlayerReadyClientOnly) { $env:MELONDS_NSML_FORCE_MVL_PLAYER_READY_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY_CLIENT_ONLY -ErrorAction SilentlyContinue }
+        $env:MELONDS_NSML_FORCE_MVL_PLAYER_READY_START_FRAME = "$ForceMvlPlayerReadyStartFrame"
+        $env:MELONDS_NSML_FORCE_MVL_PLAYER_READY_END_FRAME = "$ForceMvlPlayerReadyEndFrame"
+        $env:MELONDS_NSML_FORCE_MVL_PLAYER_READY_VALUE = "$ForceMvlPlayerReadyValue"
+        if ($ForceMvlPlayerReadySetA8EC) { $env:MELONDS_NSML_FORCE_MVL_PLAYER_READY_SET_A8EC = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY_SET_A8EC -ErrorAction SilentlyContinue }
+        $env:MELONDS_NSML_FORCE_MVL_PLAYER_READY_A8EC_VALUE = "$ForceMvlPlayerReadyA8ECValue"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY_HOST_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY_CLIENT_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY_VALUE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY_SET_A8EC -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY_A8EC_VALUE -ErrorAction SilentlyContinue
+    }
+    if ($ForceMvlRuntimeState) {
+        $env:MELONDS_NSML_FORCE_MVL_RUNTIME_STATE = "1"
+        if ($ForceMvlRuntimeStateHostOnly) { $env:MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_HOST_ONLY -ErrorAction SilentlyContinue }
+        if ($ForceMvlRuntimeStateClientOnly) { $env:MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_CLIENT_ONLY -ErrorAction SilentlyContinue }
+        $env:MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_START_FRAME = "$ForceMvlRuntimeStateStartFrame"
+        $env:MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_END_FRAME = "$ForceMvlRuntimeStateEndFrame"
+        $env:MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_VALUE = "$ForceMvlRuntimeStateValue"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_RUNTIME_STATE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_HOST_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_CLIENT_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_VALUE -ErrorAction SilentlyContinue
     }
     if ($PacketReplayFile) {
         $env:MELONDS_NSML_PACKET_REPLAY_FILE = (Resolve-Path $PacketReplayFile).Path

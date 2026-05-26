@@ -904,6 +904,14 @@ struct State
     bool ForceMvlPlayerReadySetA8EC = false;
     melonDS::u32 ForceMvlPlayerReadyA8ECValue = 0xFF;
     bool ForceMvlPlayerReadyLogged[16] {};
+    bool ForceMvlPlayerReadyMissingLogged[16] {};
+    bool ForceMvlRuntimeStateEnabled = false;
+    bool ForceMvlRuntimeStateHostOnly = false;
+    bool ForceMvlRuntimeStateClientOnly = false;
+    melonDS::u32 ForceMvlRuntimeStateStartFrame = 0;
+    melonDS::u32 ForceMvlRuntimeStateEndFrame = 0;
+    melonDS::u32 ForceMvlRuntimeStateValue = 3;
+    bool ForceMvlRuntimeStateLogged[16] {};
     bool NetRandomPatchEnabled = false;
     bool NetRandomPatchAuto = false;
     melonDS::u32 NetRandomPatchFrame = 0;
@@ -4914,13 +4922,13 @@ void ForceMvlPlayerReadyIfNeeded(int instanceID, melonDS::u32 frame, melonDS::ND
     const melonDS::u32 managerBase = nds->ARM9Read32(0x020CAD40);
     if (!IsARM9MainRAMAddress(managerBase))
     {
-        if (!G.ForceMvlPlayerReadyLogged[instanceID])
+        if (!G.ForceMvlPlayerReadyMissingLogged[instanceID])
         {
             std::printf("NSMB Test: force MvL player ready skipped inst=%d frame=%u invalid manager=%08X\n",
                 instanceID,
                 frame,
                 managerBase);
-            G.ForceMvlPlayerReadyLogged[instanceID] = true;
+            G.ForceMvlPlayerReadyMissingLogged[instanceID] = true;
         }
         return;
     }
@@ -4951,6 +4959,42 @@ void ForceMvlPlayerReadyIfNeeded(int instanceID, melonDS::u32 frame, melonDS::ND
             G.ForceMvlPlayerReadyA8ECValue & 0xFF,
             nds->ARM9Read8(0x020C9670));
         G.ForceMvlPlayerReadyLogged[instanceID] = true;
+    }
+}
+
+void ForceMvlRuntimeStateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForceMvlRuntimeStateEnabled || !nds || !nds->MainRAM)
+        return;
+    if (frame < G.ForceMvlRuntimeStateStartFrame)
+        return;
+    if (G.ForceMvlRuntimeStateEndFrame != 0 && frame > G.ForceMvlRuntimeStateEndFrame)
+        return;
+    if (G.ForceMvlRuntimeStateHostOnly && G.NetRole != Role::Host)
+        return;
+    if (G.ForceMvlRuntimeStateClientOnly && G.NetRole != Role::Client)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
+        return;
+
+    constexpr melonDS::u32 kMvlRuntimeStateAddr = 0x020CA6AC;
+    const melonDS::u8 oldValue = nds->ARM9Read8(kMvlRuntimeStateAddr);
+    const melonDS::u8 newValue = static_cast<melonDS::u8>(G.ForceMvlRuntimeStateValue & 0xFF);
+    nds->ARM9Write8(kMvlRuntimeStateAddr, newValue);
+
+    if (!G.ForceMvlRuntimeStateLogged[instanceID])
+    {
+        std::printf(
+            "NSMB Test: force MvL runtime state inst=%d frame=%u range=%u-%u old=0x%02X value=0x%02X\n",
+            instanceID,
+            frame,
+            G.ForceMvlRuntimeStateStartFrame,
+            G.ForceMvlRuntimeStateEndFrame,
+            oldValue,
+            newValue);
+        G.ForceMvlRuntimeStateLogged[instanceID] = true;
     }
 }
 
@@ -7056,6 +7100,16 @@ void InitFromEnvironment()
     G.ForceMvlPlayerReadyA8ECValue = static_cast<melonDS::u32>(
         std::strtoul(std::getenv("MELONDS_NSML_FORCE_MVL_PLAYER_READY_A8EC_VALUE")
             ? std::getenv("MELONDS_NSML_FORCE_MVL_PLAYER_READY_A8EC_VALUE") : "0xFF", nullptr, 0));
+    G.ForceMvlRuntimeStateEnabled = EnvFlag("MELONDS_NSML_FORCE_MVL_RUNTIME_STATE");
+    G.ForceMvlRuntimeStateHostOnly = EnvFlag("MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_HOST_ONLY");
+    G.ForceMvlRuntimeStateClientOnly = EnvFlag("MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_CLIENT_ONLY");
+    G.ForceMvlRuntimeStateStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_START_FRAME", 0)));
+    G.ForceMvlRuntimeStateEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_END_FRAME", 0)));
+    G.ForceMvlRuntimeStateValue = static_cast<melonDS::u32>(
+        std::strtoul(std::getenv("MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_VALUE")
+            ? std::getenv("MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_VALUE") : "3", nullptr, 0));
 
     const char* netRandomValue = std::getenv("MELONDS_NSML_NET_RANDOM_VALUE");
     if (netRandomValue && netRandomValue[0])
@@ -7360,6 +7414,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         ForceStageSceneContinueGateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceMvlPlayerReadyIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForceMvlRuntimeStateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageSceneEventFlagsIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
