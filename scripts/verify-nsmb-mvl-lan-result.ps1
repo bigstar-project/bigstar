@@ -6,6 +6,8 @@ param(
     [int]$ToFrame = 0,
     [int]$PositionTolerance = 0,
     [switch]$RequireRemoteInputHits,
+    [switch]$RequirePlayer0Input,
+    [switch]$RequirePlayer1Input,
     [switch]$RequireStarPickup,
     [switch]$RequireStarRespawn
 )
@@ -150,6 +152,24 @@ if ($RequireRemoteInputHits) {
     }
 }
 
+function Assert-InputObserved($rows, $field, $label) {
+    $hit = $rows | Where-Object {
+        $_.PSObject.Properties.Name -contains $field -and
+        (HexToInt64 ($_.$field)) -ne 0
+    } | Select-Object -First 1
+    if (!$hit) {
+        Fail "$label input was required but $field never became non-zero"
+    }
+}
+
+if ($RequirePlayer0Input) {
+    Assert-InputObserved $hostRows "inputPlayer0Held" "player0"
+}
+
+if ($RequirePlayer1Input) {
+    Assert-InputObserved $hostRows "inputPlayer1Held" "player1"
+}
+
 if ($RequireStarPickup) {
     $pickup = $hostRows | Where-Object {
         (HexToInt64 ($_.player0BattleStars)) -gt 0 -or
@@ -188,4 +208,4 @@ if ($RequireStarRespawn) {
     }
 }
 
-Write-Host "NSMB MvL LAN result verified: frames=$checked from=$FromFrame tolerance=$PositionTolerance remoteInputHits=$($RequireRemoteInputHits.IsPresent) starPickup=$($RequireStarPickup.IsPresent) starRespawn=$($RequireStarRespawn.IsPresent)"
+Write-Host "NSMB MvL LAN result verified: frames=$checked from=$FromFrame tolerance=$PositionTolerance remoteInputHits=$($RequireRemoteInputHits.IsPresent) player0Input=$($RequirePlayer0Input.IsPresent) player1Input=$($RequirePlayer1Input.IsPresent) starPickup=$($RequireStarPickup.IsPresent) starRespawn=$($RequireStarRespawn.IsPresent)"

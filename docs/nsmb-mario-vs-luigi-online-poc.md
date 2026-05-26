@@ -53,6 +53,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - screenshot / game-state trace / packet replay log / packet bridge trace に対応。
   - player powerup / inventory / dead / character / battle star / collected star などを extended game-state trace に追加済み。
   - `scripts/verify-nsmb-mvl-lan-result.ps1` で actor 座標、死亡状態、スター actor、battle/collected star の host/client 一致を検証可能。
+  - verifier に `-RequirePlayer0Input` / `-RequirePlayer1Input` を追加し、双方向入力が実際にtraceへ出ていることを必須化できる。
   - `-RequireStarPickup` / `-RequireStarRespawn` を追加し、スター取得と次スター再生成を状態値で必須チェックできる。
   - `-HostLogDir` / `-ClientLogDir` を追加し、host/client を別々の script invocation で起動したログも比較可能にした。
   - LAN smoke script から `-VsStarSnapFrame` / `-PlayerSnapToStarFrame` / `-PlayerStickToStarStartFrame` を指定可能にした。これは自然操作ではなく、RNG/再生成同期の制御検証用。
@@ -132,7 +133,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - 実2PCでは client 側に `-Peer <host-ip>` を渡す想定。
   - client camera-full-p1 ROM + `-PacketBridgeDirectCapture` の split 双方向入力でも frame 3600 まで split verifier 通過。
   - ログ: `logs/nsmvl-us-direct-entry-split-camera-full-both-different-host-3600-20260527`, `logs/nsmvl-us-direct-entry-split-camera-full-both-different-client-3600-20260527`
-  - `inputPlayer0Held` / `inputPlayer1Held` はどちらも13 trace rowsで確認。最終 player actor 座標も host/client で一致。
+  - `-RequirePlayer0Input -RequirePlayer1Input` 付き verifier が通過。最終 player actor 座標も host/client で一致。
 - 自然入力のスター取得 route:
   - `tests/nsmb_us_direct_mvl_star_collect_left.inputs` を direct MvL 起動手順込みに修正。
   - `logs/nsmvl-us-direct-entry-star-left-route-packet-only-canonical-local0-7200-20260526` は mismatch `0` で完走したが、`player*BattleStars` / `player*CollectedStars` は変化せず、スター取得は未達。
