@@ -111,6 +111,10 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - verifier の `-RequireStarPickup -RequireStarRespawn` も通過。
   - ログ: `logs/nsmvl-us-direct-entry-star-stick-p0-script-option-canonical-local0-3600-20260526`
   - これは自然入力の成功ではなく、RNG と再生成処理が正準packet同期で一致するかの制御テスト。
+- 遅延/ジッタ下のスター取得/再生成:
+  - `logs/nsmvl-us-direct-entry-star-stick-delay4-jitter4-canonical-local0-3600-20260526`: `delay=4`, `jitter=4`, `LookupTickDelay=10`, `-RequireStarPickup -RequireStarRespawn` 通過。
+  - `logs/nsmvl-us-direct-entry-star-stick-delay12-jitter8-lookup16-canonical-local0-3600-20260526`: `delay=12`, `jitter=8`, `LookupTickDelay=16`, `-RequireStarPickup -RequireStarRespawn` 通過。
+  - 少なくとも reliable packet 前提の遅延/ジッタ注入では、スター取得と再生成RNGは正準packet同期で維持できている。
 - 自然入力のスター取得 route:
   - `tests/nsmb_us_direct_mvl_star_collect_left.inputs` を direct MvL 起動手順込みに修正。
   - `logs/nsmvl-us-direct-entry-star-left-route-packet-only-canonical-local0-7200-20260526` は mismatch `0` で完走したが、`player*BattleStars` / `player*CollectedStars` は変化せず、スター取得は未達。
@@ -195,10 +199,10 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ## 次にやること
 
-1. `-PacketBridgeSendDelayFrames` / `-PacketBridgeSendJitterFrames` と `-RequireStarPickup -RequireStarRespawn` を組み合わせ、遅延/ジッタ下でもスター取得/再生成が一致するか確認する。
-2. packet loss注入を追加するか、ENet reliable前提で遅延/ジッタ中心に評価するかを決める。
-3. 自然入力でスターを取得できる route は別途調整する。成功判定は必ず `player*BattleStars` / `player*CollectedStars` / star actor 再生成で行う。
-4. 表示・操作上、clientが `Game::localPlayerID=0` のままで問題ないかをスクリーンショットと操作ログで確認する。
+1. packet loss注入を追加するか、ENet reliable前提で遅延/ジッタ中心に評価するかを決める。
+2. 自然入力でスターを取得できる route は別途調整する。成功判定は必ず `player*BattleStars` / `player*CollectedStars` / star actor 再生成で行う。
+3. 表示・操作上、clientが `Game::localPlayerID=0` のままで問題ないかをスクリーンショットと操作ログで確認する。
+4. 次の本筋として、2PC相当の起動手順を `localhost` ではなく実LAN IP指定でも再現できるように script option を整理する。
 
 ## 検証ルール
 
