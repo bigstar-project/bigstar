@@ -132,8 +132,11 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `StageCamera` state function 側の `Game::localPlayerID` 参照を player1 にする ROM patch を追加し、client ROM だけに適用すると、ゲーム状態同期を壊さず client 表示を Luigi/player1 寄りにできることを確認。
   - `StageCamera` state + display camera X の両方を player1 にする結合ROMでも、frame 2700 まで verifier は mismatch `0`。
   - ログ: `logs/nsmvl-us-direct-entry-client-camera-full-p1-rom-canonical-local0-2700-20260527`
-  - host normal ROM / client camera-full-p1 ROM の 2PC相当 split 起動でも frame 1800 まで smoke と split verifier が通過。
-  - ログ: `logs/nsmvl-us-direct-entry-split-camera-full-host-1800-20260527`, `logs/nsmvl-us-direct-entry-split-camera-full-client-1800-20260527`
+  - host normal ROM / client camera-full-p1 ROM の 2PC相当 split 起動でも、`-PacketBridgeDirectCapture` ありで frame 3600 まで smoke と split verifier が通過。
+  - client 側 player1 入力は frame 2040-2760 の trace で確認。最終 `playerActor1X` は host/client とも `0x128fff`。
+  - client 表示は `stageDisplayCameraX == stageCameraGlobalX1 == 0x3d8000` になり、player1側カメラを使う。
+  - ログ: `logs/nsmvl-us-direct-entry-split-camera-full-directcapture-host-3600-20260527`, `logs/nsmvl-us-direct-entry-split-camera-full-directcapture-client-3600-20260527`
+  - 注意: `-PacketBridgeDirectCapture` を外すと split client で player1 入力が packet に乗らない。現在の安定条件には必須として扱う。
   - これは client 表示専用ROM patch として扱う。ゲーム内 `Game::localPlayerID` は引き続き host/client とも `0` に正準化する。
 
 この結果から、当面は「各ピアのゲーム内 local player は正準化する。操作プレイヤーの違いはWAN adapter側だけで表現する」方針で進める。
@@ -207,15 +210,15 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ## 現在の課題
 
-1. client 表示カメラは player1 寄りにできたが、UI、勝敗表示、復帰後表示まで実用上問題ないかは未検証。
-2. 7200 frame の双方向入力同期と、制御hookによるスター取得/再生成同期は成立したが、これはローカル2プロセス、固定遅延、packet lossなしの条件。
+1. client 表示カメラは player1 寄りにでき、split 3600 frame で player1入力も成立したが、UI、勝敗表示、復帰後表示まで実用上問題ないかは未検証。
+2. 7200 frame の双方向入力同期と、制御hookによるスター取得/再生成同期は成立したが、client表示ROM込みでは長時間/スター再生成まで未検証。
 3. 自然操作でスターを取りに行く入力 script はまだ未完成。死亡/勝利表示をスター取得と誤判定しないよう、状態値で検証する。
 4. 死亡/復帰後の長時間同期、実WAN遅延/packet loss条件は未検証。
 5. 8コインアイテム取得は自動化が難しいため後回し。
 
 ## 次にやること
 
-1. client camera-full-p1 ROM で 3600 frame 以上の split 起動検証を行い、player1入力、死亡/復帰、表示カメラが破綻しないか見る。
+1. client camera-full-p1 ROM + `-PacketBridgeDirectCapture` を標準条件にして、遅延/ジッタ注入とスター取得/再生成制御テストを split 起動で再実行する。
 2. 実WAN相当の評価は、ENet reliable 前提で遅延/ジッタ中心に続ける。packet lossは「reliable retransmitによる遅延」としてまず扱う。
 3. 自然入力でスターを取得できる route は別途調整する。成功判定は必ず `player*BattleStars` / `player*CollectedStars` / star actor 再生成で行う。
 4. 実LAN上の2PCで `-RunRole host` / `-RunRole client -Peer <host-ip>` を使ったログ取得を行い、split verifier で比較する。
