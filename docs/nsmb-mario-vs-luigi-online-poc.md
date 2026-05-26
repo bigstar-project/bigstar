@@ -60,6 +60,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - LAN smoke script に `-RunRole both|host|client`, `-Peer`, `-LanHost` を追加。2PC相当の片側起動が可能。
   - 標準split検証用の `scripts/run-nsmb-mvl-standard-split.ps1` を追加。host normal ROM / client camera-full-p1 ROM / `-PacketBridgeDirectCapture` / canonical local0 の長い起動条件をまとめた。
   - helper は `-RunRole both|host|client` に対応。ローカル2ジョブ検証では `both`、実2PCでは host側 `host`、client側 `client -Peer <host-ip>` を使う。
+  - default の client camera ROM が無い場合、helper が `tools/nsmb_us_rom_patch.py` で自動生成する。生成ROMは git には含めない。
   - helper script は `logs/nsmvl-standard-helper-client-right-host-1800-20260527`, `logs/nsmvl-standard-helper-client-right-client-1800-20260527` で smoke と split verifier 通過。
   - host/client 別入力スクリプトを追加済み。
     - `tests/nsmb_us_direct_mvl_host_right.inputs`

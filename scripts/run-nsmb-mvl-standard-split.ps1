@@ -25,12 +25,22 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$defaultClientRom = "roms\nsmb-us-direct-mvl-entry-entranceff-flag1-camera-full-p1.nds"
+
 function Format-Arg {
     param([string]$Value)
     if ($Value.StartsWith("-")) {
         return $Value
     }
     return "'" + ($Value -replace "'", "''") + "'"
+}
+
+if (-not (Test-Path $ClientRom) -and $ClientRom -eq $defaultClientRom) {
+    $tempClientRom = "roms\nsmb-us-direct-mvl-entry-entranceff-flag1-camera-state-p1.tmp.nds"
+    Write-Host "default client camera ROM is missing; generating $ClientRom"
+    & python tools\nsmb_us_rom_patch.py --rom $HostRom --out $tempClientRom stage-camera-state-player-id --player-id 1
+    & python tools\nsmb_us_rom_patch.py --rom $tempClientRom --out $ClientRom stage-camera-player-id --player-id 1
+    Remove-Item -Force $tempClientRom -ErrorAction SilentlyContinue
 }
 
 $common = @(
