@@ -27,7 +27,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 ユーザー観察ベースで、次の4点を優先して潰す。
 
 - host/client の上画面で Mario/Luigi の初期位置が違って見える。trace上の world座標差と、client表示用camera ROMによる screen座標差を分けて確認する。
-- 開始直後に Luigi が死亡してから始まる。direct MvL entry の player1 spawn/transition/dead state を確認し、初期化またはROM patchで自然な開始状態に寄せる。
+- 開始直後に Luigi が死亡してから始まる。traceとスクショ上、初回の `player1Dead=1` は土管出現遷移中の内部フラグに見えるが、その後 frame 1950付近でGoombaがLuigiに接触して実死亡する。direct entryが本来の開始保護/カウントダウンを飛ばしている可能性が高い。
 - FPSが低い。trace/screenshot ではなく、JIT OFF、ハッシュ計算、フレームリミッタ、PacketBridge処理が主因。現在はJITあり・hashなし・traceなしで内部55fps前後、無制限では68fps前後まで回復。固定60fps化は継続調整中。
 - Luigi死亡中に敵やブロックアニメが止まるように見える。NSMB本来の死亡/リスポーン停止なのか、direct entry/PacketBridgeの副作用なのかを trace とスクリーンショットで分ける。
 
@@ -99,6 +99,16 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `logs/smvl-fps-jit-nohash-client-1800-20260527`: client内部 `53.61fps`
 - `-NoFrameLimit` ではhost単体 `68.84fps` まで出るため、CPUが常に10fps相当しか出ない状態ではない。
 - `-FixedFrameTime` / `-TargetFps` は追加済みだが、PacketBridgeありの長め検証ではまだ実測60fpsへ張り付かない。次はPacketBridge per-frame処理と描画/SaveManager flushのどちらが残りの差分かを測る。
+
+### 初期位置/初期死亡/死亡時停止
+
+2026-05-27時点の切り分け:
+
+- `logs/nsmvl-us-direct-entry-split-camera-full-directcapture-host-3600-20260527` と client 側 trace では、`playerActor0X` / `playerActor1X` は host/client で一致している。画面上の差は主に client camera-full-p1 ROM による `stageDisplayCameraX` 差。
+- frame 900 のhostスクショはまだ上画面が遷移中で、clientは表示ROM patchの影響でフィールド表示が先に出る。これは「内部座標ズレ」ではなく表示/遷移差として扱う。
+- 初期 `player1Dead=1` は frame 1020-1140 に出るが、スクショではLuigiが右土管から出てくる前後の遷移で、実死亡演出とは違う。
+- その後、`tests/nsmb_us_direct_mvl_client_right.inputs` は frame 1980 まで player1 入力が無いため、Goombaが右から歩いてきて frame 1950付近でLuigiに接触する。ここからは実死亡で、Goomba Xも `0x62800` で止まる。
+- `MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG` は開始保護の候補。終了フレーム後にfreeze flagを0へ戻す処理を追加した。ただし単純に frame 960-1800 で敵を止めるだけでは、解除後にGoombaがLuigiへ到達して死亡する。次は本来の開始保護/カウントダウン相当をROM/状態側で再現するか、player1 spawn位置/敵初期状態をROM patchで直す。
 
 標準に近い検証条件:
 

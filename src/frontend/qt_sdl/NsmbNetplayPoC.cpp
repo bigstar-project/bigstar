@@ -923,6 +923,7 @@ struct State
     melonDS::u32 ForceStageActorFreezeFlagEndFrame = 0;
     melonDS::u32 ForceStageActorFreezeFlagValue = 0;
     bool ForceStageActorFreezeFlagLogged[16] {};
+    bool ForceStageActorFreezeFlagReleased[16] {};
     bool ForceStageActorPreUpdateGateEnabled = false;
     bool ForceStageActorPreUpdateGateHostOnly = false;
     bool ForceStageActorPreUpdateGateClientOnly = false;
@@ -4780,10 +4781,6 @@ void ForceStageActorFreezeFlagIfNeeded(int instanceID, melonDS::u32 frame, melon
 {
     if (!G.ForceStageActorFreezeFlagEnabled || !nds || !nds->MainRAM)
         return;
-    if (frame < G.ForceStageActorFreezeFlagStartFrame)
-        return;
-    if (G.ForceStageActorFreezeFlagEndFrame != 0 && frame > G.ForceStageActorFreezeFlagEndFrame)
-        return;
     if (G.ForceStageActorFreezeFlagHostOnly && G.NetRole != Role::Host)
         return;
     if (G.ForceStageActorFreezeFlagClientOnly && G.NetRole != Role::Client)
@@ -4792,6 +4789,22 @@ void ForceStageActorFreezeFlagIfNeeded(int instanceID, melonDS::u32 frame, melon
         return;
     if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
         return;
+    if (frame < G.ForceStageActorFreezeFlagStartFrame)
+        return;
+    if (G.ForceStageActorFreezeFlagEndFrame != 0 && frame > G.ForceStageActorFreezeFlagEndFrame)
+    {
+        if (!G.ForceStageActorFreezeFlagReleased[instanceID])
+        {
+            nds->ARM9Write8(kStageActorFreezeFlagAddr, 0);
+            G.ForceStageActorFreezeFlagReleased[instanceID] = true;
+            std::printf(
+                "NSMB Test: released stage actor freeze flag inst=%d frame=%u end=%u\n",
+                instanceID,
+                frame,
+                G.ForceStageActorFreezeFlagEndFrame);
+        }
+        return;
+    }
 
     nds->ARM9Write8(kStageActorFreezeFlagAddr, static_cast<melonDS::u8>(G.ForceStageActorFreezeFlagValue & 0xFF));
     if (!G.ForceStageActorFreezeFlagLogged[instanceID])
