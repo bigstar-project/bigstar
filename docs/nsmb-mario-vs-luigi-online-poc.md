@@ -30,6 +30,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `--clear-actor-category-mask`
   - `--force-scene-settings`
   - `--call-load-mvsl-files`
+  - `--call-load-mvsl-files-after`
 - direct MvL ROM 生成
   - 生成物: `roms/nsmb-us-direct-mvl-entry-ready-transfer-clear-mask-settings-files.nds`
   - git には含めない。
@@ -116,6 +117,7 @@ direct ROM は MvL stage / HUD / player actor までは表示できるが、fram
 - `logs/nsmvl-us-direct-entry-call-stagelayout-init-1800-2400-20260526`
 - `logs/nsmvl-us-vsconnect-natural-loadgame-2400-20260526`
 - `logs/nsmvl-us-vsconnect-natural-loadgame-progress-only-3000-20260526`
+- `logs/nsmvl-us-direct-entry-loadfiles-after-3000-20260526`
 
 StageLayout 関連の確認事項:
 
@@ -127,6 +129,7 @@ StageLayout 関連の確認事項:
 - 診断用に `StageLayout + 0xA8CC` へ `0x023C8000` のゼロ初期化 buffer を差し込み、`0x020CAC74=5` を開いたが、frame 1860 付近で ARM9 が `0xFFFF0104` 側に落ちて停止した。null buffer だけが原因ではなく、MvL branch に入る前の StageLayout/MvL lifecycle 前提が不足している。
 - `--skip-direct-loadlevel` で `VSConnectScene::updateLoadGameSM` を自然に残す ROM も試したが、`sceneCurrentSceneID=6` / `VSConnectScene` のまま進まず、StageLayout 作成前で止まる。
 - `updateLoadGameSM` の待ち枝 NOP だけを重ねた ROM は `sceneCurrentSceneID=3`, `stageGroup=9`, `vsMode=1` までは進むが、`Stage::stageLayout=0` のまま `0xFFFF0104` 側に落ちる。正規 flow を少し残すだけでは足りず、stage setup / `loadMvsLFilesThread` / `Game::loadLevel` 呼び出し条件のどこかがまだ欠けている。
+- direct stub で `loadMvsLFilesThread` を `Game::loadLevel` 後に呼ぶ ROM も試したが、frame 3000 まで `mvlManagerWordA8CC=0`, `0x020CAC74=0`, `0x020CAE74=0`, `vsStarActorFound=0` のまま。`loadMvsLFilesThread` の呼び出し順だけでは不足を解消できない。
 
 このため、現在の direct entry は「見た目のステージ開始」には到達しているが、MvsL の試合管理 actor / StageLayout 周辺の初期化が自然ルートとまだ一致していない。
 

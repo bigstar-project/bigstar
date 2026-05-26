@@ -273,7 +273,8 @@ def build_direct_loadlevel_stub(
     player_id: int,
     rng_seed: int,
     force_scene_settings: int | None = None,
-    load_mvl_files_addr: int | None = None,
+    load_mvl_files_before_addr: int | None = None,
+    load_mvl_files_after_addr: int | None = None,
 ) -> list[int]:
     stack_values = [
         0,          # act
@@ -301,9 +302,9 @@ def build_direct_loadlevel_stub(
         encode_mov_imm(12, 0x77),
         encode_str_imm(12, 4, 0x16C),
     ]
-    if load_mvl_files_addr is not None:
+    if load_mvl_files_before_addr is not None:
         bl_load_files_addr = start_addr + len(words) * 4
-        words.append(encode_bl(bl_load_files_addr, load_mvl_files_addr))
+        words.append(encode_bl(bl_load_files_addr, load_mvl_files_before_addr))
     words.extend([
         encode_sub_sp_imm(0x38),
         encode_mov_imm(0, scene),
@@ -330,6 +331,9 @@ def build_direct_loadlevel_stub(
 
     bl_addr = start_addr + len(words) * 4
     words.append(encode_bl(bl_addr, load_level_addr))
+    if load_mvl_files_after_addr is not None:
+        bl_load_files_addr = start_addr + len(words) * 4
+        words.append(encode_bl(bl_load_files_addr, load_mvl_files_after_addr))
     if force_scene_settings is not None:
         emit_ldr_literal(0, 0x02088F38)  # Scene::nextSceneSettings
         emit_ldr_literal(1, force_scene_settings)
@@ -364,6 +368,7 @@ def patch_direct_mvl_entry(
     clear_actor_category_mask: bool,
     force_scene_settings: int | None,
     call_load_mvl_files: bool,
+    call_load_mvl_files_after: bool,
 ) -> list[str]:
     arm9 = rom.loadArm9()
     overlays = rom.loadArm9Overlays()
@@ -400,8 +405,10 @@ def patch_direct_mvl_entry(
             player_id=player_id,
             rng_seed=rng_seed,
             force_scene_settings=force_scene_settings,
-            load_mvl_files_addr=symbols["_ZN14VSConnectScene19loadMvsLFilesThreadEv"]
+            load_mvl_files_before_addr=symbols["_ZN14VSConnectScene19loadMvsLFilesThreadEv"]
             if call_load_mvl_files else None,
+            load_mvl_files_after_addr=symbols["_ZN14VSConnectScene19loadMvsLFilesThreadEv"]
+            if call_load_mvl_files_after else None,
         )
         ov_id, old = patch_overlay_words(overlays, update_addr, stub)
         changes.append(
@@ -621,6 +628,7 @@ def main() -> int:
     p_direct.add_argument("--clear-actor-category-mask", action="store_true")
     p_direct.add_argument("--force-scene-settings", type=lambda x: int(x, 0), default=None)
     p_direct.add_argument("--call-load-mvsl-files", action="store_true")
+    p_direct.add_argument("--call-load-mvsl-files-after", action="store_true")
     p_fake = sub.add_parser("fake-opponent")
     p_fake.add_argument("--force-confirm-load", action="store_true")
     p_fake.add_argument("--force-loadgame-progress", action="store_true")
@@ -651,6 +659,7 @@ def main() -> int:
             clear_actor_category_mask=args.clear_actor_category_mask,
             force_scene_settings=args.force_scene_settings,
             call_load_mvl_files=args.call_load_mvsl_files,
+            call_load_mvl_files_after=args.call_load_mvsl_files_after,
         )
     elif args.cmd == "fake-opponent":
         changes = patch_fake_opponent(
