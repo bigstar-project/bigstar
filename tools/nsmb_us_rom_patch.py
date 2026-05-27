@@ -365,6 +365,32 @@ def patch_stage_camera_state_player_id(overlays: dict[int, object], player_id: i
     return changes
 
 
+def patch_stage_camera_state_vertical_slot_zero(overlays: dict[int, object]) -> list[str]:
+    # Diagnostic only. For the direct localPlayerID=1 client route, Stage::cameraY[1]
+    # can be rewritten before StageCamera::state1 builds the view, leaving the
+    # render target/position Z at 0. Keep the horizontal slot selection natural,
+    # but force state1's vertical camera-height/Y reads to slot0.
+    patches = [
+        (0x020CE328, encode_ldr_imm(5, 2, 0), "StageCamera state1 cameraHeight slot0"),
+        (0x020CE32C, encode_ldr_imm(12, 0, 0), "StageCamera state1 cameraY slot0"),
+    ]
+    expected = {
+        0x020CE328: 0xE7925104,  # ldr r5, [r2, r4, lsl #2]
+        0x020CE32C: 0xE790C104,  # ldr ip, [r0, r4, lsl #2]
+    }
+    changes: list[str] = []
+    for addr, word, label in patches:
+        old = patch_overlay_words_by_id(overlays, 10, addr, [word])
+        old_word = struct.unpack("<I", old)[0]
+        if old_word != expected[addr]:
+            raise ValueError(f"{label} @ 0x{addr:08X} expected 0x{expected[addr]:08X}, got 0x{old_word:08X}")
+        changes.append(
+            f"{label} overlay10 @ 0x{addr:08X}: "
+            f"{old.hex()} -> {struct.pack('<I', word).hex()}"
+        )
+    return changes
+
+
 def build_is_out_of_view_vertical_camera_fallback_stub(start_addr: int, *, player1_slot0: bool = False) -> list[int]:
     words: list[int] = []
     literals: list[int] = []
@@ -672,12 +698,54 @@ def patch_player_render_model_visible(overlays: dict[int, object]) -> list[str]:
     # when the player is treated as outside/remote for display. Force the value
     # to 0 at function entry to see whether the missing client player is only a
     # visibility/culling flag problem or a deeper camera-coordinate problem.
-    addr = 0x020FCF74
-    word = encode_mov_imm(1, 0)
-    old = patch_overlay_words_by_id(overlays, 10, addr, [word])
+    hook_addr = 0x020FCF74
+    return_addr = 0x020FCF7C
+    stub_addr = 0x02122FF4
+    original_store = 0xE58D1000  # str r1, [sp]
+    original_add = 0xE2801C06  # add r1, r0, #0x600
+    stub = [
+        encode_mov_imm(1, 0),
+        original_store,
+        original_add,
+        encode_b(stub_addr + 0x0C, return_addr),
+    ]
+    old_stub = patch_overlay_words_by_id(overlays, 10, stub_addr, stub)
+    if any(old_stub):
+        raise ValueError(f"Player::renderModel visible arg stub cave @ 0x{stub_addr:08X} is not empty")
+    branch = encode_b(hook_addr, stub_addr)
+    old = patch_overlay_words_by_id(overlays, 10, hook_addr, [branch, NOP])
+    old_words = struct.unpack("<II", old)
+    if old_words != (original_store, original_add):
+        raise ValueError(
+            f"Player::renderModel visible arg hook @ 0x{hook_addr:08X} expected "
+            f"0x{original_store:08X}/0x{original_add:08X}, got 0x{old_words[0]:08X}/0x{old_words[1]:08X}"
+        )
     return [
-        f"Player::renderModel visible arg force overlay10 @ 0x{addr:08X}: "
-        f"{old.hex()} -> {struct.pack('<I', word).hex()}"
+        f"Player::renderModel visible arg stub overlay10 @ 0x{stub_addr:08X}: {old_stub.hex()} -> {words_hex(stub)}",
+        f"Player::renderModel visible arg hook overlay10 @ 0x{hook_addr:08X}: {old.hex()} -> {words_hex([branch, NOP])}"
+    ]
+
+
+def patch_player_render_range_view_player_id(overlays: dict[int, object], player_id: int) -> list[str]:
+    # Diagnostic only: Player::renderModel() asks Stage::isOutsidePlayerRange()
+    # with a view/player slot loaded from Player+0x11E. Force just that argument
+    # to separate "range slot/camera state is wrong" from "renderModel(bool)
+    # has a different semantic".
+    if player_id < 0 or player_id > 1:
+        raise ValueError(f"player id must be 0 or 1, got {player_id}")
+    addr = 0x020FD0C4
+    original = 0xE1D021DE  # ldrsb r2, [r0, #0x1e]
+    replacement = encode_mov_imm(2, player_id)
+    old = patch_overlay_words_by_id(overlays, 10, addr, [replacement])
+    old_word = struct.unpack("<I", old)[0]
+    if old_word != original:
+        raise ValueError(
+            f"Player::renderModel range view hook @ 0x{addr:08X} expected "
+            f"0x{original:08X}, got 0x{old_word:08X}"
+        )
+    return [
+        f"Player::renderModel range view arg overlay10 @ 0x{addr:08X}: "
+        f"0x{old_word:08X} -> 0x{replacement:08X} playerID={player_id}"
     ]
 
 
@@ -1183,6 +1251,7 @@ def main() -> int:
     p_camera.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_camera_state = sub.add_parser("stage-camera-state-player-id")
     p_camera_state.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
+    sub.add_parser("stage-camera-state-vertical-slot-zero")
     sub.add_parser("camera-fallback-slot-zero")
     sub.add_parser("camera-player1-out-of-view-slot0")
     p_camera_loop = sub.add_parser("camera-focus-loop-count")
@@ -1203,6 +1272,8 @@ def main() -> int:
     p_stage_range_alias = sub.add_parser("stage-range-localplayer-literal-alias")
     p_stage_range_alias.add_argument("--alias-addr", type=lambda x: int(x, 0), default=0x020CA280)
     sub.add_parser("player-render-model-visible")
+    p_player_range_view = sub.add_parser("player-render-range-view-player-id")
+    p_player_range_view.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_player_wrap = sub.add_parser("player-render-wrap-x-offset")
     p_player_wrap.add_argument("--offset", type=lambda x: int(x, 0), default=0x400000)
     p_player_r12 = sub.add_parser("player-render-r12-offset")
@@ -1263,6 +1334,10 @@ def main() -> int:
         overlays = rom.loadArm9Overlays()
         changes = patch_stage_camera_state_player_id(overlays, args.player_id)
         save_overlays(rom, overlays)
+    elif args.cmd == "stage-camera-state-vertical-slot-zero":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_stage_camera_state_vertical_slot_zero(overlays)
+        save_overlays(rom, overlays)
     elif args.cmd == "camera-fallback-slot-zero":
         overlays = rom.loadArm9Overlays()
         changes = patch_is_out_of_view_vertical_camera_fallback(overlays)
@@ -1303,6 +1378,10 @@ def main() -> int:
     elif args.cmd == "player-render-model-visible":
         overlays = rom.loadArm9Overlays()
         changes = patch_player_render_model_visible(overlays)
+        save_overlays(rom, overlays)
+    elif args.cmd == "player-render-range-view-player-id":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_player_render_range_view_player_id(overlays, args.player_id)
         save_overlays(rom, overlays)
     elif args.cmd == "player-render-wrap-x-offset":
         overlays = rom.loadArm9Overlays()

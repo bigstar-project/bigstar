@@ -1112,6 +1112,18 @@ struct State
     melonDS::u32 ForcePlayerActorIDsStartFrame = 0;
     melonDS::u32 ForcePlayerActorIDsEndFrame = 0;
     bool ForcePlayerActorIDsLogged[16] {};
+    bool ForcePlayerActorPositionEnabled = false;
+    int ForcePlayerActorPositionSlot = 1;
+    melonDS::u32 ForcePlayerActorPositionStartFrame = 0;
+    melonDS::u32 ForcePlayerActorPositionEndFrame = 0;
+    melonDS::u32 ForcePlayerActorPositionX = 0;
+    melonDS::u32 ForcePlayerActorPositionY = 0;
+    melonDS::u32 ForcePlayerActorPositionZ = 0;
+    bool ForcePlayerActorPositionCharacterSet = false;
+    melonDS::u16 ForcePlayerActorPositionCharacter = 0;
+    bool ForcePlayerActorPositionPlayerIDSet = false;
+    melonDS::u8 ForcePlayerActorPositionPlayerID = 0;
+    bool ForcePlayerActorPositionLogged[16] {};
     bool ForcePlayerTransitionStatusEnabled = false;
     bool ForcePlayerTransitionStatusHostOnly = false;
     bool ForcePlayerTransitionStatusClientOnly = false;
@@ -4584,6 +4596,54 @@ void WriteObjectTransform(melonDS::NDS* nds, const ObjectScanSample& actor, melo
         WriteMainRAMU32(nds, off + 0xD0, 0);
         WriteMainRAMU32(nds, off + 0xD4, 0);
         WriteMainRAMU32(nds, off + 0xD8, 0);
+    }
+}
+
+void ForcePlayerActorPositionIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForcePlayerActorPositionEnabled || !nds)
+        return;
+    if (frame < G.ForcePlayerActorPositionStartFrame)
+        return;
+    if (G.ForcePlayerActorPositionEndFrame != 0 && frame > G.ForcePlayerActorPositionEndFrame)
+        return;
+
+    const PlayerActorScanSample players = FindPlayerActors(nds);
+    const int slot = std::clamp(G.ForcePlayerActorPositionSlot, 0, 1);
+    const ObjectScanSample& player = slot == 1 ? players.Actor1 : players.Actor0;
+    if (!player.Found)
+        return;
+
+    WriteObjectTransform(
+        nds,
+        player,
+        G.ForcePlayerActorPositionX,
+        G.ForcePlayerActorPositionY,
+        G.ForcePlayerActorPositionZ,
+        true);
+    if (G.ForcePlayerActorPositionCharacterSet)
+        nds->ARM9Write16(player.Base + kPlayerBaseCharacterIDOffset, G.ForcePlayerActorPositionCharacter);
+    if (G.ForcePlayerActorPositionPlayerIDSet)
+        nds->ARM9Write8(player.Base + kPlayerBasePlayerIDOffset, G.ForcePlayerActorPositionPlayerID);
+
+    if (instanceID >= 0 && instanceID < 16 && !G.ForcePlayerActorPositionLogged[instanceID])
+    {
+        G.ForcePlayerActorPositionLogged[instanceID] = true;
+        std::printf(
+            "NSMB Test: force player actor position inst=%d frame=%u range=%u-%u slot=%d base=%08X pos=%08X,%08X,%08X characterSet=%d character=%u playerIDSet=%d playerID=%u\n",
+            instanceID,
+            frame,
+            G.ForcePlayerActorPositionStartFrame,
+            G.ForcePlayerActorPositionEndFrame,
+            slot,
+            player.Base,
+            G.ForcePlayerActorPositionX,
+            G.ForcePlayerActorPositionY,
+            G.ForcePlayerActorPositionZ,
+            G.ForcePlayerActorPositionCharacterSet ? 1 : 0,
+            G.ForcePlayerActorPositionCharacter,
+            G.ForcePlayerActorPositionPlayerIDSet ? 1 : 0,
+            G.ForcePlayerActorPositionPlayerID);
     }
 }
 
@@ -8302,6 +8362,32 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_ACTOR_IDS_START_FRAME", 0)));
     G.ForcePlayerActorIDsEndFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_ACTOR_IDS_END_FRAME", 0)));
+    G.ForcePlayerActorPositionEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_ACTOR_POSITION");
+    G.ForcePlayerActorPositionSlot =
+        std::clamp(EnvInt("MELONDS_NSML_FORCE_PLAYER_ACTOR_POSITION_SLOT", 1), 0, 1);
+    G.ForcePlayerActorPositionStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_ACTOR_POSITION_START_FRAME", 0)));
+    G.ForcePlayerActorPositionEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_ACTOR_POSITION_END_FRAME", 0)));
+    G.ForcePlayerActorPositionX = static_cast<melonDS::u32>(
+        std::strtoul(std::getenv("MELONDS_NSML_FORCE_PLAYER_ACTOR_POSITION_X")
+            ? std::getenv("MELONDS_NSML_FORCE_PLAYER_ACTOR_POSITION_X") : "0", nullptr, 0));
+    G.ForcePlayerActorPositionY = static_cast<melonDS::u32>(
+        std::strtoul(std::getenv("MELONDS_NSML_FORCE_PLAYER_ACTOR_POSITION_Y")
+            ? std::getenv("MELONDS_NSML_FORCE_PLAYER_ACTOR_POSITION_Y") : "0", nullptr, 0));
+    G.ForcePlayerActorPositionZ = static_cast<melonDS::u32>(
+        std::strtoul(std::getenv("MELONDS_NSML_FORCE_PLAYER_ACTOR_POSITION_Z")
+            ? std::getenv("MELONDS_NSML_FORCE_PLAYER_ACTOR_POSITION_Z") : "0", nullptr, 0));
+    if (const char* character = std::getenv("MELONDS_NSML_FORCE_PLAYER_ACTOR_POSITION_CHARACTER"))
+    {
+        G.ForcePlayerActorPositionCharacterSet = true;
+        G.ForcePlayerActorPositionCharacter = static_cast<melonDS::u16>(std::strtoul(character, nullptr, 0) & 0xFFFF);
+    }
+    if (const char* playerID = std::getenv("MELONDS_NSML_FORCE_PLAYER_ACTOR_POSITION_PLAYER_ID"))
+    {
+        G.ForcePlayerActorPositionPlayerIDSet = true;
+        G.ForcePlayerActorPositionPlayerID = static_cast<melonDS::u8>(std::strtoul(playerID, nullptr, 0) & 0xFF);
+    }
     G.ForcePlayerTransitionStatusEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_TRANSITION_STATUS");
     G.ForcePlayerTransitionStatusHostOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_TRANSITION_STATUS_HOST_ONLY");
     G.ForcePlayerTransitionStatusClientOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_TRANSITION_STATUS_CLIENT_ONLY");
@@ -8671,6 +8757,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         ForceEntranceSpawnPointersIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerActorIDsIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForcePlayerActorPositionIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
     {
         if (CallMvlStageLayoutInitIfNeeded(instanceID, inputFrame, nds))
@@ -9059,6 +9147,8 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerDeathCountersIfNeeded(instanceID, logFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForcePlayerActorPositionIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerInventoryPowerupsIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
