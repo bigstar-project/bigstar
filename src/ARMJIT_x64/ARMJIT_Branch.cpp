@@ -246,6 +246,7 @@ void Compiler::A_Comp_BranchXchangeReg()
         MOV(32, R(ABI_PARAM3), Imm32(R15 - 4));
         ABI_CallFunction(TraceNSMLBranchRegFromJIT);
         PopRegs(true, true);
+        MOV(32, R(RSCRATCH), rn);
     }
     Comp_JumpTo(RSCRATCH);
 }

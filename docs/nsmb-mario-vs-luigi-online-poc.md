@@ -96,6 +96,8 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 - 旧release buildは `ENABLE_JIT=OFF` だったため、PacketBridge検証は実質インタプリタ実行になっていた。
 - `cmake -S . -B build\release-windows-x86_64 -DENABLE_JIT=ON` で release を再構成し、`-AllowJitWithPacketBridge` で PacketBridge 使用時もJITを許可するようにした。
+- 2026-05-27 の trace追加直後に `-PacketBridgeAllowJit` で frame 10 `pc=00000004` の prefetch abort が出た。原因は JIT BLX_reg trace がジャンプ先を保持していた `RSCRATCH` を C++ trace 呼び出しで破壊していたこと。trace後に target を復元して解消。
+- JIT + PacketBridge の最小起動確認: `logs/smvl-packetbridge-jit-branchfix-host-200-20260527` は frame 200 まで abort なし。
 - `-NoGameStateTrace -NoScreenshots` だけでは約11fpsのまま。trace/screenshotは主因ではない。
 - `-NoHashLog` はCSVを止めるだけでなく、`MELONDS_NSML_DISABLE_HASH=1` でハッシュ計算自体も止めるようにした。
 - JIT有効 + hash/trace/screenshotなし:
@@ -123,6 +125,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - `Player::defaultTransitState()` から呼ばれる画面外死亡チェックは `StageActor::isOutOfViewVertical(FxRect, playerID)`。RAM dumpでは frame 990-992 の `Stage::cameraY[0]=0x60000`, `Stage::cameraHeight[0]=0xC0000` に対して、`Stage::cameraY[1]=0`, `Stage::cameraHeight[1]=0` のまま。player1 は `playerID=1` なので、同じ `y=0xFFF20000` でも player0 だけ安全、player1 だけ縦画面外扱いになる。これは表示カメラだけでなくゲーム内死亡判定の入力値。
 - baseline再確認ログ `logs/smvl-camera-slot-baseline-host-1150-20260527`: frame 992 で `cam={... y=00060000/00000000 ... h=000C0000/00000000}`、`player1Dead=1`, `p1 transitFunc=021196B0`。frame 1112 で `player1Lives=4`, `player1Deaths=1`。
 - 診断フック `ForceStageCameraSlot` で slot0 の `Stage::cameraX/Y/Width/Height` を slot1 へ初期化すると、`logs/smvl-camera-slot-mirror-host-1300-20260527` では frame 992 でも `player1Dead=0`, `player1Lives=5`, `p1 transitFunc=0211E670` のまま。よって開始残機減少の直接原因は `Stage::camera*` remote slot 未初期化でほぼ確定。
+- JIT + PacketBridge + host/client splitでも確認済み。`logs/smvl-camera-slot-split-branchfix-host-1800-20260527`, `logs/smvl-camera-slot-split-branchfix-client-1800-20260527` は frame 1800 まで abort/timeoutなし、host/clientとも frame 1006 で `lives=5/5`, `dead=0/0`, `p1 transitFunc=0211E670`。ローカル2プロセス同時で実効 `56.84fps`。
 - `MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG` は開始保護の候補。終了フレーム後にfreeze flagを0へ戻す処理を追加した。ただし単純に frame 960-1800 で敵を止めるだけでは、解除後にGoombaがLuigiへ到達して死亡する。次は本来の開始保護/カウントダウン相当をROM/状態側で再現するか、player1 spawn位置/敵初期状態をROM patchで直す。
 
 標準に近い検証条件:
