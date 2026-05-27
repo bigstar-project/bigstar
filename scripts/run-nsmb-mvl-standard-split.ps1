@@ -32,6 +32,7 @@ param(
     [switch]$FixedFrameTime,
     [double]$TargetFps = 0.0,
     [switch]$AllowJitWithPacketBridge,
+    [switch]$PacketBridgeTrace,
     [int]$PlayerStickToStarStartFrame = 0,
     [int]$PlayerStickToStarEndFrame = 0,
     [int]$PlayerStickToStarSlot = 0,
@@ -205,6 +206,9 @@ if ($TargetFps -gt 0.0) {
 }
 if ($AllowJitWithPacketBridge) {
     $common += "-PacketBridgeAllowJit"
+}
+if ($PacketBridgeTrace) {
+    $common += "-PacketBridgeTrace"
 }
 if ($SendDelayFrames -gt 0) {
     $common += @("-PacketBridgeSendDelayFrames", "$SendDelayFrames")

@@ -31,6 +31,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - 開始直後に右上Luigi残機が `5 -> 4` になる問題は、Goomba接触ではない。根本経路は `Player::vsPipeTransitState()` 完了後の player1 が `StageActor::isOutOfViewVertical()` で画面外扱いになり、`Player::pitDeathTransitState()` -> `Player::beginDeathTransition()` -> `Game::playerDead[1]=1` -> `PlayerBase::onDefeated()` -> `Game::losePlayerLife(1)` / `Game::addPlayerDeath(1)` と進む流れ。direct entry では `Stage::cameraY[1]` / `Stage::cameraHeight[1]` が 0 のままなので player1 の縦画面外判定だけが壊れる。開始限定の残機/死亡カウンタ補正は最終修正として扱わない。2026-05-27時点で、`StageActor::isOutOfViewVertical` の cameraHeight が 0 の player slot だけ slot0 にfallbackする ROM patch で開始死亡を解消できた。確認ログ `logs/smvl-rootcheck-fallback-host-1300-20260527`, `logs/smvl-rootcheck-fallback-client-1300-20260527` では frame 1290 まで `player0Lives=5`, `player1Lives=5`, `player0Dead=0`, `player1Dead=0`、life call は初期 `setPlayerLives` のみ。
 - FPSが低い。JIT OFFが10fps級の主因だった。JIT ON + hash/trace/screenshotなしでは単独hostが約67fps、ローカル2プロセス同時では約47-55fps。実2PCでは1PCあたり1インスタンスなので単独hostの数値が近い。ローカル2プロセス検証速度は引き続き改善対象。
 - Luigi死亡中に敵やブロックアニメが止まるように見える。frame 1923以降の trace では Luigi死亡演出中に `player0UpdateLocked=1` も立つため、現時点ではNSMB本体の死亡演出停止である可能性が高い。direct entry/PacketBridgeの副作用かどうかは、通常LocalMP/実機相当ルートとの比較が残る。
+- 安定実行の入口は `scripts/run-nsmb-mvl-stable-split.ps1` に寄せる。US原本から stable host/client UI ROM を再生成し、`-RunRole host` / `-RunRole client -Peer <host-ip>` で実2PC相当の分離起動ができる。ローカル別job検証では frame 1800 まで開始残機減少なし、frame 3000 では host/client state一致かつ `-RequirePlayer0Input -RequirePlayer1Input` 通過。
 
 ## 実装済み
 
@@ -131,6 +132,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `logs/smvl-fps-jit-nohash-host-1800-20260527`: host内部 `52.76fps`
   - `logs/smvl-fps-jit-nohash-client-1800-20260527`: client内部 `53.61fps`
 - `-NoFrameLimit` ではhost単体 `68.84fps` まで出るため、CPUが常に10fps相当しか出ない状態ではない。
+- ただし stable PacketBridge 入力同期では、2026-05-27時点で `-AllowJitWithPacketBridge` を付けると frame 1980 以降の送信packetには非ゼロkeysが出る一方、game-state trace の `inputPlayer0Held` / `inputPlayer1Held` と actor movement が 0 のままになる。JIT実行時は interpreter 側の packet API hook がゲームロジックへ反映されないため、JITはまだ安定条件に含めない。検証ログ: `logs/smvl-stable-wrapper-jitinput-host-3000-20260527`, `logs/smvl-stable-wrapper-jittrace2-host-2100-20260527`。
 - 通常ROM同士 + JIT + hash/trace/screenshotなし:
   - host単独 `logs/smvl-fps-clean-hostonly-host-1800-20260527`: 約 `67.25fps`
   - ローカルhost/client 2プロセス同時 `logs/smvl-fps-clean-normalrom-host-1800-20260527`, `logs/smvl-fps-clean-normalrom-client-1800-20260527`: host内部 `50.08fps`, client内部 `54.61fps`
@@ -150,6 +152,8 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - `scripts/generate-nsmb-mvl-client-ui-rom.ps1` で生成した client UI ROM でも frame 1800 smoke と verifier 通過。ログ: `logs/smvl-generated-clientui-host-1800-20260527`, `logs/smvl-generated-clientui-client-1800-20260527`。
 - `scripts/generate-nsmb-mvl-stable-roms.ps1` でUS原本から再生成した host/client ROM でも frame 1300 smoke と verifier 通過。ログ: `logs/smvl-stable-generator-host-1300-20260527`, `logs/smvl-stable-generator-client-1300-20260527`。
 - `scripts/run-nsmb-mvl-stable-split.ps1` でも frame 1300 smoke と verifier 通過。ログ: `logs/smvl-stable-wrapper-host-1300-20260527`, `logs/smvl-stable-wrapper-client-1300-20260527`。
+- `scripts/run-nsmb-mvl-stable-split.ps1 -RunRole host` と `-RunRole client -Peer 127.0.0.1` を別PowerShell jobから起動しても frame 1800 まで通過。ログ: `logs/smvl-stable-wrapper-role-host-1800-20260527`, `logs/smvl-stable-wrapper-role-client-1800-20260527`。
+- stable wrapper の frame 3000 双方向入力検証も通過。ログ: `logs/smvl-stable-wrapper-both-3000-20260527`, `logs/smvl-stable-wrapper-both-client-3000-20260527`。`-RequirePlayer0Input -RequirePlayer1Input -RequireStageVisibleScreenshots` を通し、frame 2040以降に `inputPlayer0Held` / `inputPlayer1Held` が非ゼロになり、host/client の player actor 座標も一致した。`-RequireRemoteInputHits` は packet replay CSV 前提の旧判定なので、このROM patch経路の成功条件には `RequirePlayer*Input` を使う。
 - camera patch切り分け:
   - `stage-camera-state-player-id` は3D actor側だけがズレる表示を作りやすく、現状不採用。
   - `stage-camera-player-id` / display-only も完全なLuigi視点ではない。
@@ -324,21 +328,19 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ## 現在の課題
 
-1. Luigi視点表示が未解決。`camera-full-p1` は地形相対のactor表示が壊れるため不採用。カメラだけでなく、local player UI、ストックアイテム、勝敗判定まで含めて成立条件を確認する。
-2. 開始残機減少は `camera-fallback-slot-zero` ROM patch で解消し、標準split helperもこのROMをデフォルト生成するようにした。次は direct ROM 生成物の命名/再生成手順を整理する。
-3. ローカル2プロセス同時検証では50fps前後、単独hostでは60fps超。実2PCは1インスタンス/PCなので実用速度の可能性は残るが、ローカル自動検証ループはまだ重い。
-4. Luigi がクリボーで死亡した後、復帰まで stage 全体の動きが止まるように見える。NSMB本来の同期停止なのか、PacketBridge/Direct入口の不具合なのかを検証する。
-5. client表示ROM込みのsplit構成でもスター取得/再生成同期は成立したが、これは制御hookによる取得であり、自然操作では未達。
-6. 自然操作でスターを取りに行く入力 script はまだ未完成。死亡/勝利表示をスター取得と誤判定しないよう、状態値で検証する。
-7. 8コインアイテム取得は自動化が難しいため後回し。
+1. 勝敗結果画面の client 表示が未解決。`vs-results-display-player-id` は player1 勝利表示だけ確認できたが、player0勝利/client敗北で data abort するため採用不可。
+2. Luigi視点の上画面カメラは未解決。`camera-full-p1` は地形相対のactor表示が壊れるため不採用。現時点の安定client UIは共有上画面 + Luigi側HUD表示。
+3. ローカル2プロセス同時検証は、安定条件のJITなしでは約10-11fps、JITありなら40fps台まで上がるが入力同期がゲームロジックへ反映されない。実用速度へ近づけるには、JIT側で PacketBridge packet API hook を正しく扱うか、ROM patch側でpacket API境界を置換してJITでも同じ値を返せるようにする必要がある。
+4. Luigi がクリボーで死亡した後、復帰まで stage 全体の動きが止まるように見える。NSMB本体仕様か、direct entry/PacketBridge副作用かを比較検証する。
+5. 自然操作でスターを取りに行く入力 script はまだ未完成。死亡/勝利表示をスター取得と誤判定しないよう、状態値で検証する。8コインアイテム取得は自動化が難しいため後回し。
 
 ## 次にやること
 
-1. Luigi側UXを `Game::localPlayerID=1` 全体切り替えではなく、正準 `Game::localPlayerID=0` のまま display/HUD/result 境界だけで作れるか確認する。`StageFX` は限定patchでstate一致を確認済み。次は下画面HUD/ストックアイテムがどの関数で描画/消費されるかを分ける。
-2. 上画面は state verifier だけで成功扱いにせず、スクリーンショット上の地形相対位置も確認する。actor座標一致と表示一致を別物として扱う。
-3. Item 系の local player 参照は、表示と gameplay 消費処理が混ざっている。8コインitem自動化は一旦保留だが、ROM disasm と runtime call traceで、右下ストック表示だけに関係する箇所を見つける。actor/state verifierを通らないpatchは採用しない。
-4. 開始残機減少は fallback ROM で再現検出・回避できているが、ユーザー環境で旧ROM/旧buildを使うと再発しうる。標準helperが使うROM名、生成条件、ログ上の life call 有無を明確にする。
-5. Luigi死亡後のstage停止がNSMB本体仕様かどうか、通常LocalMP/実機相当ルートとの比較方法を決める。
+1. `scripts/run-nsmb-mvl-stable-split.ps1` を実2PC用の標準入口として整える。host/client別起動コマンド、必要ROM生成、推奨高速フラグ、verifier条件をこのdocsとscriptに反映する。
+2. 双方向入力の検証は `-RequirePlayer0Input -RequirePlayer1Input` を必須にし、`-RequireRemoteInputHits` の旧packet replay依存と混同しない。
+3. 勝敗結果画面は `VSResults` object の `+0x70..+0x9B` と winner/local player resource table を追い、表示だけをclient player1視点にする。state同期を壊すpatchは採用しない。
+4. Luigi死亡後のstage停止がNSMB本体仕様かどうか、通常LocalMP/実機相当ルートとの比較方法を決める。
+5. 高速化はJITを無条件に許可しない。`-AllowJitWithPacketBridge` は現状「速度計測用/失敗再現用」で、成功判定には使わない。JIT対応を再開する場合は、PacketBridgeの `Net::getConsoleKeys` / `getPacketByte` / `getPacketTick` / `getPacketAction` hook がJIT実行でもguest R0へ反映されることを最初に検証する。
 6. 実WAN相当の評価は、ENet reliable 前提で遅延/ジッタ中心に続ける。packet lossは「reliable retransmitによる遅延」としてまず扱う。
 
 ## 検証ルール
