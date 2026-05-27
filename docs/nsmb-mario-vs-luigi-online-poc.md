@@ -48,6 +48,9 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `logs/smvl-hybrid-safe-bothjump-4200-20260528`
     - `tests/nsmb_us_direct_mvl_safe_short.inputs`
     - Mario/Luigiをその場ジャンプさせ、frame 1500-4200 で `RequirePlayer0Input -RequirePlayer1Input -RequireNoLifeLossUntilFrame 4200` 通過
+  - `logs/smvl-hybrid-separated-host-3000-20260528` / `logs/smvl-hybrid-separated-client-3000-20260528`
+    - `RunRole host` と `RunRole client` を別PowerShell jobとして起動
+    - frame 1500-3000 で別ログディレクトリ比較 verifier 通過
 - 最新の未解決:
   - client表示はまだ広いQAが必要。Goombaについては `Goomba::onRender` と `OAM/drawSprite` がclientでも呼ばれ、単独スクリーンショットで描画を確認したため、直近の差分はcamera差分の可能性が高い。player modelはhost/client双方へ同じrender-visible patchを当てると表示できるが、cullingを雑に外しているため最終品質としては要改善。
   - `tests/nsmb_us_direct_mvl_safe_short.inputs` はMario/Luigi両者入力あり・死亡なしの4200frame安全ルート。次はさらに長時間化し、実操作に近い左右移動やスター/8コインアイテム検証へ広げる必要がある。
@@ -329,8 +332,8 @@ localID1 route の切り分け結果:
 
 ## 次にやること
 
-1. hybrid helperをhost/client別プロセス、次に2PC相当で動かし、`PacketBridgeLookupTickDelay=60` 条件のまま切断や片側先行入力が出ないかを見る。
-2. `tests/nsmb_us_direct_mvl_safe_short.inputs` を長時間化し、`RequirePlayer0Input -RequirePlayer1Input -RequireNoLifeLossUntilFrame` をより長いframe範囲で通す。スター/8コインアイテムはその後。
+1. hybrid helperを実2PCで動かし、`PacketBridgeLookupTickDelay=60` 条件のまま切断や片側先行入力が出ないかを見る。同一PC上のhost/client別wrapper jobは3000frame通過済み。
+2. `tests/nsmb_us_direct_mvl_safe_short.inputs` を4200frameより長時間化し、`RequirePlayer0Input -RequirePlayer1Input -RequireNoLifeLossUntilFrame` をより長いframe範囲で通す。スター/8コインアイテムはその後。
 3. client Luigi視点のQAを追加する。成功判定は「stage visible」だけでなく、player model、敵、HUD、死亡演出、勝敗演出が自然に見えることをスクリーンショット/フレームバッファ検査でfailできるようにする。
 4. 高速化はJITを無条件に許可しない。`-AllowJitWithPacketBridge` は現状「速度計測用/失敗再現用」で、成功判定には使わない。JIT対応を再開する場合は、PacketBridgeの `Net::getConsoleKeys` / `getPacketByte` / `getPacketTick` / `getPacketAction` hook がJIT実行でもguest R0へ反映されることを最初に検証する。
 
@@ -350,23 +353,76 @@ localID1 route の切り分け結果:
 
 ## 実2PC相当の実行メモ
 
-同一PCで分離起動する場合:
+同一PCでまとめて検証する場合:
 
 ```powershell
-.\scripts\run-nsmb-mvl-stable-split.ps1 -Frames 3000 -Port 8181 -HostLogDir logs\host -ClientLogDir logs\client
-.\scripts\verify-nsmb-mvl-stable-split.ps1 -HostLogDir logs\host -ClientLogDir logs\client -FromFrame 1500 -ToFrame 2990
+.\scripts\run-nsmb-mvl-hybrid-split.ps1 `
+  -Frames 4200 `
+  -InputScript tests\nsmb_us_direct_mvl_safe_short.inputs `
+  -LogDir logs\hybrid-both `
+  -RegenerateRoms
 ```
 
-実2PCでは host 側:
+同一PCでhost/client wrapperを分ける場合:
 
 ```powershell
-.\scripts\run-nsmb-mvl-stable-split.ps1 -RunRole host -Port 8181 -HostLogDir logs\mvl-host
+.\scripts\run-nsmb-mvl-hybrid-split.ps1 `
+  -RunRole host `
+  -Frames 3000 `
+  -InputScript tests\nsmb_us_direct_mvl_safe_short.inputs `
+  -LogDir logs\hybrid-host `
+  -Port 8241 `
+  -SkipVerify
 ```
 
-client 側:
+別PowerShellでclient側:
 
 ```powershell
-.\scripts\run-nsmb-mvl-stable-split.ps1 -RunRole client -Peer <host-ip> -Port 8181 -ClientLogDir logs\mvl-client
+.\scripts\run-nsmb-mvl-hybrid-split.ps1 `
+  -RunRole client `
+  -Peer 127.0.0.1 `
+  -Frames 3000 `
+  -InputScript tests\nsmb_us_direct_mvl_safe_short.inputs `
+  -LogDir logs\hybrid-client `
+  -Port 8241 `
+  -SkipVerify
+```
+
+分離ログを比較する場合:
+
+```powershell
+.\scripts\verify-nsmb-mvl-stable-split.ps1 `
+  -HostLogDir logs\hybrid-host `
+  -ClientLogDir logs\hybrid-client `
+  -FromFrame 1500 `
+  -ToFrame 3000 `
+  -RequireNoLifeLossUntilFrame 3000 `
+  -RequireStageVisibleScreenshots
+```
+
+実2PCではhost側:
+
+```powershell
+.\scripts\run-nsmb-mvl-hybrid-split.ps1 `
+  -RunRole host `
+  -Frames 3000 `
+  -InputScript tests\nsmb_us_direct_mvl_safe_short.inputs `
+  -LogDir logs\mvl-host `
+  -Port 8241 `
+  -SkipVerify
+```
+
+client側:
+
+```powershell
+.\scripts\run-nsmb-mvl-hybrid-split.ps1 `
+  -RunRole client `
+  -Peer <host-ip> `
+  -Frames 3000 `
+  -InputScript tests\nsmb_us_direct_mvl_safe_short.inputs `
+  -LogDir logs\mvl-client `
+  -Port 8241 `
+  -SkipVerify
 ```
 
 現時点では `-AllowJitWithPacketBridge` は成功条件に使わない。JITありでは送信packetにkeysが出てもゲームロジック側の `inputPlayer*Held` に反映されないため。
