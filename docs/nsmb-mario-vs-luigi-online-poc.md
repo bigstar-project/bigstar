@@ -155,6 +155,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - `scripts/run-nsmb-mvl-stable-split.ps1` でも frame 1300 smoke と verifier 通過。ログ: `logs/smvl-stable-wrapper-host-1300-20260527`, `logs/smvl-stable-wrapper-client-1300-20260527`。
 - `scripts/run-nsmb-mvl-stable-split.ps1 -RunRole host` と `-RunRole client -Peer 127.0.0.1` を別PowerShell jobから起動しても frame 1800 まで通過。ログ: `logs/smvl-stable-wrapper-role-host-1800-20260527`, `logs/smvl-stable-wrapper-role-client-1800-20260527`。
 - stable wrapper の frame 3000 双方向入力検証も通過。ログ: `logs/smvl-stable-wrapper-both-3000-20260527`, `logs/smvl-stable-wrapper-both-client-3000-20260527`。`-RequirePlayer0Input -RequirePlayer1Input -RequireStageVisibleScreenshots` を通し、frame 2040以降に `inputPlayer0Held` / `inputPlayer1Held` が非ゼロになり、host/client の player actor 座標も一致した。`-RequireRemoteInputHits` は packet replay CSV 前提の旧判定なので、このROM patch経路の成功条件には `RequirePlayer*Input` を使う。
+- stable wrapper で `-SendDelayFrames 4 -SendJitterFrames 4 -LookupTickDelay 10` のWAN遅延相当を入れても frame 2400 verifier 通過。ログ: `logs/smvl-stable-delay4-jitter4-host-2400-20260527`, `logs/smvl-stable-delay4-jitter4-client-2400-20260527`。
 - camera patch切り分け:
   - `stage-camera-state-player-id` は3D actor側だけがズレる表示を作りやすく、現状不採用。
   - `stage-camera-player-id` / display-only も完全なLuigi視点ではない。
