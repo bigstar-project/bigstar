@@ -239,6 +239,15 @@ param(
     [int]$ForcePlayerInventoryPowerupsEndFrame = 0,
     [int]$ForcePlayerInventoryPowerup0 = 0,
     [int]$ForcePlayerInventoryPowerup1 = 0,
+    [switch]$ForcePlayerStarCounters,
+    [int]$ForcePlayerStarCountersStartFrame = 0,
+    [int]$ForcePlayerStarCountersEndFrame = 0,
+    [int]$ForcePlayerBattleStars0 = 0,
+    [int]$ForcePlayerBattleStars1 = 0,
+    [int]$ForcePlayerDisplayedStars0 = 0,
+    [int]$ForcePlayerDisplayedStars1 = 0,
+    [int]$ForcePlayerCollectedStars0 = 0,
+    [int]$ForcePlayerCollectedStars1 = 0,
     [switch]$RenderCameraAlias,
     [switch]$RenderCameraAliasAllRoles,
     [int]$RenderCameraAliasSourcePlayer = 1,
@@ -1187,6 +1196,27 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_END_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP0 -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP1 -ErrorAction SilentlyContinue
+    }
+    if ($ForcePlayerStarCounters) {
+        $env:MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS = "1"
+        $env:MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS_START_FRAME = "$ForcePlayerStarCountersStartFrame"
+        $env:MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS_END_FRAME = "$ForcePlayerStarCountersEndFrame"
+        $env:MELONDS_NSML_FORCE_PLAYER_BATTLE_STARS0 = "$ForcePlayerBattleStars0"
+        $env:MELONDS_NSML_FORCE_PLAYER_BATTLE_STARS1 = "$ForcePlayerBattleStars1"
+        $env:MELONDS_NSML_FORCE_PLAYER_DISPLAYED_STARS0 = "$ForcePlayerDisplayedStars0"
+        $env:MELONDS_NSML_FORCE_PLAYER_DISPLAYED_STARS1 = "$ForcePlayerDisplayedStars1"
+        $env:MELONDS_NSML_FORCE_PLAYER_COLLECTED_STARS0 = "$ForcePlayerCollectedStars0"
+        $env:MELONDS_NSML_FORCE_PLAYER_COLLECTED_STARS1 = "$ForcePlayerCollectedStars1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_BATTLE_STARS0 -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_BATTLE_STARS1 -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_DISPLAYED_STARS0 -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_DISPLAYED_STARS1 -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COLLECTED_STARS0 -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COLLECTED_STARS1 -ErrorAction SilentlyContinue
     }
     if ($TracePlayerLifeChanges) {
         $env:MELONDS_NSML_TRACE_PLAYER_LIFE_CHANGES = "1"
@@ -2547,6 +2577,16 @@ function Start-MelonLANProcess {
         "forcePlayerInventoryPowerupsEnd=$($env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_END_FRAME)"
         "forcePlayerInventoryPowerup0=$($env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP0)"
         "forcePlayerInventoryPowerup1=$($env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP1)"
+        "forcePlayerStarCountersSwitch=$ForcePlayerStarCounters"
+        "forcePlayerStarCountersEnv=$($env:MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS)"
+        "forcePlayerStarCountersStart=$($env:MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS_START_FRAME)"
+        "forcePlayerStarCountersEnd=$($env:MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS_END_FRAME)"
+        "forcePlayerBattleStars0=$($env:MELONDS_NSML_FORCE_PLAYER_BATTLE_STARS0)"
+        "forcePlayerBattleStars1=$($env:MELONDS_NSML_FORCE_PLAYER_BATTLE_STARS1)"
+        "forcePlayerDisplayedStars0=$($env:MELONDS_NSML_FORCE_PLAYER_DISPLAYED_STARS0)"
+        "forcePlayerDisplayedStars1=$($env:MELONDS_NSML_FORCE_PLAYER_DISPLAYED_STARS1)"
+        "forcePlayerCollectedStars0=$($env:MELONDS_NSML_FORCE_PLAYER_COLLECTED_STARS0)"
+        "forcePlayerCollectedStars1=$($env:MELONDS_NSML_FORCE_PLAYER_COLLECTED_STARS1)"
         "tracePlayerLifeChangesSwitch=$TracePlayerLifeChanges"
         "tracePlayerLifeChangesEnv=$($env:MELONDS_NSML_TRACE_PLAYER_LIFE_CHANGES)"
         "tracePlayerLifeCallsSwitch=$TracePlayerLifeCalls"

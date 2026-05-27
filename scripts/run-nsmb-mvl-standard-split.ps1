@@ -48,6 +48,15 @@ param(
     [int]$ForcePlayerInventoryPowerupsEndFrame = 0,
     [int]$ForcePlayerInventoryPowerup0 = 0,
     [int]$ForcePlayerInventoryPowerup1 = 0,
+    [switch]$ForcePlayerStarCounters,
+    [int]$ForcePlayerStarCountersStartFrame = 0,
+    [int]$ForcePlayerStarCountersEndFrame = 0,
+    [int]$ForcePlayerBattleStars0 = 0,
+    [int]$ForcePlayerBattleStars1 = 0,
+    [int]$ForcePlayerDisplayedStars0 = 0,
+    [int]$ForcePlayerDisplayedStars1 = 0,
+    [int]$ForcePlayerCollectedStars0 = 0,
+    [int]$ForcePlayerCollectedStars1 = 0,
     [switch]$NoCameraFallbackRom,
     [switch]$ForceStageCameraSlot,
     [int]$ForceStageCameraSlotStartFrame = 850,
@@ -233,6 +242,19 @@ if ($ForcePlayerInventoryPowerups) {
         "-ForcePlayerInventoryPowerupsEndFrame", "$ForcePlayerInventoryPowerupsEndFrame",
         "-ForcePlayerInventoryPowerup0", "$ForcePlayerInventoryPowerup0",
         "-ForcePlayerInventoryPowerup1", "$ForcePlayerInventoryPowerup1"
+    )
+}
+if ($ForcePlayerStarCounters) {
+    $common += @(
+        "-ForcePlayerStarCounters",
+        "-ForcePlayerStarCountersStartFrame", "$ForcePlayerStarCountersStartFrame",
+        "-ForcePlayerStarCountersEndFrame", "$ForcePlayerStarCountersEndFrame",
+        "-ForcePlayerBattleStars0", "$ForcePlayerBattleStars0",
+        "-ForcePlayerBattleStars1", "$ForcePlayerBattleStars1",
+        "-ForcePlayerDisplayedStars0", "$ForcePlayerDisplayedStars0",
+        "-ForcePlayerDisplayedStars1", "$ForcePlayerDisplayedStars1",
+        "-ForcePlayerCollectedStars0", "$ForcePlayerCollectedStars0",
+        "-ForcePlayerCollectedStars1", "$ForcePlayerCollectedStars1"
     )
 }
 if ($ForceStageCameraSlot) {

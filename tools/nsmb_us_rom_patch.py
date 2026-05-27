@@ -544,6 +544,27 @@ def patch_stage_layout_inventory_display_player_id(
     return changes
 
 
+def patch_vs_results_display_player_id(overlays: dict[int, object], player_id: int) -> list[str]:
+    # VSResults stores the display-local player in its scene object around
+    # +0x9B. The actual winner/result variable must stay untouched; only the
+    # init-time comparison that chooses the local win/lose text is fixed.
+    # Other +0x9B reads also affect result panel resource indices; forcing them
+    # broadly can select invalid tile data on the lose path.
+    ov_id = 52
+    player_id &= 1
+    patches = [
+        (0x02156B0C, encode_mov_imm(1, player_id), "VSResults init win/lose local player read"),
+    ]
+    changes: list[str] = []
+    for addr, word, label in patches:
+        old = patch_overlay_words_by_id(overlays, ov_id, addr, [word])
+        changes.append(
+            f"{label} overlay{ov_id} @ 0x{addr:08X}: "
+            f"{old.hex()} -> {struct.pack('<I', word).hex()} player={player_id}"
+        )
+    return changes
+
+
 def build_direct_loadlevel_stub(
     start_addr: int,
     load_level_addr: int,
@@ -672,6 +693,7 @@ def patch_direct_mvl_entry(
     stagefx_display_player_id: int | None,
     stage_layout_inventory_display_player_id: int | None,
     stage_layout_inventory_display_mode: str,
+    vs_results_display_player_id: int | None,
 ) -> list[str]:
     arm9 = rom.loadArm9()
     overlays = rom.loadArm9Overlays()
@@ -786,6 +808,8 @@ def patch_direct_mvl_entry(
             stage_layout_inventory_display_player_id,
             mode=stage_layout_inventory_display_mode,
         ))
+    if vs_results_display_player_id is not None:
+        changes.extend(patch_vs_results_display_player_id(overlays, vs_results_display_player_id))
 
     rom.arm9 = arm9.save(compress=True)
     save_overlays(rom, overlays)
@@ -963,6 +987,8 @@ def main() -> int:
     p_stage_layout_inventory = sub.add_parser("stage-layout-inventory-display-player-id")
     p_stage_layout_inventory.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_stage_layout_inventory.add_argument("--mode", choices=("hud", "all-read"), default="hud")
+    p_vs_results_display = sub.add_parser("vs-results-display-player-id")
+    p_vs_results_display.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_direct = sub.add_parser("direct-mvl-entry")
     p_direct.add_argument("--scene", type=lambda x: int(x, 0), default=0x0F)
     p_direct.add_argument("--stage", type=lambda x: int(x, 0), default=0)
@@ -992,6 +1018,7 @@ def main() -> int:
     p_direct.add_argument("--stagefx-display-player-id", type=lambda x: int(x, 0), default=None)
     p_direct.add_argument("--stage-layout-inventory-display-player-id", type=lambda x: int(x, 0), default=None)
     p_direct.add_argument("--stage-layout-inventory-display-mode", choices=("hud", "all-read"), default="hud")
+    p_direct.add_argument("--vs-results-display-player-id", type=lambda x: int(x, 0), default=None)
     p_fake = sub.add_parser("fake-opponent")
     p_fake.add_argument("--force-confirm-load", action="store_true")
     p_fake.add_argument("--force-loadgame-progress", action="store_true")
@@ -1039,6 +1066,10 @@ def main() -> int:
         overlays = rom.loadArm9Overlays()
         changes = patch_stage_layout_inventory_display_player_id(overlays, args.player_id, mode=args.mode)
         save_overlays(rom, overlays)
+    elif args.cmd == "vs-results-display-player-id":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_vs_results_display_player_id(overlays, args.player_id)
+        save_overlays(rom, overlays)
     elif args.cmd == "direct-mvl-entry":
         changes = patch_direct_mvl_entry(
             rom,
@@ -1071,6 +1102,7 @@ def main() -> int:
             stagefx_display_player_id=args.stagefx_display_player_id,
             stage_layout_inventory_display_player_id=args.stage_layout_inventory_display_player_id,
             stage_layout_inventory_display_mode=args.stage_layout_inventory_display_mode,
+            vs_results_display_player_id=args.vs_results_display_player_id,
         )
     elif args.cmd == "fake-opponent":
         changes = patch_fake_opponent(

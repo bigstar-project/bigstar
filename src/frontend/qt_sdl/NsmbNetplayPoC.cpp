@@ -1001,6 +1001,16 @@ struct State
     melonDS::u32 ForcePlayerInventoryPowerup0 = 0;
     melonDS::u32 ForcePlayerInventoryPowerup1 = 0;
     bool ForcePlayerInventoryPowerupsLogged[16] {};
+    bool ForcePlayerStarCountersEnabled = false;
+    melonDS::u32 ForcePlayerStarCountersStartFrame = 0;
+    melonDS::u32 ForcePlayerStarCountersEndFrame = 0;
+    melonDS::u32 ForcePlayerBattleStars0 = 0;
+    melonDS::u32 ForcePlayerBattleStars1 = 0;
+    melonDS::u32 ForcePlayerDisplayedStars0 = 0;
+    melonDS::u32 ForcePlayerDisplayedStars1 = 0;
+    melonDS::u32 ForcePlayerCollectedStars0 = 0;
+    melonDS::u32 ForcePlayerCollectedStars1 = 0;
+    bool ForcePlayerStarCountersLogged[16] {};
     bool TracePlayerLifeChanges = false;
     bool LastPlayerLifeSampleValid[16] {};
     GameStateSample LastPlayerLifeSample[16] {};
@@ -5068,6 +5078,58 @@ void ForcePlayerInventoryPowerupsIfNeeded(int instanceID, melonDS::u32 frame, me
     }
 }
 
+void ForcePlayerStarCountersIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForcePlayerStarCountersEnabled || !nds || !nds->MainRAM)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.ForcePlayerStarCountersStartFrame)
+        return;
+    if (G.ForcePlayerStarCountersEndFrame != 0 && frame > G.ForcePlayerStarCountersEndFrame)
+        return;
+    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
+        return;
+
+    const melonDS::u32 oldBattle0 = nds->ARM9Read32(kGamePlayerBattleStarsAddr);
+    const melonDS::u32 oldBattle1 = nds->ARM9Read32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32));
+    const melonDS::u32 oldDisplayed0 = nds->ARM9Read32(kGamePlayerDisplayedStarsAddr);
+    const melonDS::u32 oldDisplayed1 = nds->ARM9Read32(kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32));
+    const melonDS::u32 oldCollected0 = nds->ARM9Read32(kGamePlayerCollectedStarsAddr);
+    const melonDS::u32 oldCollected1 = nds->ARM9Read32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32));
+
+    nds->ARM9Write32(kGamePlayerBattleStarsAddr, G.ForcePlayerBattleStars0);
+    nds->ARM9Write32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32), G.ForcePlayerBattleStars1);
+    nds->ARM9Write32(kGamePlayerDisplayedStarsAddr, G.ForcePlayerDisplayedStars0);
+    nds->ARM9Write32(kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32), G.ForcePlayerDisplayedStars1);
+    nds->ARM9Write32(kGamePlayerCollectedStarsAddr, G.ForcePlayerCollectedStars0);
+    nds->ARM9Write32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32), G.ForcePlayerCollectedStars1);
+
+    if (!G.ForcePlayerStarCountersLogged[instanceID])
+    {
+        std::printf(
+            "NSMB Test: force player star counters inst=%d frame=%u range=%u-%u "
+            "battle=%u/%u->%u/%u displayed=%u/%u->%u/%u collected=%u/%u->%u/%u\n",
+            instanceID,
+            frame,
+            G.ForcePlayerStarCountersStartFrame,
+            G.ForcePlayerStarCountersEndFrame,
+            oldBattle0,
+            oldBattle1,
+            G.ForcePlayerBattleStars0,
+            G.ForcePlayerBattleStars1,
+            oldDisplayed0,
+            oldDisplayed1,
+            G.ForcePlayerDisplayedStars0,
+            G.ForcePlayerDisplayedStars1,
+            oldCollected0,
+            oldCollected1,
+            G.ForcePlayerCollectedStars0,
+            G.ForcePlayerCollectedStars1);
+        G.ForcePlayerStarCountersLogged[instanceID] = true;
+    }
+}
+
 void ForceStageActorPreUpdateGateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.ForceStageActorPreUpdateGateEnabled || !nds || !nds->MainRAM)
@@ -7977,6 +8039,23 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP0", 0)));
     G.ForcePlayerInventoryPowerup1 = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP1", 0)));
+    G.ForcePlayerStarCountersEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS");
+    G.ForcePlayerStarCountersStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS_START_FRAME", 0)));
+    G.ForcePlayerStarCountersEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS_END_FRAME", 0)));
+    G.ForcePlayerBattleStars0 = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_BATTLE_STARS0", 0)));
+    G.ForcePlayerBattleStars1 = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_BATTLE_STARS1", 0)));
+    G.ForcePlayerDisplayedStars0 = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_DISPLAYED_STARS0", 0)));
+    G.ForcePlayerDisplayedStars1 = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_DISPLAYED_STARS1", 0)));
+    G.ForcePlayerCollectedStars0 = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_COLLECTED_STARS0", 0)));
+    G.ForcePlayerCollectedStars1 = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_COLLECTED_STARS1", 0)));
     G.TracePlayerLifeChanges = EnvFlag("MELONDS_NSML_TRACE_PLAYER_LIFE_CHANGES");
     G.ForceStageActorPreUpdateGateEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_ACTOR_PREUPDATE_GATE");
     G.ForceStageActorPreUpdateGateHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_ACTOR_PREUPDATE_GATE_HOST_ONLY");
@@ -8471,6 +8550,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerInventoryPowerupsIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForcePlayerStarCountersIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageFXSettingsIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageActorPreUpdateGateIfNeeded(instanceID, inputFrame, nds);
@@ -8831,6 +8912,8 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         ForcePlayerDeathCountersIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerInventoryPowerupsIfNeeded(instanceID, logFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForcePlayerStarCountersIfNeeded(instanceID, logFrame, nds);
 
     SaveState(instanceID, logFrame, nds);
     SaveLocalMPState(logFrame);
