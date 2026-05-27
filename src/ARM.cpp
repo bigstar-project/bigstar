@@ -3679,6 +3679,79 @@ static void PatchNSMLRenderCameraAlias(ARM* cpu, u32 instrAddr)
     }
 }
 
+static void PatchNSMLCameraFocusLoopCount(ARM* cpu, u32 instrAddr)
+{
+    struct Config
+    {
+        bool Checked = false;
+        bool Enabled = false;
+        bool HostOnly = false;
+        bool ClientOnly = false;
+        u32 Count = 2;
+        u32 StartFrame = 0;
+        u32 EndFrame = 0xFFFFFFFF;
+    };
+
+    static Config cfg;
+    static std::map<NDS*, u32> loggedFrame;
+    if (!cfg.Checked)
+    {
+        std::lock_guard<std::mutex> configLock(NSMLTraceConfigMutex);
+        if (!cfg.Checked)
+        {
+            cfg.Enabled = NSMLEnvFlag("MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT");
+            cfg.HostOnly = NSMLEnvFlag("MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT_HOST_ONLY");
+            cfg.ClientOnly = NSMLEnvFlag("MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT_CLIENT_ONLY");
+            if (const char* count = getenv("MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT_VALUE"))
+                cfg.Count = std::max<u32>(1, static_cast<u32>(strtoul(count, nullptr, 0)));
+            if (const char* startFrame = getenv("MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT_START_FRAME"))
+                cfg.StartFrame = static_cast<u32>(strtoul(startFrame, nullptr, 0));
+            if (const char* endFrame = getenv("MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT_END_FRAME"))
+                cfg.EndFrame = static_cast<u32>(strtoul(endFrame, nullptr, 0));
+            if (cfg.EndFrame == 0)
+                cfg.EndFrame = 0xFFFFFFFF;
+            cfg.Checked = true;
+        }
+    }
+
+    if (!cfg.Enabled || !cpu || cpu->Num != 0)
+        return;
+    if (instrAddr != 0x020BAAE8 && instrAddr != 0x020BAC1C)
+        return;
+
+    const u32 frame = cpu->NDS.NumFrames;
+    if (frame < cfg.StartFrame || frame > cfg.EndFrame)
+        return;
+    if (!IsNSMLMarioVsLuigiGameplay(cpu->NDS))
+        return;
+    if (cfg.HostOnly || cfg.ClientOnly)
+    {
+        const char* role = getenv("MELONDS_NSML_ROLE");
+        if (!role || !role[0])
+            role = getenv("MELONDS_NSML_LAN_ROLE");
+        const bool isHost = role && strcmp(role, "host") == 0;
+        const bool isClient = role && strcmp(role, "client") == 0;
+        if ((cfg.HostOnly && !isHost) || (cfg.ClientOnly && !isClient))
+            return;
+    }
+    if (cpu->R[0] >= cfg.Count)
+        return;
+
+    const u32 oldCount = cpu->R[0];
+    cpu->R[0] = cfg.Count;
+    if (loggedFrame[&cpu->NDS] != frame)
+    {
+        Log(LogLevel::Debug,
+            "NSMB camera focus loop count forced: frame=%u pc=%08X old=%u new=%u sb=%u\n",
+            frame,
+            instrAddr,
+            oldCount,
+            cfg.Count,
+            cpu->R[9]);
+        loggedFrame[&cpu->NDS] = frame;
+    }
+}
+
 static void TraceNSMLStageCamera(ARM* cpu, u32 instrAddr)
 {
     struct Config
@@ -4756,6 +4829,7 @@ void ARMv5::Execute()
             PatchNSMLStageStartNet20Check(this, instrAddr);
             PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
             PatchNSMLRenderCameraAlias(this, instrAddr);
+            PatchNSMLCameraFocusLoopCount(this, instrAddr);
             TraceNSMLStageCamera(this, instrAddr);
             TraceNSMLPlayerDefeatedEntry(this, instrAddr);
             TraceNSMLStageStartDispatch(this, instrAddr);
@@ -4884,6 +4958,7 @@ void ARMv5::Execute()
                 PatchNSMLStageStartNet20Check(this, instrAddr);
                 PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
                 PatchNSMLRenderCameraAlias(this, instrAddr);
+                PatchNSMLCameraFocusLoopCount(this, instrAddr);
                 TraceNSMLStageCamera(this, instrAddr);
                 TraceNSMLPlayerDefeatedEntry(this, instrAddr);
                 TraceNSMLStageStartDispatch(this, instrAddr);
@@ -4987,6 +5062,7 @@ void ARMv5::Execute()
                 PatchNSMLStageStartNet20Check(this, instrAddr);
                 PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
                 PatchNSMLRenderCameraAlias(this, instrAddr);
+                PatchNSMLCameraFocusLoopCount(this, instrAddr);
                 TraceNSMLStageCamera(this, instrAddr);
                 TraceNSMLPlayerDefeatedEntry(this, instrAddr);
                 TraceNSMLStageStartDispatch(this, instrAddr);

@@ -240,6 +240,12 @@ param(
     [int]$RenderCameraAliasDestPlayer = 0,
     [int]$RenderCameraAliasStartFrame = 0,
     [int]$RenderCameraAliasEndFrame = 0,
+    [switch]$ForceCameraFocusLoopCount,
+    [switch]$ForceCameraFocusLoopCountHostOnly,
+    [switch]$ForceCameraFocusLoopCountClientOnly,
+    [int]$ForceCameraFocusLoopCountValue = 2,
+    [int]$ForceCameraFocusLoopCountStartFrame = 0,
+    [int]$ForceCameraFocusLoopCountEndFrame = 0,
     [switch]$TracePlayerLifeCalls,
     [switch]$TracePlayerLifeChanges,
     [switch]$TracePlayerDefeated,
@@ -1183,6 +1189,21 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_RENDER_CAMERA_ALIAS_DEST_PLAYER -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_RENDER_CAMERA_ALIAS_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_RENDER_CAMERA_ALIAS_END_FRAME -ErrorAction SilentlyContinue
+    }
+    if ($ForceCameraFocusLoopCount) {
+        $env:MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT = "1"
+        if ($ForceCameraFocusLoopCountHostOnly) { $env:MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT_HOST_ONLY -ErrorAction SilentlyContinue }
+        if ($ForceCameraFocusLoopCountClientOnly) { $env:MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT_CLIENT_ONLY -ErrorAction SilentlyContinue }
+        $env:MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT_VALUE = "$ForceCameraFocusLoopCountValue"
+        $env:MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT_START_FRAME = "$ForceCameraFocusLoopCountStartFrame"
+        $env:MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT_END_FRAME = "$ForceCameraFocusLoopCountEndFrame"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT_HOST_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT_CLIENT_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT_VALUE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT_END_FRAME -ErrorAction SilentlyContinue
     }
     if ($ForceStageFXSettings) {
         $env:MELONDS_NSML_FORCE_STAGEFX_SETTINGS = "1"

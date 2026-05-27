@@ -60,6 +60,12 @@ param(
     [int]$RenderCameraAliasDestPlayer = 0,
     [int]$RenderCameraAliasStartFrame = 0,
     [int]$RenderCameraAliasEndFrame = 0,
+    [switch]$ForceCameraFocusLoopCount,
+    [switch]$ForceCameraFocusLoopCountHostOnly,
+    [switch]$ForceCameraFocusLoopCountClientOnly,
+    [int]$ForceCameraFocusLoopCountValue = 2,
+    [int]$ForceCameraFocusLoopCountStartFrame = 0,
+    [int]$ForceCameraFocusLoopCountEndFrame = 0,
     [switch]$TracePlayerLifeCalls,
     [switch]$TracePlayerLifeChanges,
     [switch]$TracePlayerDefeated,
@@ -71,7 +77,11 @@ param(
     [string]$CallTraceAddrs = "",
     [int]$CallTraceStartFrame = 0,
     [int]$CallTraceEndFrame = 0,
-    [int]$CallTraceDumpLen = 32
+    [int]$CallTraceDumpLen = 32,
+    [switch]$WriteTrace,
+    [string]$WriteTraceAddrs = "",
+    [int]$WriteTraceStartFrame = 0,
+    [int]$WriteTraceEndFrame = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -243,6 +253,20 @@ if ($RenderCameraAlias) {
         "-RenderCameraAliasEndFrame", "$RenderCameraAliasEndFrame"
     )
 }
+if ($ForceCameraFocusLoopCount) {
+    $common += @(
+        "-ForceCameraFocusLoopCount",
+        "-ForceCameraFocusLoopCountValue", "$ForceCameraFocusLoopCountValue",
+        "-ForceCameraFocusLoopCountStartFrame", "$ForceCameraFocusLoopCountStartFrame",
+        "-ForceCameraFocusLoopCountEndFrame", "$ForceCameraFocusLoopCountEndFrame"
+    )
+    if ($ForceCameraFocusLoopCountHostOnly) {
+        $common += "-ForceCameraFocusLoopCountHostOnly"
+    }
+    if ($ForceCameraFocusLoopCountClientOnly) {
+        $common += "-ForceCameraFocusLoopCountClientOnly"
+    }
+}
 if ($TracePlayerLifeCalls) {
     $common += "-TracePlayerLifeCalls"
 }
@@ -269,6 +293,16 @@ if ($CallTrace) {
     )
     if ($CallTraceAddrs -ne "") {
         $common += @("-CallTraceAddrs", "$CallTraceAddrs")
+    }
+}
+if ($WriteTrace) {
+    $common += @(
+        "-WriteTrace",
+        "-WriteTraceStartFrame", "$WriteTraceStartFrame",
+        "-WriteTraceEndFrame", "$WriteTraceEndFrame"
+    )
+    if ($WriteTraceAddrs -ne "") {
+        $common += @("-WriteTraceAddrs", "$WriteTraceAddrs")
     }
 }
 
