@@ -63,12 +63,26 @@ def encode_ldr_imm(rd: int, rn: int, off: int) -> int:
     return 0xE5900000 | (rn << 16) | (rd << 12) | off
 
 
+def encode_ldr_reg_lsl(rd: int, rn: int, rm: int, shift: int) -> int:
+    if shift < 0 or shift > 31:
+        raise ValueError(f"LDR register shift {shift} is out of range")
+    return 0xE7900000 | (rn << 16) | (rd << 12) | (shift << 7) | rm
+
+
 def encode_cmp_imm(rn: int, imm: int) -> int:
     return 0xE3500000 | (rn << 16) | encode_arm_imm12(imm)
 
 
 def encode_mov_reg(rd: int, rm: int) -> int:
     return 0xE1A00000 | (rd << 12) | rm
+
+
+def encode_add_reg(rd: int, rn: int, rm: int) -> int:
+    return 0xE0800000 | (rn << 16) | (rd << 12) | rm
+
+
+def encode_rsb_imm(rd: int, rn: int, imm: int) -> int:
+    return 0xE2600000 | (rn << 16) | (rd << 12) | encode_arm_imm12(imm)
 
 
 def with_cond(word: int, cond: int) -> int:
@@ -87,6 +101,16 @@ def encode_bl(src_addr: int, dst_addr: int) -> int:
     if off < -(1 << 23) or off >= (1 << 23):
         raise ValueError(f"BL target 0x{dst_addr:08X} out of range from 0x{src_addr:08X}")
     return 0xEB000000 | (off & 0x00FFFFFF)
+
+
+def encode_b(src_addr: int, dst_addr: int) -> int:
+    diff = dst_addr - (src_addr + 8)
+    if diff % 4:
+        raise ValueError(f"unaligned B target 0x{dst_addr:08X} from 0x{src_addr:08X}")
+    off = diff // 4
+    if off < -(1 << 23) or off >= (1 << 23):
+        raise ValueError(f"B target 0x{dst_addr:08X} out of range from 0x{src_addr:08X}")
+    return 0xEA000000 | (off & 0x00FFFFFF)
 
 
 def encode_arm_imm12(imm: int) -> int:
@@ -337,6 +361,71 @@ def patch_stage_camera_state_player_id(overlays: dict[int, object], player_id: i
     return changes
 
 
+def build_is_out_of_view_vertical_camera_fallback_stub(start_addr: int) -> list[int]:
+    words: list[int] = []
+    literals: list[int] = []
+    literal_refs: list[tuple[int, int, int, int]] = []
+
+    def emit_ldr_literal(rd: int, value: int, *, cond: int = 0xE) -> None:
+        literal_index = len(literals)
+        literals.append(value)
+        word_index = len(words)
+        words.append(0)
+        literal_refs.append((word_index, rd, literal_index, cond))
+
+    words.append(encode_push((1 << 4) | (1 << 14)))  # push {r4, lr}
+    emit_ldr_literal(3, 0x020CAD8C)  # Stage::cameraHeight
+    words.append(encode_ldr_reg_lsl(12, 3, 2, 2))  # ldr ip, [r3, r2, lsl #2]
+    words.append(encode_cmp_imm(12, 0))
+    words.append(with_cond(encode_mov_imm(2, 0), 0x0))  # moveq r2, #0
+    emit_ldr_literal(12, 0x020CAD94)  # Stage::cameraY
+    words.append(encode_ldr_imm(14, 1, 4))  # ldr lr, [r1, #4]
+    emit_ldr_literal(3, 0x020CAD8C)  # Stage::cameraHeight
+    words.append(encode_ldr_imm(4, 0, 0x64))  # ldr r4, [r0, #0x64]
+    words.append(encode_ldr_reg_lsl(12, 12, 2, 2))  # ldr ip, [ip, r2, lsl #2]
+    words.append(encode_ldr_reg_lsl(0, 3, 2, 2))  # ldr r0, [r3, r2, lsl #2]
+    words.append(encode_add_reg(2, 4, 14))  # add r2, r4, lr
+    words.append(encode_add_reg(0, 12, 0))  # add r0, ip, r0
+    words.append(encode_ldr_imm(1, 1, 0x0C))  # ldr r1, [r1, #0xC]
+    words.append(encode_add_imm(2, 2, 0x18000))
+    words.append(encode_add_reg(1, 2, 1))  # add r1, r2, r1
+    words.append(encode_rsb_imm(0, 0, 0))
+    words.append(0xE1510000)  # cmp r1, r0
+    words.append(with_cond(encode_mov_imm(0, 1), 0xB))  # movlt r0, #1
+    words.append(with_cond(encode_mov_imm(0, 0), 0xA))  # movge r0, #0
+    words.append(POP_PC | (1 << 4))  # pop {r4, pc}
+
+    literal_start_addr = start_addr + (len(words) * 4)
+    for word_index, rd, literal_index, cond in literal_refs:
+        instruction_addr = start_addr + (word_index * 4)
+        literal_addr = literal_start_addr + (literal_index * 4)
+        words[word_index] = encode_ldr_pc_literal(rd, instruction_addr, literal_addr, cond=cond)
+    words.extend(literals)
+    return words
+
+
+def patch_is_out_of_view_vertical_camera_fallback(overlays: dict[int, object]) -> list[str]:
+    ov_id = 0
+    func_addr = 0x020A06DC
+    # overlay0 ends at 0x020CA280, followed by overlay BSS/globals used during
+    # stage startup. Extending the overlay collides with those globals, so keep
+    # this patch in-place in a zero-filled padding cave inside overlay0.
+    stub_addr = 0x020C5298
+    stub = build_is_out_of_view_vertical_camera_fallback_stub(stub_addr)
+    cave_old = patch_overlay_words_by_id(overlays, ov_id, stub_addr, stub)
+    if any(cave_old):
+        raise ValueError(
+            f"StageActor::isOutOfViewVertical stub cave 0x{stub_addr:08X} is not empty"
+        )
+    branch_word = encode_b(func_addr, stub_addr)
+    old = patch_overlay_words_by_id(overlays, ov_id, func_addr, [branch_word])
+    return [
+        f"StageActor::isOutOfViewVertical camera fallback stub overlay{ov_id} @ 0x{stub_addr:08X}",
+        f"StageActor::isOutOfViewVertical branch overlay{ov_id} @ 0x{func_addr:08X}: "
+        f"{old.hex()} -> {struct.pack('<I', branch_word).hex()}",
+    ]
+
+
 def build_direct_loadlevel_stub(
     start_addr: int,
     load_level_addr: int,
@@ -458,6 +547,7 @@ def patch_direct_mvl_entry(
     call_load_mvl_files_after: bool,
     stage_camera_player_id: int | None,
     stage_camera_state_player_id: int | None,
+    camera_fallback_slot_zero: bool,
 ) -> list[str]:
     arm9 = rom.loadArm9()
     overlays = rom.loadArm9Overlays()
@@ -555,6 +645,8 @@ def patch_direct_mvl_entry(
         changes.extend(patch_stage_camera_player_id(overlays, stage_camera_player_id))
     if stage_camera_state_player_id is not None:
         changes.extend(patch_stage_camera_state_player_id(overlays, stage_camera_state_player_id))
+    if camera_fallback_slot_zero:
+        changes.extend(patch_is_out_of_view_vertical_camera_fallback(overlays))
 
     rom.arm9 = arm9.save(compress=True)
     save_overlays(rom, overlays)
@@ -721,6 +813,7 @@ def main() -> int:
     p_camera.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_camera_state = sub.add_parser("stage-camera-state-player-id")
     p_camera_state.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
+    sub.add_parser("camera-fallback-slot-zero")
     p_direct = sub.add_parser("direct-mvl-entry")
     p_direct.add_argument("--scene", type=lambda x: int(x, 0), default=0x0F)
     p_direct.add_argument("--stage", type=lambda x: int(x, 0), default=0)
@@ -743,6 +836,7 @@ def main() -> int:
     p_direct.add_argument("--call-load-mvsl-files-after", action="store_true")
     p_direct.add_argument("--stage-camera-player-id", type=lambda x: int(x, 0), default=None)
     p_direct.add_argument("--stage-camera-state-player-id", type=lambda x: int(x, 0), default=None)
+    p_direct.add_argument("--camera-fallback-slot-zero", action="store_true")
     p_fake = sub.add_parser("fake-opponent")
     p_fake.add_argument("--force-confirm-load", action="store_true")
     p_fake.add_argument("--force-loadgame-progress", action="store_true")
@@ -765,6 +859,10 @@ def main() -> int:
     elif args.cmd == "stage-camera-state-player-id":
         overlays = rom.loadArm9Overlays()
         changes = patch_stage_camera_state_player_id(overlays, args.player_id)
+        save_overlays(rom, overlays)
+    elif args.cmd == "camera-fallback-slot-zero":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_is_out_of_view_vertical_camera_fallback(overlays)
         save_overlays(rom, overlays)
     elif args.cmd == "direct-mvl-entry":
         changes = patch_direct_mvl_entry(
@@ -791,6 +889,7 @@ def main() -> int:
             call_load_mvl_files_after=args.call_load_mvsl_files_after,
             stage_camera_player_id=args.stage_camera_player_id,
             stage_camera_state_player_id=args.stage_camera_state_player_id,
+            camera_fallback_slot_zero=args.camera_fallback_slot_zero,
         )
     elif args.cmd == "fake-opponent":
         changes = patch_fake_opponent(

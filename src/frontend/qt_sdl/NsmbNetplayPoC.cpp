@@ -846,6 +846,7 @@ struct State
     bool PacketBridgeForceStageNet20OnStageScene = false;
     int PacketBridgeForceGameLocalPlayerID = -1;
     melonDS::u32 PacketBridgeForceGameLocalPlayerIDStartFrame = 0;
+    bool PacketBridgeForceGameLocalPlayerIDEarly = false;
     bool PacketBridgeDummyAlloc = false;
     melonDS::u32 PacketBridgeDummyAllocFrame = 0;
     melonDS::u32 PacketBridgeDummyAllocSize = 0;
@@ -2934,7 +2935,8 @@ void ForceNSMLGameLocalPlayerIDIfNeeded(melonDS::u32 frame, melonDS::NDS* nds)
         return;
     if (frame < G.PacketBridgeForceGameLocalPlayerIDStartFrame)
         return;
-    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
+    if (!G.PacketBridgeForceGameLocalPlayerIDEarly
+        && (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1))
         return;
 
     nds->ARM9Write32(kGameLocalPlayerIDAddr, static_cast<melonDS::u32>(G.PacketBridgeForceGameLocalPlayerID & 1));
@@ -7648,6 +7650,8 @@ void InitFromEnvironment()
         EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID", -1);
     G.PacketBridgeForceGameLocalPlayerIDStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_START_FRAME", 0)));
+    G.PacketBridgeForceGameLocalPlayerIDEarly =
+        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_EARLY");
     G.PacketBridgeDummyAlloc =
         EnvFlag("MELONDS_NSML_PACKET_BRIDGE_DUMMY_ALLOC");
     G.PacketBridgeDummyAllocFrame = static_cast<melonDS::u32>(

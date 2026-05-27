@@ -13,6 +13,7 @@ param(
     [int]$LookupTickDelay = 10,
     [string]$HostGameLocalPlayerID = "0",
     [string]$ClientGameLocalPlayerID = "0",
+    [switch]$ForceGameLocalPlayerIDEarly,
     [int]$SendDelayFrames = 0,
     [int]$SendJitterFrames = 0,
     [int]$MaxFrameLead = 8,
@@ -97,6 +98,9 @@ $common = @(
     "-NetRandomValue", "0x12345678",
     "-NetRandomAuto"
 )
+if ($ForceGameLocalPlayerIDEarly) {
+    $common += "-PacketBridgeForceGameLocalPlayerIDEarly"
+}
 
 if ($MaxFrameLead -ge 0) {
     $common += @("-PacketBridgeMaxFrameLead", "$MaxFrameLead")

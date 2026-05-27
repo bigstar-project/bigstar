@@ -57,6 +57,7 @@ param(
     [string]$HostPacketBridgeForceGameLocalPlayerID = "",
     [string]$ClientPacketBridgeForceGameLocalPlayerID = "",
     [int]$PacketBridgeForceGameLocalPlayerIDStartFrame = 0,
+    [switch]$PacketBridgeForceGameLocalPlayerIDEarly,
     [int]$PacketBridgeReplayTickOffset = 0,
     [int]$HostPacketBridgeReplayTickOffset = [int]::MinValue,
     [int]$ClientPacketBridgeReplayTickOffset = [int]::MinValue,
@@ -1356,6 +1357,11 @@ function Start-MelonLANProcess {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_START_FRAME -ErrorAction SilentlyContinue
         }
+        if ($PacketBridgeForceGameLocalPlayerIDEarly) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_EARLY = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_EARLY -ErrorAction SilentlyContinue
+        }
         if ($PacketBridgeAllowPreGame) {
             $env:MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME = "1"
         } else {
@@ -1902,6 +1908,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOAD_LEVEL_PLAYER_ID -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_EARLY -ErrorAction SilentlyContinue
         if (-not ($PacketCapture -and $PacketCaptureAllowPreGame)) {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME -ErrorAction SilentlyContinue
         }
@@ -2371,6 +2378,7 @@ function Start-MelonLANProcess {
         "packetBridgeLoadLevelPlayerID=$($env:MELONDS_NSML_PACKET_BRIDGE_LOAD_LEVEL_PLAYER_ID)"
         "packetBridgeForceGameLocalPlayerID=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID)"
         "packetBridgeForceGameLocalPlayerIDStartFrame=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_START_FRAME)"
+        "packetBridgeForceGameLocalPlayerIDEarly=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_EARLY)"
         "packetBridgeLocalInputDelay=$($env:MELONDS_NSML_PACKET_BRIDGE_LOCAL_INPUT_DELAY)"
         "packetBridgeNeutralizeLocalInput=$($env:MELONDS_NSML_PACKET_BRIDGE_NEUTRALIZE_LOCAL_INPUT)"
         "packetBridgeSendDelayFrames=$($env:MELONDS_NSML_PACKET_BRIDGE_SEND_DELAY_FRAMES)"
