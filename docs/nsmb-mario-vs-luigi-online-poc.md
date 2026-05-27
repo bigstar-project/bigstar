@@ -88,6 +88,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - verifier に `-RequireNoLifeLossUntilFrame` を追加。開始残機減少を「スクショ目視」ではなく、`player*Lives` / `player*Deaths` / `player*Dead` と `Game::losePlayerLife` / `Game::addPlayerDeath` call trace で fail できる。
   - verifier に `-RequireStageVisibleScreenshots` を追加。最新スクリーンショットを `tools/nsmb_screenshot_probe.py` で確認し、sky-only 画面を成功扱いしない。
   - helper script は `logs/nsmvl-standard-helper-client-right-host-1800-20260527`, `logs/nsmvl-standard-helper-client-right-client-1800-20260527` で smoke と split verifier 通過。
+  - `scripts/generate-nsmb-mvl-client-ui-rom.ps1` を追加。安定base ROMから `StageFX + StageLayout inventory HUD` の client UI ROM を再生成できる。
   - host/client 別入力スクリプトを追加済み。
     - `tests/nsmb_us_direct_mvl_host_right.inputs`
     - `tests/nsmb_us_direct_mvl_client_right.inputs`
@@ -144,6 +145,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - 勝敗結果画面は `ForcePlayerStarCounters` 診断フックで短時間発火できるようにした。`player1BattleStars=5` の検証では `VSResults` scene (`SceneID=0xA`) へ遷移し、`vs-results-display-player-id --player-id 1` で client に `You Win!` を出せた。ログ: `logs/smvl-vsresults-text-p1win-host-1600-20260527`, `logs/smvl-vsresults-text-p1win-client-1600-20260527`。
 - ただし `player0BattleStars=5` で client を負け表示にするケースは、同patchで `pc=02066EBC lr=02155F48 fault=00000020` の data abort になる。`VSResults` は `object+0x9B` を複数の資源index選択にも使っており、win/lose stateだけをlocal player1にすると lose path のtile sourceが破綻する。ログ: `logs/smvl-vsresults-text-p0win-client-1600-20260527`。次は `VSResults` object の `+0x70..+0x9B` と winner/local player resource table の関係を追う。
 - 結果画面patchを除いた `StageFX + stage-layout-inventory-display-player-id` client UI ROM は、通常入力で frame 3600 まで verifier 通過。開始残機減少なし、stage visible、host/client state一致、ARM abortなし。ログ: `logs/smvl-stable-clientui-host-3600-20260527`, `logs/smvl-stable-clientui-client-3600-20260527`。当面の安定client UI候補はこの組み合わせ。
+- `scripts/generate-nsmb-mvl-client-ui-rom.ps1` で生成した client UI ROM でも frame 1800 smoke と verifier 通過。ログ: `logs/smvl-generated-clientui-host-1800-20260527`, `logs/smvl-generated-clientui-client-1800-20260527`。
 - camera patch切り分け:
   - `stage-camera-state-player-id` は3D actor側だけがズレる表示を作りやすく、現状不採用。
   - `stage-camera-player-id` / display-only も完全なLuigi視点ではない。
