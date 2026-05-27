@@ -81,6 +81,9 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `TraceStageCamera` を追加。`StageCamera` 更新/描画付近の `Game::localPlayerID`, `Stage::camera*`, view matrix hash, DISPCNT/BG scroll を stdout に出し、カメラ、view matrix、描画対象のどこがズレるかを切り分ける。
   - `RamDumpFrames` / `RamDumpInterval` を標準split helperへ通し、client local0/local1 などのMAINRAM差分を同じ手順で採取できるようにした。
   - `ForceStageFXSettings` を追加。`StageFX` actor settings の bit差分が上画面描画崩れの主因かを診断するための一時フック。runtime settings を直すだけでは上画面空表示は直らなかった。
+  - `tools/nsmb_localplayer_ref_report.py` を追加。PC相対LDRが `Game::localPlayerID` を読む命令だけを抽出し、近傍シンボルへ紐づける。overlay10 の候補を `logs/nsmb-us-overlay10-localplayer-refs-20260527.csv` に出力済み。
+  - 標準split helper から `CallTrace` / `CallTraceAddrs` / `CallTraceStartFrame` / `CallTraceEndFrame` を渡せるようにした。静的候補のうち実行中に踏まれるものを短時間で確認するため。
+  - verifier に `-RequireNoLifeLossUntilFrame` を追加。開始残機減少を「スクショ目視」ではなく、`player*Lives` / `player*Deaths` / `player*Dead` と `Game::losePlayerLife` / `Game::addPlayerDeath` call trace で fail できる。
   - helper script は `logs/nsmvl-standard-helper-client-right-host-1800-20260527`, `logs/nsmvl-standard-helper-client-right-client-1800-20260527` で smoke と split verifier 通過。
   - host/client 別入力スクリプトを追加済み。
     - `tests/nsmb_us_direct_mvl_host_right.inputs`
@@ -215,6 +218,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - ただし同条件の上画面は地形/プレイヤーが表示されず空だけになる。`Game::localPlayerID=1` を early に書いても直らない。
   - StageCamera trace では、local1 は `Stage::cameraX/Y/W/H[1]` と `StageCamera` target/pos が 0 のままになる。`ForceStageCameraSlot` で slot1 global camera bounds を埋めると view matrix と `stageDisplayCameraX` は local0 と一致するが、上画面はまだ空のまま。ログ: `logs/smvl-stagecam-trace-local1-client-1250-20260527`, `logs/smvl-stagecam-trace-local1-mirror-client-1250-20260527`。
   - RAM dump 差分では local0 client は object数13、local1+mirror client は object数12。local1+mirror では Goomba actor が消え、`StageFX` actor settings が `0x00008010` になっていた。`ForceStageFXSettings=0x8000` で runtime settings を戻しても上画面空表示は直らない。ログ: `logs/smvl-ramdump-local0-client-1250-20260527`, `logs/smvl-ramdump-local1-mirror-client-1250-20260527`, `logs/smvl-local1-mirror-stagefx8000-client-1250-20260527`。
+  - overlay10 の `Game::localPlayerID` 静的参照は StageCamera, Item, StageFX, Player transition, render/effect 系に分布する。短時間の runtime trace `logs/smvl-localplayer-reftrace-host-1300-20260527`, `logs/smvl-localplayer-reftrace-client-1300-20260527` では frame 886-1300 の間に踏まれたのは StageCamera 系のみ。StageFX/Item はこの区間ではまだ踏まれていない。
   - よって global `Game::localPlayerID=1` はカメラだけでなく `StageFX` / object生成 / result/UI 側まで切り替える。最終ルートとしては副作用が大きく、当面は採用しない。
   - 次の表示方針は、ゲーム内 `Game::localPlayerID=0` の正準シミュレーションを維持し、Luigi側UXは display player id を読む箇所を限定patchするか、emulator側overlayでHUD/結果表示を差し替える方向。勝敗判定やストックアイテムを壊さないため、カメラだけを単独で変える実装は成功扱いにしない。
   - 注意: `-PacketBridgeDirectCapture` を外すと split client で player1 入力が packet に乗らない。現在の安定条件には必須として扱う。

@@ -65,7 +65,12 @@ param(
     [switch]$TraceStageCamera,
     [int]$TraceStageCameraStartFrame = 0,
     [int]$TraceStageCameraEndFrame = 0,
-    [int]$TraceStageCameraInterval = 1
+    [int]$TraceStageCameraInterval = 1,
+    [switch]$CallTrace,
+    [string]$CallTraceAddrs = "",
+    [int]$CallTraceStartFrame = 0,
+    [int]$CallTraceEndFrame = 0,
+    [int]$CallTraceDumpLen = 32
 )
 
 $ErrorActionPreference = "Stop"
@@ -252,6 +257,17 @@ if ($TraceStageCamera) {
         "-TraceStageCameraEndFrame", "$TraceStageCameraEndFrame",
         "-TraceStageCameraInterval", "$TraceStageCameraInterval"
     )
+}
+if ($CallTrace) {
+    $common += @(
+        "-CallTrace",
+        "-CallTraceStartFrame", "$CallTraceStartFrame",
+        "-CallTraceEndFrame", "$CallTraceEndFrame",
+        "-CallTraceDumpLen", "$CallTraceDumpLen"
+    )
+    if ($CallTraceAddrs -ne "") {
+        $common += @("-CallTraceAddrs", "$CallTraceAddrs")
+    }
 }
 
 $hostArgs = @("-RunRole", "host", "-LogDir", $HostLogDir) + $common

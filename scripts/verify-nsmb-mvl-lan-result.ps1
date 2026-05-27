@@ -9,7 +9,8 @@ param(
     [switch]$RequirePlayer0Input,
     [switch]$RequirePlayer1Input,
     [switch]$RequireStarPickup,
-    [switch]$RequireStarRespawn
+    [switch]$RequireStarRespawn,
+    [int]$RequireNoLifeLossUntilFrame = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -208,4 +209,34 @@ if ($RequireStarRespawn) {
     }
 }
 
-Write-Host "NSMB MvL LAN result verified: frames=$checked from=$FromFrame tolerance=$PositionTolerance remoteInputHits=$($RequireRemoteInputHits.IsPresent) player0Input=$($RequirePlayer0Input.IsPresent) player1Input=$($RequirePlayer1Input.IsPresent) starPickup=$($RequireStarPickup.IsPresent) starRespawn=$($RequireStarRespawn.IsPresent)"
+if ($RequireNoLifeLossUntilFrame -gt 0) {
+    foreach ($entry in @(
+        @{ Label = "host"; Rows = $hostRows; Stdout = $hostStdout },
+        @{ Label = "client"; Rows = $clientRows; Stdout = $clientStdout }
+    )) {
+        $badLife = $entry.Rows | Where-Object {
+            [int]$_.frame -ge $FromFrame -and
+            [int]$_.frame -le $RequireNoLifeLossUntilFrame -and (
+                $_.player0Lives -ne "0x5" -or
+                $_.player1Lives -ne "0x5" -or
+                $_.player0Deaths -ne "0x0" -or
+                $_.player1Deaths -ne "0x0" -or
+                $_.player0Dead -ne "0x0" -or
+                $_.player1Dead -ne "0x0"
+            )
+        } | Select-Object -First 1
+        if ($badLife) {
+            Fail "$($entry.Label) life/death state changed before frame $RequireNoLifeLossUntilFrame`: frame=$($badLife.frame) lives=$($badLife.player0Lives)/$($badLife.player1Lives) deaths=$($badLife.player0Deaths)/$($badLife.player1Deaths) dead=$($badLife.player0Dead)/$($badLife.player1Dead)"
+        }
+
+        $badCall = Select-String -Path $entry.Stdout -Pattern "NSMB LifeCall: ([0-9]+),[0-9A-Fa-f]+,(Game::losePlayerLife|Game::addPlayerDeath)," | Where-Object {
+            [int]$_.Matches[0].Groups[1].Value -ge $FromFrame -and
+            [int]$_.Matches[0].Groups[1].Value -le $RequireNoLifeLossUntilFrame
+        } | Select-Object -First 1
+        if ($badCall) {
+            Fail "$($entry.Label) life loss call before frame $RequireNoLifeLossUntilFrame`: $($badCall.Line)"
+        }
+    }
+}
+
+Write-Host "NSMB MvL LAN result verified: frames=$checked from=$FromFrame tolerance=$PositionTolerance remoteInputHits=$($RequireRemoteInputHits.IsPresent) player0Input=$($RequirePlayer0Input.IsPresent) player1Input=$($RequirePlayer1Input.IsPresent) starPickup=$($RequireStarPickup.IsPresent) starRespawn=$($RequireStarRespawn.IsPresent) noLifeLossUntil=$RequireNoLifeLossUntilFrame"
