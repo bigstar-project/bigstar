@@ -126,12 +126,14 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - baseline再確認ログ `logs/smvl-camera-slot-baseline-host-1150-20260527`: frame 992 で `cam={... y=00060000/00000000 ... h=000C0000/00000000}`、`player1Dead=1`, `p1 transitFunc=021196B0`。frame 1112 で `player1Lives=4`, `player1Deaths=1`。
 - 診断フック `ForceStageCameraSlot` で slot0 の `Stage::cameraX/Y/Width/Height` を slot1 へ初期化すると、`logs/smvl-camera-slot-mirror-host-1300-20260527` では frame 992 でも `player1Dead=0`, `player1Lives=5`, `p1 transitFunc=0211E670` のまま。よって開始残機減少の直接原因は `Stage::camera*` remote slot 未初期化でほぼ確定。
 - JIT + PacketBridge + host/client splitでも確認済み。`logs/smvl-camera-slot-split-branchfix-host-1800-20260527`, `logs/smvl-camera-slot-split-branchfix-client-1800-20260527` は frame 1800 まで abort/timeoutなし、host/clientとも frame 1006 で `lives=5/5`, `dead=0/0`, `p1 transitFunc=0211E670`。ローカル2プロセス同時で実効 `56.84fps`。
+- `ForceStageCameraSlotEndFrame=1008` の短時間 bootstrap だけでも frame 1800 まで開始死亡なし。ログ: `logs/smvl-camera-slot-bootstrap-host-1800-20260527`。標準split helperでは当面この短時間 bootstrap をデフォルト有効にする。`ForcePlayerLives` / `ForcePlayerDeathCounters` と違い、これは残機値を戻す補正ではなく、死亡判定に使われる remote camera bounds の欠落初期化を埋めるもの。
+- 標準split helperのデフォルトbootstrap確認: `logs/smvl-standard-default-camera-bootstrap-host-1100-20260527`, `logs/smvl-standard-default-camera-bootstrap-client-1100-20260527` は明示指定なしで frame 1006 `lives=5/5`, `dead=0/0`, `p1 transitFunc=0211E670`。
 - `MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG` は開始保護の候補。終了フレーム後にfreeze flagを0へ戻す処理を追加した。ただし単純に frame 960-1800 で敵を止めるだけでは、解除後にGoombaがLuigiへ到達して死亡する。次は本来の開始保護/カウントダウン相当をROM/状態側で再現するか、player1 spawn位置/敵初期状態をROM patchで直す。
 
 標準に近い検証条件:
 
 - direct ROM
-- `-PacketBridgeStartFrame 1800`
+- `-PacketBridgeStartFrame 1500`
 - `-PacketBridgeMaxFrameLead 8`
 - `-PacketBridgeLookupTickDelay 10`
 - `-PacketBridgeLiveFallbackLatestBefore`
@@ -140,6 +142,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - `-PacketBridgeDirectCapture`
 - host local player `0`
 - client のゲーム内 local player は現状 `0` に正準化する。送信packet上だけ client を player1 として扱う。
+- direct entry の remote camera bounds bootstrap は frame `850-1008` だけ slot0 -> slot1 をコピーする。
 
 ### 入力 packet 差し替え
 
@@ -269,7 +272,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 ## 現在の課題
 
 1. Luigi視点表示が未解決。`camera-full-p1` は地形相対のactor表示が壊れるため不採用。カメラだけでなく、local player UI、ストックアイテム、勝敗判定まで含めて成立条件を確認する。
-2. direct MvL 入口では開始直後に player1 が `pitDeathTransitState` へ入り、`beginDeathTransition -> onDefeated -> losePlayerLife(1)` の順に残機が減る。直接原因は `Stage::cameraY/Height[1]` 未初期化による `StageActor::isOutOfViewVertical()` の false positive。`ForceStageCameraSlot` で slot1 を初期化すると開始死亡は止まる。次はこれを診断フックではなくROM/adapter側の正しい remote camera bounds 初期化として入れる。
+2. direct MvL 入口では開始直後に player1 が `pitDeathTransitState` へ入り、`beginDeathTransition -> onDefeated -> losePlayerLife(1)` の順に残機が減る問題は、`Stage::cameraY/Height[1]` 未初期化による `StageActor::isOutOfViewVertical()` の false positive と特定済み。標準split helperは frame 850-1008 の remote camera bounds bootstrap をデフォルトにした。次はこの初期化をROM/adapter側へ寄せる。
 3. ローカル2プロセス同時検証では50fps前後、単独hostでは60fps超。実2PCは1インスタンス/PCなので実用速度の可能性は残るが、ローカル自動検証ループはまだ重い。
 4. Luigi がクリボーで死亡した後、復帰まで stage 全体の動きが止まるように見える。NSMB本来の同期停止なのか、PacketBridge/Direct入口の不具合なのかを検証する。
 5. client表示ROM込みのsplit構成でもスター取得/再生成同期は成立したが、これは制御hookによる取得であり、自然操作では未達。
@@ -278,7 +281,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ## 次にやること
 
-1. `ForceStageCameraSlot` を恒久化しない形で、direct entry/packet adapter の remote camera bounds 初期化を設計する。単純mirrorは初期死亡を止める診断としては有効だが、遠距離時の画面外判定や勝敗/UIまで正しい保証はない。
+1. frame 850-1008 の remote camera bounds bootstrap を、melonDS診断フックではなく direct entry ROM patch か packet adapter の初期化として実装する。恒常mirrorは遠距離時の画面外判定や勝敗/UIまで正しい保証がないため採用しない。
 2. Luigi視点表示を再検討する。`StageCamera` だけでなく、BG/地形描画、local player UI、ストックアイテム、勝敗判定が参照する camera/local-player 境界を特定する。
 3. 自動検証では state verifier だけで成功扱いにせず、スクリーンショット上の地形相対位置も確認する。
 4. Luigi死亡後のstage停止が `Stage::actorFreezeFlag` や player transition status によるものか確認する。
