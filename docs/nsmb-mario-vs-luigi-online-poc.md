@@ -92,6 +92,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `scripts/generate-nsmb-mvl-client-ui-rom.ps1` を追加。安定base ROMから `StageFX + StageLayout inventory HUD` の client UI ROM を再生成できる。
   - `scripts/generate-nsmb-mvl-stable-roms.ps1` を追加。US原本ROMから stable host ROM と stable client UI ROM を再生成できる。
   - `scripts/run-nsmb-mvl-stable-split.ps1` を追加。stable host/client ROM を使う標準実行ラッパー。`-GenerateRoms` でROM生成から実行まで行える。
+  - `scripts/verify-nsmb-mvl-stable-split.ps1` を追加。stable route の成功条件として `-RequirePlayer0Input -RequirePlayer1Input` をデフォルトで必須にする verifier ラッパー。
   - host/client 別入力スクリプトを追加済み。
     - `tests/nsmb_us_direct_mvl_host_right.inputs`
     - `tests/nsmb_us_direct_mvl_client_right.inputs`
@@ -356,3 +357,26 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - スター取得は `player*BattleStars` などの状態値で確認する。
 - ROM 生成物、savestate、巨大ログは git に含めない。
 - docs は古い追記を残し続けず、現在の方針、達成済み、課題、次作業が上から読める形に保つ。
+
+## 実2PC相当の実行メモ
+
+同一PCで分離起動する場合:
+
+```powershell
+.\scripts\run-nsmb-mvl-stable-split.ps1 -Frames 3000 -Port 8181 -HostLogDir logs\host -ClientLogDir logs\client
+.\scripts\verify-nsmb-mvl-stable-split.ps1 -HostLogDir logs\host -ClientLogDir logs\client -FromFrame 1500 -ToFrame 2990
+```
+
+実2PCでは host 側:
+
+```powershell
+.\scripts\run-nsmb-mvl-stable-split.ps1 -RunRole host -Port 8181 -HostLogDir logs\mvl-host
+```
+
+client 側:
+
+```powershell
+.\scripts\run-nsmb-mvl-stable-split.ps1 -RunRole client -Peer <host-ip> -Port 8181 -ClientLogDir logs\mvl-client
+```
+
+現時点では `-AllowJitWithPacketBridge` は成功条件に使わない。JITありでは送信packetにkeysが出てもゲームロジック側の `inputPlayer*Held` に反映されないため。
