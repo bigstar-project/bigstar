@@ -19,6 +19,8 @@ param(
     [int]$MaxFrameLead = 8,
     [int]$ScreenshotInterval = 900,
     [int]$GameStateTraceInterval = 60,
+    [string]$RamDumpFrames = "",
+    [int]$RamDumpInterval = 0,
     [int]$WaitTimeoutMs = 720000,
     [int]$JobTimeoutSeconds = 780,
     [switch]$NoDirectCapture,
@@ -46,6 +48,12 @@ param(
     [int]$ForceStageCameraSlotEndFrame = 1008,
     [int]$ForceStageCameraSlotSource = 0,
     [int]$ForceStageCameraSlotDest = 1,
+    [switch]$ForceStageFXSettings,
+    [switch]$ForceStageFXSettingsHostOnly,
+    [switch]$ForceStageFXSettingsClientOnly,
+    [int]$ForceStageFXSettingsStartFrame = 0,
+    [int]$ForceStageFXSettingsEndFrame = 0,
+    [string]$ForceStageFXSettingsValue = "0x8000",
     [switch]$RenderCameraAlias,
     [int]$RenderCameraAliasSourcePlayer = 1,
     [int]$RenderCameraAliasDestPlayer = 0,
@@ -53,7 +61,11 @@ param(
     [int]$RenderCameraAliasEndFrame = 0,
     [switch]$TracePlayerLifeCalls,
     [switch]$TracePlayerLifeChanges,
-    [switch]$TracePlayerDefeated
+    [switch]$TracePlayerDefeated,
+    [switch]$TraceStageCamera,
+    [int]$TraceStageCameraStartFrame = 0,
+    [int]$TraceStageCameraEndFrame = 0,
+    [int]$TraceStageCameraInterval = 1
 )
 
 $ErrorActionPreference = "Stop"
@@ -142,6 +154,12 @@ if ($NoScreenshots) {
 if (-not $NoDirectCapture) {
     $common += "-PacketBridgeDirectCapture"
 }
+if ($RamDumpFrames -ne "") {
+    $common += @("-RamDumpFrames", $RamDumpFrames)
+}
+if ($RamDumpInterval -gt 0) {
+    $common += @("-RamDumpInterval", "$RamDumpInterval")
+}
 if ($NoHashLog) {
     $common += "-NoHashLog"
 }
@@ -195,6 +213,20 @@ if ($ForceStageCameraSlot) {
         "-ForceStageCameraSlotDest", "$ForceStageCameraSlotDest"
     )
 }
+if ($ForceStageFXSettings) {
+    $common += @(
+        "-ForceStageFXSettings",
+        "-ForceStageFXSettingsStartFrame", "$ForceStageFXSettingsStartFrame",
+        "-ForceStageFXSettingsEndFrame", "$ForceStageFXSettingsEndFrame",
+        "-ForceStageFXSettingsValue", "$ForceStageFXSettingsValue"
+    )
+    if ($ForceStageFXSettingsHostOnly) {
+        $common += "-ForceStageFXSettingsHostOnly"
+    }
+    if ($ForceStageFXSettingsClientOnly) {
+        $common += "-ForceStageFXSettingsClientOnly"
+    }
+}
 if ($RenderCameraAlias) {
     $common += @(
         "-RenderCameraAlias",
@@ -212,6 +244,14 @@ if ($TracePlayerLifeChanges) {
 }
 if ($TracePlayerDefeated) {
     $common += "-TracePlayerDefeated"
+}
+if ($TraceStageCamera) {
+    $common += @(
+        "-TraceStageCamera",
+        "-TraceStageCameraStartFrame", "$TraceStageCameraStartFrame",
+        "-TraceStageCameraEndFrame", "$TraceStageCameraEndFrame",
+        "-TraceStageCameraInterval", "$TraceStageCameraInterval"
+    )
 }
 
 $hostArgs = @("-RunRole", "host", "-LogDir", $HostLogDir) + $common

@@ -139,6 +139,7 @@ constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
 constexpr melonDS::u32 kMvlStageSceneSettings = 0x00B4FF00;
 constexpr melonDS::u32 kStageSceneUpdateDispatchTableAddr = 0x020CA378;
 constexpr melonDS::u32 kStageSceneRenderDispatchTableAddr = 0x020CA398;
+constexpr melonDS::u16 kStageFXObjectID = 0x0012;
 constexpr melonDS::u16 kStageActorManagerObjectID = 0x012F;
 constexpr melonDS::u16 kStageControllerObjectID = 0x0130;
 constexpr melonDS::u16 kMvlObject267ID = 0x010B;
@@ -963,6 +964,13 @@ struct State
     int ForceStageCameraSlotSource = 0;
     int ForceStageCameraSlotDest = 1;
     bool ForceStageCameraSlotLogged[16] {};
+    bool ForceStageFXSettingsEnabled = false;
+    bool ForceStageFXSettingsHostOnly = false;
+    bool ForceStageFXSettingsClientOnly = false;
+    melonDS::u32 ForceStageFXSettingsStartFrame = 0;
+    melonDS::u32 ForceStageFXSettingsEndFrame = 0;
+    melonDS::u32 ForceStageFXSettingsValue = 0x00008000;
+    bool ForceStageFXSettingsLogged[16] {};
     bool CallStageScenePostCreateEnabled = false;
     bool CallStageScenePostCreateHostOnly = false;
     bool CallStageScenePostCreateClientOnly = false;
@@ -4797,6 +4805,42 @@ void ForceStageCameraSlotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::N
     }
 }
 
+void ForceStageFXSettingsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForceStageFXSettingsEnabled || !nds || !nds->MainRAM)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (G.ForceStageFXSettingsHostOnly && G.NetRole != Role::Host)
+        return;
+    if (G.ForceStageFXSettingsClientOnly && G.NetRole != Role::Client)
+        return;
+    if (frame < G.ForceStageFXSettingsStartFrame)
+        return;
+    if (G.ForceStageFXSettingsEndFrame != 0 && frame > G.ForceStageFXSettingsEndFrame)
+        return;
+
+    const ObjectScanSample stageFX = FindObjectByID(nds, kStageFXObjectID);
+    if (!stageFX.Found || !IsARM9MainRAMAddress(stageFX.Base))
+        return;
+
+    const melonDS::u32 oldSettings = nds->ARM9Read32(stageFX.Base + 0x08);
+    nds->ARM9Write32(stageFX.Base + 0x08, G.ForceStageFXSettingsValue);
+    if (!G.ForceStageFXSettingsLogged[instanceID] || oldSettings != G.ForceStageFXSettingsValue)
+    {
+        std::printf(
+            "NSMB Test: force StageFX settings inst=%d frame=%u range=%u-%u base=%08X old=%08X new=%08X\n",
+            instanceID,
+            frame,
+            G.ForceStageFXSettingsStartFrame,
+            G.ForceStageFXSettingsEndFrame,
+            stageFX.Base,
+            oldSettings,
+            G.ForceStageFXSettingsValue);
+        G.ForceStageFXSettingsLogged[instanceID] = true;
+    }
+}
+
 bool CallStageScenePostCreateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.CallStageScenePostCreateEnabled || !nds || instanceID < 0 || instanceID >= 16)
@@ -7843,6 +7887,16 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_END_FRAME", 0)));
     G.ForceStageCameraSlotSource = std::clamp(EnvInt("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_SOURCE", 0), 0, 1);
     G.ForceStageCameraSlotDest = std::clamp(EnvInt("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_DEST", 1), 0, 1);
+    G.ForceStageFXSettingsEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGEFX_SETTINGS");
+    G.ForceStageFXSettingsHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGEFX_SETTINGS_HOST_ONLY");
+    G.ForceStageFXSettingsClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGEFX_SETTINGS_CLIENT_ONLY");
+    G.ForceStageFXSettingsStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGEFX_SETTINGS_START_FRAME", 0)));
+    G.ForceStageFXSettingsEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGEFX_SETTINGS_END_FRAME", 0)));
+    G.ForceStageFXSettingsValue = static_cast<melonDS::u32>(
+        std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGEFX_SETTINGS_VALUE")
+            ? std::getenv("MELONDS_NSML_FORCE_STAGEFX_SETTINGS_VALUE") : "0x8000", nullptr, 0));
     G.CallStageScenePostCreateEnabled = EnvFlag("MELONDS_NSML_CALL_STAGE_SCENE_POST_CREATE");
     G.CallStageScenePostCreateHostOnly = EnvFlag("MELONDS_NSML_CALL_STAGE_SCENE_POST_CREATE_HOST_ONLY");
     G.CallStageScenePostCreateClientOnly = EnvFlag("MELONDS_NSML_CALL_STAGE_SCENE_POST_CREATE_CLIENT_ONLY");
@@ -8366,6 +8420,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerDeathCountersIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForceStageFXSettingsIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageActorPreUpdateGateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceActorCategoryMaskIfNeeded(instanceID, inputFrame, nds);
@@ -8716,6 +8772,9 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageCameraSlotIfNeeded(instanceID, logFrame, nds);
+
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForceStageFXSettingsIfNeeded(instanceID, logFrame, nds);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerDeathCountersIfNeeded(instanceID, logFrame, nds);

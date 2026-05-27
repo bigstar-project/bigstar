@@ -3221,6 +3221,20 @@ static u32 ReadNSMLTrace32(ARM* cpu, u32 addr)
         | (static_cast<u32>(ReadNSMLTraceByte(cpu, addr + 3)) << 24);
 }
 
+static u64 HashNSMLTraceRange(ARM* cpu, u32 addr, u32 len)
+{
+    if (!cpu || len == 0)
+        return 0;
+
+    u64 hash = 1469598103934665603ULL;
+    for (u32 i = 0; i < len; i++)
+    {
+        hash ^= ReadNSMLTraceByte(cpu, addr + i);
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
 static void WriteNSMLHexDump(FILE* file, ARM* cpu, u32 addr, u32 len)
 {
     if (!file || !cpu || (!IsNSMLMainRAMAddress(addr) && !IsNSMLDTCMAddress(cpu, addr) && !IsNSMLITCMAddress(cpu, addr)) || len == 0)
@@ -3663,6 +3677,174 @@ static void PatchNSMLRenderCameraAlias(ARM* cpu, u32 instrAddr)
             sourceX);
         logged = true;
     }
+}
+
+static void TraceNSMLStageCamera(ARM* cpu, u32 instrAddr)
+{
+    struct Config
+    {
+        bool Checked = false;
+        bool Enabled = false;
+        u32 StartFrame = 0;
+        u32 EndFrame = 0xFFFFFFFF;
+        u32 Interval = 1;
+    };
+
+    static Config cfg;
+    static std::map<NDS*, std::map<u32, u32>> lastLoggedFrame;
+    if (!cfg.Checked)
+    {
+        std::lock_guard<std::mutex> configLock(NSMLTraceConfigMutex);
+        if (!cfg.Checked)
+        {
+            cfg.Enabled = NSMLEnvFlag("MELONDS_NSML_TRACE_STAGE_CAMERA");
+            if (const char* startFrame = getenv("MELONDS_NSML_TRACE_STAGE_CAMERA_START_FRAME"))
+                cfg.StartFrame = static_cast<u32>(strtoul(startFrame, nullptr, 0));
+            if (const char* endFrame = getenv("MELONDS_NSML_TRACE_STAGE_CAMERA_END_FRAME"))
+                cfg.EndFrame = static_cast<u32>(strtoul(endFrame, nullptr, 0));
+            if (const char* interval = getenv("MELONDS_NSML_TRACE_STAGE_CAMERA_INTERVAL"))
+                cfg.Interval = std::max<u32>(1, static_cast<u32>(strtoul(interval, nullptr, 0)));
+            cfg.Checked = true;
+        }
+    }
+
+    if (!cfg.Enabled || !cpu || cpu->Num != 0)
+        return;
+    if (instrAddr != 0x020CDF78 && instrAddr != 0x020CE238 &&
+        instrAddr != 0x020CE304 && instrAddr != 0x020CE42C &&
+        instrAddr != 0x020CE46C)
+        return;
+
+    const u32 frame = cpu->NDS.NumFrames;
+    if (frame < cfg.StartFrame || frame > cfg.EndFrame)
+        return;
+    if ((frame % cfg.Interval) != 0)
+        return;
+    if (!IsNSMLMarioVsLuigiGameplay(cpu->NDS))
+        return;
+
+    {
+        std::lock_guard<std::mutex> outputLock(NSMLTraceOutputMutex);
+        u32& lastFrame = lastLoggedFrame[&cpu->NDS][instrAddr];
+        if (lastFrame == frame)
+            return;
+        lastFrame = frame;
+    }
+
+    constexpr u32 stageCameraX = 0x020CAE1C;
+    constexpr u32 stageCameraY = 0x020CAD94;
+    constexpr u32 stageCameraWidth = 0x020CADA4;
+    constexpr u32 stageCameraHeight = 0x020CAD8C;
+    constexpr u32 stageDisplayCameraX = 0x02085AB4;
+    constexpr u32 gameLocalPlayerID = 0x02085A7C;
+    constexpr u32 gameViewMatrix = 0x02085B20;
+
+    u32 cameraBase = 0;
+    if (IsNSMLMainRAMAddress(cpu->R[0]) && cpu->NDS.ARM9Read16(cpu->R[0] + 0x0C) == 0x013C)
+        cameraBase = cpu->R[0];
+    else if (IsNSMLMainRAMAddress(cpu->R[4]) && cpu->NDS.ARM9Read16(cpu->R[4] + 0x0C) == 0x013C)
+        cameraBase = cpu->R[4];
+    else
+        cameraBase = NSMLFindObjectBaseByID(cpu->NDS, 0x013C);
+
+    auto readObj = [&](u32 offset) -> u32
+    {
+        return IsNSMLMainRAMAddress(cameraBase) ? cpu->NDS.ARM9Read32(cameraBase + offset) : 0;
+    };
+
+    const char* role = getenv("MELONDS_NSML_ROLE");
+    if (!role || !role[0])
+        role = getenv("MELONDS_NSML_LAN_ROLE");
+    if (!role || !role[0])
+        role = "-";
+
+    const u64 viewHash = HashNSMLTraceRange(cpu, gameViewMatrix, 0x40);
+    const u64 renderHash = HashNSMLTraceRange(cpu, 0x023F8300, 0x240);
+    std::lock_guard<std::mutex> outputLock(NSMLTraceOutputMutex);
+    std::printf(
+        "NSMB StageCameraTrace: role=%s frame=%u pc=%08X r0=%08X r1=%08X r2=%08X r3=%08X r4=%08X "
+        "local=%u base=%08X state=%08X/%08X/%08X target=%08X,%08X,%08X pos=%08X,%08X,%08X up=%08X,%08X,%08X "
+        "unk=%08X,%08X,%08X,%08X,%08X,%08X words=%08X,%08X,%08X,%08X "
+        "camX=%08X/%08X camY=%08X/%08X camW=%08X/%08X camH=%08X/%08X displayX=%08X "
+        "viewHash=%016llX view=%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X "
+        "renderHash=%016llX dispcnt=%08X/%08X bgofsA=%04X,%04X,%04X,%04X,%04X,%04X,%04X,%04X bgofsB=%04X,%04X,%04X,%04X,%04X,%04X,%04X,%04X\n",
+        role,
+        frame,
+        instrAddr,
+        cpu->R[0],
+        cpu->R[1],
+        cpu->R[2],
+        cpu->R[3],
+        cpu->R[4],
+        cpu->NDS.ARM9Read32(gameLocalPlayerID),
+        cameraBase,
+        readObj(0x120),
+        readObj(0x124),
+        readObj(0x128),
+        readObj(0x0CC),
+        readObj(0x0D0),
+        readObj(0x0D4),
+        readObj(0x0DC),
+        readObj(0x0E0),
+        readObj(0x0E4),
+        readObj(0x0EC),
+        readObj(0x0F0),
+        readObj(0x0F4),
+        readObj(0x114),
+        readObj(0x118),
+        readObj(0x11C),
+        readObj(0x128),
+        readObj(0x12C),
+        readObj(0x130),
+        readObj(0x190),
+        readObj(0x194),
+        readObj(0x19C),
+        readObj(0x1A0),
+        cpu->NDS.ARM9Read32(stageCameraX),
+        cpu->NDS.ARM9Read32(stageCameraX + 4),
+        cpu->NDS.ARM9Read32(stageCameraY),
+        cpu->NDS.ARM9Read32(stageCameraY + 4),
+        cpu->NDS.ARM9Read32(stageCameraWidth),
+        cpu->NDS.ARM9Read32(stageCameraWidth + 4),
+        cpu->NDS.ARM9Read32(stageCameraHeight),
+        cpu->NDS.ARM9Read32(stageCameraHeight + 4),
+        cpu->NDS.ARM9Read32(stageDisplayCameraX),
+        static_cast<unsigned long long>(viewHash),
+        cpu->NDS.ARM9Read32(gameViewMatrix + 0x00),
+        cpu->NDS.ARM9Read32(gameViewMatrix + 0x04),
+        cpu->NDS.ARM9Read32(gameViewMatrix + 0x08),
+        cpu->NDS.ARM9Read32(gameViewMatrix + 0x0C),
+        cpu->NDS.ARM9Read32(gameViewMatrix + 0x10),
+        cpu->NDS.ARM9Read32(gameViewMatrix + 0x14),
+        cpu->NDS.ARM9Read32(gameViewMatrix + 0x18),
+        cpu->NDS.ARM9Read32(gameViewMatrix + 0x1C),
+        cpu->NDS.ARM9Read32(gameViewMatrix + 0x20),
+        cpu->NDS.ARM9Read32(gameViewMatrix + 0x24),
+        cpu->NDS.ARM9Read32(gameViewMatrix + 0x28),
+        cpu->NDS.ARM9Read32(gameViewMatrix + 0x2C),
+        cpu->NDS.ARM9Read32(gameViewMatrix + 0x30),
+        cpu->NDS.ARM9Read32(gameViewMatrix + 0x34),
+        cpu->NDS.ARM9Read32(gameViewMatrix + 0x38),
+        cpu->NDS.ARM9Read32(gameViewMatrix + 0x3C),
+        static_cast<unsigned long long>(renderHash),
+        cpu->NDS.ARM9Read32(0x04000000),
+        cpu->NDS.ARM9Read32(0x04001000),
+        cpu->NDS.ARM9Read16(0x04000010),
+        cpu->NDS.ARM9Read16(0x04000012),
+        cpu->NDS.ARM9Read16(0x04000014),
+        cpu->NDS.ARM9Read16(0x04000016),
+        cpu->NDS.ARM9Read16(0x04000018),
+        cpu->NDS.ARM9Read16(0x0400001A),
+        cpu->NDS.ARM9Read16(0x0400001C),
+        cpu->NDS.ARM9Read16(0x0400001E),
+        cpu->NDS.ARM9Read16(0x04001010),
+        cpu->NDS.ARM9Read16(0x04001012),
+        cpu->NDS.ARM9Read16(0x04001014),
+        cpu->NDS.ARM9Read16(0x04001016),
+        cpu->NDS.ARM9Read16(0x04001018),
+        cpu->NDS.ARM9Read16(0x0400101A),
+        cpu->NDS.ARM9Read16(0x0400101C),
+        cpu->NDS.ARM9Read16(0x0400101E));
 }
 
 bool TraceNSMLRandomCallFromJIT(ARM* cpu, u32 instrAddr, u32 lr)
@@ -4574,6 +4756,7 @@ void ARMv5::Execute()
             PatchNSMLStageStartNet20Check(this, instrAddr);
             PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
             PatchNSMLRenderCameraAlias(this, instrAddr);
+            TraceNSMLStageCamera(this, instrAddr);
             TraceNSMLPlayerDefeatedEntry(this, instrAddr);
             TraceNSMLStageStartDispatch(this, instrAddr);
             TraceNSMLCallImpl(this, instrAddr);
@@ -4701,6 +4884,7 @@ void ARMv5::Execute()
                 PatchNSMLStageStartNet20Check(this, instrAddr);
                 PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
                 PatchNSMLRenderCameraAlias(this, instrAddr);
+                TraceNSMLStageCamera(this, instrAddr);
                 TraceNSMLPlayerDefeatedEntry(this, instrAddr);
                 TraceNSMLStageStartDispatch(this, instrAddr);
                 TraceNSMLCallImpl(this, instrAddr);
@@ -4803,6 +4987,7 @@ void ARMv5::Execute()
                 PatchNSMLStageStartNet20Check(this, instrAddr);
                 PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
                 PatchNSMLRenderCameraAlias(this, instrAddr);
+                TraceNSMLStageCamera(this, instrAddr);
                 TraceNSMLPlayerDefeatedEntry(this, instrAddr);
                 TraceNSMLStageStartDispatch(this, instrAddr);
                 TraceNSMLCallImpl(this, instrAddr);
