@@ -26,6 +26,8 @@ namespace melonDS
 {
 
 bool TraceNSMLRandomCallFromJIT(ARM* cpu, u32 instrAddr, u32 lr);
+bool TraceNSMLPlayerLifeCallFromJIT(ARM* cpu, u32 targetAddr, u32 lr);
+bool TraceNSMLBranchRegFromJIT(ARM* cpu, u32 targetAddr, u32 lr);
 
 template <typename T>
 int squeezePointer(T* ptr)
@@ -216,6 +218,17 @@ void Compiler::A_Comp_BranchImm()
         PopRegs(true, true);
     }
 
+    if (link && (target == 0x0202048C || target == 0x020204D0 ||
+                 target == 0x020204E0 || target == 0x02020580))
+    {
+        PushRegs(true, true);
+        MOV(64, R(ABI_PARAM1), R(RCPU));
+        MOV(32, R(ABI_PARAM2), Imm32(target));
+        MOV(32, R(ABI_PARAM3), Imm32(R15 - 4));
+        ABI_CallFunction(TraceNSMLPlayerLifeCallFromJIT);
+        PopRegs(true, true);
+    }
+
     Comp_JumpTo(target);
 }
 
@@ -223,8 +236,17 @@ void Compiler::A_Comp_BranchXchangeReg()
 {
     OpArg rn = MapReg(CurInstr.A_Reg(0));
     MOV(32, R(RSCRATCH), rn);
-    if ((CurInstr.Instr & 0xF0) == 0x30) // BLX_reg
+    const bool link = (CurInstr.Instr & 0xF0) == 0x30;
+    if (link) // BLX_reg
+    {
         MOV(32, MapReg(14), Imm32(R15 - 4));
+        PushRegs(true, true);
+        MOV(64, R(ABI_PARAM1), R(RCPU));
+        MOV(32, R(ABI_PARAM2), R(RSCRATCH));
+        MOV(32, R(ABI_PARAM3), Imm32(R15 - 4));
+        ABI_CallFunction(TraceNSMLBranchRegFromJIT);
+        PopRegs(true, true);
+    }
     Comp_JumpTo(RSCRATCH);
 }
 

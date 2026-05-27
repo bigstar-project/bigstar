@@ -31,14 +31,27 @@ param(
     [int]$PlayerStickToStarStartFrame = 0,
     [int]$PlayerStickToStarEndFrame = 0,
     [int]$PlayerStickToStarSlot = 0,
-    [switch]$ForcePlayerDeathCounters = $true,
+    [switch]$ForcePlayerDeathCounters,
     [int]$ForcePlayerDeathCountersStartFrame = 900,
     [int]$ForcePlayerDeathCountersEndFrame = 1500,
     [int]$ForcePlayerDeathCounter0 = 0,
     [int]$ForcePlayerDeathCounter1 = 0,
-    [switch]$ForcePlayerLives = $true,
+    [switch]$ForcePlayerLives,
     [int]$ForcePlayerLife0 = 5,
-    [int]$ForcePlayerLife1 = 5
+    [int]$ForcePlayerLife1 = 5,
+    [switch]$ForceStageCameraSlot,
+    [int]$ForceStageCameraSlotStartFrame = 0,
+    [int]$ForceStageCameraSlotEndFrame = 0,
+    [int]$ForceStageCameraSlotSource = 0,
+    [int]$ForceStageCameraSlotDest = 1,
+    [switch]$RenderCameraAlias,
+    [int]$RenderCameraAliasSourcePlayer = 1,
+    [int]$RenderCameraAliasDestPlayer = 0,
+    [int]$RenderCameraAliasStartFrame = 0,
+    [int]$RenderCameraAliasEndFrame = 0,
+    [switch]$TracePlayerLifeCalls,
+    [switch]$TracePlayerLifeChanges,
+    [switch]$TracePlayerDefeated
 )
 
 $ErrorActionPreference = "Stop"
@@ -149,6 +162,33 @@ if ($ForcePlayerLives) {
         "-ForcePlayerLife0", "$ForcePlayerLife0",
         "-ForcePlayerLife1", "$ForcePlayerLife1"
     )
+}
+if ($ForceStageCameraSlot) {
+    $common += @(
+        "-ForceStageCameraSlot",
+        "-ForceStageCameraSlotStartFrame", "$ForceStageCameraSlotStartFrame",
+        "-ForceStageCameraSlotEndFrame", "$ForceStageCameraSlotEndFrame",
+        "-ForceStageCameraSlotSource", "$ForceStageCameraSlotSource",
+        "-ForceStageCameraSlotDest", "$ForceStageCameraSlotDest"
+    )
+}
+if ($RenderCameraAlias) {
+    $common += @(
+        "-RenderCameraAlias",
+        "-RenderCameraAliasSourcePlayer", "$RenderCameraAliasSourcePlayer",
+        "-RenderCameraAliasDestPlayer", "$RenderCameraAliasDestPlayer",
+        "-RenderCameraAliasStartFrame", "$RenderCameraAliasStartFrame",
+        "-RenderCameraAliasEndFrame", "$RenderCameraAliasEndFrame"
+    )
+}
+if ($TracePlayerLifeCalls) {
+    $common += "-TracePlayerLifeCalls"
+}
+if ($TracePlayerLifeChanges) {
+    $common += "-TracePlayerLifeChanges"
+}
+if ($TracePlayerDefeated) {
+    $common += "-TracePlayerDefeated"
 }
 
 $hostArgs = @("-RunRole", "host", "-LogDir", $HostLogDir) + $common

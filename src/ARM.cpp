@@ -3523,6 +3523,7 @@ static void PatchNSMLPlayerModelRenderPtrs(ARM* cpu, u32 instrAddr)
     };
 
     static Config cfg;
+    static bool logged = false;
     if (!cfg.Checked)
     {
         std::lock_guard<std::mutex> configLock(NSMLTraceConfigMutex);
@@ -3586,9 +3587,196 @@ static void PatchNSMLPlayerModelRenderPtrs(ARM* cpu, u32 instrAddr)
     }
 }
 
+static void PatchNSMLRenderCameraAlias(ARM* cpu, u32 instrAddr)
+{
+    struct Config
+    {
+        bool Checked = false;
+        bool Enabled = false;
+        bool ClientOnly = true;
+        u32 SourcePlayer = 1;
+        u32 DestPlayer = 0;
+        u32 StartFrame = 0;
+        u32 EndFrame = 0xFFFFFFFF;
+    };
+
+    static Config cfg;
+    static bool logged = false;
+    if (!cfg.Checked)
+    {
+        std::lock_guard<std::mutex> configLock(NSMLTraceConfigMutex);
+        if (!cfg.Checked)
+        {
+            cfg.Enabled = NSMLEnvFlag("MELONDS_NSML_RENDER_CAMERA_ALIAS");
+            cfg.ClientOnly = !NSMLEnvFlag("MELONDS_NSML_RENDER_CAMERA_ALIAS_ALL_ROLES");
+            if (const char* source = getenv("MELONDS_NSML_RENDER_CAMERA_ALIAS_SOURCE_PLAYER"))
+                cfg.SourcePlayer = static_cast<u32>(strtoul(source, nullptr, 0)) & 1u;
+            if (const char* dest = getenv("MELONDS_NSML_RENDER_CAMERA_ALIAS_DEST_PLAYER"))
+                cfg.DestPlayer = static_cast<u32>(strtoul(dest, nullptr, 0)) & 1u;
+            if (const char* startFrame = getenv("MELONDS_NSML_RENDER_CAMERA_ALIAS_START_FRAME"))
+                cfg.StartFrame = static_cast<u32>(strtoul(startFrame, nullptr, 0));
+            if (const char* endFrame = getenv("MELONDS_NSML_RENDER_CAMERA_ALIAS_END_FRAME"))
+                cfg.EndFrame = static_cast<u32>(strtoul(endFrame, nullptr, 0));
+            cfg.Checked = true;
+        }
+    }
+
+    if (!cfg.Enabled || !cpu || cpu->Num != 0) return;
+    if (instrAddr != 0x020CE238 && instrAddr != 0x020CE304 &&
+        instrAddr != 0x020CE42C && instrAddr != 0x020CE46C)
+        return;
+    if (cpu->NDS.NumFrames < cfg.StartFrame || cpu->NDS.NumFrames > cfg.EndFrame) return;
+    if (!IsNSMLMarioVsLuigiGameplay(cpu->NDS)) return;
+    if (cfg.ClientOnly)
+    {
+        const char* role = getenv("MELONDS_NSML_ROLE");
+        if (!role || strcmp(role, "client") != 0)
+        {
+            role = getenv("MELONDS_NSML_LAN_ROLE");
+            if (!role || strcmp(role, "client") != 0)
+                return;
+        }
+    }
+
+    constexpr u32 stageCameraX = 0x020CAE1C;
+    constexpr u32 stageCameraY = 0x020CAD94;
+    constexpr u32 stageCameraWidth = 0x020CADA4;
+    constexpr u32 stageCameraHeight = 0x020CAD8C;
+    constexpr u32 stageDisplayCameraX = 0x02085AB4;
+    const u32 sourceOffset = cfg.SourcePlayer * 4u;
+    const u32 destOffset = cfg.DestPlayer * 4u;
+    const u32 sourceX = cpu->NDS.ARM9Read32(stageCameraX + sourceOffset);
+    cpu->NDS.ARM9Write32(stageCameraX + destOffset, sourceX);
+    cpu->NDS.ARM9Write32(stageCameraY + destOffset, cpu->NDS.ARM9Read32(stageCameraY + sourceOffset));
+    cpu->NDS.ARM9Write32(stageCameraWidth + destOffset, cpu->NDS.ARM9Read32(stageCameraWidth + sourceOffset));
+    cpu->NDS.ARM9Write32(stageCameraHeight + destOffset, cpu->NDS.ARM9Read32(stageCameraHeight + sourceOffset));
+    if (cfg.DestPlayer == 0)
+        cpu->NDS.ARM9Write32(stageDisplayCameraX, sourceX);
+    if (!logged)
+    {
+        Log(LogLevel::Debug,
+            "NSMB render camera alias: frame=%u pc=%08X src=%u dst=%u x=%08X\n",
+            cpu->NDS.NumFrames,
+            instrAddr,
+            cfg.SourcePlayer,
+            cfg.DestPlayer,
+            sourceX);
+        logged = true;
+    }
+}
+
 bool TraceNSMLRandomCallFromJIT(ARM* cpu, u32 instrAddr, u32 lr)
 {
     return TraceNSMLRandomCallImpl(cpu, instrAddr, lr, true);
+}
+
+bool TraceNSMLPlayerLifeCallFromJIT(ARM* cpu, u32 targetAddr, u32 lr)
+{
+    static bool checked = false;
+    static bool enabled = false;
+    static bool header = false;
+    if (!checked)
+    {
+        enabled = NSMLEnvFlag("MELONDS_NSML_TRACE_PLAYER_LIFE_CALLS");
+        checked = true;
+    }
+    if (!enabled || !cpu || cpu->Num != 0)
+        return false;
+
+    const u32 player = cpu->R[0];
+    const u32 value = cpu->R[1];
+    const u32 lives0 = cpu->NDS.ARM9Read32(0x0208B364);
+    const u32 lives1 = cpu->NDS.ARM9Read32(0x0208B368);
+    const u32 deaths0 = cpu->NDS.ARM9Read32(0x0208B394);
+    const u32 deaths1 = cpu->NDS.ARM9Read32(0x0208B398);
+    const char* name = "unknown";
+    switch (targetAddr)
+    {
+    case 0x0202048C: name = "Game::addPlayerDeath"; break;
+    case 0x020204D0: name = "Game::setPlayerDeaths"; break;
+    case 0x020204E0: name = "Game::losePlayerLife"; break;
+    case 0x02020580: name = "Game::setPlayerLives"; break;
+    default: break;
+    }
+    if (!header)
+    {
+        std::printf("NSMB LifeCall header: frame,target,name,caller,player,value,lives0,lives1,deaths0,deaths1,stageGroup,vsMode,localPlayerID\n");
+        header = true;
+    }
+    std::printf(
+        "NSMB LifeCall: %u,%08X,%s,%08X,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
+        cpu->NDS.NumFrames,
+        targetAddr,
+        name,
+        lr,
+        player,
+        value,
+        lives0,
+        lives1,
+        deaths0,
+        deaths1,
+        cpu->NDS.ARM9Read32(0x02085A18),
+        cpu->NDS.ARM9Read32(0x02085A84),
+        cpu->NDS.ARM9Read32(0x02085A7C));
+    return true;
+}
+
+static void TraceNSMLPlayerDefeatedCall(ARM* cpu, u32 targetAddr, u32 lr)
+{
+    static bool checked = false;
+    static bool enabled = false;
+    if (!checked)
+    {
+        enabled = NSMLEnvFlag("MELONDS_NSML_TRACE_PLAYER_DEFEATED");
+        checked = true;
+    }
+    if (!enabled || !cpu || cpu->Num != 0 || targetAddr != 0x0212B2BC)
+        return;
+
+    const u32 actor = cpu->R[0];
+    u32 player = 0xFFFFFFFF;
+    u32 x = 0;
+    u32 y = 0;
+    u32 flags = 0;
+    u32 defeatedFlag = 0;
+    u32 linkedActor = 0;
+    if (IsNSMLMainRAMAddress(actor))
+    {
+        player = static_cast<u32>(static_cast<s8>(ReadNSMLTraceByte(cpu, actor + 0x11E)));
+        x = cpu->NDS.ARM9Read32(actor + 0x60);
+        y = cpu->NDS.ARM9Read32(actor + 0x64);
+        flags = cpu->NDS.ARM9Read32(actor + 0x18);
+        defeatedFlag = ReadNSMLTraceByte(cpu, actor + 0x7B3);
+        linkedActor = cpu->NDS.ARM9Read32(actor + 0x688);
+    }
+    std::printf(
+        "NSMB DefeatedCall: frame=%u caller=%08X actor=%08X player=%u x=%08X y=%08X flags=%08X defeatedFlag=%u linkedActor=%08X lives=%u/%u deaths=%u/%u trans=%u/%u\n",
+        cpu->NDS.NumFrames,
+        lr,
+        actor,
+        player,
+        x,
+        y,
+        flags,
+        defeatedFlag,
+        linkedActor,
+        cpu->NDS.ARM9Read32(0x0208B364),
+        cpu->NDS.ARM9Read32(0x0208B368),
+        cpu->NDS.ARM9Read32(0x0208B394),
+        cpu->NDS.ARM9Read32(0x0208B398),
+        cpu->NDS.ARM9Read32(0x0208B354),
+        cpu->NDS.ARM9Read32(0x0208B358));
+}
+
+bool TraceNSMLBranchRegFromJIT(ARM* cpu, u32 targetAddr, u32 lr)
+{
+    TraceNSMLPlayerDefeatedCall(cpu, targetAddr, lr);
+    return false;
+}
+
+static void TraceNSMLPlayerDefeatedEntry(ARM* cpu, u32 instrAddr)
+{
+    TraceNSMLPlayerDefeatedCall(cpu, instrAddr, cpu ? cpu->R[14] : 0);
 }
 
 #ifdef GDBSTUB_ENABLED
@@ -4385,6 +4573,8 @@ void ARMv5::Execute()
             }
             PatchNSMLStageStartNet20Check(this, instrAddr);
             PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
+            PatchNSMLRenderCameraAlias(this, instrAddr);
+            TraceNSMLPlayerDefeatedEntry(this, instrAddr);
             TraceNSMLStageStartDispatch(this, instrAddr);
             TraceNSMLCallImpl(this, instrAddr);
             TraceNSMLRandomCall(this, instrAddr);
@@ -4510,6 +4700,8 @@ void ARMv5::Execute()
                 PatchNSMLClientConfirmSchedule(this, instrAddr);
                 PatchNSMLStageStartNet20Check(this, instrAddr);
                 PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
+                PatchNSMLRenderCameraAlias(this, instrAddr);
+                TraceNSMLPlayerDefeatedEntry(this, instrAddr);
                 TraceNSMLStageStartDispatch(this, instrAddr);
                 TraceNSMLCallImpl(this, instrAddr);
                 TraceNSMLRandomCall(this, instrAddr);
@@ -4610,6 +4802,8 @@ void ARMv5::Execute()
                 PatchNSMLClientConfirmSchedule(this, instrAddr);
                 PatchNSMLStageStartNet20Check(this, instrAddr);
                 PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
+                PatchNSMLRenderCameraAlias(this, instrAddr);
+                TraceNSMLPlayerDefeatedEntry(this, instrAddr);
                 TraceNSMLStageStartDispatch(this, instrAddr);
                 TraceNSMLCallImpl(this, instrAddr);
                 TraceNSMLRandomCall(this, instrAddr);

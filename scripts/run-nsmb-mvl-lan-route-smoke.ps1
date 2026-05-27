@@ -201,6 +201,11 @@ param(
     [int]$ForceStageSceneRuntimeWordsEndFrame = 0,
     [string]$ForceStageSceneWord154 = "1",
     [string]$ForceStageSceneWord160 = "0xDA",
+    [switch]$ForceStageCameraSlot,
+    [int]$ForceStageCameraSlotStartFrame = 0,
+    [int]$ForceStageCameraSlotEndFrame = 0,
+    [int]$ForceStageCameraSlotSource = 0,
+    [int]$ForceStageCameraSlotDest = 1,
     [switch]$ForceStageSceneActive,
     [switch]$ForceStageSceneActiveHostOnly,
     [switch]$ForceStageSceneActiveClientOnly,
@@ -222,6 +227,15 @@ param(
     [switch]$ForcePlayerLives,
     [int]$ForcePlayerLife0 = 5,
     [int]$ForcePlayerLife1 = 5,
+    [switch]$RenderCameraAlias,
+    [switch]$RenderCameraAliasAllRoles,
+    [int]$RenderCameraAliasSourcePlayer = 1,
+    [int]$RenderCameraAliasDestPlayer = 0,
+    [int]$RenderCameraAliasStartFrame = 0,
+    [int]$RenderCameraAliasEndFrame = 0,
+    [switch]$TracePlayerLifeCalls,
+    [switch]$TracePlayerLifeChanges,
+    [switch]$TracePlayerDefeated,
     [switch]$ForcePlayerSignalUnlock,
     [switch]$ForcePlayerSignalUnlockHostOnly,
     [switch]$ForcePlayerSignalUnlockClientOnly,
@@ -1072,6 +1086,19 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_WORD154 -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_WORD160 -ErrorAction SilentlyContinue
     }
+    if ($ForceStageCameraSlot) {
+        $env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT = "1"
+        $env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_START_FRAME = "$ForceStageCameraSlotStartFrame"
+        $env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_END_FRAME = "$ForceStageCameraSlotEndFrame"
+        $env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_SOURCE = "$ForceStageCameraSlotSource"
+        $env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_DEST = "$ForceStageCameraSlotDest"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_SOURCE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_DEST -ErrorAction SilentlyContinue
+    }
     if ($ForceStageSceneActive) {
         $env:MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE = "1"
         if ($ForceStageSceneActiveHostOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_HOST_ONLY -ErrorAction SilentlyContinue }
@@ -1125,6 +1152,36 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_LIVES -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_LIFE0 -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_LIFE1 -ErrorAction SilentlyContinue
+    }
+    if ($TracePlayerLifeChanges) {
+        $env:MELONDS_NSML_TRACE_PLAYER_LIFE_CHANGES = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_TRACE_PLAYER_LIFE_CHANGES -ErrorAction SilentlyContinue
+    }
+    if ($RenderCameraAlias) {
+        $env:MELONDS_NSML_RENDER_CAMERA_ALIAS = "1"
+        if ($RenderCameraAliasAllRoles) { $env:MELONDS_NSML_RENDER_CAMERA_ALIAS_ALL_ROLES = "1" } else { Remove-Item Env:\MELONDS_NSML_RENDER_CAMERA_ALIAS_ALL_ROLES -ErrorAction SilentlyContinue }
+        $env:MELONDS_NSML_RENDER_CAMERA_ALIAS_SOURCE_PLAYER = "$RenderCameraAliasSourcePlayer"
+        $env:MELONDS_NSML_RENDER_CAMERA_ALIAS_DEST_PLAYER = "$RenderCameraAliasDestPlayer"
+        $env:MELONDS_NSML_RENDER_CAMERA_ALIAS_START_FRAME = "$RenderCameraAliasStartFrame"
+        $env:MELONDS_NSML_RENDER_CAMERA_ALIAS_END_FRAME = "$RenderCameraAliasEndFrame"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_RENDER_CAMERA_ALIAS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_RENDER_CAMERA_ALIAS_ALL_ROLES -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_RENDER_CAMERA_ALIAS_SOURCE_PLAYER -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_RENDER_CAMERA_ALIAS_DEST_PLAYER -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_RENDER_CAMERA_ALIAS_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_RENDER_CAMERA_ALIAS_END_FRAME -ErrorAction SilentlyContinue
+    }
+    if ($TracePlayerLifeCalls) {
+        $env:MELONDS_NSML_TRACE_PLAYER_LIFE_CALLS = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_TRACE_PLAYER_LIFE_CALLS -ErrorAction SilentlyContinue
+    }
+    if ($TracePlayerDefeated) {
+        $env:MELONDS_NSML_TRACE_PLAYER_DEFEATED = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_TRACE_PLAYER_DEFEATED -ErrorAction SilentlyContinue
     }
     if ($ForcePlayerSignalUnlock) {
         $env:MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK = "1"
@@ -2395,6 +2452,18 @@ function Start-MelonLANProcess {
         "playerStickToStarStartFrame=$($env:MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME)"
         "playerStickToStarEndFrame=$($env:MELONDS_NSML_PLAYER_STICK_TO_STAR_END_FRAME)"
         "playerStickToStarSlot=$($env:MELONDS_NSML_PLAYER_STICK_TO_STAR_SLOT)"
+        "forceStageCameraSlotSwitch=$ForceStageCameraSlot"
+        "forceStageCameraSlotEnv=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT)"
+        "forceStageCameraSlotStart=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_START_FRAME)"
+        "forceStageCameraSlotEnd=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_END_FRAME)"
+        "forceStageCameraSlotSource=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_SOURCE)"
+        "forceStageCameraSlotDest=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_DEST)"
+        "tracePlayerLifeChangesSwitch=$TracePlayerLifeChanges"
+        "tracePlayerLifeChangesEnv=$($env:MELONDS_NSML_TRACE_PLAYER_LIFE_CHANGES)"
+        "tracePlayerLifeCallsSwitch=$TracePlayerLifeCalls"
+        "tracePlayerLifeCallsEnv=$($env:MELONDS_NSML_TRACE_PLAYER_LIFE_CALLS)"
+        "tracePlayerDefeatedSwitch=$TracePlayerDefeated"
+        "tracePlayerDefeatedEnv=$($env:MELONDS_NSML_TRACE_PLAYER_DEFEATED)"
         "safeCreateSwitch=$PacketBridgeSafeCreateLoadGameSM"
         "safeCreateEnv=$($env:MELONDS_NSML_SAFE_CREATE_LOAD_GAME_CALL)"
         "safeCreateFrame=$($env:MELONDS_NSML_SAFE_CREATE_LOAD_GAME_CALL_FRAME)"
