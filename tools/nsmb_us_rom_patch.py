@@ -361,7 +361,7 @@ def patch_stage_camera_state_player_id(overlays: dict[int, object], player_id: i
     return changes
 
 
-def build_is_out_of_view_vertical_camera_fallback_stub(start_addr: int) -> list[int]:
+def build_is_out_of_view_vertical_camera_fallback_stub(start_addr: int, *, player1_slot0: bool = False) -> list[int]:
     words: list[int] = []
     literals: list[int] = []
     literal_refs: list[tuple[int, int, int, int]] = []
@@ -374,6 +374,9 @@ def build_is_out_of_view_vertical_camera_fallback_stub(start_addr: int) -> list[
         literal_refs.append((word_index, rd, literal_index, cond))
 
     words.append(encode_push((1 << 4) | (1 << 14)))  # push {r4, lr}
+    if player1_slot0:
+        words.append(encode_cmp_imm(2, 1))
+        words.append(with_cond(encode_mov_imm(2, 0), 0x0))  # moveq r2, #0
     emit_ldr_literal(3, 0x020CAD8C)  # Stage::cameraHeight
     words.append(encode_ldr_reg_lsl(12, 3, 2, 2))  # ldr ip, [r3, r2, lsl #2]
     words.append(encode_cmp_imm(12, 0))
@@ -404,14 +407,18 @@ def build_is_out_of_view_vertical_camera_fallback_stub(start_addr: int) -> list[
     return words
 
 
-def patch_is_out_of_view_vertical_camera_fallback(overlays: dict[int, object]) -> list[str]:
+def patch_is_out_of_view_vertical_camera_fallback(
+    overlays: dict[int, object],
+    *,
+    player1_slot0: bool = False,
+) -> list[str]:
     ov_id = 0
     func_addr = 0x020A06DC
     # overlay0 ends at 0x020CA280, followed by overlay BSS/globals used during
     # stage startup. Extending the overlay collides with those globals, so keep
     # this patch in-place in a zero-filled padding cave inside overlay0.
     stub_addr = 0x020C5298
-    stub = build_is_out_of_view_vertical_camera_fallback_stub(stub_addr)
+    stub = build_is_out_of_view_vertical_camera_fallback_stub(stub_addr, player1_slot0=player1_slot0)
     cave_old = patch_overlay_words_by_id(overlays, ov_id, stub_addr, stub)
     if any(cave_old):
         raise ValueError(
@@ -420,10 +427,25 @@ def patch_is_out_of_view_vertical_camera_fallback(overlays: dict[int, object]) -
     branch_word = encode_b(func_addr, stub_addr)
     old = patch_overlay_words_by_id(overlays, ov_id, func_addr, [branch_word])
     return [
-        f"StageActor::isOutOfViewVertical camera fallback stub overlay{ov_id} @ 0x{stub_addr:08X}",
+        f"StageActor::isOutOfViewVertical camera fallback stub overlay{ov_id} @ 0x{stub_addr:08X}"
+        f" player1Slot0={int(player1_slot0)}",
         f"StageActor::isOutOfViewVertical branch overlay{ov_id} @ 0x{func_addr:08X}: "
         f"{old.hex()} -> {struct.pack('<I', branch_word).hex()}",
     ]
+
+
+def patch_camera_focus_loop_count(overlays: dict[int, object], count: int) -> list[str]:
+    ov_id = 0
+    count &= 0xFF
+    word = encode_mov_imm(0, count)
+    changes: list[str] = []
+    for addr in (0x020BAAE4, 0x020BAC18):
+        old = patch_overlay_words_by_id(overlays, ov_id, addr, [word])
+        changes.append(
+            f"camera focus loop count overlay{ov_id} @ 0x{addr:08X}: "
+            f"{old.hex()} -> {struct.pack('<I', word).hex()} count={count}"
+        )
+    return changes
 
 
 def build_direct_loadlevel_stub(
@@ -548,6 +570,8 @@ def patch_direct_mvl_entry(
     stage_camera_player_id: int | None,
     stage_camera_state_player_id: int | None,
     camera_fallback_slot_zero: bool,
+    camera_player1_out_of_view_slot0: bool,
+    camera_focus_loop_count: int | None,
 ) -> list[str]:
     arm9 = rom.loadArm9()
     overlays = rom.loadArm9Overlays()
@@ -645,8 +669,13 @@ def patch_direct_mvl_entry(
         changes.extend(patch_stage_camera_player_id(overlays, stage_camera_player_id))
     if stage_camera_state_player_id is not None:
         changes.extend(patch_stage_camera_state_player_id(overlays, stage_camera_state_player_id))
-    if camera_fallback_slot_zero:
-        changes.extend(patch_is_out_of_view_vertical_camera_fallback(overlays))
+    if camera_fallback_slot_zero or camera_player1_out_of_view_slot0:
+        changes.extend(patch_is_out_of_view_vertical_camera_fallback(
+            overlays,
+            player1_slot0=camera_player1_out_of_view_slot0,
+        ))
+    if camera_focus_loop_count is not None:
+        changes.extend(patch_camera_focus_loop_count(overlays, camera_focus_loop_count))
 
     rom.arm9 = arm9.save(compress=True)
     save_overlays(rom, overlays)
@@ -814,6 +843,9 @@ def main() -> int:
     p_camera_state = sub.add_parser("stage-camera-state-player-id")
     p_camera_state.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     sub.add_parser("camera-fallback-slot-zero")
+    sub.add_parser("camera-player1-out-of-view-slot0")
+    p_camera_loop = sub.add_parser("camera-focus-loop-count")
+    p_camera_loop.add_argument("--count", type=lambda x: int(x, 0), default=2)
     p_direct = sub.add_parser("direct-mvl-entry")
     p_direct.add_argument("--scene", type=lambda x: int(x, 0), default=0x0F)
     p_direct.add_argument("--stage", type=lambda x: int(x, 0), default=0)
@@ -837,6 +869,8 @@ def main() -> int:
     p_direct.add_argument("--stage-camera-player-id", type=lambda x: int(x, 0), default=None)
     p_direct.add_argument("--stage-camera-state-player-id", type=lambda x: int(x, 0), default=None)
     p_direct.add_argument("--camera-fallback-slot-zero", action="store_true")
+    p_direct.add_argument("--camera-player1-out-of-view-slot0", action="store_true")
+    p_direct.add_argument("--camera-focus-loop-count", type=lambda x: int(x, 0), default=None)
     p_fake = sub.add_parser("fake-opponent")
     p_fake.add_argument("--force-confirm-load", action="store_true")
     p_fake.add_argument("--force-loadgame-progress", action="store_true")
@@ -864,6 +898,14 @@ def main() -> int:
         overlays = rom.loadArm9Overlays()
         changes = patch_is_out_of_view_vertical_camera_fallback(overlays)
         save_overlays(rom, overlays)
+    elif args.cmd == "camera-player1-out-of-view-slot0":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_is_out_of_view_vertical_camera_fallback(overlays, player1_slot0=True)
+        save_overlays(rom, overlays)
+    elif args.cmd == "camera-focus-loop-count":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_camera_focus_loop_count(overlays, args.count)
+        save_overlays(rom, overlays)
     elif args.cmd == "direct-mvl-entry":
         changes = patch_direct_mvl_entry(
             rom,
@@ -890,6 +932,8 @@ def main() -> int:
             stage_camera_player_id=args.stage_camera_player_id,
             stage_camera_state_player_id=args.stage_camera_state_player_id,
             camera_fallback_slot_zero=args.camera_fallback_slot_zero,
+            camera_player1_out_of_view_slot0=args.camera_player1_out_of_view_slot0,
+            camera_focus_loop_count=args.camera_focus_loop_count,
         )
     elif args.cmd == "fake-opponent":
         changes = patch_fake_opponent(

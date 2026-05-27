@@ -104,6 +104,9 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `direct-mvl-entry --camera-fallback-slot-zero` でも同じ patch を適用できる。
   - `StageActor::isOutOfViewVertical` (`0x020A06DC`, overlay0) から overlay0 内のゼロ埋め code cave `0x020C5298` へ分岐し、参照先 `Stage::cameraHeight[playerID]` が 0 の場合だけ `playerID=0` の camera bounds を使う。
   - overlay0 末尾追記は `0x020CA280` 以降の BSS/global と衝突して direct entry を壊したため不採用。ROMサイズ/overlay RAM範囲を変えない code cave 方式にした。
+- 追加のROM patch診断
+  - `tools/nsmb_us_rom_patch.py camera-player1-out-of-view-slot0` を追加。`isOutOfViewVertical(player1)` だけ slot0 camera bounds を使い、player1 camera生成と死亡判定を分離する。
+  - `tools/nsmb_us_rom_patch.py camera-focus-loop-count --count 2` を追加。overlay0 `0x020BAAE4` / `0x020BAC18` の camera focus loop count取得を `mov r0,#2` に置換し、JIT有効でも `updatePlayerCameraFocus(1)` が走るようにする。
 
 ## 最新の検証結果
 
@@ -224,6 +227,8 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - overlay10 の `Game::localPlayerID` 静的参照は StageCamera, Item, StageFX, Player transition, render/effect 系に分布する。短時間の runtime trace `logs/smvl-localplayer-reftrace-host-1300-20260527`, `logs/smvl-localplayer-reftrace-client-1300-20260527` では frame 886-1300 の間に踏まれたのは StageCamera 系のみ。StageFX/Item はこの区間ではまだ踏まれていない。
   - camera focus loop の実行境界も確認した。overlay0 `0x020BAB24` から呼ばれる `Game::updatePlayerCameraFocus` は direct route では通常 `player0` のみで、`0x02046C34` が返す loop count が `1` のため `player1` が処理されない。`ForceCameraFocusLoopCount=2` で `updatePlayerCameraFocus(1)` / `PlayerBase::followCamera(...,1)` は呼ばれ、`Stage::camera* [1]` への書き込みも発生する。ログ: `logs/smvl-camera-loop2-fix-client-1050-20260527`, `logs/smvl-camera-loop2-write-client-1250-20260527`。
   - ただし camera focus loop を `player1` まで回すと、`Stage::cameraY[1]` が一時的に負方向値になり、`StageActor::isOutOfViewVertical(..., playerID=1)` が再び `Player::pitDeathTransitState()` へ入る。`Game::localPlayerID=1 + ForceCameraFocusLoopCountClientOnly` は上画面の sky-only を消し、下画面HUD/ストックもLuigi側らしくなるが、clientだけ `player1Dead=1`, `player1Lives=4`, actor Y divergence になり host と同期不能。ログ: `logs/smvl-local1-camera-loop2-clientonly-host-1300-20260527`, `logs/smvl-local1-camera-loop2-clientonly-client-1300-20260527`。
+  - `camera-player1-out-of-view-slot0 + camera-focus-loop-count=2` のROM patch版では、JIT有効でも host/client state と開始残機を維持したまま `Stage::camera* [1]` を生成できた。clientだけ `StageCamera` p1 patch を当てても verifier は通る。ログ: `logs/smvl-romloop2-camerafullp1-host-1300-20260527`, `logs/smvl-romloop2-camerafullp1-client-1300-20260527`。
+  - ただしその状態でも上画面スクリーンショットはまだほぼMario側表示に見える。`stageDisplayCameraX` は client で p1側に変わるため、実表示はさらに別のBG/3D camera path、または描画時の座標変換を見ている可能性が高い。次は top-screen上の地形/actor座標を画像差分で定量化し、StageCamera以外の render camera入力を特定する。
   - よって global `Game::localPlayerID=1` はカメラだけでなく `StageFX` / object生成 / result/UI 側まで切り替える。最終ルートとしては副作用が大きく、当面は採用しない。
   - `Game::loadLevel(... playerID=1 ...)` まで揃えた p1 direct ROM も検証したが、client側で stage actor / player actor / star actor が生成されず、`Ready!` または黒画面のまま進まない。ready/transfer/files 系補助を全部入れても同じ。ログ: `logs/smvl-p1-loadlevel-local1-client-1300-20260527`, `logs/smvl-p1-full-local1-client-1300-20260527`, `logs/smvl-p1-full-local0-client-1300-20260527`。
   - p0 direct ROM で stage/player actor 生成後に `Game::localPlayerID=1` へ遅延切り替えする検証も追加。frame 1300 で切り替えると client が `ARM9 pc=00000004` prefetch abort になった。スクリーンショットは直前の通常画面が残るが、実行状態は壊れる。ログ: `logs/smvl-delayed-local1-client-1800-20260527`。
