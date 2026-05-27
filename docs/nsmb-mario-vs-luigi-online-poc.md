@@ -26,9 +26,9 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ユーザー観察ベースで、次の4点を優先して潰す。
 
-- host/client の上画面で Mario/Luigi の初期位置が違って見える。trace上の world座標差と、client表示用camera ROMによる screen座標差を分けて確認する。
-- 開始直後に Luigi が死亡してから始まる。traceとスクショ上、初回の `player1Dead=1` は土管出現遷移中の内部フラグに見えるが、その後 frame 1950付近でGoombaがLuigiに接触して実死亡する。direct entryが本来の開始保護/カウントダウンを飛ばしている可能性が高い。
-- FPSが低い。trace/screenshot ではなく、JIT OFF、ハッシュ計算、フレームリミッタ、PacketBridge処理が主因。現在はJITあり・hashなし・traceなしで内部55fps前後、無制限では68fps前後まで回復。固定60fps化は継続調整中。
+- host/client の上画面で Mario/Luigi の表示位置が違って見える問題は、client `camera-full-p1` ROM patch が3D actor側とBG/地形側のカメラを揃えられていない表示バグとして扱う。標準split helperのデフォルトclient ROMは通常ROMへ戻した。通常ROM同士では地形相対の表示は一致するが、Luigi視点表示は未解決。
+- 開始直後に右上Luigi残機が `5 -> 4` になる問題は、Goomba接触とは別。frame 1020-1140付近で `player1Dead=1` と `player1Deaths` / `player1Lives` の変化が起きていた。標準split helperでは frame 900-1500 のみ `ForcePlayerDeathCounters + ForcePlayerLives` を有効化し、開始時だけ deaths=0/0, lives=5/5 に戻す。Goomba接触後の通常死亡は `lives 5 -> 4`, `deaths 0 -> 1` として残る。
+- FPSが低い。JIT OFFが10fps級の主因だった。JIT ON + hash/trace/screenshotなしでは単独hostが約67fps、ローカル2プロセス同時では約47-55fps。実2PCでは1PCあたり1インスタンスなので単独hostの数値が近い。ローカル2プロセス検証速度は引き続き改善対象。
 - Luigi死亡中に敵やブロックアニメが止まるように見える。NSMB本来の死亡/リスポーン停止なのか、direct entry/PacketBridgeの副作用なのかを trace とスクリーンショットで分ける。
 
 ## 実装済み
@@ -67,10 +67,11 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `-HostLogDir` / `-ClientLogDir` を追加し、host/client を別々の script invocation で起動したログも比較可能にした。
   - LAN smoke script から `-VsStarSnapFrame` / `-PlayerSnapToStarFrame` / `-PlayerStickToStarStartFrame` を指定可能にした。これは自然操作ではなく、RNG/再生成同期の制御検証用。
   - LAN smoke script に `-RunRole both|host|client`, `-Peer`, `-LanHost` を追加。2PC相当の片側起動が可能。
-  - 標準split検証用の `scripts/run-nsmb-mvl-standard-split.ps1` を追加。host normal ROM / client camera-full-p1 ROM / `-PacketBridgeDirectCapture` / canonical local0 の長い起動条件をまとめた。
+  - 標準split検証用の `scripts/run-nsmb-mvl-standard-split.ps1` を追加。host/client通常ROM / `-PacketBridgeDirectCapture` / canonical local0 の長い起動条件をまとめた。
   - helper は `-RunRole both|host|client` に対応。ローカル2ジョブ検証では `both`、実2PCでは host側 `host`、client側 `client -Peer <host-ip>` を使う。
   - helper にFPS切り分け用の `-NoGameStateTrace`, `-NoScreenshots`, `-NoHashLog`, `-NoFrameLimit`, `-FixedFrameTime`, `-TargetFps`, `-AllowJitWithPacketBridge` を追加。
-  - default の client camera ROM が無い場合、helper が `tools/nsmb_us_rom_patch.py` で自動生成する。生成ROMは git には含めない。
+  - default の client ROM は通常ROMに戻した。camera-full-p1 ROMは表示ズレがあるため実験用に降格。
+  - `ForcePlayerDeathCounters` と `ForcePlayerLives` を追加し、標準split helperでは frame 900-1500 に開始時だけ死亡カウンタを0/0、残機を5/5へ戻す。
   - helper script は `logs/nsmvl-standard-helper-client-right-host-1800-20260527`, `logs/nsmvl-standard-helper-client-right-client-1800-20260527` で smoke と split verifier 通過。
   - host/client 別入力スクリプトを追加済み。
     - `tests/nsmb_us_direct_mvl_host_right.inputs`
@@ -98,16 +99,25 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `logs/smvl-fps-jit-nohash-host-1800-20260527`: host内部 `52.76fps`
   - `logs/smvl-fps-jit-nohash-client-1800-20260527`: client内部 `53.61fps`
 - `-NoFrameLimit` ではhost単体 `68.84fps` まで出るため、CPUが常に10fps相当しか出ない状態ではない。
+- 通常ROM同士 + JIT + hash/trace/screenshotなし + 開始死亡補正:
+  - host単独 `logs/smvl-fps-clean-hostonly-host-1800-20260527`: 約 `67.25fps`
+  - ローカルhost/client 2プロセス同時 `logs/smvl-fps-clean-normalrom-host-1800-20260527`, `logs/smvl-fps-clean-normalrom-client-1800-20260527`: host内部 `50.08fps`, client内部 `54.61fps`
+  - 2プロセス同時はこのPC上の検証負荷が強く、実2PCの1インスタンス/PC条件とは分けて見る。
 - `-FixedFrameTime` / `-TargetFps` は追加済みだが、PacketBridgeありの長め検証ではまだ実測60fpsへ張り付かない。次はPacketBridge per-frame処理と描画/SaveManager flushのどちらが残りの差分かを測る。
 
 ### 初期位置/初期死亡/死亡時停止
 
 2026-05-27時点の切り分け:
 
-- `logs/nsmvl-us-direct-entry-split-camera-full-directcapture-host-3600-20260527` と client 側 trace では、`playerActor0X` / `playerActor1X` は host/client で一致している。画面上の差は主に client camera-full-p1 ROM による `stageDisplayCameraX` 差。
-- frame 900 のhostスクショはまだ上画面が遷移中で、clientは表示ROM patchの影響でフィールド表示が先に出る。これは「内部座標ズレ」ではなく表示/遷移差として扱う。
-- 初期 `player1Dead=1` は frame 1020-1140 に出るが、スクショではLuigiが右土管から出てくる前後の遷移で、実死亡演出とは違う。
-- その後、`tests/nsmb_us_direct_mvl_client_right.inputs` は frame 1980 まで player1 入力が無いため、Goombaが右から歩いてきて frame 1950付近でLuigiに接触する。ここからは実死亡で、Goomba Xも `0x62800` で止まる。
+- `logs/nsmvl-us-direct-entry-split-camera-full-both-different-host-3600-20260527` と client 側 trace では、`playerActor0X` / `playerActor1X` は host/client で一致している。ただしcamera-full-p1 ROMのclientスクショでは、地形/ブロックに対するキャラ位置が破綻している。これは「内部座標一致」とは別の表示バグ。
+- 通常ROMをclientにも使うと、host/clientの上画面は地形相対で一致する。ログ: `logs/smvl-normalrom-both-display-host-1800-20260527`, `logs/smvl-normalrom-both-display-client-1800-20260527`
+- camera patch切り分け:
+  - `stage-camera-state-player-id` は3D actor側だけがズレる表示を作りやすく、現状不採用。
+  - `stage-camera-player-id` / display-only も完全なLuigi視点ではない。
+  - 実localPlayerID=1 client routeはstate一致するが、client画面がプレイヤー不在の右側表示になったため不採用。ログ: `logs/smvl-client-game-local1-retest-1800-20260527`
+- 初期 `player1Dead=1` は frame 1020-1140 に出るが、ユーザー指摘の本体は残機カウンタが `5 -> 4` になること。trace に `player0Lives/player1Lives` を追加し、残機も直接確認できるようにした。
+- `ForcePlayerDeathCounters + ForcePlayerLives` を frame 900-1500 に適用すると、frame 1500まで `player0Deaths/player1Deaths=0/0` と `player0Lives/player1Lives=5/5` を維持できる。ログ: `logs/smvl-start-lives-reset-host-1500-20260527`, `logs/smvl-start-lives-reset-client-1500-20260527`
+- その後、`tests/nsmb_us_direct_mvl_both_different.inputs` でGoombaに接触すると、frame 2040付近で `player1Lives=5->4`, `player1Deaths=0->1` になる。開始補正後も通常死亡は残る。ログ: `logs/smvl-start-lives-reset-goomba-host-2100-20260527`, `logs/smvl-start-lives-reset-goomba-client-2100-20260527`
 - `MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG` は開始保護の候補。終了フレーム後にfreeze flagを0へ戻す処理を追加した。ただし単純に frame 960-1800 で敵を止めるだけでは、解除後にGoombaがLuigiへ到達して死亡する。次は本来の開始保護/カウントダウン相当をROM/状態側で再現するか、player1 spawn位置/敵初期状態をROM patchで直す。
 
 標準に近い検証条件:
@@ -121,7 +131,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - `-PacketBridgeReplayOps keys,byte,tick,action`
 - `-PacketBridgeDirectCapture`
 - host local player `0`
-- client local player `1`
+- client のゲーム内 local player は現状 `0` に正準化する。送信packet上だけ client を player1 として扱う。
 
 ### 入力 packet 差し替え
 
@@ -156,19 +166,14 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `logs/nsmvl-us-direct-entry-star-stick-delay4-jitter4-canonical-local0-3600-20260526`: `delay=4`, `jitter=4`, `LookupTickDelay=10`, `-RequireStarPickup -RequireStarRespawn` 通過。
   - `logs/nsmvl-us-direct-entry-star-stick-delay12-jitter8-lookup16-canonical-local0-3600-20260526`: `delay=12`, `jitter=8`, `LookupTickDelay=16`, `-RequireStarPickup -RequireStarRespawn` 通過。
   - 少なくとも reliable packet 前提の遅延/ジッタ注入では、スター取得と再生成RNGは正準packet同期で維持できている。
-  - client camera-full-p1 ROM を含む split 構成でも、no-movement route + `PlayerStickToStar` + `delay=4` + `jitter=4` で `-RequireStarPickup -RequireStarRespawn` 通過。
-  - ログ: `logs/nsmvl-us-direct-entry-split-camera-full-star-nomove-delay4-jitter4-host-3600-20260527`, `logs/nsmvl-us-direct-entry-split-camera-full-star-nomove-delay4-jitter4-client-3600-20260527`
-  - 最終状態は host/client とも `player0BattleStars=0x1`, 次スター座標 `0x3c0000,0xfff50000`。
-  - 同じ表示ROM込み split 構成で `delay=12`, `jitter=8`, `LookupTickDelay=16` でも `-RequireStarPickup -RequireStarRespawn` 通過。
-  - ログ: `logs/nsmvl-us-direct-entry-split-camera-full-star-nomove-delay12-jitter8-host-3600-20260527`, `logs/nsmvl-us-direct-entry-split-camera-full-star-nomove-delay12-jitter8-client-3600-20260527`
+  - 過去に client `camera-full-p1` ROM 込みでも state verifier は通ったが、後でスクリーンショット上の表示破綻が分かったため、現在は表示成功として扱わない。
 - 2PC相当の分割起動:
   - `-RunRole host` と `-RunRole client -Peer 127.0.0.1` を別々の PowerShell invocation で起動できることを確認。
   - `logs/nsmvl-us-direct-entry-runrole-split-host-1800-20260526` と `logs/nsmvl-us-direct-entry-runrole-split-client-1800-20260526`: frame 1800 まで split mismatch `0`。
   - `logs/nsmvl-us-direct-entry-runrole-split-star-host-3600-20260526` と `logs/nsmvl-us-direct-entry-runrole-split-star-client-3600-20260526`: split 起動でも `-RequireStarPickup -RequireStarRespawn` 通過。
   - 実2PCでは client 側に `-Peer <host-ip>` を渡す想定。
-  - client camera-full-p1 ROM + `-PacketBridgeDirectCapture` の split 双方向入力でも frame 3600 まで split verifier 通過。
+  - client `camera-full-p1` ROM + `-PacketBridgeDirectCapture` の split 双方向入力でも state verifier は frame 3600 まで通ったが、スクリーンショット表示が破綻していたため成功扱いにしない。
   - ログ: `logs/nsmvl-us-direct-entry-split-camera-full-both-different-host-3600-20260527`, `logs/nsmvl-us-direct-entry-split-camera-full-both-different-client-3600-20260527`
-  - `-RequirePlayer0Input -RequirePlayer1Input` 付き verifier が通過。最終 player actor 座標も host/client で一致。
 - 自然入力のスター取得 route:
   - `tests/nsmb_us_direct_mvl_star_collect_left.inputs` を direct MvL 起動手順込みに修正。
   - `logs/nsmvl-us-direct-entry-star-left-route-packet-only-canonical-local0-7200-20260526` は mismatch `0` で完走したが、`player*BattleStars` / `player*CollectedStars` は変化せず、スター取得は未達。
@@ -176,15 +181,12 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - client 表示カメラ:
   - canonical local0 では host/client の内部状態同期は維持できるが、client 側も通常は Mario/player0 寄りのカメラになる。
   - `StageCamera::onUpdate` の display camera X だけを player1 にしてもスクリーンショットはほぼ変わらず、不十分だった。
-  - `StageCamera` state function 側の `Game::localPlayerID` 参照を player1 にする ROM patch を追加し、client ROM だけに適用すると、ゲーム状態同期を壊さず client 表示を Luigi/player1 寄りにできることを確認。
-  - `StageCamera` state + display camera X の両方を player1 にする結合ROMでも、frame 2700 まで verifier は mismatch `0`。
-  - ログ: `logs/nsmvl-us-direct-entry-client-camera-full-p1-rom-canonical-local0-2700-20260527`
-  - host normal ROM / client camera-full-p1 ROM の 2PC相当 split 起動でも、`-PacketBridgeDirectCapture` ありで frame 3600 まで smoke と split verifier が通過。
-  - client 側 player1 入力は frame 2040-2760 の trace で確認。最終 `playerActor1X` は host/client とも `0x128fff`。
-  - client 表示は `stageDisplayCameraX == stageCameraGlobalX1 == 0x3d8000` になり、player1側カメラを使う。
-  - ログ: `logs/nsmvl-us-direct-entry-split-camera-full-directcapture-host-3600-20260527`, `logs/nsmvl-us-direct-entry-split-camera-full-directcapture-client-3600-20260527`
+  - `StageCamera` state function 側の `Game::localPlayerID` 参照を player1 にする ROM patch は、trace上のgame-state verifierは通るが、スクリーンショットでは地形/ブロックに対して actor がズレる。ユーザー指摘どおり、これはカメラ差ではなく表示として破綻しているため現状不採用。
+  - host normal ROM / client `camera-full-p1` ROM の 2PC相当 split 起動は frame 3600 まで state verifier が通るが、表示が不正なので成功扱いにしない。ログ: `logs/nsmvl-us-direct-entry-split-camera-full-both-different-host-3600-20260527`, `logs/nsmvl-us-direct-entry-split-camera-full-both-different-client-3600-20260527`
+  - client も通常ROMに戻すと、frame 1800 のスクリーンショットで地形相対の Mario/Luigi 位置は一致する。ログ: `logs/smvl-normalrom-both-display-host-1800-20260527`, `logs/smvl-normalrom-both-display-client-1800-20260527`
+  - client の実 `Game::localPlayerID=1` と p1 direct ROM は、現時点では player actor が生成されず smoke に失敗する。ログ: `logs/smvl-default-p1rom-local1-client-1800-20260527`, `logs/smvl-default-p1files-local1-client-1800-20260527`
   - 注意: `-PacketBridgeDirectCapture` を外すと split client で player1 入力が packet に乗らない。現在の安定条件には必須として扱う。
-  - これは client 表示専用ROM patch として扱う。ゲーム内 `Game::localPlayerID` は引き続き host/client とも `0` に正準化する。
+  - 当面は「ゲーム内 `Game::localPlayerID` は host/client とも `0` に正準化し、表示は通常ROM同士で破綻しない状態を基準にする」。Luigi視点化は、状態同期とは別に解く。
 
 この結果から、当面は「各ピアのゲーム内 local player は正準化する。操作プレイヤーの違いはWAN adapter側だけで表現する」方針で進める。
 
@@ -257,9 +259,9 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ## 現在の課題
 
-1. client 表示カメラは player1 寄りにできたが、上画面で Mario/Luigi の初期表示位置が host/client で違って見える。trace上のworld座標ズレか、カメラ差によるscreen座標差かを切り分ける。
-2. 現在の direct MvL 入口では開始直後に Luigi/player1 が一度死亡状態になることがある。最終対戦としては unacceptable なので、開始状態または spawn/transition 初期化を修正する。
-3. 検証中の実効FPSが10程度まで落ちる。trace/screenshot/hashの負荷なのか、PacketBridge待機/スロットリング/JIT設定なのかを測定可能にし、通常プレイ条件で60fpsを目指す。
+1. Luigi視点表示が未解決。`camera-full-p1` は地形相対のactor表示が壊れるため不採用。次はBG/地形側と3D actor側が同じカメラを使う境界を探すか、別の表示方法を検討する。
+2. direct MvL 入口では開始直後に player1 が一度 dead 状態へ入る。残機/死亡カウンタは開始フレーム限定補正で抑えられたが、根本原因の spawn/transition 初期化は未解決。
+3. ローカル2プロセス同時検証では50fps前後、単独hostでは60fps超。実2PCは1インスタンス/PCなので実用速度の可能性は残るが、ローカル自動検証ループはまだ重い。
 4. Luigi がクリボーで死亡した後、復帰まで stage 全体の動きが止まるように見える。NSMB本来の同期停止なのか、PacketBridge/Direct入口の不具合なのかを検証する。
 5. client表示ROM込みのsplit構成でもスター取得/再生成同期は成立したが、これは制御hookによる取得であり、自然操作では未達。
 6. 自然操作でスターを取りに行く入力 script はまだ未完成。死亡/勝利表示をスター取得と誤判定しないよう、状態値で検証する。
@@ -267,9 +269,9 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ## 次にやること
 
-1. 標準split helperにFPS/実行時間計測を追加し、trace/screenshotあり・なしの差を測る。
-2. 開始直後の player1 death を traceで最小再現し、spawn/transition/global初期値のどれが原因か特定する。
-3. host/clientの上画面差を、world座標・camera値・screenshot上の見え方に分けて確認する。
+1. Luigi視点表示を再検討する。`StageCamera` だけでなく、BG/地形描画が参照する camera/local-player 境界を特定する。
+2. 開始直後の player1 dead 遷移の根本原因を、spawn/transition/global初期値に分けて特定する。現状の開始限定残機補正は暫定措置。
+3. 自動検証では state verifier だけで成功扱いにせず、スクリーンショット上の地形相対位置も確認する。
 4. Luigi死亡後のstage停止が `Stage::actorFreezeFlag` や player transition status によるものか確認する。
 5. 実WAN相当の評価は、ENet reliable 前提で遅延/ジッタ中心に続ける。packet lossは「reliable retransmitによる遅延」としてまず扱う。
 

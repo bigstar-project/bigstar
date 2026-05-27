@@ -95,6 +95,7 @@ constexpr melonDS::u32 kGamePlayerInventoryPowerupAddr = 0x0208B32C;
 constexpr melonDS::u32 kGamePlayerCharacterAddr = 0x0208B330;
 constexpr melonDS::u32 kGamePlayerTransitionStatusAddr = 0x0208B354; // Game::playerVSPipeState
 constexpr melonDS::u32 kGamePlayerCountAddr = 0x0208B348;
+constexpr melonDS::u32 kGamePlayerLivesAddr = 0x0208B364;
 constexpr melonDS::u32 kGamePlayerBattleStarsAddr = 0x0208B36C;
 constexpr melonDS::u32 kGamePlayerCoinsAddr = 0x0208B37C;
 constexpr melonDS::u32 kGamePlayerScoreAddr = 0x0208B384;
@@ -115,6 +116,10 @@ constexpr melonDS::u32 kAppBootParamAddr = 0x0208598C;
 constexpr melonDS::u32 kAppBootTargetAddr = 0x02085990;
 constexpr melonDS::u32 kAppBootSceneAddr = 0x02085994;
 constexpr melonDS::u16 kPlayerObjectID = 0x0015;
+constexpr melonDS::u32 kPlayerBaseActionFlagOffset = 0x778;
+constexpr melonDS::u32 kPlayerBaseSubActionFlagOffset = 0x77C;
+constexpr melonDS::u32 kPlayerBasePhysicsFlagOffset = 0x780;
+constexpr melonDS::u32 kPlayerBaseDamageCooldownOffset = 0x79C;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
 constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
@@ -432,6 +437,10 @@ struct GameStateSample
     melonDS::u32 PlayerActor0Flags728 = 0;
     melonDS::u32 PlayerActor0Flags72C = 0;
     melonDS::u32 PlayerActor0Flags730 = 0;
+    melonDS::u32 PlayerActor0ActionFlag = 0;
+    melonDS::u32 PlayerActor0SubActionFlag = 0;
+    melonDS::u32 PlayerActor0PhysicsFlag = 0;
+    melonDS::u32 PlayerActor0DamageCooldown = 0;
     melonDS::u32 PlayerActor0TransitFunc = 0;
     melonDS::u32 PlayerActor0TransitArg = 0;
     melonDS::u32 PlayerActor1Found = 0;
@@ -456,6 +465,10 @@ struct GameStateSample
     melonDS::u32 PlayerActor1Flags728 = 0;
     melonDS::u32 PlayerActor1Flags72C = 0;
     melonDS::u32 PlayerActor1Flags730 = 0;
+    melonDS::u32 PlayerActor1ActionFlag = 0;
+    melonDS::u32 PlayerActor1SubActionFlag = 0;
+    melonDS::u32 PlayerActor1PhysicsFlag = 0;
+    melonDS::u32 PlayerActor1DamageCooldown = 0;
     melonDS::u32 PlayerActor1TransitFunc = 0;
     melonDS::u32 PlayerActor1TransitArg = 0;
     melonDS::u32 PlayerCount = 0;
@@ -475,6 +488,8 @@ struct GameStateSample
     melonDS::u32 Player1Dead = 0;
     melonDS::u32 Player0Character = 0;
     melonDS::u32 Player1Character = 0;
+    melonDS::u32 Player0Lives = 0;
+    melonDS::u32 Player1Lives = 0;
     melonDS::u32 Player0BattleStars = 0;
     melonDS::u32 Player1BattleStars = 0;
     melonDS::u32 Player0Coins = 0;
@@ -924,6 +939,17 @@ struct State
     melonDS::u32 ForceStageActorFreezeFlagValue = 0;
     bool ForceStageActorFreezeFlagLogged[16] {};
     bool ForceStageActorFreezeFlagReleased[16] {};
+    bool ForcePlayerDeathCountersEnabled = false;
+    bool ForcePlayerDeathCountersHostOnly = false;
+    bool ForcePlayerDeathCountersClientOnly = false;
+    melonDS::u32 ForcePlayerDeathCountersStartFrame = 0;
+    melonDS::u32 ForcePlayerDeathCountersEndFrame = 0;
+    melonDS::u32 ForcePlayerDeathCounter0 = 0;
+    melonDS::u32 ForcePlayerDeathCounter1 = 0;
+    bool ForcePlayerLivesEnabled = false;
+    melonDS::u32 ForcePlayerLife0 = 5;
+    melonDS::u32 ForcePlayerLife1 = 5;
+    bool ForcePlayerDeathCountersLogged[16] {};
     bool ForceStageActorPreUpdateGateEnabled = false;
     bool ForceStageActorPreUpdateGateHostOnly = false;
     bool ForceStageActorPreUpdateGateClientOnly = false;
@@ -4820,6 +4846,56 @@ void ForceStageActorFreezeFlagIfNeeded(int instanceID, melonDS::u32 frame, melon
     }
 }
 
+void ForcePlayerDeathCountersIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForcePlayerDeathCountersEnabled || !nds || !nds->MainRAM)
+        return;
+    if (G.ForcePlayerDeathCountersHostOnly && G.NetRole != Role::Host)
+        return;
+    if (G.ForcePlayerDeathCountersClientOnly && G.NetRole != Role::Client)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.ForcePlayerDeathCountersStartFrame)
+        return;
+    if (G.ForcePlayerDeathCountersEndFrame != 0 && frame > G.ForcePlayerDeathCountersEndFrame)
+        return;
+    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
+        return;
+
+    const melonDS::u32 old0 = nds->ARM9Read32(kGamePlayerDeathsAddr);
+    const melonDS::u32 old1 = nds->ARM9Read32(kGamePlayerDeathsAddr + sizeof(melonDS::u32));
+    const melonDS::u32 oldLife0 = nds->ARM9Read32(kGamePlayerLivesAddr);
+    const melonDS::u32 oldLife1 = nds->ARM9Read32(kGamePlayerLivesAddr + sizeof(melonDS::u32));
+    nds->ARM9Write32(kGamePlayerDeathsAddr, G.ForcePlayerDeathCounter0);
+    nds->ARM9Write32(kGamePlayerDeathsAddr + sizeof(melonDS::u32), G.ForcePlayerDeathCounter1);
+    if (G.ForcePlayerLivesEnabled)
+    {
+        nds->ARM9Write32(kGamePlayerLivesAddr, G.ForcePlayerLife0);
+        nds->ARM9Write32(kGamePlayerLivesAddr + sizeof(melonDS::u32), G.ForcePlayerLife1);
+    }
+
+    if (!G.ForcePlayerDeathCountersLogged[instanceID])
+    {
+        std::printf(
+            "NSMB Test: force player death counters inst=%d frame=%u range=%u-%u old=%u/%u value=%u/%u lives=%u/%u->%u/%u enabled=%d\n",
+            instanceID,
+            frame,
+            G.ForcePlayerDeathCountersStartFrame,
+            G.ForcePlayerDeathCountersEndFrame,
+            old0,
+            old1,
+            G.ForcePlayerDeathCounter0,
+            G.ForcePlayerDeathCounter1,
+            oldLife0,
+            oldLife1,
+            G.ForcePlayerLife0,
+            G.ForcePlayerLife1,
+            G.ForcePlayerLivesEnabled ? 1 : 0);
+        G.ForcePlayerDeathCountersLogged[instanceID] = true;
+    }
+}
+
 void ForceStageActorPreUpdateGateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.ForceStageActorPreUpdateGateEnabled || !nds || !nds->MainRAM)
@@ -5866,6 +5942,10 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
                                             melonDS::u32& flags728,
                                             melonDS::u32& flags72C,
                                             melonDS::u32& flags730,
+                                            melonDS::u32& actionFlag,
+                                            melonDS::u32& subActionFlag,
+                                            melonDS::u32& physicsFlag,
+                                            melonDS::u32& damageCooldown,
                                             melonDS::u32& transitFunc,
                                             melonDS::u32& transitArg)
     {
@@ -5878,6 +5958,10 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         flags728 = nds->ARM9Read32(actor.Base + 0x728);
         flags72C = nds->ARM9Read32(actor.Base + 0x72C);
         flags730 = nds->ARM9Read32(actor.Base + 0x730);
+        actionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseActionFlagOffset);
+        subActionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseSubActionFlagOffset);
+        physicsFlag = nds->ARM9Read32(actor.Base + kPlayerBasePhysicsFlagOffset);
+        damageCooldown = nds->ARM9Read16(actor.Base + kPlayerBaseDamageCooldownOffset);
         transitFunc = nds->ARM9Read32(actor.Base + 0x910);
         transitArg = nds->ARM9Read32(actor.Base + 0x914);
     };
@@ -5890,6 +5974,10 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         sample.PlayerActor0Flags728,
         sample.PlayerActor0Flags72C,
         sample.PlayerActor0Flags730,
+        sample.PlayerActor0ActionFlag,
+        sample.PlayerActor0SubActionFlag,
+        sample.PlayerActor0PhysicsFlag,
+        sample.PlayerActor0DamageCooldown,
         sample.PlayerActor0TransitFunc,
         sample.PlayerActor0TransitArg);
     readPlayerTransitionFields(
@@ -5901,6 +5989,10 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         sample.PlayerActor1Flags728,
         sample.PlayerActor1Flags72C,
         sample.PlayerActor1Flags730,
+        sample.PlayerActor1ActionFlag,
+        sample.PlayerActor1SubActionFlag,
+        sample.PlayerActor1PhysicsFlag,
+        sample.PlayerActor1DamageCooldown,
         sample.PlayerActor1TransitFunc,
         sample.PlayerActor1TransitArg);
 
@@ -5921,6 +6013,8 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.Player1Dead = nds->ARM9Read8(kGamePlayerDeadAddr + 1);
     sample.Player0Character = nds->ARM9Read8(kGamePlayerCharacterAddr);
     sample.Player1Character = nds->ARM9Read8(kGamePlayerCharacterAddr + 1);
+    sample.Player0Lives = nds->ARM9Read32(kGamePlayerLivesAddr);
+    sample.Player1Lives = nds->ARM9Read32(kGamePlayerLivesAddr + sizeof(melonDS::u32));
     sample.Player0BattleStars = nds->ARM9Read32(kGamePlayerBattleStarsAddr);
     sample.Player1BattleStars = nds->ARM9Read32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32));
     sample.Player0Coins = nds->ARM9Read32(kGamePlayerCoinsAddr);
@@ -6219,6 +6313,8 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.Player1Dead);
     MixGameStateValue(sample.Hash, sample.Player0Character);
     MixGameStateValue(sample.Hash, sample.Player1Character);
+    MixGameStateValue(sample.Hash, sample.Player0Lives);
+    MixGameStateValue(sample.Hash, sample.Player1Lives);
     MixGameStateValue(sample.Hash, sample.Player0BattleStars);
     MixGameStateValue(sample.Hash, sample.Player1BattleStars);
     MixGameStateValue(sample.Hash, sample.Player0Coins);
@@ -6806,6 +6902,8 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                          << ",0x" << sample.Player1Dead
                          << ",0x" << sample.Player0Character
                          << ",0x" << sample.Player1Character
+                         << ",0x" << sample.Player0Lives
+                         << ",0x" << sample.Player1Lives
                          << ",0x" << sample.Player0BattleStars
                          << ",0x" << sample.Player1BattleStars
                          << ",0x" << sample.Player0Coins
@@ -6853,7 +6951,15 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                          << ",0x" << playerGlobalHash
                          << ",0x" << wifiCandidateHash
                          << ",0x" << renderCandidateHash
-                         << ",0x" << netStateHash;
+                         << ",0x" << netStateHash
+                         << ",0x" << sample.PlayerActor0ActionFlag
+                         << ",0x" << sample.PlayerActor0SubActionFlag
+                         << ",0x" << sample.PlayerActor0PhysicsFlag
+                         << ",0x" << sample.PlayerActor0DamageCooldown
+                         << ",0x" << sample.PlayerActor1ActionFlag
+                         << ",0x" << sample.PlayerActor1SubActionFlag
+                         << ",0x" << sample.PlayerActor1PhysicsFlag
+                         << ",0x" << sample.PlayerActor1DamageCooldown;
     }
 
     G.GameStateTrace << std::dec << '\n';
@@ -7585,6 +7691,22 @@ void InitFromEnvironment()
     G.ForceStageActorFreezeFlagValue = static_cast<melonDS::u32>(
         std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_VALUE")
             ? std::getenv("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_VALUE") : "0", nullptr, 0));
+    G.ForcePlayerDeathCountersEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS");
+    G.ForcePlayerDeathCountersHostOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_HOST_ONLY");
+    G.ForcePlayerDeathCountersClientOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_CLIENT_ONLY");
+    G.ForcePlayerDeathCountersStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_START_FRAME", 0)));
+    G.ForcePlayerDeathCountersEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_END_FRAME", 0)));
+    G.ForcePlayerDeathCounter0 = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTER0", 0)));
+    G.ForcePlayerDeathCounter1 = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTER1", 0)));
+    G.ForcePlayerLivesEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_LIVES");
+    G.ForcePlayerLife0 = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_LIFE0", 5)));
+    G.ForcePlayerLife1 = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_LIFE1", 5)));
     G.ForceStageActorPreUpdateGateEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_ACTOR_PREUPDATE_GATE");
     G.ForceStageActorPreUpdateGateHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_ACTOR_PREUPDATE_GATE_HOST_ONLY");
     G.ForceStageActorPreUpdateGateClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_ACTOR_PREUPDATE_GATE_CLIENT_ONLY");
@@ -7790,7 +7912,7 @@ void InitFromEnvironment()
         {
             G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,arm9PC,arm9LR,arm9SP,arm9CPSR,appFrameLength,appUpdateTask,appSleepPhase,appSleepControl,appSleeping,appSleepPhaseTimer,appSleepWakeUpTimer,appBootParam,appBootTarget,appBootScene,ggid,netCurrentLanguage,netLocalAid,netState14,netState1C,netState20,netState24,netExpectedConsoleCount,netMultiBootSession,netSessionState,netModuleState,netMaxSessionChildren,netMaxConsoleCount,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,stageActorFreezeFlag,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor0PlayerID,playerActor0TransitionStep,playerActor0SignalLock,playerActor0Flag192,playerActor0Flags728,playerActor0Flags72C,playerActor0Flags730,playerActor0TransitFunc,playerActor0TransitArg,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,playerActor1PlayerID,playerActor1TransitionStep,playerActor1SignalLock,playerActor1Flag192,playerActor1Flags728,playerActor1Flags72C,playerActor1Flags730,playerActor1TransitFunc,playerActor1TransitArg,playerTransitionStatus0,playerTransitionStatus1,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectByte0E2,vsConnectByte106,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord138,vsConnectWord13C,vsConnectWord140,vsConnectWord144,vsConnectWord148,vsConnectByte153,vsConnectByte154,vsConnectByte155,vsConnectByte156,vsConnectByte157,vsConnectByte158,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectSettings,courseSelectWord060,courseSelectWord064,courseSelectWord068,courseSelectWord06C,courseSelectWord070,courseSelectWord074,courseSelectWord078,courseSelectWord07C,courseSelectWord080,courseSelectWord084,courseSelectWord088,courseSelectWord08C,courseSelectWord090,stageCameraFound,stageCameraWord190,stageCameraWord194,stageCameraWord19C,stageCameraWord1A0,stageActorManagerFound,stageActorManagerBase,stageActorManagerStateType,stageControllerFound,stageControllerBase,stageControllerStateType,mvlObject267Found,mvlObject267Base,mvlObject267StateType,mvlGlobal965C,mvlGlobal9670,mvlGlobal9674,mvlGlobal9694_0,mvlGlobal9694_1,mvlStageLayoutGateCAC6C,mvlStageLayoutGateCAC74,mvlStageLayoutGateCAC7C,mvlStageLayoutGateCACDC,mvlStageLayoutGateCAE80,mvlStageLayoutGateCAE74,mvlStageLayoutGateCAEB8,mvlStageLayoutGateCAF20,mvlStageLayoutGateCAF40,mvlStageLayoutGateCA8C0,mvlStageLayoutGateCA8D0,mvlStageLayoutGateCAD30,mvlManagerBase,mvlManagerVTable,mvlManagerGuid,mvlManagerSettings,mvlManagerObjectId,mvlManagerStateType,mvlManagerFlags,mvlManagerUnk54,mvlManagerResourcesHeap,mvlManagerWordA8CC,mvlManagerWordA8D0,mvlManagerWordA8D4,mvlManagerWordA8D8,mvlManagerWordA8DC,mvlManagerWordA8E0,mvlManagerWordA8E4,mvlManagerHalfA8E8,mvlManagerHalfA8EA,mvlManagerByteA8EC,mvlManagerHalf494,mvlManagerHalf4A0,stageSceneFound,stageSceneBase,stageSceneSettings,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,stageSceneWord5618,stageSceneWord561C,stageSceneWord563C,stageSceneByte5643,stageSceneByte5644,stageSceneByte5645,stageSceneByte5646,stageSceneByte5648,stageSceneByte5649,stageSceneUpdateDispatchFunc,stageSceneUpdateDispatchArg,stageSceneRenderDispatchFunc,stageSceneRenderDispatchArg,stageSceneGlobal9280,stageSceneGlobal9284,stageSceneGlobal928C,stageSceneGlobal92B4,stageSceneGlobal92C0,stageSceneGlobal92C8,stageSceneGlobal92CC,stageSceneGlobal92D0,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY,objectScanTotal,objectNotCreatedCount,objectActiveCount,objectDeadCount,objectSkipUpdateCount,objectSkipRenderCount,objectFirstNotCreatedId,objectFirstNotCreatedBase,objectFirstNotCreatedFlags,objectSecondNotCreatedId,objectSecondNotCreatedBase,objectSecondNotCreatedFlags";
             if (G.GameStateTraceExtended)
-                G.GameStateTrace << ",playerCount,player0Powerup,player1Powerup,player0InventoryPowerup,player1InventoryPowerup,player0Dead,player1Dead,player0Character,player1Character,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,entranceSpawnID0,entranceSpawnID1,entranceTransitionFlags0,entranceTransitionFlags1,entranceSpawnPtr0,entranceSpawnPtr1,stageCameraBase,stageCameraTargetX,stageCameraTargetY,stageCameraTargetZ,stageCameraPositionX,stageCameraPositionY,stageCameraPositionZ,stageCameraUpX,stageCameraUpY,stageCameraUpZ,stageCameraUnk114,stageCameraUnk118,stageCameraUnk11C,stageCameraUnk128,stageCameraUnk12C,stageCameraRoll130,stageCameraGlobalX0,stageCameraGlobalX1,stageCameraGlobalY0,stageCameraGlobalY1,stageCameraGlobalWidth0,stageCameraGlobalWidth1,stageCameraGlobalHeight0,stageCameraGlobalHeight1,stageDisplayCameraX,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash";
+                G.GameStateTrace << ",playerCount,player0Powerup,player1Powerup,player0InventoryPowerup,player1InventoryPowerup,player0Dead,player1Dead,player0Character,player1Character,player0Lives,player1Lives,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,entranceSpawnID0,entranceSpawnID1,entranceTransitionFlags0,entranceTransitionFlags1,entranceSpawnPtr0,entranceSpawnPtr1,stageCameraBase,stageCameraTargetX,stageCameraTargetY,stageCameraTargetZ,stageCameraPositionX,stageCameraPositionY,stageCameraPositionZ,stageCameraUpX,stageCameraUpY,stageCameraUpZ,stageCameraUnk114,stageCameraUnk118,stageCameraUnk11C,stageCameraUnk128,stageCameraUnk12C,stageCameraRoll130,stageCameraGlobalX0,stageCameraGlobalX1,stageCameraGlobalY0,stageCameraGlobalY1,stageCameraGlobalWidth0,stageCameraGlobalWidth1,stageCameraGlobalHeight0,stageCameraGlobalHeight1,stageDisplayCameraX,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash,playerActor0ActionFlag,playerActor0SubActionFlag,playerActor0PhysicsFlag,playerActor0DamageCooldown,playerActor1ActionFlag,playerActor1SubActionFlag,playerActor1PhysicsFlag,playerActor1DamageCooldown";
             G.GameStateTrace << '\n';
         }
     }
@@ -8074,6 +8196,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageActorFreezeFlagIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForcePlayerDeathCountersIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageActorPreUpdateGateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceActorCategoryMaskIfNeeded(instanceID, inputFrame, nds);
@@ -8303,6 +8427,9 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     }
     if (G.Enabled && G.PacketBridgeEnabled && bridgeNetworkActive)
         ThrottleNSMLPacketBridgeFrameLead(nds, logFrame);
+
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForcePlayerDeathCountersIfNeeded(instanceID, logFrame, nds);
 
     SaveState(instanceID, logFrame, nds);
     SaveLocalMPState(logFrame);

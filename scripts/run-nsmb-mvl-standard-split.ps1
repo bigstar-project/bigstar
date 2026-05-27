@@ -6,11 +6,13 @@ param(
     [string]$Peer = "127.0.0.1",
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-entranceff-flag1.nds",
-    [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-entranceff-flag1-camera-full-p1.nds",
+    [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-entranceff-flag1.nds",
     [string]$InputScript = "tests\nsmb_us_direct_mvl_both_different.inputs",
     [string]$HostLogDir = "logs\nsmvl-standard-split-host",
     [string]$ClientLogDir = "logs\nsmvl-standard-split-client",
     [int]$LookupTickDelay = 10,
+    [string]$HostGameLocalPlayerID = "0",
+    [string]$ClientGameLocalPlayerID = "0",
     [int]$SendDelayFrames = 0,
     [int]$SendJitterFrames = 0,
     [int]$MaxFrameLead = 8,
@@ -28,7 +30,15 @@ param(
     [switch]$AllowJitWithPacketBridge,
     [int]$PlayerStickToStarStartFrame = 0,
     [int]$PlayerStickToStarEndFrame = 0,
-    [int]$PlayerStickToStarSlot = 0
+    [int]$PlayerStickToStarSlot = 0,
+    [switch]$ForcePlayerDeathCounters = $true,
+    [int]$ForcePlayerDeathCountersStartFrame = 900,
+    [int]$ForcePlayerDeathCountersEndFrame = 1500,
+    [int]$ForcePlayerDeathCounter0 = 0,
+    [int]$ForcePlayerDeathCounter1 = 0,
+    [switch]$ForcePlayerLives = $true,
+    [int]$ForcePlayerLife0 = 5,
+    [int]$ForcePlayerLife1 = 5
 )
 
 $ErrorActionPreference = "Stop"
@@ -68,8 +78,8 @@ $common = @(
     "-PacketBridgeNeutralizeLocalInput",
     "-HostPacketBridgeLocalPlayer", "0",
     "-ClientPacketBridgeLocalPlayer", "1",
-    "-HostPacketBridgeForceGameLocalPlayerID", "0",
-    "-ClientPacketBridgeForceGameLocalPlayerID", "0",
+    "-HostPacketBridgeForceGameLocalPlayerID", "$HostGameLocalPlayerID",
+    "-ClientPacketBridgeForceGameLocalPlayerID", "$ClientGameLocalPlayerID",
     "-PacketBridgeThrottleStartFrame", "1500",
     "-NetRandomValue", "0x12345678",
     "-NetRandomAuto"
@@ -122,6 +132,22 @@ if ($PlayerStickToStarStartFrame -gt 0 -or $PlayerStickToStarEndFrame -gt 0) {
         "-PlayerStickToStarStartFrame", "$PlayerStickToStarStartFrame",
         "-PlayerStickToStarEndFrame", "$PlayerStickToStarEndFrame",
         "-PlayerStickToStarSlot", "$PlayerStickToStarSlot"
+    )
+}
+if ($ForcePlayerDeathCounters) {
+    $common += @(
+        "-ForcePlayerDeathCounters",
+        "-ForcePlayerDeathCountersStartFrame", "$ForcePlayerDeathCountersStartFrame",
+        "-ForcePlayerDeathCountersEndFrame", "$ForcePlayerDeathCountersEndFrame",
+        "-ForcePlayerDeathCounter0", "$ForcePlayerDeathCounter0",
+        "-ForcePlayerDeathCounter1", "$ForcePlayerDeathCounter1"
+    )
+}
+if ($ForcePlayerLives) {
+    $common += @(
+        "-ForcePlayerLives",
+        "-ForcePlayerLife0", "$ForcePlayerLife0",
+        "-ForcePlayerLife1", "$ForcePlayerLife1"
     )
 }
 

@@ -212,6 +212,16 @@ param(
     [int]$ForceStageActorFreezeFlagStartFrame = 0,
     [int]$ForceStageActorFreezeFlagEndFrame = 0,
     [string]$ForceStageActorFreezeFlagValue = "0",
+    [switch]$ForcePlayerDeathCounters,
+    [switch]$ForcePlayerDeathCountersHostOnly,
+    [switch]$ForcePlayerDeathCountersClientOnly,
+    [int]$ForcePlayerDeathCountersStartFrame = 0,
+    [int]$ForcePlayerDeathCountersEndFrame = 0,
+    [int]$ForcePlayerDeathCounter0 = 0,
+    [int]$ForcePlayerDeathCounter1 = 0,
+    [switch]$ForcePlayerLives,
+    [int]$ForcePlayerLife0 = 5,
+    [int]$ForcePlayerLife1 = 5,
     [switch]$ForcePlayerSignalUnlock,
     [switch]$ForcePlayerSignalUnlockHostOnly,
     [switch]$ForcePlayerSignalUnlockClientOnly,
@@ -1089,6 +1099,32 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_END_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_VALUE -ErrorAction SilentlyContinue
+    }
+    if ($ForcePlayerDeathCounters) {
+        $env:MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS = "1"
+        if ($ForcePlayerDeathCountersHostOnly) { $env:MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_HOST_ONLY -ErrorAction SilentlyContinue }
+        if ($ForcePlayerDeathCountersClientOnly) { $env:MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_CLIENT_ONLY -ErrorAction SilentlyContinue }
+        $env:MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_START_FRAME = "$ForcePlayerDeathCountersStartFrame"
+        $env:MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_END_FRAME = "$ForcePlayerDeathCountersEndFrame"
+        $env:MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTER0 = "$ForcePlayerDeathCounter0"
+        $env:MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTER1 = "$ForcePlayerDeathCounter1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_HOST_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_CLIENT_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTER0 -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTER1 -ErrorAction SilentlyContinue
+    }
+    if ($ForcePlayerLives) {
+        $env:MELONDS_NSML_FORCE_PLAYER_LIVES = "1"
+        $env:MELONDS_NSML_FORCE_PLAYER_LIFE0 = "$ForcePlayerLife0"
+        $env:MELONDS_NSML_FORCE_PLAYER_LIFE1 = "$ForcePlayerLife1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_LIVES -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_LIFE0 -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_LIFE1 -ErrorAction SilentlyContinue
     }
     if ($ForcePlayerSignalUnlock) {
         $env:MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK = "1"
