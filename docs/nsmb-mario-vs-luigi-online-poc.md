@@ -10,50 +10,46 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 US 版 ROM `roms/nsmb-us.nds` (`A2DE`) を主対象にする。`external/NSMB-Code-Reference` が US 版のシンボルを持つため、ROM patch と通信 API 解析の精度を優先する。
 
-2026-05-28 の再評価で、`host/client の Game::localPlayerID を両方 0 に固定し、client 側だけ表示/UIを player1 へ寄せる` 方針は本筋から降格する。理由は、試合開始直後の画面/actor構成が自然なMvsL状態になっていない場合に、カメラ、HUD、ストックアイテム、死亡演出を個別patchで補正しても、最終的なLuigi側ゲームプレイとして成立する保証が弱いため。
+2026-05-28 の検証で、`client Game::localPlayerID=1` の direct MvL route は、表示だけでなく object spawn set も host とズレることが分かった。具体的には host local0 では Goomba/movingHazard が存在する一方、client local1 direct route では同じframeで `movingHazardFound=0` になり、入力同期以前にsimulationが一致しない。overlay0 localPlayerID alias を広く当ててもこの差は解消しなかった。
 
-次の本筋は「各PCのNSMBを、本来のローカル対戦時と同じ host=localPlayerID 0 / client=localPlayerID 1 の役割で起動し、その下の通信境界だけをWAN adapterへ差し替える」形に戻す。
+このため、現時点の本筋は次に変更する。
 
-- ROM patch で LocalMP UI/接続処理に依存しない MvL 専用入口を作る。
-- host は `Game::localPlayerID=0`、client は `Game::localPlayerID=1` として、NSMB本体のカメラ、HUD、ストックアイテム、勝敗/死亡演出の役割分担をできるだけそのまま使う。
-- 試合開始直後に host 画面でMario/Luigiが自然に存在し、client画面でLuigi側として自然にプレイ可能な状態になることを、以降の最優先gateにする。
-- 試合中に NSMB が読む packet/input/touch API を WAN adapter に差し替える。localPlayerIDを両方0に揃えるのではなく、NSMBが本来想定するローカル/リモート役割を壊さない。
-- actor/state強制同期や表示だけの個別補正は、原因切り分け用に限定し、成功条件として扱わない。
-- ローカル実入力は、最終的にはNSMBの通常入力経路に乗せ、peerの入力/touchはWAN packetとしてNSMBの通信境界へ渡す。
+- simulation は host/client とも canonical `Game::localPlayerID=0` に揃える。
+- client は表示、HUD、StageFX、PacketBridge local player を player1/Luigi 役に寄せる。
+- NSMBが読む試合中packet/input/touch APIをWAN adapterへ差し替え、host/clientで同じcanonical packet列を読ませる。
+- `client localPlayerID=1` の自然再現は研究対象として残すが、現時点では最終WAN対戦へ向けた主経路から外す。
+- actor座標、敵、スター、残機、死亡状態がhost/clientで一致することを成功条件にする。見た目だけの補正や死亡/残機カウンタ補正は成功扱いしない。
 
-NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、試合中は主に入力情報 packet を通信している前提で進める。
+NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、試合中は主に入力情報 packet を通信している前提で進める。ただし「入力だけで同期できる」ためには、敵やステージ処理が両PCで同じ入力列・同じsimulation条件を読む必要がある。
 
 参考: https://bookstack.nsmbcentral.net/books/new-super-mario-bros/page/mario-vs-luigi
 
 ## 現在の最優先課題
 
-ユーザー観察ベースで、順番を次のように修正する。
+現在の最優先は、canonical local0 simulation + client player1表示/UI/input のrouteを、実際に遊べるWAN netplayへ近づけること。
 
-- 2026-05-28 現在の最優先は、`client localPlayerID=1` で「上画面に地形とlocal playerが自然に出る」状態を作ること。host/clientのactor stateは `player0/player1 lives=5`, dead=0 で揃うが、client側の表示初期化が壊れる。
-- `client localPlayerID=1` の緑一色上画面は、overlay0 の StageLayout 系 `Game::localPlayerID` 参照を0読みへaliasすると地形が戻る。したがって、ステージ地形/BG欠落の主因はStageLayout/地形描画側のlocal player camera選択。
-- StageLayoutの緑画面は、全layout aliasではなく `0x020BACC0` だけでも消える。さらに狭くすると、StageLayout更新関数末尾の `0x020BAC84` / `0x020BAC90` の view/player 引数を player0 固定にするだけでも地形は戻る。これは「緑画面」はStageLayout最終view反映のplayer1経路に絞れる、という結果。
-- 地形を戻してもplayer 3D modelが出ない問題は別。`Player::onRender` / `Player::renderModel` / `NNS_G3dDraw` はclientでも呼ばれるが、表示用X/wrap/camera判定がhostと違い、clientではplayerが上画面に出ない。`Player::onRender` の表示用Xへ `+0x400000` を足し、StageCameraをplayer0側へ戻すとMarioは表示されるため、3D描画自体は壊れていない。
-- `stage-layout-final-view-player-id --player-id 0` と `player-render-wrap-x-offset` を組み合わせてもLuigi/player modelは戻らない。したがって次は、StageLayoutの地形view補正とPlayer modelの3D view/projection補正を分けて追う。カメラをplayer0に戻すだけではLuigi側プレイにならないので、これは成功条件ではなく診断結果として扱う。
-- 2026-05-28 追加切り分け:
-  - `ForceStageCameraObjectX` を RunFrame 前後で適用し、`StageDisplayCameraX` / `Stage::cameraX[1]` / StageCamera object の X/Z を cam0相当に揃えても、ROM側 `StageCamera state` patchなしではplayer modelは出なかった。つまり、After/Beforeのメモリ書き換えでは描画時のview matrix生成タイミングに届いていない。
-  - `stage-range-localplayer-literal-alias` はplayer model欠落を解消しなかった。旧 `player-render-model-visible` はstack引数保存を壊していたため、この結果は破棄する。修正版では `renderModel(bool)` の引数0固定、または `Stage::isOutsidePlayerRange` のviewID 0固定でMario/Luigi両方の表示が戻る。
-  - `stage-camera-state-player-id --player-id 0` だけを追加すると、`StageCamera::onUpdate` の display camera 選択をlocalID1のまま残してもMario modelは表示される。したがって、player model欠落の直接条件は StageCamera state関数が作る render用 target/position/view matrix 側にある可能性が高い。ただしこれはMario表示であり、Luigi側プレイ成功ではない。
-  - `tools/nsmb_screenshot_probe.py` に `redPlayerPixels` / `darkModelPixels` と閾値オプションを追加。少なくとも「地形は出ているがMario modelが出ていない」失敗をスクリーンショットから自動検出できる。
-- 最優先gateは「試合開始直後の画面/actor構成」。host側にMarioだけ、client側にMario/Luigiが出ていない、または地形相対の表示が壊れている状態は失敗として扱う。ここを飛ばしてストックアイテムや死亡演出の検証へ進まない。
-- `localPlayerID=0` 両固定 + 表示patch方式は、clientのLuigi側プレイ実現として将来性が低い。次は `localPlayerID=1` client を本筋に戻し、そこで壊れる actor生成/StageStart/packet境界を根本原因として追う。
-- clientでLuigi側を実際にプレイできること、つまりカメラ追従、HUD、ストックアイテム、死亡/勝敗演出をNSMB本体のlocal player処理として自然に動かすことを優先する。
-- 2026-05-28 追加結果:
-  - `Player::renderModel()` は player0 を `Stage::isOutsidePlayerRange(..., viewID=0)`, player1 を `viewID=1` で判定している。client localID1 routeでは player1 の判定がtrueになり、`Player::renderModel(bool)` に `r1=1` が渡る。
-  - 壊れていた旧 `player-render-model-visible` patch を修正し、`renderModel(bool)` の stack引数を0へ正しく保存するstubにした。`stage-camera-state-vertical-slot-zero` と組み合わせるとclient上画面にMario/Luigi両方が表示される。
-  - より狭い診断として `player-render-range-view-player-id --player-id 0` を追加した。`renderModel(bool)` 自体を改変せず、`Stage::isOutsidePlayerRange` へ渡すviewIDだけを0にすると同じくMario/Luigi両方が表示される。よって、現時点のplayer model欠落は「モデル/actor不在」ではなく、direct entry時のplayer1 range/camera slot初期化不足が主因。
-  - ただしこれはまだ最終修正ではない。client localID1 splitでは、frame 1200以前からhost/clientのplayer Yが微妙にズレ、DirectCapture入力後もhost側でplayer1 inputがゲームstateへ反映されない。表示gateは前進したが、同期gateは未解決。
-- 既存の `StageCamera state + onUpdate + Stage::setZoom` player1 patchや `StageLayout` inventory patch は、表示補正の診断結果として残すが、最終方針の中心には置かない。
-- 右下ストックアイテム検証は一時停止する。`PacketBridgePreserveLocalTouch` と packet byte trace で touch header がWAN packetとしてhostへ届くことは確認したが、試合開始状態が不自然なままでは優先順位が低い。
-- host/client の上画面で Mario/Luigi の表示位置が違って見える問題は、単なるカメラ差として扱わない。自然なlocalPlayerID役割で再現し、地形、actor、HUD、下画面、演出が同じ役割解釈になっているかを検証する。
-- 開始直後に右上Luigi残機が `5 -> 4` になる問題は、Goomba接触ではない。根本経路は `Player::vsPipeTransitState()` 完了後の player1 が `StageActor::isOutOfViewVertical()` で画面外扱いになり、`Player::pitDeathTransitState()` -> `Player::beginDeathTransition()` -> `Game::playerDead[1]=1` -> `PlayerBase::onDefeated()` -> `Game::losePlayerLife(1)` / `Game::addPlayerDeath(1)` と進む流れ。direct entry では `Stage::cameraY[1]` / `Stage::cameraHeight[1]` が 0 のままなので player1 の縦画面外判定だけが壊れる。開始限定の残機/死亡カウンタ補正は最終修正として扱わない。2026-05-27時点で、`StageActor::isOutOfViewVertical` の cameraHeight が 0 の player slot だけ slot0 にfallbackする ROM patch で開始死亡を解消できた。確認ログ `logs/smvl-rootcheck-fallback-host-1300-20260527`, `logs/smvl-rootcheck-fallback-client-1300-20260527` では frame 1290 まで `player0Lives=5`, `player1Lives=5`, `player0Dead=0`, `player1Dead=0`、life call は初期 `setPlayerLives` のみ。
-- FPSが低い。JIT OFFが10fps級の主因だった。JIT ON + hash/trace/screenshotなしでは単独hostが約67fps、ローカル2プロセス同時では約47-55fps。実2PCでは1PCあたり1インスタンスなので単独hostの数値が近い。ローカル2プロセス検証速度は引き続き改善対象。
-- Luigi死亡中に敵やブロックアニメが止まるように見える。frame 1923以降の trace では Luigi死亡演出中に `player0UpdateLocked=1` も立つため、現時点ではNSMB本体の死亡演出停止である可能性が高い。direct entry/PacketBridgeの副作用かどうかは、通常LocalMP/実機相当ルートとの比較が残る。
-- 安定実行の入口は `scripts/run-nsmb-mvl-stable-split.ps1` に寄せる。US原本から stable host/client UI ROM を再生成し、`-RunRole host` / `-RunRole client -Peer <host-ip>` で実2PC相当の分離起動ができる。ローカル別job検証では frame 1800 まで開始残機減少なし、frame 3000 では host/client state一致かつ `-RequirePlayer0Input -RequirePlayer1Input` 通過。
+- 最新の成功ログ:
+  - `logs/smvl-hybrid-display1-split-framelead20-2240-20260528`
+    - host/client とも canonical `localPlayerID=0`
+    - client ROM は `StageCamera player1 + StageFX player1 + inventory HUD player1`
+    - `PacketBridgeLookupTickDelay=10`
+    - frame 1500-2240 で host/client state verifier 通過
+  - `logs/smvl-hybrid-avoidgoomba-delay60-split-3000-20260528`
+    - `PacketBridgeLookupTickDelay=60`
+    - frame 1500-3000 で actor座標、敵、残機/死亡状態を含むstate一致
+    - `-RequirePlayer0Input -RequirePlayer1Input -RequireStageVisibleScreenshots` 通過
+- 最新の未解決:
+  - client表示で一部actor、特にGoombaが見えないframeがある。`StageEntity::skipRender` をplayer1表示へ向けるだけでは不十分だった。simulation stateは一致しているので、次はGoomba/ActiveActor側のrender gateを追う。
+  - `tests/nsmb_us_direct_mvl_avoid_goomba.inputs` でもMario/Luigiが後半に死亡する。これは同期失敗ではなく入力経路の問題なので、長時間検証用の自然操作スクリプトを作る必要がある。
+  - `PacketBridgeLookupTickDelay=10` ではclientのlocal player1 packetがhostより先に反映されることがある。delay 60 では同期できたため、最終的にはlockstep待ち/入力遅延の自動調整が必要。
+  - client側のHUD/カメラ/StageFXはplayer1へ寄せているが、trace上の `Game::localPlayerID` はcanonical 0 のまま。勝敗演出、ストックアイテム使用、死亡演出がLuigi視点として成立するかは未検証。
+
+直近の次アクション:
+
+- Goomba/敵actorのrender gateを特定し、client player1表示でもsimulation上の敵が見えるようにする。
+- `PacketBridgeLookupTickDelay=60` 相当を標準routeへ反映し、local packetが片側だけ先に反映される条件を潰す。
+- 死亡しない長時間入力スクリプトを作り、3000 frame 以上で `RequireNoLifeLossUntilFrame` も通す。
+- 成功条件を満たすrouteを `scripts/run-nsmb-mvl-stable-split.ps1` または新しいhybrid helperへ整理する。
 
 ## 実装済み
 
@@ -149,10 +145,22 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `ForceStageCameraSlotVerticalOnly` を追加。camera slot copyのうちY/heightだけをコピーする診断フック。ただし現時点ではこれだけではLuigi側player表示は戻らない。
   - `tools/nsmb_us_rom_patch.py stage-camera-state-vertical-slot-zero` を追加。StageCamera state関数のY/height参照だけslot0へ向け、runtime ForceStageCameraでは間に合わないview matrix生成タイミングをROM側で切り分ける。
   - `tools/nsmb_us_rom_patch.py player-render-range-view-player-id` を追加。`Player::renderModel()` から `Stage::isOutsidePlayerRange` へ渡るviewIDだけを固定し、player model欠落がrange/camera slot由来かを診断できる。
+  - `tools/nsmb_us_rom_patch.py player-view-transit-local-player-id` / `player-vs-pipe-local-player-id` を追加。`Player::viewTransitState` / `Player::vsPipeTransitState` 内だけlocalPlayerID比較を固定する診断patch。localID1 object set不一致の直接解決にはならなかった。
+  - `tools/nsmb_us_rom_patch.py stage-entity-skip-render-player-id` を追加。hybrid client表示で `StageEntity::skipRender` のcamera slotだけplayer1へ寄せる診断patch。Goomba表示欠落はこれだけでは直らず、ActiveActor/Goomba側のrender gate追跡が残る。
+  - `tools/nsmb_us_rom_patch.py player-render-wrap-x-offset` は負方向offsetも受け取れるようにした。単純なdisplay X wrap補正ではlocalID1のplayer model欠落は解消しなかった。
+  - `tests/nsmb_us_direct_mvl_avoid_goomba.inputs` を追加。Luigiを早めに動かし、PacketBridge入力遅延とstate同期を検証しやすくするための暫定入力スクリプト。
   - `TraceNSMLPlayerRender` を追加。`Player::onRender`, `Player::renderModel()`, `Player::renderModel(bool)` のframe, actor, playerID, characterID, visibleFlag, display vector, model pointerをstdoutに出せる。
   - `ForcePlayerActorPosition` を追加。player actor位置/character/playerIDを一時的に書き換え、描画欠落が座標・キャラ・playerIDのどれに依存するかを切り分ける診断フック。
 
 ## 最新の検証結果
+
+### 2026-05-28 hybrid route
+
+- `client localPlayerID=1` direct routeは、表示だけでなくobject spawn setがhostと一致しない。`logs/smvl-local1-raw-client-2040-20260528` と `logs/smvl-local1-rangeview0-client-selfinput-2240-20260528` では `movingHazardFound=0` のまま。host local0では同じ区間でGoomba/movingHazardが存在し、これがplayer1へ干渉する。
+- canonical local0 simulationに戻し、client側だけ `StageCamera player1 + StageFX player1 + inventory HUD player1` を当てるhybrid ROMでは、host/clientのobject setが一致する。`logs/smvl-hybrid-display1-split-framelead20-2240-20260528` は frame 1500-2240 で verifier 通過。
+- `tests/nsmb_us_direct_mvl_avoid_goomba.inputs` と `PacketBridgeLookupTickDelay=60` の組み合わせでは、`logs/smvl-hybrid-avoidgoomba-delay60-split-3000-20260528` が frame 1500-3000 で verifier 通過。player0/player1入力が入り、actor座標、敵、死亡/残機状態がhost/clientで一致した。後半に死亡はあるが両者一致しており、desyncではなく入力ルートの問題。
+- `PacketBridgeLookupTickDelay=10` では、clientが自分のplayer1 packetをhostより早く読んで frame 1560 から差分が出た。入力遅延/lockstep制御はWAN対戦の必須要素。
+- hybrid client表示では、state上のGoomba/movingHazardが見えないframeがある。`stage-entity-skip-render-player-id --player-id 1` だけでは直らないため、ActiveActor/Goomba側のrender gate追跡が残る。
 
 ### FPS / 検証速度
 
@@ -214,30 +222,23 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - 標準split helperのデフォルトもROM fallbackへ移行済み。`logs/smvl-standard-fallback-default-host-1800-20260527`, `logs/smvl-standard-fallback-default-client-1800-20260527` は `ForceStageCameraSlot` ログなしで frame 1800 まで通過し、スクリーンショットも通常の地形表示。
 - `MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG` は開始保護の候補。終了フレーム後にfreeze flagを0へ戻す処理を追加した。ただし単純に frame 960-1800 で敵を止めるだけでは、解除後にGoombaがLuigiへ到達して死亡する。次は本来の開始保護/カウントダウン相当をROM/状態側で再現するか、player1 spawn位置/敵初期状態をROM patchで直す。
 
-標準に近い検証条件は今後 `host localPlayerID=0 / client localPlayerID=1` を本筋にする。過去の `canonical local0` は packet/RNG 同期の制御検証には有効だったが、Luigi側UXを満たさないため最終方針ではない。
-
 ### 入力 packet 差し替え
 
 これまでに分かったこと:
 
 - host/player0 と client/player1 の入力を packet として相互に読ませる `PacketBridge` は動作する。
-- `PacketBridgeStartFrame=1500`, `LookupTickDelay=10`, `PacketBridgeDirectCapture` などの条件では、canonical local0 の制御検証で座標、死亡状態、スター位置、スター再生成RNGが一致した。
+- canonical local0 simulation では、clientをplayer1入力/表示へ寄せてもhost/clientのstateを一致させられる。
 - `-RunRole host` / `-RunRole client -Peer <host-ip>` による2PC相当の分割起動も通る。
-- ただし canonical local0 は「同期検証」用であり、clientがLuigiとして自然に遊べる状態ではない。現在は localID=1 client の表示/カメラ/StageLayout 問題を優先している。
 - 注意: `-PacketBridgeDirectCapture` を外すと split client で player1 入力が packet に乗らない。現在の安定条件には必須として扱う。
+- `PacketBridgeForceTick` 使用時にDirectCapture送信packet自身のtickを書き換えていなかった問題は修正済み。`CaptureAndSendNSMLPacketLocked()` で送信packet[0:1]もcanonical tickへ正規化する。
+- `PacketBridgeLookupTickDelay=10` ではclient側のlocal player1 packetがhostより先に反映されることがある。`PacketBridgeLookupTickDelay=60` では `logs/smvl-hybrid-avoidgoomba-delay60-split-3000-20260528` がstate verifierを通った。
+- `PacketBridgeMaxFrameLead=20` と `PacketBridgeThrottleStartFrame=1500` は有効。`PacketBridgeWait` は双方待ちでタイムアウトしやすい。
 
-現在の表示系切り分け:
+localID1 route の切り分け結果:
 
-- `client localPlayerID=1` でも actor/lives/dead のstateは揃うが、上画面が緑一色になる。
-- overlay0 StageLayout系localPlayerID literalを0読みへaliasすると地形/BGは戻る。
-- `0x020BACC0` の単独alias、または `stage-layout-final-view-player-id --player-id 0` でも地形/BGは戻る。全StageLayout aliasは広すぎるため、今後はこの狭いpatchを基準にする。
-- その状態でもplayer modelは出ないが、`Player::onRender` / `Player::renderModel()` / `Player::renderModel(bool)` はplayer0/player1とも呼ばれている。
-- `stage-camera-state-vertical-slot-zero + player-render-range-view-player-id --player-id 0` で、client localID1の上画面にMario/Luigi両方が表示される。`Player::renderModel(bool)` の強制0でも同じ結果。したがって、次の対象はactor生成ではなく、player1 range/camera slotの初期化と、host/clientで同じsimulation stateを維持できるか。
-- split検証 `logs/smvl-local1-rangeview0-split-directcap-2400-20260528` では、client自身は `inputPlayer1Held=0x21/0x22` を読んでLuigi/player1が動く。一方、host側はclientのplayer1 packetを受信しているが、lookup tick差によりgame-stateの `inputPlayer1Held` が0のまま残る。`PacketBridgeForceTick` でも完全には揃っていない。
-- `PacketBridgeForceTick` 使用時にDirectCapture送信packet自身のtickを書き換えていなかったため、送信側packet tickと受信側canonical lookup tickがズレていた。`CaptureAndSendNSMLPacketLocked()` で送信packet[0:1]もcanonical tickへ正規化する修正を入れた。
-- 修正後、`PacketBridgeLiveFallbackWindow=256` まで広げるとhost側にもclient/player1入力が入り、`inputPlayer1Held=0x21` になる。したがってhost側packet API hookは機能している。ただし古いpacketを読む形になるため、actor座標は大きくdesyncする。最終的には大window fallbackではなく、host/clientの実行ペースを揃える必要がある。
-- `PacketBridgeMaxFrameLead=20` と `PacketBridgeThrottleStartFrame=1500` を使うと、狭い `PacketBridgeLiveFallbackWindow=4` のままhost側にも `inputPlayer1Held=0x21` が入る。`PacketBridgeWait` は双方待ちでタイムアウトしたが、frame lead throttleはこの用途に使える。
-- 同split検証では、入力前のframe 1200時点でhost/clientのplayer Yに差分が出る。localID1 direct routeの初期化差分がsimulationにも漏れているため、表示だけ直しても最終成功ではない。
+- `client localPlayerID=1` の緑一色上画面は、overlay0 StageLayout系localPlayerID literalを0読みへaliasすると地形/BGが戻る。
+- `stage-camera-state-vertical-slot-zero + player-render-range-view-player-id --player-id 0` で、client localID1の上画面にMario/Luigi両方が表示される。player model欠落はactor不在ではなくrange/camera判定由来。
+- ただしlocalID1 direct routeはobject setがhost local0と一致しない。Goomba/movingHazardがclient側に出ないため、最終WAN同期の主経路としては現時点で不採用。
 
 ### MvL 管理状態とスター生成
 

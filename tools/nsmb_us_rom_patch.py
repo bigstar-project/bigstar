@@ -749,6 +749,52 @@ def patch_player_render_range_view_player_id(overlays: dict[int, object], player
     ]
 
 
+def patch_player_view_transit_local_player_id(overlays: dict[int, object], player_id: int) -> list[str]:
+    # Diagnostic only. Player::viewTransitState compares Player+0x11E against
+    # Game::localPlayerID and then runs a large amount of local-only transit
+    # setup. Force only that comparison's loaded localPlayerID to see whether
+    # the direct localPlayerID=1 route is leaking into simulation setup.
+    if player_id < 0 or player_id > 1:
+        raise ValueError(f"player id must be 0 or 1, got {player_id}")
+    addr = 0x0211872C
+    original = 0xE5920000  # ldr r0, [r2]
+    replacement = encode_mov_imm(0, player_id)
+    old = patch_overlay_words_by_id(overlays, 10, addr, [replacement])
+    old_word = struct.unpack("<I", old)[0]
+    if old_word != original:
+        raise ValueError(
+            f"Player::viewTransitState localPlayerID load @ 0x{addr:08X} expected "
+            f"0x{original:08X}, got 0x{old_word:08X}"
+        )
+    return [
+        f"Player::viewTransitState localPlayerID load overlay10 @ 0x{addr:08X}: "
+        f"0x{old_word:08X} -> 0x{replacement:08X} playerID={player_id}"
+    ]
+
+
+def patch_player_vs_pipe_local_player_id(overlays: dict[int, object], player_id: int) -> list[str]:
+    # Diagnostic only. Player::vsPipeTransitState also gates a local-only path
+    # on Player+0x11E == Game::localPlayerID near the end of the pipe transit.
+    # Force just that comparison to identify whether the start-life/state issue
+    # comes from this transition instead of the broader viewTransitState path.
+    if player_id < 0 or player_id > 1:
+        raise ValueError(f"player id must be 0 or 1, got {player_id}")
+    addr = 0x0211C59C
+    original = 0xE5911000  # ldr r1, [r1]
+    replacement = encode_mov_imm(1, player_id)
+    old = patch_overlay_words_by_id(overlays, 10, addr, [replacement])
+    old_word = struct.unpack("<I", old)[0]
+    if old_word != original:
+        raise ValueError(
+            f"Player::vsPipeTransitState localPlayerID load @ 0x{addr:08X} expected "
+            f"0x{original:08X}, got 0x{old_word:08X}"
+        )
+    return [
+        f"Player::vsPipeTransitState localPlayerID load overlay10 @ 0x{addr:08X}: "
+        f"0x{old_word:08X} -> 0x{replacement:08X} playerID={player_id}"
+    ]
+
+
 def patch_player_render_wrap_x_offset(overlays: dict[int, object], offset: int) -> list[str]:
     # Diagnostic only. In the direct localPlayerID=1 client route the terrain
     # can be visible while Player::onRender passes unwrapped X coordinates to
@@ -757,8 +803,12 @@ def patch_player_render_wrap_x_offset(overlays: dict[int, object], offset: int) 
     hook_addr = 0x020FCB04
     stub_addr = 0x020C5394
     display_vec_aux_addr = 0x0212AFD0
+    if offset >= 0:
+        adjust = encode_add_imm(1, 1, offset)
+    else:
+        adjust = encode_sub_imm(1, 1, -offset)
     stub = [
-        encode_add_imm(1, 1, offset),
+        adjust,
         encode_str_imm(1, 0, 4),
         encode_ldr_imm(1, 5, 0x64),
         encode_ldr_pc_literal(12, stub_addr + 0x0C, stub_addr + 0x18),
@@ -838,6 +888,29 @@ def patch_stage_layout_final_view_player_id(
             f"{old.hex()} -> {struct.pack('<I', word).hex()} player={player_id}"
         )
     return changes
+
+
+def patch_stage_entity_skip_render_player_id(overlays: dict[int, object], player_id: int) -> list[str]:
+    # Display-only diagnostic. StageEntity::skipRender chooses a camera/range
+    # slot from Game::localPlayerID. In the hybrid route simulation remains
+    # canonical local0, while the client display camera can be player1. Force
+    # only skipRender's camera slot so enemies near the Luigi view are drawn.
+    if player_id < 0 or player_id > 1:
+        raise ValueError(f"player id must be 0 or 1, got {player_id}")
+    addr = 0x0209AD60
+    original = 0xE5911000  # ldr r1, [r1]
+    replacement = encode_mov_imm(1, player_id)
+    old = patch_overlay_words_by_id(overlays, 0, addr, [replacement])
+    old_word = struct.unpack("<I", old)[0]
+    if old_word != original:
+        raise ValueError(
+            f"StageEntity::skipRender localPlayerID load @ 0x{addr:08X} expected "
+            f"0x{original:08X}, got 0x{old_word:08X}"
+        )
+    return [
+        f"StageEntity::skipRender display player overlay0 @ 0x{addr:08X}: "
+        f"0x{old_word:08X} -> 0x{replacement:08X} playerID={player_id}"
+    ]
 
 
 def build_direct_loadlevel_stub(
@@ -1274,6 +1347,10 @@ def main() -> int:
     sub.add_parser("player-render-model-visible")
     p_player_range_view = sub.add_parser("player-render-range-view-player-id")
     p_player_range_view.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
+    p_player_view_transit = sub.add_parser("player-view-transit-local-player-id")
+    p_player_view_transit.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
+    p_player_vs_pipe = sub.add_parser("player-vs-pipe-local-player-id")
+    p_player_vs_pipe.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_player_wrap = sub.add_parser("player-render-wrap-x-offset")
     p_player_wrap.add_argument("--offset", type=lambda x: int(x, 0), default=0x400000)
     p_player_r12 = sub.add_parser("player-render-r12-offset")
@@ -1281,6 +1358,8 @@ def main() -> int:
     p_stage_layout_final_view = sub.add_parser("stage-layout-final-view-player-id")
     p_stage_layout_final_view.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_stage_layout_final_view.add_argument("--which", choices=("prepare", "render", "both"), default="both")
+    p_stage_entity_skip_render = sub.add_parser("stage-entity-skip-render-player-id")
+    p_stage_entity_skip_render.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_direct = sub.add_parser("direct-mvl-entry")
     p_direct.add_argument("--scene", type=lambda x: int(x, 0), default=0x0F)
     p_direct.add_argument("--stage", type=lambda x: int(x, 0), default=0)
@@ -1383,6 +1462,14 @@ def main() -> int:
         overlays = rom.loadArm9Overlays()
         changes = patch_player_render_range_view_player_id(overlays, args.player_id)
         save_overlays(rom, overlays)
+    elif args.cmd == "player-view-transit-local-player-id":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_player_view_transit_local_player_id(overlays, args.player_id)
+        save_overlays(rom, overlays)
+    elif args.cmd == "player-vs-pipe-local-player-id":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_player_vs_pipe_local_player_id(overlays, args.player_id)
+        save_overlays(rom, overlays)
     elif args.cmd == "player-render-wrap-x-offset":
         overlays = rom.loadArm9Overlays()
         changes = patch_player_render_wrap_x_offset(overlays, args.offset)
@@ -1394,6 +1481,10 @@ def main() -> int:
     elif args.cmd == "stage-layout-final-view-player-id":
         overlays = rom.loadArm9Overlays()
         changes = patch_stage_layout_final_view_player_id(overlays, args.player_id, args.which)
+        save_overlays(rom, overlays)
+    elif args.cmd == "stage-entity-skip-render-player-id":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_stage_entity_skip_render_player_id(overlays, args.player_id)
         save_overlays(rom, overlays)
     elif args.cmd == "direct-mvl-entry":
         changes = patch_direct_mvl_entry(

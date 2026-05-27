@@ -1,0 +1,32 @@
+# Direct MvL PacketBridge asymmetric probe that moves Luigi before the first
+# Goomba reaches the spawn point. This is for sync validation, not a polished
+# gameplay route.
+
+inst0 0-619 NONE
+inst0 620-627 DOWN
+inst0 628-659 NONE
+inst0 660-667 A
+inst0 668-899 NONE
+inst0 900-907 A
+inst0 908-1259 NONE
+inst0 1260-1267 A
+inst0 1268-1979 NONE
+inst0 1980-2239 RIGHT+A
+inst0 2240-2519 RIGHT+B
+inst0 2520-3000 RIGHT
+inst0 3001-3600 NONE
+
+inst1 0-619 NONE
+inst1 620-627 DOWN
+inst1 628-659 NONE
+inst1 660-667 A
+inst1 668-899 NONE
+inst1 900-907 A
+inst1 908-1259 NONE
+inst1 1260-1267 A
+inst1 1268-1535 NONE
+inst1 1536-1919 LEFT+B
+inst1 1920-2239 LEFT+A
+inst1 2240-2519 LEFT+B
+inst1 2520-3000 LEFT
+inst1 3001-3600 NONE
