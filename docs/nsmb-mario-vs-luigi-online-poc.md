@@ -90,6 +90,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - helper script は `logs/nsmvl-standard-helper-client-right-host-1800-20260527`, `logs/nsmvl-standard-helper-client-right-client-1800-20260527` で smoke と split verifier 通過。
   - `scripts/generate-nsmb-mvl-client-ui-rom.ps1` を追加。安定base ROMから `StageFX + StageLayout inventory HUD` の client UI ROM を再生成できる。
   - `scripts/generate-nsmb-mvl-stable-roms.ps1` を追加。US原本ROMから stable host ROM と stable client UI ROM を再生成できる。
+  - `scripts/run-nsmb-mvl-stable-split.ps1` を追加。stable host/client ROM を使う標準実行ラッパー。`-GenerateRoms` でROM生成から実行まで行える。
   - host/client 別入力スクリプトを追加済み。
     - `tests/nsmb_us_direct_mvl_host_right.inputs`
     - `tests/nsmb_us_direct_mvl_client_right.inputs`
@@ -148,6 +149,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - 結果画面patchを除いた `StageFX + stage-layout-inventory-display-player-id` client UI ROM は、通常入力で frame 3600 まで verifier 通過。開始残機減少なし、stage visible、host/client state一致、ARM abortなし。ログ: `logs/smvl-stable-clientui-host-3600-20260527`, `logs/smvl-stable-clientui-client-3600-20260527`。当面の安定client UI候補はこの組み合わせ。
 - `scripts/generate-nsmb-mvl-client-ui-rom.ps1` で生成した client UI ROM でも frame 1800 smoke と verifier 通過。ログ: `logs/smvl-generated-clientui-host-1800-20260527`, `logs/smvl-generated-clientui-client-1800-20260527`。
 - `scripts/generate-nsmb-mvl-stable-roms.ps1` でUS原本から再生成した host/client ROM でも frame 1300 smoke と verifier 通過。ログ: `logs/smvl-stable-generator-host-1300-20260527`, `logs/smvl-stable-generator-client-1300-20260527`。
+- `scripts/run-nsmb-mvl-stable-split.ps1` でも frame 1300 smoke と verifier 通過。ログ: `logs/smvl-stable-wrapper-host-1300-20260527`, `logs/smvl-stable-wrapper-client-1300-20260527`。
 - camera patch切り分け:
   - `stage-camera-state-player-id` は3D actor側だけがズレる表示を作りやすく、現状不採用。
   - `stage-camera-player-id` / display-only も完全なLuigi視点ではない。
