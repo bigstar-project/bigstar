@@ -10,7 +10,10 @@ param(
     [switch]$RequirePlayer1Input,
     [switch]$RequireStarPickup,
     [switch]$RequireStarRespawn,
-    [int]$RequireNoLifeLossUntilFrame = 0
+    [int]$RequireNoLifeLossUntilFrame = 0,
+    [switch]$RequireStageVisibleScreenshots,
+    [double]$MinStageTerrainRatio = 0.2,
+    [double]$MaxStageSkyRatio = 0.8
 )
 
 $ErrorActionPreference = "Stop"
@@ -239,4 +242,24 @@ if ($RequireNoLifeLossUntilFrame -gt 0) {
     }
 }
 
-Write-Host "NSMB MvL LAN result verified: frames=$checked from=$FromFrame tolerance=$PositionTolerance remoteInputHits=$($RequireRemoteInputHits.IsPresent) player0Input=$($RequirePlayer0Input.IsPresent) player1Input=$($RequirePlayer1Input.IsPresent) starPickup=$($RequireStarPickup.IsPresent) starRespawn=$($RequireStarRespawn.IsPresent) noLifeLossUntil=$RequireNoLifeLossUntilFrame"
+if ($RequireStageVisibleScreenshots) {
+    foreach ($entry in @(
+        @{ Label = "host"; Root = $hostRoot; Dir = "screens-host" },
+        @{ Label = "client"; Root = $clientRoot; Dir = "screens-client" }
+    )) {
+        $screenDir = Join-Path ([string]$entry.Root) $entry.Dir
+        if (!(Test-Path $screenDir)) {
+            Fail "$($entry.Label) screenshot directory is missing: $screenDir"
+        }
+        $latest = Get-ChildItem -Path $screenDir -Filter "*.png" | Sort-Object Name | Select-Object -Last 1
+        if (!$latest) {
+            Fail "$($entry.Label) screenshot directory has no PNGs: $screenDir"
+        }
+        $probe = & python tools\nsmb_screenshot_probe.py $latest.FullName --min-terrain-ratio $MinStageTerrainRatio --max-sky-ratio $MaxStageSkyRatio 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Fail "$($entry.Label) screenshot stage visibility probe failed for $($latest.FullName): $($probe -join ' | ')"
+        }
+    }
+}
+
+Write-Host "NSMB MvL LAN result verified: frames=$checked from=$FromFrame tolerance=$PositionTolerance remoteInputHits=$($RequireRemoteInputHits.IsPresent) player0Input=$($RequirePlayer0Input.IsPresent) player1Input=$($RequirePlayer1Input.IsPresent) starPickup=$($RequireStarPickup.IsPresent) starRespawn=$($RequireStarRespawn.IsPresent) noLifeLossUntil=$RequireNoLifeLossUntilFrame stageVisible=$($RequireStageVisibleScreenshots.IsPresent)"

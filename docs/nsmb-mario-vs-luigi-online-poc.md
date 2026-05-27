@@ -82,8 +82,10 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `RamDumpFrames` / `RamDumpInterval` を標準split helperへ通し、client local0/local1 などのMAINRAM差分を同じ手順で採取できるようにした。
   - `ForceStageFXSettings` を追加。`StageFX` actor settings の bit差分が上画面描画崩れの主因かを診断するための一時フック。runtime settings を直すだけでは上画面空表示は直らなかった。
   - `tools/nsmb_localplayer_ref_report.py` を追加。PC相対LDRが `Game::localPlayerID` を読む命令だけを抽出し、近傍シンボルへ紐づける。overlay10 の候補を `logs/nsmb-us-overlay10-localplayer-refs-20260527.csv` に出力済み。
+  - `tools/nsmb_screenshot_probe.py` を追加。上画面下部の地形/空ピクセル比率を見て、stateは一致しているが上画面が空、という失敗を自動検出する。
   - 標準split helper から `CallTrace` / `CallTraceAddrs` / `CallTraceStartFrame` / `CallTraceEndFrame` を渡せるようにした。静的候補のうち実行中に踏まれるものを短時間で確認するため。
   - verifier に `-RequireNoLifeLossUntilFrame` を追加。開始残機減少を「スクショ目視」ではなく、`player*Lives` / `player*Deaths` / `player*Dead` と `Game::losePlayerLife` / `Game::addPlayerDeath` call trace で fail できる。
+  - verifier に `-RequireStageVisibleScreenshots` を追加。最新スクリーンショットを `tools/nsmb_screenshot_probe.py` で確認し、sky-only 画面を成功扱いしない。
   - helper script は `logs/nsmvl-standard-helper-client-right-host-1800-20260527`, `logs/nsmvl-standard-helper-client-right-client-1800-20260527` で smoke と split verifier 通過。
   - host/client 別入力スクリプトを追加済み。
     - `tests/nsmb_us_direct_mvl_host_right.inputs`
@@ -321,6 +323,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - host/client で想定した player input が game-state trace に出る。
   - 対応する actor 座標が動く。
   - screenshot が MvL stage として読める。
+  - 画面確認は目視だけでなく、可能なら `-RequireStageVisibleScreenshots` で上画面地形ピクセルが存在することを確認する。
   - スター取得は `player*BattleStars` などの状態値で確認する。
 - ROM 生成物、savestate、巨大ログは git に含めない。
 - docs は古い追記を残し続けず、現在の方針、達成済み、課題、次作業が上から読める形に保つ。
