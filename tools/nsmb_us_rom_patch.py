@@ -466,6 +466,46 @@ def patch_stage_set_zoom_camera_player_id(overlays: dict[int, object], player_id
     return changes
 
 
+def patch_stagefx_display_player_id(overlays: dict[int, object], player_id: int) -> list[str]:
+    # StageFX reads Game::localPlayerID while showing start/result/times-up
+    # effects. Force only those display-side reads for client UX experiments;
+    # do not change the global Game::localPlayerID used by gameplay logic.
+    ov_id = 10
+    player_id &= 1
+    changes: list[str] = []
+    patches = [
+        # StageFX::updateVsTimesUp
+        (0x020FBA88, NOP, "StageFX::updateVsTimesUp localPlayerID literal for r6"),
+        (0x020FBA90, encode_mov_imm(6, player_id), "StageFX::updateVsTimesUp localPlayerID value r6"),
+        (0x020FBB6C, encode_mov_imm(0, player_id), "StageFX::updateVsTimesUp status localPlayerID r0"),
+        (0x020FBB74, NOP, "StageFX::updateVsTimesUp status localPlayerID load"),
+        # StageFX::updateLose
+        (0x020FBF1C, encode_mov_imm(0, player_id), "StageFX::updateLose localPlayerID r0"),
+        (0x020FBF24, NOP, "StageFX::updateLose localPlayerID load"),
+        # StageFX::updateClear
+        (0x020FC17C, encode_mov_imm(0, player_id), "StageFX::updateClear localPlayerID r0"),
+        (0x020FC184, NOP, "StageFX::updateClear localPlayerID load"),
+        # StageFX::updateStart
+        (0x020FC3AC, encode_mov_imm(0, player_id), "StageFX::updateStart localPlayerID r0 #1"),
+        (0x020FC3B4, NOP, "StageFX::updateStart localPlayerID load #1"),
+        (0x020FC3C8, encode_mov_imm(0, player_id), "StageFX::updateStart localPlayerID r0 #2"),
+        (0x020FC3CC, NOP, "StageFX::updateStart localPlayerID load #2"),
+        (0x020FC3D4, NOP, "StageFX::updateStart localPlayerID literal #3"),
+        (0x020FC3DC, encode_mov_imm(0, player_id), "StageFX::updateStart localPlayerID value r0 #3"),
+        (0x020FC404, encode_mov_imm(0, player_id), "StageFX::updateStart localPlayerID r0 #4"),
+        (0x020FC408, NOP, "StageFX::updateStart localPlayerID load #4"),
+        (0x020FC4D8, encode_mov_imm(1, player_id), "StageFX::updateStart localPlayerID r1 #5"),
+        (0x020FC4E0, NOP, "StageFX::updateStart localPlayerID load #5"),
+    ]
+    for addr, word, label in patches:
+        old = patch_overlay_words_by_id(overlays, ov_id, addr, [word])
+        changes.append(
+            f"{label} overlay{ov_id} @ 0x{addr:08X}: "
+            f"{old.hex()} -> {struct.pack('<I', word).hex()} player={player_id}"
+        )
+    return changes
+
+
 def build_direct_loadlevel_stub(
     start_addr: int,
     load_level_addr: int,
@@ -591,6 +631,7 @@ def patch_direct_mvl_entry(
     camera_player1_out_of_view_slot0: bool,
     camera_focus_loop_count: int | None,
     stage_set_zoom_camera_player_id: int | None,
+    stagefx_display_player_id: int | None,
 ) -> list[str]:
     arm9 = rom.loadArm9()
     overlays = rom.loadArm9Overlays()
@@ -697,6 +738,8 @@ def patch_direct_mvl_entry(
         changes.extend(patch_camera_focus_loop_count(overlays, camera_focus_loop_count))
     if stage_set_zoom_camera_player_id is not None:
         changes.extend(patch_stage_set_zoom_camera_player_id(overlays, stage_set_zoom_camera_player_id))
+    if stagefx_display_player_id is not None:
+        changes.extend(patch_stagefx_display_player_id(overlays, stagefx_display_player_id))
 
     rom.arm9 = arm9.save(compress=True)
     save_overlays(rom, overlays)
@@ -869,6 +912,8 @@ def main() -> int:
     p_camera_loop.add_argument("--count", type=lambda x: int(x, 0), default=2)
     p_set_zoom_camera = sub.add_parser("stage-set-zoom-camera-player-id")
     p_set_zoom_camera.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
+    p_stagefx_display = sub.add_parser("stagefx-display-player-id")
+    p_stagefx_display.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_direct = sub.add_parser("direct-mvl-entry")
     p_direct.add_argument("--scene", type=lambda x: int(x, 0), default=0x0F)
     p_direct.add_argument("--stage", type=lambda x: int(x, 0), default=0)
@@ -895,6 +940,7 @@ def main() -> int:
     p_direct.add_argument("--camera-player1-out-of-view-slot0", action="store_true")
     p_direct.add_argument("--camera-focus-loop-count", type=lambda x: int(x, 0), default=None)
     p_direct.add_argument("--stage-set-zoom-camera-player-id", type=lambda x: int(x, 0), default=None)
+    p_direct.add_argument("--stagefx-display-player-id", type=lambda x: int(x, 0), default=None)
     p_fake = sub.add_parser("fake-opponent")
     p_fake.add_argument("--force-confirm-load", action="store_true")
     p_fake.add_argument("--force-loadgame-progress", action="store_true")
@@ -934,6 +980,10 @@ def main() -> int:
         overlays = rom.loadArm9Overlays()
         changes = patch_stage_set_zoom_camera_player_id(overlays, args.player_id)
         save_overlays(rom, overlays)
+    elif args.cmd == "stagefx-display-player-id":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_stagefx_display_player_id(overlays, args.player_id)
+        save_overlays(rom, overlays)
     elif args.cmd == "direct-mvl-entry":
         changes = patch_direct_mvl_entry(
             rom,
@@ -963,6 +1013,7 @@ def main() -> int:
             camera_player1_out_of_view_slot0=args.camera_player1_out_of_view_slot0,
             camera_focus_loop_count=args.camera_focus_loop_count,
             stage_set_zoom_camera_player_id=args.stage_set_zoom_camera_player_id,
+            stagefx_display_player_id=args.stagefx_display_player_id,
         )
     elif args.cmd == "fake-opponent":
         changes = patch_fake_opponent(

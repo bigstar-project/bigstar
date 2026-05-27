@@ -30,7 +30,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - host/client の上画面で Mario/Luigi の表示位置が違って見える問題は、単なるカメラ差として扱わない。`camera-full-p1` ROM patch は3D actor側とBG/地形側のカメラを揃えられず、地形相対の表示が壊れる。`Game::localPlayerID=1 + camera focus loop` では空画面は消えるが、client の `player1Dead/lives` と actor Y が host から分岐するため、同期用ゲームロジックへ `localPlayerID=1` を見せるルートは本筋から外す。右下ストックアイテム、local player UI、勝敗判定は「正準シミュレーションを壊さない表示/overlay/限定patch」として別に解く。
 - 開始直後に右上Luigi残機が `5 -> 4` になる問題は、Goomba接触ではない。根本経路は `Player::vsPipeTransitState()` 完了後の player1 が `StageActor::isOutOfViewVertical()` で画面外扱いになり、`Player::pitDeathTransitState()` -> `Player::beginDeathTransition()` -> `Game::playerDead[1]=1` -> `PlayerBase::onDefeated()` -> `Game::losePlayerLife(1)` / `Game::addPlayerDeath(1)` と進む流れ。direct entry では `Stage::cameraY[1]` / `Stage::cameraHeight[1]` が 0 のままなので player1 の縦画面外判定だけが壊れる。開始限定の残機/死亡カウンタ補正は最終修正として扱わない。2026-05-27時点で、`StageActor::isOutOfViewVertical` の cameraHeight が 0 の player slot だけ slot0 にfallbackする ROM patch で開始死亡を解消できた。確認ログ `logs/smvl-rootcheck-fallback-host-1300-20260527`, `logs/smvl-rootcheck-fallback-client-1300-20260527` では frame 1290 まで `player0Lives=5`, `player1Lives=5`, `player0Dead=0`, `player1Dead=0`、life call は初期 `setPlayerLives` のみ。
 - FPSが低い。JIT OFFが10fps級の主因だった。JIT ON + hash/trace/screenshotなしでは単独hostが約67fps、ローカル2プロセス同時では約47-55fps。実2PCでは1PCあたり1インスタンスなので単独hostの数値が近い。ローカル2プロセス検証速度は引き続き改善対象。
-- Luigi死亡中に敵やブロックアニメが止まるように見える。NSMB本来の死亡/リスポーン停止なのか、direct entry/PacketBridgeの副作用なのかを trace とスクリーンショットで分ける。
+- Luigi死亡中に敵やブロックアニメが止まるように見える。frame 1923以降の trace では Luigi死亡演出中に `player0UpdateLocked=1` も立つため、現時点ではNSMB本体の死亡演出停止である可能性が高い。direct entry/PacketBridgeの副作用かどうかは、通常LocalMP/実機相当ルートとの比較が残る。
 
 ## 実装済み
 
@@ -108,6 +108,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `tools/nsmb_us_rom_patch.py camera-player1-out-of-view-slot0` を追加。`isOutOfViewVertical(player1)` だけ slot0 camera bounds を使い、player1 camera生成と死亡判定を分離する。
   - `tools/nsmb_us_rom_patch.py camera-focus-loop-count --count 2` を追加。overlay0 `0x020BAAE4` / `0x020BAC18` の camera focus loop count取得を `mov r0,#2` に置換し、JIT有効でも `updatePlayerCameraFocus(1)` が走るようにする。
   - `tools/nsmb_us_rom_patch.py stage-set-zoom-camera-player-id` を追加。`Stage::setZoom` 内の `Stage::cameraX/Width` literal を player slot別に差し替え、StageCamera以外の描画camera入力を検証できるようにする。
+  - `tools/nsmb_us_rom_patch.py stagefx-display-player-id` を追加。`StageFX::updateStart` / `updateLose` / `updateClear` / `updateVsTimesUp` 内の表示系 `Game::localPlayerID` 読み取りだけを固定し、ゲーム全体の `Game::localPlayerID` を変えずに開始/勝敗/タイムアップ表示だけをLuigi側に寄せられるか検証できる。
 
 ## 最新の検証結果
 
@@ -230,11 +231,12 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - ただし camera focus loop を `player1` まで回すと、`Stage::cameraY[1]` が一時的に負方向値になり、`StageActor::isOutOfViewVertical(..., playerID=1)` が再び `Player::pitDeathTransitState()` へ入る。`Game::localPlayerID=1 + ForceCameraFocusLoopCountClientOnly` は上画面の sky-only を消し、下画面HUD/ストックもLuigi側らしくなるが、clientだけ `player1Dead=1`, `player1Lives=4`, actor Y divergence になり host と同期不能。ログ: `logs/smvl-local1-camera-loop2-clientonly-host-1300-20260527`, `logs/smvl-local1-camera-loop2-clientonly-client-1300-20260527`。
   - `camera-player1-out-of-view-slot0 + camera-focus-loop-count=2` のROM patch版では、JIT有効でも host/client state と開始残機を維持したまま `Stage::camera* [1]` を生成できた。clientだけ `StageCamera` p1 patch を当てても verifier は通る。ログ: `logs/smvl-romloop2-camerafullp1-host-1300-20260527`, `logs/smvl-romloop2-camerafullp1-client-1300-20260527`。
   - ただしその状態でも上画面スクリーンショットはまだほぼMario側表示に見える。`stageDisplayCameraX` と view matrix は client で p1側に変わるが、画像差分は主に小さいsprite領域のみだった。`Stage::setZoom` の cameraX/Width を p1 slotへ向けても verifier は通るが、上画面は大きく変わらない。ログ: `logs/smvl-romloop2-camerafullp1-setzoomp1-host-1300-20260527`, `logs/smvl-romloop2-camerafullp1-setzoomp1-client-1300-20260527`, `logs/smvl-romloop2-camerafullp1-setzoomp1-host-2800-20260527`, `logs/smvl-romloop2-camerafullp1-setzoomp1-client-2800-20260527`。
+  - `stagefx-display-player-id=1` を client ROMだけに当てた検証では、frame 1300 まで開始残機は減らず、frame 2800 まで host/client のplayer座標、死亡状態、actor状態は一致した。ログ: `logs/smvl-stagefx-display-p1-host-1300c-20260527`, `logs/smvl-stagefx-display-p1-client-1300c-20260527`, `logs/smvl-stagefx-display-p1-host-2800-20260527`, `logs/smvl-stagefx-display-p1-client-2800-20260527`。ただし1300/2800スクショでは下画面ストックや上画面カメラの違いはまだ見えないため、これは「StageFX表示だけは限定patchしてもstateを壊さない」という検証結果に留める。
   - 現時点では、上画面は共有カメラ表示のままでもMario/Luigiの地形相対位置は一致する。localPlayerIDをゲームロジックに見せるより、下画面HUD/ストック/勝敗表示を正準stateから読み替える方向を優先する。
   - よって global `Game::localPlayerID=1` はカメラだけでなく `StageFX` / object生成 / result/UI 側まで切り替える。最終ルートとしては副作用が大きく、当面は採用しない。
   - `Game::loadLevel(... playerID=1 ...)` まで揃えた p1 direct ROM も検証したが、client側で stage actor / player actor / star actor が生成されず、`Ready!` または黒画面のまま進まない。ready/transfer/files 系補助を全部入れても同じ。ログ: `logs/smvl-p1-loadlevel-local1-client-1300-20260527`, `logs/smvl-p1-full-local1-client-1300-20260527`, `logs/smvl-p1-full-local0-client-1300-20260527`。
   - p0 direct ROM で stage/player actor 生成後に `Game::localPlayerID=1` へ遅延切り替えする検証も追加。frame 1300 で切り替えると client が `ARM9 pc=00000004` prefetch abort になった。スクリーンショットは直前の通常画面が残るが、実行状態は壊れる。ログ: `logs/smvl-delayed-local1-client-1800-20260527`。
-  - 次の表示方針は、ゲーム内 `Game::localPlayerID=0` の正準シミュレーションを維持し、Luigi側UXは display player id を読む箇所を限定patchするか、emulator側overlayでHUD/結果表示を差し替える方向。勝敗判定やストックアイテムを壊さないため、カメラだけを単独で変える実装は成功扱いにしない。
+  - 次の表示方針は、ゲーム内 `Game::localPlayerID=0` の正準シミュレーションを維持し、Luigi側UXは display player id を読む箇所を限定patchするか、emulator側overlayでHUD/結果表示を差し替える方向。勝敗判定やストックアイテムを壊さないため、カメラだけを単独で変える実装は成功扱いにしない。`StageFX` は限定patch候補としてstate一致検証を通過したが、Item/HUD系は gameplay消費処理と混ざっているため未採用。
   - 注意: `-PacketBridgeDirectCapture` を外すと split client で player1 入力が packet に乗らない。現在の安定条件には必須として扱う。
   - 注意: 正準化した `Game::localPlayerID=0` は同期検証には有効だが、clientがLuigiとして遊べる最終UXではない。右下ストックアイテム、local player UI、勝敗判定がlocal player依存なら、カメラだけを変えても最終要件を満たせない。
   - 当面は「ゲーム内 `Game::localPlayerID` は host/client とも `0` に正準化し、表示は通常ROM同士で破綻しない状態を基準にする」。Luigi視点/UILayout/勝敗表示は、状態同期とは別に解く。
@@ -320,11 +322,12 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ## 次にやること
 
-1. Luigi側UXを `Game::localPlayerID=1` 全体切り替えではなく、正準 `Game::localPlayerID=0` のまま display/HUD/result 境界だけで作れるか確認する。まず overlay10 内の `Game::localPlayerID` 参照を関数単位に分類し、StageCamera/StageFX/HUD/result のどれが安全に差し替え可能かを分ける。
+1. Luigi側UXを `Game::localPlayerID=1` 全体切り替えではなく、正準 `Game::localPlayerID=0` のまま display/HUD/result 境界だけで作れるか確認する。`StageFX` は限定patchでstate一致を確認済み。次は下画面HUD/ストックアイテムがどの関数で描画/消費されるかを分ける。
 2. 上画面は state verifier だけで成功扱いにせず、スクリーンショット上の地形相対位置も確認する。actor座標一致と表示一致を別物として扱う。
-3. 開始残機減少は fallback ROM で再現検出・回避できているが、ユーザー環境で旧ROM/旧buildを使うと再発しうる。標準helperが使うROM名、生成条件、ログ上の life call 有無を明確にする。
-4. Luigi死亡後のstage停止が `Stage::actorFreezeFlag` や player transition status によるものか確認する。
-5. 実WAN相当の評価は、ENet reliable 前提で遅延/ジッタ中心に続ける。packet lossは「reliable retransmitによる遅延」としてまず扱う。
+3. Item 系の local player 参照は、表示と gameplay 消費処理が混ざっている。8コインitem自動化は一旦保留だが、ROM disasm と runtime call traceで、右下ストック表示だけに関係する箇所を見つける。actor/state verifierを通らないpatchは採用しない。
+4. 開始残機減少は fallback ROM で再現検出・回避できているが、ユーザー環境で旧ROM/旧buildを使うと再発しうる。標準helperが使うROM名、生成条件、ログ上の life call 有無を明確にする。
+5. Luigi死亡後のstage停止がNSMB本体仕様かどうか、通常LocalMP/実機相当ルートとの比較方法を決める。
+6. 実WAN相当の評価は、ENet reliable 前提で遅延/ジッタ中心に続ける。packet lossは「reliable retransmitによる遅延」としてまず扱う。
 
 ## 検証ルール
 
