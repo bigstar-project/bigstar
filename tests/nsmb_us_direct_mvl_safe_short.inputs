@@ -1,0 +1,25 @@
+# Direct MvL hybrid route safety probe.
+# Keep Mario idle and move Luigi left only long enough to avoid the first Goomba.
+
+inst0 0-619 NONE
+inst0 620-627 DOWN
+inst0 628-659 NONE
+inst0 660-667 A
+inst0 668-899 NONE
+inst0 900-907 A
+inst0 908-1259 NONE
+inst0 1260-1267 A
+inst0 1268-3600 NONE
+
+inst1 0-619 NONE
+inst1 620-627 DOWN
+inst1 628-659 NONE
+inst1 660-667 A
+inst1 668-899 NONE
+inst1 900-907 A
+inst1 908-1259 NONE
+inst1 1260-1267 A
+inst1 1268-1799 NONE
+inst1 1800-1960 A
+inst1 1961-3600 NONE
+inst1 3001-3600 NONE
