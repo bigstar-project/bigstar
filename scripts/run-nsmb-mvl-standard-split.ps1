@@ -61,6 +61,7 @@ param(
     [int]$ForcePlayerCollectedStars1 = 0,
     [switch]$NoCameraFallbackRom,
     [switch]$ForceStageCameraSlot,
+    [switch]$ForceStageCameraSlotVerticalOnly,
     [int]$ForceStageCameraSlotStartFrame = 850,
     [int]$ForceStageCameraSlotEndFrame = 1008,
     [int]$ForceStageCameraSlotSource = 0,
@@ -273,6 +274,9 @@ if ($ForceStageCameraSlot) {
         "-ForceStageCameraSlotSource", "$ForceStageCameraSlotSource",
         "-ForceStageCameraSlotDest", "$ForceStageCameraSlotDest"
     )
+    if ($ForceStageCameraSlotVerticalOnly) {
+        $common += "-ForceStageCameraSlotVerticalOnly"
+    }
 }
 if ($ForceStageFXSettings) {
     $common += @(

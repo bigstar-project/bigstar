@@ -2336,15 +2336,20 @@ static bool HandleNSMLPacketReadByteBridge(ARM* cpu, u32 instrAddr)
 
     const u32 value = packet[offset];
     static u32 traceCount = 0;
-    if (traceLower && (traceCount < 64 || offset == 0x29 || (traceCount % 600) == 0))
+    if (traceLower && (traceCount < 64 || offset == 0x29 || offset <= 7 || (traceCount % 600) == 0))
     {
-        printf("NSMB PacketBridge lower: readPacketByte 0200E978 player=%u off=0x%02X frame=%u tick=0x%04X pktTick=0x%04X action=0x%02X -> 0x%02X lr=%08X\n",
+        printf("NSMB PacketBridge lower: readPacketByte 0200E978 player=%u off=0x%02X frame=%u tick=0x%04X pktTick=0x%04X keys=0x%04X action=0x%02X b5=0x%02X b6=0x%02X b7=0x%02X bit=0x%02X -> 0x%02X lr=%08X\n",
             player,
             offset,
             cpu->NDS.NumFrames,
             NSMLPacketBridgeCanonicalTick(cpu->NDS) & 0xFFFF,
             static_cast<u32>(packet[0] | (packet[1] << 8)),
+            static_cast<u32>(packet[2] | (packet[3] << 8)),
             packet[4],
+            packet[5],
+            packet[6],
+            packet[7],
+            packet[0x29],
             value,
             cpu->R[14]);
     }
@@ -2800,7 +2805,7 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
                 if (logPath[0])
                     cfg.LogFile = fopen(logPath, "w");
                 if (cfg.LogFile)
-                    fprintf(cfg.LogFile, "frame,pc,tick,player,op,offset,value,hit\n");
+                    fprintf(cfg.LogFile, "frame,pc,tick,player,op,offset,value,hit,pktTick,pktKeys,pktAction,pktByte5,pktByte6,pktByte7,pktBit\n");
             }
             if (path && path[0])
             {
@@ -2976,8 +2981,22 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
             op == Op::Byte ? "byte" :
             op == Op::Tick ? "tick" :
             op == Op::Action ? "action" : "none";
-        fprintf(cfg.LogFile, "%u,%08X,%04X,%u,%s,%u,%08X,%d\n",
-            cpu->NDS.NumFrames, instrAddr, tick, player, opname, offset, value, hit ? 1 : 0);
+        fprintf(cfg.LogFile, "%u,%08X,%04X,%u,%s,%u,%08X,%d,%04X,%04X,%02X,%02X,%02X,%02X,%02X\n",
+            cpu->NDS.NumFrames,
+            instrAddr,
+            tick,
+            player,
+            opname,
+            offset,
+            value,
+            hit ? 1 : 0,
+            static_cast<u32>(selectedPacket[0] | (selectedPacket[1] << 8)),
+            static_cast<u32>(selectedPacket[2] | (selectedPacket[3] << 8)),
+            selectedPacket[4],
+            selectedPacket[5],
+            selectedPacket[6],
+            selectedPacket[7],
+            selectedPacket[0x29]);
         fflush(cfg.LogFile);
     }
 

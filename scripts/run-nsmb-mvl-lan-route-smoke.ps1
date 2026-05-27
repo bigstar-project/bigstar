@@ -204,6 +204,7 @@ param(
     [string]$ForceStageSceneWord154 = "1",
     [string]$ForceStageSceneWord160 = "0xDA",
     [switch]$ForceStageCameraSlot,
+    [switch]$ForceStageCameraSlotVerticalOnly,
     [int]$ForceStageCameraSlotStartFrame = 0,
     [int]$ForceStageCameraSlotEndFrame = 0,
     [int]$ForceStageCameraSlotSource = 0,
@@ -1124,8 +1125,10 @@ function Start-MelonLANProcess {
         $env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_END_FRAME = "$ForceStageCameraSlotEndFrame"
         $env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_SOURCE = "$ForceStageCameraSlotSource"
         $env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_DEST = "$ForceStageCameraSlotDest"
+        if ($ForceStageCameraSlotVerticalOnly) { $env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_VERTICAL_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_VERTICAL_ONLY -ErrorAction SilentlyContinue }
     } else {
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_VERTICAL_ONLY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_END_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_SOURCE -ErrorAction SilentlyContinue

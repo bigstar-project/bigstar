@@ -13,7 +13,9 @@ param(
     [int]$RequireNoLifeLossUntilFrame = 0,
     [switch]$RequireStageVisibleScreenshots,
     [double]$MinStageTerrainRatio = 0.2,
-    [double]$MaxStageSkyRatio = 0.8
+    [double]$MaxStageSkyRatio = 0.8,
+    [double]$MaxStageGreenBackdropRatio = 0.5,
+    [double]$MaxStageDominantRatio = 0.85
 )
 
 $ErrorActionPreference = "Stop"
@@ -255,7 +257,7 @@ if ($RequireStageVisibleScreenshots) {
         if (!$latest) {
             Fail "$($entry.Label) screenshot directory has no PNGs: $screenDir"
         }
-        $probe = & python tools\nsmb_screenshot_probe.py $latest.FullName --min-terrain-ratio $MinStageTerrainRatio --max-sky-ratio $MaxStageSkyRatio 2>&1
+        $probe = & python tools\nsmb_screenshot_probe.py $latest.FullName --band-start 64 --band-end 192 --min-terrain-ratio $MinStageTerrainRatio --max-sky-ratio $MaxStageSkyRatio --max-green-backdrop-ratio $MaxStageGreenBackdropRatio --max-dominant-ratio $MaxStageDominantRatio 2>&1
         if ($LASTEXITCODE -ne 0) {
             Fail "$($entry.Label) screenshot stage visibility probe failed for $($latest.FullName): $($probe -join ' | ')"
         }

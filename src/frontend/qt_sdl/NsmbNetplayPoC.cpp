@@ -960,6 +960,7 @@ struct State
     melonDS::u32 ForceStageSceneActiveEndFrame = 0;
     bool ForceStageSceneActiveLogged[16] {};
     bool ForceStageCameraSlotEnabled = false;
+    bool ForceStageCameraSlotVerticalOnly = false;
     melonDS::u32 ForceStageCameraSlotStartFrame = 0;
     melonDS::u32 ForceStageCameraSlotEndFrame = 0;
     int ForceStageCameraSlotSource = 0;
@@ -1631,10 +1632,15 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     if (G.PacketBridgeTraceEnabled && newTick)
                     {
                         const melonDS::u32 keys = packet.Packet[2] | (packet.Packet[3] << 8);
-                        std::printf("NSMB PacketBridge: recv player=%u tick=0x%04X keys=0x%04X remoteFrame=%u localFrame=%u pending=%zu\n",
+                        std::printf("NSMB PacketBridge: recv player=%u tick=0x%04X keys=0x%04X action=0x%02X b5=0x%02X b6=0x%02X b7=0x%02X bit=0x%02X remoteFrame=%u localFrame=%u pending=%zu\n",
                             packet.Player,
                             packet.Tick,
                             keys,
+                            packet.Packet[4],
+                            packet.Packet[5],
+                            packet.Packet[6],
+                            packet.Packet[7],
+                            packet.Packet[0x29],
                             packet.Frame,
                             localFrame,
                             G.PendingNSMLPackets.size());
@@ -1916,10 +1922,15 @@ void SendNSMLPacketLocked(melonDS::u32 frame, melonDS::u32 player, melonDS::u32 
     {
         G.LastSentNSMLPacketTick = tick;
         const melonDS::u32 keys = packetBytes[2] | (packetBytes[3] << 8);
-        std::printf("NSMB PacketBridge: send player=%u tick=0x%04X keys=0x%04X frame=%u\n",
+        std::printf("NSMB PacketBridge: send player=%u tick=0x%04X keys=0x%04X action=0x%02X b5=0x%02X b6=0x%02X b7=0x%02X bit=0x%02X frame=%u\n",
             player,
             tick,
             keys,
+            packetBytes[4],
+            packetBytes[5],
+            packetBytes[6],
+            packetBytes[7],
+            packetBytes[0x29],
             frame);
     }
 }
@@ -4807,16 +4818,18 @@ void ForceStageCameraSlotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::N
     if (width == 0 || height == 0)
         return;
 
-    nds->ARM9Write32(kStageCameraXAddr + sizeof(melonDS::u32) * dst, x);
+    if (!G.ForceStageCameraSlotVerticalOnly)
+        nds->ARM9Write32(kStageCameraXAddr + sizeof(melonDS::u32) * dst, x);
     nds->ARM9Write32(kStageCameraYAddr + sizeof(melonDS::u32) * dst, y);
-    nds->ARM9Write32(kStageCameraWidthAddr + sizeof(melonDS::u32) * dst, width);
+    if (!G.ForceStageCameraSlotVerticalOnly)
+        nds->ARM9Write32(kStageCameraWidthAddr + sizeof(melonDS::u32) * dst, width);
     nds->ARM9Write32(kStageCameraHeightAddr + sizeof(melonDS::u32) * dst, height);
 
     if (!G.ForceStageCameraSlotLogged[instanceID])
     {
         std::printf(
             "NSMB Test: mirror Stage camera slot inst=%d frame=%u range=%u-%u src=%d dst=%d "
-            "x=%08X y=%08X width=%08X height=%08X\n",
+            "x=%08X y=%08X width=%08X height=%08X verticalOnly=%d\n",
             instanceID,
             frame,
             G.ForceStageCameraSlotStartFrame,
@@ -4826,7 +4839,8 @@ void ForceStageCameraSlotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::N
             x,
             y,
             width,
-            height);
+            height,
+            G.ForceStageCameraSlotVerticalOnly ? 1 : 0);
         G.ForceStageCameraSlotLogged[instanceID] = true;
     }
 }
@@ -7995,6 +8009,7 @@ void InitFromEnvironment()
     G.ForceStageSceneActiveEndFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_END_FRAME", 0)));
     G.ForceStageCameraSlotEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT");
+    G.ForceStageCameraSlotVerticalOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_VERTICAL_ONLY");
     G.ForceStageCameraSlotStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_START_FRAME", 0)));
     G.ForceStageCameraSlotEndFrame = static_cast<melonDS::u32>(
