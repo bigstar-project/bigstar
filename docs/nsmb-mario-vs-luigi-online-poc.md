@@ -41,8 +41,12 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `logs/smvl-hybrid-helper-3000-20260528`
     - `scripts/run-nsmb-mvl-hybrid-split.ps1` から再現
     - frame 1500-3000 で `-RequirePlayer0Input -RequirePlayer1Input -RequireStageVisibleScreenshots` 通過
+  - `logs/smvl-hybrid-helper-renderdefault-3000-20260528`
+    - hybrid helperの標準ROM生成で `Player::renderModel visible arg` patchをhost/client双方に適用
+    - client上画面でMario/Luigi両方のplayer model表示を確認
+    - frame 1500-3000 でstate verifier通過
 - 最新の未解決:
-  - client表示はまだ広いQAが必要。Goombaについては `Goomba::onRender` と `OAM/drawSprite` がclientでも呼ばれ、単独スクリーンショットで描画を確認したため、直近の差分はcamera差分の可能性が高い。敵、アイテム、死亡演出、勝敗演出がLuigi視点で自然に見えるかを継続確認する。
+  - client表示はまだ広いQAが必要。Goombaについては `Goomba::onRender` と `OAM/drawSprite` がclientでも呼ばれ、単独スクリーンショットで描画を確認したため、直近の差分はcamera差分の可能性が高い。player modelはhost/client双方へ同じrender-visible patchを当てると表示できるが、cullingを雑に外しているため最終品質としては要改善。
   - `tests/nsmb_us_direct_mvl_avoid_goomba.inputs` でもMario/Luigiが後半に死亡する。これは同期失敗ではなく入力経路の問題なので、長時間検証用の自然操作スクリプトを作る必要がある。
   - `PacketBridgeLookupTickDelay=10` ではclientのlocal player1 packetがhostより先に反映されることがある。delay 60 では同期できたため、最終的にはlockstep待ち/入力遅延の自動調整が必要。
   - client側のHUD/カメラ/StageFXはplayer1へ寄せているが、trace上の `Game::localPlayerID` はcanonical 0 のまま。勝敗演出、ストックアイテム使用、死亡演出がLuigi視点として成立するかは未検証。
@@ -52,7 +56,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - hybrid helperを使って2PC相当のhost/client分離実行へ移し、同じROM/PacketBridge条件をWAN向けに検証する。
 - `PacketBridgeLookupTickDelay=60` は固定条件として入った。次は固定値ではなく、lockstep待ち/入力遅延の自動調整へ進める。
 - 死亡しない長時間入力スクリプトを作り、3000 frame 以上で `RequireNoLifeLossUntilFrame` も通す。
-- client Luigi視点で、敵/アイテム/死亡/勝敗演出/ストックHUDが自然に成立するかを、スクリーンショットと状態値の両方で検証する。
+- client Luigi視点で、敵/アイテム/死亡/勝敗演出/ストックHUDが自然に成立するかを、スクリーンショットと状態値の両方で検証する。特にrender-visible patchは表示改善には有効だが、clientだけに当てるとstate差分が出るため必ずhost/client双方へ同じpatchを当てる。
 
 ## 実装済み
 
@@ -151,7 +155,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `tools/nsmb_us_rom_patch.py player-view-transit-local-player-id` / `player-vs-pipe-local-player-id` を追加。`Player::viewTransitState` / `Player::vsPipeTransitState` 内だけlocalPlayerID比較を固定する診断patch。localID1 object set不一致の直接解決にはならなかった。
   - `tools/nsmb_us_rom_patch.py stage-entity-skip-render-player-id` を追加。hybrid client表示で `StageEntity::skipRender` のcamera slotだけplayer1へ寄せる診断patch。Goombaは後続のcalltraceでclient側でもrender pathが呼ばれることを確認済み。
   - `tools/nsmb_us_rom_patch.py player-render-wrap-x-offset` は負方向offsetも受け取れるようにした。単純なdisplay X wrap補正ではlocalID1のplayer model欠落は解消しなかった。
-  - `scripts/generate-nsmb-mvl-hybrid-roms.ps1` / `scripts/run-nsmb-mvl-hybrid-split.ps1` を追加。canonical local0 simulation + client player1表示/UI/input の成功条件を再現するための標準helper。
+  - `scripts/generate-nsmb-mvl-hybrid-roms.ps1` / `scripts/run-nsmb-mvl-hybrid-split.ps1` を追加。canonical local0 simulation + client player1表示/UI/input の成功条件を再現するための標準helper。標準生成ではhost/client双方へ `player-render-model-visible` も当て、片側だけの描画patch副作用を避ける。
   - `tests/nsmb_us_direct_mvl_avoid_goomba.inputs` を追加。Luigiを早めに動かし、PacketBridge入力遅延とstate同期を検証しやすくするための暫定入力スクリプト。
   - `TraceNSMLPlayerRender` を追加。`Player::onRender`, `Player::renderModel()`, `Player::renderModel(bool)` のframe, actor, playerID, characterID, visibleFlag, display vector, model pointerをstdoutに出せる。
   - `ForcePlayerActorPosition` を追加。player actor位置/character/playerIDを一時的に書き換え、描画欠落が座標・キャラ・playerIDのどれに依存するかを切り分ける診断フック。
@@ -165,6 +169,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - `tests/nsmb_us_direct_mvl_avoid_goomba.inputs` と `PacketBridgeLookupTickDelay=60` の組み合わせでは、`logs/smvl-hybrid-avoidgoomba-delay60-split-3000-20260528` が frame 1500-3000 で verifier 通過。player0/player1入力が入り、actor座標、敵、死亡/残機状態がhost/clientで一致した。後半に死亡はあるが両者一致しており、desyncではなく入力ルートの問題。
 - `PacketBridgeLookupTickDelay=10` では、clientが自分のplayer1 packetをhostより早く読んで frame 1560 から差分が出た。入力遅延/lockstep制御はWAN対戦の必須要素。
 - hybrid client表示のGoombaについては、`Goomba::onRender` と `OAM/drawSprite` がclientでも呼ばれ、単独スクリーンショットで描画を確認した。split screenshot上の見え方差分はcamera差分の可能性が高く、現在は「Goomba render gateが壊れている」とは扱わない。
+- `player-render-model-visible` をclientだけに当てると frame 1620 でstate mismatchした。host/client双方に同じpatchを当てると `logs/smvl-hybrid-render-visible-both-3000-20260528` と `logs/smvl-hybrid-helper-renderdefault-3000-20260528` で verifier 通過。描画関数にも状態副作用があり得るため、表示patchは左右で一致させる。
 
 ### FPS / 検証速度
 

@@ -1,7 +1,8 @@
 param(
     [string]$SourceRom = "roms\nsmb-us.nds",
-    [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host.tmp.nds",
-    [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-hybrid.tmp.nds",
+    [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-hybrid-render.tmp.nds",
+    [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-hybrid-render.tmp.nds",
+    [switch]$NoRenderVisiblePatch,
     [switch]$PatchStageEntitySkipRender
 )
 
@@ -11,9 +12,15 @@ if (!(Test-Path $SourceRom)) {
     throw "Source ROM not found: $SourceRom"
 }
 
+$directHostRom = if ($NoRenderVisiblePatch) {
+    $HostRom
+} else {
+    [System.IO.Path]::ChangeExtension($HostRom, ".direct.tmp.nds")
+}
+
 & python tools\nsmb_us_rom_patch.py `
     --rom $SourceRom `
-    --out $HostRom `
+    --out $directHostRom `
     direct-mvl-entry `
     --entrance 0xff `
     --flag 1 `
@@ -24,6 +31,13 @@ if (!(Test-Path $SourceRom)) {
     --call-load-mvsl-files-after `
     --camera-player1-out-of-view-slot0 `
     --camera-focus-loop-count 2
+
+if (-not $NoRenderVisiblePatch) {
+    & python tools\nsmb_us_rom_patch.py `
+        --rom $directHostRom `
+        --out $HostRom `
+        player-render-model-visible
+}
 
 $cameraRom = [System.IO.Path]::ChangeExtension($ClientRom, ".camera.tmp.nds")
 $stageFxRom = [System.IO.Path]::ChangeExtension($ClientRom, ".stagefx.tmp.nds")
@@ -54,6 +68,9 @@ if ($PatchStageEntitySkipRender) {
 }
 
 Remove-Item -Force $cameraRom, $stageFxRom, $inventoryRom -ErrorAction SilentlyContinue
+if (-not $NoRenderVisiblePatch) {
+    Remove-Item -Force $directHostRom -ErrorAction SilentlyContinue
+}
 
 Write-Host "wrote hybrid host ROM: $HostRom"
 Write-Host "wrote hybrid client ROM: $ClientRom"

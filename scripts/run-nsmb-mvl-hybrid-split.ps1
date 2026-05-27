@@ -6,8 +6,8 @@ param(
     [int]$Port = 8237,
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$SourceRom = "roms\nsmb-us.nds",
-    [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host.tmp.nds",
-    [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-hybrid.tmp.nds",
+    [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-hybrid-render.tmp.nds",
+    [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-hybrid-render.tmp.nds",
     [string]$InputScript = "tests\nsmb_us_direct_mvl_avoid_goomba.inputs",
     [string]$LogDir = "logs\nsmvl-hybrid-split",
     [int]$PacketBridgeStartFrame = 1500,
@@ -19,6 +19,7 @@ param(
     [int]$GameStateTraceInterval = 60,
     [int]$WaitTimeoutMs = 1200000,
     [switch]$RegenerateRoms,
+    [switch]$NoRenderVisiblePatch,
     [switch]$PatchStageEntitySkipRender,
     [switch]$HashLog,
     [switch]$SkipVerify
@@ -42,6 +43,9 @@ if ($RegenerateRoms -or !(Test-Path $HostRom) -or !(Test-Path $ClientRom)) {
     )
     if ($PatchStageEntitySkipRender) {
         $generateArgs += "-PatchStageEntitySkipRender"
+    }
+    if ($NoRenderVisiblePatch) {
+        $generateArgs += "-NoRenderVisiblePatch"
     }
     $generateCmd = "& .\scripts\generate-nsmb-mvl-hybrid-roms.ps1 " + (($generateArgs | ForEach-Object { Format-Arg $_ }) -join " ")
     Invoke-Expression $generateCmd
