@@ -31,8 +31,9 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 - 2026-05-28 現在の最優先は、`client localPlayerID=1` で「上画面に地形とlocal playerが自然に出る」状態を作ること。host/clientのactor stateは `player0/player1 lives=5`, dead=0 で揃うが、client側の表示初期化が壊れる。
 - `client localPlayerID=1` の緑一色上画面は、overlay0 の StageLayout 系 `Game::localPlayerID` 参照を0読みへaliasすると地形が戻る。したがって、ステージ地形/BG欠落の主因はStageLayout/地形描画側のlocal player camera選択。
-- 地形を戻してもplayer 3D modelが出ない問題は別。`Player::onRender` / `Player::renderModel` / `NNS_G3dDraw` はclientでも呼ばれるが、表示用X/wrap/camera判定がhostと違い、clientではplayerが画面外扱いになる。`Player::onRender` の表示用Xへ `+0x400000` を足し、StageCameraをplayer0側へ戻すとMarioは表示されるため、3D描画自体は壊れていない。
-- 次は「StageLayoutは地形用に安定cameraを使う」「Player modelはLuigi側cameraで画面内になるwrap/vertical cameraを使う」を分けて詰める。カメラをplayer0に戻すだけではLuigi側プレイにならないので、これは成功条件ではなく診断結果として扱う。
+- StageLayoutの緑画面は、全layout aliasではなく `0x020BACC0` だけでも消える。さらに狭くすると、StageLayout更新関数末尾の `0x020BAC84` / `0x020BAC90` の view/player 引数を player0 固定にするだけでも地形は戻る。これは「緑画面」はStageLayout最終view反映のplayer1経路に絞れる、という結果。
+- 地形を戻してもplayer 3D modelが出ない問題は別。`Player::onRender` / `Player::renderModel` / `NNS_G3dDraw` はclientでも呼ばれるが、表示用X/wrap/camera判定がhostと違い、clientではplayerが上画面に出ない。`Player::onRender` の表示用Xへ `+0x400000` を足し、StageCameraをplayer0側へ戻すとMarioは表示されるため、3D描画自体は壊れていない。
+- `stage-layout-final-view-player-id --player-id 0` と `player-render-wrap-x-offset` を組み合わせてもLuigi/player modelは戻らない。したがって次は、StageLayoutの地形view補正とPlayer modelの3D view/projection補正を分けて追う。カメラをplayer0に戻すだけではLuigi側プレイにならないので、これは成功条件ではなく診断結果として扱う。
 - 最優先gateは「試合開始直後の画面/actor構成」。host側にMarioだけ、client側にMario/Luigiが出ていない、または地形相対の表示が壊れている状態は失敗として扱う。ここを飛ばしてストックアイテムや死亡演出の検証へ進まない。
 - `localPlayerID=0` 両固定 + 表示patch方式は、clientのLuigi側プレイ実現として将来性が低い。次は `localPlayerID=1` client を本筋に戻し、そこで壊れる actor生成/StageStart/packet境界を根本原因として追う。
 - clientでLuigi側を実際にプレイできること、つまりカメラ追従、HUD、ストックアイテム、死亡/勝敗演出をNSMB本体のlocal player処理として自然に動かすことを優先する。
@@ -133,6 +134,8 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `tools/nsmb_us_rom_patch.py vs-results-display-player-id` を追加。VSResults scene の win/lose 判定用 local player read を固定する診断patch。現時点では player1勝利時に client へ `You Win!` を出せるが、player0勝利時に client 側 lose path の資源選択が壊れて data abort するため、最終採用不可。
   - `tools/nsmb_us_rom_patch.py overlay0-localplayer-literal-alias` を追加。`client localPlayerID=1` の緑画面切り分け用。`--mode layout` でStageLayout系localPlayerID literalのみを0読みへaliasでき、地形/BG表示が戻ることを確認済み。
   - `tools/nsmb_us_rom_patch.py player-render-wrap-x-offset` を追加。`Player::onRender` の表示用Xへwrap offsetを足す診断patch。StageCameraをplayer0側へ戻すとclient localID=1でもMario 3D modelが見えるため、player model描画自体は生きている。
+  - `tools/nsmb_us_rom_patch.py stage-layout-final-view-player-id` を追加。`0x020BACC0` literal aliasの効果を狭める診断patchで、StageLayout更新関数末尾の view/player 引数だけを固定できる。`player0` 固定で緑画面は消えるが、player model欠落は残る。
+  - `tools/nsmb_us_rom_patch.py player-render-r12-offset` を追加。`Player::renderModel` entry の `r12` 差分を疑った診断patch。ただし `r12 -= 0x400000/0x800000` ではplayer modelは戻らず、この仮説は優先度を下げる。
   - `ForceStageCameraSlotVerticalOnly` を追加。camera slot copyのうちY/heightだけをコピーする診断フック。ただし現時点ではこれだけではLuigi側player表示は戻らない。
 
 ## 最新の検証結果
@@ -213,7 +216,8 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 - `client localPlayerID=1` でも actor/lives/dead のstateは揃うが、上画面が緑一色になる。
 - overlay0 StageLayout系localPlayerID literalを0読みへaliasすると地形/BGは戻る。
-- その状態でもplayer modelは出ない。`Player::onRender` と `NNS_G3dDraw` は呼ばれており、表示用X/wrap/camera判定の問題に絞れている。
+- `0x020BACC0` の単独alias、または `stage-layout-final-view-player-id --player-id 0` でも地形/BGは戻る。全StageLayout aliasは広すぎるため、今後はこの狭いpatchを基準にする。
+- その状態でもplayer modelは出ない。`Player::onRender` と `NNS_G3dDraw` は呼ばれており、地形viewとPlayer model 3D view/projectionがまだ噛み合っていない。
 - `player-render-wrap-x-offset + StageCamera player0` ではclient localID=1でもMario modelが出る。次はこの診断結果をLuigi側cameraへ寄せる。
 
 ### MvL 管理状態とスター生成
@@ -293,8 +297,8 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ## 次にやること
 
-1. `layoutalias + wrapx + cam0` でplayer modelが見えるログと、`layoutalias + wrapx + player1 camera` で見えないログを比較し、`Player::renderModel` / `Stage::isOutsideCamera` / StageCamera trace の差分を特定する。
-2. player1 cameraのまま表示用X/Y/view matrixを診断patchで最小補正し、client localID=1 の上画面でLuigi/player modelを地形相対に自然表示できるか確認する。
+1. `stage-layout-final-view-player-id --player-id 0` を基準に、StageLayoutの地形だけを戻した状態で、Player modelがなぜ上画面へ出ないかを3D view/projection側から追う。
+2. `layoutalias + wrapx + cam0` でplayer modelが見えるログと、`finalview0 + wrapx + player1 camera` で見えないログを比較し、Player modelの投影行列/viewport/camera inputの差分を特定する。
 3. 成功判定は「stage visible」だけでなく、player modelが出ていることをスクリーンショット/フレームバッファ検査でfailできるようにする。
 4. 双方向入力の検証は、localID1表示gateが通ってから `-RequirePlayer0Input -RequirePlayer1Input` を戻す。`-RequireRemoteInputHits` の旧packet replay依存と混同しない。
 5. 高速化はJITを無条件に許可しない。`-AllowJitWithPacketBridge` は現状「速度計測用/失敗再現用」で、成功判定には使わない。JIT対応を再開する場合は、PacketBridgeの `Net::getConsoleKeys` / `getPacketByte` / `getPacketTick` / `getPacketAction` hook がJIT実行でもguest R0へ反映されることを最初に検証する。

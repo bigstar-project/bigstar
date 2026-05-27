@@ -41,6 +41,10 @@ def encode_add_imm(rd: int, rn: int, imm: int) -> int:
     return 0xE2800000 | (rn << 16) | (rd << 12) | encode_arm_imm12(imm)
 
 
+def encode_sub_imm(rd: int, rn: int, imm: int) -> int:
+    return 0xE2400000 | (rn << 16) | (rd << 12) | encode_arm_imm12(imm)
+
+
 def encode_sub_sp_imm(imm: int) -> int:
     return 0xE24DD000 | encode_arm_imm12(imm)
 
@@ -565,7 +569,21 @@ def patch_vs_results_display_player_id(overlays: dict[int, object], player_id: i
     return changes
 
 
-def patch_overlay0_localplayer_literal_alias(overlays: dict[int, object], alias_addr: int, mode: str) -> list[str]:
+def parse_int_list(value: str) -> list[int]:
+    result: list[int] = []
+    for item in value.replace(";", ",").split(","):
+        item = item.strip()
+        if item:
+            result.append(int(item, 0))
+    return result
+
+
+def patch_overlay0_localplayer_literal_alias(
+    overlays: dict[int, object],
+    alias_addr: int,
+    mode: str,
+    literal_addrs: list[int] | None = None,
+) -> list[str]:
     # Diagnostic only: keep Game::localPlayerID itself unchanged, but make the
     # stage/layout/collision code in overlay0 read a zero-like byte instead.
     # This isolates whether localPlayerID=1 breaks the visible stage through
@@ -605,7 +623,9 @@ def patch_overlay0_localplayer_literal_alias(overlays: dict[int, object], alias_
         0x020C07D8,
         0x020C0D78,
     ]
-    if mode == "all":
+    if literal_addrs is not None:
+        literal_addrs = sorted(set(literal_addrs))
+    elif mode == "all":
         literal_addrs = sorted(set(actor_collision_literal_addrs + layout_literal_addrs))
     elif mode == "layout":
         literal_addrs = sorted(set(layout_literal_addrs))
@@ -687,6 +707,69 @@ def patch_player_render_wrap_x_offset(overlays: dict[int, object], offset: int) 
         f"Player::onRender wrap-x stub overlay0 @ 0x{stub_addr:08X}: {old_stub.hex()} -> {words_hex(stub)}",
         f"Player::onRender wrap-x hook overlay10 @ 0x{hook_addr:08X}: {old_hook.hex()} -> {struct.pack('<I', branch).hex()} offset=0x{offset:X}",
     ]
+
+
+def patch_player_render_r12_offset(overlays: dict[int, object], offset: int) -> list[str]:
+    # Diagnostic only. Player::renderModel sees r12 as a camera-relative
+    # transform component. With player1 camera this value remains positive in
+    # the localPlayerID=1 route, while the visible player0-camera route uses a
+    # wrapped negative value. Adjust r12 at function entry to test whether the
+    # missing model is caused by that final render transform rather than actor
+    # state or G3D submission.
+    hook_addr = 0x020FCF6C
+    return_addr = 0x020FCF70
+    stub_addr = 0x02122FF4
+    original_prologue = 0xE92D4000  # push {lr}
+    if offset >= 0:
+        adjust = encode_add_imm(12, 12, offset)
+    else:
+        adjust = encode_sub_imm(12, 12, -offset)
+    stub = [
+        original_prologue,
+        adjust,
+        encode_b(stub_addr + 0x08, return_addr),
+    ]
+    old_stub = patch_overlay_words_by_id(overlays, 10, stub_addr, stub)
+    if any(old_stub):
+        raise ValueError(f"player render r12 stub cave @ 0x{stub_addr:08X} is not empty")
+    branch = encode_b(hook_addr, stub_addr)
+    old_hook = patch_overlay_words_by_id(overlays, 10, hook_addr, [branch])
+    old_word = struct.unpack("<I", old_hook)[0]
+    if old_word != original_prologue:
+        raise ValueError(
+            f"Player::renderModel hook @ 0x{hook_addr:08X} expected 0x{original_prologue:08X}, got 0x{old_word:08X}"
+        )
+    return [
+        f"Player::renderModel r12-offset stub overlay10 @ 0x{stub_addr:08X}: {old_stub.hex()} -> {words_hex(stub)}",
+        f"Player::renderModel r12-offset hook overlay10 @ 0x{hook_addr:08X}: {old_hook.hex()} -> {struct.pack('<I', branch).hex()} offset={offset}",
+    ]
+
+
+def patch_stage_layout_final_view_player_id(
+    overlays: dict[int, object],
+    player_id: int,
+    which: str,
+) -> list[str]:
+    # Diagnostic only. The single 0x020BACC0 localPlayerID literal is enough to
+    # bring terrain back in the localPlayerID=1 direct route, but it aliases a
+    # whole StageLayout update function. Narrow that to the final per-view calls
+    # that receive r1=view/player ID.
+    patches: list[tuple[int, str]] = []
+    if which in ("prepare", "both"):
+        patches.append((0x020BAC84, "StageLayout final prepare/view call player arg"))
+    if which in ("render", "both"):
+        patches.append((0x020BAC90, "StageLayout final render/view call player arg"))
+    if not patches:
+        raise ValueError(f"unknown stage-layout-final-view-player-id mode: {which}")
+    word = encode_mov_imm(1, player_id & 1)
+    changes: list[str] = []
+    for addr, label in patches:
+        old = patch_overlay_words_by_id(overlays, 0, addr, [word])
+        changes.append(
+            f"{label} overlay0 @ 0x{addr:08X}: "
+            f"{old.hex()} -> {struct.pack('<I', word).hex()} player={player_id}"
+        )
+    return changes
 
 
 def build_direct_loadlevel_stub(
@@ -1116,11 +1199,17 @@ def main() -> int:
     p_overlay0_alias = sub.add_parser("overlay0-localplayer-literal-alias")
     p_overlay0_alias.add_argument("--alias-addr", type=lambda x: int(x, 0), default=0x020CA280)
     p_overlay0_alias.add_argument("--mode", choices=("layout", "all"), default="layout")
+    p_overlay0_alias.add_argument("--literal-addrs", default="")
     p_stage_range_alias = sub.add_parser("stage-range-localplayer-literal-alias")
     p_stage_range_alias.add_argument("--alias-addr", type=lambda x: int(x, 0), default=0x020CA280)
     sub.add_parser("player-render-model-visible")
     p_player_wrap = sub.add_parser("player-render-wrap-x-offset")
     p_player_wrap.add_argument("--offset", type=lambda x: int(x, 0), default=0x400000)
+    p_player_r12 = sub.add_parser("player-render-r12-offset")
+    p_player_r12.add_argument("--offset", type=lambda x: int(x, 0), default=-0x400000)
+    p_stage_layout_final_view = sub.add_parser("stage-layout-final-view-player-id")
+    p_stage_layout_final_view.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
+    p_stage_layout_final_view.add_argument("--which", choices=("prepare", "render", "both"), default="both")
     p_direct = sub.add_parser("direct-mvl-entry")
     p_direct.add_argument("--scene", type=lambda x: int(x, 0), default=0x0F)
     p_direct.add_argument("--stage", type=lambda x: int(x, 0), default=0)
@@ -1204,7 +1293,8 @@ def main() -> int:
         save_overlays(rom, overlays)
     elif args.cmd == "overlay0-localplayer-literal-alias":
         overlays = rom.loadArm9Overlays()
-        changes = patch_overlay0_localplayer_literal_alias(overlays, args.alias_addr, args.mode)
+        literal_addrs = parse_int_list(args.literal_addrs) if args.literal_addrs else None
+        changes = patch_overlay0_localplayer_literal_alias(overlays, args.alias_addr, args.mode, literal_addrs)
         save_overlays(rom, overlays)
     elif args.cmd == "stage-range-localplayer-literal-alias":
         arm9 = rom.loadArm9()
@@ -1217,6 +1307,14 @@ def main() -> int:
     elif args.cmd == "player-render-wrap-x-offset":
         overlays = rom.loadArm9Overlays()
         changes = patch_player_render_wrap_x_offset(overlays, args.offset)
+        save_overlays(rom, overlays)
+    elif args.cmd == "player-render-r12-offset":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_player_render_r12_offset(overlays, args.offset)
+        save_overlays(rom, overlays)
+    elif args.cmd == "stage-layout-final-view-player-id":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_stage_layout_final_view_player_id(overlays, args.player_id, args.which)
         save_overlays(rom, overlays)
     elif args.cmd == "direct-mvl-entry":
         changes = patch_direct_mvl_entry(
