@@ -69,6 +69,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - LAN smoke script から `-VsStarSnapFrame` / `-PlayerSnapToStarFrame` / `-PlayerStickToStarStartFrame` を指定可能にした。これは自然操作ではなく、RNG/再生成同期の制御検証用。
   - LAN smoke script に `-RunRole both|host|client`, `-Peer`, `-LanHost` を追加。2PC相当の片側起動が可能。
   - 標準split検証用の `scripts/run-nsmb-mvl-standard-split.ps1` を追加。host/client通常ROM / `-PacketBridgeDirectCapture` / canonical local0 の長い起動条件をまとめた。
+  - 標準split helper はデフォルトで `camera-fallback-slot-zero` ROM を `roms/nsmb-us-direct-mvl-entry-entranceff-flag1-camera-fallback.tmp.nds` に生成し、`ForceStageCameraSlot` なしで検証する。`-NoCameraFallbackRom` を渡すと旧ROMを直接使える。
   - helper は `-RunRole both|host|client` に対応。ローカル2ジョブ検証では `both`、実2PCでは host側 `host`、client側 `client -Peer <host-ip>` を使う。
   - helper にFPS切り分け用の `-NoGameStateTrace`, `-NoScreenshots`, `-NoHashLog`, `-NoFrameLimit`, `-FixedFrameTime`, `-TargetFps`, `-AllowJitWithPacketBridge` を追加。
   - default の client ROM は通常ROMに戻した。camera-full-p1 ROMは表示ズレがあるため実験用に降格。
@@ -134,10 +135,11 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - 診断フック `ForceStageCameraSlot` で slot0 の `Stage::cameraX/Y/Width/Height` を slot1 へ初期化すると、`logs/smvl-camera-slot-mirror-host-1300-20260527` では frame 992 でも `player1Dead=0`, `player1Lives=5`, `p1 transitFunc=0211E670` のまま。よって開始残機減少の直接原因は `Stage::camera*` remote slot 未初期化でほぼ確定。
 - JIT + PacketBridge + host/client splitでも確認済み。`logs/smvl-camera-slot-split-branchfix-host-1800-20260527`, `logs/smvl-camera-slot-split-branchfix-client-1800-20260527` は frame 1800 まで abort/timeoutなし、host/clientとも frame 1006 で `lives=5/5`, `dead=0/0`, `p1 transitFunc=0211E670`。ローカル2プロセス同時で実効 `56.84fps`。
 - `ForceStageCameraSlotEndFrame=1008` の短時間 bootstrap だけでも frame 1800 まで開始死亡なし。ログ: `logs/smvl-camera-slot-bootstrap-host-1800-20260527`。これは診断として有効だったが、恒常mirrorは遠距離時の画面外判定や勝敗/UIまで正しい保証がないため最終修正にはしない。
-- ROM patch版の確認:
+  - ROM patch版の確認:
   - 初回実装は overlay0 末尾 `0x020CA280` にstubを追記して BSS/global と衝突し、direct entry が進まなかった。失敗ログ: `logs/smvl-camera-fallback-compare-patched-host-1300-20260527`。
   - code cave `0x020C5298` へstubを置く方式に修正。`logs/smvl-camera-fallback-cave-host-1300-20260527` は frame 1006 で `lives=5/5`, `dead=0/0`, `p1 transitFunc=0211E670`。
   - `ForceStageCameraSlot` なしの host/client split でも開始死亡なし。`logs/smvl-camera-fallback-cave-split-host-1800-20260527`, `logs/smvl-camera-fallback-cave-split-client-1800-20260527` は frame 1800 まで通過。
+  - 標準split helperのデフォルトもROM fallbackへ移行済み。`logs/smvl-standard-fallback-default-host-1800-20260527`, `logs/smvl-standard-fallback-default-client-1800-20260527` は `ForceStageCameraSlot` ログなしで frame 1800 まで通過し、スクリーンショットも通常の地形表示。
 - `MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG` は開始保護の候補。終了フレーム後にfreeze flagを0へ戻す処理を追加した。ただし単純に frame 960-1800 で敵を止めるだけでは、解除後にGoombaがLuigiへ到達して死亡する。次は本来の開始保護/カウントダウン相当をROM/状態側で再現するか、player1 spawn位置/敵初期状態をROM patchで直す。
 
 標準に近い検証条件:
@@ -285,7 +287,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 ## 現在の課題
 
 1. Luigi視点表示が未解決。`camera-full-p1` は地形相対のactor表示が壊れるため不採用。カメラだけでなく、local player UI、ストックアイテム、勝敗判定まで含めて成立条件を確認する。
-2. 開始残機減少は `camera-fallback-slot-zero` ROM patch で解消できた。次はこのpatchを標準のdirect ROM生成手順へ組み込み、診断hook `ForceStageCameraSlot` への依存を外す。
+2. 開始残機減少は `camera-fallback-slot-zero` ROM patch で解消し、標準split helperもこのROMをデフォルト生成するようにした。次は direct ROM 生成物の命名/再生成手順を整理する。
 3. ローカル2プロセス同時検証では50fps前後、単独hostでは60fps超。実2PCは1インスタンス/PCなので実用速度の可能性は残るが、ローカル自動検証ループはまだ重い。
 4. Luigi がクリボーで死亡した後、復帰まで stage 全体の動きが止まるように見える。NSMB本来の同期停止なのか、PacketBridge/Direct入口の不具合なのかを検証する。
 5. client表示ROM込みのsplit構成でもスター取得/再生成同期は成立したが、これは制御hookによる取得であり、自然操作では未達。
@@ -294,7 +296,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ## 次にやること
 
-1. `camera-fallback-slot-zero` を含む direct MvL ROM生成手順を標準化し、標準split helperのデフォルトから `ForceStageCameraSlot` bootstrap を外せる状態にする。
+1. `camera-fallback-slot-zero` を含む direct MvL ROM生成手順を整理し、手動生成ROMとhelper生成tmp ROMの使い分けを明確にする。
 2. Luigi視点表示を再検討する。`Game::localPlayerID=1` で下画面UIは変わるが上画面が空になるため、`StageCamera::onRender` / View matrix / BG/地形描画 / local player UI / 勝敗判定が参照する camera/local-player 境界を特定する。
 3. 自動検証では state verifier だけで成功扱いにせず、スクリーンショット上の地形相対位置も確認する。
 4. Luigi死亡後のstage停止が `Stage::actorFreezeFlag` や player transition status によるものか確認する。

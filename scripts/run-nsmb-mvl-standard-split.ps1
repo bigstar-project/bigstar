@@ -40,7 +40,8 @@ param(
     [switch]$ForcePlayerLives,
     [int]$ForcePlayerLife0 = 5,
     [int]$ForcePlayerLife1 = 5,
-    [switch]$ForceStageCameraSlot = $true,
+    [switch]$NoCameraFallbackRom,
+    [switch]$ForceStageCameraSlot,
     [int]$ForceStageCameraSlotStartFrame = 850,
     [int]$ForceStageCameraSlotEndFrame = 1008,
     [int]$ForceStageCameraSlotSource = 0,
@@ -58,6 +59,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 $defaultClientRom = "roms\nsmb-us-direct-mvl-entry-entranceff-flag1-camera-full-p1.nds"
+$defaultDirectRom = "roms\nsmb-us-direct-mvl-entry-entranceff-flag1.nds"
+$defaultCameraFallbackRom = "roms\nsmb-us-direct-mvl-entry-entranceff-flag1-camera-fallback.tmp.nds"
 
 function Format-Arg {
     param([string]$Value)
@@ -73,6 +76,22 @@ if (-not (Test-Path $ClientRom) -and $ClientRom -eq $defaultClientRom) {
     & python tools\nsmb_us_rom_patch.py --rom $HostRom --out $tempClientRom stage-camera-state-player-id --player-id 1
     & python tools\nsmb_us_rom_patch.py --rom $tempClientRom --out $ClientRom stage-camera-player-id --player-id 1
     Remove-Item -Force $tempClientRom -ErrorAction SilentlyContinue
+}
+
+if (-not $NoCameraFallbackRom) {
+    if ($HostRom -eq $defaultDirectRom -or $ClientRom -eq $defaultDirectRom) {
+        if (-not (Test-Path $defaultCameraFallbackRom) -or
+            ((Get-Item $defaultCameraFallbackRom).LastWriteTime -lt (Get-Item $defaultDirectRom).LastWriteTime)) {
+            Write-Host "generating camera fallback ROM: $defaultCameraFallbackRom"
+            & python tools\nsmb_us_rom_patch.py --rom $defaultDirectRom --out $defaultCameraFallbackRom camera-fallback-slot-zero
+        }
+    }
+    if ($HostRom -eq $defaultDirectRom) {
+        $HostRom = $defaultCameraFallbackRom
+    }
+    if ($ClientRom -eq $defaultDirectRom) {
+        $ClientRom = $defaultCameraFallbackRom
+    }
 }
 
 $common = @(
