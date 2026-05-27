@@ -209,6 +209,14 @@ param(
     [int]$ForceStageCameraSlotEndFrame = 0,
     [int]$ForceStageCameraSlotSource = 0,
     [int]$ForceStageCameraSlotDest = 1,
+    [switch]$ForceStageCameraObjectX,
+    [int]$ForceStageCameraObjectXStartFrame = 0,
+    [int]$ForceStageCameraObjectXEndFrame = 0,
+    [string]$ForceStageCameraObjectXValue = "0",
+    [string]$ForceStageCameraObjectZValue = "",
+    [switch]$ForceStageCameraObjectXWriteDisplay,
+    [switch]$ForceStageCameraObjectXWriteSlot,
+    [int]$ForceStageCameraObjectXSlot = 1,
     [switch]$ForceStageFXSettings,
     [switch]$ForceStageFXSettingsHostOnly,
     [switch]$ForceStageFXSettingsClientOnly,
@@ -1133,6 +1141,25 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_END_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_SOURCE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_DEST -ErrorAction SilentlyContinue
+    }
+    if ($ForceStageCameraObjectX) {
+        $env:MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X = "1"
+        $env:MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_START_FRAME = "$ForceStageCameraObjectXStartFrame"
+        $env:MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_END_FRAME = "$ForceStageCameraObjectXEndFrame"
+        $env:MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_VALUE = "$ForceStageCameraObjectXValue"
+        $env:MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_SLOT = "$ForceStageCameraObjectXSlot"
+        if ($ForceStageCameraObjectZValue -ne "") { $env:MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_Z_VALUE = "$ForceStageCameraObjectZValue" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_Z_VALUE -ErrorAction SilentlyContinue }
+        if ($ForceStageCameraObjectXWriteDisplay) { $env:MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_WRITE_DISPLAY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_WRITE_DISPLAY -ErrorAction SilentlyContinue }
+        if ($ForceStageCameraObjectXWriteSlot) { $env:MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_WRITE_SLOT = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_WRITE_SLOT -ErrorAction SilentlyContinue }
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_VALUE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_Z_VALUE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_WRITE_DISPLAY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_WRITE_SLOT -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_SLOT -ErrorAction SilentlyContinue
     }
     if ($ForceStageSceneActive) {
         $env:MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE = "1"
@@ -2582,6 +2609,15 @@ function Start-MelonLANProcess {
         "forceStageCameraSlotEnd=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_END_FRAME)"
         "forceStageCameraSlotSource=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_SOURCE)"
         "forceStageCameraSlotDest=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_DEST)"
+        "forceStageCameraObjectXSwitch=$ForceStageCameraObjectX"
+        "forceStageCameraObjectXEnv=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X)"
+        "forceStageCameraObjectXStart=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_START_FRAME)"
+        "forceStageCameraObjectXEnd=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_END_FRAME)"
+        "forceStageCameraObjectXValue=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_VALUE)"
+        "forceStageCameraObjectZValue=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_Z_VALUE)"
+        "forceStageCameraObjectXWriteDisplay=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_WRITE_DISPLAY)"
+        "forceStageCameraObjectXWriteSlot=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_WRITE_SLOT)"
+        "forceStageCameraObjectXSlot=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_SLOT)"
         "forcePlayerInventoryPowerupsSwitch=$ForcePlayerInventoryPowerups"
         "forcePlayerInventoryPowerupsEnv=$($env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS)"
         "forcePlayerInventoryPowerupsStart=$($env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_START_FRAME)"

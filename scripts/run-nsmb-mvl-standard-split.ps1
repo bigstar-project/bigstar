@@ -66,6 +66,14 @@ param(
     [int]$ForceStageCameraSlotEndFrame = 1008,
     [int]$ForceStageCameraSlotSource = 0,
     [int]$ForceStageCameraSlotDest = 1,
+    [switch]$ForceStageCameraObjectX,
+    [int]$ForceStageCameraObjectXStartFrame = 0,
+    [int]$ForceStageCameraObjectXEndFrame = 0,
+    [string]$ForceStageCameraObjectXValue = "0",
+    [string]$ForceStageCameraObjectZValue = "",
+    [switch]$ForceStageCameraObjectXWriteDisplay,
+    [switch]$ForceStageCameraObjectXWriteSlot,
+    [int]$ForceStageCameraObjectXSlot = 1,
     [switch]$ForceStageFXSettings,
     [switch]$ForceStageFXSettingsHostOnly,
     [switch]$ForceStageFXSettingsClientOnly,
@@ -276,6 +284,22 @@ if ($ForceStageCameraSlot) {
     )
     if ($ForceStageCameraSlotVerticalOnly) {
         $common += "-ForceStageCameraSlotVerticalOnly"
+    }
+}
+if ($ForceStageCameraObjectX) {
+    $common += @(
+        "-ForceStageCameraObjectX",
+        "-ForceStageCameraObjectXStartFrame", "$ForceStageCameraObjectXStartFrame",
+        "-ForceStageCameraObjectXEndFrame", "$ForceStageCameraObjectXEndFrame",
+        "-ForceStageCameraObjectXValue", "$ForceStageCameraObjectXValue",
+        "-ForceStageCameraObjectZValue", "$ForceStageCameraObjectZValue",
+        "-ForceStageCameraObjectXSlot", "$ForceStageCameraObjectXSlot"
+    )
+    if ($ForceStageCameraObjectXWriteDisplay) {
+        $common += "-ForceStageCameraObjectXWriteDisplay"
+    }
+    if ($ForceStageCameraObjectXWriteSlot) {
+        $common += "-ForceStageCameraObjectXWriteSlot"
     }
 }
 if ($ForceStageFXSettings) {

@@ -34,6 +34,11 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - StageLayoutの緑画面は、全layout aliasではなく `0x020BACC0` だけでも消える。さらに狭くすると、StageLayout更新関数末尾の `0x020BAC84` / `0x020BAC90` の view/player 引数を player0 固定にするだけでも地形は戻る。これは「緑画面」はStageLayout最終view反映のplayer1経路に絞れる、という結果。
 - 地形を戻してもplayer 3D modelが出ない問題は別。`Player::onRender` / `Player::renderModel` / `NNS_G3dDraw` はclientでも呼ばれるが、表示用X/wrap/camera判定がhostと違い、clientではplayerが上画面に出ない。`Player::onRender` の表示用Xへ `+0x400000` を足し、StageCameraをplayer0側へ戻すとMarioは表示されるため、3D描画自体は壊れていない。
 - `stage-layout-final-view-player-id --player-id 0` と `player-render-wrap-x-offset` を組み合わせてもLuigi/player modelは戻らない。したがって次は、StageLayoutの地形view補正とPlayer modelの3D view/projection補正を分けて追う。カメラをplayer0に戻すだけではLuigi側プレイにならないので、これは成功条件ではなく診断結果として扱う。
+- 2026-05-28 追加切り分け:
+  - `ForceStageCameraObjectX` を RunFrame 前後で適用し、`StageDisplayCameraX` / `Stage::cameraX[1]` / StageCamera object の X/Z を cam0相当に揃えても、ROM側 `StageCamera state` patchなしではplayer modelは出なかった。つまり、After/Beforeのメモリ書き換えでは描画時のview matrix生成タイミングに届いていない。
+  - `stage-range-localplayer-literal-alias` と `player-render-model-visible` は、どちらもplayer model欠落を解消しなかった。単純な `isOutsidePlayerRange` / `renderModel(bool)` の可視フラグだけが原因ではない。
+  - `stage-camera-state-player-id --player-id 0` だけを追加すると、`StageCamera::onUpdate` の display camera 選択をlocalID1のまま残してもMario modelは表示される。したがって、player model欠落の直接条件は StageCamera state関数が作る render用 target/position/view matrix 側にある可能性が高い。ただしこれはMario表示であり、Luigi側プレイ成功ではない。
+  - `tools/nsmb_screenshot_probe.py` に `redPlayerPixels` / `darkModelPixels` と閾値オプションを追加。少なくとも「地形は出ているがMario modelが出ていない」失敗をスクリーンショットから自動検出できる。
 - 最優先gateは「試合開始直後の画面/actor構成」。host側にMarioだけ、client側にMario/Luigiが出ていない、または地形相対の表示が壊れている状態は失敗として扱う。ここを飛ばしてストックアイテムや死亡演出の検証へ進まない。
 - `localPlayerID=0` 両固定 + 表示patch方式は、clientのLuigi側プレイ実現として将来性が低い。次は `localPlayerID=1` client を本筋に戻し、そこで壊れる actor生成/StageStart/packet境界を根本原因として追う。
 - clientでLuigi側を実際にプレイできること、つまりカメラ追従、HUD、ストックアイテム、死亡/勝敗演出をNSMB本体のlocal player処理として自然に動かすことを優先する。
@@ -290,16 +295,16 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 ## 現在の課題
 
 1. `client localPlayerID=1` の試合開始画面を自然なLuigi側表示にする。緑一色上画面はStageLayout系 localPlayerID 参照のaliasで地形/BGが戻るが、player modelはまだLuigi側cameraで自然に出ていない。
-2. `player-render-wrap-x-offset + StageCamera player0` ではclient localID=1でもMario modelが出る。これは描画経路が生きている証拠だが、成功条件ではない。次はplayer1 cameraのまま、wrap/vertical/view matrixのどこでplayer modelが落ちるかを切り分ける。
+2. `player-render-wrap-x-offset + StageCamera state player0` ではclient localID=1でもMario modelが出る。これは描画経路が生きている証拠だが、成功条件ではない。Luigi側表示を成立させるには、StageCamera state関数がplayer1で作るview matrixがなぜdirect entry状態と噛み合わないかを追う必要がある。
 3. 開始直後のactor構成、地形相対の表示、HUD、下画面、死亡/勝敗演出が、`host=player0`, `client=player1` の自然な役割解釈になっているかを確認する。これが通るまでストックアイテムや勝敗結果画面の個別検証へ進まない。
 4. ローカル2プロセス同時検証は、安定条件のJITなしでは約10-11fps、JITありなら40fps台まで上がるが入力同期がゲームロジックへ反映されない。実用速度へ近づけるには、JIT側で PacketBridge packet API hook を正しく扱うか、ROM patch側でpacket API境界を置換してJITでも同じ値を返せるようにする必要がある。
 5. Luigi がクリボーで死亡した後、復帰まで stage 全体の動きが止まるように見える。NSMB本体仕様か、direct entry/PacketBridge副作用かを比較検証する。
 
 ## 次にやること
 
-1. `stage-layout-final-view-player-id --player-id 0` を基準に、StageLayoutの地形だけを戻した状態で、Player modelがなぜ上画面へ出ないかを3D view/projection側から追う。
-2. `layoutalias + wrapx + cam0` でplayer modelが見えるログと、`finalview0 + wrapx + player1 camera` で見えないログを比較し、Player modelの投影行列/viewport/camera inputの差分を特定する。
-3. 成功判定は「stage visible」だけでなく、player modelが出ていることをスクリーンショット/フレームバッファ検査でfailできるようにする。
+1. `stage-layout-final-view-player-id --player-id 0 + player-render-wrap-x-offset` を基準に、StageCamera stateをplayer0へ寄せるとMarioが出る理由を、`StageCamera::onUpdate/onRender` のview matrix生成単位で分解する。
+2. 目標は `StageCamera state player0` 依存を外し、client localID1のままLuigi/player1 modelを上画面に出すこと。必要なら、direct entryのplayer1 spawn位置/Stage::camera[1]/StageCamera state初期化を、実LocalMPの開始状態に近づけるROM patchへ寄せる。
+3. 成功判定は「stage visible」だけでなく、player modelが出ていることをスクリーンショット/フレームバッファ検査でfailできるようにする。`tools/nsmb_screenshot_probe.py --band-start 110 --band-end 180 --min-red-player-pixels 80` はMario表示/非表示の自動判定に使える。
 4. 双方向入力の検証は、localID1表示gateが通ってから `-RequirePlayer0Input -RequirePlayer1Input` を戻す。`-RequireRemoteInputHits` の旧packet replay依存と混同しない。
 5. 高速化はJITを無条件に許可しない。`-AllowJitWithPacketBridge` は現状「速度計測用/失敗再現用」で、成功判定には使わない。JIT対応を再開する場合は、PacketBridgeの `Net::getConsoleKeys` / `getPacketByte` / `getPacketTick` / `getPacketAction` hook がJIT実行でもguest R0へ反映されることを最初に検証する。
 6. 実WAN相当の評価は、ENet reliable 前提で遅延/ジッタ中心に続ける。packet lossは「reliable retransmitによる遅延」としてまず扱う。

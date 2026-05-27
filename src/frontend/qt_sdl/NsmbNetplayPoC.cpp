@@ -966,6 +966,24 @@ struct State
     int ForceStageCameraSlotSource = 0;
     int ForceStageCameraSlotDest = 1;
     bool ForceStageCameraSlotLogged[16] {};
+    bool ForceStageCameraSlotOverrideX = false;
+    bool ForceStageCameraSlotOverrideY = false;
+    bool ForceStageCameraSlotOverrideWidth = false;
+    bool ForceStageCameraSlotOverrideHeight = false;
+    melonDS::u32 ForceStageCameraSlotX = 0;
+    melonDS::u32 ForceStageCameraSlotY = 0;
+    melonDS::u32 ForceStageCameraSlotWidth = 0;
+    melonDS::u32 ForceStageCameraSlotHeight = 0;
+    bool ForceStageCameraObjectXEnabled = false;
+    melonDS::u32 ForceStageCameraObjectXStartFrame = 0;
+    melonDS::u32 ForceStageCameraObjectXEndFrame = 0;
+    melonDS::u32 ForceStageCameraObjectX = 0;
+    bool ForceStageCameraObjectXWriteDisplay = false;
+    bool ForceStageCameraObjectXWriteSlot = false;
+    int ForceStageCameraObjectXSlot = 1;
+    bool ForceStageCameraObjectZEnabled = false;
+    melonDS::u32 ForceStageCameraObjectZ = 0;
+    bool ForceStageCameraObjectXLogged[16] {};
     bool ForceStageFXSettingsEnabled = false;
     bool ForceStageFXSettingsHostOnly = false;
     bool ForceStageFXSettingsClientOnly = false;
@@ -4811,10 +4829,14 @@ void ForceStageCameraSlotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::N
     if (src == dst)
         return;
 
-    const melonDS::u32 x = nds->ARM9Read32(kStageCameraXAddr + sizeof(melonDS::u32) * src);
-    const melonDS::u32 y = nds->ARM9Read32(kStageCameraYAddr + sizeof(melonDS::u32) * src);
-    const melonDS::u32 width = nds->ARM9Read32(kStageCameraWidthAddr + sizeof(melonDS::u32) * src);
-    const melonDS::u32 height = nds->ARM9Read32(kStageCameraHeightAddr + sizeof(melonDS::u32) * src);
+    melonDS::u32 x = nds->ARM9Read32(kStageCameraXAddr + sizeof(melonDS::u32) * src);
+    melonDS::u32 y = nds->ARM9Read32(kStageCameraYAddr + sizeof(melonDS::u32) * src);
+    melonDS::u32 width = nds->ARM9Read32(kStageCameraWidthAddr + sizeof(melonDS::u32) * src);
+    melonDS::u32 height = nds->ARM9Read32(kStageCameraHeightAddr + sizeof(melonDS::u32) * src);
+    if (G.ForceStageCameraSlotOverrideX) x = G.ForceStageCameraSlotX;
+    if (G.ForceStageCameraSlotOverrideY) y = G.ForceStageCameraSlotY;
+    if (G.ForceStageCameraSlotOverrideWidth) width = G.ForceStageCameraSlotWidth;
+    if (G.ForceStageCameraSlotOverrideHeight) height = G.ForceStageCameraSlotHeight;
     if (width == 0 || height == 0)
         return;
 
@@ -4829,7 +4851,7 @@ void ForceStageCameraSlotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::N
     {
         std::printf(
             "NSMB Test: mirror Stage camera slot inst=%d frame=%u range=%u-%u src=%d dst=%d "
-            "x=%08X y=%08X width=%08X height=%08X verticalOnly=%d\n",
+            "x=%08X y=%08X width=%08X height=%08X verticalOnly=%d override=%d/%d/%d/%d\n",
             instanceID,
             frame,
             G.ForceStageCameraSlotStartFrame,
@@ -4840,8 +4862,61 @@ void ForceStageCameraSlotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::N
             y,
             width,
             height,
-            G.ForceStageCameraSlotVerticalOnly ? 1 : 0);
+            G.ForceStageCameraSlotVerticalOnly ? 1 : 0,
+            G.ForceStageCameraSlotOverrideX ? 1 : 0,
+            G.ForceStageCameraSlotOverrideY ? 1 : 0,
+            G.ForceStageCameraSlotOverrideWidth ? 1 : 0,
+            G.ForceStageCameraSlotOverrideHeight ? 1 : 0);
         G.ForceStageCameraSlotLogged[instanceID] = true;
+    }
+}
+
+void ForceStageCameraObjectXIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForceStageCameraObjectXEnabled || !nds || !nds->MainRAM)
+        return;
+    if (frame < G.ForceStageCameraObjectXStartFrame)
+        return;
+    if (G.ForceStageCameraObjectXEndFrame != 0 && frame > G.ForceStageCameraObjectXEndFrame)
+        return;
+
+    ObjectScanSample stageCamera = FindObjectByIDAndSettings(nds, kStageCameraObjectID, 0);
+    if (!stageCamera.Found)
+        stageCamera = FindObjectByIDAndSettingsLoose(nds, kStageCameraObjectID, 0);
+    if (!stageCamera.Found || !IsARM9MainRAMAddress(stageCamera.Base + 0x0E0))
+        return;
+
+    nds->ARM9Write32(stageCamera.Base + 0x0D0, G.ForceStageCameraObjectX);
+    nds->ARM9Write32(stageCamera.Base + 0x0E0, G.ForceStageCameraObjectX);
+    if (G.ForceStageCameraObjectZEnabled)
+    {
+        nds->ARM9Write32(stageCamera.Base + 0x0D4, G.ForceStageCameraObjectZ);
+        nds->ARM9Write32(stageCamera.Base + 0x0E4, G.ForceStageCameraObjectZ);
+    }
+    if (G.ForceStageCameraObjectXWriteDisplay)
+        nds->ARM9Write32(kStageDisplayCameraXAddr, G.ForceStageCameraObjectX);
+    if (G.ForceStageCameraObjectXWriteSlot)
+    {
+        const int slot = std::clamp(G.ForceStageCameraObjectXSlot, 0, 1);
+        nds->ARM9Write32(kStageCameraXAddr + sizeof(melonDS::u32) * slot, G.ForceStageCameraObjectX);
+    }
+    if (instanceID >= 0 && instanceID < 16 && !G.ForceStageCameraObjectXLogged[instanceID])
+    {
+        std::printf(
+            "NSMB Test: force StageCamera object X inst=%d frame=%u range=%u-%u base=%08X x=%08X z=%08X zWrite=%d display=%d slotWrite=%d slot=%d\n",
+            instanceID,
+            frame,
+            G.ForceStageCameraObjectXStartFrame,
+            G.ForceStageCameraObjectXEndFrame,
+            stageCamera.Base,
+            G.ForceStageCameraObjectX,
+            G.ForceStageCameraObjectZ,
+            G.ForceStageCameraObjectZEnabled ? 1 : 0,
+            G.ForceStageCameraObjectXWriteDisplay ? 1 : 0,
+            G.ForceStageCameraObjectXWriteSlot ? 1 : 0,
+            G.ForceStageCameraObjectXSlot);
+        std::fflush(stdout);
+        G.ForceStageCameraObjectXLogged[instanceID] = true;
     }
 }
 
@@ -8016,6 +8091,45 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_END_FRAME", 0)));
     G.ForceStageCameraSlotSource = std::clamp(EnvInt("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_SOURCE", 0), 0, 1);
     G.ForceStageCameraSlotDest = std::clamp(EnvInt("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_DEST", 1), 0, 1);
+    if (const char* x = std::getenv("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_X"))
+    {
+        G.ForceStageCameraSlotOverrideX = true;
+        G.ForceStageCameraSlotX = static_cast<melonDS::u32>(std::strtoul(x, nullptr, 0));
+    }
+    if (const char* y = std::getenv("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_Y"))
+    {
+        G.ForceStageCameraSlotOverrideY = true;
+        G.ForceStageCameraSlotY = static_cast<melonDS::u32>(std::strtoul(y, nullptr, 0));
+    }
+    if (const char* width = std::getenv("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_WIDTH"))
+    {
+        G.ForceStageCameraSlotOverrideWidth = true;
+        G.ForceStageCameraSlotWidth = static_cast<melonDS::u32>(std::strtoul(width, nullptr, 0));
+    }
+    if (const char* height = std::getenv("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_HEIGHT"))
+    {
+        G.ForceStageCameraSlotOverrideHeight = true;
+        G.ForceStageCameraSlotHeight = static_cast<melonDS::u32>(std::strtoul(height, nullptr, 0));
+    }
+    G.ForceStageCameraObjectXEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X");
+    G.ForceStageCameraObjectXStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_START_FRAME", 0)));
+    G.ForceStageCameraObjectXEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_END_FRAME", 0)));
+    G.ForceStageCameraObjectX = static_cast<melonDS::u32>(
+        std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_VALUE")
+            ? std::getenv("MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_VALUE") : "0", nullptr, 0));
+    G.ForceStageCameraObjectXWriteDisplay =
+        EnvFlag("MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_WRITE_DISPLAY");
+    G.ForceStageCameraObjectXWriteSlot =
+        EnvFlag("MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_WRITE_SLOT");
+    G.ForceStageCameraObjectXSlot =
+        std::clamp(EnvInt("MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_SLOT", 1), 0, 1);
+    if (const char* z = std::getenv("MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_Z_VALUE"))
+    {
+        G.ForceStageCameraObjectZEnabled = true;
+        G.ForceStageCameraObjectZ = static_cast<melonDS::u32>(std::strtoul(z, nullptr, 0));
+    }
     G.ForceStageFXSettingsEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGEFX_SETTINGS");
     G.ForceStageFXSettingsHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGEFX_SETTINGS_HOST_ONLY");
     G.ForceStageFXSettingsClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGEFX_SETTINGS_CLIENT_ONLY");
@@ -8569,6 +8683,10 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageSceneEventFlagsIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForceStageCameraSlotIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForceStageCameraObjectXIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageSceneState3GateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageActorFreezeFlagIfNeeded(instanceID, inputFrame, nds);
@@ -8933,6 +9051,8 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageCameraSlotIfNeeded(instanceID, logFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForceStageCameraObjectXIfNeeded(instanceID, logFrame, nds);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageFXSettingsIfNeeded(instanceID, logFrame, nds);
