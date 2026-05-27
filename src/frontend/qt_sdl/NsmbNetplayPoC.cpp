@@ -1965,6 +1965,8 @@ void SendNSMLPacketLocked(melonDS::u32 frame, melonDS::u32 player, melonDS::u32 
     }
 }
 
+melonDS::u32 PacketBridgeCanonicalTick(melonDS::NDS* nds, melonDS::u32 frame);
+
 void CaptureAndSendNSMLPacketLocked(melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.PacketBridgeEnabled || !nds)
@@ -1987,6 +1989,15 @@ void CaptureAndSendNSMLPacketLocked(melonDS::u32 frame, melonDS::NDS* nds)
         keys = (~overrideInput->second.KeyMask) & 0x0FFF;
         packet[2] = static_cast<melonDS::u8>(keys & 0xFF);
         packet[3] = static_cast<melonDS::u8>((keys >> 8) & 0xFF);
+    }
+
+    if (G.PacketBridgeForceTickEnabled
+        && frame >= G.PacketBridgeForceTickStartFrame
+        && G.PacketBridgeForceTickBase >= 0)
+    {
+        tick = PacketBridgeCanonicalTick(nds, frame);
+        packet[0] = static_cast<melonDS::u8>(tick & 0xFF);
+        packet[1] = static_cast<melonDS::u8>((tick >> 8) & 0xFF);
     }
 
     (void)keys;

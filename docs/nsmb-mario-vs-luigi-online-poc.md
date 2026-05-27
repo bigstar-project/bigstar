@@ -234,6 +234,8 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - その状態でもplayer modelは出ないが、`Player::onRender` / `Player::renderModel()` / `Player::renderModel(bool)` はplayer0/player1とも呼ばれている。
 - `stage-camera-state-vertical-slot-zero + player-render-range-view-player-id --player-id 0` で、client localID1の上画面にMario/Luigi両方が表示される。`Player::renderModel(bool)` の強制0でも同じ結果。したがって、次の対象はactor生成ではなく、player1 range/camera slotの初期化と、host/clientで同じsimulation stateを維持できるか。
 - split検証 `logs/smvl-local1-rangeview0-split-directcap-2400-20260528` では、client自身は `inputPlayer1Held=0x21/0x22` を読んでLuigi/player1が動く。一方、host側はclientのplayer1 packetを受信しているが、lookup tick差によりgame-stateの `inputPlayer1Held` が0のまま残る。`PacketBridgeForceTick` でも完全には揃っていない。
+- `PacketBridgeForceTick` 使用時にDirectCapture送信packet自身のtickを書き換えていなかったため、送信側packet tickと受信側canonical lookup tickがズレていた。`CaptureAndSendNSMLPacketLocked()` で送信packet[0:1]もcanonical tickへ正規化する修正を入れた。
+- 修正後、`PacketBridgeLiveFallbackWindow=256` まで広げるとhost側にもclient/player1入力が入り、`inputPlayer1Held=0x21` になる。したがってhost側packet API hookは機能している。ただし古いpacketを読む形になるため、actor座標は大きくdesyncする。最終的には大window fallbackではなく、host/clientの実行ペースを揃える必要がある。
 - 同split検証では、入力前のframe 1200時点でhost/clientのplayer Yに差分が出る。localID1 direct routeの初期化差分がsimulationにも漏れているため、表示だけ直しても最終成功ではない。
 
 ### MvL 管理状態とスター生成
@@ -307,7 +309,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 1. `client localPlayerID=1` の表示gateは前進したが、`range viewID=0` 固定は診断patchであり最終解ではない。実LocalMP相当のplayer1 camera/range slot初期化を特定して、viewID=1のままLuigi/player1を出す必要がある。
 2. `host localID0 / client localID1` splitで、入力前からplayer Yがズレる。localID1 direct routeでsimulationに影響する初期化差分を、StageStart/StageCamera/StageLayoutのどれかに絞る。
-3. DirectCaptureでclient自身はplayer1入力を読めるが、host側game-stateにplayer1入力が反映されない。packet送受信は見えているため、tick lookup / packet slot / `Net::getConsoleKeys` hook のどこで落ちるかを追う。
+3. DirectCaptureでclient自身はplayer1入力を読め、fallback windowを広げればhost側にもplayer1入力は入る。狭いwindowで安定させるには、host/clientのフレーム先行を抑える同期ペーシングが必要。
 4. 開始直後のactor構成、地形相対の表示、HUD、下画面、死亡/勝敗演出が、`host=player0`, `client=player1` の自然な役割解釈になっているかを確認する。これが通るまでストックアイテムや勝敗結果画面の個別検証へ進まない。
 5. ローカル2プロセス同時検証は、安定条件のJITなしでは約10-12fps、JITありなら40fps台まで上がるが入力同期がゲームロジックへ反映されない。実用速度へ近づけるには、JIT側で PacketBridge packet API hook を正しく扱うか、ROM patch側でpacket API境界を置換してJITでも同じ値を返せるようにする必要がある。
 
@@ -315,7 +317,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 1. `Stage::isOutsidePlayerRange` に渡る `viewID=1` がなぜplayer1をoutside扱いにするかを、Stage::cameraX/Y/Width/HeightとdisplayVecの差分で追う。目標は `player-render-range-view-player-id` を外すこと。
 2. 入力前のhost/client Y差分を、localID1単独ROMとhost/client splitの両方で最小再現する。`StageActor::isOutOfViewVertical` fallback以外にsimulationへ影響しているlocalPlayerID参照を探す。
-3. PacketBridge traceで、hostが受け取ったplayer1 packetが `Net::getConsoleKeys` / packet lookupへ入るまでを追う。tick差が原因ならForceTickの適用タイミングかlookup基準を直す。
+3. PacketBridgeの次は、fallback windowに頼らない実行ペース同期を作る。現状の `PacketBridgeWait` は双方待ちでタイムアウトするため、そのままでは使えない。片側先行を一定tick以内に抑えるthrottle/heartbeat型の同期へ作り直す。
 4. 成功判定は「stage visible」だけでなく、player modelが出ていることをスクリーンショット/フレームバッファ検査でfailできるようにする。`tools/nsmb_screenshot_probe.py --band-start 110 --band-end 180 --min-red-player-pixels 80` はMario表示/非表示の自動判定に使える。
 5. 高速化はJITを無条件に許可しない。`-AllowJitWithPacketBridge` は現状「速度計測用/失敗再現用」で、成功判定には使わない。JIT対応を再開する場合は、PacketBridgeの `Net::getConsoleKeys` / `getPacketByte` / `getPacketTick` / `getPacketAction` hook がJIT実行でもguest R0へ反映されることを最初に検証する。
 
