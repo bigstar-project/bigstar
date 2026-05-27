@@ -13,6 +13,7 @@ param(
     [int]$LookupTickDelay = 10,
     [string]$HostGameLocalPlayerID = "0",
     [string]$ClientGameLocalPlayerID = "0",
+    [int]$GameLocalPlayerIDStartFrame = 0,
     [switch]$ForceGameLocalPlayerIDEarly,
     [int]$SendDelayFrames = 0,
     [int]$SendJitterFrames = 0,
@@ -130,6 +131,7 @@ $common = @(
     "-ClientPacketBridgeLocalPlayer", "1",
     "-HostPacketBridgeForceGameLocalPlayerID", "$HostGameLocalPlayerID",
     "-ClientPacketBridgeForceGameLocalPlayerID", "$ClientGameLocalPlayerID",
+    "-PacketBridgeForceGameLocalPlayerIDStartFrame", "$GameLocalPlayerIDStartFrame",
     "-PacketBridgeThrottleStartFrame", "1500",
     "-NetRandomValue", "0x12345678",
     "-NetRandomAuto"

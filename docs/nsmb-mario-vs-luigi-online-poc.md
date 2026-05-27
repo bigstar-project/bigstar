@@ -223,6 +223,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - overlay10 の `Game::localPlayerID` 静的参照は StageCamera, Item, StageFX, Player transition, render/effect 系に分布する。短時間の runtime trace `logs/smvl-localplayer-reftrace-host-1300-20260527`, `logs/smvl-localplayer-reftrace-client-1300-20260527` では frame 886-1300 の間に踏まれたのは StageCamera 系のみ。StageFX/Item はこの区間ではまだ踏まれていない。
   - よって global `Game::localPlayerID=1` はカメラだけでなく `StageFX` / object生成 / result/UI 側まで切り替える。最終ルートとしては副作用が大きく、当面は採用しない。
   - `Game::loadLevel(... playerID=1 ...)` まで揃えた p1 direct ROM も検証したが、client側で stage actor / player actor / star actor が生成されず、`Ready!` または黒画面のまま進まない。ready/transfer/files 系補助を全部入れても同じ。ログ: `logs/smvl-p1-loadlevel-local1-client-1300-20260527`, `logs/smvl-p1-full-local1-client-1300-20260527`, `logs/smvl-p1-full-local0-client-1300-20260527`。
+  - p0 direct ROM で stage/player actor 生成後に `Game::localPlayerID=1` へ遅延切り替えする検証も追加。frame 1300 で切り替えると client が `ARM9 pc=00000004` prefetch abort になった。スクリーンショットは直前の通常画面が残るが、実行状態は壊れる。ログ: `logs/smvl-delayed-local1-client-1800-20260527`。
   - 次の表示方針は、ゲーム内 `Game::localPlayerID=0` の正準シミュレーションを維持し、Luigi側UXは display player id を読む箇所を限定patchするか、emulator側overlayでHUD/結果表示を差し替える方向。勝敗判定やストックアイテムを壊さないため、カメラだけを単独で変える実装は成功扱いにしない。
   - 注意: `-PacketBridgeDirectCapture` を外すと split client で player1 入力が packet に乗らない。現在の安定条件には必須として扱う。
   - 注意: 正準化した `Game::localPlayerID=0` は同期検証には有効だが、clientがLuigiとして遊べる最終UXではない。右下ストックアイテム、local player UI、勝敗判定がlocal player依存なら、カメラだけを変えても最終要件を満たせない。
