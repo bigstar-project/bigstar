@@ -506,6 +506,44 @@ def patch_stagefx_display_player_id(overlays: dict[int, object], player_id: int)
     return changes
 
 
+def patch_stage_layout_inventory_display_player_id(
+    overlays: dict[int, object],
+    player_id: int,
+    *,
+    mode: str,
+) -> list[str]:
+    # StageLayout owns the lower-screen MvL HUD. These patches only replace
+    # the argument passed to Game::getPlayerInventoryPowerup(), keeping the
+    # inventory write/consume path untouched.
+    ov_id = 0
+    player_id &= 1
+    mode_patches = {
+        "hud": [
+            (0x020BE934, "StageLayout inventory HUD primary read #1"),
+            (0x020BE95C, "StageLayout inventory HUD primary read #2"),
+        ],
+        "all-read": [
+            (0x020BE1EC, "StageLayout inventory availability read"),
+            (0x020BE934, "StageLayout inventory HUD primary read #1"),
+            (0x020BE95C, "StageLayout inventory HUD primary read #2"),
+            (0x020BFB64, "StageLayout inventory state read"),
+            (0x020C06B8, "StageLayout inventory spawn/read animation"),
+        ],
+    }
+    if mode not in mode_patches:
+        raise ValueError(f"unknown StageLayout inventory display patch mode: {mode}")
+
+    word = encode_mov_imm(0, player_id)
+    changes: list[str] = []
+    for addr, label in mode_patches[mode]:
+        old = patch_overlay_words_by_id(overlays, ov_id, addr, [word])
+        changes.append(
+            f"{label} overlay{ov_id} @ 0x{addr:08X}: "
+            f"{old.hex()} -> {struct.pack('<I', word).hex()} player={player_id} mode={mode}"
+        )
+    return changes
+
+
 def build_direct_loadlevel_stub(
     start_addr: int,
     load_level_addr: int,
@@ -632,6 +670,8 @@ def patch_direct_mvl_entry(
     camera_focus_loop_count: int | None,
     stage_set_zoom_camera_player_id: int | None,
     stagefx_display_player_id: int | None,
+    stage_layout_inventory_display_player_id: int | None,
+    stage_layout_inventory_display_mode: str,
 ) -> list[str]:
     arm9 = rom.loadArm9()
     overlays = rom.loadArm9Overlays()
@@ -740,6 +780,12 @@ def patch_direct_mvl_entry(
         changes.extend(patch_stage_set_zoom_camera_player_id(overlays, stage_set_zoom_camera_player_id))
     if stagefx_display_player_id is not None:
         changes.extend(patch_stagefx_display_player_id(overlays, stagefx_display_player_id))
+    if stage_layout_inventory_display_player_id is not None:
+        changes.extend(patch_stage_layout_inventory_display_player_id(
+            overlays,
+            stage_layout_inventory_display_player_id,
+            mode=stage_layout_inventory_display_mode,
+        ))
 
     rom.arm9 = arm9.save(compress=True)
     save_overlays(rom, overlays)
@@ -914,6 +960,9 @@ def main() -> int:
     p_set_zoom_camera.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_stagefx_display = sub.add_parser("stagefx-display-player-id")
     p_stagefx_display.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
+    p_stage_layout_inventory = sub.add_parser("stage-layout-inventory-display-player-id")
+    p_stage_layout_inventory.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
+    p_stage_layout_inventory.add_argument("--mode", choices=("hud", "all-read"), default="hud")
     p_direct = sub.add_parser("direct-mvl-entry")
     p_direct.add_argument("--scene", type=lambda x: int(x, 0), default=0x0F)
     p_direct.add_argument("--stage", type=lambda x: int(x, 0), default=0)
@@ -941,6 +990,8 @@ def main() -> int:
     p_direct.add_argument("--camera-focus-loop-count", type=lambda x: int(x, 0), default=None)
     p_direct.add_argument("--stage-set-zoom-camera-player-id", type=lambda x: int(x, 0), default=None)
     p_direct.add_argument("--stagefx-display-player-id", type=lambda x: int(x, 0), default=None)
+    p_direct.add_argument("--stage-layout-inventory-display-player-id", type=lambda x: int(x, 0), default=None)
+    p_direct.add_argument("--stage-layout-inventory-display-mode", choices=("hud", "all-read"), default="hud")
     p_fake = sub.add_parser("fake-opponent")
     p_fake.add_argument("--force-confirm-load", action="store_true")
     p_fake.add_argument("--force-loadgame-progress", action="store_true")
@@ -984,6 +1035,10 @@ def main() -> int:
         overlays = rom.loadArm9Overlays()
         changes = patch_stagefx_display_player_id(overlays, args.player_id)
         save_overlays(rom, overlays)
+    elif args.cmd == "stage-layout-inventory-display-player-id":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_stage_layout_inventory_display_player_id(overlays, args.player_id, mode=args.mode)
+        save_overlays(rom, overlays)
     elif args.cmd == "direct-mvl-entry":
         changes = patch_direct_mvl_entry(
             rom,
@@ -1014,6 +1069,8 @@ def main() -> int:
             camera_focus_loop_count=args.camera_focus_loop_count,
             stage_set_zoom_camera_player_id=args.stage_set_zoom_camera_player_id,
             stagefx_display_player_id=args.stagefx_display_player_id,
+            stage_layout_inventory_display_player_id=args.stage_layout_inventory_display_player_id,
+            stage_layout_inventory_display_mode=args.stage_layout_inventory_display_mode,
         )
     elif args.cmd == "fake-opponent":
         changes = patch_fake_opponent(

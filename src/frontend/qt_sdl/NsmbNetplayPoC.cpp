@@ -995,6 +995,12 @@ struct State
     melonDS::u32 ForcePlayerLife0 = 5;
     melonDS::u32 ForcePlayerLife1 = 5;
     bool ForcePlayerDeathCountersLogged[16] {};
+    bool ForcePlayerInventoryPowerupsEnabled = false;
+    melonDS::u32 ForcePlayerInventoryPowerupsStartFrame = 0;
+    melonDS::u32 ForcePlayerInventoryPowerupsEndFrame = 0;
+    melonDS::u32 ForcePlayerInventoryPowerup0 = 0;
+    melonDS::u32 ForcePlayerInventoryPowerup1 = 0;
+    bool ForcePlayerInventoryPowerupsLogged[16] {};
     bool TracePlayerLifeChanges = false;
     bool LastPlayerLifeSampleValid[16] {};
     GameStateSample LastPlayerLifeSample[16] {};
@@ -5028,6 +5034,40 @@ void ForcePlayerDeathCountersIfNeeded(int instanceID, melonDS::u32 frame, melonD
     }
 }
 
+void ForcePlayerInventoryPowerupsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForcePlayerInventoryPowerupsEnabled || !nds || !nds->MainRAM)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.ForcePlayerInventoryPowerupsStartFrame)
+        return;
+    if (G.ForcePlayerInventoryPowerupsEndFrame != 0 && frame > G.ForcePlayerInventoryPowerupsEndFrame)
+        return;
+    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
+        return;
+
+    const melonDS::u8 old0 = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr);
+    const melonDS::u8 old1 = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr + 1);
+    nds->ARM9Write8(kGamePlayerInventoryPowerupAddr, static_cast<melonDS::u8>(G.ForcePlayerInventoryPowerup0 & 0xFF));
+    nds->ARM9Write8(kGamePlayerInventoryPowerupAddr + 1, static_cast<melonDS::u8>(G.ForcePlayerInventoryPowerup1 & 0xFF));
+
+    if (!G.ForcePlayerInventoryPowerupsLogged[instanceID])
+    {
+        std::printf(
+            "NSMB Test: force player inventory powerups inst=%d frame=%u range=%u-%u old=%u/%u value=%u/%u\n",
+            instanceID,
+            frame,
+            G.ForcePlayerInventoryPowerupsStartFrame,
+            G.ForcePlayerInventoryPowerupsEndFrame,
+            old0,
+            old1,
+            G.ForcePlayerInventoryPowerup0 & 0xFF,
+            G.ForcePlayerInventoryPowerup1 & 0xFF);
+        G.ForcePlayerInventoryPowerupsLogged[instanceID] = true;
+    }
+}
+
 void ForceStageActorPreUpdateGateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.ForceStageActorPreUpdateGateEnabled || !nds || !nds->MainRAM)
@@ -7928,6 +7968,15 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_LIFE0", 5)));
     G.ForcePlayerLife1 = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_LIFE1", 5)));
+    G.ForcePlayerInventoryPowerupsEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS");
+    G.ForcePlayerInventoryPowerupsStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_START_FRAME", 0)));
+    G.ForcePlayerInventoryPowerupsEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_END_FRAME", 0)));
+    G.ForcePlayerInventoryPowerup0 = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP0", 0)));
+    G.ForcePlayerInventoryPowerup1 = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP1", 0)));
     G.TracePlayerLifeChanges = EnvFlag("MELONDS_NSML_TRACE_PLAYER_LIFE_CHANGES");
     G.ForceStageActorPreUpdateGateEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_ACTOR_PREUPDATE_GATE");
     G.ForceStageActorPreUpdateGateHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_ACTOR_PREUPDATE_GATE_HOST_ONLY");
@@ -8420,6 +8469,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerDeathCountersIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForcePlayerInventoryPowerupsIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageFXSettingsIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageActorPreUpdateGateIfNeeded(instanceID, inputFrame, nds);
@@ -8778,6 +8829,8 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerDeathCountersIfNeeded(instanceID, logFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForcePlayerInventoryPowerupsIfNeeded(instanceID, logFrame, nds);
 
     SaveState(instanceID, logFrame, nds);
     SaveLocalMPState(logFrame);

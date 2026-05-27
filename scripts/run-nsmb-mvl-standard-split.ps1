@@ -43,6 +43,11 @@ param(
     [switch]$ForcePlayerLives,
     [int]$ForcePlayerLife0 = 5,
     [int]$ForcePlayerLife1 = 5,
+    [switch]$ForcePlayerInventoryPowerups,
+    [int]$ForcePlayerInventoryPowerupsStartFrame = 0,
+    [int]$ForcePlayerInventoryPowerupsEndFrame = 0,
+    [int]$ForcePlayerInventoryPowerup0 = 0,
+    [int]$ForcePlayerInventoryPowerup1 = 0,
     [switch]$NoCameraFallbackRom,
     [switch]$ForceStageCameraSlot,
     [int]$ForceStageCameraSlotStartFrame = 850,
@@ -219,6 +224,15 @@ if ($ForcePlayerLives) {
         "-ForcePlayerLives",
         "-ForcePlayerLife0", "$ForcePlayerLife0",
         "-ForcePlayerLife1", "$ForcePlayerLife1"
+    )
+}
+if ($ForcePlayerInventoryPowerups) {
+    $common += @(
+        "-ForcePlayerInventoryPowerups",
+        "-ForcePlayerInventoryPowerupsStartFrame", "$ForcePlayerInventoryPowerupsStartFrame",
+        "-ForcePlayerInventoryPowerupsEndFrame", "$ForcePlayerInventoryPowerupsEndFrame",
+        "-ForcePlayerInventoryPowerup0", "$ForcePlayerInventoryPowerup0",
+        "-ForcePlayerInventoryPowerup1", "$ForcePlayerInventoryPowerup1"
     )
 }
 if ($ForceStageCameraSlot) {

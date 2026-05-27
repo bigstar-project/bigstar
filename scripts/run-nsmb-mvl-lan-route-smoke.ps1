@@ -234,6 +234,11 @@ param(
     [switch]$ForcePlayerLives,
     [int]$ForcePlayerLife0 = 5,
     [int]$ForcePlayerLife1 = 5,
+    [switch]$ForcePlayerInventoryPowerups,
+    [int]$ForcePlayerInventoryPowerupsStartFrame = 0,
+    [int]$ForcePlayerInventoryPowerupsEndFrame = 0,
+    [int]$ForcePlayerInventoryPowerup0 = 0,
+    [int]$ForcePlayerInventoryPowerup1 = 0,
     [switch]$RenderCameraAlias,
     [switch]$RenderCameraAliasAllRoles,
     [int]$RenderCameraAliasSourcePlayer = 1,
@@ -1169,6 +1174,19 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_LIVES -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_LIFE0 -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_LIFE1 -ErrorAction SilentlyContinue
+    }
+    if ($ForcePlayerInventoryPowerups) {
+        $env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS = "1"
+        $env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_START_FRAME = "$ForcePlayerInventoryPowerupsStartFrame"
+        $env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_END_FRAME = "$ForcePlayerInventoryPowerupsEndFrame"
+        $env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP0 = "$ForcePlayerInventoryPowerup0"
+        $env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP1 = "$ForcePlayerInventoryPowerup1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP0 -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP1 -ErrorAction SilentlyContinue
     }
     if ($TracePlayerLifeChanges) {
         $env:MELONDS_NSML_TRACE_PLAYER_LIFE_CHANGES = "1"
@@ -2523,6 +2541,12 @@ function Start-MelonLANProcess {
         "forceStageCameraSlotEnd=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_END_FRAME)"
         "forceStageCameraSlotSource=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_SOURCE)"
         "forceStageCameraSlotDest=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_DEST)"
+        "forcePlayerInventoryPowerupsSwitch=$ForcePlayerInventoryPowerups"
+        "forcePlayerInventoryPowerupsEnv=$($env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS)"
+        "forcePlayerInventoryPowerupsStart=$($env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_START_FRAME)"
+        "forcePlayerInventoryPowerupsEnd=$($env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_END_FRAME)"
+        "forcePlayerInventoryPowerup0=$($env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP0)"
+        "forcePlayerInventoryPowerup1=$($env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP1)"
         "tracePlayerLifeChangesSwitch=$TracePlayerLifeChanges"
         "tracePlayerLifeChangesEnv=$($env:MELONDS_NSML_TRACE_PLAYER_LIFE_CHANGES)"
         "tracePlayerLifeCallsSwitch=$TracePlayerLifeCalls"

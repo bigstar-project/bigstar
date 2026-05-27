@@ -109,6 +109,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `tools/nsmb_us_rom_patch.py camera-focus-loop-count --count 2` を追加。overlay0 `0x020BAAE4` / `0x020BAC18` の camera focus loop count取得を `mov r0,#2` に置換し、JIT有効でも `updatePlayerCameraFocus(1)` が走るようにする。
   - `tools/nsmb_us_rom_patch.py stage-set-zoom-camera-player-id` を追加。`Stage::setZoom` 内の `Stage::cameraX/Width` literal を player slot別に差し替え、StageCamera以外の描画camera入力を検証できるようにする。
   - `tools/nsmb_us_rom_patch.py stagefx-display-player-id` を追加。`StageFX::updateStart` / `updateLose` / `updateClear` / `updateVsTimesUp` 内の表示系 `Game::localPlayerID` 読み取りだけを固定し、ゲーム全体の `Game::localPlayerID` を変えずに開始/勝敗/タイムアップ表示だけをLuigi側に寄せられるか検証できる。
+  - `tools/nsmb_us_rom_patch.py stage-layout-inventory-display-player-id` を追加。StageLayout の下画面HUDが `Game::getPlayerInventoryPowerup()` を読む箇所だけを player0/player1 に固定し、アイテム消費側の `setPlayerInventoryPowerup()` は触らずにストック表示を切り替える診断patch。
 
 ## 最新の検証結果
 
@@ -138,6 +139,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 - `logs/nsmvl-us-direct-entry-split-camera-full-both-different-host-3600-20260527` と client 側 trace では、`playerActor0X` / `playerActor1X` は host/client で一致している。ただしcamera-full-p1 ROMのclientスクショでは、地形/ブロックに対するキャラ位置が破綻している。これは「内部座標一致」とは別の表示バグ。
 - 通常ROMをclientにも使うと、host/clientの上画面は地形相対で一致する。ログ: `logs/smvl-normalrom-both-display-host-1800-20260527`, `logs/smvl-normalrom-both-display-client-1800-20260527`
+- 右下ストックHUDは、正準 `Game::localPlayerID=0` のままだと host/client とも player0 の在庫を表示する。診断フックで `player0InventoryPowerup=0x1`, `player1InventoryPowerup=0x4` を強制した検証では、client側だけ `stage-layout-inventory-display-player-id --player-id 1 --mode hud` を当てると右下HUDが player1 側の青いアイテム表示に変わり、frame 1300 まで開始残機減少なし、state一致、stage-visible verifier を通過した。ログ: `logs/smvl-invhudpatch-host-1350-20260527`, `logs/smvl-invhudpatch-client-1350-20260527`。これは「下画面ストック表示」は display-only patch で分離できる可能性が高い、という結果。
 - camera patch切り分け:
   - `stage-camera-state-player-id` は3D actor側だけがズレる表示を作りやすく、現状不採用。
   - `stage-camera-player-id` / display-only も完全なLuigi視点ではない。
