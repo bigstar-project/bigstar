@@ -448,6 +448,24 @@ def patch_camera_focus_loop_count(overlays: dict[int, object], count: int) -> li
     return changes
 
 
+def patch_stage_set_zoom_camera_player_id(overlays: dict[int, object], player_id: int) -> list[str]:
+    ov_id = 10
+    slot_offset = (player_id & 1) * 4
+    replacements = {
+        0x020FB33C: 0x020CAE1C + slot_offset,  # Stage::cameraX
+        0x020FB450: 0x020CAE1C + slot_offset,  # Stage::cameraX
+        0x020FB454: 0x020CADA4 + slot_offset,  # Stage::cameraWidth
+    }
+    changes: list[str] = []
+    for addr, value in replacements.items():
+        old = patch_overlay_words_by_id(overlays, ov_id, addr, [value])
+        changes.append(
+            f"Stage::setZoom camera slot literal overlay{ov_id} @ 0x{addr:08X}: "
+            f"{old.hex()} -> {struct.pack('<I', value).hex()} player={player_id & 1}"
+        )
+    return changes
+
+
 def build_direct_loadlevel_stub(
     start_addr: int,
     load_level_addr: int,
@@ -572,6 +590,7 @@ def patch_direct_mvl_entry(
     camera_fallback_slot_zero: bool,
     camera_player1_out_of_view_slot0: bool,
     camera_focus_loop_count: int | None,
+    stage_set_zoom_camera_player_id: int | None,
 ) -> list[str]:
     arm9 = rom.loadArm9()
     overlays = rom.loadArm9Overlays()
@@ -676,6 +695,8 @@ def patch_direct_mvl_entry(
         ))
     if camera_focus_loop_count is not None:
         changes.extend(patch_camera_focus_loop_count(overlays, camera_focus_loop_count))
+    if stage_set_zoom_camera_player_id is not None:
+        changes.extend(patch_stage_set_zoom_camera_player_id(overlays, stage_set_zoom_camera_player_id))
 
     rom.arm9 = arm9.save(compress=True)
     save_overlays(rom, overlays)
@@ -846,6 +867,8 @@ def main() -> int:
     sub.add_parser("camera-player1-out-of-view-slot0")
     p_camera_loop = sub.add_parser("camera-focus-loop-count")
     p_camera_loop.add_argument("--count", type=lambda x: int(x, 0), default=2)
+    p_set_zoom_camera = sub.add_parser("stage-set-zoom-camera-player-id")
+    p_set_zoom_camera.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_direct = sub.add_parser("direct-mvl-entry")
     p_direct.add_argument("--scene", type=lambda x: int(x, 0), default=0x0F)
     p_direct.add_argument("--stage", type=lambda x: int(x, 0), default=0)
@@ -871,6 +894,7 @@ def main() -> int:
     p_direct.add_argument("--camera-fallback-slot-zero", action="store_true")
     p_direct.add_argument("--camera-player1-out-of-view-slot0", action="store_true")
     p_direct.add_argument("--camera-focus-loop-count", type=lambda x: int(x, 0), default=None)
+    p_direct.add_argument("--stage-set-zoom-camera-player-id", type=lambda x: int(x, 0), default=None)
     p_fake = sub.add_parser("fake-opponent")
     p_fake.add_argument("--force-confirm-load", action="store_true")
     p_fake.add_argument("--force-loadgame-progress", action="store_true")
@@ -906,6 +930,10 @@ def main() -> int:
         overlays = rom.loadArm9Overlays()
         changes = patch_camera_focus_loop_count(overlays, args.count)
         save_overlays(rom, overlays)
+    elif args.cmd == "stage-set-zoom-camera-player-id":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_stage_set_zoom_camera_player_id(overlays, args.player_id)
+        save_overlays(rom, overlays)
     elif args.cmd == "direct-mvl-entry":
         changes = patch_direct_mvl_entry(
             rom,
@@ -934,6 +962,7 @@ def main() -> int:
             camera_fallback_slot_zero=args.camera_fallback_slot_zero,
             camera_player1_out_of_view_slot0=args.camera_player1_out_of_view_slot0,
             camera_focus_loop_count=args.camera_focus_loop_count,
+            stage_set_zoom_camera_player_id=args.stage_set_zoom_camera_player_id,
         )
     elif args.cmd == "fake-opponent":
         changes = patch_fake_opponent(
