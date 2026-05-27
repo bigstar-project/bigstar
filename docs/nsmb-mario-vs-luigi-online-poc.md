@@ -38,18 +38,21 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
     - `PacketBridgeLookupTickDelay=60`
     - frame 1500-3000 で actor座標、敵、残機/死亡状態を含むstate一致
     - `-RequirePlayer0Input -RequirePlayer1Input -RequireStageVisibleScreenshots` 通過
+  - `logs/smvl-hybrid-helper-3000-20260528`
+    - `scripts/run-nsmb-mvl-hybrid-split.ps1` から再現
+    - frame 1500-3000 で `-RequirePlayer0Input -RequirePlayer1Input -RequireStageVisibleScreenshots` 通過
 - 最新の未解決:
-  - client表示で一部actor、特にGoombaが見えないframeがある。`StageEntity::skipRender` をplayer1表示へ向けるだけでは不十分だった。simulation stateは一致しているので、次はGoomba/ActiveActor側のrender gateを追う。
+  - client表示はまだ広いQAが必要。Goombaについては `Goomba::onRender` と `OAM/drawSprite` がclientでも呼ばれ、単独スクリーンショットで描画を確認したため、直近の差分はcamera差分の可能性が高い。敵、アイテム、死亡演出、勝敗演出がLuigi視点で自然に見えるかを継続確認する。
   - `tests/nsmb_us_direct_mvl_avoid_goomba.inputs` でもMario/Luigiが後半に死亡する。これは同期失敗ではなく入力経路の問題なので、長時間検証用の自然操作スクリプトを作る必要がある。
   - `PacketBridgeLookupTickDelay=10` ではclientのlocal player1 packetがhostより先に反映されることがある。delay 60 では同期できたため、最終的にはlockstep待ち/入力遅延の自動調整が必要。
   - client側のHUD/カメラ/StageFXはplayer1へ寄せているが、trace上の `Game::localPlayerID` はcanonical 0 のまま。勝敗演出、ストックアイテム使用、死亡演出がLuigi視点として成立するかは未検証。
 
 直近の次アクション:
 
-- Goomba/敵actorのrender gateを特定し、client player1表示でもsimulation上の敵が見えるようにする。
-- `PacketBridgeLookupTickDelay=60` 相当を標準routeへ反映し、local packetが片側だけ先に反映される条件を潰す。
+- hybrid helperを使って2PC相当のhost/client分離実行へ移し、同じROM/PacketBridge条件をWAN向けに検証する。
+- `PacketBridgeLookupTickDelay=60` は固定条件として入った。次は固定値ではなく、lockstep待ち/入力遅延の自動調整へ進める。
 - 死亡しない長時間入力スクリプトを作り、3000 frame 以上で `RequireNoLifeLossUntilFrame` も通す。
-- 成功条件を満たすrouteを `scripts/run-nsmb-mvl-stable-split.ps1` または新しいhybrid helperへ整理する。
+- client Luigi視点で、敵/アイテム/死亡/勝敗演出/ストックHUDが自然に成立するかを、スクリーンショットと状態値の両方で検証する。
 
 ## 実装済み
 
@@ -146,8 +149,9 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `tools/nsmb_us_rom_patch.py stage-camera-state-vertical-slot-zero` を追加。StageCamera state関数のY/height参照だけslot0へ向け、runtime ForceStageCameraでは間に合わないview matrix生成タイミングをROM側で切り分ける。
   - `tools/nsmb_us_rom_patch.py player-render-range-view-player-id` を追加。`Player::renderModel()` から `Stage::isOutsidePlayerRange` へ渡るviewIDだけを固定し、player model欠落がrange/camera slot由来かを診断できる。
   - `tools/nsmb_us_rom_patch.py player-view-transit-local-player-id` / `player-vs-pipe-local-player-id` を追加。`Player::viewTransitState` / `Player::vsPipeTransitState` 内だけlocalPlayerID比較を固定する診断patch。localID1 object set不一致の直接解決にはならなかった。
-  - `tools/nsmb_us_rom_patch.py stage-entity-skip-render-player-id` を追加。hybrid client表示で `StageEntity::skipRender` のcamera slotだけplayer1へ寄せる診断patch。Goomba表示欠落はこれだけでは直らず、ActiveActor/Goomba側のrender gate追跡が残る。
+  - `tools/nsmb_us_rom_patch.py stage-entity-skip-render-player-id` を追加。hybrid client表示で `StageEntity::skipRender` のcamera slotだけplayer1へ寄せる診断patch。Goombaは後続のcalltraceでclient側でもrender pathが呼ばれることを確認済み。
   - `tools/nsmb_us_rom_patch.py player-render-wrap-x-offset` は負方向offsetも受け取れるようにした。単純なdisplay X wrap補正ではlocalID1のplayer model欠落は解消しなかった。
+  - `scripts/generate-nsmb-mvl-hybrid-roms.ps1` / `scripts/run-nsmb-mvl-hybrid-split.ps1` を追加。canonical local0 simulation + client player1表示/UI/input の成功条件を再現するための標準helper。
   - `tests/nsmb_us_direct_mvl_avoid_goomba.inputs` を追加。Luigiを早めに動かし、PacketBridge入力遅延とstate同期を検証しやすくするための暫定入力スクリプト。
   - `TraceNSMLPlayerRender` を追加。`Player::onRender`, `Player::renderModel()`, `Player::renderModel(bool)` のframe, actor, playerID, characterID, visibleFlag, display vector, model pointerをstdoutに出せる。
   - `ForcePlayerActorPosition` を追加。player actor位置/character/playerIDを一時的に書き換え、描画欠落が座標・キャラ・playerIDのどれに依存するかを切り分ける診断フック。
@@ -160,7 +164,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - canonical local0 simulationに戻し、client側だけ `StageCamera player1 + StageFX player1 + inventory HUD player1` を当てるhybrid ROMでは、host/clientのobject setが一致する。`logs/smvl-hybrid-display1-split-framelead20-2240-20260528` は frame 1500-2240 で verifier 通過。
 - `tests/nsmb_us_direct_mvl_avoid_goomba.inputs` と `PacketBridgeLookupTickDelay=60` の組み合わせでは、`logs/smvl-hybrid-avoidgoomba-delay60-split-3000-20260528` が frame 1500-3000 で verifier 通過。player0/player1入力が入り、actor座標、敵、死亡/残機状態がhost/clientで一致した。後半に死亡はあるが両者一致しており、desyncではなく入力ルートの問題。
 - `PacketBridgeLookupTickDelay=10` では、clientが自分のplayer1 packetをhostより早く読んで frame 1560 から差分が出た。入力遅延/lockstep制御はWAN対戦の必須要素。
-- hybrid client表示では、state上のGoomba/movingHazardが見えないframeがある。`stage-entity-skip-render-player-id --player-id 1` だけでは直らないため、ActiveActor/Goomba側のrender gate追跡が残る。
+- hybrid client表示のGoombaについては、`Goomba::onRender` と `OAM/drawSprite` がclientでも呼ばれ、単独スクリーンショットで描画を確認した。split screenshot上の見え方差分はcamera差分の可能性が高く、現在は「Goomba render gateが壊れている」とは扱わない。
 
 ### FPS / 検証速度
 
@@ -309,19 +313,17 @@ localID1 route の切り分け結果:
 
 ## 現在の課題
 
-1. `client localPlayerID=1` の表示gateは前進したが、`range viewID=0` 固定は診断patchであり最終解ではない。実LocalMP相当のplayer1 camera/range slot初期化を特定して、viewID=1のままLuigi/player1を出す必要がある。
-2. `host localID0 / client localID1` splitで、入力前からplayer Yがズレる。localID1 direct routeでsimulationに影響する初期化差分を、StageStart/StageCamera/StageLayoutのどれかに絞る。
-3. DirectCaptureでclient自身はplayer1入力を読め、frame lead throttleを使えば狭いwindowでもhost側にplayer1入力は入る。ただしstate desyncは残るため、入力同期成功とゲーム状態一致を分けて扱う。
-4. 開始直後のactor構成、地形相対の表示、HUD、下画面、死亡/勝敗演出が、`host=player0`, `client=player1` の自然な役割解釈になっているかを確認する。これが通るまでストックアイテムや勝敗結果画面の個別検証へ進まない。
-5. ローカル2プロセス同時検証は、安定条件のJITなしでは約10-12fps、JITありなら40fps台まで上がるが入力同期がゲームロジックへ反映されない。実用速度へ近づけるには、JIT側で PacketBridge packet API hook を正しく扱うか、ROM patch側でpacket API境界を置換してJITでも同じ値を返せるようにする必要がある。
+1. `client localPlayerID=1` direct routeは、表示だけでなくobject spawn setがhostと一致しないため、主経路から外す。以後はcanonical local0 simulation + client player1表示/UI/input のhybrid routeを本筋にする。
+2. DirectCaptureでclient自身はplayer1入力を読め、`PacketBridgeLookupTickDelay=60` と frame lead throttle を使えばhost/client state一致まで到達する。この条件はhybrid helperへ固定済みなので、次はhost/client分離実行とWAN/2PC検証へ移す。
+3. 開始直後のactor構成、地形相対の表示、HUD、下画面、死亡/勝敗演出が、`host=player0`, `client=player1` の自然な役割解釈になっているかを確認する。これが通るまでストックアイテムや勝敗結果画面の個別検証へ進まない。
+4. ローカル2プロセス同時検証は、安定条件のJITなしでは約10-12fps、JITありなら40fps台まで上がるが入力同期がゲームロジックへ反映されない。実用速度へ近づけるには、JIT側で PacketBridge packet API hook を正しく扱うか、ROM patch側でpacket API境界を置換してJITでも同じ値を返せるようにする必要がある。
 
 ## 次にやること
 
-1. `Stage::isOutsidePlayerRange` に渡る `viewID=1` がなぜplayer1をoutside扱いにするかを、Stage::cameraX/Y/Width/HeightとdisplayVecの差分で追う。目標は `player-render-range-view-player-id` を外すこと。
-2. 入力前のhost/client Y差分を、localID1単独ROMとhost/client splitの両方で最小再現する。`StageActor::isOutOfViewVertical` fallback以外にsimulationへ影響しているlocalPlayerID参照を探す。
-3. PacketBridgeの次は、`PacketBridgeMaxFrameLead` を標準split条件へ組み込み、入力反映の成功条件を verifier で見る。そのうえで、入力前から出ているlocalID1由来のstate差分を潰す。
-4. 成功判定は「stage visible」だけでなく、player modelが出ていることをスクリーンショット/フレームバッファ検査でfailできるようにする。`tools/nsmb_screenshot_probe.py --band-start 110 --band-end 180 --min-red-player-pixels 80` はMario表示/非表示の自動判定に使える。
-5. 高速化はJITを無条件に許可しない。`-AllowJitWithPacketBridge` は現状「速度計測用/失敗再現用」で、成功判定には使わない。JIT対応を再開する場合は、PacketBridgeの `Net::getConsoleKeys` / `getPacketByte` / `getPacketTick` / `getPacketAction` hook がJIT実行でもguest R0へ反映されることを最初に検証する。
+1. hybrid helperをhost/client別プロセス、次に2PC相当で動かし、`PacketBridgeLookupTickDelay=60` 条件のまま切断や片側先行入力が出ないかを見る。
+2. 死亡しない長時間入力スクリプトを作り、`RequireNoLifeLossUntilFrame` を通す。まずは敵回避とカメラ確認を優先し、スター/8コインアイテムはその後。
+3. client Luigi視点のQAを追加する。成功判定は「stage visible」だけでなく、player model、敵、HUD、死亡演出、勝敗演出が自然に見えることをスクリーンショット/フレームバッファ検査でfailできるようにする。
+4. 高速化はJITを無条件に許可しない。`-AllowJitWithPacketBridge` は現状「速度計測用/失敗再現用」で、成功判定には使わない。JIT対応を再開する場合は、PacketBridgeの `Net::getConsoleKeys` / `getPacketByte` / `getPacketTick` / `getPacketAction` hook がJIT実行でもguest R0へ反映されることを最初に検証する。
 
 ## 検証ルール
 
