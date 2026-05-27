@@ -33,6 +33,7 @@ param(
     [double]$TargetFps = 0.0,
     [switch]$AllowJitWithPacketBridge,
     [switch]$PacketBridgeTrace,
+    [switch]$PacketBridgePreserveLocalTouch,
     [int]$PlayerStickToStarStartFrame = 0,
     [int]$PlayerStickToStarEndFrame = 0,
     [int]$PlayerStickToStarSlot = 0,
@@ -209,6 +210,9 @@ if ($AllowJitWithPacketBridge) {
 }
 if ($PacketBridgeTrace) {
     $common += "-PacketBridgeTrace"
+}
+if ($PacketBridgePreserveLocalTouch) {
+    $common += "-PacketBridgePreserveLocalTouch"
 }
 if ($SendDelayFrames -gt 0) {
     $common += @("-PacketBridgeSendDelayFrames", "$SendDelayFrames")

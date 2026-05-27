@@ -26,7 +26,8 @@ param(
     [switch]$FixedFrameTime,
     [double]$TargetFps = 0.0,
     [switch]$AllowJitWithPacketBridge,
-    [switch]$PacketBridgeTrace
+    [switch]$PacketBridgeTrace,
+    [switch]$PacketBridgePreserveLocalTouch
 )
 
 $ErrorActionPreference = "Stop"
@@ -62,6 +63,7 @@ $standardArgs = @{
     TargetFps = $TargetFps
     AllowJitWithPacketBridge = $AllowJitWithPacketBridge
     PacketBridgeTrace = $PacketBridgeTrace
+    PacketBridgePreserveLocalTouch = $PacketBridgePreserveLocalTouch
 }
 
 & .\scripts\run-nsmb-mvl-standard-split.ps1 @standardArgs

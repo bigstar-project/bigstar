@@ -168,6 +168,7 @@ param(
     [int]$PacketBridgeLookupTickDelay = 0,
     [int]$PacketBridgeLocalInputDelay = -1,
     [switch]$PacketBridgeNeutralizeLocalInput,
+    [switch]$PacketBridgePreserveLocalTouch,
     [int]$PacketBridgeSendDelayFrames = 0,
     [int]$PacketBridgeSendJitterFrames = 0,
     [int]$PacketBridgeMaxPumpEvents = 64,
@@ -1745,6 +1746,11 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_NEUTRALIZE_LOCAL_INPUT -ErrorAction SilentlyContinue
         }
+        if ($PacketBridgePreserveLocalTouch) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_PRESERVE_LOCAL_TOUCH = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_PRESERVE_LOCAL_TOUCH -ErrorAction SilentlyContinue
+        }
         if ($PacketBridgeSendDelayFrames -gt 0) {
             $env:MELONDS_NSML_PACKET_BRIDGE_SEND_DELAY_FRAMES = "$PacketBridgeSendDelayFrames"
         } else {
@@ -2072,6 +2078,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_THROTTLE_TIMEOUT_MS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOCAL_INPUT_DELAY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_NEUTRALIZE_LOCAL_INPUT -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_PRESERVE_LOCAL_TOUCH -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_SEND_DELAY_FRAMES -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_SEND_JITTER_FRAMES -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_NET_RANDOM_VALUE -ErrorAction SilentlyContinue
@@ -2123,6 +2130,7 @@ function Start-MelonLANProcess {
     if (-not $PacketBridge) {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOCAL_INPUT_DELAY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_NEUTRALIZE_LOCAL_INPUT -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_PRESERVE_LOCAL_TOUCH -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_SEND_DELAY_FRAMES -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_SEND_JITTER_FRAMES -ErrorAction SilentlyContinue
         if ($PacketBridgeLookupTickDelay -gt 0) {

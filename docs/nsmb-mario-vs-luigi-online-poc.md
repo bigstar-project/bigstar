@@ -27,7 +27,10 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ユーザー観察ベースで、次の4点を優先して潰す。
 
-- host/client の上画面で Mario/Luigi の表示位置が違って見える問題は、単なるカメラ差として扱わない。`camera-full-p1` ROM patch は3D actor側とBG/地形側のカメラを揃えられず、地形相対の表示が壊れる。`Game::localPlayerID=1 + camera focus loop` では空画面は消えるが、client の `player1Dead/lives` と actor Y が host から分岐するため、同期用ゲームロジックへ `localPlayerID=1` を見せるルートは本筋から外す。右下ストックアイテム、local player UI、勝敗判定は「正準シミュレーションを壊さない表示/overlay/限定patch」として別に解く。
+- client で Luigi 側を実際にプレイできる表示/操作系を優先する。現時点の判断では、ゲーム全体の `Game::localPlayerID=1` 化は避け、正準シミュレーションは `localPlayerID=0` のまま維持する。その上で client ROM だけ `StageCamera` / `Stage::setZoom` / `StageFX` / `StageLayout` の表示・下画面読み取りを player1 に寄せる。
+- 2026-05-28 の検証で、`StageCamera state + onUpdate + Stage::setZoom` を player1 に揃えた client ROM は、host/client state一致を保ったまま client 上画面にLuigiを表示できた。`RenderCameraAlias` runtime hookだけでは上画面がMario側のままで不十分だった。確認ログ: `logs/smvl-client-play-camera-romsetzoom-host-2400-20260528`, `logs/smvl-client-play-camera-romsetzoom-client-2400-20260528`。
+- 右下ストックアイテムは、表示だけなら `stage-layout-inventory-display-player-id --mode hud` で player1 表示にできる。ただし使用操作まで含めるには `--mode all-read` と local touch の扱いが必要。`PacketBridgeNeutralizeLocalInput` が touch も消していたため、`PacketBridgePreserveLocalTouch` を追加した。これで client 側 packet byte は touch時に変化するが、2026-05-28時点では `player1InventoryPowerup` 消費までは未達。次は packet byte5/action のhost側反映と、StageLayout/Item使用処理の境界を追う。
+- host/client の上画面で Mario/Luigi の表示位置が違って見える問題は、単なるカメラ差として扱わない。旧 `camera-full-p1` ROM patch は3D actor側とBG/地形側のカメラを揃えられず、地形相対の表示が壊れたため不採用。新しい client play ROM は `scripts/generate-nsmb-mvl-client-play-rom.ps1` で生成し、`Stage::setZoom` も含めて揃える。
 - 開始直後に右上Luigi残機が `5 -> 4` になる問題は、Goomba接触ではない。根本経路は `Player::vsPipeTransitState()` 完了後の player1 が `StageActor::isOutOfViewVertical()` で画面外扱いになり、`Player::pitDeathTransitState()` -> `Player::beginDeathTransition()` -> `Game::playerDead[1]=1` -> `PlayerBase::onDefeated()` -> `Game::losePlayerLife(1)` / `Game::addPlayerDeath(1)` と進む流れ。direct entry では `Stage::cameraY[1]` / `Stage::cameraHeight[1]` が 0 のままなので player1 の縦画面外判定だけが壊れる。開始限定の残機/死亡カウンタ補正は最終修正として扱わない。2026-05-27時点で、`StageActor::isOutOfViewVertical` の cameraHeight が 0 の player slot だけ slot0 にfallbackする ROM patch で開始死亡を解消できた。確認ログ `logs/smvl-rootcheck-fallback-host-1300-20260527`, `logs/smvl-rootcheck-fallback-client-1300-20260527` では frame 1290 まで `player0Lives=5`, `player1Lives=5`, `player0Dead=0`, `player1Dead=0`、life call は初期 `setPlayerLives` のみ。
 - FPSが低い。JIT OFFが10fps級の主因だった。JIT ON + hash/trace/screenshotなしでは単独hostが約67fps、ローカル2プロセス同時では約47-55fps。実2PCでは1PCあたり1インスタンスなので単独hostの数値が近い。ローカル2プロセス検証速度は引き続き改善対象。
 - Luigi死亡中に敵やブロックアニメが止まるように見える。frame 1923以降の trace では Luigi死亡演出中に `player0UpdateLocked=1` も立つため、現時点ではNSMB本体の死亡演出停止である可能性が高い。direct entry/PacketBridgeの副作用かどうかは、通常LocalMP/実機相当ルートとの比較が残る。
@@ -90,6 +93,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - verifier に `-RequireStageVisibleScreenshots` を追加。最新スクリーンショットを `tools/nsmb_screenshot_probe.py` で確認し、sky-only 画面を成功扱いしない。
   - helper script は `logs/nsmvl-standard-helper-client-right-host-1800-20260527`, `logs/nsmvl-standard-helper-client-right-client-1800-20260527` で smoke と split verifier 通過。
   - `scripts/generate-nsmb-mvl-client-ui-rom.ps1` を追加。安定base ROMから `StageFX + StageLayout inventory HUD` の client UI ROM を再生成できる。
+  - `scripts/generate-nsmb-mvl-client-play-rom.ps1` を追加。安定base ROMから `StageFX player1 + StageLayout inventory all-read player1 + StageCamera player1 + Stage::setZoom player1` の client play 候補 ROM を再生成できる。
   - `scripts/generate-nsmb-mvl-stable-roms.ps1` を追加。US原本ROMから stable host ROM と stable client UI ROM を再生成できる。
   - `scripts/run-nsmb-mvl-stable-split.ps1` を追加。stable host/client ROM を使う標準実行ラッパー。`-GenerateRoms` でROM生成から実行まで行える。
   - `scripts/verify-nsmb-mvl-stable-split.ps1` を追加。stable route の成功条件として `-RequirePlayer0Input -RequirePlayer1Input` をデフォルトで必須にする verifier ラッパー。
@@ -98,6 +102,8 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
     - `tests/nsmb_us_direct_mvl_client_right.inputs`
     - `tests/nsmb_us_direct_mvl_both_different.inputs`
     - `tests/nsmb_us_direct_mvl_star_collect_left.inputs`
+    - `tests/nsmb_us_direct_mvl_client_inventory_touch.inputs`
+    - `tests/nsmb_us_direct_mvl_client_inventory_touch_local.inputs`
 - 追加した検証フック
   - `ForceMvlPlayerReady` を PowerShell script から指定可能にした。
   - `ForceMvlRuntimeState` を追加し、US direct entry と自然ルートの差分だった MvL runtime state byte `0x020CA6AC` を検証用に強制できるようにした。
@@ -150,6 +156,11 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - 勝敗結果画面は `ForcePlayerStarCounters` 診断フックで短時間発火できるようにした。`player1BattleStars=5` の検証では `VSResults` scene (`SceneID=0xA`) へ遷移し、`vs-results-display-player-id --player-id 1` で client に `You Win!` を出せた。ログ: `logs/smvl-vsresults-text-p1win-host-1600-20260527`, `logs/smvl-vsresults-text-p1win-client-1600-20260527`。
 - ただし `player0BattleStars=5` で client を負け表示にするケースは、同patchで `pc=02066EBC lr=02155F48 fault=00000020` の data abort になる。`VSResults` は `object+0x9B` を複数の資源index選択にも使っており、win/lose stateだけをlocal player1にすると lose path のtile sourceが破綻する。ログ: `logs/smvl-vsresults-text-p0win-client-1600-20260527`。次は `VSResults` object の `+0x70..+0x9B` と winner/local player resource table の関係を追う。
 - 結果画面patchを除いた `StageFX + stage-layout-inventory-display-player-id` client UI ROM は、通常入力で frame 3600 まで verifier 通過。開始残機減少なし、stage visible、host/client state一致、ARM abortなし。ログ: `logs/smvl-stable-clientui-host-3600-20260527`, `logs/smvl-stable-clientui-client-3600-20260527`。当面の安定client UI候補はこの組み合わせ。
+- client play ROM候補:
+  - `scripts/generate-nsmb-mvl-client-play-rom.ps1` は `StageFX + StageLayout inventory all-read + StageCamera state/onUpdate + Stage::setZoom` を player1 表示/読み取りへ寄せる。
+  - `logs/smvl-client-play-camera-romsetzoom-host-2400-20260528`, `logs/smvl-client-play-camera-romsetzoom-client-2400-20260528` は frame 2400 verifier 通過。clientスクショでLuigiが上画面に表示され、host/client state一致とstage-visibleを維持した。
+  - `logs/smvl-client-play-camera-alias-host-2400-20260528`, `logs/smvl-client-play-camera-alias-client-2400-20260528` では runtime `RenderCameraAlias` だけでは上画面がMario側のままで、Luigi視点として不採用。
+  - `PacketBridgePreserveLocalTouch` を追加し、local button はpacket-onlyのまま、touchだけはclient UIへ渡せるようにした。`logs/smvl-client-inventory-preservetouch-client-2400-20260528` では touch frame 付近で `NetPacketByte5=0x1` / `NetPacketByte6=0xD9` が出るが、`player1InventoryPowerup` はまだ消費されていない。次はこのpacket actionをhost側で同じtickに読ませるか、NSMBのItem/StageLayout側でどの条件が不足しているかを追う。
 - `scripts/generate-nsmb-mvl-client-ui-rom.ps1` で生成した client UI ROM でも frame 1800 smoke と verifier 通過。ログ: `logs/smvl-generated-clientui-host-1800-20260527`, `logs/smvl-generated-clientui-client-1800-20260527`。
 - `scripts/generate-nsmb-mvl-stable-roms.ps1` でUS原本から再生成した host/client ROM でも frame 1300 smoke と verifier 通過。ログ: `logs/smvl-stable-generator-host-1300-20260527`, `logs/smvl-stable-generator-client-1300-20260527`。
 - `scripts/run-nsmb-mvl-stable-split.ps1` でも frame 1300 smoke と verifier 通過。ログ: `logs/smvl-stable-wrapper-host-1300-20260527`, `logs/smvl-stable-wrapper-client-1300-20260527`。

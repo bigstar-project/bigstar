@@ -889,6 +889,7 @@ struct State
     melonDS::u32 PacketBridgeThrottleStartFrame = 0;
     int PacketBridgeLocalInputDelay = 0;
     bool PacketBridgeNeutralizeLocalInput = false;
+    bool PacketBridgePreserveLocalTouch = false;
     int PacketBridgeSendDelayFrames = 0;
     int PacketBridgeSendJitterFrames = 0;
     std::map<melonDS::u32, InputState> PacketBridgePacketInputs;
@@ -1224,6 +1225,15 @@ InputState NeutralInput()
 {
     InputState input {};
     input.KeyMask = 0xFFF;
+    return input;
+}
+
+InputState NeutralInputPreservingTouch(const InputState& source)
+{
+    InputState input = NeutralInput();
+    input.Touching = source.Touching;
+    input.TouchX = source.TouchX;
+    input.TouchY = source.TouchY;
     return input;
 }
 
@@ -7851,6 +7861,8 @@ void InitFromEnvironment()
         0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_LOCAL_INPUT_DELAY", 0));
     G.PacketBridgeNeutralizeLocalInput =
         EnvFlag("MELONDS_NSML_PACKET_BRIDGE_NEUTRALIZE_LOCAL_INPUT");
+    G.PacketBridgePreserveLocalTouch =
+        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_PRESERVE_LOCAL_TOUCH");
     G.PacketBridgeSendDelayFrames = std::max(
         0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_SEND_DELAY_FRAMES", 0));
     G.PacketBridgeSendJitterFrames = std::max(
@@ -8608,7 +8620,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         {
             std::lock_guard<std::mutex> lock(G.Mutex);
             G.PacketBridgePacketInputs[syncFrame] = testInput;
-            packetBridgeInput = NeutralInput();
+            packetBridgeInput = G.PacketBridgePreserveLocalTouch
+                ? NeutralInputPreservingTouch(testInput)
+                : NeutralInput();
         }
         if (bridgeNetworkActive)
         {
