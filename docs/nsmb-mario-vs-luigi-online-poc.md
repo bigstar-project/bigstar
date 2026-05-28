@@ -121,6 +121,8 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `-RequireResultScene` を追加し、勝敗画面 `sceneCurrentSceneID=0xa` への到達を自動確認できるようにした。現行stable ROMで6000フレームの結果画面到達チェックが通過。
 - 結果画面の勝敗表示は `Game::localPlayerID` ではなく `Net::localAid` を見ていた。direct entry stubで `Net::localAid` もplayer-idに合わせて書くようにし、client側が `You Lose...` 表示になることをスクリーンショットで確認。`-RequireHostNetLocalAid` / `-RequireClientNetLocalAid` も追加。
 - `tools/nsmb_screenshot_probe.py` に青/黄文字ピクセル検出を追加。結果画面スクリーンショットに対して、clientの青い `You Lose...` とhostの黄色い `You Win!` を簡易検出できることを確認。
+- smoke scriptに `-RequireHostResultWinScreenshot` / `-RequireClientResultLoseScreenshot` を追加し、結果画面到達後の最新スクリーンショットからhostの `You Win!` とclientの `You Lose...` を自動検出できるようにした。
+- `logs/codex-both-stable-wificount2-netaid-resultscene-probe-6000-20260529` で、6000フレーム結果画面到達、host/client gameplay sync、`localPlayerID`、`Net::localAid`、結果画面画像probeがすべて通過。
 
 ## 未解決・注意点
 
@@ -141,7 +143,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 3. Luigi側操作の検証を増やす。
    - カメラ追従
    - 死亡/復帰
-   - 勝敗判定は結果画面到達とhost/clientのwin/lose表示まで確認済み。次は結果表示の画像probeをsmoke scriptから呼べる形にする。
+   - 勝敗判定は結果画面到達とhost/clientのwin/lose表示までsmoke scriptで自動確認済み。次は遅延/jitter条件や長時間検証でも同じチェックを通す。
 4. 8コインアイテム、2個目以降のBig Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
 5. 残るruntime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
 6. 同一LANまたは擬似遅延付きの2プロセス検証へ進む。

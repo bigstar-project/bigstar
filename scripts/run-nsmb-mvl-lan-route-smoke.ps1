@@ -479,6 +479,8 @@ param(
     [switch]$RequireStarPickup,
     [int]$RequireStarPickupPlayer = -1,
     [switch]$RequireResultScene,
+    [switch]$RequireHostResultWinScreenshot,
+    [switch]$RequireClientResultLoseScreenshot,
     [int]$RequireHostLocalPlayerID = -1,
     [int]$RequireClientLocalPlayerID = -1,
     [int]$RequireHostNetLocalAid = -1,
@@ -3137,6 +3139,55 @@ function Convert-TraceHexToInt64 {
     return [Convert]::ToInt64($text, 10)
 }
 
+function Invoke-ResultScreenshotProbe {
+    param(
+        [string]$Role,
+        [string]$ScreenshotDir,
+        [string]$Expectation
+    )
+
+    if ($ScreenshotInterval -le 0) {
+        throw "$Role result screenshot probe requires ScreenshotInterval > 0"
+    }
+    if (-not (Test-Path $ScreenshotDir)) {
+        throw "$Role result screenshot probe requires screenshot dir: $ScreenshotDir"
+    }
+
+    $latest = Get-ChildItem $ScreenshotDir -Filter "inst0_frame*.png" -ErrorAction SilentlyContinue |
+        Sort-Object {
+            if ($_.Name -match "frame(\d+)\.png") {
+                [int]$matches[1]
+            } else {
+                -1
+            }
+        } |
+        Select-Object -Last 1
+
+    if (-not $latest) {
+        throw "$Role result screenshot probe found no screenshots in $ScreenshotDir"
+    }
+
+    $repoRoot = Split-Path -Parent $PSScriptRoot
+    $probe = Join-Path $repoRoot "tools\nsmb_screenshot_probe.py"
+    if (-not (Test-Path $probe)) {
+        throw "$Role result screenshot probe script not found: $probe"
+    }
+
+    if ($Expectation -eq "win") {
+        $args = @($probe, $latest.FullName, "--band-start", "0", "--band-end", "45", "--min-yellow-text-pixels", "250")
+    } elseif ($Expectation -eq "lose") {
+        $args = @($probe, $latest.FullName, "--band-start", "130", "--band-end", "180", "--min-blue-text-pixels", "250")
+    } else {
+        throw "unknown result screenshot expectation: $Expectation"
+    }
+
+    $output = & python @args 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Role result screenshot probe failed for $($latest.FullName): $($output -join "`n")"
+    }
+    Write-Host "$Role result screenshot probe passed: $($latest.FullName)"
+}
+
 if ($ScreenshotInterval -gt 0) {
     foreach ($screenDir in @($roleInfos | ForEach-Object { $_.Screens })) {
         $screens = Get-ChildItem $screenDir -Filter "inst0_frame*.png" -ErrorAction SilentlyContinue
@@ -3463,6 +3514,20 @@ if ($RequireResultScene) {
             throw "result scene check failed for $($item.Role): no sceneCurrentSceneID=0xa; last frame=$($last.frame) scene=$($last.sceneCurrentSceneID)->$($last.sceneNextSceneID). See $($item.Path)"
         }
     }
+}
+
+if ($RequireHostResultWinScreenshot) {
+    if ($RunRole -ne "both" -and $RunRole -ne "host") {
+        throw "RequireHostResultWinScreenshot requires host role"
+    }
+    Invoke-ResultScreenshotProbe -Role "host" -ScreenshotDir $hostScreens -Expectation "win"
+}
+
+if ($RequireClientResultLoseScreenshot) {
+    if ($RunRole -ne "both" -and $RunRole -ne "client") {
+        throw "RequireClientResultLoseScreenshot requires client role"
+    }
+    Invoke-ResultScreenshotProbe -Role "client" -ScreenshotDir $clientScreens -Expectation "lose"
 }
 
 foreach ($item in @(
