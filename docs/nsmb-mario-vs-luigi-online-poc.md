@@ -154,6 +154,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `scripts/run-nsmb-mvl-split-local-input-smoke.ps1 -AllowJit` でも2600フレームの別ローカル入力同期が通過。
   - `logs/codex-split-local-input-script-jit-2600-20260529`
   - `logs/codex-split-local-input-script-jit-nodelay-2600-20260529`
+- `scripts/run-nsmb-mvl-split-local-input-smoke.ps1` に `-InputSendDelayFrames` / `-InputSendJitterFrames` を追加。`logs/codex-split-local-input-script-jit-delay8-jitter4-2600-20260529` で、JIT有効 + 入力遅延16 + 送信遅延8 + jitter最大4の別ローカル入力同期が通過。
 - frame limit直前では、未来フレーム用入力の先行制限がテスト終了後の入力を待ってしまう問題があったため、テスト終端では `-InputMaxFrameLead` throttleをskipするように修正。
 - `logs/codex-split-local-result-framelead2-jit-endfix-6000-20260529` で、JIT有効 + frame lead 2 + 人工遅延/jitter付きの6000フレーム結果画面到達split smokeが通過。
 
@@ -177,7 +178,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
    - `-InputMaxFrameLead 2` で片方のプロセスだけが先行しすぎないようにする。
    - JIT無効 + manual bootstrap + localhost split 1800フレーム比較は通過。
    - host/clientで別々のローカル入力を出す2600フレームsplit smokeも通過。
-   - JIT有効の短時間splitと結果画面到達splitも通過。次は手動launcherで人間の実キー入力を目視確認し、その後に長時間化する。
+   - JIT有効の短時間split、送信遅延/jitter付きsplit、結果画面到達splitも通過。次は手動launcherで人間の実キー入力を目視確認し、その後に長時間化する。
 2. true local1 + RNG固定 + VS限定stage-lock skip + ROM側wifi count + Net::localAid patchを本線として、長時間の死亡/復帰・勝敗・スター取得まで壊れないか確認する。
    - client local1カメラ、Big Star位置、localPlayerIDは自動チェックで守る。
    - 片方死亡中に相手プレイヤー・敵・ブロック・ステージ進行が止まらないことは、`-CheckNoPlayerUpdateLock` と `-CheckMovingHazardProgressDuringDeath` で継続確認する。
