@@ -111,6 +111,8 @@ def probe(path: Path, band_start: int, band_end: int) -> dict[str, float | int |
     green_backdrop = 0
     red_player = 0
     dark_model = 0
+    blue_text = 0
+    yellow_text = 0
     dominant: dict[tuple[int, int, int], int] = {}
     for y in range(y0, y1):
         for x in range(width):
@@ -134,6 +136,10 @@ def probe(path: Path, band_start: int, band_end: int) -> dict[str, float | int |
                 red_player += 1
             if r < 45 and g < 45 and b < 45:
                 dark_model += 1
+            if b > 130 and g > 70 and r < 120 and b > r + 50:
+                blue_text += 1
+            if r > 180 and g > 130 and b < 100:
+                yellow_text += 1
     terrain_ratio = terrain / total if total else 0.0
     sky_ratio = sky / total if total else 0.0
     green_backdrop_ratio = green_backdrop / total if total else 0.0
@@ -151,6 +157,8 @@ def probe(path: Path, band_start: int, band_end: int) -> dict[str, float | int |
         "greenBackdropPixels": green_backdrop,
         "redPlayerPixels": red_player,
         "darkModelPixels": dark_model,
+        "blueTextPixels": blue_text,
+        "yellowTextPixels": yellow_text,
         "uniqueBuckets": unique_buckets,
         "terrainRatio": terrain_ratio,
         "skyRatio": sky_ratio,
@@ -170,10 +178,12 @@ def main() -> int:
     ap.add_argument("--max-dominant-ratio", type=float, default=None)
     ap.add_argument("--min-red-player-pixels", type=int, default=None)
     ap.add_argument("--min-dark-model-pixels", type=int, default=None)
+    ap.add_argument("--min-blue-text-pixels", type=int, default=None)
+    ap.add_argument("--min-yellow-text-pixels", type=int, default=None)
     args = ap.parse_args()
 
     failed = False
-    print("path,width,height,bandStart,bandEnd,pixels,terrainPixels,skyPixels,greenBackdropPixels,redPlayerPixels,darkModelPixels,uniqueBuckets,terrainRatio,skyRatio,greenBackdropRatio,dominantRatio,status")
+    print("path,width,height,bandStart,bandEnd,pixels,terrainPixels,skyPixels,greenBackdropPixels,redPlayerPixels,darkModelPixels,blueTextPixels,yellowTextPixels,uniqueBuckets,terrainRatio,skyRatio,greenBackdropRatio,dominantRatio,status")
     for item in args.paths:
         for path in sorted(Path().glob(item) if any(ch in item for ch in "*?[]") else [Path(item)]):
             result = probe(path, args.band_start, args.band_end)
@@ -190,6 +200,10 @@ def main() -> int:
                 status = "fail"
             if args.min_dark_model_pixels is not None and result["darkModelPixels"] < args.min_dark_model_pixels:
                 status = "fail"
+            if args.min_blue_text_pixels is not None and result["blueTextPixels"] < args.min_blue_text_pixels:
+                status = "fail"
+            if args.min_yellow_text_pixels is not None and result["yellowTextPixels"] < args.min_yellow_text_pixels:
+                status = "fail"
             if status == "fail":
                 failed = True
             print(
@@ -197,6 +211,7 @@ def main() -> int:
                 f"{result['bandStart']},{result['bandEnd']},{result['pixels']},"
                 f"{result['terrainPixels']},{result['skyPixels']},{result['greenBackdropPixels']},"
                 f"{result['redPlayerPixels']},{result['darkModelPixels']},"
+                f"{result['blueTextPixels']},{result['yellowTextPixels']},"
                 f"{result['uniqueBuckets']},{result['terrainRatio']:.6f},{result['skyRatio']:.6f},"
                 f"{result['greenBackdropRatio']:.6f},{result['dominantRatio']:.6f},{status}"
             )
