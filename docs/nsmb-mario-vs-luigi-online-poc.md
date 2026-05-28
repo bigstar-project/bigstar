@@ -83,14 +83,17 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 ## 次にやること
 
-1. さらにtraceを減らした実用寄り設定、または2PC分散でFPSが60fpsに近づくか確認する。
-2. Luigi側操作の検証を増やす。
+1. 最優先: Luigi死亡時にゲーム進行が止まる問題を直す。
+   - 本来のMario vs Luigiでは片方が死亡していてもステージや相手プレイヤーは動き続ける。
+   - 現状はLuigi死亡後に敵・ブロック・ゲーム進行が停止することがあるため、`stageActorFreezeFlag`、player defeated/dead/transition状態、死亡演出中のfreeze制御を特定して自然に進行させる。
+2. さらにtraceを減らした実用寄り設定、または2PC分散でFPSが60fpsに近づくか確認する。
+3. Luigi側操作の検証を増やす。
    - カメラ追従
    - 死亡/復帰
    - 勝敗判定
-3. 8コインアイテム、Big Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
-4. runtime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
-5. 同一LANまたは擬似遅延付きの2プロセス検証へ進む。
+4. 8コインアイテム、Big Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
+5. runtime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
+6. 同一LANまたは擬似遅延付きの2プロセス検証へ進む。
 
 ## 代表テストコマンド
 
