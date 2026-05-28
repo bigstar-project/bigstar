@@ -53,111 +53,29 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 ## 直近の検証結果
 
-代表ログ:
+最新の要約:
 
-- `logs/codex-both-inputnetplay-delay-armcheck-1300-20260528`
-- `logs/codex-both-inputnetplay-delay-long-2400-20260528`
-- `logs/codex-both-inputnetplay-synccheck-2400-20260528`
-- `logs/codex-both-inputnetplay-synccheck-4800-20260528`
-- `logs/codex-both-inputnetplay-delay12-synccheck-2400-20260528`
-- `logs/codex-both-inputnetplay-senddelay4-jitter2-delay12-2400-20260528`
-- `logs/codex-both-inputnetplay-senddelay8-jitter4-delay12-2400-20260528`
-- `logs/codex-both-inputnetplay-senddelay10-jitter6-delay16-2400-20260528`
-- `logs/codex-both-inputnetplay-touch-helper-stock-strong-synccheck2-2600-20260528`
-- `logs/codex-both-inputnetplay-touch-helper-regression-2400-20260528`
-- `logs/codex-both-inputnetplay-stock-touch-screenshotcheck-3600-20260528`
-- `logs/codex-both-luigi-death-updatelock-writetrace-1700-20260528`
-- `logs/codex-both-inputnetplay-luigi-death-siglocknoop-3600-20260528`
-- `logs/codex-both-inputnetplay-luigi-death-siglocknoop-synccheck-2400-20260528`
-- `logs/codex-both-luigi-death-baseline-updatelockcheck-1700-20260528-2`
-- `logs/codex-both-luigi-death-siglocknoop-updatelockcheck-1800-20260528-2`
-- `logs/codex-both-luigi-only-death-siglocknoop-freeze-probe-2700-20260528`
-- `logs/codex-both-luigi-only-death-stagefreeze-calltrace-2250-20260528`
-- `logs/codex-both-luigi-only-death-freezenoop-probe-2700-20260528`
-- `logs/codex-both-luigi-only-death-freezenoop-progresscheck-2250-20260528`
-- `logs/codex-both-luigi-only-death-siglocknoop-progresscheck-expectedfail-2250-20260528`
-- `logs/codex-both-inputnetplay-freezenoop-current-2250-20260528`
-- `logs/codex-both-true-local1-rootcmp-start-1500-20260529`
-- `logs/codex-both-true-local1-rngconst-start-1500-20260529`
-- `logs/codex-both-true-local1-rngconst-death-lockcheck-expectedfail-2250-20260529`
-- `logs/codex-both-true-local1-vslockskip-rngconst-deathcheck-2400-20260529`
-- `logs/codex-both-stable-true-local1-vslockskip-rngconst-deathcheck-2400-20260529`
-- `logs/codex-both-stable-true-local1-vslockskip-rngconst-idcheck-2400-20260529`
+- 現在の本線は US版ROM + true `host localPlayerID=0` / true `client localPlayerID=1` のdirect MvL entry。旧hybrid local0 client経路、savestate共有、試合開始後WAN切り替え、actor/state強制同期は本線から外した。
+- `Net::getConsoleKeys` / `Net::getConsoleTouchPad` のJIT helper patchで、host/clientの `WireInput` をplayer0/player1入力へ反映している。`getPacketByte/getPacketTick/getPacketAction` 差し替えはステージ状態を壊しやすいため現在は使わない。
+- RNG固定、ROM側wifi count、`Net::localAid` patch、VS限定stage-lock skipにより、スター位置、死亡/復帰、Luigi視点、ストック表示、勝敗画面は主要smokeで通過済み。
+- 結果画面到達と勝敗画像probeは `scripts/run-nsmb-mvl-split-local-result-smoke.ps1` で自動確認できる。
+- 手動入力ルートでは、入力送信開始前にhostがpeer接続を待ち、remote input timeoutはデフォルトfatal。さらに `-InputMaxFrameLead` で片側プロセスの先行幅を制限する。
+- host/clientで別々のローカル入力を流す検証は `scripts/run-nsmb-mvl-split-local-input-smoke.ps1` で自動確認できる。
+- JIT有効でも、短時間の別ローカル入力同期、送信遅延/jitter付き別ローカル入力同期、6000フレーム結果画面到達split smokeが通過している。
 
-結果:
+直近の代表ログ:
 
-- 1300フレーム検証で、host/clientの `netPacketTick`、player0/player1入力、Mario/Luigi actor座標、残機が一致。
-- 2400フレーム検証でも、通信切断、remote input timeout、ARM abort検出なし。
-- 2400フレーム時点の実効速度は host 約49.45fps、client 約50.50fps。
-- `-CheckHostClientGameplaySync` 付きの2400/4800フレーム検証が通過。入力、Mario/Luigi actor座標、残機、ストック、スターactor、moving hazard、一部object countのhost/client一致を自動確認済み。
-- 4800フレーム時点の実効速度は host 約50.97fps、client 約51.54fps。
-- 入力遅延12フレーム設定でも2400フレーム同期チェックが通過。WAN向けに遅延量を上げる検証ルートができた。
-- 入力遅延12フレーム + 人工送信遅延4フレーム + jitter最大2フレームでも2400フレーム同期チェックが通過。
-- 入力遅延12フレーム + 人工送信遅延8フレーム + jitter最大4フレーム、入力遅延16フレーム + 人工送信遅延10フレーム + jitter最大6フレームでも2400フレーム同期チェックが通過。
-- touch helper追加後も既存移動スクリプトが2400フレーム同期チェックを通過。
-- Luigi側ストックアイテム用の長押しtouchスクリプトで、`player1InventoryPowerup` が `0x1 -> 0x0` に変化し、host/clientで一致することを確認。
-- ストック使用スクリプトで3600フレーム検証も通過。3000フレーム以降のスクリーンショット切断/blank検出も有効にした状態で問題なし。
-- screenshot上、hostはMario視点、clientはLuigi視点になっている。上画面カメラ差はlocalPlayerID差として想定内。
-- ストック表示はhostがplayer0、clientがplayer1を表示しており、CSV上も `player0InventoryPowerup=0x0`、`player1InventoryPowerup=0x1` でhost/client一致。Luigi側UIとして自然に動いている可能性が高い。
-- Luigi死亡時の停止原因をwrite traceで確認。`PlayerBase::signalLocked()` が相手PlayerBaseの `updateLocked` を1にし、`signalUnlocked()` が後で戻していた。
-- `PlayerBase::signalLocked()` no-op ROMでは、Luigi死亡時に `playerActor0UpdateLocked` / `playerActor1UpdateLocked` が立たず、2400フレームのhost/client gameplay sync checkも通過。
-- `-CheckNoPlayerUpdateLock` は未patched ROMで期待通り失敗し、`signalLocked()` no-op ROMで通過することを確認。
-- ただし `signalLocked()` no-opだけでは敵/移動ハザードはまだ止まっていた。`movingHazardX` がLuigi死亡中に `0x62800` で固定されることを確認。
-- call traceで、Luigiのdamage/death経路から `PlayerBase::freezeStage()` が呼ばれていることを確認。
-- `PlayerBase::freezeStage()` no-op ROMでは、同じ死亡区間で `movingHazardX` が継続して変化し、敵/移動ハザード停止が解消することを確認。
-- `-CheckMovingHazardProgressDuringDeath` は旧 `signalLocked()` no-op ROMで期待通り失敗し、`freezeStage()` no-op入りROMで通過することを確認。
-- ただしこれは成功扱いではない。`freezeStage()` no-opは死亡時停止症状の一部を抑えただけで、通常のMario vs Luigi開始状態との差分が残っている可能性が高い。死亡/復帰、敵、カメラ、勝敗判定まで含めた自然な挙動は未確認。
-- 目視確認では、`freezeStage()` no-op入り検証でもまだ不自然な挙動がある。
-  - client側がLuigi視点ではなくMario視点になる場合がある。
-  - Big Star位置がhost/clientでずれる場合がある。
-  - リスポーン前に死亡プレイヤー姿が見えるなど、死亡/復帰描画が通常のMario vs Luigiと異なる。
-- 調査の結果、clientがMario視点になる問題は、旧ROM生成フローが名前にlocal1を含みつつ実際の `Game::localPlayerID` は0のhybrid経路になっていたことが主因。true `localPlayerID=1` direct entryではclient側カメラはLuigi側へ戻る。
-- true local1でも `rng-constant` を明示適用しない場合、Big Star座標がhost `0x30000` / client `0x3c0000` のようにずれる。`Net::getRandom()` / `Game::getRandom()` を `0x100` 固定にするとhost/clientとも `vsStarActorX=0x90000` で一致。
-- true local1 + RNG固定だけでは、死亡時に `playerActor0UpdateLocked` が立ち、moving hazardも停止する。`Game::vsMode != 0` のときだけ `freezeStage()` / `signalLocked()` をskipする条件付きpatchで、死亡中のplayer update-lockとmoving hazard停止は解消。
-- `Player::beginDeathTransition()` は標準死亡transitionへ入り、その後 `viewTransitState` → `vsPipeTransitState` → `defaultTransitState` へ進むことを確認。VSPipe復帰自体には移っているが、死亡/復帰描画が通常MvsLとして完全に自然かは引き続き確認が必要。
-- 細かいスクリーンショット確認で、true local1 + RNG固定 + VS限定stage-lock skipの死亡/土管復帰描画は通常動作に見えることを確認。`-CheckVsPipeRespawnVisibility` を追加し、土管復帰前フェーズで死亡プレイヤーが表示される回帰を自動検出できるようにした。
-- `wifi-communicating-consoles --count 2` をstable ROM生成フローへ組み込み、`ForceWifiCommunicatingCount=2` runtime hookなしでも同じ死亡/復帰チェックが通ることを確認。
-- 現行stable ROMで4800フレームのhost/client gameplay syncが通過。`ForceWifiCommunicatingCount` runtime hookなしで、主要game-stateの一致を確認。
-- 入力遅延16フレーム + 人工送信遅延8フレーム + jitter最大4フレームでも3600フレーム同期チェックが通過。
-- Luigiが固定RNGのBig Starを取得する入力スクリプト `tests/nsmb_us_direct_mvl_luigi_star_right.inputs` を追加。`-RequireStarPickup -RequireStarPickupPlayer 1` で、通常条件と遅延/jitter条件の両方でスター取得を自動確認。
-- `-RequireResultScene` を追加し、勝敗画面 `sceneCurrentSceneID=0xa` への到達を自動確認できるようにした。現行stable ROMで6000フレームの結果画面到達チェックが通過。
-- 結果画面の勝敗表示は `Game::localPlayerID` ではなく `Net::localAid` を見ていた。direct entry stubで `Net::localAid` もplayer-idに合わせて書くようにし、client側が `You Lose...` 表示になることをスクリーンショットで確認。`-RequireHostNetLocalAid` / `-RequireClientNetLocalAid` も追加。
-- `tools/nsmb_screenshot_probe.py` に青/黄文字ピクセル検出を追加。結果画面スクリーンショットに対して、clientの青い `You Lose...` とhostの黄色い `You Win!` を簡易検出できることを確認。
-- smoke scriptに `-RequireHostResultWinScreenshot` / `-RequireClientResultLoseScreenshot` を追加し、結果画面到達後の最新スクリーンショットからhostの `You Win!` とclientの `You Lose...` を自動検出できるようにした。
-- `logs/codex-both-stable-wificount2-netaid-resultscene-probe-6000-20260529` で、6000フレーム結果画面到達、host/client gameplay sync、`localPlayerID`、`Net::localAid`、結果画面画像probeがすべて通過。
-- `logs/codex-both-stable-wificount2-netaid-resultscene-probe-jitter-6000-20260529` で、入力遅延16フレーム + 送信遅延8フレーム + jitter最大4フレームでも、6000フレーム結果画面到達、host/client gameplay sync、勝敗画像probeが通過。
-- smoke scriptに `-NoAudioSync` / `-NoDrawScreen` を追加し、テスト専用にaudio syncとUI描画を切れるようにした。単体プロセスでは約54fpsで、同一PC上のhost/client 2プロセス同時実行では約48fps。現時点ではaudio/drawだけでなく、同一PCで2つのmelonDSを回すCPU負荷が大きい。
-- `RunRole both` ではなく、host用スモークとclient用スモークを別PowerShellプロセスとして起動するlocalhost split検証でも、6000フレーム結果画面到達とhost/client勝敗画像probeが通過。
-  - host: `logs/codex-split-host-stable-netaid-result-6000-20260529`
-  - client: `logs/codex-split-client-stable-netaid-result-6000-20260529`
-- localhost split検証を再現する `scripts/run-nsmb-mvl-split-local-result-smoke.ps1` を追加。`logs/codex-split-local-script-result2-6000-20260529` で通過確認済み。
-- 同じsplit smokeで、入力遅延24フレーム + 送信遅延12フレーム + jitter最大8フレームでも6000フレーム結果画面到達とhost/client勝敗画像probeが通過。
-  - `logs/codex-split-local-script-result-delay24-jitter8-6000-20260529`
-- 手動入力用の空スクリプト `tests/nsmb_manual_empty.inputs` を追加。
-- `-InputNetplay -PacketBridgeStartFrame <n>` の場合、入力送信開始フレームでhostがpeer接続を待つようにした。これにより、手動起動時にhostだけが先にMario vs Luigi開始フレームへ進むズレを抑える。
-- 手動プレイ用bootstrap入力 `tests/nsmb_us_direct_mvl_manual_bootstrap.inputs` を追加。試合開始までのメニュー/タッチ操作だけを自動化し、frame 1728以降はキーボード/コントローラー入力を使う。
-- split manual bootstrap検証で、JIT有効時は `movingHazardX` が1サンプルだけhost/clientでずれるケースを確認。JIT無効では2400フレームのsplit CSV比較が通過。
-  - JIT有効ズレ: `logs/codex-split-manual-bootstrap-host-startsync-2400-20260529` / `logs/codex-split-manual-bootstrap-client-startsync-2400-20260529`
-  - JIT無効通過: `logs/codex-split-manual-bootstrap-nojit-host-2400-20260529` / `logs/codex-split-manual-bootstrap-nojit-client-2400-20260529`
-- 入力netplayではremote input timeoutをデフォルトfatalにした。相手入力がないフレームをneutral入力で進めてdesyncを隠す経路は、明示的に `-AllowRemoteInputTimeoutFallback` を付けた場合だけ使う。
-- `logs/codex-both-manual-bootstrap-nojit-fatal-2400-20260529` で、JIT無効 + manual bootstrap + fatal timeout設定の2400フレームhost/client gameplay syncが通過。
-- 手動プレイ用launcher `scripts/run-nsmb-mvl-manual-local.ps1` を追加。デフォルトではJIT無効、manual bootstrap、fatal timeout、host/client localhost接続で起動する。
-- `InputNetplay` のclient側local instance既定値を1に修正。手動launcher smoke `logs/codex-manual-launcher-smoke2-1200-20260529` で、host `localInstance=0`、client `localInstance=1`、fatal timeout有効、frame limit到達を確認。
-- `-InputMaxFrameLead` を追加。デフォルトは `2` で、手動入力時にhost/clientのエミュレーションフレームが大きく先行しないようにする。1フレーム制限は開始直後の配送順で厳しすぎるため、実用デフォルトは2。
-- `logs/codex-both-manual-bootstrap-nojit-framelead1-1800-20260529` で、JIT無効 + frame lead 1 + manual bootstrap の同一プロセスhost/client gameplay syncが通過。
-- `logs/codex-split-manual-bootstrap-nojit-framelead1-1800-20260529` で、JIT無効 + frame lead 1 + manual bootstrap のlocalhost split起動が通過。900フレーム以降の主要gameplay CSV比較でも差分なし。
-- host/clientで別々のローカル入力を流す検証スクリプトを追加。
-  - `tests/nsmb_us_direct_mvl_manual_host_mario_move.inputs`
-  - `tests/nsmb_us_direct_mvl_manual_client_luigi_move.inputs`
-  - `scripts/run-nsmb-mvl-split-local-input-smoke.ps1`
-- `logs/codex-split-local-input-script-2600-20260529` で、hostのMario入力とclientのLuigi入力が別々に送られても、2600フレームまで主要gameplay CSV比較が通過。Mario/Luigi双方が移動したことも自動確認済み。
-- `scripts/run-nsmb-mvl-split-local-input-smoke.ps1 -AllowJit` でも2600フレームの別ローカル入力同期が通過。
-  - `logs/codex-split-local-input-script-jit-2600-20260529`
-  - `logs/codex-split-local-input-script-jit-nodelay-2600-20260529`
-- `scripts/run-nsmb-mvl-split-local-input-smoke.ps1` に `-InputSendDelayFrames` / `-InputSendJitterFrames` を追加。`logs/codex-split-local-input-script-jit-delay8-jitter4-2600-20260529` で、JIT有効 + 入力遅延16 + 送信遅延8 + jitter最大4の別ローカル入力同期が通過。
-- frame limit直前では、未来フレーム用入力の先行制限がテスト終了後の入力を待ってしまう問題があったため、テスト終端では `-InputMaxFrameLead` throttleをskipするように修正。
-- `logs/codex-split-local-result-framelead2-jit-endfix-6000-20260529` で、JIT有効 + frame lead 2 + 人工遅延/jitter付きの6000フレーム結果画面到達split smokeが通過。
-- 手動launcher `scripts/run-nsmb-mvl-manual-local.ps1` に `-InputMaxFrameLead` / `-InputSendDelayFrames` / `-InputSendJitterFrames` を追加。`logs/codex-manual-launcher-params-smoke-1200-20260529` で、JIT有効の短時間起動がhost約54fps / client約57fpsで通過。
+- `logs/codex-split-local-input-script-2600-20260529`: JIT無効、hostのMario入力とclientのLuigi入力を別々に流し、2600フレームまで主要gameplay CSV比較通過。
+- `logs/codex-split-local-input-script-jit-nodelay-2600-20260529`: JIT有効、人工遅延なし、別ローカル入力同期通過。host約43.7fps、client約44.8fps。
+- `logs/codex-split-local-input-script-jit-delay8-jitter4-2600-20260529`: JIT有効、入力遅延16 + 送信遅延8 + jitter最大4、別ローカル入力同期通過。
+- `logs/codex-split-local-result-framelead2-jit-endfix-6000-20260529`: JIT有効、frame lead 2、人工遅延/jitter付き、6000フレーム結果画面到達とhost/client勝敗画像probe通過。
+- `logs/codex-manual-launcher-params-smoke-1200-20260529`: 手動launcher短時間起動確認。JIT有効でhost約54fps、client約57fps。
+
+重要な既存検証:
+
+- `logs/codex-both-stable-wificount2-netaid-resultscene-probe-6000-20260529`: 6000フレーム結果画面到達、host/client gameplay sync、`localPlayerID`、`Net::localAid`、結果画面画像probe通過。
+- `logs/codex-both-stable-wificount2-netaid-resultscene-probe-jitter-6000-20260529`: 入力遅延16 + 送信遅延8 + jitter最大4でも結果画面到達と勝敗画像probe通過。
+- `logs/codex-both-manual-bootstrap-nojit-fatal-2400-20260529`: JIT無効 + manual bootstrap + fatal timeoutで2400フレームhost/client gameplay sync通過。
 
 ## 未解決・注意点
 
@@ -209,7 +127,7 @@ localhost split検証:
   -LogDir logs\manual-local
 ```
 
-JITを有効にする場合は `-AllowJit` を付ける。ただしJIT有効ではsplit検証で単発moving hazard差分が出ているため、同期確認では非推奨。
+JITを有効にする場合は `-AllowJit` を付ける。`-InputMaxFrameLead 2` 追加後は短時間splitと結果画面到達splitが通過しているため、操作感確認ではJIT有効も試せる。ただし長時間自由入力は未確認。
 
 個別起動する場合:
 
@@ -262,7 +180,7 @@ client側:
   -LogDir logs\manual-client
 ```
 
-手動プレイ用コマンドでは、決定性優先のため当面 `-AllowJit` を付けない。
+手動プレイ用コマンドで決定性を最優先する場合は `-AllowJit` を付けない。操作感を優先して試す場合は `-AllowJit` を付ける。
 
 2PC分散検証のコマンド雛形:
 
