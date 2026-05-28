@@ -88,6 +88,20 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - switchFrame 900 ではabortなしで1560frameまで完走し、`movingHazardFound=0x1` も維持した。
   - ただしclient player1がframe 1380付近で `Player::standardDeathTransitState` に入り、frame 1500で `player1Lives=4` になる。stable ROM + 長めの `ForceStageCameraSlot` でも再現するため、単純なcamera slot未初期化ではない。
   - life traceではclient local1化後のplayer collision/environment系がhostと違う。frame 960時点でhostは `coll=0800B001 env=00000000`、clientは `coll=0840B021 env=00000202` になっている。次はこの差分を作る `localPlayerID` 参照またはstage/zone stateを追う。
+- `logs/smvl-local1-bootstrap900-actorcollision0-client-3000-20260528`
+  - `overlay0-localplayer-literal-alias --mode actor-collision` でplayer1死亡は止まったが、client上画面が緑一色になった。stateだけ通っても表示が壊れるため失敗扱い。
+- `logs/smvl-local1-bootstrap900-overlay0all0-host-3000-20260528` / `logs/smvl-local1-bootstrap900-overlay0all0-client-3000-20260528`
+  - client ROMに `overlay0-localplayer-literal-alias --mode all` を適用し、clientをframe 900以降 `localPlayerID=1` にした。
+  - runtime `ForceStageCameraSlot` なしで、frame 900-3000 のstate一致、stage visible、player0/player1入力あり、残機減少なしを通過。
+  - clientスクショの緑画面も解消した。つまり local1 route の現時点の最良条件は `stable direct MvL host ROM + client overlay0 all alias + switchFrame 900`。
+- `logs/smvl-local1-bootstrap900-overlay0all0-bothdiff-host-3000-20260528` / `logs/smvl-local1-bootstrap900-overlay0all0-bothdiff-client-3000-20260528`
+  - `tests/nsmb_us_direct_mvl_both_different.inputs` で、Mario右移動 / Luigi左移動を含む非対称入力を検証。
+  - 途中で死亡は発生するが、host/clientのstate、入力、stage visibleは一致。死亡はdesyncではなく入力ルート由来。
+- 速度:
+  - JITなし、スクショ/game-state/hashありのlocal1 splitは約10-12fps。
+  - `-NoScreenshots -NoGameStateTrace -NoHashLog` でも約12fpsで、遅さの主因はtraceではなくPacketBridge時のJIT無効化と2プロセス同時実行。
+  - `-AllowJitWithPacketBridge` は約43fpsまで上がるが、game-state上の入力反映が消え、Luigi死亡も出るため成功条件にはまだ使わない。
+- `scripts/generate-nsmb-mvl-local1-bootstrap-roms.ps1` / `scripts/run-nsmb-mvl-local1-bootstrap-split.ps1` を追加。local1 bootstrap routeを標準コマンドで再現できる。
 
 ## 実装済み
 
@@ -362,10 +376,10 @@ localID1 route の切り分け結果:
 
 ## 次にやること
 
-1. `local1 bootstrap` の早期切替で出る player collision/environment 差分を、`Player::defaultTransitState` / collision update / environment update の `localPlayerID` 参照から追う。
-2. `scripts/run-nsmb-mvl-local1-bootstrap-sweep.ps1` で切替frameを増やし、abortしない範囲と死亡しない範囲を分けて記録する。
-3. `client localPlayerID=1` で開始死亡なし、object set維持、player0/player1入力反映まで通ったら、PacketBridge入力同期をlocal1 routeへ接続する。
-4. local0 hybridの6000frame成功ルートは比較基盤として残すが、最終WAN検証へ進める前にlocal1開始状態を優先する。
+1. `local1 bootstrap + overlay0 all alias` を標準ルートとして、さらに長い入力、スター取得、8コインアイテム、死亡/復帰/勝敗演出へ検証を広げる。
+2. overlay0 all aliasは広すぎるため、最終的には `actor-collision + layout` の必要最小限へ分解し、どの参照が死亡回避と表示復旧に必要かを分類する。
+3. client local1 routeを実2PC/WANに近い形へ移す。まずは同一PCの `RunRole host/client` 分離実行、次にLAN別端末。
+4. local0 hybridの6000frame成功ルートは比較基盤として残す。
 5. 高速化はJITを無条件に許可しない。`-AllowJitWithPacketBridge` は現状「速度計測用/失敗再現用」で、成功判定には使わない。JIT対応を再開する場合は、PacketBridgeの `Net::getConsoleKeys` / `getPacketByte` / `getPacketTick` / `getPacketAction` hook がJIT実行でもguest R0へ反映されることを最初に検証する。
 
 ## 検証ルール

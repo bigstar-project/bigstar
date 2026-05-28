@@ -655,6 +655,8 @@ def patch_overlay0_localplayer_literal_alias(
         literal_addrs = sorted(set(actor_collision_literal_addrs + layout_literal_addrs))
     elif mode == "layout":
         literal_addrs = sorted(set(layout_literal_addrs))
+    elif mode == "actor-collision":
+        literal_addrs = sorted(set(actor_collision_literal_addrs))
     else:
         raise ValueError(f"unknown overlay0 localPlayerID alias mode: {mode}")
     changes: list[str] = []
@@ -1340,7 +1342,7 @@ def main() -> int:
     p_vs_results_display.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_overlay0_alias = sub.add_parser("overlay0-localplayer-literal-alias")
     p_overlay0_alias.add_argument("--alias-addr", type=lambda x: int(x, 0), default=0x020CA280)
-    p_overlay0_alias.add_argument("--mode", choices=("layout", "all"), default="layout")
+    p_overlay0_alias.add_argument("--mode", choices=("layout", "actor-collision", "all"), default="layout")
     p_overlay0_alias.add_argument("--literal-addrs", default="")
     p_stage_range_alias = sub.add_parser("stage-range-localplayer-literal-alias")
     p_stage_range_alias.add_argument("--alias-addr", type=lambda x: int(x, 0), default=0x020CA280)
