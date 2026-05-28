@@ -140,6 +140,8 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   - JIT無効通過: `logs/codex-split-manual-bootstrap-nojit-host-2400-20260529` / `logs/codex-split-manual-bootstrap-nojit-client-2400-20260529`
 - 入力netplayではremote input timeoutをデフォルトfatalにした。相手入力がないフレームをneutral入力で進めてdesyncを隠す経路は、明示的に `-AllowRemoteInputTimeoutFallback` を付けた場合だけ使う。
 - `logs/codex-both-manual-bootstrap-nojit-fatal-2400-20260529` で、JIT無効 + manual bootstrap + fatal timeout設定の2400フレームhost/client gameplay syncが通過。
+- 手動プレイ用launcher `scripts/run-nsmb-mvl-manual-local.ps1` を追加。デフォルトではJIT無効、manual bootstrap、fatal timeout、host/client localhost接続で起動する。
+- `InputNetplay` のclient側local instance既定値を1に修正。手動launcher smoke `logs/codex-manual-launcher-smoke2-1200-20260529` で、host `localInstance=0`、client `localInstance=1`、fatal timeout有効、frame limit到達を確認。
 
 ## 未解決・注意点
 
@@ -151,6 +153,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - WANの遅延・ジッタを模した検証とlocalhostでのhost/client分割起動は通過。packet lossや実2PC分散は未実施。
 - 手動入力は動作確認済みだが、開始タイミングと入力フレームのズレが見えている。今回のpeer待ち修正後に、手動入力でhost/clientが自然に揃うか再確認する必要がある。
 - 手動入力の決定性優先ルートでは、当面 `-AllowJit` を付けない。JIT有効時の単発moving hazard差分を解消するまでは、JIT有効は速度検証用として扱う。
+- JIT無効の手動launcherは同期優先でかなり遅い。短いsmokeでは約12fps。操作感改善には、JIT決定性問題の解消か、別の軽量化が必要。
 
 ## 次にやること
 
@@ -180,6 +183,17 @@ localhost split検証:
 ```
 
 手動プレイ用localhost起動:
+
+短縮コマンド:
+
+```powershell
+.\scripts\run-nsmb-mvl-manual-local.ps1 `
+  -LogDir logs\manual-local
+```
+
+JITを有効にする場合は `-AllowJit` を付ける。ただしJIT有効ではsplit検証で単発moving hazard差分が出ているため、同期確認では非推奨。
+
+個別起動する場合:
 
 host側:
 

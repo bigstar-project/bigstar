@@ -1627,7 +1627,7 @@ function Start-MelonLANProcess {
             $env:MELONDS_NSML_LOCAL_INSTANCE = $HostLocalInstance
         } elseif ($Role -eq "client" -and $ClientLocalInstance) {
             $env:MELONDS_NSML_LOCAL_INSTANCE = $ClientLocalInstance
-        } elseif ($PacketBridgeAllowPreGame -and $Role -eq "client") {
+        } elseif (($PacketBridgeAllowPreGame -or $InputNetplay) -and $Role -eq "client") {
             $env:MELONDS_NSML_LOCAL_INSTANCE = "1"
         } else {
             $env:MELONDS_NSML_LOCAL_INSTANCE = "0"
