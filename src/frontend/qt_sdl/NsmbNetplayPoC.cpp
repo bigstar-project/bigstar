@@ -5960,9 +5960,9 @@ void WritePacketBridgeJitScratchIfNeeded(
         packet[2] = static_cast<melonDS::u8>(keys & 0xFF);
         packet[3] = static_cast<melonDS::u8>((keys >> 8) & 0xFF);
         packet[4] = action;
-        packet[5] = nds->ARM9Read8(kNetPacketByte5Addr);
-        packet[6] = nds->ARM9Read8(kNetPacketByte6Addr);
-        packet[7] = nds->ARM9Read8(kNetPacketByte7Addr);
+        packet[5] = input.Touching ? 1 : 0;
+        packet[6] = static_cast<melonDS::u8>(std::min<int>(input.TouchX, 255));
+        packet[7] = static_cast<melonDS::u8>(std::min<int>(input.TouchY, 191));
         for (melonDS::u32 i = 0; i < 44; i++)
             packet[8 + i] = nds->ARM9Read8(0x020888E8 + i);
         packet[0x29] = nds->ARM9Read8(0x02088A4C);
@@ -6010,9 +6010,23 @@ void ApplyPacketBridgeJitHelperPatchIfNeeded(int instanceID, melonDS::u32 frame,
     WriteARM9U32(nds, 0x0200E860, 0xE12FFF1E); // bx lr
     WriteARM9U32(nds, 0x0200E864, kPacketBridgeJitScratchKeysAddr);
 
+    // Net::getConsoleTouchPad(u16): write TPData{x,y,touch,0} from scratch packet[player].
+    WriteARM9U32(nds, 0x0200E7D0, 0xE59F2024); // ldr r2, [pc, #36]
+    WriteARM9U32(nds, 0x0200E7D4, 0xE0822301); // add r2, r2, r1, lsl #6
+    WriteARM9U32(nds, 0x0200E7D8, 0xE5D23006); // ldrb r3, [r2, #6]
+    WriteARM9U32(nds, 0x0200E7DC, 0xE1C030B0); // strh r3, [r0]
+    WriteARM9U32(nds, 0x0200E7E0, 0xE5D23007); // ldrb r3, [r2, #7]
+    WriteARM9U32(nds, 0x0200E7E4, 0xE1C030B2); // strh r3, [r0, #2]
+    WriteARM9U32(nds, 0x0200E7E8, 0xE5D23005); // ldrb r3, [r2, #5]
+    WriteARM9U32(nds, 0x0200E7EC, 0xE1C030B4); // strh r3, [r0, #4]
+    WriteARM9U32(nds, 0x0200E7F0, 0xE3A03000); // mov r3, #0
+    WriteARM9U32(nds, 0x0200E7F4, 0xE1C030B6); // strh r3, [r0, #6]
+    WriteARM9U32(nds, 0x0200E7F8, 0xE12FFF1E); // bx lr
+    WriteARM9U32(nds, 0x0200E7FC, kPacketBridgeJitScratchPacketsAddr);
+
     G.PacketBridgeJitHelperPatchApplied[instanceID] = true;
     std::printf(
-        "NSMB Test: packet bridge JIT keys helper patch inst=%d frame=%u scratch=0x%08X\n",
+        "NSMB Test: packet bridge JIT keys/touch helper patch inst=%d frame=%u scratch=0x%08X\n",
         instanceID,
         frame,
         kPacketBridgeJitScratchBaseAddr);

@@ -12,8 +12,8 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - 最終形は `host localPlayerID=0`、`client localPlayerID=1`。
 - clientはLuigi側として自然に動かす。カメラ、ストックアイテム、死亡/復帰、勝敗判定をlocalPlayerID=1の通常処理に任せる。
 - direct MvL entry ROM patchで、ローカル通信UIを経由せずMario vs Luigiステージへ入る。
-- `Net::getConsoleKeys(u16)` をJIT helper patchでscratch memory参照へ差し替え、host/client間の `WireInput` をplayer0/player1入力へ反映する。
-- `getPacketByte/getPacketTick/getPacketAction` まで差し替えるとステージ状態を壊しやすいため、現時点ではkeys helper限定。
+- `Net::getConsoleKeys(u16)` と `Net::getConsoleTouchPad(u16)` をJIT helper patchでscratch memory参照へ差し替え、host/client間の `WireInput` をplayer0/player1入力へ反映する。
+- `getPacketByte/getPacketTick/getPacketAction` まで差し替えるとステージ状態を壊しやすいため、現時点ではkeys/touch helper限定。
 
 ## 完了したこと
 
@@ -25,6 +25,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   - client: `roms/nsmb-us-direct-mvl-entry-stable-client-local1-wificount2-rng100.tmp.nds`
 - `external/NSMB-Code-Reference` を参照し、主要なNet helperを特定。
   - `Net::getConsoleKeys`
+  - `Net::getConsoleTouchPad`
   - `Net::getPacketByte`
   - `Net::getPacketTick`
   - `Net::getPacketAction`
@@ -33,6 +34,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - offline scripted remote packet検証で、host local0 / client local1 のplayer0/player1入力とactor座標が短時間一致することを確認。
 - JIT有効時でも `Net::getConsoleKeys` keys helper patchだけなら、offline検証でhost/clientが一致することを確認。
 - `-InputNetplay` modeを追加し、PacketBridge本体を使わず `WireInput` だけをkeys helper scratchへ接続できるようにした。
+- JIT helper patchで `Net::getConsoleTouchPad` もscratch packet参照へ差し替え、touch入力をplayer別に反映できるようにした。
 - 入力netplay専用モードでは通常lockstepへ入らず、`frame + delay` の入力を事前送信し、`frame` の入力を適用するようにした。
 - `-InputDelayFrames` を追加し、検証スクリプトから入力遅延フレーム数を切り替えられるようにした。
 - `-InputSendDelayFrames` / `-InputSendJitterFrames` を追加し、`WireInput` の人工配送遅延・jitterを検証できるようにした。
@@ -51,6 +53,8 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `logs/codex-both-inputnetplay-senddelay4-jitter2-delay12-2400-20260528`
 - `logs/codex-both-inputnetplay-senddelay8-jitter4-delay12-2400-20260528`
 - `logs/codex-both-inputnetplay-senddelay10-jitter6-delay16-2400-20260528`
+- `logs/codex-both-inputnetplay-touch-helper-stock-strong-synccheck2-2600-20260528`
+- `logs/codex-both-inputnetplay-touch-helper-regression-2400-20260528`
 
 結果:
 
@@ -62,6 +66,8 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - 入力遅延12フレーム設定でも2400フレーム同期チェックが通過。WAN向けに遅延量を上げる検証ルートができた。
 - 入力遅延12フレーム + 人工送信遅延4フレーム + jitter最大2フレームでも2400フレーム同期チェックが通過。
 - 入力遅延12フレーム + 人工送信遅延8フレーム + jitter最大4フレーム、入力遅延16フレーム + 人工送信遅延10フレーム + jitter最大6フレームでも2400フレーム同期チェックが通過。
+- touch helper追加後も既存移動スクリプトが2400フレーム同期チェックを通過。
+- Luigi側ストックアイテム用の長押しtouchスクリプトで、`player1InventoryPowerup` が `0x1 -> 0x0` に変化し、host/clientで一致することを確認。
 - screenshot上、hostはMario視点、clientはLuigi視点になっている。上画面カメラ差はlocalPlayerID差として想定内。
 - ストック表示はhostがplayer0、clientがplayer1を表示しており、CSV上も `player0InventoryPowerup=0x0`、`player1InventoryPowerup=0x1` でhost/client一致。Luigi側UIとして自然に動いている可能性が高い。
 
@@ -78,7 +84,6 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 1. さらにtraceを減らした実用寄り設定、または2PC分散でFPSが60fpsに近づくか確認する。
 2. Luigi側操作の検証を増やす。
    - カメラ追従
-   - ストックアイテム使用
    - 死亡/復帰
    - 勝敗判定
 3. 8コインアイテム、Big Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。

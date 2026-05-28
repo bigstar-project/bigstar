@@ -3234,7 +3234,6 @@ if ($GameStateTrace -and -not $SkipMvlStateCheck -and ($GameStateTraceEndFrame -
             "stageID",
             "stageGroup",
             "vsMode",
-            "netPacketTick",
             "inputPlayer0Held",
             "inputPlayer1Held",
             "inputPlayer0Pressed",
@@ -3274,6 +3273,11 @@ if ($GameStateTrace -and -not $SkipMvlStateCheck -and ($GameStateTraceEndFrame -
                 continue
             }
             $clientRow = $clientByFrame[$hostRow.frame]
+            $hostTick = Convert-TraceHexToInt64 $hostRow.netPacketTick
+            $clientTick = Convert-TraceHexToInt64 $clientRow.netPacketTick
+            if ([Math]::Abs($hostTick - $clientTick) -gt 1) {
+                throw "host/client gameplay sync mismatch frame=$($hostRow.frame) field=netPacketTick host=$($hostRow.netPacketTick) client=$($clientRow.netPacketTick). See $hostGameStateTrace and $clientGameStateTrace"
+            }
             foreach ($field in $fields) {
                 if ($hostRow.$field -ne $clientRow.$field) {
                     throw "host/client gameplay sync mismatch frame=$($hostRow.frame) field=$field host=$($hostRow.$field) client=$($clientRow.$field). See $hostGameStateTrace and $clientGameStateTrace"
