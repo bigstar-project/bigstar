@@ -67,6 +67,12 @@ def encode_ldr_imm(rd: int, rn: int, off: int) -> int:
     return 0xE5900000 | (rn << 16) | (rd << 12) | off
 
 
+def encode_ldr_pc_imm(rd: int, off: int) -> int:
+    if off < 0 or off > 0xFFF:
+        raise ValueError(f"LDR literal offset 0x{off:X} is out of range")
+    return 0xE59F0000 | (rd << 12) | off
+
+
 def encode_ldr_reg_lsl(rd: int, rn: int, rm: int, shift: int) -> int:
     if shift < 0 or shift > 31:
         raise ValueError(f"LDR register shift {shift} is out of range")
@@ -737,6 +743,97 @@ def patch_stage_range_localplayer_literal_alias(arm9, alias_addr: int) -> list[s
     ]
 
 
+def patch_stage_object_activation_player_id(overlays: dict[int, object], player_id: int) -> list[str]:
+    # Stage object activation chooses a player camera/range before it decides
+    # which StageObject records to instantiate. In direct localPlayerID=1, this
+    # skips the early Goomba that host localPlayerID=0 spawns. Force only this
+    # activation scan to use the requested player while leaving Game::localPlayerID
+    # unchanged for gameplay, UI, camera, and player-local logic.
+    if player_id < 0 or player_id > 1:
+        raise ValueError(f"player id must be 0 or 1, got {player_id}")
+
+    ov_id = 0
+    hook_addr = 0x0209B048
+    return_addr = 0x0209B050
+    stub_addr = 0x020C53B0
+    get_player_addr = 0x02020608
+    stub = [
+        encode_push(1 << 14),                         # push {lr}
+        encode_mov_imm(0, player_id),                 # mov r0, #player_id
+        encode_str_imm(0, 13, 0x0C),                  # str r0, [sp, #0x0C] (original sp+8)
+        encode_bl(stub_addr + 0x0C, get_player_addr), # bl Game::getPlayer(player_id)
+        0xE8BD4000,                                   # pop {lr}
+        encode_b(stub_addr + 0x14, return_addr),      # b original ldrb r0, [r0, #0x2be]
+    ]
+    old_stub = patch_overlay_words_by_id(overlays, ov_id, stub_addr, stub)
+    if old_stub != b"\0" * len(old_stub):
+        raise ValueError(f"stage object activation player stub cave @ 0x{stub_addr:08X} is not empty")
+    branch = encode_b(hook_addr, stub_addr)
+    old_hook = patch_overlay_words_by_id(overlays, ov_id, hook_addr, [branch, NOP])
+    return [
+        f"Stage object activation player stub overlay{ov_id} @ 0x{stub_addr:08X}: "
+        f"{old_stub.hex()} -> {words_hex(stub)}",
+        f"Stage object activation player hook overlay{ov_id} @ 0x{hook_addr:08X}: "
+        f"{old_hook.hex()} -> {words_hex([branch, NOP])} player={player_id}",
+    ]
+
+
+def patch_stage_object_activation_wrap_width(overlays: dict[int, object], width: int) -> list[str]:
+    # Diagnostic only. The localPlayerID=1 direct route leaves Game::wrapX as
+    # 0xFFFFFFFF, so the 0x0209B320 stage object activation path computes a
+    # wrapped stage width of zero and skips the left-side Goomba. Force the
+    # computed tile-space width to match the MvL wrapped stage while we trace
+    # the real initialization source.
+    if width < 0:
+        raise ValueError(f"width must be non-negative, got {width}")
+
+    ov_id = 0
+    hook_addr = 0x0209B3AC
+    word = encode_mov_imm(2, width)
+    old_hook = patch_overlay_words_by_id(overlays, ov_id, hook_addr, [word])
+    return [
+        f"Stage object activation wrap width overlay{ov_id} @ 0x{hook_addr:08X}: "
+        f"{old_hook.hex()} -> {words_hex([word])} width=0x{width:X}",
+    ]
+
+
+def patch_stage_object_activation_force_wrap_x(overlays: dict[int, object], wrap_x: int) -> list[str]:
+    # Diagnostic only. Write Game::wrapX at the beginning of the 0x0209B320
+    # activation path, then execute the two original instructions we replaced.
+    if wrap_x < 0 or wrap_x > 0xFFFFFFFF:
+        raise ValueError(f"wrap_x must be a u32, got {wrap_x}")
+
+    ov_id = 0
+    hook_addr = 0x0209B328
+    return_addr = 0x0209B330
+    stub_addr = 0x020C53D0
+    game_wrap_x_addr = 0x02085AA4
+    original_stage_blocks_addr = 0x0208B168
+    stub = [
+        encode_ldr_pc_imm(2, 0x14),                   # ldr r2, =Game::wrapX
+        encode_ldr_pc_imm(3, 0x14),                   # ldr r3, =wrap_x
+        encode_str_imm(3, 2, 0),                      # str r3, [r2]
+        encode_str_imm(3, 2, 4),                      # str r3, [r2, #4]
+        encode_ldr_pc_imm(1, 0x0C),                   # ldr r1, =StageBlocks
+        encode_str_imm(0, 13, 8),                     # str r0, [sp, #8]
+        encode_b(stub_addr + 0x18, return_addr),      # b 0x0209B330
+        game_wrap_x_addr,
+        wrap_x & 0xFFFFFFFF,
+        original_stage_blocks_addr,
+    ]
+    old_stub = patch_overlay_words_by_id(overlays, ov_id, stub_addr, stub)
+    if old_stub != b"\0" * len(old_stub):
+        raise ValueError(f"stage object activation force wrapX stub cave @ 0x{stub_addr:08X} is not empty")
+    branch = encode_b(hook_addr, stub_addr)
+    old_hook = patch_overlay_words_by_id(overlays, ov_id, hook_addr, [branch])
+    return [
+        f"Stage object activation force wrapX stub overlay{ov_id} @ 0x{stub_addr:08X}: "
+        f"{old_stub.hex()} -> {words_hex(stub)}",
+        f"Stage object activation force wrapX hook overlay{ov_id} @ 0x{hook_addr:08X}: "
+        f"{old_hook.hex()} -> {words_hex([branch])} wrapX=0x{wrap_x:08X}",
+    ]
+
+
 def patch_player_render_model_visible(overlays: dict[int, object]) -> list[str]:
     # Diagnostic only: Player::renderModel(bool) receives a boolean that is 1
     # when the player is treated as outside/remote for display. Force the value
@@ -1390,6 +1487,12 @@ def main() -> int:
     p_overlay0_alias.add_argument("--literal-addrs", default="")
     p_stage_range_alias = sub.add_parser("stage-range-localplayer-literal-alias")
     p_stage_range_alias.add_argument("--alias-addr", type=lambda x: int(x, 0), default=0x020CA280)
+    p_stage_object_activation = sub.add_parser("stage-object-activation-player-id")
+    p_stage_object_activation.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
+    p_stage_object_wrap = sub.add_parser("stage-object-activation-wrap-width")
+    p_stage_object_wrap.add_argument("--width", type=lambda x: int(x, 0), default=0x400)
+    p_stage_object_force_wrap_x = sub.add_parser("stage-object-activation-force-wrap-x")
+    p_stage_object_force_wrap_x.add_argument("--wrap-x", type=lambda x: int(x, 0), default=0x003FFFFF)
     sub.add_parser("player-render-model-visible")
     p_player_range_view = sub.add_parser("player-render-range-view-player-id")
     p_player_range_view.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
@@ -1504,6 +1607,18 @@ def main() -> int:
         arm9 = rom.loadArm9()
         changes = patch_stage_range_localplayer_literal_alias(arm9, args.alias_addr)
         rom.arm9 = arm9.save(compress=True)
+    elif args.cmd == "stage-object-activation-player-id":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_stage_object_activation_player_id(overlays, args.player_id)
+        save_overlays(rom, overlays)
+    elif args.cmd == "stage-object-activation-wrap-width":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_stage_object_activation_wrap_width(overlays, args.width)
+        save_overlays(rom, overlays)
+    elif args.cmd == "stage-object-activation-force-wrap-x":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_stage_object_activation_force_wrap_x(overlays, args.wrap_x)
+        save_overlays(rom, overlays)
     elif args.cmd == "player-render-model-visible":
         overlays = rom.loadArm9Overlays()
         changes = patch_player_render_model_visible(overlays)
