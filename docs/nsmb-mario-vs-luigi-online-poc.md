@@ -51,6 +51,9 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `logs/smvl-hybrid-separated-host-3000-20260528` / `logs/smvl-hybrid-separated-client-3000-20260528`
     - `RunRole host` と `RunRole client` を別PowerShell jobとして起動
     - frame 1500-3000 で別ログディレクトリ比較 verifier 通過
+  - `logs/smvl-hybrid-delay30-jitter5-safe-3000-20260528`
+    - `SendDelayFrames=30`, `SendJitterFrames=5`
+    - frame 1500-3000 で両者入力あり、死亡なし、state verifier 通過
 - 最新の未解決:
   - client表示はまだ広いQAが必要。Goombaについては `Goomba::onRender` と `OAM/drawSprite` がclientでも呼ばれ、単独スクリーンショットで描画を確認したため、直近の差分はcamera差分の可能性が高い。player modelはhost/client双方へ同じrender-visible patchを当てると表示できるが、cullingを雑に外しているため最終品質としては要改善。
   - `tests/nsmb_us_direct_mvl_safe_short.inputs` はMario/Luigi両者入力あり・死亡なしの4200frame安全ルート。次はさらに長時間化し、実操作に近い左右移動やスター/8コインアイテム検証へ広げる必要がある。
@@ -429,6 +432,17 @@ client側:
   -LogDir logs\mvl-client `
   -Port 8241 `
   -SkipVerify
+```
+
+人工遅延を入れる場合:
+
+```powershell
+.\scripts\run-nsmb-mvl-hybrid-split.ps1 `
+  -Frames 3000 `
+  -InputScript tests\nsmb_us_direct_mvl_safe_short.inputs `
+  -LogDir logs\hybrid-delay `
+  -SendDelayFrames 30 `
+  -SendJitterFrames 5
 ```
 
 現時点では `-AllowJitWithPacketBridge` は成功条件に使わない。JITありでは送信packetにkeysが出てもゲームロジック側の `inputPlayer*Held` に反映されないため。
