@@ -50,6 +50,7 @@ param(
     [int]$InputDelayFrames = -1,
     [int]$InputSendDelayFrames = 0,
     [int]$InputSendJitterFrames = 0,
+    [int]$InputMaxFrameLead = 1,
     [switch]$PacketBridge,
     [switch]$PacketBridgeAllowJit,
     [switch]$PacketBridgeAllowPreGame,
@@ -2237,6 +2238,11 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_INPUT_SEND_JITTER_FRAMES -ErrorAction SilentlyContinue
         }
+        if ($InputNetplay -and $InputMaxFrameLead -ge 0) {
+            $env:MELONDS_NSML_INPUT_MAX_FRAME_LEAD = "$InputMaxFrameLead"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_INPUT_MAX_FRAME_LEAD -ErrorAction SilentlyContinue
+        }
         if ($InputNetplayTrace) {
             $env:MELONDS_NSML_INPUT_NETPLAY_TRACE = "1"
         } else {
@@ -2262,6 +2268,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_DELAY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_INPUT_SEND_DELAY_FRAMES -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_INPUT_SEND_JITTER_FRAMES -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_INPUT_MAX_FRAME_LEAD -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PORT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_LOCAL_INSTANCE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE -ErrorAction SilentlyContinue
@@ -2783,6 +2790,7 @@ function Start-MelonLANProcess {
         "packetBridgeStageStartStep6CloseMinTimer=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_STEP6_CLOSE_MIN_TIMER)"
         "packetBridgeStageSceneReadyClose=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE)"
         "packetBridgeStageSceneReadyCloseStartFrame=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE_START_FRAME)"
+        "inputMaxFrameLead=$($env:MELONDS_NSML_INPUT_MAX_FRAME_LEAD)"
         "packetBridgeReadPacketByte=$($env:MELONDS_NSML_PACKET_BRIDGE_READ_PACKET_BYTE)"
         "packetBridgeCheckPacketBits=$($env:MELONDS_NSML_PACKET_BRIDGE_CHECK_PACKET_BITS)"
         "packetBridgeForceStageNet20OnStageScene=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_NET20_ON_STAGE_SCENE)"

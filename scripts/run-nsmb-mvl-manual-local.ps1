@@ -2,6 +2,7 @@ param(
     [int]$Frames = 999999,
     [int]$WaitTimeoutMs = 86400000,
     [int]$InputDelayFrames = 16,
+    [int]$InputMaxFrameLead = 1,
     [int]$HostStartupDelayMs = 1200,
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds",
@@ -32,6 +33,7 @@ $common = @(
     "-SkipGameplayActorCheck",
     "-InputNetplay",
     "-InputDelayFrames", "$InputDelayFrames",
+    "-InputMaxFrameLead", "$InputMaxFrameLead",
     "-PacketBridgeJitHelperPatch",
     "-PacketBridgeJitHelperPatchFrame", "900",
     "-PacketBridgeStartFrame", "900"
