@@ -476,6 +476,8 @@ param(
     [switch]$CheckVsPipeRespawnVisibility,
     [int]$CheckVsPipeRespawnVisibilityStartFrame = 0,
     [int]$CheckVsPipeRespawnVisibilityEndFrame = 0,
+    [switch]$RequireStarPickup,
+    [int]$RequireStarPickupPlayer = -1,
     [int]$RequireHostLocalPlayerID = -1,
     [int]$RequireClientLocalPlayerID = -1,
     [switch]$SkipArmAbortCheck,
@@ -3400,6 +3402,42 @@ if ($CheckVsPipeRespawnVisibility) {
 
         if ($checked -eq 0) {
             throw "VS pipe respawn visibility check found no vsPipeTransitState rows for $($item.Role). See $($item.Path)"
+        }
+    }
+}
+
+if ($RequireStarPickup) {
+    if ($RequireStarPickupPlayer -lt -1 -or $RequireStarPickupPlayer -gt 1) {
+        throw "RequireStarPickupPlayer must be -1, 0, or 1"
+    }
+
+    foreach ($item in @($roleInfos | ForEach-Object { @{ Path = $_.GameState; Role = $_.Role } })) {
+        if (-not (Test-Path $item.Path)) {
+            throw "star pickup check requires game-state trace for $($item.Role): $($item.Path)"
+        }
+
+        $rows = @(Import-Csv $item.Path)
+        if ($rows.Count -eq 0) {
+            throw "star pickup check received empty trace for $($item.Role): $($item.Path)"
+        }
+
+        $pickupRows = @($rows | Where-Object {
+            if ($RequireStarPickupPlayer -eq 0) {
+                return (Convert-TraceHexToInt64 $_.player0BattleStars) -gt 0 -or
+                    (Convert-TraceHexToInt64 $_.player0CollectedStars) -gt 0
+            }
+            if ($RequireStarPickupPlayer -eq 1) {
+                return (Convert-TraceHexToInt64 $_.player1BattleStars) -gt 0 -or
+                    (Convert-TraceHexToInt64 $_.player1CollectedStars) -gt 0
+            }
+            return (Convert-TraceHexToInt64 $_.player0BattleStars) -gt 0 -or
+                (Convert-TraceHexToInt64 $_.player1BattleStars) -gt 0 -or
+                (Convert-TraceHexToInt64 $_.player0CollectedStars) -gt 0 -or
+                (Convert-TraceHexToInt64 $_.player1CollectedStars) -gt 0
+        })
+
+        if ($pickupRows.Count -eq 0) {
+            throw "star pickup check failed for $($item.Role): player=$RequireStarPickupPlayer. See $($item.Path)"
         }
     }
 }

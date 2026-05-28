@@ -115,15 +115,18 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `Player::beginDeathTransition()` は標準死亡transitionへ入り、その後 `viewTransitState` → `vsPipeTransitState` → `defaultTransitState` へ進むことを確認。VSPipe復帰自体には移っているが、死亡/復帰描画が通常MvsLとして完全に自然かは引き続き確認が必要。
 - 細かいスクリーンショット確認で、true local1 + RNG固定 + VS限定stage-lock skipの死亡/土管復帰描画は通常動作に見えることを確認。`-CheckVsPipeRespawnVisibility` を追加し、土管復帰前フェーズで死亡プレイヤーが表示される回帰を自動検出できるようにした。
 - `wifi-communicating-consoles --count 2` をstable ROM生成フローへ組み込み、`ForceWifiCommunicatingCount=2` runtime hookなしでも同じ死亡/復帰チェックが通ることを確認。
+- 現行stable ROMで4800フレームのhost/client gameplay syncが通過。`ForceWifiCommunicatingCount` runtime hookなしで、主要game-stateの一致を確認。
+- 入力遅延16フレーム + 人工送信遅延8フレーム + jitter最大4フレームでも3600フレーム同期チェックが通過。
+- Luigiが固定RNGのBig Starを取得する入力スクリプト `tests/nsmb_us_direct_mvl_luigi_star_right.inputs` を追加。`-RequireStarPickup -RequireStarPickupPlayer 1` で、通常条件と遅延/jitter条件の両方でスター取得を自動確認。
 
 ## 未解決・注意点
 
 - 2400フレームまでの短時間検証であり、実プレイとして十分な長時間安定性は未確認。
-- `Game::vsMode != 0` 条件付きstage-lock skipは全no-opより副作用が小さいが、勝敗、タイムアップ、土管/ドア、スター取得など他transitionで問題がないかは未確認。
+- `Game::vsMode != 0` 条件付きstage-lock skipは全no-opより副作用が小さいが、タイムアップ、土管/ドア、8コインアイテムなど他transitionで問題がないかは未確認。
 - リスポーン描画は短時間の目視とvisible flag検証では自然に見えるが、長時間プレイや別死亡条件での回帰は未確認。
-- 現在の入力スクリプトは短い診断用で、スター取得、8コインアイテム、ランダムステージ、死亡/復帰後の長時間継続まではまだ十分に検証していない。
+- 現在の入力スクリプトは短い診断用で、8コインアイテム、ランダムステージ、死亡/復帰後の長時間継続まではまだ十分に検証していない。
 - 詳細trace付きでは約43-44fps、traceなしの実用寄り設定では約54-55fps。完全な60fpsには届いていないが、10fps台は主に重い診断設定由来。
-- WANの遅延・ジッタ・packet lossを模した検証は未実施。現状は同一PC上のhost/client 2プロセス検証。
+- WANの遅延・ジッタを模した検証は一部通過。packet lossや実2PC分散は未実施。現状は同一PC上のhost/client 2プロセス検証。
 
 ## 次にやること
 
@@ -136,7 +139,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
    - カメラ追従
    - 死亡/復帰
    - 勝敗判定
-4. 8コインアイテム、Big Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
+4. 8コインアイテム、2個目以降のBig Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
 5. 残るruntime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
 6. 同一LANまたは擬似遅延付きの2プロセス検証へ進む。
 
