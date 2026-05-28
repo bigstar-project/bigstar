@@ -303,6 +303,8 @@ param(
     [string]$ScriptRemotePacketInputScript = "",
     [int]$ScriptRemotePacketStartFrame = 0,
     [int]$ScriptRemotePacketEndFrame = 0,
+    [switch]$PacketBridgeJitHelperPatch,
+    [int]$PacketBridgeJitHelperPatchFrame = 0,
     [int]$ForceStageSceneStartGateStartFrame = 0,
     [int]$ForceStageSceneStartGateEndFrame = 0,
     [string]$ForceStageSceneStartGateValue = "1",
@@ -1468,6 +1470,13 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_END_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_VALUE -ErrorAction SilentlyContinue
+    }
+    if ($PacketBridgeJitHelperPatch) {
+        $env:MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH = "1"
+        $env:MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH_FRAME = "$PacketBridgeJitHelperPatchFrame"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH_FRAME -ErrorAction SilentlyContinue
     }
     if ($ForceStageSceneContinueGate) {
         $env:MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE = "1"

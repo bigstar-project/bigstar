@@ -83,6 +83,11 @@ constexpr melonDS::u32 kNetPacketActionAddr = 0x020888E4;
 constexpr melonDS::u32 kNetPacketByte5Addr = 0x020888E5;
 constexpr melonDS::u32 kNetPacketByte6Addr = 0x020888E6;
 constexpr melonDS::u32 kNetPacketByte7Addr = 0x020888E7;
+constexpr melonDS::u32 kPacketBridgeJitScratchBaseAddr = 0x023C1200;
+constexpr melonDS::u32 kPacketBridgeJitScratchTickAddr = kPacketBridgeJitScratchBaseAddr + 0x00;
+constexpr melonDS::u32 kPacketBridgeJitScratchActionAddr = kPacketBridgeJitScratchBaseAddr + 0x04;
+constexpr melonDS::u32 kPacketBridgeJitScratchKeysAddr = kPacketBridgeJitScratchBaseAddr + 0x08;
+constexpr melonDS::u32 kPacketBridgeJitScratchPacketsAddr = kPacketBridgeJitScratchBaseAddr + 0x40;
 constexpr melonDS::u32 kNetRandomCallCountAddr = 0x02088A48;
 constexpr melonDS::u32 kNetRandomValueAddr = 0x02088A68;
 constexpr melonDS::u32 kInputConsoleKeysAddr = 0x02087650;
@@ -1113,6 +1118,9 @@ struct State
     melonDS::u32 ScriptRemotePacketStartFrame = 0;
     melonDS::u32 ScriptRemotePacketEndFrame = 0;
     bool ScriptRemotePacketLogged[16] {};
+    bool PacketBridgeJitHelperPatchEnabled = false;
+    melonDS::u32 PacketBridgeJitHelperPatchFrame = 0;
+    bool PacketBridgeJitHelperPatchApplied[16] {};
     melonDS::u32 ForceStageSceneStartGateStartFrame = 0;
     melonDS::u32 ForceStageSceneStartGateEndFrame = 0;
     melonDS::u32 ForceStageSceneStartGateValue = 1;
@@ -5773,6 +5781,85 @@ void PushScriptRemotePacketIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
     }
 }
 
+int CurrentPacketBridgeLocalPlayer()
+{
+    if (G.ForceNetLocalAid >= 0 && G.ForceNetLocalAid <= 1)
+        return G.ForceNetLocalAid;
+    if (G.NetRole == Role::Client)
+        return 1;
+    return 0;
+}
+
+InputState PacketBridgeInputForPlayer(int player, int localPlayer, int instanceID, melonDS::u32 frame)
+{
+    if (player == localPlayer)
+        return ApplyInputScript(instanceID, frame, NeutralInput());
+    return ApplyScriptRemotePacketInputScript(G.ScriptRemotePacketInputInstance, frame, NeutralInput());
+}
+
+void WritePacketBridgeJitScratchIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.PacketBridgeJitHelperPatchEnabled || !nds || !nds->MainRAM)
+        return;
+    if (!G.ScriptRemotePacketEnabled)
+        return;
+    if (G.ScriptRemotePacketInputInstance < 0 || G.ScriptRemotePacketInputInstance >= 16)
+        return;
+    if (frame < G.ScriptRemotePacketStartFrame)
+        return;
+    if (G.ScriptRemotePacketEndFrame != 0 && frame > G.ScriptRemotePacketEndFrame)
+        return;
+
+    const int localPlayer = CurrentPacketBridgeLocalPlayer();
+    const melonDS::u32 tick = nds->ARM9Read16(kNetPacketTickAddr);
+    const melonDS::u8 action = nds->ARM9Read8(kNetPacketActionAddr);
+    nds->ARM9Write16(kPacketBridgeJitScratchTickAddr, static_cast<melonDS::u16>(tick));
+    nds->ARM9Write8(kPacketBridgeJitScratchActionAddr, action);
+
+    for (int player = 0; player < 2; player++)
+    {
+        const InputState input = PacketBridgeInputForPlayer(player, localPlayer, instanceID, frame);
+        const melonDS::u32 keys = (~input.KeyMask) & 0x0FFF;
+        nds->ARM9Write16(kPacketBridgeJitScratchKeysAddr + static_cast<melonDS::u32>(player * 2),
+            static_cast<melonDS::u16>(keys));
+
+        const melonDS::u32 packetAddr = kPacketBridgeJitScratchPacketsAddr + static_cast<melonDS::u32>(player * 0x40);
+        nds->ARM9Write16(packetAddr + 0, static_cast<melonDS::u16>(tick));
+        nds->ARM9Write16(packetAddr + 2, static_cast<melonDS::u16>(keys));
+        nds->ARM9Write8(packetAddr + 4, action);
+        nds->ARM9Write8(packetAddr + 5, nds->ARM9Read8(kNetPacketByte5Addr));
+        nds->ARM9Write8(packetAddr + 6, nds->ARM9Read8(kNetPacketByte6Addr));
+        nds->ARM9Write8(packetAddr + 7, nds->ARM9Read8(kNetPacketByte7Addr));
+        for (melonDS::u32 i = 0; i < 44; i++)
+            nds->ARM9Write8(packetAddr + 8 + i, nds->ARM9Read8(0x020888E8 + i));
+        nds->ARM9Write8(packetAddr + 0x29, nds->ARM9Read8(0x02088A4C));
+    }
+}
+
+void ApplyPacketBridgeJitHelperPatchIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.PacketBridgeJitHelperPatchEnabled || !nds || !nds->MainRAM)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (G.PacketBridgeJitHelperPatchApplied[instanceID] || frame < G.PacketBridgeJitHelperPatchFrame)
+        return;
+
+    // Net::getConsoleKeys(u16): return scratchKeys[player].
+    WriteARM9U32(nds, 0x0200E854, 0xE59F1008); // ldr r1, [pc, #8]
+    WriteARM9U32(nds, 0x0200E858, 0xE0811080); // add r1, r1, r0, lsl #1
+    WriteARM9U32(nds, 0x0200E85C, 0xE1D100B0); // ldrh r0, [r1]
+    WriteARM9U32(nds, 0x0200E860, 0xE12FFF1E); // bx lr
+    WriteARM9U32(nds, 0x0200E864, kPacketBridgeJitScratchKeysAddr);
+
+    G.PacketBridgeJitHelperPatchApplied[instanceID] = true;
+    std::printf(
+        "NSMB Test: packet bridge JIT keys helper patch inst=%d frame=%u scratch=0x%08X\n",
+        instanceID,
+        frame,
+        kPacketBridgeJitScratchBaseAddr);
+}
+
 void ForceStageSceneContinueGateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.ForceStageSceneContinueGateEnabled || !nds || !nds->MainRAM)
@@ -8574,6 +8661,9 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_SCRIPT_REMOTE_PACKET_START_FRAME", 0)));
     G.ScriptRemotePacketEndFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_SCRIPT_REMOTE_PACKET_END_FRAME", 0)));
+    G.PacketBridgeJitHelperPatchEnabled = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH");
+    G.PacketBridgeJitHelperPatchFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH_FRAME", 0)));
     G.ForceStageSceneStartGateStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_START_FRAME", 0)));
     G.ForceStageSceneStartGateEndFrame = static_cast<melonDS::u32>(
@@ -8981,6 +9071,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         LoadState(instanceID, inputFrame, nds);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyPacketBridgeJitHelperPatchIfNeeded(instanceID, inputFrame, nds);
+
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         InjectDirectMvlBootCall(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         InjectCourseSelectFactoryCall(instanceID, inputFrame, nds);
@@ -9036,6 +9129,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         ForceNetLocalAidIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         PushScriptRemotePacketIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        WritePacketBridgeJitScratchIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageSceneContinueGateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)

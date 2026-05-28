@@ -35,6 +35,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   - client単体検証では `host.inputs` をremote player0 packetに使う。
 - JIT無効のoffline検証で、host local0とclient local1が同じ2人分の入力を受け取り、frame 960/1020/1200/1260のplayer0/player1座標が一致した。
 - single-role offline packet検証ではLAN startログが出ないため、`PacketBridgeArmOnly + ScriptRemotePacket` の場合はscript側のLAN start必須チェックを外した。
+- JIT有効時にもremote入力を高速検証できるよう、`Net::getConsoleKeys` だけをscratch memory参照へ差し替える診断patchを追加した。
 
 直近の重要結果:
 
@@ -47,32 +48,35 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   - frame 960: `inputPlayer0Held=0x11`, `inputPlayer1Held=0x21`
   - frame 1200: `playerActor0X=0x847f0`, `playerActor1X=0xfffc8000`
 - つまり、少なくとも短時間のoffline scripted packetでは、host/client simulationの主要player状態は一致している。
+- JIT有効 + keys helper patchでもhost/clientは一致した。
+  - logs:
+    - `logs/codex-host-local0-offline-remote1-jit-keys-helper900-fix-1300-20260528`
+    - `logs/codex-client-local1-offline-remote0-jit-keys-helper900-fix-1300-20260528`
+  - frame 1200: host/clientとも `playerActor0X=0x70ff0`, `playerActor1X=0xfffc8000`
+  - 約49から50fpsで完走した。
 
 ## 未解決
 
-- ARM-only packet hookはJIT有効時に踏まれない。
-  - JIT無効では約10から11fpsで、フィードバックループが遅い。
-  - JIT有効では約49fpsまで上がるが、現状のARM hook経由remote入力が効かない。
+- ARM-only packet hook自体はJIT有効時に踏まれない。
+  - ただし `Net::getConsoleKeys` のscratch helper patchなら、JIT有効でもscripted remote入力の短時間一致検証は可能になった。
+  - `getPacketByte/getPacketTick/getPacketAction` までpatchすると試合開始状態を壊したため、現時点のJIT helper patchはkeys限定にする。
 - runtime `DirectMvlBoot` / firstScene直行は、SND/heap周辺の初期化不足でdata abortまたは停止になりやすく、安定入口としては使わない。
 - `wifi-communicating-consoles --count 2` はStageLayout後には有効だが、VSConnect初期化中に常時patchすると壊れることがある。最終的には起動前ROM patchへ落とす前に適用タイミングを詰める必要がある。
 - 現在の一致確認はscripted inputの短時間検証であり、まだ実WAN adapter、遅延、packet loss、長時間対戦、スター再出現、8コインアイテム、ランダムステージ選択までは検証できていない。
 
 ## 次にやること
 
-1. JIT有効でもpacket API差し替えが効く形を作る。
-   - 候補A: JIT compiler側で `Net::getConsoleKeys` / packet helperへのBLをruntime helperへ迂回する。
-   - 候補B: ROM/RAM上のpacket helper本体をscratch memory参照にpatchし、JITでも通常コードとして実行させる。
-2. JIT有効でhost local0 / client local1のoffline scripted packet一致を再確認する。
-3. offline scripted packetをWAN adapter入力へ接続する。
-4. WAN adapterでhost/clientを同時起動し、ローカルネットワーク上で60fps近い検証ループを作る。
-5. 長時間の決定性確認を追加する。
+1. keys限定JIT helper patchをWAN adapter入力へ接続する。
+2. WAN adapterでhost/clientを同時起動し、ローカルネットワーク上で50fps前後の検証ループを作る。
+3. 長時間の決定性確認を追加する。
    - player actor
    - active object set
    - Goomba / moving hazard
    - Big Star
    - 8コインアイテム
    - ランダムステージ
-6. Luigi側UI、カメラ、stock item、死亡/復帰、勝敗判定がlocalPlayerID=1の自然処理で動くかを検証する。
+4. `getPacketByte/getPacketTick/getPacketAction` もWAN化が必要かを、実WAN adapter検証後に判断する。
+5. Luigi側UI、カメラ、stock item、死亡/復帰、勝敗判定がlocalPlayerID=1の自然処理で動くかを検証する。
 
 ## 成功条件
 
