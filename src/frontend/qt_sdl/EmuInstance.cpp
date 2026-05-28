@@ -1307,7 +1307,8 @@ bool EmuInstance::updateConsole() noexcept
     const bool packetBridgeAllowsJIT =
         getenv("MELONDS_NSML_PACKET_BRIDGE") &&
         getenv("MELONDS_NSML_PACKET_BRIDGE_ALLOW_JIT");
-    auto jitargs = (jitopt.GetBool("Enable") || packetBridgeAllowsJIT)
+    const bool nsmlAllowsJIT = getenv("MELONDS_NSML_ALLOW_JIT") != nullptr;
+    auto jitargs = (jitopt.GetBool("Enable") || packetBridgeAllowsJIT || nsmlAllowsJIT)
         ? std::make_optional(_jitargs)
         : std::nullopt;
     if (getenv("MELONDS_NSML_DISABLE_JIT") ||

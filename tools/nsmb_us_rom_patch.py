@@ -743,6 +743,39 @@ def patch_stage_range_localplayer_literal_alias(arm9, alias_addr: int) -> list[s
     ]
 
 
+def patch_wifi_communicating_consoles(arm9, count: int) -> list[str]:
+    if count < 1 or count > 4:
+        raise ValueError(f"communicating console count must be 1..4, got {count}")
+
+    # Diagnostic for direct MvL entry. The natural StageLayout init loops over
+    # Wifi::getCommunicatingConsoleCount() and initializes per-view Stage
+    # arrays, including Stage::liquidPosition[]. Direct single-instance boot
+    # reports one console, which leaves slot1 uninitialized when
+    # Game::localPlayerID is 1.
+    count_addr = 0x02046C34
+    count_words = [
+        encode_mov_imm(0, count),
+        BX_LR,
+    ]
+    old_count = patch_arm9_words(arm9, count_addr, count_words)
+
+    is_comm_addr = 0x02046C44
+    is_comm_words = [
+        encode_cmp_imm(0, count),
+        with_cond(encode_mov_imm(0, 1), 3),  # LO
+        with_cond(encode_mov_imm(0, 0), 2),  # HS
+        BX_LR,
+    ]
+    old_is_comm = patch_arm9_words(arm9, is_comm_addr, is_comm_words)
+
+    return [
+        f"Wifi::getCommunicatingConsoleCount @ 0x{count_addr:08X}: "
+        f"{old_count.hex()} -> {words_hex(count_words)} count={count}",
+        f"Wifi::isConsoleCommunicating @ 0x{is_comm_addr:08X}: "
+        f"{old_is_comm.hex()} -> {words_hex(is_comm_words)} count={count}",
+    ]
+
+
 def patch_stage_object_activation_player_id(overlays: dict[int, object], player_id: int) -> list[str]:
     # Stage object activation chooses a player camera/range before it decides
     # which StageObject records to instantiate. In direct localPlayerID=1, this
@@ -1513,6 +1546,8 @@ def main() -> int:
     p_overlay0_alias.add_argument("--literal-addrs", default="")
     p_stage_range_alias = sub.add_parser("stage-range-localplayer-literal-alias")
     p_stage_range_alias.add_argument("--alias-addr", type=lambda x: int(x, 0), default=0x020CA280)
+    p_wifi_comm = sub.add_parser("wifi-communicating-consoles")
+    p_wifi_comm.add_argument("--count", type=lambda x: int(x, 0), default=2)
     p_stage_object_activation = sub.add_parser("stage-object-activation-player-id")
     p_stage_object_activation.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_stage_object_wrap = sub.add_parser("stage-object-activation-wrap-width")
@@ -1634,6 +1669,10 @@ def main() -> int:
     elif args.cmd == "stage-range-localplayer-literal-alias":
         arm9 = rom.loadArm9()
         changes = patch_stage_range_localplayer_literal_alias(arm9, args.alias_addr)
+        rom.arm9 = arm9.save(compress=True)
+    elif args.cmd == "wifi-communicating-consoles":
+        arm9 = rom.loadArm9()
+        changes = patch_wifi_communicating_consoles(arm9, args.count)
         rom.arm9 = arm9.save(compress=True)
     elif args.cmd == "stage-object-activation-player-id":
         overlays = rom.loadArm9Overlays()

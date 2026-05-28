@@ -290,6 +290,12 @@ param(
     [switch]$ForceStageSceneStartGateClientOnly,
     [switch]$ForceStageSceneFadeReady,
     [switch]$ForceStageSceneInputLatch,
+    [int]$ForceNetLocalAid = -1,
+    [int]$ForceNetLocalAidStartFrame = 0,
+    [int]$ForceNetLocalAidEndFrame = 0,
+    [int]$ForceWifiCommunicatingCount = -1,
+    [int]$ForceWifiCommunicatingStartFrame = 0,
+    [int]$ForceWifiCommunicatingEndFrame = 0,
     [int]$ForceStageSceneStartGateStartFrame = 0,
     [int]$ForceStageSceneStartGateEndFrame = 0,
     [string]$ForceStageSceneStartGateValue = "1",
@@ -1351,6 +1357,24 @@ function Start-MelonLANProcess {
         if ($ForceStageSceneStartGateClientOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_CLIENT_ONLY -ErrorAction SilentlyContinue }
         if ($ForceStageSceneFadeReady) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_FADE_READY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_FADE_READY -ErrorAction SilentlyContinue }
         if ($ForceStageSceneInputLatch) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_INPUT_LATCH = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_INPUT_LATCH -ErrorAction SilentlyContinue }
+        if ($ForceNetLocalAid -ge 0) {
+            $env:MELONDS_NSML_FORCE_NET_LOCAL_AID = "$ForceNetLocalAid"
+            $env:MELONDS_NSML_FORCE_NET_LOCAL_AID_START_FRAME = "$ForceNetLocalAidStartFrame"
+            $env:MELONDS_NSML_FORCE_NET_LOCAL_AID_END_FRAME = "$ForceNetLocalAidEndFrame"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_FORCE_NET_LOCAL_AID -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_FORCE_NET_LOCAL_AID_START_FRAME -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_FORCE_NET_LOCAL_AID_END_FRAME -ErrorAction SilentlyContinue
+        }
+        if ($ForceWifiCommunicatingCount -ge 0) {
+            $env:MELONDS_NSML_FORCE_WIFI_COMMUNICATING_COUNT = "$ForceWifiCommunicatingCount"
+            $env:MELONDS_NSML_FORCE_WIFI_COMMUNICATING_START_FRAME = "$ForceWifiCommunicatingStartFrame"
+            $env:MELONDS_NSML_FORCE_WIFI_COMMUNICATING_END_FRAME = "$ForceWifiCommunicatingEndFrame"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_FORCE_WIFI_COMMUNICATING_COUNT -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_FORCE_WIFI_COMMUNICATING_START_FRAME -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_FORCE_WIFI_COMMUNICATING_END_FRAME -ErrorAction SilentlyContinue
+        }
         $env:MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_START_FRAME = "$ForceStageSceneStartGateStartFrame"
         $env:MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_END_FRAME = "$ForceStageSceneStartGateEndFrame"
         $env:MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_VALUE = "$ForceStageSceneStartGateValue"
@@ -1360,6 +1384,24 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_CLIENT_ONLY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_FADE_READY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_INPUT_LATCH -ErrorAction SilentlyContinue
+        if ($ForceNetLocalAid -ge 0) {
+            $env:MELONDS_NSML_FORCE_NET_LOCAL_AID = "$ForceNetLocalAid"
+            $env:MELONDS_NSML_FORCE_NET_LOCAL_AID_START_FRAME = "$ForceNetLocalAidStartFrame"
+            $env:MELONDS_NSML_FORCE_NET_LOCAL_AID_END_FRAME = "$ForceNetLocalAidEndFrame"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_FORCE_NET_LOCAL_AID -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_FORCE_NET_LOCAL_AID_START_FRAME -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_FORCE_NET_LOCAL_AID_END_FRAME -ErrorAction SilentlyContinue
+        }
+        if ($ForceWifiCommunicatingCount -ge 0) {
+            $env:MELONDS_NSML_FORCE_WIFI_COMMUNICATING_COUNT = "$ForceWifiCommunicatingCount"
+            $env:MELONDS_NSML_FORCE_WIFI_COMMUNICATING_START_FRAME = "$ForceWifiCommunicatingStartFrame"
+            $env:MELONDS_NSML_FORCE_WIFI_COMMUNICATING_END_FRAME = "$ForceWifiCommunicatingEndFrame"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_FORCE_WIFI_COMMUNICATING_COUNT -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_FORCE_WIFI_COMMUNICATING_START_FRAME -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_FORCE_WIFI_COMMUNICATING_END_FRAME -ErrorAction SilentlyContinue
+        }
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_END_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_VALUE -ErrorAction SilentlyContinue
@@ -2399,8 +2441,10 @@ function Start-MelonLANProcess {
     $env:MELONDS_NSML_ROLE = $Role
     $env:MELONDS_NSML_FIXED_RTC = "2020-01-01T00:00:00"
     if ($AllowJit -or $PacketBridgeAllowJit) {
+        $env:MELONDS_NSML_ALLOW_JIT = "1"
         Remove-Item Env:\MELONDS_NSML_DISABLE_JIT -ErrorAction SilentlyContinue
     } else {
+        Remove-Item Env:\MELONDS_NSML_ALLOW_JIT -ErrorAction SilentlyContinue
         $env:MELONDS_NSML_DISABLE_JIT = "1"
     }
     if ($DropMPAfterFrame -gt 0) {

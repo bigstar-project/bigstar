@@ -20,27 +20,33 @@ US版 ROM `roms/nsmb-us.nds` (`A2DE`) を主対象にする。`external/NSMB-Cod
 
 当面は、UIや結果表示を補正するのではなく、`direct entry / VSConnect / StageStart / Game::loadLevel / StageObject activation / collision-liquid map initialization` を解析し、raw `client localPlayerID=1` の開始状態を host local0 と同じ simulation 条件へ近づける。
 
+2026-05-28時点の次の焦点は、`client localPlayerID=1` の開始状態で `Net::localAid` と通信相手数をいつ・どの層で2P扱いにするか。常時patchでは起動前のVSConnect側が壊れるため、StageLayout/試合開始後に効かせる最小patchへ寄せる。
+
 ## 直近の重要な発見
 
-2026-05-28 時点の raw direct local1 比較:
+raw `client localPlayerID=1` は、入力同期前から stage actor / physics 状態がhost local0と一致していなかった。Goomba欠落はStageObject list欠落ではなく、`Game::wrapX` と液体/collision初期化の不一致が原因だった。
 
-- host local0 と client local1 は、入力同期前から stage actor / physics 状態が一致していない。
-- client local1 のGoomba欠落は、StageObject list欠落ではなかった。StageObject list自体はhost/clientで一致し、欠けていたGoombaは `objectID=0x53`, `settings=0x0`, StageObject `0x0229A9EC`。
-- Goomba spawn欠落の主因は `Game::wrapX` 未初期化。host local0 は `0x02085AA4/0x02085AA8 = 0x003FFFFF` だが、raw client local1 は `0xFFFFFFFF` のままだった。
-- 診断patch `stage-object-activation-force-wrap-x --wrap-x 0x003FFFFF` でGoomba spawnとactive維持は戻る。
-- ただしwrapX補正だけではGoombaの実移動速度がhostと一致しなかった。
+StageLayout初期化をtraceした結果、液体slot不一致の根本は `Wifi::getCommunicatingConsoleCount()` がdirect single-instance bootでは1を返し、`Stage::liquidPosition[1]` が初期化されないことだった。診断patch `wifi-communicating-consoles --count 2` を当てると、slot0/slot1の水面値、Goomba、player environment flags はhost local0と一致した。
 
-追加解析で判明したこと:
+RNGはdirect entryのseedだけでは一致しない。診断patch `rng-constant --value 0x100` をhost/client両方に当てると、初期スター座標は一致した。
 
-- Goomba AI側の意図速度 `velocity.x` は host/client とも `-0x800` で一致していた。
-- 実際に座標へ適用される `lastStepX` が host `-0x800`、client `-0x400` に分岐していた。
-- 分岐点は `StageEntity::updateLiquidCollision`。frame 888でhostは「液体外」、client local1は「液体内」と判定され、clientだけ `accelV=-0x100`, `velocityLimitY=-0x1000` 系の液体物理に入っていた。
-- 診断patch `stage-entity-liquid-check-result` で液体判定を強制的に「液体外」にすると、client local1 のGoomba位置/速度は host local0 と frame 960 まで一致した。
-- つまりGoomba速度差の直接原因は、Goomba自身ではなく、local1開始状態での collision/liquid map または関連初期化の不一致。
-- ただし同じ診断patch後も player environment flags はclient側で `0x202` のまま残るため、液体判定を潰すだけでは根本解決ではない。
-- 液体判定の内部traceで、`StageEntity::updateLiquidCollision` は `Game::localPlayerID` を使って `0x020CAE0C + localPlayerID*4` の水面値を読んでいることを確認した。host local0 はslot0の `0xFF000000` を読み液体外、client local1 はslot1の `0x00000000` を読み液体内になる。
-- 診断patchとして `overlay0-localplayer-literal-alias --literal-addrs 0x020A6F40` を当てると、液体判定だけslot0を見るようになり、Goomba物理とplayer environment flagsがhostと一致した。
-- RNGはdirect entryのseedだけではhost/client一致しない。診断patch `rng-constant --value 0x100` をhost/client両方に当てると、初期スター座標は一致した。
+`wificount2 + rng100` の比較では、frame 960時点で以下がhost/client一致した。
+
+- `stageLiquidHeight0/1 = 0xFF000000`
+- Goomba系 moving hazard の座標/速度/lastStep
+- player actor 0/1 の座標と環境フラグ
+- object active count
+- 初期スター座標
+
+JIT強制許可 `MELONDS_NSML_ALLOW_JIT` を追加し、trace検証速度は約45-50fpsまで改善した。
+
+一方、client local1 でも `Net::localAid` が0のままだと、NSMBの `Net::getConsoleKeys(player)` はlocal入力をplayer0へ流す。Luigiを自然操作するには `Net::localAid=1` を正しいタイミングで成立させる必要がある。
+
+注意点:
+
+- `wifi-communicating-consoles --count 2` をROMに常時patchすると、VSConnect起動直後の初期化でnull参照/data abortを起こす場合がある。
+- runtime `DirectMvlBoot` / firstScene直行も、現状はSND/heap周辺の初期化不足でdata abortまたは極端な低速停止になりやすい。
+- よって通信相手数とlocalAidは、起動直後ではなく、StageLayout/試合開始後に限定して成立させる方が筋が良い。
 
 ## 現在の実装状況
 
@@ -69,25 +75,28 @@ US版 ROM `roms/nsmb-us.nds` (`A2DE`) を主対象にする。`external/NSMB-Cod
 - 診断patch
   - `stage-object-activation-force-wrap-x`
   - `stage-entity-liquid-check-result`
+  - `wifi-communicating-consoles`
+- runtime診断フック
+  - `MELONDS_NSML_ALLOW_JIT`
+  - `MELONDS_NSML_FORCE_NET_LOCAL_AID`
+  - `MELONDS_NSML_FORCE_WIFI_COMMUNICATING_COUNT`
 
 未解決:
 
 - raw `client localPlayerID=1` の正常開始状態がまだ作れていない。
-- `Game::wrapX` と collision/liquid map の初期化が、raw direct local1 ではhost local0と同じ経路を通っていない。
-- client local1で液体水面slot1が未初期化相当になっている。slot0を見る診断patchでは直るが、最終的にはslot1を正しく初期化するか、MvsL時の正しい参照slotを特定する必要がある。
-- RNG状態もhost/clientでまだ自然一致していない。スター、8コインアイテム、ランダムステージ選択などに影響するため後続で再固定が必要。
-- JITなし検証は約10-12fpsで遅い。JIT有効化はPacketBridge系hookの正しさに注意が必要。
+- `wificount2` はStageLayout後には有効だが、VSConnect初期化中に常時2を返すと壊れる。適用タイミングを限定する必要がある。
+- `Net::localAid=1` を成立させないと、client local1でもlocal入力がplayer0へ流れる。
+- RNG状態は診断用定数化では一致するが、最終的にはhost/clientで同じ乱数列になるROM patchまたはseed同期が必要。
+- runtime `DirectMvlBoot` / firstScene直行はまだ安定入口になっていない。
 
 ## 次にやること
 
-1. client local1の `0x020CAE10` 水面slot1がなぜ `0x00000000` のままになるかを追う。
-   - host local0のslot0初期化箇所を特定する。
-   - local1でもslot1へ同じ値を自然初期化するのが正しいか、MvsL中はslot0参照が正しいのかを切り分ける。
-2. host local0で `Game::wrapX` と collision/liquid map がどの開始処理から初期化されるか特定し、raw client local1でも同じ初期化を自然に通す。
-3. RNGを、定数化ではなくhost/clientで同じ列になる形へ寄せる。まずは初期スター、その後8コインアイテムやランダムステージ選択を確認する。
-4. 診断patchで補正するのではなく、direct entry / StageStart 初期化側の最小patchへ落とす。
-5. raw local1で Goomba spawn、速度、位置、player environment flags、スター/RNGがhost local0と一致するか確認する。
-6. その後、Luigi camera/UI/stock item/death/win判定が local1 の自然処理で動くか検証する。
+1. `MELONDS_NSML_FORCE_WIFI_COMMUNICATING_COUNT` と `MELONDS_NSML_FORCE_NET_LOCAL_AID` をclient local1の試合開始後だけ適用し、起動前VSConnectを壊さずに `inputPlayer1Held` と `playerActor1` が動くか確認する。
+2. `wificount2 + rng100 + netLocalAid1` 相当の条件で、host local0 / client local1 のframe 960以降のsimulation一致を再確認する。
+3. runtime診断で成立した条件を、起動前VSConnectを壊さない条件付きROM patchへ落とし込む。
+4. runtime `DirectMvlBoot` / firstScene直行のdata abort原因を切り分け、安定入口として使えるか判断する。だめなら既存の安定開始ルートからStageLayout以後のpatchに限定する。
+5. RNGを定数化ではなくhost/clientで同じ列になる形へ寄せる。初期スターの後、8コインアイテムやランダムステージ選択も確認する。
+6. Luigi camera/UI/stock item/death/win判定が local1 の自然処理で動くか検証する。
 
 ## 成功条件
 
@@ -126,15 +135,15 @@ host local0 単体:
   -LogDir logs\...
 ```
 
-client local1 + wrapX診断:
+client local1 + runtime通信状態診断:
 
 ```powershell
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 `
   -RunRole client `
   -Frames 960 `
   -Exe build\release-windows-x86_64\melonDS.exe `
-  -Rom roms\nsmb-us-direct-mvl-entry-stable-client-local1-forcewrapx2.tmp.nds `
-  -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-local1-forcewrapx2.tmp.nds `
+  -Rom roms\nsmb-us-direct-mvl-entry-stable-client-local1-rng100.tmp.nds `
+  -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-local1-rng100.tmp.nds `
   -InputScript tests\nsmb_us_direct_mvl_both_different.inputs `
   -GameStateTrace `
   -GameStateTraceExtended `
@@ -146,8 +155,14 @@ client local1 + wrapX診断:
   -SkipMvlStateCheck `
   -SkipGameplayActorCheck `
   -SkipArmAbortCheck `
+  -ForceWifiCommunicatingCount 2 `
+  -ForceWifiCommunicatingStartFrame 840 `
+  -ForceNetLocalAid 1 `
+  -ForceNetLocalAidStartFrame 840 `
   -LogDir logs\...
 ```
+
+このコマンドは検証用の雛形。`DirectMvlBoot` / firstScene直行は現状まだ不安定なので、実際の開始ルートに合わせてframeとROMを調整する。
 
 ## 運用ルール
 

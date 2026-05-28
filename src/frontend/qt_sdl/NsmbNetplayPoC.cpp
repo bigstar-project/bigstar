@@ -62,6 +62,8 @@ constexpr melonDS::u32 kGameVsModeAddr = 0x02085A84;
 constexpr melonDS::u32 kNetStateBaseAddr = 0x020887E8;
 constexpr melonDS::u32 kNetCurrentLanguageAddr = 0x020887E8;
 constexpr melonDS::u32 kNetLocalAidAddr = 0x020887F0;
+constexpr melonDS::u32 kWifiCommunicatingConsoleCountAddr = 0x02085200;
+constexpr melonDS::u32 kWifiCommunicatingConsolesAddr = 0x0208B848;
 constexpr melonDS::u32 kNetState14Addr = 0x020887FC; // Net::connectionState
 constexpr melonDS::u32 kNetState1CAddr = 0x02088804; // Net::connectedConsoleCount
 constexpr melonDS::u32 kNetState20Addr = 0x02088808;
@@ -1096,6 +1098,14 @@ struct State
     bool ForceStageSceneStartGateClientOnly = false;
     bool ForceStageSceneFadeReady = false;
     bool ForceStageSceneInputLatchEnabled = false;
+    int ForceNetLocalAid = -1;
+    melonDS::u32 ForceNetLocalAidStartFrame = 0;
+    melonDS::u32 ForceNetLocalAidEndFrame = 0;
+    bool ForceNetLocalAidLogged[16] {};
+    int ForceWifiCommunicatingCount = -1;
+    melonDS::u32 ForceWifiCommunicatingStartFrame = 0;
+    melonDS::u32 ForceWifiCommunicatingEndFrame = 0;
+    bool ForceWifiCommunicatingLogged[16] {};
     melonDS::u32 ForceStageSceneStartGateStartFrame = 0;
     melonDS::u32 ForceStageSceneStartGateEndFrame = 0;
     melonDS::u32 ForceStageSceneStartGateValue = 1;
@@ -5617,6 +5627,66 @@ void ForceStageSceneStartGateIfNeeded(int instanceID, melonDS::u32 frame, melonD
     }
 }
 
+void ForceNetLocalAidIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (G.ForceNetLocalAid < 0 || !nds || !nds->MainRAM)
+        return;
+    if (G.ForceNetLocalAid > 3)
+        return;
+    if (frame < G.ForceNetLocalAidStartFrame)
+        return;
+    if (G.ForceNetLocalAidEndFrame != 0 && frame > G.ForceNetLocalAidEndFrame)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+
+    nds->ARM9Write32(kNetLocalAidAddr, static_cast<melonDS::u32>(G.ForceNetLocalAid));
+
+    if (!G.ForceNetLocalAidLogged[instanceID])
+    {
+        std::printf("NSMB Test: force net local AID inst=%d frame=%u range=%u-%u value=%d\n",
+            instanceID,
+            frame,
+            G.ForceNetLocalAidStartFrame,
+            G.ForceNetLocalAidEndFrame,
+            G.ForceNetLocalAid);
+        G.ForceNetLocalAidLogged[instanceID] = true;
+    }
+}
+
+void ForceWifiCommunicatingIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (G.ForceWifiCommunicatingCount < 0 || !nds || !nds->MainRAM)
+        return;
+    if (G.ForceWifiCommunicatingCount < 1 || G.ForceWifiCommunicatingCount > 4)
+        return;
+    if (frame < G.ForceWifiCommunicatingStartFrame)
+        return;
+    if (G.ForceWifiCommunicatingEndFrame != 0 && frame > G.ForceWifiCommunicatingEndFrame)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+
+    nds->ARM9Write16(kWifiCommunicatingConsoleCountAddr,
+        static_cast<melonDS::u16>(G.ForceWifiCommunicatingCount));
+    for (int i = 0; i < 4; i++)
+    {
+        nds->ARM9Write32(kWifiCommunicatingConsolesAddr + static_cast<melonDS::u32>(i * sizeof(melonDS::u32)),
+            i < G.ForceWifiCommunicatingCount ? 1u : 0u);
+    }
+
+    if (!G.ForceWifiCommunicatingLogged[instanceID])
+    {
+        std::printf("NSMB Test: force wifi communicating inst=%d frame=%u range=%u-%u count=%d\n",
+            instanceID,
+            frame,
+            G.ForceWifiCommunicatingStartFrame,
+            G.ForceWifiCommunicatingEndFrame,
+            G.ForceWifiCommunicatingCount);
+        G.ForceWifiCommunicatingLogged[instanceID] = true;
+    }
+}
+
 void ForceStageSceneContinueGateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.ForceStageSceneContinueGateEnabled || !nds || !nds->MainRAM)
@@ -8397,6 +8467,16 @@ void InitFromEnvironment()
     G.ForceStageSceneStartGateClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_CLIENT_ONLY");
     G.ForceStageSceneFadeReady = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_FADE_READY");
     G.ForceStageSceneInputLatchEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_INPUT_LATCH");
+    G.ForceNetLocalAid = EnvInt("MELONDS_NSML_FORCE_NET_LOCAL_AID", -1);
+    G.ForceNetLocalAidStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_NET_LOCAL_AID_START_FRAME", 0)));
+    G.ForceNetLocalAidEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_NET_LOCAL_AID_END_FRAME", 0)));
+    G.ForceWifiCommunicatingCount = EnvInt("MELONDS_NSML_FORCE_WIFI_COMMUNICATING_COUNT", -1);
+    G.ForceWifiCommunicatingStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_WIFI_COMMUNICATING_START_FRAME", 0)));
+    G.ForceWifiCommunicatingEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_WIFI_COMMUNICATING_END_FRAME", 0)));
     G.ForceStageSceneStartGateStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_START_FRAME", 0)));
     G.ForceStageSceneStartGateEndFrame = static_cast<melonDS::u32>(
@@ -8849,6 +8929,10 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageSceneStartGateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForceWifiCommunicatingIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForceNetLocalAidIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageSceneContinueGateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceMvlPlayerReadyIfNeeded(instanceID, inputFrame, nds);
@@ -9256,6 +9340,10 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         ForcePlayerInventoryPowerupsIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerStarCountersIfNeeded(instanceID, logFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForceWifiCommunicatingIfNeeded(instanceID, logFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForceNetLocalAidIfNeeded(instanceID, logFrame, nds);
 
     SaveState(instanceID, logFrame, nds);
     SaveLocalMPState(logFrame);
