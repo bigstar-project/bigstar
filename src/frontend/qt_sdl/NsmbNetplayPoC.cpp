@@ -1106,6 +1106,12 @@ struct State
     melonDS::u32 ForceWifiCommunicatingStartFrame = 0;
     melonDS::u32 ForceWifiCommunicatingEndFrame = 0;
     bool ForceWifiCommunicatingLogged[16] {};
+    bool ScriptRemotePacketEnabled = false;
+    int ScriptRemotePacketPlayer = -1;
+    int ScriptRemotePacketInputInstance = -1;
+    melonDS::u32 ScriptRemotePacketStartFrame = 0;
+    melonDS::u32 ScriptRemotePacketEndFrame = 0;
+    bool ScriptRemotePacketLogged[16] {};
     melonDS::u32 ForceStageSceneStartGateStartFrame = 0;
     melonDS::u32 ForceStageSceneStartGateEndFrame = 0;
     melonDS::u32 ForceStageSceneStartGateValue = 1;
@@ -5687,6 +5693,57 @@ void ForceWifiCommunicatingIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
     }
 }
 
+void PushScriptRemotePacketIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ScriptRemotePacketEnabled || !nds || !nds->MainRAM)
+        return;
+    if (G.ScriptRemotePacketPlayer < 0 || G.ScriptRemotePacketPlayer > 1)
+        return;
+    if (G.ScriptRemotePacketInputInstance < 0 || G.ScriptRemotePacketInputInstance >= 16)
+        return;
+    if (frame < G.ScriptRemotePacketStartFrame)
+        return;
+    if (G.ScriptRemotePacketEndFrame != 0 && frame > G.ScriptRemotePacketEndFrame)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+
+    const InputState input = ApplyInputScript(G.ScriptRemotePacketInputInstance, frame, NeutralInput());
+    melonDS::u8 packet[52] {};
+    const melonDS::u32 tick = nds->ARM9Read16(kNetPacketTickAddr);
+    const melonDS::u32 keys = input.KeyMask & 0x0FFF;
+    packet[0] = static_cast<melonDS::u8>(tick & 0xFF);
+    packet[1] = static_cast<melonDS::u8>((tick >> 8) & 0xFF);
+    packet[2] = static_cast<melonDS::u8>(keys & 0xFF);
+    packet[3] = static_cast<melonDS::u8>((keys >> 8) & 0xFF);
+    packet[4] = nds->ARM9Read8(kNetPacketActionAddr);
+    packet[5] = nds->ARM9Read8(kNetPacketByte5Addr);
+    packet[6] = nds->ARM9Read8(kNetPacketByte6Addr);
+    packet[7] = nds->ARM9Read8(kNetPacketByte7Addr);
+    for (melonDS::u32 i = 0; i < 44; i++)
+        packet[8 + i] = nds->ARM9Read8(0x020888E8 + i);
+    packet[0x29] = nds->ARM9Read8(0x02088A4C);
+
+    melonDS::NSML_PushMarioVsLuigiRemotePacket(
+        nds,
+        static_cast<melonDS::u32>(G.ScriptRemotePacketPlayer),
+        packet);
+
+    if (!G.ScriptRemotePacketLogged[instanceID])
+    {
+        std::printf("NSMB Test: script remote packet inst=%d frame=%u range=%u-%u player=%d inputInstance=%d tick=0x%04X keys=0x%04X\n",
+            instanceID,
+            frame,
+            G.ScriptRemotePacketStartFrame,
+            G.ScriptRemotePacketEndFrame,
+            G.ScriptRemotePacketPlayer,
+            G.ScriptRemotePacketInputInstance,
+            tick,
+            keys);
+        G.ScriptRemotePacketLogged[instanceID] = true;
+    }
+}
+
 void ForceStageSceneContinueGateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.ForceStageSceneContinueGateEnabled || !nds || !nds->MainRAM)
@@ -8477,6 +8534,13 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_FORCE_WIFI_COMMUNICATING_START_FRAME", 0)));
     G.ForceWifiCommunicatingEndFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_WIFI_COMMUNICATING_END_FRAME", 0)));
+    G.ScriptRemotePacketEnabled = EnvFlag("MELONDS_NSML_SCRIPT_REMOTE_PACKET");
+    G.ScriptRemotePacketPlayer = EnvInt("MELONDS_NSML_SCRIPT_REMOTE_PACKET_PLAYER", -1);
+    G.ScriptRemotePacketInputInstance = EnvInt("MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_INSTANCE", -1);
+    G.ScriptRemotePacketStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_SCRIPT_REMOTE_PACKET_START_FRAME", 0)));
+    G.ScriptRemotePacketEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_SCRIPT_REMOTE_PACKET_END_FRAME", 0)));
     G.ForceStageSceneStartGateStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_START_FRAME", 0)));
     G.ForceStageSceneStartGateEndFrame = static_cast<melonDS::u32>(
@@ -8933,6 +8997,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceNetLocalAidIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        PushScriptRemotePacketIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageSceneContinueGateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceMvlPlayerReadyIfNeeded(instanceID, inputFrame, nds);
@@ -9344,6 +9410,8 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         ForceWifiCommunicatingIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceNetLocalAidIfNeeded(instanceID, logFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        PushScriptRemotePacketIfNeeded(instanceID, logFrame, nds);
 
     SaveState(instanceID, logFrame, nds);
     SaveLocalMPState(logFrame);

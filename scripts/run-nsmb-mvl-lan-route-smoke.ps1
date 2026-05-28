@@ -296,6 +296,12 @@ param(
     [int]$ForceWifiCommunicatingCount = -1,
     [int]$ForceWifiCommunicatingStartFrame = 0,
     [int]$ForceWifiCommunicatingEndFrame = 0,
+    [switch]$PacketBridgeArmOnly,
+    [switch]$ScriptRemotePacket,
+    [int]$ScriptRemotePacketPlayer = -1,
+    [int]$ScriptRemotePacketInputInstance = -1,
+    [int]$ScriptRemotePacketStartFrame = 0,
+    [int]$ScriptRemotePacketEndFrame = 0,
     [int]$ForceStageSceneStartGateStartFrame = 0,
     [int]$ForceStageSceneStartGateEndFrame = 0,
     [string]$ForceStageSceneStartGateValue = "1",
@@ -1375,6 +1381,26 @@ function Start-MelonLANProcess {
             Remove-Item Env:\MELONDS_NSML_FORCE_WIFI_COMMUNICATING_START_FRAME -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_FORCE_WIFI_COMMUNICATING_END_FRAME -ErrorAction SilentlyContinue
         }
+        if ($PacketBridgeArmOnly) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_ARM_ONLY = "1"
+            if ($PacketBridgeTrace) {
+                $env:MELONDS_NSML_PACKET_BRIDGE_TRACE = "1"
+                $env:MELONDS_NSML_PACKET_REPLAY_LOG = "$Stdout.packet-replay.csv"
+            }
+        } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ARM_ONLY -ErrorAction SilentlyContinue }
+        if ($ScriptRemotePacket) {
+            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET = "1"
+            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_PLAYER = "$ScriptRemotePacketPlayer"
+            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_INSTANCE = "$ScriptRemotePacketInputInstance"
+            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_START_FRAME = "$ScriptRemotePacketStartFrame"
+            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_END_FRAME = "$ScriptRemotePacketEndFrame"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_PLAYER -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_INSTANCE -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_START_FRAME -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_END_FRAME -ErrorAction SilentlyContinue
+        }
         $env:MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_START_FRAME = "$ForceStageSceneStartGateStartFrame"
         $env:MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_END_FRAME = "$ForceStageSceneStartGateEndFrame"
         $env:MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_VALUE = "$ForceStageSceneStartGateValue"
@@ -1401,6 +1427,26 @@ function Start-MelonLANProcess {
             Remove-Item Env:\MELONDS_NSML_FORCE_WIFI_COMMUNICATING_COUNT -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_FORCE_WIFI_COMMUNICATING_START_FRAME -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_FORCE_WIFI_COMMUNICATING_END_FRAME -ErrorAction SilentlyContinue
+        }
+        if ($PacketBridgeArmOnly) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_ARM_ONLY = "1"
+            if ($PacketBridgeTrace) {
+                $env:MELONDS_NSML_PACKET_BRIDGE_TRACE = "1"
+                $env:MELONDS_NSML_PACKET_REPLAY_LOG = "$Stdout.packet-replay.csv"
+            }
+        } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ARM_ONLY -ErrorAction SilentlyContinue }
+        if ($ScriptRemotePacket) {
+            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET = "1"
+            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_PLAYER = "$ScriptRemotePacketPlayer"
+            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_INSTANCE = "$ScriptRemotePacketInputInstance"
+            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_START_FRAME = "$ScriptRemotePacketStartFrame"
+            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_END_FRAME = "$ScriptRemotePacketEndFrame"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_PLAYER -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_INSTANCE -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_START_FRAME -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_END_FRAME -ErrorAction SilentlyContinue
         }
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_END_FRAME -ErrorAction SilentlyContinue

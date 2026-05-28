@@ -44,6 +44,8 @@ JIT強制許可 `MELONDS_NSML_ALLOW_JIT` を追加し、trace検証速度は約4
 
 runtime hookで `ForceWifiCommunicatingCount=2` と `ForceNetLocalAid=1` をframe 840以降に適用したところ、client local1 は2600frameまで約49fpsで完走し、trace上で `inputConsole1Held` が `inputPlayer1Held` へ流れ、player1 actorが移動した。host local0側は同条件で `Net::localAid=0` のまま `inputPlayer0Held` が立つ。入力前frame 1980では host/client とも `playerActor0X=0x8000`, `playerActor1X=0x58000` で一致しており、local1自然操作ルートの前提はかなり改善した。
 
+さらにARM-only packet hookと `ScriptRemotePacket` 診断を追加し、JIT無効ではhost local0内でplayer0 local入力とplayer1 remote packet入力を同時に入れられることを確認した。client local1側でもremote player0 packetとlocal player1入力が入る。ただし、現時点ではlocal入力経路とremote packet経路のkey表現が完全には揃っておらず、host/clientの座標はまだ一致しない。次はこのkey/tick変換を詰める。
+
 注意点:
 
 - `wifi-communicating-consoles --count 2` をROMに常時patchすると、VSConnect起動直後の初期化でnull参照/data abortを起こす場合がある。
@@ -82,21 +84,25 @@ runtime hookで `ForceWifiCommunicatingCount=2` と `ForceNetLocalAid=1` をfram
   - `MELONDS_NSML_ALLOW_JIT`
   - `MELONDS_NSML_FORCE_NET_LOCAL_AID`
   - `MELONDS_NSML_FORCE_WIFI_COMMUNICATING_COUNT`
+  - `MELONDS_NSML_PACKET_BRIDGE_ARM_ONLY`
+  - `MELONDS_NSML_SCRIPT_REMOTE_PACKET`
 
 未解決:
 
 - raw `client localPlayerID=1` の正常開始状態がまだ作れていない。
 - `wificount2` はStageLayout後には有効だが、VSConnect初期化中に常時2を返すと壊れる。適用タイミングを限定する必要がある。
 - `Net::localAid=1` のruntime適用でclient local1の入力はplayer1へ流せた。ただし、最終的にはWAN adapter側でremote inputも双方へ入れる必要がある。
+- ARM-only packet hookはJIT無効で効く。JIT有効時には現状hitしていない可能性があり、最終的に高速検証するにはJIT側hook対応か、packet hook対象をROM patchへ移す必要がある。
+- local input経路とremote packet経路でkey表現がまだ完全一致していない。host/client双方に同じ2人分入力を入れても座標が一致しないため、ここが次の本筋。
 - RNG状態は診断用定数化では一致するが、最終的にはhost/clientで同じ乱数列になるROM patchまたはseed同期が必要。
 - runtime `DirectMvlBoot` / firstScene直行はまだ安定入口になっていない。
 
 ## 次にやること
 
-1. host local0 / client local1 の2つの単体simulationに、WAN adapter経由で互いのremote inputも入れる。host側ではplayer1入力、client側ではplayer0入力をremote packetとして注入する。
-2. 同一入力列を入れた状態で、host/clientのplayer0/player1座標、Goomba、スター、object countが2600frame以降も一致するか確認する。
-3. runtime診断で成立した `wifi communicating count` と `netLocalAid` を、起動前VSConnectを壊さない条件付きROM patchへ落とし込む。
-4. runtime `DirectMvlBoot` / firstScene直行のdata abort原因を切り分け、安定入口として使えるか判断する。だめなら既存の安定開始ルートからStageLayout以後のpatchに限定する。
+1. `ScriptRemotePacket` のkey/tick変換を修正し、local入力経路とremote packet経路で同じ操作結果になるようにする。
+2. JIT無効の短縮input scriptで、host local0 / client local1 のplayer0/player1座標が一致するか確認する。
+3. ARM-only packet hookをJIT有効でも使えるようにするか、同等のpacket API差し替えをROM patchへ移す。
+4. runtime診断で成立した `wifi communicating count` と `netLocalAid` を、起動前VSConnectを壊さない条件付きROM patchへ落とし込む。
 5. RNGを定数化ではなくhost/clientで同じ列になる形へ寄せる。初期スターの後、8コインアイテムやランダムステージ選択も確認する。
 6. Luigi camera/UI/stock item/death/win判定が local1 の自然処理で動くか検証する。
 

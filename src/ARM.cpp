@@ -80,7 +80,8 @@ static bool NSMLPacketBridgeEnabled()
 {
     static int enabled = -1;
     if (enabled < 0)
-        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE") ? 1 : 0;
+        enabled = (NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE")
+            || NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_ARM_ONLY")) ? 1 : 0;
     return enabled != 0;
 }
 
