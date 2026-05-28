@@ -67,6 +67,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 - `logs/codex-split-local-input-script-2600-20260529`: JIT無効、hostのMario入力とclientのLuigi入力を別々に流し、2600フレームまで主要gameplay CSV比較通過。
 - `logs/codex-split-local-input-script-jit-nodelay-2600-20260529`: JIT有効、人工遅延なし、別ローカル入力同期通過。host約43.7fps、client約44.8fps。
+- `logs/codex-split-local-input-script-jit-nodelay-6000-20260529`: JIT有効、人工遅延なし、別ローカル入力後に6000フレームまで主要gameplay CSV比較通過。
 - `logs/codex-split-local-input-script-jit-delay8-jitter4-2600-20260529`: JIT有効、入力遅延16 + 送信遅延8 + jitter最大4、別ローカル入力同期通過。
 - `logs/codex-split-local-result-framelead2-jit-endfix-6000-20260529`: JIT有効、frame lead 2、人工遅延/jitter付き、6000フレーム結果画面到達とhost/client勝敗画像probe通過。
 - `logs/codex-manual-launcher-params-smoke-1200-20260529`: 手動launcher短時間起動確認。JIT有効でhost約54fps、client約57fps。
@@ -79,7 +80,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 ## 未解決・注意点
 
-- 6000フレーム結果画面到達までは検証済みだが、実プレイとして十分な長時間安定性は未確認。
+- 6000フレーム結果画面到達と、別ローカル入力後6000フレーム維持までは検証済み。実プレイとして十分な長時間安定性はまだ未確認。
 - `Game::vsMode != 0` 条件付きstage-lock skipは全no-opより副作用が小さいが、タイムアップ、土管/ドア、8コインアイテムなど他transitionで問題がないかは未確認。
 - リスポーン描画は短時間の目視とvisible flag検証では自然に見えるが、長時間プレイや別死亡条件での回帰は未確認。
 - 現在の入力スクリプトは短い診断用で、8コインアイテム、ランダムステージ、死亡/復帰後の長時間継続まではまだ十分に検証していない。
