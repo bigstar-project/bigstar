@@ -125,6 +125,9 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `logs/codex-both-stable-wificount2-netaid-resultscene-probe-6000-20260529` で、6000フレーム結果画面到達、host/client gameplay sync、`localPlayerID`、`Net::localAid`、結果画面画像probeがすべて通過。
 - `logs/codex-both-stable-wificount2-netaid-resultscene-probe-jitter-6000-20260529` で、入力遅延16フレーム + 送信遅延8フレーム + jitter最大4フレームでも、6000フレーム結果画面到達、host/client gameplay sync、勝敗画像probeが通過。
 - smoke scriptに `-NoAudioSync` / `-NoDrawScreen` を追加し、テスト専用にaudio syncとUI描画を切れるようにした。単体プロセスでは約54fpsで、同一PC上のhost/client 2プロセス同時実行では約48fps。現時点ではaudio/drawだけでなく、同一PCで2つのmelonDSを回すCPU負荷が大きい。
+- `RunRole both` ではなく、host用スモークとclient用スモークを別PowerShellプロセスとして起動するlocalhost split検証でも、6000フレーム結果画面到達とhost/client勝敗画像probeが通過。
+  - host: `logs/codex-split-host-stable-netaid-result-6000-20260529`
+  - client: `logs/codex-split-client-stable-netaid-result-6000-20260529`
 
 ## 未解決・注意点
 
@@ -133,7 +136,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - リスポーン描画は短時間の目視とvisible flag検証では自然に見えるが、長時間プレイや別死亡条件での回帰は未確認。
 - 現在の入力スクリプトは短い診断用で、8コインアイテム、ランダムステージ、死亡/復帰後の長時間継続まではまだ十分に検証していない。
 - 詳細traceや結果画面スクリーンショット付きでは約39-44fps、traceなしの実用寄り設定では単体約54fps、同一PC 2プロセスでは約45-53fps。完全な60fpsには届いていないが、10fps台は主に重い診断設定由来。
-- WANの遅延・ジッタを模した検証は一部通過。packet lossや実2PC分散は未実施。現状は同一PC上のhost/client 2プロセス検証。
+- WANの遅延・ジッタを模した検証とlocalhostでのhost/client分割起動は通過。packet lossや実2PC分散は未実施。
 
 ## 次にやること
 
@@ -148,7 +151,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
    - 勝敗判定は結果画面到達とhost/clientのwin/lose表示までsmoke scriptで自動確認済み。次は遅延/jitter条件や長時間検証でも同じチェックを通す。
 4. 8コインアイテム、2個目以降のBig Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
 5. 残るruntime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
-6. 同一LANまたは擬似遅延付きの2プロセス検証へ進む。
+6. 実2PCまたは同一LANで、host/clientを別マシン相当の起動コマンドに分けて検証する。
 
 ## 代表テストコマンド
 
