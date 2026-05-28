@@ -478,6 +478,7 @@ param(
     [int]$CheckVsPipeRespawnVisibilityEndFrame = 0,
     [switch]$RequireStarPickup,
     [int]$RequireStarPickupPlayer = -1,
+    [switch]$RequireResultScene,
     [int]$RequireHostLocalPlayerID = -1,
     [int]$RequireClientLocalPlayerID = -1,
     [switch]$SkipArmAbortCheck,
@@ -3438,6 +3439,25 @@ if ($RequireStarPickup) {
 
         if ($pickupRows.Count -eq 0) {
             throw "star pickup check failed for $($item.Role): player=$RequireStarPickupPlayer. See $($item.Path)"
+        }
+    }
+}
+
+if ($RequireResultScene) {
+    foreach ($item in @($roleInfos | ForEach-Object { @{ Path = $_.GameState; Role = $_.Role } })) {
+        if (-not (Test-Path $item.Path)) {
+            throw "result scene check requires game-state trace for $($item.Role): $($item.Path)"
+        }
+
+        $rows = @(Import-Csv $item.Path)
+        if ($rows.Count -eq 0) {
+            throw "result scene check received empty trace for $($item.Role): $($item.Path)"
+        }
+
+        $resultRows = @($rows | Where-Object { $_.sceneCurrentSceneID -eq "0xa" })
+        if ($resultRows.Count -eq 0) {
+            $last = $rows[$rows.Count - 1]
+            throw "result scene check failed for $($item.Role): no sceneCurrentSceneID=0xa; last frame=$($last.frame) scene=$($last.sceneCurrentSceneID)->$($last.sceneNextSceneID). See $($item.Path)"
         }
     }
 }

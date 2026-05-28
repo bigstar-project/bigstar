@@ -118,6 +118,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - 現行stable ROMで4800フレームのhost/client gameplay syncが通過。`ForceWifiCommunicatingCount` runtime hookなしで、主要game-stateの一致を確認。
 - 入力遅延16フレーム + 人工送信遅延8フレーム + jitter最大4フレームでも3600フレーム同期チェックが通過。
 - Luigiが固定RNGのBig Starを取得する入力スクリプト `tests/nsmb_us_direct_mvl_luigi_star_right.inputs` を追加。`-RequireStarPickup -RequireStarPickupPlayer 1` で、通常条件と遅延/jitter条件の両方でスター取得を自動確認。
+- `-RequireResultScene` を追加し、勝敗画面 `sceneCurrentSceneID=0xa` への到達を自動確認できるようにした。現行stable ROMで6000フレームの結果画面到達チェックが通過。
 
 ## 未解決・注意点
 
@@ -138,7 +139,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 3. Luigi側操作の検証を増やす。
    - カメラ追従
    - 死亡/復帰
-   - 勝敗判定
+   - 勝敗判定は結果画面到達まで確認済み。次は星数や勝者表示まで自動検証する。
 4. 8コインアイテム、2個目以降のBig Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
 5. 残るruntime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
 6. 同一LANまたは擬似遅延付きの2プロセス検証へ進む。
