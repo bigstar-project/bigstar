@@ -469,6 +469,10 @@ param(
     [switch]$CheckNoPlayerUpdateLock,
     [int]$CheckNoPlayerUpdateLockStartFrame = 0,
     [int]$CheckNoPlayerUpdateLockEndFrame = 0,
+    [switch]$CheckMovingHazardProgressDuringDeath,
+    [int]$CheckMovingHazardProgressStartFrame = 0,
+    [int]$CheckMovingHazardProgressEndFrame = 0,
+    [int]$CheckMovingHazardProgressMinUniqueX = 3,
     [switch]$SkipArmAbortCheck,
     [switch]$RequireClientRemotePlayer0Movement,
     [string]$LogDir = "logs\nsmb-mvl-lan-route"
@@ -3311,6 +3315,38 @@ if ($CheckNoPlayerUpdateLock) {
         if ($badRows.Count -gt 0) {
             $first = $badRows[0]
             throw "player update-lock check failed for $($item.Role): frame=$($first.frame) p0=$($first.playerActor0UpdateLocked) p1=$($first.playerActor1UpdateLocked). See $($item.Path)"
+        }
+    }
+}
+
+if ($CheckMovingHazardProgressDuringDeath) {
+    foreach ($item in @($roleInfos | ForEach-Object { @{ Path = $_.GameState; Role = $_.Role } })) {
+        if (-not (Test-Path $item.Path)) {
+            throw "moving hazard progress check requires game-state trace for $($item.Role): $($item.Path)"
+        }
+
+        $rows = @(Import-Csv $item.Path)
+        if ($rows.Count -eq 0) {
+            throw "moving hazard progress check received empty trace for $($item.Role): $($item.Path)"
+        }
+
+        $deathRows = @($rows | Where-Object {
+            $frame = [int]$_.frame
+            $inRange = $frame -ge $CheckMovingHazardProgressStartFrame -and
+                ($CheckMovingHazardProgressEndFrame -le 0 -or $frame -le $CheckMovingHazardProgressEndFrame)
+            $inRange -and
+                $_.movingHazardFound -eq "0x1" -and
+                ($_.player0Dead -ne "0x0" -or $_.player1Dead -ne "0x0")
+        })
+        if ($deathRows.Count -eq 0) {
+            throw "moving hazard progress check found no death rows for $($item.Role). See $($item.Path)"
+        }
+
+        $uniqueX = @($deathRows | Select-Object -ExpandProperty movingHazardX -Unique)
+        if ($uniqueX.Count -lt $CheckMovingHazardProgressMinUniqueX) {
+            $first = $deathRows[0]
+            $last = $deathRows[$deathRows.Count - 1]
+            throw "moving hazard progress check failed for $($item.Role): uniqueX=$($uniqueX.Count) min=$CheckMovingHazardProgressMinUniqueX firstFrame=$($first.frame) firstX=$($first.movingHazardX) lastFrame=$($last.frame) lastX=$($last.movingHazardX). See $($item.Path)"
         }
     }
 }

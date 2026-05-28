@@ -25,7 +25,8 @@ $hostDirectRom = [System.IO.Path]::ChangeExtension($HostRom, ".direct.tmp.nds")
     --call-load-mvsl-files-after `
     --camera-player1-out-of-view-slot0 `
     --camera-focus-loop-count 2 `
-    --player-signal-locked-noop
+    --player-signal-locked-noop `
+    --player-freeze-stage-noop
 
 & python tools\nsmb_us_rom_patch.py `
     --rom $hostDirectRom `

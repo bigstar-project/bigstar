@@ -1048,6 +1048,18 @@ def patch_player_signal_locked_noop(overlays: dict[int, object]) -> list[str]:
     ]
 
 
+def patch_player_freeze_stage_noop(overlays: dict[int, object]) -> list[str]:
+    # Diagnostic MvL patch: PlayerBase::freezeStage() is called from Luigi's
+    # damage/death path and pauses non-player stage actors while the transition
+    # runs. Returning early lets us verify whether that is the remaining enemy
+    # freeze after signalLocked() has been disabled.
+    addr = 0x0212C130
+    overlay_id, old = patch_overlay_words(overlays, addr, [BX_LR])
+    return [
+        f"PlayerBase::freezeStage no-op overlay{overlay_id} @ 0x{addr:08X}: {old.hex()} -> {struct.pack('<I', BX_LR).hex()}",
+    ]
+
+
 def patch_stage_layout_final_view_player_id(
     overlays: dict[int, object],
     player_id: int,
@@ -1254,6 +1266,7 @@ def patch_direct_mvl_entry(
     stage_layout_inventory_display_mode: str,
     vs_results_display_player_id: int | None,
     player_signal_locked_noop: bool,
+    player_freeze_stage_noop: bool,
 ) -> list[str]:
     arm9 = rom.loadArm9()
     overlays = rom.loadArm9Overlays()
@@ -1372,6 +1385,8 @@ def patch_direct_mvl_entry(
         changes.extend(patch_vs_results_display_player_id(overlays, vs_results_display_player_id))
     if player_signal_locked_noop:
         changes.extend(patch_player_signal_locked_noop(overlays))
+    if player_freeze_stage_noop:
+        changes.extend(patch_player_freeze_stage_noop(overlays))
 
     rom.arm9 = arm9.save(compress=True)
     save_overlays(rom, overlays)
@@ -1580,6 +1595,7 @@ def main() -> int:
     p_player_r12 = sub.add_parser("player-render-r12-offset")
     p_player_r12.add_argument("--offset", type=lambda x: int(x, 0), default=-0x400000)
     sub.add_parser("player-signal-locked-noop")
+    sub.add_parser("player-freeze-stage-noop")
     p_stage_layout_final_view = sub.add_parser("stage-layout-final-view-player-id")
     p_stage_layout_final_view.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_stage_layout_final_view.add_argument("--which", choices=("prepare", "render", "both"), default="both")
@@ -1618,6 +1634,7 @@ def main() -> int:
     p_direct.add_argument("--stage-layout-inventory-display-mode", choices=("hud", "all-read"), default="hud")
     p_direct.add_argument("--vs-results-display-player-id", type=lambda x: int(x, 0), default=None)
     p_direct.add_argument("--player-signal-locked-noop", action="store_true")
+    p_direct.add_argument("--player-freeze-stage-noop", action="store_true")
     p_fake = sub.add_parser("fake-opponent")
     p_fake.add_argument("--force-confirm-load", action="store_true")
     p_fake.add_argument("--force-loadgame-progress", action="store_true")
@@ -1730,6 +1747,10 @@ def main() -> int:
         overlays = rom.loadArm9Overlays()
         changes = patch_player_signal_locked_noop(overlays)
         save_overlays(rom, overlays)
+    elif args.cmd == "player-freeze-stage-noop":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_player_freeze_stage_noop(overlays)
+        save_overlays(rom, overlays)
     elif args.cmd == "stage-layout-final-view-player-id":
         overlays = rom.loadArm9Overlays()
         changes = patch_stage_layout_final_view_player_id(overlays, args.player_id, args.which)
@@ -1776,6 +1797,7 @@ def main() -> int:
             stage_layout_inventory_display_mode=args.stage_layout_inventory_display_mode,
             vs_results_display_player_id=args.vs_results_display_player_id,
             player_signal_locked_noop=args.player_signal_locked_noop,
+            player_freeze_stage_noop=args.player_freeze_stage_noop,
         )
     elif args.cmd == "fake-opponent":
         changes = patch_fake_opponent(

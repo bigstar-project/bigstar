@@ -23,7 +23,8 @@ if (!(Test-Path $SourceRom)) {
     --call-load-mvsl-files-after `
     --camera-player1-out-of-view-slot0 `
     --camera-focus-loop-count 2 `
-    --player-signal-locked-noop
+    --player-signal-locked-noop `
+    --player-freeze-stage-noop
 
 & .\scripts\generate-nsmb-mvl-client-ui-rom.ps1 `
     -BaseRom $HostRom `
