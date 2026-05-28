@@ -40,6 +40,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `-InputSendDelayFrames` / `-InputSendJitterFrames` を追加し、`WireInput` の人工配送遅延・jitterを検証できるようにした。
 - 入力netplay専用モードでは自動match seedによる `Net::random.value` 書き換えを止め、ROM側の固定RNGを使うようにした。
 - `-CheckHostClientGameplaySync` を追加し、host/clientの重要game-state差分を自動検出できるようにした。
+- `PlayerBase::signalLocked()` をno-op化するUS ROM patchを追加し、Luigi死亡時に相手PlayerBaseの `updateLocked` が立って進行が止まる経路を診断できるようにした。
 
 ## 直近の検証結果
 
@@ -56,6 +57,9 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `logs/codex-both-inputnetplay-touch-helper-stock-strong-synccheck2-2600-20260528`
 - `logs/codex-both-inputnetplay-touch-helper-regression-2400-20260528`
 - `logs/codex-both-inputnetplay-stock-touch-screenshotcheck-3600-20260528`
+- `logs/codex-both-luigi-death-updatelock-writetrace-1700-20260528`
+- `logs/codex-both-inputnetplay-luigi-death-siglocknoop-3600-20260528`
+- `logs/codex-both-inputnetplay-luigi-death-siglocknoop-synccheck-2400-20260528`
 
 結果:
 
@@ -72,20 +76,23 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - ストック使用スクリプトで3600フレーム検証も通過。3000フレーム以降のスクリーンショット切断/blank検出も有効にした状態で問題なし。
 - screenshot上、hostはMario視点、clientはLuigi視点になっている。上画面カメラ差はlocalPlayerID差として想定内。
 - ストック表示はhostがplayer0、clientがplayer1を表示しており、CSV上も `player0InventoryPowerup=0x0`、`player1InventoryPowerup=0x1` でhost/client一致。Luigi側UIとして自然に動いている可能性が高い。
+- Luigi死亡時の停止原因をwrite traceで確認。`PlayerBase::signalLocked()` が相手PlayerBaseの `updateLocked` を1にし、`signalUnlocked()` が後で戻していた。
+- `PlayerBase::signalLocked()` no-op ROMでは、Luigi死亡時に `playerActor0UpdateLocked` / `playerActor1UpdateLocked` が立たず、2400フレームのhost/client gameplay sync checkも通過。
 
 ## 未解決・注意点
 
 - 2400フレームまでの短時間検証であり、実プレイとして十分な長時間安定性は未確認。
 - `ForceWifiCommunicatingCount=2` などruntime hookにまだ依存している。最終的にはROM patch側へ寄せたい。
+- `signalLocked()` no-opは診断として有効だが、pipe/door/勝敗/他のtransitionにも副作用がないかは未確認。
 - 現在の入力スクリプトは短い診断用で、スター取得、8コインアイテム、ランダムステージ、死亡/復帰後の長時間継続まではまだ十分に検証していない。
 - 50fps前後で、完全な60fpsには届いていない。traceやスクリーンショットを減らした実用設定で再測定する必要がある。
 - WANの遅延・ジッタ・packet lossを模した検証は未実施。現状は同一PC上のhost/client 2プロセス検証。
 
 ## 次にやること
 
-1. 最優先: Luigi死亡時にゲーム進行が止まる問題を直す。
-   - 本来のMario vs Luigiでは片方が死亡していてもステージや相手プレイヤーは動き続ける。
-   - 現状はLuigi死亡後に敵・ブロック・ゲーム進行が停止することがあるため、`stageActorFreezeFlag`、player defeated/dead/transition状態、死亡演出中のfreeze制御を特定して自然に進行させる。
+1. 最優先: `PlayerBase::signalLocked()` no-opを死亡時停止対策として使えるか長めに検証する。
+   - 片方死亡中に相手プレイヤー・敵・ブロック・ステージ進行が止まらないことを確認する。
+   - pipe/door/復帰/勝敗など、`signalLocked()` が本来必要なtransitionに副作用がないか確認する。
 2. さらにtraceを減らした実用寄り設定、または2PC分散でFPSが60fpsに近づくか確認する。
 3. Luigi側操作の検証を増やす。
    - カメラ追従

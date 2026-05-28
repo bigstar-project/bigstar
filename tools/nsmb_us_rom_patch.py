@@ -1037,6 +1037,17 @@ def patch_player_render_r12_offset(overlays: dict[int, object], offset: int) -> 
     ]
 
 
+def patch_player_signal_locked_noop(overlays: dict[int, object]) -> list[str]:
+    # Diagnostic MvL patch: PlayerBase::signalLocked() locks the other player
+    # through PlayerBase::updateLocked during death transitions. Returning early
+    # lets us verify whether this is the source of the unwanted gameplay pause.
+    addr = 0x0212C1B8
+    overlay_id, old = patch_overlay_words(overlays, addr, [BX_LR])
+    return [
+        f"PlayerBase::signalLocked no-op overlay{overlay_id} @ 0x{addr:08X}: {old.hex()} -> {struct.pack('<I', BX_LR).hex()}",
+    ]
+
+
 def patch_stage_layout_final_view_player_id(
     overlays: dict[int, object],
     player_id: int,
@@ -1565,6 +1576,7 @@ def main() -> int:
     p_player_wrap.add_argument("--offset", type=lambda x: int(x, 0), default=0x400000)
     p_player_r12 = sub.add_parser("player-render-r12-offset")
     p_player_r12.add_argument("--offset", type=lambda x: int(x, 0), default=-0x400000)
+    sub.add_parser("player-signal-locked-noop")
     p_stage_layout_final_view = sub.add_parser("stage-layout-final-view-player-id")
     p_stage_layout_final_view.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_stage_layout_final_view.add_argument("--which", choices=("prepare", "render", "both"), default="both")
@@ -1709,6 +1721,10 @@ def main() -> int:
     elif args.cmd == "player-render-r12-offset":
         overlays = rom.loadArm9Overlays()
         changes = patch_player_render_r12_offset(overlays, args.offset)
+        save_overlays(rom, overlays)
+    elif args.cmd == "player-signal-locked-noop":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_player_signal_locked_noop(overlays)
         save_overlays(rom, overlays)
     elif args.cmd == "stage-layout-final-view-player-id":
         overlays = rom.loadArm9Overlays()

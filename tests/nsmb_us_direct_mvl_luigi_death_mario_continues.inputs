@@ -1,0 +1,20 @@
+# Direct MvL death/freeze probe.
+# Luigi uses the stock item path that currently reaches a death transition,
+# while Mario keeps moving afterward so we can detect whether gameplay continues.
+
+inst0 0-619 NONE
+inst0 620-627 DOWN
+inst0 628-659 NONE
+inst0 660-667 A
+inst0 668-899 NONE
+inst0 900-1399 RIGHT+B
+inst0 1400-3600 RIGHT
+
+inst1 0-619 NONE
+inst1 620-627 DOWN
+inst1 628-659 NONE
+inst1 660-667 A
+inst1 668-899 NONE
+inst1 900-1799 NONE
+inst1 1800-1880 NONE 217,165
+inst1 1881-3600 NONE
