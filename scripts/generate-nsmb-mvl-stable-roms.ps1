@@ -22,7 +22,8 @@ if (!(Test-Path $SourceRom)) {
     --force-scene-settings 0xb4ff00 `
     --call-load-mvsl-files-after `
     --camera-player1-out-of-view-slot0 `
-    --camera-focus-loop-count 2
+    --camera-focus-loop-count 2 `
+    --player-signal-locked-noop
 
 & .\scripts\generate-nsmb-mvl-client-ui-rom.ps1 `
     -BaseRom $HostRom `

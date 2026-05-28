@@ -1253,6 +1253,7 @@ def patch_direct_mvl_entry(
     stage_layout_inventory_display_player_id: int | None,
     stage_layout_inventory_display_mode: str,
     vs_results_display_player_id: int | None,
+    player_signal_locked_noop: bool,
 ) -> list[str]:
     arm9 = rom.loadArm9()
     overlays = rom.loadArm9Overlays()
@@ -1369,6 +1370,8 @@ def patch_direct_mvl_entry(
         ))
     if vs_results_display_player_id is not None:
         changes.extend(patch_vs_results_display_player_id(overlays, vs_results_display_player_id))
+    if player_signal_locked_noop:
+        changes.extend(patch_player_signal_locked_noop(overlays))
 
     rom.arm9 = arm9.save(compress=True)
     save_overlays(rom, overlays)
@@ -1614,6 +1617,7 @@ def main() -> int:
     p_direct.add_argument("--stage-layout-inventory-display-player-id", type=lambda x: int(x, 0), default=None)
     p_direct.add_argument("--stage-layout-inventory-display-mode", choices=("hud", "all-read"), default="hud")
     p_direct.add_argument("--vs-results-display-player-id", type=lambda x: int(x, 0), default=None)
+    p_direct.add_argument("--player-signal-locked-noop", action="store_true")
     p_fake = sub.add_parser("fake-opponent")
     p_fake.add_argument("--force-confirm-load", action="store_true")
     p_fake.add_argument("--force-loadgame-progress", action="store_true")
@@ -1771,6 +1775,7 @@ def main() -> int:
             stage_layout_inventory_display_player_id=args.stage_layout_inventory_display_player_id,
             stage_layout_inventory_display_mode=args.stage_layout_inventory_display_mode,
             vs_results_display_player_id=args.vs_results_display_player_id,
+            player_signal_locked_noop=args.player_signal_locked_noop,
         )
     elif args.cmd == "fake-opponent":
         changes = patch_fake_opponent(

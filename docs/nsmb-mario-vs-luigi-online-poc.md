@@ -41,6 +41,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - 入力netplay専用モードでは自動match seedによる `Net::random.value` 書き換えを止め、ROM側の固定RNGを使うようにした。
 - `-CheckHostClientGameplaySync` を追加し、host/clientの重要game-state差分を自動検出できるようにした。
 - `PlayerBase::signalLocked()` をno-op化するUS ROM patchを追加し、Luigi死亡時に相手PlayerBaseの `updateLocked` が立って進行が止まる経路を診断できるようにした。
+- direct MvL entry ROM生成フローに `--player-signal-locked-noop` を組み込み、stable/local1 bootstrap ROM生成スクリプトからも同patchを入れられるようにした。
 - `-CheckNoPlayerUpdateLock` を追加し、死亡前後などの指定フレーム範囲で `playerActor0UpdateLocked` / `playerActor1UpdateLocked` が立ったら自動失敗にできるようにした。
 
 ## 直近の検証結果
@@ -87,7 +88,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 - 2400フレームまでの短時間検証であり、実プレイとして十分な長時間安定性は未確認。
 - `ForceWifiCommunicatingCount=2` などruntime hookにまだ依存している。最終的にはROM patch側へ寄せたい。
-- `signalLocked()` no-opは診断として有効だが、pipe/door/勝敗/他のtransitionにも副作用がないかは未確認。
+- `signalLocked()` no-opは死亡時停止対策として有効そうだが、pipe/door/勝敗/他のtransitionにも副作用がないかは未確認。
 - 現在の入力スクリプトは短い診断用で、スター取得、8コインアイテム、ランダムステージ、死亡/復帰後の長時間継続まではまだ十分に検証していない。
 - 50fps前後で、完全な60fpsには届いていない。traceやスクリーンショットを減らした実用設定で再測定する必要がある。
 - WANの遅延・ジッタ・packet lossを模した検証は未実施。現状は同一PC上のhost/client 2プロセス検証。
@@ -97,15 +98,14 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 1. 最優先: `PlayerBase::signalLocked()` no-opを死亡時停止対策として使えるか長めに検証する。
    - 片方死亡中に相手プレイヤー・敵・ブロック・ステージ進行が止まらないことを確認する。
    - pipe/door/復帰/勝敗など、`signalLocked()` が本来必要なtransitionに副作用がないか確認する。
-2. no-op ROM生成を手動の派生tmp ROMではなく、通常のdirect MvL ROM生成フローに組み込むか判断する。
-3. さらにtraceを減らした実用寄り設定、または2PC分散でFPSが60fpsに近づくか確認する。
-4. Luigi側操作の検証を増やす。
+2. さらにtraceを減らした実用寄り設定、または2PC分散でFPSが60fpsに近づくか確認する。
+3. Luigi側操作の検証を増やす。
    - カメラ追従
    - 死亡/復帰
    - 勝敗判定
-5. 8コインアイテム、Big Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
-6. runtime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
-7. 同一LANまたは擬似遅延付きの2プロセス検証へ進む。
+4. 8コインアイテム、Big Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
+5. runtime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
+6. 同一LANまたは擬似遅延付きの2プロセス検証へ進む。
 
 ## 代表テストコマンド
 
@@ -117,9 +117,9 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   -Frames 2400 `
   -AllowJit `
   -Exe build\release-windows-x86_64\melonDS.exe `
-  -Rom roms\nsmb-us-direct-mvl-entry-stable-host-wificount2-rng100.tmp.nds `
-  -HostRom roms\nsmb-us-direct-mvl-entry-stable-host-wificount2-rng100.tmp.nds `
-  -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-local1-wificount2-rng100.tmp.nds `
+  -Rom roms\nsmb-us-direct-mvl-entry-stable-host-wificount2-rng100-siglocknoop.tmp.nds `
+  -HostRom roms\nsmb-us-direct-mvl-entry-stable-host-wificount2-rng100-siglocknoop.tmp.nds `
+  -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-local1-wificount2-rng100-siglocknoop.tmp.nds `
   -InputScript tests\nsmb_us_direct_mvl_early_dual.inputs `
   -GameStateTrace `
   -GameStateTraceExtended `
@@ -140,7 +140,10 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   -PacketBridgeJitHelperPatchFrame 900 `
   -PacketBridgeStartFrame 900 `
   -CheckHostClientGameplaySync `
-  -LogDir logs\codex-both-inputnetplay-delay-long-2400-20260528
+  -CheckNoPlayerUpdateLock `
+  -CheckNoPlayerUpdateLockStartFrame 1450 `
+  -CheckNoPlayerUpdateLockEndFrame 1800 `
+  -LogDir logs\codex-both-inputnetplay-siglocknoop-current-2400-20260528
 ```
 
 診断trace付きで入力netplay内部を見る場合は `-InputNetplayTrace` を追加する。
