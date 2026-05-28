@@ -473,6 +473,8 @@ param(
     [int]$CheckMovingHazardProgressStartFrame = 0,
     [int]$CheckMovingHazardProgressEndFrame = 0,
     [int]$CheckMovingHazardProgressMinUniqueX = 3,
+    [int]$RequireHostLocalPlayerID = -1,
+    [int]$RequireClientLocalPlayerID = -1,
     [switch]$SkipArmAbortCheck,
     [switch]$RequireClientRemotePlayer0Movement,
     [string]$LogDir = "logs\nsmb-mvl-lan-route"
@@ -3348,6 +3350,31 @@ if ($CheckMovingHazardProgressDuringDeath) {
             $last = $deathRows[$deathRows.Count - 1]
             throw "moving hazard progress check failed for $($item.Role): uniqueX=$($uniqueX.Count) min=$CheckMovingHazardProgressMinUniqueX firstFrame=$($first.frame) firstX=$($first.movingHazardX) lastFrame=$($last.frame) lastX=$($last.movingHazardX). See $($item.Path)"
         }
+    }
+}
+
+foreach ($item in @(
+    @{ Role = "host"; Path = $hostGameStateTrace; Required = $RequireHostLocalPlayerID },
+    @{ Role = "client"; Path = $clientGameStateTrace; Required = $RequireClientLocalPlayerID }
+)) {
+    if ($item.Required -lt 0) {
+        continue
+    }
+    if (-not (Test-Path $item.Path)) {
+        throw "$($item.Role) localPlayerID check requires game-state trace: $($item.Path)"
+    }
+
+    $rows = @(Import-Csv $item.Path)
+    $stageRows = @($rows | Where-Object { $_.vsMode -ne "0x0" })
+    if ($stageRows.Count -eq 0) {
+        throw "$($item.Role) localPlayerID check found no VS rows. See $($item.Path)"
+    }
+
+    $expected = "0x$('{0:x}' -f $item.Required)"
+    $badRows = @($stageRows | Where-Object { $_.localPlayerID -ne $expected })
+    if ($badRows.Count -gt 0) {
+        $first = $badRows[0]
+        throw "$($item.Role) localPlayerID check failed: expected=$expected frame=$($first.frame) actual=$($first.localPlayerID). See $($item.Path)"
     }
 }
 

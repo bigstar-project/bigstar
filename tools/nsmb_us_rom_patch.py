@@ -1060,6 +1060,45 @@ def patch_player_freeze_stage_noop(overlays: dict[int, object]) -> list[str]:
     ]
 
 
+def patch_player_stage_lock_vsmode_noop(overlays: dict[int, object]) -> list[str]:
+    # Narrower MvL diagnostic patch. Player::beginDeathTransition calls
+    # PlayerBase::freezeStage() and PlayerBase::signalLocked(); that is too
+    # broad for Mario vs Luigi because it pauses the living player and stage
+    # actors during a VS respawn. Keep the original behavior outside VS mode.
+    patches = [
+        (0x0212C130, 0x020C5390, 0xE92D4000, "PlayerBase::freezeStage VS-mode skip"),
+        (0x0212C1B8, 0x020C53B0, 0xE92D4010, "PlayerBase::signalLocked VS-mode skip"),
+    ]
+    changes: list[str] = []
+    for func_addr, stub_addr, original_word, label in patches:
+        stub = [
+            0xE59FC010,  # ldr ip, [pc, #0x10]
+            0xE5DCC000,  # ldrb ip, [ip]
+            0xE35C0000,  # cmp ip, #0
+            0x112FFF1E,  # bxne lr
+            original_word,
+            encode_b(stub_addr + 0x14, func_addr + 0x04),
+            0x02085A84,  # Game::vsMode
+        ]
+        old_stub = patch_overlay_words_by_id(overlays, 0, stub_addr, stub)
+        if any(old_stub):
+            raise ValueError(f"{label} stub cave @ 0x{stub_addr:08X} is not empty")
+        branch = encode_b(func_addr, stub_addr)
+        hook_overlay_id, old_hook = patch_overlay_words(overlays, func_addr, [branch])
+        old_hook_word = struct.unpack("<I", old_hook)[0]
+        if old_hook_word != original_word:
+            raise ValueError(
+                f"{label} hook @ 0x{func_addr:08X} expected 0x{original_word:08X}, got 0x{old_hook_word:08X}"
+            )
+        changes.append(
+            f"{label} stub overlay0 @ 0x{stub_addr:08X}: {old_stub.hex()} -> {words_hex(stub)}"
+        )
+        changes.append(
+            f"{label} hook overlay{hook_overlay_id} @ 0x{func_addr:08X}: {old_hook.hex()} -> {struct.pack('<I', branch).hex()}"
+        )
+    return changes
+
+
 def patch_stage_layout_final_view_player_id(
     overlays: dict[int, object],
     player_id: int,
@@ -1267,6 +1306,7 @@ def patch_direct_mvl_entry(
     vs_results_display_player_id: int | None,
     player_signal_locked_noop: bool,
     player_freeze_stage_noop: bool,
+    player_stage_lock_vsmode_noop: bool,
 ) -> list[str]:
     arm9 = rom.loadArm9()
     overlays = rom.loadArm9Overlays()
@@ -1387,6 +1427,8 @@ def patch_direct_mvl_entry(
         changes.extend(patch_player_signal_locked_noop(overlays))
     if player_freeze_stage_noop:
         changes.extend(patch_player_freeze_stage_noop(overlays))
+    if player_stage_lock_vsmode_noop:
+        changes.extend(patch_player_stage_lock_vsmode_noop(overlays))
 
     rom.arm9 = arm9.save(compress=True)
     save_overlays(rom, overlays)
@@ -1596,6 +1638,7 @@ def main() -> int:
     p_player_r12.add_argument("--offset", type=lambda x: int(x, 0), default=-0x400000)
     sub.add_parser("player-signal-locked-noop")
     sub.add_parser("player-freeze-stage-noop")
+    sub.add_parser("player-stage-lock-vsmode-noop")
     p_stage_layout_final_view = sub.add_parser("stage-layout-final-view-player-id")
     p_stage_layout_final_view.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_stage_layout_final_view.add_argument("--which", choices=("prepare", "render", "both"), default="both")
@@ -1635,6 +1678,7 @@ def main() -> int:
     p_direct.add_argument("--vs-results-display-player-id", type=lambda x: int(x, 0), default=None)
     p_direct.add_argument("--player-signal-locked-noop", action="store_true")
     p_direct.add_argument("--player-freeze-stage-noop", action="store_true")
+    p_direct.add_argument("--player-stage-lock-vsmode-noop", action="store_true")
     p_fake = sub.add_parser("fake-opponent")
     p_fake.add_argument("--force-confirm-load", action="store_true")
     p_fake.add_argument("--force-loadgame-progress", action="store_true")
@@ -1751,6 +1795,10 @@ def main() -> int:
         overlays = rom.loadArm9Overlays()
         changes = patch_player_freeze_stage_noop(overlays)
         save_overlays(rom, overlays)
+    elif args.cmd == "player-stage-lock-vsmode-noop":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_player_stage_lock_vsmode_noop(overlays)
+        save_overlays(rom, overlays)
     elif args.cmd == "stage-layout-final-view-player-id":
         overlays = rom.loadArm9Overlays()
         changes = patch_stage_layout_final_view_player_id(overlays, args.player_id, args.which)
@@ -1798,6 +1846,7 @@ def main() -> int:
             vs_results_display_player_id=args.vs_results_display_player_id,
             player_signal_locked_noop=args.player_signal_locked_noop,
             player_freeze_stage_noop=args.player_freeze_stage_noop,
+            player_stage_lock_vsmode_noop=args.player_stage_lock_vsmode_noop,
         )
     elif args.cmd == "fake-opponent":
         changes = patch_fake_opponent(

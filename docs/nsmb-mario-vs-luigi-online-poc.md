@@ -11,9 +11,10 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - 主対象ROMは US版 `roms/nsmb-us.nds` / `A2DE`。
 - 最終形は `host localPlayerID=0`、`client localPlayerID=1`。
 - clientはLuigi側として自然に動かす。カメラ、ストックアイテム、死亡/復帰、勝敗判定をlocalPlayerID=1の通常処理に任せる。
-- direct MvL entry ROM patchで、ローカル通信UIを経由せずMario vs Luigiステージへ入る。
+- direct MvL entry ROM patchで、ローカル通信UIを経由せずMario vs Luigiステージへ入る。現在の本線は true `host localPlayerID=0` / true `client localPlayerID=1`。
 - `Net::getConsoleKeys(u16)` と `Net::getConsoleTouchPad(u16)` をJIT helper patchでscratch memory参照へ差し替え、host/client間の `WireInput` をplayer0/player1入力へ反映する。
 - `getPacketByte/getPacketTick/getPacketAction` まで差し替えるとステージ状態を壊しやすいため、現時点ではkeys/touch helper限定。
+- 死亡時停止対策は全no-opではなく、`Game::vsMode != 0` のときだけ `PlayerBase::freezeStage()` / `PlayerBase::signalLocked()` をskipする条件付きROM patchへ寄せる。
 
 ## 完了したこと
 
@@ -42,9 +43,11 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `-CheckHostClientGameplaySync` を追加し、host/clientの重要game-state差分を自動検出できるようにした。
 - `PlayerBase::signalLocked()` をno-op化するUS ROM patchを追加し、Luigi死亡時に相手PlayerBaseの `updateLocked` が立って進行が止まる経路を診断できるようにした。
 - `PlayerBase::freezeStage()` をno-op化するUS ROM patchを追加し、死亡時に敵/移動ハザードなどのstage actor更新が止まる経路を診断できるようにした。
-- direct MvL entry ROM生成フローに `--player-signal-locked-noop` / `--player-freeze-stage-noop` を組み込み、stable/local1 bootstrap ROM生成スクリプトからも同patchを入れられるようにした。
+- `PlayerBase::freezeStage()` / `PlayerBase::signalLocked()` をVS中だけskipする `--player-stage-lock-vsmode-noop` を追加した。
+- direct MvL entry ROM生成フローを true local1 + `rng-constant --value 0x100` + `--player-stage-lock-vsmode-noop` に更新した。旧hybrid local0 client UI経路は本線から外す。
 - `-CheckNoPlayerUpdateLock` を追加し、死亡前後などの指定フレーム範囲で `playerActor0UpdateLocked` / `playerActor1UpdateLocked` が立ったら自動失敗にできるようにした。
 - `-CheckMovingHazardProgressDuringDeath` を追加し、死亡中にmoving hazardのX座標が進まない場合を自動失敗にできるようにした。
+- `-RequireHostLocalPlayerID` / `-RequireClientLocalPlayerID` を追加し、clientが実際にはlocal0へ戻ってしまう回帰を自動検出できるようにした。
 
 ## 直近の検証結果
 
@@ -72,6 +75,12 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `logs/codex-both-luigi-only-death-freezenoop-progresscheck-2250-20260528`
 - `logs/codex-both-luigi-only-death-siglocknoop-progresscheck-expectedfail-2250-20260528`
 - `logs/codex-both-inputnetplay-freezenoop-current-2250-20260528`
+- `logs/codex-both-true-local1-rootcmp-start-1500-20260529`
+- `logs/codex-both-true-local1-rngconst-start-1500-20260529`
+- `logs/codex-both-true-local1-rngconst-death-lockcheck-expectedfail-2250-20260529`
+- `logs/codex-both-true-local1-vslockskip-rngconst-deathcheck-2400-20260529`
+- `logs/codex-both-stable-true-local1-vslockskip-rngconst-deathcheck-2400-20260529`
+- `logs/codex-both-stable-true-local1-vslockskip-rngconst-idcheck-2400-20260529`
 
 結果:
 
@@ -96,23 +105,31 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `PlayerBase::freezeStage()` no-op ROMでは、同じ死亡区間で `movingHazardX` が継続して変化し、敵/移動ハザード停止が解消することを確認。
 - `-CheckMovingHazardProgressDuringDeath` は旧 `signalLocked()` no-op ROMで期待通り失敗し、`freezeStage()` no-op入りROMで通過することを確認。
 - ただしこれは成功扱いではない。`freezeStage()` no-opは死亡時停止症状の一部を抑えただけで、通常のMario vs Luigi開始状態との差分が残っている可能性が高い。死亡/復帰、敵、カメラ、勝敗判定まで含めた自然な挙動は未確認。
+- 目視確認では、`freezeStage()` no-op入り検証でもまだ不自然な挙動がある。
+  - client側がLuigi視点ではなくMario視点になる場合がある。
+  - Big Star位置がhost/clientでずれる場合がある。
+  - リスポーン前に死亡プレイヤー姿が見えるなど、死亡/復帰描画が通常のMario vs Luigiと異なる。
+- 調査の結果、clientがMario視点になる問題は、旧ROM生成フローが名前にlocal1を含みつつ実際の `Game::localPlayerID` は0のhybrid経路になっていたことが主因。true `localPlayerID=1` direct entryではclient側カメラはLuigi側へ戻る。
+- true local1でも `rng-constant` を明示適用しない場合、Big Star座標がhost `0x30000` / client `0x3c0000` のようにずれる。`Net::getRandom()` / `Game::getRandom()` を `0x100` 固定にするとhost/clientとも `vsStarActorX=0x90000` で一致。
+- true local1 + RNG固定だけでは、死亡時に `playerActor0UpdateLocked` が立ち、moving hazardも停止する。`Game::vsMode != 0` のときだけ `freezeStage()` / `signalLocked()` をskipする条件付きpatchで、死亡中のplayer update-lockとmoving hazard停止は解消。
+- `Player::beginDeathTransition()` は標準死亡transitionへ入り、その後 `viewTransitState` → `vsPipeTransitState` → `defaultTransitState` へ進むことを確認。VSPipe復帰自体には移っているが、死亡/復帰描画が通常MvsLとして完全に自然かは引き続き確認が必要。
 
 ## 未解決・注意点
 
 - 2400フレームまでの短時間検証であり、実プレイとして十分な長時間安定性は未確認。
 - `ForceWifiCommunicatingCount=2` などruntime hookにまだ依存している。最終的にはROM patch側へ寄せたい。
-- `signalLocked()` / `freezeStage()` no-opは症状抑制としては有効だが、根本修正とはまだ言えない。通常のMario vs Luigiで同じ停止が起きないなら、direct entry / localPlayerID / 疑似通信状態が本来のMvL死亡処理条件を満たしていない可能性を優先して調べる。
-- `signalLocked()` / `freezeStage()` no-opがpipe/door/勝敗/他のtransitionに副作用を出す可能性がある。
+- `Game::vsMode != 0` 条件付きstage-lock skipは全no-opより副作用が小さいが、勝敗、タイムアップ、土管/ドア、スター取得など他transitionで問題がないかは未確認。
+- リスポーン描画はまだ目視確認が必要。死亡直後に見えるプレイヤー姿が通常MvsLとの差分なのか、死亡演出として正常なのかを切り分ける。
 - 現在の入力スクリプトは短い診断用で、スター取得、8コインアイテム、ランダムステージ、死亡/復帰後の長時間継続まではまだ十分に検証していない。
 - 50fps前後で、完全な60fpsには届いていない。traceやスクリーンショットを減らした実用設定で再測定する必要がある。
 - WANの遅延・ジッタ・packet lossを模した検証は未実施。現状は同一PC上のhost/client 2プロセス検証。
 
 ## 次にやること
 
-1. 最優先: なぜ通常のMario vs Luigiでは止まらない死亡処理が、direct entry経路では `signalLocked()` / `freezeStage()` に入るのかを特定する。
-   - no-op patchは診断・一時回避として扱い、根本原因を隠さない。
-   - direct entry状態と本来のMvL開始状態の差分を、死亡直前/死亡中のgame-state traceとcall traceで比較する。
+1. 最優先: true local1 + RNG固定 + VS限定stage-lock skipを本線として、死亡/復帰描画が通常MvsLとして自然か確認する。
+   - client local1カメラ、Big Star位置、localPlayerIDは自動チェックで守る。
    - 片方死亡中に相手プレイヤー・敵・ブロック・ステージ進行が止まらないことは、`-CheckNoPlayerUpdateLock` と `-CheckMovingHazardProgressDuringDeath` で継続確認する。
+   - リスポーン直前/直後のvisible flag、transit func、VSPipe state、スクリーンショットを細かく取り、異常描画を検出できる形にする。
 2. さらにtraceを減らした実用寄り設定、または2PC分散でFPSが60fpsに近づくか確認する。
 3. Luigi側操作の検証を増やす。
    - カメラ追従
@@ -129,12 +146,12 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 ```powershell
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 `
   -RunRole both `
-  -Frames 2250 `
+  -Frames 2400 `
   -AllowJit `
   -Exe build\release-windows-x86_64\melonDS.exe `
-  -Rom roms\nsmb-us-direct-mvl-entry-stable-host-wificount2-rng100-siglock-freezenoop.tmp.nds `
-  -HostRom roms\nsmb-us-direct-mvl-entry-stable-host-wificount2-rng100-siglock-freezenoop.tmp.nds `
-  -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-local1-wificount2-rng100-siglock-freezenoop.tmp.nds `
+  -Rom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-vslockskip-rngconst.tmp.nds `
+  -HostRom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-vslockskip-rngconst.tmp.nds `
+  -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-vslockskip-rngconst.tmp.nds `
   -InputScript tests\nsmb_us_direct_mvl_client_stock_touch_strong.inputs `
   -GameStateTrace `
   -GameStateTraceExtended `
@@ -160,7 +177,9 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   -CheckMovingHazardProgressStartFrame 1840 `
   -CheckMovingHazardProgressEndFrame 2220 `
   -CheckMovingHazardProgressMinUniqueX 3 `
-  -LogDir logs\codex-both-inputnetplay-freezenoop-current-2250-20260528
+  -RequireHostLocalPlayerID 0 `
+  -RequireClientLocalPlayerID 1 `
+  -LogDir logs\codex-both-stable-true-local1-vslockskip-rngconst-idcheck-2400-20260529
 ```
 
 診断trace付きで入力netplay内部を見る場合は `-InputNetplayTrace` を追加する。

@@ -11,11 +11,13 @@ if (!(Test-Path $SourceRom)) {
 }
 
 $hostDirectRom = [System.IO.Path]::ChangeExtension($HostRom, ".direct.tmp.nds")
+$clientDirectRom = [System.IO.Path]::ChangeExtension($ClientRom, ".direct.tmp.nds")
 
 & python tools\nsmb_us_rom_patch.py `
     --rom $SourceRom `
     --out $hostDirectRom `
     direct-mvl-entry `
+    --player-id 0 `
     --entrance 0xff `
     --flag 1 `
     --force-ready-progress `
@@ -25,40 +27,35 @@ $hostDirectRom = [System.IO.Path]::ChangeExtension($HostRom, ".direct.tmp.nds")
     --call-load-mvsl-files-after `
     --camera-player1-out-of-view-slot0 `
     --camera-focus-loop-count 2 `
-    --player-signal-locked-noop `
-    --player-freeze-stage-noop
+    --player-stage-lock-vsmode-noop
 
 & python tools\nsmb_us_rom_patch.py `
     --rom $hostDirectRom `
     --out $HostRom `
-    player-render-model-visible
-
-$clientOverlayRom = [System.IO.Path]::ChangeExtension($ClientRom, ".overlay0all.tmp.nds")
-$clientRangeRom = [System.IO.Path]::ChangeExtension($ClientRom, ".range0.tmp.nds")
+    rng-constant --value 0x100
 
 & python tools\nsmb_us_rom_patch.py `
-    --rom $HostRom `
-    --out $clientOverlayRom `
-    overlay0-localplayer-literal-alias --mode all-no-inventory
+    --rom $SourceRom `
+    --out $clientDirectRom `
+    direct-mvl-entry `
+    --player-id 1 `
+    --entrance 0xff `
+    --flag 1 `
+    --force-ready-progress `
+    --force-transfer-result 8 `
+    --clear-actor-category-mask `
+    --force-scene-settings 0xb4ff00 `
+    --call-load-mvsl-files-after `
+    --camera-player1-out-of-view-slot0 `
+    --camera-focus-loop-count 2 `
+    --player-stage-lock-vsmode-noop
 
 & python tools\nsmb_us_rom_patch.py `
-    --rom $clientOverlayRom `
-    --out $clientRangeRom `
-    player-render-range-view-player-id --player-id 0
-
-& python tools\nsmb_us_rom_patch.py `
-    --rom $clientRangeRom `
+    --rom $clientDirectRom `
     --out $ClientRom `
-    stage-camera-state-vertical-slot-zero
+    rng-constant --value 0x100
 
-$clientInventoryRom = [System.IO.Path]::ChangeExtension($ClientRom, ".inventory-use1.tmp.nds")
-Move-Item -Force $ClientRom $clientInventoryRom
-& python tools\nsmb_us_rom_patch.py `
-    --rom $clientInventoryRom `
-    --out $ClientRom `
-    stage-layout-inventory-use-player-id --player-id 1
-
-Remove-Item -Force $hostDirectRom, $clientOverlayRom, $clientRangeRom, $clientInventoryRom -ErrorAction SilentlyContinue
+Remove-Item -Force $hostDirectRom, $clientDirectRom -ErrorAction SilentlyContinue
 
 Write-Host "wrote local1 bootstrap host ROM: $HostRom"
 Write-Host "wrote local1 bootstrap client ROM: $ClientRom"
