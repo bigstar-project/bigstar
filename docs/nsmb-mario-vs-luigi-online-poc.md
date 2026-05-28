@@ -55,6 +55,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `logs/codex-both-inputnetplay-senddelay10-jitter6-delay16-2400-20260528`
 - `logs/codex-both-inputnetplay-touch-helper-stock-strong-synccheck2-2600-20260528`
 - `logs/codex-both-inputnetplay-touch-helper-regression-2400-20260528`
+- `logs/codex-both-inputnetplay-stock-touch-screenshotcheck-3600-20260528`
 
 結果:
 
@@ -68,6 +69,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - 入力遅延12フレーム + 人工送信遅延8フレーム + jitter最大4フレーム、入力遅延16フレーム + 人工送信遅延10フレーム + jitter最大6フレームでも2400フレーム同期チェックが通過。
 - touch helper追加後も既存移動スクリプトが2400フレーム同期チェックを通過。
 - Luigi側ストックアイテム用の長押しtouchスクリプトで、`player1InventoryPowerup` が `0x1 -> 0x0` に変化し、host/clientで一致することを確認。
+- ストック使用スクリプトで3600フレーム検証も通過。3000フレーム以降のスクリーンショット切断/blank検出も有効にした状態で問題なし。
 - screenshot上、hostはMario視点、clientはLuigi視点になっている。上画面カメラ差はlocalPlayerID差として想定内。
 - ストック表示はhostがplayer0、clientがplayer1を表示しており、CSV上も `player0InventoryPowerup=0x0`、`player1InventoryPowerup=0x1` でhost/client一致。Luigi側UIとして自然に動いている可能性が高い。
 
