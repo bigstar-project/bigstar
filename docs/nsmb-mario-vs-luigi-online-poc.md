@@ -42,6 +42,8 @@ JIT強制許可 `MELONDS_NSML_ALLOW_JIT` を追加し、trace検証速度は約4
 
 一方、client local1 でも `Net::localAid` が0のままだと、NSMBの `Net::getConsoleKeys(player)` はlocal入力をplayer0へ流す。Luigiを自然操作するには `Net::localAid=1` を正しいタイミングで成立させる必要がある。
 
+runtime hookで `ForceWifiCommunicatingCount=2` と `ForceNetLocalAid=1` をframe 840以降に適用したところ、client local1 は2600frameまで約49fpsで完走し、trace上で `inputConsole1Held` が `inputPlayer1Held` へ流れ、player1 actorが移動した。host local0側は同条件で `Net::localAid=0` のまま `inputPlayer0Held` が立つ。入力前frame 1980では host/client とも `playerActor0X=0x8000`, `playerActor1X=0x58000` で一致しており、local1自然操作ルートの前提はかなり改善した。
+
 注意点:
 
 - `wifi-communicating-consoles --count 2` をROMに常時patchすると、VSConnect起動直後の初期化でnull参照/data abortを起こす場合がある。
@@ -85,15 +87,15 @@ JIT強制許可 `MELONDS_NSML_ALLOW_JIT` を追加し、trace検証速度は約4
 
 - raw `client localPlayerID=1` の正常開始状態がまだ作れていない。
 - `wificount2` はStageLayout後には有効だが、VSConnect初期化中に常時2を返すと壊れる。適用タイミングを限定する必要がある。
-- `Net::localAid=1` を成立させないと、client local1でもlocal入力がplayer0へ流れる。
+- `Net::localAid=1` のruntime適用でclient local1の入力はplayer1へ流せた。ただし、最終的にはWAN adapter側でremote inputも双方へ入れる必要がある。
 - RNG状態は診断用定数化では一致するが、最終的にはhost/clientで同じ乱数列になるROM patchまたはseed同期が必要。
 - runtime `DirectMvlBoot` / firstScene直行はまだ安定入口になっていない。
 
 ## 次にやること
 
-1. `MELONDS_NSML_FORCE_WIFI_COMMUNICATING_COUNT` と `MELONDS_NSML_FORCE_NET_LOCAL_AID` をclient local1の試合開始後だけ適用し、起動前VSConnectを壊さずに `inputPlayer1Held` と `playerActor1` が動くか確認する。
-2. `wificount2 + rng100 + netLocalAid1` 相当の条件で、host local0 / client local1 のframe 960以降のsimulation一致を再確認する。
-3. runtime診断で成立した条件を、起動前VSConnectを壊さない条件付きROM patchへ落とし込む。
+1. host local0 / client local1 の2つの単体simulationに、WAN adapter経由で互いのremote inputも入れる。host側ではplayer1入力、client側ではplayer0入力をremote packetとして注入する。
+2. 同一入力列を入れた状態で、host/clientのplayer0/player1座標、Goomba、スター、object countが2600frame以降も一致するか確認する。
+3. runtime診断で成立した `wifi communicating count` と `netLocalAid` を、起動前VSConnectを壊さない条件付きROM patchへ落とし込む。
 4. runtime `DirectMvlBoot` / firstScene直行のdata abort原因を切り分け、安定入口として使えるか判断する。だめなら既存の安定開始ルートからStageLayout以後のpatchに限定する。
 5. RNGを定数化ではなくhost/clientで同じ列になる形へ寄せる。初期スターの後、8コインアイテムやランダムステージ選択も確認する。
 6. Luigi camera/UI/stock item/death/win判定が local1 の自然処理で動くか検証する。
