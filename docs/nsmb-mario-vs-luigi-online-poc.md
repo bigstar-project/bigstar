@@ -95,21 +95,24 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - call traceで、Luigiのdamage/death経路から `PlayerBase::freezeStage()` が呼ばれていることを確認。
 - `PlayerBase::freezeStage()` no-op ROMでは、同じ死亡区間で `movingHazardX` が継続して変化し、敵/移動ハザード停止が解消することを確認。
 - `-CheckMovingHazardProgressDuringDeath` は旧 `signalLocked()` no-op ROMで期待通り失敗し、`freezeStage()` no-op入りROMで通過することを確認。
+- ただしこれは成功扱いではない。`freezeStage()` no-opは死亡時停止症状の一部を抑えただけで、通常のMario vs Luigi開始状態との差分が残っている可能性が高い。死亡/復帰、敵、カメラ、勝敗判定まで含めた自然な挙動は未確認。
 
 ## 未解決・注意点
 
 - 2400フレームまでの短時間検証であり、実プレイとして十分な長時間安定性は未確認。
 - `ForceWifiCommunicatingCount=2` などruntime hookにまだ依存している。最終的にはROM patch側へ寄せたい。
-- `signalLocked()` / `freezeStage()` no-opは死亡時停止対策として有効そうだが、pipe/door/勝敗/他のtransitionにも副作用がないかは未確認。
+- `signalLocked()` / `freezeStage()` no-opは症状抑制としては有効だが、根本修正とはまだ言えない。通常のMario vs Luigiで同じ停止が起きないなら、direct entry / localPlayerID / 疑似通信状態が本来のMvL死亡処理条件を満たしていない可能性を優先して調べる。
+- `signalLocked()` / `freezeStage()` no-opがpipe/door/勝敗/他のtransitionに副作用を出す可能性がある。
 - 現在の入力スクリプトは短い診断用で、スター取得、8コインアイテム、ランダムステージ、死亡/復帰後の長時間継続まではまだ十分に検証していない。
 - 50fps前後で、完全な60fpsには届いていない。traceやスクリーンショットを減らした実用設定で再測定する必要がある。
 - WANの遅延・ジッタ・packet lossを模した検証は未実施。現状は同一PC上のhost/client 2プロセス検証。
 
 ## 次にやること
 
-1. 最優先: `PlayerBase::signalLocked()` + `PlayerBase::freezeStage()` no-opを死亡時停止対策として長めに検証する。
-   - 片方死亡中に相手プレイヤー・敵・ブロック・ステージ進行が止まらないことを、`-CheckNoPlayerUpdateLock` と `-CheckMovingHazardProgressDuringDeath` で確認する。
-   - pipe/door/復帰/勝敗など、両関数が本来必要なtransitionに副作用がないか確認する。
+1. 最優先: なぜ通常のMario vs Luigiでは止まらない死亡処理が、direct entry経路では `signalLocked()` / `freezeStage()` に入るのかを特定する。
+   - no-op patchは診断・一時回避として扱い、根本原因を隠さない。
+   - direct entry状態と本来のMvL開始状態の差分を、死亡直前/死亡中のgame-state traceとcall traceで比較する。
+   - 片方死亡中に相手プレイヤー・敵・ブロック・ステージ進行が止まらないことは、`-CheckNoPlayerUpdateLock` と `-CheckMovingHazardProgressDuringDeath` で継続確認する。
 2. さらにtraceを減らした実用寄り設定、または2PC分散でFPSが60fpsに近づくか確認する。
 3. Luigi側操作の検証を増やす。
    - カメラ追従
