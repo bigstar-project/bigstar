@@ -131,6 +131,8 @@ EmuInstance::EmuInstance(int inst) : deleting(false),
     else slowmoFPS = val;
 
     doAudioSync = globalCfg.GetBool("AudioSync");
+    if (getenv("MELONDS_NSML_DISABLE_AUDIO_SYNC"))
+        doAudioSync = false;
 
     mpAudioMode = globalCfg.GetInt("MP.AudioMode");
 

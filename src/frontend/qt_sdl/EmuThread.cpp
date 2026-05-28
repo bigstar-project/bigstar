@@ -343,7 +343,8 @@ void EmuThread::run()
             if (emuInstance->firmwareSave)
                 emuInstance->firmwareSave->CheckFlush();
 
-            emuInstance->drawScreen();
+            if (!getenv("MELONDS_NSML_NO_DRAW_SCREEN"))
+                emuInstance->drawScreen();
 
 #ifdef MELONCAP
             MelonCap::Update();
@@ -497,7 +498,8 @@ frame_limit_done:
 
             SDL_Delay(75);
 
-            emuInstance->drawScreen();
+            if (!getenv("MELONDS_NSML_NO_DRAW_SCREEN"))
+                emuInstance->drawScreen();
         }
 
         handleMessages();

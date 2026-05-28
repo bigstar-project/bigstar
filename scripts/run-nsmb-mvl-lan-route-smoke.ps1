@@ -36,6 +36,8 @@ param(
     [int]$LanMPTraceDumpLen = 512,
     [switch]$NoHashLog,
     [switch]$NoFrameLimit,
+    [switch]$NoAudioSync,
+    [switch]$NoDrawScreen,
     [switch]$FixedFrameTime,
     [double]$TargetFps = 0.0,
     [string]$HostPacketReplayFile = "",
@@ -639,6 +641,16 @@ function Start-MelonLANProcess {
         $env:MELONDS_NSML_DISABLE_FRAME_LIMIT = "1"
     } else {
         Remove-Item Env:\MELONDS_NSML_DISABLE_FRAME_LIMIT -ErrorAction SilentlyContinue
+    }
+    if ($NoAudioSync) {
+        $env:MELONDS_NSML_DISABLE_AUDIO_SYNC = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_DISABLE_AUDIO_SYNC -ErrorAction SilentlyContinue
+    }
+    if ($NoDrawScreen) {
+        $env:MELONDS_NSML_NO_DRAW_SCREEN = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_NO_DRAW_SCREEN -ErrorAction SilentlyContinue
     }
     if ($FixedFrameTime) {
         $env:MELONDS_NSML_FIXED_FRAME_TIMESTEP = "1"
@@ -2726,6 +2738,8 @@ function Start-MelonLANProcess {
         "packetBridgeSendDelayFrames=$($env:MELONDS_NSML_PACKET_BRIDGE_SEND_DELAY_FRAMES)"
         "packetBridgeSendJitterFrames=$($env:MELONDS_NSML_PACKET_BRIDGE_SEND_JITTER_FRAMES)"
         "disableFrameLimit=$($env:MELONDS_NSML_DISABLE_FRAME_LIMIT)"
+        "disableAudioSync=$($env:MELONDS_NSML_DISABLE_AUDIO_SYNC)"
+        "noDrawScreen=$($env:MELONDS_NSML_NO_DRAW_SCREEN)"
         "fixedFrameTime=$($env:MELONDS_NSML_FIXED_FRAME_TIMESTEP)"
         "targetFps=$($env:MELONDS_NSML_TARGET_FPS)"
         "disableHash=$($env:MELONDS_NSML_DISABLE_HASH)"

@@ -123,6 +123,8 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `tools/nsmb_screenshot_probe.py` に青/黄文字ピクセル検出を追加。結果画面スクリーンショットに対して、clientの青い `You Lose...` とhostの黄色い `You Win!` を簡易検出できることを確認。
 - smoke scriptに `-RequireHostResultWinScreenshot` / `-RequireClientResultLoseScreenshot` を追加し、結果画面到達後の最新スクリーンショットからhostの `You Win!` とclientの `You Lose...` を自動検出できるようにした。
 - `logs/codex-both-stable-wificount2-netaid-resultscene-probe-6000-20260529` で、6000フレーム結果画面到達、host/client gameplay sync、`localPlayerID`、`Net::localAid`、結果画面画像probeがすべて通過。
+- `logs/codex-both-stable-wificount2-netaid-resultscene-probe-jitter-6000-20260529` で、入力遅延16フレーム + 送信遅延8フレーム + jitter最大4フレームでも、6000フレーム結果画面到達、host/client gameplay sync、勝敗画像probeが通過。
+- smoke scriptに `-NoAudioSync` / `-NoDrawScreen` を追加し、テスト専用にaudio syncとUI描画を切れるようにした。単体プロセスでは約54fpsで、同一PC上のhost/client 2プロセス同時実行では約48fps。現時点ではaudio/drawだけでなく、同一PCで2つのmelonDSを回すCPU負荷が大きい。
 
 ## 未解決・注意点
 
@@ -130,7 +132,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `Game::vsMode != 0` 条件付きstage-lock skipは全no-opより副作用が小さいが、タイムアップ、土管/ドア、8コインアイテムなど他transitionで問題がないかは未確認。
 - リスポーン描画は短時間の目視とvisible flag検証では自然に見えるが、長時間プレイや別死亡条件での回帰は未確認。
 - 現在の入力スクリプトは短い診断用で、8コインアイテム、ランダムステージ、死亡/復帰後の長時間継続まではまだ十分に検証していない。
-- 詳細trace付きでは約43-44fps、traceなしの実用寄り設定では約54-55fps。完全な60fpsには届いていないが、10fps台は主に重い診断設定由来。
+- 詳細traceや結果画面スクリーンショット付きでは約39-44fps、traceなしの実用寄り設定では単体約54fps、同一PC 2プロセスでは約45-53fps。完全な60fpsには届いていないが、10fps台は主に重い診断設定由来。
 - WANの遅延・ジッタを模した検証は一部通過。packet lossや実2PC分散は未実施。現状は同一PC上のhost/client 2プロセス検証。
 
 ## 次にやること
