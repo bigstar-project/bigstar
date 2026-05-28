@@ -38,6 +38,9 @@ US版 ROM `roms/nsmb-us.nds` (`A2DE`) を主対象にする。`external/NSMB-Cod
 - 診断patch `stage-entity-liquid-check-result` で液体判定を強制的に「液体外」にすると、client local1 のGoomba位置/速度は host local0 と frame 960 まで一致した。
 - つまりGoomba速度差の直接原因は、Goomba自身ではなく、local1開始状態での collision/liquid map または関連初期化の不一致。
 - ただし同じ診断patch後も player environment flags はclient側で `0x202` のまま残るため、液体判定を潰すだけでは根本解決ではない。
+- 液体判定の内部traceで、`StageEntity::updateLiquidCollision` は `Game::localPlayerID` を使って `0x020CAE0C + localPlayerID*4` の水面値を読んでいることを確認した。host local0 はslot0の `0xFF000000` を読み液体外、client local1 はslot1の `0x00000000` を読み液体内になる。
+- 診断patchとして `overlay0-localplayer-literal-alias --literal-addrs 0x020A6F40` を当てると、液体判定だけslot0を見るようになり、Goomba物理とplayer environment flagsがhostと一致した。
+- RNGはdirect entryのseedだけではhost/client一致しない。診断patch `rng-constant --value 0x100` をhost/client両方に当てると、初期スター座標は一致した。
 
 ## 現在の実装状況
 
@@ -59,6 +62,7 @@ US版 ROM `roms/nsmb-us.nds` (`A2DE`) を主対象にする。`external/NSMB-Cod
   - RAM dump
 - active object list trace
 - moving hazard / Goomba physics field trace
+- stage liquid slot / liquid height trace
 - host/client split 実行ランナー
 - local0 hybrid の比較基盤
 - RNG seed固定と初期スター座標一致の検証
@@ -70,19 +74,20 @@ US版 ROM `roms/nsmb-us.nds` (`A2DE`) を主対象にする。`external/NSMB-Cod
 
 - raw `client localPlayerID=1` の正常開始状態がまだ作れていない。
 - `Game::wrapX` と collision/liquid map の初期化が、raw direct local1 ではhost local0と同じ経路を通っていない。
-- client local1でplayer environment flagsが `0x202` になり、プレイヤー側も液体/環境状態がhostと違う。
-- RNG状態もhost/clientでまだ一致していないログがある。スター、8コインアイテム、ランダムステージ選択などに影響するため後続で再固定が必要。
+- client local1で液体水面slot1が未初期化相当になっている。slot0を見る診断patchでは直るが、最終的にはslot1を正しく初期化するか、MvsL時の正しい参照slotを特定する必要がある。
+- RNG状態もhost/clientでまだ自然一致していない。スター、8コインアイテム、ランダムステージ選択などに影響するため後続で再固定が必要。
 - JITなし検証は約10-12fpsで遅い。JIT有効化はPacketBridge系hookの正しさに注意が必要。
 
 ## 次にやること
 
-1. `StageEntity::updateLiquidCollision` の液体判定が client local1 だけ真になる根本原因を追う。
-   - `0x020A6E70` / `0x020A9CF4` の戻り値と参照するcollision/tile mapを比較する。
-   - host/clientで同じ座標なのに液体tile flagが違うのか、参照しているlayer/view/bufferが違うのかを切り分ける。
+1. client local1の `0x020CAE10` 水面slot1がなぜ `0x00000000` のままになるかを追う。
+   - host local0のslot0初期化箇所を特定する。
+   - local1でもslot1へ同じ値を自然初期化するのが正しいか、MvsL中はslot0参照が正しいのかを切り分ける。
 2. host local0で `Game::wrapX` と collision/liquid map がどの開始処理から初期化されるか特定し、raw client local1でも同じ初期化を自然に通す。
-3. 診断patchで補正するのではなく、direct entry / StageStart 初期化側の最小patchへ落とす。
-4. raw local1で Goomba spawn、速度、位置、player environment flags、スター/RNGがhost local0と一致するか確認する。
-5. その後、Luigi camera/UI/stock item/death/win判定が local1 の自然処理で動くか検証する。
+3. RNGを、定数化ではなくhost/clientで同じ列になる形へ寄せる。まずは初期スター、その後8コインアイテムやランダムステージ選択を確認する。
+4. 診断patchで補正するのではなく、direct entry / StageStart 初期化側の最小patchへ落とす。
+5. raw local1で Goomba spawn、速度、位置、player environment flags、スター/RNGがhost local0と一致するか確認する。
+6. その後、Luigi camera/UI/stock item/death/win判定が local1 の自然処理で動くか検証する。
 
 ## 成功条件
 
