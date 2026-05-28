@@ -10,7 +10,8 @@ param(
     [int]$InputMaxFrameLead = 2,
     [int]$GameStateTraceInterval = 30,
     [int]$HostStartupDelayMs = 1200,
-    [string]$LogDir = "logs\nsmb-mvl-split-local-input-smoke"
+    [string]$LogDir = "logs\nsmb-mvl-split-local-input-smoke",
+    [switch]$AllowJit
 )
 
 $ErrorActionPreference = "Stop"
@@ -45,6 +46,9 @@ $common = @(
     "-PacketBridgeStartFrame", "900",
     "-RequireNetLocalAidStartFrame", "900"
 )
+if ($AllowJit) {
+    $common += "-AllowJit"
+}
 
 $hostArgs = @(
     "-NoProfile",

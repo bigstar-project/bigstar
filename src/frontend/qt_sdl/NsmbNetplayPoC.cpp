@@ -5887,6 +5887,8 @@ void ThrottleInputNetplayFrameLead(melonDS::NDS* nds, melonDS::u32 frame, melonD
         return;
     if (G.NetplayStartFrame != 0 && frame < G.NetplayStartFrame)
         return;
+    if (IsPastTestInputRange(sendFrame))
+        return;
 
     const auto start = std::chrono::steady_clock::now();
     for (;;)

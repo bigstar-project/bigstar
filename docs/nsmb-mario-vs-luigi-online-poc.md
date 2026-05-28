@@ -151,6 +151,11 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   - `tests/nsmb_us_direct_mvl_manual_client_luigi_move.inputs`
   - `scripts/run-nsmb-mvl-split-local-input-smoke.ps1`
 - `logs/codex-split-local-input-script-2600-20260529` で、hostのMario入力とclientのLuigi入力が別々に送られても、2600フレームまで主要gameplay CSV比較が通過。Mario/Luigi双方が移動したことも自動確認済み。
+- `scripts/run-nsmb-mvl-split-local-input-smoke.ps1 -AllowJit` でも2600フレームの別ローカル入力同期が通過。
+  - `logs/codex-split-local-input-script-jit-2600-20260529`
+  - `logs/codex-split-local-input-script-jit-nodelay-2600-20260529`
+- frame limit直前では、未来フレーム用入力の先行制限がテスト終了後の入力を待ってしまう問題があったため、テスト終端では `-InputMaxFrameLead` throttleをskipするように修正。
+- `logs/codex-split-local-result-framelead2-jit-endfix-6000-20260529` で、JIT有効 + frame lead 2 + 人工遅延/jitter付きの6000フレーム結果画面到達split smokeが通過。
 
 ## 未解決・注意点
 
@@ -161,8 +166,8 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - 詳細traceや結果画面スクリーンショット付きでは約39-44fps、traceなしの実用寄り設定では単体約54fps、同一PC 2プロセスでは約45-53fps。完全な60fpsには届いていないが、10fps台は主に重い診断設定由来。
 - WANの遅延・ジッタを模した検証とlocalhostでのhost/client分割起動は通過。packet lossや実2PC分散は未実施。
 - 手動入力は動作確認済み。peer待ち、fatal timeout、frame lead制限を入れたため、次は実キー入力を含む検証で見た目と操作感を確認する。
-- 手動入力の決定性優先ルートでは、当面 `-AllowJit` を付けない。JIT helper patch後に該当ARM9コード範囲のJIT cache invalidateを追加したが、JIT有効split検証ではまだ2190フレームの単発moving hazard差分が残るため、JIT有効は速度検証用として扱う。
-- JIT無効の手動launcherは同期優先でかなり遅い。短いsmokeでは約12fps。操作感改善には、JIT決定性問題の解消か、別の軽量化が必要。
+- `-InputMaxFrameLead 2` 後はJIT有効の別ローカル入力2600フレームと、結果画面到達6000フレームが通過している。ただし長時間の自由入力では未確認なので、JIT有効は段階的に検証を増やす。
+- JIT無効の手動launcherは同期優先でかなり遅い。短いsmokeでは約12fps。JIT有効 + 人工遅延なしのsplit local-input smokeは約44fps。人工遅延/jitter付きresult smokeは意図的な待ちが入るため約15fps。
 
 ## 次にやること
 
@@ -171,7 +176,8 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
    - 開始後は相手入力がないフレームを勝手に進めず、待つ。timeoutした場合はデフォルトで失敗終了する。
    - `-InputMaxFrameLead 2` で片方のプロセスだけが先行しすぎないようにする。
    - JIT無効 + manual bootstrap + localhost split 1800フレーム比較は通過。
-   - host/clientで別々のローカル入力を出す2600フレームsplit smokeも通過。次は手動launcherで人間の実キー入力を目視確認し、その後に長時間化する。
+   - host/clientで別々のローカル入力を出す2600フレームsplit smokeも通過。
+   - JIT有効の短時間splitと結果画面到達splitも通過。次は手動launcherで人間の実キー入力を目視確認し、その後に長時間化する。
 2. true local1 + RNG固定 + VS限定stage-lock skip + ROM側wifi count + Net::localAid patchを本線として、長時間の死亡/復帰・勝敗・スター取得まで壊れないか確認する。
    - client local1カメラ、Big Star位置、localPlayerIDは自動チェックで守る。
    - 片方死亡中に相手プレイヤー・敵・ブロック・ステージ進行が止まらないことは、`-CheckNoPlayerUpdateLock` と `-CheckMovingHazardProgressDuringDeath` で継続確認する。
