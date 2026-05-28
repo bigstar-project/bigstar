@@ -5896,6 +5896,22 @@ void WritePacketBridgeJitScratchIfNeeded(
         return;
 
     const int localPlayer = CurrentPacketBridgeLocalPlayer();
+    if (G.InputNetplayOnly && G.WaitForPeerBeforeStart && G.NetplayStartFrame > 0)
+    {
+        const melonDS::u32 delay = static_cast<melonDS::u32>(std::max(0, G.Delay));
+        const melonDS::u32 sendStartFrame = (G.NetplayStartFrame > delay)
+            ? G.NetplayStartFrame - delay
+            : 0;
+        if (frame == sendStartFrame)
+        {
+            std::printf("NSMB InputNetplay: waiting for peer before send start frame=%u applyStart=%u\n",
+                sendStartFrame,
+                G.NetplayStartFrame);
+            std::fflush(stdout);
+            WaitForPeerIfNeeded(true);
+        }
+    }
+
     InputState effectiveLocalInput = localInput;
     InputState remoteInput = NeutralInput();
     bool hasRemoteInput = false;

@@ -1,0 +1,2 @@
+# Empty input script for manual keyboard/controller input.
+# The PoC keeps polled local input as the fallback when no scripted spans exist.

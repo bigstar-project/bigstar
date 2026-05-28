@@ -15,6 +15,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `Net::getConsoleKeys(u16)` と `Net::getConsoleTouchPad(u16)` をJIT helper patchでscratch memory参照へ差し替え、host/client間の `WireInput` をplayer0/player1入力へ反映する。
 - `getPacketByte/getPacketTick/getPacketAction` まで差し替えるとステージ状態を壊しやすいため、現時点ではkeys/touch helper限定。
 - 死亡時停止対策は全no-opではなく、`Game::vsMode != 0` のときだけ `PlayerBase::freezeStage()` / `PlayerBase::signalLocked()` をskipする条件付きROM patchへ寄せる。
+- 手動入力時の最優先課題は、host/clientの試合開始フレームと入力適用フレームを揃えること。入力送信開始フレームでhostをpeer接続待ちにし、開始後は相手入力が届くまで進めないロックステップ寄りにする。
 
 ## 完了したこと
 
@@ -131,6 +132,12 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - localhost split検証を再現する `scripts/run-nsmb-mvl-split-local-result-smoke.ps1` を追加。`logs/codex-split-local-script-result2-6000-20260529` で通過確認済み。
 - 同じsplit smokeで、入力遅延24フレーム + 送信遅延12フレーム + jitter最大8フレームでも6000フレーム結果画面到達とhost/client勝敗画像probeが通過。
   - `logs/codex-split-local-script-result-delay24-jitter8-6000-20260529`
+- 手動入力用の空スクリプト `tests/nsmb_manual_empty.inputs` を追加。
+- `-InputNetplay -PacketBridgeStartFrame <n>` の場合、入力送信開始フレームでhostがpeer接続を待つようにした。これにより、手動起動時にhostだけが先にMario vs Luigi開始フレームへ進むズレを抑える。
+- 手動プレイ用bootstrap入力 `tests/nsmb_us_direct_mvl_manual_bootstrap.inputs` を追加。試合開始までのメニュー/タッチ操作だけを自動化し、frame 1728以降はキーボード/コントローラー入力を使う。
+- split manual bootstrap検証で、JIT有効時は `movingHazardX` が1サンプルだけhost/clientでずれるケースを確認。JIT無効では2400フレームのsplit CSV比較が通過。
+  - JIT有効ズレ: `logs/codex-split-manual-bootstrap-host-startsync-2400-20260529` / `logs/codex-split-manual-bootstrap-client-startsync-2400-20260529`
+  - JIT無効通過: `logs/codex-split-manual-bootstrap-nojit-host-2400-20260529` / `logs/codex-split-manual-bootstrap-nojit-client-2400-20260529`
 
 ## 未解決・注意点
 
@@ -140,21 +147,28 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - 現在の入力スクリプトは短い診断用で、8コインアイテム、ランダムステージ、死亡/復帰後の長時間継続まではまだ十分に検証していない。
 - 詳細traceや結果画面スクリーンショット付きでは約39-44fps、traceなしの実用寄り設定では単体約54fps、同一PC 2プロセスでは約45-53fps。完全な60fpsには届いていないが、10fps台は主に重い診断設定由来。
 - WANの遅延・ジッタを模した検証とlocalhostでのhost/client分割起動は通過。packet lossや実2PC分散は未実施。
+- 手動入力は動作確認済みだが、開始タイミングと入力フレームのズレが見えている。今回のpeer待ち修正後に、手動入力でhost/clientが自然に揃うか再確認する必要がある。
+- 手動入力の決定性優先ルートでは、当面 `-AllowJit` を付けない。JIT有効時の単発moving hazard差分を解消するまでは、JIT有効は速度検証用として扱う。
 
 ## 次にやること
 
-1. 最優先: true local1 + RNG固定 + VS限定stage-lock skip + ROM側wifi count + Net::localAid patchを本線として、長時間の死亡/復帰・勝敗・スター取得まで壊れないか確認する。
+1. 最優先: 手動入力時にhost/clientの開始フレームと入力適用フレームが揃うことを確認する。
+   - hostが入力送信開始前にpeer接続を待つ。
+   - 開始後は相手入力がないフレームを勝手に進めず、待つか失敗扱いにする。
+   - manual bootstrap入力 + キーボード入力で、Mario/Luigi操作が双方の画面で同じフレーム列として反映されるか確認する。
+   - JIT無効ではsplit 2400フレーム比較が通過。次は手動入力を入れた状態で確認する。
+2. true local1 + RNG固定 + VS限定stage-lock skip + ROM側wifi count + Net::localAid patchを本線として、長時間の死亡/復帰・勝敗・スター取得まで壊れないか確認する。
    - client local1カメラ、Big Star位置、localPlayerIDは自動チェックで守る。
    - 片方死亡中に相手プレイヤー・敵・ブロック・ステージ進行が止まらないことは、`-CheckNoPlayerUpdateLock` と `-CheckMovingHazardProgressDuringDeath` で継続確認する。
    - 土管復帰前後の表示は `-CheckVsPipeRespawnVisibility` で継続確認する。
-2. さらにtraceを減らした実用寄り設定、または2PC分散でFPSが60fpsに近づくか確認する。
-3. Luigi側操作の検証を増やす。
+3. さらにtraceを減らした実用寄り設定、または2PC分散でFPSが60fpsに近づくか確認する。
+4. Luigi側操作の検証を増やす。
    - カメラ追従
    - 死亡/復帰
    - 勝敗判定は結果画面到達とhost/clientのwin/lose表示まで、通常条件・遅延/jitter条件・localhost split条件で自動確認済み。次はより自由な入力列と長時間検証へ広げる。
-4. 8コインアイテム、2個目以降のBig Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
-5. 残るruntime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
-6. 実2PCまたは同一LANで、host/clientを別マシン相当の起動コマンドに分けて検証する。
+5. 8コインアイテム、2個目以降のBig Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
+6. 残るruntime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
+7. 実2PCまたは同一LANで、host/clientを別マシン相当の起動コマンドに分けて検証する。
 
 localhost split検証:
 
@@ -162,6 +176,57 @@ localhost split検証:
 .\scripts\run-nsmb-mvl-split-local-result-smoke.ps1 `
   -LogDir logs\codex-split-local-script-result2-6000-20260529
 ```
+
+手動プレイ用localhost起動:
+
+host側:
+
+```powershell
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 `
+  -RunRole host `
+  -Frames 999999 `
+  -WaitTimeoutMs 86400000 `
+  -Exe build\release-windows-x86_64\melonDS.exe `
+  -Rom roms\nsmb-us.nds `
+  -HostRom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds `
+  -InputScript tests\nsmb_us_direct_mvl_manual_bootstrap.inputs `
+  -ScreenshotInterval 0 `
+  -NoHashLog `
+  -SkipMvlStateCheck `
+  -SkipGameplayActorCheck `
+  -InputNetplay `
+  -InputDelayFrames 16 `
+  -PacketBridgeJitHelperPatch `
+  -PacketBridgeJitHelperPatchFrame 900 `
+  -PacketBridgeStartFrame 900 `
+  -LogDir logs\manual-host
+```
+
+client側:
+
+```powershell
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 `
+  -RunRole client `
+  -Peer 127.0.0.1 `
+  -Frames 999999 `
+  -WaitTimeoutMs 86400000 `
+  -Exe build\release-windows-x86_64\melonDS.exe `
+  -Rom roms\nsmb-us.nds `
+  -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds `
+  -InputScript tests\nsmb_us_direct_mvl_manual_bootstrap.inputs `
+  -ScreenshotInterval 0 `
+  -NoHashLog `
+  -SkipMvlStateCheck `
+  -SkipGameplayActorCheck `
+  -InputNetplay `
+  -InputDelayFrames 16 `
+  -PacketBridgeJitHelperPatch `
+  -PacketBridgeJitHelperPatchFrame 900 `
+  -PacketBridgeStartFrame 900 `
+  -LogDir logs\manual-client
+```
+
+手動プレイ用コマンドでは、決定性優先のため当面 `-AllowJit` を付けない。
 
 2PC分散検証のコマンド雛形:
 

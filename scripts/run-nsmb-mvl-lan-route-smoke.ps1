@@ -55,6 +55,7 @@ param(
     [switch]$PacketBridgeTrace,
     [int]$PacketBridgePort = 8165,
     [int]$PacketBridgeStartFrame = 0,
+    [switch]$WaitForPeerBeforeStart,
     [string]$HostLocalInstance = "",
     [string]$ClientLocalInstance = "",
     [switch]$NoLocalWait,
@@ -2186,8 +2187,12 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_OPS -ErrorAction SilentlyContinue
         }
-        Remove-Item Env:\MELONDS_NSML_WAIT_FOR_PEER -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SEED_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
+        if ($WaitForPeerBeforeStart -or ($InputNetplay -and $PacketBridgeStartFrame -gt 0)) {
+            $env:MELONDS_NSML_WAIT_FOR_PEER = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_WAIT_FOR_PEER -ErrorAction SilentlyContinue
+        }
         if ($PacketBridgeStartFrame -gt 0) {
             $env:MELONDS_NSML_DEFER_NETWORK_UNTIL_START = "1"
             $env:MELONDS_NSML_NETPLAY_START_FRAME = "$PacketBridgeStartFrame"
@@ -2748,6 +2753,7 @@ function Start-MelonLANProcess {
         "packetBridgeLiveFallbackLatestBefore=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_LATEST_BEFORE)"
         "packetBridgeLiveFallbackStartFrame=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_START_FRAME)"
         "packetBridgeWaitStartFrame=$($env:MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME)"
+        "waitForPeer=$($env:MELONDS_NSML_WAIT_FOR_PEER)"
         "packetBridgeMaintainPacketFreeBytes=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_PACKET_FREE_BYTES)"
         "packetBridgeMaintainSessionPeers=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS)"
         "packetBridgeMaintainSessionPeersStart=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_START_FRAME)"
