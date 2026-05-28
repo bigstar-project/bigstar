@@ -128,6 +128,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `RunRole both` ではなく、host用スモークとclient用スモークを別PowerShellプロセスとして起動するlocalhost split検証でも、6000フレーム結果画面到達とhost/client勝敗画像probeが通過。
   - host: `logs/codex-split-host-stable-netaid-result-6000-20260529`
   - client: `logs/codex-split-client-stable-netaid-result-6000-20260529`
+- localhost split検証を再現する `scripts/run-nsmb-mvl-split-local-result-smoke.ps1` を追加。`logs/codex-split-local-script-result2-6000-20260529` で通過確認済み。
 
 ## 未解決・注意点
 
@@ -152,6 +153,13 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 4. 8コインアイテム、2個目以降のBig Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
 5. 残るruntime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
 6. 実2PCまたは同一LANで、host/clientを別マシン相当の起動コマンドに分けて検証する。
+
+localhost split検証:
+
+```powershell
+.\scripts\run-nsmb-mvl-split-local-result-smoke.ps1 `
+  -LogDir logs\codex-split-local-script-result2-6000-20260529
+```
 
 ## 代表テストコマンド
 
