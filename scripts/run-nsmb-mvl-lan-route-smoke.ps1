@@ -44,6 +44,7 @@ param(
     [switch]$PacketCaptureAllowPreGame,
     [switch]$InputNetplay,
     [switch]$InputNetplayTrace,
+    [int]$InputDelayFrames = -1,
     [switch]$PacketBridge,
     [switch]$PacketBridgeAllowJit,
     [switch]$PacketBridgeAllowPreGame,
@@ -2175,6 +2176,11 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_INPUT_NETPLAY_ONLY -ErrorAction SilentlyContinue
         }
+        if ($InputDelayFrames -ge 0) {
+            $env:MELONDS_NSML_DELAY = "$InputDelayFrames"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_DELAY -ErrorAction SilentlyContinue
+        }
         if ($InputNetplayTrace) {
             $env:MELONDS_NSML_INPUT_NETPLAY_TRACE = "1"
         } else {
@@ -2196,6 +2202,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_NO_LOCAL_WAIT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_INPUT_NETPLAY_ONLY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_INPUT_NETPLAY_TRACE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DELAY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PORT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_LOCAL_INSTANCE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE -ErrorAction SilentlyContinue
@@ -2813,6 +2820,7 @@ function Start-MelonLANProcess {
         "packetBridgeThrottleStartFrame=$($env:MELONDS_NSML_PACKET_BRIDGE_THROTTLE_START_FRAME)"
         "inputNetplaySwitch=$InputNetplay"
         "inputNetplayOnlyEnv=$($env:MELONDS_NSML_INPUT_NETPLAY_ONLY)"
+        "inputDelayFrames=$($env:MELONDS_NSML_DELAY)"
         "inputNetplayTraceSwitch=$InputNetplayTrace"
         "inputNetplayTraceEnv=$($env:MELONDS_NSML_INPUT_NETPLAY_TRACE)"
         "packetBridgeJitHelperPatchSwitch=$PacketBridgeJitHelperPatch"

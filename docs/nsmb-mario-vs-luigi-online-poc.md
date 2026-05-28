@@ -34,6 +34,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - JIT有効時でも `Net::getConsoleKeys` keys helper patchだけなら、offline検証でhost/clientが一致することを確認。
 - `-InputNetplay` modeを追加し、PacketBridge本体を使わず `WireInput` だけをkeys helper scratchへ接続できるようにした。
 - 入力netplay専用モードでは通常lockstepへ入らず、`frame + delay` の入力を事前送信し、`frame` の入力を適用するようにした。
+- `-InputDelayFrames` を追加し、検証スクリプトから入力遅延フレーム数を切り替えられるようにした。
 - 入力netplay専用モードでは自動match seedによる `Net::random.value` 書き換えを止め、ROM側の固定RNGを使うようにした。
 - `-CheckHostClientGameplaySync` を追加し、host/clientの重要game-state差分を自動検出できるようにした。
 
@@ -45,6 +46,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `logs/codex-both-inputnetplay-delay-long-2400-20260528`
 - `logs/codex-both-inputnetplay-synccheck-2400-20260528`
 - `logs/codex-both-inputnetplay-synccheck-4800-20260528`
+- `logs/codex-both-inputnetplay-delay12-synccheck-2400-20260528`
 
 結果:
 
@@ -53,6 +55,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - 2400フレーム時点の実効速度は host 約49.45fps、client 約50.50fps。
 - `-CheckHostClientGameplaySync` 付きの2400/4800フレーム検証が通過。入力、Mario/Luigi actor座標、残機、ストック、スターactor、moving hazard、一部object countのhost/client一致を自動確認済み。
 - 4800フレーム時点の実効速度は host 約50.97fps、client 約51.54fps。
+- 入力遅延12フレーム設定でも2400フレーム同期チェックが通過。WAN向けに遅延量を上げる検証ルートができた。
 - screenshot上、hostはMario視点、clientはLuigi視点になっている。上画面カメラ差はlocalPlayerID差として想定内。
 - ストック表示はhostがplayer0、clientがplayer1を表示しており、CSV上も `player0InventoryPowerup=0x0`、`player1InventoryPowerup=0x1` でhost/client一致。Luigi側UIとして自然に動いている可能性が高い。
 
@@ -102,6 +105,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   -ForceWifiCommunicatingCount 2 `
   -ForceWifiCommunicatingStartFrame 840 `
   -InputNetplay `
+  -InputDelayFrames 12 `
   -PacketBridgeJitHelperPatch `
   -PacketBridgeJitHelperPatchFrame 900 `
   -PacketBridgeStartFrame 900 `
