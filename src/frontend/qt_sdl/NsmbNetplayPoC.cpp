@@ -258,6 +258,13 @@ struct DelayedWireNSMLPacket
     WireNSMLPacket Packet {};
 };
 
+struct DelayedWireInput
+{
+    melonDS::u32 ReleaseFrame = 0;
+    std::chrono::steady_clock::time_point ReleaseTime {};
+    WireInput Packet {};
+};
+
 struct WireGameState
 {
     melonDS::u32 Magic;
@@ -931,8 +938,11 @@ struct State
     bool PacketBridgePreserveLocalTouch = false;
     int PacketBridgeSendDelayFrames = 0;
     int PacketBridgeSendJitterFrames = 0;
+    int InputSendDelayFrames = 0;
+    int InputSendJitterFrames = 0;
     std::map<melonDS::u32, InputState> PacketBridgePacketInputs;
     std::vector<DelayedWireNSMLPacket> DelayedNSMLPackets;
+    std::vector<DelayedWireInput> DelayedInputs;
     bool DirectMvlBootEnabled = false;
     bool DirectMvlBootHostOnly = false;
     bool DirectMvlBootClientOnly = false;
@@ -1668,9 +1678,13 @@ InputState ApplyScriptRemotePacketInputScript(int instanceID, melonDS::u32 frame
     return ApplyInputSpans(GScriptRemotePacketInputScript, instanceID, frame, fallback);
 }
 
+void FlushDelayedInputsLocked(melonDS::u32 frame);
+
 void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kNoFrameLimit)
 {
     if (!G.Host) return;
+
+    FlushDelayedInputsLocked(localFrame);
 
     ENetEvent event;
     const int maxEvents = std::clamp(G.PacketBridgeMaxPumpEvents, 1, kMaxPumpEvents);
@@ -1900,6 +1914,36 @@ void SendMatchSeedLocked()
     std::printf("NSMB PoC: sent match seed 0x%08X\n", G.MatchSeed);
 }
 
+void SendInputWireNowLocked(const WireInput& packet)
+{
+    if (!G.Peer) return;
+
+    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE);
+    if (!enetPacket) return;
+
+    enet_peer_send(G.Peer, 0, enetPacket);
+    enet_host_flush(G.Host);
+}
+
+void FlushDelayedInputsLocked(melonDS::u32 frame)
+{
+    if (!G.Peer || G.DelayedInputs.empty())
+        return;
+
+    for (auto it = G.DelayedInputs.begin(); it != G.DelayedInputs.end(); )
+    {
+        if (it->ReleaseFrame <= frame || std::chrono::steady_clock::now() >= it->ReleaseTime)
+        {
+            SendInputWireNowLocked(it->Packet);
+            it = G.DelayedInputs.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
+
 void SendInputLocked(melonDS::u32 frame, const InputState& input)
 {
     if (!G.Peer) return;
@@ -1915,11 +1959,23 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
     packet.TouchY = input.TouchY;
     packet.Touching = input.Touching ? 1 : 0;
 
-    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE);
-    if (!enetPacket) return;
-
-    enet_peer_send(G.Peer, 0, enetPacket);
-    enet_host_flush(G.Host);
+    const int jitterFrames = G.InputSendJitterFrames > 0
+        ? static_cast<int>(frame % static_cast<melonDS::u32>(G.InputSendJitterFrames + 1))
+        : 0;
+    const int sendDelayFrames = G.InputSendDelayFrames + jitterFrames;
+    if (sendDelayFrames > 0)
+    {
+        G.DelayedInputs.push_back({
+            frame + static_cast<melonDS::u32>(sendDelayFrames),
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(
+                (sendDelayFrames * 1000 + 59) / 60),
+            packet,
+        });
+    }
+    else
+    {
+        SendInputWireNowLocked(packet);
+    }
 
     if (G.InputTraceEnabled
         && frame != G.LastTracedSentInputFrame
@@ -8464,6 +8520,10 @@ void InitFromEnvironment()
         0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_SEND_DELAY_FRAMES", 0));
     G.PacketBridgeSendJitterFrames = std::max(
         0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_SEND_JITTER_FRAMES", 0));
+    G.InputSendDelayFrames = std::max(
+        0, EnvInt("MELONDS_NSML_INPUT_SEND_DELAY_FRAMES", 0));
+    G.InputSendJitterFrames = std::max(
+        0, EnvInt("MELONDS_NSML_INPUT_SEND_JITTER_FRAMES", 0));
     G.DirectMvlBootEnabled = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT");
     G.DirectMvlBootHostOnly = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_HOST_ONLY");
     G.DirectMvlBootClientOnly = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_CLIENT_ONLY");

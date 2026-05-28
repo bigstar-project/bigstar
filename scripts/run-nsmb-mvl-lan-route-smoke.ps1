@@ -45,6 +45,8 @@ param(
     [switch]$InputNetplay,
     [switch]$InputNetplayTrace,
     [int]$InputDelayFrames = -1,
+    [int]$InputSendDelayFrames = 0,
+    [int]$InputSendJitterFrames = 0,
     [switch]$PacketBridge,
     [switch]$PacketBridgeAllowJit,
     [switch]$PacketBridgeAllowPreGame,
@@ -2181,6 +2183,16 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_DELAY -ErrorAction SilentlyContinue
         }
+        if ($InputSendDelayFrames -gt 0) {
+            $env:MELONDS_NSML_INPUT_SEND_DELAY_FRAMES = "$InputSendDelayFrames"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_INPUT_SEND_DELAY_FRAMES -ErrorAction SilentlyContinue
+        }
+        if ($InputSendJitterFrames -gt 0) {
+            $env:MELONDS_NSML_INPUT_SEND_JITTER_FRAMES = "$InputSendJitterFrames"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_INPUT_SEND_JITTER_FRAMES -ErrorAction SilentlyContinue
+        }
         if ($InputNetplayTrace) {
             $env:MELONDS_NSML_INPUT_NETPLAY_TRACE = "1"
         } else {
@@ -2203,6 +2215,8 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_INPUT_NETPLAY_ONLY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_INPUT_NETPLAY_TRACE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_DELAY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_INPUT_SEND_DELAY_FRAMES -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_INPUT_SEND_JITTER_FRAMES -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PORT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_LOCAL_INSTANCE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE -ErrorAction SilentlyContinue
@@ -2821,6 +2835,8 @@ function Start-MelonLANProcess {
         "inputNetplaySwitch=$InputNetplay"
         "inputNetplayOnlyEnv=$($env:MELONDS_NSML_INPUT_NETPLAY_ONLY)"
         "inputDelayFrames=$($env:MELONDS_NSML_DELAY)"
+        "inputSendDelayFrames=$($env:MELONDS_NSML_INPUT_SEND_DELAY_FRAMES)"
+        "inputSendJitterFrames=$($env:MELONDS_NSML_INPUT_SEND_JITTER_FRAMES)"
         "inputNetplayTraceSwitch=$InputNetplayTrace"
         "inputNetplayTraceEnv=$($env:MELONDS_NSML_INPUT_NETPLAY_TRACE)"
         "packetBridgeJitHelperPatchSwitch=$PacketBridgeJitHelperPatch"
