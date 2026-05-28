@@ -22,8 +22,8 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   - `tools/nsmb_us_rom_tool.py`
   - `tools/nsmb_us_rom_patch.py`
 - direct MvL entry系の検証ROMを生成済み。
-  - host: `roms/nsmb-us-direct-mvl-entry-stable-host-wificount2-rng100.tmp.nds`
-  - client: `roms/nsmb-us-direct-mvl-entry-stable-client-local1-wificount2-rng100.tmp.nds`
+  - host: `roms/nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst.tmp.nds`
+  - client: `roms/nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst.tmp.nds`
 - `external/NSMB-Code-Reference` を参照し、主要なNet helperを特定。
   - `Net::getConsoleKeys`
   - `Net::getConsoleTouchPad`
@@ -113,30 +113,31 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - true local1でも `rng-constant` を明示適用しない場合、Big Star座標がhost `0x30000` / client `0x3c0000` のようにずれる。`Net::getRandom()` / `Game::getRandom()` を `0x100` 固定にするとhost/clientとも `vsStarActorX=0x90000` で一致。
 - true local1 + RNG固定だけでは、死亡時に `playerActor0UpdateLocked` が立ち、moving hazardも停止する。`Game::vsMode != 0` のときだけ `freezeStage()` / `signalLocked()` をskipする条件付きpatchで、死亡中のplayer update-lockとmoving hazard停止は解消。
 - `Player::beginDeathTransition()` は標準死亡transitionへ入り、その後 `viewTransitState` → `vsPipeTransitState` → `defaultTransitState` へ進むことを確認。VSPipe復帰自体には移っているが、死亡/復帰描画が通常MvsLとして完全に自然かは引き続き確認が必要。
+- 細かいスクリーンショット確認で、true local1 + RNG固定 + VS限定stage-lock skipの死亡/土管復帰描画は通常動作に見えることを確認。`-CheckVsPipeRespawnVisibility` を追加し、土管復帰前フェーズで死亡プレイヤーが表示される回帰を自動検出できるようにした。
+- `wifi-communicating-consoles --count 2` をstable ROM生成フローへ組み込み、`ForceWifiCommunicatingCount=2` runtime hookなしでも同じ死亡/復帰チェックが通ることを確認。
 
 ## 未解決・注意点
 
 - 2400フレームまでの短時間検証であり、実プレイとして十分な長時間安定性は未確認。
-- `ForceWifiCommunicatingCount=2` などruntime hookにまだ依存している。最終的にはROM patch側へ寄せたい。
 - `Game::vsMode != 0` 条件付きstage-lock skipは全no-opより副作用が小さいが、勝敗、タイムアップ、土管/ドア、スター取得など他transitionで問題がないかは未確認。
-- リスポーン描画はまだ目視確認が必要。死亡直後に見えるプレイヤー姿が通常MvsLとの差分なのか、死亡演出として正常なのかを切り分ける。
+- リスポーン描画は短時間の目視とvisible flag検証では自然に見えるが、長時間プレイや別死亡条件での回帰は未確認。
 - 現在の入力スクリプトは短い診断用で、スター取得、8コインアイテム、ランダムステージ、死亡/復帰後の長時間継続まではまだ十分に検証していない。
-- 50fps前後で、完全な60fpsには届いていない。traceやスクリーンショットを減らした実用設定で再測定する必要がある。
+- 詳細trace付きでは約43-44fps、traceなしの実用寄り設定では約54-55fps。完全な60fpsには届いていないが、10fps台は主に重い診断設定由来。
 - WANの遅延・ジッタ・packet lossを模した検証は未実施。現状は同一PC上のhost/client 2プロセス検証。
 
 ## 次にやること
 
-1. 最優先: true local1 + RNG固定 + VS限定stage-lock skipを本線として、死亡/復帰描画が通常MvsLとして自然か確認する。
+1. 最優先: true local1 + RNG固定 + VS限定stage-lock skip + ROM側wifi count patchを本線として、長時間の死亡/復帰・勝敗・スター取得まで壊れないか確認する。
    - client local1カメラ、Big Star位置、localPlayerIDは自動チェックで守る。
    - 片方死亡中に相手プレイヤー・敵・ブロック・ステージ進行が止まらないことは、`-CheckNoPlayerUpdateLock` と `-CheckMovingHazardProgressDuringDeath` で継続確認する。
-   - リスポーン直前/直後のvisible flag、transit func、VSPipe state、スクリーンショットを細かく取り、異常描画を検出できる形にする。
+   - 土管復帰前後の表示は `-CheckVsPipeRespawnVisibility` で継続確認する。
 2. さらにtraceを減らした実用寄り設定、または2PC分散でFPSが60fpsに近づくか確認する。
 3. Luigi側操作の検証を増やす。
    - カメラ追従
    - 死亡/復帰
    - 勝敗判定
 4. 8コインアイテム、Big Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
-5. runtime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
+5. 残るruntime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
 6. 同一LANまたは擬似遅延付きの2プロセス検証へ進む。
 
 ## 代表テストコマンド
@@ -146,24 +147,22 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 ```powershell
 .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 `
   -RunRole both `
-  -Frames 2400 `
+  -Frames 2250 `
   -AllowJit `
   -Exe build\release-windows-x86_64\melonDS.exe `
-  -Rom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-vslockskip-rngconst.tmp.nds `
-  -HostRom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-vslockskip-rngconst.tmp.nds `
-  -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-vslockskip-rngconst.tmp.nds `
+  -Rom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst.tmp.nds `
+  -HostRom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst.tmp.nds `
+  -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst.tmp.nds `
   -InputScript tests\nsmb_us_direct_mvl_client_stock_touch_strong.inputs `
   -GameStateTrace `
   -GameStateTraceExtended `
-  -GameStateTraceInterval 120 `
-  -ScreenshotInterval 1200 `
+  -GameStateTraceInterval 30 `
+  -ScreenshotInterval 0 `
   -NoHashLog `
   -SkipDisconnectScreenshotCheck `
   -SkipBlankScreenshotCheck `
   -SkipMvlStateCheck `
   -SkipGameplayActorCheck `
-  -ForceWifiCommunicatingCount 2 `
-  -ForceWifiCommunicatingStartFrame 840 `
   -InputNetplay `
   -InputDelayFrames 12 `
   -PacketBridgeJitHelperPatch `
@@ -177,9 +176,12 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   -CheckMovingHazardProgressStartFrame 1840 `
   -CheckMovingHazardProgressEndFrame 2220 `
   -CheckMovingHazardProgressMinUniqueX 3 `
+  -CheckVsPipeRespawnVisibility `
+  -CheckVsPipeRespawnVisibilityStartFrame 1840 `
+  -CheckVsPipeRespawnVisibilityEndFrame 2250 `
   -RequireHostLocalPlayerID 0 `
   -RequireClientLocalPlayerID 1 `
-  -LogDir logs\codex-both-stable-true-local1-vslockskip-rngconst-idcheck-2400-20260529
+  -LogDir logs\codex-both-stable-wificount2-rompatch-vspipecheck-2250-20260529
 ```
 
 診断trace付きで入力netplay内部を見る場合は `-InputNetplayTrace` を追加する。

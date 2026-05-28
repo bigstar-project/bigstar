@@ -473,6 +473,9 @@ param(
     [int]$CheckMovingHazardProgressStartFrame = 0,
     [int]$CheckMovingHazardProgressEndFrame = 0,
     [int]$CheckMovingHazardProgressMinUniqueX = 3,
+    [switch]$CheckVsPipeRespawnVisibility,
+    [int]$CheckVsPipeRespawnVisibilityStartFrame = 0,
+    [int]$CheckVsPipeRespawnVisibilityEndFrame = 0,
     [int]$RequireHostLocalPlayerID = -1,
     [int]$RequireClientLocalPlayerID = -1,
     [switch]$SkipArmAbortCheck,
@@ -3349,6 +3352,54 @@ if ($CheckMovingHazardProgressDuringDeath) {
             $first = $deathRows[0]
             $last = $deathRows[$deathRows.Count - 1]
             throw "moving hazard progress check failed for $($item.Role): uniqueX=$($uniqueX.Count) min=$CheckMovingHazardProgressMinUniqueX firstFrame=$($first.frame) firstX=$($first.movingHazardX) lastFrame=$($last.frame) lastX=$($last.movingHazardX). See $($item.Path)"
+        }
+    }
+}
+
+if ($CheckVsPipeRespawnVisibility) {
+    foreach ($item in @($roleInfos | ForEach-Object { @{ Path = $_.GameState; Role = $_.Role } })) {
+        if (-not (Test-Path $item.Path)) {
+            throw "VS pipe respawn visibility check requires game-state trace for $($item.Role): $($item.Path)"
+        }
+
+        $rows = @(Import-Csv $item.Path)
+        if ($rows.Count -eq 0) {
+            throw "VS pipe respawn visibility check received empty trace for $($item.Role): $($item.Path)"
+        }
+
+        $checked = 0
+        foreach ($row in $rows) {
+            $frame = [int]$row.frame
+            $inRange = $frame -ge $CheckVsPipeRespawnVisibilityStartFrame -and
+                ($CheckVsPipeRespawnVisibilityEndFrame -le 0 -or $frame -le $CheckVsPipeRespawnVisibilityEndFrame)
+            if (-not $inRange) {
+                continue
+            }
+
+            foreach ($player in @(0, 1)) {
+                $transitField = "playerActor${player}TransitFunc"
+                $statusField = "playerTransitionStatus${player}"
+                $visibleField = "playerActor${player}VisibleFlag"
+                $transit = $row.$transitField
+                $status = $row.$statusField
+                $visible = $row.$visibleField
+
+                if ($transit -ne "0x211c434") {
+                    continue
+                }
+
+                $checked++
+                if ($status -eq "0x1" -and $visible -ne "0x0") {
+                    throw "VS pipe respawn visibility check failed for $($item.Role): frame=$($row.frame) player=$player status=$status visible=$visible expected hidden before pipe spawn. See $($item.Path)"
+                }
+                if ($status -eq "0x2" -and $visible -ne "0x1") {
+                    throw "VS pipe respawn visibility check failed for $($item.Role): frame=$($row.frame) player=$player status=$status visible=$visible expected visible during pipe spawn. See $($item.Path)"
+                }
+            }
+        }
+
+        if ($checked -eq 0) {
+            throw "VS pipe respawn visibility check found no vsPipeTransitState rows for $($item.Role). See $($item.Path)"
         }
     }
 }

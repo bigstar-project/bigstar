@@ -11,7 +11,9 @@ if (!(Test-Path $SourceRom)) {
 }
 
 $hostDirectRom = [System.IO.Path]::ChangeExtension($HostRom, ".direct.tmp.nds")
+$hostWifiRom = [System.IO.Path]::ChangeExtension($HostRom, ".wificount2.tmp.nds")
 $clientDirectRom = [System.IO.Path]::ChangeExtension($ClientRom, ".direct.tmp.nds")
+$clientWifiRom = [System.IO.Path]::ChangeExtension($ClientRom, ".wificount2.tmp.nds")
 
 & python tools\nsmb_us_rom_patch.py `
     --rom $SourceRom `
@@ -31,6 +33,11 @@ $clientDirectRom = [System.IO.Path]::ChangeExtension($ClientRom, ".direct.tmp.nd
 
 & python tools\nsmb_us_rom_patch.py `
     --rom $hostDirectRom `
+    --out $hostWifiRom `
+    wifi-communicating-consoles --count 2
+
+& python tools\nsmb_us_rom_patch.py `
+    --rom $hostWifiRom `
     --out $HostRom `
     rng-constant --value 0x100
 
@@ -52,10 +59,15 @@ $clientDirectRom = [System.IO.Path]::ChangeExtension($ClientRom, ".direct.tmp.nd
 
 & python tools\nsmb_us_rom_patch.py `
     --rom $clientDirectRom `
+    --out $clientWifiRom `
+    wifi-communicating-consoles --count 2
+
+& python tools\nsmb_us_rom_patch.py `
+    --rom $clientWifiRom `
     --out $ClientRom `
     rng-constant --value 0x100
 
-Remove-Item -Force $hostDirectRom, $clientDirectRom -ErrorAction SilentlyContinue
+Remove-Item -Force $hostDirectRom, $hostWifiRom, $clientDirectRom, $clientWifiRom -ErrorAction SilentlyContinue
 
 Write-Host "wrote stable host ROM: $HostRom"
 Write-Host "wrote stable client local1 ROM: $ClientRom"
