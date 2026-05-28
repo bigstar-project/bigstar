@@ -41,6 +41,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - 入力netplay専用モードでは自動match seedによる `Net::random.value` 書き換えを止め、ROM側の固定RNGを使うようにした。
 - `-CheckHostClientGameplaySync` を追加し、host/clientの重要game-state差分を自動検出できるようにした。
 - `PlayerBase::signalLocked()` をno-op化するUS ROM patchを追加し、Luigi死亡時に相手PlayerBaseの `updateLocked` が立って進行が止まる経路を診断できるようにした。
+- `-CheckNoPlayerUpdateLock` を追加し、死亡前後などの指定フレーム範囲で `playerActor0UpdateLocked` / `playerActor1UpdateLocked` が立ったら自動失敗にできるようにした。
 
 ## 直近の検証結果
 
@@ -60,6 +61,8 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `logs/codex-both-luigi-death-updatelock-writetrace-1700-20260528`
 - `logs/codex-both-inputnetplay-luigi-death-siglocknoop-3600-20260528`
 - `logs/codex-both-inputnetplay-luigi-death-siglocknoop-synccheck-2400-20260528`
+- `logs/codex-both-luigi-death-baseline-updatelockcheck-1700-20260528-2`
+- `logs/codex-both-luigi-death-siglocknoop-updatelockcheck-1800-20260528-2`
 
 結果:
 
@@ -78,6 +81,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - ストック表示はhostがplayer0、clientがplayer1を表示しており、CSV上も `player0InventoryPowerup=0x0`、`player1InventoryPowerup=0x1` でhost/client一致。Luigi側UIとして自然に動いている可能性が高い。
 - Luigi死亡時の停止原因をwrite traceで確認。`PlayerBase::signalLocked()` が相手PlayerBaseの `updateLocked` を1にし、`signalUnlocked()` が後で戻していた。
 - `PlayerBase::signalLocked()` no-op ROMでは、Luigi死亡時に `playerActor0UpdateLocked` / `playerActor1UpdateLocked` が立たず、2400フレームのhost/client gameplay sync checkも通過。
+- `-CheckNoPlayerUpdateLock` は未patched ROMで期待通り失敗し、`signalLocked()` no-op ROMで通過することを確認。
 
 ## 未解決・注意点
 
@@ -93,14 +97,15 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 1. 最優先: `PlayerBase::signalLocked()` no-opを死亡時停止対策として使えるか長めに検証する。
    - 片方死亡中に相手プレイヤー・敵・ブロック・ステージ進行が止まらないことを確認する。
    - pipe/door/復帰/勝敗など、`signalLocked()` が本来必要なtransitionに副作用がないか確認する。
-2. さらにtraceを減らした実用寄り設定、または2PC分散でFPSが60fpsに近づくか確認する。
-3. Luigi側操作の検証を増やす。
+2. no-op ROM生成を手動の派生tmp ROMではなく、通常のdirect MvL ROM生成フローに組み込むか判断する。
+3. さらにtraceを減らした実用寄り設定、または2PC分散でFPSが60fpsに近づくか確認する。
+4. Luigi側操作の検証を増やす。
    - カメラ追従
    - 死亡/復帰
    - 勝敗判定
-4. 8コインアイテム、Big Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
-5. runtime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
-6. 同一LANまたは擬似遅延付きの2プロセス検証へ進む。
+5. 8コインアイテム、Big Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
+6. runtime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
+7. 同一LANまたは擬似遅延付きの2プロセス検証へ進む。
 
 ## 代表テストコマンド
 

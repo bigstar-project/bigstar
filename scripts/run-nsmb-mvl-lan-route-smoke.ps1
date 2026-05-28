@@ -466,6 +466,9 @@ param(
     [switch]$SkipMvlStateCheck,
     [switch]$SkipGameplayActorCheck,
     [switch]$CheckHostClientGameplaySync,
+    [switch]$CheckNoPlayerUpdateLock,
+    [int]$CheckNoPlayerUpdateLockStartFrame = 0,
+    [int]$CheckNoPlayerUpdateLockEndFrame = 0,
     [switch]$SkipArmAbortCheck,
     [switch]$RequireClientRemotePlayer0Movement,
     [string]$LogDir = "logs\nsmb-mvl-lan-route"
@@ -3283,6 +3286,31 @@ if ($GameStateTrace -and -not $SkipMvlStateCheck -and ($GameStateTraceEndFrame -
                     throw "host/client gameplay sync mismatch frame=$($hostRow.frame) field=$field host=$($hostRow.$field) client=$($clientRow.$field). See $hostGameStateTrace and $clientGameStateTrace"
                 }
             }
+        }
+    }
+
+}
+
+if ($CheckNoPlayerUpdateLock) {
+    foreach ($item in @($roleInfos | ForEach-Object { @{ Path = $_.GameState; Role = $_.Role } })) {
+        if (-not (Test-Path $item.Path)) {
+            throw "player update-lock check requires game-state trace for $($item.Role): $($item.Path)"
+        }
+
+        $rows = @(Import-Csv $item.Path)
+        if ($rows.Count -eq 0) {
+            throw "player update-lock check received empty trace for $($item.Role): $($item.Path)"
+        }
+
+        $badRows = @($rows | Where-Object {
+            $frame = [int]$_.frame
+            $inRange = $frame -ge $CheckNoPlayerUpdateLockStartFrame -and
+                ($CheckNoPlayerUpdateLockEndFrame -le 0 -or $frame -le $CheckNoPlayerUpdateLockEndFrame)
+            $inRange -and ($_.playerActor0UpdateLocked -ne "0x0" -or $_.playerActor1UpdateLocked -ne "0x0")
+        })
+        if ($badRows.Count -gt 0) {
+            $first = $badRows[0]
+            throw "player update-lock check failed for $($item.Role): frame=$($first.frame) p0=$($first.playerActor0UpdateLocked) p1=$($first.playerActor1UpdateLocked). See $($item.Path)"
         }
     }
 }
