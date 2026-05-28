@@ -1054,6 +1054,32 @@ def patch_stage_entity_skip_render_player_id(overlays: dict[int, object], player
     ]
 
 
+def patch_stage_entity_liquid_check_result(overlays: dict[int, object], *, in_liquid: bool) -> list[str]:
+    # Diagnostic only. StageEntity::updateLiquidCollision branches on the
+    # result of the liquid tile probe at 0x0209C6F8/0x0209C6FC. Forcing the
+    # branch result tells us whether localPlayerID=1 still has a bad
+    # collision/liquid map after the wrapX diagnostic patch.
+    cmp_addr = 0x0209C6F8
+    branch_addr = 0x0209C6FC
+    false_path_addr = 0x0209C780
+    true_path_addr = 0x0209C700
+
+    if in_liquid:
+        # Force the condition to fall through into the liquid path.
+        words = [encode_mov_imm(0, 1), NOP]
+        description = "force liquid"
+    else:
+        # Force the non-liquid path, equivalent to the probe returning 0.
+        words = [NOP, encode_b(branch_addr, false_path_addr)]
+        description = "force non-liquid"
+
+    old = patch_overlay_words_by_id(overlays, 0, cmp_addr, words)
+    return [
+        f"StageEntity::updateLiquidCollision {description} overlay0 @ 0x{cmp_addr:08X}: "
+        f"{old.hex()} -> {words_hex(words)} target=0x{true_path_addr if in_liquid else false_path_addr:08X}"
+    ]
+
+
 def build_direct_loadlevel_stub(
     start_addr: int,
     load_level_addr: int,
@@ -1509,6 +1535,8 @@ def main() -> int:
     p_stage_layout_final_view.add_argument("--which", choices=("prepare", "render", "both"), default="both")
     p_stage_entity_skip_render = sub.add_parser("stage-entity-skip-render-player-id")
     p_stage_entity_skip_render.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
+    p_stage_entity_liquid = sub.add_parser("stage-entity-liquid-check-result")
+    p_stage_entity_liquid.add_argument("--in-liquid", action="store_true")
     p_direct = sub.add_parser("direct-mvl-entry")
     p_direct.add_argument("--scene", type=lambda x: int(x, 0), default=0x0F)
     p_direct.add_argument("--stage", type=lambda x: int(x, 0), default=0)
@@ -1650,6 +1678,10 @@ def main() -> int:
     elif args.cmd == "stage-entity-skip-render-player-id":
         overlays = rom.loadArm9Overlays()
         changes = patch_stage_entity_skip_render_player_id(overlays, args.player_id)
+        save_overlays(rom, overlays)
+    elif args.cmd == "stage-entity-liquid-check-result":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_stage_entity_liquid_check_result(overlays, in_liquid=args.in_liquid)
         save_overlays(rom, overlays)
     elif args.cmd == "direct-mvl-entry":
         changes = patch_direct_mvl_entry(
