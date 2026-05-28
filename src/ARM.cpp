@@ -4697,7 +4697,29 @@ void ARM::TriggerIRQ()
 
 void ARMv5::PrefetchAbort()
 {
-    Log(LogLevel::Warn, "ARM%d: prefetch abort (frame=%u pc=%08X)\n", Num == 1 ? 7 : 9, NDS.NumFrames, R[15]);
+    Log(LogLevel::Warn,
+        "ARM%d: prefetch abort (frame=%u pc=%08X lr=%08X sp=%08X cpsr=%08X "
+        "r0=%08X r1=%08X r2=%08X r3=%08X r4=%08X r5=%08X r6=%08X r7=%08X "
+        "r8=%08X r9=%08X r10=%08X r11=%08X r12=%08X)\n",
+        Num == 1 ? 7 : 9,
+        NDS.NumFrames,
+        R[15],
+        R[14],
+        R[13],
+        CPSR,
+        R[0],
+        R[1],
+        R[2],
+        R[3],
+        R[4],
+        R[5],
+        R[6],
+        R[7],
+        R[8],
+        R[9],
+        R[10],
+        R[11],
+        R[12]);
 
     u32 oldcpsr = CPSR;
     CPSR &= ~0xBF;

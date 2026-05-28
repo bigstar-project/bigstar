@@ -10,14 +10,16 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 US 版 ROM `roms/nsmb-us.nds` (`A2DE`) を主対象にする。`external/NSMB-Code-Reference` が US 版のシンボルを持つため、ROM patch と通信 API 解析の精度を優先する。
 
-2026-05-28 の検証で、`client Game::localPlayerID=1` の direct MvL route は、表示だけでなく object spawn set も host とズレることが分かった。具体的には host local0 では Goomba/movingHazard が存在する一方、client local1 direct route では同じframeで `movingHazardFound=0` になり、入力同期以前にsimulationが一致しない。overlay0 localPlayerID alias を広く当ててもこの差は解消しなかった。
+2026-05-28 の検証で、`client Game::localPlayerID=1` の raw direct MvL route は、表示だけでなく object spawn set も host とズレることが分かった。具体的には host local0 では Goomba/movingHazard が存在する一方、client local1 direct route では同じframeで `movingHazardFound=0` になり、入力同期以前にsimulationが一致しない。overlay0 localPlayerID alias を広く当ててもこの差は解消しなかった。
+
+ただし、最終形としては `client Game::localPlayerID=1` を本命に戻す。`localPlayerID=0` hybrid は短期PoCと比較基盤としては有効だが、clientが内部的にはMario側のままになるため、カメラ、死亡演出、サウンド、ストックアイテム使用、勝敗判定、描画culling、画面外判定などを個別にpatchし続ける必要がある。最終的に遊べる対戦へ持っていくにはpatch面積が広すぎる。
 
 このため、現時点の本筋は次に変更する。
 
-- simulation は host/client とも canonical `Game::localPlayerID=0` に揃える。
-- client は表示、HUD、StageFX、PacketBridge local player を player1/Luigi 役に寄せる。
-- NSMBが読む試合中packet/input/touch APIをWAN adapterへ差し替え、host/clientで同じcanonical packet列を読ませる。
-- `client localPlayerID=1` の自然再現は研究対象として残すが、現時点では最終WAN対戦へ向けた主経路から外す。
+- 最終WAN対戦ルートは `host localPlayerID=0` / `client localPlayerID=1` を目指す。
+- まず `client localPlayerID=1` で正常なMario vs Luigi開始状態を作る。raw direct entryで壊れている object spawn、camera slot、stage init、packet/session state を特定して直す。
+- 中間案として、stage初期化中だけclientを `localPlayerID=0` 相当で走らせ、actor/camera/packet buffer/stage state が揃った時点で `localPlayerID=1` へ切り替える bootstrap route を検証する。
+- `localPlayerID=0` hybrid は、同期比較、packet bridge、入力スクリプト、画面/状態検証の足場として残す。ただし最終ルート扱いにはしない。
 - actor座標、敵、スター、残機、死亡状態がhost/clientで一致することを成功条件にする。見た目だけの補正や死亡/残機カウンタ補正は成功扱いしない。
 
 NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、試合中は主に入力情報 packet を通信している前提で進める。ただし「入力だけで同期できる」ためには、敵やステージ処理が両PCで同じ入力列・同じsimulation条件を読む必要がある。
@@ -26,7 +28,9 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ## 現在の最優先課題
 
-現在の最優先は、canonical local0 simulation + client player1表示/UI/input のrouteを、実際に遊べるWAN netplayへ近づけること。
+現在の最優先は、`client localPlayerID=1` で正常なMvL開始状態を作れるかを検証すること。特に、raw local1 direct routeで欠けていた Goomba/movingHazard などのobject spawn set、camera slot、開始死亡、player model表示を、`local0 bootstrap -> local1切替` と stage/session state patch の両面から切り分ける。
+
+`localPlayerID=0` hybrid は、以下の同期比較基盤として維持する。
 
 - 最新の成功ログ:
   - `logs/smvl-hybrid-display1-split-framelead20-2240-20260528`
@@ -59,16 +63,31 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `tests/nsmb_us_direct_mvl_safe_short.inputs` はMario/Luigi両者入力あり・死亡なしの6000frame安全ルート。次はさらに実操作に近い左右移動やスター/8コインアイテム検証へ広げる必要がある。
   - 既存の `tests/nsmb_us_direct_mvl_star_collect_left.inputs` はhybrid routeのスター取得検証には使えない。`logs/smvl-hybrid-star-left-7200-20260528` では7200frameまで進めても `player*BattleStars` / `player*CollectedStars` が変わらず、最終的にYou Win画面へ入った。スター位置へ向かう入力を作り直す必要がある。
   - `PacketBridgeLookupTickDelay=10` ではclientのlocal player1 packetがhostより先に反映されることがある。delay 60 では同期できたため、最終的にはlockstep待ち/入力遅延の自動調整が必要。
-  - client側のHUD/カメラ/StageFXはplayer1へ寄せているが、trace上の `Game::localPlayerID` はcanonical 0 のまま。勝敗演出、ストックアイテム使用、死亡演出がLuigi視点として成立するかは未検証。
+  - `localPlayerID=0` hybridはtrace上の `Game::localPlayerID` がcanonical 0 のままなので、最終方針ではなく比較基盤として扱う。
   - JIT + PacketBridgeはまだ成功条件に使わない。`logs/smvl-hybrid-jit-trace-2300-20260528` ではpacket API hook自体は値を返すが、game-stateの `inputPlayer*Held` へ反映されない。`logs/smvl-hybrid-jit-branchdone-safe-3000-20260528` のBL skip実験は試合開始前で止まったため破棄した。
 
 直近の次アクション:
 
-- hybrid helperを使って2PC相当のhost/client分離実行へ移し、同じROM/PacketBridge条件をWAN向けに検証する。
-- `PacketBridgeLookupTickDelay=60` は固定条件として入った。次は固定値ではなく、lockstep待ち/入力遅延の自動調整へ進める。
-- 死亡しない両者入力スクリプトは6000 frameまで通過。次は左右移動、スター取得、8コインアイテムなど、実プレイに近い入力へ広げる。
-- client Luigi視点で、敵/アイテム/死亡/勝敗演出/ストックHUDが自然に成立するかを、スクリーンショットと状態値の両方で検証する。特にrender-visible patchは表示改善には有効だが、clientだけに当てるとstate差分が出るため必ずhost/client双方へ同じpatchを当てる。
+- `local0 bootstrap -> local1切替` の標準検証コマンド/スクリプトを作り、切替frameごとに object spawn set と開始死亡を比較する。
+- raw `client localPlayerID=1` で欠ける object spawn が、どの初期化段階のlocalPlayerID参照に依存しているかを特定する。
+- 正常開始状態を作れたら、以後は `client localPlayerID=1` のまま PacketBridge 入力同期へ接続する。
+- `PacketBridgeLookupTickDelay=60` はlocal0 hybridの安定条件として残す。local1 routeで再検証する。
 - 高速化はJIT core hookを直接いじる前に、ROM patch側でpacket API境界を置換できるか再検討する。JIT実験は `-AllowJitWithPacketBridge -PacketBridgeTrace` で再現可能。
+
+2026-05-28 local1 bootstrap 検証:
+
+- `logs/smvl-local1-bootstrap1800-host-2400-20260528` / `logs/smvl-local1-bootstrap1800-client-2400-20260528`
+  - clientをframe 1800まで `localPlayerID=0`、以後 `localPlayerID=1` に切り替えた。
+  - raw local1で欠けていた `movingHazardFound` はhost/clientとも `0x1`、`objectActiveCount=0x9` を維持した。つまり object spawn set の欠落は、stage初期化をlocal0相当で通すbootstrapで回避できる可能性が高い。
+  - 一方で切替frame 1800直後にclientで `ARM9 prefetch abort pc=00000004` が出る。さらにframe 2280でhost側player0入力がclient側game-stateへ反映されず、state verifierは `playerActor0Y mismatch` で失敗した。
+  - 追加した `src/ARM.cpp` のprefetch abort詳細ログで、次の実行からLR/SP/CPSR/主要レジスタを確認できる。
+- `scripts/run-nsmb-mvl-local1-bootstrap-sweep.ps1` を追加。複数の切替frameを同じ条件で回し、local1 bootstrapの失敗点を比較する。
+- `logs/smvl-local1-bootstrap1800-abortdetail-client-1860-20260528`
+  - 詳細ログでは `pc=00000004 lr=0208FAEC sp=027E387C r1=0208FAE8 r12=0208FAF8`。`0x0208FAEC` は `Base::spawnObjectType` globalで、通常コードではない。試合中に `localPlayerID` だけを1へ切り替えると、既存state machine/関数ポインタ系が壊れて例外に落ちている可能性が高い。
+- `logs/smvl-local1-bootstrap-early-20260528-switch900-*`
+  - switchFrame 900 ではabortなしで1560frameまで完走し、`movingHazardFound=0x1` も維持した。
+  - ただしclient player1がframe 1380付近で `Player::standardDeathTransitState` に入り、frame 1500で `player1Lives=4` になる。stable ROM + 長めの `ForceStageCameraSlot` でも再現するため、単純なcamera slot未初期化ではない。
+  - life traceではclient local1化後のplayer collision/environment系がhostと違う。frame 960時点でhostは `coll=0800B001 env=00000000`、clientは `coll=0840B021 env=00000202` になっている。次はこの差分を作る `localPlayerID` 参照またはstage/zone stateを追う。
 
 ## 実装済み
 
@@ -335,17 +354,19 @@ localID1 route の切り分け結果:
 
 ## 現在の課題
 
-1. `client localPlayerID=1` direct routeは、表示だけでなくobject spawn setがhostと一致しないため、主経路から外す。以後はcanonical local0 simulation + client player1表示/UI/input のhybrid routeを本筋にする。
-2. DirectCaptureでclient自身はplayer1入力を読め、`PacketBridgeLookupTickDelay=60` と frame lead throttle を使えばhost/client state一致まで到達する。この条件はhybrid helperへ固定済みなので、次はhost/client分離実行とWAN/2PC検証へ移す。
-3. 開始直後のactor構成、地形相対の表示、HUD、下画面、死亡/勝敗演出が、`host=player0`, `client=player1` の自然な役割解釈になっているかを確認する。これが通るまでストックアイテムや勝敗結果画面の個別検証へ進まない。
-4. ローカル2プロセス同時検証は、安定条件のJITなしでは約10-12fps、JITありなら40fps台まで上がるが入力同期がゲームロジックへ反映されない。実用速度へ近づけるには、JIT側で PacketBridge packet API hook を正しく扱うか、ROM patch側でpacket API境界を置換してJITでも同じ値を返せるようにする必要がある。
+1. 最終ルートは `host localPlayerID=0` / `client localPlayerID=1` に戻す。raw local1 direct routeはobject spawn setが欠けるが、`local0 bootstrap -> local1` では `movingHazardFound` を維持できるため、開始状態を作る余地はある。
+2. 試合中に遅く `localPlayerID=1` へ切り替えると `pc=00000004` prefetch abort が出る。切替はstage初期化近辺で行う必要がありそう。
+3. 早期切替ではabortは避けられるが、client player1が `standardDeathTransitState` に入り残機が減る。camera slot mirrorでも残るため、次は collision/environment state の差分原因を追う。
+4. DirectCaptureでclient自身はplayer1入力を読め、`PacketBridgeLookupTickDelay=60` と frame lead throttle を使えばlocal0 hybridではhost/client state一致まで到達する。この条件は比較基盤として維持する。
+5. ローカル2プロセス同時検証は、安定条件のJITなしでは約10-12fps、JITありなら40fps台まで上がるが入力同期がゲームロジックへ反映されない。実用速度へ近づけるには、JIT側で PacketBridge packet API hook を正しく扱うか、ROM patch側でpacket API境界を置換してJITでも同じ値を返せるようにする必要がある。
 
 ## 次にやること
 
-1. hybrid helperを実2PCで動かし、`PacketBridgeLookupTickDelay=60` 条件のまま切断や片側先行入力が出ないかを見る。同一PC上のhost/client別wrapper jobは3000frame通過済み。
-2. `tests/nsmb_us_direct_mvl_safe_short.inputs` をベースに、左右移動やスター取得を含む入力を作り、`RequirePlayer0Input -RequirePlayer1Input -RequireNoLifeLossUntilFrame` とstate一致を維持する。既存の `nsmb_us_direct_mvl_star_collect_left.inputs` はスター取得に失敗したため流用しない。
-3. client Luigi視点のQAを追加する。成功判定は「stage visible」だけでなく、player model、敵、HUD、死亡演出、勝敗演出が自然に見えることをスクリーンショット/フレームバッファ検査でfailできるようにする。
-4. 高速化はJITを無条件に許可しない。`-AllowJitWithPacketBridge` は現状「速度計測用/失敗再現用」で、成功判定には使わない。JIT対応を再開する場合は、PacketBridgeの `Net::getConsoleKeys` / `getPacketByte` / `getPacketTick` / `getPacketAction` hook がJIT実行でもguest R0へ反映されることを最初に検証する。
+1. `local1 bootstrap` の早期切替で出る player collision/environment 差分を、`Player::defaultTransitState` / collision update / environment update の `localPlayerID` 参照から追う。
+2. `scripts/run-nsmb-mvl-local1-bootstrap-sweep.ps1` で切替frameを増やし、abortしない範囲と死亡しない範囲を分けて記録する。
+3. `client localPlayerID=1` で開始死亡なし、object set維持、player0/player1入力反映まで通ったら、PacketBridge入力同期をlocal1 routeへ接続する。
+4. local0 hybridの6000frame成功ルートは比較基盤として残すが、最終WAN検証へ進める前にlocal1開始状態を優先する。
+5. 高速化はJITを無条件に許可しない。`-AllowJitWithPacketBridge` は現状「速度計測用/失敗再現用」で、成功判定には使わない。JIT対応を再開する場合は、PacketBridgeの `Net::getConsoleKeys` / `getPacketByte` / `getPacketTick` / `getPacketAction` hook がJIT実行でもguest R0へ反映されることを最初に検証する。
 
 ## 検証ルール
 
