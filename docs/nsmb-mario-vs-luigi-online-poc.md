@@ -57,6 +57,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - 最新の未解決:
   - client表示はまだ広いQAが必要。Goombaについては `Goomba::onRender` と `OAM/drawSprite` がclientでも呼ばれ、単独スクリーンショットで描画を確認したため、直近の差分はcamera差分の可能性が高い。player modelはhost/client双方へ同じrender-visible patchを当てると表示できるが、cullingを雑に外しているため最終品質としては要改善。
   - `tests/nsmb_us_direct_mvl_safe_short.inputs` はMario/Luigi両者入力あり・死亡なしの6000frame安全ルート。次はさらに実操作に近い左右移動やスター/8コインアイテム検証へ広げる必要がある。
+  - 既存の `tests/nsmb_us_direct_mvl_star_collect_left.inputs` はhybrid routeのスター取得検証には使えない。`logs/smvl-hybrid-star-left-7200-20260528` では7200frameまで進めても `player*BattleStars` / `player*CollectedStars` が変わらず、最終的にYou Win画面へ入った。スター位置へ向かう入力を作り直す必要がある。
   - `PacketBridgeLookupTickDelay=10` ではclientのlocal player1 packetがhostより先に反映されることがある。delay 60 では同期できたため、最終的にはlockstep待ち/入力遅延の自動調整が必要。
   - client側のHUD/カメラ/StageFXはplayer1へ寄せているが、trace上の `Game::localPlayerID` はcanonical 0 のまま。勝敗演出、ストックアイテム使用、死亡演出がLuigi視点として成立するかは未検証。
   - JIT + PacketBridgeはまだ成功条件に使わない。`logs/smvl-hybrid-jit-trace-2300-20260528` ではpacket API hook自体は値を返すが、game-stateの `inputPlayer*Held` へ反映されない。`logs/smvl-hybrid-jit-branchdone-safe-3000-20260528` のBL skip実験は試合開始前で止まったため破棄した。
@@ -342,7 +343,7 @@ localID1 route の切り分け結果:
 ## 次にやること
 
 1. hybrid helperを実2PCで動かし、`PacketBridgeLookupTickDelay=60` 条件のまま切断や片側先行入力が出ないかを見る。同一PC上のhost/client別wrapper jobは3000frame通過済み。
-2. `tests/nsmb_us_direct_mvl_safe_short.inputs` をベースに、左右移動やスター取得を含む入力を作り、`RequirePlayer0Input -RequirePlayer1Input -RequireNoLifeLossUntilFrame` とstate一致を維持する。
+2. `tests/nsmb_us_direct_mvl_safe_short.inputs` をベースに、左右移動やスター取得を含む入力を作り、`RequirePlayer0Input -RequirePlayer1Input -RequireNoLifeLossUntilFrame` とstate一致を維持する。既存の `nsmb_us_direct_mvl_star_collect_left.inputs` はスター取得に失敗したため流用しない。
 3. client Luigi視点のQAを追加する。成功判定は「stage visible」だけでなく、player model、敵、HUD、死亡演出、勝敗演出が自然に見えることをスクリーンショット/フレームバッファ検査でfailできるようにする。
 4. 高速化はJITを無条件に許可しない。`-AllowJitWithPacketBridge` は現状「速度計測用/失敗再現用」で、成功判定には使わない。JIT対応を再開する場合は、PacketBridgeの `Net::getConsoleKeys` / `getPacketByte` / `getPacketTick` / `getPacketAction` hook がJIT実行でもguest R0へ反映されることを最初に検証する。
 
