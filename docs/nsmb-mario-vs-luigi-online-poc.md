@@ -54,29 +54,36 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
     - `logs/codex-client-local1-offline-remote0-jit-keys-helper900-fix-1300-20260528`
   - frame 1200: host/clientとも `playerActor0X=0x70ff0`, `playerActor1X=0xfffc8000`
   - 約49から50fpsで完走した。
+- 同一PC上のhost/client 2プロセスで、ENetの `WireInput` をkeys helper scratchへ接続した。
+  - log: `logs/codex-both-waninput-jit-keys-helper900-wait-1300-20260528`
+  - frame 960/1020/1200/1260でhost/clientのplayer0/player1入力と座標が一致した。
+  - 初動でframe 0から2のremote input timeoutがまだ残り、実効fpsはhost約35fps、client約42fps。
+  - `-NoLocalWait` を使うとtimeoutは消えるが、remote入力が間に合わないframeが出てhost/clientがズレたため、現時点では正しい検証には使わない。
 
 ## 未解決
 
 - ARM-only packet hook自体はJIT有効時に踏まれない。
   - ただし `Net::getConsoleKeys` のscratch helper patchなら、JIT有効でもscripted remote入力の短時間一致検証は可能になった。
   - `getPacketByte/getPacketTick/getPacketAction` までpatchすると試合開始状態を壊したため、現時点のJIT helper patchはkeys限定にする。
+- PacketBridge + keys helperのboth検証では、起動直後に既存lockstep側のremote input timeoutが残っている。最終的にはnetplay開始前にremote inputを待たないよう整理して、初動の15秒前後のロスを消す必要がある。
 - runtime `DirectMvlBoot` / firstScene直行は、SND/heap周辺の初期化不足でdata abortまたは停止になりやすく、安定入口としては使わない。
 - `wifi-communicating-consoles --count 2` はStageLayout後には有効だが、VSConnect初期化中に常時patchすると壊れることがある。最終的には起動前ROM patchへ落とす前に適用タイミングを詰める必要がある。
 - 現在の一致確認はscripted inputの短時間検証であり、まだ実WAN adapter、遅延、packet loss、長時間対戦、スター再出現、8コインアイテム、ランダムステージ選択までは検証できていない。
 
 ## 次にやること
 
-1. keys限定JIT helper patchをWAN adapter入力へ接続する。
-2. WAN adapterでhost/clientを同時起動し、ローカルネットワーク上で50fps前後の検証ループを作る。
-3. 長時間の決定性確認を追加する。
+1. PacketBridge + keys helperの初動remote input timeoutを消す。
+2. WAN adapterでhost/clientを同時起動し、ローカルネットワーク上で50fps前後の検証ループを安定化する。
+3. 入力を長めに流して、playerが止まらず自然に移動し続けるか確認する。
+4. 長時間の決定性確認を追加する。
    - player actor
    - active object set
    - Goomba / moving hazard
    - Big Star
    - 8コインアイテム
    - ランダムステージ
-4. `getPacketByte/getPacketTick/getPacketAction` もWAN化が必要かを、実WAN adapter検証後に判断する。
-5. Luigi側UI、カメラ、stock item、死亡/復帰、勝敗判定がlocalPlayerID=1の自然処理で動くかを検証する。
+5. `getPacketByte/getPacketTick/getPacketAction` もWAN化が必要かを、実WAN adapter検証後に判断する。
+6. Luigi側UI、カメラ、stock item、死亡/復帰、勝敗判定がlocalPlayerID=1の自然処理で動くかを検証する。
 
 ## 成功条件
 

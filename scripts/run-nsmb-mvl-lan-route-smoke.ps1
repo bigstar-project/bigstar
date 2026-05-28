@@ -50,6 +50,7 @@ param(
     [int]$PacketBridgeStartFrame = 0,
     [string]$HostLocalInstance = "",
     [string]$ClientLocalInstance = "",
+    [switch]$NoLocalWait,
     [string]$HostPacketBridgeLocalPlayer = "",
     [string]$ClientPacketBridgeLocalPlayer = "",
     [string]$HostPacketBridgeLoadLevelPlayerID = "",
@@ -2156,6 +2157,11 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_PEER -ErrorAction SilentlyContinue
         }
+        if ($NoLocalWait) {
+            $env:MELONDS_NSML_NO_LOCAL_WAIT = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_NO_LOCAL_WAIT -ErrorAction SilentlyContinue
+        }
         if ($PacketBridgeTrace) {
             $env:MELONDS_NSML_PACKET_BRIDGE_TRACE = "1"
             $env:MELONDS_NSML_PACKET_REPLAY_LOG = "$Stdout.packet-replay.csv"
@@ -2169,6 +2175,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_POC -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_ROLE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PEER -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_NO_LOCAL_WAIT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PORT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_LOCAL_INSTANCE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE -ErrorAction SilentlyContinue
@@ -2910,7 +2917,7 @@ $requiredPatterns = @()
 foreach ($info in $roleInfos) {
     $requiredPatterns += @{ Path = $info.Out; Pattern = "frame limit reached"; Name = "$($info.Role) frame limit" }
 }
-if (-not $NoLanMP -and -not ($RunRole -ne "both" -and $ScriptRemotePacket -and $PacketBridgeArmOnly)) {
+if (-not $NoLanMP -and -not $PacketBridge -and -not ($RunRole -ne "both" -and $ScriptRemotePacket -and $PacketBridgeArmOnly)) {
     foreach ($info in $roleInfos) {
         $requiredPatterns = @(@{ Path = $info.Out; Pattern = $info.LanStartPattern; Name = $info.LanStartName }) + $requiredPatterns
     }

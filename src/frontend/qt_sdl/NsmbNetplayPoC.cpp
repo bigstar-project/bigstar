@@ -5735,9 +5735,13 @@ void PushScriptRemotePacketIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
         return;
     if (G.ScriptRemotePacketInputInstance < 0 || G.ScriptRemotePacketInputInstance >= 16)
         return;
-    if (frame < G.ScriptRemotePacketStartFrame)
+    const melonDS::u32 startFrame = G.ScriptRemotePacketEnabled
+        ? G.ScriptRemotePacketStartFrame
+        : G.PacketBridgeJitHelperPatchFrame;
+    const melonDS::u32 endFrame = G.ScriptRemotePacketEnabled ? G.ScriptRemotePacketEndFrame : 0;
+    if (frame < startFrame)
         return;
-    if (G.ScriptRemotePacketEndFrame != 0 && frame > G.ScriptRemotePacketEndFrame)
+    if (endFrame != 0 && frame > endFrame)
         return;
     if (instanceID < 0 || instanceID >= 16)
         return;
@@ -5790,20 +5794,34 @@ int CurrentPacketBridgeLocalPlayer()
     return 0;
 }
 
-InputState PacketBridgeInputForPlayer(int player, int localPlayer, int instanceID, melonDS::u32 frame)
+InputState PacketBridgeInputForPlayer(
+    int player,
+    int localPlayer,
+    int instanceID,
+    melonDS::u32 frame,
+    const InputState& localInput,
+    const InputState& remoteInput,
+    bool hasRemoteInput)
 {
     if (player == localPlayer)
-        return ApplyInputScript(instanceID, frame, NeutralInput());
+        return localInput;
+    if (hasRemoteInput)
+        return remoteInput;
     return ApplyScriptRemotePacketInputScript(G.ScriptRemotePacketInputInstance, frame, NeutralInput());
 }
 
-void WritePacketBridgeJitScratchIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+void WritePacketBridgeJitScratchIfNeeded(
+    int instanceID,
+    melonDS::u32 frame,
+    melonDS::NDS* nds,
+    const InputState& localInput)
 {
     if (!G.PacketBridgeJitHelperPatchEnabled || !nds || !nds->MainRAM)
         return;
-    if (!G.ScriptRemotePacketEnabled)
+    if (!G.ScriptRemotePacketEnabled && !G.Enabled)
         return;
-    if (G.ScriptRemotePacketInputInstance < 0 || G.ScriptRemotePacketInputInstance >= 16)
+    if (G.ScriptRemotePacketEnabled &&
+        (G.ScriptRemotePacketInputInstance < 0 || G.ScriptRemotePacketInputInstance >= 16))
         return;
     if (frame < G.ScriptRemotePacketStartFrame)
         return;
@@ -5811,6 +5829,31 @@ void WritePacketBridgeJitScratchIfNeeded(int instanceID, melonDS::u32 frame, mel
         return;
 
     const int localPlayer = CurrentPacketBridgeLocalPlayer();
+    InputState remoteInput = NeutralInput();
+    bool hasRemoteInput = false;
+    if (G.Enabled && G.Ready)
+    {
+        {
+            std::lock_guard<std::mutex> lock(G.Mutex);
+            PumpNetworkLocked(nds, frame);
+            SendMatchSeedLocked();
+            G.LocalInputs[frame] = localInput;
+            SendInputLocked(frame, localInput);
+            auto it = G.RemoteInputs.find(frame);
+            if (it != G.RemoteInputs.end())
+            {
+                remoteInput = it->second;
+                hasRemoteInput = true;
+            }
+        }
+
+        if (!hasRemoteInput && G.LocalWaitsForRemote)
+        {
+            remoteInput = WaitForRemoteInput(frame);
+            hasRemoteInput = true;
+        }
+    }
+
     const melonDS::u32 tick = nds->ARM9Read16(kNetPacketTickAddr);
     const melonDS::u8 action = nds->ARM9Read8(kNetPacketActionAddr);
     nds->ARM9Write16(kPacketBridgeJitScratchTickAddr, static_cast<melonDS::u16>(tick));
@@ -5818,7 +5861,14 @@ void WritePacketBridgeJitScratchIfNeeded(int instanceID, melonDS::u32 frame, mel
 
     for (int player = 0; player < 2; player++)
     {
-        const InputState input = PacketBridgeInputForPlayer(player, localPlayer, instanceID, frame);
+        const InputState input = PacketBridgeInputForPlayer(
+            player,
+            localPlayer,
+            instanceID,
+            frame,
+            localInput,
+            remoteInput,
+            hasRemoteInput);
         const melonDS::u32 keys = (~input.KeyMask) & 0x0FFF;
         nds->ARM9Write16(kPacketBridgeJitScratchKeysAddr + static_cast<melonDS::u32>(player * 2),
             static_cast<melonDS::u16>(keys));
@@ -9130,8 +9180,6 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         PushScriptRemotePacketIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        WritePacketBridgeJitScratchIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageSceneContinueGateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceMvlPlayerReadyIfNeeded(instanceID, inputFrame, nds);
@@ -9189,6 +9237,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     const InputState testInput = ApplyInputScript(instanceID, inputFrame, polledInput);
     const melonDS::u32 syncFrame = G.TestEnabled ? inputFrame : frame;
+
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        WritePacketBridgeJitScratchIfNeeded(instanceID, syncFrame, nds, testInput);
 
     if (!G.Enabled || !G.Ready) return testInput;
     if (syncFrame == 0 && G.PacketBridgeOnly)
