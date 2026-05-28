@@ -42,6 +42,7 @@ param(
     [string]$ClientPacketReplayFile = "",
     [switch]$PacketCapture,
     [switch]$PacketCaptureAllowPreGame,
+    [switch]$InputNetplay,
     [switch]$PacketBridge,
     [switch]$PacketBridgeAllowJit,
     [switch]$PacketBridgeAllowPreGame,
@@ -1579,7 +1580,7 @@ function Start-MelonLANProcess {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME -ErrorAction SilentlyContinue
         }
     }
-    if ($PacketBridge) {
+    if ($PacketBridge -or $InputNetplay) {
         $env:MELONDS_NSML_POC = "1"
         $env:MELONDS_NSML_ROLE = $Role
         $env:MELONDS_NSML_PORT = "$PacketBridgePort"
@@ -1592,8 +1593,13 @@ function Start-MelonLANProcess {
         } else {
             $env:MELONDS_NSML_LOCAL_INSTANCE = "0"
         }
-        $env:MELONDS_NSML_PACKET_BRIDGE = "1"
-        $env:MELONDS_NSML_PACKET_BRIDGE_ONLY = "1"
+        if ($PacketBridge) {
+            $env:MELONDS_NSML_PACKET_BRIDGE = "1"
+            $env:MELONDS_NSML_PACKET_BRIDGE_ONLY = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ONLY -ErrorAction SilentlyContinue
+        }
         if ($PacketBridgeAllowJit) {
             $env:MELONDS_NSML_PACKET_BRIDGE_ALLOW_JIT = "1"
         } else {
@@ -2917,7 +2923,7 @@ $requiredPatterns = @()
 foreach ($info in $roleInfos) {
     $requiredPatterns += @{ Path = $info.Out; Pattern = "frame limit reached"; Name = "$($info.Role) frame limit" }
 }
-if (-not $NoLanMP -and -not $PacketBridge -and -not ($RunRole -ne "both" -and $ScriptRemotePacket -and $PacketBridgeArmOnly)) {
+if (-not $NoLanMP -and -not $PacketBridge -and -not $InputNetplay -and -not ($RunRole -ne "both" -and $ScriptRemotePacket -and $PacketBridgeArmOnly)) {
     foreach ($info in $roleInfos) {
         $requiredPatterns = @(@{ Path = $info.Out; Pattern = $info.LanStartPattern; Name = $info.LanStartName }) + $requiredPatterns
     }

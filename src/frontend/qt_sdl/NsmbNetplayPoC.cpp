@@ -3333,6 +3333,9 @@ bool IsPastTestInputRange(melonDS::u32 targetFrame)
 
 InputState WaitForRemoteInput(melonDS::u32 targetFrame)
 {
+    if (G.PacketBridgeOnly && G.NetplayStartFrame != 0 && targetFrame < G.NetplayStartFrame)
+        return NeutralInput();
+
     const auto start = std::chrono::steady_clock::now();
     for (;;)
     {
