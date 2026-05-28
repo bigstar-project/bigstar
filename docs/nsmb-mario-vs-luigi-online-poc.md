@@ -138,6 +138,8 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - split manual bootstrap検証で、JIT有効時は `movingHazardX` が1サンプルだけhost/clientでずれるケースを確認。JIT無効では2400フレームのsplit CSV比較が通過。
   - JIT有効ズレ: `logs/codex-split-manual-bootstrap-host-startsync-2400-20260529` / `logs/codex-split-manual-bootstrap-client-startsync-2400-20260529`
   - JIT無効通過: `logs/codex-split-manual-bootstrap-nojit-host-2400-20260529` / `logs/codex-split-manual-bootstrap-nojit-client-2400-20260529`
+- 入力netplayではremote input timeoutをデフォルトfatalにした。相手入力がないフレームをneutral入力で進めてdesyncを隠す経路は、明示的に `-AllowRemoteInputTimeoutFallback` を付けた場合だけ使う。
+- `logs/codex-both-manual-bootstrap-nojit-fatal-2400-20260529` で、JIT無効 + manual bootstrap + fatal timeout設定の2400フレームhost/client gameplay syncが通過。
 
 ## 未解決・注意点
 
@@ -154,7 +156,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 1. 最優先: 手動入力時にhost/clientの開始フレームと入力適用フレームが揃うことを確認する。
    - hostが入力送信開始前にpeer接続を待つ。
-   - 開始後は相手入力がないフレームを勝手に進めず、待つか失敗扱いにする。
+   - 開始後は相手入力がないフレームを勝手に進めず、待つ。timeoutした場合はデフォルトで失敗終了する。
    - manual bootstrap入力 + キーボード入力で、Mario/Luigi操作が双方の画面で同じフレーム列として反映されるか確認する。
    - JIT無効ではsplit 2400フレーム比較が通過。次は手動入力を入れた状態で確認する。
 2. true local1 + RNG固定 + VS限定stage-lock skip + ROM側wifi count + Net::localAid patchを本線として、長時間の死亡/復帰・勝敗・スター取得まで壊れないか確認する。

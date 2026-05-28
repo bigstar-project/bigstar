@@ -46,6 +46,7 @@ param(
     [switch]$PacketCaptureAllowPreGame,
     [switch]$InputNetplay,
     [switch]$InputNetplayTrace,
+    [switch]$AllowRemoteInputTimeoutFallback,
     [int]$InputDelayFrames = -1,
     [int]$InputSendDelayFrames = 0,
     [int]$InputSendJitterFrames = 0,
@@ -2212,8 +2213,14 @@ function Start-MelonLANProcess {
         }
         if ($InputNetplay) {
             $env:MELONDS_NSML_INPUT_NETPLAY_ONLY = "1"
+            if ($AllowRemoteInputTimeoutFallback) {
+                Remove-Item Env:\MELONDS_NSML_REMOTE_INPUT_TIMEOUT_FATAL -ErrorAction SilentlyContinue
+            } else {
+                $env:MELONDS_NSML_REMOTE_INPUT_TIMEOUT_FATAL = "1"
+            }
         } else {
             Remove-Item Env:\MELONDS_NSML_INPUT_NETPLAY_ONLY -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_REMOTE_INPUT_TIMEOUT_FATAL -ErrorAction SilentlyContinue
         }
         if ($InputDelayFrames -ge 0) {
             $env:MELONDS_NSML_DELAY = "$InputDelayFrames"
@@ -2250,6 +2257,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PEER -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_NO_LOCAL_WAIT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_INPUT_NETPLAY_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_REMOTE_INPUT_TIMEOUT_FATAL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_INPUT_NETPLAY_TRACE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_DELAY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_INPUT_SEND_DELAY_FRAMES -ErrorAction SilentlyContinue
@@ -2877,6 +2885,7 @@ function Start-MelonLANProcess {
         "inputDelayFrames=$($env:MELONDS_NSML_DELAY)"
         "inputSendDelayFrames=$($env:MELONDS_NSML_INPUT_SEND_DELAY_FRAMES)"
         "inputSendJitterFrames=$($env:MELONDS_NSML_INPUT_SEND_JITTER_FRAMES)"
+        "remoteInputTimeoutFatal=$($env:MELONDS_NSML_REMOTE_INPUT_TIMEOUT_FATAL)"
         "inputNetplayTraceSwitch=$InputNetplayTrace"
         "inputNetplayTraceEnv=$($env:MELONDS_NSML_INPUT_NETPLAY_TRACE)"
         "packetBridgeJitHelperPatchSwitch=$PacketBridgeJitHelperPatch"

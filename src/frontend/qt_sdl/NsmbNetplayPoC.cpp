@@ -825,6 +825,7 @@ struct State
     const char* PeerHost = "127.0.0.1";
     melonDS::u32 NetplayStartFrame = 0;
     bool LocalWaitsForRemote = true;
+    bool RemoteInputTimeoutFatal = false;
     melonDS::u32 TestFrames = kNoFrameLimit;
     int TestInstanceCount = 1;
     bool TestTimerStarted = false;
@@ -3417,6 +3418,9 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
                 std::printf("NSMB Test: remote input timeout frame=%u waitedMs=%d\n",
                     targetFrame,
                     G.TestWaitTimeoutMs);
+                std::fflush(stdout);
+                if (G.RemoteInputTimeoutFatal)
+                    std::_Exit(70);
                 return NeutralInput();
             }
         }
@@ -9161,6 +9165,7 @@ void InitFromEnvironment()
     G.LocalInstance = EnvInt("MELONDS_NSML_LOCAL_INSTANCE", G.NetRole == Role::Host ? 0 : 1);
     G.NetplayStartFrame = static_cast<melonDS::u32>(std::max(0, EnvInt("MELONDS_NSML_NETPLAY_START_FRAME", 0)));
     G.LocalWaitsForRemote = !EnvFlag("MELONDS_NSML_NO_LOCAL_WAIT");
+    G.RemoteInputTimeoutFatal = EnvFlag("MELONDS_NSML_REMOTE_INPUT_TIMEOUT_FATAL");
 
     const char* peer = std::getenv("MELONDS_NSML_PEER");
     if (peer && peer[0]) G.PeerHost = peer;
@@ -9217,7 +9222,7 @@ void InitFromEnvironment()
     }
 
     G.Ready = true;
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -9226,6 +9231,7 @@ void InitFromEnvironment()
         G.LocalInstance,
         G.NetplayStartFrame,
         G.LocalWaitsForRemote ? 1 : 0,
+        G.RemoteInputTimeoutFatal ? 1 : 0,
         G.WaitForPeerBeforeStart ? 1 : 0,
         G.WaitForPeerAtNetplayStart ? 1 : 0,
         G.DeferNetworkUntilStart ? 1 : 0,
