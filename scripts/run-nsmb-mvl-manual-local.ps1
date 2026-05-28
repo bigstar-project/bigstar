@@ -3,6 +3,8 @@ param(
     [int]$WaitTimeoutMs = 86400000,
     [int]$InputDelayFrames = 16,
     [int]$InputMaxFrameLead = 2,
+    [int]$InputSendDelayFrames = 0,
+    [int]$InputSendJitterFrames = 0,
     [int]$HostStartupDelayMs = 1200,
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds",
@@ -34,6 +36,8 @@ $common = @(
     "-InputNetplay",
     "-InputDelayFrames", "$InputDelayFrames",
     "-InputMaxFrameLead", "$InputMaxFrameLead",
+    "-InputSendDelayFrames", "$InputSendDelayFrames",
+    "-InputSendJitterFrames", "$InputSendJitterFrames",
     "-PacketBridgeJitHelperPatch",
     "-PacketBridgeJitHelperPatchFrame", "900",
     "-PacketBridgeStartFrame", "900"
@@ -92,6 +96,7 @@ Write-Host "Started NSMB MvL manual local session."
 Write-Host "host wrapper pid=$($hostProc.Id) log=$hostLog"
 Write-Host "client wrapper pid=$($clientProc.Id) log=$clientLog"
 Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
+Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames"
 if ($AllowJit) {
     Write-Host "JIT is enabled for speed; deterministic sync is not guaranteed yet."
 } else {

@@ -157,6 +157,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `scripts/run-nsmb-mvl-split-local-input-smoke.ps1` に `-InputSendDelayFrames` / `-InputSendJitterFrames` を追加。`logs/codex-split-local-input-script-jit-delay8-jitter4-2600-20260529` で、JIT有効 + 入力遅延16 + 送信遅延8 + jitter最大4の別ローカル入力同期が通過。
 - frame limit直前では、未来フレーム用入力の先行制限がテスト終了後の入力を待ってしまう問題があったため、テスト終端では `-InputMaxFrameLead` throttleをskipするように修正。
 - `logs/codex-split-local-result-framelead2-jit-endfix-6000-20260529` で、JIT有効 + frame lead 2 + 人工遅延/jitter付きの6000フレーム結果画面到達split smokeが通過。
+- 手動launcher `scripts/run-nsmb-mvl-manual-local.ps1` に `-InputMaxFrameLead` / `-InputSendDelayFrames` / `-InputSendJitterFrames` を追加。`logs/codex-manual-launcher-params-smoke-1200-20260529` で、JIT有効の短時間起動がhost約54fps / client約57fpsで通過。
 
 ## 未解決・注意点
 
@@ -168,7 +169,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - WANの遅延・ジッタを模した検証とlocalhostでのhost/client分割起動は通過。packet lossや実2PC分散は未実施。
 - 手動入力は動作確認済み。peer待ち、fatal timeout、frame lead制限を入れたため、次は実キー入力を含む検証で見た目と操作感を確認する。
 - `-InputMaxFrameLead 2` 後はJIT有効の別ローカル入力2600フレームと、結果画面到達6000フレームが通過している。ただし長時間の自由入力では未確認なので、JIT有効は段階的に検証を増やす。
-- JIT無効の手動launcherは同期優先でかなり遅い。短いsmokeでは約12fps。JIT有効 + 人工遅延なしのsplit local-input smokeは約44fps。人工遅延/jitter付きresult smokeは意図的な待ちが入るため約15fps。
+- JIT無効の手動launcherは同期優先でかなり遅い。短いsmokeでは約12fps。JIT有効 + 人工遅延なしの短いmanual launcherは約54-57fps、split local-input smokeは約44fps。人工遅延/jitter付きresult smokeは意図的な待ちが入るため約15fps。
 
 ## 次にやること
 
