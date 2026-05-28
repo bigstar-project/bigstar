@@ -129,6 +129,8 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   - host: `logs/codex-split-host-stable-netaid-result-6000-20260529`
   - client: `logs/codex-split-client-stable-netaid-result-6000-20260529`
 - localhost split検証を再現する `scripts/run-nsmb-mvl-split-local-result-smoke.ps1` を追加。`logs/codex-split-local-script-result2-6000-20260529` で通過確認済み。
+- 同じsplit smokeで、入力遅延24フレーム + 送信遅延12フレーム + jitter最大8フレームでも6000フレーム結果画面到達とhost/client勝敗画像probeが通過。
+  - `logs/codex-split-local-script-result-delay24-jitter8-6000-20260529`
 
 ## 未解決・注意点
 
