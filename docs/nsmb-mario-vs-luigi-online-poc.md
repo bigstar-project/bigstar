@@ -45,9 +45,9 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
     - hybrid helperの標準ROM生成で `Player::renderModel visible arg` patchをhost/client双方に適用
     - client上画面でMario/Luigi両方のplayer model表示を確認
     - frame 1500-3000 でstate verifier通過
-  - `logs/smvl-hybrid-safe-bothjump-4200-20260528`
+  - `logs/smvl-hybrid-safe-bothjump-6000-20260528`
     - `tests/nsmb_us_direct_mvl_safe_short.inputs`
-    - Mario/Luigiをその場ジャンプさせ、frame 1500-4200 で `RequirePlayer0Input -RequirePlayer1Input -RequireNoLifeLossUntilFrame 4200` 通過
+    - Mario/Luigiをその場ジャンプさせ、frame 1500-6000 で `RequirePlayer0Input -RequirePlayer1Input -RequireNoLifeLossUntilFrame 6000` 通過
   - `logs/smvl-hybrid-separated-host-3000-20260528` / `logs/smvl-hybrid-separated-client-3000-20260528`
     - `RunRole host` と `RunRole client` を別PowerShell jobとして起動
     - frame 1500-3000 で別ログディレクトリ比較 verifier 通過
@@ -56,7 +56,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
     - frame 1500-3000 で両者入力あり、死亡なし、state verifier 通過
 - 最新の未解決:
   - client表示はまだ広いQAが必要。Goombaについては `Goomba::onRender` と `OAM/drawSprite` がclientでも呼ばれ、単独スクリーンショットで描画を確認したため、直近の差分はcamera差分の可能性が高い。player modelはhost/client双方へ同じrender-visible patchを当てると表示できるが、cullingを雑に外しているため最終品質としては要改善。
-  - `tests/nsmb_us_direct_mvl_safe_short.inputs` はMario/Luigi両者入力あり・死亡なしの4200frame安全ルート。次はさらに長時間化し、実操作に近い左右移動やスター/8コインアイテム検証へ広げる必要がある。
+  - `tests/nsmb_us_direct_mvl_safe_short.inputs` はMario/Luigi両者入力あり・死亡なしの6000frame安全ルート。次はさらに実操作に近い左右移動やスター/8コインアイテム検証へ広げる必要がある。
   - `PacketBridgeLookupTickDelay=10` ではclientのlocal player1 packetがhostより先に反映されることがある。delay 60 では同期できたため、最終的にはlockstep待ち/入力遅延の自動調整が必要。
   - client側のHUD/カメラ/StageFXはplayer1へ寄せているが、trace上の `Game::localPlayerID` はcanonical 0 のまま。勝敗演出、ストックアイテム使用、死亡演出がLuigi視点として成立するかは未検証。
   - JIT + PacketBridgeはまだ成功条件に使わない。`logs/smvl-hybrid-jit-trace-2300-20260528` ではpacket API hook自体は値を返すが、game-stateの `inputPlayer*Held` へ反映されない。`logs/smvl-hybrid-jit-branchdone-safe-3000-20260528` のBL skip実験は試合開始前で止まったため破棄した。
@@ -65,7 +65,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 - hybrid helperを使って2PC相当のhost/client分離実行へ移し、同じROM/PacketBridge条件をWAN向けに検証する。
 - `PacketBridgeLookupTickDelay=60` は固定条件として入った。次は固定値ではなく、lockstep待ち/入力遅延の自動調整へ進める。
-- 死亡しない両者入力スクリプトを、4200 frameからさらに長時間へ伸ばす。
+- 死亡しない両者入力スクリプトは6000 frameまで通過。次は左右移動、スター取得、8コインアイテムなど、実プレイに近い入力へ広げる。
 - client Luigi視点で、敵/アイテム/死亡/勝敗演出/ストックHUDが自然に成立するかを、スクリーンショットと状態値の両方で検証する。特にrender-visible patchは表示改善には有効だが、clientだけに当てるとstate差分が出るため必ずhost/client双方へ同じpatchを当てる。
 - 高速化はJIT core hookを直接いじる前に、ROM patch側でpacket API境界を置換できるか再検討する。JIT実験は `-AllowJitWithPacketBridge -PacketBridgeTrace` で再現可能。
 
@@ -342,7 +342,7 @@ localID1 route の切り分け結果:
 ## 次にやること
 
 1. hybrid helperを実2PCで動かし、`PacketBridgeLookupTickDelay=60` 条件のまま切断や片側先行入力が出ないかを見る。同一PC上のhost/client別wrapper jobは3000frame通過済み。
-2. `tests/nsmb_us_direct_mvl_safe_short.inputs` を4200frameより長時間化し、`RequirePlayer0Input -RequirePlayer1Input -RequireNoLifeLossUntilFrame` をより長いframe範囲で通す。スター/8コインアイテムはその後。
+2. `tests/nsmb_us_direct_mvl_safe_short.inputs` をベースに、左右移動やスター取得を含む入力を作り、`RequirePlayer0Input -RequirePlayer1Input -RequireNoLifeLossUntilFrame` とstate一致を維持する。
 3. client Luigi視点のQAを追加する。成功判定は「stage visible」だけでなく、player model、敵、HUD、死亡演出、勝敗演出が自然に見えることをスクリーンショット/フレームバッファ検査でfailできるようにする。
 4. 高速化はJITを無条件に許可しない。`-AllowJitWithPacketBridge` は現状「速度計測用/失敗再現用」で、成功判定には使わない。JIT対応を再開する場合は、PacketBridgeの `Net::getConsoleKeys` / `getPacketByte` / `getPacketTick` / `getPacketAction` hook がJIT実行でもguest R0へ反映されることを最初に検証する。
 
