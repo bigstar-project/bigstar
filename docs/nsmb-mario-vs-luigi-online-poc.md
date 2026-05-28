@@ -163,6 +163,79 @@ localhost split検証:
   -LogDir logs\codex-split-local-script-result2-6000-20260529
 ```
 
+2PC分散検証のコマンド雛形:
+
+host側PC:
+
+```powershell
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 `
+  -RunRole host `
+  -Frames 6000 `
+  -WaitTimeoutMs 420000 `
+  -AllowJit `
+  -Exe build\release-windows-x86_64\melonDS.exe `
+  -HostRom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds `
+  -InputScript tests\nsmb_us_direct_mvl_star_collect_left.inputs `
+  -GameStateTrace `
+  -GameStateTraceExtended `
+  -GameStateTraceInterval 120 `
+  -ScreenshotInterval 6000 `
+  -NoHashLog `
+  -SkipDisconnectScreenshotCheck `
+  -SkipBlankScreenshotCheck `
+  -SkipMvlStateCheck `
+  -SkipGameplayActorCheck `
+  -InputNetplay `
+  -InputDelayFrames 24 `
+  -InputSendDelayFrames 12 `
+  -InputSendJitterFrames 8 `
+  -PacketBridgeJitHelperPatch `
+  -PacketBridgeJitHelperPatchFrame 900 `
+  -PacketBridgeStartFrame 900 `
+  -RequireResultScene `
+  -RequireHostResultWinScreenshot `
+  -RequireHostLocalPlayerID 0 `
+  -RequireHostNetLocalAid 0 `
+  -RequireNetLocalAidStartFrame 900 `
+  -LogDir logs\mvl-host-2pc-result
+```
+
+client側PC:
+
+```powershell
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 `
+  -RunRole client `
+  -Peer <host-ip-address> `
+  -Frames 6000 `
+  -WaitTimeoutMs 420000 `
+  -AllowJit `
+  -Exe build\release-windows-x86_64\melonDS.exe `
+  -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds `
+  -InputScript tests\nsmb_us_direct_mvl_star_collect_left.inputs `
+  -GameStateTrace `
+  -GameStateTraceExtended `
+  -GameStateTraceInterval 120 `
+  -ScreenshotInterval 6000 `
+  -NoHashLog `
+  -SkipDisconnectScreenshotCheck `
+  -SkipBlankScreenshotCheck `
+  -SkipMvlStateCheck `
+  -SkipGameplayActorCheck `
+  -InputNetplay `
+  -InputDelayFrames 24 `
+  -InputSendDelayFrames 12 `
+  -InputSendJitterFrames 8 `
+  -PacketBridgeJitHelperPatch `
+  -PacketBridgeJitHelperPatchFrame 900 `
+  -PacketBridgeStartFrame 900 `
+  -RequireResultScene `
+  -RequireClientResultLoseScreenshot `
+  -RequireClientLocalPlayerID 1 `
+  -RequireClientNetLocalAid 1 `
+  -RequireNetLocalAidStartFrame 900 `
+  -LogDir logs\mvl-client-2pc-result
+```
+
 ## 代表テストコマンド
 
 入力netplayの現行代表検証:
