@@ -28,7 +28,26 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ## 現在の最優先課題
 
-現在の本筋は `host localPlayerID=0` / `client localPlayerID=1` の local1 bootstrap route。stage初期化はlocal0相当で通し、frame 900以後にclientをlocal1へ切り替える。raw local1 direct routeで欠けていたobject spawn setは、このbootstrapで回避できている。
+現在の本筋を、local1 bootstrap の補正拡張から `direct entry / VSConnect / StageStart / Game::loadLevel` の開始処理解析へ戻す。目的は、`client localPlayerID=1` でNSMB自身が期待する正常なMario vs Luigi開始状態を作ること。
+
+判断理由:
+
+- `local0 bootstrap -> local1切替` は raw local1 で欠けていたobject spawn setを一部回避できるが、切替後のcamera、player model culling、StageLayout、ストックアイテム消費などに局所patchが増えている。
+- これは最終形として不自然で、今後も死亡/復帰、勝敗判定、サウンド、敵表示、アイテム、スター再生成などで同じ種類の補正が増える可能性が高い。
+- したがって、まず「なぜ raw `client localPlayerID=1` direct route では Goomba/movingHazard/object set がhost local0と一致しないのか」を開始処理から追う。
+- 正常なlocal1開始状態が作れれば、クリボー欠落、カメラの不自然さ、地形/キャラ表示のズレ、UIのplayer0消費などの多くは、個別補正ではなく根本的に解消できる可能性が高い。
+
+当面の作業方針:
+
+1. 自然なLocalMP開始に近い状態、現行direct local0、raw direct local1、bootstrap local1を同じtrace項目で比較する。
+2. `Game::loadLevel` 引数、`Game::localPlayerID`、`stageSceneSettings`、`StageStartSM` / `VSConnect` state、actor category mask、StageLayout/StageCamera初期化順を追う。
+3. raw local1でobject spawn setが欠ける最初のframe/分岐を特定する。
+4. 補正patchを足す場合も、表示/UIの結果補正ではなく、開始状態を自然なlocal1へ近づける最小patchに限定する。
+5. bootstrap routeは比較・回帰確認用として残すが、最終ルートとは扱わない。
+
+local1 bootstrap route の現状:
+
+stage初期化はlocal0相当で通し、frame 900以後にclientをlocal1へ切り替える。これは中間検証としては有効だが、今後の主戦場ではない。
 
 最新の標準検証コマンド:
 
@@ -69,12 +88,10 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 直近の次アクション:
 
-- まず「正常なstage/simulation」と「client local1表示/UI」を分離して判定する。actor存在だけでなく、Goomba/movingHazardの表示、camera追従、player/敵/スター/object hash一致を同じ検証で見る。
-- `local0 bootstrap -> local1切替` は当面の本筋だが、最終形としては不自然な切替を減らす必要がある。raw local1開始で壊れるobject spawn setの原因を、`all-no-inventory` のような狭いlocalPlayerID参照patchへ落とし込む。
-- `client localPlayerID=1` でストックアイテム、死亡/復帰、勝敗判定がLuigi側として成立するか確認する。
-- player model表示patchはまだcullingを強めに回避している。最終品質では、どの可視判定がlocal1移動後に誤るのかを絞り、patch面積を減らす。
-- `PacketBridgeLookupTickDelay=60` を基準に、WAN遅延/ジッタ条件とロックステップ待ちの設計へ進める。
-- JIT高速化は成功条件を崩さない形で別途切り分ける。
+- direct local0 / raw direct local1 / bootstrap local1 の3系統を同一trace項目で取り直し、raw local1でGoomba/movingHazard/object setが欠け始める最初のframeを特定する。
+- `Game::loadLevel` 入口、`StageStartSM`、`VSConnect`、`StageScene`、`StageLayout`、actor category mask の開始時差分を追い、local1を自然開始状態へ近づける最小patch候補を作る。
+- bootstrap routeの表示/UI補正は回帰確認用に残すが、新しい補正追加は一旦止める。最優先は開始状態の根本差分特定。
+- 速度問題は並行課題として残す。JIT + PacketBridgeは入力hook未成立のため、開始処理解析でPacketBridge入力が不要な短時間検証から再利用できるか切り分ける。
 
 ## 実装済み
 
