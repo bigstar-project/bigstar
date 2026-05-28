@@ -25,6 +25,16 @@ param(
     [switch]$NoScreenshots,
     [switch]$NoGameStateTrace,
     [switch]$NoHashLog,
+    [switch]$PacketBridgePreserveLocalTouch,
+    [switch]$ForcePlayerInventoryPowerups,
+    [int]$ForcePlayerInventoryPowerupsStartFrame = 0,
+    [int]$ForcePlayerInventoryPowerupsEndFrame = 0,
+    [int]$ForcePlayerInventoryPowerup0 = 0,
+    [int]$ForcePlayerInventoryPowerup1 = 0,
+    [switch]$WriteTrace,
+    [string]$WriteTraceAddrs = "",
+    [int]$WriteTraceStartFrame = 0,
+    [int]$WriteTraceEndFrame = 0,
     [switch]$TracePlayerRender,
     [int]$TracePlayerRenderStartFrame = 0,
     [int]$TracePlayerRenderEndFrame = 0
@@ -63,6 +73,20 @@ if ($AllowJitWithPacketBridge) { $argsForRun.AllowJitWithPacketBridge = $true }
 if ($NoScreenshots) { $argsForRun.NoScreenshots = $true }
 if ($NoGameStateTrace) { $argsForRun.NoGameStateTrace = $true }
 if ($NoHashLog) { $argsForRun.NoHashLog = $true }
+if ($PacketBridgePreserveLocalTouch) { $argsForRun.PacketBridgePreserveLocalTouch = $true }
+if ($ForcePlayerInventoryPowerups) {
+    $argsForRun.ForcePlayerInventoryPowerups = $true
+    $argsForRun.ForcePlayerInventoryPowerupsStartFrame = $ForcePlayerInventoryPowerupsStartFrame
+    $argsForRun.ForcePlayerInventoryPowerupsEndFrame = $ForcePlayerInventoryPowerupsEndFrame
+    $argsForRun.ForcePlayerInventoryPowerup0 = $ForcePlayerInventoryPowerup0
+    $argsForRun.ForcePlayerInventoryPowerup1 = $ForcePlayerInventoryPowerup1
+}
+if ($WriteTrace) {
+    $argsForRun.WriteTrace = $true
+    $argsForRun.WriteTraceAddrs = $WriteTraceAddrs
+    $argsForRun.WriteTraceStartFrame = $WriteTraceStartFrame
+    $argsForRun.WriteTraceEndFrame = $WriteTraceEndFrame
+}
 if ($TracePlayerRender) {
     $argsForRun.TracePlayerRender = $true
     $argsForRun.TracePlayerRenderStartFrame = $TracePlayerRenderStartFrame

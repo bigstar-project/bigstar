@@ -574,6 +574,28 @@ def patch_stage_layout_inventory_display_player_id(
     return changes
 
 
+def patch_stage_layout_inventory_use_player_id(overlays: dict[int, object], player_id: int) -> list[str]:
+    # StageLayout consumes the lower-screen stock item through
+    # Game::setPlayerInventoryPowerup(player, 0). Force only that consume-side
+    # player argument; display reads are handled by
+    # stage-layout-inventory-display-player-id.
+    ov_id = 0
+    addr = 0x020BF594
+    original = 0xE1A00004  # mov r0, r4
+    word = encode_mov_imm(0, player_id & 1)
+    old = patch_overlay_words_by_id(overlays, ov_id, addr, [word])
+    old_word = struct.unpack("<I", old)[0]
+    if old_word != original:
+        raise ValueError(
+            f"StageLayout inventory consume player arg @ 0x{addr:08X} expected "
+            f"0x{original:08X}, got 0x{old_word:08X}"
+        )
+    return [
+        f"StageLayout inventory consume player arg overlay{ov_id} @ 0x{addr:08X}: "
+        f"0x{old_word:08X} -> 0x{word:08X} player={player_id & 1}"
+    ]
+
+
 def patch_vs_results_display_player_id(overlays: dict[int, object], player_id: int) -> list[str]:
     # VSResults stores the display-local player in its scene object around
     # +0x9B. The actual winner/result variable must stay untouched; only the
@@ -649,10 +671,30 @@ def patch_overlay0_localplayer_literal_alias(
         0x020C07D8,
         0x020C0D78,
     ]
+    # These late StageLayout literals include the lower-screen stock item path.
+    # Aliasing them to player0 fixes some broad local1 display paths, but makes
+    # client/local1 touches consume player0's stock item. Keep them out for the
+    # local1 bootstrap route and patch the narrower display/use call sites
+    # separately.
+    inventory_sensitive_layout_addrs = [
+        0x020BE7D0,
+        0x020BF704,
+        0x020BFFD8,
+        0x020C006C,
+        0x020C00EC,
+        0x020C02B4,
+        0x020C07D8,
+        0x020C0D78,
+    ]
     if literal_addrs is not None:
         literal_addrs = sorted(set(literal_addrs))
     elif mode == "all":
         literal_addrs = sorted(set(actor_collision_literal_addrs + layout_literal_addrs))
+    elif mode == "all-no-inventory":
+        literal_addrs = sorted(set(
+            actor_collision_literal_addrs +
+            [addr for addr in layout_literal_addrs if addr not in inventory_sensitive_layout_addrs]
+        ))
     elif mode == "layout":
         literal_addrs = sorted(set(layout_literal_addrs))
     elif mode == "actor-collision":
@@ -1338,11 +1380,13 @@ def main() -> int:
     p_stage_layout_inventory = sub.add_parser("stage-layout-inventory-display-player-id")
     p_stage_layout_inventory.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_stage_layout_inventory.add_argument("--mode", choices=("hud", "all-read"), default="hud")
+    p_stage_layout_inventory_use = sub.add_parser("stage-layout-inventory-use-player-id")
+    p_stage_layout_inventory_use.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_vs_results_display = sub.add_parser("vs-results-display-player-id")
     p_vs_results_display.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_overlay0_alias = sub.add_parser("overlay0-localplayer-literal-alias")
     p_overlay0_alias.add_argument("--alias-addr", type=lambda x: int(x, 0), default=0x020CA280)
-    p_overlay0_alias.add_argument("--mode", choices=("layout", "actor-collision", "all"), default="layout")
+    p_overlay0_alias.add_argument("--mode", choices=("layout", "actor-collision", "all", "all-no-inventory"), default="layout")
     p_overlay0_alias.add_argument("--literal-addrs", default="")
     p_stage_range_alias = sub.add_parser("stage-range-localplayer-literal-alias")
     p_stage_range_alias.add_argument("--alias-addr", type=lambda x: int(x, 0), default=0x020CA280)
@@ -1442,6 +1486,10 @@ def main() -> int:
     elif args.cmd == "stage-layout-inventory-display-player-id":
         overlays = rom.loadArm9Overlays()
         changes = patch_stage_layout_inventory_display_player_id(overlays, args.player_id, mode=args.mode)
+        save_overlays(rom, overlays)
+    elif args.cmd == "stage-layout-inventory-use-player-id":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_stage_layout_inventory_use_player_id(overlays, args.player_id)
         save_overlays(rom, overlays)
     elif args.cmd == "vs-results-display-player-id":
         overlays = rom.loadArm9Overlays()

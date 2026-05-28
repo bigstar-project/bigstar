@@ -56,6 +56,8 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - `overlay0-localplayer-literal-alias --mode all` だけでは静止時は表示できても、player1移動後に上画面からmodelが消える。
 - `player-render-range-view-player-id --player-id 0 + stage-camera-state-vertical-slot-zero` で静止時のMario/Luigi表示は戻る。
 - player1移動後も表示を維持するには `player-render-model-visible` が必要。描画関数に状態副作用があり得るため、host/client双方の共通ベースROMへ同じpatchを当てる。
+- `overlay0-localplayer-literal-alias --mode all` はStageLayoutのストックアイテム経路までplayer0扱いにしてしまう。`all-no-inventory` を追加し、在庫系のlate StageLayout literalはalias対象から外す。
+- `stage-layout-inventory-use-player-id --player-id 1` を追加。client local1で右下ストックをtouchした時、`Game::setPlayerInventoryPowerup()` の消費対象をplayer1にできることを確認した。ただし現状はclient側だけ在庫消費が起き、host側stateとはズレるため、最終成功ではない。touch/アイテム使用をpacketとして同じtickで両者に読ませる必要がある。
 - verifier に `-RequirePlayerVisibleScreenshots` を追加。従来の `-RequireStageVisibleScreenshots` は緑画面を落とせるが、「地形はあるがplayer modelがない」ケースを通してしまうため。
 - `tests/nsmb_us_direct_mvl_both_different.inputs` は死亡演出へ入ることがあり、スクショ可視検証には向かない。同期ストレス用としてはstate一致だけを見る。
 
@@ -67,6 +69,8 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 直近の次アクション:
 
+- まず「正常なstage/simulation」と「client local1表示/UI」を分離して判定する。actor存在だけでなく、Goomba/movingHazardの表示、camera追従、player/敵/スター/object hash一致を同じ検証で見る。
+- `local0 bootstrap -> local1切替` は当面の本筋だが、最終形としては不自然な切替を減らす必要がある。raw local1開始で壊れるobject spawn setの原因を、`all-no-inventory` のような狭いlocalPlayerID参照patchへ落とし込む。
 - `client localPlayerID=1` でストックアイテム、死亡/復帰、勝敗判定がLuigi側として成立するか確認する。
 - player model表示patchはまだcullingを強めに回避している。最終品質では、どの可視判定がlocal1移動後に誤るのかを絞り、patch面積を減らす。
 - `PacketBridgeLookupTickDelay=60` を基準に、WAN遅延/ジッタ条件とロックステップ待ちの設計へ進める。
