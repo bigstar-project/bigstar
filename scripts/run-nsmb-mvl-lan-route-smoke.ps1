@@ -481,6 +481,9 @@ param(
     [switch]$RequireResultScene,
     [int]$RequireHostLocalPlayerID = -1,
     [int]$RequireClientLocalPlayerID = -1,
+    [int]$RequireHostNetLocalAid = -1,
+    [int]$RequireClientNetLocalAid = -1,
+    [int]$RequireNetLocalAidStartFrame = 0,
     [switch]$SkipArmAbortCheck,
     [switch]$RequireClientRemotePlayer0Movement,
     [string]$LogDir = "logs\nsmb-mvl-lan-route"
@@ -3484,6 +3487,31 @@ foreach ($item in @(
     if ($badRows.Count -gt 0) {
         $first = $badRows[0]
         throw "$($item.Role) localPlayerID check failed: expected=$expected frame=$($first.frame) actual=$($first.localPlayerID). See $($item.Path)"
+    }
+}
+
+foreach ($item in @(
+    @{ Role = "host"; Path = $hostGameStateTrace; Required = $RequireHostNetLocalAid },
+    @{ Role = "client"; Path = $clientGameStateTrace; Required = $RequireClientNetLocalAid }
+)) {
+    if ($item.Required -lt 0) {
+        continue
+    }
+    if (-not (Test-Path $item.Path)) {
+        throw "$($item.Role) netLocalAid check requires game-state trace: $($item.Path)"
+    }
+
+    $rows = @(Import-Csv $item.Path)
+    $stageRows = @($rows | Where-Object { $_.vsMode -ne "0x0" -and [int]$_.frame -ge $RequireNetLocalAidStartFrame })
+    if ($stageRows.Count -eq 0) {
+        throw "$($item.Role) netLocalAid check found no VS rows. See $($item.Path)"
+    }
+
+    $expected = "0x$('{0:x}' -f $item.Required)"
+    $badRows = @($stageRows | Where-Object { $_.netLocalAid -ne $expected })
+    if ($badRows.Count -gt 0) {
+        $first = $badRows[0]
+        throw "$($item.Role) netLocalAid check failed: expected=$expected frame=$($first.frame) actual=$($first.netLocalAid). See $($item.Path)"
     }
 }
 

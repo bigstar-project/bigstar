@@ -22,8 +22,8 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   - `tools/nsmb_us_rom_tool.py`
   - `tools/nsmb_us_rom_patch.py`
 - direct MvL entry系の検証ROMを生成済み。
-  - host: `roms/nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst.tmp.nds`
-  - client: `roms/nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst.tmp.nds`
+  - host: `roms/nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds`
+  - client: `roms/nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds`
 - `external/NSMB-Code-Reference` を参照し、主要なNet helperを特定。
   - `Net::getConsoleKeys`
   - `Net::getConsoleTouchPad`
@@ -119,6 +119,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - 入力遅延16フレーム + 人工送信遅延8フレーム + jitter最大4フレームでも3600フレーム同期チェックが通過。
 - Luigiが固定RNGのBig Starを取得する入力スクリプト `tests/nsmb_us_direct_mvl_luigi_star_right.inputs` を追加。`-RequireStarPickup -RequireStarPickupPlayer 1` で、通常条件と遅延/jitter条件の両方でスター取得を自動確認。
 - `-RequireResultScene` を追加し、勝敗画面 `sceneCurrentSceneID=0xa` への到達を自動確認できるようにした。現行stable ROMで6000フレームの結果画面到達チェックが通過。
+- 結果画面の勝敗表示は `Game::localPlayerID` ではなく `Net::localAid` を見ていた。direct entry stubで `Net::localAid` もplayer-idに合わせて書くようにし、client側が `You Lose...` 表示になることをスクリーンショットで確認。`-RequireHostNetLocalAid` / `-RequireClientNetLocalAid` も追加。
 
 ## 未解決・注意点
 
@@ -131,7 +132,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 ## 次にやること
 
-1. 最優先: true local1 + RNG固定 + VS限定stage-lock skip + ROM側wifi count patchを本線として、長時間の死亡/復帰・勝敗・スター取得まで壊れないか確認する。
+1. 最優先: true local1 + RNG固定 + VS限定stage-lock skip + ROM側wifi count + Net::localAid patchを本線として、長時間の死亡/復帰・勝敗・スター取得まで壊れないか確認する。
    - client local1カメラ、Big Star位置、localPlayerIDは自動チェックで守る。
    - 片方死亡中に相手プレイヤー・敵・ブロック・ステージ進行が止まらないことは、`-CheckNoPlayerUpdateLock` と `-CheckMovingHazardProgressDuringDeath` で継続確認する。
    - 土管復帰前後の表示は `-CheckVsPipeRespawnVisibility` で継続確認する。
@@ -139,7 +140,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 3. Luigi側操作の検証を増やす。
    - カメラ追従
    - 死亡/復帰
-   - 勝敗判定は結果画面到達まで確認済み。次は星数や勝者表示まで自動検証する。
+   - 勝敗判定は結果画面到達とhost/clientのwin/lose表示まで確認済み。次は画像に頼らず勝者表示を自動検証する。
 4. 8コインアイテム、2個目以降のBig Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
 5. 残るruntime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
 6. 同一LANまたは擬似遅延付きの2プロセス検証へ進む。
@@ -154,9 +155,9 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   -Frames 2250 `
   -AllowJit `
   -Exe build\release-windows-x86_64\melonDS.exe `
-  -Rom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst.tmp.nds `
-  -HostRom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst.tmp.nds `
-  -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst.tmp.nds `
+  -Rom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds `
+  -HostRom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds `
+  -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds `
   -InputScript tests\nsmb_us_direct_mvl_client_stock_touch_strong.inputs `
   -GameStateTrace `
   -GameStateTraceExtended `
@@ -185,7 +186,10 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   -CheckVsPipeRespawnVisibilityEndFrame 2250 `
   -RequireHostLocalPlayerID 0 `
   -RequireClientLocalPlayerID 1 `
-  -LogDir logs\codex-both-stable-wificount2-rompatch-vspipecheck-2250-20260529
+  -RequireHostNetLocalAid 0 `
+  -RequireClientNetLocalAid 1 `
+  -RequireNetLocalAidStartFrame 900 `
+  -LogDir logs\codex-both-stable-wificount2-netaid-vspipecheck-2250-20260529
 ```
 
 診断trace付きで入力netplay内部を見る場合は `-InputNetplayTrace` を追加する。

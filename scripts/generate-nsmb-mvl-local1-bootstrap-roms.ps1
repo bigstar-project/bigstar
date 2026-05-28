@@ -1,7 +1,7 @@
 param(
     [string]$SourceRom = "roms\nsmb-us.nds",
-    [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-local1-host.tmp.nds",
-    [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-local1-client-overlay0all-range0-vertical0.tmp.nds"
+    [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-local1-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds",
+    [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-local1-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds"
 )
 
 $ErrorActionPreference = "Stop"

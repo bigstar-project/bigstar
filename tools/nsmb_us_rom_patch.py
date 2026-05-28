@@ -1256,6 +1256,12 @@ def build_direct_loadlevel_stub(
         emit_ldr_literal(0, 0x02088F38)  # Scene::nextSceneSettings
         emit_ldr_literal(1, force_scene_settings)
         words.append(encode_str_imm(1, 0, 0))
+    # Direct MvL entry bypasses the normal local MP pairing path, so
+    # Net::localAid stays at its single-player default. VSResults uses
+    # Net::localAid, not Game::localPlayerID, to decide local win/lose text.
+    emit_ldr_literal(0, 0x020887F0)  # Net::localAid
+    words.append(encode_mov_imm(1, player_id & 3))
+    words.append(encode_str_imm(1, 0, 0))
     words.extend([
         encode_add_sp_imm(0x38),
         encode_mov_imm(0, 1),
