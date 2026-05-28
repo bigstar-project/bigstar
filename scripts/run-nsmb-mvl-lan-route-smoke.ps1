@@ -50,7 +50,7 @@ param(
     [int]$InputDelayFrames = -1,
     [int]$InputSendDelayFrames = 0,
     [int]$InputSendJitterFrames = 0,
-    [int]$InputMaxFrameLead = 1,
+    [int]$InputMaxFrameLead = 2,
     [switch]$PacketBridge,
     [switch]$PacketBridgeAllowJit,
     [switch]$PacketBridgeAllowPreGame,

@@ -1,0 +1,20 @@
+# Direct MvL manual-input client probe.
+# Bootstrap to Mario vs Luigi, then simulate the client's local Luigi input.
+# The smoke wrapper extracts inst1 lines for the client role and writes them as
+# that process' local input script.
+
+inst1 0-619 NONE
+inst1 620-627 DOWN
+inst1 628-659 NONE
+inst1 660-667 A
+inst1 668-899 NONE
+inst1 900-907 A
+inst1 908-1259 NONE
+inst1 1260-1267 A
+inst1 1268-1599 NONE
+inst1 1600-1607 NONE 128,165
+inst1 1608-1719 NONE
+inst1 1720-1727 NONE 128,165
+inst1 1728-1919 NONE
+inst1 1920-2340 LEFT+Y
+inst1 2341-2600 NONE

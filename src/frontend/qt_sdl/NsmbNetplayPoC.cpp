@@ -8636,7 +8636,7 @@ void InitFromEnvironment()
     G.InputSendJitterFrames = std::max(
         0, EnvInt("MELONDS_NSML_INPUT_SEND_JITTER_FRAMES", 0));
     G.InputNetplayMaxFrameLead =
-        EnvInt("MELONDS_NSML_INPUT_MAX_FRAME_LEAD", G.InputNetplayOnly ? 1 : -1);
+        EnvInt("MELONDS_NSML_INPUT_MAX_FRAME_LEAD", G.InputNetplayOnly ? 2 : -1);
     G.DirectMvlBootEnabled = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT");
     G.DirectMvlBootHostOnly = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_HOST_ONLY");
     G.DirectMvlBootClientOnly = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_CLIENT_ONLY");

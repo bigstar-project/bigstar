@@ -6,7 +6,7 @@ param(
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds",
     [string]$InputScript = "tests\nsmb_us_direct_mvl_star_collect_left.inputs",
     [int]$InputDelayFrames = 16,
-    [int]$InputMaxFrameLead = 1,
+    [int]$InputMaxFrameLead = 2,
     [int]$InputSendDelayFrames = 8,
     [int]$InputSendJitterFrames = 4,
     [int]$ScreenshotInterval = 6000,

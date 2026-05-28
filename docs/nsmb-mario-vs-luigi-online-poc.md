@@ -143,9 +143,14 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `logs/codex-both-manual-bootstrap-nojit-fatal-2400-20260529` で、JIT無効 + manual bootstrap + fatal timeout設定の2400フレームhost/client gameplay syncが通過。
 - 手動プレイ用launcher `scripts/run-nsmb-mvl-manual-local.ps1` を追加。デフォルトではJIT無効、manual bootstrap、fatal timeout、host/client localhost接続で起動する。
 - `InputNetplay` のclient側local instance既定値を1に修正。手動launcher smoke `logs/codex-manual-launcher-smoke2-1200-20260529` で、host `localInstance=0`、client `localInstance=1`、fatal timeout有効、frame limit到達を確認。
-- `-InputMaxFrameLead` を追加。デフォルトは `1` で、手動入力時にhost/clientのエミュレーションフレームが大きく先行しないようにする。
+- `-InputMaxFrameLead` を追加。デフォルトは `2` で、手動入力時にhost/clientのエミュレーションフレームが大きく先行しないようにする。1フレーム制限は開始直後の配送順で厳しすぎるため、実用デフォルトは2。
 - `logs/codex-both-manual-bootstrap-nojit-framelead1-1800-20260529` で、JIT無効 + frame lead 1 + manual bootstrap の同一プロセスhost/client gameplay syncが通過。
 - `logs/codex-split-manual-bootstrap-nojit-framelead1-1800-20260529` で、JIT無効 + frame lead 1 + manual bootstrap のlocalhost split起動が通過。900フレーム以降の主要gameplay CSV比較でも差分なし。
+- host/clientで別々のローカル入力を流す検証スクリプトを追加。
+  - `tests/nsmb_us_direct_mvl_manual_host_mario_move.inputs`
+  - `tests/nsmb_us_direct_mvl_manual_client_luigi_move.inputs`
+  - `scripts/run-nsmb-mvl-split-local-input-smoke.ps1`
+- `logs/codex-split-local-input-script-2600-20260529` で、hostのMario入力とclientのLuigi入力が別々に送られても、2600フレームまで主要gameplay CSV比較が通過。Mario/Luigi双方が移動したことも自動確認済み。
 
 ## 未解決・注意点
 
@@ -164,8 +169,9 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 1. 最優先: 手動入力時にhost/clientの開始フレームと入力適用フレームが揃うことを確認する。
    - hostが入力送信開始前にpeer接続を待つ。
    - 開始後は相手入力がないフレームを勝手に進めず、待つ。timeoutした場合はデフォルトで失敗終了する。
-   - `-InputMaxFrameLead 1` で片方のプロセスだけが先行しすぎないようにする。
-   - JIT無効 + manual bootstrap + localhost split 1800フレーム比較は通過。次は短い実キー入力を含む自動/半自動検証を作る。
+   - `-InputMaxFrameLead 2` で片方のプロセスだけが先行しすぎないようにする。
+   - JIT無効 + manual bootstrap + localhost split 1800フレーム比較は通過。
+   - host/clientで別々のローカル入力を出す2600フレームsplit smokeも通過。次は手動launcherで人間の実キー入力を目視確認し、その後に長時間化する。
 2. true local1 + RNG固定 + VS限定stage-lock skip + ROM側wifi count + Net::localAid patchを本線として、長時間の死亡/復帰・勝敗・スター取得まで壊れないか確認する。
    - client local1カメラ、Big Star位置、localPlayerIDは自動チェックで守る。
    - 片方死亡中に相手プレイヤー・敵・ブロック・ステージ進行が止まらないことは、`-CheckNoPlayerUpdateLock` と `-CheckMovingHazardProgressDuringDeath` で継続確認する。
@@ -216,7 +222,7 @@ host側:
   -SkipGameplayActorCheck `
   -InputNetplay `
   -InputDelayFrames 16 `
-  -InputMaxFrameLead 1 `
+  -InputMaxFrameLead 2 `
   -PacketBridgeJitHelperPatch `
   -PacketBridgeJitHelperPatchFrame 900 `
   -PacketBridgeStartFrame 900 `
@@ -241,7 +247,7 @@ client側:
   -SkipGameplayActorCheck `
   -InputNetplay `
   -InputDelayFrames 16 `
-  -InputMaxFrameLead 1 `
+  -InputMaxFrameLead 2 `
   -PacketBridgeJitHelperPatch `
   -PacketBridgeJitHelperPatchFrame 900 `
   -PacketBridgeStartFrame 900 `
