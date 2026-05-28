@@ -35,6 +35,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `-InputNetplay` modeを追加し、PacketBridge本体を使わず `WireInput` だけをkeys helper scratchへ接続できるようにした。
 - 入力netplay専用モードでは通常lockstepへ入らず、`frame + delay` の入力を事前送信し、`frame` の入力を適用するようにした。
 - 入力netplay専用モードでは自動match seedによる `Net::random.value` 書き換えを止め、ROM側の固定RNGを使うようにした。
+- `-CheckHostClientGameplaySync` を追加し、host/clientの重要game-state差分を自動検出できるようにした。
 
 ## 直近の検証結果
 
@@ -42,12 +43,16 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 - `logs/codex-both-inputnetplay-delay-armcheck-1300-20260528`
 - `logs/codex-both-inputnetplay-delay-long-2400-20260528`
+- `logs/codex-both-inputnetplay-synccheck-2400-20260528`
+- `logs/codex-both-inputnetplay-synccheck-4800-20260528`
 
 結果:
 
 - 1300フレーム検証で、host/clientの `netPacketTick`、player0/player1入力、Mario/Luigi actor座標、残機が一致。
 - 2400フレーム検証でも、通信切断、remote input timeout、ARM abort検出なし。
 - 2400フレーム時点の実効速度は host 約49.45fps、client 約50.50fps。
+- `-CheckHostClientGameplaySync` 付きの2400/4800フレーム検証が通過。入力、Mario/Luigi actor座標、残機、ストック、スターactor、moving hazard、一部object countのhost/client一致を自動確認済み。
+- 4800フレーム時点の実効速度は host 約50.97fps、client 約51.54fps。
 - screenshot上、hostはMario視点、clientはLuigi視点になっている。上画面カメラ差はlocalPlayerID差として想定内。
 - ストック表示はhostがplayer0、clientがplayer1を表示しており、CSV上も `player0InventoryPowerup=0x0`、`player1InventoryPowerup=0x1` でhost/client一致。Luigi側UIとして自然に動いている可能性が高い。
 
@@ -61,16 +66,15 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 ## 次にやること
 
-1. traceとscreenshotを最小化した実用寄り設定で、FPSが60fpsに近づくか確認する。
-2. 2400フレームより長い入力同期検証を行い、host/clientの重要状態が崩れないか確認する。
-3. Luigi側操作の検証を増やす。
+1. さらにtraceを減らした実用寄り設定、または2PC分散でFPSが60fpsに近づくか確認する。
+2. Luigi側操作の検証を増やす。
    - カメラ追従
    - ストックアイテム使用
    - 死亡/復帰
    - 勝敗判定
-4. 8コインアイテム、Big Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
-5. runtime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
-6. 同一LANまたは擬似遅延付きの2プロセス検証へ進む。
+3. 8コインアイテム、Big Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
+4. runtime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
+5. 同一LANまたは擬似遅延付きの2プロセス検証へ進む。
 
 ## 代表テストコマンド
 
@@ -101,6 +105,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   -PacketBridgeJitHelperPatch `
   -PacketBridgeJitHelperPatchFrame 900 `
   -PacketBridgeStartFrame 900 `
+  -CheckHostClientGameplaySync `
   -LogDir logs\codex-both-inputnetplay-delay-long-2400-20260528
 ```
 

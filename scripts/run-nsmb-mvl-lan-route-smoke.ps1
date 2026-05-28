@@ -462,6 +462,7 @@ param(
     [switch]$SkipBlankScreenshotCheck,
     [switch]$SkipMvlStateCheck,
     [switch]$SkipGameplayActorCheck,
+    [switch]$CheckHostClientGameplaySync,
     [switch]$SkipArmAbortCheck,
     [switch]$RequireClientRemotePlayer0Movement,
     [string]$LogDir = "logs\nsmb-mvl-lan-route"
@@ -3186,6 +3187,74 @@ if ($GameStateTrace -and -not $SkipMvlStateCheck -and ($GameStateTraceEndFrame -
         if ($inputRows.Count -eq 0 -or $movedRows.Count -eq 0) {
             $last = $candidateRows[-1]
             throw "client remote player0 movement check failed: rows=$($candidateRows.Count) inputRows=$($inputRows.Count) movedRows=$($movedRows.Count) firstX=$($first.playerActor0X) lastX=$($last.playerActor0X) lastInput=$($last.inputPlayer0Held). See $clientGameStateTrace"
+        }
+    }
+
+    if ($CheckHostClientGameplaySync -and $RunRole -eq "both") {
+        if (-not (Test-Path $hostGameStateTrace) -or -not (Test-Path $clientGameStateTrace)) {
+            throw "host/client gameplay sync check requires both game-state traces: host=$hostGameStateTrace client=$clientGameStateTrace"
+        }
+
+        $hostRows = @(Import-Csv $hostGameStateTrace)
+        $clientRows = @(Import-Csv $clientGameStateTrace)
+        if ($hostRows.Count -eq 0 -or $clientRows.Count -eq 0) {
+            throw "host/client gameplay sync check received empty traces: hostRows=$($hostRows.Count) clientRows=$($clientRows.Count)"
+        }
+
+        $clientByFrame = @{}
+        foreach ($row in $clientRows) {
+            $clientByFrame[$row.frame] = $row
+        }
+
+        $fields = @(
+            "stageID",
+            "stageGroup",
+            "vsMode",
+            "netPacketTick",
+            "inputPlayer0Held",
+            "inputPlayer1Held",
+            "inputPlayer0Pressed",
+            "inputPlayer1Pressed",
+            "playerActor0Found",
+            "playerActor0X",
+            "playerActor0Y",
+            "playerActor0Z",
+            "playerActor1Found",
+            "playerActor1X",
+            "playerActor1Y",
+            "playerActor1Z",
+            "player0InventoryPowerup",
+            "player1InventoryPowerup",
+            "player0Dead",
+            "player1Dead",
+            "player0Lives",
+            "player1Lives",
+            "player0BattleStars",
+            "player1BattleStars",
+            "player0Coins",
+            "player1Coins",
+            "vsStarActorFound",
+            "vsStarActorX",
+            "vsStarActorY",
+            "vsStarActorZ",
+            "movingHazardFound",
+            "movingHazardX",
+            "movingHazardY",
+            "movingHazardZ",
+            "objectActiveCount",
+            "objectDeadCount"
+        )
+
+        foreach ($hostRow in $hostRows) {
+            if (-not $clientByFrame.ContainsKey($hostRow.frame)) {
+                continue
+            }
+            $clientRow = $clientByFrame[$hostRow.frame]
+            foreach ($field in $fields) {
+                if ($hostRow.$field -ne $clientRow.$field) {
+                    throw "host/client gameplay sync mismatch frame=$($hostRow.frame) field=$field host=$($hostRow.$field) client=$($clientRow.$field). See $hostGameStateTrace and $clientGameStateTrace"
+                }
+            }
         }
     }
 }
