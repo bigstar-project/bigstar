@@ -947,6 +947,7 @@ struct State
     int ForceCourseSelectFactoryPlayerArg = -1;
     bool ForceCourseSelectFactoryApplied[16] {};
     std::string InputScriptPath;
+    std::string ScriptRemotePacketInputScriptPath;
     std::string HashLogPath;
     std::string ScreenshotDir;
     std::string StateSaveDir;
@@ -1268,6 +1269,7 @@ struct InputSpan
 
 State G;
 std::vector<InputSpan> GInputScript;
+std::vector<InputSpan> GScriptRemotePacketInputScript;
 
 struct FrameBarrier
 {
@@ -1386,14 +1388,15 @@ bool ParseInputSpec(const std::string& spec, InputState& input)
     return true;
 }
 
-bool LoadInputScriptLocked()
+bool LoadInputScriptFileLocked(const std::string& path, std::vector<InputSpan>& spans)
 {
-    if (G.InputScriptPath.empty()) return true;
+    if (path.empty()) return true;
 
-    std::ifstream file(G.InputScriptPath);
+    spans.clear();
+    std::ifstream file(path);
     if (!file)
     {
-        std::printf("NSMB Test: failed to open input script: %s\n", G.InputScriptPath.c_str());
+        std::printf("NSMB Test: failed to open input script: %s\n", path.c_str());
         return false;
     }
 
@@ -1434,7 +1437,7 @@ bool LoadInputScriptLocked()
                     !ParseU32(upperTarget.substr(prefix.size()), targetInstance) ||
                     targetInstance >= 16)
                 {
-                    std::printf("NSMB Test: invalid input target at %s:%d\n", G.InputScriptPath.c_str(), lineNo);
+                    std::printf("NSMB Test: invalid input target at %s:%d\n", path.c_str(), lineNo);
                     return false;
                 }
                 span.Instance = static_cast<int>(targetInstance);
@@ -1444,7 +1447,7 @@ bool LoadInputScriptLocked()
         const auto dash = range.find('-');
         if (dash == std::string::npos)
         {
-            std::printf("NSMB Test: invalid range at %s:%d\n", G.InputScriptPath.c_str(), lineNo);
+            std::printf("NSMB Test: invalid range at %s:%d\n", path.c_str(), lineNo);
             return false;
         }
 
@@ -1453,7 +1456,7 @@ bool LoadInputScriptLocked()
             span.End < span.Start ||
             !ParseInputSpec(buttons, span.Input))
         {
-            std::printf("NSMB Test: invalid input line at %s:%d\n", G.InputScriptPath.c_str(), lineNo);
+            std::printf("NSMB Test: invalid input line at %s:%d\n", path.c_str(), lineNo);
             return false;
         }
 
@@ -1466,7 +1469,7 @@ bool LoadInputScriptLocked()
                 !ParseU32(touch.substr(0, comma), x) ||
                 !ParseU32(touch.substr(comma + 1), y))
             {
-                std::printf("NSMB Test: invalid touch at %s:%d\n", G.InputScriptPath.c_str(), lineNo);
+                std::printf("NSMB Test: invalid touch at %s:%d\n", path.c_str(), lineNo);
                 return false;
             }
             span.Input.Touching = true;
@@ -1474,13 +1477,18 @@ bool LoadInputScriptLocked()
             span.Input.TouchY = static_cast<melonDS::u16>(std::min<melonDS::u32>(y, 191));
         }
 
-        GInputScript.push_back(span);
+        spans.push_back(span);
     }
 
     std::printf("NSMB Test: loaded %zu input spans from %s\n",
-        GInputScript.size(),
-        G.InputScriptPath.c_str());
+        spans.size(),
+        path.c_str());
     return true;
+}
+
+bool LoadInputScriptLocked()
+{
+    return LoadInputScriptFileLocked(G.InputScriptPath, GInputScript);
 }
 
 bool ParseFrameRanges(const char* value, std::vector<std::pair<melonDS::u32, melonDS::u32>>& out)
@@ -1618,11 +1626,15 @@ void CompareGameStateLocked(int instanceID, melonDS::u32 frame)
         static_cast<unsigned long long>(rhs.RenderCandidate));
 }
 
-InputState ApplyInputScript(int instanceID, melonDS::u32 frame, const InputState& fallback)
+InputState ApplyInputSpans(
+    const std::vector<InputSpan>& spans,
+    int instanceID,
+    melonDS::u32 frame,
+    const InputState& fallback)
 {
-    if (!G.TestEnabled || GInputScript.empty()) return fallback;
+    if (spans.empty()) return fallback;
 
-    for (const InputSpan& span : GInputScript)
+    for (const InputSpan& span : spans)
     {
         if ((span.Instance < 0 || span.Instance == instanceID) &&
             frame >= span.Start && frame <= span.End)
@@ -1630,6 +1642,20 @@ InputState ApplyInputScript(int instanceID, melonDS::u32 frame, const InputState
     }
 
     return fallback;
+}
+
+InputState ApplyInputScript(int instanceID, melonDS::u32 frame, const InputState& fallback)
+{
+    if (!G.TestEnabled) return fallback;
+    return ApplyInputSpans(GInputScript, instanceID, frame, fallback);
+}
+
+InputState ApplyScriptRemotePacketInputScript(int instanceID, melonDS::u32 frame, const InputState& fallback)
+{
+    if (!G.TestEnabled) return fallback;
+    if (GScriptRemotePacketInputScript.empty())
+        return ApplyInputScript(instanceID, frame, fallback);
+    return ApplyInputSpans(GScriptRemotePacketInputScript, instanceID, frame, fallback);
 }
 
 void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kNoFrameLimit)
@@ -5708,10 +5734,13 @@ void PushScriptRemotePacketIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
     if (instanceID < 0 || instanceID >= 16)
         return;
 
-    const InputState input = ApplyInputScript(G.ScriptRemotePacketInputInstance, frame, NeutralInput());
+    const InputState input = ApplyScriptRemotePacketInputScript(
+        G.ScriptRemotePacketInputInstance,
+        frame,
+        NeutralInput());
     melonDS::u8 packet[52] {};
     const melonDS::u32 tick = nds->ARM9Read16(kNetPacketTickAddr);
-    const melonDS::u32 keys = input.KeyMask & 0x0FFF;
+    const melonDS::u32 keys = (~input.KeyMask) & 0x0FFF;
     packet[0] = static_cast<melonDS::u8>(tick & 0xFF);
     packet[1] = static_cast<melonDS::u8>((tick >> 8) & 0xFF);
     packet[2] = static_cast<melonDS::u8>(keys & 0xFF);
@@ -8268,6 +8297,10 @@ void InitFromEnvironment()
     const char* inputScript = std::getenv("MELONDS_NSML_INPUT_SCRIPT");
     if (inputScript && inputScript[0]) G.InputScriptPath = inputScript;
 
+    const char* scriptRemotePacketInputScript = std::getenv("MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT");
+    if (scriptRemotePacketInputScript && scriptRemotePacketInputScript[0])
+        G.ScriptRemotePacketInputScriptPath = scriptRemotePacketInputScript;
+
     const char* hashLog = std::getenv("MELONDS_NSML_HASH_LOG");
     if (hashLog && hashLog[0]) G.HashLogPath = hashLog;
 
@@ -8745,6 +8778,11 @@ void InitFromEnvironment()
     {
         if (!LoadInputScriptLocked())
             G.TestEnabled = false;
+        if (!G.ScriptRemotePacketInputScriptPath.empty() &&
+            !LoadInputScriptFileLocked(G.ScriptRemotePacketInputScriptPath, GScriptRemotePacketInputScript))
+        {
+            G.TestEnabled = false;
+        }
 
         if (!G.HashLogPath.empty())
         {
