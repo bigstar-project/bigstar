@@ -273,6 +273,9 @@ param(
     [switch]$TracePlayerLifeCalls,
     [switch]$TracePlayerLifeChanges,
     [switch]$TracePlayerDefeated,
+    [switch]$TracePlayerRender,
+    [int]$TracePlayerRenderStartFrame = 0,
+    [int]$TracePlayerRenderEndFrame = 0,
     [switch]$TraceStageCamera,
     [int]$TraceStageCameraStartFrame = 0,
     [int]$TraceStageCameraEndFrame = 0,
@@ -1308,6 +1311,15 @@ function Start-MelonLANProcess {
         $env:MELONDS_NSML_TRACE_PLAYER_DEFEATED = "1"
     } else {
         Remove-Item Env:\MELONDS_NSML_TRACE_PLAYER_DEFEATED -ErrorAction SilentlyContinue
+    }
+    if ($TracePlayerRender) {
+        $env:MELONDS_NSML_TRACE_PLAYER_RENDER = "1"
+        if ($TracePlayerRenderStartFrame -gt 0) { $env:MELONDS_NSML_TRACE_PLAYER_RENDER_START_FRAME = "$TracePlayerRenderStartFrame" } else { Remove-Item Env:\MELONDS_NSML_TRACE_PLAYER_RENDER_START_FRAME -ErrorAction SilentlyContinue }
+        if ($TracePlayerRenderEndFrame -gt 0) { $env:MELONDS_NSML_TRACE_PLAYER_RENDER_END_FRAME = "$TracePlayerRenderEndFrame" } else { Remove-Item Env:\MELONDS_NSML_TRACE_PLAYER_RENDER_END_FRAME -ErrorAction SilentlyContinue }
+    } else {
+        Remove-Item Env:\MELONDS_NSML_TRACE_PLAYER_RENDER -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_TRACE_PLAYER_RENDER_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_TRACE_PLAYER_RENDER_END_FRAME -ErrorAction SilentlyContinue
     }
     if ($TraceStageCamera) {
         $env:MELONDS_NSML_TRACE_STAGE_CAMERA = "1"

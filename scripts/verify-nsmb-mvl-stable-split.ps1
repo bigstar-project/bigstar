@@ -5,7 +5,8 @@ param(
     [int]$ToFrame = 0,
     [int]$RequireNoLifeLossUntilFrame = 0,
     [switch]$NoRequireInput,
-    [switch]$RequireStageVisibleScreenshots
+    [switch]$RequireStageVisibleScreenshots,
+    [switch]$RequirePlayerVisibleScreenshots
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,6 +36,10 @@ if ($RequireNoLifeLossUntilFrame -gt 0) {
 
 if ($RequireStageVisibleScreenshots) {
     $argsForVerifier.RequireStageVisibleScreenshots = $true
+}
+
+if ($RequirePlayerVisibleScreenshots) {
+    $argsForVerifier.RequirePlayerVisibleScreenshots = $true
 }
 
 & .\scripts\verify-nsmb-mvl-lan-result.ps1 @argsForVerifier

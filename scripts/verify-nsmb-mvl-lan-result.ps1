@@ -12,10 +12,13 @@ param(
     [switch]$RequireStarRespawn,
     [int]$RequireNoLifeLossUntilFrame = 0,
     [switch]$RequireStageVisibleScreenshots,
+    [switch]$RequirePlayerVisibleScreenshots,
     [double]$MinStageTerrainRatio = 0.2,
     [double]$MaxStageSkyRatio = 0.8,
     [double]$MaxStageGreenBackdropRatio = 0.5,
-    [double]$MaxStageDominantRatio = 0.85
+    [double]$MaxStageDominantRatio = 0.85,
+    [int]$MinPlayerRedPixels = 40,
+    [int]$MinPlayerDarkPixels = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -244,7 +247,7 @@ if ($RequireNoLifeLossUntilFrame -gt 0) {
     }
 }
 
-if ($RequireStageVisibleScreenshots) {
+if ($RequireStageVisibleScreenshots -or $RequirePlayerVisibleScreenshots) {
     foreach ($entry in @(
         @{ Label = "host"; Root = $hostRoot; Dir = "screens-host" },
         @{ Label = "client"; Root = $clientRoot; Dir = "screens-client" }
@@ -257,11 +260,31 @@ if ($RequireStageVisibleScreenshots) {
         if (!$latest) {
             Fail "$($entry.Label) screenshot directory has no PNGs: $screenDir"
         }
-        $probe = & python tools\nsmb_screenshot_probe.py $latest.FullName --band-start 64 --band-end 192 --min-terrain-ratio $MinStageTerrainRatio --max-sky-ratio $MaxStageSkyRatio --max-green-backdrop-ratio $MaxStageGreenBackdropRatio --max-dominant-ratio $MaxStageDominantRatio 2>&1
+        $probeArgs = @(
+            "tools\nsmb_screenshot_probe.py",
+            $latest.FullName,
+            "--band-start", "64",
+            "--band-end", "192"
+        )
+        if ($RequireStageVisibleScreenshots) {
+            $probeArgs += @(
+                "--min-terrain-ratio", "$MinStageTerrainRatio",
+                "--max-sky-ratio", "$MaxStageSkyRatio",
+                "--max-green-backdrop-ratio", "$MaxStageGreenBackdropRatio",
+                "--max-dominant-ratio", "$MaxStageDominantRatio"
+            )
+        }
+        if ($RequirePlayerVisibleScreenshots) {
+            $probeArgs += @(
+                "--min-red-player-pixels", "$MinPlayerRedPixels",
+                "--min-dark-model-pixels", "$MinPlayerDarkPixels"
+            )
+        }
+        $probe = & python @probeArgs 2>&1
         if ($LASTEXITCODE -ne 0) {
-            Fail "$($entry.Label) screenshot stage visibility probe failed for $($latest.FullName): $($probe -join ' | ')"
+            Fail "$($entry.Label) screenshot probe failed for $($latest.FullName): $($probe -join ' | ')"
         }
     }
 }
 
-Write-Host "NSMB MvL LAN result verified: frames=$checked from=$FromFrame tolerance=$PositionTolerance remoteInputHits=$($RequireRemoteInputHits.IsPresent) player0Input=$($RequirePlayer0Input.IsPresent) player1Input=$($RequirePlayer1Input.IsPresent) starPickup=$($RequireStarPickup.IsPresent) starRespawn=$($RequireStarRespawn.IsPresent) noLifeLossUntil=$RequireNoLifeLossUntilFrame stageVisible=$($RequireStageVisibleScreenshots.IsPresent)"
+Write-Host "NSMB MvL LAN result verified: frames=$checked from=$FromFrame tolerance=$PositionTolerance remoteInputHits=$($RequireRemoteInputHits.IsPresent) player0Input=$($RequirePlayer0Input.IsPresent) player1Input=$($RequirePlayer1Input.IsPresent) starPickup=$($RequireStarPickup.IsPresent) starRespawn=$($RequireStarRespawn.IsPresent) noLifeLossUntil=$RequireNoLifeLossUntilFrame stageVisible=$($RequireStageVisibleScreenshots.IsPresent) playerVisible=$($RequirePlayerVisibleScreenshots.IsPresent)"

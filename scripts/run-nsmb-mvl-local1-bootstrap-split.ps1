@@ -6,7 +6,7 @@ param(
     [string]$Peer = "127.0.0.1",
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-local1-host.tmp.nds",
-    [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-local1-client-overlay0all.tmp.nds",
+    [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-local1-client-overlay0all-range0-vertical0.tmp.nds",
     [string]$InputScript = "tests\nsmb_us_direct_mvl_safe_short.inputs",
     [string]$HostLogDir = "logs\nsmvl-local1-bootstrap-host",
     [string]$ClientLogDir = "logs\nsmvl-local1-bootstrap-client",
@@ -24,7 +24,10 @@ param(
     [switch]$AllowJitWithPacketBridge,
     [switch]$NoScreenshots,
     [switch]$NoGameStateTrace,
-    [switch]$NoHashLog
+    [switch]$NoHashLog,
+    [switch]$TracePlayerRender,
+    [int]$TracePlayerRenderStartFrame = 0,
+    [int]$TracePlayerRenderEndFrame = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -60,6 +63,11 @@ if ($AllowJitWithPacketBridge) { $argsForRun.AllowJitWithPacketBridge = $true }
 if ($NoScreenshots) { $argsForRun.NoScreenshots = $true }
 if ($NoGameStateTrace) { $argsForRun.NoGameStateTrace = $true }
 if ($NoHashLog) { $argsForRun.NoHashLog = $true }
+if ($TracePlayerRender) {
+    $argsForRun.TracePlayerRender = $true
+    $argsForRun.TracePlayerRenderStartFrame = $TracePlayerRenderStartFrame
+    $argsForRun.TracePlayerRenderEndFrame = $TracePlayerRenderEndFrame
+}
 
 & .\scripts\run-nsmb-mvl-standard-split.ps1 @argsForRun
 
@@ -70,6 +78,7 @@ if ($RunRole -eq "both" -and -not $SkipVerify -and -not $NoGameStateTrace) {
         FromFrame = $SwitchFrame
         ToFrame = $Frames
         RequireStageVisibleScreenshots = (-not $NoScreenshots)
+        RequirePlayerVisibleScreenshots = (-not $NoScreenshots)
     }
     if ($RequireNoLifeLoss) {
         $argsForVerify.RequireNoLifeLossUntilFrame = $Frames

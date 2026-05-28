@@ -94,6 +94,9 @@ param(
     [switch]$TracePlayerLifeCalls,
     [switch]$TracePlayerLifeChanges,
     [switch]$TracePlayerDefeated,
+    [switch]$TracePlayerRender,
+    [int]$TracePlayerRenderStartFrame = 0,
+    [int]$TracePlayerRenderEndFrame = 0,
     [switch]$TraceStageCamera,
     [int]$TraceStageCameraStartFrame = 0,
     [int]$TraceStageCameraEndFrame = 0,
@@ -347,6 +350,13 @@ if ($TracePlayerLifeChanges) {
 }
 if ($TracePlayerDefeated) {
     $common += "-TracePlayerDefeated"
+}
+if ($TracePlayerRender) {
+    $common += @(
+        "-TracePlayerRender",
+        "-TracePlayerRenderStartFrame", "$TracePlayerRenderStartFrame",
+        "-TracePlayerRenderEndFrame", "$TracePlayerRenderEndFrame"
+    )
 }
 if ($TraceStageCamera) {
     $common += @(

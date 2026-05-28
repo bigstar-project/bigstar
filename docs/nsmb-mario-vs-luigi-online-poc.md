@@ -28,80 +28,49 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 
 ## 現在の最優先課題
 
-現在の最優先は、`client localPlayerID=1` で正常なMvL開始状態を作れるかを検証すること。特に、raw local1 direct routeで欠けていた Goomba/movingHazard などのobject spawn set、camera slot、開始死亡、player model表示を、`local0 bootstrap -> local1切替` と stage/session state patch の両面から切り分ける。
+現在の本筋は `host localPlayerID=0` / `client localPlayerID=1` の local1 bootstrap route。stage初期化はlocal0相当で通し、frame 900以後にclientをlocal1へ切り替える。raw local1 direct routeで欠けていたobject spawn setは、このbootstrapで回避できている。
 
-`localPlayerID=0` hybrid は、以下の同期比較基盤として維持する。
+最新の標準検証コマンド:
 
-- 最新の成功ログ:
-  - `logs/smvl-hybrid-display1-split-framelead20-2240-20260528`
-    - host/client とも canonical `localPlayerID=0`
-    - client ROM は `StageCamera player1 + StageFX player1 + inventory HUD player1`
-    - `PacketBridgeLookupTickDelay=10`
-    - frame 1500-2240 で host/client state verifier 通過
-  - `logs/smvl-hybrid-avoidgoomba-delay60-split-3000-20260528`
-    - `PacketBridgeLookupTickDelay=60`
-    - frame 1500-3000 で actor座標、敵、残機/死亡状態を含むstate一致
-    - `-RequirePlayer0Input -RequirePlayer1Input -RequireStageVisibleScreenshots` 通過
-  - `logs/smvl-hybrid-helper-3000-20260528`
-    - `scripts/run-nsmb-mvl-hybrid-split.ps1` から再現
-    - frame 1500-3000 で `-RequirePlayer0Input -RequirePlayer1Input -RequireStageVisibleScreenshots` 通過
-  - `logs/smvl-hybrid-helper-renderdefault-3000-20260528`
-    - hybrid helperの標準ROM生成で `Player::renderModel visible arg` patchをhost/client双方に適用
-    - client上画面でMario/Luigi両方のplayer model表示を確認
-    - frame 1500-3000 でstate verifier通過
-  - `logs/smvl-hybrid-safe-bothjump-6000-20260528`
-    - `tests/nsmb_us_direct_mvl_safe_short.inputs`
-    - Mario/Luigiをその場ジャンプさせ、frame 1500-6000 で `RequirePlayer0Input -RequirePlayer1Input -RequireNoLifeLossUntilFrame 6000` 通過
-  - `logs/smvl-hybrid-separated-host-3000-20260528` / `logs/smvl-hybrid-separated-client-3000-20260528`
-    - `RunRole host` と `RunRole client` を別PowerShell jobとして起動
-    - frame 1500-3000 で別ログディレクトリ比較 verifier 通過
-  - `logs/smvl-hybrid-delay30-jitter5-safe-3000-20260528`
-    - `SendDelayFrames=30`, `SendJitterFrames=5`
-    - frame 1500-3000 で両者入力あり、死亡なし、state verifier 通過
-- 最新の未解決:
-  - client表示はまだ広いQAが必要。Goombaについては `Goomba::onRender` と `OAM/drawSprite` がclientでも呼ばれ、単独スクリーンショットで描画を確認したため、直近の差分はcamera差分の可能性が高い。player modelはhost/client双方へ同じrender-visible patchを当てると表示できるが、cullingを雑に外しているため最終品質としては要改善。
-  - `tests/nsmb_us_direct_mvl_safe_short.inputs` はMario/Luigi両者入力あり・死亡なしの6000frame安全ルート。次はさらに実操作に近い左右移動やスター/8コインアイテム検証へ広げる必要がある。
-  - 既存の `tests/nsmb_us_direct_mvl_star_collect_left.inputs` はhybrid routeのスター取得検証には使えない。`logs/smvl-hybrid-star-left-7200-20260528` では7200frameまで進めても `player*BattleStars` / `player*CollectedStars` が変わらず、最終的にYou Win画面へ入った。スター位置へ向かう入力を作り直す必要がある。
-  - `PacketBridgeLookupTickDelay=10` ではclientのlocal player1 packetがhostより先に反映されることがある。delay 60 では同期できたため、最終的にはlockstep待ち/入力遅延の自動調整が必要。
-  - `localPlayerID=0` hybridはtrace上の `Game::localPlayerID` がcanonical 0 のままなので、最終方針ではなく比較基盤として扱う。
-  - JIT + PacketBridgeはまだ成功条件に使わない。`logs/smvl-hybrid-jit-trace-2300-20260528` ではpacket API hook自体は値を返すが、game-stateの `inputPlayer*Held` へ反映されない。`logs/smvl-hybrid-jit-branchdone-safe-3000-20260528` のBL skip実験は試合開始前で止まったため破棄した。
+```powershell
+.\scripts\run-nsmb-mvl-local1-bootstrap-split.ps1 -RegenerateRoms -Frames 3000 -InputScript tests\nsmb_us_direct_mvl_client_short_right_safe.inputs -HostLogDir logs\...host -ClientLogDir logs\...client -NoHashLog -RequireNoLifeLoss
+```
+
+現在の成功条件:
+
+- `scripts/generate-nsmb-mvl-local1-bootstrap-roms.ps1` が、host/client用ROMを生成する。
+- host/client共通: direct MvL entry, `camera-player1-out-of-view-slot0`, `camera-focus-loop-count 2`, `player-render-model-visible`
+- client追加: `overlay0-localplayer-literal-alias --mode all`, `player-render-range-view-player-id --player-id 0`, `stage-camera-state-vertical-slot-zero`
+- `logs/smvl-local1-default-client-short-right-safe-host-3000-20260528` / `logs/smvl-local1-default-client-short-right-safe-client-3000-20260528`
+  - `client localPlayerID=1`
+  - player0/player1 state一致
+  - player1を短時間右移動させても `player1Lives=5`, `player1Dead=0`
+  - client上画面にplayer modelが表示され、緑画面/キャラ欠落検証も通過
+  - verifier: state一致、player0/player1入力あり、死亡なし、stage visible、player visible
+- `logs/smvl-local1-default-updated-host-3000-20260528` / `logs/smvl-local1-default-updated-client-3000-20260528`
+  - 固定立ち状態でも local1 route の stage visible / player visible / no life loss が通る。
+
+重要な失敗条件と対策:
+
+- `overlay0-localplayer-literal-alias --mode actor-collision` だけではclient上画面が緑一色になる。stateが通っても表示が壊れるため失敗扱い。
+- `overlay0-localplayer-literal-alias --mode all` だけでは静止時は表示できても、player1移動後に上画面からmodelが消える。
+- `player-render-range-view-player-id --player-id 0 + stage-camera-state-vertical-slot-zero` で静止時のMario/Luigi表示は戻る。
+- player1移動後も表示を維持するには `player-render-model-visible` が必要。描画関数に状態副作用があり得るため、host/client双方の共通ベースROMへ同じpatchを当てる。
+- verifier に `-RequirePlayerVisibleScreenshots` を追加。従来の `-RequireStageVisibleScreenshots` は緑画面を落とせるが、「地形はあるがplayer modelがない」ケースを通してしまうため。
+- `tests/nsmb_us_direct_mvl_both_different.inputs` は死亡演出へ入ることがあり、スクショ可視検証には向かない。同期ストレス用としてはstate一致だけを見る。
+
+速度:
+
+- JITなしのlocal1 splitは約10-12fps。`-NoScreenshots -NoGameStateTrace -NoHashLog` でも約12fpsなので、trace/screenshotは主因ではない。
+- `-AllowJitWithPacketBridge` は約42fpsまで上がるが、JIT経路では `inputPlayer0Held` が立たず、PacketBridge入力hookが成功条件を満たさない。現時点では入力前の短距離/見た目チェック限定。
+- 本筋の高速化は、JITのcore hook修正か、ROM patch側でpacket API境界を置換してJIT依存を減らす方向で検討する。
 
 直近の次アクション:
 
-- `local0 bootstrap -> local1切替` の標準検証コマンド/スクリプトを作り、切替frameごとに object spawn set と開始死亡を比較する。
-- raw `client localPlayerID=1` で欠ける object spawn が、どの初期化段階のlocalPlayerID参照に依存しているかを特定する。
-- 正常開始状態を作れたら、以後は `client localPlayerID=1` のまま PacketBridge 入力同期へ接続する。
-- `PacketBridgeLookupTickDelay=60` はlocal0 hybridの安定条件として残す。local1 routeで再検証する。
-- 高速化はJIT core hookを直接いじる前に、ROM patch側でpacket API境界を置換できるか再検討する。JIT実験は `-AllowJitWithPacketBridge -PacketBridgeTrace` で再現可能。
-
-2026-05-28 local1 bootstrap 検証:
-
-- `logs/smvl-local1-bootstrap1800-host-2400-20260528` / `logs/smvl-local1-bootstrap1800-client-2400-20260528`
-  - clientをframe 1800まで `localPlayerID=0`、以後 `localPlayerID=1` に切り替えた。
-  - raw local1で欠けていた `movingHazardFound` はhost/clientとも `0x1`、`objectActiveCount=0x9` を維持した。つまり object spawn set の欠落は、stage初期化をlocal0相当で通すbootstrapで回避できる可能性が高い。
-  - 一方で切替frame 1800直後にclientで `ARM9 prefetch abort pc=00000004` が出る。さらにframe 2280でhost側player0入力がclient側game-stateへ反映されず、state verifierは `playerActor0Y mismatch` で失敗した。
-  - 追加した `src/ARM.cpp` のprefetch abort詳細ログで、次の実行からLR/SP/CPSR/主要レジスタを確認できる。
-- `scripts/run-nsmb-mvl-local1-bootstrap-sweep.ps1` を追加。複数の切替frameを同じ条件で回し、local1 bootstrapの失敗点を比較する。
-- `logs/smvl-local1-bootstrap1800-abortdetail-client-1860-20260528`
-  - 詳細ログでは `pc=00000004 lr=0208FAEC sp=027E387C r1=0208FAE8 r12=0208FAF8`。`0x0208FAEC` は `Base::spawnObjectType` globalで、通常コードではない。試合中に `localPlayerID` だけを1へ切り替えると、既存state machine/関数ポインタ系が壊れて例外に落ちている可能性が高い。
-- `logs/smvl-local1-bootstrap-early-20260528-switch900-*`
-  - switchFrame 900 ではabortなしで1560frameまで完走し、`movingHazardFound=0x1` も維持した。
-  - ただしclient player1がframe 1380付近で `Player::standardDeathTransitState` に入り、frame 1500で `player1Lives=4` になる。stable ROM + 長めの `ForceStageCameraSlot` でも再現するため、単純なcamera slot未初期化ではない。
-  - life traceではclient local1化後のplayer collision/environment系がhostと違う。frame 960時点でhostは `coll=0800B001 env=00000000`、clientは `coll=0840B021 env=00000202` になっている。次はこの差分を作る `localPlayerID` 参照またはstage/zone stateを追う。
-- `logs/smvl-local1-bootstrap900-actorcollision0-client-3000-20260528`
-  - `overlay0-localplayer-literal-alias --mode actor-collision` でplayer1死亡は止まったが、client上画面が緑一色になった。stateだけ通っても表示が壊れるため失敗扱い。
-- `logs/smvl-local1-bootstrap900-overlay0all0-host-3000-20260528` / `logs/smvl-local1-bootstrap900-overlay0all0-client-3000-20260528`
-  - client ROMに `overlay0-localplayer-literal-alias --mode all` を適用し、clientをframe 900以降 `localPlayerID=1` にした。
-  - runtime `ForceStageCameraSlot` なしで、frame 900-3000 のstate一致、stage visible、player0/player1入力あり、残機減少なしを通過。
-  - clientスクショの緑画面も解消した。つまり local1 route の現時点の最良条件は `stable direct MvL host ROM + client overlay0 all alias + switchFrame 900`。
-- `logs/smvl-local1-bootstrap900-overlay0all0-bothdiff-host-3000-20260528` / `logs/smvl-local1-bootstrap900-overlay0all0-bothdiff-client-3000-20260528`
-  - `tests/nsmb_us_direct_mvl_both_different.inputs` で、Mario右移動 / Luigi左移動を含む非対称入力を検証。
-  - 途中で死亡は発生するが、host/clientのstate、入力、stage visibleは一致。死亡はdesyncではなく入力ルート由来。
-- 速度:
-  - JITなし、スクショ/game-state/hashありのlocal1 splitは約10-12fps。
-  - `-NoScreenshots -NoGameStateTrace -NoHashLog` でも約12fpsで、遅さの主因はtraceではなくPacketBridge時のJIT無効化と2プロセス同時実行。
-  - `-AllowJitWithPacketBridge` は約43fpsまで上がるが、game-state上の入力反映が消え、Luigi死亡も出るため成功条件にはまだ使わない。
-- `scripts/generate-nsmb-mvl-local1-bootstrap-roms.ps1` / `scripts/run-nsmb-mvl-local1-bootstrap-split.ps1` を追加。local1 bootstrap routeを標準コマンドで再現できる。
+- `client localPlayerID=1` でストックアイテム、死亡/復帰、勝敗判定がLuigi側として成立するか確認する。
+- player model表示patchはまだcullingを強めに回避している。最終品質では、どの可視判定がlocal1移動後に誤るのかを絞り、patch面積を減らす。
+- `PacketBridgeLookupTickDelay=60` を基準に、WAN遅延/ジッタ条件とロックステップ待ちの設計へ進める。
+- JIT高速化は成功条件を崩さない形で別途切り分ける。
 
 ## 実装済み
 
