@@ -2,94 +2,109 @@
 
 ## 目的
 
-New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` で WAN 越しに遊べる形へ持っていく。
+New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` で WAN 越しに対戦できる形へ持っていく。
 
-過去に試した `LocalMP 2インスタンス * 2プロセス`、savestate共有、試合開始後のWAN切り替え、actor/state強制同期は、切断、desync、内部状態不一致、低FPSの問題が大きいため本筋から外す。
+過去に試した `LocalMP 2インスタンス * 2プロセス`、savestate共有、試合開始後のWAN切り替え、actor/state強制同期は、速度・安定性・ゲーム状態の自然さの問題が大きいため本筋から外した。現在は US版ROMを主対象に、NSMB本来のMario vs Luigi処理をできるだけ使い、試合中の入力同期だけをWAN adapterへ差し替える方針。
 
-現在の本筋は次の通り。
+## 現在の方針
 
-- US版ROM `roms/nsmb-us.nds` / `A2DE` を主対象にする。
-- `host localPlayerID=0`、`client localPlayerID=1` を最終ルートにする。
-- NSMBが本来持っているMario vs Luigiの同期処理をできるだけ使う。
-- ローカル無線packet API、またはROM/RAM patchで、試合中の入力packetをWAN adapterへ差し替える。
+- 主対象ROMは US版 `roms/nsmb-us.nds` / `A2DE`。
+- 最終形は `host localPlayerID=0`、`client localPlayerID=1`。
+- clientはLuigi側として自然に動かす。カメラ、ストックアイテム、死亡/復帰、勝敗判定をlocalPlayerID=1の通常処理に任せる。
+- direct MvL entry ROM patchで、ローカル通信UIを経由せずMario vs Luigiステージへ入る。
+- `Net::getConsoleKeys(u16)` をJIT helper patchでscratch memory参照へ差し替え、host/client間の `WireInput` をplayer0/player1入力へ反映する。
+- `getPacketByte/getPacketTick/getPacketAction` まで差し替えるとステージ状態を壊しやすいため、現時点ではkeys helper限定。
 
-## 現在の到達点
+## 完了したこと
 
-完了:
-
-- US版ROM patch toolingを追加した。
+- US版ROM patch toolingを追加。
   - `tools/nsmb_us_rom_tool.py`
   - `tools/nsmb_us_rom_patch.py`
-- direct MvL entry系ROM patchを作った。
-- `external/NSMB-Code-Reference` のUS版シンボルを参照して、主要なpacket helperを特定した。
+- direct MvL entry系の検証ROMを生成済み。
+  - host: `roms/nsmb-us-direct-mvl-entry-stable-host-wificount2-rng100.tmp.nds`
+  - client: `roms/nsmb-us-direct-mvl-entry-stable-client-local1-wificount2-rng100.tmp.nds`
+- `external/NSMB-Code-Reference` を参照し、主要なNet helperを特定。
   - `Net::getConsoleKeys`
   - `Net::getPacketByte`
   - `Net::getPacketTick`
   - `Net::getPacketAction`
-- screenshot dump、game-state trace、extended trace、packet replay trace、RAM dumpなどの検証フックを追加した。
-- `wifi-communicating-consoles --count 2` と `rng-constant --value 0x100` の診断patchで、初期ステージ状態、Goomba系moving hazard、液体collision、初期スター位置をhost/clientで揃えられることを確認した。
-- runtime hookで `ForceWifiCommunicatingCount=2` と `ForceNetLocalAid=1` をframe 840以降に適用すると、client local1のローカル入力がplayer1へ流れることを確認した。
-- ARM-only packet hookと `ScriptRemotePacket` 診断を追加し、JIT無効ではNSMBのpacket API経由でremote player入力を注入できる。
-- `ScriptRemotePacket` がpeer側入力ファイルを別に読めるようにした。
-  - host単体検証では `client.inputs` をremote player1 packetに使う。
-  - client単体検証では `host.inputs` をremote player0 packetに使う。
-- JIT無効のoffline検証で、host local0とclient local1が同じ2人分の入力を受け取り、frame 960/1020/1200/1260のplayer0/player1座標が一致した。
-- single-role offline packet検証ではLAN startログが出ないため、`PacketBridgeArmOnly + ScriptRemotePacket` の場合はscript側のLAN start必須チェックを外した。
-- JIT有効時にもremote入力を高速検証できるよう、`Net::getConsoleKeys` だけをscratch memory参照へ差し替える診断patchを追加した。
+- screenshot dump、framebuffer dump、game-state trace、extended trace、packet replay trace、RAM dumpなどの検証フックを追加。
+- `wifi-communicating-consoles --count 2` と `rng-constant --value 0x100` の診断patchで、初期ステージ状態、moving hazard、液体collision、初期スター位置をhost/clientで揃えられることを確認。
+- offline scripted remote packet検証で、host local0 / client local1 のplayer0/player1入力とactor座標が短時間一致することを確認。
+- JIT有効時でも `Net::getConsoleKeys` keys helper patchだけなら、offline検証でhost/clientが一致することを確認。
+- `-InputNetplay` modeを追加し、PacketBridge本体を使わず `WireInput` だけをkeys helper scratchへ接続できるようにした。
+- 入力netplay専用モードでは通常lockstepへ入らず、`frame + delay` の入力を事前送信し、`frame` の入力を適用するようにした。
+- 入力netplay専用モードでは自動match seedによる `Net::random.value` 書き換えを止め、ROM側の固定RNGを使うようにした。
 
-直近の重要結果:
+## 直近の検証結果
 
-- host local0 offline remote1:
-  - log: `logs/codex-host-local0-offline-remote1-peerinput-trace-1300-20260528`
-  - frame 960: `inputPlayer0Held=0x11`, `inputPlayer1Held=0x21`
-  - frame 1200: `playerActor0X=0x847f0`, `playerActor1X=0xfffc8000`
-- client local1 offline remote0:
-  - log: `logs/codex-client-local1-offline-remote0-peerinput-trace-1300-20260528`
-  - frame 960: `inputPlayer0Held=0x11`, `inputPlayer1Held=0x21`
-  - frame 1200: `playerActor0X=0x847f0`, `playerActor1X=0xfffc8000`
-- つまり、少なくとも短時間のoffline scripted packetでは、host/client simulationの主要player状態は一致している。
-- JIT有効 + keys helper patchでもhost/clientは一致した。
-  - logs:
-    - `logs/codex-host-local0-offline-remote1-jit-keys-helper900-fix-1300-20260528`
-    - `logs/codex-client-local1-offline-remote0-jit-keys-helper900-fix-1300-20260528`
-  - frame 1200: host/clientとも `playerActor0X=0x70ff0`, `playerActor1X=0xfffc8000`
-  - 約49から50fpsで完走した。
-- 同一PC上のhost/client 2プロセスで、ENetの `WireInput` をkeys helper scratchへ接続した。
-  - log: `logs/codex-both-waninput-jit-keys-helper900-wait-1300-20260528`
-  - frame 960/1020/1200/1260でhost/clientのplayer0/player1入力と座標が一致した。
-  - 初動でframe 0から2のremote input timeoutがまだ残り、実効fpsはhost約35fps、client約42fps。
-  - `-NoLocalWait` を使うとtimeoutは消えるが、remote入力が間に合わないframeが出てhost/clientがズレたため、現時点では正しい検証には使わない。
-- PacketBridge本体を切り離して、ENetの `WireInput` だけを使う `-InputNetplay` modeを追加した。
-  - log: `logs/codex-both-inputnetplay-jit-keys-helper900-1300-20260528`
-  - host/clientの入力と座標は一致する。
-  - ただしframe 1020以降、入力値が更新され続けず、player座標も止まる。通常netplay側のlockstep開始後にscratchへ入れる入力frameが進んでいない可能性がある。
+代表ログ:
 
-## 未解決
+- `logs/codex-both-inputnetplay-delay-armcheck-1300-20260528`
+- `logs/codex-both-inputnetplay-delay-long-2400-20260528`
 
-- ARM-only packet hook自体はJIT有効時に踏まれない。
-  - ただし `Net::getConsoleKeys` のscratch helper patchなら、JIT有効でもscripted remote入力の短時間一致検証は可能になった。
-  - `getPacketByte/getPacketTick/getPacketAction` までpatchすると試合開始状態を壊したため、現時点のJIT helper patchはkeys限定にする。
-- PacketBridge + keys helperのboth検証では、起動直後に既存lockstep側のremote input timeoutが残っている。最終的にはnetplay開始前にremote inputを待たないよう整理して、初動の15秒前後のロスを消す必要がある。
-- `-InputNetplay` modeではPacketBridge本体の干渉は減ったが、lockstep開始後にscratch入力が固定化される問題が残っている。
-- runtime `DirectMvlBoot` / firstScene直行は、SND/heap周辺の初期化不足でdata abortまたは停止になりやすく、安定入口としては使わない。
-- `wifi-communicating-consoles --count 2` はStageLayout後には有効だが、VSConnect初期化中に常時patchすると壊れることがある。最終的には起動前ROM patchへ落とす前に適用タイミングを詰める必要がある。
-- 現在の一致確認はscripted inputの短時間検証であり、まだ実WAN adapter、遅延、packet loss、長時間対戦、スター再出現、8コインアイテム、ランダムステージ選択までは検証できていない。
+結果:
+
+- 1300フレーム検証で、host/clientの `netPacketTick`、player0/player1入力、Mario/Luigi actor座標、残機が一致。
+- 2400フレーム検証でも、通信切断、remote input timeout、ARM abort検出なし。
+- 2400フレーム時点の実効速度は host 約49.45fps、client 約50.50fps。
+- screenshot上、hostはMario視点、clientはLuigi視点になっている。上画面カメラ差はlocalPlayerID差として想定内。
+- ストック表示はhostがplayer0、clientがplayer1を表示しており、CSV上も `player0InventoryPowerup=0x0`、`player1InventoryPowerup=0x1` でhost/client一致。Luigi側UIとして自然に動いている可能性が高い。
+
+## 未解決・注意点
+
+- 2400フレームまでの短時間検証であり、実プレイとして十分な長時間安定性は未確認。
+- `ForceWifiCommunicatingCount=2` などruntime hookにまだ依存している。最終的にはROM patch側へ寄せたい。
+- 現在の入力スクリプトは短い診断用で、スター取得、8コインアイテム、ランダムステージ、死亡/復帰後の長時間継続まではまだ十分に検証していない。
+- 50fps前後で、完全な60fpsには届いていない。traceやスクリーンショットを減らした実用設定で再測定する必要がある。
+- WANの遅延・ジッタ・packet lossを模した検証は未実施。現状は同一PC上のhost/client 2プロセス検証。
 
 ## 次にやること
 
-1. `-InputNetplay` modeでlockstep開始後もscratch入力frameが進むようにする。
-2. PacketBridge + keys helperの初動remote input timeoutを消す。
-3. WAN adapterでhost/clientを同時起動し、ローカルネットワーク上で50fps前後の検証ループを安定化する。
-4. 入力を長めに流して、playerが止まらず自然に移動し続けるか確認する。
-5. 長時間の決定性確認を追加する。
-   - player actor
-   - active object set
-   - Goomba / moving hazard
-   - Big Star
-   - 8コインアイテム
-   - ランダムステージ
-6. `getPacketByte/getPacketTick/getPacketAction` もWAN化が必要かを、実WAN adapter検証後に判断する。
-7. Luigi側UI、カメラ、stock item、死亡/復帰、勝敗判定がlocalPlayerID=1の自然処理で動くかを検証する。
+1. traceとscreenshotを最小化した実用寄り設定で、FPSが60fpsに近づくか確認する。
+2. 2400フレームより長い入力同期検証を行い、host/clientの重要状態が崩れないか確認する。
+3. Luigi側操作の検証を増やす。
+   - カメラ追従
+   - ストックアイテム使用
+   - 死亡/復帰
+   - 勝敗判定
+4. 8コインアイテム、Big Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
+5. runtime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
+6. 同一LANまたは擬似遅延付きの2プロセス検証へ進む。
+
+## 代表テストコマンド
+
+入力netplayの現行代表検証:
+
+```powershell
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 `
+  -RunRole both `
+  -Frames 2400 `
+  -AllowJit `
+  -Exe build\release-windows-x86_64\melonDS.exe `
+  -Rom roms\nsmb-us-direct-mvl-entry-stable-host-wificount2-rng100.tmp.nds `
+  -HostRom roms\nsmb-us-direct-mvl-entry-stable-host-wificount2-rng100.tmp.nds `
+  -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-local1-wificount2-rng100.tmp.nds `
+  -InputScript tests\nsmb_us_direct_mvl_early_dual.inputs `
+  -GameStateTrace `
+  -GameStateTraceExtended `
+  -GameStateTraceInterval 120 `
+  -ScreenshotInterval 1200 `
+  -NoHashLog `
+  -SkipDisconnectScreenshotCheck `
+  -SkipBlankScreenshotCheck `
+  -SkipMvlStateCheck `
+  -SkipGameplayActorCheck `
+  -ForceWifiCommunicatingCount 2 `
+  -ForceWifiCommunicatingStartFrame 840 `
+  -InputNetplay `
+  -PacketBridgeJitHelperPatch `
+  -PacketBridgeJitHelperPatchFrame 900 `
+  -PacketBridgeStartFrame 900 `
+  -LogDir logs\codex-both-inputnetplay-delay-long-2400-20260528
+```
+
+診断trace付きで入力netplay内部を見る場合は `-InputNetplayTrace` を追加する。
 
 ## 成功条件
 
@@ -98,85 +113,10 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - data abort / fatal / undefined がない。
 - 「通信が切断されました」画面にならない。
 - screenshotがMario vs Luigi stageとして読める。
-- host/clientでstage actor setが一致する。
-- host/clientでplayer0/player1 actor座標、死亡状態、残機、スター数が一致する。
+- host/clientでplayer0/player1 actor座標、死亡状態、残機、スター数、ストックアイテムが一致する。
 - Goomba、Big Star、8コインアイテムなどの動的要素が一致する。
-- client local1でLuigi側のカメラ、UI、stock item、死亡/復帰、勝敗判定が自然に動く。
+- client local1でLuigi側カメラ、UI、ストックアイテム、死亡/復帰、勝敗判定が自然に動く。
 - WAN adapter有効時に実用的なFPSで検証できる。
-
-## 代表的な検証コマンド
-
-host local0 + offline remote1:
-
-```powershell
-.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 `
-  -RunRole host `
-  -Frames 1300 `
-  -Exe build\release-windows-x86_64\melonDS.exe `
-  -Rom roms\nsmb-us-direct-mvl-entry-stable-host-wificount2-rng100.tmp.nds `
-  -HostRom roms\nsmb-us-direct-mvl-entry-stable-host-wificount2-rng100.tmp.nds `
-  -InputScript tests\nsmb_us_direct_mvl_early_dual.inputs `
-  -GameStateTrace `
-  -GameStateTraceExtended `
-  -GameStateTraceInterval 60 `
-  -ScreenshotInterval 1300 `
-  -NoHashLog `
-  -SkipDisconnectScreenshotCheck `
-  -SkipBlankScreenshotCheck `
-  -SkipMvlStateCheck `
-  -SkipGameplayActorCheck `
-  -SkipArmAbortCheck `
-  -ForceWifiCommunicatingCount 2 `
-  -ForceWifiCommunicatingStartFrame 840 `
-  -ForceNetLocalAid 0 `
-  -ForceNetLocalAidStartFrame 840 `
-  -PacketBridgeArmOnly `
-  -PacketBridgeTrace `
-  -PacketBridgeReplayOps keys,byte,tick,action `
-  -PacketBridgeLiveFallbackWindow 180 `
-  -PacketBridgeReplayReturnLookupTick `
-  -ScriptRemotePacket `
-  -ScriptRemotePacketPlayer 1 `
-  -ScriptRemotePacketInputInstance 0 `
-  -ScriptRemotePacketStartFrame 840 `
-  -LogDir logs\...
-```
-
-client local1 + offline remote0:
-
-```powershell
-.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 `
-  -RunRole client `
-  -Frames 1300 `
-  -Exe build\release-windows-x86_64\melonDS.exe `
-  -Rom roms\nsmb-us-direct-mvl-entry-stable-client-local1-wificount2-rng100.tmp.nds `
-  -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-local1-wificount2-rng100.tmp.nds `
-  -InputScript tests\nsmb_us_direct_mvl_early_dual.inputs `
-  -GameStateTrace `
-  -GameStateTraceExtended `
-  -GameStateTraceInterval 60 `
-  -ScreenshotInterval 1300 `
-  -NoHashLog `
-  -SkipDisconnectScreenshotCheck `
-  -SkipBlankScreenshotCheck `
-  -SkipMvlStateCheck `
-  -SkipGameplayActorCheck `
-  -SkipArmAbortCheck `
-  -ForceWifiCommunicatingCount 2 `
-  -ForceWifiCommunicatingStartFrame 840 `
-  -ForceNetLocalAid 1 `
-  -ForceNetLocalAidStartFrame 840 `
-  -PacketBridgeArmOnly `
-  -PacketBridgeTrace `
-  -PacketBridgeReplayOps keys,byte,tick,action `
-  -PacketBridgeLiveFallbackWindow 180 `
-  -PacketBridgeReplayReturnLookupTick `
-  -ScriptRemotePacket `
-  -ScriptRemotePacketPlayer 0 `
-  -ScriptRemotePacketInputInstance 0 `
-  -ScriptRemotePacketStartFrame 840 `
-  -LogDir logs\...
-```
 
 ## 運用ルール
 

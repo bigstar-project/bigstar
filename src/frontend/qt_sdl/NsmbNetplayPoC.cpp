@@ -1121,6 +1121,8 @@ struct State
     bool PacketBridgeJitHelperPatchEnabled = false;
     melonDS::u32 PacketBridgeJitHelperPatchFrame = 0;
     bool PacketBridgeJitHelperPatchApplied[16] {};
+    bool InputNetplayOnly = false;
+    bool InputNetplayTraceEnabled = false;
     melonDS::u32 ForceStageSceneStartGateStartFrame = 0;
     melonDS::u32 ForceStageSceneStartGateEndFrame = 0;
     melonDS::u32 ForceStageSceneStartGateValue = 1;
@@ -1718,7 +1720,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                 {
                     G.MatchSeed = packet.Seed;
                     G.MatchSeedConfigured = true;
-                    if (G.StateLoadDir.empty())
+                    if (G.StateLoadDir.empty() && !G.InputNetplayOnly)
                     {
                         G.NetRandomPatchValue = packet.Seed;
                         G.NetRandomPatchEnabled = true;
@@ -3333,7 +3335,9 @@ bool IsPastTestInputRange(melonDS::u32 targetFrame)
 
 InputState WaitForRemoteInput(melonDS::u32 targetFrame)
 {
-    if (G.PacketBridgeOnly && G.NetplayStartFrame != 0 && targetFrame < G.NetplayStartFrame)
+    if ((G.PacketBridgeOnly || G.InputNetplayOnly)
+        && G.NetplayStartFrame != 0
+        && targetFrame < G.NetplayStartFrame)
         return NeutralInput();
 
     const auto start = std::chrono::steady_clock::now();
@@ -5826,12 +5830,17 @@ void WritePacketBridgeJitScratchIfNeeded(
     if (G.ScriptRemotePacketEnabled &&
         (G.ScriptRemotePacketInputInstance < 0 || G.ScriptRemotePacketInputInstance >= 16))
         return;
-    if (frame < G.ScriptRemotePacketStartFrame)
-        return;
+    melonDS::u32 startFrame = G.ScriptRemotePacketStartFrame;
+    if (G.InputNetplayOnly)
+    {
+        startFrame = std::max(startFrame, G.PacketBridgeJitHelperPatchFrame);
+        startFrame = std::max(startFrame, G.NetplayStartFrame);
+    }
     if (G.ScriptRemotePacketEndFrame != 0 && frame > G.ScriptRemotePacketEndFrame)
         return;
 
     const int localPlayer = CurrentPacketBridgeLocalPlayer();
+    InputState effectiveLocalInput = localInput;
     InputState remoteInput = NeutralInput();
     bool hasRemoteInput = false;
     if (G.Enabled && G.Ready)
@@ -5840,8 +5849,16 @@ void WritePacketBridgeJitScratchIfNeeded(
             std::lock_guard<std::mutex> lock(G.Mutex);
             PumpNetworkLocked(nds, frame);
             SendMatchSeedLocked();
-            G.LocalInputs[frame] = localInput;
-            SendInputLocked(frame, localInput);
+            const melonDS::u32 sendFrame = G.InputNetplayOnly
+                ? frame + static_cast<melonDS::u32>(std::max(0, G.Delay))
+                : frame;
+            G.LocalInputs[sendFrame] = localInput;
+            SendInputLocked(sendFrame, localInput);
+            if (G.InputNetplayOnly)
+            {
+                auto localIt = G.LocalInputs.find(frame);
+                effectiveLocalInput = localIt != G.LocalInputs.end() ? localIt->second : NeutralInput();
+            }
             auto it = G.RemoteInputs.find(frame);
             if (it != G.RemoteInputs.end())
             {
@@ -5850,12 +5867,17 @@ void WritePacketBridgeJitScratchIfNeeded(
             }
         }
 
-        if (!hasRemoteInput && G.LocalWaitsForRemote)
+        if (!hasRemoteInput
+            && G.LocalWaitsForRemote
+            && (!G.InputNetplayOnly || G.NetplayStartFrame == 0 || frame >= G.NetplayStartFrame))
         {
             remoteInput = WaitForRemoteInput(frame);
             hasRemoteInput = true;
         }
     }
+
+    if (frame < startFrame)
+        return;
 
     const melonDS::u32 tick = nds->ARM9Read16(kNetPacketTickAddr);
     const melonDS::u8 action = nds->ARM9Read8(kNetPacketActionAddr);
@@ -5869,23 +5891,50 @@ void WritePacketBridgeJitScratchIfNeeded(
             localPlayer,
             instanceID,
             frame,
-            localInput,
+            effectiveLocalInput,
             remoteInput,
             hasRemoteInput);
         const melonDS::u32 keys = (~input.KeyMask) & 0x0FFF;
         nds->ARM9Write16(kPacketBridgeJitScratchKeysAddr + static_cast<melonDS::u32>(player * 2),
             static_cast<melonDS::u16>(keys));
 
-        const melonDS::u32 packetAddr = kPacketBridgeJitScratchPacketsAddr + static_cast<melonDS::u32>(player * 0x40);
-        nds->ARM9Write16(packetAddr + 0, static_cast<melonDS::u16>(tick));
-        nds->ARM9Write16(packetAddr + 2, static_cast<melonDS::u16>(keys));
-        nds->ARM9Write8(packetAddr + 4, action);
-        nds->ARM9Write8(packetAddr + 5, nds->ARM9Read8(kNetPacketByte5Addr));
-        nds->ARM9Write8(packetAddr + 6, nds->ARM9Read8(kNetPacketByte6Addr));
-        nds->ARM9Write8(packetAddr + 7, nds->ARM9Read8(kNetPacketByte7Addr));
+        melonDS::u8 packet[52] {};
+        packet[0] = static_cast<melonDS::u8>(tick & 0xFF);
+        packet[1] = static_cast<melonDS::u8>((tick >> 8) & 0xFF);
+        packet[2] = static_cast<melonDS::u8>(keys & 0xFF);
+        packet[3] = static_cast<melonDS::u8>((keys >> 8) & 0xFF);
+        packet[4] = action;
+        packet[5] = nds->ARM9Read8(kNetPacketByte5Addr);
+        packet[6] = nds->ARM9Read8(kNetPacketByte6Addr);
+        packet[7] = nds->ARM9Read8(kNetPacketByte7Addr);
         for (melonDS::u32 i = 0; i < 44; i++)
-            nds->ARM9Write8(packetAddr + 8 + i, nds->ARM9Read8(0x020888E8 + i));
-        nds->ARM9Write8(packetAddr + 0x29, nds->ARM9Read8(0x02088A4C));
+            packet[8 + i] = nds->ARM9Read8(0x020888E8 + i);
+        packet[0x29] = nds->ARM9Read8(0x02088A4C);
+
+        const melonDS::u32 packetAddr = kPacketBridgeJitScratchPacketsAddr + static_cast<melonDS::u32>(player * 0x40);
+        for (melonDS::u32 i = 0; i < sizeof(packet); i++)
+            nds->ARM9Write8(packetAddr + i, packet[i]);
+
+        // The JIT helper path only replaces Net::getConsoleKeys().  Feeding these
+        // synthetic packets back into NSMB's packet queue can corrupt the game's
+        // lower MP state after stage start, so keep the packet copy as a trace
+        // scratch buffer and let the ROM's normal packet state advance itself.
+    }
+
+    if (G.InputNetplayTraceEnabled && (frame % 60) == 0)
+    {
+        const melonDS::u16 scratchKeys0 = nds->ARM9Read16(kPacketBridgeJitScratchKeysAddr);
+        const melonDS::u16 scratchKeys1 = nds->ARM9Read16(kPacketBridgeJitScratchKeysAddr + 2);
+        std::printf(
+            "NSMB InputNetplay: inst=%d frame=%u localPlayer=%d hasRemote=%d tick=0x%04X action=0x%02X keys0=0x%03X keys1=0x%03X\n",
+            instanceID,
+            frame,
+            localPlayer,
+            hasRemoteInput ? 1 : 0,
+            static_cast<unsigned>(tick),
+            static_cast<unsigned>(action),
+            static_cast<unsigned>(scratchKeys0),
+            static_cast<unsigned>(scratchKeys1));
     }
 }
 
@@ -8717,6 +8766,8 @@ void InitFromEnvironment()
     G.PacketBridgeJitHelperPatchEnabled = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH");
     G.PacketBridgeJitHelperPatchFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH_FRAME", 0)));
+    G.InputNetplayOnly = EnvFlag("MELONDS_NSML_INPUT_NETPLAY_ONLY");
+    G.InputNetplayTraceEnabled = EnvFlag("MELONDS_NSML_INPUT_NETPLAY_TRACE");
     G.ForceStageSceneStartGateStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_START_FRAME", 0)));
     G.ForceStageSceneStartGateEndFrame = static_cast<melonDS::u32>(
@@ -9030,7 +9081,11 @@ void InitFromEnvironment()
         G.MatchSeedConfigured = true;
     }
 
-    if (G.NetRole == Role::Host && G.MatchSeedConfigured && G.StateLoadDir.empty() && !G.PacketBridgeOnly)
+    if (G.NetRole == Role::Host
+        && G.MatchSeedConfigured
+        && G.StateLoadDir.empty()
+        && !G.PacketBridgeOnly
+        && !G.InputNetplayOnly)
     {
         G.NetRandomPatchEnabled = true;
         G.NetRandomPatchAuto = true;
@@ -9072,7 +9127,7 @@ void InitFromEnvironment()
     }
 
     G.Ready = true;
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -9100,6 +9155,8 @@ void InitFromEnvironment()
         G.PacketBridgeMaxFrameLead,
         G.PacketBridgeThrottleTimeoutMs,
         G.PacketBridgeThrottleStartFrame,
+        G.InputNetplayOnly ? 1 : 0,
+        G.InputNetplayTraceEnabled ? 1 : 0,
         G.MatchSeed,
         G.MatchSeedConfigured ? 1 : 0,
         G.DirectMvlBootEnabled ? 1 : 0,
@@ -9243,6 +9300,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         WritePacketBridgeJitScratchIfNeeded(instanceID, syncFrame, nds, testInput);
+
+    if (G.Enabled && G.InputNetplayOnly)
+        return testInput;
 
     if (!G.Enabled || !G.Ready) return testInput;
     if (syncFrame == 0 && G.PacketBridgeOnly)

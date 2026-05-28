@@ -43,6 +43,7 @@ param(
     [switch]$PacketCapture,
     [switch]$PacketCaptureAllowPreGame,
     [switch]$InputNetplay,
+    [switch]$InputNetplayTrace,
     [switch]$PacketBridge,
     [switch]$PacketBridgeAllowJit,
     [switch]$PacketBridgeAllowPreGame,
@@ -2168,6 +2169,16 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_NO_LOCAL_WAIT -ErrorAction SilentlyContinue
         }
+        if ($InputNetplay) {
+            $env:MELONDS_NSML_INPUT_NETPLAY_ONLY = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_INPUT_NETPLAY_ONLY -ErrorAction SilentlyContinue
+        }
+        if ($InputNetplayTrace) {
+            $env:MELONDS_NSML_INPUT_NETPLAY_TRACE = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_INPUT_NETPLAY_TRACE -ErrorAction SilentlyContinue
+        }
         if ($PacketBridgeTrace) {
             $env:MELONDS_NSML_PACKET_BRIDGE_TRACE = "1"
             $env:MELONDS_NSML_PACKET_REPLAY_LOG = "$Stdout.packet-replay.csv"
@@ -2182,6 +2193,8 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_ROLE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PEER -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_NO_LOCAL_WAIT -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_INPUT_NETPLAY_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_INPUT_NETPLAY_TRACE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PORT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_LOCAL_INSTANCE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE -ErrorAction SilentlyContinue
@@ -2797,6 +2810,13 @@ function Start-MelonLANProcess {
         "forceStageStartSMFields=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_FIELDS)"
         "forceStageStartSMFieldsStart=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_START_SM_FIELDS_START_FRAME)"
         "packetBridgeThrottleStartFrame=$($env:MELONDS_NSML_PACKET_BRIDGE_THROTTLE_START_FRAME)"
+        "inputNetplaySwitch=$InputNetplay"
+        "inputNetplayOnlyEnv=$($env:MELONDS_NSML_INPUT_NETPLAY_ONLY)"
+        "inputNetplayTraceSwitch=$InputNetplayTrace"
+        "inputNetplayTraceEnv=$($env:MELONDS_NSML_INPUT_NETPLAY_TRACE)"
+        "packetBridgeJitHelperPatchSwitch=$PacketBridgeJitHelperPatch"
+        "packetBridgeJitHelperPatchEnv=$($env:MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH)"
+        "packetBridgeJitHelperPatchFrameEnv=$($env:MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH_FRAME)"
     ) |
         Set-Content -Encoding UTF8 "$Stdout.env.txt"
     $err = "$Stdout.err"
