@@ -49,6 +49,8 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `logs/codex-both-inputnetplay-synccheck-4800-20260528`
 - `logs/codex-both-inputnetplay-delay12-synccheck-2400-20260528`
 - `logs/codex-both-inputnetplay-senddelay4-jitter2-delay12-2400-20260528`
+- `logs/codex-both-inputnetplay-senddelay8-jitter4-delay12-2400-20260528`
+- `logs/codex-both-inputnetplay-senddelay10-jitter6-delay16-2400-20260528`
 
 結果:
 
@@ -59,6 +61,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - 4800フレーム時点の実効速度は host 約50.97fps、client 約51.54fps。
 - 入力遅延12フレーム設定でも2400フレーム同期チェックが通過。WAN向けに遅延量を上げる検証ルートができた。
 - 入力遅延12フレーム + 人工送信遅延4フレーム + jitter最大2フレームでも2400フレーム同期チェックが通過。
+- 入力遅延12フレーム + 人工送信遅延8フレーム + jitter最大4フレーム、入力遅延16フレーム + 人工送信遅延10フレーム + jitter最大6フレームでも2400フレーム同期チェックが通過。
 - screenshot上、hostはMario視点、clientはLuigi視点になっている。上画面カメラ差はlocalPlayerID差として想定内。
 - ストック表示はhostがplayer0、clientがplayer1を表示しており、CSV上も `player0InventoryPowerup=0x0`、`player1InventoryPowerup=0x1` でhost/client一致。Luigi側UIとして自然に動いている可能性が高い。
 
