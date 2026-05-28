@@ -21,6 +21,8 @@ param(
     [switch]$RegenerateRoms,
     [switch]$NoRenderVisiblePatch,
     [switch]$PatchStageEntitySkipRender,
+    [switch]$AllowJitWithPacketBridge,
+    [switch]$PacketBridgeTrace,
     [switch]$HashLog,
     [switch]$SkipVerify
 )
@@ -95,6 +97,12 @@ if ($RunRole -eq "client") {
 }
 if (-not $HashLog) {
     $runArgs += "-NoHashLog"
+}
+if ($AllowJitWithPacketBridge) {
+    $runArgs += "-PacketBridgeAllowJit"
+}
+if ($PacketBridgeTrace) {
+    $runArgs += "-PacketBridgeTrace"
 }
 
 $runCmd = "& .\scripts\run-nsmb-mvl-lan-route-smoke.ps1 " + (($runArgs | ForEach-Object { Format-Arg $_ }) -join " ")

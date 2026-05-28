@@ -56,6 +56,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `tests/nsmb_us_direct_mvl_safe_short.inputs` はMario/Luigi両者入力あり・死亡なしの4200frame安全ルート。次はさらに長時間化し、実操作に近い左右移動やスター/8コインアイテム検証へ広げる必要がある。
   - `PacketBridgeLookupTickDelay=10` ではclientのlocal player1 packetがhostより先に反映されることがある。delay 60 では同期できたため、最終的にはlockstep待ち/入力遅延の自動調整が必要。
   - client側のHUD/カメラ/StageFXはplayer1へ寄せているが、trace上の `Game::localPlayerID` はcanonical 0 のまま。勝敗演出、ストックアイテム使用、死亡演出がLuigi視点として成立するかは未検証。
+  - JIT + PacketBridgeはまだ成功条件に使わない。`logs/smvl-hybrid-jit-trace-2300-20260528` ではpacket API hook自体は値を返すが、game-stateの `inputPlayer*Held` へ反映されない。`logs/smvl-hybrid-jit-branchdone-safe-3000-20260528` のBL skip実験は試合開始前で止まったため破棄した。
 
 直近の次アクション:
 
@@ -63,6 +64,7 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
 - `PacketBridgeLookupTickDelay=60` は固定条件として入った。次は固定値ではなく、lockstep待ち/入力遅延の自動調整へ進める。
 - 死亡しない両者入力スクリプトを、4200 frameからさらに長時間へ伸ばす。
 - client Luigi視点で、敵/アイテム/死亡/勝敗演出/ストックHUDが自然に成立するかを、スクリーンショットと状態値の両方で検証する。特にrender-visible patchは表示改善には有効だが、clientだけに当てるとstate差分が出るため必ずhost/client双方へ同じpatchを当てる。
+- 高速化はJIT core hookを直接いじる前に、ROM patch側でpacket API境界を置換できるか再検討する。JIT実験は `-AllowJitWithPacketBridge -PacketBridgeTrace` で再現可能。
 
 ## 実装済み
 
@@ -193,6 +195,10 @@ NSMB Central の解析どおり、MvsL は接続時に RNG seed を同期し、�
   - `logs/smvl-fps-jit-nohash-client-1800-20260527`: client内部 `53.61fps`
 - `-NoFrameLimit` ではhost単体 `68.84fps` まで出るため、CPUが常に10fps相当しか出ない状態ではない。
 - ただし stable PacketBridge 入力同期では、2026-05-27時点で `-AllowJitWithPacketBridge` を付けると frame 1980 以降の送信packetには非ゼロkeysが出る一方、game-state trace の `inputPlayer0Held` / `inputPlayer1Held` と actor movement が 0 のままになる。JIT実行時は interpreter 側の packet API hook がゲームロジックへ反映されないため、JITはまだ安定条件に含めない。検証ログ: `logs/smvl-stable-wrapper-jitinput-host-3000-20260527`, `logs/smvl-stable-wrapper-jittrace2-host-2100-20260527`。
+- 2026-05-28 のhybrid JIT再検証:
+  - `scripts/run-nsmb-mvl-hybrid-split.ps1` に `-AllowJitWithPacketBridge` / `-PacketBridgeTrace` を追加し、hybrid routeでもJIT失敗を再現できるようにした。
+  - `logs/smvl-hybrid-jit-safe-3000-20260528` は約68秒で3000frame完走するが、`inputPlayer0Held` / `inputPlayer1Held` が0のまま。
+  - `logs/smvl-hybrid-jit-trace-2300-20260528` ではpacket replay log上は非ゼロkeysを返せているが、ゲーム側入力状態には反映されない。JIT core側でBLをスキップする実験は試合開始を壊したため採用しない。
 - 通常ROM同士 + JIT + hash/trace/screenshotなし:
   - host単独 `logs/smvl-fps-clean-hostonly-host-1800-20260527`: 約 `67.25fps`
   - ローカルhost/client 2プロセス同時 `logs/smvl-fps-clean-normalrom-host-1800-20260527`, `logs/smvl-fps-clean-normalrom-client-1800-20260527`: host内部 `50.08fps`, client内部 `54.61fps`
