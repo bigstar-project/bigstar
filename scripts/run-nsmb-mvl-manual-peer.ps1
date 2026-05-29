@@ -20,7 +20,8 @@ param(
     [switch]$UseFrameLimit,
     [switch]$NoFrameLimit,
     [switch]$NoJit,
-    [switch]$NoStartBarrier
+    [switch]$NoStartBarrier,
+    [switch]$SoftwareRenderer
 )
 
 $ErrorActionPreference = "Stop"
@@ -88,7 +89,7 @@ if ($InputUnreliable) {
 
 Write-Host "Starting NSMB MvL peer session: role=$Role peer=$Peer"
 Write-Host "input delay=$InputDelayFrames sendDelay=$InputSendDelayFrames sendJitter=$InputSendJitterFrames max frame lead=$InputMaxFrameLead internalWaitTimeoutMs=$InternalWaitTimeoutMs unreliable=$($InputUnreliable.IsPresent) bundleHistory=$InputBundleHistory jit=$(-not $NoJit)"
-Write-Host "frameLimit=$(-not $NoFrameLimit.IsPresent) swapBuffersInterval=$SwapBuffersInterval startBarrier=$(-not $NoStartBarrier)"
+Write-Host "frameLimit=$(-not $NoFrameLimit.IsPresent) swapBuffersInterval=$SwapBuffersInterval startBarrier=$(-not $NoStartBarrier) renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' })"
 Write-Host "log=$LogDir"
 Write-Host "Host controls Mario. Client controls Luigi."
 
@@ -104,11 +105,13 @@ try {
     $cfgPath = Join-Path $repoRoot "build\release-windows-x86_64\melonDS.toml"
     if (Test-Path $cfgPath) {
         $cfg = Get-Content $cfgPath -Raw
+        $useGL = if ($SoftwareRenderer) { 'false' } else { 'true' }
+        $renderer = if ($SoftwareRenderer) { '0' } else { '2' }
         $replacements = [ordered]@{
             'LimitFPS' = 'true'
-            'UseGL' = 'true'
+            'UseGL' = $useGL
             'VSync' = 'false'
-            'Renderer' = '2'
+            'Renderer' = $renderer
             'ScreenSizing' = '0'
             'ShowOSD' = 'false'
         }

@@ -22,7 +22,8 @@ param(
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds",
     [string]$InputScript = "tests\nsmb_us_direct_mvl_manual_bootstrap.inputs",
     [string]$LogDir = "logs\nsmb-mvl-manual-local",
-    [switch]$AllowJit
+    [switch]$AllowJit,
+    [switch]$SoftwareRenderer
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,6 +52,30 @@ $hostLog = Join-Path $logRoot "host"
 $clientLog = Join-Path $logRoot "client"
 $wrapperLog = Join-Path $logRoot "wrapper"
 New-Item -ItemType Directory -Force $wrapperLog | Out-Null
+
+$cfgPath = Join-Path $repoRoot "build\release-windows-x86_64\melonDS.toml"
+if (Test-Path $cfgPath) {
+    $cfg = Get-Content $cfgPath -Raw
+    $useGL = if ($SoftwareRenderer) { 'false' } else { 'true' }
+    $renderer = if ($SoftwareRenderer) { '0' } else { '2' }
+    $replacements = [ordered]@{
+        'LimitFPS' = 'true'
+        'UseGL' = $useGL
+        'VSync' = 'false'
+        'Renderer' = $renderer
+        'ScreenSizing' = '0'
+        'ShowOSD' = 'false'
+    }
+    foreach ($key in $replacements.Keys) {
+        $value = $replacements[$key]
+        if ($cfg -match "(?m)^$key\s*=") {
+            $cfg = $cfg -replace "(?m)^$key\s*=.*$", "$key = $value"
+        } else {
+            $cfg += "`n$key = $value"
+        }
+    }
+    Set-Content -Path $cfgPath -Value $cfg -Encoding UTF8
+}
 
 $common = @(
     "-Frames", "$Frames",
@@ -144,7 +169,7 @@ Write-Host "Started NSMB MvL manual local session."
 Write-Host "host wrapper pid=$($hostProc.Id) log=$hostLog"
 Write-Host "client wrapper pid=$($clientProc.Id) log=$clientLog"
 Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
-Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames"
+Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' })"
 if ($Rollback) {
     $backendLabel = if ($RollbackBackend -ne "") { $RollbackBackend } else { "savestate" }
     Write-Host "rollback enabled backend=$backendLabel window=$RollbackWindow checkpointInterval=$RollbackCheckpointInterval resimDelay=$RollbackResimulateDelayFrames resimulate=$RollbackResimulate"

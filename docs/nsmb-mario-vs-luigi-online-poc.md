@@ -70,6 +70,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   - frame limit有効
   - `ShowOSD=false`
   - OpenGL表示、VSync off、JIT enabled
+  - software renderer比較用に `-SoftwareRenderer` を追加
 
 ## 現在の最優先課題
 
@@ -114,6 +115,19 @@ WAN相当の遅延・jitterを試す場合:
 ```powershell
 .\scripts\run-nsmb-mvl-manual-peer.ps1 -Role host -NoFrameLimit
 .\scripts\run-nsmb-mvl-manual-peer.ps1 -Role client -Peer <host-ip> -NoFrameLimit
+```
+
+melonDSデフォルト相当のsoftware rendererで比較する場合:
+
+```powershell
+.\scripts\run-nsmb-mvl-manual-peer.ps1 -Role host -SoftwareRenderer
+.\scripts\run-nsmb-mvl-manual-peer.ps1 -Role client -Peer <host-ip> -SoftwareRenderer
+```
+
+同一PCで2窓起動する場合:
+
+```powershell
+.\scripts\run-nsmb-mvl-manual-local.ps1 -LowDelayWan -SoftwareRenderer -AllowJit
 ```
 
 ## 検証コマンド
