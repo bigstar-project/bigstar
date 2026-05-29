@@ -1,0 +1,225 @@
+# NSMB Mario vs Luigi Rollback Design Notes
+
+この文書は、Mario vs Luigi online PoCで検討したrollback方式の議論を、後で再開できるように分離して残す設計メモ。
+
+## 背景
+
+現在の本線は、`InputDelayFrames=4` 前後の低ディレイ入力同期方式。手動確認では4フレーム遅延なら実用に届く可能性がある。
+
+一方で、高遅延・jitterが大きいWAN環境では、固定4フレーム遅延だけではremote inputが間に合わず、停止やカクつきが出る可能性がある。そのため、rollback方式も将来候補として検討した。
+
+## これまでに試したこと
+
+### melonDS full savestate rollback
+
+既存のmelonDS savestateを使い、過去フレームのcheckpointへ戻して、保存済み入力履歴で現在フレームまで再実行する方式。
+
+良い点:
+
+- 正しさは高い。CPU、RAM、デバイス状態など、melonDSが通常savestateで保持する状態をまとめて戻せる。
+- PoC実装は比較的早く作れる。
+- `InputDelayFrames=0` でも、remote input未着時に予測入力で進める土台は動いた。
+
+問題:
+
+- 1 checkpointが約19MBあり、保存/復元/再実行が重い。
+- rollback発生時に体感で止まる、またはカクつく。
+- 同一PCでhost/clientを両方動かす検証では、実用感から遠い場面があった。
+- 毎フレームcheckpointは現実的ではなく、checkpoint intervalを広げると再実行距離が伸びる。
+
+現時点の評価:
+
+- 正しさ確認用、または低頻度rollbackの保険としては使える。
+- ゼロ遅延rollbackの主力として使うには重い。
+
+### ARM9 Main RAM 4MB snapshot
+
+ARM9 Main RAM最大4MBだけを`memcpy`で保存/復元する軽量backendを試した。公開フレームカウンタとして `NumFrames` / `NumLagFrames` / `LagFrameFlag` も小さいヘッダに入れて復元した。
+
+良い点:
+
+- checkpointが約4MB + 40byteになり、full savestateよりかなり軽い。
+- 短距離の保存/復元/resimulate自体は動作した。
+
+問題:
+
+- CPUレジスタ、timer、DMA、scheduler、VRAM、Wi-Fi、IPCなどが戻らない。
+- 人工送信遅延6フレーム + jitter4の検証で、rollback後にhost側のmoving hazardが止まり、client側だけ進む不一致が出た。
+- RAMだけでは「過去のエミュレータ状態」ではなく、「過去の一部メモリを現在のCPU状態へ貼り直した状態」になってしまう。
+
+現時点の評価:
+
+- 軽いが正しさ不足。
+- 実用候補ではない。
+- ここから正しくするには、結局core側の状態をかなり追加保存する必要がある。
+
+## 検討したrollback案
+
+### 案A: ゼロ遅延full rollback
+
+`InputDelayFrames=0`で常に即時反映し、remote inputが後から違っていたらrollbackする。
+
+評価:
+
+- 操作感は理想に近い。
+- ただしrollback頻度が高くなりやすい。
+- DSエミュ全体のsavestateが重いため、現状ではカクつきが大きい。
+- 快適化するには、かなり深いcheckpoint最適化が必要。
+
+結論:
+
+- 最終的にできれば強いが、今の実装難度とリスクは高い。
+
+### 案B: 小入力遅延 + 小rollback
+
+`InputDelayFrames=3〜4`を残し、通常はremote inputが間に合うようにする。packetが少し遅れた時だけ、最大4〜6フレーム程度を予測入力で進め、後着入力が違っていた場合だけ短距離rollbackする。
+
+想定動作:
+
+```text
+通常:
+  3〜4フレーム遅延で入力を適用する
+  ほとんどのpacketは間に合うのでrollbackしない
+
+packetが少し遅れた時:
+  1〜4フレームだけ予測入力で進める
+  後から本物の入力が来たら短距離rollbackする
+
+大きく遅れた時:
+  rollbackし続けず、一時停止して待つ
+```
+
+評価:
+
+- 実装難度と実現性のバランスが最も良い。
+- rollback頻度とrollback距離を小さくできる。
+- full savestate backendでも、発生頻度を抑えれば体感カクつきを許容範囲にできる可能性がある。
+- 国内WANの安定回線では、4フレーム遅延で大半の入力が間に合う見込みがある。
+
+結論:
+
+- rollbackを主役にせず、低ディレイ方式の保険にする。
+- 将来rollbackを再開するなら、この案が第一候補。
+
+候補設定:
+
+```text
+InputDelayFrames: 3〜4
+InputMaxFrameLead: 4〜6
+MaxRollbackFrames: 4〜6
+RollbackBackend: savestate
+RollbackCheckpointInterval: 1〜2
+InputUnreliable: enabled
+InputBundleHistory: 8〜12
+Rollback over limit: stall
+```
+
+### 案C: core側の軽量checkpoint API
+
+melonDS core側に、rollback専用の軽量checkpoint APIを作る。通常savestateと同じ正しさを目指しつつ、ファイル互換性、圧縮、不要メタデータなどを削り、必要な内部状態だけを高速保存/復元する。
+
+必要になりうる状態:
+
+- ARM9/ARM7 CPU state
+- timers
+- DMA
+- IRQ
+- scheduler/event queue
+- Main RAM / WRAM / VRAM / OAM / palette
+- IPC/FIFO
+- Wi-Fi
+- SPUのゲーム進行に影響する部分
+- JIT cache invalidation policy
+
+評価:
+
+- 正しくできれば最もきれい。
+- ただしmelonDS coreへの深い改造になる。
+- 何か1つ漏れるとrollback後に不一致が出る。
+- 実装・検証コストは高い。
+
+結論:
+
+- 中長期候補。
+- まず小入力遅延 + 小rollbackでfull savestateを使い、どうしても重い場合に検討する。
+
+### 案D: NSMBゲーム状態snapshot
+
+DS全体ではなく、NSMB MvsLのゲーム側状態だけをsnapshotする。たとえばplayer actor、敵、Big Star、coin/item、RNG、MvsL global stateなどを保存/復元する。
+
+必要になりうる状態:
+
+- Mario/Luigi actor状態、座標、速度、アニメーション、死亡/復帰状態
+- 敵、ブロック、土管、スター、コイン、アイテム、エフェクト
+- object manager / actor list / spawn/despawn状態
+- collision/physics内部状態
+- MvsL score、残機、勝敗、timer、stage state
+- RNG state
+- input/communication tick
+- camera、HUD、sound/event queueの一部
+
+良い点:
+
+- 成功すれば非常に軽い。
+- NSMB MvsL専用に割り切れる。
+- DS core全体のrollbackよりゲーム目的に近い。
+
+問題:
+
+- 解析難度が高い。
+- 漏れた状態が1つあるだけで数秒後にズレる。
+- ROM/メモリ構造への依存が強くなる。
+- actor listやspawn/despawn管理を完全に理解する必要がある。
+
+現実的なPoC順:
+
+```text
+1. player actor 2体
+2. Big Star actor
+3. moving hazard / enemy actor数体
+4. RNG state
+5. MvsL global state
+```
+
+結論:
+
+- DS core軽量checkpointとは別方向の中長期候補。
+- 「NSMB MvsL専用ゲーム状態rollback」を作る覚悟が必要。
+- 今すぐ本線にするより、低ディレイ方式が限界に達した後の研究対象。
+
+## 現時点の推奨方針
+
+最終目標が「快適なWAN越し対戦」なら、現時点の最有力は次のハイブリッド方針。
+
+```text
+国内・安定回線:
+  3〜4F delay + packet bundle + ほぼrollbackなし
+
+不安定な瞬間:
+  最大4〜6Fだけrollbackで吸収
+
+それ以上の遅延:
+  rollbackし続けず、一時停止して同期維持
+```
+
+理由:
+
+- 4フレーム入力遅延は手動確認で実用に届く可能性がある。
+- rollbackを常用しないため、full savestateの重さを避けやすい。
+- packet bundleと組み合わせると、短いpacket lossやjitterは吸収できる可能性が高い。
+- 実装が現実的で、現在のPoCから段階的に進められる。
+
+避けたい方針:
+
+- `InputDelayFrames=0` を前提にした常時rollback。
+- ARM9 RAMだけを戻す不完全rollback。
+- いきなりcore全体の軽量checkpointを作る。
+- いきなりNSMBゲーム状態snapshotを完全実装する。
+
+## 後で再開する場合の次アクション
+
+1. 低ディレイ本線で `InputDelayFrames=3/4/5` の実用性を実2PCまたはLAN分散で測る。
+2. `MaxRollbackFrames` を明示的に導入し、rollback距離を4〜6フレームに制限する。
+3. rollback距離超過時はstallへ落とす。
+4. full savestate backendのまま、小rollbackだけで体感カクつきが許容範囲か確認する。
+5. それでも重い場合だけ、core軽量checkpointまたはNSMBゲーム状態snapshotのPoCへ進む。

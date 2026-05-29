@@ -8,6 +8,8 @@
 
 既存のrollbackはmelonDS丸ごとのsavestateを使うため、1 checkpointが約19MBあり、rollback時にカクつきが出る。`ARM9 Main RAM 4MB` だけを `memcpy` で保存/復元する軽量snapshot backendも試したが、CPU/タイマ/スケジューラ状態まで戻らないため、rollback後にmoving hazardなどのゲーム状態がhost/clientで分岐した。現時点では、正しさはsavestate backendのほうが上。
 
+rollback方式の比較、実装難度、後で再開する場合の候補案は `docs/nsmb-mvl-rollback-design-notes.md` に分離して保存した。
+
 外部資料と既存実装から整理したrollbackの必須条件:
 
 - 過去フレームの完全なゲーム状態を保存できること。
