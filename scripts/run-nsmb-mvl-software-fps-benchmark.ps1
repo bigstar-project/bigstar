@@ -1,6 +1,8 @@
 param(
     [int]$Frames = 3600,
     [int]$InputMaxFrameLead = 4,
+    [int]$InputSendDelayFrames = 0,
+    [int]$InputSendJitterFrames = 0,
     [string]$InputScript = "tests\nsmb_us_direct_mvl_both_different.inputs",
     [string]$LogDir = "logs\nsmb-mvl-software-fps-benchmark",
     [switch]$Visible,
@@ -63,6 +65,8 @@ try {
             "-SoftwareRenderer",
             "-Frames", "$Frames",
             "-InputMaxFrameLead", "$InputMaxFrameLead",
+            "-InputSendDelayFrames", "$InputSendDelayFrames",
+            "-InputSendJitterFrames", "$InputSendJitterFrames",
             "-InputScript", $InputScript,
             "-LogDir", $hostLog
         )
@@ -75,6 +79,8 @@ try {
             "-SoftwareRenderer",
             "-Frames", "$Frames",
             "-InputMaxFrameLead", "$InputMaxFrameLead",
+            "-InputSendDelayFrames", "$InputSendDelayFrames",
+            "-InputSendJitterFrames", "$InputSendJitterFrames",
             "-InputScript", $InputScript,
             "-LogDir", $clientLog
         )
@@ -104,6 +110,8 @@ try {
             SoftwareRenderer = $true
             Frames = $Frames
             InputMaxFrameLead = $InputMaxFrameLead
+            InputSendDelayFrames = $InputSendDelayFrames
+            InputSendJitterFrames = $InputSendJitterFrames
             InputScript = $InputScript
             LogDir = $LogDir
         }
