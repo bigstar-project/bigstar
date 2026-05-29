@@ -70,6 +70,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   - frame limit有効
   - `ShowOSD=false`
   - OpenGL表示、VSync off、JIT enabled
+  - JITを切って比較する場合は `-NoJit` を付ける
   - software renderer比較用に `-SoftwareRenderer` を追加
 
 ## 現在の最優先課題
@@ -99,9 +100,17 @@ client:
 .\scripts\run-nsmb-mvl-manual-peer.ps1 -Role client -Peer <host-ip>
 ```
 
-デフォルトは `InputDelayFrames=4` / `InputMaxFrameLead=4` / frame limit有効 / `SwapBuffersInterval=1` / start-ready barrier有効 / `InternalWaitTimeoutMs=0`。
+デフォルトは `InputDelayFrames=4` / `InputMaxFrameLead=4` / frame limit有効 / `SwapBuffersInterval=1` / start-ready barrier有効 / `InternalWaitTimeoutMs=0` / JIT有効。
 開始バリアを一時的に無効化して比較する場合だけ `-NoStartBarrier` を付ける。
 同期待ちの自動テスト用timeoutを明示的に戻す場合は `-InternalWaitTimeoutMs 5000` のように指定する。
+JITなしで比較する場合は `-NoJit` を付ける。
+
+JITなしで peer 起動する場合:
+
+```powershell
+.\scripts\run-nsmb-mvl-manual-peer.ps1 -Role host -NoJit
+.\scripts\run-nsmb-mvl-manual-peer.ps1 -Role client -Peer <host-ip> -NoJit
+```
 
 WAN相当の遅延・jitterを試す場合:
 
@@ -129,6 +138,8 @@ melonDSデフォルト相当のsoftware rendererで比較する場合:
 ```powershell
 .\scripts\run-nsmb-mvl-manual-local.ps1 -LowDelayWan -SoftwareRenderer -AllowJit
 ```
+
+`run-nsmb-mvl-manual-local.ps1` は `-AllowJit` を明示したときだけJIT有効。`run-nsmb-mvl-manual-peer.ps1` は逆に、手動/LAN実用検証の速度優先でデフォルトJIT有効、`-NoJit` で無効化する。
 
 ## 検証コマンド
 
