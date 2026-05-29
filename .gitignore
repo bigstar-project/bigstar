@@ -2,6 +2,7 @@ build*/
 vcpkg/
 external/
 logs/
+dist/
 bin
 obj
 target/
