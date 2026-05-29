@@ -182,7 +182,19 @@ logs/webrtc-melonds-1pc-20260530-051459/client/client.stdout.txt
 
 - この検証は自動bootstrap入力によるsmokeで、手動操作の快適性確認ではない。
 - `remote input timeout` / `peer disconnected` は今回の該当ログでは出ていない。
-- hidden window + 2プロセス実行では約27fpsで、FPS評価には使わない。
+- hidden window + 2プロセス実行では約27fpsだった。直接ENet接続の同条件比較では全体約57fps、active約53fpsだったため、WebRTC bridge経由のtransport側遅延/処理負荷が疑わしい。実用にはここを60fpsへ戻す必要がある。
+
+直接ENet接続の比較ログ:
+
+```text
+logs/direct-melonds-1pc-fps-compare-20260530-051854/host/host.stdout.txt
+logs/direct-melonds-1pc-fps-compare-20260530-051854/client/client.stdout.txt
+
+host:   frame limit reached at frame=1200 elapsedMs=20809 fps=57.67
+host:   active fps startFrame=990 frames=210 elapsedMs=3865 fps=54.33
+client: frame limit reached at frame=1200 elapsedMs=20859 fps=57.53
+client: active fps startFrame=990 frames=210 elapsedMs=3937 fps=53.34
+```
 
 必要ツール:
 
@@ -230,11 +242,12 @@ melonDS手動起動例:
 
 ## 次にやること
 
-1. 1PC内でWebRTC bridge経由の手動対戦を確認する。
-2. LAN 2PCでWebRTC bridge経由の手動対戦を確認する。
-3. WAN 2PCでSTUNのみの直結率、ping、jitter、packet lossを測る。
-4. 必要ならTURN fallbackを追加する。
-5. 実用化段階でsignaling server、matchmaking、launcherへ進む。
+1. WebRTC bridge経由で27fpsまで落ちる原因を切り分け、60fps相当まで戻す。
+2. 1PC内でWebRTC bridge経由の手動対戦を確認する。
+3. LAN 2PCでWebRTC bridge経由の手動対戦を確認する。
+4. WAN 2PCでSTUNのみの直結率、ping、jitter、packet lossを測る。
+5. 必要ならTURN fallbackを追加する。
+6. 実用化段階でsignaling server、matchmaking、launcherへ進む。
 
 ## 将来方針
 
