@@ -43,6 +43,7 @@ WAN越しで入力遅延を小さくするには、現行の固定入力遅延/�
 - `logs/codex-input-unreliable-bundle8-delay6-jitter4-2600-20260529`: unreliable bundle history 8、送信遅延6 + jitter4、lead8で2600フレームgame-state比較通過。
 - `logs/codex-input-unreliable-bundle8-drop10-delay6-jitter4-2600-20260529`: 10%相当の入力packet dropでもbundle history 8で2600フレームgame-state比較通過。traceなしでは約43.7-44.7fps。
 - `logs/codex-input-unreliable-bundle8-drop3-delay6-jitter4-2600-20260529`: 3フレームに1回dropする強い条件でも2600フレームgame-state比較通過。
+- `logs/codex-input-unreliable-bundle8-drop10-long-6000-interval30-20260529`: unreliable bundle history 8、10%相当drop、送信遅延6 + jitter4、lead8、checkpoint interval 30で6000フレームgame-state比較通過。
 - 既存のmelonDS savestateは使えるが、1 checkpointが約19MBあり、毎フレーム保存は重い。低頻度checkpointと予測破棄で改善したが、快適なWAN対戦には、実プレイ時のtrace抑制、再実行中のcheckpoint保存削減、差分savestate、重要RAM限定snapshot、またはrollback window/intervalの自動調整が必要。
 
 ## 目的
