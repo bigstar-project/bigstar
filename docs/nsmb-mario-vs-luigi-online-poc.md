@@ -16,6 +16,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - RNG は ROM側 `rng-constant --value 0x100` で固定する。
 - 実用低遅延路線は `InputDelayFrames=4` / `InputMaxFrameLead=4` / unreliable input + bundle history 8。
 - 入力netplay開始時は、host/client双方が `PacketBridgeStartFrame` に到達したことを reliable start-ready packet で確認してから試合入力を開始する。
+- 手動対戦では、片側が先行しすぎた場合に5秒でタイムアウトせず、相手が追いつくまで待つ。自動テストだけ内部wait timeoutを使う。
 - 高遅延向け rollback は別紙 `docs/nsmb-mvl-rollback-design-notes.md` に保留。現時点の本筋ではない。
 
 ## 完了済み
@@ -32,6 +33,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `InputMaxFrameLead` による先行制限。
 - unreliable input packet + 過去入力bundleによる packet drop 耐性。
 - `PacketBridgeStartFrame` 到達時の二者 start-ready barrier。古い同一プロセス用の開始バリアは input netplay 時には使わない。
+- 手動peer/local起動では `InternalWaitTimeoutMs=0` をデフォルト化。input frame lead が閾値を超えたときは、desync/終了ではなく同期待ちで止める。
 - active FPS と input wait/throttle の計測ログ。
 - trace/hook無効時にJITを使える経路。
 - 不要な古い `logs/codex-*` は適宜削除済み。
@@ -57,6 +59,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   - host/client active `59.86fps`
   - remote waitは小さいが、throttleは発生する。FPS低下ではなく先行制限として機能している。
 - remote input wait は直近測定では主因ではない。フレーム制限あり測定では remote wait はごく小さく、60fpsを維持できた。
+- ただし、手動peerログ `logs/nsmb-mvl-manual-peer-host-20260530-024135/host.stdout.txt` では `input frame throttle timeout frame=2538 ... lead=5 waitedMs=5000` を確認。これは現行の手動設定で、片側先行時に5秒で同期待ちを打ち切る問題として扱う。
 
 結論:
 
@@ -70,8 +73,8 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 ## 現在の最優先課題
 
-1. 手動/LAN 2PCで、開始時の start-ready barrier により host/client がズレずに試合開始するか再確認する。
-2. 複雑入力や長めの手動対戦で、star/object/player state が継続して一致するか見る。
+1. 手動/LAN 2PCで、開始時の start-ready barrier と `InternalWaitTimeoutMs=0` により host/client がズレずに試合継続するか再確認する。
+2. 複雑入力や長めの手動対戦で、throttle timeout が出なくなり、star/object/player state が継続して一致するか見る。
 3. 60fpsを維持できる場合、次はWAN相当の遅延・jitterを入れて `InputDelayFrames=4` の実用限界を見る。
 4. 60fpsが再発して落ちる場合は、次を個別に切り分ける:
    - OSD on/off
@@ -95,8 +98,9 @@ client:
 .\scripts\run-nsmb-mvl-manual-peer.ps1 -Role client -Peer <host-ip>
 ```
 
-デフォルトは `InputDelayFrames=4` / `InputMaxFrameLead=4` / frame limit有効 / `SwapBuffersInterval=1` / start-ready barrier有効。
+デフォルトは `InputDelayFrames=4` / `InputMaxFrameLead=4` / frame limit有効 / `SwapBuffersInterval=1` / start-ready barrier有効 / `InternalWaitTimeoutMs=0`。
 開始バリアを一時的に無効化して比較する場合だけ `-NoStartBarrier` を付ける。
+同期待ちの自動テスト用timeoutを明示的に戻す場合は `-InternalWaitTimeoutMs 5000` のように指定する。
 
 WAN相当の遅延・jitterを試す場合:
 

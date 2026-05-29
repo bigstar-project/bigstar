@@ -3,6 +3,7 @@ param(
     [int]$HostFrames = 0,
     [int]$ClientFrames = 0,
     [int]$WaitTimeoutMs = 240000,
+    [int]$InternalWaitTimeoutMs = 5000,
     [string]$Exe = "build\debug-windows-x86_64\melonDS.exe",
     [string]$Rom = "roms\nsmb.nds",
     [string]$HostRom = "",
@@ -2200,6 +2201,11 @@ function Start-MelonLANProcess {
             $env:MELONDS_NSML_PACKET_REPLAY_OPS = $PacketBridgeReplayOps
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_OPS -ErrorAction SilentlyContinue
+        }
+        if ($InternalWaitTimeoutMs -ge 0) {
+            $env:MELONDS_NSML_WAIT_TIMEOUT_MS = "$InternalWaitTimeoutMs"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
         }
         Remove-Item Env:\MELONDS_NSML_SEED_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
         if ($WaitForPeerBeforeStart -or ($InputNetplay -and $PacketBridgeStartFrame -gt 0)) {

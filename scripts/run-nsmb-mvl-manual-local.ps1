@@ -3,6 +3,7 @@ param(
     [int]$WaitTimeoutMs = 86400000,
     [int]$InputDelayFrames = 16,
     [int]$InputMaxFrameLead = 2,
+    [int]$InternalWaitTimeoutMs = 0,
     [int]$InputSendDelayFrames = 0,
     [int]$InputSendJitterFrames = 0,
     [switch]$InputUnreliable,
@@ -54,20 +55,23 @@ New-Item -ItemType Directory -Force $wrapperLog | Out-Null
 $common = @(
     "-Frames", "$Frames",
     "-WaitTimeoutMs", "$WaitTimeoutMs",
+    "-InternalWaitTimeoutMs", "$InternalWaitTimeoutMs",
     "-Exe", $Exe,
     "-InputScript", $InputScript,
     "-ScreenshotInterval", "0",
     "-NoHashLog",
     "-SkipMvlStateCheck",
     "-SkipGameplayActorCheck",
+    "-NoLanMP",
     "-InputNetplay",
     "-InputDelayFrames", "$InputDelayFrames",
     "-InputMaxFrameLead", "$InputMaxFrameLead",
     "-InputSendDelayFrames", "$InputSendDelayFrames",
     "-InputSendJitterFrames", "$InputSendJitterFrames",
     "-PacketBridgeJitHelperPatch",
-    "-PacketBridgeJitHelperPatchFrame", "900",
-    "-PacketBridgeStartFrame", "900"
+    "-PacketBridgeJitHelperPatchFrame", "870",
+    "-PacketBridgeStartFrame", "870",
+    "-WaitForPeerAtNetplayStart"
 )
 if ($AllowJit) {
     $common += "-AllowJit"
@@ -140,7 +144,7 @@ Write-Host "Started NSMB MvL manual local session."
 Write-Host "host wrapper pid=$($hostProc.Id) log=$hostLog"
 Write-Host "client wrapper pid=$($clientProc.Id) log=$clientLog"
 Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
-Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames"
+Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames"
 if ($Rollback) {
     $backendLabel = if ($RollbackBackend -ne "") { $RollbackBackend } else { "savestate" }
     Write-Host "rollback enabled backend=$backendLabel window=$RollbackWindow checkpointInterval=$RollbackCheckpointInterval resimDelay=$RollbackResimulateDelayFrames resimulate=$RollbackResimulate"
