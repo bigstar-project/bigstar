@@ -1,5 +1,32 @@
 # NSMB Mario vs Luigi Online PoC
 
+## 現在の最優先事項: rollback方式の成立性調査
+
+WAN越しで入力遅延を小さくするには、現行の固定入力遅延/待ち方式だけでは限界がある。次の優先事項は、MvsLの入力同期をrollback形式に寄せられるかを調査・検証すること。
+
+外部資料と既存実装から整理したrollbackの必須条件:
+
+- 過去フレームの完全なゲーム状態を保存できること。
+- remote inputが未着のフレームでは、前回remote inputを繰り返すなどの予測入力で先に進めること。
+- 後から届いたremote inputが予測と違った場合、該当フレームのsavestateへ戻し、正しい入力列で現在フレームまで高速再実行できること。
+- 同じ初期状態と同じ入力列なら、host/clientでMvsLの重要状態が決定論的に一致すること。
+
+2026-05-29時点で追加した調査用hook:
+
+- `MELONDS_NSML_ROLLBACK=1`: 入力netplay中にremote input未着でも停止せず、直近remote inputから予測して進めるprobe mode。
+- `MELONDS_NSML_ROLLBACK_WINDOW=<frames>`: in-memory savestate ringの保持フレーム数。初期値20。
+- `MELONDS_NSML_ROLLBACK_RESTORE_PROBE=1`: 予測ミスマッチ時に該当フレームのcheckpointを復元できるかだけを試す診断用。
+- `MELONDS_NSML_ROLLBACK_RESIMULATE=1`: 予測ミスマッチ時にcheckpointへ戻り、保存済みlocal/remote入力履歴で現在フレームまで内部再実行する診断用。
+
+現時点の判断:
+
+- rollbackの第一関門である「予測しながら止まらず進める」「後着remote inputとのミスマッチを検出する」「過去フレームのsavestateをメモリ上に保持する」「checkpoint復元後に内部再実行する」土台を追加した。
+- `logs/codex-rollback-restore-probe-980-20260529`: frame 900付近の予測ミスマッチ後、約19MBのsavestate checkpointを復元できることを確認。
+- `logs/codex-rollback-resim-probe-980-20260529`: frame 900の予測ミスマッチ後、frame 900..955 を内部再実行できることを確認。
+- `logs/codex-rollback-resim-throttle-2600-20260529`: rollback + frame lead throttle + checkpoint更新で、2600フレームの主要CSV比較は同一行では一致。検証wrapperはCSV間隔設定のため movement probe row不足で失敗。
+- `logs/codex-rollback-resim-throttle-pass-2600-20260529`: CSV間隔30では、rollback補正直後の一時フレームでhost/clientの表示/actor状態が異なり、その後再収束する挙動を確認。従来の「全フレーム完全一致」検証はrollback方式には厳しすぎるため、rollback用には「一定settle frames後に収束しているか」を見る検証へ分ける必要がある。
+- 既存のmelonDS savestateは使えるが、1 checkpointが約19MBあり、毎フレーム保存は重い。現在のrollback probeは30fps前後まで落ちるため、実用化には差分savestate、重要RAM限定snapshot、または低頻度checkpoint + replay範囲制限が必要。
+
 ## 目的
 
 New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` で WAN 越しに対戦できる形へ持っていく。

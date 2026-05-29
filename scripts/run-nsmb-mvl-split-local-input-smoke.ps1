@@ -8,8 +8,13 @@ param(
     [string]$ClientInputScript = "tests\nsmb_us_direct_mvl_manual_client_luigi_move.inputs",
     [int]$InputDelayFrames = 16,
     [int]$InputMaxFrameLead = 2,
+    [switch]$InputNetplayTrace,
     [int]$InputSendDelayFrames = 0,
     [int]$InputSendJitterFrames = 0,
+    [switch]$Rollback,
+    [int]$RollbackWindow = 20,
+    [switch]$RollbackResimulate,
+    [switch]$RollbackRestoreProbe,
     [int]$GameStateTraceInterval = 30,
     [int]$HostStartupDelayMs = 1200,
     [string]$LogDir = "logs\nsmb-mvl-split-local-input-smoke",
@@ -52,6 +57,18 @@ $common = @(
 )
 if ($AllowJit) {
     $common += "-AllowJit"
+}
+if ($InputNetplayTrace) {
+    $common += "-InputNetplayTrace"
+}
+if ($Rollback) {
+    $common += @("-Rollback", "-RollbackWindow", "$RollbackWindow")
+    if ($RollbackResimulate) {
+        $common += "-RollbackResimulate"
+    }
+    if ($RollbackRestoreProbe) {
+        $common += "-RollbackRestoreProbe"
+    }
 }
 
 $hostArgs = @(

@@ -51,6 +51,10 @@ param(
     [int]$InputSendDelayFrames = 0,
     [int]$InputSendJitterFrames = 0,
     [int]$InputMaxFrameLead = 2,
+    [switch]$Rollback,
+    [int]$RollbackWindow = 20,
+    [switch]$RollbackResimulate,
+    [switch]$RollbackRestoreProbe,
     [switch]$PacketBridge,
     [switch]$PacketBridgeAllowJit,
     [switch]$PacketBridgeAllowPreGame,
@@ -2248,6 +2252,25 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_INPUT_NETPLAY_TRACE -ErrorAction SilentlyContinue
         }
+        if ($Rollback) {
+            $env:MELONDS_NSML_ROLLBACK = "1"
+            $env:MELONDS_NSML_ROLLBACK_WINDOW = "$RollbackWindow"
+            if ($RollbackResimulate) {
+                $env:MELONDS_NSML_ROLLBACK_RESIMULATE = "1"
+            } else {
+                Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIMULATE -ErrorAction SilentlyContinue
+            }
+            if ($RollbackRestoreProbe) {
+                $env:MELONDS_NSML_ROLLBACK_RESTORE_PROBE = "1"
+            } else {
+                Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESTORE_PROBE -ErrorAction SilentlyContinue
+            }
+        } else {
+            Remove-Item Env:\MELONDS_NSML_ROLLBACK -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_ROLLBACK_WINDOW -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIMULATE -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESTORE_PROBE -ErrorAction SilentlyContinue
+        }
         if ($PacketBridgeTrace) {
             $env:MELONDS_NSML_PACKET_BRIDGE_TRACE = "1"
             $env:MELONDS_NSML_PACKET_REPLAY_LOG = "$Stdout.packet-replay.csv"
@@ -2269,6 +2292,10 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_INPUT_SEND_DELAY_FRAMES -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_INPUT_SEND_JITTER_FRAMES -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_INPUT_MAX_FRAME_LEAD -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_WINDOW -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIMULATE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESTORE_PROBE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PORT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_LOCAL_INSTANCE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE -ErrorAction SilentlyContinue

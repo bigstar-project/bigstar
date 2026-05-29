@@ -807,6 +807,8 @@ bool IsARM9MainRAMAddress(melonDS::u32 addr)
     return (addr & 0xFF000000u) == 0x02000000u;
 }
 
+int CurrentPacketBridgeLocalPlayer();
+
 struct State
 {
     std::mutex Mutex;
@@ -1135,6 +1137,20 @@ struct State
     bool InputNetplayOnly = false;
     bool InputNetplayTraceEnabled = false;
     int InputNetplayMaxFrameLead = -1;
+    bool RollbackEnabled = false;
+    bool RollbackResimulate = false;
+    bool RollbackRestoreProbe = false;
+    int RollbackWindow = 20;
+    std::map<melonDS::u32, InputState> PredictedRemoteInputs;
+    std::map<melonDS::u32, std::vector<char>> RollbackStates;
+    bool LastConfirmedRemoteInputValid = false;
+    InputState LastConfirmedRemoteInput {};
+    melonDS::u32 PendingRollbackFrame = kNoFrameLimit;
+    melonDS::u32 RollbackPredictionCount = 0;
+    melonDS::u32 RollbackMismatchCount = 0;
+    melonDS::u32 RollbackRestoreCount = 0;
+    melonDS::u32 RollbackResimulateCount = 0;
+    melonDS::u32 LastRollbackTraceFrame = kNoFrameLimit;
     melonDS::u32 ForceStageSceneStartGateStartFrame = 0;
     melonDS::u32 ForceStageSceneStartGateEndFrame = 0;
     melonDS::u32 ForceStageSceneStartGateValue = 1;
@@ -1331,6 +1347,14 @@ InputState NeutralInput()
     InputState input {};
     input.KeyMask = 0xFFF;
     return input;
+}
+
+bool InputsEqual(const InputState& a, const InputState& b)
+{
+    return a.KeyMask == b.KeyMask
+        && a.Touching == b.Touching
+        && a.TouchX == b.TouchX
+        && a.TouchY == b.TouchY;
 }
 
 InputState NeutralInputPreservingTouch(const InputState& source)
@@ -1712,12 +1736,43 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                 std::memcpy(&packet, event.packet->data, sizeof(packet));
                 if (packet.Magic == kMagic && packet.Version == kVersion)
                 {
-                    G.RemoteInputs[packet.Frame] = {
+                    const InputState receivedInput {
                         packet.KeyMask,
                         packet.Touching != 0,
                         packet.TouchX,
                         packet.TouchY,
                     };
+                    if (G.RollbackEnabled)
+                    {
+                        auto predicted = G.PredictedRemoteInputs.find(packet.Frame);
+                        if (predicted != G.PredictedRemoteInputs.end()
+                            && !InputsEqual(predicted->second, receivedInput))
+                        {
+                            G.RollbackMismatchCount++;
+                            if (G.PendingRollbackFrame == kNoFrameLimit
+                                || packet.Frame < G.PendingRollbackFrame)
+                            {
+                                G.PendingRollbackFrame = packet.Frame;
+                            }
+                            std::printf(
+                                "NSMB Rollback: prediction mismatch frame=%u predicted={keys=0x%03X touch=%d x=%u y=%u} actual={keys=0x%03X touch=%d x=%u y=%u} pending=%u mismatches=%u\n",
+                                packet.Frame,
+                                predicted->second.KeyMask,
+                                predicted->second.Touching ? 1 : 0,
+                                predicted->second.TouchX,
+                                predicted->second.TouchY,
+                                receivedInput.KeyMask,
+                                receivedInput.Touching ? 1 : 0,
+                                receivedInput.TouchX,
+                                receivedInput.TouchY,
+                                G.PendingRollbackFrame,
+                                G.RollbackMismatchCount);
+                            std::fflush(stdout);
+                        }
+                        G.LastConfirmedRemoteInput = receivedInput;
+                        G.LastConfirmedRemoteInputValid = true;
+                    }
+                    G.RemoteInputs[packet.Frame] = receivedInput;
                     G.LastReceivedInputFrame = packet.Frame;
                     if (G.InputTraceEnabled
                         && packet.Frame != G.LastTracedReceivedInputFrame
@@ -1992,6 +2047,155 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
             input.KeyMask,
             G.LocalInputs.size());
     }
+}
+
+bool GetRollbackRemoteInputLocked(melonDS::u32 frame, InputState& input, bool& predicted)
+{
+    auto confirmed = G.RemoteInputs.find(frame);
+    if (confirmed != G.RemoteInputs.end())
+    {
+        input = confirmed->second;
+        predicted = false;
+        return true;
+    }
+
+    auto existingPrediction = G.PredictedRemoteInputs.find(frame);
+    if (existingPrediction != G.PredictedRemoteInputs.end())
+    {
+        input = existingPrediction->second;
+        predicted = true;
+        return true;
+    }
+
+    auto previousPrediction = frame > 0 ? G.PredictedRemoteInputs.find(frame - 1) : G.PredictedRemoteInputs.end();
+    if (previousPrediction != G.PredictedRemoteInputs.end())
+        input = previousPrediction->second;
+    else if (G.LastConfirmedRemoteInputValid)
+        input = G.LastConfirmedRemoteInput;
+    else
+        input = NeutralInput();
+
+    G.PredictedRemoteInputs.emplace(frame, input);
+    G.RollbackPredictionCount++;
+    predicted = true;
+    return true;
+}
+
+void PruneRollbackHistoryLocked(melonDS::u32 frame)
+{
+    const melonDS::u32 keepFrom = frame > static_cast<melonDS::u32>(G.RollbackWindow)
+        ? frame - static_cast<melonDS::u32>(G.RollbackWindow)
+        : 0;
+
+    for (auto it = G.RollbackStates.begin(); it != G.RollbackStates.end(); )
+    {
+        if (it->first < keepFrom)
+            it = G.RollbackStates.erase(it);
+        else
+            ++it;
+    }
+    for (auto it = G.PredictedRemoteInputs.begin(); it != G.PredictedRemoteInputs.end(); )
+    {
+        if (it->first < keepFrom && G.RemoteInputs.find(it->first) != G.RemoteInputs.end())
+            it = G.PredictedRemoteInputs.erase(it);
+        else
+            ++it;
+    }
+}
+
+void SaveRollbackCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.RollbackEnabled || !G.InputNetplayOnly || !nds)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (G.NetplayStartFrame != 0 && frame < G.NetplayStartFrame)
+        return;
+    if (G.RollbackWindow <= 0)
+        return;
+
+    melonDS::Savestate state;
+    if (state.Error || !nds->DoSavestate(&state) || state.Error)
+    {
+        if (G.InputNetplayTraceEnabled)
+            std::printf("NSMB Rollback: failed to save checkpoint inst=%d frame=%u\n", instanceID, frame);
+        return;
+    }
+
+    std::vector<char> buffer(static_cast<const char*>(state.Buffer()),
+        static_cast<const char*>(state.Buffer()) + state.Length());
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        G.RollbackStates[frame] = std::move(buffer);
+        PruneRollbackHistoryLocked(frame);
+    }
+}
+
+void SaveRollbackCheckpointNowLocked(melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!nds || G.RollbackWindow <= 0)
+        return;
+
+    melonDS::Savestate state;
+    if (state.Error || !nds->DoSavestate(&state) || state.Error)
+        return;
+
+    std::vector<char> buffer(static_cast<const char*>(state.Buffer()),
+        static_cast<const char*>(state.Buffer()) + state.Length());
+    G.RollbackStates[frame] = std::move(buffer);
+    PruneRollbackHistoryLocked(frame);
+}
+
+bool RestoreRollbackCheckpointForProbeIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.RollbackEnabled || !G.RollbackRestoreProbe || !G.InputNetplayOnly || !nds)
+        return false;
+    if (instanceID < 0 || instanceID >= 16)
+        return false;
+
+    melonDS::u32 restoreFrame = kNoFrameLimit;
+    std::vector<char> buffer;
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        if (G.PendingRollbackFrame == kNoFrameLimit)
+            return false;
+
+        restoreFrame = G.PendingRollbackFrame;
+        auto state = G.RollbackStates.find(restoreFrame);
+        if (state == G.RollbackStates.end())
+        {
+            std::printf(
+                "NSMB Rollback: cannot restore frame=%u at current=%u, checkpoint missing window=%d\n",
+                restoreFrame,
+                frame,
+                G.RollbackWindow);
+            G.PendingRollbackFrame = kNoFrameLimit;
+            return false;
+        }
+        buffer = state->second;
+        G.PendingRollbackFrame = kNoFrameLimit;
+    }
+
+    melonDS::Savestate state(buffer.data(), static_cast<melonDS::u32>(buffer.size()), false);
+    if (state.Error || !nds->DoSavestate(&state) || state.Error)
+    {
+        std::printf("NSMB Rollback: restore probe failed inst=%d restoreFrame=%u current=%u\n",
+            instanceID,
+            restoreFrame,
+            frame);
+        return false;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        G.RollbackRestoreCount++;
+    }
+    std::printf("NSMB Rollback: restore probe loaded frame=%u at current=%u bytes=%zu\n",
+        restoreFrame,
+        frame,
+        buffer.size());
+    std::fflush(stdout);
+    return true;
 }
 
 melonDS::u32 LocalPlayerID(melonDS::NDS* nds)
@@ -5881,6 +6085,181 @@ InputState PacketBridgeInputForPlayer(
     return ApplyScriptRemotePacketInputScript(G.ScriptRemotePacketInputInstance, frame, NeutralInput());
 }
 
+void WritePacketBridgeJitScratchInputs(
+    int instanceID,
+    melonDS::u32 frame,
+    melonDS::NDS* nds,
+    int localPlayer,
+    const InputState& localInput,
+    const InputState& remoteInput,
+    bool hasRemoteInput,
+    bool predictedRemoteInput)
+{
+    if (!nds || !nds->MainRAM)
+        return;
+
+    const melonDS::u32 tick = nds->ARM9Read16(kNetPacketTickAddr);
+    const melonDS::u8 action = nds->ARM9Read8(kNetPacketActionAddr);
+    nds->ARM9Write16(kPacketBridgeJitScratchTickAddr, static_cast<melonDS::u16>(tick));
+    nds->ARM9Write8(kPacketBridgeJitScratchActionAddr, action);
+
+    for (int player = 0; player < 2; player++)
+    {
+        const InputState input = PacketBridgeInputForPlayer(
+            player,
+            localPlayer,
+            instanceID,
+            frame,
+            localInput,
+            remoteInput,
+            hasRemoteInput);
+        const melonDS::u32 keys = (~input.KeyMask) & 0x0FFF;
+        nds->ARM9Write16(kPacketBridgeJitScratchKeysAddr + static_cast<melonDS::u32>(player * 2),
+            static_cast<melonDS::u16>(keys));
+
+        melonDS::u8 packet[52] {};
+        packet[0] = static_cast<melonDS::u8>(tick & 0xFF);
+        packet[1] = static_cast<melonDS::u8>((tick >> 8) & 0xFF);
+        packet[2] = static_cast<melonDS::u8>(keys & 0xFF);
+        packet[3] = static_cast<melonDS::u8>((keys >> 8) & 0xFF);
+        packet[4] = action;
+        packet[5] = input.Touching ? 1 : 0;
+        packet[6] = static_cast<melonDS::u8>(std::min<int>(input.TouchX, 255));
+        packet[7] = static_cast<melonDS::u8>(std::min<int>(input.TouchY, 191));
+        for (melonDS::u32 i = 0; i < 44; i++)
+            packet[8 + i] = nds->ARM9Read8(0x020888E8 + i);
+        packet[0x29] = nds->ARM9Read8(0x02088A4C);
+
+        const melonDS::u32 packetAddr = kPacketBridgeJitScratchPacketsAddr + static_cast<melonDS::u32>(player * 0x40);
+        for (melonDS::u32 i = 0; i < sizeof(packet); i++)
+            nds->ARM9Write8(packetAddr + i, packet[i]);
+
+        // The JIT helper path only replaces Net::getConsoleKeys()/TouchPad.
+        // Feeding these synthetic packets back into NSMB's lower packet queue can
+        // corrupt the game's stage state, so keep the packet copy as trace data.
+    }
+
+    if (G.InputNetplayTraceEnabled && (frame % 60) == 0)
+    {
+        const melonDS::u16 scratchKeys0 = nds->ARM9Read16(kPacketBridgeJitScratchKeysAddr);
+        const melonDS::u16 scratchKeys1 = nds->ARM9Read16(kPacketBridgeJitScratchKeysAddr + 2);
+        std::printf(
+            "NSMB InputNetplay: inst=%d frame=%u localPlayer=%d hasRemote=%d predictedRemote=%d tick=0x%04X action=0x%02X keys0=0x%03X keys1=0x%03X\n",
+            instanceID,
+            frame,
+            localPlayer,
+            hasRemoteInput ? 1 : 0,
+            predictedRemoteInput ? 1 : 0,
+            static_cast<unsigned>(tick),
+            static_cast<unsigned>(action),
+            static_cast<unsigned>(scratchKeys0),
+            static_cast<unsigned>(scratchKeys1));
+    }
+}
+
+bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.RollbackEnabled || !G.RollbackResimulate || !G.InputNetplayOnly || !nds)
+        return false;
+    if (instanceID < 0 || instanceID >= 16)
+        return false;
+
+    melonDS::u32 restoreFrame = kNoFrameLimit;
+    std::vector<char> buffer;
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        if (G.PendingRollbackFrame == kNoFrameLimit)
+            return false;
+        restoreFrame = G.PendingRollbackFrame;
+        if (restoreFrame >= frame)
+            return false;
+
+        auto state = G.RollbackStates.find(restoreFrame);
+        if (state == G.RollbackStates.end())
+        {
+            std::printf(
+                "NSMB Rollback: cannot resimulate frame=%u at current=%u, checkpoint missing window=%d\n",
+                restoreFrame,
+                frame,
+                G.RollbackWindow);
+            G.PendingRollbackFrame = kNoFrameLimit;
+            return false;
+        }
+
+        buffer = state->second;
+        G.PendingRollbackFrame = kNoFrameLimit;
+    }
+
+    melonDS::Savestate state(buffer.data(), static_cast<melonDS::u32>(buffer.size()), false);
+    if (state.Error || !nds->DoSavestate(&state) || state.Error)
+    {
+        std::printf("NSMB Rollback: resim restore failed inst=%d restoreFrame=%u current=%u\n",
+            instanceID,
+            restoreFrame,
+            frame);
+        return false;
+    }
+
+    const int localPlayer = CurrentPacketBridgeLocalPlayer();
+    melonDS::u32 resimulated = 0;
+    for (melonDS::u32 f = restoreFrame; f < frame; f++)
+    {
+        InputState localInput = NeutralInput();
+        InputState remoteInput = NeutralInput();
+        bool predictedRemote = false;
+        {
+            std::lock_guard<std::mutex> lock(G.Mutex);
+            auto localIt = G.LocalInputs.find(f);
+            if (localIt != G.LocalInputs.end())
+                localInput = localIt->second;
+            GetRollbackRemoteInputLocked(f, remoteInput, predictedRemote);
+        }
+
+        WritePacketBridgeJitScratchInputs(
+            instanceID,
+            f,
+            nds,
+            localPlayer,
+            localInput,
+            remoteInput,
+            true,
+            predictedRemote);
+
+        nds->SetKeyMask(localInput.KeyMask);
+        if (localInput.Touching)
+            nds->TouchScreen(localInput.TouchX, localInput.TouchY);
+        else
+            nds->ReleaseScreen();
+
+        nds->RunFrame();
+        resimulated++;
+
+        {
+            std::lock_guard<std::mutex> lock(G.Mutex);
+            SaveRollbackCheckpointNowLocked(f + 1, nds);
+        }
+
+        if (nds->NumFrames != f + 1 && G.InputNetplayTraceEnabled)
+        {
+            std::printf("NSMB Rollback: resim frame counter drift expected=%u actual=%u\n",
+                f + 1,
+                nds->NumFrames);
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        G.RollbackResimulateCount++;
+    }
+    std::printf("NSMB Rollback: resimulated from frame=%u to current=%u frames=%u bytes=%zu\n",
+        restoreFrame,
+        frame,
+        resimulated,
+        buffer.size());
+    std::fflush(stdout);
+    return true;
+}
+
 void ThrottleInputNetplayFrameLead(melonDS::NDS* nds, melonDS::u32 frame, melonDS::u32 sendFrame)
 {
     if (!G.InputNetplayOnly || G.InputNetplayMaxFrameLead < 0 || !G.Enabled || !G.Ready)
@@ -5984,6 +6363,7 @@ void WritePacketBridgeJitScratchIfNeeded(
     InputState effectiveLocalInput = localInput;
     InputState remoteInput = NeutralInput();
     bool hasRemoteInput = false;
+    bool predictedRemoteInput = false;
     if (G.Enabled && G.Ready)
     {
         const melonDS::u32 sendFrame = G.InputNetplayOnly
@@ -6006,11 +6386,17 @@ void WritePacketBridgeJitScratchIfNeeded(
                 remoteInput = it->second;
                 hasRemoteInput = true;
             }
+            else if (G.RollbackEnabled && G.InputNetplayOnly
+                && (G.NetplayStartFrame == 0 || frame >= G.NetplayStartFrame))
+            {
+                hasRemoteInput = GetRollbackRemoteInputLocked(frame, remoteInput, predictedRemoteInput);
+            }
         }
 
         ThrottleInputNetplayFrameLead(nds, frame, sendFrame);
 
         if (!hasRemoteInput
+            && !G.RollbackEnabled
             && G.LocalWaitsForRemote
             && (!G.InputNetplayOnly || G.NetplayStartFrame == 0 || frame >= G.NetplayStartFrame))
         {
@@ -6022,63 +6408,15 @@ void WritePacketBridgeJitScratchIfNeeded(
     if (frame < startFrame)
         return;
 
-    const melonDS::u32 tick = nds->ARM9Read16(kNetPacketTickAddr);
-    const melonDS::u8 action = nds->ARM9Read8(kNetPacketActionAddr);
-    nds->ARM9Write16(kPacketBridgeJitScratchTickAddr, static_cast<melonDS::u16>(tick));
-    nds->ARM9Write8(kPacketBridgeJitScratchActionAddr, action);
-
-    for (int player = 0; player < 2; player++)
-    {
-        const InputState input = PacketBridgeInputForPlayer(
-            player,
-            localPlayer,
-            instanceID,
-            frame,
-            effectiveLocalInput,
-            remoteInput,
-            hasRemoteInput);
-        const melonDS::u32 keys = (~input.KeyMask) & 0x0FFF;
-        nds->ARM9Write16(kPacketBridgeJitScratchKeysAddr + static_cast<melonDS::u32>(player * 2),
-            static_cast<melonDS::u16>(keys));
-
-        melonDS::u8 packet[52] {};
-        packet[0] = static_cast<melonDS::u8>(tick & 0xFF);
-        packet[1] = static_cast<melonDS::u8>((tick >> 8) & 0xFF);
-        packet[2] = static_cast<melonDS::u8>(keys & 0xFF);
-        packet[3] = static_cast<melonDS::u8>((keys >> 8) & 0xFF);
-        packet[4] = action;
-        packet[5] = input.Touching ? 1 : 0;
-        packet[6] = static_cast<melonDS::u8>(std::min<int>(input.TouchX, 255));
-        packet[7] = static_cast<melonDS::u8>(std::min<int>(input.TouchY, 191));
-        for (melonDS::u32 i = 0; i < 44; i++)
-            packet[8 + i] = nds->ARM9Read8(0x020888E8 + i);
-        packet[0x29] = nds->ARM9Read8(0x02088A4C);
-
-        const melonDS::u32 packetAddr = kPacketBridgeJitScratchPacketsAddr + static_cast<melonDS::u32>(player * 0x40);
-        for (melonDS::u32 i = 0; i < sizeof(packet); i++)
-            nds->ARM9Write8(packetAddr + i, packet[i]);
-
-        // The JIT helper path only replaces Net::getConsoleKeys().  Feeding these
-        // synthetic packets back into NSMB's packet queue can corrupt the game's
-        // lower MP state after stage start, so keep the packet copy as a trace
-        // scratch buffer and let the ROM's normal packet state advance itself.
-    }
-
-    if (G.InputNetplayTraceEnabled && (frame % 60) == 0)
-    {
-        const melonDS::u16 scratchKeys0 = nds->ARM9Read16(kPacketBridgeJitScratchKeysAddr);
-        const melonDS::u16 scratchKeys1 = nds->ARM9Read16(kPacketBridgeJitScratchKeysAddr + 2);
-        std::printf(
-            "NSMB InputNetplay: inst=%d frame=%u localPlayer=%d hasRemote=%d tick=0x%04X action=0x%02X keys0=0x%03X keys1=0x%03X\n",
-            instanceID,
-            frame,
-            localPlayer,
-            hasRemoteInput ? 1 : 0,
-            static_cast<unsigned>(tick),
-            static_cast<unsigned>(action),
-            static_cast<unsigned>(scratchKeys0),
-            static_cast<unsigned>(scratchKeys1));
-    }
+    WritePacketBridgeJitScratchInputs(
+        instanceID,
+        frame,
+        nds,
+        localPlayer,
+        effectiveLocalInput,
+        remoteInput,
+        hasRemoteInput,
+        predictedRemoteInput);
 }
 
 void ApplyPacketBridgeJitHelperPatchIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -8943,6 +9281,16 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH_FRAME", 0)));
     G.InputNetplayOnly = EnvFlag("MELONDS_NSML_INPUT_NETPLAY_ONLY");
     G.InputNetplayTraceEnabled = EnvFlag("MELONDS_NSML_INPUT_NETPLAY_TRACE");
+    G.RollbackEnabled = EnvFlag("MELONDS_NSML_ROLLBACK");
+    G.RollbackResimulate = EnvFlag("MELONDS_NSML_ROLLBACK_RESIMULATE");
+    G.RollbackRestoreProbe = EnvFlag("MELONDS_NSML_ROLLBACK_RESTORE_PROBE");
+    G.RollbackWindow = std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_WINDOW", 20), 1, 180);
+    if (G.RollbackEnabled && G.InputNetplayOnly)
+    {
+        G.LocalWaitsForRemote = false;
+        if (G.Delay > 2)
+            G.Delay = std::min(G.Delay, 2);
+    }
     G.ForceStageSceneStartGateStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_START_FRAME", 0)));
     G.ForceStageSceneStartGateEndFrame = static_cast<melonDS::u32>(
@@ -9303,7 +9651,7 @@ void InitFromEnvironment()
     }
 
     G.Ready = true;
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d rollback=%d rollbackWindow=%d rollbackResimulate=%d rollbackRestoreProbe=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -9335,6 +9683,10 @@ void InitFromEnvironment()
         G.InputNetplayOnly ? 1 : 0,
         G.InputNetplayTraceEnabled ? 1 : 0,
         G.InputNetplayMaxFrameLead,
+        G.RollbackEnabled ? 1 : 0,
+        G.RollbackWindow,
+        G.RollbackResimulate ? 1 : 0,
+        G.RollbackRestoreProbe ? 1 : 0,
         G.MatchSeed,
         G.MatchSeedConfigured ? 1 : 0,
         G.DirectMvlBootEnabled ? 1 : 0,
@@ -9359,7 +9711,13 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         LoadState(instanceID, inputFrame, nds);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        RestoreRollbackCheckpointForProbeIfNeeded(instanceID, inputFrame, nds);
+
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ApplyPacketBridgeJitHelperPatchIfNeeded(instanceID, inputFrame, nds);
+
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        RollbackResimulateIfNeeded(instanceID, inputFrame, nds);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         InjectDirectMvlBootCall(instanceID, inputFrame, nds);
@@ -9475,6 +9833,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     const InputState testInput = ApplyInputScript(instanceID, inputFrame, polledInput);
     const melonDS::u32 syncFrame = G.TestEnabled ? inputFrame : frame;
+
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        SaveRollbackCheckpointIfNeeded(instanceID, syncFrame, nds);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         WritePacketBridgeJitScratchIfNeeded(instanceID, syncFrame, nds, testInput);
@@ -9814,6 +10175,26 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         TracePlayerLifeChanges(instanceID, logFrame, nds);
+
+    if (G.RollbackEnabled
+        && G.InputNetplayTraceEnabled
+        && logFrame != G.LastRollbackTraceFrame
+        && (logFrame % 120) == 0)
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        G.LastRollbackTraceFrame = logFrame;
+        std::printf(
+            "NSMB Rollback: frame=%u checkpoints=%zu predicted=%zu predictions=%u mismatches=%u restores=%u resims=%u pending=%u\n",
+            logFrame,
+            G.RollbackStates.size(),
+            G.PredictedRemoteInputs.size(),
+            G.RollbackPredictionCount,
+            G.RollbackMismatchCount,
+            G.RollbackRestoreCount,
+            G.RollbackResimulateCount,
+            G.PendingRollbackFrame);
+        std::fflush(stdout);
+    }
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageCameraSlotIfNeeded(instanceID, logFrame, nds);
