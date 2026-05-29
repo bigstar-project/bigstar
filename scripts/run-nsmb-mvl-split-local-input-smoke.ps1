@@ -14,10 +14,15 @@ param(
     [switch]$Rollback,
     [int]$RollbackWindow = 20,
     [int]$RollbackCheckpointInterval = 1,
+    [int]$RollbackResimulateDelayFrames = 0,
     [switch]$RollbackResimulate,
     [switch]$RollbackRestoreProbe,
     [int]$RollbackSettleFrames = 0,
     [int]$GameStateTraceInterval = 30,
+    [switch]$NoGameStateTrace,
+    [switch]$SkipGameStateComparison,
+    [switch]$NoDrawScreen,
+    [switch]$NoAudioSync,
     [int]$HostStartupDelayMs = 1200,
     [string]$LogDir = "logs\nsmb-mvl-split-local-input-smoke",
     [switch]$AllowJit
@@ -38,9 +43,6 @@ $common = @(
     "-WaitTimeoutMs", "$WaitTimeoutMs",
     "-Frames", "$Frames",
     "-Exe", $Exe,
-    "-GameStateTrace",
-    "-GameStateTraceExtended",
-    "-GameStateTraceInterval", "$GameStateTraceInterval",
     "-ScreenshotInterval", "0",
     "-NoHashLog",
     "-SkipDisconnectScreenshotCheck",
@@ -57,14 +59,32 @@ $common = @(
     "-PacketBridgeStartFrame", "900",
     "-RequireNetLocalAidStartFrame", "900"
 )
+if (-not $NoGameStateTrace) {
+    $common += @(
+        "-GameStateTrace",
+        "-GameStateTraceExtended",
+        "-GameStateTraceInterval", "$GameStateTraceInterval"
+    )
+}
 if ($AllowJit) {
     $common += "-AllowJit"
+}
+if ($NoDrawScreen) {
+    $common += "-NoDrawScreen"
+}
+if ($NoAudioSync) {
+    $common += "-NoAudioSync"
 }
 if ($InputNetplayTrace) {
     $common += "-InputNetplayTrace"
 }
 if ($Rollback) {
-    $common += @("-Rollback", "-RollbackWindow", "$RollbackWindow", "-RollbackCheckpointInterval", "$RollbackCheckpointInterval")
+    $common += @(
+        "-Rollback",
+        "-RollbackWindow", "$RollbackWindow",
+        "-RollbackCheckpointInterval", "$RollbackCheckpointInterval",
+        "-RollbackResimulateDelayFrames", "$RollbackResimulateDelayFrames"
+    )
     if ($RollbackResimulate) {
         $common += "-RollbackResimulate"
     }
@@ -135,6 +155,13 @@ if ($hostText -notmatch "NSMB Mario vs Luigi LAN route smoke passed" -or
         if (Test-Path $path) { $details += Get-Content $path -Raw }
     }
     throw "split local-input child smoke failed: $($details -join "`n")"
+}
+
+if ($NoGameStateTrace -or $SkipGameStateComparison) {
+    Get-Content $hostOut
+    Get-Content $clientOut
+    Write-Host "NSMB Mario vs Luigi split local-input smoke passed without game-state comparison: frames=$Frames log=$logRoot"
+    return
 }
 
 $hostCsv = Join-Path $hostLog "host.game-state.csv"

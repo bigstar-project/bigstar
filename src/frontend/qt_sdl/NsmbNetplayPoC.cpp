@@ -1142,11 +1142,13 @@ struct State
     bool RollbackRestoreProbe = false;
     int RollbackWindow = 20;
     int RollbackCheckpointInterval = 1;
+    int RollbackResimulateDelayFrames = 0;
     std::map<melonDS::u32, InputState> PredictedRemoteInputs;
     std::map<melonDS::u32, std::vector<char>> RollbackStates;
     bool LastConfirmedRemoteInputValid = false;
     InputState LastConfirmedRemoteInput {};
     melonDS::u32 PendingRollbackFrame = kNoFrameLimit;
+    melonDS::u32 PendingRollbackObservedFrame = kNoFrameLimit;
     melonDS::u32 RollbackPredictionCount = 0;
     melonDS::u32 RollbackMismatchCount = 0;
     melonDS::u32 RollbackRestoreCount = 0;
@@ -1750,21 +1752,32 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                         if (predicted != G.PredictedRemoteInputs.end()
                             && !InputsEqual(predicted->second, receivedInput))
                         {
+                            const InputState predictedInput = predicted->second;
                             G.RollbackMismatchCount++;
+                            const melonDS::u32 observedFrame = localFrame == kNoFrameLimit
+                                ? packet.Frame
+                                : localFrame;
                             if (G.PendingRollbackFrame == kNoFrameLimit
                                 || packet.Frame < G.PendingRollbackFrame)
                             {
                                 G.PendingRollbackFrame = packet.Frame;
+                                G.PendingRollbackObservedFrame = observedFrame;
                             }
+                            else if (G.PendingRollbackObservedFrame == kNoFrameLimit)
+                            {
+                                G.PendingRollbackObservedFrame = observedFrame;
+                            }
+                            G.PredictedRemoteInputs.erase(G.PredictedRemoteInputs.lower_bound(packet.Frame),
+                                G.PredictedRemoteInputs.end());
                             if (G.InputNetplayTraceEnabled)
                             {
                                 std::printf(
                                     "NSMB Rollback: prediction mismatch frame=%u predicted={keys=0x%03X touch=%d x=%u y=%u} actual={keys=0x%03X touch=%d x=%u y=%u} pending=%u mismatches=%u\n",
                                     packet.Frame,
-                                    predicted->second.KeyMask,
-                                    predicted->second.Touching ? 1 : 0,
-                                    predicted->second.TouchX,
-                                    predicted->second.TouchY,
+                                    predictedInput.KeyMask,
+                                    predictedInput.Touching ? 1 : 0,
+                                    predictedInput.TouchX,
+                                    predictedInput.TouchY,
                                     receivedInput.KeyMask,
                                     receivedInput.Touching ? 1 : 0,
                                     receivedInput.TouchX,
@@ -6194,6 +6207,12 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
         mismatchFrame = G.PendingRollbackFrame;
         if (mismatchFrame >= frame)
             return false;
+        if (G.RollbackResimulateDelayFrames > 0
+            && G.PendingRollbackObservedFrame != kNoFrameLimit
+            && frame < G.PendingRollbackObservedFrame + static_cast<melonDS::u32>(G.RollbackResimulateDelayFrames))
+        {
+            return false;
+        }
 
         auto state = G.RollbackStates.upper_bound(mismatchFrame);
         if (state == G.RollbackStates.begin())
@@ -6205,6 +6224,7 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
                 G.RollbackWindow,
                 G.RollbackCheckpointInterval);
             G.PendingRollbackFrame = kNoFrameLimit;
+            G.PendingRollbackObservedFrame = kNoFrameLimit;
             return false;
         }
         --state;
@@ -6212,6 +6232,7 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
 
         buffer = state->second;
         G.PendingRollbackFrame = kNoFrameLimit;
+        G.PendingRollbackObservedFrame = kNoFrameLimit;
 
         for (auto it = G.RollbackStates.upper_bound(restoreFrame); it != G.RollbackStates.end(); )
             it = G.RollbackStates.erase(it);
@@ -6278,13 +6299,16 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
         std::lock_guard<std::mutex> lock(G.Mutex);
         G.RollbackResimulateCount++;
     }
-    std::printf("NSMB Rollback: resimulated from checkpoint=%u mismatch=%u to current=%u frames=%u bytes=%zu\n",
-        restoreFrame,
-        mismatchFrame,
-        frame,
-        resimulated,
-        buffer.size());
-    std::fflush(stdout);
+    if (G.InputNetplayTraceEnabled)
+    {
+        std::printf("NSMB Rollback: resimulated from checkpoint=%u mismatch=%u to current=%u frames=%u bytes=%zu\n",
+            restoreFrame,
+            mismatchFrame,
+            frame,
+            resimulated,
+            buffer.size());
+        std::fflush(stdout);
+    }
     return true;
 }
 
@@ -9315,6 +9339,8 @@ void InitFromEnvironment()
     G.RollbackWindow = std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_WINDOW", 20), 1, 180);
     G.RollbackCheckpointInterval = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL", 1), 1, 30);
+    G.RollbackResimulateDelayFrames = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_RESIMULATE_DELAY_FRAMES", 0), 0, 30);
     if (G.RollbackEnabled && G.InputNetplayOnly)
     {
         G.LocalWaitsForRemote = false;
@@ -9681,7 +9707,7 @@ void InitFromEnvironment()
     }
 
     G.Ready = true;
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d rollback=%d rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimulate=%d rollbackRestoreProbe=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d rollback=%d rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -9716,6 +9742,7 @@ void InitFromEnvironment()
         G.RollbackEnabled ? 1 : 0,
         G.RollbackWindow,
         G.RollbackCheckpointInterval,
+        G.RollbackResimulateDelayFrames,
         G.RollbackResimulate ? 1 : 0,
         G.RollbackRestoreProbe ? 1 : 0,
         G.MatchSeed,
@@ -10215,7 +10242,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         std::lock_guard<std::mutex> lock(G.Mutex);
         G.LastRollbackTraceFrame = logFrame;
         std::printf(
-            "NSMB Rollback: frame=%u checkpoints=%zu checkpointSaves=%u predicted=%zu predictions=%u mismatches=%u restores=%u resims=%u pending=%u\n",
+            "NSMB Rollback: frame=%u checkpoints=%zu checkpointSaves=%u predicted=%zu predictions=%u mismatches=%u restores=%u resims=%u pending=%u observed=%u\n",
             logFrame,
             G.RollbackStates.size(),
             G.RollbackCheckpointSaveCount,
@@ -10224,7 +10251,8 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             G.RollbackMismatchCount,
             G.RollbackRestoreCount,
             G.RollbackResimulateCount,
-            G.PendingRollbackFrame);
+            G.PendingRollbackFrame,
+            G.PendingRollbackObservedFrame);
         std::fflush(stdout);
     }
 

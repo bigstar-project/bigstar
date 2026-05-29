@@ -16,6 +16,7 @@ WAN越しで入力遅延を小さくするには、現行の固定入力遅延/�
 - `MELONDS_NSML_ROLLBACK=1`: 入力netplay中にremote input未着でも停止せず、直近remote inputから予測して進めるprobe mode。
 - `MELONDS_NSML_ROLLBACK_WINDOW=<frames>`: in-memory savestate ringの保持フレーム数。初期値20。
 - `MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL=<frames>`: rollback checkpointの保存間隔。初期値1。intervalを広げると保持checkpoint数とsavestate保存回数を減らせるが、予測ミス時の再実行範囲は長くなる。
+- `MELONDS_NSML_ROLLBACK_RESIMULATE_DELAY_FRAMES=<frames>`: 予測ミスマッチ検出後、すぐ再実行せず指定フレームだけ待つ実験用debounce。初期値0。長くしすぎると一時差分が長く残る。
 - `MELONDS_NSML_ROLLBACK_RESTORE_PROBE=1`: 予測ミスマッチ時に該当フレームのcheckpointを復元できるかだけを試す診断用。
 - `MELONDS_NSML_ROLLBACK_RESIMULATE=1`: 予測ミスマッチ時にcheckpointへ戻り、保存済みlocal/remote入力履歴で現在フレームまで内部再実行する診断用。
 
@@ -30,7 +31,10 @@ WAN越しで入力遅延を小さくするには、現行の固定入力遅延/�
 - `logs/codex-rollback-checkpoint-interval4-2600-20260529`: checkpoint interval 4で2600フレーム通過。保持checkpointは約31、30フレームsettle比較も通過。
 - `logs/codex-rollback-checkpoint-interval8-2600-20260529`: checkpoint interval 8で2600フレーム通過。保持checkpointは約16、30フレームsettle比較も通過。
 - `logs/codex-rollback-checkpoint-interval16-2600-20260529`: checkpoint interval 16で2600フレーム通過。保持checkpointは約8、30フレームsettle比較も通過。ただしFPSは35-37fps程度で大きく改善していないため、保持メモリよりも予測ミス後の再実行中savestate保存、同一PC 2プロセス実行、game-state traceが主な負荷候補。
-- 既存のmelonDS savestateは使えるが、1 checkpointが約19MBあり、毎フレーム保存は重い。低頻度checkpointでも成立する見込みは出たが、快適なWAN対戦には、実プレイ時のtrace抑制、再実行中のcheckpoint保存削減、差分savestate、重要RAM限定snapshot、またはrollback window/intervalの自動調整が必要。
+- `logs/codex-rollback-prediction-prune-trace-1400-20260529`: 予測ミスマッチ時に該当フレーム以降の古い予測入力を破棄することで、長押し入力中の連続ミスマッチを大きく削減。例: host側は8件から押下/離しの2件へ減少。
+- `logs/codex-rollback-prediction-prune-interval8-delay6-2600-20260529`: 人工送信遅延6、checkpoint interval 8、30フレームsettle比較で2600フレーム通過。一時差分は4箇所から2箇所へ減少。
+- `logs/codex-rollback-prediction-prune-perf-delay6-2600-20260529`: game-state traceなしの性能測定で、同一PC 2プロセス時にhost約42.7fps / client約44.0fps。rollbackなしbaseline `logs/codex-lockstep-perf-notrace-2600-20260529` は約49-50fps。
+- 既存のmelonDS savestateは使えるが、1 checkpointが約19MBあり、毎フレーム保存は重い。低頻度checkpointと予測破棄で改善したが、快適なWAN対戦には、実プレイ時のtrace抑制、再実行中のcheckpoint保存削減、差分savestate、重要RAM限定snapshot、またはrollback window/intervalの自動調整が必要。
 
 ## 目的
 
@@ -126,7 +130,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 1. 最優先: rollbackを「成立性probe」から「実用候補」へ寄せる。
    - checkpoint interval 4/8/16はいずれも30フレームsettle比較を通過したため、次はtraceを切った実プレイ寄り設定でFPSを測る。
-   - 予測ミス後の再実行中checkpoint保存が重い可能性が高い。再実行中は必要最小限のcheckpointだけ保存する方式、または低頻度checkpoint + 入力到着バッファの設計を検証する。
+   - 予測ミス後の古い予測入力破棄は有効。次は再実行中checkpoint保存が本当に必要な範囲を削り、rollbackなしbaselineとの差をさらに詰める。
    - rollback時の一時差分は許容し、一定settle frames後に収束するかを見る検証を標準化する。
 2. 手動入力時のhost/client同期を、rollbackあり・なしの両方で比較する。
    - 既存の固定入力遅延/待ち方式は同期確認用のbaselineとして残す。
