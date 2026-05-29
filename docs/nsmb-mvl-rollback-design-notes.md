@@ -55,6 +55,55 @@ ARM9 Main RAM最大4MBだけを`memcpy`で保存/復元する軽量backendを試
 
 ## 検討したrollback案
 
+### Tango調査から得た示唆
+
+`external/tango` にTango本体をcloneして、`tango-pvp` のrollback実装を確認した。
+
+Tangoの重要な構造:
+
+- ゲームごとのROM hook/trapを持ち、通信処理、入力読み取り、round開始/終了、RNG初期化などをゲーム別に差し替える。
+- live primary emulatorとは別に、remote peerをローカルで再現する `shadow` emulator を持つ。
+- 再実行専用のheadless `Fastforwarder` emulatorを持つ。描画を飛ばして高速に再実行する。
+- `settled_state` は実remote inputで確定済みの単一checkpointとして保持する。
+- `speculative tail` は `settled_state` から一時的にfastforwardして表示用stateを作る。ここで作った予測stateを次のseedへ混ぜない。
+- ユーザー設定のframe delayを、両者共通の `input_delay = min(local, remote)` と、各ローカルだけの `presentation_delay = local - input_delay` に分ける。
+- 入力はwire上ではraw inputを送る。local側ではdelay line、remote側ではqueue prefillで同じ共有input delayを実現する。
+- 先行しすぎた側だけFPS targetを下げるthrottlerを持ち、双方が無制限にズレていくのを防ぐ。
+
+Tangoで特に参考になる点:
+
+1. rollbackを「毎回過去へ戻る処理」ではなく、`settled checkpoint` から表示用stateを毎フレーム作る仕組みにしている。
+2. 予測stateを確定checkpointに混ぜない。確定checkpointは実inputだけで進める。
+3. 共有input delayを使って、rollback深度そのものを先に削っている。
+4. presentation delayはローカル表示だけの問題として扱い、ネットワーク上のtickとは分離している。
+5. round lifecycleを明示的に管理し、roundをまたいだ古いinputを捨てる。
+6. remote packet予測はゲームごとのpacket構造を理解した上で行っている。
+
+NSMBへの適用可能性:
+
+- `input_delay + presentation_delay` 分割は、そのまま採用する価値が高い。
+- `settled checkpoint` と `speculative display state` を分ける設計も採用候補。
+- 先行側だけを緩やかに減速するthrottlerは、host/clientのframe lead制御より自然にできる可能性がある。
+- `shadow emulator` はDSだとコストが高い。NSMBの場合、今は「remote packetを再生成する」より「remote inputを同じゲームへ入れる」構造なので、Tangoのshadowをそのまま持ち込む必要は薄い。
+- TangoのmGBA stateはGBAなので軽い。一方melonDS savestateは約19MBあり、同じ頻度で使うと重い。ここはそのまま真似できない。
+
+NSMB向けに取り込むなら、次の順が現実的:
+
+```text
+1. 現在の低ディレイ方式を、Tango風に input_delay / presentation_delay に整理する。
+2. 現在の InputMaxFrameLead を、Tango風の frame advantage + throttler に置き換えるか比較する。
+3. rollbackを使う場合も、確定checkpointは実remote inputだけで進める。
+4. 予測stateを次のcheckpointへ混ぜないルールを徹底する。
+5. full savestate rollbackは短距離・低頻度に限定する。
+```
+
+現時点の判断:
+
+- Tangoは「ゼロ遅延rollbackを力技で回している」のではなく、input delay、presentation delay、settled checkpoint、speculative tail、throttlingを組み合わせてrollback深度を管理している。
+- これは今のNSMB方針と相性がよい。
+- ただし、TangoはGBAでsavestateが軽く、ゲーム別通信packetもかなり解析済み。DS/NSMBへそのまま移植はできない。
+- 参考にすべきなのはコードの部品より、`settled checkpointを汚さない`、`rollback深度をinput delayで削る`、`先行側をthrottleする` という設計。
+
 ### 案A: ゼロ遅延full rollback
 
 `InputDelayFrames=0`で常に即時反映し、remote inputが後から違っていたらrollbackする。
