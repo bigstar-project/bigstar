@@ -182,7 +182,8 @@ logs/webrtc-melonds-1pc-20260530-051459/client/client.stdout.txt
 
 - この検証は自動bootstrap入力によるsmokeで、手動操作の快適性確認ではない。
 - `remote input timeout` / `peer disconnected` は今回の該当ログでは出ていない。
-- hidden window + 2プロセス実行では約27fpsだった。直接ENet接続の同条件比較では全体約57fps、active約53fpsだったため、WebRTC bridge経由のtransport側遅延/処理負荷が疑わしい。実用にはここを60fpsへ戻す必要がある。
+- 1PC内にmelonDS host/clientとWebRTC bridge 2本を同居させた自動smokeでは約27fpsだった。直接ENet接続の同条件比較では全体約57fps、active約53fpsだったため、1PC集約時のbridge追加負荷/スケジューリング/検証ハーネス条件が疑わしい。
+- ユーザーのLAN 2PC検証では、WebRTC bridge経由でも通常どおり60fpsが出た。したがって、1PC自動smokeの27fpsは実運用条件を代表していない可能性が高い。
 
 直接ENet接続の比較ログ:
 
@@ -242,12 +243,10 @@ melonDS手動起動例:
 
 ## 次にやること
 
-1. WebRTC bridge経由で27fpsまで落ちる原因を切り分け、60fps相当まで戻す。
-2. 1PC内でWebRTC bridge経由の手動対戦を確認する。
-3. LAN 2PCでWebRTC bridge経由の手動対戦を確認する。
-4. WAN 2PCでSTUNのみの直結率、ping、jitter、packet lossを測る。
-5. 必要ならTURN fallbackを追加する。
-6. 実用化段階でsignaling server、matchmaking、launcherへ進む。
+1. LAN 2PCでWebRTC bridge経由の手動対戦ログを取り、FPS/timeout/packet statsを正式に記録する。
+2. WAN 2PCでSTUNのみの直結率、ping、jitter、packet lossを測る。
+3. 必要ならTURN fallbackを追加する。
+4. 実用化段階でsignaling server、matchmaking、launcherへ進む。
 
 ## 将来方針
 
