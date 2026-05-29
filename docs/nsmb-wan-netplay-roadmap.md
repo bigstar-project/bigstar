@@ -50,6 +50,38 @@ future backend
 
 ## Phase Status
 
+## 1PC auto smoke FPS investigation
+
+Status: investigated on 2026-05-30.
+
+The 1PC automated WebRTC smoke is useful as a connectivity/regression smoke, but it is not a reliable FPS benchmark. The user's LAN 2PC WebRTC run reached normal 60fps, while the same-machine automated runs varied heavily depending on harness and machine load.
+
+Observed results:
+
+- Earlier direct ENet 1PC comparison: about 57.6fps total / 53.3fps active.
+- Release WebRTC 1PC smoke with the original no-drain PowerShell harness: previously reproduced about 27fps total / 18.5fps active, but a later rerun was about 42.6fps total / 33.2fps active.
+- Release WebRTC 1PC smoke with bridge stdout/stderr actively drained: about 52.9fps total / 39.8fps active.
+- UDP sidecar bridge without WebRTC: about 40.5fps total / 34.9fps active.
+- Direct ENet under the same Python/Start-Process orchestration during the investigation also fell to about 42fps total / 33-42fps active.
+
+Interpretation:
+
+- The original 27fps result was not caused by actual game input waiting. In the representative WebRTC runs, `remoteWaitCount` and `throttleCount` were often zero or small while FPS still dropped.
+- Rust debug vs release was not the main cause; release WebRTC could still run slowly under the 1PC harness.
+- The strongest cause is the 1PC automated harness itself: two melonDS processes, two sidecar bridge processes, PowerShell/Python orchestration, redirected output, hidden windows, and same-machine scheduler/GPU contention. Not draining bridge output made the measurement worse and less reproducible, but it is not the only factor.
+- Because real LAN 2PC WebRTC reached 60fps, FPS decisions should be based on manual/LAN 2PC or a dedicated benchmark harness, not this 1PC auto smoke.
+
+Policy:
+
+- Keep 1PC WebRTC auto smoke for connection, start barrier, disconnect, timeout, and log regression checks.
+- Do not treat 1PC auto smoke FPS as representative of real play.
+- For FPS validation, use LAN 2PC WebRTC or a dedicated harness that:
+  - actively drains bridge stdout/stderr,
+  - uses unique ports,
+  - kills stale melonDS/bridge processes before the run,
+  - records CPU/process load,
+  - stores bridge stats together with melonDS logs.
+
 ### Phase 1: Transport境界の整理
 
 状態: 完了

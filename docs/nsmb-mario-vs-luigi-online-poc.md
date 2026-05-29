@@ -60,6 +60,11 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   - remote waitは小さいが、throttleは発生する。FPS低下ではなく先行制限として機能している。
 - remote input wait は直近測定では主因ではない。フレーム制限あり測定では remote wait はごく小さく、60fpsを維持できた。
 - ただし、手動peerログ `logs/nsmb-mvl-manual-peer-host-20260530-024135/host.stdout.txt` では `input frame throttle timeout frame=2538 ... lead=5 waitedMs=5000` を確認。これは現行の手動設定で、片側先行時に5秒で同期待ちを打ち切る問題として扱う。
+- 2026-05-30のWebRTC 1PC自動smoke FPS低下調査:
+  - ユーザーのLAN 2PC WebRTC実行では60fpsを確認済み。
+  - 1PC自動smokeでは、WebRTC/UDP sidecar/直接ENetのいずれでも、起動ハーネスや同一PC上のプロセス競合によりactive FPSが大きく揺れた。
+  - 以前の27fpsは実運用性能ではなく、1PC自動smoke環境特有の結果として扱う。接続確認には使うが、FPS評価はLAN 2PCまたは専用計測で行う。
+  - 詳細は `docs/nsmb-wan-netplay-roadmap.md` の `1PC auto smoke FPS investigation` を参照。
 
 結論:
 
