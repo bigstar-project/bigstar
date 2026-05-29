@@ -5,6 +5,8 @@ param(
     [int]$Frames = 999999,
     [int]$WaitTimeoutMs = 86400000,
     [int]$InputDelayFrames = 4,
+    [int]$InputSendDelayFrames = 0,
+    [int]$InputSendJitterFrames = 0,
     [int]$InputMaxFrameLead = 4,
     [switch]$InputUnreliable,
     [int]$InputBundleHistory = 8,
@@ -48,6 +50,8 @@ $params = @{
     NoLanMP = $true
     InputNetplay = $true
     InputDelayFrames = $InputDelayFrames
+    InputSendDelayFrames = $InputSendDelayFrames
+    InputSendJitterFrames = $InputSendJitterFrames
     InputMaxFrameLead = $InputMaxFrameLead
     PacketBridgeJitHelperPatch = $true
     PacketBridgeJitHelperPatchFrame = 870
@@ -79,7 +83,7 @@ if ($InputUnreliable) {
 }
 
 Write-Host "Starting NSMB MvL peer session: role=$Role peer=$Peer"
-Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead unreliable=$($InputUnreliable.IsPresent) bundleHistory=$InputBundleHistory jit=$(-not $NoJit)"
+Write-Host "input delay=$InputDelayFrames sendDelay=$InputSendDelayFrames sendJitter=$InputSendJitterFrames max frame lead=$InputMaxFrameLead unreliable=$($InputUnreliable.IsPresent) bundleHistory=$InputBundleHistory jit=$(-not $NoJit)"
 Write-Host "frameLimit=$(-not $NoFrameLimit.IsPresent) swapBuffersInterval=$SwapBuffersInterval"
 Write-Host "log=$LogDir"
 Write-Host "Host controls Mario. Client controls Luigi."

@@ -51,6 +51,9 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - US PoC経路、同一PC2プロセス、SwapBuffers毎フレーム、input delay 4:
   - フレーム制限なし: host/client active 約`65.4fps`
   - フレーム制限あり: host `59.89fps`、client `59.86fps`
+- US PoC経路、送信遅延2F + jitter1F、フレーム制限あり:
+  - host/client active `59.86fps`
+  - remote waitは小さいが、throttleは発生する。FPS低下ではなく先行制限として機能している。
 - remote input wait は直近測定では主因ではない。フレーム制限あり測定では remote wait はごく小さく、60fpsを維持できた。
 
 結論:
@@ -90,6 +93,13 @@ client:
 ```
 
 デフォルトは `InputDelayFrames=4` / `InputMaxFrameLead=4` / frame limit有効 / `SwapBuffersInterval=1`。
+
+WAN相当の遅延・jitterを試す場合:
+
+```powershell
+.\scripts\run-nsmb-mvl-manual-peer.ps1 -Role host -InputSendDelayFrames 2 -InputSendJitterFrames 1
+.\scripts\run-nsmb-mvl-manual-peer.ps1 -Role client -Peer <host-ip> -InputSendDelayFrames 2 -InputSendJitterFrames 1
+```
 
 フレーム制限を切って余力を見る場合:
 
