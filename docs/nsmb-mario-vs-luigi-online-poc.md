@@ -167,7 +167,16 @@ localhost split検証:
   -LogDir logs\manual-local
 ```
 
-JITを有効にする場合は `-AllowJit` を付ける。`-InputMaxFrameLead 2` 追加後は短時間splitと結果画面到達splitが通過しているため、操作感確認ではJIT有効も試せる。ただし長時間自由入力は未確認。
+低遅延rollback候補設定で試す場合:
+
+```powershell
+.\scripts\run-nsmb-mvl-manual-local.ps1 `
+  -AllowJit `
+  -LowLatencyRollback `
+  -LogDir logs\manual-local-rollback
+```
+
+`-LowLatencyRollback` は `InputDelayFrames=0`、`InputMaxFrameLead=8`、`RollbackWindow=120`、`RollbackCheckpointInterval=30`、`RollbackResimulate` をまとめて有効にする。JITを有効にする場合は `-AllowJit` を付ける。`-InputMaxFrameLead 2` 追加後は短時間splitと結果画面到達splitが通過しているため、操作感確認ではJIT有効も試せる。ただし長時間自由入力は未確認。
 
 個別起動する場合:
 

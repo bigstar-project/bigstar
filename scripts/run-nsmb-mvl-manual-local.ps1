@@ -5,6 +5,12 @@ param(
     [int]$InputMaxFrameLead = 2,
     [int]$InputSendDelayFrames = 0,
     [int]$InputSendJitterFrames = 0,
+    [switch]$LowLatencyRollback,
+    [switch]$Rollback,
+    [int]$RollbackWindow = 120,
+    [int]$RollbackCheckpointInterval = 30,
+    [int]$RollbackResimulateDelayFrames = 0,
+    [switch]$RollbackResimulate,
     [int]$HostStartupDelayMs = 1200,
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds",
@@ -15,6 +21,14 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($LowLatencyRollback) {
+    $InputDelayFrames = 0
+    $InputMaxFrameLead = 8
+    $Rollback = $true
+    $RollbackResimulate = $true
+    $RollbackCheckpointInterval = 30
+}
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $smokeScript = Join-Path $PSScriptRoot "run-nsmb-mvl-lan-route-smoke.ps1"
@@ -44,6 +58,17 @@ $common = @(
 )
 if ($AllowJit) {
     $common += "-AllowJit"
+}
+if ($Rollback) {
+    $common += @(
+        "-Rollback",
+        "-RollbackWindow", "$RollbackWindow",
+        "-RollbackCheckpointInterval", "$RollbackCheckpointInterval",
+        "-RollbackResimulateDelayFrames", "$RollbackResimulateDelayFrames"
+    )
+    if ($RollbackResimulate) {
+        $common += "-RollbackResimulate"
+    }
 }
 
 $hostArgs = @(
@@ -97,6 +122,9 @@ Write-Host "host wrapper pid=$($hostProc.Id) log=$hostLog"
 Write-Host "client wrapper pid=$($clientProc.Id) log=$clientLog"
 Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
 Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames"
+if ($Rollback) {
+    Write-Host "rollback enabled window=$RollbackWindow checkpointInterval=$RollbackCheckpointInterval resimDelay=$RollbackResimulateDelayFrames resimulate=$RollbackResimulate"
+}
 if ($AllowJit) {
     Write-Host "JIT is enabled for speed; deterministic sync is not guaranteed yet."
 } else {
