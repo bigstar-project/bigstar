@@ -15,6 +15,7 @@ WAN越しで入力遅延を小さくするには、現行の固定入力遅延/�
 
 - `MELONDS_NSML_ROLLBACK=1`: 入力netplay中にremote input未着でも停止せず、直近remote inputから予測して進めるprobe mode。
 - `MELONDS_NSML_ROLLBACK_WINDOW=<frames>`: in-memory savestate ringの保持フレーム数。初期値20。
+- `MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL=<frames>`: rollback checkpointの保存間隔。初期値1。intervalを広げると保持checkpoint数とsavestate保存回数を減らせるが、予測ミス時の再実行範囲は長くなる。
 - `MELONDS_NSML_ROLLBACK_RESTORE_PROBE=1`: 予測ミスマッチ時に該当フレームのcheckpointを復元できるかだけを試す診断用。
 - `MELONDS_NSML_ROLLBACK_RESIMULATE=1`: 予測ミスマッチ時にcheckpointへ戻り、保存済みlocal/remote入力履歴で現在フレームまで内部再実行する診断用。
 
@@ -26,7 +27,10 @@ WAN越しで入力遅延を小さくするには、現行の固定入力遅延/�
 - `logs/codex-rollback-resim-throttle-2600-20260529`: rollback + frame lead throttle + checkpoint更新で、2600フレームの主要CSV比較は同一行では一致。検証wrapperはCSV間隔設定のため movement probe row不足で失敗。
 - `logs/codex-rollback-resim-throttle-pass-2600-20260529`: CSV間隔30では、rollback補正直後の一時フレームでhost/clientの表示/actor状態が異なり、その後再収束する挙動を確認。従来の「全フレーム完全一致」検証はrollback方式には厳しすぎるため、rollback用には「一定settle frames後に収束しているか」を見る検証へ分ける必要がある。
 - `logs/codex-rollback-resim-settle-2600-20260529`: `RollbackSettleFrames=30` の比較で2600フレーム通過。frame 1290/1950/2250/2370 の一時差分が、それぞれ30フレーム以内にhost/client一致へ戻ることを確認。
-- 既存のmelonDS savestateは使えるが、1 checkpointが約19MBあり、毎フレーム保存は重い。現在のrollback probeは30fps前後まで落ちるため、実用化には差分savestate、重要RAM限定snapshot、または低頻度checkpoint + replay範囲制限が必要。
+- `logs/codex-rollback-checkpoint-interval4-2600-20260529`: checkpoint interval 4で2600フレーム通過。保持checkpointは約31、30フレームsettle比較も通過。
+- `logs/codex-rollback-checkpoint-interval8-2600-20260529`: checkpoint interval 8で2600フレーム通過。保持checkpointは約16、30フレームsettle比較も通過。
+- `logs/codex-rollback-checkpoint-interval16-2600-20260529`: checkpoint interval 16で2600フレーム通過。保持checkpointは約8、30フレームsettle比較も通過。ただしFPSは35-37fps程度で大きく改善していないため、保持メモリよりも予測ミス後の再実行中savestate保存、同一PC 2プロセス実行、game-state traceが主な負荷候補。
+- 既存のmelonDS savestateは使えるが、1 checkpointが約19MBあり、毎フレーム保存は重い。低頻度checkpointでも成立する見込みは出たが、快適なWAN対戦には、実プレイ時のtrace抑制、再実行中のcheckpoint保存削減、差分savestate、重要RAM限定snapshot、またはrollback window/intervalの自動調整が必要。
 
 ## 目的
 
@@ -120,25 +124,25 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 ## 次にやること
 
-1. 最優先: 手動入力時にhost/clientの開始フレームと入力適用フレームが揃うことを確認する。
-   - hostが入力送信開始前にpeer接続を待つ。
-   - 開始後は相手入力がないフレームを勝手に進めず、待つ。timeoutした場合はデフォルトで失敗終了する。
-   - `-InputMaxFrameLead 2` で片方のプロセスだけが先行しすぎないようにする。
-   - JIT無効 + manual bootstrap + localhost split 1800フレーム比較は通過。
-   - host/clientで別々のローカル入力を出す2600フレームsplit smokeも通過。
-   - JIT有効の短時間split、送信遅延/jitter付きsplit、結果画面到達splitも通過。次は手動launcherで人間の実キー入力を目視確認し、その後に長時間化する。
-2. true local1 + RNG固定 + VS限定stage-lock skip + ROM側wifi count + Net::localAid patchを本線として、長時間の死亡/復帰・勝敗・スター取得まで壊れないか確認する。
+1. 最優先: rollbackを「成立性probe」から「実用候補」へ寄せる。
+   - checkpoint interval 4/8/16はいずれも30フレームsettle比較を通過したため、次はtraceを切った実プレイ寄り設定でFPSを測る。
+   - 予測ミス後の再実行中checkpoint保存が重い可能性が高い。再実行中は必要最小限のcheckpointだけ保存する方式、または低頻度checkpoint + 入力到着バッファの設計を検証する。
+   - rollback時の一時差分は許容し、一定settle frames後に収束するかを見る検証を標準化する。
+2. 手動入力時のhost/client同期を、rollbackあり・なしの両方で比較する。
+   - 既存の固定入力遅延/待ち方式は同期確認用のbaselineとして残す。
+   - rollback方式では `InputDelayFrames=0` でもカクつかず進むこと、後着入力で再収束すること、操作感が改善することを見る。
+3. true local1 + RNG固定 + VS限定stage-lock skip + ROM側wifi count + Net::localAid patchを本線として、長時間の死亡/復帰・勝敗・スター取得まで壊れないか確認する。
    - client local1カメラ、Big Star位置、localPlayerIDは自動チェックで守る。
    - 片方死亡中に相手プレイヤー・敵・ブロック・ステージ進行が止まらないことは、`-CheckNoPlayerUpdateLock` と `-CheckMovingHazardProgressDuringDeath` で継続確認する。
    - 土管復帰前後の表示は `-CheckVsPipeRespawnVisibility` で継続確認する。
-3. さらにtraceを減らした実用寄り設定、または2PC分散でFPSが60fpsに近づくか確認する。
-4. Luigi側操作の検証を増やす。
+4. traceを減らした実用寄り設定、または2PC分散でFPSが60fpsに近づくか確認する。
+5. Luigi側操作の検証を増やす。
    - カメラ追従
    - 死亡/復帰
    - 勝敗判定は結果画面到達とhost/clientのwin/lose表示まで、通常条件・遅延/jitter条件・localhost split条件で自動確認済み。次はより自由な入力列と長時間検証へ広げる。
-5. 8コインアイテム、2個目以降のBig Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
-6. 残るruntime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
-7. 実2PCまたは同一LANで、host/clientを別マシン相当の起動コマンドに分けて検証する。
+6. 8コインアイテム、2個目以降のBig Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
+7. 残るruntime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
+8. 実2PCまたは同一LANで、host/clientを別マシン相当の起動コマンドに分けて検証する。
 
 localhost split検証:
 

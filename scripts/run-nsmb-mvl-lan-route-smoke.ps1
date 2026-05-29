@@ -53,6 +53,7 @@ param(
     [int]$InputMaxFrameLead = 2,
     [switch]$Rollback,
     [int]$RollbackWindow = 20,
+    [int]$RollbackCheckpointInterval = 1,
     [switch]$RollbackResimulate,
     [switch]$RollbackRestoreProbe,
     [switch]$PacketBridge,
@@ -2255,6 +2256,7 @@ function Start-MelonLANProcess {
         if ($Rollback) {
             $env:MELONDS_NSML_ROLLBACK = "1"
             $env:MELONDS_NSML_ROLLBACK_WINDOW = "$RollbackWindow"
+            $env:MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL = "$RollbackCheckpointInterval"
             if ($RollbackResimulate) {
                 $env:MELONDS_NSML_ROLLBACK_RESIMULATE = "1"
             } else {
@@ -2268,6 +2270,7 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_ROLLBACK -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_ROLLBACK_WINDOW -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIMULATE -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESTORE_PROBE -ErrorAction SilentlyContinue
         }

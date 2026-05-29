@@ -13,6 +13,7 @@ param(
     [int]$InputSendJitterFrames = 0,
     [switch]$Rollback,
     [int]$RollbackWindow = 20,
+    [int]$RollbackCheckpointInterval = 1,
     [switch]$RollbackResimulate,
     [switch]$RollbackRestoreProbe,
     [int]$RollbackSettleFrames = 0,
@@ -63,7 +64,7 @@ if ($InputNetplayTrace) {
     $common += "-InputNetplayTrace"
 }
 if ($Rollback) {
-    $common += @("-Rollback", "-RollbackWindow", "$RollbackWindow")
+    $common += @("-Rollback", "-RollbackWindow", "$RollbackWindow", "-RollbackCheckpointInterval", "$RollbackCheckpointInterval")
     if ($RollbackResimulate) {
         $common += "-RollbackResimulate"
     }
