@@ -46,6 +46,14 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 こちらの確認:
 
+- 2026-05-30 software renderer追加調査:
+  - 根本原因の一つは Windows clang Release build cache の `CMAKE_C_FLAGS_RELEASE` / `CMAKE_CXX_FLAGS_RELEASE` が空で、software renderer が実質的に最適化なしでビルドされていたこと。重いMvL gameplay中に `RunFrame()` が16.67msを超え、50-55fps級の低下につながっていた。
+  - `cmake/DefaultBuildFlags.cmake` と `CMakeLists.txt` で Windows clang Release に `-O3 -DNDEBUG` を明示し、既存buildも同フラグで再configure/rebuild済み。
+  - 手動scriptは renderer 設定を正しいTOML sectionへ書くよう修正済み: `[Screen]`, `[3D]`, `[3D.Soft]`, `Instance0.Window0`。
+  - PoC smoke/manual scriptで起動する melonDS process は既定で `AboveNormal` priority にする。1PC 2プロセス + software renderer のscheduler競合を減らすため。
+  - 連続remote input条件の専用ベンチとして `scripts/run-nsmb-mvl-software-fps-benchmark.ps1` を追加。既定入力は `tests/nsmb_us_direct_mvl_both_different.inputs`。
+  - 代表値: `.\scripts\run-nsmb-mvl-software-fps-benchmark.ps1 -Frames 3600 -LogDir logs\codex-software-fps-benchmark-noperf` で host active `59.63fps`, client active `59.56fps`。perf breakdownは小さく負荷を足すため、代表FPS測定では付けない。詳細な内訳が必要なときだけ `-PerfBreakdown` を使う。
+  - 1PC 2プロセスでは OS scheduling と input lead制御により 59fps台で揺れる。実運用のLAN/WAN 2PCでは各PCが1プロセスだけなので、このベンチは保守的なstress条件として扱う。
 - `C:\Users\Sugiyama\melon-ds-master-perf` に素の master worktree を作成し、release build 済み。
 - フォーク側の通常LocalMP routeは、日本版ROM + 既存入力スクリプトで成立。
 - フォーク側通常LocalMPの定常区間:
@@ -69,7 +77,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 結論:
 
 - melonDS本体、フォーク全体、通常LocalMPが52fps程度に落ちているわけではない。
-- 以前の52fps問題は、手動起動scriptの暫定軽量化設定や表示設定の影響が大きい可能性が高い。
+- 以前の52fps問題は、Release最適化フラグ欠落、手動起動scriptの表示設定、1PC 2プロセスのscheduler競合が主因。
 - `scripts/run-nsmb-mvl-manual-peer.ps1` は、デフォルトを滑らかさ優先に変更した:
   - `SwapBuffersInterval=1`
   - frame limit有効
@@ -77,13 +85,17 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   - OpenGL表示、VSync off、JIT enabled
   - JITを切って比較する場合は `-NoJit` を付ける
   - software renderer比較用に `-SoftwareRenderer` を追加
+- software rendererでFPSを確認する場合:
+  - hidden stress: `.\scripts\run-nsmb-mvl-software-fps-benchmark.ps1 -Frames 3600`
+  - visible stress: `.\scripts\run-nsmb-mvl-software-fps-benchmark.ps1 -Frames 3600 -Visible`
+  - 手動peer: `.\scripts\run-nsmb-mvl-manual-peer.ps1 -Role host -SoftwareRenderer` / `.\scripts\run-nsmb-mvl-manual-peer.ps1 -Role client -Peer <host-ip> -SoftwareRenderer`
 
 ## 現在の最優先課題
 
-1. 手動/LAN 2PCで、開始時の start-ready barrier と `InternalWaitTimeoutMs=0` により host/client がズレずに試合継続するか再確認する。
+1. ユーザー環境のLAN 2PC + software rendererで、通常プレイ時に60fps相当を維持できるか確認する。
 2. 複雑入力や長めの手動対戦で、throttle timeout が出なくなり、star/object/player state が継続して一致するか見る。
-3. 60fpsを維持できる場合、次はWAN相当の遅延・jitterを入れて `InputDelayFrames=4` の実用限界を見る。
-4. 60fpsが再発して落ちる場合は、次を個別に切り分ける:
+3. LAN 2PCで60fps相当を維持できる場合、次はWAN相当の遅延・jitterを入れて `InputDelayFrames=4` の実用限界を見る。
+4. software rendererで50-55fps級の低下が再発する場合は、次を個別に切り分ける:
    - OSD on/off
    - `SwapBuffersInterval=1/2/4`
    - frame limit on/off

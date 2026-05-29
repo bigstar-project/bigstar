@@ -30,6 +30,38 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $smokeScript = Join-Path $PSScriptRoot "run-nsmb-mvl-lan-route-smoke.ps1"
 
+function Set-MelonTomlValue {
+    param(
+        [string]$Text,
+        [string]$KeyPath,
+        [string]$Value
+    )
+
+    $idx = $KeyPath.LastIndexOf('.')
+    if ($idx -lt 0) {
+        if ($Text -match "(?m)^$([regex]::Escape($KeyPath))\s*=") {
+            return ($Text -replace "(?m)^$([regex]::Escape($KeyPath))\s*=.*$", "$KeyPath = $Value")
+        }
+        return "$Text`n$KeyPath = $Value"
+    }
+
+    $section = $KeyPath.Substring(0, $idx)
+    $key = $KeyPath.Substring($idx + 1)
+    $sectionPattern = "(?ms)^\[$([regex]::Escape($section))\]\r?\n.*?(?=^\[|\z)"
+    $sectionMatch = [regex]::Match($Text, $sectionPattern)
+    if (-not $sectionMatch.Success) {
+        return "$Text`n[$section]`n$key = $Value`n"
+    }
+
+    $sectionText = $sectionMatch.Value
+    if ($sectionText -match "(?m)^$([regex]::Escape($key))\s*=") {
+        $newSectionText = $sectionText -replace "(?m)^$([regex]::Escape($key))\s*=.*$", "$key = $Value"
+    } else {
+        $newSectionText = "$sectionText$key = $Value`n"
+    }
+    return $Text.Remove($sectionMatch.Index, $sectionMatch.Length).Insert($sectionMatch.Index, $newSectionText)
+}
+
 if ($LogDir -eq "") {
     $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
     $LogDir = "logs\nsmb-mvl-manual-peer-$Role-$timestamp"
@@ -111,19 +143,20 @@ try {
         $renderer = if ($SoftwareRenderer) { '0' } else { '2' }
         $replacements = [ordered]@{
             'LimitFPS' = 'true'
-            'UseGL' = $useGL
-            'VSync' = 'false'
-            'Renderer' = $renderer
-            'ScreenSizing' = '0'
-            'ShowOSD' = 'false'
+            'AudioSync' = 'false'
+            'Screen.UseGL' = $useGL
+            'Screen.VSync' = 'false'
+            'Screen.VSyncInterval' = '1'
+            '3D.Renderer' = $renderer
+            '3D.GL.ScaleFactor' = '1'
+            '3D.GL.HiresCoordinates' = 'false'
+            '3D.Soft.Threaded' = 'true'
+            'Instance0.Window0.ScreenSizing' = '0'
+            'Instance0.Window0.ShowOSD' = 'false'
         }
         foreach ($key in $replacements.Keys) {
             $value = $replacements[$key]
-            if ($cfg -match "(?m)^$key\s*=") {
-                $cfg = $cfg -replace "(?m)^$key\s*=.*$", "$key = $value"
-            } else {
-                $cfg += "`n$key = $value"
-            }
+            $cfg = Set-MelonTomlValue -Text $cfg -KeyPath $key -Value $value
         }
         Set-Content -Path $cfgPath -Value $cfg -Encoding UTF8
     }

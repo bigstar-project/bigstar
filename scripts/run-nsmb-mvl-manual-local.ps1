@@ -23,18 +23,51 @@ param(
     [string]$InputScript = "tests\nsmb_us_direct_mvl_manual_bootstrap.inputs",
     [string]$LogDir = "logs\nsmb-mvl-manual-local",
     [switch]$AllowJit,
+    [switch]$NoFrameLimit,
     [switch]$SoftwareRenderer
 )
 
 $ErrorActionPreference = "Stop"
 
+function Set-MelonTomlValue {
+    param(
+        [string]$Text,
+        [string]$KeyPath,
+        [string]$Value
+    )
+
+    $idx = $KeyPath.LastIndexOf('.')
+    if ($idx -lt 0) {
+        if ($Text -match "(?m)^$([regex]::Escape($KeyPath))\s*=") {
+            return ($Text -replace "(?m)^$([regex]::Escape($KeyPath))\s*=.*$", "$KeyPath = $Value")
+        }
+        return "$Text`n$KeyPath = $Value"
+    }
+
+    $section = $KeyPath.Substring(0, $idx)
+    $key = $KeyPath.Substring($idx + 1)
+    $sectionPattern = "(?ms)^\[$([regex]::Escape($section))\]\r?\n.*?(?=^\[|\z)"
+    $sectionMatch = [regex]::Match($Text, $sectionPattern)
+    if (-not $sectionMatch.Success) {
+        return "$Text`n[$section]`n$key = $Value`n"
+    }
+
+    $sectionText = $sectionMatch.Value
+    if ($sectionText -match "(?m)^$([regex]::Escape($key))\s*=") {
+        $newSectionText = $sectionText -replace "(?m)^$([regex]::Escape($key))\s*=.*$", "$key = $Value"
+    } else {
+        $newSectionText = "$sectionText$key = $Value`n"
+    }
+    return $Text.Remove($sectionMatch.Index, $sectionMatch.Length).Insert($sectionMatch.Index, $newSectionText)
+}
+
 if ($LowDelayWan) {
-    $InputDelayFrames = 4
-    $InputMaxFrameLead = 4
-    $InputSendDelayFrames = 0
-    $InputSendJitterFrames = 0
+    if (-not $PSBoundParameters.ContainsKey('InputDelayFrames')) { $InputDelayFrames = 4 }
+    if (-not $PSBoundParameters.ContainsKey('InputMaxFrameLead')) { $InputMaxFrameLead = 4 }
+    if (-not $PSBoundParameters.ContainsKey('InputSendDelayFrames')) { $InputSendDelayFrames = 0 }
+    if (-not $PSBoundParameters.ContainsKey('InputSendJitterFrames')) { $InputSendJitterFrames = 0 }
     $InputUnreliable = $true
-    $InputBundleHistory = 8
+    if (-not $PSBoundParameters.ContainsKey('InputBundleHistory')) { $InputBundleHistory = 8 }
 }
 
 if ($LowLatencyRollback) {
@@ -60,19 +93,20 @@ if (Test-Path $cfgPath) {
     $renderer = if ($SoftwareRenderer) { '0' } else { '2' }
     $replacements = [ordered]@{
         'LimitFPS' = 'true'
-        'UseGL' = $useGL
-        'VSync' = 'false'
-        'Renderer' = $renderer
-        'ScreenSizing' = '0'
-        'ShowOSD' = 'false'
+        'AudioSync' = 'false'
+        'Screen.UseGL' = $useGL
+        'Screen.VSync' = 'false'
+        'Screen.VSyncInterval' = '1'
+        '3D.Renderer' = $renderer
+        '3D.GL.ScaleFactor' = '1'
+        '3D.GL.HiresCoordinates' = 'false'
+        '3D.Soft.Threaded' = 'true'
+        'Instance0.Window0.ScreenSizing' = '0'
+        'Instance0.Window0.ShowOSD' = 'false'
     }
     foreach ($key in $replacements.Keys) {
         $value = $replacements[$key]
-        if ($cfg -match "(?m)^$key\s*=") {
-            $cfg = $cfg -replace "(?m)^$key\s*=.*$", "$key = $value"
-        } else {
-            $cfg += "`n$key = $value"
-        }
+        $cfg = Set-MelonTomlValue -Text $cfg -KeyPath $key -Value $value
     }
     Set-Content -Path $cfgPath -Value $cfg -Encoding UTF8
 }
@@ -98,6 +132,9 @@ $common = @(
     "-PacketBridgeStartFrame", "870",
     "-WaitForPeerAtNetplayStart"
 )
+if ($NoFrameLimit) {
+    $common += "-NoFrameLimit"
+}
 if ($AllowJit) {
     $common += "-AllowJit"
 }
@@ -169,7 +206,7 @@ Write-Host "Started NSMB MvL manual local session."
 Write-Host "host wrapper pid=$($hostProc.Id) log=$hostLog"
 Write-Host "client wrapper pid=$($clientProc.Id) log=$clientLog"
 Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
-Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' })"
+Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit)"
 if ($Rollback) {
     $backendLabel = if ($RollbackBackend -ne "") { $RollbackBackend } else { "savestate" }
     Write-Host "rollback enabled backend=$backendLabel window=$RollbackWindow checkpointInterval=$RollbackCheckpointInterval resimDelay=$RollbackResimulateDelayFrames resimulate=$RollbackResimulate"

@@ -79,6 +79,13 @@ if (ENABLE_LTO)
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
 
+if (WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    add_compile_options(
+        "$<$<CONFIG:Release>:-O3>"
+        "$<$<CONFIG:Release>:-DNDEBUG>"
+    )
+endif()
+
 if (NOT APPLE)
     set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} -s")
 endif()

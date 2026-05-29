@@ -63,6 +63,7 @@ param(
     [int]$RollbackResimulateDelayFrames = 0,
     [switch]$RollbackResimulate,
     [switch]$RollbackRestoreProbe,
+    [string]$ProcessPriority = "AboveNormal",
     [switch]$PacketBridge,
     [switch]$PacketBridgeAllowJit,
     [switch]$PacketBridgeAllowPreGame,
@@ -2978,6 +2979,13 @@ function Start-MelonLANProcess {
         -RedirectStandardOutput $Stdout `
         -RedirectStandardError $err `
         -PassThru
+    if ($ProcessPriority -ne "") {
+        try {
+            $process.PriorityClass = $ProcessPriority
+        } catch {
+            Write-Warning "Failed to set melonDS process priority to ${ProcessPriority}: $($_.Exception.Message)"
+        }
+    }
     return [pscustomobject]@{
         Process = $process
         Stdout = $Stdout
