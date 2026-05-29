@@ -25,6 +25,7 @@ WAN越しで入力遅延を小さくするには、現行の固定入力遅延/�
 - `logs/codex-rollback-resim-probe-980-20260529`: frame 900の予測ミスマッチ後、frame 900..955 を内部再実行できることを確認。
 - `logs/codex-rollback-resim-throttle-2600-20260529`: rollback + frame lead throttle + checkpoint更新で、2600フレームの主要CSV比較は同一行では一致。検証wrapperはCSV間隔設定のため movement probe row不足で失敗。
 - `logs/codex-rollback-resim-throttle-pass-2600-20260529`: CSV間隔30では、rollback補正直後の一時フレームでhost/clientの表示/actor状態が異なり、その後再収束する挙動を確認。従来の「全フレーム完全一致」検証はrollback方式には厳しすぎるため、rollback用には「一定settle frames後に収束しているか」を見る検証へ分ける必要がある。
+- `logs/codex-rollback-resim-settle-2600-20260529`: `RollbackSettleFrames=30` の比較で2600フレーム通過。frame 1290/1950/2250/2370 の一時差分が、それぞれ30フレーム以内にhost/client一致へ戻ることを確認。
 - 既存のmelonDS savestateは使えるが、1 checkpointが約19MBあり、毎フレーム保存は重い。現在のrollback probeは30fps前後まで落ちるため、実用化には差分savestate、重要RAM限定snapshot、または低頻度checkpoint + replay範囲制限が必要。
 
 ## 目的

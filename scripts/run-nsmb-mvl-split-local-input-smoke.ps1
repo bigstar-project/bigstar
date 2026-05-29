@@ -15,6 +15,7 @@ param(
     [int]$RollbackWindow = 20,
     [switch]$RollbackResimulate,
     [switch]$RollbackRestoreProbe,
+    [int]$RollbackSettleFrames = 0,
     [int]$GameStateTraceInterval = 30,
     [int]$HostStartupDelayMs = 1200,
     [string]$LogDir = "logs\nsmb-mvl-split-local-input-smoke",
@@ -159,6 +160,21 @@ $fields = @(
     "playerActor0VisibleFlag", "playerActor1VisibleFlag"
 )
 
+function RowAtFrame {
+    param([object[]]$Rows, [int]$Frame)
+    return $Rows | Where-Object { [int]$_.frame -eq $Frame } | Select-Object -First 1
+}
+
+function RowsMatchFields {
+    param([object]$HostRow, [object]$ClientRow, [string[]]$Fields)
+    foreach ($field in $Fields) {
+        if ($HostRow.$field -ne $ClientRow.$field) {
+            return $false
+        }
+    }
+    return $true
+}
+
 foreach ($hostRow in $hostRows) {
     $frame = [int]$hostRow.frame
     if ($frame -lt 900) { continue }
@@ -168,14 +184,19 @@ foreach ($hostRow in $hostRows) {
     $clientRow = $clientByFrame[$frame]
     foreach ($field in $fields) {
         if ($hostRow.$field -ne $clientRow.$field) {
+            if ($RollbackSettleFrames -gt 0) {
+                $settleFrame = $frame + $RollbackSettleFrames
+                $hostSettle = RowAtFrame -Rows $hostRows -Frame $settleFrame
+                $clientSettle = if ($clientByFrame.ContainsKey($settleFrame)) { $clientByFrame[$settleFrame] } else { $null }
+                if ($null -ne $hostSettle -and $null -ne $clientSettle -and
+                    (RowsMatchFields -HostRow $hostSettle -ClientRow $clientSettle -Fields $fields)) {
+                    Write-Host "rollback transient mismatch settled frame=$frame settleFrame=$settleFrame field=$field"
+                    break
+                }
+            }
             throw "gameplay mismatch frame=$frame field=$field host=$($hostRow.$field) client=$($clientRow.$field)"
         }
     }
-}
-
-function RowAtFrame {
-    param([object[]]$Rows, [int]$Frame)
-    return $Rows | Where-Object { [int]$_.frame -eq $Frame } | Select-Object -First 1
 }
 
 $before = RowAtFrame -Rows $hostRows -Frame 1770
