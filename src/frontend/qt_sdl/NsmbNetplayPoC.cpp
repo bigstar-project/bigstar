@@ -275,6 +275,7 @@ struct WireSeed
 };
 
 constexpr melonDS::u32 kWireKindSeed = 0x44454553; // "SEED", little endian
+constexpr melonDS::u32 kWireKindStartReady = 0x54525453; // "STRT", little endian
 constexpr melonDS::u32 kWireKindState = 0x54415453; // "STAT", little endian
 constexpr melonDS::u32 kWireKindPacket = 0x4B434150; // "PACK", little endian
 constexpr melonDS::u32 kWireKindInputBundle = 0x42504E49; // "INPB", little endian
@@ -902,6 +903,8 @@ struct State
     bool WaitForPeerBeforeStart = false;
     bool WaitForPeerAtNetplayStart = false;
     bool WaitedForPeerAtNetplayStart = false;
+    bool NetplayStartReadySent = false;
+    melonDS::u32 RemoteNetplayStartReadyFrame = kNoFrameLimit;
     bool NetplayStartWaitArrived[16] {};
     bool NetplayStartWaitComplete = false;
     bool DeferNetworkUntilStart = false;
@@ -1866,6 +1869,8 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
         case ENET_EVENT_TYPE_CONNECT:
             G.Peer = event.peer;
             G.MatchSeedSent = false;
+            G.NetplayStartReadySent = false;
+            G.RemoteNetplayStartReadyFrame = kNoFrameLimit;
             G.InputCond.notify_all();
             std::printf("NSMB PoC: peer connected\n");
             break;
@@ -1929,6 +1934,12 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                         G.NetRandomPatchAuto = true;
                     }
                     std::printf("NSMB PoC: received match seed 0x%08X\n", packet.Seed);
+                }
+                else if (packet.Magic == kMagic && packet.Version == kVersion && packet.Kind == kWireKindStartReady)
+                {
+                    G.RemoteNetplayStartReadyFrame = packet.Seed;
+                    G.InputCond.notify_all();
+                    std::printf("NSMB InputNetplay: received start ready frame=%u\n", packet.Seed);
                 }
             }
             else if (event.packet->dataLength == sizeof(WireNSMLPacket))
@@ -2147,6 +2158,26 @@ void SendMatchSeedLocked()
     enet_host_flush(G.Host);
     G.MatchSeedSent = true;
     std::printf("NSMB PoC: sent match seed 0x%08X\n", G.MatchSeed);
+}
+
+void SendNetplayStartReadyLocked(melonDS::u32 frame)
+{
+    if (!G.Peer || G.NetplayStartReadySent)
+        return;
+
+    WireSeed packet {};
+    packet.Magic = kMagic;
+    packet.Version = kVersion;
+    packet.Kind = kWireKindStartReady;
+    packet.Seed = frame;
+
+    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE);
+    if (!enetPacket) return;
+
+    enet_peer_send(G.Peer, 0, enetPacket);
+    enet_host_flush(G.Host);
+    G.NetplayStartReadySent = true;
+    std::printf("NSMB InputNetplay: sent start ready frame=%u\n", frame);
 }
 
 void SendInputPayloadNowLocked(const void* data, size_t size, melonDS::u32 flags)
@@ -4066,8 +4097,9 @@ bool AllNetplayStartWaitArrivedLocked()
 void WaitForPeerAtNetplayStartBarrier(int instanceID, melonDS::u32 syncFrame)
 {
     if (!G.Enabled || !G.WaitForPeerAtNetplayStart || G.NetRole != Role::Host
+        || G.InputNetplayOnly
         || G.NetplayStartFrame == 0 || syncFrame != G.NetplayStartFrame
-        || instanceID < 0 || instanceID >= 16)
+        || instanceID < 0 || instanceID >= 16 || G.WaitedForPeerAtNetplayStart)
     {
         return;
     }
@@ -4141,6 +4173,56 @@ void WaitForPeerAtNetplayStartBarrier(int instanceID, melonDS::u32 syncFrame)
     }
     std::printf("NSMB PoC: peer wait at netplay start finished frame=%u\n", syncFrame);
     std::fflush(stdout);
+}
+
+void WaitForRemoteNetplayStartReadyIfNeeded(melonDS::NDS* nds, melonDS::u32 syncFrame)
+{
+    if (!G.Enabled || !G.InputNetplayOnly || !G.WaitForPeerAtNetplayStart
+        || G.NetplayStartFrame == 0 || syncFrame != G.NetplayStartFrame
+        || G.WaitedForPeerAtNetplayStart)
+    {
+        return;
+    }
+
+    std::printf("NSMB InputNetplay: waiting for remote start ready frame=%u\n", syncFrame);
+    std::fflush(stdout);
+
+    const auto start = std::chrono::steady_clock::now();
+    for (;;)
+    {
+        {
+            std::lock_guard<std::mutex> lock(G.Mutex);
+            PumpNetworkLocked(nds, syncFrame);
+            SendMatchSeedLocked();
+            SendNetplayStartReadyLocked(syncFrame);
+            if (G.RemoteNetplayStartReadyFrame != kNoFrameLimit
+                && G.RemoteNetplayStartReadyFrame >= syncFrame)
+            {
+                G.WaitedForPeerAtNetplayStart = true;
+                std::printf("NSMB InputNetplay: remote start ready accepted remoteFrame=%u localFrame=%u\n",
+                    G.RemoteNetplayStartReadyFrame,
+                    syncFrame);
+                std::fflush(stdout);
+                return;
+            }
+        }
+
+        if (G.SeedWaitTimeoutMs > 0)
+        {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            if (elapsed >= G.SeedWaitTimeoutMs)
+            {
+                std::printf("NSMB InputNetplay: remote start ready wait timeout frame=%u waitedMs=%d\n",
+                    syncFrame,
+                    G.SeedWaitTimeoutMs);
+                std::fflush(stdout);
+                return;
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
 }
 
 bool WaitAtFrameBarrier(FrameBarrier& barrier, int instanceID, melonDS::u32 frame, const char* name)
@@ -10267,6 +10349,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     const InputState testInput = ApplyInputScript(instanceID, inputFrame, polledInput);
     const melonDS::u32 syncFrame = G.TestEnabled ? inputFrame : frame;
+
+    if (G.Enabled && G.InputNetplayOnly)
+        WaitForRemoteNetplayStartReadyIfNeeded(nds, syncFrame);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         SaveRollbackCheckpointIfNeeded(instanceID, syncFrame, nds);

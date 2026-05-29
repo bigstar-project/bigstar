@@ -15,6 +15,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `getPacketByte/getPacketTick/getPacketAction` まで差し替えるとステージ状態を壊しやすいため、現時点では keys/touch helper 限定。
 - RNG は ROM側 `rng-constant --value 0x100` で固定する。
 - 実用低遅延路線は `InputDelayFrames=4` / `InputMaxFrameLead=4` / unreliable input + bundle history 8。
+- 入力netplay開始時は、host/client双方が `PacketBridgeStartFrame` に到達したことを reliable start-ready packet で確認してから試合入力を開始する。
 - 高遅延向け rollback は別紙 `docs/nsmb-mvl-rollback-design-notes.md` に保留。現時点の本筋ではない。
 
 ## 完了済み
@@ -30,6 +31,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - 手動入力をhost/clientで別々に受け取り、入力パケットとして相手へ送る input netplay mode。
 - `InputMaxFrameLead` による先行制限。
 - unreliable input packet + 過去入力bundleによる packet drop 耐性。
+- `PacketBridgeStartFrame` 到達時の二者 start-ready barrier。古い同一プロセス用の開始バリアは input netplay 時には使わない。
 - active FPS と input wait/throttle の計測ログ。
 - trace/hook無効時にJITを使える経路。
 - 不要な古い `logs/codex-*` は適宜削除済み。
@@ -68,9 +70,10 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 ## 現在の最優先課題
 
-1. 手動/LAN 2PCで更新後の `run-nsmb-mvl-manual-peer.ps1` を再確認する。
-2. 60fpsを維持できる場合、次はWAN相当の遅延・jitterを入れて `InputDelayFrames=4` の実用限界を見る。
-3. 60fpsが再発して落ちる場合は、次を個別に切り分ける:
+1. 手動/LAN 2PCで、開始時の start-ready barrier により host/client がズレずに試合開始するか再確認する。
+2. 複雑入力や長めの手動対戦で、star/object/player state が継続して一致するか見る。
+3. 60fpsを維持できる場合、次はWAN相当の遅延・jitterを入れて `InputDelayFrames=4` の実用限界を見る。
+4. 60fpsが再発して落ちる場合は、次を個別に切り分ける:
    - OSD on/off
    - `SwapBuffersInterval=1/2/4`
    - frame limit on/off
@@ -92,7 +95,8 @@ client:
 .\scripts\run-nsmb-mvl-manual-peer.ps1 -Role client -Peer <host-ip>
 ```
 
-デフォルトは `InputDelayFrames=4` / `InputMaxFrameLead=4` / frame limit有効 / `SwapBuffersInterval=1`。
+デフォルトは `InputDelayFrames=4` / `InputMaxFrameLead=4` / frame limit有効 / `SwapBuffersInterval=1` / start-ready barrier有効。
+開始バリアを一時的に無効化して比較する場合だけ `-NoStartBarrier` を付ける。
 
 WAN相当の遅延・jitterを試す場合:
 
@@ -120,9 +124,15 @@ US PoC 低遅延入力同期 baseline:
 
 ```powershell
 $env:MELONDS_NSML_SWAPBUFFERS_INTERVAL='1'
-.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -RunRole both -Exe build\release-windows-x86_64\melonDS.exe -Rom roms\nsmb-us.nds -HostRom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds -InputScript tests\nsmB_us_direct_mvl_manual_bootstrap.inputs -Frames 3000 -ScreenshotInterval 0 -NoHashLog -SkipMvlStateCheck -SkipGameplayActorCheck -NoLanMP -InputNetplay -InputDelayFrames 4 -InputMaxFrameLead 4 -PacketBridgeJitHelperPatch -PacketBridgeJitHelperPatchFrame 870 -PacketBridgeStartFrame 870 -AllowJit -InputUnreliable -InputBundleHistory 8
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -RunRole both -Exe build\release-windows-x86_64\melonDS.exe -Rom roms\nsmb-us.nds -HostRom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds -InputScript tests\nsmb_us_direct_mvl_manual_bootstrap.inputs -Frames 3000 -ScreenshotInterval 0 -NoHashLog -SkipMvlStateCheck -SkipGameplayActorCheck -NoLanMP -InputNetplay -InputDelayFrames 4 -InputMaxFrameLead 4 -PacketBridgeJitHelperPatch -PacketBridgeJitHelperPatchFrame 870 -PacketBridgeStartFrame 870 -WaitForPeerAtNetplayStart -AllowJit -InputUnreliable -InputBundleHistory 8
 Remove-Item Env:\MELONDS_NSML_SWAPBUFFERS_INTERVAL -ErrorAction SilentlyContinue
 ```
+
+直近の開始同期検証:
+
+- `tests\nsmb_us_direct_mvl_manual_bootstrap.inputs` / 2200 frames / `-CheckHostClientGameplaySync`: pass。
+- `tests\nsmb_us_direct_mvl_both_different.inputs` / 3600 frames / `-CheckHostClientGameplaySync`: pass。
+- host/client両方で `sent start ready frame=870`、`received start ready frame=870`、`remote start ready accepted ... localFrame=870` を確認。
 
 ## 注意
 

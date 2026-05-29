@@ -18,7 +18,8 @@ param(
     [int]$SwapBuffersInterval = 1,
     [switch]$UseFrameLimit,
     [switch]$NoFrameLimit,
-    [switch]$NoJit
+    [switch]$NoJit,
+    [switch]$NoStartBarrier
 )
 
 $ErrorActionPreference = "Stop"
@@ -56,6 +57,7 @@ $params = @{
     PacketBridgeJitHelperPatch = $true
     PacketBridgeJitHelperPatchFrame = 870
     PacketBridgeStartFrame = 870
+    WaitForPeerAtNetplayStart = (-not $NoStartBarrier)
     LogDir = $LogDir
 }
 
@@ -84,7 +86,7 @@ if ($InputUnreliable) {
 
 Write-Host "Starting NSMB MvL peer session: role=$Role peer=$Peer"
 Write-Host "input delay=$InputDelayFrames sendDelay=$InputSendDelayFrames sendJitter=$InputSendJitterFrames max frame lead=$InputMaxFrameLead unreliable=$($InputUnreliable.IsPresent) bundleHistory=$InputBundleHistory jit=$(-not $NoJit)"
-Write-Host "frameLimit=$(-not $NoFrameLimit.IsPresent) swapBuffersInterval=$SwapBuffersInterval"
+Write-Host "frameLimit=$(-not $NoFrameLimit.IsPresent) swapBuffersInterval=$SwapBuffersInterval startBarrier=$(-not $NoStartBarrier)"
 Write-Host "log=$LogDir"
 Write-Host "Host controls Mario. Client controls Luigi."
 

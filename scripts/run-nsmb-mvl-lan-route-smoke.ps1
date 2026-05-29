@@ -69,6 +69,7 @@ param(
     [int]$PacketBridgePort = 8165,
     [int]$PacketBridgeStartFrame = 0,
     [switch]$WaitForPeerBeforeStart,
+    [switch]$WaitForPeerAtNetplayStart,
     [string]$HostLocalInstance = "",
     [string]$ClientLocalInstance = "",
     [switch]$NoLocalWait,
@@ -2205,6 +2206,11 @@ function Start-MelonLANProcess {
             $env:MELONDS_NSML_WAIT_FOR_PEER = "1"
         } else {
             Remove-Item Env:\MELONDS_NSML_WAIT_FOR_PEER -ErrorAction SilentlyContinue
+        }
+        if ($WaitForPeerAtNetplayStart) {
+            $env:MELONDS_NSML_WAIT_FOR_PEER_AT_NETPLAY_START = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_WAIT_FOR_PEER_AT_NETPLAY_START -ErrorAction SilentlyContinue
         }
         if ($PacketBridgeStartFrame -gt 0) {
             $env:MELONDS_NSML_DEFER_NETWORK_UNTIL_START = "1"
