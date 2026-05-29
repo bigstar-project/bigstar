@@ -4,18 +4,18 @@
 
 New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` で WAN 越しに対戦できる形へ持っていく。
 
-現在の本筋は、LocalMP を WAN に流す方式ではなく、US版ROMへの direct MvL entry patch と、NSMB が試合中に読む入力境界への adapter を組み合わせる方式。
+現在の本筋は、LocalMPをWANへそのまま流す方式ではなく、US版ROM向けの direct MvL entry patch と、NSMBが試合中に読む入力境界への adapter を組み合わせる方式。
 
 ## 現在の方針
 
 - 対象ROMは US版 `roms/nsmb-us.nds`。
 - host は `localPlayerID=0`、client は `localPlayerID=1` の true local player 構成を維持する。
 - direct MvL entry ROM patch でローカル通信UIを経由せず、Mario vs Luigi ステージへ直接入る。
-- `Net::getConsoleKeys(u16)` / `Net::getConsoleTouchPad(u16)` を JIT helper patch で scratch memory 参照へ差し替え、WAN input を player0/player1 入力として渡す。
+- 試合中は `Net::getConsoleKeys(u16)` / `Net::getConsoleTouchPad(u16)` を JIT helper patch で差し替え、WAN入力を player0/player1 入力として渡す。
 - `getPacketByte/getPacketTick/getPacketAction` まで差し替えるとステージ状態を壊しやすいため、現時点では keys/touch helper 限定。
-- RNG は ROM側 `rng-constant --value 0x100` で固定している。
-- 低遅延実用路線は `InputDelayFrames=4`、`InputMaxFrameLead=4`、unreliable input + bundle history 8。
-- 高遅延向け rollback は別紙 `docs/nsmb-mvl-rollback-design-notes.md` に退避。現時点の本筋ではない。
+- RNG は ROM側 `rng-constant --value 0x100` で固定する。
+- 実用低遅延路線は `InputDelayFrames=4` / `InputMaxFrameLead=4` / unreliable input + bundle history 8。
+- 高遅延向け rollback は別紙 `docs/nsmb-mvl-rollback-design-notes.md` に保留。現時点の本筋ではない。
 
 ## 完了済み
 
@@ -26,59 +26,54 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   - host: `roms/nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds`
   - client: `roms/nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds`
 - client側を Luigi 視点/localPlayerID=1 として動かす基本経路。
-- Luigi死亡時にステージ全体が止まる問題は、VS中だけ `PlayerBase::freezeStage()` / `PlayerBase::signalLocked()` を避ける ROM patch で改善。
-- 手動入力を host/client で別々に受け取り、入力パケットとして相手へ送る input netplay mode。
-- `InputMaxFrameLead` による片側先行制限。
-- unreliable input packet + 過去入力 bundle による packet drop 耐性。
+- Luigi死亡時にステージ全体が止まる問題は、通常MvLと比較しながら改善済み。
+- 手動入力をhost/clientで別々に受け取り、入力パケットとして相手へ送る input netplay mode。
+- `InputMaxFrameLead` による先行制限。
+- unreliable input packet + 過去入力bundleによる packet drop 耐性。
 - active FPS と input wait/throttle の計測ログ。
-- disabled trace/hook の JIT/ARM runtime overhead 削減。
-- 一時ログ肥大化対策として `logs/codex-*` は削除済み。
+- trace/hook無効時にJITを使える経路。
+- 不要な古い `logs/codex-*` は適宜削除済み。
+
+## 60fps切り分け結果
+
+ユーザー確認:
+
+- 公式配布版melonDS + US版ROM + 通常LocalMPでは60fps張り付き。
+
+こちらの確認:
+
+- `C:\Users\Sugiyama\melon-ds-master-perf` に素の master worktree を作成し、release build 済み。
+- フォーク側の通常LocalMP routeは、日本版ROM + 既存入力スクリプトで成立。
+- フォーク側通常LocalMPの定常区間:
+  - フレーム制限なし: active `85.18fps`
+  - フレーム制限あり: active `60.02fps`
+- US版ROM + 既存 `tests/nsmb_mario_vs_luigi.inputs` は日本版向け入力スクリプトなので、通常LocalMP routeの自動化には使えない。メニュー/接続待ちを測ってしまうため、FPS baselineとして採用しない。
+- US PoC経路、同一PC2プロセス、SwapBuffers毎フレーム、input delay 4:
+  - フレーム制限なし: host/client active 約`65.4fps`
+  - フレーム制限あり: host `59.89fps`、client `59.86fps`
+- remote input wait は直近測定では主因ではない。フレーム制限あり測定では remote wait はごく小さく、60fpsを維持できた。
+
+結論:
+
+- melonDS本体、フォーク全体、通常LocalMPが52fps程度に落ちているわけではない。
+- 以前の52fps問題は、手動起動scriptの暫定軽量化設定や表示設定の影響が大きい可能性が高い。
+- `scripts/run-nsmb-mvl-manual-peer.ps1` は、デフォルトを滑らかさ優先に変更した:
+  - `SwapBuffersInterval=1`
+  - frame limit有効
+  - `ShowOSD=false`
+  - OpenGL表示、VSync off、JIT enabled
 
 ## 現在の最優先課題
 
-### 1. 60fps維持
-
-ユーザー実測で、1PC 2窓でも LAN 2PC でも表示FPSが52前後に落ちる。
-
-2026-05-29 の再調査結果:
-
-- remote input wait は主因ではない。
-- `MPInterface::Process()` も主因ではない。
-- MvL gameplay中は `RunFrame()` 自体が約15-16msまで重くなる。
-- 画面描画なしでは active fps が約62-64fps。
-- 画面表示ありでは `SwapBuffers` / 画面提示が数ms乗り、active fps が約50fpsまで落ちる。
-- `MELONDS_NSML_SWAPBUFFERS_INTERVAL=4` では負荷は下がるが、測定値は約55-60fpsで揺れる。表示更新頻度も落ちるため、快適な最終解ではない。
-
-暫定手動プレイ設定:
-
-- `scripts/run-nsmb-mvl-manual-peer.ps1` はデフォルトで `NoFrameLimit` 相当、`SwapBuffersInterval=4`、start frame 870 を使う。これは暫定の軽量化設定であり、60fps保証ではない。
-- `UseFrameLimit` を付けると従来の frame limiter を使う。
-
-次にやること:
-
-- 画面提示を間引かずに60fpsへ戻す方法を探す。
-- 候補:
-  - input netplay時の描画経路を軽量化する。
-  - OpenGL SwapBuffers を emulation thread から分離できるか調べる。
-  - window/display更新頻度を落とさず、内部frameだけ60維持する別のpresent方式を検討する。
-  - MvL中の `RunFrame()` 負荷をさらに削る。
-
-### 2. direct entry起因の開始位相差
-
-game-state比較では frame 900 で `movingHazardX` が host/client 不一致になる。
-
-現在わかっていること:
-
-- 入力は一致している。
-- moving hazard は host 側が約6フレーム早く動き始める。
-- 起動待ちや host/client 起動時間差ではなく、host ROM/client ROM の direct entry 経路差に見える。
-- 目視プレイ上の主要挙動は改善しているが、完全同期を保証するには未解決。
-
-次にやること:
-
-- localPlayerID=1 client direct entry の StageStart/StageScene 作成経路をさらに追う。
-- host/client の object spawn frame を揃える。
-- 一時的な座標補正ではなく、試合開始状態の生成差を減らす。
+1. 手動/LAN 2PCで更新後の `run-nsmb-mvl-manual-peer.ps1` を再確認する。
+2. 60fpsを維持できる場合、次はWAN相当の遅延・jitterを入れて `InputDelayFrames=4` の実用限界を見る。
+3. 60fpsが再発して落ちる場合は、次を個別に切り分ける:
+   - OSD on/off
+   - `SwapBuffersInterval=1/2/4`
+   - frame limit on/off
+   - VSync on/off
+   - 1PC 2プロセス vs LAN 2PC
+   - trace/hash/screenshot/game-state trace の有無
 
 ## 手動起動
 
@@ -94,26 +89,33 @@ client:
 .\scripts\run-nsmb-mvl-manual-peer.ps1 -Role client -Peer <host-ip>
 ```
 
-低遅延設定はデフォルトで `InputDelayFrames=4` / `InputMaxFrameLead=4`。描画間引き暫定策を無効化したい場合は `-SwapBuffersInterval 1` を付ける。
+デフォルトは `InputDelayFrames=4` / `InputMaxFrameLead=4` / frame limit有効 / `SwapBuffersInterval=1`。
+
+フレーム制限を切って余力を見る場合:
+
+```powershell
+.\scripts\run-nsmb-mvl-manual-peer.ps1 -Role host -NoFrameLimit
+.\scripts\run-nsmb-mvl-manual-peer.ps1 -Role client -Peer <host-ip> -NoFrameLimit
+```
 
 ## 検証コマンド
 
-速度だけを見る:
+通常LocalMP baseline:
 
 ```powershell
-.\scripts\run-nsmb-mvl-split-local-input-smoke.ps1 -LowDelayWan -AllowJit -Frames 3000 -NoGameStateTrace -SkipGameStateComparison -NoFrameLimit
+.\scripts\run-nsmb-mvl-route-smoke.ps1 -Exe build\release-windows-x86_64\melonDS.exe -Rom roms\nsmb.nds -Frames 3600 -AllowJit -NoScreenshots -NoHashLog -NoRngPatch -QuietLog -ActiveFpsStartFrame 3000
 ```
 
-同期比較を見る:
+US PoC 低遅延入力同期 baseline:
 
 ```powershell
-.\scripts\run-nsmb-mvl-split-local-input-smoke.ps1 -UseLanMP -LowDelayWan -AllowJit -Frames 2600 -GameStateTraceInterval 30
+$env:MELONDS_NSML_SWAPBUFFERS_INTERVAL='1'
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -RunRole both -Exe build\release-windows-x86_64\melonDS.exe -Rom roms\nsmb-us.nds -HostRom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds -InputScript tests\nsmB_us_direct_mvl_manual_bootstrap.inputs -Frames 3000 -ScreenshotInterval 0 -NoHashLog -SkipMvlStateCheck -SkipGameplayActorCheck -NoLanMP -InputNetplay -InputDelayFrames 4 -InputMaxFrameLead 4 -PacketBridgeJitHelperPatch -PacketBridgeJitHelperPatchFrame 870 -PacketBridgeStartFrame 870 -AllowJit -InputUnreliable -InputBundleHistory 8
+Remove-Item Env:\MELONDS_NSML_SWAPBUFFERS_INTERVAL -ErrorAction SilentlyContinue
 ```
-
-現時点では同期比較は `movingHazardX` の開始位相差で失敗する可能性がある。
 
 ## 注意
 
 - `docs/nsmb-mvl-rollback-design-notes.md` は rollback 議論の保存先。肥大化させず、rollback再開時だけ参照する。
 - `logs/` はROMコピーを含むため肥大化しやすい。検証結果はdocsに要約し、古い `logs/codex-*` は削除する。
-- final response 前にはこのファイルの古い「次にやること」や解決済みblockerが残っていないか確認する。
+- final response 前には、このファイルの古い「次にやること」や解決済みblockerが残っていないか確認する。

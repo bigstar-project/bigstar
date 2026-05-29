@@ -13,8 +13,9 @@ param(
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds",
     [string]$InputScript = "tests\nsmb_us_direct_mvl_manual_bootstrap.inputs",
     [string]$LogDir = "",
-    [int]$SwapBuffersInterval = 4,
+    [int]$SwapBuffersInterval = 1,
     [switch]$UseFrameLimit,
+    [switch]$NoFrameLimit,
     [switch]$NoJit
 )
 
@@ -54,7 +55,11 @@ $params = @{
     LogDir = $LogDir
 }
 
-if (-not $UseFrameLimit) {
+if ($UseFrameLimit -and $NoFrameLimit) {
+    throw "UseFrameLimit and NoFrameLimit cannot be used together"
+}
+
+if ($NoFrameLimit) {
     $params.NoFrameLimit = $true
 }
 
@@ -75,7 +80,7 @@ if ($InputUnreliable) {
 
 Write-Host "Starting NSMB MvL peer session: role=$Role peer=$Peer"
 Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead unreliable=$($InputUnreliable.IsPresent) bundleHistory=$InputBundleHistory jit=$(-not $NoJit)"
-Write-Host "frameLimit=$($UseFrameLimit.IsPresent) swapBuffersInterval=$SwapBuffersInterval"
+Write-Host "frameLimit=$(-not $NoFrameLimit.IsPresent) swapBuffersInterval=$SwapBuffersInterval"
 Write-Host "log=$LogDir"
 Write-Host "Host controls Mario. Client controls Luigi."
 
@@ -91,10 +96,22 @@ try {
     $cfgPath = Join-Path $repoRoot "build\release-windows-x86_64\melonDS.toml"
     if (Test-Path $cfgPath) {
         $cfg = Get-Content $cfgPath -Raw
-        $cfg = $cfg -replace 'UseGL = false', 'UseGL = true'
-        $cfg = $cfg -replace 'VSync = true', 'VSync = false'
-        $cfg = $cfg -replace 'Renderer = 0', 'Renderer = 2'
-        $cfg = $cfg -replace 'ScreenSizing = 4', 'ScreenSizing = 0'
+        $replacements = [ordered]@{
+            'LimitFPS' = 'true'
+            'UseGL' = 'true'
+            'VSync' = 'false'
+            'Renderer' = '2'
+            'ScreenSizing' = '0'
+            'ShowOSD' = 'false'
+        }
+        foreach ($key in $replacements.Keys) {
+            $value = $replacements[$key]
+            if ($cfg -match "(?m)^$key\s*=") {
+                $cfg = $cfg -replace "(?m)^$key\s*=.*$", "$key = $value"
+            } else {
+                $cfg += "`n$key = $value"
+            }
+        }
         Set-Content -Path $cfgPath -Value $cfg -Encoding UTF8
     }
 

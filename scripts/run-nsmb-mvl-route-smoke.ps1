@@ -15,6 +15,15 @@ param(
     [int]$StateSaveFrame = 0,
     [int]$VsStarSnapFrame = 0,
     [int]$VsStarSnapPlayerSlot = 0,
+    [switch]$AllowJit,
+    [switch]$NoFrameLimit,
+    [switch]$NoScreenshots,
+    [int]$ScreenshotInterval = 120,
+    [switch]$NoHashLog,
+    [int]$HashInterval = 300,
+    [switch]$QuietLog,
+    [int]$ActiveFpsStartFrame = 0,
+    [switch]$Visible,
     [int]$PlayerSnapToStarFrame = 0,
     [int]$PlayerSnapToStarSlot = 0,
     [int]$PlayerStickToStarStartFrame = 0,
@@ -39,13 +48,14 @@ $ErrorActionPreference = "Stop"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 $stdout = Join-Path $LogDir "nsmb-mvl-route.stdout.txt"
+$stderr = Join-Path $LogDir "nsmb-mvl-route.stderr.txt"
 $hashLog = Join-Path $LogDir "nsmb-mvl-route.hash.csv"
 $gameStateTracePath = Join-Path $LogDir "nsmb-mvl-route.game-state.csv"
 $callTracePath = Join-Path $LogDir "nsmb-mvl-route.call-trace.csv"
 $writeTracePath = Join-Path $LogDir "nsmb-mvl-route.write-trace.csv"
 $screenDir = Join-Path $LogDir "screens-mvl-route"
 $ramDumpDir = Join-Path $LogDir "ram-mvl-route"
-Remove-Item -Force $stdout, $hashLog, $gameStateTracePath, $callTracePath, $writeTracePath -ErrorAction SilentlyContinue
+Remove-Item -Force $stdout, $stderr, $hashLog, $gameStateTracePath, $callTracePath, $writeTracePath -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force $screenDir -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force $ramDumpDir -ErrorAction SilentlyContinue
 
@@ -64,6 +74,7 @@ foreach ($name in @(
     "MELONDS_NSML_DEFER_NETWORK_UNTIL_START",
     "MELONDS_NSML_FRAME_BARRIER",
     "MELONDS_NSML_SERIAL_RUN",
+    "MELONDS_NSML_DISABLE_FRAME_LIMIT",
     "MELONDS_NSML_NETPLAY_FRAME_BARRIER",
     "MELONDS_NSML_STATE_SYNC",
     "MELONDS_NSML_STATE_APPLY",
@@ -100,7 +111,16 @@ foreach ($name in @(
     "MELONDS_NSML_DIRECT_MVL_BOOT_CALL_UPDATE_SM",
     "MELONDS_NSML_DIRECT_MVL_BOOT_CALL_START_LOAD",
     "MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT",
-    "MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT"
+    "MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT",
+    "MELONDS_NSML_DISABLE_JIT",
+    "MELONDS_NSML_ALLOW_JIT",
+    "MELONDS_NSML_DISABLE_HASH",
+    "MELONDS_NSML_HASH_LOG",
+    "MELONDS_NSML_HASH_INTERVAL",
+    "MELONDS_NSML_SCREENSHOT_DIR",
+    "MELONDS_NSML_SCREENSHOT_INTERVAL",
+    "MELONDS_NSML_QUIET_LOG",
+    "MELONDS_NSML_ACTIVE_FPS_START_FRAME"
 )) {
     Remove-Item "Env:\$name" -ErrorAction SilentlyContinue
 }
@@ -109,12 +129,45 @@ $env:MELONDS_NSML_TEST = "1"
 $env:MELONDS_NSML_TEST_INSTANCES = "2"
 $env:MELONDS_NSML_TEST_FRAMES = "$Frames"
 $env:MELONDS_NSML_INPUT_SCRIPT = (Resolve-Path $InputScript).Path
-$env:MELONDS_NSML_HASH_LOG = (Join-Path (Resolve-Path $LogDir).Path "nsmb-mvl-route.hash.csv")
-$env:MELONDS_NSML_HASH_INTERVAL = "300"
-$env:MELONDS_NSML_SCREENSHOT_DIR = (Join-Path (Resolve-Path $LogDir).Path "screens-mvl-route")
-$env:MELONDS_NSML_SCREENSHOT_INTERVAL = "120"
 $env:MELONDS_NSML_FIXED_RTC = "2020-01-01T00:00:00"
-$env:MELONDS_NSML_DISABLE_JIT = "1"
+if ($NoHashLog) {
+    $env:MELONDS_NSML_DISABLE_HASH = "1"
+    Remove-Item Env:\MELONDS_NSML_HASH_LOG -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_HASH_INTERVAL -ErrorAction SilentlyContinue
+} else {
+    Remove-Item Env:\MELONDS_NSML_DISABLE_HASH -ErrorAction SilentlyContinue
+    $env:MELONDS_NSML_HASH_LOG = (Join-Path (Resolve-Path $LogDir).Path "nsmb-mvl-route.hash.csv")
+    $env:MELONDS_NSML_HASH_INTERVAL = "$HashInterval"
+}
+if ($NoScreenshots) {
+    Remove-Item Env:\MELONDS_NSML_SCREENSHOT_DIR -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_SCREENSHOT_INTERVAL -ErrorAction SilentlyContinue
+} else {
+    $env:MELONDS_NSML_SCREENSHOT_DIR = (Join-Path (Resolve-Path $LogDir).Path "screens-mvl-route")
+    $env:MELONDS_NSML_SCREENSHOT_INTERVAL = "$ScreenshotInterval"
+}
+if ($AllowJit) {
+    Remove-Item Env:\MELONDS_NSML_DISABLE_JIT -ErrorAction SilentlyContinue
+    $env:MELONDS_NSML_ALLOW_JIT = "1"
+} else {
+    Remove-Item Env:\MELONDS_NSML_ALLOW_JIT -ErrorAction SilentlyContinue
+    $env:MELONDS_NSML_DISABLE_JIT = "1"
+}
+if ($NoFrameLimit) {
+    $env:MELONDS_NSML_DISABLE_FRAME_LIMIT = "1"
+} else {
+    Remove-Item Env:\MELONDS_NSML_DISABLE_FRAME_LIMIT -ErrorAction SilentlyContinue
+}
+if ($QuietLog) {
+    $env:MELONDS_NSML_QUIET_LOG = "1"
+} else {
+    Remove-Item Env:\MELONDS_NSML_QUIET_LOG -ErrorAction SilentlyContinue
+}
+if ($ActiveFpsStartFrame -gt 0) {
+    $env:MELONDS_NSML_ACTIVE_FPS_START_FRAME = "$ActiveFpsStartFrame"
+} else {
+    Remove-Item Env:\MELONDS_NSML_ACTIVE_FPS_START_FRAME -ErrorAction SilentlyContinue
+}
 if ($FrameBarrier) {
     $env:MELONDS_NSML_FRAME_BARRIER = "1"
 } else {
@@ -243,34 +296,55 @@ if ($BadJumpTrace) {
     Remove-Item Env:\MELONDS_NSML_BAD_JUMP_TRACE -ErrorAction SilentlyContinue
 }
 
-& (Resolve-Path $Exe).Path (Resolve-Path $Rom).Path *> $stdout
-$exitCode = $LASTEXITCODE
+$startInfo = @{
+    FilePath = (Resolve-Path $Exe).Path
+    ArgumentList = @((Resolve-Path $Rom).Path)
+    Wait = $true
+    PassThru = $true
+    RedirectStandardOutput = $stdout
+    RedirectStandardError = $stderr
+}
+if (-not $Visible) {
+    $startInfo.WindowStyle = "Hidden"
+}
+$proc = Start-Process @startInfo
+$exitCode = $proc.ExitCode
+if (Test-Path $stderr) {
+    Add-Content -Path $stdout -Value (Get-Content -Path $stderr -Raw)
+}
 
 if ($exitCode -ne 0) {
     throw "melonDS exited with code $exitCode. See $stdout"
 }
 
-if (-not (Test-Path $hashLog)) {
+if (-not $NoHashLog -and -not (Test-Path $hashLog)) {
     throw "hash log was not created: $hashLog"
 }
 
-$hashRows = Import-Csv $hashLog
-if (-not ($hashRows | Where-Object { $_.instance -eq "0" })) {
-    throw "hash log did not contain instance 0 rows: $hashLog"
-}
+$hashRows = @()
+if (-not $NoHashLog) {
+    $hashRows = Import-Csv $hashLog
+    if (-not ($hashRows | Where-Object { $_.instance -eq "0" })) {
+        throw "hash log did not contain instance 0 rows: $hashLog"
+    }
 
-if (-not ($hashRows | Where-Object { $_.instance -eq "1" })) {
-    throw "hash log did not contain instance 1 rows: $hashLog"
+    if (-not ($hashRows | Where-Object { $_.instance -eq "1" })) {
+        throw "hash log did not contain instance 1 rows: $hashLog"
+    }
 }
 
 if (-not (Select-String -Path $stdout -Pattern "NSMB Test: frame limit reached" -Quiet)) {
     throw "frame-limit completion marker was not found in $stdout"
 }
 
-$inst0Screens = Get-ChildItem $screenDir -Filter "inst0_*.png" -ErrorAction SilentlyContinue
-$inst1Screens = Get-ChildItem $screenDir -Filter "inst1_*.png" -ErrorAction SilentlyContinue
-if (-not $inst0Screens -or -not $inst1Screens) {
-    throw "expected screenshots for both instances in $screenDir"
+$screenshotCount = 0
+if (-not $NoScreenshots) {
+    $inst0Screens = Get-ChildItem $screenDir -Filter "inst0_*.png" -ErrorAction SilentlyContinue
+    $inst1Screens = Get-ChildItem $screenDir -Filter "inst1_*.png" -ErrorAction SilentlyContinue
+    if (-not $inst0Screens -or -not $inst1Screens) {
+        throw "expected screenshots for both instances in $screenDir"
+    }
+    $screenshotCount = $inst0Screens.Count + $inst1Screens.Count
 }
 
-Write-Host "NSMB Mario vs Luigi route smoke passed: frames=$Frames rows=$($hashRows.Count) screenshots=$($inst0Screens.Count + $inst1Screens.Count)"
+Write-Host "NSMB Mario vs Luigi route smoke passed: frames=$Frames rows=$($hashRows.Count) screenshots=$screenshotCount"

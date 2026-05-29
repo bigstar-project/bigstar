@@ -879,6 +879,7 @@ struct State
     bool ActiveTimerStarted[16] {};
     melonDS::u32 ActiveTimerStartFrame[16] {};
     std::chrono::steady_clock::time_point ActiveTimerStart[16];
+    melonDS::u32 ActiveFpsStartFrame = 0;
     int HashInterval = 60;
     bool HashEnabled = true;
     int TestWaitTimeoutMs = 5000;
@@ -9226,6 +9227,8 @@ void InitFromEnvironment()
     G.TestEnabled = EnvFlag("MELONDS_NSML_TEST");
     G.TestFrames = static_cast<melonDS::u32>(std::max(0, EnvInt("MELONDS_NSML_TEST_FRAMES", 0)));
     G.TestInstanceCount = std::clamp(EnvInt("MELONDS_NSML_TEST_INSTANCES", 1), 1, 16);
+    G.ActiveFpsStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_ACTIVE_FPS_START_FRAME", 0)));
     G.FrameBarrierEnabled = EnvFlag("MELONDS_NSML_FRAME_BARRIER");
     G.SerialRunEnabled = EnvFlag("MELONDS_NSML_SERIAL_RUN");
     G.HashEnabled = !EnvFlag("MELONDS_NSML_DISABLE_HASH");
@@ -10574,9 +10577,11 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                 G.TestTimerStart = std::chrono::steady_clock::now();
             }
         }
-        const melonDS::u32 activeStartFrame = G.NetplayStartFrame != 0
-            ? G.NetplayStartFrame + 120
-            : 120;
+        const melonDS::u32 activeStartFrame = G.ActiveFpsStartFrame != 0
+            ? G.ActiveFpsStartFrame
+            : (G.NetplayStartFrame != 0
+                ? G.NetplayStartFrame + 120
+                : 120);
         if (!G.ActiveTimerStarted[instanceID] && logFrame >= activeStartFrame)
         {
             std::lock_guard<std::mutex> lock(G.Mutex);

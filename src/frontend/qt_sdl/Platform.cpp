@@ -297,6 +297,21 @@ void Log(LogLevel level, const char* fmt, ...)
     if (fmt == nullptr)
         return;
 
+    static int minLevel = []() {
+        if (getenv("MELONDS_NSML_QUIET_LOG"))
+            return static_cast<int>(LogLevel::Warn);
+        if (const char* value = getenv("MELONDS_LOG_MIN_LEVEL"))
+        {
+            char* end = nullptr;
+            const long parsed = strtol(value, &end, 0);
+            if (end != value)
+                return static_cast<int>(parsed);
+        }
+        return static_cast<int>(LogLevel::Debug);
+    }();
+    if (static_cast<int>(level) < minLevel)
+        return;
+
     va_list args;
     va_start(args, fmt);
     vprintf(fmt, args);
