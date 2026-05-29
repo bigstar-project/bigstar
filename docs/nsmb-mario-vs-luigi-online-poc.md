@@ -179,6 +179,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 7. 8コインアイテム、2個目以降のBig Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
 8. 残るruntime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
 9. 実2PCまたは同一LANで、host/clientを別マシン相当の起動コマンドに分けて検証する。
+   - 実2PC/LAN用の短縮起動scriptとして `scripts/run-nsmb-mvl-manual-peer.ps1` を追加した。次に人間の手動確認が必要になったら、このscriptでhost/clientを別PCまたは別端末から起動する。
 
 localhost split検証:
 
@@ -221,6 +222,28 @@ localhost split検証:
 packet loss対策のunreliable bundleも試す場合は、上のコマンドに `-InputUnreliable -InputBundleHistory 8` を追加する。これはReliable orderedによる詰まりを避けるため、直近8フレームぶんの入力を毎packetに重複して入れる実験設定。
 
 個別起動する場合:
+
+短縮scriptを使う場合:
+
+host側:
+
+```powershell
+.\scripts\run-nsmb-mvl-manual-peer.ps1 `
+  -Role host `
+  -Peer <client-ip-or-hostname>
+```
+
+client側:
+
+```powershell
+.\scripts\run-nsmb-mvl-manual-peer.ps1 `
+  -Role client `
+  -Peer <host-ip-or-hostname>
+```
+
+この短縮scriptは `InputDelayFrames=4`、`InputMaxFrameLead=4`、`InputUnreliable`、`InputBundleHistory=8`、JIT有効を既定にする。JITを切る場合は `-NoJit` を付ける。
+
+低レベルscriptを直接使う場合:
 
 host側:
 
