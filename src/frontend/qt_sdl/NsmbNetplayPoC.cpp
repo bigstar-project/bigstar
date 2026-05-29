@@ -210,6 +210,27 @@ enum class Role
     Client,
 };
 
+enum class RollbackBackend
+{
+    Savestate,
+    ARM9RAM,
+};
+
+constexpr melonDS::u32 kRollbackARM9RAMMagic = 0x524D4139; // RMA9
+constexpr melonDS::u32 kRollbackARM9RAMVersion = 1;
+
+struct RollbackARM9RAMHeader
+{
+    melonDS::u32 Magic;
+    melonDS::u32 Version;
+    melonDS::u32 RamSize;
+    melonDS::u32 NumFrames;
+    melonDS::u32 NumLagFrames;
+    melonDS::u32 LagFrameFlag;
+    melonDS::u32 Reserved;
+    melonDS::u64 Reserved64;
+};
+
 struct WireInput
 {
     melonDS::u32 Magic;
@@ -1167,6 +1188,7 @@ struct State
     bool RollbackEnabled = false;
     bool RollbackResimulate = false;
     bool RollbackRestoreProbe = false;
+    RollbackBackend RollbackBackendMode = RollbackBackend::Savestate;
     int RollbackWindow = 20;
     int RollbackCheckpointInterval = 1;
     int RollbackResimulateDelayFrames = 0;
@@ -1357,6 +1379,12 @@ bool EnvFlag(const char* name)
 {
     const char* value = std::getenv(name);
     return value && value[0] && std::strcmp(value, "0") != 0;
+}
+
+const char* EnvCString(const char* name, const char* fallback)
+{
+    const char* value = std::getenv(name);
+    return value && value[0] ? value : fallback;
 }
 
 int EnvInt(const char* name, int fallback)
@@ -2257,6 +2285,79 @@ bool ShouldSaveRollbackCheckpoint(melonDS::u32 frame)
     return (frame % static_cast<melonDS::u32>(G.RollbackCheckpointInterval)) == 0;
 }
 
+void InvalidateMainRAMJIT(melonDS::NDS* nds, melonDS::u32 len)
+{
+    if (!nds || len == 0)
+        return;
+    for (melonDS::u32 offset = 0; offset < len; offset += 0x1000)
+    {
+        const melonDS::u32 addr = kMainRAMBase + offset;
+        nds->JIT.CheckAndInvalidate<0, melonDS::ARMJIT_Memory::memregion_MainRAM>(addr);
+        nds->JIT.CheckAndInvalidate<1, melonDS::ARMJIT_Memory::memregion_MainRAM>(addr);
+    }
+}
+
+bool SaveRollbackCheckpointBuffer(melonDS::NDS* nds, std::vector<char>& buffer)
+{
+    if (!nds)
+        return false;
+
+    if (G.RollbackBackendMode == RollbackBackend::ARM9RAM)
+    {
+        if (!nds->MainRAM)
+            return false;
+        const melonDS::u32 len = std::min<melonDS::u32>(nds->MainRAMMask + 1, 0x400000);
+        RollbackARM9RAMHeader header = {};
+        header.Magic = kRollbackARM9RAMMagic;
+        header.Version = kRollbackARM9RAMVersion;
+        header.RamSize = len;
+        header.NumFrames = nds->NumFrames;
+        header.NumLagFrames = nds->NumLagFrames;
+        header.LagFrameFlag = nds->LagFrameFlag ? 1 : 0;
+        buffer.resize(sizeof(header) + len);
+        std::memcpy(buffer.data(), &header, sizeof(header));
+        std::memcpy(buffer.data() + sizeof(header), nds->MainRAM, len);
+        return true;
+    }
+
+    melonDS::Savestate state;
+    if (state.Error || !nds->DoSavestate(&state) || state.Error)
+        return false;
+    buffer.assign(static_cast<const char*>(state.Buffer()),
+        static_cast<const char*>(state.Buffer()) + state.Length());
+    return true;
+}
+
+bool RestoreRollbackCheckpointBuffer(melonDS::NDS* nds, const std::vector<char>& buffer)
+{
+    if (!nds)
+        return false;
+
+    if (G.RollbackBackendMode == RollbackBackend::ARM9RAM)
+    {
+        if (!nds->MainRAM || buffer.empty())
+            return false;
+        const melonDS::u32 len = std::min<melonDS::u32>(nds->MainRAMMask + 1, 0x400000);
+        if (buffer.size() != sizeof(RollbackARM9RAMHeader) + len)
+            return false;
+        RollbackARM9RAMHeader header = {};
+        std::memcpy(&header, buffer.data(), sizeof(header));
+        if (header.Magic != kRollbackARM9RAMMagic ||
+            header.Version != kRollbackARM9RAMVersion ||
+            header.RamSize != len)
+            return false;
+        std::memcpy(nds->MainRAM, buffer.data() + sizeof(header), len);
+        nds->NumFrames = header.NumFrames;
+        nds->NumLagFrames = header.NumLagFrames;
+        nds->LagFrameFlag = header.LagFrameFlag != 0;
+        InvalidateMainRAMJIT(nds, len);
+        return true;
+    }
+
+    melonDS::Savestate state(const_cast<char*>(buffer.data()), static_cast<melonDS::u32>(buffer.size()), false);
+    return !state.Error && nds->DoSavestate(&state) && !state.Error;
+}
+
 void SaveRollbackCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.RollbackEnabled || !G.InputNetplayOnly || !nds)
@@ -2270,16 +2371,14 @@ void SaveRollbackCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
     if (!ShouldSaveRollbackCheckpoint(frame))
         return;
 
-    melonDS::Savestate state;
-    if (state.Error || !nds->DoSavestate(&state) || state.Error)
+    std::vector<char> buffer;
+    if (!SaveRollbackCheckpointBuffer(nds, buffer))
     {
         if (G.InputNetplayTraceEnabled)
             std::printf("NSMB Rollback: failed to save checkpoint inst=%d frame=%u\n", instanceID, frame);
         return;
     }
 
-    std::vector<char> buffer(static_cast<const char*>(state.Buffer()),
-        static_cast<const char*>(state.Buffer()) + state.Length());
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         G.RollbackStates[frame] = std::move(buffer);
@@ -2295,12 +2394,10 @@ void SaveRollbackCheckpointNowLocked(melonDS::u32 frame, melonDS::NDS* nds, bool
     if (!force && !ShouldSaveRollbackCheckpoint(frame))
         return;
 
-    melonDS::Savestate state;
-    if (state.Error || !nds->DoSavestate(&state) || state.Error)
+    std::vector<char> buffer;
+    if (!SaveRollbackCheckpointBuffer(nds, buffer))
         return;
 
-    std::vector<char> buffer(static_cast<const char*>(state.Buffer()),
-        static_cast<const char*>(state.Buffer()) + state.Length());
     G.RollbackStates[frame] = std::move(buffer);
     G.RollbackCheckpointSaveCount++;
     PruneRollbackHistoryLocked(frame);
@@ -2336,8 +2433,7 @@ bool RestoreRollbackCheckpointForProbeIfNeeded(int instanceID, melonDS::u32 fram
         G.PendingRollbackFrame = kNoFrameLimit;
     }
 
-    melonDS::Savestate state(buffer.data(), static_cast<melonDS::u32>(buffer.size()), false);
-    if (state.Error || !nds->DoSavestate(&state) || state.Error)
+    if (!RestoreRollbackCheckpointBuffer(nds, buffer))
     {
         std::printf("NSMB Rollback: restore probe failed inst=%d restoreFrame=%u current=%u\n",
             instanceID,
@@ -6365,8 +6461,7 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
             it = G.RollbackStates.erase(it);
     }
 
-    melonDS::Savestate state(buffer.data(), static_cast<melonDS::u32>(buffer.size()), false);
-    if (state.Error || !nds->DoSavestate(&state) || state.Error)
+    if (!RestoreRollbackCheckpointBuffer(nds, buffer))
     {
         std::printf("NSMB Rollback: resim restore failed inst=%d restoreFrame=%u current=%u\n",
             instanceID,
@@ -9470,6 +9565,11 @@ void InitFromEnvironment()
     G.RollbackEnabled = EnvFlag("MELONDS_NSML_ROLLBACK");
     G.RollbackResimulate = EnvFlag("MELONDS_NSML_ROLLBACK_RESIMULATE");
     G.RollbackRestoreProbe = EnvFlag("MELONDS_NSML_ROLLBACK_RESTORE_PROBE");
+    const char* rollbackBackend = EnvCString("MELONDS_NSML_ROLLBACK_BACKEND", "savestate");
+    if (!std::strcmp(rollbackBackend, "arm9ram") || !std::strcmp(rollbackBackend, "ram"))
+        G.RollbackBackendMode = RollbackBackend::ARM9RAM;
+    else
+        G.RollbackBackendMode = RollbackBackend::Savestate;
     G.RollbackWindow = std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_WINDOW", 20), 1, 180);
     G.RollbackCheckpointInterval = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL", 1), 1, 30);
@@ -9841,7 +9941,7 @@ void InitFromEnvironment()
     }
 
     G.Ready = true;
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputDropModulo=%d inputDropOffset=%d rollback=%d rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputDropModulo=%d inputDropOffset=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -9878,6 +9978,7 @@ void InitFromEnvironment()
         G.InputDropModulo,
         G.InputDropOffset,
         G.RollbackEnabled ? 1 : 0,
+        G.RollbackBackendMode == RollbackBackend::ARM9RAM ? "arm9ram" : "savestate",
         G.RollbackWindow,
         G.RollbackCheckpointInterval,
         G.RollbackResimulateDelayFrames,

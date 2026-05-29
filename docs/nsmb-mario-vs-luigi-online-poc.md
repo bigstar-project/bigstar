@@ -1,8 +1,12 @@
 # NSMB Mario vs Luigi Online PoC
 
-## 現在の最優先事項: rollback方式の成立性調査
+## 現在の最優先事項: 低ディレイ方式を本線にしつつ軽量rollbackを調査
 
-WAN越しで入力遅延を小さくするには、現行の固定入力遅延/待ち方式だけでは限界がある。次の優先事項は、MvsLの入力同期をrollback形式に寄せられるかを調査・検証すること。
+手動確認では `InputDelayFrames=4` なら実用に届く可能性がある。現時点の本線は、低ディレイ方式を国内WAN向けに詰めること。
+
+一方で、高遅延・jitterの大きいネット環境では固定4フレーム遅延だけでは止まりやすいため、補助研究としてrollback方式も継続する。
+
+既存のrollbackはmelonDS丸ごとのsavestateを使うため、1 checkpointが約19MBあり、rollback時にカクつきが出る。`ARM9 Main RAM 4MB` だけを `memcpy` で保存/復元する軽量snapshot backendも試したが、CPU/タイマ/スケジューラ状態まで戻らないため、rollback後にmoving hazardなどのゲーム状態がhost/clientで分岐した。現時点では、正しさはsavestate backendのほうが上。
 
 外部資料と既存実装から整理したrollbackの必須条件:
 
@@ -14,6 +18,7 @@ WAN越しで入力遅延を小さくするには、現行の固定入力遅延/�
 2026-05-29時点で追加した調査用hook:
 
 - `MELONDS_NSML_ROLLBACK=1`: 入力netplay中にremote input未着でも停止せず、直近remote inputから予測して進めるprobe mode。
+- `MELONDS_NSML_ROLLBACK_BACKEND=savestate|arm9ram`: rollback checkpoint backend。初期値は従来どおり`savestate`。`arm9ram`はARM9 Main RAM最大4MBと公開フレームカウンタだけを保存/復元する実験用。軽いが正しさ不足のため実用候補ではない。
 - `MELONDS_NSML_ROLLBACK_WINDOW=<frames>`: in-memory savestate ringの保持フレーム数。初期値20。
 - `MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL=<frames>`: rollback checkpointの保存間隔。初期値1。intervalを広げると保持checkpoint数とsavestate保存回数を減らせるが、予測ミス時の再実行範囲は長くなる。
 - `MELONDS_NSML_ROLLBACK_RESIMULATE_DELAY_FRAMES=<frames>`: 予測ミスマッチ検出後、すぐ再実行せず指定フレームだけ待つ実験用debounce。初期値0。長くしすぎると一時差分が長く残る。
@@ -44,6 +49,8 @@ WAN越しで入力遅延を小さくするには、現行の固定入力遅延/�
 - `logs/codex-input-unreliable-bundle8-drop10-delay6-jitter4-2600-20260529`: 10%相当の入力packet dropでもbundle history 8で2600フレームgame-state比較通過。traceなしでは約43.7-44.7fps。
 - `logs/codex-input-unreliable-bundle8-drop3-delay6-jitter4-2600-20260529`: 3フレームに1回dropする強い条件でも2600フレームgame-state比較通過。
 - `logs/codex-input-unreliable-bundle8-drop10-long-6000-interval30-20260529`: unreliable bundle history 8、10%相当drop、送信遅延6 + jitter4、lead8、checkpoint interval 30で6000フレームgame-state比較通過。
+- `logs/codex-rollback-arm9ram-header-trace-1400-20260529`: `arm9ram` backendで4MB RAM + 40byteヘッダのcheckpoint保存/復元と短距離resimulateは動作。`NumFrames`/`NumLagFrames`/`LagFrameFlag`も復元し、frame counter driftは出ていない。
+- `logs/codex-rollback-arm9ram-header-delay6-jitter4-2600-20260529`: `arm9ram` backendは人工送信遅延6 + jitter4でframe 1290に不一致。trace付き再現では、rollback後にhost側のmoving hazardが進まず、client側だけ進む。ARM9 RAMだけではrollback状態として不完全。
 - 既存のmelonDS savestateは使えるが、1 checkpointが約19MBあり、毎フレーム保存は重い。低頻度checkpointと予測破棄で改善したが、快適なWAN対戦には、実プレイ時のtrace抑制、再実行中のcheckpoint保存削減、差分savestate、重要RAM限定snapshot、またはrollback window/intervalの自動調整が必要。
 
 ## 目的
@@ -138,27 +145,29 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 ## 次にやること
 
-1. 最優先: rollbackを「成立性probe」から「実用候補」へ寄せる。
-   - checkpoint interval 4/8/16はいずれも30フレームsettle比較を通過したため、次はtraceを切った実プレイ寄り設定でFPSを測る。
-   - 予測ミス後の古い予測入力破棄は有効。次は再実行中checkpoint保存が本当に必要な範囲を削り、rollbackなしbaselineとの差をさらに詰める。
-   - 現時点の実用候補設定は `InputDelayFrames=0`、`InputMaxFrameLead=8-12`、`RollbackCheckpointInterval=30`。人工送信遅延6+jitter4、送信遅延12+jitter4の両方で一時差分なし2600フレーム通過。
-   - WAN向け候補として unreliable bundle history 8 を追加。10%相当dropと3フレームに1回dropの両方で2600フレーム通過。
+1. 最優先: 低ディレイ方式を本線として、`InputDelayFrames=4` 前後で実用条件を詰める。
+   - 国内WAN向けの第一候補は `InputDelayFrames=4`、`InputMaxFrameLead=4`、unreliable bundle history 8。
+   - packet loss対策として unreliable bundle history 8 は維持する。10%相当dropと3フレームに1回dropの両方で2600フレーム通過済み。
+   - 次はtraceなし・実2PCまたはLAN分散で、FPSと操作感、remote input timeoutの有無を確認する。
+2. 高遅延・jitter向けの補助研究としてrollbackを続ける。
+   - savestate backendは正しさはあるが、1 checkpoint約19MBでrollback時にカクつく。
+   - `arm9ram` backendは4MB + 小ヘッダで軽いが、CPU/タイマ/スケジューラ状態を戻せないため、現時点では正しさ不足。実用候補からは外し、必要なら「完全savestateの差分化」または「core側に軽量checkpoint APIを作る」方向を検討する。
    - rollback時の一時差分は許容し、一定settle frames後に収束するかを見る検証を標準化する。
-2. 手動入力時のhost/client同期を、rollbackあり・なしの両方で比較する。
+3. 手動入力時のhost/client同期を、低ディレイ方式・rollback方式の両方で比較する。
    - 既存の固定入力遅延/待ち方式は同期確認用のbaselineとして残す。
    - rollback方式では `InputDelayFrames=0` でもカクつかず進むこと、後着入力で再収束すること、操作感が改善することを見る。
-3. true local1 + RNG固定 + VS限定stage-lock skip + ROM側wifi count + Net::localAid patchを本線として、長時間の死亡/復帰・勝敗・スター取得まで壊れないか確認する。
+4. true local1 + RNG固定 + VS限定stage-lock skip + ROM側wifi count + Net::localAid patchを本線として、長時間の死亡/復帰・勝敗・スター取得まで壊れないか確認する。
    - client local1カメラ、Big Star位置、localPlayerIDは自動チェックで守る。
    - 片方死亡中に相手プレイヤー・敵・ブロック・ステージ進行が止まらないことは、`-CheckNoPlayerUpdateLock` と `-CheckMovingHazardProgressDuringDeath` で継続確認する。
    - 土管復帰前後の表示は `-CheckVsPipeRespawnVisibility` で継続確認する。
-4. traceを減らした実用寄り設定、または2PC分散でFPSが60fpsに近づくか確認する。
-5. Luigi側操作の検証を増やす。
+5. traceを減らした実用寄り設定、または2PC分散でFPSが60fpsに近づくか確認する。
+6. Luigi側操作の検証を増やす。
    - カメラ追従
    - 死亡/復帰
    - 勝敗判定は結果画面到達とhost/clientのwin/lose表示まで、通常条件・遅延/jitter条件・localhost split条件で自動確認済み。次はより自由な入力列と長時間検証へ広げる。
-6. 8コインアイテム、2個目以降のBig Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
-7. 残るruntime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
-8. 実2PCまたは同一LANで、host/clientを別マシン相当の起動コマンドに分けて検証する。
+7. 8コインアイテム、2個目以降のBig Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
+8. 残るruntime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
+9. 実2PCまたは同一LANで、host/clientを別マシン相当の起動コマンドに分けて検証する。
 
 localhost split検証:
 

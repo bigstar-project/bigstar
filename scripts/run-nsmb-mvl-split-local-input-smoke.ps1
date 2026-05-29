@@ -16,6 +16,7 @@ param(
     [int]$InputDropModulo = 0,
     [int]$InputDropOffset = 0,
     [switch]$Rollback,
+    [string]$RollbackBackend = "",
     [int]$RollbackWindow = 20,
     [int]$RollbackCheckpointInterval = 1,
     [int]$RollbackResimulateDelayFrames = 0,
@@ -95,6 +96,9 @@ if ($Rollback) {
         "-RollbackCheckpointInterval", "$RollbackCheckpointInterval",
         "-RollbackResimulateDelayFrames", "$RollbackResimulateDelayFrames"
     )
+    if ($RollbackBackend -ne "") {
+        $common += @("-RollbackBackend", "$RollbackBackend")
+    }
     if ($RollbackResimulate) {
         $common += "-RollbackResimulate"
     }

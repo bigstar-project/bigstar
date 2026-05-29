@@ -9,6 +9,7 @@ param(
     [int]$InputBundleHistory = 0,
     [switch]$LowLatencyRollback,
     [switch]$Rollback,
+    [string]$RollbackBackend = "",
     [int]$RollbackWindow = 120,
     [int]$RollbackCheckpointInterval = 30,
     [int]$RollbackResimulateDelayFrames = 0,
@@ -68,6 +69,9 @@ if ($Rollback) {
         "-RollbackCheckpointInterval", "$RollbackCheckpointInterval",
         "-RollbackResimulateDelayFrames", "$RollbackResimulateDelayFrames"
     )
+    if ($RollbackBackend -ne "") {
+        $common += @("-RollbackBackend", "$RollbackBackend")
+    }
     if ($RollbackResimulate) {
         $common += "-RollbackResimulate"
     }
@@ -128,7 +132,8 @@ Write-Host "client wrapper pid=$($clientProc.Id) log=$clientLog"
 Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
 Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames"
 if ($Rollback) {
-    Write-Host "rollback enabled window=$RollbackWindow checkpointInterval=$RollbackCheckpointInterval resimDelay=$RollbackResimulateDelayFrames resimulate=$RollbackResimulate"
+    $backendLabel = if ($RollbackBackend -ne "") { $RollbackBackend } else { "savestate" }
+    Write-Host "rollback enabled backend=$backendLabel window=$RollbackWindow checkpointInterval=$RollbackCheckpointInterval resimDelay=$RollbackResimulateDelayFrames resimulate=$RollbackResimulate"
 }
 if ($InputUnreliable) {
     Write-Host "input unreliable bundleHistory=$InputBundleHistory"
