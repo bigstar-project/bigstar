@@ -4,6 +4,10 @@
 
 手動確認では `InputDelayFrames=4` なら実用に届く可能性がある。現時点の本線は、低ディレイ方式を国内WAN向けに詰めること。
 
+`InputDelayFrames=4`、`InputMaxFrameLead=4`、unreliable bundle history 8 を `-LowDelayWan` プリセットとして追加した。traceなし・JIT有効の自動検証でFPS、remote input timeout、host/client同期を確認済み。
+
+補足: `InputMaxFrameLead=4` の送信遅延3F+jitter1F検証で一度timeoutを観測したが、その実行中に手動操作が入った可能性があるため無効扱い。clean再実行では同条件で2600フレーム同期比較を通過している。
+
 一方で、高遅延・jitterの大きいネット環境では固定4フレーム遅延だけでは止まりやすいため、補助研究としてrollback方式も継続する。
 
 既存のrollbackはmelonDS丸ごとのsavestateを使うため、1 checkpointが約19MBあり、rollback時にカクつきが出る。`ARM9 Main RAM 4MB` だけを `memcpy` で保存/復元する軽量snapshot backendも試したが、CPU/タイマ/スケジューラ状態まで戻らないため、rollback後にmoving hazardなどのゲーム状態がhost/clientで分岐した。現時点では、正しさはsavestate backendのほうが上。
@@ -53,6 +57,11 @@ rollback方式の比較、実装難度、後で再開する場合の候補案は
 - `logs/codex-input-unreliable-bundle8-drop10-long-6000-interval30-20260529`: unreliable bundle history 8、10%相当drop、送信遅延6 + jitter4、lead8、checkpoint interval 30で6000フレームgame-state比較通過。
 - `logs/codex-rollback-arm9ram-header-trace-1400-20260529`: `arm9ram` backendで4MB RAM + 40byteヘッダのcheckpoint保存/復元と短距離resimulateは動作。`NumFrames`/`NumLagFrames`/`LagFrameFlag`も復元し、frame counter driftは出ていない。
 - `logs/codex-rollback-arm9ram-header-delay6-jitter4-2600-20260529`: `arm9ram` backendは人工送信遅延6 + jitter4でframe 1290に不一致。trace付き再現では、rollback後にhost側のmoving hazardが進まず、client側だけ進む。ARM9 RAMだけではrollback状態として不完全。
+- `logs/codex-lowdelaywan-final-input-2600-20260529`: `-LowDelayWan` プリセット、JIT有効、2600フレームのhost/client別入力同期比較を通過。
+- `logs/codex-lowdelaywan-final-result-6000-20260529`: `-LowDelayWan` プリセットで結果画面到達6000フレームを通過。host/client両方の結果画面スクリーンショットprobeも通過。
+- `logs/codex-lowdelaywan-lead8-perf-6000-20260529` と `logs/codex-lowdelaywan-input-perf-6000-20260529`: traceなし性能は同一PC 2プロセスで約45-50fps。実2PC分散なら改善余地あり。
+- `logs/codex-recheck-delay4-lead4-send3-jitter1-2600-20260529`: `InputDelayFrames=4`、`InputMaxFrameLead=4`、unreliable bundle history 8、人工送信遅延3F+jitter1Fで2600フレーム同期比較を通過。
+- `logs/codex-lowdelaywan-final-drop10-2600-20260529` / `logs/codex-lowdelaywan-final-drop3-2600-20260529`: `-LowDelayWan` プリセットで10%相当dropと3フレームに1回dropの両方を通過。
 - 既存のmelonDS savestateは使えるが、1 checkpointが約19MBあり、毎フレーム保存は重い。低頻度checkpointと予測破棄で改善したが、快適なWAN対戦には、実プレイ時のtrace抑制、再実行中のcheckpoint保存削減、差分savestate、重要RAM限定snapshot、またはrollback window/intervalの自動調整が必要。
 
 ## 目的
@@ -148,9 +157,9 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 ## 次にやること
 
 1. 最優先: 低ディレイ方式を本線として、`InputDelayFrames=4` 前後で実用条件を詰める。
-   - 国内WAN向けの第一候補は `InputDelayFrames=4`、`InputMaxFrameLead=4`、unreliable bundle history 8。
-   - packet loss対策として unreliable bundle history 8 は維持する。10%相当dropと3フレームに1回dropの両方で2600フレーム通過済み。
-   - 次はtraceなし・実2PCまたはLAN分散で、FPSと操作感、remote input timeoutの有無を確認する。
+   - 国内WAN向けの第一候補は `-LowDelayWan`: `InputDelayFrames=4`、`InputMaxFrameLead=4`、unreliable bundle history 8。
+   - localhost自動検証では、別入力2600フレーム、結果画面到達6000フレーム、10%相当drop、3フレームに1回drop、人工送信遅延3F+jitter1Fを通過済み。
+   - 次は実2PCまたはLAN分散で、FPSと操作感、remote input timeoutの有無を確認する。
 2. 高遅延・jitter向けの補助研究としてrollbackを続ける。
    - savestate backendは正しさはあるが、1 checkpoint約19MBでrollback時にカクつく。
    - `arm9ram` backendは4MB + 小ヘッダで軽いが、CPU/タイマ/スケジューラ状態を戻せないため、現時点では正しさ不足。実用候補からは外し、必要なら「完全savestateの差分化」または「core側に軽量checkpoint APIを作る」方向を検討する。
@@ -186,6 +195,17 @@ localhost split検証:
 .\scripts\run-nsmb-mvl-manual-local.ps1 `
   -LogDir logs\manual-local
 ```
+
+本線の低ディレイWAN候補で試す場合:
+
+```powershell
+.\scripts\run-nsmb-mvl-manual-local.ps1 `
+  -AllowJit `
+  -LowDelayWan `
+  -LogDir logs\manual-local-lowdelaywan
+```
+
+`-LowDelayWan` は `InputDelayFrames=4`、`InputMaxFrameLead=4`、`InputUnreliable`、`InputBundleHistory=8`、人工送信遅延なしをまとめて有効にする。
 
 低遅延rollback候補設定で試す場合:
 

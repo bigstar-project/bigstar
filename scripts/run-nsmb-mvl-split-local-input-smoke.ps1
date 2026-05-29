@@ -13,6 +13,7 @@ param(
     [int]$InputSendJitterFrames = 0,
     [switch]$InputUnreliable,
     [int]$InputBundleHistory = 0,
+    [switch]$LowDelayWan,
     [int]$InputDropModulo = 0,
     [int]$InputDropOffset = 0,
     [switch]$Rollback,
@@ -34,6 +35,15 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($LowDelayWan) {
+    $InputDelayFrames = 4
+    $InputMaxFrameLead = 4
+    $InputSendDelayFrames = 0
+    $InputSendJitterFrames = 0
+    $InputUnreliable = $true
+    $InputBundleHistory = 8
+}
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $smokeScript = Join-Path $PSScriptRoot "run-nsmb-mvl-lan-route-smoke.ps1"

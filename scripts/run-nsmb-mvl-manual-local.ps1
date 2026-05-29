@@ -7,6 +7,7 @@ param(
     [int]$InputSendJitterFrames = 0,
     [switch]$InputUnreliable,
     [int]$InputBundleHistory = 0,
+    [switch]$LowDelayWan,
     [switch]$LowLatencyRollback,
     [switch]$Rollback,
     [string]$RollbackBackend = "",
@@ -24,6 +25,15 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($LowDelayWan) {
+    $InputDelayFrames = 4
+    $InputMaxFrameLead = 4
+    $InputSendDelayFrames = 0
+    $InputSendJitterFrames = 0
+    $InputUnreliable = $true
+    $InputBundleHistory = 8
+}
 
 if ($LowLatencyRollback) {
     $InputDelayFrames = 0

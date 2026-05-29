@@ -9,6 +9,9 @@ param(
     [int]$InputMaxFrameLead = 2,
     [int]$InputSendDelayFrames = 8,
     [int]$InputSendJitterFrames = 4,
+    [switch]$InputUnreliable,
+    [int]$InputBundleHistory = 0,
+    [switch]$LowDelayWan,
     [int]$ScreenshotInterval = 6000,
     [int]$GameStateTraceInterval = 120,
     [int]$HostStartupDelayMs = 1200,
@@ -16,6 +19,15 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($LowDelayWan) {
+    $InputDelayFrames = 4
+    $InputMaxFrameLead = 4
+    $InputSendDelayFrames = 0
+    $InputSendJitterFrames = 0
+    $InputUnreliable = $true
+    $InputBundleHistory = 8
+}
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $smokeScript = Join-Path $PSScriptRoot "run-nsmb-mvl-lan-route-smoke.ps1"
@@ -52,6 +64,9 @@ $common = @(
     "-RequireResultScene",
     "-RequireNetLocalAidStartFrame", "900"
 )
+if ($InputUnreliable) {
+    $common += @("-InputUnreliable", "-InputBundleHistory", "$InputBundleHistory")
+}
 
 $hostArgs = @(
     "-NoProfile",
