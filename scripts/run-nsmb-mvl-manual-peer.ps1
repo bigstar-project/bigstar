@@ -30,47 +30,40 @@ if (-not $InputUnreliable) {
     $InputUnreliable = $true
 }
 
-$argsList = @(
-    "-RunRole", $Role,
-    "-Peer", $Peer,
-    "-Frames", "$Frames",
-    "-WaitTimeoutMs", "$WaitTimeoutMs",
-    "-Exe", $Exe,
-    "-Rom", "roms\nsmb-us.nds",
-    "-InputScript", $InputScript,
-    "-ScreenshotInterval", "0",
-    "-NoHashLog",
-    "-SkipMvlStateCheck",
-    "-SkipGameplayActorCheck",
-    "-InputNetplay",
-    "-InputDelayFrames", "$InputDelayFrames",
-    "-InputMaxFrameLead", "$InputMaxFrameLead",
-    "-PacketBridgeJitHelperPatch",
-    "-PacketBridgeJitHelperPatchFrame", "900",
-    "-PacketBridgeStartFrame", "900",
-    "-LogDir", $LogDir
-)
+$params = @{
+    RunRole = $Role
+    Peer = $Peer
+    Frames = $Frames
+    WaitTimeoutMs = $WaitTimeoutMs
+    Exe = $Exe
+    Rom = "roms\nsmb-us.nds"
+    InputScript = $InputScript
+    ScreenshotInterval = 0
+    NoHashLog = $true
+    SkipMvlStateCheck = $true
+    SkipGameplayActorCheck = $true
+    InputNetplay = $true
+    InputDelayFrames = $InputDelayFrames
+    InputMaxFrameLead = $InputMaxFrameLead
+    PacketBridgeJitHelperPatch = $true
+    PacketBridgeJitHelperPatchFrame = 900
+    PacketBridgeStartFrame = 900
+    LogDir = $LogDir
+}
 
 if ($Role -eq "host") {
-    $argsList += @(
-        "-HostRom", $HostRom,
-        "-RequireHostLocalPlayerID", "0",
-        "-RequireHostNetLocalAid", "0"
-    )
+    $params.HostRom = $HostRom
 } else {
-    $argsList += @(
-        "-ClientRom", $ClientRom,
-        "-RequireClientLocalPlayerID", "1",
-        "-RequireClientNetLocalAid", "1"
-    )
+    $params.ClientRom = $ClientRom
 }
 
 if (-not $NoJit) {
-    $argsList += "-AllowJit"
+    $params.AllowJit = $true
 }
 
 if ($InputUnreliable) {
-    $argsList += @("-InputUnreliable", "-InputBundleHistory", "$InputBundleHistory")
+    $params.InputUnreliable = $true
+    $params.InputBundleHistory = $InputBundleHistory
 }
 
 Write-Host "Starting NSMB MvL peer session: role=$Role peer=$Peer"
@@ -80,7 +73,7 @@ Write-Host "Host controls Mario. Client controls Luigi."
 
 Push-Location $repoRoot
 try {
-    & $smokeScript @argsList
+    & $smokeScript @params
 } finally {
     Pop-Location
 }
