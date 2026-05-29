@@ -11,6 +11,10 @@ param(
     [switch]$InputNetplayTrace,
     [int]$InputSendDelayFrames = 0,
     [int]$InputSendJitterFrames = 0,
+    [switch]$InputUnreliable,
+    [int]$InputBundleHistory = 0,
+    [int]$InputDropModulo = 0,
+    [int]$InputDropOffset = 0,
     [switch]$Rollback,
     [int]$RollbackWindow = 20,
     [int]$RollbackCheckpointInterval = 1,
@@ -77,6 +81,12 @@ if ($NoAudioSync) {
 }
 if ($InputNetplayTrace) {
     $common += "-InputNetplayTrace"
+}
+if ($InputUnreliable) {
+    $common += @("-InputUnreliable", "-InputBundleHistory", "$InputBundleHistory")
+}
+if ($InputDropModulo -gt 0) {
+    $common += @("-InputDropModulo", "$InputDropModulo", "-InputDropOffset", "$InputDropOffset")
 }
 if ($Rollback) {
     $common += @(

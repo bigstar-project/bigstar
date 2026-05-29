@@ -224,6 +224,27 @@ struct WireInput
 
 static_assert(sizeof(WireInput) == 24);
 
+struct WireInputBundleHeader
+{
+    melonDS::u32 Magic;
+    melonDS::u32 Version;
+    melonDS::u32 Kind;
+    melonDS::u32 Count;
+};
+
+struct WireInputBundleEntry
+{
+    melonDS::u32 Frame;
+    melonDS::u32 KeyMask;
+    melonDS::u16 TouchX;
+    melonDS::u16 TouchY;
+    melonDS::u8 Touching;
+    melonDS::u8 Reserved[3];
+};
+
+static_assert(sizeof(WireInputBundleHeader) == 16);
+static_assert(sizeof(WireInputBundleEntry) == 16);
+
 struct WireSeed
 {
     melonDS::u32 Magic;
@@ -235,6 +256,7 @@ struct WireSeed
 constexpr melonDS::u32 kWireKindSeed = 0x44454553; // "SEED", little endian
 constexpr melonDS::u32 kWireKindState = 0x54415453; // "STAT", little endian
 constexpr melonDS::u32 kWireKindPacket = 0x4B434150; // "PACK", little endian
+constexpr melonDS::u32 kWireKindInputBundle = 0x42504E49; // "INPB", little endian
 
 static_assert(sizeof(WireSeed) == 16);
 
@@ -262,7 +284,8 @@ struct DelayedWireInput
 {
     melonDS::u32 ReleaseFrame = 0;
     std::chrono::steady_clock::time_point ReleaseTime {};
-    WireInput Packet {};
+    std::vector<char> Payload {};
+    melonDS::u32 Flags = ENET_PACKET_FLAG_RELIABLE;
 };
 
 struct WireGameState
@@ -943,6 +966,10 @@ struct State
     int PacketBridgeSendJitterFrames = 0;
     int InputSendDelayFrames = 0;
     int InputSendJitterFrames = 0;
+    bool InputUnreliable = false;
+    int InputBundleHistory = 0;
+    int InputDropModulo = 0;
+    int InputDropOffset = 0;
     std::map<melonDS::u32, InputState> PacketBridgePacketInputs;
     std::vector<DelayedWireNSMLPacket> DelayedNSMLPackets;
     std::vector<DelayedWireInput> DelayedInputs;
@@ -1712,6 +1739,67 @@ InputState ApplyScriptRemotePacketInputScript(int instanceID, melonDS::u32 frame
 
 void FlushDelayedInputsLocked(melonDS::u32 frame);
 
+void StoreRemoteInputLocked(melonDS::u32 frame, const InputState& receivedInput, melonDS::u32 localFrame)
+{
+    if (G.RollbackEnabled)
+    {
+        auto predicted = G.PredictedRemoteInputs.find(frame);
+        if (predicted != G.PredictedRemoteInputs.end()
+            && !InputsEqual(predicted->second, receivedInput))
+        {
+            const InputState predictedInput = predicted->second;
+            G.RollbackMismatchCount++;
+            const melonDS::u32 observedFrame = localFrame == kNoFrameLimit
+                ? frame
+                : localFrame;
+            if (G.PendingRollbackFrame == kNoFrameLimit
+                || frame < G.PendingRollbackFrame)
+            {
+                G.PendingRollbackFrame = frame;
+                G.PendingRollbackObservedFrame = observedFrame;
+            }
+            else if (G.PendingRollbackObservedFrame == kNoFrameLimit)
+            {
+                G.PendingRollbackObservedFrame = observedFrame;
+            }
+            G.PredictedRemoteInputs.erase(G.PredictedRemoteInputs.lower_bound(frame),
+                G.PredictedRemoteInputs.end());
+            if (G.InputNetplayTraceEnabled)
+            {
+                std::printf(
+                    "NSMB Rollback: prediction mismatch frame=%u predicted={keys=0x%03X touch=%d x=%u y=%u} actual={keys=0x%03X touch=%d x=%u y=%u} pending=%u mismatches=%u\n",
+                    frame,
+                    predictedInput.KeyMask,
+                    predictedInput.Touching ? 1 : 0,
+                    predictedInput.TouchX,
+                    predictedInput.TouchY,
+                    receivedInput.KeyMask,
+                    receivedInput.Touching ? 1 : 0,
+                    receivedInput.TouchX,
+                    receivedInput.TouchY,
+                    G.PendingRollbackFrame,
+                    G.RollbackMismatchCount);
+                std::fflush(stdout);
+            }
+        }
+        G.LastConfirmedRemoteInput = receivedInput;
+        G.LastConfirmedRemoteInputValid = true;
+    }
+    G.RemoteInputs[frame] = receivedInput;
+    if (G.LastReceivedInputFrame == kNoFrameLimit || frame > G.LastReceivedInputFrame)
+        G.LastReceivedInputFrame = frame;
+    if (G.InputTraceEnabled
+        && frame != G.LastTracedReceivedInputFrame
+        && (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
+    {
+        G.LastTracedReceivedInputFrame = frame;
+        std::printf("NSMB PoC: recv input frame=%u keys=0x%03X remoteQueue=%zu\n",
+            frame,
+            receivedInput.KeyMask,
+            G.RemoteInputs.size());
+    }
+}
+
 void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kNoFrameLimit)
 {
     if (!G.Host) return;
@@ -1746,61 +1834,33 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                         packet.TouchX,
                         packet.TouchY,
                     };
-                    if (G.RollbackEnabled)
+                    StoreRemoteInputLocked(packet.Frame, receivedInput, localFrame);
+                }
+            }
+            else if (event.packet->dataLength > sizeof(WireSeed))
+            {
+                WireInputBundleHeader header;
+                std::memcpy(&header, event.packet->data, sizeof(header));
+                if (header.Magic == kMagic
+                    && header.Version == kVersion
+                    && header.Kind == kWireKindInputBundle
+                    && header.Count > 0
+                    && header.Count <= 32
+                    && event.packet->dataLength == sizeof(WireInputBundleHeader)
+                        + sizeof(WireInputBundleEntry) * header.Count)
+                {
+                    const auto* entries = reinterpret_cast<const WireInputBundleEntry*>(
+                        event.packet->data + sizeof(WireInputBundleHeader));
+                    for (melonDS::u32 entryIndex = 0; entryIndex < header.Count; entryIndex++)
                     {
-                        auto predicted = G.PredictedRemoteInputs.find(packet.Frame);
-                        if (predicted != G.PredictedRemoteInputs.end()
-                            && !InputsEqual(predicted->second, receivedInput))
-                        {
-                            const InputState predictedInput = predicted->second;
-                            G.RollbackMismatchCount++;
-                            const melonDS::u32 observedFrame = localFrame == kNoFrameLimit
-                                ? packet.Frame
-                                : localFrame;
-                            if (G.PendingRollbackFrame == kNoFrameLimit
-                                || packet.Frame < G.PendingRollbackFrame)
-                            {
-                                G.PendingRollbackFrame = packet.Frame;
-                                G.PendingRollbackObservedFrame = observedFrame;
-                            }
-                            else if (G.PendingRollbackObservedFrame == kNoFrameLimit)
-                            {
-                                G.PendingRollbackObservedFrame = observedFrame;
-                            }
-                            G.PredictedRemoteInputs.erase(G.PredictedRemoteInputs.lower_bound(packet.Frame),
-                                G.PredictedRemoteInputs.end());
-                            if (G.InputNetplayTraceEnabled)
-                            {
-                                std::printf(
-                                    "NSMB Rollback: prediction mismatch frame=%u predicted={keys=0x%03X touch=%d x=%u y=%u} actual={keys=0x%03X touch=%d x=%u y=%u} pending=%u mismatches=%u\n",
-                                    packet.Frame,
-                                    predictedInput.KeyMask,
-                                    predictedInput.Touching ? 1 : 0,
-                                    predictedInput.TouchX,
-                                    predictedInput.TouchY,
-                                    receivedInput.KeyMask,
-                                    receivedInput.Touching ? 1 : 0,
-                                    receivedInput.TouchX,
-                                    receivedInput.TouchY,
-                                    G.PendingRollbackFrame,
-                                    G.RollbackMismatchCount);
-                                std::fflush(stdout);
-                            }
-                        }
-                        G.LastConfirmedRemoteInput = receivedInput;
-                        G.LastConfirmedRemoteInputValid = true;
-                    }
-                    G.RemoteInputs[packet.Frame] = receivedInput;
-                    G.LastReceivedInputFrame = packet.Frame;
-                    if (G.InputTraceEnabled
-                        && packet.Frame != G.LastTracedReceivedInputFrame
-                        && (G.InputTraceInterval <= 1 || (packet.Frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
-                    {
-                        G.LastTracedReceivedInputFrame = packet.Frame;
-                        std::printf("NSMB PoC: recv input frame=%u keys=0x%03X remoteQueue=%zu\n",
-                            packet.Frame,
-                            packet.KeyMask,
-                            G.RemoteInputs.size());
+                        const WireInputBundleEntry& entry = entries[entryIndex];
+                        const InputState receivedInput {
+                            entry.KeyMask,
+                            entry.Touching != 0,
+                            entry.TouchX,
+                            entry.TouchY,
+                        };
+                        StoreRemoteInputLocked(entry.Frame, receivedInput, localFrame);
                     }
                 }
             }
@@ -1992,15 +2052,20 @@ void SendMatchSeedLocked()
     std::printf("NSMB PoC: sent match seed 0x%08X\n", G.MatchSeed);
 }
 
-void SendInputWireNowLocked(const WireInput& packet)
+void SendInputPayloadNowLocked(const void* data, size_t size, melonDS::u32 flags)
 {
     if (!G.Peer) return;
 
-    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE);
+    ENetPacket* enetPacket = enet_packet_create(data, size, flags);
     if (!enetPacket) return;
 
     enet_peer_send(G.Peer, 0, enetPacket);
     enet_host_flush(G.Host);
+}
+
+void SendInputWireNowLocked(const WireInput& packet)
+{
+    SendInputPayloadNowLocked(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE);
 }
 
 void FlushDelayedInputsLocked(melonDS::u32 frame)
@@ -2012,7 +2077,7 @@ void FlushDelayedInputsLocked(melonDS::u32 frame)
     {
         if (it->ReleaseFrame <= frame || std::chrono::steady_clock::now() >= it->ReleaseTime)
         {
-            SendInputWireNowLocked(it->Packet);
+            SendInputPayloadNowLocked(it->Payload.data(), it->Payload.size(), it->Flags);
             it = G.DelayedInputs.erase(it);
         }
         else
@@ -2022,11 +2087,60 @@ void FlushDelayedInputsLocked(melonDS::u32 frame)
     }
 }
 
+std::vector<char> BuildInputBundlePayloadLocked(melonDS::u32 frame, const InputState& input)
+{
+    const int history = std::clamp(G.InputBundleHistory, 0, 31);
+    std::vector<WireInputBundleEntry> entries;
+    entries.reserve(static_cast<size_t>(history + 1));
+    for (int offset = history; offset >= 0; offset--)
+    {
+        if (static_cast<melonDS::u32>(offset) > frame)
+            continue;
+        const melonDS::u32 entryFrame = frame - static_cast<melonDS::u32>(offset);
+        InputState entryInput = input;
+        auto existing = G.LocalInputs.find(entryFrame);
+        if (existing != G.LocalInputs.end())
+            entryInput = existing->second;
+        entries.push_back({
+            entryFrame,
+            entryInput.KeyMask,
+            entryInput.TouchX,
+            entryInput.TouchY,
+            entryInput.Touching ? static_cast<melonDS::u8>(1) : static_cast<melonDS::u8>(0),
+            {},
+        });
+    }
+
+    WireInputBundleHeader header {};
+    header.Magic = kMagic;
+    header.Version = kVersion;
+    header.Kind = kWireKindInputBundle;
+    header.Count = static_cast<melonDS::u32>(entries.size());
+
+    std::vector<char> payload(sizeof(header) + entries.size() * sizeof(WireInputBundleEntry));
+    std::memcpy(payload.data(), &header, sizeof(header));
+    if (!entries.empty())
+        std::memcpy(payload.data() + sizeof(header), entries.data(), entries.size() * sizeof(WireInputBundleEntry));
+    return payload;
+}
+
 void SendInputLocked(melonDS::u32 frame, const InputState& input)
 {
     if (!G.Peer) return;
 
     SendMatchSeedLocked();
+
+    if (G.InputDropModulo > 0
+        && (frame % static_cast<melonDS::u32>(G.InputDropModulo))
+            == static_cast<melonDS::u32>(G.InputDropOffset))
+    {
+        if (G.InputNetplayTraceEnabled)
+            std::printf("NSMB InputNetplay: dropped local input packet frame=%u modulo=%d offset=%d\n",
+                frame,
+                G.InputDropModulo,
+                G.InputDropOffset);
+        return;
+    }
 
     WireInput packet {};
     packet.Magic = kMagic;
@@ -2036,6 +2150,12 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
     packet.TouchX = input.TouchX;
     packet.TouchY = input.TouchY;
     packet.Touching = input.Touching ? 1 : 0;
+
+    const bool sendBundle = G.InputUnreliable && G.InputBundleHistory > 0;
+    const std::vector<char> bundlePayload = sendBundle
+        ? BuildInputBundlePayloadLocked(frame, input)
+        : std::vector<char> {};
+    const melonDS::u32 sendFlags = sendBundle ? ENET_PACKET_FLAG_UNSEQUENCED : ENET_PACKET_FLAG_RELIABLE;
 
     const int jitterFrames = G.InputSendJitterFrames > 0
         ? static_cast<int>(frame % static_cast<melonDS::u32>(G.InputSendJitterFrames + 1))
@@ -2047,12 +2167,19 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
             frame + static_cast<melonDS::u32>(sendDelayFrames),
             std::chrono::steady_clock::now() + std::chrono::milliseconds(
                 (sendDelayFrames * 1000 + 59) / 60),
-            packet,
+            sendBundle
+                ? bundlePayload
+                : std::vector<char>(reinterpret_cast<const char*>(&packet),
+                    reinterpret_cast<const char*>(&packet) + sizeof(packet)),
+            sendFlags,
         });
     }
     else
     {
-        SendInputWireNowLocked(packet);
+        if (sendBundle)
+            SendInputPayloadNowLocked(bundlePayload.data(), bundlePayload.size(), sendFlags);
+        else
+            SendInputWireNowLocked(packet);
     }
 
     if (G.InputTraceEnabled
@@ -9027,6 +9154,13 @@ void InitFromEnvironment()
         0, EnvInt("MELONDS_NSML_INPUT_SEND_DELAY_FRAMES", 0));
     G.InputSendJitterFrames = std::max(
         0, EnvInt("MELONDS_NSML_INPUT_SEND_JITTER_FRAMES", 0));
+    G.InputUnreliable = EnvFlag("MELONDS_NSML_INPUT_UNRELIABLE");
+    G.InputBundleHistory = std::clamp(
+        EnvInt("MELONDS_NSML_INPUT_BUNDLE_HISTORY", 0), 0, 31);
+    G.InputDropModulo = std::max(0, EnvInt("MELONDS_NSML_INPUT_DROP_MODULO", 0));
+    G.InputDropOffset = std::max(0, EnvInt("MELONDS_NSML_INPUT_DROP_OFFSET", 0));
+    if (G.InputDropModulo > 0)
+        G.InputDropOffset %= G.InputDropModulo;
     G.InputNetplayMaxFrameLead =
         EnvInt("MELONDS_NSML_INPUT_MAX_FRAME_LEAD", G.InputNetplayOnly ? 2 : -1);
     G.DirectMvlBootEnabled = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT");
@@ -9707,7 +9841,7 @@ void InitFromEnvironment()
     }
 
     G.Ready = true;
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d rollback=%d rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputDropModulo=%d inputDropOffset=%d rollback=%d rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -9739,6 +9873,10 @@ void InitFromEnvironment()
         G.InputNetplayOnly ? 1 : 0,
         G.InputNetplayTraceEnabled ? 1 : 0,
         G.InputNetplayMaxFrameLead,
+        G.InputUnreliable ? 1 : 0,
+        G.InputBundleHistory,
+        G.InputDropModulo,
+        G.InputDropOffset,
         G.RollbackEnabled ? 1 : 0,
         G.RollbackWindow,
         G.RollbackCheckpointInterval,

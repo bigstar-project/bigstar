@@ -17,6 +17,8 @@ WAN越しで入力遅延を小さくするには、現行の固定入力遅延/�
 - `MELONDS_NSML_ROLLBACK_WINDOW=<frames>`: in-memory savestate ringの保持フレーム数。初期値20。
 - `MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL=<frames>`: rollback checkpointの保存間隔。初期値1。intervalを広げると保持checkpoint数とsavestate保存回数を減らせるが、予測ミス時の再実行範囲は長くなる。
 - `MELONDS_NSML_ROLLBACK_RESIMULATE_DELAY_FRAMES=<frames>`: 予測ミスマッチ検出後、すぐ再実行せず指定フレームだけ待つ実験用debounce。初期値0。長くしすぎると一時差分が長く残る。
+- `MELONDS_NSML_INPUT_UNRELIABLE=1` + `MELONDS_NSML_INPUT_BUNDLE_HISTORY=<frames>`: 入力packetをunreliable unsequencedで送り、直近Nフレームの入力をbundleとして重複送信する実験用WAN設定。
+- `MELONDS_NSML_INPUT_DROP_MODULO=<n>` / `MELONDS_NSML_INPUT_DROP_OFFSET=<n>`: 入力packetを意図的に間引くdrop耐性検証用。
 - `MELONDS_NSML_ROLLBACK_RESTORE_PROBE=1`: 予測ミスマッチ時に該当フレームのcheckpointを復元できるかだけを試す診断用。
 - `MELONDS_NSML_ROLLBACK_RESIMULATE=1`: 予測ミスマッチ時にcheckpointへ戻り、保存済みlocal/remote入力履歴で現在フレームまで内部再実行する診断用。
 
@@ -38,6 +40,9 @@ WAN越しで入力遅延を小さくするには、現行の固定入力遅延/�
 - `logs/codex-rollback-prune-lead8-delay6-interval30-perf-2600-20260529`: 同条件・game-state traceなしではhost約44.6fps / client約45.7fps。rollbackなしbaselineとの差は約4-5fpsまで縮小。
 - `logs/codex-rollback-prune-lead8-delay6-jitter4-interval30-2600-20260529`: 送信遅延6 + jitter4、lead8、checkpoint interval 30で2600フレームgame-state比較通過。一時差分なし。traceなしでは約42.9-43.8fps。
 - `logs/codex-rollback-prune-lead12-delay12-jitter4-interval30-2600-20260529`: 送信遅延12 + jitter4、lead12、checkpoint interval 30で2600フレームgame-state比較通過。一時差分なし。traceなしでは約43.9-45.0fps。
+- `logs/codex-input-unreliable-bundle8-delay6-jitter4-2600-20260529`: unreliable bundle history 8、送信遅延6 + jitter4、lead8で2600フレームgame-state比較通過。
+- `logs/codex-input-unreliable-bundle8-drop10-delay6-jitter4-2600-20260529`: 10%相当の入力packet dropでもbundle history 8で2600フレームgame-state比較通過。traceなしでは約43.7-44.7fps。
+- `logs/codex-input-unreliable-bundle8-drop3-delay6-jitter4-2600-20260529`: 3フレームに1回dropする強い条件でも2600フレームgame-state比較通過。
 - 既存のmelonDS savestateは使えるが、1 checkpointが約19MBあり、毎フレーム保存は重い。低頻度checkpointと予測破棄で改善したが、快適なWAN対戦には、実プレイ時のtrace抑制、再実行中のcheckpoint保存削減、差分savestate、重要RAM限定snapshot、またはrollback window/intervalの自動調整が必要。
 
 ## 目的
@@ -136,6 +141,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
    - checkpoint interval 4/8/16はいずれも30フレームsettle比較を通過したため、次はtraceを切った実プレイ寄り設定でFPSを測る。
    - 予測ミス後の古い予測入力破棄は有効。次は再実行中checkpoint保存が本当に必要な範囲を削り、rollbackなしbaselineとの差をさらに詰める。
    - 現時点の実用候補設定は `InputDelayFrames=0`、`InputMaxFrameLead=8-12`、`RollbackCheckpointInterval=30`。人工送信遅延6+jitter4、送信遅延12+jitter4の両方で一時差分なし2600フレーム通過。
+   - WAN向け候補として unreliable bundle history 8 を追加。10%相当dropと3フレームに1回dropの両方で2600フレーム通過。
    - rollback時の一時差分は許容し、一定settle frames後に収束するかを見る検証を標準化する。
 2. 手動入力時のhost/client同期を、rollbackあり・なしの両方で比較する。
    - 既存の固定入力遅延/待ち方式は同期確認用のbaselineとして残す。
@@ -179,6 +185,8 @@ localhost split検証:
 ```
 
 `-LowLatencyRollback` は `InputDelayFrames=0`、`InputMaxFrameLead=8`、`RollbackWindow=120`、`RollbackCheckpointInterval=30`、`RollbackResimulate` をまとめて有効にする。JITを有効にする場合は `-AllowJit` を付ける。`-InputMaxFrameLead 2` 追加後は短時間splitと結果画面到達splitが通過しているため、操作感確認ではJIT有効も試せる。ただし長時間自由入力は未確認。
+
+packet loss対策のunreliable bundleも試す場合は、上のコマンドに `-InputUnreliable -InputBundleHistory 8` を追加する。これはReliable orderedによる詰まりを避けるため、直近8フレームぶんの入力を毎packetに重複して入れる実験設定。
 
 個別起動する場合:
 

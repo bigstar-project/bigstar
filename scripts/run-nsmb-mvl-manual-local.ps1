@@ -5,6 +5,8 @@ param(
     [int]$InputMaxFrameLead = 2,
     [int]$InputSendDelayFrames = 0,
     [int]$InputSendJitterFrames = 0,
+    [switch]$InputUnreliable,
+    [int]$InputBundleHistory = 0,
     [switch]$LowLatencyRollback,
     [switch]$Rollback,
     [int]$RollbackWindow = 120,
@@ -70,6 +72,9 @@ if ($Rollback) {
         $common += "-RollbackResimulate"
     }
 }
+if ($InputUnreliable) {
+    $common += @("-InputUnreliable", "-InputBundleHistory", "$InputBundleHistory")
+}
 
 $hostArgs = @(
     "-NoProfile",
@@ -124,6 +129,9 @@ Write-Host "Use the host melonDS window for Mario and the client melonDS window 
 Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames"
 if ($Rollback) {
     Write-Host "rollback enabled window=$RollbackWindow checkpointInterval=$RollbackCheckpointInterval resimDelay=$RollbackResimulateDelayFrames resimulate=$RollbackResimulate"
+}
+if ($InputUnreliable) {
+    Write-Host "input unreliable bundleHistory=$InputBundleHistory"
 }
 if ($AllowJit) {
     Write-Host "JIT is enabled for speed; deterministic sync is not guaranteed yet."

@@ -51,6 +51,10 @@ param(
     [int]$InputSendDelayFrames = 0,
     [int]$InputSendJitterFrames = 0,
     [int]$InputMaxFrameLead = 2,
+    [switch]$InputUnreliable,
+    [int]$InputBundleHistory = 0,
+    [int]$InputDropModulo = 0,
+    [int]$InputDropOffset = 0,
     [switch]$Rollback,
     [int]$RollbackWindow = 20,
     [int]$RollbackCheckpointInterval = 1,
@@ -2253,6 +2257,20 @@ function Start-MelonLANProcess {
             $env:MELONDS_NSML_INPUT_NETPLAY_TRACE = "1"
         } else {
             Remove-Item Env:\MELONDS_NSML_INPUT_NETPLAY_TRACE -ErrorAction SilentlyContinue
+        }
+        if ($InputUnreliable) {
+            $env:MELONDS_NSML_INPUT_UNRELIABLE = "1"
+            $env:MELONDS_NSML_INPUT_BUNDLE_HISTORY = "$InputBundleHistory"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_INPUT_UNRELIABLE -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_INPUT_BUNDLE_HISTORY -ErrorAction SilentlyContinue
+        }
+        if ($InputDropModulo -gt 0) {
+            $env:MELONDS_NSML_INPUT_DROP_MODULO = "$InputDropModulo"
+            $env:MELONDS_NSML_INPUT_DROP_OFFSET = "$InputDropOffset"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_INPUT_DROP_MODULO -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_INPUT_DROP_OFFSET -ErrorAction SilentlyContinue
         }
         if ($Rollback) {
             $env:MELONDS_NSML_ROLLBACK = "1"
