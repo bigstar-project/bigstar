@@ -87,7 +87,7 @@ cargo build
 
 ### Phase 3: サーバーなしWebRTC接続
 
-状態: 実装済み、ビルド確認済み。ローカルDataChannel smoke確認済み。1PC 2プロセスのWebRTC bridge + UDP往復確認済み。melonDS実プレイ経由と実WAN検証は未実施。
+状態: 実装済み、ビルド確認済み。ローカルDataChannel smoke確認済み。1PC 2プロセスのWebRTC bridge + UDP往復確認済み。1PC上の `melonDS host -> WebRTC bridge -> melonDS client` 実プレイsmoke確認済み。実WAN検証は未実施。
 
 実装:
 
@@ -147,6 +147,43 @@ got1=offer-to-answer
 got2=answer-to-offer
 ```
 
+1PC WebRTC bridge経由のmelonDS実プレイsmoke:
+
+```text
+bridge:
+  offer local-bind 127.0.0.1:9001
+  offer local-target 127.0.0.1:8165
+  answer local-bind 127.0.0.1:8265
+
+melonDS:
+  host   -Peer 127.0.0.1 -Port 8165 -Frames 1800
+  client -Peer 127.0.0.1 -Port 8265 -Frames 1800
+```
+
+確認済みログ:
+
+```text
+host:   NSMB PoC: peer connected
+client: NSMB PoC: peer connected
+host:   NSMB InputNetplay: remote start ready accepted remoteFrame=870 localFrame=870
+client: NSMB InputNetplay: remote start ready accepted remoteFrame=870 localFrame=870
+host:   NSMB Test: frame limit reached at frame=1800
+client: NSMB Test: frame limit reached at frame=1800
+```
+
+ログ位置:
+
+```text
+logs/webrtc-melonds-1pc-20260530-051459/host/host.stdout.txt
+logs/webrtc-melonds-1pc-20260530-051459/client/client.stdout.txt
+```
+
+注意:
+
+- この検証は自動bootstrap入力によるsmokeで、手動操作の快適性確認ではない。
+- `remote input timeout` / `peer disconnected` は今回の該当ログでは出ていない。
+- hidden window + 2プロセス実行では約27fpsで、FPS評価には使わない。
+
 必要ツール:
 
 - Rustup/Rust
@@ -193,12 +230,11 @@ melonDS手動起動例:
 
 ## 次にやること
 
-1. 1PC内で `melonDS -> bridge -> WebRTC -> bridge -> melonDS` の疎通を確認する。
-2. 1PC内でWebRTC bridge経由の手動対戦を確認する。
-3. LAN 2PCでWebRTC bridge経由の手動対戦を確認する。
-4. WAN 2PCでSTUNのみの直結率、ping、jitter、packet lossを測る。
-5. 必要ならTURN fallbackを追加する。
-6. 実用化段階でsignaling server、matchmaking、launcherへ進む。
+1. 1PC内でWebRTC bridge経由の手動対戦を確認する。
+2. LAN 2PCでWebRTC bridge経由の手動対戦を確認する。
+3. WAN 2PCでSTUNのみの直結率、ping、jitter、packet lossを測る。
+4. 必要ならTURN fallbackを追加する。
+5. 実用化段階でsignaling server、matchmaking、launcherへ進む。
 
 ## 将来方針
 
