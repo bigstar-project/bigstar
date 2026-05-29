@@ -107,6 +107,12 @@ bool TraceNSMLWatchWrite(NDS* nds, const char* cpu, u32 pc, u32 addr, u32 width,
     return true;
 }
 
+static bool NSMLWatchWriteMaybeEnabled()
+{
+    static const bool enabled = getenv("MELONDS_NSML_WATCH_ADDR") != nullptr;
+    return enabled;
+}
+
 // timing notes
 //
 // * this implementation is technically wrong for VRAM
@@ -2219,7 +2225,8 @@ void NDS::ARM9Write8(u32 addr, u8 val)
     {
     case 0x02000000:
         JIT.CheckAndInvalidate<0, ARMJIT_Memory::memregion_MainRAM>(addr);
-        TraceNSMLWatchWrite(this, "ARM9", ARM9.R[15], addr, 1, val);
+        if (NSMLWatchWriteMaybeEnabled())
+            TraceNSMLWatchWrite(this, "ARM9", ARM9.R[15], addr, 1, val);
         *(u8*)&MainRAM[addr & MainRAMMask] = val;
         return;
 
@@ -2261,7 +2268,8 @@ void NDS::ARM9Write16(u32 addr, u16 val)
     {
     case 0x02000000:
         JIT.CheckAndInvalidate<0, ARMJIT_Memory::memregion_MainRAM>(addr);
-        TraceNSMLWatchWrite(this, "ARM9", ARM9.R[15], addr, 2, val);
+        if (NSMLWatchWriteMaybeEnabled())
+            TraceNSMLWatchWrite(this, "ARM9", ARM9.R[15], addr, 2, val);
         *(u16*)&MainRAM[addr & MainRAMMask] = val;
         return;
 
@@ -2322,7 +2330,8 @@ void NDS::ARM9Write32(u32 addr, u32 val)
     {
     case 0x02000000:
         JIT.CheckAndInvalidate<0, ARMJIT_Memory::memregion_MainRAM>(addr);
-        TraceNSMLWatchWrite(this, "ARM9", ARM9.R[15], addr, 4, val);
+        if (NSMLWatchWriteMaybeEnabled())
+            TraceNSMLWatchWrite(this, "ARM9", ARM9.R[15], addr, 4, val);
         *(u32*)&MainRAM[addr & MainRAMMask] = val;
         return ;
 
@@ -2618,7 +2627,8 @@ void NDS::ARM7Write8(u32 addr, u8 val)
     case 0x02000000:
     case 0x02800000:
         JIT.CheckAndInvalidate<1, ARMJIT_Memory::memregion_MainRAM>(addr);
-        TraceNSMLWatchWrite(this, "ARM7", ARM7.R[15], addr, 1, val);
+        if (NSMLWatchWriteMaybeEnabled())
+            TraceNSMLWatchWrite(this, "ARM7", ARM7.R[15], addr, 1, val);
         *(u8*)&MainRAM[addr & MainRAMMask] = val;
         return;
 
@@ -2678,7 +2688,8 @@ void NDS::ARM7Write16(u32 addr, u16 val)
     case 0x02000000:
     case 0x02800000:
         JIT.CheckAndInvalidate<1, ARMJIT_Memory::memregion_MainRAM>(addr);
-        TraceNSMLWatchWrite(this, "ARM7", ARM7.R[15], addr, 2, val);
+        if (NSMLWatchWriteMaybeEnabled())
+            TraceNSMLWatchWrite(this, "ARM7", ARM7.R[15], addr, 2, val);
         *(u16*)&MainRAM[addr & MainRAMMask] = val;
         return;
 
@@ -2749,7 +2760,8 @@ void NDS::ARM7Write32(u32 addr, u32 val)
     case 0x02000000:
     case 0x02800000:
         JIT.CheckAndInvalidate<1, ARMJIT_Memory::memregion_MainRAM>(addr);
-        TraceNSMLWatchWrite(this, "ARM7", ARM7.R[15], addr, 4, val);
+        if (NSMLWatchWriteMaybeEnabled())
+            TraceNSMLWatchWrite(this, "ARM7", ARM7.R[15], addr, 4, val);
         *(u32*)&MainRAM[addr & MainRAMMask] = val;
         return;
 

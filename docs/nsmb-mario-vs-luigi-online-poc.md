@@ -1,437 +1,119 @@
 # NSMB Mario vs Luigi Online PoC
 
-## 現在の最優先事項: 低ディレイ方式を本線にしつつ軽量rollbackを調査
-
-手動確認では `InputDelayFrames=4` なら実用に届く可能性がある。現時点の本線は、低ディレイ方式を国内WAN向けに詰めること。
-
-`InputDelayFrames=4`、`InputMaxFrameLead=4`、unreliable bundle history 8 を `-LowDelayWan` プリセットとして追加した。traceなし・JIT有効の自動検証でFPS、remote input timeout、host/client同期を確認済み。
-
-補足: `InputMaxFrameLead=4` の送信遅延3F+jitter1F検証で一度timeoutを観測したが、その実行中に手動操作が入った可能性があるため無効扱い。clean再実行では同条件で2600フレーム同期比較を通過している。
-
-一方で、高遅延・jitterの大きいネット環境では固定4フレーム遅延だけでは止まりやすいため、補助研究としてrollback方式も継続する。
-
-既存のrollbackはmelonDS丸ごとのsavestateを使うため、1 checkpointが約19MBあり、rollback時にカクつきが出る。`ARM9 Main RAM 4MB` だけを `memcpy` で保存/復元する軽量snapshot backendも試したが、CPU/タイマ/スケジューラ状態まで戻らないため、rollback後にmoving hazardなどのゲーム状態がhost/clientで分岐した。現時点では、正しさはsavestate backendのほうが上。
-
-rollback方式の比較、実装難度、Tango調査から得た示唆、後で再開する場合の候補案は `docs/nsmb-mvl-rollback-design-notes.md` に分離して保存した。
-
-外部資料と既存実装から整理したrollbackの必須条件:
-
-- 過去フレームの完全なゲーム状態を保存できること。
-- remote inputが未着のフレームでは、前回remote inputを繰り返すなどの予測入力で先に進めること。
-- 後から届いたremote inputが予測と違った場合、該当フレームのsavestateへ戻し、正しい入力列で現在フレームまで高速再実行できること。
-- 同じ初期状態と同じ入力列なら、host/clientでMvsLの重要状態が決定論的に一致すること。
-
-2026-05-29時点で追加した調査用hook:
-
-- `MELONDS_NSML_ROLLBACK=1`: 入力netplay中にremote input未着でも停止せず、直近remote inputから予測して進めるprobe mode。
-- `MELONDS_NSML_ROLLBACK_BACKEND=savestate|arm9ram`: rollback checkpoint backend。初期値は従来どおり`savestate`。`arm9ram`はARM9 Main RAM最大4MBと公開フレームカウンタだけを保存/復元する実験用。軽いが正しさ不足のため実用候補ではない。
-- `MELONDS_NSML_ROLLBACK_WINDOW=<frames>`: in-memory savestate ringの保持フレーム数。初期値20。
-- `MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL=<frames>`: rollback checkpointの保存間隔。初期値1。intervalを広げると保持checkpoint数とsavestate保存回数を減らせるが、予測ミス時の再実行範囲は長くなる。
-- `MELONDS_NSML_ROLLBACK_RESIMULATE_DELAY_FRAMES=<frames>`: 予測ミスマッチ検出後、すぐ再実行せず指定フレームだけ待つ実験用debounce。初期値0。長くしすぎると一時差分が長く残る。
-- `MELONDS_NSML_INPUT_UNRELIABLE=1` + `MELONDS_NSML_INPUT_BUNDLE_HISTORY=<frames>`: 入力packetをunreliable unsequencedで送り、直近Nフレームの入力をbundleとして重複送信する実験用WAN設定。
-- `MELONDS_NSML_INPUT_DROP_MODULO=<n>` / `MELONDS_NSML_INPUT_DROP_OFFSET=<n>`: 入力packetを意図的に間引くdrop耐性検証用。
-- `MELONDS_NSML_ROLLBACK_RESTORE_PROBE=1`: 予測ミスマッチ時に該当フレームのcheckpointを復元できるかだけを試す診断用。
-- `MELONDS_NSML_ROLLBACK_RESIMULATE=1`: 予測ミスマッチ時にcheckpointへ戻り、保存済みlocal/remote入力履歴で現在フレームまで内部再実行する診断用。
-
-現時点の判断:
-
-- rollbackの第一関門である「予測しながら止まらず進める」「後着remote inputとのミスマッチを検出する」「過去フレームのsavestateをメモリ上に保持する」「checkpoint復元後に内部再実行する」土台を追加した。
-- `logs/codex-rollback-restore-probe-980-20260529`: frame 900付近の予測ミスマッチ後、約19MBのsavestate checkpointを復元できることを確認。
-- `logs/codex-rollback-resim-probe-980-20260529`: frame 900の予測ミスマッチ後、frame 900..955 を内部再実行できることを確認。
-- `logs/codex-rollback-resim-throttle-2600-20260529`: rollback + frame lead throttle + checkpoint更新で、2600フレームの主要CSV比較は同一行では一致。検証wrapperはCSV間隔設定のため movement probe row不足で失敗。
-- `logs/codex-rollback-resim-throttle-pass-2600-20260529`: CSV間隔30では、rollback補正直後の一時フレームでhost/clientの表示/actor状態が異なり、その後再収束する挙動を確認。従来の「全フレーム完全一致」検証はrollback方式には厳しすぎるため、rollback用には「一定settle frames後に収束しているか」を見る検証へ分ける必要がある。
-- `logs/codex-rollback-resim-settle-2600-20260529`: `RollbackSettleFrames=30` の比較で2600フレーム通過。frame 1290/1950/2250/2370 の一時差分が、それぞれ30フレーム以内にhost/client一致へ戻ることを確認。
-- `logs/codex-rollback-checkpoint-interval4-2600-20260529`: checkpoint interval 4で2600フレーム通過。保持checkpointは約31、30フレームsettle比較も通過。
-- `logs/codex-rollback-checkpoint-interval8-2600-20260529`: checkpoint interval 8で2600フレーム通過。保持checkpointは約16、30フレームsettle比較も通過。
-- `logs/codex-rollback-checkpoint-interval16-2600-20260529`: checkpoint interval 16で2600フレーム通過。保持checkpointは約8、30フレームsettle比較も通過。ただしFPSは35-37fps程度で大きく改善していないため、保持メモリよりも予測ミス後の再実行中savestate保存、同一PC 2プロセス実行、game-state traceが主な負荷候補。
-- `logs/codex-rollback-prediction-prune-trace-1400-20260529`: 予測ミスマッチ時に該当フレーム以降の古い予測入力を破棄することで、長押し入力中の連続ミスマッチを大きく削減。例: host側は8件から押下/離しの2件へ減少。
-- `logs/codex-rollback-prediction-prune-interval8-delay6-2600-20260529`: 人工送信遅延6、checkpoint interval 8、30フレームsettle比較で2600フレーム通過。一時差分は4箇所から2箇所へ減少。
-- `logs/codex-rollback-prediction-prune-perf-delay6-2600-20260529`: game-state traceなしの性能測定で、同一PC 2プロセス時にhost約42.7fps / client約44.0fps。rollbackなしbaseline `logs/codex-lockstep-perf-notrace-2600-20260529` は約49-50fps。
-- `logs/codex-rollback-prune-lead8-delay6-interval30-2600-20260529`: `InputMaxFrameLead=8`、人工送信遅延6、checkpoint interval 30で2600フレームgame-state比較通過。一時差分なし。大きなrollbackを避けるには、WANでも先行幅を小さく保つ方が有効。
-- `logs/codex-rollback-prune-lead8-delay6-interval30-perf-2600-20260529`: 同条件・game-state traceなしではhost約44.6fps / client約45.7fps。rollbackなしbaselineとの差は約4-5fpsまで縮小。
-- `logs/codex-rollback-prune-lead8-delay6-jitter4-interval30-2600-20260529`: 送信遅延6 + jitter4、lead8、checkpoint interval 30で2600フレームgame-state比較通過。一時差分なし。traceなしでは約42.9-43.8fps。
-- `logs/codex-rollback-prune-lead12-delay12-jitter4-interval30-2600-20260529`: 送信遅延12 + jitter4、lead12、checkpoint interval 30で2600フレームgame-state比較通過。一時差分なし。traceなしでは約43.9-45.0fps。
-- `logs/codex-input-unreliable-bundle8-delay6-jitter4-2600-20260529`: unreliable bundle history 8、送信遅延6 + jitter4、lead8で2600フレームgame-state比較通過。
-- `logs/codex-input-unreliable-bundle8-drop10-delay6-jitter4-2600-20260529`: 10%相当の入力packet dropでもbundle history 8で2600フレームgame-state比較通過。traceなしでは約43.7-44.7fps。
-- `logs/codex-input-unreliable-bundle8-drop3-delay6-jitter4-2600-20260529`: 3フレームに1回dropする強い条件でも2600フレームgame-state比較通過。
-- `logs/codex-input-unreliable-bundle8-drop10-long-6000-interval30-20260529`: unreliable bundle history 8、10%相当drop、送信遅延6 + jitter4、lead8、checkpoint interval 30で6000フレームgame-state比較通過。
-- `logs/codex-rollback-arm9ram-header-trace-1400-20260529`: `arm9ram` backendで4MB RAM + 40byteヘッダのcheckpoint保存/復元と短距離resimulateは動作。`NumFrames`/`NumLagFrames`/`LagFrameFlag`も復元し、frame counter driftは出ていない。
-- `logs/codex-rollback-arm9ram-header-delay6-jitter4-2600-20260529`: `arm9ram` backendは人工送信遅延6 + jitter4でframe 1290に不一致。trace付き再現では、rollback後にhost側のmoving hazardが進まず、client側だけ進む。ARM9 RAMだけではrollback状態として不完全。
-- `logs/codex-lowdelaywan-final-input-2600-20260529`: `-LowDelayWan` プリセット、JIT有効、2600フレームのhost/client別入力同期比較を通過。
-- `logs/codex-lowdelaywan-final-result-6000-20260529`: `-LowDelayWan` プリセットで結果画面到達6000フレームを通過。host/client両方の結果画面スクリーンショットprobeも通過。
-- `logs/codex-lowdelaywan-lead8-perf-6000-20260529` と `logs/codex-lowdelaywan-input-perf-6000-20260529`: traceなし性能は同一PC 2プロセスで約45-50fps。実2PC分散なら改善余地あり。
-- `logs/codex-recheck-delay4-lead4-send3-jitter1-2600-20260529`: `InputDelayFrames=4`、`InputMaxFrameLead=4`、unreliable bundle history 8、人工送信遅延3F+jitter1Fで2600フレーム同期比較を通過。
-- `logs/codex-lowdelaywan-final-drop10-2600-20260529` / `logs/codex-lowdelaywan-final-drop3-2600-20260529`: `-LowDelayWan` プリセットで10%相当dropと3フレームに1回dropの両方を通過。
-- 既存のmelonDS savestateは使えるが、1 checkpointが約19MBあり、毎フレーム保存は重い。低頻度checkpointと予測破棄で改善したが、快適なWAN対戦には、実プレイ時のtrace抑制、再実行中のcheckpoint保存削減、差分savestate、重要RAM限定snapshot、またはrollback window/intervalの自動調整が必要。
-
 ## 目的
 
 New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` で WAN 越しに対戦できる形へ持っていく。
 
-過去に試した `LocalMP 2インスタンス * 2プロセス`、savestate共有、試合開始後のWAN切り替え、actor/state強制同期は、速度・安定性・ゲーム状態の自然さの問題が大きいため本筋から外した。現在は US版ROMを主対象に、NSMB本来のMario vs Luigi処理をできるだけ使い、試合中の入力同期だけをWAN adapterへ差し替える方針。
+現在の本筋は、LocalMP を WAN に流す方式ではなく、US版ROMへの direct MvL entry patch と、NSMB が試合中に読む入力境界への adapter を組み合わせる方式。
 
 ## 現在の方針
 
-- 主対象ROMは US版 `roms/nsmb-us.nds` / `A2DE`。
-- 最終形は `host localPlayerID=0`、`client localPlayerID=1`。
-- clientはLuigi側として自然に動かす。カメラ、ストックアイテム、死亡/復帰、勝敗判定をlocalPlayerID=1の通常処理に任せる。
-- direct MvL entry ROM patchで、ローカル通信UIを経由せずMario vs Luigiステージへ入る。現在の本線は true `host localPlayerID=0` / true `client localPlayerID=1`。
-- `Net::getConsoleKeys(u16)` と `Net::getConsoleTouchPad(u16)` をJIT helper patchでscratch memory参照へ差し替え、host/client間の `WireInput` をplayer0/player1入力へ反映する。
-- `getPacketByte/getPacketTick/getPacketAction` まで差し替えるとステージ状態を壊しやすいため、現時点ではkeys/touch helper限定。
-- 死亡時停止対策は全no-opではなく、`Game::vsMode != 0` のときだけ `PlayerBase::freezeStage()` / `PlayerBase::signalLocked()` をskipする条件付きROM patchへ寄せる。
-- 手動入力時の最優先課題は、host/clientの試合開始フレームと入力適用フレームを揃えること。入力送信開始フレームでhostをpeer接続待ちにし、開始後は相手入力が届くまで進めないロックステップ寄りにする。
-- 手動入力では `-InputMaxFrameLead` で片方のプロセスが先行できるフレーム数を制限する。これにより、入力遅延ぶんだけ片方が先行し、同じ実時間のキー入力がhost/clientで別フレームに乗る問題を抑える。
+- 対象ROMは US版 `roms/nsmb-us.nds`。
+- host は `localPlayerID=0`、client は `localPlayerID=1` の true local player 構成を維持する。
+- direct MvL entry ROM patch でローカル通信UIを経由せず、Mario vs Luigi ステージへ直接入る。
+- `Net::getConsoleKeys(u16)` / `Net::getConsoleTouchPad(u16)` を JIT helper patch で scratch memory 参照へ差し替え、WAN input を player0/player1 入力として渡す。
+- `getPacketByte/getPacketTick/getPacketAction` まで差し替えるとステージ状態を壊しやすいため、現時点では keys/touch helper 限定。
+- RNG は ROM側 `rng-constant --value 0x100` で固定している。
+- 低遅延実用路線は `InputDelayFrames=4`、`InputMaxFrameLead=4`、unreliable input + bundle history 8。
+- 高遅延向け rollback は別紙 `docs/nsmb-mvl-rollback-design-notes.md` に退避。現時点の本筋ではない。
 
-## 完了したこと
+## 完了済み
 
-- US版ROM patch toolingを追加。
+- US版ROM patch tooling:
   - `tools/nsmb_us_rom_tool.py`
   - `tools/nsmb_us_rom_patch.py`
-- direct MvL entry系の検証ROMを生成済み。
+- stable direct MvL entry ROM:
   - host: `roms/nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds`
   - client: `roms/nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds`
-- `external/NSMB-Code-Reference` を参照し、主要なNet helperを特定。
-  - `Net::getConsoleKeys`
-  - `Net::getConsoleTouchPad`
-  - `Net::getPacketByte`
-  - `Net::getPacketTick`
-  - `Net::getPacketAction`
-- screenshot dump、framebuffer dump、game-state trace、extended trace、packet replay trace、RAM dumpなどの検証フックを追加。
-- `wifi-communicating-consoles --count 2` と `rng-constant --value 0x100` の診断patchで、初期ステージ状態、moving hazard、液体collision、初期スター位置をhost/clientで揃えられることを確認。
-- offline scripted remote packet検証で、host local0 / client local1 のplayer0/player1入力とactor座標が短時間一致することを確認。
-- JIT有効時でも `Net::getConsoleKeys` keys helper patchだけなら、offline検証でhost/clientが一致することを確認。
-- `-InputNetplay` modeを追加し、PacketBridge本体を使わず `WireInput` だけをkeys helper scratchへ接続できるようにした。
-- JIT helper patchで `Net::getConsoleTouchPad` もscratch packet参照へ差し替え、touch入力をplayer別に反映できるようにした。
-- 入力netplay専用モードでは通常lockstepへ入らず、`frame + delay` の入力を事前送信し、`frame` の入力を適用するようにした。
-- `-InputDelayFrames` を追加し、検証スクリプトから入力遅延フレーム数を切り替えられるようにした。
-- `-InputSendDelayFrames` / `-InputSendJitterFrames` を追加し、`WireInput` の人工配送遅延・jitterを検証できるようにした。
-- 入力netplay専用モードでは自動match seedによる `Net::random.value` 書き換えを止め、ROM側の固定RNGを使うようにした。
-- `-CheckHostClientGameplaySync` を追加し、host/clientの重要game-state差分を自動検出できるようにした。
-- `PlayerBase::signalLocked()` をno-op化するUS ROM patchを追加し、Luigi死亡時に相手PlayerBaseの `updateLocked` が立って進行が止まる経路を診断できるようにした。
-- `PlayerBase::freezeStage()` をno-op化するUS ROM patchを追加し、死亡時に敵/移動ハザードなどのstage actor更新が止まる経路を診断できるようにした。
-- `PlayerBase::freezeStage()` / `PlayerBase::signalLocked()` をVS中だけskipする `--player-stage-lock-vsmode-noop` を追加した。
-- direct MvL entry ROM生成フローを true local1 + `rng-constant --value 0x100` + `--player-stage-lock-vsmode-noop` に更新した。旧hybrid local0 client UI経路は本線から外す。
-- `-CheckNoPlayerUpdateLock` を追加し、死亡前後などの指定フレーム範囲で `playerActor0UpdateLocked` / `playerActor1UpdateLocked` が立ったら自動失敗にできるようにした。
-- `-CheckMovingHazardProgressDuringDeath` を追加し、死亡中にmoving hazardのX座標が進まない場合を自動失敗にできるようにした。
-- `-RequireHostLocalPlayerID` / `-RequireClientLocalPlayerID` を追加し、clientが実際にはlocal0へ戻ってしまう回帰を自動検出できるようにした。
+- client側を Luigi 視点/localPlayerID=1 として動かす基本経路。
+- Luigi死亡時にステージ全体が止まる問題は、VS中だけ `PlayerBase::freezeStage()` / `PlayerBase::signalLocked()` を避ける ROM patch で改善。
+- 手動入力を host/client で別々に受け取り、入力パケットとして相手へ送る input netplay mode。
+- `InputMaxFrameLead` による片側先行制限。
+- unreliable input packet + 過去入力 bundle による packet drop 耐性。
+- active FPS と input wait/throttle の計測ログ。
+- disabled trace/hook の JIT/ARM runtime overhead 削減。
+- 一時ログ肥大化対策として `logs/codex-*` は削除済み。
 
-## 直近の検証結果
+## 現在の最優先課題
 
-最新の要約:
+### 1. 60fps維持
 
-- 現在の本線は US版ROM + true `host localPlayerID=0` / true `client localPlayerID=1` のdirect MvL entry。旧hybrid local0 client経路、savestate共有、試合開始後WAN切り替え、actor/state強制同期は本線から外した。
-- `Net::getConsoleKeys` / `Net::getConsoleTouchPad` のJIT helper patchで、host/clientの `WireInput` をplayer0/player1入力へ反映している。`getPacketByte/getPacketTick/getPacketAction` 差し替えはステージ状態を壊しやすいため現在は使わない。
-- RNG固定、ROM側wifi count、`Net::localAid` patch、VS限定stage-lock skipにより、スター位置、死亡/復帰、Luigi視点、ストック表示、勝敗画面は主要smokeで通過済み。
-- 結果画面到達と勝敗画像probeは `scripts/run-nsmb-mvl-split-local-result-smoke.ps1` で自動確認できる。
-- 手動入力ルートでは、入力送信開始前にhostがpeer接続を待ち、remote input timeoutはデフォルトfatal。さらに `-InputMaxFrameLead` で片側プロセスの先行幅を制限する。
-- host/clientで別々のローカル入力を流す検証は `scripts/run-nsmb-mvl-split-local-input-smoke.ps1` で自動確認できる。
-- JIT有効でも、短時間の別ローカル入力同期、送信遅延/jitter付き別ローカル入力同期、6000フレーム結果画面到達split smokeが通過している。
+ユーザー実測で、1PC 2窓でも LAN 2PC でも表示FPSが52前後に落ちる。
 
-直近の代表ログ:
+2026-05-29 の再調査結果:
 
-- `logs/codex-split-local-input-script-2600-20260529`: JIT無効、hostのMario入力とclientのLuigi入力を別々に流し、2600フレームまで主要gameplay CSV比較通過。
-- `logs/codex-split-local-input-script-jit-nodelay-2600-20260529`: JIT有効、人工遅延なし、別ローカル入力同期通過。host約43.7fps、client約44.8fps。
-- `logs/codex-split-local-input-script-jit-nodelay-6000-20260529`: JIT有効、人工遅延なし、別ローカル入力後に6000フレームまで主要gameplay CSV比較通過。
-- `logs/codex-split-local-input-script-jit-delay8-jitter4-2600-20260529`: JIT有効、入力遅延16 + 送信遅延8 + jitter最大4、別ローカル入力同期通過。
-- `logs/codex-split-local-result-framelead2-jit-endfix-6000-20260529`: JIT有効、frame lead 2、人工遅延/jitter付き、6000フレーム結果画面到達とhost/client勝敗画像probe通過。
-- `logs/codex-manual-launcher-params-smoke-1200-20260529`: 手動launcher短時間起動確認。JIT有効でhost約54fps、client約57fps。
+- remote input wait は主因ではない。
+- `MPInterface::Process()` も主因ではない。
+- MvL gameplay中は `RunFrame()` 自体が約15-16msまで重くなる。
+- 画面描画なしでは active fps が約62-64fps。
+- 画面表示ありでは `SwapBuffers` / 画面提示が数ms乗り、active fps が約50fpsまで落ちる。
+- `MELONDS_NSML_SWAPBUFFERS_INTERVAL=4` では負荷は下がるが、測定値は約55-60fpsで揺れる。表示更新頻度も落ちるため、快適な最終解ではない。
 
-重要な既存検証:
+暫定手動プレイ設定:
 
-- `logs/codex-both-stable-wificount2-netaid-resultscene-probe-6000-20260529`: 6000フレーム結果画面到達、host/client gameplay sync、`localPlayerID`、`Net::localAid`、結果画面画像probe通過。
-- `logs/codex-both-stable-wificount2-netaid-resultscene-probe-jitter-6000-20260529`: 入力遅延16 + 送信遅延8 + jitter最大4でも結果画面到達と勝敗画像probe通過。
-- `logs/codex-both-manual-bootstrap-nojit-fatal-2400-20260529`: JIT無効 + manual bootstrap + fatal timeoutで2400フレームhost/client gameplay sync通過。
+- `scripts/run-nsmb-mvl-manual-peer.ps1` はデフォルトで `NoFrameLimit` 相当、`SwapBuffersInterval=4`、start frame 870 を使う。これは暫定の軽量化設定であり、60fps保証ではない。
+- `UseFrameLimit` を付けると従来の frame limiter を使う。
 
-## 未解決・注意点
+次にやること:
 
-- 6000フレーム結果画面到達と、別ローカル入力後6000フレーム維持までは検証済み。実プレイとして十分な長時間安定性はまだ未確認。
-- `Game::vsMode != 0` 条件付きstage-lock skipは全no-opより副作用が小さいが、タイムアップ、土管/ドア、8コインアイテムなど他transitionで問題がないかは未確認。
-- リスポーン描画は短時間の目視とvisible flag検証では自然に見えるが、長時間プレイや別死亡条件での回帰は未確認。
-- 現在の入力スクリプトは短い診断用で、8コインアイテム、ランダムステージ、死亡/復帰後の長時間継続まではまだ十分に検証していない。
-- 詳細traceや結果画面スクリーンショット付きでは約39-44fps、traceなしの実用寄り設定では単体約54fps、同一PC 2プロセスでは約45-53fps。完全な60fpsには届いていないが、10fps台は主に重い診断設定由来。
-- WANの遅延・ジッタを模した検証とlocalhostでのhost/client分割起動は通過。packet lossや実2PC分散は未実施。
-- 手動入力は動作確認済み。peer待ち、fatal timeout、frame lead制限を入れたため、次は実キー入力を含む検証で見た目と操作感を確認する。
-- `-InputMaxFrameLead 2` 後はJIT有効の別ローカル入力2600フレームと、結果画面到達6000フレームが通過している。ただし長時間の自由入力では未確認なので、JIT有効は段階的に検証を増やす。
-- JIT無効の手動launcherは同期優先でかなり遅い。短いsmokeでは約12fps。JIT有効 + 人工遅延なしの短いmanual launcherは約54-57fps、split local-input smokeは約44fps。人工遅延/jitter付きresult smokeは意図的な待ちが入るため約15fps。
+- 画面提示を間引かずに60fpsへ戻す方法を探す。
+- 候補:
+  - input netplay時の描画経路を軽量化する。
+  - OpenGL SwapBuffers を emulation thread から分離できるか調べる。
+  - window/display更新頻度を落とさず、内部frameだけ60維持する別のpresent方式を検討する。
+  - MvL中の `RunFrame()` 負荷をさらに削る。
 
-## 次にやること
+### 2. direct entry起因の開始位相差
 
-1. 最優先: 低ディレイ方式を本線として、`InputDelayFrames=4` 前後で実用条件を詰める。
-   - 国内WAN向けの第一候補は `-LowDelayWan`: `InputDelayFrames=4`、`InputMaxFrameLead=4`、unreliable bundle history 8。
-   - localhost自動検証では、別入力2600フレーム、結果画面到達6000フレーム、10%相当drop、3フレームに1回drop、人工送信遅延3F+jitter1Fを通過済み。
-   - 次は実2PCまたはLAN分散で、FPSと操作感、remote input timeoutの有無を確認する。
-2. 高遅延・jitter向けの補助研究としてrollbackを続ける。
-   - savestate backendは正しさはあるが、1 checkpoint約19MBでrollback時にカクつく。
-   - `arm9ram` backendは4MB + 小ヘッダで軽いが、CPU/タイマ/スケジューラ状態を戻せないため、現時点では正しさ不足。実用候補からは外し、必要なら「完全savestateの差分化」または「core側に軽量checkpoint APIを作る」方向を検討する。
-   - rollback時の一時差分は許容し、一定settle frames後に収束するかを見る検証を標準化する。
-3. 手動入力時のhost/client同期を、低ディレイ方式・rollback方式の両方で比較する。
-   - 既存の固定入力遅延/待ち方式は同期確認用のbaselineとして残す。
-   - rollback方式では `InputDelayFrames=0` でもカクつかず進むこと、後着入力で再収束すること、操作感が改善することを見る。
-4. true local1 + RNG固定 + VS限定stage-lock skip + ROM側wifi count + Net::localAid patchを本線として、長時間の死亡/復帰・勝敗・スター取得まで壊れないか確認する。
-   - client local1カメラ、Big Star位置、localPlayerIDは自動チェックで守る。
-   - 片方死亡中に相手プレイヤー・敵・ブロック・ステージ進行が止まらないことは、`-CheckNoPlayerUpdateLock` と `-CheckMovingHazardProgressDuringDeath` で継続確認する。
-   - 土管復帰前後の表示は `-CheckVsPipeRespawnVisibility` で継続確認する。
-5. traceを減らした実用寄り設定、または2PC分散でFPSが60fpsに近づくか確認する。
-6. Luigi側操作の検証を増やす。
-   - カメラ追従
-   - 死亡/復帰
-   - 勝敗判定は結果画面到達とhost/clientのwin/lose表示まで、通常条件・遅延/jitter条件・localhost split条件で自動確認済み。次はより自由な入力列と長時間検証へ広げる。
-7. 8コインアイテム、2個目以降のBig Star、ランダムステージなど、乱数由来イベントを固定RNG + 入力同期で再現できるか確認する。
-8. 残るruntime hook依存をROM patchへ寄せ、起動から試合開始までをより自然なdirect entryにする。
-9. 実2PCまたは同一LANで、host/clientを別マシン相当の起動コマンドに分けて検証する。
-   - 実2PC/LAN用の短縮起動scriptとして `scripts/run-nsmb-mvl-manual-peer.ps1` を追加した。次に人間の手動確認が必要になったら、このscriptでhost/clientを別PCまたは別端末から起動する。
+game-state比較では frame 900 で `movingHazardX` が host/client 不一致になる。
 
-localhost split検証:
+現在わかっていること:
+
+- 入力は一致している。
+- moving hazard は host 側が約6フレーム早く動き始める。
+- 起動待ちや host/client 起動時間差ではなく、host ROM/client ROM の direct entry 経路差に見える。
+- 目視プレイ上の主要挙動は改善しているが、完全同期を保証するには未解決。
+
+次にやること:
+
+- localPlayerID=1 client direct entry の StageStart/StageScene 作成経路をさらに追う。
+- host/client の object spawn frame を揃える。
+- 一時的な座標補正ではなく、試合開始状態の生成差を減らす。
+
+## 手動起動
+
+host:
 
 ```powershell
-.\scripts\run-nsmb-mvl-split-local-result-smoke.ps1 `
-  -LogDir logs\codex-split-local-script-result2-6000-20260529
+.\scripts\run-nsmb-mvl-manual-peer.ps1 -Role host
 ```
 
-手動プレイ用localhost起動:
-
-短縮コマンド:
+client:
 
 ```powershell
-.\scripts\run-nsmb-mvl-manual-local.ps1 `
-  -LogDir logs\manual-local
+.\scripts\run-nsmb-mvl-manual-peer.ps1 -Role client -Peer <host-ip>
 ```
 
-本線の低ディレイWAN候補で試す場合:
+低遅延設定はデフォルトで `InputDelayFrames=4` / `InputMaxFrameLead=4`。描画間引き暫定策を無効化したい場合は `-SwapBuffersInterval 1` を付ける。
+
+## 検証コマンド
+
+速度だけを見る:
 
 ```powershell
-.\scripts\run-nsmb-mvl-manual-local.ps1 `
-  -AllowJit `
-  -LowDelayWan `
-  -LogDir logs\manual-local-lowdelaywan
+.\scripts\run-nsmb-mvl-split-local-input-smoke.ps1 -LowDelayWan -AllowJit -Frames 3000 -NoGameStateTrace -SkipGameStateComparison -NoFrameLimit
 ```
 
-`-LowDelayWan` は `InputDelayFrames=4`、`InputMaxFrameLead=4`、`InputUnreliable`、`InputBundleHistory=8`、人工送信遅延なしをまとめて有効にする。
-
-低遅延rollback候補設定で試す場合:
+同期比較を見る:
 
 ```powershell
-.\scripts\run-nsmb-mvl-manual-local.ps1 `
-  -AllowJit `
-  -LowLatencyRollback `
-  -LogDir logs\manual-local-rollback
+.\scripts\run-nsmb-mvl-split-local-input-smoke.ps1 -UseLanMP -LowDelayWan -AllowJit -Frames 2600 -GameStateTraceInterval 30
 ```
 
-`-LowLatencyRollback` は `InputDelayFrames=0`、`InputMaxFrameLead=8`、`RollbackWindow=120`、`RollbackCheckpointInterval=30`、`RollbackResimulate` をまとめて有効にする。JITを有効にする場合は `-AllowJit` を付ける。`-InputMaxFrameLead 2` 追加後は短時間splitと結果画面到達splitが通過しているため、操作感確認ではJIT有効も試せる。ただし長時間自由入力は未確認。
+現時点では同期比較は `movingHazardX` の開始位相差で失敗する可能性がある。
 
-packet loss対策のunreliable bundleも試す場合は、上のコマンドに `-InputUnreliable -InputBundleHistory 8` を追加する。これはReliable orderedによる詰まりを避けるため、直近8フレームぶんの入力を毎packetに重複して入れる実験設定。
+## 注意
 
-個別起動する場合:
-
-短縮scriptを使う場合:
-
-host側:
-
-```powershell
-.\scripts\run-nsmb-mvl-manual-peer.ps1 `
-  -Role host `
-  -Peer <client-ip-or-hostname>
-```
-
-client側:
-
-```powershell
-.\scripts\run-nsmb-mvl-manual-peer.ps1 `
-  -Role client `
-  -Peer <host-ip-or-hostname>
-```
-
-この短縮scriptは `InputDelayFrames=4`、`InputMaxFrameLead=4`、`InputUnreliable`、`InputBundleHistory=8`、JIT有効を既定にする。JITを切る場合は `-NoJit` を付ける。
-
-低レベルscriptを直接使う場合:
-
-host側:
-
-```powershell
-.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 `
-  -RunRole host `
-  -Frames 999999 `
-  -WaitTimeoutMs 86400000 `
-  -Exe build\release-windows-x86_64\melonDS.exe `
-  -Rom roms\nsmb-us.nds `
-  -HostRom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds `
-  -InputScript tests\nsmb_us_direct_mvl_manual_bootstrap.inputs `
-  -ScreenshotInterval 0 `
-  -NoHashLog `
-  -SkipMvlStateCheck `
-  -SkipGameplayActorCheck `
-  -InputNetplay `
-  -InputDelayFrames 16 `
-  -InputMaxFrameLead 2 `
-  -PacketBridgeJitHelperPatch `
-  -PacketBridgeJitHelperPatchFrame 900 `
-  -PacketBridgeStartFrame 900 `
-  -LogDir logs\manual-host
-```
-
-client側:
-
-```powershell
-.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 `
-  -RunRole client `
-  -Peer 127.0.0.1 `
-  -Frames 999999 `
-  -WaitTimeoutMs 86400000 `
-  -Exe build\release-windows-x86_64\melonDS.exe `
-  -Rom roms\nsmb-us.nds `
-  -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds `
-  -InputScript tests\nsmb_us_direct_mvl_manual_bootstrap.inputs `
-  -ScreenshotInterval 0 `
-  -NoHashLog `
-  -SkipMvlStateCheck `
-  -SkipGameplayActorCheck `
-  -InputNetplay `
-  -InputDelayFrames 16 `
-  -InputMaxFrameLead 2 `
-  -PacketBridgeJitHelperPatch `
-  -PacketBridgeJitHelperPatchFrame 900 `
-  -PacketBridgeStartFrame 900 `
-  -LogDir logs\manual-client
-```
-
-手動プレイ用コマンドで決定性を最優先する場合は `-AllowJit` を付けない。操作感を優先して試す場合は `-AllowJit` を付ける。
-
-2PC分散検証のコマンド雛形:
-
-host側PC:
-
-```powershell
-.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 `
-  -RunRole host `
-  -Frames 6000 `
-  -WaitTimeoutMs 420000 `
-  -AllowJit `
-  -Exe build\release-windows-x86_64\melonDS.exe `
-  -HostRom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds `
-  -InputScript tests\nsmb_us_direct_mvl_star_collect_left.inputs `
-  -GameStateTrace `
-  -GameStateTraceExtended `
-  -GameStateTraceInterval 120 `
-  -ScreenshotInterval 6000 `
-  -NoHashLog `
-  -SkipDisconnectScreenshotCheck `
-  -SkipBlankScreenshotCheck `
-  -SkipMvlStateCheck `
-  -SkipGameplayActorCheck `
-  -InputNetplay `
-  -InputDelayFrames 24 `
-  -InputSendDelayFrames 12 `
-  -InputSendJitterFrames 8 `
-  -PacketBridgeJitHelperPatch `
-  -PacketBridgeJitHelperPatchFrame 900 `
-  -PacketBridgeStartFrame 900 `
-  -RequireResultScene `
-  -RequireHostResultWinScreenshot `
-  -RequireHostLocalPlayerID 0 `
-  -RequireHostNetLocalAid 0 `
-  -RequireNetLocalAidStartFrame 900 `
-  -LogDir logs\mvl-host-2pc-result
-```
-
-client側PC:
-
-```powershell
-.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 `
-  -RunRole client `
-  -Peer <host-ip-address> `
-  -Frames 6000 `
-  -WaitTimeoutMs 420000 `
-  -AllowJit `
-  -Exe build\release-windows-x86_64\melonDS.exe `
-  -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds `
-  -InputScript tests\nsmb_us_direct_mvl_star_collect_left.inputs `
-  -GameStateTrace `
-  -GameStateTraceExtended `
-  -GameStateTraceInterval 120 `
-  -ScreenshotInterval 6000 `
-  -NoHashLog `
-  -SkipDisconnectScreenshotCheck `
-  -SkipBlankScreenshotCheck `
-  -SkipMvlStateCheck `
-  -SkipGameplayActorCheck `
-  -InputNetplay `
-  -InputDelayFrames 24 `
-  -InputSendDelayFrames 12 `
-  -InputSendJitterFrames 8 `
-  -PacketBridgeJitHelperPatch `
-  -PacketBridgeJitHelperPatchFrame 900 `
-  -PacketBridgeStartFrame 900 `
-  -RequireResultScene `
-  -RequireClientResultLoseScreenshot `
-  -RequireClientLocalPlayerID 1 `
-  -RequireClientNetLocalAid 1 `
-  -RequireNetLocalAidStartFrame 900 `
-  -LogDir logs\mvl-client-2pc-result
-```
-
-## 代表テストコマンド
-
-入力netplayの現行代表検証:
-
-```powershell
-.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 `
-  -RunRole both `
-  -Frames 2250 `
-  -AllowJit `
-  -Exe build\release-windows-x86_64\melonDS.exe `
-  -Rom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds `
-  -HostRom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds `
-  -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds `
-  -InputScript tests\nsmb_us_direct_mvl_client_stock_touch_strong.inputs `
-  -GameStateTrace `
-  -GameStateTraceExtended `
-  -GameStateTraceInterval 30 `
-  -ScreenshotInterval 0 `
-  -NoHashLog `
-  -SkipDisconnectScreenshotCheck `
-  -SkipBlankScreenshotCheck `
-  -SkipMvlStateCheck `
-  -SkipGameplayActorCheck `
-  -InputNetplay `
-  -InputDelayFrames 12 `
-  -PacketBridgeJitHelperPatch `
-  -PacketBridgeJitHelperPatchFrame 900 `
-  -PacketBridgeStartFrame 900 `
-  -CheckHostClientGameplaySync `
-  -CheckNoPlayerUpdateLock `
-  -CheckNoPlayerUpdateLockStartFrame 1840 `
-  -CheckNoPlayerUpdateLockEndFrame 2220 `
-  -CheckMovingHazardProgressDuringDeath `
-  -CheckMovingHazardProgressStartFrame 1840 `
-  -CheckMovingHazardProgressEndFrame 2220 `
-  -CheckMovingHazardProgressMinUniqueX 3 `
-  -CheckVsPipeRespawnVisibility `
-  -CheckVsPipeRespawnVisibilityStartFrame 1840 `
-  -CheckVsPipeRespawnVisibilityEndFrame 2250 `
-  -RequireHostLocalPlayerID 0 `
-  -RequireClientLocalPlayerID 1 `
-  -RequireHostNetLocalAid 0 `
-  -RequireClientNetLocalAid 1 `
-  -RequireNetLocalAidStartFrame 900 `
-  -LogDir logs\codex-both-stable-wificount2-netaid-vspipecheck-2250-20260529
-```
-
-診断trace付きで入力netplay内部を見る場合は `-InputNetplayTrace` を追加する。
-
-## 成功条件
-
-`frame limit reached` だけでは成功扱いにしない。最低限、次を確認する。
-
-- data abort / fatal / undefined がない。
-- 「通信が切断されました」画面にならない。
-- screenshotがMario vs Luigi stageとして読める。
-- host/clientでplayer0/player1 actor座標、死亡状態、残機、スター数、ストックアイテムが一致する。
-- Goomba、Big Star、8コインアイテムなどの動的要素が一致する。
-- client local1でLuigi側カメラ、UI、ストックアイテム、死亡/復帰、勝敗判定が自然に動く。
-- WAN adapter有効時に実用的なFPSで検証できる。
-
-## 運用ルール
-
-- ROM生成物、savestate、巨大ログはgitに含めない。
-- docsは古い追記を残し続けず、現在の方針、完了、未解決、次作業が上から読める形に保つ。
-- 最終応答前にdocsの古い情報や矛盾を確認し、必要なら整理する。
+- `docs/nsmb-mvl-rollback-design-notes.md` は rollback 議論の保存先。肥大化させず、rollback再開時だけ参照する。
+- `logs/` はROMコピーを含むため肥大化しやすい。検証結果はdocsに要約し、古い `logs/codex-*` は削除する。
+- final response 前にはこのファイルの古い「次にやること」や解決済みblockerが残っていないか確認する。

@@ -13,6 +13,8 @@ param(
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds",
     [string]$InputScript = "tests\nsmb_us_direct_mvl_manual_bootstrap.inputs",
     [string]$LogDir = "",
+    [int]$SwapBuffersInterval = 4,
+    [switch]$UseFrameLimit,
     [switch]$NoJit
 )
 
@@ -42,13 +44,18 @@ $params = @{
     NoHashLog = $true
     SkipMvlStateCheck = $true
     SkipGameplayActorCheck = $true
+    NoLanMP = $true
     InputNetplay = $true
     InputDelayFrames = $InputDelayFrames
     InputMaxFrameLead = $InputMaxFrameLead
     PacketBridgeJitHelperPatch = $true
-    PacketBridgeJitHelperPatchFrame = 900
-    PacketBridgeStartFrame = 900
+    PacketBridgeJitHelperPatchFrame = 870
+    PacketBridgeStartFrame = 870
     LogDir = $LogDir
+}
+
+if (-not $UseFrameLimit) {
+    $params.NoFrameLimit = $true
 }
 
 if ($Role -eq "host") {
@@ -68,12 +75,35 @@ if ($InputUnreliable) {
 
 Write-Host "Starting NSMB MvL peer session: role=$Role peer=$Peer"
 Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead unreliable=$($InputUnreliable.IsPresent) bundleHistory=$InputBundleHistory jit=$(-not $NoJit)"
+Write-Host "frameLimit=$($UseFrameLimit.IsPresent) swapBuffersInterval=$SwapBuffersInterval"
 Write-Host "log=$LogDir"
 Write-Host "Host controls Mario. Client controls Luigi."
 
 Push-Location $repoRoot
 try {
+    $oldSwapBuffersInterval = $env:MELONDS_NSML_SWAPBUFFERS_INTERVAL
+    if ($SwapBuffersInterval -gt 1) {
+        $env:MELONDS_NSML_SWAPBUFFERS_INTERVAL = "$SwapBuffersInterval"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_SWAPBUFFERS_INTERVAL -ErrorAction SilentlyContinue
+    }
+
+    $cfgPath = Join-Path $repoRoot "build\release-windows-x86_64\melonDS.toml"
+    if (Test-Path $cfgPath) {
+        $cfg = Get-Content $cfgPath -Raw
+        $cfg = $cfg -replace 'UseGL = false', 'UseGL = true'
+        $cfg = $cfg -replace 'VSync = true', 'VSync = false'
+        $cfg = $cfg -replace 'Renderer = 0', 'Renderer = 2'
+        $cfg = $cfg -replace 'ScreenSizing = 4', 'ScreenSizing = 0'
+        Set-Content -Path $cfgPath -Value $cfg -Encoding UTF8
+    }
+
     & $smokeScript @params
 } finally {
+    if ($null -ne $oldSwapBuffersInterval) {
+        $env:MELONDS_NSML_SWAPBUFFERS_INTERVAL = $oldSwapBuffersInterval
+    } else {
+        Remove-Item Env:\MELONDS_NSML_SWAPBUFFERS_INTERVAL -ErrorAction SilentlyContinue
+    }
     Pop-Location
 }

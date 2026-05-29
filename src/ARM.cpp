@@ -74,6 +74,48 @@ static bool NSMLEnvFlag(const char* name)
     return value && value[0] && strcmp(value, "0") != 0;
 }
 
+static bool NSMLRuntimeHooksMaybeEnabled()
+{
+    static const bool enabled =
+        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE") ||
+        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_ARM_ONLY") ||
+        NSMLEnvFlag("MELONDS_NSML_PACKET_CAPTURE_LOG") ||
+        NSMLEnvFlag("MELONDS_NSML_PACKET_REPLAY_FILE") ||
+        NSMLEnvFlag("MELONDS_NSML_RANDOM_TRACE") ||
+        NSMLEnvFlag("MELONDS_NSML_CALL_TRACE") ||
+        NSMLEnvFlag("MELONDS_NSML_STAGE_START_DISPATCH_TRACE") ||
+        NSMLEnvFlag("MELONDS_NSML_TRACE_STAGE_CAMERA") ||
+        NSMLEnvFlag("MELONDS_NSML_TRACE_PLAYER_RENDER") ||
+        NSMLEnvFlag("MELONDS_NSML_TRACE_PLAYER_DEFEATED") ||
+        NSMLEnvFlag("MELONDS_NSML_TRACE_PLAYER_LIFE_CALLS") ||
+        NSMLEnvFlag("MELONDS_NSML_GUARD_PLAYER_MODEL_RENDER_PTRS") ||
+        NSMLEnvFlag("MELONDS_NSML_RENDER_CAMERA_ALIAS") ||
+        NSMLEnvFlag("MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT") ||
+        NSMLEnvFlag("MELONDS_NSML_SAFE_START_LOAD_CALL") ||
+        NSMLEnvFlag("MELONDS_NSML_SAFE_LOAD_LEVEL_CALL") ||
+        NSMLEnvFlag("MELONDS_NSML_SAFE_COURSE_SELECT_CALL") ||
+        NSMLEnvFlag("MELONDS_NSML_SAFE_COURSE_SELECT_FACTORY_CALL") ||
+        NSMLEnvFlag("MELONDS_NSML_SAFE_CREATE_LOAD_GAME_CALL") ||
+        NSMLEnvFlag("MELONDS_NSML_SAFE_UPDATE_LOAD_GAME_CALL") ||
+        NSMLEnvFlag("MELONDS_NSML_SAFE_SCHEDULE_LOAD_GAME_CALL") ||
+        NSMLEnvFlag("MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL") ||
+        NSMLEnvFlag("MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_CALL") ||
+        NSMLEnvFlag("MELONDS_NSML_SCENE_AUTO_ACTIVE_CLEAR") ||
+        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_READY_PROBE") ||
+        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_STEP6_CLOSE") ||
+        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE") ||
+        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_CHECK") ||
+        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_READ_PACKET_BYTE") ||
+        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_CHECK_PACKET_BITS") ||
+        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FAKE_PEER_INFO") ||
+        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_BYPASS_START_CONNECTION") ||
+        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_BYPASS_WIFI_START") ||
+        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT") ||
+        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_RESET") ||
+        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT");
+    return enabled;
+}
+
 static u32 NSMLPacketBridgeEnvFrame(const char* name, u32 fallback);
 
 static bool NSMLPacketBridgeEnabled()
@@ -4900,72 +4942,75 @@ void ARMv5::Execute()
         if constexpr (mode == CPUExecuteMode::JIT)
         {
             u32 instrAddr = R[15] - ((CPSR&0x20)?2:4);
-            HandleNSMLNetReadyHotPatch(this, instrAddr);
-            TraceNSMLPacketCapture(this, instrAddr);
-            if (HandleNSMLSafeMvlLoadThreadCall(this, instrAddr))
+            if (NSMLRuntimeHooksMaybeEnabled())
             {
-                NDS.ARM9Timestamp++;
-                continue;
+                HandleNSMLNetReadyHotPatch(this, instrAddr);
+                TraceNSMLPacketCapture(this, instrAddr);
+                if (HandleNSMLSafeMvlLoadThreadCall(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLSafeLevelCall(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLStageStartReadyProbeCall(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLStageStartStep6CloseCall(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLStageSceneReadyCloseCall(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLCheckPacketBitsBridge(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLPacketReadByteBridge(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLLowerMPBridge(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLFakePeerInfo(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLStartConnectionBypass(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                if (HandleNSMLWifiStartBypass(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
+                PatchNSMLStageStartNet20Check(this, instrAddr);
+                PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
+                PatchNSMLRenderCameraAlias(this, instrAddr);
+                PatchNSMLCameraFocusLoopCount(this, instrAddr);
+                TraceNSMLStageCamera(this, instrAddr);
+                TraceNSMLPlayerDefeatedEntry(this, instrAddr);
+                TraceNSMLStageStartDispatch(this, instrAddr);
+                TraceNSMLCallImpl(this, instrAddr);
+                TraceNSMLRandomCall(this, instrAddr);
             }
-            if (HandleNSMLSafeLevelCall(this, instrAddr))
-            {
-                NDS.ARM9Timestamp++;
-                continue;
-            }
-            if (HandleNSMLStageStartReadyProbeCall(this, instrAddr))
-            {
-                NDS.ARM9Timestamp++;
-                continue;
-            }
-            if (HandleNSMLStageStartStep6CloseCall(this, instrAddr))
-            {
-                NDS.ARM9Timestamp++;
-                continue;
-            }
-            if (HandleNSMLStageSceneReadyCloseCall(this, instrAddr))
-            {
-                NDS.ARM9Timestamp++;
-                continue;
-            }
-            if (HandleNSMLCheckPacketBitsBridge(this, instrAddr))
-            {
-                NDS.ARM9Timestamp++;
-                continue;
-            }
-            if (HandleNSMLPacketReadByteBridge(this, instrAddr))
-            {
-                NDS.ARM9Timestamp++;
-                continue;
-            }
-            if (HandleNSMLLowerMPBridge(this, instrAddr))
-            {
-                NDS.ARM9Timestamp++;
-                continue;
-            }
-            if (HandleNSMLFakePeerInfo(this, instrAddr))
-            {
-                NDS.ARM9Timestamp++;
-                continue;
-            }
-            if (HandleNSMLStartConnectionBypass(this, instrAddr))
-            {
-                NDS.ARM9Timestamp++;
-                continue;
-            }
-            if (HandleNSMLWifiStartBypass(this, instrAddr))
-            {
-                NDS.ARM9Timestamp++;
-                continue;
-            }
-            PatchNSMLStageStartNet20Check(this, instrAddr);
-            PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
-            PatchNSMLRenderCameraAlias(this, instrAddr);
-            PatchNSMLCameraFocusLoopCount(this, instrAddr);
-            TraceNSMLStageCamera(this, instrAddr);
-            TraceNSMLPlayerDefeatedEntry(this, instrAddr);
-            TraceNSMLStageStartDispatch(this, instrAddr);
-            TraceNSMLCallImpl(this, instrAddr);
-            TraceNSMLRandomCall(this, instrAddr);
 
             if ((instrAddr < FastBlockLookupStart || instrAddr >= (FastBlockLookupStart + FastBlockLookupSize))
                 && !NDS.JIT.SetupExecutableRegion(0, instrAddr, FastBlockLookup, FastBlockLookupStart, FastBlockLookupSize))
@@ -5008,94 +5053,97 @@ void ARMv5::Execute()
                 if constexpr (mode == CPUExecuteMode::InterpreterGDB)
                     GdbCheckC();
                 const u32 instrAddr = R[15] - 2;
-                HandleNSMLNetReadyHotPatch(this, instrAddr);
-                TraceNSMLPacketCapture(this, instrAddr);
-                if (HandleNSMLSafeMvlLoadThreadCall(this, instrAddr))
+                if (NSMLRuntimeHooksMaybeEnabled())
                 {
-                    NDS.ARM9Timestamp++;
-                    continue;
+                    HandleNSMLNetReadyHotPatch(this, instrAddr);
+                    TraceNSMLPacketCapture(this, instrAddr);
+                    if (HandleNSMLSafeMvlLoadThreadCall(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLSafeLevelCall(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLStageStartReadyProbeCall(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLStageStartStep6CloseCall(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLStageSceneReadyCloseCall(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLCheckPacketBitsBridge(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLPacketReadByteBridge(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLLowerMPBridge(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLFakePeerInfo(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLStartConnectionBypass(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLWifiStartBypass(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLTransferPacketBypass(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLNetDisconnectBypass(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLNetResetBypass(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLPacketReplay(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    PatchNSMLClientConfirmSchedule(this, instrAddr);
+                    PatchNSMLStageStartNet20Check(this, instrAddr);
+                    PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
+                    PatchNSMLRenderCameraAlias(this, instrAddr);
+                    PatchNSMLCameraFocusLoopCount(this, instrAddr);
+                    TraceNSMLStageCamera(this, instrAddr);
+                    TraceNSMLPlayerRender(this, instrAddr);
+                    TraceNSMLPlayerDefeatedEntry(this, instrAddr);
+                    TraceNSMLStageStartDispatch(this, instrAddr);
+                    TraceNSMLCallImpl(this, instrAddr);
+                    TraceNSMLRandomCall(this, instrAddr);
                 }
-                if (HandleNSMLSafeLevelCall(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLStageStartReadyProbeCall(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLStageStartStep6CloseCall(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLStageSceneReadyCloseCall(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLCheckPacketBitsBridge(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLPacketReadByteBridge(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLLowerMPBridge(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLFakePeerInfo(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLStartConnectionBypass(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLWifiStartBypass(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLTransferPacketBypass(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLNetDisconnectBypass(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLNetResetBypass(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLPacketReplay(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                PatchNSMLClientConfirmSchedule(this, instrAddr);
-                PatchNSMLStageStartNet20Check(this, instrAddr);
-                PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
-                PatchNSMLRenderCameraAlias(this, instrAddr);
-                PatchNSMLCameraFocusLoopCount(this, instrAddr);
-                TraceNSMLStageCamera(this, instrAddr);
-                TraceNSMLPlayerRender(this, instrAddr);
-                TraceNSMLPlayerDefeatedEntry(this, instrAddr);
-                TraceNSMLStageStartDispatch(this, instrAddr);
-                TraceNSMLCallImpl(this, instrAddr);
-                TraceNSMLRandomCall(this, instrAddr);
 
                 // prefetch
                 R[15] += 2;
@@ -5113,94 +5161,97 @@ void ARMv5::Execute()
                 if constexpr (mode == CPUExecuteMode::InterpreterGDB)
                     GdbCheckC();
                 const u32 instrAddr = R[15] - 4;
-                HandleNSMLNetReadyHotPatch(this, instrAddr);
-                TraceNSMLPacketCapture(this, instrAddr);
-                if (HandleNSMLSafeMvlLoadThreadCall(this, instrAddr))
+                if (NSMLRuntimeHooksMaybeEnabled())
                 {
-                    NDS.ARM9Timestamp++;
-                    continue;
+                    HandleNSMLNetReadyHotPatch(this, instrAddr);
+                    TraceNSMLPacketCapture(this, instrAddr);
+                    if (HandleNSMLSafeMvlLoadThreadCall(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLSafeLevelCall(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLStageStartReadyProbeCall(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLStageStartStep6CloseCall(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLStageSceneReadyCloseCall(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLCheckPacketBitsBridge(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLPacketReadByteBridge(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLLowerMPBridge(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLFakePeerInfo(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLStartConnectionBypass(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLWifiStartBypass(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLTransferPacketBypass(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLNetDisconnectBypass(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLNetResetBypass(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    if (HandleNSMLPacketReplay(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
+                    PatchNSMLClientConfirmSchedule(this, instrAddr);
+                    PatchNSMLStageStartNet20Check(this, instrAddr);
+                    PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
+                    PatchNSMLRenderCameraAlias(this, instrAddr);
+                    PatchNSMLCameraFocusLoopCount(this, instrAddr);
+                    TraceNSMLStageCamera(this, instrAddr);
+                    TraceNSMLPlayerRender(this, instrAddr);
+                    TraceNSMLPlayerDefeatedEntry(this, instrAddr);
+                    TraceNSMLStageStartDispatch(this, instrAddr);
+                    TraceNSMLCallImpl(this, instrAddr);
+                    TraceNSMLRandomCall(this, instrAddr);
                 }
-                if (HandleNSMLSafeLevelCall(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLStageStartReadyProbeCall(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLStageStartStep6CloseCall(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLStageSceneReadyCloseCall(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLCheckPacketBitsBridge(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLPacketReadByteBridge(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLLowerMPBridge(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLFakePeerInfo(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLStartConnectionBypass(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLWifiStartBypass(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLTransferPacketBypass(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLNetDisconnectBypass(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLNetResetBypass(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLPacketReplay(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                PatchNSMLClientConfirmSchedule(this, instrAddr);
-                PatchNSMLStageStartNet20Check(this, instrAddr);
-                PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
-                PatchNSMLRenderCameraAlias(this, instrAddr);
-                PatchNSMLCameraFocusLoopCount(this, instrAddr);
-                TraceNSMLStageCamera(this, instrAddr);
-                TraceNSMLPlayerRender(this, instrAddr);
-                TraceNSMLPlayerDefeatedEntry(this, instrAddr);
-                TraceNSMLStageStartDispatch(this, instrAddr);
-                TraceNSMLCallImpl(this, instrAddr);
-                TraceNSMLRandomCall(this, instrAddr);
 
                 // prefetch
                 R[15] += 4;
@@ -5284,7 +5335,8 @@ void ARMv4::Execute()
         if constexpr (mode == CPUExecuteMode::JIT)
         {
             u32 instrAddr = R[15] - ((CPSR&0x20)?2:4);
-            TraceNSMLRandomCall(this, instrAddr);
+            if (NSMLRuntimeHooksMaybeEnabled())
+                TraceNSMLRandomCall(this, instrAddr);
 
             if ((instrAddr < FastBlockLookupStart || instrAddr >= (FastBlockLookupStart + FastBlockLookupSize))
                 && !NDS.JIT.SetupExecutableRegion(1, instrAddr, FastBlockLookup, FastBlockLookupStart, FastBlockLookupSize))

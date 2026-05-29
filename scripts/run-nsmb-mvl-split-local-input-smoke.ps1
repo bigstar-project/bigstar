@@ -27,8 +27,18 @@ param(
     [int]$GameStateTraceInterval = 30,
     [switch]$NoGameStateTrace,
     [switch]$SkipGameStateComparison,
+    [switch]$NoFrameLimit,
+    [switch]$FixedFrameTime,
+    [double]$TargetFps = 0.0,
     [switch]$NoDrawScreen,
     [switch]$NoAudioSync,
+    [switch]$UseLanMP,
+    [switch]$ForceStageActorFreezeFlag,
+    [switch]$ForceStageActorFreezeFlagHostOnly,
+    [switch]$ForceStageActorFreezeFlagClientOnly,
+    [int]$ForceStageActorFreezeFlagStartFrame = 0,
+    [int]$ForceStageActorFreezeFlagEndFrame = 0,
+    [string]$ForceStageActorFreezeFlagValue = "0",
     [int]$HostStartupDelayMs = 1200,
     [string]$LogDir = "logs\nsmb-mvl-split-local-input-smoke",
     [switch]$AllowJit
@@ -70,10 +80,13 @@ $common = @(
     "-InputSendDelayFrames", "$InputSendDelayFrames",
     "-InputSendJitterFrames", "$InputSendJitterFrames",
     "-PacketBridgeJitHelperPatch",
-    "-PacketBridgeJitHelperPatchFrame", "900",
-    "-PacketBridgeStartFrame", "900",
-    "-RequireNetLocalAidStartFrame", "900"
+    "-PacketBridgeJitHelperPatchFrame", "870",
+    "-PacketBridgeStartFrame", "870",
+    "-RequireNetLocalAidStartFrame", "870"
 )
+if (-not $UseLanMP) {
+    $common += "-NoLanMP"
+}
 if (-not $NoGameStateTrace) {
     $common += @(
         "-GameStateTrace",
@@ -84,11 +97,34 @@ if (-not $NoGameStateTrace) {
 if ($AllowJit) {
     $common += "-AllowJit"
 }
+if ($NoFrameLimit) {
+    $common += "-NoFrameLimit"
+}
+if ($FixedFrameTime) {
+    $common += "-FixedFrameTime"
+}
+if ($TargetFps -gt 0.0) {
+    $common += @("-TargetFps", "$TargetFps")
+}
 if ($NoDrawScreen) {
     $common += "-NoDrawScreen"
 }
 if ($NoAudioSync) {
     $common += "-NoAudioSync"
+}
+if ($ForceStageActorFreezeFlag) {
+    $common += @(
+        "-ForceStageActorFreezeFlag",
+        "-ForceStageActorFreezeFlagStartFrame", "$ForceStageActorFreezeFlagStartFrame",
+        "-ForceStageActorFreezeFlagEndFrame", "$ForceStageActorFreezeFlagEndFrame",
+        "-ForceStageActorFreezeFlagValue", "$ForceStageActorFreezeFlagValue"
+    )
+    if ($ForceStageActorFreezeFlagHostOnly) {
+        $common += "-ForceStageActorFreezeFlagHostOnly"
+    }
+    if ($ForceStageActorFreezeFlagClientOnly) {
+        $common += "-ForceStageActorFreezeFlagClientOnly"
+    }
 }
 if ($InputNetplayTrace) {
     $common += "-InputNetplayTrace"
