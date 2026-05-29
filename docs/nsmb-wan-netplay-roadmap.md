@@ -87,7 +87,7 @@ cargo build
 
 ### Phase 3: サーバーなしWebRTC接続
 
-状態: 実装済み、ビルド確認済み。ローカルDataChannel smoke確認済み。実WAN/手動プレイ検証は未実施。
+状態: 実装済み、ビルド確認済み。ローカルDataChannel smoke確認済み。1PC 2プロセスのWebRTC bridge + UDP往復確認済み。melonDS実プレイ経由と実WAN検証は未実施。
 
 実装:
 
@@ -121,6 +121,30 @@ cargo build --features webrtc
 nsmb-net-bridge webrtc: connection state Connected
 nsmb-net-bridge webrtc: connection state Connected
 nsmb-net-bridge webrtc: loopback smoke passed
+```
+
+1PC 2プロセスWebRTC bridge確認:
+
+```text
+offer bridge:
+  local-bind 127.0.0.1:9101
+  local-target 127.0.0.1:9103
+
+answer bridge:
+  local-bind 127.0.0.1:9102
+  local-target 127.0.0.1:9104
+
+UDP relay:
+  127.0.0.1:9101 -> WebRTC -> 127.0.0.1:9104
+  127.0.0.1:9102 -> WebRTC -> 127.0.0.1:9103
+```
+
+確認済み結果:
+
+```text
+WEBRTC_TWO_PROCESS_UDP_SMOKE=PASS
+got1=offer-to-answer
+got2=answer-to-offer
 ```
 
 必要ツール:
@@ -169,8 +193,8 @@ melonDS手動起動例:
 
 ## 次にやること
 
-1. `nsmb-net-bridge` のWebRTC手動接続を1PC内2プロセスで確認する。
-2. 1PC内で `melonDS -> bridge -> WebRTC -> bridge -> melonDS` の疎通を確認する。
+1. 1PC内で `melonDS -> bridge -> WebRTC -> bridge -> melonDS` の疎通を確認する。
+2. 1PC内でWebRTC bridge経由の手動対戦を確認する。
 3. LAN 2PCでWebRTC bridge経由の手動対戦を確認する。
 4. WAN 2PCでSTUNのみの直結率、ping、jitter、packet lossを測る。
 5. 必要ならTURN fallbackを追加する。
