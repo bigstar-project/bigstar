@@ -4,6 +4,7 @@ external/
 logs/
 bin
 obj
+target/
 *.depend
 *.layout
 *.o

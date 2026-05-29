@@ -4,76 +4,187 @@
 
 New Super Mario Bros. DS の `Mario vs Luigi` を、最終的に一般ユーザーがポート開放なしで WAN 越しに対戦できる形へ持っていく。
 
-既存の `docs/nsmb-mario-vs-luigi-online-poc.md` は melonDS/ROM patch/input sync のPoC履歴と検証状態を管理する。この文書は、WAN実用化、WebRTC sidecar、デスクトップGUI、Cloudflare backend を含む今後の製品寄り方針を管理する。
+`docs/nsmb-mario-vs-luigi-online-poc.md` は melonDS/ROM patch/input sync のPoC履歴と検証状態を扱う。この文書は WAN transport、WebRTC sidecar、将来のGUI/バックエンド方針を扱う。
 
-## 採用方針
+## 現在の採用方針
 
-当面の推奨構成は次の通り。
+当面は GUI とマッチメイキングサーバーを後回しにし、サーバーなしの手動コピー&ペースト signaling で WebRTC DataChannel が使えるかを確認する。
+
+重要な設計判断:
+
+- melonDS本体の入力同期実装はすぐに壊さない。
+- まずは既存の ENet/UDP packet を opaque datagram として外側から運ぶ。
+- `nsmb-net-bridge` は `melonDS <-> localhost UDP <-> WebRTC DataChannel <-> localhost UDP <-> melonDS` のsidecarとして動かす。
+- WebRTCはTangoと同じく `libdatachannel` 系を使う。
+- マッチメイキング、ランキング、GUI起動管理は後段で作る。
+
+この方針なら、既存のLAN/手動peer対戦で成立しているゲーム同期ロジックを維持したまま、transportだけWAN向けに差し替えられる。
+
+## 構成
 
 ```text
-Cloudflare backend
-  signaling
-  matchmaking
-  lobby
-  account/ranking
-  match result / replay upload
-
-Desktop GUI
-  Tauri + TypeScript UI
-  Rust backend commands
-  melonDS起動管理
-  net bridge起動管理
-  logs/status表示
-
-Net bridge
-  Rust CLI / Rust crate
-  WebRTC DataChannel
-  STUN/TURN
-  local UDP or IPC bridge
-  ping/jitter/loss/relay stats
-
 melonDS fork
   NSMB direct MvL entry
   input netplay adapter
   deterministic start barrier
-  ENet or local bridge transport for development
+  ENet/UDP transport
+
+nsmb-net-bridge
+  local UDP endpoint
+  WebRTC DataChannel endpoint
+  manual copy-paste SDP exchange
+  later: signaling server support
+
+future desktop launcher
+  Tauri + TypeScript UI
+  melonDS process management
+  bridge process management
+  logs/status display
+
+future backend
+  signaling
+  matchmaking/lobby
+  account/ranking
+  match result / replay upload
 ```
 
-## 責務分離
+## Phase Status
 
-- `melonDS fork`: ゲーム開始、入力同期、ROM patch、状態検証を担当する。
-- `nsmb-net-bridge`: WAN transportを担当する。melonDSからは localhost の相手として見えるようにする。
-- `nsmb-launcher`: GUI、設定、マッチメイキング、melonDS/bridgeの起動管理を担当する。
-- `Cloudflare backend`: signaling、matchmaking、room、ranking、result保存を担当する。
+### Phase 1: Transport境界の整理
 
-重要なのは、ゲーム同期の問題とWAN接続の問題を分けること。既存PoCで動いている入力同期経路を壊さず、transportだけを差し替えられる形にする。
+状態: 完了
 
-## 技術選定
+- 既存のmelonDS側は、当面 ENet/UDP を使う。
+- sidecarはmelonDSから見ると単なる相手UDP endpointとして振る舞う。
+- これにより、melonDS本体にWebRTC依存を入れない。
 
-### Net Bridge
+### Phase 2: Rust bridge最小PoC
 
-Rustで作る。
+状態: 実装済み、ビルド確認済み
 
-理由:
+実装:
 
-- TangoがRust + libdatachannel構成で参考にしやすい。
-- Windows向け単体exe配布がしやすい。
-- tokioでWebSocket signaling、local UDP/IPC、WebRTC event loopを扱いやすい。
-- バイナリpacket処理、低遅延処理、ログ出力に向いている。
-- 後でTauri backendへcrateとして統合できる。
+- `tools/nsmb-net-bridge`
+- Rust CLI
+- `udp` mode
+- packet count/byte countログ
+- local target自動学習
+
+通常ビルド確認:
+
+```powershell
+cd tools\nsmb-net-bridge
+$env:Path="$env:USERPROFILE\.cargo\bin;$env:Path"
+cargo build
+```
+
+単体起動例:
+
+```powershell
+.\tools\nsmb-net-bridge\target\debug\nsmb-net-bridge.exe udp --local-bind 127.0.0.1:0 --local-target 127.0.0.1:8165 --bridge-bind 127.0.0.1:9001 --bridge-peer 127.0.0.1:9002
+.\tools\nsmb-net-bridge\target\debug\nsmb-net-bridge.exe udp --local-bind 127.0.0.1:8265 --bridge-bind 127.0.0.1:9002 --bridge-peer 127.0.0.1:9001
+```
+
+### Phase 3: サーバーなしWebRTC接続
+
+状態: 実装済み、ビルド確認済み。ローカルDataChannel smoke確認済み。実WAN/手動プレイ検証は未実施。
+
+実装:
+
+- `webrtc-offer` mode
+- `webrtc-answer` mode
+- 手動コピー&ペーストのbase64 SDP交換
+- STUN指定対応
+- デフォルトSTUN: `stun:stun.l.google.com:19302`
+- unreliable + unordered DataChannel
+- local UDP <-> DataChannel relay
+- `webrtc-loopback-smoke` による同一プロセス内DataChannel疎通確認
+
+WebRTC feature付きビルド確認:
+
+```powershell
+cd tools\nsmb-net-bridge
+$env:Path="C:\Strawberry\perl\bin;$env:USERPROFILE\.cargo\bin;$env:Path"
+$env:LIBCLANG_PATH="C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\Llvm\x64\bin"
+cargo build --features webrtc
+```
+
+ローカルWebRTC smoke確認:
+
+```powershell
+.\tools\nsmb-net-bridge\target\debug\nsmb-net-bridge.exe webrtc-loopback-smoke
+```
+
+確認済み結果:
+
+```text
+nsmb-net-bridge webrtc: connection state Connected
+nsmb-net-bridge webrtc: connection state Connected
+nsmb-net-bridge webrtc: loopback smoke passed
+```
+
+必要ツール:
+
+- Rustup/Rust
+- Visual Studio 2022 Build Tools
+- CMake
+- Strawberry Perl
+- `LIBCLANG_PATH` に VS Build Tools 付属の `libclang.dll` ディレクトリを指定
+
+手動WebRTC起動例:
+
+Offer側:
+
+```powershell
+.\tools\nsmb-net-bridge\target\debug\nsmb-net-bridge.exe webrtc-offer --local-bind 127.0.0.1:0 --local-target 127.0.0.1:8165
+```
+
+Answer側:
+
+```powershell
+.\tools\nsmb-net-bridge\target\debug\nsmb-net-bridge.exe webrtc-answer --local-bind 127.0.0.1:8265
+```
+
+使い方:
+
+1. Offer側を起動して、表示されたoffer SDP base64をAnswer側へ貼る。
+2. Answer側が表示したanswer SDP base64をOffer側へ貼る。
+3. `connected` になったらmelonDSを起動する。
+4. Answer側のmelonDSはbridgeに向けるため、1PC検証なら `-Peer 127.0.0.1 -Port 8265` で起動する。
+5. 2PC検証ではPCが分かれるので、Answer側bridgeもmelonDSも標準の `8165` を使ってよい。
+
+melonDS手動起動例:
+
+```powershell
+.\scripts\run-nsmb-mvl-manual-peer.ps1 -Role host -Peer 127.0.0.1
+.\scripts\run-nsmb-mvl-manual-peer.ps1 -Role client -Peer 127.0.0.1 -Port 8265
+```
+
+注意:
+
+- 現時点ではsignaling serverなしなので、接続確立は手動コピー&ペースト。
+- STUNだけで直結できないNAT環境では接続できない可能性がある。
+- TURN fallbackは未実装。
+- まだWAN実測、jitter/loss統計、実プレイ安定性検証は未完了。
+
+## 次にやること
+
+1. `nsmb-net-bridge` のWebRTC手動接続を1PC内2プロセスで確認する。
+2. 1PC内で `melonDS -> bridge -> WebRTC -> bridge -> melonDS` の疎通を確認する。
+3. LAN 2PCでWebRTC bridge経由の手動対戦を確認する。
+4. WAN 2PCでSTUNのみの直結率、ping、jitter、packet lossを測る。
+5. 必要ならTURN fallbackを追加する。
+6. 実用化段階でsignaling server、matchmaking、launcherへ進む。
+
+## 将来方針
 
 ### Desktop GUI
 
 Tauri + TypeScriptを本命にする。
 
-理由:
-
-- UIはTypeScriptで作れる。
-- Rust製bridgeとの相性が良い。
-- Electronより軽い。
-- 最初は `nsmb-net-bridge.exe` をspawnし、後でRust crateとして直接組み込む選択肢を残せる。
-
-Electronは、Web UI開発速度や既存Node資産を強く優先する場合の候補。ただし今回のWebRTC/DataChannel実装はRust bridgeに寄せるため、Electronを使う積極的な理由は現時点では弱い。
+- UIはTypeScriptで作る。
+- Rust製bridgeを将来crateとして直接統合できる。
+- 初期はCLIの`nsmb-net-bridge.exe`をspawnするだけでよい。
 
 ### Backend
 
@@ -81,113 +192,15 @@ Cloudflare Workers + Durable Objects + TypeScriptを本命にする。
 
 初期:
 
-- session_id による2者matching
 - WebSocket signaling
+- session_id による2人接続
 - ICE server配布
 - SDP offer/answer交換
 
 将来:
 
-- D1: users, ratings, match results
-- R2: replay/input log保存
-- Durable Objects: lobby, room, active match
-- Queues: result validation
-- Analytics: ping, region, TURN relay率
-
-## WebRTC方針
-
-Tangoと同様に、WebRTC DataChannelを使う。
-
-ICE server方針:
-
-- 通常はSTUNでP2P直結を狙う。
-- 直結できない場合はTURN relayにfallbackする。
-- 実用化時は日本国内/近隣regionにTURNを用意する。TURN relayは遅延が増えるため、対戦品質表示に反映する。
-
-DataChannelは用途別に分ける。
-
-```text
-reliable ordered channel:
-  handshake
-  ROM hash
-  patch version
-  match seed
-  start-ready
-  settings sync
-  disconnect reason
-
-unreliable unordered channel:
-  per-frame input
-  input bundle history
-  ping
-  jitter/loss/frame lead stats
-```
-
-毎フレーム入力は reliable に寄せない。古いpacket再送で新しい入力まで詰まるのを避けるため、unreliable + unordered + 過去入力bundleを基本にする。
-
-## 段階的実装
-
-### Phase 1: Transport境界を整理
-
-- melonDS側の現在のENet依存を整理し、transport境界を明確にする。
-- 既存ENet経路はLAN/デバッグ用に残す。
-- localhost bridge向けの送受信口を追加する。
-- packet formatを文書化する。
-
-### Phase 2: Rust bridgeの最小PoC
-
-- `nsmb-net-bridge` CLIを作る。
-- まず localhost relay として動作させる。
-- melonDS同士を `melonDS -> bridge -> bridge -> melonDS` でつなぎ、ENet直結と同じ結果になるか確認する。
-- ping、packet count、loss、jitter、frame leadをログに出す。
-
-### Phase 3: WebRTC接続
-
-- Tangoの `datachannel-wrapper` / `tango-signaling` 構成を参考にする。
-- signaling serverでsession_id接続する。
-- STUNのみでP2P直結を確認する。
-- DataChannel上でPhase 2と同じpacket relayを行う。
-
-### Phase 4: TURN fallback
-
-- Cloudflare TURNまたはcoturn等を検証する。
-- `relay=auto/off/force` を持たせる。
-- P2P直結時とTURN relay時のping/jitterを計測する。
-- `InputDelayFrames=4` で国内WANが現実的か確認する。
-
-### Phase 5: Tauri launcher
-
-- ROM/patch確認。
-- melonDSとbridgeの起動管理。
-- session作成/参加。
-- 接続状態、P2P/TURN、ping/jitter、入力遅延、FPSを表示。
-- 対戦終了後にログ/結果を保存する。
-
-### Phase 6: Matchmaking / Ranking
-
-- accountまたは軽量identityを導入する。
-- lobby/matchmakingを作る。
-- result uploadとrating更新を作る。
-- 入力ログ、ROM/patch hash、match seed、簡易state hashを保存し、最低限の検証可能性を持たせる。
-
-## 現在の優先順位
-
-1. 既存PoCの低遅延入力同期を壊さない。
-2. melonDS内の通信経路をtransport抽象化し、ENetとlocalhost bridgeを差し替え可能にする。
-3. Rust bridgeのlocalhost relay PoCを作る。
-4. WebRTC DataChannelをbridge間に入れる。
-5. WAN実測で4F delayの実用性を見る。
-
-## 未決事項
-
-- melonDSとbridge間のlocal transportを UDP にするか TCP/pipe にするか。
-- WebRTC crateはTangoと同じ `datachannel` / libdatachannel を使うか、別候補を使うか。
-- signaling serverをTangoの構造からfork/流用するか、新規で作るか。
-- TURN providerをCloudflareにするか、自前coturnにするか。
-- Tauriへbridgeをいつ統合するか。初期は必ずCLI bridgeとして独立させる。
-
-## 次にやること
-
-- `nsmb-net-bridge` の最小仕様を決める。
-- melonDS側の現在のENet packet送受信箇所を整理し、bridge transportに必要なAPIを洗い出す。
-- localhost relayのみで既存LAN相当の手動対戦が動くかを最初の実装目標にする。
+- lobby/matchmaking
+- account/ranking
+- result upload
+- replay/input log保存
+- TURN relay region選択

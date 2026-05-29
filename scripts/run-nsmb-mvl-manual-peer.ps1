@@ -2,6 +2,7 @@ param(
     [ValidateSet("host", "client")]
     [string]$Role,
     [string]$Peer = "127.0.0.1",
+    [int]$Port = 8165,
     [int]$Frames = 999999,
     [int]$WaitTimeoutMs = 86400000,
     [int]$InputDelayFrames = 4,
@@ -41,6 +42,7 @@ if (-not $InputUnreliable) {
 $params = @{
     RunRole = $Role
     Peer = $Peer
+    PacketBridgePort = $Port
     Frames = $Frames
     WaitTimeoutMs = $WaitTimeoutMs
     InternalWaitTimeoutMs = $InternalWaitTimeoutMs
@@ -87,7 +89,7 @@ if ($InputUnreliable) {
     $params.InputBundleHistory = $InputBundleHistory
 }
 
-Write-Host "Starting NSMB MvL peer session: role=$Role peer=$Peer"
+Write-Host "Starting NSMB MvL peer session: role=$Role peer=$Peer port=$Port"
 Write-Host "input delay=$InputDelayFrames sendDelay=$InputSendDelayFrames sendJitter=$InputSendJitterFrames max frame lead=$InputMaxFrameLead internalWaitTimeoutMs=$InternalWaitTimeoutMs unreliable=$($InputUnreliable.IsPresent) bundleHistory=$InputBundleHistory jit=$(-not $NoJit)"
 Write-Host "frameLimit=$(-not $NoFrameLimit.IsPresent) swapBuffersInterval=$SwapBuffersInterval startBarrier=$(-not $NoStartBarrier) renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' })"
 Write-Host "log=$LogDir"

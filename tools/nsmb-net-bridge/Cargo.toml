@@ -1,0 +1,20 @@
+[package]
+name = "nsmb-net-bridge"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+webrtc = [
+    "dep:base64",
+    "dep:datachannel-wrapper",
+    "dep:tokio",
+]
+
+[dependencies]
+base64 = { version = "0.22", optional = true }
+datachannel-wrapper = { path = "../../external/tango/datachannel-wrapper", optional = true }
+tokio = { version = "1", features = ["full"], optional = true }
+
+[lints.rust]
+unsafe_code = "forbid"
