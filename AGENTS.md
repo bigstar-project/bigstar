@@ -1,5 +1,11 @@
 # Repository Working Rules
 
+## Git Operations
+
+Do not push automatically. Only run `git push` when the user explicitly asks for a push in the current conversation.
+
+Local commits are allowed when they are useful for preserving completed work, but pushing to remotes requires an explicit user request each time.
+
 ## Progress Tracking
 
 For this fork, keep the NSMB Mario vs Luigi online progress updated in `docs/`.

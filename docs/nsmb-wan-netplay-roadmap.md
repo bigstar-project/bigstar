@@ -188,12 +188,14 @@ cargo check --features webrtc: pass
 - `feature/*` or `codex-*`: 個別作業ブランチ。
 - 自分のGitHub remoteを `origin` (`https://github.com/uniunitaro/nsmb-mvl-online.git`)、公式melonDS remoteを `upstream` にする。
 - GitHub Actionsのsignaling deployは `main` push と `main` 手動dispatchに限定する。PRではCIのみ。
+- エージェントはユーザーがその都度明示的に依頼した場合だけ `git push` する。ローカルcommitとpushは分けて扱う。
 
 理由:
 
 - melonDS公式履歴に近い `master` を温存できる。
 - `main` はNSMB online向けのアプリ、signaling server、bridge、docsを含む統合ブランチとして扱える。
 - GitHub Actionsのsignaling deployは `main` push と `main` 手動dispatchに限定し、`upstream/master` 追従作業で誤deployしない。
+- `main` pushでdeployが走るため、エージェントの自動pushを禁止して意図しないdeployを避ける。
 
 ## 1PC auto smoke FPS investigation
 
