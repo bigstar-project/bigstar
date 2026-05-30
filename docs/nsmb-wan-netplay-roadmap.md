@@ -57,7 +57,7 @@ future backend
 
 ### Phase 4: Cloudflare signaling server
 
-状態: 実装済み、ローカル型チェック/リンティング確認済み。Cloudflare デプロイと実サーバー経由の2PC接続確認は未実施。
+状態: 実装済み、ローカル型チェック/リンティング確認済み。Cloudflare デプロイはユーザー側で完了。実サーバー経由の2PC接続確認は未実施。
 
 実装:
 
@@ -104,7 +104,7 @@ biome check . --write: no fixes applied
 
 ### Phase 5: nsmb-net-bridge signaling integration
 
-状態: 実装済み、Rust通常check/WebRTC feature check確認済み。実サーバー経由の疎通確認は未実施。
+状態: 実装済み、Rust通常check/WebRTC feature check確認済み。signaling対応を含むreleaseビルド作成済み。実サーバー経由の疎通確認は未実施。
 
 実装:
 
@@ -118,6 +118,12 @@ biome check . --write: no fixes applied
 ```powershell
 .\tools\nsmb-net-bridge\target\debug\nsmb-net-bridge.exe webrtc-offer --local-bind 127.0.0.1:0 --local-target 127.0.0.1:8165 --signal wss://<worker-host>/session --session test-room
 .\tools\nsmb-net-bridge\target\debug\nsmb-net-bridge.exe webrtc-answer --local-bind 127.0.0.1:8265 --signal wss://<worker-host>/session --session test-room
+```
+
+最新releaseビルド:
+
+```powershell
+.\tools\nsmb-net-bridge\target\release\nsmb-net-bridge.exe
 ```
 
 ローカル確認:
@@ -137,6 +143,7 @@ cargo check --features webrtc
 cargo fmt --check: pass
 cargo check: pass
 cargo check --features webrtc: pass
+cargo build --release --features webrtc: pass
 ```
 
 ### Future: 本番WAN向け signaling / WebRTC hardening
