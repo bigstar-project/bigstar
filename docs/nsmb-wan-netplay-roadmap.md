@@ -179,14 +179,14 @@ cargo check --features webrtc: pass
 
 ### Repository / branch policy
 
-状態: 方針検討中。
+状態: 方針決定。`main` は `uniunitaro/nsmb-mvl-online` の本線として扱う。
 
 推奨:
 
 - `upstream/master`: melonDS公式追従用。基本的に直接変更しない。
 - `main`: このfork/独自プロダクトの本線。`master` から作成し、NSMB online向け作業ブランチをmergeする。
 - `feature/*` or `codex-*`: 個別作業ブランチ。
-- 自分のGitHub remoteを `origin`、公式melonDS remoteを `upstream` にする。
+- 自分のGitHub remoteを `origin` (`https://github.com/uniunitaro/nsmb-mvl-online.git`)、公式melonDS remoteを `upstream` にする。
 - GitHub Actionsのsignaling deployは `main` push に限定する。PRではCIのみ。
 
 理由:
