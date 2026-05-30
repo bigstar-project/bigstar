@@ -17,7 +17,7 @@ corepack pnpm dev
 Deployment is intentionally left to the repository owner:
 
 ```powershell
-corepack pnpm deploy -- --stage prod
+corepack pnpm deploy --stage prod
 ```
 
 ## WebSocket Endpoint

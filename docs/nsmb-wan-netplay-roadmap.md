@@ -75,7 +75,7 @@ future backend
 - GitHub Actions:
   - push/PR は typecheck + Biome
   - deploy は `main` push 時に自動実行する
-  - deploy stage は `prod` を明示する: `pnpm run deploy -- --stage prod`
+  - deploy stage は `prod` を明示する: `pnpm run deploy --stage prod`
 
 ローカル確認:
 

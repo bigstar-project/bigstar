@@ -59,4 +59,4 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           DEFAULT_ICE_SERVERS: ${{ vars.DEFAULT_ICE_SERVERS }}
           NODE_ENV: production
-        run: pnpm run deploy -- --stage prod
+        run: pnpm run deploy --stage prod
