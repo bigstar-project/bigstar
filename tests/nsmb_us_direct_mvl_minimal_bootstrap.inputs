@@ -1,0 +1,9 @@
+# Direct MvL minimal bootstrap.
+# Only drives the menu confirmation needed before direct MvL entry reaches gameplay.
+# Do not script post-gameplay inputs here; input netplay normalizes gameplay start per peer.
+
+0-619 NONE
+620-627 DOWN
+628-659 NONE
+660-667 A
+668-10000 NONE

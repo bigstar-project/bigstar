@@ -93,16 +93,12 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 ## 現在の最優先課題
 
-1. ユーザー環境のLAN 2PC + software rendererで、通常プレイ時に60fps相当を維持できるか確認する。
-2. 複雑入力や長めの手動対戦で、throttle timeout が出なくなり、star/object/player state が継続して一致するか見る。
-3. LAN 2PCで60fps相当を維持できる場合、次はWAN相当の遅延・jitterを入れて `InputDelayFrames=4` の実用限界を見る。
-4. software rendererで50-55fps級の低下が再発する場合は、次を個別に切り分ける:
-   - OSD on/off
-   - `SwapBuffersInterval=1/2/4`
-   - frame limit on/off
-   - VSync on/off
-   - 1PC 2プロセス vs LAN 2PC
-   - trace/hash/screenshot/game-state trace の有無
+1. 開始直後からhost/clientのenemy/object位置が微妙にズレることがある。特に最初のクリボー付近で、同じ入力でも接触判定が分岐しうる。
+2. 2026-05-30調査: 固定 `PacketBridgeStartFrame=870` では、hostがraw frame 860、clientがraw frame 866でMvsL gameplay actor生成に到達していた。つまりbarrier前にhost側の試合内時間が6F進んでいた。
+3. 対策: start-ready barrierを固定raw frameではなく、player actor 2体 + 最初のクリボー相当actorが出揃った最初のframeで行う。host raw 860 / client raw 866 を同じnetplay論理frameに正規化し、入力packet frameとNSMB側tickは論理frameで揃える。
+4. 手動起動のデフォルトbootstrapは、ゲーム開始後にA入力が残らない `tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs` に変更。試合中入力のズレ要因を避けるため。
+5. 検証: `logs\codex-sync-drift-dynamic-start-2` ではraw frame同士の比較だと6F差に見えるが、host frame `f` と client frame `f+6` を対応させると、最初のクリボー位置/速度とplayer位置が一致した。
+6. 残り: 自動smokeの終了条件はraw frame基準なので、動的start後は片側が先に終了してもう片側がthrottle timeoutすることがある。これは手動対戦の同期ズレとは別のテストハーネス問題として扱う。
 
 ## 手動起動
 

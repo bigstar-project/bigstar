@@ -835,6 +835,7 @@ struct ObjectLifecycleSummary
 };
 
 ObjectScanSample FindObjectByIDAndSettingsLoose(melonDS::NDS* nds, melonDS::u16 expectedObjectID, melonDS::u32 expectedSettings);
+PlayerActorScanSample FindPlayerActors(melonDS::NDS* nds);
 
 struct GameStateSyncHashes
 {
@@ -904,6 +905,7 @@ struct State
     bool WaitForPeerAtNetplayStart = false;
     bool WaitedForPeerAtNetplayStart = false;
     bool NetplayStartReadySent = false;
+    melonDS::u32 LocalNetplayStartReadyFrame = kNoFrameLimit;
     melonDS::u32 RemoteNetplayStartReadyFrame = kNoFrameLimit;
     bool NetplayStartWaitArrived[16] {};
     bool NetplayStartWaitComplete = false;
@@ -4083,6 +4085,33 @@ bool ShouldPumpNetworkAtFrame(melonDS::u32 syncFrame, melonDS::u32 sendStartFram
     return !G.DeferNetworkUntilStart || G.NetplayStartFrame == 0 || syncFrame >= sendStartFrame;
 }
 
+bool IsInputNetplayGameplayStartReady(melonDS::NDS* nds)
+{
+    if (!nds || !nds->MainRAM)
+        return false;
+    if (!IsMarioVsLuigiGameplay(nds))
+        return false;
+
+    const PlayerActorScanSample players = FindPlayerActors(nds);
+    if (!players.Actor0.Found || !players.Actor1.Found)
+        return false;
+
+    const ObjectScanSample firstGoomba = FindObjectByIDAndSettingsLoose(
+        nds,
+        kVsMovingHazardObjectID,
+        kVsMovingHazardSettings);
+    return firstGoomba.Found != 0;
+}
+
+melonDS::u32 InputNetplayLogicalFrame(melonDS::u32 rawFrame)
+{
+    if (!G.InputNetplayOnly || G.LocalNetplayStartReadyFrame == kNoFrameLimit)
+        return rawFrame;
+    if (rawFrame < G.LocalNetplayStartReadyFrame)
+        return rawFrame;
+    return G.NetplayStartFrame + (rawFrame - G.LocalNetplayStartReadyFrame);
+}
+
 bool AllNetplayStartWaitArrivedLocked()
 {
     const int count = std::max(1, std::min(G.TestInstanceCount, 16));
@@ -4178,13 +4207,20 @@ void WaitForPeerAtNetplayStartBarrier(int instanceID, melonDS::u32 syncFrame)
 void WaitForRemoteNetplayStartReadyIfNeeded(melonDS::NDS* nds, melonDS::u32 syncFrame)
 {
     if (!G.Enabled || !G.InputNetplayOnly || !G.WaitForPeerAtNetplayStart
-        || G.NetplayStartFrame == 0 || syncFrame != G.NetplayStartFrame
+        || G.NetplayStartFrame == 0 || syncFrame < G.NetplayStartFrame
         || G.WaitedForPeerAtNetplayStart)
     {
         return;
     }
+    if (!IsInputNetplayGameplayStartReady(nds))
+        return;
 
-    std::printf("NSMB InputNetplay: waiting for remote start ready frame=%u\n", syncFrame);
+    if (G.LocalNetplayStartReadyFrame == kNoFrameLimit)
+        G.LocalNetplayStartReadyFrame = syncFrame;
+
+    std::printf("NSMB InputNetplay: waiting for remote gameplay start ready localFrame=%u logicalStart=%u\n",
+        syncFrame,
+        G.NetplayStartFrame);
     std::fflush(stdout);
 
     const auto start = std::chrono::steady_clock::now();
@@ -4195,13 +4231,13 @@ void WaitForRemoteNetplayStartReadyIfNeeded(melonDS::NDS* nds, melonDS::u32 sync
             PumpNetworkLocked(nds, syncFrame);
             SendMatchSeedLocked();
             SendNetplayStartReadyLocked(syncFrame);
-            if (G.RemoteNetplayStartReadyFrame != kNoFrameLimit
-                && G.RemoteNetplayStartReadyFrame >= syncFrame)
+            if (G.RemoteNetplayStartReadyFrame != kNoFrameLimit)
             {
                 G.WaitedForPeerAtNetplayStart = true;
-                std::printf("NSMB InputNetplay: remote start ready accepted remoteFrame=%u localFrame=%u\n",
+                std::printf("NSMB InputNetplay: remote gameplay start ready accepted remoteFrame=%u localFrame=%u logicalStart=%u\n",
                     G.RemoteNetplayStartReadyFrame,
-                    syncFrame);
+                    syncFrame,
+                    G.NetplayStartFrame);
                 std::fflush(stdout);
                 return;
             }
@@ -4217,6 +4253,8 @@ void WaitForRemoteNetplayStartReadyIfNeeded(melonDS::NDS* nds, melonDS::u32 sync
                     syncFrame,
                     G.SeedWaitTimeoutMs);
                 std::fflush(stdout);
+                G.LocalNetplayStartReadyFrame = kNoFrameLimit;
+                G.NetplayStartReadySent = false;
                 return;
             }
         }
@@ -6816,6 +6854,14 @@ void WritePacketBridgeJitScratchIfNeeded(
     if (G.ScriptRemotePacketEndFrame != 0 && frame > G.ScriptRemotePacketEndFrame)
         return;
 
+    const melonDS::u32 logicalFrame = InputNetplayLogicalFrame(frame);
+    if (G.InputNetplayOnly
+        && G.WaitForPeerAtNetplayStart
+        && G.LocalNetplayStartReadyFrame == kNoFrameLimit)
+    {
+        return;
+    }
+
     const int localPlayer = CurrentPacketBridgeLocalPlayer();
     if (G.InputNetplayOnly && G.WaitForPeerBeforeStart && G.NetplayStartFrame > 0)
     {
@@ -6840,7 +6886,7 @@ void WritePacketBridgeJitScratchIfNeeded(
     if (G.Enabled && G.Ready)
     {
         const melonDS::u32 sendFrame = G.InputNetplayOnly
-            ? frame + static_cast<melonDS::u32>(std::max(0, G.Delay))
+            ? logicalFrame + static_cast<melonDS::u32>(std::max(0, G.Delay))
             : frame;
         {
             std::lock_guard<std::mutex> lock(G.Mutex);
@@ -6850,19 +6896,19 @@ void WritePacketBridgeJitScratchIfNeeded(
             SendInputLocked(sendFrame, localInput);
             if (G.InputNetplayOnly)
             {
-                auto localIt = G.LocalInputs.find(frame);
+                auto localIt = G.LocalInputs.find(logicalFrame);
                 effectiveLocalInput = localIt != G.LocalInputs.end() ? localIt->second : NeutralInput();
             }
-            auto it = G.RemoteInputs.find(frame);
+            auto it = G.RemoteInputs.find(logicalFrame);
             if (it != G.RemoteInputs.end())
             {
                 remoteInput = it->second;
                 hasRemoteInput = true;
             }
             else if (G.RollbackEnabled && G.InputNetplayOnly
-                && (G.NetplayStartFrame == 0 || frame >= G.NetplayStartFrame))
+                && (G.NetplayStartFrame == 0 || logicalFrame >= G.NetplayStartFrame))
             {
-                hasRemoteInput = GetRollbackRemoteInputLocked(frame, remoteInput, predictedRemoteInput);
+                hasRemoteInput = GetRollbackRemoteInputLocked(logicalFrame, remoteInput, predictedRemoteInput);
             }
         }
 
@@ -6871,19 +6917,19 @@ void WritePacketBridgeJitScratchIfNeeded(
         if (!hasRemoteInput
             && !G.RollbackEnabled
             && G.LocalWaitsForRemote
-            && (!G.InputNetplayOnly || G.NetplayStartFrame == 0 || frame >= G.NetplayStartFrame))
+            && (!G.InputNetplayOnly || G.NetplayStartFrame == 0 || logicalFrame >= G.NetplayStartFrame))
         {
-            remoteInput = WaitForRemoteInput(frame);
+            remoteInput = WaitForRemoteInput(logicalFrame);
             hasRemoteInput = true;
         }
     }
 
-    if (frame < startFrame)
+    if (logicalFrame < startFrame)
         return;
 
     WritePacketBridgeJitScratchInputs(
         instanceID,
-        frame,
+        logicalFrame,
         nds,
         localPlayer,
         effectiveLocalInput,

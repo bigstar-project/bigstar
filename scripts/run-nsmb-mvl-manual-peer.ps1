@@ -15,7 +15,7 @@ param(
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds",
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds",
-    [string]$InputScript = "tests\nsmb_us_direct_mvl_manual_bootstrap.inputs",
+    [string]$InputScript = "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs",
     [string]$LogDir = "",
     [int]$SwapBuffersInterval = 1,
     [switch]$UseFrameLimit,
@@ -92,8 +92,8 @@ $params = @{
     InputSendJitterFrames = $InputSendJitterFrames
     InputMaxFrameLead = $InputMaxFrameLead
     PacketBridgeJitHelperPatch = $true
-    PacketBridgeJitHelperPatchFrame = 870
-    PacketBridgeStartFrame = 870
+    PacketBridgeJitHelperPatchFrame = 840
+    PacketBridgeStartFrame = 840
     WaitForPeerAtNetplayStart = (-not $NoStartBarrier)
     LogDir = $LogDir
 }
