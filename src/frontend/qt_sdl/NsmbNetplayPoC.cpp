@@ -90,6 +90,8 @@ constexpr melonDS::u32 kPacketBridgeJitScratchKeysAddr = kPacketBridgeJitScratch
 constexpr melonDS::u32 kPacketBridgeJitScratchPacketsAddr = kPacketBridgeJitScratchBaseAddr + 0x40;
 constexpr melonDS::u32 kNetRandomCallCountAddr = 0x02088A48;
 constexpr melonDS::u32 kNetRandomValueAddr = 0x02088A68;
+constexpr melonDS::u32 kGameRandomCallCountAddr = 0x02085A54;
+constexpr melonDS::u32 kGameRandomValueAddr = 0x02085A70;
 constexpr melonDS::u32 kInputConsoleKeysAddr = 0x02087650;
 constexpr melonDS::u32 kInputPlayerKeysHeldAddr = 0x02087660;
 constexpr melonDS::u32 kInputPlayerKeysPressedAddr = 0x02087664;
@@ -1930,7 +1932,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     G.MatchSeed = packet.Seed;
                     G.MatchSeedConfigured = true;
                     G.InputCond.notify_all();
-                    if (G.StateLoadDir.empty() && !G.InputNetplayOnly)
+                    if (G.StateLoadDir.empty() && !G.PacketBridgeOnly)
                     {
                         G.NetRandomPatchValue = packet.Seed;
                         G.NetRandomPatchEnabled = true;
@@ -8480,32 +8482,40 @@ void ApplyNetRandomPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     constexpr melonDS::u32 kNetRandomValueOffset = kNetRandomValueAddr - kMainRAMBase;
     constexpr melonDS::u32 kNetRandomCallCountOffset = kNetRandomCallCountAddr - kMainRAMBase;
+    constexpr melonDS::u32 kGameRandomValueOffset = kGameRandomValueAddr - kMainRAMBase;
+    constexpr melonDS::u32 kGameRandomCallCountOffset = kGameRandomCallCountAddr - kMainRAMBase;
 
     if (!nds || !nds->MainRAM || !G.NetRandomPatchEnabled) return;
     if (instanceID < 0 || instanceID >= 16) return;
     if (G.NetRandomPatchApplied[instanceID]) return;
     if (kNetRandomValueOffset + sizeof(melonDS::u32) > nds->MainRAMMask + 1) return;
+    if (kGameRandomValueOffset + sizeof(melonDS::u32) > nds->MainRAMMask + 1) return;
 
     bool shouldPatch = frame == G.NetRandomPatchFrame;
     melonDS::u8 randomCallCountBeforePatch = 0;
+    melonDS::u8 gameRandomCallCountBeforePatch = 0;
     if (G.NetRandomPatchAuto)
     {
         const melonDS::u32 ggid = nds->ARM9Read32(kNetGGIDAddr);
         randomCallCountBeforePatch = nds->ARM9Read8(kNetRandomCallCountAddr);
+        gameRandomCallCountBeforePatch = nds->ARM9Read8(kGameRandomCallCountAddr);
         shouldPatch = IsMarioVsLuigiGameplay(nds) || IsMarioVsLuigiGGID(ggid);
     }
     if (!shouldPatch) return;
 
     std::memcpy(&nds->MainRAM[kNetRandomValueOffset], &G.NetRandomPatchValue, sizeof(G.NetRandomPatchValue));
     nds->MainRAM[kNetRandomCallCountOffset] = 0;
+    std::memcpy(&nds->MainRAM[kGameRandomValueOffset], &G.NetRandomPatchValue, sizeof(G.NetRandomPatchValue));
+    nds->MainRAM[kGameRandomCallCountOffset] = 0;
     G.NetRandomPatchApplied[instanceID] = true;
 
-    std::printf("NSMB Test: patched Net::random.value inst=%d frame=%u value=0x%08X auto=%d oldCount=0x%02X resetCount=1\n",
+    std::printf("NSMB Test: patched Net/Game random inst=%d frame=%u value=0x%08X auto=%d oldNetCount=0x%02X oldGameCount=0x%02X resetCount=1\n",
         instanceID,
         frame,
         G.NetRandomPatchValue,
         G.NetRandomPatchAuto ? 1 : 0,
-        randomCallCountBeforePatch);
+        randomCallCountBeforePatch,
+        gameRandomCallCountBeforePatch);
 }
 
 void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -10152,11 +10162,9 @@ void InitFromEnvironment()
         G.MatchSeedConfigured = true;
     }
 
-    if (G.NetRole == Role::Host
-        && G.MatchSeedConfigured
+    if (G.MatchSeedConfigured
         && G.StateLoadDir.empty()
-        && !G.PacketBridgeOnly
-        && !G.InputNetplayOnly)
+        && !G.PacketBridgeOnly)
     {
         G.NetRandomPatchEnabled = true;
         G.NetRandomPatchAuto = true;

@@ -13,7 +13,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - direct MvL entry ROM patch でローカル通信UIを経由せず、Mario vs Luigi ステージへ直接入る。
 - 試合中は `Net::getConsoleKeys(u16)` / `Net::getConsoleTouchPad(u16)` を JIT helper patch で差し替え、WAN入力を player0/player1 入力として渡す。
 - `getPacketByte/getPacketTick/getPacketAction` まで差し替えるとステージ状態を壊しやすいため、現時点では keys/touch helper 限定。
-- RNG は ROM側 `rng-constant --value 0x100` で固定する。
+- RNG はROM側で定数化しない。hostが試合ごとにmatch seedを生成し、clientへ配布して、両側の `Net::random.value` / `Game::random.value` に同じseedを注入する。
 - 実用低遅延路線は `InputDelayFrames=4` / `InputMaxFrameLead=4` / unreliable input + bundle history 8。
 - 入力netplay開始時は、host/client双方が `PacketBridgeStartFrame` に到達したことを reliable start-ready packet で確認してから試合入力を開始する。
 - 手動対戦では、片側が先行しすぎた場合に5秒でタイムアウトせず、相手が追いつくまで待つ。自動テストだけ内部wait timeoutを使う。
@@ -25,8 +25,8 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   - `tools/nsmb_us_rom_tool.py`
   - `tools/nsmb_us_rom_patch.py`
 - stable direct MvL entry ROM:
-  - host: `roms/nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds`
-  - client: `roms/nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds`
+  - host: `roms/nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds`
+  - client: `roms/nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds`
 - client側を Luigi 視点/localPlayerID=1 として動かす基本経路。
 - Luigi死亡時にステージ全体が止まる問題は、通常MvLと比較しながら改善済み。
 - 手動入力をhost/clientで別々に受け取り、入力パケットとして相手へ送る input netplay mode。
@@ -98,7 +98,9 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 3. 対策: start-ready barrierを固定raw frameではなく、全ステージ共通の `StageScene active + StageController + player actor 2体` が出揃った最初のframeで行う。host raw 860 / client raw 866 を同じnetplay論理frameに正規化し、入力packet frameとNSMB側tickは論理frameで揃える。クリボーなどのステージ固有enemy/objectはready条件に使わない。
 4. 手動起動のデフォルトbootstrapは、ゲーム開始後にA入力が残らない `tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs` に変更。試合中入力のズレ要因を避けるため。
 5. 検証: `logs\codex-sync-start-stage-ready-host` / `logs\codex-sync-start-stage-ready-client` で、クリボー依存を外したready条件でも host raw 860 / client raw 866 の6F差を検出し、active fps 約60、throttle 0で完走した。
-6. 残り: 自動smokeの終了条件はraw frame基準なので、動的start後は片側が先に終了してもう片側がthrottle timeoutすることがある。これは手動対戦の同期ズレとは別のテストハーネス問題として扱う。
+6. 2026-05-30 RNG修正: 旧stable ROMの `rng-constant --value 0x100` を廃止。`MELONDS_NSML_MATCH_SEED` 指定時もhost/client双方で起動直後から `Net::random.value` / `Game::random.value` 注入を有効にし、未指定時はhost生成seedをclientへ配布する。
+7. RNG検証: `logs\codex-rng-seed-12345678-netgame` ではhost/clientともseed `0x12345678`、初期スター `X=0x2c0000 Y=0xfff30000` で一致。`logs\codex-rng-seed-87654321-netgame` ではseed `0x87654321`、初期スター `X=0x1a0000 Y=0xfff40000` で一致。`logs\codex-rng-auto-seed-netgame-a/b/c` ではseed未指定の複数回実行でhost生成seedが毎回変わり、少なくとも `c` で別スター位置を確認。各回のhost/clientは一致。
+8. 残り: 自動smokeの終了条件はraw frame基準なので、動的start後は片側が先に終了してもう片側がthrottle timeoutすることがある。これは手動対戦の同期ズレとは別のテストハーネス問題として扱う。
 
 ## 手動起動
 
@@ -167,7 +169,7 @@ US PoC 低遅延入力同期 baseline:
 
 ```powershell
 $env:MELONDS_NSML_SWAPBUFFERS_INTERVAL='1'
-.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -RunRole both -Exe build\release-windows-x86_64\melonDS.exe -Rom roms\nsmb-us.nds -HostRom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds -InputScript tests\nsmb_us_direct_mvl_manual_bootstrap.inputs -Frames 3000 -ScreenshotInterval 0 -NoHashLog -SkipMvlStateCheck -SkipGameplayActorCheck -NoLanMP -InputNetplay -InputDelayFrames 4 -InputMaxFrameLead 4 -PacketBridgeJitHelperPatch -PacketBridgeJitHelperPatchFrame 870 -PacketBridgeStartFrame 870 -WaitForPeerAtNetplayStart -AllowJit -InputUnreliable -InputBundleHistory 8
+.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 -RunRole both -Exe build\release-windows-x86_64\melonDS.exe -Rom roms\nsmb-us.nds -HostRom roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds -ClientRom roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds -InputScript tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs -Frames 3000 -ScreenshotInterval 0 -NoHashLog -SkipMvlStateCheck -SkipGameplayActorCheck -NoLanMP -InputNetplay -InputDelayFrames 4 -InputMaxFrameLead 4 -PacketBridgeJitHelperPatch -PacketBridgeJitHelperPatchFrame 840 -PacketBridgeStartFrame 840 -WaitForPeerAtNetplayStart -AllowJit -InputUnreliable -InputBundleHistory 8
 Remove-Item Env:\MELONDS_NSML_SWAPBUFFERS_INTERVAL -ErrorAction SilentlyContinue
 ```
 

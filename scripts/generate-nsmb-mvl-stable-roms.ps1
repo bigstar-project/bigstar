@@ -1,7 +1,7 @@
 param(
     [string]$SourceRom = "roms\nsmb-us.nds",
-    [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-rngconst-netaid.tmp.nds",
-    [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-rngconst-netaid.tmp.nds"
+    [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds",
+    [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds"
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,10 +36,7 @@ $clientWifiRom = [System.IO.Path]::ChangeExtension($ClientRom, ".wificount2.tmp.
     --out $hostWifiRom `
     wifi-communicating-consoles --count 2
 
-& python tools\nsmb_us_rom_patch.py `
-    --rom $hostWifiRom `
-    --out $HostRom `
-    rng-constant --value 0x100
+Move-Item -Force $hostWifiRom $HostRom
 
 & python tools\nsmb_us_rom_patch.py `
     --rom $SourceRom `
@@ -62,10 +59,7 @@ $clientWifiRom = [System.IO.Path]::ChangeExtension($ClientRom, ".wificount2.tmp.
     --out $clientWifiRom `
     wifi-communicating-consoles --count 2
 
-& python tools\nsmb_us_rom_patch.py `
-    --rom $clientWifiRom `
-    --out $ClientRom `
-    rng-constant --value 0x100
+Move-Item -Force $clientWifiRom $ClientRom
 
 Remove-Item -Force $hostDirectRom, $hostWifiRom, $clientDirectRom, $clientWifiRom -ErrorAction SilentlyContinue
 
