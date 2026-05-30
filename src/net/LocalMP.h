@@ -19,6 +19,9 @@
 #ifndef LOCALMP_H
 #define LOCALMP_H
 
+#include <cstddef>
+#include <vector>
+
 #include "types.h"
 #include "Platform.h"
 #include "MPInterface.h"
@@ -60,6 +63,9 @@ public:
     int SendAck(int inst, u8* data, int len, u64 timestamp);
     int RecvHostPacket(int inst, u8* data, u64* timestamp);
     u16 RecvReplies(int inst, u8* data, u64 timestamp, u16 aidmask);
+
+    bool SnapshotForTest(std::vector<u8>& out) noexcept;
+    bool RestoreForTest(const u8* data, std::size_t len) noexcept;
 
 private:
     void FIFORead(int inst, int fifo, void* buf, int len) noexcept;

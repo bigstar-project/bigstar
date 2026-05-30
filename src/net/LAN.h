@@ -131,11 +131,26 @@ private:
     u16 ConnectedBitmask;
 
     int MPRecvTimeout;
+    int MPMiscRecvTimeout;
+    int MPStaleTimeout;
+    int MPReplyTimestampSlack;
+    bool MPUseReliable;
+    bool MPDropOldRegular;
     int LastHostID;
     ENetPeer* LastHostPeer;
     std::queue<ENetPacket*> RXQueue;
 
     u32 FrameCount;
+
+    struct PendingTX
+    {
+        ENetPacket* Packet;
+        ENetPeer* Peer;
+        bool Broadcast;
+        u32 DueTick;
+    };
+
+    std::vector<PendingTX> PendingTXQueue;
 
     void ProcessDiscovery();
 
@@ -146,9 +161,12 @@ private:
     void ProcessClientEvent(ENetEvent& event);
     void ProcessEvent(ENetEvent& event);
     void ProcessLAN(int type);
+    void FlushPendingTX();
 
     int SendPacketGeneric(u32 type, u8* packet, int len, u64 timestamp);
     int RecvPacketGeneric(u8* packet, bool block, u64* timestamp);
+
+    int MPSendDelayMs;
 };
 
 }

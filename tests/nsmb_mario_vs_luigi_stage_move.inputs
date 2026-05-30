@@ -1,0 +1,32 @@
+# Experimental route toward the Japanese NSMB Mario vs Luigi menu.
+# Frame ranges are inclusive.
+# Format:
+#   start-end buttons [touchX,touchY]
+
+0-619 NONE
+620-627 DOWN
+628-659 NONE
+660-667 A
+668-899 NONE
+900-907 A
+908-1259 NONE
+inst0 1260-1267 A
+inst1 1260-1267 DOWN
+1268-1319 NONE
+inst1 1320-1327 A
+1328-1499 NONE
+inst1 1500-1507 A
+1508-1619 NONE
+inst1 1620-1627 A
+1628-1739 NONE
+inst1 1740-1747 A
+1748-1799 NONE
+inst0 1800-1807 A
+1808-1919 NONE
+inst0 1920-1927 A
+1928-2039 NONE
+inst0 2040-2047 A
+2048-2199 NONE
+inst0 2200-3600 RIGHT
+inst1 2200-3600 NONE
+3601-8400 NONE

@@ -1,0 +1,20 @@
+# Early direct MvL dual-input probe.
+# Keeps the existing menu/touch route, then starts movement shortly after stage init.
+
+inst0 0-619 NONE
+inst0 620-627 DOWN
+inst0 628-659 NONE
+inst0 660-667 A
+inst0 668-899 NONE
+inst0 900-1199 RIGHT+A
+inst0 1200-1399 RIGHT+B
+inst0 1400-1600 RIGHT
+
+inst1 0-619 NONE
+inst1 620-627 DOWN
+inst1 628-659 NONE
+inst1 660-667 A
+inst1 668-899 NONE
+inst1 900-1199 LEFT+A
+inst1 1200-1399 LEFT+B
+inst1 1400-1600 LEFT

@@ -1,0 +1,83 @@
+# Experimental route toward the Japanese NSMB Mario vs Luigi match,
+# then move inst0/Mario toward the first visible star.
+#
+# Frame ranges are inclusive.
+# Format:
+#   start-end buttons [touchX,touchY]
+
+0-619 NONE
+620-627 DOWN
+628-659 NONE
+660-667 A
+668-899 NONE
+900-907 A
+908-1259 NONE
+inst0 1260-1267 A
+inst1 1260-1267 DOWN
+1268-1319 NONE
+inst1 1320-1327 A
+1328-1499 NONE
+inst1 1500-1507 A
+1508-1619 NONE
+inst1 1620-1627 A
+1628-1739 NONE
+inst1 1740-1747 A
+1748-1799 NONE
+inst0 1800-1807 A
+1808-1919 NONE
+inst0 1920-1927 A
+1928-2039 NONE
+inst0 2040-2047 A
+2048-2279 NONE
+inst0 2280-2287 NONE 128,170
+2288-2399 NONE
+inst0 2400-2407 NONE 128,170
+2408-2519 NONE
+inst0 2520-2527 NONE 128,170
+2528-2639 NONE
+inst0 2640-2647 A
+2648-2759 NONE
+inst0 2760-2767 A
+2768-3099 NONE
+
+# Local MP discovery timing can drift in PoC host/client runs. Keep retrying
+# the menu confirmations before and during the early movement probe.
+inst0 3120-3127 A
+inst0 3240-3247 A
+inst0 3360-3367 A
+inst0 3480-3487 A
+inst0 3600-3607 A
+inst0 3720-3727 A
+inst0 3840-3847 A
+inst0 3960-3967 A
+inst0 4080-4087 A
+inst0 4200-4207 A
+inst0 4320-4327 A
+inst0 4440-4447 A
+inst0 4560-4567 A
+inst0 4680-4687 A
+inst0 4800-4807 A
+inst0 4920-4927 A
+inst0 5040-5047 A
+inst0 5160-5167 A
+inst0 5280-5287 A
+inst0 5400-5407 A
+inst0 5520-5527 A
+inst1 3120-3127 A
+inst1 3240-3247 A
+inst1 3360-3367 A
+inst1 3480-3487 A
+inst1 3600-3607 A
+inst1 3720-3727 A
+inst1 3840-3847 A
+
+# Trial movement: wait for the match to be safely running, then try jumps
+# around the first visible star.
+inst0 3100-4199 NONE
+inst0 4200-4450 LEFT
+inst0 4451-4650 LEFT+B
+inst0 4651-4900 RIGHT
+inst0 4901-5100 RIGHT+B
+inst0 5101-5350 LEFT+B
+inst0 5351-5600 RIGHT+B
+inst0 5601-6400 NONE

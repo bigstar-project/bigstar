@@ -23,6 +23,7 @@
 
 #include <optional>
 #include <string>
+#include <algorithm>
 
 #include <QApplication>
 #include <QStyle>
@@ -57,8 +58,10 @@
 #include "EmuInstance.h"
 #include "ArchiveUtil.h"
 #include "CameraManager.h"
+#include "LAN.h"
 #include "MPInterface.h"
 #include "Net.h"
+#include "NsmbNetplayPoC.h"
 
 #include "CLI.h"
 
@@ -83,6 +86,64 @@ Net net;
 
 
 QElapsedTimer sysTimer;
+
+static int envInt(const char* name, int fallback)
+{
+    const char* value = getenv(name);
+    if (!value || !value[0]) return fallback;
+    return atoi(value);
+}
+
+static bool envEquals(const char* name, const char* expected)
+{
+    const char* value = getenv(name);
+    if (!value || !value[0]) return false;
+    return !strcasecmp(value, expected);
+}
+
+static void setupAutomatedMPInterface()
+{
+    if (!envEquals("MELONDS_NSML_MP_INTERFACE", "lan"))
+        return;
+
+    setMPInterface(MPInterface_LAN);
+
+    LAN* lan = dynamic_cast<LAN*>(&MPInterface::Get());
+    if (!lan)
+    {
+        printf("NSMB Test: failed to select LAN MP interface\n");
+        return;
+    }
+
+    const char* role = getenv("MELONDS_NSML_LAN_ROLE");
+    const char* player = getenv("MELONDS_NSML_LAN_PLAYER");
+    const char* host = getenv("MELONDS_NSML_LAN_HOST");
+    if (!role || !role[0]) role = "host";
+    if (!player || !player[0]) player = envEquals("MELONDS_NSML_LAN_ROLE", "client") ? "codex-client" : "codex-host";
+    if (!host || !host[0]) host = "127.0.0.1";
+
+    if (!strcasecmp(role, "host"))
+    {
+        const int players = std::clamp(envInt("MELONDS_NSML_LAN_PLAYERS", 2), 2, 16);
+        const bool ok = lan->StartHost(player, players);
+        printf("NSMB Test: LAN host start player=%s players=%d ok=%d\n",
+            player,
+            players,
+            ok ? 1 : 0);
+    }
+    else if (!strcasecmp(role, "client"))
+    {
+        const bool ok = lan->StartClient(player, host);
+        printf("NSMB Test: LAN client start player=%s host=%s ok=%d\n",
+            player,
+            host,
+            ok ? 1 : 0);
+    }
+    else
+    {
+        printf("NSMB Test: unknown MELONDS_NSML_LAN_ROLE=%s\n", role);
+    }
+}
 
 
 void NetInit()
@@ -380,10 +441,15 @@ int main(int argc, char** argv)
     // default MP interface type is local MP
     // this will be changed if a LAN or netplay session is initiated
     setMPInterface(MPInterface_Local);
+    setupAutomatedMPInterface();
 
     NetInit();
 
     createEmuInstance();
+
+    const int testInstances = std::clamp(envInt("MELONDS_NSML_TEST_INSTANCES", 1), 1, kMaxEmuInstances);
+    for (int i = 1; i < testInstances; i++)
+        createEmuInstance();
 
     {
         MainWindow* win = emuInstances[0]->getMainWindow();
@@ -407,7 +473,11 @@ int main(int argc, char** argv)
 
         if (memberSyntaxUsed) printf("Warning: use the a.zip|b.nds format at your own risk!\n");
 
-        win->preloadROMs(dsfile, gbafile, options->boot);
+        for (int i = 0; i < testInstances; i++)
+        {
+            MainWindow* instWin = emuInstances[i]->getMainWindow();
+            instWin->preloadROMs(dsfile, gbafile, options->boot);
+        }
 
         if (options->fullscreen)
             win->toggleFullscreen();
@@ -425,6 +495,7 @@ int main(int argc, char** argv)
     delete camManager[1];
 
     Config::Save();
+    NsmbNetplayPoC::Shutdown();
 
     SDL_Quit();
     return ret;

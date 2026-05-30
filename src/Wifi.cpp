@@ -16,6 +16,10 @@
     with melonDS. If not, see http://www.gnu.org/licenses/.
 */
 
+#include <cstdlib>
+#include <cstdint>
+#include <fstream>
+#include <mutex>
 #include <stdio.h>
 #include <string.h>
 #include "NDS.h"
@@ -37,6 +41,152 @@ using Platform::LogLevel;
 
 #define IOPORT(x) IO[(x)>>1]
 #define IOPORT8(x) ((u8*)IO)[x]
+
+namespace
+{
+struct MPReplyTraceConfig
+{
+    bool Checked = false;
+    bool Enabled = false;
+    std::ofstream File;
+    std::mutex Mutex;
+    u64 Seq = 0;
+};
+
+struct MPSlotTraceConfig
+{
+    bool Checked = false;
+    bool Enabled = false;
+    std::ofstream File;
+    std::mutex Mutex;
+    u64 Seq = 0;
+};
+
+struct MPReplyOptionConfig
+{
+    bool Checked = false;
+    bool ForceReplyValid = false;
+    bool StickyReply1 = false;
+    bool AcceptAnyMPChannel = false;
+};
+
+MPReplyTraceConfig& GetMPReplyTraceConfig()
+{
+    static MPReplyTraceConfig cfg;
+    if (!cfg.Checked)
+    {
+        cfg.Checked = true;
+        if (const char* path = std::getenv("MELONDS_NSML_WIFI_MP_REPLY_TRACE"))
+        {
+            cfg.File.open(path, std::ios::out | std::ios::trunc);
+            cfg.Enabled = cfg.File.is_open();
+            if (cfg.Enabled)
+            {
+                cfg.File << "seq,wifi,aid,clienttime,clientmask,reply1Before,reply2Before,reply2After,valid,length,duration,usedDefault,force,txBusy,cmdCounter,usCounter,usTimestamp\n";
+            }
+        }
+    }
+    return cfg;
+}
+
+bool MPReplyTraceEnabled()
+{
+    return GetMPReplyTraceConfig().Enabled;
+}
+
+MPReplyOptionConfig& GetMPReplyOptionConfig()
+{
+    static MPReplyOptionConfig cfg;
+    if (!cfg.Checked)
+    {
+        cfg.Checked = true;
+        cfg.ForceReplyValid = std::getenv("MELONDS_NSML_WIFI_MP_FORCE_REPLY_VALID") != nullptr;
+        cfg.StickyReply1 = std::getenv("MELONDS_NSML_WIFI_MP_STICKY_REPLY1") != nullptr;
+        cfg.AcceptAnyMPChannel = std::getenv("MELONDS_NSML_WIFI_MP_ACCEPT_ANY_CHANNEL") != nullptr;
+    }
+    return cfg;
+}
+
+MPSlotTraceConfig& GetMPSlotTraceConfig()
+{
+    static MPSlotTraceConfig cfg;
+    if (!cfg.Checked)
+    {
+        cfg.Checked = true;
+        if (const char* path = std::getenv("MELONDS_NSML_WIFI_MP_SLOT_TRACE"))
+        {
+            cfg.File.open(path, std::ios::out | std::ios::trunc);
+            cfg.Enabled = cfg.File.is_open();
+            if (cfg.Enabled)
+            {
+                cfg.File << "seq,wifi,event,aid,addr,val,reply1Before,reply2Before,reply1After,reply2After,txBusy,cmdCounter,usCounter,usTimestamp\n";
+            }
+        }
+    }
+    return cfg;
+}
+
+bool MPSlotTraceEnabled()
+{
+    return GetMPSlotTraceConfig().Enabled;
+}
+
+void TraceMPReply(Wifi* wifi, u16 aid, u16 clienttime, u16 clientmask,
+                  u16 reply1Before, u16 reply2Before, u16 reply2After,
+                  bool valid, u32 length, u32 duration, bool usedDefault, bool force,
+                  u16 txBusy, u32 cmdCounter, u64 usCounter, u64 usTimestamp)
+{
+    auto& cfg = GetMPReplyTraceConfig();
+    if (!cfg.Enabled)
+        return;
+
+    std::lock_guard<std::mutex> lock(cfg.Mutex);
+    cfg.File << cfg.Seq++ << ','
+             << std::hex << reinterpret_cast<uintptr_t>(wifi) << std::dec << ','
+             << aid << ','
+             << clienttime << ','
+             << clientmask << ','
+             << reply1Before << ','
+             << reply2Before << ','
+             << reply2After << ','
+             << (valid ? 1 : 0) << ','
+             << length << ','
+             << duration << ','
+             << (usedDefault ? 1 : 0) << ','
+             << (force ? 1 : 0) << ','
+             << txBusy << ','
+             << cmdCounter << ','
+             << usCounter << ','
+             << usTimestamp << '\n';
+    cfg.File.flush();
+}
+
+void TraceMPSlot(Wifi* wifi, const char* event, u16 aid, u32 addr, u16 val,
+                 u16 reply1Before, u16 reply2Before, u16 reply1After, u16 reply2After,
+                 u16 txBusy, u32 cmdCounter, u64 usCounter, u64 usTimestamp)
+{
+    auto& cfg = GetMPSlotTraceConfig();
+    if (!cfg.Enabled)
+        return;
+
+    std::lock_guard<std::mutex> lock(cfg.Mutex);
+    cfg.File << cfg.Seq++ << ','
+             << std::hex << reinterpret_cast<uintptr_t>(wifi) << std::dec << ','
+             << event << ','
+             << aid << ','
+             << addr << ','
+             << val << ','
+             << reply1Before << ','
+             << reply2Before << ','
+             << reply1After << ','
+             << reply2After << ','
+             << txBusy << ','
+             << cmdCounter << ','
+             << usCounter << ','
+             << usTimestamp << '\n';
+    cfg.File.flush();
+}
+}
 
 // destination MACs for MP frames
 const u8 Wifi::MPCmdMAC[6]   = {0x03, 0x09, 0xBF, 0x00, 0x00, 0x00};
@@ -795,7 +945,7 @@ void Wifi::FireTX()
 
 void Wifi::SendMPDefaultReply()
 {
-    u8 reply[12 + 28];
+    u8 reply[12 + 28] {};
 
     *(u16*)&reply[0xA] = 28; // length
 
@@ -828,7 +978,13 @@ void Wifi::SendMPDefaultReply()
 
 void Wifi::SendMPReply(u16 clienttime, u16 clientmask)
 {
+    auto& replyOptions = GetMPReplyOptionConfig();
+    const bool forceReplyValidForTest = replyOptions.ForceReplyValid;
+    const bool stickyReply1ForTest = replyOptions.StickyReply1;
     TXSlot* slot = &TXSlots[5];
+    const u16 reply1Before = IOPORT(W_TXSlotReply1);
+    const u16 reply2Before = IOPORT(W_TXSlotReply2);
+    u32 duration = 0;
 
     // mark the last packet as success. dunno what the MSB is, it changes.
     //if (slot->Valid)
@@ -841,7 +997,8 @@ void Wifi::SendMPReply(u16 clienttime, u16 clientmask)
     slot->Rate = 2;
 
     IOPORT(W_TXSlotReply2) = IOPORT(W_TXSlotReply1);
-    IOPORT(W_TXSlotReply1) = 0;
+    if (!stickyReply1ForTest)
+        IOPORT(W_TXSlotReply1) = 0;
 
     if (!(IOPORT(W_TXSlotReply2) & 0x8000))
     {
@@ -855,8 +1012,8 @@ void Wifi::SendMPReply(u16 clienttime, u16 clientmask)
         slot->Length = *(u16*)&RAM[slot->Addr + 0xA] & 0x3FFF;
 
         // the packet is entirely ignored if it lasts longer than the maximum reply time
-        u32 duration = PreambleLen(slot->Rate) + (slot->Length * (slot->Rate==2 ? 4:8));
-        if (duration > clienttime)
+        duration = PreambleLen(slot->Rate) + (slot->Length * (slot->Rate==2 ? 4:8));
+        if (!forceReplyValidForTest && duration > clienttime)
             slot->Valid = false;
     }
 
@@ -875,6 +1032,26 @@ void Wifi::SendMPReply(u16 clienttime, u16 clientmask)
         SendMPDefaultReply();
     }
 
+    if (MPReplyTraceEnabled())
+    {
+        TraceMPReply(this,
+            IOPORT(W_AIDLow),
+            clienttime,
+            clientmask,
+            reply1Before,
+            reply2Before,
+            IOPORT(W_TXSlotReply2),
+            slot->Valid,
+            slot->Length,
+            duration,
+            !slot->Valid,
+            forceReplyValidForTest,
+            IOPORT(W_TXBusy),
+            CmdCounter,
+            USCounter,
+            USTimestamp);
+    }
+
     u16 clientnum = 0;
     for (int i = 1; i < IOPORT(W_AIDLow); i++)
     {
@@ -889,7 +1066,7 @@ void Wifi::SendMPReply(u16 clienttime, u16 clientmask)
 
 void Wifi::SendMPAck(u16 cmdcount, u16 clientfail)
 {
-    u8 ack[12 + 32];
+    u8 ack[12 + 32] {};
 
     *(u16*)&ack[0xA] = 32; // length
 
@@ -1607,8 +1784,17 @@ bool Wifi::CheckRX(int type) // 0=regular 1=MP replies 2=MP host frames
         chan = RXBuffer[9];
         if (chan != CurChannel || CurChannel == 0)
         {
+            if (CurChannel != 0 && GetMPReplyOptionConfig().AcceptAnyMPChannel)
+            {
+                Log(LogLevel::Debug, "received MP frame on channel %d while tuned to %d; accepting for WAN adapter\n", chan, CurChannel);
+                RXBuffer[9] = CurChannel;
+                chan = CurChannel;
+            }
+            else
+            {
             Log(LogLevel::Debug, "received frame but bad channel %d (expected %d)\n", chan, CurChannel);
             continue;
+            }
         }
 
         // hack: ignore MP frames if not engaged in a MP comm
@@ -2327,8 +2513,16 @@ void Wifi::Write(u32 addr, u16 val)
         }
         if (val & 0x0080)
         {
+            const u16 reply1Before = IOPORT(W_TXSlotReply1);
+            const u16 reply2Before = IOPORT(W_TXSlotReply2);
             IOPORT(W_TXSlotReply2) = IOPORT(W_TXSlotReply1);
             IOPORT(W_TXSlotReply1) = 0;
+            if (MPSlotTraceEnabled())
+            {
+                TraceMPSlot(this, "rxcnt-shift", IOPORT(W_AIDLow), addr, val,
+                    reply1Before, reply2Before, IOPORT(W_TXSlotReply1), IOPORT(W_TXSlotReply2),
+                    IOPORT(W_TXBusy), CmdCounter, USCounter, USTimestamp);
+            }
         }
         if (val & 0x8000)
         {
@@ -2369,6 +2563,9 @@ void Wifi::Write(u32 addr, u16 val)
         return;
 
     case W_TXSlotReset:
+        {
+        const u16 reply1Before = IOPORT(W_TXSlotReply1);
+        const u16 reply2Before = IOPORT(W_TXSlotReply2);
         if (val & 0x0001) IOPORT(W_TXSlotLoc1) &= 0x7FFF;
         if (val & 0x0002) IOPORT(W_TXSlotCmd) &= 0x7FFF;
         if (val & 0x0004) IOPORT(W_TXSlotLoc2) &= 0x7FFF;
@@ -2376,9 +2573,14 @@ void Wifi::Write(u32 addr, u16 val)
         // checkme: any bits affecting the beacon slot?
         if (val & 0x0040) IOPORT(W_TXSlotReply2) &= 0x7FFF;
         if (val & 0x0080) IOPORT(W_TXSlotReply1) &= 0x7FFF;
+        if ((val & 0x00C0) && MPSlotTraceEnabled())
+            TraceMPSlot(this, "txslot-reset", IOPORT(W_AIDLow), addr, val,
+                reply1Before, reply2Before, IOPORT(W_TXSlotReply1), IOPORT(W_TXSlotReply2),
+                IOPORT(W_TXBusy), CmdCounter, USCounter, USTimestamp);
         if ((val & 0xFF30) && (val != 0xFFFF)) Log(LogLevel::Warn, "unusual TXSLOTRESET %04X\n", val);
         val = 0; // checkme (write-only port)
         break;
+        }
 
     case W_TXBufDataWrite:
         {
@@ -2415,6 +2617,20 @@ void Wifi::Write(u32 addr, u16 val)
     case W_TXSlotBeacon:
         IsMP = (val & 0x8000) != 0;
         break;
+
+    case W_TXSlotReply1:
+        {
+            const u16 reply1Before = IOPORT(W_TXSlotReply1);
+            const u16 reply2Before = IOPORT(W_TXSlotReply2);
+            IOPORT(W_TXSlotReply1) = val;
+            if (MPSlotTraceEnabled())
+            {
+                TraceMPSlot(this, "reply1-write", IOPORT(W_AIDLow), addr, val,
+                    reply1Before, reply2Before, IOPORT(W_TXSlotReply1), IOPORT(W_TXSlotReply2),
+                    IOPORT(W_TXBusy), CmdCounter, USCounter, USTimestamp);
+            }
+        }
+        return;
 
     case W_TXSlotCmd:
         if (CmdCounter == 0)

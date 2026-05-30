@@ -430,5 +430,12 @@ void A_UNK(ARM* cpu);
 void T_UNK(ARM* cpu);
 
 }
+
+bool NSML_TakeMarioVsLuigiLocalPacket(NDS* nds, u8 outPacket[52], u32* outTick, u32* outKeys);
+bool NSML_BuildMarioVsLuigiLocalPacket(NDS* nds, u8 outPacket[52], u32* outTick, u32* outKeys);
+void NSML_PushMarioVsLuigiRemotePacket(NDS* nds, u32 player, const u8 packet[52]);
+bool NSML_HasMarioVsLuigiRemotePacket(NDS* nds, u32 player, u32 tick);
+void NSML_RefreshMarioVsLuigiPacketSlots(NDS* nds);
+
 }
 #endif // ARM_H

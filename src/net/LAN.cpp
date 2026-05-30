@@ -18,6 +18,10 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <algorithm>
+#include <cstdlib>
+#include <fstream>
+#include <mutex>
 
 #ifdef __WIN32__
     #include <winsock2.h>
@@ -47,6 +51,114 @@
 
 namespace melonDS
 {
+
+namespace
+{
+
+struct LANTraceConfig
+{
+    bool Checked = false;
+    bool Enabled = false;
+    int DumpLen = 0;
+    std::ofstream Trace;
+    std::mutex Mutex;
+    u64 Seq = 0;
+};
+
+LANTraceConfig& TraceConfig()
+{
+    static LANTraceConfig cfg;
+    if (!cfg.Checked)
+    {
+        cfg.Checked = true;
+        if (const char* tracePath = getenv("MELONDS_NSML_LANMP_TRACE"))
+        {
+            cfg.Trace.open(tracePath, std::ios::out | std::ios::trunc);
+            cfg.Enabled = cfg.Trace.is_open();
+            if (cfg.Enabled)
+                cfg.Trace << "seq,event,inst,type,len,timestamp,ret,aidmask,dataHash,dataHex,packetRead,replyRead,packetWrite,replyWrite,connected,lastHost\n";
+        }
+        if (const char* dumpLen = getenv("MELONDS_NSML_LANMP_TRACE_DUMP_LEN"))
+            cfg.DumpLen = atoi(dumpLen);
+        if (cfg.DumpLen < 0) cfg.DumpLen = 0;
+        if (cfg.DumpLen > 512) cfg.DumpLen = 512;
+    }
+    return cfg;
+}
+
+u64 HashBytes(const u8* data, int len)
+{
+    u64 hash = 1469598103934665603ull;
+    for (int i = 0; i < len; i++)
+    {
+        hash ^= data[i];
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+int EnvInt(const char* name, int fallback)
+{
+    const char* value = getenv(name);
+    if (!value || !value[0])
+        return fallback;
+
+    return atoi(value);
+}
+
+bool EnvBool(const char* name, bool fallback = false)
+{
+    const char* value = getenv(name);
+    if (!value || !value[0])
+        return fallback;
+
+    if (!strcmp(value, "0"))
+        return false;
+    if (!strcmp(value, "false") || !strcmp(value, "FALSE"))
+        return false;
+    return true;
+}
+
+void TraceLANMP(const char* event, int inst, u32 type, int len, u64 timestamp,
+                u16 ret, u16 aidmask, const u8* data, u16 connected, int lastHost)
+{
+    LANTraceConfig& cfg = TraceConfig();
+    if (!cfg.Enabled)
+        return;
+
+    std::lock_guard<std::mutex> lock(cfg.Mutex);
+    cfg.Trace << cfg.Seq++ << ','
+              << event << ','
+              << inst << ','
+              << type << ','
+              << len << ','
+              << timestamp << ','
+              << ret << ','
+              << aidmask << ','
+              << std::hex << ((data && len > 0) ? HashBytes(data, len) : 0) << std::dec << ','
+              << std::hex;
+    if (data && len > 0 && cfg.DumpLen > 0)
+    {
+        const int dumpLen = std::min(len, cfg.DumpLen);
+        for (int i = 0; i < dumpLen; i++)
+        {
+            const int byte = data[i];
+            cfg.Trace << "0123456789ABCDEF"[(byte >> 4) & 0xF]
+                      << "0123456789ABCDEF"[byte & 0xF];
+        }
+    }
+    cfg.Trace << std::dec << ",0,0,0,0,"
+              << connected << ','
+              << lastHost << '\n';
+    cfg.Trace.flush();
+}
+
+void TraceLANControl(const char* event, int playerID, u32 cmd, u16 connected, int lastHost)
+{
+    TraceLANMP(event, playerID, cmd, 0, 0, 0, 0, nullptr, connected, lastHost);
+}
+
+}
 
 const u32 kDiscoveryMagic = 0x444E414C; // LAND
 const u32 kLANMagic = 0x504E414C; // LANP
@@ -95,7 +207,20 @@ LAN::LAN() noexcept : Inited(false)
 
     ConnectedBitmask = 0;
 
-    MPRecvTimeout = 25;
+    const bool wanMode = EnvBool("MELONDS_NSML_LAN_WAN_MODE");
+    MPRecvTimeout = std::max(0, EnvInt("MELONDS_NSML_LAN_MP_RECV_TIMEOUT_MS", wanMode ? 1000 : 25));
+    MPMiscRecvTimeout = std::max(0, EnvInt("MELONDS_NSML_LAN_MP_MISC_RECV_TIMEOUT_MS", wanMode ? 100 : 0));
+    MPStaleTimeout = EnvInt("MELONDS_NSML_LAN_MP_STALE_MS", wanMode ? 1000 : 16);
+    MPReplyTimestampSlack = std::max(0, EnvInt("MELONDS_NSML_LAN_MP_REPLY_TIMESTAMP_SLACK_US", wanMode ? 20000 : 32));
+    MPUseReliable = EnvBool("MELONDS_NSML_LAN_MP_RELIABLE", wanMode);
+    MPDropOldRegular = EnvBool("MELONDS_NSML_LAN_MP_DROP_OLD_REGULAR", false);
+    MPSendDelayMs = std::max(0, EnvInt("MELONDS_NSML_LAN_MP_SEND_DELAY_MS", 0));
+    Platform::Log(Platform::LogLevel::Info,
+        "LAN MP config: recvTimeout=%d staleTimeout=%d replyTimestampSlack=%d reliable=%d dropOldRegular=%d sendDelay=%d\n",
+        MPRecvTimeout, MPStaleTimeout, MPReplyTimestampSlack, MPUseReliable ? 1 : 0, MPDropOldRegular ? 1 : 0, MPSendDelayMs);
+    Platform::Log(Platform::LogLevel::Info,
+        "LAN MP config: miscRecvTimeout=%d\n",
+        MPMiscRecvTimeout);
     LastHostID = -1;
     LastHostPeer = nullptr;
 
@@ -384,6 +509,12 @@ void LAN::EndSession()
         RXQueue.pop();
         enet_packet_destroy(packet);
     }
+    for (PendingTX& pending : PendingTXQueue)
+    {
+        if (pending.Packet)
+            enet_packet_destroy(pending.Packet);
+    }
+    PendingTXQueue.clear();
 
     for (int i = 0; i < 16; i++)
     {
@@ -558,6 +689,7 @@ void LAN::ProcessHostEvent(ENetEvent& event)
                 Platform::Mutex_Unlock(PlayersMutex);
 
                 RemotePeers[id] = event.peer;
+                TraceLANControl("ctrl-host-connect", id, Cmd_ClientInit, ConnectedBitmask, LastHostID);
             }
             else
             {
@@ -583,6 +715,7 @@ void LAN::ProcessHostEvent(ENetEvent& event)
 
             // broadcast updated player list
             HostUpdatePlayerList();
+            TraceLANControl("ctrl-host-disconnect", id, Cmd_PlayerDisconnect, ConnectedBitmask, LastHostID);
         }
         break;
 
@@ -626,6 +759,7 @@ void LAN::ProcessHostEvent(ENetEvent& event)
 
                     // broadcast updated player list
                     HostUpdatePlayerList();
+                    TraceLANControl("ctrl-host-player-info", player.ID, Cmd_PlayerInfo, ConnectedBitmask, LastHostID);
                 }
                 break;
 
@@ -636,6 +770,7 @@ void LAN::ProcessHostEvent(ENetEvent& event)
                     if (!player) break;
 
                     ConnectedBitmask |= (1 << player->ID);
+                    TraceLANControl("ctrl-host-player-connect", player->ID, Cmd_PlayerConnect, ConnectedBitmask, LastHostID);
                 }
                 break;
 
@@ -646,6 +781,7 @@ void LAN::ProcessHostEvent(ENetEvent& event)
                     if (!player) break;
 
                     ConnectedBitmask &= ~(1 << player->ID);
+                    TraceLANControl("ctrl-host-player-disconnect", player->ID, Cmd_PlayerDisconnect, ConnectedBitmask, LastHostID);
                 }
                 break;
             }
@@ -688,6 +824,7 @@ void LAN::ProcessClientEvent(ENetEvent& event)
 
             RemotePeers[playerid] = event.peer;
             event.peer->data = &Players[playerid];
+            TraceLANControl("ctrl-client-peer-connect", playerid, Cmd_PlayerConnect, ConnectedBitmask, LastHostID);
         }
         break;
 
@@ -706,6 +843,7 @@ void LAN::ProcessClientEvent(ENetEvent& event)
             Platform::Mutex_Unlock(PlayersMutex);
 
             ClientUpdatePlayerList();
+            TraceLANControl("ctrl-client-peer-disconnect", id, Cmd_PlayerDisconnect, ConnectedBitmask, LastHostID);
         }
         break;
 
@@ -733,6 +871,7 @@ void LAN::ProcessClientEvent(ENetEvent& event)
                     Platform::Mutex_Unlock(PlayersMutex);
 
                     // establish connections to any new clients
+                    TraceLANControl("ctrl-client-player-list", MyPlayer.ID, Cmd_PlayerList, ConnectedBitmask, LastHostID);
                     for (int i = 0; i < 16; i++)
                     {
                         Player* player = &Players[i];
@@ -762,6 +901,7 @@ void LAN::ProcessClientEvent(ENetEvent& event)
                     if (!player) break;
 
                     ConnectedBitmask |= (1 << player->ID);
+                    TraceLANControl("ctrl-client-player-connect", player->ID, Cmd_PlayerConnect, ConnectedBitmask, LastHostID);
                 }
                 break;
 
@@ -772,6 +912,7 @@ void LAN::ProcessClientEvent(ENetEvent& event)
                     if (!player) break;
 
                     ConnectedBitmask &= ~(1 << player->ID);
+                    TraceLANControl("ctrl-client-player-disconnect", player->ID, Cmd_PlayerDisconnect, ConnectedBitmask, LastHostID);
                 }
                 break;
             }
@@ -792,6 +933,34 @@ void LAN::ProcessEvent(ENetEvent& event)
         ProcessClientEvent(event);
 }
 
+void LAN::FlushPendingTX()
+{
+    if (!Host || PendingTXQueue.empty())
+        return;
+
+    const u32 now = (u32)Platform::GetMSCount();
+    for (auto it = PendingTXQueue.begin(); it != PendingTXQueue.end();)
+    {
+        const bool due = (it->DueTick <= now) || ((it->DueTick - now) > 0x80000000u);
+        if (!due)
+        {
+            ++it;
+            continue;
+        }
+
+        if (it->Broadcast)
+            enet_host_broadcast(Host, Chan_MP, it->Packet);
+        else if (it->Peer)
+            enet_peer_send(it->Peer, Chan_MP, it->Packet);
+        else
+            enet_packet_destroy(it->Packet);
+
+        it = PendingTXQueue.erase(it);
+    }
+
+    enet_host_flush(Host);
+}
+
 // 0 = per-frame processing of events and eventual misc. frame
 // 1 = checking if a misc. frame has arrived
 // 2 = waiting for a MP frame
@@ -799,19 +968,22 @@ void LAN::ProcessLAN(int type)
 {
     if (!Host) return;
 
+    FlushPendingTX();
+
     u32 time_last = (u32)Platform::GetMSCount();
 
-    // see if we have queued packets already, get rid of the stale ones
-    // any incoming packet should be consumed by the core quickly, so if
-    // they've been sitting in the queue for more than one frame's time,
-    // we can assume they're stale
+    // See if we have queued packets already, get rid of stale ones.
+    // For WAN-oriented PoC runs this window is intentionally configurable:
+    // NSMB can tolerate stalls better than silently dropped MP frames.
     while (!RXQueue.empty())
     {
         ENetPacket* enetpacket = RXQueue.front();
         MPPacketHeader* header = (MPPacketHeader*)&enetpacket->data[0];
         u32 packettime = header->Magic;
 
-        if ((packettime > time_last) || (packettime < (time_last - 16)))
+        const bool stale = MPStaleTimeout > 0 &&
+            ((packettime > time_last) || ((time_last - packettime) > (u32)MPStaleTimeout));
+        if (stale)
         {
             RXQueue.pop();
             enet_packet_destroy(enetpacket);
@@ -834,7 +1006,7 @@ void LAN::ProcessLAN(int type)
         }
     }
 
-    int timeout = (type == 2) ? MPRecvTimeout : 0;
+    int timeout = (type == 2) ? MPRecvTimeout : (type == 1) ? MPMiscRecvTimeout : 0;
     time_last = (u32)Platform::GetMSCount();
 
     ENetEvent event;
@@ -859,9 +1031,26 @@ void LAN::ProcessLAN(int type)
             else
             {
                 // mark this packet with the time it was received
+                const u32 originalType = header->Type;
+                const u32 originalSender = header->SenderID;
                 header->Magic = (u32)Platform::GetMSCount();
 
                 event.packet->userData = event.peer;
+                if (MPDropOldRegular && ((originalType & 0xFFFF) == 0))
+                {
+                    std::queue<ENetPacket*> filtered;
+                    while (!RXQueue.empty())
+                    {
+                        ENetPacket* queued = RXQueue.front();
+                        RXQueue.pop();
+                        MPPacketHeader* queuedHeader = (MPPacketHeader*)&queued->data[0];
+                        if (((queuedHeader->Type & 0xFFFF) == 0) && queuedHeader->SenderID == originalSender)
+                            enet_packet_destroy(queued);
+                        else
+                            filtered.push(queued);
+                    }
+                    RXQueue.swap(filtered);
+                }
                 RXQueue.push(event.packet);
 
                 // return now -- if we are receiving MP frames, if we keep going
@@ -874,7 +1063,7 @@ void LAN::ProcessLAN(int type)
             ProcessEvent(event);
         }
 
-        if (type == 2)
+        if (timeout > 0)
         {
             u32 time = (u32)Platform::GetMSCount();
             if (time < time_last) return;
@@ -889,6 +1078,7 @@ void LAN::Process()
 {
     if (!Active) return;
 
+    FlushPendingTX();
     ProcessDiscovery();
     ProcessLAN(0);
 
@@ -942,9 +1132,7 @@ int LAN::SendPacketGeneric(u32 type, u8* packet, int len, u64 timestamp)
 {
     if (!Host) return 0;
 
-    // TODO make the reliable part optional?
-    //u32 flags = ENET_PACKET_FLAG_RELIABLE;
-    u32 flags = ENET_PACKET_FLAG_UNSEQUENCED;
+    const u32 flags = MPUseReliable ? ENET_PACKET_FLAG_RELIABLE : ENET_PACKET_FLAG_UNSEQUENCED;
 
     ENetPacket* enetpacket = enet_packet_create(nullptr, sizeof(MPPacketHeader)+len, flags);
 
@@ -958,11 +1146,29 @@ int LAN::SendPacketGeneric(u32 type, u8* packet, int len, u64 timestamp)
     if (len)
         memcpy(&enetpacket->data[sizeof(MPPacketHeader)], packet, len);
 
-    if (((type & 0xFFFF) == 2) && LastHostPeer)
+    const bool sendToHostPeer = ((type & 0xFFFF) == 2) && LastHostPeer;
+    if (MPSendDelayMs > 0)
+    {
+        PendingTX pending {};
+        pending.Packet = enetpacket;
+        pending.Peer = sendToHostPeer ? LastHostPeer : nullptr;
+        pending.Broadcast = !sendToHostPeer;
+        pending.DueTick = (u32)Platform::GetMSCount() + (u32)MPSendDelayMs;
+        PendingTXQueue.push_back(pending);
+    }
+    else if (sendToHostPeer)
+    {
         enet_peer_send(LastHostPeer, Chan_MP, enetpacket);
+        enet_host_flush(Host);
+    }
     else
+    {
         enet_host_broadcast(Host, Chan_MP, enetpacket);
-    enet_host_flush(Host);
+        enet_host_flush(Host);
+    }
+
+    TraceLANMP("send", MyPlayer.ID, type, len, pktheader.Timestamp, 0, 0,
+        len ? packet : nullptr, ConnectedBitmask, LastHostID);
 
     return len;
 }
@@ -993,6 +1199,8 @@ int LAN::RecvPacketGeneric(u8* packet, bool block, u64* timestamp)
     }
 
     if (timestamp) *timestamp = header->Timestamp;
+    TraceLANMP("recv", MyPlayer.ID, header->Type, header->Length, header->Timestamp, 0, 0,
+        len ? packet : nullptr, ConnectedBitmask, LastHostID);
     enet_packet_destroy(enetpacket);
     return len;
 }
@@ -1062,18 +1270,20 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
         bool good = true;
         if ((header->Type & 0xFFFF) != 2)
             good = false;
-        else if (header->Timestamp < (timestamp - 32))
+        else if (header->Timestamp < (timestamp - (u64)MPReplyTimestampSlack))
             good = false;
 
         if (good)
         {
             u32 len = header->Length;
+            const u8* replyData = nullptr;
             if (len)
             {
                 if (len > 1024) len = 1024;
 
                 u32 aid = header->Type >> 16;
                 memcpy(&packets[(aid-1)*1024], &enetpacket->data[sizeof(MPPacketHeader)], len);
+                replyData = &packets[(aid-1)*1024];
 
                 ret |= (1<<aid);
             }
@@ -1083,9 +1293,19 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
                 ((ret & aidmask) == aidmask))
             {
                 // all the clients have sent their reply
+                TraceLANMP("replies", MyPlayer.ID, header->Type, len, header->Timestamp, ret, aidmask,
+                    replyData, ConnectedBitmask, LastHostID);
                 enet_packet_destroy(enetpacket);
                 return ret;
             }
+
+            TraceLANMP("reply-partial", MyPlayer.ID, header->Type, len, header->Timestamp, ret, aidmask,
+                replyData, ConnectedBitmask, LastHostID);
+        }
+        else
+        {
+            TraceLANMP("reply-skip", MyPlayer.ID, header->Type, header->Length, header->Timestamp, ret, aidmask,
+                nullptr, ConnectedBitmask, LastHostID);
         }
 
         enet_packet_destroy(enetpacket);

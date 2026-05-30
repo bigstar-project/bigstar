@@ -1,0 +1,8 @@
+# Escape movement after loading a Mario vs Luigi match savestate.
+# inst0 is host/Mario, inst1 is client/Luigi after role conversion.
+0-20 NONE
+inst0 21-90 LEFT+A
+inst1 21-90 RIGHT+A
+inst0 91-360 LEFT+B
+inst1 91-360 RIGHT+B
+361-1600 NONE

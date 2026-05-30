@@ -16,8 +16,10 @@
     with melonDS. If not, see http://www.gnu.org/licenses/.
 */
 
+#include <stdlib.h>
 #include <string.h>
 
+#include <algorithm>
 #include <optional>
 #include <cmath>
 
@@ -913,6 +915,7 @@ void ScreenPanelGL::setSwapInterval(int intv)
 {
     if (!glContext) return;
 
+    glContext->MakeCurrent();
     glContext->SetSwapInterval(intv);
 }
 
@@ -1260,7 +1263,16 @@ void ScreenPanelGL::drawScreen()
         osdMutex.unlock();
     }
 
-    glContext->SwapBuffers();
+    if (getenv("MELONDS_NSML_INPUT_NETPLAY_ONLY"))
+        glContext->SetSwapInterval(0);
+    static unsigned nsmlSwapCounter = 0;
+    int nsmlSwapInterval = 1;
+    if (const char* value = getenv("MELONDS_NSML_SWAPBUFFERS_INTERVAL"))
+        nsmlSwapInterval = std::max(1, atoi(value));
+    nsmlSwapCounter++;
+    const bool nsmlShouldSwap = (nsmlSwapCounter % static_cast<unsigned>(nsmlSwapInterval)) == 0;
+    if (!getenv("MELONDS_NSML_SKIP_SWAPBUFFERS") && nsmlShouldSwap)
+        glContext->SwapBuffers();
 }
 
 qreal ScreenPanelGL::devicePixelRatioFromScreen() const

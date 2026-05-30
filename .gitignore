@@ -1,9 +1,16 @@
 build*/
+vcpkg/
+external/
+logs/
+dist/
 bin
 obj
+target/
+node_modules/
 *.depend
 *.layout
 *.o
+__pycache__/
 melon_grc.c
 melon_grc.h
 melon.rc
@@ -25,3 +32,5 @@ CMakeCache.txt
 freebios/FreeBIOS_Data.h
 freebios/bios*
 freebios/build/
+
+roms/

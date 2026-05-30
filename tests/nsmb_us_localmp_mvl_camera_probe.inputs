@@ -1,0 +1,70 @@
+# US normal LocalMP route toward Mario vs Luigi.
+# Starts from the existing menu route, then confirms character/course screens
+# slowly enough for the US ROM timing observed in automated smoke runs.
+
+0-619 NONE
+620-627 DOWN
+628-659 NONE
+660-667 A
+668-899 NONE
+900-907 A
+908-1259 NONE
+inst0 1260-1267 A
+inst1 1260-1267 DOWN
+1268-1319 NONE
+inst1 1320-1327 A
+1328-1499 NONE
+inst1 1500-1507 A
+1508-1619 NONE
+inst1 1620-1627 A
+1628-1739 NONE
+inst1 1740-1747 A
+1748-1799 NONE
+inst0 1800-1807 A
+1808-1919 NONE
+inst0 1920-1927 A
+1928-2039 NONE
+inst0 2040-2047 A
+2048-2279 NONE
+inst0 2280-2287 NONE 128,170
+2288-2399 NONE
+inst0 2400-2407 NONE 128,170
+2408-2519 NONE
+inst0 2520-2527 NONE 128,170
+2528-2639 NONE
+inst0 2640-2647 A
+2648-2759 NONE
+inst0 2760-2767 A
+2768-4319 NONE
+
+# Confirm character selection after both instances are visibly on the
+# character-select screen in the current US route automation.
+inst0 4320-4327 A
+inst1 4320-4327 A
+4328-4559 NONE
+
+# If the selection did not latch on the first press, repeat once.
+inst0 4560-4567 A
+inst1 4560-4567 A
+4568-4799 NONE
+
+# Course/intro confirmations. These are intentionally spaced out while
+# discovering the normal LocalMP baseline camera behavior.
+inst0 4800-4807 A
+inst1 4800-4807 A
+4808-5039 NONE
+inst0 5040-5047 A
+inst1 5040-5047 A
+5048-5279 NONE
+inst0 5280-5287 A
+inst1 5280-5287 A
+5288-5519 NONE
+inst0 5520-5527 A
+inst1 5520-5527 A
+5528-5999 NONE
+
+# Gameplay probe after expected stage start.
+inst1 6000-6239 RIGHT+A
+inst1 6240-6519 RIGHT+B
+inst1 6520-6800 RIGHT
+6801-7600 NONE

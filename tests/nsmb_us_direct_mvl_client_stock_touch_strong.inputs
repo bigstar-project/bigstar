@@ -1,0 +1,18 @@
+# Direct MvL input-netplay stock item probe.
+# Client/Luigi holds the lower-screen stock-item button area longer.
+
+inst0 0-619 NONE
+inst0 620-627 DOWN
+inst0 628-659 NONE
+inst0 660-667 A
+inst0 668-899 NONE
+inst0 900-2600 NONE
+
+inst1 0-619 NONE
+inst1 620-627 DOWN
+inst1 628-659 NONE
+inst1 660-667 A
+inst1 668-899 NONE
+inst1 900-1799 NONE
+inst1 1800-1880 NONE 217,165
+inst1 1881-2600 NONE

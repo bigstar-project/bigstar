@@ -28,6 +28,14 @@
 
 #include <SDL2/SDL.h>
 
+#include <QCoreApplication>
+#include <QMetaObject>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <timeapi.h>
+#endif
+
 #include "main.h"
 
 #include "types.h"
@@ -54,6 +62,7 @@
 #include "Savestate.h"
 
 #include "EmuInstance.h"
+#include "NsmbNetplayPoC.h"
 
 using namespace melonDS;
 
@@ -149,6 +158,14 @@ void EmuThread::run()
     bool slowmo = false;
     emuInstance->fastForwardToggled = false;
     emuInstance->slowmoToggled = false;
+    const bool nsmlPerfBreakdown = getenv("MELONDS_NSML_PERF_BREAKDOWN") != nullptr;
+    double nsmlPerfBeforeHook = 0.0;
+    double nsmlPerfRunFrame = 0.0;
+    double nsmlPerfAfterHook = 0.0;
+    double nsmlPerfDraw = 0.0;
+    double nsmlPerfAudio = 0.0;
+    double nsmlPerfLimit = 0.0;
+    u32 nsmlPerfFrames = 0;
 
     while (emuStatus != emuStatus_Exit)
     {
@@ -252,10 +269,27 @@ void EmuThread::run()
             }
 
             // process input and hotkeys
-            emuInstance->nds->SetKeyMask(emuInstance->inputMask);
+            NsmbNetplayPoC::InputState inputState {
+                emuInstance->inputMask,
+                emuInstance->isTouching,
+                emuInstance->touchX,
+                emuInstance->touchY,
+            };
+            const double nsmlBeforeHookStart = nsmlPerfBreakdown
+                ? SDL_GetPerformanceCounter() * perfCountsSec
+                : 0.0;
+            inputState = NsmbNetplayPoC::BeforeRunFrame(
+                emuInstance->instanceID,
+                emuInstance->nds->NumFrames,
+                emuInstance->nds,
+                inputState);
+            if (nsmlPerfBreakdown)
+                nsmlPerfBeforeHook += SDL_GetPerformanceCounter() * perfCountsSec - nsmlBeforeHookStart;
 
-            if (emuInstance->isTouching)
-                emuInstance->nds->TouchScreen(emuInstance->touchX, emuInstance->touchY);
+            emuInstance->nds->SetKeyMask(inputState.KeyMask);
+
+            if (inputState.Touching)
+                emuInstance->nds->TouchScreen(inputState.TouchX, inputState.TouchY);
             else
                 emuInstance->nds->ReleaseScreen();
 
@@ -308,7 +342,24 @@ void EmuThread::run()
             }
             else
             {
+                const u32 frameBeforeRun = emuInstance->nds->NumFrames;
+                const double nsmlRunFrameStart = nsmlPerfBreakdown
+                    ? SDL_GetPerformanceCounter() * perfCountsSec
+                    : 0.0;
                 nlines = emuInstance->nds->RunFrame();
+                const double nsmlAfterRunFrameStart = nsmlPerfBreakdown
+                    ? SDL_GetPerformanceCounter() * perfCountsSec
+                    : 0.0;
+                if (nsmlPerfBreakdown)
+                    nsmlPerfRunFrame += nsmlAfterRunFrameStart - nsmlRunFrameStart;
+                NsmbNetplayPoC::AfterRunFrame(
+                    emuInstance->instanceID,
+                    frameBeforeRun,
+                    emuInstance->nds);
+                if (nsmlPerfBreakdown)
+                    nsmlPerfAfterHook += SDL_GetPerformanceCounter() * perfCountsSec - nsmlAfterRunFrameStart;
+                if (NsmbNetplayPoC::ShouldQuitAfterFrame(emuInstance->instanceID, frameBeforeRun))
+                    QMetaObject::invokeMethod(qApp, "quit", Qt::QueuedConnection);
             }
 
             if (emuInstance->ndsSave)
@@ -320,7 +371,13 @@ void EmuThread::run()
             if (emuInstance->firmwareSave)
                 emuInstance->firmwareSave->CheckFlush();
 
-            emuInstance->drawScreen();
+            const double nsmlDrawStart = nsmlPerfBreakdown
+                ? SDL_GetPerformanceCounter() * perfCountsSec
+                : 0.0;
+            if (!getenv("MELONDS_NSML_NO_DRAW_SCREEN"))
+                emuInstance->drawScreen();
+            if (nsmlPerfBreakdown)
+                nsmlPerfDraw += SDL_GetPerformanceCounter() * perfCountsSec - nsmlDrawStart;
 
 #ifdef MELONCAP
             MelonCap::Update();
@@ -376,16 +433,72 @@ void EmuThread::run()
                 emuInstance->audioVolume = volumeLevel * (256.0 / 31.0);
             }
 
+            const double nsmlAudioStart = nsmlPerfBreakdown
+                ? SDL_GetPerformanceCounter() * perfCountsSec
+                : 0.0;
             if (emuInstance->doAudioSync && !(fastforward || slowmo))
                 emuInstance->audioSync();
+            if (nsmlPerfBreakdown)
+                nsmlPerfAudio += SDL_GetPerformanceCounter() * perfCountsSec - nsmlAudioStart;
 
             double frametimeStep = nlines / (emuInstance->curFPS * 263.0);
+            const bool nsmlFixedFrameTimestep =
+                !getenv("MELONDS_NSML_NO_FIXED_FRAME_TIMESTEP")
+                && (getenv("MELONDS_NSML_FIXED_FRAME_TIMESTEP")
+                    || getenv("MELONDS_NSML_INPUT_NETPLAY_ONLY"));
+#ifdef _WIN32
+            static bool nsmlTimerPeriodSet = false;
+            if (nsmlFixedFrameTimestep && !nsmlTimerPeriodSet)
+            {
+                timeBeginPeriod(1);
+                nsmlTimerPeriodSet = true;
+            }
+#endif
+            static bool nsmlFixedFrameTimestepLogged = false;
+            if (nsmlFixedFrameTimestep && !nsmlFixedFrameTimestepLogged)
+            {
+                std::printf("NSMB Test: fixed frame timestep enabled for netplay timing\n");
+                std::fflush(stdout);
+                nsmlFixedFrameTimestepLogged = true;
+            }
+            if (nsmlFixedFrameTimestep)
+                frametimeStep = 1.0 / emuInstance->curFPS;
 
             if (frametimeStep < 0.001) frametimeStep = 0.001;
 
             if (emuInstance->doLimitFPS)
             {
+                const double nsmlLimitStart = nsmlPerfBreakdown
+                    ? SDL_GetPerformanceCounter() * perfCountsSec
+                    : 0.0;
                 double curtime = SDL_GetPerformanceCounter() * perfCountsSec;
+
+                if (nsmlFixedFrameTimestep)
+                {
+                    lastTime += frametimeStep;
+                    if (lastTime < curtime - frametimeStep)
+                        lastTime = curtime;
+                    for (;;)
+                    {
+                        curtime = SDL_GetPerformanceCounter() * perfCountsSec;
+                        const double remaining = lastTime - curtime;
+                        if (remaining <= 0.0)
+                            break;
+                        if (remaining > 0.003 && getenv("MELONDS_NSML_FIXED_FRAME_SLEEP"))
+                        {
+                            const Uint32 sleepMs = (Uint32)std::max(1.0, floor((remaining * 1000.0) - 1.0));
+                            SDL_Delay(sleepMs);
+                        }
+                        else if (remaining > 0.001)
+                        {
+                            SDL_Delay(0);
+                        }
+                    }
+                    frameLimitError = 0.0;
+                    if (nsmlPerfBreakdown)
+                        nsmlPerfLimit += SDL_GetPerformanceCounter() * perfCountsSec - nsmlLimitStart;
+                    goto frame_limit_done;
+                }
 
                 frameLimitError += frametimeStep - (curtime - lastTime);
                 if (frameLimitError < -frametimeStep)
@@ -393,7 +506,21 @@ void EmuThread::run()
                 if (frameLimitError > frametimeStep)
                     frameLimitError = frametimeStep;
 
-                if (round(frameLimitError * 1000.0) > 0.0)
+                if (nsmlFixedFrameTimestep && frameLimitError > 0.0)
+                {
+                    const double targetTime = curtime + frameLimitError;
+                    for (;;)
+                    {
+                        curtime = SDL_GetPerformanceCounter() * perfCountsSec;
+                        const double remaining = targetTime - curtime;
+                        if (remaining <= 0.0)
+                            break;
+                        if (remaining > 0.003)
+                            SDL_Delay(1);
+                    }
+                    frameLimitError = 0.0;
+                }
+                else if (round(frameLimitError * 1000.0) > 0.0)
                 {
                     SDL_Delay(round(frameLimitError * 1000.0));
                     double timeBeforeSleep = curtime;
@@ -402,6 +529,36 @@ void EmuThread::run()
                 }
 
                 lastTime = curtime;
+                if (nsmlPerfBreakdown)
+                    nsmlPerfLimit += SDL_GetPerformanceCounter() * perfCountsSec - nsmlLimitStart;
+            }
+frame_limit_done:
+
+            if (nsmlPerfBreakdown)
+            {
+                nsmlPerfFrames++;
+                if (nsmlPerfFrames >= 300)
+                {
+                    const double scale = 1000.0 / static_cast<double>(nsmlPerfFrames);
+                    std::printf(
+                        "NSMB Perf: inst=%d frame=%u beforeHookMs=%.3f runFrameMs=%.3f afterHookMs=%.3f drawMs=%.3f audioMs=%.3f limitMs=%.3f\n",
+                        emuInstance->instanceID,
+                        emuInstance->nds->NumFrames,
+                        nsmlPerfBeforeHook * scale,
+                        nsmlPerfRunFrame * scale,
+                        nsmlPerfAfterHook * scale,
+                        nsmlPerfDraw * scale,
+                        nsmlPerfAudio * scale,
+                        nsmlPerfLimit * scale);
+                    std::fflush(stdout);
+                    nsmlPerfBeforeHook = 0.0;
+                    nsmlPerfRunFrame = 0.0;
+                    nsmlPerfAfterHook = 0.0;
+                    nsmlPerfDraw = 0.0;
+                    nsmlPerfAudio = 0.0;
+                    nsmlPerfLimit = 0.0;
+                    nsmlPerfFrames = 0;
+                }
             }
 
             nframes++;
@@ -439,7 +596,8 @@ void EmuThread::run()
 
             SDL_Delay(75);
 
-            emuInstance->drawScreen();
+            if (!getenv("MELONDS_NSML_NO_DRAW_SCREEN"))
+                emuInstance->drawScreen();
         }
 
         handleMessages();

@@ -1,0 +1,33 @@
+# Direct MvL PacketBridge client inventory-use probe.
+# Touch coordinates are lower-screen local coordinates, so the stock item
+# button is near 217,153 rather than full screenshot y=337.
+
+inst0 0-619 NONE
+inst0 620-627 DOWN
+inst0 628-659 NONE
+inst0 660-667 A
+inst0 668-899 NONE
+inst0 900-907 A
+inst0 908-1259 NONE
+inst0 1260-1267 A
+inst0 1268-1599 NONE
+inst0 1600-1607 NONE 128,165
+inst0 1608-1719 NONE
+inst0 1720-1727 NONE 128,165
+inst0 1728-2400 NONE
+
+inst1 0-619 NONE
+inst1 620-627 DOWN
+inst1 628-659 NONE
+inst1 660-667 A
+inst1 668-899 NONE
+inst1 900-907 A
+inst1 908-1259 NONE
+inst1 1260-1267 A
+inst1 1268-1599 NONE
+inst1 1600-1607 NONE 128,165
+inst1 1608-1719 NONE
+inst1 1720-1727 NONE 128,165
+inst1 1728-2039 NONE
+inst1 2040-2059 NONE 217,153
+inst1 2060-2400 NONE

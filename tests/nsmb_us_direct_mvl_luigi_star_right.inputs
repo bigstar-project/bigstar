@@ -1,0 +1,22 @@
+# Direct MvL input-netplay Big Star probe.
+# Keep Mario idle and drive Luigi right toward the fixed RNG star at x=0x90000.
+
+inst0 0-619 NONE
+inst0 620-627 DOWN
+inst0 628-659 NONE
+inst0 660-667 A
+inst0 668-2600 NONE
+
+inst1 0-619 NONE
+inst1 620-627 DOWN
+inst1 628-659 NONE
+inst1 660-667 A
+inst1 668-899 NONE
+inst1 900-959 RIGHT+Y
+inst1 960-1019 RIGHT+Y+A
+inst1 1020-1259 RIGHT+Y
+inst1 1260-1319 RIGHT+Y+A
+inst1 1320-1559 RIGHT+Y
+inst1 1560-1619 RIGHT+Y+A
+inst1 1620-2200 RIGHT+Y
+inst1 2201-2600 NONE

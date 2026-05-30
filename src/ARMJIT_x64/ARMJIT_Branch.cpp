@@ -19,11 +19,45 @@
 #include "ARMJIT_Compiler.h"
 #include "../ARM.h"
 #include "../NDS.h"
+#include <stdlib.h>
+#include <string.h>
 
 using namespace Gen;
 
 namespace melonDS
 {
+
+bool TraceNSMLRandomCallFromJIT(ARM* cpu, u32 instrAddr, u32 lr);
+bool TraceNSMLPlayerLifeCallFromJIT(ARM* cpu, u32 targetAddr, u32 lr);
+bool TraceNSMLBranchRegFromJIT(ARM* cpu, u32 targetAddr, u32 lr);
+
+static bool NSMLJitEnvFlag(const char* name)
+{
+    const char* value = getenv(name);
+    if (!value || !value[0])
+        return false;
+    if (!strcmp(value, "0") || !strcmp(value, "false") || !strcmp(value, "FALSE"))
+        return false;
+    return true;
+}
+
+static bool NSMLJitRandomTraceEnabled()
+{
+    static const bool enabled = NSMLJitEnvFlag("MELONDS_NSML_RANDOM_TRACE");
+    return enabled;
+}
+
+static bool NSMLJitPlayerLifeTraceEnabled()
+{
+    static const bool enabled = NSMLJitEnvFlag("MELONDS_NSML_TRACE_PLAYER_LIFE_CALLS");
+    return enabled;
+}
+
+static bool NSMLJitBranchRegTraceEnabled()
+{
+    static const bool enabled = NSMLJitEnvFlag("MELONDS_NSML_TRACE_PLAYER_DEFEATED");
+    return enabled;
+}
 
 template <typename T>
 int squeezePointer(T* ptr)
@@ -204,6 +238,27 @@ void Compiler::A_Comp_BranchImm()
     if (link)
         MOV(32, MapReg(14), Imm32(R15 - 4));
 
+    if (link && NSMLJitRandomTraceEnabled() && (target == 0x0200E5A0 || target == 0x0200E550))
+    {
+        PushRegs(true, true);
+        MOV(64, R(ABI_PARAM1), R(RCPU));
+        MOV(32, R(ABI_PARAM2), Imm32(target));
+        MOV(32, R(ABI_PARAM3), Imm32(R15 - 4));
+        ABI_CallFunction(TraceNSMLRandomCallFromJIT);
+        PopRegs(true, true);
+    }
+
+    if (link && NSMLJitPlayerLifeTraceEnabled() && (target == 0x0202048C || target == 0x020204D0 ||
+                 target == 0x020204E0 || target == 0x02020580))
+    {
+        PushRegs(true, true);
+        MOV(64, R(ABI_PARAM1), R(RCPU));
+        MOV(32, R(ABI_PARAM2), Imm32(target));
+        MOV(32, R(ABI_PARAM3), Imm32(R15 - 4));
+        ABI_CallFunction(TraceNSMLPlayerLifeCallFromJIT);
+        PopRegs(true, true);
+    }
+
     Comp_JumpTo(target);
 }
 
@@ -211,8 +266,21 @@ void Compiler::A_Comp_BranchXchangeReg()
 {
     OpArg rn = MapReg(CurInstr.A_Reg(0));
     MOV(32, R(RSCRATCH), rn);
-    if ((CurInstr.Instr & 0xF0) == 0x30) // BLX_reg
+    const bool link = (CurInstr.Instr & 0xF0) == 0x30;
+    if (link) // BLX_reg
+    {
         MOV(32, MapReg(14), Imm32(R15 - 4));
+        if (NSMLJitBranchRegTraceEnabled())
+        {
+            PushRegs(true, true);
+            MOV(64, R(ABI_PARAM1), R(RCPU));
+            MOV(32, R(ABI_PARAM2), R(RSCRATCH));
+            MOV(32, R(ABI_PARAM3), Imm32(R15 - 4));
+            ABI_CallFunction(TraceNSMLBranchRegFromJIT);
+            PopRegs(true, true);
+            MOV(32, R(RSCRATCH), rn);
+        }
+    }
     Comp_JumpTo(RSCRATCH);
 }
 

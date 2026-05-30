@@ -1,0 +1,26 @@
+[package]
+name = "nsmb-net-bridge"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+webrtc = [
+    "dep:base64",
+    "dep:datachannel-wrapper",
+    "dep:futures-util",
+    "dep:serde_json",
+    "dep:tokio",
+    "dep:tokio-tungstenite",
+]
+
+[dependencies]
+base64 = { version = "0.22", optional = true }
+datachannel-wrapper = { path = "../../external/tango/datachannel-wrapper", optional = true }
+futures-util = { version = "0.3", optional = true }
+serde_json = { version = "1", optional = true }
+tokio = { version = "1", features = ["full"], optional = true }
+tokio-tungstenite = { version = "0.26", features = ["native-tls"], optional = true }
+
+[lints.rust]
+unsafe_code = "forbid"

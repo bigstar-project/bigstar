@@ -1,0 +1,36 @@
+# Direct MvL PacketBridge asymmetric probe.
+# Both sides use the known menu/transition route, then only host/local player 0 moves.
+
+inst0 0-619 NONE
+inst0 620-627 DOWN
+inst0 628-659 NONE
+inst0 660-667 A
+inst0 668-899 NONE
+inst0 900-907 A
+inst0 908-1259 NONE
+inst0 1260-1267 A
+inst0 1268-1599 NONE
+inst0 1600-1607 NONE 128,165
+inst0 1608-1719 NONE
+inst0 1720-1727 NONE 128,165
+inst0 1728-1839 NONE
+inst0 1848-1979 NONE
+inst0 1980-2239 RIGHT+A
+inst0 2240-2519 RIGHT+B
+inst0 2520-2800 RIGHT
+inst0 2801-3400 NONE
+
+inst1 0-619 NONE
+inst1 620-627 DOWN
+inst1 628-659 NONE
+inst1 660-667 A
+inst1 668-899 NONE
+inst1 900-907 A
+inst1 908-1259 NONE
+inst1 1260-1267 A
+inst1 1268-1599 NONE
+inst1 1600-1607 NONE 128,165
+inst1 1608-1719 NONE
+inst1 1720-1727 NONE 128,165
+inst1 1728-1839 NONE
+inst1 1848-3400 NONE

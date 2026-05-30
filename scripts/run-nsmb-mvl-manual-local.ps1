@@ -1,0 +1,223 @@
+param(
+    [int]$Frames = 999999,
+    [int]$WaitTimeoutMs = 86400000,
+    [int]$InputDelayFrames = 16,
+    [int]$InputMaxFrameLead = 2,
+    [int]$InternalWaitTimeoutMs = 0,
+    [int]$InputSendDelayFrames = 0,
+    [int]$InputSendJitterFrames = 0,
+    [switch]$InputUnreliable,
+    [int]$InputBundleHistory = 0,
+    [switch]$LowDelayWan,
+    [switch]$LowLatencyRollback,
+    [switch]$Rollback,
+    [string]$RollbackBackend = "",
+    [int]$RollbackWindow = 120,
+    [int]$RollbackCheckpointInterval = 30,
+    [int]$RollbackResimulateDelayFrames = 0,
+    [switch]$RollbackResimulate,
+    [int]$HostStartupDelayMs = 1200,
+    [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
+    [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds",
+    [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds",
+    [string]$InputScript = "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs",
+    [string]$LogDir = "logs\nsmb-mvl-manual-local",
+    [switch]$AllowJit,
+    [switch]$NoFrameLimit,
+    [switch]$SoftwareRenderer
+)
+
+$ErrorActionPreference = "Stop"
+
+function Set-MelonTomlValue {
+    param(
+        [string]$Text,
+        [string]$KeyPath,
+        [string]$Value
+    )
+
+    $idx = $KeyPath.LastIndexOf('.')
+    if ($idx -lt 0) {
+        if ($Text -match "(?m)^$([regex]::Escape($KeyPath))\s*=") {
+            return ($Text -replace "(?m)^$([regex]::Escape($KeyPath))\s*=.*$", "$KeyPath = $Value")
+        }
+        return "$Text`n$KeyPath = $Value"
+    }
+
+    $section = $KeyPath.Substring(0, $idx)
+    $key = $KeyPath.Substring($idx + 1)
+    $sectionPattern = "(?ms)^\[$([regex]::Escape($section))\]\r?\n.*?(?=^\[|\z)"
+    $sectionMatch = [regex]::Match($Text, $sectionPattern)
+    if (-not $sectionMatch.Success) {
+        return "$Text`n[$section]`n$key = $Value`n"
+    }
+
+    $sectionText = $sectionMatch.Value
+    if ($sectionText -match "(?m)^$([regex]::Escape($key))\s*=") {
+        $newSectionText = $sectionText -replace "(?m)^$([regex]::Escape($key))\s*=.*$", "$key = $Value"
+    } else {
+        $newSectionText = "$sectionText$key = $Value`n"
+    }
+    return $Text.Remove($sectionMatch.Index, $sectionMatch.Length).Insert($sectionMatch.Index, $newSectionText)
+}
+
+if ($LowDelayWan) {
+    if (-not $PSBoundParameters.ContainsKey('InputDelayFrames')) { $InputDelayFrames = 4 }
+    if (-not $PSBoundParameters.ContainsKey('InputMaxFrameLead')) { $InputMaxFrameLead = 4 }
+    if (-not $PSBoundParameters.ContainsKey('InputSendDelayFrames')) { $InputSendDelayFrames = 0 }
+    if (-not $PSBoundParameters.ContainsKey('InputSendJitterFrames')) { $InputSendJitterFrames = 0 }
+    $InputUnreliable = $true
+    if (-not $PSBoundParameters.ContainsKey('InputBundleHistory')) { $InputBundleHistory = 8 }
+}
+
+if ($LowLatencyRollback) {
+    $InputDelayFrames = 0
+    $InputMaxFrameLead = 8
+    $Rollback = $true
+    $RollbackResimulate = $true
+    $RollbackCheckpointInterval = 30
+}
+
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$smokeScript = Join-Path $PSScriptRoot "run-nsmb-mvl-lan-route-smoke.ps1"
+$logRoot = Join-Path $repoRoot $LogDir
+$hostLog = Join-Path $logRoot "host"
+$clientLog = Join-Path $logRoot "client"
+$wrapperLog = Join-Path $logRoot "wrapper"
+New-Item -ItemType Directory -Force $wrapperLog | Out-Null
+
+$cfgPath = Join-Path $repoRoot "build\release-windows-x86_64\melonDS.toml"
+if (Test-Path $cfgPath) {
+    $cfg = Get-Content $cfgPath -Raw
+    $useGL = if ($SoftwareRenderer) { 'false' } else { 'true' }
+    $renderer = if ($SoftwareRenderer) { '0' } else { '2' }
+    $replacements = [ordered]@{
+        'LimitFPS' = 'true'
+        'AudioSync' = 'false'
+        'Screen.UseGL' = $useGL
+        'Screen.VSync' = 'false'
+        'Screen.VSyncInterval' = '1'
+        '3D.Renderer' = $renderer
+        '3D.GL.ScaleFactor' = '1'
+        '3D.GL.HiresCoordinates' = 'false'
+        '3D.Soft.Threaded' = 'true'
+        'Instance0.Window0.ScreenSizing' = '0'
+        'Instance0.Window0.ShowOSD' = 'false'
+    }
+    foreach ($key in $replacements.Keys) {
+        $value = $replacements[$key]
+        $cfg = Set-MelonTomlValue -Text $cfg -KeyPath $key -Value $value
+    }
+    Set-Content -Path $cfgPath -Value $cfg -Encoding UTF8
+}
+
+$common = @(
+    "-Frames", "$Frames",
+    "-WaitTimeoutMs", "$WaitTimeoutMs",
+    "-InternalWaitTimeoutMs", "$InternalWaitTimeoutMs",
+    "-Exe", $Exe,
+    "-InputScript", $InputScript,
+    "-ScreenshotInterval", "0",
+    "-NoHashLog",
+    "-SkipMvlStateCheck",
+    "-SkipGameplayActorCheck",
+    "-NoLanMP",
+    "-InputNetplay",
+    "-InputDelayFrames", "$InputDelayFrames",
+    "-InputMaxFrameLead", "$InputMaxFrameLead",
+    "-InputSendDelayFrames", "$InputSendDelayFrames",
+    "-InputSendJitterFrames", "$InputSendJitterFrames",
+    "-PacketBridgeJitHelperPatch",
+    "-PacketBridgeJitHelperPatchFrame", "840",
+    "-PacketBridgeStartFrame", "840",
+    "-ClearMvlCameraInitHold",
+    "-ClearMvlCameraInitHoldStartFrame", "840",
+    "-WaitForPeerAtNetplayStart"
+)
+if ($NoFrameLimit) {
+    $common += "-NoFrameLimit"
+}
+if ($AllowJit) {
+    $common += "-AllowJit"
+}
+if ($Rollback) {
+    $common += @(
+        "-Rollback",
+        "-RollbackWindow", "$RollbackWindow",
+        "-RollbackCheckpointInterval", "$RollbackCheckpointInterval",
+        "-RollbackResimulateDelayFrames", "$RollbackResimulateDelayFrames"
+    )
+    if ($RollbackBackend -ne "") {
+        $common += @("-RollbackBackend", "$RollbackBackend")
+    }
+    if ($RollbackResimulate) {
+        $common += "-RollbackResimulate"
+    }
+}
+if ($InputUnreliable) {
+    $common += @("-InputUnreliable", "-InputBundleHistory", "$InputBundleHistory")
+}
+
+$hostArgs = @(
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-File", $smokeScript
+) + $common + @(
+    "-RunRole", "host",
+    "-Rom", "roms\nsmb-us.nds",
+    "-HostRom", $HostRom,
+    "-LogDir", $hostLog
+)
+
+$clientArgs = @(
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-File", $smokeScript
+) + $common + @(
+    "-RunRole", "client",
+    "-Peer", "127.0.0.1",
+    "-Rom", "roms\nsmb-us.nds",
+    "-ClientRom", $ClientRom,
+    "-LogDir", $clientLog
+)
+
+$hostOut = Join-Path $wrapperLog "host-wrapper.out.txt"
+$hostErr = Join-Path $wrapperLog "host-wrapper.err.txt"
+$clientOut = Join-Path $wrapperLog "client-wrapper.out.txt"
+$clientErr = Join-Path $wrapperLog "client-wrapper.err.txt"
+
+$hostProc = Start-Process -FilePath "powershell.exe" `
+    -ArgumentList $hostArgs `
+    -WorkingDirectory $repoRoot `
+    -RedirectStandardOutput $hostOut `
+    -RedirectStandardError $hostErr `
+    -PassThru `
+    -WindowStyle Hidden
+
+Start-Sleep -Milliseconds $HostStartupDelayMs
+
+$clientProc = Start-Process -FilePath "powershell.exe" `
+    -ArgumentList $clientArgs `
+    -WorkingDirectory $repoRoot `
+    -RedirectStandardOutput $clientOut `
+    -RedirectStandardError $clientErr `
+    -PassThru `
+    -WindowStyle Hidden
+
+Write-Host "Started NSMB MvL manual local session."
+Write-Host "host wrapper pid=$($hostProc.Id) log=$hostLog"
+Write-Host "client wrapper pid=$($clientProc.Id) log=$clientLog"
+Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
+Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit)"
+if ($Rollback) {
+    $backendLabel = if ($RollbackBackend -ne "") { $RollbackBackend } else { "savestate" }
+    Write-Host "rollback enabled backend=$backendLabel window=$RollbackWindow checkpointInterval=$RollbackCheckpointInterval resimDelay=$RollbackResimulateDelayFrames resimulate=$RollbackResimulate"
+}
+if ($InputUnreliable) {
+    Write-Host "input unreliable bundleHistory=$InputBundleHistory"
+}
+if ($AllowJit) {
+    Write-Host "JIT is enabled for speed; deterministic sync is not guaranteed yet."
+} else {
+    Write-Host "JIT is disabled for deterministic sync."
+}

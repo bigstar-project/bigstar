@@ -1,0 +1,30 @@
+# Direct MvL local1 client-side movement probe.
+# Keep the known safe menu/bootstrap path, then move only Luigi briefly after
+# the stage is stable. This should prove client/local player1 input without
+# intentionally entering a death/fade sequence.
+
+inst0 0-619 NONE
+inst0 620-627 DOWN
+inst0 628-659 NONE
+inst0 660-667 A
+inst0 668-899 NONE
+inst0 900-907 A
+inst0 908-1259 NONE
+inst0 1260-1267 A
+inst0 1268-2199 NONE
+inst0 2200-2300 A
+inst0 2301-7200 NONE
+
+inst1 0-619 NONE
+inst1 620-627 DOWN
+inst1 628-659 NONE
+inst1 660-667 A
+inst1 668-899 NONE
+inst1 900-907 A
+inst1 908-1259 NONE
+inst1 1260-1267 A
+inst1 1268-1799 NONE
+inst1 1800-1960 A
+inst1 1961-2759 NONE
+inst1 2760-2879 RIGHT
+inst1 2880-7200 NONE
