@@ -1,6 +1,7 @@
 name: NSMB Signaling
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -34,7 +35,7 @@ jobs:
         run: pnpm format-and-lint
 
   deploy:
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
     needs: ci
     runs-on: ubuntu-24.04
     defaults:

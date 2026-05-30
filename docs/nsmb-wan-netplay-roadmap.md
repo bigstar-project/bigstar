@@ -173,7 +173,7 @@ cargo check --features webrtc: pass
   - 必要なら簡易tokenや署名つきsessionを導入する。
   - SDPやICE情報を長期保存しない方針を明記する。
 - deployment / operations:
-  - GitHub Actionsのdeploy jobは `main` push 自動実行を維持しつつ、必要なsecrets/varsをREADMEに明記する。
+  - GitHub Actionsのdeploy jobは `main` push 自動実行と `main` 手動dispatchを維持しつつ、必要なsecrets/varsをREADMEに明記する。
   - staging/productionを分けるか判断する。
   - Cloudflare logsで接続失敗理由を追えるようにする。
 
@@ -187,13 +187,13 @@ cargo check --features webrtc: pass
 - `main`: このfork/独自プロダクトの本線。`master` から作成し、NSMB online向け作業ブランチをmergeする。
 - `feature/*` or `codex-*`: 個別作業ブランチ。
 - 自分のGitHub remoteを `origin` (`https://github.com/uniunitaro/nsmb-mvl-online.git`)、公式melonDS remoteを `upstream` にする。
-- GitHub Actionsのsignaling deployは `main` push に限定する。PRではCIのみ。
+- GitHub Actionsのsignaling deployは `main` push と `main` 手動dispatchに限定する。PRではCIのみ。
 
 理由:
 
 - melonDS公式履歴に近い `master` を温存できる。
 - `main` はNSMB online向けのアプリ、signaling server、bridge、docsを含む統合ブランチとして扱える。
-- GitHub Actionsのsignaling deployは `main` push に限定し、`upstream/master` 追従作業で誤deployしない。
+- GitHub Actionsのsignaling deployは `main` push と `main` 手動dispatchに限定し、`upstream/master` 追従作業で誤deployしない。
 
 ## 1PC auto smoke FPS investigation
 
