@@ -83,12 +83,20 @@ def encode_cmp_imm(rn: int, imm: int) -> int:
     return 0xE3500000 | (rn << 16) | encode_arm_imm12(imm)
 
 
+def encode_cmn_imm(rn: int, imm: int) -> int:
+    return 0xE3700000 | (rn << 16) | encode_arm_imm12(imm)
+
+
 def encode_mov_reg(rd: int, rm: int) -> int:
     return 0xE1A00000 | (rd << 12) | rm
 
 
 def encode_add_reg(rd: int, rn: int, rm: int) -> int:
     return 0xE0800000 | (rn << 16) | (rd << 12) | rm
+
+
+def encode_sub_reg(rd: int, rn: int, rm: int) -> int:
+    return 0xE0400000 | (rn << 16) | (rd << 12) | rm
 
 
 def encode_rsb_imm(rd: int, rn: int, imm: int) -> int:
@@ -482,6 +490,125 @@ def patch_camera_focus_loop_count(overlays: dict[int, object], count: int) -> li
             f"{old.hex()} -> {struct.pack('<I', word).hex()} count={count}"
         )
     return changes
+
+
+def build_mvl_camera_lead_stub(
+    start_addr: int,
+    *,
+    return_addr: int,
+    get_player_addr: int,
+    right_lead: int,
+    left_lead: int,
+    neutral_lead: int,
+    velocity_threshold: int,
+    camera_step: int,
+) -> list[int]:
+    words: list[int] = []
+    literals: list[int] = []
+    literal_refs: list[tuple[int, int, int, int]] = []
+
+    def emit_ldr_literal(rd: int, value: int, *, cond: int = 0xE) -> None:
+        literal_index = len(literals)
+        literals.append(value)
+        word_index = len(words)
+        words.append(0)
+        literal_refs.append((word_index, rd, literal_index, cond))
+
+    right_offset = max(0, neutral_lead - right_lead)
+    left_offset = max(0, left_lead - neutral_lead)
+
+    # The overwritten site is the Stage::cameraX store in the camera update.
+    # Keep the caller's live registers, use the previous Stage::cameraX value
+    # as the smooth current position, and bias NSMB's natural camera target by
+    # the real player actor velocity. The MvL stage wraps horizontally, so the
+    # final approach must use the shortest delta on the 0x400000 camera ring.
+    words.append(encode_push((1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 14)))  # push {r0-r5,lr}
+    words.append(encode_ldr_reg_lsl(5, 3, 6, 2))  # ldr r5, [r3, r6, lsl #2] ; previous Stage::cameraX
+    words.append(encode_mov_reg(0, 6))  # mov r0, r6 ; player slot
+    words.append(encode_bl(start_addr + len(words) * 4, get_player_addr))
+    words.append(encode_cmp_imm(0, 0))
+    use_original_branch_index = len(words)
+    words.append(0)  # beq useOriginal
+    words.append(encode_mov_reg(2, 8))  # mov r2, r8 ; natural camera x target
+    words.append(encode_ldr_imm(3, 0, 0xD0))  # ldr r3, [r0, #0xD0] ; actor vel x
+    emit_ldr_literal(4, 0x003FFFFF)
+    words.append(encode_cmp_imm(3, velocity_threshold))
+    words.append(with_cond(encode_add_imm(2, 2, right_offset), 0xC))  # addgt r2, r2, #rightOffset
+    words.append(encode_cmn_imm(3, velocity_threshold))
+    words.append(with_cond(encode_sub_imm(2, 2, left_offset), 0x4))  # submi r2, r2, #leftOffset
+    words.append(0xE0022004)  # and r2, r2, r4
+
+    words.append(encode_sub_reg(0, 2, 5))  # sub r0, r2, r5 ; ring delta target-current
+    words.append(encode_cmp_imm(0, 0x200000))
+    words.append(with_cond(encode_sub_imm(0, 0, 0x400000), 0xC))  # subgt r0, r0, #span
+    words.append(encode_cmn_imm(0, 0x200000))
+    words.append(with_cond(encode_add_imm(0, 0, 0x400000), 0x4))  # addmi r0, r0, #span
+    words.append(encode_cmp_imm(0, camera_step))
+    words.append(with_cond(encode_mov_imm(0, camera_step), 0xC))  # movgt r0, #cameraStep
+    words.append(encode_cmn_imm(0, camera_step))
+    words.append(with_cond(encode_mov_imm(0, camera_step), 0x4))  # movmi r0, #cameraStep
+    words.append(with_cond(encode_rsb_imm(0, 0, 0), 0x4))  # rsbmi r0, r0, #0
+    words.append(encode_add_reg(8, 5, 0))  # add r8, r5, r0
+    words.append(0xE0088004)  # and r8, r8, r4
+    use_original_addr = start_addr + len(words) * 4
+    words.append(0xE8BD0000 | (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 14))  # pop {r0-r5,lr}
+    words.append(0xE7838106)  # str r8, [r3, r6, lsl #2]
+    words.append(encode_b(start_addr + len(words) * 4, return_addr))
+
+    words[use_original_branch_index] = with_cond(
+        encode_b(start_addr + use_original_branch_index * 4, use_original_addr),
+        0x0,
+    )
+
+    literal_start_addr = start_addr + (len(words) * 4)
+    for word_index, rd, literal_index, cond in literal_refs:
+        instruction_addr = start_addr + (word_index * 4)
+        literal_addr = literal_start_addr + (literal_index * 4)
+        words[word_index] = encode_ldr_pc_literal(rd, instruction_addr, literal_addr, cond=cond)
+    words.extend(literals)
+    return words
+
+
+def patch_mvl_camera_lead_from_player_velocity(
+    overlays: dict[int, object],
+    *,
+    right_lead: int = 0x00050000,
+    left_lead: int = 0x000B0000,
+    neutral_lead: int = 0x00080000,
+    velocity_threshold: int = 0x40,
+    camera_step: int = 0x6000,
+) -> list[str]:
+    ov_id = 0
+    store_addr = 0x020AD784
+    return_addr = 0x020AD788
+    stub_addr = 0x020C5300
+    expected_store = 0xE7838106  # str r8, [r3, r6, lsl #2]
+    stub = build_mvl_camera_lead_stub(
+        stub_addr,
+        return_addr=return_addr,
+        get_player_addr=0x02020608,
+        right_lead=right_lead,
+        left_lead=left_lead,
+        neutral_lead=neutral_lead,
+        velocity_threshold=velocity_threshold,
+        camera_step=camera_step,
+    )
+    if len(stub) * 4 > 0x78:
+        raise ValueError(f"MvL camera lead stub too large: 0x{len(stub) * 4:X} bytes")
+    old_cave = patch_overlay_words_by_id(overlays, ov_id, stub_addr, stub)
+    if any(old_cave):
+        raise ValueError(f"MvL camera lead stub cave 0x{stub_addr:08X} is not empty")
+    branch = encode_b(store_addr, stub_addr)
+    old = patch_overlay_words_by_id(overlays, ov_id, store_addr, [branch])
+    old_word = struct.unpack("<I", old)[0]
+    if old_word != expected_store:
+        raise ValueError(f"camera store @ 0x{store_addr:08X} expected 0x{expected_store:08X}, got 0x{old_word:08X}")
+    return [
+        f"MvL camera lead stub overlay{ov_id} @ 0x{stub_addr:08X} bytes=0x{len(stub) * 4:X}",
+        f"MvL camera lead branch overlay{ov_id} @ 0x{store_addr:08X}: {old.hex()} -> {struct.pack('<I', branch).hex()} "
+        f"right=0x{right_lead:X} left=0x{left_lead:X} neutral=0x{neutral_lead:X} "
+        f"threshold=0x{velocity_threshold:X} cameraStep=0x{camera_step:X}",
+    ]
 
 
 def patch_stage_set_zoom_camera_player_id(overlays: dict[int, object], player_id: int) -> list[str]:
@@ -1305,6 +1432,12 @@ def patch_direct_mvl_entry(
     camera_fallback_slot_zero: bool,
     camera_player1_out_of_view_slot0: bool,
     camera_focus_loop_count: int | None,
+    mvl_camera_lead_from_player_velocity: bool,
+    mvl_camera_right_lead: int,
+    mvl_camera_left_lead: int,
+    mvl_camera_neutral_lead: int,
+    mvl_camera_velocity_threshold: int,
+    mvl_camera_step: int,
     stage_set_zoom_camera_player_id: int | None,
     stagefx_display_player_id: int | None,
     stage_layout_inventory_display_player_id: int | None,
@@ -1417,6 +1550,15 @@ def patch_direct_mvl_entry(
         ))
     if camera_focus_loop_count is not None:
         changes.extend(patch_camera_focus_loop_count(overlays, camera_focus_loop_count))
+    if mvl_camera_lead_from_player_velocity:
+        changes.extend(patch_mvl_camera_lead_from_player_velocity(
+            overlays,
+            right_lead=mvl_camera_right_lead,
+            left_lead=mvl_camera_left_lead,
+            neutral_lead=mvl_camera_neutral_lead,
+            velocity_threshold=mvl_camera_velocity_threshold,
+            camera_step=mvl_camera_step,
+        ))
     if stage_set_zoom_camera_player_id is not None:
         changes.extend(patch_stage_set_zoom_camera_player_id(overlays, stage_set_zoom_camera_player_id))
     if stagefx_display_player_id is not None:
@@ -1606,6 +1748,12 @@ def main() -> int:
     sub.add_parser("camera-player1-out-of-view-slot0")
     p_camera_loop = sub.add_parser("camera-focus-loop-count")
     p_camera_loop.add_argument("--count", type=lambda x: int(x, 0), default=2)
+    p_camera_lead = sub.add_parser("mvl-camera-lead-from-player-velocity")
+    p_camera_lead.add_argument("--right-lead", type=lambda x: int(x, 0), default=0x00050000)
+    p_camera_lead.add_argument("--left-lead", type=lambda x: int(x, 0), default=0x000B0000)
+    p_camera_lead.add_argument("--neutral-lead", type=lambda x: int(x, 0), default=0x00080000)
+    p_camera_lead.add_argument("--velocity-threshold", type=lambda x: int(x, 0), default=0x40)
+    p_camera_lead.add_argument("--camera-step", type=lambda x: int(x, 0), default=0x6000)
     p_set_zoom_camera = sub.add_parser("stage-set-zoom-camera-player-id")
     p_set_zoom_camera.add_argument("--player-id", type=lambda x: int(x, 0), required=True)
     p_stagefx_display = sub.add_parser("stagefx-display-player-id")
@@ -1677,6 +1825,12 @@ def main() -> int:
     p_direct.add_argument("--camera-fallback-slot-zero", action="store_true")
     p_direct.add_argument("--camera-player1-out-of-view-slot0", action="store_true")
     p_direct.add_argument("--camera-focus-loop-count", type=lambda x: int(x, 0), default=None)
+    p_direct.add_argument("--mvl-camera-lead-from-player-velocity", action="store_true")
+    p_direct.add_argument("--mvl-camera-right-lead", type=lambda x: int(x, 0), default=0x00050000)
+    p_direct.add_argument("--mvl-camera-left-lead", type=lambda x: int(x, 0), default=0x000B0000)
+    p_direct.add_argument("--mvl-camera-neutral-lead", type=lambda x: int(x, 0), default=0x00080000)
+    p_direct.add_argument("--mvl-camera-velocity-threshold", type=lambda x: int(x, 0), default=0x40)
+    p_direct.add_argument("--mvl-camera-step", type=lambda x: int(x, 0), default=0x6000)
     p_direct.add_argument("--stage-set-zoom-camera-player-id", type=lambda x: int(x, 0), default=None)
     p_direct.add_argument("--stagefx-display-player-id", type=lambda x: int(x, 0), default=None)
     p_direct.add_argument("--stage-layout-inventory-display-player-id", type=lambda x: int(x, 0), default=None)
@@ -1723,6 +1877,17 @@ def main() -> int:
     elif args.cmd == "camera-focus-loop-count":
         overlays = rom.loadArm9Overlays()
         changes = patch_camera_focus_loop_count(overlays, args.count)
+        save_overlays(rom, overlays)
+    elif args.cmd == "mvl-camera-lead-from-player-velocity":
+        overlays = rom.loadArm9Overlays()
+        changes = patch_mvl_camera_lead_from_player_velocity(
+            overlays,
+            right_lead=args.right_lead,
+            left_lead=args.left_lead,
+            neutral_lead=args.neutral_lead,
+            velocity_threshold=args.velocity_threshold,
+            camera_step=args.camera_step,
+        )
         save_overlays(rom, overlays)
     elif args.cmd == "stage-set-zoom-camera-player-id":
         overlays = rom.loadArm9Overlays()
@@ -1845,6 +2010,12 @@ def main() -> int:
             camera_fallback_slot_zero=args.camera_fallback_slot_zero,
             camera_player1_out_of_view_slot0=args.camera_player1_out_of_view_slot0,
             camera_focus_loop_count=args.camera_focus_loop_count,
+            mvl_camera_lead_from_player_velocity=args.mvl_camera_lead_from_player_velocity,
+            mvl_camera_right_lead=args.mvl_camera_right_lead,
+            mvl_camera_left_lead=args.mvl_camera_left_lead,
+            mvl_camera_neutral_lead=args.mvl_camera_neutral_lead,
+            mvl_camera_velocity_threshold=args.mvl_camera_velocity_threshold,
+            mvl_camera_step=args.mvl_camera_step,
             stage_set_zoom_camera_player_id=args.stage_set_zoom_camera_player_id,
             stagefx_display_player_id=args.stagefx_display_player_id,
             stage_layout_inventory_display_player_id=args.stage_layout_inventory_display_player_id,

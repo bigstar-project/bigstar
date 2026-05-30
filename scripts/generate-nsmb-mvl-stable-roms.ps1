@@ -29,6 +29,7 @@ $clientWifiRom = [System.IO.Path]::ChangeExtension($ClientRom, ".wificount2.tmp.
     --call-load-mvsl-files-after `
     --camera-player1-out-of-view-slot0 `
     --camera-focus-loop-count 2 `
+    --mvl-camera-lead-from-player-velocity `
     --player-stage-lock-vsmode-noop
 
 & python tools\nsmb_us_rom_patch.py `
@@ -52,6 +53,7 @@ Move-Item -Force $hostWifiRom $HostRom
     --call-load-mvsl-files-after `
     --camera-player1-out-of-view-slot0 `
     --camera-focus-loop-count 2 `
+    --mvl-camera-lead-from-player-velocity `
     --player-stage-lock-vsmode-noop
 
 & python tools\nsmb_us_rom_patch.py `
