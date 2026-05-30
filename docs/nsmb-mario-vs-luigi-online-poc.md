@@ -96,11 +96,12 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 1. 開始直後からhost/clientのenemy/object位置が微妙にズレることがある。特に最初のクリボー付近で、同じ入力でも接触判定が分岐しうる。
 2. 2026-05-30調査: 固定 `PacketBridgeStartFrame=870` では、hostがraw frame 860、clientがraw frame 866でMvsL gameplay actor生成に到達していた。つまりbarrier前にhost側の試合内時間が6F進んでいた。
 3. 対策: start-ready barrierを固定raw frameではなく、全ステージ共通の `StageScene active + StageController + player actor 2体` が出揃った最初のframeで行う。host raw 860 / client raw 866 を同じnetplay論理frameに正規化し、入力packet frameとNSMB側tickは論理frameで揃える。クリボーなどのステージ固有enemy/objectはready条件に使わない。
-4. 手動起動のデフォルトbootstrapは、ゲーム開始後にA入力が残らない `tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs` に変更。試合中入力のズレ要因を避けるため。
+4. 手動起動のデフォルトbootstrapは、ゲーム開始後にA入力が残らない `tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs` に変更。試合中入力のズレ要因を避けるため。ただし手動入力を殺さないよう、scriptのneutral範囲は `668-839` までで止める。
 5. 検証: `logs\codex-sync-start-stage-ready-host` / `logs\codex-sync-start-stage-ready-client` で、クリボー依存を外したready条件でも host raw 860 / client raw 866 の6F差を検出し、active fps 約60、throttle 0で完走した。
 6. 2026-05-30 RNG修正: 旧stable ROMの `rng-constant --value 0x100` を廃止。`MELONDS_NSML_MATCH_SEED` 指定時もhost/client双方で起動直後から `Net::random.value` / `Game::random.value` 注入を有効にし、未指定時はhost生成seedをclientへ配布する。
 7. RNG検証: `logs\codex-rng-seed-12345678-netgame` ではhost/clientともseed `0x12345678`、初期スター `X=0x2c0000 Y=0xfff30000` で一致。`logs\codex-rng-seed-87654321-netgame` ではseed `0x87654321`、初期スター `X=0x1a0000 Y=0xfff40000` で一致。`logs\codex-rng-auto-seed-netgame-a/b/c` ではseed未指定の複数回実行でhost生成seedが毎回変わり、少なくとも `c` で別スター位置を確認。各回のhost/clientは一致。
-8. 残り: 自動smokeの終了条件はraw frame基準なので、動的start後は片側が先に終了してもう片側がthrottle timeoutすることがある。これは手動対戦の同期ズレとは別のテストハーネス問題として扱う。
+8. 2026-05-30手動入力修正: `minimal_bootstrap.inputs` の `668-10000 NONE` が試合中の手動入力を上書きしていたため、`668-839 NONE` に短縮。`logs\codex-manual-input-bootstrap-fix` で起動smoke pass、active fps約60を確認。
+9. 残り: 自動smokeの終了条件はraw frame基準なので、動的start後は片側が先に終了してもう片側がthrottle timeoutすることがある。これは手動対戦の同期ズレとは別のテストハーネス問題として扱う。
 
 ## 手動起動
 
