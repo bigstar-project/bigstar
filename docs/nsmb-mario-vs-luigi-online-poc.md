@@ -37,11 +37,10 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - active FPS と input wait/throttle の計測ログ。
 - trace/hook無効時にJITを使える経路。
 - 2026-05-30 カメラ補正:
-  - direct MvL routeでは、本来のMvsLの「移動方向側を広く見せる」カメラ先読みが弱く、特にステージ端の `0x400000` ラップ付近で `Stage::cameraX` が長い方向へ追従してプレイヤーが画面外へ出ることがあった。
-  - 現在の本筋は実行時hookではなく、US版ROM patch `--mvl-camera-lead-from-player-velocity`。`0x020AD784` の `Stage::cameraX[player]` 書き込み地点を差し替え、NSMB本来のカメラ計算結果をベースに、プレイヤー速度で左右の先読み量を足す。
-  - カメラXは `0x400000` 周期のリング座標として扱い、target-current の最短デルタを `cameraStep=0x6000` でクランプして進める。これにより、右端/左端をまたぐ時の長回りとガクつきを避ける。
-  - stable ROM生成scriptはhost/client両方にこのROM patchを入れる。旧 `MELONDS_NSML_DYNAMIC_CAMERA_LEAD` 実行時hookは診断用に残すが、手動peerではデフォルト無効。必要な場合だけ `-RuntimeDynamicCameraLead` を付ける。
-  - 検証: `logs\codex-camera-ring-lead` で右移動中の client/Luigi が常に相対 `0x50FFF` 前後に保たれ、ステージ端ラップで画面外へ長回りしないことを確認。host/client active FPS は `59.76-59.82fps`、remote wait/throttle は0。
+  - `--mvl-camera-lead-from-player-velocity` による独自先読み補正は、本来MvsLと違う挙動になるためstable ROMから外した。
+  - 比較結果: `plain` / `camera-player1-out-of-view-slot0` / `camera-focus-loop-count 2` / 両方あり、の4系統はすべて右移動時の `playerX-cameraX ~= 0x80FFF` で一致。異常な差分は独自先読みROM patchだけで発生していた。
+  - 現在のstable ROMは `0x020AD784` の本来の `Stage::cameraX[player]` 書き込みを変更しない。旧 `MELONDS_NSML_DYNAMIC_CAMERA_LEAD` 実行時hookも手動peerではデフォルト無効。
+  - 本当に本来MvsLと差が残る場合は、カメラ追従を後付け近似せず、通常MvsLのカメラ初期化/状態値を採取してdirect entry側の不足初期化を直す。
 - 不要な古い `logs/codex-*` は適宜削除済み。
 
 ## 60fps切り分け結果
@@ -102,7 +101,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - 開始同期は固定raw frameではなく、全ステージ共通の `StageScene active + StageController + player actor 2体` ready条件に寄せている。クリボーなどステージ固有enemy/objectはready条件に使わない。
 - RNGはROM側定数化ではなく、match seed同期。seed未指定時はhost生成seedをclientへ配布し、host/client内では一致させる。
 - 手動起動のデフォルトbootstrapは `tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs`。試合中の手動入力を上書きしないよう、neutral範囲は `668-839` まで。
-- カメラ先読みは stable ROM 内の `--mvl-camera-lead-from-player-velocity` patch で補正する。旧 `MELONDS_NSML_DYNAMIC_CAMERA_LEAD` 実行時hookは診断用で、手動peerではデフォルト無効。
+- stable ROMでは独自カメラ先読みpatchを使わず、NSMB本来の `Stage::cameraX[player]` 更新をそのまま使う。旧 `MELONDS_NSML_DYNAMIC_CAMERA_LEAD` 実行時hookは診断用で、手動peerではデフォルト無効。
 - 残りの注意点: 自動smokeの終了条件はraw frame基準なので、動的start後は片側が先に終了してもう片側がthrottle timeoutすることがある。これは手動対戦の同期ズレとは別のテストハーネス問題として扱う。
 
 ## 手動起動
@@ -121,7 +120,7 @@ client:
 
 デフォルトは `InputDelayFrames=4` / `InputMaxFrameLead=4` / frame limit有効 / `SwapBuffersInterval=1` / start-ready barrier有効 / `InternalWaitTimeoutMs=0` / JIT有効。
 
-カメラ先読み補正は stable ROM に入っているため、通常の手動起動では追加指定は不要。旧実行時hookを診断目的で重ねる場合だけ `-RuntimeDynamicCameraLead` を付ける。
+カメラ追従は通常の手動起動では追加指定不要。旧実行時hookを診断目的で重ねる場合だけ `-RuntimeDynamicCameraLead` を付ける。
 
 ```powershell
 .\scripts\run-nsmb-mvl-manual-peer.ps1 -Role host -RuntimeDynamicCameraLead
