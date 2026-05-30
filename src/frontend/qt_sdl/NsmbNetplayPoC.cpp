@@ -835,6 +835,7 @@ struct ObjectLifecycleSummary
 };
 
 ObjectScanSample FindObjectByIDAndSettingsLoose(melonDS::NDS* nds, melonDS::u16 expectedObjectID, melonDS::u32 expectedSettings);
+ObjectScanSample FindObjectByID(melonDS::NDS* nds, melonDS::u16 expectedObjectID);
 PlayerActorScanSample FindPlayerActors(melonDS::NDS* nds);
 
 struct GameStateSyncHashes
@@ -4092,15 +4093,21 @@ bool IsInputNetplayGameplayStartReady(melonDS::NDS* nds)
     if (!IsMarioVsLuigiGameplay(nds))
         return false;
 
+    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(
+        nds,
+        kStageSceneObjectID,
+        kMvlStageSceneSettings);
+    if (!stageScene.Found || stageScene.StateType == 0)
+        return false;
+
+    const ObjectScanSample stageController = FindObjectByID(nds, kStageControllerObjectID);
+    if (!stageController.Found)
+        return false;
+
     const PlayerActorScanSample players = FindPlayerActors(nds);
     if (!players.Actor0.Found || !players.Actor1.Found)
         return false;
-
-    const ObjectScanSample firstGoomba = FindObjectByIDAndSettingsLoose(
-        nds,
-        kVsMovingHazardObjectID,
-        kVsMovingHazardSettings);
-    return firstGoomba.Found != 0;
+    return true;
 }
 
 melonDS::u32 InputNetplayLogicalFrame(melonDS::u32 rawFrame)

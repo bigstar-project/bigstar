@@ -95,9 +95,9 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 1. 開始直後からhost/clientのenemy/object位置が微妙にズレることがある。特に最初のクリボー付近で、同じ入力でも接触判定が分岐しうる。
 2. 2026-05-30調査: 固定 `PacketBridgeStartFrame=870` では、hostがraw frame 860、clientがraw frame 866でMvsL gameplay actor生成に到達していた。つまりbarrier前にhost側の試合内時間が6F進んでいた。
-3. 対策: start-ready barrierを固定raw frameではなく、player actor 2体 + 最初のクリボー相当actorが出揃った最初のframeで行う。host raw 860 / client raw 866 を同じnetplay論理frameに正規化し、入力packet frameとNSMB側tickは論理frameで揃える。
+3. 対策: start-ready barrierを固定raw frameではなく、全ステージ共通の `StageScene active + StageController + player actor 2体` が出揃った最初のframeで行う。host raw 860 / client raw 866 を同じnetplay論理frameに正規化し、入力packet frameとNSMB側tickは論理frameで揃える。クリボーなどのステージ固有enemy/objectはready条件に使わない。
 4. 手動起動のデフォルトbootstrapは、ゲーム開始後にA入力が残らない `tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs` に変更。試合中入力のズレ要因を避けるため。
-5. 検証: `logs\codex-sync-drift-dynamic-start-2` ではraw frame同士の比較だと6F差に見えるが、host frame `f` と client frame `f+6` を対応させると、最初のクリボー位置/速度とplayer位置が一致した。
+5. 検証: `logs\codex-sync-start-stage-ready-host` / `logs\codex-sync-start-stage-ready-client` で、クリボー依存を外したready条件でも host raw 860 / client raw 866 の6F差を検出し、active fps 約60、throttle 0で完走した。
 6. 残り: 自動smokeの終了条件はraw frame基準なので、動的start後は片側が先に終了してもう片側がthrottle timeoutすることがある。これは手動対戦の同期ズレとは別のテストハーネス問題として扱う。
 
 ## 手動起動
