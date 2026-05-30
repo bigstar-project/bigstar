@@ -36,11 +36,12 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - 手動peer/local起動では `InternalWaitTimeoutMs=0` をデフォルト化。input frame lead が閾値を超えたときは、desync/終了ではなく同期待ちで止める。
 - active FPS と input wait/throttle の計測ログ。
 - trace/hook無効時にJITを使える経路。
-- 2026-05-30 カメラ補正:
+- 2026-05-30 カメラ追従:
   - `--mvl-camera-lead-from-player-velocity` による独自先読み補正は、本来MvsLと違う挙動になるためstable ROMから外した。
-  - 比較結果: `plain` / `camera-player1-out-of-view-slot0` / `camera-focus-loop-count 2` / 両方あり、の4系統はすべて右移動時の `playerX-cameraX ~= 0x80FFF` で一致。異常な差分は独自先読みROM patchだけで発生していた。
-  - 現在のstable ROMは `0x020AD784` の本来の `Stage::cameraX[player]` 書き込みを変更しない。旧 `MELONDS_NSML_DYNAMIC_CAMERA_LEAD` 実行時hookも手動peerではデフォルト無効。
-  - 本当に本来MvsLと差が残る場合は、カメラ追従を後付け近似せず、通常MvsLのカメラ初期化/状態値を採取してdirect entry側の不足初期化を直す。
+  - 通常LocalMPをUS版ROMで実測し、Luigi右移動時に `playerActor1X - stageCameraGlobalX1 ~= 0x60FFF` へ寄ることを確認した。
+  - direct entryではステージ初期化中に `0x020CA880` の bit `0x08` が残り、右移動時も `playerActor1X - stageCameraGlobalX1 ~= 0x80FFF` 付近に固定されることをwrite-traceで特定した。
+  - `MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD` を追加し、direct entryで残った初期化hold bitだけを試合開始前に一度クリアするようにした。`0x020AD784` の本来の `Stage::cameraX[player]` 書き込みや、通常の `0x10` runtime camera flag は変更しない。
+  - hook有効後、direct entryでも右移動時に `playerActor1X - stageCameraGlobalX1 ~= 0x60FFF` へ戻ることを確認した。
 - 不要な古い `logs/codex-*` は適宜削除済み。
 
 ## 60fps切り分け結果
@@ -102,6 +103,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - RNGはROM側定数化ではなく、match seed同期。seed未指定時はhost生成seedをclientへ配布し、host/client内では一致させる。
 - 手動起動のデフォルトbootstrapは `tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs`。試合中の手動入力を上書きしないよう、neutral範囲は `668-839` まで。
 - stable ROMでは独自カメラ先読みpatchを使わず、NSMB本来の `Stage::cameraX[player]` 更新をそのまま使う。旧 `MELONDS_NSML_DYNAMIC_CAMERA_LEAD` 実行時hookは診断用で、手動peerではデフォルト無効。
+- direct entryのカメラは、通常LocalMPとの実測比較に基づいて `0x020CA880` の初期化hold bit `0x08` だけを一度クリアする。手動peer/local起動では `ClearMvlCameraInitHold` をデフォルト有効にしている。
 - 残りの注意点: 自動smokeの終了条件はraw frame基準なので、動的start後は片側が先に終了してもう片側がthrottle timeoutすることがある。これは手動対戦の同期ズレとは別のテストハーネス問題として扱う。
 
 ## 手動起動
@@ -182,11 +184,12 @@ $env:MELONDS_NSML_SWAPBUFFERS_INTERVAL='1'
 Remove-Item Env:\MELONDS_NSML_SWAPBUFFERS_INTERVAL -ErrorAction SilentlyContinue
 ```
 
-直近の開始同期検証:
+直近の検証:
 
-- `tests\nsmb_us_direct_mvl_manual_bootstrap.inputs` / 2200 frames / `-CheckHostClientGameplaySync`: pass。
-- `tests\nsmb_us_direct_mvl_both_different.inputs` / 3600 frames / `-CheckHostClientGameplaySync`: pass。
-- host/client両方で `sent start ready frame=870`、`received start ready frame=870`、`remote start ready accepted ... localFrame=870` を確認。
+- 通常LocalMP baseline: `logs\codex-camera-original-localmp-us-probe1` / `logs\codex-camera-original-localmp-dbgfields`。Luigi右移動時の `playerActor1X - stageCameraGlobalX1` は約 `0x60FFF`。
+- direct entry + camera init hold clear: `logs\codex-camera-clear-init-hold-hook-screens`。Luigi右移動時の `playerActor1X - stageCameraGlobalX1` は約 `0x60FFF` へ戻る。
+- `scripts\run-nsmb-mvl-manual-local.ps1 -Frames 1200 -LowDelayWan -AllowJit` で、手動local wrapperから `ClearMvlCameraInitHold` がhost/client両方に渡ることを確認。
+- `-CheckHostClientGameplaySync` は現在、frame 880/1280 付近のstar/player座標で失敗することがある。これは今回のcamera init hold clear有無に関係なく再現したため、カメラ修正とは別の同期/検証ハーネス課題として扱う。
 
 ## 注意
 

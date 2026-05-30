@@ -130,6 +130,8 @@ $common = @(
     "-PacketBridgeJitHelperPatch",
     "-PacketBridgeJitHelperPatchFrame", "840",
     "-PacketBridgeStartFrame", "840",
+    "-ClearMvlCameraInitHold",
+    "-ClearMvlCameraInitHoldStartFrame", "840",
     "-WaitForPeerAtNetplayStart"
 )
 if ($NoFrameLimit) {

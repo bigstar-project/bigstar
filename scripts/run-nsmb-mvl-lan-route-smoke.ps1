@@ -375,6 +375,11 @@ param(
     [int]$ForceMvlRuntimeStateStartFrame = 0,
     [int]$ForceMvlRuntimeStateEndFrame = 0,
     [string]$ForceMvlRuntimeStateValue = "3",
+    [switch]$ClearMvlCameraInitHold,
+    [switch]$ClearMvlCameraInitHoldHostOnly,
+    [switch]$ClearMvlCameraInitHoldClientOnly,
+    [int]$ClearMvlCameraInitHoldStartFrame = 840,
+    [int]$ClearMvlCameraInitHoldEndFrame = 0,
     [switch]$GuardPlayerModelRenderPtrs,
     [int]$GuardPlayerModelRenderPtrsStartFrame = 0,
     [int]$GuardPlayerModelRenderPtrsEndFrame = 0,
@@ -1645,6 +1650,19 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_END_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_VALUE -ErrorAction SilentlyContinue
+    }
+    if ($ClearMvlCameraInitHold) {
+        $env:MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD = "1"
+        if ($ClearMvlCameraInitHoldHostOnly) { $env:MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_HOST_ONLY -ErrorAction SilentlyContinue }
+        if ($ClearMvlCameraInitHoldClientOnly) { $env:MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_CLIENT_ONLY -ErrorAction SilentlyContinue }
+        $env:MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_START_FRAME = "$ClearMvlCameraInitHoldStartFrame"
+        $env:MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_END_FRAME = "$ClearMvlCameraInitHoldEndFrame"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_HOST_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_CLIENT_ONLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_END_FRAME -ErrorAction SilentlyContinue
     }
     if ($PacketReplayFile) {
         $env:MELONDS_NSML_PACKET_REPLAY_FILE = (Resolve-Path $PacketReplayFile).Path
@@ -2932,6 +2950,9 @@ function Start-MelonLANProcess {
         "forceMvlLoadThreadClientOnly=$PacketBridgeForceMvlLoadThreadClientOnly"
         "forceMvlLoadThread=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_LOAD_THREAD)"
         "forceMvlLoadThreadStart=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_MVL_LOAD_THREAD_START_FRAME)"
+        "clearMvlCameraInitHold=$($env:MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD)"
+        "clearMvlCameraInitHoldStart=$($env:MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_START_FRAME)"
+        "clearMvlCameraInitHoldEnd=$($env:MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_END_FRAME)"
         "memPatchFile=$($env:MELONDS_NSML_MEM_PATCH_FILE)"
         "memPatchFrame=$($env:MELONDS_NSML_MEM_PATCH_FRAME)"
         "memPatchRanges=$($env:MELONDS_NSML_MEM_PATCH_RANGES)"
