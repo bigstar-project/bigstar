@@ -6,6 +6,7 @@ dist/
 bin
 obj
 target/
+node_modules/
 *.depend
 *.layout
 *.o

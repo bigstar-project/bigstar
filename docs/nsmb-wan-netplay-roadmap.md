@@ -8,7 +8,9 @@ New Super Mario Bros. DS の `Mario vs Luigi` を、最終的に一般ユーザ�
 
 ## 現在の採用方針
 
-当面は GUI とマッチメイキングサーバーを後回しにし、サーバーなしの手動コピー&ペースト signaling で WebRTC DataChannel が使えるかを確認する。
+サーバーなしの手動コピー&ペースト signaling で WebRTC DataChannel が使えることは確認済み。
+次は Cloudflare Workers + Durable Objects の最小 signaling server を追加し、手動コピー&ペーストなしで `nsmb-net-bridge` が SDP/ICE 接続情報を交換できる状態へ進める。
+Cloudflare 側は WSL の `~/oji-driving-school-reserver` と同じく pnpm + TypeScript + Alchemy 形式を参考にする。Cloudflare へのデプロイ操作はユーザーが行い、こちらでは実行しない。
 
 重要な設計判断:
 
@@ -16,7 +18,7 @@ New Super Mario Bros. DS の `Mario vs Luigi` を、最終的に一般ユーザ�
 - まずは既存の ENet/UDP packet を opaque datagram として外側から運ぶ。
 - `nsmb-net-bridge` は `melonDS <-> localhost UDP <-> WebRTC DataChannel <-> localhost UDP <-> melonDS` のsidecarとして動かす。
 - WebRTCはTangoと同じく `libdatachannel` 系を使う。
-- マッチメイキング、ランキング、GUI起動管理は後段で作る。
+- 初期のsignaling serverは2人部屋のWebSocket signalingに絞り、マッチメイキング、ランキング、GUI起動管理は後段で作る。
 
 この方針なら、既存のLAN/手動peer対戦で成立しているゲーム同期ロジックを維持したまま、transportだけWAN向けに差し替えられる。
 
@@ -33,7 +35,11 @@ nsmb-net-bridge
   local UDP endpoint
   WebRTC DataChannel endpoint
   manual copy-paste SDP exchange
-  later: signaling server support
+  Cloudflare signaling server support
+
+current backend
+  Cloudflare Worker + Durable Object signaling
+  two-peer session rooms
 
 future desktop launcher
   Tauri + TypeScript UI
@@ -42,13 +48,152 @@ future desktop launcher
   logs/status display
 
 future backend
-  signaling
   matchmaking/lobby
   account/ranking
   match result / replay upload
 ```
 
 ## Phase Status
+
+### Phase 4: Cloudflare signaling server
+
+状態: 実装済み、ローカル型チェック/リンティング確認済み。Cloudflare デプロイと実サーバー経由の2PC接続確認は未実施。
+
+実装:
+
+- `tools/nsmb-signaling-server`
+- pnpm standalone project
+- TypeScript + Biome
+- Alchemy based Cloudflare Worker definition
+- Durable Object per `session`
+- WebSocket endpoint:
+  - `/session?session=<room_id>&role=offer`
+  - `/session?session=<room_id>&role=answer`
+- 1 room につき `offer` 1接続 + `answer` 1接続
+- `sdp` / `candidate` JSON message relay
+- `/health`
+- GitHub Actions:
+  - push/PR は typecheck + Biome
+  - deploy は `main` push 時に自動実行する
+  - deploy stage は `prod` を明示する: `pnpm run deploy -- --stage prod`
+
+ローカル確認:
+
+```powershell
+cd tools\nsmb-signaling-server
+corepack pnpm install
+corepack pnpm typecheck
+corepack pnpm format-and-lint
+corepack pnpm format-and-lint:fix
+corepack pnpm run ci
+```
+
+確認済み結果:
+
+```text
+tsc --noEmit: pass
+biome check .: pass
+biome check . --write: no fixes applied
+```
+
+注意:
+
+- Cloudflare への deploy はユーザーが行う。こちらでは `pnpm deploy` / `alchemy deploy` を実行しない。
+- `DEFAULT_ICE_SERVERS` は comma-separated STUN/TURN URI list。未指定時は `stun:stun.l.google.com:19302`。
+- 初期実装は signaling のみ。matchmaking、account、ranking、result upload は未実装。
+
+### Phase 5: nsmb-net-bridge signaling integration
+
+状態: 実装済み、Rust通常check/WebRTC feature check確認済み。実サーバー経由の疎通確認は未実施。
+
+実装:
+
+- 既存の `webrtc-offer` / `webrtc-answer` 手動コピペモードは維持。
+- `--signal URL --session ID` を指定した場合だけ WebSocket signaling を使う。
+- signaling server から受け取った `iceServers` を、`--stun` 未指定時の WebRTC config として使う。
+- SDP は base64 ではなく JSON string として server 経由で中継する。
+
+起動例:
+
+```powershell
+.\tools\nsmb-net-bridge\target\debug\nsmb-net-bridge.exe webrtc-offer --local-bind 127.0.0.1:0 --local-target 127.0.0.1:8165 --signal wss://<worker-host>/session --session test-room
+.\tools\nsmb-net-bridge\target\debug\nsmb-net-bridge.exe webrtc-answer --local-bind 127.0.0.1:8265 --signal wss://<worker-host>/session --session test-room
+```
+
+ローカル確認:
+
+```powershell
+cd tools\nsmb-net-bridge
+$env:Path="$env:USERPROFILE\.cargo\bin;$env:Path"
+$env:LIBCLANG_PATH="C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\Llvm\x64\bin"
+cargo fmt --check
+cargo check
+cargo check --features webrtc
+```
+
+確認済み結果:
+
+```text
+cargo fmt --check: pass
+cargo check: pass
+cargo check --features webrtc: pass
+```
+
+### Future: 本番WAN向け signaling / WebRTC hardening
+
+状態: 未実装。現時点の Cloudflare signaling は、手動コピー&ペーストをなくすための軽い動作検証用 PoC として扱う。
+
+本格的にWAN対戦へ進める場合は、Tango の設計に寄せて以下を強化する。
+
+- signaling protocol:
+  - JSON暫定protocolから、protobuf等の明確なwire protocolへ移行するか判断する。
+  - protocol versionを持たせ、古いclient/新しいserverの不一致を明示的に拒否する。
+  - abort reason / error codeを定義し、missing session、duplicate role、version mismatch、invalid packet、timeoutを区別する。
+- connection lifecycle:
+  - ping / pong intervalとread timeoutを入れる。
+  - WebSocket切断、peer不在、answer未到着、WebRTC failed/disconnected/closedを区別してログに出す。
+  - offer/answer交換後にsignaling socketを閉じるか、状態監視用に残すかを決める。
+  - stale session / stale WebSocket cleanupを明示する。
+- room/session semantics:
+  - 現在の `role=offer|answer` 明示方式を継続するか、Tango のように最初の `start` をoffererとして扱う方式に寄せるか判断する。
+  - duplicate接続時の挙動を明確化する。古い接続を落とすのか、新しい接続を拒否するのかを決める。
+  - session idの長さ、文字種、有効期限、推測困難性を見直す。
+- ICE/TURN:
+  - Cloudflare TURN credential発行を追加する。
+  - `DEFAULT_ICE_SERVERS` だけでなく、短命credentialつきTURNをserverから配布する。
+  - TURN over TCPなど、`libdatachannel` 側で問題があるtransportをfilterする。
+  - relay強制モード / STUN-onlyモードをbridge CLIから選べるようにする。
+- bridge CLI / diagnostics:
+  - signaling URL、session、role、ICE server、connection stateを整理してログ出力する。
+  - machine-readableな接続結果ログを追加し、GUI/Tauriから状態を拾いやすくする。
+  - packet stats、disconnect reason、WebRTC state transitionを保存する。
+  - signaling server経由の自動smoke testを追加する。
+- security / abuse:
+  - sessionごとの最大接続数、message size上限、rate limitを入れる。
+  - 必要なら簡易tokenや署名つきsessionを導入する。
+  - SDPやICE情報を長期保存しない方針を明記する。
+- deployment / operations:
+  - GitHub Actionsのdeploy jobは `main` push 自動実行を維持しつつ、必要なsecrets/varsをREADMEに明記する。
+  - staging/productionを分けるか判断する。
+  - Cloudflare logsで接続失敗理由を追えるようにする。
+
+### Repository / branch policy
+
+状態: 方針検討中。
+
+推奨:
+
+- `upstream/master`: melonDS公式追従用。基本的に直接変更しない。
+- `main`: このfork/独自プロダクトの本線。`master` から作成し、NSMB online向け作業ブランチをmergeする。
+- `feature/*` or `codex-*`: 個別作業ブランチ。
+- 自分のGitHub remoteを `origin`、公式melonDS remoteを `upstream` にする。
+- GitHub Actionsのsignaling deployは `main` push に限定する。PRではCIのみ。
+
+理由:
+
+- melonDS公式履歴に近い `master` を温存できる。
+- `main` はNSMB online向けのアプリ、signaling server、bridge、docsを含む統合ブランチとして扱える。
+- GitHub Actionsのsignaling deployは `main` push に限定し、`upstream/master` 追従作業で誤deployしない。
 
 ## 1PC auto smoke FPS investigation
 
@@ -268,17 +413,19 @@ melonDS手動起動例:
 
 注意:
 
-- 現時点ではsignaling serverなしなので、接続確立は手動コピー&ペースト。
+- Phase 3時点ではsignaling serverなしだったため、接続確立は手動コピー&ペーストだった。現在は Phase 4/5 で Cloudflare signaling server と `--signal` mode を追加済み。
 - STUNだけで直結できないNAT環境では接続できない可能性がある。
 - TURN fallbackは未実装。
 - まだWAN実測、jitter/loss統計、実プレイ安定性検証は未完了。
 
 ## 次にやること
 
-1. LAN 2PCでWebRTC bridge経由の手動対戦ログを取り、FPS/timeout/packet statsを正式に記録する。
-2. WAN 2PCでSTUNのみの直結率、ping、jitter、packet lossを測る。
-3. 必要ならTURN fallbackを追加する。
-4. 実用化段階でsignaling server、matchmaking、launcherへ進む。
+1. ユーザー側で `tools/nsmb-signaling-server` を Cloudflare に deploy する。
+2. deploy された Worker URL で `nsmb-net-bridge webrtc-offer/webrtc-answer --signal ... --session ...` を2PC実行し、手動コピー&ペーストなしで接続できるか確認する。
+3. LAN 2PCで signaling server 経由の WebRTC bridge 手動対戦ログを取り、FPS/timeout/packet statsを正式に記録する。
+4. WAN 2PCでSTUNのみの直結率、ping、jitter、packet lossを測る。
+5. 必要なら `DEFAULT_ICE_SERVERS` に TURN を追加し、TURN fallback を検証する。
+6. 接続確認後、Tauri launcher で melonDS/bridge process 管理とログ表示を作る。
 
 ## 将来方針
 

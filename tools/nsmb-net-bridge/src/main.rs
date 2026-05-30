@@ -27,8 +27,8 @@ struct Stats {
 fn usage() -> &'static str {
     "usage:
   nsmb-net-bridge udp --local-bind ADDR --bridge-bind ADDR --bridge-peer ADDR [--local-target ADDR]
-  nsmb-net-bridge webrtc-offer  --local-bind ADDR [--local-target ADDR] [--stun URI]
-  nsmb-net-bridge webrtc-answer --local-bind ADDR [--local-target ADDR] [--stun URI]
+  nsmb-net-bridge webrtc-offer  --local-bind ADDR [--local-target ADDR] [--stun URI] [--signal URL --session ID]
+  nsmb-net-bridge webrtc-answer --local-bind ADDR [--local-target ADDR] [--stun URI] [--signal URL --session ID]
   nsmb-net-bridge webrtc-loopback-smoke [--stun URI]
 
 examples:
@@ -43,6 +43,12 @@ examples:
 
   manual WebRTC answer side:
     nsmb-net-bridge webrtc-answer --local-bind 127.0.0.1:8265
+
+  signaling WebRTC offer side:
+    nsmb-net-bridge webrtc-offer --local-bind 127.0.0.1:0 --local-target 127.0.0.1:8165 --signal wss://example.workers.dev/session --session test-room
+
+  signaling WebRTC answer side:
+    nsmb-net-bridge webrtc-answer --local-bind 127.0.0.1:8265 --signal wss://example.workers.dev/session --session test-room
 "
 }
 
@@ -81,7 +87,15 @@ fn parse_udp_config(args: &[String]) -> Result<UdpTunnelConfig, String> {
 
 fn parse_local_config(
     args: &[String],
-) -> Result<(SocketAddr, Option<SocketAddr>, Vec<String>), String> {
+) -> Result<
+    (
+        SocketAddr,
+        Option<SocketAddr>,
+        Vec<String>,
+        Option<(String, String)>,
+    ),
+    String,
+> {
     let local_bind = take_arg(args, "--local-bind")
         .ok_or_else(|| "missing --local-bind".to_owned())
         .and_then(|v| parse_socket_addr(&v, "--local-bind"))?;
@@ -92,13 +106,38 @@ fn parse_local_config(
         .windows(2)
         .filter_map(|w| (w[0] == "--stun").then(|| w[1].clone()))
         .collect::<Vec<_>>();
-    let stun_servers = if stun_servers.is_empty() {
+    let signal = take_arg(args, "--signal");
+    let session = take_arg(args, "--session");
+    let signal_session = match (signal, session) {
+        (Some(signal), Some(session)) => {
+            validate_signal_session(&session)?;
+            Some((signal, session))
+        }
+        (None, None) => None,
+        _ => {
+            return Err("--signal and --session must be specified together".to_owned());
+        }
+    };
+    let stun_servers = if stun_servers.is_empty() && signal_session.is_none() {
         vec!["stun:stun.l.google.com:19302".to_owned()]
     } else {
         stun_servers
     };
 
-    Ok((local_bind, local_target, stun_servers))
+    Ok((local_bind, local_target, stun_servers, signal_session))
+}
+
+fn validate_signal_session(session: &str) -> Result<(), String> {
+    let valid = !session.is_empty()
+        && session.len() <= 64
+        && session
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+    if valid {
+        Ok(())
+    } else {
+        Err("session must match ^[A-Za-z0-9_-]{1,64}$".to_owned())
+    }
 }
 
 fn run_udp_tunnel(config: UdpTunnelConfig) -> io::Result<()> {
@@ -229,11 +268,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             run_udp_tunnel(config)?;
         }
         "webrtc-offer" | "webrtc-answer" => {
-            let (local_bind, local_target, stun_servers) =
+            let (local_bind, local_target, stun_servers, signal_session) =
                 parse_local_config(&args[1..]).map_err(|err| {
                     io::Error::new(io::ErrorKind::InvalidInput, format!("{err}\n{}", usage()))
                 })?;
-            run_manual_webrtc(args[0].as_str(), local_bind, local_target, stun_servers)?;
+            match signal_session {
+                Some((signal_url, session)) => run_signaling_webrtc(
+                    args[0].as_str(),
+                    local_bind,
+                    local_target,
+                    stun_servers,
+                    signal_url,
+                    session,
+                )?,
+                None => {
+                    run_manual_webrtc(args[0].as_str(), local_bind, local_target, stun_servers)?
+                }
+            }
         }
         "webrtc-loopback-smoke" => {
             let stun_servers = args[1..]
@@ -285,6 +336,22 @@ fn run_manual_webrtc(
     .into())
 }
 
+#[cfg(not(feature = "webrtc"))]
+fn run_signaling_webrtc(
+    _side: &str,
+    _local_bind: SocketAddr,
+    _local_target: Option<SocketAddr>,
+    _stun_servers: Vec<String>,
+    _signal_url: String,
+    _session: String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "signaling WebRTC mode requires building with --features webrtc",
+    )
+    .into())
+}
+
 #[cfg(feature = "webrtc")]
 fn run_manual_webrtc(
     side: &str,
@@ -304,14 +371,39 @@ fn run_manual_webrtc(
 }
 
 #[cfg(feature = "webrtc")]
+fn run_signaling_webrtc(
+    side: &str,
+    local_bind: SocketAddr,
+    local_target: Option<SocketAddr>,
+    stun_servers: Vec<String>,
+    signal_url: String,
+    session: String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(webrtc::run_signaling_webrtc(
+        side.to_owned(),
+        local_bind,
+        local_target,
+        stun_servers,
+        signal_url,
+        session,
+    ))
+}
+
+#[cfg(feature = "webrtc")]
 mod webrtc {
     use super::{SocketAddr, MAX_DATAGRAM_SIZE};
     use base64::prelude::*;
+    use futures_util::{SinkExt, StreamExt};
     use std::io::{self, Write};
     use std::sync::Arc;
     use std::time::{Duration, Instant};
     use tokio::net::UdpSocket as TokioUdpSocket;
     use tokio::sync::Mutex as TokioMutex;
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
 
     struct WebRtcEndpoint {
         data_channel: datachannel_wrapper::DataChannel,
@@ -386,6 +478,131 @@ mod webrtc {
         println!("==== {label} SDP base64 begin ====");
         println!("{}", encode_sdp(sdp));
         println!("==== {label} SDP base64 end ====");
+    }
+
+    fn role_from_side(side: &str) -> &'static str {
+        match side {
+            "webrtc-offer" => "offer",
+            "webrtc-answer" => "answer",
+            _ => unreachable!("validated by caller"),
+        }
+    }
+
+    fn sdp_type_from_str(value: &str) -> Result<datachannel_wrapper::SdpType, io::Error> {
+        match value {
+            "offer" => Ok(datachannel_wrapper::SdpType::Offer),
+            "answer" => Ok(datachannel_wrapper::SdpType::Answer),
+            other => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unsupported SDP type {other:?}"),
+            )),
+        }
+    }
+
+    fn build_signal_url(base: &str, session: &str, role: &str) -> String {
+        let separator = if base.contains('?') { '&' } else { '?' };
+        format!("{base}{separator}session={session}&role={role}")
+    }
+
+    fn parse_server_ice_servers(value: &serde_json::Value) -> Vec<String> {
+        value
+            .get("iceServers")
+            .and_then(|servers| servers.as_array())
+            .map(|servers| {
+                servers
+                    .iter()
+                    .filter_map(|server| server.as_str().map(ToOwned::to_owned))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    }
+
+    async fn wait_signal_hello(
+        ws: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        loop {
+            let Some(message) = ws.next().await else {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "signaling socket closed",
+                )
+                .into());
+            };
+            let message = message?;
+            let WebSocketMessage::Text(text) = message else {
+                continue;
+            };
+            let value = serde_json::from_str::<serde_json::Value>(&text)?;
+            match value.get("type").and_then(|v| v.as_str()) {
+                Some("hello") => {
+                    println!("nsmb-net-bridge signaling: {}", value);
+                    return Ok(value);
+                }
+                Some("peer-joined") | Some("pong") => {
+                    println!("nsmb-net-bridge signaling: {}", value);
+                }
+                Some("error") => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::ConnectionAborted,
+                        format!("signaling server error: {value}"),
+                    )
+                    .into());
+                }
+                other => {
+                    println!(
+                        "nsmb-net-bridge signaling: ignored message type {:?}",
+                        other
+                    );
+                }
+            }
+        }
+    }
+
+    async fn wait_signal_sdp(
+        ws: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        expected_sdp_type: &str,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        loop {
+            let Some(message) = ws.next().await else {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "signaling socket closed",
+                )
+                .into());
+            };
+            let message = message?;
+            let WebSocketMessage::Text(text) = message else {
+                continue;
+            };
+            let value = serde_json::from_str::<serde_json::Value>(&text)?;
+            match value.get("type").and_then(|v| v.as_str()) {
+                Some("hello") | Some("peer-joined") | Some("pong") => {
+                    println!("nsmb-net-bridge signaling: {}", value);
+                }
+                Some("error") => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::ConnectionAborted,
+                        format!("signaling server error: {value}"),
+                    )
+                    .into());
+                }
+                Some("sdp") => {
+                    if value.get("sdpType").and_then(|v| v.as_str()) == Some(expected_sdp_type) {
+                        return Ok(value);
+                    }
+                }
+                other => {
+                    println!(
+                        "nsmb-net-bridge signaling: ignored message type {:?}",
+                        other
+                    );
+                }
+            }
+        }
     }
 
     async fn wait_connected(
@@ -473,6 +690,118 @@ mod webrtc {
         Ok(endpoint)
     }
 
+    async fn connect_signal_offer(
+        signal_url: String,
+        session: String,
+        stun_servers: Vec<String>,
+    ) -> Result<WebRtcEndpoint, Box<dyn std::error::Error>> {
+        let url = build_signal_url(&signal_url, &session, "offer");
+        let (mut ws, _) = connect_async(&url).await?;
+        println!("nsmb-net-bridge signaling: connected {}", url);
+
+        let hello = wait_signal_hello(&mut ws).await?;
+        let server_ice_servers = parse_server_ice_servers(&hello);
+        let stun_servers = if stun_servers.is_empty() {
+            server_ice_servers
+        } else {
+            stun_servers
+        };
+
+        let (mut endpoint, mut event_rx) = create_endpoint(stun_servers).await?;
+        let offer = endpoint
+            .peer_connection
+            .local_description()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "missing local offer SDP"))?;
+        ws.send(WebSocketMessage::Text(
+            serde_json::json!({
+                "type": "sdp",
+                "sdpType": "offer",
+                "sdp": offer.sdp.to_string(),
+            })
+            .to_string()
+            .into(),
+        ))
+        .await?;
+        println!("nsmb-net-bridge signaling: sent offer SDP");
+
+        let answer = wait_signal_sdp(&mut ws, "answer").await?;
+        let answer_sdp = answer
+            .get("sdp")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing answer SDP"))?;
+        endpoint.peer_connection.set_remote_description(
+            datachannel_wrapper::SessionDescription {
+                sdp_type: sdp_type_from_str(
+                    answer
+                        .get("sdpType")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("answer"),
+                )?,
+                sdp: datachannel_wrapper::sdp::parse_sdp(answer_sdp, false)?,
+            },
+        )?;
+        wait_connected(&mut event_rx).await?;
+        Ok(endpoint)
+    }
+
+    async fn connect_signal_answer(
+        signal_url: String,
+        session: String,
+        stun_servers: Vec<String>,
+    ) -> Result<WebRtcEndpoint, Box<dyn std::error::Error>> {
+        let url = build_signal_url(&signal_url, &session, "answer");
+        let (mut ws, _) = connect_async(&url).await?;
+        println!("nsmb-net-bridge signaling: connected {}", url);
+
+        let hello = wait_signal_hello(&mut ws).await?;
+        let server_ice_servers = parse_server_ice_servers(&hello);
+        let stun_servers = if stun_servers.is_empty() {
+            server_ice_servers
+        } else {
+            stun_servers
+        };
+
+        let offer = wait_signal_sdp(&mut ws, "offer").await?;
+        let offer_sdp = offer
+            .get("sdp")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing offer SDP"))?;
+
+        let (mut endpoint, mut event_rx) = create_endpoint(stun_servers).await?;
+        endpoint
+            .peer_connection
+            .set_local_description(datachannel_wrapper::SdpType::Rollback)?;
+        endpoint.peer_connection.set_remote_description(
+            datachannel_wrapper::SessionDescription {
+                sdp_type: sdp_type_from_str(
+                    offer
+                        .get("sdpType")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("offer"),
+                )?,
+                sdp: datachannel_wrapper::sdp::parse_sdp(offer_sdp, false)?,
+            },
+        )?;
+        let answer = endpoint
+            .peer_connection
+            .local_description()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "missing local answer SDP"))?;
+        ws.send(WebSocketMessage::Text(
+            serde_json::json!({
+                "type": "sdp",
+                "sdpType": "answer",
+                "sdp": answer.sdp.to_string(),
+            })
+            .to_string()
+            .into(),
+        ))
+        .await?;
+        println!("nsmb-net-bridge signaling: sent answer SDP");
+
+        wait_connected(&mut event_rx).await?;
+        Ok(endpoint)
+    }
+
     pub async fn run_manual_webrtc(
         side: String,
         local_bind: SocketAddr,
@@ -482,6 +811,22 @@ mod webrtc {
         let endpoint = match side.as_str() {
             "webrtc-offer" => connect_offer(stun_servers).await?,
             "webrtc-answer" => connect_answer(stun_servers).await?,
+            _ => unreachable!("validated by caller"),
+        };
+        run_webrtc_udp_tunnel(endpoint.data_channel, local_bind, local_target).await
+    }
+
+    pub async fn run_signaling_webrtc(
+        side: String,
+        local_bind: SocketAddr,
+        local_target: Option<SocketAddr>,
+        stun_servers: Vec<String>,
+        signal_url: String,
+        session: String,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let endpoint = match role_from_side(&side) {
+            "offer" => connect_signal_offer(signal_url, session, stun_servers).await?,
+            "answer" => connect_signal_answer(signal_url, session, stun_servers).await?,
             _ => unreachable!("validated by caller"),
         };
         run_webrtc_udp_tunnel(endpoint.data_channel, local_bind, local_target).await
