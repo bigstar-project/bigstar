@@ -283,6 +283,13 @@ param(
     [int]$ForcePlayerDisplayedStars1 = 0,
     [int]$ForcePlayerCollectedStars0 = 0,
     [int]$ForcePlayerCollectedStars1 = 0,
+    [switch]$DynamicCameraLead,
+    [int]$DynamicCameraLeadStartFrame = 0,
+    [int]$DynamicCameraLeadEndFrame = 0,
+    [string]$DynamicCameraRightLead = "0x58000",
+    [string]$DynamicCameraLeftLead = "0xA8000",
+    [string]$DynamicCameraMaxStep = "0",
+    [string]$DynamicCameraVelocityThreshold = "0x40",
     [switch]$RenderCameraAlias,
     [switch]$RenderCameraAliasAllRoles,
     [int]$RenderCameraAliasSourcePlayer = 1,
@@ -1234,6 +1241,23 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_WRITE_DISPLAY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_WRITE_SLOT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_SLOT -ErrorAction SilentlyContinue
+    }
+    if ($DynamicCameraLead) {
+        $env:MELONDS_NSML_DYNAMIC_CAMERA_LEAD = "1"
+        $env:MELONDS_NSML_DYNAMIC_CAMERA_LEAD_START_FRAME = "$DynamicCameraLeadStartFrame"
+        $env:MELONDS_NSML_DYNAMIC_CAMERA_LEAD_END_FRAME = "$DynamicCameraLeadEndFrame"
+        $env:MELONDS_NSML_DYNAMIC_CAMERA_RIGHT_LEAD = "$DynamicCameraRightLead"
+        $env:MELONDS_NSML_DYNAMIC_CAMERA_LEFT_LEAD = "$DynamicCameraLeftLead"
+        $env:MELONDS_NSML_DYNAMIC_CAMERA_MAX_STEP = "$DynamicCameraMaxStep"
+        $env:MELONDS_NSML_DYNAMIC_CAMERA_VELOCITY_THRESHOLD = "$DynamicCameraVelocityThreshold"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_DYNAMIC_CAMERA_LEAD -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DYNAMIC_CAMERA_LEAD_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DYNAMIC_CAMERA_LEAD_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DYNAMIC_CAMERA_RIGHT_LEAD -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DYNAMIC_CAMERA_LEFT_LEAD -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DYNAMIC_CAMERA_MAX_STEP -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DYNAMIC_CAMERA_VELOCITY_THRESHOLD -ErrorAction SilentlyContinue
     }
     if ($ForceStageSceneActive) {
         $env:MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE = "1"
@@ -2924,6 +2948,14 @@ function Start-MelonLANProcess {
         "forceStageCameraObjectXWriteDisplay=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_WRITE_DISPLAY)"
         "forceStageCameraObjectXWriteSlot=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_WRITE_SLOT)"
         "forceStageCameraObjectXSlot=$($env:MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_SLOT)"
+        "dynamicCameraLeadSwitch=$DynamicCameraLead"
+        "dynamicCameraLeadEnv=$($env:MELONDS_NSML_DYNAMIC_CAMERA_LEAD)"
+        "dynamicCameraLeadStart=$($env:MELONDS_NSML_DYNAMIC_CAMERA_LEAD_START_FRAME)"
+        "dynamicCameraLeadEnd=$($env:MELONDS_NSML_DYNAMIC_CAMERA_LEAD_END_FRAME)"
+        "dynamicCameraRightLead=$($env:MELONDS_NSML_DYNAMIC_CAMERA_RIGHT_LEAD)"
+        "dynamicCameraLeftLead=$($env:MELONDS_NSML_DYNAMIC_CAMERA_LEFT_LEAD)"
+        "dynamicCameraMaxStep=$($env:MELONDS_NSML_DYNAMIC_CAMERA_MAX_STEP)"
+        "dynamicCameraVelocityThreshold=$($env:MELONDS_NSML_DYNAMIC_CAMERA_VELOCITY_THRESHOLD)"
         "forcePlayerInventoryPowerupsSwitch=$ForcePlayerInventoryPowerups"
         "forcePlayerInventoryPowerupsEnv=$($env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS)"
         "forcePlayerInventoryPowerupsStart=$($env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_START_FRAME)"

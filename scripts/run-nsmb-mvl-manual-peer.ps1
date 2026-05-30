@@ -22,6 +22,7 @@ param(
     [switch]$NoFrameLimit,
     [switch]$NoJit,
     [switch]$NoStartBarrier,
+    [switch]$NoDynamicCameraLead,
     [switch]$SoftwareRenderer
 )
 
@@ -95,6 +96,7 @@ $params = @{
     PacketBridgeJitHelperPatchFrame = 840
     PacketBridgeStartFrame = 840
     WaitForPeerAtNetplayStart = (-not $NoStartBarrier)
+    DynamicCameraLead = (-not $NoDynamicCameraLead)
     LogDir = $LogDir
 }
 
@@ -123,7 +125,7 @@ if ($InputUnreliable) {
 
 Write-Host "Starting NSMB MvL peer session: role=$Role peer=$Peer port=$Port"
 Write-Host "input delay=$InputDelayFrames sendDelay=$InputSendDelayFrames sendJitter=$InputSendJitterFrames max frame lead=$InputMaxFrameLead internalWaitTimeoutMs=$InternalWaitTimeoutMs unreliable=$($InputUnreliable.IsPresent) bundleHistory=$InputBundleHistory jit=$(-not $NoJit)"
-Write-Host "frameLimit=$(-not $NoFrameLimit.IsPresent) swapBuffersInterval=$SwapBuffersInterval startBarrier=$(-not $NoStartBarrier) renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' })"
+Write-Host "frameLimit=$(-not $NoFrameLimit.IsPresent) swapBuffersInterval=$SwapBuffersInterval startBarrier=$(-not $NoStartBarrier) dynamicCameraLead=$(-not $NoDynamicCameraLead) renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' })"
 Write-Host "log=$LogDir"
 Write-Host "Host controls Mario. Client controls Luigi."
 

@@ -89,6 +89,7 @@ static bool NSMLRuntimeHooksMaybeEnabled()
         NSMLEnvFlag("MELONDS_NSML_TRACE_PLAYER_DEFEATED") ||
         NSMLEnvFlag("MELONDS_NSML_TRACE_PLAYER_LIFE_CALLS") ||
         NSMLEnvFlag("MELONDS_NSML_GUARD_PLAYER_MODEL_RENDER_PTRS") ||
+        NSMLEnvFlag("MELONDS_NSML_DYNAMIC_CAMERA_LEAD") ||
         NSMLEnvFlag("MELONDS_NSML_RENDER_CAMERA_ALIAS") ||
         NSMLEnvFlag("MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT") ||
         NSMLEnvFlag("MELONDS_NSML_SAFE_START_LOAD_CALL") ||
@@ -3663,6 +3664,152 @@ static void PatchNSMLPlayerModelRenderPtrs(ARM* cpu, u32 instrAddr)
     }
 }
 
+static u32 NSMLFindPlayerActorBase(NDS& nds, u32 playerID)
+{
+    if (!nds.MainRAM)
+        return 0;
+
+    for (u32 off = 0x080000; off + 0x800 <= nds.MainRAMMask + 1; off += 4)
+    {
+        const u32 base = 0x02000000 + off;
+        const u32 vtable = nds.ARM9Read32(base);
+        const u16 objectID = nds.ARM9Read16(base + 0x0C);
+        const u16 stateType = nds.ARM9Read16(base + 0x0E);
+        const u32 flags = nds.ARM9Read32(base + 0x10);
+        if (objectID != 0x0015 || stateType == 0 || stateType > 2)
+            continue;
+        if (vtable < 0x02000000 || vtable >= 0x02400000)
+            continue;
+        if ((flags & 0xFFFF0000u) == 0)
+            continue;
+        if ((nds.ARM9Read8(base + 0x7B4) & 1u) == (playerID & 1u))
+            return base;
+    }
+
+    return 0;
+}
+
+static s32 NSMLCameraRingDelta(u32 target, u32 current)
+{
+    constexpr s32 span = 0x00400000;
+    s32 delta = static_cast<s32>((target - current) & (span - 1));
+    if (delta > (span / 2))
+        delta -= span;
+    return delta;
+}
+
+static u32 NSMLCameraRingAdd(u32 value, s32 delta)
+{
+    constexpr s32 span = 0x00400000;
+    s32 wrapped = (static_cast<s32>(value & (span - 1)) + delta) % span;
+    if (wrapped < 0)
+        wrapped += span;
+    return static_cast<u32>(wrapped);
+}
+
+static void PatchNSMLDynamicCameraLead(ARM* cpu, u32 instrAddr)
+{
+    struct Config
+    {
+        bool Checked = false;
+        bool Enabled = false;
+        u32 StartFrame = 0;
+        u32 EndFrame = 0xFFFFFFFF;
+        u32 RightLead = 0x00058000;
+        u32 LeftLead = 0x000A8000;
+        u32 MaxStep = 0;
+        u32 VelocityThreshold = 0x40;
+    };
+
+    static Config cfg;
+    static bool logged = false;
+    if (!cfg.Checked)
+    {
+        std::lock_guard<std::mutex> configLock(NSMLTraceConfigMutex);
+        if (!cfg.Checked)
+        {
+            cfg.Enabled = NSMLEnvFlag("MELONDS_NSML_DYNAMIC_CAMERA_LEAD");
+            if (const char* startFrame = getenv("MELONDS_NSML_DYNAMIC_CAMERA_LEAD_START_FRAME"))
+                cfg.StartFrame = static_cast<u32>(strtoul(startFrame, nullptr, 0));
+            if (const char* endFrame = getenv("MELONDS_NSML_DYNAMIC_CAMERA_LEAD_END_FRAME"))
+                cfg.EndFrame = static_cast<u32>(strtoul(endFrame, nullptr, 0));
+            if (cfg.EndFrame == 0)
+                cfg.EndFrame = 0xFFFFFFFF;
+            if (const char* rightLead = getenv("MELONDS_NSML_DYNAMIC_CAMERA_RIGHT_LEAD"))
+                cfg.RightLead = static_cast<u32>(strtoul(rightLead, nullptr, 0));
+            if (const char* leftLead = getenv("MELONDS_NSML_DYNAMIC_CAMERA_LEFT_LEAD"))
+                cfg.LeftLead = static_cast<u32>(strtoul(leftLead, nullptr, 0));
+            if (const char* maxStep = getenv("MELONDS_NSML_DYNAMIC_CAMERA_MAX_STEP"))
+                cfg.MaxStep = static_cast<u32>(strtoul(maxStep, nullptr, 0));
+            if (const char* threshold = getenv("MELONDS_NSML_DYNAMIC_CAMERA_VELOCITY_THRESHOLD"))
+                cfg.VelocityThreshold = static_cast<u32>(strtoul(threshold, nullptr, 0));
+            cfg.Checked = true;
+        }
+    }
+
+    if (!cfg.Enabled || !cpu || cpu->Num != 0)
+        return;
+    if (instrAddr != 0x020CE304 && instrAddr != 0x020CE46C)
+        return;
+    const u32 frame = cpu->NDS.NumFrames;
+    if (frame < cfg.StartFrame || frame > cfg.EndFrame)
+        return;
+    if (!IsNSMLMarioVsLuigiGameplay(cpu->NDS))
+        return;
+
+    constexpr u32 stageCameraX = 0x020CAE1C;
+    constexpr u32 stageDisplayCameraX = 0x02085AB4;
+    constexpr u32 gameLocalPlayerID = 0x02085A7C;
+    constexpr u32 playerXOffset = 0x60;
+    constexpr u32 playerVelXOffset = 0xD0;
+
+    const u32 localPlayerID = cpu->NDS.ARM9Read32(gameLocalPlayerID) & 1u;
+    for (u32 playerID = 0; playerID < 2; playerID++)
+    {
+        const u32 actor = NSMLFindPlayerActorBase(cpu->NDS, playerID);
+        if (!IsNSMLMainRAMAddress(actor))
+            continue;
+
+        const s32 velocityX = static_cast<s32>(cpu->NDS.ARM9Read32(actor + playerVelXOffset));
+        const s32 threshold = static_cast<s32>(cfg.VelocityThreshold);
+        if (velocityX <= threshold && velocityX >= -threshold)
+            continue;
+
+        const u32 lead = velocityX > 0 ? cfg.RightLead : cfg.LeftLead;
+        const u32 playerX = cpu->NDS.ARM9Read32(actor + playerXOffset);
+        const u32 target = (playerX - lead) & 0x003FFFFF;
+        const u32 cameraAddr = stageCameraX + playerID * sizeof(u32);
+        const u32 current = cpu->NDS.ARM9Read32(cameraAddr) & 0x003FFFFF;
+        s32 delta = NSMLCameraRingDelta(target, current);
+        if (cfg.MaxStep != 0)
+        {
+            const s32 maxStep = static_cast<s32>(cfg.MaxStep);
+            delta = std::clamp(delta, -maxStep, maxStep);
+        }
+        const u32 next = NSMLCameraRingAdd(current, delta);
+        cpu->NDS.ARM9Write32(cameraAddr, next);
+        if (playerID == localPlayerID)
+            cpu->NDS.ARM9Write32(stageDisplayCameraX, next);
+
+        if (!logged)
+        {
+            Log(LogLevel::Debug,
+                "NSMB dynamic camera lead: frame=%u pc=%08X player=%u actor=%08X x=%08X vel=%08X lead=%08X current=%08X target=%08X next=%08X\n",
+                frame,
+                instrAddr,
+                playerID,
+                actor,
+                playerX,
+                static_cast<u32>(velocityX),
+                lead,
+                current,
+                target,
+                next);
+            logged = true;
+        }
+    }
+}
+
 static void PatchNSMLRenderCameraAlias(ARM* cpu, u32 instrAddr)
 {
     struct Config
@@ -5003,6 +5150,7 @@ void ARMv5::Execute()
                 }
                 PatchNSMLStageStartNet20Check(this, instrAddr);
                 PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
+                PatchNSMLDynamicCameraLead(this, instrAddr);
                 PatchNSMLRenderCameraAlias(this, instrAddr);
                 PatchNSMLCameraFocusLoopCount(this, instrAddr);
                 TraceNSMLStageCamera(this, instrAddr);
@@ -5135,6 +5283,7 @@ void ARMv5::Execute()
                     PatchNSMLClientConfirmSchedule(this, instrAddr);
                     PatchNSMLStageStartNet20Check(this, instrAddr);
                     PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
+                    PatchNSMLDynamicCameraLead(this, instrAddr);
                     PatchNSMLRenderCameraAlias(this, instrAddr);
                     PatchNSMLCameraFocusLoopCount(this, instrAddr);
                     TraceNSMLStageCamera(this, instrAddr);
@@ -5243,6 +5392,7 @@ void ARMv5::Execute()
                     PatchNSMLClientConfirmSchedule(this, instrAddr);
                     PatchNSMLStageStartNet20Check(this, instrAddr);
                     PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
+                    PatchNSMLDynamicCameraLead(this, instrAddr);
                     PatchNSMLRenderCameraAlias(this, instrAddr);
                     PatchNSMLCameraFocusLoopCount(this, instrAddr);
                     TraceNSMLStageCamera(this, instrAddr);

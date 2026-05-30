@@ -36,6 +36,11 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - 手動peer/local起動では `InternalWaitTimeoutMs=0` をデフォルト化。input frame lead が閾値を超えたときは、desync/終了ではなく同期待ちで止める。
 - active FPS と input wait/throttle の計測ログ。
 - trace/hook無効時にJITを使える経路。
+- 2026-05-30 カメラ補正:
+  - direct MvL routeでは、本来のMvsLの「移動方向側を広く見せる」カメラ先読みが弱く、`Stage::cameraX` がプレイヤー中心寄りまたはセグメント固定気味になる。
+  - `MELONDS_NSML_DYNAMIC_CAMERA_LEAD` を追加し、MvsL gameplay中に player actor の水平速度を見て `Stage::cameraX[player]` / local display camera を補正する。
+  - `scripts/run-nsmb-mvl-manual-peer.ps1` ではデフォルト有効。無効化比較は `-NoDynamicCameraLead`。
+  - 検証: `logs\codex-camera-dynamic-final` で右移動時client slot1 cameraが `0x0A8000` から `0x0D0FFF` へ変化することを確認。`logs\codex-camera-dynamic-instant` のスクリーンショットでもルイージの右側視界が広がることを確認。`logs\codex-camera-dynamic-both` でhost/client両入力でもsmoke pass。
 - 不要な古い `logs/codex-*` は適宜削除済み。
 
 ## 60fps切り分け結果
@@ -91,17 +96,13 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   - visible stress: `.\scripts\run-nsmb-mvl-software-fps-benchmark.ps1 -Frames 3600 -Visible`
   - 手動peer: `.\scripts\run-nsmb-mvl-manual-peer.ps1 -Role host -SoftwareRenderer` / `.\scripts\run-nsmb-mvl-manual-peer.ps1 -Role client -Peer <host-ip> -SoftwareRenderer`
 
-## 現在の最優先課題
+## 現在の確認状態
 
-1. 開始直後からhost/clientのenemy/object位置が微妙にズレることがある。特に最初のクリボー付近で、同じ入力でも接触判定が分岐しうる。
-2. 2026-05-30調査: 固定 `PacketBridgeStartFrame=870` では、hostがraw frame 860、clientがraw frame 866でMvsL gameplay actor生成に到達していた。つまりbarrier前にhost側の試合内時間が6F進んでいた。
-3. 対策: start-ready barrierを固定raw frameではなく、全ステージ共通の `StageScene active + StageController + player actor 2体` が出揃った最初のframeで行う。host raw 860 / client raw 866 を同じnetplay論理frameに正規化し、入力packet frameとNSMB側tickは論理frameで揃える。クリボーなどのステージ固有enemy/objectはready条件に使わない。
-4. 手動起動のデフォルトbootstrapは、ゲーム開始後にA入力が残らない `tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs` に変更。試合中入力のズレ要因を避けるため。ただし手動入力を殺さないよう、scriptのneutral範囲は `668-839` までで止める。
-5. 検証: `logs\codex-sync-start-stage-ready-host` / `logs\codex-sync-start-stage-ready-client` で、クリボー依存を外したready条件でも host raw 860 / client raw 866 の6F差を検出し、active fps 約60、throttle 0で完走した。
-6. 2026-05-30 RNG修正: 旧stable ROMの `rng-constant --value 0x100` を廃止。`MELONDS_NSML_MATCH_SEED` 指定時もhost/client双方で起動直後から `Net::random.value` / `Game::random.value` 注入を有効にし、未指定時はhost生成seedをclientへ配布する。
-7. RNG検証: `logs\codex-rng-seed-12345678-netgame` ではhost/clientともseed `0x12345678`、初期スター `X=0x2c0000 Y=0xfff30000` で一致。`logs\codex-rng-seed-87654321-netgame` ではseed `0x87654321`、初期スター `X=0x1a0000 Y=0xfff40000` で一致。`logs\codex-rng-auto-seed-netgame-a/b/c` ではseed未指定の複数回実行でhost生成seedが毎回変わり、少なくとも `c` で別スター位置を確認。各回のhost/clientは一致。
-8. 2026-05-30手動入力修正: `minimal_bootstrap.inputs` の `668-10000 NONE` が試合中の手動入力を上書きしていたため、`668-839 NONE` に短縮。`logs\codex-manual-input-bootstrap-fix` で起動smoke pass、active fps約60を確認。
-9. 残り: 自動smokeの終了条件はraw frame基準なので、動的start後は片側が先に終了してもう片側がthrottle timeoutすることがある。これは手動対戦の同期ズレとは別のテストハーネス問題として扱う。
+- 開始同期は固定raw frameではなく、全ステージ共通の `StageScene active + StageController + player actor 2体` ready条件に寄せている。クリボーなどステージ固有enemy/objectはready条件に使わない。
+- RNGはROM側定数化ではなく、match seed同期。seed未指定時はhost生成seedをclientへ配布し、host/client内では一致させる。
+- 手動起動のデフォルトbootstrapは `tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs`。試合中の手動入力を上書きしないよう、neutral範囲は `668-839` まで。
+- カメラは `MELONDS_NSML_DYNAMIC_CAMERA_LEAD` で移動方向先読みを補正する。現在は手動peerでデフォルト有効。
+- 残りの注意点: 自動smokeの終了条件はraw frame基準なので、動的start後は片側が先に終了してもう片側がthrottle timeoutすることがある。これは手動対戦の同期ズレとは別のテストハーネス問題として扱う。
 
 ## 手動起動
 
@@ -118,6 +119,13 @@ client:
 ```
 
 デフォルトは `InputDelayFrames=4` / `InputMaxFrameLead=4` / frame limit有効 / `SwapBuffersInterval=1` / start-ready barrier有効 / `InternalWaitTimeoutMs=0` / JIT有効。
+
+カメラ先読み補正はデフォルト有効。比較のため無効化する場合:
+
+```powershell
+.\scripts\run-nsmb-mvl-manual-peer.ps1 -Role host -NoDynamicCameraLead
+.\scripts\run-nsmb-mvl-manual-peer.ps1 -Role client -Peer <host-ip> -NoDynamicCameraLead
+```
 開始バリアを一時的に無効化して比較する場合だけ `-NoStartBarrier` を付ける。
 同期待ちの自動テスト用timeoutを明示的に戻す場合は `-InternalWaitTimeoutMs 5000` のように指定する。
 JITなしで比較する場合は `-NoJit` を付ける。
