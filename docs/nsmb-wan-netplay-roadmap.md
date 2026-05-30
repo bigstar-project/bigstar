@@ -126,6 +126,17 @@ biome check . --write: no fixes applied
 .\tools\nsmb-net-bridge\target\release\nsmb-net-bridge.exe
 ```
 
+最小ROM同梱テストkit:
+
+```text
+dist/nsmb-mvl-webrtc-test-kit-rom-20260531-054144.zip
+```
+
+- 目的: 別PCへ素早くコピーして WebRTC signaling 経由の対戦検証を行うための一時成果物。
+- 内容: release `melonDS.exe`、release `nsmb-net-bridge.exe`、host/client安定ROM、起動用PowerShell wrapper、既存manual peer script。
+- 注意: ROM同梱の自分用検証zip。第三者へ再配布しない。
+- 確認: 同梱 `nsmb-net-bridge.exe webrtc-loopback-smoke` pass。
+
 ローカル確認:
 
 ```powershell
