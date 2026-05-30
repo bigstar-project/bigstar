@@ -288,7 +288,10 @@ param(
     [int]$DynamicCameraLeadEndFrame = 0,
     [string]$DynamicCameraRightLead = "0x58000",
     [string]$DynamicCameraLeftLead = "0xA8000",
-    [string]$DynamicCameraMaxStep = "0",
+    [string]$DynamicCameraNeutralLead = "0x80000",
+    [string]$DynamicCameraMinStep = "0x1000",
+    [string]$DynamicCameraBaseStep = "0x4000",
+    [string]$DynamicCameraMaxStep = "0x6000",
     [string]$DynamicCameraVelocityThreshold = "0x40",
     [switch]$RenderCameraAlias,
     [switch]$RenderCameraAliasAllRoles,
@@ -1248,6 +1251,9 @@ function Start-MelonLANProcess {
         $env:MELONDS_NSML_DYNAMIC_CAMERA_LEAD_END_FRAME = "$DynamicCameraLeadEndFrame"
         $env:MELONDS_NSML_DYNAMIC_CAMERA_RIGHT_LEAD = "$DynamicCameraRightLead"
         $env:MELONDS_NSML_DYNAMIC_CAMERA_LEFT_LEAD = "$DynamicCameraLeftLead"
+        $env:MELONDS_NSML_DYNAMIC_CAMERA_NEUTRAL_LEAD = "$DynamicCameraNeutralLead"
+        $env:MELONDS_NSML_DYNAMIC_CAMERA_MIN_STEP = "$DynamicCameraMinStep"
+        $env:MELONDS_NSML_DYNAMIC_CAMERA_BASE_STEP = "$DynamicCameraBaseStep"
         $env:MELONDS_NSML_DYNAMIC_CAMERA_MAX_STEP = "$DynamicCameraMaxStep"
         $env:MELONDS_NSML_DYNAMIC_CAMERA_VELOCITY_THRESHOLD = "$DynamicCameraVelocityThreshold"
     } else {
@@ -1256,6 +1262,9 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_DYNAMIC_CAMERA_LEAD_END_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_DYNAMIC_CAMERA_RIGHT_LEAD -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_DYNAMIC_CAMERA_LEFT_LEAD -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DYNAMIC_CAMERA_NEUTRAL_LEAD -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DYNAMIC_CAMERA_MIN_STEP -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DYNAMIC_CAMERA_BASE_STEP -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_DYNAMIC_CAMERA_MAX_STEP -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_DYNAMIC_CAMERA_VELOCITY_THRESHOLD -ErrorAction SilentlyContinue
     }
@@ -2954,6 +2963,9 @@ function Start-MelonLANProcess {
         "dynamicCameraLeadEnd=$($env:MELONDS_NSML_DYNAMIC_CAMERA_LEAD_END_FRAME)"
         "dynamicCameraRightLead=$($env:MELONDS_NSML_DYNAMIC_CAMERA_RIGHT_LEAD)"
         "dynamicCameraLeftLead=$($env:MELONDS_NSML_DYNAMIC_CAMERA_LEFT_LEAD)"
+        "dynamicCameraNeutralLead=$($env:MELONDS_NSML_DYNAMIC_CAMERA_NEUTRAL_LEAD)"
+        "dynamicCameraMinStep=$($env:MELONDS_NSML_DYNAMIC_CAMERA_MIN_STEP)"
+        "dynamicCameraBaseStep=$($env:MELONDS_NSML_DYNAMIC_CAMERA_BASE_STEP)"
         "dynamicCameraMaxStep=$($env:MELONDS_NSML_DYNAMIC_CAMERA_MAX_STEP)"
         "dynamicCameraVelocityThreshold=$($env:MELONDS_NSML_DYNAMIC_CAMERA_VELOCITY_THRESHOLD)"
         "forcePlayerInventoryPowerupsSwitch=$ForcePlayerInventoryPowerups"

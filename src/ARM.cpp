@@ -3664,31 +3664,6 @@ static void PatchNSMLPlayerModelRenderPtrs(ARM* cpu, u32 instrAddr)
     }
 }
 
-static u32 NSMLFindPlayerActorBase(NDS& nds, u32 playerID)
-{
-    if (!nds.MainRAM)
-        return 0;
-
-    for (u32 off = 0x080000; off + 0x800 <= nds.MainRAMMask + 1; off += 4)
-    {
-        const u32 base = 0x02000000 + off;
-        const u32 vtable = nds.ARM9Read32(base);
-        const u16 objectID = nds.ARM9Read16(base + 0x0C);
-        const u16 stateType = nds.ARM9Read16(base + 0x0E);
-        const u32 flags = nds.ARM9Read32(base + 0x10);
-        if (objectID != 0x0015 || stateType == 0 || stateType > 2)
-            continue;
-        if (vtable < 0x02000000 || vtable >= 0x02400000)
-            continue;
-        if ((flags & 0xFFFF0000u) == 0)
-            continue;
-        if ((nds.ARM9Read8(base + 0x7B4) & 1u) == (playerID & 1u))
-            return base;
-    }
-
-    return 0;
-}
-
 static s32 NSMLCameraRingDelta(u32 target, u32 current)
 {
     constexpr s32 span = 0x00400000;
@@ -3717,7 +3692,10 @@ static void PatchNSMLDynamicCameraLead(ARM* cpu, u32 instrAddr)
         u32 EndFrame = 0xFFFFFFFF;
         u32 RightLead = 0x00058000;
         u32 LeftLead = 0x000A8000;
-        u32 MaxStep = 0;
+        u32 NeutralLead = 0x00080000;
+        u32 MinStep = 0x00001000;
+        u32 MaxStep = 0x00006000;
+        u32 BaseStep = 0x00004000;
         u32 VelocityThreshold = 0x40;
     };
 
@@ -3739,8 +3717,14 @@ static void PatchNSMLDynamicCameraLead(ARM* cpu, u32 instrAddr)
                 cfg.RightLead = static_cast<u32>(strtoul(rightLead, nullptr, 0));
             if (const char* leftLead = getenv("MELONDS_NSML_DYNAMIC_CAMERA_LEFT_LEAD"))
                 cfg.LeftLead = static_cast<u32>(strtoul(leftLead, nullptr, 0));
+            if (const char* neutralLead = getenv("MELONDS_NSML_DYNAMIC_CAMERA_NEUTRAL_LEAD"))
+                cfg.NeutralLead = static_cast<u32>(strtoul(neutralLead, nullptr, 0));
+            if (const char* minStep = getenv("MELONDS_NSML_DYNAMIC_CAMERA_MIN_STEP"))
+                cfg.MinStep = static_cast<u32>(strtoul(minStep, nullptr, 0));
             if (const char* maxStep = getenv("MELONDS_NSML_DYNAMIC_CAMERA_MAX_STEP"))
                 cfg.MaxStep = static_cast<u32>(strtoul(maxStep, nullptr, 0));
+            if (const char* baseStep = getenv("MELONDS_NSML_DYNAMIC_CAMERA_BASE_STEP"))
+                cfg.BaseStep = static_cast<u32>(strtoul(baseStep, nullptr, 0));
             if (const char* threshold = getenv("MELONDS_NSML_DYNAMIC_CAMERA_VELOCITY_THRESHOLD"))
                 cfg.VelocityThreshold = static_cast<u32>(strtoul(threshold, nullptr, 0));
             cfg.Checked = true;
@@ -3749,7 +3733,7 @@ static void PatchNSMLDynamicCameraLead(ARM* cpu, u32 instrAddr)
 
     if (!cfg.Enabled || !cpu || cpu->Num != 0)
         return;
-    if (instrAddr != 0x020CE304 && instrAddr != 0x020CE46C)
+    if (instrAddr != 0x020CE304)
         return;
     const u32 frame = cpu->NDS.NumFrames;
     if (frame < cfg.StartFrame || frame > cfg.EndFrame)
@@ -3760,31 +3744,36 @@ static void PatchNSMLDynamicCameraLead(ARM* cpu, u32 instrAddr)
     constexpr u32 stageCameraX = 0x020CAE1C;
     constexpr u32 stageDisplayCameraX = 0x02085AB4;
     constexpr u32 gameLocalPlayerID = 0x02085A7C;
-    constexpr u32 playerXOffset = 0x60;
-    constexpr u32 playerVelXOffset = 0xD0;
+    constexpr u32 playerCameraFocusPosX = 0x020CAEBC;
+    constexpr u32 playerCameraFocusVelX = 0x020CAEEC;
+    constexpr u32 focusStride = 0x10;
 
     const u32 localPlayerID = cpu->NDS.ARM9Read32(gameLocalPlayerID) & 1u;
     for (u32 playerID = 0; playerID < 2; playerID++)
     {
-        const u32 actor = NSMLFindPlayerActorBase(cpu->NDS, playerID);
-        if (!IsNSMLMainRAMAddress(actor))
-            continue;
-
-        const s32 velocityX = static_cast<s32>(cpu->NDS.ARM9Read32(actor + playerVelXOffset));
+        const u32 focusOffset = playerID * focusStride;
+        const u32 focusX = cpu->NDS.ARM9Read32(playerCameraFocusPosX + focusOffset);
+        const s32 velocityX = static_cast<s32>(cpu->NDS.ARM9Read32(playerCameraFocusVelX + focusOffset));
         const s32 threshold = static_cast<s32>(cfg.VelocityThreshold);
-        if (velocityX <= threshold && velocityX >= -threshold)
-            continue;
-
-        const u32 lead = velocityX > 0 ? cfg.RightLead : cfg.LeftLead;
-        const u32 playerX = cpu->NDS.ARM9Read32(actor + playerXOffset);
-        const u32 target = (playerX - lead) & 0x003FFFFF;
+        const u32 lead = velocityX > threshold ? cfg.RightLead
+            : (velocityX < -threshold ? cfg.LeftLead : cfg.NeutralLead);
+        const u32 target = (focusX - lead) & 0x003FFFFF;
         const u32 cameraAddr = stageCameraX + playerID * sizeof(u32);
         const u32 current = cpu->NDS.ARM9Read32(cameraAddr) & 0x003FFFFF;
         s32 delta = NSMLCameraRingDelta(target, current);
+        if (delta == 0)
+            continue;
+
+        const u32 absVelocity = static_cast<u32>(velocityX < 0 ? -velocityX : velocityX);
+        u32 step = cfg.BaseStep + std::min<u32>(absVelocity, cfg.MaxStep);
         if (cfg.MaxStep != 0)
+            step = std::min(step, cfg.MaxStep);
+        if (cfg.MinStep != 0)
+            step = std::max(step, cfg.MinStep);
+        if (step != 0)
         {
-            const s32 maxStep = static_cast<s32>(cfg.MaxStep);
-            delta = std::clamp(delta, -maxStep, maxStep);
+            const s32 signedStep = static_cast<s32>(step);
+            delta = std::clamp(delta, -signedStep, signedStep);
         }
         const u32 next = NSMLCameraRingAdd(current, delta);
         cpu->NDS.ARM9Write32(cameraAddr, next);
@@ -3794,14 +3783,14 @@ static void PatchNSMLDynamicCameraLead(ARM* cpu, u32 instrAddr)
         if (!logged)
         {
             Log(LogLevel::Debug,
-                "NSMB dynamic camera lead: frame=%u pc=%08X player=%u actor=%08X x=%08X vel=%08X lead=%08X current=%08X target=%08X next=%08X\n",
+                "NSMB dynamic camera lead: frame=%u pc=%08X player=%u focusX=%08X vel=%08X lead=%08X step=%08X current=%08X target=%08X next=%08X\n",
                 frame,
                 instrAddr,
                 playerID,
-                actor,
-                playerX,
+                focusX,
                 static_cast<u32>(velocityX),
                 lead,
+                step,
                 current,
                 target,
                 next);

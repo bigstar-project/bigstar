@@ -38,9 +38,11 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - trace/hook無効時にJITを使える経路。
 - 2026-05-30 カメラ補正:
   - direct MvL routeでは、本来のMvsLの「移動方向側を広く見せる」カメラ先読みが弱く、`Stage::cameraX` がプレイヤー中心寄りまたはセグメント固定気味になる。
-  - `MELONDS_NSML_DYNAMIC_CAMERA_LEAD` を追加し、MvsL gameplay中に player actor の水平速度を見て `Stage::cameraX[player]` / local display camera を補正する。
+  - `MELONDS_NSML_DYNAMIC_CAMERA_LEAD` を追加し、MvsL gameplay中にNSMB側の camera focus 配列の水平速度を見て `Stage::cameraX[player]` / local display camera を補正する。
+  - 補正は即時代入ではなく、逆アセンブルした本来処理の傾向に合わせて `baseStep=0x4000`, `minStep=0x1000`, `maxStep=0x6000` の上限付きで滑らかに追従させる。
+  - FPS回帰を避けるため、前回のplayer actor RAM scan方式は廃止。実行時は `0x020CAEBC` / `0x020CAEEC` のcamera focus配列を読むだけにする。
   - `scripts/run-nsmb-mvl-manual-peer.ps1` ではデフォルト有効。無効化比較は `-NoDynamicCameraLead`。
-  - 検証: `logs\codex-camera-dynamic-final` で右移動時client slot1 cameraが `0x0A8000` から `0x0D0FFF` へ変化することを確認。`logs\codex-camera-dynamic-instant` のスクリーンショットでもルイージの右側視界が広がることを確認。`logs\codex-camera-dynamic-both` でhost/client両入力でもsmoke pass。
+  - 検証: `logs\codex-camera-smooth` で右移動中のカメラが段階的に追従することを確認。`logs\codex-camera-smooth-fps` ではhost/clientとも active `60.00fps`。
 - 不要な古い `logs/codex-*` は適宜削除済み。
 
 ## 60fps切り分け結果
