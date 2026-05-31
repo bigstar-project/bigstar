@@ -20,6 +20,7 @@
 ## Current GUI runtime note - 2026-05-31
 
 - Tauri GUI frontend was migrated to React + Tailwind CSS. Current checks: `corepack pnpm typecheck` pass, `corepack pnpm vite:build` pass, and Vite browser render smoke shows the launcher controls.
+- Tauri GUI frontend now uses Biome 2.3.12 with signaling-server-style `format-and-lint`, `format-and-lint:fix`, and `ci` scripts. Current checks: `corepack pnpm format-and-lint` pass and `corepack pnpm typecheck` pass.
 - Default GUI signaling URL is now `wss://nsmb-mvl-signaling-signaling-prod.uniunitaro.workers.dev/session`; `NSMB_MVL_SIGNAL_URL` remains the override.
 - Main worktree sidecars are present, and `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml` passes locally.
 - `corepack pnpm build` passes and regenerated `tools\nsmb-mvl-gui\src-tauri\target\release\nsmb-mvl-gui.exe`, the MSI bundle, and the NSIS setup exe. The rebuilt release exe `--preflight` resolves the bundled melonDS, bridge, bootstrap input, symbols file, and passes bridge signaling smoke.

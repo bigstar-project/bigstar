@@ -7,6 +7,9 @@
     "dev": "tauri dev",
     "build": "tauri build",
     "typecheck": "tsc --noEmit",
+    "format-and-lint": "biome check .",
+    "format-and-lint:fix": "biome check . --write",
+    "ci": "tsc --noEmit && biome check .",
     "vite:build": "vite build",
     "vite:dev": "vite --host 127.0.0.1"
   },
@@ -16,6 +19,7 @@
     "react-dom": "^19.2.6"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.3.12",
     "@tailwindcss/vite": "^4.3.0",
     "@tauri-apps/cli": "^2.9.0",
     "@types/react": "^19.2.15",

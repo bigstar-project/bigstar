@@ -1,10 +1,10 @@
-import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { invoke } from '@tauri-apps/api/core';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
-type Role = "host" | "client";
-type CourseMode = "random" | "select";
-type Lives = "3" | "5" | "endless";
-type StatusKind = "idle" | "ok" | "warn" | "error";
+type Role = 'host' | 'client';
+type CourseMode = 'random' | 'select';
+type Lives = '3' | '5' | 'endless';
+type StatusKind = 'idle' | 'ok' | 'warn' | 'error';
 
 type Defaults = {
   signal_url: string;
@@ -82,64 +82,74 @@ type FormState = {
 };
 
 const initialForm: FormState = {
-  role: "host",
-  signalUrl: "",
-  roomCode: "",
+  role: 'host',
+  signalUrl: '',
+  roomCode: '',
   port: 8165,
-  hostRomPath: "",
-  clientRomPath: "",
-  baseRomPath: "",
-  courseMode: "random",
+  hostRomPath: '',
+  clientRomPath: '',
+  baseRomPath: '',
+  courseMode: 'random',
   wins: 2,
   bigStars: 5,
-  lives: "endless",
-  matchSeed: "",
+  lives: 'endless',
+  matchSeed: '',
 };
 
 export function App() {
   const [form, setForm] = useState<FormState>(initialForm);
   const [status, setStatus] = useState({
-    text: "初期化中",
-    kind: "idle" as StatusKind,
+    text: '初期化中',
+    kind: 'idle' as StatusKind,
   });
-  const [lastLogDir, setLastLogDir] = useState("");
-  const [lastGeneratedStage, setLastGeneratedStage] = useState<number | null>(null);
+  const [lastLogDir, setLastLogDir] = useState('');
+  const [lastGeneratedStage, setLastGeneratedStage] = useState<number | null>(
+    null,
+  );
 
-  const currentRomPath = form.role === "host" ? form.hostRomPath : form.clientRomPath;
+  const currentRomPath =
+    form.role === 'host' ? form.hostRomPath : form.clientRomPath;
   const selectedStage = useMemo(
     () => selectedStageFrom(form.courseMode, form.matchSeed),
     [form.courseMode, form.matchSeed],
   );
   const selectedStageLabel =
-    selectedStage === null ? (form.courseMode === "random" ? "seed未設定" : "0") : String(selectedStage);
+    selectedStage === null
+      ? form.courseMode === 'random'
+        ? 'seed未設定'
+        : '0'
+      : String(selectedStage);
   const courseNote =
-    form.courseMode === "select"
-      ? "Choose Each Time は direct route では未対応のため、現在は固定 stage 0 で起動します。"
-      : "Match seed から stage 0-4 を決め、ROM生成と起動時に同じ stage を渡します。";
+    form.courseMode === 'select'
+      ? 'Choose Each Time は direct route では未対応のため、現在は固定 stage 0 で起動します。'
+      : 'Match seed から stage 0-4 を決め、ROM生成と起動時に同じ stage を渡します。';
 
-  const updateField = <K extends keyof FormState>(key: K, value: FormState[K]) => {
+  const updateField = <K extends keyof FormState>(
+    key: K,
+    value: FormState[K],
+  ) => {
     setForm((current) => ({ ...current, [key]: value }));
-    if (key === "courseMode" || key === "matchSeed") {
+    if (key === 'courseMode' || key === 'matchSeed') {
       setLastGeneratedStage(null);
     }
   };
 
   const pollStatus = useCallback(async () => {
     try {
-      const response = await invoke<SessionStatus>("session_status");
+      const response = await invoke<SessionStatus>('session_status');
       if (response.log_dir) {
         setLastLogDir(response.log_dir);
       }
       if (!response.active) {
-        setStatus({ text: "未接続", kind: "idle" });
+        setStatus({ text: '未接続', kind: 'idle' });
         return;
       }
       setStatus({
-        text: `実行中 melonDS:${response.melon ?? "-"} bridge:${response.bridge ?? "-"}`,
-        kind: "ok",
+        text: `実行中 melonDS:${response.melon ?? '-'} bridge:${response.bridge ?? '-'}`,
+        kind: 'ok',
       });
     } catch {
-      setStatus({ text: "状態取得に失敗しました", kind: "warn" });
+      setStatus({ text: '状態取得に失敗しました', kind: 'warn' });
     }
   }, []);
 
@@ -148,26 +158,26 @@ export function App() {
 
     async function init() {
       try {
-        const defaults = await invoke<Defaults>("get_defaults");
+        const defaults = await invoke<Defaults>('get_defaults');
         if (disposed) return;
         setForm({
-          role: "host",
+          role: 'host',
           signalUrl: defaults.signal_url,
           roomCode: defaults.room_code,
           port: defaults.port,
           hostRomPath: defaults.host_rom_path,
           clientRomPath: defaults.client_rom_path,
           baseRomPath: defaults.base_rom_path,
-          courseMode: "random",
+          courseMode: 'random',
           wins: 2,
           bigStars: 5,
-          lives: "endless",
+          lives: 'endless',
           matchSeed: String(generateSeed()),
         });
         await pollStatus();
       } catch (error) {
         if (!disposed) {
-          setStatus({ text: String(error), kind: "error" });
+          setStatus({ text: String(error), kind: 'error' });
         }
       }
     }
@@ -182,12 +192,12 @@ export function App() {
 
   const preflightCheck = async () => {
     try {
-      setStatus({ text: "起動前チェック中", kind: "idle" });
-      const response = await invoke<PreflightResponse>("preflight_check");
-      console.info("preflight", response);
-      setStatus({ text: "起動前チェック OK", kind: "ok" });
+      setStatus({ text: '起動前チェック中', kind: 'idle' });
+      const response = await invoke<PreflightResponse>('preflight_check');
+      console.info('preflight', response);
+      setStatus({ text: '起動前チェック OK', kind: 'ok' });
     } catch (error) {
-      setStatus({ text: String(error), kind: "error" });
+      setStatus({ text: String(error), kind: 'error' });
     }
   };
 
@@ -198,7 +208,10 @@ export function App() {
     }
     const stage = selectedStageFrom(nextForm.courseMode, nextForm.matchSeed);
     if (stage === null) {
-      setStatus({ text: "Match seed は10進数、または 0x から始まる16進数で指定してください", kind: "error" });
+      setStatus({
+        text: 'Match seed は10進数、または 0x から始まる16進数で指定してください',
+        kind: 'error',
+      });
       return;
     }
 
@@ -211,17 +224,19 @@ export function App() {
     };
 
     try {
-      setStatus({ text: `ROM生成中 stage=${stage}`, kind: "idle" });
-      const response = await invoke<GenerateRomResponse>("generate_roms", { request });
+      setStatus({ text: `ROM生成中 stage=${stage}`, kind: 'idle' });
+      const response = await invoke<GenerateRomResponse>('generate_roms', {
+        request,
+      });
       setForm((current) => ({
         ...current,
         hostRomPath: response.host_rom,
         clientRomPath: response.client_rom,
       }));
       setLastGeneratedStage(stage);
-      setStatus({ text: `ROM生成が完了しました stage=${stage}`, kind: "ok" });
+      setStatus({ text: `ROM生成が完了しました stage=${stage}`, kind: 'ok' });
     } catch (error) {
-      setStatus({ text: String(error), kind: "error" });
+      setStatus({ text: String(error), kind: 'error' });
     }
   };
 
@@ -232,7 +247,10 @@ export function App() {
     }
     const stage = selectedStageFrom(nextForm.courseMode, nextForm.matchSeed);
     if (stage === null) {
-      setStatus({ text: "Match seed は10進数、または 0x から始まる16進数で指定してください", kind: "error" });
+      setStatus({
+        text: 'Match seed は10進数、または 0x から始まる16進数で指定してください',
+        kind: 'error',
+      });
       return;
     }
 
@@ -241,29 +259,32 @@ export function App() {
       signal_url: nextForm.signalUrl,
       room_code: nextForm.roomCode,
       port: nextForm.port,
-      rom_path: nextForm.role === "host" ? nextForm.hostRomPath : nextForm.clientRomPath,
+      rom_path:
+        nextForm.role === 'host'
+          ? nextForm.hostRomPath
+          : nextForm.clientRomPath,
       settings: currentSettings(nextForm),
     };
 
     try {
-      setStatus({ text: `起動中 stage=${stage}`, kind: "idle" });
-      const response = await invoke<LaunchResponse>("start_match", { request });
+      setStatus({ text: `起動中 stage=${stage}`, kind: 'idle' });
+      const response = await invoke<LaunchResponse>('start_match', { request });
       setLastLogDir(response.log_dir);
       setStatus({
         text: `起動済み melonDS:${response.melon_pid} bridge:${response.bridge_pid}`,
-        kind: "ok",
+        kind: 'ok',
       });
     } catch (error) {
-      setStatus({ text: String(error), kind: "error" });
+      setStatus({ text: String(error), kind: 'error' });
     }
   };
 
   const stopMatch = async () => {
     try {
-      await invoke("stop_match");
-      setStatus({ text: "停止しました", kind: "warn" });
+      await invoke('stop_match');
+      setStatus({ text: '停止しました', kind: 'warn' });
     } catch (error) {
-      setStatus({ text: String(error), kind: "error" });
+      setStatus({ text: String(error), kind: 'error' });
     }
   };
 
@@ -271,7 +292,9 @@ export function App() {
     <main className="mx-auto grid w-[min(1160px,calc(100vw-48px))] gap-6 py-8">
       <header className="flex items-end justify-between gap-6">
         <div>
-          <p className="mb-1 text-sm font-bold text-slate-500">NSMB Mario vs Luigi</p>
+          <p className="mb-1 text-sm font-bold text-slate-500">
+            NSMB Mario vs Luigi
+          </p>
           <h1 className="text-3xl font-bold text-slate-950">対戦ランチャー</h1>
         </div>
         <StatusPill kind={status.kind}>{status.text}</StatusPill>
@@ -286,35 +309,83 @@ export function App() {
           }}
         >
           <h2 className="text-lg font-bold text-slate-950">接続</h2>
-          <div className="grid grid-cols-2 gap-1 rounded-lg border border-slate-300 bg-slate-100 p-1" role="radiogroup">
-            <RoleButton active={form.role === "host"} onClick={() => updateField("role", "host")}>
+          <div
+            className="grid grid-cols-2 gap-1 rounded-lg border border-slate-300 bg-slate-100 p-1"
+            role="radiogroup"
+          >
+            <RoleButton
+              active={form.role === 'host'}
+              onClick={() => updateField('role', 'host')}
+            >
               ホスト
             </RoleButton>
-            <RoleButton active={form.role === "client"} onClick={() => updateField("role", "client")}>
+            <RoleButton
+              active={form.role === 'client'}
+              onClick={() => updateField('role', 'client')}
+            >
               参加
             </RoleButton>
           </div>
 
-          <TextField label="部屋コード" value={form.roomCode} maxLength={64} onChange={(value) => updateField("roomCode", value)} />
-          <TextField label="シグナリングサーバー URL" value={form.signalUrl} onChange={(value) => updateField("signalUrl", value)} />
-          <NumberField label="UDP ポート" value={form.port} min={1} max={65535} onChange={(value) => updateField("port", value)} />
+          <TextField
+            label="部屋コード"
+            value={form.roomCode}
+            maxLength={64}
+            onChange={(value) => updateField('roomCode', value)}
+          />
+          <TextField
+            label="シグナリングサーバー URL"
+            value={form.signalUrl}
+            onChange={(value) => updateField('signalUrl', value)}
+          />
+          <NumberField
+            label="UDP ポート"
+            value={form.port}
+            min={1}
+            max={65535}
+            onChange={(value) => updateField('port', value)}
+          />
 
           <h2 className="pt-2 text-lg font-bold text-slate-950">ROM</h2>
-          <TextField label="ホスト用 ROM" value={form.hostRomPath} onChange={(value) => updateField("hostRomPath", value)} />
-          <TextField label="参加用 ROM" value={form.clientRomPath} onChange={(value) => updateField("clientRomPath", value)} />
-          <TextField label="ベース ROM" value={form.baseRomPath} onChange={(value) => updateField("baseRomPath", value)} />
+          <TextField
+            label="ホスト用 ROM"
+            value={form.hostRomPath}
+            onChange={(value) => updateField('hostRomPath', value)}
+          />
+          <TextField
+            label="参加用 ROM"
+            value={form.clientRomPath}
+            onChange={(value) => updateField('clientRomPath', value)}
+          />
+          <TextField
+            label="ベース ROM"
+            value={form.baseRomPath}
+            onChange={(value) => updateField('baseRomPath', value)}
+          />
 
           <div className="mt-1 flex flex-wrap justify-end gap-2">
-            <ActionButton kind="secondary" type="button" onClick={() => void preflightCheck()}>
+            <ActionButton
+              kind="secondary"
+              type="button"
+              onClick={() => void preflightCheck()}
+            >
               起動前チェック
             </ActionButton>
-            <ActionButton kind="secondary" type="button" onClick={() => void generateRoms()}>
+            <ActionButton
+              kind="secondary"
+              type="button"
+              onClick={() => void generateRoms()}
+            >
               ROM生成
             </ActionButton>
             <ActionButton kind="primary" type="submit">
               開始
             </ActionButton>
-            <ActionButton kind="secondary" type="button" onClick={() => void stopMatch()}>
+            <ActionButton
+              kind="secondary"
+              type="button"
+              onClick={() => void stopMatch()}
+            >
               停止
             </ActionButton>
           </div>
@@ -322,32 +393,48 @@ export function App() {
           <div className="grid gap-1 pt-1 text-xs font-bold text-slate-500">
             <span>Log directory</span>
             <code className="overflow-wrap-anywhere rounded-md border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs font-semibold text-slate-800">
-              {lastLogDir || "not started"}
+              {lastLogDir || 'not started'}
             </code>
           </div>
         </form>
 
         <section className="grid content-start gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-lg font-bold text-slate-950">ゲーム設定</h2>
-          <SelectField label="コース" value={form.courseMode} onChange={(value) => updateField("courseMode", value as CourseMode)}>
+          <SelectField
+            label="コース"
+            value={form.courseMode}
+            onChange={(value) => updateField('courseMode', value as CourseMode)}
+          >
             <option value="random">ランダム</option>
             <option value="select">毎回選ぶ</option>
           </SelectField>
-          <SelectField label="勝利数" value={String(form.wins)} onChange={(value) => updateField("wins", Number(value))}>
+          <SelectField
+            label="勝利数"
+            value={String(form.wins)}
+            onChange={(value) => updateField('wins', Number(value))}
+          >
             {[1, 2, 3].map((value) => (
               <option key={value} value={value}>
                 {value}
               </option>
             ))}
           </SelectField>
-          <SelectField label="ビッグスター" value={String(form.bigStars)} onChange={(value) => updateField("bigStars", Number(value))}>
+          <SelectField
+            label="ビッグスター"
+            value={String(form.bigStars)}
+            onChange={(value) => updateField('bigStars', Number(value))}
+          >
             {[3, 5, 10].map((value) => (
               <option key={value} value={value}>
                 {value}
               </option>
             ))}
           </SelectField>
-          <SelectField label="残機" value={form.lives} onChange={(value) => updateField("lives", value as Lives)}>
+          <SelectField
+            label="残機"
+            value={form.lives}
+            onChange={(value) => updateField('lives', value as Lives)}
+          >
             <option value="3">3</option>
             <option value="5">5</option>
             <option value="endless">無限</option>
@@ -356,15 +443,22 @@ export function App() {
             label="Match seed"
             value={form.matchSeed}
             placeholder="ランダム時は空でも自動生成"
-            onChange={(value) => updateField("matchSeed", value)}
+            onChange={(value) => updateField('matchSeed', value)}
           />
 
           <div className="mt-1 grid gap-3 border-t border-slate-200 pt-4">
-            <SummaryItem label="操作キャラ" value={form.role === "host" ? "Mario" : "Luigi"} />
-            <SummaryItem label="使用 ROM" value={currentRomPath || "未設定"} />
+            <SummaryItem
+              label="操作キャラ"
+              value={form.role === 'host' ? 'Mario' : 'Luigi'}
+            />
+            <SummaryItem label="使用 ROM" value={currentRomPath || '未設定'} />
             <SummaryItem
               label="生成/起動 stage"
-              value={lastGeneratedStage === null ? selectedStageLabel : `${selectedStageLabel}（生成済み）`}
+              value={
+                lastGeneratedStage === null
+                  ? selectedStageLabel
+                  : `${selectedStageLabel}（生成済み）`
+              }
             />
             <SummaryItem label="コース処理" value={courseNote} />
           </div>
@@ -374,27 +468,45 @@ export function App() {
   );
 }
 
-function StatusPill({ children, kind }: { children: string; kind: StatusKind }) {
+function StatusPill({
+  children,
+  kind,
+}: {
+  children: string;
+  kind: StatusKind;
+}) {
   const colors: Record<StatusKind, string> = {
-    idle: "border-slate-300 text-slate-600",
-    ok: "border-emerald-300 text-emerald-800",
-    warn: "border-amber-300 text-amber-800",
-    error: "border-rose-300 text-rose-800",
+    idle: 'border-slate-300 text-slate-600',
+    ok: 'border-emerald-300 text-emerald-800',
+    warn: 'border-amber-300 text-amber-800',
+    error: 'border-rose-300 text-rose-800',
   };
   return (
-    <div className={`min-h-10 max-w-[48ch] overflow-wrap-anywhere rounded-lg border bg-white px-3 py-2 ${colors[kind]}`}>
+    <div
+      className={`min-h-10 max-w-[48ch] overflow-wrap-anywhere rounded-lg border bg-white px-3 py-2 ${colors[kind]}`}
+    >
       {children}
     </div>
   );
 }
 
-function RoleButton({ active, children, onClick }: { active: boolean; children: string; onClick: () => void }) {
+function RoleButton({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean;
+  children: string;
+  onClick: () => void;
+}) {
   return (
     <button
       type="button"
       aria-pressed={active}
       className={`min-h-9 rounded-md px-3 font-semibold transition ${
-        active ? "bg-white text-slate-950 shadow-sm" : "text-slate-600 hover:bg-slate-50"
+        active
+          ? 'bg-white text-slate-950 shadow-sm'
+          : 'text-slate-600 hover:bg-slate-50'
       }`}
       onClick={onClick}
     >
@@ -491,16 +603,20 @@ function ActionButton({
   onClick,
 }: {
   children: string;
-  kind: "primary" | "secondary";
-  type: "button" | "submit";
+  kind: 'primary' | 'secondary';
+  type: 'button' | 'submit';
   onClick?: () => void;
 }) {
   const styles =
-    kind === "primary"
-      ? "border-blue-700 bg-blue-600 text-white hover:bg-blue-700"
-      : "border-slate-300 bg-white text-slate-800 hover:bg-slate-50";
+    kind === 'primary'
+      ? 'border-blue-700 bg-blue-600 text-white hover:bg-blue-700'
+      : 'border-slate-300 bg-white text-slate-800 hover:bg-slate-50';
   return (
-    <button type={type} className={`min-h-10 min-w-24 rounded-md border px-4 font-bold transition ${styles}`} onClick={onClick}>
+    <button
+      type={type}
+      className={`min-h-10 min-w-24 rounded-md border px-4 font-bold transition ${styles}`}
+      onClick={onClick}
+    >
       {children}
     </button>
   );
@@ -510,7 +626,9 @@ function SummaryItem({ label, value }: { label: string; value: string }) {
   return (
     <div className="grid gap-0.5">
       <span className="text-xs font-bold text-slate-500">{label}</span>
-      <strong className="overflow-wrap-anywhere text-sm text-slate-950">{value}</strong>
+      <strong className="overflow-wrap-anywhere text-sm text-slate-950">
+        {value}
+      </strong>
     </div>
   );
 }
@@ -526,14 +644,17 @@ function currentSettings(form: FormState): GameSettings {
 }
 
 function withRequiredSeed(form: FormState): FormState {
-  if (form.courseMode === "random" && form.matchSeed.trim() === "") {
+  if (form.courseMode === 'random' && form.matchSeed.trim() === '') {
     return { ...form, matchSeed: String(generateSeed()) };
   }
   return form;
 }
 
-function selectedStageFrom(courseMode: CourseMode, matchSeed: string): number | null {
-  if (courseMode === "select") {
+function selectedStageFrom(
+  courseMode: CourseMode,
+  matchSeed: string,
+): number | null {
+  if (courseMode === 'select') {
     return 0;
   }
   const seed = parseSeed(matchSeed.trim());

@@ -11,6 +11,7 @@
 ## Current GUI/signaling note - 2026-05-31
 
 - Tauri GUI frontend was migrated from vanilla TypeScript DOM rendering to React + Tailwind CSS. Current frontend verification: `corepack pnpm typecheck` pass, `corepack pnpm vite:build` pass, and Vite browser render smoke shows the launcher controls.
+- Tauri GUI frontend now uses Biome 2.3.12 with signaling-server-style `format-and-lint`, `format-and-lint:fix`, and `ci` scripts. Current verification: `corepack pnpm format-and-lint` pass and `corepack pnpm typecheck` pass.
 - The default GUI signaling URL is now `wss://nsmb-mvl-signaling-signaling-prod.uniunitaro.workers.dev/session`. `NSMB_MVL_SIGNAL_URL` can still override it.
 - Main worktree sidecars are present under `tools\nsmb-mvl-gui\src-tauri\binaries\`; `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml` passes locally.
 - `corepack pnpm build` passes on the main worktree with the React/Tailwind GUI and produced fresh release outputs at `tools\nsmb-mvl-gui\src-tauri\target\release\nsmb-mvl-gui.exe`, `bundle\msi\NSMB Mario vs Luigi Online_0.1.0_x64_en-US.msi`, and `bundle\nsis\NSMB Mario vs Luigi Online_0.1.0_x64-setup.exe`. The rebuilt release exe `--preflight` also passes.
