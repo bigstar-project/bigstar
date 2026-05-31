@@ -237,6 +237,7 @@ enum class RollbackBackend
     CoreDelta,
     NSMBRanges,
     NSMBCoreRanges,
+    NSMBTinyCoreRanges,
     ARM9RAM,
 };
 
@@ -1326,6 +1327,7 @@ struct State
     int RollbackDeltaKeyframeInterval = 10;
     int RollbackMainRAMPageSize = 4096;
     int RollbackCoreSkipMask = 0;
+    int RollbackTinyCoreFlags = 0;
     bool RollbackNSMBWideRanges = false;
     bool RollbackNSMBDeltaDiscoveredRanges = false;
     bool RollbackNSMBSkipInputRanges = false;
@@ -2596,6 +2598,8 @@ const char* RollbackBackendName()
         return "nsmbranges";
     case RollbackBackend::NSMBCoreRanges:
         return "nsmbcoreranges";
+    case RollbackBackend::NSMBTinyCoreRanges:
+        return "nsmbtinycore";
     case RollbackBackend::ARM9RAM:
         return "arm9ram";
     case RollbackBackend::Savestate:
@@ -2997,7 +3001,8 @@ void CaptureNSMBRestoreShadowIfNeeded(RollbackStoredState& checkpoint, melonDS::
     if (!G.RollbackNSMBRestoreDiffTrace)
         return;
     if (G.RollbackBackendMode != RollbackBackend::NSMBRanges
-        && G.RollbackBackendMode != RollbackBackend::NSMBCoreRanges)
+        && G.RollbackBackendMode != RollbackBackend::NSMBCoreRanges
+        && G.RollbackBackendMode != RollbackBackend::NSMBTinyCoreRanges)
     {
         return;
     }
@@ -3119,19 +3124,24 @@ bool SaveRollbackCheckpointBuffer(
     }
 
     if (G.RollbackBackendMode == RollbackBackend::NSMBRanges
-        || G.RollbackBackendMode == RollbackBackend::NSMBCoreRanges)
+        || G.RollbackBackendMode == RollbackBackend::NSMBCoreRanges
+        || G.RollbackBackendMode == RollbackBackend::NSMBTinyCoreRanges)
     {
         const std::vector<RollbackNSMBRangeEntry> ranges = BuildNSMBRollbackRanges(nds);
         if (ranges.empty())
             return false;
 
         std::vector<char> coreBuffer;
-        if (G.RollbackBackendMode == RollbackBackend::NSMBCoreRanges)
+        if (G.RollbackBackendMode == RollbackBackend::NSMBCoreRanges
+            || G.RollbackBackendMode == RollbackBackend::NSMBTinyCoreRanges)
         {
             melonDS::Savestate coreState;
-            if (!nds->DoRollbackSavestate(&coreState, kRollbackMainRAMModeSkip, nullptr, 4096,
-                    static_cast<melonDS::u32>(G.RollbackCoreSkipMask))
-                || coreState.Error)
+            const bool coreSaved = G.RollbackBackendMode == RollbackBackend::NSMBTinyCoreRanges
+                ? nds->DoRollbackTinyCoreSavestate(&coreState,
+                    static_cast<melonDS::u32>(G.RollbackTinyCoreFlags))
+                : nds->DoRollbackSavestate(&coreState, kRollbackMainRAMModeSkip, nullptr, 4096,
+                    static_cast<melonDS::u32>(G.RollbackCoreSkipMask));
+            if (!coreSaved || coreState.Error)
             {
                 return false;
             }
@@ -3218,7 +3228,8 @@ bool RestoreRollbackCheckpointBuffer(
     }
 
     if (G.RollbackBackendMode == RollbackBackend::NSMBRanges
-        || G.RollbackBackendMode == RollbackBackend::NSMBCoreRanges)
+        || G.RollbackBackendMode == RollbackBackend::NSMBCoreRanges
+        || G.RollbackBackendMode == RollbackBackend::NSMBTinyCoreRanges)
     {
         if (!nds->MainRAM || buffer.size() < sizeof(RollbackNSMBRangesHeader))
             return false;
@@ -3229,16 +3240,21 @@ bool RestoreRollbackCheckpointBuffer(
             header.RangeCount > 128)
             return false;
         const size_t entriesBytes = static_cast<size_t>(header.RangeCount) * sizeof(RollbackNSMBRangeEntry);
-        const size_t coreBytes = G.RollbackBackendMode == RollbackBackend::NSMBCoreRanges ? header.Reserved : 0;
+        const bool hasCoreState = G.RollbackBackendMode == RollbackBackend::NSMBCoreRanges
+            || G.RollbackBackendMode == RollbackBackend::NSMBTinyCoreRanges;
+        const size_t coreBytes = hasCoreState ? header.Reserved : 0;
         if (buffer.size() != sizeof(header) + coreBytes + entriesBytes + header.TotalRangeBytes)
             return false;
         const char* in = buffer.data() + sizeof(header);
-        if (G.RollbackBackendMode == RollbackBackend::NSMBCoreRanges)
+        if (hasCoreState)
         {
             if (coreBytes == 0 || coreBytes > buffer.size() - sizeof(header))
                 return false;
             melonDS::Savestate coreState(const_cast<char*>(in), static_cast<melonDS::u32>(coreBytes), false);
-            const bool restored = nds->DoRollbackSavestate(&coreState, kRollbackMainRAMModeSkip);
+            const bool restored = G.RollbackBackendMode == RollbackBackend::NSMBTinyCoreRanges
+                ? nds->DoRollbackTinyCoreSavestate(&coreState,
+                    static_cast<melonDS::u32>(G.RollbackTinyCoreFlags))
+                : nds->DoRollbackSavestate(&coreState, kRollbackMainRAMModeSkip);
             if (coreState.Error || !restored || coreState.Error)
                 return false;
             in += coreBytes;
@@ -11290,6 +11306,8 @@ void InitFromEnvironment()
         G.RollbackBackendMode = RollbackBackend::NSMBRanges;
     else if (!std::strcmp(rollbackBackend, "nsmbcoreranges") || !std::strcmp(rollbackBackend, "nsmb-core-ranges"))
         G.RollbackBackendMode = RollbackBackend::NSMBCoreRanges;
+    else if (!std::strcmp(rollbackBackend, "nsmbtinycore") || !std::strcmp(rollbackBackend, "nsmb-tiny-core"))
+        G.RollbackBackendMode = RollbackBackend::NSMBTinyCoreRanges;
     else if (!std::strcmp(rollbackBackend, "arm9ram") || !std::strcmp(rollbackBackend, "ram"))
         G.RollbackBackendMode = RollbackBackend::ARM9RAM;
     else
@@ -11304,6 +11322,7 @@ void InitFromEnvironment()
     if ((G.RollbackMainRAMPageSize & (G.RollbackMainRAMPageSize - 1)) != 0)
         G.RollbackMainRAMPageSize = 4096;
     G.RollbackCoreSkipMask = std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK", 0), 0, 31);
+    G.RollbackTinyCoreFlags = std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS", 0), 0, 255);
     G.RollbackNSMBWideRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_WIDE_RANGES");
     G.RollbackNSMBDeltaDiscoveredRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES");
     G.RollbackNSMBSkipInputRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_SKIP_INPUT_RANGES");
@@ -12299,7 +12318,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             mainRAMCopyBytes += stored.MainRAMCopy.size();
         }
         std::printf(
-            "NSMB Rollback: frame=%u backend=%s checkpoints=%zu checkpointSaves=%u bytesLast=%zu bytesMin=%zu bytesMax=%zu bytesAvg=%zu saveAvgUs=%llu saveMaxUs=%llu restoreOps=%u restoreAvgUs=%llu restoreMaxUs=%llu delta=%zu keyframes=%zu mainRAMCopies=%zu keyInt=%d page=%d coreSkip=0x%X wide=%d deltaDiscovered=%d skipInput=%d restoreDiff=%d predicted=%zu predictions=%u mismatches=%u restores=%u resims=%u pending=%u observed=%u\n",
+            "NSMB Rollback: frame=%u backend=%s checkpoints=%zu checkpointSaves=%u bytesLast=%zu bytesMin=%zu bytesMax=%zu bytesAvg=%zu saveAvgUs=%llu saveMaxUs=%llu restoreOps=%u restoreAvgUs=%llu restoreMaxUs=%llu delta=%zu keyframes=%zu mainRAMCopies=%zu keyInt=%d page=%d coreSkip=0x%X tinyFlags=0x%X wide=%d deltaDiscovered=%d skipInput=%d restoreDiff=%d predicted=%zu predictions=%u mismatches=%u restores=%u resims=%u pending=%u observed=%u\n",
             logFrame,
             RollbackBackendName(),
             G.RollbackStates.size(),
@@ -12319,6 +12338,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             G.RollbackDeltaKeyframeInterval,
             G.RollbackMainRAMPageSize,
             G.RollbackCoreSkipMask,
+            G.RollbackTinyCoreFlags,
             G.RollbackNSMBWideRanges ? 1 : 0,
             G.RollbackNSMBDeltaDiscoveredRanges ? 1 : 0,
             G.RollbackNSMBSkipInputRanges ? 1 : 0,

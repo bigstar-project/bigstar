@@ -63,6 +63,7 @@ public:
     void Stop() noexcept;
 
     void DoSavestate(Savestate* file) noexcept;
+    void DoRollbackTimingSavestate(Savestate* file) noexcept;
 
     void SetRenderer(std::unique_ptr<Renderer>&& renderer) noexcept;
     const Renderer& GetRenderer() const noexcept { return *Rend; }
