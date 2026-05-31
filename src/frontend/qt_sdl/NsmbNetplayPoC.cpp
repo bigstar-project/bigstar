@@ -235,6 +235,7 @@ enum class RollbackBackend
     CoreLite,
     CoreSparse,
     CoreDelta,
+    NSMBRanges,
     ARM9RAM,
 };
 
@@ -243,6 +244,8 @@ constexpr melonDS::u32 kRollbackMainRAMModeSparse = 1;
 constexpr melonDS::u32 kRollbackMainRAMModeDelta = 2;
 constexpr melonDS::u32 kRollbackARM9RAMMagic = 0x524D4139; // RMA9
 constexpr melonDS::u32 kRollbackARM9RAMVersion = 1;
+constexpr melonDS::u32 kRollbackNSMBRangesMagic = 0x524D534E; // NSMR
+constexpr melonDS::u32 kRollbackNSMBRangesVersion = 1;
 
 struct RollbackARM9RAMHeader
 {
@@ -254,6 +257,24 @@ struct RollbackARM9RAMHeader
     melonDS::u32 LagFrameFlag;
     melonDS::u32 Reserved;
     melonDS::u64 Reserved64;
+};
+
+struct RollbackNSMBRangesHeader
+{
+    melonDS::u32 Magic;
+    melonDS::u32 Version;
+    melonDS::u32 NumFrames;
+    melonDS::u32 NumLagFrames;
+    melonDS::u32 LagFrameFlag;
+    melonDS::u32 RangeCount;
+    melonDS::u32 TotalRangeBytes;
+    melonDS::u32 Reserved;
+};
+
+struct RollbackNSMBRangeEntry
+{
+    melonDS::u32 Address;
+    melonDS::u32 Length;
 };
 
 struct RollbackStoredState
@@ -2559,6 +2580,8 @@ const char* RollbackBackendName()
         return "coresparse";
     case RollbackBackend::CoreDelta:
         return "coredelta";
+    case RollbackBackend::NSMBRanges:
+        return "nsmbranges";
     case RollbackBackend::ARM9RAM:
         return "arm9ram";
     case RollbackBackend::Savestate:
@@ -2605,6 +2628,163 @@ void InvalidateMainRAMJIT(melonDS::NDS* nds, melonDS::u32 len)
         nds->JIT.CheckAndInvalidate<0, melonDS::ARMJIT_Memory::memregion_MainRAM>(addr);
         nds->JIT.CheckAndInvalidate<1, melonDS::ARMJIT_Memory::memregion_MainRAM>(addr);
     }
+}
+
+bool IsValidMainRAMRange(melonDS::NDS* nds, melonDS::u32 address, melonDS::u32 length)
+{
+    if (!nds || !nds->MainRAM || length == 0 || address < kMainRAMBase)
+        return false;
+    const melonDS::u32 offset = address - kMainRAMBase;
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    return offset < ramLen && length <= ramLen - offset;
+}
+
+void AddNSMBRollbackRange(
+    melonDS::NDS* nds,
+    std::vector<RollbackNSMBRangeEntry>& ranges,
+    melonDS::u32 address,
+    melonDS::u32 length)
+{
+    if (!IsValidMainRAMRange(nds, address, length))
+        return;
+    ranges.push_back({address, length});
+}
+
+void AddNSMBRollbackObjectRange(
+    melonDS::NDS* nds,
+    std::vector<RollbackNSMBRangeEntry>& ranges,
+    melonDS::u32 base,
+    melonDS::u32 length)
+{
+    if (base != 0)
+        AddNSMBRollbackRange(nds, ranges, base, length);
+}
+
+void AddNSMBRollbackScannedObjectRanges(melonDS::NDS* nds, std::vector<RollbackNSMBRangeEntry>& ranges)
+{
+    if (!nds || !nds->MainRAM)
+        return;
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (ramLen < 0x120)
+        return;
+
+    auto read16 = [&](melonDS::u32 offset) -> melonDS::u16 {
+        melonDS::u16 value = 0;
+        std::memcpy(&value, nds->MainRAM + offset, sizeof(value));
+        return value;
+    };
+    auto read32 = [&](melonDS::u32 offset) -> melonDS::u32 {
+        melonDS::u32 value = 0;
+        std::memcpy(&value, nds->MainRAM + offset, sizeof(value));
+        return value;
+    };
+
+    for (melonDS::u32 off = 0; off <= ramLen - 0x120; off += 4)
+    {
+        const melonDS::u32 vtable = read32(off);
+        const melonDS::u32 guid = read32(off + 0x04);
+        const melonDS::u32 settings = read32(off + 0x08);
+        const melonDS::u16 objectID = read16(off + 0x0C);
+        const melonDS::u16 stateType = read16(off + 0x0E);
+        const melonDS::u32 flags = read32(off + 0x10);
+
+        if (vtable < kMainRAMBase || vtable >= kMainRAMBase + ramLen)
+            continue;
+        if (guid == 0 || guid >= 0x10000)
+            continue;
+        if (objectID == 0 || objectID > 0x0400)
+            continue;
+        if (stateType < 1 || stateType > 3)
+            continue;
+        if (flags >= 0x10000000)
+            continue;
+        if (settings == 0xFFFFFFFFu)
+            continue;
+
+        melonDS::u32 length = 0x300;
+        if (objectID == kPlayerObjectID)
+            length = 0x900;
+        else if (objectID == kStageSceneObjectID)
+            length = 0x5800;
+        else if (objectID == kStageActorManagerObjectID)
+            length = 0x1000;
+        else if (objectID == kStageControllerObjectID || objectID == kStageCameraObjectID)
+            length = 0x500;
+
+        AddNSMBRollbackRange(nds, ranges, kMainRAMBase + off, length);
+    }
+}
+
+std::vector<RollbackNSMBRangeEntry> BuildNSMBRollbackRanges(melonDS::NDS* nds)
+{
+    std::vector<RollbackNSMBRangeEntry> ranges;
+    if (!nds || !nds->MainRAM)
+        return ranges;
+
+    AddNSMBRollbackRange(nds, ranges, 0x02039800, 0xA0);
+    AddNSMBRollbackRange(nds, ranges, 0x0203BD20, 0x40);
+    AddNSMBRollbackRange(nds, ranges, 0x02085900, 0x140);
+    AddNSMBRollbackRange(nds, ranges, kNetStateBaseAddr, 0x280);
+    AddNSMBRollbackRange(nds, ranges, kInputConsoleKeysAddr, 0x40);
+    AddNSMBRollbackRange(nds, ranges, kGameStageIDAddr & ~0x3Fu, 0x140);
+    AddNSMBRollbackRange(nds, ranges, kGamePlayerGlobalBlockAddr, 0x100);
+    AddNSMBRollbackRange(nds, ranges, kGameCandidateWifiBlockAddr, 0x2200);
+    AddNSMBRollbackRange(nds, ranges, kStageActorFreezeFlagAddr & ~0x3FFu, 0x1400);
+    AddNSMBRollbackRange(nds, ranges, kStageCameraYAddr & ~0x3FFu, 0x2200);
+    AddNSMBRollbackRange(nds, ranges, kPacketBridgeJitScratchBaseAddr, 0x100);
+    AddNSMBRollbackRange(nds, ranges, kGameCandidateRenderBlockAddr, 0x600);
+
+    AddNSMBRollbackScannedObjectRanges(nds, ranges);
+
+    const PlayerActorScanSample players = FindPlayerActors(nds);
+    AddNSMBRollbackObjectRange(nds, ranges, players.Actor0.Base, 0x900);
+    AddNSMBRollbackObjectRange(nds, ranges, players.Actor1.Base, 0x900);
+
+    const ObjectScanSample star = FindObjectByIDAndSettingsLoose(nds, kVsBattleStarActorObjectID, kVsBattleStarActorSettings);
+    AddNSMBRollbackObjectRange(nds, ranges, star.Base, 0x300);
+    const ObjectScanSample movingHazard = FindObjectByIDAndSettingsLoose(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
+    AddNSMBRollbackObjectRange(nds, ranges, movingHazard.Base, 0x300);
+    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, G.MvlStageSceneSettings);
+    AddNSMBRollbackObjectRange(nds, ranges, stageScene.Base, 0x5800);
+    const ObjectScanSample stageCamera = FindObjectByIDAndSettingsLoose(nds, kStageCameraObjectID, 0);
+    AddNSMBRollbackObjectRange(nds, ranges, stageCamera.Base, 0x300);
+    const ObjectScanSample stageFX = FindObjectByID(nds, kStageFXObjectID);
+    AddNSMBRollbackObjectRange(nds, ranges, stageFX.Base, 0x300);
+    const ObjectScanSample stageActorManager = FindObjectByID(nds, kStageActorManagerObjectID);
+    AddNSMBRollbackObjectRange(nds, ranges, stageActorManager.Base, 0x800);
+    const ObjectScanSample stageController = FindObjectByID(nds, kStageControllerObjectID);
+    AddNSMBRollbackObjectRange(nds, ranges, stageController.Base, 0x500);
+    const ObjectPairScanSample mvlObject267 = FindObjectPairByIDSortedX(nds, kMvlObject267ID);
+    AddNSMBRollbackObjectRange(nds, ranges, mvlObject267.Left.Base, 0x300);
+    AddNSMBRollbackObjectRange(nds, ranges, mvlObject267.Right.Base, 0x300);
+
+    std::sort(ranges.begin(), ranges.end(), [](const auto& a, const auto& b) {
+        return a.Address < b.Address;
+    });
+
+    std::vector<RollbackNSMBRangeEntry> merged;
+    for (const auto& range : ranges)
+    {
+        if (merged.empty())
+        {
+            merged.push_back(range);
+            continue;
+        }
+
+        auto& last = merged.back();
+        const melonDS::u32 lastEnd = last.Address + last.Length;
+        const melonDS::u32 rangeEnd = range.Address + range.Length;
+        if (range.Address <= lastEnd)
+        {
+            if (rangeEnd > lastEnd)
+                last.Length = rangeEnd - last.Address;
+        }
+        else
+        {
+            merged.push_back(range);
+        }
+    }
+    return merged;
 }
 
 bool PrepareRollbackDeltaSaveLocked(melonDS::u32 frame, RollbackStoredState& checkpoint, std::vector<melonDS::u8>& baseMainRAM)
@@ -2666,6 +2846,40 @@ bool SaveRollbackCheckpointBuffer(
         return true;
     }
 
+    if (G.RollbackBackendMode == RollbackBackend::NSMBRanges)
+    {
+        const std::vector<RollbackNSMBRangeEntry> ranges = BuildNSMBRollbackRanges(nds);
+        if (ranges.empty())
+            return false;
+
+        melonDS::u32 totalBytes = 0;
+        for (const auto& range : ranges)
+            totalBytes += range.Length;
+
+        RollbackNSMBRangesHeader header = {};
+        header.Magic = kRollbackNSMBRangesMagic;
+        header.Version = kRollbackNSMBRangesVersion;
+        header.NumFrames = nds->NumFrames;
+        header.NumLagFrames = nds->NumLagFrames;
+        header.LagFrameFlag = nds->LagFrameFlag ? 1 : 0;
+        header.RangeCount = static_cast<melonDS::u32>(ranges.size());
+        header.TotalRangeBytes = totalBytes;
+
+        buffer.resize(sizeof(header) + ranges.size() * sizeof(RollbackNSMBRangeEntry) + totalBytes);
+        char* out = buffer.data();
+        std::memcpy(out, &header, sizeof(header));
+        out += sizeof(header);
+        std::memcpy(out, ranges.data(), ranges.size() * sizeof(RollbackNSMBRangeEntry));
+        out += ranges.size() * sizeof(RollbackNSMBRangeEntry);
+        for (const auto& range : ranges)
+        {
+            const melonDS::u32 offset = range.Address - kMainRAMBase;
+            std::memcpy(out, nds->MainRAM + offset, range.Length);
+            out += range.Length;
+        }
+        return true;
+    }
+
     melonDS::Savestate state;
     const bool saved = (G.RollbackBackendMode == RollbackBackend::CoreLite
         || G.RollbackBackendMode == RollbackBackend::CoreSparse
@@ -2706,6 +2920,39 @@ bool RestoreRollbackCheckpointBuffer(
         nds->NumLagFrames = header.NumLagFrames;
         nds->LagFrameFlag = header.LagFrameFlag != 0;
         InvalidateMainRAMJIT(nds, len);
+        return true;
+    }
+
+    if (G.RollbackBackendMode == RollbackBackend::NSMBRanges)
+    {
+        if (!nds->MainRAM || buffer.size() < sizeof(RollbackNSMBRangesHeader))
+            return false;
+        RollbackNSMBRangesHeader header = {};
+        std::memcpy(&header, buffer.data(), sizeof(header));
+        if (header.Magic != kRollbackNSMBRangesMagic ||
+            header.Version != kRollbackNSMBRangesVersion ||
+            header.RangeCount > 128)
+            return false;
+        const size_t entriesBytes = static_cast<size_t>(header.RangeCount) * sizeof(RollbackNSMBRangeEntry);
+        if (buffer.size() != sizeof(header) + entriesBytes + header.TotalRangeBytes)
+            return false;
+        const char* in = buffer.data() + sizeof(header);
+        std::vector<RollbackNSMBRangeEntry> ranges(header.RangeCount);
+        if (!ranges.empty())
+            std::memcpy(ranges.data(), in, entriesBytes);
+        in += entriesBytes;
+        for (const auto& range : ranges)
+        {
+            if (!IsValidMainRAMRange(nds, range.Address, range.Length))
+                return false;
+            const melonDS::u32 offset = range.Address - kMainRAMBase;
+            std::memcpy(nds->MainRAM + offset, in, range.Length);
+            in += range.Length;
+        }
+        nds->NumFrames = header.NumFrames;
+        nds->NumLagFrames = header.NumLagFrames;
+        nds->LagFrameFlag = header.LagFrameFlag != 0;
+        InvalidateMainRAMJIT(nds, nds->MainRAMMask + 1);
         return true;
     }
 
@@ -10724,6 +10971,8 @@ void InitFromEnvironment()
         G.RollbackBackendMode = RollbackBackend::CoreSparse;
     else if (!std::strcmp(rollbackBackend, "coredelta") || !std::strcmp(rollbackBackend, "core-delta"))
         G.RollbackBackendMode = RollbackBackend::CoreDelta;
+    else if (!std::strcmp(rollbackBackend, "nsmbranges") || !std::strcmp(rollbackBackend, "nsmb-ranges"))
+        G.RollbackBackendMode = RollbackBackend::NSMBRanges;
     else if (!std::strcmp(rollbackBackend, "arm9ram") || !std::strcmp(rollbackBackend, "ram"))
         G.RollbackBackendMode = RollbackBackend::ARM9RAM;
     else

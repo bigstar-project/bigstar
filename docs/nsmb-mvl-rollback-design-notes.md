@@ -11,6 +11,7 @@ Completed:
 - `MELONDS_NSML_ROLLBACK_BACKEND=corelite` / `-RollbackBackend corelite` でPoC rollback backendを選べる。
 - `coresparse` backendを追加し、Main RAMのゼロページを省略できるかを試した。
 - `coredelta` backendを追加し、keyframeのMain RAMを基準に、各checkpointでは変更ページだけを保存できるようにした。
+- 案D寄りのサイズ探索として `nsmbranges` backendを追加した。NSMBのplayer/global/net/stage周辺と検出できる主要actor/object風メモリ範囲だけを保存する。
 - `MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL` でdelta keyframe間隔、`MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE` でMain RAMページサイズを調整できる。
 - rollback traceへ checkpoint byte/time stats、delta/keyframe数、Main RAM base copy量、delta page size を追加した。
 
@@ -31,16 +32,20 @@ Verification:
 - `coredelta` keyframe interval 30 with 1KB page: `logs/codex-rollback-coredelta-k30-page1024-timing-20260601` passed. Delta size was around `2.48-2.50MB`; average was around `2.62MB`.
 - `coredelta` keyframe interval 30 with 256B page: `logs/codex-rollback-coredelta-k30-page256-timing-20260601` passed. Delta size was around `2.46-2.47MB`; average was around `2.60MB`.
 - Longer game-state comparison for best current candidate: `logs/codex-rollback-coredelta-k30-page256-gamestate-2600-20260601` passed 2600-frame split local-input smoke with game-state comparison enabled. Host/client both exercised prediction mismatches and resimulation without restore failure. Final traces around frame 2520 showed average checkpoint bytes around `2.60MB`, save average around `3.4-3.5ms`, restore average around `18ms`.
+- `nsmbranges` short timing probe: `logs/codex-rollback-nsmbranges-timing-20260601` passed without game-state comparison. Checkpoint size was around `58KB`, restore average was around `0.2-0.6ms`, but save average was around `6.6ms` because the PoC scans Main RAM for objects on every checkpoint.
+- `nsmbranges` 2600-frame game-state comparison with the first fixed range set: `logs/codex-rollback-nsmbranges-gamestate-2600-20260601` failed at frame 1950 (`playerActor1X` mismatch).
+- `nsmbranges` with all scanned object-like ranges: `logs/codex-rollback-nsmbranges-allobjects-gamestate-2600-20260601` still failed, now at frame 930 (`playerActor0Y` mismatch). Checkpoint size stayed small at around `62-64KB`; restore stayed below `1ms`, but correctness was insufficient.
 
 Current blocker:
 
 - Page-delta Main RAM is correct enough for the current 2600-frame synthetic route, but it is still around `2.6MB` average per checkpoint window entry and restore still reads a base+delta pair, so rollback recovery remains around `18ms` in this run.
 - The residual size suggests many Main RAM regions are changing or being dirtied broadly; page-delta alone is not likely to reach sub-megabyte snapshots.
+- The NSMB range/actor snapshot is small enough, but current selected RAM ranges do not reconstruct deterministic gameplay after rollback. The missing state is likely outside the selected game RAM ranges and/or emulator core state that affects subsequent simulation.
 - Real WAN jitter patterns and longer sessions are not measured yet.
 
 Next actions:
 
-- Try a more案D-style NSMB actor/global snapshot for size discovery, while expecting that it may fail correctness unless paired with enough emulator/core state.
+- If continuing 案D, use it as a diagnostic path: compare failing frames around rollback and identify the smallest extra game/core state needed, instead of assuming actor/global RAM alone is sufficient.
 - Add an automated rollback benchmark mode if repeated timing comparisons become necessary.
 
 この文書は、Mario vs Luigi online PoCで検討したrollback方式の議論を、後で再開できるように分離して残す設計メモ。
