@@ -14,37 +14,13 @@ $ErrorActionPreference = "Stop"
 
 function Convert-ToMvlSceneSettings {
     param(
-        [int]$Wins,
-        [int]$BigStars,
-        [string]$Lives,
-        [string]$CourseMode
+        [int]$Stage
     )
 
-    $bigStarField = switch ($BigStars) {
-        3 { 4 }
-        5 { 4 }
-        10 { 8 }
-        default { throw "MvlBigStars must be 3, 5, or 10: $BigStars" }
+    if ($Stage -lt 0 -or $Stage -gt 4) {
+        throw "MvlStage must be between 0 and 4: $Stage"
     }
-    $lifeField = switch ($Lives.ToLowerInvariant()) {
-        "3" { 3 }
-        "5" { 5 }
-        "endless" { 0xff }
-        default { throw "MvlLives must be 3, 5, or endless: $Lives" }
-    }
-
-    if ($Wins -lt 1 -or $Wins -gt 3) {
-        throw "MvlWins must be 1, 2, or 3: $Wins"
-    }
-
-    # Direct MvL skips the normal settings/result flow, so match wins are
-    # enforced by the runtime restart controller. Keep the per-round rule byte
-    # on the stable post-course-select value; Course=random is applied by
-    # choosing the stage before boot.
-    $ruleHighNibble = 0xb0
-
-    $packedRules = $ruleHighNibble -bor ($bigStarField -band 0xf)
-    $settings = (($packedRules -band 0xff) -shl 16) -bor (($lifeField -band 0xff) -shl 8)
+    $settings = ((0xb4 + $Stage) -shl 16) -bor 0xff00
     return "0x$('{0:x6}' -f $settings)"
 }
 
@@ -64,7 +40,7 @@ foreach ($courseMode in $CourseModes) {
                 $seed = $StartSeed + $caseIndex
                 $stage = $seed % 5
                 $seedText = "0x$('{0:x8}' -f $seed)"
-                $settings = Convert-ToMvlSceneSettings -Wins $wins -BigStars $bigStars -Lives $lives -CourseMode $courseMode
+                $settings = Convert-ToMvlSceneSettings -Stage $stage
                 $caseName = "course-$courseMode-w$wins-s$bigStars-l$lives-seed$seed"
                 $caseLogDir = Join-Path $LogDir $caseName
                 Write-Host "MvL settings matrix: $caseName settings=$settings stage=$stage"
@@ -97,6 +73,7 @@ foreach ($courseMode in $CourseModes) {
                         -MvlLives $lives `
                         -RequireMvlStage $stage `
                         -RequireMvlSceneSettings $settings `
+                        -RequireMvlLives $lives `
                         -RequireMvlInitialSpawnState `
                         -GameStateTrace `
                         -GameStateTraceExtended `

@@ -412,6 +412,7 @@ param(
     [string]$MvlMatchSeed = "",
     [int]$RequireMvlStage = -1,
     [string]$RequireMvlSceneSettings = "",
+    [string]$RequireMvlLives = "",
     [switch]$DirectMvlBootLoadSM,
     [switch]$DirectMvlBootPatchLoadSMOnly,
     [switch]$DirectMvlBootCallUpdateSM,
@@ -604,36 +605,13 @@ function Convert-ToUInt32Setting {
 
 function Convert-ToMvlSceneSettings {
     param(
-        [int]$Wins,
-        [int]$BigStars,
-        [string]$Lives,
-        [string]$CourseMode
+        [int]$Stage
     )
 
-    $bigStarField = switch ($BigStars) {
-        3 { 4 }
-        5 { 4 }
-        10 { 8 }
-        default { throw "MvlBigStars must be 3, 5, or 10: $BigStars" }
+    if ($Stage -lt 0 -or $Stage -gt 4) {
+        throw "MvlStage must be between 0 and 4: $Stage"
     }
-    $lifeField = switch ($Lives.ToLowerInvariant()) {
-        "3" { 3 }
-        "5" { 5 }
-        "endless" { 0xff }
-        default { throw "MvlLives must be 3, 5, or endless: $Lives" }
-    }
-
-    if ($Wins -lt 1 -or $Wins -gt 3) {
-        throw "MvlWins must be 1, 2, or 3: $Wins"
-    }
-
-    # Direct MvL skips the normal settings/result flow, so match wins are
-    # enforced by the runtime restart controller. Keep the per-round rule byte
-    # on the stable post-course-select value; Course=random is applied by
-    # choosing the stage before boot.
-    $ruleHighNibble = 0xb0
-    $packedRules = $ruleHighNibble -bor ($bigStarField -band 0xf)
-    return "0x$('{0:x6}' -f ((($packedRules -band 0xff) -shl 16) -bor (($lifeField -band 0xff) -shl 8)))"
+    return "0x$('{0:x6}' -f ((((0xb4 + $Stage) -band 0xff) -shl 16) -bor 0xff00))"
 }
 
 if ($GenerateMvlConfiguredRoms) {
@@ -660,7 +638,7 @@ if ($GenerateMvlConfiguredRoms) {
         throw "MvlStage must be between 0 and 4: $configuredStage"
     }
 
-    $configuredSceneSettings = if ($MvlSceneSettings) { $MvlSceneSettings } else { Convert-ToMvlSceneSettings -Wins $MvlWins -BigStars $MvlBigStars -Lives $MvlLives -CourseMode $MvlCourseMode }
+    $configuredSceneSettings = if ($MvlSceneSettings) { $MvlSceneSettings } else { Convert-ToMvlSceneSettings -Stage $configuredStage }
     $generatedHost = Join-Path $logRoot "generated-host.nds"
     $generatedClient = Join-Path $logRoot "generated-client.nds"
     & (Join-Path $PSScriptRoot "generate-nsmb-mvl-stable-roms.ps1") `
@@ -697,7 +675,8 @@ if ($GenerateMvlConfiguredRoms) {
 }
 
 if (-not $MvlSceneSettings) {
-    $MvlSceneSettings = Convert-ToMvlSceneSettings -Wins $MvlWins -BigStars $MvlBigStars -Lives $MvlLives -CourseMode $MvlCourseMode
+    $settingsStage = if ($MvlStage -ge 0) { $MvlStage } else { $DirectMvlBootStage }
+    $MvlSceneSettings = Convert-ToMvlSceneSettings -Stage $settingsStage
 }
 
 Copy-Item -Force $hostSourceRomPath $hostRom
@@ -3590,6 +3569,19 @@ if ($GameStateTrace -and -not $SkipMvlStateCheck -and ($GameStateTraceEndFrame -
             $actualStageSettings = [uint32](Convert-TraceHexToInt64 $last.stageSceneSettings)
             if ($last.stageSceneFound -ne "0x1" -or $actualStageSettings -ne $expectedSettings) {
                 throw "Mario vs Luigi scene settings check failed for $($item.Role): expected=0x$('{0:x}' -f $expectedSettings) actual=$($last.stageSceneSettings) stageSceneFound=$($last.stageSceneFound). See $($item.Path)"
+            }
+        }
+        if ($RequireMvlLives) {
+            $expectedLives = switch ($RequireMvlLives.ToLowerInvariant()) {
+                "3" { 3 }
+                "5" { 5 }
+                "endless" { 3 }
+                default { throw "RequireMvlLives must be 3, 5, or endless: $RequireMvlLives" }
+            }
+            $actualLives0 = Convert-TraceHexToInt64 $last.player0Lives
+            $actualLives1 = Convert-TraceHexToInt64 $last.player1Lives
+            if ($actualLives0 -ne $expectedLives -or $actualLives1 -ne $expectedLives) {
+                throw "Mario vs Luigi lives check failed for $($item.Role): expected=$expectedLives actual=$actualLives0/$actualLives1. See $($item.Path)"
             }
         }
 

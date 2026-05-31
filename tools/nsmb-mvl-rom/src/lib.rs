@@ -79,26 +79,48 @@ pub fn generate_stable_roms(options: &StableRomOptions) -> Result<StableRomResul
     if !options.source_rom.exists() {
         bail!("source ROM not found: {}", options.source_rom.display());
     }
+    validate_game_settings(
+        options.wins,
+        options.big_stars,
+        &options.lives,
+        &options.course_mode,
+    )?;
     let scene_settings = match &options.scene_settings {
         Some(value) if !value.trim().is_empty() => parse_u32(value)?,
-        _ => scene_settings(
-            options.wins,
-            options.big_stars,
-            &options.lives,
-            &options.course_mode,
-        )?,
+        _ => stage_scene_settings(options.stage)?,
     };
+    let initial_lives = initial_lives(&options.lives)?;
+    let life_mode_selector = life_mode_selector(&options.lives)?;
+    let big_star_selector = big_star_selector(options.big_stars)?;
     let symbols = load_symbols(&options.symbols)?;
     let base = RomImage::load(&options.source_rom)?;
 
     let mut host = base.clone();
-    patch_direct_mvl_entry(&mut host, &symbols, options.stage, 0, scene_settings)?;
+    patch_direct_mvl_entry(
+        &mut host,
+        &symbols,
+        options.stage,
+        0,
+        scene_settings,
+        initial_lives,
+        life_mode_selector,
+        big_star_selector,
+    )?;
     patch_wifi_communicating_consoles(&mut host, 2)?;
     patch_rng_constant(&mut host, &symbols, 0x100)?;
     host.save(&options.host_rom)?;
 
     let mut client = base;
-    patch_direct_mvl_entry(&mut client, &symbols, options.stage, 1, scene_settings)?;
+    patch_direct_mvl_entry(
+        &mut client,
+        &symbols,
+        options.stage,
+        1,
+        scene_settings,
+        initial_lives,
+        life_mode_selector,
+        big_star_selector,
+    )?;
     patch_wifi_communicating_consoles(&mut client, 2)?;
     patch_rng_constant(&mut client, &symbols, 0x100)?;
     client.save(&options.client_rom)?;
@@ -109,27 +131,56 @@ pub fn generate_stable_roms(options: &StableRomOptions) -> Result<StableRomResul
     })
 }
 
-pub fn scene_settings(wins: u8, big_stars: u8, lives: &str, course_mode: &str) -> Result<u32> {
+fn validate_game_settings(wins: u8, big_stars: u8, lives: &str, course_mode: &str) -> Result<()> {
     if !(1..=3).contains(&wins) {
         bail!("wins must be 1, 2, or 3: {wins}");
     }
-    let big_star_field = match big_stars {
-        3 | 5 => 4,
-        10 => 8,
+    match big_stars {
+        3 | 5 | 10 => {}
         _ => bail!("big stars must be 3, 5, or 10: {big_stars}"),
-    };
-    let life_field = match lives.to_ascii_lowercase().as_str() {
-        "3" => 3,
-        "5" => 5,
-        "endless" => 0xff,
+    }
+    match lives.to_ascii_lowercase().as_str() {
+        "3" | "5" | "endless" => {}
         _ => bail!("lives must be 3, 5, or endless: {lives}"),
-    };
+    }
     match course_mode.to_ascii_lowercase().as_str() {
         "random" | "select" => {}
         _ => bail!("course mode must be random or select: {course_mode}"),
     }
-    let packed_rules = 0xb0 | (big_star_field & 0xf);
-    Ok(((packed_rules as u32) << 16) | ((life_field as u32) << 8))
+    Ok(())
+}
+
+pub fn stage_scene_settings(stage: u8) -> Result<u32> {
+    if stage > 4 {
+        bail!("stage must be between 0 and 4: {stage}");
+    }
+    Ok(((0xb4u32 + stage as u32) << 16) | 0xff00)
+}
+
+fn initial_lives(lives: &str) -> Result<u32> {
+    match lives.to_ascii_lowercase().as_str() {
+        "3" => Ok(3),
+        "5" => Ok(5),
+        "endless" => Ok(3),
+        _ => bail!("lives must be 3, 5, or endless: {lives}"),
+    }
+}
+
+fn life_mode_selector(lives: &str) -> Result<u32> {
+    match lives.to_ascii_lowercase().as_str() {
+        "3" | "5" => Ok(0),
+        "endless" => Ok(2),
+        _ => bail!("lives must be 3, 5, or endless: {lives}"),
+    }
+}
+
+fn big_star_selector(big_stars: u8) -> Result<u32> {
+    match big_stars {
+        3 => Ok(0),
+        5 => Ok(1),
+        10 => Ok(2),
+        _ => bail!("big stars must be 3, 5, or 10: {big_stars}"),
+    }
 }
 
 impl RomImage {
@@ -453,6 +504,9 @@ fn patch_direct_mvl_entry(
     stage: u8,
     player_id: u8,
     scene_settings: u32,
+    initial_lives: u32,
+    life_mode_selector: u32,
+    big_star_selector: u32,
 ) -> Result<()> {
     patch_arm9_words(rom, 0x0201_3428, &[encode_mov_imm(12, 6)?])?;
 
@@ -470,6 +524,9 @@ fn patch_direct_mvl_entry(
         stage,
         player_id,
         scene_settings,
+        initial_lives,
+        life_mode_selector,
+        big_star_selector,
     )?;
     patch_overlay_words(rom, update_addr, &stub)?;
 
@@ -494,6 +551,9 @@ fn build_direct_loadlevel_stub(
     stage: u8,
     player_id: u8,
     force_scene_settings: u32,
+    initial_lives: u32,
+    life_mode_selector: u32,
+    big_star_selector: u32,
 ) -> Result<Vec<u32>> {
     let stack_values = [
         0,                // act
@@ -554,6 +614,19 @@ fn build_direct_loadlevel_stub(
     emit_ldr_literal(&mut words, 0, 0x0208_8F38, 0xE);
     emit_ldr_literal(&mut words, 1, force_scene_settings, 0xE);
     words.push(encode_str_imm(1, 0, 0)?);
+
+    emit_ldr_literal(&mut words, 0, 0x0208_B364, 0xE);
+    words.push(encode_load_imm(1, initial_lives)?);
+    words.push(encode_str_imm(1, 0, 0)?);
+    words.push(encode_str_imm(1, 0, 4)?);
+
+    emit_ldr_literal(&mut words, 0, 0x0215_C89C, 0xE);
+    words.push(encode_mov_imm(1, life_mode_selector)?);
+    words.push(encode_strb_imm(1, 0, 0)?);
+
+    emit_ldr_literal(&mut words, 0, 0x0215_C88C, 0xE);
+    words.push(encode_mov_imm(1, big_star_selector)?);
+    words.push(encode_strb_imm(1, 0, 0)?);
 
     emit_ldr_literal(&mut words, 0, 0x0208_B094, 0xE);
     words.push(encode_mov_imm(1, 0)?);
@@ -861,6 +934,35 @@ fn parse_u32(value: &str) -> Result<u32> {
         Ok(u32::from_str_radix(hex, 16)?)
     } else {
         Ok(u32::from_str_radix(trimmed, 16).or_else(|_| trimmed.parse())?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{big_star_selector, initial_lives, life_mode_selector, stage_scene_settings};
+
+    #[test]
+    fn stage_scene_settings_follow_mvl_course_ids() {
+        assert_eq!(stage_scene_settings(0).unwrap(), 0x00b4_ff00);
+        assert_eq!(stage_scene_settings(4).unwrap(), 0x00b8_ff00);
+        assert!(stage_scene_settings(5).is_err());
+    }
+
+    #[test]
+    fn initial_lives_keep_rules_separate_from_stage_settings() {
+        assert_eq!(initial_lives("3").unwrap(), 3);
+        assert_eq!(initial_lives("5").unwrap(), 5);
+        assert_eq!(initial_lives("endless").unwrap(), 3);
+        assert_eq!(life_mode_selector("3").unwrap(), 0);
+        assert_eq!(life_mode_selector("5").unwrap(), 0);
+        assert_eq!(life_mode_selector("endless").unwrap(), 2);
+    }
+
+    #[test]
+    fn big_star_targets_use_the_native_selector_table() {
+        assert_eq!(big_star_selector(3).unwrap(), 0);
+        assert_eq!(big_star_selector(5).unwrap(), 1);
+        assert_eq!(big_star_selector(10).unwrap(), 2);
     }
 }
 

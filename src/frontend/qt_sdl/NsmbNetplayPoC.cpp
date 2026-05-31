@@ -1067,10 +1067,6 @@ struct State
     std::string MvlCourseMode = "fixed";
     int MvlTargetWins = 2;
     int MvlBigStarTarget = 5;
-    melonDS::u32 MvlBigStarLogicalCount[16][2] {};
-    bool MvlBigStarAtNativeThreshold[16][2] {};
-    bool MvlBigStarTargetReachedLogged[16][2] {};
-    bool MvlBigStarCapLogged[16][2] {};
     bool MvlEntranceSpawnNormalizedLogged[16] {};
     bool MvlInitialPlayerSpawnRepairedLogged[16] {};
     bool MvlAutoRestartAfterResult = false;
@@ -1512,24 +1508,10 @@ bool EnvHasValue(const char* name)
 
 melonDS::u32 ComposeMvlSceneSettingsFromEnvironment()
 {
-    const int bigStars = EnvInt("MELONDS_NSML_MVL_BIG_STARS", 5);
-    const int bigStarField =
-        bigStars == 10 ? 8 :
-        4;
-    const char* lives = EnvCString("MELONDS_NSML_MVL_LIVES", "endless");
-    const melonDS::u32 lifeField =
-        std::strcmp(lives, "3") == 0 ? 3u :
-        std::strcmp(lives, "5") == 0 ? 5u :
-        0xFFu;
-    // Direct MvL skips the normal settings/result flow, so match wins are
-    // enforced by the runtime restart controller. The scene setting keeps the
-    // per-round rule byte compatible with the known stable post-course-select
-    // value; Course=random is applied by choosing the stage before boot.
-    // 0xB4FF00 is the normal MvL default: BigStar=5, Lives=Endless,
-    // Course=Choose Each Time. Course selection itself is handled before direct boot.
-    const melonDS::u32 ruleHighNibble = 0xB0u;
-    const melonDS::u32 packedRules = ruleHighNibble | static_cast<melonDS::u32>(bigStarField & 0xF);
-    return (packedRules << 16) | (lifeField << 8);
+    const melonDS::u32 stage = std::min(
+        EnvU32("MELONDS_NSML_MVL_STAGE", EnvU32("MELONDS_NSML_DIRECT_MVL_BOOT_STAGE", 0)),
+        4u);
+    return ((0xB4u + stage) << 16) | 0xFF00u;
 }
 
 melonDS::u32 GenerateMatchSeed()
@@ -4983,8 +4965,6 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
     return true;
 }
 
-void ResetMvlBigStarTargetState(int instanceID);
-
 bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.MvlAutoRestartAfterResult || G.MvlTargetWins <= 1 || !nds || instanceID < 0 || instanceID >= 16)
@@ -5085,8 +5065,6 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
         nds->ARM9Write16(kSceneIsSceneActiveAddr, 0x0000);
     }
     G.MvlAutoRestartLastRestartFrame[instanceID] = frame;
-    ResetMvlBigStarTargetState(instanceID);
-
     G.MvlAutoRestartInResult[instanceID] = false;
     G.MvlAutoRestartResultScored[instanceID] = false;
     const int actualStage = static_cast<int>(nds->ARM9Read32(kGameStageIDAddr));
@@ -5103,109 +5081,6 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
         restoredCheckpoint ? 1 : 0);
     std::fflush(stdout);
     return true;
-}
-
-void ResetMvlBigStarTargetState(int instanceID)
-{
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    for (int player = 0; player < 2; player++)
-    {
-        G.MvlBigStarLogicalCount[instanceID][player] = 0;
-        G.MvlBigStarAtNativeThreshold[instanceID][player] = false;
-        G.MvlBigStarTargetReachedLogged[instanceID][player] = false;
-        G.MvlBigStarCapLogged[instanceID][player] = false;
-    }
-}
-
-void EnforceMvlBigStarTargetIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (G.MvlBigStarTarget <= 3 || !nds || !nds->MainRAM)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    if (nds->ARM9Read16(kSceneCurrentSceneIDAddr) != 0x0003)
-        return;
-    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
-        return;
-
-    for (int player = 0; player < 2; player++)
-    {
-        const melonDS::u32 offset = static_cast<melonDS::u32>(player) * sizeof(melonDS::u32);
-        const melonDS::u32 battle = nds->ARM9Read32(kGamePlayerBattleStarsAddr + offset);
-        const melonDS::u32 displayed = nds->ARM9Read32(kGamePlayerDisplayedStarsAddr + offset);
-        const melonDS::u32 collected = nds->ARM9Read32(kGamePlayerCollectedStarsAddr + offset);
-        melonDS::u32& logical = G.MvlBigStarLogicalCount[instanceID][player];
-        const melonDS::u32 observed = std::max({battle, displayed, collected});
-        const bool forceAbsolute = G.ForcePlayerStarCountersEnabled
-            && frame >= G.ForcePlayerStarCountersStartFrame
-            && (G.ForcePlayerStarCountersEndFrame == 0 || frame <= G.ForcePlayerStarCountersEndFrame);
-
-        if (forceAbsolute)
-        {
-            logical = observed;
-        }
-        else if (observed >= 3)
-        {
-            if (!G.MvlBigStarAtNativeThreshold[instanceID][player])
-                logical = logical < 2 ? observed : logical + (observed - 2);
-            G.MvlBigStarAtNativeThreshold[instanceID][player] = true;
-        }
-        else
-        {
-            G.MvlBigStarAtNativeThreshold[instanceID][player] = false;
-            if (observed > logical || observed < 2)
-                logical = observed;
-        }
-
-        if (logical >= static_cast<melonDS::u32>(G.MvlBigStarTarget))
-        {
-            if (battle < 3)
-                nds->ARM9Write32(kGamePlayerBattleStarsAddr + offset, 3);
-            if (displayed < 3)
-                nds->ARM9Write32(kGamePlayerDisplayedStarsAddr + offset, 3);
-            if (collected < 3)
-                nds->ARM9Write32(kGamePlayerCollectedStarsAddr + offset, 3);
-            if (!G.MvlBigStarTargetReachedLogged[instanceID][player])
-            {
-                std::printf(
-                    "NSMB MvL settings: big-star target reached inst=%d frame=%u player=%d target=%d logical=%u battle=%u displayed=%u collected=%u\n",
-                    instanceID,
-                    frame,
-                    player,
-                    G.MvlBigStarTarget,
-                    logical,
-                    battle,
-                    displayed,
-                    collected);
-                std::fflush(stdout);
-                G.MvlBigStarTargetReachedLogged[instanceID][player] = true;
-            }
-            continue;
-        }
-
-        if (observed >= 3)
-        {
-            nds->ARM9Write32(kGamePlayerBattleStarsAddr + offset, 2);
-            nds->ARM9Write32(kGamePlayerDisplayedStarsAddr + offset, 2);
-            nds->ARM9Write32(kGamePlayerCollectedStarsAddr + offset, 2);
-            if (!G.MvlBigStarCapLogged[instanceID][player])
-            {
-                std::printf(
-                    "NSMB MvL settings: capped native 3-star result inst=%d frame=%u player=%d target=%d logical=%u battle=%u displayed=%u collected=%u\n",
-                    instanceID,
-                    frame,
-                    player,
-                    G.MvlBigStarTarget,
-                    logical,
-                    battle,
-                    displayed,
-                    collected);
-                std::fflush(stdout);
-                G.MvlBigStarCapLogged[instanceID][player] = true;
-            }
-        }
-    }
 }
 
 void SaveMvlAutoRestartCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -11151,8 +11026,6 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerStarCountersIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        EnforceMvlBigStarTargetIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageFXSettingsIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageActorPreUpdateGateIfNeeded(instanceID, inputFrame, nds);
@@ -11574,8 +11447,6 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         ForcePlayerInventoryPowerupsIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerStarCountersIfNeeded(instanceID, logFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        EnforceMvlBigStarTargetIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceWifiCommunicatingIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)

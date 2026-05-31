@@ -98,22 +98,11 @@ static int NSMLEnvInt(const char* name, int fallback)
 
 static u32 NSMLComposeMvlSceneSettingsFromEnvironment()
 {
-    const int bigStars = NSMLEnvInt("MELONDS_NSML_MVL_BIG_STARS", 5);
-    const u32 bigStarField =
-        bigStars == 10 ? 8u :
-        4u;
-    const char* lives = getenv("MELONDS_NSML_MVL_LIVES");
-    const u32 lifeField =
-        lives && strcmp(lives, "3") == 0 ? 3u :
-        lives && strcmp(lives, "5") == 0 ? 5u :
-        0xFFu;
-    // Direct MvL skips the normal settings/result flow, so match wins are
-    // enforced by the frontend restart controller. Keep the scene setting's
-    // per-round rule byte on the stable post-course-select value; Course=random
-    // is applied by choosing the stage before boot.
-    const u32 ruleHighNibble = 0xB0u;
-    const u32 packedRules = ruleHighNibble | (bigStarField & 0xFu);
-    return (packedRules << 16) | (lifeField << 8);
+    const u32 stage = std::min(
+        NSMLEnvU32("MELONDS_NSML_MVL_STAGE",
+            NSMLEnvU32("MELONDS_NSML_DIRECT_MVL_BOOT_STAGE", 0)),
+        4u);
+    return ((0xB4u + stage) << 16) | 0xFF00u;
 }
 
 static u32 NSMLMvlStage()

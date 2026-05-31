@@ -1,5 +1,21 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Current game settings fix - 2026-06-01
+
+- Previous settings verification was insufficient: it checked RAM traces and actor presence, but did not visually verify each course, the Big Star HUD above 2 stars, or the lives HUD. The GUI-visible failures reported by the user were real.
+- Root cause for the course bug: `stageSceneSettings` was incorrectly treated as packed match rules. Native MvL uses flattened course scene settings `0xB4FF00` through `0xB8FF00` for stages `0..4`. Rust ROM generation, runtime fallback composition, and PowerShell helpers now derive scene settings only from the selected stage.
+- Root cause for the Big Star HUD bug: the frontend runtime clamp held native counters at 2 until its logical target was reached. This broke the HUD. The clamp was removed. Rust ROM generation now writes the native overlay selector at `0x0215C88C`: `0/1/2` selects the native `3/5/10` target table.
+- Root cause for the lives bug: lives were encoded into the unrelated scene setting byte. Rust ROM generation now writes the native player life globals at `0x0208B364/+4` and life mode selector at `0x0215C89C`. Finite `3/5` uses mode `0`; `endless` uses normal visible lives `3` with mode `2`.
+- Verification after rebuilding `build/release-windows-x86_64/melonDS.exe`:
+  - `logs/codex-rust-settings-matrix-native-20260601/settings-matrix-summary.csv`: all 27 combinations of `Wins=1|2|3`, `Big Star=3|5|10`, and `Lives=3|5|endless` passed initial route verification.
+  - `logs/codex-settings-visual-after-stage0-soft`, `logs/codex-settings-visual-native-stage1-soft`, `logs/codex-settings-visual-native-stage2-soft`, `logs/codex-settings-visual-after-stage3-soft`, and `logs/codex-settings-visual-native-stage4-soft`: screenshots visually show five distinct courses: grass, cave, snow, pipe underground, and castle.
+  - `logs/codex-settings-visual-native-stars4-soft/hud-top-enlarged.png`: with native `Big Star=5`, the HUD visibly shows 4 collected stars before victory.
+  - `logs/codex-settings-native-target3-snap`, `logs/codex-settings-native-target5-snap`, and `logs/codex-settings-native-target10-snap`: native result transition occurs at exactly `3`, `5`, and `10` stars.
+  - `logs/codex-settings-visual-native-lives-5-soft` and `logs/codex-settings-visual-native-lives-endless-fixed-soft`: screenshots visibly show 5 lives for finite `5`, and the normal 3-life display for `endless`.
+  - `logs/codex-settings-wins2-round2-probe`: `Wins=2` returns to game 2 after one result.
+  - `logs/codex-settings-wins3-round3-native-lives3-20260601`: `Wins=3` returns to game 2 and game 3, then stops restarting after the third win.
+- Remaining course limitation: `Course=random` selects `matchSeed % 5` at match start. Checkpoint restart returns to the same course for games 2 and 3. Re-randomizing each game and normal `Choose Each Time` both require restoring the skipped CourseSelect flow and remain unsupported.
+
 ## Current FPS regression triage - 2026-06-01
 
 - User reported that `scripts/run-nsmb-mvl-manual-peer.ps1` no longer holds the post-`09db0f1b` 57-60 FPS behavior and can dip to about 50 FPS. Reproduced before the fix with `logs/codex-fps-regression-baseline-20260601`: active FPS was host `37.52` and client `37.38`.
@@ -7,7 +23,7 @@
 - Root cause: `b5769a84c` made manual peer runs always pass MvL settings envs (`MELONDS_NSML_MVL_WINS`, `MELONDS_NSML_MVL_BIG_STARS`, `MELONDS_NSML_MVL_LIVES`) and also added those passive settings to `NSMLRuntimeHooksMaybeEnabled()`, causing ARM hot-loop runtime hook checks to be enabled during normal manual-peer play.
 - Fix: passive MvL settings envs no longer enable `NSMLRuntimeHooksMaybeEnabled()`. Entrance-spawn write normalization is now behind explicit `MELONDS_NSML_NORMALIZE_MVL_ENTRANCE_SPAWN_WRITES` instead of piggybacking on the broad runtime hook flag.
 - Verification after rebuilding `build/release-windows-x86_64/melonDS.exe`: `logs/codex-fps-regression-after-hook-gate-20260601` improved active FPS to host `57.41` / client `57.17` over 1800 frames, and `logs/codex-fps-regression-after-hook-gate-long-20260601` held host `58.41` / client `58.34` over 3600 frames.
-- Settings smoke after the fix: `logs/codex-fps-regression-settings-smoke-20260601` passed 1200 frames with generated ROMs, `Course=random`, `MatchSeed=0x00000002`, `Wins=3`, `BigStars=10`, `Lives=5`, required stage `2`, required scene settings `0xb80500`, and initial spawn-state verification.
+- Historical settings smoke after the FPS fix: `logs/codex-fps-regression-settings-smoke-20260601` passed 1200 frames, but its `0xb80500` scene-settings assumption was incorrect and its trace-only checks did not catch the GUI-visible settings bugs. Use the verification under `Current game settings fix` instead.
 
 ## Current Actions package status - 2026-06-01
 
@@ -106,9 +122,9 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   - ユーザー向け項目は `-MvlWins 1|2|3`、`-MvlBigStars 3|5|10`、`-MvlLives 3|5|endless` として外部指定できる。
   - direct routeでは通常の設定画面/結果後管理を飛ばすため、`Wins` はROM内 `sceneSettings` の高位nibbleへ無理に詰めず、runtime側のmatch targetとして扱う。`Big Star` / `Mario's Lives` / `Course=random` は起動前の一時ROM生成とruntime envへ反映する。
   - `scripts/test-nsmb-mvl-settings-matrix.ps1` を追加し、`Course=random` で `Wins` 3通り * `Big Star` 3通り * `Mario's Lives` 3通りを自動検証できるようにした。
-  - `logs/codex-rust-settings-matrix-final` で、Rust生成ROMの27通りすべてが1200 frames smokeを通過し、期待 `stageID = matchSeed % 5`、期待 `stageSceneSettings`、player actor 2体、Vs star actor、StageScene activeを確認した。
-  - `Big Star=5` は安定defaultの `0xB4xx00`、`Big Star=10` は `0xB8xx00` を使う。`logs/codex-mvl-bigstar-low-nibble-sweep/summary.csv` ではlow nibble `4..8` だけが実stage actorありで通り、`0..3` と `9..15` は不安定またはabortした。
-  - `Big Star=3` はNSMB本来の3個勝利を使う。`Big Star=5/10` はruntime側で星数をlogical countとして追跡し、native 3-star resultをtarget到達まで抑制、target到達時に結果へ進める。
+  - 旧 `logs/codex-rust-settings-matrix-final` はtrace-only smokeであり、GUI表示の破損を見逃していた。修正後は `logs/codex-rust-settings-matrix-native-20260601` で27通りを再検証した。
+  - `stageSceneSettings` はmatch rulesではなくコースIDに対応する。stage `0..4` はそれぞれ `0xB4FF00..0xB8FF00` を使う。
+  - `Big Star=3/5/10` はoverlay52のnative target tableを使う。Rust生成ROMがselector `0/1/2` を書き込み、frontend側のlogical count clampは削除した。
   - `logs/codex-rust-bigstar-thresholds-final` で、`Big Star=3` は2個では結果なし/3個で結果、`Big Star=5` は3個では結果なし/5個で結果、`Big Star=10` は9個では結果なし/10個で結果を確認した。
   - 以前の `Wins=3` 候補 `0x00F4FF00`、`Wins=3` / `Big Star=10` の `0x09xxxx`、暫定 `0x39xxxx` は、direct routeでの安定性または勝敗遷移の意味が弱いため採用しない。現行mappingは安定した `0xB?xx00` を使い、match winsはruntime側で管理する。
   - raw逃げ道として `-MvlSceneSettings` は引き続き外部指定可能。ユーザー向け項目より raw override を優先する。
@@ -215,7 +231,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - stable ROMでは独自カメラ先読みpatchを使わず、NSMB本来の `Stage::cameraX[player]` 更新をそのまま使う。旧 `MELONDS_NSML_DYNAMIC_CAMERA_LEAD` 実行時hookは診断用で、手動peerではデフォルト無効。
 - direct entryのカメラは、通常LocalMPとの実測比較に基づいて `0x020CA880` の初期化hold bit `0x08` だけを一度クリアする。手動peer/local起動では `ClearMvlCameraInitHold` をデフォルト有効にしている。
 - MvL設定は `Wins` / `Big Star` / `Mario's Lives` / `Course=random` を外部指定できる。`Course=Choose Each Time` はdirect routeがCourseSelectを飛ばすため未対応、`Course=random` の2ゲーム目以降の再抽選も未対応。
-- `Big Star=3/5/10` はGUI/CLI設定値として受け付け、起動マトリクスと勝敗しきい値probeを通過済み。5/10個勝利はruntime側のlogical countでnative 3-star resultを抑制して実現する。
+- `Big Star=3/5/10` はGUI/CLI設定値として受け付け、起動マトリクスとnative勝敗しきい値probeを通過済み。Rust生成ROMがnative selectorを書き込み、frontend側で星数をclampしない。
 - 残りの注意点: 自動smokeの終了条件はraw frame基準なので、動的start後は片側が先に終了してもう片側がthrottle timeoutすることがある。これは手動対戦の同期ズレとは別のテストハーネス問題として扱う。
 
 ## 手動起動
@@ -307,10 +323,10 @@ Remove-Item Env:\MELONDS_NSML_SWAPBUFFERS_INTERVAL -ErrorAction SilentlyContinue
   - `netPacketTick` はNSMBの通信packet作業領域で、反映済みゲーム状態そのものではないため、`-CheckHostClientGameplaySync` の必須比較から外した。必要な場合だけ `-CheckHostClientNetPacketTickSync` で別途検査する。
   - 修正後、`tests\nsmb_us_direct_mvl_both_different.inputs` / 3600 frames / `-CheckHostClientGameplaySync` はpass。`-CheckHostClientNetPacketTickSync` を明示した場合は従来どおり frame 2560 のtick差を検出する。
 - MvL設定外部化:
-  - `logs\codex-rust-settings-matrix-final\settings-matrix-summary.csv`: Rust生成ROMで `Course=random` / `Wins=1,2,3` / `Big Star=3,5,10` / `Lives=3,5,endless` の27通りがpass。各caseでstageID、sceneSettings、player actor、Vs star actor、StageScene activeを確認。
+  - `logs\codex-rust-settings-matrix-native-20260601\settings-matrix-summary.csv`: Rust生成ROMで `Course=random` / `Wins=1,2,3` / `Big Star=3,5,10` / `Lives=3,5,endless` の27通りがpass。各caseでstageID、sceneSettings、player actor、Vs star actor、StageScene active、初期livesを確認。
   - `logs\codex-rust-bigstar-thresholds-final\bigstar-threshold-summary.csv`: `Big Star=3/5/10` の結果しきい値6ケースがpass。
   - `logs\codex-rust-auto-restart-wins2-v2`: `Course=random` / `Wins=2` で結果後に `nextGame=2` へ復帰することを確認。checkpoint方式のため、2ゲーム目のcourseは1ゲーム目と同じ。
-  - `logs\codex-rust-auto-restart-wins3-v2`: `Wins=3` で `nextGame=2` と `nextGame=3` へのcheckpoint restartを確認。
+  - `logs\codex-settings-wins3-round3-native-lives3-20260601`: 修正後のnative lives設定で `Wins=3` の `nextGame=2` と `nextGame=3` へのcheckpoint restart、3勝後にrestartしないことを確認。
   - Rust ROM generator parity: Python生成ROMとRust生成ROMの主要patch領域 (`0x021577EC`, `0x020C5298`, `0x020A06DC`, `0x02013428`, `0x02159348`, `0x0200FAE0`) の一致を確認。
 
 ## 注意
