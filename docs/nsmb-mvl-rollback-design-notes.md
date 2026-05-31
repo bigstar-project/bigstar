@@ -1,5 +1,37 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
+## 2026-06-01 current experiment status
+
+ユーザー指示により、delay方式とのhybrid検討はいったん外し、軽いcheckpoint/snapshotが作れるかだけに焦点を戻した。
+
+Completed:
+
+- 案C寄りのPoCとして、通常savestate互換を捨てたrollback専用 `corelite` backendを追加した。
+- `melonDS::NDS::DoRollbackSavestate()` を追加し、通常 `DoSavestate()` がNTRでも常に保存していた16MB Main RAMを、実際の `MainRAMMask + 1` だけ保存するようにした。その他のCPU、DMA、timer、scheduler、GPU/SPU/Wifi等の既存savestate対象は維持している。
+- `MELONDS_NSML_ROLLBACK_BACKEND=corelite` / `-RollbackBackend corelite` でPoC rollback backendを選べる。
+- rollback traceへ checkpoint byte stats を追加した。
+
+Verification:
+
+- Build: `cmake --build --preset release-windows-x86_64 --parallel` passed.
+- Core-lite rollback probe: `logs/codex-rollback-corelite-trace-20260601` passed short split local-input smoke with artificial input delay, prediction mismatches, and resimulation.
+- `corelite` checkpoint size was stable at `6,645,137` bytes.
+- Same short probe with normal `savestate` backend in `logs/codex-rollback-savestate-trace-20260601` showed `19,228,045` bytes.
+- This is about 65% smaller than full savestate, mainly by removing unused NTR upper Main RAM from rollback checkpoints.
+- `logs/codex-rollback-corelite-gamestate-20260601` ran both host/client to frame 1500 with game-state traces and rollback resimulation, but the wrapper-level comparison failed at the outer movement-probe check because the short run did not provide the expected movement probe rows. The inner host/client route smoke completed and no rollback restore/resim failure was logged.
+- Longer game-state comparison: `logs/codex-rollback-corelite-gamestate-2600-20260601` passed 2600-frame split local-input smoke with game-state comparison enabled. It exercised prediction mismatches and rollback resimulation. Final client-side trace at frame 2520 showed 10 mismatches and 10 resimulations, with checkpoint size still `6,645,137` bytes.
+- Timing probe: `logs/codex-rollback-corelite-timing-20260601` showed `corelite` save average around `4.5ms` and restore average around `15-18ms` in the short JIT-enabled synthetic run. `logs/codex-rollback-savestate-timing-20260601` showed normal `savestate` save average around `9.4-9.6ms` and restore average around `19.6ms` under the same style of run.
+
+Current blocker:
+
+- `corelite` is still ~6.3 MiB per checkpoint, so every-frame windows are memory-heavy. It is much more realistic than full savestate, but not yet a sub-megabyte rollback snapshot.
+- Longer than 2600 frames and real WAN jitter patterns are not measured yet.
+
+Next actions:
+
+- If 6.6MB is still too heavy, move to a second experiment: page-delta Main RAM inside `DoRollbackSavestate()`, or an案D-style NSMB actor/global snapshot.
+- Add an automated rollback benchmark mode if repeated timing comparisons become necessary.
+
 この文書は、Mario vs Luigi online PoCで検討したrollback方式の議論を、後で再開できるように分離して残す設計メモ。
 
 ## 背景

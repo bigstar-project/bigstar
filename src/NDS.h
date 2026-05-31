@@ -344,6 +344,7 @@ public: // TODO: Encapsulate the rest of these members
     virtual void Stop(Platform::StopReason reason = Platform::StopReason::External);
 
     bool DoSavestate(Savestate* file);
+    bool DoRollbackSavestate(Savestate* file);
 
     void SetARM9RegionTimings(u32 addrstart, u32 addrend, u32 region, int buswidth, int nonseq, int seq);
     void SetARM7RegionTimings(u32 addrstart, u32 addrend, u32 region, int buswidth, int nonseq, int seq);

@@ -837,6 +837,153 @@ bool NDS::DoSavestate(Savestate* file)
     return true;
 }
 
+bool NDS::DoRollbackSavestate(Savestate* file)
+{
+    file->Section("NDSR");
+
+    u32 config = GetSavestateConfig();
+    if (file->Saving)
+    {
+        file->Var32(&config);
+    }
+    else
+    {
+        u32 config_chk;
+        file->Var32(&config_chk);
+        if (config_chk != config)
+        {
+            Log(LogLevel::Error, "rollback savestate: Expected config word %08X, got %08X. cannot load.\n", config, config_chk);
+            return false;
+        }
+    }
+
+    u32 mainRAMLength = MainRAMMask + 1;
+    file->Var32(&mainRAMLength);
+    if (mainRAMLength == 0 || mainRAMLength > MainRAMMaxSize || mainRAMLength != MainRAMMask + 1)
+    {
+        Log(LogLevel::Error, "rollback savestate: bad main RAM length %u, expected %u\n", mainRAMLength, MainRAMMask + 1);
+        return false;
+    }
+
+    file->VarArray(MainRAM, mainRAMLength);
+    file->VarArray(SharedWRAM, SharedWRAMSize);
+    file->VarArray(ARM7WRAM, ARM7WRAMSize);
+
+    file->VarArray(ExMemCnt, 2*sizeof(u16));
+
+    file->Var16(&WifiWaitCnt);
+
+    file->VarArray(IME, 2*sizeof(u32));
+    file->VarArray(IE, 2*sizeof(u32));
+    file->VarArray(IF, 2*sizeof(u32));
+    file->Var32(&IE2);
+    file->Var32(&IF2);
+
+    file->Var8(&PostFlag9);
+    file->Var8(&PostFlag7);
+    file->Var16(&PowerControl9);
+    file->Var16(&PowerControl7);
+
+    file->Var16(&ARM7BIOSProt);
+
+    file->Var16(&IPCSync9);
+    file->Var16(&IPCSync7);
+    file->Var16(&IPCFIFOCnt9);
+    file->Var16(&IPCFIFOCnt7);
+    IPCFIFO9.DoSavestate(file);
+    IPCFIFO7.DoSavestate(file);
+
+    file->Var16(&DivCnt);
+    file->Var16(&SqrtCnt);
+
+    file->Var32(&CPUStop);
+
+    for (int i = 0; i < 8; i++)
+    {
+        Timer* timer = &Timers[i];
+
+        file->Var16(&timer->Reload);
+        file->Var16(&timer->Cnt);
+        file->Var32(&timer->Counter);
+        file->Var32(&timer->CycleShift);
+    }
+    file->VarArray(TimerCheckMask, 2*sizeof(u8));
+    file->VarArray(TimerTimestamp, 2*sizeof(u64));
+
+    file->VarArray(DMA9Fill, 4*sizeof(u32));
+
+    for (int i = 0; i < Event_MAX; i++)
+    {
+        SchedEvent& evt = SchedList[i];
+
+        file->Var64(&evt.Timestamp);
+        file->Var32(&evt.FuncID);
+        file->Var32(&evt.Param);
+    }
+    file->Var32(&SchedListMask);
+    file->Var64(&ARM9Timestamp);
+    file->Var64(&ARM9Target);
+    file->Var64(&ARM7Timestamp);
+    file->Var64(&ARM7Target);
+    file->Var64(&SysTimestamp);
+    file->Var64(&LastSysClockCycles);
+    file->Var64(&FrameStartTimestamp);
+    file->Var32(&NumFrames);
+    file->Var32(&NumLagFrames);
+    file->Bool32(&LagFrameFlag);
+
+    file->VarArray(KeyCnt, 2*sizeof(u16));
+    file->Var16(&RCnt);
+
+    file->Var8(&WRAMCnt);
+
+    file->Bool32(&RunningGame);
+
+    if (!file->Saving)
+    {
+        MapSharedWRAM(WRAMCnt);
+
+        InitTimings();
+        SetGBASlotTimings();
+
+        UpdateWifiTimings();
+    }
+
+    for (int i = 0; i < 8; i++)
+        DMAs[i].DoSavestate(file);
+
+    ARM9.DoSavestate(file);
+    ARM7.DoSavestate(file);
+
+    NDSCartSlot.DoSavestate(file);
+    if (ConsoleType == 0)
+        GBACartSlot.DoSavestate(file);
+    GPU.DoSavestate(file);
+    SPU.DoSavestate(file);
+    Mic.DoSavestate(file);
+    SPI.DoSavestate(file);
+    RTC.DoSavestate(file);
+    Wifi.DoSavestate(file);
+
+    DoSavestateExtra(file);
+
+    if (!file->Saving)
+    {
+        GPU.SetPowerCnt(PowerControl9);
+
+        SPU.SetPowerCnt(PowerControl7 & 0x0001);
+        Wifi.SetPowerCnt(PowerControl7 & 0x0002);
+
+#ifdef JIT_ENABLED
+        JIT.Reset();
+#endif
+    }
+
+    file->Finish();
+
+    return true;
+}
+
 void NDS::SetNDSCart(std::unique_ptr<NDSCart::CartCommon>&& cart)
 {
     NDSCartSlot.SetCart(std::move(cart));
