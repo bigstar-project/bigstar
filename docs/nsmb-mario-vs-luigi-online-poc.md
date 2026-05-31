@@ -7,6 +7,9 @@
 - The observed failure was not a melonDS launch failure. `bridge.stdout.txt` showed the host connected and sent offer SDP; `bridge.stderr.txt` showed the deployed signaling server returned `{"error":"peer is not connected","type":"error"}`.
 - Local signaling server code now queues early host/client signaling messages until the opposite role joins, and the GUI now shows the latest log directory directly in the launcher.
 - Live GUI testing against the default signaling URL still requires redeploying the Worker with the queued-message fix.
+- For manual local triage, use `scripts/run-nsmb-mvl-local-triage.ps1`. `-Mode DirectUdp` generates Rust-patched host/client ROMs and launches the old direct UDP pair without WebRTC. `-Mode WebRtc` uses the same Rust-patched ROM/settings but launches `nsmb-net-bridge` WebRTC without the Tauri GUI. This separates Rust ROM/runtime issues from WebRTC/bridge issues.
+- 2026-05-31 DirectUdp triage reproduced the client green/bad-control symptom without WebRTC, then Python-generated ROMs passed the same test. Root cause was the Rust ROM generator treating ARM9 as one linear RAM block; NSMB ARM9 uses copy-table sections, so ARM9 patches such as `Wifi::getCommunicatingConsoleCount` and `Net/Game::getRandom` were written to the wrong offsets.
+- Fixed in `tools/nsmb-mvl-rom`: ARM9 section parsing now follows the code settings copy table, and the Rust stable generator also applies the Python-equivalent RNG constant patch. Verification: `logs/codex-rust-arm9section-bothdiff-20260531` passed 3600 frames with host/client gameplay sync and movement inputs; `logs/codex-rust-arm9section-png-20260531` produced host/client PNG screenshots with normal MvL rendering at frames 900/1200.
 
 ## Current status - 2026-05-31
 

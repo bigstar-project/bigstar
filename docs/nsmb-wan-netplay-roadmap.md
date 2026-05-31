@@ -8,6 +8,9 @@
 - Local signaling server code now queues pending `sdp` / `candidate` messages for the absent role and flushes them when the opposite role joins. `corepack pnpm run ci` passes in `tools/nsmb-signaling-server`.
 - The deployed Worker still needs to be updated before the default GUI signaling URL benefits from this fix.
 - The Tauri GUI now displays the latest log directory in the launcher, so a failed bridge/melonDS run can be inspected without opening devtools.
+- `scripts/run-nsmb-mvl-local-triage.ps1` was added for 1PC manual isolation. `DirectUdp` tests Rust-generated ROMs and melonDS input netplay without WebRTC; `WebRtc` keeps Rust-generated ROMs/settings but replaces GUI process management with direct `nsmb-net-bridge` WebRTC launch.
+- DirectUdp reproduced the green/bad-control client symptom without WebRTC. Python-generated ROMs passed the same movement/sync test, which isolated the regression to Rust ROM generation. The Rust generator now resolves ARM9 patch addresses through the NSMB code settings copy table and applies the Python-equivalent RNG constant patch.
+- Verification after the Rust ROM fix: `logs/codex-rust-arm9section-bothdiff-20260531` passed a 3600-frame DirectUdp host/client gameplay sync test with movement inputs, and `logs/codex-rust-arm9section-png-20260531` produced host/client screenshots at frames 900/1200 showing normal MvL rendering instead of a green client screen.
 
 ## 目的
 

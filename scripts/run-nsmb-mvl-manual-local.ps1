@@ -22,6 +22,13 @@ param(
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds",
     [string]$InputScript = "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs",
     [string]$LogDir = "logs\nsmb-mvl-manual-local",
+    [int]$ScreenshotInterval = 0,
+    [switch]$GameStateTrace,
+    [int]$GameStateTraceInterval = 60,
+    [int]$GameStateTraceStartFrame = 0,
+    [int]$GameStateTraceEndFrame = 0,
+    [switch]$GameStateTraceExtended,
+    [switch]$InputNetplayTrace,
     [int]$MvlStage = -1,
     [string]$MvlSceneSettings = "",
     [ValidateSet(1, 2, 3)] [int]$MvlWins = 2,
@@ -126,7 +133,7 @@ $common = @(
     "-InternalWaitTimeoutMs", "$InternalWaitTimeoutMs",
     "-Exe", $Exe,
     "-InputScript", $InputScript,
-    "-ScreenshotInterval", "0",
+    "-ScreenshotInterval", "$ScreenshotInterval",
     "-NoHashLog",
     "-SkipMvlStateCheck",
     "-SkipGameplayActorCheck",
@@ -143,6 +150,20 @@ $common = @(
     "-ClearMvlCameraInitHoldStartFrame", "840",
     "-WaitForPeerAtNetplayStart"
 )
+if ($GameStateTrace) {
+    $common += @(
+        "-GameStateTrace",
+        "-GameStateTraceInterval", "$GameStateTraceInterval",
+        "-GameStateTraceStartFrame", "$GameStateTraceStartFrame",
+        "-GameStateTraceEndFrame", "$GameStateTraceEndFrame"
+    )
+    if ($GameStateTraceExtended) {
+        $common += "-GameStateTraceExtended"
+    }
+}
+if ($InputNetplayTrace) {
+    $common += "-InputNetplayTrace"
+}
 if ($NoFrameLimit) {
     $common += "-NoFrameLimit"
 }

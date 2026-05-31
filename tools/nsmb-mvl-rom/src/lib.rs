@@ -39,8 +39,10 @@ struct RomImage {
     arm9_ram: u32,
     arm9_entry: u32,
     arm9_autoload_callback: u32,
+    arm9_code_settings_pointer: u32,
     arm9_footer: [u8; ARM9_FOOTER_SIZE],
     arm9: Vec<u8>,
+    arm9_sections: Vec<Arm9Section>,
     arm7: Vec<u8>,
     arm7_ram: u32,
     arm7_entry: u32,
@@ -51,6 +53,13 @@ struct RomImage {
     arm7_overlay_table: Vec<u8>,
     banner: Vec<u8>,
     original_len: usize,
+}
+
+#[derive(Clone)]
+struct Arm9Section {
+    ram_addr: u32,
+    file_off: usize,
+    size: usize,
 }
 
 #[derive(Clone)]
@@ -85,11 +94,13 @@ pub fn generate_stable_roms(options: &StableRomOptions) -> Result<StableRomResul
     let mut host = base.clone();
     patch_direct_mvl_entry(&mut host, &symbols, options.stage, 0, scene_settings)?;
     patch_wifi_communicating_consoles(&mut host, 2)?;
+    patch_rng_constant(&mut host, &symbols, 0x100)?;
     host.save(&options.host_rom)?;
 
     let mut client = base;
     patch_direct_mvl_entry(&mut client, &symbols, options.stage, 1, scene_settings)?;
     patch_wifi_communicating_consoles(&mut client, 2)?;
+    patch_rng_constant(&mut client, &symbols, 0x100)?;
     client.save(&options.client_rom)?;
 
     Ok(StableRomResult {
@@ -145,6 +156,7 @@ impl RomImage {
         let arm7_ovt_off = read_u32(&data, 0x58)? as usize;
         let arm7_ovt_size = read_u32(&data, 0x5c)? as usize;
         let arm9_autoload_callback = read_u32(&data, 0x60)?;
+        let arm9_code_settings_pointer = read_u32(&data, 0x70)?;
         let arm7_autoload_callback = read_u32(&data, 0x64)?;
         let banner_off = read_u32(&data, 0x68)? as usize;
 
@@ -157,6 +169,7 @@ impl RomImage {
             .decompress(arm9_raw)
             .map(|v| v.into_vec())
             .context("decompress ARM9")?;
+        let arm9_sections = parse_arm9_sections(&arm9, arm9_ram, arm9_code_settings_pointer)?;
 
         let file_count = fat_size / 8;
         let mut files = Vec::with_capacity(file_count);
@@ -202,8 +215,10 @@ impl RomImage {
             arm9_ram,
             arm9_entry,
             arm9_autoload_callback,
+            arm9_code_settings_pointer,
             arm9_footer,
             arm9,
+            arm9_sections,
             arm7: slice(&data, arm7_off, arm7_size, "ARM7")?.to_vec(),
             arm7_ram,
             arm7_entry,
@@ -326,6 +341,7 @@ impl RomImage {
         write_u32(&mut output, 0x60, self.arm9_autoload_callback)?;
         write_u32(&mut output, 0x64, self.arm7_autoload_callback)?;
         write_u32(&mut output, 0x68, banner_off as u32)?;
+        write_u32(&mut output, 0x70, self.arm9_code_settings_pointer)?;
         write_u32(&mut output, 0x80, rom_size)?;
         let header_crc = CRC_16_MODBUS.checksum(&output[..0x15e]);
         write_u16(&mut output, 0x15e, header_crc)?;
@@ -343,6 +359,69 @@ impl RomImage {
         }
         Ok(offset)
     }
+}
+
+fn parse_arm9_sections(
+    data: &[u8],
+    ram_addr: u32,
+    code_settings_pointer_addr: u32,
+) -> Result<Vec<Arm9Section>> {
+    let code_settings_pointer_off = code_settings_pointer_addr
+        .checked_sub(ram_addr + 4)
+        .ok_or_else(|| {
+            anyhow!("ARM9 code settings pointer before base: 0x{code_settings_pointer_addr:08x}")
+        })? as usize;
+    let Ok(code_settings_addr) = read_u32(data, code_settings_pointer_off) else {
+        return Ok(vec![Arm9Section {
+            ram_addr,
+            file_off: 0,
+            size: data.len(),
+        }]);
+    };
+    let code_settings_off = match code_settings_addr.checked_sub(ram_addr) {
+        Some(off) if off as usize + 12 <= data.len() => off as usize,
+        _ => {
+            return Ok(vec![Arm9Section {
+                ram_addr,
+                file_off: 0,
+                size: data.len(),
+            }])
+        }
+    };
+
+    let copy_table_begin = read_u32(data, code_settings_off)?.saturating_sub(ram_addr) as usize;
+    let copy_table_end = read_u32(data, code_settings_off + 4)?.saturating_sub(ram_addr) as usize;
+    let mut data_begin = read_u32(data, code_settings_off + 8)?.saturating_sub(ram_addr) as usize;
+    if copy_table_begin > copy_table_end || copy_table_end > data.len() || data_begin > data.len() {
+        return Ok(vec![Arm9Section {
+            ram_addr,
+            file_off: 0,
+            size: data.len(),
+        }]);
+    }
+
+    let mut sections = vec![Arm9Section {
+        ram_addr,
+        file_off: 0,
+        size: data_begin,
+    }];
+    for entry in (copy_table_begin..copy_table_end).step_by(12) {
+        if entry + 12 > data.len() {
+            bail!("ARM9 copy table entry out of range: 0x{entry:x}");
+        }
+        let section_ram = read_u32(data, entry)?;
+        let section_size = read_u32(data, entry + 4)? as usize;
+        if data_begin + section_size > data.len() {
+            bail!("ARM9 section out of range: off=0x{data_begin:x} size=0x{section_size:x}");
+        }
+        sections.push(Arm9Section {
+            ram_addr: section_ram,
+            file_off: data_begin,
+            size: section_size,
+        });
+        data_begin += section_size;
+    }
+    Ok(sections)
 }
 
 fn compress_arm9_with_build_info(
@@ -524,6 +603,18 @@ fn patch_wifi_communicating_consoles(rom: &mut RomImage, count: u8) -> Result<()
     Ok(())
 }
 
+fn patch_rng_constant(
+    rom: &mut RomImage,
+    symbols: &BTreeMap<String, u32>,
+    value: u32,
+) -> Result<()> {
+    let words = [encode_mov_imm(0, value)?, BX_LR];
+    for name in ["_ZN3Net9getRandomEv", "_ZN4Game9getRandomEv"] {
+        patch_arm9_words(rom, symbol(symbols, name)?, &words)?;
+    }
+    Ok(())
+}
+
 fn patch_mvl_load_thread_entrance_ids(rom: &mut RomImage) -> Result<()> {
     for (addr, word) in [
         (0x0215_2D64, encode_mov_imm(0, 1)?),
@@ -627,9 +718,12 @@ fn patch_player_stage_lock_vsmode_noop(rom: &mut RomImage) -> Result<()> {
 }
 
 fn patch_arm9_words(rom: &mut RomImage, addr: u32, words: &[u32]) -> Result<Vec<u8>> {
-    let off = addr
-        .checked_sub(rom.arm9_ram)
-        .ok_or_else(|| anyhow!("ARM9 address before base: 0x{addr:08x}"))? as usize;
+    let section = rom
+        .arm9_sections
+        .iter()
+        .find(|section| addr >= section.ram_addr && addr < section.ram_addr + section.size as u32)
+        .ok_or_else(|| anyhow!("address 0x{addr:08x} is not in an ARM9 data section"))?;
+    let off = section.file_off + (addr - section.ram_addr) as usize;
     patch_words(&mut rom.arm9, off, words)
 }
 
