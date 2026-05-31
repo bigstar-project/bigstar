@@ -2,6 +2,19 @@ name: NSMB MvL Tauri
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - ".github/workflows/nsmb-mvl-tauri.yml"
+      - "scripts/prepare-nsmb-mvl-tauri-sidecars.ps1"
+      - "tools/nsmb-mvl-gui/**"
+      - "tools/nsmb-mvl-rom/**"
+      - "tools/nsmb-net-bridge/**"
+      - "src/**"
+      - "CMakeLists.txt"
+      - "vcpkg.json"
   pull_request:
     branches:
       - main

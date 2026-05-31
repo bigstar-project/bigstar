@@ -14,6 +14,7 @@
 - `NSMB MvL Tauri` GitHub Actions run `26714302373` succeeded for commit `b5769a84c6de0ac8b99b4fb896ccaec7f598de05`.
 - Artifacts are present and not expired: `nsmb-mvl-tauri-windows-x86_64`, `melonDS-windows-x86_64`, and `nsmb-net-bridge-windows-x86_64`.
 - The packaged Tauri app was generated after Windows melonDS/bridge builds, GUI backend tests, Tauri bundle build, and packaged `nsmb-mvl-gui.exe --preflight`.
+- `.github/workflows/nsmb-mvl-tauri.yml` now also runs on `push` to `main` / `master` with the same `paths` filter as `pull_request`.
 - This does not replace live two-PC GUI testing against the deployed signaling server; that remains separate from the package-generation proof.
 
 ## Current GUI runtime note - 2026-05-31
