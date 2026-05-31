@@ -1,5 +1,12 @@
 # NSMB Mario vs Luigi WAN Netplay Roadmap
 
+## GitHub Actions package status - 2026-06-01
+
+- `NSMB MvL Tauri` run `26714302373` completed successfully on GitHub Actions for commit `b5769a84c6de0ac8b99b4fb896ccaec7f598de05`.
+- The run produced non-expired artifacts: `nsmb-mvl-tauri-windows-x86_64` (~36 MB), `melonDS-windows-x86_64` (~15 MB), and `nsmb-net-bridge-windows-x86_64` (~3.6 MB).
+- The Windows pipeline covered melonDS build, bridge build, bridge `webrtc-signaling-udp-pair-smoke`, GUI backend tests, Tauri bundle build, packaged app `--preflight`, and artifact upload.
+- No rerun was requested for later `main` commits because the user accepted the successful package-producing workflow run as sufficient for this step.
+
 ## Current GUI/signaling note - 2026-05-31
 
 - Real Tauri GUI host startup produced `bridge exited(1)`.

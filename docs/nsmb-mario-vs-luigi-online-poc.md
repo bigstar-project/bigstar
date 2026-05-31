@@ -9,6 +9,13 @@
 - Verification after rebuilding `build/release-windows-x86_64/melonDS.exe`: `logs/codex-fps-regression-after-hook-gate-20260601` improved active FPS to host `57.41` / client `57.17` over 1800 frames, and `logs/codex-fps-regression-after-hook-gate-long-20260601` held host `58.41` / client `58.34` over 3600 frames.
 - Settings smoke after the fix: `logs/codex-fps-regression-settings-smoke-20260601` passed 1200 frames with generated ROMs, `Course=random`, `MatchSeed=0x00000002`, `Wins=3`, `BigStars=10`, `Lives=5`, required stage `2`, required scene settings `0xb80500`, and initial spawn-state verification.
 
+## Current Actions package status - 2026-06-01
+
+- `NSMB MvL Tauri` GitHub Actions run `26714302373` succeeded for commit `b5769a84c6de0ac8b99b4fb896ccaec7f598de05`.
+- Artifacts are present and not expired: `nsmb-mvl-tauri-windows-x86_64`, `melonDS-windows-x86_64`, and `nsmb-net-bridge-windows-x86_64`.
+- The packaged Tauri app was generated after Windows melonDS/bridge builds, GUI backend tests, Tauri bundle build, and packaged `nsmb-mvl-gui.exe --preflight`.
+- This does not replace live two-PC GUI testing against the deployed signaling server; that remains separate from the package-generation proof.
+
 ## Current GUI runtime note - 2026-05-31
 
 - A real Tauri GUI host run failed with `bridge exited(1)`.
