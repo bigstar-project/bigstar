@@ -401,6 +401,17 @@ param(
     [switch]$DirectMvlBootClientOnly,
     [int]$DirectMvlBootFrame = 900,
     [int]$DirectMvlBootStage = 0,
+    [int]$MvlStage = -1,
+    [string]$MvlSceneSettings = "",
+    [ValidateSet(1, 2, 3)] [int]$MvlWins = 2,
+    [ValidateSet(3, 5, 10)] [int]$MvlBigStars = 5,
+    [ValidateSet("3", "5", "endless", "Endless")] [string]$MvlLives = "endless",
+    [ValidateSet("fixed", "random", "select")]
+    [string]$MvlCourseMode = "fixed",
+    [switch]$GenerateMvlConfiguredRoms,
+    [string]$MvlMatchSeed = "",
+    [int]$RequireMvlStage = -1,
+    [string]$RequireMvlSceneSettings = "",
     [switch]$DirectMvlBootLoadSM,
     [switch]$DirectMvlBootPatchLoadSMOnly,
     [switch]$DirectMvlBootCallUpdateSM,
@@ -514,6 +525,11 @@ param(
     [switch]$RequireStarPickup,
     [int]$RequireStarPickupPlayer = -1,
     [switch]$RequireResultScene,
+    [switch]$RequireNoResultScene,
+    [switch]$RequireMvlInitialSpawnState,
+    [switch]$RequireSecondMvlGame,
+    [int]$RequireMvlGameCount = 0,
+    [string]$RequireMvlGameStages = "",
     [switch]$RequireHostResultWinScreenshot,
     [switch]$RequireClientResultLoseScreenshot,
     [int]$RequireHostLocalPlayerID = -1,
@@ -568,6 +584,122 @@ $clientRoot = Join-Path $logRoot "client-rom"
 New-Item -ItemType Directory -Force -Path $hostRoot, $clientRoot | Out-Null
 $hostRom = Join-Path $hostRoot "nsmb.nds"
 $clientRom = Join-Path $clientRoot "nsmb.nds"
+
+function Convert-ToUInt32Setting {
+    param(
+        [string]$Value,
+        [string]$Name
+    )
+
+    try {
+        $trimmed = $Value.Trim()
+        if ($trimmed.StartsWith("0x", [System.StringComparison]::OrdinalIgnoreCase)) {
+            return [uint32][Convert]::ToUInt64($trimmed.Substring(2), 16)
+        }
+        return [uint32][Convert]::ToUInt64($trimmed, 10)
+    } catch {
+        throw "$Name must be a 32-bit unsigned integer literal: $Value"
+    }
+}
+
+function Convert-ToMvlSceneSettings {
+    param(
+        [int]$Wins,
+        [int]$BigStars,
+        [string]$Lives,
+        [string]$CourseMode
+    )
+
+    $bigStarField = switch ($BigStars) {
+        3 { 4 }
+        5 { 4 }
+        10 { 8 }
+        default { throw "MvlBigStars must be 3, 5, or 10: $BigStars" }
+    }
+    $lifeField = switch ($Lives.ToLowerInvariant()) {
+        "3" { 3 }
+        "5" { 5 }
+        "endless" { 0xff }
+        default { throw "MvlLives must be 3, 5, or endless: $Lives" }
+    }
+
+    if ($Wins -lt 1 -or $Wins -gt 3) {
+        throw "MvlWins must be 1, 2, or 3: $Wins"
+    }
+
+    # Direct MvL skips the normal settings/result flow, so match wins are
+    # enforced by the runtime restart controller. Keep the per-round rule byte
+    # on the stable post-course-select value; Course=random is applied by
+    # choosing the stage before boot.
+    $ruleHighNibble = 0xb0
+    $packedRules = $ruleHighNibble -bor ($bigStarField -band 0xf)
+    return "0x$('{0:x6}' -f ((($packedRules -band 0xff) -shl 16) -bor (($lifeField -band 0xff) -shl 8)))"
+}
+
+if ($GenerateMvlConfiguredRoms) {
+    if ($MvlCourseMode -eq "select") {
+        throw "MvlCourseMode=select is not supported by the current direct MvL route. Use random, or run the normal CourseSelect route."
+    }
+
+    $configuredStage = $MvlStage
+    $configuredSeed = $MvlMatchSeed
+    if (-not $configuredSeed -and $NetRandomValue) {
+        $configuredSeed = $NetRandomValue
+    }
+    if ($MvlCourseMode -eq "random" -and $configuredStage -lt 0) {
+        if (-not $configuredSeed) {
+            $configuredSeed = "0x$('{0:x8}' -f (Get-Random -Minimum 0 -Maximum ([int]::MaxValue)))"
+            $MvlMatchSeed = $configuredSeed
+        }
+        $configuredStage = [int]((Convert-ToUInt32Setting -Value $configuredSeed -Name "MvlMatchSeed") % 5)
+    }
+    if ($configuredStage -lt 0) {
+        $configuredStage = 0
+    }
+    if ($configuredStage -gt 4) {
+        throw "MvlStage must be between 0 and 4: $configuredStage"
+    }
+
+    $configuredSceneSettings = if ($MvlSceneSettings) { $MvlSceneSettings } else { Convert-ToMvlSceneSettings -Wins $MvlWins -BigStars $MvlBigStars -Lives $MvlLives -CourseMode $MvlCourseMode }
+    $generatedHost = Join-Path $logRoot "generated-host.nds"
+    $generatedClient = Join-Path $logRoot "generated-client.nds"
+    & (Join-Path $PSScriptRoot "generate-nsmb-mvl-stable-roms.ps1") `
+        -SourceRom $romPath `
+        -HostRom $generatedHost `
+        -ClientRom $generatedClient `
+        -MvlStage $configuredStage `
+        -MvlSceneSettings $configuredSceneSettings `
+        -MvlWins $MvlWins `
+        -MvlBigStars $MvlBigStars `
+        -MvlLives $MvlLives `
+        -MvlCourseMode $MvlCourseMode
+
+    $hostSourceRomPath = (Resolve-Path $generatedHost).Path
+    $clientSourceRomPath = (Resolve-Path $generatedClient).Path
+    if ($MvlStage -lt 0) {
+        $MvlStage = $configuredStage
+    }
+    if ($RequireMvlStage -lt 0) {
+        $RequireMvlStage = $configuredStage
+    }
+    if (-not $MvlSceneSettings) {
+        $MvlSceneSettings = $configuredSceneSettings
+    }
+    @(
+        "courseMode=$MvlCourseMode"
+        "wins=$MvlWins"
+        "bigStars=$MvlBigStars"
+        "lives=$MvlLives"
+        "stage=$configuredStage"
+        "sceneSettings=$configuredSceneSettings"
+        "matchSeed=$configuredSeed"
+    ) | Set-Content -Encoding UTF8 (Join-Path $logRoot "mvl-settings.txt")
+}
+
+if (-not $MvlSceneSettings) {
+    $MvlSceneSettings = Convert-ToMvlSceneSettings -Wins $MvlWins -BigStars $MvlBigStars -Lives $MvlLives -CourseMode $MvlCourseMode
+}
+
 Copy-Item -Force $hostSourceRomPath $hostRom
 Copy-Item -Force $clientSourceRomPath $clientRom
 
@@ -706,6 +838,20 @@ function Start-MelonLANProcess {
     }
     $env:MELONDS_NSML_SCREENSHOT_DIR = $ScreenshotDir
     $env:MELONDS_NSML_SCREENSHOT_INTERVAL = "$ScreenshotInterval"
+    if ($MvlStage -ge 0) { $env:MELONDS_NSML_MVL_STAGE = "$MvlStage" } else { Remove-Item Env:\MELONDS_NSML_MVL_STAGE -ErrorAction SilentlyContinue }
+    if ($MvlSceneSettings) { $env:MELONDS_NSML_MVL_SCENE_SETTINGS = "$MvlSceneSettings" } else { Remove-Item Env:\MELONDS_NSML_MVL_SCENE_SETTINGS -ErrorAction SilentlyContinue }
+    $env:MELONDS_NSML_MVL_WINS = "$MvlWins"
+    $env:MELONDS_NSML_MVL_BIG_STARS = "$MvlBigStars"
+    $env:MELONDS_NSML_MVL_LIVES = "$MvlLives"
+    $env:MELONDS_NSML_MVL_COURSE_MODE = "$MvlCourseMode"
+    if ($MvlWins -gt 1) {
+        $env:MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT = "1"
+        $env:MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES = "120"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES -ErrorAction SilentlyContinue
+    }
+    if ($MvlMatchSeed) { $env:MELONDS_NSML_MATCH_SEED = "$MvlMatchSeed" } else { Remove-Item Env:\MELONDS_NSML_MATCH_SEED -ErrorAction SilentlyContinue }
     if ($DirectMvlBoot) {
         $env:MELONDS_NSML_DIRECT_MVL_BOOT = "1"
         if ($DirectMvlBootHostOnly) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_HOST_ONLY -ErrorAction SilentlyContinue }
@@ -2886,6 +3032,14 @@ function Start-MelonLANProcess {
         "fixedFrameTime=$($env:MELONDS_NSML_FIXED_FRAME_TIMESTEP)"
         "targetFps=$($env:MELONDS_NSML_TARGET_FPS)"
         "disableHash=$($env:MELONDS_NSML_DISABLE_HASH)"
+        "mvlStage=$($env:MELONDS_NSML_MVL_STAGE)"
+        "mvlSceneSettings=$($env:MELONDS_NSML_MVL_SCENE_SETTINGS)"
+        "mvlWins=$($env:MELONDS_NSML_MVL_WINS)"
+        "mvlBigStars=$($env:MELONDS_NSML_MVL_BIG_STARS)"
+        "mvlLives=$($env:MELONDS_NSML_MVL_LIVES)"
+        "mvlCourseMode=$($env:MELONDS_NSML_MVL_COURSE_MODE)"
+        "mvlAutoRestartAfterResult=$($env:MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT)"
+        "mvlAutoRestartDelayFrames=$($env:MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES)"
         "packetBridgeLiveFallbackWindow=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW)"
         "packetBridgeLiveFallbackNearest=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST)"
         "packetBridgeLiveFallbackLatestBefore=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_LATEST_BEFORE)"
@@ -3425,10 +3579,65 @@ if ($GameStateTrace -and -not $SkipMvlStateCheck -and ($GameStateTraceEndFrame -
         if ($last.stageGroup -ne "0x9" -or $last.vsMode -ne "0x1" -or $last.localPlayerID -ne $item.LocalPlayerID) {
             throw "Mario vs Luigi state check failed for $($item.Role): stageGroup=$($last.stageGroup) vsMode=$($last.vsMode) localPlayerID=$($last.localPlayerID). See $($item.Path)"
         }
+        if ($RequireMvlStage -ge 0) {
+            $expectedStage = "0x$('{0:x}' -f $RequireMvlStage)"
+            if ($last.stageID -ne $expectedStage) {
+                throw "Mario vs Luigi stage check failed for $($item.Role): expected=$expectedStage actual=$($last.stageID). See $($item.Path)"
+            }
+        }
+        if ($RequireMvlSceneSettings) {
+            $expectedSettings = Convert-ToUInt32Setting -Value $RequireMvlSceneSettings -Name "RequireMvlSceneSettings"
+            $actualStageSettings = [uint32](Convert-TraceHexToInt64 $last.stageSceneSettings)
+            if ($last.stageSceneFound -ne "0x1" -or $actualStageSettings -ne $expectedSettings) {
+                throw "Mario vs Luigi scene settings check failed for $($item.Role): expected=0x$('{0:x}' -f $expectedSettings) actual=$($last.stageSceneSettings) stageSceneFound=$($last.stageSceneFound). See $($item.Path)"
+            }
+        }
 
         if (-not $SkipGameplayActorCheck) {
             if ($last.playerActor0Found -ne "0x1" -or $last.playerActor1Found -ne "0x1" -or $last.vsStarActorFound -ne "0x1") {
                 throw "Mario vs Luigi gameplay actor check failed for $($item.Role): playerActor0=$($last.playerActor0Found) playerActor1=$($last.playerActor1Found) vsStarActor=$($last.vsStarActorFound). See $($item.Path)"
+            }
+        }
+
+        if ($RequireMvlInitialSpawnState) {
+            $rows = @(Import-Csv $item.Path)
+            $wasInMvlStage = $false
+            $waitingForEntryActors = $false
+            $checkedEntries = 0
+            foreach ($row in $rows) {
+                $inMvlStage = $row.sceneCurrentSceneID -eq "0x3" -and
+                    $row.stageGroup -eq "0x9" -and
+                    $row.vsMode -eq "0x1"
+                if ($inMvlStage -and -not $wasInMvlStage) {
+                    $waitingForEntryActors = $true
+                }
+                if ($waitingForEntryActors -and
+                    $row.playerActor0Found -eq "0x1" -and
+                    $row.playerActor1Found -eq "0x1") {
+                    $spawnID0 = Convert-TraceHexToInt64 $row.entranceSpawnID0
+                    $spawnID1 = Convert-TraceHexToInt64 $row.entranceSpawnID1
+                    $spawnPtr0 = Convert-TraceHexToInt64 $row.entranceSpawnPtr0
+                    $spawnPtr1 = Convert-TraceHexToInt64 $row.entranceSpawnPtr1
+                    $player0X = Convert-TraceHexToInt64 $row.playerActor0X
+                    $player1X = Convert-TraceHexToInt64 $row.playerActor1X
+                    $playerDeltaX = $player1X - $player0X
+                    $pipeLeftFound = $row.mvlObject267LeftFound
+                    $pipeRightFound = $row.mvlObject267RightFound
+                    $pipeLeftX = Convert-TraceHexToInt64 $row.mvlObject267LeftX
+                    $pipeRightX = Convert-TraceHexToInt64 $row.mvlObject267RightX
+                    $pipeDeltaX = $pipeRightX - $pipeLeftX
+
+                    if ($spawnID0 -ne 0 -or $spawnID1 -ne 1 -or ($spawnPtr1 - $spawnPtr0) -ne 0x14 -or $playerDeltaX -ne 0x50000 -or
+                        $pipeLeftFound -ne "0x1" -or $pipeRightFound -ne "0x1" -or $pipeDeltaX -ne 0x50000) {
+                        throw "Mario vs Luigi initial spawn check failed for $($item.Role): entry=$($checkedEntries + 1) frame=$($row.frame) ids=$($row.entranceSpawnID0)/$($row.entranceSpawnID1) ptrs=$($row.entranceSpawnPtr0)/$($row.entranceSpawnPtr1) playerX=$($row.playerActor0X)/$($row.playerActor1X) pipeX=$($row.mvlObject267LeftX)/$($row.mvlObject267RightX). See $($item.Path)"
+                    }
+                    $checkedEntries++
+                    $waitingForEntryActors = $false
+                }
+                $wasInMvlStage = $inMvlStage
+            }
+            if ($checkedEntries -eq 0) {
+                throw "Mario vs Luigi initial spawn check found no gameplay actor row for $($item.Role). See $($item.Path)"
             }
         }
     }
@@ -3514,6 +3723,12 @@ if ($GameStateTrace -and -not $SkipMvlStateCheck -and ($GameStateTraceEndFrame -
             "movingHazardX",
             "movingHazardY",
             "movingHazardZ",
+            "mvlObject267LeftFound",
+            "mvlObject267LeftX",
+            "mvlObject267LeftY",
+            "mvlObject267RightFound",
+            "mvlObject267RightX",
+            "mvlObject267RightY",
             "objectActiveCount",
             "objectDeadCount"
         )
@@ -3695,6 +3910,130 @@ if ($RequireResultScene) {
         if ($resultRows.Count -eq 0) {
             $last = $rows[$rows.Count - 1]
             throw "result scene check failed for $($item.Role): no sceneCurrentSceneID=0xa; last frame=$($last.frame) scene=$($last.sceneCurrentSceneID)->$($last.sceneNextSceneID). See $($item.Path)"
+        }
+    }
+}
+
+if ($RequireNoResultScene) {
+    foreach ($item in @($roleInfos | ForEach-Object { @{ Path = $_.GameState; Role = $_.Role } })) {
+        if (-not (Test-Path $item.Path)) {
+            throw "no-result scene check requires game-state trace for $($item.Role): $($item.Path)"
+        }
+
+        $rows = @(Import-Csv $item.Path)
+        if ($rows.Count -eq 0) {
+            throw "no-result scene check received empty trace for $($item.Role): $($item.Path)"
+        }
+
+        $resultRows = @($rows | Where-Object { $_.sceneCurrentSceneID -eq "0xa" })
+        if ($resultRows.Count -gt 0) {
+            $first = $resultRows | Select-Object -First 1
+            throw "no-result scene check failed for $($item.Role): first sceneCurrentSceneID=0xa at frame=$($first.frame). See $($item.Path)"
+        }
+    }
+}
+
+if ($RequireSecondMvlGame) {
+    foreach ($item in @($roleInfos | ForEach-Object { @{ Path = $_.GameState; Role = $_.Role } })) {
+        if (-not (Test-Path $item.Path)) {
+            throw "second MvL game check requires game-state trace for $($item.Role): $($item.Path)"
+        }
+
+        $rows = @(Import-Csv $item.Path)
+        if ($rows.Count -eq 0) {
+            throw "second MvL game check received empty trace for $($item.Role): $($item.Path)"
+        }
+
+        $firstResult = $rows | Where-Object { $_.sceneCurrentSceneID -eq "0xa" } | Select-Object -First 1
+        if (-not $firstResult) {
+            $last = $rows[$rows.Count - 1]
+            throw "second MvL game check failed for $($item.Role): no result scene before retry; last frame=$($last.frame) scene=$($last.sceneCurrentSceneID). See $($item.Path)"
+        }
+
+        $firstResultFrame = [int]$firstResult.frame
+        $secondGameRows = @($rows | Where-Object {
+            [int]$_.frame -gt $firstResultFrame -and
+                $_.sceneCurrentSceneID -eq "0x3" -and
+                $_.stageGroup -eq "0x9" -and
+                $_.vsMode -eq "0x1"
+        })
+        if ($secondGameRows.Count -eq 0) {
+            $last = $rows[$rows.Count - 1]
+            throw "second MvL game check failed for $($item.Role): result at frame=$firstResultFrame but no later MvL stage; last frame=$($last.frame) scene=$($last.sceneCurrentSceneID)->$($last.sceneNextSceneID). See $($item.Path)"
+        }
+    }
+}
+
+if ($RequireMvlGameCount -gt 0) {
+    foreach ($item in @($roleInfos | ForEach-Object { @{ Path = $_.GameState; Role = $_.Role } })) {
+        if (-not (Test-Path $item.Path)) {
+            throw "MvL game count check requires game-state trace for $($item.Role): $($item.Path)"
+        }
+
+        $rows = @(Import-Csv $item.Path)
+        if ($rows.Count -eq 0) {
+            throw "MvL game count check received empty trace for $($item.Role): $($item.Path)"
+        }
+
+        $gameEntries = 0
+        $wasInMvlStage = $false
+        foreach ($row in $rows) {
+            $inMvlStage = $row.sceneCurrentSceneID -eq "0x3" -and
+                $row.stageGroup -eq "0x9" -and
+                $row.vsMode -eq "0x1"
+            if ($inMvlStage -and -not $wasInMvlStage) {
+                $gameEntries++
+            }
+            $wasInMvlStage = $inMvlStage
+        }
+        if ($gameEntries -lt $RequireMvlGameCount) {
+            $last = $rows[$rows.Count - 1]
+            throw "MvL game count check failed for $($item.Role): expected at least $RequireMvlGameCount MvL stage entries, actual=$gameEntries; last frame=$($last.frame) scene=$($last.sceneCurrentSceneID)->$($last.sceneNextSceneID). See $($item.Path)"
+        }
+    }
+}
+
+if ($RequireMvlGameStages) {
+    $expectedStages = @($RequireMvlGameStages.Split(",") | ForEach-Object {
+        $trimmed = $_.Trim()
+        if ($trimmed -eq "") {
+            throw "RequireMvlGameStages contains an empty stage entry: $RequireMvlGameStages"
+        }
+        $stageValue = [int](Convert-ToUInt32Setting -Value $trimmed -Name "RequireMvlGameStages")
+        if ($stageValue -lt 0 -or $stageValue -gt 4) {
+            throw "RequireMvlGameStages values must be between 0 and 4: $stageValue"
+        }
+        $stageValue
+    })
+    foreach ($item in @($roleInfos | ForEach-Object { @{ Path = $_.GameState; Role = $_.Role } })) {
+        if (-not (Test-Path $item.Path)) {
+            throw "MvL game stages check requires game-state trace for $($item.Role): $($item.Path)"
+        }
+
+        $rows = @(Import-Csv $item.Path)
+        if ($rows.Count -eq 0) {
+            throw "MvL game stages check received empty trace for $($item.Role): $($item.Path)"
+        }
+
+        $entryStages = @()
+        $wasInMvlStage = $false
+        foreach ($row in $rows) {
+            $inMvlStage = $row.sceneCurrentSceneID -eq "0x3" -and
+                $row.stageGroup -eq "0x9" -and
+                $row.vsMode -eq "0x1"
+            if ($inMvlStage -and -not $wasInMvlStage) {
+                $entryStages += [int](Convert-TraceHexToInt64 $row.stageID)
+            }
+            $wasInMvlStage = $inMvlStage
+        }
+
+        if ($entryStages.Count -lt $expectedStages.Count) {
+            throw "MvL game stages check failed for $($item.Role): expected at least $($expectedStages.Count) stage entries, actual=$($entryStages.Count); expected=$($expectedStages -join ',') actual=$($entryStages -join ','). See $($item.Path)"
+        }
+        for ($i = 0; $i -lt $expectedStages.Count; $i++) {
+            if ($entryStages[$i] -ne $expectedStages[$i]) {
+                throw "MvL game stages check failed for $($item.Role): entry=$($i + 1) expected=$($expectedStages[$i]) actual=$($entryStages[$i]); expected=$($expectedStages -join ',') actual=$($entryStages -join ','). See $($item.Path)"
+            }
         }
     }
 }

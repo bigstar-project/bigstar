@@ -55,6 +55,95 @@ future backend
 
 ## Phase Status
 
+### Phase 6: Tauri desktop launcher
+
+状態: 初期実装済み。Windows ローカルで Tauri release exe と MSI/NSIS bundle 生成まで確認済み。ROM 生成は Rust crate へ移行し、Tauri command から呼べる状態。GUI backend の start_match コマンド組み立てと fake bridge/fake melonDS による実プロセス起動・停止は unit test で確認済み。起動前preflightで同梱/解決対象のbinary/resourceとbridge signaling smokeをGUIから確認できる。GitHub Actions 上のフル Windows bundle 実行は未確認。
+
+実装:
+
+- `tools/nsmb-mvl-gui`
+- `tools/nsmb-mvl-rom`
+- Tauri v2 + TypeScript + Vite + pnpm 構成
+- GUI から指定できる項目:
+  - role: ホスト / 参加
+  - 部屋コード
+  - シグナリングサーバー URL
+  - UDP port
+  - host/client ROM path
+  - コース: ランダム / 毎回選ぶ
+  - 勝利数: 1 / 2 / 3
+  - ビッグスター: 3 / 5 / 10
+  - 残機: 3 / 5 / 無限
+  - マッチシード
+- Rust ROM generator crate が stable direct MvL host/client ROM を生成する。
+- `scripts/generate-nsmb-mvl-stable-roms.ps1` は Python patch script ではなく `tools/nsmb-mvl-rom` を呼ぶ。
+- Tauri command `generate_roms` が base ROM と設定から host/client ROM を生成する。
+- Tauri command `generate_roms` の既定出力先は Tauri app data 配下の `roms/` にし、インストール済みアプリでも開発ツリーの `roms/` へ書き込まない。
+- GUI に `ROM生成` 操作を追加し、開始前に設定付きROMを作れる。
+- GUI の `Course=random` はマッチシードから `stage = seed % 5` を算出し、ROM生成と melonDS 起動時の `MELONDS_NSML_MVL_STAGE` / `MELONDS_NSML_DIRECT_MVL_BOOT_STAGE` に同じ値を渡す。
+- Tauri command が `nsmb-net-bridge` を `webrtc-offer` / `webrtc-answer` で起動する。
+- Tauri command が melonDS を `MELONDS_NSML_*` 環境変数つきで起動する。
+- Tauri command の起動処理は `start_match_resolved` に分離し、fake実行ファイルを使ったtestで bridge/melonDS 相当プロセスのspawn、session状態、停止、melonDS起動失敗時のsession未保存を確認する。
+- Tauri command `preflight_check` とGUIの `起動前チェック` を追加し、melonDS binary、bridge binary、bootstrap input、symbols file の解決と、実bridgeの `webrtc-signaling-udp-pair-smoke` を開始前に確認できるようにした。古いbridgeが smoke subcommand を持たない場合も検出する。
+- `nsmb-mvl-gui.exe --preflight` を追加し、GUIを開かずに同梱sidecar/resource解決とbridge signaling smokeを検証できるようにした。GitHub Actions の `tauri-windows` でもbundle build後にこのpreflightを実行する。
+- Tauri release exe では同梱 sidecar を開発ツリーのbuild成果物より優先して探索する。
+- `bundle.externalBin` で fork 済み `melonDS.exe` と `nsmb-net-bridge.exe` を Tauri bundle に同梱する。
+- `bundle.resources` で bootstrap input と `tools/nsmb-mvl-rom/resources/symbols9.x` を同梱し、インストール済みアプリでもROM生成と起動用入力script解決ができるようにした。`external/` はGit管理外なので参照元から外した。
+- `scripts/prepare-nsmb-mvl-tauri-sidecars.ps1` で Tauri sidecar 名へコピーする。
+- `.github/workflows/nsmb-mvl-tauri.yml` を追加し、melonDS build、bridge build、Tauri bundle を分けてつなぐ。
+- `.github/workflows/nsmb-mvl-tauri.yml` の `melon-windows` は `melonDS.exe` 自体を source/CMake/vcpkg hash keyed cacheに保存し、cache hit時はvcpkg/CMake buildを飛ばしてartifact uploadへ進む。Windows runner上のmelonDS buildが重すぎる場合の軽減策。
+- `.github/workflows/nsmb-mvl-tauri.yml` の `bridge-windows` は Git管理外の `external/tango` に依存しないよう、Tango repositoryを固定commit `283dacf2894d5e47be95a6d7f19acdda63a773b0` で明示checkoutしてから `--features webrtc` buildを行う。`LIBCLANG_PATH` は runner 上の LLVM / Visual Studio BuildTools 候補から `libclang.dll` を探して設定する。release exe の `webrtc-signaling-udp-pair-smoke` も同jobで実行する。
+- `.github/workflows/nsmb-mvl-tauri.yml` の `tauri-windows` は artifact sidecar 取り込み後に `cargo test --manifest-path tools/nsmb-mvl-gui/src-tauri/Cargo.toml` を実行し、GUI backend の command/env 組み立てを確認してから Tauri bundle を作る。
+- `.github/workflows/nsmb-mvl-gui-local.yml` を追加し、Docker + `act` で軽量な GUI check をローカル実行できるようにした。
+- `.github/workflows/nsmb-mvl-gui-local.yml` に `bridge-check` jobを追加し、Tango checkout + Ubuntu build dependencies + `cargo check --features webrtc` + `webrtc-signaling-udp-pair-smoke` をDocker `act` で確認できるようにした。
+- `scripts/test-nsmb-mvl-gui-launch-smoke.ps1` を追加し、GUI backend の fake process launch tests、実 `nsmb-net-bridge` の signaling UDP pair smoke、任意の Tauri bundle build を1本で再実行できるようにした。古いbridge executableが `webrtc-signaling-udp-pair-smoke` を持たない場合は検出してdebug bridgeをbuildする。
+
+ローカル確認:
+
+```text
+corepack pnpm install: pass
+corepack pnpm typecheck: pass
+corepack pnpm vite:build: pass
+tools/nsmb-mvl-rom cargo check: pass
+src-tauri cargo check: pass
+cargo test --manifest-path tools/nsmb-mvl-gui/src-tauri/Cargo.toml: pass (10 tests; command/env + fake process launch/stop + preflight bridge smoke validation)
+scripts/test-nsmb-mvl-gui-launch-smoke.ps1: pass
+scripts/test-nsmb-mvl-gui-launch-smoke.ps1 -BuildTauriBundle: pass (debug/release nsmb-mvl-gui.exe --preflight included)
+tools/nsmb-net-bridge/target/release/nsmb-net-bridge.exe webrtc-signaling-udp-pair-smoke: pass
+tools/nsmb-mvl-gui/src-tauri/binaries/nsmb-net-bridge-x86_64-pc-windows-msvc.exe webrtc-signaling-udp-pair-smoke: pass
+corepack pnpm build: pass
+actionlint .github/workflows/nsmb-mvl-tauri.yml .github/workflows/nsmb-mvl-gui-local.yml: pass
+act workflow_dispatch -W .github/workflows/nsmb-mvl-tauri.yml -j gui-check -P ubuntu-latest=catthehacker/ubuntu:act-latest: pass (rechecked 2026-05-31 on current diff)
+act workflow_dispatch -W .github/workflows/nsmb-mvl-gui-local.yml -j gui-check -P ubuntu-latest=catthehacker/ubuntu:act-latest: pass (rechecked 2026-05-31 on current diff)
+act workflow_dispatch -W .github/workflows/nsmb-mvl-gui-local.yml -j bridge-check -P ubuntu-latest=catthehacker/ubuntu:act-latest: pass (rechecked 2026-05-31 on current diff)
+cargo run --manifest-path tools/nsmb-mvl-rom/Cargo.toml -- generate-stable ... default symbols path: pass
+Tauri release resources/symbols9.x and bootstrap input placement: pass
+Tauri sidecars refreshed via scripts/prepare-nsmb-mvl-tauri-sidecars.ps1 after rebuilding release bridge: pass
+tools/nsmb-mvl-gui/src-tauri/target/release/nsmb-mvl-gui.exe --preflight: pass
+```
+
+生成物:
+
+```text
+tools/nsmb-mvl-gui/src-tauri/target/release/nsmb-mvl-gui.exe
+tools/nsmb-mvl-gui/src-tauri/target/release/bundle/msi/NSMB Mario vs Luigi Online_0.1.0_x64_en-US.msi
+tools/nsmb-mvl-gui/src-tauri/target/release/bundle/nsis/NSMB Mario vs Luigi Online_0.1.0_x64-setup.exe
+```
+
+現在の注意点:
+
+- ROM はまだ bundle に同梱しない。ユーザーが ROM path を指定する。
+- 既定の生成ROMとログは Tauri app data 配下へ保存する。開発ツリーに `roms/nsmb-us.nds` がある場合だけ base ROM の既定値として使う。
+- `DEFAULT_SIGNAL_URL` は placeholder の `wss://example.workers.dev/session`。実運用 URL は GUI で変更するか `NSMB_MVL_SIGNAL_URL` で差し替える。
+- full workflow は Windows runner と vcpkg/melonDS build を使うため、ローカル Docker `act` では frontend/ROM generator/bridge smoke の軽量workflowを検証対象にしている。Windows full workflowは実GitHub runnerでの確認が必要。現作業ツリーは未pushのため、実runner確認はpush/PRまたはworkflow_dispatch可能なremote branch作成後に行う。
+- `Course=select` / 通常 MvL の `Choose Each Time` は direct route が CourseSelect を飛ばすため未対応。GUI/CLIでは選択肢として保持するが、実行時は fixed stage 扱いへ落とす。
+- `Course=random` は起動前に選んだコースでROMを作る。現checkpoint restart方式では2ゲーム目以降も同じコースへ戻り、ゲームごとの再抽選は未対応。
+
+次アクション:
+
+- GitHub Actions の full Windows Tauri build を実 runner で確認する。
+- GUI から実際に host/client を起動し、signaling server 経由で2PC接続を確認する。
+
 ### Phase 4: Cloudflare signaling server
 
 状態: 実装済み、ローカル型チェック/リンティング確認済み。Cloudflare デプロイはユーザー側で完了。実サーバー経由の2PC接続確認は未実施。
@@ -104,7 +193,7 @@ biome check . --write: no fixes applied
 
 ### Phase 5: nsmb-net-bridge signaling integration
 
-状態: 実装済み、Rust通常check/WebRTC feature check確認済み。signaling対応を含むreleaseビルド作成済み。実サーバー経由の疎通確認は未実施。
+状態: 実装済み、Rust通常check/WebRTC feature check確認済み。signaling対応を含むreleaseビルド作成済み。ローカルin-process signaling smokeで WebSocket signaling 経由の offer/answer SDP 交換と DataChannel payload 到達を確認済み。実サーバー経由の疎通確認は未実施。
 
 実装:
 
@@ -112,6 +201,8 @@ biome check . --write: no fixes applied
 - `--signal URL --session ID` を指定した場合だけ WebSocket signaling を使う。
 - signaling server から受け取った `iceServers` を、`--stun` 未指定時の WebRTC config として使う。
 - SDP は base64 ではなく JSON string として server 経由で中継する。
+- `webrtc-signaling-loopback-smoke` で、同一プロセス内のローカルWebSocket signaling serverを通して実際の offer/answer signaling path と DataChannel payload 受信を検証できる。
+- `webrtc-signaling-udp-pair-smoke` で、同じ signaling path に加えて host/client 相当の2つの UDP socket から WebRTC tunnel 経由の双方向payload到達を検証できる。
 
 起動例:
 
@@ -146,6 +237,8 @@ $env:LIBCLANG_PATH="C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildToo
 cargo fmt --check
 cargo check
 cargo check --features webrtc
+cargo build --features webrtc
+cargo run --features webrtc -- webrtc-signaling-udp-pair-smoke
 ```
 
 確認済み結果:
@@ -154,7 +247,10 @@ cargo check --features webrtc
 cargo fmt --check: pass
 cargo check: pass
 cargo check --features webrtc: pass
+cargo build --features webrtc: pass
 cargo build --release --features webrtc: pass
+tools\nsmb-net-bridge\target\debug\nsmb-net-bridge.exe webrtc-signaling-udp-pair-smoke: pass
+webrtc-signaling-udp-pair-smoke via Docker act bridge-check: pass
 ```
 
 ### Future: 本番WAN向け signaling / WebRTC hardening

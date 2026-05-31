@@ -17,6 +17,15 @@ param(
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds",
     [string]$InputScript = "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs",
     [string]$LogDir = "",
+    [int]$MvlStage = -1,
+    [string]$MvlSceneSettings = "",
+    [ValidateSet(1, 2, 3)] [int]$MvlWins = 2,
+    [ValidateSet(3, 5, 10)] [int]$MvlBigStars = 5,
+    [ValidateSet("3", "5", "endless", "Endless")] [string]$MvlLives = "endless",
+    [ValidateSet("fixed", "random", "select")]
+    [string]$MvlCourseMode = "fixed",
+    [switch]$GenerateMvlConfiguredRoms,
+    [string]$MvlMatchSeed = "",
     [int]$SwapBuffersInterval = 1,
     [switch]$UseFrameLimit,
     [switch]$NoFrameLimit,
@@ -101,6 +110,23 @@ $params = @{
     ClearMvlCameraInitHoldStartFrame = 840
     DynamicCameraLead = ($RuntimeDynamicCameraLead -and -not $NoDynamicCameraLead)
     LogDir = $LogDir
+    MvlCourseMode = $MvlCourseMode
+    MvlWins = $MvlWins
+    MvlBigStars = $MvlBigStars
+    MvlLives = $MvlLives
+}
+
+if ($MvlStage -ge 0) {
+    $params.MvlStage = $MvlStage
+}
+if ($MvlSceneSettings -ne "") {
+    $params.MvlSceneSettings = $MvlSceneSettings
+}
+if ($GenerateMvlConfiguredRoms) {
+    $params.GenerateMvlConfiguredRoms = $true
+}
+if ($MvlMatchSeed -ne "") {
+    $params.MvlMatchSeed = $MvlMatchSeed
 }
 
 if ($UseFrameLimit -and $NoFrameLimit) {
@@ -129,6 +155,7 @@ if ($InputUnreliable) {
 Write-Host "Starting NSMB MvL peer session: role=$Role peer=$Peer port=$Port"
 Write-Host "input delay=$InputDelayFrames sendDelay=$InputSendDelayFrames sendJitter=$InputSendJitterFrames max frame lead=$InputMaxFrameLead internalWaitTimeoutMs=$InternalWaitTimeoutMs unreliable=$($InputUnreliable.IsPresent) bundleHistory=$InputBundleHistory jit=$(-not $NoJit)"
 Write-Host "frameLimit=$(-not $NoFrameLimit.IsPresent) swapBuffersInterval=$SwapBuffersInterval startBarrier=$(-not $NoStartBarrier) clearMvlCameraInitHold=true runtimeDynamicCameraLead=$($RuntimeDynamicCameraLead -and -not $NoDynamicCameraLead) renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' })"
+Write-Host "mvlWins=$MvlWins mvlBigStars=$MvlBigStars mvlLives=$MvlLives mvlStage=$(if ($MvlStage -ge 0) { $MvlStage } else { 'auto/default' }) mvlSceneSettings=$(if ($MvlSceneSettings) { $MvlSceneSettings } else { 'derived' }) mvlCourseMode=$MvlCourseMode generateConfiguredRoms=$($GenerateMvlConfiguredRoms.IsPresent) mvlMatchSeed=$(if ($MvlMatchSeed) { $MvlMatchSeed } else { 'auto' })"
 Write-Host "log=$LogDir"
 Write-Host "Host controls Mario. Client controls Luigi."
 

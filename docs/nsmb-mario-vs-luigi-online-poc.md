@@ -1,5 +1,37 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Current status - 2026-05-31
+
+- MvL 設定外部化は、direct MvL route の起動前 ROM 生成と runtime env の両方で受け取れる状態。
+- ユーザーが触る通常 MvL 設定として、`Wins=1|2|3`、`Big Star=3|5|10`、`Mario's Lives=3|5|endless`、`Course=random` を扱う。通常 MvL の `Choose Each Time` は CourseSelect を復帰させる必要があるため、現 direct route では未対応。
+- stable ROM生成は Python script から Rust crate `tools/nsmb-mvl-rom` へ移行済み。`scripts/generate-nsmb-mvl-stable-roms.ps1` と Tauri GUI command `generate_roms` は Rust 実装を呼ぶ。
+- 旧Python ROM toolingの既定symbols pathも `tools/nsmb-mvl-rom/resources/symbols9.x` へ寄せ、Git管理外の `external/` がない環境でも既定値で動かしやすくした。
+- Tauri GUI から base ROM、host/client ROM出力先、通常MvL相当設定、signaling URL、部屋コードを指定して、ROM生成と対戦開始を行える初期経路を追加済み。
+- Tauri GUI backend の `start_match` は、host/client別の `nsmb-net-bridge` signaling引数と melonDS 起動envを unit test で確認する。さらに fake bridge/fake melonDS を実際にspawnし、session状態、停止、melonDS起動失敗時にsessionを残さないことを確認する。
+- Tauri GUI に `起動前チェック` を追加し、melonDS/bridge/input/symbols の解決と、実bridgeの `webrtc-signaling-udp-pair-smoke` を開始前に確認できるようにした。古いbridgeが新しいsignaling smoke subcommandを持たない場合も検出する。
+- `nsmb-mvl-gui.exe --preflight` を追加し、GUIを開かずに同梱sidecar/resource解決とbridge signaling smokeを検証できるようにした。
+- Tauri GUI の既定ROM出力先とログ保存先は app data 配下に移し、`tools/nsmb-mvl-rom/resources/symbols9.x` と bootstrap input は bundle resource からも解決できるようにした。これでインストール済みアプリが開発ツリーのパスへ書き込む前提を外した。
+- Tauri GUI の `Course=random` は表示中のmatch seedから `stage = seed % 5` を計算し、ROM生成と起動時envに同じstageを渡す。空欄時はGUI側でseedを生成して表示する。
+- 有限ライフ設定時に Luigi の初期スポーン土管が Mario 側へ重なる問題を修正。原因は direct route が通常 CourseSelect setup を飛ばすため、`loadMvsLFilesThread` の早い入口選択で lives byte `3/5` が entrance ID として使われていたこと。
+- `tools/nsmb_us_rom_patch.py` で `loadMvsLFilesThread` の初期入口 temp 値を player0=0 / player1=1 に寄せ、土管生成前に通常 MvL の左右入口に近い状態へ戻す。
+- `scripts/run-nsmb-mvl-lan-route-smoke.ps1 -RequireMvlInitialSpawnState` は player actor だけでなく、初期スポーン土管に対応する `0x10b` object 2個の `x=0x8000/0x58000` も検証する。
+- 検証:
+  - `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4` 成功。
+  - `logs/codex-mvl-initial-pipe-verified-v1`: `MvlLives=3`, `Course=random`, `seed=0`, host/client 両方で `playerActor0X/playerActor1X=0x8000/0x58000`、`mvlObject267LeftX/mvlObject267RightX=0x8000/0x58000`。`repaired initial player spawn` は出ていない。
+  - 同ログの software renderer screenshot `frame000895` で、初期土管が左右2本に分離していることを目視確認。
+  - `logs\codex-rust-settings-matrix-final\settings-matrix-summary.csv`: Rust生成ROMで `Course=random` / `Wins=1,2,3` / `Big Star=3,5,10` / `Lives=3,5,endless` の27通りがpass。
+  - `logs\codex-rust-bigstar-thresholds-final\bigstar-threshold-summary.csv`: `Big Star=3/5/10` の結果しきい値6ケースがpass。
+  - `logs\codex-rust-auto-restart-wins2-v2` / `logs\codex-rust-auto-restart-wins3-v2`: `Wins=2` は `nextGame=2`、`Wins=3` は `nextGame=2` と `nextGame=3` へのcheckpoint restartを確認。
+  - GUI/Actions: `corepack pnpm typecheck`、`corepack pnpm vite:build`、`cargo check --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`、`cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml` 10 tests、`corepack pnpm build`、`actionlint .github/workflows/nsmb-mvl-tauri.yml .github/workflows/nsmb-mvl-gui-local.yml`、`act workflow_dispatch -W .github/workflows/nsmb-mvl-tauri.yml -j gui-check -P ubuntu-latest=catthehacker/ubuntu:act-latest`、`act workflow_dispatch -W .github/workflows/nsmb-mvl-gui-local.yml -j gui-check -P ubuntu-latest=catthehacker/ubuntu:act-latest` がpass。両方の `gui-check` は2026-05-31に現差分で再確認済み。
+  - `scripts/test-nsmb-mvl-gui-launch-smoke.ps1` を追加し、GUI backend の fake process launch tests と実bridgeの `webrtc-signaling-udp-pair-smoke` をまとめて確認できるようにした。`-BuildTauriBundle` 付きでもpass。
+  - `scripts/test-nsmb-mvl-gui-launch-smoke.ps1 -BuildTauriBundle` は debug/release `nsmb-mvl-gui.exe --preflight` も実行し、release exe が `target\release` 直下の `melonDS.exe` / `nsmb-net-bridge.exe` / `resources\symbols9.x` / bootstrap input を解決できることを確認済み。
+  - `act workflow_dispatch -W .github/workflows/nsmb-mvl-gui-local.yml -j bridge-check -P ubuntu-latest=catthehacker/ubuntu:act-latest` がpass。2026-05-31に現差分で再確認済み。Tango依存を固定commitでcheckoutし、Ubuntu上で `cargo check --features webrtc --manifest-path tools/nsmb-net-bridge/Cargo.toml` と `cargo run --features webrtc --manifest-path tools/nsmb-net-bridge/Cargo.toml -- webrtc-signaling-udp-pair-smoke` を通した。後者はローカルWebSocket signaling server経由で offer/answer SDP 交換、WebRTC DataChannel接続、host/client相当UDP socket間の双方向payload到達を確認する。
+  - Windowsローカルでも `LIBCLANG_PATH=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\Llvm\x64\bin` を指定して `cargo check --features webrtc --manifest-path tools\nsmb-net-bridge\Cargo.toml` と `cargo build --features webrtc --manifest-path tools\nsmb-net-bridge\Cargo.toml` がpass。生成済み debug exe の `webrtc-signaling-udp-pair-smoke` もpass。
+  - release `nsmb-net-bridge.exe` を再buildし、`scripts/prepare-nsmb-mvl-tauri-sidecars.ps1` で Tauri sidecar を更新済み。更新後の `tools\nsmb-mvl-gui\src-tauri\binaries\nsmb-net-bridge-x86_64-pc-windows-msvc.exe webrtc-signaling-udp-pair-smoke` もpass。
+  - `tools/nsmb-mvl-rom/resources/symbols9.x` をGit管理対象配下へ置き、ROM generator CLIの既定symbols pathとTauri bundle resource参照をこのファイルへ変更。既定symbols pathでの `generate-stable` と、Tauri release resourcesへの配置を確認済み。
+  - 旧Python toolingのsymbols既定値変更後、`python -m py_compile tools\nsmb_localplayer_ref_report.py tools\nsmb_us_rom_tool.py tools\nsmb_us_rom_patch.py` がpass。
+  - `.github/workflows/nsmb-mvl-tauri.yml` はWindows runnerで melonDS / bridge / Tauri app を分けてbuildし、最終Tauri bundle artifactをuploadする。melonDS build時間対策として `melonDS.exe` のsource-hash cacheを追加済み。`bridge-windows` はrelease exeの `webrtc-signaling-udp-pair-smoke`、`tauri-windows` はGUI backend unit testを走らせてからbundleする。
+
 ## 目的
 
 New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` を、最終的に `melonDS 1インスタンス * 2PC` で WAN 越しに対戦できる形へ持っていく。
@@ -19,14 +51,58 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - 手動対戦では、片側が先行しすぎた場合に5秒でタイムアウトせず、相手が追いつくまで待つ。自動テストだけ内部wait timeoutを使う。
 - 高遅延向け rollback は別紙 `docs/nsmb-mvl-rollback-design-notes.md` に保留。現時点の本筋ではない。
 
+## MvLゲーム設定の現状
+
+- 通常LocalMPのMvL設定画面でユーザーが触る項目は、US版ROMの実画面で `Wins` / `Big Star` / `Mario's Lives` / `Course` と確認した。
+  - 確認時のデフォルト表示は `Wins=2` / `Big Star=5` / `Mario's Lives=Endless` / `Course=Choose Each Time`。
+  - `Course` はユーザー指摘どおり、通常画面では固定コースではなく `Choose Each Time` と `Random` の選択肢として扱う。
+- direct MvL routeでは通常のCourseSelect/設定画面を飛ばしているため、GUI向けには「起動前に設定から一時ROMを生成する」経路を使う。
+  - `tools/nsmb-mvl-rom` は Rust製のstable ROM generator。direct MvL entry patch、WiFi communicating count patch、scene settings、Luigi初期入口/土管補正、camera fallback、VS mode skipを生成ROMへ反映する。
+  - `scripts/generate-nsmb-mvl-stable-roms.ps1` は `-MvlWins` / `-MvlBigStars` / `-MvlLives` / `-MvlCourseMode` と、raw override の `-MvlSceneSettings` を受け取り、Rust generatorでhost/client ROMを設定付き生成する。
+  - `scripts/run-nsmb-mvl-lan-route-smoke.ps1` は `-GenerateMvlConfiguredRoms` / `-MvlCourseMode random` / `-MvlMatchSeed` と上記ユーザー向け設定を受け取り、起動前に一時host/client ROMを生成できる。
+  - manual local/peer scriptも同じユーザー向け設定を受け取れる。Tauri GUI側は、`generate_roms` commandでこれらの値を渡して開始前に一時ROMを作れる。
+  - Tauri GUI側も `Course=random` ではmatch seedからstageを算出し、Rust generatorとmelonDS起動envの両方へ同じstageを渡す。
+- コース設定:
+  - `random` は起動時に `matchSeed % 5` でコース0..4を決める。`logs/codex-mvl-settings-random-stage0` から `stage4` まで、5コースすべてで1300 frames smokeが通過し、期待stageID検証も通った。
+  - 2ゲーム目以降は、現checkpoint restart方式では1ゲーム目の正常stage checkpointへ戻すため、起動時に選ばれた同じコースへ戻る。ゲームごとにrandomを振り直す処理は未対応。pre-direct checkpointからstageを差し替える実験はtimeout/ARM9 abortにつながったため外した。
+  - `select` / `Choose Each Time` は、飛ばしているCourseSelect部分を復活させる必要があるため未対応。ユーザー要件どおり、難しければ未対応でよい枠として扱う。
+  - `fixed` は通常MvLのユーザー向け設定ではない。現状はdirect route内部・検証用の表現としてだけ残す。
+- `Wins` / `Big Star` / `Mario's Lives`:
+  - raw `sceneSettings=0x00B4FF00` が上記デフォルト表示と対応することは確認済み。
+  - ユーザー向け項目は `-MvlWins 1|2|3`、`-MvlBigStars 3|5|10`、`-MvlLives 3|5|endless` として外部指定できる。
+  - direct routeでは通常の設定画面/結果後管理を飛ばすため、`Wins` はROM内 `sceneSettings` の高位nibbleへ無理に詰めず、runtime側のmatch targetとして扱う。`Big Star` / `Mario's Lives` / `Course=random` は起動前の一時ROM生成とruntime envへ反映する。
+  - `scripts/test-nsmb-mvl-settings-matrix.ps1` を追加し、`Course=random` で `Wins` 3通り * `Big Star` 3通り * `Mario's Lives` 3通りを自動検証できるようにした。
+  - `logs/codex-rust-settings-matrix-final` で、Rust生成ROMの27通りすべてが1200 frames smokeを通過し、期待 `stageID = matchSeed % 5`、期待 `stageSceneSettings`、player actor 2体、Vs star actor、StageScene activeを確認した。
+  - `Big Star=5` は安定defaultの `0xB4xx00`、`Big Star=10` は `0xB8xx00` を使う。`logs/codex-mvl-bigstar-low-nibble-sweep/summary.csv` ではlow nibble `4..8` だけが実stage actorありで通り、`0..3` と `9..15` は不安定またはabortした。
+  - `Big Star=3` はNSMB本来の3個勝利を使う。`Big Star=5/10` はruntime側で星数をlogical countとして追跡し、native 3-star resultをtarget到達まで抑制、target到達時に結果へ進める。
+  - `logs/codex-rust-bigstar-thresholds-final` で、`Big Star=3` は2個では結果なし/3個で結果、`Big Star=5` は3個では結果なし/5個で結果、`Big Star=10` は9個では結果なし/10個で結果を確認した。
+  - 以前の `Wins=3` 候補 `0x00F4FF00`、`Wins=3` / `Big Star=10` の `0x09xxxx`、暫定 `0x39xxxx` は、direct routeでの安定性または勝敗遷移の意味が弱いため採用しない。現行mappingは安定した `0xB?xx00` を使い、match winsはruntime側で管理する。
+  - raw逃げ道として `-MvlSceneSettings` は引き続き外部指定可能。ユーザー向け項目より raw override を優先する。
+- 複数ゲーム:
+  - `tests/nsmb_us_direct_mvl_star_collect_left_continue.inputs` を追加し、結果画面後にAを連打する継続probeを作成した。
+  - `logs/codex-mvl-settings-result-continue-probe` では、勝敗確定後 `sceneCurrentSceneID=0xa` の結果シーンに入り、その後9000 frameまで2回目の `sceneCurrentSceneID=0x3` MvL stageへ戻らないことを確認した。
+  - 結果シーン中に `Game::loadLevel` を直接呼ぶ方式はARM9 abortしたため不採用。scene requestだけを書き換える方式も、scene IDは戻るがステージオブジェクトが死んだままになるため不採用。
+  - 現在は1ゲーム目の正常なMvL stageを内部savestate checkpointとして保持し、結果後にcheckpointへ戻す方式。`logs/codex-mvl-auto-restart-wins2-checkpoint` で、`Wins=2` 相当の1勝後に2ゲーム目へ実ステージとして戻ることを確認済み。
+  - `run-nsmb-mvl-lan-route-smoke.ps1` に `-RequireMvlGameCount` を追加した。ただしcheckpoint restartは新規stage entryとしては見えにくいため、最終確認はstdoutの `nextGame` restartログも併用する。
+  - `logs/codex-mvl-auto-restart-wins1-checkpoint` で、`Wins=1` 相当では結果シーン到達後に自動再開しないことを確認済み。
+  - `logs/codex-rust-auto-restart-wins2-v2` で、`Course=random` / `Wins=2` / `Big Star=5` / `Lives=endless` が結果後に `nextGame=2` へ復帰することを確認済み。
+  - `logs/codex-rust-auto-restart-wins3-v2` で、2回勝敗を作ったあと `nextGame=2` と `nextGame=3` のcheckpoint restartまで到達することを確認済み。
+  - checkpoint復帰のため、2ゲーム目以降のstageは1ゲーム目と同じ。stdout上の `requestedStage` は進むが、実際のcheckpoint stageは保存時のstageへ戻る。
+
 ## 完了済み
 
 - US版ROM patch tooling:
   - `tools/nsmb_us_rom_tool.py`
   - `tools/nsmb_us_rom_patch.py`
+- Rust stable ROM generator:
+  - `tools/nsmb-mvl-rom`
+  - `scripts/generate-nsmb-mvl-stable-roms.ps1` はこのRust実装を呼ぶ。
 - stable direct MvL entry ROM:
   - host: `roms/nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds`
   - client: `roms/nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds`
+- 通常MvL設定画面のユーザー向け項目のうち、`Wins` / `Big Star` / `Mario's Lives` / `Course=random` を外部指定し、起動前の一時ROM生成へ反映する経路。
+- `Big Star=3/5/10` の勝敗しきい値をruntime側で検証済み。
+- `Wins=2` の2ゲーム目復帰と `Wins=3` の3ゲーム目到達を、direct route のcheckpoint restart方式で確認。
 - client側を Luigi 視点/localPlayerID=1 として動かす基本経路。
 - Luigi死亡時にステージ全体が止まる問題は、通常MvLと比較しながら改善済み。
 - 手動入力をhost/clientで別々に受け取り、入力パケットとして相手へ送る input netplay mode。
@@ -104,6 +180,8 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - 手動起動のデフォルトbootstrapは `tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs`。試合中の手動入力を上書きしないよう、neutral範囲は `668-839` まで。
 - stable ROMでは独自カメラ先読みpatchを使わず、NSMB本来の `Stage::cameraX[player]` 更新をそのまま使う。旧 `MELONDS_NSML_DYNAMIC_CAMERA_LEAD` 実行時hookは診断用で、手動peerではデフォルト無効。
 - direct entryのカメラは、通常LocalMPとの実測比較に基づいて `0x020CA880` の初期化hold bit `0x08` だけを一度クリアする。手動peer/local起動では `ClearMvlCameraInitHold` をデフォルト有効にしている。
+- MvL設定は `Wins` / `Big Star` / `Mario's Lives` / `Course=random` を外部指定できる。`Course=Choose Each Time` はdirect routeがCourseSelectを飛ばすため未対応、`Course=random` の2ゲーム目以降の再抽選も未対応。
+- `Big Star=3/5/10` はGUI/CLI設定値として受け付け、起動マトリクスと勝敗しきい値probeを通過済み。5/10個勝利はruntime側のlogical countでnative 3-star resultを抑制して実現する。
 - 残りの注意点: 自動smokeの終了条件はraw frame基準なので、動的start後は片側が先に終了してもう片側がthrottle timeoutすることがある。これは手動対戦の同期ズレとは別のテストハーネス問題として扱う。
 
 ## 手動起動
@@ -194,6 +272,12 @@ Remove-Item Env:\MELONDS_NSML_SWAPBUFFERS_INTERVAL -ErrorAction SilentlyContinue
   - `tests\nsmb_us_direct_mvl_both_different.inputs` / 3600 frames では、player座標、スター、moving hazard、object数、入力状態などのゲームプレイ項目は全行一致したが、`netPacketTick` だけ frame 2100/2560 で一時的に差が出ていた。
   - `netPacketTick` はNSMBの通信packet作業領域で、反映済みゲーム状態そのものではないため、`-CheckHostClientGameplaySync` の必須比較から外した。必要な場合だけ `-CheckHostClientNetPacketTickSync` で別途検査する。
   - 修正後、`tests\nsmb_us_direct_mvl_both_different.inputs` / 3600 frames / `-CheckHostClientGameplaySync` はpass。`-CheckHostClientNetPacketTickSync` を明示した場合は従来どおり frame 2560 のtick差を検出する。
+- MvL設定外部化:
+  - `logs\codex-rust-settings-matrix-final\settings-matrix-summary.csv`: Rust生成ROMで `Course=random` / `Wins=1,2,3` / `Big Star=3,5,10` / `Lives=3,5,endless` の27通りがpass。各caseでstageID、sceneSettings、player actor、Vs star actor、StageScene activeを確認。
+  - `logs\codex-rust-bigstar-thresholds-final\bigstar-threshold-summary.csv`: `Big Star=3/5/10` の結果しきい値6ケースがpass。
+  - `logs\codex-rust-auto-restart-wins2-v2`: `Course=random` / `Wins=2` で結果後に `nextGame=2` へ復帰することを確認。checkpoint方式のため、2ゲーム目のcourseは1ゲーム目と同じ。
+  - `logs\codex-rust-auto-restart-wins3-v2`: `Wins=3` で `nextGame=2` と `nextGame=3` へのcheckpoint restartを確認。
+  - Rust ROM generator parity: Python生成ROMとRust生成ROMの主要patch領域 (`0x021577EC`, `0x020C5298`, `0x020A06DC`, `0x02013428`, `0x02159348`, `0x0200FAE0`) の一致を確認。
 
 ## 注意
 

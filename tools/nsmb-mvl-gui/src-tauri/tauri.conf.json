@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "NSMB Mario vs Luigi Online",
+  "version": "0.1.0",
+  "identifier": "dev.melonds.nsmb-mvl",
+  "build": {
+    "beforeDevCommand": "corepack pnpm vite:dev",
+    "beforeBuildCommand": "corepack pnpm vite:build",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "NSMB Mario vs Luigi Online",
+        "width": 980,
+        "height": 720,
+        "minWidth": 860,
+        "minHeight": 620
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/melonDS",
+      "binaries/nsmb-net-bridge"
+    ],
+    "resources": {
+      "../../../tests/nsmb_us_direct_mvl_minimal_bootstrap.inputs": "resources/nsmb_us_direct_mvl_minimal_bootstrap.inputs",
+      "../../../tools/nsmb-mvl-rom/resources/symbols9.x": "resources/symbols9.x"
+    }
+  }
+}

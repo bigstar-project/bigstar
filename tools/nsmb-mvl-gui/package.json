@@ -1,0 +1,22 @@
+{
+  "name": "nsmb-mvl-gui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "typecheck": "tsc --noEmit",
+    "vite:build": "vite build",
+    "vite:dev": "vite --host 127.0.0.1"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.9.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.9.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.0"
+  },
+  "packageManager": "pnpm@10.26.2"
+}

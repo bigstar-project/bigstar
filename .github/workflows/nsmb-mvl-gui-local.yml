@@ -1,0 +1,53 @@
+name: NSMB MvL GUI Local
+
+on:
+  workflow_dispatch:
+
+jobs:
+  gui-check:
+    name: GUI check for act
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Enable pnpm
+        run: corepack enable pnpm
+      - name: Install GUI dependencies
+        working-directory: tools/nsmb-mvl-gui
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck GUI
+        working-directory: tools/nsmb-mvl-gui
+        run: pnpm typecheck
+      - name: Build frontend
+        working-directory: tools/nsmb-mvl-gui
+        run: pnpm vite:build
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check ROM generator
+        run: cargo check --manifest-path tools/nsmb-mvl-rom/Cargo.toml
+
+  bridge-check:
+    name: Bridge check for act
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Checkout Tango dependency
+        run: |
+          ref=283dacf2894d5e47be95a6d7f19acdda63a773b0
+          if [ -d external/tango/.git ]; then
+            git -C external/tango fetch --depth=1 origin "$ref"
+          else
+            git clone --no-checkout https://github.com/tangobattle/tango.git external/tango
+            git -C external/tango fetch --depth=1 origin "$ref"
+          fi
+          git -C external/tango checkout --detach "$ref"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install bridge build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config clang libclang-dev
+      - name: Check bridge with WebRTC feature
+        run: cargo check --features webrtc --manifest-path tools/nsmb-net-bridge/Cargo.toml
+      - name: Run bridge signaling UDP pair smoke
+        run: cargo run --features webrtc --manifest-path tools/nsmb-net-bridge/Cargo.toml -- webrtc-signaling-udp-pair-smoke

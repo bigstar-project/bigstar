@@ -1,0 +1,171 @@
+name: NSMB MvL Tauri
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - master
+    paths:
+      - ".github/workflows/nsmb-mvl-tauri.yml"
+      - "scripts/prepare-nsmb-mvl-tauri-sidecars.ps1"
+      - "tools/nsmb-mvl-gui/**"
+      - "tools/nsmb-mvl-rom/**"
+      - "tools/nsmb-net-bridge/**"
+      - "src/**"
+      - "CMakeLists.txt"
+      - "vcpkg.json"
+
+env:
+  MELONDS_GIT_BRANCH: ${{ github.ref }}
+  MELONDS_GIT_HASH: ${{ github.sha }}
+  MELONDS_BUILD_PROVIDER: GitHub Actions
+
+jobs:
+  gui-check:
+    name: GUI check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Enable pnpm
+        run: corepack enable pnpm
+      - name: Install GUI dependencies
+        working-directory: tools/nsmb-mvl-gui
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck GUI
+        working-directory: tools/nsmb-mvl-gui
+        run: pnpm typecheck
+      - name: Build frontend
+        working-directory: tools/nsmb-mvl-gui
+        run: pnpm vite:build
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check ROM generator
+        run: cargo check --manifest-path tools/nsmb-mvl-rom/Cargo.toml
+
+  melon-windows:
+    name: melonDS Windows x86_64
+    runs-on: windows-2025
+    env:
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/vcpkg_cache,readwrite
+    steps:
+      - uses: actions/checkout@v6
+      - name: Restore cached melonDS exe
+        id: melonds-exe-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build/release-windows-x86_64/melonDS.exe
+          key: melonds-exe-windows-x86_64-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'cmake/**', 'src/**', 'vcpkg.json') }}
+      - uses: actions/cache/restore@v4
+        if: steps.melonds-exe-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ github.workspace }}/vcpkg_cache
+          key: vcpkg-x86_64-windows-${{ hashFiles('vcpkg.json') }}
+          restore-keys: vcpkg-x86_64-windows-
+      - uses: lukka/run-vcpkg@v11
+        if: steps.melonds-exe-cache.outputs.cache-hit != 'true'
+        with:
+          vcpkgJsonGlob: vcpkg.json
+      - uses: lukka/run-cmake@v10
+        if: steps.melonds-exe-cache.outputs.cache-hit != 'true'
+        with:
+          configurePreset: release-windows-x86_64
+          configurePresetAdditionalArgs: "['-DENABLE_DEBUG_DEPS=OFF', '-DMELONDS_EMBED_BUILD_INFO=ON']"
+          buildPreset: release-windows-x86_64
+      - uses: actions/upload-artifact@v7
+        with:
+          name: melonDS-windows-x86_64
+          path: build/release-windows-x86_64/melonDS.exe
+      - uses: actions/cache/save@v4
+        if: always() && steps.melonds-exe-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ github.workspace }}/vcpkg_cache
+          key: vcpkg-x86_64-windows-${{ hashFiles('vcpkg.json') }}
+      - name: Save cached melonDS exe
+        if: steps.melonds-exe-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build/release-windows-x86_64/melonDS.exe
+          key: melonds-exe-windows-x86_64-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'cmake/**', 'src/**', 'vcpkg.json') }}
+
+  bridge-windows:
+    name: bridge Windows x86_64
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v6
+      - name: Checkout Tango dependency
+        shell: pwsh
+        run: |
+          $ref = "283dacf2894d5e47be95a6d7f19acdda63a773b0"
+          if (Test-Path external\tango\.git) {
+            git -C external\tango fetch --depth=1 origin $ref
+          } else {
+            git clone --no-checkout https://github.com/tangobattle/tango.git external\tango
+            git -C external\tango fetch --depth=1 origin $ref
+          }
+          git -C external\tango checkout --detach $ref
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build bridge
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "C:\Program Files\LLVM\bin",
+            "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\Llvm\x64\bin"
+          )
+          $libclangPath = $candidates | Where-Object { Test-Path (Join-Path $_ "libclang.dll") } | Select-Object -First 1
+          if (-not $libclangPath) {
+            throw "libclang.dll was not found"
+          }
+          $env:LIBCLANG_PATH = $libclangPath
+          cargo build --release --features webrtc --manifest-path tools/nsmb-net-bridge/Cargo.toml
+      - name: Run bridge signaling UDP pair smoke
+        shell: pwsh
+        run: .\tools\nsmb-net-bridge\target\release\nsmb-net-bridge.exe webrtc-signaling-udp-pair-smoke
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nsmb-net-bridge-windows-x86_64
+          path: tools/nsmb-net-bridge/target/release/nsmb-net-bridge.exe
+
+  tauri-windows:
+    name: Tauri Windows x86_64
+    runs-on: windows-2025
+    needs:
+      - gui-check
+      - melon-windows
+      - bridge-windows
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Enable pnpm
+        run: corepack enable pnpm
+      - uses: actions/download-artifact@v7
+        with:
+          name: melonDS-windows-x86_64
+          path: build/release-windows-x86_64
+      - uses: actions/download-artifact@v7
+        with:
+          name: nsmb-net-bridge-windows-x86_64
+          path: tools/nsmb-net-bridge/target/release
+      - name: Prepare sidecars
+        shell: pwsh
+        run: .\scripts\prepare-nsmb-mvl-tauri-sidecars.ps1
+      - name: Install GUI dependencies
+        working-directory: tools/nsmb-mvl-gui
+        run: pnpm install --frozen-lockfile
+      - name: Test Tauri backend
+        run: cargo test --manifest-path tools/nsmb-mvl-gui/src-tauri/Cargo.toml
+      - name: Build Tauri app
+        working-directory: tools/nsmb-mvl-gui
+        run: pnpm tauri build
+      - name: Run packaged app preflight
+        shell: pwsh
+        run: .\tools\nsmb-mvl-gui\src-tauri\target\release\nsmb-mvl-gui.exe --preflight
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nsmb-mvl-tauri-windows-x86_64
+          path: tools/nsmb-mvl-gui/src-tauri/target/release/bundle/**

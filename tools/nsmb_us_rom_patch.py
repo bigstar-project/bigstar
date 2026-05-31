@@ -1096,6 +1096,30 @@ def patch_player_vs_pipe_local_player_id(overlays: dict[int, object], player_id:
     ]
 
 
+def patch_mvl_load_thread_entrance_ids(overlays: dict[int, object]) -> list[str]:
+    # The direct route supplies finite-life sceneSettings before the normal
+    # CourseSelect state has prepared spawn IDs. loadMvsLFilesThread otherwise
+    # copies those settings bytes into both entrance slots, which places
+    # Luigi's initial pipe at Mario's entrance. Keep player 0/1 on entrances 0/1.
+    patches = [
+        (0x02152D64, encode_mov_imm(0, 1), "player1 early temp value"),
+        (0x02152D68, encode_strb_imm(0, 13, 0x1D), "player1 early temp store"),
+        (0x02152D74, encode_strb_imm(0, 13, 0x1C), "player0 early temp store"),
+        (0x02152DC0, encode_mov_imm(0, 0), "player0 temp"),
+        (0x02152DC8, encode_mov_imm(0, 1), "player1 temp"),
+        (0x02152E00, encode_mov_imm(0, 0), "player0"),
+        (0x02152E0C, encode_mov_imm(0, 1), "player1"),
+    ]
+    changes: list[str] = []
+    for addr, word, label in patches:
+        ov_id, old = patch_overlay_words(overlays, addr, [word])
+        changes.append(
+            f"loadMvsLFilesThread entrance ID {label} overlay{ov_id} @ 0x{addr:08X}: "
+            f"{old.hex()} -> {struct.pack('<I', word).hex()}"
+        )
+    return changes
+
+
 def patch_player_render_wrap_x_offset(overlays: dict[int, object], offset: int) -> list[str]:
     # Diagnostic only. In the direct localPlayerID=1 client route the terrain
     # can be visible while Player::onRender passes unwrapped X coordinates to
@@ -1383,6 +1407,23 @@ def build_direct_loadlevel_stub(
         emit_ldr_literal(0, 0x02088F38)  # Scene::nextSceneSettings
         emit_ldr_literal(1, force_scene_settings)
         words.append(encode_str_imm(1, 0, 0))
+    # The direct route bypasses the normal CourseSelect setup. With finite lives,
+    # NSMB reuses the lives byte from sceneSettings as both players' entrance ID,
+    # which also leaves Luigi's spawn pipe at Mario's entrance. Normalize the
+    # entrance globals before the stage creates the initial player/pipe actors.
+    emit_ldr_literal(0, 0x0208B094)  # Entrance::spawnEntranceID[0]
+    words.append(encode_mov_imm(1, 0))
+    words.append(encode_strb_imm(1, 0, 0))
+    words.append(encode_mov_imm(1, 1))
+    words.append(encode_strb_imm(1, 0, 1))
+    emit_ldr_literal(0, 0x0208B098)  # Entrance::transitionFlags[0]
+    words.append(encode_mov_imm(1, 0))
+    words.append(encode_strb_imm(1, 0, 0))
+    words.append(encode_strb_imm(1, 0, 1))
+    emit_ldr_literal(0, 0x0208B0A0)  # Entrance::spawnEntrance[0]
+    words.append(encode_ldr_imm(1, 0, 0))
+    words.append(encode_add_imm(2, 1, 0x14))
+    words.append(encode_str_imm(2, 0, 4))
     # Direct MvL entry bypasses the normal local MP pairing path, so
     # Net::localAid stays at its single-player default. VSResults uses
     # Net::localAid, not Game::localPlayerID, to decide local win/lose text.
@@ -1538,6 +1579,8 @@ def patch_direct_mvl_entry(
             f"loadMvsLFilesThread actor category mask value overlay{ov_id} @ 0x{addr:08X}: "
             f"{old.hex()} -> {struct.pack('<I', word).hex()}"
         )
+
+    changes.extend(patch_mvl_load_thread_entrance_ids(overlays))
 
     if stage_camera_player_id is not None:
         changes.extend(patch_stage_camera_player_id(overlays, stage_camera_player_id))
@@ -1734,7 +1777,7 @@ def patch_fake_opponent(
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rom", default="roms/nsmb-us.nds")
-    ap.add_argument("--symbols", default="external/NSMB-Code-Reference/symbols9.x")
+    ap.add_argument("--symbols", default="tools/nsmb-mvl-rom/resources/symbols9.x")
     ap.add_argument("--out", required=True)
     sub = ap.add_subparsers(dest="cmd", required=True)
     p_rng = sub.add_parser("rng-constant")

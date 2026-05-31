@@ -1,0 +1,69 @@
+# Direct MvL result continuation probe.
+# Player0 collects/wins like the star_collect_left script, then both sides press A
+# on the result scene to test whether a second game can start.
+
+inst0 0-619 NONE
+inst0 620-627 DOWN
+inst0 628-659 NONE
+inst0 660-667 A
+inst0 668-899 NONE
+inst0 900-907 A
+inst0 908-1259 NONE
+inst0 1260-1267 A
+inst0 1268-1599 NONE
+inst0 1600-1607 NONE 128,165
+inst0 1608-1719 NONE
+inst0 1720-1727 NONE 128,165
+inst0 1728-4199 NONE
+inst0 4200-4700 LEFT+Y+A
+inst0 4701-5200 LEFT+Y
+inst0 5201-5600 LEFT+Y+A
+inst0 5601-6200 LEFT+Y
+inst0 6201-6208 A
+inst0 6320-6327 A
+inst0 6440-6447 A
+inst0 6560-6567 A
+inst0 6680-6687 A
+inst0 6800-6807 A
+inst0 6920-6927 A
+inst0 7040-7047 A
+inst0 7160-7167 A
+inst0 7280-7287 A
+inst0 7400-7407 A
+inst0 7520-7527 A
+inst0 7640-7647 A
+inst0 7760-7767 A
+inst0 7880-7887 A
+inst0 8000-8007 A
+inst0 8008-9000 NONE
+
+inst1 0-619 NONE
+inst1 620-627 DOWN
+inst1 628-659 NONE
+inst1 660-667 A
+inst1 668-899 NONE
+inst1 900-907 A
+inst1 908-1259 NONE
+inst1 1260-1267 A
+inst1 1268-1599 NONE
+inst1 1600-1607 NONE 128,165
+inst1 1608-1719 NONE
+inst1 1720-1727 NONE 128,165
+inst1 1728-6200 NONE
+inst1 6201-6208 A
+inst1 6320-6327 A
+inst1 6440-6447 A
+inst1 6560-6567 A
+inst1 6680-6687 A
+inst1 6800-6807 A
+inst1 6920-6927 A
+inst1 7040-7047 A
+inst1 7160-7167 A
+inst1 7280-7287 A
+inst1 7400-7407 A
+inst1 7520-7527 A
+inst1 7640-7647 A
+inst1 7760-7767 A
+inst1 7880-7887 A
+inst1 8000-8007 A
+inst1 8008-9000 NONE

@@ -30,6 +30,8 @@ fn usage() -> &'static str {
   nsmb-net-bridge webrtc-offer  --local-bind ADDR [--local-target ADDR] [--stun URI] [--signal URL --session ID]
   nsmb-net-bridge webrtc-answer --local-bind ADDR [--local-target ADDR] [--stun URI] [--signal URL --session ID]
   nsmb-net-bridge webrtc-loopback-smoke [--stun URI]
+  nsmb-net-bridge webrtc-signaling-loopback-smoke [--stun URI]
+  nsmb-net-bridge webrtc-signaling-udp-pair-smoke [--stun URI]
 
 examples:
   host bridge:
@@ -293,6 +295,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .collect::<Vec<_>>();
             run_webrtc_loopback_smoke(stun_servers)?;
         }
+        "webrtc-signaling-loopback-smoke" => {
+            let stun_servers = args[1..]
+                .windows(2)
+                .filter_map(|w| (w[0] == "--stun").then(|| w[1].clone()))
+                .collect::<Vec<_>>();
+            run_webrtc_signaling_loopback_smoke(stun_servers)?;
+        }
+        "webrtc-signaling-udp-pair-smoke" => {
+            let stun_servers = args[1..]
+                .windows(2)
+                .filter_map(|w| (w[0] == "--stun").then(|| w[1].clone()))
+                .collect::<Vec<_>>();
+            run_webrtc_signaling_udp_pair_smoke(stun_servers)?;
+        }
         other => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -314,12 +330,54 @@ fn run_webrtc_loopback_smoke(_stun_servers: Vec<String>) -> Result<(), Box<dyn s
     .into())
 }
 
+#[cfg(not(feature = "webrtc"))]
+fn run_webrtc_signaling_loopback_smoke(
+    _stun_servers: Vec<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "WebRTC signaling loopback smoke requires building with --features webrtc",
+    )
+    .into())
+}
+
+#[cfg(not(feature = "webrtc"))]
+fn run_webrtc_signaling_udp_pair_smoke(
+    _stun_servers: Vec<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "WebRTC signaling UDP pair smoke requires building with --features webrtc",
+    )
+    .into())
+}
+
 #[cfg(feature = "webrtc")]
 fn run_webrtc_loopback_smoke(stun_servers: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
     runtime.block_on(webrtc::run_loopback_smoke(stun_servers))
+}
+
+#[cfg(feature = "webrtc")]
+fn run_webrtc_signaling_loopback_smoke(
+    stun_servers: Vec<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(webrtc::run_signaling_loopback_smoke(stun_servers))
+}
+
+#[cfg(feature = "webrtc")]
+fn run_webrtc_signaling_udp_pair_smoke(
+    stun_servers: Vec<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(webrtc::run_signaling_udp_pair_smoke(stun_servers))
 }
 
 #[cfg(not(feature = "webrtc"))]
@@ -398,12 +456,13 @@ mod webrtc {
     use base64::prelude::*;
     use futures_util::{SinkExt, StreamExt};
     use std::io::{self, Write};
+    use std::net::UdpSocket;
     use std::sync::Arc;
     use std::time::{Duration, Instant};
-    use tokio::net::UdpSocket as TokioUdpSocket;
+    use tokio::net::{TcpListener, TcpStream, UdpSocket as TokioUdpSocket};
     use tokio::sync::Mutex as TokioMutex;
-    use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
+    use tokio_tungstenite::{accept_async, connect_async};
 
     struct WebRtcEndpoint {
         data_channel: datachannel_wrapper::DataChannel,
@@ -894,6 +953,202 @@ mod webrtc {
         }
 
         println!("nsmb-net-bridge webrtc: loopback smoke passed");
+        Ok(())
+    }
+
+    async fn run_local_signaling_server(
+        listener: TcpListener,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (first, _) = listener.accept().await?;
+        let (second, _) = listener.accept().await?;
+        let first = accept_async(first).await?;
+        let second = accept_async(second).await?;
+        let (mut first_tx, first_rx) = first.split();
+        let (mut second_tx, second_rx) = second.split();
+
+        let hello = serde_json::json!({
+            "type": "hello",
+            "role": "loopback",
+            "session": "loopback",
+            "peerCount": 2,
+            "iceServers": [],
+        })
+        .to_string();
+        first_tx
+            .send(WebSocketMessage::Text(hello.clone().into()))
+            .await?;
+        second_tx.send(WebSocketMessage::Text(hello.into())).await?;
+
+        let first_to_second = relay_signaling_messages(first_rx, second_tx);
+        let second_to_first = relay_signaling_messages(second_rx, first_tx);
+        let _ = tokio::join!(first_to_second, second_to_first);
+        Ok(())
+    }
+
+    async fn relay_signaling_messages(
+        mut rx: futures_util::stream::SplitStream<tokio_tungstenite::WebSocketStream<TcpStream>>,
+        mut tx: futures_util::stream::SplitSink<
+            tokio_tungstenite::WebSocketStream<TcpStream>,
+            WebSocketMessage,
+        >,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        while let Some(message) = rx.next().await {
+            tx.send(message?).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn run_signaling_loopback_smoke(
+        stun_servers: Vec<String>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let signal_url = format!("ws://{}/session", listener.local_addr()?);
+        let server = tokio::spawn(run_local_signaling_server(listener));
+        let offer = connect_signal_offer(
+            signal_url.clone(),
+            "loopback".to_owned(),
+            stun_servers.clone(),
+        );
+        let answer = connect_signal_answer(signal_url, "loopback".to_owned(), stun_servers);
+
+        let (offer, answer) = tokio::time::timeout(Duration::from_secs(30), async {
+            tokio::try_join!(offer, answer)
+        })
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "signaling loopback timed out"))??;
+
+        let (mut offer_tx, _offer_rx) = offer.data_channel.split();
+        let (_answer_tx, mut answer_rx) = answer.data_channel.split();
+        offer_tx.send(b"nsmb-net-bridge-signaling-smoke").await?;
+        let Some(received) = answer_rx.receive().await else {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "signaling loopback data channel closed",
+            )
+            .into());
+        };
+        if received != b"nsmb-net-bridge-signaling-smoke" {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "signaling loopback payload mismatch",
+            )
+            .into());
+        }
+
+        server.abort();
+        println!("nsmb-net-bridge webrtc: signaling loopback smoke passed");
+        Ok(())
+    }
+
+    fn reserve_loopback_udp_addr() -> io::Result<SocketAddr> {
+        UdpSocket::bind("127.0.0.1:0")?.local_addr()
+    }
+
+    async fn wait_for_udp_payload(
+        sender: &TokioUdpSocket,
+        bridge_addr: SocketAddr,
+        receiver: &TokioUdpSocket,
+        payload: &[u8],
+        label: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut tick = tokio::time::interval(Duration::from_millis(100));
+        let mut buf = [0u8; MAX_DATAGRAM_SIZE];
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                tokio::select! {
+                    _ = tick.tick() => {
+                        sender.send_to(payload, bridge_addr).await?;
+                    }
+                    recv = receiver.recv_from(&mut buf) => {
+                        match recv {
+                            Ok((len, _)) if &buf[..len] == payload => {
+                                return Ok::<(), io::Error>(());
+                            }
+                            Ok(_) => {}
+                            Err(err) if err.kind() == io::ErrorKind::ConnectionReset => {}
+                            Err(err) => return Err(err),
+                        }
+                    }
+                }
+            }
+        })
+        .await
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("{label} UDP payload timed out"),
+            )
+        })??;
+        Ok(())
+    }
+
+    pub async fn run_signaling_udp_pair_smoke(
+        stun_servers: Vec<String>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let signal_url = format!("ws://{}/session", listener.local_addr()?);
+        let server = tokio::spawn(run_local_signaling_server(listener));
+        let offer_bridge_addr = reserve_loopback_udp_addr()?;
+        let answer_bridge_addr = reserve_loopback_udp_addr()?;
+        let host_app = TokioUdpSocket::bind("127.0.0.1:0").await?;
+        let client_app = TokioUdpSocket::bind("127.0.0.1:0").await?;
+        let host_app_addr = host_app.local_addr()?;
+        let session = "udp-pair-smoke".to_owned();
+
+        let offer_stun = stun_servers.clone();
+        let offer_signal = signal_url.clone();
+        let offer_session = session.clone();
+        let offer_task = tokio::spawn(async move {
+            if let Err(err) = run_signaling_webrtc(
+                "webrtc-offer".to_owned(),
+                offer_bridge_addr,
+                Some(host_app_addr),
+                offer_stun,
+                offer_signal,
+                offer_session,
+            )
+            .await
+            {
+                eprintln!("nsmb-net-bridge webrtc: offer smoke task failed: {err}");
+            }
+        });
+
+        let answer_task = tokio::spawn(async move {
+            if let Err(err) = run_signaling_webrtc(
+                "webrtc-answer".to_owned(),
+                answer_bridge_addr,
+                None,
+                stun_servers,
+                signal_url,
+                session,
+            )
+            .await
+            {
+                eprintln!("nsmb-net-bridge webrtc: answer smoke task failed: {err}");
+            }
+        });
+
+        wait_for_udp_payload(
+            &client_app,
+            answer_bridge_addr,
+            &host_app,
+            b"nsmb-net-bridge-client-to-host",
+            "client-to-host",
+        )
+        .await?;
+        wait_for_udp_payload(
+            &host_app,
+            offer_bridge_addr,
+            &client_app,
+            b"nsmb-net-bridge-host-to-client",
+            "host-to-client",
+        )
+        .await?;
+
+        offer_task.abort();
+        answer_task.abort();
+        server.abort();
+        println!("nsmb-net-bridge webrtc: signaling udp pair smoke passed");
         Ok(())
     }
 

@@ -142,7 +142,7 @@ def scan_segment(
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rom", default="roms/nsmb-us.nds")
-    ap.add_argument("--symbols", default="external/NSMB-Code-Reference/symbols9.x")
+    ap.add_argument("--symbols", default="tools/nsmb-mvl-rom/resources/symbols9.x")
     ap.add_argument("--overlay-id", type=lambda x: int(x, 0), default=None)
     ap.add_argument("--all-segments", action="store_true")
     ap.add_argument("--addr", type=lambda x: int(x, 0), default=None)

@@ -22,6 +22,15 @@ param(
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds",
     [string]$InputScript = "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs",
     [string]$LogDir = "logs\nsmb-mvl-manual-local",
+    [int]$MvlStage = -1,
+    [string]$MvlSceneSettings = "",
+    [ValidateSet(1, 2, 3)] [int]$MvlWins = 2,
+    [ValidateSet(3, 5, 10)] [int]$MvlBigStars = 5,
+    [ValidateSet("3", "5", "endless", "Endless")] [string]$MvlLives = "endless",
+    [ValidateSet("fixed", "random", "select")]
+    [string]$MvlCourseMode = "fixed",
+    [switch]$GenerateMvlConfiguredRoms,
+    [string]$MvlMatchSeed = "",
     [switch]$AllowJit,
     [switch]$NoFrameLimit,
     [switch]$SoftwareRenderer
@@ -157,6 +166,22 @@ if ($Rollback) {
 if ($InputUnreliable) {
     $common += @("-InputUnreliable", "-InputBundleHistory", "$InputBundleHistory")
 }
+if ($MvlStage -ge 0) {
+    $common += @("-MvlStage", "$MvlStage")
+}
+if ($MvlSceneSettings -ne "") {
+    $common += @("-MvlSceneSettings", "$MvlSceneSettings")
+}
+$common += @("-MvlWins", "$MvlWins", "-MvlBigStars", "$MvlBigStars", "-MvlLives", "$MvlLives")
+if ($MvlCourseMode -ne "fixed") {
+    $common += @("-MvlCourseMode", "$MvlCourseMode")
+}
+if ($GenerateMvlConfiguredRoms) {
+    $common += @("-GenerateMvlConfiguredRoms")
+}
+if ($MvlMatchSeed -ne "") {
+    $common += @("-MvlMatchSeed", "$MvlMatchSeed")
+}
 
 $hostArgs = @(
     "-NoProfile",
@@ -209,6 +234,7 @@ Write-Host "host wrapper pid=$($hostProc.Id) log=$hostLog"
 Write-Host "client wrapper pid=$($clientProc.Id) log=$clientLog"
 Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
 Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit)"
+Write-Host "mvlWins=$MvlWins mvlBigStars=$MvlBigStars mvlLives=$MvlLives mvlStage=$(if ($MvlStage -ge 0) { $MvlStage } else { 'auto/default' }) mvlSceneSettings=$(if ($MvlSceneSettings) { $MvlSceneSettings } else { 'derived' }) mvlCourseMode=$MvlCourseMode generateConfiguredRoms=$($GenerateMvlConfiguredRoms.IsPresent) mvlMatchSeed=$(if ($MvlMatchSeed) { $MvlMatchSeed } else { 'auto' })"
 if ($Rollback) {
     $backendLabel = if ($RollbackBackend -ne "") { $RollbackBackend } else { "savestate" }
     Write-Host "rollback enabled backend=$backendLabel window=$RollbackWindow checkpointInterval=$RollbackCheckpointInterval resimDelay=$RollbackResimulateDelayFrames resimulate=$RollbackResimulate"

@@ -147,7 +147,7 @@ constexpr melonDS::u16 kVsMovingHazardObjectID = 0x0053;
 constexpr melonDS::u32 kVsMovingHazardSettings = 0x00000000;
 constexpr int kObjectTraceSlots = 16;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
-constexpr melonDS::u32 kMvlStageSceneSettings = 0x00B4FF00;
+constexpr melonDS::u32 kMvlStageSceneDefaultSettings = 0x00B4FF00;
 constexpr melonDS::u32 kStageSceneUpdateDispatchTableAddr = 0x020CA378;
 constexpr melonDS::u32 kStageSceneRenderDispatchTableAddr = 0x020CA398;
 constexpr melonDS::u16 kStageFXObjectID = 0x0012;
@@ -733,6 +733,18 @@ struct GameStateSample
     melonDS::u32 MvlObject267Found = 0;
     melonDS::u32 MvlObject267Base = 0;
     melonDS::u32 MvlObject267StateType = 0;
+    melonDS::u32 MvlObject267LeftFound = 0;
+    melonDS::u32 MvlObject267LeftBase = 0;
+    melonDS::u32 MvlObject267LeftStateType = 0;
+    melonDS::u32 MvlObject267LeftPosX = 0;
+    melonDS::u32 MvlObject267LeftPosY = 0;
+    melonDS::u32 MvlObject267LeftPosZ = 0;
+    melonDS::u32 MvlObject267RightFound = 0;
+    melonDS::u32 MvlObject267RightBase = 0;
+    melonDS::u32 MvlObject267RightStateType = 0;
+    melonDS::u32 MvlObject267RightPosX = 0;
+    melonDS::u32 MvlObject267RightPosY = 0;
+    melonDS::u32 MvlObject267RightPosZ = 0;
     melonDS::u32 MvlGlobal965C = 0;
     melonDS::u32 MvlGlobal9670 = 0;
     melonDS::u32 MvlGlobal9674 = 0;
@@ -810,6 +822,8 @@ struct GameStateSample
     melonDS::u64 Hash = 0;
 };
 
+GameStateSample ReadGameStateSample(melonDS::NDS* nds);
+
 struct ObjectScanSample
 {
     melonDS::u32 Found = 0;
@@ -846,6 +860,12 @@ struct PlayerActorScanSample
     ObjectScanSample Actor1;
 };
 
+struct ObjectPairScanSample
+{
+    ObjectScanSample Left;
+    ObjectScanSample Right;
+};
+
 struct ObjectLifecycleSummary
 {
     melonDS::u32 Total = 0;
@@ -867,6 +887,7 @@ struct ObjectLifecycleSummary
 
 ObjectScanSample FindObjectByIDAndSettingsLoose(melonDS::NDS* nds, melonDS::u16 expectedObjectID, melonDS::u32 expectedSettings);
 ObjectScanSample FindObjectByID(melonDS::NDS* nds, melonDS::u16 expectedObjectID);
+ObjectPairScanSample FindObjectPairByIDSortedX(melonDS::NDS* nds, melonDS::u16 expectedObjectID);
 PlayerActorScanSample FindPlayerActors(melonDS::NDS* nds);
 
 struct GameStateSyncHashes
@@ -1042,6 +1063,26 @@ struct State
     int DirectMvlBootScene = 0x0F;
     int DirectMvlBootStage = 0;
     int DirectMvlBootPlayerID = -1;
+    melonDS::u32 MvlStageSceneSettings = kMvlStageSceneDefaultSettings;
+    std::string MvlCourseMode = "fixed";
+    int MvlTargetWins = 2;
+    int MvlBigStarTarget = 5;
+    melonDS::u32 MvlBigStarLogicalCount[16][2] {};
+    bool MvlBigStarAtNativeThreshold[16][2] {};
+    bool MvlBigStarTargetReachedLogged[16][2] {};
+    bool MvlBigStarCapLogged[16][2] {};
+    bool MvlEntranceSpawnNormalizedLogged[16] {};
+    bool MvlInitialPlayerSpawnRepairedLogged[16] {};
+    bool MvlAutoRestartAfterResult = false;
+    melonDS::u32 MvlAutoRestartDelayFrames = 120;
+    bool MvlAutoRestartInResult[16] {};
+    bool MvlAutoRestartResultScored[16] {};
+    melonDS::u32 MvlAutoRestartResultFrame[16] {};
+    melonDS::u32 MvlAutoRestartLastRestartFrame[16] {};
+    int MvlAutoRestartCount[16] {};
+    int MvlAutoRestartWins[16][2] {};
+    std::vector<char> MvlAutoRestartCheckpoint[16];
+    bool MvlAutoRestartCheckpointLogged[16] {};
     bool DirectMvlBootUseLoadGameSM = false;
     bool DirectMvlBootPatchLoadGameSMOnly = false;
     bool DirectMvlBootCallUpdateLoadGameSM = false;
@@ -1454,6 +1495,41 @@ int EnvInt(const char* name, int fallback)
     const char* value = std::getenv(name);
     if (!value || !value[0]) return fallback;
     return std::atoi(value);
+}
+
+melonDS::u32 EnvU32(const char* name, melonDS::u32 fallback)
+{
+    const char* value = std::getenv(name);
+    if (!value || !value[0]) return fallback;
+    return static_cast<melonDS::u32>(std::strtoul(value, nullptr, 0));
+}
+
+bool EnvHasValue(const char* name)
+{
+    const char* value = std::getenv(name);
+    return value && value[0];
+}
+
+melonDS::u32 ComposeMvlSceneSettingsFromEnvironment()
+{
+    const int bigStars = EnvInt("MELONDS_NSML_MVL_BIG_STARS", 5);
+    const int bigStarField =
+        bigStars == 10 ? 8 :
+        4;
+    const char* lives = EnvCString("MELONDS_NSML_MVL_LIVES", "endless");
+    const melonDS::u32 lifeField =
+        std::strcmp(lives, "3") == 0 ? 3u :
+        std::strcmp(lives, "5") == 0 ? 5u :
+        0xFFu;
+    // Direct MvL skips the normal settings/result flow, so match wins are
+    // enforced by the runtime restart controller. The scene setting keeps the
+    // per-round rule byte compatible with the known stable post-course-select
+    // value; Course=random is applied by choosing the stage before boot.
+    // 0xB4FF00 is the normal MvL default: BigStar=5, Lives=Endless,
+    // Course=Choose Each Time. Course selection itself is handled before direct boot.
+    const melonDS::u32 ruleHighNibble = 0xB0u;
+    const melonDS::u32 packedRules = ruleHighNibble | static_cast<melonDS::u32>(bigStarField & 0xF);
+    return (packedRules << 16) | (lifeField << 8);
 }
 
 melonDS::u32 GenerateMatchSeed()
@@ -3756,7 +3832,7 @@ void ForceNSMLStagePacketWordsIfNeeded(melonDS::u32 frame, melonDS::NDS* nds)
 
     if (G.PacketBridgeForceStageNet20OnStageScene
         && nds->ARM9Read16(kSceneCurrentSceneIDAddr) == 0x0003
-        && FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, kMvlStageSceneSettings).Found)
+        && FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, G.MvlStageSceneSettings).Found)
         nds->ARM9Write16(kNetState20Addr, 2);
 }
 
@@ -4133,7 +4209,7 @@ bool IsInputNetplayGameplayStartReady(melonDS::NDS* nds)
     const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(
         nds,
         kStageSceneObjectID,
-        kMvlStageSceneSettings);
+        G.MvlStageSceneSettings);
     if (!stageScene.Found || stageScene.StateType == 0)
         return false;
 
@@ -4499,6 +4575,16 @@ melonDS::u64 HashMainRAMRange(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32
     return hash;
 }
 
+bool IsMainRAMAddress(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 size = 1)
+{
+    if (!nds || !nds->MainRAM || addr < kMainRAMBase)
+        return false;
+
+    const melonDS::u32 offset = addr - kMainRAMBase;
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    return offset < ramLen && size <= ramLen - offset;
+}
+
 void MixGameStateValue(melonDS::u64& hash, melonDS::u32 value)
 {
     for (int i = 0; i < 4; i++)
@@ -4627,6 +4713,30 @@ void EmitStrR4SP(std::vector<melonDS::u32>& code, melonDS::u32 offset)
     EmitARM(code, 0xE58D4000u | (offset & 0xFFF));
 }
 
+void EmitStrImm(std::vector<melonDS::u32>& code, int rd, int rn, melonDS::u32 offset)
+{
+    EmitARM(code, 0xE5800000u
+        | (static_cast<melonDS::u32>(rn & 0xF) << 16)
+        | (static_cast<melonDS::u32>(rd & 0xF) << 12)
+        | (offset & 0xFFF));
+}
+
+void EmitStrbImm(std::vector<melonDS::u32>& code, int rd, int rn, melonDS::u32 offset)
+{
+    EmitARM(code, 0xE5C00000u
+        | (static_cast<melonDS::u32>(rn & 0xF) << 16)
+        | (static_cast<melonDS::u32>(rd & 0xF) << 12)
+        | (offset & 0xFFF));
+}
+
+void EmitLdrImm(std::vector<melonDS::u32>& code, int rd, int rn, melonDS::u32 offset)
+{
+    EmitARM(code, 0xE5900000u
+        | (static_cast<melonDS::u32>(rn & 0xF) << 16)
+        | (static_cast<melonDS::u32>(rd & 0xF) << 12)
+        | (offset & 0xFFF));
+}
+
 void EmitStackArg(std::vector<melonDS::u32>& code, melonDS::u32 offset, melonDS::u32 value)
 {
     if (value <= 0xFF)
@@ -4638,24 +4748,52 @@ void EmitStackArg(std::vector<melonDS::u32>& code, melonDS::u32 offset, melonDS:
     EmitStrR4SP(code, offset);
 }
 
-bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+void EmitNormalizeMvlEntranceSpawnState(std::vector<melonDS::u32>& code)
 {
-    if (!G.DirectMvlBootEnabled || !nds || instanceID < 0 || instanceID >= 16)
+    EmitLoadImm(code, 0, kEntranceSpawnEntranceIDAddr);
+    EmitMovImm(code, 1, 0);
+    EmitStrbImm(code, 1, 0, 0);
+    EmitMovImm(code, 1, 1);
+    EmitStrbImm(code, 1, 0, 1);
+    EmitLoadImm(code, 0, kEntranceTransitionFlagsAddr);
+    EmitMovImm(code, 1, 0);
+    EmitStrbImm(code, 1, 0, 0);
+    EmitStrbImm(code, 1, 0, 1);
+    EmitLoadImm(code, 0, kEntranceSpawnEntranceAddr);
+    EmitLdrImm(code, 1, 0, 0);
+    EmitARM(code, 0xE2812014u); // add r2, r1, #0x14
+    EmitStrImm(code, 2, 0, sizeof(melonDS::u32));
+}
+
+bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, bool autoRestart = false)
+{
+    if ((!G.DirectMvlBootEnabled && !autoRestart) || !nds || instanceID < 0 || instanceID >= 16)
         return false;
     if (G.DirectMvlBootHostOnly && G.NetRole != Role::Host)
         return false;
     if (G.DirectMvlBootClientOnly && G.NetRole != Role::Client)
         return false;
-    if (G.DirectMvlBootApplied[instanceID] || frame != G.DirectMvlBootFrame)
+    if (G.DirectMvlBootApplied[instanceID] || (!autoRestart && frame < G.DirectMvlBootFrame))
         return false;
 
+    int defaultPlayerID = instanceID;
+    if (G.NetRole == Role::Host)
+        defaultPlayerID = 0;
+    else if (G.NetRole == Role::Client)
+        defaultPlayerID = 1;
     const int playerID = std::clamp(
-        G.DirectMvlBootPlayerID >= 0 ? G.DirectMvlBootPlayerID : instanceID,
+        G.DirectMvlBootPlayerID >= 0 ? G.DirectMvlBootPlayerID : defaultPlayerID,
         0,
         1);
     const int scene = std::clamp(G.DirectMvlBootScene, 0, 0xFFFF);
-    const int stage = std::clamp(G.DirectMvlBootStage, 0, 4);
+    if (G.MvlCourseMode == "random" && !G.MatchSeedConfigured)
+        return false;
+    const int configuredStage = G.MvlCourseMode == "random"
+        ? static_cast<int>((G.MatchSeed + static_cast<melonDS::u32>(std::max(0, G.MvlAutoRestartCount[instanceID]))) % 5u)
+        : G.DirectMvlBootStage;
+    const int stage = std::clamp(configuredStage, 0, 4);
     melonDS::u32 vsConnectBase = 0;
+    WriteARM9U32(nds, kSceneNextSceneSettingsAddr, G.MvlStageSceneSettings);
     if (G.DirectMvlBootUseLoadGameSM)
     {
         vsConnectBase = FindObjectBaseByID(nds, 0x0006);
@@ -4740,6 +4878,7 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
         EmitARM(code, 0xE12FFF1Cu); // bx ip
         EmitARM(code, 0xE1A00000u); // nop
         EmitARM(code, kA2DJGameLoadLevelAddr);
+        EmitNormalizeMvlEntranceSpawnState(code);
     }
     else
     {
@@ -4761,6 +4900,7 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
             {
                 WriteARM9U32(nds, vsConnectBase + 0x218 + 0x008, 0x00000001);
                 WriteARM9U32(nds, vsConnectBase + 0x218 + 0x064, 0x00000409);
+                WriteARM9U32(nds, kSceneNextSceneSettingsAddr, G.MvlStageSceneSettings);
                 EmitLoadImm(code, 0, vsConnectBase + 0x218);
                 EmitLoadImm(code, 1, kA2DJVSConnectStartLoadLevelAddr);
                 EmitLoadImm(code, 2, 0);
@@ -4841,6 +4981,280 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
     std::fflush(stdout);
     nds->ARM9.JumpTo(kDirectBootTrampolineAddr);
     return true;
+}
+
+void ResetMvlBigStarTargetState(int instanceID);
+
+bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.MvlAutoRestartAfterResult || G.MvlTargetWins <= 1 || !nds || instanceID < 0 || instanceID >= 16)
+        return false;
+
+    constexpr melonDS::u16 kResultsScene = 0x000A;
+    const melonDS::u16 currentScene = nds->ARM9Read16(kSceneCurrentSceneIDAddr);
+    if (currentScene != kResultsScene)
+    {
+        if (G.MvlAutoRestartCount[instanceID] > 0
+            && currentScene == 0x0003
+            && nds->ARM9Read16(kScenePreviousSceneIDAddr) == kResultsScene
+            && nds->ARM9Read16(kSceneNextSceneIDAddr) == 0x0003
+            && frame - G.MvlAutoRestartLastRestartFrame[instanceID] >= 30)
+        {
+            nds->ARM9Write16(kSceneNextSceneIDAddr, 0x0181);
+        }
+        G.MvlAutoRestartInResult[instanceID] = false;
+        G.MvlAutoRestartResultScored[instanceID] = false;
+        return false;
+    }
+
+    if (!G.MvlAutoRestartInResult[instanceID])
+    {
+        G.MvlAutoRestartInResult[instanceID] = true;
+        G.MvlAutoRestartResultFrame[instanceID] = frame;
+        return false;
+    }
+
+    if (!G.MvlAutoRestartResultScored[instanceID])
+    {
+        const melonDS::u32 battleStars0 = nds->ARM9Read32(kGamePlayerBattleStarsAddr);
+        const melonDS::u32 battleStars1 = nds->ARM9Read32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32));
+        const melonDS::u32 collectedStars0 = nds->ARM9Read32(kGamePlayerCollectedStarsAddr);
+        const melonDS::u32 collectedStars1 = nds->ARM9Read32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32));
+        int winner = -1;
+        if (battleStars0 != battleStars1)
+            winner = battleStars0 > battleStars1 ? 0 : 1;
+        else if (collectedStars0 != collectedStars1)
+            winner = collectedStars0 > collectedStars1 ? 0 : 1;
+        else
+            winner = 0;
+        if (winner >= 0)
+            G.MvlAutoRestartWins[instanceID][winner]++;
+        G.MvlAutoRestartResultScored[instanceID] = true;
+        std::printf(
+            "NSMB MvL auto restart: result inst=%d frame=%u winner=%d stars=%u/%u collected=%u/%u matchWins=%d/%d target=%d\n",
+            instanceID,
+            frame,
+            winner,
+            battleStars0,
+            battleStars1,
+            collectedStars0,
+            collectedStars1,
+            G.MvlAutoRestartWins[instanceID][0],
+            G.MvlAutoRestartWins[instanceID][1],
+            G.MvlTargetWins);
+        std::fflush(stdout);
+    }
+
+    const int leadingWins = std::max(G.MvlAutoRestartWins[instanceID][0], G.MvlAutoRestartWins[instanceID][1]);
+    if (leadingWins >= G.MvlTargetWins)
+        return false;
+    if (frame - G.MvlAutoRestartResultFrame[instanceID] < G.MvlAutoRestartDelayFrames)
+        return false;
+
+    const int nextRestartCount = G.MvlAutoRestartCount[instanceID] + 1;
+    const int requestedStage = G.MvlCourseMode == "random" && G.MatchSeedConfigured
+        ? static_cast<int>((G.MatchSeed + static_cast<melonDS::u32>(nextRestartCount)) % 5u)
+        : std::clamp(G.DirectMvlBootStage, 0, 4);
+    bool restoredCheckpoint = false;
+    if (!G.MvlAutoRestartCheckpoint[instanceID].empty())
+    {
+        melonDS::Savestate state(
+            G.MvlAutoRestartCheckpoint[instanceID].data(),
+            static_cast<melonDS::u32>(G.MvlAutoRestartCheckpoint[instanceID].size()),
+            false);
+        restoredCheckpoint = !state.Error && nds->DoSavestate(&state) && !state.Error;
+        if (restoredCheckpoint)
+        {
+            melonDS::Platform::MP_Begin(nds->UserData);
+            WriteARM9U32(nds, kGameStageGroupAddr, 0x00000009);
+            WriteARM9U32(nds, kGameVsModeAddr, 0x00000001);
+            WriteARM9U32(nds, kSceneNextSceneSettingsAddr, G.MvlStageSceneSettings);
+        }
+    }
+
+    G.MvlAutoRestartCount[instanceID] = nextRestartCount;
+    if (!restoredCheckpoint)
+    {
+        WriteARM9U32(nds, kGameStageIDAddr, static_cast<melonDS::u32>(requestedStage));
+        WriteARM9U32(nds, kGameStageGroupAddr, 0x00000009);
+        WriteARM9U32(nds, kGameVsModeAddr, 0x00000001);
+        WriteARM9U32(nds, kSceneNextSceneSettingsAddr, G.MvlStageSceneSettings);
+        nds->ARM9Write16(kScenePreviousSceneIDAddr, kResultsScene);
+        nds->ARM9Write16(kSceneNextSceneIDAddr, 0x0003);
+        nds->ARM9Write16(kSceneCurrentSceneIDAddr, kResultsScene);
+        nds->ARM9Write16(kSceneIsSceneActiveAddr, 0x0000);
+    }
+    G.MvlAutoRestartLastRestartFrame[instanceID] = frame;
+    ResetMvlBigStarTargetState(instanceID);
+
+    G.MvlAutoRestartInResult[instanceID] = false;
+    G.MvlAutoRestartResultScored[instanceID] = false;
+    const int actualStage = static_cast<int>(nds->ARM9Read32(kGameStageIDAddr));
+    std::printf(
+        "NSMB MvL auto restart: inst=%d frame=%u nextGame=%d stage=%d requestedStage=%d matchWins=%d/%d target=%d checkpoint=%d\n",
+        instanceID,
+        frame,
+        G.MvlAutoRestartCount[instanceID] + 1,
+        actualStage,
+        requestedStage,
+        G.MvlAutoRestartWins[instanceID][0],
+        G.MvlAutoRestartWins[instanceID][1],
+        G.MvlTargetWins,
+        restoredCheckpoint ? 1 : 0);
+    std::fflush(stdout);
+    return true;
+}
+
+void ResetMvlBigStarTargetState(int instanceID)
+{
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    for (int player = 0; player < 2; player++)
+    {
+        G.MvlBigStarLogicalCount[instanceID][player] = 0;
+        G.MvlBigStarAtNativeThreshold[instanceID][player] = false;
+        G.MvlBigStarTargetReachedLogged[instanceID][player] = false;
+        G.MvlBigStarCapLogged[instanceID][player] = false;
+    }
+}
+
+void EnforceMvlBigStarTargetIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (G.MvlBigStarTarget <= 3 || !nds || !nds->MainRAM)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (nds->ARM9Read16(kSceneCurrentSceneIDAddr) != 0x0003)
+        return;
+    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
+        return;
+
+    for (int player = 0; player < 2; player++)
+    {
+        const melonDS::u32 offset = static_cast<melonDS::u32>(player) * sizeof(melonDS::u32);
+        const melonDS::u32 battle = nds->ARM9Read32(kGamePlayerBattleStarsAddr + offset);
+        const melonDS::u32 displayed = nds->ARM9Read32(kGamePlayerDisplayedStarsAddr + offset);
+        const melonDS::u32 collected = nds->ARM9Read32(kGamePlayerCollectedStarsAddr + offset);
+        melonDS::u32& logical = G.MvlBigStarLogicalCount[instanceID][player];
+        const melonDS::u32 observed = std::max({battle, displayed, collected});
+        const bool forceAbsolute = G.ForcePlayerStarCountersEnabled
+            && frame >= G.ForcePlayerStarCountersStartFrame
+            && (G.ForcePlayerStarCountersEndFrame == 0 || frame <= G.ForcePlayerStarCountersEndFrame);
+
+        if (forceAbsolute)
+        {
+            logical = observed;
+        }
+        else if (observed >= 3)
+        {
+            if (!G.MvlBigStarAtNativeThreshold[instanceID][player])
+                logical = logical < 2 ? observed : logical + (observed - 2);
+            G.MvlBigStarAtNativeThreshold[instanceID][player] = true;
+        }
+        else
+        {
+            G.MvlBigStarAtNativeThreshold[instanceID][player] = false;
+            if (observed > logical || observed < 2)
+                logical = observed;
+        }
+
+        if (logical >= static_cast<melonDS::u32>(G.MvlBigStarTarget))
+        {
+            if (battle < 3)
+                nds->ARM9Write32(kGamePlayerBattleStarsAddr + offset, 3);
+            if (displayed < 3)
+                nds->ARM9Write32(kGamePlayerDisplayedStarsAddr + offset, 3);
+            if (collected < 3)
+                nds->ARM9Write32(kGamePlayerCollectedStarsAddr + offset, 3);
+            if (!G.MvlBigStarTargetReachedLogged[instanceID][player])
+            {
+                std::printf(
+                    "NSMB MvL settings: big-star target reached inst=%d frame=%u player=%d target=%d logical=%u battle=%u displayed=%u collected=%u\n",
+                    instanceID,
+                    frame,
+                    player,
+                    G.MvlBigStarTarget,
+                    logical,
+                    battle,
+                    displayed,
+                    collected);
+                std::fflush(stdout);
+                G.MvlBigStarTargetReachedLogged[instanceID][player] = true;
+            }
+            continue;
+        }
+
+        if (observed >= 3)
+        {
+            nds->ARM9Write32(kGamePlayerBattleStarsAddr + offset, 2);
+            nds->ARM9Write32(kGamePlayerDisplayedStarsAddr + offset, 2);
+            nds->ARM9Write32(kGamePlayerCollectedStarsAddr + offset, 2);
+            if (!G.MvlBigStarCapLogged[instanceID][player])
+            {
+                std::printf(
+                    "NSMB MvL settings: capped native 3-star result inst=%d frame=%u player=%d target=%d logical=%u battle=%u displayed=%u collected=%u\n",
+                    instanceID,
+                    frame,
+                    player,
+                    G.MvlBigStarTarget,
+                    logical,
+                    battle,
+                    displayed,
+                    collected);
+                std::fflush(stdout);
+                G.MvlBigStarCapLogged[instanceID][player] = true;
+            }
+        }
+    }
+}
+
+void SaveMvlAutoRestartCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.MvlAutoRestartAfterResult || G.MvlTargetWins <= 1 || !nds || !nds->MainRAM)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (!G.MvlAutoRestartCheckpoint[instanceID].empty())
+        return;
+    if (G.MvlAutoRestartInResult[instanceID] || G.MvlAutoRestartCount[instanceID] != 0)
+        return;
+    if (nds->ARM9Read16(kSceneCurrentSceneIDAddr) != 0x0003)
+        return;
+    if (nds->ARM9Read16(kSceneIsSceneActiveAddr) == 0)
+        return;
+    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
+        return;
+
+    const GameStateSample sample = ReadGameStateSample(nds);
+    if (!sample.PlayerActor0Found || !sample.PlayerActor1Found || !sample.VsStarActorFound || !sample.StageSceneFound)
+        return;
+    if (sample.StageSceneStateType != 1)
+        return;
+
+    melonDS::Savestate state;
+    if (state.Error || !nds->DoSavestate(&state) || state.Error)
+    {
+        if (!G.MvlAutoRestartCheckpointLogged[instanceID])
+        {
+            std::printf("NSMB MvL auto restart: failed to save checkpoint inst=%d frame=%u\n", instanceID, frame);
+            std::fflush(stdout);
+            G.MvlAutoRestartCheckpointLogged[instanceID] = true;
+        }
+        return;
+    }
+
+    G.MvlAutoRestartCheckpoint[instanceID].assign(
+        reinterpret_cast<const char*>(state.Buffer()),
+        reinterpret_cast<const char*>(state.Buffer()) + state.Length());
+    G.MvlAutoRestartCheckpointLogged[instanceID] = true;
+    std::printf(
+        "NSMB MvL auto restart: saved checkpoint inst=%d frame=%u bytes=%u stage=%u settings=0x%08X\n",
+        instanceID,
+        frame,
+        state.Length(),
+        sample.StageID,
+        sample.StageSceneSettings);
+    std::fflush(stdout);
 }
 
 bool InjectCourseSelectFactoryCall(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -5187,6 +5601,76 @@ ObjectScanSample FindObjectByIDAndSettingsLoose(melonDS::NDS* nds, melonDS::u16 
     return sample;
 }
 
+void InsertObjectByPosX(ObjectPairScanSample& pair, const ObjectScanSample& actor)
+{
+    if (!actor.Found)
+        return;
+    if (!pair.Left.Found ||
+        actor.PosX < pair.Left.PosX ||
+        (actor.PosX == pair.Left.PosX && actor.GUID < pair.Left.GUID))
+    {
+        pair.Right = pair.Left;
+        pair.Left = actor;
+        return;
+    }
+    if ((!pair.Right.Found ||
+         actor.PosX < pair.Right.PosX ||
+         (actor.PosX == pair.Right.PosX && actor.GUID < pair.Right.GUID)) &&
+        actor.GUID != pair.Left.GUID)
+    {
+        pair.Right = actor;
+    }
+}
+
+ObjectPairScanSample FindObjectPairByIDSortedX(melonDS::NDS* nds, melonDS::u16 expectedObjectID)
+{
+    ObjectPairScanSample pair;
+    if (!nds || !nds->MainRAM)
+        return pair;
+
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (ramLen < 0x120)
+        return pair;
+
+    for (melonDS::u32 off = 0; off <= ramLen - 0x120; off += 4)
+    {
+        melonDS::u32 vtable = 0;
+        melonDS::u32 guid = 0;
+        melonDS::u32 settings = 0;
+        melonDS::u16 objectID = 0;
+        melonDS::u16 stateType = 0;
+        melonDS::u32 flags = 0;
+        if (!ReadMainRAMU32(nds, off, vtable) ||
+            !ReadMainRAMU32(nds, off + 4, guid) ||
+            !ReadMainRAMU32(nds, off + 8, settings) ||
+            !ReadMainRAMU16(nds, off + 0x0C, objectID) ||
+            !ReadMainRAMU16(nds, off + 0x0E, stateType) ||
+            !ReadMainRAMU32(nds, off + 0x10, flags))
+            continue;
+
+        if (vtable < kMainRAMBase || vtable >= kMainRAMBase + ramLen)
+            continue;
+        if (guid == 0 || guid >= 0x10000)
+            continue;
+        if (objectID != expectedObjectID)
+            continue;
+        if (flags >= 0x10000000)
+            continue;
+
+        ObjectScanSample actor;
+        actor.Found = 1;
+        actor.GUID = guid;
+        actor.Base = kMainRAMBase + off;
+        actor.Settings = settings;
+        actor.StateType = stateType;
+        actor.Flags = flags;
+        ReadObjectTransform(nds, off, actor);
+        InsertObjectByPosX(pair, actor);
+    }
+
+    return pair;
+}
+
 void InsertPlayerActorByGUID(PlayerActorScanSample& players, const ObjectScanSample& actor)
 {
     if (!actor.Found)
@@ -5349,6 +5833,93 @@ void ForceEntranceSpawnPointersIfNeeded(int instanceID, melonDS::u32 frame, melo
             G.ForceEntranceSpawnPtr1,
             G.ForceEntranceSpawnID0,
             G.ForceEntranceSpawnID1);
+    }
+}
+
+void WriteObjectTransform(melonDS::NDS* nds, const ObjectScanSample& actor, melonDS::u32 posX, melonDS::u32 posY, melonDS::u32 posZ, bool clearVelocity);
+
+void NormalizeMvlEntranceSpawnStateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!nds || !nds->MainRAM || instanceID < 0 || instanceID >= 16)
+        return;
+    if (!IsMarioVsLuigiGameplay(nds))
+        return;
+
+    const melonDS::u32 oldID0 = nds->ARM9Read8(kEntranceSpawnEntranceIDAddr);
+    const melonDS::u32 oldID1 = nds->ARM9Read8(kEntranceSpawnEntranceIDAddr + 1);
+    const melonDS::u32 oldPtr0 = nds->ARM9Read32(kEntranceSpawnEntranceAddr);
+    const melonDS::u32 oldPtr1 = nds->ARM9Read32(kEntranceSpawnEntranceAddr + sizeof(melonDS::u32));
+
+    const bool idsNeedFix = oldID0 != 0 || oldID1 != 1;
+    const bool ptr0Valid = IsMainRAMAddress(nds, oldPtr0, 0x14);
+    const bool ptr1Valid = IsMainRAMAddress(nds, oldPtr1, 0x14);
+    const bool fallbackPtr1Valid = IsMainRAMAddress(nds, oldPtr0 + 0x14, 0x14);
+    const bool ptrsNeedFix = ptr0Valid && fallbackPtr1Valid && (!ptr1Valid || oldPtr1 == oldPtr0);
+    if (!idsNeedFix && !ptrsNeedFix)
+        return;
+
+    nds->ARM9Write8(kEntranceSpawnEntranceIDAddr, 0);
+    nds->ARM9Write8(kEntranceSpawnEntranceIDAddr + 1, 1);
+    nds->ARM9Write8(kEntranceTransitionFlagsAddr, 0);
+    nds->ARM9Write8(kEntranceTransitionFlagsAddr + 1, 0);
+    if (ptrsNeedFix)
+    {
+        nds->ARM9Write32(kEntranceSpawnEntranceAddr, oldPtr0);
+        nds->ARM9Write32(kEntranceSpawnEntranceAddr + sizeof(melonDS::u32), oldPtr0 + 0x14);
+    }
+
+    if (!G.MvlEntranceSpawnNormalizedLogged[instanceID])
+    {
+        G.MvlEntranceSpawnNormalizedLogged[instanceID] = true;
+        std::printf(
+            "NSMB MvL: normalized entrance spawn state inst=%d frame=%u ids=%u/%u->0/1 ptr=%08X/%08X->%08X/%08X\n",
+            instanceID,
+            frame,
+            oldID0,
+            oldID1,
+            oldPtr0,
+            oldPtr1,
+            oldPtr0,
+            ptrsNeedFix ? oldPtr0 + 0x14 : oldPtr1);
+        std::fflush(stdout);
+    }
+}
+
+void RepairMvlInitialPlayerSpawnIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!nds || !nds->MainRAM || instanceID < 0 || instanceID >= 16)
+        return;
+    if (!IsMarioVsLuigiGameplay(nds))
+        return;
+
+    const PlayerActorScanSample players = FindPlayerActors(nds);
+    if (!players.Actor0.Found || !players.Actor1.Found)
+        return;
+
+    constexpr melonDS::u32 kExpectedPlayerSpawnDeltaX = 0x00050000;
+    if (players.Actor1.PosX != 0xFFFF8000u)
+        return;
+
+    const melonDS::u32 fixedX = players.Actor0.PosX + kExpectedPlayerSpawnDeltaX;
+    WriteObjectTransform(
+        nds,
+        players.Actor1,
+        fixedX,
+        players.Actor1.PosY,
+        players.Actor1.PosZ,
+        true);
+
+    if (!G.MvlInitialPlayerSpawnRepairedLogged[instanceID])
+    {
+        G.MvlInitialPlayerSpawnRepairedLogged[instanceID] = true;
+        std::printf(
+            "NSMB MvL: repaired initial player spawn inst=%d frame=%u p0=%08X p1=%08X->%08X\n",
+            instanceID,
+            frame,
+            players.Actor0.PosX,
+            players.Actor1.PosX,
+            fixedX);
+        std::fflush(stdout);
     }
 }
 
@@ -5701,13 +6272,13 @@ void ForceStageSceneRuntimeWordsIfNeeded(int instanceID, melonDS::u32 frame, mel
     const bool wrote154 = WriteObjectWordByIDAndSettings(
         nds,
         kStageSceneObjectID,
-        kMvlStageSceneSettings,
+        G.MvlStageSceneSettings,
         0x154,
         G.ForceStageSceneWord154);
     const bool wrote160 = WriteObjectWordByIDAndSettings(
         nds,
         kStageSceneObjectID,
-        kMvlStageSceneSettings,
+        G.MvlStageSceneSettings,
         0x160,
         G.ForceStageSceneWord160);
     if (!G.ForceStageSceneRuntimeWordsLogged[instanceID])
@@ -5742,7 +6313,7 @@ void ForceStageSceneActiveIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
     if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
         return;
 
-    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, kMvlStageSceneSettings);
+    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, G.MvlStageSceneSettings);
     if (!stageScene.Found || !IsARM9MainRAMAddress(stageScene.Base))
     {
         if (!G.ForceStageSceneActiveLogged[instanceID])
@@ -5932,7 +6503,7 @@ bool CallStageScenePostCreateIfNeeded(int instanceID, melonDS::u32 frame, melonD
     const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(
         nds,
         kStageSceneObjectID,
-        kMvlStageSceneSettings);
+        G.MvlStageSceneSettings);
     if (!stageScene.Found || !IsARM9MainRAMAddress(stageScene.Base))
     {
         std::printf(
@@ -6414,7 +6985,7 @@ void ForceStageSceneStartGateIfNeeded(int instanceID, melonDS::u32 frame, melonD
     if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
         return;
 
-    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, kMvlStageSceneSettings);
+    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, G.MvlStageSceneSettings);
     if (!stageScene.Found || !IsARM9MainRAMAddress(stageScene.Base))
     {
         if (!G.ForceStageSceneStartGateLogged[instanceID])
@@ -7049,7 +7620,7 @@ void ForceStageSceneContinueGateIfNeeded(int instanceID, melonDS::u32 frame, mel
     if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
         return;
 
-    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, kMvlStageSceneSettings);
+    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, G.MvlStageSceneSettings);
     if (!stageScene.Found || !IsARM9MainRAMAddress(stageScene.Base))
     {
         if (!G.ForceStageSceneContinueGateLogged[instanceID])
@@ -7647,8 +8218,8 @@ void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     }
     if (G.GameStateApplyStageObjects && sample.StageSceneFound)
     {
-        WriteObjectWordByIDAndSettings(nds, kStageSceneObjectID, kMvlStageSceneSettings, 0x154, sample.StageSceneWord154);
-        WriteObjectWordByIDAndSettings(nds, kStageSceneObjectID, kMvlStageSceneSettings, 0x160, sample.StageSceneWord160);
+        WriteObjectWordByIDAndSettings(nds, kStageSceneObjectID, G.MvlStageSceneSettings, 0x154, sample.StageSceneWord154);
+        WriteObjectWordByIDAndSettings(nds, kStageSceneObjectID, G.MvlStageSceneSettings, 0x160, sample.StageSceneWord160);
     }
     if (G.GameStateApplyStageObjects && sample.MovingHazardFound)
     {
@@ -8052,9 +8623,9 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
             sample.StageCameraWord1A0 = nds->ARM9Read32(stageCamera.Base + 0x1A0);
         }
     }
-    ObjectScanSample stageScene = FindObjectByIDAndSettings(nds, kStageSceneObjectID, kMvlStageSceneSettings);
+    ObjectScanSample stageScene = FindObjectByIDAndSettings(nds, kStageSceneObjectID, G.MvlStageSceneSettings);
     if (!stageScene.Found)
-        stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, kMvlStageSceneSettings);
+        stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, G.MvlStageSceneSettings);
     if (stageScene.Found)
     {
         sample.StageSceneFound = 1;
@@ -8152,6 +8723,19 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.MvlObject267Found = mvlObject267.Found;
     sample.MvlObject267Base = mvlObject267.Base;
     sample.MvlObject267StateType = mvlObject267.StateType;
+    const ObjectPairScanSample mvlObject267Pair = FindObjectPairByIDSortedX(nds, kMvlObject267ID);
+    sample.MvlObject267LeftFound = mvlObject267Pair.Left.Found;
+    sample.MvlObject267LeftBase = mvlObject267Pair.Left.Base;
+    sample.MvlObject267LeftStateType = mvlObject267Pair.Left.StateType;
+    sample.MvlObject267LeftPosX = mvlObject267Pair.Left.PosX;
+    sample.MvlObject267LeftPosY = mvlObject267Pair.Left.PosY;
+    sample.MvlObject267LeftPosZ = mvlObject267Pair.Left.PosZ;
+    sample.MvlObject267RightFound = mvlObject267Pair.Right.Found;
+    sample.MvlObject267RightBase = mvlObject267Pair.Right.Base;
+    sample.MvlObject267RightStateType = mvlObject267Pair.Right.StateType;
+    sample.MvlObject267RightPosX = mvlObject267Pair.Right.PosX;
+    sample.MvlObject267RightPosY = mvlObject267Pair.Right.PosY;
+    sample.MvlObject267RightPosZ = mvlObject267Pair.Right.PosZ;
     sample.MvlGlobal965C = nds->ARM9Read8(0x020CA698);
     sample.MvlGlobal9670 = nds->ARM9Read8(0x020CA6AC);
     sample.MvlGlobal9674 = nds->ARM9Read8(0x020CA6B0);
@@ -8808,6 +9392,18 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                      << ",0x" << sample.MvlObject267Found
                      << ",0x" << sample.MvlObject267Base
                      << ",0x" << sample.MvlObject267StateType
+                     << ",0x" << sample.MvlObject267LeftFound
+                     << ",0x" << sample.MvlObject267LeftBase
+                     << ",0x" << sample.MvlObject267LeftStateType
+                     << ",0x" << sample.MvlObject267LeftPosX
+                     << ",0x" << sample.MvlObject267LeftPosY
+                     << ",0x" << sample.MvlObject267LeftPosZ
+                     << ",0x" << sample.MvlObject267RightFound
+                     << ",0x" << sample.MvlObject267RightBase
+                     << ",0x" << sample.MvlObject267RightStateType
+                     << ",0x" << sample.MvlObject267RightPosX
+                     << ",0x" << sample.MvlObject267RightPosY
+                     << ",0x" << sample.MvlObject267RightPosZ
                      << ",0x" << sample.MvlGlobal965C
                      << ",0x" << sample.MvlGlobal9670
                      << ",0x" << sample.MvlGlobal9674
@@ -9648,7 +10244,30 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_DIRECT_MVL_BOOT_FRAME", 900)));
     G.DirectMvlBootScene = std::clamp(EnvInt("MELONDS_NSML_DIRECT_MVL_BOOT_SCENE", 0x0F), 0, 0xFFFF);
     G.DirectMvlBootStage = std::clamp(EnvInt("MELONDS_NSML_DIRECT_MVL_BOOT_STAGE", 0), 0, 4);
+    G.DirectMvlBootStage = std::clamp(EnvInt("MELONDS_NSML_MVL_STAGE", G.DirectMvlBootStage), 0, 4);
     G.DirectMvlBootPlayerID = EnvInt("MELONDS_NSML_DIRECT_MVL_BOOT_PLAYER_ID", -1);
+    G.MvlStageSceneSettings = EnvHasValue("MELONDS_NSML_MVL_SCENE_SETTINGS")
+        ? EnvU32("MELONDS_NSML_MVL_SCENE_SETTINGS", kMvlStageSceneDefaultSettings)
+        : ComposeMvlSceneSettingsFromEnvironment();
+    G.MvlCourseMode = EnvCString("MELONDS_NSML_MVL_COURSE_MODE", "fixed");
+    G.MvlTargetWins = std::clamp(EnvInt("MELONDS_NSML_MVL_WINS", 2), 1, 3);
+    G.MvlBigStarTarget = std::clamp(EnvInt("MELONDS_NSML_MVL_BIG_STARS", 5), 3, 10);
+    G.MvlAutoRestartAfterResult = EnvFlag("MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT");
+    G.MvlAutoRestartDelayFrames = static_cast<melonDS::u32>(
+        std::max(1, EnvInt("MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES", 120)));
+    if (G.MvlCourseMode == "select")
+    {
+        std::printf("NSMB MvL settings: courseMode=select is not supported by direct boot; using fixed stage=%d\n",
+            G.DirectMvlBootStage);
+        G.MvlCourseMode = "fixed";
+    }
+    else if (G.MvlCourseMode != "fixed" && G.MvlCourseMode != "random")
+    {
+        std::printf("NSMB MvL settings: unknown courseMode=%s; using fixed stage=%d\n",
+            G.MvlCourseMode.c_str(),
+            G.DirectMvlBootStage);
+        G.MvlCourseMode = "fixed";
+    }
     G.DirectMvlBootUseLoadGameSM = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_LOAD_SM");
     G.DirectMvlBootPatchLoadGameSMOnly = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_PATCH_LOAD_SM_ONLY");
     G.DirectMvlBootCallUpdateLoadGameSM = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_CALL_UPDATE_SM");
@@ -10167,7 +10786,7 @@ void InitFromEnvironment()
         }
         else
         {
-            G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,arm9PC,arm9LR,arm9SP,arm9CPSR,appFrameLength,appUpdateTask,appSleepPhase,appSleepControl,appSleeping,appSleepPhaseTimer,appSleepWakeUpTimer,appBootParam,appBootTarget,appBootScene,ggid,netCurrentLanguage,netLocalAid,netState14,netState1C,netState20,netState24,netExpectedConsoleCount,netMultiBootSession,netSessionState,netModuleState,netMaxSessionChildren,netMaxConsoleCount,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,stageActorFreezeFlag,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor0PlayerID,playerActor0TransitionStep,playerActor0SignalLock,playerActor0Flag192,playerActor0Flags728,playerActor0Flags72C,playerActor0Flags730,playerActor0TransitFunc,playerActor0TransitArg,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,playerActor1PlayerID,playerActor1TransitionStep,playerActor1SignalLock,playerActor1Flag192,playerActor1Flags728,playerActor1Flags72C,playerActor1Flags730,playerActor1TransitFunc,playerActor1TransitArg,playerTransitionStatus0,playerTransitionStatus1,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectByte0E2,vsConnectByte106,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord138,vsConnectWord13C,vsConnectWord140,vsConnectWord144,vsConnectWord148,vsConnectByte153,vsConnectByte154,vsConnectByte155,vsConnectByte156,vsConnectByte157,vsConnectByte158,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectSettings,courseSelectWord060,courseSelectWord064,courseSelectWord068,courseSelectWord06C,courseSelectWord070,courseSelectWord074,courseSelectWord078,courseSelectWord07C,courseSelectWord080,courseSelectWord084,courseSelectWord088,courseSelectWord08C,courseSelectWord090,stageCameraFound,stageCameraWord190,stageCameraWord194,stageCameraWord19C,stageCameraWord1A0,stageActorManagerFound,stageActorManagerBase,stageActorManagerStateType,stageControllerFound,stageControllerBase,stageControllerStateType,mvlObject267Found,mvlObject267Base,mvlObject267StateType,mvlGlobal965C,mvlGlobal9670,mvlGlobal9674,mvlGlobal9694_0,mvlGlobal9694_1,mvlStageLayoutGateCAC6C,mvlStageLayoutGateCAC74,mvlStageLayoutGateCAC7C,mvlStageLayoutGateCACDC,mvlStageLayoutGateCAE80,mvlStageLayoutGateCAE74,mvlStageLayoutGateCAEB8,mvlStageLayoutGateCAF20,mvlStageLayoutGateCAF40,mvlStageLayoutGateCA8C0,mvlStageLayoutGateCA8D0,mvlStageLayoutGateCAD30,mvlManagerBase,mvlManagerVTable,mvlManagerGuid,mvlManagerSettings,mvlManagerObjectId,mvlManagerStateType,mvlManagerFlags,mvlManagerUnk54,mvlManagerResourcesHeap,mvlManagerWordA8CC,mvlManagerWordA8D0,mvlManagerWordA8D4,mvlManagerWordA8D8,mvlManagerWordA8DC,mvlManagerWordA8E0,mvlManagerWordA8E4,mvlManagerHalfA8E8,mvlManagerHalfA8EA,mvlManagerByteA8EC,mvlManagerHalf494,mvlManagerHalf4A0,stageSceneFound,stageSceneBase,stageSceneSettings,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,stageSceneWord5618,stageSceneWord561C,stageSceneWord563C,stageSceneByte5643,stageSceneByte5644,stageSceneByte5645,stageSceneByte5646,stageSceneByte5648,stageSceneByte5649,stageSceneUpdateDispatchFunc,stageSceneUpdateDispatchArg,stageSceneRenderDispatchFunc,stageSceneRenderDispatchArg,stageSceneGlobal9280,stageSceneGlobal9284,stageSceneGlobal928C,stageSceneGlobal92B4,stageSceneGlobal92C0,stageSceneGlobal92C8,stageSceneGlobal92CC,stageSceneGlobal92D0,stageLiquidPlayerSlot,stageLiquidHeight0,stageLiquidHeight1,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY,movingHazardLastStepX,movingHazardLastStepY,movingHazardLastStepZ,movingHazardVelH,movingHazardTargetVelH,movingHazardAccelV,movingHazardTargetVelV,movingHazardAccelH,movingHazardTargetVelX,movingHazardTargetVelY,movingHazardTargetVelZ,objectScanTotal,objectNotCreatedCount,objectActiveCount,objectDeadCount,objectSkipUpdateCount,objectSkipRenderCount,objectFirstNotCreatedId,objectFirstNotCreatedBase,objectFirstNotCreatedFlags,objectSecondNotCreatedId,objectSecondNotCreatedBase,objectSecondNotCreatedFlags,objectActiveId0,objectActiveSettings0,objectActiveBase0,objectActiveId1,objectActiveSettings1,objectActiveBase1,objectActiveId2,objectActiveSettings2,objectActiveBase2,objectActiveId3,objectActiveSettings3,objectActiveBase3,objectActiveId4,objectActiveSettings4,objectActiveBase4,objectActiveId5,objectActiveSettings5,objectActiveBase5,objectActiveId6,objectActiveSettings6,objectActiveBase6,objectActiveId7,objectActiveSettings7,objectActiveBase7,objectActiveId8,objectActiveSettings8,objectActiveBase8,objectActiveId9,objectActiveSettings9,objectActiveBase9,objectActiveId10,objectActiveSettings10,objectActiveBase10,objectActiveId11,objectActiveSettings11,objectActiveBase11,objectActiveId12,objectActiveSettings12,objectActiveBase12,objectActiveId13,objectActiveSettings13,objectActiveBase13,objectActiveId14,objectActiveSettings14,objectActiveBase14,objectActiveId15,objectActiveSettings15,objectActiveBase15";
+                G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,arm9PC,arm9LR,arm9SP,arm9CPSR,appFrameLength,appUpdateTask,appSleepPhase,appSleepControl,appSleeping,appSleepPhaseTimer,appSleepWakeUpTimer,appBootParam,appBootTarget,appBootScene,ggid,netCurrentLanguage,netLocalAid,netState14,netState1C,netState20,netState24,netExpectedConsoleCount,netMultiBootSession,netSessionState,netModuleState,netMaxSessionChildren,netMaxConsoleCount,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,stageActorFreezeFlag,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor0PlayerID,playerActor0TransitionStep,playerActor0SignalLock,playerActor0Flag192,playerActor0Flags728,playerActor0Flags72C,playerActor0Flags730,playerActor0TransitFunc,playerActor0TransitArg,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,playerActor1PlayerID,playerActor1TransitionStep,playerActor1SignalLock,playerActor1Flag192,playerActor1Flags728,playerActor1Flags72C,playerActor1Flags730,playerActor1TransitFunc,playerActor1TransitArg,playerTransitionStatus0,playerTransitionStatus1,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectByte0E2,vsConnectByte106,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord138,vsConnectWord13C,vsConnectWord140,vsConnectWord144,vsConnectWord148,vsConnectByte153,vsConnectByte154,vsConnectByte155,vsConnectByte156,vsConnectByte157,vsConnectByte158,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectSettings,courseSelectWord060,courseSelectWord064,courseSelectWord068,courseSelectWord06C,courseSelectWord070,courseSelectWord074,courseSelectWord078,courseSelectWord07C,courseSelectWord080,courseSelectWord084,courseSelectWord088,courseSelectWord08C,courseSelectWord090,stageCameraFound,stageCameraWord190,stageCameraWord194,stageCameraWord19C,stageCameraWord1A0,stageActorManagerFound,stageActorManagerBase,stageActorManagerStateType,stageControllerFound,stageControllerBase,stageControllerStateType,mvlObject267Found,mvlObject267Base,mvlObject267StateType,mvlObject267LeftFound,mvlObject267LeftBase,mvlObject267LeftStateType,mvlObject267LeftX,mvlObject267LeftY,mvlObject267LeftZ,mvlObject267RightFound,mvlObject267RightBase,mvlObject267RightStateType,mvlObject267RightX,mvlObject267RightY,mvlObject267RightZ,mvlGlobal965C,mvlGlobal9670,mvlGlobal9674,mvlGlobal9694_0,mvlGlobal9694_1,mvlStageLayoutGateCAC6C,mvlStageLayoutGateCAC74,mvlStageLayoutGateCAC7C,mvlStageLayoutGateCACDC,mvlStageLayoutGateCAE80,mvlStageLayoutGateCAE74,mvlStageLayoutGateCAEB8,mvlStageLayoutGateCAF20,mvlStageLayoutGateCAF40,mvlStageLayoutGateCA8C0,mvlStageLayoutGateCA8D0,mvlStageLayoutGateCAD30,mvlManagerBase,mvlManagerVTable,mvlManagerGuid,mvlManagerSettings,mvlManagerObjectId,mvlManagerStateType,mvlManagerFlags,mvlManagerUnk54,mvlManagerResourcesHeap,mvlManagerWordA8CC,mvlManagerWordA8D0,mvlManagerWordA8D4,mvlManagerWordA8D8,mvlManagerWordA8DC,mvlManagerWordA8E0,mvlManagerWordA8E4,mvlManagerHalfA8E8,mvlManagerHalfA8EA,mvlManagerByteA8EC,mvlManagerHalf494,mvlManagerHalf4A0,stageSceneFound,stageSceneBase,stageSceneSettings,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,stageSceneWord5618,stageSceneWord561C,stageSceneWord563C,stageSceneByte5643,stageSceneByte5644,stageSceneByte5645,stageSceneByte5646,stageSceneByte5648,stageSceneByte5649,stageSceneUpdateDispatchFunc,stageSceneUpdateDispatchArg,stageSceneRenderDispatchFunc,stageSceneRenderDispatchArg,stageSceneGlobal9280,stageSceneGlobal9284,stageSceneGlobal928C,stageSceneGlobal92B4,stageSceneGlobal92C0,stageSceneGlobal92C8,stageSceneGlobal92CC,stageSceneGlobal92D0,stageLiquidPlayerSlot,stageLiquidHeight0,stageLiquidHeight1,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY,movingHazardLastStepX,movingHazardLastStepY,movingHazardLastStepZ,movingHazardVelH,movingHazardTargetVelH,movingHazardAccelV,movingHazardTargetVelV,movingHazardAccelH,movingHazardTargetVelX,movingHazardTargetVelY,movingHazardTargetVelZ,objectScanTotal,objectNotCreatedCount,objectActiveCount,objectDeadCount,objectSkipUpdateCount,objectSkipRenderCount,objectFirstNotCreatedId,objectFirstNotCreatedBase,objectFirstNotCreatedFlags,objectSecondNotCreatedId,objectSecondNotCreatedBase,objectSecondNotCreatedFlags,objectActiveId0,objectActiveSettings0,objectActiveBase0,objectActiveId1,objectActiveSettings1,objectActiveBase1,objectActiveId2,objectActiveSettings2,objectActiveBase2,objectActiveId3,objectActiveSettings3,objectActiveBase3,objectActiveId4,objectActiveSettings4,objectActiveBase4,objectActiveId5,objectActiveSettings5,objectActiveBase5,objectActiveId6,objectActiveSettings6,objectActiveBase6,objectActiveId7,objectActiveSettings7,objectActiveBase7,objectActiveId8,objectActiveSettings8,objectActiveBase8,objectActiveId9,objectActiveSettings9,objectActiveBase9,objectActiveId10,objectActiveSettings10,objectActiveBase10,objectActiveId11,objectActiveSettings11,objectActiveBase11,objectActiveId12,objectActiveSettings12,objectActiveBase12,objectActiveId13,objectActiveSettings13,objectActiveBase13,objectActiveId14,objectActiveSettings14,objectActiveBase14,objectActiveId15,objectActiveSettings15,objectActiveBase15";
             if (G.GameStateTraceExtended)
                 G.GameStateTrace << ",playerCount,player0Powerup,player1Powerup,player0InventoryPowerup,player1InventoryPowerup,player0Dead,player1Dead,player0Character,player1Character,player0Lives,player1Lives,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,entranceSpawnID0,entranceSpawnID1,entranceTransitionFlags0,entranceTransitionFlags1,entranceSpawnPtr0,entranceSpawnPtr1,stageCameraBase,stageCameraTargetX,stageCameraTargetY,stageCameraTargetZ,stageCameraPositionX,stageCameraPositionY,stageCameraPositionZ,stageCameraUpX,stageCameraUpY,stageCameraUpZ,stageCameraUnk114,stageCameraUnk118,stageCameraUnk11C,stageCameraUnk128,stageCameraUnk12C,stageCameraRoll130,stageCameraGlobalX0,stageCameraGlobalX1,stageCameraGlobalY0,stageCameraGlobalY1,stageCameraGlobalWidth0,stageCameraGlobalWidth1,stageCameraGlobalHeight0,stageCameraGlobalHeight1,playerCameraFocusPosX0,playerCameraFocusPosX1,playerCameraFocusPosY0,playerCameraFocusPosY1,playerCameraFocusPosZ0,playerCameraFocusPosZ1,playerCameraFocusVelX0,playerCameraFocusVelX1,playerCameraFocusVelY0,playerCameraFocusVelY1,playerCameraFocusVelZ0,playerCameraFocusVelZ1,stageDisplayCameraX,cameraDbgCA880,cameraDbgCAE04,cameraDbgCAE14,cameraDbgCAD6C,cameraDbgCAD8C,cameraDbgCADB4,cameraDbgCAE60,cameraDbgCAE64,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash,playerActor0ActionFlag,playerActor0SubActionFlag,playerActor0PhysicsFlag,playerActor0DamageCooldown,playerActor1ActionFlag,playerActor1SubActionFlag,playerActor1PhysicsFlag,playerActor1DamageCooldown,playerActor0LinkedActor,playerActor0TransitionFlag,playerActor0CollisionFlag,playerActor0EnvironmentFlag,playerActor0UpdateLocked,playerActor0CharacterIDBase,playerActor0TransitioningFlag,playerActor0CameraFocusMode,playerActor0DefeatedFlag,playerActor0PlayerBaseID,playerActor0VisibleFlag,playerActor1LinkedActor,playerActor1TransitionFlag,playerActor1CollisionFlag,playerActor1EnvironmentFlag,playerActor1UpdateLocked,playerActor1CharacterIDBase,playerActor1TransitioningFlag,playerActor1CameraFocusMode,playerActor1DefeatedFlag,playerActor1PlayerBaseID,playerActor1VisibleFlag";
             G.GameStateTrace << '\n';
@@ -10200,7 +10819,7 @@ void InitFromEnvironment()
             }
         }
 
-        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
+        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
             G.TestFrames,
             G.TestInstanceCount,
             G.FrameBarrierEnabled ? 1 : 0,
@@ -10260,7 +10879,10 @@ void InitFromEnvironment()
             G.DirectMvlBootPlayerID,
             G.DirectMvlBootUseLoadGameSM ? 1 : 0,
             G.DirectMvlBootPatchLoadGameSMOnly ? 1 : 0,
-            G.DirectMvlBootCallUpdateLoadGameSM ? 1 : 0);
+            G.DirectMvlBootCallUpdateLoadGameSM ? 1 : 0,
+            G.MvlStageSceneSettings,
+            G.MvlCourseMode.c_str(),
+            G.MvlBigStarTarget);
         std::fflush(stdout);
     }
 
@@ -10333,7 +10955,7 @@ void InitFromEnvironment()
 
     G.Ready = true;
     StartNetworkPumpThreadIfNeeded();
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputDropModulo=%d inputDropOffset=%d netPumpThread=%d netPumpSleepUs=%d inputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputDropModulo=%d inputDropOffset=%d netPumpThread=%d netPumpSleepUs=%d inputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -10388,7 +11010,10 @@ void InitFromEnvironment()
         G.DirectMvlBootPlayerID,
         G.DirectMvlBootUseLoadGameSM ? 1 : 0,
         G.DirectMvlBootPatchLoadGameSMOnly ? 1 : 0,
-        G.DirectMvlBootCallUpdateLoadGameSM ? 1 : 0);
+        G.DirectMvlBootCallUpdateLoadGameSM ? 1 : 0,
+        G.MvlStageSceneSettings,
+        G.MvlCourseMode.c_str(),
+        G.MvlBigStarTarget);
     std::fflush(stdout);
 }
 
@@ -10424,6 +11049,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         InjectDirectMvlBootCall(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        RestartMvlAfterResultIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         InjectCourseSelectFactoryCall(instanceID, inputFrame, nds);
 
@@ -10489,7 +11116,11 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceEntranceSpawnPointersIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        NormalizeMvlEntranceSpawnStateIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerActorIDsIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        RepairMvlInitialPlayerSpawnIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerActorPositionIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
@@ -10519,6 +11150,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         ForcePlayerInventoryPowerupsIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerStarCountersIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        EnforceMvlBigStarTargetIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageFXSettingsIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
@@ -10932,17 +11565,25 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerDeathCountersIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        NormalizeMvlEntranceSpawnStateIfNeeded(instanceID, logFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        RepairMvlInitialPlayerSpawnIfNeeded(instanceID, logFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerActorPositionIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerInventoryPowerupsIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerStarCountersIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        EnforceMvlBigStarTargetIfNeeded(instanceID, logFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceWifiCommunicatingIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceNetLocalAidIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         PushScriptRemotePacketIfNeeded(instanceID, logFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        SaveMvlAutoRestartCheckpointIfNeeded(instanceID, logFrame, nds);
 
     SaveState(instanceID, logFrame, nds);
     SaveLocalMPState(logFrame);

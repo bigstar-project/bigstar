@@ -55,9 +55,26 @@ $callTracePath = Join-Path $LogDir "nsmb-mvl-route.call-trace.csv"
 $writeTracePath = Join-Path $LogDir "nsmb-mvl-route.write-trace.csv"
 $screenDir = Join-Path $LogDir "screens-mvl-route"
 $ramDumpDir = Join-Path $LogDir "ram-mvl-route"
+$romRoot = Join-Path $LogDir "rom"
 Remove-Item -Force $stdout, $stderr, $hashLog, $gameStateTracePath, $callTracePath, $writeTracePath -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force $screenDir -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force $ramDumpDir -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force $romRoot -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $romRoot | Out-Null
+
+$sourceRomPath = (Resolve-Path $Rom).Path
+$testRomPath = Join-Path $romRoot "nsmb.nds"
+Copy-Item -Force $sourceRomPath $testRomPath
+
+$sourceRomBase = [System.IO.Path]::Combine(
+    [System.IO.Path]::GetDirectoryName($sourceRomPath),
+    [System.IO.Path]::GetFileNameWithoutExtension($sourceRomPath))
+foreach ($suffix in @(".sav", ".sav.2")) {
+    $sourceSave = "$sourceRomBase$suffix"
+    if (Test-Path $sourceSave) {
+        Copy-Item -Force $sourceSave (Join-Path $romRoot "nsmb$suffix")
+    }
+}
 
 foreach ($name in @(
     "MELONDS_NSML_POC",
@@ -298,7 +315,7 @@ if ($BadJumpTrace) {
 
 $startInfo = @{
     FilePath = (Resolve-Path $Exe).Path
-    ArgumentList = @((Resolve-Path $Rom).Path)
+    ArgumentList = @((Resolve-Path $testRomPath).Path)
     Wait = $true
     PassThru = $true
     RedirectStandardOutput = $stdout
