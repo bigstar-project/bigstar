@@ -23,7 +23,7 @@ const DEFAULT_FRAMES: u32 = 999_999;
 const DEFAULT_INPUT_DELAY_FRAMES: u8 = 4;
 const DEFAULT_INPUT_MAX_FRAME_LEAD: u8 = 4;
 const NETPLAY_START_FRAME: u32 = 840;
-const REUSABLE_ROM_FORMAT: &str = "nsmb-mvl-reusable-runtime-config-v2";
+const REUSABLE_ROM_FORMAT: &str = "nsmb-mvl-reusable-runtime-config-v3";
 
 #[derive(Default)]
 struct AppState {

@@ -114,7 +114,6 @@ pub fn generate_stable_roms(options: &StableRomOptions) -> Result<StableRomResul
         big_star_selector,
     )?;
     patch_wifi_communicating_consoles(&mut host, 2)?;
-    patch_rng_constant(&mut host, &symbols, 0x100)?;
     host.save(&options.host_rom)?;
 
     let mut client = base;
@@ -129,7 +128,6 @@ pub fn generate_stable_roms(options: &StableRomOptions) -> Result<StableRomResul
         big_star_selector,
     )?;
     patch_wifi_communicating_consoles(&mut client, 2)?;
-    patch_rng_constant(&mut client, &symbols, 0x100)?;
     client.save(&options.client_rom)?;
 
     Ok(StableRomResult {
@@ -575,7 +573,7 @@ fn build_direct_loadlevel_stub(
         0,                // controlOptions
         0,                // unused2
         0,                // challengeMode
-        0x100,            // rngSeed
+        0xffff_ffff,      // rngSeed: use network/random state
     ];
 
     let mut words = vec![
@@ -709,18 +707,6 @@ fn patch_wifi_communicating_consoles(rom: &mut RomImage, count: u8) -> Result<()
             BX_LR,
         ],
     )?;
-    Ok(())
-}
-
-fn patch_rng_constant(
-    rom: &mut RomImage,
-    symbols: &BTreeMap<String, u32>,
-    value: u32,
-) -> Result<()> {
-    let words = [encode_mov_imm(0, value)?, BX_LR];
-    for name in ["_ZN3Net9getRandomEv", "_ZN4Game9getRandomEv"] {
-        patch_arm9_words(rom, symbol(symbols, name)?, &words)?;
-    }
     Ok(())
 }
 
@@ -975,7 +961,10 @@ fn parse_u32(value: &str) -> Result<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{big_star_selector, initial_lives, life_mode_selector, stage_scene_settings};
+    use super::{
+        big_star_selector, build_direct_loadlevel_stub, encode_load_imm, encode_str_imm,
+        initial_lives, life_mode_selector, stage_scene_settings,
+    };
 
     #[test]
     fn stage_scene_settings_follow_mvl_course_ids() {
@@ -999,6 +988,30 @@ mod tests {
         assert_eq!(big_star_selector(3).unwrap(), 0);
         assert_eq!(big_star_selector(5).unwrap(), 1);
         assert_eq!(big_star_selector(10).unwrap(), 2);
+    }
+
+    #[test]
+    fn direct_loadlevel_uses_network_random_seed() {
+        let stub = build_direct_loadlevel_stub(
+            0x0215_0000,
+            0x0200_0000,
+            0x0210_0000,
+            2,
+            0,
+            0x00b6_ff00,
+            3,
+            0,
+            1,
+        )
+        .expect("build direct MvL stub");
+        let load_network_rng_seed = encode_load_imm(12, 0xffff_ffff).expect("encode rng seed");
+        let store_rng_seed = encode_str_imm(12, 13, 0x30).expect("encode rng seed store");
+
+        assert!(
+            stub.windows(2)
+                .any(|pair| pair == [load_network_rng_seed, store_rng_seed]),
+            "loadLevel rngSeed stack argument must be 0xffffffff so match-seeded Net/Game RNG is used"
+        );
     }
 }
 

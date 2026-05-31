@@ -1,6 +1,19 @@
 # NSMB Mario vs Luigi Online PoC
 
-## Current visual/gameplay anomaly investigation - 2026-06-01
+## Current RNG variation fix - 2026-06-01
+
+- User-reported issue: Big Star positions and 8-coin item outcomes looked constant across matches, suggesting gameplay RNG was fixed.
+- Root cause: the Rust stable ROM generator still applied the old Python-equivalent `rng-constant` patch to both `Net::getRandom()` and `Game::getRandom()`, making both functions return `0x100` regardless of the match seed. The runtime `MELONDS_NSML_MATCH_SEED` / NetRandom injection wrote the RNG state, but gameplay random callers could not observe it because the functions were patched to return the constant.
+- Fix: removed the ROM-side `Net::getRandom()` / `Game::getRandom()` constant patch, and pass `0xffffffff` as the direct `Game::loadLevel` rngSeed stack argument so NSMB uses the match-seeded network/game random state.
+- Reusable ROM marker bumped to `nsmb-mvl-reusable-runtime-config-v3`, forcing one regeneration so cached v2 ROMs with constant RNG are not reused.
+- Verification:
+  - `cargo test --manifest-path tools\nsmb-mvl-rom\Cargo.toml`: 4 tests pass, including the direct loadLevel rngSeed stack argument check.
+  - `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`, `corepack pnpm run ci`, and `scripts\test-nsmb-mvl-gui-launch-smoke.ps1 -BuildTauriBundle` pass.
+  - `logs/codex-rng-vary-seed-12345678-20260601` and `logs/codex-rng-vary-seed-87654321-20260601`: same stage 2, different match seeds. Host/client remain synchronized within each run, while RNG timeline and initial Big Star position differ by seed:
+    - seed `0x12345678`: frame 2500 `netRandomValue=0xc5b2d62c`, Big Star X `0x40000`.
+    - seed `0x87654321`: frame 2500 `netRandomValue=0x3791bcf0`, Big Star X `0x210000`.
+
+## Previous visual/gameplay anomaly investigation - 2026-06-01
 
 - User-reported issues after the reusable ROM/runtime-config work:
   - stage 2 snow course background flickers.

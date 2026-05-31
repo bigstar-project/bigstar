@@ -45,7 +45,7 @@ Star target, and lives are applied by melonDS at launch time, so changing them
 does not regenerate ROM files. The `共通ROM再準備` button is an explicit recovery
 action for replacing the cached pair.
 
-The current reusable ROM marker is `nsmb-mvl-reusable-runtime-config-v2`.
+The current reusable ROM marker is `nsmb-mvl-reusable-runtime-config-v3`.
 
 ## act
 
