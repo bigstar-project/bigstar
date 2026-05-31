@@ -37,6 +37,16 @@ The Tauri bundle includes sidecar copies of:
 Use `scripts/prepare-nsmb-mvl-tauri-sidecars.ps1` after rebuilding either
 binary. ROM files are not bundled.
 
+## Reusable ROM setup
+
+The launcher generates patched host/client ROMs only when they are missing or
+when the reusable ROM format changes. Match settings such as course stage, Big
+Star target, and lives are applied by melonDS at launch time, so changing them
+does not regenerate ROM files. The `共通ROM再準備` button is an explicit recovery
+action for replacing the cached pair.
+
+The current reusable ROM marker is `nsmb-mvl-reusable-runtime-config-v2`.
+
 ## act
 
 The full Windows Tauri bundle needs a Windows GitHub runner. For local Docker

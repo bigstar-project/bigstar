@@ -17,7 +17,11 @@ function Copy-Sidecar {
         [string]$Name
     )
 
-    $sourcePath = Join-Path $repoRoot $Source
+    $sourcePath = if ([System.IO.Path]::IsPathRooted($Source)) {
+        $Source
+    } else {
+        Join-Path $repoRoot $Source
+    }
     if (-not (Test-Path $sourcePath)) {
         throw "Missing sidecar source: $sourcePath"
     }

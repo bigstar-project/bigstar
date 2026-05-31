@@ -49,6 +49,7 @@ type LaunchResponse = {
 type GenerateRomResponse = {
   host_rom: string;
   client_rom: string;
+  generated: boolean;
 };
 
 type SessionStatus = {
@@ -103,9 +104,7 @@ export function App() {
     kind: 'idle' as StatusKind,
   });
   const [lastLogDir, setLastLogDir] = useState('');
-  const [lastGeneratedStage, setLastGeneratedStage] = useState<number | null>(
-    null,
-  );
+  const [romPreparation, setRomPreparation] = useState('未確認');
 
   const currentRomPath =
     form.role === 'host' ? form.hostRomPath : form.clientRomPath;
@@ -122,16 +121,13 @@ export function App() {
   const courseNote =
     form.courseMode === 'select'
       ? 'Choose Each Time は direct route では未対応のため、現在は固定 stage 0 で起動します。'
-      : 'Match seed から stage 0-4 を決め、ROM生成と起動時に同じ stage を渡します。';
+      : 'Match seed から stage 0-4 を決め、起動時に生成済み共通 ROM へ渡します。';
 
   const updateField = <K extends keyof FormState>(
     key: K,
     value: FormState[K],
   ) => {
     setForm((current) => ({ ...current, [key]: value }));
-    if (key === 'courseMode' || key === 'matchSeed') {
-      setLastGeneratedStage(null);
-    }
   };
 
   const pollStatus = useCallback(async () => {
@@ -201,7 +197,7 @@ export function App() {
     }
   };
 
-  const generateRoms = async () => {
+  const prepareRoms = async () => {
     const nextForm = withRequiredSeed(form);
     if (nextForm.matchSeed !== form.matchSeed) {
       setForm(nextForm);
@@ -224,7 +220,7 @@ export function App() {
     };
 
     try {
-      setStatus({ text: `ROM生成中 stage=${stage}`, kind: 'idle' });
+      setStatus({ text: '共通 ROM を準備中', kind: 'idle' });
       const response = await invoke<GenerateRomResponse>('generate_roms', {
         request,
       });
@@ -233,11 +229,31 @@ export function App() {
         hostRomPath: response.host_rom,
         clientRomPath: response.client_rom,
       }));
-      setLastGeneratedStage(stage);
-      setStatus({ text: `ROM生成が完了しました stage=${stage}`, kind: 'ok' });
+      setRomPreparation('準備済み');
+      setStatus({ text: '共通 ROM の準備が完了しました', kind: 'ok' });
     } catch (error) {
       setStatus({ text: String(error), kind: 'error' });
     }
+  };
+
+  const ensureRoms = async (nextForm: FormState, stage: number) => {
+    const request: GenerateRomRequest = {
+      source_rom: nextForm.baseRomPath,
+      host_rom: nextForm.hostRomPath,
+      client_rom: nextForm.clientRomPath,
+      stage,
+      settings: currentSettings(nextForm),
+    };
+    const response = await invoke<GenerateRomResponse>('ensure_roms', {
+      request,
+    });
+    setForm((current) => ({
+      ...current,
+      hostRomPath: response.host_rom,
+      clientRomPath: response.client_rom,
+    }));
+    setRomPreparation(response.generated ? '初回準備済み' : '再利用');
+    return response;
   };
 
   const startMatch = async () => {
@@ -267,6 +283,10 @@ export function App() {
     };
 
     try {
+      setStatus({ text: '共通 ROM を確認中', kind: 'idle' });
+      const roms = await ensureRoms(nextForm, stage);
+      request.rom_path =
+        nextForm.role === 'host' ? roms.host_rom : roms.client_rom;
       setStatus({ text: `起動中 stage=${stage}`, kind: 'idle' });
       const response = await invoke<LaunchResponse>('start_match', { request });
       setLastLogDir(response.log_dir);
@@ -374,9 +394,9 @@ export function App() {
             <ActionButton
               kind="secondary"
               type="button"
-              onClick={() => void generateRoms()}
+              onClick={() => void prepareRoms()}
             >
-              ROM生成
+              共通ROM再準備
             </ActionButton>
             <ActionButton kind="primary" type="submit">
               開始
@@ -452,14 +472,8 @@ export function App() {
               value={form.role === 'host' ? 'Mario' : 'Luigi'}
             />
             <SummaryItem label="使用 ROM" value={currentRomPath || '未設定'} />
-            <SummaryItem
-              label="生成/起動 stage"
-              value={
-                lastGeneratedStage === null
-                  ? selectedStageLabel
-                  : `${selectedStageLabel}（生成済み）`
-              }
-            />
+            <SummaryItem label="起動 stage" value={selectedStageLabel} />
+            <SummaryItem label="共通 ROM" value={romPreparation} />
             <SummaryItem label="コース処理" value={courseNote} />
           </div>
         </section>

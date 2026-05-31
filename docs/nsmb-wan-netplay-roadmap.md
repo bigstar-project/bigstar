@@ -1,5 +1,25 @@
 # NSMB Mario vs Luigi WAN Netplay Roadmap
 
+## Current work: reusable launcher ROMs - 2026-06-01
+
+- Goal: stop regenerating host/client ROMs whenever the Tauri game settings change. ROM generation should happen only for initial setup or when the reusable ROM format changes.
+- Implemented: generated direct-entry ROMs now read course stage, scene settings, Big Star selector, and lives configuration from a small melonDS-populated runtime configuration block when its magic is present. Baked ROM values remain the fallback for non-launcher use.
+- Implemented: the Tauri launcher writes a reusable-ROM format marker beside host/client ROMs. Match start reuses current ROMs and auto-generates only when files are missing or stale; the GUI keeps an explicit `共通ROM再準備` action for recovery/upgrades.
+- Current reusable-ROM format marker is `nsmb-mvl-reusable-runtime-config-v2`; this forces one regeneration after moving runtime config out of high Main RAM while preserving the existing stable ROM camera/stage-lock patches.
+- Verification passed: Rust ROM generator tests, 12 GUI backend tests, TypeScript/Biome checks, frontend build, local release melonDS rebuild, and reused-ROM gameplay smokes.
+- Resolved during verification: the first reused-ROM settings smoke aborted because the runtime magic check reused `r0` after the load-level scene argument had been prepared. Moving the check before argument setup restored the call contract.
+- Reused-ROM gameplay verification passed with one host/client ROM pair generated once using fallback `stage=0`, `Big Star=5`, `lives=endless`:
+  - `logs/codex-reusable-rom-runtime-stage4-w3-s10-l5-v2-20260601`: runtime-only override to `stage=4`, `Wins=3`, `Big Star=10`, `lives=5`.
+  - `logs/codex-reusable-rom-runtime-stage1-s3-result-20260601`: runtime-only override to `stage=1`, `Big Star=3`, `lives=endless`; forcing 3 stars reaches results.
+  - `logs/codex-reusable-rom-runtime-stage2-s10-noresult-20260601`: runtime-only override to `stage=2`, `Big Star=10`, `lives=3`; forcing 3 stars does not reach results.
+- GUI DOM render smoke passed against local Vite: the launcher shows `共通ROM再準備`, runtime-only course guidance, `起動 stage`, and reusable-ROM status.
+- `scripts/prepare-nsmb-mvl-tauri-sidecars.ps1` refreshed the rebuilt melonDS sidecar. It now accepts absolute sidecar source paths as well as repo-relative paths.
+- `scripts/test-nsmb-mvl-gui-launch-smoke.ps1 -BuildTauriBundle` now refreshes release sidecars before Tauri build, verifies `target\release\melonDS.exe` matches `build\release-windows-x86_64\melonDS.exe`, and passes with 12 GUI backend tests, bridge signaling UDP pair smoke, debug/release preflight, and regenerated MSI/NSIS bundles.
+- Release GUI follow-up: the user-visible `target\release\nsmb-mvl-gui.exe` had been rebuilt while `target\release\melonDS.exe` remained an older sidecar. That stale melonDS binary explained why the GUI still showed entrance-normalization and visual regressions after the main release melonDS build looked fixed. The final rebuilt sidecar hash prefix is `8BA24DCEE1FE6B15` in the build output, Tauri binaries directory, and Tauri target release directory.
+- GUI melonDS launches now remove inherited `MELONDS_NSML_*` variables before applying GUI-owned settings, so external diagnostic force/trace flags cannot leak into normal release GUI matches.
+- During bundle verification, the smoke wrapper was fixed to run GUI-subsystem `nsmb-mvl-gui.exe --preflight` through `Start-Process -Wait`; direct PowerShell invocation did not reliably wait for the release GUI process or expose its exit code.
+- Current blocker: none for reusable-ROM launch settings.
+
 ## GitHub Actions package status - 2026-06-01
 
 - `NSMB MvL Tauri` run `26714302373` completed successfully on GitHub Actions for commit `b5769a84c6de0ac8b99b4fb896ccaec7f598de05`.
@@ -67,7 +87,7 @@ current backend
   Cloudflare Worker + Durable Object signaling
   two-peer session rooms
 
-future desktop launcher
+current desktop launcher
   Tauri + TypeScript UI
   melonDS process management
   bridge process management
@@ -83,7 +103,7 @@ future backend
 
 ### Phase 6: Tauri desktop launcher
 
-状態: 初期実装済み。Windows ローカルで Tauri release exe と MSI/NSIS bundle 生成まで確認済み。ROM 生成は Rust crate へ移行し、Tauri command から呼べる状態。GUI backend の start_match コマンド組み立てと fake bridge/fake melonDS による実プロセス起動・停止は unit test で確認済み。起動前preflightで同梱/解決対象のbinary/resourceとbridge signaling smokeをGUIから確認できる。GitHub Actions 上のフル Windows bundle 実行は未確認。
+状態: 初期実装済み。Windows ローカルで Tauri release exe と MSI/NSIS bundle 生成まで確認済み。ROM 生成は Rust crate へ移行し、初回または形式更新時だけ共通 host/client ROM を準備する。ゲーム設定変更時は ROM を再生成せず melonDS 起動時に注入する。GUI backend の start_match コマンド組み立てと fake bridge/fake melonDS による実プロセス起動・停止は unit test で確認済み。起動前preflightで同梱/解決対象のbinary/resourceとbridge signaling smokeをGUIから確認できる。
 
 実装:
 
@@ -101,12 +121,13 @@ future backend
   - ビッグスター: 3 / 5 / 10
   - 残機: 3 / 5 / 無限
   - マッチシード
-- Rust ROM generator crate が stable direct MvL host/client ROM を生成する。
+- Rust ROM generator crate が再利用可能な stable direct MvL host/client ROM を生成する。ROM 内の baked 設定は非 launcher 利用時の fallback として残す。
 - `scripts/generate-nsmb-mvl-stable-roms.ps1` は Python patch script ではなく `tools/nsmb-mvl-rom` を呼ぶ。
-- Tauri command `generate_roms` が base ROM と設定から host/client ROM を生成する。
+- Tauri command `ensure_roms` が version marker を確認し、初回または共通 ROM 形式更新時だけ base ROM から host/client ROM を生成する。`generate_roms` は明示的な再準備操作として残す。
 - Tauri command `generate_roms` の既定出力先は Tauri app data 配下の `roms/` にし、インストール済みアプリでも開発ツリーの `roms/` へ書き込まない。
-- GUI に `ROM生成` 操作を追加し、開始前に設定付きROMを作れる。
-- GUI の `Course=random` はマッチシードから `stage = seed % 5` を算出し、ROM生成と melonDS 起動時の `MELONDS_NSML_MVL_STAGE` / `MELONDS_NSML_DIRECT_MVL_BOOT_STAGE` に同じ値を渡す。
+- GUI の開始操作は共通 ROM が未生成または旧形式の場合だけ自動準備する。通常は生成済み ROM を再利用し、`共通ROM再準備` は明示的な recovery 操作として扱う。
+- GUI の `Course=random` はマッチシードから `stage = seed % 5` を算出し、melonDS 起動時の `MELONDS_NSML_MVL_STAGE` / `MELONDS_NSML_DIRECT_MVL_BOOT_STAGE` に渡す。
+- melonDS は起動時 env から course stage、scene settings、Big Star selector、lives 初期値/mode selector を共有 RAM 設定ブロックへ書き、runtime-aware direct-entry stub がそれを読む。
 - Tauri command が `nsmb-net-bridge` を `webrtc-offer` / `webrtc-answer` で起動する。
 - Tauri command が melonDS を `MELONDS_NSML_*` 環境変数つきで起動する。
 - Tauri command の起動処理は `start_match_resolved` に分離し、fake実行ファイルを使ったtestで bridge/melonDS 相当プロセスのspawn、session状態、停止、melonDS起動失敗時のsession未保存を確認する。
@@ -132,7 +153,7 @@ corepack pnpm typecheck: pass
 corepack pnpm vite:build: pass
 tools/nsmb-mvl-rom cargo check: pass
 src-tauri cargo check: pass
-cargo test --manifest-path tools/nsmb-mvl-gui/src-tauri/Cargo.toml: pass (10 tests; command/env + fake process launch/stop + preflight bridge smoke validation)
+cargo test --manifest-path tools/nsmb-mvl-gui/src-tauri/Cargo.toml: pass (11 tests; command/env + reusable ROM marker + fake process launch/stop + preflight bridge smoke validation)
 scripts/test-nsmb-mvl-gui-launch-smoke.ps1: pass
 scripts/test-nsmb-mvl-gui-launch-smoke.ps1 -BuildTauriBundle: pass (debug/release nsmb-mvl-gui.exe --preflight included)
 tools/nsmb-net-bridge/target/release/nsmb-net-bridge.exe webrtc-signaling-udp-pair-smoke: pass
@@ -163,7 +184,7 @@ tools/nsmb-mvl-gui/src-tauri/target/release/bundle/nsis/NSMB Mario vs Luigi Onli
 - `DEFAULT_SIGNAL_URL` は `wss://nsmb-mvl-signaling-signaling-prod.uniunitaro.workers.dev/session`。GUI で変更するか `NSMB_MVL_SIGNAL_URL` で差し替える。
 - full workflow は Windows runner と vcpkg/melonDS build を使うため、ローカル Docker `act` では frontend/ROM generator/bridge smoke の軽量workflowを検証対象にしている。Windows full workflowは実GitHub runnerでの確認が必要。現作業ツリーは未pushのため、実runner確認はpush/PRまたはworkflow_dispatch可能なremote branch作成後に行う。
 - `Course=select` / 通常 MvL の `Choose Each Time` は direct route が CourseSelect を飛ばすため未対応。GUI/CLIでは選択肢として保持するが、実行時は fixed stage 扱いへ落とす。
-- `Course=random` は起動前に選んだコースでROMを作る。現checkpoint restart方式では2ゲーム目以降も同じコースへ戻り、ゲームごとの再抽選は未対応。
+- `Course=random` は起動前に選んだコースを runtime 設定として渡す。現checkpoint restart方式では2ゲーム目以降も同じコースへ戻り、ゲームごとの再抽選は未対応。
 
 次アクション:
 

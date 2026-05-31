@@ -191,6 +191,15 @@ constexpr melonDS::u32 kA2DJStartSceneTransitionAddr = 0x02011CE8;
 constexpr melonDS::u32 kA2DJCreateObjectAddr = 0x0204BF8C;
 constexpr melonDS::u32 kA2DEStageLayoutMvlInitAddr = 0x020B0714;
 constexpr melonDS::u32 kDirectBootTrampolineAddr = 0x023C0000;
+// Overlay0 padding cave. Keep runtime settings out of high Main RAM, which NSMB
+// can use for stage graphics/model buffers during MvL gameplay.
+constexpr melonDS::u32 kMvlRuntimeConfigAddr = 0x020C5360;
+constexpr melonDS::u32 kMvlRuntimeConfigMagic = 0x434C564D; // "MVLC", little endian
+constexpr melonDS::u32 kMvlRuntimeConfigStageOffset = 0x04;
+constexpr melonDS::u32 kMvlRuntimeConfigSceneSettingsOffset = 0x08;
+constexpr melonDS::u32 kMvlRuntimeConfigInitialLivesOffset = 0x0C;
+constexpr melonDS::u32 kMvlRuntimeConfigLifeModeSelectorOffset = 0x10;
+constexpr melonDS::u32 kMvlRuntimeConfigBigStarSelectorOffset = 0x14;
 constexpr melonDS::u32 kSceneIsSceneActiveAddr = 0x0203BD28;
 constexpr melonDS::u32 kScenePreviousSceneIDAddr = 0x0203BD2C;
 constexpr melonDS::u32 kSceneNextSceneIDAddr = 0x0203BD30;
@@ -1067,6 +1076,12 @@ struct State
     std::string MvlCourseMode = "fixed";
     int MvlTargetWins = 2;
     int MvlBigStarTarget = 5;
+    bool MvlRuntimeConfigEnabled = false;
+    melonDS::u32 MvlInitialLives = 3;
+    melonDS::u32 MvlLifeModeSelector = 2;
+    melonDS::u32 MvlBigStarSelector = 1;
+    bool NormalizeMvlEntranceSpawnWritesEnabled = false;
+    bool RepairMvlInitialPlayerSpawnEnabled = false;
     bool MvlEntranceSpawnNormalizedLogged[16] {};
     bool MvlInitialPlayerSpawnRepairedLogged[16] {};
     bool MvlAutoRestartAfterResult = false;
@@ -1512,6 +1527,24 @@ melonDS::u32 ComposeMvlSceneSettingsFromEnvironment()
         EnvU32("MELONDS_NSML_MVL_STAGE", EnvU32("MELONDS_NSML_DIRECT_MVL_BOOT_STAGE", 0)),
         4u);
     return ((0xB4u + stage) << 16) | 0xFF00u;
+}
+
+void ApplyMvlRuntimeConfigIfNeeded(melonDS::NDS* nds)
+{
+    if (!G.MvlRuntimeConfigEnabled || !nds)
+        return;
+
+    nds->ARM9Write32(kMvlRuntimeConfigAddr, kMvlRuntimeConfigMagic);
+    nds->ARM9Write32(kMvlRuntimeConfigAddr + kMvlRuntimeConfigStageOffset,
+        static_cast<melonDS::u32>(G.DirectMvlBootStage));
+    nds->ARM9Write32(kMvlRuntimeConfigAddr + kMvlRuntimeConfigSceneSettingsOffset,
+        G.MvlStageSceneSettings);
+    nds->ARM9Write32(kMvlRuntimeConfigAddr + kMvlRuntimeConfigInitialLivesOffset,
+        G.MvlInitialLives);
+    nds->ARM9Write32(kMvlRuntimeConfigAddr + kMvlRuntimeConfigLifeModeSelectorOffset,
+        G.MvlLifeModeSelector);
+    nds->ARM9Write32(kMvlRuntimeConfigAddr + kMvlRuntimeConfigBigStarSelectorOffset,
+        G.MvlBigStarSelector);
 }
 
 melonDS::u32 GenerateMatchSeed()
@@ -5715,6 +5748,8 @@ void WriteObjectTransform(melonDS::NDS* nds, const ObjectScanSample& actor, melo
 
 void NormalizeMvlEntranceSpawnStateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
+    if (!G.NormalizeMvlEntranceSpawnWritesEnabled)
+        return;
     if (!nds || !nds->MainRAM || instanceID < 0 || instanceID >= 16)
         return;
     if (!IsMarioVsLuigiGameplay(nds))
@@ -5762,6 +5797,8 @@ void NormalizeMvlEntranceSpawnStateIfNeeded(int instanceID, melonDS::u32 frame, 
 
 void RepairMvlInitialPlayerSpawnIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
+    if (!G.RepairMvlInitialPlayerSpawnEnabled)
+        return;
     if (!nds || !nds->MainRAM || instanceID < 0 || instanceID >= 16)
         return;
     if (!IsMarioVsLuigiGameplay(nds))
@@ -10127,6 +10164,17 @@ void InitFromEnvironment()
     G.MvlCourseMode = EnvCString("MELONDS_NSML_MVL_COURSE_MODE", "fixed");
     G.MvlTargetWins = std::clamp(EnvInt("MELONDS_NSML_MVL_WINS", 2), 1, 3);
     G.MvlBigStarTarget = std::clamp(EnvInt("MELONDS_NSML_MVL_BIG_STARS", 5), 3, 10);
+    G.MvlRuntimeConfigEnabled =
+        EnvHasValue("MELONDS_NSML_MVL_STAGE")
+        || EnvHasValue("MELONDS_NSML_MVL_SCENE_SETTINGS")
+        || EnvHasValue("MELONDS_NSML_MVL_BIG_STARS")
+        || EnvHasValue("MELONDS_NSML_MVL_LIVES");
+    const std::string mvlLives = EnvCString("MELONDS_NSML_MVL_LIVES", "endless");
+    G.MvlInitialLives = mvlLives == "5" ? 5u : 3u;
+    G.MvlLifeModeSelector = mvlLives == "endless" || mvlLives == "Endless" ? 2u : 0u;
+    G.MvlBigStarSelector = G.MvlBigStarTarget == 3 ? 0u : G.MvlBigStarTarget == 10 ? 2u : 1u;
+    G.NormalizeMvlEntranceSpawnWritesEnabled = EnvFlag("MELONDS_NSML_NORMALIZE_MVL_ENTRANCE_SPAWN_WRITES");
+    G.RepairMvlInitialPlayerSpawnEnabled = EnvFlag("MELONDS_NSML_REPAIR_MVL_INITIAL_PLAYER_SPAWN");
     G.MvlAutoRestartAfterResult = EnvFlag("MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT");
     G.MvlAutoRestartDelayFrames = static_cast<melonDS::u32>(
         std::max(1, EnvInt("MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES", 120)));
@@ -10912,6 +10960,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
         LoadState(instanceID, inputFrame, nds);
+
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyMvlRuntimeConfigIfNeeded(nds);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         RestoreRollbackCheckpointForProbeIfNeeded(instanceID, inputFrame, nds);

@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -22,6 +23,7 @@ const DEFAULT_FRAMES: u32 = 999_999;
 const DEFAULT_INPUT_DELAY_FRAMES: u8 = 4;
 const DEFAULT_INPUT_MAX_FRAME_LEAD: u8 = 4;
 const NETPLAY_START_FRAME: u32 = 840;
+const REUSABLE_ROM_FORMAT: &str = "nsmb-mvl-reusable-runtime-config-v2";
 
 #[derive(Default)]
 struct AppState {
@@ -110,6 +112,7 @@ struct LaunchResponse {
 struct GenerateRomResponse {
     host_rom: String,
     client_rom: String,
+    generated: bool,
 }
 
 #[derive(Serialize)]
@@ -278,11 +281,32 @@ fn generate_roms(
     app: AppHandle,
     request: GenerateRomRequest,
 ) -> Result<GenerateRomResponse, String> {
+    prepare_roms(&app, request, true)
+}
+
+#[tauri::command]
+fn ensure_roms(app: AppHandle, request: GenerateRomRequest) -> Result<GenerateRomResponse, String> {
+    prepare_roms(&app, request, false)
+}
+
+fn prepare_roms(
+    app: &AppHandle,
+    request: GenerateRomRequest,
+    force: bool,
+) -> Result<GenerateRomResponse, String> {
     validate_settings(&request.settings)?;
     let stage = selected_stage(&request.settings, request.stage)?;
-    let source_rom = absolutize_existing(&request.source_rom)?;
     let host_rom = absolutize_target(&app, &request.host_rom)?;
     let client_rom = absolutize_target(&app, &request.client_rom)?;
+    if !force && reusable_rom_is_current(&host_rom) && reusable_rom_is_current(&client_rom) {
+        return Ok(GenerateRomResponse {
+            host_rom: host_rom.to_string_lossy().into_owned(),
+            client_rom: client_rom.to_string_lossy().into_owned(),
+            generated: false,
+        });
+    }
+
+    let source_rom = absolutize_existing(&request.source_rom)?;
     ensure_parent_dir(&host_rom)?;
     ensure_parent_dir(&client_rom)?;
     let options = nsmb_mvl_rom::StableRomOptions {
@@ -300,11 +324,34 @@ fn generate_roms(
 
     nsmb_mvl_rom::generate_stable_roms(&options)
         .map_err(|err| format!("ROM生成に失敗しました: {err}"))?;
+    write_reusable_rom_marker(&host_rom)?;
+    write_reusable_rom_marker(&client_rom)?;
 
     Ok(GenerateRomResponse {
         host_rom: host_rom.to_string_lossy().into_owned(),
         client_rom: client_rom.to_string_lossy().into_owned(),
+        generated: true,
     })
+}
+
+fn reusable_rom_marker_path(rom: &Path) -> PathBuf {
+    let mut marker = rom.as_os_str().to_owned();
+    marker.push(".nsmb-mvl-version");
+    PathBuf::from(marker)
+}
+
+fn reusable_rom_is_current(rom: &Path) -> bool {
+    rom.is_file()
+        && fs::read_to_string(reusable_rom_marker_path(rom))
+            .is_ok_and(|version| version.trim() == REUSABLE_ROM_FORMAT)
+}
+
+fn write_reusable_rom_marker(rom: &Path) -> Result<(), String> {
+    fs::write(
+        reusable_rom_marker_path(rom),
+        format!("{REUSABLE_ROM_FORMAT}\n"),
+    )
+    .map_err(|err| format!("ROM形式 marker を保存できません: {err}"))
 }
 
 #[tauri::command]
@@ -388,11 +435,29 @@ fn build_melon_command(
     command.arg(rom_path);
     command.current_dir(log_dir);
 
+    remove_inherited_melonds_env(&mut command);
     for (key, value) in melon_env(request, input_script, log_dir) {
         command.env(key, value);
     }
 
     with_stdio(command, log_dir, "melonds")
+}
+
+fn remove_inherited_melonds_env(command: &mut Command) {
+    remove_inherited_melonds_env_keys(command, std::env::vars_os().map(|(key, _)| key));
+}
+
+fn remove_inherited_melonds_env_keys<I, K>(command: &mut Command, keys: I)
+where
+    I: IntoIterator<Item = K>,
+    K: AsRef<OsStr>,
+{
+    for key in keys {
+        let key = key.as_ref();
+        if key.to_string_lossy().starts_with("MELONDS_NSML_") {
+            command.env_remove(key);
+        }
+    }
 }
 
 fn melon_env(
@@ -1030,6 +1095,7 @@ fn main() {
             get_defaults,
             preflight_check,
             generate_roms,
+            ensure_roms,
             start_match,
             stop_match,
             session_status
@@ -1041,7 +1107,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ffi::OsStr;
+    use std::ffi::{OsStr, OsString};
 
     fn request(role: Role) -> LaunchRequest {
         LaunchRequest {
@@ -1257,6 +1323,36 @@ mod tests {
     }
 
     #[test]
+    fn melon_command_sanitizes_inherited_melonds_environment() {
+        let mut command = Command::new("melonDS.exe");
+        command.env("MELONDS_NSML_NORMALIZE_MVL_ENTRANCE_SPAWN_WRITES", "1");
+        command.env("MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS", "1");
+        command.env("NSMB_MVL_SIGNAL_URL", "ws://127.0.0.1:8787/session");
+
+        remove_inherited_melonds_env_keys(
+            &mut command,
+            [
+                OsString::from("MELONDS_NSML_NORMALIZE_MVL_ENTRANCE_SPAWN_WRITES"),
+                OsString::from("MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS"),
+                OsString::from("NSMB_MVL_SIGNAL_URL"),
+            ],
+        );
+
+        assert_eq!(
+            env_value(&command, "MELONDS_NSML_NORMALIZE_MVL_ENTRANCE_SPAWN_WRITES"),
+            None
+        );
+        assert_eq!(
+            env_value(&command, "MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS"),
+            None
+        );
+        assert_eq!(
+            env_value(&command, "NSMB_MVL_SIGNAL_URL").as_deref(),
+            Some("ws://127.0.0.1:8787/session")
+        );
+    }
+
+    #[test]
     fn validation_rejects_bad_signal_url_and_room_code() {
         let mut bad_signal = request(Role::Host);
         bad_signal.signal_url = "https://example.invalid/session".to_owned();
@@ -1275,6 +1371,25 @@ mod tests {
 
         request.settings.course_mode = CourseMode::Select;
         assert_eq!(selected_stage(&request.settings, 9).expect("stage"), 4);
+    }
+
+    #[test]
+    fn reusable_rom_marker_requires_current_format_and_rom_file() {
+        let dir = temp_log_dir("reusable-rom-marker");
+        let rom = dir.join("host.nds");
+        fs::write(&rom, b"fake rom").expect("write fake rom");
+        assert!(!reusable_rom_is_current(&rom));
+
+        write_reusable_rom_marker(&rom).expect("write marker");
+        assert!(reusable_rom_is_current(&rom));
+
+        fs::write(reusable_rom_marker_path(&rom), "old-format\n").expect("write stale marker");
+        assert!(!reusable_rom_is_current(&rom));
+
+        fs::remove_file(&rom).expect("remove fake rom");
+        write_reusable_rom_marker(&rom).expect("write marker without rom");
+        assert!(!reusable_rom_is_current(&rom));
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

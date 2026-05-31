@@ -12,6 +12,13 @@ const NOP: u32 = 0xE1A0_0000;
 const ARM9_COMPRESSION_START: usize = 0x4000;
 const ARM9_FOOTER_SIZE: usize = 12;
 const HEADER_SIZE: usize = 0x4000;
+const MVL_RUNTIME_CONFIG_ADDR: u32 = 0x020C_5360;
+const MVL_RUNTIME_CONFIG_MAGIC: u32 = 0x434C_564D; // "MVLC", little endian
+const MVL_RUNTIME_CONFIG_STAGE_OFFSET: u32 = 0x04;
+const MVL_RUNTIME_CONFIG_SCENE_SETTINGS_OFFSET: u32 = 0x08;
+const MVL_RUNTIME_CONFIG_INITIAL_LIVES_OFFSET: u32 = 0x0C;
+const MVL_RUNTIME_CONFIG_LIFE_MODE_SELECTOR_OFFSET: u32 = 0x10;
+const MVL_RUNTIME_CONFIG_BIG_STAR_SELECTOR_OFFSET: u32 = 0x14;
 
 #[derive(Debug, Clone)]
 pub struct StableRomOptions {
@@ -581,10 +588,6 @@ fn build_direct_loadlevel_stub(
         encode_mov_imm(12, 0x77)?,
         encode_str_imm(12, 4, 0x16c)?,
         encode_sub_sp_imm(0x38)?,
-        encode_mov_imm(0, 0x0f)?,
-        encode_mov_imm(1, 1)?,
-        encode_mov_imm(2, 9)?,
-        encode_mov_imm(3, stage as u32)?,
     ];
 
     let mut literals: Vec<u32> = Vec::new();
@@ -596,6 +599,19 @@ fn build_direct_loadlevel_stub(
         words.push(0);
         literal_refs.push((word_index, rd, literal_index, cond));
     };
+
+    emit_ldr_literal(&mut words, 4, MVL_RUNTIME_CONFIG_ADDR, 0xE);
+    words.push(encode_ldr_imm(12, 4, 0)?);
+    emit_ldr_literal(&mut words, 0, MVL_RUNTIME_CONFIG_MAGIC, 0xE);
+    words.push(encode_cmp_reg(12, 0));
+    words.push(encode_mov_imm(0, 0x0f)?);
+    words.push(encode_mov_imm(1, 1)?);
+    words.push(encode_mov_imm(2, 9)?);
+    words.push(encode_mov_imm(3, stage as u32)?);
+    words.push(with_cond(
+        encode_ldr_imm(3, 4, MVL_RUNTIME_CONFIG_STAGE_OFFSET)?,
+        0,
+    ));
 
     let mut current_ip_value = None;
     for (i, value) in stack_values.iter().enumerate() {
@@ -611,21 +627,41 @@ fn build_direct_loadlevel_stub(
     let bl_load_files_addr = start_addr + words.len() as u32 * 4;
     words.push(encode_bl(bl_load_files_addr, load_mvl_files_after_addr)?);
 
+    words.push(encode_ldr_imm(12, 4, 0)?);
+    emit_ldr_literal(&mut words, 2, MVL_RUNTIME_CONFIG_MAGIC, 0xE);
+    words.push(encode_cmp_reg(12, 2));
+
     emit_ldr_literal(&mut words, 0, 0x0208_8F38, 0xE);
     emit_ldr_literal(&mut words, 1, force_scene_settings, 0xE);
+    words.push(with_cond(
+        encode_ldr_imm(1, 4, MVL_RUNTIME_CONFIG_SCENE_SETTINGS_OFFSET)?,
+        0,
+    ));
     words.push(encode_str_imm(1, 0, 0)?);
 
     emit_ldr_literal(&mut words, 0, 0x0208_B364, 0xE);
     words.push(encode_load_imm(1, initial_lives)?);
+    words.push(with_cond(
+        encode_ldr_imm(1, 4, MVL_RUNTIME_CONFIG_INITIAL_LIVES_OFFSET)?,
+        0,
+    ));
     words.push(encode_str_imm(1, 0, 0)?);
     words.push(encode_str_imm(1, 0, 4)?);
 
     emit_ldr_literal(&mut words, 0, 0x0215_C89C, 0xE);
     words.push(encode_mov_imm(1, life_mode_selector)?);
+    words.push(with_cond(
+        encode_ldr_imm(1, 4, MVL_RUNTIME_CONFIG_LIFE_MODE_SELECTOR_OFFSET)?,
+        0,
+    ));
     words.push(encode_strb_imm(1, 0, 0)?);
 
     emit_ldr_literal(&mut words, 0, 0x0215_C88C, 0xE);
     words.push(encode_mov_imm(1, big_star_selector)?);
+    words.push(with_cond(
+        encode_ldr_imm(1, 4, MVL_RUNTIME_CONFIG_BIG_STAR_SELECTOR_OFFSET)?,
+        0,
+    ));
     words.push(encode_strb_imm(1, 0, 0)?);
 
     emit_ldr_literal(&mut words, 0, 0x0208_B094, 0xE);
@@ -1081,6 +1117,10 @@ fn encode_ldr_reg_lsl(rd: u8, rn: u8, rm: u8, shift: u8) -> Result<u32> {
 
 fn encode_cmp_imm(rn: u8, imm: u32) -> Result<u32> {
     Ok(0xE350_0000 | ((rn as u32) << 16) | encode_arm_imm12(imm)?)
+}
+
+fn encode_cmp_reg(rn: u8, rm: u8) -> u32 {
+    0xE150_0000 | ((rn as u32) << 16) | rm as u32
 }
 
 fn encode_mov_reg(rd: u8, rm: u8) -> u32 {

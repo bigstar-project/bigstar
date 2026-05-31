@@ -1,5 +1,40 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Current visual/gameplay anomaly investigation - 2026-06-01
+
+- User-reported issues after the reusable ROM/runtime-config work:
+  - stage 2 snow course background flickers.
+  - stage 3 pipe course edge pipes no longer connect left-to-right/right-to-left; entering an edge pipe exits from the respawn pipe position.
+  - Mario/Luigi character drawing or animation looks wrong around death and triple-jump states.
+- Fixes made:
+  - Stage 3 edge-pipe regression: always-on runtime entrance normalization was resetting normal in-stage pipe entrance IDs back to `0/1`. It is now gated behind explicit diagnostic env `MELONDS_NSML_NORMALIZE_MVL_ENTRANCE_SPAWN_WRITES`; normal GUI/manual runs no longer enable it.
+  - Stage 2 upper background corruption and death/triple-jump sprite corruption: these did not happen when each setting change generated a new ROM, and appeared after runtime RAM injection. Runtime config was writing every frame to high Main RAM `0x023C1100`, which can overlap gameplay heap/asset buffers. The block is now at overlay0 padding `0x020C5360`.
+  - Reusable ROM marker bumped to `nsmb-mvl-reusable-runtime-config-v2`, forcing one regeneration so old ROMs that read `0x023C1100` are not reused.
+  - Release GUI follow-up: `tools\nsmb-mvl-gui\src-tauri\target\release\nsmb-mvl-gui.exe` had been rebuilt, but the copied Tauri sidecar `target\release\melonDS.exe` was still the older 04:00 binary. That old sidecar still ran the broad entrance-normalization path, so GUI runs could show the pipe/death/background regressions even after the main `build\release-windows-x86_64\melonDS.exe` looked fixed. `scripts\test-nsmb-mvl-gui-launch-smoke.ps1 -BuildTauriBundle` now refreshes sidecars before Tauri build and verifies the release sidecar hash matches `build\release-windows-x86_64\melonDS.exe`.
+  - GUI-launched melonDS now removes inherited `MELONDS_NSML_*` variables before applying the GUI's own allowlisted environment. This prevents stale diagnostic force/trace flags from leaking into normal release GUI play.
+- ROM camera/stage-lock patch removal was tested and rejected because it regressed the existing death/progress probe. These patches existed in the per-setting ROM generation path, so they are preserved.
+- GUI log findings:
+  - Recent user GUI logs did change seed/stage (`seed=5 -> stage=0`, `seed=4 -> stage=4`, `seed=2 -> stage=2`, `seed=1 -> stage=1`). The latest visible underground run had `matchSeed=0x00000001`, which maps to stage 1 by `seed % 5`.
+  - The same logs also contained `NSMB MvL: normalized entrance spawn state...`, proving the release GUI was launching the stale sidecar and not the fixed melonDS binary.
+- Verification:
+  - `logs/codex-runtime-config-overlay-v2-stage2-20260601`: stage 2 runtime override passed 1800 frames at ~60 FPS.
+  - `logs/codex-runtime-config-overlay-v2-stage3-right-20260601`: stage 3 right-movement/pipe-route smoke passed 3200 frames with entrance normalization disabled.
+  - `logs/codex-runtime-config-overlay-v2-death-20260601`: Luigi death/Mario continues probe passed 3600 frames, including no player update-lock and moving hazard progress checks.
+  - `cargo test --manifest-path tools\nsmb-mvl-rom\Cargo.toml`, `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`, `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4`, `corepack pnpm run ci`, and `scripts/test-nsmb-mvl-gui-launch-smoke.ps1 -BuildTauriBundle` all pass.
+  - After the final Tauri rebuild, `build\release-windows-x86_64\melonDS.exe`, `tools\nsmb-mvl-gui\src-tauri\binaries\melonDS-x86_64-pc-windows-msvc.exe`, and `tools\nsmb-mvl-gui\src-tauri\target\release\melonDS.exe` all have SHA-256 prefix `8BA24DCEE1FE6B15`.
+
+## Current reusable ROM launcher flow - 2026-06-01
+
+- Tauri 対戦開始時の ROM 生成を初回または共通 ROM 形式更新時だけに変更した。生成済み host/client ROM の横に version marker を保存し、現行形式なら base ROM を読み直さず再利用する。
+- direct-entry ROM stub は共有 RAM の runtime configuration block に magic がある場合、course stage、scene settings、Big Star selector、lives 初期値/mode selector をそこから読む。magic がない場合は ROM 生成時の baked 値を使うため、CLI ROM generator の従来用途も維持する。
+- melonDS frontend は `MELONDS_NSML_MVL_*` env を起動時に読み、runtime configuration block を毎フレーム早期に更新する。
+- GUI は通常の設定変更では ROM を再生成しない。開始時に未生成/旧形式だけ自動準備し、`共通ROM再準備` は明示的な recovery 操作として残す。
+- `scripts/test-nsmb-mvl-gui-launch-smoke.ps1 -BuildTauriBundle` は 12 GUI backend tests、bridge signaling UDP pair smoke、sidecar refresh/hash check、debug/release preflight、MSI/NSIS 再生成まで pass。GUI-subsystem release exe の preflight は `Start-Process -Wait` で終了コードを取る。
+- 同じ ROM ペアを fallback `stage=0` / `Big Star=5` / `lives=endless` で一度だけ生成し、再生成なしで以下を確認した:
+  - `logs/codex-reusable-rom-runtime-stage4-w3-s10-l5-v2-20260601`: `stage=4`, `Wins=3`, `Big Star=10`, `lives=5`。
+  - `logs/codex-reusable-rom-runtime-stage1-s3-result-20260601`: `stage=1`, `Big Star=3`, `lives=endless`、3 stars で result 遷移。
+  - `logs/codex-reusable-rom-runtime-stage2-s10-noresult-20260601`: `stage=2`, `Big Star=10`, `lives=3`、3 stars では result 遷移なし。
+
 ## Current game settings fix - 2026-06-01
 
 - Previous settings verification was insufficient: it checked RAM traces and actor presence, but did not visually verify each course, the Big Star HUD above 2 stars, or the lives HUD. The GUI-visible failures reported by the user were real.
@@ -52,16 +87,16 @@
 
 ## Current status - 2026-05-31
 
-- MvL 設定外部化は、direct MvL route の起動前 ROM 生成と runtime env の両方で受け取れる状態。
+- MvL 設定外部化は、direct MvL route の共通 ROM baked fallback と runtime env 注入の両方で受け取れる状態。
 - ユーザーが触る通常 MvL 設定として、`Wins=1|2|3`、`Big Star=3|5|10`、`Mario's Lives=3|5|endless`、`Course=random` を扱う。通常 MvL の `Choose Each Time` は CourseSelect を復帰させる必要があるため、現 direct route では未対応。
 - stable ROM生成は Python script から Rust crate `tools/nsmb-mvl-rom` へ移行済み。`scripts/generate-nsmb-mvl-stable-roms.ps1` と Tauri GUI command `generate_roms` は Rust 実装を呼ぶ。
 - 旧Python ROM toolingの既定symbols pathも `tools/nsmb-mvl-rom/resources/symbols9.x` へ寄せ、Git管理外の `external/` がない環境でも既定値で動かしやすくした。
-- Tauri GUI から base ROM、host/client ROM出力先、通常MvL相当設定、signaling URL、部屋コードを指定して、ROM生成と対戦開始を行える初期経路を追加済み。
+- Tauri GUI から base ROM、host/client 共通ROM出力先、通常MvL相当設定、signaling URL、部屋コードを指定できる。対戦開始時は生成済み共通ROMを再利用し、未生成または旧形式の場合だけ自動準備する。
 - Tauri GUI backend の `start_match` は、host/client別の `nsmb-net-bridge` signaling引数と melonDS 起動envを unit test で確認する。さらに fake bridge/fake melonDS を実際にspawnし、session状態、停止、melonDS起動失敗時にsessionを残さないことを確認する。
 - Tauri GUI に `起動前チェック` を追加し、melonDS/bridge/input/symbols の解決と、実bridgeの `webrtc-signaling-udp-pair-smoke` を開始前に確認できるようにした。古いbridgeが新しいsignaling smoke subcommandを持たない場合も検出する。
 - `nsmb-mvl-gui.exe --preflight` を追加し、GUIを開かずに同梱sidecar/resource解決とbridge signaling smokeを検証できるようにした。
 - Tauri GUI の既定ROM出力先とログ保存先は app data 配下に移し、`tools/nsmb-mvl-rom/resources/symbols9.x` と bootstrap input は bundle resource からも解決できるようにした。これでインストール済みアプリが開発ツリーのパスへ書き込む前提を外した。
-- Tauri GUI の `Course=random` は表示中のmatch seedから `stage = seed % 5` を計算し、ROM生成と起動時envに同じstageを渡す。空欄時はGUI側でseedを生成して表示する。
+- Tauri GUI の `Course=random` は表示中のmatch seedから `stage = seed % 5` を計算し、起動時envにstageを渡す。空欄時はGUI側でseedを生成して表示する。
 - 有限ライフ設定時に Luigi の初期スポーン土管が Mario 側へ重なる問題を修正。原因は direct route が通常 CourseSelect setup を飛ばすため、`loadMvsLFilesThread` の早い入口選択で lives byte `3/5` が entrance ID として使われていたこと。
 - `tools/nsmb_us_rom_patch.py` で `loadMvsLFilesThread` の初期入口 temp 値を player0=0 / player1=1 に寄せ、土管生成前に通常 MvL の左右入口に近い状態へ戻す。
 - `scripts/run-nsmb-mvl-lan-route-smoke.ps1 -RequireMvlInitialSpawnState` は player actor だけでなく、初期スポーン土管に対応する `0x10b` object 2個の `x=0x8000/0x58000` も検証する。
@@ -72,7 +107,7 @@
   - `logs\codex-rust-settings-matrix-final\settings-matrix-summary.csv`: Rust生成ROMで `Course=random` / `Wins=1,2,3` / `Big Star=3,5,10` / `Lives=3,5,endless` の27通りがpass。
   - `logs\codex-rust-bigstar-thresholds-final\bigstar-threshold-summary.csv`: `Big Star=3/5/10` の結果しきい値6ケースがpass。
   - `logs\codex-rust-auto-restart-wins2-v2` / `logs\codex-rust-auto-restart-wins3-v2`: `Wins=2` は `nextGame=2`、`Wins=3` は `nextGame=2` と `nextGame=3` へのcheckpoint restartを確認。
-  - GUI/Actions: `corepack pnpm typecheck`、`corepack pnpm vite:build`、`cargo check --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`、`cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml` 10 tests、`corepack pnpm build`、`actionlint .github/workflows/nsmb-mvl-tauri.yml .github/workflows/nsmb-mvl-gui-local.yml`、`act workflow_dispatch -W .github/workflows/nsmb-mvl-tauri.yml -j gui-check -P ubuntu-latest=catthehacker/ubuntu:act-latest`、`act workflow_dispatch -W .github/workflows/nsmb-mvl-gui-local.yml -j gui-check -P ubuntu-latest=catthehacker/ubuntu:act-latest` がpass。両方の `gui-check` は2026-05-31に現差分で再確認済み。
+  - GUI/Actions: `corepack pnpm typecheck`、`corepack pnpm vite:build`、`cargo check --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`、`cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml` 11 tests、`corepack pnpm build`、`actionlint .github/workflows/nsmb-mvl-tauri.yml .github/workflows/nsmb-mvl-gui-local.yml`、`act workflow_dispatch -W .github/workflows/nsmb-mvl-tauri.yml -j gui-check -P ubuntu-latest=catthehacker/ubuntu:act-latest`、`act workflow_dispatch -W .github/workflows/nsmb-mvl-gui-local.yml -j gui-check -P ubuntu-latest=catthehacker/ubuntu:act-latest` がpass。両方の `gui-check` は2026-05-31に再確認済み。
   - `scripts/test-nsmb-mvl-gui-launch-smoke.ps1` を追加し、GUI backend の fake process launch tests と実bridgeの `webrtc-signaling-udp-pair-smoke` をまとめて確認できるようにした。`-BuildTauriBundle` 付きでもpass。
   - `scripts/test-nsmb-mvl-gui-launch-smoke.ps1 -BuildTauriBundle` は debug/release `nsmb-mvl-gui.exe --preflight` も実行し、release exe が `target\release` 直下の `melonDS.exe` / `nsmb-net-bridge.exe` / `resources\symbols9.x` / bootstrap input を解決できることを確認済み。
   - `act workflow_dispatch -W .github/workflows/nsmb-mvl-gui-local.yml -j bridge-check -P ubuntu-latest=catthehacker/ubuntu:act-latest` がpass。2026-05-31に現差分で再確認済み。Tango依存を固定commitでcheckoutし、Ubuntu上で `cargo check --features webrtc --manifest-path tools/nsmb-net-bridge/Cargo.toml` と `cargo run --features webrtc --manifest-path tools/nsmb-net-bridge/Cargo.toml -- webrtc-signaling-udp-pair-smoke` を通した。後者はローカルWebSocket signaling server経由で offer/answer SDP 交換、WebRTC DataChannel接続、host/client相当UDP socket間の双方向payload到達を確認する。
@@ -106,12 +141,12 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - 通常LocalMPのMvL設定画面でユーザーが触る項目は、US版ROMの実画面で `Wins` / `Big Star` / `Mario's Lives` / `Course` と確認した。
   - 確認時のデフォルト表示は `Wins=2` / `Big Star=5` / `Mario's Lives=Endless` / `Course=Choose Each Time`。
   - `Course` はユーザー指摘どおり、通常画面では固定コースではなく `Choose Each Time` と `Random` の選択肢として扱う。
-- direct MvL routeでは通常のCourseSelect/設定画面を飛ばしているため、GUI向けには「起動前に設定から一時ROMを生成する」経路を使う。
+- direct MvL routeでは通常のCourseSelect/設定画面を飛ばしているため、GUI向けには再利用可能な共通ROMへ起動時設定を注入する経路を使う。
   - `tools/nsmb-mvl-rom` は Rust製のstable ROM generator。direct MvL entry patch、WiFi communicating count patch、scene settings、Luigi初期入口/土管補正、camera fallback、VS mode skipを生成ROMへ反映する。
   - `scripts/generate-nsmb-mvl-stable-roms.ps1` は `-MvlWins` / `-MvlBigStars` / `-MvlLives` / `-MvlCourseMode` と、raw override の `-MvlSceneSettings` を受け取り、Rust generatorでhost/client ROMを設定付き生成する。
   - `scripts/run-nsmb-mvl-lan-route-smoke.ps1` は `-GenerateMvlConfiguredRoms` / `-MvlCourseMode random` / `-MvlMatchSeed` と上記ユーザー向け設定を受け取り、起動前に一時host/client ROMを生成できる。
-  - manual local/peer scriptも同じユーザー向け設定を受け取れる。Tauri GUI側は、`generate_roms` commandでこれらの値を渡して開始前に一時ROMを作れる。
-  - Tauri GUI側も `Course=random` ではmatch seedからstageを算出し、Rust generatorとmelonDS起動envの両方へ同じstageを渡す。
+  - manual local/peer scriptも同じユーザー向け設定を受け取れる。Tauri GUI側は、初回だけ共通ROMを生成し、通常の対戦開始では runtime env だけを渡す。
+  - Tauri GUI側も `Course=random` ではmatch seedからstageを算出し、melonDS起動envへ渡す。
 - コース設定:
   - `random` は起動時に `matchSeed % 5` でコース0..4を決める。`logs/codex-mvl-settings-random-stage0` から `stage4` まで、5コースすべてで1300 frames smokeが通過し、期待stageID検証も通った。
   - 2ゲーム目以降は、現checkpoint restart方式では1ゲーム目の正常stage checkpointへ戻すため、起動時に選ばれた同じコースへ戻る。ゲームごとにrandomを振り直す処理は未対応。pre-direct checkpointからstageを差し替える実験はtimeout/ARM9 abortにつながったため外した。
@@ -120,7 +155,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - `Wins` / `Big Star` / `Mario's Lives`:
   - raw `sceneSettings=0x00B4FF00` が上記デフォルト表示と対応することは確認済み。
   - ユーザー向け項目は `-MvlWins 1|2|3`、`-MvlBigStars 3|5|10`、`-MvlLives 3|5|endless` として外部指定できる。
-  - direct routeでは通常の設定画面/結果後管理を飛ばすため、`Wins` はROM内 `sceneSettings` の高位nibbleへ無理に詰めず、runtime側のmatch targetとして扱う。`Big Star` / `Mario's Lives` / `Course=random` は起動前の一時ROM生成とruntime envへ反映する。
+  - direct routeでは通常の設定画面/結果後管理を飛ばすため、`Wins` はROM内 `sceneSettings` の高位nibbleへ無理に詰めず、runtime側のmatch targetとして扱う。`Big Star` / `Mario's Lives` / `Course=random` は起動時 runtime config へ反映し、ROM 内の値は非 launcher 利用向け fallback として残す。
   - `scripts/test-nsmb-mvl-settings-matrix.ps1` を追加し、`Course=random` で `Wins` 3通り * `Big Star` 3通り * `Mario's Lives` 3通りを自動検証できるようにした。
   - 旧 `logs/codex-rust-settings-matrix-final` はtrace-only smokeであり、GUI表示の破損を見逃していた。修正後は `logs/codex-rust-settings-matrix-native-20260601` で27通りを再検証した。
   - `stageSceneSettings` はmatch rulesではなくコースIDに対応する。stage `0..4` はそれぞれ `0xB4FF00..0xB8FF00` を使う。
@@ -150,7 +185,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 - stable direct MvL entry ROM:
   - host: `roms/nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds`
   - client: `roms/nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds`
-- 通常MvL設定画面のユーザー向け項目のうち、`Wins` / `Big Star` / `Mario's Lives` / `Course=random` を外部指定し、起動前の一時ROM生成へ反映する経路。
+- 通常MvL設定画面のユーザー向け項目のうち、`Wins` / `Big Star` / `Mario's Lives` / `Course=random` を外部指定し、生成済み共通ROMへ起動時反映する経路。
 - `Big Star=3/5/10` の勝敗しきい値をruntime側で検証済み。
 - `Wins=2` の2ゲーム目復帰と `Wins=3` の3ゲーム目到達を、direct route のcheckpoint restart方式で確認。
 - client側を Luigi 視点/localPlayerID=1 として動かす基本経路。

@@ -10,6 +10,8 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $guiDir = Join-Path $repo "tools\nsmb-mvl-gui"
 $guiManifest = Join-Path $guiDir "src-tauri\Cargo.toml"
 $bridgeManifest = Join-Path $repo "tools\nsmb-net-bridge\Cargo.toml"
+$melonReleaseExe = Join-Path $repo "build\release-windows-x86_64\melonDS.exe"
+$prepareSidecarsScript = Join-Path $repo "scripts\prepare-nsmb-mvl-tauri-sidecars.ps1"
 
 function Resolve-GuiDebugExe {
     Invoke-NativeChecked cargo build --manifest-path $guiManifest
@@ -24,6 +26,18 @@ function Invoke-NativeChecked {
     & $args[0] @($args | Select-Object -Skip 1)
     if ($LASTEXITCODE -ne 0) {
         throw "Command failed with exit code ${LASTEXITCODE}: $($args -join ' ')"
+    }
+}
+
+function Invoke-GuiPreflightChecked($Path) {
+    $process = Start-Process `
+        -FilePath $Path `
+        -ArgumentList "--preflight" `
+        -WindowStyle Hidden `
+        -Wait `
+        -PassThru
+    if ($process.ExitCode -ne 0) {
+        throw "GUI preflight failed with exit code $($process.ExitCode): $Path"
     }
 }
 
@@ -86,22 +100,41 @@ function Resolve-BridgeExe {
     return (Resolve-Path $built).Path
 }
 
+function Resolve-ReleaseBridgeExe {
+    $release = Join-Path $repo "tools\nsmb-net-bridge\target\release\nsmb-net-bridge.exe"
+    if (Test-BridgeSupportsSignalingSmoke $release) {
+        return (Resolve-Path $release).Path
+    }
+
+    Set-LibclangPathIfAvailable
+    Invoke-NativeChecked cargo build --release --features webrtc --manifest-path $bridgeManifest
+    if (!(Test-BridgeSupportsSignalingSmoke $release)) {
+        throw "Release nsmb-net-bridge.exe does not support webrtc-signaling-udp-pair-smoke"
+    }
+    return (Resolve-Path $release).Path
+}
+
 Push-Location $repo
 try {
     Invoke-NativeChecked cargo test --manifest-path $guiManifest
 
     $bridge = Resolve-BridgeExe
     Invoke-NativeChecked $bridge webrtc-signaling-udp-pair-smoke
-    Invoke-NativeChecked (Resolve-GuiDebugExe) --preflight
+    Invoke-GuiPreflightChecked (Resolve-GuiDebugExe)
 
     if ($BuildTauriBundle) {
+        Invoke-NativeChecked powershell -NoProfile -ExecutionPolicy Bypass -File $prepareSidecarsScript -BridgeExe (Resolve-ReleaseBridgeExe)
         Push-Location $guiDir
         try {
             Invoke-NativeChecked corepack pnpm build
         } finally {
             Pop-Location
         }
-        Invoke-NativeChecked (Join-Path $guiDir "src-tauri\target\release\nsmb-mvl-gui.exe") --preflight
+        $targetMelon = Join-Path $guiDir "src-tauri\target\release\melonDS.exe"
+        if ((Get-FileHash $targetMelon).Hash -ne (Get-FileHash $melonReleaseExe).Hash) {
+            throw "Tauri release melonDS sidecar does not match $melonReleaseExe"
+        }
+        Invoke-GuiPreflightChecked (Join-Path $guiDir "src-tauri\target\release\nsmb-mvl-gui.exe")
     }
 
     Write-Host "NSMB MvL GUI launch smoke passed"
