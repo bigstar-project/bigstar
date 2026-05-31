@@ -18,6 +18,10 @@
 
 ## Current GUI runtime note - 2026-05-31
 
+- Tauri GUI frontend was migrated to React + Tailwind CSS. Current checks: `corepack pnpm typecheck` pass, `corepack pnpm vite:build` pass, and Vite browser render smoke shows the launcher controls.
+- Default GUI signaling URL is now `wss://nsmb-mvl-signaling-signaling-prod.uniunitaro.workers.dev/session`; `NSMB_MVL_SIGNAL_URL` remains the override.
+- Main worktree sidecars are present, and `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml` passes locally.
+- `corepack pnpm build` passes and regenerated `tools\nsmb-mvl-gui\src-tauri\target\release\nsmb-mvl-gui.exe`, the MSI bundle, and the NSIS setup exe. The rebuilt release exe `--preflight` resolves the bundled melonDS, bridge, bootstrap input, symbols file, and passes bridge signaling smoke.
 - A real Tauri GUI host run failed with `bridge exited(1)`.
 - Logs for each GUI run are under `%APPDATA%\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-*`; inspect `bridge.stderr.txt` first for bridge exits.
 - The observed failure was not a melonDS launch failure. `bridge.stdout.txt` showed the host connected and sent offer SDP; `bridge.stderr.txt` showed the deployed signaling server returned `{"error":"peer is not connected","type":"error"}`.

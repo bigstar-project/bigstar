@@ -9,6 +9,10 @@
 
 ## Current GUI/signaling note - 2026-05-31
 
+- Tauri GUI frontend was migrated from vanilla TypeScript DOM rendering to React + Tailwind CSS. Current frontend verification: `corepack pnpm typecheck` pass, `corepack pnpm vite:build` pass, and Vite browser render smoke shows the launcher controls.
+- The default GUI signaling URL is now `wss://nsmb-mvl-signaling-signaling-prod.uniunitaro.workers.dev/session`. `NSMB_MVL_SIGNAL_URL` can still override it.
+- Main worktree sidecars are present under `tools\nsmb-mvl-gui\src-tauri\binaries\`; `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml` passes locally.
+- `corepack pnpm build` passes on the main worktree with the React/Tailwind GUI and produced fresh release outputs at `tools\nsmb-mvl-gui\src-tauri\target\release\nsmb-mvl-gui.exe`, `bundle\msi\NSMB Mario vs Luigi Online_0.1.0_x64_en-US.msi`, and `bundle\nsis\NSMB Mario vs Luigi Online_0.1.0_x64-setup.exe`. The rebuilt release exe `--preflight` also passes.
 - Real Tauri GUI host startup produced `bridge exited(1)`.
 - The GUI logs are written under `%APPDATA%\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-*`, with `bridge.stdout.txt`, `bridge.stderr.txt`, `melonds.stdout.txt`, and `melonds.stderr.txt` per run.
 - The latest host bridge stderr showed `signaling server error: {"error":"peer is not connected","type":"error"}` after the host sent its offer while the answer peer was not connected yet.
@@ -82,7 +86,7 @@ future backend
 
 - `tools/nsmb-mvl-gui`
 - `tools/nsmb-mvl-rom`
-- Tauri v2 + TypeScript + Vite + pnpm 構成
+- Tauri v2 + React + TypeScript + Vite + Tailwind CSS + pnpm 構成
 - GUI から指定できる項目:
   - role: ホスト / 参加
   - 部屋コード
@@ -153,7 +157,7 @@ tools/nsmb-mvl-gui/src-tauri/target/release/bundle/nsis/NSMB Mario vs Luigi Onli
 
 - ROM はまだ bundle に同梱しない。ユーザーが ROM path を指定する。
 - 既定の生成ROMとログは Tauri app data 配下へ保存する。開発ツリーに `roms/nsmb-us.nds` がある場合だけ base ROM の既定値として使う。
-- `DEFAULT_SIGNAL_URL` は placeholder の `wss://example.workers.dev/session`。実運用 URL は GUI で変更するか `NSMB_MVL_SIGNAL_URL` で差し替える。
+- `DEFAULT_SIGNAL_URL` は `wss://nsmb-mvl-signaling-signaling-prod.uniunitaro.workers.dev/session`。GUI で変更するか `NSMB_MVL_SIGNAL_URL` で差し替える。
 - full workflow は Windows runner と vcpkg/melonDS build を使うため、ローカル Docker `act` では frontend/ROM generator/bridge smoke の軽量workflowを検証対象にしている。Windows full workflowは実GitHub runnerでの確認が必要。現作業ツリーは未pushのため、実runner確認はpush/PRまたはworkflow_dispatch可能なremote branch作成後に行う。
 - `Course=select` / 通常 MvL の `Choose Each Time` は direct route が CourseSelect を飛ばすため未対応。GUI/CLIでは選択肢として保持するが、実行時は fixed stage 扱いへ落とす。
 - `Course=random` は起動前に選んだコースでROMを作る。現checkpoint restart方式では2ゲーム目以降も同じコースへ戻り、ゲームごとの再抽選は未対応。

@@ -1,230 +1,43 @@
-:root {
-  color: #20242b;
-  background: #f5f7fa;
-  font-family:
-    Inter, "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-  font-size: 16px;
-  line-height: 1.5;
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    color: #20242b;
+    background: #f5f7fa;
+    font-family:
+      Inter, "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    min-width: 760px;
+    margin: 0;
+    background: #f5f7fa;
+  }
+
+  button,
+  input,
+  select {
+    font: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  h1,
+  h2,
+  p {
+    margin: 0;
+    letter-spacing: 0;
+  }
 }
 
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  min-width: 760px;
-}
-
-button,
-input,
-select {
-  font: inherit;
-}
-
-.shell {
-  width: min(1160px, calc(100vw - 48px));
-  margin: 0 auto;
-  padding: 32px 0;
-}
-
-.topbar {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 24px;
-}
-
-.eyebrow {
-  margin: 0 0 4px;
-  color: #697386;
-  font-size: 0.82rem;
-  font-weight: 700;
-}
-
-h1,
-h2 {
-  margin: 0;
-  color: #151922;
-  letter-spacing: 0;
-}
-
-h1 {
-  font-size: 2rem;
-}
-
-h2 {
-  padding-top: 2px;
-  font-size: 1.05rem;
-}
-
-.status {
-  max-width: 48ch;
-  min-height: 38px;
-  padding: 8px 12px;
-  border: 1px solid #d7dde8;
-  border-radius: 8px;
-  background: #fff;
-  color: #4f5b6d;
-  overflow-wrap: anywhere;
-}
-
-.status[data-kind="ok"] {
-  border-color: #8ac5a3;
-  color: #11613a;
-}
-
-.status[data-kind="warn"] {
-  border-color: #d9ba73;
-  color: #755a12;
-}
-
-.status[data-kind="error"] {
-  border-color: #df8b8b;
-  color: #9a2525;
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.9fr);
-  gap: 20px;
-}
-
-.panel {
-  display: grid;
-  gap: 16px;
-  padding: 20px;
-  border: 1px solid #dde3ed;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 1px 2px rgb(20 30 48 / 6%);
-}
-
-label {
-  display: grid;
-  gap: 6px;
-  color: #3f4858;
-  font-size: 0.9rem;
-  font-weight: 700;
-}
-
-input,
-select {
-  width: 100%;
-  min-height: 38px;
-  padding: 7px 10px;
-  border: 1px solid #cbd3df;
-  border-radius: 6px;
-  background: #fff;
-  color: #171b24;
-}
-
-input:focus,
-select:focus,
-button:focus-visible {
-  outline: 2px solid #2a6df4;
-  outline-offset: 2px;
-}
-
-.segmented {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  padding: 4px;
-  border: 1px solid #cbd3df;
-  border-radius: 8px;
-  background: #eef2f7;
-}
-
-.segment {
-  min-height: 34px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: #465164;
-  cursor: pointer;
-}
-
-.segment[aria-pressed="true"] {
-  background: #fff;
-  color: #121722;
-  box-shadow: 0 1px 2px rgb(20 30 48 / 12%);
-}
-
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 4px;
-}
-
-.log-path {
-  display: grid;
-  gap: 4px;
-  padding-top: 4px;
-  color: #6a7485;
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
-.log-path code {
-  display: block;
-  max-width: 100%;
-  padding: 8px 10px;
-  border: 1px solid #e5e9f0;
-  border-radius: 6px;
-  background: #f8fafc;
-  color: #1f2633;
-  font-family: "Cascadia Mono", "Consolas", monospace;
-  font-size: 0.76rem;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.primary,
-.secondary {
-  min-width: 104px;
-  min-height: 38px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.primary {
-  border: 1px solid #245fd6;
-  background: #2a6df4;
-  color: #fff;
-  font-weight: 800;
-}
-
-.secondary {
-  border: 1px solid #cbd3df;
-  background: #fff;
-  color: #313948;
-  font-weight: 700;
-}
-
-.summary {
-  display: grid;
-  gap: 10px;
-  margin-top: 4px;
-  padding-top: 16px;
-  border-top: 1px solid #e5e9f0;
-}
-
-.summary div {
-  display: grid;
-  gap: 2px;
-}
-
-.summary span {
-  color: #6a7485;
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
-.summary strong {
-  color: #151922;
-  font-size: 0.9rem;
+@utility overflow-wrap-anywhere {
   overflow-wrap: anywhere;
 }

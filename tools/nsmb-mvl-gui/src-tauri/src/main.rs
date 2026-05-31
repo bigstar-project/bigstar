@@ -7,7 +7,8 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 
 const DEFAULT_ROOM_CODE: &str = "test-room";
-const DEFAULT_SIGNAL_URL: &str = "wss://example.workers.dev/session";
+const DEFAULT_SIGNAL_URL: &str =
+    "wss://nsmb-mvl-signaling-signaling-prod.uniunitaro.workers.dev/session";
 const DEFAULT_PORT: u16 = 8165;
 const DEFAULT_FRAMES: u32 = 999_999;
 const DEFAULT_INPUT_DELAY_FRAMES: u8 = 4;
