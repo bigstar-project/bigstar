@@ -13,6 +13,7 @@
 - The default GUI signaling URL is now `wss://nsmb-mvl-signaling-signaling-prod.uniunitaro.workers.dev/session`. `NSMB_MVL_SIGNAL_URL` can still override it.
 - Main worktree sidecars are present under `tools\nsmb-mvl-gui\src-tauri\binaries\`; `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml` passes locally.
 - `corepack pnpm build` passes on the main worktree with the React/Tailwind GUI and produced fresh release outputs at `tools\nsmb-mvl-gui\src-tauri\target\release\nsmb-mvl-gui.exe`, `bundle\msi\NSMB Mario vs Luigi Online_0.1.0_x64_en-US.msi`, and `bundle\nsis\NSMB Mario vs Luigi Online_0.1.0_x64-setup.exe`. The rebuilt release exe `--preflight` also passes.
+- The startup command prompt was caused by the release `nsmb-mvl-gui.exe` being built as Windows CUI. The GUI now sets `windows_subsystem = "windows"` for non-debug Windows builds, and spawned sidecars use `CREATE_NO_WINDOW`. Verification: rebuilt `nsmb-mvl-gui.exe` PE subsystem is `Windows GUI`; release `--preflight` still passes.
 - Real Tauri GUI host startup produced `bridge exited(1)`.
 - The GUI logs are written under `%APPDATA%\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-*`, with `bridge.stdout.txt`, `bridge.stderr.txt`, `melonds.stdout.txt`, and `melonds.stderr.txt` per run.
 - The latest host bridge stderr showed `signaling server error: {"error":"peer is not connected","type":"error"}` after the host sent its offer while the answer peer was not connected yet.

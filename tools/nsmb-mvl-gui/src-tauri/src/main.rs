@@ -1,3 +1,5 @@
+#![cfg_attr(all(not(debug_assertions), windows), windows_subsystem = "windows")]
+
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::{self, File};
@@ -5,6 +7,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 const DEFAULT_ROOM_CODE: &str = "test-room";
 const DEFAULT_SIGNAL_URL: &str =
@@ -525,8 +533,17 @@ fn with_stdio(mut command: Command, log_dir: &Path, name: &str) -> Result<Comman
         .map_err(|err| format!("{name} stderr log を作成できません: {err}"))?;
     command.stdout(Stdio::from(stdout));
     command.stderr(Stdio::from(stderr));
+    hide_child_console_window(&mut command);
     Ok(command)
 }
+
+#[cfg(windows)]
+fn hide_child_console_window(command: &mut Command) {
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn hide_child_console_window(_command: &mut Command) {}
 
 fn validate_request(request: &LaunchRequest) -> Result<(), String> {
     validate_settings(&request.settings)?;
