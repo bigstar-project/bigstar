@@ -80,6 +80,7 @@ const state = {
   lives: "endless" as Lives,
   matchSeed: "",
   lastGeneratedStage: null as number | null,
+  lastLogDir: "",
 };
 
 const app = document.querySelector<HTMLDivElement>("#app");
@@ -107,6 +108,13 @@ function setStatus(text: string, kind: "idle" | "ok" | "warn" | "error" = "idle"
   if (!el) return;
   el.textContent = text;
   el.dataset.kind = kind;
+}
+
+function setLogDir(logDir: string) {
+  state.lastLogDir = logDir;
+  const el = document.querySelector<HTMLElement>("#log-dir");
+  if (!el) return;
+  el.textContent = logDir || "not started";
 }
 
 function render() {
@@ -166,6 +174,10 @@ function render() {
             <button id="generate" class="secondary" type="button">ROM生成</button>
             <button id="start" class="primary" type="submit">開始</button>
             <button id="stop" class="secondary" type="button">停止</button>
+          </div>
+          <div class="log-path">
+            <span>Log directory</span>
+            <code id="log-dir">${escapeHtml(state.lastLogDir || "not started")}</code>
           </div>
         </form>
 
@@ -348,6 +360,7 @@ async function startMatch() {
   try {
     setStatus(`起動中 stage=${stage}`, "idle");
     const response = await invoke<LaunchResponse>("start_match", { request });
+    setLogDir(response.log_dir);
     setStatus(`起動済み melonDS:${response.melon_pid} bridge:${response.bridge_pid}`, "ok");
     console.info("log_dir", response.log_dir);
   } catch (error) {
@@ -358,6 +371,9 @@ async function startMatch() {
 async function pollStatus() {
   try {
     const status = await invoke<SessionStatus>("session_status");
+    if (status.log_dir) {
+      setLogDir(status.log_dir);
+    }
     if (!status.active) {
       setStatus("未接続", "idle");
       return;

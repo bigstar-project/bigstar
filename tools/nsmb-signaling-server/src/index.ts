@@ -27,6 +27,10 @@ type SignalMessage =
       type: 'ping';
     };
 
+type RelaySignalMessage = Exclude<SignalMessage, { type: 'ping' }> & {
+  from: Role;
+};
+
 const VALID_SESSION = /^[A-Za-z0-9_-]{1,64}$/;
 const VALID_ROLES = new Set<Role>(['offer', 'answer']);
 
@@ -112,6 +116,8 @@ export default {
 };
 
 export class SignalingRoom extends DurableObject<Env> {
+  private readonly pendingSignals = new Map<Role, RelaySignalMessage[]>();
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const session = url.searchParams.get('session');
@@ -144,6 +150,9 @@ export class SignalingRoom extends DurableObject<Env> {
       session,
       joinedAt: Date.now(),
     } satisfies Attachment);
+    if (this.getSockets().length === 1) {
+      this.pendingSignals.clear();
+    }
 
     send(server, {
       type: 'hello',
@@ -160,6 +169,7 @@ export class SignalingRoom extends DurableObject<Env> {
       },
       server,
     );
+    this.flushPending(role, server);
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -186,16 +196,18 @@ export class SignalingRoom extends DurableObject<Env> {
       return;
     }
 
-    const target = this.getSocketByRole(peerRole(attachment.role));
+    const targetRole = peerRole(attachment.role);
+    const relayMessage = {
+      ...parsed,
+      from: attachment.role,
+    };
+    const target = this.getSocketByRole(targetRole);
     if (target === null) {
-      send(ws, { type: 'error', error: 'peer is not connected' });
+      this.enqueuePending(targetRole, relayMessage);
       return;
     }
 
-    send(target, {
-      ...parsed,
-      from: attachment.role,
-    });
+    send(target, relayMessage);
   }
 
   async webSocketClose(ws: WebSocket) {
@@ -265,6 +277,26 @@ export class SignalingRoom extends DurableObject<Env> {
       }
     }
     return null;
+  }
+
+  private enqueuePending(role: Role, message: RelaySignalMessage): void {
+    const queue = this.pendingSignals.get(role) ?? [];
+    queue.push(message);
+    while (queue.length > 64) {
+      queue.shift();
+    }
+    this.pendingSignals.set(role, queue);
+  }
+
+  private flushPending(role: Role, ws: WebSocket): void {
+    const queue = this.pendingSignals.get(role);
+    if (queue === undefined) {
+      return;
+    }
+    for (const message of queue) {
+      send(ws, message);
+    }
+    this.pendingSignals.delete(role);
   }
 
   private broadcast(data: unknown, except?: WebSocket): void {

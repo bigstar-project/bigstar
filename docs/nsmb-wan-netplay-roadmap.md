@@ -1,5 +1,14 @@
 # NSMB Mario vs Luigi WAN Netplay Roadmap
 
+## Current GUI/signaling note - 2026-05-31
+
+- Real Tauri GUI host startup produced `bridge exited(1)`.
+- The GUI logs are written under `%APPDATA%\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-*`, with `bridge.stdout.txt`, `bridge.stderr.txt`, `melonds.stdout.txt`, and `melonds.stderr.txt` per run.
+- The latest host bridge stderr showed `signaling server error: {"error":"peer is not connected","type":"error"}` after the host sent its offer while the answer peer was not connected yet.
+- Local signaling server code now queues pending `sdp` / `candidate` messages for the absent role and flushes them when the opposite role joins. `corepack pnpm run ci` passes in `tools/nsmb-signaling-server`.
+- The deployed Worker still needs to be updated before the default GUI signaling URL benefits from this fix.
+- The Tauri GUI now displays the latest log directory in the launcher, so a failed bridge/melonDS run can be inspected without opening devtools.
+
 ## 目的
 
 New Super Mario Bros. DS の `Mario vs Luigi` を、最終的に一般ユーザーがポート開放なしで WAN 越しに対戦できる形へ持っていく。

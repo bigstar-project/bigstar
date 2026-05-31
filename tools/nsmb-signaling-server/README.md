@@ -31,7 +31,8 @@ wss://<worker-host>/session?session=<room_id>&role=answer
 
 The Durable Object allows at most one `offer` client and one `answer` client per
 session. It relays JSON messages with `type: "sdp"` and `type: "candidate"` to
-the opposite role.
+the opposite role. If one side sends signaling messages before the peer connects,
+the room queues those messages and flushes them when the opposite role joins.
 
 ## Environment
 

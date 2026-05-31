@@ -159,6 +159,29 @@ button:focus-visible {
   margin-top: 4px;
 }
 
+.log-path {
+  display: grid;
+  gap: 4px;
+  padding-top: 4px;
+  color: #6a7485;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.log-path code {
+  display: block;
+  max-width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #e5e9f0;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #1f2633;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 0.76rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 .primary,
 .secondary {
   min-width: 104px;

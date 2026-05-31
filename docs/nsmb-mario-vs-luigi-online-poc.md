@@ -1,5 +1,13 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Current GUI runtime note - 2026-05-31
+
+- A real Tauri GUI host run failed with `bridge exited(1)`.
+- Logs for each GUI run are under `%APPDATA%\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-*`; inspect `bridge.stderr.txt` first for bridge exits.
+- The observed failure was not a melonDS launch failure. `bridge.stdout.txt` showed the host connected and sent offer SDP; `bridge.stderr.txt` showed the deployed signaling server returned `{"error":"peer is not connected","type":"error"}`.
+- Local signaling server code now queues early host/client signaling messages until the opposite role joins, and the GUI now shows the latest log directory directly in the launcher.
+- Live GUI testing against the default signaling URL still requires redeploying the Worker with the queued-message fix.
+
 ## Current status - 2026-05-31
 
 - MvL 設定外部化は、direct MvL route の起動前 ROM 生成と runtime env の両方で受け取れる状態。
