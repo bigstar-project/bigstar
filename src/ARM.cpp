@@ -161,11 +161,6 @@ static bool NSMLRuntimeHooksMaybeEnabled()
         NSMLEnvFlag("MELONDS_NSML_SAFE_STAGE_SCENE_FACTORY_CALL") ||
         NSMLEnvFlag("MELONDS_NSML_SAFE_TRY_CHANGE_SCENE_CALL") ||
         NSMLEnvFlag("MELONDS_NSML_SCENE_AUTO_ACTIVE_CLEAR") ||
-        NSMLEnvFlag("MELONDS_NSML_MVL_STAGE") ||
-        NSMLEnvFlag("MELONDS_NSML_MVL_SCENE_SETTINGS") ||
-        NSMLEnvFlag("MELONDS_NSML_MVL_WINS") ||
-        NSMLEnvFlag("MELONDS_NSML_MVL_BIG_STARS") ||
-        NSMLEnvFlag("MELONDS_NSML_MVL_LIVES") ||
         NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_READY_PROBE") ||
         NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_STEP6_CLOSE") ||
         NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE") ||
@@ -178,6 +173,12 @@ static bool NSMLRuntimeHooksMaybeEnabled()
         NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT") ||
         NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_RESET") ||
         NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT");
+    return enabled;
+}
+
+static bool NSMLEntranceSpawnWriteNormalizeEnabled()
+{
+    static const bool enabled = NSMLEnvFlag("MELONDS_NSML_NORMALIZE_MVL_ENTRANCE_SPAWN_WRITES");
     return enabled;
 }
 
@@ -3508,7 +3509,7 @@ static bool ShouldNormalizeNSMLEntranceSpawnWrites(ARM* cpu)
 {
     if (!cpu || cpu->Num != 0)
         return false;
-    if (!NSMLRuntimeHooksMaybeEnabled())
+    if (!NSMLEntranceSpawnWriteNormalizeEnabled())
         return false;
     return cpu->NDS.ARM9Read8(0x02085A84) == 1; // Game::vsMode
 }

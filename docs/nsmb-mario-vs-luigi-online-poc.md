@@ -1,5 +1,14 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Current FPS regression triage - 2026-06-01
+
+- User reported that `scripts/run-nsmb-mvl-manual-peer.ps1` no longer holds the post-`09db0f1b` 57-60 FPS behavior and can dip to about 50 FPS. Reproduced before the fix with `logs/codex-fps-regression-baseline-20260601`: active FPS was host `37.52` and client `37.38`.
+- The release build configuration still matches the optimized path: `CMAKE_BUILD_TYPE=Release`, `CMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG`, `ENABLE_JIT=ON`, `ENABLE_OGLRENDERER=ON`, and `ENABLE_LTO_RELEASE=ON`.
+- Root cause: `b5769a84c` made manual peer runs always pass MvL settings envs (`MELONDS_NSML_MVL_WINS`, `MELONDS_NSML_MVL_BIG_STARS`, `MELONDS_NSML_MVL_LIVES`) and also added those passive settings to `NSMLRuntimeHooksMaybeEnabled()`, causing ARM hot-loop runtime hook checks to be enabled during normal manual-peer play.
+- Fix: passive MvL settings envs no longer enable `NSMLRuntimeHooksMaybeEnabled()`. Entrance-spawn write normalization is now behind explicit `MELONDS_NSML_NORMALIZE_MVL_ENTRANCE_SPAWN_WRITES` instead of piggybacking on the broad runtime hook flag.
+- Verification after rebuilding `build/release-windows-x86_64/melonDS.exe`: `logs/codex-fps-regression-after-hook-gate-20260601` improved active FPS to host `57.41` / client `57.17` over 1800 frames, and `logs/codex-fps-regression-after-hook-gate-long-20260601` held host `58.41` / client `58.34` over 3600 frames.
+- Settings smoke after the fix: `logs/codex-fps-regression-settings-smoke-20260601` passed 1200 frames with generated ROMs, `Course=random`, `MatchSeed=0x00000002`, `Wins=3`, `BigStars=10`, `Lives=5`, required stage `2`, required scene settings `0xb80500`, and initial spawn-state verification.
+
 ## Current GUI runtime note - 2026-05-31
 
 - A real Tauri GUI host run failed with `bridge exited(1)`.
