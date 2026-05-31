@@ -35,17 +35,20 @@ Verification:
 - `nsmbranges` short timing probe: `logs/codex-rollback-nsmbranges-timing-20260601` passed without game-state comparison. Checkpoint size was around `58KB`, restore average was around `0.2-0.6ms`, but save average was around `6.6ms` because the PoC scans Main RAM for objects on every checkpoint.
 - `nsmbranges` 2600-frame game-state comparison with the first fixed range set: `logs/codex-rollback-nsmbranges-gamestate-2600-20260601` failed at frame 1950 (`playerActor1X` mismatch).
 - `nsmbranges` with all scanned object-like ranges: `logs/codex-rollback-nsmbranges-allobjects-gamestate-2600-20260601` still failed, now at frame 930 (`playerActor0Y` mismatch). Checkpoint size stayed small at around `62-64KB`; restore stayed below `1ms`, but correctness was insufficient.
+- `nsmbcoreranges` diagnostic backend was added to split the failure cause. It saves melonDS core state with Main RAM skipped, then applies the NSMB range snapshot. Short timing probe `logs/codex-rollback-nsmbcoreranges-timing-20260601` passed without game-state comparison. Size was around `2,513,397` bytes, save average around `11ms`, restore average around `12-14ms`.
+- `nsmbcoreranges` 2600-frame game-state comparison `logs/codex-rollback-nsmbcoreranges-gamestate-2600-20260601` still failed at frame 930 (`playerActor0Y` mismatch). Restoring core state did not fix the failure.
+- `nsmbcoreranges` with broad diagnostic ranges (`MELONDS_NSML_ROLLBACK_NSMB_WIDE_RANGES=1`, adding `0x02080000..0x020E0000` and `0x023C0000..0x02400000`) also failed at frame 930 in `logs/codex-rollback-nsmbcoreranges-wide-gamestate-2600-20260601`. Size rose to around `3,144,901` bytes, but correctness did not improve.
 
 Current blocker:
 
 - Page-delta Main RAM is correct enough for the current 2600-frame synthetic route, but it is still around `2.6MB` average per checkpoint window entry and restore still reads a base+delta pair, so rollback recovery remains around `18ms` in this run.
 - The residual size suggests many Main RAM regions are changing or being dirtied broadly; page-delta alone is not likely to reach sub-megabyte snapshots.
-- The NSMB range/actor snapshot is small enough, but current selected RAM ranges do not reconstruct deterministic gameplay after rollback. The missing state is likely outside the selected game RAM ranges and/or emulator core state that affects subsequent simulation.
+- The NSMB range/actor snapshot is small enough, but current selected RAM ranges do not reconstruct deterministic gameplay after rollback. `nsmbcoreranges` indicates this is not just missing CPU/timer/scheduler/core state; it is likely missing Main RAM state outside the selected actor/global bands, such as stack, temporary working buffers, heap structures, or pages dirtied by code paths that are hard to identify by object scanning.
 - Real WAN jitter patterns and longer sessions are not measured yet.
 
 Next actions:
 
-- If continuing 案D, use it as a diagnostic path: compare failing frames around rollback and identify the smallest extra game/core state needed, instead of assuming actor/global RAM alone is sufficient.
+- Further案D work should first instrument the successful `coredelta` path to report changed Main RAM page addresses around the failing frames. Expanding named actor/global ranges by hand is now low-value because even broad hand-picked ranges failed at the same frame.
 - Add an automated rollback benchmark mode if repeated timing comparisons become necessary.
 
 この文書は、Mario vs Luigi online PoCで検討したrollback方式の議論を、後で再開できるように分離して残す設計メモ。

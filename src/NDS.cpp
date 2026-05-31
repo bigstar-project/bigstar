@@ -876,6 +876,11 @@ bool NDS::DoRollbackSavestate(
     {
         file->VarArray(MainRAM, mainRAMLength);
     }
+    else if (mainRAMMode == 3)
+    {
+        // Diagnostic rollback mode: preserve all non-MainRAM core state while
+        // leaving Main RAM to a game-specific snapshot layer.
+    }
     else if (mainRAMMode == 1 || mainRAMMode == 2)
     {
         u32 pageSize = mainRAMPageSize;
