@@ -17,6 +17,7 @@
 */
 
 #include <assert.h>
+#include <algorithm>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -837,7 +838,11 @@ bool NDS::DoSavestate(Savestate* file)
     return true;
 }
 
-bool NDS::DoRollbackSavestate(Savestate* file)
+bool NDS::DoRollbackSavestate(
+    Savestate* file,
+    u32 requestedMainRAMMode,
+    const u8* deltaBaseMainRAM,
+    u32 mainRAMPageSize)
 {
     file->Section("NDSR");
 
@@ -865,7 +870,137 @@ bool NDS::DoRollbackSavestate(Savestate* file)
         return false;
     }
 
-    file->VarArray(MainRAM, mainRAMLength);
+    u32 mainRAMMode = requestedMainRAMMode;
+    file->Var32(&mainRAMMode);
+    if (mainRAMMode == 0)
+    {
+        file->VarArray(MainRAM, mainRAMLength);
+    }
+    else if (mainRAMMode == 1 || mainRAMMode == 2)
+    {
+        u32 pageSize = mainRAMPageSize;
+        if (pageSize < 256 || pageSize > 4096 || (pageSize & (pageSize - 1)) != 0)
+            pageSize = 4096;
+        u32 pageCount = (mainRAMLength + pageSize - 1) / pageSize;
+        u32 savedPageCount = 0;
+
+        if (mainRAMMode == 2 && !deltaBaseMainRAM)
+        {
+            Log(LogLevel::Error, "rollback savestate: delta main RAM requested without a base\n");
+            return false;
+        }
+
+        if (file->Saving)
+        {
+            for (u32 page = 0; page < pageCount; page++)
+            {
+                const u32 offset = page * pageSize;
+                const u32 len = std::min(pageSize, mainRAMLength - offset);
+                bool savePage = false;
+                if (mainRAMMode == 1)
+                {
+                    for (u32 i = 0; i < len; i++)
+                    {
+                        if (MainRAM[offset + i] != 0)
+                        {
+                            savePage = true;
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    savePage = memcmp(MainRAM + offset, deltaBaseMainRAM + offset, len) != 0;
+                }
+                if (savePage)
+                    savedPageCount++;
+            }
+        }
+
+        u32 storedPageSize = pageSize;
+        u32 storedPageCount = pageCount;
+        file->Var32(&storedPageSize);
+        file->Var32(&storedPageCount);
+        file->Var32(&savedPageCount);
+        if (!file->Saving)
+        {
+            pageSize = storedPageSize;
+            pageCount = pageSize == 0 ? 0 : (mainRAMLength + pageSize - 1) / pageSize;
+        }
+        if (storedPageSize < 256
+            || storedPageSize > 4096
+            || (storedPageSize & (storedPageSize - 1)) != 0
+            || storedPageCount != pageCount)
+        {
+            Log(LogLevel::Error, "rollback savestate: bad sparse main RAM layout pageSize=%u pageCount=%u\n",
+                storedPageSize,
+                storedPageCount);
+            return false;
+        }
+
+        if (!file->Saving)
+        {
+            if (mainRAMMode == 1)
+                memset(MainRAM, 0, mainRAMLength);
+            else
+                memcpy(MainRAM, deltaBaseMainRAM, mainRAMLength);
+        }
+
+        if (file->Saving)
+        {
+            for (u32 page = 0; page < pageCount; page++)
+            {
+                const u32 offset = page * pageSize;
+                const u32 len = std::min(pageSize, mainRAMLength - offset);
+                bool savePage = false;
+                if (mainRAMMode == 1)
+                {
+                    for (u32 i = 0; i < len; i++)
+                    {
+                        if (MainRAM[offset + i] != 0)
+                        {
+                            savePage = true;
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    savePage = memcmp(MainRAM + offset, deltaBaseMainRAM + offset, len) != 0;
+                }
+                if (!savePage)
+                    continue;
+
+                u32 savedPage = page;
+                file->Var32(&savedPage);
+                file->VarArray(MainRAM + offset, len);
+            }
+        }
+        else
+        {
+            for (u32 i = 0; i < savedPageCount; i++)
+            {
+                u32 page = 0;
+                file->Var32(&page);
+                if (page >= pageCount)
+                {
+                    Log(LogLevel::Error, "rollback savestate: sparse main RAM page %u out of %u\n",
+                        page,
+                        pageCount);
+                    return false;
+                }
+                const u32 offset = page * pageSize;
+                const u32 len = std::min(pageSize, mainRAMLength - offset);
+                file->VarArray(MainRAM + offset, len);
+            }
+        }
+    }
+    else
+    {
+        Log(LogLevel::Error, "rollback savestate: unsupported main RAM mode %u\n", mainRAMMode);
+        return false;
+    }
+
     file->VarArray(SharedWRAM, SharedWRAMSize);
     file->VarArray(ARM7WRAM, ARM7WRAMSize);
 

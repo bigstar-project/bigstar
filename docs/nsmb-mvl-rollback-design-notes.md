@@ -9,7 +9,10 @@ Completed:
 - 案C寄りのPoCとして、通常savestate互換を捨てたrollback専用 `corelite` backendを追加した。
 - `melonDS::NDS::DoRollbackSavestate()` を追加し、通常 `DoSavestate()` がNTRでも常に保存していた16MB Main RAMを、実際の `MainRAMMask + 1` だけ保存するようにした。その他のCPU、DMA、timer、scheduler、GPU/SPU/Wifi等の既存savestate対象は維持している。
 - `MELONDS_NSML_ROLLBACK_BACKEND=corelite` / `-RollbackBackend corelite` でPoC rollback backendを選べる。
-- rollback traceへ checkpoint byte stats を追加した。
+- `coresparse` backendを追加し、Main RAMのゼロページを省略できるかを試した。
+- `coredelta` backendを追加し、keyframeのMain RAMを基準に、各checkpointでは変更ページだけを保存できるようにした。
+- `MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL` でdelta keyframe間隔、`MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE` でMain RAMページサイズを調整できる。
+- rollback traceへ checkpoint byte/time stats、delta/keyframe数、Main RAM base copy量、delta page size を追加した。
 
 Verification:
 
@@ -21,15 +24,23 @@ Verification:
 - `logs/codex-rollback-corelite-gamestate-20260601` ran both host/client to frame 1500 with game-state traces and rollback resimulation, but the wrapper-level comparison failed at the outer movement-probe check because the short run did not provide the expected movement probe rows. The inner host/client route smoke completed and no rollback restore/resim failure was logged.
 - Longer game-state comparison: `logs/codex-rollback-corelite-gamestate-2600-20260601` passed 2600-frame split local-input smoke with game-state comparison enabled. It exercised prediction mismatches and rollback resimulation. Final client-side trace at frame 2520 showed 10 mismatches and 10 resimulations, with checkpoint size still `6,645,137` bytes.
 - Timing probe: `logs/codex-rollback-corelite-timing-20260601` showed `corelite` save average around `4.5ms` and restore average around `15-18ms` in the short JIT-enabled synthetic run. `logs/codex-rollback-savestate-timing-20260601` showed normal `savestate` save average around `9.4-9.6ms` and restore average around `19.6ms` under the same style of run.
+- `coresparse` timing probe: `logs/codex-rollback-coresparse-timing-20260601` passed, but size was only reduced to `6,054,749` bytes. Save average was around `5.0ms`; zero-page省略だけでは効果が小さい。
+- `coredelta` keyframe interval 10: `logs/codex-rollback-coredelta-k10-timing-20260601` passed. Delta checkpoint was around `2.53-2.55MB`, average was around `2.95MB`, restore average was around `18-23ms`.
+- `coredelta` keyframe interval 20: `logs/codex-rollback-coredelta-k20-timing-20260601` passed. Average was around `2.75MB`; restore average remained around `21-23ms`.
+- `coredelta` keyframe interval 30 with 4KB page: `logs/codex-rollback-coredelta-k30-timing-20260601` passed. Average was around `2.67MB`; delta size was still around `2.53-2.55MB`.
+- `coredelta` keyframe interval 30 with 1KB page: `logs/codex-rollback-coredelta-k30-page1024-timing-20260601` passed. Delta size was around `2.48-2.50MB`; average was around `2.62MB`.
+- `coredelta` keyframe interval 30 with 256B page: `logs/codex-rollback-coredelta-k30-page256-timing-20260601` passed. Delta size was around `2.46-2.47MB`; average was around `2.60MB`.
+- Longer game-state comparison for best current candidate: `logs/codex-rollback-coredelta-k30-page256-gamestate-2600-20260601` passed 2600-frame split local-input smoke with game-state comparison enabled. Host/client both exercised prediction mismatches and resimulation without restore failure. Final traces around frame 2520 showed average checkpoint bytes around `2.60MB`, save average around `3.4-3.5ms`, restore average around `18ms`.
 
 Current blocker:
 
-- `corelite` is still ~6.3 MiB per checkpoint, so every-frame windows are memory-heavy. It is much more realistic than full savestate, but not yet a sub-megabyte rollback snapshot.
-- Longer than 2600 frames and real WAN jitter patterns are not measured yet.
+- Page-delta Main RAM is correct enough for the current 2600-frame synthetic route, but it is still around `2.6MB` average per checkpoint window entry and restore still reads a base+delta pair, so rollback recovery remains around `18ms` in this run.
+- The residual size suggests many Main RAM regions are changing or being dirtied broadly; page-delta alone is not likely to reach sub-megabyte snapshots.
+- Real WAN jitter patterns and longer sessions are not measured yet.
 
 Next actions:
 
-- If 6.6MB is still too heavy, move to a second experiment: page-delta Main RAM inside `DoRollbackSavestate()`, or an案D-style NSMB actor/global snapshot.
+- Try a more案D-style NSMB actor/global snapshot for size discovery, while expecting that it may fail correctness unless paired with enough emulator/core state.
 - Add an automated rollback benchmark mode if repeated timing comparisons become necessary.
 
 この文書は、Mario vs Luigi online PoCで検討したrollback方式の議論を、後で再開できるように分離して残す設計メモ。
