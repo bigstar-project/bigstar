@@ -38,18 +38,24 @@ Verification:
 - `nsmbcoreranges` diagnostic backend was added to split the failure cause. It saves melonDS core state with Main RAM skipped, then applies the NSMB range snapshot. Short timing probe `logs/codex-rollback-nsmbcoreranges-timing-20260601` passed without game-state comparison. Size was around `2,513,397` bytes, save average around `11ms`, restore average around `12-14ms`.
 - `nsmbcoreranges` 2600-frame game-state comparison `logs/codex-rollback-nsmbcoreranges-gamestate-2600-20260601` still failed at frame 930 (`playerActor0Y` mismatch). Restoring core state did not fix the failure.
 - `nsmbcoreranges` with broad diagnostic ranges (`MELONDS_NSML_ROLLBACK_NSMB_WIDE_RANGES=1`, adding `0x02080000..0x020E0000` and `0x023C0000..0x02400000`) also failed at frame 930 in `logs/codex-rollback-nsmbcoreranges-wide-gamestate-2600-20260601`. Size rose to around `3,144,901` bytes, but correctness did not improve.
+- `coredelta`の成功経路に `MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE` を追加し、Main RAM差分ページを256B単位で出せるようにした。930フレーム前後では、既存NSMB rangeが `0x0208xxxx` のgame/global、`0x0219xxxx`/`0x021Bxxxx`/`0x02288400` 付近のheap/object、`0x023FFC00` 付近を取り逃がしていた。
+- `MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES=1` を追加し、delta/restore diffで見つけた小さな追加rangeをNSMB snapshotへ反映できるようにした。
+- `MELONDS_NSML_ROLLBACK_NSMB_RESTORE_DIFF_TRACE=1` を追加し、NSMB range復元直後に診断用Main RAM shadow copyと比較して、未復元ページを直接出せるようにした。
+- 追加rangeの初回反映だけでは `nsmbcoreranges` は同じ930フレームで失敗したが、restore diffで `0x02085B00`、`0x02088000`、`0x021B4B00` などの未復元ページを追加した後、`logs/codex-rollback-nsmbcoreranges-delta-discovered-more-heap-gamestate-2600-20260601` が2600-frame split local-input smokeを通過した。最終traceは checkpoint bytes `2,534,821`、save average 約`11.0ms`、restore average 約`11.1ms`。
+- 同じ追加rangeで `nsmbranges` 単体も試したが、`logs/codex-rollback-nsmbranges-delta-discovered-more-heap-gamestate-2600-20260601` は1290フレームの入力状態で不一致になった。入力rangeを外す `MELONDS_NSML_ROLLBACK_NSMB_SKIP_INPUT_RANGES=1` でも `logs/codex-rollback-nsmbranges-delta-discovered-skip-input-gamestate-2600-20260601` は同じ1290付近で不一致になった。
 
 Current blocker:
 
-- Page-delta Main RAM is correct enough for the current 2600-frame synthetic route, but it is still around `2.6MB` average per checkpoint window entry and restore still reads a base+delta pair, so rollback recovery remains around `18ms` in this run.
-- The residual size suggests many Main RAM regions are changing or being dirtied broadly; page-delta alone is not likely to reach sub-megabyte snapshots.
-- The NSMB range/actor snapshot is small enough, but current selected RAM ranges do not reconstruct deterministic gameplay after rollback. `nsmbcoreranges` indicates this is not just missing CPU/timer/scheduler/core state; it is likely missing Main RAM state outside the selected actor/global bands, such as stack, temporary working buffers, heap structures, or pages dirtied by code paths that are hard to identify by object scanning.
+- `nsmbcoreranges + delta-discovered ranges` は現時点の2600-frame synthetic routeでは通るが、まだcore state部分が約2.5MBあり、純粋な案D actor/global snapshotとしては重い。
+- `nsmbranges` 単体はまだ通らない。1290フレーム付近で入力状態がずれるため、CPU/timer/schedulerまたは入力処理に必要な非RAM core stateが残っている可能性が高い。
+- delta/restore diffで発見した範囲は実行時メモリ解析ベースであり、ROM静的解析でactor/global構造を確定した状態ではない。
 - Real WAN jitter patterns and longer sessions are not measured yet.
 
 Next actions:
 
-- Further案D work should first instrument the successful `coredelta` path to report changed Main RAM page addresses around the failing frames. Expanding named actor/global ranges by hand is now low-value because even broad hand-picked ranges failed at the same frame.
-- Add an automated rollback benchmark mode if repeated timing comparisons become necessary.
+- 次は `nsmbcoreranges` のcore state部分を分解し、CPU/timer/scheduler等のうち `nsmbranges` 単体に足りない最小core stateを特定する。
+- 並行して、delta-discovered rangeのうち入力ラッチやNet packet周辺のように復元すると挙動を固定しやすい範囲を分類し、ROM/メモリ解析で「戻すべきglobal」と「再注入されるべきvolatile input」を分ける。
+- `nsmbcoreranges` の2600-frame通過は有効な中間地点として維持しつつ、sub-MB化にはcore state縮小か、nsmbranges単体の不足状態特定が必要。
 
 この文書は、Mario vs Luigi online PoCで検討したrollback方式の議論を、後で再開できるように分離して残す設計メモ。
 
