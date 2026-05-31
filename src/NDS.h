@@ -348,7 +348,8 @@ public: // TODO: Encapsulate the rest of these members
         Savestate* file,
         u32 mainRAMMode = 0,
         const u8* deltaBaseMainRAM = nullptr,
-        u32 mainRAMPageSize = 4096);
+        u32 mainRAMPageSize = 4096,
+        u32 coreSkipMask = 0);
 
     void SetARM9RegionTimings(u32 addrstart, u32 addrend, u32 region, int buswidth, int nonseq, int seq);
     void SetARM7RegionTimings(u32 addrstart, u32 addrend, u32 region, int buswidth, int nonseq, int seq);

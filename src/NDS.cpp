@@ -842,7 +842,8 @@ bool NDS::DoRollbackSavestate(
     Savestate* file,
     u32 requestedMainRAMMode,
     const u8* deltaBaseMainRAM,
-    u32 mainRAMPageSize)
+    u32 mainRAMPageSize,
+    u32 requestedCoreSkipMask)
 {
     file->Section("NDSR");
 
@@ -1006,6 +1007,15 @@ bool NDS::DoRollbackSavestate(
         return false;
     }
 
+    u32 coreSkipMask = requestedCoreSkipMask;
+    file->Var32(&coreSkipMask);
+
+    constexpr u32 kRollbackCoreSkipCart = 1 << 0;
+    constexpr u32 kRollbackCoreSkipGPU = 1 << 1;
+    constexpr u32 kRollbackCoreSkipSPU = 1 << 2;
+    constexpr u32 kRollbackCoreSkipMicSpiRtc = 1 << 3;
+    constexpr u32 kRollbackCoreSkipWifi = 1 << 4;
+
     file->VarArray(SharedWRAM, SharedWRAMSize);
     file->VarArray(ARM7WRAM, ARM7WRAMSize);
 
@@ -1095,15 +1105,24 @@ bool NDS::DoRollbackSavestate(
     ARM9.DoSavestate(file);
     ARM7.DoSavestate(file);
 
-    NDSCartSlot.DoSavestate(file);
-    if (ConsoleType == 0)
-        GBACartSlot.DoSavestate(file);
-    GPU.DoSavestate(file);
-    SPU.DoSavestate(file);
-    Mic.DoSavestate(file);
-    SPI.DoSavestate(file);
-    RTC.DoSavestate(file);
-    Wifi.DoSavestate(file);
+    if (!(coreSkipMask & kRollbackCoreSkipCart))
+    {
+        NDSCartSlot.DoSavestate(file);
+        if (ConsoleType == 0)
+            GBACartSlot.DoSavestate(file);
+    }
+    if (!(coreSkipMask & kRollbackCoreSkipGPU))
+        GPU.DoSavestate(file);
+    if (!(coreSkipMask & kRollbackCoreSkipSPU))
+        SPU.DoSavestate(file);
+    if (!(coreSkipMask & kRollbackCoreSkipMicSpiRtc))
+    {
+        Mic.DoSavestate(file);
+        SPI.DoSavestate(file);
+        RTC.DoSavestate(file);
+    }
+    if (!(coreSkipMask & kRollbackCoreSkipWifi))
+        Wifi.DoSavestate(file);
 
     DoSavestateExtra(file);
 

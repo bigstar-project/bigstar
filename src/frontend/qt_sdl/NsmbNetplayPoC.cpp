@@ -1325,6 +1325,7 @@ struct State
     int RollbackCheckpointInterval = 1;
     int RollbackDeltaKeyframeInterval = 10;
     int RollbackMainRAMPageSize = 4096;
+    int RollbackCoreSkipMask = 0;
     bool RollbackNSMBWideRanges = false;
     bool RollbackNSMBDeltaDiscoveredRanges = false;
     bool RollbackNSMBSkipInputRanges = false;
@@ -3128,7 +3129,8 @@ bool SaveRollbackCheckpointBuffer(
         if (G.RollbackBackendMode == RollbackBackend::NSMBCoreRanges)
         {
             melonDS::Savestate coreState;
-            if (!nds->DoRollbackSavestate(&coreState, kRollbackMainRAMModeSkip)
+            if (!nds->DoRollbackSavestate(&coreState, kRollbackMainRAMModeSkip, nullptr, 4096,
+                    static_cast<melonDS::u32>(G.RollbackCoreSkipMask))
                 || coreState.Error)
             {
                 return false;
@@ -3176,7 +3178,8 @@ bool SaveRollbackCheckpointBuffer(
         || G.RollbackBackendMode == RollbackBackend::CoreSparse
         || G.RollbackBackendMode == RollbackBackend::CoreDelta)
         ? nds->DoRollbackSavestate(&state, mainRAMMode, deltaBaseMainRAM,
-            static_cast<melonDS::u32>(G.RollbackMainRAMPageSize))
+            static_cast<melonDS::u32>(G.RollbackMainRAMPageSize),
+            static_cast<melonDS::u32>(G.RollbackCoreSkipMask))
         : nds->DoSavestate(&state);
     if (state.Error || !saved || state.Error)
         return false;
@@ -3264,7 +3267,8 @@ bool RestoreRollbackCheckpointBuffer(
         || G.RollbackBackendMode == RollbackBackend::CoreSparse
         || G.RollbackBackendMode == RollbackBackend::CoreDelta)
         ? nds->DoRollbackSavestate(&state, kRollbackMainRAMModeFull, deltaBaseMainRAM,
-            static_cast<melonDS::u32>(G.RollbackMainRAMPageSize))
+            static_cast<melonDS::u32>(G.RollbackMainRAMPageSize),
+            static_cast<melonDS::u32>(G.RollbackCoreSkipMask))
         : nds->DoSavestate(&state);
     return !state.Error && restored && !state.Error;
 }
@@ -11299,6 +11303,7 @@ void InitFromEnvironment()
         EnvInt("MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE", 4096), 256, 4096);
     if ((G.RollbackMainRAMPageSize & (G.RollbackMainRAMPageSize - 1)) != 0)
         G.RollbackMainRAMPageSize = 4096;
+    G.RollbackCoreSkipMask = std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK", 0), 0, 31);
     G.RollbackNSMBWideRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_WIDE_RANGES");
     G.RollbackNSMBDeltaDiscoveredRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES");
     G.RollbackNSMBSkipInputRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_SKIP_INPUT_RANGES");
@@ -12294,7 +12299,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             mainRAMCopyBytes += stored.MainRAMCopy.size();
         }
         std::printf(
-            "NSMB Rollback: frame=%u backend=%s checkpoints=%zu checkpointSaves=%u bytesLast=%zu bytesMin=%zu bytesMax=%zu bytesAvg=%zu saveAvgUs=%llu saveMaxUs=%llu restoreOps=%u restoreAvgUs=%llu restoreMaxUs=%llu delta=%zu keyframes=%zu mainRAMCopies=%zu keyInt=%d page=%d wide=%d deltaDiscovered=%d skipInput=%d restoreDiff=%d predicted=%zu predictions=%u mismatches=%u restores=%u resims=%u pending=%u observed=%u\n",
+            "NSMB Rollback: frame=%u backend=%s checkpoints=%zu checkpointSaves=%u bytesLast=%zu bytesMin=%zu bytesMax=%zu bytesAvg=%zu saveAvgUs=%llu saveMaxUs=%llu restoreOps=%u restoreAvgUs=%llu restoreMaxUs=%llu delta=%zu keyframes=%zu mainRAMCopies=%zu keyInt=%d page=%d coreSkip=0x%X wide=%d deltaDiscovered=%d skipInput=%d restoreDiff=%d predicted=%zu predictions=%u mismatches=%u restores=%u resims=%u pending=%u observed=%u\n",
             logFrame,
             RollbackBackendName(),
             G.RollbackStates.size(),
@@ -12313,6 +12318,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             mainRAMCopyBytes,
             G.RollbackDeltaKeyframeInterval,
             G.RollbackMainRAMPageSize,
+            G.RollbackCoreSkipMask,
             G.RollbackNSMBWideRanges ? 1 : 0,
             G.RollbackNSMBDeltaDiscoveredRanges ? 1 : 0,
             G.RollbackNSMBSkipInputRanges ? 1 : 0,

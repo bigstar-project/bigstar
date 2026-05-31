@@ -43,11 +43,13 @@ Verification:
 - `MELONDS_NSML_ROLLBACK_NSMB_RESTORE_DIFF_TRACE=1` を追加し、NSMB range復元直後に診断用Main RAM shadow copyと比較して、未復元ページを直接出せるようにした。
 - 追加rangeの初回反映だけでは `nsmbcoreranges` は同じ930フレームで失敗したが、restore diffで `0x02085B00`、`0x02088000`、`0x021B4B00` などの未復元ページを追加した後、`logs/codex-rollback-nsmbcoreranges-delta-discovered-more-heap-gamestate-2600-20260601` が2600-frame split local-input smokeを通過した。最終traceは checkpoint bytes `2,534,821`、save average 約`11.0ms`、restore average 約`11.1ms`。
 - 同じ追加rangeで `nsmbranges` 単体も試したが、`logs/codex-rollback-nsmbranges-delta-discovered-more-heap-gamestate-2600-20260601` は1290フレームの入力状態で不一致になった。入力rangeを外す `MELONDS_NSML_ROLLBACK_NSMB_SKIP_INPUT_RANGES=1` でも `logs/codex-rollback-nsmbranges-delta-discovered-skip-input-gamestate-2600-20260601` は同じ1290付近で不一致になった。
+- `MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK` を追加し、`nsmbcoreranges` のMain RAM以外core stateからCart/GPU/SPU/Mic+SPI+RTC/Wifiを実験的に外せるようにした。`0x08`（Mic/SPI/RTC skip）は `logs/codex-rollback-nsmbcoreranges-core-skip-0x08-gamestate-2600-20260601` で2600-frame smokeを通過したが、サイズは約`2.54MB`のままで実用上の削減はほぼなかった。`0x02`（GPU skip）は1290フレーム、`0x04`（SPU skip）は1950フレーム、`0x0E`（GPU+SPU+Mic/SPI/RTC skip）は1620フレームで不一致になった。
 
 Current blocker:
 
 - `nsmbcoreranges + delta-discovered ranges` は現時点の2600-frame synthetic routeでは通るが、まだcore state部分が約2.5MBあり、純粋な案D actor/global snapshotとしては重い。
 - `nsmbranges` 単体はまだ通らない。1290フレーム付近で入力状態がずれるため、CPU/timer/schedulerまたは入力処理に必要な非RAM core stateが残っている可能性が高い。
+- GPU/SPUなどのデバイス状態を丸ごと外す方向は、少なくともこのPoC routeでは正しさを壊す。Mic/SPI/RTCだけは外せるがサイズ削減が小さく、優先度は低い。
 - delta/restore diffで発見した範囲は実行時メモリ解析ベースであり、ROM静的解析でactor/global構造を確定した状態ではない。
 - Real WAN jitter patterns and longer sessions are not measured yet.
 
@@ -56,6 +58,7 @@ Next actions:
 - 次は `nsmbcoreranges` のcore state部分を分解し、CPU/timer/scheduler等のうち `nsmbranges` 単体に足りない最小core stateを特定する。
 - 並行して、delta-discovered rangeのうち入力ラッチやNet packet周辺のように復元すると挙動を固定しやすい範囲を分類し、ROM/メモリ解析で「戻すべきglobal」と「再注入されるべきvolatile input」を分ける。
 - `nsmbcoreranges` の2600-frame通過は有効な中間地点として維持しつつ、sub-MB化にはcore state縮小か、nsmbranges単体の不足状態特定が必要。
+- core state縮小は、デバイス単位skipではなく、ARM9/ARM7 CPU、timer、DMA、scheduler、IRQ/IPCなど小さいが決定性に効く状態の最小セット化を次に見る。
 
 この文書は、Mario vs Luigi online PoCで検討したrollback方式の議論を、後で再開できるように分離して残す設計メモ。
 
