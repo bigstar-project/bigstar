@@ -14,6 +14,7 @@ param(
     [int]$NetworkPumpSleepUs = 250,
     [switch]$LowDelayWan,
     [switch]$LowLatencyRollback,
+    [switch]$PlanDActorSnapshot,
     [switch]$Rollback,
     [string]$RollbackBackend = "",
     [string]$RollbackTinyCoreFlags = "",
@@ -23,6 +24,8 @@ param(
     [int]$RollbackInputWaitUs = 0,
     [int]$RollbackMaxResimFrames = 0,
     [switch]$RollbackResimulate,
+    [int]$PlayerStateSyncInterval = 2,
+    [int]$PlayerStateMaxPredictFrames = 1,
     [int]$HostStartupDelayMs = 1200,
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds",
@@ -55,6 +58,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($LowLatencyRollback -and $PlanDActorSnapshot) {
+    throw "LowLatencyRollback and PlanDActorSnapshot cannot be enabled together"
+}
 
 function Set-MelonTomlValue {
     param(
@@ -113,6 +120,14 @@ if ($LowLatencyRollback) {
     $TracePlayerDefeated = $true
     $RollbackResimulate = $true
     $PerfBreakdown = $true
+}
+
+if ($PlanDActorSnapshot) {
+    if (-not $PSBoundParameters.ContainsKey('InputDelayFrames')) { $InputDelayFrames = 0 }
+    if (-not $PSBoundParameters.ContainsKey('InputMaxFrameLead')) { $InputMaxFrameLead = 8 }
+    if (-not $PSBoundParameters.ContainsKey('NetworkPumpThread')) { $NetworkPumpThread = $true }
+    if (-not $PSBoundParameters.ContainsKey('NetworkPumpSleepUs')) { $NetworkPumpSleepUs = 50 }
+    if (-not $PSBoundParameters.ContainsKey('StallTimeoutMs')) { $StallTimeoutMs = 5000 }
 }
 
 if ($LowLatencyRollback -and ($RollbackBackend -eq "nsmbtinycore" -or $RollbackBackend -eq "nsmb-tiny-core")) {
@@ -206,6 +221,15 @@ if ($TracePlayerLifeChanges) {
 if ($TracePlayerDefeated) {
     $common += "-TracePlayerDefeated"
 }
+if ($PlanDActorSnapshot) {
+    $common += @(
+        "-PlayerStateSync",
+        "-PlayerStateApply",
+        "-PlayerStateGlobals",
+        "-PlayerStateSyncInterval", "$PlayerStateSyncInterval",
+        "-PlayerStateMaxPredictFrames", "$PlayerStateMaxPredictFrames"
+    )
+}
 if ($NoFrameLimit) {
     $common += "-NoFrameLimit"
 }
@@ -278,6 +302,10 @@ if ($LowLatencyRollback) {
     }
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK -ErrorAction SilentlyContinue
 }
+if ($PlanDActorSnapshot) {
+    $env:MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "33"
+    $env:MELONDS_NSML_FPS_SPIKE_TRACE = "1"
+}
 if ($RollbackInputWaitUs -gt 0) {
     $env:MELONDS_NSML_ROLLBACK_INPUT_WAIT_US = "$RollbackInputWaitUs"
 } else {
@@ -297,6 +325,9 @@ if ($NetworkPumpThread) {
 }
 if ($PerfBreakdown) {
     $env:MELONDS_NSML_PERF_BREAKDOWN = "1"
+}
+else {
+    Remove-Item Env:\MELONDS_NSML_PERF_BREAKDOWN -ErrorAction SilentlyContinue
 }
 
 $hostArgs = @(
@@ -351,6 +382,9 @@ Write-Host "client wrapper pid=$($clientProc.Id) log=$clientLog"
 Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
 Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames networkPump=$([bool]$NetworkPumpThread) networkPumpSleepUs=$NetworkPumpSleepUs packetBridgeStart=$PacketBridgeStartFrame renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$([bool]$PerfBreakdown)"
 Write-Host "trace gameState=$([bool]$GameStateTrace) interval=$GameStateTraceInterval extended=$([bool]$GameStateTraceExtended) lifeChanges=$([bool]$TracePlayerLifeChanges) defeated=$([bool]$TracePlayerDefeated)"
+if ($PlanDActorSnapshot) {
+    Write-Host "Plan-D actor/global snapshot enabled interval=$PlayerStateSyncInterval predict=$PlayerStateMaxPredictFrames"
+}
 Write-Host "mvlWins=$MvlWins mvlBigStars=$MvlBigStars mvlLives=$MvlLives mvlStage=$(if ($MvlStage -ge 0) { $MvlStage } else { 'auto/default' }) mvlSceneSettings=$(if ($MvlSceneSettings) { $MvlSceneSettings } else { 'derived' }) mvlCourseMode=$MvlCourseMode generateConfiguredRoms=$($GenerateMvlConfiguredRoms.IsPresent) mvlMatchSeed=$(if ($MvlMatchSeed) { $MvlMatchSeed } else { 'auto' })"
 if ($Rollback) {
     $backendLabel = if ($RollbackBackend -ne "") { $RollbackBackend } else { "savestate" }

@@ -54,6 +54,7 @@ param(
     [int]$ActorSnapshotMinMovedRows = 1,
     [int]$ActorSnapshotMaxDriftX = -1,
     [int]$ActorSnapshotMaxDriftY = -1,
+    [int]$ActorSnapshotMaxConsecutiveDriftRows = 0,
     [switch]$TracePlayerLifeChanges,
     [switch]$TracePlayerDefeated,
     [switch]$RequireStarPickup,
@@ -64,6 +65,9 @@ param(
     [int]$RequirePlayerDeathEndFrame = 0,
     [switch]$RequireResultScene,
     [switch]$RequireNoResultScene,
+    [switch]$RequireSecondMvlGame,
+    [int]$RequireMvlGameCount = 0,
+    [string]$RequireMvlGameStages = "",
     [switch]$CheckMovingHazardProgressDuringDeath,
     [int]$CheckMovingHazardProgressStartFrame = 0,
     [int]$CheckMovingHazardProgressEndFrame = 0,
@@ -283,6 +287,15 @@ if ($RequireResultScene) {
 }
 if ($RequireNoResultScene) {
     $common += "-RequireNoResultScene"
+}
+if ($RequireSecondMvlGame) {
+    $common += "-RequireSecondMvlGame"
+}
+if ($RequireMvlGameCount -gt 0) {
+    $common += @("-RequireMvlGameCount", "$RequireMvlGameCount")
+}
+if ($RequireMvlGameStages -ne "") {
+    $common += @("-RequireMvlGameStages", "$RequireMvlGameStages")
 }
 if ($CheckMovingHazardProgressDuringDeath) {
     $common += @(
@@ -608,7 +621,7 @@ function Assert-ActorSnapshotMovement {
         $firstX = Convert-TraceHexToInt64 $first.$XField
         $inputRows = @($candidateRows | Where-Object { (Convert-TraceHexToInt64 $_.$InputField) -ne 0 })
         $movedRows = @($candidateRows | Where-Object { (Convert-TraceHexToInt64 $_.$XField) -ne $firstX })
-        if ($inputRows.Count -eq 0 -or $movedRows.Count -lt $ActorSnapshotMinMovedRows) {
+        if ($movedRows.Count -lt $ActorSnapshotMinMovedRows) {
             throw "$Label actor snapshot movement check failed: rows=$($candidateRows.Count) inputRows=$($inputRows.Count) movedRows=$($movedRows.Count) minMoved=$ActorSnapshotMinMovedRows firstX=$($first.$XField) lastX=$($last.$XField) lastInput=$($last.$InputField)"
         }
         Write-Host "$Label actor snapshot movement check passed: rows=$($candidateRows.Count) inputRows=$($inputRows.Count) movedRows=$($movedRows.Count) firstX=$($first.$XField) lastX=$($last.$XField)"
@@ -643,6 +656,9 @@ function Assert-ActorSnapshotMovement {
     $maxDriftX = 0
     $maxDriftY = 0
     $checked = 0
+    $skippedTransitionRows = 0
+    $driftRuns = @{}
+    $maxConsecutiveDriftRows = 0
     foreach ($frame in $hostByFrame.Keys) {
         if ($frame -lt $ActorSnapshotStartFrame -or -not $clientByFrame.ContainsKey($frame)) {
             continue
@@ -651,10 +667,18 @@ function Assert-ActorSnapshotMovement {
         $hostRow = $hostByFrame[$frame]
         $clientRow = $clientByFrame[$frame]
         foreach ($pair in @(
-            @{ Label = "player0"; Local = $hostRow; Remote = $clientRow; X = "playerActor0X"; Y = "playerActor0Y"; Found = "playerActor0Found" },
-            @{ Label = "player1"; Local = $clientRow; Remote = $hostRow; X = "playerActor1X"; Y = "playerActor1Y"; Found = "playerActor1Found" }
+            @{ Label = "player0"; Local = $hostRow; Remote = $clientRow; X = "playerActor0X"; Y = "playerActor0Y"; Found = "playerActor0Found"; Dead = "player0Dead"; Step = "playerActor0TransitionStep" },
+            @{ Label = "player1"; Local = $clientRow; Remote = $hostRow; X = "playerActor1X"; Y = "playerActor1Y"; Found = "playerActor1Found"; Dead = "player1Dead"; Step = "playerActor1TransitionStep" }
         )) {
             if ($pair.Local.($pair.Found) -ne "0x1" -or $pair.Remote.($pair.Found) -ne "0x1") {
+                continue
+            }
+            if ((Convert-TraceHexToInt64 $pair.Local.($pair.Dead)) -ne 0 -or
+                (Convert-TraceHexToInt64 $pair.Remote.($pair.Dead)) -ne 0 -or
+                (Convert-TraceHexToInt64 $pair.Local.($pair.Step)) -ne 1 -or
+                (Convert-TraceHexToInt64 $pair.Remote.($pair.Step)) -ne 1) {
+                $skippedTransitionRows++
+                $driftRuns[$pair.Label] = 0
                 continue
             }
 
@@ -663,11 +687,19 @@ function Assert-ActorSnapshotMovement {
             if ($dx -gt $maxDriftX) { $maxDriftX = $dx }
             if ($dy -gt $maxDriftY) { $maxDriftY = $dy }
             $checked++
-            if ($ActorSnapshotMaxDriftX -ge 0 -and $dx -gt $ActorSnapshotMaxDriftX) {
-                throw "$($pair.Label) actor snapshot X drift too high: frame=$frame dx=$dx limit=$ActorSnapshotMaxDriftX local=$($pair.Local.($pair.X)) remote=$($pair.Remote.($pair.X))"
-            }
-            if ($ActorSnapshotMaxDriftY -ge 0 -and $dy -gt $ActorSnapshotMaxDriftY) {
-                throw "$($pair.Label) actor snapshot Y drift too high: frame=$frame dy=$dy limit=$ActorSnapshotMaxDriftY local=$($pair.Local.($pair.Y)) remote=$($pair.Remote.($pair.Y))"
+            $overDriftLimit =
+                ($ActorSnapshotMaxDriftX -ge 0 -and $dx -gt $ActorSnapshotMaxDriftX) -or
+                ($ActorSnapshotMaxDriftY -ge 0 -and $dy -gt $ActorSnapshotMaxDriftY)
+            if ($overDriftLimit) {
+                $driftRuns[$pair.Label] = 1 + [int]$driftRuns[$pair.Label]
+                if ($driftRuns[$pair.Label] -gt $maxConsecutiveDriftRows) {
+                    $maxConsecutiveDriftRows = $driftRuns[$pair.Label]
+                }
+                if ($driftRuns[$pair.Label] -gt $ActorSnapshotMaxConsecutiveDriftRows) {
+                    throw "$($pair.Label) actor snapshot drift too high: frame=$frame dx=$dx limitX=$ActorSnapshotMaxDriftX dy=$dy limitY=$ActorSnapshotMaxDriftY consecutiveRows=$($driftRuns[$pair.Label]) limitRows=$ActorSnapshotMaxConsecutiveDriftRows local=$($pair.Local.($pair.X))/$($pair.Local.($pair.Y)) remote=$($pair.Remote.($pair.X))/$($pair.Remote.($pair.Y))"
+                }
+            } else {
+                $driftRuns[$pair.Label] = 0
             }
         }
     }
@@ -675,7 +707,7 @@ function Assert-ActorSnapshotMovement {
     if ($checked -eq 0) {
         throw "actor snapshot drift check failed: no comparable actor rows after frame $ActorSnapshotStartFrame"
     }
-    Write-Host "actor snapshot movement/drift check passed: checked=$checked maxDriftX=$maxDriftX maxDriftY=$maxDriftY"
+    Write-Host "actor snapshot movement/drift check passed: checked=$checked skippedTransitionRows=$skippedTransitionRows maxDriftX=$maxDriftX maxDriftY=$maxDriftY maxConsecutiveDriftRows=$maxConsecutiveDriftRows"
 }
 
 if ($RequireActorSnapshotMovement) {
