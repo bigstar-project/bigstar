@@ -167,10 +167,11 @@ $hostArgs = @(
     "-RunRole", "host",
     "-HostRom", $HostRom,
     "-InputScript", $HostInputScript,
-    "-RequireHostLocalPlayerID", "0",
-    "-RequireHostNetLocalAid", "0",
     "-LogDir", $hostLog
 )
+if (-not $NoGameStateTrace) {
+    $hostArgs += @("-RequireHostLocalPlayerID", "0", "-RequireHostNetLocalAid", "0")
+}
 
 $clientArgs = @(
     "-NoProfile",
@@ -181,10 +182,11 @@ $clientArgs = @(
     "-Peer", "127.0.0.1",
     "-ClientRom", $ClientRom,
     "-InputScript", $ClientInputScript,
-    "-RequireClientLocalPlayerID", "1",
-    "-RequireClientNetLocalAid", "1",
     "-LogDir", $clientLog
 )
+if (-not $NoGameStateTrace) {
+    $clientArgs += @("-RequireClientLocalPlayerID", "1", "-RequireClientNetLocalAid", "1")
+}
 
 $hostOut = Join-Path $wrapperLog "host-wrapper.out.txt"
 $hostErr = Join-Path $wrapperLog "host-wrapper.err.txt"
@@ -214,13 +216,19 @@ $hostProc.WaitForExit()
 
 $hostText = if (Test-Path $hostOut) { Get-Content $hostOut -Raw } else { "" }
 $clientText = if (Test-Path $clientOut) { Get-Content $clientOut -Raw } else { "" }
-if ($hostText -notmatch "NSMB Mario vs Luigi LAN route smoke passed" -or
+$hostText = [string]$hostText
+$clientText = [string]$clientText
+$hostExitFailed = $null -ne $hostProc.ExitCode -and $hostProc.ExitCode -ne 0
+$clientExitFailed = $null -ne $clientProc.ExitCode -and $clientProc.ExitCode -ne 0
+if ($hostExitFailed -or
+    $clientExitFailed -or
+    $hostText -notmatch "NSMB Mario vs Luigi LAN route smoke passed" -or
     $clientText -notmatch "NSMB Mario vs Luigi LAN route smoke passed") {
     $details = @()
     foreach ($path in @($hostOut, $hostErr, $clientOut, $clientErr)) {
         if (Test-Path $path) { $details += Get-Content $path -Raw }
     }
-    throw "split local-input child smoke failed: $($details -join "`n")"
+    throw "split local-input child smoke failed: hostExit=$($hostProc.ExitCode) clientExit=$($clientProc.ExitCode) $($details -join "`n")"
 }
 
 if ($NoGameStateTrace -or $SkipGameStateComparison) {

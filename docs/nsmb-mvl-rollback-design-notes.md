@@ -1,5 +1,21 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
+## 2026-06-01 rollback stress update - authoritative current note
+
+現在の手動向け `-LowLatencyRollback` は、`nsmbcoreranges` から `coredelta` へ戻した。理由は、移動 + ジャンプ + ダッシュ同時入力の長時間stressで `nsmbcoreranges` が停止/timeoutし、client側 game-state trace では `arm9PC=0xffff0104` / `arm9SP=0x0` になったため。`nsmbcoreranges` はcore stateを過去へ戻す一方で Main RAM はNSMB推定rangeだけを戻すため、range外のスタック/一時領域/周辺Main RAMが現在フレームのまま残り、resimulate時にCPU状態とRAM状態が噛み合わなくなる可能性が高い。
+
+現行候補は `RollbackBackend=coredelta` / `RollbackWindow=64` / `RollbackCheckpointInterval=8` / `RollbackResimulate` / `InputDelayFrames=0` / `InputMaxFrameLead=8` / `MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL=30` / `MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE=256`。これは「page-delta Main RAM + core state」寄りで、軽量な案D actor/global snapshotではない。
+
+移動 + ジャンプ + ダッシュstressの結果:
+
+- `nsmbcoreranges`, `InputSendDelayFrames=6`, 6000F: wrapperは成功扱いしていたが、実際はhost/client childがtimeout。game-stateは3960Fで止まり、client ARM9は異常PC/SPになった。テストハーネス側も、child stderr timeoutを見逃す経路があったため修正した。
+- `coredelta`, page 256, keyframe 30, `InputSendDelayFrames=6`, 6000F: 完走。active fps は host/client とも約 `43.1fps`。重い遅延stressなので通常プレイFPSとは分けて扱う。
+- `coredelta`, page 256, keyframe 30, `InputSendDelayFrames=6`, 2600F, game-state comparisonあり: 完走。座標/global hash系の比較は通過。
+- `coredelta`, page 256, keyframe 30, no artificial send delay, 2600F, game-state comparisonあり: 完走。active fps は約 `52.1fps`。
+- no artificial send delay, trace/game-stateなしのプレイ寄り2600F: active fps は約 `53.5fps`。`InputMaxFrameLead=16` ではthrottle 0件になったがfpsは約 `53.0fps`で、主な残りコストはthrottleではなくcheckpoint保存/resimulate。`RollbackCheckpointInterval=16` は約 `50.6fps`まで悪化したため、現時点ではinterval 8を維持する。
+
+フレーム落ちの主因は、rollback発生フレームで `restore + 過去checkpointから現在フレームまでのRunFrame再実行 + checkpoint再保存` を同じ表示フレーム内で行うこと。現行 `coredelta` は通常delta checkpointでも約 `2.46-2.49MB`、平均約 `2.7MB`、keyframeは約 `6.6MB`。save平均はおおむね `3.5-4.1ms`、restore平均は `17-20ms` 程度まで出る。したがって、さらに軽い actor/global snapshot を正しく作れれば改善余地はある。ただし `nsmbcoreranges` の失敗から、Main RAMを推定rangeだけに削るとCPU stateとの整合性が壊れやすい。軽量化はROM/メモリ解析で「戻すべきゲーム状態」と「戻してはいけないinput/net volatile領域」を確定してから進める。
+
 ## 2026-06-01 current manual rollback status
 
 手動プレイ用の現行コマンドは `scripts/run-nsmb-mvl-manual-local.ps1 -LowLatencyRollback -AllowJit`。
