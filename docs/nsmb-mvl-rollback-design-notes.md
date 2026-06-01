@@ -1,5 +1,13 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
+## 2026-06-01 manual play correction
+
+手動プレイ向けに一度案内した `InputDelayFrames=0 / InputMaxFrameLead=8` は未検証で、2600Fの自動入力・game-state比較でframe 1950に `playerActor0X` 不一致を起こした。手動プレイ推奨から外す。
+
+現時点で手動プレイに使う設定は、旧候補rollbackに `InputDelayFrames=4 / InputMaxFrameLead=4 / InputUnreliable / InputBundleHistory=8` を組み合わせる。描画あり・自動入力・game-state比較ありの2600Fは `logs/codex-manual-safer-oldcandidate-rendered-delay4-lead4-gamestate-2600-20260601` で通過し、host/client active fps は `59.54/59.48`。
+
+手動起動パスでも `-SoftwareRenderer` 付きの1800F run `logs/codex-manual-local-software-oldcandidate-delay4-lead4-1800-20260601` がhost/client active fps `57.80/57.56` で完走した。手動時に10fps級まで落ちる場合は、まずOpenGL compute rendererではなく `-SoftwareRenderer` を使う。
+
 ## 2026-06-01 ProcessList-centered rollback snapshot
 
 現在の最有力候補は `nsmbtinycore + MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS=0x200 + MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES=1` を維持しつつ、NSMB Code Reference の `ProcessManager` 構造を使って actor/object range を作る方式。
