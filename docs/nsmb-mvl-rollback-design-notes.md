@@ -19,6 +19,7 @@ Completed:
 - 同じ4200F以降遅延で `InputMaxFrameLead=-1` にしてthrottleを外すと、`RollbackWindow=20` では実input到着が31F後になり `checkpoint missing`。このstressにはwindow 20が不足だった。
 - `RollbackWindow=60` に広げた同条件は4500Fを通過した。hostは4200F以降のprobeを含め `restoreOps=3`, `resims=3`, `restoreAvgUs=10,976`, `saveAvgUs=433`, active fps `58.63`。clientも `restoreOps=3`, `resims=3`, `restoreAvgUs=10,475`, active fps `58.87`。
 - 同じ `RollbackWindow=60` 条件で5400Fまで延長し、前回問題になった4950F付近もhost/client一致で通過した。最終hostは `bytesLast=253,939`, `saveAvgUs=422`, `restoreOps=2`, `restoreAvgUs=11,286`, `resims=2`, active fps `58.89`。clientは `saveAvgUs=427`, `restoreOps=3`, `restoreAvgUs=10,652`, `resims=3`, active fps `59.06`。
+- さらに6000Fまで延長し、結果後の再開周辺もhost/client一致で通過した。最終hostは `bytesLast=253,427`, `bytesMax=254,087`, `saveAvgUs=433`, `restoreOps=2`, `restoreAvgUs=13,236`, active fps `58.91`。clientは `saveAvgUs=431`, `restoreOps=3`, `restoreAvgUs=10,574`, active fps `59.03`。
 
 Current blocker:
 
@@ -28,7 +29,7 @@ Current blocker:
 
 Next actions:
 
-- `RollbackWindow=60` + targeted late delay/probeを6000F以上、または別input routeへ伸ばし、結果画面/再スタート後まで状態が崩れないか確認する。
+- `RollbackWindow=60` + targeted late delay/probeを別input routeへ広げ、ルート依存のspawn/despawnで状態が崩れないか確認する。
 - 再発した場合だけ `MELONDS_NSML_ROLLBACK_NSMB_RESTORE_DIFF_TRACE=1` を短い範囲で入れ、未復元Main RAM pageか、Main RAM外のcore進行状態かを切り分ける。
 - FPS測定はbaseline/rollbackを同じ `-AllowJit` 条件で並べ、診断traceの遅さを通常性能として扱わない。
 
