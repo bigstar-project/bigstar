@@ -1,6 +1,40 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
-## 2026-06-01 current status - spike gate and Plan-D-like experiments
+## 2026-06-02 current status - real rollback gate and Plan-D-like retest
+
+Current working candidate is still experimental:
+
+- `nsmbtinycore + delta-discovered globals + process-list object ranges + actorArena + ARM9 stack + no heap scan + tinyCoreFlags=0x241`.
+- Manual explicit `-RollbackBackend nsmbtinycore` under `-LowLatencyRollback` now defaults to checkpoint interval 1, input max frame lead 1, `RollbackInputWaitUs=2500`, `RollbackMaxResimFrames=1`, network pump 50us, JIT reset skip, render skip during resim, and CP15 PU debug suppression.
+- `coredelta` remains the correctness/perf baseline. The lightweight path is still not promoted.
+
+Validation changes:
+
+- `scripts/run-nsmb-mvl-split-local-input-smoke.ps1` now has `-MinRollbackResims`, so a bounded-input-wait run cannot pass as a rollback test when it avoided rollback entirely.
+- `scripts/run-nsmb-mvl-rollback-candidate-sweep.ps1` passes the minimum-resim gate, scans candidate logs recursively, records `rollbackResims` summary lines, exposes `-RollbackMaxResimFrames`, and can force remote input delay with `-InputSendDelayFrames`.
+- `nsmbranges-proclist-arena-gpu2d-noheap` was added as a RAM-only Plan-D extreme candidate; it is useful as a negative control.
+
+Implementation changes:
+
+- NSMB range restore no longer invalidates all Main RAM JIT pages. It invalidates only restored ranges, and honors `MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET=1`.
+- CP15 PU-region debug logging can be suppressed with `MELONDS_NSML_SUPPRESS_PU_DEBUG=1`, removing large rollback-time stdout bursts.
+
+Latest measurements:
+
+- The old manual comparison still matches the user report: `logs/nsmb-mvl-manual-local-20260601-212956` is `nsmbtinycore` abort/low-FPS failure, while `logs/nsmb-mvl-manual-local-20260601-213213` is a non-frozen `coredelta` baseline.
+- `RollbackInputWaitUs=8000 + netpump 50us` is no longer treated as a valid rollback pass by itself. `logs/codex-sweep-tinycore-rbwait8000-minresim1-1600-20260602/20260601-234507` fails correctly with `resims=0`.
+- Current best real-rollback natural route: `logs/codex-sweep-tinycore-suppresspu-natural-wait2500-compare-2400-20260602/20260602-000856`. It passed state comparison but still failed strict rollback spike gate by a small margin: host max `32.935ms`, client rollback spike `33.894ms`.
+- Relaxed correctness proof for the same settings passed 2400F: `logs/codex-sweep-tinycore-maxresim1-wait2500-netpump-correctness-2400-20260602/20260601-235854`.
+- Forced one-frame send delay remains unacceptable: `logs/codex-sweep-tinycore-suppresspu-forced-delay1-wait2500-compare-2400-20260602/20260602-000614` saw repeated rollback frames, active max `102.108ms`, and `over33ms=505`.
+- RAM-only `nsmbranges` is rejected: `logs/codex-sweep-nsmbranges-forced-delay1-wait2500-compare-1600-20260602/20260602-000804` data-aborted around frame 961 despite very low restore cost.
+
+Current conclusion:
+
+- The lightweight snapshot size is not the main blocker anymore. CPU/core restore plus full-frame `nds->RunFrame()` resim is the remaining cost.
+- CPU core restore is required for correctness; RAM-only actor/global restore is too unstable.
+- The best tinycore path is close under natural localhost timing but not robust under forced delay. Next useful direction is a narrower CPU/timer/core subset or a game-level actor/global apply that avoids full NDS resim, not wider Main RAM snapshots.
+
+## 2026-06-01 prior status - spike gate and Plan-D-like experiments
 
 Current working candidate is still experimental:
 

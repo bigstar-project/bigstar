@@ -21,6 +21,7 @@ param(
     [int]$RollbackCheckpointInterval = 30,
     [int]$RollbackResimulateDelayFrames = 0,
     [int]$RollbackInputWaitUs = 0,
+    [int]$RollbackMaxResimFrames = 0,
     [switch]$RollbackResimulate,
     [int]$HostStartupDelayMs = 1200,
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
@@ -117,7 +118,8 @@ if ($LowLatencyRollback) {
 if ($LowLatencyRollback -and ($RollbackBackend -eq "nsmbtinycore" -or $RollbackBackend -eq "nsmb-tiny-core")) {
     if (-not $PSBoundParameters.ContainsKey('InputMaxFrameLead')) { $InputMaxFrameLead = 1 }
     if (-not $PSBoundParameters.ContainsKey('RollbackCheckpointInterval')) { $RollbackCheckpointInterval = 1 }
-    if (-not $PSBoundParameters.ContainsKey('RollbackInputWaitUs')) { $RollbackInputWaitUs = 8000 }
+    if (-not $PSBoundParameters.ContainsKey('RollbackInputWaitUs')) { $RollbackInputWaitUs = 2500 }
+    if (-not $PSBoundParameters.ContainsKey('RollbackMaxResimFrames')) { $RollbackMaxResimFrames = 1 }
     if (-not $PSBoundParameters.ContainsKey('NetworkPumpThread')) { $NetworkPumpThread = $true }
     if (-not $PSBoundParameters.ContainsKey('NetworkPumpSleepUs')) { $NetworkPumpSleepUs = 50 }
 }
@@ -259,7 +261,8 @@ if ($LowLatencyRollback) {
         $env:MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
         $env:MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
         $env:MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
-        if ($RollbackTinyCoreFlags -eq "") { $RollbackTinyCoreFlags = "0x200" }
+        $env:MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
+        if ($RollbackTinyCoreFlags -eq "") { $RollbackTinyCoreFlags = "0x241" }
         $env:MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "$RollbackTinyCoreFlags"
     } else {
         Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES -ErrorAction SilentlyContinue
@@ -270,6 +273,7 @@ if ($LowLatencyRollback) {
         Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SUPPRESS_PU_DEBUG -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS -ErrorAction SilentlyContinue
     }
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK -ErrorAction SilentlyContinue
@@ -278,6 +282,11 @@ if ($RollbackInputWaitUs -gt 0) {
     $env:MELONDS_NSML_ROLLBACK_INPUT_WAIT_US = "$RollbackInputWaitUs"
 } else {
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_INPUT_WAIT_US -ErrorAction SilentlyContinue
+}
+if ($RollbackMaxResimFrames -gt 0) {
+    $env:MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES = "$RollbackMaxResimFrames"
+} else {
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES -ErrorAction SilentlyContinue
 }
 if ($NetworkPumpThread) {
     $env:MELONDS_NSML_NET_PUMP_THREAD = "1"

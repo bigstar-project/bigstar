@@ -13,6 +13,8 @@ param(
     [double]$MaxRollbackFrameMs = 0.0,
     [switch]$NetworkPumpThread,
     [int]$NetworkPumpSleepUs = 250,
+    [int]$InputSendDelayFrames = 0,
+    [int]$InputSendJitterFrames = 0,
     [int]$RollbackPredictionProbeModulo = 0,
     [int]$RollbackPredictionProbeOffset = 0,
     [int]$RollbackPredictionProbeLimit = -1,
@@ -20,6 +22,8 @@ param(
     [int]$RollbackPredictionProbeEndFrame = 0,
     [string]$RollbackPredictionProbeKeyMask = "",
     [int]$RollbackInputWaitUs = 0,
+    [int]$RollbackMaxResimFrames = 0,
+    [int]$MinRollbackResims = -1,
     [switch]$NoGameStateComparison,
     [switch]$SkipMovementProbe,
     [switch]$InputNetplayTrace
@@ -36,6 +40,7 @@ New-Item -ItemType Directory -Force $runRoot | Out-Null
 $envKeys = @(
     "MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL",
     "MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE",
+    "MELONDS_NSML_ROLLBACK_NSMB_WIDE_RANGES",
     "MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES",
     "MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES",
     "MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE",
@@ -48,6 +53,7 @@ $envKeys = @(
     "MELONDS_NSML_ROLLBACK_INPUT_WAIT_US",
     "MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET",
     "MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER",
+    "MELONDS_NSML_SUPPRESS_PU_DEBUG",
     "MELONDS_NSML_NET_PUMP_THREAD",
     "MELONDS_NSML_NET_PUMP_SLEEP_US",
     "MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK",
@@ -79,7 +85,8 @@ function Get-CandidateStatus {
         $combined += (Get-Content $RunLog -Raw -ErrorAction SilentlyContinue)
     }
     if (Test-Path $CandidateLog) {
-        $matches = Select-String -Path (Join-Path $CandidateLog "*\*.txt") -Pattern "stalled|timed out|prefetch abort|data abort|gameplay mismatch|active frame exceeded|active frame spike too high|over25ms exceeded|over33ms exceeded|consecutive slow frames too high|rollback frame spike too high" -ErrorAction SilentlyContinue
+        $matches = Get-ChildItem -Path $CandidateLog -Recurse -File -Include "*.txt","*.err" -ErrorAction SilentlyContinue |
+            Select-String -Pattern "stalled|timed out|prefetch abort|data abort|gameplay mismatch|active frame exceeded|active frame spike too high|over25ms exceeded|over33ms exceeded|consecutive slow frames too high|rollback frame spike too high|rollback resim count too low" -ErrorAction SilentlyContinue
         foreach ($match in $matches) {
             $combined += "`n$($match.Line)"
         }
@@ -89,7 +96,7 @@ function Get-CandidateStatus {
     if ($combined -match "prefetch abort|data abort") { return "abort" }
     if ($combined -match "gameplay mismatch") { return "mismatch" }
     if ($combined -match "timed out|missing frame limit") { return "timeout" }
-    if ($combined -match "active frame exceeded|active frame spike too high|over25ms exceeded|over33ms exceeded|consecutive slow frames too high|rollback frame spike too high") { return "perf-fail" }
+    if ($combined -match "active frame exceeded|active frame spike too high|over25ms exceeded|over33ms exceeded|consecutive slow frames too high|rollback frame spike too high|rollback resim count too low") { return "perf-fail" }
     if ($ErrorText) { return "failed" }
     return "passed"
 }
@@ -103,7 +110,8 @@ function Get-LastMatchingLine {
     if (-not (Test-Path $CandidateLog)) {
         return ""
     }
-    $matches = Select-String -Path (Join-Path $CandidateLog "*\*.stdout.txt") -Pattern $Pattern -ErrorAction SilentlyContinue
+    $matches = Get-ChildItem -Path $CandidateLog -Recurse -File -Filter "*.stdout.txt" -ErrorAction SilentlyContinue |
+        Select-String -Pattern $Pattern -ErrorAction SilentlyContinue
     if (-not $matches) {
         return ""
     }
@@ -147,6 +155,46 @@ $candidates = @(
             MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "0x200"
             MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
             MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
+            MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
+            MELONDS_NSML_FIXED_FRAME_SLEEP = "1"
+            MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "25"
+            MELONDS_NSML_FPS_SPIKE_TRACE = "1"
+        }
+    },
+    [pscustomobject]@{
+        Name = "nsmbtinycore-wide-proclist-arena-noheap"
+        Backend = "nsmbtinycore"
+        Env = @{
+            MELONDS_NSML_ROLLBACK_NSMB_WIDE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
+            MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "0x200"
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
+            MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
+            MELONDS_NSML_FIXED_FRAME_SLEEP = "1"
+            MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "25"
+            MELONDS_NSML_FPS_SPIKE_TRACE = "1"
+        }
+    },
+    [pscustomobject]@{
+        Name = "nsmbtinycore-proclist-arena-gpu2d-noheap"
+        Backend = "nsmbtinycore"
+        Env = @{
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
+            MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "0x241"
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
+            MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
             MELONDS_NSML_FIXED_FRAME_SLEEP = "1"
             MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "25"
             MELONDS_NSML_FPS_SPIKE_TRACE = "1"
@@ -162,6 +210,24 @@ $candidates = @(
             MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_INTERVAL = "900"
             MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
             MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "0x200"
+            MELONDS_NSML_FIXED_FRAME_SLEEP = "1"
+            MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "25"
+            MELONDS_NSML_FPS_SPIKE_TRACE = "1"
+        }
+    },
+    [pscustomobject]@{
+        Name = "nsmbranges-proclist-arena-gpu2d-noheap"
+        Backend = "nsmbranges"
+        Env = @{
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
+            MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
             MELONDS_NSML_FIXED_FRAME_SLEEP = "1"
             MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "25"
             MELONDS_NSML_FPS_SPIKE_TRACE = "1"
@@ -214,6 +280,8 @@ foreach ($item in $candidates) {
         RollbackResimulate = $true
         InputDelayFrames = 0
         InputMaxFrameLead = 8
+        InputSendDelayFrames = $InputSendDelayFrames
+        InputSendJitterFrames = $InputSendJitterFrames
         AllowJit = $true
         RollbackSettleFrames = 8
         MaxActiveFrameMs = $MaxActiveFrameMs
@@ -221,7 +289,7 @@ foreach ($item in $candidates) {
         MaxConsecutiveSlowFrames = $MaxConsecutiveSlowFrames
         LogDir = $candidateLogRel
     }
-    if ($item.Backend -eq "nsmbtinycore") {
+    if ($item.Backend -eq "nsmbtinycore" -or $item.Backend -eq "nsmbranges") {
         $candidateParams.RollbackCheckpointInterval = 1
         $candidateParams.InputMaxFrameLead = 1
     }
@@ -230,6 +298,12 @@ foreach ($item in $candidates) {
     }
     if ($RollbackInputWaitUs -gt 0) {
         $candidateParams.RollbackInputWaitUs = $RollbackInputWaitUs
+    }
+    if ($RollbackMaxResimFrames -gt 0) {
+        Set-Item "Env:\MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES" "$RollbackMaxResimFrames"
+    }
+    if ($MinRollbackResims -ge 0) {
+        $candidateParams.MinRollbackResims = $MinRollbackResims
     }
     if ($NetworkPumpThread) {
         $candidateParams.NetworkPumpThread = $true
@@ -265,7 +339,7 @@ foreach ($item in $candidates) {
     }
 
     $status = Get-CandidateStatus -RunLog $runLog -CandidateLog $candidateLog -ErrorText $errorText
-    $rollbackLine = Get-LastMatchingLine -CandidateLog $candidateLog -Pattern "NSMB Rollback: frame="
+    $rollbackLine = Get-LastMatchingLine -CandidateLog $candidateLog -Pattern "NSMB Rollback: frame=|rollbackResims="
     $timingLine = Get-LastMatchingLine -CandidateLog $candidateLog -Pattern "NSMB Test: active frame timing"
 
     $summary += [pscustomobject]@{

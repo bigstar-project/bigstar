@@ -70,6 +70,7 @@ param(
     [int]$MaxActiveFrameOver25ms = -1,
     [int]$MaxActiveFrameOver33ms = -1,
     [double]$MaxRollbackFrameMs = 0.0,
+    [int]$MinRollbackResims = -1,
     [double]$SlowFrameThresholdMs = 33.0,
     [int]$MaxConsecutiveSlowFrames = -1,
     [int]$StallTimeoutMs = 0,
@@ -481,9 +482,43 @@ function Assert-ActiveFrameTiming {
     }
 }
 
+function Assert-RollbackResimCount {
+    param(
+        [string]$Role,
+        [string]$Text
+    )
+
+    if ($MinRollbackResims -lt 0) {
+        return
+    }
+
+    $maxResims = 0
+    foreach ($line in ($Text -split "`r?`n")) {
+        if ($line -match "NSMB Rollback: frame=.*resims=([0-9]+)") {
+            $value = [int]$Matches[1]
+            if ($value -gt $maxResims) {
+                $maxResims = $value
+            }
+        } elseif ($line -match "rollbackResims=([0-9]+)") {
+            $value = [int]$Matches[1]
+            if ($value -gt $maxResims) {
+                $maxResims = $value
+            }
+        }
+    }
+
+    if ($maxResims -lt $MinRollbackResims) {
+        throw "$Role rollback resim count too low: resims=$maxResims min=$MinRollbackResims"
+    }
+}
+
 if ($MaxActiveFrameMs -gt 0.0 -or $MaxActiveFrameOver25ms -ge 0 -or $MaxActiveFrameOver33ms -ge 0 -or $MaxConsecutiveSlowFrames -ge 0 -or $MaxRollbackFrameMs -gt 0.0) {
     Assert-ActiveFrameTiming -Role "host" -Text $hostMelonText -RollbackFrameLimitMs $MaxRollbackFrameMs
     Assert-ActiveFrameTiming -Role "client" -Text $clientMelonText -RollbackFrameLimitMs $MaxRollbackFrameMs
+}
+if ($MinRollbackResims -ge 0) {
+    Assert-RollbackResimCount -Role "host" -Text $hostMelonText
+    Assert-RollbackResimCount -Role "client" -Text $clientMelonText
 }
 
 if ($NoGameStateTrace -or $SkipGameStateComparison) {

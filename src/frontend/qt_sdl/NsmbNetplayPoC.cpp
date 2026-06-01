@@ -2785,11 +2785,28 @@ void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
 
 void InvalidateMainRAMJIT(melonDS::NDS* nds, melonDS::u32 len)
 {
-    if (!nds || len == 0)
+    static const bool skipInvalidation = std::getenv("MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET") != nullptr;
+    if (skipInvalidation || !nds || len == 0)
         return;
     for (melonDS::u32 offset = 0; offset < len; offset += 0x1000)
     {
         const melonDS::u32 addr = kMainRAMBase + offset;
+        nds->JIT.CheckAndInvalidate<0, melonDS::ARMJIT_Memory::memregion_MainRAM>(addr);
+        nds->JIT.CheckAndInvalidate<1, melonDS::ARMJIT_Memory::memregion_MainRAM>(addr);
+    }
+}
+
+void InvalidateMainRAMJITRange(melonDS::NDS* nds, melonDS::u32 address, melonDS::u32 length)
+{
+    static const bool skipInvalidation = std::getenv("MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET") != nullptr;
+    if (skipInvalidation || !nds || length == 0 || address < kMainRAMBase)
+        return;
+    const melonDS::u32 offset = address - kMainRAMBase;
+    const melonDS::u32 start = offset & ~0xFFFu;
+    const melonDS::u32 end = (offset + length + 0xFFFu) & ~0xFFFu;
+    for (melonDS::u32 page = start; page < end; page += 0x1000)
+    {
+        const melonDS::u32 addr = kMainRAMBase + page;
         nds->JIT.CheckAndInvalidate<0, melonDS::ARMJIT_Memory::memregion_MainRAM>(addr);
         nds->JIT.CheckAndInvalidate<1, melonDS::ARMJIT_Memory::memregion_MainRAM>(addr);
     }
@@ -3655,7 +3672,8 @@ bool RestoreRollbackCheckpointBuffer(
         nds->NumFrames = header.NumFrames;
         nds->NumLagFrames = header.NumLagFrames;
         nds->LagFrameFlag = header.LagFrameFlag != 0;
-        InvalidateMainRAMJIT(nds, nds->MainRAMMask + 1);
+        for (const auto& range : ranges)
+            InvalidateMainRAMJITRange(nds, range.Address, range.Length);
         return true;
     }
 
