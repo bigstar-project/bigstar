@@ -1106,6 +1106,8 @@ struct State
     int PacketBridgeSendJitterFrames = 0;
     int InputSendDelayFrames = 0;
     int InputSendJitterFrames = 0;
+    melonDS::u32 InputSendDelayStartFrame = 0;
+    melonDS::u32 InputSendDelayEndFrame = kNoFrameLimit;
     bool InputUnreliable = false;
     int InputBundleHistory = 0;
     int InputDropModulo = 0;
@@ -1332,6 +1334,8 @@ struct State
     int RollbackPredictionProbeModulo = 0;
     int RollbackPredictionProbeOffset = 0;
     int RollbackPredictionProbeLimit = -1;
+    melonDS::u32 RollbackPredictionProbeStartFrame = 0;
+    melonDS::u32 RollbackPredictionProbeEndFrame = kNoFrameLimit;
     melonDS::u32 RollbackPredictionProbeKeyMask = 0x1;
     RollbackBackend RollbackBackendMode = RollbackBackend::Savestate;
     int RollbackWindow = 20;
@@ -2494,10 +2498,14 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
         : std::vector<char> {};
     const melonDS::u32 sendFlags = sendBundle ? ENET_PACKET_FLAG_UNSEQUENCED : ENET_PACKET_FLAG_RELIABLE;
 
-    const int jitterFrames = G.InputSendJitterFrames > 0
+    const bool sendDelayActive =
+        frame >= G.InputSendDelayStartFrame
+        && (G.InputSendDelayEndFrame == kNoFrameLimit
+            || frame <= G.InputSendDelayEndFrame);
+    const int jitterFrames = sendDelayActive && G.InputSendJitterFrames > 0
         ? static_cast<int>(frame % static_cast<melonDS::u32>(G.InputSendJitterFrames + 1))
         : 0;
-    const int sendDelayFrames = G.InputSendDelayFrames + jitterFrames;
+    const int sendDelayFrames = sendDelayActive ? G.InputSendDelayFrames + jitterFrames : 0;
     if (sendDelayFrames > 0)
     {
         G.DelayedInputs.push_back({
@@ -2560,6 +2568,9 @@ bool GetRollbackRemoteInputLocked(melonDS::u32 frame, InputState& input, bool& p
     if (G.RollbackPredictionProbeModulo > 0
         && (G.RollbackPredictionProbeLimit < 0
             || G.RollbackPredictionProbeCount < static_cast<melonDS::u32>(G.RollbackPredictionProbeLimit))
+        && frame >= G.RollbackPredictionProbeStartFrame
+        && (G.RollbackPredictionProbeEndFrame == kNoFrameLimit
+            || frame <= G.RollbackPredictionProbeEndFrame)
         && (frame % static_cast<melonDS::u32>(G.RollbackPredictionProbeModulo))
             == static_cast<melonDS::u32>(G.RollbackPredictionProbeOffset))
     {
@@ -11022,6 +11033,13 @@ void InitFromEnvironment()
         0, EnvInt("MELONDS_NSML_INPUT_SEND_DELAY_FRAMES", 0));
     G.InputSendJitterFrames = std::max(
         0, EnvInt("MELONDS_NSML_INPUT_SEND_JITTER_FRAMES", 0));
+    G.InputSendDelayStartFrame = static_cast<melonDS::u32>(
+        std::clamp(EnvInt("MELONDS_NSML_INPUT_SEND_DELAY_START_FRAME", 0), 0, 1000000));
+    G.InputSendDelayEndFrame = static_cast<melonDS::u32>(
+        std::clamp(EnvInt("MELONDS_NSML_INPUT_SEND_DELAY_END_FRAME", 0), 0, 1000000));
+    if (G.InputSendDelayEndFrame != kNoFrameLimit
+        && G.InputSendDelayEndFrame < G.InputSendDelayStartFrame)
+        G.InputSendDelayEndFrame = G.InputSendDelayStartFrame;
     G.InputUnreliable = EnvFlag("MELONDS_NSML_INPUT_UNRELIABLE");
     G.InputBundleHistory = std::clamp(
         EnvInt("MELONDS_NSML_INPUT_BUNDLE_HISTORY", 0), 0, 31);
@@ -11383,6 +11401,13 @@ void InitFromEnvironment()
         std::max(0, G.RollbackPredictionProbeModulo - 1));
     G.RollbackPredictionProbeLimit = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_LIMIT", -1), -1, 10000);
+    G.RollbackPredictionProbeStartFrame = static_cast<melonDS::u32>(
+        std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_START_FRAME", 0), 0, 1000000));
+    G.RollbackPredictionProbeEndFrame = static_cast<melonDS::u32>(
+        std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_END_FRAME", 0), 0, 1000000));
+    if (G.RollbackPredictionProbeEndFrame != kNoFrameLimit
+        && G.RollbackPredictionProbeEndFrame < G.RollbackPredictionProbeStartFrame)
+        G.RollbackPredictionProbeEndFrame = G.RollbackPredictionProbeStartFrame;
     G.RollbackPredictionProbeKeyMask = static_cast<melonDS::u32>(
         std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_KEY_MASK", 0x1), 1, 0xFFF));
     const char* rollbackBackend = EnvCString("MELONDS_NSML_ROLLBACK_BACKEND", "savestate");
@@ -11803,7 +11828,7 @@ void InitFromEnvironment()
 
     G.Ready = true;
     StartNetworkPumpThreadIfNeeded();
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputDropModulo=%d inputDropOffset=%d netPumpThread=%d netPumpSleepUs=%d inputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d rollbackPredProbeModulo=%d rollbackPredProbeLimit=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputSendDelay=%d inputSendJitter=%d inputSendDelayStart=%u inputSendDelayEnd=%u inputDropModulo=%d inputDropOffset=%d netPumpThread=%d netPumpSleepUs=%d inputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d rollbackPredProbeModulo=%d rollbackPredProbeLimit=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -11837,6 +11862,10 @@ void InitFromEnvironment()
         G.InputNetplayMaxFrameLead,
         G.InputUnreliable ? 1 : 0,
         G.InputBundleHistory,
+        G.InputSendDelayFrames,
+        G.InputSendJitterFrames,
+        G.InputSendDelayStartFrame,
+        G.InputSendDelayEndFrame,
         G.InputDropModulo,
         G.InputDropOffset,
         G.NetworkPumpThreadEnabled ? 1 : 0,
