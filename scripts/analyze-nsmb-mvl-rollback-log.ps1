@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory=$true)] [string]$LogDir,
     [double]$SlowFrameThresholdMs = 33.0,
+    [double]$MaxSingleFrameMs = 100.0,
     [int]$MaxConsecutiveSlowFrames = 120,
     [int]$FreezeMinRows = 20
 )
@@ -73,6 +74,27 @@ function Get-MaxSlowRun {
         }
     }
     return $maxRun
+}
+
+function Get-MaxFrameMs {
+    param([string]$Text)
+
+    $maxFrameMs = 0.0
+    foreach ($line in ($Text -split "`r?`n")) {
+        if ($line -match "NSMB Test: active frame timing .*maxFrameMs=([0-9.]+)") {
+            $value = [double]::Parse($Matches[1], [System.Globalization.CultureInfo]::InvariantCulture)
+            if ($value -gt $maxFrameMs) {
+                $maxFrameMs = $value
+            }
+        }
+        if ($line -match "NSMB PerfSpike: .*frameTimeUs=([0-9]+)") {
+            $value = [double]$Matches[1] / 1000.0
+            if ($value -gt $maxFrameMs) {
+                $maxFrameMs = $value
+            }
+        }
+    }
+    return $maxFrameMs
 }
 
 function Get-LastHeartbeatFrame {
@@ -163,6 +185,21 @@ function Get-LongestActorPlateau {
     }
 }
 
+function Test-TraceHasResultScene {
+    param([string]$CsvPath)
+
+    if (-not (Test-Path $CsvPath)) {
+        return $false
+    }
+
+    foreach ($row in (Import-Csv $CsvPath)) {
+        if ($row.sceneCurrentSceneID -eq "0xa") {
+            return $true
+        }
+    }
+    return $false
+}
+
 $roleRows = @()
 foreach ($role in @("host", "client")) {
     $roleDir = Join-Path $root $role
@@ -174,23 +211,25 @@ foreach ($role in @("host", "client")) {
     $plateau0 = Get-LongestActorPlateau -CsvPath $csvPath -Player 0
     $plateau1 = Get-LongestActorPlateau -CsvPath $csvPath -Player 1
     $maxPlateau = @($plateau0, $plateau1) | Sort-Object Rows -Descending | Select-Object -First 1
+    $hasResultScene = Test-TraceHasResultScene -CsvPath $csvPath
     $abort = Get-FirstMatchLine -Text $combined -Pattern "ARM[79]: (data|prefetch) abort"
     $slowRun = Get-MaxSlowRun -Text $stdout -ThresholdMs $SlowFrameThresholdMs
+    $maxFrameMs = Get-MaxFrameMs -Text $stdout
     $timing = Get-LastMatchLine -Text $stdout -Pattern "NSMB Test: active frame timing"
     $rollback = Get-LastMatchLine -Text $stdout -Pattern "NSMB Rollback: frame="
     $heartbeat = Get-LastHeartbeatFrame -Text $stdout
-    $wrapperFailure = Get-FirstMatchLine -Text $combined -Pattern "missing frame limit|stalled|timed out|gameplay mismatch|star pickup check failed|player death check failed"
+    $wrapperFailure = Get-FirstMatchLine -Text $combined -Pattern "missing frame limit|stalled|timed out|active frame spike too high|gameplay mismatch|star pickup check failed|player death check failed"
 
     $status = "ok"
     if ($abort) {
         $status = "abort"
     } elseif ($wrapperFailure -match "stalled") {
         $status = "stalled"
-    } elseif ($slowRun -gt $MaxConsecutiveSlowFrames) {
+    } elseif ($maxFrameMs -gt $MaxSingleFrameMs -or $slowRun -gt $MaxConsecutiveSlowFrames -or $wrapperFailure -match "active frame spike too high") {
         $status = "perf-fail"
     } elseif ($wrapperFailure) {
         $status = "failed"
-    } elseif ($maxPlateau.Rows -ge $FreezeMinRows) {
+    } elseif ($maxPlateau.Rows -ge $FreezeMinRows -and -not $hasResultScene) {
         $status = "freeze-suspect"
     }
 
@@ -199,7 +238,9 @@ foreach ($role in @("host", "client")) {
         Status = $status
         Backend = Get-Backend -Text $stdout
         LastHeartbeatFrame = $heartbeat
+        MaxFrameMs = [Math]::Round($maxFrameMs, 3)
         MaxConsecutiveSlowFrames = $slowRun
+        HasResultScene = $hasResultScene
         LongestActorPlateau = $maxPlateau.Rows
         PlateauPlayer = $maxPlateau.Player
         PlateauStart = $maxPlateau.StartFrame

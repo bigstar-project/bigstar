@@ -1,17 +1,20 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
-## 2026-06-02 current status - Plan-D actor snapshot path
+## 2026-06-02 current status - Plan-D actor/global snapshot path
 
 Current best Plan-D-like direction is no longer a rollback backend. It is a small per-player actor snapshot path that avoids full NDS rollback restore/resim:
 
-- New wire packet: `WirePlayerState`, 116 bytes.
+- New wire packet: `WirePlayerState`, 168 bytes. The base actor fields are always present; player global fields are read/applied only when `MELONDS_NSML_PLAYER_STATE_GLOBALS=1`.
 - Env/script switches:
   - `MELONDS_NSML_PLAYER_STATE_SYNC=1`
   - `MELONDS_NSML_PLAYER_STATE_APPLY=1`
+  - `MELONDS_NSML_PLAYER_STATE_GLOBALS=1` for the experimental actor+global route
   - `MELONDS_NSML_PLAYER_STATE_SYNC_INTERVAL`
   - `MELONDS_NSML_PLAYER_STATE_MAX_PREDICT_FRAMES`
-  - split/lan scripts expose `-PlayerStateSync`, `-PlayerStateApply`, `-PlayerStateSyncInterval`, and `-PlayerStateMaxPredictFrames`.
+  - split/lan scripts expose `-PlayerStateSync`, `-PlayerStateApply`, `-PlayerStateGlobals`, `-PlayerStateSyncInterval`, and `-PlayerStateMaxPredictFrames`.
 - The packet carries actor transform, velocity, action/subaction/physics flags, damage cooldown, transition/collision/environment flags, and compact runtime byte flags.
+- The optional global section currently carries per-player life/death/pipe/star counters. It is applied as event-only state, not as a full global overwrite.
+- During player actor transition steps other than `1`, the actor+global route skips transform/full runtime writes and applies only minimal visible/defeated bytes. This avoids fighting the game's pipe/death transition code.
 - The receiver applies the latest remote player actor snapshot before frame execution and again before game-state trace/sync.
 - Existing fixed-size wire packets were also unblocked from the input-bundle branch so `WireNSMLPacket`, `WireGameState`, and the new `WirePlayerState` can reach their exact handlers.
 
@@ -30,19 +33,26 @@ Verification:
   - `logs/codex-playerstate-cache-drift-gate-interval2-predict1-2400-20260602`: 2400F passed with movement/drift gate; host/client active FPS about `59.5`.
   - `logs/codex-playerstate-cache-drift-gate-interval2-predict1-4200-20260602`: 4200F passed with movement/drift gate; host/client active FPS about `59.5`, max frame `33.224/32.548ms`, `over33ms=0/0`, max drift X/Y `12352/16768`.
   - `logs/codex-playerstate-cache-luigi-death-3600-20260602`: Luigi death/respawn-style probe passed with player death and pipe visibility checks; analyzer status `ok`, active FPS about `59.6`, max frame `40.399/45.362ms`, `over33ms=4/4`, max consecutive slow frames `1/1`.
+- Actor+global snapshot verification:
+  - Rejected earlier always-apply global snapshots: `logs/codex-playerglobal-cache-drift-gate-interval2-predict1-4200-20260602` and `logs/codex-playerglobal-directwrite-drift-gate-interval2-predict1-4200-20260602` ran around `48fps` with many `over33ms` frames.
+  - Event-only globals with signed drift fixed passed normal movement: `logs/codex-playerglobal-events-optional-on-drift-gate-interval2-predict1-4200-20260602`, active avg about `16.79ms`, max `43.724/46.892ms`, `over33ms=4/5`.
+  - A death/pipe route without transition-step minimal apply reproduced a bad stutter: `logs/codex-playerglobal-events-luigi-death-3720-20260602` hit `353.752/354.027ms` max frames around frame `2794` and is now classified as `perf-fail`.
+  - With transition-step minimal apply, the same death/pipe route passed: `logs/codex-playerglobal-transition-step-min-luigi-death-3720-20260602`, active avg about `17.10ms`, max `39.388/38.823ms`, `over33ms=9/9`, max consecutive slow frame `1/1`.
+  - With transition-step minimal apply, normal movement still passed: `logs/codex-playerglobal-transition-step-min-stress-4200-20260602`, active avg about `17.05ms`, max `44.636/42.051ms`, movement/drift gate passed.
+- Result route using `RequireResultScene` passed with actor+global snapshot: `logs/codex-playerglobal-transition-step-min-result-9000-20260602`, active avg about `16.77ms`, max `46.907/45.751ms`, `over33ms=11/11`. Star counter fields still remain `0/0`, so `RequireStarPickup` remains a bad assertion for this route.
+- `scripts/analyze-nsmb-mvl-rollback-log.ps1` now also classifies single-frame or short-run spikes over `MaxSingleFrameMs` as `perf-fail`, so a run like the old 353ms death/pipe case cannot be reported as `ok` just because the average FPS is acceptable. It also avoids marking a completed result-scene trace as a freeze solely because player actors are stationary during the result transition.
 - Star/result-continuation route is not a useful actor-snapshot correctness failure yet: `logs/codex-playerstate-cache-star-result-continue-9000-20260602` reached result/restart and held about `59.6fps`, but `RequireStarPickup` failed because star counters stayed `0/0`. Existing baseline `logs/codex-rollback-baseline-starcollect-6200-skipmove-20260601` shows the same `result ... stars=0/0 collected=0/0`, so this route/check needs cleanup before being used as a blocker for actor snapshot.
 - The previous full/core rollback issue is still reproduced in logs: rollback/resim paths can spike into hundreds of ms when many inputs arrive or forced delay causes repeated rollback. The actor snapshot path avoids that mechanism entirely.
 
 Current blocker / caveat:
 
 - Strict full game-state comparison still fails early because the existing comparison assumes deterministic same-frame actor equality. The player-state path is an actor replication/visual correction path, not deterministic rollback. Current CSV traces show player slot/timing differences around frame 930 even while player actor motion is present.
-- This means the actor snapshot path is now a much more practical Plan-D-like route for "does not freeze / does not rollback-spike / remote actor moves", but it is still not a correctness replacement for deterministic rollback.
+- This means the actor/global snapshot path is now a much more practical Plan-D-like route for "does not freeze / does not rollback-spike / remote actor moves / pipe death visibility survives", but it is still not a correctness replacement for deterministic rollback.
 
 Next actions:
 
-- Clean up the star/result-continuation route so it asserts the actual winner/result transition instead of relying on star counters that baseline does not update.
-- Stress the cached actor snapshot route with manual play commands, keeping `-MaxActiveFrameMs`, `-MaxActiveFrameOver33ms`, `-MaxConsecutiveSlowFrames`, and the actor drift gate enabled.
-- Investigate which non-player globals must be added next for result/death/respawn correctness, without falling back to full savestate or full CPU rollback.
+- Stress the actor+global route with manual play and longer automated routes, keeping `-MaxActiveFrameMs`, `-MaxActiveFrameOver33ms`, `-MaxConsecutiveSlowFrames`, `-MaxSingleFrameMs`, `RequireResultScene`, and the actor drift gate enabled.
+- Investigate which non-player globals must be added next for result/star correctness, without falling back to full savestate or full CPU rollback.
 - Tighten drift thresholds after more route coverage; current permissive gate is meant to catch gross desync/freeze without rejecting normal one-frame timing offset.
 
 ## 2026-06-02 current status - real rollback gate and Plan-D-like retest

@@ -44,6 +44,7 @@ param(
     [string]$StateApplyMode = "",
     [switch]$PlayerStateSync,
     [switch]$PlayerStateApply,
+    [switch]$PlayerStateGlobals,
     [int]$PlayerStateSyncInterval = 1,
     [int]$PlayerStateMaxPredictFrames = 2,
     [switch]$SkipGameStateComparison,
@@ -220,6 +221,9 @@ if ($PlayerStateSync) {
     )
     if ($PlayerStateApply) {
         $common += "-PlayerStateApply"
+    }
+    if ($PlayerStateGlobals) {
+        $common += "-PlayerStateGlobals"
     }
 }
 if ($AllowJit) {
@@ -552,6 +556,16 @@ function Convert-TraceHexToInt64 {
     return [Convert]::ToInt64($Value, 10)
 }
 
+function Convert-TraceHexToSigned32 {
+    param([string]$Value)
+
+    $raw = Convert-TraceHexToInt64 $Value
+    if ($raw -ge [int64]2147483648) {
+        return $raw - [int64]4294967296
+    }
+    return $raw
+}
+
 $hostCsv = Join-Path $hostLog "host.game-state.csv"
 $clientCsv = Join-Path $clientLog "client.game-state.csv"
 $hostRows = $null
@@ -644,8 +658,8 @@ function Assert-ActorSnapshotMovement {
                 continue
             }
 
-            $dx = [Math]::Abs((Convert-TraceHexToInt64 $pair.Local.($pair.X)) - (Convert-TraceHexToInt64 $pair.Remote.($pair.X)))
-            $dy = [Math]::Abs((Convert-TraceHexToInt64 $pair.Local.($pair.Y)) - (Convert-TraceHexToInt64 $pair.Remote.($pair.Y)))
+            $dx = [Math]::Abs((Convert-TraceHexToSigned32 $pair.Local.($pair.X)) - (Convert-TraceHexToSigned32 $pair.Remote.($pair.X)))
+            $dy = [Math]::Abs((Convert-TraceHexToSigned32 $pair.Local.($pair.Y)) - (Convert-TraceHexToSigned32 $pair.Remote.($pair.Y)))
             if ($dx -gt $maxDriftX) { $maxDriftX = $dx }
             if ($dy -gt $maxDriftY) { $maxDriftY = $dy }
             $checked++
