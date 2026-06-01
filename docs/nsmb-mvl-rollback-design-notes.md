@@ -1,6 +1,36 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
-## 2026-06-01 current lightweight direction - actor arena + ARM9 stack snapshot
+## 2026-06-01 current status - spike gate and Plan-D-like experiments
+
+Current working candidate is still experimental:
+
+- `nsmbtinycore + delta-discovered globals + process-list object ranges + actorArena + ARM9 stack + no heap scan`.
+- Manual/log comparison confirmed the user's report: `logs/nsmb-mvl-manual-local-20260601-212956` is an `nsmbtinycore` abort/low-FPS failure, while `logs/nsmb-mvl-manual-local-20260601-213213` is a non-frozen `coredelta` baseline.
+- The aborting manual log predates the ARM9 stack addition. With the current stack range, `logs/codex-currentframefix-tinycore-long-4200-20260601/20260601-225143/nsmbtinycore-proclist-arena-noheap` passes 4200F without abort/stall, checkpoint size `398,399` bytes, save avg about `0.18ms`, restore avg about `3.6ms`.
+
+Spike-aware validation added:
+
+- `scripts/run-nsmb-mvl-split-local-input-smoke.ps1` now has `-MaxRollbackFrameMs`; it fails specifically when a frame containing `rollbackResimDelta > 0` exceeds the limit, so average FPS can no longer hide rollback stutter.
+- `NSMB PerfSpike` now prints `rollbackRestoreDelta` and `rollbackResimDelta`, which lets the harness distinguish rollback spikes from ordinary slow frames.
+- `scripts/run-nsmb-mvl-rollback-candidate-sweep.ps1` passes the new rollback-frame gate and classifies it as `perf-fail`.
+
+Performance experiments:
+
+- Skipping JIT reset on rollback restore (`MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET=1`) reduced tinycore restore avg from roughly `9.5ms` to roughly `3.5-3.8ms`.
+- Skipping render during rollback resim (`MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER=1`) did not remove the visible spikes; the remaining cost is mainly the full NDS `RunFrame()` resimulation.
+- With checkpoint interval 8 / frame lead 8, strict rollback spike gate still sees about `150-180ms` max rollback frames.
+- With checkpoint interval 1 / frame lead 1, the same route improves to about `54-76ms` max rollback frames, but still fails a 33ms no-stutter gate.
+- An experimental `MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES=1` cap reduced max rollback frames to about `38-40ms` in 1600F, but the 4200F correctness run failed at frame 1110 (`playerActor0Y` mismatch). This is not promotable.
+- A Plan-D-like remote-player actor snapshot mode (`MELONDS_NSML_STATE_APPLY_MODE=remote-player`) was added for experiments, but no-rollback state-apply testing ran at only about `38fps` and failed the movement-probe harness. It is not a replacement for rollback yet.
+
+Current conclusion:
+
+- The old "案D寄りが固まる" report was real. The current stack-augmented tinycore candidate no longer reproduces that abort in the 4200F automated route, but rollback resimulation still causes noticeable spikes.
+- Lightweight snapshot size is no longer the dominant cost. The blocker is full-frame resimulation: even a 398KB restore is followed by 1-2 full `nds->RunFrame()` calls.
+- Manual explicit `-RollbackBackend nsmbtinycore` under `-LowLatencyRollback` now defaults to checkpoint interval 1 and input max frame lead 1, because that is the best measured tinycore setting so far. It is still experimental, not the final no-stutter answer.
+- Next direction: keep `coredelta` as correctness baseline, keep tinycore as the light snapshot candidate, and look for ROM/memory-level ways to avoid full NDS resim rather than only shrinking checkpoint bytes.
+
+## 2026-06-01 prior lightweight direction - actor arena + ARM9 stack snapshot
 
 Current Plan-D-like candidate: `nsmbtinycore + delta-discovered globals + process-list object ranges + actorArena + ARM9 stack + no heap scan`.
 
@@ -31,8 +61,8 @@ Verification:
 Current conclusion:
 
 - The old 270KB actorArena/noHeap candidate is not trusted for manual play because the user reproduced a freeze and the log shows ARM9 abort plus long slow-run.
-- The current candidate is about 398KB, still much lighter than the 2.5MB `coredelta` baseline, and now includes the stack range implicated by the abort. It is promoted only as an experimental manual candidate, not final.
-- Manual explicit `-RollbackBackend nsmbtinycore` under `-LowLatencyRollback` now uses actorArena/processList/ARM9-stack/noHeap by default.
+- The current candidate is about 398KB, still much lighter than the 2.5MB `coredelta` baseline, and now includes the stack range implicated by the abort. It is an experimental manual candidate only, not final.
+- Manual explicit `-RollbackBackend nsmbtinycore` under `-LowLatencyRollback` now uses actorArena/processList/ARM9-stack/noHeap by default, with checkpoint interval 1 and input max frame lead 1 from the later spike tests.
 
 ## 2026-06-01 prior automation state - slow-run detection
 

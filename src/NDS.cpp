@@ -114,6 +114,12 @@ static bool NSMLWatchWriteMaybeEnabled()
     return enabled;
 }
 
+static bool NSMLRollbackSkipJITReset()
+{
+    static const bool enabled = getenv("MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET") != nullptr;
+    return enabled;
+}
+
 // timing notes
 //
 // * this implementation is technically wrong for VRAM
@@ -1134,7 +1140,8 @@ bool NDS::DoRollbackSavestate(
         Wifi.SetPowerCnt(PowerControl7 & 0x0002);
 
 #ifdef JIT_ENABLED
-        JIT.Reset();
+        if (!NSMLRollbackSkipJITReset())
+            JIT.Reset();
 #endif
     }
 
@@ -1292,7 +1299,8 @@ bool NDS::DoRollbackTinyCoreSavestate(Savestate* file, u32 requestedTinyCoreFlag
         Wifi.SetPowerCnt(PowerControl7 & 0x0002);
 
 #ifdef JIT_ENABLED
-        JIT.Reset();
+        if (!NSMLRollbackSkipJITReset())
+            JIT.Reset();
 #endif
     }
 

@@ -1353,21 +1353,23 @@ void GPU::StartHBlank(u32 line) noexcept
     {
         // draw
         // note: this should start 48 cycles after the scanline start
-        if (line < 192)
+        if (!RollbackSkipRender && line < 192)
             Rend->DrawScanline(line);
-        if (line < 191)
+        if (!RollbackSkipRender && line < 191)
             Rend->DrawSprites(line+1);
 
         NDS.CheckDMAs(0, 0x02);
     }
     else if (VCount == 215)
     {
-        Rend->Start3DRendering();
+        if (!RollbackSkipRender)
+            Rend->Start3DRendering();
     }
     else if (VCount == 262)
     {
         // sprites are pre-rendered one scanline in advance
-        Rend->DrawSprites(0);
+        if (!RollbackSkipRender)
+            Rend->DrawSprites(0);
     }
 
     GPU2D_A.UpdateRegistersPostDraw(resetregs);
@@ -1384,11 +1386,12 @@ void GPU::StartHBlank(u32 line) noexcept
 
 void GPU::FinishFrame(u32 lines) noexcept
 {
-    Rend->SwapBuffers();
+    if (!RollbackSkipRender)
+        Rend->SwapBuffers();
 
     TotalScanlines = lines;
 
-    if (GPU3D.AbortFrame)
+    if (!RollbackSkipRender && GPU3D.AbortFrame)
     {
         Rend->Restart3DRendering();
         GPU3D.AbortFrame = false;

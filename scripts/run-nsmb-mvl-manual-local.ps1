@@ -111,6 +111,11 @@ if ($LowLatencyRollback) {
     $PerfBreakdown = $true
 }
 
+if ($LowLatencyRollback -and ($RollbackBackend -eq "nsmbtinycore" -or $RollbackBackend -eq "nsmb-tiny-core")) {
+    if (-not $PSBoundParameters.ContainsKey('InputMaxFrameLead')) { $InputMaxFrameLead = 1 }
+    if (-not $PSBoundParameters.ContainsKey('RollbackCheckpointInterval')) { $RollbackCheckpointInterval = 1 }
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if ($LogDir -eq "") {
     $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -246,6 +251,8 @@ if ($LowLatencyRollback) {
         $env:MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
         $env:MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
         $env:MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
+        $env:MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+        $env:MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
         if ($RollbackTinyCoreFlags -eq "") { $RollbackTinyCoreFlags = "0x200" }
         $env:MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "$RollbackTinyCoreFlags"
     } else {
@@ -255,6 +262,8 @@ if ($LowLatencyRollback) {
         Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS -ErrorAction SilentlyContinue
     }
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK -ErrorAction SilentlyContinue

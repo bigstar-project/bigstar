@@ -1027,6 +1027,7 @@ struct State
     bool GameStateApplyStarObjects = true;
     bool GameStateApplyStageObjects = true;
     bool GameStateApplyPlayerActors = true;
+    bool GameStateApplyRemotePlayerOnly = false;
     int GameStateSyncInterval = 60;
     int SeedWaitTimeoutMs = 10000;
     bool WaitForPeerBeforeStart = false;
@@ -1386,6 +1387,7 @@ struct State
     melonDS::u32 RollbackDeltaPageTraceEndFrame = 0;
     int RollbackDeltaPageTraceMaxRuns = 12;
     int RollbackResimulateDelayFrames = 0;
+    int RollbackMaxResimFrames = 0;
     std::map<melonDS::u32, InputState> PredictedRemoteInputs;
     std::map<melonDS::u32, RollbackStoredState> RollbackStates;
     bool LastConfirmedRemoteInputValid = false;
@@ -1396,6 +1398,9 @@ struct State
     melonDS::u32 RollbackMismatchCount = 0;
     melonDS::u32 RollbackRestoreCount = 0;
     melonDS::u32 RollbackResimulateCount = 0;
+    bool RollbackSkipRenderDuringResim = false;
+    melonDS::u32 LastPerfSpikeRollbackRestoreCount[16] {};
+    melonDS::u32 LastPerfSpikeRollbackResimulateCount[16] {};
     melonDS::u32 RollbackPredictionProbeCount = 0;
     melonDS::u32 RollbackCheckpointSaveCount = 0;
     size_t RollbackCheckpointLastBytes = 0;
@@ -2048,13 +2053,15 @@ void StoreRemoteInputLocked(melonDS::u32 frame, const InputState& receivedInput,
             const melonDS::u32 observedFrame = localFrame == kNoFrameLimit
                 ? frame
                 : localFrame;
-            if (G.PendingRollbackFrame == kNoFrameLimit
-                || frame < G.PendingRollbackFrame)
+            const bool frameAlreadySimulated = localFrame == kNoFrameLimit || frame < localFrame;
+            if (frameAlreadySimulated
+                && (G.PendingRollbackFrame == kNoFrameLimit
+                    || frame < G.PendingRollbackFrame))
             {
                 G.PendingRollbackFrame = frame;
                 G.PendingRollbackObservedFrame = observedFrame;
             }
-            else if (G.PendingRollbackObservedFrame == kNoFrameLimit)
+            else if (frameAlreadySimulated && G.PendingRollbackObservedFrame == kNoFrameLimit)
             {
                 G.PendingRollbackObservedFrame = observedFrame;
             }
@@ -2075,6 +2082,13 @@ void StoreRemoteInputLocked(melonDS::u32 frame, const InputState& receivedInput,
                     receivedInput.TouchY,
                     G.PendingRollbackFrame,
                     G.RollbackMismatchCount);
+                if (!frameAlreadySimulated)
+                {
+                    std::printf(
+                        "NSMB Rollback: current/future mismatch applied without rollback frame=%u localFrame=%u\n",
+                        frame,
+                        localFrame);
+                }
                 std::fflush(stdout);
             }
         }
@@ -2745,14 +2759,22 @@ void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
 
     if (G.ActiveFrameSpikeTrace && elapsedUs >= static_cast<unsigned long long>(G.ActiveFrameSpikeThresholdUs))
     {
+        const melonDS::u32 restoreDelta =
+            G.RollbackRestoreCount - G.LastPerfSpikeRollbackRestoreCount[instanceID];
+        const melonDS::u32 resimDelta =
+            G.RollbackResimulateCount - G.LastPerfSpikeRollbackResimulateCount[instanceID];
+        G.LastPerfSpikeRollbackRestoreCount[instanceID] = G.RollbackRestoreCount;
+        G.LastPerfSpikeRollbackResimulateCount[instanceID] = G.RollbackResimulateCount;
         std::printf(
-            "NSMB PerfSpike: inst=%d frame=%u frameTimeUs=%llu thresholdUs=%d rollbackRestores=%u rollbackResims=%u saveMaxUs=%llu restoreMaxUs=%llu\n",
+            "NSMB PerfSpike: inst=%d frame=%u frameTimeUs=%llu thresholdUs=%d rollbackRestores=%u rollbackResims=%u rollbackRestoreDelta=%u rollbackResimDelta=%u saveMaxUs=%llu restoreMaxUs=%llu\n",
             instanceID,
             frame,
             elapsedUs,
             G.ActiveFrameSpikeThresholdUs,
             G.RollbackRestoreCount,
             G.RollbackResimulateCount,
+            restoreDelta,
+            resimDelta,
             G.RollbackCheckpointSaveMaxUs,
             G.RollbackCheckpointRestoreMaxUs);
         std::fflush(stdout);
@@ -8373,8 +8395,38 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
         if (G.PendingRollbackFrame == kNoFrameLimit)
             return false;
         mismatchFrame = G.PendingRollbackFrame;
+        if (mismatchFrame == frame)
+        {
+            if (G.InputNetplayTraceEnabled)
+            {
+                std::printf("NSMB Rollback: current-frame mismatch consumed without resim frame=%u\n",
+                    frame);
+                std::fflush(stdout);
+            }
+            G.PendingRollbackFrame = kNoFrameLimit;
+            G.PendingRollbackObservedFrame = kNoFrameLimit;
+            return false;
+        }
         if (mismatchFrame >= frame)
             return false;
+        if (G.RollbackMaxResimFrames > 0)
+        {
+            const melonDS::u32 maxResimFrames = static_cast<melonDS::u32>(G.RollbackMaxResimFrames);
+            if (frame - mismatchFrame > maxResimFrames)
+            {
+                const melonDS::u32 cappedFrame = frame - maxResimFrames;
+                if (G.InputNetplayTraceEnabled)
+                {
+                    std::printf("NSMB Rollback: capping resim window originalMismatch=%u cappedMismatch=%u current=%u maxFrames=%u\n",
+                        mismatchFrame,
+                        cappedFrame,
+                        frame,
+                        maxResimFrames);
+                    std::fflush(stdout);
+                }
+                mismatchFrame = cappedFrame;
+            }
+        }
         if (G.RollbackResimulateDelayFrames > 0
             && G.PendingRollbackObservedFrame != kNoFrameLimit
             && frame < G.PendingRollbackObservedFrame + static_cast<melonDS::u32>(G.RollbackResimulateDelayFrames))
@@ -8467,7 +8519,12 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
         else
             nds->ReleaseScreen();
 
+        const bool skipRender = G.RollbackSkipRenderDuringResim;
+        if (skipRender)
+            nds->GPU.SetRollbackSkipRender(true);
         nds->RunFrame();
+        if (skipRender)
+            nds->GPU.SetRollbackSkipRender(false);
         ApplyRollbackResimPostFramePatches(f + 1, nds);
         resimulated++;
 
@@ -9284,6 +9341,39 @@ bool WriteObjectTransformByGUID(
     return false;
 }
 
+bool WriteObjectTransformByBase(
+    melonDS::NDS* nds,
+    melonDS::u32 base,
+    melonDS::u32 posX,
+    melonDS::u32 posY,
+    melonDS::u32 posZ,
+    melonDS::u32 prevX,
+    melonDS::u32 prevY,
+    melonDS::u32 prevZ,
+    melonDS::u32 velX,
+    melonDS::u32 velY,
+    melonDS::u32 velZ)
+{
+    if (!nds || !nds->MainRAM || base < kMainRAMBase)
+        return false;
+
+    const melonDS::u32 off = base - kMainRAMBase;
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (off + 0xDC > ramLen)
+        return false;
+
+    WriteMainRAMU32(nds, off + 0x60, posX);
+    WriteMainRAMU32(nds, off + 0x64, posY);
+    WriteMainRAMU32(nds, off + 0x68, posZ);
+    WriteMainRAMU32(nds, off + 0x70, prevX);
+    WriteMainRAMU32(nds, off + 0x74, prevY);
+    WriteMainRAMU32(nds, off + 0x78, prevZ);
+    WriteMainRAMU32(nds, off + 0xD0, velX);
+    WriteMainRAMU32(nds, off + 0xD4, velY);
+    WriteMainRAMU32(nds, off + 0xD8, velZ);
+    return true;
+}
+
 bool FindLatestRemoteGameStateLocked(int instanceID, melonDS::u32 frame, GameStateSample& sample, melonDS::u32& sampleFrame)
 {
     bool found = false;
@@ -9309,7 +9399,8 @@ bool FindLatestRemoteGameStateLocked(int instanceID, melonDS::u32 frame, GameSta
 
 void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (!G.Enabled || !G.GameStateApplyEnabled || G.NetRole != Role::Client) return;
+    if (!G.Enabled || !G.GameStateApplyEnabled) return;
+    if (!G.GameStateApplyRemotePlayerOnly && G.NetRole != Role::Client) return;
     if (instanceID < 0 || instanceID >= 16 || !nds || !nds->MainRAM) return;
     if (frame < G.NetplayStartFrame) return;
 
@@ -9320,6 +9411,57 @@ void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         PumpNetworkLocked();
         if (!FindLatestRemoteGameStateLocked(instanceID, frame, sample, sampleFrame))
             return;
+    }
+
+    if (G.GameStateApplyRemotePlayerOnly)
+    {
+        const int remotePlayer = CurrentPacketBridgeLocalPlayer() ^ 1;
+        const PlayerActorScanSample localPlayers = FindPlayerActors(nds);
+        bool applied = false;
+        if (remotePlayer == 0 && sample.PlayerActor0Found)
+        {
+            const melonDS::u32 localBase = localPlayers.Actor0.Found ? localPlayers.Actor0.Base : 0;
+            applied = WriteObjectTransformByBase(
+                nds,
+                localBase,
+                sample.PlayerActor0PosX,
+                sample.PlayerActor0PosY,
+                sample.PlayerActor0PosZ,
+                sample.PlayerActor0PrevX,
+                sample.PlayerActor0PrevY,
+                sample.PlayerActor0PrevZ,
+                sample.PlayerActor0VelX,
+                sample.PlayerActor0VelY,
+                sample.PlayerActor0VelZ);
+        }
+        else if (remotePlayer == 1 && sample.PlayerActor1Found)
+        {
+            const melonDS::u32 localBase = localPlayers.Actor1.Found ? localPlayers.Actor1.Base : 0;
+            applied = WriteObjectTransformByBase(
+                nds,
+                localBase,
+                sample.PlayerActor1PosX,
+                sample.PlayerActor1PosY,
+                sample.PlayerActor1PosZ,
+                sample.PlayerActor1PrevX,
+                sample.PlayerActor1PrevY,
+                sample.PlayerActor1PrevZ,
+                sample.PlayerActor1VelX,
+                sample.PlayerActor1VelY,
+                sample.PlayerActor1VelZ);
+        }
+
+        if (G.InputTraceEnabled &&
+            (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
+        {
+            std::printf("NSMB PoC: applied remote-player snapshot inst=%d frame=%u sampleFrame=%u remotePlayer=%d applied=%d\n",
+                instanceID,
+                frame,
+                sampleFrame,
+                remotePlayer,
+                applied ? 1 : 0);
+        }
+        return;
     }
 
     if (G.GameStateApplyCriticalGlobals)
@@ -11474,6 +11616,7 @@ void InitFromEnvironment()
     G.GameStateApplyStarObjects = true;
     G.GameStateApplyStageObjects = true;
     G.GameStateApplyPlayerActors = true;
+    G.GameStateApplyRemotePlayerOnly = false;
     if (const char* applyMode = std::getenv("MELONDS_NSML_STATE_APPLY_MODE"))
     {
         if (!std::strcmp(applyMode, "critical"))
@@ -11490,6 +11633,14 @@ void InitFromEnvironment()
         else if (!std::strcmp(applyMode, "objects"))
         {
             G.GameStateApplyCriticalGlobals = false;
+        }
+        else if (!std::strcmp(applyMode, "remote-player"))
+        {
+            G.GameStateApplyCriticalGlobals = false;
+            G.GameStateApplyStarObjects = false;
+            G.GameStateApplyStageObjects = false;
+            G.GameStateApplyPlayerActors = true;
+            G.GameStateApplyRemotePlayerOnly = true;
         }
     }
     G.GameStateSyncInterval = std::max(1, EnvInt("MELONDS_NSML_STATE_SYNC_INTERVAL", 60));
@@ -11726,6 +11877,7 @@ void InitFromEnvironment()
     G.InputWaitPollUs = std::clamp(EnvInt("MELONDS_NSML_INPUT_WAIT_POLL_US", 100), 50, 5000);
     G.RollbackEnabled = EnvFlag("MELONDS_NSML_ROLLBACK");
     G.RollbackResimulate = EnvFlag("MELONDS_NSML_ROLLBACK_RESIMULATE");
+    G.RollbackSkipRenderDuringResim = EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER");
     G.RollbackRestoreProbe = EnvFlag("MELONDS_NSML_ROLLBACK_RESTORE_PROBE");
     G.RollbackPredictionProbeModulo = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_MODULO", 0), 0, 600);
@@ -11793,6 +11945,8 @@ void InitFromEnvironment()
         EnvInt("MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE_MAX_RUNS", 12), 1, 80);
     G.RollbackResimulateDelayFrames = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_RESIMULATE_DELAY_FRAMES", 0), 0, 30);
+    G.RollbackMaxResimFrames = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES", 0), 0, 30);
     if (G.RollbackEnabled && G.InputNetplayOnly)
     {
         G.LocalWaitsForRemote = false;

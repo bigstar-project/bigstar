@@ -9,6 +9,7 @@ param(
     [string]$LogRoot = "logs\nsmb-mvl-rollback-candidate-sweep",
     [double]$SlowFrameThresholdMs = 33.0,
     [int]$MaxConsecutiveSlowFrames = 120,
+    [double]$MaxRollbackFrameMs = 0.0,
     [int]$RollbackPredictionProbeModulo = 0,
     [int]$RollbackPredictionProbeOffset = 0,
     [int]$RollbackPredictionProbeLimit = -1,
@@ -39,6 +40,9 @@ $envKeys = @(
     "MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_INTERVAL",
     "MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL",
     "MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS",
+    "MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES",
+    "MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET",
+    "MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER",
     "MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK",
     "MELONDS_NSML_FIXED_FRAME_SLEEP",
     "MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS",
@@ -68,7 +72,7 @@ function Get-CandidateStatus {
         $combined += (Get-Content $RunLog -Raw -ErrorAction SilentlyContinue)
     }
     if (Test-Path $CandidateLog) {
-        $matches = Select-String -Path (Join-Path $CandidateLog "*\*.txt") -Pattern "stalled|timed out|prefetch abort|data abort|gameplay mismatch|active frame exceeded|active frame spike too high|over25ms exceeded|over33ms exceeded|consecutive slow frames too high" -ErrorAction SilentlyContinue
+        $matches = Select-String -Path (Join-Path $CandidateLog "*\*.txt") -Pattern "stalled|timed out|prefetch abort|data abort|gameplay mismatch|active frame exceeded|active frame spike too high|over25ms exceeded|over33ms exceeded|consecutive slow frames too high|rollback frame spike too high" -ErrorAction SilentlyContinue
         foreach ($match in $matches) {
             $combined += "`n$($match.Line)"
         }
@@ -78,7 +82,7 @@ function Get-CandidateStatus {
     if ($combined -match "prefetch abort|data abort") { return "abort" }
     if ($combined -match "gameplay mismatch") { return "mismatch" }
     if ($combined -match "timed out|missing frame limit") { return "timeout" }
-    if ($combined -match "active frame exceeded|active frame spike too high|over25ms exceeded|over33ms exceeded|consecutive slow frames too high") { return "perf-fail" }
+    if ($combined -match "active frame exceeded|active frame spike too high|over25ms exceeded|over33ms exceeded|consecutive slow frames too high|rollback frame spike too high") { return "perf-fail" }
     if ($ErrorText) { return "failed" }
     return "passed"
 }
@@ -134,6 +138,8 @@ $candidates = @(
             MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
             MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
             MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "0x200"
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
             MELONDS_NSML_FIXED_FRAME_SLEEP = "1"
             MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "25"
             MELONDS_NSML_FPS_SPIKE_TRACE = "1"
@@ -207,6 +213,13 @@ foreach ($item in $candidates) {
         SlowFrameThresholdMs = $SlowFrameThresholdMs
         MaxConsecutiveSlowFrames = $MaxConsecutiveSlowFrames
         LogDir = $candidateLogRel
+    }
+    if ($item.Backend -eq "nsmbtinycore") {
+        $candidateParams.RollbackCheckpointInterval = 1
+        $candidateParams.InputMaxFrameLead = 1
+    }
+    if ($MaxRollbackFrameMs -gt 0.0) {
+        $candidateParams.MaxRollbackFrameMs = $MaxRollbackFrameMs
     }
     if ($RollbackPredictionProbeModulo -gt 0) {
         $candidateParams.RollbackPredictionProbeModulo = $RollbackPredictionProbeModulo

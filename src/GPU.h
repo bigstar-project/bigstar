@@ -592,6 +592,7 @@ public:
     void BlankFrame() noexcept;
     void StartScanline(u32 line) noexcept;
     void StartHBlank(u32 line) noexcept;
+    void SetRollbackSkipRender(bool skip) noexcept { RollbackSkipRender = skip; }
 
     void Restart3DFrame() noexcept;
 
@@ -619,6 +620,7 @@ public:
 
     bool ScreensEnabled = false;
     bool ScreenSwap = false;
+    bool RollbackSkipRender = false;
 
     u16 VCount = 0;
     u16 TotalScanlines = 0;

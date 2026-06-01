@@ -34,6 +34,11 @@ param(
     [switch]$IgnoreSpeculativeInputFields,
     [int]$GameStateTraceInterval = 30,
     [switch]$NoGameStateTrace,
+    [switch]$StateSync,
+    [switch]$StateApply,
+    [int]$StateSyncInterval = 60,
+    [switch]$StateSyncExtended,
+    [string]$StateApplyMode = "",
     [switch]$SkipGameStateComparison,
     [switch]$SkipMovementProbe,
     [switch]$TracePlayerLifeChanges,
@@ -61,6 +66,7 @@ param(
     [double]$MaxActiveFrameMs = 0.0,
     [int]$MaxActiveFrameOver25ms = -1,
     [int]$MaxActiveFrameOver33ms = -1,
+    [double]$MaxRollbackFrameMs = 0.0,
     [double]$SlowFrameThresholdMs = 33.0,
     [int]$MaxConsecutiveSlowFrames = -1,
     [int]$StallTimeoutMs = 0,
@@ -79,16 +85,21 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if ($MaxConsecutiveSlowFrames -ge 0) {
+if ($MaxConsecutiveSlowFrames -ge 0 -or $MaxRollbackFrameMs -gt 0.0) {
     $env:MELONDS_NSML_FPS_SPIKE_TRACE = "1"
     $currentSpikeThreshold = 0.0
+    $targetSpikeThreshold = if ($MaxRollbackFrameMs -gt 0.0) {
+        [Math]::Min($SlowFrameThresholdMs, $MaxRollbackFrameMs)
+    } else {
+        $SlowFrameThresholdMs
+    }
     $hasSpikeThreshold = [double]::TryParse(
         $env:MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS,
         [System.Globalization.NumberStyles]::Float,
         [System.Globalization.CultureInfo]::InvariantCulture,
         [ref]$currentSpikeThreshold)
-    if (-not $hasSpikeThreshold -or $currentSpikeThreshold -le 0.0 -or $currentSpikeThreshold -gt $SlowFrameThresholdMs) {
-        $env:MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = $SlowFrameThresholdMs.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+    if (-not $hasSpikeThreshold -or $currentSpikeThreshold -le 0.0 -or $currentSpikeThreshold -gt $targetSpikeThreshold) {
+        $env:MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = $targetSpikeThreshold.ToString([System.Globalization.CultureInfo]::InvariantCulture)
     }
 }
 
@@ -159,6 +170,21 @@ if (-not $NoGameStateTrace) {
         "-GameStateTraceExtended",
         "-GameStateTraceInterval", "$GameStateTraceInterval"
     )
+}
+if ($StateSync) {
+    $common += @(
+        "-StateSync",
+        "-StateSyncInterval", "$StateSyncInterval"
+    )
+    if ($StateApply) {
+        $common += "-StateApply"
+    }
+    if ($StateSyncExtended) {
+        $common += "-StateSyncExtended"
+    }
+    if ($StateApplyMode -ne "") {
+        $common += @("-StateApplyMode", "$StateApplyMode")
+    }
 }
 if ($AllowJit) {
     $common += "-AllowJit"
@@ -339,7 +365,8 @@ if ($hostExitFailed -or
 function Assert-ActiveFrameTiming {
     param(
         [string]$Role,
-        [string]$Text
+        [string]$Text,
+        [double]$RollbackFrameLimitMs
     )
 
     $line = ($Text -split "`r?`n") |
@@ -396,11 +423,51 @@ function Assert-ActiveFrameTiming {
             throw "$Role consecutive slow frames too high: thresholdMs=$SlowFrameThresholdMs maxRun=$maxRun limit=$MaxConsecutiveSlowFrames"
         }
     }
+
+    if ($RollbackFrameLimitMs -gt 0.0) {
+        $maxRollbackFrameMs = 0.0
+        $rollbackSpikeCount = 0
+        $lastRestores = 0
+        $lastResims = 0
+        foreach ($perfLine in ($Text -split "`r?`n")) {
+            if ($perfLine -notmatch "NSMB PerfSpike: .*frame=([0-9]+) frameTimeUs=([0-9]+)") {
+                continue
+            }
+
+            $frameMs = [double]$Matches[2] / 1000.0
+            $restoreDelta = 0
+            $resimDelta = 0
+            if ($perfLine -match "rollbackRestoreDelta=([0-9]+).*rollbackResimDelta=([0-9]+)") {
+                $restoreDelta = [int]$Matches[1]
+                $resimDelta = [int]$Matches[2]
+            } elseif ($perfLine -match "rollbackRestores=([0-9]+).*rollbackResims=([0-9]+)") {
+                $restores = [int]$Matches[1]
+                $resims = [int]$Matches[2]
+                $restoreDelta = $restores - $lastRestores
+                $resimDelta = $resims - $lastResims
+                $lastRestores = $restores
+                $lastResims = $resims
+            }
+
+            if ($restoreDelta -le 0 -and $resimDelta -le 0) {
+                continue
+            }
+
+            $rollbackSpikeCount++
+            if ($frameMs -gt $maxRollbackFrameMs) {
+                $maxRollbackFrameMs = $frameMs
+            }
+        }
+
+        if ($maxRollbackFrameMs -gt $RollbackFrameLimitMs) {
+            throw "$Role rollback frame spike too high: maxRollbackFrameMs=$maxRollbackFrameMs limit=$RollbackFrameLimitMs rollbackSpikeCount=$rollbackSpikeCount"
+        }
+    }
 }
 
-if ($MaxActiveFrameMs -gt 0.0 -or $MaxActiveFrameOver25ms -ge 0 -or $MaxActiveFrameOver33ms -ge 0 -or $MaxConsecutiveSlowFrames -ge 0) {
-    Assert-ActiveFrameTiming -Role "host" -Text $hostMelonText
-    Assert-ActiveFrameTiming -Role "client" -Text $clientMelonText
+if ($MaxActiveFrameMs -gt 0.0 -or $MaxActiveFrameOver25ms -ge 0 -or $MaxActiveFrameOver33ms -ge 0 -or $MaxConsecutiveSlowFrames -ge 0 -or $MaxRollbackFrameMs -gt 0.0) {
+    Assert-ActiveFrameTiming -Role "host" -Text $hostMelonText -RollbackFrameLimitMs $MaxRollbackFrameMs
+    Assert-ActiveFrameTiming -Role "client" -Text $clientMelonText -RollbackFrameLimitMs $MaxRollbackFrameMs
 }
 
 if ($NoGameStateTrace -or $SkipGameStateComparison) {
