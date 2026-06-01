@@ -38,6 +38,8 @@ param(
     [double]$MaxActiveFrameMs = 0.0,
     [int]$MaxActiveFrameOver25ms = -1,
     [int]$MaxActiveFrameOver33ms = -1,
+    [int]$StallTimeoutMs = 0,
+    [int]$StallStartFrame = 900,
     [switch]$UseLanMP,
     [switch]$ForceStageActorFreezeFlag,
     [switch]$ForceStageActorFreezeFlagHostOnly,
@@ -72,6 +74,8 @@ Remove-Item -Recurse -Force $hostLog, $clientLog -ErrorAction SilentlyContinue
 
 $common = @(
     "-WaitTimeoutMs", "$WaitTimeoutMs",
+    "-StallTimeoutMs", "$StallTimeoutMs",
+    "-StallStartFrame", "$StallStartFrame",
     "-Frames", "$Frames",
     "-Exe", $Exe,
     "-ScreenshotInterval", "0",

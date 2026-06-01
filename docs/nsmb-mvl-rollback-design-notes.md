@@ -1,5 +1,44 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
+## 2026-06-01 current automation state - stall watchdog and candidate sweep
+
+User requirement clarified: the next rollback work must not rely on manual observation of "melonDS froze". The test harness now has a frame-progress watchdog. When `-StallTimeoutMs` is set, melonDS emits `NSMB Heartbeat: inst=... frame=...` every 30 active frames, and the wrapper kills the child process if the latest observed frame stops advancing after `-StallStartFrame`. This catches the manual-style hard freeze even when the user has to force-close melonDS and the normal end-of-run logs are incomplete.
+
+Implemented scripts:
+
+- `scripts/run-nsmb-mvl-lan-route-smoke.ps1`: added `-StallTimeoutMs`, `-StallStartFrame`, `-StallPollMs`, heartbeat env setup, and child-process stall detection from stdout progress lines.
+- `scripts/run-nsmb-mvl-split-local-input-smoke.ps1`: passes stall watchdog parameters through to host/client runs.
+- `scripts/run-nsmb-mvl-manual-local.ps1`: `-LowLatencyRollback` now defaults to `-StallTimeoutMs 5000`, so manual low-latency runs also leave progress heartbeats for diagnosing freezes.
+- `scripts/run-nsmb-mvl-manual-local.ps1`: explicit `-RollbackBackend nsmbtinycore` under `-LowLatencyRollback` now configures `MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES=1`, scan interval 30, and `tinyCoreFlags=0x200` by default for the current lightweight candidate.
+- `scripts/run-nsmb-mvl-rollback-candidate-sweep.ps1`: runs rollback backend candidates under the same move+jump+dash stress input and writes `summary.csv` with `passed`, `mismatch`, `stalled`, `abort`, `timeout`, or `perf-fail`.
+
+Latest verification:
+
+- Build passed: `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4`.
+- Watchdog normal path passed: `logs/codex-stall-watchdog-coredelta-smoke-1600-20260601`.
+- Watchdog intentional trip passed: `logs/codex-stall-watchdog-intentional-trip-20260601` failed with `melonDS process stalled... latestFrame=1020`, confirming the wrapper can detect frame-progress stalls automatically.
+- Important fix: `EnvInt` now uses `strtol(..., base 0)`, so hex env values such as `MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS=0x200` are parsed correctly. Earlier tiny-core runs that printed `tinyFlags=0x0` were not valid flag tests.
+- Candidate sweep after the hex fix: `logs/nsmb-mvl-rollback-candidate-sweep/20260601-190040/summary.csv`.
+- Long validation for the current lightweight candidate: `logs/nsmb-mvl-rollback-candidate-sweep/20260601-190537/summary.csv` and no-trace run `logs/nsmb-mvl-rollback-candidate-sweep/20260601-190741/summary.csv`.
+
+Current candidate results from the post-fix sweep:
+
+- `coredelta-page256-k30`: `passed`. Still heavy: final stats around `bytesLast=2,465,673`, `bytesAvg=2,742,996`, `saveAvgUs=3914`, `restoreAvgUs=22297`; timing `avgFrameMs=20.012`, `maxFrameMs=301.520`, `over25ms=114`, `over33ms=35`.
+- `nsmbtinycore-expanded`: `passed` at 2600F with comparison and trace. This is the current best lightweight candidate: `bytesLast=269,175`, `bytesAvg=268,552`, `saveAvgUs=2393`, `restoreAvgUs=12310`, `tinyFlags=0x200`, `deltaDiscovered=1`. Timing was `avgFrameMs=20.979`, `maxFrameMs=316.254`, `over25ms=132`, `over33ms=40`.
+- `nsmbtinycore-proclist-heap900`: `mismatch` at `frame=1590 movingHazardX`. ProcessList+low-frequency heap scan lowers save cost (`saveAvgUs=247`) but currently drops a required moving-hazard range.
+- `nsmbcoreranges-proclist-heap900`: `mismatch` at `frame=1590 movingHazardX`; around `2.56MB`, `saveAvgUs=3906`, `restoreAvgUs=14599`, and still not correct.
+
+Long validation for `nsmbtinycore-expanded`:
+
+- 6000F comparison+trace passed: `bytesLast=269,175`, `bytesAvg=268,963`, `saveAvgUs=2366`, `restoreAvgUs=11411`, `maxFrameMs=298.646`, `over25ms=281`, `over33ms=34`.
+- 6000F no-trace playlike run passed: `avgFrameMs=17.403`, `maxFrameMs=285.308`, `over25ms=123`, `over33ms=20`.
+
+Current conclusion:
+
+- `nsmbtinycore-expanded` is now the most promising rollback backend for the user-requested "light checkpoint /案D寄り" direction. It is roughly 269KB per checkpoint in this stress route, versus roughly 2.46MB for `coredelta`.
+- The current blocker has shifted from correctness to spike reduction and broader validation. Even the lightweight candidate still has large single-frame spikes around 285-316ms in these local two-instance stress runs.
+- Next search direction: keep `nsmbtinycore-expanded` as the candidate baseline, test longer/manual-like sessions with the watchdog enabled, and then try to replace scan30 heap discovery with a ROM/memory-derived static actor/global range set so `saveAvgUs` and spike counts drop without losing correctness.
+
 ## 2026-06-01 current direction - ROM/memory analysis and spike-aware validation
 
 Update after manual play: `nsmbcoreranges` is still not acceptable as the default manual path. User manual run `logs/nsmb-mvl-manual-local-20260601-182701` used `rollbackBackend=nsmbcoreranges` and froze during play after many rollback resimulations and repeated `NSMB PerfSpike` lines around frame 1900-2633. The immediately following user run `logs/nsmb-mvl-manual-local-20260601-182807` used `rollbackBackend=coredelta` and reached result/restart logging around frame 3313 without the same freeze. Therefore `scripts/run-nsmb-mvl-manual-local.ps1 -LowLatencyRollback` default is back to `coredelta`; `nsmbcoreranges` remains an explicit experimental analysis backend only.
@@ -42,7 +81,9 @@ Current blocker: 拡張 `nsmbcoreranges` は停止耐性は改善したが、che
 
 フレーム落ちの主因は、rollback発生フレームで `restore + 過去checkpointから現在フレームまでのRunFrame再実行 + checkpoint再保存` を同じ表示フレーム内で行うこと。現行 `coredelta` は通常delta checkpointでも約 `2.46-2.49MB`、平均約 `2.7MB`、keyframeは約 `6.6MB`。save平均はおおむね `3.5-4.1ms`、restore平均は `17-20ms` 程度まで出る。したがって、さらに軽い actor/global snapshot を正しく作れれば改善余地はある。ただし `nsmbcoreranges` の失敗から、Main RAMを推定rangeだけに削るとCPU stateとの整合性が壊れやすい。軽量化はROM/メモリ解析で「戻すべきゲーム状態」と「戻してはいけないinput/net volatile領域」を確定してから進める。
 
-## 2026-06-01 current manual rollback status
+## 2026-06-01 older manual rollback status - superseded
+
+Superseded by the current automation note above: `-LowLatencyRollback` manual default is now `coredelta`, not `nsmbcoreranges`. The older text below is retained only as historical context for the manual-run debugging path.
 
 手動プレイ用の現行コマンドは `scripts/run-nsmb-mvl-manual-local.ps1 -LowLatencyRollback -AllowJit`。
 `-LowLatencyRollback` は `InputDelayFrames=0` / `InputMaxFrameLead=8` / `RollbackBackend=nsmbcoreranges` / `RollbackWindow=64` / `RollbackCheckpointInterval=8` / `RollbackResimulate` / `PacketBridgeStartFrame=870` を設定し、必要な `MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES=1` と `MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL=30` もスクリプト内で設定する。

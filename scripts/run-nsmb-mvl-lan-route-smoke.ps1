@@ -4,6 +4,9 @@ param(
     [int]$ClientFrames = 0,
     [int]$WaitTimeoutMs = 240000,
     [int]$InternalWaitTimeoutMs = 5000,
+    [int]$StallTimeoutMs = 0,
+    [int]$StallStartFrame = 900,
+    [int]$StallPollMs = 500,
     [string]$Exe = "build\debug-windows-x86_64\melonDS.exe",
     [string]$Rom = "roms\nsmb.nds",
     [string]$HostRom = "",
@@ -805,6 +808,11 @@ function Start-MelonLANProcess {
         $env:MELONDS_NSML_TARGET_FPS = $TargetFps.ToString([System.Globalization.CultureInfo]::InvariantCulture)
     } else {
         Remove-Item Env:\MELONDS_NSML_TARGET_FPS -ErrorAction SilentlyContinue
+    }
+    if ($StallTimeoutMs -gt 0) {
+        $env:MELONDS_NSML_FRAME_HEARTBEAT_INTERVAL = "30"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FRAME_HEARTBEAT_INTERVAL -ErrorAction SilentlyContinue
     }
     if ($NoHashLog) {
         $env:MELONDS_NSML_DISABLE_HASH = "1"
@@ -3209,11 +3217,58 @@ function Wait-LogPattern {
     throw "timed out waiting for '$Pattern' in $Path"
 }
 
+function Get-LatestNSMBProgressFrame {
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) {
+        return -1
+    }
+
+    $latest = -1
+    $lines = Get-Content $Path -Tail 240 -ErrorAction SilentlyContinue
+    foreach ($line in $lines) {
+        if ($line -notmatch "^(NSMB Heartbeat:|NSMB Perf|NSMB PerfSpike|NSMB Rollback:|NSMB InputNetplay:|NSMB MvL auto restart:)") {
+            continue
+        }
+        foreach ($match in [regex]::Matches($line, "(?:^|[ =])frame=(\d+)")) {
+            $value = [int]$match.Groups[1].Value
+            if ($value -gt $latest) {
+                $latest = $value
+            }
+        }
+    }
+    return $latest
+}
+
 function Complete-MelonLANProcess {
     param($Started)
 
     $process = $Started.Process
-    if (-not $process.WaitForExit($WaitTimeoutMs)) {
+    if ($StallTimeoutMs -gt 0) {
+        $latestFrame = -1
+        $lastProgress = [DateTime]::UtcNow
+        $deadline = [DateTime]::UtcNow.AddMilliseconds($WaitTimeoutMs)
+        $pollMs = [Math]::Max(100, $StallPollMs)
+        while (-not $process.WaitForExit($pollMs)) {
+            $now = [DateTime]::UtcNow
+            if ($now -ge $deadline) {
+                $process.Kill()
+                throw "melonDS process timed out. pid=$($process.Id)"
+            }
+
+            $frame = Get-LatestNSMBProgressFrame -Path $Started.Stdout
+            if ($frame -gt $latestFrame) {
+                $latestFrame = $frame
+                $lastProgress = $now
+            }
+
+            if ($latestFrame -ge $StallStartFrame -and
+                ($now - $lastProgress).TotalMilliseconds -ge $StallTimeoutMs) {
+                $process.Kill()
+                throw "melonDS process stalled. pid=$($process.Id) latestFrame=$latestFrame stallMs=$([int]($now - $lastProgress).TotalMilliseconds) stdout=$($Started.Stdout)"
+            }
+        }
+    } elseif (-not $process.WaitForExit($WaitTimeoutMs)) {
         $process.Kill()
         throw "melonDS process timed out. pid=$($process.Id)"
     }

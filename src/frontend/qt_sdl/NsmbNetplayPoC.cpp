@@ -1008,6 +1008,8 @@ struct State
     melonDS::u32 ActiveFrameOver33ms[16] {};
     int ActiveFrameSpikeThresholdUs = 25000;
     bool ActiveFrameSpikeTrace = false;
+    int FrameHeartbeatInterval = 0;
+    melonDS::u32 LastFrameHeartbeat[16] {};
     int HashInterval = 60;
     bool HashEnabled = true;
     int TestWaitTimeoutMs = 5000;
@@ -1612,7 +1614,11 @@ int EnvInt(const char* name, int fallback)
 {
     const char* value = std::getenv(name);
     if (!value || !value[0]) return fallback;
-    return std::atoi(value);
+    char* end = nullptr;
+    const long parsed = std::strtol(value, &end, 0);
+    if (end == value)
+        return fallback;
+    return static_cast<int>(parsed);
 }
 
 melonDS::u32 EnvU32(const char* name, melonDS::u32 fallback)
@@ -11203,6 +11209,8 @@ void InitFromEnvironment()
     G.ActiveFrameSpikeThresholdUs = std::clamp(
         EnvInt("MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS", 25), 1, 1000) * 1000;
     G.ActiveFrameSpikeTrace = EnvFlag("MELONDS_NSML_FPS_SPIKE_TRACE");
+    G.FrameHeartbeatInterval = std::clamp(
+        EnvInt("MELONDS_NSML_FRAME_HEARTBEAT_INTERVAL", 0), 0, 3600);
     G.FrameBarrierEnabled = EnvFlag("MELONDS_NSML_FRAME_BARRIER");
     G.SerialRunEnabled = EnvFlag("MELONDS_NSML_SERIAL_RUN");
     G.HashEnabled = !EnvFlag("MELONDS_NSML_DISABLE_HASH");
@@ -12693,6 +12701,15 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             }
         }
         RecordActiveFrameTiming(instanceID, logFrame);
+        if (G.FrameHeartbeatInterval > 0
+            && logFrame >= activeStartFrame
+            && logFrame != G.LastFrameHeartbeat[instanceID]
+            && (logFrame % static_cast<melonDS::u32>(G.FrameHeartbeatInterval)) == 0)
+        {
+            G.LastFrameHeartbeat[instanceID] = logFrame;
+            std::printf("NSMB Heartbeat: inst=%d frame=%u\n", instanceID, logFrame);
+            std::fflush(stdout);
+        }
     }
 
     WaitAtFrameBarrier(GAfterFrameBarrier, instanceID, logFrame, "after");

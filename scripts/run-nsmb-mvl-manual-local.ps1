@@ -1,6 +1,8 @@
 param(
     [int]$Frames = 999999,
     [int]$WaitTimeoutMs = 86400000,
+    [int]$StallTimeoutMs = 0,
+    [int]$StallStartFrame = 900,
     [int]$InputDelayFrames = 16,
     [int]$InputMaxFrameLead = 2,
     [int]$InternalWaitTimeoutMs = 0,
@@ -12,6 +14,7 @@ param(
     [switch]$LowLatencyRollback,
     [switch]$Rollback,
     [string]$RollbackBackend = "",
+    [string]$RollbackTinyCoreFlags = "",
     [int]$RollbackWindow = 120,
     [int]$RollbackCheckpointInterval = 30,
     [int]$RollbackResimulateDelayFrames = 0,
@@ -96,6 +99,7 @@ if ($LowLatencyRollback) {
     if (-not $PSBoundParameters.ContainsKey('RollbackWindow')) { $RollbackWindow = 64 }
     if (-not $PSBoundParameters.ContainsKey('RollbackCheckpointInterval')) { $RollbackCheckpointInterval = 8 }
     if (-not $PSBoundParameters.ContainsKey('PacketBridgeStartFrame')) { $PacketBridgeStartFrame = 870 }
+    if (-not $PSBoundParameters.ContainsKey('StallTimeoutMs')) { $StallTimeoutMs = 5000 }
     $RollbackResimulate = $true
     $PerfBreakdown = $true
 }
@@ -141,6 +145,8 @@ $common = @(
     "-Frames", "$Frames",
     "-WaitTimeoutMs", "$WaitTimeoutMs",
     "-InternalWaitTimeoutMs", "$InternalWaitTimeoutMs",
+    "-StallTimeoutMs", "$StallTimeoutMs",
+    "-StallStartFrame", "$StallStartFrame",
     "-Exe", $Exe,
     "-InputScript", $InputScript,
     "-ScreenshotInterval", "$ScreenshotInterval",
@@ -220,9 +226,16 @@ if ($LowLatencyRollback) {
     $env:MELONDS_NSML_FIXED_FRAME_SLEEP = "1"
     $env:MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "25"
     $env:MELONDS_NSML_FPS_SPIKE_TRACE = "1"
-    Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES -ErrorAction SilentlyContinue
-    Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL -ErrorAction SilentlyContinue
-    Remove-Item Env:\MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS -ErrorAction SilentlyContinue
+    if ($RollbackBackend -eq "nsmbtinycore" -or $RollbackBackend -eq "nsmb-tiny-core") {
+        $env:MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+        $env:MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
+        if ($RollbackTinyCoreFlags -eq "") { $RollbackTinyCoreFlags = "0x200" }
+        $env:MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "$RollbackTinyCoreFlags"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS -ErrorAction SilentlyContinue
+    }
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK -ErrorAction SilentlyContinue
 }
 if ($PerfBreakdown) {
@@ -279,11 +292,12 @@ Write-Host "Started NSMB MvL manual local session."
 Write-Host "host wrapper pid=$($hostProc.Id) log=$hostLog"
 Write-Host "client wrapper pid=$($clientProc.Id) log=$clientLog"
 Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
-Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames packetBridgeStart=$PacketBridgeStartFrame renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$($PerfBreakdown.IsPresent)"
+Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames packetBridgeStart=$PacketBridgeStartFrame renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$($PerfBreakdown.IsPresent)"
 Write-Host "mvlWins=$MvlWins mvlBigStars=$MvlBigStars mvlLives=$MvlLives mvlStage=$(if ($MvlStage -ge 0) { $MvlStage } else { 'auto/default' }) mvlSceneSettings=$(if ($MvlSceneSettings) { $MvlSceneSettings } else { 'derived' }) mvlCourseMode=$MvlCourseMode generateConfiguredRoms=$($GenerateMvlConfiguredRoms.IsPresent) mvlMatchSeed=$(if ($MvlMatchSeed) { $MvlMatchSeed } else { 'auto' })"
 if ($Rollback) {
     $backendLabel = if ($RollbackBackend -ne "") { $RollbackBackend } else { "savestate" }
-    Write-Host "rollback enabled backend=$backendLabel window=$RollbackWindow checkpointInterval=$RollbackCheckpointInterval resimDelay=$RollbackResimulateDelayFrames resimulate=$RollbackResimulate"
+    $tinyLabel = if ($RollbackTinyCoreFlags -ne "") { " tinyCoreFlags=$RollbackTinyCoreFlags" } else { "" }
+    Write-Host "rollback enabled backend=$backendLabel window=$RollbackWindow checkpointInterval=$RollbackCheckpointInterval resimDelay=$RollbackResimulateDelayFrames resimulate=$RollbackResimulate$tinyLabel"
 }
 if ($InputUnreliable) {
     Write-Host "input unreliable bundleHistory=$InputBundleHistory"
