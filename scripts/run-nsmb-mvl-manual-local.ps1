@@ -92,7 +92,7 @@ if ($LowLatencyRollback) {
     $InputDelayFrames = 0
     $InputMaxFrameLead = 8
     $Rollback = $true
-    if (-not $PSBoundParameters.ContainsKey('RollbackBackend')) { $RollbackBackend = "nsmbcoreranges" }
+    if (-not $PSBoundParameters.ContainsKey('RollbackBackend')) { $RollbackBackend = "coredelta" }
     if (-not $PSBoundParameters.ContainsKey('RollbackWindow')) { $RollbackWindow = 64 }
     if (-not $PSBoundParameters.ContainsKey('RollbackCheckpointInterval')) { $RollbackCheckpointInterval = 8 }
     if (-not $PSBoundParameters.ContainsKey('PacketBridgeStartFrame')) { $PacketBridgeStartFrame = 870 }
@@ -215,13 +215,13 @@ if ($MvlMatchSeed -ne "") {
 }
 
 if ($LowLatencyRollback) {
-    $env:MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
-    $env:MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
+    $env:MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "30"
+    $env:MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
     $env:MELONDS_NSML_FIXED_FRAME_SLEEP = "1"
     $env:MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "25"
     $env:MELONDS_NSML_FPS_SPIKE_TRACE = "1"
-    Remove-Item Env:\MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL -ErrorAction SilentlyContinue
-    Remove-Item Env:\MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK -ErrorAction SilentlyContinue
 }

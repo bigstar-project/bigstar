@@ -2,6 +2,8 @@
 
 ## 2026-06-01 current direction - ROM/memory analysis and spike-aware validation
 
+Update after manual play: `nsmbcoreranges` is still not acceptable as the default manual path. User manual run `logs/nsmb-mvl-manual-local-20260601-182701` used `rollbackBackend=nsmbcoreranges` and froze during play after many rollback resimulations and repeated `NSMB PerfSpike` lines around frame 1900-2633. The immediately following user run `logs/nsmb-mvl-manual-local-20260601-182807` used `rollbackBackend=coredelta` and reached result/restart logging around frame 3313 without the same freeze. Therefore `scripts/run-nsmb-mvl-manual-local.ps1 -LowLatencyRollback` default is back to `coredelta`; `nsmbcoreranges` remains an explicit experimental analysis backend only.
+
 方針を `coredelta` 固定ではなく、案D寄りのROM/メモリ解析で正しい軽量snapshotを作る方向へ戻した。`coredelta` は引き続き安全基準として残すが、軽量化候補の検証は `coredelta` の `MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE=1` で実際に変化したMain RAM pageを取り、既存NSMB range候補で未カバーのpageを集計して進める。
 
 追加した検証/解析:
@@ -20,7 +22,7 @@ delta-page解析結果:
 - `logs/codex-nsmbcoreranges-expandedranges-stress-compare-2600-20260601`: `nsmbcoreranges` / `InputDelayFrames=0` / move+jump+dash stress / game-state比較ありで2600F通過。checkpointは約 `2,559,101` bytes、saveAvgUsは約 `5.57ms`、restoreAvgUsは約 `12.4-12.8ms`、active fpsは約 `53fps`。
 - `logs/codex-nsmbcoreranges-expandedranges-stress-playlike-2600-20260601`: trace/game-stateなし寄りで2600F通過。active fpsは host/client `53.09/53.37`、throttleは0。ただしactive frame timingは `maxFrameMs=213-252ms`, `over25ms=84-87` で、ガクッとしたdropは残る。
 - 旧候補が停止した条件に近い `InputSendDelayFrames=6` / 6000F stress は `logs/codex-nsmbcoreranges-expandedranges-delay6-6000-20260601` で完走。以前の `arm9PC=0xffff0104` / `arm9SP=0x0` 停止はこのrange拡張では再発していない。active fpsは約 `45.5fps`、restoreOpsは host/client `116/111`、restoreAvgUsは約 `11.5-12.4ms`。重い遅延stressなので通常性能とは分ける。
-- 手動向け `-LowLatencyRollback` の既定も、調査方向に合わせて `nsmbcoreranges` + expanded delta-discovered rangesへ戻した。`coredelta` は安全な比較基準として残し、必要なら `-RollbackBackend coredelta` で明示する。
+- 手動向け `-LowLatencyRollback` の既定は `coredelta`。`nsmbcoreranges` は `-RollbackBackend nsmbcoreranges` で明示した解析用に限定する。
 
 Current blocker: 拡張 `nsmbcoreranges` は停止耐性は改善したが、checkpoint sizeが約2.56MBのままで、案Dの軽量actor/global snapshotとはまだ言えない。次は、今回追加したpageのうち本当に必要なactor/global/stack/scratchだけをROM/メモリ構造で分類し、ProcessList/global由来の小さいrangeへ置き換える。
 
