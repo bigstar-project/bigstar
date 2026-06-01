@@ -42,6 +42,10 @@ param(
     [int]$StateSyncInterval = 60,
     [switch]$StateSyncExtended,
     [string]$StateApplyMode = "",
+    [switch]$PlayerStateSync,
+    [switch]$PlayerStateApply,
+    [int]$PlayerStateSyncInterval = 1,
+    [int]$PlayerStateMaxPredictFrames = 2,
     [switch]$SkipGameStateComparison,
     [switch]$SkipMovementProbe,
     [switch]$TracePlayerLifeChanges,
@@ -201,6 +205,16 @@ if ($StateSync) {
     }
     if ($StateApplyMode -ne "") {
         $common += @("-StateApplyMode", "$StateApplyMode")
+    }
+}
+if ($PlayerStateSync) {
+    $common += @(
+        "-PlayerStateSync",
+        "-PlayerStateSyncInterval", "$PlayerStateSyncInterval",
+        "-PlayerStateMaxPredictFrames", "$PlayerStateMaxPredictFrames"
+    )
+    if ($PlayerStateApply) {
+        $common += "-PlayerStateApply"
     }
 }
 if ($AllowJit) {

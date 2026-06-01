@@ -1,5 +1,41 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
+## 2026-06-02 current status - Plan-D actor snapshot path
+
+Current best Plan-D-like direction is no longer a rollback backend. It is a small per-player actor snapshot path that avoids full NDS rollback restore/resim:
+
+- New wire packet: `WirePlayerState`, 116 bytes.
+- Env/script switches:
+  - `MELONDS_NSML_PLAYER_STATE_SYNC=1`
+  - `MELONDS_NSML_PLAYER_STATE_APPLY=1`
+  - `MELONDS_NSML_PLAYER_STATE_SYNC_INTERVAL`
+  - `MELONDS_NSML_PLAYER_STATE_MAX_PREDICT_FRAMES`
+  - split/lan scripts expose `-PlayerStateSync`, `-PlayerStateApply`, `-PlayerStateSyncInterval`, and `-PlayerStateMaxPredictFrames`.
+- The packet carries actor transform, velocity, action/subaction/physics flags, damage cooldown, transition/collision/environment flags, and compact runtime byte flags.
+- The receiver applies the latest remote player actor snapshot before frame execution and again before game-state trace/sync.
+- Existing fixed-size wire packets were also unblocked from the input-bundle branch so `WireNSMLPacket`, `WireGameState`, and the new `WirePlayerState` can reach their exact handlers.
+
+Verification:
+
+- Build passed: `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4`.
+- First naive implementation used `ReadGameStateSample()` every frame and was too heavy: `logs/codex-playerstate-norollback-lead8-stress-seq-1600-20260602` ran only about `37.6fps` active.
+- After replacing that with `FindPlayerActors()` plus direct player offset reads:
+  - `logs/codex-playerstate-fastsend-lead8-stress-1600-20260602`: 1600F passed, host/client active FPS about `57.9`, max frame about `36ms`, `over33ms=2`.
+  - `logs/codex-playerstate-fastsend-lead8-stress-2400-20260602`: 2400F passed, no rollback/resim, host/client active FPS about `51.6`, max frame `31.979/34.490ms`, `over33ms=0/2`, and both player actor X values moved.
+  - `logs/codex-playerstate-interval2-predict1-lead8-stress-2400-20260602`: 2400F passed with send interval 2 and prediction 1, host/client active FPS about `54.5`, max frame `33.074/33.406ms`, `over33ms=0/1`.
+- The previous full/core rollback issue is still reproduced in logs: rollback/resim paths can spike into hundreds of ms when many inputs arrive or forced delay causes repeated rollback. The actor snapshot path avoids that mechanism entirely.
+
+Current blocker / caveat:
+
+- Strict full game-state comparison still fails early because the existing comparison assumes deterministic same-frame actor equality. The player-state path is an actor replication/visual correction path, not deterministic rollback. Current CSV traces show player slot/timing differences around frame 930 even while player actor motion is present.
+- This means the actor snapshot path is promising for "does not freeze / does not rollback-spike / remote actor moves", but it is not yet a correctness replacement for rollback.
+
+Next actions:
+
+- Add a dedicated actor-snapshot validation gate instead of reusing full deterministic game-state comparison: remote actor movement, max coordinate drift, no hard stall, active max frame, over33ms count, and no long consecutive slow frames.
+- Continue reducing per-frame overhead: cache local/remote player actor bases after gameplay start and avoid repeated object scans where possible.
+- Investigate player slot mapping in direct host/client ROMs so actor snapshot comparison can compare host p0 against the correct client actor and vice versa.
+
 ## 2026-06-02 current status - real rollback gate and Plan-D-like retest
 
 Current working candidate is still experimental:

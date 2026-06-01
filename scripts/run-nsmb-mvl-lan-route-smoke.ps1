@@ -22,6 +22,10 @@ param(
     [int]$StateSyncInterval = 60,
     [switch]$StateSyncExtended,
     [string]$StateApplyMode = "",
+    [switch]$PlayerStateSync,
+    [switch]$PlayerStateApply,
+    [int]$PlayerStateSyncInterval = 1,
+    [int]$PlayerStateMaxPredictFrames = 2,
     [int]$ScreenshotInterval = 600,
     [string]$RamDumpFrames = "",
     [int]$RamDumpInterval = 0,
@@ -1240,6 +1244,21 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_STATE_SYNC_INTERVAL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_STATE_SYNC_EXTENDED -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_STATE_APPLY_MODE -ErrorAction SilentlyContinue
+    }
+    if ($PlayerStateSync) {
+        $env:MELONDS_NSML_PLAYER_STATE_SYNC = "1"
+        $env:MELONDS_NSML_PLAYER_STATE_SYNC_INTERVAL = "$PlayerStateSyncInterval"
+        $env:MELONDS_NSML_PLAYER_STATE_MAX_PREDICT_FRAMES = "$PlayerStateMaxPredictFrames"
+        if ($PlayerStateApply) {
+            $env:MELONDS_NSML_PLAYER_STATE_APPLY = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_APPLY -ErrorAction SilentlyContinue
+        }
+    } else {
+        Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_SYNC -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_APPLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_SYNC_INTERVAL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_MAX_PREDICT_FRAMES -ErrorAction SilentlyContinue
     }
     if ($RamDumpFrames -or $RamDumpInterval -gt 0) {
         $env:MELONDS_NSML_RAM_DUMP_DIR = $RamDumpDir
@@ -2864,6 +2883,12 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_STATE_SYNC_INTERVAL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_STATE_SYNC_EXTENDED -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_STATE_APPLY_MODE -ErrorAction SilentlyContinue
+    }
+    if (-not $PlayerStateSync) {
+        Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_SYNC -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_APPLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_SYNC_INTERVAL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_MAX_PREDICT_FRAMES -ErrorAction SilentlyContinue
     }
     if (-not $StateSaveDir) {
         Remove-Item Env:\MELONDS_NSML_STATE_SAVE_DIR -ErrorAction SilentlyContinue
