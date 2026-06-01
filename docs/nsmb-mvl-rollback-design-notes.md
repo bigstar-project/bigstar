@@ -1,5 +1,34 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
+## 2026-06-01 latest rollback snapshot focus
+
+ユーザー指示により、delay方式とのhybrid検討はいったん外し、軽いcheckpoint/snapshotとして現実的なrollback方式を実験している。
+
+現在の最有力候補は `nsmbtinycore + MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES=1 + MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS=0x200`。これはMain RAM全体や通常savestateではなく、NSMB向けMain RAM range snapshotに、CPU/timer/scheduler/DMA/IRQ/IPC/WRAMなどの小さいcore進行状態と、GPU3DのFIFO/matrix/pipeline/register系だけを足す方式。checkpoint sizeは `247,355` bytesまで下がっており、`savestate` や `corelite` よりかなり案D寄り。
+
+ただし、まだ完全な「ROM解析でactor/global構造を静的に確定した案D」ではない。現在のrange setは、coredelta/restore diffと実行時Main RAM観測で見つけたNSMB global/actor/heap周辺を使っている。ROMの関数・構造体・actor tableを本格的に逆引きして、必要状態を名前付き構造として確定する作業はまだ途中ではなく、これからの段階。
+
+今回の追加実験では、`MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL` を追加し、動的object/range探索結果を数十フレーム単位でキャッシュできるようにした。`scanInterval=30` では、`0x200` 候補のcheckpoint bytesは `247,355` のまま、保存平均時間が約 `7.9ms` から約 `0.39-0.41ms` まで下がった。
+
+Verification:
+
+- Build: `cmake --build --preset release-windows-x86_64 --parallel` passed.
+- `logs/codex-rollback-nsmbtinycore-gpu3dlight-scan30-delayjitter-2600-20260601`: 2600-frame split local-input smoke passed. Client frame 2520: `bytesLast=247,355`, `saveAvgUs=391`, `scanInt=30`, `scanRefresh=55`, `scanCacheHits=1595`, `mismatches=0`.
+- `logs/codex-rollback-nsmbtinycore-gpu3dlight-scan30-delayjitter-3600-20260601`: 3600-frame split local-input smoke passed. Client frame 3600: `bytesLast=247,355`, `saveAvgUs=393`, `scanRefresh=91`, `scanCacheHits=2639`, `mismatches=0`.
+- `logs/codex-rollback-nsmbtinycore-gpu3dlight-scan30-restoreprobe-2600-20260601`: 2600-frame smoke passed, but restore probe did not force restoreOps.次は実rollback回数を確実に増やすprobeを直して、復元時の正しさとコストを再測定する。
+
+Current blocker:
+
+- 案Dとしてはかなり近づいたが、まだ「実行時delta-discovered range + 小さいemulator進行状態」。ROM解析でNSMB actor/global構造を確定している段階ではない。
+- `scanInterval=30` は現ルートで成功しているが、spawn/despawnや別ルートでrangeが変わる場面の安全余裕は追加検証が必要。
+- restore probeが今回のrunで実rollbackを増やせていないため、rollback発生時の再測定を強制できるようにする必要がある。
+
+Next actions:
+
+- restore probeが確実にrollback/restoreOpsを発生させるように調整し、`scanInterval=30` の復元正しさを再測定する。
+- delta-discovered rangeをROM/メモリ解析に戻し、NSMB global/actor/manager/camera/RNG相当へ名前付きで切り分ける。
+- `scanInterval` のデフォルト値を上げてよいかは、別ルート・長時間・spawn/despawn検証後に判断する。現時点ではデフォルト1で保守的にしている。
+
 ## 2026-06-01 current experiment status
 
 ユーザー指示により、delay方式とのhybrid検討はいったん外し、軽いcheckpoint/snapshotが作れるかだけに焦点を戻した。

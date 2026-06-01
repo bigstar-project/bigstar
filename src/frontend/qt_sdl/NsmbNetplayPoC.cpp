@@ -280,6 +280,14 @@ struct RollbackNSMBRangeEntry
     melonDS::u32 Length;
 };
 
+struct RollbackNSMBDynamicRangeCache
+{
+    melonDS::NDS* NDS = nullptr;
+    melonDS::u32 Frame = kNoFrameLimit;
+    bool Valid = false;
+    std::vector<RollbackNSMBRangeEntry> Ranges;
+};
+
 struct RollbackStoredState
 {
     std::vector<char> Buffer;
@@ -1332,6 +1340,10 @@ struct State
     bool RollbackNSMBDeltaDiscoveredRanges = false;
     bool RollbackNSMBSkipInputRanges = false;
     bool RollbackNSMBRestoreDiffTrace = false;
+    int RollbackNSMBScanInterval = 1;
+    RollbackNSMBDynamicRangeCache RollbackNSMBDynamicRanges;
+    melonDS::u32 RollbackNSMBRangeScanRefreshCount = 0;
+    melonDS::u32 RollbackNSMBRangeCacheHitCount = 0;
     bool RollbackDeltaPageTrace = false;
     melonDS::u32 RollbackDeltaPageTraceStartFrame = 0;
     melonDS::u32 RollbackDeltaPageTraceEndFrame = 0;
@@ -2774,6 +2786,60 @@ void AddNSMBRollbackDeltaDiscoveredRanges(melonDS::NDS* nds, std::vector<Rollbac
     AddNSMBRollbackRange(nds, ranges, 0x023FFC00, 0x100);
 }
 
+void BuildNSMBRollbackDynamicRanges(melonDS::NDS* nds, std::vector<RollbackNSMBRangeEntry>& ranges)
+{
+    AddNSMBRollbackScannedObjectRanges(nds, ranges);
+
+    const PlayerActorScanSample players = FindPlayerActors(nds);
+    AddNSMBRollbackObjectRange(nds, ranges, players.Actor0.Base, 0x900);
+    AddNSMBRollbackObjectRange(nds, ranges, players.Actor1.Base, 0x900);
+
+    const ObjectScanSample star = FindObjectByIDAndSettingsLoose(nds, kVsBattleStarActorObjectID, kVsBattleStarActorSettings);
+    AddNSMBRollbackObjectRange(nds, ranges, star.Base, 0x300);
+    const ObjectScanSample movingHazard = FindObjectByIDAndSettingsLoose(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
+    AddNSMBRollbackObjectRange(nds, ranges, movingHazard.Base, 0x300);
+    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, G.MvlStageSceneSettings);
+    AddNSMBRollbackObjectRange(nds, ranges, stageScene.Base, 0x5800);
+    const ObjectScanSample stageCamera = FindObjectByIDAndSettingsLoose(nds, kStageCameraObjectID, 0);
+    AddNSMBRollbackObjectRange(nds, ranges, stageCamera.Base, 0x300);
+    const ObjectScanSample stageFX = FindObjectByID(nds, kStageFXObjectID);
+    AddNSMBRollbackObjectRange(nds, ranges, stageFX.Base, 0x300);
+    const ObjectScanSample stageActorManager = FindObjectByID(nds, kStageActorManagerObjectID);
+    AddNSMBRollbackObjectRange(nds, ranges, stageActorManager.Base, 0x800);
+    const ObjectScanSample stageController = FindObjectByID(nds, kStageControllerObjectID);
+    AddNSMBRollbackObjectRange(nds, ranges, stageController.Base, 0x500);
+    const ObjectPairScanSample mvlObject267 = FindObjectPairByIDSortedX(nds, kMvlObject267ID);
+    AddNSMBRollbackObjectRange(nds, ranges, mvlObject267.Left.Base, 0x300);
+    AddNSMBRollbackObjectRange(nds, ranges, mvlObject267.Right.Base, 0x300);
+}
+
+void AddNSMBRollbackDynamicRanges(melonDS::NDS* nds, std::vector<RollbackNSMBRangeEntry>& ranges)
+{
+    const int scanInterval = std::max(1, G.RollbackNSMBScanInterval);
+    auto& cache = G.RollbackNSMBDynamicRanges;
+    const melonDS::u32 frame = nds ? nds->NumFrames : 0;
+    const bool frameWentBack = cache.Valid && frame < cache.Frame;
+    const bool intervalExpired = !cache.Valid
+        || cache.Frame == kNoFrameLimit
+        || (frame - cache.Frame) >= static_cast<melonDS::u32>(scanInterval);
+
+    if (cache.NDS != nds || frameWentBack || intervalExpired)
+    {
+        cache.NDS = nds;
+        cache.Frame = frame;
+        cache.Valid = true;
+        cache.Ranges.clear();
+        BuildNSMBRollbackDynamicRanges(nds, cache.Ranges);
+        G.RollbackNSMBRangeScanRefreshCount++;
+    }
+    else
+    {
+        G.RollbackNSMBRangeCacheHitCount++;
+    }
+
+    ranges.insert(ranges.end(), cache.Ranges.begin(), cache.Ranges.end());
+}
+
 std::vector<RollbackNSMBRangeEntry> BuildNSMBRollbackRanges(melonDS::NDS* nds)
 {
     std::vector<RollbackNSMBRangeEntry> ranges;
@@ -2803,29 +2869,7 @@ std::vector<RollbackNSMBRangeEntry> BuildNSMBRollbackRanges(melonDS::NDS* nds)
     if (G.RollbackNSMBDeltaDiscoveredRanges)
         AddNSMBRollbackDeltaDiscoveredRanges(nds, ranges);
 
-    AddNSMBRollbackScannedObjectRanges(nds, ranges);
-
-    const PlayerActorScanSample players = FindPlayerActors(nds);
-    AddNSMBRollbackObjectRange(nds, ranges, players.Actor0.Base, 0x900);
-    AddNSMBRollbackObjectRange(nds, ranges, players.Actor1.Base, 0x900);
-
-    const ObjectScanSample star = FindObjectByIDAndSettingsLoose(nds, kVsBattleStarActorObjectID, kVsBattleStarActorSettings);
-    AddNSMBRollbackObjectRange(nds, ranges, star.Base, 0x300);
-    const ObjectScanSample movingHazard = FindObjectByIDAndSettingsLoose(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
-    AddNSMBRollbackObjectRange(nds, ranges, movingHazard.Base, 0x300);
-    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, G.MvlStageSceneSettings);
-    AddNSMBRollbackObjectRange(nds, ranges, stageScene.Base, 0x5800);
-    const ObjectScanSample stageCamera = FindObjectByIDAndSettingsLoose(nds, kStageCameraObjectID, 0);
-    AddNSMBRollbackObjectRange(nds, ranges, stageCamera.Base, 0x300);
-    const ObjectScanSample stageFX = FindObjectByID(nds, kStageFXObjectID);
-    AddNSMBRollbackObjectRange(nds, ranges, stageFX.Base, 0x300);
-    const ObjectScanSample stageActorManager = FindObjectByID(nds, kStageActorManagerObjectID);
-    AddNSMBRollbackObjectRange(nds, ranges, stageActorManager.Base, 0x800);
-    const ObjectScanSample stageController = FindObjectByID(nds, kStageControllerObjectID);
-    AddNSMBRollbackObjectRange(nds, ranges, stageController.Base, 0x500);
-    const ObjectPairScanSample mvlObject267 = FindObjectPairByIDSortedX(nds, kMvlObject267ID);
-    AddNSMBRollbackObjectRange(nds, ranges, mvlObject267.Left.Base, 0x300);
-    AddNSMBRollbackObjectRange(nds, ranges, mvlObject267.Right.Base, 0x300);
+    AddNSMBRollbackDynamicRanges(nds, ranges);
 
     std::sort(ranges.begin(), ranges.end(), [](const auto& a, const auto& b) {
         return a.Address < b.Address;
@@ -11327,6 +11371,8 @@ void InitFromEnvironment()
     G.RollbackNSMBDeltaDiscoveredRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES");
     G.RollbackNSMBSkipInputRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_SKIP_INPUT_RANGES");
     G.RollbackNSMBRestoreDiffTrace = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_RESTORE_DIFF_TRACE");
+    G.RollbackNSMBScanInterval = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL", 1), 1, 600);
     G.RollbackDeltaPageTrace = EnvFlag("MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE");
     G.RollbackDeltaPageTraceStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE_START_FRAME", 0)));
@@ -12318,7 +12364,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             mainRAMCopyBytes += stored.MainRAMCopy.size();
         }
         std::printf(
-            "NSMB Rollback: frame=%u backend=%s checkpoints=%zu checkpointSaves=%u bytesLast=%zu bytesMin=%zu bytesMax=%zu bytesAvg=%zu saveAvgUs=%llu saveMaxUs=%llu restoreOps=%u restoreAvgUs=%llu restoreMaxUs=%llu delta=%zu keyframes=%zu mainRAMCopies=%zu keyInt=%d page=%d coreSkip=0x%X tinyFlags=0x%X wide=%d deltaDiscovered=%d skipInput=%d restoreDiff=%d predicted=%zu predictions=%u mismatches=%u restores=%u resims=%u pending=%u observed=%u\n",
+            "NSMB Rollback: frame=%u backend=%s checkpoints=%zu checkpointSaves=%u bytesLast=%zu bytesMin=%zu bytesMax=%zu bytesAvg=%zu saveAvgUs=%llu saveMaxUs=%llu restoreOps=%u restoreAvgUs=%llu restoreMaxUs=%llu delta=%zu keyframes=%zu mainRAMCopies=%zu keyInt=%d page=%d coreSkip=0x%X tinyFlags=0x%X wide=%d deltaDiscovered=%d skipInput=%d restoreDiff=%d scanInt=%d scanRefresh=%u scanCacheHits=%u predicted=%zu predictions=%u mismatches=%u restores=%u resims=%u pending=%u observed=%u\n",
             logFrame,
             RollbackBackendName(),
             G.RollbackStates.size(),
@@ -12343,6 +12389,9 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             G.RollbackNSMBDeltaDiscoveredRanges ? 1 : 0,
             G.RollbackNSMBSkipInputRanges ? 1 : 0,
             G.RollbackNSMBRestoreDiffTrace ? 1 : 0,
+            G.RollbackNSMBScanInterval,
+            G.RollbackNSMBRangeScanRefreshCount,
+            G.RollbackNSMBRangeCacheHitCount,
             G.PredictedRemoteInputs.size(),
             G.RollbackPredictionCount,
             G.RollbackMismatchCount,
