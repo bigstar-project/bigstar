@@ -1,6 +1,32 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
-## 2026-06-01 current automation state - slow-run detection fixed
+## 2026-06-01 current lightweight direction - actor arena snapshot
+
+New Plan-D-like candidate: `nsmbtinycore + delta-discovered globals + process-list object ranges + actorArena + no heap scan`.
+
+Implementation:
+
+- Added `MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES=1`.
+- Actor arena range currently adds `0x021B2600+0x5000` and `0x02088B00+0x200`.
+- The range came from `coredelta` page-delta coverage with `processList=1`, `deltaDiscovered=1`, and `heapScan=0`. Remaining uncovered pages were concentrated at `0x021B2700-0x021B6700` plus `0x02088C00`.
+- This is intentionally not a full savestate and not full Main RAM. It is a small static actor/global arena plus process-list-derived live objects and tiny core state.
+
+Verification:
+
+- `logs/codex-delta-trace-proclist-delta-noheap-2600-20260601`: with process-list + delta ranges but no actorArena, uncovered pages dropped to 6 ranges. This identified the actor arena gap.
+- `logs/codex-nsmbtinycore-proclist-delta-noheap-compare-2600-20260601`: without actorArena, `nsmbtinycore` failed with client data abort at frame 2225.
+- `logs/codex-nsmbtinycore-proclist-arena-noheap-compare-2600-20260601`: actorArena candidate passed 2600F game-state comparison.
+- `logs/codex-nsmbtinycore-proclist-arena-noheap-stress-6000-20260601`: actorArena candidate passed 6000F stress with slow-run gate. Host/client `maxConsecutiveOver33=6/6`, active FPS around `48.6`, versus old `nsmbtinycore` host `maxConsecutiveOver33=2519`.
+- `logs/codex-nsmbtinycore-proclist-arena-noheap-compare-6000-20260601`: actorArena candidate passed 6000F game-state comparison.
+- `logs/codex-nsmbtinycore-proclist-arena-noheap-trace-2600-20260601`: checkpoint `bytesLast=269,895`, `saveAvgUs=206-208`, `restoreAvgUs=11.4-11.5ms`, `heapScan=0`, `procObjs=10-12`.
+
+Current conclusion:
+
+- This is now the best Plan-D-like candidate seen so far: roughly 270KB checkpoints, no heap scan, and it passes the new consecutive-slow-frame gate.
+- It still has single-frame spikes around 300ms in the two-instance stress environment, so it is not final. But the previous "solid 10-20fps" failure is no longer reproduced in the 6000F automated stress route.
+- Manual explicit `-RollbackBackend nsmbtinycore` under `-LowLatencyRollback` now uses actorArena/processList/noHeap by default.
+
+## 2026-06-01 prior automation state - slow-run detection
 
 User clarification: the star pickup/fall-death freeze was only an example from an automated run. The real bug was that automation treated runs as passed even when melonDS had become effectively stuck at very low FPS. The harness must detect both hard frame-progress stalls and long consecutive slow-frame runs.
 
