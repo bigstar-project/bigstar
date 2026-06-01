@@ -24,6 +24,12 @@ param(
     [int]$RollbackResimulateDelayFrames = 0,
     [switch]$RollbackResimulate,
     [switch]$RollbackRestoreProbe,
+    [int]$RollbackPredictionProbeModulo = 0,
+    [int]$RollbackPredictionProbeOffset = 0,
+    [int]$RollbackPredictionProbeLimit = -1,
+    [int]$RollbackPredictionProbeStartFrame = 0,
+    [int]$RollbackPredictionProbeEndFrame = 0,
+    [string]$RollbackPredictionProbeKeyMask = "",
     [int]$RollbackSettleFrames = 0,
     [switch]$IgnoreSpeculativeInputFields,
     [int]$GameStateTraceInterval = 30,
@@ -84,6 +90,24 @@ if ($MaxConsecutiveSlowFrames -ge 0) {
     if (-not $hasSpikeThreshold -or $currentSpikeThreshold -le 0.0 -or $currentSpikeThreshold -gt $SlowFrameThresholdMs) {
         $env:MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = $SlowFrameThresholdMs.ToString([System.Globalization.CultureInfo]::InvariantCulture)
     }
+}
+
+if ($RollbackPredictionProbeModulo -gt 0) {
+    $env:MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_MODULO = "$RollbackPredictionProbeModulo"
+    $env:MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_OFFSET = "$RollbackPredictionProbeOffset"
+    $env:MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_LIMIT = "$RollbackPredictionProbeLimit"
+    $env:MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_START_FRAME = "$RollbackPredictionProbeStartFrame"
+    $env:MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_END_FRAME = "$RollbackPredictionProbeEndFrame"
+    if ($RollbackPredictionProbeKeyMask -ne "") {
+        $env:MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_KEY_MASK = "$RollbackPredictionProbeKeyMask"
+    }
+} else {
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_MODULO -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_OFFSET -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_LIMIT -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_START_FRAME -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_END_FRAME -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_KEY_MASK -ErrorAction SilentlyContinue
 }
 
 if ($LowDelayWan) {

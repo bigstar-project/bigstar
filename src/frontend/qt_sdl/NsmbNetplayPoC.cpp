@@ -1365,6 +1365,7 @@ struct State
     bool RollbackNSMBWideRanges = false;
     bool RollbackNSMBDeltaDiscoveredRanges = false;
     bool RollbackNSMBActorArenaRanges = false;
+    bool RollbackNSMBArm9StackRange = false;
     bool RollbackNSMBSkipInputRanges = false;
     bool RollbackNSMBRestoreDiffTrace = false;
     bool RollbackNSMBProcessListRanges = false;
@@ -3079,6 +3080,11 @@ void AddNSMBRollbackActorArenaRanges(melonDS::NDS* nds, std::vector<RollbackNSMB
     AddNSMBRollbackRange(nds, ranges, 0x02088B00, 0x200);
 }
 
+void AddNSMBRollbackArm9StackRange(melonDS::NDS* nds, std::vector<RollbackNSMBRangeEntry>& ranges)
+{
+    AddNSMBRollbackRange(nds, ranges, 0x023E0000, 0x20000);
+}
+
 void BuildNSMBRollbackDynamicRanges(melonDS::NDS* nds, std::vector<RollbackNSMBRangeEntry>& ranges)
 {
     G.RollbackNSMBProcessListObjectCount = 0;
@@ -3173,6 +3179,8 @@ std::vector<RollbackNSMBRangeEntry> BuildNSMBRollbackRanges(melonDS::NDS* nds)
         AddNSMBRollbackDeltaDiscoveredRanges(nds, ranges);
     if (G.RollbackNSMBActorArenaRanges)
         AddNSMBRollbackActorArenaRanges(nds, ranges);
+    if (G.RollbackNSMBArm9StackRange)
+        AddNSMBRollbackArm9StackRange(nds, ranges);
 
     AddNSMBRollbackDynamicRanges(nds, ranges);
 
@@ -11767,6 +11775,7 @@ void InitFromEnvironment()
     G.RollbackNSMBWideRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_WIDE_RANGES");
     G.RollbackNSMBDeltaDiscoveredRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES");
     G.RollbackNSMBActorArenaRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES");
+    G.RollbackNSMBArm9StackRange = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE");
     G.RollbackNSMBSkipInputRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_SKIP_INPUT_RANGES");
     G.RollbackNSMBRestoreDiffTrace = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_RESTORE_DIFF_TRACE");
     G.RollbackNSMBProcessListRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES");
@@ -12782,7 +12791,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             mainRAMCopyBytes += stored.MainRAMCopy.size();
         }
         std::printf(
-            "NSMB Rollback: frame=%u backend=%s checkpoints=%zu checkpointSaves=%u bytesLast=%zu bytesMin=%zu bytesMax=%zu bytesAvg=%zu saveAvgUs=%llu saveMaxUs=%llu restoreOps=%u restoreAvgUs=%llu restoreMaxUs=%llu delta=%zu keyframes=%zu mainRAMCopies=%zu keyInt=%d page=%d coreSkip=0x%X tinyFlags=0x%X wide=%d deltaDiscovered=%d actorArena=%d skipInput=%d restoreDiff=%d procList=%d heapScan=%d procObjs=%u procNodes=%u heapObjs=%u scanInt=%d heapScanInt=%d scanRefresh=%u scanCacheHits=%u heapScanRefresh=%u heapScanCacheHits=%u predicted=%zu predictions=%u predProbe=%u mismatches=%u restores=%u resims=%u pending=%u observed=%u\n",
+            "NSMB Rollback: frame=%u backend=%s checkpoints=%zu checkpointSaves=%u bytesLast=%zu bytesMin=%zu bytesMax=%zu bytesAvg=%zu saveAvgUs=%llu saveMaxUs=%llu restoreOps=%u restoreAvgUs=%llu restoreMaxUs=%llu delta=%zu keyframes=%zu mainRAMCopies=%zu keyInt=%d page=%d coreSkip=0x%X tinyFlags=0x%X wide=%d deltaDiscovered=%d actorArena=%d arm9Stack=%d skipInput=%d restoreDiff=%d procList=%d heapScan=%d procObjs=%u procNodes=%u heapObjs=%u scanInt=%d heapScanInt=%d scanRefresh=%u scanCacheHits=%u heapScanRefresh=%u heapScanCacheHits=%u predicted=%zu predictions=%u predProbe=%u mismatches=%u restores=%u resims=%u pending=%u observed=%u\n",
             logFrame,
             RollbackBackendName(),
             G.RollbackStates.size(),
@@ -12806,6 +12815,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             G.RollbackNSMBWideRanges ? 1 : 0,
             G.RollbackNSMBDeltaDiscoveredRanges ? 1 : 0,
             G.RollbackNSMBActorArenaRanges ? 1 : 0,
+            G.RollbackNSMBArm9StackRange ? 1 : 0,
             G.RollbackNSMBSkipInputRanges ? 1 : 0,
             G.RollbackNSMBRestoreDiffTrace ? 1 : 0,
             G.RollbackNSMBProcessListRanges ? 1 : 0,

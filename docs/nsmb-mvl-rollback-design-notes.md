@@ -1,30 +1,38 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
-## 2026-06-01 current lightweight direction - actor arena snapshot
+## 2026-06-01 current lightweight direction - actor arena + ARM9 stack snapshot
 
-New Plan-D-like candidate: `nsmbtinycore + delta-discovered globals + process-list object ranges + actorArena + no heap scan`.
+Current Plan-D-like candidate: `nsmbtinycore + delta-discovered globals + process-list object ranges + actorArena + ARM9 stack + no heap scan`.
 
 Implementation:
 
 - Added `MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES=1`.
+- Added `MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE=1`.
 - Actor arena range currently adds `0x021B2600+0x5000` and `0x02088B00+0x200`.
-- The range came from `coredelta` page-delta coverage with `processList=1`, `deltaDiscovered=1`, and `heapScan=0`. Remaining uncovered pages were concentrated at `0x021B2700-0x021B6700` plus `0x02088C00`.
-- This is intentionally not a full savestate and not full Main RAM. It is a small static actor/global arena plus process-list-derived live objects and tiny core state.
+- ARM9 stack/scratch range currently adds `0x023E0000+0x20000`. This comes from the failed manual `nsmbtinycore` run where ARM9 aborted with `sp=0x027E38F4`, which mirrors into Main RAM near `0x023E38F4`.
+- This is intentionally not a full savestate and not full Main RAM. It is a small static actor/global/stack snapshot plus process-list-derived live objects and tiny core state.
+
+Manual-log classification:
+
+- `logs/nsmb-mvl-manual-local-20260601-212956`: user-reported frozen Plan-D-like run. New analyzer classifies it as `abort`; client has `ARM9: prefetch abort (frame=2077 pc=00000004 ...)`, host `maxConsecutiveSlowFrames=409`, client `maxConsecutiveSlowFrames=251`.
+- `logs/nsmb-mvl-manual-local-20260601-213213`: user-reported non-frozen baseline run. Analyzer classifies it as `ok`; host/client `maxConsecutiveSlowFrames=4/4`.
+- Added `scripts/analyze-nsmb-mvl-rollback-log.ps1` so forced-close manual logs can be classified after the fact instead of being dismissed as only `missing frame limit`.
 
 Verification:
 
-- `logs/codex-delta-trace-proclist-delta-noheap-2600-20260601`: with process-list + delta ranges but no actorArena, uncovered pages dropped to 6 ranges. This identified the actor arena gap.
-- `logs/codex-nsmbtinycore-proclist-delta-noheap-compare-2600-20260601`: without actorArena, `nsmbtinycore` failed with client data abort at frame 2225.
-- `logs/codex-nsmbtinycore-proclist-arena-noheap-compare-2600-20260601`: actorArena candidate passed 2600F game-state comparison.
-- `logs/codex-nsmbtinycore-proclist-arena-noheap-stress-6000-20260601`: actorArena candidate passed 6000F stress with slow-run gate. Host/client `maxConsecutiveOver33=6/6`, active FPS around `48.6`, versus old `nsmbtinycore` host `maxConsecutiveOver33=2519`.
-- `logs/codex-nsmbtinycore-proclist-arena-noheap-compare-6000-20260601`: actorArena candidate passed 6000F game-state comparison.
-- `logs/codex-nsmbtinycore-proclist-arena-noheap-trace-2600-20260601`: checkpoint `bytesLast=269,895`, `saveAvgUs=206-208`, `restoreAvgUs=11.4-11.5ms`, `heapScan=0`, `procObjs=10-12`.
+- `logs/codex-nsmbcoreranges-proclist-arena-noheap-compare-6000-20260601`: same NSMB Main RAM ranges with full non-MainRAM core state passed 6000F. This suggests the old failure was not just actor range coverage; missing rollback state around stack/core interaction was plausible.
+- `logs/codex-tinycore-flag-probe-pred1-2400-20260601` and `logs/codex-tinycore-fullflag-probe-pred1-2400-20260601`: very aggressive prediction-probe-every-frame stress fails even for `coredelta`, so it is retained as an overload diagnostic, not a promotion gate.
+- `logs/codex-sweep-pred10-limit100-3600-20260601`: moderate prediction probe passed both `coredelta` and pre-stack actorArena candidate. `logs/codex-sweep-pred5-limit200-3600-20260601` and `logs/codex-sweep-pred8-limit120-3600-20260601` fail even baseline, so they are too severe for current correctness gating.
+- `logs/codex-sweep-tinycore-arena-stack-6000-20260601`: stack-augmented candidate passed 6000F move+jump+dash stress with slow-run gate.
+- `logs/codex-sweep-tinycore-arena-stack-trace-2600-20260601`: stack-augmented candidate passed with trace. Checkpoint `bytesLast=398,399`, `saveAvgUs=192`, `restoreAvgUs=9,519`, `tinyFlags=0x200`, `actorArena=1`, `arm9Stack=1`, `heapScan=0`.
+- `logs/codex-sweep-tinycore-arena-stack-pred10-limit100-3600-20260601`: stack-augmented candidate passed moderate prediction-probe stress.
+- `logs/codex-sweep-tinycore-arena-stack-death-skipprobe-4200-20260601`: stack-augmented candidate passed the Luigi death/Mario continues route with game-state comparison.
 
 Current conclusion:
 
-- This is now the best Plan-D-like candidate seen so far: roughly 270KB checkpoints, no heap scan, and it passes the new consecutive-slow-frame gate.
-- It still has single-frame spikes around 300ms in the two-instance stress environment, so it is not final. But the previous "solid 10-20fps" failure is no longer reproduced in the 6000F automated stress route.
-- Manual explicit `-RollbackBackend nsmbtinycore` under `-LowLatencyRollback` now uses actorArena/processList/noHeap by default.
+- The old 270KB actorArena/noHeap candidate is not trusted for manual play because the user reproduced a freeze and the log shows ARM9 abort plus long slow-run.
+- The current candidate is about 398KB, still much lighter than the 2.5MB `coredelta` baseline, and now includes the stack range implicated by the abort. It is promoted only as an experimental manual candidate, not final.
+- Manual explicit `-RollbackBackend nsmbtinycore` under `-LowLatencyRollback` now uses actorArena/processList/ARM9-stack/noHeap by default.
 
 ## 2026-06-01 prior automation state - slow-run detection
 

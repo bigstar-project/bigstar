@@ -9,7 +9,14 @@ param(
     [string]$LogRoot = "logs\nsmb-mvl-rollback-candidate-sweep",
     [double]$SlowFrameThresholdMs = 33.0,
     [int]$MaxConsecutiveSlowFrames = 120,
+    [int]$RollbackPredictionProbeModulo = 0,
+    [int]$RollbackPredictionProbeOffset = 0,
+    [int]$RollbackPredictionProbeLimit = -1,
+    [int]$RollbackPredictionProbeStartFrame = 0,
+    [int]$RollbackPredictionProbeEndFrame = 0,
+    [string]$RollbackPredictionProbeKeyMask = "",
     [switch]$NoGameStateComparison,
+    [switch]$SkipMovementProbe,
     [switch]$InputNetplayTrace
 )
 
@@ -26,6 +33,7 @@ $envKeys = @(
     "MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE",
     "MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES",
     "MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES",
+    "MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE",
     "MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES",
     "MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES",
     "MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_INTERVAL",
@@ -121,6 +129,7 @@ $candidates = @(
         Env = @{
             MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
             MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
             MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
             MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
             MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
@@ -199,12 +208,25 @@ foreach ($item in $candidates) {
         MaxConsecutiveSlowFrames = $MaxConsecutiveSlowFrames
         LogDir = $candidateLogRel
     }
+    if ($RollbackPredictionProbeModulo -gt 0) {
+        $candidateParams.RollbackPredictionProbeModulo = $RollbackPredictionProbeModulo
+        $candidateParams.RollbackPredictionProbeOffset = $RollbackPredictionProbeOffset
+        $candidateParams.RollbackPredictionProbeLimit = $RollbackPredictionProbeLimit
+        $candidateParams.RollbackPredictionProbeStartFrame = $RollbackPredictionProbeStartFrame
+        $candidateParams.RollbackPredictionProbeEndFrame = $RollbackPredictionProbeEndFrame
+        if ($RollbackPredictionProbeKeyMask -ne "") {
+            $candidateParams.RollbackPredictionProbeKeyMask = $RollbackPredictionProbeKeyMask
+        }
+    }
     if ($InputNetplayTrace) {
         $candidateParams.InputNetplayTrace = $true
     }
     if ($NoGameStateComparison) {
         $candidateParams.NoGameStateTrace = $true
         $candidateParams.SkipGameStateComparison = $true
+    }
+    if ($SkipMovementProbe) {
+        $candidateParams.SkipMovementProbe = $true
     }
 
     $errorText = ""
