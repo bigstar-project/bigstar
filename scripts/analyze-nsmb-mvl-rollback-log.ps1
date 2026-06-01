@@ -188,10 +188,10 @@ foreach ($role in @("host", "client")) {
         $status = "stalled"
     } elseif ($slowRun -gt $MaxConsecutiveSlowFrames) {
         $status = "perf-fail"
-    } elseif ($maxPlateau.Rows -ge $FreezeMinRows) {
-        $status = "freeze-suspect"
     } elseif ($wrapperFailure) {
         $status = "failed"
+    } elseif ($maxPlateau.Rows -ge $FreezeMinRows) {
+        $status = "freeze-suspect"
     }
 
     $roleRows += [pscustomobject]@{
@@ -218,10 +218,10 @@ if ($roleRows.Status -contains "abort") {
     $overall = "stalled"
 } elseif ($roleRows.Status -contains "perf-fail") {
     $overall = "perf-fail"
-} elseif ($roleRows.Status -contains "freeze-suspect") {
-    $overall = "freeze-suspect"
 } elseif ($roleRows.Status -contains "failed") {
     $overall = "failed"
+} elseif ($roleRows.Status -contains "freeze-suspect") {
+    $overall = "freeze-suspect"
 }
 
 Write-Host "rollback log analysis: status=$overall log=$root"

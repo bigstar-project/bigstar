@@ -30,6 +30,7 @@ Verification:
   - `logs/codex-playerstate-cache-drift-gate-interval2-predict1-2400-20260602`: 2400F passed with movement/drift gate; host/client active FPS about `59.5`.
   - `logs/codex-playerstate-cache-drift-gate-interval2-predict1-4200-20260602`: 4200F passed with movement/drift gate; host/client active FPS about `59.5`, max frame `33.224/32.548ms`, `over33ms=0/0`, max drift X/Y `12352/16768`.
   - `logs/codex-playerstate-cache-luigi-death-3600-20260602`: Luigi death/respawn-style probe passed with player death and pipe visibility checks; analyzer status `ok`, active FPS about `59.6`, max frame `40.399/45.362ms`, `over33ms=4/4`, max consecutive slow frames `1/1`.
+- Star/result-continuation route is not a useful actor-snapshot correctness failure yet: `logs/codex-playerstate-cache-star-result-continue-9000-20260602` reached result/restart and held about `59.6fps`, but `RequireStarPickup` failed because star counters stayed `0/0`. Existing baseline `logs/codex-rollback-baseline-starcollect-6200-skipmove-20260601` shows the same `result ... stars=0/0 collected=0/0`, so this route/check needs cleanup before being used as a blocker for actor snapshot.
 - The previous full/core rollback issue is still reproduced in logs: rollback/resim paths can spike into hundreds of ms when many inputs arrive or forced delay causes repeated rollback. The actor snapshot path avoids that mechanism entirely.
 
 Current blocker / caveat:
@@ -39,7 +40,8 @@ Current blocker / caveat:
 
 Next actions:
 
-- Stress the cached actor snapshot route with star/result-continuation scripts and manual play commands, keeping `-MaxActiveFrameMs`, `-MaxActiveFrameOver33ms`, `-MaxConsecutiveSlowFrames`, and the actor drift gate enabled.
+- Clean up the star/result-continuation route so it asserts the actual winner/result transition instead of relying on star counters that baseline does not update.
+- Stress the cached actor snapshot route with manual play commands, keeping `-MaxActiveFrameMs`, `-MaxActiveFrameOver33ms`, `-MaxConsecutiveSlowFrames`, and the actor drift gate enabled.
 - Investigate which non-player globals must be added next for result/death/respawn correctness, without falling back to full savestate or full CPU rollback.
 - Tighten drift thresholds after more route coverage; current permissive gate is meant to catch gross desync/freeze without rejecting normal one-frame timing offset.
 
