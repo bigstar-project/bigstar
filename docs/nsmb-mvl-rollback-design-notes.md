@@ -1,5 +1,29 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
+## 2026-06-01 current direction - ROM/memory analysis and spike-aware validation
+
+方針を `coredelta` 固定ではなく、案D寄りのROM/メモリ解析で正しい軽量snapshotを作る方向へ戻した。`coredelta` は引き続き安全基準として残すが、軽量化候補の検証は `coredelta` の `MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE=1` で実際に変化したMain RAM pageを取り、既存NSMB range候補で未カバーのpageを集計して進める。
+
+追加した検証/解析:
+
+- `NSMB Test: active frame timing ... avgFrameMs/maxFrameMs/over16ms/over25ms/over33ms` を終了時に出すようにした。平均FPSだけでは見えないガクッとした落ち込みを検出するため。`MELONDS_NSML_FPS_SPIKE_TRACE=1` と `MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS` で逐次 `NSMB PerfSpike` も出せる。
+- `scripts/run-nsmb-mvl-split-local-input-smoke.ps1` に `-MaxActiveFrameMs` / `-MaxActiveFrameOver25ms` / `-MaxActiveFrameOver33ms` を追加し、FPS平均だけでなく瞬間dropをgateできるようにした。
+- `scripts/analyze-nsmb-rollback-delta-pages.ps1` を追加。`NSMB RollbackDeltaPagesUncovered` を集計し、未カバーrangeを頻度順に出す。
+
+delta-page解析結果:
+
+- `logs/codex-rollback-delta-page-trace-knownranges-990-2600-20260601`: 既知range入りでも `uncoveredFrames=163`, `ranges=64`。上位は `0x02190400`, `0x021B4F00`, `0x02095600`, `0x0208FA00`, `0x0229BD00`, `0x02350E00` など。
+- 上位rangeを `AddNSMBRollbackDeltaDiscoveredRanges` に追加後、`logs/codex-rollback-delta-page-trace-expandedranges-v2-990-2600-20260601` は `summaries=402`, `uncoveredFrames=0`, `ranges=0`。少なくとも990-2600Fの移動+ジャンプ+ダッシュstressでは、既知range候補が `coredelta` 変更pageを覆うところまで来た。
+
+拡張rangeでの `nsmbcoreranges` 再検証:
+
+- `logs/codex-nsmbcoreranges-expandedranges-stress-compare-2600-20260601`: `nsmbcoreranges` / `InputDelayFrames=0` / move+jump+dash stress / game-state比較ありで2600F通過。checkpointは約 `2,559,101` bytes、saveAvgUsは約 `5.57ms`、restoreAvgUsは約 `12.4-12.8ms`、active fpsは約 `53fps`。
+- `logs/codex-nsmbcoreranges-expandedranges-stress-playlike-2600-20260601`: trace/game-stateなし寄りで2600F通過。active fpsは host/client `53.09/53.37`、throttleは0。ただしactive frame timingは `maxFrameMs=213-252ms`, `over25ms=84-87` で、ガクッとしたdropは残る。
+- 旧候補が停止した条件に近い `InputSendDelayFrames=6` / 6000F stress は `logs/codex-nsmbcoreranges-expandedranges-delay6-6000-20260601` で完走。以前の `arm9PC=0xffff0104` / `arm9SP=0x0` 停止はこのrange拡張では再発していない。active fpsは約 `45.5fps`、restoreOpsは host/client `116/111`、restoreAvgUsは約 `11.5-12.4ms`。重い遅延stressなので通常性能とは分ける。
+- 手動向け `-LowLatencyRollback` の既定も、調査方向に合わせて `nsmbcoreranges` + expanded delta-discovered rangesへ戻した。`coredelta` は安全な比較基準として残し、必要なら `-RollbackBackend coredelta` で明示する。
+
+Current blocker: 拡張 `nsmbcoreranges` は停止耐性は改善したが、checkpoint sizeが約2.56MBのままで、案Dの軽量actor/global snapshotとはまだ言えない。次は、今回追加したpageのうち本当に必要なactor/global/stack/scratchだけをROM/メモリ構造で分類し、ProcessList/global由来の小さいrangeへ置き換える。
+
 ## 2026-06-01 rollback stress update - authoritative current note
 
 現在の手動向け `-LowLatencyRollback` は、`nsmbcoreranges` から `coredelta` へ戻した。理由は、移動 + ジャンプ + ダッシュ同時入力の長時間stressで `nsmbcoreranges` が停止/timeoutし、client側 game-state trace では `arm9PC=0xffff0104` / `arm9SP=0x0` になったため。`nsmbcoreranges` はcore stateを過去へ戻す一方で Main RAM はNSMB推定rangeだけを戻すため、range外のスタック/一時領域/周辺Main RAMが現在フレームのまま残り、resimulate時にCPU状態とRAM状態が噛み合わなくなる可能性が高い。

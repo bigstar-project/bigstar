@@ -997,6 +997,17 @@ struct State
     melonDS::u32 ActiveTimerStartFrame[16] {};
     std::chrono::steady_clock::time_point ActiveTimerStart[16];
     melonDS::u32 ActiveFpsStartFrame = 0;
+    bool ActiveFrameTimingStarted[16] {};
+    std::chrono::steady_clock::time_point ActiveFrameLastTime[16];
+    melonDS::u32 ActiveFrameSamples[16] {};
+    unsigned long long ActiveFrameTotalUs[16] {};
+    unsigned long long ActiveFrameMaxUs[16] {};
+    melonDS::u32 ActiveFrameMaxFrame[16] {};
+    melonDS::u32 ActiveFrameOver16ms[16] {};
+    melonDS::u32 ActiveFrameOver25ms[16] {};
+    melonDS::u32 ActiveFrameOver33ms[16] {};
+    int ActiveFrameSpikeThresholdUs = 25000;
+    bool ActiveFrameSpikeTrace = false;
     int HashInterval = 60;
     bool HashEnabled = true;
     int TestWaitTimeoutMs = 5000;
@@ -2688,6 +2699,58 @@ void RecordRollbackCheckpointRestoreLocked(unsigned long long elapsedUs)
         G.RollbackCheckpointRestoreMaxUs = elapsedUs;
 }
 
+void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
+{
+    if (instanceID < 0 || instanceID >= 16 || !G.ActiveTimerStarted[instanceID])
+        return;
+
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    if (!G.ActiveFrameTimingStarted[instanceID])
+    {
+        G.ActiveFrameTimingStarted[instanceID] = true;
+        G.ActiveFrameLastTime[instanceID] = now;
+        return;
+    }
+
+    const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+        now - G.ActiveFrameLastTime[instanceID]).count();
+    G.ActiveFrameLastTime[instanceID] = now;
+    if (elapsed <= 0)
+        return;
+
+    const unsigned long long elapsedUs =
+        static_cast<unsigned long long>(elapsed);
+    G.ActiveFrameSamples[instanceID]++;
+    G.ActiveFrameTotalUs[instanceID] += elapsedUs;
+    if (elapsedUs > G.ActiveFrameMaxUs[instanceID])
+    {
+        G.ActiveFrameMaxUs[instanceID] = elapsedUs;
+        G.ActiveFrameMaxFrame[instanceID] = frame;
+    }
+    if (elapsedUs > 16667)
+        G.ActiveFrameOver16ms[instanceID]++;
+    if (elapsedUs > 25000)
+        G.ActiveFrameOver25ms[instanceID]++;
+    if (elapsedUs > 33334)
+        G.ActiveFrameOver33ms[instanceID]++;
+
+    if (G.ActiveFrameSpikeTrace && elapsedUs >= static_cast<unsigned long long>(G.ActiveFrameSpikeThresholdUs))
+    {
+        std::printf(
+            "NSMB PerfSpike: inst=%d frame=%u frameTimeUs=%llu thresholdUs=%d rollbackRestores=%u rollbackResims=%u saveMaxUs=%llu restoreMaxUs=%llu\n",
+            instanceID,
+            frame,
+            elapsedUs,
+            G.ActiveFrameSpikeThresholdUs,
+            G.RollbackRestoreCount,
+            G.RollbackResimulateCount,
+            G.RollbackCheckpointSaveMaxUs,
+            G.RollbackCheckpointRestoreMaxUs);
+        std::fflush(stdout);
+    }
+}
+
 void InvalidateMainRAMJIT(melonDS::NDS* nds, melonDS::u32 len)
 {
     if (!nds || len == 0)
@@ -2921,6 +2984,7 @@ void AddNSMBRollbackDeltaDiscoveredRanges(melonDS::NDS* nds, std::vector<Rollbac
 {
     // Experimental coverage from coredelta page traces around rollback mismatches.
     AddNSMBRollbackRange(nds, ranges, 0x02085200, 0x500);
+    AddNSMBRollbackRange(nds, ranges, 0x0203CF00, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02085B00, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02085C00, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02087600, 0x100);
@@ -2941,26 +3005,43 @@ void AddNSMBRollbackDeltaDiscoveredRanges(melonDS::NDS* nds, std::vector<Rollbac
     AddNSMBRollbackRange(nds, ranges, 0x02092B00, 0xC00);
     AddNSMBRollbackRange(nds, ranges, 0x02094200, 0x600);
     AddNSMBRollbackRange(nds, ranges, 0x02094800, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02094900, 0x1000);
     AddNSMBRollbackRange(nds, ranges, 0x02095000, 0x200);
     AddNSMBRollbackRange(nds, ranges, 0x02095200, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02095300, 0x300);
+    AddNSMBRollbackRange(nds, ranges, 0x02095600, 0xB00);
     AddNSMBRollbackRange(nds, ranges, 0x02095700, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02096100, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0208FA00, 0x400);
     AddNSMBRollbackRange(nds, ranges, 0x02129400, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0212A400, 0x300);
     AddNSMBRollbackRange(nds, ranges, 0x0212AD00, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x0212AE00, 0x200);
+    AddNSMBRollbackRange(nds, ranges, 0x0215C100, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02190400, 0x400);
     AddNSMBRollbackRange(nds, ranges, 0x02190500, 0x200);
     AddNSMBRollbackRange(nds, ranges, 0x02190900, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02190B00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02190C00, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02190D00, 0x200);
     AddNSMBRollbackRange(nds, ranges, 0x02191100, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02191300, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02191400, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B2600, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B2B00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B2E00, 0x900);
+    AddNSMBRollbackRange(nds, ranges, 0x021B3900, 0x300);
+    AddNSMBRollbackRange(nds, ranges, 0x021B4400, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021B4600, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B4700, 0x300);
+    AddNSMBRollbackRange(nds, ranges, 0x021B4500, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021B4A00, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021B4B00, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021B4E00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B4F00, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021B5000, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021B5300, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B5400, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021B5500, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021B6300, 0x300);
     AddNSMBRollbackRange(nds, ranges, 0x021B6600, 0x100);
@@ -2972,11 +3053,17 @@ void AddNSMBRollbackDeltaDiscoveredRanges(melonDS::NDS* nds, std::vector<Rollbac
     AddNSMBRollbackRange(nds, ranges, 0x021C1E00, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021C8400, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02288400, 0x1100);
+    AddNSMBRollbackRange(nds, ranges, 0x0229AB00, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x0229AC00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0229BC00, 0x400);
     AddNSMBRollbackRange(nds, ranges, 0x0229BF00, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x0229D800, 0x200);
+    AddNSMBRollbackRange(nds, ranges, 0x022A4300, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02315700, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0231B500, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x0234A300, 0x300);
-    AddNSMBRollbackRange(nds, ranges, 0x023FFC00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02350E00, 0x200);
+    AddNSMBRollbackRange(nds, ranges, 0x023FFC00, 0x400);
 }
 
 void BuildNSMBRollbackDynamicRanges(melonDS::NDS* nds, std::vector<RollbackNSMBRangeEntry>& ranges)
@@ -11113,6 +11200,9 @@ void InitFromEnvironment()
     G.TestInstanceCount = std::clamp(EnvInt("MELONDS_NSML_TEST_INSTANCES", 1), 1, 16);
     G.ActiveFpsStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_ACTIVE_FPS_START_FRAME", 0)));
+    G.ActiveFrameSpikeThresholdUs = std::clamp(
+        EnvInt("MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS", 25), 1, 1000) * 1000;
+    G.ActiveFrameSpikeTrace = EnvFlag("MELONDS_NSML_FPS_SPIKE_TRACE");
     G.FrameBarrierEnabled = EnvFlag("MELONDS_NSML_FRAME_BARRIER");
     G.SerialRunEnabled = EnvFlag("MELONDS_NSML_SERIAL_RUN");
     G.HashEnabled = !EnvFlag("MELONDS_NSML_DISABLE_HASH");
@@ -12602,6 +12692,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                 G.ActiveTimerStart[instanceID] = std::chrono::steady_clock::now();
             }
         }
+        RecordActiveFrameTiming(instanceID, logFrame);
     }
 
     WaitAtFrameBarrier(GAfterFrameBarrier, instanceID, logFrame, "after");
@@ -12825,6 +12916,26 @@ bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
                 activeFrames,
                 static_cast<long long>(activeElapsedMs),
                 activeFps);
+            const melonDS::u32 timingSamples = G.ActiveFrameSamples[instanceID];
+            if (timingSamples > 0)
+            {
+                const double avgFrameMs =
+                    static_cast<double>(G.ActiveFrameTotalUs[instanceID]) /
+                    static_cast<double>(timingSamples) / 1000.0;
+                const double maxFrameMs =
+                    static_cast<double>(G.ActiveFrameMaxUs[instanceID]) / 1000.0;
+                std::printf(
+                    "NSMB Test: active frame timing startFrame=%u samples=%u avgFrameMs=%.3f maxFrameMs=%.3f maxFrame=%u over16ms=%u over25ms=%u over33ms=%u spikeThresholdMs=%.3f\n",
+                    G.ActiveTimerStartFrame[instanceID],
+                    timingSamples,
+                    avgFrameMs,
+                    maxFrameMs,
+                    G.ActiveFrameMaxFrame[instanceID],
+                    G.ActiveFrameOver16ms[instanceID],
+                    G.ActiveFrameOver25ms[instanceID],
+                    G.ActiveFrameOver33ms[instanceID],
+                    static_cast<double>(G.ActiveFrameSpikeThresholdUs) / 1000.0);
+            }
         }
         if (G.Enabled && G.InputNetplayOnly)
         {

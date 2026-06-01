@@ -35,6 +35,9 @@ param(
     [double]$TargetFps = 0.0,
     [switch]$NoDrawScreen,
     [switch]$NoAudioSync,
+    [double]$MaxActiveFrameMs = 0.0,
+    [int]$MaxActiveFrameOver25ms = -1,
+    [int]$MaxActiveFrameOver33ms = -1,
     [switch]$UseLanMP,
     [switch]$ForceStageActorFreezeFlag,
     [switch]$ForceStageActorFreezeFlagHostOnly,
@@ -218,6 +221,10 @@ $hostText = if (Test-Path $hostOut) { Get-Content $hostOut -Raw } else { "" }
 $clientText = if (Test-Path $clientOut) { Get-Content $clientOut -Raw } else { "" }
 $hostText = [string]$hostText
 $clientText = [string]$clientText
+$hostMelonOut = Join-Path $hostLog "host.stdout.txt"
+$clientMelonOut = Join-Path $clientLog "client.stdout.txt"
+$hostMelonText = if (Test-Path $hostMelonOut) { [string](Get-Content $hostMelonOut -Raw) } else { "" }
+$clientMelonText = if (Test-Path $clientMelonOut) { [string](Get-Content $clientMelonOut -Raw) } else { "" }
 $hostExitFailed = $null -ne $hostProc.ExitCode -and $hostProc.ExitCode -ne 0
 $clientExitFailed = $null -ne $clientProc.ExitCode -and $clientProc.ExitCode -ne 0
 if ($hostExitFailed -or
@@ -229,6 +236,42 @@ if ($hostExitFailed -or
         if (Test-Path $path) { $details += Get-Content $path -Raw }
     }
     throw "split local-input child smoke failed: hostExit=$($hostProc.ExitCode) clientExit=$($clientProc.ExitCode) $($details -join "`n")"
+}
+
+function Assert-ActiveFrameTiming {
+    param(
+        [string]$Role,
+        [string]$Text
+    )
+
+    $line = ($Text -split "`r?`n") |
+        Where-Object { $_ -match "NSMB Test: active frame timing" } |
+        Select-Object -Last 1
+    if ($null -eq $line) {
+        throw "$Role missing active frame timing line"
+    }
+
+    if ($line -notmatch "maxFrameMs=([0-9.]+).*over25ms=([0-9]+).*over33ms=([0-9]+)") {
+        throw "$Role malformed active frame timing line: $line"
+    }
+
+    $maxFrameMs = [double]$Matches[1]
+    $over25ms = [int]$Matches[2]
+    $over33ms = [int]$Matches[3]
+    if ($MaxActiveFrameMs -gt 0.0 -and $maxFrameMs -gt $MaxActiveFrameMs) {
+        throw "$Role active frame spike too high: maxFrameMs=$maxFrameMs limit=$MaxActiveFrameMs"
+    }
+    if ($MaxActiveFrameOver25ms -ge 0 -and $over25ms -gt $MaxActiveFrameOver25ms) {
+        throw "$Role active frame over25ms too high: over25ms=$over25ms limit=$MaxActiveFrameOver25ms"
+    }
+    if ($MaxActiveFrameOver33ms -ge 0 -and $over33ms -gt $MaxActiveFrameOver33ms) {
+        throw "$Role active frame over33ms too high: over33ms=$over33ms limit=$MaxActiveFrameOver33ms"
+    }
+}
+
+if ($MaxActiveFrameMs -gt 0.0 -or $MaxActiveFrameOver25ms -ge 0 -or $MaxActiveFrameOver33ms -ge 0) {
+    Assert-ActiveFrameTiming -Role "host" -Text $hostMelonText
+    Assert-ActiveFrameTiming -Role "client" -Text $clientMelonText
 }
 
 if ($NoGameStateTrace -or $SkipGameStateComparison) {
