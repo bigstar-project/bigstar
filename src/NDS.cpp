@@ -1171,6 +1171,10 @@ bool NDS::DoRollbackTinyCoreSavestate(Savestate* file, u32 requestedTinyCoreFlag
     constexpr u32 kRollbackTinyCoreWifi = 1 << 3;
     constexpr u32 kRollbackTinyCoreCart = 1 << 4;
     constexpr u32 kRollbackTinyCoreMicSpiRtc = 1 << 5;
+    constexpr u32 kRollbackTinyCoreGPUPaletteOAM = 1 << 6;
+    constexpr u32 kRollbackTinyCoreGPUVRAM = 1 << 7;
+    constexpr u32 kRollbackTinyCoreGPU3D = 1 << 8;
+    constexpr u32 kRollbackTinyCoreGPU3DLight = 1 << 9;
 
     file->VarArray(SharedWRAM, SharedWRAMSize);
     file->VarArray(ARM7WRAM, ARM7WRAMSize);
@@ -1262,9 +1266,14 @@ bool NDS::DoRollbackTinyCoreSavestate(Savestate* file, u32 requestedTinyCoreFlag
 
     if (tinyCoreFlags & kRollbackTinyCoreFullGPU)
         GPU.DoSavestate(file);
-    else if (tinyCoreFlags & kRollbackTinyCoreGPU2DTiming)
-        GPU.DoRollbackTimingSavestate(file);
-
+    else if (tinyCoreFlags & (kRollbackTinyCoreGPU2DTiming
+        | kRollbackTinyCoreGPUPaletteOAM
+        | kRollbackTinyCoreGPUVRAM
+        | kRollbackTinyCoreGPU3D
+        | kRollbackTinyCoreGPU3DLight))
+    {
+        GPU.DoRollbackSubsetSavestate(file, tinyCoreFlags);
+    }
     if (tinyCoreFlags & kRollbackTinyCoreSPU)
         SPU.DoSavestate(file);
     if (tinyCoreFlags & kRollbackTinyCoreMicSpiRtc)

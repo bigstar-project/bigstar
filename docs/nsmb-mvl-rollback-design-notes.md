@@ -47,22 +47,26 @@ Verification:
 - `nsmbtinycore` backendを追加した。NSMB range snapshotに、CPU/timer/scheduler/DMA/IRQ/IPC/WRAMなどの小さいcore stateだけを足す実験用backendで、通常savestate互換からさらに離れて案Dへ寄せるための切り分け。
 - `nsmbtinycore + delta-discovered ranges` は checkpoint size 約`238KB`まで下がったが、1290フレームで `playerActor0Y` が不一致になった。GPU/SPU等の大きいdevice stateを完全に捨てるにはまだ足りない。
 - `MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS=1`（GPU timing/2D registerだけ追加）でも1290フレームで不一致。`=2`（full GPU追加）は1950フレームまで進んで `playerActor0X` 不一致になった。`=6`（full GPU+SPU追加）は `logs/codex-rollback-nsmbtinycore-fullgpu-spu-gamestate-2600-20260601` で2600-frame smokeを通過したが、checkpoint sizeは約`2.49MB`で `nsmbcoreranges` から約50KBしか減らない。
+- GPU subset診断を追加し、`MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS` の高位bitで palette/OAM、VRAM、full GPU3D、light GPU3D を個別保存できるようにした。
+- `0x0C4`（SPU + palette/OAM + VRAM）は `logs/codex-rollback-nsmbtinycore-gpuvram-spu-gamestate-2600-20260601` で1620フレーム `movingHazardX` 不一致。sizeは約`916KB`で軽いが、GPU3D状態なしでは不足。
+- `0x104`（full GPU3D + SPU、VRAM/palette/OAMなし）は `logs/codex-rollback-nsmbtinycore-gpu3d-spu-novram-nopaloam-gamestate-2600-20260601` で2600-frame smoke通過。sizeは約`1.81MB`。
+- `0x200`（light GPU3Dのみ、SPU/VRAM/palette/OAMなし）は `logs/codex-rollback-nsmbtinycore-gpu3dlight-nospu-fixed-gamestate-2600-20260601` で2600-frame smoke通過。checkpoint sizeは `247,355` bytes、save averageは約`7.9ms`。light GPU3DはFIFO、matrix、pipeline、register系を戻すが、VertexRAM/PolygonRAM/RenderPolygonRAMは戻さない。
+- 人工送信遅延/jitter付きの `0x200` 追加検証 `logs/codex-rollback-nsmbtinycore-gpu3dlight-delayjitter-gamestate-2600-20260601` も2600-frame smoke通過。client側で `restoreOps=1`、`resims=1` を踏み、sizeは同じ `247,355` bytes、restore averageは約`8.2ms`。
 
 Current blocker:
 
-- 現在の実装は完全な案Dではなく、案D寄りのNSMB range snapshotに最小core stateを足して、どの非RAM状態が本当に必要かを測っている段階。`nsmbranges` は案Dに最も近いがまだ通らず、`nsmbtinycore` は案Dと案Cの中間。
-- `nsmbtinycore` の最小coreだけなら約`238KB`で軽いが、1290フレームで壊れる。full GPUを足すと1950フレームまで進み、さらにSPUを足すと2600フレームを通るため、現時点の大きい残りはGPU/SPU state。
-- GPU timing/2D registerだけでは1290フレーム不一致を直せない。GPU側はVRAM/palette/OAMまたは3D/FIFO/renderer周辺のどこが必要かをさらに分ける必要がある。
-- SPUを丸ごと外すと1950フレームで不一致になる。音そのものより、SPU DMA/IRQ/timing/buffer side effectがゲーム進行へ影響している可能性があるため、full SPU stateを小さいtiming/control snapshotへ分割する必要がある。
+- 現在の最有力は `nsmbtinycore + delta-discovered ranges + light GPU3D`。これは完全な案D actor/global snapshotではないが、DS全体savestateではなく、NSMB range snapshotにCPU/timer/scheduler/DMA/IRQ/IPC/WRAMとGPU3Dの小さい進行状態だけを足す形なので、かなり案D寄り。
+- 2600-frame synthetic routeでは `247,355` bytesまで下がった。まだ実行時diffで見つけたMain RAM rangeに依存しており、ROM静的解析でactor/global構造を完全確定した状態ではない。
+- GPU3D lightで通る一方、GPU3Dなしの約`916KB`構成は1620フレームで壊れる。戻すべきなのは描画メモリ本体ではなく、GPU3D FIFO/matrix/pipeline/register系の進行状態らしい。
+- SPUは今回の最小候補 `0x200` では不要だった。前のfull GPUのみ失敗との違いは再確認余地があるが、少なくとも現候補ではSPU保存は必須ではない。
 - delta/restore diffで発見した範囲は実行時メモリ解析ベースであり、ROM静的解析でactor/global構造を確定した状態ではない。
 - Real WAN jitter patterns and longer sessions are not measured yet.
 
 Next actions:
 
-- 次はSPUをfull savestateではなく、channel control、capture/timing、IRQ/DMAに効く最小状態へ分割し、`nsmbtinycore + full GPU + small SPU` で1950フレームを越えられるか測る。
-- GPU側は、full GPUが1290フレーム不一致を直す一方でtiming/2D registerだけでは直らないため、VRAM/palette/OAM/GPU3D/FIFOのどれが必要かを段階的に切る。
-- ROM静的解析はまだ本格化していない。必要に応じて、実行時diffで出たglobal/actor候補アドレスをA2DJ symbol portやROM側参照元へ戻して確認する。
-- `nsmbcoreranges` と `nsmbtinycore + full GPU+SPU` の2600-frame通過は有効な中間地点として維持しつつ、sub-MB化はGPU/SPU stateを小さくできるかで判断する。
+- 次は `0x200` 候補をより長いframe数、別input route、rollback restore probeで検証する。人工遅延/jitterでは復元経路を1回踏んで通ったが、復元回数はまだ少ない。
+- 並行して、delta-discovered rangeをROM/メモリ解析へ戻し、`戻すべきNSMB global/actor` と `毎フレーム再注入されるvolatile input/net packet` を分ける。
+- `nsmbranges` 単体の案D完全形へ寄せるには、light GPU3Dで戻しているFIFO/matrix/pipeline/register相当のうち、ゲーム進行に本当に効く要素をさらに削る。
 
 この文書は、Mario vs Luigi online PoCで検討したrollback方式の議論を、後で再開できるように分離して残す設計メモ。
 

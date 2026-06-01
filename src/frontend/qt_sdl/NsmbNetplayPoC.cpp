@@ -11322,7 +11322,7 @@ void InitFromEnvironment()
     if ((G.RollbackMainRAMPageSize & (G.RollbackMainRAMPageSize - 1)) != 0)
         G.RollbackMainRAMPageSize = 4096;
     G.RollbackCoreSkipMask = std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK", 0), 0, 31);
-    G.RollbackTinyCoreFlags = std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS", 0), 0, 255);
+    G.RollbackTinyCoreFlags = std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS", 0), 0, 2047);
     G.RollbackNSMBWideRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_WIDE_RANGES");
     G.RollbackNSMBDeltaDiscoveredRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES");
     G.RollbackNSMBSkipInputRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_SKIP_INPUT_RANGES");
