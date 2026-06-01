@@ -7,6 +7,8 @@ param(
     [string]$HostInputScript = "tests\nsmb_us_direct_mvl_stress_host_move_jump_dash.inputs",
     [string]$ClientInputScript = "tests\nsmb_us_direct_mvl_stress_client_move_jump_dash.inputs",
     [string]$LogRoot = "logs\nsmb-mvl-rollback-candidate-sweep",
+    [double]$SlowFrameThresholdMs = 33.0,
+    [int]$MaxConsecutiveSlowFrames = 120,
     [switch]$NoGameStateComparison,
     [switch]$InputNetplayTrace
 )
@@ -57,7 +59,7 @@ function Get-CandidateStatus {
         $combined += (Get-Content $RunLog -Raw -ErrorAction SilentlyContinue)
     }
     if (Test-Path $CandidateLog) {
-        $matches = Select-String -Path (Join-Path $CandidateLog "*\*.txt") -Pattern "stalled|timed out|prefetch abort|data abort|gameplay mismatch|active frame exceeded|active frame spike too high|over25ms exceeded|over33ms exceeded" -ErrorAction SilentlyContinue
+        $matches = Select-String -Path (Join-Path $CandidateLog "*\*.txt") -Pattern "stalled|timed out|prefetch abort|data abort|gameplay mismatch|active frame exceeded|active frame spike too high|over25ms exceeded|over33ms exceeded|consecutive slow frames too high" -ErrorAction SilentlyContinue
         foreach ($match in $matches) {
             $combined += "`n$($match.Line)"
         }
@@ -67,7 +69,7 @@ function Get-CandidateStatus {
     if ($combined -match "prefetch abort|data abort") { return "abort" }
     if ($combined -match "gameplay mismatch") { return "mismatch" }
     if ($combined -match "timed out|missing frame limit") { return "timeout" }
-    if ($combined -match "active frame exceeded|active frame spike too high|over25ms exceeded|over33ms exceeded") { return "perf-fail" }
+    if ($combined -match "active frame exceeded|active frame spike too high|over25ms exceeded|over33ms exceeded|consecutive slow frames too high") { return "perf-fail" }
     if ($ErrorText) { return "failed" }
     return "passed"
 }
@@ -177,6 +179,8 @@ foreach ($item in $candidates) {
         AllowJit = $true
         RollbackSettleFrames = 8
         MaxActiveFrameMs = 1000
+        SlowFrameThresholdMs = $SlowFrameThresholdMs
+        MaxConsecutiveSlowFrames = $MaxConsecutiveSlowFrames
         LogDir = $candidateLogRel
     }
     if ($InputNetplayTrace) {

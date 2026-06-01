@@ -32,6 +32,8 @@ param(
     [int]$GameStateTraceEndFrame = 0,
     [switch]$GameStateTraceExtended,
     [switch]$InputNetplayTrace,
+    [switch]$TracePlayerLifeChanges,
+    [switch]$TracePlayerDefeated,
     [switch]$PerfBreakdown,
     [int]$PacketBridgeStartFrame = 840,
     [int]$MvlStage = -1,
@@ -100,6 +102,11 @@ if ($LowLatencyRollback) {
     if (-not $PSBoundParameters.ContainsKey('RollbackCheckpointInterval')) { $RollbackCheckpointInterval = 8 }
     if (-not $PSBoundParameters.ContainsKey('PacketBridgeStartFrame')) { $PacketBridgeStartFrame = 870 }
     if (-not $PSBoundParameters.ContainsKey('StallTimeoutMs')) { $StallTimeoutMs = 5000 }
+    if (-not $PSBoundParameters.ContainsKey('GameStateTrace')) { $GameStateTrace = $true }
+    if (-not $PSBoundParameters.ContainsKey('GameStateTraceInterval')) { $GameStateTraceInterval = 15 }
+    $GameStateTraceExtended = $true
+    $TracePlayerLifeChanges = $true
+    $TracePlayerDefeated = $true
     $RollbackResimulate = $true
     $PerfBreakdown = $true
 }
@@ -179,6 +186,12 @@ if ($GameStateTrace) {
 }
 if ($InputNetplayTrace) {
     $common += "-InputNetplayTrace"
+}
+if ($TracePlayerLifeChanges) {
+    $common += "-TracePlayerLifeChanges"
+}
+if ($TracePlayerDefeated) {
+    $common += "-TracePlayerDefeated"
 }
 if ($NoFrameLimit) {
     $common += "-NoFrameLimit"
@@ -293,6 +306,7 @@ Write-Host "host wrapper pid=$($hostProc.Id) log=$hostLog"
 Write-Host "client wrapper pid=$($clientProc.Id) log=$clientLog"
 Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
 Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames packetBridgeStart=$PacketBridgeStartFrame renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$($PerfBreakdown.IsPresent)"
+Write-Host "trace gameState=$([bool]$GameStateTrace) interval=$GameStateTraceInterval extended=$([bool]$GameStateTraceExtended) lifeChanges=$([bool]$TracePlayerLifeChanges) defeated=$([bool]$TracePlayerDefeated)"
 Write-Host "mvlWins=$MvlWins mvlBigStars=$MvlBigStars mvlLives=$MvlLives mvlStage=$(if ($MvlStage -ge 0) { $MvlStage } else { 'auto/default' }) mvlSceneSettings=$(if ($MvlSceneSettings) { $MvlSceneSettings } else { 'derived' }) mvlCourseMode=$MvlCourseMode generateConfiguredRoms=$($GenerateMvlConfiguredRoms.IsPresent) mvlMatchSeed=$(if ($MvlMatchSeed) { $MvlMatchSeed } else { 'auto' })"
 if ($Rollback) {
     $backendLabel = if ($RollbackBackend -ne "") { $RollbackBackend } else { "savestate" }

@@ -528,6 +528,10 @@ param(
     [int]$CheckVsPipeRespawnVisibilityEndFrame = 0,
     [switch]$RequireStarPickup,
     [int]$RequireStarPickupPlayer = -1,
+    [switch]$RequirePlayerDeath,
+    [int]$RequirePlayerDeathPlayer = -1,
+    [int]$RequirePlayerDeathStartFrame = 0,
+    [int]$RequirePlayerDeathEndFrame = 0,
     [switch]$RequireResultScene,
     [switch]$RequireNoResultScene,
     [switch]$RequireMvlInitialSpawnState,
@@ -3938,6 +3942,43 @@ if ($RequireStarPickup) {
 
         if ($pickupRows.Count -eq 0) {
             throw "star pickup check failed for $($item.Role): player=$RequireStarPickupPlayer. See $($item.Path)"
+        }
+    }
+}
+
+if ($RequirePlayerDeath) {
+    if ($RequirePlayerDeathPlayer -lt -1 -or $RequirePlayerDeathPlayer -gt 1) {
+        throw "RequirePlayerDeathPlayer must be -1, 0, or 1"
+    }
+
+    foreach ($item in @($roleInfos | ForEach-Object { @{ Path = $_.GameState; Role = $_.Role } })) {
+        if (-not (Test-Path $item.Path)) {
+            throw "player death check requires game-state trace for $($item.Role): $($item.Path)"
+        }
+        $rows = @(Import-Csv $item.Path)
+        $deathRows = @($rows | Where-Object {
+            $frame = [int]$_.frame
+            if ($frame -lt $RequirePlayerDeathStartFrame) {
+                return $false
+            }
+            if ($RequirePlayerDeathEndFrame -gt 0 -and $frame -gt $RequirePlayerDeathEndFrame) {
+                return $false
+            }
+            if ($RequirePlayerDeathPlayer -eq 0) {
+                return (Convert-TraceHexToInt64 $_.player0Deaths) -gt 0 -or
+                    (Convert-TraceHexToInt64 $_.player0Dead) -ne 0
+            }
+            if ($RequirePlayerDeathPlayer -eq 1) {
+                return (Convert-TraceHexToInt64 $_.player1Deaths) -gt 0 -or
+                    (Convert-TraceHexToInt64 $_.player1Dead) -ne 0
+            }
+            return (Convert-TraceHexToInt64 $_.player0Deaths) -gt 0 -or
+                (Convert-TraceHexToInt64 $_.player1Deaths) -gt 0 -or
+                (Convert-TraceHexToInt64 $_.player0Dead) -ne 0 -or
+                (Convert-TraceHexToInt64 $_.player1Dead) -ne 0
+        })
+        if ($deathRows.Count -eq 0) {
+            throw "player death check failed for $($item.Role): player=$RequirePlayerDeathPlayer. See $($item.Path)"
         }
     }
 }

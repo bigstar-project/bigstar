@@ -1,6 +1,32 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
-## 2026-06-01 current automation state - stall watchdog and candidate sweep
+## 2026-06-01 current automation state - slow-run detection fixed
+
+User clarification: the star pickup/fall-death freeze was only an example from an automated run. The real bug was that automation treated runs as passed even when melonDS had become effectively stuck at very low FPS. The harness must detect both hard frame-progress stalls and long consecutive slow-frame runs.
+
+Implemented detection:
+
+- `scripts/run-nsmb-mvl-lan-route-smoke.ps1`: keeps the frame-progress watchdog through `-StallTimeoutMs`, `-StallStartFrame`, `-StallPollMs`, and stdout heartbeat parsing.
+- `scripts/run-nsmb-mvl-split-local-input-smoke.ps1`: now supports `-SlowFrameThresholdMs` and `-MaxConsecutiveSlowFrames`. It parses `NSMB PerfSpike` frame numbers and fails if frames over the threshold are consecutive for too long.
+- `scripts/run-nsmb-mvl-split-local-input-smoke.ps1`: enabling `-MaxConsecutiveSlowFrames` now forces `MELONDS_NSML_FPS_SPIKE_TRACE=1` and ensures the spike threshold is not higher than the slow-frame threshold, so the check cannot silently no-op.
+- `scripts/run-nsmb-mvl-rollback-candidate-sweep.ps1`: candidate sweep now passes the same consecutive-slow-frame gate and classifies it as `perf-fail`.
+- `scripts/run-nsmb-mvl-manual-local.ps1`: `-LowLatencyRollback` keeps heartbeat logging and now enables game-state/life/defeated traces by default so forced-close manual failures leave more useful logs.
+
+Latest verification:
+
+- PowerShell parse passed for the touched smoke/manual scripts.
+- The previous `nsmbtinycore` 6000F result is no longer valid as a pass. Re-run with `-MaxConsecutiveSlowFrames 120 -SlowFrameThresholdMs 33` failed correctly: `logs/codex-detect-slowrun-nsmbtinycore-dual-stress-6000-20260601`, host `maxConsecutiveOver33=2519`, client `maxConsecutiveOver33=708`, active FPS around 19.
+- `nsmbtinycore` with `RollbackCheckpointInterval=16` still failed: `logs/codex-detect-slowrun-nsmbtinycore-ckpt16-dual-stress-6000-20260601`, host `maxConsecutiveOver33=708`, active FPS around 19. Checkpoint frequency affects the symptom but does not fix it.
+- `coredelta-page256-k30` under the same 6000F move+jump+dash stress and the same slow-run gate passed: `logs/codex-detect-slowrun-coredelta-page256-k30-dual-stress-6000-20260601`, host/client `maxConsecutiveOver33=2/3`, active FPS around 51.
+
+Current conclusion:
+
+- The old automation was wrong: average FPS and frame-limit completion were insufficient. Consecutive slow-frame detection is now part of the pass/fail gate.
+- `coredelta-page256-k30` remains the practical correctness/perf baseline for zero-delay rollback. It is still heavy, but it does not show the long solid low-FPS failure in the current 6000F stress.
+- `nsmbtinycore + delta-discovered + light GPU3D` is not usable as current best despite being much lighter. It can degrade into long low-FPS runs without a hard process stall.
+- Next ROM/memory-analysis direction: keep `coredelta` as the baseline, use its page-delta coverage and the NSMB process/object list code to find a smaller actor/global range set, and do not promote a lightweight backend unless it passes the consecutive-slow-frame gate.
+
+## 2026-06-01 superseded automation note - stall watchdog and old sweep
 
 User requirement clarified: the next rollback work must not rely on manual observation of "melonDS froze". The test harness now has a frame-progress watchdog. When `-StallTimeoutMs` is set, melonDS emits `NSMB Heartbeat: inst=... frame=...` every 30 active frames, and the wrapper kills the child process if the latest observed frame stops advancing after `-StallStartFrame`. This catches the manual-style hard freeze even when the user has to force-close melonDS and the normal end-of-run logs are incomplete.
 

@@ -30,6 +30,23 @@ param(
     [switch]$NoGameStateTrace,
     [switch]$SkipGameStateComparison,
     [switch]$SkipMovementProbe,
+    [switch]$TracePlayerLifeChanges,
+    [switch]$TracePlayerDefeated,
+    [switch]$RequireStarPickup,
+    [int]$RequireStarPickupPlayer = -1,
+    [switch]$RequirePlayerDeath,
+    [int]$RequirePlayerDeathPlayer = -1,
+    [int]$RequirePlayerDeathStartFrame = 0,
+    [int]$RequirePlayerDeathEndFrame = 0,
+    [switch]$RequireResultScene,
+    [switch]$RequireNoResultScene,
+    [switch]$CheckMovingHazardProgressDuringDeath,
+    [int]$CheckMovingHazardProgressStartFrame = 0,
+    [int]$CheckMovingHazardProgressEndFrame = 0,
+    [int]$CheckMovingHazardProgressMinUniqueX = 3,
+    [switch]$CheckVsPipeRespawnVisibility,
+    [int]$CheckVsPipeRespawnVisibilityStartFrame = 0,
+    [int]$CheckVsPipeRespawnVisibilityEndFrame = 0,
     [switch]$NoFrameLimit,
     [switch]$FixedFrameTime,
     [double]$TargetFps = 0.0,
@@ -38,6 +55,8 @@ param(
     [double]$MaxActiveFrameMs = 0.0,
     [int]$MaxActiveFrameOver25ms = -1,
     [int]$MaxActiveFrameOver33ms = -1,
+    [double]$SlowFrameThresholdMs = 33.0,
+    [int]$MaxConsecutiveSlowFrames = -1,
     [int]$StallTimeoutMs = 0,
     [int]$StallStartFrame = 900,
     [switch]$UseLanMP,
@@ -53,6 +72,19 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($MaxConsecutiveSlowFrames -ge 0) {
+    $env:MELONDS_NSML_FPS_SPIKE_TRACE = "1"
+    $currentSpikeThreshold = 0.0
+    $hasSpikeThreshold = [double]::TryParse(
+        $env:MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS,
+        [System.Globalization.NumberStyles]::Float,
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [ref]$currentSpikeThreshold)
+    if (-not $hasSpikeThreshold -or $currentSpikeThreshold -le 0.0 -or $currentSpikeThreshold -gt $SlowFrameThresholdMs) {
+        $env:MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = $SlowFrameThresholdMs.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+    }
+}
 
 if ($LowDelayWan) {
     $InputDelayFrames = 4
@@ -138,6 +170,44 @@ if ($ForceStageActorFreezeFlag) {
 }
 if ($InputNetplayTrace) {
     $common += "-InputNetplayTrace"
+}
+if ($TracePlayerLifeChanges) {
+    $common += "-TracePlayerLifeChanges"
+}
+if ($TracePlayerDefeated) {
+    $common += "-TracePlayerDefeated"
+}
+if ($RequireStarPickup) {
+    $common += @("-RequireStarPickup", "-RequireStarPickupPlayer", "$RequireStarPickupPlayer")
+}
+if ($RequirePlayerDeath) {
+    $common += @(
+        "-RequirePlayerDeath",
+        "-RequirePlayerDeathPlayer", "$RequirePlayerDeathPlayer",
+        "-RequirePlayerDeathStartFrame", "$RequirePlayerDeathStartFrame",
+        "-RequirePlayerDeathEndFrame", "$RequirePlayerDeathEndFrame"
+    )
+}
+if ($RequireResultScene) {
+    $common += "-RequireResultScene"
+}
+if ($RequireNoResultScene) {
+    $common += "-RequireNoResultScene"
+}
+if ($CheckMovingHazardProgressDuringDeath) {
+    $common += @(
+        "-CheckMovingHazardProgressDuringDeath",
+        "-CheckMovingHazardProgressStartFrame", "$CheckMovingHazardProgressStartFrame",
+        "-CheckMovingHazardProgressEndFrame", "$CheckMovingHazardProgressEndFrame",
+        "-CheckMovingHazardProgressMinUniqueX", "$CheckMovingHazardProgressMinUniqueX"
+    )
+}
+if ($CheckVsPipeRespawnVisibility) {
+    $common += @(
+        "-CheckVsPipeRespawnVisibility",
+        "-CheckVsPipeRespawnVisibilityStartFrame", "$CheckVsPipeRespawnVisibilityStartFrame",
+        "-CheckVsPipeRespawnVisibilityEndFrame", "$CheckVsPipeRespawnVisibilityEndFrame"
+    )
 }
 if ($MvlMatchSeed -ne "") {
     $common += @("-MvlMatchSeed", $MvlMatchSeed)
@@ -271,9 +341,40 @@ function Assert-ActiveFrameTiming {
     if ($MaxActiveFrameOver33ms -ge 0 -and $over33ms -gt $MaxActiveFrameOver33ms) {
         throw "$Role active frame over33ms too high: over33ms=$over33ms limit=$MaxActiveFrameOver33ms"
     }
+
+    if ($MaxConsecutiveSlowFrames -ge 0) {
+        $maxRun = 0
+        $run = 0
+        $lastFrame = -1
+        foreach ($perfLine in ($Text -split "`r?`n")) {
+            if ($perfLine -notmatch "NSMB PerfSpike: .*frame=([0-9]+) frameTimeUs=([0-9]+)") {
+                continue
+            }
+
+            $frame = [int]$Matches[1]
+            $frameMs = [double]$Matches[2] / 1000.0
+            if ($frameMs -lt $SlowFrameThresholdMs) {
+                continue
+            }
+
+            if ($lastFrame -ge 0 -and $frame -eq ($lastFrame + 1)) {
+                $run++
+            } else {
+                $run = 1
+            }
+            $lastFrame = $frame
+            if ($run -gt $maxRun) {
+                $maxRun = $run
+            }
+        }
+
+        if ($maxRun -gt $MaxConsecutiveSlowFrames) {
+            throw "$Role consecutive slow frames too high: thresholdMs=$SlowFrameThresholdMs maxRun=$maxRun limit=$MaxConsecutiveSlowFrames"
+        }
+    }
 }
 
-if ($MaxActiveFrameMs -gt 0.0 -or $MaxActiveFrameOver25ms -ge 0 -or $MaxActiveFrameOver33ms -ge 0) {
+if ($MaxActiveFrameMs -gt 0.0 -or $MaxActiveFrameOver25ms -ge 0 -or $MaxActiveFrameOver33ms -ge 0 -or $MaxConsecutiveSlowFrames -ge 0) {
     Assert-ActiveFrameTiming -Role "host" -Text $hostMelonText
     Assert-ActiveFrameTiming -Role "client" -Text $clientMelonText
 }
