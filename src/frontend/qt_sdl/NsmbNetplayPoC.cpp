@@ -2762,6 +2762,7 @@ void AddNSMBRollbackDeltaDiscoveredRanges(melonDS::NDS* nds, std::vector<Rollbac
     // Experimental coverage from coredelta page traces around rollback mismatches.
     AddNSMBRollbackRange(nds, ranges, 0x02085200, 0x500);
     AddNSMBRollbackRange(nds, ranges, 0x02085B00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02085C00, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02087600, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02087700, 0x900);
     AddNSMBRollbackRange(nds, ranges, 0x02088000, 0x400);
@@ -2776,12 +2777,14 @@ void AddNSMBRollbackDeltaDiscoveredRanges(melonDS::NDS* nds, std::vector<Rollbac
     AddNSMBRollbackRange(nds, ranges, 0x0208B700, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x0208FB00, 0x300);
     AddNSMBRollbackRange(nds, ranges, 0x0208FE00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02090D00, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02092B00, 0xC00);
     AddNSMBRollbackRange(nds, ranges, 0x02094200, 0x600);
     AddNSMBRollbackRange(nds, ranges, 0x02094800, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02095000, 0x200);
     AddNSMBRollbackRange(nds, ranges, 0x02095200, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02095300, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02095700, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02096100, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02129400, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x0212AD00, 0x100);
@@ -2792,6 +2795,7 @@ void AddNSMBRollbackDeltaDiscoveredRanges(melonDS::NDS* nds, std::vector<Rollbac
     AddNSMBRollbackRange(nds, ranges, 0x02190D00, 0x200);
     AddNSMBRollbackRange(nds, ranges, 0x02191100, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02191300, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B4600, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021B4A00, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021B4B00, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021B4E00, 0x100);
@@ -2809,6 +2813,8 @@ void AddNSMBRollbackDeltaDiscoveredRanges(melonDS::NDS* nds, std::vector<Rollbac
     AddNSMBRollbackRange(nds, ranges, 0x021C8400, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02288400, 0x1100);
     AddNSMBRollbackRange(nds, ranges, 0x0229AC00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0229BF00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0229D800, 0x200);
     AddNSMBRollbackRange(nds, ranges, 0x0234A300, 0x300);
     AddNSMBRollbackRange(nds, ranges, 0x023FFC00, 0x100);
 }

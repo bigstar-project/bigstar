@@ -4,13 +4,15 @@
 
 ユーザー指示により、delay方式とのhybrid検討はいったん外し、軽いcheckpoint/snapshotとして現実的なrollback方式を実験している。
 
-現在の最有力候補は `nsmbtinycore + MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES=1 + MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS=0x200`。これはMain RAM全体や通常savestateではなく、NSMB向けMain RAM range snapshotに、CPU/timer/scheduler/DMA/IRQ/IPC/WRAMなどの小さいcore進行状態と、GPU3DのFIFO/matrix/pipeline/register系だけを足す方式。checkpoint sizeは最新range補強後で `251,095` bytesまでに収まり、`savestate` や `corelite` よりかなり実用寄り。
+現在の最有力候補は `nsmbtinycore + MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES=1 + MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS=0x200`。これはMain RAM全体や通常savestateではなく、NSMB向けMain RAM range snapshotに、CPU/timer/scheduler/DMA/IRQ/IPC/WRAMなどの小さいcore進行状態と、GPU3DのFIFO/matrix/pipeline/register系だけを足す方式。checkpoint sizeは最新range補強後で `252,915` bytesまでに収まり、`savestate` や `corelite` よりかなり実用寄り。
 
 ただし、まだ完全な「ROM解析でactor/global構造を静的に確定した案D」ではない。現在のrange setは、coredelta/restore diffと実行時Main RAM観測で見つけたNSMB global/actor/heap周辺を使っている。ROMの関数・構造体・actor tableを本格的に逆引きして、必要状態を名前付き構造として確定する作業はまだ途中ではなく、これからの段階。
 
-今回の追加実験では、`MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL` を追加し、動的object/range探索結果を数十フレーム単位でキャッシュできるようにした。`scanInterval=30` では、`0x200` 候補のcheckpoint bytesは約 `248-251KB`、保存平均時間は約 `7.9ms` から約 `0.39-0.41ms` まで下がった。
+今回の追加実験では、`MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL` を追加し、動的object/range探索結果を数十フレーム単位でキャッシュできるようにした。`scanInterval=30` では、`0x200` 候補のcheckpoint bytesは約 `253KB`、保存平均時間は約 `7.9ms` から約 `0.39-0.41ms` まで下がった。
 
 実rollback検証用に `MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_MODULO` も追加した。これはテスト時だけ予測remote inputを周期的に1bit外し、通常のprediction mismatch/resimulate経路を強制する。restore diffで見つけた未復元ページを追加し、game/global周辺とheap/object周辺を数KB補強した。
+
+`scripts/run-nsmb-mvl-split-local-input-smoke.ps1` には `-IgnoreSpeculativeInputFields` とsettle window検索を追加した。rollback中のgame-state traceは、次フレームでresimulateされるspeculative input状態を含むことがあるため、入力保持/pressedフィールドとsettle後のactor/object/score比較を分けて評価できるようにした。
 
 Verification:
 
@@ -20,7 +22,9 @@ Verification:
 - `logs/codex-rollback-nsmbtinycore-gpu3dlight-scan30-restoreprobe-2600-20260601`: 2600-frame smoke passed, but restore probe did not force restoreOps. その後、prediction probeで通常のmismatch/resimulate経路を強制できるようにした。
 - `logs/codex-rollback-nsmbtinycore-gpu3dlight-scan30-predprobe30-extra-gameglobals-2600-20260601`: prediction probe modulo 30で2600-frame game-state comparison passed。Host側 `restoreOps=2`, `resims=2`, `bytesLast=248,287`, `saveAvgUs=395`, `restoreAvgUs=7,512`。
 - `logs/codex-rollback-nsmbtinycore-gpu3dlight-scan30-predprobe10-more-diff-ranges-2600-20260601`: prediction probe modulo 10で2600-frame game-state comparison passed。Host側 `restoreOps=2`, `resims=2`, `bytesLast=251,095`, `saveAvgUs=391`, `restoreAvgUs=7,786`。
+- `logs/codex-rollback-nsmbtinycore-gpu3dlight-scan30-predprobe10-stablefields-extra4-3600-20260601`: prediction probe modulo 10 + stable-field comparison + settle window 60で3600-frame game-state comparison passed。Host側 `restoreOps=3`, `resims=3`, `bytesLast=252,915`, `saveAvgUs=398`, `restoreAvgUs=7,474`。Client側 `restoreOps=1`, `resims=1`, `saveAvgUs=398`, `restoreAvgUs=7,518`。
 - `logs/codex-rollback-nsmbtinycore-gpu3dlight-scan30-predprobe-all-more-diff-ranges-2600-20260601`: prediction probe modulo 1はframe 1890で `inputPlayer0Held` のspeculative差分によりwrapper比較が停止した。全予測外れstressは現実的WANより過剰だが、追加range探索用の負荷として残す。
+- `logs/codex-rollback-nsmbtinycore-gpu3dlight-scan30-predprobe-all-stablefields-settlewindow-extra3-2600-20260601`: prediction probe modulo 1 + stable-field comparisonでもframe 1950でplayer位置差が残った。全予測外れはまだ未達。
 
 Current blocker:
 
@@ -30,7 +34,7 @@ Current blocker:
 
 Next actions:
 
-- prediction probe modulo 10程度を継続stressとして使い、別input routeや長時間で `251KB / saveAvg 0.4ms / restoreAvg 8ms前後` が維持できるか測る。
+- prediction probe modulo 10程度を継続stressとして使い、別input routeやさらに長時間で `253KB / saveAvg 0.4ms / restoreAvg 7.5-8ms前後` が維持できるか測る。
 - delta-discovered rangeをROM/メモリ解析に戻し、NSMB global/actor/manager/camera/RNG相当へ名前付きで切り分ける。
 - `scanInterval` のデフォルト値を上げてよいかは、別ルート・長時間・spawn/despawn検証後に判断する。現時点ではデフォルト1で保守的にしている。
 

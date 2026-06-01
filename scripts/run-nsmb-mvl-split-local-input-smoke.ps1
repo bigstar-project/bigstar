@@ -24,6 +24,7 @@ param(
     [switch]$RollbackResimulate,
     [switch]$RollbackRestoreProbe,
     [int]$RollbackSettleFrames = 0,
+    [switch]$IgnoreSpeculativeInputFields,
     [int]$GameStateTraceInterval = 30,
     [switch]$NoGameStateTrace,
     [switch]$SkipGameStateComparison,
@@ -233,9 +234,8 @@ foreach ($row in $clientRows) {
     $clientByFrame[[int]$row.frame] = $row
 }
 
-$fields = @(
+$stableFields = @(
     "stageID", "stageGroup", "vsMode", "sceneCurrentSceneID",
-    "inputPlayer0Held", "inputPlayer1Held", "inputPlayer0Pressed", "inputPlayer1Pressed",
     "vsStarActorFound", "vsStarActorX", "vsStarActorY",
     "playerActor0Found", "playerActor0X", "playerActor0Y", "playerActor0Z",
     "playerActor1Found", "playerActor1X", "playerActor1Y", "playerActor1Z",
@@ -247,6 +247,12 @@ $fields = @(
     "playerActor0UpdateLocked", "playerActor1UpdateLocked",
     "playerActor0VisibleFlag", "playerActor1VisibleFlag"
 )
+$inputFields = @("inputPlayer0Held", "inputPlayer1Held", "inputPlayer0Pressed", "inputPlayer1Pressed")
+$fields = if ($IgnoreSpeculativeInputFields) {
+    $stableFields
+} else {
+    @($stableFields + $inputFields)
+}
 
 function RowAtFrame {
     param([object[]]$Rows, [int]$Frame)
@@ -273,12 +279,16 @@ foreach ($hostRow in $hostRows) {
     foreach ($field in $fields) {
         if ($hostRow.$field -ne $clientRow.$field) {
             if ($RollbackSettleFrames -gt 0) {
-                $settleFrame = $frame + $RollbackSettleFrames
-                $hostSettle = RowAtFrame -Rows $hostRows -Frame $settleFrame
-                $clientSettle = if ($clientByFrame.ContainsKey($settleFrame)) { $clientByFrame[$settleFrame] } else { $null }
-                if ($null -ne $hostSettle -and $null -ne $clientSettle -and
-                    (RowsMatchFields -HostRow $hostSettle -ClientRow $clientSettle -Fields $fields)) {
-                    Write-Host "rollback transient mismatch settled frame=$frame settleFrame=$settleFrame field=$field"
+                for ($settleFrame = $frame + 1; $settleFrame -le $frame + $RollbackSettleFrames; $settleFrame++) {
+                    $hostSettle = RowAtFrame -Rows $hostRows -Frame $settleFrame
+                    $clientSettle = if ($clientByFrame.ContainsKey($settleFrame)) { $clientByFrame[$settleFrame] } else { $null }
+                    if ($null -ne $hostSettle -and $null -ne $clientSettle -and
+                        (RowsMatchFields -HostRow $hostSettle -ClientRow $clientSettle -Fields $fields)) {
+                        Write-Host "rollback transient mismatch settled frame=$frame settleFrame=$settleFrame field=$field"
+                        break
+                    }
+                }
+                if ($settleFrame -le $frame + $RollbackSettleFrames) {
                     break
                 }
             }
