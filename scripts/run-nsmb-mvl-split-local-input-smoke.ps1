@@ -14,6 +14,8 @@ param(
     [int]$InputSendJitterFrames = 0,
     [switch]$InputUnreliable,
     [int]$InputBundleHistory = 0,
+    [switch]$NetworkPumpThread,
+    [int]$NetworkPumpSleepUs = 250,
     [switch]$LowDelayWan,
     [int]$InputDropModulo = 0,
     [int]$InputDropOffset = 0,
@@ -30,6 +32,7 @@ param(
     [int]$RollbackPredictionProbeStartFrame = 0,
     [int]$RollbackPredictionProbeEndFrame = 0,
     [string]$RollbackPredictionProbeKeyMask = "",
+    [int]$RollbackInputWaitUs = 0,
     [int]$RollbackSettleFrames = 0,
     [switch]$IgnoreSpeculativeInputFields,
     [int]$GameStateTraceInterval = 30,
@@ -119,6 +122,19 @@ if ($RollbackPredictionProbeModulo -gt 0) {
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_START_FRAME -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_END_FRAME -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_KEY_MASK -ErrorAction SilentlyContinue
+}
+
+if ($RollbackInputWaitUs -gt 0) {
+    $env:MELONDS_NSML_ROLLBACK_INPUT_WAIT_US = "$RollbackInputWaitUs"
+} else {
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_INPUT_WAIT_US -ErrorAction SilentlyContinue
+}
+if ($NetworkPumpThread) {
+    $env:MELONDS_NSML_NET_PUMP_THREAD = "1"
+    $env:MELONDS_NSML_NET_PUMP_SLEEP_US = "$NetworkPumpSleepUs"
+} else {
+    Remove-Item Env:\MELONDS_NSML_NET_PUMP_THREAD -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_NET_PUMP_SLEEP_US -ErrorAction SilentlyContinue
 }
 
 if ($LowDelayWan) {

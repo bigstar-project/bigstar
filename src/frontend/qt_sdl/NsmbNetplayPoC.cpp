@@ -1388,6 +1388,7 @@ struct State
     int RollbackDeltaPageTraceMaxRuns = 12;
     int RollbackResimulateDelayFrames = 0;
     int RollbackMaxResimFrames = 0;
+    int RollbackInputWaitUs = 0;
     std::map<melonDS::u32, InputState> PredictedRemoteInputs;
     std::map<melonDS::u32, RollbackStoredState> RollbackStates;
     bool LastConfirmedRemoteInputValid = false;
@@ -2377,9 +2378,10 @@ void StartNetworkPumpThreadIfNeeded()
     G.NetworkPumpStop = false;
     G.NetworkPumpThreadStarted = true;
     G.NetworkPumpThread = std::thread(NetworkPumpThreadMain);
-    std::printf("NSMB PoC: network pump thread started sleepUs=%d inputWaitUs=%d\n",
+    std::printf("NSMB PoC: network pump thread started sleepUs=%d inputWaitPollUs=%d rollbackInputWaitUs=%d\n",
         G.NetworkPumpSleepUs,
-        G.InputWaitPollUs);
+        G.InputWaitPollUs,
+        G.RollbackInputWaitUs);
     std::fflush(stdout);
 }
 
@@ -5304,6 +5306,63 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
             }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+bool TryWaitForRollbackRemoteInputLocked(
+    std::unique_lock<std::mutex>& lock,
+    melonDS::NDS* nds,
+    melonDS::u32 localFrame,
+    melonDS::u32 targetFrame,
+    InputState& input)
+{
+    if (G.RollbackInputWaitUs <= 0)
+        return false;
+    if (!lock.owns_lock())
+        return false;
+    if ((G.PacketBridgeOnly || G.InputNetplayOnly)
+        && G.NetplayStartFrame != 0
+        && targetFrame < G.NetplayStartFrame)
+        return false;
+
+    const auto start = std::chrono::steady_clock::now();
+    unsigned long long loops = 0;
+    for (;;)
+    {
+        loops++;
+        PumpNetworkLocked(nds, localFrame);
+
+        auto it = G.RemoteInputs.find(targetFrame);
+        if (it != G.RemoteInputs.end())
+        {
+            input = it->second;
+            const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            RecordRemoteInputWaitStats(static_cast<unsigned long long>(std::max<long long>(0, elapsedUs)), loops);
+            return true;
+        }
+
+        const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - start).count();
+        const long long remainingUs = static_cast<long long>(G.RollbackInputWaitUs) - elapsedUs;
+        if (remainingUs <= 0)
+        {
+            RecordRemoteInputWaitStats(static_cast<unsigned long long>(std::max<long long>(0, elapsedUs)), loops);
+            if (G.InputNetplayTraceEnabled)
+            {
+                std::printf("NSMB Rollback: input wait timeout frame=%u waitedUs=%lld\n",
+                    targetFrame,
+                    static_cast<long long>(std::max<long long>(0, elapsedUs)));
+                std::fflush(stdout);
+            }
+            return false;
+        }
+
+        const int pollUs = std::clamp(
+            static_cast<int>(std::min<long long>(remainingUs, G.InputWaitPollUs)),
+            50,
+            5000);
+        G.InputCond.wait_for(lock, std::chrono::microseconds(pollUs));
     }
 }
 
@@ -8695,7 +8754,7 @@ void WritePacketBridgeJitScratchIfNeeded(
             ? logicalFrame + static_cast<melonDS::u32>(std::max(0, G.Delay))
             : frame;
         {
-            std::lock_guard<std::mutex> lock(G.Mutex);
+            std::unique_lock<std::mutex> lock(G.Mutex);
             PumpNetworkLocked(nds, frame);
             SendMatchSeedLocked();
             G.LocalInputs[sendFrame] = localInput;
@@ -8709,6 +8768,12 @@ void WritePacketBridgeJitScratchIfNeeded(
             if (it != G.RemoteInputs.end())
             {
                 remoteInput = it->second;
+                hasRemoteInput = true;
+            }
+            else if (G.RollbackEnabled && G.InputNetplayOnly
+                && (G.NetplayStartFrame == 0 || logicalFrame >= G.NetplayStartFrame)
+                && TryWaitForRollbackRemoteInputLocked(lock, nds, frame, logicalFrame, remoteInput))
+            {
                 hasRemoteInput = true;
             }
             else if (G.RollbackEnabled && G.InputNetplayOnly
@@ -11878,6 +11943,8 @@ void InitFromEnvironment()
     G.RollbackEnabled = EnvFlag("MELONDS_NSML_ROLLBACK");
     G.RollbackResimulate = EnvFlag("MELONDS_NSML_ROLLBACK_RESIMULATE");
     G.RollbackSkipRenderDuringResim = EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER");
+    G.RollbackInputWaitUs = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_INPUT_WAIT_US", 0), 0, 20000);
     G.RollbackRestoreProbe = EnvFlag("MELONDS_NSML_ROLLBACK_RESTORE_PROBE");
     G.RollbackPredictionProbeModulo = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_MODULO", 0), 0, 600);
@@ -12322,7 +12389,7 @@ void InitFromEnvironment()
 
     G.Ready = true;
     StartNetworkPumpThreadIfNeeded();
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputSendDelay=%d inputSendJitter=%d inputSendDelayStart=%u inputSendDelayEnd=%u inputDropModulo=%d inputDropOffset=%d netPumpThread=%d netPumpSleepUs=%d inputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d rollbackPredProbeModulo=%d rollbackPredProbeLimit=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputSendDelay=%d inputSendJitter=%d inputSendDelayStart=%u inputSendDelayEnd=%u inputDropModulo=%d inputDropOffset=%d netPumpThread=%d netPumpSleepUs=%d inputWaitPollUs=%d rollbackInputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d rollbackPredProbeModulo=%d rollbackPredProbeLimit=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -12365,6 +12432,7 @@ void InitFromEnvironment()
         G.NetworkPumpThreadEnabled ? 1 : 0,
         G.NetworkPumpSleepUs,
         G.InputWaitPollUs,
+        G.RollbackInputWaitUs,
         G.RollbackEnabled ? 1 : 0,
         RollbackBackendName(),
         G.RollbackWindow,

@@ -8,14 +8,18 @@ param(
     [string]$ClientInputScript = "tests\nsmb_us_direct_mvl_stress_client_move_jump_dash.inputs",
     [string]$LogRoot = "logs\nsmb-mvl-rollback-candidate-sweep",
     [double]$SlowFrameThresholdMs = 33.0,
+    [double]$MaxActiveFrameMs = 1000.0,
     [int]$MaxConsecutiveSlowFrames = 120,
     [double]$MaxRollbackFrameMs = 0.0,
+    [switch]$NetworkPumpThread,
+    [int]$NetworkPumpSleepUs = 250,
     [int]$RollbackPredictionProbeModulo = 0,
     [int]$RollbackPredictionProbeOffset = 0,
     [int]$RollbackPredictionProbeLimit = -1,
     [int]$RollbackPredictionProbeStartFrame = 0,
     [int]$RollbackPredictionProbeEndFrame = 0,
     [string]$RollbackPredictionProbeKeyMask = "",
+    [int]$RollbackInputWaitUs = 0,
     [switch]$NoGameStateComparison,
     [switch]$SkipMovementProbe,
     [switch]$InputNetplayTrace
@@ -41,8 +45,11 @@ $envKeys = @(
     "MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL",
     "MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS",
     "MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES",
+    "MELONDS_NSML_ROLLBACK_INPUT_WAIT_US",
     "MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET",
     "MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER",
+    "MELONDS_NSML_NET_PUMP_THREAD",
+    "MELONDS_NSML_NET_PUMP_SLEEP_US",
     "MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK",
     "MELONDS_NSML_FIXED_FRAME_SLEEP",
     "MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS",
@@ -209,7 +216,7 @@ foreach ($item in $candidates) {
         InputMaxFrameLead = 8
         AllowJit = $true
         RollbackSettleFrames = 8
-        MaxActiveFrameMs = 1000
+        MaxActiveFrameMs = $MaxActiveFrameMs
         SlowFrameThresholdMs = $SlowFrameThresholdMs
         MaxConsecutiveSlowFrames = $MaxConsecutiveSlowFrames
         LogDir = $candidateLogRel
@@ -220,6 +227,13 @@ foreach ($item in $candidates) {
     }
     if ($MaxRollbackFrameMs -gt 0.0) {
         $candidateParams.MaxRollbackFrameMs = $MaxRollbackFrameMs
+    }
+    if ($RollbackInputWaitUs -gt 0) {
+        $candidateParams.RollbackInputWaitUs = $RollbackInputWaitUs
+    }
+    if ($NetworkPumpThread) {
+        $candidateParams.NetworkPumpThread = $true
+        $candidateParams.NetworkPumpSleepUs = $NetworkPumpSleepUs
     }
     if ($RollbackPredictionProbeModulo -gt 0) {
         $candidateParams.RollbackPredictionProbeModulo = $RollbackPredictionProbeModulo

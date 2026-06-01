@@ -5,6 +5,7 @@
 Current working candidate is still experimental:
 
 - `nsmbtinycore + delta-discovered globals + process-list object ranges + actorArena + ARM9 stack + no heap scan`.
+- Best current no-freeze/no-rollback-spike automation setting adds bounded same-frame input wait: `MELONDS_NSML_ROLLBACK_INPUT_WAIT_US=8000` plus `MELONDS_NSML_NET_PUMP_THREAD=1` / `MELONDS_NSML_NET_PUMP_SLEEP_US=50`.
 - Manual/log comparison confirmed the user's report: `logs/nsmb-mvl-manual-local-20260601-212956` is an `nsmbtinycore` abort/low-FPS failure, while `logs/nsmb-mvl-manual-local-20260601-213213` is a non-frozen `coredelta` baseline.
 - The aborting manual log predates the ARM9 stack addition. With the current stack range, `logs/codex-currentframefix-tinycore-long-4200-20260601/20260601-225143/nsmbtinycore-proclist-arena-noheap` passes 4200F without abort/stall, checkpoint size `398,399` bytes, save avg about `0.18ms`, restore avg about `3.6ms`.
 
@@ -12,7 +13,7 @@ Spike-aware validation added:
 
 - `scripts/run-nsmb-mvl-split-local-input-smoke.ps1` now has `-MaxRollbackFrameMs`; it fails specifically when a frame containing `rollbackResimDelta > 0` exceeds the limit, so average FPS can no longer hide rollback stutter.
 - `NSMB PerfSpike` now prints `rollbackRestoreDelta` and `rollbackResimDelta`, which lets the harness distinguish rollback spikes from ordinary slow frames.
-- `scripts/run-nsmb-mvl-rollback-candidate-sweep.ps1` passes the new rollback-frame gate and classifies it as `perf-fail`.
+- `scripts/run-nsmb-mvl-rollback-candidate-sweep.ps1` passes the new rollback-frame gate and classifies it as `perf-fail`. It also has `-MaxActiveFrameMs` so non-rollback frame spikes can be gated separately.
 
 Performance experiments:
 
@@ -22,13 +23,16 @@ Performance experiments:
 - With checkpoint interval 1 / frame lead 1, the same route improves to about `54-76ms` max rollback frames, but still fails a 33ms no-stutter gate.
 - An experimental `MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES=1` cap reduced max rollback frames to about `38-40ms` in 1600F, but the 4200F correctness run failed at frame 1110 (`playerActor0Y` mismatch). This is not promotable.
 - A Plan-D-like remote-player actor snapshot mode (`MELONDS_NSML_STATE_APPLY_MODE=remote-player`) was added for experiments, but no-rollback state-apply testing ran at only about `38fps` and failed the movement-probe harness. It is not a replacement for rollback yet.
+- Bounded same-frame remote input wait is not an input-delay scheme and does not change local frame delay, but it is also not the final Plan-D snapshot answer. It prevents prediction in the common localhost case and therefore avoids full rollback resim spikes.
+- `RollbackInputWaitUs=8000` without network pump passed the 4200F rollback-spike gate but still showed occasional non-rollback active-frame spikes around `39ms`.
+- `RollbackInputWaitUs=8000` plus network pump 50us passed 4200F move+jump+dash stress with game-state comparison, `-MaxRollbackFrameMs 33`, `-MaxActiveFrameMs 50`, and `-MaxConsecutiveSlowFrames 120`: `logs/codex-sweep-tinycore-rbwait8000-netpump-param-rb33-active50-4200-20260601/20260601-233536`. Active timing was about `avgFrameMs=17.15`, `maxFrameMs=44.51`, active FPS about `58.3`, and `rollbackResims=0` in the sampled active window.
 
 Current conclusion:
 
 - The old "案D寄りが固まる" report was real. The current stack-augmented tinycore candidate no longer reproduces that abort in the 4200F automated route, but rollback resimulation still causes noticeable spikes.
 - Lightweight snapshot size is no longer the dominant cost. The blocker is full-frame resimulation: even a 398KB restore is followed by 1-2 full `nds->RunFrame()` calls.
-- Manual explicit `-RollbackBackend nsmbtinycore` under `-LowLatencyRollback` now defaults to checkpoint interval 1 and input max frame lead 1, because that is the best measured tinycore setting so far. It is still experimental, not the final no-stutter answer.
-- Next direction: keep `coredelta` as correctness baseline, keep tinycore as the light snapshot candidate, and look for ROM/memory-level ways to avoid full NDS resim rather than only shrinking checkpoint bytes.
+- Manual explicit `-RollbackBackend nsmbtinycore` under `-LowLatencyRollback` now defaults to checkpoint interval 1, input max frame lead 1, rollback input wait 8000us, and network pump 50us because that is the best measured tinycore setting so far. It is still experimental, not the final no-stutter answer.
+- Next direction: keep `coredelta` as correctness baseline, keep tinycore as the light snapshot candidate, and continue ROM/memory-level work to avoid full NDS resim rather than relying only on bounded same-frame waiting.
 
 ## 2026-06-01 prior lightweight direction - actor arena + ARM9 stack snapshot
 
