@@ -1,5 +1,25 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
+## 2026-06-01 current manual rollback status
+
+手動プレイ用の現行コマンドは `scripts/run-nsmb-mvl-manual-local.ps1 -LowLatencyRollback -AllowJit -SoftwareRenderer`。
+`-LowLatencyRollback` は `InputDelayFrames=0` / `InputMaxFrameLead=8` / `RollbackBackend=nsmbcoreranges` / `RollbackWindow=64` / `RollbackCheckpointInterval=8` / `RollbackResimulate` / `PacketBridgeStartFrame=870` を設定し、必要な `MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES=1` と `MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL=30` もスクリプト内で設定する。
+手動ログは既定で `logs\nsmb-mvl-manual-local-yyyyMMdd-HHmmss` に分けて保存するように変更したため、失敗回のログが上書きされにくい。
+
+直近の手動失敗ログは `logs\nsmb-mvl-manual-local` に残っていたが、固定ディレクトリのため2回分が上書きされていた。残っていたログでは host/client とも `localFrame=860` の start-ready 受理直後に終了し、wrapper は `missing frame limit` 扱いになっていた。
+修正後の有限検証では、`logs/codex-manual-local-lowlatrollback-script-1200-20260601` が1200Fまで通過し host/client active fps は `58.72/58.63`、`logs/codex-manual-local-lowlatrollback-script-2600-20260601` が2600Fまで通過し active fps は `57.95/58.00`、throttle は両側0だった。
+座標同期の再確認として `logs/codex-split-lowlat-nsmbcoreranges-ckpt8-start870-predprobe-2600-20260601` で prediction probe ありの2600F game-state比較を通過した。active fps はtraceと比較込みで `52.65/52.64`。
+
+Current blocker: 実手動入力でユーザー環境の停止をまだ直接再現できていない。次に停止した場合は、新しいタイムスタンプ付きログディレクトリの `host.stdout.txt` / `client.stdout.txt` / `wrapper/*.err.txt` をそのまま読む。
+
+## 2026-06-01 zero-delay manual candidate
+
+`InputDelayFrames=4` で通った結果は、rollback成立確認として扱わない。`InputDelayFrames=0` / `InputMaxFrameLead=8` で再検証したところ、旧 `nsmbtinycore + TINY_CORE_FLAGS=0x200` 候補は frame 1950 付近で `netPacketTick` がhost側だけ `0x65c -> 0x437` に巻き戻り、座標不一致を起こした。
+
+現時点で手動プレイに出せるゼロ遅延候補は `nsmbcoreranges + delta-discovered ranges + checkpointInterval=8 + rollbackWindow=64`。`logs/codex-delay0-nsmbcoreranges-resim-patches-ckpt8-rendered-lead8-gamestate-2600-20260601` はgame-state比較ありで2600F通過し、host/client active fps は `56.51/56.77`。game-state traceなしの同条件 `logs/codex-delay0-nsmbcoreranges-resim-patches-ckpt8-rendered-lead8-nogamestate-2600-20260601` はhost/client active fps `57.40/57.62`。
+
+正しさの主因は、tiny coreではなく通常core stateを保存する必要があること。`nsmbtinycore` は軽いが、ゼロ遅延rollbackで実際にresimが走るとNSMB packet/global状態が一致しない。`nsmbcoreranges` はcheckpoint sizeが約 `2.54MB` と重い一方、現在のゼロ遅延候補としては座標一致を維持している。
+
 ## 2026-06-01 manual play correction
 
 手動プレイ向けに一度案内した `InputDelayFrames=0 / InputMaxFrameLead=8` は未検証で、2600Fの自動入力・game-state比較でframe 1950に `playerActor0X` 不一致を起こした。手動プレイ推奨から外す。

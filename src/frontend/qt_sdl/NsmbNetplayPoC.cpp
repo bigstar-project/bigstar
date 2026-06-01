@@ -8185,6 +8185,67 @@ void WritePacketBridgeJitScratchInputs(
     }
 }
 
+void ForceStageSceneContinueGateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
+void ForceStageSceneState3GateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
+void ForceStageSceneEventFlagsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
+void ForceMvlPlayerReadyIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
+void ForceMvlRuntimeStateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
+void ForceMvlStageLayoutGateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
+void ClearMvlCameraInitHoldIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
+void ForceMvlStageLayoutBufferIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
+
+void ApplyRollbackResimFramePatches(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!nds || instanceID < 0 || instanceID >= 16)
+        return;
+
+    ApplyMvlRuntimeConfigIfNeeded(nds);
+    ForceNSMLPacketBridgeNetReadyIfNeeded(instanceID, frame, nds);
+    ForceNSMLPacketBridgeStageStartSMFieldsIfNeeded(instanceID, frame, nds);
+    ForceNSMLPacketBridgeLoadGameSMIfNeeded(instanceID, frame, nds);
+    ForceNSMLStagePacketWordsIfNeeded(frame, nds);
+    ForceNSMLGameLocalPlayerIDIfNeeded(frame, nds);
+    ForceWifiCommunicatingIfNeeded(instanceID, frame, nds);
+    ForceNetLocalAidIfNeeded(instanceID, frame, nds);
+    ForceStageSceneContinueGateIfNeeded(instanceID, frame, nds);
+    ForceMvlPlayerReadyIfNeeded(instanceID, frame, nds);
+    ForceMvlRuntimeStateIfNeeded(instanceID, frame, nds);
+    ForcePlayerTransitionStatusIfNeeded(instanceID, frame, nds);
+    ForceEntranceSpawnPointersIfNeeded(instanceID, frame, nds);
+    NormalizeMvlEntranceSpawnStateIfNeeded(instanceID, frame, nds);
+    ForcePlayerActorIDsIfNeeded(instanceID, frame, nds);
+    RepairMvlInitialPlayerSpawnIfNeeded(instanceID, frame, nds);
+    ForcePlayerActorPositionIfNeeded(instanceID, frame, nds);
+    ForceMvlStageLayoutBufferIfNeeded(instanceID, frame, nds);
+    ForceMvlStageLayoutGateIfNeeded(instanceID, frame, nds);
+    ClearMvlCameraInitHoldIfNeeded(instanceID, frame, nds);
+    ForceStageSceneEventFlagsIfNeeded(instanceID, frame, nds);
+    ForceStageCameraSlotIfNeeded(instanceID, frame, nds);
+    ForceStageCameraObjectXIfNeeded(instanceID, frame, nds);
+    ForceStageSceneState3GateIfNeeded(instanceID, frame, nds);
+    ForceStageActorFreezeFlagIfNeeded(instanceID, frame, nds);
+    ForcePlayerDeathCountersIfNeeded(instanceID, frame, nds);
+    ForcePlayerInventoryPowerupsIfNeeded(instanceID, frame, nds);
+    ForcePlayerStarCountersIfNeeded(instanceID, frame, nds);
+    ForceStageFXSettingsIfNeeded(instanceID, frame, nds);
+    ForceStageActorPreUpdateGateIfNeeded(instanceID, frame, nds);
+    ForceActorCategoryMaskIfNeeded(instanceID, frame, nds);
+    ForcePlayerSignalUnlockIfNeeded(instanceID, frame, nds);
+    ForcePlayerUpdateEnableIfNeeded(instanceID, frame, nds);
+}
+
+void ApplyRollbackResimPostFramePatches(melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!nds)
+        return;
+
+    ForceNSMLStagePacketWordsIfNeeded(frame, nds);
+    ForceNSMLGameLocalPlayerIDIfNeeded(frame, nds);
+    melonDS::NSML_RefreshMarioVsLuigiPacketSlots(nds);
+    ForceNSMLStagePacketWordsIfNeeded(frame, nds);
+    ForceNSMLGameLocalPlayerIDIfNeeded(frame, nds);
+}
+
 bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.RollbackEnabled || !G.RollbackResimulate || !G.InputNetplayOnly || !nds)
@@ -8279,6 +8340,7 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
             GetRollbackRemoteInputLocked(f, remoteInput, predictedRemote);
         }
 
+        ApplyRollbackResimFramePatches(instanceID, f, nds);
         WritePacketBridgeJitScratchInputs(
             instanceID,
             f,
@@ -8296,6 +8358,7 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
             nds->ReleaseScreen();
 
         nds->RunFrame();
+        ApplyRollbackResimPostFramePatches(f + 1, nds);
         resimulated++;
 
         {

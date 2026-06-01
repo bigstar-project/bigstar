@@ -21,7 +21,7 @@ param(
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds",
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds",
     [string]$InputScript = "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs",
-    [string]$LogDir = "logs\nsmb-mvl-manual-local",
+    [string]$LogDir = "",
     [int]$ScreenshotInterval = 0,
     [switch]$GameStateTrace,
     [int]$GameStateTraceInterval = 60,
@@ -29,6 +29,7 @@ param(
     [int]$GameStateTraceEndFrame = 0,
     [switch]$GameStateTraceExtended,
     [switch]$InputNetplayTrace,
+    [int]$PacketBridgeStartFrame = 840,
     [int]$MvlStage = -1,
     [string]$MvlSceneSettings = "",
     [ValidateSet(1, 2, 3)] [int]$MvlWins = 2,
@@ -90,11 +91,18 @@ if ($LowLatencyRollback) {
     $InputDelayFrames = 0
     $InputMaxFrameLead = 8
     $Rollback = $true
+    if (-not $PSBoundParameters.ContainsKey('RollbackBackend')) { $RollbackBackend = "nsmbcoreranges" }
+    if (-not $PSBoundParameters.ContainsKey('RollbackWindow')) { $RollbackWindow = 64 }
+    if (-not $PSBoundParameters.ContainsKey('RollbackCheckpointInterval')) { $RollbackCheckpointInterval = 8 }
+    if (-not $PSBoundParameters.ContainsKey('PacketBridgeStartFrame')) { $PacketBridgeStartFrame = 870 }
     $RollbackResimulate = $true
-    $RollbackCheckpointInterval = 30
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+if ($LogDir -eq "") {
+    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $LogDir = "logs\nsmb-mvl-manual-local-$timestamp"
+}
 $smokeScript = Join-Path $PSScriptRoot "run-nsmb-mvl-lan-route-smoke.ps1"
 $logRoot = Join-Path $repoRoot $LogDir
 $hostLog = Join-Path $logRoot "host"
@@ -144,8 +152,8 @@ $common = @(
     "-InputSendDelayFrames", "$InputSendDelayFrames",
     "-InputSendJitterFrames", "$InputSendJitterFrames",
     "-PacketBridgeJitHelperPatch",
-    "-PacketBridgeJitHelperPatchFrame", "840",
-    "-PacketBridgeStartFrame", "840",
+    "-PacketBridgeJitHelperPatchFrame", "$PacketBridgeStartFrame",
+    "-PacketBridgeStartFrame", "$PacketBridgeStartFrame",
     "-ClearMvlCameraInitHold",
     "-ClearMvlCameraInitHoldStartFrame", "840",
     "-WaitForPeerAtNetplayStart"
@@ -204,6 +212,13 @@ if ($MvlMatchSeed -ne "") {
     $common += @("-MvlMatchSeed", "$MvlMatchSeed")
 }
 
+if ($LowLatencyRollback) {
+    $env:MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+    $env:MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK -ErrorAction SilentlyContinue
+}
+
 $hostArgs = @(
     "-NoProfile",
     "-ExecutionPolicy", "Bypass",
@@ -254,7 +269,7 @@ Write-Host "Started NSMB MvL manual local session."
 Write-Host "host wrapper pid=$($hostProc.Id) log=$hostLog"
 Write-Host "client wrapper pid=$($clientProc.Id) log=$clientLog"
 Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
-Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit)"
+Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames packetBridgeStart=$PacketBridgeStartFrame renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit)"
 Write-Host "mvlWins=$MvlWins mvlBigStars=$MvlBigStars mvlLives=$MvlLives mvlStage=$(if ($MvlStage -ge 0) { $MvlStage } else { 'auto/default' }) mvlSceneSettings=$(if ($MvlSceneSettings) { $MvlSceneSettings } else { 'derived' }) mvlCourseMode=$MvlCourseMode generateConfiguredRoms=$($GenerateMvlConfiguredRoms.IsPresent) mvlMatchSeed=$(if ($MvlMatchSeed) { $MvlMatchSeed } else { 'auto' })"
 if ($Rollback) {
     $backendLabel = if ($RollbackBackend -ne "") { $RollbackBackend } else { "savestate" }
