@@ -1329,6 +1329,9 @@ struct State
     bool RollbackEnabled = false;
     bool RollbackResimulate = false;
     bool RollbackRestoreProbe = false;
+    int RollbackPredictionProbeModulo = 0;
+    int RollbackPredictionProbeOffset = 0;
+    melonDS::u32 RollbackPredictionProbeKeyMask = 0x1;
     RollbackBackend RollbackBackendMode = RollbackBackend::Savestate;
     int RollbackWindow = 20;
     int RollbackCheckpointInterval = 1;
@@ -1359,6 +1362,7 @@ struct State
     melonDS::u32 RollbackMismatchCount = 0;
     melonDS::u32 RollbackRestoreCount = 0;
     melonDS::u32 RollbackResimulateCount = 0;
+    melonDS::u32 RollbackPredictionProbeCount = 0;
     melonDS::u32 RollbackCheckpointSaveCount = 0;
     size_t RollbackCheckpointLastBytes = 0;
     size_t RollbackCheckpointMinBytes = 0;
@@ -2552,6 +2556,14 @@ bool GetRollbackRemoteInputLocked(melonDS::u32 frame, InputState& input, bool& p
     else
         input = NeutralInput();
 
+    if (G.RollbackPredictionProbeModulo > 0
+        && (frame % static_cast<melonDS::u32>(G.RollbackPredictionProbeModulo))
+            == static_cast<melonDS::u32>(G.RollbackPredictionProbeOffset))
+    {
+        input.KeyMask ^= G.RollbackPredictionProbeKeyMask & 0xFFFu;
+        G.RollbackPredictionProbeCount++;
+    }
+
     G.PredictedRemoteInputs.emplace(frame, input);
     G.RollbackPredictionCount++;
     predicted = true;
@@ -2750,9 +2762,16 @@ void AddNSMBRollbackDeltaDiscoveredRanges(melonDS::NDS* nds, std::vector<Rollbac
     // Experimental coverage from coredelta page traces around rollback mismatches.
     AddNSMBRollbackRange(nds, ranges, 0x02085200, 0x500);
     AddNSMBRollbackRange(nds, ranges, 0x02085B00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02087600, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02087700, 0x900);
     AddNSMBRollbackRange(nds, ranges, 0x02088000, 0x400);
     AddNSMBRollbackRange(nds, ranges, 0x02088400, 0x800);
+    AddNSMBRollbackRange(nds, ranges, 0x02089100, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02089200, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02089400, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02089500, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0208AE00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0208B400, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x0208B600, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x0208B700, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x0208FB00, 0x300);
@@ -2762,8 +2781,10 @@ void AddNSMBRollbackDeltaDiscoveredRanges(melonDS::NDS* nds, std::vector<Rollbac
     AddNSMBRollbackRange(nds, ranges, 0x02094800, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02095000, 0x200);
     AddNSMBRollbackRange(nds, ranges, 0x02095200, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02095300, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02096100, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02129400, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0212AD00, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x0212AE00, 0x200);
     AddNSMBRollbackRange(nds, ranges, 0x02190500, 0x200);
     AddNSMBRollbackRange(nds, ranges, 0x02190900, 0x100);
@@ -2771,18 +2792,24 @@ void AddNSMBRollbackDeltaDiscoveredRanges(melonDS::NDS* nds, std::vector<Rollbac
     AddNSMBRollbackRange(nds, ranges, 0x02190D00, 0x200);
     AddNSMBRollbackRange(nds, ranges, 0x02191100, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02191300, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B4A00, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021B4B00, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021B4E00, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021B5000, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B5300, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021B5500, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021B6300, 0x300);
+    AddNSMBRollbackRange(nds, ranges, 0x021B6600, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021B6900, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B7200, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021B7300, 0x200);
     AddNSMBRollbackRange(nds, ranges, 0x021B7500, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021BE800, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x021C1E00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021C8400, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02288400, 0x1100);
     AddNSMBRollbackRange(nds, ranges, 0x0229AC00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0234A300, 0x300);
     AddNSMBRollbackRange(nds, ranges, 0x023FFC00, 0x100);
 }
 
@@ -11339,6 +11366,14 @@ void InitFromEnvironment()
     G.RollbackEnabled = EnvFlag("MELONDS_NSML_ROLLBACK");
     G.RollbackResimulate = EnvFlag("MELONDS_NSML_ROLLBACK_RESIMULATE");
     G.RollbackRestoreProbe = EnvFlag("MELONDS_NSML_ROLLBACK_RESTORE_PROBE");
+    G.RollbackPredictionProbeModulo = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_MODULO", 0), 0, 600);
+    G.RollbackPredictionProbeOffset = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_OFFSET", 0),
+        0,
+        std::max(0, G.RollbackPredictionProbeModulo - 1));
+    G.RollbackPredictionProbeKeyMask = static_cast<melonDS::u32>(
+        std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_KEY_MASK", 0x1), 1, 0xFFF));
     const char* rollbackBackend = EnvCString("MELONDS_NSML_ROLLBACK_BACKEND", "savestate");
     if (!std::strcmp(rollbackBackend, "corelite") || !std::strcmp(rollbackBackend, "core-lite"))
         G.RollbackBackendMode = RollbackBackend::CoreLite;
@@ -11757,7 +11792,7 @@ void InitFromEnvironment()
 
     G.Ready = true;
     StartNetworkPumpThreadIfNeeded();
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputDropModulo=%d inputDropOffset=%d netPumpThread=%d netPumpSleepUs=%d inputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputDropModulo=%d inputDropOffset=%d netPumpThread=%d netPumpSleepUs=%d inputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d rollbackPredProbeModulo=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -11803,6 +11838,7 @@ void InitFromEnvironment()
         G.RollbackResimulateDelayFrames,
         G.RollbackResimulate ? 1 : 0,
         G.RollbackRestoreProbe ? 1 : 0,
+        G.RollbackPredictionProbeModulo,
         G.MatchSeed,
         G.MatchSeedConfigured ? 1 : 0,
         G.DirectMvlBootEnabled ? 1 : 0,
@@ -12364,7 +12400,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             mainRAMCopyBytes += stored.MainRAMCopy.size();
         }
         std::printf(
-            "NSMB Rollback: frame=%u backend=%s checkpoints=%zu checkpointSaves=%u bytesLast=%zu bytesMin=%zu bytesMax=%zu bytesAvg=%zu saveAvgUs=%llu saveMaxUs=%llu restoreOps=%u restoreAvgUs=%llu restoreMaxUs=%llu delta=%zu keyframes=%zu mainRAMCopies=%zu keyInt=%d page=%d coreSkip=0x%X tinyFlags=0x%X wide=%d deltaDiscovered=%d skipInput=%d restoreDiff=%d scanInt=%d scanRefresh=%u scanCacheHits=%u predicted=%zu predictions=%u mismatches=%u restores=%u resims=%u pending=%u observed=%u\n",
+            "NSMB Rollback: frame=%u backend=%s checkpoints=%zu checkpointSaves=%u bytesLast=%zu bytesMin=%zu bytesMax=%zu bytesAvg=%zu saveAvgUs=%llu saveMaxUs=%llu restoreOps=%u restoreAvgUs=%llu restoreMaxUs=%llu delta=%zu keyframes=%zu mainRAMCopies=%zu keyInt=%d page=%d coreSkip=0x%X tinyFlags=0x%X wide=%d deltaDiscovered=%d skipInput=%d restoreDiff=%d scanInt=%d scanRefresh=%u scanCacheHits=%u predicted=%zu predictions=%u predProbe=%u mismatches=%u restores=%u resims=%u pending=%u observed=%u\n",
             logFrame,
             RollbackBackendName(),
             G.RollbackStates.size(),
@@ -12394,6 +12430,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             G.RollbackNSMBRangeCacheHitCount,
             G.PredictedRemoteInputs.size(),
             G.RollbackPredictionCount,
+            G.RollbackPredictionProbeCount,
             G.RollbackMismatchCount,
             G.RollbackRestoreCount,
             G.RollbackResimulateCount,
