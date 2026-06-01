@@ -2,15 +2,17 @@
 
 ## 2026-06-01 current manual rollback status
 
-手動プレイ用の現行コマンドは `scripts/run-nsmb-mvl-manual-local.ps1 -LowLatencyRollback -AllowJit -SoftwareRenderer`。
+手動プレイ用の現行コマンドは `scripts/run-nsmb-mvl-manual-local.ps1 -LowLatencyRollback -AllowJit`。
 `-LowLatencyRollback` は `InputDelayFrames=0` / `InputMaxFrameLead=8` / `RollbackBackend=nsmbcoreranges` / `RollbackWindow=64` / `RollbackCheckpointInterval=8` / `RollbackResimulate` / `PacketBridgeStartFrame=870` を設定し、必要な `MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES=1` と `MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL=30` もスクリプト内で設定する。
+同時に `MELONDS_NSML_FIXED_FRAME_SLEEP=1` と `MELONDS_NSML_PERF_BREAKDOWN=1` を有効にし、2プロセス起動時のbusy-yieldによるCPU消費を抑えつつ、手動runでも `NSMB Perf` 行でフレーム進行と処理内訳を確認できるようにした。
 手動ログは既定で `logs\nsmb-mvl-manual-local-yyyyMMdd-HHmmss` に分けて保存するように変更したため、失敗回のログが上書きされにくい。
 
 直近の手動失敗ログは `logs\nsmb-mvl-manual-local` に残っていたが、固定ディレクトリのため2回分が上書きされていた。残っていたログでは host/client とも `localFrame=860` の start-ready 受理直後に終了し、wrapper は `missing frame limit` 扱いになっていた。
 修正後の有限検証では、`logs/codex-manual-local-lowlatrollback-script-1200-20260601` が1200Fまで通過し host/client active fps は `58.72/58.63`、`logs/codex-manual-local-lowlatrollback-script-2600-20260601` が2600Fまで通過し active fps は `57.95/58.00`、throttle は両側0だった。
+追加で `-SoftwareRenderer` を外し、OpenGL compute + fixed sleep + perf breakdown の `logs/codex-manual-lowlat-fixedsleep-opengl-2600-20260601` は2600Fまで通過し、host/client active fps は `59.55/59.65`、throttle は両側0だった。無期限runの `logs/codex-manual-lowlat-fixedsleep-perf-opengl-20260601` でも870以降に `NSMB Perf` が出ており、ログが870で止まるように見えていた主因は通常ログ不足だった。
 座標同期の再確認として `logs/codex-split-lowlat-nsmbcoreranges-ckpt8-start870-predprobe-2600-20260601` で prediction probe ありの2600F game-state比較を通過した。active fps はtraceと比較込みで `52.65/52.64`。
 
-Current blocker: 実手動入力でユーザー環境の停止をまだ直接再現できていない。次に停止した場合は、新しいタイムスタンプ付きログディレクトリの `host.stdout.txt` / `client.stdout.txt` / `wrapper/*.err.txt` をそのまま読む。
+Current blocker: 実手動入力でユーザー環境の停止をまだ直接再現できていない。次に停止した場合は、新しいタイムスタンプ付きログディレクトリの `host.stdout.txt` / `client.stdout.txt` / `wrapper/*.err.txt` を読み、`NSMB Perf` が870以降も進んでいるか、`runFrameMs` / `beforeHookMs` / `limitMs` のどれが増えているかで切り分ける。
 
 ## 2026-06-01 zero-delay manual candidate
 
