@@ -1,5 +1,33 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
+## 2026-06-01 ProcessList-centered rollback snapshot
+
+現在の最有力候補は `nsmbtinycore + MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS=0x200 + MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES=1` を維持しつつ、NSMB Code Reference の `ProcessManager` 構造を使って actor/object range を作る方式。
+
+新しい実験フラグ:
+
+- `MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES=1`: `Game::executeProcess/deleteProcess/renderProcess/createProcess/idLookupProcesses` をたどって実在objectをsnapshot対象にする。
+- `MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES=1`: 従来のMain RAM object風heap scanをfallbackとして使う。互換性のためdefaultは有効。
+- `MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_INTERVAL=900`: fallback heap scanだけを低頻度化する。`MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL=30` のProcessList更新とは分離した。
+
+結論:
+
+- ProcessList-only (`heapScan=0`) は通常FPSと短距離probeでは良い。1500F traceで `saveAvgUs=157-159us`、1800F no-trace FPSでhost/client `59.93/59.97fps`、2600F game-state + predprobe10 limit6も通過した。
+- ただし ProcessList-only は6000Fの後着入力stressでframe 4350に `playerActor1Y` 差分を起こしたため、現時点では単独採用しない。
+- `ProcessList + heapScanInterval=900` は6000F後着入力stressを通過した。最終hostは `bytesLast=254,219`, `bytesMax=254,219`, `saveAvgUs=169`, `restoreOps=2`, `restoreAvgUs=11,942`, active fps `59.06`。clientは `saveAvgUs=168`, active fps `59.06`。
+- 従来のscan30候補は同stressで `saveAvgUs=431-433us` 程度だったため、正しさを維持しつつ保存コストを約0.17msまで落とせた。
+
+FPS方針:
+
+- 15fps級の遅さは通常性能として扱わない。JITなし、restore diff、scan1、game-state CSV大量出力、`InputNetplayTrace` の長時間runは診断条件。
+- 通常性能gateは `-AllowJit` を必須にし、traceなし/軽traceと分けて `active fps` を見る。
+- 今回の6000F stressはtrace付きでもhost/client active fps `59.06` なので、現候補はFPS面では実用候補に残す。
+
+次の確認:
+
+- 別input routeとstock touch系で `ProcessList + heapScanInterval=900` を再確認する。
+- さらに軽くするなら `heapScanInterval=1800` や、heap scan対象をCode Reference由来のmanager/globalへ寄せる。ただしProcessList-onlyの4350F不一致を踏まえ、fallbackを完全に消すのはまだ早い。
+
 ## 2026-06-01 FPS-aware rollback validation
 
 現時点の性能判断では、15fps級の遅さはrollback本体ではなく、主に検証ハーネスを `-AllowJit` なしで回していたことが原因。通常性能を見るrunでは必ず `-AllowJit` を付け、`MELONDS_NSML_ROLLBACK_NSMB_RESTORE_DIFF_TRACE=1`、`scanInterval=1`、game-state CSV大量出力などの診断条件とは分けて扱う。
