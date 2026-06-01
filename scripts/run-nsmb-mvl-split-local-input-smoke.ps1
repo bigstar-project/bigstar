@@ -28,6 +28,7 @@ param(
     [int]$GameStateTraceInterval = 30,
     [switch]$NoGameStateTrace,
     [switch]$SkipGameStateComparison,
+    [switch]$SkipMovementProbe,
     [switch]$NoFrameLimit,
     [switch]$FixedFrameTime,
     [double]$TargetFps = 0.0,
@@ -297,16 +298,18 @@ foreach ($hostRow in $hostRows) {
     }
 }
 
-$before = RowAtFrame -Rows $hostRows -Frame 1770
-$after = RowAtFrame -Rows $hostRows -Frame 2220
-if ($null -eq $before -or $null -eq $after) {
-    throw "missing movement probe rows"
-}
-if ($before.playerActor0X -eq $after.playerActor0X) {
-    throw "Mario did not move in host local-input probe"
-}
-if ($before.playerActor1X -eq $after.playerActor1X) {
-    throw "Luigi did not move in client local-input probe"
+if (-not $SkipMovementProbe) {
+    $before = RowAtFrame -Rows $hostRows -Frame 1770
+    $after = RowAtFrame -Rows $hostRows -Frame 2220
+    if ($null -eq $before -or $null -eq $after) {
+        throw "missing movement probe rows"
+    }
+    if ($before.playerActor0X -eq $after.playerActor0X) {
+        throw "Mario did not move in host local-input probe"
+    }
+    if ($before.playerActor1X -eq $after.playerActor1X) {
+        throw "Luigi did not move in client local-input probe"
+    }
 }
 
 Get-Content $hostOut

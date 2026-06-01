@@ -1,5 +1,30 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
+## 2026-06-01 continued practical validation
+
+現候補は引き続き `nsmbtinycore + MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES=1 + MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS=0x200 + MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL=30`。軽量checkpointは約253KB、保存平均は0.39-0.41ms程度、1フレームresim付き復元は7.5-8.7ms程度で推移している。
+
+Completed:
+
+- 手動host/clientルートを5400フレームまで延長し、prediction probe modulo 10、stable-field比較、settle window 60で通過した。host最終は `bytesLast=253,427`, `saveAvgUs=394`, `restoreOps=3`, `restoreAvgUs=7,535`。client最終は `bytesLast=253,427`, `saveAvgUs=396`, `restoreOps=1`, `restoreAvgUs=7,657`。
+- `nsmb_us_direct_mvl_both_different.inputs` をhost/client両方に使う別ルートで4200フレームを通過した。途中の `movingHazardX` 差分はsettle window内で収束した。hostは `restoreOps=4`, `restoreAvgUs=8,136`, `saveAvgUs=400`。
+- 固定の1770->2220移動確認が別ルート検証の邪魔になるため、`scripts/run-nsmb-mvl-split-local-input-smoke.ps1` に `-SkipMovementProbe` を追加した。game-state同期比較とルート固有の移動probeを分離できる。
+- star collectルートはrollbackあり/なしの両方でframe 5880に `playerActor0X` 差分が出たため、現時点ではrollback候補の復元漏れではなくルートまたは比較条件側のbaseline差分として扱う。
+- stock touchルートはrollbackなしbaseline 2800フレーム、rollbackあり自然jitter 3200フレームを通過した。自然jitterでは `bytesLast=252,691`, `saveAvgUs=390-399`, `restoreOps=0`。
+- stock touch + prediction probe modulo 10はframe 2610付近でmoving hazard差分を起こした。ログ上は強制probeが連続し、通常WANより厳しいstressになっている。診断用に `MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_LIMIT` を追加し、強制prediction mismatch注入回数を上限付きにできるようにした。
+- stock touch + prediction probe limit 1は3200フレームを通過した。hostは `restoreOps=2`, `restoreAvgUs=7,470`, `saveAvgUs=395`, `predProbe=1`。一方、limit 6ではframe 2610付近のmoving hazard差分が残るため、強制probeの連続耐性は未解決。
+
+Current blocker:
+
+- 実用候補としてはかなり軽く、複数ルートの自然jitterでは通るが、stock touch付近の強制prediction probeではまだ差分が残る。restore diffでは未復元Main RAMページが明確に出ないケースがあり、Main RAM range不足ではなく、連続rollback時の入力予測/比較タイミング、またはMain RAM外の進行状態差の可能性がある。
+- star collectルートはbaseline自体が同期比較に合っていないため、rollback検証用ルートとして使うには比較フィールドまたはルート期待値の再設計が必要。
+
+Next actions:
+
+- stock touch付近の強制probe失敗を、`PREDICTION_PROBE_LIMIT` とrestore diff/traceを組み合わせて再現性のある最小ケースへ縮める。
+- 差分がMain RAM range不足でない場合、moving hazard更新に関係するscheduler/timer/GPU3D以外の小さなcore状態、またはgame-state比較側のsettle条件を切り分ける。
+- 自然jitterでの長時間検証を増やしつつ、強制probeは実用gateではなく診断stressとして扱う。
+
 ## 2026-06-01 latest rollback snapshot focus
 
 ユーザー指示により、delay方式とのhybrid検討はいったん外し、軽いcheckpoint/snapshotとして現実的なrollback方式を実験している。

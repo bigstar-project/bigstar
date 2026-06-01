@@ -1331,6 +1331,7 @@ struct State
     bool RollbackRestoreProbe = false;
     int RollbackPredictionProbeModulo = 0;
     int RollbackPredictionProbeOffset = 0;
+    int RollbackPredictionProbeLimit = -1;
     melonDS::u32 RollbackPredictionProbeKeyMask = 0x1;
     RollbackBackend RollbackBackendMode = RollbackBackend::Savestate;
     int RollbackWindow = 20;
@@ -2557,6 +2558,8 @@ bool GetRollbackRemoteInputLocked(melonDS::u32 frame, InputState& input, bool& p
         input = NeutralInput();
 
     if (G.RollbackPredictionProbeModulo > 0
+        && (G.RollbackPredictionProbeLimit < 0
+            || G.RollbackPredictionProbeCount < static_cast<melonDS::u32>(G.RollbackPredictionProbeLimit))
         && (frame % static_cast<melonDS::u32>(G.RollbackPredictionProbeModulo))
             == static_cast<melonDS::u32>(G.RollbackPredictionProbeOffset))
     {
@@ -11378,6 +11381,8 @@ void InitFromEnvironment()
         EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_OFFSET", 0),
         0,
         std::max(0, G.RollbackPredictionProbeModulo - 1));
+    G.RollbackPredictionProbeLimit = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_LIMIT", -1), -1, 10000);
     G.RollbackPredictionProbeKeyMask = static_cast<melonDS::u32>(
         std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_KEY_MASK", 0x1), 1, 0xFFF));
     const char* rollbackBackend = EnvCString("MELONDS_NSML_ROLLBACK_BACKEND", "savestate");
@@ -11798,7 +11803,7 @@ void InitFromEnvironment()
 
     G.Ready = true;
     StartNetworkPumpThreadIfNeeded();
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputDropModulo=%d inputDropOffset=%d netPumpThread=%d netPumpSleepUs=%d inputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d rollbackPredProbeModulo=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputDropModulo=%d inputDropOffset=%d netPumpThread=%d netPumpSleepUs=%d inputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d rollbackPredProbeModulo=%d rollbackPredProbeLimit=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -11845,6 +11850,7 @@ void InitFromEnvironment()
         G.RollbackResimulate ? 1 : 0,
         G.RollbackRestoreProbe ? 1 : 0,
         G.RollbackPredictionProbeModulo,
+        G.RollbackPredictionProbeLimit,
         G.MatchSeed,
         G.MatchSeedConfigured ? 1 : 0,
         G.DirectMvlBootEnabled ? 1 : 0,
