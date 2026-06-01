@@ -2,7 +2,7 @@
 
 ## 2026-06-01 continued practical validation
 
-現候補は引き続き `nsmbtinycore + MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES=1 + MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS=0x200 + MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL=30`。軽量checkpointは約253KB、保存平均は0.39-0.41ms程度、1フレームresim付き復元は7.5-8.7ms程度で推移している。
+現候補は引き続き `nsmbtinycore + MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES=1 + MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS=0x200 + MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL=30`。軽量checkpointは約253KB、保存平均は0.39-0.46ms程度、1フレームresim付き復元は7.5-8.7ms程度で推移している。
 
 Completed:
 
@@ -12,18 +12,19 @@ Completed:
 - star collectルートはrollbackあり/なしの両方でframe 5880に `playerActor0X` 差分が出たため、現時点ではrollback候補の復元漏れではなくルートまたは比較条件側のbaseline差分として扱う。
 - stock touchルートはrollbackなしbaseline 2800フレーム、rollbackあり自然jitter 3200フレームを通過した。自然jitterでは `bytesLast=252,691`, `saveAvgUs=390-399`, `restoreOps=0`。
 - stock touch + prediction probe modulo 10はframe 2610付近でmoving hazard差分を起こした。ログ上は強制probeが連続し、通常WANより厳しいstressになっている。診断用に `MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_LIMIT` を追加し、強制prediction mismatch注入回数を上限付きにできるようにした。
-- stock touch + prediction probe limit 1は3200フレームを通過した。hostは `restoreOps=2`, `restoreAvgUs=7,470`, `saveAvgUs=395`, `predProbe=1`。一方、limit 6ではframe 2610付近のmoving hazard差分が残るため、強制probeの連続耐性は未解決。
+- stock touch + prediction probe limit 1は3200フレームを通過した。hostは `restoreOps=2`, `restoreAvgUs=7,470`, `saveAvgUs=395`, `predProbe=1`。
+- stock touch + seed固定 + prediction probe limit 6 のrestore diffで、frame 2220/2320復元時に `0x02095400` / `0x02095500` の未復元ページを確認した。`0x02095300` rangeを `0x300` に広げた後、同じseed固定2800フレームと非固定seed 3200フレームのstock touch + limit 6が通過した。非固定seed 3200ではhost側 `bytesLast=253,203`, `bytesMax=253,427`, `saveAvgUs=449`, `restoreOps=1`, `restoreAvgUs=7,573`。
 
 Current blocker:
 
-- 実用候補としてはかなり軽く、複数ルートの自然jitterでは通るが、stock touch付近の強制prediction probeではまだ差分が残る。restore diffでは未復元Main RAMページが明確に出ないケースがあり、Main RAM range不足ではなく、連続rollback時の入力予測/比較タイミング、またはMain RAM外の進行状態差の可能性がある。
+- 実用候補としてはかなり軽く、複数ルートの自然jitterとstock touchのlimit 6強制probeまで通るようになった。まだ全予測外れstressやより長いルートは未解決なので、実用gateと診断stressを分けて継続確認する。
 - star collectルートはbaseline自体が同期比較に合っていないため、rollback検証用ルートとして使うには比較フィールドまたはルート期待値の再設計が必要。
 
 Next actions:
 
-- stock touch付近の強制probe失敗を、`PREDICTION_PROBE_LIMIT` とrestore diff/traceを組み合わせて再現性のある最小ケースへ縮める。
-- 差分がMain RAM range不足でない場合、moving hazard更新に関係するscheduler/timer/GPU3D以外の小さなcore状態、またはgame-state比較側のsettle条件を切り分ける。
-- 自然jitterでの長時間検証を増やしつつ、強制probeは実用gateではなく診断stressとして扱う。
+- 追加した `0x02095300+0x300` が他ルートでも安定するか、5400フレーム級の既存ルートと別ルートで再確認する。
+- 強制probe limitを段階的に上げ、次に未復元ページが出るか、Main RAM外の進行状態が問題になるかを切り分ける。
+- 自然jitterでの長時間検証を増やしつつ、全予測外れstressは実用gateではなく診断stressとして扱う。
 
 ## 2026-06-01 latest rollback snapshot focus
 

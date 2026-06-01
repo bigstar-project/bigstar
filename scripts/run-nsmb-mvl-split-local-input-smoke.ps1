@@ -6,6 +6,7 @@ param(
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds",
     [string]$HostInputScript = "tests\nsmb_us_direct_mvl_manual_host_mario_move.inputs",
     [string]$ClientInputScript = "tests\nsmb_us_direct_mvl_manual_client_luigi_move.inputs",
+    [string]$MvlMatchSeed = "",
     [int]$InputDelayFrames = 16,
     [int]$InputMaxFrameLead = 2,
     [switch]$InputNetplayTrace,
@@ -130,6 +131,9 @@ if ($ForceStageActorFreezeFlag) {
 }
 if ($InputNetplayTrace) {
     $common += "-InputNetplayTrace"
+}
+if ($MvlMatchSeed -ne "") {
+    $common += @("-MvlMatchSeed", $MvlMatchSeed)
 }
 if ($InputUnreliable) {
     $common += @("-InputUnreliable", "-InputBundleHistory", "$InputBundleHistory")

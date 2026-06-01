@@ -2786,7 +2786,7 @@ void AddNSMBRollbackDeltaDiscoveredRanges(melonDS::NDS* nds, std::vector<Rollbac
     AddNSMBRollbackRange(nds, ranges, 0x02094800, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02095000, 0x200);
     AddNSMBRollbackRange(nds, ranges, 0x02095200, 0x100);
-    AddNSMBRollbackRange(nds, ranges, 0x02095300, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02095300, 0x300);
     AddNSMBRollbackRange(nds, ranges, 0x02095700, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02096100, 0x100);
     AddNSMBRollbackRange(nds, ranges, 0x02129400, 0x100);
