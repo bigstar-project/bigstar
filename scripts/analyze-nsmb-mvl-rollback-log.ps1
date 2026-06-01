@@ -86,6 +86,18 @@ function Get-LastHeartbeatFrame {
     return $last
 }
 
+function Convert-TraceNumber {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return 0
+    }
+    if ($Value.StartsWith("0x", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return [Convert]::ToInt64($Value.Substring(2), 16)
+    }
+    return [Convert]::ToInt64($Value, 10)
+}
+
 function Get-LongestActorPlateau {
     param([string]$CsvPath, [int]$Player)
 
@@ -98,6 +110,7 @@ function Get-LongestActorPlateau {
     $xField = "playerActor$($Player)X"
     $yField = "playerActor$($Player)Y"
     $deadField = "player$($Player)Dead"
+    $inputField = "inputPlayer$($Player)Held"
 
     $bestRows = 0
     $bestStart = -1
@@ -109,9 +122,13 @@ function Get-LongestActorPlateau {
     $lastKey = ""
 
     foreach ($row in $rows) {
-        $isFound = $row.$foundField -eq "1"
-        $isDead = $row.$deadField -eq "1"
-        if (-not $isFound -or $isDead) {
+        $isFound = (Convert-TraceNumber $row.$foundField) -ne 0
+        $isDead = (Convert-TraceNumber $row.$deadField) -ne 0
+        $hasInput = $true
+        if ($row.PSObject.Properties.Name -contains $inputField) {
+            $hasInput = (Convert-TraceNumber $row.$inputField) -ne 0
+        }
+        if (-not $isFound -or $isDead -or -not $hasInput) {
             $runRows = 0
             $lastKey = ""
             continue

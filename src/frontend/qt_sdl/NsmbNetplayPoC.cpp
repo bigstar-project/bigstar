@@ -1598,6 +1598,8 @@ struct State
     melonDS::u64 LastLoggedGameStateFrame[16] {};
     melonDS::u64 LastSentGameStateFrame[16] {};
     melonDS::u64 LastSentPlayerStateFrame[16] {};
+    melonDS::u32 PlayerActorBaseCache[16][2] {};
+    melonDS::u32 PlayerActorGUIDCache[16][2] {};
     melonDS::u32 TestFrameCount[16] {};
     bool StateSaved[16] {};
     bool StateLoaded[16] {};
@@ -6956,6 +6958,80 @@ PlayerActorScanSample FindPlayerActors(melonDS::NDS* nds)
     return players;
 }
 
+bool ReadPlayerActorByBase(melonDS::NDS* nds, melonDS::u32 base, melonDS::u32 expectedGUID, ObjectScanSample& actor)
+{
+    actor = {};
+    if (!nds || !nds->MainRAM || base < kMainRAMBase)
+        return false;
+
+    const melonDS::u32 off = base - kMainRAMBase;
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (off + 0x120 > ramLen)
+        return false;
+
+    melonDS::u32 vtable = 0;
+    melonDS::u32 guid = 0;
+    melonDS::u32 settings = 0;
+    melonDS::u16 objectID = 0;
+    melonDS::u16 stateType = 0;
+    melonDS::u32 flags = 0;
+    if (!ReadMainRAMU32(nds, off, vtable) ||
+        !ReadMainRAMU32(nds, off + 4, guid) ||
+        !ReadMainRAMU32(nds, off + 8, settings) ||
+        !ReadMainRAMU16(nds, off + 0x0C, objectID) ||
+        !ReadMainRAMU16(nds, off + 0x0E, stateType) ||
+        !ReadMainRAMU32(nds, off + 0x10, flags))
+        return false;
+
+    if (vtable < kMainRAMBase || vtable >= kMainRAMBase + ramLen)
+        return false;
+    if (guid == 0 || guid >= 0x10000)
+        return false;
+    if (expectedGUID != 0 && guid != expectedGUID)
+        return false;
+    if (objectID != kPlayerObjectID)
+        return false;
+    if (stateType != 1 && stateType != 2 && stateType != 3)
+        return false;
+    if (flags >= 0x10000000)
+        return false;
+
+    actor.Found = 1;
+    actor.GUID = guid;
+    actor.Base = base;
+    actor.Settings = settings;
+    actor.StateType = stateType;
+    actor.Flags = flags;
+    ReadObjectTransform(nds, off, actor);
+    return true;
+}
+
+ObjectScanSample GetPlayerActorCached(int instanceID, int player, melonDS::NDS* nds)
+{
+    ObjectScanSample actor;
+    if (instanceID < 0 || instanceID >= 16 || player < 0 || player > 1)
+        return actor;
+
+    const melonDS::u32 cachedBase = G.PlayerActorBaseCache[instanceID][player];
+    const melonDS::u32 cachedGUID = G.PlayerActorGUIDCache[instanceID][player];
+    if (cachedBase != 0 && ReadPlayerActorByBase(nds, cachedBase, cachedGUID, actor))
+        return actor;
+
+    const PlayerActorScanSample players = FindPlayerActors(nds);
+    actor = (player == 0) ? players.Actor0 : players.Actor1;
+    if (actor.Found)
+    {
+        G.PlayerActorBaseCache[instanceID][player] = actor.Base;
+        G.PlayerActorGUIDCache[instanceID][player] = actor.GUID;
+    }
+    else
+    {
+        G.PlayerActorBaseCache[instanceID][player] = 0;
+        G.PlayerActorGUIDCache[instanceID][player] = 0;
+    }
+    return actor;
+}
+
 void ForcePlayerActorIDsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.ForcePlayerActorIDsEnabled || !nds)
@@ -9624,10 +9700,8 @@ void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
     if (!sample.Found)
         return;
 
-    const PlayerActorScanSample localPlayers = FindPlayerActors(nds);
-    const melonDS::u32 localBase = (remotePlayer == 0 && localPlayers.Actor0.Found)
-        ? localPlayers.Actor0.Base
-        : ((remotePlayer == 1 && localPlayers.Actor1.Found) ? localPlayers.Actor1.Base : 0);
+    const ObjectScanSample localActor = GetPlayerActorCached(instanceID, remotePlayer, nds);
+    const melonDS::u32 localBase = localActor.Found ? localActor.Base : 0;
     const melonDS::u32 predictFrames = std::min(
         frame - sampleFrame,
         static_cast<melonDS::u32>(std::max(0, G.PlayerStateMaxPredictFrames)));
@@ -11313,9 +11387,7 @@ void SyncPlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if ((frame % static_cast<melonDS::u32>(G.PlayerStateSyncInterval)) != 0) return;
 
     const int localPlayer = CurrentPacketBridgeLocalPlayer();
-    const bool player0 = localPlayer == 0;
-    const PlayerActorScanSample players = FindPlayerActors(nds);
-    const ObjectScanSample& actor = player0 ? players.Actor0 : players.Actor1;
+    const ObjectScanSample actor = GetPlayerActorCached(instanceID, localPlayer, nds);
     const bool found = actor.Found != 0;
 
     WirePlayerState packet {};

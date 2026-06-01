@@ -48,6 +48,11 @@ param(
     [int]$PlayerStateMaxPredictFrames = 2,
     [switch]$SkipGameStateComparison,
     [switch]$SkipMovementProbe,
+    [switch]$RequireActorSnapshotMovement,
+    [int]$ActorSnapshotStartFrame = 990,
+    [int]$ActorSnapshotMinMovedRows = 1,
+    [int]$ActorSnapshotMaxDriftX = -1,
+    [int]$ActorSnapshotMaxDriftY = -1,
     [switch]$TracePlayerLifeChanges,
     [switch]$TracePlayerDefeated,
     [switch]$RequireStarPickup,
@@ -535,6 +540,134 @@ if ($MinRollbackResims -ge 0) {
     Assert-RollbackResimCount -Role "client" -Text $clientMelonText
 }
 
+function Convert-TraceHexToInt64 {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return 0
+    }
+    if ($Value.StartsWith("0x", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return [Convert]::ToInt64($Value.Substring(2), 16)
+    }
+    return [Convert]::ToInt64($Value, 10)
+}
+
+$hostCsv = Join-Path $hostLog "host.game-state.csv"
+$clientCsv = Join-Path $clientLog "client.game-state.csv"
+$hostRows = $null
+$clientRows = $null
+if (-not $NoGameStateTrace -and ($RequireActorSnapshotMovement -or -not $SkipGameStateComparison)) {
+    if (-not (Test-Path $hostCsv)) {
+        throw "missing host game-state trace: $hostCsv"
+    }
+    if (-not (Test-Path $clientCsv)) {
+        throw "missing client game-state trace: $clientCsv"
+    }
+    $hostRows = @(Import-Csv $hostCsv)
+    $clientRows = @(Import-Csv $clientCsv)
+}
+
+function Assert-ActorSnapshotMovement {
+    param(
+        [object[]]$HostRows,
+        [object[]]$ClientRows
+    )
+
+    function Test-RemoteMovement {
+        param(
+            [string]$Label,
+            [object[]]$Rows,
+            [string]$FoundField,
+            [string]$XField,
+            [string]$InputField
+        )
+
+        $candidateRows = @($Rows | Where-Object {
+            [int]$_.frame -ge $ActorSnapshotStartFrame -and $_.$FoundField -eq "0x1"
+        })
+        if ($candidateRows.Count -lt 2) {
+            throw "$Label actor snapshot movement check failed: rows=$($candidateRows.Count) startFrame=$ActorSnapshotStartFrame"
+        }
+
+        $first = $candidateRows | Select-Object -First 1
+        $last = $candidateRows | Select-Object -Last 1
+        $firstX = Convert-TraceHexToInt64 $first.$XField
+        $inputRows = @($candidateRows | Where-Object { (Convert-TraceHexToInt64 $_.$InputField) -ne 0 })
+        $movedRows = @($candidateRows | Where-Object { (Convert-TraceHexToInt64 $_.$XField) -ne $firstX })
+        if ($inputRows.Count -eq 0 -or $movedRows.Count -lt $ActorSnapshotMinMovedRows) {
+            throw "$Label actor snapshot movement check failed: rows=$($candidateRows.Count) inputRows=$($inputRows.Count) movedRows=$($movedRows.Count) minMoved=$ActorSnapshotMinMovedRows firstX=$($first.$XField) lastX=$($last.$XField) lastInput=$($last.$InputField)"
+        }
+        Write-Host "$Label actor snapshot movement check passed: rows=$($candidateRows.Count) inputRows=$($inputRows.Count) movedRows=$($movedRows.Count) firstX=$($first.$XField) lastX=$($last.$XField)"
+    }
+
+    Test-RemoteMovement `
+        -Label "client remote player0" `
+        -Rows $ClientRows `
+        -FoundField "playerActor0Found" `
+        -XField "playerActor0X" `
+        -InputField "inputPlayer0Held"
+    Test-RemoteMovement `
+        -Label "host remote player1" `
+        -Rows $HostRows `
+        -FoundField "playerActor1Found" `
+        -XField "playerActor1X" `
+        -InputField "inputPlayer1Held"
+
+    if ($ActorSnapshotMaxDriftX -lt 0 -and $ActorSnapshotMaxDriftY -lt 0) {
+        return
+    }
+
+    $hostByFrame = @{}
+    foreach ($row in $HostRows) {
+        $hostByFrame[[int]$row.frame] = $row
+    }
+    $clientByFrame = @{}
+    foreach ($row in $ClientRows) {
+        $clientByFrame[[int]$row.frame] = $row
+    }
+
+    $maxDriftX = 0
+    $maxDriftY = 0
+    $checked = 0
+    foreach ($frame in $hostByFrame.Keys) {
+        if ($frame -lt $ActorSnapshotStartFrame -or -not $clientByFrame.ContainsKey($frame)) {
+            continue
+        }
+
+        $hostRow = $hostByFrame[$frame]
+        $clientRow = $clientByFrame[$frame]
+        foreach ($pair in @(
+            @{ Label = "player0"; Local = $hostRow; Remote = $clientRow; X = "playerActor0X"; Y = "playerActor0Y"; Found = "playerActor0Found" },
+            @{ Label = "player1"; Local = $clientRow; Remote = $hostRow; X = "playerActor1X"; Y = "playerActor1Y"; Found = "playerActor1Found" }
+        )) {
+            if ($pair.Local.($pair.Found) -ne "0x1" -or $pair.Remote.($pair.Found) -ne "0x1") {
+                continue
+            }
+
+            $dx = [Math]::Abs((Convert-TraceHexToInt64 $pair.Local.($pair.X)) - (Convert-TraceHexToInt64 $pair.Remote.($pair.X)))
+            $dy = [Math]::Abs((Convert-TraceHexToInt64 $pair.Local.($pair.Y)) - (Convert-TraceHexToInt64 $pair.Remote.($pair.Y)))
+            if ($dx -gt $maxDriftX) { $maxDriftX = $dx }
+            if ($dy -gt $maxDriftY) { $maxDriftY = $dy }
+            $checked++
+            if ($ActorSnapshotMaxDriftX -ge 0 -and $dx -gt $ActorSnapshotMaxDriftX) {
+                throw "$($pair.Label) actor snapshot X drift too high: frame=$frame dx=$dx limit=$ActorSnapshotMaxDriftX local=$($pair.Local.($pair.X)) remote=$($pair.Remote.($pair.X))"
+            }
+            if ($ActorSnapshotMaxDriftY -ge 0 -and $dy -gt $ActorSnapshotMaxDriftY) {
+                throw "$($pair.Label) actor snapshot Y drift too high: frame=$frame dy=$dy limit=$ActorSnapshotMaxDriftY local=$($pair.Local.($pair.Y)) remote=$($pair.Remote.($pair.Y))"
+            }
+        }
+    }
+
+    if ($checked -eq 0) {
+        throw "actor snapshot drift check failed: no comparable actor rows after frame $ActorSnapshotStartFrame"
+    }
+    Write-Host "actor snapshot movement/drift check passed: checked=$checked maxDriftX=$maxDriftX maxDriftY=$maxDriftY"
+}
+
+if ($RequireActorSnapshotMovement) {
+    Assert-ActorSnapshotMovement -HostRows $hostRows -ClientRows $clientRows
+}
+
 if ($NoGameStateTrace -or $SkipGameStateComparison) {
     Get-Content $hostOut
     Get-Content $clientOut
@@ -542,10 +675,6 @@ if ($NoGameStateTrace -or $SkipGameStateComparison) {
     return
 }
 
-$hostCsv = Join-Path $hostLog "host.game-state.csv"
-$clientCsv = Join-Path $clientLog "client.game-state.csv"
-$hostRows = Import-Csv $hostCsv
-$clientRows = Import-Csv $clientCsv
 $clientByFrame = @{}
 foreach ($row in $clientRows) {
     $clientByFrame[[int]$row.frame] = $row

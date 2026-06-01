@@ -23,18 +23,25 @@ Verification:
   - `logs/codex-playerstate-fastsend-lead8-stress-1600-20260602`: 1600F passed, host/client active FPS about `57.9`, max frame about `36ms`, `over33ms=2`.
   - `logs/codex-playerstate-fastsend-lead8-stress-2400-20260602`: 2400F passed, no rollback/resim, host/client active FPS about `51.6`, max frame `31.979/34.490ms`, `over33ms=0/2`, and both player actor X values moved.
   - `logs/codex-playerstate-interval2-predict1-lead8-stress-2400-20260602`: 2400F passed with send interval 2 and prediction 1, host/client active FPS about `54.5`, max frame `33.074/33.406ms`, `over33ms=0/1`.
+- Added a dedicated actor-snapshot gate for `-SkipGameStateComparison` runs. It checks both directions of remote actor movement, optional host/client coordinate drift, active max frame, over33ms count, and consecutive slow frames.
+- `scripts/analyze-nsmb-mvl-rollback-log.ps1` now parses hex trace fields correctly and only treats actor plateaus as freeze suspects while input is being held. It classifies the user-reported Plan-D-like manual freeze `logs/nsmb-mvl-manual-local-20260601-212956` as `abort/perf-fail`, and the baseline `logs/nsmb-mvl-manual-local-20260601-213213` as `ok`.
+- Player actor base/GUID caching was added for the actor snapshot send/apply path so it does not scan all Main RAM every frame unless the cached actor becomes invalid.
+- Cached actor snapshot verification:
+  - `logs/codex-playerstate-cache-drift-gate-interval2-predict1-2400-20260602`: 2400F passed with movement/drift gate; host/client active FPS about `59.5`.
+  - `logs/codex-playerstate-cache-drift-gate-interval2-predict1-4200-20260602`: 4200F passed with movement/drift gate; host/client active FPS about `59.5`, max frame `33.224/32.548ms`, `over33ms=0/0`, max drift X/Y `12352/16768`.
+  - `logs/codex-playerstate-cache-luigi-death-3600-20260602`: Luigi death/respawn-style probe passed with player death and pipe visibility checks; analyzer status `ok`, active FPS about `59.6`, max frame `40.399/45.362ms`, `over33ms=4/4`, max consecutive slow frames `1/1`.
 - The previous full/core rollback issue is still reproduced in logs: rollback/resim paths can spike into hundreds of ms when many inputs arrive or forced delay causes repeated rollback. The actor snapshot path avoids that mechanism entirely.
 
 Current blocker / caveat:
 
 - Strict full game-state comparison still fails early because the existing comparison assumes deterministic same-frame actor equality. The player-state path is an actor replication/visual correction path, not deterministic rollback. Current CSV traces show player slot/timing differences around frame 930 even while player actor motion is present.
-- This means the actor snapshot path is promising for "does not freeze / does not rollback-spike / remote actor moves", but it is not yet a correctness replacement for rollback.
+- This means the actor snapshot path is now a much more practical Plan-D-like route for "does not freeze / does not rollback-spike / remote actor moves", but it is still not a correctness replacement for deterministic rollback.
 
 Next actions:
 
-- Add a dedicated actor-snapshot validation gate instead of reusing full deterministic game-state comparison: remote actor movement, max coordinate drift, no hard stall, active max frame, over33ms count, and no long consecutive slow frames.
-- Continue reducing per-frame overhead: cache local/remote player actor bases after gameplay start and avoid repeated object scans where possible.
-- Investigate player slot mapping in direct host/client ROMs so actor snapshot comparison can compare host p0 against the correct client actor and vice versa.
+- Stress the cached actor snapshot route with star/result-continuation scripts and manual play commands, keeping `-MaxActiveFrameMs`, `-MaxActiveFrameOver33ms`, `-MaxConsecutiveSlowFrames`, and the actor drift gate enabled.
+- Investigate which non-player globals must be added next for result/death/respawn correctness, without falling back to full savestate or full CPU rollback.
+- Tighten drift thresholds after more route coverage; current permissive gate is meant to catch gross desync/freeze without rejecting normal one-frame timing offset.
 
 ## 2026-06-02 current status - real rollback gate and Plan-D-like retest
 
