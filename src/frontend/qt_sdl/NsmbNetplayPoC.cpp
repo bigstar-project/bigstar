@@ -10322,6 +10322,7 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
             if (localItem.StateType == 1)
             {
                 itemApplied = ApplyWireWorldActorState(nds, sample.Item, predictFrames, localItem.Base);
+                G.LastSpawnedWorldItemRemoteGUID[instanceID] = sample.Item.GUID;
                 if (G.LastConfirmedWorldItemRemoteGUID[instanceID] != sample.Item.GUID)
                 {
                     G.LastConfirmedWorldItemRemoteGUID[instanceID] = sample.Item.GUID;
