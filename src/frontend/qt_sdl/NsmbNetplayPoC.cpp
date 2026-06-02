@@ -1613,6 +1613,7 @@ struct State
     melonDS::u64 LastLoggedGameStateFrame[16] {};
     melonDS::u64 LastSentGameStateFrame[16] {};
     melonDS::u64 LastSentPlayerStateFrame[16] {};
+    melonDS::u32 LastAppliedPlayerGlobalsFrame[16][2] {};
     melonDS::u32 PlayerActorBaseCache[16][2] {};
     melonDS::u32 PlayerActorGUIDCache[16][2] {};
     melonDS::u32 TestFrameCount[16] {};
@@ -9853,7 +9854,12 @@ void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
         if (!FindLatestRemotePlayerStateLocked(static_cast<melonDS::u32>(remotePlayer), frame, sample, sampleFrame))
             return;
     }
-    const bool globalsApplied = G.PlayerStateGlobalsEnabled && WritePlayerGlobalState(nds, sample);
+    const bool shouldApplyGlobals =
+        G.PlayerStateGlobalsEnabled &&
+        sampleFrame > G.LastAppliedPlayerGlobalsFrame[instanceID][remotePlayer];
+    const bool globalsApplied = shouldApplyGlobals && WritePlayerGlobalState(nds, sample);
+    if (globalsApplied)
+        G.LastAppliedPlayerGlobalsFrame[instanceID][remotePlayer] = sampleFrame;
     if (!sample.Found)
     {
         if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
