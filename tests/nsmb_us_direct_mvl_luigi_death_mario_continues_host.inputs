@@ -1,0 +1,10 @@
+# Direct MvL death/freeze probe for the split host.
+# Mario keeps moving while Luigi exercises the death and pipe-respawn path.
+
+0-619 NONE
+620-627 DOWN
+628-659 NONE
+660-667 A
+668-899 NONE
+900-1399 RIGHT+B
+1400-3600 RIGHT
