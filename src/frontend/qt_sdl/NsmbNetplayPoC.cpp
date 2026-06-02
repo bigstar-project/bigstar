@@ -11258,19 +11258,33 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
     }
 }
 
-void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, bool preferFreshSample = false)
 {
     if (!G.Enabled || !G.WorldStateApplyMovingHazard || G.NetRole != Role::Client) return;
     if (instanceID < 0 || instanceID >= 16 || !nds || !nds->MainRAM) return;
     if (frame < G.NetplayStartFrame) return;
 
     WireMovingHazardState sample {};
+    bool sampleValid = false;
+    const auto waitDeadline = std::chrono::steady_clock::now() + std::chrono::microseconds(1500);
     {
-        std::lock_guard<std::mutex> lock(G.Mutex);
-        PumpNetworkLocked();
-        if (!G.RemoteMovingHazardStateSampleValid)
+        while (true)
+        {
+            {
+                std::lock_guard<std::mutex> lock(G.Mutex);
+                PumpNetworkLocked();
+                if (G.RemoteMovingHazardStateSampleValid)
+                {
+                    sample = G.RemoteMovingHazardStateSample;
+                    sampleValid = true;
+                }
+            }
+            if (!preferFreshSample || sample.Frame >= frame || std::chrono::steady_clock::now() >= waitDeadline)
+                break;
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
+        if (!sampleValid || (preferFreshSample && sample.Frame < frame))
             return;
-        sample = G.RemoteMovingHazardStateSample;
     }
 
     const std::vector<ObjectScanSample> localActors = GetWorldMovingHazardsCached(instanceID, frame, nds);
@@ -11581,7 +11595,7 @@ bool FindLatestRemotePlayerStateLocked(melonDS::u32 player, melonDS::u32 frame, 
     return found;
 }
 
-void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, bool preferFreshSample = false)
 {
     if (!G.Enabled || !G.PlayerStateApplyEnabled) return;
     if (instanceID < 0 || instanceID >= 16 || !nds || !nds->MainRAM) return;
@@ -11590,10 +11604,21 @@ void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
     const int remotePlayer = CurrentPacketBridgeLocalPlayer() ^ 1;
     WirePlayerState sample {};
     melonDS::u32 sampleFrame = 0;
+    bool sampleValid = false;
+    const auto waitDeadline = std::chrono::steady_clock::now() + std::chrono::microseconds(500);
     {
-        std::lock_guard<std::mutex> lock(G.Mutex);
-        PumpNetworkLocked();
-        if (!FindLatestRemotePlayerStateLocked(static_cast<melonDS::u32>(remotePlayer), frame, sample, sampleFrame))
+        while (true)
+        {
+            {
+                std::lock_guard<std::mutex> lock(G.Mutex);
+                PumpNetworkLocked();
+                sampleValid = FindLatestRemotePlayerStateLocked(static_cast<melonDS::u32>(remotePlayer), frame, sample, sampleFrame);
+            }
+            if (!preferFreshSample || (sampleValid && sampleFrame >= frame) || std::chrono::steady_clock::now() >= waitDeadline)
+                break;
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
+        if (!sampleValid || (preferFreshSample && sampleFrame < frame))
             return;
     }
     const bool shouldApplyGlobals =
@@ -15855,7 +15880,17 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     const auto afterArtifacts = std::chrono::steady_clock::now();
     const auto afterPreSnapshot = std::chrono::steady_clock::now();
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        ApplyRemoteMovingHazardState(instanceID, logFrame, nds);
+        SyncWorldState(instanceID, logFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        SyncWorldEffectState(instanceID, logFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        SyncMovingHazardState(instanceID, logFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        SyncWorldActorSnapshotState(instanceID, logFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        SyncPlayerState(instanceID, logFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyRemoteMovingHazardState(instanceID, logFrame, nds, true);
     const auto afterApplyHazard = std::chrono::steady_clock::now();
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteWorldActorSnapshotState(instanceID, logFrame, nds);
@@ -15865,7 +15900,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         ApplyRemoteWorldEffectState(instanceID, logFrame, nds);
     const auto afterApplyWorld = std::chrono::steady_clock::now();
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        ApplyRemotePlayerState(instanceID, logFrame, nds);
+        ApplyRemotePlayerState(instanceID, logFrame, nds, true);
     const auto afterApplyPlayer = std::chrono::steady_clock::now();
     TraceGameState(instanceID, logFrame, nds);
     const auto afterTrace = std::chrono::steady_clock::now();

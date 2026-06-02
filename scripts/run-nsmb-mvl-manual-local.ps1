@@ -141,6 +141,9 @@ if ($PlanDActorSnapshot) {
     if (-not $PSBoundParameters.ContainsKey('NetworkPumpSleepUs')) { $NetworkPumpSleepUs = 50 }
     if (-not $PSBoundParameters.ContainsKey('StallTimeoutMs')) { $StallTimeoutMs = 5000 }
     if (-not $PSBoundParameters.ContainsKey('WorldStateApplyActorSnapshot')) { $WorldStateApplyActorSnapshot = $true }
+    if (-not $PSBoundParameters.ContainsKey('WorldStateSyncInterval')) { $WorldStateSyncInterval = 1 }
+    if (-not $PSBoundParameters.ContainsKey('WorldStateMaxPredictFrames')) { $WorldStateMaxPredictFrames = 2 }
+    if (-not $PSBoundParameters.ContainsKey('PlayerStateMaxPredictFrames')) { $PlayerStateMaxPredictFrames = 1 }
     if (-not $PSBoundParameters.ContainsKey('GameplayHeartbeatInterval')) { $GameplayHeartbeatInterval = 120 }
 }
 
