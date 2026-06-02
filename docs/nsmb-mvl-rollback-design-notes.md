@@ -2,7 +2,7 @@
 
 ## 2026-06-02 current status - Plan-D actor/global snapshot path
 
-Current best Plan-D-like direction is no longer a rollback backend. It is a small per-player actor snapshot path that avoids full NDS rollback restore/resim:
+Current best Plan-D-like direction is no longer a rollback backend. It is a small actor/global/world snapshot path that avoids full NDS rollback restore/resim:
 
 - New wire packet: `WirePlayerState`, 168 bytes. The base actor fields are always present; player global fields are read/applied only when `MELONDS_NSML_PLAYER_STATE_GLOBALS=1`.
 - New host-authoritative wire packets: `WireWorldState`, 220 bytes, for the real Big Star actor; and `WireMovingHazardState`, 424 bytes, for up to four active moving-hazard actors.
@@ -66,6 +66,17 @@ Verification:
   - `logs/codex-worldhazards-processlist-luigi-death-3720-20260602`: death/respawn passed, moving-hazard max drift `2048/3072`, active avg `16.898/16.899ms`, max `42.804/48.631ms`.
   - `logs/codex-worldhazards-processlist-result-restart-6200-20260602`: result/restart into a second MvL game passed, moving-hazard max drift `4096/0`, active avg `16.908/16.908ms`, max `49.980/49.207ms`.
   - `logs/codex-manual-pland-worldhazard-launch-1800-20260602`: visible-window `-PlanDActorSnapshot` launch completed with active avg `17.462/17.461ms`, max `31.970/30.764ms`, and `over33ms=0/0`.
+- Added `-RequireMvlManagerGlobalSync`, an observation-only gate for 31 selected MvL manager/global/stage-scene fields. It intentionally does not add runtime writes when the trace already agrees:
+  - `logs/codex-mvlmanager-gate-result-restart-6200-20260602`: result/restart passed with `177` compared rows, Big Star drift `0/0`, moving-hazard max drift `4096/0`, active avg `16.800/16.801ms`, max `62.290/63.555ms`.
+  - `logs/codex-mvlmanager-gate-repeat-result-threegame-12000-20260602`: three-game repeated result/restart passed with `371` compared rows, Big Star drift `0/0`, moving-hazard max drift `4096/0`, active avg `16.773/16.773ms`, max `47.360/45.596ms`.
+- Real Big Star acquisition is now covered by a deterministic probe. `tests/nsmb_us_direct_mvl_luigi_star_right.inputs` depends on initial star placement, so the reliable condition is `-MvlMatchSeed 0x19FE5603`:
+  - `logs/codex-pland-luigi-star-right-seed19fe5603-2600-20260602`: Luigi collected the real star with Plan-D snapshots enabled, Big Star drift `0/0`, moving-hazard max drift `2048/0`, active avg `16.867/16.869ms`, max `39.714/41.264ms`.
+  - `logs/codex-pland-luigi-star-right-settle-seed19fe5603-3200-20260602`: the post-collection star counter and respawned star converged on both sides. This rejects the earlier apparent failure from a run whose random initial star was at `0x3c0000` instead of the probe-compatible `0x90000`.
+- The split wrapper now forwards `-MvlStage`, `-MvlSceneSettings`, `-MvlBigStars`, `-MvlLives`, `-MvlCourseMode`, and `-GenerateMvlConfiguredRoms`. Configured-ROM generation uses the unpatched default source `roms/nsmb-us.nds` through `-GenerateMvlSourceRom`.
+- Plan-D stage variation matrix passed for all five courses with generated ROMs, move/dash/jump stress, player actor movement gate, Big Star drift gate, moving-hazard drift gate, manager/global gate, and frame-spike gate:
+  - `logs/codex-pland-world-stage0-generated-stress-2400-20260602` through `logs/codex-pland-world-stage4-generated-stress-2400-20260602`.
+  - Host/client active averages ranged from `16.918ms` to `17.676ms`; maxima ranged from `35.407ms` to `63.668ms`.
+  - Courses `0` and `1` exercised the tracked `0x0053` hazard with max drift `2048/0`. Courses `2`, `3`, and `4` had no tracked `0x0053` hazard in the sampled route. All courses kept Big Star drift at `0/0`.
 - `scripts/analyze-nsmb-mvl-rollback-log.ps1` now also classifies single-frame or short-run spikes over `MaxSingleFrameMs` as `perf-fail`, so a run like the old 353ms death/pipe case cannot be reported as `ok` just because the average FPS is acceptable. It also avoids marking a completed result-scene trace as a freeze solely because player actors are stationary during the result transition.
 - Star/result-continuation route is not a useful actor-snapshot correctness failure yet: `logs/codex-playerstate-cache-star-result-continue-9000-20260602` reached result/restart and held about `59.6fps`, but `RequireStarPickup` failed because star counters stayed `0/0`. Existing baseline `logs/codex-rollback-baseline-starcollect-6200-skipmove-20260601` shows the same `result ... stars=0/0 collected=0/0`, so this route/check needs cleanup before being used as a blocker for actor snapshot.
 - The previous full/core rollback issue is still reproduced in logs: rollback/resim paths can spike into hundreds of ms when many inputs arrive or forced delay causes repeated rollback. The actor snapshot path avoids that mechanism entirely.
@@ -76,15 +87,16 @@ Current blocker / caveat:
 - The 10000F route no longer freezes under automated result/restart stress, but ordinary non-rollback frame spikes still exist (`54-56ms` max in that run). Manual play remains required before promotion.
 - Added `tests/nsmb_us_direct_mvl_repeat_result_stress.inputs` and exposed `-MvlWins` in the split wrapper. A 12000F repeated death/result/checkpoint-restart route reached MvL stage entries at frames `870`, `5790`, and `9990`. One post-change performance run `logs/codex-playerglobal-globals-once-repeat-result-threegame-12000-20260602` failed the single-frame spike gate because both processes stalled together around frame `2464`, before result restart, with max `278.678/273.749ms`. An immediate identical rerun `logs/codex-playerglobal-globals-once-repeat-result-threegame-rerun-12000-20260602` passed with active avg `17.262/17.262ms`, max `80.939/75.063ms`, and max consecutive slow frames `2/2`. The 278ms group is not a fixed game-transition cost, but occasional paired-process stalls remain a performance caveat.
 - A normal 4200F Big Star world-gate run also reproduced an occasional paired-process stall at frame `3571`: `logs/codex-worldstate-star-gate-normal-stress-4200-20260602` reached `825.170/823.892ms`. The immediate identical rerun passed with max `43.936/40.535ms`. This remains a detected caveat, not a hidden average-FPS issue.
-- Moving hazards now use a compact multi-instance snapshot, but the current mapping relies on creation-order alignment plus equal active counts. It needs longer manual play and stage variation before being treated as complete.
+- Moving hazards now use a compact multi-instance snapshot, but the current mapping relies on creation-order alignment plus equal active counts. Automated stage variation passed; longer manual play is still required before treating it as complete.
+- The selected MvL manager/global/stage-scene fields stayed equal during real star acquisition and repeated result/restart. Do not add blind runtime writes for them unless the new observation gate finds a concrete divergent route.
 - This means the actor/global snapshot path is now a much more practical Plan-D-like route for "does not freeze / does not rollback-spike / remote actor moves / pipe death visibility survives", but it is still not a correctness replacement for deterministic rollback.
 
 Next actions:
 
 - Stress the actor+global route with longer manual play, especially repeated result/restart, star acquisition, fall death, respawn, and pipe transitions. Keep automatic FPS-spike logging enabled in manual Plan-D mode.
 - Keep the three-game stress route in repeated performance sweeps so occasional paired-process stalls remain visible instead of being hidden by average FPS.
-- Stress the compact multi-instance moving-hazard snapshot with longer manual play and stage variation. Keep the strict drift gate enabled in automation.
-- Continue investigating which non-player globals must be added for result/star correctness, without falling back to full savestate or full CPU rollback.
+- Stress the compact multi-instance moving-hazard snapshot with longer manual play. Keep the strict drift gate enabled in automation.
+- Use the MvL manager/global observation gate on new routes and add only fields that show a concrete persistent mismatch, without falling back to full savestate or full CPU rollback.
 - Tighten drift thresholds after more route coverage; the current sustained-drift gate is meant to catch gross desync/freeze without rejecting a transient one-row correction.
 
 ## 2026-06-02 current status - real rollback gate and Plan-D-like retest

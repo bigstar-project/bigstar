@@ -4,10 +4,17 @@ param(
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds",
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds",
+    [string]$GenerateMvlSourceRom = "roms\nsmb-us.nds",
     [string]$HostInputScript = "tests\nsmb_us_direct_mvl_manual_host_mario_move.inputs",
     [string]$ClientInputScript = "tests\nsmb_us_direct_mvl_manual_client_luigi_move.inputs",
     [string]$MvlMatchSeed = "",
+    [int]$MvlStage = -1,
+    [string]$MvlSceneSettings = "",
     [ValidateSet(1, 2, 3)] [int]$MvlWins = 2,
+    [ValidateSet(3, 5, 10)] [int]$MvlBigStars = 5,
+    [ValidateSet("3", "5", "endless", "Endless")] [string]$MvlLives = "endless",
+    [ValidateSet("fixed", "random", "select")] [string]$MvlCourseMode = "fixed",
+    [switch]$GenerateMvlConfiguredRoms,
     [int]$InputDelayFrames = 16,
     [int]$InputMaxFrameLead = 2,
     [switch]$InputNetplayTrace,
@@ -72,6 +79,8 @@ param(
     [int]$WorldSnapshotMaxHazardDriftX = -1,
     [int]$WorldSnapshotMaxHazardDriftY = -1,
     [int]$WorldSnapshotMaxHazardConsecutiveDriftRows = 0,
+    [switch]$RequireMvlManagerGlobalSync,
+    [int]$MvlManagerGlobalSnapshotStartFrame = 900,
     [switch]$TracePlayerLifeChanges,
     [switch]$TracePlayerDefeated,
     [switch]$RequireStarPickup,
@@ -194,6 +203,9 @@ $common = @(
     "-Frames", "$Frames",
     "-Exe", $Exe,
     "-MvlWins", "$MvlWins",
+    "-MvlBigStars", "$MvlBigStars",
+    "-MvlLives", "$MvlLives",
+    "-MvlCourseMode", "$MvlCourseMode",
     "-ScreenshotInterval", "0",
     "-NoHashLog",
     "-SkipDisconnectScreenshotCheck",
@@ -355,6 +367,15 @@ if ($CheckVsPipeRespawnVisibility) {
 }
 if ($MvlMatchSeed -ne "") {
     $common += @("-MvlMatchSeed", $MvlMatchSeed)
+}
+if ($MvlStage -ge 0) {
+    $common += @("-MvlStage", "$MvlStage")
+}
+if ($MvlSceneSettings -ne "") {
+    $common += @("-MvlSceneSettings", "$MvlSceneSettings")
+}
+if ($GenerateMvlConfiguredRoms) {
+    $common += @("-GenerateMvlConfiguredRoms", "-Rom", "$GenerateMvlSourceRom")
 }
 if ($InputUnreliable) {
     $common += @("-InputUnreliable", "-InputBundleHistory", "$InputBundleHistory")
@@ -624,7 +645,7 @@ $hostCsv = Join-Path $hostLog "host.game-state.csv"
 $clientCsv = Join-Path $clientLog "client.game-state.csv"
 $hostRows = $null
 $clientRows = $null
-if (-not $NoGameStateTrace -and ($RequireActorSnapshotMovement -or $RequireWorldSnapshotSync -or -not $SkipGameStateComparison)) {
+if (-not $NoGameStateTrace -and ($RequireActorSnapshotMovement -or $RequireWorldSnapshotSync -or $RequireMvlManagerGlobalSync -or -not $SkipGameStateComparison)) {
     if (-not (Test-Path $hostCsv)) {
         throw "missing host game-state trace: $hostCsv"
     }
@@ -825,6 +846,59 @@ function Assert-WorldSnapshotSync {
 
 if ($RequireWorldSnapshotSync) {
     Assert-WorldSnapshotSync -HostRows $hostRows -ClientRows $clientRows
+}
+
+function Assert-MvlManagerGlobalSync {
+    param(
+        [object[]]$HostRows,
+        [object[]]$ClientRows
+    )
+
+    $fields = @(
+        "mvlGlobal965C", "mvlGlobal9670", "mvlGlobal9674", "mvlGlobal9694_0", "mvlGlobal9694_1",
+        "mvlManagerStateType", "mvlManagerFlags", "mvlManagerUnk54",
+        "mvlManagerWordA8CC", "mvlManagerWordA8D0", "mvlManagerWordA8D4", "mvlManagerWordA8D8",
+        "mvlManagerWordA8DC", "mvlManagerWordA8E0", "mvlManagerWordA8E4",
+        "mvlManagerHalfA8E8", "mvlManagerHalfA8EA", "mvlManagerByteA8EC",
+        "mvlManagerHalf494", "mvlManagerHalf4A0",
+        "stageSceneWord154", "stageSceneWord160", "stageSceneWord5618", "stageSceneWord561C",
+        "stageSceneWord563C", "stageSceneByte5643", "stageSceneByte5644", "stageSceneByte5645",
+        "stageSceneByte5646", "stageSceneByte5648", "stageSceneByte5649"
+    )
+
+    $clientByFrame = @{}
+    foreach ($row in $ClientRows) {
+        $clientByFrame[[int]$row.frame] = $row
+    }
+
+    $checkedRows = 0
+    $managerObservedRows = 0
+    foreach ($hostRow in $HostRows) {
+        $frame = [int]$hostRow.frame
+        if ($frame -lt $MvlManagerGlobalSnapshotStartFrame -or -not $clientByFrame.ContainsKey($frame)) {
+            continue
+        }
+
+        $clientRow = $clientByFrame[$frame]
+        $checkedRows++
+        if ($hostRow.mvlManagerBase -ne "0x0" -or $clientRow.mvlManagerBase -ne "0x0") {
+            $managerObservedRows++
+        }
+        foreach ($field in $fields) {
+            if ($hostRow.$field -ne $clientRow.$field) {
+                throw "MvL manager/global snapshot mismatch: frame=$frame field=$field host=$($hostRow.$field) client=$($clientRow.$field)"
+            }
+        }
+    }
+
+    if ($checkedRows -eq 0) {
+        throw "MvL manager/global snapshot check failed: no comparable rows after frame $MvlManagerGlobalSnapshotStartFrame"
+    }
+    Write-Host "MvL manager/global snapshot check passed: checkedRows=$checkedRows managerObservedRows=$managerObservedRows fields=$($fields.Count)"
+}
+
+if ($RequireMvlManagerGlobalSync) {
+    Assert-MvlManagerGlobalSync -HostRows $hostRows -ClientRows $clientRows
 }
 
 if ($NoGameStateTrace -or $SkipGameStateComparison) {
