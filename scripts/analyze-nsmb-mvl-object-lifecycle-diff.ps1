@@ -2,10 +2,19 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$LogDir,
 
-    [int]$MinRows = 1
+    [int]$MinRows = 1,
+
+    [string[]]$IgnoreActors = @(),
+
+    [switch]$FailOnDifference
 )
 
 $ErrorActionPreference = "Stop"
+$ignoreActorPatterns = @(
+    $IgnoreActors |
+        ForEach-Object { $_ -split "," } |
+        Where-Object { $_ }
+)
 
 function Read-ActorRows {
     param(
@@ -88,12 +97,20 @@ $summary = @(
             }
         } |
         Where-Object { $_.Rows -ge $MinRows } |
+        Where-Object {
+            $actor = $_.Actor
+            @($ignoreActorPatterns | Where-Object { $actor -like $_ }).Count -eq 0
+        } |
         Sort-Object @{ Expression = "Rows"; Descending = $true }, Actor
 )
 
 if ($summary.Count -eq 0) {
-    Write-Host "No lifecycle actor-count differences matched the requested threshold."
+    Write-Host "No unexpected lifecycle actor-count differences matched the requested threshold."
     return
 }
 
 $summary | Format-Table -AutoSize
+
+if ($FailOnDifference) {
+    throw "Unexpected lifecycle actor-count differences detected."
+}

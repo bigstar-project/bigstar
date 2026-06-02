@@ -65,6 +65,7 @@ param(
     [int]$WorldStateTraceObjectLifecyclesInterval = 60,
     [int]$WorldStateTraceObjectLifecyclesStartFrame = 0,
     [int]$WorldStateTraceObjectLifecyclesEndFrame = 0,
+    [switch]$RequireNoUnexpectedWorldLifecycleDiff,
     [switch]$WorldStateSkipMovingHazard,
     [int]$WorldStateSyncInterval = 2,
     [int]$WorldStateMaxPredictFrames = 1,
@@ -950,6 +951,16 @@ function Assert-MvlManagerGlobalSync {
 
 if ($RequireMvlManagerGlobalSync) {
     Assert-MvlManagerGlobalSync -HostRows $hostRows -ClientRows $clientRows
+}
+
+if ($RequireNoUnexpectedWorldLifecycleDiff) {
+    if (-not $WorldStateTraceObjectLifecycles) {
+        throw "-RequireNoUnexpectedWorldLifecycleDiff requires -WorldStateTraceObjectLifecycles"
+    }
+    & (Join-Path $PSScriptRoot "analyze-nsmb-mvl-object-lifecycle-diff.ps1") `
+        -LogDir $logRoot `
+        -IgnoreActors "012/*,0F0/01080002" `
+        -FailOnDifference
 }
 
 if ($NoGameStateTrace -or $SkipGameStateComparison) {
