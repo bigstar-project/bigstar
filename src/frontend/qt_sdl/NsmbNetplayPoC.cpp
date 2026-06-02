@@ -378,7 +378,7 @@ constexpr melonDS::u32 kWireKindWorldEffectState = 0x54434645; // "EFCT", little
 constexpr melonDS::u32 kWireKindWorldActorSnapshot = 0x54434157; // "WACT", little endian
 constexpr std::size_t kMaxWorldMovingHazards = 4;
 constexpr std::size_t kMaxWorldEffects = 4;
-constexpr std::size_t kMaxWorldActorSnapshots = 12;
+constexpr std::size_t kMaxWorldActorSnapshots = 16;
 
 static_assert(sizeof(WireSeed) == 16);
 
@@ -635,7 +635,7 @@ struct WireWorldActorSnapshotState
 };
 
 static_assert(sizeof(WireWorldObjectActorState) == 104);
-static_assert(sizeof(WireWorldActorSnapshotState) == 1272);
+static_assert(sizeof(WireWorldActorSnapshotState) == 1688);
 
 struct WireWorldEffectSlot
 {
@@ -10723,6 +10723,7 @@ bool IsWorldActorSnapshotCandidate(const GameStateObjectScanEntry& entry)
     case kStageFXObjectID:
     case kStageActorManagerObjectID:
     case kStageControllerObjectID:
+    case kMvlObject267ID:
     case kVsConnectObjectID:
     case kCourseSelectObjectID:
     case kStageCameraObjectID:
@@ -15547,7 +15548,7 @@ void TraceGameplayHeartbeatIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
         "NSMB GameplayHeartbeat: role=%s inst=%d frame=%u "
         "p0=%u/%08X/%08X/%08X/%08X/%08X "
         "p1=%u/%08X/%08X/%08X/%08X/%08X "
-        "objects=%u/%u/%u/%u/%u/%u\n",
+        "objects=%u/%u/%u/%u/%u/%u",
         G.NetRole == Role::Host ? "host" : "client",
         instanceID,
         frame,
@@ -15569,6 +15570,14 @@ void TraceGameplayHeartbeatIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
         objects.NotCreated,
         objects.SkipUpdate,
         objects.SkipRender);
+    std::printf(" activeIds=");
+    for (std::size_t i = 0; i < kObjectTraceSlots; i++)
+    {
+        if (i != 0)
+            std::printf(",");
+        std::printf("%03X:%08X", objects.ActiveID[i], objects.ActiveSettings[i]);
+    }
+    std::printf("\n");
     std::fflush(stdout);
 }
 

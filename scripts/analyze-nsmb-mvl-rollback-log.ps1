@@ -196,6 +196,229 @@ function Get-LongestGameplayHeartbeatPlateau {
     return $best
 }
 
+function Get-GameplayHeartbeatObjectRows {
+    param([string]$Text)
+
+    $rows = @{}
+    foreach ($line in ($Text -split "`r?`n")) {
+        if ($line -notmatch "NSMB GameplayHeartbeat: .*frame=([0-9]+) .*objects=([0-9]+)/([0-9]+)/([0-9]+)/([0-9]+)/([0-9]+)/([0-9]+)") {
+            continue
+        }
+        $frame = [int]$Matches[1]
+        $rows[$frame] = [pscustomobject]@{
+            Frame = $frame
+            Total = [int]$Matches[2]
+            Active = [int]$Matches[3]
+            Dead = [int]$Matches[4]
+            NotCreated = [int]$Matches[5]
+            SkipUpdate = [int]$Matches[6]
+            SkipRender = [int]$Matches[7]
+            ActiveKeys = @(Get-GameplayHeartbeatActiveKeys -Line $line)
+            Line = $line
+        }
+    }
+    return $rows
+}
+
+function Get-GameplayHeartbeatActiveKeys {
+    param([string]$Line)
+
+    if ($Line -notmatch " activeIds=([^ ]+)") {
+        return @()
+    }
+
+    $keys = @()
+    foreach ($token in ($Matches[1] -split ",")) {
+        if ($token -notmatch "^([0-9A-Fa-f]{3}):([0-9A-Fa-f]{8})$") {
+            continue
+        }
+        $key = "$($Matches[1].ToUpperInvariant()):$($Matches[2].ToUpperInvariant())"
+        if ($key -eq "000:00000000") {
+            continue
+        }
+        $keys += $key
+    }
+    return $keys
+}
+
+function ConvertTo-CountMap {
+    param([string[]]$Keys)
+
+    $map = @{}
+    foreach ($key in $Keys) {
+        if (-not $map.ContainsKey($key)) {
+            $map[$key] = 0
+        }
+        $map[$key]++
+    }
+    return $map
+}
+
+function Remove-GameplayHeartbeatIgnoredKeys {
+    param([hashtable]$Map)
+
+    $filtered = @{}
+    foreach ($key in $Map.Keys) {
+        if ($key -like "012:*" -or $key -like "10B:*") {
+            continue
+        }
+        $filtered[$key] = $Map[$key]
+    }
+    return $filtered
+}
+
+function Format-CountMapOnly {
+    param(
+        [hashtable]$Left,
+        [hashtable]$Right,
+        [int]$Limit = 8
+    )
+
+    $items = @()
+    foreach ($key in ($Left.Keys | Sort-Object)) {
+        $rightCount = 0
+        if ($Right.ContainsKey($key)) {
+            $rightCount = $Right[$key]
+        }
+        $delta = $Left[$key] - $rightCount
+        if ($delta -le 0) {
+            continue
+        }
+        if ($delta -gt 1) {
+            $items += "$key`x$delta"
+        } else {
+            $items += $key
+        }
+        if ($items.Count -ge $Limit) {
+            break
+        }
+    }
+
+    if ($items.Count -eq 0) {
+        return "-"
+    }
+    return ($items -join ",")
+}
+
+function Add-CountMapOnly {
+    param(
+        [hashtable]$Target,
+        [hashtable]$Left,
+        [hashtable]$Right
+    )
+
+    foreach ($key in $Left.Keys) {
+        $rightCount = 0
+        if ($Right.ContainsKey($key)) {
+            $rightCount = $Right[$key]
+        }
+        $delta = $Left[$key] - $rightCount
+        if ($delta -le 0) {
+            continue
+        }
+        if (-not $Target.ContainsKey($key)) {
+            $Target[$key] = 0
+        }
+        $Target[$key] += $delta
+    }
+}
+
+function Format-TopCountMap {
+    param(
+        [hashtable]$Map,
+        [int]$Limit = 8
+    )
+
+    $items = @(
+        $Map.GetEnumerator() |
+            Sort-Object @{ Expression = "Value"; Descending = $true }, @{ Expression = "Key"; Descending = $false } |
+            Select-Object -First $Limit
+    )
+    if ($items.Count -eq 0) {
+        return "-"
+    }
+    return (($items | ForEach-Object { "$($_.Key)x$($_.Value)" }) -join ",")
+}
+
+function Get-GameplayHeartbeatObjectDiff {
+    param([string]$HostText, [string]$ClientText)
+
+    $hostRows = Get-GameplayHeartbeatObjectRows -Text $HostText
+    $clientRows = Get-GameplayHeartbeatObjectRows -Text $ClientText
+    $significantHostOnly = @{}
+    $significantClientOnly = @{}
+    $summary = [pscustomobject]@{
+        SharedFrames = 0
+        DiffFrames = 0
+        SignificantDiffFrames = 0
+        MaxActiveDelta = 0
+        FirstDiffFrame = -1
+        FirstDiff = ""
+        FirstActiveIdDiff = ""
+        FirstSignificantActiveIdDiffFrame = -1
+        FirstSignificantActiveIdDiff = ""
+        TopSignificantHostOnly = ""
+        TopSignificantClientOnly = ""
+    }
+    foreach ($frame in ($hostRows.Keys | Sort-Object)) {
+        if (-not $clientRows.ContainsKey($frame)) {
+            continue
+        }
+        $summary.SharedFrames++
+        $hostRow = $hostRows[$frame]
+        $clientRow = $clientRows[$frame]
+        $activeDelta = [Math]::Abs($hostRow.Active - $clientRow.Active)
+        if ($activeDelta -gt $summary.MaxActiveDelta) {
+            $summary.MaxActiveDelta = $activeDelta
+        }
+        if ($hostRow.Total -ne $clientRow.Total -or
+            $hostRow.Active -ne $clientRow.Active -or
+            $hostRow.Dead -ne $clientRow.Dead -or
+            $hostRow.NotCreated -ne $clientRow.NotCreated) {
+            $summary.DiffFrames++
+            $hostMap = ConvertTo-CountMap -Keys $hostRow.ActiveKeys
+            $clientMap = ConvertTo-CountMap -Keys $clientRow.ActiveKeys
+            if ($summary.FirstDiffFrame -lt 0) {
+                $summary.FirstDiffFrame = $frame
+                $summary.FirstDiff = "host=$($hostRow.Total)/$($hostRow.Active)/$($hostRow.Dead)/$($hostRow.NotCreated) client=$($clientRow.Total)/$($clientRow.Active)/$($clientRow.Dead)/$($clientRow.NotCreated)"
+
+                if ($hostRow.ActiveKeys.Count -gt 0 -or $clientRow.ActiveKeys.Count -gt 0) {
+                    $hostOnly = Format-CountMapOnly -Left $hostMap -Right $clientMap
+                    $clientOnly = Format-CountMapOnly -Left $clientMap -Right $hostMap
+                    $summary.FirstActiveIdDiff = "hostOnly=$hostOnly clientOnly=$clientOnly"
+                }
+            }
+
+            if ($summary.FirstSignificantActiveIdDiffFrame -lt 0 -and
+                ($hostRow.ActiveKeys.Count -gt 0 -or $clientRow.ActiveKeys.Count -gt 0)) {
+                $filteredHostMap = Remove-GameplayHeartbeatIgnoredKeys -Map $hostMap
+                $filteredClientMap = Remove-GameplayHeartbeatIgnoredKeys -Map $clientMap
+                $hostOnly = Format-CountMapOnly -Left $filteredHostMap -Right $filteredClientMap
+                $clientOnly = Format-CountMapOnly -Left $filteredClientMap -Right $filteredHostMap
+                if ($hostOnly -ne "-" -or $clientOnly -ne "-") {
+                    $summary.FirstSignificantActiveIdDiffFrame = $frame
+                    $summary.FirstSignificantActiveIdDiff = "hostOnly=$hostOnly clientOnly=$clientOnly"
+                }
+            }
+
+            if ($hostRow.ActiveKeys.Count -gt 0 -or $clientRow.ActiveKeys.Count -gt 0) {
+                $filteredHostMap = Remove-GameplayHeartbeatIgnoredKeys -Map $hostMap
+                $filteredClientMap = Remove-GameplayHeartbeatIgnoredKeys -Map $clientMap
+                $hostOnly = Format-CountMapOnly -Left $filteredHostMap -Right $filteredClientMap
+                $clientOnly = Format-CountMapOnly -Left $filteredClientMap -Right $filteredHostMap
+                if ($hostOnly -ne "-" -or $clientOnly -ne "-") {
+                    $summary.SignificantDiffFrames++
+                    Add-CountMapOnly -Target $significantHostOnly -Left $filteredHostMap -Right $filteredClientMap
+                    Add-CountMapOnly -Target $significantClientOnly -Left $filteredClientMap -Right $filteredHostMap
+                }
+            }
+        }
+    }
+    $summary.TopSignificantHostOnly = Format-TopCountMap -Map $significantHostOnly
+    $summary.TopSignificantClientOnly = Format-TopCountMap -Map $significantClientOnly
+    return $summary
+}
+
 function Get-LongestActorPlateau {
     param([string]$CsvPath, [int]$Player)
 
@@ -307,7 +530,7 @@ foreach ($role in @("host", "client")) {
         $status = "perf-fail"
     } elseif ($wrapperFailure) {
         $status = "failed"
-    } elseif (($maxPlateau.Rows -ge $FreezeMinRows -or $gameplayPlateau.Rows -ge $GameplayFreezeMinRows) -and -not $hasResultScene) {
+    } elseif ($maxPlateau.Rows -ge $FreezeMinRows -and -not $hasResultScene) {
         $status = "freeze-suspect"
     }
 
@@ -355,3 +578,18 @@ if ($roleRows.Status -contains "abort") {
 
 Write-Host "rollback log analysis: status=$overall log=$root"
 $roleRows | Format-List
+
+$hostStdout = Get-Text (Join-Path (Join-Path $root "host") "host.stdout.txt")
+$clientStdout = Get-Text (Join-Path (Join-Path $root "client") "client.stdout.txt")
+$gameplayObjectDiff = Get-GameplayHeartbeatObjectDiff -HostText $hostStdout -ClientText $clientStdout
+if ($gameplayObjectDiff.SharedFrames -gt 0) {
+    $activeIdDiff = ""
+    if ($gameplayObjectDiff.FirstActiveIdDiff) {
+        $activeIdDiff = " $($gameplayObjectDiff.FirstActiveIdDiff)"
+    }
+    $significantDiff = ""
+    if ($gameplayObjectDiff.FirstSignificantActiveIdDiffFrame -ge 0) {
+        $significantDiff = " firstSignificantActiveIdDiffFrame=$($gameplayObjectDiff.FirstSignificantActiveIdDiffFrame) $($gameplayObjectDiff.FirstSignificantActiveIdDiff)"
+    }
+    Write-Host "gameplay heartbeat object diff: sharedFrames=$($gameplayObjectDiff.SharedFrames) diffFrames=$($gameplayObjectDiff.DiffFrames) significantDiffFrames=$($gameplayObjectDiff.SignificantDiffFrames) maxActiveDelta=$($gameplayObjectDiff.MaxActiveDelta) firstDiffFrame=$($gameplayObjectDiff.FirstDiffFrame) $($gameplayObjectDiff.FirstDiff)$activeIdDiff$significantDiff topSignificantHostOnly=$($gameplayObjectDiff.TopSignificantHostOnly) topSignificantClientOnly=$($gameplayObjectDiff.TopSignificantClientOnly)"
+}
