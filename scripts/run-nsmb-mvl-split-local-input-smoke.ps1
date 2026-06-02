@@ -143,6 +143,7 @@ $ErrorActionPreference = "Stop"
 
 if ($MaxConsecutiveSlowFrames -ge 0 -or $MaxRollbackFrameMs -gt 0.0) {
     $env:MELONDS_NSML_FPS_SPIKE_TRACE = "1"
+    $env:MELONDS_NSML_PERF_SPIKE_PHASE_TRACE = "1"
     $currentSpikeThreshold = 0.0
     $targetSpikeThreshold = if ($MaxRollbackFrameMs -gt 0.0) {
         [Math]::Min($SlowFrameThresholdMs, $MaxRollbackFrameMs)

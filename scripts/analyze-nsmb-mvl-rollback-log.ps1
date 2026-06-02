@@ -3,6 +3,7 @@ param(
     [double]$SlowFrameThresholdMs = 33.0,
     [double]$MaxSingleFrameMs = 100.0,
     [int]$MaxConsecutiveSlowFrames = 120,
+    [int]$PhaseSpikeStartFrame = 900,
     [int]$FreezeMinRows = 20
 )
 
@@ -95,6 +96,51 @@ function Get-MaxFrameMs {
         }
     }
     return $maxFrameMs
+}
+
+function Get-MaxPhaseSpike {
+    param([string]$Text, [int]$StartFrame)
+
+    $best = [pscustomobject]@{
+        Frame = -1
+        TotalMs = 0.0
+        DominantPhase = ""
+        DominantMs = 0.0
+    }
+    foreach ($line in ($Text -split "`r?`n")) {
+        if ($line -notmatch "NSMB PerfPhaseSpike: .*frame=([0-9]+) totalMs=([0-9.]+) mpMs=([0-9.]+) inputMs=([0-9.]+) beforeHookMs=([0-9.]+) runFrameMs=([0-9.]+) afterHookMs=([0-9.]+) drawMs=([0-9.]+) audioMs=([0-9.]+) limitMs=([0-9.]+) unaccountedMs=([0-9.]+)") {
+            continue
+        }
+
+        $frame = [int]$Matches[1]
+        if ($frame -lt $StartFrame) {
+            continue
+        }
+        $totalMs = [double]::Parse($Matches[2], [System.Globalization.CultureInfo]::InvariantCulture)
+        if ($totalMs -le $best.TotalMs) {
+            continue
+        }
+
+        $phases = [ordered]@{
+            mp = [double]::Parse($Matches[3], [System.Globalization.CultureInfo]::InvariantCulture)
+            input = [double]::Parse($Matches[4], [System.Globalization.CultureInfo]::InvariantCulture)
+            beforeHook = [double]::Parse($Matches[5], [System.Globalization.CultureInfo]::InvariantCulture)
+            runFrame = [double]::Parse($Matches[6], [System.Globalization.CultureInfo]::InvariantCulture)
+            afterHook = [double]::Parse($Matches[7], [System.Globalization.CultureInfo]::InvariantCulture)
+            draw = [double]::Parse($Matches[8], [System.Globalization.CultureInfo]::InvariantCulture)
+            audio = [double]::Parse($Matches[9], [System.Globalization.CultureInfo]::InvariantCulture)
+            limit = [double]::Parse($Matches[10], [System.Globalization.CultureInfo]::InvariantCulture)
+            unaccounted = [double]::Parse($Matches[11], [System.Globalization.CultureInfo]::InvariantCulture)
+        }
+        $dominant = $phases.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 1
+        $best = [pscustomobject]@{
+            Frame = $frame
+            TotalMs = $totalMs
+            DominantPhase = [string]$dominant.Key
+            DominantMs = [double]$dominant.Value
+        }
+    }
+    return $best
 }
 
 function Get-LastHeartbeatFrame {
@@ -215,6 +261,7 @@ foreach ($role in @("host", "client")) {
     $abort = Get-FirstMatchLine -Text $combined -Pattern "ARM[79]: (data|prefetch) abort"
     $slowRun = Get-MaxSlowRun -Text $stdout -ThresholdMs $SlowFrameThresholdMs
     $maxFrameMs = Get-MaxFrameMs -Text $stdout
+    $maxPhaseSpike = Get-MaxPhaseSpike -Text $stdout -StartFrame $PhaseSpikeStartFrame
     $timing = Get-LastMatchLine -Text $stdout -Pattern "NSMB Test: active frame timing"
     $rollback = Get-LastMatchLine -Text $stdout -Pattern "NSMB Rollback: frame="
     $heartbeat = Get-LastHeartbeatFrame -Text $stdout
@@ -240,6 +287,13 @@ foreach ($role in @("host", "client")) {
         LastHeartbeatFrame = $heartbeat
         MaxFrameMs = [Math]::Round($maxFrameMs, 3)
         MaxConsecutiveSlowFrames = $slowRun
+        MaxPhaseSpikeFrame = $maxPhaseSpike.Frame
+        MaxPhaseSpikeMs = [Math]::Round($maxPhaseSpike.TotalMs, 3)
+        MaxPhaseSpikeDominant = if ($maxPhaseSpike.DominantPhase) {
+            "$($maxPhaseSpike.DominantPhase)=$([Math]::Round($maxPhaseSpike.DominantMs, 3))ms"
+        } else {
+            ""
+        }
         HasResultScene = $hasResultScene
         LongestActorPlateau = $maxPlateau.Rows
         PlateauPlayer = $maxPlateau.Player

@@ -3192,6 +3192,7 @@ function Start-MelonLANProcess {
         "worldStateApplyMovingHazard=$($env:MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD)"
         "worldStateSyncInterval=$($env:MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL)"
         "worldStateActorRescanInterval=$($env:MELONDS_NSML_WORLD_STATE_ACTOR_RESCAN_INTERVAL)"
+        "perfSpikePhaseTrace=$($env:MELONDS_NSML_PERF_SPIKE_PHASE_TRACE)"
         "packetBridgeReadPacketByte=$($env:MELONDS_NSML_PACKET_BRIDGE_READ_PACKET_BYTE)"
         "packetBridgeCheckPacketBits=$($env:MELONDS_NSML_PACKET_BRIDGE_CHECK_PACKET_BITS)"
         "packetBridgeForceStageNet20OnStageScene=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_NET20_ON_STAGE_SCENE)"

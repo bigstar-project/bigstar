@@ -286,6 +286,7 @@ if ($LowLatencyRollback) {
     $env:MELONDS_NSML_FIXED_FRAME_SLEEP = "1"
     $env:MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "25"
     $env:MELONDS_NSML_FPS_SPIKE_TRACE = "1"
+    $env:MELONDS_NSML_PERF_SPIKE_PHASE_TRACE = "1"
     if ($RollbackBackend -eq "nsmbtinycore" -or $RollbackBackend -eq "nsmb-tiny-core") {
         $env:MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
         $env:MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
@@ -315,6 +316,7 @@ if ($LowLatencyRollback) {
 if ($PlanDActorSnapshot) {
     $env:MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "33"
     $env:MELONDS_NSML_FPS_SPIKE_TRACE = "1"
+    $env:MELONDS_NSML_PERF_SPIKE_PHASE_TRACE = "1"
 }
 if ($RollbackInputWaitUs -gt 0) {
     $env:MELONDS_NSML_ROLLBACK_INPUT_WAIT_US = "$RollbackInputWaitUs"
