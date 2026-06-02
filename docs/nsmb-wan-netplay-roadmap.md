@@ -1,5 +1,33 @@
 # NSMB Mario vs Luigi WAN Netplay Roadmap
 
+## Current work: Tauri CI bridge/Tauri build speedup - 2026-06-03
+
+- User request: real GitHub Actions history shows `bridge` and `tauri` are long; optimize the completed-run bottlenecks, not the currently running action.
+- Actions measurement, converted from GitHub UTC timestamps to JST:
+  - Completed `NSMB MvL Tauri` run `26806041965` ran from 2026-06-02 16:47:47 JST to 2026-06-02 17:11:44 JST, about 24 minutes.
+  - `bridge Windows x86_64` ran from 16:47:50 JST to 17:00:32 JST, about 12m42s. The `Build bridge` step was 16:48:27 JST to 17:00:25 JST, about 11m58s.
+  - `Tauri Windows x86_64` ran from 17:00:35 JST to 17:11:43 JST, about 11m08s. `Test Tauri backend` was about 3m05s and `Build Tauri app` was about 6m36s.
+  - In `Build Tauri app`, the release Rust build itself was about 5m28s, followed by WiX/NSIS downloads and bundling.
+- Implemented CI changes in `.github/workflows/nsmb-mvl-tauri.yml`:
+  - Added `Swatinem/rust-cache@v2` for `tools/nsmb-net-bridge -> target` so bridge dependency/native rebuilds, especially `datachannel-sys`, `openssl-src`, and their Rust dependency graph, can be reused across runs.
+  - Added `Swatinem/rust-cache@v2` for `tools/nsmb-mvl-gui/src-tauri -> target` so Tauri/Rust dependencies can be reused across runs.
+  - Changed `Test Tauri backend` to `cargo test --release` so the test step warms the same release target used by `pnpm tauri build` instead of spending about 3 minutes on a separate debug target.
+  - Added an `actions/cache@v4` cache for `~\AppData\Local\tauri` to avoid repeated WiX/NSIS helper downloads during Tauri bundling.
+  - Removed the stale Tango checkout from `bridge-windows`; the bridge now uses tracked `tools/nsmb-net-bridge/datachannel-wrapper` through its Cargo path dependency.
+- Expected effect:
+  - First remote run mainly seeds caches, so the biggest improvement should appear on the second run with cache hits.
+  - Bridge should drop the most because most of its 11m58s is dependency/native compilation.
+  - Tauri should drop by reusing release dependencies and avoiding the debug/release split. Bundling and local app crate rebuild still remain.
+- Verification status:
+  - Workflow YAML parsed successfully locally.
+  - `cargo test --release --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml` passed locally.
+  - `cargo metadata --manifest-path tools\nsmb-net-bridge\Cargo.toml --features webrtc --no-deps --format-version 1` confirmed the bridge resolves `datachannel-wrapper` from tracked `tools\nsmb-net-bridge\datachannel-wrapper`.
+  - A local `cargo check --release --features webrtc --manifest-path tools\nsmb-net-bridge\Cargo.toml` was stopped after 5 minutes because it entered the same long native dependency build this CI change is meant to cache.
+  - Remote runtime improvement still needs a pushed cache-seeding run and a following cache-hit run. Do not push automatically without explicit user request.
+- Current blocker: remote cache-hit timings cannot be measured until the change is pushed and at least two relevant Tauri CI runs complete.
+- Next actions:
+  - After user-approved push, compare `bridge Windows x86_64` and `Tauri Windows x86_64` step durations on the first and second runs.
+
 ## Current work: WebRTC WAN diagnostics and connection audit - 2026-06-03
 
 - Reported symptom: 2PC on the same Wi-Fi had connected successfully, but a WAN test with a remote friend stopped after `nsmb-net-bridge signaling: {"peerCount":2,"role":"answer","type":"peer-joined"}`. This proves the signaling WebSocket reached the room join step; the likely failure area is subsequent SDP/ICE setup or NAT traversal.
@@ -190,7 +218,7 @@ future backend
 - `scripts/prepare-nsmb-mvl-tauri-sidecars.ps1` で Tauri sidecar 名へコピーする。
 - `.github/workflows/nsmb-mvl-tauri.yml` を追加し、melonDS build、bridge build、Tauri bundle を分けてつなぐ。
 - `.github/workflows/nsmb-mvl-tauri.yml` の `melon-windows` は `melonDS.exe` 自体を source/CMake/vcpkg hash keyed cacheに保存し、cache hit時はvcpkg/CMake buildを飛ばしてartifact uploadへ進む。Windows runner上のmelonDS buildが重すぎる場合の軽減策。
-- `.github/workflows/nsmb-mvl-tauri.yml` の `bridge-windows` は Git管理外の `external/tango` に依存しないよう、Tango repositoryを固定commit `283dacf2894d5e47be95a6d7f19acdda63a773b0` で明示checkoutしてから `--features webrtc` buildを行う。`LIBCLANG_PATH` は runner 上の LLVM / Visual Studio BuildTools 候補から `libclang.dll` を探して設定する。release exe の `webrtc-signaling-udp-pair-smoke` も同jobで実行する。
+- `.github/workflows/nsmb-mvl-tauri.yml` の `bridge-windows` は tracked `tools/nsmb-net-bridge/datachannel-wrapper` を使って `--features webrtc` buildを行う。`LIBCLANG_PATH` は runner 上の LLVM / Visual Studio BuildTools 候補から `libclang.dll` を探して設定する。release exe の `webrtc-signaling-udp-pair-smoke` も同jobで実行する。
 - `.github/workflows/nsmb-mvl-tauri.yml` の `tauri-windows` は artifact sidecar 取り込み後に `cargo test --manifest-path tools/nsmb-mvl-gui/src-tauri/Cargo.toml` を実行し、GUI backend の command/env 組み立てを確認してから Tauri bundle を作る。
 - `.github/workflows/nsmb-mvl-gui-local.yml` を追加し、Docker + `act` で軽量な GUI check をローカル実行できるようにした。
 - `.github/workflows/nsmb-mvl-gui-local.yml` に `bridge-check` jobを追加し、Tango checkout + Ubuntu build dependencies + `cargo check --features webrtc` + `webrtc-signaling-udp-pair-smoke` をDocker `act` で確認できるようにした。

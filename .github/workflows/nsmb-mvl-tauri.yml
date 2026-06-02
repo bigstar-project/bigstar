@@ -108,18 +108,12 @@ jobs:
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v6
-      - name: Checkout Tango dependency
-        shell: pwsh
-        run: |
-          $ref = "283dacf2894d5e47be95a6d7f19acdda63a773b0"
-          if (Test-Path external\tango\.git) {
-            git -C external\tango fetch --depth=1 origin $ref
-          } else {
-            git clone --no-checkout https://github.com/tangobattle/tango.git external\tango
-            git -C external\tango fetch --depth=1 origin $ref
-          }
-          git -C external\tango checkout --detach $ref
       - uses: dtolnay/rust-toolchain@stable
+      - name: Restore bridge Rust build cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/nsmb-net-bridge -> target
+          shared-key: nsmb-net-bridge-webrtc-windows
       - name: Build bridge
         shell: pwsh
         run: |
@@ -154,6 +148,16 @@ jobs:
         with:
           node-version: 24
       - uses: dtolnay/rust-toolchain@stable
+      - name: Restore Tauri Rust build cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/nsmb-mvl-gui/src-tauri -> target
+          shared-key: nsmb-mvl-gui-tauri-windows
+      - name: Restore Tauri bundler cache
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\tauri
+          key: tauri-bundlers-${{ runner.os }}
       - name: Enable pnpm
         run: corepack enable pnpm
       - uses: actions/download-artifact@v7
@@ -171,7 +175,7 @@ jobs:
         working-directory: tools/nsmb-mvl-gui
         run: pnpm install --frozen-lockfile
       - name: Test Tauri backend
-        run: cargo test --manifest-path tools/nsmb-mvl-gui/src-tauri/Cargo.toml
+        run: cargo test --release --manifest-path tools/nsmb-mvl-gui/src-tauri/Cargo.toml
       - name: Build Tauri app
         working-directory: tools/nsmb-mvl-gui
         run: pnpm tauri build
