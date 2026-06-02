@@ -5,7 +5,7 @@
 Current best Plan-D-like direction is no longer a rollback backend. It is a small actor/global/world snapshot path that avoids full NDS rollback restore/resim:
 
 - New wire packet: `WirePlayerState`, 168 bytes. The base actor fields are always present; player global fields are read/applied only when `MELONDS_NSML_PLAYER_STATE_GLOBALS=1`.
-- New host-authoritative wire packets: `WireWorldState`, 320 bytes, for the real Big Star actor and item-specific `Item(0x01F settings=0x00080002)` event; and `WireMovingHazardState`, 424 bytes, for up to four active moving-hazard actors.
+- New mostly host-authoritative wire packets: `WireWorldState`, 420 bytes, for the real Big Star actor, item-specific `Item(0x01F settings=0x00080002)` event, and a separate `DroppedStarItem(0x01F settings=0x00090002)` slot; and `WireMovingHazardState`, 424 bytes, for up to four active moving-hazard actors. The dropped-star item slot is intentionally applied both directions because star-loss items can originate from either local player, while Big Star and normal Item remain host-authoritative.
 - New host-authoritative effect packet: `WireWorldEffectState`, 760 bytes, for up to four active fixed Effect slots from `0x021C3268 + 0x1D4*i`. This targets visible dropped-star/red-number style effects without scanning all Main RAM.
 - Env/script switches:
   - `MELONDS_NSML_PLAYER_STATE_SYNC=1`
@@ -24,6 +24,7 @@ Current best Plan-D-like direction is no longer a rollback backend. It is a smal
 - During player actor transition steps other than `1`, the actor+global route skips transform/full runtime writes and applies only minimal visible/defeated bytes. This avoids fighting the game's pipe/death transition code.
 - The receiver applies the latest remote player actor snapshot before frame execution and again before game-state trace/sync.
 - Existing fixed-size wire packets were also unblocked from the input-bundle branch so `WireNSMLPacket`, `WireGameState`, `WirePlayerState`, `WireWorldState`, and `WireMovingHazardState` can reach their exact handlers.
+- Generated direct-MvL ROMs now patch the stage-object activation scan to use player `0` on both peers. The local-player-1 scan could skip early off-camera actors such as the first Goomba, which matches the user-reported "enemy appears on only one side" class of desync better than a runtime clone-all approach.
 
 Verification:
 
@@ -154,6 +155,16 @@ Verification:
   - `logs/codex-pland-effect-sync-stage0-2400-20260602`: Effect slot tracing found active slots at the fixed Effect table, and enabling `WorldStateApplyEffects` kept the normal stage `0` stress route light enough: host/client active avg about `16.89ms`, max `29.835/34.965ms`, max consecutive slow frames `0/1`.
   - `logs/codex-pland-effect-sync-luigi-death-notrace-3720-20260602`: the Luigi death/star-loss route passed without game-state CSV tracing, avg `16.750/16.751ms`, max `39.082/41.908ms`, max consecutive slow frames `1/1`.
   - Full game-state CSV tracing is currently too intrusive for spike decisions on this route: `logs/codex-pland-effect-sync-luigi-death-skipcmp-3720-20260602` hit a `traceMs=180ms` observer spike at frame `2610` even though the no-trace route was light. Use no-trace active timing plus targeted gates/traces for performance decisions.
+- Current stage-object activation / dropped-star refinement:
+  - ROM generation now forces stage-object activation to player `0` before the vsmode stage-lock stubs. This was added after lifecycle traces showed direct local-player differences can prevent an actor from being activated before the runtime snapshot path sees it.
+  - Activation validation passed with generated ROMs: `logs/codex-pland-activation-player-stage0-lifecycle-2400-20260602` had `host=52 client=52 shared=52` lifecycle samples, no unexpected actor-count diffs, and active avg `16.788/16.791ms`. The default regenerated stable ROM route also passed: `logs/codex-pland-defaultrom-activation-stage0-2400-20260602`.
+  - A short generated stage matrix passed courses `0-4`: `logs/codex-pland-activation-matrix-stage0-1800-20260602` through `logs/codex-pland-activation-matrix-stage4-1800-20260602`.
+  - `logs/codex-pland-activation-luigi-death-notrace-3720-20260602` passed the death route after the ROM activation patch, active avg `16.699/16.700ms`, max `37.745/37.963ms`, max consecutive slow frames `1/1`.
+  - Dropped-star item sync now tracks `Item(0x01F settings=0x00090002)` separately from the normal world item and accepts item actor Type `2`; the previous item finder only accepted Type `1`, so short-lived dropped-star items appeared in lifecycle logs but were often missed by the packet sampler.
+  - `WireWorldState` is now sent both directions, but host-side application only uses `DroppedStarItem`; Big Star and normal Item are still applied only on the client from host samples.
+  - `logs/codex-pland-droppeditem-type2-bidir-stage0-trace-2100-20260602` confirmed the dropped-star slot is applied around frame `1876` while staying light: active avg `16.702/16.702ms`, max `26.964/28.009ms`, `over33ms=0/0`.
+  - `logs/codex-pland-droppeditem-type2-bidir-luigi-death-notrace-3720-20260602` passed the longer death route with no trace CSV: active avg `16.855/16.855ms`, max `43.114/40.792ms`, max consecutive slow frames `1/1`.
+  - `logs/codex-pland-type2-bidir-stage0-lifecycle-only-2400-20260602` passed the lifecycle gate after the Type `2` change: `host=52 client=52 shared=52`, no unexpected actor-count diffs, active avg `16.814/16.815ms`, and `over33ms=0/0`.
 - Current moving-hazard refinement:
   - Applying the already-sent `StateType` and `Flags` fields to matched moving hazards passed `logs/codex-pland-hazard-stateflags-stage0-2400-20260602`: Big Star drift `0/0`, moving-hazard max drift `2048/0`, active avg `16.916/16.914ms`, max `28.863/31.990ms`, `over33ms=0/0`.
   - `logs/codex-pland-stateflags-effect-luigi-death-notrace-rerun-3720-20260602` passed the death route with Effect sync and hazard state/flags apply: avg `17.053/17.052ms`, max `42.598/43.390ms`, max consecutive slow frames `1/1`.
@@ -166,7 +177,7 @@ Current blocker / caveat:
 - Added `tests/nsmb_us_direct_mvl_repeat_result_stress.inputs` and exposed `-MvlWins` in the split wrapper. A 12000F repeated death/result/checkpoint-restart route reached MvL stage entries at frames `870`, `5790`, and `9990`.
 - Earlier strict runs exposed occasional paired-process stalls in the `278-825ms` range across three-game, Big Star, coin-sync, and item-sync routes. At least the newly reproduced large stalls were observer interference rather than Plan-D snapshot cost: stdout trace flush, diagnostic full-Main-RAM actor scans, and synchronous heartbeat file flush were each isolated and removed from the emulation thread. Keep the older logs as historical caveats because they predate the finer phase traces, but use the current async-heartbeat route for new performance decisions.
 - Moving hazards now use a compact multi-instance snapshot with persistent GUID mapping and nearest-position fallback, but application still waits for equal host/client active counts. Automated lifecycle churn and stage variation passed; longer manual play is still required before treating it as complete.
-- Effect slots are now synchronized, but only for fixed active Effect slots and without clearing local-only effects. This is intentionally narrower than generic actor/effect cloning.
+- Effect slots are synchronized only for fixed active Effect slots and without clearing local-only effects. Dropped-star item actors now have a separate bidirectional item slot, but other host/client-only actors still require case-by-case ROM/memory classification rather than generic actor cloning.
 - Course `1` host-only `Item` creation is now covered by an item-specific client spawn. The associated `0x0F0 settings=0x01080002` transient is not replicated yet; add it only if a concrete visible or gameplay mismatch appears. Blindly spawning every host-only actor would also replicate local-only effects.
 - Result/restart lifecycle traces show local-role `StageFX(0x012)` differences, including a host-only lose/result lead-in effect. Keep these local unless a concrete visible defect appears; do not clone them as gameplay world actors.
 - The selected MvL manager/global/stage-scene fields stayed equal during real star acquisition and repeated result/restart. Do not add blind runtime writes for them unless the new observation gate finds a concrete divergent route.
@@ -174,10 +185,10 @@ Current blocker / caveat:
 
 Next actions:
 
-- Run longer manual play with the promoted Plan-D path including Effect sync, especially dropped-star movement after damage, enemy stomp/death, course `1` item interactions, repeated result/restart, fall death, respawn, and pipe transitions. Keep automatic FPS-spike logging enabled in manual Plan-D mode.
+- Run longer manual play with the promoted Plan-D path including Effect sync, ROM activation patch, and the dropped-star Type `2` bidirectional slot. Focus on dropped-star movement after damage, enemy stomp/death, course `1` item interactions, repeated result/restart, fall death, respawn, and pipe transitions. Keep automatic FPS-spike logging enabled in manual Plan-D mode.
 - Keep the three-game stress route in repeated performance sweeps so occasional paired-process stalls remain visible instead of being hidden by average FPS.
 - Keep the phase traces and async dedicated-heartbeat stall detector enabled in automation, but do not use full game-state CSV traces as the primary FPS-spike signal on long routes; they can create observer spikes. Prefer no-trace active timing plus targeted world/effect/lifecycle traces.
-- Continue ROM/memory analysis for enemy stomp correctness. The unsafe "deactivate extra local hazards" path is rejected; next useful direction is identifying the narrow stomp/death state field or a proper StageEntity/Actor destroy event rather than blindly killing extras.
+- Continue ROM/memory analysis for enemy stomp correctness. The unsafe "deactivate extra local hazards" path is rejected; after the activation-player patch, the next useful direction is identifying narrow enemy damage/death/stomp state fields or a proper StageEntity/Actor destroy event rather than blindly killing extras.
 - Use the MvL manager/global observation gate on new routes and add only fields that show a concrete persistent mismatch, without falling back to full savestate or full CPU rollback.
 - Reuse `scripts/analyze-nsmb-mvl-object-lifecycle-diff.ps1` on new lifecycle traces and investigate only persistent non-`StageFX` gaps.
 - Tighten drift thresholds after more route coverage; the current sustained-drift gate is meant to catch gross desync/freeze without rejecting a transient one-row correction.
