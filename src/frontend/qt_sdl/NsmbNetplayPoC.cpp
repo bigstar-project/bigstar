@@ -14,6 +14,7 @@
 #include "NsmbNetplayPoC.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cctype>
@@ -374,8 +375,10 @@ constexpr melonDS::u32 kWireKindPlayerState = 0x41545350; // "PSTA", little endi
 constexpr melonDS::u32 kWireKindWorldState = 0x41545357; // "WSTA", little endian
 constexpr melonDS::u32 kWireKindMovingHazardState = 0x415A4148; // "HAZA", little endian
 constexpr melonDS::u32 kWireKindWorldEffectState = 0x54434645; // "EFCT", little endian
+constexpr melonDS::u32 kWireKindWorldActorSnapshot = 0x54434157; // "WACT", little endian
 constexpr std::size_t kMaxWorldMovingHazards = 4;
 constexpr std::size_t kMaxWorldEffects = 4;
+constexpr std::size_t kMaxWorldActorSnapshots = 12;
 
 static_assert(sizeof(WireSeed) == 16);
 
@@ -613,6 +616,26 @@ struct WireMovingHazardState
 };
 
 static_assert(sizeof(WireMovingHazardState) == 424);
+
+struct WireWorldObjectActorState
+{
+    melonDS::u32 ObjectID;
+    WireWorldActorState Actor;
+};
+
+struct WireWorldActorSnapshotState
+{
+    melonDS::u32 Magic;
+    melonDS::u32 Version;
+    melonDS::u32 Kind;
+    melonDS::u32 Frame;
+    melonDS::u32 Instance;
+    melonDS::u32 Count;
+    WireWorldObjectActorState Actors[kMaxWorldActorSnapshots];
+};
+
+static_assert(sizeof(WireWorldObjectActorState) == 104);
+static_assert(sizeof(WireWorldActorSnapshotState) == 1272);
 
 struct WireWorldEffectSlot
 {
@@ -1185,6 +1208,8 @@ struct State
     bool ActiveFrameSpikeTrace = false;
     int FrameHeartbeatInterval = 0;
     melonDS::u32 LastFrameHeartbeat[16] {};
+    int GameplayHeartbeatInterval = 0;
+    melonDS::u32 LastGameplayHeartbeat[16] {};
     std::string FrameHeartbeatPath;
     std::ofstream FrameHeartbeat;
     std::atomic<melonDS::u32> PendingFrameHeartbeat { 0 };
@@ -1221,6 +1246,7 @@ struct State
     bool WorldStateSpawnItem = false;
     bool WorldStateApplyMovingHazard = false;
     bool WorldStateApplyEffects = false;
+    bool WorldStateApplyActorSnapshot = false;
     bool WorldStateTraceMovingHazards = false;
     bool WorldStateTraceObjectLifecycles = false;
     bool WorldStateTraceActorInternals = false;
@@ -1745,6 +1771,8 @@ struct State
     bool RemoteWorldStateSampleValid = false;
     WireMovingHazardState RemoteMovingHazardStateSample {};
     bool RemoteMovingHazardStateSampleValid = false;
+    WireWorldActorSnapshotState RemoteWorldActorSnapshotSample {};
+    bool RemoteWorldActorSnapshotSampleValid = false;
     WireWorldEffectState RemoteWorldEffectStateSample {};
     bool RemoteWorldEffectStateSampleValid = false;
     std::vector<WireNSMLPacket> PendingNSMLPackets;
@@ -1786,6 +1814,8 @@ struct State
     melonDS::u32 WorldMovingHazardGUIDCaches[16][kMaxWorldMovingHazards] {};
     melonDS::u32 WorldMovingHazardRemoteGUIDMaps[16][kMaxWorldMovingHazards] {};
     melonDS::u32 WorldMovingHazardLocalGUIDMaps[16][kMaxWorldMovingHazards] {};
+    melonDS::u32 WorldActorSnapshotRemoteGUIDMaps[16][kMaxWorldActorSnapshots] {};
+    melonDS::u32 WorldActorSnapshotLocalGUIDMaps[16][kMaxWorldActorSnapshots] {};
     melonDS::u32 WorldMovingHazardCacheCounts[16] {};
     melonDS::u32 LastTracedWorldMovingHazardsFrame[16] {};
     melonDS::u32 LastTracedWorldEffectsFrame[16] {};
@@ -2397,6 +2427,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                 && event.packet->dataLength != sizeof(WirePlayerState)
                 && event.packet->dataLength != sizeof(WireWorldState)
                 && event.packet->dataLength != sizeof(WireMovingHazardState)
+                && event.packet->dataLength != sizeof(WireWorldActorSnapshotState)
                 && event.packet->dataLength != sizeof(WireWorldEffectState))
             {
                 WireInputBundleHeader header;
@@ -2540,6 +2571,18 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                 {
                     G.RemoteMovingHazardStateSample = packet;
                     G.RemoteMovingHazardStateSampleValid = true;
+                }
+            }
+            else if (event.packet->dataLength == sizeof(WireWorldActorSnapshotState))
+            {
+                WireWorldActorSnapshotState packet;
+                std::memcpy(&packet, event.packet->data, sizeof(packet));
+                if (packet.Magic == kMagic && packet.Version == kVersion
+                    && packet.Kind == kWireKindWorldActorSnapshot
+                    && packet.Count <= kMaxWorldActorSnapshots)
+                {
+                    G.RemoteWorldActorSnapshotSample = packet;
+                    G.RemoteWorldActorSnapshotSampleValid = true;
                 }
             }
             else if (event.packet->dataLength == sizeof(WireWorldEffectState))
@@ -10664,6 +10707,69 @@ void FillWireWorldActorState(const ObjectScanSample& actor, WireWorldActorState&
     state.TargetVelZ = actor.TargetVelZ;
 }
 
+bool IsWorldActorSnapshotCandidate(const GameStateObjectScanEntry& entry)
+{
+    if (!entry.Actor.Found || entry.Actor.StateType == 0 || entry.Actor.StateType > 2)
+        return false;
+    if (entry.Actor.Flags >= 0x10000000)
+        return false;
+
+    switch (entry.ObjectID)
+    {
+    case kPlayerObjectID:
+    case kVsBattleStarActorObjectID:
+    case kVsMovingHazardObjectID:
+    case kStageSceneObjectID:
+    case kStageFXObjectID:
+    case kStageActorManagerObjectID:
+    case kStageControllerObjectID:
+    case kVsConnectObjectID:
+    case kCourseSelectObjectID:
+    case kStageCameraObjectID:
+        return false;
+    default:
+        break;
+    }
+
+    return entry.ObjectID != 0 && entry.ObjectID < 0x0300;
+}
+
+struct WorldActorSnapshotCandidate
+{
+    melonDS::u32 ObjectID = 0;
+    ObjectScanSample Actor;
+};
+
+std::vector<WorldActorSnapshotCandidate> CollectWorldActorSnapshotCandidates(melonDS::NDS* nds)
+{
+    std::vector<WorldActorSnapshotCandidate> actors;
+    const GameStateObjectScanCache cache = BuildGameStateObjectScanCache(nds);
+    actors.reserve(std::min(cache.Entries.size(), kMaxWorldActorSnapshots));
+    for (const GameStateObjectScanEntry& entry : cache.Entries)
+    {
+        if (!IsWorldActorSnapshotCandidate(entry))
+            continue;
+
+        WorldActorSnapshotCandidate state {};
+        state.ObjectID = entry.ObjectID;
+        state.Actor = entry.Actor;
+        actors.push_back(state);
+    }
+
+    std::sort(actors.begin(), actors.end(), [](const WorldActorSnapshotCandidate& lhs, const WorldActorSnapshotCandidate& rhs) {
+        if (lhs.ObjectID != rhs.ObjectID)
+            return lhs.ObjectID < rhs.ObjectID;
+        if (lhs.Actor.Settings != rhs.Actor.Settings)
+            return lhs.Actor.Settings < rhs.Actor.Settings;
+        if (lhs.Actor.PosX != rhs.Actor.PosX)
+            return lhs.Actor.PosX < rhs.Actor.PosX;
+        return lhs.Actor.GUID < rhs.Actor.GUID;
+    });
+    if (actors.size() > kMaxWorldActorSnapshots)
+        actors.resize(kMaxWorldActorSnapshots);
+    return actors;
+}
+
 bool ApplyWireWorldActorState(
     melonDS::NDS* nds,
     const WireWorldActorState& state,
@@ -10745,6 +10851,141 @@ melonDS::u64 WorldMovingHazardMatchDistance(
     return componentDistance(remoteActor.PosX, localActor.PosX) +
         componentDistance(remoteActor.PosY, localActor.PosY) +
         componentDistance(remoteActor.PosZ, localActor.PosZ);
+}
+
+void ApplyRemoteWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.Enabled || !G.WorldStateApplyActorSnapshot || G.NetRole != Role::Client || !nds || !nds->MainRAM)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.NetplayStartFrame)
+        return;
+
+    WireWorldActorSnapshotState sample {};
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        PumpNetworkLocked();
+        if (!G.RemoteWorldActorSnapshotSampleValid)
+            return;
+        sample = G.RemoteWorldActorSnapshotSample;
+    }
+
+    const std::vector<WorldActorSnapshotCandidate> localActors = CollectWorldActorSnapshotCandidates(nds);
+    const std::size_t remoteCount = std::min(
+        static_cast<std::size_t>(sample.Count),
+        kMaxWorldActorSnapshots);
+    if (remoteCount == 0 || localActors.empty())
+        return;
+
+    std::array<int, kMaxWorldActorSnapshots> localIndices {};
+    std::array<bool, kMaxWorldActorSnapshots> localUsed {};
+    localIndices.fill(-1);
+    std::array<melonDS::u32, kMaxWorldActorSnapshots> nextRemoteGUIDs {};
+    std::array<melonDS::u32, kMaxWorldActorSnapshots> nextLocalGUIDs {};
+
+    for (std::size_t i = 0; i < remoteCount; i++)
+    {
+        const WireWorldObjectActorState& remoteActor = sample.Actors[i];
+        for (std::size_t mapIndex = 0; mapIndex < kMaxWorldActorSnapshots; mapIndex++)
+        {
+            if (G.WorldActorSnapshotRemoteGUIDMaps[instanceID][mapIndex] != remoteActor.Actor.GUID)
+                continue;
+
+            const melonDS::u32 localGUID = G.WorldActorSnapshotLocalGUIDMaps[instanceID][mapIndex];
+            for (std::size_t localIndex = 0; localIndex < localActors.size() && localIndex < kMaxWorldActorSnapshots; localIndex++)
+            {
+                if (!localUsed[localIndex] &&
+                    localActors[localIndex].Actor.GUID == localGUID &&
+                    localActors[localIndex].ObjectID == remoteActor.ObjectID &&
+                    localActors[localIndex].Actor.Settings == remoteActor.Actor.Settings)
+                {
+                    localIndices[i] = static_cast<int>(localIndex);
+                    localUsed[localIndex] = true;
+                    break;
+                }
+            }
+            break;
+        }
+    }
+
+    for (std::size_t i = 0; i < remoteCount; i++)
+    {
+        if (localIndices[i] >= 0)
+            continue;
+
+        const WireWorldObjectActorState& remoteActor = sample.Actors[i];
+        std::size_t closestIndex = localActors.size();
+        melonDS::u64 closestDistance = std::numeric_limits<melonDS::u64>::max();
+        for (std::size_t localIndex = 0; localIndex < localActors.size() && localIndex < kMaxWorldActorSnapshots; localIndex++)
+        {
+            if (localUsed[localIndex])
+                continue;
+            const WorldActorSnapshotCandidate& localActor = localActors[localIndex];
+            if (localActor.ObjectID != remoteActor.ObjectID ||
+                localActor.Actor.Settings != remoteActor.Actor.Settings ||
+                localActor.Actor.StateType == 0 ||
+                localActor.Actor.StateType > 2)
+                continue;
+
+            const melonDS::u64 distance = WorldMovingHazardMatchDistance(remoteActor.Actor, localActor.Actor);
+            if (distance < closestDistance ||
+                (distance == closestDistance &&
+                    (closestIndex == localActors.size() ||
+                        localActor.Actor.GUID < localActors[closestIndex].Actor.GUID)))
+            {
+                closestIndex = localIndex;
+                closestDistance = distance;
+            }
+        }
+        if (closestIndex == localActors.size())
+            continue;
+
+        localIndices[i] = static_cast<int>(closestIndex);
+        localUsed[closestIndex] = true;
+    }
+
+    const melonDS::u32 predictFrames = std::min(
+        frame > sample.Frame ? frame - sample.Frame : 0,
+        static_cast<melonDS::u32>(std::max(0, G.WorldStateMaxPredictFrames)));
+    melonDS::u32 applied = 0;
+    bool mapChanged = false;
+    for (std::size_t i = 0; i < remoteCount; i++)
+    {
+        if (localIndices[i] < 0)
+            continue;
+
+        const WireWorldObjectActorState& remoteActor = sample.Actors[i];
+        const WorldActorSnapshotCandidate& localActor = localActors[localIndices[i]];
+        if (ApplyWireWorldActorState(nds, remoteActor.Actor, predictFrames, localActor.Actor.Base))
+        {
+            applied++;
+            nextRemoteGUIDs[i] = remoteActor.Actor.GUID;
+            nextLocalGUIDs[i] = localActor.Actor.GUID;
+        }
+    }
+
+    for (std::size_t i = 0; i < kMaxWorldActorSnapshots; i++)
+    {
+        mapChanged = mapChanged ||
+            G.WorldActorSnapshotRemoteGUIDMaps[instanceID][i] != nextRemoteGUIDs[i] ||
+            G.WorldActorSnapshotLocalGUIDMaps[instanceID][i] != nextLocalGUIDs[i];
+        G.WorldActorSnapshotRemoteGUIDMaps[instanceID][i] = nextRemoteGUIDs[i];
+        G.WorldActorSnapshotLocalGUIDMaps[instanceID][i] = nextLocalGUIDs[i];
+    }
+
+    if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
+        (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
+    {
+        std::printf("NSMB WorldActors: apply inst=%d frame=%u sampleFrame=%u count=%zu applied=%u predict=%u mapChanged=%d\n",
+            instanceID,
+            frame,
+            sample.Frame,
+            remoteCount,
+            applied,
+            predictFrames,
+            mapChanged ? 1 : 0);
+    }
 }
 
 bool SpawnRemoteWorldItem(
@@ -13259,6 +13500,43 @@ void SyncMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
         enet_peer_send(G.Peer, 0, enetPacket);
 }
 
+void SyncWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.Enabled || !G.WorldStateSyncEnabled || !G.WorldStateApplyActorSnapshot ||
+        G.NetRole != Role::Host || !nds || !nds->MainRAM)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.NetplayStartFrame)
+        return;
+    if ((frame % static_cast<melonDS::u32>(G.WorldStateSyncInterval)) != 0)
+        return;
+
+    const std::vector<WorldActorSnapshotCandidate> actors = CollectWorldActorSnapshotCandidates(nds);
+    if (actors.empty())
+        return;
+
+    WireWorldActorSnapshotState packet {};
+    packet.Magic = kMagic;
+    packet.Version = kVersion;
+    packet.Kind = kWireKindWorldActorSnapshot;
+    packet.Frame = frame;
+    packet.Instance = static_cast<melonDS::u32>(instanceID);
+    packet.Count = static_cast<melonDS::u32>(std::min(actors.size(), kMaxWorldActorSnapshots));
+    for (melonDS::u32 i = 0; i < packet.Count; i++)
+    {
+        packet.Actors[i].ObjectID = actors[i].ObjectID;
+        FillWireWorldActorState(actors[i].Actor, packet.Actors[i].Actor);
+    }
+
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    if (!G.Peer)
+        return;
+    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), 0);
+    if (enetPacket)
+        enet_peer_send(G.Peer, 0, enetPacket);
+}
+
 std::filesystem::path StatePath(const std::string& dir, int instanceID)
 {
     char filename[64];
@@ -13597,6 +13875,8 @@ void InitFromEnvironment()
     G.ActiveFrameSpikeTrace = EnvFlag("MELONDS_NSML_FPS_SPIKE_TRACE");
     G.FrameHeartbeatInterval = std::clamp(
         EnvInt("MELONDS_NSML_FRAME_HEARTBEAT_INTERVAL", 0), 0, 3600);
+    G.GameplayHeartbeatInterval = std::clamp(
+        EnvInt("MELONDS_NSML_GAMEPLAY_HEARTBEAT_INTERVAL", 0), 0, 3600);
     const char* frameHeartbeatPath = std::getenv("MELONDS_NSML_FRAME_HEARTBEAT_FILE");
     if (frameHeartbeatPath && frameHeartbeatPath[0])
     {
@@ -13893,6 +14173,7 @@ void InitFromEnvironment()
     G.WorldStateApplyEffects =
         EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS") &&
         !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_EFFECTS");
+    G.WorldStateApplyActorSnapshot = EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT");
     G.WorldStateTraceMovingHazards = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS");
     G.WorldStateTraceObjectLifecycles = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES");
     G.WorldStateTraceActorInternals = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS");
@@ -14922,6 +15203,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteMovingHazardState(instanceID, inputFrame, nds);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyRemoteWorldActorSnapshotState(instanceID, inputFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteWorldState(instanceID, inputFrame, nds);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteWorldEffectState(instanceID, inputFrame, nds);
@@ -14933,6 +15216,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         SyncWorldEffectState(instanceID, inputFrame, nds);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         SyncMovingHazardState(instanceID, inputFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        SyncWorldActorSnapshotState(instanceID, inputFrame, nds);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         SyncPlayerState(instanceID, inputFrame, nds);
 
@@ -15241,6 +15526,52 @@ void TracePlayerLifeChanges(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
     G.LastPlayerLifeSampleValid[instanceID] = true;
 }
 
+void TraceGameplayHeartbeatIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (G.GameplayHeartbeatInterval <= 0 || !nds || !nds->MainRAM)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.NetplayStartFrame)
+        return;
+    if (frame == G.LastGameplayHeartbeat[instanceID] ||
+        (frame % static_cast<melonDS::u32>(G.GameplayHeartbeatInterval)) != 0)
+        return;
+
+    G.LastGameplayHeartbeat[instanceID] = frame;
+    const GameStateObjectScanCache cache = BuildGameStateObjectScanCache(nds);
+    const ScopedGameStateObjectScanCache scopedCache(cache);
+    const PlayerActorScanSample players = FindPlayerActors(nds);
+    const ObjectLifecycleSummary objects = SummarizeObjectLifecycle(nds);
+    std::printf(
+        "NSMB GameplayHeartbeat: role=%s inst=%d frame=%u "
+        "p0=%u/%08X/%08X/%08X/%08X/%08X "
+        "p1=%u/%08X/%08X/%08X/%08X/%08X "
+        "objects=%u/%u/%u/%u/%u/%u\n",
+        G.NetRole == Role::Host ? "host" : "client",
+        instanceID,
+        frame,
+        players.Actor0.Found,
+        players.Actor0.PosX,
+        players.Actor0.PosY,
+        players.Actor0.VelX,
+        players.Actor0.VelY,
+        players.Actor0.Flags,
+        players.Actor1.Found,
+        players.Actor1.PosX,
+        players.Actor1.PosY,
+        players.Actor1.VelX,
+        players.Actor1.VelY,
+        players.Actor1.Flags,
+        objects.Total,
+        objects.Active,
+        objects.Dead,
+        objects.NotCreated,
+        objects.SkipUpdate,
+        objects.SkipRender);
+    std::fflush(stdout);
+}
+
 void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     const auto afterHookCallStart = std::chrono::steady_clock::now();
@@ -15297,6 +15628,9 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         }
     }
     const auto afterHeartbeat = std::chrono::steady_clock::now();
+
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        TraceGameplayHeartbeatIfNeeded(instanceID, logFrame, nds);
 
     WaitAtFrameBarrier(GAfterFrameBarrier, instanceID, logFrame, "after");
     AdvanceSerialRunTurn(instanceID, logFrame - 1);
@@ -15451,6 +15785,8 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         ApplyRemoteMovingHazardState(instanceID, logFrame, nds);
     const auto afterApplyHazard = std::chrono::steady_clock::now();
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyRemoteWorldActorSnapshotState(instanceID, logFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteWorldState(instanceID, logFrame, nds);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteWorldEffectState(instanceID, logFrame, nds);
@@ -15466,6 +15802,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     SyncWorldEffectState(instanceID, logFrame, nds);
     const auto afterSyncWorld = std::chrono::steady_clock::now();
     SyncMovingHazardState(instanceID, logFrame, nds);
+    SyncWorldActorSnapshotState(instanceID, logFrame, nds);
     const auto afterSyncHazard = std::chrono::steady_clock::now();
     SyncPlayerState(instanceID, logFrame, nds);
     const auto afterSyncPlayer = std::chrono::steady_clock::now();

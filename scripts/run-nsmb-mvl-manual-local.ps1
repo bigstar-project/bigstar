@@ -3,6 +3,7 @@ param(
     [int]$WaitTimeoutMs = 86400000,
     [int]$StallTimeoutMs = 0,
     [int]$StallStartFrame = 900,
+    [int]$GameplayHeartbeatInterval = 120,
     [int]$InputDelayFrames = 16,
     [int]$InputMaxFrameLead = 2,
     [int]$InternalWaitTimeoutMs = 0,
@@ -30,6 +31,7 @@ param(
     [int]$WorldStateMaxPredictFrames = 1,
     [int]$WorldStateActorRescanInterval = 30,
     [switch]$WorldStateSkipEffects,
+    [switch]$WorldStateApplyActorSnapshot,
     [switch]$WorldStateTraceObjectLifecycles,
     [switch]$WorldStateTraceActorInternals,
     [switch]$WorldStateTraceEffects,
@@ -134,10 +136,12 @@ if ($LowLatencyRollback) {
 
 if ($PlanDActorSnapshot) {
     if (-not $PSBoundParameters.ContainsKey('InputDelayFrames')) { $InputDelayFrames = 0 }
-    if (-not $PSBoundParameters.ContainsKey('InputMaxFrameLead')) { $InputMaxFrameLead = 8 }
+    if (-not $PSBoundParameters.ContainsKey('InputMaxFrameLead')) { $InputMaxFrameLead = 4 }
     if (-not $PSBoundParameters.ContainsKey('NetworkPumpThread')) { $NetworkPumpThread = $true }
     if (-not $PSBoundParameters.ContainsKey('NetworkPumpSleepUs')) { $NetworkPumpSleepUs = 50 }
     if (-not $PSBoundParameters.ContainsKey('StallTimeoutMs')) { $StallTimeoutMs = 5000 }
+    if (-not $PSBoundParameters.ContainsKey('WorldStateApplyActorSnapshot')) { $WorldStateApplyActorSnapshot = $true }
+    if (-not $PSBoundParameters.ContainsKey('GameplayHeartbeatInterval')) { $GameplayHeartbeatInterval = 120 }
 }
 
 if ($LowLatencyRollback -and ($RollbackBackend -eq "nsmbtinycore" -or $RollbackBackend -eq "nsmb-tiny-core")) {
@@ -191,6 +195,7 @@ $common = @(
     "-WaitTimeoutMs", "$WaitTimeoutMs",
     "-InternalWaitTimeoutMs", "$InternalWaitTimeoutMs",
     "-StallTimeoutMs", "$StallTimeoutMs",
+    "-GameplayHeartbeatInterval", "$GameplayHeartbeatInterval",
     "-StallStartFrame", "$StallStartFrame",
     "-Exe", $Exe,
     "-InputScript", $InputScript,
@@ -243,6 +248,7 @@ if ($PlanDActorSnapshot) {
         "-WorldStateSpawnItem",
         "-WorldStateApplyMovingHazard",
         "-WorldStateApplyEffects",
+        "-WorldStateApplyActorSnapshot",
         "-WorldStateSyncInterval", "$WorldStateSyncInterval",
         "-WorldStateMaxPredictFrames", "$WorldStateMaxPredictFrames",
         "-WorldStateActorRescanInterval", "$WorldStateActorRescanInterval"
@@ -418,9 +424,10 @@ Write-Host "host wrapper pid=$($hostProc.Id) log=$hostLog"
 Write-Host "client wrapper pid=$($clientProc.Id) log=$clientLog"
 Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
 Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames networkPump=$([bool]$NetworkPumpThread) networkPumpSleepUs=$NetworkPumpSleepUs packetBridgeStart=$PacketBridgeStartFrame renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$([bool]$PerfBreakdown)"
+Write-Host "gameplay heartbeat interval=$GameplayHeartbeatInterval"
 Write-Host "trace gameState=$([bool]$GameStateTrace) interval=$GameStateTraceInterval extended=$([bool]$GameStateTraceExtended) lifeChanges=$([bool]$TracePlayerLifeChanges) defeated=$([bool]$TracePlayerDefeated)"
 if ($PlanDActorSnapshot) {
-    Write-Host "Plan-D actor/global/world snapshot enabled playerInterval=$PlayerStateSyncInterval playerPredict=$PlayerStateMaxPredictFrames worldInterval=$WorldStateSyncInterval worldPredict=$WorldStateMaxPredictFrames worldRescan=$WorldStateActorRescanInterval itemSpawn=1"
+    Write-Host "Plan-D actor/global/world snapshot enabled playerInterval=$PlayerStateSyncInterval playerPredict=$PlayerStateMaxPredictFrames worldInterval=$WorldStateSyncInterval worldPredict=$WorldStateMaxPredictFrames worldRescan=$WorldStateActorRescanInterval itemSpawn=1 actorSnapshot=$([bool]$WorldStateApplyActorSnapshot)"
 }
 Write-Host "mvlWins=$MvlWins mvlBigStars=$MvlBigStars mvlLives=$MvlLives mvlStage=$(if ($MvlStage -ge 0) { $MvlStage } else { 'auto/default' }) mvlSceneSettings=$(if ($MvlSceneSettings) { $MvlSceneSettings } else { 'derived' }) mvlCourseMode=$MvlCourseMode generateConfiguredRoms=$($GenerateMvlConfiguredRoms.IsPresent) mvlMatchSeed=$(if ($MvlMatchSeed) { $MvlMatchSeed } else { 'auto' })"
 if ($Rollback) {

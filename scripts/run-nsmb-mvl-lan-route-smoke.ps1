@@ -6,6 +6,7 @@ param(
     [int]$InternalWaitTimeoutMs = 5000,
     [int]$StallTimeoutMs = 0,
     [int]$FrameHeartbeatInterval = 120,
+    [int]$GameplayHeartbeatInterval = 0,
     [int]$StallStartFrame = 900,
     [int]$StallPollMs = 500,
     [string]$Exe = "build\debug-windows-x86_64\melonDS.exe",
@@ -34,6 +35,7 @@ param(
     [switch]$WorldStateSkipStar,
     [switch]$WorldStateApplyMovingHazard,
     [switch]$WorldStateApplyEffects,
+    [switch]$WorldStateApplyActorSnapshot,
     [switch]$WorldStateSkipEffects,
     [switch]$WorldStateTraceMovingHazards,
     [switch]$WorldStateTraceObjectLifecycles,
@@ -846,6 +848,11 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FRAME_HEARTBEAT_INTERVAL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FRAME_HEARTBEAT_FILE -ErrorAction SilentlyContinue
     }
+    if ($GameplayHeartbeatInterval -gt 0) {
+        $env:MELONDS_NSML_GAMEPLAY_HEARTBEAT_INTERVAL = "$([Math]::Max(1, $GameplayHeartbeatInterval))"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_GAMEPLAY_HEARTBEAT_INTERVAL -ErrorAction SilentlyContinue
+    }
     if ($NoHashLog) {
         $env:MELONDS_NSML_DISABLE_HASH = "1"
         Remove-Item Env:\MELONDS_NSML_HASH_LOG -ErrorAction SilentlyContinue
@@ -1325,6 +1332,11 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS -ErrorAction SilentlyContinue
         }
+        if ($WorldStateApplyActorSnapshot) {
+            $env:MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT -ErrorAction SilentlyContinue
+        }
         if ($WorldStateSkipEffects) {
             $env:MELONDS_NSML_WORLD_STATE_SKIP_EFFECTS = "1"
         } else {
@@ -1367,6 +1379,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_EFFECTS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES -ErrorAction SilentlyContinue
@@ -3224,6 +3237,8 @@ function Start-MelonLANProcess {
         "worldStateSpawnItem=$($env:MELONDS_NSML_WORLD_STATE_SPAWN_ITEM)"
         "worldStateApplyMovingHazard=$($env:MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD)"
         "worldStateApplyEffects=$($env:MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS)"
+        "worldStateApplyActorSnapshot=$($env:MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT)"
+        "gameplayHeartbeatInterval=$($env:MELONDS_NSML_GAMEPLAY_HEARTBEAT_INTERVAL)"
         "worldStateTraceActorInternals=$($env:MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS)"
         "worldStateTraceEffects=$($env:MELONDS_NSML_WORLD_STATE_TRACE_EFFECTS)"
         "worldStateSyncInterval=$($env:MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL)"

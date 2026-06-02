@@ -61,6 +61,7 @@ param(
     [switch]$WorldStateSkipStar,
     [switch]$WorldStateApplyMovingHazard,
     [switch]$WorldStateApplyEffects,
+    [switch]$WorldStateApplyActorSnapshot,
     [switch]$WorldStateSkipEffects,
     [switch]$WorldStateTraceMovingHazards,
     [switch]$WorldStateTraceObjectLifecycles,
@@ -126,6 +127,7 @@ param(
     [int]$MaxConsecutiveSlowFrames = -1,
     [int]$StallTimeoutMs = 0,
     [int]$FrameHeartbeatInterval = 120,
+    [int]$GameplayHeartbeatInterval = 0,
     [int]$StallStartFrame = 900,
     [switch]$UseLanMP,
     [switch]$PacketBridgePreserveLocalTouch,
@@ -219,6 +221,7 @@ $common = @(
     "-WaitTimeoutMs", "$WaitTimeoutMs",
     "-StallTimeoutMs", "$StallTimeoutMs",
     "-FrameHeartbeatInterval", "$FrameHeartbeatInterval",
+    "-GameplayHeartbeatInterval", "$GameplayHeartbeatInterval",
     "-StallStartFrame", "$StallStartFrame",
     "-Frames", "$Frames",
     "-Exe", $Exe,
@@ -316,6 +319,9 @@ if ($WorldStateSync) {
     }
     if ($WorldStateApplyEffects) {
         $common += "-WorldStateApplyEffects"
+    }
+    if ($WorldStateApplyActorSnapshot) {
+        $common += "-WorldStateApplyActorSnapshot"
     }
     if ($WorldStateSkipEffects) {
         $common += "-WorldStateSkipEffects"
