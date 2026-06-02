@@ -1148,6 +1148,10 @@ struct State
     bool WorldStateApplyStarActor = true;
     bool WorldStateApplyMovingHazard = false;
     bool WorldStateTraceMovingHazards = false;
+    bool WorldStateTraceObjectLifecycles = false;
+    int WorldStateTraceObjectLifecyclesInterval = 60;
+    melonDS::u32 WorldStateTraceObjectLifecyclesStartFrame = 0;
+    melonDS::u32 WorldStateTraceObjectLifecyclesEndFrame = kNoFrameLimit;
     int WorldStateSyncInterval = 2;
     int WorldStateMaxPredictFrames = 1;
     int WorldStateActorRescanInterval = 0;
@@ -1696,6 +1700,7 @@ struct State
     melonDS::u32 WorldMovingHazardGUIDCaches[16][kMaxWorldMovingHazards] {};
     melonDS::u32 WorldMovingHazardCacheCounts[16] {};
     melonDS::u32 LastTracedWorldMovingHazardsFrame[16] {};
+    melonDS::u32 LastTracedWorldObjectLifecyclesFrame[16] {};
     melonDS::u32 TestFrameCount[16] {};
     bool StateSaved[16] {};
     bool StateLoaded[16] {};
@@ -7352,6 +7357,94 @@ void TraceWorldMovingHazardsIfNeeded(int instanceID, melonDS::u32 frame, melonDS
     std::printf("\n");
 }
 
+void TraceWorldObjectLifecyclesIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.WorldStateTraceObjectLifecycles || !nds || !nds->MainRAM || instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.WorldStateTraceObjectLifecyclesStartFrame ||
+        (G.WorldStateTraceObjectLifecyclesEndFrame != kNoFrameLimit &&
+            frame > G.WorldStateTraceObjectLifecyclesEndFrame))
+        return;
+    if ((frame % static_cast<melonDS::u32>(G.WorldStateTraceObjectLifecyclesInterval)) != 0 ||
+        G.LastTracedWorldObjectLifecyclesFrame[instanceID] == frame)
+        return;
+    G.LastTracedWorldObjectLifecyclesFrame[instanceID] = frame;
+
+    struct LifecycleActor
+    {
+        melonDS::u32 VTable = 0;
+        melonDS::u32 Base = 0;
+        melonDS::u32 GUID = 0;
+        melonDS::u32 Settings = 0;
+        melonDS::u32 PosX = 0;
+        melonDS::u32 PosY = 0;
+        melonDS::u32 PosZ = 0;
+        melonDS::u16 ObjectID = 0;
+        melonDS::u8 State = 0;
+        melonDS::u8 Type = 0;
+        melonDS::u8 SkipFlags = 0;
+    };
+
+    std::vector<LifecycleActor> actors;
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (ramLen < 0x14)
+        return;
+    for (melonDS::u32 off = 0; off <= ramLen - 0x14; off += 4)
+    {
+        LifecycleActor actor;
+        if (!ReadMainRAMU32(nds, off, actor.VTable) ||
+            !ReadMainRAMU32(nds, off + 4, actor.GUID) ||
+            !ReadMainRAMU32(nds, off + 8, actor.Settings) ||
+            !ReadMainRAMU32(nds, off + 0x60, actor.PosX) ||
+            !ReadMainRAMU32(nds, off + 0x64, actor.PosY) ||
+            !ReadMainRAMU32(nds, off + 0x68, actor.PosZ) ||
+            !ReadMainRAMU16(nds, off + 0x0C, actor.ObjectID) ||
+            !ReadMainRAMU8(nds, off + 0x0E, actor.State) ||
+            !ReadMainRAMU8(nds, off + 0x12, actor.Type) ||
+            !ReadMainRAMU8(nds, off + 0x13, actor.SkipFlags))
+            continue;
+        if (actor.VTable < kMainRAMBase || actor.VTable >= kMainRAMBase + ramLen)
+            continue;
+        if (actor.GUID == 0 || actor.GUID >= 0x10000)
+            continue;
+        if (actor.ObjectID == 0 || actor.ObjectID >= 0x400)
+            continue;
+        if (actor.State == 0 || actor.State > 2 || actor.Type > 2)
+            continue;
+        actor.Base = kMainRAMBase + off;
+        actors.push_back(actor);
+    }
+
+    std::sort(actors.begin(), actors.end(), [](const LifecycleActor& lhs, const LifecycleActor& rhs) {
+        if (lhs.State != rhs.State)
+            return lhs.State < rhs.State;
+        if (lhs.ObjectID != rhs.ObjectID)
+            return lhs.ObjectID < rhs.ObjectID;
+        return lhs.GUID < rhs.GUID;
+    });
+    std::printf("NSMB WorldObjects: role=%s inst=%d frame=%u count=%zu",
+        G.NetRole == Role::Host ? "host" : "client",
+        instanceID,
+        frame,
+        actors.size());
+    for (const LifecycleActor& actor : actors)
+    {
+        std::printf(" actor=%u/%03X/%08X/%u/%u/%02X/%08X/%08X/%08X/%08X/%08X",
+            actor.GUID,
+            actor.ObjectID,
+            actor.Settings,
+            actor.State,
+            actor.Type,
+            actor.SkipFlags,
+            actor.VTable,
+            actor.Base,
+            actor.PosX,
+            actor.PosY,
+            actor.PosZ);
+    }
+    std::printf("\n");
+}
+
 std::vector<ObjectScanSample> GetWorldMovingHazardsCached(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     std::vector<ObjectScanSample> actors;
@@ -10107,6 +10200,7 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
     if (instanceID < 0 || instanceID >= 16 || !nds || !nds->MainRAM) return;
     if (frame < G.NetplayStartFrame) return;
     TraceWorldMovingHazardsIfNeeded(instanceID, frame, nds);
+    TraceWorldObjectLifecyclesIfNeeded(instanceID, frame, nds);
 
     WireWorldState sample {};
     {
@@ -12179,6 +12273,7 @@ void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if (frame < G.NetplayStartFrame) return;
     if ((frame % static_cast<melonDS::u32>(G.WorldStateSyncInterval)) != 0) return;
     TraceWorldMovingHazardsIfNeeded(instanceID, frame, nds);
+    TraceWorldObjectLifecyclesIfNeeded(instanceID, frame, nds);
 
     const ObjectScanSample star = GetWorldActorCached(
         instanceID,
@@ -12861,6 +12956,13 @@ void InitFromEnvironment()
         EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD") &&
         !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD");
     G.WorldStateTraceMovingHazards = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS");
+    G.WorldStateTraceObjectLifecycles = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES");
+    G.WorldStateTraceObjectLifecyclesInterval =
+        std::max(1, EnvInt("MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_INTERVAL", 60));
+    G.WorldStateTraceObjectLifecyclesStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_START_FRAME", 0)));
+    G.WorldStateTraceObjectLifecyclesEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_END_FRAME", 0)));
     G.WorldStateSyncInterval = std::max(1, EnvInt("MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL", 2));
     G.WorldStateMaxPredictFrames = std::max(0, EnvInt("MELONDS_NSML_WORLD_STATE_MAX_PREDICT_FRAMES", 1));
     G.WorldStateActorRescanInterval = std::max(0, EnvInt("MELONDS_NSML_WORLD_STATE_ACTOR_RESCAN_INTERVAL", 0));

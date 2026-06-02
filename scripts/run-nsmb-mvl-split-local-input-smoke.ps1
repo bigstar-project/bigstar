@@ -60,6 +60,10 @@ param(
     [switch]$WorldStateSkipStar,
     [switch]$WorldStateApplyMovingHazard,
     [switch]$WorldStateTraceMovingHazards,
+    [switch]$WorldStateTraceObjectLifecycles,
+    [int]$WorldStateTraceObjectLifecyclesInterval = 60,
+    [int]$WorldStateTraceObjectLifecyclesStartFrame = 0,
+    [int]$WorldStateTraceObjectLifecyclesEndFrame = 0,
     [switch]$WorldStateSkipMovingHazard,
     [int]$WorldStateSyncInterval = 2,
     [int]$WorldStateMaxPredictFrames = 1,
@@ -116,6 +120,12 @@ param(
     [int]$StallTimeoutMs = 0,
     [int]$StallStartFrame = 900,
     [switch]$UseLanMP,
+    [switch]$PacketBridgePreserveLocalTouch,
+    [switch]$ForcePlayerInventoryPowerups,
+    [int]$ForcePlayerInventoryPowerupsStartFrame = 0,
+    [int]$ForcePlayerInventoryPowerupsEndFrame = 0,
+    [int]$ForcePlayerInventoryPowerup0 = 0,
+    [int]$ForcePlayerInventoryPowerup1 = 0,
     [switch]$ForceStageActorFreezeFlag,
     [switch]$ForceStageActorFreezeFlagHostOnly,
     [switch]$ForceStageActorFreezeFlagClientOnly,
@@ -225,6 +235,18 @@ $common = @(
 if (-not $UseLanMP) {
     $common += "-NoLanMP"
 }
+if ($PacketBridgePreserveLocalTouch) {
+    $common += "-PacketBridgePreserveLocalTouch"
+}
+if ($ForcePlayerInventoryPowerups) {
+    $common += @(
+        "-ForcePlayerInventoryPowerups",
+        "-ForcePlayerInventoryPowerupsStartFrame", "$ForcePlayerInventoryPowerupsStartFrame",
+        "-ForcePlayerInventoryPowerupsEndFrame", "$ForcePlayerInventoryPowerupsEndFrame",
+        "-ForcePlayerInventoryPowerup0", "$ForcePlayerInventoryPowerup0",
+        "-ForcePlayerInventoryPowerup1", "$ForcePlayerInventoryPowerup1"
+    )
+}
 if (-not $NoGameStateTrace) {
     $common += @(
         "-GameStateTrace",
@@ -281,6 +303,14 @@ if ($WorldStateSync) {
     }
     if ($WorldStateTraceMovingHazards) {
         $common += "-WorldStateTraceMovingHazards"
+    }
+    if ($WorldStateTraceObjectLifecycles) {
+        $common += @(
+            "-WorldStateTraceObjectLifecycles",
+            "-WorldStateTraceObjectLifecyclesInterval", "$WorldStateTraceObjectLifecyclesInterval",
+            "-WorldStateTraceObjectLifecyclesStartFrame", "$WorldStateTraceObjectLifecyclesStartFrame",
+            "-WorldStateTraceObjectLifecyclesEndFrame", "$WorldStateTraceObjectLifecyclesEndFrame"
+        )
     }
 }
 if ($AllowJit) {
