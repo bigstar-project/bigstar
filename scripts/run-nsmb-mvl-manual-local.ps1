@@ -29,6 +29,13 @@ param(
     [int]$WorldStateSyncInterval = 2,
     [int]$WorldStateMaxPredictFrames = 1,
     [int]$WorldStateActorRescanInterval = 30,
+    [switch]$WorldStateSkipEffects,
+    [switch]$WorldStateTraceObjectLifecycles,
+    [switch]$WorldStateTraceActorInternals,
+    [switch]$WorldStateTraceEffects,
+    [int]$WorldStateTraceObjectLifecyclesInterval = 60,
+    [int]$WorldStateTraceObjectLifecyclesStartFrame = 0,
+    [int]$WorldStateTraceObjectLifecyclesEndFrame = 0,
     [int]$HostStartupDelayMs = 1200,
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds",
@@ -235,10 +242,28 @@ if ($PlanDActorSnapshot) {
         "-WorldStateApply",
         "-WorldStateSpawnItem",
         "-WorldStateApplyMovingHazard",
+        "-WorldStateApplyEffects",
         "-WorldStateSyncInterval", "$WorldStateSyncInterval",
         "-WorldStateMaxPredictFrames", "$WorldStateMaxPredictFrames",
         "-WorldStateActorRescanInterval", "$WorldStateActorRescanInterval"
     )
+}
+if ($WorldStateTraceObjectLifecycles) {
+    $common += @(
+        "-WorldStateTraceObjectLifecycles",
+        "-WorldStateTraceObjectLifecyclesInterval", "$WorldStateTraceObjectLifecyclesInterval",
+        "-WorldStateTraceObjectLifecyclesStartFrame", "$WorldStateTraceObjectLifecyclesStartFrame",
+        "-WorldStateTraceObjectLifecyclesEndFrame", "$WorldStateTraceObjectLifecyclesEndFrame"
+    )
+}
+if ($WorldStateTraceActorInternals) {
+    $common += "-WorldStateTraceActorInternals"
+}
+if ($WorldStateTraceEffects) {
+    $common += "-WorldStateTraceEffects"
+}
+if ($WorldStateSkipEffects) {
+    $common += "-WorldStateSkipEffects"
 }
 if ($NoFrameLimit) {
     $common += "-NoFrameLimit"

@@ -33,8 +33,12 @@ param(
     [switch]$WorldStateSpawnItem,
     [switch]$WorldStateSkipStar,
     [switch]$WorldStateApplyMovingHazard,
+    [switch]$WorldStateApplyEffects,
+    [switch]$WorldStateSkipEffects,
     [switch]$WorldStateTraceMovingHazards,
     [switch]$WorldStateTraceObjectLifecycles,
+    [switch]$WorldStateTraceActorInternals,
+    [switch]$WorldStateTraceEffects,
     [int]$WorldStateTraceObjectLifecyclesInterval = 60,
     [int]$WorldStateTraceObjectLifecyclesStartFrame = 0,
     [int]$WorldStateTraceObjectLifecyclesEndFrame = 0,
@@ -1316,6 +1320,16 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD -ErrorAction SilentlyContinue
         }
+        if ($WorldStateApplyEffects) {
+            $env:MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS -ErrorAction SilentlyContinue
+        }
+        if ($WorldStateSkipEffects) {
+            $env:MELONDS_NSML_WORLD_STATE_SKIP_EFFECTS = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_EFFECTS -ErrorAction SilentlyContinue
+        }
         if ($WorldStateTraceMovingHazards) {
             $env:MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS = "1"
         } else {
@@ -1332,6 +1346,16 @@ function Start-MelonLANProcess {
             Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_START_FRAME -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_END_FRAME -ErrorAction SilentlyContinue
         }
+        if ($WorldStateTraceActorInternals) {
+            $env:MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS -ErrorAction SilentlyContinue
+        }
+        if ($WorldStateTraceEffects) {
+            $env:MELONDS_NSML_WORLD_STATE_TRACE_EFFECTS = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_EFFECTS -ErrorAction SilentlyContinue
+        }
     } else {
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SYNC -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY -ErrorAction SilentlyContinue
@@ -1342,11 +1366,15 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_STAR -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_EFFECTS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_INTERVAL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_EFFECTS -ErrorAction SilentlyContinue
     }
     if ($RamDumpFrames -or $RamDumpInterval -gt 0) {
         $env:MELONDS_NSML_RAM_DUMP_DIR = $RamDumpDir
@@ -3195,6 +3223,9 @@ function Start-MelonLANProcess {
         "worldStateApply=$($env:MELONDS_NSML_WORLD_STATE_APPLY)"
         "worldStateSpawnItem=$($env:MELONDS_NSML_WORLD_STATE_SPAWN_ITEM)"
         "worldStateApplyMovingHazard=$($env:MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD)"
+        "worldStateApplyEffects=$($env:MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS)"
+        "worldStateTraceActorInternals=$($env:MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS)"
+        "worldStateTraceEffects=$($env:MELONDS_NSML_WORLD_STATE_TRACE_EFFECTS)"
         "worldStateSyncInterval=$($env:MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL)"
         "worldStateActorRescanInterval=$($env:MELONDS_NSML_WORLD_STATE_ACTOR_RESCAN_INTERVAL)"
         "perfSpikePhaseTrace=$($env:MELONDS_NSML_PERF_SPIKE_PHASE_TRACE)"

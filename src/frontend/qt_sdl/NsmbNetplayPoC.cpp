@@ -150,9 +150,19 @@ constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
 constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
 constexpr melonDS::u16 kVsMovingHazardObjectID = 0x0053;
 constexpr melonDS::u32 kVsMovingHazardSettings = 0x00000000;
+constexpr melonDS::u16 kVsKoopaTroopaObjectID = 0x005E;
 constexpr melonDS::u16 kVsWorldItemObjectID = 0x001F;
 constexpr melonDS::u32 kVsWorldItemSettings = 0x00080002;
 constexpr melonDS::u32 kVsWorldItemNaturalSpawnGraceFrames = 4;
+constexpr melonDS::u32 kEffectVTableStart = 0x02126A24;
+constexpr melonDS::u32 kEffectVTablePtr = 0x02126A2C;
+constexpr melonDS::u32 kWorldEffectSlotBase = 0x021C3268;
+constexpr melonDS::u32 kWorldEffectSlotStride = 0x1D4;
+constexpr melonDS::u32 kWorldEffectSlotCount = 32;
+constexpr melonDS::u32 kWorldEffectWordStart = 0x04;
+constexpr melonDS::u32 kWorldEffectWordEnd = 0xAC;
+constexpr std::size_t kWorldEffectWordCount =
+    ((kWorldEffectWordEnd - kWorldEffectWordStart) / sizeof(melonDS::u32)) + 1;
 constexpr int kObjectTraceSlots = 16;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
 constexpr melonDS::u32 kMvlStageSceneDefaultSettings = 0x00B4FF00;
@@ -362,7 +372,9 @@ constexpr melonDS::u32 kWireKindInputBundle = 0x42504E49; // "INPB", little endi
 constexpr melonDS::u32 kWireKindPlayerState = 0x41545350; // "PSTA", little endian
 constexpr melonDS::u32 kWireKindWorldState = 0x41545357; // "WSTA", little endian
 constexpr melonDS::u32 kWireKindMovingHazardState = 0x415A4148; // "HAZA", little endian
+constexpr melonDS::u32 kWireKindWorldEffectState = 0x54434645; // "EFCT", little endian
 constexpr std::size_t kMaxWorldMovingHazards = 4;
+constexpr std::size_t kMaxWorldEffects = 4;
 
 static_assert(sizeof(WireSeed) == 16);
 
@@ -599,6 +611,28 @@ struct WireMovingHazardState
 };
 
 static_assert(sizeof(WireMovingHazardState) == 424);
+
+struct WireWorldEffectSlot
+{
+    melonDS::u32 Found;
+    melonDS::u32 Base;
+    melonDS::u32 VTable;
+    melonDS::u32 Words[kWorldEffectWordCount];
+};
+
+struct WireWorldEffectState
+{
+    melonDS::u32 Magic;
+    melonDS::u32 Version;
+    melonDS::u32 Kind;
+    melonDS::u32 Frame;
+    melonDS::u32 Instance;
+    melonDS::u32 Count;
+    WireWorldEffectSlot Effects[kMaxWorldEffects];
+};
+
+static_assert(sizeof(WireWorldEffectSlot) == 184);
+static_assert(sizeof(WireWorldEffectState) == 760);
 
 struct GameStateSample
 {
@@ -1184,8 +1218,11 @@ struct State
     bool WorldStateApplyStarActor = true;
     bool WorldStateSpawnItem = false;
     bool WorldStateApplyMovingHazard = false;
+    bool WorldStateApplyEffects = false;
     bool WorldStateTraceMovingHazards = false;
     bool WorldStateTraceObjectLifecycles = false;
+    bool WorldStateTraceActorInternals = false;
+    bool WorldStateTraceEffects = false;
     int WorldStateTraceObjectLifecyclesInterval = 60;
     melonDS::u32 WorldStateTraceObjectLifecyclesStartFrame = 0;
     melonDS::u32 WorldStateTraceObjectLifecyclesEndFrame = kNoFrameLimit;
@@ -1706,6 +1743,8 @@ struct State
     bool RemoteWorldStateSampleValid = false;
     WireMovingHazardState RemoteMovingHazardStateSample {};
     bool RemoteMovingHazardStateSampleValid = false;
+    WireWorldEffectState RemoteWorldEffectStateSample {};
+    bool RemoteWorldEffectStateSampleValid = false;
     std::vector<WireNSMLPacket> PendingNSMLPackets;
     bool GameStateMismatchSeen = false;
     melonDS::u32 LastTracedSentInputFrame = kNoFrameLimit;
@@ -1743,6 +1782,7 @@ struct State
     melonDS::u32 WorldMovingHazardLocalGUIDMaps[16][kMaxWorldMovingHazards] {};
     melonDS::u32 WorldMovingHazardCacheCounts[16] {};
     melonDS::u32 LastTracedWorldMovingHazardsFrame[16] {};
+    melonDS::u32 LastTracedWorldEffectsFrame[16] {};
     melonDS::u32 LastTracedWorldObjectLifecyclesFrame[16] {};
     melonDS::u32 TestFrameCount[16] {};
     bool StateSaved[16] {};
@@ -2350,7 +2390,8 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                 && event.packet->dataLength != sizeof(WireGameState)
                 && event.packet->dataLength != sizeof(WirePlayerState)
                 && event.packet->dataLength != sizeof(WireWorldState)
-                && event.packet->dataLength != sizeof(WireMovingHazardState))
+                && event.packet->dataLength != sizeof(WireMovingHazardState)
+                && event.packet->dataLength != sizeof(WireWorldEffectState))
             {
                 WireInputBundleHeader header;
                 std::memcpy(&header, event.packet->data, sizeof(header));
@@ -2492,6 +2533,18 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                 {
                     G.RemoteMovingHazardStateSample = packet;
                     G.RemoteMovingHazardStateSampleValid = true;
+                }
+            }
+            else if (event.packet->dataLength == sizeof(WireWorldEffectState))
+            {
+                WireWorldEffectState packet;
+                std::memcpy(&packet, event.packet->data, sizeof(packet));
+                if (packet.Magic == kMagic && packet.Version == kVersion
+                    && packet.Kind == kWireKindWorldEffectState
+                    && packet.Count <= kMaxWorldEffects)
+                {
+                    G.RemoteWorldEffectStateSample = packet;
+                    G.RemoteWorldEffectStateSampleValid = true;
                 }
             }
             else if (event.packet->dataLength == sizeof(WireGameState))
@@ -7685,6 +7738,141 @@ void TraceWorldMovingHazardsIfNeeded(int instanceID, melonDS::u32 frame, melonDS
     std::printf("\n");
 }
 
+bool ShouldTraceWorldActorInternals(melonDS::u16 objectID, melonDS::u32 vtable)
+{
+    return objectID == kVsMovingHazardObjectID ||
+        objectID == kVsKoopaTroopaObjectID ||
+        objectID == kVsBattleStarCandidateObjectID ||
+        vtable == kEffectVTablePtr ||
+        vtable == kEffectVTableStart;
+}
+
+void PrintWorldActorInternalWords(
+    const char* prefix,
+    int instanceID,
+    melonDS::u32 frame,
+    melonDS::NDS* nds,
+    melonDS::u32 base,
+    melonDS::u32 guid,
+    melonDS::u16 objectID,
+    melonDS::u32 settings,
+    melonDS::u32 vtable)
+{
+    std::printf(
+        "%s: role=%s inst=%d frame=%u guid=%u object=%03X settings=%08X vtable=%08X base=%08X words=",
+        prefix,
+        G.NetRole == Role::Host ? "host" : "client",
+        instanceID,
+        frame,
+        guid,
+        objectID,
+        settings,
+        vtable,
+        base);
+
+    for (melonDS::u32 relativeOffset = 0; relativeOffset <= 0x10C; relativeOffset += sizeof(melonDS::u32))
+    {
+        melonDS::u32 value = 0;
+        ReadMainRAMAddressU32(nds, base + relativeOffset, value);
+        std::printf("%s%02X:%08X", relativeOffset == 0 ? "" : "/", relativeOffset, value);
+    }
+    std::printf("\n");
+}
+
+bool IsInterestingEffectCandidate(melonDS::NDS* nds, melonDS::u32 base)
+{
+    if (base < 0x02100000u)
+        return false;
+
+    for (melonDS::u32 relativeOffset = 0x04; relativeOffset <= 0x10C; relativeOffset += sizeof(melonDS::u32))
+    {
+        melonDS::u32 value = 0;
+        ReadMainRAMAddressU32(nds, base + relativeOffset, value);
+        if (value == 0 ||
+            value == 0x020391F8u ||
+            value == 0x02039208u ||
+            value == kEffectVTablePtr ||
+            value == kEffectVTableStart)
+            continue;
+        if (relativeOffset == 0xA8 && (value & 0x0000FFFFu) == 0)
+            continue;
+        return true;
+    }
+    return false;
+}
+
+bool ReadWorldEffectSlot(melonDS::NDS* nds, melonDS::u32 base, WireWorldEffectSlot& slot)
+{
+    if (!nds || !nds->MainRAM || !IsValidMainRAMRange(nds, base, kWorldEffectWordEnd + sizeof(melonDS::u32)))
+        return false;
+
+    melonDS::u32 vtable = 0;
+    if (!ReadMainRAMAddressU32(nds, base, vtable))
+        return false;
+    if (vtable != kEffectVTablePtr && vtable != kEffectVTableStart)
+        return false;
+    if (!IsInterestingEffectCandidate(nds, base))
+        return false;
+
+    slot.Found = 1;
+    slot.Base = base;
+    slot.VTable = vtable;
+    for (std::size_t i = 0; i < kWorldEffectWordCount; i++)
+    {
+        const melonDS::u32 relativeOffset =
+            kWorldEffectWordStart + static_cast<melonDS::u32>(i * sizeof(melonDS::u32));
+        ReadMainRAMAddressU32(nds, base + relativeOffset, slot.Words[i]);
+    }
+    return true;
+}
+
+void TraceWorldEffectsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.WorldStateTraceEffects || !nds || !nds->MainRAM || instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.WorldStateTraceObjectLifecyclesStartFrame ||
+        (G.WorldStateTraceObjectLifecyclesEndFrame != kNoFrameLimit &&
+            frame > G.WorldStateTraceObjectLifecyclesEndFrame))
+        return;
+    if ((frame % static_cast<melonDS::u32>(G.WorldStateTraceObjectLifecyclesInterval)) != 0 ||
+        G.LastTracedWorldEffectsFrame[instanceID] == frame)
+        return;
+    G.LastTracedWorldEffectsFrame[instanceID] = frame;
+
+    melonDS::u32 count = 0;
+    for (melonDS::u32 slotIndex = 0; slotIndex < kWorldEffectSlotCount; slotIndex++)
+    {
+        const melonDS::u32 base = kWorldEffectSlotBase + slotIndex * kWorldEffectSlotStride;
+        WireWorldEffectSlot slot {};
+        if (!ReadWorldEffectSlot(nds, base, slot))
+            continue;
+
+        const melonDS::u32 guid = 0;
+        PrintWorldActorInternalWords(
+            "NSMB WorldEffectInternals",
+            instanceID,
+            frame,
+            nds,
+            base,
+            guid,
+            0,
+            0,
+            slot.VTable);
+        count++;
+        if (count >= 16)
+            break;
+    }
+
+    if (count == 0)
+    {
+        std::printf(
+            "NSMB WorldEffectInternals: role=%s inst=%d frame=%u count=0\n",
+            G.NetRole == Role::Host ? "host" : "client",
+            instanceID,
+            frame);
+    }
+}
+
 void TraceWorldObjectLifecyclesIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.WorldStateTraceObjectLifecycles || !nds || !nds->MainRAM || instanceID < 0 || instanceID >= 16)
@@ -7730,6 +7918,20 @@ void TraceWorldObjectLifecyclesIfNeeded(int instanceID, melonDS::u32 frame, melo
         actor.State = entry.LifecycleState;
         actor.Type = entry.Type;
         actor.SkipFlags = entry.SkipFlags;
+        if (G.WorldStateTraceActorInternals &&
+            ShouldTraceWorldActorInternals(entry.ObjectID, entry.VTable))
+        {
+            PrintWorldActorInternalWords(
+                "NSMB WorldActorInternals",
+                instanceID,
+                frame,
+                nds,
+                actor.Base,
+                actor.GUID,
+                actor.ObjectID,
+                actor.Settings,
+                actor.VTable);
+        }
         if (actor.State == 0 || actor.State > 2 || actor.Type > 2)
             continue;
         actors.push_back(actor);
@@ -10485,6 +10687,9 @@ bool ApplyWireWorldMovingHazardState(
     if (!state.Found)
         return false;
 
+    nds->ARM9Write16(localBase + 0x0E, static_cast<melonDS::u16>(state.StateType));
+    nds->ARM9Write32(localBase + 0x10, state.Flags);
+
     const melonDS::u32 posX = state.PosX + state.VelX * predictFrames;
     const melonDS::u32 posY = state.PosY + state.VelY * predictFrames;
     const melonDS::u32 posZ = state.PosZ + state.VelZ * predictFrames;
@@ -10607,6 +10812,7 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
     if (frame < G.NetplayStartFrame) return;
     TraceWorldMovingHazardsIfNeeded(instanceID, frame, nds);
     TraceWorldObjectLifecyclesIfNeeded(instanceID, frame, nds);
+    TraceWorldEffectsIfNeeded(instanceID, frame, nds);
 
     WireWorldState sample {};
     {
@@ -10799,6 +11005,7 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
             G.WorldMovingHazardLocalGUIDMaps[instanceID][i] != nextLocalGUIDs[i];
         ApplyWireWorldMovingHazardState(nds, remoteActor, predictFrames, localActor.Base);
     }
+
     for (std::size_t i = 0; i < kMaxWorldMovingHazards; i++)
     {
         mapChanged = mapChanged ||
@@ -10816,6 +11023,44 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
         for (std::size_t i = 0; i < pairCount; i++)
             std::printf(" slot%zu=%u/%u", i, nextRemoteGUIDs[i], nextLocalGUIDs[i]);
         std::printf("\n");
+    }
+}
+
+void ApplyRemoteWorldEffectState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.Enabled || !G.WorldStateApplyEffects || G.NetRole != Role::Client || !nds || !nds->MainRAM)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.NetplayStartFrame)
+        return;
+
+    WireWorldEffectState sample {};
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        PumpNetworkLocked();
+        if (!G.RemoteWorldEffectStateSampleValid)
+            return;
+        sample = G.RemoteWorldEffectStateSample;
+    }
+
+    for (std::size_t i = 0; i < std::min<std::size_t>(sample.Count, kMaxWorldEffects); i++)
+    {
+        const WireWorldEffectSlot& remote = sample.Effects[i];
+        if (!remote.Found || !IsValidMainRAMRange(nds, remote.Base, kWorldEffectWordEnd + sizeof(melonDS::u32)))
+            continue;
+
+        melonDS::u32 localVTable = 0;
+        if (!ReadMainRAMAddressU32(nds, remote.Base, localVTable) ||
+            (localVTable != kEffectVTablePtr && localVTable != kEffectVTableStart))
+            continue;
+
+        for (std::size_t wordIndex = 0; wordIndex < kWorldEffectWordCount; wordIndex++)
+        {
+            const melonDS::u32 relativeOffset =
+                kWorldEffectWordStart + static_cast<melonDS::u32>(wordIndex * sizeof(melonDS::u32));
+            WriteARM9U32(nds, remote.Base + relativeOffset, remote.Words[wordIndex]);
+        }
     }
 }
 
@@ -12819,6 +13064,7 @@ void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if ((frame % static_cast<melonDS::u32>(G.WorldStateSyncInterval)) != 0) return;
     TraceWorldMovingHazardsIfNeeded(instanceID, frame, nds);
     TraceWorldObjectLifecyclesIfNeeded(instanceID, frame, nds);
+    TraceWorldEffectsIfNeeded(instanceID, frame, nds);
 
     const ObjectScanSample star = GetWorldActorCached(
         instanceID,
@@ -12864,6 +13110,44 @@ void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             packet.MovingHazard.PosY);
     }
 
+    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), 0);
+    if (enetPacket)
+        enet_peer_send(G.Peer, 0, enetPacket);
+}
+
+void SyncWorldEffectState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.Enabled || !G.WorldStateSyncEnabled || !G.WorldStateApplyEffects ||
+        G.NetRole != Role::Host || !nds || !nds->MainRAM)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.NetplayStartFrame)
+        return;
+    if ((frame % static_cast<melonDS::u32>(G.WorldStateSyncInterval)) != 0)
+        return;
+
+    WireWorldEffectState packet {};
+    packet.Magic = kMagic;
+    packet.Version = kVersion;
+    packet.Kind = kWireKindWorldEffectState;
+    packet.Frame = frame;
+    packet.Instance = static_cast<melonDS::u32>(instanceID);
+
+    for (melonDS::u32 slotIndex = 0; slotIndex < kWorldEffectSlotCount && packet.Count < kMaxWorldEffects; slotIndex++)
+    {
+        const melonDS::u32 base = kWorldEffectSlotBase + slotIndex * kWorldEffectSlotStride;
+        WireWorldEffectSlot slot {};
+        if (!ReadWorldEffectSlot(nds, base, slot))
+            continue;
+        packet.Effects[packet.Count++] = slot;
+    }
+    if (packet.Count == 0)
+        return;
+
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    if (!G.Peer)
+        return;
     ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), 0);
     if (enetPacket)
         enet_peer_send(G.Peer, 0, enetPacket);
@@ -13525,8 +13809,13 @@ void InitFromEnvironment()
     G.WorldStateApplyMovingHazard =
         EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD") &&
         !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD");
+    G.WorldStateApplyEffects =
+        EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS") &&
+        !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_EFFECTS");
     G.WorldStateTraceMovingHazards = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS");
     G.WorldStateTraceObjectLifecycles = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES");
+    G.WorldStateTraceActorInternals = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS");
+    G.WorldStateTraceEffects = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_EFFECTS");
     G.WorldStateTraceObjectLifecyclesInterval =
         std::max(1, EnvInt("MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_INTERVAL", 60));
     G.WorldStateTraceObjectLifecyclesStartFrame = static_cast<melonDS::u32>(
@@ -14554,9 +14843,13 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteWorldState(instanceID, inputFrame, nds);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyRemoteWorldEffectState(instanceID, inputFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemotePlayerState(instanceID, inputFrame, nds);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         SyncWorldState(instanceID, inputFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        SyncWorldEffectState(instanceID, inputFrame, nds);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         SyncMovingHazardState(instanceID, inputFrame, nds);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
@@ -15078,6 +15371,8 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     const auto afterApplyHazard = std::chrono::steady_clock::now();
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteWorldState(instanceID, logFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyRemoteWorldEffectState(instanceID, logFrame, nds);
     const auto afterApplyWorld = std::chrono::steady_clock::now();
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemotePlayerState(instanceID, logFrame, nds);
@@ -15087,6 +15382,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     SyncGameState(instanceID, logFrame, nds);
     const auto afterSyncGame = std::chrono::steady_clock::now();
     SyncWorldState(instanceID, logFrame, nds);
+    SyncWorldEffectState(instanceID, logFrame, nds);
     const auto afterSyncWorld = std::chrono::steady_clock::now();
     SyncMovingHazardState(instanceID, logFrame, nds);
     const auto afterSyncHazard = std::chrono::steady_clock::now();

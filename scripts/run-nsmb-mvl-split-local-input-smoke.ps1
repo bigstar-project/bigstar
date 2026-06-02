@@ -60,8 +60,12 @@ param(
     [switch]$WorldStateSpawnItem,
     [switch]$WorldStateSkipStar,
     [switch]$WorldStateApplyMovingHazard,
+    [switch]$WorldStateApplyEffects,
+    [switch]$WorldStateSkipEffects,
     [switch]$WorldStateTraceMovingHazards,
     [switch]$WorldStateTraceObjectLifecycles,
+    [switch]$WorldStateTraceActorInternals,
+    [switch]$WorldStateTraceEffects,
     [int]$WorldStateTraceObjectLifecyclesInterval = 60,
     [int]$WorldStateTraceObjectLifecyclesStartFrame = 0,
     [int]$WorldStateTraceObjectLifecyclesEndFrame = 0,
@@ -310,6 +314,12 @@ if ($WorldStateSync) {
     if ($WorldStateApplyMovingHazard) {
         $common += "-WorldStateApplyMovingHazard"
     }
+    if ($WorldStateApplyEffects) {
+        $common += "-WorldStateApplyEffects"
+    }
+    if ($WorldStateSkipEffects) {
+        $common += "-WorldStateSkipEffects"
+    }
     if ($WorldStateTraceMovingHazards) {
         $common += "-WorldStateTraceMovingHazards"
     }
@@ -320,6 +330,12 @@ if ($WorldStateSync) {
             "-WorldStateTraceObjectLifecyclesStartFrame", "$WorldStateTraceObjectLifecyclesStartFrame",
             "-WorldStateTraceObjectLifecyclesEndFrame", "$WorldStateTraceObjectLifecyclesEndFrame"
         )
+    }
+    if ($WorldStateTraceActorInternals) {
+        $common += "-WorldStateTraceActorInternals"
+    }
+    if ($WorldStateTraceEffects) {
+        $common += "-WorldStateTraceEffects"
     }
 }
 if ($AllowJit) {
