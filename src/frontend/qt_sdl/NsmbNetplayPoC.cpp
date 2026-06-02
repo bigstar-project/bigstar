@@ -147,6 +147,8 @@ constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
 constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
 constexpr melonDS::u16 kVsMovingHazardObjectID = 0x0053;
 constexpr melonDS::u32 kVsMovingHazardSettings = 0x00000000;
+constexpr melonDS::u16 kVsWorldItemObjectID = 0x001F;
+constexpr melonDS::u32 kVsWorldItemSettings = 0x00080002;
 constexpr int kObjectTraceSlots = 16;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
 constexpr melonDS::u32 kMvlStageSceneDefaultSettings = 0x00B4FF00;
@@ -196,8 +198,10 @@ constexpr melonDS::u32 kA2DJCourseSelectFactoryAddr = 0x020130A8;
 constexpr melonDS::u32 kA2DJApplySceneRequestAddr = 0x02007ACC;
 constexpr melonDS::u32 kA2DJStartSceneTransitionAddr = 0x02011CE8;
 constexpr melonDS::u32 kA2DJCreateObjectAddr = 0x0204BF8C;
+constexpr melonDS::u32 kA2DEActorSpawnActorAddr = 0x020A0B64;
 constexpr melonDS::u32 kA2DEStageLayoutMvlInitAddr = 0x020B0714;
 constexpr melonDS::u32 kDirectBootTrampolineAddr = 0x023C0000;
+constexpr melonDS::u32 kDirectBootTrampolineDataAddr = 0x023C0400;
 // Overlay0 padding cave. Keep runtime settings out of high Main RAM, which NSMB
 // can use for stage graphics/model buffers during MvL gameplay.
 constexpr melonDS::u32 kMvlRuntimeConfigAddr = 0x020C5360;
@@ -572,11 +576,12 @@ struct WireWorldState
     melonDS::u32 Frame;
     melonDS::u32 Instance;
     WireWorldActorState Star;
+    WireWorldActorState Item;
     WireWorldActorState MovingHazard;
 };
 
 static_assert(sizeof(WireWorldActorState) == 100);
-static_assert(sizeof(WireWorldState) == 220);
+static_assert(sizeof(WireWorldState) == 320);
 
 struct WireMovingHazardState
 {
@@ -1146,6 +1151,7 @@ struct State
     bool WorldStateSyncEnabled = false;
     bool WorldStateApplyEnabled = false;
     bool WorldStateApplyStarActor = true;
+    bool WorldStateSpawnItem = false;
     bool WorldStateApplyMovingHazard = false;
     bool WorldStateTraceMovingHazards = false;
     bool WorldStateTraceObjectLifecycles = false;
@@ -1694,6 +1700,8 @@ struct State
     melonDS::u32 PlayerActorGUIDCache[16][2] {};
     melonDS::u32 WorldStarActorBaseCache[16] {};
     melonDS::u32 WorldStarActorGUIDCache[16] {};
+    melonDS::u32 LastSpawnedWorldItemRemoteGUID[16] {};
+    melonDS::u32 LastConfirmedWorldItemRemoteGUID[16] {};
     melonDS::u32 WorldMovingHazardBaseCache[16] {};
     melonDS::u32 WorldMovingHazardGUIDCache[16] {};
     melonDS::u32 WorldMovingHazardBaseCaches[16][kMaxWorldMovingHazards] {};
@@ -2428,10 +2436,11 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
                         (G.InputTraceInterval <= 1 || (localFrame != kNoFrameLimit && (localFrame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0)))
                     {
-                        std::printf("NSMB WorldState: recv localFrame=%u packetFrame=%u star=%u hazard=%u hazardPos=%08X/%08X\n",
+                        std::printf("NSMB WorldState: recv localFrame=%u packetFrame=%u star=%u item=%u hazard=%u hazardPos=%08X/%08X\n",
                             localFrame,
                             packet.Frame,
                             packet.Star.Found,
+                            packet.Item.Found,
                             packet.MovingHazard.Found,
                             packet.MovingHazard.PosX,
                             packet.MovingHazard.PosY);
@@ -10194,6 +10203,73 @@ bool ApplyWireWorldMovingHazardState(
     return true;
 }
 
+bool SpawnRemoteWorldItem(
+    int instanceID,
+    melonDS::u32 frame,
+    melonDS::NDS* nds,
+    const WireWorldActorState& state)
+{
+    if (!nds || !nds->MainRAM || !state.Found || state.StateType != 1)
+        return false;
+
+    WriteARM9U32(nds, kDirectBootTrampolineDataAddr + 0x00, state.PosX);
+    WriteARM9U32(nds, kDirectBootTrampolineDataAddr + 0x04, state.PosY);
+    WriteARM9U32(nds, kDirectBootTrampolineDataAddr + 0x08, state.PosZ);
+    WriteARM9U32(nds, kDirectBootTrampolineDataAddr + 0x0C, 0);
+    WriteARM9U32(nds, kDirectBootTrampolineDataAddr + 0x10, 0);
+
+    const melonDS::u32 oldPC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
+    const melonDS::u32 returnPC = oldPC | ((nds->ARM9.CPSR & 0x20) ? 1u : 0u);
+
+    std::vector<melonDS::u32> code;
+    code.reserve(48);
+    EmitARM(code, 0xE92D5FFFu); // push {r0-r12, lr}
+    EmitARM(code, 0xE10F5000u); // mrs r5, cpsr
+    EmitARM(code, 0xE92D0020u); // push {r5}
+    EmitARM(code, 0xE24DD00Cu); // sub sp, sp, #0x0c
+    EmitStackArg(code, 0x00, 0);
+    EmitStackArg(code, 0x04, 0);
+    EmitStackArg(code, 0x08, 0);
+    EmitLoadImm(code, 0, kVsWorldItemObjectID);
+    EmitLoadImm(code, 1, state.Settings);
+    EmitLoadImm(code, 2, kDirectBootTrampolineDataAddr);
+    EmitLoadImm(code, 3, kDirectBootTrampolineDataAddr + 0x0C);
+    EmitARM(code, 0xE59FC008u); // ldr ip, [pc, #8]
+    EmitARM(code, 0xE28FE008u); // add lr, pc, #8
+    EmitARM(code, 0xE12FFF1Cu); // bx ip
+    EmitARM(code, 0xE1A00000u); // nop
+    EmitARM(code, kA2DEActorSpawnActorAddr);
+    EmitARM(code, 0xE28DD00Cu); // add sp, sp, #0x0c
+    EmitARM(code, 0xE8BD0020u); // pop {r5}
+    EmitARM(code, 0xE128F005u); // msr apsr_nzcvq, r5
+    EmitARM(code, 0xE8BD5FFFu); // pop {r0-r12, lr}
+    EmitARM(code, 0xE59FC004u); // ldr ip, [pc, #4]
+    EmitARM(code, 0xE12FFF1Cu); // bx ip
+    EmitARM(code, 0xE1A00000u); // nop
+    EmitARM(code, returnPC);
+
+    for (size_t i = 0; i < code.size(); i++)
+    {
+        if (!WriteARM9U32(nds, kDirectBootTrampolineAddr + static_cast<melonDS::u32>(i * sizeof(melonDS::u32)), code[i]))
+            return false;
+    }
+
+    std::printf(
+        "NSMB WorldItem: spawn inst=%d frame=%u remoteGuid=%u settings=%08X pos=%08X/%08X/%08X trampoline=%08X return=%08X\n",
+        instanceID,
+        frame,
+        state.GUID,
+        state.Settings,
+        state.PosX,
+        state.PosY,
+        state.PosZ,
+        kDirectBootTrampolineAddr,
+        returnPC);
+    std::fflush(stdout);
+    nds->ARM9.JumpTo(kDirectBootTrampolineAddr);
+    return true;
+}
+
 void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.Enabled || !G.WorldStateApplyEnabled || G.NetRole != Role::Client) return;
@@ -10227,16 +10303,61 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
         star.StateType == 1 &&
         sample.Star.StateType == 1 &&
         ApplyWireWorldActorState(nds, sample.Star, predictFrames, star.Base);
+    ObjectScanSample localItem;
+    bool itemApplied = false;
+    bool itemSpawned = false;
+    if (G.WorldStateSpawnItem)
+    {
+        if (!sample.Item.Found)
+        {
+            G.LastSpawnedWorldItemRemoteGUID[instanceID] = 0;
+            G.LastConfirmedWorldItemRemoteGUID[instanceID] = 0;
+        }
+        else if (sample.Item.StateType == 1)
+        {
+            localItem = FindNewestActiveObjectByIDAndSettings(
+                nds,
+                kVsWorldItemObjectID,
+                sample.Item.Settings);
+            if (localItem.StateType == 1)
+            {
+                itemApplied = ApplyWireWorldActorState(nds, sample.Item, predictFrames, localItem.Base);
+                if (G.LastConfirmedWorldItemRemoteGUID[instanceID] != sample.Item.GUID)
+                {
+                    G.LastConfirmedWorldItemRemoteGUID[instanceID] = sample.Item.GUID;
+                    std::printf(
+                        "NSMB WorldItem: active inst=%d frame=%u remoteGuid=%u localGuid=%u settings=%08X pos=%08X/%08X/%08X\n",
+                        instanceID,
+                        frame,
+                        sample.Item.GUID,
+                        localItem.GUID,
+                        localItem.Settings,
+                        nds->ARM9Read32(localItem.Base + 0x60),
+                        nds->ARM9Read32(localItem.Base + 0x64),
+                        nds->ARM9Read32(localItem.Base + 0x68));
+                    std::fflush(stdout);
+                }
+            }
+            else if (G.LastSpawnedWorldItemRemoteGUID[instanceID] != sample.Item.GUID)
+            {
+                itemSpawned = SpawnRemoteWorldItem(instanceID, frame, nds, sample.Item);
+                if (itemSpawned)
+                    G.LastSpawnedWorldItemRemoteGUID[instanceID] = sample.Item.GUID;
+            }
+        }
+    }
 
     if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
         (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
     {
-        std::printf("NSMB WorldState: apply inst=%d frame=%u sampleFrame=%u predict=%u star=%d hazard=%d hazardPos=%08X/%08X\n",
+        std::printf("NSMB WorldState: apply inst=%d frame=%u sampleFrame=%u predict=%u star=%d item=%d itemSpawn=%d hazard=%d hazardPos=%08X/%08X\n",
             instanceID,
             frame,
             sample.Frame,
             predictFrames,
             starApplied ? 1 : 0,
+            itemApplied ? 1 : 0,
+            itemSpawned ? 1 : 0,
             0,
             sample.MovingHazard.PosX,
             sample.MovingHazard.PosY);
@@ -12283,6 +12404,14 @@ void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         kVsBattleStarActorSettings,
         G.WorldStarActorBaseCache,
         G.WorldStarActorGUIDCache);
+    ObjectScanSample item;
+    if (G.WorldStateSpawnItem)
+    {
+        item = FindNewestActiveObjectByIDAndSettings(
+            nds,
+            kVsWorldItemObjectID,
+            kVsWorldItemSettings);
+    }
 
     WireWorldState packet {};
     packet.Magic = kMagic;
@@ -12291,6 +12420,7 @@ void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     packet.Frame = frame;
     packet.Instance = static_cast<melonDS::u32>(instanceID);
     FillWireWorldActorState(star, packet.Star);
+    FillWireWorldActorState(item, packet.Item);
 
     std::lock_guard<std::mutex> lock(G.Mutex);
     if (G.LastSentWorldStateFrame[instanceID] == frame) return;
@@ -12300,10 +12430,11 @@ void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
         (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
     {
-        std::printf("NSMB WorldState: send inst=%d frame=%u star=%u hazard=%u hazardPos=%08X/%08X\n",
+        std::printf("NSMB WorldState: send inst=%d frame=%u star=%u item=%u hazard=%u hazardPos=%08X/%08X\n",
             instanceID,
             frame,
             packet.Star.Found,
+            packet.Item.Found,
             packet.MovingHazard.Found,
             packet.MovingHazard.PosX,
             packet.MovingHazard.PosY);
@@ -12952,6 +13083,7 @@ void InitFromEnvironment()
     G.WorldStateSyncEnabled = EnvFlag("MELONDS_NSML_WORLD_STATE_SYNC");
     G.WorldStateApplyEnabled = EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY");
     G.WorldStateApplyStarActor = !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_STAR");
+    G.WorldStateSpawnItem = EnvFlag("MELONDS_NSML_WORLD_STATE_SPAWN_ITEM");
     G.WorldStateApplyMovingHazard =
         EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD") &&
         !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD");

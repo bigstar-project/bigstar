@@ -57,6 +57,7 @@ param(
     [int]$PlayerStateMaxPredictFrames = 2,
     [switch]$WorldStateSync,
     [switch]$WorldStateApply,
+    [switch]$WorldStateSpawnItem,
     [switch]$WorldStateSkipStar,
     [switch]$WorldStateApplyMovingHazard,
     [switch]$WorldStateTraceMovingHazards,
@@ -77,6 +78,7 @@ param(
     [int]$ActorSnapshotMaxDriftY = -1,
     [int]$ActorSnapshotMaxConsecutiveDriftRows = 0,
     [switch]$RequireWorldSnapshotSync,
+    [switch]$RequireWorldItemSpawn,
     [int]$WorldSnapshotStartFrame = 900,
     [int]$WorldSnapshotMaxStarDriftX = 0,
     [int]$WorldSnapshotMaxStarDriftY = 0,
@@ -291,6 +293,9 @@ if ($WorldStateSync) {
     )
     if ($WorldStateApply) {
         $common += "-WorldStateApply"
+    }
+    if ($WorldStateSpawnItem) {
+        $common += "-WorldStateSpawnItem"
     }
     if ($WorldStateSkipStar) {
         $common += "-WorldStateSkipStar"
@@ -647,6 +652,18 @@ if ($MaxActiveFrameMs -gt 0.0 -or $MaxActiveFrameOver25ms -ge 0 -or $MaxActiveFr
 if ($MinRollbackResims -ge 0) {
     Assert-RollbackResimCount -Role "host" -Text $hostMelonText
     Assert-RollbackResimCount -Role "client" -Text $clientMelonText
+}
+
+if ($RequireWorldItemSpawn) {
+    $spawnLines = @($clientMelonText -split "`r?`n" | Where-Object { $_ -match "^NSMB WorldItem: spawn " })
+    $activeLines = @($clientMelonText -split "`r?`n" | Where-Object { $_ -match "^NSMB WorldItem: active " })
+    if ($spawnLines.Count -eq 0) {
+        throw "client world item spawn check failed: no spawn log"
+    }
+    if ($activeLines.Count -eq 0) {
+        throw "client world item spawn check failed: no active confirmation log"
+    }
+    Write-Host "client world item spawn check passed: spawnLogs=$($spawnLines.Count) activeLogs=$($activeLines.Count)"
 }
 
 function Convert-TraceHexToInt64 {

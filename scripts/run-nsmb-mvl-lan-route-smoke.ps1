@@ -29,6 +29,7 @@ param(
     [int]$PlayerStateMaxPredictFrames = 2,
     [switch]$WorldStateSync,
     [switch]$WorldStateApply,
+    [switch]$WorldStateSpawnItem,
     [switch]$WorldStateSkipStar,
     [switch]$WorldStateApplyMovingHazard,
     [switch]$WorldStateTraceMovingHazards,
@@ -1290,6 +1291,11 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY -ErrorAction SilentlyContinue
         }
+        if ($WorldStateSpawnItem) {
+            $env:MELONDS_NSML_WORLD_STATE_SPAWN_ITEM = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SPAWN_ITEM -ErrorAction SilentlyContinue
+        }
         if ($WorldStateSkipStar) {
             $env:MELONDS_NSML_WORLD_STATE_SKIP_STAR = "1"
         } else {
@@ -1324,6 +1330,7 @@ function Start-MelonLANProcess {
     } else {
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SYNC -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SPAWN_ITEM -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_MAX_PREDICT_FRAMES -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_ACTOR_RESCAN_INTERVAL -ErrorAction SilentlyContinue
@@ -3181,6 +3188,7 @@ function Start-MelonLANProcess {
         "playerStateGlobals=$($env:MELONDS_NSML_PLAYER_STATE_GLOBALS)"
         "worldStateSync=$($env:MELONDS_NSML_WORLD_STATE_SYNC)"
         "worldStateApply=$($env:MELONDS_NSML_WORLD_STATE_APPLY)"
+        "worldStateSpawnItem=$($env:MELONDS_NSML_WORLD_STATE_SPAWN_ITEM)"
         "worldStateApplyMovingHazard=$($env:MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD)"
         "worldStateSyncInterval=$($env:MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL)"
         "worldStateActorRescanInterval=$($env:MELONDS_NSML_WORLD_STATE_ACTOR_RESCAN_INTERVAL)"
