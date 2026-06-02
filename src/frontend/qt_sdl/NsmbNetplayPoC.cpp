@@ -152,6 +152,7 @@ constexpr melonDS::u16 kVsMovingHazardObjectID = 0x0053;
 constexpr melonDS::u32 kVsMovingHazardSettings = 0x00000000;
 constexpr melonDS::u16 kVsWorldItemObjectID = 0x001F;
 constexpr melonDS::u32 kVsWorldItemSettings = 0x00080002;
+constexpr melonDS::u32 kVsWorldItemNaturalSpawnGraceFrames = 4;
 constexpr int kObjectTraceSlots = 16;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
 constexpr melonDS::u32 kMvlStageSceneDefaultSettings = 0x00B4FF00;
@@ -1732,6 +1733,8 @@ struct State
     melonDS::u32 WorldStarActorGUIDCache[16] {};
     melonDS::u32 LastSpawnedWorldItemRemoteGUID[16] {};
     melonDS::u32 LastConfirmedWorldItemRemoteGUID[16] {};
+    melonDS::u32 PendingWorldItemRemoteGUID[16] {};
+    melonDS::u32 PendingWorldItemFirstMissingFrame[16] {};
     melonDS::u32 WorldMovingHazardBaseCache[16] {};
     melonDS::u32 WorldMovingHazardGUIDCache[16] {};
     melonDS::u32 WorldMovingHazardBaseCaches[16][kMaxWorldMovingHazards] {};
@@ -10639,9 +10642,16 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
         {
             G.LastSpawnedWorldItemRemoteGUID[instanceID] = 0;
             G.LastConfirmedWorldItemRemoteGUID[instanceID] = 0;
+            G.PendingWorldItemRemoteGUID[instanceID] = 0;
+            G.PendingWorldItemFirstMissingFrame[instanceID] = 0;
         }
         else if (sample.Item.StateType == 1)
         {
+            if (G.PendingWorldItemRemoteGUID[instanceID] != sample.Item.GUID)
+            {
+                G.PendingWorldItemRemoteGUID[instanceID] = sample.Item.GUID;
+                G.PendingWorldItemFirstMissingFrame[instanceID] = frame;
+            }
             localItem = FindNewestActiveObjectByIDAndSettings(
                 nds,
                 kVsWorldItemObjectID,
@@ -10650,6 +10660,8 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
             {
                 itemApplied = ApplyWireWorldActorState(nds, sample.Item, predictFrames, localItem.Base);
                 G.LastSpawnedWorldItemRemoteGUID[instanceID] = sample.Item.GUID;
+                G.PendingWorldItemRemoteGUID[instanceID] = 0;
+                G.PendingWorldItemFirstMissingFrame[instanceID] = 0;
                 if (G.LastConfirmedWorldItemRemoteGUID[instanceID] != sample.Item.GUID)
                 {
                     G.LastConfirmedWorldItemRemoteGUID[instanceID] = sample.Item.GUID;
@@ -10666,7 +10678,8 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
                     std::fflush(stdout);
                 }
             }
-            else if (G.LastSpawnedWorldItemRemoteGUID[instanceID] != sample.Item.GUID)
+            else if (G.LastSpawnedWorldItemRemoteGUID[instanceID] != sample.Item.GUID &&
+                frame - G.PendingWorldItemFirstMissingFrame[instanceID] >= kVsWorldItemNaturalSpawnGraceFrames)
             {
                 itemSpawned = SpawnRemoteWorldItem(instanceID, frame, nds, sample.Item);
                 if (itemSpawned)
