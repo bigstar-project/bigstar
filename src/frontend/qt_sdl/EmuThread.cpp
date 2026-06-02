@@ -620,7 +620,6 @@ frame_limit_done:
                         nsmlPhaseAudio * 1000.0,
                         nsmlPhaseLimit * 1000.0,
                         std::max(0.0, nsmlPhaseTotal - nsmlPhaseAccounted) * 1000.0);
-                    std::fflush(stdout);
                 }
             }
 

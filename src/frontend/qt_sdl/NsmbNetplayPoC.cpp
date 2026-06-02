@@ -1148,6 +1148,10 @@ struct State
     melonDS::u32 LastFrameHeartbeat[16] {};
     std::string FrameHeartbeatPath;
     std::ofstream FrameHeartbeat;
+    std::atomic<melonDS::u32> PendingFrameHeartbeat { 0 };
+    std::atomic<bool> FrameHeartbeatStop { false };
+    bool FrameHeartbeatThreadStarted = false;
+    std::thread FrameHeartbeatThread;
     int HashInterval = 60;
     bool HashEnabled = true;
     int TestWaitTimeoutMs = 5000;
@@ -2618,6 +2622,43 @@ void NetworkPumpThreadMain()
     }
 }
 
+void FrameHeartbeatThreadMain()
+{
+    melonDS::u32 writtenFrame = 0;
+    while (!G.FrameHeartbeatStop.load(std::memory_order_acquire))
+    {
+        const melonDS::u32 frame = G.PendingFrameHeartbeat.load(std::memory_order_acquire);
+        if (frame != 0 && frame != writtenFrame && G.FrameHeartbeat)
+        {
+            G.FrameHeartbeat << frame << '\n';
+            G.FrameHeartbeat.flush();
+            writtenFrame = frame;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+void StartFrameHeartbeatThreadIfNeeded()
+{
+    if (!G.FrameHeartbeat || G.FrameHeartbeatThreadStarted)
+        return;
+
+    G.FrameHeartbeatStop.store(false, std::memory_order_release);
+    G.FrameHeartbeatThreadStarted = true;
+    G.FrameHeartbeatThread = std::thread(FrameHeartbeatThreadMain);
+}
+
+void StopFrameHeartbeatThread()
+{
+    if (!G.FrameHeartbeatThreadStarted)
+        return;
+
+    G.FrameHeartbeatStop.store(true, std::memory_order_release);
+    if (G.FrameHeartbeatThread.joinable())
+        G.FrameHeartbeatThread.join();
+    G.FrameHeartbeatThreadStarted = false;
+}
+
 void StartNetworkPumpThreadIfNeeded()
 {
     if (!G.NetworkPumpThreadEnabled || G.NetworkPumpThreadStarted)
@@ -3027,7 +3068,6 @@ void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
             resimDelta,
             G.RollbackCheckpointSaveMaxUs,
             G.RollbackCheckpointRestoreMaxUs);
-        std::fflush(stdout);
     }
 }
 
@@ -5519,6 +5559,21 @@ void RecordRemoteInputWaitStats(unsigned long long elapsedUs, unsigned long long
     G.RemoteInputWaitMaxUs = std::max(G.RemoteInputWaitMaxUs, elapsedUs);
 }
 
+void TraceRemoteInputWaitSpike(melonDS::u32 targetFrame, unsigned long long elapsedUs, unsigned long long loops)
+{
+    if (!G.ActiveFrameSpikeTrace
+        || elapsedUs < static_cast<unsigned long long>(std::min(G.ActiveFrameSpikeThresholdUs, 10000)))
+    {
+        return;
+    }
+
+    std::printf(
+        "NSMB RemoteInputWaitSpike: frame=%u waitedMs=%.3f loops=%llu\n",
+        targetFrame,
+        static_cast<double>(elapsedUs) / 1000.0,
+        loops);
+}
+
 void RecordFrameLeadThrottleStats(unsigned long long elapsedUs, unsigned long long loops)
 {
     G.FrameLeadThrottleCount++;
@@ -5548,7 +5603,9 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
             {
                 const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::steady_clock::now() - start).count();
-                RecordRemoteInputWaitStats(static_cast<unsigned long long>(std::max<long long>(0, elapsedUs)), loops);
+                const auto waitedUs = static_cast<unsigned long long>(std::max<long long>(0, elapsedUs));
+                RecordRemoteInputWaitStats(waitedUs, loops);
+                TraceRemoteInputWaitSpike(targetFrame, waitedUs, loops);
                 return it->second;
             }
         }
@@ -5567,7 +5624,9 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
                     std::_Exit(70);
                 const auto waitedUs = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::steady_clock::now() - start).count();
-                RecordRemoteInputWaitStats(static_cast<unsigned long long>(std::max<long long>(0, waitedUs)), loops);
+                const auto recordedWaitedUs = static_cast<unsigned long long>(std::max<long long>(0, waitedUs));
+                RecordRemoteInputWaitStats(recordedWaitedUs, loops);
+                TraceRemoteInputWaitSpike(targetFrame, recordedWaitedUs, loops);
                 return NeutralInput();
             }
         }
@@ -6796,97 +6855,140 @@ void ReadObjectTransform(melonDS::NDS* nds, melonDS::u32 off, ObjectScanSample& 
     ReadMainRAMU32(nds, off + 0xE8, sample.TargetVelZ);
 }
 
+void AddGameStateProcessObject(
+    melonDS::NDS* nds,
+    GameStateObjectScanCache& cache,
+    std::set<melonDS::u32>& seenBases,
+    melonDS::u32 base)
+{
+    if (!IsValidMainRAMRange(nds, base, 0x120) || !seenBases.insert(base).second)
+        return;
+
+    GameStateObjectScanEntry entry;
+    melonDS::u32 guid = 0;
+    melonDS::u32 settings = 0;
+    melonDS::u16 stateType = 0;
+    melonDS::u32 flags = 0;
+    if (!ReadMainRAMAddressU32(nds, base, entry.VTable) ||
+        !ReadMainRAMAddressU32(nds, base + 4, guid) ||
+        !ReadMainRAMAddressU32(nds, base + 8, settings) ||
+        !ReadMainRAMAddressU16(nds, base + 0x0C, entry.ObjectID) ||
+        !ReadMainRAMAddressU16(nds, base + 0x0E, stateType))
+        return;
+    std::memcpy(&flags, nds->MainRAM + (base - kMainRAMBase) + 0x10, sizeof(flags));
+    entry.LifecycleState = nds->MainRAM[(base - kMainRAMBase) + 0x0E];
+    entry.Type = nds->MainRAM[(base - kMainRAMBase) + 0x12];
+    entry.SkipFlags = nds->MainRAM[(base - kMainRAMBase) + 0x13];
+
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (entry.VTable < kMainRAMBase || entry.VTable >= kMainRAMBase + ramLen)
+        return;
+    if (guid == 0 || guid >= 0x10000)
+        return;
+    if (entry.ObjectID == 0 || entry.ObjectID >= 0x400)
+        return;
+
+    entry.Offset = base - kMainRAMBase;
+    entry.Actor.Found = 1;
+    entry.Actor.GUID = guid;
+    entry.Actor.Base = base;
+    entry.Actor.Settings = settings;
+    entry.Actor.StateType = stateType;
+    entry.Actor.Flags = flags;
+    ReadObjectTransform(nds, entry.Offset, entry.Actor);
+    cache.Entries.push_back(entry);
+
+    if (entry.LifecycleState > 2 || entry.Type > 2)
+        return;
+
+    auto& summary = cache.Lifecycle;
+    summary.Total++;
+    if (entry.LifecycleState == 0)
+    {
+        summary.NotCreated++;
+        const melonDS::u32 lifecycleFlags =
+            (static_cast<melonDS::u32>(entry.Type) << 16) |
+            (static_cast<melonDS::u32>(entry.SkipFlags) << 24);
+        if (summary.FirstNotCreatedBase == 0)
+        {
+            summary.FirstNotCreatedID = entry.ObjectID;
+            summary.FirstNotCreatedBase = entry.Actor.Base;
+            summary.FirstNotCreatedFlags = lifecycleFlags;
+        }
+        else if (summary.SecondNotCreatedBase == 0)
+        {
+            summary.SecondNotCreatedID = entry.ObjectID;
+            summary.SecondNotCreatedBase = entry.Actor.Base;
+            summary.SecondNotCreatedFlags = lifecycleFlags;
+        }
+    }
+    else if (entry.LifecycleState == 1)
+    {
+        const melonDS::u32 index = summary.Active;
+        if (index < static_cast<melonDS::u32>(kObjectTraceSlots))
+        {
+            summary.ActiveID[index] = entry.ObjectID;
+            summary.ActiveSettings[index] = settings;
+            summary.ActiveBase[index] = entry.Actor.Base;
+        }
+        summary.Active++;
+    }
+    else
+    {
+        summary.Dead++;
+    }
+
+    if ((entry.SkipFlags & 0x02) != 0)
+        summary.SkipUpdate++;
+    if ((entry.SkipFlags & 0x08) != 0)
+        summary.SkipRender++;
+}
+
+void AddGameStateProcessList(
+    melonDS::NDS* nds,
+    GameStateObjectScanCache& cache,
+    std::set<melonDS::u32>& seenBases,
+    melonDS::u32 listAddress)
+{
+    melonDS::u32 node = 0;
+    if (!ReadMainRAMAddressU32(nds, listAddress, node))
+        return;
+
+    std::set<melonDS::u32> seenNodes;
+    for (int i = 0; i < 512 && IsValidMainRAMRange(nds, node, 0x0C); i++)
+    {
+        if (!seenNodes.insert(node).second)
+            break;
+
+        melonDS::u32 next = 0;
+        melonDS::u32 base = 0;
+        ReadMainRAMAddressU32(nds, node + 0x04, next);
+        ReadMainRAMAddressU32(nds, node + 0x08, base);
+        AddGameStateProcessObject(nds, cache, seenBases, base);
+        node = next;
+    }
+}
+
 GameStateObjectScanCache BuildGameStateObjectScanCache(melonDS::NDS* nds)
 {
     GameStateObjectScanCache cache;
     if (!nds || !nds->MainRAM)
         return cache;
 
-    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
-    if (ramLen < 0x120)
-        return cache;
-
     cache.Entries.reserve(128);
-    for (melonDS::u32 off = 0; off <= ramLen - 0x120; off += 4)
+    std::set<melonDS::u32> seenBases;
+    AddGameStateProcessList(nds, cache, seenBases, kNSMBProcessExecuteListAddr);
+    AddGameStateProcessList(nds, cache, seenBases, kNSMBProcessDeleteListAddr);
+    AddGameStateProcessList(nds, cache, seenBases, kNSMBProcessRenderListAddr);
+    AddGameStateProcessList(nds, cache, seenBases, kNSMBProcessCreateListAddr);
+    for (int i = 0; i < 8; i++)
     {
-        GameStateObjectScanEntry entry;
-        melonDS::u32 guid = 0;
-        melonDS::u32 settings = 0;
-        melonDS::u16 stateType = 0;
-        melonDS::u32 flags = 0;
-        if (!ReadMainRAMU32(nds, off, entry.VTable) ||
-            !ReadMainRAMU32(nds, off + 4, guid) ||
-            !ReadMainRAMU32(nds, off + 8, settings) ||
-            !ReadMainRAMU16(nds, off + 0x0C, entry.ObjectID) ||
-            !ReadMainRAMU16(nds, off + 0x0E, stateType) ||
-            !ReadMainRAMU32(nds, off + 0x10, flags) ||
-            !ReadMainRAMU8(nds, off + 0x0E, entry.LifecycleState) ||
-            !ReadMainRAMU8(nds, off + 0x12, entry.Type) ||
-            !ReadMainRAMU8(nds, off + 0x13, entry.SkipFlags))
-            continue;
-        if (entry.VTable < kMainRAMBase || entry.VTable >= kMainRAMBase + ramLen)
-            continue;
-        if (guid == 0 || guid >= 0x10000)
-            continue;
-        if (entry.ObjectID == 0 || entry.ObjectID >= 0x400)
-            continue;
-
-        entry.Offset = off;
-        entry.Actor.Found = 1;
-        entry.Actor.GUID = guid;
-        entry.Actor.Base = kMainRAMBase + off;
-        entry.Actor.Settings = settings;
-        entry.Actor.StateType = stateType;
-        entry.Actor.Flags = flags;
-        ReadObjectTransform(nds, off, entry.Actor);
-        cache.Entries.push_back(entry);
-
-        if (entry.LifecycleState > 2 || entry.Type > 2)
-            continue;
-
-        auto& summary = cache.Lifecycle;
-        summary.Total++;
-        if (entry.LifecycleState == 0)
-        {
-            summary.NotCreated++;
-            const melonDS::u32 lifecycleFlags =
-                (static_cast<melonDS::u32>(entry.Type) << 16) |
-                (static_cast<melonDS::u32>(entry.SkipFlags) << 24);
-            if (summary.FirstNotCreatedBase == 0)
-            {
-                summary.FirstNotCreatedID = entry.ObjectID;
-                summary.FirstNotCreatedBase = entry.Actor.Base;
-                summary.FirstNotCreatedFlags = lifecycleFlags;
-            }
-            else if (summary.SecondNotCreatedBase == 0)
-            {
-                summary.SecondNotCreatedID = entry.ObjectID;
-                summary.SecondNotCreatedBase = entry.Actor.Base;
-                summary.SecondNotCreatedFlags = lifecycleFlags;
-            }
-        }
-        else if (entry.LifecycleState == 1)
-        {
-            const melonDS::u32 index = summary.Active;
-            if (index < static_cast<melonDS::u32>(kObjectTraceSlots))
-            {
-                summary.ActiveID[index] = entry.ObjectID;
-                summary.ActiveSettings[index] = settings;
-                summary.ActiveBase[index] = entry.Actor.Base;
-            }
-            summary.Active++;
-        }
-        else
-        {
-            summary.Dead++;
-        }
-
-        if ((entry.SkipFlags & 0x02) != 0)
-            summary.SkipUpdate++;
-        if ((entry.SkipFlags & 0x08) != 0)
-            summary.SkipRender++;
+        AddGameStateProcessList(
+            nds,
+            cache,
+            seenBases,
+            kNSMBProcessIDLookupListsAddr + static_cast<melonDS::u32>(i * 8));
     }
-
     return cache;
 }
 
@@ -13028,6 +13130,7 @@ void InitFromEnvironment()
     {
         G.FrameHeartbeatPath = frameHeartbeatPath;
         G.FrameHeartbeat.open(G.FrameHeartbeatPath, std::ios::out | std::ios::trunc);
+        StartFrameHeartbeatThreadIfNeeded();
     }
     G.FrameBarrierEnabled = EnvFlag("MELONDS_NSML_FRAME_BARRIER");
     G.SerialRunEnabled = EnvFlag("MELONDS_NSML_SERIAL_RUN");
@@ -14080,12 +14183,121 @@ void InitFromEnvironment()
     std::fflush(stdout);
 }
 
+class BeforeHookPhaseTrace
+{
+public:
+    enum class Phase
+    {
+        Init,
+        Setup,
+        ActorState,
+        Barrier,
+        Checkpoint,
+        Scratch,
+        Network,
+        Gate,
+        RemoteWait,
+    };
+
+    BeforeHookPhaseTrace(int instanceID, melonDS::u32 frame)
+        : Enabled(G.ActiveFrameSpikeTrace)
+        , InstanceID(instanceID)
+        , Frame(frame)
+        , Start(std::chrono::steady_clock::now())
+        , Last(Start)
+    {
+    }
+
+    ~BeforeHookPhaseTrace()
+    {
+        if (!Enabled)
+            return;
+
+        const auto now = std::chrono::steady_clock::now();
+        const auto tailUs = ElapsedUs(Last, now);
+        const auto totalUs = ElapsedUs(Start, now);
+        if (totalUs < std::min(G.ActiveFrameSpikeThresholdUs, 10000))
+            return;
+
+        std::printf(
+            "NSMB BeforeHookPhaseSpike: inst=%d frame=%u totalMs=%.3f initMs=%.3f setupMs=%.3f actorStateMs=%.3f barrierMs=%.3f checkpointMs=%.3f scratchMs=%.3f networkMs=%.3f gateMs=%.3f remoteWaitMs=%.3f tailMs=%.3f\n",
+            InstanceID,
+            Frame,
+            static_cast<double>(totalUs) / 1000.0,
+            static_cast<double>(InitUs) / 1000.0,
+            static_cast<double>(SetupUs) / 1000.0,
+            static_cast<double>(ActorStateUs) / 1000.0,
+            static_cast<double>(BarrierUs) / 1000.0,
+            static_cast<double>(CheckpointUs) / 1000.0,
+            static_cast<double>(ScratchUs) / 1000.0,
+            static_cast<double>(NetworkUs) / 1000.0,
+            static_cast<double>(GateUs) / 1000.0,
+            static_cast<double>(RemoteWaitUs) / 1000.0,
+            static_cast<double>(tailUs) / 1000.0);
+    }
+
+    void SetFrame(melonDS::u32 frame)
+    {
+        Frame = frame;
+    }
+
+    void Mark(Phase phase)
+    {
+        if (!Enabled)
+            return;
+
+        const auto now = std::chrono::steady_clock::now();
+        const auto elapsedUs = ElapsedUs(Last, now);
+        Last = now;
+        switch (phase)
+        {
+        case Phase::Init: InitUs += elapsedUs; break;
+        case Phase::Setup: SetupUs += elapsedUs; break;
+        case Phase::ActorState: ActorStateUs += elapsedUs; break;
+        case Phase::Barrier: BarrierUs += elapsedUs; break;
+        case Phase::Checkpoint: CheckpointUs += elapsedUs; break;
+        case Phase::Scratch: ScratchUs += elapsedUs; break;
+        case Phase::Network: NetworkUs += elapsedUs; break;
+        case Phase::Gate: GateUs += elapsedUs; break;
+        case Phase::RemoteWait: RemoteWaitUs += elapsedUs; break;
+        }
+    }
+
+private:
+    using Clock = std::chrono::steady_clock;
+
+    static long long ElapsedUs(Clock::time_point start, Clock::time_point end)
+    {
+        return std::max<long long>(
+            0,
+            std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+    }
+
+    bool Enabled = false;
+    int InstanceID = -1;
+    melonDS::u32 Frame = 0;
+    Clock::time_point Start;
+    Clock::time_point Last;
+    long long InitUs = 0;
+    long long SetupUs = 0;
+    long long ActorStateUs = 0;
+    long long BarrierUs = 0;
+    long long CheckpointUs = 0;
+    long long ScratchUs = 0;
+    long long NetworkUs = 0;
+    long long GateUs = 0;
+    long long RemoteWaitUs = 0;
+};
+
 InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, const InputState& polledInput)
 {
+    BeforeHookPhaseTrace phaseTrace(instanceID, frame);
     InitFromEnvironment();
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Init);
     melonDS::u32 inputFrame = frame;
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16)
         inputFrame = G.TestFrameCount[instanceID];
+    phaseTrace.SetFrame(inputFrame);
 
     if (G.Enabled && G.InputNetplayOnly && G.WaitForPeerBeforeStart && inputFrame == 0)
     {
@@ -14227,6 +14439,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerUpdateEnableIfNeeded(instanceID, inputFrame, nds);
 
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Setup);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteGameState(instanceID, inputFrame, nds);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
@@ -14242,8 +14455,10 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         SyncPlayerState(instanceID, inputFrame, nds);
 
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::ActorState);
     WaitForSerialRunTurn(instanceID, inputFrame);
     WaitAtFrameBarrier(GBeforeFrameBarrier, instanceID, inputFrame, "before");
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Barrier);
 
     const InputState testInput = ApplyInputScript(instanceID, inputFrame, polledInput);
     const melonDS::u32 syncFrame = G.TestEnabled ? inputFrame : frame;
@@ -14253,9 +14468,11 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         SaveRollbackCheckpointIfNeeded(instanceID, syncFrame, nds);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Checkpoint);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         WritePacketBridgeJitScratchIfNeeded(instanceID, syncFrame, nds, testInput);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Scratch);
 
     if (G.Enabled && G.InputNetplayOnly)
         return testInput;
@@ -14358,6 +14575,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
                 SendInputLocked(storedFrame, input);
         }
     }
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Network);
 
     if (!netplayApplyActive)
         return testInput;
@@ -14413,7 +14631,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         return NeutralInput();
     }
 
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Gate);
     const InputState remoteInput = WaitForRemoteInput(targetFrame);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::RemoteWait);
 
     if (isLocal)
     {
@@ -14587,8 +14807,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             std::printf("NSMB Heartbeat: inst=%d frame=%u\n", instanceID, logFrame);
             if (G.FrameHeartbeat)
             {
-                G.FrameHeartbeat << logFrame << '\n';
-                G.FrameHeartbeat.flush();
+                G.PendingFrameHeartbeat.store(logFrame, std::memory_order_release);
             }
             else
             {
@@ -14596,10 +14815,12 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             }
         }
     }
+    const auto afterHeartbeat = std::chrono::steady_clock::now();
 
     WaitAtFrameBarrier(GAfterFrameBarrier, instanceID, logFrame, "after");
     AdvanceSerialRunTurn(instanceID, logFrame - 1);
     WaitForPeerAtNetplayStartBarrier(instanceID, logFrame);
+    const auto afterBarrier = std::chrono::steady_clock::now();
 
     if (G.Enabled)
         ApplyRemoteGameState(instanceID, logFrame, nds);
@@ -14624,9 +14845,11 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     }
     if (G.Enabled && G.PacketBridgeEnabled && bridgeNetworkActive)
         ThrottleNSMLPacketBridgeFrameLead(nds, logFrame);
+    const auto afterBridge = std::chrono::steady_clock::now();
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         TracePlayerLifeChanges(instanceID, logFrame, nds);
+    const auto afterLifeTrace = std::chrono::steady_clock::now();
 
     if (G.RollbackEnabled
         && G.InputNetplayTraceEnabled
@@ -14705,6 +14928,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             G.PendingRollbackObservedFrame);
         std::fflush(stdout);
     }
+    const auto afterRollbackTrace = std::chrono::steady_clock::now();
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageCameraSlotIfNeeded(instanceID, logFrame, nds);
@@ -14734,11 +14958,13 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         PushScriptRemotePacketIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         SaveMvlAutoRestartCheckpointIfNeeded(instanceID, logFrame, nds);
+    const auto afterRuntimeForce = std::chrono::steady_clock::now();
 
     SaveState(instanceID, logFrame, nds);
     SaveLocalMPState(logFrame);
     SaveScreenshot(instanceID, logFrame, nds);
     SaveRamDump(instanceID, logFrame, nds);
+    const auto afterArtifacts = std::chrono::steady_clock::now();
     const auto afterPreSnapshot = std::chrono::steady_clock::now();
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteMovingHazardState(instanceID, logFrame, nds);
@@ -14770,12 +14996,19 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                 return std::chrono::duration<double, std::milli>(end - start).count();
             };
             std::printf(
-                "NSMB AfterHookPhaseSpike: inst=%d frame=%u totalMs=%.3f initMs=%.3f preSnapshotMs=%.3f applyHazardMs=%.3f applyWorldMs=%.3f applyPlayerMs=%.3f traceMs=%.3f syncGameMs=%.3f syncWorldMs=%.3f syncHazardMs=%.3f syncPlayerMs=%.3f\n",
+                "NSMB AfterHookPhaseSpike: inst=%d frame=%u totalMs=%.3f initMs=%.3f heartbeatMs=%.3f barrierMs=%.3f bridgeMs=%.3f lifeTraceMs=%.3f rollbackTraceMs=%.3f runtimeForceMs=%.3f artifactsMs=%.3f preSnapshotTailMs=%.3f applyHazardMs=%.3f applyWorldMs=%.3f applyPlayerMs=%.3f traceMs=%.3f syncGameMs=%.3f syncWorldMs=%.3f syncHazardMs=%.3f syncPlayerMs=%.3f\n",
                 instanceID,
                 logFrame,
                 elapsedMs(afterHookCallStart, afterSyncPlayer),
                 elapsedMs(afterHookCallStart, afterInit),
-                elapsedMs(afterInit, afterPreSnapshot),
+                elapsedMs(afterInit, afterHeartbeat),
+                elapsedMs(afterHeartbeat, afterBarrier),
+                elapsedMs(afterBarrier, afterBridge),
+                elapsedMs(afterBridge, afterLifeTrace),
+                elapsedMs(afterLifeTrace, afterRollbackTrace),
+                elapsedMs(afterRollbackTrace, afterRuntimeForce),
+                elapsedMs(afterRuntimeForce, afterArtifacts),
+                elapsedMs(afterArtifacts, afterPreSnapshot),
                 elapsedMs(afterPreSnapshot, afterApplyHazard),
                 elapsedMs(afterApplyHazard, afterApplyWorld),
                 elapsedMs(afterApplyWorld, afterApplyPlayer),
@@ -14784,7 +15017,6 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                 elapsedMs(afterSyncGame, afterSyncWorld),
                 elapsedMs(afterSyncWorld, afterSyncHazard),
                 elapsedMs(afterSyncHazard, afterSyncPlayer));
-            std::fflush(stdout);
         }
     }
 
@@ -14926,6 +15158,7 @@ bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
 
 void Shutdown()
 {
+    StopFrameHeartbeatThread();
     StopNetworkPumpThread();
 
     std::lock_guard<std::mutex> lock(G.Mutex);
