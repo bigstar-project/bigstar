@@ -10290,6 +10290,7 @@ bool WritePlayerGlobalState(melonDS::NDS* nds, const WirePlayerState& state)
 
     if (state.Lives != 0)
         ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerLivesAddr + sizeof(melonDS::u32) * player, state.Lives) && ok;
+    ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerCoinsAddr + sizeof(melonDS::u32) * player, state.Coins) && ok;
     if (deathEvent)
     {
         ok = WriteMainRAMAddrU8IfChanged(nds, deadAddr, static_cast<melonDS::u8>(state.Dead & 0xFFu)) && ok;

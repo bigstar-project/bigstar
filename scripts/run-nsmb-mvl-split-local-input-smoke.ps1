@@ -855,6 +855,7 @@ function Assert-MvlManagerGlobalSync {
     )
 
     $fields = @(
+        "player0Coins", "player1Coins", "vsCoinCount",
         "mvlGlobal965C", "mvlGlobal9670", "mvlGlobal9674", "mvlGlobal9694_0", "mvlGlobal9694_1",
         "mvlManagerStateType", "mvlManagerFlags", "mvlManagerUnk54",
         "mvlManagerWordA8CC", "mvlManagerWordA8D0", "mvlManagerWordA8D4", "mvlManagerWordA8D8",
