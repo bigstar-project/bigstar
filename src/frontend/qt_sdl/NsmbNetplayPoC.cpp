@@ -153,6 +153,7 @@ constexpr melonDS::u16 kVsMovingHazardObjectID = 0x0053;
 constexpr melonDS::u32 kVsMovingHazardSettings = 0x00000000;
 constexpr melonDS::u16 kVsKoopaTroopaObjectID = 0x005E;
 constexpr melonDS::u16 kVsWorldItemObjectID = 0x001F;
+constexpr melonDS::u32 kVsNeutralWorldItemSettings = 0x00080000;
 constexpr melonDS::u32 kVsWorldItemSettings = 0x00080002;
 constexpr melonDS::u32 kVsDroppedStarItemSettings = 0x00090002;
 constexpr melonDS::u32 kVsWorldItemNaturalSpawnGraceFrames = 4;
@@ -596,13 +597,14 @@ struct WireWorldState
     melonDS::u32 Frame;
     melonDS::u32 Instance;
     WireWorldActorState Star;
+    WireWorldActorState NeutralItem;
     WireWorldActorState Item;
     WireWorldActorState DroppedStarItem;
     WireWorldActorState MovingHazard;
 };
 
 static_assert(sizeof(WireWorldActorState) == 100);
-static_assert(sizeof(WireWorldState) == 420);
+static_assert(sizeof(WireWorldState) == 520);
 
 struct WireMovingHazardState
 {
@@ -1804,6 +1806,10 @@ struct State
     melonDS::u32 LastConfirmedWorldItemRemoteGUID[16] {};
     melonDS::u32 PendingWorldItemRemoteGUID[16] {};
     melonDS::u32 PendingWorldItemFirstMissingFrame[16] {};
+    melonDS::u32 LastSpawnedNeutralWorldItemRemoteGUID[16] {};
+    melonDS::u32 LastConfirmedNeutralWorldItemRemoteGUID[16] {};
+    melonDS::u32 PendingNeutralWorldItemRemoteGUID[16] {};
+    melonDS::u32 PendingNeutralWorldItemFirstMissingFrame[16] {};
     melonDS::u32 LastSpawnedDroppedStarItemRemoteGUID[16] {};
     melonDS::u32 LastConfirmedDroppedStarItemRemoteGUID[16] {};
     melonDS::u32 PendingDroppedStarItemRemoteGUID[16] {};
@@ -2544,15 +2550,19 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                 if (packet.Magic == kMagic && packet.Version == kVersion
                     && packet.Kind == kWireKindWorldState)
                 {
-                    G.RemoteWorldStateSample = packet;
-                    G.RemoteWorldStateSampleValid = true;
+                    if (!G.RemoteWorldStateSampleValid || packet.Frame >= G.RemoteWorldStateSample.Frame)
+                    {
+                        G.RemoteWorldStateSample = packet;
+                        G.RemoteWorldStateSampleValid = true;
+                    }
                     if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
                         (G.InputTraceInterval <= 1 || (localFrame != kNoFrameLimit && (localFrame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0)))
                     {
-                        std::printf("NSMB WorldState: recv localFrame=%u packetFrame=%u star=%u item=%u droppedItem=%u hazard=%u hazardPos=%08X/%08X\n",
+                        std::printf("NSMB WorldState: recv localFrame=%u packetFrame=%u star=%u neutralItem=%u item=%u droppedItem=%u hazard=%u hazardPos=%08X/%08X\n",
                             localFrame,
                             packet.Frame,
                             packet.Star.Found,
+                            packet.NeutralItem.Found,
                             packet.Item.Found,
                             packet.DroppedStarItem.Found,
                             packet.MovingHazard.Found,
@@ -2569,8 +2579,11 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     && packet.Kind == kWireKindMovingHazardState
                     && packet.Count <= kMaxWorldMovingHazards)
                 {
-                    G.RemoteMovingHazardStateSample = packet;
-                    G.RemoteMovingHazardStateSampleValid = true;
+                    if (!G.RemoteMovingHazardStateSampleValid || packet.Frame >= G.RemoteMovingHazardStateSample.Frame)
+                    {
+                        G.RemoteMovingHazardStateSample = packet;
+                        G.RemoteMovingHazardStateSampleValid = true;
+                    }
                 }
             }
             else if (event.packet->dataLength == sizeof(WireWorldActorSnapshotState))
@@ -2581,8 +2594,11 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     && packet.Kind == kWireKindWorldActorSnapshot
                     && packet.Count <= kMaxWorldActorSnapshots)
                 {
-                    G.RemoteWorldActorSnapshotSample = packet;
-                    G.RemoteWorldActorSnapshotSampleValid = true;
+                    if (!G.RemoteWorldActorSnapshotSampleValid || packet.Frame >= G.RemoteWorldActorSnapshotSample.Frame)
+                    {
+                        G.RemoteWorldActorSnapshotSample = packet;
+                        G.RemoteWorldActorSnapshotSampleValid = true;
+                    }
                 }
             }
             else if (event.packet->dataLength == sizeof(WireWorldEffectState))
@@ -2593,8 +2609,11 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     && packet.Kind == kWireKindWorldEffectState
                     && packet.Count <= kMaxWorldEffects)
                 {
-                    G.RemoteWorldEffectStateSample = packet;
-                    G.RemoteWorldEffectStateSampleValid = true;
+                    if (!G.RemoteWorldEffectStateSampleValid || packet.Frame >= G.RemoteWorldEffectStateSample.Frame)
+                    {
+                        G.RemoteWorldEffectStateSample = packet;
+                        G.RemoteWorldEffectStateSampleValid = true;
+                    }
                 }
             }
             else if (event.packet->dataLength == sizeof(WireGameState))
@@ -11176,9 +11195,21 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
             ApplyWireWorldActorState(nds, sample.Star, predictFrames, star.Base);
     }
     WorldItemApplyResult worldItemResult {};
+    WorldItemApplyResult neutralWorldItemResult {};
     WorldItemApplyResult droppedStarItemResult {};
     if (G.WorldStateSpawnItem)
     {
+        neutralWorldItemResult = ApplyRemoteWorldItemLikeState(
+            instanceID,
+            frame,
+            nds,
+            sample.NeutralItem,
+            predictFrames,
+            G.LastSpawnedNeutralWorldItemRemoteGUID[instanceID],
+            G.LastConfirmedNeutralWorldItemRemoteGUID[instanceID],
+            G.PendingNeutralWorldItemRemoteGUID[instanceID],
+            G.PendingNeutralWorldItemFirstMissingFrame[instanceID],
+            "NeutralWorldItem");
         if (applyHostAuthoritativeWorld)
         {
             worldItemResult = ApplyRemoteWorldItemLikeState(
@@ -11209,12 +11240,14 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
     if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
         (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
     {
-        std::printf("NSMB WorldState: apply inst=%d frame=%u sampleFrame=%u predict=%u star=%d item=%d itemSpawn=%d droppedItem=%d droppedSpawn=%d hazard=%d hazardPos=%08X/%08X\n",
+        std::printf("NSMB WorldState: apply inst=%d frame=%u sampleFrame=%u predict=%u star=%d neutralItem=%d neutralSpawn=%d item=%d itemSpawn=%d droppedItem=%d droppedSpawn=%d hazard=%d hazardPos=%08X/%08X\n",
             instanceID,
             frame,
             sample.Frame,
             predictFrames,
             starApplied ? 1 : 0,
+            neutralWorldItemResult.Applied ? 1 : 0,
+            neutralWorldItemResult.Spawned ? 1 : 0,
             worldItemResult.Applied ? 1 : 0,
             worldItemResult.Spawned ? 1 : 0,
             droppedStarItemResult.Applied ? 1 : 0,
@@ -13389,9 +13422,15 @@ void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         G.WorldStarActorBaseCache,
         G.WorldStarActorGUIDCache);
     ObjectScanSample item;
+    ObjectScanSample neutralItem;
     ObjectScanSample droppedStarItem;
     if (G.WorldStateSpawnItem)
     {
+        neutralItem = FindNewestActiveObjectByIDAndSettings(
+            nds,
+            kVsWorldItemObjectID,
+            kVsNeutralWorldItemSettings,
+            true);
         item = FindNewestActiveObjectByIDAndSettings(
             nds,
             kVsWorldItemObjectID,
@@ -13411,6 +13450,7 @@ void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     packet.Frame = frame;
     packet.Instance = static_cast<melonDS::u32>(instanceID);
     FillWireWorldActorState(star, packet.Star);
+    FillWireWorldActorState(neutralItem, packet.NeutralItem);
     FillWireWorldActorState(item, packet.Item);
     FillWireWorldActorState(droppedStarItem, packet.DroppedStarItem);
 
@@ -13422,10 +13462,11 @@ void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
         (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
     {
-        std::printf("NSMB WorldState: send inst=%d frame=%u star=%u item=%u droppedItem=%u hazard=%u hazardPos=%08X/%08X\n",
+        std::printf("NSMB WorldState: send inst=%d frame=%u star=%u neutralItem=%u item=%u droppedItem=%u hazard=%u hazardPos=%08X/%08X\n",
             instanceID,
             frame,
             packet.Star.Found,
+            packet.NeutralItem.Found,
             packet.Item.Found,
             packet.DroppedStarItem.Found,
             packet.MovingHazard.Found,
