@@ -11,6 +11,12 @@ Completed in the current pivot:
 - Forced `coredelta` rollback validation ran as `logs/codex-coredelta-resim-breakdown-1300-20260602`. The strict wrapper intentionally failed because host rollback-related frame time reached `112.791ms` above the configured `100ms` gate; the instrumentation itself worked.
 - At host frame `1200`, five measured 2-frame corrections averaged: restore `11.116ms/op`, resimulated `RunFrame` `13.925ms/frame`, checkpoint re-save `5.713ms/frame`, total correction `50.425ms/op`. The worst measured correction was `75.704ms`.
 - At client frame `1200`, five measured 2-frame corrections averaged: restore `5.360ms/op`, resimulated `RunFrame` `13.365ms/frame`, checkpoint re-save `5.425ms/frame`, total correction `42.966ms/op`. The worst measured correction was `46.272ms`.
+- Added three experimental systematic Main RAM page-delta backends:
+  - `coreframedelta`: stores Main RAM postimage deltas relative to the preceding checkpoint and restores by replaying a delta chain from a keyframe. It passed `logs/codex-coreframedelta-breakdown-1300-20260602`, but is not a performance candidate: host restore average regressed to `44.405ms` because forward chain replay is expensive.
+  - `corepreimage`: stores a full rollback core snapshot plus frame-local Main RAM preimages and restores short rollbacks by reverse-applying preimages from the latest RAM shadow. It passed `logs/codex-corepreimage-breakdown-1300-20260602`; host restore average improved to `6.350ms`, correction average to `44.377ms`, and the 65-checkpoint ring held about `1.18MB` of RAM preimages. Full core snapshots still kept the average checkpoint around `2.47MB`.
+  - `tinycorepreimage`: pairs the same reverse Main RAM preimage ring with `DoRollbackTinyCoreSavestate`. With `tinyFlags=0x241`, checkpoint average dropped to about `179KB` and normal save average to `1.36-1.84ms` in `logs/codex-tinycorepreimage-breakdown-1300-20260602`.
+- A rollback-producing `tinycorepreimage` route passed without game-state comparison: `logs/codex-tinycorepreimage-start50-netpump-wait2500-delay2-1500-20260602`. At frame `1440`, host/client checkpoint averages were about `182KB`, restore averages `4.126/4.148ms`, resim checkpoint re-save averages `1.875/1.871ms/frame`, and correction averages `36.894/38.861ms`. Both peers had `16` measured correction operations.
+- The next correctness run, `logs/codex-tinycorepreimage-compare-start50-delay2-1600-20260602`, did not complete: both peers missed the frame-limit marker after game-state comparison was enabled and stopped progressing around frame `1453`. The tail shows repeated input-wait timeouts and throttle waits with `scratchMs` spikes around `20-34ms`, not an immediate CPU abort. Treat `tinycorepreimage` as an experimental performance result only until this stall is diagnosed.
 
 Current conclusion:
 
@@ -21,13 +27,13 @@ Current conclusion:
 Current blocker / caveat:
 
 - Full write-barrier coverage is not yet proven. JIT and direct host writes can bypass a naive dirty-bit hook. Start with page comparison against a shadow copy to prove correctness, then replace proven paths with write tracking where it reduces cost.
-- A frame-local delta ring still needs a restore strategy. The initial implementation should preserve small core state per checkpoint and reconstruct Main RAM from a nearby keyframe plus frame-local postimage deltas; a reverse preimage fast path can then be added for common short rollback windows.
+- The reverse-preimage restore strategy is implemented and measurably lighter. The current blocker is correctness under comparison-enabled rollback stress: determine whether `tinycorepreimage` is missing a tiny-core device domain or whether the comparison observer exposed an independent stall.
 
 Next actions:
 
-- Add an experimental frame-local Main RAM page-delta backend with a bounded keyframe ring and small fixed core snapshot.
-- Reuse the new timing fields to compare checkpoint bytes, normal save cost, restore cost, resim re-save cost, total correction cost, active FPS, and isolated frame spikes against `coredelta`.
-- Validate correctness first with automatic full/coredelta comparison under complex input, then add short-rollback optimization. Do not promote per-object Plan-D fixes as the primary path.
+- Diagnose `logs/codex-tinycorepreimage-compare-start50-delay2-1600-20260602` before promoting `tinycorepreimage`. Start by checking the last heartbeat, frame progress, CPU PC/SP, and whether disabling intrusive comparison while keeping targeted state gates changes the result.
+- Compare `tinycorepreimage` against `corepreimage` on the same contact/death/block/item-focused routes. If only tiny-core fails, add missing core domains systematically; do not fall back to per-object Plan-D fixes.
+- Keep measuring checkpoint bytes, normal save cost, restore cost, resim re-save cost, total correction cost, active FPS, and isolated frame spikes. The short-rollback reverse-preimage mechanism is now the promising branch; forward `coreframedelta` remains a diagnostic reference only.
 
 ## 2026-06-02 retained diagnostic status - Plan-D actor/global snapshot path
 
