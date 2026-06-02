@@ -1,6 +1,35 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
-## 2026-06-02 current status - Plan-D actor/global snapshot path
+## 2026-06-02 current status - systematic page-delta rollback pivot
+
+Primary implementation direction is now a systematic page-delta rollback checkpoint derived from the working `coredelta` correctness baseline. The Plan-D actor/global/world snapshot remains useful as a lightweight diagnostic and narrow recovery experiment, but it is not the production-correctness architecture: manual play still exposed collision/contact freezes, broken-block divergence, minimap Big Star marker divergence, and differing 8-coin rewards.
+
+Completed in the current pivot:
+
+- Added rollback timing breakdowns to `src/frontend/qt_sdl/NsmbNetplayPoC.cpp`. Periodic rollback logs and per-resim traces now separate restore, resimulated `RunFrame`, resim checkpoint re-save, and total correction time. `NSMB PerfSpike` lines also include the observed maxima.
+- Build passed: `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4`.
+- Forced `coredelta` rollback validation ran as `logs/codex-coredelta-resim-breakdown-1300-20260602`. The strict wrapper intentionally failed because host rollback-related frame time reached `112.791ms` above the configured `100ms` gate; the instrumentation itself worked.
+- At host frame `1200`, five measured 2-frame corrections averaged: restore `11.116ms/op`, resimulated `RunFrame` `13.925ms/frame`, checkpoint re-save `5.713ms/frame`, total correction `50.425ms/op`. The worst measured correction was `75.704ms`.
+- At client frame `1200`, five measured 2-frame corrections averaged: restore `5.360ms/op`, resimulated `RunFrame` `13.365ms/frame`, checkpoint re-save `5.425ms/frame`, total correction `42.966ms/op`. The worst measured correction was `46.272ms`.
+
+Current conclusion:
+
+- Checkpoint lightweighting is still worthwhile: with two resimulated frames, current checkpoint restore plus re-save consumes about `16-23ms` per correction in this route, in addition to normal-frame checkpoint-save overhead.
+- It is not sufficient by itself: the unavoidable resimulated `RunFrame` portion is already about `27ms` for a two-frame correction. The new backend must reduce checkpoint cost while the input/prediction policy keeps common corrections near one frame.
+- Existing `coredelta` stores normal checkpoints around `2.46-2.49MB`, average around `2.6-2.7MB`, with periodic keyframes around `6.6MB`. The next backend should store frame-local Main RAM dirty-page changes rather than cumulative keyframe-relative Main RAM deltas.
+
+Current blocker / caveat:
+
+- Full write-barrier coverage is not yet proven. JIT and direct host writes can bypass a naive dirty-bit hook. Start with page comparison against a shadow copy to prove correctness, then replace proven paths with write tracking where it reduces cost.
+- A frame-local delta ring still needs a restore strategy. The initial implementation should preserve small core state per checkpoint and reconstruct Main RAM from a nearby keyframe plus frame-local postimage deltas; a reverse preimage fast path can then be added for common short rollback windows.
+
+Next actions:
+
+- Add an experimental frame-local Main RAM page-delta backend with a bounded keyframe ring and small fixed core snapshot.
+- Reuse the new timing fields to compare checkpoint bytes, normal save cost, restore cost, resim re-save cost, total correction cost, active FPS, and isolated frame spikes against `coredelta`.
+- Validate correctness first with automatic full/coredelta comparison under complex input, then add short-rollback optimization. Do not promote per-object Plan-D fixes as the primary path.
+
+## 2026-06-02 retained diagnostic status - Plan-D actor/global snapshot path
 
 Current best Plan-D-like direction is no longer a rollback backend. It is a small actor/global/world snapshot path that avoids full NDS rollback restore/resim:
 

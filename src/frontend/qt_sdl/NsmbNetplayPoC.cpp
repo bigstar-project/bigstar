@@ -1643,6 +1643,14 @@ struct State
     unsigned long long RollbackCheckpointRestoreTotalUs = 0;
     unsigned long long RollbackCheckpointRestoreMaxUs = 0;
     melonDS::u32 RollbackCheckpointRestoreOpCount = 0;
+    melonDS::u32 RollbackMeasuredResimOpCount = 0;
+    unsigned long long RollbackMeasuredResimFrameCount = 0;
+    unsigned long long RollbackResimRunFrameTotalUs = 0;
+    unsigned long long RollbackResimRunFrameMaxUs = 0;
+    unsigned long long RollbackResimCheckpointSaveTotalUs = 0;
+    unsigned long long RollbackResimCheckpointSaveMaxUs = 0;
+    unsigned long long RollbackResimCorrectionTotalUs = 0;
+    unsigned long long RollbackResimCorrectionMaxUs = 0;
     melonDS::u32 LastRollbackTraceFrame = kNoFrameLimit;
     melonDS::u32 ForceStageSceneStartGateStartFrame = 0;
     melonDS::u32 ForceStageSceneStartGateEndFrame = 0;
@@ -3141,6 +3149,27 @@ void RecordRollbackCheckpointRestoreLocked(unsigned long long elapsedUs)
         G.RollbackCheckpointRestoreMaxUs = elapsedUs;
 }
 
+void RecordRollbackResimTimingLocked(
+    melonDS::u32 frames,
+    unsigned long long runFrameTotalUs,
+    unsigned long long runFrameMaxUs,
+    unsigned long long checkpointSaveTotalUs,
+    unsigned long long checkpointSaveMaxUs,
+    unsigned long long correctionTotalUs)
+{
+    G.RollbackMeasuredResimOpCount++;
+    G.RollbackMeasuredResimFrameCount += frames;
+    G.RollbackResimRunFrameTotalUs += runFrameTotalUs;
+    if (runFrameMaxUs > G.RollbackResimRunFrameMaxUs)
+        G.RollbackResimRunFrameMaxUs = runFrameMaxUs;
+    G.RollbackResimCheckpointSaveTotalUs += checkpointSaveTotalUs;
+    if (checkpointSaveMaxUs > G.RollbackResimCheckpointSaveMaxUs)
+        G.RollbackResimCheckpointSaveMaxUs = checkpointSaveMaxUs;
+    G.RollbackResimCorrectionTotalUs += correctionTotalUs;
+    if (correctionTotalUs > G.RollbackResimCorrectionMaxUs)
+        G.RollbackResimCorrectionMaxUs = correctionTotalUs;
+}
+
 void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
 {
     if (instanceID < 0 || instanceID >= 16 || !G.ActiveTimerStarted[instanceID])
@@ -3186,7 +3215,7 @@ void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
         G.LastPerfSpikeRollbackRestoreCount[instanceID] = G.RollbackRestoreCount;
         G.LastPerfSpikeRollbackResimulateCount[instanceID] = G.RollbackResimulateCount;
         std::printf(
-            "NSMB PerfSpike: inst=%d frame=%u frameTimeUs=%llu thresholdUs=%d rollbackRestores=%u rollbackResims=%u rollbackRestoreDelta=%u rollbackResimDelta=%u saveMaxUs=%llu restoreMaxUs=%llu\n",
+            "NSMB PerfSpike: inst=%d frame=%u frameTimeUs=%llu thresholdUs=%d rollbackRestores=%u rollbackResims=%u rollbackRestoreDelta=%u rollbackResimDelta=%u saveMaxUs=%llu restoreMaxUs=%llu resimRunMaxUs=%llu resimSaveMaxUs=%llu resimTotalMaxUs=%llu\n",
             instanceID,
             frame,
             elapsedUs,
@@ -3196,7 +3225,10 @@ void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
             restoreDelta,
             resimDelta,
             G.RollbackCheckpointSaveMaxUs,
-            G.RollbackCheckpointRestoreMaxUs);
+            G.RollbackCheckpointRestoreMaxUs,
+            G.RollbackResimRunFrameMaxUs,
+            G.RollbackResimCheckpointSaveMaxUs,
+            G.RollbackResimCorrectionMaxUs);
     }
 }
 
@@ -9792,7 +9824,8 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
             it = G.RollbackStates.erase(it);
     }
 
-    const auto restoreStart = std::chrono::steady_clock::now();
+    const auto rollbackStart = std::chrono::steady_clock::now();
+    const auto restoreStart = rollbackStart;
     if (!RestoreRollbackStoredState(nds, checkpoint, hasDeltaBase ? &deltaBase : nullptr))
     {
         std::printf("NSMB Rollback: resim restore failed inst=%d restoreFrame=%u current=%u\n",
@@ -9806,6 +9839,10 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
 
     const int localPlayer = CurrentPacketBridgeLocalPlayer();
     melonDS::u32 resimulated = 0;
+    unsigned long long resimRunFrameTotalUs = 0;
+    unsigned long long resimRunFrameMaxUs = 0;
+    unsigned long long resimCheckpointSaveTotalUs = 0;
+    unsigned long long resimCheckpointSaveMaxUs = 0;
     for (melonDS::u32 f = restoreFrame; f < frame; f++)
     {
         InputState localInput = NeutralInput();
@@ -9839,16 +9876,26 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
         const bool skipRender = G.RollbackSkipRenderDuringResim;
         if (skipRender)
             nds->GPU.SetRollbackSkipRender(true);
+        const auto runFrameStart = std::chrono::steady_clock::now();
         nds->RunFrame();
+        const unsigned long long runFrameUs = ElapsedUs(runFrameStart);
+        resimRunFrameTotalUs += runFrameUs;
+        if (runFrameUs > resimRunFrameMaxUs)
+            resimRunFrameMaxUs = runFrameUs;
         if (skipRender)
             nds->GPU.SetRollbackSkipRender(false);
         ApplyRollbackResimPostFramePatches(f + 1, nds);
         resimulated++;
 
+        const auto checkpointSaveStart = std::chrono::steady_clock::now();
         {
             std::lock_guard<std::mutex> lock(G.Mutex);
             SaveRollbackCheckpointNowLocked(f + 1, nds);
         }
+        const unsigned long long checkpointSaveUs = ElapsedUs(checkpointSaveStart);
+        resimCheckpointSaveTotalUs += checkpointSaveUs;
+        if (checkpointSaveUs > resimCheckpointSaveMaxUs)
+            resimCheckpointSaveMaxUs = checkpointSaveUs;
 
         if (nds->NumFrames != f + 1 && G.InputNetplayTraceEnabled)
         {
@@ -9858,19 +9905,33 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
         }
     }
 
+    const unsigned long long rollbackTotalUs = ElapsedUs(rollbackStart);
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         RecordRollbackCheckpointRestoreLocked(restoreUs);
+        RecordRollbackResimTimingLocked(
+            resimulated,
+            resimRunFrameTotalUs,
+            resimRunFrameMaxUs,
+            resimCheckpointSaveTotalUs,
+            resimCheckpointSaveMaxUs,
+            rollbackTotalUs);
         G.RollbackResimulateCount++;
     }
     if (G.InputNetplayTraceEnabled)
     {
-        std::printf("NSMB Rollback: resimulated from checkpoint=%u mismatch=%u to current=%u frames=%u bytes=%zu\n",
+        std::printf("NSMB Rollback: resimulated from checkpoint=%u mismatch=%u to current=%u frames=%u bytes=%zu restoreUs=%llu runUs=%llu runMaxUs=%llu checkpointSaveUs=%llu checkpointSaveMaxUs=%llu totalUs=%llu\n",
             restoreFrame,
             mismatchFrame,
             frame,
             resimulated,
-            checkpoint.Buffer.size());
+            checkpoint.Buffer.size(),
+            restoreUs,
+            resimRunFrameTotalUs,
+            resimRunFrameMaxUs,
+            resimCheckpointSaveTotalUs,
+            resimCheckpointSaveMaxUs,
+            rollbackTotalUs);
         std::fflush(stdout);
     }
     return true;
@@ -15780,6 +15841,15 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         const unsigned long long restoreAvgUs = G.RollbackCheckpointRestoreOpCount == 0
             ? 0
             : G.RollbackCheckpointRestoreTotalUs / G.RollbackCheckpointRestoreOpCount;
+        const unsigned long long resimRunAvgUs = G.RollbackMeasuredResimFrameCount == 0
+            ? 0
+            : G.RollbackResimRunFrameTotalUs / G.RollbackMeasuredResimFrameCount;
+        const unsigned long long resimCheckpointSaveAvgUs = G.RollbackMeasuredResimFrameCount == 0
+            ? 0
+            : G.RollbackResimCheckpointSaveTotalUs / G.RollbackMeasuredResimFrameCount;
+        const unsigned long long resimTotalAvgUs = G.RollbackMeasuredResimOpCount == 0
+            ? 0
+            : G.RollbackResimCorrectionTotalUs / G.RollbackMeasuredResimOpCount;
         size_t deltaCheckpoints = 0;
         size_t keyframeCheckpoints = 0;
         size_t mainRAMCopyBytes = 0;
@@ -15793,7 +15863,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             mainRAMCopyBytes += stored.MainRAMCopy.size();
         }
         std::printf(
-            "NSMB Rollback: frame=%u backend=%s checkpoints=%zu checkpointSaves=%u bytesLast=%zu bytesMin=%zu bytesMax=%zu bytesAvg=%zu saveAvgUs=%llu saveMaxUs=%llu restoreOps=%u restoreAvgUs=%llu restoreMaxUs=%llu delta=%zu keyframes=%zu mainRAMCopies=%zu keyInt=%d page=%d coreSkip=0x%X tinyFlags=0x%X wide=%d deltaDiscovered=%d actorArena=%d arm9Stack=%d skipInput=%d restoreDiff=%d procList=%d heapScan=%d procObjs=%u procNodes=%u heapObjs=%u scanInt=%d heapScanInt=%d scanRefresh=%u scanCacheHits=%u heapScanRefresh=%u heapScanCacheHits=%u predicted=%zu predictions=%u predProbe=%u mismatches=%u restores=%u resims=%u pending=%u observed=%u\n",
+            "NSMB Rollback: frame=%u backend=%s checkpoints=%zu checkpointSaves=%u bytesLast=%zu bytesMin=%zu bytesMax=%zu bytesAvg=%zu saveAvgUs=%llu saveMaxUs=%llu restoreOps=%u restoreAvgUs=%llu restoreMaxUs=%llu resimOps=%u resimFrames=%llu resimRunAvgUs=%llu resimRunMaxUs=%llu resimSaveAvgUs=%llu resimSaveMaxUs=%llu resimTotalAvgUs=%llu resimTotalMaxUs=%llu delta=%zu keyframes=%zu mainRAMCopies=%zu keyInt=%d page=%d coreSkip=0x%X tinyFlags=0x%X wide=%d deltaDiscovered=%d actorArena=%d arm9Stack=%d skipInput=%d restoreDiff=%d procList=%d heapScan=%d procObjs=%u procNodes=%u heapObjs=%u scanInt=%d heapScanInt=%d scanRefresh=%u scanCacheHits=%u heapScanRefresh=%u heapScanCacheHits=%u predicted=%zu predictions=%u predProbe=%u mismatches=%u restores=%u resims=%u pending=%u observed=%u\n",
             logFrame,
             RollbackBackendName(),
             G.RollbackStates.size(),
@@ -15807,6 +15877,14 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             G.RollbackCheckpointRestoreOpCount,
             restoreAvgUs,
             G.RollbackCheckpointRestoreMaxUs,
+            G.RollbackMeasuredResimOpCount,
+            G.RollbackMeasuredResimFrameCount,
+            resimRunAvgUs,
+            G.RollbackResimRunFrameMaxUs,
+            resimCheckpointSaveAvgUs,
+            G.RollbackResimCheckpointSaveMaxUs,
+            resimTotalAvgUs,
+            G.RollbackResimCorrectionMaxUs,
             deltaCheckpoints,
             keyframeCheckpoints,
             mainRAMCopyBytes,
