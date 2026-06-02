@@ -15577,6 +15577,29 @@ void TraceGameplayHeartbeatIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
             std::printf(",");
         std::printf("%03X:%08X", objects.ActiveID[i], objects.ActiveSettings[i]);
     }
+    const std::vector<ObjectScanSample> hazards =
+        FindActiveObjectsByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
+    std::printf(" hazards=");
+    const std::size_t hazardCount = std::min(hazards.size(), kMaxWorldMovingHazards);
+    for (std::size_t i = 0; i < kMaxWorldMovingHazards; i++)
+    {
+        if (i != 0)
+            std::printf(",");
+        if (i >= hazardCount)
+        {
+            std::printf("-");
+            continue;
+        }
+        const ObjectScanSample& hazard = hazards[i];
+        std::printf(
+            "%u:%08X:%08X:%08X:%u:%08X",
+            hazard.GUID,
+            hazard.PosX,
+            hazard.PosY,
+            hazard.VelX,
+            hazard.StateType,
+            hazard.Flags);
+    }
     std::printf("\n");
     std::fflush(stdout);
 }

@@ -214,6 +214,7 @@ function Get-GameplayHeartbeatObjectRows {
             SkipUpdate = [int]$Matches[6]
             SkipRender = [int]$Matches[7]
             ActiveKeys = @(Get-GameplayHeartbeatActiveKeys -Line $line)
+            Hazards = Get-GameplayHeartbeatHazards -Line $line
             Line = $line
         }
     }
@@ -239,6 +240,15 @@ function Get-GameplayHeartbeatActiveKeys {
         $keys += $key
     }
     return $keys
+}
+
+function Get-GameplayHeartbeatHazards {
+    param([string]$Line)
+
+    if ($Line -notmatch " hazards=([^ ]+)") {
+        return ""
+    }
+    return $Matches[1]
 }
 
 function ConvertTo-CountMap {
@@ -359,6 +369,8 @@ function Get-GameplayHeartbeatObjectDiff {
         FirstSignificantActiveIdDiff = ""
         TopSignificantHostOnly = ""
         TopSignificantClientOnly = ""
+        FirstHazardDiffFrame = -1
+        FirstHazardDiff = ""
     }
     foreach ($frame in ($hostRows.Keys | Sort-Object)) {
         if (-not $clientRows.ContainsKey($frame)) {
@@ -411,6 +423,13 @@ function Get-GameplayHeartbeatObjectDiff {
                     Add-CountMapOnly -Target $significantHostOnly -Left $filteredHostMap -Right $filteredClientMap
                     Add-CountMapOnly -Target $significantClientOnly -Left $filteredClientMap -Right $filteredHostMap
                 }
+            }
+
+            if ($summary.FirstHazardDiffFrame -lt 0 -and
+                $hostRow.Hazards -and $clientRow.Hazards -and
+                $hostRow.Hazards -ne $clientRow.Hazards) {
+                $summary.FirstHazardDiffFrame = $frame
+                $summary.FirstHazardDiff = "hostHazards=$($hostRow.Hazards) clientHazards=$($clientRow.Hazards)"
             }
         }
     }
@@ -591,5 +610,9 @@ if ($gameplayObjectDiff.SharedFrames -gt 0) {
     if ($gameplayObjectDiff.FirstSignificantActiveIdDiffFrame -ge 0) {
         $significantDiff = " firstSignificantActiveIdDiffFrame=$($gameplayObjectDiff.FirstSignificantActiveIdDiffFrame) $($gameplayObjectDiff.FirstSignificantActiveIdDiff)"
     }
-    Write-Host "gameplay heartbeat object diff: sharedFrames=$($gameplayObjectDiff.SharedFrames) diffFrames=$($gameplayObjectDiff.DiffFrames) significantDiffFrames=$($gameplayObjectDiff.SignificantDiffFrames) maxActiveDelta=$($gameplayObjectDiff.MaxActiveDelta) firstDiffFrame=$($gameplayObjectDiff.FirstDiffFrame) $($gameplayObjectDiff.FirstDiff)$activeIdDiff$significantDiff topSignificantHostOnly=$($gameplayObjectDiff.TopSignificantHostOnly) topSignificantClientOnly=$($gameplayObjectDiff.TopSignificantClientOnly)"
+    $hazardDiff = ""
+    if ($gameplayObjectDiff.FirstHazardDiffFrame -ge 0) {
+        $hazardDiff = " firstHazardDiffFrame=$($gameplayObjectDiff.FirstHazardDiffFrame) $($gameplayObjectDiff.FirstHazardDiff)"
+    }
+    Write-Host "gameplay heartbeat object diff: sharedFrames=$($gameplayObjectDiff.SharedFrames) diffFrames=$($gameplayObjectDiff.DiffFrames) significantDiffFrames=$($gameplayObjectDiff.SignificantDiffFrames) maxActiveDelta=$($gameplayObjectDiff.MaxActiveDelta) firstDiffFrame=$($gameplayObjectDiff.FirstDiffFrame) $($gameplayObjectDiff.FirstDiff)$activeIdDiff$significantDiff topSignificantHostOnly=$($gameplayObjectDiff.TopSignificantHostOnly) topSignificantClientOnly=$($gameplayObjectDiff.TopSignificantClientOnly)$hazardDiff"
 }
