@@ -14,6 +14,7 @@
 #include "NsmbNetplayPoC.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cctype>
 #include <condition_variable>
@@ -1061,10 +1062,30 @@ struct ObjectLifecycleSummary
     melonDS::u32 ActiveBase[kObjectTraceSlots] {};
 };
 
+struct GameStateObjectScanEntry
+{
+    ObjectScanSample Actor;
+    melonDS::u32 Offset = 0;
+    melonDS::u32 VTable = 0;
+    melonDS::u16 ObjectID = 0;
+    melonDS::u8 LifecycleState = 0;
+    melonDS::u8 Type = 0;
+    melonDS::u8 SkipFlags = 0;
+};
+
+struct GameStateObjectScanCache
+{
+    std::vector<GameStateObjectScanEntry> Entries;
+    ObjectLifecycleSummary Lifecycle;
+};
+
+thread_local const GameStateObjectScanCache* ActiveGameStateObjectScanCache = nullptr;
+
 ObjectScanSample FindObjectByIDAndSettingsLoose(melonDS::NDS* nds, melonDS::u16 expectedObjectID, melonDS::u32 expectedSettings);
 ObjectScanSample FindObjectByID(melonDS::NDS* nds, melonDS::u16 expectedObjectID);
 ObjectPairScanSample FindObjectPairByIDSortedX(melonDS::NDS* nds, melonDS::u16 expectedObjectID);
 PlayerActorScanSample FindPlayerActors(melonDS::NDS* nds);
+melonDS::u32 FindCachedObjectBaseByID(melonDS::u16 objectID);
 
 struct GameStateSyncHashes
 {
@@ -1087,7 +1108,8 @@ int CurrentPacketBridgeLocalPlayer();
 struct State
 {
     std::mutex Mutex;
-    bool EnvChecked = false;
+    std::mutex PerfMutex;
+    std::atomic<bool> EnvChecked { false };
     bool Enabled = false;
     bool Ready = false;
     bool TestEnabled = false;
@@ -1124,6 +1146,8 @@ struct State
     bool ActiveFrameSpikeTrace = false;
     int FrameHeartbeatInterval = 0;
     melonDS::u32 LastFrameHeartbeat[16] {};
+    std::string FrameHeartbeatPath;
+    std::ofstream FrameHeartbeat;
     int HashInterval = 60;
     bool HashEnabled = true;
     int TestWaitTimeoutMs = 5000;
@@ -2953,7 +2977,7 @@ void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
         return;
 
     const auto now = std::chrono::steady_clock::now();
-    std::lock_guard<std::mutex> lock(G.Mutex);
+    std::lock_guard<std::mutex> lock(G.PerfMutex);
     if (!G.ActiveFrameTimingStarted[instanceID])
     {
         G.ActiveFrameTimingStarted[instanceID] = true;
@@ -6176,6 +6200,8 @@ melonDS::u32 FindObjectBaseByID(melonDS::NDS* nds, melonDS::u16 objectID)
 {
     if (!nds || !nds->MainRAM)
         return 0;
+    if (ActiveGameStateObjectScanCache)
+        return FindCachedObjectBaseByID(objectID);
 
     for (melonDS::u32 off = 0x080000; off + 0x80 <= nds->MainRAMMask + 1; off += 4)
     {
@@ -6770,11 +6796,169 @@ void ReadObjectTransform(melonDS::NDS* nds, melonDS::u32 off, ObjectScanSample& 
     ReadMainRAMU32(nds, off + 0xE8, sample.TargetVelZ);
 }
 
+GameStateObjectScanCache BuildGameStateObjectScanCache(melonDS::NDS* nds)
+{
+    GameStateObjectScanCache cache;
+    if (!nds || !nds->MainRAM)
+        return cache;
+
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (ramLen < 0x120)
+        return cache;
+
+    cache.Entries.reserve(128);
+    for (melonDS::u32 off = 0; off <= ramLen - 0x120; off += 4)
+    {
+        GameStateObjectScanEntry entry;
+        melonDS::u32 guid = 0;
+        melonDS::u32 settings = 0;
+        melonDS::u16 stateType = 0;
+        melonDS::u32 flags = 0;
+        if (!ReadMainRAMU32(nds, off, entry.VTable) ||
+            !ReadMainRAMU32(nds, off + 4, guid) ||
+            !ReadMainRAMU32(nds, off + 8, settings) ||
+            !ReadMainRAMU16(nds, off + 0x0C, entry.ObjectID) ||
+            !ReadMainRAMU16(nds, off + 0x0E, stateType) ||
+            !ReadMainRAMU32(nds, off + 0x10, flags) ||
+            !ReadMainRAMU8(nds, off + 0x0E, entry.LifecycleState) ||
+            !ReadMainRAMU8(nds, off + 0x12, entry.Type) ||
+            !ReadMainRAMU8(nds, off + 0x13, entry.SkipFlags))
+            continue;
+        if (entry.VTable < kMainRAMBase || entry.VTable >= kMainRAMBase + ramLen)
+            continue;
+        if (guid == 0 || guid >= 0x10000)
+            continue;
+        if (entry.ObjectID == 0 || entry.ObjectID >= 0x400)
+            continue;
+
+        entry.Offset = off;
+        entry.Actor.Found = 1;
+        entry.Actor.GUID = guid;
+        entry.Actor.Base = kMainRAMBase + off;
+        entry.Actor.Settings = settings;
+        entry.Actor.StateType = stateType;
+        entry.Actor.Flags = flags;
+        ReadObjectTransform(nds, off, entry.Actor);
+        cache.Entries.push_back(entry);
+
+        if (entry.LifecycleState > 2 || entry.Type > 2)
+            continue;
+
+        auto& summary = cache.Lifecycle;
+        summary.Total++;
+        if (entry.LifecycleState == 0)
+        {
+            summary.NotCreated++;
+            const melonDS::u32 lifecycleFlags =
+                (static_cast<melonDS::u32>(entry.Type) << 16) |
+                (static_cast<melonDS::u32>(entry.SkipFlags) << 24);
+            if (summary.FirstNotCreatedBase == 0)
+            {
+                summary.FirstNotCreatedID = entry.ObjectID;
+                summary.FirstNotCreatedBase = entry.Actor.Base;
+                summary.FirstNotCreatedFlags = lifecycleFlags;
+            }
+            else if (summary.SecondNotCreatedBase == 0)
+            {
+                summary.SecondNotCreatedID = entry.ObjectID;
+                summary.SecondNotCreatedBase = entry.Actor.Base;
+                summary.SecondNotCreatedFlags = lifecycleFlags;
+            }
+        }
+        else if (entry.LifecycleState == 1)
+        {
+            const melonDS::u32 index = summary.Active;
+            if (index < static_cast<melonDS::u32>(kObjectTraceSlots))
+            {
+                summary.ActiveID[index] = entry.ObjectID;
+                summary.ActiveSettings[index] = settings;
+                summary.ActiveBase[index] = entry.Actor.Base;
+            }
+            summary.Active++;
+        }
+        else
+        {
+            summary.Dead++;
+        }
+
+        if ((entry.SkipFlags & 0x02) != 0)
+            summary.SkipUpdate++;
+        if ((entry.SkipFlags & 0x08) != 0)
+            summary.SkipRender++;
+    }
+
+    return cache;
+}
+
+struct ScopedGameStateObjectScanCache
+{
+    explicit ScopedGameStateObjectScanCache(const GameStateObjectScanCache& cache)
+        : Previous(ActiveGameStateObjectScanCache)
+    {
+        ActiveGameStateObjectScanCache = &cache;
+    }
+
+    ~ScopedGameStateObjectScanCache()
+    {
+        ActiveGameStateObjectScanCache = Previous;
+    }
+
+    const GameStateObjectScanCache* Previous;
+};
+
+bool IsCachedObjectStrict(const GameStateObjectScanEntry& entry)
+{
+    return (entry.Actor.StateType == 1 || entry.Actor.StateType == 2 || entry.Actor.StateType == 3) &&
+        entry.Actor.Flags < 0x10000000;
+}
+
+ObjectScanSample FindCachedObject(
+    melonDS::u16 expectedObjectID,
+    bool matchSettings,
+    melonDS::u32 expectedSettings,
+    bool strict)
+{
+    if (!ActiveGameStateObjectScanCache)
+        return {};
+
+    for (const auto& entry : ActiveGameStateObjectScanCache->Entries)
+    {
+        if (entry.ObjectID != expectedObjectID)
+            continue;
+        if (matchSettings && entry.Actor.Settings != expectedSettings)
+            continue;
+        if (strict && !IsCachedObjectStrict(entry))
+            continue;
+        return entry.Actor;
+    }
+    return {};
+}
+
+melonDS::u32 FindCachedObjectBaseByID(melonDS::u16 objectID)
+{
+    if (!ActiveGameStateObjectScanCache)
+        return 0;
+
+    for (const auto& entry : ActiveGameStateObjectScanCache->Entries)
+    {
+        if (entry.Offset < 0x080000 || entry.ObjectID != objectID)
+            continue;
+        if (entry.Actor.StateType == 0 || entry.Actor.StateType > 2)
+            continue;
+        if ((entry.Actor.Flags & 0xFFFF0000u) == 0)
+            continue;
+        return entry.Actor.Base;
+    }
+    return 0;
+}
+
 ObjectScanSample FindVsBattleStarCandidate(melonDS::NDS* nds)
 {
     ObjectScanSample sample;
     if (!nds || !nds->MainRAM)
         return sample;
+    if (ActiveGameStateObjectScanCache)
+        return FindCachedObject(kVsBattleStarCandidateObjectID, false, 0, true);
 
     const melonDS::u32 ramLen = nds->MainRAMMask + 1;
     if (ramLen < 0x120)
@@ -6826,6 +7010,8 @@ ObjectScanSample FindObjectByIDAndSettings(melonDS::NDS* nds, melonDS::u16 expec
     ObjectScanSample sample;
     if (!nds || !nds->MainRAM)
         return sample;
+    if (ActiveGameStateObjectScanCache)
+        return FindCachedObject(expectedObjectID, true, expectedSettings, true);
 
     const melonDS::u32 ramLen = nds->MainRAMMask + 1;
     if (ramLen < 0x120)
@@ -6876,6 +7062,8 @@ ObjectScanSample FindObjectByID(melonDS::NDS* nds, melonDS::u16 expectedObjectID
     ObjectScanSample sample;
     if (!nds || !nds->MainRAM)
         return sample;
+    if (ActiveGameStateObjectScanCache)
+        return FindCachedObject(expectedObjectID, false, 0, true);
 
     const melonDS::u32 ramLen = nds->MainRAMMask + 1;
     if (ramLen < 0x120)
@@ -6926,6 +7114,8 @@ ObjectScanSample FindObjectByIDLoose(melonDS::NDS* nds, melonDS::u16 expectedObj
     ObjectScanSample sample;
     if (!nds || !nds->MainRAM)
         return sample;
+    if (ActiveGameStateObjectScanCache)
+        return FindCachedObject(expectedObjectID, false, 0, false);
 
     const melonDS::u32 ramLen = nds->MainRAMMask + 1;
     if (ramLen < 0x120)
@@ -6972,6 +7162,8 @@ ObjectScanSample FindObjectByIDAndSettingsLoose(melonDS::NDS* nds, melonDS::u16 
     ObjectScanSample sample;
     if (!nds || !nds->MainRAM)
         return sample;
+    if (ActiveGameStateObjectScanCache)
+        return FindCachedObject(expectedObjectID, true, expectedSettings, false);
 
     const melonDS::u32 ramLen = nds->MainRAMMask + 1;
     if (ramLen < 0x120)
@@ -7039,6 +7231,15 @@ ObjectPairScanSample FindObjectPairByIDSortedX(melonDS::NDS* nds, melonDS::u16 e
     ObjectPairScanSample pair;
     if (!nds || !nds->MainRAM)
         return pair;
+    if (ActiveGameStateObjectScanCache)
+    {
+        for (const auto& entry : ActiveGameStateObjectScanCache->Entries)
+        {
+            if (entry.ObjectID == expectedObjectID && entry.Actor.Flags < 0x10000000)
+                InsertObjectByPosX(pair, entry.Actor);
+        }
+        return pair;
+    }
 
     const melonDS::u32 ramLen = nds->MainRAMMask + 1;
     if (ramLen < 0x120)
@@ -7105,6 +7306,15 @@ PlayerActorScanSample FindPlayerActors(melonDS::NDS* nds)
     PlayerActorScanSample players;
     if (!nds || !nds->MainRAM)
         return players;
+    if (ActiveGameStateObjectScanCache)
+    {
+        for (const auto& entry : ActiveGameStateObjectScanCache->Entries)
+        {
+            if (entry.ObjectID == kPlayerObjectID && IsCachedObjectStrict(entry))
+                InsertPlayerActorByGUID(players, entry.Actor);
+        }
+        return players;
+    }
 
     const melonDS::u32 ramLen = nds->MainRAMMask + 1;
     if (ramLen < 0x120)
@@ -7729,6 +7939,8 @@ ObjectLifecycleSummary SummarizeObjectLifecycle(melonDS::NDS* nds)
     ObjectLifecycleSummary summary;
     if (!nds || !nds->MainRAM)
         return summary;
+    if (ActiveGameStateObjectScanCache)
+        return ActiveGameStateObjectScanCache->Lifecycle;
 
     const melonDS::u32 ramLen = nds->MainRAMMask + 1;
     if (ramLen < 0x5C)
@@ -10840,6 +11052,8 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     GameStateSample sample;
     if (!nds || !nds->MainRAM)
         return sample;
+    const GameStateObjectScanCache objectScanCache = BuildGameStateObjectScanCache(nds);
+    const ScopedGameStateObjectScanCache scopedObjectScanCache(objectScanCache);
 
     sample.StageID = nds->ARM9Read32(kGameStageIDAddr);
     sample.StageGroup = nds->ARM9Read32(kGameStageGroupAddr);
@@ -12787,9 +13001,16 @@ bool IsEnabled()
 
 void InitFromEnvironment()
 {
+    if (G.EnvChecked.load(std::memory_order_acquire)) return;
     std::lock_guard<std::mutex> lock(G.Mutex);
-    if (G.EnvChecked) return;
-    G.EnvChecked = true;
+    if (G.EnvChecked.load(std::memory_order_relaxed)) return;
+    struct MarkEnvironmentChecked
+    {
+        ~MarkEnvironmentChecked()
+        {
+            G.EnvChecked.store(true, std::memory_order_release);
+        }
+    } markEnvironmentChecked;
 
     G.Enabled = EnvFlag("MELONDS_NSML_POC");
     G.TestEnabled = EnvFlag("MELONDS_NSML_TEST");
@@ -12802,6 +13023,12 @@ void InitFromEnvironment()
     G.ActiveFrameSpikeTrace = EnvFlag("MELONDS_NSML_FPS_SPIKE_TRACE");
     G.FrameHeartbeatInterval = std::clamp(
         EnvInt("MELONDS_NSML_FRAME_HEARTBEAT_INTERVAL", 0), 0, 3600);
+    const char* frameHeartbeatPath = std::getenv("MELONDS_NSML_FRAME_HEARTBEAT_FILE");
+    if (frameHeartbeatPath && frameHeartbeatPath[0])
+    {
+        G.FrameHeartbeatPath = frameHeartbeatPath;
+        G.FrameHeartbeat.open(G.FrameHeartbeatPath, std::ios::out | std::ios::trunc);
+    }
     G.FrameBarrierEnabled = EnvFlag("MELONDS_NSML_FRAME_BARRIER");
     G.SerialRunEnabled = EnvFlag("MELONDS_NSML_SERIAL_RUN");
     G.HashEnabled = !EnvFlag("MELONDS_NSML_DISABLE_HASH");
@@ -14315,7 +14542,9 @@ void TracePlayerLifeChanges(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
 
 void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
+    const auto afterHookCallStart = std::chrono::steady_clock::now();
     InitFromEnvironment();
+    const auto afterInit = std::chrono::steady_clock::now();
     if ((!G.Enabled && !G.TestEnabled) || !nds) return;
 
     if (instanceID < 0 || instanceID >= 16) return;
@@ -14356,7 +14585,15 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         {
             G.LastFrameHeartbeat[instanceID] = logFrame;
             std::printf("NSMB Heartbeat: inst=%d frame=%u\n", instanceID, logFrame);
-            std::fflush(stdout);
+            if (G.FrameHeartbeat)
+            {
+                G.FrameHeartbeat << logFrame << '\n';
+                G.FrameHeartbeat.flush();
+            }
+            else
+            {
+                std::fflush(stdout);
+            }
         }
     }
 
@@ -14502,17 +14739,54 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     SaveLocalMPState(logFrame);
     SaveScreenshot(instanceID, logFrame, nds);
     SaveRamDump(instanceID, logFrame, nds);
+    const auto afterPreSnapshot = std::chrono::steady_clock::now();
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteMovingHazardState(instanceID, logFrame, nds);
+    const auto afterApplyHazard = std::chrono::steady_clock::now();
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteWorldState(instanceID, logFrame, nds);
+    const auto afterApplyWorld = std::chrono::steady_clock::now();
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemotePlayerState(instanceID, logFrame, nds);
+    const auto afterApplyPlayer = std::chrono::steady_clock::now();
     TraceGameState(instanceID, logFrame, nds);
+    const auto afterTrace = std::chrono::steady_clock::now();
     SyncGameState(instanceID, logFrame, nds);
+    const auto afterSyncGame = std::chrono::steady_clock::now();
     SyncWorldState(instanceID, logFrame, nds);
+    const auto afterSyncWorld = std::chrono::steady_clock::now();
     SyncMovingHazardState(instanceID, logFrame, nds);
+    const auto afterSyncHazard = std::chrono::steady_clock::now();
     SyncPlayerState(instanceID, logFrame, nds);
+    const auto afterSyncPlayer = std::chrono::steady_clock::now();
+
+    if (G.ActiveFrameSpikeTrace)
+    {
+        const auto totalUs = std::chrono::duration_cast<std::chrono::microseconds>(
+            afterSyncPlayer - afterHookCallStart).count();
+        if (totalUs >= std::min(G.ActiveFrameSpikeThresholdUs, 10000))
+        {
+            const auto elapsedMs = [](auto start, auto end) {
+                return std::chrono::duration<double, std::milli>(end - start).count();
+            };
+            std::printf(
+                "NSMB AfterHookPhaseSpike: inst=%d frame=%u totalMs=%.3f initMs=%.3f preSnapshotMs=%.3f applyHazardMs=%.3f applyWorldMs=%.3f applyPlayerMs=%.3f traceMs=%.3f syncGameMs=%.3f syncWorldMs=%.3f syncHazardMs=%.3f syncPlayerMs=%.3f\n",
+                instanceID,
+                logFrame,
+                elapsedMs(afterHookCallStart, afterSyncPlayer),
+                elapsedMs(afterHookCallStart, afterInit),
+                elapsedMs(afterInit, afterPreSnapshot),
+                elapsedMs(afterPreSnapshot, afterApplyHazard),
+                elapsedMs(afterApplyHazard, afterApplyWorld),
+                elapsedMs(afterApplyWorld, afterApplyPlayer),
+                elapsedMs(afterApplyPlayer, afterTrace),
+                elapsedMs(afterTrace, afterSyncGame),
+                elapsedMs(afterSyncGame, afterSyncWorld),
+                elapsedMs(afterSyncWorld, afterSyncHazard),
+                elapsedMs(afterSyncHazard, afterSyncPlayer));
+            std::fflush(stdout);
+        }
+    }
 
     if (!G.HashEnabled) return;
     if ((logFrame % static_cast<melonDS::u32>(G.HashInterval)) != 0) return;

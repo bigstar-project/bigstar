@@ -120,6 +120,7 @@ param(
     [double]$SlowFrameThresholdMs = 33.0,
     [int]$MaxConsecutiveSlowFrames = -1,
     [int]$StallTimeoutMs = 0,
+    [int]$FrameHeartbeatInterval = 120,
     [int]$StallStartFrame = 900,
     [switch]$UseLanMP,
     [switch]$PacketBridgePreserveLocalTouch,
@@ -212,6 +213,7 @@ Remove-Item -Recurse -Force $hostLog, $clientLog -ErrorAction SilentlyContinue
 $common = @(
     "-WaitTimeoutMs", "$WaitTimeoutMs",
     "-StallTimeoutMs", "$StallTimeoutMs",
+    "-FrameHeartbeatInterval", "$FrameHeartbeatInterval",
     "-StallStartFrame", "$StallStartFrame",
     "-Frames", "$Frames",
     "-Exe", $Exe,

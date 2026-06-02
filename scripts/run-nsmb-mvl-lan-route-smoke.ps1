@@ -5,6 +5,7 @@ param(
     [int]$WaitTimeoutMs = 240000,
     [int]$InternalWaitTimeoutMs = 5000,
     [int]$StallTimeoutMs = 0,
+    [int]$FrameHeartbeatInterval = 120,
     [int]$StallStartFrame = 900,
     [int]$StallPollMs = 500,
     [string]$Exe = "build\debug-windows-x86_64\melonDS.exe",
@@ -667,6 +668,7 @@ if ($GenerateMvlConfiguredRoms) {
     $configuredSceneSettings = if ($MvlSceneSettings) { $MvlSceneSettings } else { Convert-ToMvlSceneSettings -Stage $configuredStage }
     $generatedHost = Join-Path $logRoot "generated-host.nds"
     $generatedClient = Join-Path $logRoot "generated-client.nds"
+    $generatorCourseMode = if ($MvlCourseMode -eq "fixed") { "random" } else { $MvlCourseMode }
     & (Join-Path $PSScriptRoot "generate-nsmb-mvl-stable-roms.ps1") `
         -SourceRom $romPath `
         -HostRom $generatedHost `
@@ -676,7 +678,7 @@ if ($GenerateMvlConfiguredRoms) {
         -MvlWins $MvlWins `
         -MvlBigStars $MvlBigStars `
         -MvlLives $MvlLives `
-        -MvlCourseMode $MvlCourseMode
+        -MvlCourseMode $generatorCourseMode
 
     $hostSourceRomPath = (Resolve-Path $generatedHost).Path
     $clientSourceRomPath = (Resolve-Path $generatedClient).Path
@@ -691,6 +693,7 @@ if ($GenerateMvlConfiguredRoms) {
     }
     @(
         "courseMode=$MvlCourseMode"
+        "generatorCourseMode=$generatorCourseMode"
         "wins=$MvlWins"
         "bigStars=$MvlBigStars"
         "lives=$MvlLives"
@@ -833,9 +836,11 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_TARGET_FPS -ErrorAction SilentlyContinue
     }
     if ($StallTimeoutMs -gt 0) {
-        $env:MELONDS_NSML_FRAME_HEARTBEAT_INTERVAL = "30"
+        $env:MELONDS_NSML_FRAME_HEARTBEAT_INTERVAL = "$([Math]::Max(1, $FrameHeartbeatInterval))"
+        $env:MELONDS_NSML_FRAME_HEARTBEAT_FILE = "$Stdout.heartbeat"
     } else {
         Remove-Item Env:\MELONDS_NSML_FRAME_HEARTBEAT_INTERVAL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FRAME_HEARTBEAT_FILE -ErrorAction SilentlyContinue
     }
     if ($NoHashLog) {
         $env:MELONDS_NSML_DISABLE_HASH = "1"
@@ -3335,6 +3340,7 @@ function Start-MelonLANProcess {
         Process = $process
         Stdout = $Stdout
         Stderr = $err
+        Heartbeat = "$Stdout.heartbeat"
     }
 }
 
@@ -3378,6 +3384,21 @@ function Get-LatestNSMBProgressFrame {
     return $latest
 }
 
+function Get-LatestNSMBHeartbeatFrame {
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) {
+        return -1
+    }
+
+    $line = Get-Content $Path -Tail 1 -ErrorAction SilentlyContinue
+    $frame = 0
+    if ($line -and [int]::TryParse($line.Trim(), [ref]$frame)) {
+        return $frame
+    }
+    return -1
+}
+
 function Complete-MelonLANProcess {
     param($Started)
 
@@ -3394,7 +3415,10 @@ function Complete-MelonLANProcess {
                 throw "melonDS process timed out. pid=$($process.Id)"
             }
 
-            $frame = Get-LatestNSMBProgressFrame -Path $Started.Stdout
+            $frame = Get-LatestNSMBHeartbeatFrame -Path $Started.Heartbeat
+            if ($frame -lt 0) {
+                $frame = Get-LatestNSMBProgressFrame -Path $Started.Stdout
+            }
             if ($frame -gt $latestFrame) {
                 $latestFrame = $frame
                 $lastProgress = $now
