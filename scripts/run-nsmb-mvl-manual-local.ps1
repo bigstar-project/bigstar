@@ -26,6 +26,9 @@ param(
     [switch]$RollbackResimulate,
     [int]$PlayerStateSyncInterval = 2,
     [int]$PlayerStateMaxPredictFrames = 1,
+    [int]$WorldStateSyncInterval = 2,
+    [int]$WorldStateMaxPredictFrames = 1,
+    [int]$WorldStateActorRescanInterval = 0,
     [int]$HostStartupDelayMs = 1200,
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds",
@@ -227,7 +230,12 @@ if ($PlanDActorSnapshot) {
         "-PlayerStateApply",
         "-PlayerStateGlobals",
         "-PlayerStateSyncInterval", "$PlayerStateSyncInterval",
-        "-PlayerStateMaxPredictFrames", "$PlayerStateMaxPredictFrames"
+        "-PlayerStateMaxPredictFrames", "$PlayerStateMaxPredictFrames",
+        "-WorldStateSync",
+        "-WorldStateApply",
+        "-WorldStateSyncInterval", "$WorldStateSyncInterval",
+        "-WorldStateMaxPredictFrames", "$WorldStateMaxPredictFrames",
+        "-WorldStateActorRescanInterval", "$WorldStateActorRescanInterval"
     )
 }
 if ($NoFrameLimit) {
@@ -383,7 +391,7 @@ Write-Host "Use the host melonDS window for Mario and the client melonDS window 
 Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames networkPump=$([bool]$NetworkPumpThread) networkPumpSleepUs=$NetworkPumpSleepUs packetBridgeStart=$PacketBridgeStartFrame renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$([bool]$PerfBreakdown)"
 Write-Host "trace gameState=$([bool]$GameStateTrace) interval=$GameStateTraceInterval extended=$([bool]$GameStateTraceExtended) lifeChanges=$([bool]$TracePlayerLifeChanges) defeated=$([bool]$TracePlayerDefeated)"
 if ($PlanDActorSnapshot) {
-    Write-Host "Plan-D actor/global snapshot enabled interval=$PlayerStateSyncInterval predict=$PlayerStateMaxPredictFrames"
+    Write-Host "Plan-D actor/global/world snapshot enabled playerInterval=$PlayerStateSyncInterval playerPredict=$PlayerStateMaxPredictFrames worldInterval=$WorldStateSyncInterval worldPredict=$WorldStateMaxPredictFrames worldRescan=$WorldStateActorRescanInterval"
 }
 Write-Host "mvlWins=$MvlWins mvlBigStars=$MvlBigStars mvlLives=$MvlLives mvlStage=$(if ($MvlStage -ge 0) { $MvlStage } else { 'auto/default' }) mvlSceneSettings=$(if ($MvlSceneSettings) { $MvlSceneSettings } else { 'derived' }) mvlCourseMode=$MvlCourseMode generateConfiguredRoms=$($GenerateMvlConfiguredRoms.IsPresent) mvlMatchSeed=$(if ($MvlMatchSeed) { $MvlMatchSeed } else { 'auto' })"
 if ($Rollback) {

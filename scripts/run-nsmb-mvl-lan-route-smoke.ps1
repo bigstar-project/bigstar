@@ -27,6 +27,14 @@ param(
     [switch]$PlayerStateGlobals,
     [int]$PlayerStateSyncInterval = 1,
     [int]$PlayerStateMaxPredictFrames = 2,
+    [switch]$WorldStateSync,
+    [switch]$WorldStateApply,
+    [switch]$WorldStateSkipStar,
+    [switch]$WorldStateApplyMovingHazard,
+    [switch]$WorldStateSkipMovingHazard,
+    [int]$WorldStateSyncInterval = 2,
+    [int]$WorldStateMaxPredictFrames = 1,
+    [int]$WorldStateActorRescanInterval = 0,
     [int]$ScreenshotInterval = 600,
     [string]$RamDumpFrames = "",
     [int]$RamDumpInterval = 0,
@@ -1266,6 +1274,41 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_GLOBALS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_SYNC_INTERVAL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_MAX_PREDICT_FRAMES -ErrorAction SilentlyContinue
+    }
+    if ($WorldStateSync) {
+        $env:MELONDS_NSML_WORLD_STATE_SYNC = "1"
+        $env:MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL = "$WorldStateSyncInterval"
+        $env:MELONDS_NSML_WORLD_STATE_MAX_PREDICT_FRAMES = "$WorldStateMaxPredictFrames"
+        $env:MELONDS_NSML_WORLD_STATE_ACTOR_RESCAN_INTERVAL = "$WorldStateActorRescanInterval"
+        if ($WorldStateApply) {
+            $env:MELONDS_NSML_WORLD_STATE_APPLY = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY -ErrorAction SilentlyContinue
+        }
+        if ($WorldStateSkipStar) {
+            $env:MELONDS_NSML_WORLD_STATE_SKIP_STAR = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_STAR -ErrorAction SilentlyContinue
+        }
+        if ($WorldStateSkipMovingHazard) {
+            $env:MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD -ErrorAction SilentlyContinue
+        }
+        if ($WorldStateApplyMovingHazard) {
+            $env:MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD -ErrorAction SilentlyContinue
+        }
+    } else {
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SYNC -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_MAX_PREDICT_FRAMES -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_ACTOR_RESCAN_INTERVAL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_STAR -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD -ErrorAction SilentlyContinue
     }
     if ($RamDumpFrames -or $RamDumpInterval -gt 0) {
         $env:MELONDS_NSML_RAM_DUMP_DIR = $RamDumpDir
@@ -2897,6 +2940,16 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_GLOBALS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_SYNC_INTERVAL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_MAX_PREDICT_FRAMES -ErrorAction SilentlyContinue
+    }
+    if (-not $WorldStateSync) {
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SYNC -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_MAX_PREDICT_FRAMES -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_ACTOR_RESCAN_INTERVAL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_STAR -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD -ErrorAction SilentlyContinue
     }
     if (-not $StateSaveDir) {
         Remove-Item Env:\MELONDS_NSML_STATE_SAVE_DIR -ErrorAction SilentlyContinue

@@ -5,6 +5,7 @@
 Current best Plan-D-like direction is no longer a rollback backend. It is a small per-player actor snapshot path that avoids full NDS rollback restore/resim:
 
 - New wire packet: `WirePlayerState`, 168 bytes. The base actor fields are always present; player global fields are read/applied only when `MELONDS_NSML_PLAYER_STATE_GLOBALS=1`.
+- New host-authoritative wire packet: `WireWorldState`, 220 bytes. The standard path currently applies the real Big Star actor transform on the client. The packet has room for moving-hazard motion fields, but moving-hazard apply remains experimental and opt-in because object `0x0053 settings=0` can have multiple simultaneous active instances.
 - Env/script switches:
   - `MELONDS_NSML_PLAYER_STATE_SYNC=1`
   - `MELONDS_NSML_PLAYER_STATE_APPLY=1`
@@ -12,11 +13,13 @@ Current best Plan-D-like direction is no longer a rollback backend. It is a smal
   - `MELONDS_NSML_PLAYER_STATE_SYNC_INTERVAL`
   - `MELONDS_NSML_PLAYER_STATE_MAX_PREDICT_FRAMES`
   - split/lan scripts expose `-PlayerStateSync`, `-PlayerStateApply`, `-PlayerStateGlobals`, `-PlayerStateSyncInterval`, and `-PlayerStateMaxPredictFrames`.
+  - `MELONDS_NSML_WORLD_STATE_SYNC=1`, `MELONDS_NSML_WORLD_STATE_APPLY=1`, `MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL`, and `MELONDS_NSML_WORLD_STATE_MAX_PREDICT_FRAMES` enable the standard Big Star world snapshot.
+  - `MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD=1` is an experiment-only switch. It is intentionally not enabled by `-PlanDActorSnapshot`.
 - The packet carries actor transform, velocity, action/subaction/physics flags, damage cooldown, transition/collision/environment flags, and compact runtime byte flags.
 - The optional global section currently carries per-player life/death/pipe/star counters. It is applied as event-only state, not as a full global overwrite.
 - During player actor transition steps other than `1`, the actor+global route skips transform/full runtime writes and applies only minimal visible/defeated bytes. This avoids fighting the game's pipe/death transition code.
 - The receiver applies the latest remote player actor snapshot before frame execution and again before game-state trace/sync.
-- Existing fixed-size wire packets were also unblocked from the input-bundle branch so `WireNSMLPacket`, `WireGameState`, and the new `WirePlayerState` can reach their exact handlers.
+- Existing fixed-size wire packets were also unblocked from the input-bundle branch so `WireNSMLPacket`, `WireGameState`, `WirePlayerState`, and `WireWorldState` can reach their exact handlers.
 
 Verification:
 
@@ -43,10 +46,19 @@ Verification:
 - The split-input wrapper now exposes `-RequireSecondMvlGame`, `-RequireMvlGameCount`, and `-RequireMvlGameStages`. A result/restart route using the actor+global snapshot passed a second-game gate: `logs/codex-playerglobal-transition-step-min-secondgame-gate-9000-20260602`.
 - Added `tests/nsmb_us_direct_mvl_star_collect_second_game_stress.inputs`: after result/restart it drives both players with simultaneous move, dash, jump, and direction reversals. `logs/codex-playerglobal-sustained-drift-gate-secondgame-stress-10000-20260602` passed 10000F, reached the second MvL game, moved both remote actors for 126 sampled rows, and passed movement/drift validation. Active avg was about `17.40ms`, max `56.405/54.940ms`, `over33ms=44/47`, and max consecutive slow frames `2/1`.
 - The actor drift gate ignores dead/transition rows because transition-step minimal apply intentionally does not overwrite transform there. It also supports `-ActorSnapshotMaxConsecutiveDriftRows`; the 10000F route allows one transient sampled row but still fails sustained drift. The passing route observed max drift X/Y `24192/17024` and no sustained over-limit row.
-- `scripts/run-nsmb-mvl-manual-local.ps1 -PlanDActorSnapshot -AllowJit` is the lightweight manual-play command. It enables input delay `0`, frame lead `8`, network pump `50us`, actor/global snapshots every `2` frames, and at most `1` prediction frame. It intentionally leaves detailed game-state/perf breakdown traces off unless explicitly requested. A short visible-window launch `logs/codex-manual-pland-runtimelean-launch-1800-20260602` propagated `playerStateSync=1 playerStateApply=1 playerStateGlobals=1`, ran with no rollback/resim, and measured active avg `17.665/17.663ms`, max `33.253/33.132ms`, `over33ms=0/0`.
+- `scripts/run-nsmb-mvl-manual-local.ps1 -PlanDActorSnapshot -AllowJit` is the lightweight manual-play command. It enables input delay `0`, frame lead `8`, network pump `50us`, player actor/global and Big Star world snapshots every `2` frames, and at most `1` prediction frame. It intentionally leaves detailed game-state/perf breakdown traces off unless explicitly requested. A short visible-window launch `logs/codex-manual-pland-runtimelean-launch-1800-20260602` propagated `playerStateSync=1 playerStateApply=1 playerStateGlobals=1`, ran with no rollback/resim, and measured active avg `17.665/17.663ms`, max `33.253/33.132ms`, `over33ms=0/0`.
 - Global writes are now applied once per newly received player-state packet while actor transform prediction still runs each frame. This avoids repeatedly writing the same delayed lives/deaths/transition snapshot into the game between packet arrivals.
 - Post-change normal movement validation passed: `logs/codex-playerglobal-globals-once-normal-stress-4200-20260602`, active avg `17.608/17.605ms`, max `43.060/46.158ms`, max consecutive slow frames `1/1`, and movement/drift validation passed with max drift X/Y `12352/16768`.
 - Post-change visible-window manual launch passed: `logs/codex-manual-pland-globals-once-launch-1800-20260602`, active avg `17.372/17.370ms`, max `28.831/31.461ms`, `over33ms=0/0`.
+- Added a host-authoritative Big Star world snapshot and `-RequireWorldSnapshotSync` gate. The gate fails on Big Star actor drift and reports moving-hazard drift separately.
+- Standard Big Star-only world snapshot validation:
+  - `logs/codex-worldstate-star-gate-normal-stress-rerun-4200-20260602`: normal move/dash/jump stress passed, Big Star drift `0/0`, active avg `17.083/17.083ms`, max `43.936/40.535ms`, `over33ms=6/7`.
+  - `logs/codex-worldstate-star-gate-luigi-death-3720-20260602`: death/respawn route passed, Big Star drift `0/0`, active avg `17.192/17.193ms`, max `41.988/42.378ms`.
+  - `logs/codex-worldstate-star-gate-result-restart-6200-20260602`: result/restart into a second MvL game passed, Big Star drift `0/0`, active avg `17.402/17.403ms`, max `67.511/50.303ms`.
+- Rejected naive moving-hazard correction as a standard-path feature:
+  - `logs/codex-worldstate-hazard-only-normal-stress-4200-20260602` showed that transform-only apply was insufficient.
+  - Adding hazard physics fields and active GUID cache refresh fixed one respawn boundary, but `logs/codex-worldstate-newest-rescan-combined-normal-stress-4200-20260602` showed that selecting one newest `0x0053` actor can still target the wrong simultaneous instance.
+  - Standard mode now leaves moving-hazard apply off. The world gate still reports observed hazard drift so this gap stays visible.
 - `scripts/analyze-nsmb-mvl-rollback-log.ps1` now also classifies single-frame or short-run spikes over `MaxSingleFrameMs` as `perf-fail`, so a run like the old 353ms death/pipe case cannot be reported as `ok` just because the average FPS is acceptable. It also avoids marking a completed result-scene trace as a freeze solely because player actors are stationary during the result transition.
 - Star/result-continuation route is not a useful actor-snapshot correctness failure yet: `logs/codex-playerstate-cache-star-result-continue-9000-20260602` reached result/restart and held about `59.6fps`, but `RequireStarPickup` failed because star counters stayed `0/0`. Existing baseline `logs/codex-rollback-baseline-starcollect-6200-skipmove-20260601` shows the same `result ... stars=0/0 collected=0/0`, so this route/check needs cleanup before being used as a blocker for actor snapshot.
 - The previous full/core rollback issue is still reproduced in logs: rollback/resim paths can spike into hundreds of ms when many inputs arrive or forced delay causes repeated rollback. The actor snapshot path avoids that mechanism entirely.
@@ -56,13 +68,16 @@ Current blocker / caveat:
 - Strict full game-state comparison still fails early because the existing comparison assumes deterministic same-frame actor equality. The player-state path is an actor replication/visual correction path, not deterministic rollback. Current CSV traces show player slot/timing differences around frame 930 even while player actor motion is present.
 - The 10000F route no longer freezes under automated result/restart stress, but ordinary non-rollback frame spikes still exist (`54-56ms` max in that run). Manual play remains required before promotion.
 - Added `tests/nsmb_us_direct_mvl_repeat_result_stress.inputs` and exposed `-MvlWins` in the split wrapper. A 12000F repeated death/result/checkpoint-restart route reached MvL stage entries at frames `870`, `5790`, and `9990`. One post-change performance run `logs/codex-playerglobal-globals-once-repeat-result-threegame-12000-20260602` failed the single-frame spike gate because both processes stalled together around frame `2464`, before result restart, with max `278.678/273.749ms`. An immediate identical rerun `logs/codex-playerglobal-globals-once-repeat-result-threegame-rerun-12000-20260602` passed with active avg `17.262/17.262ms`, max `80.939/75.063ms`, and max consecutive slow frames `2/2`. The 278ms group is not a fixed game-transition cost, but occasional paired-process stalls remain a performance caveat.
+- A normal 4200F Big Star world-gate run also reproduced an occasional paired-process stall at frame `3571`: `logs/codex-worldstate-star-gate-normal-stress-4200-20260602` reached `825.170/823.892ms`. The immediate identical rerun passed with max `43.936/40.535ms`. This remains a detected caveat, not a hidden average-FPS issue.
+- Moving hazards are not solved by a single actor snapshot. Object `0x0053 settings=0` needs a compact multi-instance snapshot with stable host/client matching before apply can be promoted.
 - This means the actor/global snapshot path is now a much more practical Plan-D-like route for "does not freeze / does not rollback-spike / remote actor moves / pipe death visibility survives", but it is still not a correctness replacement for deterministic rollback.
 
 Next actions:
 
 - Stress the actor+global route with longer manual play, especially repeated result/restart, star acquisition, fall death, respawn, and pipe transitions. Keep automatic FPS-spike logging enabled in manual Plan-D mode.
 - Keep the three-game stress route in repeated performance sweeps so occasional paired-process stalls remain visible instead of being hidden by average FPS.
-- Investigate which non-player globals must be added next for result/star correctness, without falling back to full savestate or full CPU rollback.
+- Implement a compact multi-instance moving-hazard snapshot and establish stable host/client instance matching before enabling hazard correction in the standard path.
+- Continue investigating which non-player globals must be added for result/star correctness, without falling back to full savestate or full CPU rollback.
 - Tighten drift thresholds after more route coverage; the current sustained-drift gate is meant to catch gross desync/freeze without rejecting a transient one-row correction.
 
 ## 2026-06-02 current status - real rollback gate and Plan-D-like retest

@@ -48,6 +48,14 @@ param(
     [switch]$PlayerStateGlobals,
     [int]$PlayerStateSyncInterval = 1,
     [int]$PlayerStateMaxPredictFrames = 2,
+    [switch]$WorldStateSync,
+    [switch]$WorldStateApply,
+    [switch]$WorldStateSkipStar,
+    [switch]$WorldStateApplyMovingHazard,
+    [switch]$WorldStateSkipMovingHazard,
+    [int]$WorldStateSyncInterval = 2,
+    [int]$WorldStateMaxPredictFrames = 1,
+    [int]$WorldStateActorRescanInterval = 0,
     [switch]$SkipGameStateComparison,
     [switch]$SkipMovementProbe,
     [switch]$RequireActorSnapshotMovement,
@@ -56,6 +64,13 @@ param(
     [int]$ActorSnapshotMaxDriftX = -1,
     [int]$ActorSnapshotMaxDriftY = -1,
     [int]$ActorSnapshotMaxConsecutiveDriftRows = 0,
+    [switch]$RequireWorldSnapshotSync,
+    [int]$WorldSnapshotStartFrame = 900,
+    [int]$WorldSnapshotMaxStarDriftX = 0,
+    [int]$WorldSnapshotMaxStarDriftY = 0,
+    [int]$WorldSnapshotMaxHazardDriftX = -1,
+    [int]$WorldSnapshotMaxHazardDriftY = -1,
+    [int]$WorldSnapshotMaxHazardConsecutiveDriftRows = 0,
     [switch]$TracePlayerLifeChanges,
     [switch]$TracePlayerDefeated,
     [switch]$RequireStarPickup,
@@ -230,6 +245,26 @@ if ($PlayerStateSync) {
     }
     if ($PlayerStateGlobals) {
         $common += "-PlayerStateGlobals"
+    }
+}
+if ($WorldStateSync) {
+    $common += @(
+        "-WorldStateSync",
+        "-WorldStateSyncInterval", "$WorldStateSyncInterval",
+        "-WorldStateMaxPredictFrames", "$WorldStateMaxPredictFrames",
+        "-WorldStateActorRescanInterval", "$WorldStateActorRescanInterval"
+    )
+    if ($WorldStateApply) {
+        $common += "-WorldStateApply"
+    }
+    if ($WorldStateSkipStar) {
+        $common += "-WorldStateSkipStar"
+    }
+    if ($WorldStateSkipMovingHazard) {
+        $common += "-WorldStateSkipMovingHazard"
+    }
+    if ($WorldStateApplyMovingHazard) {
+        $common += "-WorldStateApplyMovingHazard"
     }
 }
 if ($AllowJit) {
@@ -585,7 +620,7 @@ $hostCsv = Join-Path $hostLog "host.game-state.csv"
 $clientCsv = Join-Path $clientLog "client.game-state.csv"
 $hostRows = $null
 $clientRows = $null
-if (-not $NoGameStateTrace -and ($RequireActorSnapshotMovement -or -not $SkipGameStateComparison)) {
+if (-not $NoGameStateTrace -and ($RequireActorSnapshotMovement -or $RequireWorldSnapshotSync -or -not $SkipGameStateComparison)) {
     if (-not (Test-Path $hostCsv)) {
         throw "missing host game-state trace: $hostCsv"
     }
@@ -714,6 +749,78 @@ function Assert-ActorSnapshotMovement {
 
 if ($RequireActorSnapshotMovement) {
     Assert-ActorSnapshotMovement -HostRows $hostRows -ClientRows $clientRows
+}
+
+function Assert-WorldSnapshotSync {
+    param(
+        [object[]]$HostRows,
+        [object[]]$ClientRows
+    )
+
+    $clientByFrame = @{}
+    foreach ($row in $ClientRows) {
+        $clientByFrame[[int]$row.frame] = $row
+    }
+
+    $starChecked = 0
+    $starMaxDriftX = 0
+    $starMaxDriftY = 0
+    $hazardChecked = 0
+    $hazardMaxDriftX = 0
+    $hazardMaxDriftY = 0
+    $hazardDriftRun = 0
+    $hazardMaxConsecutiveDriftRows = 0
+    foreach ($hostRow in $HostRows) {
+        $frame = [int]$hostRow.frame
+        if ($frame -lt $WorldSnapshotStartFrame -or -not $clientByFrame.ContainsKey($frame)) {
+            continue
+        }
+
+        $clientRow = $clientByFrame[$frame]
+        if ($hostRow.vsStarActorFound -eq "0x1" -and $clientRow.vsStarActorFound -eq "0x1") {
+            $starDx = [Math]::Abs((Convert-TraceHexToSigned32 $hostRow.vsStarActorX) - (Convert-TraceHexToSigned32 $clientRow.vsStarActorX))
+            $starDy = [Math]::Abs((Convert-TraceHexToSigned32 $hostRow.vsStarActorY) - (Convert-TraceHexToSigned32 $clientRow.vsStarActorY))
+            if ($starDx -gt $starMaxDriftX) { $starMaxDriftX = $starDx }
+            if ($starDy -gt $starMaxDriftY) { $starMaxDriftY = $starDy }
+            $starChecked++
+            if ($starDx -gt $WorldSnapshotMaxStarDriftX -or $starDy -gt $WorldSnapshotMaxStarDriftY) {
+                throw "world snapshot Big Star drift too high: frame=$frame dx=$starDx limitX=$WorldSnapshotMaxStarDriftX dy=$starDy limitY=$WorldSnapshotMaxStarDriftY host=$($hostRow.vsStarActorX)/$($hostRow.vsStarActorY) client=$($clientRow.vsStarActorX)/$($clientRow.vsStarActorY)"
+            }
+        }
+
+        if ($hostRow.movingHazardFound -eq "0x1" -and $clientRow.movingHazardFound -eq "0x1") {
+            $hazardDx = [Math]::Abs((Convert-TraceHexToSigned32 $hostRow.movingHazardX) - (Convert-TraceHexToSigned32 $clientRow.movingHazardX))
+            $hazardDy = [Math]::Abs((Convert-TraceHexToSigned32 $hostRow.movingHazardY) - (Convert-TraceHexToSigned32 $clientRow.movingHazardY))
+            if ($hazardDx -gt $hazardMaxDriftX) { $hazardMaxDriftX = $hazardDx }
+            if ($hazardDy -gt $hazardMaxDriftY) { $hazardMaxDriftY = $hazardDy }
+            $hazardChecked++
+            $hazardOverLimit =
+                ($WorldSnapshotMaxHazardDriftX -ge 0 -and $hazardDx -gt $WorldSnapshotMaxHazardDriftX) -or
+                ($WorldSnapshotMaxHazardDriftY -ge 0 -and $hazardDy -gt $WorldSnapshotMaxHazardDriftY)
+            if ($hazardOverLimit) {
+                $hazardDriftRun++
+                if ($hazardDriftRun -gt $hazardMaxConsecutiveDriftRows) {
+                    $hazardMaxConsecutiveDriftRows = $hazardDriftRun
+                }
+                if ($hazardDriftRun -gt $WorldSnapshotMaxHazardConsecutiveDriftRows) {
+                    throw "world snapshot moving hazard drift too high: frame=$frame dx=$hazardDx limitX=$WorldSnapshotMaxHazardDriftX dy=$hazardDy limitY=$WorldSnapshotMaxHazardDriftY consecutiveRows=$hazardDriftRun limitRows=$WorldSnapshotMaxHazardConsecutiveDriftRows"
+                }
+            } else {
+                $hazardDriftRun = 0
+            }
+        } else {
+            $hazardDriftRun = 0
+        }
+    }
+
+    if ($starChecked -eq 0) {
+        throw "world snapshot Big Star check failed: no comparable rows after frame $WorldSnapshotStartFrame"
+    }
+    Write-Host "world snapshot check passed: starChecked=$starChecked starMaxDriftX=$starMaxDriftX starMaxDriftY=$starMaxDriftY hazardChecked=$hazardChecked hazardMaxDriftX=$hazardMaxDriftX hazardMaxDriftY=$hazardMaxDriftY hazardMaxConsecutiveDriftRows=$hazardMaxConsecutiveDriftRows"
+}
+
+if ($RequireWorldSnapshotSync) {
+    Assert-WorldSnapshotSync -HostRows $hostRows -ClientRows $clientRows
 }
 
 if ($NoGameStateTrace -or $SkipGameStateComparison) {
