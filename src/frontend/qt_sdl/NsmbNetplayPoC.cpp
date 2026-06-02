@@ -7779,7 +7779,7 @@ void PrintWorldActorInternalWords(
         vtable,
         base);
 
-    for (melonDS::u32 relativeOffset = 0; relativeOffset <= 0x10C; relativeOffset += sizeof(melonDS::u32))
+    for (melonDS::u32 relativeOffset = 0; relativeOffset <= 0x1FC; relativeOffset += sizeof(melonDS::u32))
     {
         melonDS::u32 value = 0;
         ReadMainRAMAddressU32(nds, base + relativeOffset, value);
