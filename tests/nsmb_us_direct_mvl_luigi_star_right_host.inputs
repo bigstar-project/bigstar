@@ -1,0 +1,8 @@
+# Direct MvL Big Star probe for the split host.
+# Keep Mario idle while Luigi moves toward the fixed RNG star.
+
+0-619 NONE
+620-627 DOWN
+628-659 NONE
+660-667 A
+668-3200 NONE

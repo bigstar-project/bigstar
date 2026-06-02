@@ -77,6 +77,7 @@ Verification:
 - Real Big Star acquisition is now covered by a deterministic probe. `tests/nsmb_us_direct_mvl_luigi_star_right.inputs` depends on initial star placement, so the reliable condition is `-MvlMatchSeed 0x19FE5603`:
   - `logs/codex-pland-luigi-star-right-seed19fe5603-2600-20260602`: Luigi collected the real star with Plan-D snapshots enabled, Big Star drift `0/0`, moving-hazard max drift `2048/0`, active avg `16.867/16.869ms`, max `39.714/41.264ms`.
   - `logs/codex-pland-luigi-star-right-settle-seed19fe5603-3200-20260602`: the post-collection star counter and respawned star converged on both sides. This rejects the earlier apparent failure from a run whose random initial star was at `0x3c0000` instead of the probe-compatible `0x90000`.
+  - `logs/codex-pland-hazard-guidmap-luigi-star-settle-3200-20260602`: the current moving-hazard GUID-map path also passed real Luigi star pickup and settle. Big Star drift stayed `0/0`, moving-hazard max drift was `2048/0`, manager/global agreement covered `77` rows, active avg was `17.346/17.346ms`, max `54.719/53.511ms`, and max consecutive slow frames `1/1`.
 - The split wrapper now forwards `-MvlStage`, `-MvlSceneSettings`, `-MvlBigStars`, `-MvlLives`, `-MvlCourseMode`, and `-GenerateMvlConfiguredRoms`. Configured-ROM generation uses the unpatched default source `roms/nsmb-us.nds` through `-GenerateMvlSourceRom`.
 - Plan-D stage variation matrix passed for all five courses with generated ROMs, move/dash/jump stress, player actor movement gate, Big Star drift gate, moving-hazard drift gate, manager/global gate, and frame-spike gate:
   - `logs/codex-pland-world-stage0-generated-stress-2400-20260602` through `logs/codex-pland-world-stage4-generated-stress-2400-20260602`.
@@ -129,6 +130,9 @@ Verification:
 - Added role-specific split inputs for the Luigi death/pipe-respawn stress:
   - `tests/nsmb_us_direct_mvl_luigi_death_mario_continues_host.inputs`
   - `tests/nsmb_us_direct_mvl_luigi_death_mario_continues_client.inputs`
+- Added role-specific split inputs for the deterministic Luigi Big Star pickup:
+  - `tests/nsmb_us_direct_mvl_luigi_star_right_host.inputs`
+  - `tests/nsmb_us_direct_mvl_luigi_star_right_client.inputs`
 - Configured-ROM generation now normalizes direct-route `fixed` mode to generator `random` while preserving the explicitly selected stage. `logs/codex-pland-singlescan-filtered-stage1-defaultfixed-2400-20260602` verified the default wrapper path, one Item compensating spawn, Big Star/hazard/manager gates, and `courseMode=fixed generatorCourseMode=random`.
 - Star/result-continuation route is not a useful actor-snapshot correctness failure yet: `logs/codex-playerstate-cache-star-result-continue-9000-20260602` reached result/restart and held about `59.6fps`, but `RequireStarPickup` failed because star counters stayed `0/0`. Existing baseline `logs/codex-rollback-baseline-starcollect-6200-skipmove-20260601` shows the same `result ... stars=0/0 collected=0/0`, so this route/check needs cleanup before being used as a blocker for actor snapshot.
 - The previous full/core rollback issue is still reproduced in logs: rollback/resim paths can spike into hundreds of ms when many inputs arrive or forced delay causes repeated rollback. The actor snapshot path avoids that mechanism entirely.
