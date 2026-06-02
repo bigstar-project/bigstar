@@ -7711,32 +7711,24 @@ void TraceWorldObjectLifecyclesIfNeeded(int instanceID, melonDS::u32 frame, melo
     };
 
     std::vector<LifecycleActor> actors;
-    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
-    if (ramLen < 0x14)
-        return;
-    for (melonDS::u32 off = 0; off <= ramLen - 0x14; off += 4)
+    const GameStateObjectScanCache cache = BuildGameStateObjectScanCache(nds);
+    actors.reserve(cache.Entries.size());
+    for (const GameStateObjectScanEntry& entry : cache.Entries)
     {
         LifecycleActor actor;
-        if (!ReadMainRAMU32(nds, off, actor.VTable) ||
-            !ReadMainRAMU32(nds, off + 4, actor.GUID) ||
-            !ReadMainRAMU32(nds, off + 8, actor.Settings) ||
-            !ReadMainRAMU32(nds, off + 0x60, actor.PosX) ||
-            !ReadMainRAMU32(nds, off + 0x64, actor.PosY) ||
-            !ReadMainRAMU32(nds, off + 0x68, actor.PosZ) ||
-            !ReadMainRAMU16(nds, off + 0x0C, actor.ObjectID) ||
-            !ReadMainRAMU8(nds, off + 0x0E, actor.State) ||
-            !ReadMainRAMU8(nds, off + 0x12, actor.Type) ||
-            !ReadMainRAMU8(nds, off + 0x13, actor.SkipFlags))
-            continue;
-        if (actor.VTable < kMainRAMBase || actor.VTable >= kMainRAMBase + ramLen)
-            continue;
-        if (actor.GUID == 0 || actor.GUID >= 0x10000)
-            continue;
-        if (actor.ObjectID == 0 || actor.ObjectID >= 0x400)
-            continue;
+        actor.VTable = entry.VTable;
+        actor.Base = entry.Actor.Base;
+        actor.GUID = entry.Actor.GUID;
+        actor.Settings = entry.Actor.Settings;
+        actor.PosX = entry.Actor.PosX;
+        actor.PosY = entry.Actor.PosY;
+        actor.PosZ = entry.Actor.PosZ;
+        actor.ObjectID = entry.ObjectID;
+        actor.State = entry.LifecycleState;
+        actor.Type = entry.Type;
+        actor.SkipFlags = entry.SkipFlags;
         if (actor.State == 0 || actor.State > 2 || actor.Type > 2)
             continue;
-        actor.Base = kMainRAMBase + off;
         actors.push_back(actor);
     }
 
