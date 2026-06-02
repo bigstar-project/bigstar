@@ -40,6 +40,12 @@ type GenerateRomRequest = {
   settings: GameSettings;
 };
 
+type SaveRomPathsRequest = {
+  host_rom_path: string;
+  client_rom_path: string;
+  base_rom_path: string;
+};
+
 type LaunchResponse = {
   log_dir: string;
   melon_pid: number;
@@ -104,6 +110,7 @@ export function App() {
     kind: 'idle' as StatusKind,
   });
   const [lastLogDir, setLastLogDir] = useState('');
+  const [defaultsLoaded, setDefaultsLoaded] = useState(false);
   const [romPreparation, setRomPreparation] = useState('未確認');
 
   const currentRomPath =
@@ -135,6 +142,13 @@ export function App() {
       const response = await invoke<SessionStatus>('session_status');
       if (response.log_dir) {
         setLastLogDir(response.log_dir);
+      }
+      if (processExited(response.melon) || processExited(response.bridge)) {
+        setStatus({
+          text: `プロセス終了 melonDS:${response.melon ?? '-'} bridge:${response.bridge ?? '-'}`,
+          kind: 'error',
+        });
+        return;
       }
       if (!response.active) {
         setStatus({ text: '未接続', kind: 'idle' });
@@ -170,6 +184,7 @@ export function App() {
           lives: 'endless',
           matchSeed: String(generateSeed()),
         });
+        setDefaultsLoaded(true);
         await pollStatus();
       } catch (error) {
         if (!disposed) {
@@ -185,6 +200,38 @@ export function App() {
       window.clearInterval(timer);
     };
   }, [pollStatus]);
+
+  useEffect(() => {
+    if (!defaultsLoaded) {
+      return;
+    }
+    const request: SaveRomPathsRequest = {
+      host_rom_path: form.hostRomPath,
+      client_rom_path: form.clientRomPath,
+      base_rom_path: form.baseRomPath,
+    };
+    const timer = window.setTimeout(() => {
+      void invoke('save_rom_paths', { request }).catch((error) => {
+        setStatus({ text: String(error), kind: 'warn' });
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [defaultsLoaded, form.hostRomPath, form.clientRomPath, form.baseRomPath]);
+
+  const selectRomPath = async (
+    key: 'hostRomPath' | 'clientRomPath' | 'baseRomPath',
+  ) => {
+    try {
+      const selected = await invoke<string | null>('select_rom_file', {
+        currentPath: form[key],
+      });
+      if (selected) {
+        updateField(key, selected);
+      }
+    } catch (error) {
+      setStatus({ text: String(error), kind: 'error' });
+    }
+  };
 
   const preflightCheck = async () => {
     try {
@@ -367,20 +414,20 @@ export function App() {
           />
 
           <h2 className="pt-2 text-lg font-bold text-slate-950">ROM</h2>
-          <TextField
+          <FilePathField
             label="ホスト用 ROM"
             value={form.hostRomPath}
-            onChange={(value) => updateField('hostRomPath', value)}
+            onBrowse={() => void selectRomPath('hostRomPath')}
           />
-          <TextField
+          <FilePathField
             label="参加用 ROM"
             value={form.clientRomPath}
-            onChange={(value) => updateField('clientRomPath', value)}
+            onBrowse={() => void selectRomPath('clientRomPath')}
           />
-          <TextField
+          <FilePathField
             label="ベース ROM"
             value={form.baseRomPath}
-            onChange={(value) => updateField('baseRomPath', value)}
+            onBrowse={() => void selectRomPath('baseRomPath')}
           />
 
           <div className="mt-1 flex flex-wrap justify-end gap-2">
@@ -490,16 +537,26 @@ function StatusPill({
   kind: StatusKind;
 }) {
   const colors: Record<StatusKind, string> = {
-    idle: 'border-slate-300 text-slate-600',
-    ok: 'border-emerald-300 text-emerald-800',
-    warn: 'border-amber-300 text-amber-800',
-    error: 'border-rose-300 text-rose-800',
+    idle: 'border-slate-300 bg-white text-slate-600',
+    ok: 'border-emerald-300 bg-emerald-50 text-emerald-900',
+    warn: 'border-amber-300 bg-amber-50 text-amber-900',
+    error:
+      'border-rose-500 bg-rose-50 text-rose-950 shadow-[0_0_0_1px_rgba(244,63,94,0.35)]',
+  };
+  const label: Record<StatusKind, string> = {
+    idle: '待機',
+    ok: '正常',
+    warn: '注意',
+    error: 'エラー',
   };
   return (
     <div
-      className={`min-h-10 max-w-[48ch] overflow-wrap-anywhere rounded-lg border bg-white px-3 py-2 ${colors[kind]}`}
+      className={`grid min-h-12 max-w-[58ch] gap-0.5 overflow-wrap-anywhere rounded-lg border px-3 py-2 ${colors[kind]}`}
     >
-      {children}
+      <span className="text-[11px] font-black uppercase tracking-normal">
+        {label[kind]}
+      </span>
+      <span className="text-sm font-bold leading-snug">{children}</span>
     </div>
   );
 }
@@ -553,6 +610,34 @@ function TextField({
         autoComplete="off"
         onChange={(event) => onChange(event.target.value)}
       />
+    </label>
+  );
+}
+
+function FilePathField({
+  label,
+  value,
+  onBrowse,
+}: {
+  label: string;
+  value: string;
+  onBrowse: () => void;
+}) {
+  return (
+    <label className="grid gap-1.5 text-sm font-bold text-slate-700">
+      {label}
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+        <input
+          className="min-h-10 rounded-md border border-slate-300 bg-slate-50 px-3 py-2 font-normal text-slate-950 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+          value={value}
+          placeholder="未選択"
+          readOnly
+          title={value}
+        />
+        <ActionButton kind="secondary" type="button" onClick={onBrowse}>
+          参照
+        </ActionButton>
+      </div>
     </label>
   );
 }
@@ -655,6 +740,10 @@ function currentSettings(form: FormState): GameSettings {
     lives: form.lives,
     match_seed: form.matchSeed.trim(),
   };
+}
+
+function processExited(value: string | undefined): boolean {
+  return value?.startsWith('exited(') ?? false;
 }
 
 function withRequiredSeed(form: FormState): FormState {

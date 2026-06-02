@@ -101,6 +101,22 @@ struct Defaults {
     port: u16,
 }
 
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+struct LauncherSettings {
+    host_rom_path: String,
+    client_rom_path: String,
+    base_rom_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct SaveRomPathsRequest {
+    host_rom_path: String,
+    client_rom_path: String,
+    base_rom_path: String,
+}
+
 #[derive(Debug, Serialize)]
 struct LaunchResponse {
     log_dir: String,
@@ -137,6 +153,7 @@ fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
     let app_dir = app_data_dir(&app)?;
     let rom_dir = app_dir.join("roms");
     fs::create_dir_all(&rom_dir).map_err(|err| format!("ROM保存先を作成できません: {err}"))?;
+    let saved = load_launcher_settings(&app)?;
     let signal_url =
         std::env::var("NSMB_MVL_SIGNAL_URL").unwrap_or_else(|_| DEFAULT_SIGNAL_URL.to_owned());
     let dev_base_rom = repo_root()
@@ -147,20 +164,51 @@ fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
     Ok(Defaults {
         signal_url,
         room_code: DEFAULT_ROOM_CODE.to_owned(),
-        host_rom_path: rom_dir
-            .join("nsmb-mvl-host.nds")
-            .to_string_lossy()
-            .into_owned(),
-        client_rom_path: rom_dir
-            .join("nsmb-mvl-client.nds")
-            .to_string_lossy()
-            .into_owned(),
-        base_rom_path: dev_base_rom
-            .unwrap_or_else(|| rom_dir.join("nsmb-us.nds"))
-            .to_string_lossy()
-            .into_owned(),
+        host_rom_path: saved_path_or_default(
+            &saved.host_rom_path,
+            rom_dir.join("nsmb-mvl-host.nds"),
+        ),
+        client_rom_path: saved_path_or_default(
+            &saved.client_rom_path,
+            rom_dir.join("nsmb-mvl-client.nds"),
+        ),
+        base_rom_path: saved_path_or_default(
+            &saved.base_rom_path,
+            dev_base_rom.unwrap_or_else(|| rom_dir.join("nsmb-us.nds")),
+        ),
         port: DEFAULT_PORT,
     })
+}
+
+#[tauri::command]
+fn save_rom_paths(app: AppHandle, request: SaveRomPathsRequest) -> Result<(), String> {
+    let settings = LauncherSettings {
+        host_rom_path: request.host_rom_path,
+        client_rom_path: request.client_rom_path,
+        base_rom_path: request.base_rom_path,
+    };
+    save_launcher_settings(&app, &settings)
+}
+
+#[tauri::command]
+fn select_rom_file(current_path: String) -> Result<Option<String>, String> {
+    let mut dialog = rfd::FileDialog::new()
+        .add_filter("Nintendo DS ROM", &["nds", "srl"])
+        .add_filter("All files", &["*"]);
+    let current = PathBuf::from(current_path.trim());
+    if current.is_file() {
+        if let Some(parent) = current.parent() {
+            dialog = dialog.set_directory(parent);
+        }
+        if let Some(name) = current.file_name() {
+            dialog = dialog.set_file_name(name.to_string_lossy().into_owned());
+        }
+    } else if current.is_dir() {
+        dialog = dialog.set_directory(current);
+    }
+    Ok(dialog
+        .pick_file()
+        .map(|path| path.to_string_lossy().into_owned()))
 }
 
 #[tauri::command]
@@ -1051,6 +1099,38 @@ fn find_symbols_file_without_app() -> Result<PathBuf, String> {
     Err("symbols9.x が見つかりません".into())
 }
 
+fn saved_path_or_default(value: &str, fallback: PathBuf) -> String {
+    let value = value.trim();
+    if value.is_empty() {
+        fallback.to_string_lossy().into_owned()
+    } else {
+        value.to_owned()
+    }
+}
+
+fn launcher_settings_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_dir(app)?.join("launcher-settings.json"))
+}
+
+fn load_launcher_settings(app: &AppHandle) -> Result<LauncherSettings, String> {
+    let path = launcher_settings_path(app)?;
+    if !path.exists() {
+        return Ok(LauncherSettings::default());
+    }
+    let content = fs::read_to_string(&path)
+        .map_err(|err| format!("launcher settings を読み込めません: {err}"))?;
+    serde_json::from_str(&content)
+        .map_err(|err| format!("launcher settings の形式が不正です: {err}"))
+}
+
+fn save_launcher_settings(app: &AppHandle, settings: &LauncherSettings) -> Result<(), String> {
+    let path = launcher_settings_path(app)?;
+    let content = serde_json::to_string_pretty(settings)
+        .map_err(|err| format!("launcher settings をJSON化できません: {err}"))?;
+    fs::write(&path, format!("{content}\n"))
+        .map_err(|err| format!("launcher settings を保存できません: {err}"))
+}
+
 fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let path = app
         .path()
@@ -1093,6 +1173,8 @@ fn main() {
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             get_defaults,
+            save_rom_paths,
+            select_rom_file,
             preflight_check,
             generate_roms,
             ensure_roms,

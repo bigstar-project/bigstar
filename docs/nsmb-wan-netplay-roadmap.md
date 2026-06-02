@@ -1,5 +1,16 @@
 # NSMB Mario vs Luigi WAN Netplay Roadmap
 
+## Current work: Tauri GUI usability polish - 2026-06-02
+
+- Goal: make the launcher easier to operate by replacing direct ROM path entry with file picker buttons, persisting selected ROM paths across app restarts, increasing the default window size, and making process-exit status read as an error.
+- Implemented: the React ROM fields now show read-only path displays with `参照` buttons for host ROM, client ROM, and base ROM selection.
+- Implemented: Tauri commands `select_rom_file` and `save_rom_paths` were added. ROM paths are stored in app data as `launcher-settings.json` and loaded by `get_defaults`; empty saved values fall back to the existing app-data ROM defaults.
+- Implemented: the default window height changed from 720 to 1000 so the launcher opens with more vertical room.
+- Implemented: the status pill now includes an explicit state label, stronger error styling, and treats `melonDS` or `bridge` `exited(...)` status as an error.
+- Verification: `corepack pnpm install`, `corepack pnpm typecheck`, `cargo fmt --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml --check`, and `corepack pnpm build` passed in the local main worktree. The build produced `target\release\nsmb-mvl-gui.exe`, MSI, and NSIS installer outputs.
+- Verification: release `nsmb-mvl-gui.exe --preflight` passed with sidecar/resource resolution and bridge signaling UDP pair smoke.
+- Current blocker: none for producing the local Tauri build. Manual GUI confirmation of the Windows file picker and persisted ROM path restore is still useful before packaging this as a user-facing release.
+
 ## Current work: reusable launcher ROMs - 2026-06-01
 
 - Goal: stop regenerating host/client ROMs whenever the Tauri game settings change. ROM generation should happen only for initial setup or when the reusable ROM format changes.
