@@ -28,7 +28,7 @@ param(
     [int]$PlayerStateMaxPredictFrames = 1,
     [int]$WorldStateSyncInterval = 2,
     [int]$WorldStateMaxPredictFrames = 1,
-    [int]$WorldStateActorRescanInterval = 0,
+    [int]$WorldStateActorRescanInterval = 30,
     [int]$HostStartupDelayMs = 1200,
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds",
@@ -233,6 +233,7 @@ if ($PlanDActorSnapshot) {
         "-PlayerStateMaxPredictFrames", "$PlayerStateMaxPredictFrames",
         "-WorldStateSync",
         "-WorldStateApply",
+        "-WorldStateApplyMovingHazard",
         "-WorldStateSyncInterval", "$WorldStateSyncInterval",
         "-WorldStateMaxPredictFrames", "$WorldStateMaxPredictFrames",
         "-WorldStateActorRescanInterval", "$WorldStateActorRescanInterval"

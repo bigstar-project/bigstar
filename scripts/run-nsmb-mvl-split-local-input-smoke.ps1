@@ -52,6 +52,7 @@ param(
     [switch]$WorldStateApply,
     [switch]$WorldStateSkipStar,
     [switch]$WorldStateApplyMovingHazard,
+    [switch]$WorldStateTraceMovingHazards,
     [switch]$WorldStateSkipMovingHazard,
     [int]$WorldStateSyncInterval = 2,
     [int]$WorldStateMaxPredictFrames = 1,
@@ -265,6 +266,9 @@ if ($WorldStateSync) {
     }
     if ($WorldStateApplyMovingHazard) {
         $common += "-WorldStateApplyMovingHazard"
+    }
+    if ($WorldStateTraceMovingHazards) {
+        $common += "-WorldStateTraceMovingHazards"
     }
 }
 if ($AllowJit) {

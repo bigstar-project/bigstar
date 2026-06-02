@@ -31,6 +31,7 @@ param(
     [switch]$WorldStateApply,
     [switch]$WorldStateSkipStar,
     [switch]$WorldStateApplyMovingHazard,
+    [switch]$WorldStateTraceMovingHazards,
     [switch]$WorldStateSkipMovingHazard,
     [int]$WorldStateSyncInterval = 2,
     [int]$WorldStateMaxPredictFrames = 1,
@@ -1300,6 +1301,11 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD -ErrorAction SilentlyContinue
         }
+        if ($WorldStateTraceMovingHazards) {
+            $env:MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS -ErrorAction SilentlyContinue
+        }
     } else {
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SYNC -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY -ErrorAction SilentlyContinue
@@ -1309,6 +1315,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_STAR -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS -ErrorAction SilentlyContinue
     }
     if ($RamDumpFrames -or $RamDumpInterval -gt 0) {
         $env:MELONDS_NSML_RAM_DUMP_DIR = $RamDumpDir
@@ -2950,6 +2957,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_STAR -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS -ErrorAction SilentlyContinue
     }
     if (-not $StateSaveDir) {
         Remove-Item Env:\MELONDS_NSML_STATE_SAVE_DIR -ErrorAction SilentlyContinue
@@ -3145,6 +3153,14 @@ function Start-MelonLANProcess {
         "packetBridgeStageSceneReadyClose=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE)"
         "packetBridgeStageSceneReadyCloseStartFrame=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE_START_FRAME)"
         "inputMaxFrameLead=$($env:MELONDS_NSML_INPUT_MAX_FRAME_LEAD)"
+        "playerStateSync=$($env:MELONDS_NSML_PLAYER_STATE_SYNC)"
+        "playerStateApply=$($env:MELONDS_NSML_PLAYER_STATE_APPLY)"
+        "playerStateGlobals=$($env:MELONDS_NSML_PLAYER_STATE_GLOBALS)"
+        "worldStateSync=$($env:MELONDS_NSML_WORLD_STATE_SYNC)"
+        "worldStateApply=$($env:MELONDS_NSML_WORLD_STATE_APPLY)"
+        "worldStateApplyMovingHazard=$($env:MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD)"
+        "worldStateSyncInterval=$($env:MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL)"
+        "worldStateActorRescanInterval=$($env:MELONDS_NSML_WORLD_STATE_ACTOR_RESCAN_INTERVAL)"
         "packetBridgeReadPacketByte=$($env:MELONDS_NSML_PACKET_BRIDGE_READ_PACKET_BYTE)"
         "packetBridgeCheckPacketBits=$($env:MELONDS_NSML_PACKET_BRIDGE_CHECK_PACKET_BITS)"
         "packetBridgeForceStageNet20OnStageScene=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_NET20_ON_STAGE_SCENE)"
