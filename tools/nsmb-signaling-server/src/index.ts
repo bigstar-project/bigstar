@@ -33,6 +33,7 @@ type RelaySignalMessage = Exclude<SignalMessage, { type: 'ping' }> & {
 
 const VALID_SESSION = /^[A-Za-z0-9_-]{1,64}$/;
 const VALID_ROLES = new Set<Role>(['offer', 'answer']);
+const DEFAULT_STUN_SERVER = 'stun:stun.l.google.com:19302';
 
 function json(data: unknown, init?: ResponseInit): Response {
   return new Response(JSON.stringify(data), {
@@ -52,7 +53,8 @@ function parseRole(value: string | null): Role | null {
 }
 
 function parseIceServers(value: string | undefined): string[] {
-  return (value ?? '')
+  const servers = value?.trim() ? value : DEFAULT_STUN_SERVER;
+  return servers
     .split(',')
     .map((server) => server.trim())
     .filter(Boolean);
@@ -153,6 +155,11 @@ export class SignalingRoom extends DurableObject<Env> {
     if (this.getSockets().length === 1) {
       this.pendingSignals.clear();
     }
+    console.log('signaling join', {
+      session,
+      role,
+      peerCount: this.getSockets().length,
+    });
 
     send(server, {
       type: 'hello',
@@ -203,10 +210,22 @@ export class SignalingRoom extends DurableObject<Env> {
     };
     const target = this.getSocketByRole(targetRole);
     if (target === null) {
+      console.log('signaling queue', {
+        session: attachment.session,
+        from: attachment.role,
+        to: targetRole,
+        type: parsed.type,
+      });
       this.enqueuePending(targetRole, relayMessage);
       return;
     }
 
+    console.log('signaling relay', {
+      session: attachment.session,
+      from: attachment.role,
+      to: targetRole,
+      type: parsed.type,
+    });
     send(target, relayMessage);
   }
 
@@ -215,6 +234,11 @@ export class SignalingRoom extends DurableObject<Env> {
     if (attachment === null) {
       return;
     }
+    console.log('signaling close', {
+      session: attachment.session,
+      role: attachment.role,
+      peerCount: this.getSockets().length,
+    });
     this.broadcast(
       {
         type: 'peer-left',
@@ -296,6 +320,7 @@ export class SignalingRoom extends DurableObject<Env> {
     for (const message of queue) {
       send(ws, message);
     }
+    console.log('signaling flush', { role, count: queue.length });
     this.pendingSignals.delete(role);
   }
 

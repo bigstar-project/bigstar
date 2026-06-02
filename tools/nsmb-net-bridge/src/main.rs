@@ -1,6 +1,7 @@
 use std::env;
 use std::io;
 use std::net::{SocketAddr, UdpSocket};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -27,8 +28,8 @@ struct Stats {
 fn usage() -> &'static str {
     "usage:
   nsmb-net-bridge udp --local-bind ADDR --bridge-bind ADDR --bridge-peer ADDR [--local-target ADDR]
-  nsmb-net-bridge webrtc-offer  --local-bind ADDR [--local-target ADDR] [--stun URI] [--signal URL --session ID]
-  nsmb-net-bridge webrtc-answer --local-bind ADDR [--local-target ADDR] [--stun URI] [--signal URL --session ID]
+  nsmb-net-bridge webrtc-offer  --local-bind ADDR [--local-target ADDR] [--stun URI] [--signal URL --session ID] [--status-file PATH]
+  nsmb-net-bridge webrtc-answer --local-bind ADDR [--local-target ADDR] [--stun URI] [--signal URL --session ID] [--status-file PATH]
   nsmb-net-bridge webrtc-loopback-smoke [--stun URI]
   nsmb-net-bridge webrtc-signaling-loopback-smoke [--stun URI]
   nsmb-net-bridge webrtc-signaling-udp-pair-smoke [--stun URI]
@@ -95,6 +96,7 @@ fn parse_local_config(
         Option<SocketAddr>,
         Vec<String>,
         Option<(String, String)>,
+        Option<PathBuf>,
     ),
     String,
 > {
@@ -125,8 +127,15 @@ fn parse_local_config(
     } else {
         stun_servers
     };
+    let status_file = take_arg(args, "--status-file").map(PathBuf::from);
 
-    Ok((local_bind, local_target, stun_servers, signal_session))
+    Ok((
+        local_bind,
+        local_target,
+        stun_servers,
+        signal_session,
+        status_file,
+    ))
 }
 
 fn validate_signal_session(session: &str) -> Result<(), String> {
@@ -270,7 +279,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             run_udp_tunnel(config)?;
         }
         "webrtc-offer" | "webrtc-answer" => {
-            let (local_bind, local_target, stun_servers, signal_session) =
+            let (local_bind, local_target, stun_servers, signal_session, status_file) =
                 parse_local_config(&args[1..]).map_err(|err| {
                     io::Error::new(io::ErrorKind::InvalidInput, format!("{err}\n{}", usage()))
                 })?;
@@ -282,10 +291,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     stun_servers,
                     signal_url,
                     session,
+                    status_file,
                 )?,
-                None => {
-                    run_manual_webrtc(args[0].as_str(), local_bind, local_target, stun_servers)?
-                }
+                None => run_manual_webrtc(
+                    args[0].as_str(),
+                    local_bind,
+                    local_target,
+                    stun_servers,
+                    status_file,
+                )?,
             }
         }
         "webrtc-loopback-smoke" => {
@@ -386,6 +400,7 @@ fn run_manual_webrtc(
     _local_bind: SocketAddr,
     _local_target: Option<SocketAddr>,
     _stun_servers: Vec<String>,
+    _status_file: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
@@ -402,6 +417,7 @@ fn run_signaling_webrtc(
     _stun_servers: Vec<String>,
     _signal_url: String,
     _session: String,
+    _status_file: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
@@ -416,6 +432,7 @@ fn run_manual_webrtc(
     local_bind: SocketAddr,
     local_target: Option<SocketAddr>,
     stun_servers: Vec<String>,
+    status_file: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -425,6 +442,7 @@ fn run_manual_webrtc(
         local_bind,
         local_target,
         stun_servers,
+        status_file,
     ))
 }
 
@@ -436,6 +454,7 @@ fn run_signaling_webrtc(
     stun_servers: Vec<String>,
     signal_url: String,
     session: String,
+    status_file: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -447,14 +466,19 @@ fn run_signaling_webrtc(
         stun_servers,
         signal_url,
         session,
+        status_file,
+        true,
     ))
 }
 
 #[cfg(feature = "webrtc")]
 mod webrtc {
-    use super::{SocketAddr, MAX_DATAGRAM_SIZE};
+    use super::{PathBuf, SocketAddr, MAX_DATAGRAM_SIZE};
     use base64::prelude::*;
+    use env_logger::{Builder as LogBuilder, Env as LogEnv, Target as LogTarget};
     use futures_util::{SinkExt, StreamExt};
+    use serde_json::json;
+    use std::fs;
     use std::io::{self, Write};
     use std::net::UdpSocket;
     use std::sync::Arc;
@@ -464,20 +488,280 @@ mod webrtc {
     use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
     use tokio_tungstenite::{accept_async, connect_async};
 
+    const DEFAULT_STUN_SERVER: &str = "stun:stun.l.google.com:19302";
+
     struct WebRtcEndpoint {
         data_channel: datachannel_wrapper::DataChannel,
         peer_connection: datachannel_wrapper::PeerConnection,
+        event_rx: tokio::sync::mpsc::Receiver<datachannel_wrapper::PeerConnectionEvent>,
+    }
+
+    #[derive(Default)]
+    struct PacketStats {
+        app_to_webrtc_packets: u64,
+        app_to_webrtc_bytes: u64,
+        webrtc_to_app_packets: u64,
+        webrtc_to_app_bytes: u64,
+        dropped_no_local_target: u64,
+    }
+
+    struct DiagnosticsReporter {
+        status_file: Option<PathBuf>,
+        role: String,
+        phase: String,
+        signal_url: Option<String>,
+        session: Option<String>,
+        ice_servers: Vec<String>,
+        connection_state: Option<String>,
+        gathering_state: Option<String>,
+        ice_state: Option<String>,
+        local_candidates: Vec<String>,
+        selected_local_candidate: Option<String>,
+        selected_remote_candidate: Option<String>,
+        selected_route: Option<String>,
+        local_address: Option<String>,
+        remote_address: Option<String>,
+        last_error: Option<String>,
+        started_at: Instant,
+        stats: PacketStats,
+    }
+
+    impl DiagnosticsReporter {
+        fn new(status_file: Option<PathBuf>, role: impl Into<String>) -> Self {
+            let reporter = Self {
+                status_file,
+                role: role.into(),
+                phase: "starting".to_owned(),
+                signal_url: None,
+                session: None,
+                ice_servers: Vec::new(),
+                connection_state: None,
+                gathering_state: None,
+                ice_state: None,
+                local_candidates: Vec::new(),
+                selected_local_candidate: None,
+                selected_remote_candidate: None,
+                selected_route: None,
+                local_address: None,
+                remote_address: None,
+                last_error: None,
+                started_at: Instant::now(),
+                stats: PacketStats::default(),
+            };
+            reporter.persist();
+            reporter
+        }
+
+        fn set_phase(&mut self, phase: &str) {
+            self.phase = phase.to_owned();
+            println!("nsmb-net-bridge diagnostics: phase={phase}");
+            self.persist();
+        }
+
+        fn set_signaling(&mut self, url: &str, session: &str) {
+            self.signal_url = Some(url.to_owned());
+            self.session = Some(session.to_owned());
+            println!(
+                "nsmb-net-bridge diagnostics: signalingUrl={} session={} role={}",
+                url, session, self.role
+            );
+            self.persist();
+        }
+
+        fn set_ice_servers(&mut self, servers: Vec<String>, source: &str) {
+            self.ice_servers = servers;
+            println!(
+                "nsmb-net-bridge diagnostics: iceServers source={} values={:?}",
+                source, self.ice_servers
+            );
+            self.persist();
+        }
+
+        fn observe_event(&mut self, event: &datachannel_wrapper::PeerConnectionEvent) {
+            use datachannel_wrapper::PeerConnectionEvent;
+            println!("nsmb-net-bridge webrtc: event {:?}", event);
+            match event {
+                PeerConnectionEvent::IceCandidate(candidate) => {
+                    println!(
+                        "nsmb-net-bridge webrtc: local candidate type={} mid={} value={}",
+                        candidate_type(&candidate.candidate),
+                        candidate.mid,
+                        candidate.candidate
+                    );
+                    self.local_candidates.push(candidate.candidate.clone());
+                }
+                PeerConnectionEvent::ConnectionStateChange(state) => {
+                    self.connection_state = Some(format!("{state:?}").to_lowercase());
+                }
+                PeerConnectionEvent::GatheringStateChange(state) => {
+                    self.gathering_state = Some(format!("{state:?}").to_lowercase());
+                }
+                PeerConnectionEvent::IceStateChange(state) => {
+                    self.ice_state = Some(format!("{state:?}").to_lowercase());
+                }
+                PeerConnectionEvent::SessionDescription(_)
+                | PeerConnectionEvent::SignalingStateChange(_) => {}
+            }
+            self.persist();
+        }
+
+        fn observe_selected_pair(&mut self, endpoint: &WebRtcEndpoint) {
+            self.local_address = endpoint.peer_connection.local_address();
+            self.remote_address = endpoint.peer_connection.remote_address();
+            if let Some(pair) = endpoint.peer_connection.selected_candidate_pair() {
+                let route = selected_route(&pair.local, &pair.remote);
+                if self.selected_local_candidate.as_deref() != Some(&pair.local)
+                    || self.selected_remote_candidate.as_deref() != Some(&pair.remote)
+                {
+                    println!(
+                        "nsmb-net-bridge webrtc: selected candidate pair route={} local={} remote={}",
+                        route, pair.local, pair.remote
+                    );
+                }
+                self.selected_local_candidate = Some(pair.local);
+                self.selected_remote_candidate = Some(pair.remote);
+                self.selected_route = Some(route.to_owned());
+            }
+            self.persist();
+        }
+
+        fn fail(&mut self, error: &dyn std::fmt::Display) {
+            self.phase = "failed".to_owned();
+            self.last_error = Some(error.to_string());
+            eprintln!("nsmb-net-bridge diagnostics: failed: {error}");
+            self.persist();
+        }
+
+        fn persist(&self) {
+            let Some(path) = &self.status_file else {
+                return;
+            };
+            let updated_at_unix_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
+            let value = json!({
+                "version": 1,
+                "updated_at_unix_ms": updated_at_unix_ms,
+                "elapsed_seconds": self.started_at.elapsed().as_secs_f32(),
+                "role": self.role,
+                "phase": self.phase,
+                "signal_url": self.signal_url,
+                "session": self.session,
+                "ice_servers": self.ice_servers,
+                "connection_state": self.connection_state,
+                "gathering_state": self.gathering_state,
+                "ice_state": self.ice_state,
+                "local_candidates": self.local_candidates,
+                "selected_candidate_pair": self.selected_local_candidate.as_ref().zip(
+                    self.selected_remote_candidate.as_ref()
+                ).map(|(local, remote)| json!({
+                    "route": self.selected_route,
+                    "local_type": candidate_type(local),
+                    "remote_type": candidate_type(remote),
+                    "local": local,
+                    "remote": remote,
+                    "local_address": self.local_address,
+                    "remote_address": self.remote_address,
+                })),
+                "stats": {
+                    "app_to_webrtc_packets": self.stats.app_to_webrtc_packets,
+                    "app_to_webrtc_bytes": self.stats.app_to_webrtc_bytes,
+                    "webrtc_to_app_packets": self.stats.webrtc_to_app_packets,
+                    "webrtc_to_app_bytes": self.stats.webrtc_to_app_bytes,
+                    "dropped_no_local_target": self.stats.dropped_no_local_target,
+                },
+                "last_error": self.last_error,
+            });
+            if let Some(parent) = path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            let temp = path.with_extension("json.tmp");
+            let write_result = serde_json::to_vec_pretty(&value)
+                .map_err(io::Error::other)
+                .and_then(|bytes| fs::write(&temp, bytes));
+            if let Err(error) = write_result {
+                eprintln!(
+                    "nsmb-net-bridge diagnostics: status write failed path={} error={error}",
+                    path.display()
+                );
+                return;
+            }
+            if path.exists() {
+                let _ = fs::remove_file(path);
+            }
+            if let Err(error) = fs::rename(&temp, path) {
+                eprintln!(
+                    "nsmb-net-bridge diagnostics: status rename failed path={} error={error}",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    fn init_native_logging() {
+        let _ = LogBuilder::from_env(LogEnv::default().default_filter_or("debug"))
+            .format_timestamp_millis()
+            .target(LogTarget::Stderr)
+            .try_init();
+    }
+
+    fn candidate_type(candidate: &str) -> &str {
+        let mut parts = candidate.split_whitespace();
+        while let Some(part) = parts.next() {
+            if part == "typ" {
+                return parts.next().unwrap_or("unknown");
+            }
+        }
+        "unknown"
+    }
+
+    fn candidate_address(candidate: &str) -> Option<&str> {
+        candidate.split_whitespace().nth(4)
+    }
+
+    fn is_local_candidate_address(candidate: &str) -> bool {
+        candidate_address(candidate)
+            .and_then(|address| address.parse::<std::net::IpAddr>().ok())
+            .is_some_and(|address| match address {
+                std::net::IpAddr::V4(address) => {
+                    address.is_private() || address.is_loopback() || address.is_link_local()
+                }
+                std::net::IpAddr::V6(address) => {
+                    address.is_loopback()
+                        || address.is_unicast_link_local()
+                        || (address.segments()[0] & 0xfe00) == 0xfc00
+                }
+            })
+    }
+
+    fn selected_route(local: &str, remote: &str) -> &'static str {
+        let local_type = candidate_type(local);
+        let remote_type = candidate_type(remote);
+        if local_type == "relay" || remote_type == "relay" {
+            "turn-relay"
+        } else if matches!(local_type, "srflx" | "prflx")
+            || matches!(remote_type, "srflx" | "prflx")
+        {
+            "stun"
+        } else if local_type == "host"
+            && remote_type == "host"
+            && is_local_candidate_address(local)
+            && is_local_candidate_address(remote)
+        {
+            "local"
+        } else if local_type == "host" && remote_type == "host" {
+            "direct"
+        } else {
+            "unknown"
+        }
     }
 
     async fn create_endpoint(
         stun_servers: Vec<String>,
-    ) -> Result<
-        (
-            WebRtcEndpoint,
-            tokio::sync::mpsc::Receiver<datachannel_wrapper::PeerConnectionEvent>,
-        ),
-        Box<dyn std::error::Error>,
-    > {
+        reporter: &mut DiagnosticsReporter,
+    ) -> Result<WebRtcEndpoint, Box<dyn std::error::Error>> {
+        init_native_logging();
         let rtc_config = datachannel_wrapper::RtcConfig::new(&stun_servers);
         let (mut peer_connection, mut event_rx) =
             datachannel_wrapper::PeerConnection::new(rtc_config)?;
@@ -495,24 +779,32 @@ mod webrtc {
                 .stream(0),
         )?;
 
-        while let Some(event) = event_rx.recv().await {
-            if matches!(
-                event,
-                datachannel_wrapper::PeerConnectionEvent::GatheringStateChange(
-                    datachannel_wrapper::GatheringState::Complete
-                )
-            ) {
-                break;
+        reporter.set_phase("ice-gathering");
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while let Some(event) = event_rx.recv().await {
+                reporter.observe_event(&event);
+                if matches!(
+                    event,
+                    datachannel_wrapper::PeerConnectionEvent::GatheringStateChange(
+                        datachannel_wrapper::GatheringState::Complete
+                    )
+                ) {
+                    return Ok::<(), io::Error>(());
+                }
             }
-        }
+            Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "WebRTC event stream closed during ICE gathering",
+            ))
+        })
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "ICE gathering timed out"))??;
 
-        Ok((
-            WebRtcEndpoint {
-                data_channel,
-                peer_connection,
-            },
+        Ok(WebRtcEndpoint {
+            data_channel,
+            peer_connection,
             event_rx,
-        ))
+        })
     }
 
     fn encode_sdp(sdp: &str) -> String {
@@ -537,6 +829,9 @@ mod webrtc {
         println!("==== {label} SDP base64 begin ====");
         println!("{}", encode_sdp(sdp));
         println!("==== {label} SDP base64 end ====");
+        println!("==== {label} SDP text begin ====");
+        println!("{sdp}");
+        println!("==== {label} SDP text end ====");
     }
 
     fn role_from_side(side: &str) -> &'static str {
@@ -665,51 +960,62 @@ mod webrtc {
     }
 
     async fn wait_connected(
-        event_rx: &mut tokio::sync::mpsc::Receiver<datachannel_wrapper::PeerConnectionEvent>,
+        endpoint: &mut WebRtcEndpoint,
+        reporter: &mut DiagnosticsReporter,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        loop {
-            let Some(event) = event_rx.recv().await else {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "WebRTC event stream closed",
-                )
-                .into());
-            };
-            if let datachannel_wrapper::PeerConnectionEvent::ConnectionStateChange(state) = event {
-                println!("nsmb-net-bridge webrtc: connection state {:?}", state);
-                match state {
-                    datachannel_wrapper::ConnectionState::Connected => return Ok(()),
-                    datachannel_wrapper::ConnectionState::Disconnected => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::ConnectionAborted,
-                            "WebRTC disconnected",
-                        )
-                        .into())
+        reporter.set_phase("webrtc-connecting");
+        tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let Some(event) = endpoint.event_rx.recv().await else {
+                    return Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "WebRTC event stream closed",
+                    ));
+                };
+                reporter.observe_event(&event);
+                if let datachannel_wrapper::PeerConnectionEvent::ConnectionStateChange(state) =
+                    event
+                {
+                    match state {
+                        datachannel_wrapper::ConnectionState::Connected => {
+                            reporter.set_phase("connected");
+                            reporter.observe_selected_pair(endpoint);
+                            return Ok(());
+                        }
+                        datachannel_wrapper::ConnectionState::Disconnected => {
+                            return Err(io::Error::new(
+                                io::ErrorKind::ConnectionAborted,
+                                "WebRTC disconnected",
+                            ))
+                        }
+                        datachannel_wrapper::ConnectionState::Failed => {
+                            return Err(io::Error::new(
+                                io::ErrorKind::ConnectionAborted,
+                                "WebRTC failed",
+                            ))
+                        }
+                        datachannel_wrapper::ConnectionState::Closed => {
+                            return Err(io::Error::new(
+                                io::ErrorKind::ConnectionAborted,
+                                "WebRTC closed",
+                            ))
+                        }
+                        _ => {}
                     }
-                    datachannel_wrapper::ConnectionState::Failed => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::ConnectionAborted,
-                            "WebRTC failed",
-                        )
-                        .into())
-                    }
-                    datachannel_wrapper::ConnectionState::Closed => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::ConnectionAborted,
-                            "WebRTC closed",
-                        )
-                        .into())
-                    }
-                    _ => {}
                 }
             }
-        }
+        })
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "WebRTC connect timed out"))??;
+        Ok(())
     }
 
     async fn connect_offer(
         stun_servers: Vec<String>,
+        reporter: &mut DiagnosticsReporter,
     ) -> Result<WebRtcEndpoint, Box<dyn std::error::Error>> {
-        let (mut endpoint, mut event_rx) = create_endpoint(stun_servers).await?;
+        reporter.set_ice_servers(stun_servers.clone(), "cli-or-manual-default");
+        let mut endpoint = create_endpoint(stun_servers, reporter).await?;
         let offer = endpoint
             .peer_connection
             .local_description()
@@ -722,15 +1028,19 @@ mod webrtc {
                 sdp: datachannel_wrapper::sdp::parse_sdp(&answer_sdp, false)?,
             },
         )?;
-        wait_connected(&mut event_rx).await?;
+        print_sdp("remote answer", &answer_sdp);
+        wait_connected(&mut endpoint, reporter).await?;
         Ok(endpoint)
     }
 
     async fn connect_answer(
         stun_servers: Vec<String>,
+        reporter: &mut DiagnosticsReporter,
     ) -> Result<WebRtcEndpoint, Box<dyn std::error::Error>> {
         let offer_sdp = read_pasted_sdp("Paste offer SDP base64 from the offer side.")?;
-        let (mut endpoint, mut event_rx) = create_endpoint(stun_servers).await?;
+        print_sdp("remote offer", &offer_sdp);
+        reporter.set_ice_servers(stun_servers.clone(), "cli-or-manual-default");
+        let mut endpoint = create_endpoint(stun_servers, reporter).await?;
         endpoint
             .peer_connection
             .set_local_description(datachannel_wrapper::SdpType::Rollback)?;
@@ -745,7 +1055,7 @@ mod webrtc {
             .local_description()
             .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "missing local answer SDP"))?;
         print_sdp("answer", &answer.sdp.to_string());
-        wait_connected(&mut event_rx).await?;
+        wait_connected(&mut endpoint, reporter).await?;
         Ok(endpoint)
     }
 
@@ -753,20 +1063,30 @@ mod webrtc {
         signal_url: String,
         session: String,
         stun_servers: Vec<String>,
+        reporter: &mut DiagnosticsReporter,
+        fallback_to_default_stun: bool,
     ) -> Result<WebRtcEndpoint, Box<dyn std::error::Error>> {
         let url = build_signal_url(&signal_url, &session, "offer");
+        reporter.set_signaling(&signal_url, &session);
+        reporter.set_phase("signaling-connecting");
         let (mut ws, _) = connect_async(&url).await?;
         println!("nsmb-net-bridge signaling: connected {}", url);
+        reporter.set_phase("signaling-connected");
 
         let hello = wait_signal_hello(&mut ws).await?;
         let server_ice_servers = parse_server_ice_servers(&hello);
-        let stun_servers = if stun_servers.is_empty() {
-            server_ice_servers
+        let (stun_servers, source) = if !stun_servers.is_empty() {
+            (stun_servers, "cli")
+        } else if !server_ice_servers.is_empty() {
+            (server_ice_servers, "signaling-server")
+        } else if fallback_to_default_stun {
+            (vec![DEFAULT_STUN_SERVER.to_owned()], "bridge-default")
         } else {
-            stun_servers
+            (Vec::new(), "disabled-for-smoke")
         };
+        reporter.set_ice_servers(stun_servers.clone(), source);
 
-        let (mut endpoint, mut event_rx) = create_endpoint(stun_servers).await?;
+        let mut endpoint = create_endpoint(stun_servers, reporter).await?;
         let offer = endpoint
             .peer_connection
             .local_description()
@@ -782,7 +1102,9 @@ mod webrtc {
         ))
         .await?;
         println!("nsmb-net-bridge signaling: sent offer SDP");
+        print_sdp("local offer", &offer.sdp.to_string());
 
+        reporter.set_phase("waiting-answer-sdp");
         let answer = wait_signal_sdp(&mut ws, "answer").await?;
         let answer_sdp = answer
             .get("sdp")
@@ -799,7 +1121,8 @@ mod webrtc {
                 sdp: datachannel_wrapper::sdp::parse_sdp(answer_sdp, false)?,
             },
         )?;
-        wait_connected(&mut event_rx).await?;
+        print_sdp("remote answer", answer_sdp);
+        wait_connected(&mut endpoint, reporter).await?;
         Ok(endpoint)
     }
 
@@ -807,26 +1130,38 @@ mod webrtc {
         signal_url: String,
         session: String,
         stun_servers: Vec<String>,
+        reporter: &mut DiagnosticsReporter,
+        fallback_to_default_stun: bool,
     ) -> Result<WebRtcEndpoint, Box<dyn std::error::Error>> {
         let url = build_signal_url(&signal_url, &session, "answer");
+        reporter.set_signaling(&signal_url, &session);
+        reporter.set_phase("signaling-connecting");
         let (mut ws, _) = connect_async(&url).await?;
         println!("nsmb-net-bridge signaling: connected {}", url);
+        reporter.set_phase("signaling-connected");
 
         let hello = wait_signal_hello(&mut ws).await?;
         let server_ice_servers = parse_server_ice_servers(&hello);
-        let stun_servers = if stun_servers.is_empty() {
-            server_ice_servers
+        let (stun_servers, source) = if !stun_servers.is_empty() {
+            (stun_servers, "cli")
+        } else if !server_ice_servers.is_empty() {
+            (server_ice_servers, "signaling-server")
+        } else if fallback_to_default_stun {
+            (vec![DEFAULT_STUN_SERVER.to_owned()], "bridge-default")
         } else {
-            stun_servers
+            (Vec::new(), "disabled-for-smoke")
         };
+        reporter.set_ice_servers(stun_servers.clone(), source);
 
+        reporter.set_phase("waiting-offer-sdp");
         let offer = wait_signal_sdp(&mut ws, "offer").await?;
         let offer_sdp = offer
             .get("sdp")
             .and_then(|v| v.as_str())
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing offer SDP"))?;
 
-        let (mut endpoint, mut event_rx) = create_endpoint(stun_servers).await?;
+        print_sdp("remote offer", offer_sdp);
+        let mut endpoint = create_endpoint(stun_servers, reporter).await?;
         endpoint
             .peer_connection
             .set_local_description(datachannel_wrapper::SdpType::Rollback)?;
@@ -856,8 +1191,9 @@ mod webrtc {
         ))
         .await?;
         println!("nsmb-net-bridge signaling: sent answer SDP");
+        print_sdp("local answer", &answer.sdp.to_string());
 
-        wait_connected(&mut event_rx).await?;
+        wait_connected(&mut endpoint, reporter).await?;
         Ok(endpoint)
     }
 
@@ -866,13 +1202,35 @@ mod webrtc {
         local_bind: SocketAddr,
         local_target: Option<SocketAddr>,
         stun_servers: Vec<String>,
+        status_file: Option<PathBuf>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let role = role_from_side(&side);
+        let mut reporter = DiagnosticsReporter::new(status_file, role);
+        println!(
+            "nsmb-net-bridge webrtc: start mode=manual role={} localBind={} localTarget={}",
+            role,
+            local_bind,
+            local_target
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "learn".to_owned())
+        );
         let endpoint = match side.as_str() {
-            "webrtc-offer" => connect_offer(stun_servers).await?,
-            "webrtc-answer" => connect_answer(stun_servers).await?,
+            "webrtc-offer" => connect_offer(stun_servers, &mut reporter).await,
+            "webrtc-answer" => connect_answer(stun_servers, &mut reporter).await,
             _ => unreachable!("validated by caller"),
         };
-        run_webrtc_udp_tunnel(endpoint.data_channel, local_bind, local_target).await
+        let endpoint = match endpoint {
+            Ok(endpoint) => endpoint,
+            Err(error) => {
+                reporter.fail(error.as_ref());
+                return Err(error);
+            }
+        };
+        let result = run_webrtc_udp_tunnel(endpoint, local_bind, local_target, &mut reporter).await;
+        if let Err(error) = &result {
+            reporter.fail(error.as_ref());
+        }
+        result
     }
 
     pub async fn run_signaling_webrtc(
@@ -882,13 +1240,58 @@ mod webrtc {
         stun_servers: Vec<String>,
         signal_url: String,
         session: String,
+        status_file: Option<PathBuf>,
+        fallback_to_default_stun: bool,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let endpoint = match role_from_side(&side) {
-            "offer" => connect_signal_offer(signal_url, session, stun_servers).await?,
-            "answer" => connect_signal_answer(signal_url, session, stun_servers).await?,
-            _ => unreachable!("validated by caller"),
+        let role = role_from_side(&side);
+        let mut reporter = DiagnosticsReporter::new(status_file, role);
+        println!(
+            "nsmb-net-bridge webrtc: start mode=signaling role={} localBind={} localTarget={} signalUrl={} session={}",
+            role,
+            local_bind,
+            local_target
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "learn".to_owned()),
+            signal_url,
+            session
+        );
+        let endpoint = {
+            let endpoint_result = match role_from_side(&side) {
+                "offer" => {
+                    connect_signal_offer(
+                        signal_url,
+                        session,
+                        stun_servers,
+                        &mut reporter,
+                        fallback_to_default_stun,
+                    )
+                    .await
+                }
+                "answer" => {
+                    connect_signal_answer(
+                        signal_url,
+                        session,
+                        stun_servers,
+                        &mut reporter,
+                        fallback_to_default_stun,
+                    )
+                    .await
+                }
+                _ => unreachable!("validated by caller"),
+            };
+            match endpoint_result {
+                Ok(endpoint) => endpoint,
+                Err(error) => {
+                    reporter.fail(error.as_ref());
+                    return Err(error);
+                }
+            }
         };
-        run_webrtc_udp_tunnel(endpoint.data_channel, local_bind, local_target).await
+        let result = run_webrtc_udp_tunnel(endpoint, local_bind, local_target, &mut reporter).await;
+        if let Err(error) = &result {
+            reporter.fail(error.as_ref());
+        }
+        result
     }
 
     pub async fn run_loopback_smoke(
@@ -899,8 +1302,10 @@ mod webrtc {
         } else {
             stun_servers
         };
-        let (mut offer, mut offer_events) = create_endpoint(stun_servers.clone()).await?;
-        let (mut answer, mut answer_events) = create_endpoint(stun_servers).await?;
+        let mut offer_reporter = DiagnosticsReporter::new(None, "smoke-offer");
+        let mut answer_reporter = DiagnosticsReporter::new(None, "smoke-answer");
+        let mut offer = create_endpoint(stun_servers.clone(), &mut offer_reporter).await?;
+        let mut answer = create_endpoint(stun_servers, &mut answer_reporter).await?;
 
         let offer_sdp = offer
             .peer_connection
@@ -932,8 +1337,8 @@ mod webrtc {
             })?;
 
         tokio::try_join!(
-            wait_connected(&mut offer_events),
-            wait_connected(&mut answer_events)
+            wait_connected(&mut offer, &mut offer_reporter),
+            wait_connected(&mut answer, &mut answer_reporter)
         )?;
 
         let (mut offer_tx, _offer_rx) = offer.data_channel.split();
@@ -1004,12 +1409,22 @@ mod webrtc {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let signal_url = format!("ws://{}/session", listener.local_addr()?);
         let server = tokio::spawn(run_local_signaling_server(listener));
+        let mut offer_reporter = DiagnosticsReporter::new(None, "smoke-offer");
+        let mut answer_reporter = DiagnosticsReporter::new(None, "smoke-answer");
         let offer = connect_signal_offer(
             signal_url.clone(),
             "loopback".to_owned(),
             stun_servers.clone(),
+            &mut offer_reporter,
+            false,
         );
-        let answer = connect_signal_answer(signal_url, "loopback".to_owned(), stun_servers);
+        let answer = connect_signal_answer(
+            signal_url,
+            "loopback".to_owned(),
+            stun_servers,
+            &mut answer_reporter,
+            false,
+        );
 
         let (offer, answer) = tokio::time::timeout(Duration::from_secs(30), async {
             tokio::try_join!(offer, answer)
@@ -1106,6 +1521,8 @@ mod webrtc {
                 offer_stun,
                 offer_signal,
                 offer_session,
+                None,
+                false,
             )
             .await
             {
@@ -1121,6 +1538,8 @@ mod webrtc {
                 stun_servers,
                 signal_url,
                 session,
+                None,
+                false,
             )
             .await
             {
@@ -1153,20 +1572,21 @@ mod webrtc {
     }
 
     async fn run_webrtc_udp_tunnel(
-        data_channel: datachannel_wrapper::DataChannel,
+        endpoint: WebRtcEndpoint,
         local_bind: SocketAddr,
         local_target: Option<SocketAddr>,
+        reporter: &mut DiagnosticsReporter,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let local_socket = TokioUdpSocket::bind(local_bind).await?;
         let local_addr = local_socket.local_addr()?;
         let local_target = Arc::new(TokioMutex::new(local_target));
+        let WebRtcEndpoint {
+            data_channel,
+            peer_connection,
+            mut event_rx,
+        } = endpoint;
         let (mut dc_tx, mut dc_rx) = data_channel.split();
         let mut app_buf = [0u8; MAX_DATAGRAM_SIZE];
-        let mut app_to_webrtc_packets = 0u64;
-        let mut app_to_webrtc_bytes = 0u64;
-        let mut webrtc_to_app_packets = 0u64;
-        let mut webrtc_to_app_bytes = 0u64;
-        let mut dropped_no_local_target = 0u64;
         let start = Instant::now();
         let mut stats_tick = tokio::time::interval(Duration::from_secs(2));
 
@@ -1193,8 +1613,8 @@ mod webrtc {
                         }
                     }
                     dc_tx.send(&app_buf[..len]).await?;
-                    app_to_webrtc_packets += 1;
-                    app_to_webrtc_bytes += len as u64;
+                    reporter.stats.app_to_webrtc_packets += 1;
+                    reporter.stats.app_to_webrtc_bytes += len as u64;
                 }
                 msg = dc_rx.receive() => {
                     let Some(msg) = msg else {
@@ -1202,25 +1622,73 @@ mod webrtc {
                     };
                     let target = *local_target.lock().await;
                     let Some(target) = target else {
-                        dropped_no_local_target += 1;
+                        reporter.stats.dropped_no_local_target += 1;
                         continue;
                     };
                     local_socket.send_to(&msg, target).await?;
-                    webrtc_to_app_packets += 1;
-                    webrtc_to_app_bytes += msg.len() as u64;
+                    reporter.stats.webrtc_to_app_packets += 1;
+                    reporter.stats.webrtc_to_app_bytes += msg.len() as u64;
+                }
+                event = event_rx.recv() => {
+                    let Some(event) = event else {
+                        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "WebRTC event stream closed").into());
+                    };
+                    reporter.observe_event(&event);
+                    if let datachannel_wrapper::PeerConnectionEvent::ConnectionStateChange(state) = event {
+                        if matches!(
+                            state,
+                            datachannel_wrapper::ConnectionState::Disconnected
+                                | datachannel_wrapper::ConnectionState::Failed
+                                | datachannel_wrapper::ConnectionState::Closed
+                        ) {
+                            return Err(io::Error::new(
+                                io::ErrorKind::ConnectionAborted,
+                                format!("WebRTC connection ended: {state:?}"),
+                            ).into());
+                        }
+                    }
                 }
                 _ = stats_tick.tick() => {
                     println!(
                         "nsmb-net-bridge webrtc: t={:.1}s app->rtc={}pkts/{}B rtc->app={}pkts/{}B droppedNoLocalTarget={}",
                         start.elapsed().as_secs_f32(),
-                        app_to_webrtc_packets,
-                        app_to_webrtc_bytes,
-                        webrtc_to_app_packets,
-                        webrtc_to_app_bytes,
-                        dropped_no_local_target
+                        reporter.stats.app_to_webrtc_packets,
+                        reporter.stats.app_to_webrtc_bytes,
+                        reporter.stats.webrtc_to_app_packets,
+                        reporter.stats.webrtc_to_app_bytes,
+                        reporter.stats.dropped_no_local_target
                     );
+                    reporter.local_address = peer_connection.local_address();
+                    reporter.remote_address = peer_connection.remote_address();
+                    if let Some(pair) = peer_connection.selected_candidate_pair() {
+                        reporter.selected_route = Some(selected_route(&pair.local, &pair.remote).to_owned());
+                        reporter.selected_local_candidate = Some(pair.local);
+                        reporter.selected_remote_candidate = Some(pair.remote);
+                    }
+                    reporter.persist();
                 }
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{candidate_type, selected_route};
+
+        #[test]
+        fn classifies_candidate_types_and_routes() {
+            let private_host = "a=candidate:1 1 UDP 1 192.168.0.10 5000 typ host";
+            let private_peer = "a=candidate:2 1 UDP 1 192.168.0.11 5001 typ host";
+            let public_host = "a=candidate:3 1 UDP 1 2001:db8::10 5000 typ host";
+            let public_peer = "a=candidate:4 1 UDP 1 2001:db8::11 5001 typ host";
+            let srflx = "a=candidate:5 1 UDP 1 203.0.113.10 5002 typ srflx";
+            let relay = "a=candidate:6 1 UDP 1 203.0.113.20 5003 typ relay";
+
+            assert_eq!(candidate_type(srflx), "srflx");
+            assert_eq!(selected_route(private_host, private_peer), "local");
+            assert_eq!(selected_route(public_host, public_peer), "direct");
+            assert_eq!(selected_route(private_host, srflx), "stun");
+            assert_eq!(selected_route(private_host, relay), "turn-relay");
         }
     }
 }

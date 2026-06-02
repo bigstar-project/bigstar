@@ -63,6 +63,36 @@ type SessionStatus = {
   log_dir?: string;
   melon?: string;
   bridge?: string;
+  webrtc?: BridgeDiagnostics;
+  diagnostics_error?: string;
+};
+
+type BridgeDiagnostics = {
+  role?: string;
+  phase?: string;
+  signal_url?: string;
+  session?: string;
+  ice_servers?: string[];
+  connection_state?: string;
+  gathering_state?: string;
+  ice_state?: string;
+  selected_candidate_pair?: {
+    route?: string;
+    local_type?: string;
+    remote_type?: string;
+    local?: string;
+    remote?: string;
+    local_address?: string;
+    remote_address?: string;
+  };
+  stats?: {
+    app_to_webrtc_packets?: number;
+    app_to_webrtc_bytes?: number;
+    webrtc_to_app_packets?: number;
+    webrtc_to_app_bytes?: number;
+    dropped_no_local_target?: number;
+  };
+  last_error?: string;
 };
 
 type PreflightResponse = {
@@ -110,6 +140,8 @@ export function App() {
     kind: 'idle' as StatusKind,
   });
   const [lastLogDir, setLastLogDir] = useState('');
+  const [bridgeDiagnostics, setBridgeDiagnostics] =
+    useState<BridgeDiagnostics | null>(null);
   const [defaultsLoaded, setDefaultsLoaded] = useState(false);
   const [romPreparation, setRomPreparation] = useState('未確認');
 
@@ -143,6 +175,7 @@ export function App() {
       if (response.log_dir) {
         setLastLogDir(response.log_dir);
       }
+      setBridgeDiagnostics(response.webrtc ?? null);
       if (processExited(response.melon) || processExited(response.bridge)) {
         setStatus({
           text: `プロセス終了 melonDS:${response.melon ?? '-'} bridge:${response.bridge ?? '-'}`,
@@ -152,6 +185,10 @@ export function App() {
       }
       if (!response.active) {
         setStatus({ text: '未接続', kind: 'idle' });
+        return;
+      }
+      if (response.diagnostics_error) {
+        setStatus({ text: response.diagnostics_error, kind: 'warn' });
         return;
       }
       setStatus({
@@ -355,6 +392,17 @@ export function App() {
     }
   };
 
+  const openLogDir = async () => {
+    if (!lastLogDir) {
+      return;
+    }
+    try {
+      await invoke('open_log_dir', { path: lastLogDir });
+    } catch (error) {
+      setStatus({ text: String(error), kind: 'error' });
+    }
+  };
+
   return (
     <main className="mx-auto grid w-[min(1160px,calc(100vw-48px))] gap-6 py-8">
       <header className="flex items-end justify-between gap-6">
@@ -369,7 +417,7 @@ export function App() {
 
       <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(320px,0.9fr)] gap-5 max-[860px]:grid-cols-1">
         <form
-          className="grid gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+          className="grid self-start content-start gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
           onSubmit={(event) => {
             event.preventDefault();
             void startMatch();
@@ -458,7 +506,17 @@ export function App() {
           </div>
 
           <div className="grid gap-1 pt-1 text-xs font-bold text-slate-500">
-            <span>Log directory</span>
+            <div className="flex items-center justify-between gap-2">
+              <span>Log directory</span>
+              <ActionButton
+                kind="secondary"
+                type="button"
+                disabled={!lastLogDir}
+                onClick={() => void openLogDir()}
+              >
+                ログを開く
+              </ActionButton>
+            </div>
             <code className="overflow-wrap-anywhere rounded-md border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs font-semibold text-slate-800">
               {lastLogDir || 'not started'}
             </code>
@@ -523,6 +581,7 @@ export function App() {
             <SummaryItem label="共通 ROM" value={romPreparation} />
             <SummaryItem label="コース処理" value={courseNote} />
           </div>
+          <WebRtcDiagnosticsPanel diagnostics={bridgeDiagnostics} />
         </section>
       </div>
     </main>
@@ -700,11 +759,13 @@ function ActionButton({
   kind,
   type,
   onClick,
+  disabled = false,
 }: {
   children: string;
   kind: 'primary' | 'secondary';
   type: 'button' | 'submit';
   onClick?: () => void;
+  disabled?: boolean;
 }) {
   const styles =
     kind === 'primary'
@@ -713,11 +774,59 @@ function ActionButton({
   return (
     <button
       type={type}
-      className={`min-h-10 min-w-24 rounded-md border px-4 font-bold transition ${styles}`}
+      className={`min-h-10 min-w-24 rounded-md border px-4 font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${styles}`}
+      disabled={disabled}
       onClick={onClick}
     >
       {children}
     </button>
+  );
+}
+
+function WebRtcDiagnosticsPanel({
+  diagnostics,
+}: {
+  diagnostics: BridgeDiagnostics | null;
+}) {
+  const pair = diagnostics?.selected_candidate_pair;
+  const stats = diagnostics?.stats;
+  const route = pair?.route ?? '未確定';
+  const routeLabel: Record<string, string> = {
+    local: 'local: 同一 LAN / host candidate',
+    direct: 'direct: 公開アドレスで直接接続',
+    stun: 'stun: NAT 越し P2P',
+    'turn-relay': 'turn-relay: TURN 中継',
+    unknown: 'unknown: 判定不能',
+  };
+  return (
+    <div className="mt-1 grid gap-3 border-t border-slate-200 pt-4">
+      <h2 className="text-lg font-bold text-slate-950">WebRTC 診断</h2>
+      <SummaryItem label="phase" value={diagnostics?.phase ?? '未起動'} />
+      <SummaryItem
+        label="ICE / WebRTC state"
+        value={`${diagnostics?.ice_state ?? '-'} / ${diagnostics?.connection_state ?? '-'}`}
+      />
+      <SummaryItem label="選択経路" value={routeLabel[route] ?? route} />
+      <SummaryItem
+        label="candidate type"
+        value={`${pair?.local_type ?? '-'} -> ${pair?.remote_type ?? '-'}`}
+      />
+      <SummaryItem
+        label="selected address"
+        value={`${pair?.local_address ?? '-'} -> ${pair?.remote_address ?? '-'}`}
+      />
+      <SummaryItem
+        label="ICE server"
+        value={diagnostics?.ice_servers?.join(', ') || '-'}
+      />
+      <SummaryItem
+        label="packets app -> rtc / rtc -> app"
+        value={`${stats?.app_to_webrtc_packets ?? 0} / ${stats?.webrtc_to_app_packets ?? 0}`}
+      />
+      {diagnostics?.last_error ? (
+        <SummaryItem label="last error" value={diagnostics.last_error} />
+      ) : null}
+    </div>
   );
 }
 

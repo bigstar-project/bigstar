@@ -1,0 +1,11 @@
+[package]
+name = "datachannel-wrapper"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+datachannel = { version = "0.15", features = ["vendored"] }
+tokio = { version = "1", features = ["full"] }
+
+[lints.rust]
+unsafe_code = "forbid"

@@ -36,7 +36,7 @@ struct ManagedSession {
     log_dir: PathBuf,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 struct LaunchRequest {
     role: Role,
@@ -57,14 +57,14 @@ struct GenerateRomRequest {
     settings: GameSettings,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 enum Role {
     Host,
     Client,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 struct GameSettings {
     course_mode: CourseMode,
@@ -74,14 +74,14 @@ struct GameSettings {
     match_seed: String,
 }
 
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 enum CourseMode {
     Random,
     Select,
 }
 
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 enum Lives {
     #[serde(rename = "3")]
@@ -137,6 +137,8 @@ struct SessionStatus {
     log_dir: Option<String>,
     melon: Option<String>,
     bridge: Option<String>,
+    webrtc: Option<serde_json::Value>,
+    diagnostics_error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -212,6 +214,28 @@ fn select_rom_file(current_path: String) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+fn open_log_dir(app: AppHandle, path: String) -> Result<(), String> {
+    let logs_root = app_data_dir(&app)?.join("logs");
+    fs::create_dir_all(&logs_root).map_err(|err| format!("ログ保存先を作成できません: {err}"))?;
+    let selected = PathBuf::from(path.trim());
+    let selected = allowed_log_dir(&logs_root, &selected)?;
+
+    #[cfg(windows)]
+    let mut command = Command::new("explorer.exe");
+    #[cfg(target_os = "macos")]
+    let mut command = Command::new("open");
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = Command::new("xdg-open");
+
+    command.arg(selected);
+    hide_child_console_window(&mut command);
+    command
+        .spawn()
+        .map_err(|err| format!("ログフォルダを開けません: {err}"))?;
+    Ok(())
+}
+
+#[tauri::command]
 fn preflight_check(app: AppHandle) -> Result<PreflightResponse, String> {
     let melon_path = find_melonds_binary(&app)?;
     let bridge_path = find_bridge_binary(&app)?;
@@ -284,6 +308,7 @@ fn start_match_resolved(
     paths: LaunchPaths,
 ) -> Result<LaunchResponse, String> {
     stop_existing(state)?;
+    write_launch_manifest(&paths, &request)?;
 
     let mut bridge = build_bridge_command(&paths.bridge_path, &request, &paths.log_dir)?;
     let mut bridge_child = bridge
@@ -424,18 +449,23 @@ fn session_status_inner(state: &AppState) -> Result<SessionStatus, String> {
             log_dir: None,
             melon: None,
             bridge: None,
+            webrtc: None,
+            diagnostics_error: None,
         });
     };
 
     let melon = process_state(&mut session.melon)?;
     let bridge = process_state(&mut session.bridge)?;
     let active = melon == "running" || bridge == "running";
+    let (webrtc, diagnostics_error) = read_bridge_diagnostics(&session.log_dir);
 
     Ok(SessionStatus {
         active,
         log_dir: Some(session.log_dir.to_string_lossy().into_owned()),
         melon: Some(melon),
         bridge: Some(bridge),
+        webrtc,
+        diagnostics_error,
     })
 }
 
@@ -463,11 +493,17 @@ fn build_bridge_command(
             ]);
         }
     }
+    let status_file = log_dir
+        .join("bridge-status.json")
+        .to_string_lossy()
+        .into_owned();
     command.args([
         "--signal",
         request.signal_url.trim(),
         "--session",
         request.room_code.trim(),
+        "--status-file",
+        &status_file,
     ]);
     with_stdio(command, log_dir, "bridge")
 }
@@ -648,6 +684,49 @@ fn with_stdio(mut command: Command, log_dir: &Path, name: &str) -> Result<Comman
     command.stderr(Stdio::from(stderr));
     hide_child_console_window(&mut command);
     Ok(command)
+}
+
+fn write_launch_manifest(paths: &LaunchPaths, request: &LaunchRequest) -> Result<(), String> {
+    let value = serde_json::json!({
+        "request": request,
+        "paths": {
+            "log_dir": paths.log_dir,
+            "bridge": paths.bridge_path,
+            "melonds": paths.melon_path,
+            "input_script": paths.input_script,
+            "rom": paths.rom_path,
+        }
+    });
+    let json = serde_json::to_vec_pretty(&value)
+        .map_err(|err| format!("launcher manifest を生成できません: {err}"))?;
+    fs::write(paths.log_dir.join("launcher.json"), json)
+        .map_err(|err| format!("launcher manifest を保存できません: {err}"))
+}
+
+fn read_bridge_diagnostics(log_dir: &Path) -> (Option<serde_json::Value>, Option<String>) {
+    let path = log_dir.join("bridge-status.json");
+    let json = match fs::read(&path) {
+        Ok(json) => json,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return (None, None),
+        Err(err) => return (None, Some(format!("bridge 診断を読めません: {err}"))),
+    };
+    match serde_json::from_slice(&json) {
+        Ok(value) => (Some(value), None),
+        Err(err) => (None, Some(format!("bridge 診断 JSON を読めません: {err}"))),
+    }
+}
+
+fn allowed_log_dir(logs_root: &Path, selected: &Path) -> Result<PathBuf, String> {
+    let root = logs_root
+        .canonicalize()
+        .map_err(|err| format!("ログ保存先を解決できません: {err}"))?;
+    let selected = selected
+        .canonicalize()
+        .map_err(|err| format!("ログフォルダを解決できません: {err}"))?;
+    if !selected.is_dir() || !selected.starts_with(&root) {
+        return Err("アプリのログフォルダだけを開けます".to_owned());
+    }
+    Ok(selected)
 }
 
 #[cfg(windows)]
@@ -1180,7 +1259,8 @@ fn main() {
             ensure_roms,
             start_match,
             stop_match,
-            session_status
+            session_status,
+            open_log_dir
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -1342,6 +1422,9 @@ mod tests {
         assert!(args
             .windows(2)
             .any(|pair| pair == ["--session", "room_01-test"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair[0] == "--status-file" && pair[1].ends_with("bridge-status.json")));
         let _ = fs::remove_dir_all(log_dir);
     }
 
@@ -1489,6 +1572,42 @@ mod tests {
         let bridge = fake_bridge_smoke_executable(&dir, "fake-bridge-old", false);
         let err = run_bridge_signaling_smoke(&bridge).expect_err("old bridge rejected");
         assert!(err.contains("bridge signaling smoke が失敗しました"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn bridge_diagnostics_reads_status_json() {
+        let dir = temp_log_dir("bridge-status");
+        fs::write(
+            dir.join("bridge-status.json"),
+            br#"{"phase":"connected","selected_candidate_pair":{"route":"stun"}}"#,
+        )
+        .expect("write status");
+        let (value, error) = read_bridge_diagnostics(&dir);
+        assert!(error.is_none());
+        assert_eq!(
+            value
+                .expect("status value")
+                .pointer("/selected_candidate_pair/route")
+                .and_then(serde_json::Value::as_str),
+            Some("stun")
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn allowed_log_dir_rejects_path_outside_logs_root() {
+        let dir = temp_log_dir("allowed-log-dir");
+        let logs = dir.join("logs");
+        let run = logs.join("run");
+        let outside = dir.join("outside");
+        fs::create_dir_all(&run).expect("create run");
+        fs::create_dir_all(&outside).expect("create outside");
+        assert_eq!(
+            allowed_log_dir(&logs, &run).expect("allowed run"),
+            run.canonicalize().expect("canonical run")
+        );
+        assert!(allowed_log_dir(&logs, &outside).is_err());
         let _ = fs::remove_dir_all(dir);
     }
 

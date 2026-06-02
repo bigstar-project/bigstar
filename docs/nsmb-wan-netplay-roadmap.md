@@ -1,5 +1,44 @@
 # NSMB Mario vs Luigi WAN Netplay Roadmap
 
+## Current work: WebRTC WAN diagnostics and connection audit - 2026-06-03
+
+- Reported symptom: 2PC on the same Wi-Fi had connected successfully, but a WAN test with a remote friend stopped after `nsmb-net-bridge signaling: {"peerCount":2,"role":"answer","type":"peer-joined"}`. This proves the signaling WebSocket reached the room join step; the likely failure area is subsequent SDP/ICE setup or NAT traversal.
+- Fixed a bridge lifecycle bug: the established `PeerConnection` was dropped when the bridge moved only its `DataChannel` into the UDP tunnel. The bridge now retains the `PeerConnection` and continues consuming WebRTC state events for the full tunnel lifetime.
+- Added a tracked local `tools/nsmb-net-bridge/datachannel-wrapper` derived from the Tango wrapper so the bridge can expose ICE state events, selected candidate pair, selected local/remote addresses, and larger diagnostic event queues without depending on the gitignored `external/tango` checkout at runtime.
+- Added verbose bridge diagnostics:
+  - native libdatachannel debug logging through `env_logger`
+  - signaling phase changes, SDP text/base64, ICE servers and their source, ICE/WebRTC state transitions, gathered candidate types, selected candidate pair, selected route, UDP packet statistics, and terminal errors
+  - optional `--status-file PATH` machine-readable snapshot output; Tauri launches write `bridge-status.json` in the per-run log directory
+- Added route classification for GUI and logs:
+  - `local`: private/loopback/link-local `host -> host`
+  - `direct`: public address `host -> host`, including public IPv6 direct connections
+  - `stun`: selected `srflx` / `prflx` candidate path
+  - `turn-relay`: selected `relay` candidate path
+- Fixed the STUN fallback mismatch:
+  - signaling server `parseIceServers()` now returns `stun:stun.l.google.com:19302` when `DEFAULT_ICE_SERVERS` is unset or blank
+  - bridge signaling mode independently falls back to the same STUN URI if an older deployed server returns an empty `iceServers` list
+  - a live WebSocket probe confirmed that the currently deployed Worker still returns `iceServers: []`; redeploying is still required to activate the Worker-side fallback and new server logs
+- Added Cloudflare signaling logs for room join, queued relay, direct relay, queued-signal flush, and close events without logging full SDP payloads server-side.
+- Tauri GUI now shows WebRTC phase, ICE/WebRTC state, selected route, candidate types, selected addresses, configured ICE server list, packet counters, and last bridge error. It also has a `ログを開く` button that opens the selected app-owned run directory in Explorer.
+- Fixed the GUI layout regression caused by the taller right-side WebRTC diagnostics panel stretching the left connection form. The left form now stays content-sized instead of expanding to the right column height.
+- Tauri run logs now include `launcher.json`, `bridge-status.json`, `bridge.stdout.txt`, `bridge.stderr.txt`, `melonds.stdout.txt`, and `melonds.stderr.txt`.
+- Audit conclusion for the reported WAN failure:
+  - Highest-probability existing bug was missing STUN: the deployed server currently sends `iceServers: []`, so the old bridge had only host candidates available. Same-Wi-Fi tests could pass while IPv4 WAN NAT traversal failed.
+  - After STUN is active, some NAT combinations still cannot connect peer-to-peer. TURN credentials/server support are not implemented yet, so symmetric NAT, carrier-grade NAT, strict firewall, or UDP-blocked paths can still fail. The new diagnostics will show gathered `srflx` candidates and whether a selected pair is ever established.
+- Verification passed:
+  - `cargo check --manifest-path tools\nsmb-net-bridge\Cargo.toml --features webrtc`
+  - `cargo test --manifest-path tools\nsmb-net-bridge\Cargo.toml --features webrtc` (route classification)
+  - debug and release `nsmb-net-bridge.exe webrtc-signaling-udp-pair-smoke`
+  - `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml` (14 tests)
+  - GUI `corepack pnpm run ci` and `corepack pnpm run vite:build`
+  - signaling server `corepack pnpm run ci`
+  - `scripts\test-nsmb-mvl-gui-launch-smoke.ps1 -BuildTauriBundle`
+- Current blocker: actual WAN success still needs a new 2PC remote run. If logs show STUN candidates but no selected pair, TURN support is the next transport requirement.
+- Next actions:
+  - Deploy the updated signaling Worker so Cloudflare-side diagnostics and server-side STUN defaults are active.
+  - Run the rebuilt Tauri GUI on both WAN PCs, use `ログを開く`, and compare each `bridge-status.json`, `bridge.stdout.txt`, and `bridge.stderr.txt`.
+  - Add TURN credential issuance and `relay` support if STUN-only WAN traversal still fails.
+
 ## Current work: Tauri GUI usability polish - 2026-06-02
 
 - Goal: make the launcher easier to operate by replacing direct ROM path entry with file picker buttons, persisting selected ROM paths across app restarts, increasing the default window size, and making process-exit status read as an error.
@@ -9,7 +48,7 @@
 - Implemented: the status pill now includes an explicit state label, stronger error styling, and treats `melonDS` or `bridge` `exited(...)` status as an error.
 - Verification: `corepack pnpm install`, `corepack pnpm typecheck`, `cargo fmt --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml --check`, and `corepack pnpm build` passed in the local main worktree. The build produced `target\release\nsmb-mvl-gui.exe`, MSI, and NSIS installer outputs.
 - Verification: release `nsmb-mvl-gui.exe --preflight` passed with sidecar/resource resolution and bridge signaling UDP pair smoke.
-- Current blocker: none for producing the local Tauri build. Manual GUI confirmation of the Windows file picker and persisted ROM path restore is still useful before packaging this as a user-facing release.
+- Current blocker: none for producing the local Tauri build. Manual GUI confirmation of the Windows file picker, persisted ROM path restore, and WebRTC diagnostics panel is still useful before packaging this as a user-facing release.
 
 ## Current work: reusable launcher ROMs - 2026-06-01
 
@@ -52,7 +91,7 @@
 - The GUI logs are written under `%APPDATA%\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-*`, with `bridge.stdout.txt`, `bridge.stderr.txt`, `melonds.stdout.txt`, and `melonds.stderr.txt` per run.
 - The latest host bridge stderr showed `signaling server error: {"error":"peer is not connected","type":"error"}` after the host sent its offer while the answer peer was not connected yet.
 - Local signaling server code now queues pending `sdp` / `candidate` messages for the absent role and flushes them when the opposite role joins. `corepack pnpm run ci` passes in `tools/nsmb-signaling-server`.
-- The deployed Worker still needs to be updated before the default GUI signaling URL benefits from this fix.
+- A live WebSocket probe confirmed that the deployed Worker still returns `iceServers: []`. It needs to be updated before the default GUI signaling URL benefits from queued-signal server logging and server-owned STUN defaults. The rebuilt bridge now independently falls back to Google STUN when an older deployed Worker returns an empty list.
 - The Tauri GUI now displays the latest log directory in the launcher, so a failed bridge/melonDS run can be inspected without opening devtools.
 - `scripts/run-nsmb-mvl-local-triage.ps1` was added for 1PC manual isolation. `DirectUdp` tests Rust-generated ROMs and melonDS input netplay without WebRTC; `WebRtc` keeps Rust-generated ROMs/settings but replaces GUI process management with direct `nsmb-net-bridge` WebRTC launch.
 - DirectUdp reproduced the green/bad-control client symptom without WebRTC. Python-generated ROMs passed the same movement/sync test, which isolated the regression to Rust ROM generation. The Rust generator now resolves ARM9 patch addresses through the NSMB code settings copy table and applies the Python-equivalent RNG constant patch.
@@ -66,8 +105,8 @@ New Super Mario Bros. DS の `Mario vs Luigi` を、最終的に一般ユーザ�
 
 ## 現在の採用方針
 
-サーバーなしの手動コピー&ペースト signaling で WebRTC DataChannel が使えることは確認済み。
-次は Cloudflare Workers + Durable Objects の最小 signaling server を追加し、手動コピー&ペーストなしで `nsmb-net-bridge` が SDP/ICE 接続情報を交換できる状態へ進める。
+サーバーなしの手動コピー&ペースト signaling と、Cloudflare Workers + Durable Objects の signaling server 経由で WebRTC DataChannel が使えることはローカル smoke で確認済み。
+現在は、実 WAN 2PC 接続を診断し、STUN-only で越えられない NAT に備えて TURN 対応要否を判断する段階。
 Cloudflare 側は WSL の `~/oji-driving-school-reserver` と同じく pnpm + TypeScript + Alchemy 形式を参考にする。Cloudflare へのデプロイ操作はユーザーが行い、こちらでは実行しない。
 
 重要な設計判断:
@@ -247,7 +286,7 @@ biome check . --write: no fixes applied
 注意:
 
 - Cloudflare への deploy はユーザーが行う。こちらでは `pnpm deploy` / `alchemy deploy` を実行しない。
-- `DEFAULT_ICE_SERVERS` は comma-separated STUN/TURN URI list。未指定時は `stun:stun.l.google.com:19302`。
+- `DEFAULT_ICE_SERVERS` は comma-separated STUN/TURN URI list。未指定時は signaling server と bridge の両方で `stun:stun.l.google.com:19302` へフォールバックする。
 - 初期実装は signaling のみ。matchmaking、account、ranking、result upload は未実装。
 
 ### Phase 5: nsmb-net-bridge signaling integration
@@ -337,10 +376,10 @@ webrtc-signaling-udp-pair-smoke via Docker act bridge-check: pass
   - TURN over TCPなど、`libdatachannel` 側で問題があるtransportをfilterする。
   - relay強制モード / STUN-onlyモードをbridge CLIから選べるようにする。
 - bridge CLI / diagnostics:
-  - signaling URL、session、role、ICE server、connection stateを整理してログ出力する。
-  - machine-readableな接続結果ログを追加し、GUI/Tauriから状態を拾いやすくする。
-  - packet stats、disconnect reason、WebRTC state transitionを保存する。
-  - signaling server経由の自動smoke testを追加する。
+  - 完了: signaling URL、session、role、ICE server、connection state、candidate pair、packet stats、disconnect reasonをログと `bridge-status.json` に保存する。
+  - 完了: GUI/Tauri から machine-readable 状態を読み、選択経路を表示する。
+  - 完了: signaling server経由の自動smoke testを維持する。
+  - 今後: WAN 実測ログを見て、タイムアウト値、エラー分類、TURN 強制モードの UI を調整する。
 - security / abuse:
   - sessionごとの最大接続数、message size上限、rate limitを入れる。
   - 必要なら簡易tokenや署名つきsessionを導入する。
@@ -348,7 +387,8 @@ webrtc-signaling-udp-pair-smoke via Docker act bridge-check: pass
 - deployment / operations:
   - GitHub Actionsのdeploy jobは `main` push 自動実行と `main` 手動dispatchを維持しつつ、必要なsecrets/varsをREADMEに明記する。
   - staging/productionを分けるか判断する。
-  - Cloudflare logsで接続失敗理由を追えるようにする。
+  - 完了: Cloudflare logs に join、queue、relay、flush、close を出す。
+  - 今後: deploy 後の Cloudflare logs と各 PC の `bridge-status.json` を突き合わせる運用を確認する。
 
 ### Repository / branch policy
 
