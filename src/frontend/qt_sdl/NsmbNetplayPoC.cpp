@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cctype>
 #include <condition_variable>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -26,6 +27,7 @@
 #include <mutex>
 #include <filesystem>
 #include <iterator>
+#include <limits>
 #include <random>
 #include <set>
 #include <sstream>
@@ -1734,6 +1736,8 @@ struct State
     melonDS::u32 WorldMovingHazardGUIDCache[16] {};
     melonDS::u32 WorldMovingHazardBaseCaches[16][kMaxWorldMovingHazards] {};
     melonDS::u32 WorldMovingHazardGUIDCaches[16][kMaxWorldMovingHazards] {};
+    melonDS::u32 WorldMovingHazardRemoteGUIDMaps[16][kMaxWorldMovingHazards] {};
+    melonDS::u32 WorldMovingHazardLocalGUIDMaps[16][kMaxWorldMovingHazards] {};
     melonDS::u32 WorldMovingHazardCacheCounts[16] {};
     melonDS::u32 LastTracedWorldMovingHazardsFrame[16] {};
     melonDS::u32 LastTracedWorldObjectLifecyclesFrame[16] {};
@@ -10517,6 +10521,23 @@ bool ApplyWireWorldMovingHazardState(
     return true;
 }
 
+melonDS::u64 WorldMovingHazardMatchDistance(
+    const WireWorldActorState& remoteActor,
+    const ObjectScanSample& localActor)
+{
+    const auto componentDistance = [](melonDS::u32 lhs, melonDS::u32 rhs)
+    {
+        const std::int64_t delta =
+            static_cast<std::int64_t>(static_cast<std::int32_t>(lhs)) -
+            static_cast<std::int64_t>(static_cast<std::int32_t>(rhs));
+        return static_cast<melonDS::u64>(delta < 0 ? -delta : delta);
+    };
+
+    return componentDistance(remoteActor.PosX, localActor.PosX) +
+        componentDistance(remoteActor.PosY, localActor.PosY) +
+        componentDistance(remoteActor.PosZ, localActor.PosZ);
+}
+
 bool SpawnRemoteWorldItem(
     int instanceID,
     melonDS::u32 frame,
@@ -10704,11 +10725,92 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
     const melonDS::u32 predictFrames = std::min(
         frame > sample.Frame ? frame - sample.Frame : 0,
         static_cast<melonDS::u32>(std::max(0, G.WorldStateMaxPredictFrames)));
+    int localIndices[kMaxWorldMovingHazards] { -1, -1, -1, -1 };
+    bool localUsed[kMaxWorldMovingHazards] {};
+    melonDS::u32 nextRemoteGUIDs[kMaxWorldMovingHazards] {};
+    melonDS::u32 nextLocalGUIDs[kMaxWorldMovingHazards] {};
+
     for (std::size_t i = 0; i < pairCount; i++)
     {
-        const ObjectScanSample& localActor = localActors[localActors.size() - pairCount + i];
-        const WireWorldActorState& remoteActor = sample.Actors[remoteCount - pairCount + i];
+        const WireWorldActorState& remoteActor = sample.Actors[i];
+        for (std::size_t mapIndex = 0; mapIndex < kMaxWorldMovingHazards; mapIndex++)
+        {
+            if (G.WorldMovingHazardRemoteGUIDMaps[instanceID][mapIndex] != remoteActor.GUID)
+                continue;
+
+            const melonDS::u32 localGUID = G.WorldMovingHazardLocalGUIDMaps[instanceID][mapIndex];
+            for (std::size_t localIndex = 0; localIndex < localActors.size(); localIndex++)
+            {
+                if (!localUsed[localIndex] && localActors[localIndex].GUID == localGUID)
+                {
+                    localIndices[i] = static_cast<int>(localIndex);
+                    localUsed[localIndex] = true;
+                    break;
+                }
+            }
+            break;
+        }
+    }
+
+    for (std::size_t i = 0; i < pairCount; i++)
+    {
+        if (localIndices[i] >= 0)
+            continue;
+
+        const WireWorldActorState& remoteActor = sample.Actors[i];
+        std::size_t closestIndex = localActors.size();
+        melonDS::u64 closestDistance = std::numeric_limits<melonDS::u64>::max();
+        for (std::size_t localIndex = 0; localIndex < localActors.size(); localIndex++)
+        {
+            if (localUsed[localIndex])
+                continue;
+
+            const melonDS::u64 distance =
+                WorldMovingHazardMatchDistance(remoteActor, localActors[localIndex]);
+            if (distance < closestDistance ||
+                (distance == closestDistance &&
+                    (closestIndex == localActors.size() ||
+                        localActors[localIndex].GUID < localActors[closestIndex].GUID)))
+            {
+                closestIndex = localIndex;
+                closestDistance = distance;
+            }
+        }
+        if (closestIndex == localActors.size())
+            return;
+        localIndices[i] = static_cast<int>(closestIndex);
+        localUsed[closestIndex] = true;
+    }
+
+    bool mapChanged = false;
+    for (std::size_t i = 0; i < pairCount; i++)
+    {
+        const ObjectScanSample& localActor = localActors[localIndices[i]];
+        const WireWorldActorState& remoteActor = sample.Actors[i];
+        nextRemoteGUIDs[i] = remoteActor.GUID;
+        nextLocalGUIDs[i] = localActor.GUID;
+        mapChanged = mapChanged ||
+            G.WorldMovingHazardRemoteGUIDMaps[instanceID][i] != nextRemoteGUIDs[i] ||
+            G.WorldMovingHazardLocalGUIDMaps[instanceID][i] != nextLocalGUIDs[i];
         ApplyWireWorldMovingHazardState(nds, remoteActor, predictFrames, localActor.Base);
+    }
+    for (std::size_t i = 0; i < kMaxWorldMovingHazards; i++)
+    {
+        mapChanged = mapChanged ||
+            G.WorldMovingHazardRemoteGUIDMaps[instanceID][i] != nextRemoteGUIDs[i] ||
+            G.WorldMovingHazardLocalGUIDMaps[instanceID][i] != nextLocalGUIDs[i];
+        G.WorldMovingHazardRemoteGUIDMaps[instanceID][i] = nextRemoteGUIDs[i];
+        G.WorldMovingHazardLocalGUIDMaps[instanceID][i] = nextLocalGUIDs[i];
+    }
+    if (mapChanged && G.WorldStateTraceMovingHazards)
+    {
+        std::printf("NSMB WorldHazards: map inst=%d frame=%u count=%zu",
+            instanceID,
+            frame,
+            pairCount);
+        for (std::size_t i = 0; i < pairCount; i++)
+            std::printf(" slot%zu=%u/%u", i, nextRemoteGUIDs[i], nextLocalGUIDs[i]);
+        std::printf("\n");
     }
 }
 
