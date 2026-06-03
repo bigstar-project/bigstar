@@ -8,11 +8,11 @@ export function StatusPill({
   kind: StatusKind;
 }) {
   const colors: Record<StatusKind, string> = {
-    idle: 'border-slate-300 bg-white text-slate-600',
-    ok: 'border-emerald-300 bg-emerald-50 text-emerald-900',
-    warn: 'border-amber-300 bg-amber-50 text-amber-900',
+    idle: 'border-slate-600 bg-slate-950/55 text-slate-300',
+    ok: 'border-emerald-400/45 bg-emerald-500/12 text-emerald-200',
+    warn: 'border-amber-300/45 bg-amber-500/12 text-amber-100',
     error:
-      'border-rose-500 bg-rose-50 text-rose-950 shadow-[0_0_0_1px_rgba(244,63,94,0.35)]',
+      'border-rose-400/70 bg-rose-500/14 text-rose-100 shadow-[0_0_26px_rgba(244,63,94,0.22)]',
   };
   const label: Record<StatusKind, string> = {
     idle: '待機',
@@ -22,9 +22,9 @@ export function StatusPill({
   };
   return (
     <div
-      className={`grid min-h-12 max-w-[58ch] gap-0.5 overflow-wrap-anywhere rounded-lg border px-3 py-2 ${colors[kind]}`}
+      className={`grid min-h-12 max-w-[48ch] gap-0.5 overflow-wrap-anywhere rounded-lg border px-3 py-2 shadow-sm ${colors[kind]}`}
     >
-      <span className="text-[11px] font-black uppercase tracking-normal">
+      <span className="text-[11px] font-black uppercase tracking-normal opacity-75">
         {label[kind]}
       </span>
       <span className="text-sm font-bold leading-snug">{children}</span>

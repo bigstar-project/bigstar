@@ -1,0 +1,35 @@
+import type { BridgeDiagnostics, FormState } from '../types';
+
+export type View = 'battle' | 'settings';
+
+export type UpdateFormField = <K extends keyof FormState>(
+  key: K,
+  value: FormState[K],
+) => void;
+
+export type SelectRomKey = 'hostRomPath' | 'clientRomPath' | 'baseRomPath';
+
+export type LauncherSummary = {
+  connectionActive: boolean;
+  courseNote: string;
+  currentRomPath: string;
+  romPreparation: string;
+  romsConfigured: boolean;
+  selectedStageLabel: string;
+};
+
+export type LauncherActions = {
+  checkForUpdate: () => Promise<void>;
+  copyRoomCode: () => Promise<void>;
+  openLogDir: () => Promise<void>;
+  pollStatus: () => Promise<void>;
+  preflightCheck: () => Promise<void>;
+  prepareRoms: () => Promise<void>;
+  selectRomPath: (key: SelectRomKey) => Promise<void>;
+  startMatch: () => Promise<void>;
+  stopMatch: () => Promise<void>;
+};
+
+export type DiagnosticsState = {
+  bridgeDiagnostics: BridgeDiagnostics | null;
+};

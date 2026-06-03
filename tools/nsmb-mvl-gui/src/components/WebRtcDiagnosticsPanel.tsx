@@ -2,8 +2,10 @@ import type { BridgeDiagnostics } from '../types';
 import { SummaryItem } from './SummaryItem';
 
 export function WebRtcDiagnosticsPanel({
+  compact = false,
   diagnostics,
 }: {
+  compact?: boolean;
   diagnostics: BridgeDiagnostics | null;
 }) {
   const pair = diagnostics?.selected_candidate_pair;
@@ -17,8 +19,16 @@ export function WebRtcDiagnosticsPanel({
     unknown: 'unknown: 判定不能',
   };
   return (
-    <div className="mt-1 grid gap-3 border-t border-slate-200 pt-4">
-      <h2 className="text-lg font-bold text-slate-950">WebRTC 診断</h2>
+    <div
+      className={
+        compact
+          ? 'grid gap-3'
+          : 'mt-1 grid gap-3 border-t border-slate-700/80 pt-4'
+      }
+    >
+      {compact ? null : (
+        <h2 className="text-lg font-black text-white">WebRTC 診断</h2>
+      )}
       <SummaryItem label="phase" value={diagnostics?.phase ?? '未起動'} />
       <SummaryItem
         label="ICE / WebRTC state"
