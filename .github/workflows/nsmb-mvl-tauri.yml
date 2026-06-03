@@ -142,7 +142,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add $configPath $packagePath
-            git commit -m "chore: Tauri GUIを$versionに更新"
+            git commit -m "chore: Tauri GUIを${version}に更新"
             git tag $tag
             git push origin HEAD:refs/heads/${{ github.ref_name }}
             git push origin $tag
