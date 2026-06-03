@@ -8,6 +8,11 @@ pub struct PeerConnection {
     data_channel_rx: tokio::sync::mpsc::Receiver<DataChannel>,
 }
 
+type PendingDataChannelReceiver = (
+    tokio::sync::mpsc::Receiver<Vec<u8>>,
+    std::sync::Arc<tokio::sync::Mutex<DataChannelState>>,
+);
+
 impl PeerConnection {
     pub fn new(
         config: RtcConfig,
@@ -110,16 +115,13 @@ impl PeerConnection {
 
 struct PeerConnectionHandler {
     event_tx: tokio::sync::mpsc::Sender<PeerConnectionEvent>,
-    pending_dc_receiver: Option<(
-        tokio::sync::mpsc::Receiver<Vec<u8>>,
-        std::sync::Arc<tokio::sync::Mutex<DataChannelState>>,
-    )>,
+    pending_dc_receiver: Option<PendingDataChannelReceiver>,
     data_channel_tx: tokio::sync::mpsc::Sender<DataChannel>,
 }
 
 #[derive(Debug)]
 pub enum PeerConnectionEvent {
-    SessionDescription(SessionDescription),
+    SessionDescription(Box<SessionDescription>),
     IceCandidate(IceCandidate),
     ConnectionStateChange(ConnectionState),
     GatheringStateChange(GatheringState),
@@ -148,7 +150,7 @@ impl datachannel::PeerConnectionHandler for PeerConnectionHandler {
     fn on_description(&mut self, description: SessionDescription) {
         let _ = self
             .event_tx
-            .blocking_send(PeerConnectionEvent::SessionDescription(description));
+            .blocking_send(PeerConnectionEvent::SessionDescription(Box::new(description)));
     }
 
     fn on_candidate(&mut self, candidate: IceCandidate) {

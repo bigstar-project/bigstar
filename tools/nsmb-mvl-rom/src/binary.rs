@@ -155,7 +155,7 @@ pub(crate) fn encode_branch(opcode: u32, src_addr: u32, dst_addr: u32) -> Result
         bail!("unaligned branch target 0x{dst_addr:08x} from 0x{src_addr:08x}");
     }
     let off = diff / 4;
-    if off < -(1 << 23) || off >= (1 << 23) {
+    if !(-(1 << 23)..(1 << 23)).contains(&off) {
         bail!("branch target out of range 0x{dst_addr:08x} from 0x{src_addr:08x}");
     }
     Ok(opcode | (off as u32 & 0x00ff_ffff))

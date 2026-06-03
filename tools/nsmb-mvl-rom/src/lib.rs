@@ -82,6 +82,15 @@ struct Overlay {
     data: Vec<u8>,
 }
 
+struct DirectMvlConfig {
+    stage: u8,
+    player_id: u8,
+    scene_settings: u32,
+    initial_lives: u32,
+    life_mode_selector: u32,
+    big_star_selector: u32,
+}
+
 pub fn generate_stable_roms(options: &StableRomOptions) -> Result<StableRomResult> {
     if !options.source_rom.exists() {
         bail!("source ROM not found: {}", options.source_rom.display());
@@ -103,30 +112,28 @@ pub fn generate_stable_roms(options: &StableRomOptions) -> Result<StableRomResul
     let base = RomImage::load(&options.source_rom)?;
 
     let mut host = base.clone();
-    patch_direct_mvl_entry(
-        &mut host,
-        &symbols,
-        options.stage,
-        0,
+    let host_config = DirectMvlConfig {
+        stage: options.stage,
+        player_id: 0,
         scene_settings,
         initial_lives,
         life_mode_selector,
         big_star_selector,
-    )?;
+    };
+    patch_direct_mvl_entry(&mut host, &symbols, &host_config)?;
     patch_wifi_communicating_consoles(&mut host, 2)?;
     host.save(&options.host_rom)?;
 
     let mut client = base;
-    patch_direct_mvl_entry(
-        &mut client,
-        &symbols,
-        options.stage,
-        1,
+    let client_config = DirectMvlConfig {
+        stage: options.stage,
+        player_id: 1,
         scene_settings,
         initial_lives,
         life_mode_selector,
         big_star_selector,
-    )?;
+    };
+    patch_direct_mvl_entry(&mut client, &symbols, &client_config)?;
     patch_wifi_communicating_consoles(&mut client, 2)?;
     client.save(&options.client_rom)?;
 
@@ -331,7 +338,7 @@ impl RomImage {
         for (overlay, data) in self.overlays.iter().zip(&overlay_payloads) {
             let file_id = overlay.file_id as usize;
             let start = align_vec(&mut output, 0x200, 0);
-            output.extend_from_slice(&data);
+            output.extend_from_slice(data);
             fat[file_id] = (start as u32, output.len() as u32);
         }
 
@@ -356,13 +363,13 @@ impl RomImage {
         let banner_off = align_vec(&mut output, 0x200, 0);
         output.extend_from_slice(&self.banner);
 
-        for file_id in 0..self.files.len() {
+        for (file_id, fat_entry) in fat.iter_mut().enumerate().take(self.files.len()) {
             if overlay_file_ids.contains(&(file_id as u32)) {
                 continue;
             }
             let start = align_vec(&mut output, 0x200, 0xff);
             output.extend_from_slice(&self.files[file_id]);
-            fat[file_id] = (start as u32, output.len() as u32);
+            *fat_entry = (start as u32, output.len() as u32);
         }
 
         let rom_size = output.len() as u32;
@@ -506,12 +513,7 @@ fn compress_arm9_with_build_info(
 fn patch_direct_mvl_entry(
     rom: &mut RomImage,
     symbols: &BTreeMap<String, u32>,
-    stage: u8,
-    player_id: u8,
-    scene_settings: u32,
-    initial_lives: u32,
-    life_mode_selector: u32,
-    big_star_selector: u32,
+    config: &DirectMvlConfig,
 ) -> Result<()> {
     patch_arm9_words(rom, 0x0201_3428, &[encode_mov_imm(12, 6)?])?;
 
@@ -526,12 +528,7 @@ fn patch_direct_mvl_entry(
         update_addr,
         symbol(symbols, "_ZN4Game9loadLevelEtmhhhhhhhhhhhhhhm")?,
         symbol(symbols, "_ZN14VSConnectScene19loadMvsLFilesThreadEv")?,
-        stage,
-        player_id,
-        scene_settings,
-        initial_lives,
-        life_mode_selector,
-        big_star_selector,
+        config,
     )?;
     patch_overlay_words(rom, update_addr, &stub)?;
 
@@ -553,27 +550,22 @@ fn build_direct_loadlevel_stub(
     start_addr: u32,
     load_level_addr: u32,
     load_mvl_files_after_addr: u32,
-    stage: u8,
-    player_id: u8,
-    force_scene_settings: u32,
-    initial_lives: u32,
-    life_mode_selector: u32,
-    big_star_selector: u32,
+    config: &DirectMvlConfig,
 ) -> Result<Vec<u32>> {
     let stack_values = [
-        0,                // act
-        player_id as u32, // playerID
-        3,                // playerMask
-        0,                // character1
-        1,                // character2
-        0,                // powerup
-        0xff,             // entrance
-        1,                // flag
-        0,                // unused1
-        0,                // controlOptions
-        0,                // unused2
-        0,                // challengeMode
-        0xffff_ffff,      // rngSeed: use network/random state
+        0,                       // act
+        config.player_id as u32, // playerID
+        3,                       // playerMask
+        0,                       // character1
+        1,                       // character2
+        0,                       // powerup
+        0xff,                    // entrance
+        1,                       // flag
+        0,                       // unused1
+        0,                       // controlOptions
+        0,                       // unused2
+        0,                       // challengeMode
+        0xffff_ffff,             // rngSeed: use network/random state
     ];
 
     let mut words = vec![
@@ -605,7 +597,7 @@ fn build_direct_loadlevel_stub(
     words.push(encode_mov_imm(0, 0x0f)?);
     words.push(encode_mov_imm(1, 1)?);
     words.push(encode_mov_imm(2, 9)?);
-    words.push(encode_mov_imm(3, stage as u32)?);
+    words.push(encode_mov_imm(3, config.stage as u32)?);
     words.push(with_cond(
         encode_ldr_imm(3, 4, MVL_RUNTIME_CONFIG_STAGE_OFFSET)?,
         0,
@@ -630,7 +622,7 @@ fn build_direct_loadlevel_stub(
     words.push(encode_cmp_reg(12, 2));
 
     emit_ldr_literal(&mut words, 0, 0x0208_8F38, 0xE);
-    emit_ldr_literal(&mut words, 1, force_scene_settings, 0xE);
+    emit_ldr_literal(&mut words, 1, config.scene_settings, 0xE);
     words.push(with_cond(
         encode_ldr_imm(1, 4, MVL_RUNTIME_CONFIG_SCENE_SETTINGS_OFFSET)?,
         0,
@@ -638,7 +630,7 @@ fn build_direct_loadlevel_stub(
     words.push(encode_str_imm(1, 0, 0)?);
 
     emit_ldr_literal(&mut words, 0, 0x0208_B364, 0xE);
-    words.push(encode_load_imm(1, initial_lives)?);
+    words.push(encode_load_imm(1, config.initial_lives)?);
     words.push(with_cond(
         encode_ldr_imm(1, 4, MVL_RUNTIME_CONFIG_INITIAL_LIVES_OFFSET)?,
         0,
@@ -647,7 +639,7 @@ fn build_direct_loadlevel_stub(
     words.push(encode_str_imm(1, 0, 4)?);
 
     emit_ldr_literal(&mut words, 0, 0x0215_C89C, 0xE);
-    words.push(encode_mov_imm(1, life_mode_selector)?);
+    words.push(encode_mov_imm(1, config.life_mode_selector)?);
     words.push(with_cond(
         encode_ldr_imm(1, 4, MVL_RUNTIME_CONFIG_LIFE_MODE_SELECTOR_OFFSET)?,
         0,
@@ -655,7 +647,7 @@ fn build_direct_loadlevel_stub(
     words.push(encode_strb_imm(1, 0, 0)?);
 
     emit_ldr_literal(&mut words, 0, 0x0215_C88C, 0xE);
-    words.push(encode_mov_imm(1, big_star_selector)?);
+    words.push(encode_mov_imm(1, config.big_star_selector)?);
     words.push(with_cond(
         encode_ldr_imm(1, 4, MVL_RUNTIME_CONFIG_BIG_STAR_SELECTOR_OFFSET)?,
         0,
@@ -676,7 +668,7 @@ fn build_direct_loadlevel_stub(
     words.push(encode_add_imm(2, 1, 0x14)?);
     words.push(encode_str_imm(2, 0, 4)?);
     emit_ldr_literal(&mut words, 0, 0x0208_87F0, 0xE);
-    words.push(encode_mov_imm(1, (player_id & 3) as u32)?);
+    words.push(encode_mov_imm(1, (config.player_id & 3) as u32)?);
     words.push(encode_str_imm(1, 0, 0)?);
     words.push(encode_add_sp_imm(0x38)?);
     words.push(encode_mov_imm(0, 1)?);

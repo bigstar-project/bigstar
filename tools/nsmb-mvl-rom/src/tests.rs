@@ -1,6 +1,6 @@
 use super::{
     big_star_selector, build_direct_loadlevel_stub, encode_load_imm, encode_str_imm, initial_lives,
-    life_mode_selector, stage_scene_settings,
+    life_mode_selector, stage_scene_settings, DirectMvlConfig,
 };
 
 #[test]
@@ -29,18 +29,16 @@ fn big_star_targets_use_the_native_selector_table() {
 
 #[test]
 fn direct_loadlevel_uses_network_random_seed() {
-    let stub = build_direct_loadlevel_stub(
-        0x0215_0000,
-        0x0200_0000,
-        0x0210_0000,
-        2,
-        0,
-        0x00b6_ff00,
-        3,
-        0,
-        1,
-    )
-    .expect("build direct MvL stub");
+    let config = DirectMvlConfig {
+        stage: 2,
+        player_id: 0,
+        scene_settings: 0x00b6_ff00,
+        initial_lives: 3,
+        life_mode_selector: 0,
+        big_star_selector: 1,
+    };
+    let stub = build_direct_loadlevel_stub(0x0215_0000, 0x0200_0000, 0x0210_0000, &config)
+        .expect("build direct MvL stub");
     let load_network_rng_seed = encode_load_imm(12, 0xffff_ffff).expect("encode rng seed");
     let store_rng_seed = encode_str_imm(12, 13, 0x30).expect("encode rng seed store");
 

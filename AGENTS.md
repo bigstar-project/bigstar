@@ -39,3 +39,9 @@ Before the final response of any turn that changes implementation status or proj
 - move obsolete blockers into completed/resolved notes or remove them
 - keep the current blocker and next action easy to find near the top
 - avoid long chronological append-only logs when a concise current-state summary is clearer
+
+## Code Quality Checks
+
+When changing Rust code, run Rust formatting and Clippy before ending the turn. Use `cargo fmt` for the affected crate/workspace, then run the local strict Clippy alias, normally `cargo clippy-all`, which treats warnings as errors.
+
+When changing TypeScript code, run Biome and typecheck before ending the turn. Use the package's existing scripts, such as `pnpm biome check`/`pnpm biome format` and `pnpm typecheck`, or the repo-local equivalents if the package defines different script names.

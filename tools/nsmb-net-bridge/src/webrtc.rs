@@ -19,6 +19,17 @@ struct WebRtcEndpoint {
     event_rx: tokio::sync::mpsc::Receiver<datachannel_wrapper::PeerConnectionEvent>,
 }
 
+pub struct SignalingWebRtcConfig {
+    pub side: String,
+    pub local_bind: SocketAddr,
+    pub local_target: Option<SocketAddr>,
+    pub stun_servers: Vec<String>,
+    pub signal_url: String,
+    pub session: String,
+    pub status_file: Option<PathBuf>,
+    pub fallback_to_default_stun: bool,
+}
+
 mod diagnostics;
 use diagnostics::DiagnosticsReporter;
 
@@ -360,7 +371,7 @@ async fn connect_offer(
     let offer = endpoint
         .peer_connection
         .local_description()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "missing local offer SDP"))?;
+        .ok_or_else(|| io::Error::other("missing local offer SDP"))?;
     print_sdp("offer", &offer.sdp.to_string());
     let answer_sdp = read_pasted_sdp("Paste answer SDP base64 from the answer side.")?;
     reporter.observe_remote_sdp("answer", &answer_sdp);
@@ -396,7 +407,7 @@ async fn connect_answer(
     let answer = endpoint
         .peer_connection
         .local_description()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "missing local answer SDP"))?;
+        .ok_or_else(|| io::Error::other("missing local answer SDP"))?;
     print_sdp("answer", &answer.sdp.to_string());
     wait_connected(&mut endpoint, reporter).await?;
     Ok(endpoint)
@@ -433,7 +444,7 @@ async fn connect_signal_offer(
     let offer = endpoint
         .peer_connection
         .local_description()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "missing local offer SDP"))?;
+        .ok_or_else(|| io::Error::other("missing local offer SDP"))?;
     ws.send(WebSocketMessage::Text(
         serde_json::json!({
             "type": "sdp",
@@ -524,7 +535,7 @@ async fn connect_signal_answer(
     let answer = endpoint
         .peer_connection
         .local_description()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "missing local answer SDP"))?;
+        .ok_or_else(|| io::Error::other("missing local answer SDP"))?;
     ws.send(WebSocketMessage::Text(
         serde_json::json!({
             "type": "sdp",
@@ -579,15 +590,18 @@ pub async fn run_manual_webrtc(
 }
 
 pub async fn run_signaling_webrtc(
-    side: String,
-    local_bind: SocketAddr,
-    local_target: Option<SocketAddr>,
-    stun_servers: Vec<String>,
-    signal_url: String,
-    session: String,
-    status_file: Option<PathBuf>,
-    fallback_to_default_stun: bool,
+    config: SignalingWebRtcConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let SignalingWebRtcConfig {
+        side,
+        local_bind,
+        local_target,
+        stun_servers,
+        signal_url,
+        session,
+        status_file,
+        fallback_to_default_stun,
+    } = config;
     let role = role_from_side(&side);
     let mut reporter = DiagnosticsReporter::new(status_file, role);
     println!(
@@ -655,7 +669,7 @@ pub async fn run_loopback_smoke(
     let offer_sdp = offer
         .peer_connection
         .local_description()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "missing loopback offer SDP"))?
+        .ok_or_else(|| io::Error::other("missing loopback offer SDP"))?
         .sdp
         .to_string();
     answer
@@ -671,7 +685,7 @@ pub async fn run_loopback_smoke(
     let answer_sdp = answer
         .peer_connection
         .local_description()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "missing loopback answer SDP"))?
+        .ok_or_else(|| io::Error::other("missing loopback answer SDP"))?
         .sdp
         .to_string();
     offer
@@ -855,16 +869,16 @@ pub async fn run_signaling_udp_pair_smoke(
     let offer_signal = signal_url.clone();
     let offer_session = session.clone();
     let offer_task = tokio::spawn(async move {
-        if let Err(err) = run_signaling_webrtc(
-            "webrtc-offer".to_owned(),
-            offer_bridge_addr,
-            Some(host_app_addr),
-            offer_stun,
-            offer_signal,
-            offer_session,
-            None,
-            false,
-        )
+        if let Err(err) = run_signaling_webrtc(SignalingWebRtcConfig {
+            side: "webrtc-offer".to_owned(),
+            local_bind: offer_bridge_addr,
+            local_target: Some(host_app_addr),
+            stun_servers: offer_stun,
+            signal_url: offer_signal,
+            session: offer_session,
+            status_file: None,
+            fallback_to_default_stun: false,
+        })
         .await
         {
             eprintln!("nsmb-net-bridge webrtc: offer smoke task failed: {err}");
@@ -872,16 +886,16 @@ pub async fn run_signaling_udp_pair_smoke(
     });
 
     let answer_task = tokio::spawn(async move {
-        if let Err(err) = run_signaling_webrtc(
-            "webrtc-answer".to_owned(),
-            answer_bridge_addr,
-            None,
+        if let Err(err) = run_signaling_webrtc(SignalingWebRtcConfig {
+            side: "webrtc-answer".to_owned(),
+            local_bind: answer_bridge_addr,
+            local_target: None,
             stun_servers,
             signal_url,
             session,
-            None,
-            false,
-        )
+            status_file: None,
+            fallback_to_default_stun: false,
+        })
         .await
         {
             eprintln!("nsmb-net-bridge webrtc: answer smoke task failed: {err}");

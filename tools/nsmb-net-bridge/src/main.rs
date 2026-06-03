@@ -16,6 +16,14 @@ struct UdpTunnelConfig {
     bridge_peer: SocketAddr,
 }
 
+struct LocalWebRtcConfig {
+    local_bind: SocketAddr,
+    local_target: Option<SocketAddr>,
+    stun_servers: Vec<String>,
+    signal_session: Option<(String, String)>,
+    status_file: Option<PathBuf>,
+}
+
 #[derive(Default)]
 struct Stats {
     app_to_bridge_packets: u64,
@@ -88,18 +96,7 @@ fn parse_udp_config(args: &[String]) -> Result<UdpTunnelConfig, String> {
     })
 }
 
-fn parse_local_config(
-    args: &[String],
-) -> Result<
-    (
-        SocketAddr,
-        Option<SocketAddr>,
-        Vec<String>,
-        Option<(String, String)>,
-        Option<PathBuf>,
-    ),
-    String,
-> {
+fn parse_local_config(args: &[String]) -> Result<LocalWebRtcConfig, String> {
     let local_bind = take_arg(args, "--local-bind")
         .ok_or_else(|| "missing --local-bind".to_owned())
         .and_then(|v| parse_socket_addr(&v, "--local-bind"))?;
@@ -108,7 +105,8 @@ fn parse_local_config(
         .transpose()?;
     let stun_servers = args
         .windows(2)
-        .filter_map(|w| (w[0] == "--stun").then(|| w[1].clone()))
+        .filter(|w| w[0] == "--stun")
+        .map(|w| w[1].clone())
         .collect::<Vec<_>>();
     let signal = take_arg(args, "--signal");
     let session = take_arg(args, "--session");
@@ -129,13 +127,13 @@ fn parse_local_config(
     };
     let status_file = take_arg(args, "--status-file").map(PathBuf::from);
 
-    Ok((
+    Ok(LocalWebRtcConfig {
         local_bind,
         local_target,
         stun_servers,
         signal_session,
         status_file,
-    ))
+    })
 }
 
 fn validate_signal_session(session: &str) -> Result<(), String> {
@@ -279,47 +277,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             run_udp_tunnel(config)?;
         }
         "webrtc-offer" | "webrtc-answer" => {
-            let (local_bind, local_target, stun_servers, signal_session, status_file) =
-                parse_local_config(&args[1..]).map_err(|err| {
-                    io::Error::new(io::ErrorKind::InvalidInput, format!("{err}\n{}", usage()))
-                })?;
-            match signal_session {
+            let config = parse_local_config(&args[1..]).map_err(|err| {
+                io::Error::new(io::ErrorKind::InvalidInput, format!("{err}\n{}", usage()))
+            })?;
+            match config.signal_session {
                 Some((signal_url, session)) => run_signaling_webrtc(
                     args[0].as_str(),
-                    local_bind,
-                    local_target,
-                    stun_servers,
+                    config.local_bind,
+                    config.local_target,
+                    config.stun_servers,
                     signal_url,
                     session,
-                    status_file,
+                    config.status_file,
                 )?,
                 None => run_manual_webrtc(
                     args[0].as_str(),
-                    local_bind,
-                    local_target,
-                    stun_servers,
-                    status_file,
+                    config.local_bind,
+                    config.local_target,
+                    config.stun_servers,
+                    config.status_file,
                 )?,
             }
         }
         "webrtc-loopback-smoke" => {
             let stun_servers = args[1..]
                 .windows(2)
-                .filter_map(|w| (w[0] == "--stun").then(|| w[1].clone()))
+                .filter(|w| w[0] == "--stun")
+                .map(|w| w[1].clone())
                 .collect::<Vec<_>>();
             run_webrtc_loopback_smoke(stun_servers)?;
         }
         "webrtc-signaling-loopback-smoke" => {
             let stun_servers = args[1..]
                 .windows(2)
-                .filter_map(|w| (w[0] == "--stun").then(|| w[1].clone()))
+                .filter(|w| w[0] == "--stun")
+                .map(|w| w[1].clone())
                 .collect::<Vec<_>>();
             run_webrtc_signaling_loopback_smoke(stun_servers)?;
         }
         "webrtc-signaling-udp-pair-smoke" => {
             let stun_servers = args[1..]
                 .windows(2)
-                .filter_map(|w| (w[0] == "--stun").then(|| w[1].clone()))
+                .filter(|w| w[0] == "--stun")
+                .map(|w| w[1].clone())
                 .collect::<Vec<_>>();
             run_webrtc_signaling_udp_pair_smoke(stun_servers)?;
         }
@@ -460,14 +460,16 @@ fn run_signaling_webrtc(
         .enable_all()
         .build()?;
     runtime.block_on(webrtc::run_signaling_webrtc(
-        side.to_owned(),
-        local_bind,
-        local_target,
-        stun_servers,
-        signal_url,
-        session,
-        status_file,
-        true,
+        webrtc::SignalingWebRtcConfig {
+            side: side.to_owned(),
+            local_bind,
+            local_target,
+            stun_servers,
+            signal_url,
+            session,
+            status_file,
+            fallback_to_default_stun: true,
+        },
     ))
 }
 
