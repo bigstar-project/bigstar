@@ -1,3 +1,5 @@
+import { relaunch } from '@tauri-apps/plugin-process';
+import { check } from '@tauri-apps/plugin-updater';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActionButton,
@@ -52,6 +54,7 @@ export function App() {
     useState<BridgeDiagnostics | null>(null);
   const [defaultsLoaded, setDefaultsLoaded] = useState(false);
   const [romPreparation, setRomPreparation] = useState('未確認');
+  const [updateBusy, setUpdateBusy] = useState(false);
 
   const currentRomPath =
     form.role === 'host' ? form.hostRomPath : form.clientRomPath;
@@ -305,6 +308,44 @@ export function App() {
     }
   };
 
+  const checkForUpdate = async () => {
+    try {
+      setUpdateBusy(true);
+      setStatus({ text: '更新を確認中', kind: 'idle' });
+      const update = await check();
+      if (!update) {
+        setStatus({ text: '利用可能な更新はありません', kind: 'ok' });
+        return;
+      }
+      setStatus({
+        text: `v${update.version} をインストール中`,
+        kind: 'idle',
+      });
+      await update.downloadAndInstall((event) => {
+        if (event.event === 'Started') {
+          setStatus({
+            text: `更新をダウンロード中 (${event.data.contentLength ?? '不明'} bytes)`,
+            kind: 'idle',
+          });
+        }
+        if (event.event === 'Progress') {
+          setStatus({
+            text: `更新をダウンロード中 (+${event.data.chunkLength} bytes)`,
+            kind: 'idle',
+          });
+        }
+        if (event.event === 'Finished') {
+          setStatus({ text: '更新をインストールしました', kind: 'ok' });
+        }
+      });
+      await relaunch();
+    } catch (error) {
+      setStatus({ text: String(error), kind: 'error' });
+    } finally {
+      setUpdateBusy(false);
+    }
+  };
+
   return (
     <main className="mx-auto grid w-[min(1160px,calc(100vw-48px))] gap-6 py-8">
       <header className="flex items-end justify-between gap-6">
@@ -314,7 +355,17 @@ export function App() {
           </p>
           <h1 className="text-3xl font-bold text-slate-950">対戦ランチャー</h1>
         </div>
-        <StatusPill kind={status.kind}>{status.text}</StatusPill>
+        <div className="flex items-end gap-3">
+          <ActionButton
+            kind="secondary"
+            type="button"
+            disabled={updateBusy}
+            onClick={() => void checkForUpdate()}
+          >
+            更新確認
+          </ActionButton>
+          <StatusPill kind={status.kind}>{status.text}</StatusPill>
+        </div>
       </header>
 
       <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(320px,0.9fr)] gap-5 max-[860px]:grid-cols-1">

@@ -17,3 +17,7 @@ tauri = { version = "2.9.0", features = [] }
 
 [lints.rust]
 unsafe_code = "forbid"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-process = "2"
+tauri-plugin-updater = "2"

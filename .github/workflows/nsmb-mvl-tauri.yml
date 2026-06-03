@@ -2,10 +2,22 @@ name: NSMB MvL Tauri
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish a GitHub Release with Tauri updater metadata
+        required: false
+        default: false
+        type: boolean
+      release_tag:
+        description: Release tag to create when publishing manually; defaults to nsmb-mvl-gui-v<version>
+        required: false
+        type: string
   push:
     branches:
       - main
       - master
+    tags:
+      - "nsmb-mvl-gui-v*"
     paths:
       - ".github/workflows/nsmb-mvl-tauri.yml"
       - "scripts/prepare-nsmb-mvl-tauri-sidecars.ps1"
@@ -28,6 +40,9 @@ on:
       - "src/**"
       - "CMakeLists.txt"
       - "vcpkg.json"
+
+permissions:
+  contents: write
 
 env:
   MELONDS_GIT_BRANCH: ${{ github.ref }}
@@ -176,13 +191,105 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Test Tauri backend
         run: cargo test --release --manifest-path tools/nsmb-mvl-gui/src-tauri/Cargo.toml
+      - name: Resolve release metadata
+        id: release-meta
+        shell: pwsh
+        run: |
+          $config = Get-Content -LiteralPath "tools/nsmb-mvl-gui/src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json
+          $publish = "${{ github.ref_type }}" -eq "tag"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.publish_release }}" -eq "true") {
+            $publish = $true
+          }
+
+          $tag = "${{ github.ref_name }}"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $inputTag = "${{ inputs.release_tag }}"
+            if ($inputTag) {
+              $tag = $inputTag
+            } else {
+              $tag = "nsmb-mvl-gui-v$($config.version)"
+            }
+          }
+
+          "publish=$($publish.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$($config.version)" >> $env:GITHUB_OUTPUT
       - name: Build Tauri app
         working-directory: tools/nsmb-mvl-gui
-        run: pnpm tauri build
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if ("${{ steps.release-meta.outputs.publish }}" -eq "true") {
+            if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
+              throw "TAURI_SIGNING_PRIVATE_KEY secret is required to publish a signed updater release"
+            }
+            if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
+              $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
+            }
+            pnpm tauri build --ci --config src-tauri/tauri.release.conf.json
+          } else {
+            pnpm tauri build
+          }
       - name: Run packaged app preflight
         shell: pwsh
         run: .\tools\nsmb-mvl-gui\src-tauri\target\release\nsmb-mvl-gui.exe --preflight
+      - name: Generate updater metadata
+        if: steps.release-meta.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $bundleDir = "tools/nsmb-mvl-gui/src-tauri/target/release/bundle"
+          $assetDir = "tools/nsmb-mvl-gui/release-assets"
+          New-Item -ItemType Directory -Force -Path $assetDir | Out-Null
+
+          Get-ChildItem -LiteralPath $bundleDir -Recurse -File |
+            Where-Object { $_.Extension -ne ".sig" } |
+            Copy-Item -Destination $assetDir -Force
+
+          $pairs = Get-ChildItem -LiteralPath $bundleDir -Recurse -File -Filter "*.sig" | ForEach-Object {
+            $artifactPath = $_.FullName -replace "\.sig$", ""
+            if (Test-Path -LiteralPath $artifactPath) {
+              [pscustomobject]@{
+                ArtifactPath = $artifactPath
+                ArtifactName = [IO.Path]::GetFileName($artifactPath)
+                SignaturePath = $_.FullName
+                Priority = if ($artifactPath -like "*.exe") { 0 } elseif ($artifactPath -like "*.msi") { 1 } else { 2 }
+              }
+            }
+          }
+          $pair = $pairs | Sort-Object Priority, ArtifactName | Select-Object -First 1
+          if (-not $pair) {
+            throw "No signed updater artifact pair was found under $bundleDir"
+          }
+
+          Copy-Item -LiteralPath $pair.SignaturePath -Destination $assetDir -Force
+          $signature = (Get-Content -LiteralPath $pair.SignaturePath -Raw).Trim()
+          $tag = "${{ steps.release-meta.outputs.tag }}"
+          $repo = "${{ github.repository }}"
+          $encodedArtifactName = [uri]::EscapeDataString($pair.ArtifactName)
+          $url = "https://github.com/$repo/releases/download/$tag/$encodedArtifactName"
+          $metadata = [ordered]@{
+            version = "${{ steps.release-meta.outputs.version }}"
+            notes = "NSMB Mario vs Luigi Online ${{ steps.release-meta.outputs.version }}"
+            pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            platforms = [ordered]@{
+              "windows-x86_64" = [ordered]@{
+                signature = $signature
+                url = $url
+              }
+            }
+          }
+          $metadata | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $assetDir "latest.json") -Encoding UTF8
       - uses: actions/upload-artifact@v7
         with:
           name: nsmb-mvl-tauri-windows-x86_64
           path: tools/nsmb-mvl-gui/src-tauri/target/release/bundle/**
+      - name: Publish GitHub Release
+        if: steps.release-meta.outputs.publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release-meta.outputs.tag }}
+          name: NSMB MvL GUI ${{ steps.release-meta.outputs.version }}
+          files: tools/nsmb-mvl-gui/release-assets/*
+          fail_on_unmatched_files: true
