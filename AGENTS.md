@@ -16,7 +16,12 @@ When work starts, changes direction, completes a meaningful step, or hits a bloc
 - `docs/nsmb-wan-netplay-roadmap.md`: WAN transport, WebRTC sidecar, desktop GUI, backend, matchmaking, and ranking roadmap.
 - `docs/nsmb-mvl-rollback-design-notes.md`: rollback design notes kept for later reference.
 
-When reading Japanese text in PowerShell, it may sometimes appear garbled, but this is due to the character encoding; the content itself is normal.
+When reading Japanese Markdown or other Japanese UTF-8 text in PowerShell, do not use plain `Get-Content` or `-Encoding Default`; they can mojibake in this environment. Use one of these instead:
+
+- Full or ranged reads: `Get-Content -LiteralPath <path> -Encoding UTF8`
+- Searches and line-numbered reads: `rg -n "<pattern>" <path>`
+
+If Japanese text still appears garbled, treat it as an output decoding issue first and retry with explicit UTF-8 before assuming the file content is corrupt.
 
 The relevant tracking document should show:
 
