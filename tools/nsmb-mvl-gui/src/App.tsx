@@ -1,137 +1,45 @@
-import { invoke } from '@tauri-apps/api/core';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-
-type Role = 'host' | 'client';
-type CourseMode = 'random' | 'select';
-type Lives = '3' | '5' | 'endless';
-type StatusKind = 'idle' | 'ok' | 'warn' | 'error';
-
-type Defaults = {
-  signal_url: string;
-  room_code: string;
-  host_rom_path: string;
-  client_rom_path: string;
-  base_rom_path: string;
-  port: number;
-};
-
-type GameSettings = {
-  course_mode: CourseMode;
-  wins: number;
-  big_stars: number;
-  lives: Lives;
-  match_seed: string;
-};
-
-type LaunchRequest = {
-  role: Role;
-  signal_url: string;
-  room_code: string;
-  port: number;
-  rom_path: string;
-  settings: GameSettings;
-};
-
-type GenerateRomRequest = {
-  source_rom: string;
-  host_rom: string;
-  client_rom: string;
-  stage: number;
-  settings: GameSettings;
-};
-
-type SaveRomPathsRequest = {
-  host_rom_path: string;
-  client_rom_path: string;
-  base_rom_path: string;
-};
-
-type LaunchResponse = {
-  log_dir: string;
-  melon_pid: number;
-  bridge_pid: number;
-};
-
-type GenerateRomResponse = {
-  host_rom: string;
-  client_rom: string;
-  generated: boolean;
-};
-
-type SessionStatus = {
-  active: boolean;
-  log_dir?: string;
-  melon?: string;
-  bridge?: string;
-  webrtc?: BridgeDiagnostics;
-  diagnostics_error?: string;
-};
-
-type BridgeDiagnostics = {
-  role?: string;
-  phase?: string;
-  signal_url?: string;
-  session?: string;
-  ice_servers?: string[];
-  connection_state?: string;
-  gathering_state?: string;
-  ice_state?: string;
-  selected_candidate_pair?: {
-    route?: string;
-    local_type?: string;
-    remote_type?: string;
-    local?: string;
-    remote?: string;
-    local_address?: string;
-    remote_address?: string;
-  };
-  stats?: {
-    app_to_webrtc_packets?: number;
-    app_to_webrtc_bytes?: number;
-    webrtc_to_app_packets?: number;
-    webrtc_to_app_bytes?: number;
-    dropped_no_local_target?: number;
-  };
-  last_error?: string;
-};
-
-type PreflightResponse = {
-  melonds_path: string;
-  bridge_path: string;
-  input_script: string;
-  symbols_file: string;
-  bridge_smoke: string;
-};
-
-type FormState = {
-  role: Role;
-  signalUrl: string;
-  roomCode: string;
-  port: number;
-  hostRomPath: string;
-  clientRomPath: string;
-  baseRomPath: string;
-  courseMode: CourseMode;
-  wins: number;
-  bigStars: number;
-  lives: Lives;
-  matchSeed: string;
-};
-
-const initialForm: FormState = {
-  role: 'host',
-  signalUrl: '',
-  roomCode: '',
-  port: 8165,
-  hostRomPath: '',
-  clientRomPath: '',
-  baseRomPath: '',
-  courseMode: 'random',
-  wins: 2,
-  bigStars: 5,
-  lives: 'endless',
-  matchSeed: '',
-};
+import {
+  ActionButton,
+  FilePathField,
+  NumberField,
+  RoleButton,
+  SelectField,
+  TextField,
+} from './components/Fields';
+import { StatusPill } from './components/StatusPill';
+import { SummaryItem } from './components/SummaryItem';
+import { WebRtcDiagnosticsPanel } from './components/WebRtcDiagnosticsPanel';
+import {
+  currentSettings,
+  generateSeed,
+  initialForm,
+  processExited,
+  selectedStageFrom,
+  withRequiredSeed,
+} from './form';
+import {
+  ensureRoms,
+  generateRoms,
+  getDefaults,
+  getSessionStatus,
+  openLogDir as openLogDirCommand,
+  runPreflightCheck,
+  saveRomPaths,
+  selectRomFile,
+  startMatch as startMatchCommand,
+  stopMatch as stopMatchCommand,
+} from './tauriClient';
+import type {
+  BridgeDiagnostics,
+  CourseMode,
+  FormState,
+  GenerateRomRequest,
+  LaunchRequest,
+  Lives,
+  SaveRomPathsRequest,
+  StatusKind,
+} from './types';
 
 export function App() {
   const [form, setForm] = useState<FormState>(initialForm);
@@ -171,7 +79,7 @@ export function App() {
 
   const pollStatus = useCallback(async () => {
     try {
-      const response = await invoke<SessionStatus>('session_status');
+      const response = await getSessionStatus();
       if (response.log_dir) {
         setLastLogDir(response.log_dir);
       }
@@ -205,7 +113,7 @@ export function App() {
 
     async function init() {
       try {
-        const defaults = await invoke<Defaults>('get_defaults');
+        const defaults = await getDefaults();
         if (disposed) return;
         setForm({
           role: 'host',
@@ -248,7 +156,7 @@ export function App() {
       base_rom_path: form.baseRomPath,
     };
     const timer = window.setTimeout(() => {
-      void invoke('save_rom_paths', { request }).catch((error) => {
+      void saveRomPaths(request).catch((error) => {
         setStatus({ text: String(error), kind: 'warn' });
       });
     }, 250);
@@ -259,9 +167,7 @@ export function App() {
     key: 'hostRomPath' | 'clientRomPath' | 'baseRomPath',
   ) => {
     try {
-      const selected = await invoke<string | null>('select_rom_file', {
-        currentPath: form[key],
-      });
+      const selected = await selectRomFile(form[key]);
       if (selected) {
         updateField(key, selected);
       }
@@ -273,7 +179,7 @@ export function App() {
   const preflightCheck = async () => {
     try {
       setStatus({ text: '起動前チェック中', kind: 'idle' });
-      const response = await invoke<PreflightResponse>('preflight_check');
+      const response = await runPreflightCheck();
       console.info('preflight', response);
       setStatus({ text: '起動前チェック OK', kind: 'ok' });
     } catch (error) {
@@ -305,9 +211,7 @@ export function App() {
 
     try {
       setStatus({ text: '共通 ROM を準備中', kind: 'idle' });
-      const response = await invoke<GenerateRomResponse>('generate_roms', {
-        request,
-      });
+      const response = await generateRoms(request);
       setForm((current) => ({
         ...current,
         hostRomPath: response.host_rom,
@@ -320,7 +224,7 @@ export function App() {
     }
   };
 
-  const ensureRoms = async (nextForm: FormState, stage: number) => {
+  const ensurePreparedRoms = async (nextForm: FormState, stage: number) => {
     const request: GenerateRomRequest = {
       source_rom: nextForm.baseRomPath,
       host_rom: nextForm.hostRomPath,
@@ -328,9 +232,7 @@ export function App() {
       stage,
       settings: currentSettings(nextForm),
     };
-    const response = await invoke<GenerateRomResponse>('ensure_roms', {
-      request,
-    });
+    const response = await ensureRoms(request);
     setForm((current) => ({
       ...current,
       hostRomPath: response.host_rom,
@@ -368,11 +270,11 @@ export function App() {
 
     try {
       setStatus({ text: '共通 ROM を確認中', kind: 'idle' });
-      const roms = await ensureRoms(nextForm, stage);
+      const roms = await ensurePreparedRoms(nextForm, stage);
       request.rom_path =
         nextForm.role === 'host' ? roms.host_rom : roms.client_rom;
       setStatus({ text: `起動中 stage=${stage}`, kind: 'idle' });
-      const response = await invoke<LaunchResponse>('start_match', { request });
+      const response = await startMatchCommand(request);
       setLastLogDir(response.log_dir);
       setStatus({
         text: `起動済み melonDS:${response.melon_pid} bridge:${response.bridge_pid}`,
@@ -385,7 +287,7 @@ export function App() {
 
   const stopMatch = async () => {
     try {
-      await invoke('stop_match');
+      await stopMatchCommand();
       setStatus({ text: '停止しました', kind: 'warn' });
     } catch (error) {
       setStatus({ text: String(error), kind: 'error' });
@@ -397,7 +299,7 @@ export function App() {
       return;
     }
     try {
-      await invoke('open_log_dir', { path: lastLogDir });
+      await openLogDirCommand(lastLogDir);
     } catch (error) {
       setStatus({ text: String(error), kind: 'error' });
     }
@@ -586,308 +488,4 @@ export function App() {
       </div>
     </main>
   );
-}
-
-function StatusPill({
-  children,
-  kind,
-}: {
-  children: string;
-  kind: StatusKind;
-}) {
-  const colors: Record<StatusKind, string> = {
-    idle: 'border-slate-300 bg-white text-slate-600',
-    ok: 'border-emerald-300 bg-emerald-50 text-emerald-900',
-    warn: 'border-amber-300 bg-amber-50 text-amber-900',
-    error:
-      'border-rose-500 bg-rose-50 text-rose-950 shadow-[0_0_0_1px_rgba(244,63,94,0.35)]',
-  };
-  const label: Record<StatusKind, string> = {
-    idle: '待機',
-    ok: '正常',
-    warn: '注意',
-    error: 'エラー',
-  };
-  return (
-    <div
-      className={`grid min-h-12 max-w-[58ch] gap-0.5 overflow-wrap-anywhere rounded-lg border px-3 py-2 ${colors[kind]}`}
-    >
-      <span className="text-[11px] font-black uppercase tracking-normal">
-        {label[kind]}
-      </span>
-      <span className="text-sm font-bold leading-snug">{children}</span>
-    </div>
-  );
-}
-
-function RoleButton({
-  active,
-  children,
-  onClick,
-}: {
-  active: boolean;
-  children: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      className={`min-h-9 rounded-md px-3 font-semibold transition ${
-        active
-          ? 'bg-white text-slate-950 shadow-sm'
-          : 'text-slate-600 hover:bg-slate-50'
-      }`}
-      onClick={onClick}
-    >
-      {children}
-    </button>
-  );
-}
-
-function TextField({
-  label,
-  value,
-  maxLength,
-  placeholder,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  maxLength?: number;
-  placeholder?: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="grid gap-1.5 text-sm font-bold text-slate-700">
-      {label}
-      <input
-        className="min-h-10 rounded-md border border-slate-300 bg-white px-3 py-2 font-normal text-slate-950 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
-        value={value}
-        maxLength={maxLength}
-        placeholder={placeholder}
-        autoComplete="off"
-        onChange={(event) => onChange(event.target.value)}
-      />
-    </label>
-  );
-}
-
-function FilePathField({
-  label,
-  value,
-  onBrowse,
-}: {
-  label: string;
-  value: string;
-  onBrowse: () => void;
-}) {
-  return (
-    <label className="grid gap-1.5 text-sm font-bold text-slate-700">
-      {label}
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-        <input
-          className="min-h-10 rounded-md border border-slate-300 bg-slate-50 px-3 py-2 font-normal text-slate-950 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
-          value={value}
-          placeholder="未選択"
-          readOnly
-          title={value}
-        />
-        <ActionButton kind="secondary" type="button" onClick={onBrowse}>
-          参照
-        </ActionButton>
-      </div>
-    </label>
-  );
-}
-
-function NumberField({
-  label,
-  value,
-  min,
-  max,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <label className="grid gap-1.5 text-sm font-bold text-slate-700">
-      {label}
-      <input
-        className="min-h-10 rounded-md border border-slate-300 bg-white px-3 py-2 font-normal text-slate-950 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
-        type="number"
-        min={min}
-        max={max}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-      />
-    </label>
-  );
-}
-
-function SelectField({
-  label,
-  value,
-  children,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  children: React.ReactNode;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="grid gap-1.5 text-sm font-bold text-slate-700">
-      {label}
-      <select
-        className="min-h-10 rounded-md border border-slate-300 bg-white px-3 py-2 font-normal text-slate-950 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {children}
-      </select>
-    </label>
-  );
-}
-
-function ActionButton({
-  children,
-  kind,
-  type,
-  onClick,
-  disabled = false,
-}: {
-  children: string;
-  kind: 'primary' | 'secondary';
-  type: 'button' | 'submit';
-  onClick?: () => void;
-  disabled?: boolean;
-}) {
-  const styles =
-    kind === 'primary'
-      ? 'border-blue-700 bg-blue-600 text-white hover:bg-blue-700'
-      : 'border-slate-300 bg-white text-slate-800 hover:bg-slate-50';
-  return (
-    <button
-      type={type}
-      className={`min-h-10 min-w-24 rounded-md border px-4 font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${styles}`}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      {children}
-    </button>
-  );
-}
-
-function WebRtcDiagnosticsPanel({
-  diagnostics,
-}: {
-  diagnostics: BridgeDiagnostics | null;
-}) {
-  const pair = diagnostics?.selected_candidate_pair;
-  const stats = diagnostics?.stats;
-  const route = pair?.route ?? '未確定';
-  const routeLabel: Record<string, string> = {
-    local: 'local: 同一 LAN / host candidate',
-    direct: 'direct: 公開アドレスで直接接続',
-    stun: 'stun: NAT 越し P2P',
-    'turn-relay': 'turn-relay: TURN 中継',
-    unknown: 'unknown: 判定不能',
-  };
-  return (
-    <div className="mt-1 grid gap-3 border-t border-slate-200 pt-4">
-      <h2 className="text-lg font-bold text-slate-950">WebRTC 診断</h2>
-      <SummaryItem label="phase" value={diagnostics?.phase ?? '未起動'} />
-      <SummaryItem
-        label="ICE / WebRTC state"
-        value={`${diagnostics?.ice_state ?? '-'} / ${diagnostics?.connection_state ?? '-'}`}
-      />
-      <SummaryItem label="選択経路" value={routeLabel[route] ?? route} />
-      <SummaryItem
-        label="candidate type"
-        value={`${pair?.local_type ?? '-'} -> ${pair?.remote_type ?? '-'}`}
-      />
-      <SummaryItem
-        label="selected address"
-        value={`${pair?.local_address ?? '-'} -> ${pair?.remote_address ?? '-'}`}
-      />
-      <SummaryItem
-        label="ICE server"
-        value={diagnostics?.ice_servers?.join(', ') || '-'}
-      />
-      <SummaryItem
-        label="packets app -> rtc / rtc -> app"
-        value={`${stats?.app_to_webrtc_packets ?? 0} / ${stats?.webrtc_to_app_packets ?? 0}`}
-      />
-      {diagnostics?.last_error ? (
-        <SummaryItem label="last error" value={diagnostics.last_error} />
-      ) : null}
-    </div>
-  );
-}
-
-function SummaryItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="grid gap-0.5">
-      <span className="text-xs font-bold text-slate-500">{label}</span>
-      <strong className="overflow-wrap-anywhere text-sm text-slate-950">
-        {value}
-      </strong>
-    </div>
-  );
-}
-
-function currentSettings(form: FormState): GameSettings {
-  return {
-    course_mode: form.courseMode,
-    wins: form.wins,
-    big_stars: form.bigStars,
-    lives: form.lives,
-    match_seed: form.matchSeed.trim(),
-  };
-}
-
-function processExited(value: string | undefined): boolean {
-  return value?.startsWith('exited(') ?? false;
-}
-
-function withRequiredSeed(form: FormState): FormState {
-  if (form.courseMode === 'random' && form.matchSeed.trim() === '') {
-    return { ...form, matchSeed: String(generateSeed()) };
-  }
-  return form;
-}
-
-function selectedStageFrom(
-  courseMode: CourseMode,
-  matchSeed: string,
-): number | null {
-  if (courseMode === 'select') {
-    return 0;
-  }
-  const seed = parseSeed(matchSeed.trim());
-  if (seed === null) {
-    return null;
-  }
-  return Number(seed % 5n);
-}
-
-function parseSeed(value: string): bigint | null {
-  if (/^0x[0-9a-f]+$/i.test(value)) {
-    return BigInt(value);
-  }
-  if (/^[0-9]+$/.test(value)) {
-    return BigInt(value);
-  }
-  return null;
-}
-
-function generateSeed(): number {
-  const bytes = new Uint32Array(1);
-  crypto.getRandomValues(bytes);
-  return bytes[0] || Date.now() >>> 0;
 }
