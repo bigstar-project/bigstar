@@ -3,6 +3,16 @@ name: NSMB MvL Tauri
 on:
   workflow_dispatch:
     inputs:
+      release_bump:
+        description: Version bump to commit, tag, build, and publish
+        required: true
+        default: none
+        type: choice
+        options:
+          - none
+          - patch
+          - minor
+          - major
       publish_release:
         description: Publish a GitHub Release with Tauri updater metadata
         required: false
@@ -50,11 +60,122 @@ env:
   MELONDS_BUILD_PROVIDER: GitHub Actions
 
 jobs:
+  prepare-release:
+    name: Prepare release
+    runs-on: ubuntu-latest
+    outputs:
+      checkout_ref: ${{ steps.release.outputs.checkout_ref }}
+      checkout_sha: ${{ steps.release.outputs.checkout_sha }}
+      publish: ${{ steps.release.outputs.publish }}
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Resolve or create release ref
+        id: release
+        shell: pwsh
+        run: |
+          $configPath = "tools/nsmb-mvl-gui/src-tauri/tauri.conf.json"
+          $packagePath = "tools/nsmb-mvl-gui/package.json"
+          $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+          $package = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
+          $version = [string]$config.version
+          $publish = "${{ github.ref_type }}" -eq "tag"
+          $checkoutRef = "${{ github.sha }}"
+          $checkoutSha = "${{ github.sha }}"
+          $tag = "${{ github.ref_name }}"
+          $bump = "${{ inputs.release_bump }}"
+          if (-not $bump) {
+            $bump = "none"
+          }
+
+          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.publish_release }}" -eq "true") {
+            $publish = $true
+          }
+
+          if ($bump -ne "none") {
+            if ("${{ github.event_name }}" -ne "workflow_dispatch") {
+              throw "release_bump can only be used from workflow_dispatch"
+            }
+            if ("${{ github.ref_type }}" -ne "branch") {
+              throw "release_bump must be dispatched from a branch"
+            }
+            if ($version -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
+              throw "Unsupported Tauri version format: $version"
+            }
+
+            $major = [int]$Matches[1]
+            $minor = [int]$Matches[2]
+            $patch = [int]$Matches[3]
+            switch ($bump) {
+              "major" {
+                $major += 1
+                $minor = 0
+                $patch = 0
+              }
+              "minor" {
+                $minor += 1
+                $patch = 0
+              }
+              "patch" {
+                $patch += 1
+              }
+              default {
+                throw "Unsupported release_bump: $bump"
+              }
+            }
+
+            $version = "$major.$minor.$patch"
+            $tag = "nsmb-mvl-gui-v$version"
+            $existingTag = git tag --list $tag
+            if ($existingTag) {
+              throw "Tag already exists: $tag"
+            }
+
+            $config.version = $version
+            $package.version = $version
+            $config | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $configPath -Encoding UTF8
+            $package | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $packagePath -Encoding UTF8
+
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add $configPath $packagePath
+            git commit -m "chore: Tauri GUIを$versionに更新"
+            git tag $tag
+            git push origin HEAD:refs/heads/${{ github.ref_name }}
+            git push origin $tag
+
+            $checkoutRef = $tag
+            $checkoutSha = git rev-parse HEAD
+            $publish = $true
+          } elseif ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $inputTag = "${{ inputs.release_tag }}"
+            if ($inputTag) {
+              $tag = $inputTag
+            } else {
+              $tag = "nsmb-mvl-gui-v$version"
+            }
+          } elseif ("${{ github.ref_type }}" -eq "tag") {
+            $checkoutRef = "${{ github.ref_name }}"
+          }
+
+          "checkout_ref=$checkoutRef" >> $env:GITHUB_OUTPUT
+          "checkout_sha=$checkoutSha" >> $env:GITHUB_OUTPUT
+          "publish=$($publish.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+
   gui-check:
     name: GUI check
     runs-on: ubuntu-latest
+    needs:
+      - prepare-release
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.checkout_ref }}
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -76,10 +197,16 @@ jobs:
   melon-windows:
     name: melonDS Windows x86_64
     runs-on: windows-2025
+    needs:
+      - prepare-release
     env:
+      MELONDS_GIT_BRANCH: ${{ needs.prepare-release.outputs.checkout_ref }}
+      MELONDS_GIT_HASH: ${{ needs.prepare-release.outputs.checkout_sha }}
       VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/vcpkg_cache,readwrite
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.checkout_ref }}
       - name: Restore cached melonDS exe
         id: melonds-exe-cache
         uses: actions/cache/restore@v4
@@ -121,8 +248,12 @@ jobs:
   bridge-windows:
     name: bridge Windows x86_64
     runs-on: windows-2025
+    needs:
+      - prepare-release
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.checkout_ref }}
       - uses: dtolnay/rust-toolchain@stable
       - name: Restore bridge Rust build cache
         uses: Swatinem/rust-cache@v2
@@ -154,11 +285,14 @@ jobs:
     name: Tauri Windows x86_64
     runs-on: windows-2025
     needs:
+      - prepare-release
       - gui-check
       - melon-windows
       - bridge-windows
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.checkout_ref }}
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -195,25 +329,9 @@ jobs:
         id: release-meta
         shell: pwsh
         run: |
-          $config = Get-Content -LiteralPath "tools/nsmb-mvl-gui/src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json
-          $publish = "${{ github.ref_type }}" -eq "tag"
-          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.publish_release }}" -eq "true") {
-            $publish = $true
-          }
-
-          $tag = "${{ github.ref_name }}"
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $inputTag = "${{ inputs.release_tag }}"
-            if ($inputTag) {
-              $tag = $inputTag
-            } else {
-              $tag = "nsmb-mvl-gui-v$($config.version)"
-            }
-          }
-
-          "publish=$($publish.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
-          "tag=$tag" >> $env:GITHUB_OUTPUT
-          "version=$($config.version)" >> $env:GITHUB_OUTPUT
+          "publish=${{ needs.prepare-release.outputs.publish }}" >> $env:GITHUB_OUTPUT
+          "tag=${{ needs.prepare-release.outputs.tag }}" >> $env:GITHUB_OUTPUT
+          "version=${{ needs.prepare-release.outputs.version }}" >> $env:GITHUB_OUTPUT
       - name: Build Tauri app
         working-directory: tools/nsmb-mvl-gui
         shell: pwsh
