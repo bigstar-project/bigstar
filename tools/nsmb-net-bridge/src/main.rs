@@ -516,6 +516,7 @@ mod webrtc {
         gathering_state: Option<String>,
         ice_state: Option<String>,
         local_candidates: Vec<String>,
+        remote_candidates: Vec<String>,
         selected_local_candidate: Option<String>,
         selected_remote_candidate: Option<String>,
         selected_route: Option<String>,
@@ -539,6 +540,7 @@ mod webrtc {
                 gathering_state: None,
                 ice_state: None,
                 local_candidates: Vec::new(),
+                remote_candidates: Vec::new(),
                 selected_local_candidate: None,
                 selected_remote_candidate: None,
                 selected_route: None,
@@ -577,6 +579,22 @@ mod webrtc {
             self.persist();
         }
 
+        fn observe_remote_sdp(&mut self, label: &str, sdp: &str) {
+            let mut candidates = Vec::new();
+            for line in sdp.lines().map(str::trim) {
+                if line.starts_with("a=candidate:") || line.starts_with("candidate:") {
+                    candidates.push(line.strip_prefix("a=").unwrap_or(line).to_owned());
+                }
+            }
+            println!(
+                "nsmb-net-bridge diagnostics: remoteSdp={} candidates={}",
+                label,
+                candidates.len()
+            );
+            self.remote_candidates = candidates;
+            self.persist();
+        }
+
         fn observe_event(&mut self, event: &datachannel_wrapper::PeerConnectionEvent) {
             use datachannel_wrapper::PeerConnectionEvent;
             println!("nsmb-net-bridge webrtc: event {:?}", event);
@@ -608,20 +626,78 @@ mod webrtc {
         fn observe_selected_pair(&mut self, endpoint: &WebRtcEndpoint) {
             self.local_address = endpoint.peer_connection.local_address();
             self.remote_address = endpoint.peer_connection.remote_address();
-            if let Some(pair) = endpoint.peer_connection.selected_candidate_pair() {
-                let route = selected_route(&pair.local, &pair.remote);
-                if self.selected_local_candidate.as_deref() != Some(&pair.local)
-                    || self.selected_remote_candidate.as_deref() != Some(&pair.remote)
-                {
-                    println!(
-                        "nsmb-net-bridge webrtc: selected candidate pair route={} local={} remote={}",
-                        route, pair.local, pair.remote
-                    );
-                }
-                self.selected_local_candidate = Some(pair.local);
-                self.selected_remote_candidate = Some(pair.remote);
-                self.selected_route = Some(route.to_owned());
+            let Some(local_address) = self.local_address.as_deref() else {
+                self.persist();
+                return;
+            };
+            let Some(remote_address) = self.remote_address.as_deref() else {
+                self.persist();
+                return;
+            };
+            let Some(local_candidate) = candidate_by_address(&self.local_candidates, local_address)
+            else {
+                self.persist();
+                return;
+            };
+            let Some(remote_candidate) =
+                candidate_by_address(&self.remote_candidates, remote_address)
+            else {
+                self.persist();
+                return;
+            };
+            let route = selected_route(local_candidate, remote_candidate);
+            if self.selected_local_candidate.as_deref() != Some(local_candidate)
+                || self.selected_remote_candidate.as_deref() != Some(remote_candidate)
+            {
+                println!(
+                    "nsmb-net-bridge webrtc: selected candidate pair route={} local={} remote={} localAddress={} remoteAddress={}",
+                    route, local_candidate, remote_candidate, local_address, remote_address
+                );
             }
+            self.selected_local_candidate = Some(local_candidate.to_owned());
+            self.selected_remote_candidate = Some(remote_candidate.to_owned());
+            self.selected_route = Some(route.to_owned());
+            self.persist();
+        }
+
+        fn observe_selected_addresses(
+            &mut self,
+            local_address: Option<String>,
+            remote_address: Option<String>,
+        ) {
+            self.local_address = local_address;
+            self.remote_address = remote_address;
+            let Some(local_address) = self.local_address.as_deref() else {
+                self.persist();
+                return;
+            };
+            let Some(remote_address) = self.remote_address.as_deref() else {
+                self.persist();
+                return;
+            };
+            let Some(local_candidate) = candidate_by_address(&self.local_candidates, local_address)
+            else {
+                self.persist();
+                return;
+            };
+            let Some(remote_candidate) =
+                candidate_by_address(&self.remote_candidates, remote_address)
+            else {
+                self.persist();
+                return;
+            };
+            let route = selected_route(local_candidate, remote_candidate);
+            if self.selected_local_candidate.as_deref() != Some(local_candidate)
+                || self.selected_remote_candidate.as_deref() != Some(remote_candidate)
+            {
+                println!(
+                    "nsmb-net-bridge webrtc: selected candidate pair route={} local={} remote={} localAddress={} remoteAddress={}",
+                    route, local_candidate, remote_candidate, local_address, remote_address
+                );
+            }
+            self.selected_local_candidate = Some(local_candidate.to_owned());
+            self.selected_remote_candidate = Some(remote_candidate.to_owned());
+            self.selected_route = Some(route.to_owned());
             self.persist();
         }
 
@@ -653,6 +729,7 @@ mod webrtc {
                 "gathering_state": self.gathering_state,
                 "ice_state": self.ice_state,
                 "local_candidates": self.local_candidates,
+                "remote_candidates": self.remote_candidates,
                 "selected_candidate_pair": self.selected_local_candidate.as_ref().zip(
                     self.selected_remote_candidate.as_ref()
                 ).map(|(local, remote)| json!({
@@ -718,6 +795,33 @@ mod webrtc {
 
     fn candidate_address(candidate: &str) -> Option<&str> {
         candidate.split_whitespace().nth(4)
+    }
+
+    fn candidate_socket_key(candidate: &str) -> Option<String> {
+        let mut parts = candidate.split_whitespace();
+        let address = parts.nth(4)?;
+        let port = parts.next()?;
+        Some(socket_key(address, port))
+    }
+
+    fn socket_key(address: &str, port: &str) -> String {
+        format!("{}:{port}", address.trim_matches(['[', ']']))
+    }
+
+    fn socket_address_key(value: &str) -> Option<String> {
+        if let Some((address, port)) = value.rsplit_once("]:") {
+            return Some(socket_key(address.trim_start_matches('['), port));
+        }
+        let (address, port) = value.rsplit_once(':')?;
+        Some(socket_key(address, port))
+    }
+
+    fn candidate_by_address<'a>(candidates: &'a [String], address: &str) -> Option<&'a str> {
+        let address = socket_address_key(address)?;
+        candidates
+            .iter()
+            .find(|candidate| candidate_socket_key(candidate).as_deref() == Some(address.as_str()))
+            .map(String::as_str)
     }
 
     fn is_local_candidate_address(candidate: &str) -> bool {
@@ -1022,6 +1126,7 @@ mod webrtc {
             .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "missing local offer SDP"))?;
         print_sdp("offer", &offer.sdp.to_string());
         let answer_sdp = read_pasted_sdp("Paste answer SDP base64 from the answer side.")?;
+        reporter.observe_remote_sdp("answer", &answer_sdp);
         endpoint.peer_connection.set_remote_description(
             datachannel_wrapper::SessionDescription {
                 sdp_type: datachannel_wrapper::SdpType::Answer,
@@ -1039,6 +1144,7 @@ mod webrtc {
     ) -> Result<WebRtcEndpoint, Box<dyn std::error::Error>> {
         let offer_sdp = read_pasted_sdp("Paste offer SDP base64 from the offer side.")?;
         print_sdp("remote offer", &offer_sdp);
+        reporter.observe_remote_sdp("offer", &offer_sdp);
         reporter.set_ice_servers(stun_servers.clone(), "cli-or-manual-default");
         let mut endpoint = create_endpoint(stun_servers, reporter).await?;
         endpoint
@@ -1110,6 +1216,7 @@ mod webrtc {
             .get("sdp")
             .and_then(|v| v.as_str())
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing answer SDP"))?;
+        reporter.observe_remote_sdp("answer", answer_sdp);
         endpoint.peer_connection.set_remote_description(
             datachannel_wrapper::SessionDescription {
                 sdp_type: sdp_type_from_str(
@@ -1161,6 +1268,7 @@ mod webrtc {
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing offer SDP"))?;
 
         print_sdp("remote offer", offer_sdp);
+        reporter.observe_remote_sdp("offer", offer_sdp);
         let mut endpoint = create_endpoint(stun_servers, reporter).await?;
         endpoint
             .peer_connection
@@ -1658,14 +1766,10 @@ mod webrtc {
                         reporter.stats.webrtc_to_app_bytes,
                         reporter.stats.dropped_no_local_target
                     );
-                    reporter.local_address = peer_connection.local_address();
-                    reporter.remote_address = peer_connection.remote_address();
-                    if let Some(pair) = peer_connection.selected_candidate_pair() {
-                        reporter.selected_route = Some(selected_route(&pair.local, &pair.remote).to_owned());
-                        reporter.selected_local_candidate = Some(pair.local);
-                        reporter.selected_remote_candidate = Some(pair.remote);
-                    }
-                    reporter.persist();
+                    reporter.observe_selected_addresses(
+                        peer_connection.local_address(),
+                        peer_connection.remote_address(),
+                    );
                 }
             }
         }
@@ -1673,7 +1777,7 @@ mod webrtc {
 
     #[cfg(test)]
     mod tests {
-        use super::{candidate_type, selected_route};
+        use super::{candidate_by_address, candidate_type, selected_route};
 
         #[test]
         fn classifies_candidate_types_and_routes() {
@@ -1689,6 +1793,23 @@ mod webrtc {
             assert_eq!(selected_route(public_host, public_peer), "direct");
             assert_eq!(selected_route(private_host, srflx), "stun");
             assert_eq!(selected_route(private_host, relay), "turn-relay");
+        }
+
+        #[test]
+        fn finds_candidate_by_selected_socket_address() {
+            let candidates = vec![
+                "candidate:1 1 UDP 1 192.168.0.10 5000 typ host".to_owned(),
+                "a=candidate:2 1 UDP 1 2001:db8::10 5001 typ host".to_owned(),
+            ];
+
+            assert_eq!(
+                candidate_by_address(&candidates, "192.168.0.10:5000"),
+                Some("candidate:1 1 UDP 1 192.168.0.10 5000 typ host")
+            );
+            assert_eq!(
+                candidate_by_address(&candidates, "[2001:db8::10]:5001"),
+                Some("a=candidate:2 1 UDP 1 2001:db8::10 5001 typ host")
+            );
         }
     }
 }

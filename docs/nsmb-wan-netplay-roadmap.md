@@ -62,6 +62,11 @@
   - signaling server `corepack pnpm run ci`
   - `scripts\test-nsmb-mvl-gui-launch-smoke.ps1 -BuildTauriBundle`
 - Current blocker: actual WAN success still needs a new 2PC remote run. If logs show STUN candidates but no selected pair, TURN support is the next transport requirement.
+- 2PC follow-up logs from 2026-06-03:
+  - Same Wi-Fi run `nsmb-mvl-gui-1780417439` connected. The answer SDP contained a LAN host candidate `192.168.0.48` and an IPv4 srflx candidate `133.200.159.5:21911`; ICE reached connected/completed and packets flowed.
+  - Tethering run `nsmb-mvl-gui-1780417655` failed. Signaling and SDP exchange completed, STUN was active, and both sides gathered srflx candidates, but ICE stayed in checking until `WebRTC connect timed out`. The answer SDP no longer had a `192.168.0.x` candidate, only tethering-side private candidates `10.5.0.2` / `10.149.31.198` and srflx `133.200.159.5:9626`.
+  - Current interpretation: this is now a STUN-only NAT traversal failure rather than a signaling failure. The most likely causes are tethering carrier/NAT behavior, lack of NAT hairpin/loopback for the shared srflx public address, endpoint-dependent filtering, or another UDP restriction. TURN relay is the next implementation requirement for this class of failure.
+  - Resolved diagnostics gap: the connected same-Wi-Fi run repeatedly logged `candidate_pair: BadString ... interior nul byte` when the Rust `datachannel` crate tried to decode a fixed C buffer as a full Rust string. The bridge no longer calls that API for GUI diagnostics; it records remote SDP candidates and infers the selected candidate pair from `local_address` / `remote_address`, removing the BadString spam and restoring GUI route display.
 - Next actions:
   - Deploy the updated signaling Worker so Cloudflare-side diagnostics and server-side STUN defaults are active.
   - Run the rebuilt Tauri GUI on both WAN PCs, use `ログを開く`, and compare each `bridge-status.json`, `bridge.stdout.txt`, and `bridge.stderr.txt`.
