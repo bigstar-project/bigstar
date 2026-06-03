@@ -1,6 +1,7 @@
 import { Select } from '@base-ui/react/select';
 import { CaretDown, Check } from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
+import { ActionButton } from './Button';
 
 export function RoleButton({
   active,
@@ -19,7 +20,7 @@ export function RoleButton({
     <button
       type="button"
       aria-pressed={active}
-      className={`flex min-h-20 items-center gap-3 rounded-lg border p-4 text-left transition focus:outline-none focus:ring-4 focus:ring-blue-300/25 ${
+      className={`flex min-h-20 items-center gap-3 rounded-lg border p-4 text-left transition focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-300/25 ${
         active
           ? 'border-red-400 bg-red-500/18 text-white shadow-[0_0_28px_rgba(239,68,68,0.22)]'
           : 'border-slate-600 bg-slate-950/35 text-slate-300 hover:border-blue-400/70 hover:bg-blue-500/10'
@@ -148,7 +149,7 @@ export function SelectField({
           }
         }}
       >
-        <Select.Trigger className="flex min-h-11 w-full items-center justify-between gap-3 rounded-md border border-slate-600 bg-slate-950/60 px-3 py-2 text-left font-semibold text-slate-100 outline-none transition hover:border-slate-500 focus:border-blue-400 focus:ring-4 focus:ring-blue-400/15">
+        <Select.Trigger className="flex min-h-11 w-full items-center justify-between gap-3 rounded-md border border-slate-600 bg-slate-950/60 px-3 py-2 text-left font-semibold text-slate-100 outline-none transition hover:border-slate-500 focus-visible:border-blue-400 focus-visible:ring-4 focus-visible:ring-blue-400/15">
           <span className="flex min-w-0 items-center gap-2">
             {icon ? <span className="text-blue-300">{icon}</span> : null}
             <Select.Value />
@@ -177,44 +178,5 @@ export function SelectField({
         </Select.Portal>
       </Select.Root>
     </div>
-  );
-}
-
-export function ActionButton({
-  children,
-  className = '',
-  disabled = false,
-  icon,
-  kind,
-  onClick,
-  type,
-}: {
-  children: ReactNode;
-  kind: 'primary' | 'outline' | 'ghost' | 'danger';
-  type: 'button' | 'submit';
-  className?: string;
-  icon?: ReactNode;
-  onClick?: () => void;
-  disabled?: boolean;
-}) {
-  const styles = {
-    primary:
-      'border-yellow-300 bg-yellow-400 text-slate-950 hover:bg-yellow-300 shadow-[0_0_22px_rgba(250,204,21,0.22)]',
-    outline:
-      'border-blue-400/70 bg-blue-500/10 text-blue-100 hover:bg-blue-500/18 hover:border-blue-300',
-    ghost:
-      'border-slate-600 bg-slate-950/35 text-slate-200 hover:border-slate-500 hover:bg-slate-800/65',
-    danger: 'border-red-400/70 bg-red-500/10 text-red-100 hover:bg-red-500/18',
-  };
-  return (
-    <button
-      type={type}
-      className={`inline-flex min-h-11 min-w-24 items-center justify-center gap-2 rounded-md border px-4 font-black transition focus:outline-none focus:ring-4 focus:ring-blue-300/20 disabled:cursor-not-allowed disabled:opacity-50 ${styles[kind]} ${className}`}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      {icon}
-      {children}
-    </button>
   );
 }

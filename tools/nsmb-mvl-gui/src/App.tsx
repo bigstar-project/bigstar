@@ -9,7 +9,6 @@ export function App() {
   return (
     <LauncherShell
       activeView={launcher.activeView}
-      connectionActive={launcher.connectionActive}
       onCheckForUpdate={() => void launcher.actions.checkForUpdate()}
       onViewChange={launcher.changeView}
       status={launcher.status}

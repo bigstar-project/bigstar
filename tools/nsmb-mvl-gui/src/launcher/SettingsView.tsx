@@ -7,12 +7,8 @@ import {
   ShieldCheck,
   WifiHigh,
 } from '@phosphor-icons/react';
-import {
-  ActionButton,
-  FilePathField,
-  NumberField,
-  TextField,
-} from '../components/Fields';
+import { ActionButton } from '../components/Button';
+import { FilePathField, NumberField, TextField } from '../components/Fields';
 import { SummaryItem } from '../components/SummaryItem';
 import type { FormState } from '../types';
 import { InfoPanel, SettingsPanel } from './LauncherCards';
