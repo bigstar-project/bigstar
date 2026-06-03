@@ -361,17 +361,25 @@ jobs:
           $assetDir = "tools/nsmb-mvl-gui/release-assets"
           New-Item -ItemType Directory -Force -Path $assetDir | Out-Null
 
+          function Get-ReleaseAssetName([string] $fileName) {
+            $fileName -replace "\s+", "."
+          }
+
           Get-ChildItem -LiteralPath $bundleDir -Recurse -File |
             Where-Object { $_.Extension -ne ".sig" } |
-            Copy-Item -Destination $assetDir -Force
+            ForEach-Object {
+              Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $assetDir (Get-ReleaseAssetName $_.Name)) -Force
+            }
 
           $pairs = Get-ChildItem -LiteralPath $bundleDir -Recurse -File -Filter "*.sig" | ForEach-Object {
             $artifactPath = $_.FullName -replace "\.sig$", ""
             if (Test-Path -LiteralPath $artifactPath) {
+              $artifactName = Get-ReleaseAssetName ([IO.Path]::GetFileName($artifactPath))
               [pscustomobject]@{
                 ArtifactPath = $artifactPath
-                ArtifactName = [IO.Path]::GetFileName($artifactPath)
+                ArtifactName = $artifactName
                 SignaturePath = $_.FullName
+                SignatureName = "$artifactName.sig"
                 Priority = if ($artifactPath -like "*.exe") { 0 } elseif ($artifactPath -like "*.msi") { 1 } else { 2 }
               }
             }
@@ -381,7 +389,7 @@ jobs:
             throw "No signed updater artifact pair was found under $bundleDir"
           }
 
-          Copy-Item -LiteralPath $pair.SignaturePath -Destination $assetDir -Force
+          Copy-Item -LiteralPath $pair.SignaturePath -Destination (Join-Path $assetDir $pair.SignatureName) -Force
           $signature = (Get-Content -LiteralPath $pair.SignaturePath -Raw).Trim()
           $tag = "${{ steps.release-meta.outputs.tag }}"
           $repo = "${{ github.repository }}"
