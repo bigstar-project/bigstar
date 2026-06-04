@@ -2,6 +2,18 @@ import type { BridgeDiagnostics, FormState } from '../types';
 
 export type View = 'battle' | 'settings';
 
+export type UpdateStatus = {
+  phase:
+    | 'idle'
+    | 'checking'
+    | 'available'
+    | 'downloading'
+    | 'installed'
+    | 'none'
+    | 'error';
+  version?: string;
+};
+
 export type UpdateFormField = <K extends keyof FormState>(
   key: K,
   value: FormState[K],

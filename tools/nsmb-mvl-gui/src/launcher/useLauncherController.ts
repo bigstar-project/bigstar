@@ -1,6 +1,6 @@
 import { relaunch } from '@tauri-apps/plugin-process';
 import { check } from '@tauri-apps/plugin-updater';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   currentSettings,
   generateSeed,
@@ -35,8 +35,15 @@ import type {
   LauncherActions,
   LauncherSummary,
   SelectRomKey,
+  UpdateStatus,
   View,
 } from './types';
+
+const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+
+function isTauriRuntime() {
+  return '__TAURI_INTERNALS__' in window;
+}
 
 export function useLauncherController() {
   const [activeView, setActiveView] = useState<View>(() =>
@@ -53,6 +60,12 @@ export function useLauncherController() {
   const [defaultsLoaded, setDefaultsLoaded] = useState(false);
   const [romPreparation, setRomPreparation] = useState('未確認');
   const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({
+    phase: 'idle',
+  });
+  const availableUpdateRef = useRef<Awaited<ReturnType<typeof check>>>(null);
+  const updateBusyRef = useRef(false);
+  const updatePhaseRef = useRef<UpdateStatus['phase']>('idle');
 
   const currentRomPath =
     form.role === 'host' ? form.hostRomPath : form.clientRomPath;
@@ -84,6 +97,14 @@ export function useLauncherController() {
     romsConfigured,
     selectedStageLabel,
   };
+
+  useEffect(() => {
+    updateBusyRef.current = updateBusy;
+  }, [updateBusy]);
+
+  useEffect(() => {
+    updatePhaseRef.current = updateStatus.phase;
+  }, [updateStatus.phase]);
 
   const updateField = <K extends keyof FormState>(
     key: K,
@@ -348,43 +369,90 @@ export function useLauncherController() {
     }
   };
 
-  const checkForUpdate = async () => {
+  const checkForUpdate = useCallback(async () => {
+    if (!isTauriRuntime()) {
+      setUpdateStatus({ phase: 'none' });
+      return;
+    }
+
+    if (updateStatus.phase === 'available' && availableUpdateRef.current) {
+      try {
+        setUpdateBusy(true);
+        setUpdateStatus({
+          phase: 'downloading',
+          version: availableUpdateRef.current.version,
+        });
+        await availableUpdateRef.current.downloadAndInstall((event) => {
+          if (event.event === 'Finished') {
+            setUpdateStatus({
+              phase: 'installed',
+              version: availableUpdateRef.current?.version,
+            });
+          }
+        });
+        await relaunch();
+      } catch {
+        setUpdateStatus({
+          phase: 'error',
+          version: availableUpdateRef.current?.version,
+        });
+      } finally {
+        setUpdateBusy(false);
+      }
+      return;
+    }
+
     try {
       setUpdateBusy(true);
-      setStatus({ text: '更新を確認中', kind: 'idle' });
+      setUpdateStatus({ phase: 'checking' });
       const update = await check();
       if (!update) {
-        setStatus({ text: '利用可能な更新はありません', kind: 'ok' });
+        availableUpdateRef.current = null;
+        setUpdateStatus({ phase: 'none' });
         return;
       }
-      setStatus({
-        text: `v${update.version} をインストール中`,
-        kind: 'idle',
-      });
-      await update.downloadAndInstall((event) => {
-        if (event.event === 'Started') {
-          setStatus({
-            text: `更新をダウンロード中 (${event.data.contentLength ?? '不明'} bytes)`,
-            kind: 'idle',
-          });
-        }
-        if (event.event === 'Progress') {
-          setStatus({
-            text: `更新をダウンロード中 (+${event.data.chunkLength} bytes)`,
-            kind: 'idle',
-          });
-        }
-        if (event.event === 'Finished') {
-          setStatus({ text: '更新をインストールしました', kind: 'ok' });
-        }
-      });
-      await relaunch();
-    } catch (error) {
-      setStatus({ text: String(error), kind: 'error' });
+      availableUpdateRef.current = update;
+      setUpdateStatus({ phase: 'available', version: update.version });
+    } catch {
+      setUpdateStatus({ phase: 'error' });
     } finally {
       setUpdateBusy(false);
     }
-  };
+  }, [updateStatus.phase]);
+
+  const checkForUpdateInBackground = useCallback(async () => {
+    if (
+      !isTauriRuntime() ||
+      updateBusyRef.current ||
+      updatePhaseRef.current === 'available' ||
+      updatePhaseRef.current === 'checking' ||
+      updatePhaseRef.current === 'downloading'
+    ) {
+      return;
+    }
+    try {
+      setUpdateStatus({ phase: 'checking' });
+      const update = await check();
+      if (!update) {
+        availableUpdateRef.current = null;
+        setUpdateStatus({ phase: 'none' });
+        return;
+      }
+      availableUpdateRef.current = update;
+      setUpdateStatus({ phase: 'available', version: update.version });
+    } catch {
+      setUpdateStatus({ phase: 'error' });
+    }
+  }, []);
+
+  useEffect(() => {
+    void checkForUpdateInBackground();
+    const timer = window.setInterval(
+      () => void checkForUpdateInBackground(),
+      UPDATE_CHECK_INTERVAL_MS,
+    );
+    return () => window.clearInterval(timer);
+  }, [checkForUpdateInBackground]);
 
   const actions: LauncherActions = {
     checkForUpdate,
@@ -416,6 +484,7 @@ export function useLauncherController() {
     status,
     summary,
     updateBusy,
+    updateStatus,
     updateField,
   };
 }

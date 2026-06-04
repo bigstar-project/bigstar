@@ -13,6 +13,7 @@ export function App() {
       onViewChange={launcher.changeView}
       status={launcher.status}
       updateBusy={launcher.updateBusy}
+      updateStatus={launcher.updateStatus}
     >
       <BattleView
         actions={launcher.actions}

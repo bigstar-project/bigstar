@@ -1,10 +1,44 @@
 import { Tabs } from '@base-ui/react/tabs';
 import { Flag, FlagCheckered, Gear, Wrench } from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
-import { ActionButton } from '../components/Button';
 import { StatusPill } from '../components/StatusPill';
 import type { StatusKind } from '../types';
-import type { View } from './types';
+import type { UpdateStatus, View } from './types';
+
+function updateButtonLabel(updateStatus: UpdateStatus) {
+  if (updateStatus.phase === 'checking') {
+    return '確認中';
+  }
+  if (updateStatus.phase === 'available') {
+    return '更新あり';
+  }
+  if (updateStatus.phase === 'downloading') {
+    return '取得中';
+  }
+  if (updateStatus.phase === 'installed') {
+    return '再起動中';
+  }
+  if (updateStatus.phase === 'error') {
+    return '更新失敗';
+  }
+  return '更新確認';
+}
+
+function updateButtonClass(updateStatus: UpdateStatus) {
+  if (updateStatus.phase === 'available') {
+    return 'border-yellow-300 bg-yellow-400 text-slate-950 shadow-[0_0_28px_rgba(250,204,21,0.32)] hover:bg-yellow-300';
+  }
+  if (updateStatus.phase === 'error') {
+    return 'border-red-400/80 bg-red-500/18 text-red-100 hover:bg-red-500/25';
+  }
+  if (
+    updateStatus.phase === 'checking' ||
+    updateStatus.phase === 'downloading'
+  ) {
+    return 'border-blue-300/70 bg-blue-500/18 text-blue-100';
+  }
+  return 'border-slate-600 bg-slate-950/35 text-slate-200 hover:border-slate-500 hover:bg-slate-800/65';
+}
 
 export function LauncherShell({
   activeView,
@@ -13,6 +47,7 @@ export function LauncherShell({
   onViewChange,
   status,
   updateBusy,
+  updateStatus,
 }: {
   activeView: View;
   children: ReactNode;
@@ -20,6 +55,7 @@ export function LauncherShell({
   onViewChange: (view: View) => void;
   status: { text: string; kind: StatusKind };
   updateBusy: boolean;
+  updateStatus: UpdateStatus;
 }) {
   return (
     <Tabs.Root
@@ -29,7 +65,7 @@ export function LauncherShell({
       onValueChange={(value) => onViewChange(value as View)}
     >
       <main className="grid min-h-screen grid-cols-[236px_minmax(0,1fr)] max-[1280px]:grid-cols-[92px_minmax(0,1fr)]">
-        <aside className="relative grid border-r border-blue-300/15 bg-[#06101d]/88 px-4 py-6 shadow-[inset_-1px_0_0_rgba(96,165,250,0.08)] backdrop-blur-sm max-[1280px]:px-3">
+        <aside className="sticky top-0 grid h-screen border-r border-blue-300/15 bg-[#06101d]/88 px-4 py-6 shadow-[inset_-1px_0_0_rgba(96,165,250,0.08)] backdrop-blur-sm max-[1280px]:px-3">
           <div className="grid content-between">
             <div className="grid gap-8">
               <div className="grid gap-1 px-2 max-[1280px]:justify-items-center">
@@ -75,6 +111,20 @@ export function LauncherShell({
                 </Tabs.Tab>
               </Tabs.List>
             </div>
+            <button
+              type="button"
+              className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-md border px-3 font-black transition focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-300/20 disabled:cursor-not-allowed disabled:opacity-60 max-[1280px]:min-w-14 ${updateButtonClass(updateStatus)}`}
+              disabled={updateBusy}
+              title={
+                updateStatus.version ? `v${updateStatus.version}` : '更新を確認'
+              }
+              onClick={onCheckForUpdate}
+            >
+              <Wrench className="shrink-0" size={20} weight="bold" />
+              <span className="max-[1280px]:hidden">
+                {updateButtonLabel(updateStatus)}
+              </span>
+            </button>
           </div>
         </aside>
 
@@ -99,15 +149,6 @@ export function LauncherShell({
                 </p>
               </div>
               <div className="flex items-center gap-3 max-[720px]:flex-wrap">
-                <ActionButton
-                  kind="ghost"
-                  type="button"
-                  disabled={updateBusy}
-                  icon={<Wrench size={18} weight="bold" />}
-                  onClick={onCheckForUpdate}
-                >
-                  更新確認
-                </ActionButton>
                 <StatusPill kind={status.kind}>{status.text}</StatusPill>
               </div>
             </header>
