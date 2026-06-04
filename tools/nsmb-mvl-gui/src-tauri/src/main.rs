@@ -14,8 +14,9 @@ mod state;
 mod tests;
 
 use commands::{
-    ensure_roms, generate_roms, get_defaults, open_log_dir, save_rom_paths, select_rom_file,
-    session_status, start_match, stop_match,
+    ensure_roms, generate_roms, get_defaults, open_log_dir, open_melonds,
+    open_melonds_input_config, save_rom_paths, select_rom_file, session_status, start_match,
+    stop_match,
 };
 use preflight::{cli_preflight_check, preflight_check};
 use state::AppState;
@@ -52,7 +53,9 @@ fn main() {
             start_match,
             stop_match,
             session_status,
-            open_log_dir
+            open_log_dir,
+            open_melonds,
+            open_melonds_input_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -230,6 +230,20 @@ fn melon_command_sets_rom_arg_and_environment() {
 }
 
 #[test]
+fn melonds_cli_open_input_config_option_is_registered() {
+    let cli_cpp = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("..")
+        .join("src")
+        .join("frontend")
+        .join("qt_sdl")
+        .join("CLI.cpp");
+    let source = fs::read_to_string(cli_cpp).expect("read CLI.cpp");
+    assert!(source.contains("open-input-config"));
+}
+
+#[test]
 fn melon_command_sanitizes_inherited_melonds_environment() {
     let mut command = Command::new("melonDS.exe");
     command.env("MELONDS_NSML_NORMALIZE_MVL_ENTRANCE_SPAWN_WRITES", "1");

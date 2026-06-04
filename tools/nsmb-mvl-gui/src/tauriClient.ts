@@ -115,3 +115,17 @@ export function openLogDir(path: string) {
   }
   return invoke('open_log_dir', { path });
 }
+
+export function openMelonds() {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(3001);
+  }
+  return invoke<number>('open_melonds');
+}
+
+export function openMelondsInputConfig() {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(3002);
+  }
+  return invoke<number>('open_melonds_input_config');
+}

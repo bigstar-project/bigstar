@@ -3,7 +3,9 @@ import {
   Broadcast,
   CheckCircle,
   FlagCheckered,
+  GameController,
   HardDrives,
+  Play,
   ShieldCheck,
   WifiHigh,
 } from '@phosphor-icons/react';
@@ -27,7 +29,12 @@ export function SettingsView({
 }: {
   actions: Pick<
     LauncherActions,
-    'pollStatus' | 'preflightCheck' | 'prepareRoms' | 'selectRomPath'
+    | 'openMelonds'
+    | 'openMelondsInputConfig'
+    | 'pollStatus'
+    | 'preflightCheck'
+    | 'prepareRoms'
+    | 'selectRomPath'
   >;
   form: FormState;
   summary: LauncherSummary;
@@ -87,6 +94,30 @@ export function SettingsView({
                   value={form.baseRomPath}
                   onBrowse={() => void actions.selectRomPath('baseRomPath')}
                 />
+              </SettingsPanel>
+
+              <SettingsPanel
+                icon={<GameController size={24} weight="fill" />}
+                title="melonDS 設定"
+              >
+                <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-4 max-[760px]:grid-cols-1">
+                  <ActionButton
+                    kind="outline"
+                    type="button"
+                    icon={<Play size={20} weight="fill" />}
+                    onClick={() => void actions.openMelonds()}
+                  >
+                    melonDS を開く
+                  </ActionButton>
+                  <ActionButton
+                    kind="ghost"
+                    type="button"
+                    icon={<GameController size={20} weight="fill" />}
+                    onClick={() => void actions.openMelondsInputConfig()}
+                  >
+                    入力設定を開く
+                  </ActionButton>
+                </div>
               </SettingsPanel>
 
               <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-4 max-[760px]:grid-cols-1">

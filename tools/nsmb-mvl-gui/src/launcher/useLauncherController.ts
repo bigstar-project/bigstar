@@ -15,6 +15,8 @@ import {
   getDefaults,
   getSessionStatus,
   openLogDir as openLogDirCommand,
+  openMelonds as openMelondsCommand,
+  openMelondsInputConfig as openMelondsInputConfigCommand,
   runPreflightCheck,
   saveRomPaths,
   selectRomFile,
@@ -316,6 +318,27 @@ export function useLauncherController() {
     }
   };
 
+  const openMelonds = async () => {
+    try {
+      const pid = await openMelondsCommand();
+      setStatus({ text: `melonDS を起動しました pid:${pid}`, kind: 'ok' });
+    } catch (error) {
+      setStatus({ text: String(error), kind: 'error' });
+    }
+  };
+
+  const openMelondsInputConfig = async () => {
+    try {
+      const pid = await openMelondsInputConfigCommand();
+      setStatus({
+        text: `melonDS の入力設定を開きました pid:${pid}`,
+        kind: 'ok',
+      });
+    } catch (error) {
+      setStatus({ text: String(error), kind: 'error' });
+    }
+  };
+
   const copyRoomCode = async () => {
     try {
       await navigator.clipboard.writeText(form.roomCode);
@@ -367,6 +390,8 @@ export function useLauncherController() {
     checkForUpdate,
     copyRoomCode,
     openLogDir,
+    openMelonds,
+    openMelondsInputConfig,
     pollStatus,
     preflightCheck,
     prepareRoms,

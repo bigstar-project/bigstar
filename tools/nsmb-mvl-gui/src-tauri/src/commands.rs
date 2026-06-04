@@ -1,6 +1,10 @@
 use std::fs;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use tauri::{AppHandle, State};
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 use crate::config::{DEFAULT_PORT, DEFAULT_ROOM_CODE, DEFAULT_SIGNAL_URL};
 use crate::models::{
@@ -86,6 +90,16 @@ pub(crate) fn open_log_dir(app: AppHandle, path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub(crate) fn open_melonds(app: AppHandle) -> Result<u32, String> {
+    launch_melonds(&app, &[])
+}
+
+#[tauri::command]
+pub(crate) fn open_melonds_input_config(app: AppHandle) -> Result<u32, String> {
+    launch_melonds(&app, &["--open-input-config"])
+}
+
+#[tauri::command]
 pub(crate) fn start_match(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -136,3 +150,28 @@ pub(crate) fn stop_match(state: State<'_, AppState>) -> Result<(), String> {
 pub(crate) fn session_status(state: State<'_, AppState>) -> Result<SessionStatus, String> {
     session_status_inner(state.inner())
 }
+
+fn launch_melonds(app: &AppHandle, args: &[&str]) -> Result<u32, String> {
+    let melon_path = find_melonds_binary(app)?;
+    let mut command = Command::new(&melon_path);
+    command.args(args);
+    if let Some(parent) = melon_path.parent() {
+        command.current_dir(parent);
+    }
+    command.stdin(Stdio::null());
+    command.stdout(Stdio::null());
+    command.stderr(Stdio::null());
+    hide_child_console_window(&mut command);
+    command
+        .spawn()
+        .map(|child| child.id())
+        .map_err(|err| format!("melonDS の起動に失敗しました: {err}"))
+}
+
+#[cfg(windows)]
+fn hide_child_console_window(command: &mut Command) {
+    command.creation_flags(0x0800_0000);
+}
+
+#[cfg(not(windows))]
+fn hide_child_console_window(_command: &mut Command) {}
