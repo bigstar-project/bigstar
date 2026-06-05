@@ -25,6 +25,14 @@ const lobby = DurableObjectNamespace('lobby', {
   sqlite: true,
 });
 
+const defaultCorsOrigins = [
+  'http://127.0.0.1:1420',
+  'http://localhost:1420',
+  'http://tauri.localhost',
+  'https://tauri.localhost',
+  'tauri://localhost',
+].join(',');
+
 export const signaling = await Worker('signaling', {
   adopt: true,
   entrypoint: './src/index.ts',
@@ -33,6 +41,7 @@ export const signaling = await Worker('signaling', {
     LOBBY: lobby,
     DEFAULT_ICE_SERVERS:
       process.env.DEFAULT_ICE_SERVERS ?? 'stun:stun.l.google.com:19302',
+    CORS_ORIGINS: process.env.CORS_ORIGINS ?? defaultCorsOrigins,
   },
   bundle: {
     minify: true,

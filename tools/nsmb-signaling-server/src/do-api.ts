@@ -48,6 +48,7 @@ export type MatchmakingEnv = {
   SIGNALING_ROOM: TypedDurableObjectNamespace<RoomObjectApi>;
   LOBBY: TypedDurableObjectNamespace<LobbyObjectApi>;
   DEFAULT_ICE_SERVERS?: string;
+  CORS_ORIGINS?: string;
 };
 
 export function publicRoom(record: RoomRecord, peerCount = 0): RoomSummary {

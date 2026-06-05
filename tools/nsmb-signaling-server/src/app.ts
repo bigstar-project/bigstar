@@ -1,5 +1,6 @@
 import { zValidator } from '@hono/zod-validator';
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import { type MatchmakingEnv, publicRoom } from './do-api';
 import {
   createRoomRequestSchema,
@@ -12,6 +13,23 @@ const ROOM_ID_BYTES = 9;
 const TOKEN_BYTES = 24;
 const ROOM_TTL_MS = 10 * 60 * 1000;
 const VALID_ROOM_ID = /^[A-Za-z0-9_-]{8,64}$/;
+const DEFAULT_CORS_ORIGINS = [
+  'http://127.0.0.1:1420',
+  'http://localhost:1420',
+  'http://tauri.localhost',
+  'https://tauri.localhost',
+  'tauri://localhost',
+];
+
+function corsOrigins(value: string | undefined): string[] {
+  if (!value?.trim()) {
+    return DEFAULT_CORS_ORIGINS;
+  }
+  return value
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
 
 function randomUrlToken(bytes: number): string {
   const values = new Uint8Array(bytes);
@@ -39,6 +57,16 @@ function error(error: string, status: 400 | 404 | 409 | 500) {
 }
 
 export const app = new Hono<{ Bindings: MatchmakingEnv }>();
+
+app.use('*', async (c, next) => {
+  const corsMiddleware = cors({
+    origin: corsOrigins(c.env.CORS_ORIGINS),
+    allowHeaders: ['Content-Type'],
+    allowMethods: ['GET', 'POST', 'OPTIONS'],
+    maxAge: 600,
+  });
+  return corsMiddleware(c, next);
+});
 
 const route = app
   .get('/health', (c) => c.json({ ok: true }, 200))
