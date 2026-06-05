@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
+    "prepare": "panda codegen",
     "build": "tauri build",
+    "panda:codegen": "panda codegen",
     "typecheck": "tsc --noEmit",
     "format-and-lint": "biome check .",
     "format-and-lint:fix": "biome check . --write",
@@ -14,24 +16,26 @@
     "vite:dev": "vite --host 127.0.0.1"
   },
   "dependencies": {
-    "@base-ui/react": "^1.5.0",
+    "@ark-ui/react": "^5.37.0",
     "@phosphor-icons/react": "^2.1.10",
     "@tauri-apps/api": "^2.9.0",
     "@tauri-apps/plugin-process": "~2.3.1",
     "@tauri-apps/plugin-updater": "~2.10.1",
+    "lucide-react": "^1.17.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.12",
-    "@tailwindcss/vite": "^4.3.0",
+    "@pandacss/dev": "^1.11.1",
+    "@park-ui/panda-preset": "^0.43.1",
     "@tauri-apps/cli": "^2.9.0",
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
-    "tailwindcss": "^4.3.0",
     "typescript": "^5.9.3",
-    "vite": "^7.2.0"
+    "vite": "^7.2.0",
+    "vite-tsconfig-paths": "^6.1.1"
   },
   "packageManager": "pnpm@10.26.2"
 }

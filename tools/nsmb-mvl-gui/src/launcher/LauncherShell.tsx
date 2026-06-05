@@ -1,7 +1,10 @@
-import { Tabs } from '@base-ui/react/tabs';
 import { Flag, FlagCheckered, Gear, Wrench } from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
+import { css, cx } from 'styled-system/css';
+import { token } from 'styled-system/tokens';
+import launcherBg from '../assets/launcher-bg.png';
 import { StatusPill } from '../components/StatusPill';
+import { Button, Tabs } from '../components/ui';
 import type { StatusKind } from '../types';
 import type { UpdateStatus, View } from './types';
 
@@ -26,18 +29,35 @@ function updateButtonLabel(updateStatus: UpdateStatus) {
 
 function updateButtonClass(updateStatus: UpdateStatus) {
   if (updateStatus.phase === 'available') {
-    return 'border-yellow-300 bg-yellow-400 text-slate-950 shadow-[0_0_28px_rgba(250,204,21,0.32)] hover:bg-yellow-300';
+    return css({
+      bg: 'yellow.solid.bg',
+      borderColor: 'yellow.outline.border',
+      color: 'gray.1',
+      _hover: { bg: 'yellow.solid.bg.hover' },
+    });
   }
   if (updateStatus.phase === 'error') {
-    return 'border-red-400/80 bg-red-500/18 text-red-100 hover:bg-red-500/25';
+    return css({
+      bg: 'red.subtle.bg',
+      borderColor: 'red.outline.border',
+      color: 'red.subtle.fg',
+    });
   }
   if (
     updateStatus.phase === 'checking' ||
     updateStatus.phase === 'downloading'
   ) {
-    return 'border-blue-300/70 bg-blue-500/18 text-blue-100';
+    return css({
+      bg: 'blue.subtle.bg',
+      borderColor: 'blue.outline.border',
+      color: 'blue.subtle.fg',
+    });
   }
-  return 'border-slate-600 bg-slate-950/35 text-slate-200 hover:border-slate-500 hover:bg-slate-800/65';
+  return css({
+    bg: 'gray.surface.bg',
+    borderColor: 'gray.surface.border',
+    color: 'fg.default',
+  });
 }
 
 export function LauncherShell({
@@ -59,96 +79,364 @@ export function LauncherShell({
 }) {
   return (
     <Tabs.Root
-      className="launcher-background min-h-screen text-slate-100"
+      className={css({
+        backgroundImage: `linear-gradient(180deg, rgba(3, 10, 20, 0.36) 0%, rgba(3, 10, 20, 0.22) 42%, rgba(3, 10, 20, 0.58) 100%), url(${launcherBg})`,
+        backgroundAttachment: 'fixed',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        backgroundSize: 'cover',
+        color: 'fg.default',
+        minH: 'screen',
+        w: 'full',
+      })}
       orientation="vertical"
       value={activeView}
-      onValueChange={(value) => onViewChange(value as View)}
+      onValueChange={(details) => onViewChange(details.value as View)}
     >
-      <main className="grid min-h-screen grid-cols-[236px_minmax(0,1fr)] max-[1280px]:grid-cols-[92px_minmax(0,1fr)]">
-        <aside className="sticky top-0 grid h-screen border-r border-blue-300/15 bg-[#06101d]/88 px-4 py-6 shadow-[inset_-1px_0_0_rgba(96,165,250,0.08)] backdrop-blur-sm max-[1280px]:px-3">
-          <div className="grid content-between">
-            <div className="grid gap-8">
-              <div className="grid gap-1 px-2 max-[1280px]:justify-items-center">
-                <div className="text-3xl font-black leading-none text-white max-[1280px]:text-xl">
+      <main
+        className={css({
+          display: 'grid',
+          gridTemplateColumns: `${token('sizes.sidebar')} minmax(0, 1fr)`,
+          minH: 'screen',
+          w: 'full',
+          '@media (max-width: 1280px)': {
+            gridTemplateColumns: `${token('sizes.sidebarCompact')} minmax(0, 1fr)`,
+          },
+        })}
+        style={{
+          backgroundAttachment: 'fixed',
+          backgroundImage: `linear-gradient(180deg, rgba(3, 10, 20, 0.36) 0%, rgba(3, 10, 20, 0.22) 42%, rgba(3, 10, 20, 0.58) 100%), url(${launcherBg})`,
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+          backgroundSize: 'cover',
+        }}
+      >
+        <aside
+          className={css({
+            backdropBlur: 'sm',
+            backdropFilter: 'auto',
+            bg: 'app.sidebar',
+            borderRightWidth: '1px',
+            display: 'grid',
+            h: 'screen',
+            px: '4',
+            py: '6',
+            position: 'sticky',
+            top: '0',
+            '@media (max-width: 1280px)': {
+              px: '3',
+            },
+          })}
+        >
+          <div
+            className={css({
+              alignContent: 'space-between',
+              display: 'grid',
+            })}
+          >
+            <div
+              className={css({
+                display: 'grid',
+                gap: '8',
+              })}
+            >
+              <div
+                className={css({
+                  display: 'grid',
+                  gap: '1',
+                  px: '2',
+                  '@media (max-width: 1280px)': {
+                    justifyItems: 'center',
+                  },
+                })}
+              >
+                <div
+                  className={css({
+                    color: 'fg.default',
+                    fontWeight: 'black',
+                    lineHeight: 'none',
+                    textStyle: '3xl',
+                    '@media (max-width: 1280px)': {
+                      textStyle: 'xl',
+                    },
+                  })}
+                >
                   NSMB
                 </div>
-                <div className="text-3xl font-black leading-none max-[1280px]:text-xl">
-                  <span className="text-red-400">M</span>
-                  <span className="text-sky-300">v</span>
-                  <span className="text-emerald-300">L</span>
+                <div
+                  className={css({
+                    color: 'fg.default',
+                    fontWeight: 'black',
+                    lineHeight: 'none',
+                    textStyle: '3xl',
+                    '@media (max-width: 1280px)': {
+                      textStyle: 'xl',
+                    },
+                  })}
+                >
+                  <span className={css({ color: 'red.plain.fg' })}>M</span>
+                  <span className={css({ color: 'blue.plain.fg' })}>v</span>
+                  <span className={css({ color: 'green.plain.fg' })}>L</span>
                 </div>
-                <div className="text-xs font-bold text-sky-300/80 max-[1280px]:hidden">
+                <div
+                  className={css({
+                    color: 'blue.plain.fg',
+                    fontWeight: 'bold',
+                    opacity: '0.8',
+                    textStyle: 'xs',
+                    '@media (max-width: 1280px)': {
+                      display: 'none',
+                    },
+                  })}
+                >
                   Mario vs Luigi Online
                 </div>
               </div>
 
-              <Tabs.List className="grid gap-3">
-                <Tabs.Tab
-                  className="group flex min-h-14 items-center gap-3 rounded-lg border border-transparent px-3 text-left text-slate-300 outline-none transition hover:border-blue-300/30 hover:bg-blue-400/10 data-[active]:border-blue-400 data-[active]:bg-blue-500/20 data-[active]:text-white data-[active]:shadow-[0_0_22px_rgba(59,130,246,0.2)] max-[1280px]:justify-center"
+              <Tabs.List
+                className={css({
+                  display: 'grid',
+                  gap: '3',
+                })}
+              >
+                <Tabs.Trigger
+                  aria-label="対戦"
+                  className={css({
+                    alignItems: 'center',
+                    borderColor: 'transparent',
+                    borderRadius: 'l2',
+                    borderWidth: '1px',
+                    color: 'fg.muted',
+                    display: 'flex',
+                    fontWeight: 'black',
+                    gap: '3',
+                    minH: '14',
+                    outline: 'none',
+                    px: '3',
+                    textAlign: 'left',
+                    transition: 'common',
+                    _hover: {
+                      bg: 'blue.subtle.bg',
+                      borderColor: 'blue.outline.border',
+                    },
+                    '&[data-selected]': {
+                      bg: 'blue.subtle.bg',
+                      borderColor: 'blue.solid.bg',
+                      color: 'fg.default',
+                    },
+                    '&[data-selected] svg': {
+                      color: 'yellow.plain.fg',
+                    },
+                    '@media (max-width: 1280px)': {
+                      justifyContent: 'center',
+                    },
+                  })}
                   value="battle"
                 >
                   <FlagCheckered
-                    className="shrink-0 text-white group-data-[active]:text-yellow-300"
+                    className={css({
+                      color: 'fg.muted',
+                      flexShrink: '0',
+                    })}
                     size={28}
                     weight="fill"
                   />
-                  <span className="text-base font-black max-[1280px]:hidden">
+                  <span
+                    className={css({
+                      textStyle: 'md',
+                      '@media (max-width: 1280px)': {
+                        display: 'none',
+                      },
+                    })}
+                  >
                     対戦
                   </span>
-                </Tabs.Tab>
-                <Tabs.Tab
-                  className="group flex min-h-14 items-center gap-3 rounded-lg border border-transparent px-3 text-left text-slate-300 outline-none transition hover:border-blue-300/30 hover:bg-blue-400/10 data-[active]:border-blue-400 data-[active]:bg-blue-500/20 data-[active]:text-white data-[active]:shadow-[0_0_22px_rgba(59,130,246,0.2)] max-[1280px]:justify-center"
+                </Tabs.Trigger>
+                <Tabs.Trigger
+                  aria-label="設定"
+                  className={css({
+                    alignItems: 'center',
+                    borderColor: 'transparent',
+                    borderRadius: 'l2',
+                    borderWidth: '1px',
+                    color: 'fg.muted',
+                    display: 'flex',
+                    fontWeight: 'black',
+                    gap: '3',
+                    minH: '14',
+                    outline: 'none',
+                    px: '3',
+                    textAlign: 'left',
+                    transition: 'common',
+                    _hover: {
+                      bg: 'blue.subtle.bg',
+                      borderColor: 'blue.outline.border',
+                    },
+                    '&[data-selected]': {
+                      bg: 'blue.subtle.bg',
+                      borderColor: 'blue.solid.bg',
+                      color: 'fg.default',
+                    },
+                    '&[data-selected] svg': {
+                      color: 'yellow.plain.fg',
+                    },
+                    '@media (max-width: 1280px)': {
+                      justifyContent: 'center',
+                    },
+                  })}
                   value="settings"
                 >
                   <Gear
-                    className="shrink-0 text-slate-400 group-data-[active]:text-yellow-300"
+                    className={css({
+                      color: 'fg.muted',
+                      flexShrink: '0',
+                    })}
                     size={28}
                     weight="fill"
                   />
-                  <span className="text-base font-black max-[1280px]:hidden">
+                  <span
+                    className={css({
+                      textStyle: 'md',
+                      '@media (max-width: 1280px)': {
+                        display: 'none',
+                      },
+                    })}
+                  >
                     設定
                   </span>
-                </Tabs.Tab>
+                </Tabs.Trigger>
               </Tabs.List>
             </div>
-            <button
+            <Button
               type="button"
-              className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-md border px-3 font-black transition focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-300/20 disabled:cursor-not-allowed disabled:opacity-60 max-[1280px]:min-w-14 ${updateButtonClass(updateStatus)}`}
+              className={cx(
+                css({
+                  fontWeight: 'black',
+                  maxW: 'full',
+                  '@media (max-width: 1280px)': {
+                    minW: '14',
+                  },
+                }),
+                updateButtonClass(updateStatus),
+              )}
               disabled={updateBusy}
               title={
                 updateStatus.version ? `v${updateStatus.version}` : '更新を確認'
               }
               onClick={onCheckForUpdate}
             >
-              <Wrench className="shrink-0" size={20} weight="bold" />
-              <span className="max-[1280px]:hidden">
+              <Wrench
+                className={css({ flexShrink: '0' })}
+                size={20}
+                weight="bold"
+              />
+              <span
+                className={css({
+                  textStyle: 'md',
+                  '@media (max-width: 1280px)': {
+                    display: 'none',
+                  },
+                })}
+              >
                 {updateButtonLabel(updateStatus)}
               </span>
-            </button>
+            </Button>
           </div>
         </aside>
 
-        <div className="min-w-0 bg-[linear-gradient(180deg,rgba(7,17,31,0.72)_0%,rgba(10,21,38,0.58)_58%,rgba(6,11,20,0.72)_100%)]">
-          <div className="mx-auto grid w-[min(1260px,calc(100vw-284px))] gap-6 px-7 py-7 max-[1280px]:w-[calc(100vw-92px)] max-[1280px]:px-5 max-[720px]:px-4">
-            <header className="flex items-start justify-between gap-5 max-[720px]:grid">
-              <div className="grid gap-1">
-                <div className="flex items-center gap-3">
+        <div
+          className={css({
+            backgroundImage:
+              'linear-gradient(180deg, rgba(7, 17, 31, 0.5) 0%, rgba(10, 21, 38, 0.38) 58%, rgba(6, 11, 20, 0.58) 100%)',
+            minW: '0',
+          })}
+        >
+          <div
+            className={css({
+              display: 'grid',
+              gap: '6',
+              maxW: 'contentMax',
+              mx: 'auto',
+              px: '7',
+              py: '7',
+              w: 'full',
+              '@media (max-width: 1280px)': {
+                px: '5',
+              },
+              '@media (max-width: 720px)': {
+                px: '4',
+              },
+            })}
+          >
+            <header
+              className={css({
+                alignItems: 'flex-start',
+                display: 'flex',
+                gap: '5',
+                justifyContent: 'space-between',
+                '@media (max-width: 720px)': {
+                  display: 'grid',
+                },
+              })}
+            >
+              <div
+                className={css({
+                  display: 'grid',
+                  gap: '1',
+                })}
+              >
+                <div
+                  className={css({
+                    alignItems: 'center',
+                    display: 'flex',
+                    gap: '3',
+                  })}
+                >
                   {activeView === 'battle' ? (
-                    <Flag className="text-red-400" size={36} weight="fill" />
+                    <Flag
+                      className={css({ color: 'red.plain.fg' })}
+                      size={36}
+                      weight="fill"
+                    />
                   ) : (
-                    <Gear className="text-slate-300" size={36} weight="fill" />
+                    <Gear
+                      className={css({ color: 'fg.muted' })}
+                      size={36}
+                      weight="fill"
+                    />
                   )}
-                  <h1 className="text-3xl font-black text-white">
+                  <h1
+                    className={css({
+                      color: 'fg.default',
+                      fontWeight: 'black',
+                      textStyle: '3xl',
+                    })}
+                  >
                     {activeView === 'battle' ? '対戦' : '設定'}
                   </h1>
                 </div>
-                <p className="text-sm font-semibold text-slate-400">
+                <p
+                  className={css({
+                    color: 'fg.muted',
+                    fontWeight: 'semibold',
+                    textStyle: 'sm',
+                  })}
+                >
                   {activeView === 'battle'
                     ? 'オンラインでライバルと対戦しよう！'
                     : 'オンライン対戦の環境を整えましょう'}
                 </p>
               </div>
-              <div className="flex items-center gap-3 max-[720px]:flex-wrap">
+              <div
+                className={css({
+                  alignItems: 'center',
+                  display: 'flex',
+                  gap: '3',
+                  '@media (max-width: 720px)': {
+                    flexWrap: 'wrap',
+                  },
+                })}
+              >
                 <StatusPill kind={status.kind}>{status.text}</StatusPill>
               </div>
             </header>

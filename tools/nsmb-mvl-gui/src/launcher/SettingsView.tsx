@@ -1,4 +1,3 @@
-import { Tabs } from '@base-ui/react/tabs';
 import {
   Broadcast,
   CheckCircle,
@@ -9,9 +8,11 @@ import {
   ShieldCheck,
   WifiHigh,
 } from '@phosphor-icons/react';
-import { ActionButton } from '../components/Button';
+import { css } from 'styled-system/css';
+import { token } from 'styled-system/tokens';
 import { FilePathField, NumberField, TextField } from '../components/Fields';
 import { SummaryItem } from '../components/SummaryItem';
+import { Button, Tabs } from '../components/ui';
 import type { FormState } from '../types';
 import { InfoPanel, SettingsPanel } from './LauncherCards';
 import { shortPath } from './path';
@@ -41,127 +42,192 @@ export function SettingsView({
   updateField: UpdateFormField;
 }) {
   return (
-    <Tabs.Panel value="settings">
-      <div className="grid grid-cols-[minmax(0,1fr)_360px] gap-5 max-[1180px]:grid-cols-1">
-        <section className="grid content-start gap-4">
-          <div className="grid rounded-lg border border-slate-700/90 bg-slate-950/55">
-            <div className="grid gap-4 p-5">
-              <SettingsPanel
-                icon={<Broadcast size={24} weight="bold" />}
-                title="接続設定"
+    <Tabs.Content value="settings">
+      <div
+        className={css({
+          display: 'grid',
+          gap: '5',
+          gridTemplateColumns: `minmax(0, 1fr) ${token('sizes.settingsAside')}`,
+          '@media (max-width: 1180px)': {
+            gridTemplateColumns: '1fr',
+          },
+        })}
+      >
+        <section
+          className={css({
+            alignContent: 'start',
+            display: 'grid',
+            gap: '4',
+          })}
+        >
+          <SettingsPanel
+            icon={<Broadcast size={24} weight="bold" />}
+            title="接続設定"
+          >
+            <div
+              className={css({
+                display: 'grid',
+                gap: '3',
+                gridTemplateColumns: 'minmax(0, 1fr) auto',
+                '@media (max-width: 760px)': {
+                  gridTemplateColumns: '1fr',
+                },
+              })}
+            >
+              <TextField
+                label="シグナリングサーバー"
+                value={form.signalUrl}
+                onChange={(value) => updateField('signalUrl', value)}
+              />
+              <Button
+                className={css({ alignSelf: 'end' })}
+                variant="outline"
+                onClick={() => void actions.pollStatus()}
               >
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 max-[760px]:grid-cols-1">
-                  <TextField
-                    label="シグナリングサーバー"
-                    value={form.signalUrl}
-                    onChange={(value) => updateField('signalUrl', value)}
-                  />
-                  <ActionButton
-                    className="self-end"
-                    kind="outline"
-                    type="button"
-                    icon={<WifiHigh size={18} weight="bold" />}
-                    onClick={() => void actions.pollStatus()}
-                  >
-                    接続確認
-                  </ActionButton>
-                </div>
-                <NumberField
-                  label="UDP ポート"
-                  value={form.port}
-                  min={1}
-                  max={65535}
-                  onChange={(value) => updateField('port', value)}
-                />
-              </SettingsPanel>
-
-              <SettingsPanel
-                icon={<HardDrives size={24} weight="fill" />}
-                title="ROM 設定"
-              >
-                <FilePathField
-                  label="ホスト用 ROM"
-                  value={form.hostRomPath}
-                  onBrowse={() => void actions.selectRomPath('hostRomPath')}
-                />
-                <FilePathField
-                  label="参加用 ROM"
-                  value={form.clientRomPath}
-                  onBrowse={() => void actions.selectRomPath('clientRomPath')}
-                />
-                <FilePathField
-                  label="ベース ROM"
-                  value={form.baseRomPath}
-                  onBrowse={() => void actions.selectRomPath('baseRomPath')}
-                />
-              </SettingsPanel>
-
-              <SettingsPanel
-                icon={<GameController size={24} weight="fill" />}
-                title="melonDS 設定"
-              >
-                <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-4 max-[760px]:grid-cols-1">
-                  <ActionButton
-                    kind="outline"
-                    type="button"
-                    icon={<Play size={20} weight="fill" />}
-                    onClick={() => void actions.openMelonds()}
-                  >
-                    melonDS を開く
-                  </ActionButton>
-                  <ActionButton
-                    kind="ghost"
-                    type="button"
-                    icon={<GameController size={20} weight="fill" />}
-                    onClick={() => void actions.openMelondsInputConfig()}
-                  >
-                    入力設定を開く
-                  </ActionButton>
-                </div>
-              </SettingsPanel>
-
-              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-4 max-[760px]:grid-cols-1">
-                <ActionButton
-                  kind="ghost"
-                  type="button"
-                  icon={<ShieldCheck size={20} weight="bold" />}
-                  onClick={() => void actions.preflightCheck()}
-                >
-                  起動前チェック
-                </ActionButton>
-                <ActionButton
-                  kind="primary"
-                  type="button"
-                  icon={<HardDrives size={20} weight="fill" />}
-                  onClick={() => void actions.prepareRoms()}
-                >
-                  共通 ROM を準備
-                </ActionButton>
-              </div>
+                <WifiHigh size={18} weight="bold" />
+                接続確認
+              </Button>
             </div>
+            <NumberField
+              label="UDP ポート"
+              value={form.port}
+              min={1}
+              max={65535}
+              onChange={(value) => updateField('port', value)}
+            />
+          </SettingsPanel>
+
+          <SettingsPanel
+            icon={<HardDrives size={24} weight="fill" />}
+            title="ROM 設定"
+          >
+            <FilePathField
+              label="ホスト用 ROM"
+              value={form.hostRomPath}
+              onBrowse={() => void actions.selectRomPath('hostRomPath')}
+            />
+            <FilePathField
+              label="参加用 ROM"
+              value={form.clientRomPath}
+              onBrowse={() => void actions.selectRomPath('clientRomPath')}
+            />
+            <FilePathField
+              label="ベース ROM"
+              value={form.baseRomPath}
+              onBrowse={() => void actions.selectRomPath('baseRomPath')}
+            />
+          </SettingsPanel>
+
+          <SettingsPanel
+            icon={<GameController size={24} weight="fill" />}
+            title="melonDS 設定"
+          >
+            <div
+              className={css({
+                display: 'grid',
+                gap: '4',
+                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                '@media (max-width: 760px)': {
+                  gridTemplateColumns: '1fr',
+                },
+              })}
+            >
+              <Button
+                variant="outline"
+                onClick={() => void actions.openMelonds()}
+              >
+                <Play size={20} weight="fill" />
+                melonDS を開く
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => void actions.openMelondsInputConfig()}
+              >
+                <GameController size={20} weight="fill" />
+                入力設定を開く
+              </Button>
+            </div>
+          </SettingsPanel>
+
+          <div
+            className={css({
+              display: 'grid',
+              gap: '4',
+              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+              '@media (max-width: 760px)': {
+                gridTemplateColumns: '1fr',
+              },
+            })}
+          >
+            <Button
+              variant="outline"
+              onClick={() => void actions.preflightCheck()}
+            >
+              <ShieldCheck size={20} weight="bold" />
+              起動前チェック
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => void actions.prepareRoms()}
+            >
+              <HardDrives size={20} weight="fill" />
+              共通 ROM を準備
+            </Button>
           </div>
         </section>
 
-        <aside className="grid content-start gap-4">
+        <aside
+          className={css({
+            alignContent: 'start',
+            display: 'grid',
+            gap: '4',
+          })}
+        >
           <InfoPanel
             icon={<FlagCheckered size={24} weight="fill" />}
             title="現在の構成"
             badge={summary.romsConfigured ? '準備 OK' : '未完了'}
             badgeTone={summary.romsConfigured ? 'green' : 'slate'}
           >
-            <div className="flex items-center gap-4 rounded-lg border border-emerald-400/20 bg-emerald-500/10 p-4">
+            <div
+              className={css({
+                alignItems: 'center',
+                bg: 'green.subtle.bg',
+                borderColor: 'green.outline.border',
+                borderRadius: 'l2',
+                borderWidth: '1px',
+                display: 'flex',
+                gap: '4',
+                p: '4',
+              })}
+            >
               <CheckCircle
-                className="shrink-0 text-emerald-300"
+                className={css({
+                  color: 'green.plain.fg',
+                  flexShrink: '0',
+                })}
                 size={46}
                 weight="bold"
               />
               <div>
-                <div className="text-base font-black text-emerald-200">
+                <div
+                  className={css({
+                    color: 'green.subtle.fg',
+                    fontWeight: 'black',
+                    textStyle: 'md',
+                  })}
+                >
                   {summary.romsConfigured
                     ? '対戦準備 OK！'
                     : '設定を確認してください'}
                 </div>
-                <div className="text-sm font-semibold text-slate-400">
+                <div
+                  className={css({
+                    color: 'fg.muted',
+                    fontWeight: 'semibold',
+                    textStyle: 'sm',
+                  })}
+                >
                   {summary.romsConfigured
                     ? 'ROM パスが設定されています'
                     : '未設定の ROM パスがあります'}
@@ -182,6 +248,6 @@ export function SettingsView({
           </InfoPanel>
         </aside>
       </div>
-    </Tabs.Panel>
+    </Tabs.Content>
   );
 }

@@ -3,6 +3,7 @@ vcpkg/
 external/
 logs/
 dist/
+tools/nsmb-mvl-gui/styled-system/
 bin
 obj
 target/

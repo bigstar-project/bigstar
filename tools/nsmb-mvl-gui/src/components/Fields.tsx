@@ -1,7 +1,7 @@
-import { Select } from '@base-ui/react/select';
-import { CaretDown, Check } from '@phosphor-icons/react';
+import { Portal } from '@ark-ui/react';
 import type { ReactNode } from 'react';
-import { ActionButton } from './Button';
+import { css, cx } from 'styled-system/css';
+import { Button, Field, Input, Select } from './ui';
 
 export function RoleButton({
   active,
@@ -9,30 +9,106 @@ export function RoleButton({
   onClick,
   subtitle,
   title,
+  tone,
 }: {
   active: boolean;
   icon: ReactNode;
   onClick: () => void;
   subtitle: string;
   title: string;
+  tone: 'green' | 'red';
 }) {
   return (
     <button
       type="button"
       aria-pressed={active}
-      className={`flex min-h-20 items-center gap-3 rounded-lg border p-4 text-left transition focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-300/25 ${
-        active
-          ? 'border-red-400 bg-red-500/18 text-white shadow-[0_0_28px_rgba(239,68,68,0.22)]'
-          : 'border-slate-600 bg-slate-950/35 text-slate-300 hover:border-blue-400/70 hover:bg-blue-500/10'
-      }`}
+      className={cx(
+        css({
+          alignItems: 'center',
+          borderRadius: 'l2',
+          borderWidth: '1px',
+          display: 'flex',
+          focusVisibleRing: 'outside',
+          gap: '3',
+          minH: '20',
+          p: '4',
+          textAlign: 'left',
+          transition: 'common',
+          cursor: 'pointer',
+        }),
+        css(
+          tone === 'red'
+            ? active
+              ? {
+                  bg: 'red.subtle.bg',
+                  borderColor: 'red.outline.border',
+                  color: 'fg.default',
+                }
+              : {
+                  bg: 'gray.surface.bg',
+                  borderColor: 'gray.surface.border',
+                  color: 'fg.muted',
+                  _hover: {
+                    bg: 'red.subtle.bg',
+                    borderColor: 'red.outline.border',
+                    color: 'fg.default',
+                  },
+                }
+            : active
+              ? {
+                  bg: 'green.subtle.bg',
+                  borderColor: 'green.outline.border',
+                  color: 'fg.default',
+                }
+              : {
+                  bg: 'gray.surface.bg',
+                  borderColor: 'gray.surface.border',
+                  color: 'fg.muted',
+                  _hover: {
+                    bg: 'green.subtle.bg',
+                    borderColor: 'green.outline.border',
+                    color: 'fg.default',
+                  },
+                },
+        ),
+      )}
       onClick={onClick}
     >
-      <span className={active ? 'text-yellow-300' : 'text-blue-300'}>
+      <span
+        className={css({
+          color: active
+            ? tone === 'red'
+              ? 'red.plain.fg'
+              : 'green.plain.fg'
+            : 'fg.muted',
+        })}
+      >
         {icon}
       </span>
-      <span className="grid min-w-0 gap-1">
-        <span className="text-xl font-black leading-tight">{title}</span>
-        <span className="text-sm font-semibold leading-tight text-slate-400">
+      <span
+        className={css({
+          display: 'grid',
+          gap: '1',
+          minW: '0',
+        })}
+      >
+        <span
+          className={css({
+            fontWeight: 'black',
+            lineHeight: 'tight',
+            textStyle: 'xl',
+          })}
+        >
+          {title}
+        </span>
+        <span
+          className={css({
+            color: 'fg.muted',
+            fontWeight: 'semibold',
+            lineHeight: 'tight',
+            textStyle: 'sm',
+          })}
+        >
           {subtitle}
         </span>
       </span>
@@ -54,17 +130,35 @@ export function TextField({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="grid gap-1.5 text-sm font-black text-slate-300">
-      {label}
-      <input
-        className="min-h-11 rounded-md border border-slate-600 bg-slate-950/60 px-3 py-2 font-semibold text-slate-100 outline-none transition placeholder:text-slate-600 hover:border-slate-500 focus:border-blue-400 focus:ring-4 focus:ring-blue-400/15"
+    <Field.Root
+      className={css({
+        display: 'grid',
+        gap: '1.5',
+        minW: '0',
+      })}
+    >
+      <Field.Label
+        className={css({
+          color: 'fg.muted',
+          fontWeight: 'black',
+          textStyle: 'sm',
+        })}
+      >
+        {label}
+      </Field.Label>
+      <Input
+        variant="outline"
+        className={css({
+          color: 'fg.default',
+          fontWeight: 'semibold',
+        })}
         value={value}
         maxLength={maxLength}
         placeholder={placeholder}
         autoComplete="off"
         onChange={(event) => onChange(event.target.value)}
       />
-    </label>
+    </Field.Root>
   );
 }
 
@@ -78,21 +172,45 @@ export function FilePathField({
   onBrowse: () => void;
 }) {
   return (
-    <label className="grid gap-1.5 text-sm font-black text-slate-300">
-      {label}
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-        <input
-          className="min-h-11 rounded-md border border-slate-600 bg-slate-950/60 px-3 py-2 font-semibold text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-blue-400 focus:ring-4 focus:ring-blue-400/15"
+    <Field.Root
+      className={css({
+        display: 'grid',
+        gap: '1.5',
+        minW: '0',
+      })}
+    >
+      <Field.Label
+        className={css({
+          color: 'fg.muted',
+          fontWeight: 'black',
+          textStyle: 'sm',
+        })}
+      >
+        {label}
+      </Field.Label>
+      <div
+        className={css({
+          display: 'grid',
+          gap: '2',
+          gridTemplateColumns: 'minmax(0, 1fr) auto',
+        })}
+      >
+        <Input
+          variant="outline"
+          className={css({
+            color: 'fg.default',
+            fontWeight: 'semibold',
+          })}
           value={value}
           placeholder="未選択"
           readOnly
           title={value}
         />
-        <ActionButton kind="outline" type="button" onClick={onBrowse}>
+        <Button variant="outline" onClick={onBrowse}>
           参照
-        </ActionButton>
+        </Button>
       </div>
-    </label>
+    </Field.Root>
   );
 }
 
@@ -110,17 +228,35 @@ export function NumberField({
   onChange: (value: number) => void;
 }) {
   return (
-    <label className="grid gap-1.5 text-sm font-black text-slate-300">
-      {label}
-      <input
-        className="min-h-11 rounded-md border border-slate-600 bg-slate-950/60 px-3 py-2 font-semibold text-slate-100 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-400/15"
+    <Field.Root
+      className={css({
+        display: 'grid',
+        gap: '1.5',
+        minW: '0',
+      })}
+    >
+      <Field.Label
+        className={css({
+          color: 'fg.muted',
+          fontWeight: 'black',
+          textStyle: 'sm',
+        })}
+      >
+        {label}
+      </Field.Label>
+      <Input
+        variant="outline"
+        className={css({
+          color: 'fg.default',
+          fontWeight: 'semibold',
+        })}
         type="number"
         min={min}
         max={max}
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
       />
-    </label>
+    </Field.Root>
   );
 }
 
@@ -137,45 +273,77 @@ export function SelectField({
   options: Array<{ value: string; label: string }>;
   onChange: (value: string) => void;
 }) {
+  const collection = Select.createListCollection({ items: options });
+
   return (
-    <div className="grid gap-1.5 text-sm font-black text-slate-300">
-      <span>{label}</span>
+    <div
+      className={css({
+        display: 'grid',
+        gap: '1.5',
+        minW: '0',
+      })}
+    >
       <Select.Root
-        items={options}
-        value={value}
-        onValueChange={(nextValue) => {
-          if (nextValue !== null) {
-            onChange(String(nextValue));
+        collection={collection}
+        // size="lg"
+        value={[value]}
+        variant="outline"
+        onValueChange={(details) => {
+          const nextValue = details.value[0];
+          if (nextValue) {
+            onChange(nextValue);
           }
         }}
       >
-        <Select.Trigger className="flex min-h-11 w-full items-center justify-between gap-3 rounded-md border border-slate-600 bg-slate-950/60 px-3 py-2 text-left font-semibold text-slate-100 outline-none transition hover:border-slate-500 focus-visible:border-blue-400 focus-visible:ring-4 focus-visible:ring-blue-400/15">
-          <span className="flex min-w-0 items-center gap-2">
-            {icon ? <span className="text-blue-300">{icon}</span> : null}
-            <Select.Value />
-          </span>
-          <Select.Icon>
-            <CaretDown size={18} weight="bold" />
-          </Select.Icon>
-        </Select.Trigger>
-        <Select.Portal>
-          <Select.Positioner alignItemWithTrigger={false} sideOffset={8}>
-            <Select.Popup className="z-50 min-w-[var(--anchor-width)] rounded-lg border border-slate-600 bg-slate-950 p-1 text-slate-100 shadow-2xl shadow-black/45">
-              {options.map((option) => (
-                <Select.Item
-                  key={option.value}
-                  className="grid min-h-10 cursor-default grid-cols-[1fr_auto] items-center gap-3 rounded-md px-3 text-sm font-bold outline-none data-[highlighted]:bg-blue-500/25 data-[selected]:text-blue-200"
-                  value={option.value}
+        <Select.Label
+          className={css({
+            color: 'fg.muted',
+            fontWeight: 'black',
+            textStyle: 'sm',
+          })}
+        >
+          {label}
+        </Select.Label>
+        <Select.Control>
+          <Select.Trigger>
+            <span
+              className={css({
+                alignItems: 'center',
+                display: 'flex',
+                gap: '2',
+                minW: '0',
+              })}
+            >
+              {icon ? (
+                <span
+                  className={css({
+                    color: 'blue.plain.fg',
+                    flexShrink: '0',
+                  })}
                 >
+                  {icon}
+                </span>
+              ) : null}
+              <Select.ValueText />
+            </span>
+            <Select.IndicatorGroup>
+              <Select.Indicator />
+            </Select.IndicatorGroup>
+          </Select.Trigger>
+        </Select.Control>
+        <Portal>
+          <Select.Positioner>
+            <Select.Content>
+              {options.map((option) => (
+                <Select.Item key={option.value} item={option}>
                   <Select.ItemText>{option.label}</Select.ItemText>
-                  <Select.ItemIndicator>
-                    <Check size={16} weight="bold" />
-                  </Select.ItemIndicator>
+                  <Select.ItemIndicator />
                 </Select.Item>
               ))}
-            </Select.Popup>
+            </Select.Content>
           </Select.Positioner>
-        </Select.Portal>
+        </Portal>
+        <Select.HiddenSelect />
       </Select.Root>
     </div>
   );

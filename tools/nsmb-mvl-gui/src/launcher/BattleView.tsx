@@ -1,4 +1,3 @@
-import { Tabs } from '@base-ui/react/tabs';
 import {
   Broadcast,
   Crown,
@@ -11,14 +10,16 @@ import {
   Trophy,
   Users,
 } from '@phosphor-icons/react';
+import { css, cx } from 'styled-system/css';
+import { token } from 'styled-system/tokens';
 import playerLBadge from '../assets/player-l.png';
 import playerMBadge from '../assets/player-m.png';
-import { ActionButton } from '../components/Button';
 import { RoleButton, SelectField, TextField } from '../components/Fields';
 import { SummaryItem } from '../components/SummaryItem';
+import { Button, Tabs } from '../components/ui';
 import { WebRtcDiagnosticsPanel } from '../components/WebRtcDiagnosticsPanel';
 import type { CourseMode, FormState, Lives } from '../types';
-import { InfoPanel, SmallInfoCard } from './LauncherCards';
+import { InfoPanel, LauncherCard, SmallInfoCard } from './LauncherCards';
 import {
   bigStarsOptions,
   courseOptions,
@@ -51,9 +52,16 @@ export function BattleView({
   updateField: UpdateFormField;
 }) {
   return (
-    <Tabs.Panel value="battle">
+    <Tabs.Content value="battle">
       <form
-        className="grid grid-cols-[minmax(0,1fr)_390px] gap-5 max-[1380px]:grid-cols-1"
+        className={css({
+          display: 'grid',
+          gap: '5',
+          gridTemplateColumns: `minmax(0, 1fr) ${token('sizes.diagnostics')}`,
+          '@media (max-width: 1380px)': {
+            gridTemplateColumns: '1fr',
+          },
+        })}
         onSubmit={(event) => {
           event.preventDefault();
           if (summary.connectionActive) {
@@ -63,15 +71,55 @@ export function BattleView({
           }
         }}
       >
-        <section className="grid gap-4">
-          <div className="rounded-lg border border-slate-700/90 bg-slate-950/55 p-6 shadow-[0_24px_70px_rgba(0,0,0,0.28)]">
-            <div className="grid grid-cols-[minmax(220px,0.85fr)_minmax(0,1.15fr)] gap-6 max-[760px]:grid-cols-1">
-              <div className="grid content-start gap-3 border-r border-slate-700/80 pr-6 max-[860px]:border-r-0 max-[860px]:border-b max-[860px]:pb-5 max-[860px]:pr-0">
-                <div className="flex items-center gap-2 text-sm font-black text-slate-300">
-                  部屋コード
-                </div>
+        <section
+          className={css({
+            display: 'grid',
+            gap: '4',
+          })}
+        >
+          <LauncherCard
+            title="部屋コード"
+            icon={<Flag size={24} weight="fill" />}
+          >
+            <div
+              className={css({
+                display: 'grid',
+                gap: '6',
+                gridTemplateColumns: 'minmax(220px, 0.85fr) minmax(0, 1.15fr)',
+                '@media (max-width: 760px)': {
+                  gridTemplateColumns: '1fr',
+                },
+              })}
+            >
+              <div
+                className={css({
+                  alignContent: 'start',
+                  borderColor: 'gray.surface.border',
+                  borderRightWidth: '1px',
+                  display: 'grid',
+                  gap: '3',
+                  pr: '6',
+                  '@media (max-width: 860px)': {
+                    borderBottomWidth: '1px',
+                    borderRightWidth: '0',
+                    pb: '5',
+                    pr: '0',
+                  },
+                })}
+              >
                 <input
-                  className="w-full border-none bg-transparent text-4xl font-black text-white outline-none placeholder:text-slate-700 max-[860px]:text-4xl"
+                  className={css({
+                    bg: 'transparent',
+                    border: 'none',
+                    color: 'fg.default',
+                    fontWeight: 'black',
+                    outline: 'none',
+                    textStyle: '4xl',
+                    w: 'full',
+                    _placeholder: {
+                      color: 'fg.subtle',
+                    },
+                  })}
                   value={form.roomCode}
                   maxLength={64}
                   placeholder="test-room"
@@ -82,16 +130,41 @@ export function BattleView({
                 />
               </div>
 
-              <div className="grid content-start gap-3">
-                <div className="text-sm font-black text-slate-300">
+              <div
+                className={css({
+                  alignContent: 'start',
+                  display: 'grid',
+                  gap: '3',
+                })}
+              >
+                <div
+                  className={css({
+                    alignItems: 'center',
+                    color: 'fg.muted',
+                    display: 'flex',
+                    fontWeight: 'black',
+                    gap: '2',
+                    textStyle: 'sm',
+                  })}
+                >
                   モードを選択
                 </div>
-                <div className="grid grid-cols-2 gap-3 max-[620px]:grid-cols-1">
+                <div
+                  className={css({
+                    display: 'grid',
+                    gap: '3',
+                    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                    '@media (max-width: 620px)': {
+                      gridTemplateColumns: '1fr',
+                    },
+                  })}
+                >
                   <RoleButton
                     active={form.role === 'host'}
                     icon={<Crown size={26} weight="fill" />}
                     title="ホスト"
                     subtitle="部屋を作成して待つ"
+                    tone="red"
                     onClick={() => updateField('role', 'host')}
                   />
                   <RoleButton
@@ -99,23 +172,32 @@ export function BattleView({
                     icon={<Users size={26} weight="fill" />}
                     title="参加"
                     subtitle="部屋に参加する"
+                    tone="green"
                     onClick={() => updateField('role', 'client')}
                   />
                 </div>
               </div>
             </div>
-          </div>
+          </LauncherCard>
 
-          <div className="rounded-lg border border-slate-700/90 bg-slate-950/45 p-5">
-            <div className="mb-4 flex items-center gap-3">
-              <h2 className="flex items-center gap-2 text-lg font-black text-white">
-                <Star className="text-yellow-300" size={24} weight="fill" />
-                ゲーム設定
-              </h2>
-            </div>
-
-            <div className="grid gap-3">
-              <div className="grid grid-cols-4 gap-3 max-[1260px]:grid-cols-2 max-[720px]:grid-cols-1">
+          <LauncherCard
+            title="ゲーム設定"
+            icon={<Star size={24} weight="fill" />}
+          >
+            <div className={css({ display: 'grid', gap: '3' })}>
+              <div
+                className={css({
+                  display: 'grid',
+                  gap: '3',
+                  gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                  '@media (max-width: 1260px)': {
+                    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                  },
+                  '@media (max-width: 720px)': {
+                    gridTemplateColumns: '1fr',
+                  },
+                })}
+              >
                 <SelectField
                   icon={<RadioButton size={18} />}
                   label="コース"
@@ -154,24 +236,74 @@ export function BattleView({
                 onChange={(value) => updateField('matchSeed', value)}
               />
             </div>
-          </div>
+          </LauncherCard>
 
-          <div className="grid justify-items-center gap-3">
+          <div
+            className={css({
+              display: 'grid',
+              gap: '3',
+              justifyItems: 'center',
+            })}
+          >
             <button
               type="submit"
-              className={`group relative min-h-18 w-full overflow-hidden rounded-lg border-4 px-6 py-4 text-2xl font-black text-white shadow-[0_0_0_1px_rgba(255,255,255,0.1),0_0_38px_rgba(239,68,68,0.48)] transition focus:outline-none focus-visible:ring-4 focus-visible:ring-yellow-300/35 min-[1280px]:min-h-20 min-[1280px]:text-3xl ${
+              className={cx(
+                css({
+                  borderRadius: 'l2',
+                  borderWidth: '4px',
+                  color: 'fg.default',
+                  fontWeight: 'black',
+                  minH: 'cta',
+                  overflow: 'hidden',
+                  px: '6',
+                  py: '4',
+                  position: 'relative',
+                  textStyle: '2xl',
+                  transition: 'common',
+                  w: 'full',
+                  focusVisibleRing: 'outside',
+                  cursor: 'pointer',
+                  '@media (min-width: 1280px)': {
+                    minH: '20',
+                    textStyle: '3xl',
+                  },
+                }),
                 summary.connectionActive
-                  ? 'border-red-400 bg-slate-900 hover:bg-red-950/80'
-                  : 'border-yellow-400 bg-red-700 hover:bg-red-600'
-              }`}
+                  ? css({
+                      bg: 'gray.3',
+                      borderColor: 'gray.3',
+                      _hover: {
+                        bg: 'red.subtle.bg',
+                      },
+                    })
+                  : css({
+                      bg: 'red.700',
+                      borderColor: 'yellow.500',
+                      _hover: {
+                        bg: 'red.600',
+                      },
+                    }),
+              )}
             >
-              <span className="flex items-center justify-center gap-4">
+              <span
+                className={css({
+                  alignItems: 'center',
+                  display: 'flex',
+                  gap: '4',
+                  justifyContent: 'center',
+                })}
+              >
                 {summary.connectionActive ? '停止' : '対戦を開始'}
                 {summary.connectionActive ? (
                   <Stop size={34} weight="fill" />
                 ) : (
                   <Play
-                    className="transition group-hover:translate-x-1"
+                    className={css({
+                      transition: 'transform',
+                      '.group:hover &': {
+                        transform: 'translateX(0.25rem)',
+                      },
+                    })}
                     size={34}
                     weight="fill"
                   />
@@ -186,7 +318,13 @@ export function BattleView({
           />
         </section>
 
-        <aside className="grid content-start gap-4">
+        <aside
+          className={css({
+            alignContent: 'start',
+            display: 'grid',
+            gap: '4',
+          })}
+        >
           <InfoPanel
             icon={<Broadcast size={22} weight="bold" />}
             title="接続状況"
@@ -194,7 +332,7 @@ export function BattleView({
             badgeTone={summary.connectionActive ? 'green' : 'slate'}
           >
             <SummaryItem
-              label="接続品質"
+              label="接続状態"
               value={summary.connectionActive ? '接続中' : '未接続'}
             />
             <WebRtcDiagnosticsPanel
@@ -203,7 +341,16 @@ export function BattleView({
             />
           </InfoPanel>
 
-          <div className="grid grid-cols-2 gap-3 max-[560px]:grid-cols-1">
+          <div
+            className={css({
+              display: 'grid',
+              gap: '3',
+              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+              '@media (max-width: 560px)': {
+                gridTemplateColumns: '1fr',
+              },
+            })}
+          >
             <SmallInfoCard
               imageSrc={form.role === 'host' ? playerMBadge : playerLBadge}
               label="操作キャラ"
@@ -218,7 +365,7 @@ export function BattleView({
           </div>
         </aside>
       </form>
-    </Tabs.Panel>
+    </Tabs.Content>
   );
 }
 
@@ -230,31 +377,51 @@ function BattleLogPanel({
   onOpenLogDir: () => void;
 }) {
   return (
-    <section className="rounded-lg border border-slate-700/90 bg-slate-950/45">
-      <div className="flex min-h-14 w-full items-center justify-between px-5 text-left text-slate-300">
-        <span className="flex items-center gap-3 text-base font-black">
-          <Broadcast size={22} />
-          通信ログ
-        </span>
-      </div>
-      <div className="grid gap-3 px-5 pb-5">
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-sm font-bold text-slate-400">
+    <LauncherCard title="通信ログ" icon={<Broadcast size={22} />}>
+      <div className={css({ display: 'grid', gap: '3' })}>
+        <div
+          className={css({
+            alignItems: 'center',
+            display: 'flex',
+            gap: '3',
+            justifyContent: 'space-between',
+          })}
+        >
+          <span
+            className={css({
+              color: 'fg.muted',
+              fontWeight: 'bold',
+              textStyle: 'sm',
+            })}
+          >
             Log directory
           </span>
-          <ActionButton
-            kind="outline"
-            type="button"
+          <Button
+            variant="outline"
             disabled={!lastLogDir}
             onClick={onOpenLogDir}
           >
             ログを開く
-          </ActionButton>
+          </Button>
         </div>
-        <code className="overflow-wrap-anywhere rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-xs font-semibold text-slate-300">
+        <code
+          className={css({
+            bg: 'gray.surface.bg',
+            borderColor: 'gray.surface.border',
+            borderRadius: 'l2',
+            borderWidth: '1px',
+            color: 'fg.muted',
+            fontFamily: 'mono',
+            fontWeight: 'semibold',
+            overflowWrap: 'anywhere',
+            px: '3',
+            py: '2',
+            textStyle: 'xs',
+          })}
+        >
           {lastLogDir || 'not started'}
         </code>
       </div>
-    </section>
+    </LauncherCard>
   );
 }

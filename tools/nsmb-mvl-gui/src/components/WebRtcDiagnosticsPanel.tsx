@@ -1,3 +1,4 @@
+import { css } from 'styled-system/css';
 import type { BridgeDiagnostics } from '../types';
 import { SummaryItem } from './SummaryItem';
 
@@ -20,14 +21,32 @@ export function WebRtcDiagnosticsPanel({
   };
   return (
     <div
-      className={
+      className={css(
         compact
-          ? 'grid gap-3'
-          : 'mt-1 grid gap-3 border-t border-slate-700/80 pt-4'
-      }
+          ? {
+              display: 'grid',
+              gap: '3',
+            }
+          : {
+              borderColor: 'gray.surface.border',
+              borderTopWidth: '1px',
+              display: 'grid',
+              gap: '3',
+              mt: '1',
+              pt: '4',
+            },
+      )}
     >
       {compact ? null : (
-        <h2 className="text-lg font-black text-white">WebRTC 診断</h2>
+        <h2
+          className={css({
+            color: 'fg.default',
+            fontWeight: 'black',
+            textStyle: 'lg',
+          })}
+        >
+          WebRTC 診断
+        </h2>
       )}
       <SummaryItem label="phase" value={diagnostics?.phase ?? '未起動'} />
       <SummaryItem

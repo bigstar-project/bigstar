@@ -9,6 +9,8 @@ if (!app) {
   throw new Error('missing #app');
 }
 
+document.documentElement.classList.add('dark');
+
 createRoot(app).render(
   <StrictMode>
     <App />

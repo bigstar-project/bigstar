@@ -1,3 +1,5 @@
+import { css } from 'styled-system/css';
+
 export function SummaryItem({
   label,
   value,
@@ -6,9 +8,28 @@ export function SummaryItem({
   value: string;
 }) {
   return (
-    <div className="grid gap-0.5">
-      <span className="text-xs font-black text-slate-500">{label}</span>
-      <strong className="overflow-wrap-anywhere text-sm text-slate-100">
+    <div
+      className={css({
+        display: 'grid',
+        gap: '0.5',
+      })}
+    >
+      <span
+        className={css({
+          color: 'fg.subtle',
+          fontWeight: 'black',
+          textStyle: 'xs',
+        })}
+      >
+        {label}
+      </span>
+      <strong
+        className={css({
+          color: 'fg.default',
+          overflowWrap: 'anywhere',
+          textStyle: 'sm',
+        })}
+      >
         {value}
       </strong>
     </div>
