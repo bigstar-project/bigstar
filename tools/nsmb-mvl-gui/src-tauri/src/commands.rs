@@ -9,12 +9,12 @@ use std::os::windows::process::CommandExt;
 use crate::config::{DEFAULT_PORT, DEFAULT_ROOM_CODE, DEFAULT_SIGNAL_URL};
 use crate::models::{
     Defaults, GenerateRomRequest, GenerateRomResponse, LaunchRequest, LaunchResponse,
-    LauncherSettings, SaveRomPathsRequest, SessionStatus,
+    SaveRomPathsRequest, SessionStatus,
 };
 use crate::paths::{
     absolutize_existing, app_data_dir, create_log_dir, find_bridge_binary, find_input_script,
     find_melonds_binary, fixed_generated_rom_paths, load_launcher_settings, open_allowed_log_dir,
-    repo_root, save_launcher_settings, saved_path_or_default,
+    save_launcher_settings,
 };
 use crate::processes::{session_status_inner, start_match_resolved, stop_existing, LaunchPaths};
 use crate::roms::prepare_roms;
@@ -31,20 +31,15 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
     let saved = load_launcher_settings(&app)?;
     let signal_url =
         std::env::var("NSMB_MVL_SIGNAL_URL").unwrap_or_else(|_| DEFAULT_SIGNAL_URL.to_owned());
-    let dev_base_rom = repo_root()
-        .ok()
-        .map(|root| root.join("roms").join("nsmb-us.nds"))
-        .filter(|path| path.exists());
 
     Ok(Defaults {
         signal_url,
         room_code: DEFAULT_ROOM_CODE.to_owned(),
         host_rom_path: host_rom.to_string_lossy().into_owned(),
         client_rom_path: client_rom.to_string_lossy().into_owned(),
-        base_rom_path: saved_path_or_default(
-            &saved.base_rom_path,
-            dev_base_rom.unwrap_or_else(|| app_dir.join("roms").join("nsmb-us.nds")),
-        ),
+        base_rom_path: saved.base_rom_path.trim().to_owned(),
+        roms_prepared_once: saved.roms_prepared_once,
+        input_config_opened_once: saved.input_config_opened_once,
         port: DEFAULT_PORT,
     })
 }
@@ -52,9 +47,8 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn save_rom_paths(app: AppHandle, request: SaveRomPathsRequest) -> Result<(), String> {
-    let settings = LauncherSettings {
-        base_rom_path: request.base_rom_path,
-    };
+    let mut settings = load_launcher_settings(&app)?;
+    settings.base_rom_path = request.base_rom_path;
     save_launcher_settings(&app, &settings)
 }
 
@@ -95,7 +89,11 @@ pub(crate) fn open_melonds(app: AppHandle) -> Result<u32, String> {
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn open_melonds_input_config(app: AppHandle) -> Result<u32, String> {
-    launch_melonds(&app, &["--open-input-config"])
+    let pid = launch_melonds(&app, &["--open-input-config"])?;
+    let mut settings = load_launcher_settings(&app)?;
+    settings.input_config_opened_once = true;
+    save_launcher_settings(&app, &settings)?;
+    Ok(pid)
 }
 
 #[tauri::command]
@@ -177,9 +175,15 @@ async fn prepare_roms_on_blocking_thread(
     request: GenerateRomRequest,
     force: bool,
 ) -> Result<GenerateRomResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || prepare_roms(&app, request, force))
-        .await
-        .map_err(|err| format!("ROM準備 worker が停止しました: {err}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        let response = prepare_roms(&app, request, force)?;
+        let mut settings = load_launcher_settings(&app)?;
+        settings.roms_prepared_once = true;
+        save_launcher_settings(&app, &settings)?;
+        Ok::<_, String>(response)
+    })
+    .await
+    .map_err(|err| format!("ROM準備 worker が停止しました: {err}"))?
 }
 
 #[cfg(windows)]

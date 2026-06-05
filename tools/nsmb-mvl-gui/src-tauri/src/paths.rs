@@ -275,15 +275,6 @@ pub(crate) fn find_symbols_file_without_app() -> Result<PathBuf, String> {
     Err("symbols9.x が見つかりません".into())
 }
 
-pub(crate) fn saved_path_or_default(value: &str, fallback: PathBuf) -> String {
-    let value = value.trim();
-    if value.is_empty() {
-        fallback.to_string_lossy().into_owned()
-    } else {
-        value.to_owned()
-    }
-}
-
 pub(crate) fn fixed_generated_rom_paths(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
     let rom_dir = app_data_dir(app)?.join("roms");
     fs::create_dir_all(&rom_dir).map_err(|err| format!("ROM保存先を作成できません: {err}"))?;

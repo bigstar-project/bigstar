@@ -64,6 +64,10 @@ export function useLauncherController() {
     useState<BridgeDiagnostics | null>(null);
   const [defaultsLoaded, setDefaultsLoaded] = useState(false);
   const [romPreparation, setRomPreparation] = useState('未確認');
+  const [onboardingRomsPrepared, setOnboardingRomsPrepared] = useState(false);
+  const [romGenerationBusy, setRomGenerationBusy] = useState(false);
+  const [onboardingInputConfigOpened, setOnboardingInputConfigOpened] =
+    useState(false);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({
     phase: 'idle',
@@ -181,6 +185,8 @@ export function useLauncherController() {
           lives: 'endless',
           matchSeed: String(generateSeed()),
         });
+        setOnboardingRomsPrepared(defaults.roms_prepared_once);
+        setOnboardingInputConfigOpened(defaults.input_config_opened_once);
         setDefaultsLoaded(true);
         await pollStatus();
       } catch (error) {
@@ -235,8 +241,8 @@ export function useLauncherController() {
     }
   };
 
-  const prepareRoms = async () => {
-    const nextForm = withRequiredSeed(form);
+  const prepareRomsFor = async (sourceForm: FormState) => {
+    const nextForm = withRequiredSeed(sourceForm);
     if (nextForm.matchSeed !== form.matchSeed) {
       setForm(nextForm);
     }
@@ -256,15 +262,39 @@ export function useLauncherController() {
     };
 
     try {
+      setRomGenerationBusy(true);
       setActivityStatus({ text: '共通 ROM を準備中', kind: 'idle' });
       const response = await generateRoms(request);
       setForm((current) => ({
         ...current,
+        baseRomPath: nextForm.baseRomPath,
         hostRomPath: response.host_rom,
         clientRomPath: response.client_rom,
       }));
       setRomPreparation('準備済み');
+      setOnboardingRomsPrepared(true);
       setActivityStatus({ text: '共通 ROM の準備が完了しました', kind: 'ok' });
+    } catch (error) {
+      setActivityStatus({ text: String(error), kind: 'error' });
+    } finally {
+      setRomGenerationBusy(false);
+    }
+  };
+
+  const prepareRoms = async () => {
+    await prepareRomsFor(form);
+  };
+
+  const selectBaseRomAndPrepare = async () => {
+    try {
+      const selected = await selectRomFile(form.baseRomPath);
+      if (!selected) {
+        return;
+      }
+      const nextForm = { ...form, baseRomPath: selected };
+      setForm(nextForm);
+      await saveRomPaths({ base_rom_path: selected });
+      await prepareRomsFor(nextForm);
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });
     }
@@ -368,6 +398,7 @@ export function useLauncherController() {
         text: `melonDS の入力設定を開きました pid:${pid}`,
         kind: 'ok',
       });
+      setOnboardingInputConfigOpened(true);
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });
     }
@@ -479,6 +510,7 @@ export function useLauncherController() {
     pollStatus,
     preflightCheck,
     prepareRoms,
+    selectBaseRomAndPrepare,
     selectRomPath,
     startMatch,
     stopMatch,
@@ -499,6 +531,12 @@ export function useLauncherController() {
     activityStatus,
     form,
     lastLogDir,
+    onboarding: {
+      loaded: defaultsLoaded,
+      romsPrepared: onboardingRomsPrepared,
+      romGenerationBusy,
+      inputConfigOpened: onboardingInputConfigOpened,
+    },
     summary,
     updateBusy,
     updateStatus,

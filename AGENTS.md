@@ -40,6 +40,19 @@ Before the final response of any turn that requires a Markdown update under the 
 - keep the current blocker and next action easy to find near the top
 - avoid long chronological append-only logs when a concise current-state summary is clearer
 
+## Tauri GUI UI Components
+
+When adding UI to the Tauri GUI in `tools/nsmb-mvl-gui`, reuse the existing Park UI setup before creating a new local component from scratch.
+
+If a new UI component is needed, first check whether Park UI has the desired component in its docs/components list. If Park UI provides it, add it with the Park UI CLI from the GUI package directory:
+
+```powershell
+cd tools/nsmb-mvl-gui
+pnpm dlx @park-ui/cli@next add <component-name>
+```
+
+Use the canonical Park UI component name from the docs, for example `dialog`, `tabs`, `select`, `tooltip`, or `menu`. After adding components, review generated files under `src/components/ui` and `src/theme/recipes`, then adapt them to the app's existing design conventions as needed.
+
 ## Code Quality Checks
 
 When changing Rust code, run Rust formatting and Clippy before ending the turn. Use `cargo fmt` for the affected crate/workspace, then run the local strict Clippy alias, normally `cargo clippy-all`, which treats warnings as errors.

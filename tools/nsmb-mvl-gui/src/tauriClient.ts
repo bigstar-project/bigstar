@@ -29,7 +29,9 @@ const previewDefaults: Defaults = {
     'C:\\Users\\Sugiyama\\AppData\\Roaming\\dev.melonds.nsmb-mvl\\roms\\nsmb-mvl-host.nds',
   client_rom_path:
     'C:\\Users\\Sugiyama\\AppData\\Roaming\\dev.melonds.nsmb-mvl\\roms\\nsmb-mvl-client.nds',
-  base_rom_path: 'C:\\Users\\Sugiyama\\melon-ds-mario\\roms\\nsmb-us.nds',
+  base_rom_path: '',
+  roms_prepared_once: false,
+  input_config_opened_once: false,
   port: 8165,
 };
 

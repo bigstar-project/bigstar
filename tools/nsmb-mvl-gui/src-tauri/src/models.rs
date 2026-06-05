@@ -61,6 +61,8 @@ pub(crate) struct Defaults {
     pub(crate) host_rom_path: String,
     pub(crate) client_rom_path: String,
     pub(crate) base_rom_path: String,
+    pub(crate) roms_prepared_once: bool,
+    pub(crate) input_config_opened_once: bool,
     pub(crate) port: u16,
 }
 
@@ -68,6 +70,8 @@ pub(crate) struct Defaults {
 #[serde(default)]
 pub(crate) struct LauncherSettings {
     pub(crate) base_rom_path: String,
+    pub(crate) roms_prepared_once: bool,
+    pub(crate) input_config_opened_once: bool,
 }
 
 #[derive(Debug, Deserialize, Type)]

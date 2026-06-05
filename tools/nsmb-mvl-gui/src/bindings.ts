@@ -49,6 +49,8 @@ export type Defaults = {
 	host_rom_path: string,
 	client_rom_path: string,
 	base_rom_path: string,
+	roms_prepared_once: boolean,
+	input_config_opened_once: boolean,
 	port: number,
 };
 

@@ -39,9 +39,17 @@ export type LauncherActions = {
   pollStatus: () => Promise<void>;
   preflightCheck: () => Promise<void>;
   prepareRoms: () => Promise<void>;
+  selectBaseRomAndPrepare: () => Promise<void>;
   selectRomPath: (key: SelectRomKey) => Promise<void>;
   startMatch: () => Promise<void>;
   stopMatch: () => Promise<void>;
+};
+
+export type OnboardingState = {
+  loaded: boolean;
+  romsPrepared: boolean;
+  romGenerationBusy: boolean;
+  inputConfigOpened: boolean;
 };
 
 export type DiagnosticsState = {
