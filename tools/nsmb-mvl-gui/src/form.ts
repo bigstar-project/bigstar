@@ -2,6 +2,7 @@ import type { CourseMode, FormState, GameSettings } from './types';
 
 export const initialForm: FormState = {
   role: 'host',
+  hostName: 'Player',
   signalUrl: '',
   roomCode: '',
   port: 8165,

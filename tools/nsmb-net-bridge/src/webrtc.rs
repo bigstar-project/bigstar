@@ -229,6 +229,10 @@ fn parse_server_ice_servers(value: &serde_json::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn signal_peer_count(value: &serde_json::Value) -> Option<u64> {
+    value.get("peerCount").and_then(|value| value.as_u64())
+}
+
 async fn wait_signal_hello(
     ws: &mut tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
@@ -270,6 +274,51 @@ async fn wait_signal_hello(
     }
 }
 
+async fn wait_signal_ready_for_offer(
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+) -> Result<(), Box<dyn std::error::Error>> {
+    loop {
+        let Some(message) = ws.next().await else {
+            return Err(
+                io::Error::new(io::ErrorKind::UnexpectedEof, "signaling socket closed").into(),
+            );
+        };
+        let message = message?;
+        let WebSocketMessage::Text(text) = message else {
+            continue;
+        };
+        let value = serde_json::from_str::<serde_json::Value>(&text)?;
+        match value.get("type").and_then(|v| v.as_str()) {
+            Some("ready-for-offer") => {
+                println!("nsmb-net-bridge signaling: {}", value);
+                return Ok(());
+            }
+            Some("peer-joined") if signal_peer_count(&value).is_some_and(|count| count >= 2) => {
+                println!("nsmb-net-bridge signaling: {}", value);
+                return Ok(());
+            }
+            Some("hello") | Some("peer-joined") | Some("pong") => {
+                println!("nsmb-net-bridge signaling: {}", value);
+            }
+            Some("error") => {
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    format!("signaling server error: {value}"),
+                )
+                .into());
+            }
+            other => {
+                println!(
+                    "nsmb-net-bridge signaling: ignored message type {:?}",
+                    other
+                );
+            }
+        }
+    }
+}
+
 async fn wait_signal_sdp(
     ws: &mut tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
@@ -288,7 +337,7 @@ async fn wait_signal_sdp(
         };
         let value = serde_json::from_str::<serde_json::Value>(&text)?;
         match value.get("type").and_then(|v| v.as_str()) {
-            Some("hello") | Some("peer-joined") | Some("pong") => {
+            Some("hello") | Some("peer-joined") | Some("ready-for-offer") | Some("pong") => {
                 println!("nsmb-net-bridge signaling: {}", value);
             }
             Some("error") => {
@@ -439,6 +488,11 @@ async fn connect_signal_offer(
         (Vec::new(), "disabled-for-smoke")
     };
     reporter.set_ice_servers(stun_servers.clone(), source);
+
+    if signal_peer_count(&hello).is_none_or(|count| count < 2) {
+        reporter.set_phase("waiting-peer-ready");
+        wait_signal_ready_for_offer(&mut ws).await?;
+    }
 
     let mut endpoint = create_endpoint(stun_servers, reporter).await?;
     let offer = endpoint
@@ -738,6 +792,15 @@ async fn run_local_signaling_server(
         .send(WebSocketMessage::Text(hello.clone().into()))
         .await?;
     second_tx.send(WebSocketMessage::Text(hello.into())).await?;
+    let ready = serde_json::json!({
+        "type": "ready-for-offer",
+        "peerCount": 2,
+    })
+    .to_string();
+    first_tx
+        .send(WebSocketMessage::Text(ready.clone().into()))
+        .await?;
+    second_tx.send(WebSocketMessage::Text(ready.into())).await?;
 
     let first_to_second = relay_signaling_messages(first_rx, second_tx);
     let second_to_first = relay_signaling_messages(second_rx, first_tx);

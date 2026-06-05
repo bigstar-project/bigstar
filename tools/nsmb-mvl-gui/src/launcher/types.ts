@@ -1,3 +1,4 @@
+import type { RoomSummary } from '../matchmakingClient';
 import type { BridgeDiagnostics, FormState } from '../types';
 
 export type View = 'battle' | 'settings';
@@ -33,6 +34,8 @@ export type LauncherSummary = {
 export type LauncherActions = {
   checkForUpdate: () => Promise<void>;
   copyRoomCode: () => Promise<void>;
+  createRoom: () => Promise<void>;
+  joinRoom: (roomId: string) => Promise<void>;
   openLogDir: () => Promise<void>;
   openMelonds: () => Promise<void>;
   openMelondsInputConfig: () => Promise<void>;
@@ -54,4 +57,11 @@ export type OnboardingState = {
 
 export type DiagnosticsState = {
   bridgeDiagnostics: BridgeDiagnostics | null;
+};
+
+export type MatchmakingRoomsState = {
+  rooms: RoomSummary[];
+  loading: boolean;
+  busy: boolean;
+  error: string | null;
 };

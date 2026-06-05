@@ -20,11 +20,17 @@ const signalingRoom = DurableObjectNamespace('signaling-room', {
   sqlite: true,
 });
 
+const lobby = DurableObjectNamespace('lobby', {
+  className: 'LobbyObject',
+  sqlite: true,
+});
+
 export const signaling = await Worker('signaling', {
   adopt: true,
   entrypoint: './src/index.ts',
   bindings: {
     SIGNALING_ROOM: signalingRoom,
+    LOBBY: lobby,
     DEFAULT_ICE_SERVERS:
       process.env.DEFAULT_ICE_SERVERS ?? 'stun:stun.l.google.com:19302',
   },

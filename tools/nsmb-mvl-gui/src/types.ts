@@ -20,6 +20,7 @@ export type StatusKind = 'idle' | 'ok' | 'warn' | 'error';
 
 export type FormState = {
   role: Role;
+  hostName: string;
   signalUrl: string;
   roomCode: string;
   port: number;

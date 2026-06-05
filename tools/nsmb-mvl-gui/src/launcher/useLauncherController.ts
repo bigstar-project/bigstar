@@ -1,3 +1,4 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { check } from '@tauri-apps/plugin-updater';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -9,6 +10,11 @@ import {
   selectedStageFrom,
   withRequiredSeed,
 } from '../form';
+import {
+  createRoom as createMatchmakingRoom,
+  joinRoom as joinMatchmakingRoom,
+  listRooms,
+} from '../matchmakingClient';
 import {
   ensureRoms,
   generateRoms,
@@ -46,7 +52,12 @@ function isTauriRuntime() {
   return '__TAURI_INTERNALS__' in window;
 }
 
+function isWebSocketUrl(value: string) {
+  return value.startsWith('ws://') || value.startsWith('wss://');
+}
+
 export function useLauncherController() {
+  const queryClient = useQueryClient();
   const [activeView, setActiveView] = useState<View>(() =>
     window.location.hash === '#settings' ? 'settings' : 'battle',
   );
@@ -107,6 +118,15 @@ export function useLauncherController() {
     romsConfigured,
     selectedStageLabel,
   };
+  const roomsQuery = useQuery({
+    enabled: defaultsLoaded && isWebSocketUrl(form.signalUrl),
+    queryFn: async () => {
+      const response = await listRooms(form.signalUrl);
+      return response.rooms;
+    },
+    queryKey: ['matchmakingRooms', form.signalUrl],
+    refetchInterval: 5000,
+  });
 
   useEffect(() => {
     updateBusyRef.current = updateBusy;
@@ -173,6 +193,7 @@ export function useLauncherController() {
         if (disposed) return;
         setForm({
           role: 'host',
+          hostName: 'Player',
           signalUrl: defaults.signal_url,
           roomCode: defaults.room_code,
           port: defaults.port,
@@ -316,8 +337,8 @@ export function useLauncherController() {
     return response;
   };
 
-  const startMatch = async () => {
-    const nextForm = withRequiredSeed(form);
+  const startMatchFor = async (sourceForm: FormState) => {
+    const nextForm = withRequiredSeed(sourceForm);
     if (nextForm.matchSeed !== form.matchSeed) {
       setForm(nextForm);
     }
@@ -354,6 +375,82 @@ export function useLauncherController() {
         text: `起動済み melonDS:${response.melon_pid} bridge:${response.bridge_pid}`,
         kind: 'ok',
       });
+    } catch (error) {
+      setActivityStatus({ text: String(error), kind: 'error' });
+    }
+  };
+
+  const startMatch = async () => {
+    await startMatchFor(form);
+  };
+
+  const createRoomMutation = useMutation({
+    mutationFn: async (sourceForm: FormState) => {
+      const nextForm = withRequiredSeed(sourceForm);
+      return createMatchmakingRoom({
+        hostName: nextForm.hostName,
+        settings: currentSettings(nextForm),
+        signalUrl: nextForm.signalUrl,
+      });
+    },
+  });
+
+  const joinRoomMutation = useMutation({
+    mutationFn: async (roomId: string) =>
+      joinMatchmakingRoom({ roomId, signalUrl: form.signalUrl }),
+  });
+
+  const createRoom = async () => {
+    if (connectionActive) {
+      setActivityStatus({
+        text: '実行中の対戦を停止してから部屋を作成してください',
+        kind: 'warn',
+      });
+      return;
+    }
+    try {
+      setActivityStatus({ text: '部屋を作成中', kind: 'idle' });
+      const response = await createRoomMutation.mutateAsync(form);
+      const nextForm: FormState = {
+        ...withRequiredSeed(form),
+        role: 'host',
+        roomCode: response.room_id,
+        signalUrl: response.signal_url,
+      };
+      setForm(nextForm);
+      await queryClient.invalidateQueries({ queryKey: ['matchmakingRooms'] });
+      setActivityStatus({ text: '部屋を作成しました', kind: 'ok' });
+      await startMatchFor(nextForm);
+    } catch (error) {
+      setActivityStatus({ text: String(error), kind: 'error' });
+    }
+  };
+
+  const joinRoom = async (roomId: string) => {
+    if (connectionActive) {
+      setActivityStatus({
+        text: '実行中の対戦を停止してから部屋に参加してください',
+        kind: 'warn',
+      });
+      return;
+    }
+    try {
+      setActivityStatus({ text: '部屋に参加中', kind: 'idle' });
+      const response = await joinRoomMutation.mutateAsync(roomId);
+      const nextForm: FormState = {
+        ...form,
+        role: 'client',
+        roomCode: response.room_id,
+        signalUrl: response.signal_url,
+        courseMode: response.settings.course_mode,
+        wins: response.settings.wins,
+        bigStars: response.settings.big_stars,
+        lives: response.settings.lives,
+        matchSeed: response.settings.match_seed,
+      };
+      setForm(nextForm);
+      await queryClient.invalidateQueries({ queryKey: ['matchmakingRooms'] });
+      await startMatchFor(nextForm);
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });
     }
@@ -504,6 +601,8 @@ export function useLauncherController() {
   const actions: LauncherActions = {
     checkForUpdate,
     copyRoomCode,
+    createRoom,
+    joinRoom,
     openLogDir,
     openMelonds,
     openMelondsInputConfig,
@@ -531,6 +630,12 @@ export function useLauncherController() {
     activityStatus,
     form,
     lastLogDir,
+    matchmakingRooms: {
+      rooms: roomsQuery.data ?? [],
+      loading: roomsQuery.isFetching,
+      busy: createRoomMutation.isPending || joinRoomMutation.isPending,
+      error: roomsQuery.error ? String(roomsQuery.error) : null,
+    },
     onboarding: {
       loaded: defaultsLoaded,
       romsPrepared: onboardingRomsPrepared,

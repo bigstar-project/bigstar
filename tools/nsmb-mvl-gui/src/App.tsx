@@ -31,6 +31,7 @@ export function App() {
             diagnostics={{ bridgeDiagnostics: launcher.bridgeDiagnostics }}
             form={launcher.form}
             lastLogDir={launcher.lastLogDir}
+            matchmakingRooms={launcher.matchmakingRooms}
             summary={launcher.summary}
             updateField={launcher.updateField}
           />
