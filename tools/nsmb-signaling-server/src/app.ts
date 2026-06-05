@@ -13,6 +13,7 @@ const ROOM_ID_BYTES = 9;
 const TOKEN_BYTES = 24;
 const ROOM_TTL_MS = 10 * 60 * 1000;
 const VALID_ROOM_ID = /^[A-Za-z0-9_-]{8,64}$/;
+const VALID_SESSION_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const DEFAULT_CORS_ORIGINS = [
   'http://127.0.0.1:1420',
   'http://localhost:1420',
@@ -52,6 +53,11 @@ function signalUrl(request: Request): string {
   return url.toString();
 }
 
+function sessionId(request: Request): string | null {
+  const url = new URL(request.url);
+  return url.searchParams.get('room') ?? url.searchParams.get('session');
+}
+
 function error(error: string, status: 400 | 404 | 409 | 500) {
   return { body: errorResponseSchema.parse({ error }), status };
 }
@@ -66,6 +72,18 @@ app.use('*', async (c, next) => {
     maxAge: 600,
   });
   return corsMiddleware(c, next);
+});
+
+app.get('/session', async (c) => {
+  const session = sessionId(c.req.raw);
+  if (!session || !VALID_SESSION_ID.test(session)) {
+    const { body, status } = error('invalid session', 400);
+    return c.json(body, status);
+  }
+  const room = c.env.SIGNALING_ROOM.get(
+    c.env.SIGNALING_ROOM.idFromName(session),
+  );
+  return room.fetch(c.req.raw);
 });
 
 const route = app

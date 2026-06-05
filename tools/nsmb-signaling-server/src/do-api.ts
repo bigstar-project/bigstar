@@ -41,7 +41,9 @@ export type LobbyObjectApi = {
 
 type TypedDurableObjectNamespace<T> = {
   idFromName(name: string): unknown;
-  get(id: unknown): T;
+  get(id: unknown): T & {
+    fetch(request: Request): Promise<Response>;
+  };
 };
 
 export type MatchmakingEnv = {
