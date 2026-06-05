@@ -30,7 +30,6 @@
   "devDependencies": {
     "@biomejs/biome": "2.3.12",
     "@cloudflare/workers-types": "^4.20260605.1",
-    "@hono/zod-validator": "^0.8.0",
     "@pandacss/dev": "^1.11.1",
     "@park-ui/panda-preset": "^0.43.1",
     "@tauri-apps/cli": "^2.9.0",
@@ -39,8 +38,7 @@
     "@vitejs/plugin-react": "^5.1.1",
     "typescript": "^5.9.3",
     "vite": "^7.2.0",
-    "vite-tsconfig-paths": "^6.1.1",
-    "zod": "^4.4.3"
+    "vite-tsconfig-paths": "^6.1.1"
   },
   "packageManager": "pnpm@10.26.2"
 }
