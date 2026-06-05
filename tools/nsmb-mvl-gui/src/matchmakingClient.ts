@@ -1,5 +1,6 @@
 import { hc } from 'hono/client';
-import type { AppType, RoomSummary } from './matchmakingApiContract';
+import type { AppType } from '../../nsmb-signaling-server/src/app';
+import type { RoomSummary } from '../../nsmb-signaling-server/src/schemas';
 import type { GameSettings } from './types';
 
 export type { RoomSummary };
