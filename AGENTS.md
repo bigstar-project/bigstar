@@ -10,7 +10,7 @@ Local commits are allowed when they are useful for preserving completed work, bu
 
 For this fork, keep ROM analysis, ROM patching, and melonDS/input sync PoC progress updated in `docs/`.
 
-When ROM analysis, ROM patching, or melonDS/input sync PoC work starts, changes direction, completes a meaningful step, or hits a blocker, update the relevant Markdown file before ending the turn. GUI, WebRTC/WAN transport, sidecar, backend, matchmaking, ranking, and other non-ROM-analysis work does not require a Markdown update every turn; update docs only when it meaningfully changes roadmap, architecture, verification status, blockers, or handoff state. Do not assume there is only one tracking document. Use the document that matches the current work:
+When ROM analysis, ROM patching, or melonDS/input sync PoC work starts, changes direction, completes a meaningful step, or hits a blocker, update the relevant Markdown file before ending the turn. For GUI, WebRTC/WAN transport, sidecar, backend, matchmaking, ranking, and other non-ROM-analysis work, do not update Markdown progress documents. Do not assume there is only one tracking document. Use the document that matches the current work:
 
 - `docs/nsmb-mario-vs-luigi-online-poc.md`: melonDS/ROM patch/input sync PoC status and verification.
 - `docs/nsmb-wan-netplay-roadmap.md`: WAN transport, WebRTC sidecar, desktop GUI, backend, matchmaking, and ranking roadmap.
