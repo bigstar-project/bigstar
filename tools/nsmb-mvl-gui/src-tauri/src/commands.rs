@@ -134,20 +134,20 @@ pub(crate) fn start_match(
 
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn generate_roms(
+pub(crate) async fn generate_roms(
     app: AppHandle,
     request: GenerateRomRequest,
 ) -> Result<GenerateRomResponse, String> {
-    prepare_roms(&app, request, true)
+    prepare_roms_on_blocking_thread(app, request, true).await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn ensure_roms(
+pub(crate) async fn ensure_roms(
     app: AppHandle,
     request: GenerateRomRequest,
 ) -> Result<GenerateRomResponse, String> {
-    prepare_roms(&app, request, false)
+    prepare_roms_on_blocking_thread(app, request, false).await
 }
 
 #[tauri::command]
@@ -177,6 +177,16 @@ fn launch_melonds(app: &AppHandle, args: &[&str]) -> Result<u32, String> {
         .spawn()
         .map(|child| child.id())
         .map_err(|err| format!("melonDS の起動に失敗しました: {err}"))
+}
+
+async fn prepare_roms_on_blocking_thread(
+    app: AppHandle,
+    request: GenerateRomRequest,
+    force: bool,
+) -> Result<GenerateRomResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || prepare_roms(&app, request, force))
+        .await
+        .map_err(|err| format!("ROM準備 worker が停止しました: {err}"))?
 }
 
 #[cfg(windows)]
