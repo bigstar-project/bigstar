@@ -25,7 +25,7 @@ export function currentSettings(form: FormState): GameSettings {
   };
 }
 
-export function processExited(value: string | undefined): boolean {
+export function processExited(value: string | null | undefined): boolean {
   return value?.startsWith('exited(') ?? false;
 }
 

@@ -9,6 +9,7 @@ use crate::paths::{
 use crate::processes::run_bridge_signaling_smoke;
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) fn preflight_check(app: AppHandle) -> Result<PreflightResponse, String> {
     let melon_path = find_melonds_binary(&app)?;
     let bridge_path = find_bridge_binary(&app)?;

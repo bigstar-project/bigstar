@@ -3,6 +3,7 @@
   "files": {
     "includes": [
       "src/**/*.{ts,tsx}",
+      "!src/bindings.ts",
       "package.json",
       "tsconfig.json",
       "vite.config.ts",

@@ -13,13 +13,27 @@ mod state;
 #[cfg(test)]
 mod tests;
 
-use commands::{
-    ensure_roms, generate_roms, get_defaults, open_log_dir, open_melonds,
-    open_melonds_input_config, save_rom_paths, select_rom_file, session_status, start_match,
-    stop_match,
-};
-use preflight::{cli_preflight_check, preflight_check};
+use preflight::cli_preflight_check;
+use specta_typescript::Typescript;
 use state::AppState;
+use tauri_specta::{collect_commands, Builder as SpectaBuilder};
+
+fn specta_builder() -> SpectaBuilder<tauri::Wry> {
+    SpectaBuilder::<tauri::Wry>::new().commands(collect_commands![
+        commands::get_defaults,
+        commands::save_rom_paths,
+        commands::select_rom_file,
+        preflight::preflight_check,
+        commands::generate_roms,
+        commands::ensure_roms,
+        commands::start_match,
+        commands::stop_match,
+        commands::session_status,
+        commands::open_log_dir,
+        commands::open_melonds,
+        commands::open_melonds_input_config
+    ])
+}
 
 fn main() {
     if std::env::args().any(|arg| arg == "--preflight") {
@@ -39,24 +53,34 @@ fn main() {
         return;
     }
 
+    let specta_builder = specta_builder();
+    #[cfg(debug_assertions)]
+    specta_builder
+        .export(Typescript::default(), "../src/bindings.ts")
+        .expect("failed to export TypeScript bindings");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState::default())
-        .invoke_handler(tauri::generate_handler![
-            get_defaults,
-            save_rom_paths,
-            select_rom_file,
-            preflight_check,
-            generate_roms,
-            ensure_roms,
-            start_match,
-            stop_match,
-            session_status,
-            open_log_dir,
-            open_melonds,
-            open_melonds_input_config
-        ])
+        .invoke_handler(specta_builder.invoke_handler())
+        .setup(move |app| {
+            specta_builder.mount_events(app);
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod specta_tests {
+    use super::*;
+
+    #[test]
+    fn export_bindings() {
+        let builder = specta_builder();
+        builder
+            .export(Typescript::default(), "../src/bindings.ts")
+            .expect("failed to export TypeScript bindings");
+    }
 }

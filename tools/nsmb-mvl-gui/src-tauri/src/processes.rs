@@ -10,7 +10,9 @@ use std::os::windows::process::CommandExt;
 use crate::config::{
     DEFAULT_FRAMES, DEFAULT_INPUT_DELAY_FRAMES, DEFAULT_INPUT_MAX_FRAME_LEAD, NETPLAY_START_FRAME,
 };
-use crate::models::{CourseMode, LaunchRequest, LaunchResponse, Role, SessionStatus};
+use crate::models::{
+    BridgeDiagnostics, CourseMode, LaunchRequest, LaunchResponse, Role, SessionStatus,
+};
 use crate::settings::selected_stage;
 use crate::state::{AppState, ManagedSession};
 
@@ -352,7 +354,7 @@ fn write_launch_manifest(paths: &LaunchPaths, request: &LaunchRequest) -> Result
 
 pub(crate) fn read_bridge_diagnostics(
     log_dir: &Path,
-) -> (Option<serde_json::Value>, Option<String>) {
+) -> (Option<BridgeDiagnostics>, Option<String>) {
     let path = log_dir.join("bridge-status.json");
     let json = match fs::read(&path) {
         Ok(json) => json,

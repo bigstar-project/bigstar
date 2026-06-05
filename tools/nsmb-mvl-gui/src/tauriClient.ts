@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { commands } from './bindings';
 import type {
   Defaults,
   GenerateRomRequest,
@@ -9,6 +9,18 @@ import type {
   SaveRomPathsRequest,
   SessionStatus,
 } from './types';
+
+async function unwrapCommand<T>(
+  result: Promise<
+    { status: 'ok'; data: T } | { status: 'error'; error: string }
+  >,
+) {
+  const response = await result;
+  if (response.status === 'error') {
+    throw response.error;
+  }
+  return response.data;
+}
 
 const previewDefaults: Defaults = {
   signal_url: 'wss://nsmb-mvl-signaling-prod.uniunntaro.workers.dev/session',
@@ -29,21 +41,21 @@ export function getDefaults() {
   if (!isTauriRuntime()) {
     return Promise.resolve(previewDefaults);
   }
-  return invoke<Defaults>('get_defaults');
+  return unwrapCommand(commands.getDefaults());
 }
 
 export function saveRomPaths(request: SaveRomPathsRequest) {
   if (!isTauriRuntime()) {
-    return Promise.resolve(request);
+    return Promise.resolve(null);
   }
-  return invoke('save_rom_paths', { request });
+  return unwrapCommand(commands.saveRomPaths(request));
 }
 
 export function selectRomFile(currentPath: string) {
   if (!isTauriRuntime()) {
     return Promise.resolve(currentPath || null);
   }
-  return invoke<string | null>('select_rom_file', { currentPath });
+  return unwrapCommand(commands.selectRomFile(currentPath));
 }
 
 export function runPreflightCheck() {
@@ -56,7 +68,7 @@ export function runPreflightCheck() {
       bridge_smoke: 'ok',
     });
   }
-  return invoke<PreflightResponse>('preflight_check');
+  return unwrapCommand(commands.preflightCheck());
 }
 
 export function generateRoms(request: GenerateRomRequest) {
@@ -67,7 +79,7 @@ export function generateRoms(request: GenerateRomRequest) {
       generated: true,
     });
   }
-  return invoke<GenerateRomResponse>('generate_roms', { request });
+  return unwrapCommand(commands.generateRoms(request));
 }
 
 export function ensureRoms(request: GenerateRomRequest) {
@@ -78,7 +90,7 @@ export function ensureRoms(request: GenerateRomRequest) {
       generated: false,
     });
   }
-  return invoke<GenerateRomResponse>('ensure_roms', { request });
+  return unwrapCommand(commands.ensureRoms(request));
 }
 
 export function startMatch(request: LaunchRequest) {
@@ -89,43 +101,47 @@ export function startMatch(request: LaunchRequest) {
       bridge_pid: 2001,
     });
   }
-  return invoke<LaunchResponse>('start_match', { request });
+  return unwrapCommand(commands.startMatch(request));
 }
 
 export function stopMatch() {
   if (!isTauriRuntime()) {
     return Promise.resolve();
   }
-  return invoke('stop_match');
+  return unwrapCommand(commands.stopMatch());
 }
 
 export function getSessionStatus() {
   if (!isTauriRuntime()) {
     return Promise.resolve<SessionStatus>({
       active: false,
-      log_dir: '',
+      log_dir: null,
+      melon: null,
+      bridge: null,
+      webrtc: null,
+      diagnostics_error: null,
     });
   }
-  return invoke<SessionStatus>('session_status');
+  return unwrapCommand(commands.sessionStatus());
 }
 
 export function openLogDir(path: string) {
   if (!isTauriRuntime()) {
-    return Promise.resolve(path);
+    return Promise.resolve(null);
   }
-  return invoke('open_log_dir', { path });
+  return unwrapCommand(commands.openLogDir(path));
 }
 
 export function openMelonds() {
   if (!isTauriRuntime()) {
     return Promise.resolve(3001);
   }
-  return invoke<number>('open_melonds');
+  return unwrapCommand(commands.openMelonds());
 }
 
 export function openMelondsInputConfig() {
   if (!isTauriRuntime()) {
     return Promise.resolve(3002);
   }
-  return invoke<number>('open_melonds_input_config');
+  return unwrapCommand(commands.openMelondsInputConfig());
 }

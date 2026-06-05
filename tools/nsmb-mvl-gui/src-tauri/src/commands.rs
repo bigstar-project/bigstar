@@ -22,6 +22,7 @@ use crate::settings::validate_request;
 use crate::state::AppState;
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
     let app_dir = app_data_dir(&app)?;
     let rom_dir = app_dir.join("roms");
@@ -54,6 +55,7 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) fn save_rom_paths(app: AppHandle, request: SaveRomPathsRequest) -> Result<(), String> {
     let settings = LauncherSettings {
         host_rom_path: request.host_rom_path,
@@ -64,6 +66,7 @@ pub(crate) fn save_rom_paths(app: AppHandle, request: SaveRomPathsRequest) -> Re
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) fn select_rom_file(current_path: String) -> Result<Option<String>, String> {
     let mut dialog = rfd::FileDialog::new()
         .add_filter("Nintendo DS ROM", &["nds", "srl"])
@@ -85,21 +88,25 @@ pub(crate) fn select_rom_file(current_path: String) -> Result<Option<String>, St
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) fn open_log_dir(app: AppHandle, path: String) -> Result<(), String> {
     open_allowed_log_dir(app, path)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) fn open_melonds(app: AppHandle) -> Result<u32, String> {
     launch_melonds(&app, &[])
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) fn open_melonds_input_config(app: AppHandle) -> Result<u32, String> {
     launch_melonds(&app, &["--open-input-config"])
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) fn start_match(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -126,6 +133,7 @@ pub(crate) fn start_match(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) fn generate_roms(
     app: AppHandle,
     request: GenerateRomRequest,
@@ -134,6 +142,7 @@ pub(crate) fn generate_roms(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) fn ensure_roms(
     app: AppHandle,
     request: GenerateRomRequest,
@@ -142,11 +151,13 @@ pub(crate) fn ensure_roms(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) fn stop_match(state: State<'_, AppState>) -> Result<(), String> {
     stop_existing(state.inner())
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) fn session_status(state: State<'_, AppState>) -> Result<SessionStatus, String> {
     session_status_inner(state.inner())
 }

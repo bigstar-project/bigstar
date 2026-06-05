@@ -344,8 +344,9 @@ fn bridge_diagnostics_reads_status_json() {
     assert_eq!(
         value
             .expect("status value")
-            .pointer("/selected_candidate_pair/route")
-            .and_then(serde_json::Value::as_str),
+            .selected_candidate_pair
+            .and_then(|pair| pair.route)
+            .as_deref(),
         Some("stun")
     );
     let _ = fs::remove_dir_all(dir);
