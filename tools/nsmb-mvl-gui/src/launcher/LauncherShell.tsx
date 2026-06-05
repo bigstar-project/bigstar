@@ -62,18 +62,20 @@ function updateButtonClass(updateStatus: UpdateStatus) {
 
 export function LauncherShell({
   activeView,
+  activityStatus,
   children,
+  connectionStatus,
   onCheckForUpdate,
   onViewChange,
-  status,
   updateBusy,
   updateStatus,
 }: {
   activeView: View;
+  activityStatus: { text: string; kind: StatusKind } | null;
   children: ReactNode;
+  connectionStatus: { text: string; kind: StatusKind };
   onCheckForUpdate: () => void;
   onViewChange: (view: View) => void;
-  status: { text: string; kind: StatusKind };
   updateBusy: boolean;
   updateStatus: UpdateStatus;
 }) {
@@ -437,7 +439,14 @@ export function LauncherShell({
                   },
                 })}
               >
-                <StatusPill kind={status.kind}>{status.text}</StatusPill>
+                <StatusPill kind={connectionStatus.kind}>
+                  {connectionStatus.text}
+                </StatusPill>
+                {activityStatus ? (
+                  <StatusPill kind={activityStatus.kind}>
+                    {activityStatus.text}
+                  </StatusPill>
+                ) : null}
               </div>
             </header>
 

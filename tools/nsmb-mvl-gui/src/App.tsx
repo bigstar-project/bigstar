@@ -9,9 +9,10 @@ export function App() {
   return (
     <LauncherShell
       activeView={launcher.activeView}
+      activityStatus={launcher.activityStatus}
+      connectionStatus={launcher.connectionStatus}
       onCheckForUpdate={() => void launcher.actions.checkForUpdate()}
       onViewChange={launcher.changeView}
-      status={launcher.status}
       updateBusy={launcher.updateBusy}
       updateStatus={launcher.updateStatus}
     >
