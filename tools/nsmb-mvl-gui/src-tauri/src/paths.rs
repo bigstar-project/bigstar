@@ -32,18 +32,6 @@ pub(crate) fn absolutize_existing(value: &str) -> Result<PathBuf, String> {
     Err(format!("ファイルが見つかりません: {}", path.display()))
 }
 
-pub(crate) fn absolutize_target(app: &AppHandle, value: &str) -> Result<PathBuf, String> {
-    let path = PathBuf::from(value.trim());
-    if path.as_os_str().is_empty() {
-        return Err("出力ROMパスを指定してください".into());
-    }
-    if path.is_absolute() {
-        Ok(path)
-    } else {
-        Ok(app_data_dir(app)?.join(path))
-    }
-}
-
 pub(crate) fn ensure_parent_dir(path: &Path) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -294,6 +282,15 @@ pub(crate) fn saved_path_or_default(value: &str, fallback: PathBuf) -> String {
     } else {
         value.to_owned()
     }
+}
+
+pub(crate) fn fixed_generated_rom_paths(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
+    let rom_dir = app_data_dir(app)?.join("roms");
+    fs::create_dir_all(&rom_dir).map_err(|err| format!("ROM保存先を作成できません: {err}"))?;
+    Ok((
+        rom_dir.join("nsmb-mvl-host.nds"),
+        rom_dir.join("nsmb-mvl-client.nds"),
+    ))
 }
 
 fn launcher_settings_path(app: &AppHandle) -> Result<PathBuf, String> {

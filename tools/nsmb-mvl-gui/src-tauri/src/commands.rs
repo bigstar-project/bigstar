@@ -13,8 +13,8 @@ use crate::models::{
 };
 use crate::paths::{
     absolutize_existing, app_data_dir, create_log_dir, find_bridge_binary, find_input_script,
-    find_melonds_binary, load_launcher_settings, open_allowed_log_dir, repo_root,
-    save_launcher_settings, saved_path_or_default,
+    find_melonds_binary, fixed_generated_rom_paths, load_launcher_settings, open_allowed_log_dir,
+    repo_root, save_launcher_settings, saved_path_or_default,
 };
 use crate::processes::{session_status_inner, start_match_resolved, stop_existing, LaunchPaths};
 use crate::roms::prepare_roms;
@@ -25,8 +25,9 @@ use crate::state::AppState;
 #[specta::specta]
 pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
     let app_dir = app_data_dir(&app)?;
-    let rom_dir = app_dir.join("roms");
-    fs::create_dir_all(&rom_dir).map_err(|err| format!("ROM保存先を作成できません: {err}"))?;
+    fs::create_dir_all(&app_dir)
+        .map_err(|err| format!("アプリデータディレクトリを作成できません: {err}"))?;
+    let (host_rom, client_rom) = fixed_generated_rom_paths(&app)?;
     let saved = load_launcher_settings(&app)?;
     let signal_url =
         std::env::var("NSMB_MVL_SIGNAL_URL").unwrap_or_else(|_| DEFAULT_SIGNAL_URL.to_owned());
@@ -38,17 +39,11 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
     Ok(Defaults {
         signal_url,
         room_code: DEFAULT_ROOM_CODE.to_owned(),
-        host_rom_path: saved_path_or_default(
-            &saved.host_rom_path,
-            rom_dir.join("nsmb-mvl-host.nds"),
-        ),
-        client_rom_path: saved_path_or_default(
-            &saved.client_rom_path,
-            rom_dir.join("nsmb-mvl-client.nds"),
-        ),
+        host_rom_path: host_rom.to_string_lossy().into_owned(),
+        client_rom_path: client_rom.to_string_lossy().into_owned(),
         base_rom_path: saved_path_or_default(
             &saved.base_rom_path,
-            dev_base_rom.unwrap_or_else(|| rom_dir.join("nsmb-us.nds")),
+            dev_base_rom.unwrap_or_else(|| app_dir.join("roms").join("nsmb-us.nds")),
         ),
         port: DEFAULT_PORT,
     })
@@ -58,8 +53,6 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
 #[specta::specta]
 pub(crate) fn save_rom_paths(app: AppHandle, request: SaveRomPathsRequest) -> Result<(), String> {
     let settings = LauncherSettings {
-        host_rom_path: request.host_rom_path,
-        client_rom_path: request.client_rom_path,
         base_rom_path: request.base_rom_path,
     };
     save_launcher_settings(&app, &settings)

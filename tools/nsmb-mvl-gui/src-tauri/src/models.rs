@@ -16,8 +16,6 @@ pub(crate) struct LaunchRequest {
 #[serde(rename_all = "snake_case")]
 pub(crate) struct GenerateRomRequest {
     pub(crate) source_rom: String,
-    pub(crate) host_rom: String,
-    pub(crate) client_rom: String,
     pub(crate) stage: u8,
     pub(crate) settings: GameSettings,
 }
@@ -69,16 +67,12 @@ pub(crate) struct Defaults {
 #[derive(Debug, Default, Deserialize, Serialize, Type)]
 #[serde(default)]
 pub(crate) struct LauncherSettings {
-    pub(crate) host_rom_path: String,
-    pub(crate) client_rom_path: String,
     pub(crate) base_rom_path: String,
 }
 
 #[derive(Debug, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct SaveRomPathsRequest {
-    pub(crate) host_rom_path: String,
-    pub(crate) client_rom_path: String,
     pub(crate) base_rom_path: String,
 }
 

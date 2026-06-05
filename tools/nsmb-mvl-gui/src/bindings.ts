@@ -62,8 +62,6 @@ export type GameSettings = {
 
 export type GenerateRomRequest = {
 	source_rom: string,
-	host_rom: string,
-	client_rom: string,
 	stage: number,
 	settings: GameSettings,
 };
@@ -102,8 +100,6 @@ export type PreflightResponse = {
 export type Role = "host" | "client";
 
 export type SaveRomPathsRequest = {
-	host_rom_path: string,
-	client_rom_path: string,
 	base_rom_path: string,
 };
 

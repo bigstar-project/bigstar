@@ -102,16 +102,6 @@ export function SettingsView({
             title="ROM 設定"
           >
             <FilePathField
-              label="ホスト用 ROM"
-              value={form.hostRomPath}
-              onBrowse={() => void actions.selectRomPath('hostRomPath')}
-            />
-            <FilePathField
-              label="参加用 ROM"
-              value={form.clientRomPath}
-              onBrowse={() => void actions.selectRomPath('clientRomPath')}
-            />
-            <FilePathField
               label="ベース ROM"
               value={form.baseRomPath}
               onBrowse={() => void actions.selectRomPath('baseRomPath')}

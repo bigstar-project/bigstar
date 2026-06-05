@@ -4,7 +4,9 @@ use tauri::AppHandle;
 
 use crate::config::REUSABLE_ROM_FORMAT;
 use crate::models::{GenerateRomRequest, GenerateRomResponse};
-use crate::paths::{absolutize_existing, absolutize_target, ensure_parent_dir, find_symbols_file};
+use crate::paths::{
+    absolutize_existing, ensure_parent_dir, find_symbols_file, fixed_generated_rom_paths,
+};
 use crate::settings::{course_mode_value, lives_value, selected_stage, validate_settings};
 
 pub(crate) fn prepare_roms(
@@ -14,8 +16,7 @@ pub(crate) fn prepare_roms(
 ) -> Result<GenerateRomResponse, String> {
     validate_settings(&request.settings)?;
     let stage = selected_stage(&request.settings, request.stage)?;
-    let host_rom = absolutize_target(app, &request.host_rom)?;
-    let client_rom = absolutize_target(app, &request.client_rom)?;
+    let (host_rom, client_rom) = fixed_generated_rom_paths(app)?;
     if !force && reusable_rom_is_current(&host_rom) && reusable_rom_is_current(&client_rom) {
         return Ok(GenerateRomResponse {
             host_rom: host_rom.to_string_lossy().into_owned(),

@@ -19,7 +19,7 @@ export type UpdateFormField = <K extends keyof FormState>(
   value: FormState[K],
 ) => void;
 
-export type SelectRomKey = 'hostRomPath' | 'clientRomPath' | 'baseRomPath';
+export type SelectRomKey = 'baseRomPath';
 
 export type LauncherSummary = {
   connectionActive: boolean;

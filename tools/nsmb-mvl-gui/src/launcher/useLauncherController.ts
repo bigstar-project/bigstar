@@ -203,8 +203,6 @@ export function useLauncherController() {
       return;
     }
     const request: SaveRomPathsRequest = {
-      host_rom_path: form.hostRomPath,
-      client_rom_path: form.clientRomPath,
       base_rom_path: form.baseRomPath,
     };
     const timer = window.setTimeout(() => {
@@ -213,7 +211,7 @@ export function useLauncherController() {
       });
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [defaultsLoaded, form.hostRomPath, form.clientRomPath, form.baseRomPath]);
+  }, [defaultsLoaded, form.baseRomPath]);
 
   const selectRomPath = async (key: SelectRomKey) => {
     try {
@@ -253,8 +251,6 @@ export function useLauncherController() {
 
     const request: GenerateRomRequest = {
       source_rom: nextForm.baseRomPath,
-      host_rom: nextForm.hostRomPath,
-      client_rom: nextForm.clientRomPath,
       stage,
       settings: currentSettings(nextForm),
     };
@@ -277,8 +273,6 @@ export function useLauncherController() {
   const ensurePreparedRoms = async (nextForm: FormState, stage: number) => {
     const request: GenerateRomRequest = {
       source_rom: nextForm.baseRomPath,
-      host_rom: nextForm.hostRomPath,
-      client_rom: nextForm.clientRomPath,
       stage,
       settings: currentSettings(nextForm),
     };

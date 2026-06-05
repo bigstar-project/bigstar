@@ -74,8 +74,8 @@ export function runPreflightCheck() {
 export function generateRoms(request: GenerateRomRequest) {
   if (!isTauriRuntime()) {
     return Promise.resolve<GenerateRomResponse>({
-      host_rom: request.host_rom,
-      client_rom: request.client_rom,
+      host_rom: previewDefaults.host_rom_path,
+      client_rom: previewDefaults.client_rom_path,
       generated: true,
     });
   }
@@ -85,8 +85,8 @@ export function generateRoms(request: GenerateRomRequest) {
 export function ensureRoms(request: GenerateRomRequest) {
   if (!isTauriRuntime()) {
     return Promise.resolve<GenerateRomResponse>({
-      host_rom: request.host_rom,
-      client_rom: request.client_rom,
+      host_rom: previewDefaults.host_rom_path,
+      client_rom: previewDefaults.client_rom_path,
       generated: false,
     });
   }
