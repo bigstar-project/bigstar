@@ -8,9 +8,9 @@ Local commits are allowed when they are useful for preserving completed work, bu
 
 ## Progress Tracking
 
-For this fork, keep the NSMB Mario vs Luigi online progress updated in `docs/`.
+For this fork, keep ROM analysis, ROM patching, and melonDS/input sync PoC progress updated in `docs/`.
 
-When work starts, changes direction, completes a meaningful step, or hits a blocker, update the relevant Markdown file before ending the turn. Do not assume there is only one tracking document. Use the document that matches the current work:
+When ROM analysis, ROM patching, or melonDS/input sync PoC work starts, changes direction, completes a meaningful step, or hits a blocker, update the relevant Markdown file before ending the turn. GUI, WebRTC/WAN transport, sidecar, backend, matchmaking, ranking, and other non-ROM-analysis work does not require a Markdown update every turn; update docs only when it meaningfully changes roadmap, architecture, verification status, blockers, or handoff state. Do not assume there is only one tracking document. Use the document that matches the current work:
 
 - `docs/nsmb-mario-vs-luigi-online-poc.md`: melonDS/ROM patch/input sync PoC status and verification.
 - `docs/nsmb-wan-netplay-roadmap.md`: WAN transport, WebRTC sidecar, desktop GUI, backend, matchmaking, and ranking roadmap.
@@ -33,7 +33,7 @@ The relevant tracking document should show:
 
 Do not leave implementation progress only in chat.
 
-Before the final response of any turn that changes implementation status or project direction, review the relevant tracking document for stale or contradictory content. Compact or update old sections instead of only appending new notes. In particular:
+Before the final response of any turn that requires a Markdown update under the rules above, review the relevant tracking document for stale or contradictory content. Compact or update old sections instead of only appending new notes. In particular:
 
 - remove or rewrite "next actions" that are already completed
 - move obsolete blockers into completed/resolved notes or remove them
