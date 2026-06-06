@@ -11,7 +11,10 @@
     "typecheck": "tsc --noEmit",
     "format-and-lint": "biome check .",
     "format-and-lint:fix": "biome check . --write",
-    "ci": "tsc --noEmit && biome check .",
+    "test:unit": "vitest --config vitest.config.ts run",
+    "test:browser": "vitest --config vitest.browser.config.ts run",
+    "test:e2e": "playwright test",
+    "ci": "tsc --noEmit && biome check . && vitest --config vitest.config.ts run && vitest --config vitest.browser.config.ts run && playwright test",
     "vite:build": "vite build",
     "vite:dev": "vite --host 127.0.0.1"
   },
@@ -32,13 +35,18 @@
     "@cloudflare/workers-types": "^4.20260605.1",
     "@pandacss/dev": "^1.11.1",
     "@park-ui/panda-preset": "^0.43.1",
+    "@playwright/test": "^1.60.0",
     "@tauri-apps/cli": "^2.9.0",
+    "@types/node": "^25.9.2",
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
+    "@vitest/browser-playwright": "^4.1.8",
     "typescript": "^5.9.3",
     "vite": "^7.2.0",
-    "vite-tsconfig-paths": "^6.1.1"
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^4.1.8",
+    "vitest-browser-react": "^2.2.0"
   },
   "packageManager": "pnpm@10.26.2"
 }

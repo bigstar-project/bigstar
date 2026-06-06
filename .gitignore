@@ -4,6 +4,10 @@ external/
 logs/
 dist/
 tools/nsmb-mvl-gui/styled-system/
+tools/nsmb-mvl-gui/.vitest-attachments/
+tools/nsmb-mvl-gui/src/**/__screenshots__/
+tools/nsmb-mvl-gui/test-results/
+tools/nsmb-mvl-gui/playwright-report/
 bin
 obj
 target/

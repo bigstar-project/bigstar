@@ -32,9 +32,15 @@ type RelaySignalMessage = Exclude<WsClientMessage, { type: 'ping' }> & {
   from: Role;
 };
 
+type QueuedSignalMessage = {
+  message: RelaySignalMessage;
+  targetRole: Role;
+};
+
 const DEFAULT_STUN_SERVER = 'stun:stun.l.google.com:19302';
 const ROOM_KEY = 'room';
 const LOBBY_ROOMS_KEY = 'rooms';
+const QUEUED_SIGNALS_KEY = 'queued-signals';
 
 const attachmentSchema = z.object({
   role: roleSchema,
@@ -224,6 +230,7 @@ export class SignalingRoom
       await this.markConnected();
       this.broadcast({ type: 'ready-for-offer', peerCount: 2 });
     }
+    await this.flushQueuedSignals(role.data);
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -256,15 +263,21 @@ export class SignalingRoom
     }
 
     const targetRole = peerRole(attachment.role);
-    const target = this.getSocketByRole(targetRole);
-    if (target === null) {
-      send(ws, { type: 'error', error: 'peer is not connected' });
-      return;
-    }
     const relay: RelaySignalMessage = {
       ...parsed.data,
       from: attachment.role,
     };
+    const target = this.getSocketByRole(targetRole);
+    if (target === null) {
+      await this.queueSignal(targetRole, relay);
+      console.log('signaling queued relay', {
+        session: attachment.session,
+        from: attachment.role,
+        to: targetRole,
+        type: parsed.data.type,
+      });
+      return;
+    }
     console.log('signaling relay', {
       session: attachment.session,
       from: attachment.role,
@@ -334,6 +347,39 @@ export class SignalingRoom
       }
     }
     return null;
+  }
+
+  private async queueSignal(
+    targetRole: Role,
+    message: RelaySignalMessage,
+  ): Promise<void> {
+    const queued =
+      (await this.ctx.storage.get<QueuedSignalMessage[]>(QUEUED_SIGNALS_KEY)) ??
+      [];
+    queued.push({ message, targetRole });
+    await this.ctx.storage.put(QUEUED_SIGNALS_KEY, queued);
+  }
+
+  private async flushQueuedSignals(role: Role): Promise<void> {
+    const queued =
+      (await this.ctx.storage.get<QueuedSignalMessage[]>(QUEUED_SIGNALS_KEY)) ??
+      [];
+    if (queued.length === 0) {
+      return;
+    }
+    const target = this.getSocketByRole(role);
+    if (target === null) {
+      return;
+    }
+    const remaining: QueuedSignalMessage[] = [];
+    for (const item of queued) {
+      if (item.targetRole === role) {
+        send(target, item.message);
+      } else {
+        remaining.push(item);
+      }
+    }
+    await this.ctx.storage.put(QUEUED_SIGNALS_KEY, remaining);
   }
 
   private broadcast(data: unknown, except?: WebSocket): void {

@@ -1,0 +1,27 @@
+{
+  "name": "nsmb-mvl-signaling-test",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-06",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SIGNALING_ROOM",
+        "class_name": "SignalingRoom"
+      },
+      {
+        "name": "LOBBY",
+        "class_name": "LobbyObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["SignalingRoom", "LobbyObject"]
+    }
+  ],
+  "vars": {
+    "CORS_ORIGINS": "http://127.0.0.1:1420,http://localhost:1420",
+    "DEFAULT_ICE_SERVERS": "stun:stun.l.google.com:19302"
+  }
+}
