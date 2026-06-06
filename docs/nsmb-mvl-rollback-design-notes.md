@@ -28,6 +28,7 @@ Verification:
 - Rejected experiment: `logs/codex-tinycorepreimage-chaos-predprobe10-skipresimckpt-allowjit-resimdefault-wait0-lead2-2600-20260606` skipped intermediate checkpoint re-saves during resim and failed at frame `1710` (`playerActor0X` mismatch). The intermediate checkpoints are therefore part of the correctness mechanism under repeated rollback, not just removable overhead.
 - Rejected experiment: `logs/codex-tinycorepreimage-chaos-predprobe10-resimdelay2-allowjit-resimdefault-wait0-lead2-2600-20260606` passed but worsened spikes: active max `83.378/82.271ms`, `over33ms=88/92`, with transient position mismatches that only settled later. Delaying correction coalesces work but makes the eventual correction heavier.
 - Short same-frame wait experiment: `logs/codex-tinycorepreimage-chaos-predprobe10-rbwait500-allowjit-resimdefault-lead2-2600-20260606` passed the same forced-prediction route. It reduced spike counts to `over33ms=65/62` and capped max around `58.827/57.355ms`, but average rose to `18.458/18.460ms` due to `~1ms` remote waits on many frames. `rbwait250` was not reliable in the same stress and failed at frame `2130` with `playerActor0X` mismatch.
+- `logs/codex-tinycorepreimage-resultrestart-allowjit-resimdefault-wait0-lead2-12000-20260606`: existing repeat-result input route did not reach result scene by 12000F, so the result/restart gate failed. Host/client final game-state rows matched exactly (`sceneCurrentSceneID=0x3`, `sceneNextSceneID=0x181`, lives `3/3`, battle stars `0/0`, deaths `0x17/0x5`), so this is currently an input-scenario coverage blocker rather than a tinycorepreimage desync. Performance stayed good for the long run: active average `16.748/16.744ms`, max `67.083/69.989ms`, `over33ms=29/27`.
 
 Current conclusion:
 
@@ -39,14 +40,16 @@ Current conclusion:
 
 Current blocker / caveat:
 
-- `tinycorepreimage` is promising but not promoted. JIT-enabled stock-touch, chaos 4200F, forced-prediction chaos 2600F, and a death/respawn-oriented 3600F route now pass, but longer contact, block/item, result/restart, and manual-like routes are still required.
+- `tinycorepreimage` is promising but not promoted. JIT-enabled stock-touch, chaos 4200F, forced-prediction chaos 2600F, death/respawn-oriented 3600F, and a long 12000F non-result route now pass or stay synchronized, but longer contact, block/item, actual result/restart, and manual-like routes are still required.
+- Existing repeat-result input scripts no longer prove result/restart coverage under the current direct-MvL setup: by 12000F they stay synchronized but never enter result. A new deterministic result/restart route is needed before promoting the backend.
 - Full write-barrier coverage is still not proven. The current page-comparison/preimage path is correctness-oriented; replacing it with write tracking should wait until more routes pass.
 
 Next actions:
 
 - Keep `wait=0, lead=2` as the current tinycorepreimage test default and use frame-spike gates, not only average FPS.
 - Keep `-AllowJit` on for practical automated FPS tests, and keep `-RollbackResimulate` enabled for rollback correctness tests.
-- Run the same backend on longer contact, block/item, result/restart, and manual-like routes. Treat forced all-frame prediction-probe tests as diagnostic stress, not as a promotion gate.
+- Run the same backend on longer contact, block/item, actual result/restart, and manual-like routes. Treat forced all-frame prediction-probe tests as diagnostic stress, not as a promotion gate.
+- Rework the repeat-result input route so it reaches result scene deterministically; the current script proves long synchronized death/life churn but not restart coverage.
 - Keep intermediate checkpoint re-saves during resim unless a different correctness proof replaces them; the skip experiment desynced under repeated rollback.
 - If spikes remain too visible, prefer reducing rollback frequency through a small bounded same-frame wait or smarter prediction over deleting checkpoint bytes. Current measurements show resimulation time is the larger cost, and `rbwait500` is the first measurable spike-count improvement even though it costs average frame time.
 
