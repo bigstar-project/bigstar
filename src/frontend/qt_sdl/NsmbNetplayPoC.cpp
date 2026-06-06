@@ -1638,6 +1638,7 @@ struct State
     melonDS::u32 RollbackRestoreCount = 0;
     melonDS::u32 RollbackResimulateCount = 0;
     bool RollbackSkipRenderDuringResim = false;
+    bool RollbackSkipIntermediateResimCheckpoints = false;
     melonDS::u32 LastPerfSpikeRollbackRestoreCount[16] {};
     melonDS::u32 LastPerfSpikeRollbackResimulateCount[16] {};
     melonDS::u32 RollbackPredictionProbeCount = 0;
@@ -10127,15 +10128,20 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
         ApplyRollbackResimPostFramePatches(f + 1, nds);
         resimulated++;
 
-        const auto checkpointSaveStart = std::chrono::steady_clock::now();
+        const bool saveResimCheckpoint =
+            !G.RollbackSkipIntermediateResimCheckpoints || (f + 1) == frame;
+        if (saveResimCheckpoint)
         {
-            std::lock_guard<std::mutex> lock(G.Mutex);
-            SaveRollbackCheckpointNowLocked(f + 1, nds);
+            const auto checkpointSaveStart = std::chrono::steady_clock::now();
+            {
+                std::lock_guard<std::mutex> lock(G.Mutex);
+                SaveRollbackCheckpointNowLocked(f + 1, nds);
+            }
+            const unsigned long long checkpointSaveUs = ElapsedUs(checkpointSaveStart);
+            resimCheckpointSaveTotalUs += checkpointSaveUs;
+            if (checkpointSaveUs > resimCheckpointSaveMaxUs)
+                resimCheckpointSaveMaxUs = checkpointSaveUs;
         }
-        const unsigned long long checkpointSaveUs = ElapsedUs(checkpointSaveStart);
-        resimCheckpointSaveTotalUs += checkpointSaveUs;
-        if (checkpointSaveUs > resimCheckpointSaveMaxUs)
-            resimCheckpointSaveMaxUs = checkpointSaveUs;
 
         if (nds->NumFrames != f + 1 && G.InputNetplayTraceEnabled)
         {
@@ -14839,6 +14845,8 @@ void InitFromEnvironment()
     G.RollbackEnabled = EnvFlag("MELONDS_NSML_ROLLBACK");
     G.RollbackResimulate = EnvFlag("MELONDS_NSML_ROLLBACK_RESIMULATE");
     G.RollbackSkipRenderDuringResim = EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER");
+    G.RollbackSkipIntermediateResimCheckpoints =
+        EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS");
     G.RollbackInputWaitUs = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_INPUT_WAIT_US", 0), 0, 20000);
     G.RollbackRestoreProbe = EnvFlag("MELONDS_NSML_ROLLBACK_RESTORE_PROBE");

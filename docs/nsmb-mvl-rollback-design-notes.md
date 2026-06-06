@@ -9,6 +9,7 @@ Completed in the current pass:
 - Added finer FPS-spike instrumentation to `src/frontend/qt_sdl/NsmbNetplayPoC.cpp`. `NSMB BeforeHookPhaseSpike` now splits the pre-frame hook into `probeRestoreMs`, `jitPatchMs`, `rollbackMs`, packet-bridge setup, checkpoint, scratch, network, and wait buckets. `NSMB PacketBridgeScratchSpike` further splits scratch writes into network, throttle, remote wait, and write time. New spike lines are flushed immediately so forced process termination is less likely to lose the cause.
 - Updated `scripts/run-nsmb-mvl-split-local-input-smoke.ps1` to suppress CP15 `PU region` debug spam for tiny rollback backends, pass the same tinycorepreimage env as the manual wrapper (`tinyFlags=0x241`, JIT-reset skip, resim render skip), and enable `-RollbackResimulate` by default whenever `-Rollback` is requested. The previous split-smoke runs that omitted `-RollbackResimulate` could detect prediction mismatches without actually correcting them.
 - Updated `scripts/run-nsmb-mvl-manual-local.ps1` so `-LowLatencyRollback -RollbackBackend tinycorepreimage` defaults to `InputMaxFrameLead=2`, checkpoint interval `1`, network pump `50us`, `tinyFlags=0x241`, JIT-reset skip, resim render skip, and PU debug suppression.
+- Added an experimental `-RollbackSkipIntermediateResimCheckpoints` switch to the split smoke wrapper and `MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS` in the PoC. It is intentionally not enabled by default; forced-prediction tests below show that skipping intermediate re-saves can break correctness.
 - Build passed: `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4`.
 - PowerShell parse passed for the touched manual and split smoke scripts.
 
@@ -21,26 +22,33 @@ Verification:
 - `logs/codex-baseline-stocktouch-allowjit-delay0-lead2-1400-20260606`: JIT-enabled, rollback-disabled baseline passed the early stock-touch comparison region. Active average was `16.655/16.654ms`, max `25.749/25.249ms`, and `over33ms=0/0`. This confirmed that later 50ms averages were an artifact of testing with JIT disabled, not normal play.
 - `logs/codex-tinycorepreimage-stocktouch-allowjit-resimdefault-wait0-lead2-3200-20260606`: after fixing split-smoke resim defaults, JIT-enabled tinycorepreimage passed 3200F with game-state comparison and `RollbackSettleFrames=30`. Active average was `17.028/17.020ms`, max `56.939/56.545ms`, `over33ms=19/16`; rollback spikes were in `rollbackMs`, while checkpoints stayed around `1.2-1.7ms`.
 - `logs/codex-tinycorepreimage-chaos-allowjit-resimdefault-wait0-lead2-3200-20260606`: JIT-enabled chaos route passed 3200F with game-state comparison and `RollbackSettleFrames=30`. Active average was `17.000/16.994ms`, max `62.499/68.794ms`, `over33ms=24/20`. The largest after-start spikes were rollback/resimulation (`rollbackMs` up to about `45.4/51.8ms`), not checkpoint save or packet scratch.
+- `logs/codex-tinycorepreimage-chaos-allowjit-resimdefault-wait0-lead2-4200-20260606`: the same chaos route passed 4200F. Active average was `17.050/17.056ms`, max `95.879/69.156ms`, `over33ms=39/35`. This keeps correctness confidence up but confirms that rare visible spikes can still reach about `96ms`.
+- `logs/codex-tinycorepreimage-death-allowjit-resimdefault-ignoreinput-skipmove-wait0-lead2-3600-20260606`: Luigi death/respawn-oriented route passed 3600F with game-state comparison, death and moving-hazard progress checks, and input-field comparison ignored. Active average was `17.108/17.092ms`, max `50.349/42.040ms`, `over33ms=6/5`. The skipped movement probe is intentional because the client-side death script keeps Luigi mostly stationary.
+- `logs/codex-tinycorepreimage-chaos-predprobe10-allowjit-resimdefault-wait0-lead2-2600-20260606`: diagnostic forced-prediction chaos route passed 2600F with `RollbackPredictionProbeModulo=10`, limit `80`. Active average was `18.260/18.286ms`, max `59.209/71.206ms`, `over33ms=82/81`. This is a stress test for rollback frequency, not a normal-play promotion gate.
+- Rejected experiment: `logs/codex-tinycorepreimage-chaos-predprobe10-skipresimckpt-allowjit-resimdefault-wait0-lead2-2600-20260606` skipped intermediate checkpoint re-saves during resim and failed at frame `1710` (`playerActor0X` mismatch). The intermediate checkpoints are therefore part of the correctness mechanism under repeated rollback, not just removable overhead.
+- Rejected experiment: `logs/codex-tinycorepreimage-chaos-predprobe10-resimdelay2-allowjit-resimdefault-wait0-lead2-2600-20260606` passed but worsened spikes: active max `83.378/82.271ms`, `over33ms=88/92`, with transient position mismatches that only settled later. Delaying correction coalesces work but makes the eventual correction heavier.
+- Short same-frame wait experiment: `logs/codex-tinycorepreimage-chaos-predprobe10-rbwait500-allowjit-resimdefault-lead2-2600-20260606` passed the same forced-prediction route. It reduced spike counts to `over33ms=65/62` and capped max around `58.827/57.355ms`, but average rose to `18.458/18.460ms` due to `~1ms` remote waits on many frames. `rbwait250` was not reliable in the same stress and failed at frame `2130` with `playerActor0X` mismatch.
 
 Current conclusion:
 
 - The stale 2026-06-02 conclusion that the comparison-enabled `tinycorepreimage` route stopped around frame `1453` no longer represents the current branch. Re-runs now complete 2300F under game-state comparison.
 - JIT must be enabled for practical FPS assessment. JIT-disabled split-smoke runs can sit around `50ms` per active frame and should not be used as the normal-play performance baseline.
 - Checkpoint storage is light enough for the current candidate: normal checkpoints are roughly `250KB` on the JIT allow route, save is usually about `1.2-1.7ms`, and restore is about `3.4-5.3ms` on these routes.
-- The remaining visible frame drops are dominated by rollback resimulation, not snapshot bytes. With JIT enabled, average frame time is now near `17ms`, but correction frames still produce `50-70ms` spikes on stock-touch/chaos.
-- Input policy still matters. `wait=0, lead=2` is the current best default for average FPS; larger lead values in single-machine split smoke caused worse pacing, and wait-based modes drag average FPS down.
+- The remaining visible frame drops are dominated by rollback resimulation, not snapshot bytes. With JIT enabled, average frame time is now near `17ms`, but correction frames can still produce `50-96ms` spikes on stock-touch/chaos.
+- Input policy still matters. `wait=0, lead=2` is the current best default for average FPS; short same-frame waits can reduce spike count but drag average FPS up, and too-short waits can still fail under forced prediction stress.
 
 Current blocker / caveat:
 
-- `tinycorepreimage` is promising but not promoted. JIT-enabled stock-touch and chaos 3200F now pass, but longer contact, death/respawn, block/item, result/restart, and manual-like routes are still required.
+- `tinycorepreimage` is promising but not promoted. JIT-enabled stock-touch, chaos 4200F, forced-prediction chaos 2600F, and a death/respawn-oriented 3600F route now pass, but longer contact, block/item, result/restart, and manual-like routes are still required.
 - Full write-barrier coverage is still not proven. The current page-comparison/preimage path is correctness-oriented; replacing it with write tracking should wait until more routes pass.
 
 Next actions:
 
 - Keep `wait=0, lead=2` as the current tinycorepreimage test default and use frame-spike gates, not only average FPS.
 - Keep `-AllowJit` on for practical automated FPS tests, and keep `-RollbackResimulate` enabled for rollback correctness tests.
-- Run the same backend on longer chaos, contact, death/respawn, block/item, and result/restart routes. Treat forced all-frame prediction-probe tests as diagnostic stress, not as a promotion gate.
-- If spikes remain too visible, try reducing correction frequency/window length or scheduling/coalescing corrections before trying to shrink checkpoints further; current measurements show resimulation time is the larger cost.
+- Run the same backend on longer contact, block/item, result/restart, and manual-like routes. Treat forced all-frame prediction-probe tests as diagnostic stress, not as a promotion gate.
+- Keep intermediate checkpoint re-saves during resim unless a different correctness proof replaces them; the skip experiment desynced under repeated rollback.
+- If spikes remain too visible, prefer reducing rollback frequency through a small bounded same-frame wait or smarter prediction over deleting checkpoint bytes. Current measurements show resimulation time is the larger cost, and `rbwait500` is the first measurable spike-count improvement even though it costs average frame time.
 
 ## 2026-06-02 retained diagnostic status - Plan-D actor/global snapshot path
 

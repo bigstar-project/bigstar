@@ -34,6 +34,7 @@ param(
     [int]$RollbackCheckpointInterval = 1,
     [int]$RollbackResimulateDelayFrames = 0,
     [switch]$RollbackResimulate,
+    [switch]$RollbackSkipIntermediateResimCheckpoints,
     [switch]$RollbackRestoreProbe,
     [int]$RollbackPredictionProbeModulo = 0,
     [int]$RollbackPredictionProbeOffset = 0,
@@ -196,6 +197,11 @@ $isNsmbTinyCoreRollback = $RollbackBackend -eq "nsmbtinycore" -or $RollbackBacke
 $isTinyCorePreimageRollback = $RollbackBackend -eq "tinycorepreimage" -or $RollbackBackend -eq "tiny-core-preimage"
 if ($Rollback -and -not $PSBoundParameters.ContainsKey('RollbackResimulate')) {
     $RollbackResimulate = $true
+}
+if ($RollbackSkipIntermediateResimCheckpoints) {
+    $env:MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS = "1"
+} else {
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS -ErrorAction SilentlyContinue
 }
 if ($Rollback -and ($isTinyCorePreimageRollback -or $isNsmbTinyCoreRollback)) {
     $env:MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
