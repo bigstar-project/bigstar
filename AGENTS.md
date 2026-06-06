@@ -58,3 +58,5 @@ Use the canonical Park UI component name from the docs, for example `dialog`, `t
 When changing Rust code, run Rust formatting and Clippy before ending the turn. Use `cargo fmt` for the affected crate/workspace, then run the local strict Clippy alias, normally `cargo clippy-all`, which treats warnings as errors.
 
 When changing TypeScript code, run Biome and typecheck before ending the turn. Use the package's existing scripts, such as `pnpm biome check`/`pnpm biome format` and `pnpm typecheck`, or the repo-local equivalents if the package defines different script names.
+
+After changing a pnpm-managed package, always run that package's `pnpm run ci` before ending the turn. If the package has no `ci` script or the command cannot be run, state the reason clearly in the final response.
