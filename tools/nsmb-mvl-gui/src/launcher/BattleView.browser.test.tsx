@@ -30,6 +30,7 @@ function actions(overrides: Partial<LauncherActions> = {}) {
     pollStatus: vi.fn(async () => {}),
     preflightCheck: vi.fn(async () => {}),
     prepareRoms: vi.fn(async () => {}),
+    refreshRooms: vi.fn(async () => {}),
     selectBaseRomAndPrepare: vi.fn(async () => {}),
     selectRomPath: vi.fn(async () => {}),
     startMatch: vi.fn(async () => {}),
@@ -42,6 +43,7 @@ const rooms: MatchmakingRoomsState = {
   busy: false,
   error: null,
   loading: false,
+  refreshDisabled: false,
   rooms: [
     {
       can_join: true,
@@ -112,6 +114,14 @@ describe('対戦ビュー', () => {
     await screen.getByRole('button', { name: '参加' }).click();
 
     expect(launcherActions.joinRoom).toHaveBeenCalledWith('room12345');
+  });
+
+  test('公開ルームを手動更新する', async () => {
+    const { launcherActions, screen } = await renderBattleView();
+
+    await screen.getByRole('button', { name: '更新' }).click();
+
+    expect(launcherActions.refreshRooms).toHaveBeenCalledTimes(1);
   });
 
   test('部屋作成ダイアログを開いて作成処理に送信する', async () => {

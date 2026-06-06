@@ -47,6 +47,7 @@ import type {
 
 const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const ACTIVITY_STATUS_VISIBLE_MS = 5000;
+const ROOMS_REFETCH_INTERVAL_MS = 15 * 1000;
 
 function isTauriRuntime() {
   return '__TAURI_INTERNALS__' in window;
@@ -109,6 +110,11 @@ export function useLauncherController() {
   const romsConfigured = Boolean(
     form.hostRomPath && form.clientRomPath && form.baseRomPath,
   );
+  const roomsQueryEnabled =
+    defaultsLoaded &&
+    activeView === 'battle' &&
+    isWebSocketUrl(form.signalUrl) &&
+    !connectionActive;
 
   const summary: LauncherSummary = {
     connectionActive,
@@ -119,13 +125,13 @@ export function useLauncherController() {
     selectedStageLabel,
   };
   const roomsQuery = useQuery({
-    enabled: defaultsLoaded && isWebSocketUrl(form.signalUrl),
+    enabled: roomsQueryEnabled,
     queryFn: async () => {
       const response = await listRooms(form.signalUrl);
       return response.rooms;
     },
     queryKey: ['matchmakingRooms', form.signalUrl],
-    refetchInterval: 5000,
+    refetchInterval: roomsQueryEnabled ? ROOMS_REFETCH_INTERVAL_MS : false,
   });
 
   useEffect(() => {
@@ -465,6 +471,14 @@ export function useLauncherController() {
     }
   };
 
+  const refreshRooms = async () => {
+    try {
+      await roomsQuery.refetch();
+    } catch (error) {
+      setActivityStatus({ text: String(error), kind: 'error' });
+    }
+  };
+
   const openLogDir = async () => {
     if (!lastLogDir) {
       return;
@@ -609,6 +623,7 @@ export function useLauncherController() {
     pollStatus,
     preflightCheck,
     prepareRoms,
+    refreshRooms,
     selectBaseRomAndPrepare,
     selectRomPath,
     startMatch,
@@ -633,6 +648,12 @@ export function useLauncherController() {
     matchmakingRooms: {
       rooms: roomsQuery.data ?? [],
       loading: roomsQuery.isFetching,
+      refreshDisabled:
+        !defaultsLoaded ||
+        !isWebSocketUrl(form.signalUrl) ||
+        connectionActive ||
+        createRoomMutation.isPending ||
+        joinRoomMutation.isPending,
       busy: createRoomMutation.isPending || joinRoomMutation.isPending,
       error: roomsQuery.error ? String(roomsQuery.error) : null,
     },

@@ -42,6 +42,7 @@ export type LauncherActions = {
   pollStatus: () => Promise<void>;
   preflightCheck: () => Promise<void>;
   prepareRoms: () => Promise<void>;
+  refreshRooms: () => Promise<void>;
   selectBaseRomAndPrepare: () => Promise<void>;
   selectRomPath: (key: SelectRomKey) => Promise<void>;
   startMatch: () => Promise<void>;
@@ -62,6 +63,7 @@ export type DiagnosticsState = {
 export type MatchmakingRoomsState = {
   rooms: RoomSummary[];
   loading: boolean;
+  refreshDisabled: boolean;
   busy: boolean;
   error: string | null;
 };

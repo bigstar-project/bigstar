@@ -26,6 +26,7 @@ async function renderSettingsView() {
     pollStatus: vi.fn(async () => {}),
     preflightCheck: vi.fn(async () => {}),
     prepareRoms: vi.fn(async () => {}),
+    refreshRooms: vi.fn(async () => {}),
     selectBaseRomAndPrepare: vi.fn(async () => {}),
     selectRomPath: vi.fn(async () => {}),
     startMatch: vi.fn(async () => {}),

@@ -1,5 +1,6 @@
 import { Portal } from '@ark-ui/react';
 import {
+  ArrowsClockwise,
   Broadcast,
   Crown,
   Flag,
@@ -52,6 +53,7 @@ export function BattleView({
     | 'createRoom'
     | 'joinRoom'
     | 'openLogDir'
+    | 'refreshRooms'
     | 'startMatch'
     | 'stopMatch'
   >;
@@ -103,12 +105,25 @@ export function BattleView({
               >
                 <div
                   className={css({
+                    alignItems: 'center',
                     color: 'fg.muted',
+                    display: 'flex',
+                    gap: '2',
                     fontWeight: 'bold',
                     textStyle: 'sm',
                   })}
                 >
-                  {matchmakingRooms.rooms.length} 件
+                  <span>{matchmakingRooms.rooms.length} 件</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    loading={matchmakingRooms.loading}
+                    disabled={matchmakingRooms.refreshDisabled}
+                    onClick={() => void actions.refreshRooms()}
+                  >
+                    <ArrowsClockwise size={16} weight="bold" />
+                    更新
+                  </Button>
                 </div>
                 <CreateRoomDialog
                   busy={matchmakingRooms.busy}
