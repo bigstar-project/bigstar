@@ -53,11 +53,11 @@ const rooms: MatchmakingRoomsState = {
       peer_count: 1,
       room_id: 'room12345',
       settings: {
-        big_stars: 5,
+        big_stars: 10,
         course_mode: 'random',
-        lives: 'endless',
+        lives: '3',
         match_seed: '123',
-        wins: 2,
+        wins: 3,
       },
       status: 'open',
       updated_at: 1,
@@ -106,9 +106,7 @@ describe('対戦ビュー', () => {
     await expect.element(screen.getByText('Host Player')).toBeVisible();
     await expect
       .element(
-        screen.getByText(
-          'room12345 / Course=random Wins=2 Star=5 Lives=endless',
-        ),
+        screen.getByText('room12345 / Course=random Wins=3 Star=10 Lives=3'),
       )
       .toBeVisible();
     await screen.getByRole('button', { name: '参加' }).click();

@@ -10,9 +10,9 @@ export const initialForm: FormState = {
   clientRomPath: '',
   baseRomPath: '',
   courseMode: 'random',
-  wins: 2,
-  bigStars: 5,
-  lives: 'endless',
+  wins: 3,
+  bigStars: 10,
+  lives: '3',
   matchSeed: '',
 };
 

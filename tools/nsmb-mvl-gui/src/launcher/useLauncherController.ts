@@ -207,9 +207,9 @@ export function useLauncherController() {
           clientRomPath: defaults.client_rom_path,
           baseRomPath: defaults.base_rom_path,
           courseMode: 'random',
-          wins: 2,
-          bigStars: 5,
-          lives: 'endless',
+          wins: initialForm.wins,
+          bigStars: initialForm.bigStars,
+          lives: initialForm.lives,
           matchSeed: String(generateSeed()),
         });
         setOnboardingRomsPrepared(defaults.roms_prepared_once);

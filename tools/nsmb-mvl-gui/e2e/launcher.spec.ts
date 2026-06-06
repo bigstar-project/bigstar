@@ -2,9 +2,9 @@ import { expect, type Page, test } from '@playwright/test';
 
 const settings = {
   course_mode: 'random',
-  wins: 2,
-  big_stars: 5,
-  lives: 'endless',
+  wins: 3,
+  big_stars: 10,
+  lives: '3',
   match_seed: '123',
 };
 
@@ -227,11 +227,11 @@ test('手動接続でクライアント起動ペイロードを作れる', async
     room_code: 'manual-room',
     rom_path: 'C:\\roms\\client.nds',
     settings: {
-      big_stars: 5,
+      big_stars: 10,
       course_mode: 'random',
-      lives: 'endless',
+      lives: '3',
       match_seed: '123',
-      wins: 2,
+      wins: 3,
     },
     signal_url: 'ws://127.0.0.1:8787/session',
   });
