@@ -124,14 +124,8 @@ if ($LowLatencyRollback) {
     if (-not $PSBoundParameters.ContainsKey('RollbackWindow')) { $RollbackWindow = 64 }
     if (-not $PSBoundParameters.ContainsKey('RollbackCheckpointInterval')) { $RollbackCheckpointInterval = 8 }
     if (-not $PSBoundParameters.ContainsKey('PacketBridgeStartFrame')) { $PacketBridgeStartFrame = 870 }
-    if (-not $PSBoundParameters.ContainsKey('StallTimeoutMs')) { $StallTimeoutMs = 5000 }
-    if (-not $PSBoundParameters.ContainsKey('GameStateTrace')) { $GameStateTrace = $true }
-    if (-not $PSBoundParameters.ContainsKey('GameStateTraceInterval')) { $GameStateTraceInterval = 15 }
-    $GameStateTraceExtended = $true
-    $TracePlayerLifeChanges = $true
-    $TracePlayerDefeated = $true
+    if (-not $PSBoundParameters.ContainsKey('StallTimeoutMs')) { $StallTimeoutMs = 10000 }
     $RollbackResimulate = $true
-    $PerfBreakdown = $true
 }
 
 if ($PlanDActorSnapshot) {
@@ -152,6 +146,7 @@ $isTinyCorePreimageRollback = $RollbackBackend -eq "tinycorepreimage" -or $Rollb
 
 if ($LowLatencyRollback -and $isTinyCorePreimageRollback) {
     if (-not $PSBoundParameters.ContainsKey('InputMaxFrameLead')) { $InputMaxFrameLead = 2 }
+    if (-not $PSBoundParameters.ContainsKey('RollbackWindow')) { $RollbackWindow = 32 }
     if (-not $PSBoundParameters.ContainsKey('RollbackCheckpointInterval')) { $RollbackCheckpointInterval = 1 }
     if (-not $PSBoundParameters.ContainsKey('RollbackInputWaitUs')) { $RollbackInputWaitUs = 1500 }
     if (-not $PSBoundParameters.ContainsKey('NetworkPumpThread')) { $NetworkPumpThread = $true }
@@ -306,7 +301,10 @@ if ($Rollback) {
     }
 }
 if ($InputUnreliable) {
-    $common += @("-InputUnreliable", "-InputBundleHistory", "$InputBundleHistory")
+    $common += "-InputUnreliable"
+}
+if ($InputBundleHistory -gt 0) {
+    $common += @("-InputBundleHistory", "$InputBundleHistory")
 }
 if ($MvlStage -ge 0) {
     $common += @("-MvlStage", "$MvlStage")
@@ -329,9 +327,15 @@ if ($LowLatencyRollback) {
     $env:MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "30"
     $env:MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
     $env:MELONDS_NSML_FIXED_FRAME_SLEEP = "1"
-    $env:MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "25"
-    $env:MELONDS_NSML_FPS_SPIKE_TRACE = "1"
-    $env:MELONDS_NSML_PERF_SPIKE_PHASE_TRACE = "1"
+    if ($PerfBreakdown) {
+        $env:MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "25"
+        $env:MELONDS_NSML_FPS_SPIKE_TRACE = "1"
+        $env:MELONDS_NSML_PERF_SPIKE_PHASE_TRACE = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FPS_SPIKE_TRACE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PERF_SPIKE_PHASE_TRACE -ErrorAction SilentlyContinue
+    }
     if ($isNsmbTinyCoreRollback) {
         $env:MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
         $env:MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"

@@ -1,8 +1,62 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
-## 2026-06-06 current status - tinycorepreimage rollback profiling
+## 2026-06-07 current status - practical tinycorepreimage candidate
 
-Primary implementation direction remains rollback with lightweight checkpoints, not the earlier Plan-D actor/global/world snapshot path. The current candidate is `tinycorepreimage`: frame-local Main RAM reverse preimages plus `DoRollbackTinyCoreSavestate` with `tinyFlags=0x241`.
+Current practical rollback candidate is `tinycorepreimage-rbwait1500-window32`:
+
+- backend: `tinycorepreimage`
+- input delay: `0`
+- input max frame lead: `2`
+- rollback same-frame input wait: `1500us`
+- rollback window: `32`
+- checkpoint interval: `1`
+- JIT enabled
+
+Completed in the latest pass:
+
+- Fixed a preimage shadow bug after rollback resimulation. The frame-delta shadow is now refreshed at the current frame after resim, not at the restored checkpoint frame. This removed a class of false preimage chains that later produced `chain missing`.
+- Strengthened rollback history pruning so retained checkpoints also keep every base/preimage chain required by currently kept checkpoints and by the active frame-delta shadow. This prevents pruning a base frame that is still needed for restore.
+- Added rollback integrity detection to `scripts/run-nsmb-mvl-practical-rollback-suite.ps1`; `cannot resimulate`, missing checkpoint, missing delta chain, restore failure, and rollback failure logs are now classified as `rollback-fail` instead of being hidden behind generic perf/mismatch failures.
+- Added the `tinycorepreimage-rbwait1500-window32` and `tinycorepreimage-rbwait1500-bundle8` suite candidates. `bundle8` is not promoted because it improved some transport timing but introduced correctness failures.
+- Made FPS spike phase tracing opt-in through `-FpsSpikeTrace` for split smoke and stopped forcing heavy trace/perf breakdown in the manual low-latency wrapper. Normal manual rollback runs are lighter by default, while active frame timing still records avg/max/over33ms.
+- Fixed a result/restart bug: the MvL auto-restart checkpoint is saved before the packet-bridge JIT helper patch, so restoring it after result removed the patch from Main RAM while `PacketBridgeJitHelperPatchApplied` still stayed true. Auto restart now clears that applied flag after savestate restore, causing the helper patch to be reapplied on the next frame. This fixed second-game remote input not affecting the peer.
+- Updated `secondgame` practical route to use `MvlLives=3`; with endless lives it only accumulated synchronized deaths and never reached result.
+
+Verification:
+
+- Build passed: `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4`.
+- PowerShell parse passed for the touched rollback suite/manual/smoke scripts.
+- `logs/codex-practical-suite-window32-sixroute-jitpatchfix-20260607/20260607-021914/summary.csv` passed all six current practical routes:
+  - `stocktouch`: avg `18.371/18.370ms`, max `52.904/45.171ms`, over33 `3/7`
+  - `chaos`: avg `17.317/17.315ms`, max `40.648/48.909ms`, over33 `3/7`
+  - `death`: avg `17.305/17.304ms`, max `44.139/39.782ms`, over33 `4/2`
+  - `contact`: avg `17.076/17.075ms`, max `40.459/40.216ms`, over33 `3/3`
+  - `dualstresslong`: avg `17.530/17.530ms`, max `44.751/42.764ms`, over33 `9/6`
+  - `secondgame`: avg `16.778/16.778ms`, max `46.982/47.397ms`, over33 `4/5`
+- The second-game fix was first isolated in `logs/codex-practical-suite-window32-secondgame-jitpatchfix-20260607/20260607-021551`: helper patch logs appear at frame `870` and again at frame `4054` after auto restart, and the route reaches the second result without gameplay mismatch.
+- A contaminated full-suite run, `logs/codex-practical-suite-rbwait1500-window32-postprune-20260607/20260607-012841`, showed much worse averages (`24-30ms`). It is not used as the current baseline because later single and full retakes under clean conditions passed with normal frame times. Keep using repeated retakes when a run shows global slowdown across every route.
+
+Current conclusion:
+
+- This candidate is now much closer to actual playability than the previous state: standard movement/item-touch, chaos input, death/respawn, player contact, long dual move/jump/dash, and result/restart into a second game all pass with practical FPS and no detected rollback integrity failure.
+- The remaining rollback cost is still dominated by one-frame resimulation when a prediction miss occurs. Checkpoint save/restore is not the main blocker: recent runs show normal checkpoint saves around `1.6-2.4ms`, while one-frame correction can still spend roughly `19-37ms` depending on route and machine load.
+- `luigistar` and `mariostarleft` are not current correctness failures; their latest run did not collect a star on either peer and therefore failed the event requirement symmetrically. They need better input coverage before they can prove dropped-star/star-pickup behavior.
+
+Current blocker / caveat:
+
+- Automated coverage still does not fully represent the user's manual reports around dropped stars, block break persistence, 8-coin item identity, and arbitrary complex contact. The six-route suite is a stronger baseline, not a final proof of comfortable human play.
+- Manual play should use the low-latency tinycorepreimage/window32 path, but any new manual desync needs a trace route that captures the concrete event class instead of only checking final result.
+
+Next actions:
+
+- Add or repair deterministic routes for star pickup/drop/recover, block break state, and 8-coin item spawn identity. Treat those as gameplay-state coverage gaps, not as isolated one-off examples.
+- Keep `tinycorepreimage-rbwait1500-window32` as the current candidate and reject `bundle8` unless a later correctness proof changes the input history semantics.
+- Keep result/restart in the practical promotion matrix, but do not make the shorter default suite too slow unless needed; run the six-route matrix before claiming a playable milestone.
+- Continue watching both average FPS and sudden frame drops (`maxFrameMs`, `over33ms`, consecutive slow frames). Average-only checks are insufficient.
+
+## 2026-06-06 retained status - tinycorepreimage rollback profiling
+
+At this retained checkpoint, the implementation direction had moved to rollback with lightweight checkpoints, not the earlier Plan-D actor/global/world snapshot path. The candidate under profiling was `tinycorepreimage`: frame-local Main RAM reverse preimages plus `DoRollbackTinyCoreSavestate` with `tinyFlags=0x241`.
 
 Completed in the current pass:
 

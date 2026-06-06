@@ -148,12 +148,13 @@ param(
     [string]$ForceStageActorFreezeFlagValue = "0",
     [int]$HostStartupDelayMs = 1200,
     [string]$LogDir = "logs\nsmb-mvl-split-local-input-smoke",
+    [switch]$FpsSpikeTrace,
     [switch]$AllowJit
 )
 
 $ErrorActionPreference = "Stop"
 
-if ($MaxConsecutiveSlowFrames -ge 0 -or $MaxRollbackFrameMs -gt 0.0) {
+if ($FpsSpikeTrace -and ($MaxConsecutiveSlowFrames -ge 0 -or $MaxRollbackFrameMs -gt 0.0)) {
     $env:MELONDS_NSML_FPS_SPIKE_TRACE = "1"
     $env:MELONDS_NSML_PERF_SPIKE_PHASE_TRACE = "1"
     $currentSpikeThreshold = 0.0
@@ -170,6 +171,10 @@ if ($MaxConsecutiveSlowFrames -ge 0 -or $MaxRollbackFrameMs -gt 0.0) {
     if (-not $hasSpikeThreshold -or $currentSpikeThreshold -le 0.0 -or $currentSpikeThreshold -gt $targetSpikeThreshold) {
         $env:MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = $targetSpikeThreshold.ToString([System.Globalization.CultureInfo]::InvariantCulture)
     }
+} elseif (-not $FpsSpikeTrace) {
+    Remove-Item Env:\MELONDS_NSML_FPS_SPIKE_TRACE -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_PERF_SPIKE_PHASE_TRACE -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS -ErrorAction SilentlyContinue
 }
 
 if ($RollbackPredictionProbeModulo -gt 0) {
@@ -472,7 +477,10 @@ if ($GenerateMvlConfiguredRoms) {
     $common += @("-GenerateMvlConfiguredRoms", "-Rom", "$GenerateMvlSourceRom")
 }
 if ($InputUnreliable) {
-    $common += @("-InputUnreliable", "-InputBundleHistory", "$InputBundleHistory")
+    $common += "-InputUnreliable"
+}
+if ($InputBundleHistory -gt 0) {
+    $common += @("-InputBundleHistory", "$InputBundleHistory")
 }
 if ($InputDropModulo -gt 0) {
     $common += @("-InputDropModulo", "$InputDropModulo", "-InputDropOffset", "$InputDropOffset")

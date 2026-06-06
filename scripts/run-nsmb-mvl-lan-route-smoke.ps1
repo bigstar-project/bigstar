@@ -2611,9 +2611,12 @@ function Start-MelonLANProcess {
         }
         if ($InputUnreliable) {
             $env:MELONDS_NSML_INPUT_UNRELIABLE = "1"
-            $env:MELONDS_NSML_INPUT_BUNDLE_HISTORY = "$InputBundleHistory"
         } else {
             Remove-Item Env:\MELONDS_NSML_INPUT_UNRELIABLE -ErrorAction SilentlyContinue
+        }
+        if ($InputBundleHistory -gt 0) {
+            $env:MELONDS_NSML_INPUT_BUNDLE_HISTORY = "$InputBundleHistory"
+        } else {
             Remove-Item Env:\MELONDS_NSML_INPUT_BUNDLE_HISTORY -ErrorAction SilentlyContinue
         }
         if ($InputDropModulo -gt 0) {

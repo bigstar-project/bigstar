@@ -4,6 +4,7 @@ param(
     [string]$LogRoot = "logs\nsmb-mvl-practical-rollback-suite",
     [int]$WaitTimeoutMs = 720000,
     [int]$StallTimeoutMs = 5000,
+    [int]$FrameHeartbeatInterval = 30,
     [double]$MaxActiveFrameMs = 90.0,
     [int]$MaxActiveFrameOver33ms = 80,
     [int]$MaxConsecutiveSlowFrames = 4,
@@ -74,75 +75,135 @@ function Get-TimingFields {
     return $result
 }
 
+function Get-RollbackIntegrityError {
+    param([string[]]$Paths)
+    $patterns = @(
+        "NSMB Rollback: cannot resimulate",
+        "NSMB Rollback: checkpoint missing",
+        "NSMB Rollback: .*chain missing",
+        "NSMB Rollback: .*restore failed",
+        "NSMB Test: .*rollback.*failed"
+    )
+    foreach ($path in $Paths) {
+        if (-not (Test-Path -LiteralPath $path)) {
+            continue
+        }
+        $hit = Select-String -LiteralPath $path -Pattern $patterns -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($hit) {
+            $relative = Resolve-Path -LiteralPath $path -Relative
+            return "${relative}:$($hit.LineNumber): $($hit.Line)"
+        }
+    }
+    return ""
+}
+
 $candidateDefs = @{
     "tinycorepreimage-wait0" = [pscustomobject]@{
         Backend = "tinycorepreimage"
         RollbackInputWaitUs = 0
         InputMaxFrameLead = 2
+        RollbackWindow = 20
         RollbackCheckpointInterval = 1
+        InputBundleHistory = 0
         Env = @{}
     }
     "tinycorepreimage-rbwait500" = [pscustomobject]@{
         Backend = "tinycorepreimage"
         RollbackInputWaitUs = 500
         InputMaxFrameLead = 2
+        RollbackWindow = 20
         RollbackCheckpointInterval = 1
+        InputBundleHistory = 0
         Env = @{}
     }
     "tinycorepreimage-rbwait750" = [pscustomobject]@{
         Backend = "tinycorepreimage"
         RollbackInputWaitUs = 750
         InputMaxFrameLead = 2
+        RollbackWindow = 20
         RollbackCheckpointInterval = 1
+        InputBundleHistory = 0
         Env = @{}
     }
     "tinycorepreimage-rbwait1000" = [pscustomobject]@{
         Backend = "tinycorepreimage"
         RollbackInputWaitUs = 1000
         InputMaxFrameLead = 2
+        RollbackWindow = 20
         RollbackCheckpointInterval = 1
+        InputBundleHistory = 0
         Env = @{}
     }
     "tinycorepreimage-rbwait1500" = [pscustomobject]@{
         Backend = "tinycorepreimage"
         RollbackInputWaitUs = 1500
         InputMaxFrameLead = 2
+        RollbackWindow = 20
         RollbackCheckpointInterval = 1
+        InputBundleHistory = 0
+        Env = @{}
+    }
+    "tinycorepreimage-rbwait1500-window32" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        RollbackInputWaitUs = 1500
+        InputMaxFrameLead = 2
+        RollbackWindow = 32
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 0
+        Env = @{}
+    }
+    "tinycorepreimage-rbwait1500-bundle8" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        RollbackInputWaitUs = 1500
+        InputMaxFrameLead = 2
+        RollbackWindow = 20
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
         Env = @{}
     }
     "tinycorepreimage-rbwait1500-lead4" = [pscustomobject]@{
         Backend = "tinycorepreimage"
         RollbackInputWaitUs = 1500
         InputMaxFrameLead = 4
+        RollbackWindow = 20
         RollbackCheckpointInterval = 1
+        InputBundleHistory = 0
         Env = @{}
     }
     "tinycorepreimage-rbwait1500-lead8" = [pscustomobject]@{
         Backend = "tinycorepreimage"
         RollbackInputWaitUs = 1500
         InputMaxFrameLead = 8
+        RollbackWindow = 20
         RollbackCheckpointInterval = 1
+        InputBundleHistory = 0
         Env = @{}
     }
     "tinycorepreimage-rbwait1750" = [pscustomobject]@{
         Backend = "tinycorepreimage"
         RollbackInputWaitUs = 1750
         InputMaxFrameLead = 2
+        RollbackWindow = 20
         RollbackCheckpointInterval = 1
+        InputBundleHistory = 0
         Env = @{}
     }
     "tinycorepreimage-rbwait2000" = [pscustomobject]@{
         Backend = "tinycorepreimage"
         RollbackInputWaitUs = 2000
         InputMaxFrameLead = 2
+        RollbackWindow = 20
         RollbackCheckpointInterval = 1
+        InputBundleHistory = 0
         Env = @{}
     }
     "coredelta-baseline" = [pscustomobject]@{
         Backend = "coredelta"
         RollbackInputWaitUs = 0
         InputMaxFrameLead = 8
+        RollbackWindow = 20
         RollbackCheckpointInterval = 8
+        InputBundleHistory = 0
         Env = @{
             MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "30"
             MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
@@ -219,6 +280,7 @@ $routeDefs = @{
             IgnoreSpeculativeInputFields = $true
             SkipMovementProbe = $true
             RollbackSettleFrames = 60
+            MvlLives = "3"
             RequireSecondMvlGame = $true
             RequireMvlGameCount = 2
         }
@@ -274,12 +336,15 @@ foreach ($candidateName in $Candidate) {
             ClientInputScript = $clientInput
             Rollback = $true
             RollbackBackend = $candidateDef.Backend
+            RollbackWindow = $candidateDef.RollbackWindow
             RollbackCheckpointInterval = $candidateDef.RollbackCheckpointInterval
             RollbackInputWaitUs = $candidateDef.RollbackInputWaitUs
             InputDelayFrames = 0
             InputMaxFrameLead = $candidateDef.InputMaxFrameLead
+            InputBundleHistory = $candidateDef.InputBundleHistory
             NetworkPumpThread = $true
             NetworkPumpSleepUs = 50
+            FrameHeartbeatInterval = $FrameHeartbeatInterval
             AllowJit = $true
             MaxActiveFrameMs = $MaxActiveFrameMs
             MaxActiveFrameOver33ms = $MaxActiveFrameOver33ms
@@ -306,8 +371,17 @@ foreach ($candidateName in $Candidate) {
         $clientTiming = Get-LastLineMatching -Path $clientStdout -Pattern "NSMB Test: active frame timing"
         $hostFields = Get-TimingFields -Line $hostTiming
         $clientFields = Get-TimingFields -Line $clientTiming
+        $rollbackIntegrityError = Get-RollbackIntegrityError -Paths @($hostStdout, $clientStdout)
+        if ($rollbackIntegrityError) {
+            if ($errorText) {
+                $errorText = "$errorText; rollback integrity failure: $rollbackIntegrityError"
+            } else {
+                $errorText = "rollback integrity failure: $rollbackIntegrityError"
+            }
+        }
         $status = if ($errorText) { "fail" } else { "pass" }
-        if ($errorText -match "gameplay mismatch") { $status = "mismatch" }
+        if ($errorText -match "rollback integrity failure") { $status = "rollback-fail" }
+        elseif ($errorText -match "gameplay mismatch") { $status = "mismatch" }
         elseif ($errorText -match "active frame|over33ms|consecutive slow") { $status = "perf-fail" }
         elseif ($errorText -match "stalled|timeout|timed out|missing frame limit") { $status = "stall" }
 

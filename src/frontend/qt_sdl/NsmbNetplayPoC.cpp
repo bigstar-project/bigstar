@@ -3074,28 +3074,38 @@ void PruneRollbackHistoryLocked(melonDS::u32 frame)
         ? frame - static_cast<melonDS::u32>(G.RollbackWindow)
         : 0;
 
-    std::set<melonDS::u32> requiredBaseFrames;
-    for (const auto& [storedFrame, stored] : G.RollbackStates)
+    std::set<melonDS::u32> requiredFrames;
+    auto markRequiredChain = [&](melonDS::u32 startFrame)
     {
-        if (storedFrame < keepFrom)
-            continue;
-        const RollbackStoredState* cursor = &stored;
+        auto start = G.RollbackStates.find(startFrame);
+        if (start == G.RollbackStates.end())
+            return;
+        requiredFrames.insert(startFrame);
+        const RollbackStoredState* cursor = &start->second;
         for (size_t depth = 0; depth < G.RollbackStates.size(); depth++)
         {
             if (!cursor->MainRAMDelta || cursor->BaseFrame == kNoFrameLimit)
                 break;
-            if (!requiredBaseFrames.insert(cursor->BaseFrame).second)
+            if (!requiredFrames.insert(cursor->BaseFrame).second)
                 break;
             auto base = G.RollbackStates.find(cursor->BaseFrame);
             if (base == G.RollbackStates.end())
                 break;
             cursor = &base->second;
         }
+    };
+
+    for (const auto& [storedFrame, stored] : G.RollbackStates)
+    {
+        if (storedFrame >= keepFrom)
+            markRequiredChain(storedFrame);
     }
+    if (G.RollbackFrameDeltaShadowFrame != kNoFrameLimit)
+        markRequiredChain(G.RollbackFrameDeltaShadowFrame);
 
     for (auto it = G.RollbackStates.begin(); it != G.RollbackStates.end(); )
     {
-        if (it->first < keepFrom && requiredBaseFrames.find(it->first) == requiredBaseFrames.end())
+        if (it->first < keepFrom && requiredFrames.find(it->first) == requiredFrames.end())
             it = G.RollbackStates.erase(it);
         else
             ++it;
@@ -7065,6 +7075,7 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
         if (restoredCheckpoint)
         {
             melonDS::Platform::MP_Begin(nds->UserData);
+            G.PacketBridgeJitHelperPatchApplied[instanceID] = false;
             WriteARM9U32(nds, kGameStageGroupAddr, 0x00000009);
             WriteARM9U32(nds, kGameVsModeAddr, 0x00000001);
             WriteARM9U32(nds, kSceneNextSceneSettingsAddr, G.MvlStageSceneSettings);
@@ -10154,7 +10165,7 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
     const unsigned long long rollbackTotalUs = ElapsedUs(rollbackStart);
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
-        RefreshRollbackFrameDeltaShadowLocked(restoreFrame, nds);
+        RefreshRollbackFrameDeltaShadowLocked(frame, nds);
         RecordRollbackCheckpointRestoreLocked(restoreUs);
         RecordRollbackResimTimingLocked(
             resimulated,
