@@ -1,39 +1,41 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
-## 2026-06-02 current status - systematic page-delta rollback pivot
+## 2026-06-06 current status - tinycorepreimage rollback profiling
 
-Primary implementation direction is now a systematic page-delta rollback checkpoint derived from the working `coredelta` correctness baseline. The Plan-D actor/global/world snapshot remains useful as a lightweight diagnostic and narrow recovery experiment, but it is not the production-correctness architecture: manual play still exposed collision/contact freezes, broken-block divergence, minimap Big Star marker divergence, and differing 8-coin rewards.
+Primary implementation direction remains rollback with lightweight checkpoints, not the earlier Plan-D actor/global/world snapshot path. The current candidate is `tinycorepreimage`: frame-local Main RAM reverse preimages plus `DoRollbackTinyCoreSavestate` with `tinyFlags=0x241`.
 
-Completed in the current pivot:
+Completed in the current pass:
 
-- Added rollback timing breakdowns to `src/frontend/qt_sdl/NsmbNetplayPoC.cpp`. Periodic rollback logs and per-resim traces now separate restore, resimulated `RunFrame`, resim checkpoint re-save, and total correction time. `NSMB PerfSpike` lines also include the observed maxima.
+- Added finer FPS-spike instrumentation to `src/frontend/qt_sdl/NsmbNetplayPoC.cpp`. `NSMB BeforeHookPhaseSpike` now splits the pre-frame hook into `probeRestoreMs`, `jitPatchMs`, `rollbackMs`, packet-bridge setup, checkpoint, scratch, network, and wait buckets. `NSMB PacketBridgeScratchSpike` further splits scratch writes into network, throttle, remote wait, and write time. New spike lines are flushed immediately so forced process termination is less likely to lose the cause.
+- Updated `scripts/run-nsmb-mvl-split-local-input-smoke.ps1` to suppress CP15 `PU region` debug spam for tiny rollback backends. Updated `scripts/run-nsmb-mvl-manual-local.ps1` so `-LowLatencyRollback -RollbackBackend tinycorepreimage` defaults to `InputMaxFrameLead=2`, checkpoint interval `1`, network pump `50us`, `tinyFlags=0x241`, JIT-reset skip, resim render skip, and PU debug suppression.
 - Build passed: `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4`.
-- Forced `coredelta` rollback validation ran as `logs/codex-coredelta-resim-breakdown-1300-20260602`. The strict wrapper intentionally failed because host rollback-related frame time reached `112.791ms` above the configured `100ms` gate; the instrumentation itself worked.
-- At host frame `1200`, five measured 2-frame corrections averaged: restore `11.116ms/op`, resimulated `RunFrame` `13.925ms/frame`, checkpoint re-save `5.713ms/frame`, total correction `50.425ms/op`. The worst measured correction was `75.704ms`.
-- At client frame `1200`, five measured 2-frame corrections averaged: restore `5.360ms/op`, resimulated `RunFrame` `13.365ms/frame`, checkpoint re-save `5.425ms/frame`, total correction `42.966ms/op`. The worst measured correction was `46.272ms`.
-- Added three experimental systematic Main RAM page-delta backends:
-  - `coreframedelta`: stores Main RAM postimage deltas relative to the preceding checkpoint and restores by replaying a delta chain from a keyframe. It passed `logs/codex-coreframedelta-breakdown-1300-20260602`, but is not a performance candidate: host restore average regressed to `44.405ms` because forward chain replay is expensive.
-  - `corepreimage`: stores a full rollback core snapshot plus frame-local Main RAM preimages and restores short rollbacks by reverse-applying preimages from the latest RAM shadow. It passed `logs/codex-corepreimage-breakdown-1300-20260602`; host restore average improved to `6.350ms`, correction average to `44.377ms`, and the 65-checkpoint ring held about `1.18MB` of RAM preimages. Full core snapshots still kept the average checkpoint around `2.47MB`.
-  - `tinycorepreimage`: pairs the same reverse Main RAM preimage ring with `DoRollbackTinyCoreSavestate`. With `tinyFlags=0x241`, checkpoint average dropped to about `179KB` and normal save average to `1.36-1.84ms` in `logs/codex-tinycorepreimage-breakdown-1300-20260602`.
-- A rollback-producing `tinycorepreimage` route passed without game-state comparison: `logs/codex-tinycorepreimage-start50-netpump-wait2500-delay2-1500-20260602`. At frame `1440`, host/client checkpoint averages were about `182KB`, restore averages `4.126/4.148ms`, resim checkpoint re-save averages `1.875/1.871ms/frame`, and correction averages `36.894/38.861ms`. Both peers had `16` measured correction operations.
-- The next correctness run, `logs/codex-tinycorepreimage-compare-start50-delay2-1600-20260602`, did not complete: both peers missed the frame-limit marker after game-state comparison was enabled and stopped progressing around frame `1453`. The tail shows repeated input-wait timeouts and throttle waits with `scratchMs` spikes around `20-34ms`, not an immediate CPU abort. Treat `tinycorepreimage` as an experimental performance result only until this stall is diagnosed.
+- PowerShell parse passed for the touched manual and split smoke scripts.
+
+Verification:
+
+- `logs/codex-tinycorepreimage-phaseprobe-start50-2300-20260606`: `RollbackInputWaitUs=2500`, `InputMaxFrameLead=1`, game-state comparison enabled, 2300F passed. This avoided frequent rollback but active FPS was only about `46.18/46.19`; high-frequency remote input wait timeouts were the dominant cost. One-frame corrections measured about `29.011ms` host and `26.250ms` client total.
+- `logs/codex-tinycorepreimage-phaseprobe-wait0-lead2-2300-20260606`: `RollbackInputWaitUs=0`, `InputMaxFrameLead=2`, game-state comparison enabled, 2300F passed. Active FPS improved to about `55.17/55.21`, throttle was essentially gone, and checkpoint save averaged about `1.37ms`. At frame `2280`, host/client had `19/19` correction ops; restore averaged `3.751/3.952ms`, resimulated `RunFrame` averaged `13.630/15.182ms`, resim checkpoint re-save averaged `1.522/1.560ms`, and total correction averaged `27.236/30.722ms`.
+- `logs/codex-tinycorepreimage-suppressedpu-wait0-lead2-2300-20260606`: same route after script-level PU debug suppression passed. `PU region` spam was removed. Active FPS was about `54.78/54.76`; max frame was `78.139/68.791ms`, still caused mostly by rollback/resimulation windows, with one client scratch spike from throttle (`27.558ms`).
+- `logs/codex-tinycorepreimage-stocktouch-wait0-lead2-3200-20260606`: stock-touch route with host move/jump/dash and client stock-item touch passed 3200F with game-state comparison. Active FPS was about `49.91/49.87`; max frame was `103.635/71.572ms`, `over33ms=40/48`. This broadens correctness confidence, but it shows complex routes still have visible spikes even when remote waits are gone.
 
 Current conclusion:
 
-- Checkpoint lightweighting is still worthwhile: with two resimulated frames, current checkpoint restore plus re-save consumes about `16-23ms` per correction in this route, in addition to normal-frame checkpoint-save overhead.
-- It is not sufficient by itself: the unavoidable resimulated `RunFrame` portion is already about `27ms` for a two-frame correction. The new backend must reduce checkpoint cost while the input/prediction policy keeps common corrections near one frame.
-- Existing `coredelta` stores normal checkpoints around `2.46-2.49MB`, average around `2.6-2.7MB`, with periodic keyframes around `6.6MB`. The next backend should store frame-local Main RAM dirty-page changes rather than cumulative keyframe-relative Main RAM deltas.
+- The stale 2026-06-02 conclusion that the comparison-enabled `tinycorepreimage` route stopped around frame `1453` no longer represents the current branch. Re-runs now complete 2300F under game-state comparison.
+- Checkpoint storage is light enough for the current candidate: normal checkpoints are about `180KB`, save is roughly `1.3-1.9ms`, and restore is roughly `3.7-5.6ms` on these routes.
+- The remaining visible frame drops are dominated by rollback resimulation, not snapshot bytes. A one-frame correction is often around `18-30ms`; two/three-frame corrections can push total correction to roughly `45-50ms+` and produce `50-80ms` frame spikes.
+- Input policy matters more than further checkpoint byte reduction for this route. Waiting `2500us` reduces correction count but drags average FPS down; `wait=0, lead=2` gives much better average FPS but produces more rollback spikes.
+- Stock-touch raises the practical performance concern: the candidate can stay correct while still showing roughly `70-100ms` isolated drops on heavier routes. Further work should reduce correction frequency/window length or make correction scheduling less visible.
 
 Current blocker / caveat:
 
-- Full write-barrier coverage is not yet proven. JIT and direct host writes can bypass a naive dirty-bit hook. Start with page comparison against a shadow copy to prove correctness, then replace proven paths with write tracking where it reduces cost.
-- The reverse-preimage restore strategy is implemented and measurably lighter. The current blocker is correctness under comparison-enabled rollback stress: determine whether `tinycorepreimage` is missing a tiny-core device domain or whether the comparison observer exposed an independent stall.
+- `tinycorepreimage` is promising but not promoted. The current automated route is still a short move/jump/dash stress. It must be checked on contact, death/respawn, block/item, stock-touch, and longer manual-like routes.
+- Full write-barrier coverage is still not proven. The current page-comparison/preimage path is correctness-oriented; replacing it with write tracking should wait until more routes pass.
 
 Next actions:
 
-- Diagnose `logs/codex-tinycorepreimage-compare-start50-delay2-1600-20260602` before promoting `tinycorepreimage`. Start by checking the last heartbeat, frame progress, CPU PC/SP, and whether disabling intrusive comparison while keeping targeted state gates changes the result.
-- Compare `tinycorepreimage` against `corepreimage` on the same contact/death/block/item-focused routes. If only tiny-core fails, add missing core domains systematically; do not fall back to per-object Plan-D fixes.
-- Keep measuring checkpoint bytes, normal save cost, restore cost, resim re-save cost, total correction cost, active FPS, and isolated frame spikes. The short-rollback reverse-preimage mechanism is now the promising branch; forward `coreframedelta` remains a diagnostic reference only.
+- Keep `wait=0, lead=2` as the current tinycorepreimage test default and use frame-spike gates, not only average FPS.
+- Run the same backend on stock-touch, death/respawn, result/restart, and longer chaos routes. Treat forced all-frame prediction-probe tests as diagnostic stress, not as a promotion gate.
+- If spikes remain too visible, try input bundling/history and limited rollback coalescing before trying to shrink checkpoints further; current measurements show resimulation time is the larger cost.
 
 ## 2026-06-02 retained diagnostic status - Plan-D actor/global snapshot path
 

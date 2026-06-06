@@ -10279,6 +10279,15 @@ void WritePacketBridgeJitScratchIfNeeded(
     if (G.ScriptRemotePacketEndFrame != 0 && frame > G.ScriptRemotePacketEndFrame)
         return;
 
+    const bool traceScratch = G.ActiveFrameSpikeTrace;
+    const auto scratchStart = std::chrono::steady_clock::now();
+    unsigned long long peerStartWaitUs = 0;
+    unsigned long long networkUs = 0;
+    unsigned long long throttleUs = 0;
+    unsigned long long lockstepRemoteWaitUs = 0;
+    unsigned long long writeUs = 0;
+    bool wroteScratch = false;
+
     const melonDS::u32 logicalFrame = InputNetplayLogicalFrame(frame);
     if (G.InputNetplayOnly
         && G.WaitForPeerAtNetplayStart
@@ -10300,7 +10309,9 @@ void WritePacketBridgeJitScratchIfNeeded(
                 sendStartFrame,
                 G.NetplayStartFrame);
             std::fflush(stdout);
+            const auto waitStart = std::chrono::steady_clock::now();
             WaitForPeerIfNeeded(true);
+            peerStartWaitUs = static_cast<unsigned long long>(ElapsedUs(waitStart));
         }
     }
 
@@ -10313,6 +10324,7 @@ void WritePacketBridgeJitScratchIfNeeded(
         const melonDS::u32 sendFrame = G.InputNetplayOnly
             ? logicalFrame + static_cast<melonDS::u32>(std::max(0, G.Delay))
             : frame;
+        const auto networkStart = std::chrono::steady_clock::now();
         {
             std::unique_lock<std::mutex> lock(G.Mutex);
             PumpNetworkLocked(nds, frame);
@@ -10342,31 +10354,68 @@ void WritePacketBridgeJitScratchIfNeeded(
                 hasRemoteInput = GetRollbackRemoteInputLocked(logicalFrame, remoteInput, predictedRemoteInput);
             }
         }
+        networkUs = static_cast<unsigned long long>(ElapsedUs(networkStart));
 
+        const auto throttleStart = std::chrono::steady_clock::now();
         ThrottleInputNetplayFrameLead(nds, frame, sendFrame);
+        throttleUs = static_cast<unsigned long long>(ElapsedUs(throttleStart));
 
         if (!hasRemoteInput
             && !G.RollbackEnabled
             && G.LocalWaitsForRemote
             && (!G.InputNetplayOnly || G.NetplayStartFrame == 0 || logicalFrame >= G.NetplayStartFrame))
         {
+            const auto waitStart = std::chrono::steady_clock::now();
             remoteInput = WaitForRemoteInput(logicalFrame);
+            lockstepRemoteWaitUs = static_cast<unsigned long long>(ElapsedUs(waitStart));
             hasRemoteInput = true;
         }
     }
 
-    if (logicalFrame < startFrame)
-        return;
+    const bool beforeStart = logicalFrame < startFrame;
+    if (!beforeStart)
+    {
+        const auto writeStart = std::chrono::steady_clock::now();
+        WritePacketBridgeJitScratchInputs(
+            instanceID,
+            logicalFrame,
+            nds,
+            localPlayer,
+            effectiveLocalInput,
+            remoteInput,
+            hasRemoteInput,
+            predictedRemoteInput);
+        writeUs = static_cast<unsigned long long>(ElapsedUs(writeStart));
+        wroteScratch = true;
+    }
 
-    WritePacketBridgeJitScratchInputs(
-        instanceID,
-        logicalFrame,
-        nds,
-        localPlayer,
-        effectiveLocalInput,
-        remoteInput,
-        hasRemoteInput,
-        predictedRemoteInput);
+    if (traceScratch)
+    {
+        const unsigned long long totalUs = static_cast<unsigned long long>(ElapsedUs(scratchStart));
+        const unsigned long long thresholdUs = static_cast<unsigned long long>(
+            std::min(G.ActiveFrameSpikeThresholdUs, 10000));
+        if (totalUs >= thresholdUs)
+        {
+            std::printf(
+                "NSMB PacketBridgeScratchSpike: inst=%d frame=%u logicalFrame=%u totalMs=%.3f peerStartWaitMs=%.3f networkMs=%.3f throttleMs=%.3f lockstepRemoteWaitMs=%.3f writeMs=%.3f wrote=%d beforeStart=%d hasRemote=%d predictedRemote=%d\n",
+                instanceID,
+                frame,
+                logicalFrame,
+                static_cast<double>(totalUs) / 1000.0,
+                static_cast<double>(peerStartWaitUs) / 1000.0,
+                static_cast<double>(networkUs) / 1000.0,
+                static_cast<double>(throttleUs) / 1000.0,
+                static_cast<double>(lockstepRemoteWaitUs) / 1000.0,
+                static_cast<double>(writeUs) / 1000.0,
+                wroteScratch ? 1 : 0,
+                beforeStart ? 1 : 0,
+                hasRemoteInput ? 1 : 0,
+                predictedRemoteInput ? 1 : 0);
+            std::fflush(stdout);
+        }
+    }
+    if (beforeStart)
+        return;
 }
 
 void ApplyPacketBridgeJitHelperPatchIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -15322,6 +15371,16 @@ public:
     enum class Phase
     {
         Init,
+        StartSync,
+        LoadState,
+        RuntimeConfig,
+        ProbeRestore,
+        JitPatch,
+        Rollback,
+        Boot,
+        Patch,
+        PacketBridgeSetup,
+        TestSnap,
         Setup,
         ActorState,
         Barrier,
@@ -15353,11 +15412,21 @@ public:
             return;
 
         std::printf(
-            "NSMB BeforeHookPhaseSpike: inst=%d frame=%u totalMs=%.3f initMs=%.3f setupMs=%.3f actorStateMs=%.3f barrierMs=%.3f checkpointMs=%.3f scratchMs=%.3f networkMs=%.3f gateMs=%.3f remoteWaitMs=%.3f tailMs=%.3f\n",
+            "NSMB BeforeHookPhaseSpike: inst=%d frame=%u totalMs=%.3f initMs=%.3f startSyncMs=%.3f loadStateMs=%.3f runtimeConfigMs=%.3f probeRestoreMs=%.3f jitPatchMs=%.3f rollbackMs=%.3f bootMs=%.3f patchMs=%.3f packetBridgeSetupMs=%.3f testSnapMs=%.3f setupMs=%.3f actorStateMs=%.3f barrierMs=%.3f checkpointMs=%.3f scratchMs=%.3f networkMs=%.3f gateMs=%.3f remoteWaitMs=%.3f tailMs=%.3f\n",
             InstanceID,
             Frame,
             static_cast<double>(totalUs) / 1000.0,
             static_cast<double>(InitUs) / 1000.0,
+            static_cast<double>(StartSyncUs) / 1000.0,
+            static_cast<double>(LoadStateUs) / 1000.0,
+            static_cast<double>(RuntimeConfigUs) / 1000.0,
+            static_cast<double>(ProbeRestoreUs) / 1000.0,
+            static_cast<double>(JitPatchUs) / 1000.0,
+            static_cast<double>(RollbackUs) / 1000.0,
+            static_cast<double>(BootUs) / 1000.0,
+            static_cast<double>(PatchUs) / 1000.0,
+            static_cast<double>(PacketBridgeSetupUs) / 1000.0,
+            static_cast<double>(TestSnapUs) / 1000.0,
             static_cast<double>(SetupUs) / 1000.0,
             static_cast<double>(ActorStateUs) / 1000.0,
             static_cast<double>(BarrierUs) / 1000.0,
@@ -15367,6 +15436,7 @@ public:
             static_cast<double>(GateUs) / 1000.0,
             static_cast<double>(RemoteWaitUs) / 1000.0,
             static_cast<double>(tailUs) / 1000.0);
+        std::fflush(stdout);
     }
 
     void SetFrame(melonDS::u32 frame)
@@ -15385,6 +15455,16 @@ public:
         switch (phase)
         {
         case Phase::Init: InitUs += elapsedUs; break;
+        case Phase::StartSync: StartSyncUs += elapsedUs; break;
+        case Phase::LoadState: LoadStateUs += elapsedUs; break;
+        case Phase::RuntimeConfig: RuntimeConfigUs += elapsedUs; break;
+        case Phase::ProbeRestore: ProbeRestoreUs += elapsedUs; break;
+        case Phase::JitPatch: JitPatchUs += elapsedUs; break;
+        case Phase::Rollback: RollbackUs += elapsedUs; break;
+        case Phase::Boot: BootUs += elapsedUs; break;
+        case Phase::Patch: PatchUs += elapsedUs; break;
+        case Phase::PacketBridgeSetup: PacketBridgeSetupUs += elapsedUs; break;
+        case Phase::TestSnap: TestSnapUs += elapsedUs; break;
         case Phase::Setup: SetupUs += elapsedUs; break;
         case Phase::ActorState: ActorStateUs += elapsedUs; break;
         case Phase::Barrier: BarrierUs += elapsedUs; break;
@@ -15412,6 +15492,16 @@ private:
     Clock::time_point Start;
     Clock::time_point Last;
     long long InitUs = 0;
+    long long StartSyncUs = 0;
+    long long LoadStateUs = 0;
+    long long RuntimeConfigUs = 0;
+    long long ProbeRestoreUs = 0;
+    long long JitPatchUs = 0;
+    long long RollbackUs = 0;
+    long long BootUs = 0;
+    long long PatchUs = 0;
+    long long PacketBridgeSetupUs = 0;
+    long long TestSnapUs = 0;
     long long SetupUs = 0;
     long long ActorStateUs = 0;
     long long BarrierUs = 0;
@@ -15442,21 +15532,27 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         }
         WaitForMatchSeedIfNeeded();
     }
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::StartSync);
 
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
         LoadState(instanceID, inputFrame, nds);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::LoadState);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ApplyMvlRuntimeConfigIfNeeded(nds);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::RuntimeConfig);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         RestoreRollbackCheckpointForProbeIfNeeded(instanceID, inputFrame, nds);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::ProbeRestore);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ApplyPacketBridgeJitHelperPatchIfNeeded(instanceID, inputFrame, nds);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::JitPatch);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         RollbackResimulateIfNeeded(instanceID, inputFrame, nds);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Rollback);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         InjectDirectMvlBootCall(instanceID, inputFrame, nds);
@@ -15464,12 +15560,14 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         RestartMvlAfterResultIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         InjectCourseSelectFactoryCall(instanceID, inputFrame, nds);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Boot);
 
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyMemPatch(instanceID, inputFrame, nds);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ApplyNetRandomPatch(instanceID, inputFrame, nds);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Patch);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
     {
@@ -15488,6 +15586,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         ForceNSMLStagePacketWordsIfNeeded(inputFrame, nds);
         ForceNSMLGameLocalPlayerIDIfNeeded(inputFrame, nds);
     }
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::PacketBridgeSetup);
 
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyVsStarSnap(instanceID, inputFrame, nds);
@@ -15497,6 +15596,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyPlayerStickToStar(instanceID, inputFrame, nds);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::TestSnap);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerCountIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)

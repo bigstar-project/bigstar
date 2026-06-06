@@ -191,6 +191,11 @@ if ($RollbackInputWaitUs -gt 0) {
 } else {
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_INPUT_WAIT_US -ErrorAction SilentlyContinue
 }
+if ($Rollback -and $RollbackBackend -match "^(tinycorepreimage|nsmbtinycore|nsmb-tiny-core|nsmbcoreranges|nsmb-core-ranges)$") {
+    $env:MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
+} else {
+    Remove-Item Env:\MELONDS_NSML_SUPPRESS_PU_DEBUG -ErrorAction SilentlyContinue
+}
 if ($NetworkPumpThread) {
     $env:MELONDS_NSML_NET_PUMP_THREAD = "1"
     $env:MELONDS_NSML_NET_PUMP_SLEEP_US = "$NetworkPumpSleepUs"
