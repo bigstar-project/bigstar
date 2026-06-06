@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "NSMB Mario vs Luigi Online",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "identifier": "dev.melonds.nsmb-mvl",
   "build": {
     "beforeDevCommand": "corepack pnpm vite:dev",
@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "NSMB Mario vs Luigi Online",
-        "width": 980,
-        "height": 720,
-        "minWidth": 860,
-        "minHeight": 620
+        "width": 1440,
+        "height": 900,
+        "minWidth": 920,
+        "minHeight": 680
       }
     ]
   },
@@ -33,6 +33,17 @@
     "resources": {
       "../../../tests/nsmb_us_direct_mvl_minimal_bootstrap.inputs": "resources/nsmb_us_direct_mvl_minimal_bootstrap.inputs",
       "../../../tools/nsmb-mvl-rom/resources/symbols9.x": "resources/symbols9.x"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE2MkQwMjI0MkE0QTg3MTgKUldRWWgwb3FKQUl0RnFzVDRZUHZGMldCc2NwVTdsRlBpWit6bGxiak9DeGxiUTY4YU9hRFlkYW4K",
+      "endpoints": [
+        "https://github.com/uniunitaro/nsmb-mvl-online/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

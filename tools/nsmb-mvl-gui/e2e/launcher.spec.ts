@@ -1,0 +1,261 @@
+import { expect, type Page, test } from '@playwright/test';
+
+const settings = {
+  course_mode: 'random',
+  wins: 3,
+  big_stars: 10,
+  lives: '3',
+  match_seed: '123',
+};
+
+async function installGuiDriver(
+  page: Page,
+  options: {
+    inputConfigOpened?: boolean;
+    romsPrepared?: boolean;
+  } = {},
+) {
+  await page.addInitScript(
+    ({ inputConfigOpened, romsPrepared }) => {
+      const state = {
+        active: false,
+        inputConfigOpened,
+        lastLogDir: null as string | null,
+        romsPrepared,
+      };
+      const calls: { args: unknown[]; name: string }[] = [];
+
+      Object.assign(window, {
+        __NSMB_MVL_E2E__: { calls, state },
+        __TAURI_INTERNALS__: {
+          invoke: (command: string, args: Record<string, unknown> = {}) => {
+            if (command.startsWith('plugin:updater|')) {
+              return null;
+            }
+            if (command === 'ensure_roms') {
+              calls.push({ args: [args.request], name: command });
+              return {
+                client_rom: 'C:\\roms\\client.nds',
+                generated: false,
+                host_rom: 'C:\\roms\\host.nds',
+              };
+            }
+            if (command === 'generate_roms') {
+              calls.push({ args: [args.request], name: command });
+              state.romsPrepared = true;
+              return {
+                client_rom: 'C:\\roms\\client.nds',
+                generated: true,
+                host_rom: 'C:\\roms\\host.nds',
+              };
+            }
+            if (command === 'get_defaults') {
+              return {
+                base_rom_path: state.romsPrepared ? 'C:\\roms\\base.nds' : '',
+                client_rom_path: 'C:\\roms\\client.nds',
+                host_rom_path: 'C:\\roms\\host.nds',
+                input_config_opened_once: state.inputConfigOpened,
+                port: 8165,
+                roms_prepared_once: state.romsPrepared,
+                room_code: 'test-room',
+                signal_url: 'ws://127.0.0.1:8787/session',
+              };
+            }
+            if (command === 'session_status') {
+              return {
+                active: state.active,
+                bridge: state.active ? 'running' : null,
+                diagnostics_error: null,
+                log_dir: state.lastLogDir,
+                melon: state.active ? 'running' : null,
+                webrtc: null,
+              };
+            }
+            if (command === 'open_log_dir') {
+              calls.push({ args: [args.path], name: command });
+              return null;
+            }
+            if (command === 'open_melonds_input_config') {
+              calls.push({ args: [], name: command });
+              state.inputConfigOpened = true;
+              return 3002;
+            }
+            if (command === 'preflight_check') {
+              calls.push({ args: [], name: command });
+              return {
+                bridge_path: 'bridge',
+                bridge_smoke: 'ok',
+                input_script: 'input',
+                melonds_path: 'melonDS',
+                symbols_file: 'symbols',
+              };
+            }
+            if (command === 'save_rom_paths') {
+              calls.push({ args: [args.request], name: command });
+              return null;
+            }
+            if (command === 'select_rom_file') {
+              return 'C:\\roms\\base.nds';
+            }
+            if (command === 'start_match') {
+              calls.push({ args: [args.request], name: command });
+              state.active = true;
+              state.lastLogDir = 'C:\\logs\\run1';
+              return {
+                bridge_pid: 200,
+                log_dir: state.lastLogDir,
+                melon_pid: 100,
+              };
+            }
+            if (command === 'stop_match') {
+              calls.push({ args: [], name: command });
+              state.active = false;
+              return null;
+            }
+            throw new Error(`unexpected Tauri command: ${command}`);
+          },
+        },
+      });
+    },
+    {
+      inputConfigOpened: options.inputConfigOpened ?? true,
+      romsPrepared: options.romsPrepared ?? true,
+    },
+  );
+}
+
+async function installRoomsApi(page: Page) {
+  await page.route('**/rooms', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      json: {
+        rooms: [
+          {
+            can_join: true,
+            created_at: 1,
+            expires_at: Date.now() + 600_000,
+            host_name: 'Host Player',
+            peer_count: 1,
+            room_id: 'room12345',
+            settings,
+            status: 'open',
+            updated_at: 1,
+          },
+        ],
+      },
+    });
+  });
+  await page.route('**/rooms/room12345/join', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      json: {
+        join_token: 'join-token',
+        room_id: 'room12345',
+        settings,
+        signal_url: 'ws://127.0.0.1:8787/session',
+      },
+    });
+  });
+}
+
+async function e2eCalls(page: Page) {
+  return page.evaluate(
+    () =>
+      (
+        window as typeof window & {
+          __NSMB_MVL_E2E__: { calls: { args: unknown[]; name: string }[] };
+        }
+      ).__NSMB_MVL_E2E__.calls,
+  );
+}
+
+function lastCall(calls: { args: unknown[]; name: string }[], name: string) {
+  return [...calls].reverse().find((call) => call.name === name);
+}
+
+test('初回セットアップでロム生成と入力設定を完了できる', async ({ page }) => {
+  await installGuiDriver(page, {
+    inputConfigOpened: false,
+    romsPrepared: false,
+  });
+  await installRoomsApi(page);
+
+  await page.goto('/');
+
+  await expect(
+    page.getByRole('heading', { name: '初回セットアップ' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'ROMを選んで生成' }).click();
+  await expect(page.getByText('完了').first()).toBeVisible();
+  await page.getByRole('button', { name: '入力設定を開く' }).click();
+
+  await expect(
+    page.getByRole('heading', { name: '初回セットアップ' }),
+  ).toBeHidden();
+  await expect(page.getByRole('heading', { name: '対戦' })).toBeVisible();
+
+  const calls = await e2eCalls(page);
+  expect(calls.map((call) => call.name)).toContain('generate_roms');
+  expect(calls.map((call) => call.name)).toContain('open_melonds_input_config');
+});
+
+test('手動接続でクライアント起動ペイロードを作れる', async ({ page }) => {
+  await installGuiDriver(page);
+  await installRoomsApi(page);
+
+  await page.goto('/');
+  await page.getByText('部屋コードとロールを編集').click();
+  await page.getByLabel('部屋コード').fill('manual-room');
+  await page.getByLabel('Match seed').fill('123');
+  await page
+    .locator('button[aria-pressed="false"]')
+    .filter({ hasText: 'answer側' })
+    .click();
+  await page.getByRole('button', { name: '対戦を開始' }).click();
+
+  await expect(page.getByText('起動済み melonDS:100 bridge:200')).toBeVisible();
+
+  const calls = await e2eCalls(page);
+  const start = lastCall(calls, 'start_match');
+  expect(start?.args[0]).toMatchObject({
+    port: 8165,
+    role: 'client',
+    room_code: 'manual-room',
+    rom_path: 'C:\\roms\\client.nds',
+    settings: {
+      big_stars: 10,
+      course_mode: 'random',
+      lives: '3',
+      match_seed: '123',
+      wins: 3,
+    },
+    signal_url: 'ws://127.0.0.1:8787/session',
+  });
+});
+
+test('公開ルーム参加でサーバー側の対戦設定を引き継いで起動する', async ({
+  page,
+}) => {
+  await installGuiDriver(page);
+  await installRoomsApi(page);
+
+  await page.goto('/');
+  await expect(page.getByText('Host Player')).toBeVisible();
+  await page.getByRole('button', { name: '参加' }).first().click();
+
+  await expect(page.getByText('起動済み melonDS:100 bridge:200')).toBeVisible();
+
+  const calls = await e2eCalls(page);
+  const start = lastCall(calls, 'start_match');
+  expect(start?.args[0]).toMatchObject({
+    role: 'client',
+    room_code: 'room12345',
+    rom_path: 'C:\\roms\\client.nds',
+    settings,
+    signal_url: 'ws://127.0.0.1:8787/session?token=join-token',
+  });
+});

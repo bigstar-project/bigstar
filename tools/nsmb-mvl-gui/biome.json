@@ -3,9 +3,14 @@
   "files": {
     "includes": [
       "src/**/*.{ts,tsx}",
+      "e2e/**/*.ts",
+      "!src/bindings.ts",
       "package.json",
       "tsconfig.json",
+      "playwright.config.ts",
       "vite.config.ts",
+      "vitest.browser.config.ts",
+      "vitest.config.ts",
       "biome.json",
       "README.md"
     ]

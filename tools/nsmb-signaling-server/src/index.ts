@@ -1,38 +1,54 @@
 import { DurableObject } from 'cloudflare:workers';
-
-type Role = 'offer' | 'answer';
+import { z } from 'zod';
+import { app } from './app';
+import {
+  type CreateRoomParams,
+  type LobbyObjectApi,
+  type MatchmakingEnv,
+  publicRoom,
+  type ReserveJoinParams,
+  type RoomObjectApi,
+  type RoomRecord,
+  roomRecordSchema,
+} from './do-api';
+import {
+  type Role,
+  type RoomSummary,
+  roleSchema,
+  roomSummarySchema,
+  type WsClientMessage,
+  wsClientMessageSchema,
+} from './schemas';
 
 type Attachment = {
   role: Role;
   session: string;
+  token: string | null;
   joinedAt: number;
+  legacy: boolean;
 };
 
-type Env = {
-  SIGNALING_ROOM: DurableObjectNamespace;
-  DEFAULT_ICE_SERVERS?: string;
-};
-
-type SignalMessage =
-  | {
-      type: 'sdp';
-      sdpType: 'offer' | 'answer';
-      sdp: string;
-    }
-  | {
-      type: 'candidate';
-      candidate: unknown;
-    }
-  | {
-      type: 'ping';
-    };
-
-type RelaySignalMessage = Exclude<SignalMessage, { type: 'ping' }> & {
+type RelaySignalMessage = Exclude<WsClientMessage, { type: 'ping' }> & {
   from: Role;
 };
 
-const VALID_SESSION = /^[A-Za-z0-9_-]{1,64}$/;
-const VALID_ROLES = new Set<Role>(['offer', 'answer']);
+type QueuedSignalMessage = {
+  message: RelaySignalMessage;
+  targetRole: Role;
+};
+
+const DEFAULT_STUN_SERVER = 'stun:stun.l.google.com:19302';
+const ROOM_KEY = 'room';
+const LOBBY_ROOMS_KEY = 'rooms';
+const QUEUED_SIGNALS_KEY = 'queued-signals';
+
+const attachmentSchema = z.object({
+  role: roleSchema,
+  session: z.string(),
+  token: z.string().nullable(),
+  joinedAt: z.number(),
+  legacy: z.boolean(),
+});
 
 function json(data: unknown, init?: ResponseInit): Response {
   return new Response(JSON.stringify(data), {
@@ -44,15 +60,9 @@ function json(data: unknown, init?: ResponseInit): Response {
   });
 }
 
-function parseRole(value: string | null): Role | null {
-  if (value === null) {
-    return null;
-  }
-  return VALID_ROLES.has(value as Role) ? (value as Role) : null;
-}
-
 function parseIceServers(value: string | undefined): string[] {
-  return (value ?? '')
+  const servers = value?.trim() ? value : DEFAULT_STUN_SERVER;
+  return servers
     .split(',')
     .map((server) => server.trim())
     .filter(Boolean);
@@ -62,114 +72,165 @@ function peerRole(role: Role): Role {
   return role === 'offer' ? 'answer' : 'offer';
 }
 
-function getAttachment(ws: WebSocket): Attachment | null {
-  const attachment = ws.deserializeAttachment();
-  if (
-    typeof attachment !== 'object' ||
-    attachment === null ||
-    !('role' in attachment) ||
-    !('session' in attachment)
-  ) {
-    return null;
-  }
-  return attachment as Attachment;
-}
-
 function send(ws: WebSocket, data: unknown): void {
   ws.send(JSON.stringify(data));
 }
 
+function getAttachment(ws: WebSocket): Attachment | null {
+  const parsed = attachmentSchema.safeParse(ws.deserializeAttachment());
+  return parsed.success ? parsed.data : null;
+}
+
+function peerCount(sockets: WebSocket[]): number {
+  return sockets.filter((socket) => getAttachment(socket) !== null).length;
+}
+
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
-
-    if (url.pathname === '/health') {
-      return json({ ok: true });
-    }
-
-    if (request.headers.get('Upgrade') !== 'websocket') {
-      return json(
-        {
-          error: 'expected websocket upgrade',
-          example: '/session?session=ROOM_ID&role=offer',
-        },
-        { status: 426 },
-      );
-    }
-
-    const session = url.searchParams.get('session');
-    const role = parseRole(url.searchParams.get('role'));
-    if (session === null || !VALID_SESSION.test(session)) {
-      return json(
-        { error: 'session must match ^[A-Za-z0-9_-]{1,64}$' },
-        { status: 400 },
-      );
-    }
-    if (role === null) {
-      return json({ error: 'role must be offer or answer' }, { status: 400 });
-    }
-
-    const id = env.SIGNALING_ROOM.idFromName(session);
-    const room = env.SIGNALING_ROOM.get(id);
-    return room.fetch(request);
+  fetch(request: Request, env: MatchmakingEnv, ctx: ExecutionContext) {
+    return app.fetch(request, env, ctx);
   },
-};
+} satisfies ExportedHandler<MatchmakingEnv>;
 
-export class SignalingRoom extends DurableObject<Env> {
-  private readonly pendingSignals = new Map<Role, RelaySignalMessage[]>();
+export class SignalingRoom
+  extends DurableObject<MatchmakingEnv>
+  implements RoomObjectApi
+{
+  async createRoom(params: CreateRoomParams): Promise<RoomRecord> {
+    const existing = await this.ctx.storage.get<RoomRecord>(ROOM_KEY);
+    if (existing && existing.status !== 'closed') {
+      throw new Error('room already exists');
+    }
+    const room = roomRecordSchema.parse({
+      room_id: params.room_id,
+      host_name: params.host_name,
+      host_token: params.host_token,
+      join_token: null,
+      status: 'open',
+      settings: params.settings,
+      created_at: params.now,
+      updated_at: params.now,
+      expires_at: params.expires_at,
+      can_join: true,
+      peer_count: 0,
+    });
+    await this.ctx.storage.put(ROOM_KEY, room);
+    return room;
+  }
+
+  async reserveJoin(params: ReserveJoinParams): Promise<RoomRecord> {
+    const room = await this.requireRoom(params.now);
+    if (room.status !== 'open') {
+      throw new Error('room is not joinable');
+    }
+    const next = roomRecordSchema.parse({
+      ...room,
+      status: 'joining',
+      join_token: params.join_token,
+      updated_at: params.now,
+      can_join: false,
+    });
+    await this.ctx.storage.put(ROOM_KEY, next);
+    return next;
+  }
+
+  async getRoom(now: number): Promise<RoomRecord | null> {
+    const room = await this.ctx.storage.get<RoomRecord>(ROOM_KEY);
+    if (!room || room.status === 'closed' || room.expires_at <= now) {
+      return null;
+    }
+    return room;
+  }
+
+  async closeRoom(now: number): Promise<RoomRecord | null> {
+    const room = await this.ctx.storage.get<RoomRecord>(ROOM_KEY);
+    if (!room) {
+      return null;
+    }
+    const next = roomRecordSchema.parse({
+      ...room,
+      status: 'closed',
+      updated_at: now,
+      can_join: false,
+    });
+    await this.ctx.storage.put(ROOM_KEY, next);
+    return next;
+  }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const session = url.searchParams.get('session');
-    const role = parseRole(url.searchParams.get('role'));
-
     if (request.headers.get('Upgrade') !== 'websocket') {
       return json({ error: 'expected websocket upgrade' }, { status: 426 });
     }
-    if (session === null || !VALID_SESSION.test(session) || role === null) {
+
+    const session =
+      url.searchParams.get('room') ?? url.searchParams.get('session');
+    const role = roleSchema.safeParse(url.searchParams.get('role'));
+    const token = url.searchParams.get('token');
+    if (!session || !role.success) {
       return json({ error: 'invalid session or role' }, { status: 400 });
     }
 
-    const existing = this.getSocketByRole(role);
+    const room = await this.ctx.storage.get<RoomRecord>(ROOM_KEY);
+    const legacy = room === undefined;
+    if (!legacy) {
+      const expectedToken =
+        role.data === 'offer' ? room.host_token : room.join_token;
+      if (!expectedToken || token !== expectedToken) {
+        return json({ error: 'invalid room token' }, { status: 403 });
+      }
+      if (room.status === 'closed' || room.expires_at <= Date.now()) {
+        return json({ error: 'room is closed' }, { status: 410 });
+      }
+    }
+
+    const existing = this.getSocketByRole(role.data);
     if (existing !== null) {
       return json(
-        { error: `role ${role} is already connected` },
+        { error: `role ${role.data} is already connected` },
         { status: 409 },
       );
     }
 
-    const webSocketPair = new WebSocketPair();
-    const [client, server] = Object.values(webSocketPair) as [
-      WebSocket,
-      WebSocket,
-    ];
-
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment({
-      role,
+      role: role.data,
       session,
+      token,
       joinedAt: Date.now(),
+      legacy,
     } satisfies Attachment);
-    if (this.getSockets().length === 1) {
-      this.pendingSignals.clear();
-    }
 
+    const sockets = this.ctx.getWebSockets();
+    const count = peerCount(sockets);
+    console.log('signaling join', {
+      session,
+      role: role.data,
+      peerCount: count,
+    });
     send(server, {
       type: 'hello',
-      role,
+      role: role.data,
       session,
-      peerCount: this.getSockets().length,
+      peerCount: count,
       iceServers: parseIceServers(this.env.DEFAULT_ICE_SERVERS),
+      settings: room?.settings,
     });
     this.broadcast(
       {
         type: 'peer-joined',
-        role,
-        peerCount: this.getSockets().length,
+        role: role.data,
+        peerCount: count,
       },
       server,
     );
-    this.flushPending(role, server);
+
+    if (this.getSocketByRole('offer') && this.getSocketByRole('answer')) {
+      await this.markConnected();
+      this.broadcast({ type: 'ready-for-offer', peerCount: 2 });
+    }
+    await this.flushQueuedSignals(role.data);
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -180,34 +241,50 @@ export class SignalingRoom extends DurableObject<Env> {
       ws.close(1011, 'missing websocket attachment');
       return;
     }
-
     if (typeof message !== 'string') {
       send(ws, { type: 'error', error: 'binary messages are not supported' });
       return;
     }
-
-    const parsed = this.parseMessage(ws, message);
-    if (parsed === null) {
+    let rawMessage: unknown;
+    try {
+      rawMessage = JSON.parse(message);
+    } catch {
+      send(ws, { type: 'error', error: 'invalid json' });
       return;
     }
-
-    if (parsed.type === 'ping') {
+    const parsed = wsClientMessageSchema.safeParse(rawMessage);
+    if (!parsed.success) {
+      send(ws, { type: 'error', error: 'unsupported message' });
+      return;
+    }
+    if (parsed.data.type === 'ping') {
       send(ws, { type: 'pong' });
       return;
     }
 
     const targetRole = peerRole(attachment.role);
-    const relayMessage = {
-      ...parsed,
+    const relay: RelaySignalMessage = {
+      ...parsed.data,
       from: attachment.role,
     };
     const target = this.getSocketByRole(targetRole);
     if (target === null) {
-      this.enqueuePending(targetRole, relayMessage);
+      await this.queueSignal(targetRole, relay);
+      console.log('signaling queued relay', {
+        session: attachment.session,
+        from: attachment.role,
+        to: targetRole,
+        type: parsed.data.type,
+      });
       return;
     }
-
-    send(target, relayMessage);
+    console.log('signaling relay', {
+      session: attachment.session,
+      from: attachment.role,
+      to: targetRole,
+      type: parsed.data.type,
+    });
+    send(target, relay);
   }
 
   async webSocketClose(ws: WebSocket) {
@@ -215,62 +292,55 @@ export class SignalingRoom extends DurableObject<Env> {
     if (attachment === null) {
       return;
     }
+    const count = peerCount(this.ctx.getWebSockets());
+    console.log('signaling close', {
+      session: attachment.session,
+      role: attachment.role,
+      peerCount: count,
+    });
     this.broadcast(
       {
         type: 'peer-left',
         role: attachment.role,
-        peerCount: this.getSockets().length,
+        peerCount: count,
       },
       ws,
     );
+    if (!attachment.legacy) {
+      await this.closeRoom(Date.now());
+      await this.env.LOBBY.get(this.env.LOBBY.idFromName('global')).removeRoom(
+        attachment.session,
+      );
+    }
   }
 
-  private parseMessage(ws: WebSocket, message: string): SignalMessage | null {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(message);
-    } catch {
-      send(ws, { type: 'error', error: 'invalid json' });
-      return null;
+  private async requireRoom(now: number): Promise<RoomRecord> {
+    const room = await this.getRoom(now);
+    if (room === null) {
+      throw new Error('room not found');
     }
-
-    if (typeof parsed !== 'object' || parsed === null || !('type' in parsed)) {
-      send(ws, { type: 'error', error: 'message type is required' });
-      return null;
-    }
-
-    const value = parsed as Partial<SignalMessage>;
-    if (value.type === 'ping') {
-      return { type: 'ping' };
-    }
-    if (
-      value.type === 'sdp' &&
-      (value.sdpType === 'offer' || value.sdpType === 'answer') &&
-      typeof value.sdp === 'string'
-    ) {
-      return {
-        type: 'sdp',
-        sdpType: value.sdpType,
-        sdp: value.sdp,
-      };
-    }
-    if (value.type === 'candidate' && 'candidate' in value) {
-      return {
-        type: 'candidate',
-        candidate: value.candidate,
-      };
-    }
-
-    send(ws, { type: 'error', error: 'unsupported message' });
-    return null;
+    return room;
   }
 
-  private getSockets(): WebSocket[] {
-    return this.ctx.getWebSockets();
+  private async markConnected(): Promise<void> {
+    const room = await this.ctx.storage.get<RoomRecord>(ROOM_KEY);
+    if (!room || room.status === 'connected') {
+      return;
+    }
+    const next = roomRecordSchema.parse({
+      ...room,
+      status: 'connected',
+      updated_at: Date.now(),
+      can_join: false,
+    });
+    await this.ctx.storage.put(ROOM_KEY, next);
+    await this.env.LOBBY.get(this.env.LOBBY.idFromName('global')).upsertRoom(
+      publicRoom(next, 2),
+    );
   }
 
   private getSocketByRole(role: Role): WebSocket | null {
-    for (const socket of this.getSockets()) {
+    for (const socket of this.ctx.getWebSockets()) {
       const attachment = getAttachment(socket);
       if (attachment?.role === role) {
         return socket;
@@ -279,31 +349,83 @@ export class SignalingRoom extends DurableObject<Env> {
     return null;
   }
 
-  private enqueuePending(role: Role, message: RelaySignalMessage): void {
-    const queue = this.pendingSignals.get(role) ?? [];
-    queue.push(message);
-    while (queue.length > 64) {
-      queue.shift();
-    }
-    this.pendingSignals.set(role, queue);
+  private async queueSignal(
+    targetRole: Role,
+    message: RelaySignalMessage,
+  ): Promise<void> {
+    const queued =
+      (await this.ctx.storage.get<QueuedSignalMessage[]>(QUEUED_SIGNALS_KEY)) ??
+      [];
+    queued.push({ message, targetRole });
+    await this.ctx.storage.put(QUEUED_SIGNALS_KEY, queued);
   }
 
-  private flushPending(role: Role, ws: WebSocket): void {
-    const queue = this.pendingSignals.get(role);
-    if (queue === undefined) {
+  private async flushQueuedSignals(role: Role): Promise<void> {
+    const queued =
+      (await this.ctx.storage.get<QueuedSignalMessage[]>(QUEUED_SIGNALS_KEY)) ??
+      [];
+    if (queued.length === 0) {
       return;
     }
-    for (const message of queue) {
-      send(ws, message);
+    const target = this.getSocketByRole(role);
+    if (target === null) {
+      return;
     }
-    this.pendingSignals.delete(role);
+    const remaining: QueuedSignalMessage[] = [];
+    for (const item of queued) {
+      if (item.targetRole === role) {
+        send(target, item.message);
+      } else {
+        remaining.push(item);
+      }
+    }
+    await this.ctx.storage.put(QUEUED_SIGNALS_KEY, remaining);
   }
 
   private broadcast(data: unknown, except?: WebSocket): void {
-    for (const socket of this.getSockets()) {
+    for (const socket of this.ctx.getWebSockets()) {
       if (socket !== except) {
         send(socket, data);
       }
     }
+  }
+}
+
+export class LobbyObject
+  extends DurableObject<MatchmakingEnv>
+  implements LobbyObjectApi
+{
+  async listRooms(now: number): Promise<RoomSummary[]> {
+    const rooms = await this.readRooms();
+    const fresh = Object.fromEntries(
+      Object.entries(rooms).filter(
+        ([, room]) =>
+          room.status !== 'closed' && room.expires_at > now && room.can_join,
+      ),
+    );
+    if (Object.keys(fresh).length !== Object.keys(rooms).length) {
+      await this.ctx.storage.put(LOBBY_ROOMS_KEY, fresh);
+    }
+    return Object.values(fresh).sort((a, b) => b.created_at - a.created_at);
+  }
+
+  async upsertRoom(room: RoomSummary): Promise<void> {
+    const rooms = await this.readRooms();
+    rooms[room.room_id] = roomSummarySchema.parse(room);
+    await this.ctx.storage.put(LOBBY_ROOMS_KEY, rooms);
+  }
+
+  async removeRoom(roomId: string): Promise<void> {
+    const rooms = await this.readRooms();
+    delete rooms[roomId];
+    await this.ctx.storage.put(LOBBY_ROOMS_KEY, rooms);
+  }
+
+  private async readRooms(): Promise<Record<string, RoomSummary>> {
+    return (
+      (await this.ctx.storage.get<Record<string, RoomSummary>>(
+        LOBBY_ROOMS_KEY,
+      )) ?? {}
+    );
   }
 }

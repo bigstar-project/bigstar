@@ -13,7 +13,18 @@
     "noEmit": true,
     "strict": true,
     "noUnusedLocals": true,
-    "noUnusedParameters": true
+    "noUnusedParameters": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
-  "include": ["src"]
+  "include": [
+    "e2e",
+    "playwright.config.ts",
+    "src",
+    "styled-system",
+    "vitest.browser.config.ts",
+    "vitest.config.ts"
+  ]
 }

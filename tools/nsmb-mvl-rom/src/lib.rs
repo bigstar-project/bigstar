@@ -82,6 +82,15 @@ struct Overlay {
     data: Vec<u8>,
 }
 
+struct DirectMvlConfig {
+    stage: u8,
+    player_id: u8,
+    scene_settings: u32,
+    initial_lives: u32,
+    life_mode_selector: u32,
+    big_star_selector: u32,
+}
+
 pub fn generate_stable_roms(options: &StableRomOptions) -> Result<StableRomResult> {
     if !options.source_rom.exists() {
         bail!("source ROM not found: {}", options.source_rom.display());
@@ -103,30 +112,28 @@ pub fn generate_stable_roms(options: &StableRomOptions) -> Result<StableRomResul
     let base = RomImage::load(&options.source_rom)?;
 
     let mut host = base.clone();
-    patch_direct_mvl_entry(
-        &mut host,
-        &symbols,
-        options.stage,
-        0,
+    let host_config = DirectMvlConfig {
+        stage: options.stage,
+        player_id: 0,
         scene_settings,
         initial_lives,
         life_mode_selector,
         big_star_selector,
-    )?;
+    };
+    patch_direct_mvl_entry(&mut host, &symbols, &host_config)?;
     patch_wifi_communicating_consoles(&mut host, 2)?;
     host.save(&options.host_rom)?;
 
     let mut client = base;
-    patch_direct_mvl_entry(
-        &mut client,
-        &symbols,
-        options.stage,
-        1,
+    let client_config = DirectMvlConfig {
+        stage: options.stage,
+        player_id: 1,
         scene_settings,
         initial_lives,
         life_mode_selector,
         big_star_selector,
-    )?;
+    };
+    patch_direct_mvl_entry(&mut client, &symbols, &client_config)?;
     patch_wifi_communicating_consoles(&mut client, 2)?;
     client.save(&options.client_rom)?;
 
@@ -331,7 +338,7 @@ impl RomImage {
         for (overlay, data) in self.overlays.iter().zip(&overlay_payloads) {
             let file_id = overlay.file_id as usize;
             let start = align_vec(&mut output, 0x200, 0);
-            output.extend_from_slice(&data);
+            output.extend_from_slice(data);
             fat[file_id] = (start as u32, output.len() as u32);
         }
 
@@ -356,13 +363,13 @@ impl RomImage {
         let banner_off = align_vec(&mut output, 0x200, 0);
         output.extend_from_slice(&self.banner);
 
-        for file_id in 0..self.files.len() {
+        for (file_id, fat_entry) in fat.iter_mut().enumerate().take(self.files.len()) {
             if overlay_file_ids.contains(&(file_id as u32)) {
                 continue;
             }
             let start = align_vec(&mut output, 0x200, 0xff);
             output.extend_from_slice(&self.files[file_id]);
-            fat[file_id] = (start as u32, output.len() as u32);
+            *fat_entry = (start as u32, output.len() as u32);
         }
 
         let rom_size = output.len() as u32;
@@ -506,12 +513,7 @@ fn compress_arm9_with_build_info(
 fn patch_direct_mvl_entry(
     rom: &mut RomImage,
     symbols: &BTreeMap<String, u32>,
-    stage: u8,
-    player_id: u8,
-    scene_settings: u32,
-    initial_lives: u32,
-    life_mode_selector: u32,
-    big_star_selector: u32,
+    config: &DirectMvlConfig,
 ) -> Result<()> {
     patch_arm9_words(rom, 0x0201_3428, &[encode_mov_imm(12, 6)?])?;
 
@@ -526,12 +528,7 @@ fn patch_direct_mvl_entry(
         update_addr,
         symbol(symbols, "_ZN4Game9loadLevelEtmhhhhhhhhhhhhhhm")?,
         symbol(symbols, "_ZN14VSConnectScene19loadMvsLFilesThreadEv")?,
-        stage,
-        player_id,
-        scene_settings,
-        initial_lives,
-        life_mode_selector,
-        big_star_selector,
+        config,
     )?;
     patch_overlay_words(rom, update_addr, &stub)?;
 
@@ -554,27 +551,22 @@ fn build_direct_loadlevel_stub(
     start_addr: u32,
     load_level_addr: u32,
     load_mvl_files_after_addr: u32,
-    stage: u8,
-    player_id: u8,
-    force_scene_settings: u32,
-    initial_lives: u32,
-    life_mode_selector: u32,
-    big_star_selector: u32,
+    config: &DirectMvlConfig,
 ) -> Result<Vec<u32>> {
     let stack_values = [
-        0,                // act
-        player_id as u32, // playerID
-        3,                // playerMask
-        0,                // character1
-        1,                // character2
-        0,                // powerup
-        0xff,             // entrance
-        1,                // flag
-        0,                // unused1
-        0,                // controlOptions
-        0,                // unused2
-        0,                // challengeMode
-        0xffff_ffff,      // rngSeed: use network/random state
+        0,                       // act
+        config.player_id as u32, // playerID
+        3,                       // playerMask
+        0,                       // character1
+        1,                       // character2
+        0,                       // powerup
+        0xff,                    // entrance
+        1,                       // flag
+        0,                       // unused1
+        0,                       // controlOptions
+        0,                       // unused2
+        0,                       // challengeMode
+        0xffff_ffff,             // rngSeed: use network/random state
     ];
 
     let mut words = vec![
@@ -606,7 +598,7 @@ fn build_direct_loadlevel_stub(
     words.push(encode_mov_imm(0, 0x0f)?);
     words.push(encode_mov_imm(1, 1)?);
     words.push(encode_mov_imm(2, 9)?);
-    words.push(encode_mov_imm(3, stage as u32)?);
+    words.push(encode_mov_imm(3, config.stage as u32)?);
     words.push(with_cond(
         encode_ldr_imm(3, 4, MVL_RUNTIME_CONFIG_STAGE_OFFSET)?,
         0,
@@ -631,7 +623,7 @@ fn build_direct_loadlevel_stub(
     words.push(encode_cmp_reg(12, 2));
 
     emit_ldr_literal(&mut words, 0, 0x0208_8F38, 0xE);
-    emit_ldr_literal(&mut words, 1, force_scene_settings, 0xE);
+    emit_ldr_literal(&mut words, 1, config.scene_settings, 0xE);
     words.push(with_cond(
         encode_ldr_imm(1, 4, MVL_RUNTIME_CONFIG_SCENE_SETTINGS_OFFSET)?,
         0,
@@ -639,7 +631,7 @@ fn build_direct_loadlevel_stub(
     words.push(encode_str_imm(1, 0, 0)?);
 
     emit_ldr_literal(&mut words, 0, 0x0208_B364, 0xE);
-    words.push(encode_load_imm(1, initial_lives)?);
+    words.push(encode_load_imm(1, config.initial_lives)?);
     words.push(with_cond(
         encode_ldr_imm(1, 4, MVL_RUNTIME_CONFIG_INITIAL_LIVES_OFFSET)?,
         0,
@@ -648,7 +640,7 @@ fn build_direct_loadlevel_stub(
     words.push(encode_str_imm(1, 0, 4)?);
 
     emit_ldr_literal(&mut words, 0, 0x0215_C89C, 0xE);
-    words.push(encode_mov_imm(1, life_mode_selector)?);
+    words.push(encode_mov_imm(1, config.life_mode_selector)?);
     words.push(with_cond(
         encode_ldr_imm(1, 4, MVL_RUNTIME_CONFIG_LIFE_MODE_SELECTOR_OFFSET)?,
         0,
@@ -656,7 +648,7 @@ fn build_direct_loadlevel_stub(
     words.push(encode_strb_imm(1, 0, 0)?);
 
     emit_ldr_literal(&mut words, 0, 0x0215_C88C, 0xE);
-    words.push(encode_mov_imm(1, big_star_selector)?);
+    words.push(encode_mov_imm(1, config.big_star_selector)?);
     words.push(with_cond(
         encode_ldr_imm(1, 4, MVL_RUNTIME_CONFIG_BIG_STAR_SELECTOR_OFFSET)?,
         0,
@@ -677,7 +669,7 @@ fn build_direct_loadlevel_stub(
     words.push(encode_add_imm(2, 1, 0x14)?);
     words.push(encode_str_imm(2, 0, 4)?);
     emit_ldr_literal(&mut words, 0, 0x0208_87F0, 0xE);
-    words.push(encode_mov_imm(1, (player_id & 3) as u32)?);
+    words.push(encode_mov_imm(1, (config.player_id & 3) as u32)?);
     words.push(encode_str_imm(1, 0, 0)?);
     words.push(encode_add_sp_imm(0x38)?);
     words.push(encode_mov_imm(0, 1)?);
@@ -984,235 +976,8 @@ fn parse_u32(value: &str) -> Result<u32> {
     }
 }
 
+mod binary;
 #[cfg(test)]
-mod tests {
-    use super::{
-        big_star_selector, build_direct_loadlevel_stub, encode_load_imm, encode_str_imm,
-        initial_lives, life_mode_selector, stage_scene_settings,
-    };
+mod tests;
 
-    #[test]
-    fn stage_scene_settings_follow_mvl_course_ids() {
-        assert_eq!(stage_scene_settings(0).unwrap(), 0x00b4_ff00);
-        assert_eq!(stage_scene_settings(4).unwrap(), 0x00b8_ff00);
-        assert!(stage_scene_settings(5).is_err());
-    }
-
-    #[test]
-    fn initial_lives_keep_rules_separate_from_stage_settings() {
-        assert_eq!(initial_lives("3").unwrap(), 3);
-        assert_eq!(initial_lives("5").unwrap(), 5);
-        assert_eq!(initial_lives("endless").unwrap(), 3);
-        assert_eq!(life_mode_selector("3").unwrap(), 0);
-        assert_eq!(life_mode_selector("5").unwrap(), 0);
-        assert_eq!(life_mode_selector("endless").unwrap(), 2);
-    }
-
-    #[test]
-    fn big_star_targets_use_the_native_selector_table() {
-        assert_eq!(big_star_selector(3).unwrap(), 0);
-        assert_eq!(big_star_selector(5).unwrap(), 1);
-        assert_eq!(big_star_selector(10).unwrap(), 2);
-    }
-
-    #[test]
-    fn direct_loadlevel_uses_network_random_seed() {
-        let stub = build_direct_loadlevel_stub(
-            0x0215_0000,
-            0x0200_0000,
-            0x0210_0000,
-            2,
-            0,
-            0x00b6_ff00,
-            3,
-            0,
-            1,
-        )
-        .expect("build direct MvL stub");
-        let load_network_rng_seed = encode_load_imm(12, 0xffff_ffff).expect("encode rng seed");
-        let store_rng_seed = encode_str_imm(12, 13, 0x30).expect("encode rng seed store");
-
-        assert!(
-            stub.windows(2)
-                .any(|pair| pair == [load_network_rng_seed, store_rng_seed]),
-            "loadLevel rngSeed stack argument must be 0xffffffff so match-seeded Net/Game RNG is used"
-        );
-    }
-}
-
-fn read_banner(data: &[u8], off: usize) -> Result<Vec<u8>> {
-    let version = read_u16(data, off)? as usize;
-    let size = match version {
-        0x0001 => 0x840,
-        0x0002 => 0x940,
-        0x0003 => 0x1240,
-        _ => 0x840,
-    };
-    Ok(slice(data, off, size, "banner")?.to_vec())
-}
-
-fn slice<'a>(data: &'a [u8], off: usize, len: usize, label: &str) -> Result<&'a [u8]> {
-    data.get(off..off + len)
-        .ok_or_else(|| anyhow!("{label} slice out of range: off=0x{off:x} len=0x{len:x}"))
-}
-
-fn read_u16(data: &[u8], off: usize) -> Result<u16> {
-    Ok(u16::from_le_bytes(slice(data, off, 2, "u16")?.try_into()?))
-}
-
-fn read_u32(data: &[u8], off: usize) -> Result<u32> {
-    Ok(u32::from_le_bytes(slice(data, off, 4, "u32")?.try_into()?))
-}
-
-fn write_u16(data: &mut [u8], off: usize, value: u16) -> Result<()> {
-    data.get_mut(off..off + 2)
-        .ok_or_else(|| anyhow!("u16 write out of range: 0x{off:x}"))?
-        .copy_from_slice(&value.to_le_bytes());
-    Ok(())
-}
-
-fn write_u32(data: &mut [u8], off: usize, value: u32) -> Result<()> {
-    data.get_mut(off..off + 4)
-        .ok_or_else(|| anyhow!("u32 write out of range: 0x{off:x}"))?
-        .copy_from_slice(&value.to_le_bytes());
-    Ok(())
-}
-
-fn append_u32(out: &mut Vec<u8>, value: u32) {
-    out.extend_from_slice(&value.to_le_bytes());
-}
-
-fn align_vec(out: &mut Vec<u8>, alignment: usize, value: u8) -> usize {
-    let padding = (!out.len() + 1) & (alignment - 1);
-    out.resize(out.len() + padding, value);
-    out.len()
-}
-
-fn encode_mov_imm(rd: u8, imm: u32) -> Result<u32> {
-    Ok(0xE3A0_0000 | ((rd as u32) << 12) | encode_arm_imm12(imm)?)
-}
-
-fn encode_load_imm(rd: u8, imm: u32) -> Result<u32> {
-    encode_mov_imm(rd, imm).or_else(|_| {
-        let inverse = !imm;
-        Ok(0xE3E0_0000 | ((rd as u32) << 12) | encode_arm_imm12(inverse)?)
-    })
-}
-
-fn encode_arm_imm12(imm: u32) -> Result<u32> {
-    for rot in 0..16 {
-        let left = if rot == 0 {
-            imm
-        } else {
-            imm.rotate_left(rot * 2)
-        };
-        if left <= 0xff {
-            return Ok((rot << 8) | left);
-        }
-    }
-    bail!("immediate 0x{imm:x} is not encodable as ARM immediate")
-}
-
-fn encode_add_sp_imm(imm: u32) -> Result<u32> {
-    Ok(0xE28D_D000 | encode_arm_imm12(imm)?)
-}
-
-fn encode_add_imm(rd: u8, rn: u8, imm: u32) -> Result<u32> {
-    Ok(0xE280_0000 | ((rn as u32) << 16) | ((rd as u32) << 12) | encode_arm_imm12(imm)?)
-}
-
-fn encode_sub_sp_imm(imm: u32) -> Result<u32> {
-    Ok(0xE24D_D000 | encode_arm_imm12(imm)?)
-}
-
-fn encode_str_imm(rd: u8, rn: u8, off: u32) -> Result<u32> {
-    if off > 0xfff {
-        bail!("STR offset out of range: 0x{off:x}");
-    }
-    Ok(0xE580_0000 | ((rn as u32) << 16) | ((rd as u32) << 12) | off)
-}
-
-fn encode_strb_imm(rd: u8, rn: u8, off: u32) -> Result<u32> {
-    if off > 0xfff {
-        bail!("STRB offset out of range: 0x{off:x}");
-    }
-    Ok(0xE5C0_0000 | ((rn as u32) << 16) | ((rd as u32) << 12) | off)
-}
-
-fn encode_ldr_imm(rd: u8, rn: u8, off: u32) -> Result<u32> {
-    if off > 0xfff {
-        bail!("LDR offset out of range: 0x{off:x}");
-    }
-    Ok(0xE590_0000 | ((rn as u32) << 16) | ((rd as u32) << 12) | off)
-}
-
-fn encode_ldr_reg_lsl(rd: u8, rn: u8, rm: u8, shift: u8) -> Result<u32> {
-    if shift > 31 {
-        bail!("LDR shift out of range: {shift}");
-    }
-    Ok(0xE790_0000 | ((rn as u32) << 16) | ((rd as u32) << 12) | ((shift as u32) << 7) | rm as u32)
-}
-
-fn encode_cmp_imm(rn: u8, imm: u32) -> Result<u32> {
-    Ok(0xE350_0000 | ((rn as u32) << 16) | encode_arm_imm12(imm)?)
-}
-
-fn encode_cmp_reg(rn: u8, rm: u8) -> u32 {
-    0xE150_0000 | ((rn as u32) << 16) | rm as u32
-}
-
-fn encode_mov_reg(rd: u8, rm: u8) -> u32 {
-    0xE1A0_0000 | ((rd as u32) << 12) | rm as u32
-}
-
-fn encode_add_reg(rd: u8, rn: u8, rm: u8) -> u32 {
-    0xE080_0000 | ((rn as u32) << 16) | ((rd as u32) << 12) | rm as u32
-}
-
-fn encode_rsb_imm(rd: u8, rn: u8, imm: u32) -> Result<u32> {
-    Ok(0xE260_0000 | ((rn as u32) << 16) | ((rd as u32) << 12) | encode_arm_imm12(imm)?)
-}
-
-fn with_cond(word: u32, cond: u8) -> u32 {
-    (word & 0x0fff_ffff) | ((cond as u32 & 0xf) << 28)
-}
-
-fn encode_push(regmask: u32) -> u32 {
-    0xE92D_0000 | regmask
-}
-
-fn encode_bl(src_addr: u32, dst_addr: u32) -> Result<u32> {
-    encode_branch(0xEB00_0000, src_addr, dst_addr)
-}
-
-fn encode_b(src_addr: u32, dst_addr: u32) -> Result<u32> {
-    encode_branch(0xEA00_0000, src_addr, dst_addr)
-}
-
-fn encode_branch(opcode: u32, src_addr: u32, dst_addr: u32) -> Result<u32> {
-    let diff = dst_addr as i64 - (src_addr as i64 + 8);
-    if diff % 4 != 0 {
-        bail!("unaligned branch target 0x{dst_addr:08x} from 0x{src_addr:08x}");
-    }
-    let off = diff / 4;
-    if off < -(1 << 23) || off >= (1 << 23) {
-        bail!("branch target out of range 0x{dst_addr:08x} from 0x{src_addr:08x}");
-    }
-    Ok(opcode | (off as u32 & 0x00ff_ffff))
-}
-
-fn encode_ldr_pc_literal(
-    rd: u8,
-    instruction_addr: u32,
-    literal_addr: u32,
-    cond: u8,
-) -> Result<u32> {
-    let pc = instruction_addr + 8;
-    let off = literal_addr
-        .checked_sub(pc)
-        .ok_or_else(|| anyhow!("literal before instruction"))?;
-    if off > 0xfff || off % 4 != 0 {
-        bail!("LDR literal target 0x{literal_addr:08x} out of range from 0x{instruction_addr:08x}");
-    }
-    Ok(((cond as u32) << 28) | 0x059F_0000 | ((rd as u32) << 12) | off)
-}
+use binary::*;

@@ -36,6 +36,7 @@
 #include <QMimeData>
 #include <QVector>
 #include <QCommandLineParser>
+#include <QMetaObject>
 #include <QStandardPaths>
 #ifndef _WIN32
 #include <QGuiApplication>
@@ -481,6 +482,9 @@ int main(int argc, char** argv)
 
         if (options->fullscreen)
             win->toggleFullscreen();
+
+        if (options->openInputConfig)
+            QMetaObject::invokeMethod(win, "onOpenInputConfig", Qt::QueuedConnection);
     }
 
     int ret = melon.exec();

@@ -3,11 +3,16 @@ name = "nsmb-net-bridge"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+members = ["datachannel-wrapper"]
+resolver = "2"
+
 [features]
 default = []
 webrtc = [
     "dep:base64",
     "dep:datachannel-wrapper",
+    "dep:env_logger",
     "dep:futures-util",
     "dep:serde_json",
     "dep:tokio",
@@ -16,7 +21,8 @@ webrtc = [
 
 [dependencies]
 base64 = { version = "0.22", optional = true }
-datachannel-wrapper = { path = "../../external/tango/datachannel-wrapper", optional = true }
+datachannel-wrapper = { path = "datachannel-wrapper", optional = true }
+env_logger = { version = "0.11", optional = true }
 futures-util = { version = "0.3", optional = true }
 serde_json = { version = "1", optional = true }
 tokio = { version = "1", features = ["full"], optional = true }
