@@ -46,6 +46,8 @@ param(
     [int]$RollbackSettleFrames = 0,
     [switch]$IgnoreSpeculativeInputFields,
     [int]$GameStateTraceInterval = 30,
+    [int]$GameStateTraceStartFrame = 0,
+    [int]$GameStateTraceEndFrame = 0,
     [switch]$NoGameStateTrace,
     [switch]$StateSync,
     [switch]$StateApply,
@@ -293,7 +295,9 @@ if (-not $NoGameStateTrace) {
     $common += @(
         "-GameStateTrace",
         "-GameStateTraceExtended",
-        "-GameStateTraceInterval", "$GameStateTraceInterval"
+        "-GameStateTraceInterval", "$GameStateTraceInterval",
+        "-GameStateTraceStartFrame", "$GameStateTraceStartFrame",
+        "-GameStateTraceEndFrame", "$GameStateTraceEndFrame"
     )
 }
 if ($StateSync) {
