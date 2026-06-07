@@ -133,6 +133,7 @@ def main() -> int:
                 "enemy_goomba",
                 "enemy_koopa",
                 "platform",
+                "item_spawn_effect",
             ]
             if num(counts.get(name)) > 0
         )

@@ -199,6 +199,7 @@ constexpr melonDS::u16 kThwompObjectID = 0x0025;
 constexpr melonDS::u16 kThwompAltObjectID = 0x0026;
 constexpr melonDS::u16 kFirebarObjectID = 0x0041;
 constexpr melonDS::u16 kBobOmbObjectID = 0x0023;
+constexpr melonDS::u16 kItemSpawnEffectObjectID = 0x00F0;
 constexpr melonDS::u32 kNSMBProcessExecuteListAddr = 0x0208FB18;
 constexpr melonDS::u32 kNSMBProcessDeleteListAddr = 0x0208FB28;
 constexpr melonDS::u32 kNSMBProcessRenderListAddr = 0x0208FB38;
@@ -13777,6 +13778,8 @@ const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings)
         return "platform";
     if (objectID == kWarpEntranceObjectID)
         return "warp_entrance";
+    if (objectID == kItemSpawnEffectObjectID)
+        return "item_spawn_effect";
     if (objectID == kStageCameraObjectID)
         return "camera";
     if (objectID == kStageSceneObjectID)
@@ -13817,6 +13820,8 @@ melonDS::u32 AIObjectCategoryMask(const char* category)
     if (std::strcmp(category, "platform") == 0 ||
         std::strcmp(category, "warp_entrance") == 0)
         return 1u << 6;
+    if (std::strcmp(category, "item_spawn_effect") == 0)
+        return 1u << 7;
     if (std::strcmp(category, "camera") == 0 ||
         std::strcmp(category, "stage_scene") == 0 ||
         std::strcmp(category, "stage_fx") == 0 ||

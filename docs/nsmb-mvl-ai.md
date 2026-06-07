@@ -34,6 +34,7 @@
 - 完了: `scripts/nsmb_mvl_ai_catalog_objects.py` でJSONL内のactive objectを object ID/settings/category ごとに集計できるようにした。
 - 完了: playerの `collisionFlag` / `environmentFlag` を名前付き `contact` 状態へ展開し、接地、予測接地、天井、左右壁、水/液体/水没、流砂、ロープ/ポール、スパイク、コンベア、雪/砂/破壊地形、左右ラップをAI play logとCSV特徴量に保存するようにした。
 - 完了: playerごとの `screen.camera0/1` と `fallRisk` をAI play logへ追加した。画面X/Y、カメラ内判定、カメラ底までの距離、下端近接、カメラ下抜け、Y速度符号を保存し、穴/落下判断の前段特徴としてCSVへ展開する。
+- 完了: `scripts/nsmb_mvl_ai_render_playlog_svg.py` でJSONLの1フレームをplayer中心のSVGに描画できるようにした。表だけでなく、星、hazard、item、coin、敵、platform、unknown objectの相対配置を目視できる。
 
 ## AI Play Log
 
@@ -72,6 +73,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `enemy_koopa`
 - `platform`
 - `warp_entrance`
+- `item_spawn_effect`
 - `camera`
 - `stage_scene`
 - `stage_fx`
@@ -88,6 +90,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `python scripts\nsmb_mvl_ai_build_dataset.py <playlog.jsonl> <dataset.csv> --player 1 --require-player-found` で固定長特徴量へ変換する。
 - `python scripts\nsmb_mvl_ai_train_imitation.py <dataset.csv> <model.npz>` でキー入力の多ラベル分類モデルを学習する。
 - `python scripts\nsmb_mvl_ai_inspect_playlog.py <playlog.jsonl> --player 1` で、frame、入力、接地/壁/水などのcontact、player/相手/星/hazardの相対位置、可視X数、カテゴリ数を目視確認する。
+- `python scripts\nsmb_mvl_ai_render_playlog_svg.py <playlog.jsonl> <frame.svg> --player 1 --frame <frame>` で、player中心の相対配置をSVGとして目視確認する。
 - `python scripts\nsmb_mvl_ai_catalog_objects.py <playlog.jsonl>` で、未知objectの出現頻度と代表的な相対位置を確認し、カテゴリ付けを増やす。
 - その後、同じ観測schemaを使って自己対戦学習へ進む。
 - 強さ調整は、推論時に入力反応遅延、ランダムミス、action hold制限、近傍探索幅制限を入れる。
@@ -115,10 +118,13 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `logs/codex-ai-screenfall-smoke-20260607`: player screen/fallRisk追加後のrule AI remote smoke 1600F pass。`python scripts\nsmb_mvl_ai_inspect_playlog.py ... --player 1 --limit 10` pass。`y/bot` 列で screenY と camera bottom distance を確認し、frame 990 以降で `vy-` / `vy+` と接地状態が表に出ることを確認。
 - 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --require-player-found` pass、24行CSV生成。`self_screen0_x`、`self_screen0_y`、`self_camera_bottom_distance0`、`self_near_camera_bottom0`、`self_below_camera0`、`self_vel_y_positive/negative` の列追加を確認。
 - `python scripts\nsmb_mvl_ai_train_imitation.py logs\codex-ai-screenfall-smoke-20260607\ai-dataset-player1.csv logs\codex-ai-screenfall-smoke-20260607\ai-imitation-player1.npz --epochs 200 --lr 0.05` pass。24行の小データで学習と `.npz` 保存が動作することを再確認。
+- `logs/codex-ai-svg-smoke-20260607`: `item_spawn_effect` 分類とSVGレンダラ追加後のrule AI remote smoke 1600F pass。catalogで `0x0F0 settings=0x0109002F` が `item_spawn_effect` になることを確認。
+- `python scripts\nsmb_mvl_ai_render_playlog_svg.py logs\codex-ai-svg-smoke-20260607\ai-playlog.jsonl logs\codex-ai-svg-smoke-20260607\frame-1020-player1.svg --player 1 --frame 1020` pass。`frame-1020-player1.svg` を生成し、player中心の相対配置を目視確認できる成果物が作れることを確認。
+- 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --require-player-found` pass、24行CSV生成。`python scripts\nsmb_mvl_ai_train_imitation.py ... --epochs 200 --lr 0.05` pass。
 
 ## Next Actions
 
 - camera Y / player display Y の対応を解析し、完全な画面内判定を入れる。
 - 穴/落下死ライン、ブロック/アイテム箱、前方タイル地形サンプルをメモリから取れる場所を解析してAI play logへ足す。
 - 学習済み `.npz` をPoCまたは外部sidecarから推論して入力へ戻す経路を作る。
-- object categoryをログ実例で検証し、unknownの `0x021`、`0x145` とステージ固有objectの意味を詰める。
+- object categoryをログ実例で検証し、unknownの `0x021`、`0x145` とステージ固有objectの意味を詰める。`0x0F0` はrollback notes上のItem付随短命effectとして `item_spawn_effect` に分類した。

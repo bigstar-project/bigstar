@@ -56,6 +56,7 @@ CATEGORY_COUNT_NAMES = [
     "enemy_koopa",
     "platform",
     "warp_entrance",
+    "item_spawn_effect",
     "camera",
     "stage_scene",
     "stage_fx",
