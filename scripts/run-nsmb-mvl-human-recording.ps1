@@ -102,5 +102,5 @@ $session = [ordered]@{
 $session | ConvertTo-Json -Depth 6 | Set-Content -Path $sessionPath -Encoding UTF8
 
 Write-Host "Starting stage 0 human recording. log=$LogDir"
-Write-Host "After closing melonDS, run the commands in $sessionPath to create manifests and dataset."
+Write-Host "After closing melonDS, run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-nsmb-mvl-recording-postcommands.ps1 -Session `"$sessionPath`""
 & $manualScript @manualArgs

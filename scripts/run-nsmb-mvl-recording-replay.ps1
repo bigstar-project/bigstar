@@ -23,6 +23,10 @@ param(
     [switch]$IgnoreHash,
     [switch]$IgnoreObjectCounts,
     [switch]$CheckCategoryCounts,
+    [switch]$ScanFrames,
+    [string]$MismatchReportJson = "",
+    [string]$MismatchReportCsv = "",
+    [int]$MaxMismatchFrames = 20,
     [switch]$GenerateMvlConfiguredRoms,
     [switch]$AllowJit,
     [switch]$DryRun
@@ -244,6 +248,20 @@ $effectiveVerifySide = if ($VerifySide -ne "") {
     "host"
 }
 $actualPlayLog = if ($effectiveVerifySide -eq "client") { $clientAIPlayLog } else { $hostAIPlayLog }
+$effectiveMismatchReportJson = if ($MismatchReportJson -ne "") {
+    Resolve-RepoPath $MismatchReportJson
+} elseif ($ScanFrames) {
+    Join-Path $logRoot "replay-mismatch.json"
+} else {
+    ""
+}
+$effectiveMismatchReportCsv = if ($MismatchReportCsv -ne "") {
+    Resolve-RepoPath $MismatchReportCsv
+} elseif ($ScanFrames) {
+    Join-Path $logRoot "replay-mismatch.csv"
+} else {
+    ""
+}
 
 $splitScript = Join-Path $PSScriptRoot "run-nsmb-mvl-split-local-input-smoke.ps1"
 $splitArgs = @(
@@ -282,6 +300,9 @@ $plan = [ordered]@{
     verifySide = $effectiveVerifySide
     expectedPlayLog = Resolve-ManifestPath $playLogText $manifestDir
     actualPlayLog = $actualPlayLog
+    scanFrames = [bool]$ScanFrames
+    mismatchReportJson = $effectiveMismatchReportJson
+    mismatchReportCsv = $effectiveMismatchReportCsv
     logDir = $logRoot
     frames = $effectiveFrames
     stageScope = $stageScope
@@ -318,6 +339,10 @@ $verifyArgs = @(
 if ($IgnoreHash) { $verifyArgs += "--ignore-hash" }
 if ($IgnoreObjectCounts) { $verifyArgs += "--ignore-object-counts" }
 if ($CheckCategoryCounts) { $verifyArgs += "--check-category-counts" }
+if ($ScanFrames) { $verifyArgs += "--scan-frames" }
+if ($effectiveMismatchReportJson -ne "") { $verifyArgs += @("--mismatch-report-json", $effectiveMismatchReportJson) }
+if ($effectiveMismatchReportCsv -ne "") { $verifyArgs += @("--mismatch-report-csv", $effectiveMismatchReportCsv) }
+if ($MaxMismatchFrames -ne 20) { $verifyArgs += @("--max-mismatch-frames", "$MaxMismatchFrames") }
 if ($CheckpointInterval -gt 0) {
     $verifyArgs += @(
         "--checkpoint-interval", "$CheckpointInterval",
