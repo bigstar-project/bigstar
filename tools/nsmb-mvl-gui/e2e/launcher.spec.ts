@@ -6,6 +6,9 @@ const settings = {
   big_stars: 10,
   lives: '3',
   match_seed: '123',
+  input_delay_frames: 4,
+  input_max_frame_lead: 4,
+  rollback_enabled: false,
 };
 
 async function installGuiDriver(
@@ -229,8 +232,11 @@ test('手動接続でクライアント起動ペイロードを作れる', async
     settings: {
       big_stars: 10,
       course_mode: 'random',
+      input_delay_frames: 4,
+      input_max_frame_lead: 4,
       lives: '3',
       match_seed: '123',
+      rollback_enabled: false,
       wins: 3,
     },
     signal_url: 'ws://127.0.0.1:8787/session',

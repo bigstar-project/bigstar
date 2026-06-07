@@ -32,4 +32,7 @@ export type FormState = {
   bigStars: number;
   lives: Lives;
   matchSeed: string;
+  inputDelayFrames: number;
+  inputMaxFrameLead: number;
+  rollbackEnabled: boolean;
 };

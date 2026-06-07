@@ -4,6 +4,8 @@ import { check } from '@tauri-apps/plugin-updater';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   currentSettings,
+  defaultInputDelayFrames,
+  defaultInputMaxFrameLead,
   generateSeed,
   initialForm,
   processExited,
@@ -211,6 +213,9 @@ export function useLauncherController() {
           bigStars: initialForm.bigStars,
           lives: initialForm.lives,
           matchSeed: String(generateSeed()),
+          inputDelayFrames: initialForm.inputDelayFrames,
+          inputMaxFrameLead: initialForm.inputMaxFrameLead,
+          rollbackEnabled: initialForm.rollbackEnabled,
         });
         setOnboardingRomsPrepared(defaults.roms_prepared_once);
         setOnboardingInputConfigOpened(defaults.input_config_opened_once);
@@ -453,6 +458,11 @@ export function useLauncherController() {
         bigStars: response.settings.big_stars,
         lives: response.settings.lives,
         matchSeed: response.settings.match_seed,
+        inputDelayFrames:
+          response.settings.input_delay_frames ?? defaultInputDelayFrames,
+        inputMaxFrameLead:
+          response.settings.input_max_frame_lead ?? defaultInputMaxFrameLead,
+        rollbackEnabled: response.settings.rollback_enabled ?? false,
       };
       setForm(nextForm);
       await queryClient.invalidateQueries({ queryKey: ['matchmakingRooms'] });

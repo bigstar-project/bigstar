@@ -8,6 +8,7 @@ import {
   Heart,
   Play,
   RadioButton,
+  Rewind,
   Star,
   Stop,
   Trophy,
@@ -18,16 +19,28 @@ import { css, cx } from 'styled-system/css';
 import { token } from 'styled-system/tokens';
 import playerLBadge from '../assets/player-l.png';
 import playerMBadge from '../assets/player-m.png';
-import { RoleButton, SelectField, TextField } from '../components/Fields';
+import {
+  NumberField,
+  RoleButton,
+  SelectField,
+  TextField,
+} from '../components/Fields';
 import { SummaryItem } from '../components/SummaryItem';
 import { Button, CloseButton, Dialog, Tabs } from '../components/ui';
 import { WebRtcDiagnosticsPanel } from '../components/WebRtcDiagnosticsPanel';
+import {
+  defaultInputDelayFrames,
+  defaultInputMaxFrameLead,
+  rollbackInputDelayFrames,
+  rollbackInputMaxFrameLead,
+} from '../form';
 import type { CourseMode, FormState, Lives } from '../types';
 import { InfoPanel, LauncherCard, SmallInfoCard } from './LauncherCards';
 import {
   bigStarsOptions,
   courseOptions,
   livesOptions,
+  rollbackOptions,
   winsOptions,
 } from './options';
 import type {
@@ -313,6 +326,19 @@ function MatchSettingsFields({
   form: FormState;
   updateField: UpdateFormField;
 }) {
+  const updateRollback = (value: string) => {
+    const enabled = value === 'on';
+    updateField('rollbackEnabled', enabled);
+    updateField(
+      'inputDelayFrames',
+      enabled ? rollbackInputDelayFrames : defaultInputDelayFrames,
+    );
+    updateField(
+      'inputMaxFrameLead',
+      enabled ? rollbackInputMaxFrameLead : defaultInputMaxFrameLead,
+    );
+  };
+
   return (
     <div className={css({ display: 'grid', gap: '3' })}>
       <div
@@ -363,8 +389,51 @@ function MatchSettingsFields({
         placeholder="ランダム時は空でも自動生成"
         onChange={(value) => updateField('matchSeed', value)}
       />
+      <div
+        className={css({
+          display: 'grid',
+          gap: '3',
+          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+          '@media (max-width: 900px)': {
+            gridTemplateColumns: '1fr',
+          },
+        })}
+      >
+        <SelectField
+          icon={<Rewind size={18} weight="fill" />}
+          label="ロールバック"
+          options={rollbackOptions}
+          value={form.rollbackEnabled ? 'on' : 'off'}
+          onChange={updateRollback}
+        />
+        <NumberField
+          label="InputDelayFrames"
+          min={0}
+          max={16}
+          value={form.inputDelayFrames}
+          onChange={(value) =>
+            updateField('inputDelayFrames', clampNetplaySetting(value))
+          }
+        />
+        <NumberField
+          label="InputMaxFrameLead"
+          min={0}
+          max={16}
+          value={form.inputMaxFrameLead}
+          onChange={(value) =>
+            updateField('inputMaxFrameLead', clampNetplaySetting(value))
+          }
+        />
+      </div>
     </div>
   );
+}
+
+function clampNetplaySetting(value: number) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.min(16, Math.max(0, Math.trunc(value)));
 }
 
 function ManualConnectionPanel({
@@ -635,7 +704,8 @@ function RoomList({
 }
 
 function formatRoomSettings(room: MatchmakingRoomsState['rooms'][number]) {
-  return `Course=${room.settings.course_mode} Wins=${room.settings.wins} Star=${room.settings.big_stars} Lives=${room.settings.lives}`;
+  const rollback = room.settings.rollback_enabled ? 'RB=on' : 'RB=off';
+  return `Course=${room.settings.course_mode} Wins=${room.settings.wins} Star=${room.settings.big_stars} Lives=${room.settings.lives} Delay=${room.settings.input_delay_frames} Lead=${room.settings.input_max_frame_lead} ${rollback}`;
 }
 
 function BattleLogPanel({

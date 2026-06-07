@@ -14,15 +14,21 @@ describe('フォーム補助関数', () => {
         ...initialForm,
         bigStars: 10,
         courseMode: 'select',
+        inputDelayFrames: 2,
+        inputMaxFrameLead: 2,
         lives: '5',
         matchSeed: ' 0x0e ',
+        rollbackEnabled: true,
         wins: 3,
       }),
     ).toEqual({
       big_stars: 10,
       course_mode: 'select',
+      input_delay_frames: 2,
+      input_max_frame_lead: 2,
       lives: '5',
       match_seed: '0x0e',
+      rollback_enabled: true,
       wins: 3,
     });
   });

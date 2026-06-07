@@ -1,5 +1,25 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
+## 2026-06-07 GUI rollback settings exposure
+
+Current GUI default remains the non-rollback input-delay path:
+
+- rollback: disabled
+- `InputDelayFrames`: `4`
+- `InputMaxFrameLead`: `4`
+
+The GUI battle settings now exposes `InputDelayFrames`, `InputMaxFrameLead`, and rollback enable/disable. Toggling rollback on sets `InputDelayFrames=2` and `InputMaxFrameLead=2`; toggling it off restores `4/4`.
+
+When rollback is enabled from the GUI, melonDS is launched with coredelta rollback envs (`MELONDS_NSML_ROLLBACK=1`, backend `coredelta`, window `64`, checkpoint interval `8`, resimulation enabled, delta keyframe interval `30`, Main RAM page size `256`). This is an exposed experimental path for comparing delayed rollback against the current GUI default, not a new playability claim.
+
+Current verification status:
+
+- Passed: `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`.
+- Passed: `cargo clippy --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml --all-targets -- -D warnings`.
+- Passed: `corepack pnpm run ci` in `tools\nsmb-mvl-gui`.
+- Passed: `corepack pnpm run ci` in `tools\nsmb-signaling-server`.
+- Pending: manual GUI play comparison of default `delay4/lead4` vs rollback `delay2/lead2`.
+
 ## 2026-06-07 current status - practical tinycorepreimage candidate
 
 Current practical rollback candidate is `tinycorepreimage-rbwait1500-window32`:

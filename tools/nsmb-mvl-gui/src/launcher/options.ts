@@ -18,3 +18,8 @@ export const livesOptions = [
   { value: '5', label: '5' },
   { value: 'endless', label: '無限' },
 ];
+
+export const rollbackOptions = [
+  { value: 'off', label: '無効' },
+  { value: 'on', label: '有効' },
+];
