@@ -7,6 +7,8 @@ param(
     [ValidateSet("remote", "local", "0", "1", "mario", "luigi")]
     [string]$RuleAIPlayer = "remote",
     [int]$WrapWidth = 0x400000,
+    [string]$AIPlayLog = "",
+    [int]$AIPlayLogInterval = 30,
     [switch]$Trace,
     [int]$TraceInterval = 30,
     [int]$InputDelayFrames = 4,
@@ -28,6 +30,8 @@ foreach ($name in @(
     "MELONDS_NSML_RULE_AI",
     "MELONDS_NSML_RULE_AI_PLAYER",
     "MELONDS_NSML_RULE_AI_WRAP_WIDTH",
+    "MELONDS_NSML_AI_PLAY_LOG",
+    "MELONDS_NSML_AI_PLAY_LOG_INTERVAL",
     "MELONDS_NSML_RULE_AI_TRACE",
     "MELONDS_NSML_RULE_AI_TRACE_INTERVAL",
     "MELONDS_NSML_RULE_AI_HOST_ONLY",
@@ -40,6 +44,22 @@ try {
     $env:MELONDS_NSML_RULE_AI = "1"
     $env:MELONDS_NSML_RULE_AI_PLAYER = $RuleAIPlayer
     $env:MELONDS_NSML_RULE_AI_WRAP_WIDTH = "$WrapWidth"
+    if ($AIPlayLog) {
+        $aiPlayLogPath = if ([System.IO.Path]::IsPathRooted($AIPlayLog)) {
+            $AIPlayLog
+        } else {
+            Join-Path $repoRoot $AIPlayLog
+        }
+        $aiPlayLogParent = Split-Path -Parent $aiPlayLogPath
+        if ($aiPlayLogParent) {
+            New-Item -ItemType Directory -Force -Path $aiPlayLogParent | Out-Null
+        }
+        $env:MELONDS_NSML_AI_PLAY_LOG = $aiPlayLogPath
+        $env:MELONDS_NSML_AI_PLAY_LOG_INTERVAL = "$AIPlayLogInterval"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_AI_PLAY_LOG -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_AI_PLAY_LOG_INTERVAL -ErrorAction SilentlyContinue
+    }
     if ($Trace) {
         $env:MELONDS_NSML_RULE_AI_TRACE = "1"
         $env:MELONDS_NSML_RULE_AI_TRACE_INTERVAL = "$TraceInterval"

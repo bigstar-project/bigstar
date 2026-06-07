@@ -25,6 +25,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iomanip>
 #include <map>
 #include <mutex>
 #include <filesystem>
@@ -1235,6 +1236,8 @@ struct State
     bool GameStateTraceExtended = false;
     melonDS::u32 GameStateTraceStartFrame = 0;
     melonDS::u32 GameStateTraceEndFrame = 0;
+    melonDS::u32 AIPlayLogStartFrame = 0;
+    melonDS::u32 AIPlayLogEndFrame = 0;
     bool GameStateSyncEnabled = false;
     bool GameStateSyncExtended = false;
     bool GameStateApplyEnabled = false;
@@ -1432,11 +1435,19 @@ struct State
     std::string RamDumpDir;
     std::string MemPatchFile;
     std::string GameStateTracePath;
+    std::string AIPlayLogPath;
     std::ofstream HashLog;
     std::ofstream GameStateTrace;
+    std::ofstream AIPlayLog;
+    InputState AIPlayLogLastAppliedInput[16][2] {};
+    melonDS::u32 AIPlayLogLastAppliedInputFrame[16][2] {};
+    bool AIPlayLogLastAppliedInputValid[16][2] {};
     int ScreenshotInterval = 0;
     int RamDumpInterval = 0;
     int GameStateTraceInterval = 60;
+    int AIPlayLogInterval = 1;
+    int AIPlayLogMaxObjects = 32;
+    bool AIPlayLogGameplayOnly = true;
     int MemPatchInstance = -1;
     melonDS::u32 MemPatchFrame = 0;
     bool MemPatchFrameSet = false;
@@ -2393,6 +2404,15 @@ bool RuleAIProvidesInputForPlayer(int player)
         RuleAIConfig(),
         player,
         CurrentPacketBridgeLocalPlayer());
+}
+
+void RecordAIPlayLogAppliedInput(int instanceID, melonDS::u32 frame, int player, const InputState& input)
+{
+    if (instanceID < 0 || instanceID >= 16 || player < 0 || player >= 2)
+        return;
+    G.AIPlayLogLastAppliedInput[instanceID][player] = input;
+    G.AIPlayLogLastAppliedInputFrame[instanceID][player] = frame;
+    G.AIPlayLogLastAppliedInputValid[instanceID][player] = true;
 }
 
 InputState ApplyRuleBasedAIInput(
@@ -9965,6 +9985,7 @@ void WritePacketBridgeJitScratchInputs(
             remoteInput,
             hasRemoteInput);
         const InputState effectiveInput = ApplyRuleBasedAIInput(instanceID, frame, nds, player, input);
+        RecordAIPlayLogAppliedInput(instanceID, frame, player, effectiveInput);
         const melonDS::u32 keys = (~effectiveInput.KeyMask) & 0x0FFF;
         nds->ARM9Write16(kPacketBridgeJitScratchKeysAddr + static_cast<melonDS::u32>(player * 2),
             static_cast<melonDS::u16>(keys));
@@ -13679,6 +13700,278 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     G.GameStateTrace.flush();
 }
 
+void WriteJsonHex(std::ostream& out, melonDS::u32 value, int width = 8)
+{
+    const std::ios::fmtflags flags = out.flags();
+    const char fill = out.fill();
+    out << "\"0x" << std::uppercase << std::hex << std::setw(width) << std::setfill('0') << value << "\"";
+    out.flags(flags);
+    out.fill(fill);
+}
+
+std::int32_t SignedU32(melonDS::u32 value)
+{
+    return static_cast<std::int32_t>(value);
+}
+
+const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings)
+{
+    if (objectID == kPlayerObjectID)
+        return "player";
+    if (objectID == kVsBattleStarActorObjectID && settings == kVsBattleStarActorSettings)
+        return "big_star_actor";
+    if (objectID == kVsBattleStarCandidateObjectID)
+        return "big_star_candidate";
+    if (objectID == kVsWorldItemObjectID && settings == kVsWorldItemSettings)
+        return "world_item";
+    if (objectID == kVsWorldItemObjectID && settings == kVsNeutralWorldItemSettings)
+        return "neutral_item";
+    if (objectID == kVsWorldItemObjectID && settings == kVsDroppedStarItemSettings)
+        return "dropped_star_item";
+    if (objectID == kVsMovingHazardObjectID && settings == kVsMovingHazardSettings)
+        return "moving_hazard";
+    if (objectID == kVsKoopaTroopaObjectID)
+        return "enemy_koopa";
+    if (objectID == kStageCameraObjectID)
+        return "camera";
+    if (objectID == kStageSceneObjectID)
+        return "stage_scene";
+    if (objectID == kStageActorManagerObjectID)
+        return "stage_actor_manager";
+    if (objectID == kStageControllerObjectID)
+        return "stage_controller";
+    return "object";
+}
+
+void WriteAIInputJson(std::ostream& out, const char* name, melonDS::u32 held, melonDS::u32 pressed)
+{
+    out << "\"" << name << "\":{\"held\":" << held << ",\"heldHex\":";
+    WriteJsonHex(out, held, 3);
+    out << ",\"pressed\":" << pressed << ",\"pressedHex\":";
+    WriteJsonHex(out, pressed, 3);
+    out << "}";
+}
+
+void WriteAIAppliedInputJson(std::ostream& out, int instanceID, int player)
+{
+    out << "\"appliedPlayer" << player << "\":{";
+    if (instanceID < 0 || instanceID >= 16 || player < 0 || player >= 2 ||
+        !G.AIPlayLogLastAppliedInputValid[instanceID][player])
+    {
+        out << "\"valid\":0}";
+        return;
+    }
+
+    const InputState& input = G.AIPlayLogLastAppliedInput[instanceID][player];
+    const melonDS::u32 held = (~input.KeyMask) & 0x0FFF;
+    out << "\"valid\":1"
+        << ",\"frame\":" << G.AIPlayLogLastAppliedInputFrame[instanceID][player]
+        << ",\"keyMask\":";
+    WriteJsonHex(out, input.KeyMask, 3);
+    out << ",\"held\":" << held << ",\"heldHex\":";
+    WriteJsonHex(out, held, 3);
+    out << ",\"touching\":" << (input.Touching ? 1 : 0)
+        << ",\"touchX\":" << input.TouchX
+        << ",\"touchY\":" << input.TouchY
+        << "}";
+}
+
+void WriteAIVec3Json(std::ostream& out, const char* name, melonDS::u32 x, melonDS::u32 y, melonDS::u32 z)
+{
+    out << "\"" << name << "\":{\"x\":" << SignedU32(x)
+        << ",\"y\":" << SignedU32(y)
+        << ",\"z\":" << SignedU32(z) << "}";
+}
+
+void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& sample)
+{
+    const bool p0 = index == 0;
+    auto v = [p0](melonDS::u32 a, melonDS::u32 b) { return p0 ? a : b; };
+    out << "{\"index\":" << index
+        << ",\"found\":" << v(sample.PlayerActor0Found, sample.PlayerActor1Found)
+        << ",\"guid\":";
+    WriteJsonHex(out, v(sample.PlayerActor0GUID, sample.PlayerActor1GUID));
+    out << ",\"base\":";
+    WriteJsonHex(out, v(sample.PlayerActor0Base, sample.PlayerActor1Base));
+    out << ",\"settings\":";
+    WriteJsonHex(out, v(sample.PlayerActor0Settings, sample.PlayerActor1Settings));
+    out << ",\"stateType\":" << v(sample.PlayerActor0StateType, sample.PlayerActor1StateType)
+        << ",\"flags\":";
+    WriteJsonHex(out, v(sample.PlayerActor0Flags, sample.PlayerActor1Flags));
+    out << ",";
+    WriteAIVec3Json(
+        out,
+        "pos",
+        v(sample.PlayerActor0PosX, sample.PlayerActor1PosX),
+        v(sample.PlayerActor0PosY, sample.PlayerActor1PosY),
+        v(sample.PlayerActor0PosZ, sample.PlayerActor1PosZ));
+    out << ",";
+    WriteAIVec3Json(
+        out,
+        "prev",
+        v(sample.PlayerActor0PrevX, sample.PlayerActor1PrevX),
+        v(sample.PlayerActor0PrevY, sample.PlayerActor1PrevY),
+        v(sample.PlayerActor0PrevZ, sample.PlayerActor1PrevZ));
+    out << ",";
+    WriteAIVec3Json(
+        out,
+        "vel",
+        v(sample.PlayerActor0VelX, sample.PlayerActor1VelX),
+        v(sample.PlayerActor0VelY, sample.PlayerActor1VelY),
+        v(sample.PlayerActor0VelZ, sample.PlayerActor1VelZ));
+    out << ",\"actionFlag\":" << v(sample.PlayerActor0ActionFlag, sample.PlayerActor1ActionFlag)
+        << ",\"subActionFlag\":" << v(sample.PlayerActor0SubActionFlag, sample.PlayerActor1SubActionFlag)
+        << ",\"physicsFlag\":" << v(sample.PlayerActor0PhysicsFlag, sample.PlayerActor1PhysicsFlag)
+        << ",\"transitionFlag\":" << v(sample.PlayerActor0TransitionFlag, sample.PlayerActor1TransitionFlag)
+        << ",\"collisionFlag\":" << v(sample.PlayerActor0CollisionFlag, sample.PlayerActor1CollisionFlag)
+        << ",\"environmentFlag\":" << v(sample.PlayerActor0EnvironmentFlag, sample.PlayerActor1EnvironmentFlag)
+        << ",\"updateLocked\":" << v(sample.PlayerActor0UpdateLocked, sample.PlayerActor1UpdateLocked)
+        << ",\"visible\":" << v(sample.PlayerActor0VisibleFlag, sample.PlayerActor1VisibleFlag)
+        << ",\"defeated\":" << v(sample.PlayerActor0DefeatedFlag, sample.PlayerActor1DefeatedFlag)
+        << ",\"transitioning\":" << v(sample.PlayerActor0TransitioningFlag, sample.PlayerActor1TransitioningFlag)
+        << ",\"powerup\":" << v(sample.Player0Powerup, sample.Player1Powerup)
+        << ",\"inventoryPowerup\":" << v(sample.Player0InventoryPowerup, sample.Player1InventoryPowerup)
+        << ",\"dead\":" << v(sample.Player0Dead, sample.Player1Dead)
+        << ",\"lives\":" << v(sample.Player0Lives, sample.Player1Lives)
+        << ",\"battleStars\":" << v(sample.Player0BattleStars, sample.Player1BattleStars)
+        << ",\"coins\":" << v(sample.Player0Coins, sample.Player1Coins)
+        << ",\"score\":" << v(sample.Player0Score, sample.Player1Score)
+        << ",\"displayedStars\":" << v(sample.Player0DisplayedStars, sample.Player1DisplayedStars)
+        << ",\"deaths\":" << v(sample.Player0Deaths, sample.Player1Deaths)
+        << ",\"collectedStars\":" << v(sample.Player0CollectedStars, sample.Player1CollectedStars)
+        << "}";
+}
+
+void WriteAIObjectJson(std::ostream& out, const GameStateObjectScanEntry& entry)
+{
+    out << "{\"category\":\"" << AIObjectCategory(entry.ObjectID, entry.Actor.Settings)
+        << "\",\"objectId\":";
+    WriteJsonHex(out, entry.ObjectID, 3);
+    out << ",\"settings\":";
+    WriteJsonHex(out, entry.Actor.Settings);
+    out << ",\"guid\":";
+    WriteJsonHex(out, entry.Actor.GUID);
+    out << ",\"base\":";
+    WriteJsonHex(out, entry.Actor.Base);
+    out << ",\"lifecycle\":" << static_cast<unsigned>(entry.LifecycleState)
+        << ",\"type\":" << static_cast<unsigned>(entry.Type)
+        << ",\"skipFlags\":" << static_cast<unsigned>(entry.SkipFlags)
+        << ",\"stateType\":" << entry.Actor.StateType
+        << ",\"flags\":";
+    WriteJsonHex(out, entry.Actor.Flags);
+    out << ",";
+    WriteAIVec3Json(out, "pos", entry.Actor.PosX, entry.Actor.PosY, entry.Actor.PosZ);
+    out << ",";
+    WriteAIVec3Json(out, "vel", entry.Actor.VelX, entry.Actor.VelY, entry.Actor.VelZ);
+    out << "}";
+}
+
+void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (G.AIPlayLogPath.empty() || !G.AIPlayLog || !nds || !nds->MainRAM)
+        return;
+    if (frame < G.AIPlayLogStartFrame)
+        return;
+    if (G.AIPlayLogEndFrame != 0 && frame > G.AIPlayLogEndFrame)
+        return;
+    if ((frame % static_cast<melonDS::u32>(G.AIPlayLogInterval)) != 0)
+        return;
+
+    const bool inGameplay = IsMarioVsLuigiGameplay(nds);
+    if (G.AIPlayLogGameplayOnly && !inGameplay)
+        return;
+
+    const GameStateSample sample = ReadGameStateSample(nds);
+    const GameStateObjectScanCache objectScanCache = BuildGameStateObjectScanCache(nds);
+    const int localPlayer = CurrentPacketBridgeLocalPlayer();
+
+    G.AIPlayLog << "{\"schema\":\"nsmb_mvl_ai_play_log_v1\""
+        << ",\"instance\":" << instanceID
+        << ",\"frame\":" << frame
+        << ",\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\""
+        << ",\"localPlayer\":" << localPlayer
+        << ",\"inGameplay\":" << (inGameplay ? 1 : 0)
+        << ",\"stage\":{\"id\":" << sample.StageID
+        << ",\"group\":" << sample.StageGroup
+        << ",\"vsMode\":" << sample.VsMode
+        << ",\"localPlayerIdMemory\":" << sample.LocalPlayerID
+        << ",\"vsCoinCount\":" << sample.VsCoinCount
+        << "}";
+
+    G.AIPlayLog << ",\"inputs\":{";
+    WriteAIInputJson(G.AIPlayLog, "console0", sample.InputConsole0Held, sample.InputConsole0Pressed);
+    G.AIPlayLog << ",";
+    WriteAIInputJson(G.AIPlayLog, "console1", sample.InputConsole1Held, sample.InputConsole1Pressed);
+    G.AIPlayLog << ",";
+    WriteAIInputJson(G.AIPlayLog, "player0", sample.InputPlayer0Held, sample.InputPlayer0Pressed);
+    G.AIPlayLog << ",";
+    WriteAIInputJson(G.AIPlayLog, "player1", sample.InputPlayer1Held, sample.InputPlayer1Pressed);
+    G.AIPlayLog << ",";
+    WriteAIAppliedInputJson(G.AIPlayLog, instanceID, 0);
+    G.AIPlayLog << ",";
+    WriteAIAppliedInputJson(G.AIPlayLog, instanceID, 1);
+    G.AIPlayLog << ",\"touchKnown\":0}";
+
+    G.AIPlayLog << ",\"players\":[";
+    WriteAIPlayerJson(G.AIPlayLog, 0, sample);
+    G.AIPlayLog << ",";
+    WriteAIPlayerJson(G.AIPlayLog, 1, sample);
+    G.AIPlayLog << "]";
+
+    G.AIPlayLog << ",\"targets\":{\"bigStarCandidate\":{\"found\":" << sample.VsStarFound
+        << ",\"guid\":";
+    WriteJsonHex(G.AIPlayLog, sample.VsStarGUID);
+    G.AIPlayLog << ",\"base\":";
+    WriteJsonHex(G.AIPlayLog, sample.VsStarBase);
+    G.AIPlayLog << ",";
+    WriteAIVec3Json(G.AIPlayLog, "pos", sample.VsStarPosX, sample.VsStarPosY, sample.VsStarPosZ);
+    G.AIPlayLog << "},\"bigStarActor\":{\"found\":" << sample.VsStarActorFound
+        << ",\"guid\":";
+    WriteJsonHex(G.AIPlayLog, sample.VsStarActorGUID);
+    G.AIPlayLog << ",\"base\":";
+    WriteJsonHex(G.AIPlayLog, sample.VsStarActorBase);
+    G.AIPlayLog << ",";
+    WriteAIVec3Json(G.AIPlayLog, "pos", sample.VsStarActorPosX, sample.VsStarActorPosY, sample.VsStarActorPosZ);
+    G.AIPlayLog << "}}";
+
+    G.AIPlayLog << ",\"camera\":{\"found\":" << sample.StageCameraFound
+        << ",\"globalX0\":" << SignedU32(sample.StageCameraGlobalX0)
+        << ",\"globalX1\":" << SignedU32(sample.StageCameraGlobalX1)
+        << ",\"globalY0\":" << SignedU32(sample.StageCameraGlobalY0)
+        << ",\"globalY1\":" << SignedU32(sample.StageCameraGlobalY1)
+        << ",\"width0\":" << SignedU32(sample.StageCameraGlobalWidth0)
+        << ",\"width1\":" << SignedU32(sample.StageCameraGlobalWidth1)
+        << ",\"height0\":" << SignedU32(sample.StageCameraGlobalHeight0)
+        << ",\"height1\":" << SignedU32(sample.StageCameraGlobalHeight1)
+        << "}";
+
+    G.AIPlayLog << ",\"objectSummary\":{\"total\":" << sample.ObjectScanTotal
+        << ",\"active\":" << sample.ObjectActiveCount
+        << ",\"dead\":" << sample.ObjectDeadCount
+        << ",\"notCreated\":" << sample.ObjectNotCreatedCount
+        << ",\"skipUpdate\":" << sample.ObjectSkipUpdateCount
+        << ",\"skipRender\":" << sample.ObjectSkipRenderCount
+        << "}";
+
+    G.AIPlayLog << ",\"objects\":[";
+    int writtenObjects = 0;
+    for (const GameStateObjectScanEntry& entry : objectScanCache.Entries)
+    {
+        if (entry.LifecycleState != 1)
+            continue;
+        if (writtenObjects >= G.AIPlayLogMaxObjects)
+            break;
+        if (writtenObjects != 0)
+            G.AIPlayLog << ",";
+        WriteAIObjectJson(G.AIPlayLog, entry);
+        writtenObjects++;
+    }
+    G.AIPlayLog << "],\"hash\":";
+    WriteJsonHex(G.AIPlayLog, static_cast<melonDS::u32>(sample.Hash & 0xFFFFFFFFull));
+    G.AIPlayLog << "}\n";
+    G.AIPlayLog.flush();
+}
+
 void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.Enabled || !G.GameStateSyncEnabled || !nds) return;
@@ -14657,6 +14950,15 @@ void InitFromEnvironment()
     G.GameStateTraceEndFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_GAME_STATE_TRACE_END_FRAME", 0)));
     G.GameStateTraceExtended = EnvFlag("MELONDS_NSML_GAME_STATE_TRACE_EXTENDED");
+    const char* aiPlayLog = std::getenv("MELONDS_NSML_AI_PLAY_LOG");
+    if (aiPlayLog && aiPlayLog[0]) G.AIPlayLogPath = aiPlayLog;
+    G.AIPlayLogInterval = std::max(1, EnvInt("MELONDS_NSML_AI_PLAY_LOG_INTERVAL", 1));
+    G.AIPlayLogStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_AI_PLAY_LOG_START_FRAME", 0)));
+    G.AIPlayLogEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_AI_PLAY_LOG_END_FRAME", 0)));
+    G.AIPlayLogMaxObjects = std::clamp(EnvInt("MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS", 32), 0, 256);
+    G.AIPlayLogGameplayOnly = !EnvFlag("MELONDS_NSML_AI_PLAY_LOG_INCLUDE_NON_GAMEPLAY");
     G.GameStateSyncEnabled = EnvFlag("MELONDS_NSML_STATE_SYNC");
     G.GameStateSyncExtended = EnvFlag("MELONDS_NSML_STATE_SYNC_EXTENDED");
     G.GameStateApplyEnabled = EnvFlag("MELONDS_NSML_STATE_APPLY");
@@ -15264,6 +15566,30 @@ void InitFromEnvironment()
             G.GameStateTrace << '\n';
         }
     }
+    if ((G.TestEnabled || G.Enabled) && !G.AIPlayLogPath.empty())
+    {
+        std::error_code dirError;
+        const std::filesystem::path aiPlayLogPath(G.AIPlayLogPath);
+        const std::filesystem::path aiPlayLogParent = aiPlayLogPath.parent_path();
+        if (!aiPlayLogParent.empty())
+            std::filesystem::create_directories(aiPlayLogParent, dirError);
+        G.AIPlayLog.open(G.AIPlayLogPath, std::ios::out | std::ios::trunc);
+        if (!G.AIPlayLog)
+        {
+            std::printf("NSMB AIPlayLog: failed to open path=%s\n", G.AIPlayLogPath.c_str());
+        }
+        else
+        {
+            std::printf(
+                "NSMB AIPlayLog: enabled path=%s interval=%d start=%u end=%u maxObjects=%d gameplayOnly=%d\n",
+                G.AIPlayLogPath.c_str(),
+                G.AIPlayLogInterval,
+                G.AIPlayLogStartFrame,
+                G.AIPlayLogEndFrame,
+                G.AIPlayLogMaxObjects,
+                G.AIPlayLogGameplayOnly ? 1 : 0);
+        }
+    }
 
     if (G.TestEnabled)
     {
@@ -15866,6 +16192,11 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
             nds,
             CurrentPacketBridgeLocalPlayer(),
             testInput);
+    RecordAIPlayLogAppliedInput(
+        instanceID,
+        inputFrame,
+        CurrentPacketBridgeLocalPlayer(),
+        testInput);
     const melonDS::u32 syncFrame = G.TestEnabled ? inputFrame : frame;
 
     if (G.Enabled && G.InputNetplayOnly)
@@ -16504,6 +16835,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         ApplyRemotePlayerState(instanceID, logFrame, nds, true);
     const auto afterApplyPlayer = std::chrono::steady_clock::now();
     TraceGameState(instanceID, logFrame, nds);
+    TraceAIPlayLog(instanceID, logFrame, nds);
     const auto afterTrace = std::chrono::steady_clock::now();
     SyncGameState(instanceID, logFrame, nds);
     const auto afterSyncGame = std::chrono::steady_clock::now();
@@ -16711,6 +17043,8 @@ void Shutdown()
 
     if (G.GameStateTrace)
         G.GameStateTrace.close();
+    if (G.AIPlayLog)
+        G.AIPlayLog.close();
 }
 
 }
