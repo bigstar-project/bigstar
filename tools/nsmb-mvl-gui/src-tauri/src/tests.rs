@@ -27,6 +27,9 @@ fn request(role: Role) -> LaunchRequest {
             big_stars: 10,
             lives: Lives::Five,
             match_seed: "7".to_owned(),
+            input_delay_frames: 4,
+            input_max_frame_lead: 4,
+            rollback_enabled: false,
         },
     }
 }
@@ -204,6 +207,29 @@ fn melon_env_carries_game_settings_and_netplay_start() {
     assert_eq!(env["MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT"], "1");
     assert_eq!(env["MELONDS_NSML_NETPLAY_START_FRAME"], "840");
     assert_eq!(env["MELONDS_NSML_MATCH_SEED"], "7");
+    assert_eq!(env["MELONDS_NSML_DELAY"], "4");
+    assert_eq!(env["MELONDS_NSML_INPUT_MAX_FRAME_LEAD"], "4");
+    assert!(!env.contains_key("MELONDS_NSML_ROLLBACK"));
+}
+
+#[test]
+fn melon_env_carries_rollback_settings_when_enabled() {
+    let mut request = request(Role::Host);
+    request.settings.rollback_enabled = true;
+    request.settings.input_delay_frames = 2;
+    request.settings.input_max_frame_lead = 2;
+
+    let env = melon_env(
+        &request,
+        Path::new("bootstrap.inputs"),
+        Path::new("logs/nsmb-mvl-gui-test"),
+    );
+
+    assert_eq!(env["MELONDS_NSML_DELAY"], "2");
+    assert_eq!(env["MELONDS_NSML_INPUT_MAX_FRAME_LEAD"], "2");
+    assert_eq!(env["MELONDS_NSML_ROLLBACK"], "1");
+    assert_eq!(env["MELONDS_NSML_ROLLBACK_BACKEND"], "coredelta");
+    assert_eq!(env["MELONDS_NSML_ROLLBACK_RESIMULATE"], "1");
 }
 
 #[test]

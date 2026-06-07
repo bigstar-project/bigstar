@@ -14,9 +14,12 @@
 #include "NsmbNetplayPoC.h"
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <cctype>
 #include <condition_variable>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -25,7 +28,9 @@
 #include <mutex>
 #include <filesystem>
 #include <iterator>
+#include <limits>
 #include <random>
+#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -139,12 +144,28 @@ constexpr melonDS::u32 kPlayerBaseCameraFocusModeOffset = 0x7B2;
 constexpr melonDS::u32 kPlayerBaseDefeatedFlagOffset = 0x7B3;
 constexpr melonDS::u32 kPlayerBasePlayerIDOffset = 0x7B4;
 constexpr melonDS::u32 kPlayerBaseVisibleFlagOffset = 0x7B5;
+constexpr melonDS::u32 kPlayerBaseTransitionStepOffset = 0xBAD;
 constexpr melonDS::u32 kPlayerBaseLinkedActorOffset = 0x688;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
 constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
 constexpr melonDS::u16 kVsMovingHazardObjectID = 0x0053;
 constexpr melonDS::u32 kVsMovingHazardSettings = 0x00000000;
+constexpr melonDS::u16 kVsKoopaTroopaObjectID = 0x005E;
+constexpr melonDS::u16 kVsWorldItemObjectID = 0x001F;
+constexpr melonDS::u32 kVsNeutralWorldItemSettings = 0x00080000;
+constexpr melonDS::u32 kVsWorldItemSettings = 0x00080002;
+constexpr melonDS::u32 kVsDroppedStarItemSettings = 0x00090002;
+constexpr melonDS::u32 kVsWorldItemNaturalSpawnGraceFrames = 4;
+constexpr melonDS::u32 kEffectVTableStart = 0x02126A24;
+constexpr melonDS::u32 kEffectVTablePtr = 0x02126A2C;
+constexpr melonDS::u32 kWorldEffectSlotBase = 0x021C3268;
+constexpr melonDS::u32 kWorldEffectSlotStride = 0x1D4;
+constexpr melonDS::u32 kWorldEffectSlotCount = 32;
+constexpr melonDS::u32 kWorldEffectWordStart = 0x04;
+constexpr melonDS::u32 kWorldEffectWordEnd = 0xAC;
+constexpr std::size_t kWorldEffectWordCount =
+    ((kWorldEffectWordEnd - kWorldEffectWordStart) / sizeof(melonDS::u32)) + 1;
 constexpr int kObjectTraceSlots = 16;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
 constexpr melonDS::u32 kMvlStageSceneDefaultSettings = 0x00B4FF00;
@@ -157,6 +178,11 @@ constexpr melonDS::u16 kMvlObject267ID = 0x010B;
 constexpr melonDS::u16 kVsConnectObjectID = 0x0006;
 constexpr melonDS::u16 kCourseSelectObjectID = 0x0005;
 constexpr melonDS::u16 kStageCameraObjectID = 0x013C;
+constexpr melonDS::u32 kNSMBProcessExecuteListAddr = 0x0208FB18;
+constexpr melonDS::u32 kNSMBProcessDeleteListAddr = 0x0208FB28;
+constexpr melonDS::u32 kNSMBProcessRenderListAddr = 0x0208FB38;
+constexpr melonDS::u32 kNSMBProcessCreateListAddr = 0x0208FB48;
+constexpr melonDS::u32 kNSMBProcessIDLookupListsAddr = 0x0208FB58;
 constexpr melonDS::u32 kStageCameraXAddr = 0x020CAE1C;
 constexpr melonDS::u32 kStageCameraYAddr = 0x020CAD94;
 constexpr melonDS::u32 kStageCameraWidthAddr = 0x020CADA4;
@@ -189,8 +215,10 @@ constexpr melonDS::u32 kA2DJCourseSelectFactoryAddr = 0x020130A8;
 constexpr melonDS::u32 kA2DJApplySceneRequestAddr = 0x02007ACC;
 constexpr melonDS::u32 kA2DJStartSceneTransitionAddr = 0x02011CE8;
 constexpr melonDS::u32 kA2DJCreateObjectAddr = 0x0204BF8C;
+constexpr melonDS::u32 kA2DEActorSpawnActorAddr = 0x020A0B64;
 constexpr melonDS::u32 kA2DEStageLayoutMvlInitAddr = 0x020B0714;
 constexpr melonDS::u32 kDirectBootTrampolineAddr = 0x023C0000;
+constexpr melonDS::u32 kDirectBootTrampolineDataAddr = 0x023C0400;
 // Overlay0 padding cave. Keep runtime settings out of high Main RAM, which NSMB
 // can use for stage graphics/model buffers during MvL gameplay.
 constexpr melonDS::u32 kMvlRuntimeConfigAddr = 0x020C5360;
@@ -231,11 +259,26 @@ enum class Role
 enum class RollbackBackend
 {
     Savestate,
+    CoreLite,
+    CoreSparse,
+    CoreDelta,
+    CoreFrameDelta,
+    CorePreimage,
+    TinyCorePreimage,
+    NSMBRanges,
+    NSMBCoreRanges,
+    NSMBTinyCoreRanges,
     ARM9RAM,
 };
 
+constexpr melonDS::u32 kRollbackMainRAMModeFull = 0;
+constexpr melonDS::u32 kRollbackMainRAMModeSparse = 1;
+constexpr melonDS::u32 kRollbackMainRAMModeDelta = 2;
+constexpr melonDS::u32 kRollbackMainRAMModeSkip = 3;
 constexpr melonDS::u32 kRollbackARM9RAMMagic = 0x524D4139; // RMA9
 constexpr melonDS::u32 kRollbackARM9RAMVersion = 1;
+constexpr melonDS::u32 kRollbackNSMBRangesMagic = 0x524D534E; // NSMR
+constexpr melonDS::u32 kRollbackNSMBRangesVersion = 1;
 
 struct RollbackARM9RAMHeader
 {
@@ -247,6 +290,44 @@ struct RollbackARM9RAMHeader
     melonDS::u32 LagFrameFlag;
     melonDS::u32 Reserved;
     melonDS::u64 Reserved64;
+};
+
+struct RollbackNSMBRangesHeader
+{
+    melonDS::u32 Magic;
+    melonDS::u32 Version;
+    melonDS::u32 NumFrames;
+    melonDS::u32 NumLagFrames;
+    melonDS::u32 LagFrameFlag;
+    melonDS::u32 RangeCount;
+    melonDS::u32 TotalRangeBytes;
+    melonDS::u32 Reserved;
+};
+
+struct RollbackNSMBRangeEntry
+{
+    melonDS::u32 Address;
+    melonDS::u32 Length;
+};
+
+struct RollbackNSMBDynamicRangeCache
+{
+    melonDS::NDS* NDS = nullptr;
+    melonDS::u32 Frame = kNoFrameLimit;
+    bool Valid = false;
+    std::vector<RollbackNSMBRangeEntry> Ranges;
+};
+
+struct RollbackStoredState
+{
+    std::vector<char> Buffer;
+    std::vector<melonDS::u8> MainRAMCopy;
+    std::vector<melonDS::u8> MainRAMShadowCopy;
+    std::vector<melonDS::u32> MainRAMPreimagePages;
+    std::vector<melonDS::u8> MainRAMPreimage;
+    melonDS::u32 BaseFrame = kNoFrameLimit;
+    bool MainRAMDelta = false;
+    bool MainRAMFramePreimage = false;
 };
 
 struct WireInput
@@ -297,6 +378,14 @@ constexpr melonDS::u32 kWireKindStartReady = 0x54525453; // "STRT", little endia
 constexpr melonDS::u32 kWireKindState = 0x54415453; // "STAT", little endian
 constexpr melonDS::u32 kWireKindPacket = 0x4B434150; // "PACK", little endian
 constexpr melonDS::u32 kWireKindInputBundle = 0x42504E49; // "INPB", little endian
+constexpr melonDS::u32 kWireKindPlayerState = 0x41545350; // "PSTA", little endian
+constexpr melonDS::u32 kWireKindWorldState = 0x41545357; // "WSTA", little endian
+constexpr melonDS::u32 kWireKindMovingHazardState = 0x415A4148; // "HAZA", little endian
+constexpr melonDS::u32 kWireKindWorldEffectState = 0x54434645; // "EFCT", little endian
+constexpr melonDS::u32 kWireKindWorldActorSnapshot = 0x54434157; // "WACT", little endian
+constexpr std::size_t kMaxWorldMovingHazards = 4;
+constexpr std::size_t kMaxWorldEffects = 4;
+constexpr std::size_t kMaxWorldActorSnapshots = 16;
 
 static_assert(sizeof(WireSeed) == 16);
 
@@ -428,6 +517,155 @@ struct WireGameState
 };
 
 static_assert(sizeof(WireGameState) == 380);
+
+struct WirePlayerState
+{
+    melonDS::u32 Magic;
+    melonDS::u32 Version;
+    melonDS::u32 Kind;
+    melonDS::u32 Frame;
+    melonDS::u32 Instance;
+    melonDS::u32 Player;
+    melonDS::u32 Found;
+    melonDS::u32 GUID;
+    melonDS::u32 Settings;
+    melonDS::u32 StateType;
+    melonDS::u32 Flags;
+    melonDS::u32 PosX;
+    melonDS::u32 PosY;
+    melonDS::u32 PosZ;
+    melonDS::u32 PrevX;
+    melonDS::u32 PrevY;
+    melonDS::u32 PrevZ;
+    melonDS::u32 VelX;
+    melonDS::u32 VelY;
+    melonDS::u32 VelZ;
+    melonDS::u32 ActionFlag;
+    melonDS::u32 SubActionFlag;
+    melonDS::u32 PhysicsFlag;
+    melonDS::u32 DamageCooldown;
+    melonDS::u32 TransitionFlag;
+    melonDS::u32 CollisionFlag;
+    melonDS::u32 EnvironmentFlag;
+    melonDS::u32 RuntimeFlags0;
+    melonDS::u32 RuntimeFlags1;
+    melonDS::u32 PlayerCount;
+    melonDS::u32 Powerup;
+    melonDS::u32 InventoryPowerup;
+    melonDS::u32 Dead;
+    melonDS::u32 Character;
+    melonDS::u32 TransitionStatus;
+    melonDS::u32 Lives;
+    melonDS::u32 BattleStars;
+    melonDS::u32 Coins;
+    melonDS::u32 Score;
+    melonDS::u32 DisplayedStars;
+    melonDS::u32 Deaths;
+    melonDS::u32 CollectedStars;
+};
+
+static_assert(sizeof(WirePlayerState) == 168);
+
+struct WireWorldActorState
+{
+    melonDS::u32 Found;
+    melonDS::u32 GUID;
+    melonDS::u32 Settings;
+    melonDS::u32 StateType;
+    melonDS::u32 Flags;
+    melonDS::u32 PosX;
+    melonDS::u32 PosY;
+    melonDS::u32 PosZ;
+    melonDS::u32 PrevX;
+    melonDS::u32 PrevY;
+    melonDS::u32 PrevZ;
+    melonDS::u32 VelX;
+    melonDS::u32 VelY;
+    melonDS::u32 VelZ;
+    melonDS::u32 LastStepX;
+    melonDS::u32 LastStepY;
+    melonDS::u32 LastStepZ;
+    melonDS::u32 VelH;
+    melonDS::u32 TargetVelH;
+    melonDS::u32 AccelV;
+    melonDS::u32 TargetVelV;
+    melonDS::u32 AccelH;
+    melonDS::u32 TargetVelX;
+    melonDS::u32 TargetVelY;
+    melonDS::u32 TargetVelZ;
+};
+
+struct WireWorldState
+{
+    melonDS::u32 Magic;
+    melonDS::u32 Version;
+    melonDS::u32 Kind;
+    melonDS::u32 Frame;
+    melonDS::u32 Instance;
+    WireWorldActorState Star;
+    WireWorldActorState NeutralItem;
+    WireWorldActorState Item;
+    WireWorldActorState DroppedStarItem;
+    WireWorldActorState MovingHazard;
+};
+
+static_assert(sizeof(WireWorldActorState) == 100);
+static_assert(sizeof(WireWorldState) == 520);
+
+struct WireMovingHazardState
+{
+    melonDS::u32 Magic;
+    melonDS::u32 Version;
+    melonDS::u32 Kind;
+    melonDS::u32 Frame;
+    melonDS::u32 Instance;
+    melonDS::u32 Count;
+    WireWorldActorState Actors[kMaxWorldMovingHazards];
+};
+
+static_assert(sizeof(WireMovingHazardState) == 424);
+
+struct WireWorldObjectActorState
+{
+    melonDS::u32 ObjectID;
+    WireWorldActorState Actor;
+};
+
+struct WireWorldActorSnapshotState
+{
+    melonDS::u32 Magic;
+    melonDS::u32 Version;
+    melonDS::u32 Kind;
+    melonDS::u32 Frame;
+    melonDS::u32 Instance;
+    melonDS::u32 Count;
+    WireWorldObjectActorState Actors[kMaxWorldActorSnapshots];
+};
+
+static_assert(sizeof(WireWorldObjectActorState) == 104);
+static_assert(sizeof(WireWorldActorSnapshotState) == 1688);
+
+struct WireWorldEffectSlot
+{
+    melonDS::u32 Found;
+    melonDS::u32 Base;
+    melonDS::u32 VTable;
+    melonDS::u32 Words[kWorldEffectWordCount];
+};
+
+struct WireWorldEffectState
+{
+    melonDS::u32 Magic;
+    melonDS::u32 Version;
+    melonDS::u32 Kind;
+    melonDS::u32 Frame;
+    melonDS::u32 Instance;
+    melonDS::u32 Count;
+    WireWorldEffectSlot Effects[kMaxWorldEffects];
+};
+
+static_assert(sizeof(WireWorldEffectSlot) == 184);
+static_assert(sizeof(WireWorldEffectState) == 760);
 
 struct GameStateSample
 {
@@ -894,10 +1132,30 @@ struct ObjectLifecycleSummary
     melonDS::u32 ActiveBase[kObjectTraceSlots] {};
 };
 
+struct GameStateObjectScanEntry
+{
+    ObjectScanSample Actor;
+    melonDS::u32 Offset = 0;
+    melonDS::u32 VTable = 0;
+    melonDS::u16 ObjectID = 0;
+    melonDS::u8 LifecycleState = 0;
+    melonDS::u8 Type = 0;
+    melonDS::u8 SkipFlags = 0;
+};
+
+struct GameStateObjectScanCache
+{
+    std::vector<GameStateObjectScanEntry> Entries;
+    ObjectLifecycleSummary Lifecycle;
+};
+
+thread_local const GameStateObjectScanCache* ActiveGameStateObjectScanCache = nullptr;
+
 ObjectScanSample FindObjectByIDAndSettingsLoose(melonDS::NDS* nds, melonDS::u16 expectedObjectID, melonDS::u32 expectedSettings);
 ObjectScanSample FindObjectByID(melonDS::NDS* nds, melonDS::u16 expectedObjectID);
 ObjectPairScanSample FindObjectPairByIDSortedX(melonDS::NDS* nds, melonDS::u16 expectedObjectID);
 PlayerActorScanSample FindPlayerActors(melonDS::NDS* nds);
+melonDS::u32 FindCachedObjectBaseByID(melonDS::u16 objectID);
 
 struct GameStateSyncHashes
 {
@@ -920,7 +1178,8 @@ int CurrentPacketBridgeLocalPlayer();
 struct State
 {
     std::mutex Mutex;
-    bool EnvChecked = false;
+    std::mutex PerfMutex;
+    std::atomic<bool> EnvChecked { false };
     bool Enabled = false;
     bool Ready = false;
     bool TestEnabled = false;
@@ -944,6 +1203,27 @@ struct State
     melonDS::u32 ActiveTimerStartFrame[16] {};
     std::chrono::steady_clock::time_point ActiveTimerStart[16];
     melonDS::u32 ActiveFpsStartFrame = 0;
+    bool ActiveFrameTimingStarted[16] {};
+    std::chrono::steady_clock::time_point ActiveFrameLastTime[16];
+    melonDS::u32 ActiveFrameSamples[16] {};
+    unsigned long long ActiveFrameTotalUs[16] {};
+    unsigned long long ActiveFrameMaxUs[16] {};
+    melonDS::u32 ActiveFrameMaxFrame[16] {};
+    melonDS::u32 ActiveFrameOver16ms[16] {};
+    melonDS::u32 ActiveFrameOver25ms[16] {};
+    melonDS::u32 ActiveFrameOver33ms[16] {};
+    int ActiveFrameSpikeThresholdUs = 25000;
+    bool ActiveFrameSpikeTrace = false;
+    int FrameHeartbeatInterval = 0;
+    melonDS::u32 LastFrameHeartbeat[16] {};
+    int GameplayHeartbeatInterval = 0;
+    melonDS::u32 LastGameplayHeartbeat[16] {};
+    std::string FrameHeartbeatPath;
+    std::ofstream FrameHeartbeat;
+    std::atomic<melonDS::u32> PendingFrameHeartbeat { 0 };
+    std::atomic<bool> FrameHeartbeatStop { false };
+    bool FrameHeartbeatThreadStarted = false;
+    std::thread FrameHeartbeatThread;
     int HashInterval = 60;
     bool HashEnabled = true;
     int TestWaitTimeoutMs = 5000;
@@ -961,7 +1241,30 @@ struct State
     bool GameStateApplyStarObjects = true;
     bool GameStateApplyStageObjects = true;
     bool GameStateApplyPlayerActors = true;
+    bool GameStateApplyRemotePlayerOnly = false;
     int GameStateSyncInterval = 60;
+    bool PlayerStateSyncEnabled = false;
+    bool PlayerStateApplyEnabled = false;
+    bool PlayerStateGlobalsEnabled = false;
+    int PlayerStateSyncInterval = 1;
+    int PlayerStateMaxPredictFrames = 2;
+    bool WorldStateSyncEnabled = false;
+    bool WorldStateApplyEnabled = false;
+    bool WorldStateApplyStarActor = true;
+    bool WorldStateSpawnItem = false;
+    bool WorldStateApplyMovingHazard = false;
+    bool WorldStateApplyEffects = false;
+    bool WorldStateApplyActorSnapshot = false;
+    bool WorldStateTraceMovingHazards = false;
+    bool WorldStateTraceObjectLifecycles = false;
+    bool WorldStateTraceActorInternals = false;
+    bool WorldStateTraceEffects = false;
+    int WorldStateTraceObjectLifecyclesInterval = 60;
+    melonDS::u32 WorldStateTraceObjectLifecyclesStartFrame = 0;
+    melonDS::u32 WorldStateTraceObjectLifecyclesEndFrame = kNoFrameLimit;
+    int WorldStateSyncInterval = 2;
+    int WorldStateMaxPredictFrames = 1;
+    int WorldStateActorRescanInterval = 0;
     int SeedWaitTimeoutMs = 10000;
     bool WaitForPeerBeforeStart = false;
     bool WaitForPeerAtNetplayStart = false;
@@ -1058,6 +1361,8 @@ struct State
     int PacketBridgeSendJitterFrames = 0;
     int InputSendDelayFrames = 0;
     int InputSendJitterFrames = 0;
+    melonDS::u32 InputSendDelayStartFrame = 0;
+    melonDS::u32 InputSendDelayEndFrame = kNoFrameLimit;
     bool InputUnreliable = false;
     int InputBundleHistory = 0;
     int InputDropModulo = 0;
@@ -1281,12 +1586,49 @@ struct State
     bool RollbackEnabled = false;
     bool RollbackResimulate = false;
     bool RollbackRestoreProbe = false;
+    int RollbackPredictionProbeModulo = 0;
+    int RollbackPredictionProbeOffset = 0;
+    int RollbackPredictionProbeLimit = -1;
+    melonDS::u32 RollbackPredictionProbeStartFrame = 0;
+    melonDS::u32 RollbackPredictionProbeEndFrame = kNoFrameLimit;
+    melonDS::u32 RollbackPredictionProbeKeyMask = 0x1;
     RollbackBackend RollbackBackendMode = RollbackBackend::Savestate;
     int RollbackWindow = 20;
     int RollbackCheckpointInterval = 1;
+    int RollbackDeltaKeyframeInterval = 10;
+    int RollbackMainRAMPageSize = 4096;
+    int RollbackCoreSkipMask = 0;
+    int RollbackTinyCoreFlags = 0;
+    bool RollbackNSMBWideRanges = false;
+    bool RollbackNSMBDeltaDiscoveredRanges = false;
+    bool RollbackNSMBActorArenaRanges = false;
+    bool RollbackNSMBArm9StackRange = false;
+    bool RollbackNSMBSkipInputRanges = false;
+    bool RollbackNSMBRestoreDiffTrace = false;
+    bool RollbackNSMBProcessListRanges = false;
+    bool RollbackNSMBHeapScanRanges = true;
+    int RollbackNSMBScanInterval = 1;
+    int RollbackNSMBHeapScanInterval = 1;
+    RollbackNSMBDynamicRangeCache RollbackNSMBDynamicRanges;
+    RollbackNSMBDynamicRangeCache RollbackNSMBHeapScanRangesCache;
+    melonDS::u32 RollbackNSMBRangeScanRefreshCount = 0;
+    melonDS::u32 RollbackNSMBRangeCacheHitCount = 0;
+    melonDS::u32 RollbackNSMBHeapScanRefreshCount = 0;
+    melonDS::u32 RollbackNSMBHeapScanCacheHitCount = 0;
+    melonDS::u32 RollbackNSMBProcessListObjectCount = 0;
+    melonDS::u32 RollbackNSMBProcessListNodeCount = 0;
+    melonDS::u32 RollbackNSMBHeapScanObjectCount = 0;
+    bool RollbackDeltaPageTrace = false;
+    melonDS::u32 RollbackDeltaPageTraceStartFrame = 0;
+    melonDS::u32 RollbackDeltaPageTraceEndFrame = 0;
+    int RollbackDeltaPageTraceMaxRuns = 12;
     int RollbackResimulateDelayFrames = 0;
+    int RollbackMaxResimFrames = 0;
+    int RollbackInputWaitUs = 0;
     std::map<melonDS::u32, InputState> PredictedRemoteInputs;
-    std::map<melonDS::u32, std::vector<char>> RollbackStates;
+    std::map<melonDS::u32, RollbackStoredState> RollbackStates;
+    std::vector<melonDS::u8> RollbackFrameDeltaShadowMainRAM;
+    melonDS::u32 RollbackFrameDeltaShadowFrame = kNoFrameLimit;
     bool LastConfirmedRemoteInputValid = false;
     InputState LastConfirmedRemoteInput {};
     melonDS::u32 PendingRollbackFrame = kNoFrameLimit;
@@ -1295,7 +1637,29 @@ struct State
     melonDS::u32 RollbackMismatchCount = 0;
     melonDS::u32 RollbackRestoreCount = 0;
     melonDS::u32 RollbackResimulateCount = 0;
+    bool RollbackSkipRenderDuringResim = false;
+    bool RollbackSkipIntermediateResimCheckpoints = false;
+    melonDS::u32 LastPerfSpikeRollbackRestoreCount[16] {};
+    melonDS::u32 LastPerfSpikeRollbackResimulateCount[16] {};
+    melonDS::u32 RollbackPredictionProbeCount = 0;
     melonDS::u32 RollbackCheckpointSaveCount = 0;
+    size_t RollbackCheckpointLastBytes = 0;
+    size_t RollbackCheckpointMinBytes = 0;
+    size_t RollbackCheckpointMaxBytes = 0;
+    unsigned long long RollbackCheckpointTotalBytes = 0;
+    unsigned long long RollbackCheckpointSaveTotalUs = 0;
+    unsigned long long RollbackCheckpointSaveMaxUs = 0;
+    unsigned long long RollbackCheckpointRestoreTotalUs = 0;
+    unsigned long long RollbackCheckpointRestoreMaxUs = 0;
+    melonDS::u32 RollbackCheckpointRestoreOpCount = 0;
+    melonDS::u32 RollbackMeasuredResimOpCount = 0;
+    unsigned long long RollbackMeasuredResimFrameCount = 0;
+    unsigned long long RollbackResimRunFrameTotalUs = 0;
+    unsigned long long RollbackResimRunFrameMaxUs = 0;
+    unsigned long long RollbackResimCheckpointSaveTotalUs = 0;
+    unsigned long long RollbackResimCheckpointSaveMaxUs = 0;
+    unsigned long long RollbackResimCorrectionTotalUs = 0;
+    unsigned long long RollbackResimCorrectionMaxUs = 0;
     melonDS::u32 LastRollbackTraceFrame = kNoFrameLimit;
     melonDS::u32 ForceStageSceneStartGateStartFrame = 0;
     melonDS::u32 ForceStageSceneStartGateEndFrame = 0;
@@ -1421,6 +1785,15 @@ struct State
     std::map<melonDS::u64, GameStateSyncHashes> LocalGameStateHashes;
     std::map<melonDS::u64, GameStateSyncHashes> RemoteGameStateHashes;
     std::map<melonDS::u64, GameStateSample> RemoteGameStateSamples;
+    std::map<melonDS::u64, WirePlayerState> RemotePlayerStateSamples;
+    WireWorldState RemoteWorldStateSample {};
+    bool RemoteWorldStateSampleValid = false;
+    WireMovingHazardState RemoteMovingHazardStateSample {};
+    bool RemoteMovingHazardStateSampleValid = false;
+    WireWorldActorSnapshotState RemoteWorldActorSnapshotSample {};
+    bool RemoteWorldActorSnapshotSampleValid = false;
+    WireWorldEffectState RemoteWorldEffectStateSample {};
+    bool RemoteWorldEffectStateSampleValid = false;
     std::vector<WireNSMLPacket> PendingNSMLPackets;
     bool GameStateMismatchSeen = false;
     melonDS::u32 LastTracedSentInputFrame = kNoFrameLimit;
@@ -1439,6 +1812,37 @@ struct State
     melonDS::u64 LastLoggedHashFrame[16] {};
     melonDS::u64 LastLoggedGameStateFrame[16] {};
     melonDS::u64 LastSentGameStateFrame[16] {};
+    melonDS::u64 LastSentPlayerStateFrame[16] {};
+    melonDS::u64 LastSentWorldStateFrame[16] {};
+    melonDS::u32 LastAppliedPlayerGlobalsFrame[16][2] {};
+    melonDS::u32 PlayerActorBaseCache[16][2] {};
+    melonDS::u32 PlayerActorGUIDCache[16][2] {};
+    melonDS::u32 WorldStarActorBaseCache[16] {};
+    melonDS::u32 WorldStarActorGUIDCache[16] {};
+    melonDS::u32 LastSpawnedWorldItemRemoteGUID[16] {};
+    melonDS::u32 LastConfirmedWorldItemRemoteGUID[16] {};
+    melonDS::u32 PendingWorldItemRemoteGUID[16] {};
+    melonDS::u32 PendingWorldItemFirstMissingFrame[16] {};
+    melonDS::u32 LastSpawnedNeutralWorldItemRemoteGUID[16] {};
+    melonDS::u32 LastConfirmedNeutralWorldItemRemoteGUID[16] {};
+    melonDS::u32 PendingNeutralWorldItemRemoteGUID[16] {};
+    melonDS::u32 PendingNeutralWorldItemFirstMissingFrame[16] {};
+    melonDS::u32 LastSpawnedDroppedStarItemRemoteGUID[16] {};
+    melonDS::u32 LastConfirmedDroppedStarItemRemoteGUID[16] {};
+    melonDS::u32 PendingDroppedStarItemRemoteGUID[16] {};
+    melonDS::u32 PendingDroppedStarItemFirstMissingFrame[16] {};
+    melonDS::u32 WorldMovingHazardBaseCache[16] {};
+    melonDS::u32 WorldMovingHazardGUIDCache[16] {};
+    melonDS::u32 WorldMovingHazardBaseCaches[16][kMaxWorldMovingHazards] {};
+    melonDS::u32 WorldMovingHazardGUIDCaches[16][kMaxWorldMovingHazards] {};
+    melonDS::u32 WorldMovingHazardRemoteGUIDMaps[16][kMaxWorldMovingHazards] {};
+    melonDS::u32 WorldMovingHazardLocalGUIDMaps[16][kMaxWorldMovingHazards] {};
+    melonDS::u32 WorldActorSnapshotRemoteGUIDMaps[16][kMaxWorldActorSnapshots] {};
+    melonDS::u32 WorldActorSnapshotLocalGUIDMaps[16][kMaxWorldActorSnapshots] {};
+    melonDS::u32 WorldMovingHazardCacheCounts[16] {};
+    melonDS::u32 LastTracedWorldMovingHazardsFrame[16] {};
+    melonDS::u32 LastTracedWorldEffectsFrame[16] {};
+    melonDS::u32 LastTracedWorldObjectLifecyclesFrame[16] {};
     melonDS::u32 TestFrameCount[16] {};
     bool StateSaved[16] {};
     bool StateLoaded[16] {};
@@ -1505,7 +1909,11 @@ int EnvInt(const char* name, int fallback)
 {
     const char* value = std::getenv(name);
     if (!value || !value[0]) return fallback;
-    return std::atoi(value);
+    char* end = nullptr;
+    const long parsed = std::strtol(value, &end, 0);
+    if (end == value)
+        return fallback;
+    return static_cast<int>(parsed);
 }
 
 melonDS::u32 EnvU32(const char* name, melonDS::u32 fallback)
@@ -1840,6 +2248,11 @@ melonDS::u64 GameStateKey(int instanceID, melonDS::u32 frame)
     return (static_cast<melonDS::u64>(static_cast<melonDS::u32>(instanceID)) << 32) | frame;
 }
 
+melonDS::u64 PlayerStateKey(melonDS::u32 player, melonDS::u32 frame)
+{
+    return (static_cast<melonDS::u64>(player) << 32) | frame;
+}
+
 melonDS::u64 CombinedGameStateHash(const GameStateSyncHashes& hashes)
 {
     melonDS::u64 combined = hashes.Basic;
@@ -1933,13 +2346,15 @@ void StoreRemoteInputLocked(melonDS::u32 frame, const InputState& receivedInput,
             const melonDS::u32 observedFrame = localFrame == kNoFrameLimit
                 ? frame
                 : localFrame;
-            if (G.PendingRollbackFrame == kNoFrameLimit
-                || frame < G.PendingRollbackFrame)
+            const bool frameAlreadySimulated = localFrame == kNoFrameLimit || frame < localFrame;
+            if (frameAlreadySimulated
+                && (G.PendingRollbackFrame == kNoFrameLimit
+                    || frame < G.PendingRollbackFrame))
             {
                 G.PendingRollbackFrame = frame;
                 G.PendingRollbackObservedFrame = observedFrame;
             }
-            else if (G.PendingRollbackObservedFrame == kNoFrameLimit)
+            else if (frameAlreadySimulated && G.PendingRollbackObservedFrame == kNoFrameLimit)
             {
                 G.PendingRollbackObservedFrame = observedFrame;
             }
@@ -1960,6 +2375,13 @@ void StoreRemoteInputLocked(melonDS::u32 frame, const InputState& receivedInput,
                     receivedInput.TouchY,
                     G.PendingRollbackFrame,
                     G.RollbackMismatchCount);
+                if (!frameAlreadySimulated)
+                {
+                    std::printf(
+                        "NSMB Rollback: current/future mismatch applied without rollback frame=%u localFrame=%u\n",
+                        frame,
+                        localFrame);
+                }
                 std::fflush(stdout);
             }
         }
@@ -2022,7 +2444,14 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     StoreRemoteInputLocked(packet.Frame, receivedInput, localFrame);
                 }
             }
-            else if (event.packet->dataLength > sizeof(WireSeed))
+            else if (event.packet->dataLength > sizeof(WireSeed)
+                && event.packet->dataLength != sizeof(WireNSMLPacket)
+                && event.packet->dataLength != sizeof(WireGameState)
+                && event.packet->dataLength != sizeof(WirePlayerState)
+                && event.packet->dataLength != sizeof(WireWorldState)
+                && event.packet->dataLength != sizeof(WireMovingHazardState)
+                && event.packet->dataLength != sizeof(WireWorldActorSnapshotState)
+                && event.packet->dataLength != sizeof(WireWorldEffectState))
             {
                 WireInputBundleHeader header;
                 std::memcpy(&header, event.packet->data, sizeof(header));
@@ -2102,6 +2531,105 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                             packet.Frame,
                             localFrame,
                             G.PendingNSMLPackets.size());
+                    }
+                }
+            }
+            else if (event.packet->dataLength == sizeof(WirePlayerState))
+            {
+                WirePlayerState packet;
+                std::memcpy(&packet, event.packet->data, sizeof(packet));
+                if (packet.Magic == kMagic && packet.Version == kVersion
+                    && packet.Kind == kWireKindPlayerState && packet.Player <= 1)
+                {
+                    G.RemotePlayerStateSamples[PlayerStateKey(packet.Player, packet.Frame)] = packet;
+                    while (G.RemotePlayerStateSamples.size() > 240)
+                        G.RemotePlayerStateSamples.erase(G.RemotePlayerStateSamples.begin());
+                    if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
+                        (G.InputTraceInterval <= 1 || (localFrame != kNoFrameLimit && (localFrame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0)))
+                    {
+                        std::printf("NSMB PlayerState: recv localFrame=%u packetFrame=%u player=%u found=%u pos=%08X/%08X vel=%08X/%08X stored=%zu\n",
+                            localFrame,
+                            packet.Frame,
+                            packet.Player,
+                            packet.Found,
+                            packet.PosX,
+                            packet.PosY,
+                            packet.VelX,
+                            packet.VelY,
+                            G.RemotePlayerStateSamples.size());
+                    }
+                }
+            }
+            else if (event.packet->dataLength == sizeof(WireWorldState))
+            {
+                WireWorldState packet;
+                std::memcpy(&packet, event.packet->data, sizeof(packet));
+                if (packet.Magic == kMagic && packet.Version == kVersion
+                    && packet.Kind == kWireKindWorldState)
+                {
+                    if (!G.RemoteWorldStateSampleValid || packet.Frame >= G.RemoteWorldStateSample.Frame)
+                    {
+                        G.RemoteWorldStateSample = packet;
+                        G.RemoteWorldStateSampleValid = true;
+                    }
+                    if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
+                        (G.InputTraceInterval <= 1 || (localFrame != kNoFrameLimit && (localFrame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0)))
+                    {
+                        std::printf("NSMB WorldState: recv localFrame=%u packetFrame=%u star=%u neutralItem=%u item=%u droppedItem=%u hazard=%u hazardPos=%08X/%08X\n",
+                            localFrame,
+                            packet.Frame,
+                            packet.Star.Found,
+                            packet.NeutralItem.Found,
+                            packet.Item.Found,
+                            packet.DroppedStarItem.Found,
+                            packet.MovingHazard.Found,
+                            packet.MovingHazard.PosX,
+                            packet.MovingHazard.PosY);
+                    }
+                }
+            }
+            else if (event.packet->dataLength == sizeof(WireMovingHazardState))
+            {
+                WireMovingHazardState packet;
+                std::memcpy(&packet, event.packet->data, sizeof(packet));
+                if (packet.Magic == kMagic && packet.Version == kVersion
+                    && packet.Kind == kWireKindMovingHazardState
+                    && packet.Count <= kMaxWorldMovingHazards)
+                {
+                    if (!G.RemoteMovingHazardStateSampleValid || packet.Frame >= G.RemoteMovingHazardStateSample.Frame)
+                    {
+                        G.RemoteMovingHazardStateSample = packet;
+                        G.RemoteMovingHazardStateSampleValid = true;
+                    }
+                }
+            }
+            else if (event.packet->dataLength == sizeof(WireWorldActorSnapshotState))
+            {
+                WireWorldActorSnapshotState packet;
+                std::memcpy(&packet, event.packet->data, sizeof(packet));
+                if (packet.Magic == kMagic && packet.Version == kVersion
+                    && packet.Kind == kWireKindWorldActorSnapshot
+                    && packet.Count <= kMaxWorldActorSnapshots)
+                {
+                    if (!G.RemoteWorldActorSnapshotSampleValid || packet.Frame >= G.RemoteWorldActorSnapshotSample.Frame)
+                    {
+                        G.RemoteWorldActorSnapshotSample = packet;
+                        G.RemoteWorldActorSnapshotSampleValid = true;
+                    }
+                }
+            }
+            else if (event.packet->dataLength == sizeof(WireWorldEffectState))
+            {
+                WireWorldEffectState packet;
+                std::memcpy(&packet, event.packet->data, sizeof(packet));
+                if (packet.Magic == kMagic && packet.Version == kVersion
+                    && packet.Kind == kWireKindWorldEffectState
+                    && packet.Count <= kMaxWorldEffects)
+                {
+                    if (!G.RemoteWorldEffectStateSampleValid || packet.Frame >= G.RemoteWorldEffectStateSample.Frame)
+                    {
+                        G.RemoteWorldEffectStateSample = packet;
+                        G.RemoteWorldEffectStateSampleValid = true;
                     }
                 }
             }
@@ -2240,6 +2768,43 @@ void NetworkPumpThreadMain()
     }
 }
 
+void FrameHeartbeatThreadMain()
+{
+    melonDS::u32 writtenFrame = 0;
+    while (!G.FrameHeartbeatStop.load(std::memory_order_acquire))
+    {
+        const melonDS::u32 frame = G.PendingFrameHeartbeat.load(std::memory_order_acquire);
+        if (frame != 0 && frame != writtenFrame && G.FrameHeartbeat)
+        {
+            G.FrameHeartbeat << frame << '\n';
+            G.FrameHeartbeat.flush();
+            writtenFrame = frame;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+void StartFrameHeartbeatThreadIfNeeded()
+{
+    if (!G.FrameHeartbeat || G.FrameHeartbeatThreadStarted)
+        return;
+
+    G.FrameHeartbeatStop.store(false, std::memory_order_release);
+    G.FrameHeartbeatThreadStarted = true;
+    G.FrameHeartbeatThread = std::thread(FrameHeartbeatThreadMain);
+}
+
+void StopFrameHeartbeatThread()
+{
+    if (!G.FrameHeartbeatThreadStarted)
+        return;
+
+    G.FrameHeartbeatStop.store(true, std::memory_order_release);
+    if (G.FrameHeartbeatThread.joinable())
+        G.FrameHeartbeatThread.join();
+    G.FrameHeartbeatThreadStarted = false;
+}
+
 void StartNetworkPumpThreadIfNeeded()
 {
     if (!G.NetworkPumpThreadEnabled || G.NetworkPumpThreadStarted)
@@ -2248,9 +2813,10 @@ void StartNetworkPumpThreadIfNeeded()
     G.NetworkPumpStop = false;
     G.NetworkPumpThreadStarted = true;
     G.NetworkPumpThread = std::thread(NetworkPumpThreadMain);
-    std::printf("NSMB PoC: network pump thread started sleepUs=%d inputWaitUs=%d\n",
+    std::printf("NSMB PoC: network pump thread started sleepUs=%d inputWaitPollUs=%d rollbackInputWaitUs=%d\n",
         G.NetworkPumpSleepUs,
-        G.InputWaitPollUs);
+        G.InputWaitPollUs,
+        G.RollbackInputWaitUs);
     std::fflush(stdout);
 }
 
@@ -2416,10 +2982,14 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
         : std::vector<char> {};
     const melonDS::u32 sendFlags = sendBundle ? ENET_PACKET_FLAG_UNSEQUENCED : ENET_PACKET_FLAG_RELIABLE;
 
-    const int jitterFrames = G.InputSendJitterFrames > 0
+    const bool sendDelayActive =
+        frame >= G.InputSendDelayStartFrame
+        && (G.InputSendDelayEndFrame == kNoFrameLimit
+            || frame <= G.InputSendDelayEndFrame);
+    const int jitterFrames = sendDelayActive && G.InputSendJitterFrames > 0
         ? static_cast<int>(frame % static_cast<melonDS::u32>(G.InputSendJitterFrames + 1))
         : 0;
-    const int sendDelayFrames = G.InputSendDelayFrames + jitterFrames;
+    const int sendDelayFrames = sendDelayActive ? G.InputSendDelayFrames + jitterFrames : 0;
     if (sendDelayFrames > 0)
     {
         G.DelayedInputs.push_back({
@@ -2479,6 +3049,19 @@ bool GetRollbackRemoteInputLocked(melonDS::u32 frame, InputState& input, bool& p
     else
         input = NeutralInput();
 
+    if (G.RollbackPredictionProbeModulo > 0
+        && (G.RollbackPredictionProbeLimit < 0
+            || G.RollbackPredictionProbeCount < static_cast<melonDS::u32>(G.RollbackPredictionProbeLimit))
+        && frame >= G.RollbackPredictionProbeStartFrame
+        && (G.RollbackPredictionProbeEndFrame == kNoFrameLimit
+            || frame <= G.RollbackPredictionProbeEndFrame)
+        && (frame % static_cast<melonDS::u32>(G.RollbackPredictionProbeModulo))
+            == static_cast<melonDS::u32>(G.RollbackPredictionProbeOffset))
+    {
+        input.KeyMask ^= G.RollbackPredictionProbeKeyMask & 0xFFFu;
+        G.RollbackPredictionProbeCount++;
+    }
+
     G.PredictedRemoteInputs.emplace(frame, input);
     G.RollbackPredictionCount++;
     predicted = true;
@@ -2491,9 +3074,38 @@ void PruneRollbackHistoryLocked(melonDS::u32 frame)
         ? frame - static_cast<melonDS::u32>(G.RollbackWindow)
         : 0;
 
+    std::set<melonDS::u32> requiredFrames;
+    auto markRequiredChain = [&](melonDS::u32 startFrame)
+    {
+        auto start = G.RollbackStates.find(startFrame);
+        if (start == G.RollbackStates.end())
+            return;
+        requiredFrames.insert(startFrame);
+        const RollbackStoredState* cursor = &start->second;
+        for (size_t depth = 0; depth < G.RollbackStates.size(); depth++)
+        {
+            if (!cursor->MainRAMDelta || cursor->BaseFrame == kNoFrameLimit)
+                break;
+            if (!requiredFrames.insert(cursor->BaseFrame).second)
+                break;
+            auto base = G.RollbackStates.find(cursor->BaseFrame);
+            if (base == G.RollbackStates.end())
+                break;
+            cursor = &base->second;
+        }
+    };
+
+    for (const auto& [storedFrame, stored] : G.RollbackStates)
+    {
+        if (storedFrame >= keepFrom)
+            markRequiredChain(storedFrame);
+    }
+    if (G.RollbackFrameDeltaShadowFrame != kNoFrameLimit)
+        markRequiredChain(G.RollbackFrameDeltaShadowFrame);
+
     for (auto it = G.RollbackStates.begin(); it != G.RollbackStates.end(); )
     {
-        if (it->first < keepFrom)
+        if (it->first < keepFrom && requiredFrames.find(it->first) == requiredFrames.end())
             it = G.RollbackStates.erase(it);
         else
             ++it;
@@ -2516,9 +3128,164 @@ bool ShouldSaveRollbackCheckpoint(melonDS::u32 frame)
     return (frame % static_cast<melonDS::u32>(G.RollbackCheckpointInterval)) == 0;
 }
 
+const char* RollbackBackendName()
+{
+    switch (G.RollbackBackendMode)
+    {
+    case RollbackBackend::CoreLite:
+        return "corelite";
+    case RollbackBackend::CoreSparse:
+        return "coresparse";
+    case RollbackBackend::CoreDelta:
+        return "coredelta";
+    case RollbackBackend::CoreFrameDelta:
+        return "coreframedelta";
+    case RollbackBackend::CorePreimage:
+        return "corepreimage";
+    case RollbackBackend::TinyCorePreimage:
+        return "tinycorepreimage";
+    case RollbackBackend::NSMBRanges:
+        return "nsmbranges";
+    case RollbackBackend::NSMBCoreRanges:
+        return "nsmbcoreranges";
+    case RollbackBackend::NSMBTinyCoreRanges:
+        return "nsmbtinycore";
+    case RollbackBackend::ARM9RAM:
+        return "arm9ram";
+    case RollbackBackend::Savestate:
+    default:
+        return "savestate";
+    }
+}
+
+bool IsRollbackPreimageBackend()
+{
+    return G.RollbackBackendMode == RollbackBackend::CorePreimage
+        || G.RollbackBackendMode == RollbackBackend::TinyCorePreimage;
+}
+
+unsigned long long ElapsedUs(std::chrono::steady_clock::time_point start)
+{
+    return static_cast<unsigned long long>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - start).count());
+}
+
+size_t RollbackCheckpointBytes(const RollbackStoredState& checkpoint)
+{
+    return checkpoint.Buffer.size()
+        + checkpoint.MainRAMPreimagePages.size() * sizeof(melonDS::u32)
+        + checkpoint.MainRAMPreimage.size();
+}
+
+void RecordRollbackCheckpointSaveLocked(size_t bytes, unsigned long long elapsedUs)
+{
+    G.RollbackCheckpointLastBytes = bytes;
+    if (G.RollbackCheckpointMinBytes == 0 || bytes < G.RollbackCheckpointMinBytes)
+        G.RollbackCheckpointMinBytes = bytes;
+    if (bytes > G.RollbackCheckpointMaxBytes)
+        G.RollbackCheckpointMaxBytes = bytes;
+    G.RollbackCheckpointTotalBytes += static_cast<unsigned long long>(bytes);
+    G.RollbackCheckpointSaveTotalUs += elapsedUs;
+    if (elapsedUs > G.RollbackCheckpointSaveMaxUs)
+        G.RollbackCheckpointSaveMaxUs = elapsedUs;
+}
+
+void RecordRollbackCheckpointRestoreLocked(unsigned long long elapsedUs)
+{
+    G.RollbackCheckpointRestoreOpCount++;
+    G.RollbackCheckpointRestoreTotalUs += elapsedUs;
+    if (elapsedUs > G.RollbackCheckpointRestoreMaxUs)
+        G.RollbackCheckpointRestoreMaxUs = elapsedUs;
+}
+
+void RecordRollbackResimTimingLocked(
+    melonDS::u32 frames,
+    unsigned long long runFrameTotalUs,
+    unsigned long long runFrameMaxUs,
+    unsigned long long checkpointSaveTotalUs,
+    unsigned long long checkpointSaveMaxUs,
+    unsigned long long correctionTotalUs)
+{
+    G.RollbackMeasuredResimOpCount++;
+    G.RollbackMeasuredResimFrameCount += frames;
+    G.RollbackResimRunFrameTotalUs += runFrameTotalUs;
+    if (runFrameMaxUs > G.RollbackResimRunFrameMaxUs)
+        G.RollbackResimRunFrameMaxUs = runFrameMaxUs;
+    G.RollbackResimCheckpointSaveTotalUs += checkpointSaveTotalUs;
+    if (checkpointSaveMaxUs > G.RollbackResimCheckpointSaveMaxUs)
+        G.RollbackResimCheckpointSaveMaxUs = checkpointSaveMaxUs;
+    G.RollbackResimCorrectionTotalUs += correctionTotalUs;
+    if (correctionTotalUs > G.RollbackResimCorrectionMaxUs)
+        G.RollbackResimCorrectionMaxUs = correctionTotalUs;
+}
+
+void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
+{
+    if (instanceID < 0 || instanceID >= 16 || !G.ActiveTimerStarted[instanceID])
+        return;
+
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(G.PerfMutex);
+    if (!G.ActiveFrameTimingStarted[instanceID])
+    {
+        G.ActiveFrameTimingStarted[instanceID] = true;
+        G.ActiveFrameLastTime[instanceID] = now;
+        return;
+    }
+
+    const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+        now - G.ActiveFrameLastTime[instanceID]).count();
+    G.ActiveFrameLastTime[instanceID] = now;
+    if (elapsed <= 0)
+        return;
+
+    const unsigned long long elapsedUs =
+        static_cast<unsigned long long>(elapsed);
+    G.ActiveFrameSamples[instanceID]++;
+    G.ActiveFrameTotalUs[instanceID] += elapsedUs;
+    if (elapsedUs > G.ActiveFrameMaxUs[instanceID])
+    {
+        G.ActiveFrameMaxUs[instanceID] = elapsedUs;
+        G.ActiveFrameMaxFrame[instanceID] = frame;
+    }
+    if (elapsedUs > 16667)
+        G.ActiveFrameOver16ms[instanceID]++;
+    if (elapsedUs > 25000)
+        G.ActiveFrameOver25ms[instanceID]++;
+    if (elapsedUs > 33334)
+        G.ActiveFrameOver33ms[instanceID]++;
+
+    if (G.ActiveFrameSpikeTrace && elapsedUs >= static_cast<unsigned long long>(G.ActiveFrameSpikeThresholdUs))
+    {
+        const melonDS::u32 restoreDelta =
+            G.RollbackRestoreCount - G.LastPerfSpikeRollbackRestoreCount[instanceID];
+        const melonDS::u32 resimDelta =
+            G.RollbackResimulateCount - G.LastPerfSpikeRollbackResimulateCount[instanceID];
+        G.LastPerfSpikeRollbackRestoreCount[instanceID] = G.RollbackRestoreCount;
+        G.LastPerfSpikeRollbackResimulateCount[instanceID] = G.RollbackResimulateCount;
+        std::printf(
+            "NSMB PerfSpike: inst=%d frame=%u frameTimeUs=%llu thresholdUs=%d rollbackRestores=%u rollbackResims=%u rollbackRestoreDelta=%u rollbackResimDelta=%u saveMaxUs=%llu restoreMaxUs=%llu resimRunMaxUs=%llu resimSaveMaxUs=%llu resimTotalMaxUs=%llu\n",
+            instanceID,
+            frame,
+            elapsedUs,
+            G.ActiveFrameSpikeThresholdUs,
+            G.RollbackRestoreCount,
+            G.RollbackResimulateCount,
+            restoreDelta,
+            resimDelta,
+            G.RollbackCheckpointSaveMaxUs,
+            G.RollbackCheckpointRestoreMaxUs,
+            G.RollbackResimRunFrameMaxUs,
+            G.RollbackResimCheckpointSaveMaxUs,
+            G.RollbackResimCorrectionMaxUs);
+    }
+}
+
 void InvalidateMainRAMJIT(melonDS::NDS* nds, melonDS::u32 len)
 {
-    if (!nds || len == 0)
+    static const bool skipInvalidation = std::getenv("MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET") != nullptr;
+    if (skipInvalidation || !nds || len == 0)
         return;
     for (melonDS::u32 offset = 0; offset < len; offset += 0x1000)
     {
@@ -2528,7 +3295,767 @@ void InvalidateMainRAMJIT(melonDS::NDS* nds, melonDS::u32 len)
     }
 }
 
-bool SaveRollbackCheckpointBuffer(melonDS::NDS* nds, std::vector<char>& buffer)
+void InvalidateMainRAMJITRange(melonDS::NDS* nds, melonDS::u32 address, melonDS::u32 length)
+{
+    static const bool skipInvalidation = std::getenv("MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET") != nullptr;
+    if (skipInvalidation || !nds || length == 0 || address < kMainRAMBase)
+        return;
+    const melonDS::u32 offset = address - kMainRAMBase;
+    const melonDS::u32 start = offset & ~0xFFFu;
+    const melonDS::u32 end = (offset + length + 0xFFFu) & ~0xFFFu;
+    for (melonDS::u32 page = start; page < end; page += 0x1000)
+    {
+        const melonDS::u32 addr = kMainRAMBase + page;
+        nds->JIT.CheckAndInvalidate<0, melonDS::ARMJIT_Memory::memregion_MainRAM>(addr);
+        nds->JIT.CheckAndInvalidate<1, melonDS::ARMJIT_Memory::memregion_MainRAM>(addr);
+    }
+}
+
+bool IsValidMainRAMRange(melonDS::NDS* nds, melonDS::u32 address, melonDS::u32 length)
+{
+    if (!nds || !nds->MainRAM || length == 0 || address < kMainRAMBase)
+        return false;
+    const melonDS::u32 offset = address - kMainRAMBase;
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    return offset < ramLen && length <= ramLen - offset;
+}
+
+void AddNSMBRollbackRange(
+    melonDS::NDS* nds,
+    std::vector<RollbackNSMBRangeEntry>& ranges,
+    melonDS::u32 address,
+    melonDS::u32 length)
+{
+    if (!IsValidMainRAMRange(nds, address, length))
+        return;
+    ranges.push_back({address, length});
+}
+
+void AddNSMBRollbackObjectRange(
+    melonDS::NDS* nds,
+    std::vector<RollbackNSMBRangeEntry>& ranges,
+    melonDS::u32 base,
+    melonDS::u32 length)
+{
+    if (base != 0)
+        AddNSMBRollbackRange(nds, ranges, base, length);
+}
+
+bool ReadMainRAMAddressU32(melonDS::NDS* nds, melonDS::u32 address, melonDS::u32& value)
+{
+    if (!IsValidMainRAMRange(nds, address, sizeof(value)))
+        return false;
+    std::memcpy(&value, nds->MainRAM + (address - kMainRAMBase), sizeof(value));
+    return true;
+}
+
+bool ReadMainRAMAddressU16(melonDS::NDS* nds, melonDS::u32 address, melonDS::u16& value)
+{
+    if (!IsValidMainRAMRange(nds, address, sizeof(value)))
+        return false;
+    std::memcpy(&value, nds->MainRAM + (address - kMainRAMBase), sizeof(value));
+    return true;
+}
+
+melonDS::u32 NSMBRollbackObjectSnapshotLength(melonDS::u16 objectID)
+{
+    if (objectID == kPlayerObjectID)
+        return 0xC00;
+    if (objectID == kStageSceneObjectID)
+        return 0x5800;
+    if (objectID == kStageActorManagerObjectID)
+        return 0x1000;
+    if (objectID == kStageControllerObjectID || objectID == kStageCameraObjectID || objectID == kStageFXObjectID)
+        return 0x500;
+    return 0x300;
+}
+
+bool TryReadNSMBObjectID(melonDS::NDS* nds, melonDS::u32 base, melonDS::u16& objectID)
+{
+    melonDS::u32 vtable = 0;
+    melonDS::u32 guid = 0;
+    melonDS::u16 stateType = 0;
+    melonDS::u32 flags = 0;
+    if (!ReadMainRAMAddressU32(nds, base, vtable) ||
+        !ReadMainRAMAddressU32(nds, base + 0x04, guid) ||
+        !ReadMainRAMAddressU16(nds, base + 0x0C, objectID) ||
+        !ReadMainRAMAddressU16(nds, base + 0x0E, stateType) ||
+        !ReadMainRAMAddressU32(nds, base + 0x10, flags))
+        return false;
+
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (vtable < kMainRAMBase || vtable >= kMainRAMBase + ramLen)
+        return false;
+    if (guid == 0 || guid >= 0x100000)
+        return false;
+    if (objectID == 0 || objectID > 0x0400)
+        return false;
+    if (stateType > 3)
+        return false;
+    if (flags >= 0x10000000)
+        return false;
+    return true;
+}
+
+void AddNSMBRollbackProcessObjectRange(
+    melonDS::NDS* nds,
+    std::vector<RollbackNSMBRangeEntry>& ranges,
+    std::set<melonDS::u32>& seenBases,
+    melonDS::u32 base)
+{
+    melonDS::u16 objectID = 0;
+    if (!TryReadNSMBObjectID(nds, base, objectID))
+        return;
+    if (!seenBases.insert(base).second)
+        return;
+    AddNSMBRollbackObjectRange(nds, ranges, base, NSMBRollbackObjectSnapshotLength(objectID));
+    G.RollbackNSMBProcessListObjectCount++;
+}
+
+void AddNSMBRollbackProcessListRangesFromList(
+    melonDS::NDS* nds,
+    std::vector<RollbackNSMBRangeEntry>& ranges,
+    std::set<melonDS::u32>& seenBases,
+    melonDS::u32 listAddress)
+{
+    melonDS::u32 node = 0;
+    if (!ReadMainRAMAddressU32(nds, listAddress, node))
+        return;
+
+    std::set<melonDS::u32> seenNodes;
+    for (int i = 0; i < 512 && IsValidMainRAMRange(nds, node, 0x0C); i++)
+    {
+        if (!seenNodes.insert(node).second)
+            break;
+
+        melonDS::u32 next = 0;
+        melonDS::u32 base = 0;
+        ReadMainRAMAddressU32(nds, node + 0x04, next);
+        ReadMainRAMAddressU32(nds, node + 0x08, base);
+        G.RollbackNSMBProcessListNodeCount++;
+        AddNSMBRollbackProcessObjectRange(nds, ranges, seenBases, base);
+        node = next;
+    }
+}
+
+void AddNSMBRollbackProcessListRanges(melonDS::NDS* nds, std::vector<RollbackNSMBRangeEntry>& ranges)
+{
+    if (!nds || !nds->MainRAM)
+        return;
+
+    std::set<melonDS::u32> seenBases;
+    AddNSMBRollbackProcessListRangesFromList(nds, ranges, seenBases, kNSMBProcessExecuteListAddr);
+    AddNSMBRollbackProcessListRangesFromList(nds, ranges, seenBases, kNSMBProcessDeleteListAddr);
+    AddNSMBRollbackProcessListRangesFromList(nds, ranges, seenBases, kNSMBProcessRenderListAddr);
+    AddNSMBRollbackProcessListRangesFromList(nds, ranges, seenBases, kNSMBProcessCreateListAddr);
+    for (int i = 0; i < 8; i++)
+        AddNSMBRollbackProcessListRangesFromList(nds, ranges, seenBases, kNSMBProcessIDLookupListsAddr + static_cast<melonDS::u32>(i * 8));
+}
+
+void AddNSMBRollbackScannedObjectRanges(melonDS::NDS* nds, std::vector<RollbackNSMBRangeEntry>& ranges);
+
+void AddNSMBRollbackCachedHeapScanRanges(melonDS::NDS* nds, std::vector<RollbackNSMBRangeEntry>& ranges)
+{
+    const int heapScanInterval = std::max(1, G.RollbackNSMBHeapScanInterval);
+    auto& cache = G.RollbackNSMBHeapScanRangesCache;
+    const melonDS::u32 frame = nds ? nds->NumFrames : 0;
+    const bool frameWentBack = cache.Valid && frame < cache.Frame;
+    const bool intervalExpired = !cache.Valid
+        || cache.Frame == kNoFrameLimit
+        || (frame - cache.Frame) >= static_cast<melonDS::u32>(heapScanInterval);
+
+    if (cache.NDS != nds || frameWentBack || intervalExpired)
+    {
+        cache.NDS = nds;
+        cache.Frame = frame;
+        cache.Valid = true;
+        cache.Ranges.clear();
+        AddNSMBRollbackScannedObjectRanges(nds, cache.Ranges);
+        G.RollbackNSMBHeapScanRefreshCount++;
+    }
+    else
+    {
+        G.RollbackNSMBHeapScanObjectCount = static_cast<melonDS::u32>(cache.Ranges.size());
+        G.RollbackNSMBHeapScanCacheHitCount++;
+    }
+
+    ranges.insert(ranges.end(), cache.Ranges.begin(), cache.Ranges.end());
+}
+
+void AddNSMBRollbackScannedObjectRanges(melonDS::NDS* nds, std::vector<RollbackNSMBRangeEntry>& ranges)
+{
+    if (!nds || !nds->MainRAM)
+        return;
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (ramLen < 0x120)
+        return;
+
+    auto read16 = [&](melonDS::u32 offset) -> melonDS::u16 {
+        melonDS::u16 value = 0;
+        std::memcpy(&value, nds->MainRAM + offset, sizeof(value));
+        return value;
+    };
+    auto read32 = [&](melonDS::u32 offset) -> melonDS::u32 {
+        melonDS::u32 value = 0;
+        std::memcpy(&value, nds->MainRAM + offset, sizeof(value));
+        return value;
+    };
+
+    for (melonDS::u32 off = 0; off <= ramLen - 0x120; off += 4)
+    {
+        const melonDS::u32 vtable = read32(off);
+        const melonDS::u32 guid = read32(off + 0x04);
+        const melonDS::u32 settings = read32(off + 0x08);
+        const melonDS::u16 objectID = read16(off + 0x0C);
+        const melonDS::u16 stateType = read16(off + 0x0E);
+        const melonDS::u32 flags = read32(off + 0x10);
+
+        if (vtable < kMainRAMBase || vtable >= kMainRAMBase + ramLen)
+            continue;
+        if (guid == 0 || guid >= 0x10000)
+            continue;
+        if (objectID == 0 || objectID > 0x0400)
+            continue;
+        if (stateType < 1 || stateType > 3)
+            continue;
+        if (flags >= 0x10000000)
+            continue;
+        if (settings == 0xFFFFFFFFu)
+            continue;
+
+        AddNSMBRollbackRange(nds, ranges, kMainRAMBase + off, NSMBRollbackObjectSnapshotLength(objectID));
+        G.RollbackNSMBHeapScanObjectCount++;
+    }
+}
+
+void AddNSMBRollbackDeltaDiscoveredRanges(melonDS::NDS* nds, std::vector<RollbackNSMBRangeEntry>& ranges)
+{
+    // Experimental coverage from coredelta page traces around rollback mismatches.
+    AddNSMBRollbackRange(nds, ranges, 0x02085200, 0x500);
+    AddNSMBRollbackRange(nds, ranges, 0x0203CF00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02085B00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02085C00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02087600, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02087700, 0x900);
+    AddNSMBRollbackRange(nds, ranges, 0x02088000, 0x400);
+    AddNSMBRollbackRange(nds, ranges, 0x02088400, 0x800);
+    AddNSMBRollbackRange(nds, ranges, 0x02089100, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02089200, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02089400, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02089500, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0208AE00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0208B400, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0208B600, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0208B700, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0208FB00, 0x300);
+    AddNSMBRollbackRange(nds, ranges, 0x0208FE00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02090D00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02092B00, 0xC00);
+    AddNSMBRollbackRange(nds, ranges, 0x02094200, 0x600);
+    AddNSMBRollbackRange(nds, ranges, 0x02094800, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02094900, 0x1000);
+    AddNSMBRollbackRange(nds, ranges, 0x02095000, 0x200);
+    AddNSMBRollbackRange(nds, ranges, 0x02095200, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02095300, 0x300);
+    AddNSMBRollbackRange(nds, ranges, 0x02095600, 0xB00);
+    AddNSMBRollbackRange(nds, ranges, 0x02095700, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02096100, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0208FA00, 0x400);
+    AddNSMBRollbackRange(nds, ranges, 0x02129400, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0212A400, 0x300);
+    AddNSMBRollbackRange(nds, ranges, 0x0212AD00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0212AE00, 0x200);
+    AddNSMBRollbackRange(nds, ranges, 0x0215C100, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02190400, 0x400);
+    AddNSMBRollbackRange(nds, ranges, 0x02190500, 0x200);
+    AddNSMBRollbackRange(nds, ranges, 0x02190900, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02190B00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02190C00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02190D00, 0x200);
+    AddNSMBRollbackRange(nds, ranges, 0x02191100, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02191300, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02191400, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B2600, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B2B00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B2E00, 0x900);
+    AddNSMBRollbackRange(nds, ranges, 0x021B3900, 0x300);
+    AddNSMBRollbackRange(nds, ranges, 0x021B4400, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B4600, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B4700, 0x300);
+    AddNSMBRollbackRange(nds, ranges, 0x021B4500, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B4A00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B4B00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B4E00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B4F00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B5000, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B5300, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B5400, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B5500, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B6300, 0x300);
+    AddNSMBRollbackRange(nds, ranges, 0x021B6600, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B6900, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B7200, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021B7300, 0x200);
+    AddNSMBRollbackRange(nds, ranges, 0x021B7500, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021BE800, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021C1E00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x021C8400, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02288400, 0x1100);
+    AddNSMBRollbackRange(nds, ranges, 0x0229AB00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0229AC00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0229BC00, 0x400);
+    AddNSMBRollbackRange(nds, ranges, 0x0229BF00, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0229D800, 0x200);
+    AddNSMBRollbackRange(nds, ranges, 0x022A4300, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x02315700, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0231B500, 0x100);
+    AddNSMBRollbackRange(nds, ranges, 0x0234A300, 0x300);
+    AddNSMBRollbackRange(nds, ranges, 0x02350E00, 0x200);
+    AddNSMBRollbackRange(nds, ranges, 0x023FFC00, 0x400);
+}
+
+void AddNSMBRollbackActorArenaRanges(melonDS::NDS* nds, std::vector<RollbackNSMBRangeEntry>& ranges)
+{
+    AddNSMBRollbackRange(nds, ranges, 0x021B2600, 0x5000);
+    AddNSMBRollbackRange(nds, ranges, 0x02088B00, 0x200);
+}
+
+void AddNSMBRollbackArm9StackRange(melonDS::NDS* nds, std::vector<RollbackNSMBRangeEntry>& ranges)
+{
+    AddNSMBRollbackRange(nds, ranges, 0x023E0000, 0x20000);
+}
+
+void BuildNSMBRollbackDynamicRanges(melonDS::NDS* nds, std::vector<RollbackNSMBRangeEntry>& ranges)
+{
+    G.RollbackNSMBProcessListObjectCount = 0;
+    G.RollbackNSMBProcessListNodeCount = 0;
+    G.RollbackNSMBHeapScanObjectCount = 0;
+
+    if (G.RollbackNSMBProcessListRanges)
+        AddNSMBRollbackProcessListRanges(nds, ranges);
+    if (G.RollbackNSMBHeapScanRanges)
+        AddNSMBRollbackCachedHeapScanRanges(nds, ranges);
+
+    if (!G.RollbackNSMBProcessListRanges)
+    {
+        const PlayerActorScanSample players = FindPlayerActors(nds);
+        AddNSMBRollbackObjectRange(nds, ranges, players.Actor0.Base, NSMBRollbackObjectSnapshotLength(kPlayerObjectID));
+        AddNSMBRollbackObjectRange(nds, ranges, players.Actor1.Base, NSMBRollbackObjectSnapshotLength(kPlayerObjectID));
+
+        const ObjectScanSample star = FindObjectByIDAndSettingsLoose(nds, kVsBattleStarActorObjectID, kVsBattleStarActorSettings);
+        AddNSMBRollbackObjectRange(nds, ranges, star.Base, NSMBRollbackObjectSnapshotLength(kVsBattleStarActorObjectID));
+        const ObjectScanSample movingHazard = FindObjectByIDAndSettingsLoose(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
+        AddNSMBRollbackObjectRange(nds, ranges, movingHazard.Base, NSMBRollbackObjectSnapshotLength(kVsMovingHazardObjectID));
+        const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, G.MvlStageSceneSettings);
+        AddNSMBRollbackObjectRange(nds, ranges, stageScene.Base, NSMBRollbackObjectSnapshotLength(kStageSceneObjectID));
+        const ObjectScanSample stageCamera = FindObjectByIDAndSettingsLoose(nds, kStageCameraObjectID, 0);
+        AddNSMBRollbackObjectRange(nds, ranges, stageCamera.Base, NSMBRollbackObjectSnapshotLength(kStageCameraObjectID));
+        const ObjectScanSample stageFX = FindObjectByID(nds, kStageFXObjectID);
+        AddNSMBRollbackObjectRange(nds, ranges, stageFX.Base, NSMBRollbackObjectSnapshotLength(kStageFXObjectID));
+        const ObjectScanSample stageActorManager = FindObjectByID(nds, kStageActorManagerObjectID);
+        AddNSMBRollbackObjectRange(nds, ranges, stageActorManager.Base, NSMBRollbackObjectSnapshotLength(kStageActorManagerObjectID));
+        const ObjectScanSample stageController = FindObjectByID(nds, kStageControllerObjectID);
+        AddNSMBRollbackObjectRange(nds, ranges, stageController.Base, NSMBRollbackObjectSnapshotLength(kStageControllerObjectID));
+        const ObjectPairScanSample mvlObject267 = FindObjectPairByIDSortedX(nds, kMvlObject267ID);
+        AddNSMBRollbackObjectRange(nds, ranges, mvlObject267.Left.Base, NSMBRollbackObjectSnapshotLength(kMvlObject267ID));
+        AddNSMBRollbackObjectRange(nds, ranges, mvlObject267.Right.Base, NSMBRollbackObjectSnapshotLength(kMvlObject267ID));
+    }
+}
+
+void AddNSMBRollbackDynamicRanges(melonDS::NDS* nds, std::vector<RollbackNSMBRangeEntry>& ranges)
+{
+    const int scanInterval = std::max(1, G.RollbackNSMBScanInterval);
+    auto& cache = G.RollbackNSMBDynamicRanges;
+    const melonDS::u32 frame = nds ? nds->NumFrames : 0;
+    const bool frameWentBack = cache.Valid && frame < cache.Frame;
+    const bool intervalExpired = !cache.Valid
+        || cache.Frame == kNoFrameLimit
+        || (frame - cache.Frame) >= static_cast<melonDS::u32>(scanInterval);
+
+    if (cache.NDS != nds || frameWentBack || intervalExpired)
+    {
+        cache.NDS = nds;
+        cache.Frame = frame;
+        cache.Valid = true;
+        cache.Ranges.clear();
+        BuildNSMBRollbackDynamicRanges(nds, cache.Ranges);
+        G.RollbackNSMBRangeScanRefreshCount++;
+    }
+    else
+    {
+        G.RollbackNSMBRangeCacheHitCount++;
+    }
+
+    ranges.insert(ranges.end(), cache.Ranges.begin(), cache.Ranges.end());
+}
+
+std::vector<RollbackNSMBRangeEntry> BuildNSMBRollbackRanges(melonDS::NDS* nds)
+{
+    std::vector<RollbackNSMBRangeEntry> ranges;
+    if (!nds || !nds->MainRAM)
+        return ranges;
+
+    AddNSMBRollbackRange(nds, ranges, 0x02039800, 0xA0);
+    AddNSMBRollbackRange(nds, ranges, 0x0203BD20, 0x40);
+    AddNSMBRollbackRange(nds, ranges, 0x02085900, 0x140);
+    AddNSMBRollbackRange(nds, ranges, kNetStateBaseAddr, 0x280);
+    if (!G.RollbackNSMBSkipInputRanges)
+        AddNSMBRollbackRange(nds, ranges, kInputConsoleKeysAddr, 0x40);
+    AddNSMBRollbackRange(nds, ranges, kGameStageIDAddr & ~0x3Fu, 0x140);
+    AddNSMBRollbackRange(nds, ranges, kGamePlayerGlobalBlockAddr, 0x100);
+    AddNSMBRollbackRange(nds, ranges, kGameCandidateWifiBlockAddr, 0x2200);
+    AddNSMBRollbackRange(nds, ranges, kStageActorFreezeFlagAddr & ~0x3FFu, 0x1400);
+    AddNSMBRollbackRange(nds, ranges, kStageCameraYAddr & ~0x3FFu, 0x2200);
+    AddNSMBRollbackRange(nds, ranges, kPacketBridgeJitScratchBaseAddr, 0x100);
+    AddNSMBRollbackRange(nds, ranges, kGameCandidateRenderBlockAddr, 0x600);
+
+    if (G.RollbackNSMBWideRanges)
+    {
+        AddNSMBRollbackRange(nds, ranges, 0x02080000, 0x60000);
+        AddNSMBRollbackRange(nds, ranges, 0x023C0000, 0x40000);
+    }
+
+    if (G.RollbackNSMBDeltaDiscoveredRanges)
+        AddNSMBRollbackDeltaDiscoveredRanges(nds, ranges);
+    if (G.RollbackNSMBActorArenaRanges)
+        AddNSMBRollbackActorArenaRanges(nds, ranges);
+    if (G.RollbackNSMBArm9StackRange)
+        AddNSMBRollbackArm9StackRange(nds, ranges);
+
+    AddNSMBRollbackDynamicRanges(nds, ranges);
+
+    std::sort(ranges.begin(), ranges.end(), [](const auto& a, const auto& b) {
+        return a.Address < b.Address;
+    });
+
+    std::vector<RollbackNSMBRangeEntry> merged;
+    for (const auto& range : ranges)
+    {
+        if (merged.empty())
+        {
+            merged.push_back(range);
+            continue;
+        }
+
+        auto& last = merged.back();
+        const melonDS::u32 lastEnd = last.Address + last.Length;
+        const melonDS::u32 rangeEnd = range.Address + range.Length;
+        if (range.Address <= lastEnd)
+        {
+            if (rangeEnd > lastEnd)
+                last.Length = rangeEnd - last.Address;
+        }
+        else
+        {
+            merged.push_back(range);
+        }
+    }
+    return merged;
+}
+
+bool RangeOverlaps(melonDS::u32 aStart, melonDS::u32 aLen, melonDS::u32 bStart, melonDS::u32 bLen)
+{
+    const melonDS::u32 aEnd = aStart + aLen;
+    const melonDS::u32 bEnd = bStart + bLen;
+    return aStart < bEnd && bStart < aEnd;
+}
+
+void AppendRangeRun(std::vector<RollbackNSMBRangeEntry>& runs, melonDS::u32 address, melonDS::u32 length)
+{
+    if (runs.empty())
+    {
+        runs.push_back({address, length});
+        return;
+    }
+    auto& last = runs.back();
+    if (last.Address + last.Length == address)
+        last.Length += length;
+    else
+        runs.push_back({address, length});
+}
+
+const char* MainRAMRegionLabel(melonDS::u32 address)
+{
+    if (address < 0x02080000)
+        return "low";
+    if (address < 0x020E0000)
+        return "gameGlobals";
+    if (address < 0x023C0000)
+        return "heapOrObjects";
+    if (address < 0x02400000)
+        return "scratchRender";
+    return "unknown";
+}
+
+void PrintRangeRuns(const char* prefix, melonDS::u32 frame, const std::vector<RollbackNSMBRangeEntry>& runs)
+{
+    if (runs.empty())
+        return;
+
+    std::ostringstream out;
+    out << prefix << ": frame=" << frame << " runs=";
+    const size_t limit = static_cast<size_t>(std::max(1, G.RollbackDeltaPageTraceMaxRuns));
+    for (size_t i = 0; i < runs.size() && i < limit; i++)
+    {
+        if (i != 0)
+            out << ';';
+        out << "0x" << std::hex << std::uppercase << runs[i].Address
+            << "+0x" << runs[i].Length
+            << "(" << MainRAMRegionLabel(runs[i].Address) << ")";
+    }
+    if (runs.size() > limit)
+        out << ";...";
+    std::printf("%s\n", out.str().c_str());
+}
+
+void TraceRollbackDeltaPages(melonDS::u32 frame, melonDS::NDS* nds, const std::vector<melonDS::u8>& baseMainRAM)
+{
+    if (!G.RollbackDeltaPageTrace
+        || (G.RollbackBackendMode != RollbackBackend::CoreDelta
+            && G.RollbackBackendMode != RollbackBackend::CoreFrameDelta))
+        return;
+    if (frame < G.RollbackDeltaPageTraceStartFrame)
+        return;
+    if (G.RollbackDeltaPageTraceEndFrame != 0 && frame > G.RollbackDeltaPageTraceEndFrame)
+        return;
+    if (!nds || !nds->MainRAM || baseMainRAM.size() != nds->MainRAMMask + 1)
+        return;
+
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    melonDS::u32 pageSize = static_cast<melonDS::u32>(G.RollbackMainRAMPageSize);
+    if (pageSize < 256 || pageSize > 4096 || (pageSize & (pageSize - 1)) != 0)
+        pageSize = 4096;
+
+    const std::vector<RollbackNSMBRangeEntry> nsmbRanges = BuildNSMBRollbackRanges(nds);
+    std::vector<RollbackNSMBRangeEntry> changedRuns;
+    std::vector<RollbackNSMBRangeEntry> uncoveredRuns;
+    melonDS::u32 changedPages = 0;
+    melonDS::u32 coveredPages = 0;
+    melonDS::u32 uncoveredPages = 0;
+    melonDS::u32 regionPages[4] {};
+    melonDS::u32 uncoveredRegionPages[4] {};
+
+    for (melonDS::u32 offset = 0; offset < ramLen; offset += pageSize)
+    {
+        const melonDS::u32 len = std::min(pageSize, ramLen - offset);
+        if (std::memcmp(nds->MainRAM + offset, baseMainRAM.data() + offset, len) == 0)
+            continue;
+
+        const melonDS::u32 address = kMainRAMBase + offset;
+        changedPages++;
+        AppendRangeRun(changedRuns, address, len);
+
+        size_t regionIndex = 3;
+        if (address < 0x02080000) regionIndex = 0;
+        else if (address < 0x020E0000) regionIndex = 1;
+        else if (address < 0x023C0000) regionIndex = 2;
+        regionPages[regionIndex]++;
+
+        bool covered = false;
+        for (const auto& range : nsmbRanges)
+        {
+            if (RangeOverlaps(address, len, range.Address, range.Length))
+            {
+                covered = true;
+                break;
+            }
+        }
+        if (covered)
+        {
+            coveredPages++;
+        }
+        else
+        {
+            uncoveredPages++;
+            uncoveredRegionPages[regionIndex]++;
+            AppendRangeRun(uncoveredRuns, address, len);
+        }
+    }
+
+    std::printf(
+        "NSMB RollbackDeltaPages: frame=%u page=%u changedPages=%u changedBytes=%u coveredPages=%u uncoveredPages=%u uncoveredBytes=%u ranges=%zu regions=low:%u game:%u heap:%u scratch:%u uncoveredRegions=low:%u game:%u heap:%u scratch:%u\n",
+        frame,
+        pageSize,
+        changedPages,
+        changedPages * pageSize,
+        coveredPages,
+        uncoveredPages,
+        uncoveredPages * pageSize,
+        nsmbRanges.size(),
+        regionPages[0],
+        regionPages[1],
+        regionPages[2],
+        regionPages[3],
+        uncoveredRegionPages[0],
+        uncoveredRegionPages[1],
+        uncoveredRegionPages[2],
+        uncoveredRegionPages[3]);
+    PrintRangeRuns("NSMB RollbackDeltaPagesChanged", frame, changedRuns);
+    PrintRangeRuns("NSMB RollbackDeltaPagesUncovered", frame, uncoveredRuns);
+    std::fflush(stdout);
+}
+
+void CaptureNSMBRestoreShadowIfNeeded(RollbackStoredState& checkpoint, melonDS::NDS* nds)
+{
+    if (!G.RollbackNSMBRestoreDiffTrace)
+        return;
+    if (G.RollbackBackendMode != RollbackBackend::NSMBRanges
+        && G.RollbackBackendMode != RollbackBackend::NSMBCoreRanges
+        && G.RollbackBackendMode != RollbackBackend::NSMBTinyCoreRanges)
+    {
+        return;
+    }
+    if (!nds || !nds->MainRAM)
+        return;
+
+    const melonDS::u32 len = nds->MainRAMMask + 1;
+    checkpoint.MainRAMShadowCopy.resize(len);
+    std::memcpy(checkpoint.MainRAMShadowCopy.data(), nds->MainRAM, len);
+}
+
+void TraceNSMBRestoreDiff(
+    const char* label,
+    melonDS::u32 restoreFrame,
+    melonDS::u32 currentFrame,
+    melonDS::NDS* nds,
+    const RollbackStoredState& checkpoint)
+{
+    if (!G.RollbackNSMBRestoreDiffTrace)
+        return;
+    if (!nds || !nds->MainRAM || checkpoint.MainRAMShadowCopy.size() != nds->MainRAMMask + 1)
+        return;
+
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    const melonDS::u32 pageSize = 256;
+    std::vector<RollbackNSMBRangeEntry> diffRuns;
+    melonDS::u32 diffPages = 0;
+    melonDS::u32 regionPages[4] {};
+
+    for (melonDS::u32 offset = 0; offset < ramLen; offset += pageSize)
+    {
+        const melonDS::u32 len = std::min(pageSize, ramLen - offset);
+        if (std::memcmp(nds->MainRAM + offset, checkpoint.MainRAMShadowCopy.data() + offset, len) == 0)
+            continue;
+
+        const melonDS::u32 address = kMainRAMBase + offset;
+        diffPages++;
+        AppendRangeRun(diffRuns, address, len);
+        size_t regionIndex = 3;
+        if (address < 0x02080000) regionIndex = 0;
+        else if (address < 0x020E0000) regionIndex = 1;
+        else if (address < 0x023C0000) regionIndex = 2;
+        regionPages[regionIndex]++;
+    }
+
+    std::printf(
+        "NSMB RollbackRestoreDiff: label=%s restoreFrame=%u current=%u page=%u diffPages=%u diffBytes=%u regions=low:%u game:%u heap:%u scratch:%u\n",
+        label ? label : "unknown",
+        restoreFrame,
+        currentFrame,
+        pageSize,
+        diffPages,
+        diffPages * pageSize,
+        regionPages[0],
+        regionPages[1],
+        regionPages[2],
+        regionPages[3]);
+    PrintRangeRuns("NSMB RollbackRestoreDiffRuns", restoreFrame, diffRuns);
+    std::fflush(stdout);
+}
+
+bool PrepareRollbackDeltaSaveLocked(melonDS::u32 frame, RollbackStoredState& checkpoint, std::vector<melonDS::u8>& baseMainRAM)
+{
+    checkpoint = {};
+    baseMainRAM.clear();
+    if (G.RollbackBackendMode != RollbackBackend::CoreDelta
+        && G.RollbackBackendMode != RollbackBackend::CoreFrameDelta
+        && !IsRollbackPreimageBackend())
+        return true;
+
+    if (IsRollbackPreimageBackend())
+    {
+        const bool hasUsableShadow = G.RollbackFrameDeltaShadowFrame != kNoFrameLimit
+            && !G.RollbackFrameDeltaShadowMainRAM.empty()
+            && G.RollbackStates.find(G.RollbackFrameDeltaShadowFrame) != G.RollbackStates.end();
+        if (hasUsableShadow)
+        {
+            checkpoint.MainRAMFramePreimage = true;
+            checkpoint.BaseFrame = G.RollbackFrameDeltaShadowFrame;
+            baseMainRAM = G.RollbackFrameDeltaShadowMainRAM;
+        }
+        return true;
+    }
+
+    bool forceKeyframe = G.RollbackDeltaKeyframeInterval <= 1
+        || G.RollbackStates.empty()
+        || (frame % static_cast<melonDS::u32>(G.RollbackDeltaKeyframeInterval)) == 0;
+    if (G.NetplayStartFrame != 0 && frame == G.NetplayStartFrame)
+        forceKeyframe = true;
+
+    if (G.RollbackBackendMode == RollbackBackend::CoreFrameDelta)
+    {
+        const bool hasUsableShadow = G.RollbackFrameDeltaShadowFrame != kNoFrameLimit
+            && !G.RollbackFrameDeltaShadowMainRAM.empty()
+            && G.RollbackStates.find(G.RollbackFrameDeltaShadowFrame) != G.RollbackStates.end();
+        if (!forceKeyframe && hasUsableShadow)
+        {
+            checkpoint.MainRAMDelta = true;
+            checkpoint.BaseFrame = G.RollbackFrameDeltaShadowFrame;
+            baseMainRAM = G.RollbackFrameDeltaShadowMainRAM;
+        }
+        return true;
+    }
+
+    if (!forceKeyframe)
+    {
+        auto it = G.RollbackStates.upper_bound(frame);
+        while (it != G.RollbackStates.begin())
+        {
+            --it;
+            if (!it->second.MainRAMDelta && !it->second.MainRAMCopy.empty())
+            {
+                checkpoint.MainRAMDelta = true;
+                checkpoint.BaseFrame = it->first;
+                baseMainRAM = it->second.MainRAMCopy;
+                break;
+            }
+        }
+    }
+
+    return true;
+}
+
+bool CaptureRollbackFramePreimage(
+    RollbackStoredState& checkpoint,
+    melonDS::NDS* nds,
+    const std::vector<melonDS::u8>& baseMainRAM)
+{
+    if (!checkpoint.MainRAMFramePreimage)
+        return true;
+    if (!nds || !nds->MainRAM || baseMainRAM.size() != nds->MainRAMMask + 1)
+        return false;
+
+    const melonDS::u32 len = nds->MainRAMMask + 1;
+    const melonDS::u32 pageSize = static_cast<melonDS::u32>(G.RollbackMainRAMPageSize);
+    for (melonDS::u32 offset = 0; offset < len; offset += pageSize)
+    {
+        const melonDS::u32 pageBytes = std::min(pageSize, len - offset);
+        if (std::memcmp(nds->MainRAM + offset, baseMainRAM.data() + offset, pageBytes) == 0)
+            continue;
+        checkpoint.MainRAMPreimagePages.push_back(offset / pageSize);
+        checkpoint.MainRAMPreimage.insert(
+            checkpoint.MainRAMPreimage.end(),
+            baseMainRAM.begin() + offset,
+            baseMainRAM.begin() + offset + pageBytes);
+    }
+    return true;
+}
+
+bool SaveRollbackCheckpointBuffer(
+    melonDS::NDS* nds,
+    std::vector<char>& buffer,
+    melonDS::u32 mainRAMMode = kRollbackMainRAMModeFull,
+    const melonDS::u8* deltaBaseMainRAM = nullptr)
 {
     if (!nds)
         return false;
@@ -2551,15 +4078,100 @@ bool SaveRollbackCheckpointBuffer(melonDS::NDS* nds, std::vector<char>& buffer)
         return true;
     }
 
+    if (G.RollbackBackendMode == RollbackBackend::NSMBRanges
+        || G.RollbackBackendMode == RollbackBackend::NSMBCoreRanges
+        || G.RollbackBackendMode == RollbackBackend::NSMBTinyCoreRanges)
+    {
+        const std::vector<RollbackNSMBRangeEntry> ranges = BuildNSMBRollbackRanges(nds);
+        if (ranges.empty())
+            return false;
+
+        std::vector<char> coreBuffer;
+        if (G.RollbackBackendMode == RollbackBackend::NSMBCoreRanges
+            || G.RollbackBackendMode == RollbackBackend::NSMBTinyCoreRanges)
+        {
+            melonDS::Savestate coreState;
+            const bool coreSaved = G.RollbackBackendMode == RollbackBackend::NSMBTinyCoreRanges
+                ? nds->DoRollbackTinyCoreSavestate(&coreState,
+                    static_cast<melonDS::u32>(G.RollbackTinyCoreFlags))
+                : nds->DoRollbackSavestate(&coreState, kRollbackMainRAMModeSkip, nullptr, 4096,
+                    static_cast<melonDS::u32>(G.RollbackCoreSkipMask));
+            if (!coreSaved || coreState.Error)
+            {
+                return false;
+            }
+            coreBuffer.assign(static_cast<const char*>(coreState.Buffer()),
+                static_cast<const char*>(coreState.Buffer()) + coreState.Length());
+        }
+
+        melonDS::u32 totalBytes = 0;
+        for (const auto& range : ranges)
+            totalBytes += range.Length;
+
+        RollbackNSMBRangesHeader header = {};
+        header.Magic = kRollbackNSMBRangesMagic;
+        header.Version = kRollbackNSMBRangesVersion;
+        header.NumFrames = nds->NumFrames;
+        header.NumLagFrames = nds->NumLagFrames;
+        header.LagFrameFlag = nds->LagFrameFlag ? 1 : 0;
+        header.RangeCount = static_cast<melonDS::u32>(ranges.size());
+        header.TotalRangeBytes = totalBytes;
+        header.Reserved = static_cast<melonDS::u32>(coreBuffer.size());
+
+        buffer.resize(sizeof(header) + coreBuffer.size() + ranges.size() * sizeof(RollbackNSMBRangeEntry) + totalBytes);
+        char* out = buffer.data();
+        std::memcpy(out, &header, sizeof(header));
+        out += sizeof(header);
+        if (!coreBuffer.empty())
+        {
+            std::memcpy(out, coreBuffer.data(), coreBuffer.size());
+            out += coreBuffer.size();
+        }
+        std::memcpy(out, ranges.data(), ranges.size() * sizeof(RollbackNSMBRangeEntry));
+        out += ranges.size() * sizeof(RollbackNSMBRangeEntry);
+        for (const auto& range : ranges)
+        {
+            const melonDS::u32 offset = range.Address - kMainRAMBase;
+            std::memcpy(out, nds->MainRAM + offset, range.Length);
+            out += range.Length;
+        }
+        return true;
+    }
+
+    if (G.RollbackBackendMode == RollbackBackend::TinyCorePreimage)
+    {
+        melonDS::Savestate state;
+        const bool saved = nds->DoRollbackTinyCoreSavestate(
+            &state,
+            static_cast<melonDS::u32>(G.RollbackTinyCoreFlags));
+        if (state.Error || !saved || state.Error)
+            return false;
+        buffer.assign(static_cast<const char*>(state.Buffer()),
+            static_cast<const char*>(state.Buffer()) + state.Length());
+        return true;
+    }
+
     melonDS::Savestate state;
-    if (state.Error || !nds->DoSavestate(&state) || state.Error)
+    const bool saved = (G.RollbackBackendMode == RollbackBackend::CoreLite
+        || G.RollbackBackendMode == RollbackBackend::CoreSparse
+        || G.RollbackBackendMode == RollbackBackend::CoreDelta
+        || G.RollbackBackendMode == RollbackBackend::CoreFrameDelta
+        || G.RollbackBackendMode == RollbackBackend::CorePreimage)
+        ? nds->DoRollbackSavestate(&state, mainRAMMode, deltaBaseMainRAM,
+            static_cast<melonDS::u32>(G.RollbackMainRAMPageSize),
+            static_cast<melonDS::u32>(G.RollbackCoreSkipMask))
+        : nds->DoSavestate(&state);
+    if (state.Error || !saved || state.Error)
         return false;
     buffer.assign(static_cast<const char*>(state.Buffer()),
         static_cast<const char*>(state.Buffer()) + state.Length());
     return true;
 }
 
-bool RestoreRollbackCheckpointBuffer(melonDS::NDS* nds, const std::vector<char>& buffer)
+bool RestoreRollbackCheckpointBuffer(
+    melonDS::NDS* nds,
+    const std::vector<char>& buffer,
+    const melonDS::u8* deltaBaseMainRAM = nullptr)
 {
     if (!nds)
         return false;
@@ -2585,8 +4197,190 @@ bool RestoreRollbackCheckpointBuffer(melonDS::NDS* nds, const std::vector<char>&
         return true;
     }
 
+    if (G.RollbackBackendMode == RollbackBackend::NSMBRanges
+        || G.RollbackBackendMode == RollbackBackend::NSMBCoreRanges
+        || G.RollbackBackendMode == RollbackBackend::NSMBTinyCoreRanges)
+    {
+        if (!nds->MainRAM || buffer.size() < sizeof(RollbackNSMBRangesHeader))
+            return false;
+        RollbackNSMBRangesHeader header = {};
+        std::memcpy(&header, buffer.data(), sizeof(header));
+        if (header.Magic != kRollbackNSMBRangesMagic ||
+            header.Version != kRollbackNSMBRangesVersion ||
+            header.RangeCount > 128)
+            return false;
+        const size_t entriesBytes = static_cast<size_t>(header.RangeCount) * sizeof(RollbackNSMBRangeEntry);
+        const bool hasCoreState = G.RollbackBackendMode == RollbackBackend::NSMBCoreRanges
+            || G.RollbackBackendMode == RollbackBackend::NSMBTinyCoreRanges;
+        const size_t coreBytes = hasCoreState ? header.Reserved : 0;
+        if (buffer.size() != sizeof(header) + coreBytes + entriesBytes + header.TotalRangeBytes)
+            return false;
+        const char* in = buffer.data() + sizeof(header);
+        if (hasCoreState)
+        {
+            if (coreBytes == 0 || coreBytes > buffer.size() - sizeof(header))
+                return false;
+            melonDS::Savestate coreState(const_cast<char*>(in), static_cast<melonDS::u32>(coreBytes), false);
+            const bool restored = G.RollbackBackendMode == RollbackBackend::NSMBTinyCoreRanges
+                ? nds->DoRollbackTinyCoreSavestate(&coreState,
+                    static_cast<melonDS::u32>(G.RollbackTinyCoreFlags))
+                : nds->DoRollbackSavestate(&coreState, kRollbackMainRAMModeSkip);
+            if (coreState.Error || !restored || coreState.Error)
+                return false;
+            in += coreBytes;
+        }
+        std::vector<RollbackNSMBRangeEntry> ranges(header.RangeCount);
+        if (!ranges.empty())
+            std::memcpy(ranges.data(), in, entriesBytes);
+        in += entriesBytes;
+        for (const auto& range : ranges)
+        {
+            if (!IsValidMainRAMRange(nds, range.Address, range.Length))
+                return false;
+            const melonDS::u32 offset = range.Address - kMainRAMBase;
+            std::memcpy(nds->MainRAM + offset, in, range.Length);
+            in += range.Length;
+        }
+        nds->NumFrames = header.NumFrames;
+        nds->NumLagFrames = header.NumLagFrames;
+        nds->LagFrameFlag = header.LagFrameFlag != 0;
+        for (const auto& range : ranges)
+            InvalidateMainRAMJITRange(nds, range.Address, range.Length);
+        return true;
+    }
+
+    if (G.RollbackBackendMode == RollbackBackend::TinyCorePreimage)
+    {
+        melonDS::Savestate state(const_cast<char*>(buffer.data()), static_cast<melonDS::u32>(buffer.size()), false);
+        const bool restored = nds->DoRollbackTinyCoreSavestate(
+            &state,
+            static_cast<melonDS::u32>(G.RollbackTinyCoreFlags));
+        return !state.Error && restored && !state.Error;
+    }
+
     melonDS::Savestate state(const_cast<char*>(buffer.data()), static_cast<melonDS::u32>(buffer.size()), false);
-    return !state.Error && nds->DoSavestate(&state) && !state.Error;
+    const bool restored = (G.RollbackBackendMode == RollbackBackend::CoreLite
+        || G.RollbackBackendMode == RollbackBackend::CoreSparse
+        || G.RollbackBackendMode == RollbackBackend::CoreDelta
+        || G.RollbackBackendMode == RollbackBackend::CoreFrameDelta
+        || G.RollbackBackendMode == RollbackBackend::CorePreimage)
+        ? nds->DoRollbackSavestate(&state, kRollbackMainRAMModeFull, deltaBaseMainRAM,
+            static_cast<melonDS::u32>(G.RollbackMainRAMPageSize),
+            static_cast<melonDS::u32>(G.RollbackCoreSkipMask))
+        : nds->DoSavestate(&state);
+    return !state.Error && restored && !state.Error;
+}
+
+bool BuildRollbackRestoreChainLocked(
+    melonDS::u32 frame,
+    std::vector<RollbackStoredState>& chain)
+{
+    chain.clear();
+    auto state = G.RollbackStates.find(frame);
+    if (state == G.RollbackStates.end())
+        return false;
+
+    for (size_t depth = 0; depth <= G.RollbackStates.size(); depth++)
+    {
+        chain.push_back(state->second);
+        if (!state->second.MainRAMDelta)
+        {
+            std::reverse(chain.begin(), chain.end());
+            return true;
+        }
+        state = G.RollbackStates.find(state->second.BaseFrame);
+        if (state == G.RollbackStates.end())
+            return false;
+    }
+    return false;
+}
+
+bool RestoreRollbackStoredStates(
+    melonDS::NDS* nds,
+    const std::vector<RollbackStoredState>& chain)
+{
+    if (chain.empty() || chain.front().MainRAMDelta)
+        return false;
+    if (!RestoreRollbackCheckpointBuffer(nds, chain.front().Buffer))
+        return false;
+    for (size_t i = 1; i < chain.size(); i++)
+    {
+        if (!chain[i].MainRAMDelta
+            || !RestoreRollbackCheckpointBuffer(nds, chain[i].Buffer, nds->MainRAM))
+            return false;
+    }
+    return true;
+}
+
+bool BuildRollbackPreimageRestoreLocked(
+    melonDS::u32 frame,
+    std::vector<RollbackStoredState>& reverseStates,
+    std::vector<melonDS::u8>& latestMainRAM)
+{
+    reverseStates.clear();
+    latestMainRAM = G.RollbackFrameDeltaShadowMainRAM;
+    melonDS::u32 cursorFrame = G.RollbackFrameDeltaShadowFrame;
+    if (cursorFrame == kNoFrameLimit || cursorFrame < frame || latestMainRAM.empty())
+        return false;
+
+    for (size_t depth = 0; cursorFrame > frame && depth <= G.RollbackStates.size(); depth++)
+    {
+        auto state = G.RollbackStates.find(cursorFrame);
+        if (state == G.RollbackStates.end()
+            || !state->second.MainRAMFramePreimage
+            || state->second.BaseFrame == kNoFrameLimit
+            || state->second.BaseFrame >= cursorFrame)
+            return false;
+        reverseStates.push_back(state->second);
+        cursorFrame = state->second.BaseFrame;
+    }
+    return cursorFrame == frame;
+}
+
+bool RestoreRollbackPreimageState(
+    melonDS::NDS* nds,
+    const RollbackStoredState& checkpoint,
+    const std::vector<RollbackStoredState>& reverseStates,
+    const std::vector<melonDS::u8>& latestMainRAM)
+{
+    if (!nds || !nds->MainRAM || latestMainRAM.size() != nds->MainRAMMask + 1)
+        return false;
+    const melonDS::u32 len = nds->MainRAMMask + 1;
+    const melonDS::u32 pageSize = static_cast<melonDS::u32>(G.RollbackMainRAMPageSize);
+    std::memcpy(nds->MainRAM, latestMainRAM.data(), len);
+    for (const auto& state : reverseStates)
+    {
+        size_t inOffset = 0;
+        for (const melonDS::u32 page : state.MainRAMPreimagePages)
+        {
+            const melonDS::u32 offset = page * pageSize;
+            if (offset >= len)
+                return false;
+            const melonDS::u32 pageBytes = std::min(pageSize, len - offset);
+            if (inOffset + pageBytes > state.MainRAMPreimage.size())
+                return false;
+            std::memcpy(nds->MainRAM + offset, state.MainRAMPreimage.data() + inOffset, pageBytes);
+            inOffset += pageBytes;
+        }
+        if (inOffset != state.MainRAMPreimage.size())
+            return false;
+    }
+    if (!RestoreRollbackCheckpointBuffer(nds, checkpoint.Buffer))
+        return false;
+    InvalidateMainRAMJIT(nds, len);
+    return true;
+}
+
+void RefreshRollbackFrameDeltaShadowLocked(melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if ((G.RollbackBackendMode != RollbackBackend::CoreFrameDelta
+        && !IsRollbackPreimageBackend())
+        || !nds || !nds->MainRAM)
+        return;
+    const melonDS::u32 len = nds->MainRAMMask + 1;
+    G.RollbackFrameDeltaShadowMainRAM.resize(len);
+    std::memcpy(G.RollbackFrameDeltaShadowMainRAM.data(), nds->MainRAM, len);
+    G.RollbackFrameDeltaShadowFrame = frame;
 }
 
 void SaveRollbackCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -2602,17 +4396,47 @@ void SaveRollbackCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
     if (!ShouldSaveRollbackCheckpoint(frame))
         return;
 
-    std::vector<char> buffer;
-    if (!SaveRollbackCheckpointBuffer(nds, buffer))
+    RollbackStoredState checkpoint;
+    std::vector<melonDS::u8> deltaBaseMainRAM;
+    const auto saveStart = std::chrono::steady_clock::now();
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        PrepareRollbackDeltaSaveLocked(frame, checkpoint, deltaBaseMainRAM);
+    }
+    const melonDS::u32 mainRAMMode = IsRollbackPreimageBackend()
+        ? kRollbackMainRAMModeSkip
+        : (checkpoint.MainRAMDelta
+            ? kRollbackMainRAMModeDelta
+            : (G.RollbackBackendMode == RollbackBackend::CoreSparse ? kRollbackMainRAMModeSparse : kRollbackMainRAMModeFull));
+    if (checkpoint.MainRAMDelta && (!nds->MainRAM || deltaBaseMainRAM.size() != nds->MainRAMMask + 1))
+        return;
+    if (checkpoint.MainRAMDelta)
+        TraceRollbackDeltaPages(frame, nds, deltaBaseMainRAM);
+    if (!CaptureRollbackFramePreimage(checkpoint, nds, deltaBaseMainRAM))
+        return;
+
+    if (!SaveRollbackCheckpointBuffer(nds, checkpoint.Buffer, mainRAMMode,
+        checkpoint.MainRAMDelta ? deltaBaseMainRAM.data() : nullptr))
     {
         if (G.InputNetplayTraceEnabled)
             std::printf("NSMB Rollback: failed to save checkpoint inst=%d frame=%u\n", instanceID, frame);
         return;
     }
+    if (G.RollbackBackendMode == RollbackBackend::CoreDelta && !checkpoint.MainRAMDelta && nds->MainRAM)
+    {
+        const melonDS::u32 len = nds->MainRAMMask + 1;
+        checkpoint.MainRAMCopy.resize(len);
+        std::memcpy(checkpoint.MainRAMCopy.data(), nds->MainRAM, len);
+    }
+    CaptureNSMBRestoreShadowIfNeeded(checkpoint, nds);
 
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
-        G.RollbackStates[frame] = std::move(buffer);
+        G.RollbackStates[frame] = std::move(checkpoint);
+        RefreshRollbackFrameDeltaShadowLocked(frame, nds);
+        RecordRollbackCheckpointSaveLocked(
+            RollbackCheckpointBytes(G.RollbackStates[frame]),
+            ElapsedUs(saveStart));
         G.RollbackCheckpointSaveCount++;
         PruneRollbackHistoryLocked(frame);
     }
@@ -2625,11 +4449,38 @@ void SaveRollbackCheckpointNowLocked(melonDS::u32 frame, melonDS::NDS* nds, bool
     if (!force && !ShouldSaveRollbackCheckpoint(frame))
         return;
 
-    std::vector<char> buffer;
-    if (!SaveRollbackCheckpointBuffer(nds, buffer))
+    RollbackStoredState checkpoint;
+    std::vector<melonDS::u8> deltaBaseMainRAM;
+    const auto saveStart = std::chrono::steady_clock::now();
+    PrepareRollbackDeltaSaveLocked(frame, checkpoint, deltaBaseMainRAM);
+    const melonDS::u32 mainRAMMode = IsRollbackPreimageBackend()
+        ? kRollbackMainRAMModeSkip
+        : (checkpoint.MainRAMDelta
+            ? kRollbackMainRAMModeDelta
+            : (G.RollbackBackendMode == RollbackBackend::CoreSparse ? kRollbackMainRAMModeSparse : kRollbackMainRAMModeFull));
+    if (checkpoint.MainRAMDelta && (!nds->MainRAM || deltaBaseMainRAM.size() != nds->MainRAMMask + 1))
+        return;
+    if (checkpoint.MainRAMDelta)
+        TraceRollbackDeltaPages(frame, nds, deltaBaseMainRAM);
+    if (!CaptureRollbackFramePreimage(checkpoint, nds, deltaBaseMainRAM))
         return;
 
-    G.RollbackStates[frame] = std::move(buffer);
+    if (!SaveRollbackCheckpointBuffer(nds, checkpoint.Buffer, mainRAMMode,
+        checkpoint.MainRAMDelta ? deltaBaseMainRAM.data() : nullptr))
+        return;
+    if (G.RollbackBackendMode == RollbackBackend::CoreDelta && !checkpoint.MainRAMDelta && nds->MainRAM)
+    {
+        const melonDS::u32 len = nds->MainRAMMask + 1;
+        checkpoint.MainRAMCopy.resize(len);
+        std::memcpy(checkpoint.MainRAMCopy.data(), nds->MainRAM, len);
+    }
+    CaptureNSMBRestoreShadowIfNeeded(checkpoint, nds);
+
+    G.RollbackStates[frame] = std::move(checkpoint);
+    RefreshRollbackFrameDeltaShadowLocked(frame, nds);
+    RecordRollbackCheckpointSaveLocked(
+        RollbackCheckpointBytes(G.RollbackStates[frame]),
+        ElapsedUs(saveStart));
     G.RollbackCheckpointSaveCount++;
     PruneRollbackHistoryLocked(frame);
 }
@@ -2642,7 +4493,10 @@ bool RestoreRollbackCheckpointForProbeIfNeeded(int instanceID, melonDS::u32 fram
         return false;
 
     melonDS::u32 restoreFrame = kNoFrameLimit;
-    std::vector<char> buffer;
+    RollbackStoredState checkpoint;
+    std::vector<RollbackStoredState> restoreChain;
+    std::vector<RollbackStoredState> reverseStates;
+    std::vector<melonDS::u8> latestMainRAM;
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         if (G.PendingRollbackFrame == kNoFrameLimit)
@@ -2660,11 +4514,26 @@ bool RestoreRollbackCheckpointForProbeIfNeeded(int instanceID, melonDS::u32 fram
             G.PendingRollbackFrame = kNoFrameLimit;
             return false;
         }
-        buffer = state->second;
+        checkpoint = state->second;
+        const bool restoreReady = IsRollbackPreimageBackend()
+            ? BuildRollbackPreimageRestoreLocked(restoreFrame, reverseStates, latestMainRAM)
+            : BuildRollbackRestoreChainLocked(restoreFrame, restoreChain);
+        if (!restoreReady)
+        {
+            std::printf("NSMB Rollback: cannot restore delta chain frame=%u base=%u missing\n",
+                restoreFrame,
+                checkpoint.BaseFrame);
+            G.PendingRollbackFrame = kNoFrameLimit;
+            return false;
+        }
         G.PendingRollbackFrame = kNoFrameLimit;
     }
 
-    if (!RestoreRollbackCheckpointBuffer(nds, buffer))
+    const auto restoreStart = std::chrono::steady_clock::now();
+    const bool restored = IsRollbackPreimageBackend()
+        ? RestoreRollbackPreimageState(nds, checkpoint, reverseStates, latestMainRAM)
+        : RestoreRollbackStoredStates(nds, restoreChain);
+    if (!restored)
     {
         std::printf("NSMB Rollback: restore probe failed inst=%d restoreFrame=%u current=%u\n",
             instanceID,
@@ -2672,15 +4541,19 @@ bool RestoreRollbackCheckpointForProbeIfNeeded(int instanceID, melonDS::u32 fram
             frame);
         return false;
     }
+    TraceNSMBRestoreDiff("probe", restoreFrame, frame, nds, checkpoint);
+    const unsigned long long restoreUs = ElapsedUs(restoreStart);
 
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
+        RefreshRollbackFrameDeltaShadowLocked(restoreFrame, nds);
+        RecordRollbackCheckpointRestoreLocked(restoreUs);
         G.RollbackRestoreCount++;
     }
     std::printf("NSMB Rollback: restore probe loaded frame=%u at current=%u bytes=%zu\n",
         restoreFrame,
         frame,
-        buffer.size());
+        RollbackCheckpointBytes(checkpoint));
     std::fflush(stdout);
     return true;
 }
@@ -4093,6 +5966,21 @@ void RecordRemoteInputWaitStats(unsigned long long elapsedUs, unsigned long long
     G.RemoteInputWaitMaxUs = std::max(G.RemoteInputWaitMaxUs, elapsedUs);
 }
 
+void TraceRemoteInputWaitSpike(melonDS::u32 targetFrame, unsigned long long elapsedUs, unsigned long long loops)
+{
+    if (!G.ActiveFrameSpikeTrace
+        || elapsedUs < static_cast<unsigned long long>(std::min(G.ActiveFrameSpikeThresholdUs, 10000)))
+    {
+        return;
+    }
+
+    std::printf(
+        "NSMB RemoteInputWaitSpike: frame=%u waitedMs=%.3f loops=%llu\n",
+        targetFrame,
+        static_cast<double>(elapsedUs) / 1000.0,
+        loops);
+}
+
 void RecordFrameLeadThrottleStats(unsigned long long elapsedUs, unsigned long long loops)
 {
     G.FrameLeadThrottleCount++;
@@ -4122,7 +6010,9 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
             {
                 const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::steady_clock::now() - start).count();
-                RecordRemoteInputWaitStats(static_cast<unsigned long long>(std::max<long long>(0, elapsedUs)), loops);
+                const auto waitedUs = static_cast<unsigned long long>(std::max<long long>(0, elapsedUs));
+                RecordRemoteInputWaitStats(waitedUs, loops);
+                TraceRemoteInputWaitSpike(targetFrame, waitedUs, loops);
                 return it->second;
             }
         }
@@ -4141,11 +6031,70 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
                     std::_Exit(70);
                 const auto waitedUs = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::steady_clock::now() - start).count();
-                RecordRemoteInputWaitStats(static_cast<unsigned long long>(std::max<long long>(0, waitedUs)), loops);
+                const auto recordedWaitedUs = static_cast<unsigned long long>(std::max<long long>(0, waitedUs));
+                RecordRemoteInputWaitStats(recordedWaitedUs, loops);
+                TraceRemoteInputWaitSpike(targetFrame, recordedWaitedUs, loops);
                 return NeutralInput();
             }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+bool TryWaitForRollbackRemoteInputLocked(
+    std::unique_lock<std::mutex>& lock,
+    melonDS::NDS* nds,
+    melonDS::u32 localFrame,
+    melonDS::u32 targetFrame,
+    InputState& input)
+{
+    if (G.RollbackInputWaitUs <= 0)
+        return false;
+    if (!lock.owns_lock())
+        return false;
+    if ((G.PacketBridgeOnly || G.InputNetplayOnly)
+        && G.NetplayStartFrame != 0
+        && targetFrame < G.NetplayStartFrame)
+        return false;
+
+    const auto start = std::chrono::steady_clock::now();
+    unsigned long long loops = 0;
+    for (;;)
+    {
+        loops++;
+        PumpNetworkLocked(nds, localFrame);
+
+        auto it = G.RemoteInputs.find(targetFrame);
+        if (it != G.RemoteInputs.end())
+        {
+            input = it->second;
+            const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            RecordRemoteInputWaitStats(static_cast<unsigned long long>(std::max<long long>(0, elapsedUs)), loops);
+            return true;
+        }
+
+        const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - start).count();
+        const long long remainingUs = static_cast<long long>(G.RollbackInputWaitUs) - elapsedUs;
+        if (remainingUs <= 0)
+        {
+            RecordRemoteInputWaitStats(static_cast<unsigned long long>(std::max<long long>(0, elapsedUs)), loops);
+            if (G.InputNetplayTraceEnabled)
+            {
+                std::printf("NSMB Rollback: input wait timeout frame=%u waitedUs=%lld\n",
+                    targetFrame,
+                    static_cast<long long>(std::max<long long>(0, elapsedUs)));
+                std::fflush(stdout);
+            }
+            return false;
+        }
+
+        const int pollUs = std::clamp(
+            static_cast<int>(std::min<long long>(remainingUs, G.InputWaitPollUs)),
+            50,
+            5000);
+        G.InputCond.wait_for(lock, std::chrono::microseconds(pollUs));
     }
 }
 
@@ -4659,6 +6608,51 @@ bool WriteMainRAMU32(melonDS::NDS* nds, melonDS::u32 offset, melonDS::u32 value)
     return true;
 }
 
+bool WriteMainRAMU8(melonDS::NDS* nds, melonDS::u32 offset, melonDS::u8 value)
+{
+    if (!nds || !nds->MainRAM)
+        return false;
+    if (offset + sizeof(value) > nds->MainRAMMask + 1)
+        return false;
+
+    nds->MainRAM[offset] = value;
+    return true;
+}
+
+bool MainRAMOffsetFromAddr(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 size, melonDS::u32& offset)
+{
+    if (!nds || !nds->MainRAM || addr < kMainRAMBase)
+        return false;
+
+    offset = addr - kMainRAMBase;
+    return offset + size <= nds->MainRAMMask + 1;
+}
+
+bool WriteMainRAMAddrU8IfChanged(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u8 value)
+{
+    melonDS::u32 off = 0;
+    if (!MainRAMOffsetFromAddr(nds, addr, sizeof(value), off))
+        return false;
+
+    if (nds->MainRAM[off] == value)
+        return true;
+    return WriteMainRAMU8(nds, off, value);
+}
+
+bool WriteMainRAMAddrU32IfChanged(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 value)
+{
+    melonDS::u32 off = 0;
+    melonDS::u32 current = 0;
+    if (!MainRAMOffsetFromAddr(nds, addr, sizeof(value), off))
+        return false;
+    if (!ReadMainRAMU32(nds, off, current))
+        return false;
+
+    if (current == value)
+        return true;
+    return WriteMainRAMU32(nds, off, value);
+}
+
 bool WriteARM9U32(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 value)
 {
     if (!nds || (addr & 3) != 0)
@@ -4672,6 +6666,8 @@ melonDS::u32 FindObjectBaseByID(melonDS::NDS* nds, melonDS::u16 objectID)
 {
     if (!nds || !nds->MainRAM)
         return 0;
+    if (ActiveGameStateObjectScanCache)
+        return FindCachedObjectBaseByID(objectID);
 
     for (melonDS::u32 off = 0x080000; off + 0x80 <= nds->MainRAMMask + 1; off += 4)
     {
@@ -5079,6 +7075,7 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
         if (restoredCheckpoint)
         {
             melonDS::Platform::MP_Begin(nds->UserData);
+            G.PacketBridgeJitHelperPatchApplied[instanceID] = false;
             WriteARM9U32(nds, kGameStageGroupAddr, 0x00000009);
             WriteARM9U32(nds, kGameVsModeAddr, 0x00000001);
             WriteARM9U32(nds, kSceneNextSceneSettingsAddr, G.MvlStageSceneSettings);
@@ -5266,11 +7263,212 @@ void ReadObjectTransform(melonDS::NDS* nds, melonDS::u32 off, ObjectScanSample& 
     ReadMainRAMU32(nds, off + 0xE8, sample.TargetVelZ);
 }
 
+void AddGameStateProcessObject(
+    melonDS::NDS* nds,
+    GameStateObjectScanCache& cache,
+    std::set<melonDS::u32>& seenBases,
+    melonDS::u32 base)
+{
+    if (!IsValidMainRAMRange(nds, base, 0x120) || !seenBases.insert(base).second)
+        return;
+
+    GameStateObjectScanEntry entry;
+    melonDS::u32 guid = 0;
+    melonDS::u32 settings = 0;
+    melonDS::u16 stateType = 0;
+    melonDS::u32 flags = 0;
+    if (!ReadMainRAMAddressU32(nds, base, entry.VTable) ||
+        !ReadMainRAMAddressU32(nds, base + 4, guid) ||
+        !ReadMainRAMAddressU32(nds, base + 8, settings) ||
+        !ReadMainRAMAddressU16(nds, base + 0x0C, entry.ObjectID) ||
+        !ReadMainRAMAddressU16(nds, base + 0x0E, stateType))
+        return;
+    std::memcpy(&flags, nds->MainRAM + (base - kMainRAMBase) + 0x10, sizeof(flags));
+    entry.LifecycleState = nds->MainRAM[(base - kMainRAMBase) + 0x0E];
+    entry.Type = nds->MainRAM[(base - kMainRAMBase) + 0x12];
+    entry.SkipFlags = nds->MainRAM[(base - kMainRAMBase) + 0x13];
+
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (entry.VTable < kMainRAMBase || entry.VTable >= kMainRAMBase + ramLen)
+        return;
+    if (guid == 0 || guid >= 0x10000)
+        return;
+    if (entry.ObjectID == 0 || entry.ObjectID >= 0x400)
+        return;
+
+    entry.Offset = base - kMainRAMBase;
+    entry.Actor.Found = 1;
+    entry.Actor.GUID = guid;
+    entry.Actor.Base = base;
+    entry.Actor.Settings = settings;
+    entry.Actor.StateType = stateType;
+    entry.Actor.Flags = flags;
+    ReadObjectTransform(nds, entry.Offset, entry.Actor);
+    cache.Entries.push_back(entry);
+
+    if (entry.LifecycleState > 2 || entry.Type > 2)
+        return;
+
+    auto& summary = cache.Lifecycle;
+    summary.Total++;
+    if (entry.LifecycleState == 0)
+    {
+        summary.NotCreated++;
+        const melonDS::u32 lifecycleFlags =
+            (static_cast<melonDS::u32>(entry.Type) << 16) |
+            (static_cast<melonDS::u32>(entry.SkipFlags) << 24);
+        if (summary.FirstNotCreatedBase == 0)
+        {
+            summary.FirstNotCreatedID = entry.ObjectID;
+            summary.FirstNotCreatedBase = entry.Actor.Base;
+            summary.FirstNotCreatedFlags = lifecycleFlags;
+        }
+        else if (summary.SecondNotCreatedBase == 0)
+        {
+            summary.SecondNotCreatedID = entry.ObjectID;
+            summary.SecondNotCreatedBase = entry.Actor.Base;
+            summary.SecondNotCreatedFlags = lifecycleFlags;
+        }
+    }
+    else if (entry.LifecycleState == 1)
+    {
+        const melonDS::u32 index = summary.Active;
+        if (index < static_cast<melonDS::u32>(kObjectTraceSlots))
+        {
+            summary.ActiveID[index] = entry.ObjectID;
+            summary.ActiveSettings[index] = settings;
+            summary.ActiveBase[index] = entry.Actor.Base;
+        }
+        summary.Active++;
+    }
+    else
+    {
+        summary.Dead++;
+    }
+
+    if ((entry.SkipFlags & 0x02) != 0)
+        summary.SkipUpdate++;
+    if ((entry.SkipFlags & 0x08) != 0)
+        summary.SkipRender++;
+}
+
+void AddGameStateProcessList(
+    melonDS::NDS* nds,
+    GameStateObjectScanCache& cache,
+    std::set<melonDS::u32>& seenBases,
+    melonDS::u32 listAddress)
+{
+    melonDS::u32 node = 0;
+    if (!ReadMainRAMAddressU32(nds, listAddress, node))
+        return;
+
+    std::set<melonDS::u32> seenNodes;
+    for (int i = 0; i < 512 && IsValidMainRAMRange(nds, node, 0x0C); i++)
+    {
+        if (!seenNodes.insert(node).second)
+            break;
+
+        melonDS::u32 next = 0;
+        melonDS::u32 base = 0;
+        ReadMainRAMAddressU32(nds, node + 0x04, next);
+        ReadMainRAMAddressU32(nds, node + 0x08, base);
+        AddGameStateProcessObject(nds, cache, seenBases, base);
+        node = next;
+    }
+}
+
+GameStateObjectScanCache BuildGameStateObjectScanCache(melonDS::NDS* nds)
+{
+    GameStateObjectScanCache cache;
+    if (!nds || !nds->MainRAM)
+        return cache;
+
+    cache.Entries.reserve(128);
+    std::set<melonDS::u32> seenBases;
+    AddGameStateProcessList(nds, cache, seenBases, kNSMBProcessExecuteListAddr);
+    AddGameStateProcessList(nds, cache, seenBases, kNSMBProcessDeleteListAddr);
+    AddGameStateProcessList(nds, cache, seenBases, kNSMBProcessRenderListAddr);
+    AddGameStateProcessList(nds, cache, seenBases, kNSMBProcessCreateListAddr);
+    for (int i = 0; i < 8; i++)
+    {
+        AddGameStateProcessList(
+            nds,
+            cache,
+            seenBases,
+            kNSMBProcessIDLookupListsAddr + static_cast<melonDS::u32>(i * 8));
+    }
+    return cache;
+}
+
+struct ScopedGameStateObjectScanCache
+{
+    explicit ScopedGameStateObjectScanCache(const GameStateObjectScanCache& cache)
+        : Previous(ActiveGameStateObjectScanCache)
+    {
+        ActiveGameStateObjectScanCache = &cache;
+    }
+
+    ~ScopedGameStateObjectScanCache()
+    {
+        ActiveGameStateObjectScanCache = Previous;
+    }
+
+    const GameStateObjectScanCache* Previous;
+};
+
+bool IsCachedObjectStrict(const GameStateObjectScanEntry& entry)
+{
+    return (entry.Actor.StateType == 1 || entry.Actor.StateType == 2 || entry.Actor.StateType == 3) &&
+        entry.Actor.Flags < 0x10000000;
+}
+
+ObjectScanSample FindCachedObject(
+    melonDS::u16 expectedObjectID,
+    bool matchSettings,
+    melonDS::u32 expectedSettings,
+    bool strict)
+{
+    if (!ActiveGameStateObjectScanCache)
+        return {};
+
+    for (const auto& entry : ActiveGameStateObjectScanCache->Entries)
+    {
+        if (entry.ObjectID != expectedObjectID)
+            continue;
+        if (matchSettings && entry.Actor.Settings != expectedSettings)
+            continue;
+        if (strict && !IsCachedObjectStrict(entry))
+            continue;
+        return entry.Actor;
+    }
+    return {};
+}
+
+melonDS::u32 FindCachedObjectBaseByID(melonDS::u16 objectID)
+{
+    if (!ActiveGameStateObjectScanCache)
+        return 0;
+
+    for (const auto& entry : ActiveGameStateObjectScanCache->Entries)
+    {
+        if (entry.Offset < 0x080000 || entry.ObjectID != objectID)
+            continue;
+        if (entry.Actor.StateType == 0 || entry.Actor.StateType > 2)
+            continue;
+        if ((entry.Actor.Flags & 0xFFFF0000u) == 0)
+            continue;
+        return entry.Actor.Base;
+    }
+    return 0;
+}
+
 ObjectScanSample FindVsBattleStarCandidate(melonDS::NDS* nds)
 {
     ObjectScanSample sample;
     if (!nds || !nds->MainRAM)
         return sample;
+    if (ActiveGameStateObjectScanCache)
+        return FindCachedObject(kVsBattleStarCandidateObjectID, false, 0, true);
 
     const melonDS::u32 ramLen = nds->MainRAMMask + 1;
     if (ramLen < 0x120)
@@ -5322,6 +7520,8 @@ ObjectScanSample FindObjectByIDAndSettings(melonDS::NDS* nds, melonDS::u16 expec
     ObjectScanSample sample;
     if (!nds || !nds->MainRAM)
         return sample;
+    if (ActiveGameStateObjectScanCache)
+        return FindCachedObject(expectedObjectID, true, expectedSettings, true);
 
     const melonDS::u32 ramLen = nds->MainRAMMask + 1;
     if (ramLen < 0x120)
@@ -5372,6 +7572,8 @@ ObjectScanSample FindObjectByID(melonDS::NDS* nds, melonDS::u16 expectedObjectID
     ObjectScanSample sample;
     if (!nds || !nds->MainRAM)
         return sample;
+    if (ActiveGameStateObjectScanCache)
+        return FindCachedObject(expectedObjectID, false, 0, true);
 
     const melonDS::u32 ramLen = nds->MainRAMMask + 1;
     if (ramLen < 0x120)
@@ -5422,6 +7624,8 @@ ObjectScanSample FindObjectByIDLoose(melonDS::NDS* nds, melonDS::u16 expectedObj
     ObjectScanSample sample;
     if (!nds || !nds->MainRAM)
         return sample;
+    if (ActiveGameStateObjectScanCache)
+        return FindCachedObject(expectedObjectID, false, 0, false);
 
     const melonDS::u32 ramLen = nds->MainRAMMask + 1;
     if (ramLen < 0x120)
@@ -5468,6 +7672,8 @@ ObjectScanSample FindObjectByIDAndSettingsLoose(melonDS::NDS* nds, melonDS::u16 
     ObjectScanSample sample;
     if (!nds || !nds->MainRAM)
         return sample;
+    if (ActiveGameStateObjectScanCache)
+        return FindCachedObject(expectedObjectID, true, expectedSettings, false);
 
     const melonDS::u32 ramLen = nds->MainRAMMask + 1;
     if (ramLen < 0x120)
@@ -5535,6 +7741,15 @@ ObjectPairScanSample FindObjectPairByIDSortedX(melonDS::NDS* nds, melonDS::u16 e
     ObjectPairScanSample pair;
     if (!nds || !nds->MainRAM)
         return pair;
+    if (ActiveGameStateObjectScanCache)
+    {
+        for (const auto& entry : ActiveGameStateObjectScanCache->Entries)
+        {
+            if (entry.ObjectID == expectedObjectID && entry.Actor.Flags < 0x10000000)
+                InsertObjectByPosX(pair, entry.Actor);
+        }
+        return pair;
+    }
 
     const melonDS::u32 ramLen = nds->MainRAMMask + 1;
     if (ramLen < 0x120)
@@ -5601,6 +7816,15 @@ PlayerActorScanSample FindPlayerActors(melonDS::NDS* nds)
     PlayerActorScanSample players;
     if (!nds || !nds->MainRAM)
         return players;
+    if (ActiveGameStateObjectScanCache)
+    {
+        for (const auto& entry : ActiveGameStateObjectScanCache->Entries)
+        {
+            if (entry.ObjectID == kPlayerObjectID && IsCachedObjectStrict(entry))
+                InsertPlayerActorByGUID(players, entry.Actor);
+        }
+        return players;
+    }
 
     const melonDS::u32 ramLen = nds->MainRAMMask + 1;
     if (ramLen < 0x120)
@@ -5643,6 +7867,534 @@ PlayerActorScanSample FindPlayerActors(melonDS::NDS* nds)
     }
 
     return players;
+}
+
+bool ReadPlayerActorByBase(melonDS::NDS* nds, melonDS::u32 base, melonDS::u32 expectedGUID, ObjectScanSample& actor)
+{
+    actor = {};
+    if (!nds || !nds->MainRAM || base < kMainRAMBase)
+        return false;
+
+    const melonDS::u32 off = base - kMainRAMBase;
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (off + 0x120 > ramLen)
+        return false;
+
+    melonDS::u32 vtable = 0;
+    melonDS::u32 guid = 0;
+    melonDS::u32 settings = 0;
+    melonDS::u16 objectID = 0;
+    melonDS::u16 stateType = 0;
+    melonDS::u32 flags = 0;
+    if (!ReadMainRAMU32(nds, off, vtable) ||
+        !ReadMainRAMU32(nds, off + 4, guid) ||
+        !ReadMainRAMU32(nds, off + 8, settings) ||
+        !ReadMainRAMU16(nds, off + 0x0C, objectID) ||
+        !ReadMainRAMU16(nds, off + 0x0E, stateType) ||
+        !ReadMainRAMU32(nds, off + 0x10, flags))
+        return false;
+
+    if (vtable < kMainRAMBase || vtable >= kMainRAMBase + ramLen)
+        return false;
+    if (guid == 0 || guid >= 0x10000)
+        return false;
+    if (expectedGUID != 0 && guid != expectedGUID)
+        return false;
+    if (objectID != kPlayerObjectID)
+        return false;
+    if (stateType != 1 && stateType != 2 && stateType != 3)
+        return false;
+    if (flags >= 0x10000000)
+        return false;
+
+    actor.Found = 1;
+    actor.GUID = guid;
+    actor.Base = base;
+    actor.Settings = settings;
+    actor.StateType = stateType;
+    actor.Flags = flags;
+    ReadObjectTransform(nds, off, actor);
+    return true;
+}
+
+ObjectScanSample GetPlayerActorCached(int instanceID, int player, melonDS::NDS* nds)
+{
+    ObjectScanSample actor;
+    if (instanceID < 0 || instanceID >= 16 || player < 0 || player > 1)
+        return actor;
+
+    const melonDS::u32 cachedBase = G.PlayerActorBaseCache[instanceID][player];
+    const melonDS::u32 cachedGUID = G.PlayerActorGUIDCache[instanceID][player];
+    if (cachedBase != 0 && ReadPlayerActorByBase(nds, cachedBase, cachedGUID, actor))
+        return actor;
+
+    const PlayerActorScanSample players = FindPlayerActors(nds);
+    actor = (player == 0) ? players.Actor0 : players.Actor1;
+    if (actor.Found)
+    {
+        G.PlayerActorBaseCache[instanceID][player] = actor.Base;
+        G.PlayerActorGUIDCache[instanceID][player] = actor.GUID;
+    }
+    else
+    {
+        G.PlayerActorBaseCache[instanceID][player] = 0;
+        G.PlayerActorGUIDCache[instanceID][player] = 0;
+    }
+    return actor;
+}
+
+bool ReadObjectByBase(
+    melonDS::NDS* nds,
+    melonDS::u32 base,
+    melonDS::u32 expectedGUID,
+    melonDS::u16 expectedObjectID,
+    melonDS::u32 expectedSettings,
+    ObjectScanSample& actor)
+{
+    actor = {};
+    if (!nds || !nds->MainRAM || base < kMainRAMBase)
+        return false;
+
+    const melonDS::u32 off = base - kMainRAMBase;
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (off + 0x120 > ramLen)
+        return false;
+
+    melonDS::u32 vtable = 0;
+    melonDS::u32 guid = 0;
+    melonDS::u32 settings = 0;
+    melonDS::u16 objectID = 0;
+    melonDS::u16 stateType = 0;
+    melonDS::u32 flags = 0;
+    if (!ReadMainRAMU32(nds, off, vtable) ||
+        !ReadMainRAMU32(nds, off + 4, guid) ||
+        !ReadMainRAMU32(nds, off + 8, settings) ||
+        !ReadMainRAMU16(nds, off + 0x0C, objectID) ||
+        !ReadMainRAMU16(nds, off + 0x0E, stateType) ||
+        !ReadMainRAMU32(nds, off + 0x10, flags))
+        return false;
+
+    if (vtable < kMainRAMBase || vtable >= kMainRAMBase + ramLen)
+        return false;
+    if (guid == 0 || guid >= 0x10000)
+        return false;
+    if (expectedGUID != 0 && guid != expectedGUID)
+        return false;
+    if (objectID != expectedObjectID || settings != expectedSettings)
+        return false;
+    if (stateType != 1 && stateType != 2 && stateType != 3)
+        return false;
+    if (flags >= 0x10000000)
+        return false;
+
+    actor.Found = 1;
+    actor.GUID = guid;
+    actor.Base = base;
+    actor.Settings = settings;
+    actor.StateType = stateType;
+    actor.Flags = flags;
+    ReadObjectTransform(nds, off, actor);
+    return true;
+}
+
+std::vector<ObjectScanSample> FindActiveObjectsByIDAndSettings(
+    melonDS::NDS* nds,
+    melonDS::u16 expectedObjectID,
+    melonDS::u32 expectedSettings,
+    bool includeStateType2 = false)
+{
+    std::vector<ObjectScanSample> actors;
+    if (!nds || !nds->MainRAM)
+        return actors;
+
+    std::set<melonDS::u32> seenBases;
+    const auto scanList = [&](melonDS::u32 listAddress)
+    {
+        melonDS::u32 node = 0;
+        if (!ReadMainRAMAddressU32(nds, listAddress, node))
+            return;
+
+        std::set<melonDS::u32> seenNodes;
+        for (int i = 0; i < 512 && IsValidMainRAMRange(nds, node, 0x0C); i++)
+        {
+            if (!seenNodes.insert(node).second)
+                break;
+
+            melonDS::u32 next = 0;
+            melonDS::u32 base = 0;
+            ReadMainRAMAddressU32(nds, node + 0x04, next);
+            ReadMainRAMAddressU32(nds, node + 0x08, base);
+            node = next;
+            if (!seenBases.insert(base).second)
+                continue;
+
+            ObjectScanSample actor;
+            if (!ReadObjectByBase(nds, base, 0, expectedObjectID, expectedSettings, actor))
+                continue;
+            if (actor.StateType == 1 || (includeStateType2 && actor.StateType == 2))
+                actors.push_back(actor);
+        }
+    };
+
+    scanList(kNSMBProcessExecuteListAddr);
+    scanList(kNSMBProcessDeleteListAddr);
+    scanList(kNSMBProcessRenderListAddr);
+    scanList(kNSMBProcessCreateListAddr);
+    for (int i = 0; i < 8; i++)
+        scanList(kNSMBProcessIDLookupListsAddr + static_cast<melonDS::u32>(i * 8));
+
+    std::sort(actors.begin(), actors.end(), [](const ObjectScanSample& lhs, const ObjectScanSample& rhs) {
+        return lhs.GUID < rhs.GUID;
+    });
+    return actors;
+}
+
+ObjectScanSample FindNewestActiveObjectByIDAndSettings(
+    melonDS::NDS* nds,
+    melonDS::u16 expectedObjectID,
+    melonDS::u32 expectedSettings,
+    bool includeStateType2 = false)
+{
+    const std::vector<ObjectScanSample> actors =
+        FindActiveObjectsByIDAndSettings(nds, expectedObjectID, expectedSettings, includeStateType2);
+    if (actors.empty())
+        return {};
+    return actors.back();
+}
+
+void TraceWorldMovingHazardsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.WorldStateTraceMovingHazards || instanceID < 0 || instanceID >= 16)
+        return;
+    if ((frame % 60) != 0 || G.LastTracedWorldMovingHazardsFrame[instanceID] == frame)
+        return;
+    G.LastTracedWorldMovingHazardsFrame[instanceID] = frame;
+
+    const std::vector<ObjectScanSample> actors =
+        FindActiveObjectsByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
+    std::printf("NSMB WorldHazards: role=%s inst=%d frame=%u count=%zu",
+        G.NetRole == Role::Host ? "host" : "client",
+        instanceID,
+        frame,
+        actors.size());
+    for (std::size_t i = 0; i < actors.size(); i++)
+    {
+        std::printf(" slot%zu=%u/%08X/%08X",
+            i,
+            actors[i].GUID,
+            actors[i].PosX,
+            actors[i].PosY);
+    }
+    std::printf("\n");
+}
+
+bool ShouldTraceWorldActorInternals(melonDS::u16 objectID, melonDS::u32 vtable)
+{
+    return objectID == kVsMovingHazardObjectID ||
+        objectID == kVsKoopaTroopaObjectID ||
+        objectID == kVsBattleStarCandidateObjectID ||
+        vtable == kEffectVTablePtr ||
+        vtable == kEffectVTableStart;
+}
+
+void PrintWorldActorInternalWords(
+    const char* prefix,
+    int instanceID,
+    melonDS::u32 frame,
+    melonDS::NDS* nds,
+    melonDS::u32 base,
+    melonDS::u32 guid,
+    melonDS::u16 objectID,
+    melonDS::u32 settings,
+    melonDS::u32 vtable)
+{
+    std::printf(
+        "%s: role=%s inst=%d frame=%u guid=%u object=%03X settings=%08X vtable=%08X base=%08X words=",
+        prefix,
+        G.NetRole == Role::Host ? "host" : "client",
+        instanceID,
+        frame,
+        guid,
+        objectID,
+        settings,
+        vtable,
+        base);
+
+    for (melonDS::u32 relativeOffset = 0; relativeOffset <= 0x1FC; relativeOffset += sizeof(melonDS::u32))
+    {
+        melonDS::u32 value = 0;
+        ReadMainRAMAddressU32(nds, base + relativeOffset, value);
+        std::printf("%s%02X:%08X", relativeOffset == 0 ? "" : "/", relativeOffset, value);
+    }
+    std::printf("\n");
+}
+
+bool IsInterestingEffectCandidate(melonDS::NDS* nds, melonDS::u32 base)
+{
+    if (base < 0x02100000u)
+        return false;
+
+    for (melonDS::u32 relativeOffset = 0x04; relativeOffset <= 0x10C; relativeOffset += sizeof(melonDS::u32))
+    {
+        melonDS::u32 value = 0;
+        ReadMainRAMAddressU32(nds, base + relativeOffset, value);
+        if (value == 0 ||
+            value == 0x020391F8u ||
+            value == 0x02039208u ||
+            value == kEffectVTablePtr ||
+            value == kEffectVTableStart)
+            continue;
+        if (relativeOffset == 0xA8 && (value & 0x0000FFFFu) == 0)
+            continue;
+        return true;
+    }
+    return false;
+}
+
+bool ReadWorldEffectSlot(melonDS::NDS* nds, melonDS::u32 base, WireWorldEffectSlot& slot)
+{
+    if (!nds || !nds->MainRAM || !IsValidMainRAMRange(nds, base, kWorldEffectWordEnd + sizeof(melonDS::u32)))
+        return false;
+
+    melonDS::u32 vtable = 0;
+    if (!ReadMainRAMAddressU32(nds, base, vtable))
+        return false;
+    if (vtable != kEffectVTablePtr && vtable != kEffectVTableStart)
+        return false;
+    if (!IsInterestingEffectCandidate(nds, base))
+        return false;
+
+    slot.Found = 1;
+    slot.Base = base;
+    slot.VTable = vtable;
+    for (std::size_t i = 0; i < kWorldEffectWordCount; i++)
+    {
+        const melonDS::u32 relativeOffset =
+            kWorldEffectWordStart + static_cast<melonDS::u32>(i * sizeof(melonDS::u32));
+        ReadMainRAMAddressU32(nds, base + relativeOffset, slot.Words[i]);
+    }
+    return true;
+}
+
+void TraceWorldEffectsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.WorldStateTraceEffects || !nds || !nds->MainRAM || instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.WorldStateTraceObjectLifecyclesStartFrame ||
+        (G.WorldStateTraceObjectLifecyclesEndFrame != kNoFrameLimit &&
+            frame > G.WorldStateTraceObjectLifecyclesEndFrame))
+        return;
+    if ((frame % static_cast<melonDS::u32>(G.WorldStateTraceObjectLifecyclesInterval)) != 0 ||
+        G.LastTracedWorldEffectsFrame[instanceID] == frame)
+        return;
+    G.LastTracedWorldEffectsFrame[instanceID] = frame;
+
+    melonDS::u32 count = 0;
+    for (melonDS::u32 slotIndex = 0; slotIndex < kWorldEffectSlotCount; slotIndex++)
+    {
+        const melonDS::u32 base = kWorldEffectSlotBase + slotIndex * kWorldEffectSlotStride;
+        WireWorldEffectSlot slot {};
+        if (!ReadWorldEffectSlot(nds, base, slot))
+            continue;
+
+        const melonDS::u32 guid = 0;
+        PrintWorldActorInternalWords(
+            "NSMB WorldEffectInternals",
+            instanceID,
+            frame,
+            nds,
+            base,
+            guid,
+            0,
+            0,
+            slot.VTable);
+        count++;
+        if (count >= 16)
+            break;
+    }
+
+    if (count == 0)
+    {
+        std::printf(
+            "NSMB WorldEffectInternals: role=%s inst=%d frame=%u count=0\n",
+            G.NetRole == Role::Host ? "host" : "client",
+            instanceID,
+            frame);
+    }
+}
+
+void TraceWorldObjectLifecyclesIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.WorldStateTraceObjectLifecycles || !nds || !nds->MainRAM || instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.WorldStateTraceObjectLifecyclesStartFrame ||
+        (G.WorldStateTraceObjectLifecyclesEndFrame != kNoFrameLimit &&
+            frame > G.WorldStateTraceObjectLifecyclesEndFrame))
+        return;
+    if ((frame % static_cast<melonDS::u32>(G.WorldStateTraceObjectLifecyclesInterval)) != 0 ||
+        G.LastTracedWorldObjectLifecyclesFrame[instanceID] == frame)
+        return;
+    G.LastTracedWorldObjectLifecyclesFrame[instanceID] = frame;
+
+    struct LifecycleActor
+    {
+        melonDS::u32 VTable = 0;
+        melonDS::u32 Base = 0;
+        melonDS::u32 GUID = 0;
+        melonDS::u32 Settings = 0;
+        melonDS::u32 PosX = 0;
+        melonDS::u32 PosY = 0;
+        melonDS::u32 PosZ = 0;
+        melonDS::u16 ObjectID = 0;
+        melonDS::u8 State = 0;
+        melonDS::u8 Type = 0;
+        melonDS::u8 SkipFlags = 0;
+    };
+
+    std::vector<LifecycleActor> actors;
+    const GameStateObjectScanCache cache = BuildGameStateObjectScanCache(nds);
+    actors.reserve(cache.Entries.size());
+    for (const GameStateObjectScanEntry& entry : cache.Entries)
+    {
+        LifecycleActor actor;
+        actor.VTable = entry.VTable;
+        actor.Base = entry.Actor.Base;
+        actor.GUID = entry.Actor.GUID;
+        actor.Settings = entry.Actor.Settings;
+        actor.PosX = entry.Actor.PosX;
+        actor.PosY = entry.Actor.PosY;
+        actor.PosZ = entry.Actor.PosZ;
+        actor.ObjectID = entry.ObjectID;
+        actor.State = entry.LifecycleState;
+        actor.Type = entry.Type;
+        actor.SkipFlags = entry.SkipFlags;
+        if (G.WorldStateTraceActorInternals &&
+            ShouldTraceWorldActorInternals(entry.ObjectID, entry.VTable))
+        {
+            PrintWorldActorInternalWords(
+                "NSMB WorldActorInternals",
+                instanceID,
+                frame,
+                nds,
+                actor.Base,
+                actor.GUID,
+                actor.ObjectID,
+                actor.Settings,
+                actor.VTable);
+        }
+        if (actor.State == 0 || actor.State > 2 || actor.Type > 2)
+            continue;
+        actors.push_back(actor);
+    }
+
+    std::sort(actors.begin(), actors.end(), [](const LifecycleActor& lhs, const LifecycleActor& rhs) {
+        if (lhs.State != rhs.State)
+            return lhs.State < rhs.State;
+        if (lhs.ObjectID != rhs.ObjectID)
+            return lhs.ObjectID < rhs.ObjectID;
+        return lhs.GUID < rhs.GUID;
+    });
+    std::printf("NSMB WorldObjects: role=%s inst=%d frame=%u count=%zu",
+        G.NetRole == Role::Host ? "host" : "client",
+        instanceID,
+        frame,
+        actors.size());
+    for (const LifecycleActor& actor : actors)
+    {
+        std::printf(" actor=%u/%03X/%08X/%u/%u/%02X/%08X/%08X/%08X/%08X/%08X",
+            actor.GUID,
+            actor.ObjectID,
+            actor.Settings,
+            actor.State,
+            actor.Type,
+            actor.SkipFlags,
+            actor.VTable,
+            actor.Base,
+            actor.PosX,
+            actor.PosY,
+            actor.PosZ);
+    }
+    std::printf("\n");
+}
+
+std::vector<ObjectScanSample> GetWorldMovingHazardsCached(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    std::vector<ObjectScanSample> actors;
+    if (instanceID < 0 || instanceID >= 16)
+        return actors;
+
+    const bool periodicRescan =
+        G.WorldStateActorRescanInterval > 0 &&
+        (frame % static_cast<melonDS::u32>(G.WorldStateActorRescanInterval)) == 0;
+    if (!periodicRescan)
+    {
+        const melonDS::u32 count = std::min(
+            G.WorldMovingHazardCacheCounts[instanceID],
+            static_cast<melonDS::u32>(kMaxWorldMovingHazards));
+        bool valid = count > 0;
+        for (melonDS::u32 i = 0; i < count; i++)
+        {
+            ObjectScanSample actor;
+            if (!ReadObjectByBase(
+                    nds,
+                    G.WorldMovingHazardBaseCaches[instanceID][i],
+                    G.WorldMovingHazardGUIDCaches[instanceID][i],
+                    kVsMovingHazardObjectID,
+                    kVsMovingHazardSettings,
+                    actor) ||
+                actor.StateType != 1)
+            {
+                valid = false;
+                break;
+            }
+            actors.push_back(actor);
+        }
+        if (valid)
+            return actors;
+        actors.clear();
+    }
+
+    actors = FindActiveObjectsByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
+    if (actors.size() > kMaxWorldMovingHazards)
+        actors.erase(actors.begin(), actors.end() - kMaxWorldMovingHazards);
+    G.WorldMovingHazardCacheCounts[instanceID] = static_cast<melonDS::u32>(actors.size());
+    for (std::size_t i = 0; i < kMaxWorldMovingHazards; i++)
+    {
+        G.WorldMovingHazardBaseCaches[instanceID][i] = i < actors.size() ? actors[i].Base : 0;
+        G.WorldMovingHazardGUIDCaches[instanceID][i] = i < actors.size() ? actors[i].GUID : 0;
+    }
+    return actors;
+}
+
+ObjectScanSample GetWorldActorCached(
+    int instanceID,
+    melonDS::u32 frame,
+    melonDS::NDS* nds,
+    melonDS::u16 objectID,
+    melonDS::u32 settings,
+    melonDS::u32* baseCache,
+    melonDS::u32* guidCache)
+{
+    ObjectScanSample actor;
+    if (instanceID < 0 || instanceID >= 16)
+        return actor;
+
+    ObjectScanSample cachedActor;
+    const bool periodicRescan =
+        G.WorldStateActorRescanInterval > 0 &&
+        (frame % static_cast<melonDS::u32>(G.WorldStateActorRescanInterval)) == 0;
+    if (!periodicRescan &&
+        baseCache[instanceID] != 0 &&
+        ReadObjectByBase(nds, baseCache[instanceID], guidCache[instanceID], objectID, settings, cachedActor) &&
+        cachedActor.StateType == 1)
+        return cachedActor;
+
+    actor = FindNewestActiveObjectByIDAndSettings(nds, objectID, settings);
+    if (!actor.Found)
+        actor = cachedActor;
+    baseCache[instanceID] = actor.Found ? actor.Base : 0;
+    guidCache[instanceID] = actor.Found ? actor.GUID : 0;
+    return actor;
 }
 
 void ForcePlayerActorIDsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -5840,6 +8592,8 @@ ObjectLifecycleSummary SummarizeObjectLifecycle(melonDS::NDS* nds)
     ObjectLifecycleSummary summary;
     if (!nds || !nds->MainRAM)
         return summary;
+    if (ActiveGameStateObjectScanCache)
+        return ActiveGameStateObjectScanCache->Lifecycle;
 
     const melonDS::u32 ramLen = nds->MainRAMMask + 1;
     if (ramLen < 0x5C)
@@ -7159,6 +9913,67 @@ void WritePacketBridgeJitScratchInputs(
     }
 }
 
+void ForceStageSceneContinueGateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
+void ForceStageSceneState3GateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
+void ForceStageSceneEventFlagsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
+void ForceMvlPlayerReadyIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
+void ForceMvlRuntimeStateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
+void ForceMvlStageLayoutGateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
+void ClearMvlCameraInitHoldIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
+void ForceMvlStageLayoutBufferIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
+
+void ApplyRollbackResimFramePatches(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!nds || instanceID < 0 || instanceID >= 16)
+        return;
+
+    ApplyMvlRuntimeConfigIfNeeded(nds);
+    ForceNSMLPacketBridgeNetReadyIfNeeded(instanceID, frame, nds);
+    ForceNSMLPacketBridgeStageStartSMFieldsIfNeeded(instanceID, frame, nds);
+    ForceNSMLPacketBridgeLoadGameSMIfNeeded(instanceID, frame, nds);
+    ForceNSMLStagePacketWordsIfNeeded(frame, nds);
+    ForceNSMLGameLocalPlayerIDIfNeeded(frame, nds);
+    ForceWifiCommunicatingIfNeeded(instanceID, frame, nds);
+    ForceNetLocalAidIfNeeded(instanceID, frame, nds);
+    ForceStageSceneContinueGateIfNeeded(instanceID, frame, nds);
+    ForceMvlPlayerReadyIfNeeded(instanceID, frame, nds);
+    ForceMvlRuntimeStateIfNeeded(instanceID, frame, nds);
+    ForcePlayerTransitionStatusIfNeeded(instanceID, frame, nds);
+    ForceEntranceSpawnPointersIfNeeded(instanceID, frame, nds);
+    NormalizeMvlEntranceSpawnStateIfNeeded(instanceID, frame, nds);
+    ForcePlayerActorIDsIfNeeded(instanceID, frame, nds);
+    RepairMvlInitialPlayerSpawnIfNeeded(instanceID, frame, nds);
+    ForcePlayerActorPositionIfNeeded(instanceID, frame, nds);
+    ForceMvlStageLayoutBufferIfNeeded(instanceID, frame, nds);
+    ForceMvlStageLayoutGateIfNeeded(instanceID, frame, nds);
+    ClearMvlCameraInitHoldIfNeeded(instanceID, frame, nds);
+    ForceStageSceneEventFlagsIfNeeded(instanceID, frame, nds);
+    ForceStageCameraSlotIfNeeded(instanceID, frame, nds);
+    ForceStageCameraObjectXIfNeeded(instanceID, frame, nds);
+    ForceStageSceneState3GateIfNeeded(instanceID, frame, nds);
+    ForceStageActorFreezeFlagIfNeeded(instanceID, frame, nds);
+    ForcePlayerDeathCountersIfNeeded(instanceID, frame, nds);
+    ForcePlayerInventoryPowerupsIfNeeded(instanceID, frame, nds);
+    ForcePlayerStarCountersIfNeeded(instanceID, frame, nds);
+    ForceStageFXSettingsIfNeeded(instanceID, frame, nds);
+    ForceStageActorPreUpdateGateIfNeeded(instanceID, frame, nds);
+    ForceActorCategoryMaskIfNeeded(instanceID, frame, nds);
+    ForcePlayerSignalUnlockIfNeeded(instanceID, frame, nds);
+    ForcePlayerUpdateEnableIfNeeded(instanceID, frame, nds);
+}
+
+void ApplyRollbackResimPostFramePatches(melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!nds)
+        return;
+
+    ForceNSMLStagePacketWordsIfNeeded(frame, nds);
+    ForceNSMLGameLocalPlayerIDIfNeeded(frame, nds);
+    melonDS::NSML_RefreshMarioVsLuigiPacketSlots(nds);
+    ForceNSMLStagePacketWordsIfNeeded(frame, nds);
+    ForceNSMLGameLocalPlayerIDIfNeeded(frame, nds);
+}
+
 bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.RollbackEnabled || !G.RollbackResimulate || !G.InputNetplayOnly || !nds)
@@ -7168,14 +9983,47 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
 
     melonDS::u32 mismatchFrame = kNoFrameLimit;
     melonDS::u32 restoreFrame = kNoFrameLimit;
-    std::vector<char> buffer;
+    RollbackStoredState checkpoint;
+    std::vector<RollbackStoredState> restoreChain;
+    std::vector<RollbackStoredState> reverseStates;
+    std::vector<melonDS::u8> latestMainRAM;
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         if (G.PendingRollbackFrame == kNoFrameLimit)
             return false;
         mismatchFrame = G.PendingRollbackFrame;
+        if (mismatchFrame == frame)
+        {
+            if (G.InputNetplayTraceEnabled)
+            {
+                std::printf("NSMB Rollback: current-frame mismatch consumed without resim frame=%u\n",
+                    frame);
+                std::fflush(stdout);
+            }
+            G.PendingRollbackFrame = kNoFrameLimit;
+            G.PendingRollbackObservedFrame = kNoFrameLimit;
+            return false;
+        }
         if (mismatchFrame >= frame)
             return false;
+        if (G.RollbackMaxResimFrames > 0)
+        {
+            const melonDS::u32 maxResimFrames = static_cast<melonDS::u32>(G.RollbackMaxResimFrames);
+            if (frame - mismatchFrame > maxResimFrames)
+            {
+                const melonDS::u32 cappedFrame = frame - maxResimFrames;
+                if (G.InputNetplayTraceEnabled)
+                {
+                    std::printf("NSMB Rollback: capping resim window originalMismatch=%u cappedMismatch=%u current=%u maxFrames=%u\n",
+                        mismatchFrame,
+                        cappedFrame,
+                        frame,
+                        maxResimFrames);
+                    std::fflush(stdout);
+                }
+                mismatchFrame = cappedFrame;
+            }
+        }
         if (G.RollbackResimulateDelayFrames > 0
             && G.PendingRollbackObservedFrame != kNoFrameLimit
             && frame < G.PendingRollbackObservedFrame + static_cast<melonDS::u32>(G.RollbackResimulateDelayFrames))
@@ -7199,7 +10047,21 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
         --state;
         restoreFrame = state->first;
 
-        buffer = state->second;
+        checkpoint = state->second;
+        const bool restoreReady = IsRollbackPreimageBackend()
+            ? BuildRollbackPreimageRestoreLocked(restoreFrame, reverseStates, latestMainRAM)
+            : BuildRollbackRestoreChainLocked(restoreFrame, restoreChain);
+        if (!restoreReady)
+        {
+            std::printf(
+                "NSMB Rollback: cannot resimulate mismatch=%u from delta checkpoint=%u, base=%u chain missing\n",
+                mismatchFrame,
+                restoreFrame,
+                checkpoint.BaseFrame);
+            G.PendingRollbackFrame = kNoFrameLimit;
+            G.PendingRollbackObservedFrame = kNoFrameLimit;
+            return false;
+        }
         G.PendingRollbackFrame = kNoFrameLimit;
         G.PendingRollbackObservedFrame = kNoFrameLimit;
 
@@ -7207,7 +10069,12 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
             it = G.RollbackStates.erase(it);
     }
 
-    if (!RestoreRollbackCheckpointBuffer(nds, buffer))
+    const auto rollbackStart = std::chrono::steady_clock::now();
+    const auto restoreStart = rollbackStart;
+    const bool restored = IsRollbackPreimageBackend()
+        ? RestoreRollbackPreimageState(nds, checkpoint, reverseStates, latestMainRAM)
+        : RestoreRollbackStoredStates(nds, restoreChain);
+    if (!restored)
     {
         std::printf("NSMB Rollback: resim restore failed inst=%d restoreFrame=%u current=%u\n",
             instanceID,
@@ -7215,9 +10082,19 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
             frame);
         return false;
     }
+    TraceNSMBRestoreDiff("resim", restoreFrame, frame, nds, checkpoint);
+    const unsigned long long restoreUs = ElapsedUs(restoreStart);
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        RefreshRollbackFrameDeltaShadowLocked(restoreFrame, nds);
+    }
 
     const int localPlayer = CurrentPacketBridgeLocalPlayer();
     melonDS::u32 resimulated = 0;
+    unsigned long long resimRunFrameTotalUs = 0;
+    unsigned long long resimRunFrameMaxUs = 0;
+    unsigned long long resimCheckpointSaveTotalUs = 0;
+    unsigned long long resimCheckpointSaveMaxUs = 0;
     for (melonDS::u32 f = restoreFrame; f < frame; f++)
     {
         InputState localInput = NeutralInput();
@@ -7231,6 +10108,7 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
             GetRollbackRemoteInputLocked(f, remoteInput, predictedRemote);
         }
 
+        ApplyRollbackResimFramePatches(instanceID, f, nds);
         WritePacketBridgeJitScratchInputs(
             instanceID,
             f,
@@ -7247,12 +10125,33 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
         else
             nds->ReleaseScreen();
 
+        const bool skipRender = G.RollbackSkipRenderDuringResim;
+        if (skipRender)
+            nds->GPU.SetRollbackSkipRender(true);
+        const auto runFrameStart = std::chrono::steady_clock::now();
         nds->RunFrame();
+        const unsigned long long runFrameUs = ElapsedUs(runFrameStart);
+        resimRunFrameTotalUs += runFrameUs;
+        if (runFrameUs > resimRunFrameMaxUs)
+            resimRunFrameMaxUs = runFrameUs;
+        if (skipRender)
+            nds->GPU.SetRollbackSkipRender(false);
+        ApplyRollbackResimPostFramePatches(f + 1, nds);
         resimulated++;
 
+        const bool saveResimCheckpoint =
+            !G.RollbackSkipIntermediateResimCheckpoints || (f + 1) == frame;
+        if (saveResimCheckpoint)
         {
-            std::lock_guard<std::mutex> lock(G.Mutex);
-            SaveRollbackCheckpointNowLocked(f + 1, nds);
+            const auto checkpointSaveStart = std::chrono::steady_clock::now();
+            {
+                std::lock_guard<std::mutex> lock(G.Mutex);
+                SaveRollbackCheckpointNowLocked(f + 1, nds);
+            }
+            const unsigned long long checkpointSaveUs = ElapsedUs(checkpointSaveStart);
+            resimCheckpointSaveTotalUs += checkpointSaveUs;
+            if (checkpointSaveUs > resimCheckpointSaveMaxUs)
+                resimCheckpointSaveMaxUs = checkpointSaveUs;
         }
 
         if (nds->NumFrames != f + 1 && G.InputNetplayTraceEnabled)
@@ -7263,18 +10162,34 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
         }
     }
 
+    const unsigned long long rollbackTotalUs = ElapsedUs(rollbackStart);
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
+        RefreshRollbackFrameDeltaShadowLocked(frame, nds);
+        RecordRollbackCheckpointRestoreLocked(restoreUs);
+        RecordRollbackResimTimingLocked(
+            resimulated,
+            resimRunFrameTotalUs,
+            resimRunFrameMaxUs,
+            resimCheckpointSaveTotalUs,
+            resimCheckpointSaveMaxUs,
+            rollbackTotalUs);
         G.RollbackResimulateCount++;
     }
     if (G.InputNetplayTraceEnabled)
     {
-        std::printf("NSMB Rollback: resimulated from checkpoint=%u mismatch=%u to current=%u frames=%u bytes=%zu\n",
+        std::printf("NSMB Rollback: resimulated from checkpoint=%u mismatch=%u to current=%u frames=%u bytes=%zu restoreUs=%llu runUs=%llu runMaxUs=%llu checkpointSaveUs=%llu checkpointSaveMaxUs=%llu totalUs=%llu\n",
             restoreFrame,
             mismatchFrame,
             frame,
             resimulated,
-            buffer.size());
+            RollbackCheckpointBytes(checkpoint),
+            restoreUs,
+            resimRunFrameTotalUs,
+            resimRunFrameMaxUs,
+            resimCheckpointSaveTotalUs,
+            resimCheckpointSaveMaxUs,
+            rollbackTotalUs);
         std::fflush(stdout);
     }
     return true;
@@ -7381,6 +10296,15 @@ void WritePacketBridgeJitScratchIfNeeded(
     if (G.ScriptRemotePacketEndFrame != 0 && frame > G.ScriptRemotePacketEndFrame)
         return;
 
+    const bool traceScratch = G.ActiveFrameSpikeTrace;
+    const auto scratchStart = std::chrono::steady_clock::now();
+    unsigned long long peerStartWaitUs = 0;
+    unsigned long long networkUs = 0;
+    unsigned long long throttleUs = 0;
+    unsigned long long lockstepRemoteWaitUs = 0;
+    unsigned long long writeUs = 0;
+    bool wroteScratch = false;
+
     const melonDS::u32 logicalFrame = InputNetplayLogicalFrame(frame);
     if (G.InputNetplayOnly
         && G.WaitForPeerAtNetplayStart
@@ -7402,7 +10326,9 @@ void WritePacketBridgeJitScratchIfNeeded(
                 sendStartFrame,
                 G.NetplayStartFrame);
             std::fflush(stdout);
+            const auto waitStart = std::chrono::steady_clock::now();
             WaitForPeerIfNeeded(true);
+            peerStartWaitUs = static_cast<unsigned long long>(ElapsedUs(waitStart));
         }
     }
 
@@ -7415,8 +10341,9 @@ void WritePacketBridgeJitScratchIfNeeded(
         const melonDS::u32 sendFrame = G.InputNetplayOnly
             ? logicalFrame + static_cast<melonDS::u32>(std::max(0, G.Delay))
             : frame;
+        const auto networkStart = std::chrono::steady_clock::now();
         {
-            std::lock_guard<std::mutex> lock(G.Mutex);
+            std::unique_lock<std::mutex> lock(G.Mutex);
             PumpNetworkLocked(nds, frame);
             SendMatchSeedLocked();
             G.LocalInputs[sendFrame] = localInput;
@@ -7433,36 +10360,79 @@ void WritePacketBridgeJitScratchIfNeeded(
                 hasRemoteInput = true;
             }
             else if (G.RollbackEnabled && G.InputNetplayOnly
+                && (G.NetplayStartFrame == 0 || logicalFrame >= G.NetplayStartFrame)
+                && TryWaitForRollbackRemoteInputLocked(lock, nds, frame, logicalFrame, remoteInput))
+            {
+                hasRemoteInput = true;
+            }
+            else if (G.RollbackEnabled && G.InputNetplayOnly
                 && (G.NetplayStartFrame == 0 || logicalFrame >= G.NetplayStartFrame))
             {
                 hasRemoteInput = GetRollbackRemoteInputLocked(logicalFrame, remoteInput, predictedRemoteInput);
             }
         }
+        networkUs = static_cast<unsigned long long>(ElapsedUs(networkStart));
 
+        const auto throttleStart = std::chrono::steady_clock::now();
         ThrottleInputNetplayFrameLead(nds, frame, sendFrame);
+        throttleUs = static_cast<unsigned long long>(ElapsedUs(throttleStart));
 
         if (!hasRemoteInput
             && !G.RollbackEnabled
             && G.LocalWaitsForRemote
             && (!G.InputNetplayOnly || G.NetplayStartFrame == 0 || logicalFrame >= G.NetplayStartFrame))
         {
+            const auto waitStart = std::chrono::steady_clock::now();
             remoteInput = WaitForRemoteInput(logicalFrame);
+            lockstepRemoteWaitUs = static_cast<unsigned long long>(ElapsedUs(waitStart));
             hasRemoteInput = true;
         }
     }
 
-    if (logicalFrame < startFrame)
-        return;
+    const bool beforeStart = logicalFrame < startFrame;
+    if (!beforeStart)
+    {
+        const auto writeStart = std::chrono::steady_clock::now();
+        WritePacketBridgeJitScratchInputs(
+            instanceID,
+            logicalFrame,
+            nds,
+            localPlayer,
+            effectiveLocalInput,
+            remoteInput,
+            hasRemoteInput,
+            predictedRemoteInput);
+        writeUs = static_cast<unsigned long long>(ElapsedUs(writeStart));
+        wroteScratch = true;
+    }
 
-    WritePacketBridgeJitScratchInputs(
-        instanceID,
-        logicalFrame,
-        nds,
-        localPlayer,
-        effectiveLocalInput,
-        remoteInput,
-        hasRemoteInput,
-        predictedRemoteInput);
+    if (traceScratch)
+    {
+        const unsigned long long totalUs = static_cast<unsigned long long>(ElapsedUs(scratchStart));
+        const unsigned long long thresholdUs = static_cast<unsigned long long>(
+            std::min(G.ActiveFrameSpikeThresholdUs, 10000));
+        if (totalUs >= thresholdUs)
+        {
+            std::printf(
+                "NSMB PacketBridgeScratchSpike: inst=%d frame=%u logicalFrame=%u totalMs=%.3f peerStartWaitMs=%.3f networkMs=%.3f throttleMs=%.3f lockstepRemoteWaitMs=%.3f writeMs=%.3f wrote=%d beforeStart=%d hasRemote=%d predictedRemote=%d\n",
+                instanceID,
+                frame,
+                logicalFrame,
+                static_cast<double>(totalUs) / 1000.0,
+                static_cast<double>(peerStartWaitUs) / 1000.0,
+                static_cast<double>(networkUs) / 1000.0,
+                static_cast<double>(throttleUs) / 1000.0,
+                static_cast<double>(lockstepRemoteWaitUs) / 1000.0,
+                static_cast<double>(writeUs) / 1000.0,
+                wroteScratch ? 1 : 0,
+                beforeStart ? 1 : 0,
+                hasRemoteInput ? 1 : 0,
+                predictedRemoteInput ? 1 : 0);
+            std::fflush(stdout);
+        }
+    }
+    if (beforeStart)
+        return;
 }
 
 void ApplyPacketBridgeJitHelperPatchIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -8062,6 +11032,891 @@ bool WriteObjectTransformByGUID(
     return false;
 }
 
+bool WriteObjectTransformByBase(
+    melonDS::NDS* nds,
+    melonDS::u32 base,
+    melonDS::u32 posX,
+    melonDS::u32 posY,
+    melonDS::u32 posZ,
+    melonDS::u32 prevX,
+    melonDS::u32 prevY,
+    melonDS::u32 prevZ,
+    melonDS::u32 velX,
+    melonDS::u32 velY,
+    melonDS::u32 velZ)
+{
+    if (!nds || !nds->MainRAM || base < kMainRAMBase)
+        return false;
+
+    const melonDS::u32 off = base - kMainRAMBase;
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (off + 0xDC > ramLen)
+        return false;
+
+    WriteMainRAMU32(nds, off + 0x60, posX);
+    WriteMainRAMU32(nds, off + 0x64, posY);
+    WriteMainRAMU32(nds, off + 0x68, posZ);
+    WriteMainRAMU32(nds, off + 0x70, prevX);
+    WriteMainRAMU32(nds, off + 0x74, prevY);
+    WriteMainRAMU32(nds, off + 0x78, prevZ);
+    WriteMainRAMU32(nds, off + 0xD0, velX);
+    WriteMainRAMU32(nds, off + 0xD4, velY);
+    WriteMainRAMU32(nds, off + 0xD8, velZ);
+    return true;
+}
+
+void FillWireWorldActorState(const ObjectScanSample& actor, WireWorldActorState& state)
+{
+    state.Found = actor.Found;
+    state.GUID = actor.GUID;
+    state.Settings = actor.Settings;
+    state.StateType = actor.StateType;
+    state.Flags = actor.Flags;
+    state.PosX = actor.PosX;
+    state.PosY = actor.PosY;
+    state.PosZ = actor.PosZ;
+    state.PrevX = actor.PrevX;
+    state.PrevY = actor.PrevY;
+    state.PrevZ = actor.PrevZ;
+    state.VelX = actor.VelX;
+    state.VelY = actor.VelY;
+    state.VelZ = actor.VelZ;
+    state.LastStepX = actor.LastStepX;
+    state.LastStepY = actor.LastStepY;
+    state.LastStepZ = actor.LastStepZ;
+    state.VelH = actor.VelH;
+    state.TargetVelH = actor.TargetVelH;
+    state.AccelV = actor.AccelV;
+    state.TargetVelV = actor.TargetVelV;
+    state.AccelH = actor.AccelH;
+    state.TargetVelX = actor.TargetVelX;
+    state.TargetVelY = actor.TargetVelY;
+    state.TargetVelZ = actor.TargetVelZ;
+}
+
+bool IsWorldActorSnapshotCandidate(const GameStateObjectScanEntry& entry)
+{
+    if (!entry.Actor.Found || entry.Actor.StateType == 0 || entry.Actor.StateType > 2)
+        return false;
+    if (entry.Actor.Flags >= 0x10000000)
+        return false;
+
+    switch (entry.ObjectID)
+    {
+    case kPlayerObjectID:
+    case kVsBattleStarActorObjectID:
+    case kVsMovingHazardObjectID:
+    case kStageSceneObjectID:
+    case kStageFXObjectID:
+    case kStageActorManagerObjectID:
+    case kStageControllerObjectID:
+    case kMvlObject267ID:
+    case kVsConnectObjectID:
+    case kCourseSelectObjectID:
+    case kStageCameraObjectID:
+        return false;
+    default:
+        break;
+    }
+
+    return entry.ObjectID != 0 && entry.ObjectID < 0x0300;
+}
+
+struct WorldActorSnapshotCandidate
+{
+    melonDS::u32 ObjectID = 0;
+    ObjectScanSample Actor;
+};
+
+std::vector<WorldActorSnapshotCandidate> CollectWorldActorSnapshotCandidates(melonDS::NDS* nds)
+{
+    std::vector<WorldActorSnapshotCandidate> actors;
+    const GameStateObjectScanCache cache = BuildGameStateObjectScanCache(nds);
+    actors.reserve(std::min(cache.Entries.size(), kMaxWorldActorSnapshots));
+    for (const GameStateObjectScanEntry& entry : cache.Entries)
+    {
+        if (!IsWorldActorSnapshotCandidate(entry))
+            continue;
+
+        WorldActorSnapshotCandidate state {};
+        state.ObjectID = entry.ObjectID;
+        state.Actor = entry.Actor;
+        actors.push_back(state);
+    }
+
+    std::sort(actors.begin(), actors.end(), [](const WorldActorSnapshotCandidate& lhs, const WorldActorSnapshotCandidate& rhs) {
+        if (lhs.ObjectID != rhs.ObjectID)
+            return lhs.ObjectID < rhs.ObjectID;
+        if (lhs.Actor.Settings != rhs.Actor.Settings)
+            return lhs.Actor.Settings < rhs.Actor.Settings;
+        if (lhs.Actor.PosX != rhs.Actor.PosX)
+            return lhs.Actor.PosX < rhs.Actor.PosX;
+        return lhs.Actor.GUID < rhs.Actor.GUID;
+    });
+    if (actors.size() > kMaxWorldActorSnapshots)
+        actors.resize(kMaxWorldActorSnapshots);
+    return actors;
+}
+
+bool ApplyWireWorldActorState(
+    melonDS::NDS* nds,
+    const WireWorldActorState& state,
+    melonDS::u32 predictFrames,
+    melonDS::u32 localBase)
+{
+    if (!state.Found)
+        return false;
+
+    return WriteObjectTransformByBase(
+        nds,
+        localBase,
+        state.PosX + state.VelX * predictFrames,
+        state.PosY + state.VelY * predictFrames,
+        state.PosZ + state.VelZ * predictFrames,
+        state.PrevX + state.VelX * predictFrames,
+        state.PrevY + state.VelY * predictFrames,
+        state.PrevZ + state.VelZ * predictFrames,
+        state.VelX,
+        state.VelY,
+        state.VelZ);
+}
+
+bool ApplyWireWorldMovingHazardState(
+    melonDS::NDS* nds,
+    const WireWorldActorState& state,
+    melonDS::u32 predictFrames,
+    melonDS::u32 localBase)
+{
+    if (!state.Found)
+        return false;
+
+    nds->ARM9Write16(localBase + 0x0E, static_cast<melonDS::u16>(state.StateType));
+    nds->ARM9Write32(localBase + 0x10, state.Flags);
+
+    const melonDS::u32 posX = state.PosX + state.VelX * predictFrames;
+    const melonDS::u32 posY = state.PosY + state.VelY * predictFrames;
+    const melonDS::u32 posZ = state.PosZ + state.VelZ * predictFrames;
+    if (!WriteObjectTransformByBase(
+        nds,
+        localBase,
+        posX,
+        posY,
+        posZ,
+        posX,
+        posY,
+        posZ,
+        state.VelX,
+        state.VelY,
+        0))
+        return false;
+
+    nds->ARM9Write32(localBase + 0x80, state.LastStepX);
+    nds->ARM9Write32(localBase + 0x84, state.LastStepY);
+    nds->ARM9Write32(localBase + 0x88, state.LastStepZ);
+    nds->ARM9Write32(localBase + 0xB0, state.VelH);
+    nds->ARM9Write32(localBase + 0xB4, state.TargetVelH);
+    nds->ARM9Write32(localBase + 0xB8, state.AccelV);
+    nds->ARM9Write32(localBase + 0xBC, state.TargetVelV);
+    nds->ARM9Write32(localBase + 0xC0, state.AccelH);
+    nds->ARM9Write32(localBase + 0xE0, state.TargetVelX);
+    nds->ARM9Write32(localBase + 0xE4, state.TargetVelY);
+    nds->ARM9Write32(localBase + 0xE8, state.TargetVelZ);
+    return true;
+}
+
+melonDS::u64 WorldMovingHazardMatchDistance(
+    const WireWorldActorState& remoteActor,
+    const ObjectScanSample& localActor)
+{
+    const auto componentDistance = [](melonDS::u32 lhs, melonDS::u32 rhs)
+    {
+        const std::int64_t delta =
+            static_cast<std::int64_t>(static_cast<std::int32_t>(lhs)) -
+            static_cast<std::int64_t>(static_cast<std::int32_t>(rhs));
+        return static_cast<melonDS::u64>(delta < 0 ? -delta : delta);
+    };
+
+    return componentDistance(remoteActor.PosX, localActor.PosX) +
+        componentDistance(remoteActor.PosY, localActor.PosY) +
+        componentDistance(remoteActor.PosZ, localActor.PosZ);
+}
+
+void ApplyRemoteWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.Enabled || !G.WorldStateApplyActorSnapshot || G.NetRole != Role::Client || !nds || !nds->MainRAM)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.NetplayStartFrame)
+        return;
+
+    WireWorldActorSnapshotState sample {};
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        PumpNetworkLocked();
+        if (!G.RemoteWorldActorSnapshotSampleValid)
+            return;
+        sample = G.RemoteWorldActorSnapshotSample;
+    }
+
+    const std::vector<WorldActorSnapshotCandidate> localActors = CollectWorldActorSnapshotCandidates(nds);
+    const std::size_t remoteCount = std::min(
+        static_cast<std::size_t>(sample.Count),
+        kMaxWorldActorSnapshots);
+    if (remoteCount == 0 || localActors.empty())
+        return;
+
+    std::array<int, kMaxWorldActorSnapshots> localIndices {};
+    std::array<bool, kMaxWorldActorSnapshots> localUsed {};
+    localIndices.fill(-1);
+    std::array<melonDS::u32, kMaxWorldActorSnapshots> nextRemoteGUIDs {};
+    std::array<melonDS::u32, kMaxWorldActorSnapshots> nextLocalGUIDs {};
+
+    for (std::size_t i = 0; i < remoteCount; i++)
+    {
+        const WireWorldObjectActorState& remoteActor = sample.Actors[i];
+        for (std::size_t mapIndex = 0; mapIndex < kMaxWorldActorSnapshots; mapIndex++)
+        {
+            if (G.WorldActorSnapshotRemoteGUIDMaps[instanceID][mapIndex] != remoteActor.Actor.GUID)
+                continue;
+
+            const melonDS::u32 localGUID = G.WorldActorSnapshotLocalGUIDMaps[instanceID][mapIndex];
+            for (std::size_t localIndex = 0; localIndex < localActors.size() && localIndex < kMaxWorldActorSnapshots; localIndex++)
+            {
+                if (!localUsed[localIndex] &&
+                    localActors[localIndex].Actor.GUID == localGUID &&
+                    localActors[localIndex].ObjectID == remoteActor.ObjectID &&
+                    localActors[localIndex].Actor.Settings == remoteActor.Actor.Settings)
+                {
+                    localIndices[i] = static_cast<int>(localIndex);
+                    localUsed[localIndex] = true;
+                    break;
+                }
+            }
+            break;
+        }
+    }
+
+    for (std::size_t i = 0; i < remoteCount; i++)
+    {
+        if (localIndices[i] >= 0)
+            continue;
+
+        const WireWorldObjectActorState& remoteActor = sample.Actors[i];
+        std::size_t closestIndex = localActors.size();
+        melonDS::u64 closestDistance = std::numeric_limits<melonDS::u64>::max();
+        for (std::size_t localIndex = 0; localIndex < localActors.size() && localIndex < kMaxWorldActorSnapshots; localIndex++)
+        {
+            if (localUsed[localIndex])
+                continue;
+            const WorldActorSnapshotCandidate& localActor = localActors[localIndex];
+            if (localActor.ObjectID != remoteActor.ObjectID ||
+                localActor.Actor.Settings != remoteActor.Actor.Settings ||
+                localActor.Actor.StateType == 0 ||
+                localActor.Actor.StateType > 2)
+                continue;
+
+            const melonDS::u64 distance = WorldMovingHazardMatchDistance(remoteActor.Actor, localActor.Actor);
+            if (distance < closestDistance ||
+                (distance == closestDistance &&
+                    (closestIndex == localActors.size() ||
+                        localActor.Actor.GUID < localActors[closestIndex].Actor.GUID)))
+            {
+                closestIndex = localIndex;
+                closestDistance = distance;
+            }
+        }
+        if (closestIndex == localActors.size())
+            continue;
+
+        localIndices[i] = static_cast<int>(closestIndex);
+        localUsed[closestIndex] = true;
+    }
+
+    const melonDS::u32 predictFrames = std::min(
+        frame > sample.Frame ? frame - sample.Frame : 0,
+        static_cast<melonDS::u32>(std::max(0, G.WorldStateMaxPredictFrames)));
+    melonDS::u32 applied = 0;
+    bool mapChanged = false;
+    for (std::size_t i = 0; i < remoteCount; i++)
+    {
+        if (localIndices[i] < 0)
+            continue;
+
+        const WireWorldObjectActorState& remoteActor = sample.Actors[i];
+        const WorldActorSnapshotCandidate& localActor = localActors[localIndices[i]];
+        if (ApplyWireWorldActorState(nds, remoteActor.Actor, predictFrames, localActor.Actor.Base))
+        {
+            applied++;
+            nextRemoteGUIDs[i] = remoteActor.Actor.GUID;
+            nextLocalGUIDs[i] = localActor.Actor.GUID;
+        }
+    }
+
+    for (std::size_t i = 0; i < kMaxWorldActorSnapshots; i++)
+    {
+        mapChanged = mapChanged ||
+            G.WorldActorSnapshotRemoteGUIDMaps[instanceID][i] != nextRemoteGUIDs[i] ||
+            G.WorldActorSnapshotLocalGUIDMaps[instanceID][i] != nextLocalGUIDs[i];
+        G.WorldActorSnapshotRemoteGUIDMaps[instanceID][i] = nextRemoteGUIDs[i];
+        G.WorldActorSnapshotLocalGUIDMaps[instanceID][i] = nextLocalGUIDs[i];
+    }
+
+    if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
+        (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
+    {
+        std::printf("NSMB WorldActors: apply inst=%d frame=%u sampleFrame=%u count=%zu applied=%u predict=%u mapChanged=%d\n",
+            instanceID,
+            frame,
+            sample.Frame,
+            remoteCount,
+            applied,
+            predictFrames,
+            mapChanged ? 1 : 0);
+    }
+}
+
+bool SpawnRemoteWorldItem(
+    int instanceID,
+    melonDS::u32 frame,
+    melonDS::NDS* nds,
+    const WireWorldActorState& state)
+{
+    if (!nds || !nds->MainRAM || !state.Found || (state.StateType != 1 && state.StateType != 2))
+        return false;
+
+    WriteARM9U32(nds, kDirectBootTrampolineDataAddr + 0x00, state.PosX);
+    WriteARM9U32(nds, kDirectBootTrampolineDataAddr + 0x04, state.PosY);
+    WriteARM9U32(nds, kDirectBootTrampolineDataAddr + 0x08, state.PosZ);
+    WriteARM9U32(nds, kDirectBootTrampolineDataAddr + 0x0C, 0);
+    WriteARM9U32(nds, kDirectBootTrampolineDataAddr + 0x10, 0);
+
+    const melonDS::u32 oldPC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
+    const melonDS::u32 returnPC = oldPC | ((nds->ARM9.CPSR & 0x20) ? 1u : 0u);
+
+    std::vector<melonDS::u32> code;
+    code.reserve(48);
+    EmitARM(code, 0xE92D5FFFu); // push {r0-r12, lr}
+    EmitARM(code, 0xE10F5000u); // mrs r5, cpsr
+    EmitARM(code, 0xE92D0020u); // push {r5}
+    EmitARM(code, 0xE24DD00Cu); // sub sp, sp, #0x0c
+    EmitStackArg(code, 0x00, 0);
+    EmitStackArg(code, 0x04, 0);
+    EmitStackArg(code, 0x08, 0);
+    EmitLoadImm(code, 0, kVsWorldItemObjectID);
+    EmitLoadImm(code, 1, state.Settings);
+    EmitLoadImm(code, 2, kDirectBootTrampolineDataAddr);
+    EmitLoadImm(code, 3, kDirectBootTrampolineDataAddr + 0x0C);
+    EmitARM(code, 0xE59FC008u); // ldr ip, [pc, #8]
+    EmitARM(code, 0xE28FE008u); // add lr, pc, #8
+    EmitARM(code, 0xE12FFF1Cu); // bx ip
+    EmitARM(code, 0xE1A00000u); // nop
+    EmitARM(code, kA2DEActorSpawnActorAddr);
+    EmitARM(code, 0xE28DD00Cu); // add sp, sp, #0x0c
+    EmitARM(code, 0xE8BD0020u); // pop {r5}
+    EmitARM(code, 0xE128F005u); // msr apsr_nzcvq, r5
+    EmitARM(code, 0xE8BD5FFFu); // pop {r0-r12, lr}
+    EmitARM(code, 0xE59FC004u); // ldr ip, [pc, #4]
+    EmitARM(code, 0xE12FFF1Cu); // bx ip
+    EmitARM(code, 0xE1A00000u); // nop
+    EmitARM(code, returnPC);
+
+    for (size_t i = 0; i < code.size(); i++)
+    {
+        if (!WriteARM9U32(nds, kDirectBootTrampolineAddr + static_cast<melonDS::u32>(i * sizeof(melonDS::u32)), code[i]))
+            return false;
+    }
+
+    std::printf(
+        "NSMB WorldItem: spawn inst=%d frame=%u remoteGuid=%u settings=%08X pos=%08X/%08X/%08X trampoline=%08X return=%08X\n",
+        instanceID,
+        frame,
+        state.GUID,
+        state.Settings,
+        state.PosX,
+        state.PosY,
+        state.PosZ,
+        kDirectBootTrampolineAddr,
+        returnPC);
+    std::fflush(stdout);
+    nds->ARM9.JumpTo(kDirectBootTrampolineAddr);
+    return true;
+}
+
+struct WorldItemApplyResult
+{
+    bool Applied = false;
+    bool Spawned = false;
+};
+
+WorldItemApplyResult ApplyRemoteWorldItemLikeState(
+    int instanceID,
+    melonDS::u32 frame,
+    melonDS::NDS* nds,
+    const WireWorldActorState& sample,
+    melonDS::u32 predictFrames,
+    melonDS::u32& lastSpawnedRemoteGUID,
+    melonDS::u32& lastConfirmedRemoteGUID,
+    melonDS::u32& pendingRemoteGUID,
+    melonDS::u32& pendingFirstMissingFrame,
+    const char* label)
+{
+    WorldItemApplyResult result {};
+    if (!sample.Found)
+    {
+        lastSpawnedRemoteGUID = 0;
+        lastConfirmedRemoteGUID = 0;
+        pendingRemoteGUID = 0;
+        pendingFirstMissingFrame = 0;
+        return result;
+    }
+    if (sample.StateType != 1 && sample.StateType != 2)
+        return result;
+
+    if (pendingRemoteGUID != sample.GUID)
+    {
+        pendingRemoteGUID = sample.GUID;
+        pendingFirstMissingFrame = frame;
+    }
+
+    ObjectScanSample localItem = FindNewestActiveObjectByIDAndSettings(
+        nds,
+        kVsWorldItemObjectID,
+        sample.Settings,
+        true);
+    if (localItem.StateType == 1 || localItem.StateType == 2)
+    {
+        result.Applied = ApplyWireWorldActorState(nds, sample, predictFrames, localItem.Base);
+        lastSpawnedRemoteGUID = sample.GUID;
+        pendingRemoteGUID = 0;
+        pendingFirstMissingFrame = 0;
+        if (lastConfirmedRemoteGUID != sample.GUID)
+        {
+            lastConfirmedRemoteGUID = sample.GUID;
+            if (G.WorldStateTraceMovingHazards || G.WorldStateTraceObjectLifecycles ||
+                G.InputTraceEnabled || G.InputNetplayTraceEnabled)
+            {
+                std::printf(
+                    "NSMB %s: active inst=%d frame=%u remoteGuid=%u localGuid=%u settings=%08X pos=%08X/%08X/%08X\n",
+                    label,
+                    instanceID,
+                    frame,
+                    sample.GUID,
+                    localItem.GUID,
+                    localItem.Settings,
+                    nds->ARM9Read32(localItem.Base + 0x60),
+                    nds->ARM9Read32(localItem.Base + 0x64),
+                    nds->ARM9Read32(localItem.Base + 0x68));
+                std::fflush(stdout);
+            }
+        }
+        return result;
+    }
+
+    if (lastSpawnedRemoteGUID != sample.GUID &&
+        frame - pendingFirstMissingFrame >= kVsWorldItemNaturalSpawnGraceFrames)
+    {
+        result.Spawned = SpawnRemoteWorldItem(instanceID, frame, nds, sample);
+        if (result.Spawned)
+            lastSpawnedRemoteGUID = sample.GUID;
+    }
+    return result;
+}
+
+void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.Enabled || !G.WorldStateApplyEnabled) return;
+    if (instanceID < 0 || instanceID >= 16 || !nds || !nds->MainRAM) return;
+    if (frame < G.NetplayStartFrame) return;
+    TraceWorldMovingHazardsIfNeeded(instanceID, frame, nds);
+    TraceWorldObjectLifecyclesIfNeeded(instanceID, frame, nds);
+    TraceWorldEffectsIfNeeded(instanceID, frame, nds);
+
+    WireWorldState sample {};
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        PumpNetworkLocked();
+        if (!G.RemoteWorldStateSampleValid)
+            return;
+        sample = G.RemoteWorldStateSample;
+    }
+
+    const melonDS::u32 predictFrames = std::min(
+        frame > sample.Frame ? frame - sample.Frame : 0,
+        static_cast<melonDS::u32>(std::max(0, G.WorldStateMaxPredictFrames)));
+    const bool applyHostAuthoritativeWorld = G.NetRole == Role::Client;
+    bool starApplied = false;
+    if (applyHostAuthoritativeWorld)
+    {
+        const ObjectScanSample star = GetWorldActorCached(
+            instanceID,
+            frame,
+            nds,
+            kVsBattleStarActorObjectID,
+            kVsBattleStarActorSettings,
+            G.WorldStarActorBaseCache,
+            G.WorldStarActorGUIDCache);
+        starApplied =
+            G.WorldStateApplyStarActor &&
+            star.StateType == 1 &&
+            sample.Star.StateType == 1 &&
+            ApplyWireWorldActorState(nds, sample.Star, predictFrames, star.Base);
+    }
+    WorldItemApplyResult worldItemResult {};
+    WorldItemApplyResult neutralWorldItemResult {};
+    WorldItemApplyResult droppedStarItemResult {};
+    if (G.WorldStateSpawnItem)
+    {
+        neutralWorldItemResult = ApplyRemoteWorldItemLikeState(
+            instanceID,
+            frame,
+            nds,
+            sample.NeutralItem,
+            predictFrames,
+            G.LastSpawnedNeutralWorldItemRemoteGUID[instanceID],
+            G.LastConfirmedNeutralWorldItemRemoteGUID[instanceID],
+            G.PendingNeutralWorldItemRemoteGUID[instanceID],
+            G.PendingNeutralWorldItemFirstMissingFrame[instanceID],
+            "NeutralWorldItem");
+        if (applyHostAuthoritativeWorld)
+        {
+            worldItemResult = ApplyRemoteWorldItemLikeState(
+                instanceID,
+                frame,
+                nds,
+                sample.Item,
+                predictFrames,
+                G.LastSpawnedWorldItemRemoteGUID[instanceID],
+                G.LastConfirmedWorldItemRemoteGUID[instanceID],
+                G.PendingWorldItemRemoteGUID[instanceID],
+                G.PendingWorldItemFirstMissingFrame[instanceID],
+                "WorldItem");
+        }
+        droppedStarItemResult = ApplyRemoteWorldItemLikeState(
+            instanceID,
+            frame,
+            nds,
+            sample.DroppedStarItem,
+            predictFrames,
+            G.LastSpawnedDroppedStarItemRemoteGUID[instanceID],
+            G.LastConfirmedDroppedStarItemRemoteGUID[instanceID],
+            G.PendingDroppedStarItemRemoteGUID[instanceID],
+            G.PendingDroppedStarItemFirstMissingFrame[instanceID],
+            "DroppedStarItem");
+    }
+
+    if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
+        (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
+    {
+        std::printf("NSMB WorldState: apply inst=%d frame=%u sampleFrame=%u predict=%u star=%d neutralItem=%d neutralSpawn=%d item=%d itemSpawn=%d droppedItem=%d droppedSpawn=%d hazard=%d hazardPos=%08X/%08X\n",
+            instanceID,
+            frame,
+            sample.Frame,
+            predictFrames,
+            starApplied ? 1 : 0,
+            neutralWorldItemResult.Applied ? 1 : 0,
+            neutralWorldItemResult.Spawned ? 1 : 0,
+            worldItemResult.Applied ? 1 : 0,
+            worldItemResult.Spawned ? 1 : 0,
+            droppedStarItemResult.Applied ? 1 : 0,
+            droppedStarItemResult.Spawned ? 1 : 0,
+            0,
+            sample.MovingHazard.PosX,
+            sample.MovingHazard.PosY);
+    }
+}
+
+void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, bool preferFreshSample = false)
+{
+    if (!G.Enabled || !G.WorldStateApplyMovingHazard || G.NetRole != Role::Client) return;
+    if (instanceID < 0 || instanceID >= 16 || !nds || !nds->MainRAM) return;
+    if (frame < G.NetplayStartFrame) return;
+
+    WireMovingHazardState sample {};
+    bool sampleValid = false;
+    const auto waitDeadline = std::chrono::steady_clock::now() + std::chrono::microseconds(1500);
+    {
+        while (true)
+        {
+            {
+                std::lock_guard<std::mutex> lock(G.Mutex);
+                PumpNetworkLocked();
+                if (G.RemoteMovingHazardStateSampleValid)
+                {
+                    sample = G.RemoteMovingHazardStateSample;
+                    sampleValid = true;
+                }
+            }
+            if (!preferFreshSample || sample.Frame >= frame || std::chrono::steady_clock::now() >= waitDeadline)
+                break;
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
+        if (!sampleValid || (preferFreshSample && sample.Frame < frame))
+            return;
+    }
+
+    const std::vector<ObjectScanSample> localActors = GetWorldMovingHazardsCached(instanceID, frame, nds);
+    const std::size_t remoteCount = std::min(
+        static_cast<std::size_t>(sample.Count),
+        kMaxWorldMovingHazards);
+    if (localActors.size() != remoteCount)
+        return;
+    const std::size_t pairCount = remoteCount;
+    const melonDS::u32 predictFrames = std::min(
+        frame > sample.Frame ? frame - sample.Frame : 0,
+        static_cast<melonDS::u32>(std::max(0, G.WorldStateMaxPredictFrames)));
+    int localIndices[kMaxWorldMovingHazards] { -1, -1, -1, -1 };
+    bool localUsed[kMaxWorldMovingHazards] {};
+    melonDS::u32 nextRemoteGUIDs[kMaxWorldMovingHazards] {};
+    melonDS::u32 nextLocalGUIDs[kMaxWorldMovingHazards] {};
+
+    for (std::size_t i = 0; i < pairCount; i++)
+    {
+        const WireWorldActorState& remoteActor = sample.Actors[i];
+        for (std::size_t mapIndex = 0; mapIndex < kMaxWorldMovingHazards; mapIndex++)
+        {
+            if (G.WorldMovingHazardRemoteGUIDMaps[instanceID][mapIndex] != remoteActor.GUID)
+                continue;
+
+            const melonDS::u32 localGUID = G.WorldMovingHazardLocalGUIDMaps[instanceID][mapIndex];
+            for (std::size_t localIndex = 0; localIndex < localActors.size(); localIndex++)
+            {
+                if (!localUsed[localIndex] && localActors[localIndex].GUID == localGUID)
+                {
+                    localIndices[i] = static_cast<int>(localIndex);
+                    localUsed[localIndex] = true;
+                    break;
+                }
+            }
+            break;
+        }
+    }
+
+    for (std::size_t i = 0; i < pairCount; i++)
+    {
+        if (localIndices[i] >= 0)
+            continue;
+
+        const WireWorldActorState& remoteActor = sample.Actors[i];
+        std::size_t closestIndex = localActors.size();
+        melonDS::u64 closestDistance = std::numeric_limits<melonDS::u64>::max();
+        for (std::size_t localIndex = 0; localIndex < localActors.size(); localIndex++)
+        {
+            if (localUsed[localIndex])
+                continue;
+
+            const melonDS::u64 distance =
+                WorldMovingHazardMatchDistance(remoteActor, localActors[localIndex]);
+            if (distance < closestDistance ||
+                (distance == closestDistance &&
+                    (closestIndex == localActors.size() ||
+                        localActors[localIndex].GUID < localActors[closestIndex].GUID)))
+            {
+                closestIndex = localIndex;
+                closestDistance = distance;
+            }
+        }
+        if (closestIndex == localActors.size())
+            return;
+        localIndices[i] = static_cast<int>(closestIndex);
+        localUsed[closestIndex] = true;
+    }
+
+    bool mapChanged = false;
+    for (std::size_t i = 0; i < pairCount; i++)
+    {
+        const ObjectScanSample& localActor = localActors[localIndices[i]];
+        const WireWorldActorState& remoteActor = sample.Actors[i];
+        nextRemoteGUIDs[i] = remoteActor.GUID;
+        nextLocalGUIDs[i] = localActor.GUID;
+        mapChanged = mapChanged ||
+            G.WorldMovingHazardRemoteGUIDMaps[instanceID][i] != nextRemoteGUIDs[i] ||
+            G.WorldMovingHazardLocalGUIDMaps[instanceID][i] != nextLocalGUIDs[i];
+        ApplyWireWorldMovingHazardState(nds, remoteActor, predictFrames, localActor.Base);
+    }
+
+    for (std::size_t i = 0; i < kMaxWorldMovingHazards; i++)
+    {
+        mapChanged = mapChanged ||
+            G.WorldMovingHazardRemoteGUIDMaps[instanceID][i] != nextRemoteGUIDs[i] ||
+            G.WorldMovingHazardLocalGUIDMaps[instanceID][i] != nextLocalGUIDs[i];
+        G.WorldMovingHazardRemoteGUIDMaps[instanceID][i] = nextRemoteGUIDs[i];
+        G.WorldMovingHazardLocalGUIDMaps[instanceID][i] = nextLocalGUIDs[i];
+    }
+    if (mapChanged && G.WorldStateTraceMovingHazards)
+    {
+        std::printf("NSMB WorldHazards: map inst=%d frame=%u count=%zu",
+            instanceID,
+            frame,
+            pairCount);
+        for (std::size_t i = 0; i < pairCount; i++)
+            std::printf(" slot%zu=%u/%u", i, nextRemoteGUIDs[i], nextLocalGUIDs[i]);
+        std::printf("\n");
+    }
+}
+
+void ApplyRemoteWorldEffectState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.Enabled || !G.WorldStateApplyEffects || G.NetRole != Role::Client || !nds || !nds->MainRAM)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.NetplayStartFrame)
+        return;
+
+    WireWorldEffectState sample {};
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        PumpNetworkLocked();
+        if (!G.RemoteWorldEffectStateSampleValid)
+            return;
+        sample = G.RemoteWorldEffectStateSample;
+    }
+
+    for (std::size_t i = 0; i < std::min<std::size_t>(sample.Count, kMaxWorldEffects); i++)
+    {
+        const WireWorldEffectSlot& remote = sample.Effects[i];
+        if (!remote.Found || !IsValidMainRAMRange(nds, remote.Base, kWorldEffectWordEnd + sizeof(melonDS::u32)))
+            continue;
+
+        melonDS::u32 localVTable = 0;
+        if (!ReadMainRAMAddressU32(nds, remote.Base, localVTable) ||
+            (localVTable != kEffectVTablePtr && localVTable != kEffectVTableStart))
+            continue;
+
+        for (std::size_t wordIndex = 0; wordIndex < kWorldEffectWordCount; wordIndex++)
+        {
+            const melonDS::u32 relativeOffset =
+                kWorldEffectWordStart + static_cast<melonDS::u32>(wordIndex * sizeof(melonDS::u32));
+            WriteARM9U32(nds, remote.Base + relativeOffset, remote.Words[wordIndex]);
+        }
+    }
+}
+
+bool WritePlayerRuntimeStateByBase(melonDS::NDS* nds, melonDS::u32 base, const WirePlayerState& state)
+{
+    if (!nds || !nds->MainRAM || base < kMainRAMBase)
+        return false;
+
+    const melonDS::u32 off = base - kMainRAMBase;
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (off + kPlayerBaseVisibleFlagOffset + 1 > ramLen)
+        return false;
+
+    nds->ARM9Write32(base + kPlayerBaseActionFlagOffset, state.ActionFlag);
+    nds->ARM9Write32(base + kPlayerBaseSubActionFlagOffset, state.SubActionFlag);
+    nds->ARM9Write32(base + kPlayerBasePhysicsFlagOffset, state.PhysicsFlag);
+    nds->ARM9Write32(base + kPlayerBaseTransitionFlagOffset, state.TransitionFlag);
+    nds->ARM9Write32(base + kPlayerBaseCollisionFlagOffset, state.CollisionFlag);
+    nds->ARM9Write32(base + kPlayerBaseEnvironmentFlagOffset, state.EnvironmentFlag);
+    nds->ARM9Write16(base + kPlayerBaseDamageCooldownOffset, static_cast<melonDS::u16>(state.DamageCooldown & 0xFFFFu));
+    nds->ARM9Write8(base + kPlayerBaseUpdateLockedOffset, static_cast<melonDS::u8>(state.RuntimeFlags0 & 0xFFu));
+    nds->ARM9Write8(base + kPlayerBaseCharacterIDOffset, static_cast<melonDS::u8>((state.RuntimeFlags0 >> 8) & 0xFFu));
+    nds->ARM9Write8(base + kPlayerBaseTransitioningFlagOffset, static_cast<melonDS::u8>((state.RuntimeFlags0 >> 16) & 0xFFu));
+    nds->ARM9Write8(base + kPlayerBaseCameraFocusModeOffset, static_cast<melonDS::u8>((state.RuntimeFlags0 >> 24) & 0xFFu));
+    nds->ARM9Write8(base + kPlayerBaseDefeatedFlagOffset, static_cast<melonDS::u8>(state.RuntimeFlags1 & 0xFFu));
+    nds->ARM9Write8(base + kPlayerBasePlayerIDOffset, static_cast<melonDS::u8>((state.RuntimeFlags1 >> 8) & 0xFFu));
+    nds->ARM9Write8(base + kPlayerBaseVisibleFlagOffset, static_cast<melonDS::u8>((state.RuntimeFlags1 >> 16) & 0xFFu));
+    return true;
+}
+
+bool WritePlayerMinimalTransitionStateByBase(melonDS::NDS* nds, melonDS::u32 base, const WirePlayerState& state)
+{
+    if (!nds || !nds->MainRAM || base < kMainRAMBase)
+        return false;
+
+    bool ok = true;
+    ok = WriteMainRAMAddrU8IfChanged(
+        nds,
+        base + kPlayerBaseDefeatedFlagOffset,
+        static_cast<melonDS::u8>(state.RuntimeFlags1 & 0xFFu)) && ok;
+    ok = WriteMainRAMAddrU8IfChanged(
+        nds,
+        base + kPlayerBaseVisibleFlagOffset,
+        static_cast<melonDS::u8>((state.RuntimeFlags1 >> 16) & 0xFFu)) && ok;
+    return ok;
+}
+
+bool IsPlayerInActorTransition(melonDS::NDS* nds, melonDS::u32 base)
+{
+    if (!nds || !nds->MainRAM || base < kMainRAMBase)
+        return false;
+
+    const melonDS::u32 off = base - kMainRAMBase;
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (off + kPlayerBaseTransitionStepOffset + 1 > ramLen)
+        return false;
+
+    const melonDS::u8 transitionStep = nds->ARM9Read8(base + kPlayerBaseTransitionStepOffset);
+    return transitionStep != 1;
+}
+
+void ReadPlayerGlobalState(melonDS::NDS* nds, melonDS::u32 player, WirePlayerState& state)
+{
+    if (!nds || !nds->MainRAM || player > 1)
+        return;
+
+    state.PlayerCount = nds->ARM9Read32(kGamePlayerCountAddr);
+    state.Powerup = nds->ARM9Read8(kGamePlayerPowerupAddr + player);
+    state.InventoryPowerup = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr + player);
+    state.Dead = nds->ARM9Read8(kGamePlayerDeadAddr + player);
+    state.Character = nds->ARM9Read8(kGamePlayerCharacterAddr + player);
+    state.TransitionStatus = nds->ARM9Read32(kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32) * player);
+    state.Lives = nds->ARM9Read32(kGamePlayerLivesAddr + sizeof(melonDS::u32) * player);
+    state.BattleStars = nds->ARM9Read32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32) * player);
+    state.Coins = nds->ARM9Read32(kGamePlayerCoinsAddr + sizeof(melonDS::u32) * player);
+    state.Score = nds->ARM9Read32(kGamePlayerScoreAddr + sizeof(melonDS::u32) * player);
+    state.DisplayedStars = nds->ARM9Read32(kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32) * player);
+    state.Deaths = nds->ARM9Read32(kGamePlayerDeathsAddr + sizeof(melonDS::u32) * player);
+    state.CollectedStars = nds->ARM9Read32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32) * player);
+}
+
+bool WritePlayerGlobalState(melonDS::NDS* nds, const WirePlayerState& state)
+{
+    if (!nds || !nds->MainRAM || state.Player > 1)
+        return false;
+
+    const melonDS::u32 player = state.Player;
+    bool ok = true;
+
+    melonDS::u32 currentDeaths = 0;
+    melonDS::u8 currentDead = 0;
+    const melonDS::u32 deathsAddr = kGamePlayerDeathsAddr + sizeof(melonDS::u32) * player;
+    const melonDS::u32 deadAddr = kGamePlayerDeadAddr + player;
+    melonDS::u32 deathsOff = 0;
+    melonDS::u32 deadOff = 0;
+    if (MainRAMOffsetFromAddr(nds, deathsAddr, sizeof(currentDeaths), deathsOff))
+        ReadMainRAMU32(nds, deathsOff, currentDeaths);
+    if (MainRAMOffsetFromAddr(nds, deadAddr, sizeof(currentDead), deadOff))
+        ReadMainRAMU8(nds, deadOff, currentDead);
+
+    const bool deathEvent =
+        (state.Dead != 0) ||
+        (currentDead != 0) ||
+        (state.Deaths != currentDeaths);
+    const bool starEvent =
+        state.BattleStars != 0 ||
+        state.DisplayedStars != 0 ||
+        state.CollectedStars != 0;
+
+    if (state.Lives != 0)
+        ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerLivesAddr + sizeof(melonDS::u32) * player, state.Lives) && ok;
+    ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerCoinsAddr + sizeof(melonDS::u32) * player, state.Coins) && ok;
+    if (deathEvent)
+    {
+        ok = WriteMainRAMAddrU8IfChanged(nds, deadAddr, static_cast<melonDS::u8>(state.Dead & 0xFFu)) && ok;
+        ok = WriteMainRAMAddrU32IfChanged(nds, deathsAddr, state.Deaths) && ok;
+        ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32) * player, state.TransitionStatus) && ok;
+    }
+    if (starEvent)
+    {
+        ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerBattleStarsAddr + sizeof(melonDS::u32) * player, state.BattleStars) && ok;
+        ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32) * player, state.DisplayedStars) && ok;
+        ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32) * player, state.CollectedStars) && ok;
+    }
+    return ok;
+}
+
 bool FindLatestRemoteGameStateLocked(int instanceID, melonDS::u32 frame, GameStateSample& sample, melonDS::u32& sampleFrame)
 {
     bool found = false;
@@ -8085,9 +11940,133 @@ bool FindLatestRemoteGameStateLocked(int instanceID, melonDS::u32 frame, GameSta
     return found;
 }
 
+bool FindLatestRemotePlayerStateLocked(melonDS::u32 player, melonDS::u32 frame, WirePlayerState& sample, melonDS::u32& sampleFrame)
+{
+    bool found = false;
+    melonDS::u32 bestFrame = 0;
+    const melonDS::u64 endKey = PlayerStateKey(player + 1, 0);
+    for (auto it = G.RemotePlayerStateSamples.lower_bound(PlayerStateKey(player, 0));
+         it != G.RemotePlayerStateSamples.end() && it->first < endKey;
+         ++it)
+    {
+        const WirePlayerState& value = it->second;
+        if (value.Frame > frame)
+            continue;
+        if (found && value.Frame <= bestFrame)
+            continue;
+        found = true;
+        bestFrame = value.Frame;
+        sample = value;
+    }
+
+    sampleFrame = bestFrame;
+    return found;
+}
+
+void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, bool preferFreshSample = false)
+{
+    if (!G.Enabled || !G.PlayerStateApplyEnabled) return;
+    if (instanceID < 0 || instanceID >= 16 || !nds || !nds->MainRAM) return;
+    if (frame < G.NetplayStartFrame) return;
+
+    const int remotePlayer = CurrentPacketBridgeLocalPlayer() ^ 1;
+    WirePlayerState sample {};
+    melonDS::u32 sampleFrame = 0;
+    bool sampleValid = false;
+    const auto waitDeadline = std::chrono::steady_clock::now() + std::chrono::microseconds(500);
+    {
+        while (true)
+        {
+            {
+                std::lock_guard<std::mutex> lock(G.Mutex);
+                PumpNetworkLocked();
+                sampleValid = FindLatestRemotePlayerStateLocked(static_cast<melonDS::u32>(remotePlayer), frame, sample, sampleFrame);
+            }
+            if (!preferFreshSample || (sampleValid && sampleFrame >= frame) || std::chrono::steady_clock::now() >= waitDeadline)
+                break;
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
+        if (!sampleValid || (preferFreshSample && sampleFrame < frame))
+            return;
+    }
+    const bool shouldApplyGlobals =
+        G.PlayerStateGlobalsEnabled &&
+        sampleFrame > G.LastAppliedPlayerGlobalsFrame[instanceID][remotePlayer];
+    const bool globalsApplied = shouldApplyGlobals && WritePlayerGlobalState(nds, sample);
+    if (globalsApplied)
+        G.LastAppliedPlayerGlobalsFrame[instanceID][remotePlayer] = sampleFrame;
+    if (!sample.Found)
+    {
+        if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
+            (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
+        {
+            std::printf("NSMB PlayerState: apply globals-only inst=%d frame=%u sampleFrame=%u remotePlayer=%d globals=%d lives=%u deaths=%u dead=%u stars=%u\n",
+                instanceID,
+                frame,
+                sampleFrame,
+                remotePlayer,
+                globalsApplied ? 1 : 0,
+                sample.Lives,
+                sample.Deaths,
+                sample.Dead,
+                sample.BattleStars);
+        }
+        return;
+    }
+
+    const ObjectScanSample localActor = GetPlayerActorCached(instanceID, remotePlayer, nds);
+    const melonDS::u32 localBase = localActor.Found ? localActor.Base : 0;
+    const bool transitionMinimalApply =
+        G.PlayerStateGlobalsEnabled &&
+        localActor.Found &&
+        IsPlayerInActorTransition(nds, localBase);
+    const melonDS::u32 predictFrames = std::min(
+        frame - sampleFrame,
+        static_cast<melonDS::u32>(std::max(0, G.PlayerStateMaxPredictFrames)));
+    const bool transformApplied = !transitionMinimalApply && WriteObjectTransformByBase(
+            nds,
+            localBase,
+            sample.PosX + sample.VelX * predictFrames,
+            sample.PosY + sample.VelY * predictFrames,
+            sample.PosZ + sample.VelZ * predictFrames,
+            sample.PrevX + sample.VelX * predictFrames,
+            sample.PrevY + sample.VelY * predictFrames,
+            sample.PrevZ + sample.VelZ * predictFrames,
+            sample.VelX,
+            sample.VelY,
+            sample.VelZ);
+    const bool runtimeApplied = transitionMinimalApply
+        ? WritePlayerMinimalTransitionStateByBase(nds, localBase, sample)
+        : (transformApplied && WritePlayerRuntimeStateByBase(nds, localBase, sample));
+
+    if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
+        (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
+    {
+        std::printf("NSMB PlayerState: apply inst=%d frame=%u sampleFrame=%u remotePlayer=%d predict=%u transitionMin=%d transform=%d runtime=%d globals=%d pos=%08X/%08X vel=%08X/%08X lives=%u deaths=%u dead=%u stars=%u\n",
+            instanceID,
+            frame,
+            sampleFrame,
+            remotePlayer,
+            predictFrames,
+            transitionMinimalApply ? 1 : 0,
+            transformApplied ? 1 : 0,
+            runtimeApplied ? 1 : 0,
+            globalsApplied ? 1 : 0,
+            sample.PosX,
+            sample.PosY,
+            sample.VelX,
+            sample.VelY,
+            sample.Lives,
+            sample.Deaths,
+            sample.Dead,
+            sample.BattleStars);
+    }
+}
+
 void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (!G.Enabled || !G.GameStateApplyEnabled || G.NetRole != Role::Client) return;
+    if (!G.Enabled || !G.GameStateApplyEnabled) return;
+    if (!G.GameStateApplyRemotePlayerOnly && G.NetRole != Role::Client) return;
     if (instanceID < 0 || instanceID >= 16 || !nds || !nds->MainRAM) return;
     if (frame < G.NetplayStartFrame) return;
 
@@ -8098,6 +12077,57 @@ void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         PumpNetworkLocked();
         if (!FindLatestRemoteGameStateLocked(instanceID, frame, sample, sampleFrame))
             return;
+    }
+
+    if (G.GameStateApplyRemotePlayerOnly)
+    {
+        const int remotePlayer = CurrentPacketBridgeLocalPlayer() ^ 1;
+        const PlayerActorScanSample localPlayers = FindPlayerActors(nds);
+        bool applied = false;
+        if (remotePlayer == 0 && sample.PlayerActor0Found)
+        {
+            const melonDS::u32 localBase = localPlayers.Actor0.Found ? localPlayers.Actor0.Base : 0;
+            applied = WriteObjectTransformByBase(
+                nds,
+                localBase,
+                sample.PlayerActor0PosX,
+                sample.PlayerActor0PosY,
+                sample.PlayerActor0PosZ,
+                sample.PlayerActor0PrevX,
+                sample.PlayerActor0PrevY,
+                sample.PlayerActor0PrevZ,
+                sample.PlayerActor0VelX,
+                sample.PlayerActor0VelY,
+                sample.PlayerActor0VelZ);
+        }
+        else if (remotePlayer == 1 && sample.PlayerActor1Found)
+        {
+            const melonDS::u32 localBase = localPlayers.Actor1.Found ? localPlayers.Actor1.Base : 0;
+            applied = WriteObjectTransformByBase(
+                nds,
+                localBase,
+                sample.PlayerActor1PosX,
+                sample.PlayerActor1PosY,
+                sample.PlayerActor1PosZ,
+                sample.PlayerActor1PrevX,
+                sample.PlayerActor1PrevY,
+                sample.PlayerActor1PrevZ,
+                sample.PlayerActor1VelX,
+                sample.PlayerActor1VelY,
+                sample.PlayerActor1VelZ);
+        }
+
+        if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
+            (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
+        {
+            std::printf("NSMB PoC: applied remote-player snapshot inst=%d frame=%u sampleFrame=%u remotePlayer=%d applied=%d\n",
+                instanceID,
+                frame,
+                sampleFrame,
+                remotePlayer,
+                applied ? 1 : 0);
+        }
+        return;
     }
 
     if (G.GameStateApplyCriticalGlobals)
@@ -8216,6 +12246,8 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     GameStateSample sample;
     if (!nds || !nds->MainRAM)
         return sample;
+    const GameStateObjectScanCache objectScanCache = BuildGameStateObjectScanCache(nds);
+    const ScopedGameStateObjectScanCache scopedObjectScanCache(objectScanCache);
 
     sample.StageID = nds->ARM9Read32(kGameStageIDAddr);
     sample.StageGroup = nds->ARM9Read32(kGameStageGroupAddr);
@@ -8691,7 +12723,8 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         sample.MvlManagerHalf494 = nds->ARM9Read16(sample.MvlManagerBase + 0x494);
         sample.MvlManagerHalf4A0 = nds->ARM9Read16(sample.MvlManagerBase + 0x4A0);
     }
-    const ObjectScanSample movingHazard = FindObjectByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
+    const ObjectScanSample movingHazard =
+        FindNewestActiveObjectByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
     sample.MovingHazardFound = movingHazard.Found;
     sample.MovingHazardGUID = movingHazard.GUID;
     sample.MovingHazardSettings = movingHazard.Settings;
@@ -9675,6 +13708,270 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         enet_peer_send(G.Peer, 0, enetPacket);
 }
 
+void SyncPlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.Enabled || !G.PlayerStateSyncEnabled || !nds) return;
+    if (instanceID < 0 || instanceID >= 16) return;
+    if (frame < G.NetplayStartFrame) return;
+    if ((frame % static_cast<melonDS::u32>(G.PlayerStateSyncInterval)) != 0) return;
+
+    const int localPlayer = CurrentPacketBridgeLocalPlayer();
+    const ObjectScanSample actor = GetPlayerActorCached(instanceID, localPlayer, nds);
+    const bool found = actor.Found != 0;
+
+    WirePlayerState packet {};
+    packet.Magic = kMagic;
+    packet.Version = kVersion;
+    packet.Kind = kWireKindPlayerState;
+    packet.Frame = frame;
+    packet.Instance = static_cast<melonDS::u32>(instanceID);
+    packet.Player = static_cast<melonDS::u32>(localPlayer);
+    packet.Found = found ? 1u : 0u;
+    if (G.PlayerStateGlobalsEnabled)
+        ReadPlayerGlobalState(nds, packet.Player, packet);
+    packet.GUID = actor.GUID;
+    packet.Settings = actor.Settings;
+    packet.StateType = actor.StateType;
+    packet.Flags = actor.Flags;
+    packet.PosX = actor.PosX;
+    packet.PosY = actor.PosY;
+    packet.PosZ = actor.PosZ;
+    packet.PrevX = actor.PrevX;
+    packet.PrevY = actor.PrevY;
+    packet.PrevZ = actor.PrevZ;
+    packet.VelX = actor.VelX;
+    packet.VelY = actor.VelY;
+    packet.VelZ = actor.VelZ;
+    if (found && IsARM9MainRAMAddress(actor.Base))
+    {
+        packet.ActionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseActionFlagOffset);
+        packet.SubActionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseSubActionFlagOffset);
+        packet.PhysicsFlag = nds->ARM9Read32(actor.Base + kPlayerBasePhysicsFlagOffset);
+        packet.DamageCooldown = nds->ARM9Read16(actor.Base + kPlayerBaseDamageCooldownOffset);
+        packet.TransitionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseTransitionFlagOffset);
+        packet.CollisionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseCollisionFlagOffset);
+        packet.EnvironmentFlag = nds->ARM9Read32(actor.Base + kPlayerBaseEnvironmentFlagOffset);
+        packet.RuntimeFlags0 =
+            (static_cast<melonDS::u32>(nds->ARM9Read8(actor.Base + kPlayerBaseUpdateLockedOffset)) & 0xFFu)
+            | ((static_cast<melonDS::u32>(nds->ARM9Read8(actor.Base + kPlayerBaseCharacterIDOffset)) & 0xFFu) << 8)
+            | ((static_cast<melonDS::u32>(nds->ARM9Read8(actor.Base + kPlayerBaseTransitioningFlagOffset)) & 0xFFu) << 16)
+            | ((static_cast<melonDS::u32>(nds->ARM9Read8(actor.Base + kPlayerBaseCameraFocusModeOffset)) & 0xFFu) << 24);
+        packet.RuntimeFlags1 =
+            (static_cast<melonDS::u32>(nds->ARM9Read8(actor.Base + kPlayerBaseDefeatedFlagOffset)) & 0xFFu)
+            | ((static_cast<melonDS::u32>(nds->ARM9Read8(actor.Base + kPlayerBasePlayerIDOffset)) & 0xFFu) << 8)
+            | ((static_cast<melonDS::u32>(nds->ARM9Read8(actor.Base + kPlayerBaseVisibleFlagOffset)) & 0xFFu) << 16);
+    }
+
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    if (G.LastSentPlayerStateFrame[instanceID] == frame) return;
+    G.LastSentPlayerStateFrame[instanceID] = frame;
+    if (!G.Peer)
+    {
+        if (G.InputTraceEnabled &&
+            (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
+        {
+            std::printf("NSMB PlayerState: send skipped inst=%d frame=%u reason=no-peer\n",
+                instanceID,
+                frame);
+        }
+        return;
+    }
+
+    if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
+        (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
+    {
+        std::printf("NSMB PlayerState: send inst=%d frame=%u player=%u found=%u pos=%08X/%08X vel=%08X/%08X\n",
+            instanceID,
+            frame,
+            packet.Player,
+            packet.Found,
+            packet.PosX,
+            packet.PosY,
+            packet.VelX,
+            packet.VelY);
+    }
+
+    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), 0);
+    if (enetPacket)
+        enet_peer_send(G.Peer, 0, enetPacket);
+}
+
+void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.Enabled || !G.WorldStateSyncEnabled || !nds) return;
+    if (instanceID < 0 || instanceID >= 16) return;
+    if (frame < G.NetplayStartFrame) return;
+    if ((frame % static_cast<melonDS::u32>(G.WorldStateSyncInterval)) != 0) return;
+    TraceWorldMovingHazardsIfNeeded(instanceID, frame, nds);
+    TraceWorldObjectLifecyclesIfNeeded(instanceID, frame, nds);
+    TraceWorldEffectsIfNeeded(instanceID, frame, nds);
+
+    const ObjectScanSample star = GetWorldActorCached(
+        instanceID,
+        frame,
+        nds,
+        kVsBattleStarActorObjectID,
+        kVsBattleStarActorSettings,
+        G.WorldStarActorBaseCache,
+        G.WorldStarActorGUIDCache);
+    ObjectScanSample item;
+    ObjectScanSample neutralItem;
+    ObjectScanSample droppedStarItem;
+    if (G.WorldStateSpawnItem)
+    {
+        neutralItem = FindNewestActiveObjectByIDAndSettings(
+            nds,
+            kVsWorldItemObjectID,
+            kVsNeutralWorldItemSettings,
+            true);
+        item = FindNewestActiveObjectByIDAndSettings(
+            nds,
+            kVsWorldItemObjectID,
+            kVsWorldItemSettings,
+            true);
+        droppedStarItem = FindNewestActiveObjectByIDAndSettings(
+            nds,
+            kVsWorldItemObjectID,
+            kVsDroppedStarItemSettings,
+            true);
+    }
+
+    WireWorldState packet {};
+    packet.Magic = kMagic;
+    packet.Version = kVersion;
+    packet.Kind = kWireKindWorldState;
+    packet.Frame = frame;
+    packet.Instance = static_cast<melonDS::u32>(instanceID);
+    FillWireWorldActorState(star, packet.Star);
+    FillWireWorldActorState(neutralItem, packet.NeutralItem);
+    FillWireWorldActorState(item, packet.Item);
+    FillWireWorldActorState(droppedStarItem, packet.DroppedStarItem);
+
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    if (G.LastSentWorldStateFrame[instanceID] == frame) return;
+    G.LastSentWorldStateFrame[instanceID] = frame;
+    if (!G.Peer) return;
+
+    if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
+        (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
+    {
+        std::printf("NSMB WorldState: send inst=%d frame=%u star=%u neutralItem=%u item=%u droppedItem=%u hazard=%u hazardPos=%08X/%08X\n",
+            instanceID,
+            frame,
+            packet.Star.Found,
+            packet.NeutralItem.Found,
+            packet.Item.Found,
+            packet.DroppedStarItem.Found,
+            packet.MovingHazard.Found,
+            packet.MovingHazard.PosX,
+            packet.MovingHazard.PosY);
+    }
+
+    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), 0);
+    if (enetPacket)
+        enet_peer_send(G.Peer, 0, enetPacket);
+}
+
+void SyncWorldEffectState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.Enabled || !G.WorldStateSyncEnabled || !G.WorldStateApplyEffects ||
+        G.NetRole != Role::Host || !nds || !nds->MainRAM)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.NetplayStartFrame)
+        return;
+    if ((frame % static_cast<melonDS::u32>(G.WorldStateSyncInterval)) != 0)
+        return;
+
+    WireWorldEffectState packet {};
+    packet.Magic = kMagic;
+    packet.Version = kVersion;
+    packet.Kind = kWireKindWorldEffectState;
+    packet.Frame = frame;
+    packet.Instance = static_cast<melonDS::u32>(instanceID);
+
+    for (melonDS::u32 slotIndex = 0; slotIndex < kWorldEffectSlotCount && packet.Count < kMaxWorldEffects; slotIndex++)
+    {
+        const melonDS::u32 base = kWorldEffectSlotBase + slotIndex * kWorldEffectSlotStride;
+        WireWorldEffectSlot slot {};
+        if (!ReadWorldEffectSlot(nds, base, slot))
+            continue;
+        packet.Effects[packet.Count++] = slot;
+    }
+    if (packet.Count == 0)
+        return;
+
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    if (!G.Peer)
+        return;
+    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), 0);
+    if (enetPacket)
+        enet_peer_send(G.Peer, 0, enetPacket);
+}
+
+void SyncMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.Enabled || !G.WorldStateApplyMovingHazard || G.NetRole != Role::Host || !nds) return;
+    if (instanceID < 0 || instanceID >= 16) return;
+    if (frame < G.NetplayStartFrame) return;
+    if ((frame % static_cast<melonDS::u32>(G.WorldStateSyncInterval)) != 0) return;
+
+    const std::vector<ObjectScanSample> actors = GetWorldMovingHazardsCached(instanceID, frame, nds);
+    WireMovingHazardState packet {};
+    packet.Magic = kMagic;
+    packet.Version = kVersion;
+    packet.Kind = kWireKindMovingHazardState;
+    packet.Frame = frame;
+    packet.Instance = static_cast<melonDS::u32>(instanceID);
+    packet.Count = static_cast<melonDS::u32>(std::min(actors.size(), kMaxWorldMovingHazards));
+    for (melonDS::u32 i = 0; i < packet.Count; i++)
+        FillWireWorldActorState(actors[i], packet.Actors[i]);
+
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    if (!G.Peer) return;
+    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), 0);
+    if (enetPacket)
+        enet_peer_send(G.Peer, 0, enetPacket);
+}
+
+void SyncWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.Enabled || !G.WorldStateSyncEnabled || !G.WorldStateApplyActorSnapshot ||
+        G.NetRole != Role::Host || !nds || !nds->MainRAM)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.NetplayStartFrame)
+        return;
+    if ((frame % static_cast<melonDS::u32>(G.WorldStateSyncInterval)) != 0)
+        return;
+
+    const std::vector<WorldActorSnapshotCandidate> actors = CollectWorldActorSnapshotCandidates(nds);
+    if (actors.empty())
+        return;
+
+    WireWorldActorSnapshotState packet {};
+    packet.Magic = kMagic;
+    packet.Version = kVersion;
+    packet.Kind = kWireKindWorldActorSnapshot;
+    packet.Frame = frame;
+    packet.Instance = static_cast<melonDS::u32>(instanceID);
+    packet.Count = static_cast<melonDS::u32>(std::min(actors.size(), kMaxWorldActorSnapshots));
+    for (melonDS::u32 i = 0; i < packet.Count; i++)
+    {
+        packet.Actors[i].ObjectID = actors[i].ObjectID;
+        FillWireWorldActorState(actors[i].Actor, packet.Actors[i].Actor);
+    }
+
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    if (!G.Peer)
+        return;
+    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), 0);
+    if (enetPacket)
+        enet_peer_send(G.Peer, 0, enetPacket);
+}
+
 std::filesystem::path StatePath(const std::string& dir, int instanceID)
 {
     char filename[64];
@@ -9991,9 +14288,16 @@ bool IsEnabled()
 
 void InitFromEnvironment()
 {
+    if (G.EnvChecked.load(std::memory_order_acquire)) return;
     std::lock_guard<std::mutex> lock(G.Mutex);
-    if (G.EnvChecked) return;
-    G.EnvChecked = true;
+    if (G.EnvChecked.load(std::memory_order_relaxed)) return;
+    struct MarkEnvironmentChecked
+    {
+        ~MarkEnvironmentChecked()
+        {
+            G.EnvChecked.store(true, std::memory_order_release);
+        }
+    } markEnvironmentChecked;
 
     G.Enabled = EnvFlag("MELONDS_NSML_POC");
     G.TestEnabled = EnvFlag("MELONDS_NSML_TEST");
@@ -10001,6 +14305,20 @@ void InitFromEnvironment()
     G.TestInstanceCount = std::clamp(EnvInt("MELONDS_NSML_TEST_INSTANCES", 1), 1, 16);
     G.ActiveFpsStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_ACTIVE_FPS_START_FRAME", 0)));
+    G.ActiveFrameSpikeThresholdUs = std::clamp(
+        EnvInt("MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS", 25), 1, 1000) * 1000;
+    G.ActiveFrameSpikeTrace = EnvFlag("MELONDS_NSML_FPS_SPIKE_TRACE");
+    G.FrameHeartbeatInterval = std::clamp(
+        EnvInt("MELONDS_NSML_FRAME_HEARTBEAT_INTERVAL", 0), 0, 3600);
+    G.GameplayHeartbeatInterval = std::clamp(
+        EnvInt("MELONDS_NSML_GAMEPLAY_HEARTBEAT_INTERVAL", 0), 0, 3600);
+    const char* frameHeartbeatPath = std::getenv("MELONDS_NSML_FRAME_HEARTBEAT_FILE");
+    if (frameHeartbeatPath && frameHeartbeatPath[0])
+    {
+        G.FrameHeartbeatPath = frameHeartbeatPath;
+        G.FrameHeartbeat.open(G.FrameHeartbeatPath, std::ios::out | std::ios::trunc);
+        StartFrameHeartbeatThreadIfNeeded();
+    }
     G.FrameBarrierEnabled = EnvFlag("MELONDS_NSML_FRAME_BARRIER");
     G.SerialRunEnabled = EnvFlag("MELONDS_NSML_SERIAL_RUN");
     G.HashEnabled = !EnvFlag("MELONDS_NSML_DISABLE_HASH");
@@ -10140,6 +14458,13 @@ void InitFromEnvironment()
         0, EnvInt("MELONDS_NSML_INPUT_SEND_DELAY_FRAMES", 0));
     G.InputSendJitterFrames = std::max(
         0, EnvInt("MELONDS_NSML_INPUT_SEND_JITTER_FRAMES", 0));
+    G.InputSendDelayStartFrame = static_cast<melonDS::u32>(
+        std::clamp(EnvInt("MELONDS_NSML_INPUT_SEND_DELAY_START_FRAME", 0), 0, 1000000));
+    G.InputSendDelayEndFrame = static_cast<melonDS::u32>(
+        std::clamp(EnvInt("MELONDS_NSML_INPUT_SEND_DELAY_END_FRAME", 0), 0, 1000000));
+    if (G.InputSendDelayEndFrame != kNoFrameLimit
+        && G.InputSendDelayEndFrame < G.InputSendDelayStartFrame)
+        G.InputSendDelayEndFrame = G.InputSendDelayStartFrame;
     G.InputUnreliable = EnvFlag("MELONDS_NSML_INPUT_UNRELIABLE");
     G.InputBundleHistory = std::clamp(
         EnvInt("MELONDS_NSML_INPUT_BUNDLE_HISTORY", 0), 0, 31);
@@ -10240,6 +14565,7 @@ void InitFromEnvironment()
     G.GameStateApplyStarObjects = true;
     G.GameStateApplyStageObjects = true;
     G.GameStateApplyPlayerActors = true;
+    G.GameStateApplyRemotePlayerOnly = false;
     if (const char* applyMode = std::getenv("MELONDS_NSML_STATE_APPLY_MODE"))
     {
         if (!std::strcmp(applyMode, "critical"))
@@ -10257,8 +14583,45 @@ void InitFromEnvironment()
         {
             G.GameStateApplyCriticalGlobals = false;
         }
+        else if (!std::strcmp(applyMode, "remote-player"))
+        {
+            G.GameStateApplyCriticalGlobals = false;
+            G.GameStateApplyStarObjects = false;
+            G.GameStateApplyStageObjects = false;
+            G.GameStateApplyPlayerActors = true;
+            G.GameStateApplyRemotePlayerOnly = true;
+        }
     }
     G.GameStateSyncInterval = std::max(1, EnvInt("MELONDS_NSML_STATE_SYNC_INTERVAL", 60));
+    G.PlayerStateSyncEnabled = EnvFlag("MELONDS_NSML_PLAYER_STATE_SYNC");
+    G.PlayerStateApplyEnabled = EnvFlag("MELONDS_NSML_PLAYER_STATE_APPLY");
+    G.PlayerStateGlobalsEnabled = EnvFlag("MELONDS_NSML_PLAYER_STATE_GLOBALS");
+    G.PlayerStateSyncInterval = std::max(1, EnvInt("MELONDS_NSML_PLAYER_STATE_SYNC_INTERVAL", 1));
+    G.PlayerStateMaxPredictFrames = std::max(0, EnvInt("MELONDS_NSML_PLAYER_STATE_MAX_PREDICT_FRAMES", 2));
+    G.WorldStateSyncEnabled = EnvFlag("MELONDS_NSML_WORLD_STATE_SYNC");
+    G.WorldStateApplyEnabled = EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY");
+    G.WorldStateApplyStarActor = !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_STAR");
+    G.WorldStateSpawnItem = EnvFlag("MELONDS_NSML_WORLD_STATE_SPAWN_ITEM");
+    G.WorldStateApplyMovingHazard =
+        EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD") &&
+        !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD");
+    G.WorldStateApplyEffects =
+        EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS") &&
+        !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_EFFECTS");
+    G.WorldStateApplyActorSnapshot = EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT");
+    G.WorldStateTraceMovingHazards = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS");
+    G.WorldStateTraceObjectLifecycles = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES");
+    G.WorldStateTraceActorInternals = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS");
+    G.WorldStateTraceEffects = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_EFFECTS");
+    G.WorldStateTraceObjectLifecyclesInterval =
+        std::max(1, EnvInt("MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_INTERVAL", 60));
+    G.WorldStateTraceObjectLifecyclesStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_START_FRAME", 0)));
+    G.WorldStateTraceObjectLifecyclesEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_END_FRAME", 0)));
+    G.WorldStateSyncInterval = std::max(1, EnvInt("MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL", 2));
+    G.WorldStateMaxPredictFrames = std::max(0, EnvInt("MELONDS_NSML_WORLD_STATE_MAX_PREDICT_FRAMES", 1));
+    G.WorldStateActorRescanInterval = std::max(0, EnvInt("MELONDS_NSML_WORLD_STATE_ACTOR_RESCAN_INTERVAL", 0));
 
     const char* memPatchFile = std::getenv("MELONDS_NSML_MEM_PATCH_FILE");
     if (memPatchFile && memPatchFile[0]) G.MemPatchFile = memPatchFile;
@@ -10492,17 +14855,86 @@ void InitFromEnvironment()
     G.InputWaitPollUs = std::clamp(EnvInt("MELONDS_NSML_INPUT_WAIT_POLL_US", 100), 50, 5000);
     G.RollbackEnabled = EnvFlag("MELONDS_NSML_ROLLBACK");
     G.RollbackResimulate = EnvFlag("MELONDS_NSML_ROLLBACK_RESIMULATE");
+    G.RollbackSkipRenderDuringResim = EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER");
+    G.RollbackSkipIntermediateResimCheckpoints =
+        EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS");
+    G.RollbackInputWaitUs = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_INPUT_WAIT_US", 0), 0, 20000);
     G.RollbackRestoreProbe = EnvFlag("MELONDS_NSML_ROLLBACK_RESTORE_PROBE");
+    G.RollbackPredictionProbeModulo = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_MODULO", 0), 0, 600);
+    G.RollbackPredictionProbeOffset = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_OFFSET", 0),
+        0,
+        std::max(0, G.RollbackPredictionProbeModulo - 1));
+    G.RollbackPredictionProbeLimit = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_LIMIT", -1), -1, 10000);
+    G.RollbackPredictionProbeStartFrame = static_cast<melonDS::u32>(
+        std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_START_FRAME", 0), 0, 1000000));
+    G.RollbackPredictionProbeEndFrame = static_cast<melonDS::u32>(
+        std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_END_FRAME", 0), 0, 1000000));
+    if (G.RollbackPredictionProbeEndFrame != kNoFrameLimit
+        && G.RollbackPredictionProbeEndFrame < G.RollbackPredictionProbeStartFrame)
+        G.RollbackPredictionProbeEndFrame = G.RollbackPredictionProbeStartFrame;
+    G.RollbackPredictionProbeKeyMask = static_cast<melonDS::u32>(
+        std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_KEY_MASK", 0x1), 1, 0xFFF));
     const char* rollbackBackend = EnvCString("MELONDS_NSML_ROLLBACK_BACKEND", "savestate");
-    if (!std::strcmp(rollbackBackend, "arm9ram") || !std::strcmp(rollbackBackend, "ram"))
+    if (!std::strcmp(rollbackBackend, "corelite") || !std::strcmp(rollbackBackend, "core-lite"))
+        G.RollbackBackendMode = RollbackBackend::CoreLite;
+    else if (!std::strcmp(rollbackBackend, "coresparse") || !std::strcmp(rollbackBackend, "core-sparse"))
+        G.RollbackBackendMode = RollbackBackend::CoreSparse;
+    else if (!std::strcmp(rollbackBackend, "coredelta") || !std::strcmp(rollbackBackend, "core-delta"))
+        G.RollbackBackendMode = RollbackBackend::CoreDelta;
+    else if (!std::strcmp(rollbackBackend, "coreframedelta") || !std::strcmp(rollbackBackend, "core-frame-delta"))
+        G.RollbackBackendMode = RollbackBackend::CoreFrameDelta;
+    else if (!std::strcmp(rollbackBackend, "corepreimage") || !std::strcmp(rollbackBackend, "core-preimage"))
+        G.RollbackBackendMode = RollbackBackend::CorePreimage;
+    else if (!std::strcmp(rollbackBackend, "tinycorepreimage") || !std::strcmp(rollbackBackend, "tiny-core-preimage"))
+        G.RollbackBackendMode = RollbackBackend::TinyCorePreimage;
+    else if (!std::strcmp(rollbackBackend, "nsmbranges") || !std::strcmp(rollbackBackend, "nsmb-ranges"))
+        G.RollbackBackendMode = RollbackBackend::NSMBRanges;
+    else if (!std::strcmp(rollbackBackend, "nsmbcoreranges") || !std::strcmp(rollbackBackend, "nsmb-core-ranges"))
+        G.RollbackBackendMode = RollbackBackend::NSMBCoreRanges;
+    else if (!std::strcmp(rollbackBackend, "nsmbtinycore") || !std::strcmp(rollbackBackend, "nsmb-tiny-core"))
+        G.RollbackBackendMode = RollbackBackend::NSMBTinyCoreRanges;
+    else if (!std::strcmp(rollbackBackend, "arm9ram") || !std::strcmp(rollbackBackend, "ram"))
         G.RollbackBackendMode = RollbackBackend::ARM9RAM;
     else
         G.RollbackBackendMode = RollbackBackend::Savestate;
     G.RollbackWindow = std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_WINDOW", 20), 1, 180);
     G.RollbackCheckpointInterval = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL", 1), 1, 30);
+    G.RollbackDeltaKeyframeInterval = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL", 10), 1, 60);
+    G.RollbackMainRAMPageSize = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE", 4096), 256, 4096);
+    if ((G.RollbackMainRAMPageSize & (G.RollbackMainRAMPageSize - 1)) != 0)
+        G.RollbackMainRAMPageSize = 4096;
+    G.RollbackCoreSkipMask = std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK", 0), 0, 31);
+    G.RollbackTinyCoreFlags = std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS", 0), 0, 2047);
+    G.RollbackNSMBWideRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_WIDE_RANGES");
+    G.RollbackNSMBDeltaDiscoveredRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES");
+    G.RollbackNSMBActorArenaRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES");
+    G.RollbackNSMBArm9StackRange = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE");
+    G.RollbackNSMBSkipInputRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_SKIP_INPUT_RANGES");
+    G.RollbackNSMBRestoreDiffTrace = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_RESTORE_DIFF_TRACE");
+    G.RollbackNSMBProcessListRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES");
+    G.RollbackNSMBHeapScanRanges = EnvInt("MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES", 1) != 0;
+    G.RollbackNSMBScanInterval = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL", 1), 1, 600);
+    G.RollbackNSMBHeapScanInterval = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_INTERVAL", G.RollbackNSMBScanInterval), 1, 1800);
+    G.RollbackDeltaPageTrace = EnvFlag("MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE");
+    G.RollbackDeltaPageTraceStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE_START_FRAME", 0)));
+    G.RollbackDeltaPageTraceEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE_END_FRAME", 0)));
+    G.RollbackDeltaPageTraceMaxRuns = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE_MAX_RUNS", 12), 1, 80);
     G.RollbackResimulateDelayFrames = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_RESIMULATE_DELAY_FRAMES", 0), 0, 30);
+    G.RollbackMaxResimFrames = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES", 0), 0, 30);
     if (G.RollbackEnabled && G.InputNetplayOnly)
     {
         G.LocalWaitsForRemote = false;
@@ -10742,7 +15174,7 @@ void InitFromEnvironment()
             }
         }
 
-        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
+        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d playerStateSync=%d playerStateApply=%d playerStateGlobals=%d playerStateInterval=%d playerStatePredict=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
             G.TestFrames,
             G.TestInstanceCount,
             G.FrameBarrierEnabled ? 1 : 0,
@@ -10760,6 +15192,11 @@ void InitFromEnvironment()
             G.GameStateSyncEnabled ? 1 : 0,
             G.GameStateApplyEnabled ? 1 : 0,
             G.GameStateSyncInterval,
+            G.PlayerStateSyncEnabled ? 1 : 0,
+            G.PlayerStateApplyEnabled ? 1 : 0,
+            G.PlayerStateGlobalsEnabled ? 1 : 0,
+            G.PlayerStateSyncInterval,
+            G.PlayerStateMaxPredictFrames,
             G.MemPatchFile.empty() ? "<none>" : G.MemPatchFile.c_str(),
             G.MemPatchFrameSet ? G.MemPatchFrame : 0,
             G.MemPatchRanges.size(),
@@ -10878,7 +15315,7 @@ void InitFromEnvironment()
 
     G.Ready = true;
     StartNetworkPumpThreadIfNeeded();
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputDropModulo=%d inputDropOffset=%d netPumpThread=%d netPumpSleepUs=%d inputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputSendDelay=%d inputSendJitter=%d inputSendDelayStart=%u inputSendDelayEnd=%u inputDropModulo=%d inputDropOffset=%d netPumpThread=%d netPumpSleepUs=%d inputWaitPollUs=%d rollbackInputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d rollbackPredProbeModulo=%d rollbackPredProbeLimit=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -10912,18 +15349,25 @@ void InitFromEnvironment()
         G.InputNetplayMaxFrameLead,
         G.InputUnreliable ? 1 : 0,
         G.InputBundleHistory,
+        G.InputSendDelayFrames,
+        G.InputSendJitterFrames,
+        G.InputSendDelayStartFrame,
+        G.InputSendDelayEndFrame,
         G.InputDropModulo,
         G.InputDropOffset,
         G.NetworkPumpThreadEnabled ? 1 : 0,
         G.NetworkPumpSleepUs,
         G.InputWaitPollUs,
+        G.RollbackInputWaitUs,
         G.RollbackEnabled ? 1 : 0,
-        G.RollbackBackendMode == RollbackBackend::ARM9RAM ? "arm9ram" : "savestate",
+        RollbackBackendName(),
         G.RollbackWindow,
         G.RollbackCheckpointInterval,
         G.RollbackResimulateDelayFrames,
         G.RollbackResimulate ? 1 : 0,
         G.RollbackRestoreProbe ? 1 : 0,
+        G.RollbackPredictionProbeModulo,
+        G.RollbackPredictionProbeLimit,
         G.MatchSeed,
         G.MatchSeedConfigured ? 1 : 0,
         G.DirectMvlBootEnabled ? 1 : 0,
@@ -10940,12 +15384,162 @@ void InitFromEnvironment()
     std::fflush(stdout);
 }
 
+class BeforeHookPhaseTrace
+{
+public:
+    enum class Phase
+    {
+        Init,
+        StartSync,
+        LoadState,
+        RuntimeConfig,
+        ProbeRestore,
+        JitPatch,
+        Rollback,
+        Boot,
+        Patch,
+        PacketBridgeSetup,
+        TestSnap,
+        Setup,
+        ActorState,
+        Barrier,
+        Checkpoint,
+        Scratch,
+        Network,
+        Gate,
+        RemoteWait,
+    };
+
+    BeforeHookPhaseTrace(int instanceID, melonDS::u32 frame)
+        : Enabled(G.ActiveFrameSpikeTrace)
+        , InstanceID(instanceID)
+        , Frame(frame)
+        , Start(std::chrono::steady_clock::now())
+        , Last(Start)
+    {
+    }
+
+    ~BeforeHookPhaseTrace()
+    {
+        if (!Enabled)
+            return;
+
+        const auto now = std::chrono::steady_clock::now();
+        const auto tailUs = ElapsedUs(Last, now);
+        const auto totalUs = ElapsedUs(Start, now);
+        if (totalUs < std::min(G.ActiveFrameSpikeThresholdUs, 10000))
+            return;
+
+        std::printf(
+            "NSMB BeforeHookPhaseSpike: inst=%d frame=%u totalMs=%.3f initMs=%.3f startSyncMs=%.3f loadStateMs=%.3f runtimeConfigMs=%.3f probeRestoreMs=%.3f jitPatchMs=%.3f rollbackMs=%.3f bootMs=%.3f patchMs=%.3f packetBridgeSetupMs=%.3f testSnapMs=%.3f setupMs=%.3f actorStateMs=%.3f barrierMs=%.3f checkpointMs=%.3f scratchMs=%.3f networkMs=%.3f gateMs=%.3f remoteWaitMs=%.3f tailMs=%.3f\n",
+            InstanceID,
+            Frame,
+            static_cast<double>(totalUs) / 1000.0,
+            static_cast<double>(InitUs) / 1000.0,
+            static_cast<double>(StartSyncUs) / 1000.0,
+            static_cast<double>(LoadStateUs) / 1000.0,
+            static_cast<double>(RuntimeConfigUs) / 1000.0,
+            static_cast<double>(ProbeRestoreUs) / 1000.0,
+            static_cast<double>(JitPatchUs) / 1000.0,
+            static_cast<double>(RollbackUs) / 1000.0,
+            static_cast<double>(BootUs) / 1000.0,
+            static_cast<double>(PatchUs) / 1000.0,
+            static_cast<double>(PacketBridgeSetupUs) / 1000.0,
+            static_cast<double>(TestSnapUs) / 1000.0,
+            static_cast<double>(SetupUs) / 1000.0,
+            static_cast<double>(ActorStateUs) / 1000.0,
+            static_cast<double>(BarrierUs) / 1000.0,
+            static_cast<double>(CheckpointUs) / 1000.0,
+            static_cast<double>(ScratchUs) / 1000.0,
+            static_cast<double>(NetworkUs) / 1000.0,
+            static_cast<double>(GateUs) / 1000.0,
+            static_cast<double>(RemoteWaitUs) / 1000.0,
+            static_cast<double>(tailUs) / 1000.0);
+        std::fflush(stdout);
+    }
+
+    void SetFrame(melonDS::u32 frame)
+    {
+        Frame = frame;
+    }
+
+    void Mark(Phase phase)
+    {
+        if (!Enabled)
+            return;
+
+        const auto now = std::chrono::steady_clock::now();
+        const auto elapsedUs = ElapsedUs(Last, now);
+        Last = now;
+        switch (phase)
+        {
+        case Phase::Init: InitUs += elapsedUs; break;
+        case Phase::StartSync: StartSyncUs += elapsedUs; break;
+        case Phase::LoadState: LoadStateUs += elapsedUs; break;
+        case Phase::RuntimeConfig: RuntimeConfigUs += elapsedUs; break;
+        case Phase::ProbeRestore: ProbeRestoreUs += elapsedUs; break;
+        case Phase::JitPatch: JitPatchUs += elapsedUs; break;
+        case Phase::Rollback: RollbackUs += elapsedUs; break;
+        case Phase::Boot: BootUs += elapsedUs; break;
+        case Phase::Patch: PatchUs += elapsedUs; break;
+        case Phase::PacketBridgeSetup: PacketBridgeSetupUs += elapsedUs; break;
+        case Phase::TestSnap: TestSnapUs += elapsedUs; break;
+        case Phase::Setup: SetupUs += elapsedUs; break;
+        case Phase::ActorState: ActorStateUs += elapsedUs; break;
+        case Phase::Barrier: BarrierUs += elapsedUs; break;
+        case Phase::Checkpoint: CheckpointUs += elapsedUs; break;
+        case Phase::Scratch: ScratchUs += elapsedUs; break;
+        case Phase::Network: NetworkUs += elapsedUs; break;
+        case Phase::Gate: GateUs += elapsedUs; break;
+        case Phase::RemoteWait: RemoteWaitUs += elapsedUs; break;
+        }
+    }
+
+private:
+    using Clock = std::chrono::steady_clock;
+
+    static long long ElapsedUs(Clock::time_point start, Clock::time_point end)
+    {
+        return std::max<long long>(
+            0,
+            std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+    }
+
+    bool Enabled = false;
+    int InstanceID = -1;
+    melonDS::u32 Frame = 0;
+    Clock::time_point Start;
+    Clock::time_point Last;
+    long long InitUs = 0;
+    long long StartSyncUs = 0;
+    long long LoadStateUs = 0;
+    long long RuntimeConfigUs = 0;
+    long long ProbeRestoreUs = 0;
+    long long JitPatchUs = 0;
+    long long RollbackUs = 0;
+    long long BootUs = 0;
+    long long PatchUs = 0;
+    long long PacketBridgeSetupUs = 0;
+    long long TestSnapUs = 0;
+    long long SetupUs = 0;
+    long long ActorStateUs = 0;
+    long long BarrierUs = 0;
+    long long CheckpointUs = 0;
+    long long ScratchUs = 0;
+    long long NetworkUs = 0;
+    long long GateUs = 0;
+    long long RemoteWaitUs = 0;
+};
+
 InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, const InputState& polledInput)
 {
+    BeforeHookPhaseTrace phaseTrace(instanceID, frame);
     InitFromEnvironment();
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Init);
     melonDS::u32 inputFrame = frame;
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16)
         inputFrame = G.TestFrameCount[instanceID];
+    phaseTrace.SetFrame(inputFrame);
 
     if (G.Enabled && G.InputNetplayOnly && G.WaitForPeerBeforeStart && inputFrame == 0)
     {
@@ -10957,21 +15551,27 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         }
         WaitForMatchSeedIfNeeded();
     }
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::StartSync);
 
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
         LoadState(instanceID, inputFrame, nds);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::LoadState);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ApplyMvlRuntimeConfigIfNeeded(nds);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::RuntimeConfig);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         RestoreRollbackCheckpointForProbeIfNeeded(instanceID, inputFrame, nds);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::ProbeRestore);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ApplyPacketBridgeJitHelperPatchIfNeeded(instanceID, inputFrame, nds);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::JitPatch);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         RollbackResimulateIfNeeded(instanceID, inputFrame, nds);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Rollback);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         InjectDirectMvlBootCall(instanceID, inputFrame, nds);
@@ -10979,12 +15579,14 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         RestartMvlAfterResultIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         InjectCourseSelectFactoryCall(instanceID, inputFrame, nds);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Boot);
 
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyMemPatch(instanceID, inputFrame, nds);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ApplyNetRandomPatch(instanceID, inputFrame, nds);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Patch);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
     {
@@ -11003,6 +15605,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         ForceNSMLStagePacketWordsIfNeeded(inputFrame, nds);
         ForceNSMLGameLocalPlayerIDIfNeeded(inputFrame, nds);
     }
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::PacketBridgeSetup);
 
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyVsStarSnap(instanceID, inputFrame, nds);
@@ -11012,6 +15615,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyPlayerStickToStar(instanceID, inputFrame, nds);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::TestSnap);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerCountIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
@@ -11087,11 +15691,34 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerUpdateEnableIfNeeded(instanceID, inputFrame, nds);
 
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Setup);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteGameState(instanceID, inputFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyRemoteMovingHazardState(instanceID, inputFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyRemoteWorldActorSnapshotState(instanceID, inputFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyRemoteWorldState(instanceID, inputFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyRemoteWorldEffectState(instanceID, inputFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyRemotePlayerState(instanceID, inputFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        SyncWorldState(instanceID, inputFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        SyncWorldEffectState(instanceID, inputFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        SyncMovingHazardState(instanceID, inputFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        SyncWorldActorSnapshotState(instanceID, inputFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        SyncPlayerState(instanceID, inputFrame, nds);
 
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::ActorState);
     WaitForSerialRunTurn(instanceID, inputFrame);
     WaitAtFrameBarrier(GBeforeFrameBarrier, instanceID, inputFrame, "before");
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Barrier);
 
     const InputState testInput = ApplyInputScript(instanceID, inputFrame, polledInput);
     const melonDS::u32 syncFrame = G.TestEnabled ? inputFrame : frame;
@@ -11101,9 +15728,11 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         SaveRollbackCheckpointIfNeeded(instanceID, syncFrame, nds);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Checkpoint);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         WritePacketBridgeJitScratchIfNeeded(instanceID, syncFrame, nds, testInput);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Scratch);
 
     if (G.Enabled && G.InputNetplayOnly)
         return testInput;
@@ -11206,6 +15835,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
                 SendInputLocked(storedFrame, input);
         }
     }
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Network);
 
     if (!netplayApplyActive)
         return testInput;
@@ -11261,7 +15891,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         return NeutralInput();
     }
 
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Gate);
     const InputState remoteInput = WaitForRemoteInput(targetFrame);
+    phaseTrace.Mark(BeforeHookPhaseTrace::Phase::RemoteWait);
 
     if (isLocal)
     {
@@ -11388,9 +16020,88 @@ void TracePlayerLifeChanges(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
     G.LastPlayerLifeSampleValid[instanceID] = true;
 }
 
+void TraceGameplayHeartbeatIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (G.GameplayHeartbeatInterval <= 0 || !nds || !nds->MainRAM)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.NetplayStartFrame)
+        return;
+    if (frame == G.LastGameplayHeartbeat[instanceID] ||
+        (frame % static_cast<melonDS::u32>(G.GameplayHeartbeatInterval)) != 0)
+        return;
+
+    G.LastGameplayHeartbeat[instanceID] = frame;
+    const GameStateObjectScanCache cache = BuildGameStateObjectScanCache(nds);
+    const ScopedGameStateObjectScanCache scopedCache(cache);
+    const PlayerActorScanSample players = FindPlayerActors(nds);
+    const ObjectLifecycleSummary objects = SummarizeObjectLifecycle(nds);
+    std::printf(
+        "NSMB GameplayHeartbeat: role=%s inst=%d frame=%u "
+        "p0=%u/%08X/%08X/%08X/%08X/%08X "
+        "p1=%u/%08X/%08X/%08X/%08X/%08X "
+        "objects=%u/%u/%u/%u/%u/%u",
+        G.NetRole == Role::Host ? "host" : "client",
+        instanceID,
+        frame,
+        players.Actor0.Found,
+        players.Actor0.PosX,
+        players.Actor0.PosY,
+        players.Actor0.VelX,
+        players.Actor0.VelY,
+        players.Actor0.Flags,
+        players.Actor1.Found,
+        players.Actor1.PosX,
+        players.Actor1.PosY,
+        players.Actor1.VelX,
+        players.Actor1.VelY,
+        players.Actor1.Flags,
+        objects.Total,
+        objects.Active,
+        objects.Dead,
+        objects.NotCreated,
+        objects.SkipUpdate,
+        objects.SkipRender);
+    std::printf(" activeIds=");
+    for (std::size_t i = 0; i < kObjectTraceSlots; i++)
+    {
+        if (i != 0)
+            std::printf(",");
+        std::printf("%03X:%08X", objects.ActiveID[i], objects.ActiveSettings[i]);
+    }
+    const std::vector<ObjectScanSample> hazards =
+        FindActiveObjectsByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
+    std::printf(" hazards=");
+    const std::size_t hazardCount = std::min(hazards.size(), kMaxWorldMovingHazards);
+    for (std::size_t i = 0; i < kMaxWorldMovingHazards; i++)
+    {
+        if (i != 0)
+            std::printf(",");
+        if (i >= hazardCount)
+        {
+            std::printf("-");
+            continue;
+        }
+        const ObjectScanSample& hazard = hazards[i];
+        std::printf(
+            "%u:%08X:%08X:%08X:%u:%08X",
+            hazard.GUID,
+            hazard.PosX,
+            hazard.PosY,
+            hazard.VelX,
+            hazard.StateType,
+            hazard.Flags);
+    }
+    std::printf("\n");
+    std::fflush(stdout);
+}
+
 void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
+    const auto afterHookCallStart = std::chrono::steady_clock::now();
     InitFromEnvironment();
+    const auto afterInit = std::chrono::steady_clock::now();
     if ((!G.Enabled && !G.TestEnabled) || !nds) return;
 
     if (instanceID < 0 || instanceID >= 16) return;
@@ -11423,11 +16134,33 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                 G.ActiveTimerStart[instanceID] = std::chrono::steady_clock::now();
             }
         }
+        RecordActiveFrameTiming(instanceID, logFrame);
+        if (G.FrameHeartbeatInterval > 0
+            && logFrame >= activeStartFrame
+            && logFrame != G.LastFrameHeartbeat[instanceID]
+            && (logFrame % static_cast<melonDS::u32>(G.FrameHeartbeatInterval)) == 0)
+        {
+            G.LastFrameHeartbeat[instanceID] = logFrame;
+            std::printf("NSMB Heartbeat: inst=%d frame=%u\n", instanceID, logFrame);
+            if (G.FrameHeartbeat)
+            {
+                G.PendingFrameHeartbeat.store(logFrame, std::memory_order_release);
+            }
+            else
+            {
+                std::fflush(stdout);
+            }
+        }
     }
+    const auto afterHeartbeat = std::chrono::steady_clock::now();
+
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        TraceGameplayHeartbeatIfNeeded(instanceID, logFrame, nds);
 
     WaitAtFrameBarrier(GAfterFrameBarrier, instanceID, logFrame, "after");
     AdvanceSerialRunTurn(instanceID, logFrame - 1);
     WaitForPeerAtNetplayStartBarrier(instanceID, logFrame);
+    const auto afterBarrier = std::chrono::steady_clock::now();
 
     if (G.Enabled)
         ApplyRemoteGameState(instanceID, logFrame, nds);
@@ -11452,9 +16185,11 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     }
     if (G.Enabled && G.PacketBridgeEnabled && bridgeNetworkActive)
         ThrottleNSMLPacketBridgeFrameLead(nds, logFrame);
+    const auto afterBridge = std::chrono::steady_clock::now();
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         TracePlayerLifeChanges(instanceID, logFrame, nds);
+    const auto afterLifeTrace = std::chrono::steady_clock::now();
 
     if (G.RollbackEnabled
         && G.InputNetplayTraceEnabled
@@ -11463,13 +16198,98 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         G.LastRollbackTraceFrame = logFrame;
+        const size_t avgBytes = G.RollbackCheckpointSaveCount == 0
+            ? 0
+            : static_cast<size_t>(G.RollbackCheckpointTotalBytes / G.RollbackCheckpointSaveCount);
+        const unsigned long long saveAvgUs = G.RollbackCheckpointSaveCount == 0
+            ? 0
+            : G.RollbackCheckpointSaveTotalUs / G.RollbackCheckpointSaveCount;
+        const unsigned long long restoreAvgUs = G.RollbackCheckpointRestoreOpCount == 0
+            ? 0
+            : G.RollbackCheckpointRestoreTotalUs / G.RollbackCheckpointRestoreOpCount;
+        const unsigned long long resimRunAvgUs = G.RollbackMeasuredResimFrameCount == 0
+            ? 0
+            : G.RollbackResimRunFrameTotalUs / G.RollbackMeasuredResimFrameCount;
+        const unsigned long long resimCheckpointSaveAvgUs = G.RollbackMeasuredResimFrameCount == 0
+            ? 0
+            : G.RollbackResimCheckpointSaveTotalUs / G.RollbackMeasuredResimFrameCount;
+        const unsigned long long resimTotalAvgUs = G.RollbackMeasuredResimOpCount == 0
+            ? 0
+            : G.RollbackResimCorrectionTotalUs / G.RollbackMeasuredResimOpCount;
+        size_t deltaCheckpoints = 0;
+        size_t keyframeCheckpoints = 0;
+        size_t preimageCheckpoints = 0;
+        size_t preimageBytes = 0;
+        size_t mainRAMCopyBytes = 0;
+        for (const auto& [storedFrame, stored] : G.RollbackStates)
+        {
+            (void)storedFrame;
+            if (stored.MainRAMDelta)
+                deltaCheckpoints++;
+            if (stored.MainRAMFramePreimage)
+            {
+                preimageCheckpoints++;
+                preimageBytes += stored.MainRAMPreimagePages.size() * sizeof(melonDS::u32)
+                    + stored.MainRAMPreimage.size();
+            }
+            else if ((G.RollbackBackendMode == RollbackBackend::CoreDelta
+                || G.RollbackBackendMode == RollbackBackend::CoreFrameDelta)
+                && !stored.Buffer.empty())
+                keyframeCheckpoints++;
+            mainRAMCopyBytes += stored.MainRAMCopy.size();
+        }
         std::printf(
-            "NSMB Rollback: frame=%u checkpoints=%zu checkpointSaves=%u predicted=%zu predictions=%u mismatches=%u restores=%u resims=%u pending=%u observed=%u\n",
+            "NSMB Rollback: frame=%u backend=%s checkpoints=%zu checkpointSaves=%u bytesLast=%zu bytesMin=%zu bytesMax=%zu bytesAvg=%zu saveAvgUs=%llu saveMaxUs=%llu restoreOps=%u restoreAvgUs=%llu restoreMaxUs=%llu resimOps=%u resimFrames=%llu resimRunAvgUs=%llu resimRunMaxUs=%llu resimSaveAvgUs=%llu resimSaveMaxUs=%llu resimTotalAvgUs=%llu resimTotalMaxUs=%llu delta=%zu keyframes=%zu preimages=%zu preimageBytes=%zu mainRAMCopies=%zu keyInt=%d page=%d coreSkip=0x%X tinyFlags=0x%X wide=%d deltaDiscovered=%d actorArena=%d arm9Stack=%d skipInput=%d restoreDiff=%d procList=%d heapScan=%d procObjs=%u procNodes=%u heapObjs=%u scanInt=%d heapScanInt=%d scanRefresh=%u scanCacheHits=%u heapScanRefresh=%u heapScanCacheHits=%u predicted=%zu predictions=%u predProbe=%u mismatches=%u restores=%u resims=%u pending=%u observed=%u\n",
             logFrame,
+            RollbackBackendName(),
             G.RollbackStates.size(),
             G.RollbackCheckpointSaveCount,
+            G.RollbackCheckpointLastBytes,
+            G.RollbackCheckpointMinBytes,
+            G.RollbackCheckpointMaxBytes,
+            avgBytes,
+            saveAvgUs,
+            G.RollbackCheckpointSaveMaxUs,
+            G.RollbackCheckpointRestoreOpCount,
+            restoreAvgUs,
+            G.RollbackCheckpointRestoreMaxUs,
+            G.RollbackMeasuredResimOpCount,
+            G.RollbackMeasuredResimFrameCount,
+            resimRunAvgUs,
+            G.RollbackResimRunFrameMaxUs,
+            resimCheckpointSaveAvgUs,
+            G.RollbackResimCheckpointSaveMaxUs,
+            resimTotalAvgUs,
+            G.RollbackResimCorrectionMaxUs,
+            deltaCheckpoints,
+            keyframeCheckpoints,
+            preimageCheckpoints,
+            preimageBytes,
+            mainRAMCopyBytes,
+            G.RollbackDeltaKeyframeInterval,
+            G.RollbackMainRAMPageSize,
+            G.RollbackCoreSkipMask,
+            G.RollbackTinyCoreFlags,
+            G.RollbackNSMBWideRanges ? 1 : 0,
+            G.RollbackNSMBDeltaDiscoveredRanges ? 1 : 0,
+            G.RollbackNSMBActorArenaRanges ? 1 : 0,
+            G.RollbackNSMBArm9StackRange ? 1 : 0,
+            G.RollbackNSMBSkipInputRanges ? 1 : 0,
+            G.RollbackNSMBRestoreDiffTrace ? 1 : 0,
+            G.RollbackNSMBProcessListRanges ? 1 : 0,
+            G.RollbackNSMBHeapScanRanges ? 1 : 0,
+            G.RollbackNSMBProcessListObjectCount,
+            G.RollbackNSMBProcessListNodeCount,
+            G.RollbackNSMBHeapScanObjectCount,
+            G.RollbackNSMBScanInterval,
+            G.RollbackNSMBHeapScanInterval,
+            G.RollbackNSMBRangeScanRefreshCount,
+            G.RollbackNSMBRangeCacheHitCount,
+            G.RollbackNSMBHeapScanRefreshCount,
+            G.RollbackNSMBHeapScanCacheHitCount,
             G.PredictedRemoteInputs.size(),
             G.RollbackPredictionCount,
+            G.RollbackPredictionProbeCount,
             G.RollbackMismatchCount,
             G.RollbackRestoreCount,
             G.RollbackResimulateCount,
@@ -11477,6 +16297,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             G.PendingRollbackObservedFrame);
         std::fflush(stdout);
     }
+    const auto afterRollbackTrace = std::chrono::steady_clock::now();
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageCameraSlotIfNeeded(instanceID, logFrame, nds);
@@ -11506,13 +16327,83 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         PushScriptRemotePacketIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         SaveMvlAutoRestartCheckpointIfNeeded(instanceID, logFrame, nds);
+    const auto afterRuntimeForce = std::chrono::steady_clock::now();
 
     SaveState(instanceID, logFrame, nds);
     SaveLocalMPState(logFrame);
     SaveScreenshot(instanceID, logFrame, nds);
     SaveRamDump(instanceID, logFrame, nds);
+    const auto afterArtifacts = std::chrono::steady_clock::now();
+    const auto afterPreSnapshot = std::chrono::steady_clock::now();
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        SyncWorldState(instanceID, logFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        SyncWorldEffectState(instanceID, logFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        SyncMovingHazardState(instanceID, logFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        SyncWorldActorSnapshotState(instanceID, logFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        SyncPlayerState(instanceID, logFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyRemoteMovingHazardState(instanceID, logFrame, nds, true);
+    const auto afterApplyHazard = std::chrono::steady_clock::now();
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyRemoteWorldActorSnapshotState(instanceID, logFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyRemoteWorldState(instanceID, logFrame, nds);
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyRemoteWorldEffectState(instanceID, logFrame, nds);
+    const auto afterApplyWorld = std::chrono::steady_clock::now();
+    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
+        ApplyRemotePlayerState(instanceID, logFrame, nds, true);
+    const auto afterApplyPlayer = std::chrono::steady_clock::now();
     TraceGameState(instanceID, logFrame, nds);
+    const auto afterTrace = std::chrono::steady_clock::now();
     SyncGameState(instanceID, logFrame, nds);
+    const auto afterSyncGame = std::chrono::steady_clock::now();
+    SyncWorldState(instanceID, logFrame, nds);
+    SyncWorldEffectState(instanceID, logFrame, nds);
+    const auto afterSyncWorld = std::chrono::steady_clock::now();
+    SyncMovingHazardState(instanceID, logFrame, nds);
+    SyncWorldActorSnapshotState(instanceID, logFrame, nds);
+    const auto afterSyncHazard = std::chrono::steady_clock::now();
+    SyncPlayerState(instanceID, logFrame, nds);
+    const auto afterSyncPlayer = std::chrono::steady_clock::now();
+
+    if (G.ActiveFrameSpikeTrace)
+    {
+        const auto totalUs = std::chrono::duration_cast<std::chrono::microseconds>(
+            afterSyncPlayer - afterHookCallStart).count();
+        if (totalUs >= std::min(G.ActiveFrameSpikeThresholdUs, 10000))
+        {
+            const auto elapsedMs = [](auto start, auto end) {
+                return std::chrono::duration<double, std::milli>(end - start).count();
+            };
+            std::printf(
+                "NSMB AfterHookPhaseSpike: inst=%d frame=%u totalMs=%.3f initMs=%.3f heartbeatMs=%.3f barrierMs=%.3f bridgeMs=%.3f lifeTraceMs=%.3f rollbackTraceMs=%.3f runtimeForceMs=%.3f artifactsMs=%.3f preSnapshotTailMs=%.3f applyHazardMs=%.3f applyWorldMs=%.3f applyPlayerMs=%.3f traceMs=%.3f syncGameMs=%.3f syncWorldMs=%.3f syncHazardMs=%.3f syncPlayerMs=%.3f\n",
+                instanceID,
+                logFrame,
+                elapsedMs(afterHookCallStart, afterSyncPlayer),
+                elapsedMs(afterHookCallStart, afterInit),
+                elapsedMs(afterInit, afterHeartbeat),
+                elapsedMs(afterHeartbeat, afterBarrier),
+                elapsedMs(afterBarrier, afterBridge),
+                elapsedMs(afterBridge, afterLifeTrace),
+                elapsedMs(afterLifeTrace, afterRollbackTrace),
+                elapsedMs(afterRollbackTrace, afterRuntimeForce),
+                elapsedMs(afterRuntimeForce, afterArtifacts),
+                elapsedMs(afterArtifacts, afterPreSnapshot),
+                elapsedMs(afterPreSnapshot, afterApplyHazard),
+                elapsedMs(afterApplyHazard, afterApplyWorld),
+                elapsedMs(afterApplyWorld, afterApplyPlayer),
+                elapsedMs(afterApplyPlayer, afterTrace),
+                elapsedMs(afterTrace, afterSyncGame),
+                elapsedMs(afterSyncGame, afterSyncWorld),
+                elapsedMs(afterSyncWorld, afterSyncHazard),
+                elapsedMs(afterSyncHazard, afterSyncPlayer));
+        }
+    }
 
     if (!G.HashEnabled) return;
     if ((logFrame % static_cast<melonDS::u32>(G.HashInterval)) != 0) return;
@@ -11592,6 +16483,26 @@ bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
                 activeFrames,
                 static_cast<long long>(activeElapsedMs),
                 activeFps);
+            const melonDS::u32 timingSamples = G.ActiveFrameSamples[instanceID];
+            if (timingSamples > 0)
+            {
+                const double avgFrameMs =
+                    static_cast<double>(G.ActiveFrameTotalUs[instanceID]) /
+                    static_cast<double>(timingSamples) / 1000.0;
+                const double maxFrameMs =
+                    static_cast<double>(G.ActiveFrameMaxUs[instanceID]) / 1000.0;
+                std::printf(
+                    "NSMB Test: active frame timing startFrame=%u samples=%u avgFrameMs=%.3f maxFrameMs=%.3f maxFrame=%u over16ms=%u over25ms=%u over33ms=%u spikeThresholdMs=%.3f\n",
+                    G.ActiveTimerStartFrame[instanceID],
+                    timingSamples,
+                    avgFrameMs,
+                    maxFrameMs,
+                    G.ActiveFrameMaxFrame[instanceID],
+                    G.ActiveFrameOver16ms[instanceID],
+                    G.ActiveFrameOver25ms[instanceID],
+                    G.ActiveFrameOver33ms[instanceID],
+                    static_cast<double>(G.ActiveFrameSpikeThresholdUs) / 1000.0);
+            }
         }
         if (G.Enabled && G.InputNetplayOnly)
         {
@@ -11632,6 +16543,7 @@ bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
 
 void Shutdown()
 {
+    StopFrameHeartbeatThread();
     StopNetworkPumpThread();
 
     std::lock_guard<std::mutex> lock(G.Mutex);

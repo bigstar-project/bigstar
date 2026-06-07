@@ -7,9 +7,7 @@ use std::process::{Child, Command, Stdio};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use crate::config::{
-    DEFAULT_FRAMES, DEFAULT_INPUT_DELAY_FRAMES, DEFAULT_INPUT_MAX_FRAME_LEAD, NETPLAY_START_FRAME,
-};
+use crate::config::{DEFAULT_FRAMES, NETPLAY_START_FRAME};
 use crate::models::{
     BridgeDiagnostics, CourseMode, LaunchRequest, LaunchResponse, Role, SessionStatus,
 };
@@ -238,14 +236,32 @@ pub(crate) fn melon_env(
     env.insert("MELONDS_NSML_REMOTE_INPUT_TIMEOUT_FATAL".into(), "1".into());
     env.insert(
         "MELONDS_NSML_DELAY".into(),
-        DEFAULT_INPUT_DELAY_FRAMES.to_string(),
+        request.settings.input_delay_frames.to_string(),
     );
     env.insert(
         "MELONDS_NSML_INPUT_MAX_FRAME_LEAD".into(),
-        DEFAULT_INPUT_MAX_FRAME_LEAD.to_string(),
+        request.settings.input_max_frame_lead.to_string(),
     );
     env.insert("MELONDS_NSML_INPUT_UNRELIABLE".into(), "1".into());
     env.insert("MELONDS_NSML_INPUT_BUNDLE_HISTORY".into(), "8".into());
+    if request.settings.rollback_enabled {
+        env.insert("MELONDS_NSML_ROLLBACK".into(), "1".into());
+        env.insert("MELONDS_NSML_ROLLBACK_BACKEND".into(), "coredelta".into());
+        env.insert("MELONDS_NSML_ROLLBACK_WINDOW".into(), "64".into());
+        env.insert(
+            "MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL".into(),
+            "8".into(),
+        );
+        env.insert("MELONDS_NSML_ROLLBACK_RESIMULATE".into(), "1".into());
+        env.insert(
+            "MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL".into(),
+            "30".into(),
+        );
+        env.insert(
+            "MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE".into(),
+            "256".into(),
+        );
+    }
     env.insert("MELONDS_NSML_WAIT_FOR_PEER".into(), "1".into());
     env.insert(
         "MELONDS_NSML_WAIT_FOR_PEER_AT_NETPLAY_START".into(),

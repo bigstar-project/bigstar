@@ -25,6 +25,12 @@ pub(crate) fn validate_settings(settings: &GameSettings) -> Result<(), String> {
     if !matches!(settings.big_stars, 3 | 5 | 10) {
         return Err("ビッグスターは 3/5/10 のいずれかにしてください".into());
     }
+    if settings.input_delay_frames > 16 {
+        return Err("InputDelayFrames は 0-16 にしてください".into());
+    }
+    if settings.input_max_frame_lead > 16 {
+        return Err("InputMaxFrameLead は 0-16 にしてください".into());
+    }
     if matches!(settings.course_mode, CourseMode::Random) {
         parse_match_seed(settings.match_seed.trim())?;
     }

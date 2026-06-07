@@ -17,6 +17,7 @@
 */
 
 #include <assert.h>
+#include <algorithm>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -110,6 +111,12 @@ bool TraceNSMLWatchWrite(NDS* nds, const char* cpu, u32 pc, u32 addr, u32 width,
 static bool NSMLWatchWriteMaybeEnabled()
 {
     static const bool enabled = getenv("MELONDS_NSML_WATCH_ADDR") != nullptr;
+    return enabled;
+}
+
+static bool NSMLRollbackSkipJITReset()
+{
+    static const bool enabled = getenv("MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET") != nullptr;
     return enabled;
 }
 
@@ -834,6 +841,470 @@ bool NDS::DoSavestate(Savestate* file)
 
     file->Finish();
 
+    return true;
+}
+
+bool NDS::DoRollbackSavestate(
+    Savestate* file,
+    u32 requestedMainRAMMode,
+    const u8* deltaBaseMainRAM,
+    u32 mainRAMPageSize,
+    u32 requestedCoreSkipMask)
+{
+    file->Section("NDSR");
+
+    u32 config = GetSavestateConfig();
+    if (file->Saving)
+    {
+        file->Var32(&config);
+    }
+    else
+    {
+        u32 config_chk;
+        file->Var32(&config_chk);
+        if (config_chk != config)
+        {
+            Log(LogLevel::Error, "rollback savestate: Expected config word %08X, got %08X. cannot load.\n", config, config_chk);
+            return false;
+        }
+    }
+
+    u32 mainRAMLength = MainRAMMask + 1;
+    file->Var32(&mainRAMLength);
+    if (mainRAMLength == 0 || mainRAMLength > MainRAMMaxSize || mainRAMLength != MainRAMMask + 1)
+    {
+        Log(LogLevel::Error, "rollback savestate: bad main RAM length %u, expected %u\n", mainRAMLength, MainRAMMask + 1);
+        return false;
+    }
+
+    u32 mainRAMMode = requestedMainRAMMode;
+    file->Var32(&mainRAMMode);
+    if (mainRAMMode == 0)
+    {
+        file->VarArray(MainRAM, mainRAMLength);
+    }
+    else if (mainRAMMode == 3)
+    {
+        // Diagnostic rollback mode: preserve all non-MainRAM core state while
+        // leaving Main RAM to a game-specific snapshot layer.
+    }
+    else if (mainRAMMode == 1 || mainRAMMode == 2)
+    {
+        u32 pageSize = mainRAMPageSize;
+        if (pageSize < 256 || pageSize > 4096 || (pageSize & (pageSize - 1)) != 0)
+            pageSize = 4096;
+        u32 pageCount = (mainRAMLength + pageSize - 1) / pageSize;
+        u32 savedPageCount = 0;
+
+        if (mainRAMMode == 2 && !deltaBaseMainRAM)
+        {
+            Log(LogLevel::Error, "rollback savestate: delta main RAM requested without a base\n");
+            return false;
+        }
+
+        if (file->Saving)
+        {
+            for (u32 page = 0; page < pageCount; page++)
+            {
+                const u32 offset = page * pageSize;
+                const u32 len = std::min(pageSize, mainRAMLength - offset);
+                bool savePage = false;
+                if (mainRAMMode == 1)
+                {
+                    for (u32 i = 0; i < len; i++)
+                    {
+                        if (MainRAM[offset + i] != 0)
+                        {
+                            savePage = true;
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    savePage = memcmp(MainRAM + offset, deltaBaseMainRAM + offset, len) != 0;
+                }
+                if (savePage)
+                    savedPageCount++;
+            }
+        }
+
+        u32 storedPageSize = pageSize;
+        u32 storedPageCount = pageCount;
+        file->Var32(&storedPageSize);
+        file->Var32(&storedPageCount);
+        file->Var32(&savedPageCount);
+        if (!file->Saving)
+        {
+            pageSize = storedPageSize;
+            pageCount = pageSize == 0 ? 0 : (mainRAMLength + pageSize - 1) / pageSize;
+        }
+        if (storedPageSize < 256
+            || storedPageSize > 4096
+            || (storedPageSize & (storedPageSize - 1)) != 0
+            || storedPageCount != pageCount)
+        {
+            Log(LogLevel::Error, "rollback savestate: bad sparse main RAM layout pageSize=%u pageCount=%u\n",
+                storedPageSize,
+                storedPageCount);
+            return false;
+        }
+
+        if (!file->Saving)
+        {
+            if (mainRAMMode == 1)
+                memset(MainRAM, 0, mainRAMLength);
+            else
+                memcpy(MainRAM, deltaBaseMainRAM, mainRAMLength);
+        }
+
+        if (file->Saving)
+        {
+            for (u32 page = 0; page < pageCount; page++)
+            {
+                const u32 offset = page * pageSize;
+                const u32 len = std::min(pageSize, mainRAMLength - offset);
+                bool savePage = false;
+                if (mainRAMMode == 1)
+                {
+                    for (u32 i = 0; i < len; i++)
+                    {
+                        if (MainRAM[offset + i] != 0)
+                        {
+                            savePage = true;
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    savePage = memcmp(MainRAM + offset, deltaBaseMainRAM + offset, len) != 0;
+                }
+                if (!savePage)
+                    continue;
+
+                u32 savedPage = page;
+                file->Var32(&savedPage);
+                file->VarArray(MainRAM + offset, len);
+            }
+        }
+        else
+        {
+            for (u32 i = 0; i < savedPageCount; i++)
+            {
+                u32 page = 0;
+                file->Var32(&page);
+                if (page >= pageCount)
+                {
+                    Log(LogLevel::Error, "rollback savestate: sparse main RAM page %u out of %u\n",
+                        page,
+                        pageCount);
+                    return false;
+                }
+                const u32 offset = page * pageSize;
+                const u32 len = std::min(pageSize, mainRAMLength - offset);
+                file->VarArray(MainRAM + offset, len);
+            }
+        }
+    }
+    else
+    {
+        Log(LogLevel::Error, "rollback savestate: unsupported main RAM mode %u\n", mainRAMMode);
+        return false;
+    }
+
+    u32 coreSkipMask = requestedCoreSkipMask;
+    file->Var32(&coreSkipMask);
+
+    constexpr u32 kRollbackCoreSkipCart = 1 << 0;
+    constexpr u32 kRollbackCoreSkipGPU = 1 << 1;
+    constexpr u32 kRollbackCoreSkipSPU = 1 << 2;
+    constexpr u32 kRollbackCoreSkipMicSpiRtc = 1 << 3;
+    constexpr u32 kRollbackCoreSkipWifi = 1 << 4;
+
+    file->VarArray(SharedWRAM, SharedWRAMSize);
+    file->VarArray(ARM7WRAM, ARM7WRAMSize);
+
+    file->VarArray(ExMemCnt, 2*sizeof(u16));
+
+    file->Var16(&WifiWaitCnt);
+
+    file->VarArray(IME, 2*sizeof(u32));
+    file->VarArray(IE, 2*sizeof(u32));
+    file->VarArray(IF, 2*sizeof(u32));
+    file->Var32(&IE2);
+    file->Var32(&IF2);
+
+    file->Var8(&PostFlag9);
+    file->Var8(&PostFlag7);
+    file->Var16(&PowerControl9);
+    file->Var16(&PowerControl7);
+
+    file->Var16(&ARM7BIOSProt);
+
+    file->Var16(&IPCSync9);
+    file->Var16(&IPCSync7);
+    file->Var16(&IPCFIFOCnt9);
+    file->Var16(&IPCFIFOCnt7);
+    IPCFIFO9.DoSavestate(file);
+    IPCFIFO7.DoSavestate(file);
+
+    file->Var16(&DivCnt);
+    file->Var16(&SqrtCnt);
+
+    file->Var32(&CPUStop);
+
+    for (int i = 0; i < 8; i++)
+    {
+        Timer* timer = &Timers[i];
+
+        file->Var16(&timer->Reload);
+        file->Var16(&timer->Cnt);
+        file->Var32(&timer->Counter);
+        file->Var32(&timer->CycleShift);
+    }
+    file->VarArray(TimerCheckMask, 2*sizeof(u8));
+    file->VarArray(TimerTimestamp, 2*sizeof(u64));
+
+    file->VarArray(DMA9Fill, 4*sizeof(u32));
+
+    for (int i = 0; i < Event_MAX; i++)
+    {
+        SchedEvent& evt = SchedList[i];
+
+        file->Var64(&evt.Timestamp);
+        file->Var32(&evt.FuncID);
+        file->Var32(&evt.Param);
+    }
+    file->Var32(&SchedListMask);
+    file->Var64(&ARM9Timestamp);
+    file->Var64(&ARM9Target);
+    file->Var64(&ARM7Timestamp);
+    file->Var64(&ARM7Target);
+    file->Var64(&SysTimestamp);
+    file->Var64(&LastSysClockCycles);
+    file->Var64(&FrameStartTimestamp);
+    file->Var32(&NumFrames);
+    file->Var32(&NumLagFrames);
+    file->Bool32(&LagFrameFlag);
+
+    file->VarArray(KeyCnt, 2*sizeof(u16));
+    file->Var16(&RCnt);
+
+    file->Var8(&WRAMCnt);
+
+    file->Bool32(&RunningGame);
+
+    if (!file->Saving)
+    {
+        MapSharedWRAM(WRAMCnt);
+
+        InitTimings();
+        SetGBASlotTimings();
+
+        UpdateWifiTimings();
+    }
+
+    for (int i = 0; i < 8; i++)
+        DMAs[i].DoSavestate(file);
+
+    ARM9.DoSavestate(file);
+    ARM7.DoSavestate(file);
+
+    if (!(coreSkipMask & kRollbackCoreSkipCart))
+    {
+        NDSCartSlot.DoSavestate(file);
+        if (ConsoleType == 0)
+            GBACartSlot.DoSavestate(file);
+    }
+    if (!(coreSkipMask & kRollbackCoreSkipGPU))
+        GPU.DoSavestate(file);
+    if (!(coreSkipMask & kRollbackCoreSkipSPU))
+        SPU.DoSavestate(file);
+    if (!(coreSkipMask & kRollbackCoreSkipMicSpiRtc))
+    {
+        Mic.DoSavestate(file);
+        SPI.DoSavestate(file);
+        RTC.DoSavestate(file);
+    }
+    if (!(coreSkipMask & kRollbackCoreSkipWifi))
+        Wifi.DoSavestate(file);
+
+    DoSavestateExtra(file);
+
+    if (!file->Saving)
+    {
+        GPU.SetPowerCnt(PowerControl9);
+
+        SPU.SetPowerCnt(PowerControl7 & 0x0001);
+        Wifi.SetPowerCnt(PowerControl7 & 0x0002);
+
+#ifdef JIT_ENABLED
+        if (!NSMLRollbackSkipJITReset())
+            JIT.Reset();
+#endif
+    }
+
+    file->Finish();
+
+    return true;
+}
+
+bool NDS::DoRollbackTinyCoreSavestate(Savestate* file, u32 requestedTinyCoreFlags)
+{
+    file->Section("NDST");
+
+    u32 config = GetSavestateConfig();
+    if (file->Saving)
+    {
+        file->Var32(&config);
+    }
+    else
+    {
+        u32 config_chk;
+        file->Var32(&config_chk);
+        if (config_chk != config)
+        {
+            Log(LogLevel::Error, "rollback tiny core: Expected config word %08X, got %08X. cannot load.\n", config, config_chk);
+            return false;
+        }
+    }
+
+    u32 tinyCoreFlags = requestedTinyCoreFlags;
+    file->Var32(&tinyCoreFlags);
+    constexpr u32 kRollbackTinyCoreGPU2DTiming = 1 << 0;
+    constexpr u32 kRollbackTinyCoreFullGPU = 1 << 1;
+    constexpr u32 kRollbackTinyCoreSPU = 1 << 2;
+    constexpr u32 kRollbackTinyCoreWifi = 1 << 3;
+    constexpr u32 kRollbackTinyCoreCart = 1 << 4;
+    constexpr u32 kRollbackTinyCoreMicSpiRtc = 1 << 5;
+    constexpr u32 kRollbackTinyCoreGPUPaletteOAM = 1 << 6;
+    constexpr u32 kRollbackTinyCoreGPUVRAM = 1 << 7;
+    constexpr u32 kRollbackTinyCoreGPU3D = 1 << 8;
+    constexpr u32 kRollbackTinyCoreGPU3DLight = 1 << 9;
+
+    file->VarArray(SharedWRAM, SharedWRAMSize);
+    file->VarArray(ARM7WRAM, ARM7WRAMSize);
+
+    file->VarArray(ExMemCnt, 2*sizeof(u16));
+    file->Var16(&WifiWaitCnt);
+
+    file->VarArray(IME, 2*sizeof(u32));
+    file->VarArray(IE, 2*sizeof(u32));
+    file->VarArray(IF, 2*sizeof(u32));
+    file->Var32(&IE2);
+    file->Var32(&IF2);
+
+    file->Var8(&PostFlag9);
+    file->Var8(&PostFlag7);
+    file->Var16(&PowerControl9);
+    file->Var16(&PowerControl7);
+
+    file->Var16(&ARM7BIOSProt);
+
+    file->Var16(&IPCSync9);
+    file->Var16(&IPCSync7);
+    file->Var16(&IPCFIFOCnt9);
+    file->Var16(&IPCFIFOCnt7);
+    IPCFIFO9.DoSavestate(file);
+    IPCFIFO7.DoSavestate(file);
+
+    file->Var16(&DivCnt);
+    file->Var16(&SqrtCnt);
+    file->Var32(&CPUStop);
+
+    for (int i = 0; i < 8; i++)
+    {
+        Timer* timer = &Timers[i];
+        file->Var16(&timer->Reload);
+        file->Var16(&timer->Cnt);
+        file->Var32(&timer->Counter);
+        file->Var32(&timer->CycleShift);
+    }
+    file->VarArray(TimerCheckMask, 2*sizeof(u8));
+    file->VarArray(TimerTimestamp, 2*sizeof(u64));
+
+    file->VarArray(DMA9Fill, 4*sizeof(u32));
+
+    for (int i = 0; i < Event_MAX; i++)
+    {
+        SchedEvent& evt = SchedList[i];
+        file->Var64(&evt.Timestamp);
+        file->Var32(&evt.FuncID);
+        file->Var32(&evt.Param);
+    }
+    file->Var32(&SchedListMask);
+    file->Var64(&ARM9Timestamp);
+    file->Var64(&ARM9Target);
+    file->Var64(&ARM7Timestamp);
+    file->Var64(&ARM7Target);
+    file->Var64(&SysTimestamp);
+    file->Var64(&LastSysClockCycles);
+    file->Var64(&FrameStartTimestamp);
+    file->Var32(&NumFrames);
+    file->Var32(&NumLagFrames);
+    file->Bool32(&LagFrameFlag);
+
+    file->VarArray(KeyCnt, 2*sizeof(u16));
+    file->Var16(&RCnt);
+    file->Var8(&WRAMCnt);
+    file->Bool32(&RunningGame);
+
+    if (!file->Saving)
+    {
+        MapSharedWRAM(WRAMCnt);
+        InitTimings();
+        SetGBASlotTimings();
+        UpdateWifiTimings();
+    }
+
+    for (int i = 0; i < 8; i++)
+        DMAs[i].DoSavestate(file);
+
+    ARM9.DoSavestate(file);
+    ARM7.DoSavestate(file);
+
+    if (tinyCoreFlags & kRollbackTinyCoreCart)
+    {
+        NDSCartSlot.DoSavestate(file);
+        if (ConsoleType == 0)
+            GBACartSlot.DoSavestate(file);
+    }
+
+    if (tinyCoreFlags & kRollbackTinyCoreFullGPU)
+        GPU.DoSavestate(file);
+    else if (tinyCoreFlags & (kRollbackTinyCoreGPU2DTiming
+        | kRollbackTinyCoreGPUPaletteOAM
+        | kRollbackTinyCoreGPUVRAM
+        | kRollbackTinyCoreGPU3D
+        | kRollbackTinyCoreGPU3DLight))
+    {
+        GPU.DoRollbackSubsetSavestate(file, tinyCoreFlags);
+    }
+    if (tinyCoreFlags & kRollbackTinyCoreSPU)
+        SPU.DoSavestate(file);
+    if (tinyCoreFlags & kRollbackTinyCoreMicSpiRtc)
+    {
+        Mic.DoSavestate(file);
+        SPI.DoSavestate(file);
+        RTC.DoSavestate(file);
+    }
+    if (tinyCoreFlags & kRollbackTinyCoreWifi)
+        Wifi.DoSavestate(file);
+
+    if (!file->Saving)
+    {
+        GPU.SetPowerCnt(PowerControl9);
+        SPU.SetPowerCnt(PowerControl7 & 0x0001);
+        Wifi.SetPowerCnt(PowerControl7 & 0x0002);
+
+#ifdef JIT_ENABLED
+        if (!NSMLRollbackSkipJITReset())
+            JIT.Reset();
+#endif
+    }
+
+    file->Finish();
     return true;
 }
 

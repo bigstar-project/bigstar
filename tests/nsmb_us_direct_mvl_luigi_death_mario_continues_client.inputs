@@ -1,0 +1,11 @@
+# Direct MvL death/freeze probe for the split client.
+# Luigi uses the stock-item touch path that reaches a death transition.
+
+0-619 NONE
+620-627 DOWN
+628-659 NONE
+660-667 A
+668-899 NONE
+900-1799 NONE
+1800-1880 NONE 217,165
+1881-3600 NONE

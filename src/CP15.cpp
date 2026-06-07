@@ -18,6 +18,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include "NDS.h"
 #include "DSi.h"
 #include "ARM.h"
@@ -37,6 +38,12 @@ using Platform::LogLevel;
 // games to run too fast, causing a number of issues
 const int kDataCacheTiming = 3;//2;
 const int kCodeCacheTiming = 3;//5;
+
+static bool NSMLSuppressPUDebugLog()
+{
+    static const bool enabled = getenv("MELONDS_NSML_SUPPRESS_PU_DEBUG") != nullptr;
+    return enabled;
+}
 
 
 void ARMv5::CP15Reset()
@@ -239,17 +246,20 @@ void ARMv5::UpdatePURegion(u32 n)
         usermask |= 0x40;
     }
 
-    Log(
-        LogLevel::Debug,
-        "PU region %d: %08X-%08X, user=%02X priv=%02X, %08X/%08X\n",
-        n,
-        start << 12,
-        (end << 12) - 1,
-        usermask,
-        privmask,
-        PU_DataRW,
-        PU_CodeRW
-    );
+    if (!NSMLSuppressPUDebugLog())
+    {
+        Log(
+            LogLevel::Debug,
+            "PU region %d: %08X-%08X, user=%02X priv=%02X, %08X/%08X\n",
+            n,
+            start << 12,
+            (end << 12) - 1,
+            usermask,
+            privmask,
+            PU_DataRW,
+            PU_CodeRW
+        );
+    }
 
     for (u32 i = start; i < end; i++)
     {

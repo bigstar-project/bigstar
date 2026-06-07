@@ -1,5 +1,14 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Current GUI netplay controls - 2026-06-07
+
+- GUI対戦設定に `InputDelayFrames`、`InputMaxFrameLead`、ロールバック有効/無効を追加した。
+- 既定値は従来の実用設定を維持し、ロールバック無効、`InputDelayFrames=4`、`InputMaxFrameLead=4`。
+- GUI上でロールバックを有効にすると `InputDelayFrames=2` / `InputMaxFrameLead=2` に切り替わり、無効に戻すと `4/4` に戻る。
+- GUI起動envでは、ロールバック有効時のみ `MELONDS_NSML_ROLLBACK=1`、backend `coredelta`、window `64`、checkpoint interval `8`、resimulate有効、delta keyframe interval `30`、Main RAM page size `256` を渡す。
+- マッチメイキングの room settings schema にも同じ3項目を追加し、参加側にも設定が引き継がれるようにした。
+- Verification: `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`、`cargo clippy --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml --all-targets -- -D warnings`、`corepack pnpm run ci` in `tools\nsmb-mvl-gui`、`corepack pnpm run ci` in `tools\nsmb-signaling-server` がpass。
+
 ## Current RNG variation fix - 2026-06-01
 
 - User-reported issue: Big Star positions and 8-coin item outcomes looked constant across matches, suggesting gameplay RNG was fixed.

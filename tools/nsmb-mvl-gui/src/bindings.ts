@@ -60,6 +60,9 @@ export type GameSettings = {
 	big_stars: number,
 	lives: Lives,
 	match_seed: string,
+	input_delay_frames: number,
+	input_max_frame_lead: number,
+	rollback_enabled: boolean,
 };
 
 export type GenerateRomRequest = {

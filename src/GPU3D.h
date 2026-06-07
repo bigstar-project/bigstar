@@ -93,6 +93,7 @@ public:
     void Reset() noexcept;
 
     void DoSavestate(Savestate* file) noexcept;
+    void DoRollbackLightSavestate(Savestate* file) noexcept;
 
     void SetEnabled(bool geometry, bool rendering) noexcept;
 

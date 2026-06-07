@@ -14,6 +14,9 @@ export const gameSettingsSchema = z.object({
     .refine((value) => value === 3 || value === 5 || value === 10),
   lives: livesSchema,
   match_seed: z.string().regex(/^(0x[0-9a-f]+|[0-9]+)$/i),
+  input_delay_frames: z.number().int().min(0).max(16).default(4),
+  input_max_frame_lead: z.number().int().min(0).max(16).default(4),
+  rollback_enabled: z.boolean().default(false),
 });
 
 export const roomStatusSchema = z.enum([

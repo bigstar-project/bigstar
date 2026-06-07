@@ -1,6 +1,9 @@
 param(
     [int]$Frames = 999999,
     [int]$WaitTimeoutMs = 86400000,
+    [int]$StallTimeoutMs = 0,
+    [int]$StallStartFrame = 900,
+    [int]$GameplayHeartbeatInterval = 120,
     [int]$InputDelayFrames = 16,
     [int]$InputMaxFrameLead = 2,
     [int]$InternalWaitTimeoutMs = 0,
@@ -8,20 +11,39 @@ param(
     [int]$InputSendJitterFrames = 0,
     [switch]$InputUnreliable,
     [int]$InputBundleHistory = 0,
+    [switch]$NetworkPumpThread,
+    [int]$NetworkPumpSleepUs = 250,
     [switch]$LowDelayWan,
     [switch]$LowLatencyRollback,
+    [switch]$PlanDActorSnapshot,
     [switch]$Rollback,
     [string]$RollbackBackend = "",
+    [string]$RollbackTinyCoreFlags = "",
     [int]$RollbackWindow = 120,
     [int]$RollbackCheckpointInterval = 30,
     [int]$RollbackResimulateDelayFrames = 0,
+    [int]$RollbackInputWaitUs = 0,
+    [int]$RollbackMaxResimFrames = 0,
     [switch]$RollbackResimulate,
+    [int]$PlayerStateSyncInterval = 2,
+    [int]$PlayerStateMaxPredictFrames = 1,
+    [int]$WorldStateSyncInterval = 2,
+    [int]$WorldStateMaxPredictFrames = 1,
+    [int]$WorldStateActorRescanInterval = 30,
+    [switch]$WorldStateSkipEffects,
+    [switch]$WorldStateApplyActorSnapshot,
+    [switch]$WorldStateTraceObjectLifecycles,
+    [switch]$WorldStateTraceActorInternals,
+    [switch]$WorldStateTraceEffects,
+    [int]$WorldStateTraceObjectLifecyclesInterval = 60,
+    [int]$WorldStateTraceObjectLifecyclesStartFrame = 0,
+    [int]$WorldStateTraceObjectLifecyclesEndFrame = 0,
     [int]$HostStartupDelayMs = 1200,
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds",
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds",
     [string]$InputScript = "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs",
-    [string]$LogDir = "logs\nsmb-mvl-manual-local",
+    [string]$LogDir = "",
     [int]$ScreenshotInterval = 0,
     [switch]$GameStateTrace,
     [int]$GameStateTraceInterval = 60,
@@ -29,6 +51,10 @@ param(
     [int]$GameStateTraceEndFrame = 0,
     [switch]$GameStateTraceExtended,
     [switch]$InputNetplayTrace,
+    [switch]$TracePlayerLifeChanges,
+    [switch]$TracePlayerDefeated,
+    [switch]$PerfBreakdown,
+    [int]$PacketBridgeStartFrame = 840,
     [int]$MvlStage = -1,
     [string]$MvlSceneSettings = "",
     [ValidateSet(1, 2, 3)] [int]$MvlWins = 2,
@@ -44,6 +70,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($LowLatencyRollback -and $PlanDActorSnapshot) {
+    throw "LowLatencyRollback and PlanDActorSnapshot cannot be enabled together"
+}
 
 function Set-MelonTomlValue {
     param(
@@ -90,11 +120,53 @@ if ($LowLatencyRollback) {
     $InputDelayFrames = 0
     $InputMaxFrameLead = 8
     $Rollback = $true
+    if (-not $PSBoundParameters.ContainsKey('RollbackBackend')) { $RollbackBackend = "coredelta" }
+    if (-not $PSBoundParameters.ContainsKey('RollbackWindow')) { $RollbackWindow = 64 }
+    if (-not $PSBoundParameters.ContainsKey('RollbackCheckpointInterval')) { $RollbackCheckpointInterval = 8 }
+    if (-not $PSBoundParameters.ContainsKey('PacketBridgeStartFrame')) { $PacketBridgeStartFrame = 870 }
+    if (-not $PSBoundParameters.ContainsKey('StallTimeoutMs')) { $StallTimeoutMs = 10000 }
     $RollbackResimulate = $true
-    $RollbackCheckpointInterval = 30
+}
+
+if ($PlanDActorSnapshot) {
+    if (-not $PSBoundParameters.ContainsKey('InputDelayFrames')) { $InputDelayFrames = 0 }
+    if (-not $PSBoundParameters.ContainsKey('InputMaxFrameLead')) { $InputMaxFrameLead = 4 }
+    if (-not $PSBoundParameters.ContainsKey('NetworkPumpThread')) { $NetworkPumpThread = $true }
+    if (-not $PSBoundParameters.ContainsKey('NetworkPumpSleepUs')) { $NetworkPumpSleepUs = 50 }
+    if (-not $PSBoundParameters.ContainsKey('StallTimeoutMs')) { $StallTimeoutMs = 5000 }
+    if (-not $PSBoundParameters.ContainsKey('WorldStateApplyActorSnapshot')) { $WorldStateApplyActorSnapshot = $true }
+    if (-not $PSBoundParameters.ContainsKey('WorldStateSyncInterval')) { $WorldStateSyncInterval = 1 }
+    if (-not $PSBoundParameters.ContainsKey('WorldStateMaxPredictFrames')) { $WorldStateMaxPredictFrames = 2 }
+    if (-not $PSBoundParameters.ContainsKey('PlayerStateMaxPredictFrames')) { $PlayerStateMaxPredictFrames = 1 }
+    if (-not $PSBoundParameters.ContainsKey('GameplayHeartbeatInterval')) { $GameplayHeartbeatInterval = 120 }
+}
+
+$isNsmbTinyCoreRollback = $RollbackBackend -eq "nsmbtinycore" -or $RollbackBackend -eq "nsmb-tiny-core"
+$isTinyCorePreimageRollback = $RollbackBackend -eq "tinycorepreimage" -or $RollbackBackend -eq "tiny-core-preimage"
+
+if ($LowLatencyRollback -and $isTinyCorePreimageRollback) {
+    if (-not $PSBoundParameters.ContainsKey('InputMaxFrameLead')) { $InputMaxFrameLead = 2 }
+    if (-not $PSBoundParameters.ContainsKey('RollbackWindow')) { $RollbackWindow = 32 }
+    if (-not $PSBoundParameters.ContainsKey('RollbackCheckpointInterval')) { $RollbackCheckpointInterval = 1 }
+    if (-not $PSBoundParameters.ContainsKey('RollbackInputWaitUs')) { $RollbackInputWaitUs = 1500 }
+    if (-not $PSBoundParameters.ContainsKey('NetworkPumpThread')) { $NetworkPumpThread = $true }
+    if (-not $PSBoundParameters.ContainsKey('NetworkPumpSleepUs')) { $NetworkPumpSleepUs = 50 }
+}
+
+if ($LowLatencyRollback -and $isNsmbTinyCoreRollback) {
+    if (-not $PSBoundParameters.ContainsKey('InputMaxFrameLead')) { $InputMaxFrameLead = 1 }
+    if (-not $PSBoundParameters.ContainsKey('RollbackCheckpointInterval')) { $RollbackCheckpointInterval = 1 }
+    if (-not $PSBoundParameters.ContainsKey('RollbackInputWaitUs')) { $RollbackInputWaitUs = 2500 }
+    if (-not $PSBoundParameters.ContainsKey('RollbackMaxResimFrames')) { $RollbackMaxResimFrames = 1 }
+    if (-not $PSBoundParameters.ContainsKey('NetworkPumpThread')) { $NetworkPumpThread = $true }
+    if (-not $PSBoundParameters.ContainsKey('NetworkPumpSleepUs')) { $NetworkPumpSleepUs = 50 }
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+if ($LogDir -eq "") {
+    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $LogDir = "logs\nsmb-mvl-manual-local-$timestamp"
+}
 $smokeScript = Join-Path $PSScriptRoot "run-nsmb-mvl-lan-route-smoke.ps1"
 $logRoot = Join-Path $repoRoot $LogDir
 $hostLog = Join-Path $logRoot "host"
@@ -131,6 +203,9 @@ $common = @(
     "-Frames", "$Frames",
     "-WaitTimeoutMs", "$WaitTimeoutMs",
     "-InternalWaitTimeoutMs", "$InternalWaitTimeoutMs",
+    "-StallTimeoutMs", "$StallTimeoutMs",
+    "-GameplayHeartbeatInterval", "$GameplayHeartbeatInterval",
+    "-StallStartFrame", "$StallStartFrame",
     "-Exe", $Exe,
     "-InputScript", $InputScript,
     "-ScreenshotInterval", "$ScreenshotInterval",
@@ -144,8 +219,8 @@ $common = @(
     "-InputSendDelayFrames", "$InputSendDelayFrames",
     "-InputSendJitterFrames", "$InputSendJitterFrames",
     "-PacketBridgeJitHelperPatch",
-    "-PacketBridgeJitHelperPatchFrame", "840",
-    "-PacketBridgeStartFrame", "840",
+    "-PacketBridgeJitHelperPatchFrame", "$PacketBridgeStartFrame",
+    "-PacketBridgeStartFrame", "$PacketBridgeStartFrame",
     "-ClearMvlCameraInitHold",
     "-ClearMvlCameraInitHoldStartFrame", "840",
     "-WaitForPeerAtNetplayStart"
@@ -163,6 +238,47 @@ if ($GameStateTrace) {
 }
 if ($InputNetplayTrace) {
     $common += "-InputNetplayTrace"
+}
+if ($TracePlayerLifeChanges) {
+    $common += "-TracePlayerLifeChanges"
+}
+if ($TracePlayerDefeated) {
+    $common += "-TracePlayerDefeated"
+}
+if ($PlanDActorSnapshot) {
+    $common += @(
+        "-PlayerStateSync",
+        "-PlayerStateApply",
+        "-PlayerStateGlobals",
+        "-PlayerStateSyncInterval", "$PlayerStateSyncInterval",
+        "-PlayerStateMaxPredictFrames", "$PlayerStateMaxPredictFrames",
+        "-WorldStateSync",
+        "-WorldStateApply",
+        "-WorldStateSpawnItem",
+        "-WorldStateApplyMovingHazard",
+        "-WorldStateApplyEffects",
+        "-WorldStateApplyActorSnapshot",
+        "-WorldStateSyncInterval", "$WorldStateSyncInterval",
+        "-WorldStateMaxPredictFrames", "$WorldStateMaxPredictFrames",
+        "-WorldStateActorRescanInterval", "$WorldStateActorRescanInterval"
+    )
+}
+if ($WorldStateTraceObjectLifecycles) {
+    $common += @(
+        "-WorldStateTraceObjectLifecycles",
+        "-WorldStateTraceObjectLifecyclesInterval", "$WorldStateTraceObjectLifecyclesInterval",
+        "-WorldStateTraceObjectLifecyclesStartFrame", "$WorldStateTraceObjectLifecyclesStartFrame",
+        "-WorldStateTraceObjectLifecyclesEndFrame", "$WorldStateTraceObjectLifecyclesEndFrame"
+    )
+}
+if ($WorldStateTraceActorInternals) {
+    $common += "-WorldStateTraceActorInternals"
+}
+if ($WorldStateTraceEffects) {
+    $common += "-WorldStateTraceEffects"
+}
+if ($WorldStateSkipEffects) {
+    $common += "-WorldStateSkipEffects"
 }
 if ($NoFrameLimit) {
     $common += "-NoFrameLimit"
@@ -185,7 +301,10 @@ if ($Rollback) {
     }
 }
 if ($InputUnreliable) {
-    $common += @("-InputUnreliable", "-InputBundleHistory", "$InputBundleHistory")
+    $common += "-InputUnreliable"
+}
+if ($InputBundleHistory -gt 0) {
+    $common += @("-InputBundleHistory", "$InputBundleHistory")
 }
 if ($MvlStage -ge 0) {
     $common += @("-MvlStage", "$MvlStage")
@@ -202,6 +321,86 @@ if ($GenerateMvlConfiguredRoms) {
 }
 if ($MvlMatchSeed -ne "") {
     $common += @("-MvlMatchSeed", "$MvlMatchSeed")
+}
+
+if ($LowLatencyRollback) {
+    $env:MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "30"
+    $env:MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+    $env:MELONDS_NSML_FIXED_FRAME_SLEEP = "1"
+    if ($PerfBreakdown) {
+        $env:MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "25"
+        $env:MELONDS_NSML_FPS_SPIKE_TRACE = "1"
+        $env:MELONDS_NSML_PERF_SPIKE_PHASE_TRACE = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FPS_SPIKE_TRACE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PERF_SPIKE_PHASE_TRACE -ErrorAction SilentlyContinue
+    }
+    if ($isNsmbTinyCoreRollback) {
+        $env:MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+        $env:MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+        $env:MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+        $env:MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+        $env:MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+        $env:MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
+        $env:MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+        $env:MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
+        $env:MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
+        if ($RollbackTinyCoreFlags -eq "") { $RollbackTinyCoreFlags = "0x241" }
+        $env:MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "$RollbackTinyCoreFlags"
+    } elseif ($isTinyCorePreimageRollback) {
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL -ErrorAction SilentlyContinue
+        $env:MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+        $env:MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
+        $env:MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
+        if ($RollbackTinyCoreFlags -eq "") { $RollbackTinyCoreFlags = "0x241" }
+        $env:MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "$RollbackTinyCoreFlags"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SUPPRESS_PU_DEBUG -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS -ErrorAction SilentlyContinue
+    }
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK -ErrorAction SilentlyContinue
+}
+if ($PlanDActorSnapshot) {
+    $env:MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "33"
+    $env:MELONDS_NSML_FPS_SPIKE_TRACE = "1"
+    $env:MELONDS_NSML_PERF_SPIKE_PHASE_TRACE = "1"
+}
+if ($RollbackInputWaitUs -gt 0) {
+    $env:MELONDS_NSML_ROLLBACK_INPUT_WAIT_US = "$RollbackInputWaitUs"
+} else {
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_INPUT_WAIT_US -ErrorAction SilentlyContinue
+}
+if ($RollbackMaxResimFrames -gt 0) {
+    $env:MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES = "$RollbackMaxResimFrames"
+} else {
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES -ErrorAction SilentlyContinue
+}
+if ($NetworkPumpThread) {
+    $env:MELONDS_NSML_NET_PUMP_THREAD = "1"
+    $env:MELONDS_NSML_NET_PUMP_SLEEP_US = "$NetworkPumpSleepUs"
+} else {
+    Remove-Item Env:\MELONDS_NSML_NET_PUMP_THREAD -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_NET_PUMP_SLEEP_US -ErrorAction SilentlyContinue
+}
+if ($PerfBreakdown) {
+    $env:MELONDS_NSML_PERF_BREAKDOWN = "1"
+}
+else {
+    Remove-Item Env:\MELONDS_NSML_PERF_BREAKDOWN -ErrorAction SilentlyContinue
 }
 
 $hostArgs = @(
@@ -254,11 +453,18 @@ Write-Host "Started NSMB MvL manual local session."
 Write-Host "host wrapper pid=$($hostProc.Id) log=$hostLog"
 Write-Host "client wrapper pid=$($clientProc.Id) log=$clientLog"
 Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
-Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit)"
+Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames networkPump=$([bool]$NetworkPumpThread) networkPumpSleepUs=$NetworkPumpSleepUs packetBridgeStart=$PacketBridgeStartFrame renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$([bool]$PerfBreakdown)"
+Write-Host "gameplay heartbeat interval=$GameplayHeartbeatInterval"
+Write-Host "trace gameState=$([bool]$GameStateTrace) interval=$GameStateTraceInterval extended=$([bool]$GameStateTraceExtended) lifeChanges=$([bool]$TracePlayerLifeChanges) defeated=$([bool]$TracePlayerDefeated)"
+if ($PlanDActorSnapshot) {
+    Write-Host "Plan-D actor/global/world snapshot enabled playerInterval=$PlayerStateSyncInterval playerPredict=$PlayerStateMaxPredictFrames worldInterval=$WorldStateSyncInterval worldPredict=$WorldStateMaxPredictFrames worldRescan=$WorldStateActorRescanInterval itemSpawn=1 actorSnapshot=$([bool]$WorldStateApplyActorSnapshot)"
+}
 Write-Host "mvlWins=$MvlWins mvlBigStars=$MvlBigStars mvlLives=$MvlLives mvlStage=$(if ($MvlStage -ge 0) { $MvlStage } else { 'auto/default' }) mvlSceneSettings=$(if ($MvlSceneSettings) { $MvlSceneSettings } else { 'derived' }) mvlCourseMode=$MvlCourseMode generateConfiguredRoms=$($GenerateMvlConfiguredRoms.IsPresent) mvlMatchSeed=$(if ($MvlMatchSeed) { $MvlMatchSeed } else { 'auto' })"
 if ($Rollback) {
     $backendLabel = if ($RollbackBackend -ne "") { $RollbackBackend } else { "savestate" }
-    Write-Host "rollback enabled backend=$backendLabel window=$RollbackWindow checkpointInterval=$RollbackCheckpointInterval resimDelay=$RollbackResimulateDelayFrames resimulate=$RollbackResimulate"
+    $tinyLabel = if ($RollbackTinyCoreFlags -ne "") { " tinyCoreFlags=$RollbackTinyCoreFlags" } else { "" }
+    $rollbackWaitLabel = if ($RollbackInputWaitUs -gt 0) { " rollbackInputWaitUs=$RollbackInputWaitUs" } else { "" }
+    Write-Host "rollback enabled backend=$backendLabel window=$RollbackWindow checkpointInterval=$RollbackCheckpointInterval resimDelay=$RollbackResimulateDelayFrames resimulate=$RollbackResimulate$tinyLabel$rollbackWaitLabel"
 }
 if ($InputUnreliable) {
     Write-Host "input unreliable bundleHistory=$InputBundleHistory"

@@ -5,8 +5,11 @@ import type { GameSettings } from './types';
 const settings: GameSettings = {
   big_stars: 5,
   course_mode: 'random',
+  input_delay_frames: 4,
+  input_max_frame_lead: 4,
   lives: 'endless',
   match_seed: 'seed-1',
+  rollback_enabled: false,
   wins: 3,
 };
 

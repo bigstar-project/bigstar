@@ -542,6 +542,7 @@ fn patch_direct_mvl_entry(
     patch_mvl_load_thread_entrance_ids(rom)?;
     patch_is_out_of_view_vertical_camera_fallback(rom)?;
     patch_camera_focus_loop_count(rom, 2)?;
+    patch_stage_object_activation_player_id(rom, 0)?;
     patch_player_stage_lock_vsmode_noop(rom)?;
     Ok(())
 }
@@ -776,6 +777,30 @@ fn patch_camera_focus_loop_count(rom: &mut RomImage, count: u8) -> Result<()> {
     let word = encode_mov_imm(0, count as u32)?;
     patch_overlay_words_by_id(rom, 0, 0x020B_AAE4, &[word])?;
     patch_overlay_words_by_id(rom, 0, 0x020B_AC18, &[word])?;
+    Ok(())
+}
+
+fn patch_stage_object_activation_player_id(rom: &mut RomImage, player_id: u8) -> Result<()> {
+    if player_id > 1 {
+        bail!("stage object activation player id must be 0 or 1: {player_id}");
+    }
+
+    let hook_addr = 0x0209_B048;
+    let return_addr = 0x0209_B050;
+    let stub_addr = 0x020C_53D0;
+    let get_player_addr = 0x0202_0608;
+    let stub = [
+        encode_push(1 << 14),
+        encode_mov_imm(0, player_id as u32)?,
+        encode_str_imm(0, 13, 0x0C)?,
+        encode_bl(stub_addr + 0x0C, get_player_addr)?,
+        0xE8BD_4000,
+        encode_b(stub_addr + 0x14, return_addr)?,
+    ];
+
+    ensure_zero_overlay_words(rom, 0, stub_addr, stub.len())?;
+    patch_overlay_words_by_id(rom, 0, stub_addr, &stub)?;
+    patch_overlay_words_by_id(rom, 0, hook_addr, &[encode_b(hook_addr, stub_addr)?, NOP])?;
     Ok(())
 }
 

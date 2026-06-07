@@ -544,6 +544,142 @@ void GPU3D::DoSavestate(Savestate* file) noexcept
     RenderFrameIdentical = false;
 }
 
+void GPU3D::DoRollbackLightSavestate(Savestate* file) noexcept
+{
+    file->Section("G3DL");
+
+    CmdFIFO.DoSavestate(file);
+    CmdPIPE.DoSavestate(file);
+
+    file->Var32(&NumCommands);
+    file->Var32(&CurCommand);
+    file->Var32(&ParamCount);
+    file->Var32(&TotalParams);
+
+    file->Var32(&NumPushPopCommands);
+    file->Var32(&NumTestCommands);
+
+    file->Var32(&DispCnt);
+    file->Var8(&AlphaRefVal);
+    file->Var8(&AlphaRef);
+
+    file->VarArray(ToonTable, 32*2);
+    file->VarArray(EdgeTable, 8*2);
+
+    file->Var32(&FogColor);
+    file->Var32(&FogOffset);
+    file->VarArray(FogDensityTable, 32);
+
+    file->Var32(&ClearAttr1);
+    file->Var32(&ClearAttr2);
+
+    file->Var32(&RenderDispCnt);
+    file->Var8(&RenderAlphaRef);
+
+    file->VarArray(RenderToonTable, 32*2);
+    file->VarArray(RenderEdgeTable, 8*2);
+
+    file->Var32(&RenderFogColor);
+    file->Var32(&RenderFogOffset);
+    file->Var32(&RenderFogShift);
+    file->VarArray(RenderFogDensityTable, 34);
+
+    file->Var32(&RenderClearAttr1);
+    file->Var32(&RenderClearAttr2);
+
+    file->Var16(&RenderXPos);
+
+    file->Var32(&ZeroDotWLimit);
+    file->Var32(&GXStat);
+
+    file->VarArray(ExecParams, 32*4);
+    file->Var32(&ExecParamCount);
+    file->Var32((u32*)&CycleCount);
+    file->Var64(&Timestamp);
+
+    file->Var32(&MatrixMode);
+
+    file->VarArray(ProjMatrix, 16*4);
+    file->VarArray(PosMatrix, 16*4);
+    file->VarArray(VecMatrix, 16*4);
+    file->VarArray(TexMatrix, 16*4);
+
+    file->VarArray(ProjMatrixStack, 16*4);
+    file->VarArray(PosMatrixStack, 32*16*4);
+    file->VarArray(VecMatrixStack, 32*16*4);
+    file->VarArray(TexMatrixStack, 16*4);
+
+    file->Var32((u32*)&ProjMatrixStackPointer);
+    file->Var32((u32*)&PosMatrixStackPointer);
+    file->Var32((u32*)&TexMatrixStackPointer);
+
+    file->VarArray(Viewport, sizeof(Viewport));
+
+    file->VarArray(PosTestResult, 4*4);
+    file->VarArray(VecTestResult, 2*3);
+
+    file->Var32(&VertexNum);
+    file->Var32(&VertexNumInPoly);
+    file->Var32(&NumConsecutivePolygons);
+
+    for (Vertex& vtx : TempVertexBuffer)
+        vtx.DoSavestate(file);
+
+    file->Var32(&CurRAMBank);
+    file->Var32(&FlushRequest);
+    file->Var32(&FlushAttributes);
+
+    CmdStallQueue.DoSavestate(file);
+
+    file->Var32((u32*)&VertexPipeline);
+    file->Var32((u32*)&NormalPipeline);
+    file->Var32((u32*)&PolygonPipeline);
+    file->Var32((u32*)&VertexSlotCounter);
+    file->Var32(&VertexSlotsFree);
+
+    file->VarArray(CurVertex, sizeof(s16)*3);
+    file->VarArray(VertexColor, sizeof(u8)*3);
+    file->VarArray(TexCoords, sizeof(s16)*2);
+    file->VarArray(RawTexCoords, sizeof(s16)*2);
+    file->VarArray(Normal, sizeof(s16)*3);
+
+    file->VarArray(LightDirection, sizeof(s16)*4*3);
+    file->VarArray(LightColor, sizeof(u8)*4*3);
+    file->VarArray(MatDiffuse, sizeof(u8)*3);
+    file->VarArray(MatAmbient, sizeof(u8)*3);
+    file->VarArray(MatSpecular, sizeof(u8)*3);
+    file->VarArray(MatEmission, sizeof(u8)*3);
+
+    file->Bool32(&UseShininessTable);
+    file->VarArray(ShininessTable, 128*sizeof(u8));
+
+    file->Bool32(&AbortFrame);
+    file->Bool32(&GeometryEnabled);
+    file->Bool32(&RenderingEnabled);
+    file->Var32(&PolygonMode);
+    file->Var32(&PolygonAttr);
+    file->Var32(&CurPolygonAttr);
+    file->Var32(&TexParam);
+    file->Var32(&TexPalette);
+
+    if (!file->Saving)
+    {
+        LastStripPolygon = nullptr;
+        ClipMatrixDirty = true;
+        UpdateClipMatrix();
+
+        CurVertexRAM = &VertexRAM[CurRAMBank ? 6144 : 0];
+        CurPolygonRAM = &PolygonRAM[CurRAMBank ? 2048 : 0];
+        NumVertices = 0;
+        NumPolygons = 0;
+        NumOpaquePolygons = 0;
+        RenderNumPolygons = 0;
+        RenderPolygonRAM.fill(nullptr);
+    }
+
+    RenderFrameIdentical = false;
+}
+
 
 
 void GPU3D::SetEnabled(bool geometry, bool rendering) noexcept

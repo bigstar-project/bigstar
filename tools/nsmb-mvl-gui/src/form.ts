@@ -1,5 +1,10 @@
 import type { CourseMode, FormState, GameSettings } from './types';
 
+export const defaultInputDelayFrames = 4;
+export const defaultInputMaxFrameLead = 4;
+export const rollbackInputDelayFrames = 2;
+export const rollbackInputMaxFrameLead = 2;
+
 export const initialForm: FormState = {
   role: 'host',
   hostName: 'Player',
@@ -14,6 +19,9 @@ export const initialForm: FormState = {
   bigStars: 10,
   lives: '3',
   matchSeed: '',
+  inputDelayFrames: defaultInputDelayFrames,
+  inputMaxFrameLead: defaultInputMaxFrameLead,
+  rollbackEnabled: false,
 };
 
 export function currentSettings(form: FormState): GameSettings {
@@ -23,6 +31,9 @@ export function currentSettings(form: FormState): GameSettings {
     big_stars: form.bigStars,
     lives: form.lives,
     match_seed: form.matchSeed.trim(),
+    input_delay_frames: form.inputDelayFrames,
+    input_max_frame_lead: form.inputMaxFrameLead,
+    rollback_enabled: form.rollbackEnabled,
   };
 }
 

@@ -1,0 +1,21 @@
+# Direct MvL repeated result/restart stress for the split host.
+# Player0 repeatedly runs left while player1 remains idle so the automated
+# multi-win route exercises death, respawn, result, and checkpoint restart.
+
+0-619 NONE
+620-627 DOWN
+628-659 NONE
+660-667 A
+668-899 NONE
+900-907 A
+908-1259 NONE
+1260-1267 A
+1268-1599 NONE
+1600-1607 NONE 128,165
+1608-1719 NONE
+1720-1727 NONE 128,165
+1728-4199 NONE
+4200-4700 LEFT+Y+A
+4701-5200 LEFT+Y
+5201-5600 LEFT+Y+A
+5601-12000 LEFT+Y

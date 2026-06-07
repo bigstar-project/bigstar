@@ -35,6 +35,9 @@ pub(crate) struct GameSettings {
     pub(crate) big_stars: u8,
     pub(crate) lives: Lives,
     pub(crate) match_seed: String,
+    pub(crate) input_delay_frames: u8,
+    pub(crate) input_max_frame_lead: u8,
+    pub(crate) rollback_enabled: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, Type)]
