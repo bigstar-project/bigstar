@@ -273,6 +273,7 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
             continue
         owner = num(slot.get("ownerCandidate"), -1)
         confidence = num(slot.get("ownerConfidence"))
+        state_bytes = ",".join(str(num(value)) for value in (slot.get("stateBytes") or [])[:8])
         color = "#fb923c" if owner == player else "#f43f5e"
         label = "FB" if owner == player else "fb"
         draw_marker(
@@ -283,7 +284,7 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
             (
                 f"fireball slot={slot.get('index')} ownerCandidate={owner}"
                 f" confidence={confidence} kind={slot.get('kind')} state={slot.get('state')}"
-                f" facing={slot.get('facing')} dx={dx:.0f} dy={dy:.0f}"
+                f" facing={slot.get('facing')} stateBytes={state_bytes} dx={dx:.0f} dy={dy:.0f}"
             ),
             6,
         )

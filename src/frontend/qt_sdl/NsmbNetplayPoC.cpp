@@ -226,6 +226,9 @@ constexpr melonDS::u32 kAIFireballSlotActiveOffset = 0x80;
 constexpr melonDS::u32 kAIFireballSlotKindOffset = 0x81;
 constexpr melonDS::u32 kAIFireballSlotStateOffset = 0x83;
 constexpr melonDS::u32 kAIFireballSlotFacingOffset = 0x85;
+constexpr melonDS::u32 kAIFireballSlotDebugWordOffset = 0x40;
+constexpr int kAIFireballSlotDebugWordCount = 16;
+constexpr int kAIFireballSlotStateByteCount = 12;
 constexpr int kAITileProbeCount = 17;
 constexpr int kObjectTraceSlots = 16;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
@@ -1231,6 +1234,8 @@ struct GameStateSample
     melonDS::u32 FireballSlotVelX[kAIFireballSlotCount] {};
     melonDS::u32 FireballSlotVelY[kAIFireballSlotCount] {};
     melonDS::u32 FireballSlotVelZ[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotStateBytes[kAIFireballSlotCount][kAIFireballSlotStateByteCount] {};
+    melonDS::u32 FireballSlotDebugWords[kAIFireballSlotCount][kAIFireballSlotDebugWordCount] {};
     melonDS::u32 ProjectilesHandlerWords[kAISpecialHandlerWordCount] {};
     melonDS::u32 ObjectScanTotal = 0;
     melonDS::u32 ObjectNotCreatedCount = 0;
@@ -13394,6 +13399,19 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
             sample.FireballSlotVelX[i] = nds->ARM9Read32(slot + kAIFireballSlotVelOffset);
             sample.FireballSlotVelY[i] = nds->ARM9Read32(slot + kAIFireballSlotVelOffset + sizeof(melonDS::u32));
             sample.FireballSlotVelZ[i] = nds->ARM9Read32(slot + kAIFireballSlotVelOffset + sizeof(melonDS::u32) * 2);
+            for (int j = 0; j < kAIFireballSlotStateByteCount; j++)
+            {
+                const melonDS::u32 byteAddr = slot + kAIFireballSlotActiveOffset + static_cast<melonDS::u32>(j);
+                if (IsARM9MainRAMAddress(byteAddr))
+                    sample.FireballSlotStateBytes[i][j] = nds->ARM9Read8(byteAddr);
+            }
+            for (int j = 0; j < kAIFireballSlotDebugWordCount; j++)
+            {
+                const melonDS::u32 wordAddr =
+                    slot + kAIFireballSlotDebugWordOffset + sizeof(melonDS::u32) * static_cast<melonDS::u32>(j);
+                if (IsARM9MainRAMAddress(wordAddr))
+                    sample.FireballSlotDebugWords[i][j] = nds->ARM9Read32(wordAddr);
+            }
         }
     }
 
@@ -15333,6 +15351,25 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             << ",\"ownerConfidence\":" << ownerConfidence
             << ",\"ownerHeuristic\":" << ownerHeuristic
             << ",\"ownerVerified\":0"
+            << ",\"stateBytesOffset\":";
+        WriteJsonHex(G.AIPlayLog, kAIFireballSlotActiveOffset, 2);
+        G.AIPlayLog << ",\"stateBytes\":[";
+        for (int j = 0; j < kAIFireballSlotStateByteCount; j++)
+        {
+            if (j != 0)
+                G.AIPlayLog << ",";
+            G.AIPlayLog << sample.FireballSlotStateBytes[i][j];
+        }
+        G.AIPlayLog << "],\"debugWordsOffset\":";
+        WriteJsonHex(G.AIPlayLog, kAIFireballSlotDebugWordOffset, 2);
+        G.AIPlayLog << ",\"debugWords\":[";
+        for (int j = 0; j < kAIFireballSlotDebugWordCount; j++)
+        {
+            if (j != 0)
+                G.AIPlayLog << ",";
+            WriteJsonHex(G.AIPlayLog, sample.FireballSlotDebugWords[i][j]);
+        }
+        G.AIPlayLog << "]"
             << ",";
         WriteAIVec3Json(
             G.AIPlayLog,

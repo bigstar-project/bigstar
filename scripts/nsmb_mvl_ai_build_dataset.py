@@ -282,8 +282,8 @@ def nearest_special_slot(
     slots: list[dict[str, Any]],
     self_pos: dict[str, int],
     player: int,
-) -> tuple[int, int, int, int, int, int, int, int, int, int, int]:
-    best: tuple[int, int, int, int, int, int, int, int, int, int, int] | None = None
+) -> tuple[int, int, int, int, int, int, int, int, int, int, int, int, int, int, int]:
+    best: tuple[int, int, int, int, int, int, int, int, int, int, int, int, int, int, int] | None = None
     for slot in slots:
         slot_pos = pos(slot)
         dx = slot_pos["x"] - self_pos["x"]
@@ -292,6 +292,8 @@ def nearest_special_slot(
         if best is None or dist2 < best[3]:
             owner_candidate = num(slot.get("ownerCandidate"), -1)
             owner_confidence = num(slot.get("ownerConfidence"))
+            state_bytes = slot.get("stateBytes") or []
+            debug_words = slot.get("debugWords") or []
             best = (
                 1,
                 dx,
@@ -304,9 +306,13 @@ def nearest_special_slot(
                 owner_confidence,
                 num(slot.get("ownerHeuristic")),
                 int(owner_candidate == player),
+                num(state_bytes[2] if len(state_bytes) > 2 else 0),
+                num(state_bytes[4] if len(state_bytes) > 4 else 0),
+                num(state_bytes[6] if len(state_bytes) > 6 else 0),
+                num(debug_words[0] if debug_words else 0),
             )
     if best is None:
-        return (0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0)
+        return (0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0)
     return best
 
 
@@ -507,6 +513,10 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "nearest_fireball_owner_confidence": nearest_fireball[8],
         "nearest_fireball_owner_heuristic": nearest_fireball[9],
         "nearest_fireball_owned_by_self_candidate": nearest_fireball[10],
+        "nearest_fireball_state_byte82": nearest_fireball[11],
+        "nearest_fireball_state_byte84": nearest_fireball[12],
+        "nearest_fireball_state_byte86": nearest_fireball[13],
+        "nearest_fireball_debug_word0": nearest_fireball[14],
         "projectiles_handler_word0": num((projectiles.get("words") or [0])[0]),
         "label_held": held,
     }
