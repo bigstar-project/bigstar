@@ -50,6 +50,17 @@ type ReplayFrame = {
   players?: PlayerState[];
   targets?: Record<string, unknown>;
   objectSummary?: Record<string, unknown>;
+  specialObjects?: {
+    fireballs?: {
+      active?: number | string;
+      handler?: string;
+      words?: Array<number | string>;
+    };
+    projectiles?: {
+      handler?: string;
+      words?: Array<number | string>;
+    };
+  };
   visualSummary?: {
     categoryCounts?: Record<string, number | string>;
     visibleCamera0?: number | string;
@@ -68,6 +79,9 @@ type EventSample = {
   storageContents?: number | string;
   before?: number | string;
   after?: number | string;
+  active?: number | string;
+  handler?: string;
+  words?: Array<number | string>;
   categories?: string[];
 };
 type EventSamples = Record<string, EventSample[]>;
@@ -216,6 +230,8 @@ function frameEvents(frame: ReplayFrame, previous?: ReplayFrame) {
       events.push(String(category));
     }
   }
+  const fireballsActive = numeric(frame.specialObjects?.fireballs?.active);
+  if (fireballsActive > 0) events.push(`fireball x${fireballsActive}`);
   return events;
 }
 
@@ -239,6 +255,9 @@ function eventTitle(name: string, sample: EventSample) {
         ? ''
         : ` storage ${numeric(sample.storageContents)}`;
     return `${player}block ${sample.sample ?? '-'}${tile}${storage}`;
+  }
+  if (name === 'fireballActive') {
+    return `fireball x${numeric(sample.active)}`;
   }
   if (sample.categories?.length)
     return `${name}: ${sample.categories.join(', ')}`;
@@ -359,6 +378,7 @@ export function AIReplayViewer() {
     [eventSamples],
   );
   const categoryCounts = frame?.visualSummary?.categoryCounts ?? {};
+  const fireballsActive = numeric(frame?.specialObjects?.fireballs?.active);
 
   async function loadFile(file: File) {
     try {
@@ -585,6 +605,11 @@ export function AIReplayViewer() {
                 label="可視 object"
                 value={`${numeric(frame.objectSummary?.active)} active`}
                 caption={`cam0 ${numeric(frame.visualSummary?.visibleCamera0)} / cam1 ${numeric(frame.visualSummary?.visibleCamera1)}`}
+              />
+              <SmallInfoCard
+                label="fireball"
+                value={`${fireballsActive} active`}
+                caption={frame.specialObjects?.fireballs?.handler ?? '-'}
               />
               <LauncherCard
                 title="イベント"

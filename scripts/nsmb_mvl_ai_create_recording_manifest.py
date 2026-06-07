@@ -100,6 +100,9 @@ def summarize(playlog: Path, player: int, label_source: str, max_event_samples: 
     label_rows = 0
     nonzero_label_rows = 0
     category_frames = {name: 0 for name in INTERESTING_CATEGORIES}
+    special_object_frames = {
+        "fireballActive": 0,
+    }
     block_candidate_frames = 0
     event_counts = {
         "starPickup": 0,
@@ -109,6 +112,7 @@ def summarize(playlog: Path, player: int, label_source: str, max_event_samples: 
         "blockCandidateVisible": 0,
         "itemVisible": 0,
         "projectileVisible": 0,
+        "fireballActive": 0,
     }
     event_samples: dict[str, list[dict[str, Any]]] = {name: [] for name in event_counts}
 
@@ -146,6 +150,20 @@ def summarize(playlog: Path, player: int, label_source: str, max_event_samples: 
         if categories.intersection({"projectile", "player_fireball", "enemy_fireball"}):
             event_counts["projectileVisible"] += 1
             add_event_sample("projectileVisible", record, {"categories": sorted(categories.intersection({"projectile", "player_fireball", "enemy_fireball"}))})
+        fireballs = ((record.get("specialObjects") or {}).get("fireballs")) or {}
+        fireballs_active = num(fireballs.get("active"))
+        if fireballs_active > 0:
+            special_object_frames["fireballActive"] += 1
+            event_counts["fireballActive"] += 1
+            add_event_sample(
+                "fireballActive",
+                record,
+                {
+                    "active": fireballs_active,
+                    "handler": fireballs.get("handler"),
+                    "words": fireballs.get("words") or [],
+                },
+            )
 
         block_visible = False
         block_details: dict[str, Any] | None = None
@@ -206,6 +224,7 @@ def summarize(playlog: Path, player: int, label_source: str, max_event_samples: 
         "playersEnd": [player_summary(p) for p in (last.get("players") or [])[:2]],
         "objectSummaryEnd": last.get("objectSummary"),
         "categoryFrames": category_frames,
+        "specialObjectFrames": special_object_frames,
         "blockCandidateFrames": block_candidate_frames,
         "eventCounts": event_counts,
         "eventSamples": event_samples,

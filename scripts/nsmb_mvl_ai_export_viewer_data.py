@@ -74,6 +74,7 @@ def compact_record(record: dict[str, Any], max_objects: int) -> dict[str, Any]:
         "targets": record.get("targets"),
         "camera": record.get("camera"),
         "objectSummary": record.get("objectSummary"),
+        "specialObjects": record.get("specialObjects"),
         "visualSummary": record.get("visualSummary"),
         "objects": [compact_object(obj) for obj in objects[:max_objects]],
     }

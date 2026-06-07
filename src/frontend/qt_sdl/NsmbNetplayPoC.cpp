@@ -203,6 +203,10 @@ constexpr melonDS::u32 kWorldEffectWordStart = 0x04;
 constexpr melonDS::u32 kWorldEffectWordEnd = 0xAC;
 constexpr std::size_t kWorldEffectWordCount =
     ((kWorldEffectWordEnd - kWorldEffectWordStart) / sizeof(melonDS::u32)) + 1;
+constexpr melonDS::u32 kFireballsActiveCountAddr = 0x02129480;
+constexpr melonDS::u32 kFireballsHandlerAddr = 0x02129484;
+constexpr melonDS::u32 kProjectilesHandlerAddr = 0x0212A680;
+constexpr int kAISpecialHandlerWordCount = 4;
 constexpr int kAITileProbeCount = 17;
 constexpr int kObjectTraceSlots = 16;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
@@ -1172,6 +1176,9 @@ struct GameStateSample
     melonDS::u32 MovingHazardTargetVelX = 0;
     melonDS::u32 MovingHazardTargetVelY = 0;
     melonDS::u32 MovingHazardTargetVelZ = 0;
+    melonDS::u32 FireballsActiveCount = 0;
+    melonDS::u32 FireballsHandlerWords[kAISpecialHandlerWordCount] {};
+    melonDS::u32 ProjectilesHandlerWords[kAISpecialHandlerWordCount] {};
     melonDS::u32 ObjectScanTotal = 0;
     melonDS::u32 ObjectNotCreatedCount = 0;
     melonDS::u32 ObjectActiveCount = 0;
@@ -13261,6 +13268,18 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.MovingHazardTargetVelY = movingHazard.TargetVelY;
     sample.MovingHazardTargetVelZ = movingHazard.TargetVelZ;
 
+    if (IsARM9MainRAMAddress(kFireballsActiveCountAddr))
+        sample.FireballsActiveCount = nds->ARM9Read32(kFireballsActiveCountAddr);
+    for (int i = 0; i < kAISpecialHandlerWordCount; i++)
+    {
+        const melonDS::u32 fireballWordAddr = kFireballsHandlerAddr + sizeof(melonDS::u32) * i;
+        const melonDS::u32 projectileWordAddr = kProjectilesHandlerAddr + sizeof(melonDS::u32) * i;
+        if (IsARM9MainRAMAddress(fireballWordAddr))
+            sample.FireballsHandlerWords[i] = nds->ARM9Read32(fireballWordAddr);
+        if (IsARM9MainRAMAddress(projectileWordAddr))
+            sample.ProjectilesHandlerWords[i] = nds->ARM9Read32(projectileWordAddr);
+    }
+
     const ObjectLifecycleSummary objectSummary = SummarizeObjectLifecycle(nds);
     sample.ObjectScanTotal = objectSummary.Total;
     sample.ObjectNotCreatedCount = objectSummary.NotCreated;
@@ -15009,6 +15028,28 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         << ",\"skipUpdate\":" << sample.ObjectSkipUpdateCount
         << ",\"skipRender\":" << sample.ObjectSkipRenderCount
         << "}";
+
+    G.AIPlayLog << ",\"specialObjects\":{\"fireballs\":{\"active\":" << sample.FireballsActiveCount
+        << ",\"handler\":";
+    WriteJsonHex(G.AIPlayLog, kFireballsHandlerAddr);
+    G.AIPlayLog << ",\"words\":[";
+    for (int i = 0; i < kAISpecialHandlerWordCount; i++)
+    {
+        if (i != 0)
+            G.AIPlayLog << ",";
+        WriteJsonHex(G.AIPlayLog, sample.FireballsHandlerWords[i]);
+    }
+    G.AIPlayLog << "]},\"projectiles\":{\"handler\":";
+    WriteJsonHex(G.AIPlayLog, kProjectilesHandlerAddr);
+    G.AIPlayLog << ",\"words\":[";
+    for (int i = 0; i < kAISpecialHandlerWordCount; i++)
+    {
+        if (i != 0)
+            G.AIPlayLog << ",";
+        WriteJsonHex(G.AIPlayLog, sample.ProjectilesHandlerWords[i]);
+    }
+    G.AIPlayLog << "]}}";
+
     WriteAIVisualSummaryJson(G.AIPlayLog, objectScanCache, sample);
 
     G.AIPlayLog << ",\"objects\":[";

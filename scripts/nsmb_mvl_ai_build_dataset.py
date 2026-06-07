@@ -315,6 +315,9 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
     target_pos = pos(target)
     camera = record.get("camera") or {}
     object_summary = record.get("objectSummary") or {}
+    special_objects = record.get("specialObjects") or {}
+    fireballs = special_objects.get("fireballs") or {}
+    projectiles = special_objects.get("projectiles") or {}
     visual_summary = record.get("visualSummary") or {}
     category_counts = visual_summary.get("categoryCounts") or {}
     nearest_summary = {}
@@ -408,6 +411,9 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "object_total": num(object_summary.get("total")),
         "object_active": num(object_summary.get("active")),
         "object_dead": num(object_summary.get("dead")),
+        "fireballs_active": num(fireballs.get("active")),
+        "fireballs_handler_word0": num((fireballs.get("words") or [0])[0]),
+        "projectiles_handler_word0": num((projectiles.get("words") or [0])[0]),
         "label_held": held,
     }
 
