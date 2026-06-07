@@ -1,6 +1,7 @@
 param(
     [int]$Frames = 2600,
     [int]$WaitTimeoutMs = 300000,
+    [int]$InternalWaitTimeoutMs = 5000,
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds",
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds",
@@ -22,6 +23,7 @@ param(
     [int]$InputSendJitterFrames = 0,
     [switch]$InputUnreliable,
     [int]$InputBundleHistory = 0,
+    [switch]$AllowRemoteInputTimeoutFallback,
     [switch]$NetworkPumpThread,
     [int]$NetworkPumpSleepUs = 250,
     [switch]$LowDelayWan,
@@ -266,6 +268,7 @@ Remove-Item -Recurse -Force $hostLog, $clientLog -ErrorAction SilentlyContinue
 
 $common = @(
     "-WaitTimeoutMs", "$WaitTimeoutMs",
+    "-InternalWaitTimeoutMs", "$InternalWaitTimeoutMs",
     "-StallTimeoutMs", "$StallTimeoutMs",
     "-FrameHeartbeatInterval", "$FrameHeartbeatInterval",
     "-GameplayHeartbeatInterval", "$GameplayHeartbeatInterval",
@@ -498,6 +501,9 @@ if ($InputUnreliable) {
 }
 if ($InputBundleHistory -gt 0) {
     $common += @("-InputBundleHistory", "$InputBundleHistory")
+}
+if ($AllowRemoteInputTimeoutFallback) {
+    $common += "-AllowRemoteInputTimeoutFallback"
 }
 if ($InputDropModulo -gt 0) {
     $common += @("-InputDropModulo", "$InputDropModulo", "-InputDropOffset", "$InputDropOffset")

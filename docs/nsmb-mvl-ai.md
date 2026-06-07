@@ -78,6 +78,7 @@
 - 完了: `scripts/nsmb_mvl_ai_audit_recordings.py` を追加した。`recording.json` または `recordings-index.json` を読み、rows、gameplay rows、player found率、label率、nonzero label、stage、packet replay、必須event数を学習前に検査できる。
 - 完了: `scripts/run-nsmb-mvl-human-recording.ps1 -DryRun` を追加し、melonDSを起動せずに `recording-session.json` と後処理コマンドを確認できるようにした。通常後処理には `recording-audit.json` 生成も含める。
 - 完了: `scripts/nsmb_mvl_ai_predict_input_script.py` を追加した。学習済み `.npz` とAI play log / recording manifest / recordings indexから推論し、melonDSのinput scriptへ戻せる。既存bootstrap scriptの前置き、反応遅延、ランダムミス、予測CSV出力に対応する。
+- 完了: `scripts/run-nsmb-mvl-split-local-input-smoke.ps1` に `-AllowRemoteInputTimeoutFallback` と `-InternalWaitTimeoutMs` を追加し、モデルinput script評価時にremote input timeoutを即時fallbackへ近づけられるようにした。
 
 ## AI Play Log
 
@@ -205,6 +206,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - StageLayout raw probeでは、stage 0の接地中に `tileId=0x001 behavior=0x0000002A lowType=42` が出る場面があり、現行solidish maskでは床として分類できない。RuleAIとCSVのeffective判定は接地contactで偽holeを抑えるが、学習用の目視同等ログとしては低位tile typeの意味を追加で詰める必要がある。
 - ブロック/アイテム箱の「中身」はblock flagつきStageLayout tile behaviorのstorage contentsとして保存するようになった。叩いた後の状態は現在tile id/behaviorの変化として取れる想定だが、stage 0の実ログで `StageLayout::changeTile` / question block animation path と照合して詰める。
 - 自己対戦に進む前に、ログschemaを実プレイログで増強し、学習済みモデルを入力へ戻した状態でstage 0を閉ループ評価する必要がある。現時点では `.npz` からmelonDS input scriptを生成する経路はできたが、PoC内で状態を逐次推論して即時入力へ戻す直結経路と、モデル入力scriptでの安定した実走評価は未完了。
+- 性能面では、現行の2プロセスsplit input-netplay検証は学習ループ用として遅すぎる。fallbackなしではframe 870で5秒remote input timeoutに入り、fallback + `InternalWaitTimeoutMs=1` でも900F到達にhost約91秒/client約82秒、約10fps程度。これはAI推論の重さではなく、peer接続不成立時のremote input待ちと2プロセス検証harnessの問題。学習・大量評価には、PoC内直結推論、単一プロセス評価、ヘッドレス高速実行、または状態遷移だけを回す専用runnerが必要。
 - fireballなどのprojectile系objectは、通常actor object listではなく専用handlerで管理されるものがある。Fireball slot別の座標/前フレーム座標/速度/kind/state/facingは取れるようになったが、owner、寿命、当たり判定状態、kind/state/facingの意味はまだFire Mario実ログで未検証。Fire Marioでstage 0ログを取り、active slotが増えるframeと画面上のFireballを照合する必要がある。
 - `run-nsmb-mvl-recording-replay.ps1` はinput script replayとpacket replayの起動計画を扱え、`-ScanFrames` で不一致reportも残せる。ただし実際の人間記録で完全一致することは、新規記録を取って `recording-session.json` のpacket変換後処理を実行してから確認する必要がある。現時点ではpacket replayのdry-run解決までで、melonDS実走の完全再現検証は未完了。
 
@@ -311,6 +313,8 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `python scripts\nsmb_mvl_ai_predict_input_script.py logs\codex-ai-stage0-effective-tileprobe-smoke-20260607\ai-imitation-player1-auto.npz logs\codex-ai-stage0-effective-tileprobe-smoke-20260607\ai-playlog.jsonl logs\codex-ai-stage0-effective-tileprobe-smoke-20260607\ai-imitation-player1.inputs --player 1 --label-source auto --require-player-found --prefix-script tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs --end-frame 1700 --predictions-csv ...` pass。28行から19 spanのinput scriptを生成し、bootstrap 0-839 と model予測 870-1700 が連結されることを確認。
 - 同scriptで `--reaction-delay-frames 4 --mistake-rate 0.2 --mistake-mode drop-buttons --seed 7 --max-gap-fill 60` もpass。span開始が4frame遅れ、一部buttonがdropされる強さ調整用input scriptを生成できることを確認。
 - 生成scriptをclient側入力として `run-nsmb-mvl-split-local-input-smoke.ps1` に渡したところ、melonDS側loaderはhost 5 span / client 24 spanを正常に読み込んだ。実走はframe 870のremote input timeoutでframe limit未到達。これはinput script parse失敗ではなく、split netplay harness側のpeer待ち/接続条件として別途詰める。
+- default split local input smokeも同じくframe 870でremote input timeoutになり、モデルscript固有ではなくsplit harness/peer接続側の問題であることを確認。
+- `scripts\run-nsmb-mvl-split-local-input-smoke.ps1 -AllowRemoteInputTimeoutFallback -InternalWaitTimeoutMs 1` でモデルinput scriptを900Fまで実行。host/clientともframe limitには到達し、wrapper上はchild smoke pass。ただしfallback neutralのためhost/clientの `vsStarActorX` がframe 900で不一致になり、同期検証はfail。速度はhost `fps=9.88`、client `fps=10.99` で、学習/大量評価用には不十分。
 
 ## Next Actions
 
@@ -325,4 +329,5 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - 落下死ラインとステージ境界をメモリから取り、`fallRisk` と `tileProbe.holeAhead` を統合した危険判定を作る。
 - 学習済み `.npz` から生成したinput scriptでstage 0を実走させ、一定時間生存、Big Star接近、落下しない、相手と戦うなどのゲーム内指標をmanifestへ入れる。今回のsplit smokeはloader成功後にremote input timeoutになったため、まずharness条件を安定させる。
 - PoC内または外部sidecarで状態を逐次推論し、input script生成を介さずremote CPU入力へ戻す直結経路を作る。
+- 学習/自己対戦用には、現行の2プロセスGUI寄りsmokeではなく、描画・音声・通信待ち・stdoutを削った高速評価runnerを用意する。目標は少なくともリアルタイム60fps、自己対戦データ生成では可能なら数百fps以上。
 - object categoryをログ実例で検証し、ステージ固有objectの意味を詰める。`0x021` は実ログでBig Star actorと同じvtableだったため `big_star_related` に分類した。`0x0F0` はrollback notes上のItem付随短命effectとして `item_spawn_effect` に分類した。`0x145` は既存RAM probeの名前表に基づいて `stage_layout` に分類した。
