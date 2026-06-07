@@ -77,6 +77,29 @@ CATEGORY_COUNT_NAMES = [
     "object",
 ]
 
+ITEM_CATEGORIES = {
+    "world_item",
+    "neutral_item",
+    "dropped_star_item",
+    "item",
+}
+
+# Best-effort item settings interpretation from current stage 0 logs.
+# Keep raw settings columns in the dataset because these mappings are not fully verified yet.
+ITEM_SETTINGS_FIRE_CANDIDATES = {
+    0x00090000,
+    0x00011089,
+}
+ITEM_SETTINGS_DROPPED_STAR_CANDIDATES = {
+    0x00090002,
+}
+ITEM_SETTINGS_SUSPECTED_MINI_CANDIDATES = {
+    # Observed as an 8-coin reward candidate in human-stage0-item-box-001.
+    # Treat as suspected until visually confirmed; training can explicitly avoid it.
+    0x0001108B,
+}
+COIN_REWARD_ITEM_WINDOW_FRAMES = 480
+
 CONTACT_NAMES = [
     "ground",
     "tileGround",
@@ -258,6 +281,18 @@ def screen(entity: dict[str, Any], camera: str) -> dict[str, int]:
     }
 
 
+def item_powerup_kind_candidate(settings: int) -> int:
+    if settings in ITEM_SETTINGS_FIRE_CANDIDATES:
+        return 2
+    if settings in ITEM_SETTINGS_SUSPECTED_MINI_CANDIDATES:
+        return 3
+    return -1
+
+
+def item_avoid_candidate(settings: int) -> int:
+    return int(settings in ITEM_SETTINGS_SUSPECTED_MINI_CANDIDATES)
+
+
 def nearest_object(
     objects: list[dict[str, Any]],
     category: str,
@@ -276,6 +311,75 @@ def nearest_object(
     if best is None:
         return (0, 0, 0, 0)
     return best
+
+
+def nearest_item_details(
+    objects: list[dict[str, Any]],
+    self_pos: dict[str, int],
+    *,
+    require_item_category: str | None = None,
+) -> dict[str, int]:
+    best: tuple[int, dict[str, Any], dict[str, int], dict[str, int], dict[str, int]] | None = None
+    for obj in objects:
+        category = str(obj.get("category") or "")
+        if category not in ITEM_CATEGORIES:
+            continue
+        if require_item_category is not None and category != require_item_category:
+            continue
+        obj_pos = pos(obj)
+        obj_vel = vel(obj)
+        obj_screen = screen(obj, "camera1")
+        dx = obj_pos["x"] - self_pos["x"]
+        dy = obj_pos["y"] - self_pos["y"]
+        dist2 = dx * dx + dy * dy
+        if best is None or dist2 < best[0]:
+            best = (dist2, obj, obj_pos, obj_vel, obj_screen)
+
+    if best is None:
+        return {
+            "found": 0,
+            "dx": 0,
+            "dy": 0,
+            "dist": 0,
+            "object_id": 0,
+            "settings": 0,
+            "settings_low8": 0,
+            "vtable": 0,
+            "vx": 0,
+            "vy": 0,
+            "screen_x": 0,
+            "screen_y": 0,
+            "screen_in_view": 0,
+            "powerup_kind_candidate": -1,
+            "is_fire_candidate": 0,
+            "is_dropped_star_candidate": 0,
+            "is_suspected_mini_candidate": 0,
+            "avoid_candidate": 0,
+        }
+
+    dist2, obj, obj_pos, obj_vel, obj_screen = best
+    settings = num(obj.get("settings"))
+    powerup_kind = item_powerup_kind_candidate(settings)
+    return {
+        "found": 1,
+        "dx": obj_pos["x"] - self_pos["x"],
+        "dy": obj_pos["y"] - self_pos["y"],
+        "dist": int(math.isqrt(dist2)),
+        "object_id": num(obj.get("objectId")),
+        "settings": settings,
+        "settings_low8": settings & 0xFF,
+        "vtable": num(obj.get("vtable")),
+        "vx": obj_vel["x"],
+        "vy": obj_vel["y"],
+        "screen_x": obj_screen["x"],
+        "screen_y": obj_screen["y"],
+        "screen_in_view": obj_screen["inView"],
+        "powerup_kind_candidate": powerup_kind,
+        "is_fire_candidate": int(settings in ITEM_SETTINGS_FIRE_CANDIDATES),
+        "is_dropped_star_candidate": int(settings in ITEM_SETTINGS_DROPPED_STAR_CANDIDATES),
+        "is_suspected_mini_candidate": int(settings in ITEM_SETTINGS_SUSPECTED_MINI_CANDIDATES),
+        "avoid_candidate": item_avoid_candidate(settings),
+    }
 
 
 def fireball_owner_info(slot: dict[str, Any]) -> tuple[int, int, int]:
@@ -378,6 +482,9 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
     opponent_visual_powerup = opponent_visual.get("powerup") or {}
     visual_summary = record.get("visualSummary") or {}
     category_counts = visual_summary.get("categoryCounts") or {}
+    objects = record.get("objects") or []
+    nearest_item = nearest_item_details(objects, self_pos)
+    coin_reward_item = nearest_item_details(objects, self_pos, require_item_category="item")
     nearest_summary = {}
     for nearest_player in visual_summary.get("nearest") or []:
         if num(nearest_player.get("player"), -1) == player:
@@ -505,6 +612,41 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "opponent_dead": num(opponent.get("dead")),
         "opponent_battle_stars": num(opponent.get("battleStars")),
         "opponent_coins": num(opponent.get("coins")),
+        "self_prev_coins": num(record.get("_self_prev_coins"), -1),
+        "self_coin_reward_recent": num(record.get("_self_coin_reward_recent")),
+        "self_coin_reward_age": num(record.get("_self_coin_reward_age"), -1),
+        "nearest_item_object_id": nearest_item["object_id"],
+        "nearest_item_settings": nearest_item["settings"],
+        "nearest_item_settings_low8": nearest_item["settings_low8"],
+        "nearest_item_vtable": nearest_item["vtable"],
+        "nearest_item_vx": nearest_item["vx"],
+        "nearest_item_vy": nearest_item["vy"],
+        "nearest_item_screen1_x": nearest_item["screen_x"],
+        "nearest_item_screen1_y": nearest_item["screen_y"],
+        "nearest_item_screen1_in_view": nearest_item["screen_in_view"],
+        "nearest_item_powerup_kind_candidate": nearest_item["powerup_kind_candidate"],
+        "nearest_item_is_fire_candidate": nearest_item["is_fire_candidate"],
+        "nearest_item_is_dropped_star_candidate": nearest_item["is_dropped_star_candidate"],
+        "nearest_item_is_suspected_mini_candidate": nearest_item["is_suspected_mini_candidate"],
+        "nearest_item_avoid_candidate": nearest_item["avoid_candidate"],
+        "coin_reward_item_found": coin_reward_item["found"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_dx": coin_reward_item["dx"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_dy": coin_reward_item["dy"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_dist": coin_reward_item["dist"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_object_id": coin_reward_item["object_id"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_settings": coin_reward_item["settings"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_settings_low8": coin_reward_item["settings_low8"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_vtable": coin_reward_item["vtable"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_vx": coin_reward_item["vx"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_vy": coin_reward_item["vy"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_screen1_x": coin_reward_item["screen_x"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_screen1_y": coin_reward_item["screen_y"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_screen1_in_view": coin_reward_item["screen_in_view"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_powerup_kind_candidate": coin_reward_item["powerup_kind_candidate"] if num(record.get("_self_coin_reward_recent")) else -1,
+        "coin_reward_item_is_fire_candidate": coin_reward_item["is_fire_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_is_dropped_star_candidate": coin_reward_item["is_dropped_star_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_is_suspected_mini_candidate": coin_reward_item["is_suspected_mini_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_avoid_candidate": coin_reward_item["avoid_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
         "target_found": num(target.get("found")),
         "target_dx": target_pos["x"] - self_pos["x"],
         "target_dy": target_pos["y"] - self_pos["y"],
@@ -630,7 +772,6 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
     for name, bit in BUTTON_BITS.items():
         row[f"label_{name}"] = 1 if (held & (1 << bit)) else 0
 
-    objects = record.get("objects") or []
     for category in NEAREST_CATEGORIES:
         found, dx, dy, dist2 = nearest_object(objects, category, self_pos)
         summary = nearest_summary.get(category) or {}
@@ -726,10 +867,28 @@ def main() -> int:
     rows: list[dict[str, int]] = []
     for recording_index, playlog_path in enumerate(input_playlog_paths(args.input)):
         recording_frame_index = 0
+        previous_self_coins: int | None = None
+        coin_reward_frame: int | None = None
         for record in iter_records(playlog_path):
             if num(record.get("frame")) < args.min_frame:
                 continue
-            if args.require_player_found and not record["players"][args.player].get("found"):
+            players = record.get("players") or []
+            player_record = players[args.player] if len(players) > args.player else {}
+            frame = num(record.get("frame"))
+            self_coins = num(player_record.get("coins"), -1)
+            if previous_self_coins == 7 and self_coins == 0:
+                coin_reward_frame = frame
+            reward_age = frame - coin_reward_frame if coin_reward_frame is not None else -1
+            reward_recent = (
+                coin_reward_frame is not None
+                and 0 <= reward_age <= COIN_REWARD_ITEM_WINDOW_FRAMES
+            )
+            record["_self_prev_coins"] = previous_self_coins if previous_self_coins is not None else -1
+            record["_self_coin_reward_recent"] = int(reward_recent)
+            record["_self_coin_reward_age"] = reward_age if reward_recent else -1
+            previous_self_coins = self_coins
+
+            if args.require_player_found and not player_record.get("found"):
                 continue
             if label_held(record, args.player, args.label_source) is None:
                 continue
