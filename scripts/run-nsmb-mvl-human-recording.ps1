@@ -35,25 +35,25 @@ $sessionPath = Join-Path $logRoot "recording-session.json"
 New-Item -ItemType Directory -Force -Path $hostLog, $clientLog | Out-Null
 
 $manualScript = Join-Path $PSScriptRoot "run-nsmb-mvl-manual-local.ps1"
-$manualArgs = @(
-    "-Frames", "$Frames",
-    "-Exe", $Exe,
-    "-HostRom", $HostRom,
-    "-ClientRom", $ClientRom,
-    "-InputScript", $InputScript,
-    "-LogDir", $LogDir,
-    "-MvlStage", "0",
-    "-HostAIPlayLog", $hostAIPlayLog,
-    "-ClientAIPlayLog", $clientAIPlayLog,
-    "-AIPlayLogInterval", "$AIPlayLogInterval",
-    "-AIPlayLogMaxObjects", "$AIPlayLogMaxObjects"
-)
-if (-not $NoPacketCapture) { $manualArgs += "-PacketCapture" }
-if ($GenerateMvlConfiguredRoms) { $manualArgs += "-GenerateMvlConfiguredRoms" }
-if ($MvlMatchSeed -ne "") { $manualArgs += @("-MvlMatchSeed", $MvlMatchSeed) }
-if ($AllowJit) { $manualArgs += "-AllowJit" }
-if ($HumanSide -eq "client") { $manualArgs += "-NeutralizeHostInput" }
-if ($HumanSide -eq "host") { $manualArgs += "-NeutralizeClientInput" }
+$manualArgs = @{
+    Frames = $Frames
+    Exe = $Exe
+    HostRom = $HostRom
+    ClientRom = $ClientRom
+    InputScript = $InputScript
+    LogDir = $LogDir
+    MvlStage = 0
+    HostAIPlayLog = $hostAIPlayLog
+    ClientAIPlayLog = $clientAIPlayLog
+    AIPlayLogInterval = $AIPlayLogInterval
+    AIPlayLogMaxObjects = $AIPlayLogMaxObjects
+}
+if (-not $NoPacketCapture) { $manualArgs.PacketCapture = $true }
+if ($GenerateMvlConfiguredRoms) { $manualArgs.GenerateMvlConfiguredRoms = $true }
+if ($MvlMatchSeed -ne "") { $manualArgs.MvlMatchSeed = $MvlMatchSeed }
+if ($AllowJit) { $manualArgs.AllowJit = $true }
+if ($HumanSide -eq "client") { $manualArgs.NeutralizeHostInput = $true }
+if ($HumanSide -eq "host") { $manualArgs.NeutralizeClientInput = $true }
 
 $hostManifest = Join-Path $hostLog "recording.json"
 $clientManifest = Join-Path $clientLog "recording.json"
