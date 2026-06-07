@@ -174,7 +174,19 @@ def tile_probe_text(player: dict[str, Any]) -> str:
     ]:
         sample = sample_by_name.get(name) or {}
         if num(sample.get("found")):
-            tile_ids.append(f"{label}:{num(sample.get('tileId')):03X}")
+            block = sample.get("block") or {}
+            block_suffix = ""
+            if num(block.get("itemBox")):
+                block_suffix = f"?{num(block.get('storageContents')):X}"
+            elif num(block.get("question")):
+                block_suffix = "?"
+            elif num(block.get("brick")):
+                block_suffix = "B"
+            elif num(block.get("breakable")):
+                block_suffix = "Br"
+            elif num(block.get("invisible")):
+                block_suffix = "I"
+            tile_ids.append(f"{label}:{num(sample.get('tileId')):03X}{block_suffix}")
     prefix = "+".join(tags) if tags else "open"
     suffix = ",".join(tile_ids) if tile_ids else "-"
     return f"{prefix}:{suffix}"

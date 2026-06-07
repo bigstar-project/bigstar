@@ -2492,6 +2492,9 @@ NsmbRuleAI::Config RuleAIConfig()
 NsmbRuleAI::FrameState RuleAIFrameStateFromSample(const GameStateSample& sample, bool inGameplay)
 {
     NsmbRuleAI::FrameState state {};
+    auto playerContactGround = [](melonDS::u32 collisionFlag) {
+        return (collisionFlag & (0x00000001u | 0x00002000u | 0x00008000u | 0x08000000u)) != 0;
+    };
     auto probeSolidish = [](melonDS::u32 behavior) {
         return (behavior & (0x08990000u | 0x00040000u | 0x00200000u | 0x40000000u | 0x80000000u)) != 0;
     };
@@ -2503,7 +2506,9 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(const GameStateSample& sample,
         }
         return false;
     };
-    auto fillProbeSummary = [&probePointSolidish](NsmbRuleAI::PlayerFrameState& out, const AIPlayerTileProbeSample& probe) {
+    auto fillProbeSummary = [&probePointSolidish](NsmbRuleAI::PlayerFrameState& out,
+                                                   const AIPlayerTileProbeSample& probe,
+                                                   bool contactGround) {
         if (!probe.Found)
             return;
         out.GroundBelowSolid = probePointSolidish(probe, "below");
@@ -2525,18 +2530,31 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(const GameStateSample& sample,
         out.HoleLeft = !leftBelow && !left2Below;
         out.WallRight = rightBody || rightFeet;
         out.HoleRight = !rightBelow && !right2Below;
+        if (contactGround && !out.GroundBelowSolid)
+        {
+            out.GroundBelowSolid = true;
+            out.HoleAhead = false;
+            out.HoleLeft = false;
+            out.HoleRight = false;
+        }
     };
     state.InGameplay = inGameplay;
     state.Players[0].Found = sample.PlayerActor0Found != 0;
     state.Players[0].X = sample.PlayerActor0PosX;
     state.Players[0].Y = sample.PlayerActor0PosY;
     state.Players[0].BattleStars = sample.Player0BattleStars;
-    fillProbeSummary(state.Players[0], sample.PlayerActor0TileProbe);
+    fillProbeSummary(
+        state.Players[0],
+        sample.PlayerActor0TileProbe,
+        playerContactGround(sample.PlayerActor0CollisionFlag));
     state.Players[1].Found = sample.PlayerActor1Found != 0;
     state.Players[1].X = sample.PlayerActor1PosX;
     state.Players[1].Y = sample.PlayerActor1PosY;
     state.Players[1].BattleStars = sample.Player1BattleStars;
-    fillProbeSummary(state.Players[1], sample.PlayerActor1TileProbe);
+    fillProbeSummary(
+        state.Players[1],
+        sample.PlayerActor1TileProbe,
+        playerContactGround(sample.PlayerActor1CollisionFlag));
     state.StarFound = sample.VsStarFound != 0;
     state.StarX = sample.VsStarPosX;
     state.StarY = sample.VsStarPosY;
@@ -12647,22 +12665,22 @@ AIPlayerTileProbeSample ReadAIPlayerTileProbeSample(melonDS::NDS* nds, const Obj
         bool Directional;
     } kProbeDefs[kAITileProbeCount] = {
         {"center", 0, 0, false},
-        {"feet", 0, -16, false},
-        {"below", 0, -32, false},
+        {"feet", 0, -24, false},
+        {"below", 0, -48, false},
         {"aheadBody", 16, 0, true},
-        {"aheadFeet", 16, -16, true},
-        {"aheadBelow", 16, -32, true},
-        {"ahead2Feet", 32, -16, true},
-        {"ahead2Below", 32, -32, true},
+        {"aheadFeet", 16, -24, true},
+        {"aheadBelow", 16, -48, true},
+        {"ahead2Feet", 32, -24, true},
+        {"ahead2Below", 32, -48, true},
         {"above", 0, 24, false},
         {"leftBody", -16, 0, false},
-        {"leftFeet", -16, -16, false},
-        {"leftBelow", -16, -32, false},
-        {"left2Below", -32, -32, false},
+        {"leftFeet", -16, -24, false},
+        {"leftBelow", -16, -48, false},
+        {"left2Below", -32, -48, false},
         {"rightBody", 16, 0, false},
-        {"rightFeet", 16, -16, false},
-        {"rightBelow", 16, -32, false},
-        {"right2Below", 32, -32, false},
+        {"rightFeet", 16, -24, false},
+        {"rightBelow", 16, -48, false},
+        {"right2Below", 32, -48, false},
     };
 
     for (int i = 0; i < kAITileProbeCount; i++)
@@ -14351,6 +14369,31 @@ void WriteAITileTypeJson(std::ostream& out, melonDS::u32 tileType)
         << "}";
 }
 
+void WriteAITileBlockStateJson(std::ostream& out, melonDS::u32 tileID, melonDS::u32 tileType)
+{
+    const int questionBlock = (tileType & 0x00040000u) ? 1 : 0;
+    const int breakableBlock = (tileType & 0x00080000u) ? 1 : 0;
+    const int brickBlock = (tileType & 0x00100000u) ? 1 : 0;
+    const int invisibleBlock = (tileType & 0x20000000u) ? 1 : 0;
+    const melonDS::u32 storageContents = tileType & 0x00000C3Fu;
+    const int anyBlock = questionBlock || breakableBlock || brickBlock || invisibleBlock;
+    const int hasStorageContents = anyBlock && storageContents != 0;
+    const int itemBox = hasStorageContents;
+    out << "{\"any\":" << anyBlock
+        << ",\"itemBox\":" << itemBox
+        << ",\"question\":" << questionBlock
+        << ",\"breakable\":" << breakableBlock
+        << ",\"brick\":" << brickBlock
+        << ",\"invisible\":" << invisibleBlock
+        << ",\"hasStorageContents\":" << hasStorageContents
+        << ",\"storageContents\":" << storageContents
+        << ",\"modifier\":" << ((tileType & 0x0000F000u) >> 12)
+        << ",\"currentTileId\":" << tileID
+        << ",\"currentBehavior\":";
+    WriteJsonHex(out, tileType);
+    out << "}";
+}
+
 bool AITileBehaviorSolidish(melonDS::u32 tileType)
 {
     return (tileType & (
@@ -14387,6 +14430,8 @@ void WriteAITileProbePointJson(std::ostream& out, const AITileProbeSample& sampl
     WriteJsonHex(out, sample.Behavior);
     out << ",\"tile\":";
     WriteAITileTypeJson(out, sample.Behavior);
+    out << ",\"block\":";
+    WriteAITileBlockStateJson(out, sample.TileID, sample.Behavior);
     out << ",\"solidish\":" << (AITileBehaviorSolidish(sample.Behavior) ? 1 : 0)
         << "}";
 }

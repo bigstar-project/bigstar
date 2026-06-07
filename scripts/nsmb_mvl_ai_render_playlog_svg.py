@@ -185,10 +185,17 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
         name = str(sample.get("name", "?"))
         tile_id = num(sample.get("tileId"))
         behavior = sample.get("behavior", "0")
+        block = sample.get("block") or {}
+        block_text = ""
+        if num(block.get("any")):
+            block_text = (
+                f" block itemBox={num(block.get('itemBox'))}"
+                f" contents={num(block.get('storageContents'))}"
+            )
         parts.append(
             f'<rect x="{x - 5:.1f}" y="{y - 5:.1f}" width="10" height="10" fill="{color}" '
             f'stroke="#e2e8f0" stroke-width="1">'
-            f'<title>tileProbe {html.escape(name)} tile=0x{tile_id:03X} behavior={html.escape(str(behavior))} dx={dx:.0f} dy={dy:.0f}</title></rect>'
+            f'<title>tileProbe {html.escape(name)} tile=0x{tile_id:03X} behavior={html.escape(str(behavior))}{html.escape(block_text)} dx={dx:.0f} dy={dy:.0f}</title></rect>'
         )
         parts.append(
             f'<text x="{x:.1f}" y="{y - 8:.1f}" text-anchor="middle" fill="#cbd5e1" '

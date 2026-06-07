@@ -160,6 +160,20 @@ TILE_PROBE_SUMMARY_NAMES = [
     "holeRight",
 ]
 
+TILE_PROBE_BLOCK_NAMES = [
+    "any",
+    "itemBox",
+    "question",
+    "breakable",
+    "brick",
+    "invisible",
+    "hasStorageContents",
+    "storageContents",
+    "modifier",
+    "currentTileId",
+    "currentBehavior",
+]
+
 
 def num(value: Any, default: int = 0) -> int:
     if isinstance(value, bool):
@@ -434,6 +448,7 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         for sample_name in TILE_PROBE_SAMPLE_NAMES:
             sample = tile_probe_samples.get(sample_name) or {}
             tile = sample.get("tile") or {}
+            block = sample.get("block") or {}
             sample_prefix = f"{prefix}_tile_probe_{sample_name}"
             behavior = num(sample.get("behavior"))
             row[f"{sample_prefix}_found"] = num(sample.get("found"))
@@ -444,6 +459,8 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
             row[f"{sample_prefix}_pixel_y"] = num(sample.get("pixelY"))
             for name in BOTTOM_TILE_NAMES:
                 row[f"{sample_prefix}_{name}"] = num(tile.get(name))
+            for name in TILE_PROBE_BLOCK_NAMES:
+                row[f"{sample_prefix}_block_{name}"] = num(block.get(name))
 
     for name, bit in BUTTON_BITS.items():
         row[f"label_{name}"] = 1 if (held & (1 << bit)) else 0
