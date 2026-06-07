@@ -72,6 +72,21 @@ def contact_text(player: dict[str, Any]) -> str:
     return "+".join(dict.fromkeys(names)) if names else "-"
 
 
+def tile_probe_summary_text(player: dict[str, Any]) -> str:
+    summary = ((player.get("tileProbe") or {}).get("summary")) or {}
+    tags = []
+    for key, label in [
+        ("wallAhead", "wall"),
+        ("holeAhead", "hole"),
+        ("groundBelowSolid", "ground"),
+        ("aheadBodySolid", "aheadBody"),
+        ("aheadBelowSolid", "aheadBelow"),
+    ]:
+        if num(summary.get(key)):
+            tags.append(label)
+    return "+".join(tags) if tags else "-"
+
+
 def pos(entity: dict[str, Any]) -> dict[str, int]:
     value = entity.get("pos") or {}
     return {"x": num(value.get("x")), "y": num(value.get("y"))}
@@ -127,7 +142,7 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
         f'<line x1="0" y1="{CENTER_Y}" x2="{WIDTH}" y2="{CENTER_Y}" stroke="#334155" stroke-width="1"/>',
         '<rect x="8" y="8" width="884" height="76" rx="6" fill="#111827" stroke="#334155"/>',
         f'<text x="20" y="32" fill="#e5e7eb" font-family="monospace" font-size="16">frame {num(record.get("frame"))} player {player} input {html.escape(buttons_text(held))} contact {html.escape(contact_text(self_player))}</text>',
-        '<text x="20" y="56" fill="#9ca3af" font-family="monospace" font-size="13">player-centered map, units are screen pixels after /4096 fixed-point conversion</text>',
+        f'<text x="20" y="56" fill="#9ca3af" font-family="monospace" font-size="13">player-centered map, tileProbe {html.escape(tile_probe_summary_text(self_player))}, units are screen pixels after /4096 fixed-point conversion</text>',
     ]
 
     def draw_marker(x: float, y: float, color: str, label: str, title: str, radius: int = 8) -> None:
@@ -145,6 +160,36 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
         dx, dy = world_delta(opponent_pos, self_pos)
         x, y = svg_point(dx, dy)
         draw_marker(x, y, "#818cf8", "OP", f"opponent dx={dx:.0f} dy={dy:.0f}", 10)
+
+    for sample in ((self_player.get("tileProbe") or {}).get("samples")) or []:
+        if not num(sample.get("found")):
+            continue
+        sample_pos = {"x": num(sample.get("worldX")), "y": num(sample.get("worldY"))}
+        dx, dy = world_delta(sample_pos, self_pos)
+        x, y = svg_point(dx, dy)
+        tile = sample.get("tile") or {}
+        if num(tile.get("harmful")):
+            color = "#ef4444"
+        elif num(tile.get("coin")):
+            color = "#eab308"
+        elif num(tile.get("questionBlock")) or num(tile.get("brickBlock")) or num(tile.get("breakableBlock")):
+            color = "#f97316"
+        elif num(sample.get("solidish")):
+            color = "#22c55e"
+        else:
+            color = "#475569"
+        name = str(sample.get("name", "?"))
+        tile_id = num(sample.get("tileId"))
+        behavior = sample.get("behavior", "0")
+        parts.append(
+            f'<rect x="{x - 5:.1f}" y="{y - 5:.1f}" width="10" height="10" fill="{color}" '
+            f'stroke="#e2e8f0" stroke-width="1">'
+            f'<title>tileProbe {html.escape(name)} tile=0x{tile_id:03X} behavior={html.escape(str(behavior))} dx={dx:.0f} dy={dy:.0f}</title></rect>'
+        )
+        parts.append(
+            f'<text x="{x:.1f}" y="{y - 8:.1f}" text-anchor="middle" fill="#cbd5e1" '
+            f'font-family="monospace" font-size="8">{html.escape(name[:2])}</text>'
+        )
 
     drawn = 0
     for obj in record.get("objects") or []:

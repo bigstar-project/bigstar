@@ -36,6 +36,7 @@
 - 完了: playerごとの `screen.camera0/1` と `fallRisk` をAI play logへ追加した。画面X/Y、カメラ内判定、カメラ底までの距離、下端近接、カメラ下抜け、Y速度符号を保存し、穴/落下判断の前段特徴としてCSVへ展開する。
 - 完了: `screen.camera0/1` に `inViewY` を追加し、player/opponent/objectの画面内判定をX/Y/完全判定でログに出せるようにした。
 - 完了: `scripts/nsmb_mvl_ai_render_playlog_svg.py` でJSONLの1フレームをplayer中心のSVGに描画できるようにした。表だけでなく、星、hazard、item、coin、敵、platform、unknown objectの相対配置を目視できる。
+- 完了: SVGレンダラで `players[].tileProbe.samples` を小さな四角として描画するようにした。タイルサンプルの位置、tile id、behavior、solidish/coin/block/harmful分類をSVG上で目視確認できる。
 - 完了: AI play logの `objects[]` に `offset` と `vtable` を追加した。object ID/settingsだけで意味が分からないactorも、vtableを手がかりに後から分類できる。
 - 完了: `scripts/nsmb_mvl_ai_build_dataset.py` に `--label-source auto|applied|player|console` を追加した。ルールAIログは `appliedPlayerN`、人間プレイログはメモリ上の `playerN` / `consoleN` 入力を教師ラベルにできる。
 - 完了: `scripts/nsmb_mvl_ai_predict_imitation.py` で学習済み `.npz` とdataset CSVからオフライン推論し、予測held入力、button別確率、ラベルとの一致率をCSV出力できるようにした。
@@ -106,7 +107,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `python scripts\nsmb_mvl_ai_train_imitation.py <dataset.csv> <model.npz>` でキー入力の多ラベル分類モデルを学習する。
 - `python scripts\nsmb_mvl_ai_predict_imitation.py <model.npz> <dataset.csv> <predictions.csv>` で学習済みモデルのオフライン推論結果を確認する。
 - `python scripts\nsmb_mvl_ai_inspect_playlog.py <playlog.jsonl> --player 1` で、frame、入力、接地/壁/水などのcontact、player/相手/星/hazardの相対位置、可視X数、カテゴリ数を目視確認する。
-- `python scripts\nsmb_mvl_ai_render_playlog_svg.py <playlog.jsonl> <frame.svg> --player 1 --frame <frame>` で、player中心の相対配置をSVGとして目視確認する。
+- `python scripts\nsmb_mvl_ai_render_playlog_svg.py <playlog.jsonl> <frame.svg> --player 1 --frame <frame>` で、player中心の相対配置とtileProbeサンプル点をSVGとして目視確認する。
 - `python scripts\nsmb_mvl_ai_catalog_objects.py <playlog.jsonl>` で、未知objectの出現頻度と代表的な相対位置を確認し、カテゴリ付けを増やす。
 - その後、同じ観測schemaを使って自己対戦学習へ進む。
 - 強さ調整は、推論時に入力反応遅延、ランダムミス、action hold制限、近傍探索幅制限を入れる。
@@ -168,6 +169,8 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --label-source auto --require-player-found` pass。9行CSV生成。`self_tile_probe_found`、`self_tile_probe_holeAhead`、`self_tile_probe_below_tile_id`、`self_tile_probe_aheadBelow_tile_id` などの列追加を確認。
 - `python scripts\nsmb_mvl_ai_train_imitation.py logs\codex-ai-tileprobe-yfix-smoke-20260607\ai-dataset-player1-auto.csv logs\codex-ai-tileprobe-yfix-smoke-20260607\ai-imitation-player1-auto.npz` pass。`python scripts\nsmb_mvl_ai_predict_imitation.py logs\codex-ai-tileprobe-yfix-smoke-20260607\ai-imitation-player1-auto.npz logs\codex-ai-tileprobe-yfix-smoke-20260607\ai-dataset-player1-auto.csv logs\codex-ai-tileprobe-yfix-smoke-20260607\ai-predictions-player1-auto.csv` pass。9行の小データで `button_acc=1.000`、`exact=1.000`。これはパイプライン検証であり、強さ評価ではない。
 - `python -m py_compile scripts\nsmb_mvl_ai_build_dataset.py scripts\nsmb_mvl_ai_inspect_playlog.py scripts\nsmb_mvl_ai_train_imitation.py scripts\nsmb_mvl_ai_predict_imitation.py` pass。
+- `python -m py_compile scripts\nsmb_mvl_ai_render_playlog_svg.py` pass。
+- `python scripts\nsmb_mvl_ai_render_playlog_svg.py logs\codex-ai-tileprobe-yfix-smoke-20260607\ai-playlog.jsonl logs\codex-ai-tileprobe-yfix-smoke-20260607\frame-1020-player1-tileprobe.svg --player 1 --frame 1020` pass。SVG内に `tileProbe center/feet/below/aheadBody/aheadFeet/aheadBelow/ahead2Feet/ahead2Below/above` の矩形とtile id/behavior titleが出ることを確認。
 
 ## Next Actions
 
