@@ -136,6 +136,44 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - その後、同じ観測schemaを使って自己対戦学習へ進む。
 - 強さ調整は、推論時に入力反応遅延、ランダムミス、action hold制限、近傍探索幅制限を入れる。
 
+## Imitation Learning Readiness Plan
+
+模倣学習へ進む前の基準は、「人間がstage 0の画面を見て入力判断に使う情報」と「その時点の入力ラベル」が、同じframe番号で再現・目視検証・dataset化できること。学習モデルの高度化より先に、観測、replay、データ品質、推論戻し経路を固める。
+
+1. 状態取得を目視同等へ近づける。
+   - まずstage 0固定で、player、相手、Big Star、coin、item、enemy、hazard、platform、block/item box、camera、地形接触、落下危険、入力を1フレーム単位で揃える。
+   - item boxは「叩く前の中身候補」「叩いた瞬間」「使用済みtileへの変化」「spawnしたitem/effect」を同じtimeline上で追えるようにする。
+   - Fire Marioのfireball、敵/ステージ由来projectile、短命effectは object ID/vtable/settings/owner候補/速度/寿命をログへ出し、`projectile` / `player_fireball` / `enemy_projectile` のカテゴリへ分ける。
+   - powerup変化、ダメージ、死亡、スター取得、コイン取得、item取得、ブロック破壊、敵撃破、落下復帰などをevent候補としてmanifest/viewerへ出す。
+   - `tileId=0x001 behavior=0x0000002A lowType=42` や `tileId=0x110-0x113` の未解釈tileをstage 0実ログと逆アセンブルで潰し、raw `solidish` / `hole*` を接地contact補正なしでもなるべく正しくする。
+
+2. 人間プレイ記録を完全再現できるreplay基盤にする。
+   - 記録manifestには、ROM/build識別子、stage、seed、host/client role、local player、入力scriptまたはpacket replay、AI play log、viewer data、dataset、検証結果を保存する。
+   - `recording.json` からmelonDSをreplay起動し、終了後に `nsmb_mvl_ai_verify_replay.py` まで自動実行するラッパーを作る。
+   - 検証は最終frameだけでなく、checkpoint frameのhash、player座標/powerup/dead/star/coin、object category count、event列を比較できるように拡張する。
+   - replayが完全一致しない場合でも、どのframeからズレたかをviewerとCSVで追えるようにする。
+
+3. 外部ビューア/GUIでデータ品質を人間が確認できるようにする。
+   - 現在のSVG相当表示に加えて、timeline、入力列、event列、object category filter、unknown object一覧、tileProbe/block状態、replay差分を表示する。
+   - 「このフレームの人間入力がなぜ妥当か」を確認できるように、player中心相対配置、カメラ内可視状態、足元/前方地形、item/projectileの寿命変化を同時に見る。
+   - 目視検査済み/破棄/要再分類などの品質タグをmanifestまたはindexへ残す。
+
+4. dataset作成を人間ログ向けに強くする。
+   - 低頻度イベントが消えないよう、通常走行、スター争奪、item取得、Fire Mario、敵/穴/ブロック接触、死亡前後をscenarioタグで分けて収集する。
+   - `--split-by-recording` を標準にし、同じ連続プレイの隣接frameがtrain/validationに混ざらないようにする。
+   - button別accuracyだけでなく、held完全一致、方向入力、jump/fire同時押し、イベント周辺window、危険回避windowの評価を出す。
+   - 人間ログ、RuleAIログ、将来の自己対戦ログを混ぜられるよう、source/kind/player/role/stage/scenario/qualityを特徴量ではなくmetadataとして保持する。
+
+5. 学習モデルをゲーム入力へ戻して閉ループ評価する。
+   - まず既存 `.npz` の簡易モデルをPoCまたは外部sidecarから推論し、remote CPU入力へ戻す。
+   - 推論時は直近数frameの状態、前回入力、action hold、反応遅延、ランダムミス率、無効入力抑制を入れる。
+   - オフライン一致率だけでなく、stage 0で一定時間生存、Big Starへ近づく、落下しない、相手と戦う、itemを使う、というゲーム内指標で評価する。
+
+6. その後に自己対戦へ進む。
+   - 模倣学習済みモデルを初期値にし、RuleAIを相手/補助データ生成器として残す。
+   - 報酬は勝敗だけにせず、スター差、死亡、相手/星への距離、item取得、危険回避などstage 0で観測済みのイベントを使う。
+   - 学習が破綻した場合に人間ログへ戻せるよう、自己対戦ログも同じmanifest/viewer/dataset形式で保存する。
+
 ## Current Blockers / Unknowns
 
 - object IDと画面上の意味の対応はまだ完全ではない。coin/item/enemy/platform/hazard の初期カテゴリは入り、block/item box候補はStageLayout tileProbeから取れるようになったが、stage 0の実ログを見ながらステージ固有ギミックの分類を増やす。
