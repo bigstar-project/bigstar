@@ -148,6 +148,13 @@ param(
     [string]$ForceStageActorFreezeFlagValue = "0",
     [int]$HostStartupDelayMs = 1200,
     [string]$LogDir = "logs\nsmb-mvl-split-local-input-smoke",
+    [string]$HostAIPlayLog = "",
+    [string]$ClientAIPlayLog = "",
+    [int]$AIPlayLogInterval = 1,
+    [int]$AIPlayLogStartFrame = 0,
+    [int]$AIPlayLogEndFrame = 0,
+    [int]$AIPlayLogMaxObjects = 128,
+    [switch]$AIPlayLogIncludeNonGameplay,
     [switch]$FpsSpikeTrace,
     [switch]$AllowJit
 )
@@ -537,23 +544,78 @@ $hostErr = Join-Path $wrapperLog "host-wrapper.err.txt"
 $clientOut = Join-Path $wrapperLog "client-wrapper.out.txt"
 $clientErr = Join-Path $wrapperLog "client-wrapper.err.txt"
 
-$hostProc = Start-Process -FilePath "powershell.exe" `
-    -ArgumentList $hostArgs `
-    -WorkingDirectory $repoRoot `
-    -RedirectStandardOutput $hostOut `
-    -RedirectStandardError $hostErr `
-    -PassThru `
-    -WindowStyle Hidden
+$aiPlayLogEnvNames = @(
+    "MELONDS_NSML_AI_PLAY_LOG",
+    "MELONDS_NSML_AI_PLAY_LOG_INTERVAL",
+    "MELONDS_NSML_AI_PLAY_LOG_START_FRAME",
+    "MELONDS_NSML_AI_PLAY_LOG_END_FRAME",
+    "MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS",
+    "MELONDS_NSML_AI_PLAY_LOG_INCLUDE_NON_GAMEPLAY"
+)
+$savedAIPlayLogEnv = @{}
+foreach ($name in $aiPlayLogEnvNames) {
+    $savedAIPlayLogEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+}
 
-Start-Sleep -Milliseconds $HostStartupDelayMs
+function Set-AIPlayLogEnvForChild {
+    param([string]$Path)
 
-$clientProc = Start-Process -FilePath "powershell.exe" `
-    -ArgumentList $clientArgs `
-    -WorkingDirectory $repoRoot `
-    -RedirectStandardOutput $clientOut `
-    -RedirectStandardError $clientErr `
-    -PassThru `
-    -WindowStyle Hidden
+    if ($Path -eq "") {
+        Remove-Item Env:\MELONDS_NSML_AI_PLAY_LOG -ErrorAction SilentlyContinue
+        return
+    }
+    $parent = Split-Path -Parent $Path
+    if ($parent -ne "") {
+        New-Item -ItemType Directory -Force -Path $parent | Out-Null
+    }
+    $env:MELONDS_NSML_AI_PLAY_LOG = $Path
+    $env:MELONDS_NSML_AI_PLAY_LOG_INTERVAL = "$AIPlayLogInterval"
+    $env:MELONDS_NSML_AI_PLAY_LOG_START_FRAME = "$AIPlayLogStartFrame"
+    $env:MELONDS_NSML_AI_PLAY_LOG_END_FRAME = "$AIPlayLogEndFrame"
+    $env:MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS = "$AIPlayLogMaxObjects"
+    if ($AIPlayLogIncludeNonGameplay) {
+        $env:MELONDS_NSML_AI_PLAY_LOG_INCLUDE_NON_GAMEPLAY = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_AI_PLAY_LOG_INCLUDE_NON_GAMEPLAY -ErrorAction SilentlyContinue
+    }
+}
+
+function Restore-AIPlayLogEnv {
+    foreach ($name in $aiPlayLogEnvNames) {
+        $value = $savedAIPlayLogEnv[$name]
+        if ($null -eq $value) {
+            [Environment]::SetEnvironmentVariable($name, $null, "Process")
+        } else {
+            [Environment]::SetEnvironmentVariable($name, $value, "Process")
+        }
+    }
+}
+
+$hostProc = $null
+$clientProc = $null
+try {
+    Set-AIPlayLogEnvForChild -Path $HostAIPlayLog
+    $hostProc = Start-Process -FilePath "powershell.exe" `
+        -ArgumentList $hostArgs `
+        -WorkingDirectory $repoRoot `
+        -RedirectStandardOutput $hostOut `
+        -RedirectStandardError $hostErr `
+        -PassThru `
+        -WindowStyle Hidden
+
+    Start-Sleep -Milliseconds $HostStartupDelayMs
+
+    Set-AIPlayLogEnvForChild -Path $ClientAIPlayLog
+    $clientProc = Start-Process -FilePath "powershell.exe" `
+        -ArgumentList $clientArgs `
+        -WorkingDirectory $repoRoot `
+        -RedirectStandardOutput $clientOut `
+        -RedirectStandardError $clientErr `
+        -PassThru `
+        -WindowStyle Hidden
+} finally {
+    Restore-AIPlayLogEnv
+}
 
 $clientProc.WaitForExit()
 $hostProc.WaitForExit()

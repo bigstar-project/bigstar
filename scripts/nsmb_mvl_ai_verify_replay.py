@@ -59,6 +59,15 @@ def last_record(path: Path) -> dict[str, Any]:
     return last
 
 
+def records_by_frame(path: Path) -> dict[int, dict[str, Any]]:
+    result: dict[int, dict[str, Any]] = {}
+    for record in iter_records(path):
+        result[num(record.get("frame"))] = record
+    if not result:
+        raise ValueError(f"{path}: no records")
+    return result
+
+
 def player(record: dict[str, Any], index: int) -> dict[str, Any]:
     players = record.get("players") or []
     if index >= len(players):
@@ -86,6 +95,55 @@ def assert_close(label: str, expected: int, actual: int, tolerance: int) -> None
         fail(f"{label}: expected={expected} actual={actual} diff={diff} tolerance={tolerance}")
 
 
+def category_counts(record: dict[str, Any]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for obj in record.get("objects") or []:
+        category = str(obj.get("category") or "object")
+        counts[category] = counts.get(category, 0) + 1
+    return counts
+
+
+def compare_record(
+    expected: dict[str, Any],
+    actual: dict[str, Any],
+    *,
+    label: str,
+    position_tolerance: int,
+    ignore_hash: bool,
+    ignore_object_counts: bool,
+    ignore_category_counts: bool,
+) -> None:
+    assert_equal(f"{label}.frame", num(expected.get("frame")), num(actual.get("frame")))
+    if not ignore_hash:
+        assert_equal(f"{label}.hash", expected.get("hash"), actual.get("hash"))
+    for index in [0, 1]:
+        expected_player = player(expected, index)
+        actual_player = player(actual, index)
+        assert_equal(f"{label}.player{index}.found", bool(expected_player.get("found")), bool(actual_player.get("found")))
+        expected_pos = pos(expected_player)
+        actual_pos = pos(actual_player)
+        for axis in ["x", "y", "z"]:
+            assert_close(
+                f"{label}.player{index}.pos.{axis}",
+                expected_pos[axis],
+                actual_pos[axis],
+                position_tolerance,
+            )
+        for field in ["powerup", "dead", "battleStars", "coins"]:
+            assert_equal(
+                f"{label}.player{index}.{field}",
+                num(expected_player.get(field)),
+                num(actual_player.get(field)),
+            )
+    if not ignore_object_counts:
+        expected_objects = expected.get("objectSummary") or {}
+        actual_objects = actual.get("objectSummary") or {}
+        for field in ["total", "active", "dead", "notCreated", "skipUpdate", "skipRender"]:
+            assert_equal(f"{label}.objectSummary.{field}", num(expected_objects.get(field)), num(actual_objects.get(field)))
+    if not ignore_category_counts:
+        assert_equal(f"{label}.categoryCounts", category_counts(expected), category_counts(actual))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("expected", type=Path, help="expected playlog JSONL or recording manifest JSON")
@@ -93,44 +151,57 @@ def main() -> int:
     parser.add_argument("--position-tolerance", type=int, default=0)
     parser.add_argument("--ignore-hash", action="store_true")
     parser.add_argument("--ignore-object-counts", action="store_true")
+    parser.add_argument("--check-category-counts", action="store_true")
+    parser.add_argument("--ignore-category-counts", action="store_true")
+    parser.add_argument("--checkpoint-interval", type=int, default=0)
+    parser.add_argument("--checkpoint-start-frame", type=int, default=0)
+    parser.add_argument("--max-checkpoints", type=int, default=0)
     args = parser.parse_args()
 
     expected_log = playlog_from_input(args.expected)
     actual_log = playlog_from_input(args.actual)
     expected = last_record(expected_log)
     actual = last_record(actual_log)
+    ignore_category_counts = not args.check_category_counts or args.ignore_category_counts
 
-    assert_equal("final frame", num(expected.get("frame")), num(actual.get("frame")))
-    if not args.ignore_hash:
-        assert_equal("final hash", expected.get("hash"), actual.get("hash"))
-    for index in [0, 1]:
-        expected_player = player(expected, index)
-        actual_player = player(actual, index)
-        assert_equal(f"player{index}.found", bool(expected_player.get("found")), bool(actual_player.get("found")))
-        expected_pos = pos(expected_player)
-        actual_pos = pos(actual_player)
-        for axis in ["x", "y", "z"]:
-            assert_close(
-                f"player{index}.pos.{axis}",
-                expected_pos[axis],
-                actual_pos[axis],
-                args.position_tolerance,
+    compared_checkpoints = 0
+    if args.checkpoint_interval > 0:
+        expected_by_frame = records_by_frame(expected_log)
+        actual_by_frame = records_by_frame(actual_log)
+        for frame in sorted(expected_by_frame):
+            if frame < args.checkpoint_start_frame:
+                continue
+            if (frame - args.checkpoint_start_frame) % args.checkpoint_interval != 0:
+                continue
+            if frame not in actual_by_frame:
+                fail(f"checkpoint frame missing from actual: frame={frame}")
+            compare_record(
+                expected_by_frame[frame],
+                actual_by_frame[frame],
+                label=f"checkpoint[{frame}]",
+                position_tolerance=args.position_tolerance,
+                ignore_hash=args.ignore_hash,
+                ignore_object_counts=args.ignore_object_counts,
+                ignore_category_counts=ignore_category_counts,
             )
-        for field in ["powerup", "dead", "battleStars", "coins"]:
-            assert_equal(
-                f"player{index}.{field}",
-                num(expected_player.get(field)),
-                num(actual_player.get(field)),
-            )
-    if not args.ignore_object_counts:
-        expected_objects = expected.get("objectSummary") or {}
-        actual_objects = actual.get("objectSummary") or {}
-        for field in ["total", "active", "dead", "notCreated", "skipUpdate", "skipRender"]:
-            assert_equal(f"objectSummary.{field}", num(expected_objects.get(field)), num(actual_objects.get(field)))
+            compared_checkpoints += 1
+            if args.max_checkpoints > 0 and compared_checkpoints >= args.max_checkpoints:
+                break
+
+    compare_record(
+        expected,
+        actual,
+        label="final",
+        position_tolerance=args.position_tolerance,
+        ignore_hash=args.ignore_hash,
+        ignore_object_counts=args.ignore_object_counts,
+        ignore_category_counts=ignore_category_counts,
+    )
 
     print(
         "replay verified "
-        f"expected={expected_log} actual={actual_log} frame={num(actual.get('frame'))}"
+        f"expected={expected_log} actual={actual_log} frame={num(actual.get('frame'))} "
+        f"checkpoints={compared_checkpoints}"
     )
     return 0
 

@@ -197,11 +197,22 @@ def main() -> int:
     parser.add_argument("--client-input-script", type=Path)
     parser.add_argument("--log-dir", type=Path)
     parser.add_argument("--stdout", type=Path)
+    parser.add_argument("--frames", type=int, default=0)
+    parser.add_argument("--match-seed", default="")
+    parser.add_argument("--host-rom", type=Path)
+    parser.add_argument("--client-rom", type=Path)
+    parser.add_argument("--build-id", default="")
+    parser.add_argument("--rom-id", default="")
+    parser.add_argument("--scenario", default="")
+    parser.add_argument("--quality", choices=["unreviewed", "accepted", "rejected", "needs_reclassification"], default="unreviewed")
     parser.add_argument("--notes", default="")
     args = parser.parse_args()
 
     base = args.output.parent
     base.mkdir(parents=True, exist_ok=True)
+    summary = summarize(args.playlog, args.player, args.label_source)
+    replay_frames = args.frames if args.frames > 0 else int(summary.get("frameEnd") or 0)
+    replay_mode = "input_script" if args.host_input_script or args.client_input_script else ""
     manifest = {
         "schema": "nsmb_mvl_ai_recording_manifest_v1",
         "createdAt": datetime.now(timezone.utc).isoformat(),
@@ -214,8 +225,26 @@ def main() -> int:
         "clientInputScript": rel(args.client_input_script, base),
         "logDir": rel(args.log_dir, base),
         "stdout": rel(args.stdout, base),
+        "replay": {
+            "mode": replay_mode,
+            "frames": replay_frames,
+            "matchSeed": args.match_seed,
+            "hostInputScript": rel(args.host_input_script, base),
+            "clientInputScript": rel(args.client_input_script, base),
+            "hostRom": rel(args.host_rom, base),
+            "clientRom": rel(args.client_rom, base),
+        },
+        "metadata": {
+            "buildId": args.build_id,
+            "romId": args.rom_id,
+            "scenario": args.scenario,
+        },
+        "quality": {
+            "status": args.quality,
+            "reviewed": args.quality in {"accepted", "rejected", "needs_reclassification"},
+        },
         "notes": args.notes,
-        "summary": summarize(args.playlog, args.player, args.label_source),
+        "summary": summary,
     }
     args.output.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"manifest={args.output}")

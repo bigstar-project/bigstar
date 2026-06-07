@@ -54,8 +54,8 @@ $indexPath = Join-Path $logRoot "recordings-index.json"
 $hostPlayer = if ($HumanSide -eq "client") { 0 } else { 0 }
 $clientPlayer = if ($HumanSide -eq "host") { 1 } else { 1 }
 $postCommands = @(
-    "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$hostAIPlayLog`" `"$hostManifest`" --kind human --player $hostPlayer --label-source player --stage 0 --log-dir `"$hostLog`"",
-    "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$clientAIPlayLog`" `"$clientManifest`" --kind human --player $clientPlayer --label-source player --stage 0 --log-dir `"$clientLog`"",
+    "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$hostAIPlayLog`" `"$hostManifest`" --kind human --player $hostPlayer --label-source player --stage 0 --log-dir `"$hostLog`" --frames $Frames --host-input-script `"$InputScript`" --client-input-script `"$InputScript`" --host-rom `"$HostRom`" --client-rom `"$ClientRom`" --match-seed `"$MvlMatchSeed`"",
+    "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$clientAIPlayLog`" `"$clientManifest`" --kind human --player $clientPlayer --label-source player --stage 0 --log-dir `"$clientLog`" --frames $Frames --host-input-script `"$InputScript`" --client-input-script `"$InputScript`" --host-rom `"$HostRom`" --client-rom `"$ClientRom`" --match-seed `"$MvlMatchSeed`"",
     "python scripts\nsmb_mvl_ai_make_recordings_index.py `"$indexPath`" `"$hostManifest`" `"$clientManifest`" --stage 0",
     "python scripts\nsmb_mvl_ai_build_dataset.py `"$indexPath`" `"$logRoot\ai-dataset-player1.csv`" --player 1 --label-source player --require-player-found"
 )
@@ -69,6 +69,11 @@ $session = [ordered]@{
     clientAIPlayLog = $clientAIPlayLog
     aiPlayLogInterval = $AIPlayLogInterval
     aiPlayLogMaxObjects = $AIPlayLogMaxObjects
+    frames = $Frames
+    inputScript = $InputScript
+    hostRom = $HostRom
+    clientRom = $ClientRom
+    mvlMatchSeed = $MvlMatchSeed
     postCommands = $postCommands
 }
 $session | ConvertTo-Json -Depth 6 | Set-Content -Path $sessionPath -Encoding UTF8

@@ -59,6 +59,10 @@
 - 完了: `scripts/nsmb_mvl_ai_export_viewer_data.py` を追加し、JSONLを外部ビューア向けのコンパクトJSONへ変換できるようにした。
 - 完了: `scripts/run-nsmb-mvl-manual-local.ps1` に host/client別の `HostAIPlayLog` / `ClientAIPlayLog` を追加し、手動2窓プレイでもAI play logを別々に出せるようにした。
 - 完了: `scripts/run-nsmb-mvl-human-recording.ps1` を追加した。stage 0固定で手動ローカル記録を開始し、終了後にmanifest/index/datasetを作る後処理コマンドを `recording-session.json` に残す。
+- 完了: `recording.json` に `replay` / `metadata` / `quality` を追加し、入力script replayに必要なframes、host/client input script、ROM、match seed、scenario、品質ステータスを保存できるようにした。
+- 完了: `scripts/run-nsmb-mvl-split-local-input-smoke.ps1` が host/client別AI play log出力先を受け取り、split local input replay中にもAI play logを保存できるようにした。
+- 完了: `scripts/run-nsmb-mvl-recording-replay.ps1` を追加した。`recording.json` からstage 0 input script replayの起動計画を復元し、完了後に `nsmb_mvl_ai_verify_replay.py` で検証する。`-DryRun` で起動前の解決パスと検証対象を確認できる。
+- 完了: `scripts/nsmb_mvl_ai_verify_replay.py` に任意のcheckpoint frame比較を追加した。`--checkpoint-interval` を指定すると、最終frameに加えて途中frameのhash、player状態、object countを比較できる。
 - 完了: Tauri GUIに `AIログ` タブを追加した。ローカルのJSONLまたはviewer JSONをファイル選択で読み込み、player中心のSVG相当相対配置、P0/P1入力、可視object数、イベント候補、カテゴリ数を確認できる。
 
 ## AI Play Log
@@ -128,6 +132,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `python scripts\nsmb_mvl_ai_train_imitation.py <dataset.csv> <model.npz>` でキー入力の多ラベル分類モデルを学習する。複数記録を使う場合は `--split-by-recording` で記録単位validationにする。
 - `python scripts\nsmb_mvl_ai_predict_imitation.py <model.npz> <dataset.csv> <predictions.csv>` で学習済みモデルのオフライン推論結果を確認する。
 - `python scripts\nsmb_mvl_ai_verify_replay.py <expected recording.json|playlog.jsonl> <actual playlog.jsonl>` で、melonDS replayが完全再現できているかを最終状態で検証する。
+- `pwsh scripts\run-nsmb-mvl-recording-replay.ps1 -RecordingManifest <recording.json>` で、manifest内のinput script情報からstage 0 replayを起動し、host/client別AI play logを取り直して検証する。起動計画だけ確認する場合は `-DryRun` を使う。途中frameも確認する場合は `-CheckpointInterval 30 -CheckpointStartFrame 900` などを指定する。
 - `python scripts\nsmb_mvl_ai_export_viewer_data.py <playlog.jsonl> <viewer-data.json>` で、GUI/外部ビューア向けJSONを作る。GUIの `AIログ` タブはJSONLを直接読むこともできる。
 - `python scripts\nsmb_mvl_ai_inspect_playlog.py <playlog.jsonl> --player 1` で、frame、入力、接地/壁/水などのcontact、player/相手/星/hazardの相対位置、可視X数、カテゴリ数を目視確認する。
 - `python scripts\nsmb_mvl_ai_render_playlog_svg.py <playlog.jsonl> <frame.svg> --player 1 --frame <frame>` で、player中心の相対配置とtileProbeサンプル点をSVGとして目視確認する。
@@ -149,7 +154,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 
 2. 人間プレイ記録を完全再現できるreplay基盤にする。
    - 記録manifestには、ROM/build識別子、stage、seed、host/client role、local player、入力scriptまたはpacket replay、AI play log、viewer data、dataset、検証結果を保存する。
-   - `recording.json` からmelonDSをreplay起動し、終了後に `nsmb_mvl_ai_verify_replay.py` まで自動実行するラッパーを作る。
+- `recording.json` からmelonDSをreplay起動し、終了後に `nsmb_mvl_ai_verify_replay.py` まで自動実行する。現時点の専用ラッパーはinput script replay対応で、packet replayはmanifestへpacket capture/replay情報を保存する設計を追加してから対応する。
    - 検証は最終frameだけでなく、checkpoint frameのhash、player座標/powerup/dead/star/coin、object category count、event列を比較できるように拡張する。
    - replayが完全一致しない場合でも、どのframeからズレたかをviewerとCSVで追えるようにする。
 
@@ -182,7 +187,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - ブロック/アイテム箱の「中身」はblock flagつきStageLayout tile behaviorのstorage contentsとして保存するようになった。叩いた後の状態は現在tile id/behaviorの変化として取れる想定だが、stage 0の実ログで `StageLayout::changeTile` / question block animation path と照合して詰める。
 - 自己対戦に進む前に、ログschemaを実プレイログで増強し、学習済みモデルを入力へ戻す推論経路を作る必要がある。
 - fireballなどのprojectile系objectは、viewer/export/manifest側ではカテゴリ名を扱えるが、C++側のobject ID分類はまだ未確定。Fire Marioでstage 0実ログを取り、object ID/vtable/ownerらしき状態を分類に追加する必要がある。
-- `run-nsmb-mvl-human-recording.ps1` は記録開始と後処理コマンド生成まで。melonDS側で完全再現するリプレイ実行そのものは、既存input script/packet replay経路を使う前提で、専用の「manifestからreplayを起動する」ラッパーはまだ未実装。
+- `run-nsmb-mvl-recording-replay.ps1` はinput script replayの専用ラッパーとして実装済み。ただし実際の人間記録で完全一致することは、input script付きの新規記録を取ってから確認する必要がある。packet replayは既存変換経路があるが、recording manifestへpacket capture/replay情報を保存する設計がまだ未実装。
 
 ## Verification
 
@@ -256,6 +261,11 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `logs/codex-ai-stage0-tile-catalog-smoke-20260607` の既存JSONLから `recording.json` 作成、`viewer-data.json` export、`recording.json` と同一JSONLの `nsmb_mvl_ai_verify_replay.py` pass。最終frame 1290一致。
 - 同ログの `recording.json` / `recordings-index.json` から `nsmb_mvl_ai_build_dataset.py` pass。manifest/index経由で15行CSV生成。
 - `python scripts\nsmb_mvl_ai_train_imitation.py logs\codex-ai-stage0-tile-catalog-smoke-20260607\ai-dataset-from-index-player1.csv logs\codex-ai-stage0-tile-catalog-smoke-20260607\ai-imitation-from-index-player1.npz --epochs 50 --lr 0.05 --split-by-recording` pass。1記録なので通常splitへフォールバックし、`train=12 val=3`。
+- `scripts\run-nsmb-mvl-recording-replay.ps1` / `scripts\run-nsmb-mvl-split-local-input-smoke.ps1` / `scripts\run-nsmb-mvl-human-recording.ps1` のPowerShell Parser構文確認pass。
+- `python -m py_compile scripts\nsmb_mvl_ai_create_recording_manifest.py scripts\nsmb_mvl_ai_verify_replay.py` pass。
+- `python scripts\nsmb_mvl_ai_verify_replay.py logs\codex-ai-stage0-tile-catalog-smoke-20260607\recording.json logs\codex-ai-stage0-tile-catalog-smoke-20260607\ai-playlog.jsonl --checkpoint-interval 30 --checkpoint-start-frame 900 --max-checkpoints 3` pass。最終frame 1290と途中checkpoint 3件を同一ログで検証。
+- `python scripts\nsmb_mvl_ai_create_recording_manifest.py ... --host-input-script ... --client-input-script ... --frames 1290` で、input script replay情報入りのテストmanifestを生成できることを確認。
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-nsmb-mvl-recording-replay.ps1 -RecordingManifest logs\codex-ai-stage0-tile-catalog-smoke-20260607\recording-replay-inputscript.json -DryRun -LogDir logs\codex-ai-recording-replay-dryrun-20260607` pass。manifestからhost/client input script、ROM、AI play log出力先、検証対象playlogを解決できることを確認。これは既存RuleAIログへ手動入力scriptを後付けしたdry-runであり、完全再現の実走検証ではない。
 - `tools/nsmb-mvl-gui`: `pnpm run typecheck` pass。`pnpm biome check src/App.tsx src/launcher/AIReplayViewer.tsx src/launcher/AIReplayViewer.browser.test.tsx src/launcher/LauncherShell.tsx src/launcher/types.ts` pass。`pnpm vitest --config vitest.browser.config.ts run` pass（4 files / 12 tests、AIReplayViewerのJSONL読込テストを含む）。`pnpm vitest --config vitest.config.ts run` pass（4 files / 14 tests）。`pnpm playwright test` pass（3 tests）。
 - `tools/nsmb-mvl-gui`: `pnpm run ci` は `tsc --noEmit` 後の `biome check .` で停止。原因は変更外の既存ファイルを含むCRLF整形差分で、変更ファイル単位のBiomeはpassしている。
 
@@ -267,7 +277,8 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - ブロック/アイテム箱の中身と叩いた後の状態をstage 0の `StageLayout::changeTile` / question block animation path と実ログで照合し、`tileProbe.samples[].block` の解釈を詰める。
 - Fire Marioでstage 0ログを取り、player fireballのobject ID/vtable/owner/速度/寿命を分類する。GUIビューアとmanifest event countは `projectile` / `player_fireball` カテゴリを扱う準備だけできている。
 - 人間プレイ記録を実際に複数本取り、`recordings-index.json` 経由のdataset、`--split-by-recording`、GUIの `AIログ` タブで、入力ラベルと目視相当状態が期待通り読めるか確認する。
-- `recording.json` からmelonDS replayを起動し、完了後に `nsmb_mvl_ai_verify_replay.py` まで自動で走る専用ラッパーを作る。
+- input script付きの新規人間記録を取り、`run-nsmb-mvl-recording-replay.ps1` で実replayを走らせ、最終frameとcheckpoint frameが完全一致するか確認する。
+- packet capture/replayを `recording.json` に保存するmanifest schemaを追加し、input scriptではなくpacket replayからも完全再現できるようにする。
 - 落下死ラインとステージ境界をメモリから取り、`fallRisk` と `tileProbe.holeAhead` を統合した危険判定を作る。
 - 学習済み `.npz` をPoCまたは外部sidecarから推論して入力へ戻す経路を作る。
 - object categoryをログ実例で検証し、ステージ固有objectの意味を詰める。`0x021` は実ログでBig Star actorと同じvtableだったため `big_star_related` に分類した。`0x0F0` はrollback notes上のItem付随短命effectとして `item_spawn_effect` に分類した。`0x145` は既存RAM probeの名前表に基づいて `stage_layout` に分類した。
