@@ -102,6 +102,23 @@ def tile_probe_summary_text(player: dict[str, Any]) -> str:
     return "+".join(tags) if tags else "-"
 
 
+def visual_state_text(player: dict[str, Any]) -> str:
+    visual_state = player.get("visualState") or {}
+    powerup = visual_state.get("powerup") or {}
+    inventory = visual_state.get("inventoryPowerup") or {}
+    parts = [
+        f"pwr={powerup.get('name', player.get('powerup', '?'))}",
+        f"inv={inventory.get('name', player.get('inventoryPowerup', '?'))}",
+    ]
+    if num(visual_state.get("hasReserveItemCandidate")):
+        parts.append("reserve")
+    if num(visual_state.get("invincibleKnown")):
+        parts.append(f"invincible={num(visual_state.get('invincibleCandidate'))}")
+    else:
+        parts.append("invincible=?")
+    return " ".join(str(part) for part in parts)
+
+
 def pos(entity: dict[str, Any]) -> dict[str, int]:
     value = entity.get("pos") or {}
     return {"x": num(value.get("x")), "y": num(value.get("y"))}
@@ -157,7 +174,7 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
         f'<line x1="0" y1="{CENTER_Y}" x2="{WIDTH}" y2="{CENTER_Y}" stroke="#334155" stroke-width="1"/>',
         '<rect x="8" y="8" width="884" height="76" rx="6" fill="#111827" stroke="#334155"/>',
         f'<text x="20" y="32" fill="#e5e7eb" font-family="monospace" font-size="16">frame {num(record.get("frame"))} player {player} input {html.escape(buttons_text(held))} contact {html.escape(contact_text(self_player))}</text>',
-        f'<text x="20" y="56" fill="#9ca3af" font-family="monospace" font-size="13">player-centered map, tileProbe {html.escape(tile_probe_summary_text(self_player))}, units are screen pixels after /4096 fixed-point conversion</text>',
+        f'<text x="20" y="56" fill="#9ca3af" font-family="monospace" font-size="13">state {html.escape(visual_state_text(self_player))}, tileProbe {html.escape(tile_probe_summary_text(self_player))}</text>',
     ]
 
     def draw_marker(x: float, y: float, color: str, label: str, title: str, radius: int = 8) -> None:
@@ -238,6 +255,30 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
             7,
         )
         drawn += 1
+
+    for slot in (((record.get("specialObjects") or {}).get("fireballs") or {}).get("slots")) or []:
+        rel = slot.get("relative") or {}
+        dx = num(rel.get(f"p{player}dx")) / FIXED
+        dy = num(rel.get(f"p{player}dy")) / FIXED
+        x, y = svg_point(dx, dy)
+        if x < -40 or x > WIDTH + 40 or y < -40 or y > HEIGHT + 40:
+            continue
+        owner = num(slot.get("ownerCandidate"), -1)
+        confidence = num(slot.get("ownerConfidence"))
+        color = "#fb923c" if owner == player else "#f43f5e"
+        label = "FB" if owner == player else "fb"
+        draw_marker(
+            x,
+            y,
+            color,
+            label,
+            (
+                f"fireball slot={slot.get('index')} ownerCandidate={owner}"
+                f" confidence={confidence} kind={slot.get('kind')} state={slot.get('state')}"
+                f" facing={slot.get('facing')} dx={dx:.0f} dy={dy:.0f}"
+            ),
+            6,
+        )
 
     legend_x = 20
     legend_y = HEIGHT - 24

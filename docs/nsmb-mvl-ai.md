@@ -19,7 +19,7 @@
 最初の必須条件は、人間が画面を見て判断できる状態に近い情報をメモリから取得できること。学習前に、少なくとも次をフレーム単位で保存する。
 
 - 入力ラベル: player別 held/pressed keys、console別 held/pressed keys、touch。
-- プレイヤー: actor found、座標、前フレーム座標、速度、状態/アクション/物理/衝突/環境フラグ、死亡/遷移、powerup、所持/表示スター、Battle Stars、コイン、スコア。
+- プレイヤー: actor found、座標、前フレーム座標、速度、状態/アクション/物理/衝突/環境フラグ、死亡/遷移、powerup raw値、reserve item raw値、画面上の変身/ストック候補としての `visualState`、所持/表示スター、Battle Stars、コイン、スコア。
 - 目標物: Big Star actor、Big Star candidate、落下スター/アイテム、8コイン由来アイテム。
 - ワールド: stage、vs mode、local player、カメラ矩形/ターゲット/位置、総コイン数。
 - オブジェクト: active objectの object ID、settings、GUID/base、state、flags、lifecycle、skip flags、座標、速度。既知IDはカテゴリ名も付ける。
@@ -75,6 +75,13 @@
 - 完了: AI play logに `specialObjects.fireballs` / `specialObjects.projectiles` を追加した。通常actor object listでは拾えない `Fireballs::activeFireballs` と fireball/projectile handler先頭wordを保存し、Fire Mario実ログで発射frameを見つける足場にする。
 - 完了: `specialObjects.fireballs.active` をdataset特徴量、viewer export、recording manifestの `summary.specialObjectFrames.fireballActive` / `eventSamples.fireballActive`、GUIの `AIログ` タブへ流すようにした。
 - 完了: `Fireballs::fireballHandler` のslot配列を読み、AI play logの `specialObjects.fireballs.slots[]` にactive slotのindex、kind、state、facing、座標、前フレーム座標、速度、player相対座標を保存するようにした。datasetには `fireballs_active_slots`、`fireballs_slot_count`、最近傍fireballの相対距離/kind/state/facingを追加した。
+- 完了: AI play logの `players[].visualState` に、現在powerupとreserve itemのraw値、暫定名、Fire/Shell/Mega候補、reserve item候補、invincibility未確定フラグを保存するようにした。powerup enum mappingは未検証なので `mappingVerified=0` として残す。
+- 完了: `specialObjects.fireballs.slots[]` に `ownerCandidate`、`ownerConfidence`、`ownerHeuristic`、`ownerVerified=0` を追加した。真のowner offsetが未確定なため、現時点では位置/速度ベースの候補として扱う。
+- 完了: datasetに self/opponent 両方の `inventoryPowerup`、powerup候補bit、invincibility候補、相手のaction/subAction/physics/collision/environment/dead、最近傍fireball owner候補を追加した。ログに出ているのに学習入力へ落ちていなかった相手powerup/deadもCSVへ入る。
+- 完了: `scripts/nsmb_mvl_ai_audit_visual_state.py` を追加した。playlogから `visualState` 欠落、invincibility未確定、powerup raw値分布、可視未知object、fireball owner低信頼slotを集計し、人間が画面で見える状態に対するログ不足を検出する。
+- 完了: SVGレンダラに playerの `visualState` 表示と `specialObjects.fireballs.slots[]` の描画を追加した。fireballはowner候補とconfidenceをtitleに出す。
+- 完了: 人間記録後処理に `visual-state-audit.json` 生成を追加した。`recording-session.json` のpostCommandsでmanifest/index/datasetに続けて視覚状態監査を実行する。
+- 完了: split local input smokeの `HostAIPlayLog` / `ClientAIPlayLog` 相対パスをrepo root基準の絶対パスに解決するようにし、child側LogDirとの二重パス化を避けるようにした。
 - 完了: `scripts/nsmb_mvl_ai_audit_recordings.py` を追加した。`recording.json` または `recordings-index.json` を読み、rows、gameplay rows、player found率、label率、nonzero label、stage、packet replay、必須event数を学習前に検査できる。
 - 完了: `scripts/run-nsmb-mvl-human-recording.ps1 -DryRun` を追加し、melonDSを起動せずに `recording-session.json` と後処理コマンドを確認できるようにした。通常後処理には `recording-audit.json` 生成も含める。
 - 完了: `scripts/nsmb_mvl_ai_predict_input_script.py` を追加した。学習済み `.npz` とAI play log / recording manifest / recordings indexから推論し、melonDSのinput scriptへ戻せる。既存bootstrap scriptの前置き、反応遅延、ランダムミス、予測CSV出力に対応する。
@@ -97,6 +104,8 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 
 `players[].contact` には、数値の衝突/環境フラグから人間が目視で判断する地形接触に近いbitを保存する。代表項目は `ground`、`predictGround`、`ceiling`、`wallLeft`、`wallRight`、`edgeGrab`、`water`、`liquid`、`submerged`、`quicksand`、`rope`、`tightrope`、`pole`、`spikesLeft`、`spikesRight`、`conveyorLeft`、`conveyorRight`、`wrapLeft`、`wrapRight`。CSVには `self_contact_*` / `opponent_contact_*` として展開する。
 
+`players[].visualState` には、画面上の変身状態やストック表示に相当する候補を保存する。`powerup.raw` / `inventoryPowerup.raw` はメモリから読んだ値で、`name` は暫定mapping、`mappingVerified=0` はstage 0実ログで値と画面表示をまだ照合していないことを示す。`canShootFireCandidate`、`isShellCandidate`、`isMegaCandidate`、`hasReserveItemCandidate` はraw値からの候補bitであり、模倣学習では使えるが、評価時は `mappingVerified` を見て未検証値を過信しない。`invincibleKnown=0` / `invincibleCandidate=0` は、スター無敵やダメージ後無敵のtimer/flagがまだ明示的には取れていないことを示す。
+
 `players[].collisionMgr` には、プレイヤーactor内のCollisionMgrから読んだ地形/接触結果を保存する。主な項目は `collisionResult`、`groundCollision`、`deltaX/Y`、`attachedTileX/Y`、`bottomModifierTileType`、`topModifierTileType`、`sideModifierTileTypeLeft/Right`。`bottomModifierTile` は modifier tile typeを `solid`、`coin`、`questionBlock`、`breakableBlock`、`brickBlock`、`slope`、`water`、`partialSolid`、`harmful`、`invisibleBlock`、modifier、storage contentsへ展開したもの。これは「足元そのもの」ではなく、CollisionMgrが保持するbottom modifier tileで、前方タイルや穴の完全判定ではない。CSV/inspectでは不自然に多数のtile category bitが立つ値をsanity checkで除外する。
 
 `players[].tileDamage` には、Player本体に保存されるtile damage flags/typeを保存する。`active=1` のときはlava/poison/その他ダメージ地形などの接触候補として扱う。通常の床接地や壁接触は `contact` と `collisionMgr.collisionResult` を見る。
@@ -107,7 +116,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 
 `visualSummary` には、人間が画面を見て判断する情報に近づけるための要約を保存する。現時点ではY込みの `visibleCamera0/1`、左右ラップ込みX判定の `visibleCamera0X` / `visibleCamera1X`、カテゴリ別count、player別最近傍 `big_star_actor` / `moving_hazard` などを持つ。player/object個別にも `relative` と `screen.camera*.inViewX/inViewY/inView` を保存する。
 
-`specialObjects` には、通常のactor object list外で管理されるものを保存する。現時点では `fireballs.active`、`fireballs.activeSlots`、`fireballs.handler`、`fireballs.handlerPtr`、`fireballs.words[]`、`fireballs.slots[]`、`projectiles.handler`、`projectiles.words[]` を持つ。`fireballs.active` は `Fireballs::activeFireballs` のraw wordで、kind別countがpackedされる可能性があるため、学習側ではactive slot件数の `activeSlots` / `slots.length` も併用する。handler addressはNSMB symbol table上の `Fireballs::fireballHandler` / `Projectiles::projectileHandler` に対応する。`fireballs.slots[]` は `FireballHandler::spawn/update` の逆アセンブルに基づき、handler pointer + 4 を起点に16 slot、stride `0x8C`、active byte `+0x80`、kind `+0x81`、state `+0x83`、facing `+0x85`、pos `+0x10`、prev pos `+0x20`、velocity `+0x30` として読んでいる。owner/lifetimeの正確なoffsetとkind/state/facingの意味は、Fire Mario stage 0実ログで検証する。
+`specialObjects` には、通常のactor object list外で管理されるものを保存する。現時点では `fireballs.active`、`fireballs.activeSlots`、`fireballs.handler`、`fireballs.handlerPtr`、`fireballs.words[]`、`fireballs.slots[]`、`projectiles.handler`、`projectiles.words[]` を持つ。`fireballs.active` は `Fireballs::activeFireballs` のraw wordで、kind別countがpackedされる可能性があるため、学習側ではactive slot件数の `activeSlots` / `slots.length` も併用する。handler addressはNSMB symbol table上の `Fireballs::fireballHandler` / `Projectiles::projectileHandler` に対応する。`fireballs.slots[]` は `FireballHandler::spawn/update` の逆アセンブルに基づき、handler pointer + 4 を起点に16 slot、stride `0x8C`、active byte `+0x80`、kind `+0x81`、state `+0x83`、facing `+0x85`、pos `+0x10`、prev pos `+0x20`、velocity `+0x30` として読んでいる。`ownerCandidate` / `ownerConfidence` / `ownerHeuristic` は真owner offset未確定の暫定推定で、`ownerVerified=0` のまま保存する。owner/lifetimeの正確なoffset、当たり判定状態、kind/state/facingの意味は、Fire Mario stage 0実ログで検証する。
 
 現時点の既知カテゴリ:
 
@@ -144,6 +153,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - 人間プレイを収集する場合は、まず `pwsh scripts\run-nsmb-mvl-human-recording.ps1` を使う。これはstage 0固定でhost/client別AI play logとpacket captureを出し、終了後に `recording-session.json` の後処理コマンドで `packet-replay.csv`、`recording.json`、`recordings-index.json`、datasetを作る。packet captureが不要な検証では `-NoPacketCapture` を指定する。
 - 記録終了後は `pwsh scripts\run-nsmb-mvl-recording-postcommands.ps1 -Session <recording-session.json>` で、packet replay変換、manifest/index、dataset生成をまとめて実行する。手順確認だけなら `-DryRun`、途中から再開する場合は `-StartAt <index>` を使う。
 - `python scripts\nsmb_mvl_ai_audit_recordings.py <recording.json|recordings-index.json> --stage 0 --min-player-found-ratio 0.5 --min-label-ratio 0.5` で、学習前の最低限の品質を確認する。packet replay完全再現を前提にする人間記録では `--require-packet-replay`、Fire Marioなど低頻度scenarioでは `--require-event fireballActive:1` のようにevent条件を追加する。
+- `python scripts\nsmb_mvl_ai_audit_visual_state.py <host-ai-playlog.jsonl> <client-ai-playlog.jsonl> --output <visual-state-audit.json>` で、`visualState` 欠落、powerup/inventory raw値分布、無敵状態未確定、可視未知object、fireball owner低信頼slotを確認する。人間記録のpostCommandsにはこの監査を含める。
 - `python scripts\nsmb_mvl_ai_create_recording_manifest.py <playlog.jsonl> <recording.json> --kind human --player <0|1> --label-source player --stage 0` で、1本の人間/AIログを記録manifest化する。
 - `python scripts\nsmb_mvl_ai_make_recordings_index.py <recordings-index.json> <recording1.json> <recording2.json> ... --stage 0` で、複数記録を1つの学習入力に束ねる。
 - `python scripts\nsmb_mvl_ai_build_dataset.py <playlog.jsonl> <dataset.csv> --player 1 --require-player-found` で固定長特徴量へ変換する。デフォルトの `--label-source auto` は `appliedPlayerN` があればそれを使い、なければ `playerN` を使う。人間ログだけを明示する場合は `--label-source player` を指定する。
@@ -170,6 +180,8 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
    - item boxは「叩く前の中身候補」「叩いた瞬間」「使用済みtileへの変化」「spawnしたitem/effect」を同じtimeline上で追えるようにする。
    - Fire Marioのfireball、敵/ステージ由来projectile、短命effectは object ID/vtable/settings/owner候補/速度/寿命をログへ出し、`projectile` / `player_fireball` / `enemy_projectile` のカテゴリへ分ける。
    - powerup変化、ダメージ、死亡、スター取得、コイン取得、item取得、ブロック破壊、敵撃破、落下復帰などをevent候補としてmanifest/viewerへ出す。
+   - powerup/inventory raw値は `visualState` へ出るようになったが、画面表示との照合で `mappingVerified=1` にできるまで、Fire/Shell/Megaなどは候補扱いにする。スター無敵/ダメージ後無敵は `invincibleKnown=0` が残るため、専用timer/flagを探す。
+   - `audit_visual_state` の結果で `visualStateMissing`、可視未知object、fireball owner低信頼slot、invincibility unknownを毎回確認し、目視同等に足りない状態を次の解析対象にする。
    - `tileId=0x001 behavior=0x0000002A lowType=42` や `tileId=0x110-0x113` の未解釈tileをstage 0実ログと逆アセンブルで潰し、raw `solidish` / `hole*` を接地contact補正なしでもなるべく正しくする。
 
 2. 人間プレイ記録を完全再現できるreplay基盤にする。
@@ -205,14 +217,26 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - 目視同等にするには、stage 0の実プレイ場面でタイルサンプルを増やし、穴/壁/床判定のoffsetとsolid maskを調整する必要がある。左右ラップ込みX判定、Y込みの完全可視判定、player接触地形、CollisionMgr接触結果、modifier tile、tile damage、playerの画面Y/カメラ底距離、StageLayout由来の前方/左右タイルサンプルは取れるようになった。
 - StageLayout raw probeでは、stage 0の接地中に `tileId=0x001 behavior=0x0000002A lowType=42` が出る場面があり、現行solidish maskでは床として分類できない。RuleAIとCSVのeffective判定は接地contactで偽holeを抑えるが、学習用の目視同等ログとしては低位tile typeの意味を追加で詰める必要がある。
 - ブロック/アイテム箱の「中身」はblock flagつきStageLayout tile behaviorのstorage contentsとして保存するようになった。叩いた後の状態は現在tile id/behaviorの変化として取れる想定だが、stage 0の実ログで `StageLayout::changeTile` / question block animation path と照合して詰める。
+- powerup / inventory powerupは raw値と暫定 `visualState` としてログ/dataset/SVG/manifestへ流れるようになったが、値と画面表示の対応はまだstage 0実ログで検証していない。`mappingVerified=0` のままなので、Fire/Shell/Mega候補は学習特徴として使えるが、最終的な意味付けは未確定。
+- スター無敵、ダメージ後無敵、巨大/豆/甲羅中の一時timerなど、画面から見える一時状態はまだ明示的に取れていない。`visualState.invincibleKnown=0` と `audit_visual_state.invincibilityUnknown` で不足として検出できるが、専用offset/flagの特定が必要。
 - 自己対戦に進む前に、ログschemaを実プレイログで増強し、学習済みモデルを入力へ戻した状態でstage 0を閉ループ評価する必要がある。現時点では `.npz` からmelonDS input scriptを生成する経路はできたが、PoC内で状態を逐次推論して即時入力へ戻す直結経路と、モデル入力scriptでの安定した実走評価は未完了。
 - 性能面では、現行の2プロセスsplit input-netplay検証は学習ループ用として遅すぎる。fallbackなしではframe 870で5秒remote input timeoutに入り、fallback + `InternalWaitTimeoutMs=1` でも900F到達にhost約91秒/client約82秒、約10fps程度。これはAI推論の重さではなく、peer接続不成立時のremote input待ちと2プロセス検証harnessの問題。学習・大量評価には、PoC内直結推論、単一プロセス評価、ヘッドレス高速実行、または状態遷移だけを回す専用runnerが必要。
-- fireballなどのprojectile系objectは、通常actor object listではなく専用handlerで管理されるものがある。Fireball slot別の座標/前フレーム座標/速度/kind/state/facingは取れるようになったが、owner、寿命、当たり判定状態、kind/state/facingの意味はまだFire Mario実ログで未検証。Fire Marioでstage 0ログを取り、active slotが増えるframeと画面上のFireballを照合する必要がある。
+- fireballなどのprojectile系objectは、通常actor object listではなく専用handlerで管理されるものがある。Fireball slot別の座標/前フレーム座標/速度/kind/state/facingと暫定owner候補は取れるようになったが、真のowner offset、寿命、当たり判定状態、kind/state/facingの意味はまだFire Mario実ログで未検証。Fire Marioでstage 0ログを取り、active slotが増えるframeと画面上のFireballを照合する必要がある。
 - `run-nsmb-mvl-recording-replay.ps1` はinput script replayとpacket replayの起動計画を扱え、`-ScanFrames` で不一致reportも残せる。ただし実際の人間記録で完全一致することは、新規記録を取って `recording-session.json` のpacket変換後処理を実行してから確認する必要がある。現時点ではpacket replayのdry-run解決までで、melonDS実走の完全再現検証は未完了。
 
 ## Verification
 
 - `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4` pass。
+- 2026-06-07 visual state追加後に `python -m py_compile scripts/nsmb_mvl_ai_build_dataset.py scripts/nsmb_mvl_ai_create_recording_manifest.py scripts/nsmb_mvl_ai_render_playlog_svg.py scripts/nsmb_mvl_ai_audit_visual_state.py` pass。
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-nsmb-mvl-human-recording.ps1 -DryRun -NoPacketCapture -Frames 120 -LogDir logs\codex-ai-visual-state-dryrun-20260607` pass。postCommandsに `nsmb_mvl_ai_audit_visual_state.py` と `visual-state-audit.json` が入ることを確認。
+- `scripts\run-nsmb-mvl-split-local-input-smoke.ps1` / `scripts\run-nsmb-mvl-human-recording.ps1` のPowerShell Parser構文確認pass。
+- `logs/codex-ai-visual-state-smoke-20260607`: `cmake --build ... --target melonDS -j 4` pass後、`powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-nsmb-mvl-split-local-input-smoke.ps1 -Frames 950 -MvlStage 0 -AIPlayLogInterval 30 -AllowRemoteInputTimeoutFallback -InternalWaitTimeoutMs 1 -SkipGameStateComparison -SkipMovementProbe ...` pass。短いsmokeなので強さ評価ではなく、stage 0 gameplay中のAI play log schema確認用。
+- 同ログで `players[1].visualState.powerup.raw=0` / `inventoryPowerup.raw=1` / `hasReserveItemCandidate=1` / `invincibleKnown=0` がJSONLへ出ることを確認。`specialObjects.fireballs` はhandler/words/activeSlots/slotsを保持し、今回の通常走行ではslot 0件。
+- 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --label-source auto --require-player-found` pass。CSVに `self_inventory_powerup`、`self_has_reserve_item_candidate`、`opponent_powerup`、`opponent_dead`、`nearest_fireball_owner_candidate` が出ることを確認。
+- 同ログから `python scripts\nsmb_mvl_ai_create_recording_manifest.py ... --kind rule_ai --player 1 --label-source auto --stage 0 --max-event-samples 5` pass。manifestのplayer summaryへ `powerupName` / `inventoryPowerupName` / invincibility候補が入る。
+- 同ログから `python scripts\nsmb_mvl_ai_audit_visual_state.py <host-playlog> <client-playlog> --output logs\codex-ai-visual-state-smoke-20260607\visual-state-audit.json` pass。`visualStateMissing=0/0`、可視未知objectなし、fireball slot 0件、`invincibilityUnknown=5/5` を確認し、無敵状態未取得が監査上の課題として残ることを確認。
+- 同ログから `python scripts\nsmb_mvl_ai_render_playlog_svg.py ... --player 1 --frame 900` pass。SVGヘッダに `visualState`、special fireball slotが出る経路を確認。今回の走行ではfireball slotは0件。
+- 同ログの小datasetで `python scripts\nsmb_mvl_ai_train_imitation.py ... --epochs 20 --lr 0.05` pass。3行のみのpipeline smokeであり、AI性能評価ではない。
 - `logs/codex-ai-playlog-label-smoke-20260607`: rule AI remote + PacketBridge JIT helper + `MELONDS_NSML_AI_PLAY_LOG` で1600F pass。`ai-playlog.jsonl` は27行、frame 810-1590、player actorあり25行、`appliedPlayer1` valid 24行。
 - 同ログでカテゴリ `big_star_actor`、`camera`、`moving_hazard`、`player`、`stage_actor_manager`、`stage_controller`、`stage_scene` を確認。frame 900 では `appliedPlayer1.heldHex=0x810` が出ており、remote CPUの入力ラベルが保存されている。
 - `python scripts\nsmb_mvl_ai_build_dataset.py logs\codex-ai-playlog-label-smoke-20260607\ai-playlog.jsonl logs\codex-ai-playlog-label-smoke-20260607\ai-dataset-player1.csv --player 1 --require-player-found` pass。24行のCSVが生成され、`label_held`、button別 `label_*`、self/opponent/target/camera/object/nearestカテゴリ特徴を確認。

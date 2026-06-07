@@ -586,11 +586,15 @@ function Set-AIPlayLogEnvForChild {
         Remove-Item Env:\MELONDS_NSML_AI_PLAY_LOG -ErrorAction SilentlyContinue
         return
     }
-    $parent = Split-Path -Parent $Path
+    $resolvedPath = $Path
+    if (-not [System.IO.Path]::IsPathRooted($resolvedPath)) {
+        $resolvedPath = Join-Path $repoRoot $resolvedPath
+    }
+    $parent = Split-Path -Parent $resolvedPath
     if ($parent -ne "") {
         New-Item -ItemType Directory -Force -Path $parent | Out-Null
     }
-    $env:MELONDS_NSML_AI_PLAY_LOG = $Path
+    $env:MELONDS_NSML_AI_PLAY_LOG = $resolvedPath
     $env:MELONDS_NSML_AI_PLAY_LOG_INTERVAL = "$AIPlayLogInterval"
     $env:MELONDS_NSML_AI_PLAY_LOG_START_FRAME = "$AIPlayLogStartFrame"
     $env:MELONDS_NSML_AI_PLAY_LOG_END_FRAME = "$AIPlayLogEndFrame"

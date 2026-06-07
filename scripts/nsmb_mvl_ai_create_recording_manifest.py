@@ -64,13 +64,22 @@ def iter_records(path: Path):
 
 def player_summary(player: dict[str, Any]) -> dict[str, Any]:
     pos = player.get("pos") or {}
+    visual_state = player.get("visualState") or {}
+    powerup_state = visual_state.get("powerup") or {}
+    inventory_state = visual_state.get("inventoryPowerup") or {}
     return {
         "found": bool(player.get("found")),
         "x": num(pos.get("x")),
         "y": num(pos.get("y")),
         "z": num(pos.get("z")),
         "powerup": num(player.get("powerup")),
+        "powerupName": powerup_state.get("name"),
         "dead": num(player.get("dead")),
+        "inventoryPowerup": num(player.get("inventoryPowerup")),
+        "inventoryPowerupName": inventory_state.get("name"),
+        "hasReserveItemCandidate": bool(visual_state.get("hasReserveItemCandidate")),
+        "invincibleKnown": bool(visual_state.get("invincibleKnown")),
+        "invincibleCandidate": bool(visual_state.get("invincibleCandidate")),
         "battleStars": num(player.get("battleStars")),
         "coins": num(player.get("coins")),
     }
@@ -205,7 +214,17 @@ def summarize(playlog: Path, player: int, label_source: str, max_event_samples: 
                     add_event_sample("coinChange", record, {"player": player_index, "before": before["coins"], "after": after["coins"]})
                 if after["powerup"] != before["powerup"]:
                     event_counts["powerupChange"] += 1
-                    add_event_sample("powerupChange", record, {"player": player_index, "before": before["powerup"], "after": after["powerup"]})
+                    add_event_sample(
+                        "powerupChange",
+                        record,
+                        {
+                            "player": player_index,
+                            "before": before["powerup"],
+                            "after": after["powerup"],
+                            "beforeName": before.get("powerupName"),
+                            "afterName": after.get("powerupName"),
+                        },
+                    )
                 if after["dead"] and not before["dead"]:
                     event_counts["playerDeath"] += 1
                     add_event_sample("playerDeath", record, {"player": player_index})

@@ -278,17 +278,35 @@ def nearest_object(
     return best
 
 
-def nearest_special_slot(slots: list[dict[str, Any]], self_pos: dict[str, int]) -> tuple[int, int, int, int, int, int, int]:
-    best: tuple[int, int, int, int, int, int, int] | None = None
+def nearest_special_slot(
+    slots: list[dict[str, Any]],
+    self_pos: dict[str, int],
+    player: int,
+) -> tuple[int, int, int, int, int, int, int, int, int, int, int]:
+    best: tuple[int, int, int, int, int, int, int, int, int, int, int] | None = None
     for slot in slots:
         slot_pos = pos(slot)
         dx = slot_pos["x"] - self_pos["x"]
         dy = slot_pos["y"] - self_pos["y"]
         dist2 = dx * dx + dy * dy
         if best is None or dist2 < best[3]:
-            best = (1, dx, dy, dist2, num(slot.get("kind")), num(slot.get("state")), num(slot.get("facing")))
+            owner_candidate = num(slot.get("ownerCandidate"), -1)
+            owner_confidence = num(slot.get("ownerConfidence"))
+            best = (
+                1,
+                dx,
+                dy,
+                dist2,
+                num(slot.get("kind")),
+                num(slot.get("state")),
+                num(slot.get("facing")),
+                owner_candidate,
+                owner_confidence,
+                num(slot.get("ownerHeuristic")),
+                int(owner_candidate == player),
+            )
     if best is None:
-        return (0, 0, 0, 0, 0, 0, 0)
+        return (0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0)
     return best
 
 
@@ -333,7 +351,7 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
     fireballs = special_objects.get("fireballs") or {}
     projectiles = special_objects.get("projectiles") or {}
     fireball_slots = fireballs.get("slots") or []
-    nearest_fireball = nearest_special_slot(fireball_slots, self_pos)
+    nearest_fireball = nearest_special_slot(fireball_slots, self_pos, player)
     visual_summary = record.get("visualSummary") or {}
     category_counts = visual_summary.get("categoryCounts") or {}
     nearest_summary = {}
@@ -382,6 +400,13 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "self_collision": num(self_player.get("collisionFlag")),
         "self_environment": num(self_player.get("environmentFlag")),
         "self_powerup": num(self_player.get("powerup")),
+        "self_inventory_powerup": num(self_player.get("inventoryPowerup")),
+        "self_has_reserve_item_candidate": num((self_player.get("visualState") or {}).get("hasReserveItemCandidate")),
+        "self_can_shoot_fire_candidate": num(((self_player.get("visualState") or {}).get("powerup") or {}).get("canShootFireCandidate")),
+        "self_is_shell_candidate": num(((self_player.get("visualState") or {}).get("powerup") or {}).get("isShellCandidate")),
+        "self_is_mega_candidate": num(((self_player.get("visualState") or {}).get("powerup") or {}).get("isMegaCandidate")),
+        "self_invincible_known": num((self_player.get("visualState") or {}).get("invincibleKnown")),
+        "self_invincible_candidate": num((self_player.get("visualState") or {}).get("invincibleCandidate")),
         "self_dead": num(self_player.get("dead")),
         "self_battle_stars": num(self_player.get("battleStars")),
         "self_coins": num(self_player.get("coins")),
@@ -410,6 +435,20 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "opponent_below_camera1": num(opponent_fall.get("belowCamera1")),
         "opponent_vel_y_positive": num(opponent_fall.get("velYPositive")),
         "opponent_vel_y_negative": num(opponent_fall.get("velYNegative")),
+        "opponent_action": num(opponent.get("actionFlag")),
+        "opponent_sub_action": num(opponent.get("subActionFlag")),
+        "opponent_physics": num(opponent.get("physicsFlag")),
+        "opponent_collision": num(opponent.get("collisionFlag")),
+        "opponent_environment": num(opponent.get("environmentFlag")),
+        "opponent_powerup": num(opponent.get("powerup")),
+        "opponent_inventory_powerup": num(opponent.get("inventoryPowerup")),
+        "opponent_has_reserve_item_candidate": num((opponent.get("visualState") or {}).get("hasReserveItemCandidate")),
+        "opponent_can_shoot_fire_candidate": num(((opponent.get("visualState") or {}).get("powerup") or {}).get("canShootFireCandidate")),
+        "opponent_is_shell_candidate": num(((opponent.get("visualState") or {}).get("powerup") or {}).get("isShellCandidate")),
+        "opponent_is_mega_candidate": num(((opponent.get("visualState") or {}).get("powerup") or {}).get("isMegaCandidate")),
+        "opponent_invincible_known": num((opponent.get("visualState") or {}).get("invincibleKnown")),
+        "opponent_invincible_candidate": num((opponent.get("visualState") or {}).get("invincibleCandidate")),
+        "opponent_dead": num(opponent.get("dead")),
         "opponent_battle_stars": num(opponent.get("battleStars")),
         "opponent_coins": num(opponent.get("coins")),
         "target_found": num(target.get("found")),
@@ -438,6 +477,10 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "nearest_fireball_kind": nearest_fireball[4],
         "nearest_fireball_state": nearest_fireball[5],
         "nearest_fireball_facing": nearest_fireball[6],
+        "nearest_fireball_owner_candidate": nearest_fireball[7],
+        "nearest_fireball_owner_confidence": nearest_fireball[8],
+        "nearest_fireball_owner_heuristic": nearest_fireball[9],
+        "nearest_fireball_owned_by_self_candidate": nearest_fireball[10],
         "projectiles_handler_word0": num((projectiles.get("words") or [0])[0]),
         "label_held": held,
     }

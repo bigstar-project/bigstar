@@ -57,6 +57,7 @@ $hostManifest = Join-Path $hostLog "recording.json"
 $clientManifest = Join-Path $clientLog "recording.json"
 $indexPath = Join-Path $logRoot "recordings-index.json"
 $auditPath = Join-Path $logRoot "recording-audit.json"
+$visualStateAuditPath = Join-Path $logRoot "visual-state-audit.json"
 $hostPacketCapture = Join-Path $hostLog "host.packet-capture.csv"
 $clientPacketCapture = Join-Path $clientLog "client.packet-capture.csv"
 $packetReplay = Join-Path $logRoot "packet-replay.csv"
@@ -78,7 +79,8 @@ $postCommands += @(
     "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$hostAIPlayLog`" `"$hostManifest`" --kind human --player $hostPlayer --label-source player --stage 0 --log-dir `"$hostLog`" --frames $Frames --host-input-script `"$InputScript`" --client-input-script `"$InputScript`" --host-rom `"$HostRom`" --client-rom `"$ClientRom`" --match-seed `"$MvlMatchSeed`"$packetReplayArgs",
     "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$clientAIPlayLog`" `"$clientManifest`" --kind human --player $clientPlayer --label-source player --stage 0 --log-dir `"$clientLog`" --frames $Frames --host-input-script `"$InputScript`" --client-input-script `"$InputScript`" --host-rom `"$HostRom`" --client-rom `"$ClientRom`" --match-seed `"$MvlMatchSeed`"$packetReplayArgs",
     "python scripts\nsmb_mvl_ai_make_recordings_index.py `"$indexPath`" `"$hostManifest`" `"$clientManifest`" --stage 0",
-    "python scripts\nsmb_mvl_ai_build_dataset.py `"$indexPath`" `"$logRoot\ai-dataset-player1.csv`" --player 1 --label-source player --require-player-found"
+    "python scripts\nsmb_mvl_ai_build_dataset.py `"$indexPath`" `"$logRoot\ai-dataset-player1.csv`" --player 1 --label-source player --require-player-found",
+    "python scripts\nsmb_mvl_ai_audit_visual_state.py `"$hostAIPlayLog`" `"$clientAIPlayLog`" --output `"$visualStateAuditPath`""
 )
 $auditCommand = "python scripts\nsmb_mvl_ai_audit_recordings.py `"$indexPath`" --stage 0 --min-rows 1 --min-gameplay-rows 1 --min-player-found-ratio 0.5 --min-label-ratio 0.5 --min-nonzero-label-rows 1 --output `"$auditPath`""
 if (-not $NoPacketCapture) {
@@ -105,6 +107,7 @@ $session = [ordered]@{
     clientPacketCapture = $clientPacketCapture
     packetReplay = $packetReplay
     audit = $auditPath
+    visualStateAudit = $visualStateAuditPath
     postCommands = $postCommands
 }
 $session | ConvertTo-Json -Depth 6 | Set-Content -Path $sessionPath -Encoding UTF8
