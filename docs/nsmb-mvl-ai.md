@@ -65,6 +65,7 @@
 - 完了: `scripts/nsmb_mvl_ai_verify_replay.py` に任意のcheckpoint frame比較を追加した。`--checkpoint-interval` を指定すると、最終frameに加えて途中frameのhash、player状態、object countを比較できる。
 - 完了: `recording.json` の `summary.eventSamples` に、star/coin/powerup/death/block/item/projectile候補の代表frameを保存できるようにした。件数だけでなく、目視確認すべきframeをmanifestから辿れる。
 - 完了: Tauri GUIに `AIログ` タブを追加した。ローカルのJSONLまたはviewer JSONをファイル選択で読み込み、player中心のSVG相当相対配置、P0/P1入力、可視object数、イベント候補、カテゴリ数を確認できる。
+- 完了: Tauri GUIの `AIログ` タブが `recording.json` の `summary.eventSamples` を読み込み、frame付きの記録イベントtimelineを表示できるようにした。manifest単体でも、死亡、block候補、item/projectile候補などの目視確認対象frameを確認できる。
 
 ## AI Play Log
 
@@ -155,7 +156,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 
 2. 人間プレイ記録を完全再現できるreplay基盤にする。
    - 記録manifestには、ROM/build識別子、stage、seed、host/client role、local player、入力scriptまたはpacket replay、AI play log、viewer data、dataset、検証結果を保存する。
-- `recording.json` からmelonDSをreplay起動し、終了後に `nsmb_mvl_ai_verify_replay.py` まで自動実行する。現時点の専用ラッパーはinput script replay対応で、packet replayはmanifestへpacket capture/replay情報を保存する設計を追加してから対応する。
+   - `recording.json` からmelonDSをreplay起動し、終了後に `nsmb_mvl_ai_verify_replay.py` まで自動実行する。現時点の専用ラッパーはinput script replay対応で、packet replayはmanifestへpacket capture/replay情報を保存する設計を追加してから対応する。
    - 検証は最終frameだけでなく、checkpoint frameのhash、player座標/powerup/dead/star/coin、object category count、event列を比較できるように拡張する。
    - replayが完全一致しない場合でも、どのframeからズレたかをviewerとCSVで追えるようにする。
 
@@ -268,8 +269,9 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `python scripts\nsmb_mvl_ai_create_recording_manifest.py ... --host-input-script ... --client-input-script ... --frames 1290` で、input script replay情報入りのテストmanifestを生成できることを確認。
 - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-nsmb-mvl-recording-replay.ps1 -RecordingManifest logs\codex-ai-stage0-tile-catalog-smoke-20260607\recording-replay-inputscript.json -DryRun -LogDir logs\codex-ai-recording-replay-dryrun-20260607` pass。manifestからhost/client input script、ROM、AI play log出力先、検証対象playlogを解決できることを確認。これは既存RuleAIログへ手動入力scriptを後付けしたdry-runであり、完全再現の実走検証ではない。
 - `python scripts\nsmb_mvl_ai_create_recording_manifest.py logs\codex-ai-stage0-tile-catalog-smoke-20260607\ai-playlog.jsonl ... --max-event-samples 5` pass。`summary.eventSamples` に `playerDeath` frame 1200 と `blockCandidateVisible` frame 1230 / `leftBody` / `tileId=71` / `storageContents=7` が出ることを確認。
-- `tools/nsmb-mvl-gui`: `pnpm run typecheck` pass。`pnpm biome check src/App.tsx src/launcher/AIReplayViewer.tsx src/launcher/AIReplayViewer.browser.test.tsx src/launcher/LauncherShell.tsx src/launcher/types.ts` pass。`pnpm vitest --config vitest.browser.config.ts run` pass（4 files / 12 tests、AIReplayViewerのJSONL読込テストを含む）。`pnpm vitest --config vitest.config.ts run` pass（4 files / 14 tests）。`pnpm playwright test` pass（3 tests）。
-- `tools/nsmb-mvl-gui`: `pnpm run ci` は `tsc --noEmit` 後の `biome check .` で停止。原因は変更外の既存ファイルを含むCRLF整形差分で、変更ファイル単位のBiomeはpassしている。
+- `tools/nsmb-mvl-gui`: `pnpm run typecheck` pass。`pnpm biome check src/launcher/AIReplayViewer.tsx src/launcher/AIReplayViewer.browser.test.tsx` pass。`pnpm vitest --config vitest.browser.config.ts run src/launcher/AIReplayViewer.browser.test.tsx` pass（recording manifestのevent sample表示テストを含む）。
+- `tools/nsmb-mvl-gui`: `pnpm vitest --config vitest.config.ts run` pass（4 files / 14 tests）。`pnpm vitest --config vitest.browser.config.ts run` pass（4 files / 13 tests）。`pnpm playwright test` pass（3 tests）。
+- `tools/nsmb-mvl-gui`: `pnpm run ci` は `tsc --noEmit` 後の `biome check .` で停止。原因は変更外の既存ファイルを含むCRLF整形差分。変更ファイル単位のBiomeと全テストはpass。
 
 ## Next Actions
 
@@ -277,7 +279,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - dynamic tile behavior table pointerが0のまま `tileId=0x110-0x113` を引く場面を、StageLayout初期化/`changeTile`/question block animation pathと照合する。
 - RuleAIをstage 0の実際のCPU操作経路でさらに長く走らせ、スター取得、敵回避、落下復帰、箱接触時の入力変化を確認する。
 - ブロック/アイテム箱の中身と叩いた後の状態をstage 0の `StageLayout::changeTile` / question block animation path と実ログで照合し、`tileProbe.samples[].block` の解釈を詰める。
-- Fire Marioでstage 0ログを取り、player fireballのobject ID/vtable/owner/速度/寿命を分類する。GUIビューアとmanifest event countは `projectile` / `player_fireball` カテゴリを扱う準備だけできている。
+- Fire Marioでstage 0ログを取り、player fireballのobject ID/vtable/owner/速度/寿命を分類する。GUIビューアとmanifest event sampleは `projectile` / `player_fireball` カテゴリを扱う準備だけできている。
 - 人間プレイ記録を実際に複数本取り、`recordings-index.json` 経由のdataset、`--split-by-recording`、GUIの `AIログ` タブで、入力ラベルと目視相当状態が期待通り読めるか確認する。
 - input script付きの新規人間記録を取り、`run-nsmb-mvl-recording-replay.ps1` で実replayを走らせ、最終frameとcheckpoint frameが完全一致するか確認する。
 - packet capture/replayを `recording.json` に保存するmanifest schemaを追加し、input scriptではなくpacket replayからも完全再現できるようにする。

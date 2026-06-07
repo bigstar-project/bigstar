@@ -52,6 +52,28 @@ const playlogLine = JSON.stringify({
   ],
 });
 
+const recordingManifest = JSON.stringify({
+  schema: 'nsmb_mvl_ai_recording_manifest_v1',
+  kind: 'human',
+  labelSource: 'player',
+  quality: { status: 'unreviewed' },
+  summary: {
+    eventSamples: {
+      playerDeath: [{ frame: 1200, player: 1 }],
+      blockCandidateVisible: [
+        {
+          frame: 1230,
+          itemBox: true,
+          player: 1,
+          sample: 'leftBody',
+          storageContents: 7,
+          tileId: 71,
+        },
+      ],
+    },
+  },
+});
+
 describe('AIログビューア', () => {
   test('JSONLを読み込んでフレームと相対配置を表示する', async () => {
     const screen = await render(
@@ -81,5 +103,35 @@ describe('AIログビューア', () => {
     await expect
       .element(screen.getByText('coin', { exact: true }))
       .toBeVisible();
+  });
+
+  test('recording manifestのイベントsampleを表示する', async () => {
+    const screen = await render(
+      <Tabs.Root value="ai">
+        <AIReplayViewer />
+      </Tabs.Root>,
+    );
+
+    const input =
+      document.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(input).not.toBeNull();
+    const files = new DataTransfer();
+    files.items.add(
+      new File([recordingManifest], 'recording.json', {
+        type: 'application/json',
+      }),
+    );
+    Object.defineProperty(input, 'files', {
+      configurable: true,
+      value: files.files,
+    });
+    input?.dispatchEvent(new Event('change', { bubbles: true }));
+
+    await expect.element(screen.getByText(/2 events/)).toBeVisible();
+    await expect.element(screen.getByText('P1 death')).toBeVisible();
+    await expect
+      .element(screen.getByText(/P1 block leftBody tile 0x47 storage 7/))
+      .toBeVisible();
+    await expect.element(screen.getByText(/manifest human/)).toBeVisible();
   });
 });

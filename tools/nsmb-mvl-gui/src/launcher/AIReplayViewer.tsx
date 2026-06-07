@@ -57,6 +57,25 @@ type ReplayFrame = {
   };
   objects?: ReplayObject[];
 };
+type EventSample = {
+  frame?: number | string;
+  player?: number | string;
+  sample?: string;
+  sampleIndex?: number | string;
+  tileId?: number | string;
+  behavior?: number | string;
+  itemBox?: boolean | number;
+  storageContents?: number | string;
+  before?: number | string;
+  after?: number | string;
+  categories?: string[];
+};
+type EventSamples = Record<string, EventSample[]>;
+type ParsedReplay = {
+  frames: ReplayFrame[];
+  eventSamples: EventSamples;
+  manifestLabel?: string;
+};
 
 const buttonBits: Array<[string, number]> = [
   ['A', 0],
@@ -82,17 +101,40 @@ function numeric(value: unknown, fallback = 0) {
   return fallback;
 }
 
-function parseReplayText(text: string): ReplayFrame[] {
+function parseReplayText(text: string): ParsedReplay {
   const trimmed = text.trim();
-  if (!trimmed) return [];
+  if (!trimmed) return { eventSamples: {}, frames: [] };
   if (trimmed.startsWith('{')) {
-    const parsed = JSON.parse(trimmed) as { frames?: ReplayFrame[] };
-    if (Array.isArray(parsed.frames)) return parsed.frames;
+    const parsed = JSON.parse(trimmed) as {
+      frames?: ReplayFrame[];
+      kind?: string;
+      labelSource?: string;
+      quality?: { status?: string };
+      summary?: { eventSamples?: EventSamples };
+    };
+    if (Array.isArray(parsed.frames)) {
+      return { eventSamples: {}, frames: parsed.frames };
+    }
+    if (parsed.summary?.eventSamples) {
+      const labelParts = [
+        parsed.kind,
+        parsed.labelSource,
+        parsed.quality?.status,
+      ].filter(Boolean);
+      return {
+        eventSamples: parsed.summary.eventSamples,
+        frames: [],
+        manifestLabel: labelParts.join(' / '),
+      };
+    }
   }
-  return trimmed
-    .split(/\r?\n/)
-    .filter((line) => line.trim().length > 0)
-    .map((line) => JSON.parse(line) as ReplayFrame);
+  return {
+    eventSamples: {},
+    frames: trimmed
+      .split(/\r?\n/)
+      .filter((line) => line.trim().length > 0)
+      .map((line) => JSON.parse(line) as ReplayFrame),
+  };
 }
 
 function buttonsText(input?: {
@@ -106,6 +148,12 @@ function buttonsText(input?: {
     .filter(([, bit]) => (held & (1 << bit)) !== 0)
     .map(([name]) => name);
   return names.length ? names.join('+') : '-';
+}
+
+function hexText(value: unknown) {
+  const n = numeric(value, Number.NaN);
+  if (Number.isNaN(n)) return '-';
+  return `0x${n.toString(16).toUpperCase()}`;
 }
 
 function pos(entity?: { pos?: Vec3 }) {
@@ -141,15 +189,15 @@ function frameEvents(frame: ReplayFrame, previous?: ReplayFrame) {
       events.push(`P${index} star +`);
     }
     const summary = player.tileProbe?.summary ?? {};
-    if (numeric(summary['effectiveHoleAhead']))
+    if (numeric(summary.effectiveHoleAhead))
       events.push(`P${index} hole ahead`);
-    if (numeric(summary['wallAhead'])) events.push(`P${index} wall ahead`);
-    if (numeric(summary['holeSuppressedByContact'])) {
+    if (numeric(summary.wallAhead)) events.push(`P${index} wall ahead`);
+    if (numeric(summary.holeSuppressedByContact)) {
       events.push(`P${index} ground suppress`);
     }
     const blockHit = (player.tileProbe?.samples ?? []).some((sample) => {
       const block = sample.block ?? {};
-      return numeric(block['any']) || numeric(block['itemBox']);
+      return numeric(block.any) || numeric(block.itemBox);
     });
     if (blockHit) events.push(`P${index} block`);
   }
@@ -169,6 +217,32 @@ function frameEvents(frame: ReplayFrame, previous?: ReplayFrame) {
     }
   }
   return events;
+}
+
+function eventTitle(name: string, sample: EventSample) {
+  const player =
+    sample.player === undefined || sample.player === null
+      ? ''
+      : `P${numeric(sample.player)} `;
+  if (name === 'playerDeath') return `${player}death`;
+  if (name === 'starPickup')
+    return `${player}star ${sample.before}>${sample.after}`;
+  if (name === 'coinChange')
+    return `${player}coin ${sample.before}>${sample.after}`;
+  if (name === 'powerupChange')
+    return `${player}power ${sample.before}>${sample.after}`;
+  if (name === 'blockCandidateVisible') {
+    const tile =
+      sample.tileId === undefined ? '' : ` tile ${hexText(sample.tileId)}`;
+    const storage =
+      sample.storageContents === undefined
+        ? ''
+        : ` storage ${numeric(sample.storageContents)}`;
+    return `${player}block ${sample.sample ?? '-'}${tile}${storage}`;
+  }
+  if (sample.categories?.length)
+    return `${name}: ${sample.categories.join(', ')}`;
+  return name;
 }
 
 function ReplayScene({
@@ -259,6 +333,8 @@ function ReplayScene({
 
 export function AIReplayViewer() {
   const [frames, setFrames] = useState<ReplayFrame[]>([]);
+  const [eventSamples, setEventSamples] = useState<EventSamples>({});
+  const [manifestLabel, setManifestLabel] = useState('');
   const [frameIndex, setFrameIndex] = useState(0);
   const [playerIndex, setPlayerIndex] = useState<0 | 1>(1);
   const [error, setError] = useState<string | null>(null);
@@ -268,18 +344,44 @@ export function AIReplayViewer() {
     () => (frame ? frameEvents(frame, previous) : []),
     [frame, previous],
   );
+  const eventSampleRows = useMemo(
+    () =>
+      Object.entries(eventSamples)
+        .flatMap(([name, samples]) =>
+          samples.map((sample, index) => ({
+            key: `${name}-${index}-${sample.frame ?? 'na'}-${sample.player ?? 'na'}-${sample.sample ?? ''}`,
+            name,
+            sample,
+          })),
+        )
+        .sort((a, b) => numeric(a.sample.frame) - numeric(b.sample.frame))
+        .slice(0, 80),
+    [eventSamples],
+  );
   const categoryCounts = frame?.visualSummary?.categoryCounts ?? {};
 
   async function loadFile(file: File) {
     try {
       const text = await file.text();
       const parsed = parseReplayText(text);
-      setFrames(parsed);
+      const eventCount = Object.values(parsed.eventSamples).reduce(
+        (total, samples) => total + samples.length,
+        0,
+      );
+      setFrames(parsed.frames);
+      setEventSamples(parsed.eventSamples);
+      setManifestLabel(parsed.manifestLabel ?? '');
       setFrameIndex(0);
-      setError(parsed.length ? null : 'フレームが見つかりません');
+      setError(
+        parsed.frames.length || eventCount
+          ? null
+          : 'フレームまたはイベントが見つかりません',
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setFrames([]);
+      setEventSamples({});
+      setManifestLabel('');
     }
   }
 
@@ -289,7 +391,13 @@ export function AIReplayViewer() {
         <LauncherCard
           title="AIログビューア"
           icon={<FilmStrip size={24} weight="fill" />}
-          badge={frames.length ? `${frames.length} frames` : undefined}
+          badge={
+            frames.length
+              ? `${frames.length} frames`
+              : eventSampleRows.length
+                ? `${eventSampleRows.length} events`
+                : undefined
+          }
         >
           <div
             className={css({
@@ -370,7 +478,78 @@ export function AIReplayViewer() {
               </div>
             </div>
           ) : null}
+          {manifestLabel ? (
+            <div
+              className={css({
+                color: 'fg.muted',
+                fontWeight: 'bold',
+                textStyle: 'sm',
+              })}
+            >
+              manifest {manifestLabel}
+            </div>
+          ) : null}
         </LauncherCard>
+
+        {eventSampleRows.length ? (
+          <LauncherCard
+            title="記録イベント"
+            icon={<GameController size={22} weight="fill" />}
+            badge={`${eventSampleRows.length}`}
+          >
+            <div
+              className={css({
+                display: 'grid',
+                gap: '2',
+                overflow: 'auto',
+              })}
+              style={{ maxHeight: 260 }}
+            >
+              {eventSampleRows.map(({ key, name, sample }) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={css({
+                    alignItems: 'center',
+                    bg: 'gray.subtle.bg',
+                    borderColor: 'gray.surface.border',
+                    borderRadius: 'l1',
+                    borderWidth: '1px',
+                    color: 'fg.default',
+                    display: 'grid',
+                    gap: '1',
+                    justifyItems: 'start',
+                    px: '3',
+                    py: '2',
+                    textAlign: 'left',
+                  })}
+                  onClick={() => {
+                    const target = frames.findIndex(
+                      (candidate) =>
+                        numeric(candidate.frame) === numeric(sample.frame),
+                    );
+                    if (target >= 0) setFrameIndex(target);
+                  }}
+                >
+                  <span
+                    className={css({
+                      color: 'fg.muted',
+                      fontWeight: 'bold',
+                      textStyle: 'xs',
+                    })}
+                  >
+                    frame {sample.frame ?? '-'} / {name}
+                  </span>
+                  <span
+                    className={css({ fontWeight: 'bold', textStyle: 'sm' })}
+                  >
+                    {eventTitle(name, sample)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </LauncherCard>
+        ) : null}
 
         {frame ? (
           <div
@@ -396,15 +575,15 @@ export function AIReplayViewer() {
             >
               <SmallInfoCard
                 label="入力 P0"
-                value={buttonsText(frame.inputs?.['player0'])}
+                value={buttonsText(frame.inputs?.player0)}
               />
               <SmallInfoCard
                 label="入力 P1"
-                value={buttonsText(frame.inputs?.['player1'])}
+                value={buttonsText(frame.inputs?.player1)}
               />
               <SmallInfoCard
                 label="可視 object"
-                value={`${numeric(frame.objectSummary?.['active'])} active`}
+                value={`${numeric(frame.objectSummary?.active)} active`}
                 caption={`cam0 ${numeric(frame.visualSummary?.visibleCamera0)} / cam1 ${numeric(frame.visualSummary?.visibleCamera1)}`}
               />
               <LauncherCard
