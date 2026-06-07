@@ -33,6 +33,7 @@
 - 完了: `scripts/nsmb_mvl_ai_inspect_playlog.py` でJSONLを人間が読むための短い表へ変換できるようにした。
 - 完了: `scripts/nsmb_mvl_ai_catalog_objects.py` でJSONL内のactive objectを object ID/settings/category ごとに集計できるようにした。
 - 完了: playerの `collisionFlag` / `environmentFlag` を名前付き `contact` 状態へ展開し、接地、予測接地、天井、左右壁、水/液体/水没、流砂、ロープ/ポール、スパイク、コンベア、雪/砂/破壊地形、左右ラップをAI play logとCSV特徴量に保存するようにした。
+- 完了: playerごとの `screen.camera0/1` と `fallRisk` をAI play logへ追加した。画面X/Y、カメラ内判定、カメラ底までの距離、下端近接、カメラ下抜け、Y速度符号を保存し、穴/落下判断の前段特徴としてCSVへ展開する。
 
 ## AI Play Log
 
@@ -50,6 +51,8 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 `inputs` にはメモリ上の `console0/1`、`player0/1` に加えて、PoCが実際にそのフレーム近辺へ注入した `appliedPlayer0/1` を保存する。模倣学習の教師ラベルはまず `appliedPlayerN.held` / `heldHex` を使う。
 
 `players[].contact` には、数値の衝突/環境フラグから人間が目視で判断する地形接触に近いbitを保存する。代表項目は `ground`、`predictGround`、`ceiling`、`wallLeft`、`wallRight`、`edgeGrab`、`water`、`liquid`、`submerged`、`quicksand`、`rope`、`tightrope`、`pole`、`spikesLeft`、`spikesRight`、`conveyorLeft`、`conveyorRight`、`wrapLeft`、`wrapRight`。CSVには `self_contact_*` / `opponent_contact_*` として展開する。
+
+`players[].screen` / `players[].fallRisk` には、playerをカメラ座標へ投影した情報を保存する。`fallRisk` は `screenY0/1`、`cameraBottomDistance0/1`、`nearCameraBottom0/1`、`belowCamera0/1`、`velYPositive/Negative` を持つ。完全な穴判定ではないが、目視上の「下へ落ちている」「画面下端に近い」を学習データに入れるための暫定特徴。
 
 `visualSummary` には、人間が画面を見て判断する情報に近づけるための要約を保存する。現時点では左右ラップ込みの `visibleCamera0X` / `visibleCamera1X`、カテゴリ別count、player別最近傍 `big_star_actor` / `moving_hazard` などを持つ。object個別にも `relative` と `screen.camera*.inViewX` を保存する。
 
@@ -92,7 +95,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 ## Current Blockers / Unknowns
 
 - object IDと画面上の意味の対応はまだ完全ではない。coin/item/enemy/platform/hazard の初期カテゴリは入ったが、ログを見ながら block、item box、ステージ固有ギミックの分類を増やす。
-- 目視同等にするには、画面Y座標系への変換、穴/落下死ライン、ブロック状態、アイテム箱状態、タイル地形の前方サンプルが不足している。X方向は左右ラップ込みの可視判定まで入り、player接触地形は `contact` で取れるようになったが、完全な `inView` はY側の対応を追加で詰める必要がある。
+- 目視同等にするには、穴/落下死ライン、ブロック状態、アイテム箱状態、タイル地形の前方サンプルが不足している。X方向は左右ラップ込みの可視判定まで入り、player接触地形とplayerの画面Y/カメラ底距離は取れるようになったが、objectの完全な `inView` はY側の対応を追加で詰める必要がある。
 - 自己対戦に進む前に、ログschemaを実プレイログで増強し、学習済みモデルを入力へ戻す推論経路を作る必要がある。
 
 ## Verification
@@ -109,6 +112,9 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `logs/codex-ai-contact-smoke-20260607`: contact追加後のrule AI remote smoke 1600F pass。`python scripts\nsmb_mvl_ai_inspect_playlog.py ... --player 1 --limit 10` pass。frame 990でcontact `G`、frame 1020以降で `G+WR` を確認し、接地/壁接触が人間可読の表に出ることを確認。
 - 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --require-player-found` pass、24行CSV生成。`self_contact_*` / `opponent_contact_*` は各33列、`count_coin`、`count_hazard`、`count_enemy_goomba`、`count_platform`、`count_warp_entrance` の列追加を確認。
 - `python scripts\nsmb_mvl_ai_train_imitation.py logs\codex-ai-contact-smoke-20260607\ai-dataset-player1.csv logs\codex-ai-contact-smoke-20260607\ai-imitation-player1.npz --epochs 200 --lr 0.05` pass。24行の小データで学習と `.npz` 保存が動作することを再確認。
+- `logs/codex-ai-screenfall-smoke-20260607`: player screen/fallRisk追加後のrule AI remote smoke 1600F pass。`python scripts\nsmb_mvl_ai_inspect_playlog.py ... --player 1 --limit 10` pass。`y/bot` 列で screenY と camera bottom distance を確認し、frame 990 以降で `vy-` / `vy+` と接地状態が表に出ることを確認。
+- 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --require-player-found` pass、24行CSV生成。`self_screen0_x`、`self_screen0_y`、`self_camera_bottom_distance0`、`self_near_camera_bottom0`、`self_below_camera0`、`self_vel_y_positive/negative` の列追加を確認。
+- `python scripts\nsmb_mvl_ai_train_imitation.py logs\codex-ai-screenfall-smoke-20260607\ai-dataset-player1.csv logs\codex-ai-screenfall-smoke-20260607\ai-imitation-player1.npz --epochs 200 --lr 0.05` pass。24行の小データで学習と `.npz` 保存が動作することを再確認。
 
 ## Next Actions
 

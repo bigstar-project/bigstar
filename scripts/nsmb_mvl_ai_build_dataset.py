@@ -132,6 +132,16 @@ def vel(entity: dict[str, Any]) -> dict[str, int]:
     }
 
 
+def screen(entity: dict[str, Any], camera: str) -> dict[str, int]:
+    value = ((entity.get("screen") or {}).get(camera)) or {}
+    return {
+        "x": num(value.get("x")),
+        "y": num(value.get("y")),
+        "inViewX": num(value.get("inViewX")),
+        "inView": num(value.get("inView")),
+    }
+
+
 def nearest_object(
     objects: list[dict[str, Any]],
     category: str,
@@ -163,6 +173,12 @@ def build_row(record: dict[str, Any], player: int) -> dict[str, int]:
     opponent_pos = pos(opponent)
     self_vel = vel(self_player)
     opponent_vel = vel(opponent)
+    self_screen0 = screen(self_player, "camera0")
+    self_screen1 = screen(self_player, "camera1")
+    opponent_screen0 = screen(opponent, "camera0")
+    opponent_screen1 = screen(opponent, "camera1")
+    self_fall = self_player.get("fallRisk") or {}
+    opponent_fall = opponent.get("fallRisk") or {}
     target = record["targets"]["bigStarActor"]
     if not target.get("found"):
         target = record["targets"]["bigStarCandidate"]
@@ -190,6 +206,22 @@ def build_row(record: dict[str, Any], player: int) -> dict[str, int]:
         "self_vx": self_vel["x"],
         "self_vy": self_vel["y"],
         "self_vz": self_vel["z"],
+        "self_screen0_x": self_screen0["x"],
+        "self_screen0_y": self_screen0["y"],
+        "self_screen0_in_view_x": self_screen0["inViewX"],
+        "self_screen0_in_view": self_screen0["inView"],
+        "self_screen1_x": self_screen1["x"],
+        "self_screen1_y": self_screen1["y"],
+        "self_screen1_in_view_x": self_screen1["inViewX"],
+        "self_screen1_in_view": self_screen1["inView"],
+        "self_camera_bottom_distance0": num(self_fall.get("cameraBottomDistance0")),
+        "self_camera_bottom_distance1": num(self_fall.get("cameraBottomDistance1")),
+        "self_near_camera_bottom0": num(self_fall.get("nearCameraBottom0")),
+        "self_near_camera_bottom1": num(self_fall.get("nearCameraBottom1")),
+        "self_below_camera0": num(self_fall.get("belowCamera0")),
+        "self_below_camera1": num(self_fall.get("belowCamera1")),
+        "self_vel_y_positive": num(self_fall.get("velYPositive")),
+        "self_vel_y_negative": num(self_fall.get("velYNegative")),
         "self_action": num(self_player.get("actionFlag")),
         "self_sub_action": num(self_player.get("subActionFlag")),
         "self_physics": num(self_player.get("physicsFlag")),
@@ -206,6 +238,22 @@ def build_row(record: dict[str, Any], player: int) -> dict[str, int]:
         "opponent_vx": opponent_vel["x"],
         "opponent_vy": opponent_vel["y"],
         "opponent_vz": opponent_vel["z"],
+        "opponent_screen0_x": opponent_screen0["x"],
+        "opponent_screen0_y": opponent_screen0["y"],
+        "opponent_screen0_in_view_x": opponent_screen0["inViewX"],
+        "opponent_screen0_in_view": opponent_screen0["inView"],
+        "opponent_screen1_x": opponent_screen1["x"],
+        "opponent_screen1_y": opponent_screen1["y"],
+        "opponent_screen1_in_view_x": opponent_screen1["inViewX"],
+        "opponent_screen1_in_view": opponent_screen1["inView"],
+        "opponent_camera_bottom_distance0": num(opponent_fall.get("cameraBottomDistance0")),
+        "opponent_camera_bottom_distance1": num(opponent_fall.get("cameraBottomDistance1")),
+        "opponent_near_camera_bottom0": num(opponent_fall.get("nearCameraBottom0")),
+        "opponent_near_camera_bottom1": num(opponent_fall.get("nearCameraBottom1")),
+        "opponent_below_camera0": num(opponent_fall.get("belowCamera0")),
+        "opponent_below_camera1": num(opponent_fall.get("belowCamera1")),
+        "opponent_vel_y_positive": num(opponent_fall.get("velYPositive")),
+        "opponent_vel_y_negative": num(opponent_fall.get("velYNegative")),
         "opponent_battle_stars": num(opponent.get("battleStars")),
         "opponent_coins": num(opponent.get("coins")),
         "target_found": num(target.get("found")),

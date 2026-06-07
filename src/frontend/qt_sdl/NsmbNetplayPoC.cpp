@@ -13985,12 +13985,66 @@ void WriteAIContactJson(std::ostream& out, melonDS::u32 collisionFlag, melonDS::
         << "}";
 }
 
+void WriteAIPlayerCameraJson(
+    std::ostream& out,
+    const GameStateSample& sample,
+    melonDS::u32 x,
+    melonDS::u32 y,
+    melonDS::u32 velY)
+{
+    const std::int32_t screenY0 = SignedU32(y) - SignedU32(sample.StageCameraGlobalY0);
+    const std::int32_t screenY1 = SignedU32(y) - SignedU32(sample.StageCameraGlobalY1);
+    const std::int32_t bottomDistance0 =
+        SignedU32(sample.StageCameraGlobalY0) + SignedU32(sample.StageCameraGlobalHeight0) - SignedU32(y);
+    const std::int32_t bottomDistance1 =
+        SignedU32(sample.StageCameraGlobalY1) + SignedU32(sample.StageCameraGlobalHeight1) - SignedU32(y);
+    constexpr std::int32_t kNearBottomThreshold = 32 * 4096;
+
+    out << "\"screen\":{";
+    WriteAIScreenJson(
+        out,
+        "camera0",
+        x,
+        y,
+        sample.StageCameraGlobalX0,
+        sample.StageCameraGlobalY0,
+        sample.StageCameraGlobalWidth0,
+        sample.StageCameraGlobalHeight0);
+    out << ",";
+    WriteAIScreenJson(
+        out,
+        "camera1",
+        x,
+        y,
+        sample.StageCameraGlobalX1,
+        sample.StageCameraGlobalY1,
+        sample.StageCameraGlobalWidth1,
+        sample.StageCameraGlobalHeight1);
+    out << "},\"fallRisk\":{\"screenY0\":" << screenY0
+        << ",\"screenY1\":" << screenY1
+        << ",\"cameraBottomDistance0\":" << bottomDistance0
+        << ",\"cameraBottomDistance1\":" << bottomDistance1
+        << ",\"nearCameraBottom0\":"
+        << (bottomDistance0 >= 0 && bottomDistance0 <= kNearBottomThreshold ? 1 : 0)
+        << ",\"nearCameraBottom1\":"
+        << (bottomDistance1 >= 0 && bottomDistance1 <= kNearBottomThreshold ? 1 : 0)
+        << ",\"belowCamera0\":" << (screenY0 > SignedU32(sample.StageCameraGlobalHeight0) ? 1 : 0)
+        << ",\"belowCamera1\":" << (screenY1 > SignedU32(sample.StageCameraGlobalHeight1) ? 1 : 0)
+        << ",\"velY\":" << SignedU32(velY)
+        << ",\"velYPositive\":" << (SignedU32(velY) > 0 ? 1 : 0)
+        << ",\"velYNegative\":" << (SignedU32(velY) < 0 ? 1 : 0)
+        << "}";
+}
+
 void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& sample)
 {
     const bool p0 = index == 0;
     auto v = [p0](melonDS::u32 a, melonDS::u32 b) { return p0 ? a : b; };
     const melonDS::u32 collisionFlag = v(sample.PlayerActor0CollisionFlag, sample.PlayerActor1CollisionFlag);
     const melonDS::u32 environmentFlag = v(sample.PlayerActor0EnvironmentFlag, sample.PlayerActor1EnvironmentFlag);
+    const melonDS::u32 posX = v(sample.PlayerActor0PosX, sample.PlayerActor1PosX);
+    const melonDS::u32 posY = v(sample.PlayerActor0PosY, sample.PlayerActor1PosY);
+    const melonDS::u32 velY = v(sample.PlayerActor0VelY, sample.PlayerActor1VelY);
     out << "{\"index\":" << index
         << ",\"found\":" << v(sample.PlayerActor0Found, sample.PlayerActor1Found)
         << ",\"guid\":";
@@ -14006,8 +14060,8 @@ void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& samp
     WriteAIVec3Json(
         out,
         "pos",
-        v(sample.PlayerActor0PosX, sample.PlayerActor1PosX),
-        v(sample.PlayerActor0PosY, sample.PlayerActor1PosY),
+        posX,
+        posY,
         v(sample.PlayerActor0PosZ, sample.PlayerActor1PosZ));
     out << ",";
     WriteAIVec3Json(
@@ -14021,8 +14075,10 @@ void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& samp
         out,
         "vel",
         v(sample.PlayerActor0VelX, sample.PlayerActor1VelX),
-        v(sample.PlayerActor0VelY, sample.PlayerActor1VelY),
+        velY,
         v(sample.PlayerActor0VelZ, sample.PlayerActor1VelZ));
+    out << ",";
+    WriteAIPlayerCameraJson(out, sample, posX, posY, velY);
     out << ",\"actionFlag\":" << v(sample.PlayerActor0ActionFlag, sample.PlayerActor1ActionFlag)
         << ",\"subActionFlag\":" << v(sample.PlayerActor0SubActionFlag, sample.PlayerActor1SubActionFlag)
         << ",\"physicsFlag\":" << v(sample.PlayerActor0PhysicsFlag, sample.PlayerActor1PhysicsFlag)

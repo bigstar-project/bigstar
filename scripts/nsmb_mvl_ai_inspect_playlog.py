@@ -64,6 +64,23 @@ def contact_text(player: dict[str, Any]) -> str:
     return "+".join(names) if names else "-"
 
 
+def fall_text(player: dict[str, Any]) -> str:
+    fall = player.get("fallRisk") or {}
+    tags = []
+    if num(fall.get("belowCamera0")):
+        tags.append("below")
+    if num(fall.get("nearCameraBottom0")):
+        tags.append("low")
+    if num(fall.get("velYPositive")):
+        tags.append("vy+")
+    if num(fall.get("velYNegative")):
+        tags.append("vy-")
+    prefix = "+".join(tags) if tags else "-"
+    bottom = num(fall.get("cameraBottomDistance0")) // 4096
+    screen_y = num(fall.get("screenY0")) // 4096
+    return f"{prefix}:{screen_y}/{bottom}"
+
+
 def nearest_text(record: dict[str, Any], player: int, category: str) -> str:
     visual = record.get("visualSummary") or {}
     for entry in visual.get("nearest") or []:
@@ -92,7 +109,7 @@ def main() -> int:
     args = parser.parse_args()
 
     print(
-        "frame st p input contact self(x,y) opp(x,y) star(dx,dy) hazard(dx,dy) "
+        "frame st p input contact y/bot self(x,y) opp(x,y) star(dx,dy) hazard(dx,dy) "
         "visX obj active counts"
     )
     printed = 0
@@ -127,6 +144,7 @@ def main() -> int:
             f"{player} "
             f"{buttons_text(held):5s} "
             f"{contact_text(players[player]):7s} "
+            f"{fall_text(players[player]):>11s} "
             f"{pos_text(players[player]):>11s} "
             f"{pos_text(players[opponent]):>11s} "
             f"{nearest_text(record, player, 'big_star_actor'):>11s} "
