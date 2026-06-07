@@ -112,6 +112,11 @@ def visual_state_text(player: dict[str, Any]) -> str:
     ]
     if num(visual_state.get("hasReserveItemCandidate")):
         parts.append("reserve")
+    visual_kind = num(visual_state.get("visualPowerupKindCandidate"))
+    if visual_kind:
+        parts.append(f"visualPwr={visual_kind}")
+    if num(visual_state.get("canShootFireVisualCandidate")):
+        parts.append("fireVisual")
     if num(visual_state.get("invincibleKnown")):
         parts.append(
             "invincible="
@@ -273,9 +278,10 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
             continue
         owner = num(slot.get("ownerCandidate"), -1)
         confidence = num(slot.get("ownerConfidence"))
+        owner_tracked = num(slot.get("ownerTracked"))
         state_bytes = ",".join(str(num(value)) for value in (slot.get("stateBytes") or [])[:8])
         color = "#fb923c" if owner == player else "#f43f5e"
-        label = "FB" if owner == player else "fb"
+        label = "FBt" if owner == player and owner_tracked else ("FB" if owner == player else "fb")
         draw_marker(
             x,
             y,
@@ -283,7 +289,10 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
             label,
             (
                 f"fireball slot={slot.get('index')} ownerCandidate={owner}"
-                f" confidence={confidence} kind={slot.get('kind')} state={slot.get('state')}"
+                f" confidence={confidence} tracked={owner_tracked}"
+                f" statelessOwner={slot.get('statelessOwnerCandidate')}"
+                f" statelessConfidence={slot.get('statelessOwnerConfidence')}"
+                f" kind={slot.get('kind')} state={slot.get('state')}"
                 f" facing={slot.get('facing')} stateBytes={state_bytes} dx={dx:.0f} dy={dy:.0f}"
             ),
             6,

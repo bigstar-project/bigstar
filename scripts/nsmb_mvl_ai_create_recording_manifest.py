@@ -78,6 +78,10 @@ def player_summary(player: dict[str, Any]) -> dict[str, Any]:
         "inventoryPowerup": num(player.get("inventoryPowerup")),
         "inventoryPowerupName": inventory_state.get("name"),
         "hasReserveItemCandidate": bool(visual_state.get("hasReserveItemCandidate")),
+        "visualPowerupKindCandidate": num(visual_state.get("visualPowerupKindCandidate")),
+        "visualPowerupSourceMask": num(visual_state.get("visualPowerupSourceMask")),
+        "isFireVisualCandidate": bool(visual_state.get("isFireVisualCandidate")),
+        "canShootFireVisualCandidate": bool(visual_state.get("canShootFireVisualCandidate")),
         "damageCooldown": num(player.get("damageCooldown")),
         "damageGuardTimer": num(visual_state.get("damageGuardTimer")),
         "damageGuardFlag": num(visual_state.get("damageGuardFlag")),
@@ -124,6 +128,7 @@ def summarize(playlog: Path, player: int, label_source: str, max_event_samples: 
         "starPickup": 0,
         "coinChange": 0,
         "powerupChange": 0,
+        "visualPowerupChange": 0,
         "playerDeath": 0,
         "blockCandidateVisible": 0,
         "itemVisible": 0,
@@ -230,6 +235,21 @@ def summarize(playlog: Path, player: int, label_source: str, max_event_samples: 
                             "after": after["powerup"],
                             "beforeName": before.get("powerupName"),
                             "afterName": after.get("powerupName"),
+                        },
+                    )
+                if after["visualPowerupKindCandidate"] != before["visualPowerupKindCandidate"]:
+                    event_counts["visualPowerupChange"] += 1
+                    add_event_sample(
+                        "visualPowerupChange",
+                        record,
+                        {
+                            "player": player_index,
+                            "before": before["visualPowerupKindCandidate"],
+                            "after": after["visualPowerupKindCandidate"],
+                            "beforeSourceMask": before.get("visualPowerupSourceMask"),
+                            "afterSourceMask": after.get("visualPowerupSourceMask"),
+                            "beforeFire": before.get("isFireVisualCandidate"),
+                            "afterFire": after.get("isFireVisualCandidate"),
                         },
                     )
                 if after["dead"] and not before["dead"]:

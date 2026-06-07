@@ -1628,6 +1628,11 @@ struct State
     InputState AIPlayLogLastAppliedInput[16][2] {};
     melonDS::u32 AIPlayLogLastAppliedInputFrame[16][2] {};
     bool AIPlayLogLastAppliedInputValid[16][2] {};
+    melonDS::u32 AIPlayLogFireballOwnerHandlerPtr[16] {};
+    bool AIPlayLogFireballOwnerValid[16][kAIFireballSlotCount] {};
+    int AIPlayLogFireballOwner[16][kAIFireballSlotCount] {};
+    int AIPlayLogFireballOwnerConfidence[16][kAIFireballSlotCount] {};
+    int AIPlayLogFireballOwnerHeuristic[16][kAIFireballSlotCount] {};
     int ScreenshotInterval = 0;
     int RamDumpInterval = 0;
     int GameStateTraceInterval = 60;
@@ -14298,7 +14303,48 @@ void WriteAIPowerupCandidateJson(std::ostream& out, const char* key, melonDS::u3
         << "}";
 }
 
-int AIFireballOwnerCandidate(const GameStateSample& sample, int slotIndex, int& confidence, int& heuristic)
+melonDS::u32 AIVisualPowerupKindCandidate(
+    melonDS::u32 powerup,
+    melonDS::u32 inventoryPowerup,
+    melonDS::u32 actorPowerupState,
+    melonDS::u32 actorPowerupFormState,
+    melonDS::u32 shellState)
+{
+    if (powerup == 2 || actorPowerupState == 2 || actorPowerupFormState == 2)
+        return 2;
+    if (powerup == 4 || shellState != 0)
+        return 4;
+    if (powerup == 5)
+        return 5;
+    if (powerup != 0)
+        return powerup;
+    if (inventoryPowerup != 0)
+        return inventoryPowerup;
+    return 0;
+}
+
+melonDS::u32 AIVisualPowerupSourceMask(
+    melonDS::u32 powerup,
+    melonDS::u32 inventoryPowerup,
+    melonDS::u32 actorPowerupState,
+    melonDS::u32 actorPowerupFormState,
+    melonDS::u32 shellState)
+{
+    melonDS::u32 mask = 0;
+    if (powerup != 0)
+        mask |= 1;
+    if (inventoryPowerup != 0)
+        mask |= 2;
+    if (actorPowerupState != 0)
+        mask |= 4;
+    if (actorPowerupFormState != 0)
+        mask |= 8;
+    if (shellState != 0)
+        mask |= 16;
+    return mask;
+}
+
+int AIFireballOwnerCandidateStateless(const GameStateSample& sample, int slotIndex, int& confidence, int& heuristic)
 {
     confidence = 0;
     heuristic = 0;
@@ -14357,6 +14403,64 @@ int AIFireballOwnerCandidate(const GameStateSample& sample, int slotIndex, int& 
         return velocityOwner;
     }
     return -1;
+}
+
+void ResetAIFireballOwnerTracking(int instanceID)
+{
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    for (int i = 0; i < kAIFireballSlotCount; i++)
+    {
+        G.AIPlayLogFireballOwnerValid[instanceID][i] = false;
+        G.AIPlayLogFireballOwner[instanceID][i] = -1;
+        G.AIPlayLogFireballOwnerConfidence[instanceID][i] = 0;
+        G.AIPlayLogFireballOwnerHeuristic[instanceID][i] = 0;
+    }
+}
+
+int AIFireballOwnerCandidate(
+    int instanceID,
+    const GameStateSample& sample,
+    int slotIndex,
+    int& confidence,
+    int& heuristic,
+    int& statelessOwner,
+    int& statelessConfidence,
+    int& statelessHeuristic,
+    bool& tracked)
+{
+    tracked = false;
+    statelessOwner = AIFireballOwnerCandidateStateless(sample, slotIndex, statelessConfidence, statelessHeuristic);
+    confidence = statelessConfidence;
+    heuristic = statelessHeuristic;
+    if (slotIndex < 0 || slotIndex >= kAIFireballSlotCount || sample.FireballSlotActive[slotIndex] == 0)
+        return statelessOwner;
+    if (instanceID < 0 || instanceID >= 16)
+        return statelessOwner;
+
+    if (statelessOwner >= 0 && statelessConfidence >= 55)
+    {
+        if (!G.AIPlayLogFireballOwnerValid[instanceID][slotIndex] ||
+            statelessOwner == G.AIPlayLogFireballOwner[instanceID][slotIndex] ||
+            statelessConfidence >= 80)
+        {
+            G.AIPlayLogFireballOwnerValid[instanceID][slotIndex] = true;
+            G.AIPlayLogFireballOwner[instanceID][slotIndex] = statelessOwner;
+            G.AIPlayLogFireballOwnerConfidence[instanceID][slotIndex] =
+                std::max(G.AIPlayLogFireballOwnerConfidence[instanceID][slotIndex], std::min(95, statelessConfidence + 20));
+            G.AIPlayLogFireballOwnerHeuristic[instanceID][slotIndex] = 10 + statelessHeuristic;
+        }
+    }
+
+    if (G.AIPlayLogFireballOwnerValid[instanceID][slotIndex])
+    {
+        tracked = true;
+        confidence = G.AIPlayLogFireballOwnerConfidence[instanceID][slotIndex];
+        heuristic = G.AIPlayLogFireballOwnerHeuristic[instanceID][slotIndex];
+        return G.AIPlayLogFireballOwner[instanceID][slotIndex];
+    }
+
+    return statelessOwner;
 }
 
 const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings)
@@ -14940,6 +15044,8 @@ void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& samp
         p0 ? sample.PlayerActor0ShellActorPtr : sample.PlayerActor1ShellActorPtr;
     const melonDS::u32 shellState =
         p0 ? sample.PlayerActor0ShellState : sample.PlayerActor1ShellState;
+    const melonDS::u32 powerup = v(sample.Player0Powerup, sample.Player1Powerup);
+    const melonDS::u32 inventoryPowerup = v(sample.Player0InventoryPowerup, sample.Player1InventoryPowerup);
     const melonDS::u32 damageGuardTimer =
         p0 ? sample.Player0DamageGuardTimer : sample.Player1DamageGuardTimer;
     const bool damagePhysicsGuard =
@@ -15000,14 +15106,23 @@ void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& samp
         << ",\"defeated\":" << v(sample.PlayerActor0DefeatedFlag, sample.PlayerActor1DefeatedFlag)
         << ",\"transitioning\":" << v(sample.PlayerActor0TransitioningFlag, sample.PlayerActor1TransitioningFlag)
         << ",\"damageCooldown\":" << damageCooldown
-        << ",\"powerup\":" << v(sample.Player0Powerup, sample.Player1Powerup)
-        << ",\"inventoryPowerup\":" << v(sample.Player0InventoryPowerup, sample.Player1InventoryPowerup)
+        << ",\"powerup\":" << powerup
+        << ",\"inventoryPowerup\":" << inventoryPowerup
         << ",\"visualState\":{";
-    WriteAIPowerupCandidateJson(out, "powerup", v(sample.Player0Powerup, sample.Player1Powerup), shellState);
+    WriteAIPowerupCandidateJson(out, "powerup", powerup, shellState);
     out << ",";
-    WriteAIPowerupCandidateJson(out, "inventoryPowerup", v(sample.Player0InventoryPowerup, sample.Player1InventoryPowerup));
+    WriteAIPowerupCandidateJson(out, "inventoryPowerup", inventoryPowerup);
+    const melonDS::u32 visualPowerupKind =
+        AIVisualPowerupKindCandidate(powerup, inventoryPowerup, powerupState, powerupFormState, shellState);
+    const melonDS::u32 visualPowerupSource =
+        AIVisualPowerupSourceMask(powerup, inventoryPowerup, powerupState, powerupFormState, shellState);
     out << ",\"hasReserveItemCandidate\":"
-        << (v(sample.Player0InventoryPowerup, sample.Player1InventoryPowerup) != 0 ? 1 : 0)
+        << (inventoryPowerup != 0 ? 1 : 0)
+        << ",\"visualPowerupKindCandidate\":" << visualPowerupKind
+        << ",\"visualPowerupSourceMask\":" << visualPowerupSource
+        << ",\"isFireVisualCandidate\":" << (visualPowerupKind == 2 ? 1 : 0)
+        << ",\"canShootFireVisualCandidate\":"
+        << ((powerup == 2 || powerupState == 2 || powerupFormState == 2) ? 1 : 0)
         << ",\"actorPowerupState\":" << powerupState
         << ",\"actorPowerupFormState\":" << powerupFormState
         << ",\"actorPowerupAuxState\":" << powerupAuxState
@@ -15318,11 +15433,18 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     WriteJsonHex(G.AIPlayLog, kFireballsHandlerAddr);
     G.AIPlayLog << ",\"handlerPtr\":";
     WriteJsonHex(G.AIPlayLog, sample.FireballsHandlerPtr);
+    if (instanceID >= 0 && instanceID < 16 && G.AIPlayLogFireballOwnerHandlerPtr[instanceID] != sample.FireballsHandlerPtr)
+    {
+        G.AIPlayLogFireballOwnerHandlerPtr[instanceID] = sample.FireballsHandlerPtr;
+        ResetAIFireballOwnerTracking(instanceID);
+    }
     int activeFireballSlots = 0;
     for (int i = 0; i < kAIFireballSlotCount; i++)
     {
         if (sample.FireballSlotActive[i] != 0)
             activeFireballSlots++;
+        else if (instanceID >= 0 && instanceID < 16)
+            G.AIPlayLogFireballOwnerValid[instanceID][i] = false;
     }
     G.AIPlayLog << ",\"activeSlots\":" << activeFireballSlots;
     G.AIPlayLog << ",\"words\":[";
@@ -15343,7 +15465,20 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         firstFireballSlot = false;
         int ownerConfidence = 0;
         int ownerHeuristic = 0;
-        const int ownerCandidate = AIFireballOwnerCandidate(sample, i, ownerConfidence, ownerHeuristic);
+        int statelessOwnerCandidate = -1;
+        int statelessOwnerConfidence = 0;
+        int statelessOwnerHeuristic = 0;
+        bool ownerTracked = false;
+        const int ownerCandidate = AIFireballOwnerCandidate(
+            instanceID,
+            sample,
+            i,
+            ownerConfidence,
+            ownerHeuristic,
+            statelessOwnerCandidate,
+            statelessOwnerConfidence,
+            statelessOwnerHeuristic,
+            ownerTracked);
         G.AIPlayLog << "{\"index\":" << i
             << ",\"active\":" << sample.FireballSlotActive[i]
             << ",\"kind\":" << sample.FireballSlotKind[i]
@@ -15352,6 +15487,10 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             << ",\"ownerCandidate\":" << ownerCandidate
             << ",\"ownerConfidence\":" << ownerConfidence
             << ",\"ownerHeuristic\":" << ownerHeuristic
+            << ",\"ownerTracked\":" << (ownerTracked ? 1 : 0)
+            << ",\"statelessOwnerCandidate\":" << statelessOwnerCandidate
+            << ",\"statelessOwnerConfidence\":" << statelessOwnerConfidence
+            << ",\"statelessOwnerHeuristic\":" << statelessOwnerHeuristic
             << ",\"ownerVerified\":0"
             << ",\"stateBytesOffset\":";
         WriteJsonHex(G.AIPlayLog, kAIFireballSlotActiveOffset, 2);

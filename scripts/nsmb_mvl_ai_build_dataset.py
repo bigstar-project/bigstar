@@ -282,8 +282,8 @@ def nearest_special_slot(
     slots: list[dict[str, Any]],
     self_pos: dict[str, int],
     player: int,
-) -> tuple[int, int, int, int, int, int, int, int, int, int, int, int, int, int, int]:
-    best: tuple[int, int, int, int, int, int, int, int, int, int, int, int, int, int, int] | None = None
+) -> tuple[int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int]:
+    best: tuple[int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int] | None = None
     for slot in slots:
         slot_pos = pos(slot)
         dx = slot_pos["x"] - self_pos["x"]
@@ -306,13 +306,17 @@ def nearest_special_slot(
                 owner_confidence,
                 num(slot.get("ownerHeuristic")),
                 int(owner_candidate == player),
+                num(slot.get("ownerTracked")),
+                num(slot.get("statelessOwnerCandidate"), -1),
+                num(slot.get("statelessOwnerConfidence")),
+                num(slot.get("statelessOwnerHeuristic")),
                 num(state_bytes[2] if len(state_bytes) > 2 else 0),
                 num(state_bytes[4] if len(state_bytes) > 4 else 0),
                 num(state_bytes[6] if len(state_bytes) > 6 else 0),
                 num(debug_words[0] if debug_words else 0),
             )
     if best is None:
-        return (0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0)
+        return (0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0)
     return best
 
 
@@ -414,6 +418,10 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "self_damage_cooldown": num(self_player.get("damageCooldown")),
         "self_has_reserve_item_candidate": num(self_visual.get("hasReserveItemCandidate")),
         "self_can_shoot_fire_candidate": num(self_visual_powerup.get("canShootFireCandidate")),
+        "self_visual_powerup_kind_candidate": num(self_visual.get("visualPowerupKindCandidate")),
+        "self_visual_powerup_source_mask": num(self_visual.get("visualPowerupSourceMask")),
+        "self_is_fire_visual_candidate": num(self_visual.get("isFireVisualCandidate")),
+        "self_can_shoot_fire_visual_candidate": num(self_visual.get("canShootFireVisualCandidate")),
         "self_is_shell_candidate": num(self_visual_powerup.get("isShellCandidate")),
         "self_is_mega_candidate": num(self_visual_powerup.get("isMegaCandidate")),
         "self_actor_powerup_state": num(self_visual.get("actorPowerupState")),
@@ -466,6 +474,10 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "opponent_damage_cooldown": num(opponent.get("damageCooldown")),
         "opponent_has_reserve_item_candidate": num(opponent_visual.get("hasReserveItemCandidate")),
         "opponent_can_shoot_fire_candidate": num(opponent_visual_powerup.get("canShootFireCandidate")),
+        "opponent_visual_powerup_kind_candidate": num(opponent_visual.get("visualPowerupKindCandidate")),
+        "opponent_visual_powerup_source_mask": num(opponent_visual.get("visualPowerupSourceMask")),
+        "opponent_is_fire_visual_candidate": num(opponent_visual.get("isFireVisualCandidate")),
+        "opponent_can_shoot_fire_visual_candidate": num(opponent_visual.get("canShootFireVisualCandidate")),
         "opponent_is_shell_candidate": num(opponent_visual_powerup.get("isShellCandidate")),
         "opponent_is_mega_candidate": num(opponent_visual_powerup.get("isMegaCandidate")),
         "opponent_actor_powerup_state": num(opponent_visual.get("actorPowerupState")),
@@ -513,10 +525,14 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "nearest_fireball_owner_confidence": nearest_fireball[8],
         "nearest_fireball_owner_heuristic": nearest_fireball[9],
         "nearest_fireball_owned_by_self_candidate": nearest_fireball[10],
-        "nearest_fireball_state_byte82": nearest_fireball[11],
-        "nearest_fireball_state_byte84": nearest_fireball[12],
-        "nearest_fireball_state_byte86": nearest_fireball[13],
-        "nearest_fireball_debug_word0": nearest_fireball[14],
+        "nearest_fireball_owner_tracked": nearest_fireball[11],
+        "nearest_fireball_stateless_owner_candidate": nearest_fireball[12],
+        "nearest_fireball_stateless_owner_confidence": nearest_fireball[13],
+        "nearest_fireball_stateless_owner_heuristic": nearest_fireball[14],
+        "nearest_fireball_state_byte82": nearest_fireball[15],
+        "nearest_fireball_state_byte84": nearest_fireball[16],
+        "nearest_fireball_state_byte86": nearest_fireball[17],
+        "nearest_fireball_debug_word0": nearest_fireball[18],
         "projectiles_handler_word0": num((projectiles.get("words") or [0])[0]),
         "label_held": held,
     }

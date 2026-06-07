@@ -82,10 +82,14 @@ def audit_playlog(path: Path, max_samples: int, fireball_owner_min_confidence: i
     shell_state_frames = [0, 0]
     powerup_values: list[Counter[int]] = [Counter(), Counter()]
     inventory_powerup_values: list[Counter[int]] = [Counter(), Counter()]
+    visual_powerup_values: list[Counter[int]] = [Counter(), Counter()]
+    visual_fire_candidate_frames = [0, 0]
     category_counts: Counter[str] = Counter()
     visible_unknown_objects: Counter[str] = Counter()
     fireball_slots = 0
     fireball_owner_low_confidence = 0
+    fireball_owner_tracked = 0
+    fireball_stateless_owner_low_confidence = 0
     projectile_visible_frames = 0
     samples: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
@@ -101,6 +105,9 @@ def audit_playlog(path: Path, max_samples: int, fireball_owner_min_confidence: i
             powerup_values[player_index][num(player.get("powerup"), -1)] += 1
             inventory_powerup_values[player_index][num(player.get("inventoryPowerup"), -1)] += 1
             visual_state = player.get("visualState") or {}
+            visual_powerup_values[player_index][num(visual_state.get("visualPowerupKindCandidate"), -1)] += 1
+            if num(visual_state.get("isFireVisualCandidate")) or num(visual_state.get("canShootFireVisualCandidate")):
+                visual_fire_candidate_frames[player_index] += 1
             if not visual_state:
                 visual_state_missing[player_index] += 1
                 add_sample(
@@ -154,6 +161,12 @@ def audit_playlog(path: Path, max_samples: int, fireball_owner_min_confidence: i
             fireball_slots += 1
             owner = num(slot.get("ownerCandidate"), -1)
             confidence = num(slot.get("ownerConfidence"))
+            if num(slot.get("ownerTracked")):
+                fireball_owner_tracked += 1
+            stateless_owner = num(slot.get("statelessOwnerCandidate"), -1)
+            stateless_confidence = num(slot.get("statelessOwnerConfidence"))
+            if stateless_owner < 0 or stateless_confidence < fireball_owner_min_confidence:
+                fireball_stateless_owner_low_confidence += 1
             if owner < 0 or confidence < fireball_owner_min_confidence:
                 fireball_owner_low_confidence += 1
                 add_sample(
@@ -165,6 +178,9 @@ def audit_playlog(path: Path, max_samples: int, fireball_owner_min_confidence: i
                         "slot": slot.get("index"),
                         "ownerCandidate": owner,
                         "ownerConfidence": confidence,
+                        "ownerTracked": num(slot.get("ownerTracked")),
+                        "statelessOwnerCandidate": stateless_owner,
+                        "statelessOwnerConfidence": stateless_confidence,
                         "kind": slot.get("kind"),
                         "state": slot.get("state"),
                         "facing": slot.get("facing"),
@@ -189,10 +205,14 @@ def audit_playlog(path: Path, max_samples: int, fireball_owner_min_confidence: i
         "shellStateFrames": shell_state_frames,
         "powerupValues": [{str(k): v for k, v in counter.items()} for counter in powerup_values],
         "inventoryPowerupValues": [{str(k): v for k, v in counter.items()} for counter in inventory_powerup_values],
+        "visualPowerupValues": [{str(k): v for k, v in counter.items()} for counter in visual_powerup_values],
+        "visualFireCandidateFrames": visual_fire_candidate_frames,
         "categoryCounts": dict(category_counts),
         "visibleUnknownObjects": dict(visible_unknown_objects),
         "fireballSlots": fireball_slots,
         "fireballOwnerLowConfidence": fireball_owner_low_confidence,
+        "fireballOwnerTracked": fireball_owner_tracked,
+        "fireballStatelessOwnerLowConfidence": fireball_stateless_owner_low_confidence,
         "projectileVisibleFrames": projectile_visible_frames,
         "samples": dict(samples),
     }
