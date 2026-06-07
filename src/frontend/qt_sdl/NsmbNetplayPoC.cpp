@@ -203,7 +203,7 @@ constexpr melonDS::u32 kWorldEffectWordStart = 0x04;
 constexpr melonDS::u32 kWorldEffectWordEnd = 0xAC;
 constexpr std::size_t kWorldEffectWordCount =
     ((kWorldEffectWordEnd - kWorldEffectWordStart) / sizeof(melonDS::u32)) + 1;
-constexpr int kAITileProbeCount = 9;
+constexpr int kAITileProbeCount = 17;
 constexpr int kObjectTraceSlots = 16;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
 constexpr melonDS::u32 kMvlStageSceneDefaultSettings = 0x00B4FF00;
@@ -2511,8 +2511,20 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(const GameStateSample& sample,
         const bool aheadFeet = probePointSolidish(probe, "aheadFeet");
         const bool aheadBelow = probePointSolidish(probe, "aheadBelow");
         const bool ahead2Below = probePointSolidish(probe, "ahead2Below");
+        const bool leftBody = probePointSolidish(probe, "leftBody");
+        const bool leftFeet = probePointSolidish(probe, "leftFeet");
+        const bool leftBelow = probePointSolidish(probe, "leftBelow");
+        const bool left2Below = probePointSolidish(probe, "left2Below");
+        const bool rightBody = probePointSolidish(probe, "rightBody");
+        const bool rightFeet = probePointSolidish(probe, "rightFeet");
+        const bool rightBelow = probePointSolidish(probe, "rightBelow");
+        const bool right2Below = probePointSolidish(probe, "right2Below");
         out.WallAhead = aheadBody || aheadFeet;
         out.HoleAhead = !aheadBelow && !ahead2Below;
+        out.WallLeft = leftBody || leftFeet;
+        out.HoleLeft = !leftBelow && !left2Below;
+        out.WallRight = rightBody || rightFeet;
+        out.HoleRight = !rightBelow && !right2Below;
     };
     state.InGameplay = inGameplay;
     state.Players[0].Found = sample.PlayerActor0Found != 0;
@@ -12643,6 +12655,14 @@ AIPlayerTileProbeSample ReadAIPlayerTileProbeSample(melonDS::NDS* nds, const Obj
         {"ahead2Feet", 32, -16, true},
         {"ahead2Below", 32, -32, true},
         {"above", 0, 24, false},
+        {"leftBody", -16, 0, false},
+        {"leftFeet", -16, -16, false},
+        {"leftBelow", -16, -32, false},
+        {"left2Below", -32, -32, false},
+        {"rightBody", 16, 0, false},
+        {"rightFeet", 16, -16, false},
+        {"rightBelow", 16, -32, false},
+        {"right2Below", 32, -32, false},
     };
 
     for (int i = 0; i < kAITileProbeCount; i++)
@@ -14394,6 +14414,14 @@ void WriteAIPlayerTileProbeJson(std::ostream& out, const AIPlayerTileProbeSample
     const int aheadFeet = AITileProbeSolidishValue(probe, "aheadFeet");
     const int aheadBelow = AITileProbeSolidishValue(probe, "aheadBelow");
     const int ahead2Below = AITileProbeSolidishValue(probe, "ahead2Below");
+    const int leftBody = AITileProbeSolidishValue(probe, "leftBody");
+    const int leftFeet = AITileProbeSolidishValue(probe, "leftFeet");
+    const int leftBelow = AITileProbeSolidishValue(probe, "leftBelow");
+    const int left2Below = AITileProbeSolidishValue(probe, "left2Below");
+    const int rightBody = AITileProbeSolidishValue(probe, "rightBody");
+    const int rightFeet = AITileProbeSolidishValue(probe, "rightFeet");
+    const int rightBelow = AITileProbeSolidishValue(probe, "rightBelow");
+    const int right2Below = AITileProbeSolidishValue(probe, "right2Below");
     out << "{\"found\":" << probe.Found
         << ",\"stageLayout\":";
     WriteJsonHex(out, probe.StageLayout);
@@ -14406,6 +14434,10 @@ void WriteAIPlayerTileProbeJson(std::ostream& out, const AIPlayerTileProbeSample
         << ",\"ahead2BelowSolid\":" << ahead2Below
         << ",\"wallAhead\":" << (aheadBody || aheadFeet ? 1 : 0)
         << ",\"holeAhead\":" << (probe.Found && !aheadBelow && !ahead2Below ? 1 : 0)
+        << ",\"wallLeft\":" << (leftBody || leftFeet ? 1 : 0)
+        << ",\"holeLeft\":" << (probe.Found && !leftBelow && !left2Below ? 1 : 0)
+        << ",\"wallRight\":" << (rightBody || rightFeet ? 1 : 0)
+        << ",\"holeRight\":" << (probe.Found && !rightBelow && !right2Below ? 1 : 0)
         << "},\"samples\":[";
     for (int i = 0; i < kAITileProbeCount; i++)
     {

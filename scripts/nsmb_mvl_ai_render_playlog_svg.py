@@ -81,6 +81,10 @@ def tile_probe_summary_text(player: dict[str, Any]) -> str:
         ("groundBelowSolid", "ground"),
         ("aheadBodySolid", "aheadBody"),
         ("aheadBelowSolid", "aheadBelow"),
+        ("wallLeft", "wallLeft"),
+        ("holeLeft", "holeLeft"),
+        ("wallRight", "wallRight"),
+        ("holeRight", "holeRight"),
     ]:
         if num(summary.get(key)):
             tags.append(label)

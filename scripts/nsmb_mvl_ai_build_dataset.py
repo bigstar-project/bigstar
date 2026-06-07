@@ -136,6 +136,14 @@ TILE_PROBE_SAMPLE_NAMES = [
     "ahead2Feet",
     "ahead2Below",
     "above",
+    "leftBody",
+    "leftFeet",
+    "leftBelow",
+    "left2Below",
+    "rightBody",
+    "rightFeet",
+    "rightBelow",
+    "right2Below",
 ]
 
 TILE_PROBE_SUMMARY_NAMES = [
@@ -146,6 +154,10 @@ TILE_PROBE_SUMMARY_NAMES = [
     "ahead2BelowSolid",
     "wallAhead",
     "holeAhead",
+    "wallLeft",
+    "holeLeft",
+    "wallRight",
+    "holeRight",
 ]
 
 

@@ -35,6 +35,10 @@ struct PlayerFrameState
     bool GroundBelowSolid = false;
     bool WallAhead = false;
     bool HoleAhead = false;
+    bool WallLeft = false;
+    bool HoleLeft = false;
+    bool WallRight = false;
+    bool HoleRight = false;
 };
 
 struct FrameState

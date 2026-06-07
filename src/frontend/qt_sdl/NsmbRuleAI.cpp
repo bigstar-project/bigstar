@@ -139,7 +139,12 @@ NsmbNetplayPoC::InputState DecideInput(
         (frame % static_cast<melonDS::u32>(jumpInterval)) < static_cast<melonDS::u32>(jumpFrames);
     const bool targetAbove = dy < -0x18000;
     const bool closeOpponent = absOpponentDx < config.CloseRange / 2;
-    const bool terrainJump = movingHorizontally && (self.HoleAhead || self.WallAhead);
+    const bool movingLeft = (input.KeyMask & (1u << kButtonLeft)) == 0;
+    const bool movingRight = (input.KeyMask & (1u << kButtonRight)) == 0;
+    const bool terrainJump =
+        (movingLeft && (self.HoleLeft || self.WallLeft)) ||
+        (movingRight && (self.HoleRight || self.WallRight)) ||
+        (movingHorizontally && (self.HoleAhead || self.WallAhead));
     if (periodicJump || targetAbove || closeOpponent || terrainJump)
         PressButton(input, kButtonA);
 
@@ -147,7 +152,7 @@ NsmbNetplayPoC::InputState DecideInput(
         (config.TraceInterval <= 1 || (frame % static_cast<melonDS::u32>(config.TraceInterval)) == 0))
     {
         std::printf(
-            "NSMB RuleAI: inst=%d frame=%u player=%d mode=%s self=%08X/%08X target=%08X/%08X opponent=%08X/%08X stars=%u/%u terrain=ground:%d wall:%d hole:%d keys=0x%03X\n",
+            "NSMB RuleAI: inst=%d frame=%u player=%d mode=%s self=%08X/%08X target=%08X/%08X opponent=%08X/%08X stars=%u/%u terrain=ground:%d ahead:%d/%d left:%d/%d right:%d/%d keys=0x%03X\n",
             instanceID,
             frame,
             player,
@@ -163,6 +168,10 @@ NsmbNetplayPoC::InputState DecideInput(
             self.GroundBelowSolid ? 1 : 0,
             self.WallAhead ? 1 : 0,
             self.HoleAhead ? 1 : 0,
+            self.WallLeft ? 1 : 0,
+            self.HoleLeft ? 1 : 0,
+            self.WallRight ? 1 : 0,
+            self.HoleRight ? 1 : 0,
             input.KeyMask);
     }
 

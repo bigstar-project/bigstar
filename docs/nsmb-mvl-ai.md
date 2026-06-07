@@ -42,8 +42,8 @@
 - 完了: `scripts/nsmb_mvl_ai_predict_imitation.py` で学習済み `.npz` とdataset CSVからオフライン推論し、予測held入力、button別確率、ラベルとの一致率をCSV出力できるようにした。
 - 完了: player actor内の `CollisionMgr` を読み、AI play logの `players[].collisionMgr` に collision result、ground collision、modifier tile、attached tile、raw state byteを保存するようにした。逆アセンブルで `CollisionMgr +0x7C` がcollision result、`+0x98/+0x9C/+0xA0` がbottom/top/side modifier tile typeであることを確認し、以前の暫定 `bottomTileType` 読み取りは廃止した。
 - 完了: player本体の `+0xBB2/+0xBB3` を `players[].tileDamage` として保存するようにした。`Player::applyTileDamage` / `Player::updateCollision` の逆アセンブルで参照を確認した。
-- 完了: `StageLayout::getTileBehavior` / `getChunkID` / `readTileBehaviour` を逆アセンブルし、AI play logの `players[].tileProbe` にプレイヤー周辺/前方9点のタイルサンプルを保存するようにした。各点は actor座標からStageLayout pixel座標へ変換し、chunk id、tile id、tile behavior、solid/harmful/coin/block系カテゴリ、`solidish` を出す。summaryには `wallAhead`、`holeAhead`、`groundBelowSolid`、`aheadBodySolid`、`aheadBelowSolid` などを保存する。
-- 完了: RuleAIの内部 `FrameState` に `GroundBelowSolid` / `WallAhead` / `HoleAhead` を追加し、tileProbeが取れている場合は横移動中の穴/壁候補でジャンプ入力を強めるようにした。現時点では速度方向基準の暫定プローブを使うため、左右両方向のサンプルと実プレイ検証は次の調整対象。
+- 完了: `StageLayout::getTileBehavior` / `getChunkID` / `readTileBehaviour` を逆アセンブルし、AI play logの `players[].tileProbe` にプレイヤー周辺/前方/左右17点のタイルサンプルを保存するようにした。各点は actor座標からStageLayout pixel座標へ変換し、chunk id、tile id、tile behavior、solid/harmful/coin/block系カテゴリ、`solidish` を出す。summaryには `wallAhead`、`holeAhead`、`wallLeft`、`holeLeft`、`wallRight`、`holeRight`、`groundBelowSolid` などを保存する。
+- 完了: RuleAIの内部 `FrameState` に `GroundBelowSolid` / `WallAhead` / `HoleAhead` / `WallLeft` / `HoleLeft` / `WallRight` / `HoleRight` を追加し、tileProbeが取れている場合は横移動入力の方向に応じた穴/壁候補でジャンプ入力を強めるようにした。
 
 ## AI Play Log
 
@@ -66,7 +66,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 
 `players[].tileDamage` には、Player本体に保存されるtile damage flags/typeを保存する。`active=1` のときはlava/poison/その他ダメージ地形などの接触候補として扱う。通常の床接地や壁接触は `contact` と `collisionMgr.collisionResult` を見る。
 
-`players[].tileProbe` には、StageLayoutから直接読んだタイル地形サンプルを保存する。サンプル点は `center`、`feet`、`below`、`aheadBody`、`aheadFeet`、`aheadBelow`、`ahead2Feet`、`ahead2Below`、`above`。各点は `pixelX/Y`、`chunkId`、`tileId`、`behavior`、`tile`、`solidish` を持つ。`tile` は `solid`、`scanSolid`、`coin`、`questionBlock`、`breakableBlock`、`brickBlock`、`slope`、`water`、`partialSolid`、`harmful` などへ展開する。`summary.holeAhead` は前方下2点がsolidishでない暫定穴判定、`summary.wallAhead` は前方body/feetがsolidishの暫定壁判定。CSVには `self_tile_probe_*` / `opponent_tile_probe_*` として展開する。
+`players[].tileProbe` には、StageLayoutから直接読んだタイル地形サンプルを保存する。サンプル点は `center`、`feet`、`below`、`aheadBody`、`aheadFeet`、`aheadBelow`、`ahead2Feet`、`ahead2Below`、`above`、`leftBody`、`leftFeet`、`leftBelow`、`left2Below`、`rightBody`、`rightFeet`、`rightBelow`、`right2Below`。各点は `pixelX/Y`、`chunkId`、`tileId`、`behavior`、`tile`、`solidish` を持つ。`tile` は `solid`、`scanSolid`、`coin`、`questionBlock`、`breakableBlock`、`brickBlock`、`slope`、`water`、`partialSolid`、`harmful` などへ展開する。`summary.holeAhead` は速度方向の前方下2点、`summary.holeLeft` / `holeRight` は左右下2点がsolidishでない暫定穴判定。`summary.wallAhead` / `wallLeft` / `wallRight` はbody/feetがsolidishの暫定壁判定。CSVには `self_tile_probe_*` / `opponent_tile_probe_*` として展開する。
 
 `players[].screen` / `players[].fallRisk` には、playerをカメラ座標へ投影した情報を保存する。`fallRisk` は `screenY0/1`、`cameraBottomDistance0/1`、`nearCameraBottom0/1`、`belowCamera0/1`、`velYPositive/Negative` を持つ。完全な穴判定ではないが、目視上の「下へ落ちている」「画面下端に近い」を学習データに入れるための暫定特徴。
 
@@ -174,11 +174,15 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `python scripts\nsmb_mvl_ai_render_playlog_svg.py logs\codex-ai-tileprobe-yfix-smoke-20260607\ai-playlog.jsonl logs\codex-ai-tileprobe-yfix-smoke-20260607\frame-1020-player1-tileprobe.svg --player 1 --frame 1020` pass。SVG内に `tileProbe center/feet/below/aheadBody/aheadFeet/aheadBelow/ahead2Feet/ahead2Below/above` の矩形とtile id/behavior titleが出ることを確認。
 - `logs/codex-ai-ruleai-tileprobe-smoke-20260607`: RuleAI `FrameState` への tileProbe summary接続後に `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4` pass。`MELONDS_NSML_RULE_AI=1` / `MELONDS_NSML_RULE_AI_TRACE=1` つきのhost単体標準split smoke 1150F pass。起動時のRuleAI enabledログは確認したが、このharnessでは入力決定traceは出なかったため、実際のRuleAI操作経路でterrain jumpが発火するかは次回の対象。
 - 同ログで `python scripts\nsmb_mvl_ai_inspect_playlog.py ... --player 1 --limit 8` pass、`python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --label-source auto --require-player-found` pass。tileProbe列は引き続き生成され、既存tileProbeモデルで `python scripts\nsmb_mvl_ai_predict_imitation.py ... --limit 5` pass。
+- `logs/codex-ai-tileprobe-lr-smoke-20260607`: 左右固定tileProbe追加後に `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4` pass。host単体標準split smoke 1150F pass。AI play logは10行、frame 1020で `wallLeft=0`、`holeLeft=1`、`wallRight=0`、`holeRight=1`、`leftBody/leftBelow/rightBody/rightBelow` samplesが保存されることを確認。
+- 同ログで `python scripts\nsmb_mvl_ai_inspect_playlog.py ... --player 1 --limit 6` pass。`probe` 列に `hole+HL+HR:ab:001,ad:001,lb:001,rb:001,b:001` のように左右穴候補と左右tile idが表示されることを確認。
+- 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --label-source auto --require-player-found` pass。9行CSV生成。`self_tile_probe_wallLeft`、`self_tile_probe_holeLeft`、`self_tile_probe_wallRight`、`self_tile_probe_holeRight`、`self_tile_probe_leftBelow_found`、`self_tile_probe_rightBelow_found` の列追加を確認。
+- `python scripts\nsmb_mvl_ai_train_imitation.py logs\codex-ai-tileprobe-lr-smoke-20260607\ai-dataset-player1-auto.csv logs\codex-ai-tileprobe-lr-smoke-20260607\ai-imitation-player1-auto.npz` pass。`python scripts\nsmb_mvl_ai_predict_imitation.py logs\codex-ai-tileprobe-lr-smoke-20260607\ai-imitation-player1-auto.npz logs\codex-ai-tileprobe-lr-smoke-20260607\ai-dataset-player1-auto.csv logs\codex-ai-tileprobe-lr-smoke-20260607\ai-predictions-player1-auto.csv` pass。9行の小データで `button_acc=1.000`、`exact=1.000`。
 
 ## Next Actions
 
 - StageLayout tile probeを実プレイ/複数ステージで増やして、`feet/below/ahead*` のoffsetと `holeAhead` / `wallAhead` の閾値を調整する。
-- RuleAIを実際のCPU操作経路で走らせ、`terrain=ground/wall/hole` traceと入力変化を確認する。必要なら左右両方向tileProbeを追加して、現在の速度方向依存を外す。
+- RuleAIを実際のCPU操作経路で走らせ、`terrain=ground/ahead/left/right` traceと入力変化を確認する。
 - ブロック/アイテム箱の中身と叩いた後の状態を `StageLayout::changeTile` / question block animation path と実ログで照合し、tileProbeまたはobjectカテゴリへ追加する。
 - 落下死ラインとステージ境界をメモリから取り、`fallRisk` と `tileProbe.holeAhead` を統合した危険判定を作る。
 - 学習済み `.npz` をPoCまたは外部sidecarから推論して入力へ戻す経路を作る。

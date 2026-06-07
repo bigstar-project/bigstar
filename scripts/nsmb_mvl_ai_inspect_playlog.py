@@ -156,8 +156,22 @@ def tile_probe_text(player: dict[str, Any]) -> str:
         tags.append("hole")
     if num(summary.get("groundBelowSolid")):
         tags.append("ground")
+    if num(summary.get("wallLeft")):
+        tags.append("WL")
+    if num(summary.get("holeLeft")):
+        tags.append("HL")
+    if num(summary.get("wallRight")):
+        tags.append("WR")
+    if num(summary.get("holeRight")):
+        tags.append("HR")
     tile_ids = []
-    for name, label in [("aheadBody", "ab"), ("aheadBelow", "ad"), ("below", "b")]:
+    for name, label in [
+        ("aheadBody", "ab"),
+        ("aheadBelow", "ad"),
+        ("leftBelow", "lb"),
+        ("rightBelow", "rb"),
+        ("below", "b"),
+    ]:
         sample = sample_by_name.get(name) or {}
         if num(sample.get("found")):
             tile_ids.append(f"{label}:{num(sample.get('tileId')):03X}")
