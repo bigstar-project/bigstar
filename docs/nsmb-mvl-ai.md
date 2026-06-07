@@ -34,6 +34,7 @@
 - 完了: `scripts/nsmb_mvl_ai_catalog_objects.py` でJSONL内のactive objectを object ID/settings/category ごとに集計できるようにした。
 - 完了: playerの `collisionFlag` / `environmentFlag` を名前付き `contact` 状態へ展開し、接地、予測接地、天井、左右壁、水/液体/水没、流砂、ロープ/ポール、スパイク、コンベア、雪/砂/破壊地形、左右ラップをAI play logとCSV特徴量に保存するようにした。
 - 完了: playerごとの `screen.camera0/1` と `fallRisk` をAI play logへ追加した。画面X/Y、カメラ内判定、カメラ底までの距離、下端近接、カメラ下抜け、Y速度符号を保存し、穴/落下判断の前段特徴としてCSVへ展開する。
+- 完了: `screen.camera0/1` に `inViewY` を追加し、player/opponent/objectの画面内判定をX/Y/完全判定でログに出せるようにした。
 - 完了: `scripts/nsmb_mvl_ai_render_playlog_svg.py` でJSONLの1フレームをplayer中心のSVGに描画できるようにした。表だけでなく、星、hazard、item、coin、敵、platform、unknown objectの相対配置を目視できる。
 - 完了: AI play logの `objects[]` に `offset` と `vtable` を追加した。object ID/settingsだけで意味が分からないactorも、vtableを手がかりに後から分類できる。
 - 完了: `scripts/nsmb_mvl_ai_build_dataset.py` に `--label-source auto|applied|player|console` を追加した。ルールAIログは `appliedPlayerN`、人間プレイログはメモリ上の `playerN` / `consoleN` 入力を教師ラベルにできる。
@@ -64,7 +65,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 
 `players[].screen` / `players[].fallRisk` には、playerをカメラ座標へ投影した情報を保存する。`fallRisk` は `screenY0/1`、`cameraBottomDistance0/1`、`nearCameraBottom0/1`、`belowCamera0/1`、`velYPositive/Negative` を持つ。完全な穴判定ではないが、目視上の「下へ落ちている」「画面下端に近い」を学習データに入れるための暫定特徴。
 
-`visualSummary` には、人間が画面を見て判断する情報に近づけるための要約を保存する。現時点では左右ラップ込みの `visibleCamera0X` / `visibleCamera1X`、カテゴリ別count、player別最近傍 `big_star_actor` / `moving_hazard` などを持つ。object個別にも `relative` と `screen.camera*.inViewX` を保存する。
+`visualSummary` には、人間が画面を見て判断する情報に近づけるための要約を保存する。現時点ではY込みの `visibleCamera0/1`、左右ラップ込みX判定の `visibleCamera0X` / `visibleCamera1X`、カテゴリ別count、player別最近傍 `big_star_actor` / `moving_hazard` などを持つ。player/object個別にも `relative` と `screen.camera*.inViewX/inViewY/inView` を保存する。
 
 現時点の既知カテゴリ:
 
@@ -109,7 +110,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 ## Current Blockers / Unknowns
 
 - object IDと画面上の意味の対応はまだ完全ではない。coin/item/enemy/platform/hazard の初期カテゴリは入ったが、ログを見ながら block、item box、ステージ固有ギミックの分類を増やす。
-- 目視同等にするには、穴/落下死ライン、ブロック状態、アイテム箱状態、タイル地形の前方サンプルが不足している。X方向は左右ラップ込みの可視判定まで入り、player接触地形、CollisionMgr接触結果、modifier tile、tile damage、playerの画面Y/カメラ底距離は取れるようになったが、objectの完全な `inView` はY側の対応を追加で詰める必要がある。
+- 目視同等にするには、穴/落下死ライン、ブロック状態、アイテム箱状態、タイル地形の前方サンプルが不足している。左右ラップ込みX判定、Y込みの完全可視判定、player接触地形、CollisionMgr接触結果、modifier tile、tile damage、playerの画面Y/カメラ底距離は取れるようになった。
 - 自己対戦に進む前に、ログschemaを実プレイログで増強し、学習済みモデルを入力へ戻す推論経路を作る必要がある。
 
 ## Verification
@@ -147,6 +148,11 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --require-player-found --label-source auto` pass。25行CSV生成。`self_collision_mgr_ground_collision`、`self_collision_mgr_bottom_modifier_tile_type`、`self_tile_damage_flags/type/active`、`self_bottom_modifier_tile_*` の列追加を確認。
 - `python scripts\nsmb_mvl_ai_train_imitation.py logs\codex-ai-tiledamage-smoke-20260607\ai-dataset-player1-auto.csv logs\codex-ai-tiledamage-smoke-20260607\ai-imitation-player1-auto.npz --epochs 200 --lr 0.05` pass。`python scripts\nsmb_mvl_ai_predict_imitation.py logs\codex-ai-tiledamage-smoke-20260607\ai-imitation-player1-auto.npz logs\codex-ai-tiledamage-smoke-20260607\ai-dataset-player1-auto.csv logs\codex-ai-tiledamage-smoke-20260607\ai-predictions-player1-auto.csv --limit 10` pass。10行サンプルで `button_acc=0.958`、`exact=0.700`。
 - `python scripts\nsmb_mvl_ai_render_playlog_svg.py logs\codex-ai-tiledamage-smoke-20260607\ai-playlog.jsonl logs\codex-ai-tiledamage-smoke-20260607\frame-1050-player1.svg --player 1 --frame 1050` pass。
+- `logs/codex-ai-screen-inviewy-smoke-20260607`: `screen.camera*.inViewY` 追加後に `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4` pass。rule AI remote smoke 1600F pass。
+- 同ログでJSON spot check pass。frame 870のplayer/object `screen.camera0` に `inViewX`、`inViewY`、`inView` が入り、player例は `inViewX=1` / `inViewY=0` / `inView=0`。
+- 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --require-player-found --label-source auto` pass。25行CSV生成。`self_screen0_in_view_y`、`self_screen1_in_view_y`、`opponent_screen0_in_view_y`、`opponent_screen1_in_view_y` の列追加を確認。
+- `python scripts\nsmb_mvl_ai_train_imitation.py logs\codex-ai-screen-inviewy-smoke-20260607\ai-dataset-player1-auto.csv logs\codex-ai-screen-inviewy-smoke-20260607\ai-imitation-player1-auto.npz --epochs 200 --lr 0.05` pass。`python scripts\nsmb_mvl_ai_predict_imitation.py logs\codex-ai-screen-inviewy-smoke-20260607\ai-imitation-player1-auto.npz logs\codex-ai-screen-inviewy-smoke-20260607\ai-dataset-player1-auto.csv logs\codex-ai-screen-inviewy-smoke-20260607\ai-predictions-player1-auto.csv --limit 10` pass。10行サンプルで `button_acc=0.975`、`exact=0.800`。
+- `python scripts\nsmb_mvl_ai_render_playlog_svg.py logs\codex-ai-screen-inviewy-smoke-20260607\ai-playlog.jsonl logs\codex-ai-screen-inviewy-smoke-20260607\frame-1050-player1.svg --player 1 --frame 1050` pass。
 
 ## Next Actions
 

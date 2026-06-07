@@ -13992,9 +13992,11 @@ void WriteAIScreenJson(
     }
     const std::int32_t screenY = SignedU32(y) - SignedU32(cameraY);
     const bool inViewX = screenX >= 0 && screenX < SignedU32(cameraWidth);
+    const bool inViewY = screenY >= 0 && screenY < SignedU32(cameraHeight);
     out << "\"" << name << "\":{\"x\":" << screenX
         << ",\"y\":" << screenY
         << ",\"inViewX\":" << (inViewX ? 1 : 0)
+        << ",\"inViewY\":" << (inViewY ? 1 : 0)
         << ",\"inView\":" << (IsInCameraRect(x, y, cameraX, cameraY, cameraWidth, cameraHeight) ? 1 : 0)
         << "}";
 }
