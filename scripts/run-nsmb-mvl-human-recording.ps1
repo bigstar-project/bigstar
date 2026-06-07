@@ -28,6 +28,16 @@ if ($LogDir -eq "") {
     $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
     $LogDir = "logs\nsmb-mvl-human-recording-stage0-$timestamp"
 }
+if ($MvlMatchSeed -eq "") {
+    $seedBytes = [byte[]]::new(4)
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($seedBytes)
+    } finally {
+        $rng.Dispose()
+    }
+    $MvlMatchSeed = "0x$('{0:x8}' -f [BitConverter]::ToUInt32($seedBytes, 0))"
+}
 
 $logRoot = Join-Path $repoRoot $LogDir
 $hostLog = Join-Path $logRoot "host"
