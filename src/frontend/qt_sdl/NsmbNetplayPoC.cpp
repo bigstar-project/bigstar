@@ -140,27 +140,25 @@ constexpr melonDS::u32 kPlayerBaseCollisionFlagOffset = 0x788;
 constexpr melonDS::u32 kPlayerBaseEnvironmentFlagOffset = 0x790;
 constexpr melonDS::u32 kPlayerBaseDamageCooldownOffset = 0x79C;
 constexpr melonDS::u32 kPlayerStageActorCollisionMgrOffset = 0x1D0;
-constexpr melonDS::u32 kCollisionMgrCollisionResultOffset = 0x70;
-constexpr melonDS::u32 kCollisionMgrBottomResultOffset = 0x74;
-constexpr melonDS::u32 kCollisionMgrBottomTileTypeOffset = 0x78;
-constexpr melonDS::u32 kCollisionMgrBottomTileYOffset = 0x7C;
-constexpr melonDS::u32 kCollisionMgrSurfaceAngleOffset = 0x80;
-constexpr melonDS::u32 kCollisionMgrAttachedTileXOffset = 0x84;
-constexpr melonDS::u32 kCollisionMgrAttachedTileYOffset = 0x86;
-constexpr melonDS::u32 kCollisionMgrSlopeTileXOffset = 0x88;
-constexpr melonDS::u32 kCollisionMgrSlopeTileYOffset = 0x8A;
-constexpr melonDS::u32 kCollisionMgrBottomModifierFlagsOffset = 0x8C;
-constexpr melonDS::u32 kCollisionMgrBottomModifierOffset = 0x8E;
-constexpr melonDS::u32 kCollisionMgrTopModifierFlagsOffset = 0x90;
-constexpr melonDS::u32 kCollisionMgrTopModifierOffset = 0x92;
-constexpr melonDS::u32 kCollisionMgrSideModifierFlagsOffset = 0x94;
-constexpr melonDS::u32 kCollisionMgrSideModifierOffset = 0x98;
-constexpr melonDS::u32 kCollisionMgrGroundSlopeTypeOffset = 0x9D;
-constexpr melonDS::u32 kCollisionMgrCeilingSlopeTypeOffset = 0x9E;
-constexpr melonDS::u32 kCollisionMgrSurfaceDirectionOffset = 0xA1;
-constexpr melonDS::u32 kCollisionMgrMoveDirectionOffset = 0xA2;
-constexpr melonDS::u32 kCollisionMgrDamageFlagsOffset = 0xA4;
-constexpr melonDS::u32 kCollisionMgrDamageTileTypeOffset = 0xA5;
+constexpr melonDS::u32 kCollisionMgrDeltaXOffset = 0x74;
+constexpr melonDS::u32 kCollisionMgrDeltaYOffset = 0x78;
+constexpr melonDS::u32 kCollisionMgrCollisionResultOffset = 0x7C;
+constexpr melonDS::u32 kCollisionMgrGroundCollisionOffset = 0x80;
+constexpr melonDS::u32 kCollisionMgrAttachedTileXOffset = 0x90;
+constexpr melonDS::u32 kCollisionMgrAttachedTileYOffset = 0x92;
+constexpr melonDS::u32 kCollisionMgrBottomModifierTileTypeOffset = 0x98;
+constexpr melonDS::u32 kCollisionMgrBottomSlopeTypeOffset = 0x9A;
+constexpr melonDS::u32 kCollisionMgrTopModifierTileTypeOffset = 0x9C;
+constexpr melonDS::u32 kCollisionMgrTopSlopeTypeOffset = 0x9E;
+constexpr melonDS::u32 kCollisionMgrSideModifierTileTypeOffset = 0xA0;
+constexpr melonDS::u32 kCollisionMgrByteA4Offset = 0xA4;
+constexpr melonDS::u32 kCollisionMgrByteA5Offset = 0xA5;
+constexpr melonDS::u32 kCollisionMgrPreviousByteA4Offset = 0xA6;
+constexpr melonDS::u32 kCollisionMgrPreviousByteA5Offset = 0xA7;
+constexpr melonDS::u32 kCollisionMgrFlagsA8Offset = 0xA8;
+constexpr melonDS::u32 kCollisionMgrTileByteABOffset = 0xAB;
+constexpr melonDS::u32 kCollisionMgrModifierStateOffset = 0xB0;
+constexpr melonDS::u32 kCollisionMgrUnknownB1Offset = 0xB1;
 constexpr melonDS::u32 kPlayerBaseUpdateLockedOffset = 0x7A8;
 constexpr melonDS::u32 kPlayerBaseCharacterIDOffset = 0x7AA;
 constexpr melonDS::u32 kPlayerBaseTransitioningFlagOffset = 0x7B0;
@@ -169,6 +167,8 @@ constexpr melonDS::u32 kPlayerBaseDefeatedFlagOffset = 0x7B3;
 constexpr melonDS::u32 kPlayerBasePlayerIDOffset = 0x7B4;
 constexpr melonDS::u32 kPlayerBaseVisibleFlagOffset = 0x7B5;
 constexpr melonDS::u32 kPlayerBaseTransitionStepOffset = 0xBAD;
+constexpr melonDS::u32 kPlayerBaseTileDamageFlagsOffset = 0xBB2;
+constexpr melonDS::u32 kPlayerBaseTileDamageTypeOffset = 0xBB3;
 constexpr melonDS::u32 kPlayerBaseLinkedActorOffset = 0x688;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
@@ -716,29 +716,26 @@ struct PlayerCollisionMgrSample
 {
     melonDS::u32 Found = 0;
     melonDS::u32 Base = 0;
+    melonDS::u32 DeltaX = 0;
+    melonDS::u32 DeltaY = 0;
     melonDS::u32 CollisionResult = 0;
-    melonDS::u32 BottomResult = 0;
-    melonDS::u32 BottomTileType = 0;
-    melonDS::u32 BottomTileY = 0;
-    melonDS::u32 SurfaceAngle = 0;
+    melonDS::u32 GroundCollision = 0;
     melonDS::u32 AttachedTileX = 0;
     melonDS::u32 AttachedTileY = 0;
-    melonDS::u32 SlopeTileX = 0;
-    melonDS::u32 SlopeTileY = 0;
-    melonDS::u32 BottomModifierFlags = 0;
-    melonDS::u32 BottomModifier = 0;
-    melonDS::u32 TopModifierFlags = 0;
-    melonDS::u32 TopModifier = 0;
-    melonDS::u32 SideModifierFlagsLeft = 0;
-    melonDS::u32 SideModifierFlagsRight = 0;
-    melonDS::u32 SideModifierLeft = 0;
-    melonDS::u32 SideModifierRight = 0;
-    melonDS::u32 GroundSlopeType = 0;
-    melonDS::u32 CeilingSlopeType = 0;
-    melonDS::u32 SurfaceDirection = 0;
-    melonDS::u32 MoveDirection = 0;
-    melonDS::u32 DamageFlags = 0;
-    melonDS::u32 DamageTileType = 0;
+    melonDS::u32 BottomModifierTileType = 0;
+    melonDS::u32 BottomSlopeType = 0;
+    melonDS::u32 TopModifierTileType = 0;
+    melonDS::u32 TopSlopeType = 0;
+    melonDS::u32 SideModifierTileTypeLeft = 0;
+    melonDS::u32 SideModifierTileTypeRight = 0;
+    melonDS::u32 ByteA4 = 0;
+    melonDS::u32 ByteA5 = 0;
+    melonDS::u32 PreviousByteA4 = 0;
+    melonDS::u32 PreviousByteA5 = 0;
+    melonDS::u32 FlagsA8 = 0;
+    melonDS::u32 TileByteAB = 0;
+    melonDS::u32 ModifierState = 0;
+    melonDS::u32 UnknownB1 = 0;
 };
 
 struct GameStateSample
@@ -856,6 +853,8 @@ struct GameStateSample
     melonDS::u32 PlayerActor0TransitFunc = 0;
     melonDS::u32 PlayerActor0TransitArg = 0;
     PlayerCollisionMgrSample PlayerActor0CollisionMgr;
+    melonDS::u32 PlayerActor0TileDamageFlags = 0;
+    melonDS::u32 PlayerActor0TileDamageType = 0;
     melonDS::u32 PlayerActor1Found = 0;
     melonDS::u32 PlayerActor1GUID = 0;
     melonDS::u32 PlayerActor1Base = 0;
@@ -896,6 +895,8 @@ struct GameStateSample
     melonDS::u32 PlayerActor1TransitFunc = 0;
     melonDS::u32 PlayerActor1TransitArg = 0;
     PlayerCollisionMgrSample PlayerActor1CollisionMgr;
+    melonDS::u32 PlayerActor1TileDamageFlags = 0;
+    melonDS::u32 PlayerActor1TileDamageType = 0;
     melonDS::u32 PlayerCount = 0;
     melonDS::u32 PlayerTransitionStatus0 = 0;
     melonDS::u32 PlayerTransitionStatus1 = 0;
@@ -12447,29 +12448,26 @@ PlayerCollisionMgrSample ReadPlayerCollisionMgrSample(melonDS::NDS* nds, const O
     const melonDS::u32 base = actor.Base + kPlayerStageActorCollisionMgrOffset;
     sample.Found = 1;
     sample.Base = base;
+    sample.DeltaX = nds->ARM9Read32(base + kCollisionMgrDeltaXOffset);
+    sample.DeltaY = nds->ARM9Read32(base + kCollisionMgrDeltaYOffset);
     sample.CollisionResult = nds->ARM9Read32(base + kCollisionMgrCollisionResultOffset);
-    sample.BottomResult = nds->ARM9Read32(base + kCollisionMgrBottomResultOffset);
-    sample.BottomTileType = nds->ARM9Read32(base + kCollisionMgrBottomTileTypeOffset);
-    sample.BottomTileY = nds->ARM9Read32(base + kCollisionMgrBottomTileYOffset);
-    sample.SurfaceAngle = nds->ARM9Read16(base + kCollisionMgrSurfaceAngleOffset);
+    sample.GroundCollision = nds->ARM9Read32(base + kCollisionMgrGroundCollisionOffset);
     sample.AttachedTileX = nds->ARM9Read16(base + kCollisionMgrAttachedTileXOffset);
     sample.AttachedTileY = nds->ARM9Read16(base + kCollisionMgrAttachedTileYOffset);
-    sample.SlopeTileX = nds->ARM9Read16(base + kCollisionMgrSlopeTileXOffset);
-    sample.SlopeTileY = nds->ARM9Read16(base + kCollisionMgrSlopeTileYOffset);
-    sample.BottomModifierFlags = nds->ARM9Read16(base + kCollisionMgrBottomModifierFlagsOffset);
-    sample.BottomModifier = nds->ARM9Read8(base + kCollisionMgrBottomModifierOffset);
-    sample.TopModifierFlags = nds->ARM9Read16(base + kCollisionMgrTopModifierFlagsOffset);
-    sample.TopModifier = nds->ARM9Read8(base + kCollisionMgrTopModifierOffset);
-    sample.SideModifierFlagsLeft = nds->ARM9Read16(base + kCollisionMgrSideModifierFlagsOffset);
-    sample.SideModifierFlagsRight = nds->ARM9Read16(base + kCollisionMgrSideModifierFlagsOffset + 2);
-    sample.SideModifierLeft = nds->ARM9Read8(base + kCollisionMgrSideModifierOffset);
-    sample.SideModifierRight = nds->ARM9Read8(base + kCollisionMgrSideModifierOffset + 1);
-    sample.GroundSlopeType = nds->ARM9Read8(base + kCollisionMgrGroundSlopeTypeOffset);
-    sample.CeilingSlopeType = nds->ARM9Read8(base + kCollisionMgrCeilingSlopeTypeOffset);
-    sample.SurfaceDirection = nds->ARM9Read8(base + kCollisionMgrSurfaceDirectionOffset);
-    sample.MoveDirection = nds->ARM9Read8(base + kCollisionMgrMoveDirectionOffset);
-    sample.DamageFlags = nds->ARM9Read8(base + kCollisionMgrDamageFlagsOffset);
-    sample.DamageTileType = nds->ARM9Read8(base + kCollisionMgrDamageTileTypeOffset);
+    sample.BottomModifierTileType = nds->ARM9Read16(base + kCollisionMgrBottomModifierTileTypeOffset);
+    sample.BottomSlopeType = nds->ARM9Read8(base + kCollisionMgrBottomSlopeTypeOffset);
+    sample.TopModifierTileType = nds->ARM9Read16(base + kCollisionMgrTopModifierTileTypeOffset);
+    sample.TopSlopeType = nds->ARM9Read8(base + kCollisionMgrTopSlopeTypeOffset);
+    sample.SideModifierTileTypeLeft = nds->ARM9Read16(base + kCollisionMgrSideModifierTileTypeOffset);
+    sample.SideModifierTileTypeRight = nds->ARM9Read16(base + kCollisionMgrSideModifierTileTypeOffset + 2);
+    sample.ByteA4 = nds->ARM9Read8(base + kCollisionMgrByteA4Offset);
+    sample.ByteA5 = nds->ARM9Read8(base + kCollisionMgrByteA5Offset);
+    sample.PreviousByteA4 = nds->ARM9Read8(base + kCollisionMgrPreviousByteA4Offset);
+    sample.PreviousByteA5 = nds->ARM9Read8(base + kCollisionMgrPreviousByteA5Offset);
+    sample.FlagsA8 = nds->ARM9Read8(base + kCollisionMgrFlagsA8Offset);
+    sample.TileByteAB = nds->ARM9Read8(base + kCollisionMgrTileByteABOffset);
+    sample.ModifierState = nds->ARM9Read8(base + kCollisionMgrModifierStateOffset);
+    sample.UnknownB1 = nds->ARM9Read8(base + kCollisionMgrUnknownB1Offset);
     return sample;
 }
 
@@ -12576,6 +12574,11 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.PlayerActor0VelY = players.Actor0.VelY;
     sample.PlayerActor0VelZ = players.Actor0.VelZ;
     sample.PlayerActor0CollisionMgr = ReadPlayerCollisionMgrSample(nds, players.Actor0);
+    if (players.Actor0.Found && IsValidMainRAMRange(nds, players.Actor0.Base + kPlayerBaseTileDamageTypeOffset, 1))
+    {
+        sample.PlayerActor0TileDamageFlags = nds->ARM9Read8(players.Actor0.Base + kPlayerBaseTileDamageFlagsOffset);
+        sample.PlayerActor0TileDamageType = nds->ARM9Read8(players.Actor0.Base + kPlayerBaseTileDamageTypeOffset);
+    }
     sample.PlayerActor1Found = players.Actor1.Found;
     sample.PlayerActor1GUID = players.Actor1.GUID;
     sample.PlayerActor1Base = players.Actor1.Base;
@@ -12592,6 +12595,11 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.PlayerActor1VelY = players.Actor1.VelY;
     sample.PlayerActor1VelZ = players.Actor1.VelZ;
     sample.PlayerActor1CollisionMgr = ReadPlayerCollisionMgrSample(nds, players.Actor1);
+    if (players.Actor1.Found && IsValidMainRAMRange(nds, players.Actor1.Base + kPlayerBaseTileDamageTypeOffset, 1))
+    {
+        sample.PlayerActor1TileDamageFlags = nds->ARM9Read8(players.Actor1.Base + kPlayerBaseTileDamageFlagsOffset);
+        sample.PlayerActor1TileDamageType = nds->ARM9Read8(players.Actor1.Base + kPlayerBaseTileDamageTypeOffset);
+    }
     auto readPlayerTransitionFields = [nds](const ObjectScanSample& actor,
                                             melonDS::u32& playerID,
                                             melonDS::u32& transitionStep,
@@ -14120,34 +14128,48 @@ void WriteAIPlayerCollisionMgrJson(std::ostream& out, const PlayerCollisionMgrSa
     }
     out << ",\"base\":";
     WriteJsonHex(out, collisionMgr.Base);
+    out << ",\"deltaX\":" << SignedU32(collisionMgr.DeltaX)
+        << ",\"deltaY\":" << SignedU32(collisionMgr.DeltaY);
     out << ",\"collisionResult\":";
     WriteJsonHex(out, collisionMgr.CollisionResult);
-    out << ",\"bottomResult\":";
-    WriteJsonHex(out, collisionMgr.BottomResult);
-    out << ",\"bottomTileType\":";
-    WriteJsonHex(out, collisionMgr.BottomTileType);
-    out << ",\"bottomTile\":";
-    WriteAITileTypeJson(out, collisionMgr.BottomTileType);
-    out << ",\"bottomTileY\":" << SignedU32(collisionMgr.BottomTileY)
-        << ",\"surfaceAngle\":" << static_cast<std::int16_t>(collisionMgr.SurfaceAngle)
-        << ",\"attachedTileX\":" << collisionMgr.AttachedTileX
+    out << ",\"groundCollision\":";
+    WriteJsonHex(out, collisionMgr.GroundCollision);
+    out << ",\"attachedTileX\":" << collisionMgr.AttachedTileX
         << ",\"attachedTileY\":" << collisionMgr.AttachedTileY
-        << ",\"slopeTileX\":" << collisionMgr.SlopeTileX
-        << ",\"slopeTileY\":" << collisionMgr.SlopeTileY
-        << ",\"bottomModifierFlags\":" << collisionMgr.BottomModifierFlags
-        << ",\"bottomModifier\":" << collisionMgr.BottomModifier
-        << ",\"topModifierFlags\":" << collisionMgr.TopModifierFlags
-        << ",\"topModifier\":" << collisionMgr.TopModifier
-        << ",\"sideModifierFlagsLeft\":" << collisionMgr.SideModifierFlagsLeft
-        << ",\"sideModifierFlagsRight\":" << collisionMgr.SideModifierFlagsRight
-        << ",\"sideModifierLeft\":" << collisionMgr.SideModifierLeft
-        << ",\"sideModifierRight\":" << collisionMgr.SideModifierRight
-        << ",\"groundSlopeType\":" << collisionMgr.GroundSlopeType
-        << ",\"ceilingSlopeType\":" << collisionMgr.CeilingSlopeType
-        << ",\"surfaceDirection\":" << collisionMgr.SurfaceDirection
-        << ",\"moveDirection\":" << collisionMgr.MoveDirection
-        << ",\"damageFlags\":" << collisionMgr.DamageFlags
-        << ",\"damageTileType\":" << static_cast<int>(static_cast<std::int8_t>(collisionMgr.DamageTileType))
+        << ",\"bottomModifierTileType\":";
+    WriteJsonHex(out, collisionMgr.BottomModifierTileType);
+    out << ",\"bottomModifierTile\":";
+    WriteAITileTypeJson(out, collisionMgr.BottomModifierTileType);
+    out << ",\"topModifierTileType\":";
+    WriteJsonHex(out, collisionMgr.TopModifierTileType);
+    out << ",\"topModifierTile\":";
+    WriteAITileTypeJson(out, collisionMgr.TopModifierTileType);
+    out << ",\"sideModifierTileTypeLeft\":";
+    WriteJsonHex(out, collisionMgr.SideModifierTileTypeLeft);
+    out << ",\"sideModifierTileLeft\":";
+    WriteAITileTypeJson(out, collisionMgr.SideModifierTileTypeLeft);
+    out << ",\"sideModifierTileTypeRight\":";
+    WriteJsonHex(out, collisionMgr.SideModifierTileTypeRight);
+    out << ",\"sideModifierTileRight\":";
+    WriteAITileTypeJson(out, collisionMgr.SideModifierTileTypeRight);
+    out << ",\"bottomSlopeType\":" << static_cast<int>(static_cast<std::int8_t>(collisionMgr.BottomSlopeType))
+        << ",\"topSlopeType\":" << static_cast<int>(static_cast<std::int8_t>(collisionMgr.TopSlopeType))
+        << ",\"byteA4\":" << collisionMgr.ByteA4
+        << ",\"byteA5\":" << collisionMgr.ByteA5
+        << ",\"previousByteA4\":" << collisionMgr.PreviousByteA4
+        << ",\"previousByteA5\":" << collisionMgr.PreviousByteA5
+        << ",\"flagsA8\":" << collisionMgr.FlagsA8
+        << ",\"tileByteAB\":" << static_cast<int>(static_cast<std::int8_t>(collisionMgr.TileByteAB))
+        << ",\"modifierState\":" << collisionMgr.ModifierState
+        << ",\"unknownB1\":" << static_cast<int>(static_cast<std::int8_t>(collisionMgr.UnknownB1))
+        << "}";
+}
+
+void WriteAIPlayerTileDamageJson(std::ostream& out, melonDS::u32 flags, melonDS::u32 type)
+{
+    out << "{\"flags\":" << flags
+        << ",\"type\":" << static_cast<int>(static_cast<std::int8_t>(type))
+        << ",\"active\":" << (flags != 0 ? 1 : 0)
         << "}";
 }
 
@@ -14213,6 +14235,10 @@ void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& samp
     const melonDS::u32 velY = v(sample.PlayerActor0VelY, sample.PlayerActor1VelY);
     const PlayerCollisionMgrSample& collisionMgr =
         p0 ? sample.PlayerActor0CollisionMgr : sample.PlayerActor1CollisionMgr;
+    const melonDS::u32 tileDamageFlags =
+        p0 ? sample.PlayerActor0TileDamageFlags : sample.PlayerActor1TileDamageFlags;
+    const melonDS::u32 tileDamageType =
+        p0 ? sample.PlayerActor0TileDamageType : sample.PlayerActor1TileDamageType;
     out << "{\"index\":" << index
         << ",\"found\":" << v(sample.PlayerActor0Found, sample.PlayerActor1Found)
         << ",\"guid\":";
@@ -14257,6 +14283,8 @@ void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& samp
     WriteAIContactJson(out, collisionFlag, environmentFlag);
     out << ",\"collisionMgr\":";
     WriteAIPlayerCollisionMgrJson(out, collisionMgr);
+    out << ",\"tileDamage\":";
+    WriteAIPlayerTileDamageJson(out, tileDamageFlags, tileDamageType);
     out
         << ",\"updateLocked\":" << v(sample.PlayerActor0UpdateLocked, sample.PlayerActor1UpdateLocked)
         << ",\"visible\":" << v(sample.PlayerActor0VisibleFlag, sample.PlayerActor1VisibleFlag)

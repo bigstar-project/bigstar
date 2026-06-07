@@ -104,12 +104,13 @@ def fall_text(player: dict[str, Any]) -> str:
 
 def terrain_text(player: dict[str, Any]) -> str:
     collision_mgr = player.get("collisionMgr") or {}
-    if not collision_mgr.get("found"):
+    tile_damage = player.get("tileDamage") or {}
+    if not collision_mgr.get("found") and not tile_damage:
         return "-"
-    tile_type = num(collision_mgr.get("bottomTileType"))
+    tile_type = num(collision_mgr.get("bottomModifierTileType", collision_mgr.get("bottomTileType")))
     if not sane_bottom_tile(tile_type):
-        return f"raw{tile_type & 0xFFFFFFFF:08X}"
-    tile = collision_mgr.get("bottomTile") or {}
+        return f"modRaw{tile_type & 0xFFFFFFFF:08X}"
+    tile = collision_mgr.get("bottomModifierTile") or collision_mgr.get("bottomTile") or {}
     names = []
     for key, label in [
         ("solid", "S"),
@@ -128,10 +129,13 @@ def terrain_text(player: dict[str, Any]) -> str:
     modifier = num(tile.get("modifier"))
     if modifier:
         names.append(f"M{modifier}")
-    damage = num(collision_mgr.get("damageTileType"), -1)
-    if damage >= 0:
-        names.append(f"D{damage}")
-    return "+".join(names) if names else "tile0"
+    damage_active = num(tile_damage.get("active"))
+    damage_type = num(tile_damage.get("type"), -1)
+    if damage_active:
+        names.append(f"D{damage_type}")
+    if num(collision_mgr.get("collisionResult")):
+        names.append("C")
+    return "+".join(names) if names else "terrain0"
 
 
 def nearest_text(record: dict[str, Any], player: int, category: str) -> str:

@@ -340,26 +340,44 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         for name in CONTACT_NAMES:
             row[f"{prefix}_contact_{name}"] = num(contact.get(name))
         collision_mgr = player_state.get("collisionMgr") or {}
-        bottom_tile = collision_mgr.get("bottomTile") or {}
+        tile_damage = player_state.get("tileDamage") or {}
+        bottom_tile_type = num(
+            collision_mgr.get("bottomModifierTileType", collision_mgr.get("bottomTileType"))
+        )
+        bottom_tile = (
+            collision_mgr.get("bottomModifierTile")
+            or collision_mgr.get("bottomTile")
+            or {}
+        )
         row[f"{prefix}_collision_mgr_found"] = num(collision_mgr.get("found"))
         row[f"{prefix}_collision_mgr_collision_result"] = num(collision_mgr.get("collisionResult"))
-        row[f"{prefix}_collision_mgr_bottom_result"] = num(collision_mgr.get("bottomResult"))
-        row[f"{prefix}_collision_mgr_bottom_tile_type"] = num(collision_mgr.get("bottomTileType"))
-        bottom_tile_type = num(collision_mgr.get("bottomTileType"))
+        row[f"{prefix}_collision_mgr_ground_collision"] = num(collision_mgr.get("groundCollision"))
+        row[f"{prefix}_collision_mgr_delta_x"] = num(collision_mgr.get("deltaX"))
+        row[f"{prefix}_collision_mgr_delta_y"] = num(collision_mgr.get("deltaY"))
+        row[f"{prefix}_collision_mgr_bottom_modifier_tile_type"] = bottom_tile_type
         bottom_tile_sane = sane_bottom_tile(bottom_tile_type)
-        row[f"{prefix}_collision_mgr_bottom_tile_sane"] = int(bottom_tile_sane)
-        row[f"{prefix}_collision_mgr_bottom_tile_y"] = num(collision_mgr.get("bottomTileY"))
-        row[f"{prefix}_collision_mgr_surface_angle"] = num(collision_mgr.get("surfaceAngle"))
+        row[f"{prefix}_collision_mgr_bottom_modifier_tile_sane"] = int(bottom_tile_sane)
         row[f"{prefix}_collision_mgr_attached_tile_x"] = num(collision_mgr.get("attachedTileX"))
         row[f"{prefix}_collision_mgr_attached_tile_y"] = num(collision_mgr.get("attachedTileY"))
-        row[f"{prefix}_collision_mgr_slope_tile_x"] = num(collision_mgr.get("slopeTileX"))
-        row[f"{prefix}_collision_mgr_slope_tile_y"] = num(collision_mgr.get("slopeTileY"))
-        row[f"{prefix}_collision_mgr_bottom_modifier"] = num(collision_mgr.get("bottomModifier"))
-        row[f"{prefix}_collision_mgr_top_modifier"] = num(collision_mgr.get("topModifier"))
-        row[f"{prefix}_collision_mgr_ground_slope_type"] = num(collision_mgr.get("groundSlopeType"))
-        row[f"{prefix}_collision_mgr_damage_tile_type"] = num(collision_mgr.get("damageTileType"))
+        row[f"{prefix}_collision_mgr_top_modifier_tile_type"] = num(collision_mgr.get("topModifierTileType"))
+        row[f"{prefix}_collision_mgr_side_modifier_tile_type_left"] = num(
+            collision_mgr.get("sideModifierTileTypeLeft")
+        )
+        row[f"{prefix}_collision_mgr_side_modifier_tile_type_right"] = num(
+            collision_mgr.get("sideModifierTileTypeRight")
+        )
+        row[f"{prefix}_collision_mgr_bottom_slope_type"] = num(collision_mgr.get("bottomSlopeType"))
+        row[f"{prefix}_collision_mgr_top_slope_type"] = num(collision_mgr.get("topSlopeType"))
+        row[f"{prefix}_collision_mgr_flags_a8"] = num(collision_mgr.get("flagsA8"))
+        row[f"{prefix}_collision_mgr_tile_byte_ab"] = num(collision_mgr.get("tileByteAB"))
+        row[f"{prefix}_collision_mgr_modifier_state"] = num(collision_mgr.get("modifierState"))
+        row[f"{prefix}_tile_damage_flags"] = num(tile_damage.get("flags"))
+        row[f"{prefix}_tile_damage_type"] = num(tile_damage.get("type"))
+        row[f"{prefix}_tile_damage_active"] = num(tile_damage.get("active"))
         for name in BOTTOM_TILE_NAMES:
-            row[f"{prefix}_bottom_tile_{name}"] = num(bottom_tile.get(name)) if bottom_tile_sane else 0
+            row[f"{prefix}_bottom_modifier_tile_{name}"] = (
+                num(bottom_tile.get(name)) if bottom_tile_sane else 0
+            )
 
     for name, bit in BUTTON_BITS.items():
         row[f"label_{name}"] = 1 if (held & (1 << bit)) else 0

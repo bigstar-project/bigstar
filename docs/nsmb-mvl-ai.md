@@ -38,7 +38,8 @@
 - 完了: AI play logの `objects[]` に `offset` と `vtable` を追加した。object ID/settingsだけで意味が分からないactorも、vtableを手がかりに後から分類できる。
 - 完了: `scripts/nsmb_mvl_ai_build_dataset.py` に `--label-source auto|applied|player|console` を追加した。ルールAIログは `appliedPlayerN`、人間プレイログはメモリ上の `playerN` / `consoleN` 入力を教師ラベルにできる。
 - 完了: `scripts/nsmb_mvl_ai_predict_imitation.py` で学習済み `.npz` とdataset CSVからオフライン推論し、予測held入力、button別確率、ラベルとの一致率をCSV出力できるようにした。
-- 完了: player actor内の `CollisionMgr` を読み、AI play logの `players[].collisionMgr` に bottom result、bottom tile type、modifier、slope tile、attached tile、damage tileを保存するようにした。CollisionMgrの内部offsetは追加検証が必要なため、CSVとinspectではbottom tile sanity checkを通った値だけをtile flagへ展開する。
+- 完了: player actor内の `CollisionMgr` を読み、AI play logの `players[].collisionMgr` に collision result、ground collision、modifier tile、attached tile、raw state byteを保存するようにした。逆アセンブルで `CollisionMgr +0x7C` がcollision result、`+0x98/+0x9C/+0xA0` がbottom/top/side modifier tile typeであることを確認し、以前の暫定 `bottomTileType` 読み取りは廃止した。
+- 完了: player本体の `+0xBB2/+0xBB3` を `players[].tileDamage` として保存するようにした。`Player::applyTileDamage` / `Player::updateCollision` の逆アセンブルで参照を確認した。
 
 ## AI Play Log
 
@@ -57,7 +58,9 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 
 `players[].contact` には、数値の衝突/環境フラグから人間が目視で判断する地形接触に近いbitを保存する。代表項目は `ground`、`predictGround`、`ceiling`、`wallLeft`、`wallRight`、`edgeGrab`、`water`、`liquid`、`submerged`、`quicksand`、`rope`、`tightrope`、`pole`、`spikesLeft`、`spikesRight`、`conveyorLeft`、`conveyorRight`、`wrapLeft`、`wrapRight`。CSVには `self_contact_*` / `opponent_contact_*` として展開する。
 
-`players[].collisionMgr` には、プレイヤーactor内のCollisionMgrから読んだ地形スキャン結果候補を保存する。`bottomTile` は `solid`、`coin`、`questionBlock`、`breakableBlock`、`brickBlock`、`slope`、`water`、`partialSolid`、`harmful`、`invisibleBlock`、modifier、storage contentsを持つ。これは「足元/接触中タイル」候補で、前方タイルや穴の完全判定ではない。現時点では不自然に多数のtile category bitが立つ値をsanity checkで除外してからCSV特徴量にする。
+`players[].collisionMgr` には、プレイヤーactor内のCollisionMgrから読んだ地形/接触結果を保存する。主な項目は `collisionResult`、`groundCollision`、`deltaX/Y`、`attachedTileX/Y`、`bottomModifierTileType`、`topModifierTileType`、`sideModifierTileTypeLeft/Right`。`bottomModifierTile` は modifier tile typeを `solid`、`coin`、`questionBlock`、`breakableBlock`、`brickBlock`、`slope`、`water`、`partialSolid`、`harmful`、`invisibleBlock`、modifier、storage contentsへ展開したもの。これは「足元そのもの」ではなく、CollisionMgrが保持するbottom modifier tileで、前方タイルや穴の完全判定ではない。CSV/inspectでは不自然に多数のtile category bitが立つ値をsanity checkで除外する。
+
+`players[].tileDamage` には、Player本体に保存されるtile damage flags/typeを保存する。`active=1` のときはlava/poison/その他ダメージ地形などの接触候補として扱う。通常の床接地や壁接触は `contact` と `collisionMgr.collisionResult` を見る。
 
 `players[].screen` / `players[].fallRisk` には、playerをカメラ座標へ投影した情報を保存する。`fallRisk` は `screenY0/1`、`cameraBottomDistance0/1`、`nearCameraBottom0/1`、`belowCamera0/1`、`velYPositive/Negative` を持つ。完全な穴判定ではないが、目視上の「下へ落ちている」「画面下端に近い」を学習データに入れるための暫定特徴。
 
@@ -106,7 +109,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 ## Current Blockers / Unknowns
 
 - object IDと画面上の意味の対応はまだ完全ではない。coin/item/enemy/platform/hazard の初期カテゴリは入ったが、ログを見ながら block、item box、ステージ固有ギミックの分類を増やす。
-- 目視同等にするには、穴/落下死ライン、ブロック状態、アイテム箱状態、タイル地形の前方サンプルが不足している。X方向は左右ラップ込みの可視判定まで入り、player接触地形、足元CollisionMgr tile、playerの画面Y/カメラ底距離は取れるようになったが、objectの完全な `inView` はY側の対応を追加で詰める必要がある。
+- 目視同等にするには、穴/落下死ライン、ブロック状態、アイテム箱状態、タイル地形の前方サンプルが不足している。X方向は左右ラップ込みの可視判定まで入り、player接触地形、CollisionMgr接触結果、modifier tile、tile damage、playerの画面Y/カメラ底距離は取れるようになったが、objectの完全な `inView` はY側の対応を追加で詰める必要がある。
 - 自己対戦に進む前に、ログschemaを実プレイログで増強し、学習済みモデルを入力へ戻す推論経路を作る必要がある。
 
 ## Verification
@@ -138,11 +141,16 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --require-player-found --label-source auto` pass。25行CSV生成。`self_collision_mgr_bottom_tile_sane` は `0/1` 両方を含み、sanity check外のbottom tile category列は0へ落とすことを確認。
 - `python -m py_compile scripts\nsmb_mvl_ai_build_dataset.py scripts\nsmb_mvl_ai_inspect_playlog.py scripts\nsmb_mvl_ai_predict_imitation.py` pass。
 - `python scripts\nsmb_mvl_ai_train_imitation.py logs\codex-ai-collisionmgr-smoke-20260607\ai-dataset-player1-auto-sane.csv logs\codex-ai-collisionmgr-smoke-20260607\ai-imitation-player1-auto-sane.npz --epochs 200 --lr 0.05` pass。`python scripts\nsmb_mvl_ai_predict_imitation.py logs\codex-ai-collisionmgr-smoke-20260607\ai-imitation-player1-auto-sane.npz logs\codex-ai-collisionmgr-smoke-20260607\ai-dataset-player1-auto-sane.csv logs\codex-ai-collisionmgr-smoke-20260607\ai-predictions-player1-auto-sane.csv --limit 10` pass。10行サンプルで `button_acc=0.975`、`exact=0.800`。
+- 逆アセンブル確認: `CollisionMgr::updatePlayer` / `updatePlayerVertical` / `getBottomModifierType` / `getTopModifierType` / `getSideModifierType` / `Player::applyTileDamage` / `Player::updateCollision` を `tools\nsmb_us_rom_tool.py disasm` で確認。`CollisionMgr +0x7C` collision result、`+0x80` ground collision、`+0x90/+0x92` attached tile、`+0x98/+0x9C/+0xA0` bottom/top/side modifier tile type、Player `+0xBB2/+0xBB3` tile damage flags/typeをログsourceに採用した。
+- `logs/codex-ai-tiledamage-smoke-20260607`: CollisionMgr offset補正と `tileDamage` 追加後に `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4` pass。rule AI remote smoke 1600F pass。
+- 同ログで `python scripts\nsmb_mvl_ai_inspect_playlog.py ... --player 1 --limit 10` pass。`terrain` 列で `terrain0` / `C` が表示され、旧暫定offset由来の `rawFFFFDA80` は出なくなった。
+- 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --require-player-found --label-source auto` pass。25行CSV生成。`self_collision_mgr_ground_collision`、`self_collision_mgr_bottom_modifier_tile_type`、`self_tile_damage_flags/type/active`、`self_bottom_modifier_tile_*` の列追加を確認。
+- `python scripts\nsmb_mvl_ai_train_imitation.py logs\codex-ai-tiledamage-smoke-20260607\ai-dataset-player1-auto.csv logs\codex-ai-tiledamage-smoke-20260607\ai-imitation-player1-auto.npz --epochs 200 --lr 0.05` pass。`python scripts\nsmb_mvl_ai_predict_imitation.py logs\codex-ai-tiledamage-smoke-20260607\ai-imitation-player1-auto.npz logs\codex-ai-tiledamage-smoke-20260607\ai-dataset-player1-auto.csv logs\codex-ai-tiledamage-smoke-20260607\ai-predictions-player1-auto.csv --limit 10` pass。10行サンプルで `button_acc=0.958`、`exact=0.700`。
+- `python scripts\nsmb_mvl_ai_render_playlog_svg.py logs\codex-ai-tiledamage-smoke-20260607\ai-playlog.jsonl logs\codex-ai-tiledamage-smoke-20260607\frame-1050-player1.svg --player 1 --frame 1050` pass。
 
 ## Next Actions
 
 - camera Y / player display Y の対応を解析し、完全な画面内判定を入れる。
-- CollisionMgr内部offsetを追加検証する。現時点でも足元候補はログに残すが、`bottomTileType` に不自然値が出るためCSV/inspect側でsanity gateしている。
-- 穴/落下死ライン、ブロック/アイテム箱、前方タイル地形サンプルをメモリから取れる場所を解析してAI play logへ足す。足元タイル候補は `players[].collisionMgr.bottomTile` で取得済み。
+- 穴/落下死ライン、ブロック/アイテム箱、前方タイル地形サンプルをメモリから取れる場所を解析してAI play logへ足す。接触結果、modifier tile、tile damageは取得済みだが、目視上の「前に穴がある」「?ブロックがある」はまだ直接取れていない。
 - 学習済み `.npz` をPoCまたは外部sidecarから推論して入力へ戻す経路を作る。
 - object categoryをログ実例で検証し、unknownの `0x145` とステージ固有objectの意味を詰める。`0x021` は実ログでBig Star actorと同じvtableだったため `big_star_related` に分類した。`0x0F0` はrollback notes上のItem付随短命effectとして `item_spawn_effect` に分類した。
