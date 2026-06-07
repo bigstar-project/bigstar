@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -197,13 +198,42 @@ def audit_playlog(path: Path, max_samples: int, fireball_owner_min_confidence: i
     }
 
 
+def strict_failures(report: dict[str, Any], args: argparse.Namespace) -> list[str]:
+    failures: list[str] = []
+    if args.fail_on_visual_state_missing and any(num(value) for value in report.get("visualStateMissing") or []):
+        failures.append(f"{report['playlog']}: visualStateMissing={report.get('visualStateMissing')}")
+    if args.fail_on_invincibility_unknown and any(num(value) for value in report.get("invincibilityUnknown") or []):
+        failures.append(f"{report['playlog']}: invincibilityUnknown={report.get('invincibilityUnknown')}")
+    if args.fail_on_visible_unknown_object and report.get("visibleUnknownObjects"):
+        failures.append(f"{report['playlog']}: visibleUnknownObjects={report.get('visibleUnknownObjects')}")
+    if args.fail_on_fireball_low_confidence and num(report.get("fireballOwnerLowConfidence")):
+        failures.append(
+            f"{report['playlog']}: fireballOwnerLowConfidence={report.get('fireballOwnerLowConfidence')}"
+        )
+    return failures
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("playlogs", type=Path, nargs="+")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--max-samples", type=int, default=8)
     parser.add_argument("--fireball-owner-min-confidence", type=int, default=60)
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Fail on visualState missing, invincibility unknown, visible unknown objects, or low-confidence fireball owner.",
+    )
+    parser.add_argument("--fail-on-visual-state-missing", action="store_true")
+    parser.add_argument("--fail-on-invincibility-unknown", action="store_true")
+    parser.add_argument("--fail-on-visible-unknown-object", action="store_true")
+    parser.add_argument("--fail-on-fireball-low-confidence", action="store_true")
     args = parser.parse_args()
+    if args.strict:
+        args.fail_on_visual_state_missing = True
+        args.fail_on_invincibility_unknown = True
+        args.fail_on_visible_unknown_object = True
+        args.fail_on_fireball_low_confidence = True
 
     reports = [
         audit_playlog(path, args.max_samples, args.fireball_owner_min_confidence)
@@ -215,6 +245,11 @@ def main() -> int:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text + "\n", encoding="utf-8")
     print(text)
+    failures = [failure for report in reports for failure in strict_failures(report, args)]
+    if failures:
+        for failure in failures:
+            print(f"FAIL: {failure}", file=sys.stderr)
+        return 1
     return 0
 
 
