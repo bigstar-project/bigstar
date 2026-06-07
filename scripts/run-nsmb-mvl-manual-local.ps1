@@ -50,6 +50,10 @@ param(
     [int]$GameStateTraceStartFrame = 0,
     [int]$GameStateTraceEndFrame = 0,
     [switch]$GameStateTraceExtended,
+    [string]$HostAIPlayLog = "",
+    [string]$ClientAIPlayLog = "",
+    [int]$AIPlayLogInterval = 1,
+    [int]$AIPlayLogMaxObjects = 128,
     [switch]$InputNetplayTrace,
     [switch]$TracePlayerLifeChanges,
     [switch]$TracePlayerDefeated,
@@ -431,6 +435,39 @@ $hostErr = Join-Path $wrapperLog "host-wrapper.err.txt"
 $clientOut = Join-Path $wrapperLog "client-wrapper.out.txt"
 $clientErr = Join-Path $wrapperLog "client-wrapper.err.txt"
 
+$oldAIEnv = @{}
+foreach ($name in @(
+    "MELONDS_NSML_AI_PLAY_LOG",
+    "MELONDS_NSML_AI_PLAY_LOG_INTERVAL",
+    "MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS"
+)) {
+    $oldAIEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+}
+
+function Set-AIPlayLogEnv {
+    param([string]$Path)
+    if ($Path -eq "") {
+        Remove-Item Env:\MELONDS_NSML_AI_PLAY_LOG -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_AI_PLAY_LOG_INTERVAL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS -ErrorAction SilentlyContinue
+        return
+    }
+
+    $resolved = if ([System.IO.Path]::IsPathRooted($Path)) {
+        $Path
+    } else {
+        Join-Path $repoRoot $Path
+    }
+    $parent = Split-Path -Parent $resolved
+    if ($parent) {
+        New-Item -ItemType Directory -Force -Path $parent | Out-Null
+    }
+    $env:MELONDS_NSML_AI_PLAY_LOG = $resolved
+    $env:MELONDS_NSML_AI_PLAY_LOG_INTERVAL = "$AIPlayLogInterval"
+    $env:MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS = "$AIPlayLogMaxObjects"
+}
+
+Set-AIPlayLogEnv -Path $HostAIPlayLog
 $hostProc = Start-Process -FilePath "powershell.exe" `
     -ArgumentList $hostArgs `
     -WorkingDirectory $repoRoot `
@@ -441,6 +478,7 @@ $hostProc = Start-Process -FilePath "powershell.exe" `
 
 Start-Sleep -Milliseconds $HostStartupDelayMs
 
+Set-AIPlayLogEnv -Path $ClientAIPlayLog
 $clientProc = Start-Process -FilePath "powershell.exe" `
     -ArgumentList $clientArgs `
     -WorkingDirectory $repoRoot `
@@ -449,12 +487,23 @@ $clientProc = Start-Process -FilePath "powershell.exe" `
     -PassThru `
     -WindowStyle Hidden
 
+foreach ($entry in $oldAIEnv.GetEnumerator()) {
+    if ($null -eq $entry.Value) {
+        [Environment]::SetEnvironmentVariable($entry.Key, $null, "Process")
+    } else {
+        [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
+    }
+}
+
 Write-Host "Started NSMB MvL manual local session."
 Write-Host "host wrapper pid=$($hostProc.Id) log=$hostLog"
 Write-Host "client wrapper pid=$($clientProc.Id) log=$clientLog"
 Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
 Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames networkPump=$([bool]$NetworkPumpThread) networkPumpSleepUs=$NetworkPumpSleepUs packetBridgeStart=$PacketBridgeStartFrame renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$([bool]$PerfBreakdown)"
 Write-Host "gameplay heartbeat interval=$GameplayHeartbeatInterval"
+if ($HostAIPlayLog -or $ClientAIPlayLog) {
+    Write-Host "AI play log host=$(if ($HostAIPlayLog) { $HostAIPlayLog } else { 'off' }) client=$(if ($ClientAIPlayLog) { $ClientAIPlayLog } else { 'off' }) interval=$AIPlayLogInterval maxObjects=$AIPlayLogMaxObjects"
+}
 Write-Host "trace gameState=$([bool]$GameStateTrace) interval=$GameStateTraceInterval extended=$([bool]$GameStateTraceExtended) lifeChanges=$([bool]$TracePlayerLifeChanges) defeated=$([bool]$TracePlayerDefeated)"
 if ($PlanDActorSnapshot) {
     Write-Host "Plan-D actor/global/world snapshot enabled playerInterval=$PlayerStateSyncInterval playerPredict=$PlayerStateMaxPredictFrames worldInterval=$WorldStateSyncInterval worldPredict=$WorldStateMaxPredictFrames worldRescan=$WorldStateActorRescanInterval itemSpawn=1 actorSnapshot=$([bool]$WorldStateApplyActorSnapshot)"

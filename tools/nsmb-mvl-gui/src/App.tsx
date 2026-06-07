@@ -1,3 +1,4 @@
+import { AIReplayViewer } from './launcher/AIReplayViewer';
 import { BattleView } from './launcher/BattleView';
 import { LauncherShell } from './launcher/LauncherShell';
 import { OnboardingGate } from './launcher/OnboardingGate';
@@ -35,6 +36,7 @@ export function App() {
             summary={launcher.summary}
             updateField={launcher.updateField}
           />
+          <AIReplayViewer />
           <SettingsView
             actions={launcher.actions}
             form={launcher.form}

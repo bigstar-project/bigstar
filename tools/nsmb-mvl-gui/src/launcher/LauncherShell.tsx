@@ -1,4 +1,10 @@
-import { Flag, FlagCheckered, Gear, Wrench } from '@phosphor-icons/react';
+import {
+  Brain,
+  Flag,
+  FlagCheckered,
+  Gear,
+  Wrench,
+} from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
 import { css, cx } from 'styled-system/css';
 import { token } from 'styled-system/tokens';
@@ -58,6 +64,42 @@ function updateButtonClass(updateStatus: UpdateStatus) {
     borderColor: 'gray.surface.border',
     color: 'fg.default',
   });
+}
+
+function viewTitle(view: View) {
+  if (view === 'battle') return '対戦';
+  if (view === 'ai') return 'AIログ';
+  return '設定';
+}
+
+function viewDescription(view: View) {
+  if (view === 'battle') return 'オンラインでライバルと対戦しよう！';
+  if (view === 'ai') return '人間プレイとAIログを確認しましょう';
+  return 'オンライン対戦の環境を整えましょう';
+}
+
+function viewIcon(view: View) {
+  if (view === 'battle') {
+    return (
+      <Flag
+        className={css({ color: 'red.plain.fg' })}
+        size={36}
+        weight="fill"
+      />
+    );
+  }
+  if (view === 'ai') {
+    return (
+      <Brain
+        className={css({ color: 'yellow.plain.fg' })}
+        size={36}
+        weight="fill"
+      />
+    );
+  }
+  return (
+    <Gear className={css({ color: 'fg.muted' })} size={36} weight="fill" />
+  );
 }
 
 export function LauncherShell({
@@ -255,6 +297,59 @@ export function LauncherShell({
                   </span>
                 </Tabs.Trigger>
                 <Tabs.Trigger
+                  aria-label="AIログ"
+                  className={css({
+                    alignItems: 'center',
+                    borderColor: 'transparent',
+                    borderRadius: 'l2',
+                    borderWidth: '1px',
+                    color: 'fg.muted',
+                    display: 'flex',
+                    fontWeight: 'black',
+                    gap: '3',
+                    minH: '14',
+                    outline: 'none',
+                    px: '3',
+                    textAlign: 'left',
+                    transition: 'common',
+                    _hover: {
+                      bg: 'blue.subtle.bg',
+                      borderColor: 'blue.outline.border',
+                    },
+                    '&[data-selected]': {
+                      bg: 'blue.subtle.bg',
+                      borderColor: 'blue.solid.bg',
+                      color: 'fg.default',
+                    },
+                    '&[data-selected] svg': {
+                      color: 'yellow.plain.fg',
+                    },
+                    '@media (max-width: 1280px)': {
+                      justifyContent: 'center',
+                    },
+                  })}
+                  value="ai"
+                >
+                  <Brain
+                    className={css({
+                      color: 'fg.muted',
+                      flexShrink: '0',
+                    })}
+                    size={28}
+                    weight="fill"
+                  />
+                  <span
+                    className={css({
+                      textStyle: 'md',
+                      '@media (max-width: 1280px)': {
+                        display: 'none',
+                      },
+                    })}
+                  >
+                    AIログ
+                  </span>
+                </Tabs.Trigger>
+                <Tabs.Trigger
                   aria-label="設定"
                   className={css({
                     alignItems: 'center',
@@ -394,19 +489,7 @@ export function LauncherShell({
                     gap: '3',
                   })}
                 >
-                  {activeView === 'battle' ? (
-                    <Flag
-                      className={css({ color: 'red.plain.fg' })}
-                      size={36}
-                      weight="fill"
-                    />
-                  ) : (
-                    <Gear
-                      className={css({ color: 'fg.muted' })}
-                      size={36}
-                      weight="fill"
-                    />
-                  )}
+                  {viewIcon(activeView)}
                   <h1
                     className={css({
                       color: 'fg.default',
@@ -414,7 +497,7 @@ export function LauncherShell({
                       textStyle: '3xl',
                     })}
                   >
-                    {activeView === 'battle' ? '対戦' : '設定'}
+                    {viewTitle(activeView)}
                   </h1>
                 </div>
                 <p
@@ -424,9 +507,7 @@ export function LauncherShell({
                     textStyle: 'sm',
                   })}
                 >
-                  {activeView === 'battle'
-                    ? 'オンラインでライバルと対戦しよう！'
-                    : 'オンライン対戦の環境を整えましょう'}
+                  {viewDescription(activeView)}
                 </p>
               </div>
               <div

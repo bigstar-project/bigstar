@@ -1,7 +1,7 @@
 import type { RoomSummary } from '../matchmakingClient';
 import type { BridgeDiagnostics, FormState } from '../types';
 
-export type View = 'battle' | 'settings';
+export type View = 'battle' | 'ai' | 'settings';
 
 export type UpdateStatus = {
   phase:

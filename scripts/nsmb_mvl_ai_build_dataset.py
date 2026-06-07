@@ -37,6 +37,9 @@ NEAREST_CATEGORIES = [
     "coin",
     "moving_hazard",
     "hazard",
+    "projectile",
+    "player_fireball",
+    "enemy_fireball",
     "enemy_goomba",
     "enemy_koopa",
     "platform",
@@ -54,6 +57,9 @@ CATEGORY_COUNT_NAMES = [
     "coin",
     "moving_hazard",
     "hazard",
+    "projectile",
+    "player_fireball",
+    "enemy_fireball",
     "enemy_goomba",
     "enemy_koopa",
     "platform",
@@ -318,6 +324,8 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
             break
 
     row: dict[str, int] = {
+        "recording_index": num(record.get("_recording_index")),
+        "recording_frame_index": num(record.get("_recording_frame_index")),
         "frame": num(record.get("frame")),
         "stage_id": num((record.get("stage") or {}).get("id")),
         "stage_group": num((record.get("stage") or {}).get("group")),
@@ -514,9 +522,54 @@ def iter_records(path: Path) -> Any:
                 raise ValueError(f"{path}:{line_no}: invalid JSON: {exc}") from exc
 
 
+def manifest_playlog_paths(path: Path) -> list[Path]:
+    with path.open("r", encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    base = path.parent
+    if isinstance(manifest, dict) and "recordings" in manifest:
+        results: list[Path] = []
+        for item in manifest.get("recordings") or []:
+            if not isinstance(item, dict):
+                continue
+            recording_path = item.get("manifest") or item.get("path")
+            if not recording_path:
+                continue
+            nested = Path(str(recording_path))
+            if not nested.is_absolute():
+                nested = base / nested
+            results.extend(manifest_playlog_paths(nested))
+        return results
+
+    if isinstance(manifest, dict):
+        playlog = (
+            manifest.get("playLog")
+            or manifest.get("playLogPath")
+            or manifest.get("aiPlayLog")
+            or manifest.get("aiPlayLogPath")
+        )
+        if playlog:
+            playlog_path = Path(str(playlog))
+            if not playlog_path.is_absolute():
+                playlog_path = base / playlog_path
+            return [playlog_path]
+
+    raise ValueError(f"{path}: manifest does not contain playLog/playLogPath or recordings")
+
+
+def input_playlog_paths(path: Path) -> list[Path]:
+    if path.suffix.lower() in {".json", ".manifest"}:
+        return manifest_playlog_paths(path)
+    return [path]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("input", type=Path, help="AI play log JSONL")
+    parser.add_argument(
+        "input",
+        type=Path,
+        help="AI play log JSONL, recording manifest JSON, or recordings-index JSON",
+    )
     parser.add_argument("output", type=Path, help="output CSV")
     parser.add_argument("--player", type=int, choices=[0, 1], default=1)
     parser.add_argument(
@@ -533,14 +586,19 @@ def main() -> int:
     args = parser.parse_args()
 
     rows: list[dict[str, int]] = []
-    for record in iter_records(args.input):
-        if num(record.get("frame")) < args.min_frame:
-            continue
-        if args.require_player_found and not record["players"][args.player].get("found"):
-            continue
-        if label_held(record, args.player, args.label_source) is None:
-            continue
-        rows.append(build_row(record, args.player, args.label_source))
+    for recording_index, playlog_path in enumerate(input_playlog_paths(args.input)):
+        recording_frame_index = 0
+        for record in iter_records(playlog_path):
+            if num(record.get("frame")) < args.min_frame:
+                continue
+            if args.require_player_found and not record["players"][args.player].get("found"):
+                continue
+            if label_held(record, args.player, args.label_source) is None:
+                continue
+            record["_recording_index"] = recording_index
+            record["_recording_frame_index"] = recording_frame_index
+            rows.append(build_row(record, args.player, args.label_source))
+            recording_frame_index += 1
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     if not rows:

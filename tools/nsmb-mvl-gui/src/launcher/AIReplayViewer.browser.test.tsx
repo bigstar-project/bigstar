@@ -1,0 +1,85 @@
+import { describe, expect, test } from 'vitest';
+import { render } from 'vitest-browser-react';
+import { Tabs } from '../components/ui';
+import { AIReplayViewer } from './AIReplayViewer';
+
+const playlogLine = JSON.stringify({
+  frame: 900,
+  hash: '0x12345678',
+  inputs: {
+    player0: { held: 0x810 },
+    player1: { held: 0x20 },
+  },
+  players: [
+    {
+      found: 1,
+      pos: { x: 409600, y: 819200, z: 0 },
+      powerup: 0,
+      dead: 0,
+      battleStars: 0,
+      coins: 0,
+      tileProbe: {
+        summary: { effectiveHoleAhead: 0, wallAhead: 0 },
+        samples: [],
+      },
+    },
+    {
+      found: 1,
+      pos: { x: 450560, y: 819200, z: 0 },
+      powerup: 0,
+      dead: 0,
+      battleStars: 0,
+      coins: 0,
+      tileProbe: {
+        summary: { effectiveHoleAhead: 1, wallAhead: 0 },
+        samples: [],
+      },
+    },
+  ],
+  objectSummary: { active: 2 },
+  visualSummary: {
+    categoryCounts: { coin: 1, player: 2 },
+    visibleCamera0: 2,
+    visibleCamera1: 2,
+  },
+  objects: [
+    {
+      category: 'coin',
+      objectId: '0x0042',
+      settings: '0x00000000',
+      pos: { x: 458752, y: 806912, z: 0 },
+    },
+  ],
+});
+
+describe('AIログビューア', () => {
+  test('JSONLを読み込んでフレームと相対配置を表示する', async () => {
+    const screen = await render(
+      <Tabs.Root value="ai">
+        <AIReplayViewer />
+      </Tabs.Root>,
+    );
+
+    const input =
+      document.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(input).not.toBeNull();
+    const files = new DataTransfer();
+    files.items.add(
+      new File([`${playlogLine}\n`], 'playlog.jsonl', {
+        type: 'application/jsonl',
+      }),
+    );
+    Object.defineProperty(input, 'files', {
+      configurable: true,
+      value: files.files,
+    });
+    input?.dispatchEvent(new Event('change', { bubbles: true }));
+
+    await expect.element(screen.getByText(/index 0/)).toBeVisible();
+    await expect.element(screen.getByText('RIGHT+Y')).toBeVisible();
+    await expect.element(screen.getByTestId('ai-replay-scene')).toBeVisible();
+    await expect
+      .element(screen.getByText('coin', { exact: true }))
+      .toBeVisible();
+  });
+});
