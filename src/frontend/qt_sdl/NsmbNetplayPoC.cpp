@@ -223,6 +223,7 @@ constexpr melonDS::u32 kAIFireballSlotPosOffset = 0x10;
 constexpr melonDS::u32 kAIFireballSlotPrevPosOffset = 0x20;
 constexpr melonDS::u32 kAIFireballSlotVelOffset = 0x30;
 constexpr melonDS::u32 kAIFireballSlotActiveOffset = 0x80;
+// Fireball::create stores the spawn kind at +0x81. For player fireballs, kind 0/1 is the owner player id.
 constexpr melonDS::u32 kAIFireballSlotKindOffset = 0x81;
 constexpr melonDS::u32 kAIFireballSlotStateOffset = 0x83;
 constexpr melonDS::u32 kAIFireballSlotFacingOffset = 0x85;
@@ -14364,6 +14365,20 @@ int AIFireballOwnerCandidateStateless(const GameStateSample& sample, int slotInd
     if (slotIndex < 0 || slotIndex >= kAIFireballSlotCount || sample.FireballSlotActive[slotIndex] == 0)
         return -1;
 
+    const int kind = static_cast<int>(sample.FireballSlotKind[slotIndex]);
+    if (kind == 0 || kind == 1)
+    {
+        confidence = 100;
+        heuristic = 100;
+        return kind;
+    }
+    if (kind == 2 || kind == 3)
+    {
+        confidence = 100;
+        heuristic = 101;
+        return -1;
+    }
+
     const std::int64_t fireX = SignedU32(sample.FireballSlotPosX[slotIndex]);
     const std::int64_t fireY = SignedU32(sample.FireballSlotPosY[slotIndex]);
     const std::int64_t velX = SignedU32(sample.FireballSlotVelX[slotIndex]);
@@ -14447,6 +14462,8 @@ int AIFireballOwnerCandidate(
     confidence = statelessConfidence;
     heuristic = statelessHeuristic;
     if (slotIndex < 0 || slotIndex >= kAIFireballSlotCount || sample.FireballSlotActive[slotIndex] == 0)
+        return statelessOwner;
+    if (sample.FireballSlotKind[slotIndex] <= 3)
         return statelessOwner;
     if (instanceID < 0 || instanceID >= 16)
         return statelessOwner;
@@ -15492,19 +15509,28 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             statelessOwnerConfidence,
             statelessOwnerHeuristic,
             ownerTracked);
+        const bool sourceKindVerified = sample.FireballSlotKind[i] <= 3;
         G.AIPlayLog << "{\"index\":" << i
             << ",\"active\":" << sample.FireballSlotActive[i]
             << ",\"kind\":" << sample.FireballSlotKind[i]
+            << ",\"sourceKind\":" << sample.FireballSlotKind[i]
+            << ",\"kindName\":\""
+            << (sample.FireballSlotKind[i] == 0 ? "player0" :
+                    sample.FireballSlotKind[i] == 1 ? "player1" :
+                    sample.FireballSlotKind[i] == 2 ? "piranha_plant" :
+                    sample.FireballSlotKind[i] == 3 ? "fire_bro" : "unknown")
+            << "\""
             << ",\"state\":" << sample.FireballSlotState[i]
             << ",\"facing\":" << sample.FireballSlotFacing[i]
             << ",\"ownerCandidate\":" << ownerCandidate
             << ",\"ownerConfidence\":" << ownerConfidence
             << ",\"ownerHeuristic\":" << ownerHeuristic
             << ",\"ownerTracked\":" << (ownerTracked ? 1 : 0)
+            << ",\"ownerSource\":\"" << (sourceKindVerified ? "slotKind" : "positionVelocityHeuristic") << "\""
             << ",\"statelessOwnerCandidate\":" << statelessOwnerCandidate
             << ",\"statelessOwnerConfidence\":" << statelessOwnerConfidence
             << ",\"statelessOwnerHeuristic\":" << statelessOwnerHeuristic
-            << ",\"ownerVerified\":0"
+            << ",\"ownerVerified\":" << (sourceKindVerified ? 1 : 0)
             << ",\"stateBytesOffset\":";
         WriteJsonHex(G.AIPlayLog, kAIFireballSlotActiveOffset, 2);
         G.AIPlayLog << ",\"stateBytes\":[";

@@ -53,6 +53,15 @@ def num(value: Any, default: int = 0) -> int:
     return default
 
 
+def fireball_owner_info(slot: dict[str, Any]) -> tuple[int, int, int]:
+    kind = num(slot.get("sourceKind"), num(slot.get("kind"), -1))
+    if kind in (0, 1):
+        return kind, 100, 1
+    if kind in (2, 3):
+        return -1, 100, 1
+    return num(slot.get("ownerCandidate"), -1), num(slot.get("ownerConfidence")), num(slot.get("ownerVerified"))
+
+
 def iter_records(path: Path):
     with path.open("r", encoding="utf-8") as f:
         for line_no, line in enumerate(f, 1):
@@ -159,15 +168,14 @@ def audit_playlog(path: Path, max_samples: int, fireball_owner_min_confidence: i
         fireballs = special_objects.get("fireballs") or {}
         for slot in fireballs.get("slots") or []:
             fireball_slots += 1
-            owner = num(slot.get("ownerCandidate"), -1)
-            confidence = num(slot.get("ownerConfidence"))
+            owner, confidence, owner_verified = fireball_owner_info(slot)
             if num(slot.get("ownerTracked")):
                 fireball_owner_tracked += 1
             stateless_owner = num(slot.get("statelessOwnerCandidate"), -1)
             stateless_confidence = num(slot.get("statelessOwnerConfidence"))
-            if stateless_owner < 0 or stateless_confidence < fireball_owner_min_confidence:
+            if not owner_verified and (stateless_owner < 0 or stateless_confidence < fireball_owner_min_confidence):
                 fireball_stateless_owner_low_confidence += 1
-            if owner < 0 or confidence < fireball_owner_min_confidence:
+            if not owner_verified and (owner < 0 or confidence < fireball_owner_min_confidence):
                 fireball_owner_low_confidence += 1
                 add_sample(
                     samples,
@@ -178,10 +186,13 @@ def audit_playlog(path: Path, max_samples: int, fireball_owner_min_confidence: i
                         "slot": slot.get("index"),
                         "ownerCandidate": owner,
                         "ownerConfidence": confidence,
+                        "ownerVerified": owner_verified,
+                        "ownerSource": slot.get("ownerSource"),
                         "ownerTracked": num(slot.get("ownerTracked")),
                         "statelessOwnerCandidate": stateless_owner,
                         "statelessOwnerConfidence": stateless_confidence,
                         "kind": slot.get("kind"),
+                        "kindName": slot.get("kindName"),
                         "state": slot.get("state"),
                         "facing": slot.get("facing"),
                         "stateBytesOffset": slot.get("stateBytesOffset"),

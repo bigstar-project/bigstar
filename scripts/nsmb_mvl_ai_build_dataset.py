@@ -278,20 +278,28 @@ def nearest_object(
     return best
 
 
+def fireball_owner_info(slot: dict[str, Any]) -> tuple[int, int, int]:
+    kind = num(slot.get("sourceKind"), num(slot.get("kind"), -1))
+    if kind in (0, 1):
+        return kind, 100, 1
+    if kind in (2, 3):
+        return -1, 100, 1
+    return num(slot.get("ownerCandidate"), -1), num(slot.get("ownerConfidence")), num(slot.get("ownerVerified"))
+
+
 def nearest_special_slot(
     slots: list[dict[str, Any]],
     self_pos: dict[str, int],
     player: int,
-) -> tuple[int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int]:
-    best: tuple[int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int] | None = None
+) -> tuple[int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int]:
+    best: tuple[int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int] | None = None
     for slot in slots:
         slot_pos = pos(slot)
         dx = slot_pos["x"] - self_pos["x"]
         dy = slot_pos["y"] - self_pos["y"]
         dist2 = dx * dx + dy * dy
         if best is None or dist2 < best[3]:
-            owner_candidate = num(slot.get("ownerCandidate"), -1)
-            owner_confidence = num(slot.get("ownerConfidence"))
+            owner_candidate, owner_confidence, owner_verified = fireball_owner_info(slot)
             state_bytes = slot.get("stateBytes") or []
             debug_words = slot.get("debugWords") or []
             best = (
@@ -314,9 +322,11 @@ def nearest_special_slot(
                 num(state_bytes[4] if len(state_bytes) > 4 else 0),
                 num(state_bytes[6] if len(state_bytes) > 6 else 0),
                 num(debug_words[0] if debug_words else 0),
+                owner_verified,
+                num(slot.get("sourceKind"), num(slot.get("kind"))),
             )
     if best is None:
-        return (0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0)
+        return (0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0)
     return best
 
 
@@ -533,6 +543,8 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "nearest_fireball_state_byte84": nearest_fireball[16],
         "nearest_fireball_state_byte86": nearest_fireball[17],
         "nearest_fireball_debug_word0": nearest_fireball[18],
+        "nearest_fireball_owner_verified": nearest_fireball[19],
+        "nearest_fireball_source_kind": nearest_fireball[20],
         "projectiles_handler_word0": num((projectiles.get("words") or [0])[0]),
         "label_held": held,
     }

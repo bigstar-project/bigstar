@@ -47,6 +47,23 @@ def num(value: Any, default: int = 0) -> int:
     return default
 
 
+def fireball_owner_info(slot: dict[str, Any]) -> tuple[int, int, int]:
+    kind = num(slot.get("sourceKind"), num(slot.get("kind"), -1))
+    if kind in (0, 1):
+        return kind, 100, 1
+    if kind in (2, 3):
+        return -1, 100, 1
+    return num(slot.get("ownerCandidate"), -1), num(slot.get("ownerConfidence")), num(slot.get("ownerVerified"))
+
+
+def fireball_kind_name(slot: dict[str, Any]) -> str:
+    explicit = slot.get("kindName")
+    if explicit:
+        return str(explicit)
+    kind = num(slot.get("sourceKind"), num(slot.get("kind"), -1))
+    return {0: "player0", 1: "player1", 2: "piranha_plant", 3: "fire_bro"}.get(kind, "unknown")
+
+
 def buttons_text(held: int) -> str:
     buttons = [("A", 0), ("B", 1), ("R", 4), ("L", 5), ("U", 6), ("D", 7), ("Y", 11)]
     names = [name for name, bit in buttons if held & (1 << bit)]
@@ -276,12 +293,14 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
         x, y = svg_point(dx, dy)
         if x < -40 or x > WIDTH + 40 or y < -40 or y > HEIGHT + 40:
             continue
-        owner = num(slot.get("ownerCandidate"), -1)
-        confidence = num(slot.get("ownerConfidence"))
+        owner, confidence, owner_verified = fireball_owner_info(slot)
         owner_tracked = num(slot.get("ownerTracked"))
         state_bytes = ",".join(str(num(value)) for value in (slot.get("stateBytes") or [])[:8])
+        owner_source = slot.get("ownerSource") or ("slotKind" if owner_verified else "positionVelocityHeuristic")
         color = "#fb923c" if owner == player else "#f43f5e"
-        label = "FBt" if owner == player and owner_tracked else ("FB" if owner == player else "fb")
+        label = "FBv" if owner == player and owner_verified else (
+            "FBt" if owner == player and owner_tracked else ("FB" if owner == player else "fb")
+        )
         draw_marker(
             x,
             y,
@@ -289,10 +308,11 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
             label,
             (
                 f"fireball slot={slot.get('index')} ownerCandidate={owner}"
-                f" confidence={confidence} tracked={owner_tracked}"
+                f" confidence={confidence} verified={owner_verified}"
+                f" source={owner_source} tracked={owner_tracked}"
                 f" statelessOwner={slot.get('statelessOwnerCandidate')}"
                 f" statelessConfidence={slot.get('statelessOwnerConfidence')}"
-                f" kind={slot.get('kind')} state={slot.get('state')}"
+                f" kind={slot.get('kind')} kindName={fireball_kind_name(slot)} state={slot.get('state')}"
                 f" facing={slot.get('facing')} stateBytes={state_bytes} dx={dx:.0f} dy={dy:.0f}"
             ),
             6,
