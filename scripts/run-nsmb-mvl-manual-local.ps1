@@ -221,6 +221,7 @@ $common = @(
     "-SkipMvlStateCheck",
     "-SkipGameplayActorCheck",
     "-NoLanMP",
+    "-NoLocalWait",
     "-InputNetplay",
     "-InputDelayFrames", "$InputDelayFrames",
     "-InputMaxFrameLead", "$InputMaxFrameLead",
@@ -229,9 +230,9 @@ $common = @(
     "-PacketBridgeJitHelperPatch",
     "-PacketBridgeJitHelperPatchFrame", "$PacketBridgeStartFrame",
     "-PacketBridgeStartFrame", "$PacketBridgeStartFrame",
+    "-NoImplicitInputNetplayPeerWait",
     "-ClearMvlCameraInitHold",
-    "-ClearMvlCameraInitHoldStartFrame", "840",
-    "-WaitForPeerAtNetplayStart"
+    "-ClearMvlCameraInitHoldStartFrame", "840"
 )
 if ($GameStateTrace) {
     $common += @(

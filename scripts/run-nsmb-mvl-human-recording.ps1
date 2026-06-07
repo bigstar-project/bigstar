@@ -15,6 +15,7 @@ param(
     [switch]$GenerateMvlConfiguredRoms,
     [string]$MvlMatchSeed = "",
     [switch]$AllowJit,
+    [switch]$NoJit,
     [switch]$DryRun
 )
 
@@ -51,7 +52,7 @@ $manualArgs = @{
 if (-not $NoPacketCapture) { $manualArgs.PacketCapture = $true }
 if ($GenerateMvlConfiguredRoms) { $manualArgs.GenerateMvlConfiguredRoms = $true }
 if ($MvlMatchSeed -ne "") { $manualArgs.MvlMatchSeed = $MvlMatchSeed }
-if ($AllowJit) { $manualArgs.AllowJit = $true }
+if ($AllowJit -or -not $NoJit) { $manualArgs.AllowJit = $true }
 if ($HumanSide -eq "client") { $manualArgs.NeutralizeHostInput = $true }
 if ($HumanSide -eq "host") { $manualArgs.NeutralizeClientInput = $true }
 
@@ -96,6 +97,8 @@ $session = [ordered]@{
     humanSide = $HumanSide
     neutralizeHostInput = ($HumanSide -eq "client")
     neutralizeClientInput = ($HumanSide -eq "host")
+    allowJit = ($AllowJit -or -not $NoJit)
+    noJit = [bool]$NoJit
     logDir = $LogDir
     hostAIPlayLog = $hostAIPlayLog
     clientAIPlayLog = $clientAIPlayLog

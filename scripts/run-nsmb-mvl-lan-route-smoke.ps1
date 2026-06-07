@@ -101,6 +101,7 @@ param(
     [int]$PacketBridgeStartFrame = 0,
     [switch]$WaitForPeerBeforeStart,
     [switch]$WaitForPeerAtNetplayStart,
+    [switch]$NoImplicitInputNetplayPeerWait,
     [string]$HostLocalInstance = "",
     [string]$ClientLocalInstance = "",
     [switch]$NoLocalWait,
@@ -2546,7 +2547,7 @@ function Start-MelonLANProcess {
             Remove-Item Env:\MELONDS_NSML_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
         }
         Remove-Item Env:\MELONDS_NSML_SEED_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
-        if ($WaitForPeerBeforeStart -or ($InputNetplay -and $PacketBridgeStartFrame -gt 0)) {
+        if ($WaitForPeerBeforeStart -or ($InputNetplay -and $PacketBridgeStartFrame -gt 0 -and -not $NoImplicitInputNetplayPeerWait)) {
             $env:MELONDS_NSML_WAIT_FOR_PEER = "1"
         } else {
             Remove-Item Env:\MELONDS_NSML_WAIT_FOR_PEER -ErrorAction SilentlyContinue
