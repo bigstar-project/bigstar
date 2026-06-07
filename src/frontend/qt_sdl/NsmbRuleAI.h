@@ -32,6 +32,9 @@ struct PlayerFrameState
     melonDS::u32 X = 0;
     melonDS::u32 Y = 0;
     melonDS::u32 BattleStars = 0;
+    bool GroundBelowSolid = false;
+    bool WallAhead = false;
+    bool HoleAhead = false;
 };
 
 struct FrameState

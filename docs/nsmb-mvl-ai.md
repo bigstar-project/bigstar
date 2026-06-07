@@ -43,6 +43,7 @@
 - 完了: player actor内の `CollisionMgr` を読み、AI play logの `players[].collisionMgr` に collision result、ground collision、modifier tile、attached tile、raw state byteを保存するようにした。逆アセンブルで `CollisionMgr +0x7C` がcollision result、`+0x98/+0x9C/+0xA0` がbottom/top/side modifier tile typeであることを確認し、以前の暫定 `bottomTileType` 読み取りは廃止した。
 - 完了: player本体の `+0xBB2/+0xBB3` を `players[].tileDamage` として保存するようにした。`Player::applyTileDamage` / `Player::updateCollision` の逆アセンブルで参照を確認した。
 - 完了: `StageLayout::getTileBehavior` / `getChunkID` / `readTileBehaviour` を逆アセンブルし、AI play logの `players[].tileProbe` にプレイヤー周辺/前方9点のタイルサンプルを保存するようにした。各点は actor座標からStageLayout pixel座標へ変換し、chunk id、tile id、tile behavior、solid/harmful/coin/block系カテゴリ、`solidish` を出す。summaryには `wallAhead`、`holeAhead`、`groundBelowSolid`、`aheadBodySolid`、`aheadBelowSolid` などを保存する。
+- 完了: RuleAIの内部 `FrameState` に `GroundBelowSolid` / `WallAhead` / `HoleAhead` を追加し、tileProbeが取れている場合は横移動中の穴/壁候補でジャンプ入力を強めるようにした。現時点では速度方向基準の暫定プローブを使うため、左右両方向のサンプルと実プレイ検証は次の調整対象。
 
 ## AI Play Log
 
@@ -171,10 +172,13 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `python -m py_compile scripts\nsmb_mvl_ai_build_dataset.py scripts\nsmb_mvl_ai_inspect_playlog.py scripts\nsmb_mvl_ai_train_imitation.py scripts\nsmb_mvl_ai_predict_imitation.py` pass。
 - `python -m py_compile scripts\nsmb_mvl_ai_render_playlog_svg.py` pass。
 - `python scripts\nsmb_mvl_ai_render_playlog_svg.py logs\codex-ai-tileprobe-yfix-smoke-20260607\ai-playlog.jsonl logs\codex-ai-tileprobe-yfix-smoke-20260607\frame-1020-player1-tileprobe.svg --player 1 --frame 1020` pass。SVG内に `tileProbe center/feet/below/aheadBody/aheadFeet/aheadBelow/ahead2Feet/ahead2Below/above` の矩形とtile id/behavior titleが出ることを確認。
+- `logs/codex-ai-ruleai-tileprobe-smoke-20260607`: RuleAI `FrameState` への tileProbe summary接続後に `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4` pass。`MELONDS_NSML_RULE_AI=1` / `MELONDS_NSML_RULE_AI_TRACE=1` つきのhost単体標準split smoke 1150F pass。起動時のRuleAI enabledログは確認したが、このharnessでは入力決定traceは出なかったため、実際のRuleAI操作経路でterrain jumpが発火するかは次回の対象。
+- 同ログで `python scripts\nsmb_mvl_ai_inspect_playlog.py ... --player 1 --limit 8` pass、`python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --label-source auto --require-player-found` pass。tileProbe列は引き続き生成され、既存tileProbeモデルで `python scripts\nsmb_mvl_ai_predict_imitation.py ... --limit 5` pass。
 
 ## Next Actions
 
 - StageLayout tile probeを実プレイ/複数ステージで増やして、`feet/below/ahead*` のoffsetと `holeAhead` / `wallAhead` の閾値を調整する。
+- RuleAIを実際のCPU操作経路で走らせ、`terrain=ground/wall/hole` traceと入力変化を確認する。必要なら左右両方向tileProbeを追加して、現在の速度方向依存を外す。
 - ブロック/アイテム箱の中身と叩いた後の状態を `StageLayout::changeTile` / question block animation path と実ログで照合し、tileProbeまたはobjectカテゴリへ追加する。
 - 落下死ラインとステージ境界をメモリから取り、`fallRisk` と `tileProbe.holeAhead` を統合した危険判定を作る。
 - 学習済み `.npz` をPoCまたは外部sidecarから推論して入力へ戻す経路を作る。

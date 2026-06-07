@@ -2492,15 +2492,39 @@ NsmbRuleAI::Config RuleAIConfig()
 NsmbRuleAI::FrameState RuleAIFrameStateFromSample(const GameStateSample& sample, bool inGameplay)
 {
     NsmbRuleAI::FrameState state {};
+    auto probeSolidish = [](melonDS::u32 behavior) {
+        return (behavior & (0x08990000u | 0x00040000u | 0x00200000u | 0x40000000u | 0x80000000u)) != 0;
+    };
+    auto probePointSolidish = [&probeSolidish](const AIPlayerTileProbeSample& probe, const char* name) {
+        for (const AITileProbeSample& point : probe.Samples)
+        {
+            if (point.Found && std::strcmp(point.Name, name) == 0)
+                return probeSolidish(point.Behavior);
+        }
+        return false;
+    };
+    auto fillProbeSummary = [&probePointSolidish](NsmbRuleAI::PlayerFrameState& out, const AIPlayerTileProbeSample& probe) {
+        if (!probe.Found)
+            return;
+        out.GroundBelowSolid = probePointSolidish(probe, "below");
+        const bool aheadBody = probePointSolidish(probe, "aheadBody");
+        const bool aheadFeet = probePointSolidish(probe, "aheadFeet");
+        const bool aheadBelow = probePointSolidish(probe, "aheadBelow");
+        const bool ahead2Below = probePointSolidish(probe, "ahead2Below");
+        out.WallAhead = aheadBody || aheadFeet;
+        out.HoleAhead = !aheadBelow && !ahead2Below;
+    };
     state.InGameplay = inGameplay;
     state.Players[0].Found = sample.PlayerActor0Found != 0;
     state.Players[0].X = sample.PlayerActor0PosX;
     state.Players[0].Y = sample.PlayerActor0PosY;
     state.Players[0].BattleStars = sample.Player0BattleStars;
+    fillProbeSummary(state.Players[0], sample.PlayerActor0TileProbe);
     state.Players[1].Found = sample.PlayerActor1Found != 0;
     state.Players[1].X = sample.PlayerActor1PosX;
     state.Players[1].Y = sample.PlayerActor1PosY;
     state.Players[1].BattleStars = sample.Player1BattleStars;
+    fillProbeSummary(state.Players[1], sample.PlayerActor1TileProbe);
     state.StarFound = sample.VsStarFound != 0;
     state.StarX = sample.VsStarPosX;
     state.StarY = sample.VsStarPosY;

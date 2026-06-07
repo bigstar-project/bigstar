@@ -139,14 +139,15 @@ NsmbNetplayPoC::InputState DecideInput(
         (frame % static_cast<melonDS::u32>(jumpInterval)) < static_cast<melonDS::u32>(jumpFrames);
     const bool targetAbove = dy < -0x18000;
     const bool closeOpponent = absOpponentDx < config.CloseRange / 2;
-    if (periodicJump || targetAbove || closeOpponent)
+    const bool terrainJump = movingHorizontally && (self.HoleAhead || self.WallAhead);
+    if (periodicJump || targetAbove || closeOpponent || terrainJump)
         PressButton(input, kButtonA);
 
     if (config.TraceEnabled &&
         (config.TraceInterval <= 1 || (frame % static_cast<melonDS::u32>(config.TraceInterval)) == 0))
     {
         std::printf(
-            "NSMB RuleAI: inst=%d frame=%u player=%d mode=%s self=%08X/%08X target=%08X/%08X opponent=%08X/%08X stars=%u/%u keys=0x%03X\n",
+            "NSMB RuleAI: inst=%d frame=%u player=%d mode=%s self=%08X/%08X target=%08X/%08X opponent=%08X/%08X stars=%u/%u terrain=ground:%d wall:%d hole:%d keys=0x%03X\n",
             instanceID,
             frame,
             player,
@@ -159,6 +160,9 @@ NsmbNetplayPoC::InputState DecideInput(
             other.Y,
             self.BattleStars,
             other.BattleStars,
+            self.GroundBelowSolid ? 1 : 0,
+            self.WallAhead ? 1 : 0,
+            self.HoleAhead ? 1 : 0,
             input.KeyMask);
     }
 
