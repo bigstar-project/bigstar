@@ -16,6 +16,7 @@ param(
     [string]$MvlMatchSeed = "",
     [switch]$AllowJit,
     [switch]$NoJit,
+    [switch]$DualWindow,
     [switch]$DryRun
 )
 
@@ -33,7 +34,12 @@ $clientLog = Join-Path $logRoot "client"
 $hostAIPlayLog = Join-Path $hostLog "ai-playlog.jsonl"
 $clientAIPlayLog = Join-Path $clientLog "ai-playlog.jsonl"
 $sessionPath = Join-Path $logRoot "recording-session.json"
-New-Item -ItemType Directory -Force -Path $hostLog, $clientLog | Out-Null
+$singleWindow = -not $DualWindow
+if ($singleWindow) {
+    New-Item -ItemType Directory -Force -Path $clientLog | Out-Null
+} else {
+    New-Item -ItemType Directory -Force -Path $hostLog, $clientLog | Out-Null
+}
 
 $manualScript = Join-Path $PSScriptRoot "run-nsmb-mvl-manual-local.ps1"
 $manualArgs = @{
@@ -44,17 +50,27 @@ $manualArgs = @{
     InputScript = $InputScript
     LogDir = $LogDir
     MvlStage = 0
-    HostAIPlayLog = $hostAIPlayLog
     ClientAIPlayLog = $clientAIPlayLog
     AIPlayLogInterval = $AIPlayLogInterval
     AIPlayLogMaxObjects = $AIPlayLogMaxObjects
+    NetworkPumpThread = $true
+    NetworkPumpSleepUs = 50
 }
-if (-not $NoPacketCapture) { $manualArgs.PacketCapture = $true }
+if ($singleWindow) {
+    $manualArgs.ClientOnly = $true
+    $manualArgs.InputDelayFrames = 0
+} else {
+    $manualArgs.HostAIPlayLog = $hostAIPlayLog
+}
+$packetCaptureEnabled = (-not $NoPacketCapture) -and (-not $singleWindow)
+if ($packetCaptureEnabled) { $manualArgs.PacketCapture = $true }
 if ($GenerateMvlConfiguredRoms) { $manualArgs.GenerateMvlConfiguredRoms = $true }
 if ($MvlMatchSeed -ne "") { $manualArgs.MvlMatchSeed = $MvlMatchSeed }
 if ($AllowJit -or -not $NoJit) { $manualArgs.AllowJit = $true }
-if ($HumanSide -eq "client") { $manualArgs.NeutralizeHostInput = $true }
-if ($HumanSide -eq "host") { $manualArgs.NeutralizeClientInput = $true }
+if (-not $singleWindow) {
+    if ($HumanSide -eq "client") { $manualArgs.NeutralizeHostInput = $true }
+    if ($HumanSide -eq "host") { $manualArgs.NeutralizeClientInput = $true }
+}
 
 $hostManifest = Join-Path $hostLog "recording.json"
 $clientManifest = Join-Path $clientLog "recording.json"
@@ -67,26 +83,40 @@ $packetReplay = Join-Path $logRoot "packet-replay.csv"
 $hostPlayer = if ($HumanSide -eq "client") { 0 } else { 0 }
 $clientPlayer = if ($HumanSide -eq "host") { 1 } else { 1 }
 $postCommands = @()
-if (-not $NoPacketCapture) {
+if ($packetCaptureEnabled) {
     $convertCommand = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\convert-nsmb-packet-capture-to-replay.ps1 -HostCapture `"$hostPacketCapture`" -ClientCapture `"$clientPacketCapture`" -Output `"$packetReplay`""
     if ($PacketReplayFirstFrame -gt 0) { $convertCommand += " -FirstFrame $PacketReplayFirstFrame" }
     if ($PacketReplayLastFrame -gt 0) { $convertCommand += " -LastFrame $PacketReplayLastFrame" }
     $postCommands += $convertCommand
 }
-$packetReplayArgs = if ($NoPacketCapture) {
+$packetReplayArgs = if (-not $packetCaptureEnabled) {
     ""
 } else {
     " --replay-mode packet_replay --packet-replay-file `"$packetReplay`" --host-packet-capture `"$hostPacketCapture`" --client-packet-capture `"$clientPacketCapture`""
 }
-$postCommands += @(
-    "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$hostAIPlayLog`" `"$hostManifest`" --kind human --player $hostPlayer --label-source player --stage 0 --log-dir `"$hostLog`" --frames $Frames --host-input-script `"$InputScript`" --client-input-script `"$InputScript`" --host-rom `"$HostRom`" --client-rom `"$ClientRom`" --match-seed `"$MvlMatchSeed`"$packetReplayArgs",
-    "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$clientAIPlayLog`" `"$clientManifest`" --kind human --player $clientPlayer --label-source player --stage 0 --log-dir `"$clientLog`" --frames $Frames --host-input-script `"$InputScript`" --client-input-script `"$InputScript`" --host-rom `"$HostRom`" --client-rom `"$ClientRom`" --match-seed `"$MvlMatchSeed`"$packetReplayArgs",
-    "python scripts\nsmb_mvl_ai_make_recordings_index.py `"$indexPath`" `"$hostManifest`" `"$clientManifest`" --stage 0",
-    "python scripts\nsmb_mvl_ai_build_dataset.py `"$indexPath`" `"$logRoot\ai-dataset-player1.csv`" --player 1 --label-source player --require-player-found",
-    "python scripts\nsmb_mvl_ai_audit_visual_state.py `"$hostAIPlayLog`" `"$clientAIPlayLog`" --output `"$visualStateAuditPath`""
-)
+$matchSeedManifestArg = if ($MvlMatchSeed -ne "") {
+    " --match-seed `"$MvlMatchSeed`""
+} else {
+    ""
+}
+if ($singleWindow) {
+    $postCommands += @(
+        "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$clientAIPlayLog`" `"$clientManifest`" --kind human --player 1 --label-source player --stage 0 --log-dir `"$clientLog`" --frames $Frames --client-input-script `"$InputScript`" --client-rom `"$ClientRom`"$matchSeedManifestArg",
+        "python scripts\nsmb_mvl_ai_make_recordings_index.py `"$indexPath`" `"$clientManifest`" --stage 0",
+        "python scripts\nsmb_mvl_ai_build_dataset.py `"$indexPath`" `"$logRoot\ai-dataset-player1.csv`" --player 1 --label-source player --require-player-found",
+        "python scripts\nsmb_mvl_ai_audit_visual_state.py `"$clientAIPlayLog`" --output `"$visualStateAuditPath`""
+    )
+} else {
+    $postCommands += @(
+        "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$hostAIPlayLog`" `"$hostManifest`" --kind human --player $hostPlayer --label-source player --stage 0 --log-dir `"$hostLog`" --frames $Frames --host-input-script `"$InputScript`" --client-input-script `"$InputScript`" --host-rom `"$HostRom`" --client-rom `"$ClientRom`"$matchSeedManifestArg$packetReplayArgs",
+        "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$clientAIPlayLog`" `"$clientManifest`" --kind human --player $clientPlayer --label-source player --stage 0 --log-dir `"$clientLog`" --frames $Frames --host-input-script `"$InputScript`" --client-input-script `"$InputScript`" --host-rom `"$HostRom`" --client-rom `"$ClientRom`"$matchSeedManifestArg$packetReplayArgs",
+        "python scripts\nsmb_mvl_ai_make_recordings_index.py `"$indexPath`" `"$hostManifest`" `"$clientManifest`" --stage 0",
+        "python scripts\nsmb_mvl_ai_build_dataset.py `"$indexPath`" `"$logRoot\ai-dataset-player1.csv`" --player 1 --label-source player --require-player-found",
+        "python scripts\nsmb_mvl_ai_audit_visual_state.py `"$hostAIPlayLog`" `"$clientAIPlayLog`" --output `"$visualStateAuditPath`""
+    )
+}
 $auditCommand = "python scripts\nsmb_mvl_ai_audit_recordings.py `"$indexPath`" --stage 0 --min-rows 1 --min-gameplay-rows 1 --min-player-found-ratio 0.5 --min-label-ratio 0.5 --min-nonzero-label-rows 1 --output `"$auditPath`""
-if (-not $NoPacketCapture) {
+if ($packetCaptureEnabled) {
     $auditCommand += " --require-packet-replay"
 }
 $postCommands += $auditCommand
@@ -94,13 +124,14 @@ $postCommands += $auditCommand
 $session = [ordered]@{
     schema = "nsmb_mvl_ai_human_recording_session_v1"
     stageScope = 0
+    recordingMode = $(if ($singleWindow) { "single_client_authoritative" } else { "dual_window_netplay_experimental" })
     humanSide = $HumanSide
-    neutralizeHostInput = ($HumanSide -eq "client")
-    neutralizeClientInput = ($HumanSide -eq "host")
+    neutralizeHostInput = ((-not $singleWindow) -and ($HumanSide -eq "client"))
+    neutralizeClientInput = ((-not $singleWindow) -and ($HumanSide -eq "host"))
     allowJit = ($AllowJit -or -not $NoJit)
     noJit = [bool]$NoJit
     logDir = $LogDir
-    hostAIPlayLog = $hostAIPlayLog
+    hostAIPlayLog = $(if ($singleWindow) { "" } else { $hostAIPlayLog })
     clientAIPlayLog = $clientAIPlayLog
     aiPlayLogInterval = $AIPlayLogInterval
     aiPlayLogMaxObjects = $AIPlayLogMaxObjects
@@ -109,17 +140,20 @@ $session = [ordered]@{
     hostRom = $HostRom
     clientRom = $ClientRom
     mvlMatchSeed = $MvlMatchSeed
-    packetCapture = -not $NoPacketCapture
-    hostPacketCapture = $hostPacketCapture
-    clientPacketCapture = $clientPacketCapture
-    packetReplay = $packetReplay
+    packetCapture = $packetCaptureEnabled
+    hostPacketCapture = $(if ($packetCaptureEnabled) { $hostPacketCapture } else { "" })
+    clientPacketCapture = $(if ($packetCaptureEnabled) { $clientPacketCapture } else { "" })
+    packetReplay = $(if ($packetCaptureEnabled) { $packetReplay } else { "" })
     audit = $auditPath
     visualStateAudit = $visualStateAuditPath
     postCommands = $postCommands
 }
 $session | ConvertTo-Json -Depth 6 | Set-Content -Path $sessionPath -Encoding UTF8
 
-Write-Host "Starting stage 0 human recording. log=$LogDir"
+Write-Host "Starting stage 0 human recording. log=$LogDir mode=$($session.recordingMode)"
+if ($singleWindow) {
+    Write-Host "Single client window is authoritative; dual-window host/client sync is not used for this recording."
+}
 Write-Host "After closing melonDS, run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-nsmb-mvl-recording-postcommands.ps1 -Session `"$sessionPath`""
 if ($DryRun) {
     $session | ConvertTo-Json -Depth 8

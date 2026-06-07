@@ -4,8 +4,8 @@ param(
     [int]$StallTimeoutMs = 0,
     [int]$StallStartFrame = 900,
     [int]$GameplayHeartbeatInterval = 120,
-    [int]$InputDelayFrames = 16,
-    [int]$InputMaxFrameLead = 2,
+    [int]$InputDelayFrames = 2,
+    [int]$InputMaxFrameLead = 4,
     [int]$InternalWaitTimeoutMs = 0,
     [int]$InputSendDelayFrames = 0,
     [int]$InputSendJitterFrames = 0,
@@ -39,6 +39,8 @@ param(
     [int]$WorldStateTraceObjectLifecyclesStartFrame = 0,
     [int]$WorldStateTraceObjectLifecyclesEndFrame = 0,
     [int]$HostStartupDelayMs = 1200,
+    [int]$HostReadyTimeoutMs = 30000,
+    [switch]$ClientOnly,
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds",
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds",
@@ -221,7 +223,6 @@ $common = @(
     "-SkipMvlStateCheck",
     "-SkipGameplayActorCheck",
     "-NoLanMP",
-    "-NoLocalWait",
     "-InputNetplay",
     "-InputDelayFrames", "$InputDelayFrames",
     "-InputMaxFrameLead", "$InputMaxFrameLead",
@@ -230,10 +231,17 @@ $common = @(
     "-PacketBridgeJitHelperPatch",
     "-PacketBridgeJitHelperPatchFrame", "$PacketBridgeStartFrame",
     "-PacketBridgeStartFrame", "$PacketBridgeStartFrame",
-    "-NoImplicitInputNetplayPeerWait",
     "-ClearMvlCameraInitHold",
     "-ClearMvlCameraInitHoldStartFrame", "840"
 )
+if ($ClientOnly) {
+    $common += @(
+        "-NoLocalWait",
+        "-NoImplicitInputNetplayPeerWait"
+    )
+} else {
+    $common += "-WaitForPeerAtNetplayStart"
+}
 if ($GameStateTrace) {
     $common += @(
         "-GameStateTrace",
@@ -490,17 +498,42 @@ function Set-PolledInputNeutralizeEnv {
     Remove-Item Env:\MELONDS_NSML_NEUTRALIZE_POLLED_INPUT_PRESERVE_TOUCH -ErrorAction SilentlyContinue
 }
 
-Set-AIPlayLogEnv -Path $HostAIPlayLog
-Set-PolledInputNeutralizeEnv -Enabled ([bool]$NeutralizeHostInput)
-$hostProc = Start-Process -FilePath "powershell.exe" `
-    -ArgumentList $hostArgs `
-    -WorkingDirectory $repoRoot `
-    -RedirectStandardOutput $hostOut `
-    -RedirectStandardError $hostErr `
-    -PassThru `
-    -WindowStyle Hidden
+$hostProc = $null
+if (-not $ClientOnly) {
+    Set-AIPlayLogEnv -Path $HostAIPlayLog
+    Set-PolledInputNeutralizeEnv -Enabled ([bool]$NeutralizeHostInput)
+    $hostProc = Start-Process -FilePath "powershell.exe" `
+        -ArgumentList $hostArgs `
+        -WorkingDirectory $repoRoot `
+        -RedirectStandardOutput $hostOut `
+        -RedirectStandardError $hostErr `
+        -PassThru `
+        -WindowStyle Hidden
 
-Start-Sleep -Milliseconds $HostStartupDelayMs
+    if ($HostReadyTimeoutMs -gt 0) {
+        $hostReadyLog = Join-Path $hostLog "host.stdout.txt"
+        $hostReadyDeadline = [DateTime]::UtcNow.AddMilliseconds($HostReadyTimeoutMs)
+        $hostReady = $false
+        Write-Host "Waiting for host netplay init. log=$hostReadyLog timeoutMs=$HostReadyTimeoutMs"
+        while ([DateTime]::UtcNow -lt $hostReadyDeadline) {
+            if ((Get-Process -Id $hostProc.Id -ErrorAction SilentlyContinue) -eq $null) {
+                throw "host wrapper exited before netplay init. See $hostOut / $hostErr"
+            }
+            if (Test-Path $hostReadyLog) {
+                if (Select-String -Path $hostReadyLog -Pattern "NSMB PoC: enabled role=host" -Quiet) {
+                    $hostReady = $true
+                    break
+                }
+            }
+            Start-Sleep -Milliseconds 100
+        }
+        if (-not $hostReady) {
+            throw "host netplay init did not become ready within ${HostReadyTimeoutMs}ms. See $hostReadyLog"
+        }
+    } elseif ($HostStartupDelayMs -gt 0) {
+        Start-Sleep -Milliseconds $HostStartupDelayMs
+    }
+}
 
 Set-AIPlayLogEnv -Path $ClientAIPlayLog
 Set-PolledInputNeutralizeEnv -Enabled ([bool]$NeutralizeClientInput)
@@ -521,9 +554,17 @@ foreach ($entry in $oldAIEnv.GetEnumerator()) {
 }
 
 Write-Host "Started NSMB MvL manual local session."
-Write-Host "host wrapper pid=$($hostProc.Id) log=$hostLog"
+if ($ClientOnly) {
+    Write-Host "host wrapper disabled; client window is the authoritative human recording instance."
+} else {
+    Write-Host "host wrapper pid=$($hostProc.Id) log=$hostLog"
+}
 Write-Host "client wrapper pid=$($clientProc.Id) log=$clientLog"
-Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
+if ($ClientOnly) {
+    Write-Host "Use the client melonDS window for Luigi. Mario is observed from the same client-side game state log."
+} else {
+    Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
+}
 Write-Host "physical input neutralized host=$([bool]$NeutralizeHostInput) client=$([bool]$NeutralizeClientInput)"
 Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames networkPump=$([bool]$NetworkPumpThread) networkPumpSleepUs=$NetworkPumpSleepUs packetBridgeStart=$PacketBridgeStartFrame renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$([bool]$PerfBreakdown)"
 Write-Host "gameplay heartbeat interval=$GameplayHeartbeatInterval"
