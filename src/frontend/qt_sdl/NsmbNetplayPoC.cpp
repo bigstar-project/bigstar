@@ -14344,6 +14344,19 @@ melonDS::u32 AIVisualPowerupSourceMask(
     return mask;
 }
 
+std::int64_t AIWrappedDeltaX(std::int64_t x, std::int64_t origin)
+{
+    std::int64_t dx = x - origin;
+    const std::int64_t wrapWidth = G.RuleAIHorizontalWrapWidth;
+    if (wrapWidth <= 0)
+        return dx;
+    while (dx < -(wrapWidth / 2))
+        dx += wrapWidth;
+    while (dx > wrapWidth / 2)
+        dx -= wrapWidth;
+    return dx;
+}
+
 int AIFireballOwnerCandidateStateless(const GameStateSample& sample, int slotIndex, int& confidence, int& heuristic)
 {
     confidence = 0;
@@ -14354,9 +14367,9 @@ int AIFireballOwnerCandidateStateless(const GameStateSample& sample, int slotInd
     const std::int64_t fireX = SignedU32(sample.FireballSlotPosX[slotIndex]);
     const std::int64_t fireY = SignedU32(sample.FireballSlotPosY[slotIndex]);
     const std::int64_t velX = SignedU32(sample.FireballSlotVelX[slotIndex]);
-    const std::int64_t p0dx = fireX - SignedU32(sample.PlayerActor0PosX);
+    const std::int64_t p0dx = AIWrappedDeltaX(fireX, SignedU32(sample.PlayerActor0PosX));
     const std::int64_t p0dy = fireY - SignedU32(sample.PlayerActor0PosY);
-    const std::int64_t p1dx = fireX - SignedU32(sample.PlayerActor1PosX);
+    const std::int64_t p1dx = AIWrappedDeltaX(fireX, SignedU32(sample.PlayerActor1PosX));
     const std::int64_t p1dy = fireY - SignedU32(sample.PlayerActor1PosY);
     const std::int64_t p0Dist2 = p0dx * p0dx + p0dy * p0dy;
     const std::int64_t p1Dist2 = p1dx * p1dx + p1dy * p1dy;
@@ -15533,9 +15546,9 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             sample.FireballSlotVelY[i],
             sample.FireballSlotVelZ[i]);
         G.AIPlayLog << ",\"relative\":{\"p0dx\":"
-            << (SignedU32(sample.FireballSlotPosX[i]) - SignedU32(sample.PlayerActor0PosX))
+            << AIWrappedDeltaX(SignedU32(sample.FireballSlotPosX[i]), SignedU32(sample.PlayerActor0PosX))
             << ",\"p0dy\":" << (SignedU32(sample.FireballSlotPosY[i]) - SignedU32(sample.PlayerActor0PosY))
-            << ",\"p1dx\":" << (SignedU32(sample.FireballSlotPosX[i]) - SignedU32(sample.PlayerActor1PosX))
+            << ",\"p1dx\":" << AIWrappedDeltaX(SignedU32(sample.FireballSlotPosX[i]), SignedU32(sample.PlayerActor1PosX))
             << ",\"p1dy\":" << (SignedU32(sample.FireballSlotPosY[i]) - SignedU32(sample.PlayerActor1PosY))
             << "}}";
     }
