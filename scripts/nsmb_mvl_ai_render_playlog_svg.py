@@ -75,19 +75,30 @@ def contact_text(player: dict[str, Any]) -> str:
 def tile_probe_summary_text(player: dict[str, Any]) -> str:
     summary = ((player.get("tileProbe") or {}).get("summary")) or {}
     tags = []
-    for key, label in [
+    pairs = [
         ("wallAhead", "wall"),
-        ("holeAhead", "hole"),
-        ("groundBelowSolid", "ground"),
+        ("effectiveHoleAhead", "hole"),
+        ("effectiveGroundBelowSolid", "ground"),
+        ("holeSuppressedByContact", "suppress"),
         ("aheadBodySolid", "aheadBody"),
         ("aheadBelowSolid", "aheadBelow"),
         ("wallLeft", "wallLeft"),
-        ("holeLeft", "holeLeft"),
+        ("effectiveHoleLeft", "holeLeft"),
         ("wallRight", "wallRight"),
-        ("holeRight", "holeRight"),
-    ]:
+        ("effectiveHoleRight", "holeRight"),
+    ]
+    for key, label in pairs:
         if num(summary.get(key)):
             tags.append(label)
+    if not tags:
+        for key, label in [
+            ("holeAhead", "hole"),
+            ("groundBelowSolid", "ground"),
+            ("holeLeft", "holeLeft"),
+            ("holeRight", "holeRight"),
+        ]:
+            if num(summary.get(key)):
+                tags.append(label)
     return "+".join(tags) if tags else "-"
 
 
@@ -185,6 +196,8 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
         name = str(sample.get("name", "?"))
         tile_id = num(sample.get("tileId"))
         behavior = sample.get("behavior", "0")
+        status = num(sample.get("status"))
+        low_type = num(tile.get("lowType"))
         block = sample.get("block") or {}
         block_text = ""
         if num(block.get("any")):
@@ -195,7 +208,7 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
         parts.append(
             f'<rect x="{x - 5:.1f}" y="{y - 5:.1f}" width="10" height="10" fill="{color}" '
             f'stroke="#e2e8f0" stroke-width="1">'
-            f'<title>tileProbe {html.escape(name)} tile=0x{tile_id:03X} behavior={html.escape(str(behavior))}{html.escape(block_text)} dx={dx:.0f} dy={dy:.0f}</title></rect>'
+            f'<title>tileProbe {html.escape(name)} status={status} tile=0x{tile_id:03X} behavior={html.escape(str(behavior))} low=0x{low_type:02X}{html.escape(block_text)} dx={dx:.0f} dy={dy:.0f}</title></rect>'
         )
         parts.append(
             f'<text x="{x:.1f}" y="{y - 8:.1f}" text-anchor="middle" fill="#cbd5e1" '

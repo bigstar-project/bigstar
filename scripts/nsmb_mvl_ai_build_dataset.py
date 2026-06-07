@@ -126,6 +126,12 @@ BOTTOM_TILE_NAMES = [
     "solidOnTop",
 ]
 
+TILE_NUMERIC_NAMES = [
+    "modifier",
+    "lowType",
+    "storageContents",
+]
+
 TILE_PROBE_SAMPLE_NAMES = [
     "center",
     "feet",
@@ -158,6 +164,12 @@ TILE_PROBE_SUMMARY_NAMES = [
     "holeLeft",
     "wallRight",
     "holeRight",
+    "contactGround",
+    "effectiveGroundBelowSolid",
+    "holeSuppressedByContact",
+    "effectiveHoleAhead",
+    "effectiveHoleLeft",
+    "effectiveHoleRight",
 ]
 
 TILE_PROBE_BLOCK_NAMES = [
@@ -438,6 +450,10 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
             row[f"{prefix}_bottom_modifier_tile_{name}"] = (
                 num(bottom_tile.get(name)) if bottom_tile_sane else 0
             )
+        for name in TILE_NUMERIC_NAMES:
+            row[f"{prefix}_bottom_modifier_tile_{name}"] = (
+                num(bottom_tile.get(name)) if bottom_tile_sane else 0
+            )
 
         tile_probe_summary = tile_probe.get("summary") or {}
         row[f"{prefix}_tile_probe_found"] = num(tile_probe.get("found"))
@@ -452,12 +468,15 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
             sample_prefix = f"{prefix}_tile_probe_{sample_name}"
             behavior = num(sample.get("behavior"))
             row[f"{sample_prefix}_found"] = num(sample.get("found"))
+            row[f"{sample_prefix}_status"] = num(sample.get("status"))
             row[f"{sample_prefix}_tile_id"] = num(sample.get("tileId"))
             row[f"{sample_prefix}_behavior"] = behavior
             row[f"{sample_prefix}_solidish"] = num(sample.get("solidish"))
             row[f"{sample_prefix}_pixel_x"] = num(sample.get("pixelX"))
             row[f"{sample_prefix}_pixel_y"] = num(sample.get("pixelY"))
             for name in BOTTOM_TILE_NAMES:
+                row[f"{sample_prefix}_{name}"] = num(tile.get(name))
+            for name in TILE_NUMERIC_NAMES:
                 row[f"{sample_prefix}_{name}"] = num(tile.get(name))
             for name in TILE_PROBE_BLOCK_NAMES:
                 row[f"{sample_prefix}_block_{name}"] = num(block.get(name))

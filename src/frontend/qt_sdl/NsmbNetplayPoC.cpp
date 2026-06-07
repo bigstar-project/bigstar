@@ -756,6 +756,7 @@ struct AITileProbeSample
 {
     const char* Name = "";
     melonDS::u32 Found = 0;
+    melonDS::u32 Status = 0;
     melonDS::u32 StageLayout = 0;
     melonDS::u32 ChunkPtr = 0;
     melonDS::u32 BehaviorTable = 0;
@@ -2489,12 +2490,14 @@ NsmbRuleAI::Config RuleAIConfig()
     return config;
 }
 
+bool AIPlayerContactGround(melonDS::u32 collisionFlag)
+{
+    return (collisionFlag & (0x00000001u | 0x00002000u | 0x00008000u | 0x08000000u)) != 0;
+}
+
 NsmbRuleAI::FrameState RuleAIFrameStateFromSample(const GameStateSample& sample, bool inGameplay)
 {
     NsmbRuleAI::FrameState state {};
-    auto playerContactGround = [](melonDS::u32 collisionFlag) {
-        return (collisionFlag & (0x00000001u | 0x00002000u | 0x00008000u | 0x08000000u)) != 0;
-    };
     auto probeSolidish = [](melonDS::u32 behavior) {
         return (behavior & (0x08990000u | 0x00040000u | 0x00200000u | 0x40000000u | 0x80000000u)) != 0;
     };
@@ -2546,7 +2549,7 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(const GameStateSample& sample,
     fillProbeSummary(
         state.Players[0],
         sample.PlayerActor0TileProbe,
-        playerContactGround(sample.PlayerActor0CollisionFlag));
+        AIPlayerContactGround(sample.PlayerActor0CollisionFlag));
     state.Players[1].Found = sample.PlayerActor1Found != 0;
     state.Players[1].X = sample.PlayerActor1PosX;
     state.Players[1].Y = sample.PlayerActor1PosY;
@@ -2554,7 +2557,7 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(const GameStateSample& sample,
     fillProbeSummary(
         state.Players[1],
         sample.PlayerActor1TileProbe,
-        playerContactGround(sample.PlayerActor1CollisionFlag));
+        AIPlayerContactGround(sample.PlayerActor1CollisionFlag));
     state.StarFound = sample.VsStarFound != 0;
     state.StarX = sample.VsStarPosX;
     state.StarY = sample.VsStarPosY;
@@ -12580,20 +12583,32 @@ bool ReadStageLayoutTileBehavior(
     melonDS::u32 playerID,
     AITileProbeSample& out)
 {
+    out.WorldX = worldX;
+    out.WorldY = worldY;
     if (!nds || !nds->MainRAM)
+    {
+        out.Status = 1;
         return false;
+    }
 
     const melonDS::u32 stageLayout = nds->ARM9Read32(kStageLayoutPtrAddr);
     const melonDS::u32 wrapX = nds->ARM9Read32(kGameWrapXAddr);
+    out.StageLayout = stageLayout;
     if (!IsValidMainRAMRange(nds, stageLayout, kStageLayoutCameraWrapAddOffset + sizeof(melonDS::u16)))
+    {
+        out.Status = 2;
         return false;
+    }
 
     std::int32_t pixelXSigned = SignedARM9U32(worldX) >> 12;
     const std::int32_t pixelYSigned = (-SignedARM9U32(worldY)) >> 12;
     if (wrapX != 0)
         pixelXSigned &= static_cast<std::int32_t>(wrapX >> 12);
     if (pixelYSigned < 0)
+    {
+        out.Status = 3;
         return false;
+    }
 
     melonDS::u32 pixelX = static_cast<melonDS::u32>(pixelXSigned) & 0xFFFFu;
     melonDS::u32 pixelY = static_cast<melonDS::u32>(pixelYSigned) & 0xFFFFu;
@@ -12609,14 +12624,24 @@ bool ReadStageLayoutTileBehavior(
     if (IsValidMainRAMRange(nds, stageBlocks, 4) && (nds->ARM9Read16(stageBlocks + 2) & 0x20) != 0)
         pixelX &= nds->ARM9Read16(stageLayout + kStageLayoutWrapMaskOffset);
 
+    out.PixelX = pixelX;
+    out.PixelY = pixelY;
     if (pixelX >= 0x2000 || pixelY >= 0x1000)
+    {
+        out.Status = 4;
         return false;
+    }
 
     const melonDS::u32 chunkIndex = (pixelX >> 8) + ((pixelY >> 8) << 5);
     const melonDS::u32 chunkID = nds->ARM9Read8(stageLayout + kStageLayoutChunkMapOffset + chunkIndex);
+    out.ChunkID = chunkID;
     const melonDS::u32 chunkPtr = nds->ARM9Read32(kStageLayoutChunkPtrTableAddr + chunkID * sizeof(melonDS::u32));
+    out.ChunkPtr = chunkPtr;
     if (!IsValidMainRAMRange(nds, chunkPtr, 0x200))
+    {
+        out.Status = 5;
         return false;
+    }
 
     const melonDS::u32 tileOffset = (((pixelX & 0xF0u) >> 4) << 1) + ((pixelY & 0xF0u) << 1);
     const melonDS::u32 tileID = nds->ARM9Read16(chunkPtr + tileOffset);
@@ -12632,23 +12657,23 @@ bool ReadStageLayoutTileBehavior(
         behaviorTable = nds->ARM9Read32(kStageLayoutDynamicTileBehaviorTablePtrAddr);
         const melonDS::u32 behaviorOffset = (tileID - 0x100) * sizeof(melonDS::u32);
         if (!IsValidMainRAMRange(nds, behaviorTable + behaviorOffset, sizeof(melonDS::u32)))
+        {
+            out.Status = 6;
             return false;
+        }
         behavior = nds->ARM9Read32(behaviorTable + behaviorOffset);
     }
     else
     {
+        out.Status = 7;
         return false;
     }
 
     out.Found = 1;
+    out.Status = 0;
     out.StageLayout = stageLayout;
     out.ChunkPtr = chunkPtr;
     out.BehaviorTable = behaviorTable;
-    out.WorldX = worldX;
-    out.WorldY = worldY;
-    out.PixelX = pixelX;
-    out.PixelY = pixelY;
-    out.ChunkID = chunkID;
     out.TileID = tileID;
     out.Behavior = behavior;
     return true;
@@ -14365,6 +14390,7 @@ void WriteAITileTypeJson(std::ostream& out, melonDS::u32 tileType)
         << ",\"solidOnBottom\":" << bit(0x40000000)
         << ",\"solidOnTop\":" << bit(0x80000000)
         << ",\"modifier\":" << ((tileType & 0x0000F000u) >> 12)
+        << ",\"lowType\":" << (tileType & 0x000000FFu)
         << ",\"storageContents\":" << (tileType & 0x00000C3Fu)
         << "}";
 }
@@ -14408,10 +14434,18 @@ void WriteAITileProbePointJson(std::ostream& out, const AITileProbeSample& sampl
 {
     out << "{\"name\":\"" << sample.Name
         << "\",\"found\":" << sample.Found
+        << ",\"status\":" << sample.Status
         << ",\"offsetX\":" << SignedU32(sample.OffsetX)
         << ",\"offsetY\":" << SignedU32(sample.OffsetY);
     if (!sample.Found)
     {
+        out << ",\"worldX\":" << SignedU32(sample.WorldX)
+            << ",\"worldY\":" << SignedU32(sample.WorldY)
+            << ",\"pixelX\":" << sample.PixelX
+            << ",\"pixelY\":" << sample.PixelY
+            << ",\"chunkId\":" << sample.ChunkID
+            << ",\"chunkPtr\":";
+        WriteJsonHex(out, sample.ChunkPtr);
         out << "}";
         return;
     }
@@ -14452,7 +14486,7 @@ int AITileProbeSolidishValue(const AIPlayerTileProbeSample& probe, const char* n
     return sample && sample->Found && AITileBehaviorSolidish(sample->Behavior) ? 1 : 0;
 }
 
-void WriteAIPlayerTileProbeJson(std::ostream& out, const AIPlayerTileProbeSample& probe)
+void WriteAIPlayerTileProbeJson(std::ostream& out, const AIPlayerTileProbeSample& probe, bool contactGround)
 {
     const int groundBelow = AITileProbeSolidishValue(probe, "below");
     const int aheadBody = AITileProbeSolidishValue(probe, "aheadBody");
@@ -14467,6 +14501,14 @@ void WriteAIPlayerTileProbeJson(std::ostream& out, const AIPlayerTileProbeSample
     const int rightFeet = AITileProbeSolidishValue(probe, "rightFeet");
     const int rightBelow = AITileProbeSolidishValue(probe, "rightBelow");
     const int right2Below = AITileProbeSolidishValue(probe, "right2Below");
+    const int wallAhead = aheadBody || aheadFeet ? 1 : 0;
+    const int holeAhead = probe.Found && !aheadBelow && !ahead2Below ? 1 : 0;
+    const int wallLeft = leftBody || leftFeet ? 1 : 0;
+    const int holeLeft = probe.Found && !leftBelow && !left2Below ? 1 : 0;
+    const int wallRight = rightBody || rightFeet ? 1 : 0;
+    const int holeRight = probe.Found && !rightBelow && !right2Below ? 1 : 0;
+    const int effectiveGroundBelow = groundBelow || contactGround ? 1 : 0;
+    const int suppressHoleByContact = contactGround && !groundBelow ? 1 : 0;
     out << "{\"found\":" << probe.Found
         << ",\"stageLayout\":";
     WriteJsonHex(out, probe.StageLayout);
@@ -14477,12 +14519,18 @@ void WriteAIPlayerTileProbeJson(std::ostream& out, const AIPlayerTileProbeSample
         << ",\"aheadFeetSolid\":" << aheadFeet
         << ",\"aheadBelowSolid\":" << aheadBelow
         << ",\"ahead2BelowSolid\":" << ahead2Below
-        << ",\"wallAhead\":" << (aheadBody || aheadFeet ? 1 : 0)
-        << ",\"holeAhead\":" << (probe.Found && !aheadBelow && !ahead2Below ? 1 : 0)
-        << ",\"wallLeft\":" << (leftBody || leftFeet ? 1 : 0)
-        << ",\"holeLeft\":" << (probe.Found && !leftBelow && !left2Below ? 1 : 0)
-        << ",\"wallRight\":" << (rightBody || rightFeet ? 1 : 0)
-        << ",\"holeRight\":" << (probe.Found && !rightBelow && !right2Below ? 1 : 0)
+        << ",\"wallAhead\":" << wallAhead
+        << ",\"holeAhead\":" << holeAhead
+        << ",\"wallLeft\":" << wallLeft
+        << ",\"holeLeft\":" << holeLeft
+        << ",\"wallRight\":" << wallRight
+        << ",\"holeRight\":" << holeRight
+        << ",\"contactGround\":" << (contactGround ? 1 : 0)
+        << ",\"effectiveGroundBelowSolid\":" << effectiveGroundBelow
+        << ",\"holeSuppressedByContact\":" << suppressHoleByContact
+        << ",\"effectiveHoleAhead\":" << (holeAhead && !suppressHoleByContact ? 1 : 0)
+        << ",\"effectiveHoleLeft\":" << (holeLeft && !suppressHoleByContact ? 1 : 0)
+        << ",\"effectiveHoleRight\":" << (holeRight && !suppressHoleByContact ? 1 : 0)
         << "},\"samples\":[";
     for (int i = 0; i < kAITileProbeCount; i++)
     {
@@ -14661,7 +14709,7 @@ void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& samp
     out << ",\"collisionMgr\":";
     WriteAIPlayerCollisionMgrJson(out, collisionMgr);
     out << ",\"tileProbe\":";
-    WriteAIPlayerTileProbeJson(out, tileProbe);
+    WriteAIPlayerTileProbeJson(out, tileProbe, AIPlayerContactGround(collisionFlag));
     out << ",\"tileDamage\":";
     WriteAIPlayerTileDamageJson(out, tileDamageFlags, tileDamageType);
     out

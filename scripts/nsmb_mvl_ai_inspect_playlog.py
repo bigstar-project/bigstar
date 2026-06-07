@@ -150,19 +150,25 @@ def tile_probe_text(player: dict[str, Any]) -> str:
         if isinstance(sample, dict)
     }
     tags = []
+    hole_ahead = num(summary.get("effectiveHoleAhead"), num(summary.get("holeAhead")))
+    hole_left = num(summary.get("effectiveHoleLeft"), num(summary.get("holeLeft")))
+    hole_right = num(summary.get("effectiveHoleRight"), num(summary.get("holeRight")))
+    ground = num(summary.get("effectiveGroundBelowSolid"), num(summary.get("groundBelowSolid")))
     if num(summary.get("wallAhead")):
         tags.append("wall")
-    if num(summary.get("holeAhead")):
+    if hole_ahead:
         tags.append("hole")
-    if num(summary.get("groundBelowSolid")):
+    if ground:
         tags.append("ground")
+    if num(summary.get("holeSuppressedByContact")):
+        tags.append("suppress")
     if num(summary.get("wallLeft")):
         tags.append("WL")
-    if num(summary.get("holeLeft")):
+    if hole_left:
         tags.append("HL")
     if num(summary.get("wallRight")):
         tags.append("WR")
-    if num(summary.get("holeRight")):
+    if hole_right:
         tags.append("HR")
     tile_ids = []
     for name, label in [

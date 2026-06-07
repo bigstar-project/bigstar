@@ -50,6 +50,8 @@
 - 完了: RuleAIの内部 `FrameState` に `GroundBelowSolid` / `WallAhead` / `HoleAhead` / `WallLeft` / `HoleLeft` / `WallRight` / `HoleRight` を追加し、tileProbeが取れている場合は横移動入力の方向に応じた穴/壁候補でジャンプ入力を強めるようにした。
 - 完了: `players[].tileProbe.samples[].block` を追加し、StageLayout上の現在tile id/behaviorから question block、breakable block、brick、invisible block、item box候補、storage contents、modifierを明示的に保存するようにした。CSV特徴量とinspect/SVG表示にも流す。
 - 完了: stage 0実走で `feet/below/ahead*/left*/right*` の足元系offsetを少し下げ、RuleAI実操作経路のterrain traceを確認した。現時点ではStageLayout raw probeが地上接触中の `tileId=0x001 behavior=0x0000002A` をsolidish扱いできていないため、RuleAI側では接地contactがあるフレームの偽hole判定を抑える暫定フォールバックを入れた。
+- 完了: AI play logの `tileProbe.summary` に `contactGround`、`effectiveGroundBelowSolid`、`holeSuppressedByContact`、`effectiveHoleAhead/Left/Right` を追加した。raw tileProbeの `hole*` は残しつつ、接地contactを融合した実操作向け/学習向けの地形判断もCSV特徴量に入る。
+- 完了: `tileProbe.samples[]` に `status` と未取得時のworld/pixel/chunk情報を保存し、`tile.lowType` を追加した。`tileId=0x001 behavior=0x0000002A` のような低位tile typeをCSVから直接集計できる。
 
 ## AI Play Log
 
@@ -72,7 +74,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 
 `players[].tileDamage` には、Player本体に保存されるtile damage flags/typeを保存する。`active=1` のときはlava/poison/その他ダメージ地形などの接触候補として扱う。通常の床接地や壁接触は `contact` と `collisionMgr.collisionResult` を見る。
 
-`players[].tileProbe` には、StageLayoutから直接読んだタイル地形サンプルを保存する。サンプル点は `center`、`feet`、`below`、`aheadBody`、`aheadFeet`、`aheadBelow`、`ahead2Feet`、`ahead2Below`、`above`、`leftBody`、`leftFeet`、`leftBelow`、`left2Below`、`rightBody`、`rightFeet`、`rightBelow`、`right2Below`。各点は `pixelX/Y`、`chunkId`、`tileId`、`behavior`、`tile`、`block`、`solidish` を持つ。`tile` は `solid`、`scanSolid`、`coin`、`questionBlock`、`breakableBlock`、`brickBlock`、`slope`、`water`、`partialSolid`、`harmful` などへ展開する。`block` は現在のStageLayout tileから `any`、`itemBox`、`question`、`breakable`、`brick`、`invisible`、`storageContents`、`modifier`、`currentTileId`、`currentBehavior` を保存する。`storageContents` / `itemBox` はblock flagが立っているtileでのみ意味のある値として扱う。叩いた後の箱はStageLayoutがtileを差し替えた後の `currentTileId/currentBehavior` として現れる想定なので、stage 0の実ログで照合する。`summary.holeAhead` は速度方向の前方下2点、`summary.holeLeft` / `holeRight` は左右下2点がsolidishでない暫定穴判定。`summary.wallAhead` / `wallLeft` / `wallRight` はbody/feetがsolidishの暫定壁判定。CSVには `self_tile_probe_*` / `opponent_tile_probe_*` として展開する。
+`players[].tileProbe` には、StageLayoutから直接読んだタイル地形サンプルを保存する。サンプル点は `center`、`feet`、`below`、`aheadBody`、`aheadFeet`、`aheadBelow`、`ahead2Feet`、`ahead2Below`、`above`、`leftBody`、`leftFeet`、`leftBelow`、`left2Below`、`rightBody`、`rightFeet`、`rightBelow`、`right2Below`。各点は `status`、`pixelX/Y`、`chunkId`、`tileId`、`behavior`、`tile`、`block`、`solidish` を持つ。`status=0` は取得成功、それ以外はStageLayout/chunk/behavior tableなどの未取得理由を示す。未取得時もworld/pixel/chunk候補は残す。`tile` は `solid`、`scanSolid`、`coin`、`questionBlock`、`breakableBlock`、`brickBlock`、`slope`、`water`、`partialSolid`、`harmful`、`lowType` などへ展開する。`block` は現在のStageLayout tileから `any`、`itemBox`、`question`、`breakable`、`brick`、`invisible`、`storageContents`、`modifier`、`currentTileId`、`currentBehavior` を保存する。`storageContents` / `itemBox` はblock flagが立っているtileでのみ意味のある値として扱う。叩いた後の箱はStageLayoutがtileを差し替えた後の `currentTileId/currentBehavior` として現れる想定なので、stage 0の実ログで照合する。`summary.holeAhead` は速度方向の前方下2点、`summary.holeLeft` / `holeRight` は左右下2点がsolidishでないraw穴判定。`summary.effectiveHoleAhead/Left/Right` は接地contactがある場合に偽holeを抑えた学習/操作向け判定。`summary.wallAhead` / `wallLeft` / `wallRight` はbody/feetがsolidishの暫定壁判定。CSVには `self_tile_probe_*` / `opponent_tile_probe_*` として展開する。
 
 `players[].screen` / `players[].fallRisk` には、playerをカメラ座標へ投影した情報を保存する。`fallRisk` は `screenY0/1`、`cameraBottomDistance0/1`、`nearCameraBottom0/1`、`belowCamera0/1`、`velYPositive/Negative` を持つ。完全な穴判定ではないが、目視上の「下へ落ちている」「画面下端に近い」を学習データに入れるための暫定特徴。
 
@@ -123,7 +125,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 
 - object IDと画面上の意味の対応はまだ完全ではない。coin/item/enemy/platform/hazard の初期カテゴリは入り、block/item box候補はStageLayout tileProbeから取れるようになったが、stage 0の実ログを見ながらステージ固有ギミックの分類を増やす。
 - 目視同等にするには、stage 0の実プレイ場面でタイルサンプルを増やし、穴/壁/床判定のoffsetとsolid maskを調整する必要がある。左右ラップ込みX判定、Y込みの完全可視判定、player接触地形、CollisionMgr接触結果、modifier tile、tile damage、playerの画面Y/カメラ底距離、StageLayout由来の前方/左右タイルサンプルは取れるようになった。
-- StageLayout raw probeでは、stage 0の接地中に `tileId=0x001 behavior=0x0000002A` が出る場面があり、現行solidish maskでは床として分類できない。RuleAIは接地contactで偽holeを抑えるが、学習用の目視同等ログとしては低位tile typeの意味を追加で詰める必要がある。
+- StageLayout raw probeでは、stage 0の接地中に `tileId=0x001 behavior=0x0000002A lowType=42` が出る場面があり、現行solidish maskでは床として分類できない。RuleAIとCSVのeffective判定は接地contactで偽holeを抑えるが、学習用の目視同等ログとしては低位tile typeの意味を追加で詰める必要がある。
 - ブロック/アイテム箱の「中身」はblock flagつきStageLayout tile behaviorのstorage contentsとして保存するようになった。叩いた後の状態は現在tile id/behaviorの変化として取れる想定だが、stage 0の実ログで `StageLayout::changeTile` / question block animation path と照合して詰める。
 - 自己対戦に進む前に、ログschemaを実プレイログで増強し、学習済みモデルを入力へ戻す推論経路を作る必要がある。
 
@@ -188,10 +190,14 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `logs/codex-ai-stage0-ruleai-groundfallback-block-smoke-20260607`: stage 0対象のRuleAI専用スモーク1700F pass。`cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4` pass後に実施し、`NSMB RuleAI: inst=... terrain=...` traceが実操作経路で出ることを確認。frame 960以降で `terrain=ground:1 ahead:0/0 left:0/0 right:0/0` となり、接地contactフォールバックで偽hole jumpが抑えられることを確認。
 - 同ログで `players[].tileProbe.samples[].block` がJSONLに出力され、`scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --label-source auto --require-player-found` pass。28行CSV生成、`self_tile_probe_*_block_*` / `opponent_tile_probe_*_block_*` は合計374列。今回のseedでは実際のblock sampleは0件だったが、直前の `logs/codex-ai-stage0-ruleai-offset48-block-smoke-20260607` ではframe 1230の `leftBody` で `tileId=71`、`question=1`、`itemBox=1`、`storageContents=7` を確認。
 - 同ログから `python scripts\nsmb_mvl_ai_train_imitation.py ... --epochs 200 --lr 0.05` pass。28行の小データで `train_button_acc=0.992`、`val_button_acc=0.833`。`python scripts\nsmb_mvl_ai_predict_imitation.py ... --limit 10` pass、`button_acc=0.975`、`exact=0.900`。`python scripts\nsmb_mvl_ai_render_playlog_svg.py ... --frame 1200` pass。
+- `logs/codex-ai-stage0-effective-tileprobe-smoke-20260607`: effective tileProbe summaryとsample `status` / `lowType` 追加後に `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4` pass、`python -m py_compile scripts\nsmb_mvl_ai_build_dataset.py scripts\nsmb_mvl_ai_inspect_playlog.py scripts\nsmb_mvl_ai_render_playlog_svg.py` pass。RuleAI専用スモーク1700F pass。
+- 同ログで `python scripts\nsmb_mvl_ai_inspect_playlog.py ... --player 1 --limit 14` pass。frame 960以降の地上接触中は `probe` 列が `ground+suppress` になり、raw `hole*` を `effectiveHole*=0` へ抑えたことを確認。JSON spot checkで `summary.contactGround=1`、`effectiveGroundBelowSolid=1`、`holeSuppressedByContact=1`、`effectiveHoleAhead/Left/Right=0`、sample `feet.lowType=42` を確認。
+- 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --label-source auto --require-player-found` pass。28行CSV生成。`self_tile_probe_effectiveGroundBelowSolid`、`self_tile_probe_holeSuppressedByContact`、`self_tile_probe_effectiveHoleAhead`、`self_tile_probe_feet_status`、`self_tile_probe_feet_lowType`、`self_tile_probe_below_status`、`self_tile_probe_below_lowType` の列追加を確認。
+- 同ログから `python scripts\nsmb_mvl_ai_train_imitation.py ... --epochs 200 --lr 0.05` pass。28行の小データで `train_button_acc=0.992`、`val_button_acc=0.958`。`python scripts\nsmb_mvl_ai_predict_imitation.py ... --limit 10` pass、`button_acc=0.975`、`exact=0.900`。`python scripts\nsmb_mvl_ai_render_playlog_svg.py ... --frame 1200` pass。
 
 ## Next Actions
 
-- StageLayout tile probeをstage 0の実プレイで増やし、`tileId=0x001 behavior=0x0000002A` など低位tile typeの意味を特定して、学習ログ側の `solidish` / `hole*` を接地contactフォールバックなしでも目視に近づける。
+- StageLayout tile probeをstage 0の実プレイで増やし、`tileId=0x001 behavior=0x0000002A lowType=42` など低位tile typeの意味を特定して、raw `solidish` / `hole*` を接地contact補正なしでも目視に近づける。
 - RuleAIをstage 0の実際のCPU操作経路でさらに長く走らせ、スター取得、敵回避、落下復帰、箱接触時の入力変化を確認する。
 - ブロック/アイテム箱の中身と叩いた後の状態をstage 0の `StageLayout::changeTile` / question block animation path と実ログで照合し、`tileProbe.samples[].block` の解釈を詰める。
 - 落下死ラインとステージ境界をメモリから取り、`fallRisk` と `tileProbe.holeAhead` を統合した危険判定を作る。
