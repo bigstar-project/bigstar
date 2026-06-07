@@ -203,6 +203,7 @@ constexpr melonDS::u16 kMvlObject267ID = 0x010B;
 constexpr melonDS::u16 kVsConnectObjectID = 0x0006;
 constexpr melonDS::u16 kCourseSelectObjectID = 0x0005;
 constexpr melonDS::u16 kStageCameraObjectID = 0x013C;
+constexpr melonDS::u16 kStageLayoutObjectID = 0x0145;
 constexpr melonDS::u16 kCoinObjectID = 0x0042;
 constexpr melonDS::u16 kGoombaObjectID = 0x0053;
 constexpr melonDS::u16 kGoombaBigObjectID = 0x0054;
@@ -13894,6 +13895,8 @@ const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings)
         return "stage_actor_manager";
     if (objectID == kStageControllerObjectID)
         return "stage_controller";
+    if (objectID == kStageLayoutObjectID)
+        return "stage_layout";
     if (objectID == kMvlObject267ID)
         return "mvl_object267";
     if (objectID == kVsConnectObjectID)
@@ -13932,6 +13935,7 @@ melonDS::u32 AIObjectCategoryMask(const char* category)
         std::strcmp(category, "stage_fx") == 0 ||
         std::strcmp(category, "stage_actor_manager") == 0 ||
         std::strcmp(category, "stage_controller") == 0 ||
+        std::strcmp(category, "stage_layout") == 0 ||
         std::strcmp(category, "mvl_object267") == 0 ||
         std::strcmp(category, "vs_connect") == 0 ||
         std::strcmp(category, "course_select") == 0)

@@ -64,6 +64,7 @@ CATEGORY_COUNT_NAMES = [
     "stage_fx",
     "stage_actor_manager",
     "stage_controller",
+    "stage_layout",
     "mvl_object267",
     "vs_connect",
     "course_select",

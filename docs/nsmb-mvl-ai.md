@@ -90,6 +90,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `stage_fx`
 - `stage_actor_manager`
 - `stage_controller`
+- `stage_layout`
 - `mvl_object267`
 - `vs_connect`
 - `course_select`
@@ -123,7 +124,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `logs/codex-ai-visual-wrapx-smoke-20260607`: visualSummary追加後のrule AI remote smoke 1600F pass。JSONL 27行、`visualSummary` 全行あり。frame 870で `visibleCamera0X=10`、`visibleCamera1X=11`、player objectの `screen.camera0.inViewX=1` を確認。
 - 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --require-player-found` pass、24行CSV生成。`visible_camera*_x` と `count_*` 特徴が追加された状態で `python scripts\nsmb_mvl_ai_train_imitation.py ... --epochs 200 --lr 0.05` pass。
 - `python scripts\nsmb_mvl_ai_inspect_playlog.py logs\codex-ai-visual-wrapx-smoke-20260607\ai-playlog.jsonl --player 1 --limit 8` pass。frame 900で入力 `LY`、player1座標、Big Star相対 `696,104`、moving hazard相対 `127,-8`、カテゴリ数を表で確認。
-- `logs/codex-ai-object-catalog-smoke-20260607`: object catalog追加後のrule AI remote smoke 1600F pass。`stage_fx`、`mvl_object267`、`vs_connect` のカテゴリ化を確認。未知のまま残る代表IDは `0x021`、`0x145`。
+- `logs/codex-ai-object-catalog-smoke-20260607`: object catalog追加後のrule AI remote smoke 1600F pass。`stage_fx`、`mvl_object267`、`vs_connect` のカテゴリ化を確認。未知のまま残る代表IDは当時 `0x021`、`0x145`。
 - `logs/codex-ai-contact-smoke-20260607`: contact追加後のrule AI remote smoke 1600F pass。`python scripts\nsmb_mvl_ai_inspect_playlog.py ... --player 1 --limit 10` pass。frame 990でcontact `G`、frame 1020以降で `G+WR` を確認し、接地/壁接触が人間可読の表に出ることを確認。
 - 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --require-player-found` pass、24行CSV生成。`self_contact_*` / `opponent_contact_*` は各33列、`count_coin`、`count_hazard`、`count_enemy_goomba`、`count_platform`、`count_warp_entrance` の列追加を確認。
 - `python scripts\nsmb_mvl_ai_train_imitation.py logs\codex-ai-contact-smoke-20260607\ai-dataset-player1.csv logs\codex-ai-contact-smoke-20260607\ai-imitation-player1.npz --epochs 200 --lr 0.05` pass。24行の小データで学習と `.npz` 保存が動作することを再確認。
@@ -153,10 +154,14 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --require-player-found --label-source auto` pass。25行CSV生成。`self_screen0_in_view_y`、`self_screen1_in_view_y`、`opponent_screen0_in_view_y`、`opponent_screen1_in_view_y` の列追加を確認。
 - `python scripts\nsmb_mvl_ai_train_imitation.py logs\codex-ai-screen-inviewy-smoke-20260607\ai-dataset-player1-auto.csv logs\codex-ai-screen-inviewy-smoke-20260607\ai-imitation-player1-auto.npz --epochs 200 --lr 0.05` pass。`python scripts\nsmb_mvl_ai_predict_imitation.py logs\codex-ai-screen-inviewy-smoke-20260607\ai-imitation-player1-auto.npz logs\codex-ai-screen-inviewy-smoke-20260607\ai-dataset-player1-auto.csv logs\codex-ai-screen-inviewy-smoke-20260607\ai-predictions-player1-auto.csv --limit 10` pass。10行サンプルで `button_acc=0.975`、`exact=0.800`。
 - `python scripts\nsmb_mvl_ai_render_playlog_svg.py logs\codex-ai-screen-inviewy-smoke-20260607\ai-playlog.jsonl logs\codex-ai-screen-inviewy-smoke-20260607\frame-1050-player1.svg --player 1 --frame 1050` pass。
+- `logs/codex-ai-stage-layout-category-smoke-20260607`: `0x145` を `stage_layout` に分類後、rule AI remote smoke 1600F pass。catalogで `0x145 settings=0x00000000 stage_layout sampleVTable=0x02123D6C` を確認。
+- 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --require-player-found --label-source auto` pass。25行CSV生成。`count_stage_layout=1`、`count_object=0` を確認。
+- `python scripts\nsmb_mvl_ai_train_imitation.py logs\codex-ai-stage-layout-category-smoke-20260607\ai-dataset-player1-auto.csv logs\codex-ai-stage-layout-category-smoke-20260607\ai-imitation-player1-auto.npz --epochs 200 --lr 0.05` pass。`python scripts\nsmb_mvl_ai_predict_imitation.py logs\codex-ai-stage-layout-category-smoke-20260607\ai-imitation-player1-auto.npz logs\codex-ai-stage-layout-category-smoke-20260607\ai-dataset-player1-auto.csv logs\codex-ai-stage-layout-category-smoke-20260607\ai-predictions-player1-auto.csv --limit 10` pass。10行サンプルで `button_acc=0.958`、`exact=0.700`。
+- `python scripts\nsmb_mvl_ai_render_playlog_svg.py logs\codex-ai-stage-layout-category-smoke-20260607\ai-playlog.jsonl logs\codex-ai-stage-layout-category-smoke-20260607\frame-1050-player1.svg --player 1 --frame 1050` pass。
 
 ## Next Actions
 
 - camera Y / player display Y の対応を解析し、完全な画面内判定を入れる。
 - 穴/落下死ライン、ブロック/アイテム箱、前方タイル地形サンプルをメモリから取れる場所を解析してAI play logへ足す。接触結果、modifier tile、tile damageは取得済みだが、目視上の「前に穴がある」「?ブロックがある」はまだ直接取れていない。
 - 学習済み `.npz` をPoCまたは外部sidecarから推論して入力へ戻す経路を作る。
-- object categoryをログ実例で検証し、unknownの `0x145` とステージ固有objectの意味を詰める。`0x021` は実ログでBig Star actorと同じvtableだったため `big_star_related` に分類した。`0x0F0` はrollback notes上のItem付随短命effectとして `item_spawn_effect` に分類した。
+- object categoryをログ実例で検証し、ステージ固有objectの意味を詰める。`0x021` は実ログでBig Star actorと同じvtableだったため `big_star_related` に分類した。`0x0F0` はrollback notes上のItem付随短命effectとして `item_spawn_effect` に分類した。`0x145` は既存RAM probeの名前表に基づいて `stage_layout` に分類した。
