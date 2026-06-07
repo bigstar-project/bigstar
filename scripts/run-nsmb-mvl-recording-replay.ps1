@@ -7,6 +7,9 @@ param(
     [string]$ClientRom = "",
     [string]$HostInputScript = "",
     [string]$ClientInputScript = "",
+    [string]$PacketReplayFile = "",
+    [string]$HostPacketReplayFile = "",
+    [string]$ClientPacketReplayFile = "",
     [int]$Frames = 0,
     [int]$WaitTimeoutMs = 300000,
     [int]$AIPlayLogInterval = 1,
@@ -122,7 +125,7 @@ $mode = [string](Get-JsonValue $replay "mode" "")
 if ($mode -eq "") {
     $mode = "input_script"
 }
-if ($mode -ne "input_script") {
+if ($mode -ne "input_script" -and $mode -ne "packet_replay") {
     throw "unsupported recording replay mode: $mode"
 }
 
@@ -133,8 +136,60 @@ $replayClientInput = [string](Get-JsonValue $replay "clientInputScript" "")
 if ($manifestHostInput -eq "" -and $replayHostInput -ne "") { $manifestHostInput = $replayHostInput }
 if ($manifestClientInput -eq "" -and $replayClientInput -ne "") { $manifestClientInput = $replayClientInput }
 
-$effectiveHostInput = if ($HostInputScript -ne "") { Resolve-RepoPath $HostInputScript } else { Resolve-ManifestPath $manifestHostInput $manifestDir -Required }
-$effectiveClientInput = if ($ClientInputScript -ne "") { Resolve-RepoPath $ClientInputScript } else { Resolve-ManifestPath $manifestClientInput $manifestDir -Required }
+$defaultInputScript = "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs"
+$effectiveHostInput = if ($HostInputScript -ne "") {
+    Resolve-RepoPath $HostInputScript
+} elseif ($manifestHostInput -ne "") {
+    Resolve-ManifestPath $manifestHostInput $manifestDir -Required
+} elseif ($mode -eq "packet_replay") {
+    Resolve-RepoPath $defaultInputScript
+} else {
+    Resolve-ManifestPath $manifestHostInput $manifestDir -Required
+}
+$effectiveClientInput = if ($ClientInputScript -ne "") {
+    Resolve-RepoPath $ClientInputScript
+} elseif ($manifestClientInput -ne "") {
+    Resolve-ManifestPath $manifestClientInput $manifestDir -Required
+} elseif ($mode -eq "packet_replay") {
+    Resolve-RepoPath $defaultInputScript
+} else {
+    Resolve-ManifestPath $manifestClientInput $manifestDir -Required
+}
+
+$manifestPacketReplay = [string](Get-JsonValue $manifest "packetReplayFile" "")
+$manifestHostPacketReplay = [string](Get-JsonValue $manifest "hostPacketReplayFile" "")
+$manifestClientPacketReplay = [string](Get-JsonValue $manifest "clientPacketReplayFile" "")
+$replayPacketReplay = [string](Get-JsonValue $replay "packetReplayFile" "")
+$replayHostPacketReplay = [string](Get-JsonValue $replay "hostPacketReplayFile" "")
+$replayClientPacketReplay = [string](Get-JsonValue $replay "clientPacketReplayFile" "")
+if ($manifestPacketReplay -eq "" -and $replayPacketReplay -ne "") { $manifestPacketReplay = $replayPacketReplay }
+if ($manifestHostPacketReplay -eq "" -and $replayHostPacketReplay -ne "") { $manifestHostPacketReplay = $replayHostPacketReplay }
+if ($manifestClientPacketReplay -eq "" -and $replayClientPacketReplay -ne "") { $manifestClientPacketReplay = $replayClientPacketReplay }
+
+$commonPacketReplay = if ($PacketReplayFile -ne "") {
+    Resolve-RepoPath $PacketReplayFile
+} elseif ($manifestPacketReplay -ne "") {
+    Resolve-ManifestPath $manifestPacketReplay $manifestDir -Required
+} else {
+    ""
+}
+$effectiveHostPacketReplay = if ($HostPacketReplayFile -ne "") {
+    Resolve-RepoPath $HostPacketReplayFile
+} elseif ($manifestHostPacketReplay -ne "") {
+    Resolve-ManifestPath $manifestHostPacketReplay $manifestDir -Required
+} else {
+    $commonPacketReplay
+}
+$effectiveClientPacketReplay = if ($ClientPacketReplayFile -ne "") {
+    Resolve-RepoPath $ClientPacketReplayFile
+} elseif ($manifestClientPacketReplay -ne "") {
+    Resolve-ManifestPath $manifestClientPacketReplay $manifestDir -Required
+} else {
+    $commonPacketReplay
+}
+if ($mode -eq "packet_replay" -and ($effectiveHostPacketReplay -eq "" -or $effectiveClientPacketReplay -eq "")) {
+    throw "packet_replay mode requires packetReplayFile or host/client packet replay files"
+}
 
 $defaultHostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds"
 $defaultClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds"
@@ -213,6 +268,12 @@ $splitArgs = @(
 if ($matchSeed -ne "") { $splitArgs += @("-MvlMatchSeed", $matchSeed) }
 if ($GenerateMvlConfiguredRoms) { $splitArgs += "-GenerateMvlConfiguredRoms" }
 if ($AllowJit) { $splitArgs += "-AllowJit" }
+if ($mode -eq "packet_replay") {
+    $splitArgs += @(
+        "-HostPacketReplayFile", $effectiveHostPacketReplay,
+        "-ClientPacketReplayFile", $effectiveClientPacketReplay
+    )
+}
 
 $plan = [ordered]@{
     schema = "nsmb_mvl_ai_recording_replay_run_v1"
@@ -226,6 +287,8 @@ $plan = [ordered]@{
     stageScope = $stageScope
     hostInputScript = $effectiveHostInput
     clientInputScript = $effectiveClientInput
+    hostPacketReplayFile = $effectiveHostPacketReplay
+    clientPacketReplayFile = $effectiveClientPacketReplay
     hostRom = $effectiveHostRom
     clientRom = $effectiveClientRom
     splitScript = $splitScript

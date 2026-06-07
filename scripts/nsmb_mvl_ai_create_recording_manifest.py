@@ -222,6 +222,12 @@ def main() -> int:
     parser.add_argument("--stage", type=int, default=0)
     parser.add_argument("--host-input-script", type=Path)
     parser.add_argument("--client-input-script", type=Path)
+    parser.add_argument("--replay-mode", choices=["auto", "input_script", "packet_replay"], default="auto")
+    parser.add_argument("--packet-replay-file", type=Path)
+    parser.add_argument("--host-packet-replay-file", type=Path)
+    parser.add_argument("--client-packet-replay-file", type=Path)
+    parser.add_argument("--host-packet-capture", type=Path)
+    parser.add_argument("--client-packet-capture", type=Path)
     parser.add_argument("--log-dir", type=Path)
     parser.add_argument("--stdout", type=Path)
     parser.add_argument("--frames", type=int, default=0)
@@ -240,7 +246,14 @@ def main() -> int:
     base.mkdir(parents=True, exist_ok=True)
     summary = summarize(args.playlog, args.player, args.label_source, args.max_event_samples)
     replay_frames = args.frames if args.frames > 0 else int(summary.get("frameEnd") or 0)
-    replay_mode = "input_script" if args.host_input_script or args.client_input_script else ""
+    replay_mode = args.replay_mode
+    if replay_mode == "auto":
+        if args.packet_replay_file or args.host_packet_replay_file or args.client_packet_replay_file:
+            replay_mode = "packet_replay"
+        elif args.host_input_script or args.client_input_script:
+            replay_mode = "input_script"
+        else:
+            replay_mode = ""
     manifest = {
         "schema": "nsmb_mvl_ai_recording_manifest_v1",
         "createdAt": datetime.now(timezone.utc).isoformat(),
@@ -251,6 +264,9 @@ def main() -> int:
         "playLog": rel(args.playlog, base),
         "hostInputScript": rel(args.host_input_script, base),
         "clientInputScript": rel(args.client_input_script, base),
+        "packetReplayFile": rel(args.packet_replay_file, base),
+        "hostPacketReplayFile": rel(args.host_packet_replay_file, base),
+        "clientPacketReplayFile": rel(args.client_packet_replay_file, base),
         "logDir": rel(args.log_dir, base),
         "stdout": rel(args.stdout, base),
         "replay": {
@@ -259,8 +275,15 @@ def main() -> int:
             "matchSeed": args.match_seed,
             "hostInputScript": rel(args.host_input_script, base),
             "clientInputScript": rel(args.client_input_script, base),
+            "packetReplayFile": rel(args.packet_replay_file, base),
+            "hostPacketReplayFile": rel(args.host_packet_replay_file, base),
+            "clientPacketReplayFile": rel(args.client_packet_replay_file, base),
             "hostRom": rel(args.host_rom, base),
             "clientRom": rel(args.client_rom, base),
+        },
+        "packetCapture": {
+            "host": rel(args.host_packet_capture, base),
+            "client": rel(args.client_packet_capture, base),
         },
         "metadata": {
             "buildId": args.build_id,

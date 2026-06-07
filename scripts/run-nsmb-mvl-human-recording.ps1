@@ -9,6 +9,9 @@ param(
     [int]$AIPlayLogMaxObjects = 128,
     [ValidateSet("host", "client", "both")]
     [string]$HumanSide = "host",
+    [switch]$NoPacketCapture,
+    [int]$PacketReplayFirstFrame = 0,
+    [int]$PacketReplayLastFrame = 0,
     [switch]$GenerateMvlConfiguredRoms,
     [string]$MvlMatchSeed = "",
     [switch]$AllowJit
@@ -44,6 +47,7 @@ $manualArgs = @(
     "-AIPlayLogInterval", "$AIPlayLogInterval",
     "-AIPlayLogMaxObjects", "$AIPlayLogMaxObjects"
 )
+if (-not $NoPacketCapture) { $manualArgs += "-PacketCapture" }
 if ($GenerateMvlConfiguredRoms) { $manualArgs += "-GenerateMvlConfiguredRoms" }
 if ($MvlMatchSeed -ne "") { $manualArgs += @("-MvlMatchSeed", $MvlMatchSeed) }
 if ($AllowJit) { $manualArgs += "-AllowJit" }
@@ -51,11 +55,26 @@ if ($AllowJit) { $manualArgs += "-AllowJit" }
 $hostManifest = Join-Path $hostLog "recording.json"
 $clientManifest = Join-Path $clientLog "recording.json"
 $indexPath = Join-Path $logRoot "recordings-index.json"
+$hostPacketCapture = Join-Path $hostLog "host.packet-capture.csv"
+$clientPacketCapture = Join-Path $clientLog "client.packet-capture.csv"
+$packetReplay = Join-Path $logRoot "packet-replay.csv"
 $hostPlayer = if ($HumanSide -eq "client") { 0 } else { 0 }
 $clientPlayer = if ($HumanSide -eq "host") { 1 } else { 1 }
-$postCommands = @(
-    "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$hostAIPlayLog`" `"$hostManifest`" --kind human --player $hostPlayer --label-source player --stage 0 --log-dir `"$hostLog`" --frames $Frames --host-input-script `"$InputScript`" --client-input-script `"$InputScript`" --host-rom `"$HostRom`" --client-rom `"$ClientRom`" --match-seed `"$MvlMatchSeed`"",
-    "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$clientAIPlayLog`" `"$clientManifest`" --kind human --player $clientPlayer --label-source player --stage 0 --log-dir `"$clientLog`" --frames $Frames --host-input-script `"$InputScript`" --client-input-script `"$InputScript`" --host-rom `"$HostRom`" --client-rom `"$ClientRom`" --match-seed `"$MvlMatchSeed`"",
+$postCommands = @()
+if (-not $NoPacketCapture) {
+    $convertCommand = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\convert-nsmb-packet-capture-to-replay.ps1 -HostCapture `"$hostPacketCapture`" -ClientCapture `"$clientPacketCapture`" -Output `"$packetReplay`""
+    if ($PacketReplayFirstFrame -gt 0) { $convertCommand += " -FirstFrame $PacketReplayFirstFrame" }
+    if ($PacketReplayLastFrame -gt 0) { $convertCommand += " -LastFrame $PacketReplayLastFrame" }
+    $postCommands += $convertCommand
+}
+$packetReplayArgs = if ($NoPacketCapture) {
+    ""
+} else {
+    " --replay-mode packet_replay --packet-replay-file `"$packetReplay`" --host-packet-capture `"$hostPacketCapture`" --client-packet-capture `"$clientPacketCapture`""
+}
+$postCommands += @(
+    "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$hostAIPlayLog`" `"$hostManifest`" --kind human --player $hostPlayer --label-source player --stage 0 --log-dir `"$hostLog`" --frames $Frames --host-input-script `"$InputScript`" --client-input-script `"$InputScript`" --host-rom `"$HostRom`" --client-rom `"$ClientRom`" --match-seed `"$MvlMatchSeed`"$packetReplayArgs",
+    "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$clientAIPlayLog`" `"$clientManifest`" --kind human --player $clientPlayer --label-source player --stage 0 --log-dir `"$clientLog`" --frames $Frames --host-input-script `"$InputScript`" --client-input-script `"$InputScript`" --host-rom `"$HostRom`" --client-rom `"$ClientRom`" --match-seed `"$MvlMatchSeed`"$packetReplayArgs",
     "python scripts\nsmb_mvl_ai_make_recordings_index.py `"$indexPath`" `"$hostManifest`" `"$clientManifest`" --stage 0",
     "python scripts\nsmb_mvl_ai_build_dataset.py `"$indexPath`" `"$logRoot\ai-dataset-player1.csv`" --player 1 --label-source player --require-player-found"
 )
@@ -74,6 +93,10 @@ $session = [ordered]@{
     hostRom = $HostRom
     clientRom = $ClientRom
     mvlMatchSeed = $MvlMatchSeed
+    packetCapture = -not $NoPacketCapture
+    hostPacketCapture = $hostPacketCapture
+    clientPacketCapture = $clientPacketCapture
+    packetReplay = $packetReplay
     postCommands = $postCommands
 }
 $session | ConvertTo-Json -Depth 6 | Set-Content -Path $sessionPath -Encoding UTF8

@@ -55,6 +55,8 @@ param(
     [int]$AIPlayLogInterval = 1,
     [int]$AIPlayLogMaxObjects = 128,
     [switch]$InputNetplayTrace,
+    [switch]$PacketCapture,
+    [switch]$PacketCaptureAllowPreGame,
     [switch]$TracePlayerLifeChanges,
     [switch]$TracePlayerDefeated,
     [switch]$PerfBreakdown,
@@ -242,6 +244,12 @@ if ($GameStateTrace) {
 }
 if ($InputNetplayTrace) {
     $common += "-InputNetplayTrace"
+}
+if ($PacketCapture) {
+    $common += "-PacketCapture"
+    if ($PacketCaptureAllowPreGame) {
+        $common += "-PacketCaptureAllowPreGame"
+    }
 }
 if ($TracePlayerLifeChanges) {
     $common += "-TracePlayerLifeChanges"

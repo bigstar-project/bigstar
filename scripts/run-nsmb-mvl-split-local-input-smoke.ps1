@@ -148,6 +148,10 @@ param(
     [string]$ForceStageActorFreezeFlagValue = "0",
     [int]$HostStartupDelayMs = 1200,
     [string]$LogDir = "logs\nsmb-mvl-split-local-input-smoke",
+    [string]$HostPacketReplayFile = "",
+    [string]$ClientPacketReplayFile = "",
+    [switch]$PacketCapture,
+    [switch]$PacketCaptureAllowPreGame,
     [string]$HostAIPlayLog = "",
     [string]$ClientAIPlayLog = "",
     [int]$AIPlayLogInterval = 1,
@@ -293,6 +297,12 @@ if (-not $UseLanMP) {
 }
 if ($PacketBridgePreserveLocalTouch) {
     $common += "-PacketBridgePreserveLocalTouch"
+}
+if ($PacketCapture) {
+    $common += "-PacketCapture"
+    if ($PacketCaptureAllowPreGame) {
+        $common += "-PacketCaptureAllowPreGame"
+    }
 }
 if ($ForcePlayerInventoryPowerups) {
     $common += @(
@@ -520,6 +530,9 @@ $hostArgs = @(
     "-InputScript", $HostInputScript,
     "-LogDir", $hostLog
 )
+if ($HostPacketReplayFile -ne "") {
+    $hostArgs += @("-HostPacketReplayFile", $HostPacketReplayFile)
+}
 if (-not $NoGameStateTrace) {
     $hostArgs += @("-RequireHostLocalPlayerID", "0", "-RequireHostNetLocalAid", "0")
 }
@@ -535,6 +548,9 @@ $clientArgs = @(
     "-InputScript", $ClientInputScript,
     "-LogDir", $clientLog
 )
+if ($ClientPacketReplayFile -ne "") {
+    $clientArgs += @("-ClientPacketReplayFile", $ClientPacketReplayFile)
+}
 if (-not $NoGameStateTrace) {
     $clientArgs += @("-RequireClientLocalPlayerID", "1", "-RequireClientNetLocalAid", "1")
 }
