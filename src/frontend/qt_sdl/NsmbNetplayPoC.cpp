@@ -12645,16 +12645,19 @@ bool ReadStageLayoutTileBehavior(
 
     const melonDS::u32 tileOffset = (((pixelX & 0xF0u) >> 4) << 1) + ((pixelY & 0xF0u) << 1);
     const melonDS::u32 tileID = nds->ARM9Read16(chunkPtr + tileOffset);
+    out.TileID = tileID;
     melonDS::u32 behavior = 0;
     melonDS::u32 behaviorTable = 0;
     if (tileID < 0x100)
     {
         behaviorTable = kStageLayoutTileBehaviorBaseTableAddr;
+        out.BehaviorTable = behaviorTable;
         behavior = nds->ARM9Read32(behaviorTable + tileID * sizeof(melonDS::u32));
     }
     else if (tileID < 0x600)
     {
         behaviorTable = nds->ARM9Read32(kStageLayoutDynamicTileBehaviorTablePtrAddr);
+        out.BehaviorTable = behaviorTable;
         const melonDS::u32 behaviorOffset = (tileID - 0x100) * sizeof(melonDS::u32);
         if (!IsValidMainRAMRange(nds, behaviorTable + behaviorOffset, sizeof(melonDS::u32)))
         {
@@ -12674,7 +12677,6 @@ bool ReadStageLayoutTileBehavior(
     out.StageLayout = stageLayout;
     out.ChunkPtr = chunkPtr;
     out.BehaviorTable = behaviorTable;
-    out.TileID = tileID;
     out.Behavior = behavior;
     return true;
 }
@@ -14444,8 +14446,11 @@ void WriteAITileProbePointJson(std::ostream& out, const AITileProbeSample& sampl
             << ",\"pixelX\":" << sample.PixelX
             << ",\"pixelY\":" << sample.PixelY
             << ",\"chunkId\":" << sample.ChunkID
+            << ",\"tileId\":" << sample.TileID
             << ",\"chunkPtr\":";
         WriteJsonHex(out, sample.ChunkPtr);
+        out << ",\"behaviorTable\":";
+        WriteJsonHex(out, sample.BehaviorTable);
         out << "}";
         return;
     }
