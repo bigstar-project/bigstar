@@ -35,6 +35,7 @@
 - 完了: playerの `collisionFlag` / `environmentFlag` を名前付き `contact` 状態へ展開し、接地、予測接地、天井、左右壁、水/液体/水没、流砂、ロープ/ポール、スパイク、コンベア、雪/砂/破壊地形、左右ラップをAI play logとCSV特徴量に保存するようにした。
 - 完了: playerごとの `screen.camera0/1` と `fallRisk` をAI play logへ追加した。画面X/Y、カメラ内判定、カメラ底までの距離、下端近接、カメラ下抜け、Y速度符号を保存し、穴/落下判断の前段特徴としてCSVへ展開する。
 - 完了: `scripts/nsmb_mvl_ai_render_playlog_svg.py` でJSONLの1フレームをplayer中心のSVGに描画できるようにした。表だけでなく、星、hazard、item、coin、敵、platform、unknown objectの相対配置を目視できる。
+- 完了: AI play logの `objects[]` に `offset` と `vtable` を追加した。object ID/settingsだけで意味が分からないactorも、vtableを手がかりに後から分類できる。
 
 ## AI Play Log
 
@@ -47,7 +48,7 @@
 - `MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS=32`: 1フレームに保存するactive object上限。
 - `MELONDS_NSML_AI_PLAY_LOG_INCLUDE_NON_GAMEPLAY=1`: 通常はMvL gameplay中だけ保存する。これを指定すると非gameplayも含める。
 
-JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`targets`、`camera`、`objectSummary`、`objects` を持つ。`objects` はactive objectだけを保存し、既知IDには `category` を付ける。
+JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`targets`、`camera`、`objectSummary`、`objects` を持つ。`objects` はactive objectだけを保存し、既知IDには `category` を付ける。各objectには `objectId`、`settings`、`guid`、`base`、`offset`、`vtable`、state/flags、座標、速度、player相対座標、screen情報を保存する。
 
 `inputs` にはメモリ上の `console0/1`、`player0/1` に加えて、PoCが実際にそのフレーム近辺へ注入した `appliedPlayer0/1` を保存する。模倣学習の教師ラベルはまず `appliedPlayerN.held` / `heldHex` を使う。
 
@@ -61,6 +62,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 
 - `player`
 - `big_star_actor`
+- `big_star_related`
 - `big_star_candidate`
 - `world_item`
 - `neutral_item`
@@ -121,10 +123,12 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `logs/codex-ai-svg-smoke-20260607`: `item_spawn_effect` 分類とSVGレンダラ追加後のrule AI remote smoke 1600F pass。catalogで `0x0F0 settings=0x0109002F` が `item_spawn_effect` になることを確認。
 - `python scripts\nsmb_mvl_ai_render_playlog_svg.py logs\codex-ai-svg-smoke-20260607\ai-playlog.jsonl logs\codex-ai-svg-smoke-20260607\frame-1020-player1.svg --player 1 --frame 1020` pass。`frame-1020-player1.svg` を生成し、player中心の相対配置を目視確認できる成果物が作れることを確認。
 - 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --require-player-found` pass、24行CSV生成。`python scripts\nsmb_mvl_ai_train_imitation.py ... --epochs 200 --lr 0.05` pass。
+- `logs/codex-ai-vtable-smoke-20260607`: object `offset` / `vtable` 追加後のrule AI remote smoke 1600F pass。catalogで `sampleVTable` が出力され、unknown objectにもvtableが残ることを確認。`0x021` と `0x022` が同じ `0x021331E8` を持つことを確認。
+- `logs/codex-ai-vtable-category-smoke-20260607`: `0x021` を `big_star_related` に分類後のrule AI remote smoke 1600F pass。catalogで `0x021 settings=0x00000000 big_star_related sampleVTable=0x021331E8` を確認。inspect表、SVG生成、dataset生成、最小imitation trainまでpass。
 
 ## Next Actions
 
 - camera Y / player display Y の対応を解析し、完全な画面内判定を入れる。
 - 穴/落下死ライン、ブロック/アイテム箱、前方タイル地形サンプルをメモリから取れる場所を解析してAI play logへ足す。
 - 学習済み `.npz` をPoCまたは外部sidecarから推論して入力へ戻す経路を作る。
-- object categoryをログ実例で検証し、unknownの `0x021`、`0x145` とステージ固有objectの意味を詰める。`0x0F0` はrollback notes上のItem付随短命effectとして `item_spawn_effect` に分類した。
+- object categoryをログ実例で検証し、unknownの `0x145` とステージ固有objectの意味を詰める。`0x021` は実ログでBig Star actorと同じvtableだったため `big_star_related` に分類した。`0x0F0` はrollback notes上のItem付随短命effectとして `item_spawn_effect` に分類した。

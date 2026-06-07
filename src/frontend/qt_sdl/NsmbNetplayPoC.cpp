@@ -150,6 +150,7 @@ constexpr melonDS::u32 kPlayerBaseTransitionStepOffset = 0xBAD;
 constexpr melonDS::u32 kPlayerBaseLinkedActorOffset = 0x688;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
+constexpr melonDS::u16 kVsBattleStarRelatedObjectID = 0x0021;
 constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
 constexpr melonDS::u16 kVsMovingHazardObjectID = 0x0053;
 constexpr melonDS::u32 kVsMovingHazardSettings = 0x00000000;
@@ -13740,6 +13741,8 @@ const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings)
         return "player";
     if (objectID == kVsBattleStarActorObjectID && settings == kVsBattleStarActorSettings)
         return "big_star_actor";
+    if (objectID == kVsBattleStarRelatedObjectID)
+        return "big_star_related";
     if (objectID == kVsBattleStarCandidateObjectID)
         return "big_star_candidate";
     if (objectID == kVsWorldItemObjectID && settings == kVsWorldItemSettings)
@@ -13804,6 +13807,7 @@ melonDS::u32 AIObjectCategoryMask(const char* category)
     if (std::strcmp(category, "player") == 0)
         return 1u << 0;
     if (std::strcmp(category, "big_star_actor") == 0 ||
+        std::strcmp(category, "big_star_related") == 0 ||
         std::strcmp(category, "big_star_candidate") == 0)
         return 1u << 1;
     if (std::strcmp(category, "world_item") == 0 ||
@@ -14122,6 +14126,10 @@ void WriteAIObjectJson(std::ostream& out, const GameStateObjectScanEntry& entry,
     WriteJsonHex(out, entry.Actor.GUID);
     out << ",\"base\":";
     WriteJsonHex(out, entry.Actor.Base);
+    out << ",\"offset\":";
+    WriteJsonHex(out, entry.Offset);
+    out << ",\"vtable\":";
+    WriteJsonHex(out, entry.VTable);
     out << ",\"lifecycle\":" << static_cast<unsigned>(entry.LifecycleState)
         << ",\"type\":" << static_cast<unsigned>(entry.Type)
         << ",\"skipFlags\":" << static_cast<unsigned>(entry.SkipFlags)
@@ -14191,8 +14199,9 @@ void WriteAIVisualSummaryJson(
     const GameStateObjectScanCache& objectScanCache,
     const GameStateSample& sample)
 {
-    constexpr std::array<const char*, 12> categories {{
+    constexpr std::array<const char*, 13> categories {{
         "big_star_actor",
+        "big_star_related",
         "big_star_candidate",
         "world_item",
         "neutral_item",

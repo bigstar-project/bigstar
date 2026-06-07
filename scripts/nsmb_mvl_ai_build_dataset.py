@@ -28,6 +28,7 @@ BUTTON_BITS = {
 
 NEAREST_CATEGORIES = [
     "big_star_actor",
+    "big_star_related",
     "big_star_candidate",
     "world_item",
     "neutral_item",
@@ -44,6 +45,7 @@ NEAREST_CATEGORIES = [
 CATEGORY_COUNT_NAMES = [
     "player",
     "big_star_actor",
+    "big_star_related",
     "big_star_candidate",
     "world_item",
     "neutral_item",

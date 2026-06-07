@@ -126,6 +126,7 @@ def main() -> int:
             for name in [
                 "player",
                 "big_star_actor",
+                "big_star_related",
                 "world_item",
                 "coin",
                 "moving_hazard",

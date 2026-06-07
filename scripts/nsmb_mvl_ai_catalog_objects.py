@@ -43,6 +43,7 @@ def main() -> int:
             "in_view_x": 0,
             "bases": set(),
             "guids": set(),
+            "vtables": set(),
             "min_p0dx": None,
             "max_p0dx": None,
             "min_p1dx": None,
@@ -61,6 +62,7 @@ def main() -> int:
             entry["last"] = max(entry["last"], frame)
             entry["bases"].add(obj.get("base", "0x00000000"))
             entry["guids"].add(obj.get("guid", "0x00000000"))
+            entry["vtables"].add(obj.get("vtable", "0x00000000"))
             screen = ((obj.get("screen") or {}).get("camera0") or {})
             if screen.get("inViewX"):
                 entry["in_view_x"] += 1
@@ -76,12 +78,14 @@ def main() -> int:
         catalog.items(),
         key=lambda item: (-item[1]["count"], item[0][0], item[0][1]),
     )
-    print("objectId settings category count first last inViewX bases guids p0dxRange p1dxRange")
+    print("objectId settings category count first last inViewX bases guids vtables sampleVTable p0dxRange p1dxRange")
     for (object_id, settings), entry in rows[: args.limit]:
+        sample_vtable = ",".join(sorted(entry["vtables"])[:2])
         print(
             f"{object_id:>7s} {settings:>10s} {entry['category']:<20s} "
             f"{entry['count']:5d} {entry['first']:5d} {entry['last']:5d} "
             f"{entry['in_view_x']:7d} {len(entry['bases']):5d} {len(entry['guids']):5d} "
+            f"{len(entry['vtables']):7d} {sample_vtable:<21s} "
             f"{entry['min_p0dx']//4096 if entry['min_p0dx'] is not None else 0:5d}.."
             f"{entry['max_p0dx']//4096 if entry['max_p0dx'] is not None else 0:<5d} "
             f"{entry['min_p1dx']//4096 if entry['min_p1dx'] is not None else 0:5d}.."

@@ -19,6 +19,7 @@ CENTER_Y = HEIGHT // 2
 CATEGORY_STYLE = {
     "player": ("#2563eb", "P"),
     "big_star_actor": ("#f59e0b", "S"),
+    "big_star_related": ("#facc15", "R"),
     "big_star_candidate": ("#fbbf24", "s"),
     "world_item": ("#10b981", "I"),
     "neutral_item": ("#34d399", "i"),
