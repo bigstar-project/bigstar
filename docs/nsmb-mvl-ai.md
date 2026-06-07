@@ -37,6 +37,7 @@
 - 完了: `scripts/nsmb_mvl_ai_render_playlog_svg.py` でJSONLの1フレームをplayer中心のSVGに描画できるようにした。表だけでなく、星、hazard、item、coin、敵、platform、unknown objectの相対配置を目視できる。
 - 完了: AI play logの `objects[]` に `offset` と `vtable` を追加した。object ID/settingsだけで意味が分からないactorも、vtableを手がかりに後から分類できる。
 - 完了: `scripts/nsmb_mvl_ai_build_dataset.py` に `--label-source auto|applied|player|console` を追加した。ルールAIログは `appliedPlayerN`、人間プレイログはメモリ上の `playerN` / `consoleN` 入力を教師ラベルにできる。
+- 完了: `scripts/nsmb_mvl_ai_predict_imitation.py` で学習済み `.npz` とdataset CSVからオフライン推論し、予測held入力、button別確率、ラベルとの一致率をCSV出力できるようにした。
 
 ## AI Play Log
 
@@ -92,6 +93,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `MELONDS_NSML_AI_PLAY_LOG=<path>` でAI/人間共通の観測ログを出す。
 - `python scripts\nsmb_mvl_ai_build_dataset.py <playlog.jsonl> <dataset.csv> --player 1 --require-player-found` で固定長特徴量へ変換する。デフォルトの `--label-source auto` は `appliedPlayerN` があればそれを使い、なければ `playerN` を使う。人間ログだけを明示する場合は `--label-source player` を指定する。
 - `python scripts\nsmb_mvl_ai_train_imitation.py <dataset.csv> <model.npz>` でキー入力の多ラベル分類モデルを学習する。
+- `python scripts\nsmb_mvl_ai_predict_imitation.py <model.npz> <dataset.csv> <predictions.csv>` で学習済みモデルのオフライン推論結果を確認する。
 - `python scripts\nsmb_mvl_ai_inspect_playlog.py <playlog.jsonl> --player 1` で、frame、入力、接地/壁/水などのcontact、player/相手/星/hazardの相対位置、可視X数、カテゴリ数を目視確認する。
 - `python scripts\nsmb_mvl_ai_render_playlog_svg.py <playlog.jsonl> <frame.svg> --player 1 --frame <frame>` で、player中心の相対配置をSVGとして目視確認する。
 - `python scripts\nsmb_mvl_ai_catalog_objects.py <playlog.jsonl>` で、未知objectの出現頻度と代表的な相対位置を確認し、カテゴリ付けを増やす。
@@ -127,6 +129,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `logs/codex-ai-vtable-smoke-20260607`: object `offset` / `vtable` 追加後のrule AI remote smoke 1600F pass。catalogで `sampleVTable` が出力され、unknown objectにもvtableが残ることを確認。`0x021` と `0x022` が同じ `0x021331E8` を持つことを確認。
 - `logs/codex-ai-vtable-category-smoke-20260607`: `0x021` を `big_star_related` に分類後のrule AI remote smoke 1600F pass。catalogで `0x021 settings=0x00000000 big_star_related sampleVTable=0x021331E8` を確認。inspect表、SVG生成、dataset生成、最小imitation trainまでpass。
 - 同ログで `python scripts\nsmb_mvl_ai_build_dataset.py ... --label-source auto|applied|player` を確認。`applied` は24行、`auto` と `player` は25行を生成。人間ログ相当の `playerN` ラベルでもCSV化できることを確認。`python -m py_compile` でAI関連Pythonスクリプト5本の構文確認pass。`auto` CSVから最小imitation train pass。
+- `python scripts\nsmb_mvl_ai_predict_imitation.py logs\codex-ai-vtable-category-smoke-20260607\ai-imitation-player1-auto.npz logs\codex-ai-vtable-category-smoke-20260607\ai-dataset-player1-auto.csv logs\codex-ai-vtable-category-smoke-20260607\ai-predictions-player1-auto.csv --limit 10` pass。10行サンプルで `button_acc=0.975`、`exact=0.800`、予測CSV生成を確認。
 
 ## Next Actions
 
