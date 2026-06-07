@@ -13,6 +13,8 @@ set(SOURCES_QT_SDL
     EmuThread.cpp
     NsmbNetplayPoC.cpp
     NsmbNetplayPoC.h
+    NsmbRuleAI.cpp
+    NsmbRuleAI.h
     CheatImportDialog.cpp
     CheatsDialog.cpp
     Config.cpp

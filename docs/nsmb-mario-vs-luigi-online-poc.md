@@ -1,5 +1,27 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Current rule-based AI PoC - 2026-06-07
+
+- 1人用MvLに向けた最初のCPU入力PoCとして、状態ベースのルールAIを追加した。
+- AI判断本体は `src/frontend/qt_sdl/NsmbRuleAI.cpp` / `.h` に分離し、巨大化している `NsmbNetplayPoC.cpp` 側には `GameStateSample` からAI用 `FrameState` へ詰め替える薄い接続だけを残した。
+- 有効化env:
+  - `MELONDS_NSML_RULE_AI=1`
+  - `MELONDS_NSML_RULE_AI_PLAYER=remote|local|0|1|mario|luigi`
+  - `MELONDS_NSML_RULE_AI_HOST_ONLY=1` / `MELONDS_NSML_RULE_AI_CLIENT_ONLY=1`
+  - `MELONDS_NSML_RULE_AI_TRACE=1`
+- 現AIは、player actor座標、Big Star actor/candidate座標、相手座標、双方のBattle Starsを読み、Big Star追跡、相手追跡、スター優勢時の近距離回避を切り替える。入力は左右移動 + `Y`走り + 周期/高低差/近距離ジャンプの最小構成。
+- 1人用PoC向けに、AIがremote playerを担当する場合は input-netplay の peer wait / remote input wait をスキップし、PacketBridge JIT helper scratchへAI入力を書けるようにした。
+- Verification:
+  - `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4` pass。
+  - `logs/codex-rule-ai-single-host-helper-smoke-20260607`: host単体、`MELONDS_NSML_RULE_AI=1`、`MELONDS_NSML_RULE_AI_PLAYER=remote`、`-InputNetplay`、`-PacketBridgeJitHelperPatch -PacketBridgeJitHelperPatchFrame 870` で1600F pass。`NSMB RuleAI` traceで player1 の `starActor` 追跡入力が出力され、`remoteWaitCount=0`。
+- Current blocker / limitation:
+  - AIはまだ「ゲームが成立する最低限」の入力生成で、ステージ別経路、穴/壁/土管、スター取得保証、強さ調整、GUIからの起動設定は未実装。
+  - 単体hostでAI remoteを使うには、現時点では PacketBridge JIT helper patch を明示する必要がある。
+- Next actions:
+  - GUI/手動起動に「CPU相手」設定を追加し、host単体またはclient hidden AI構成を選べるようにする。
+  - AIログとgame-state traceから、スター取得までの到達率、壁で止まる位置、落下/復帰を確認してステージ別ルールを足す。
+  - `MELONDS_NSML_RULE_AI` 用の smoke wrapper を追加し、helper patch と必要envを毎回手で指定しなくてよい形にする。
+
 ## Current GUI netplay controls - 2026-06-07
 
 - GUI対戦設定に `InputDelayFrames`、`InputMaxFrameLead`、ロールバック有効/無効を追加した。

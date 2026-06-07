@@ -12,6 +12,7 @@
 */
 
 #include "NsmbNetplayPoC.h"
+#include "NsmbRuleAI.h"
 
 #include <algorithm>
 #include <array>
@@ -1398,6 +1399,17 @@ struct State
     int MvlAutoRestartCount[16] {};
     int MvlAutoRestartWins[16][2] {};
     std::vector<char> MvlAutoRestartCheckpoint[16];
+    bool RuleAIEnabled = false;
+    bool RuleAIHostOnly = false;
+    bool RuleAIClientOnly = false;
+    std::string RuleAIPlayerSpec = "remote";
+    melonDS::u32 RuleAIStartFrame = 0;
+    int RuleAIHorizontalDeadzone = 0x4000;
+    int RuleAICloseRange = 0x22000;
+    int RuleAIJumpInterval = 42;
+    int RuleAIJumpFrames = 9;
+    bool RuleAITraceEnabled = false;
+    int RuleAITraceInterval = 60;
     bool MvlAutoRestartCheckpointLogged[16] {};
     bool DirectMvlBootUseLoadGameSM = false;
     bool DirectMvlBootPatchLoadGameSMOnly = false;
@@ -2329,6 +2341,87 @@ InputState ApplyScriptRemotePacketInputScript(int instanceID, melonDS::u32 frame
     if (GScriptRemotePacketInputScript.empty())
         return ApplyInputScript(instanceID, frame, fallback);
     return ApplyInputSpans(GScriptRemotePacketInputScript, instanceID, frame, fallback);
+}
+
+NsmbRuleAI::Config RuleAIConfig()
+{
+    NsmbRuleAI::Config config {};
+    config.Enabled = G.RuleAIEnabled;
+    config.PlayerSpec = G.RuleAIPlayerSpec;
+    config.StartFrame = G.RuleAIStartFrame;
+    config.HorizontalDeadzone = G.RuleAIHorizontalDeadzone;
+    config.CloseRange = G.RuleAICloseRange;
+    config.JumpInterval = G.RuleAIJumpInterval;
+    config.JumpFrames = G.RuleAIJumpFrames;
+    config.TraceEnabled = G.RuleAITraceEnabled;
+    config.TraceInterval = G.RuleAITraceInterval;
+    return config;
+}
+
+NsmbRuleAI::FrameState RuleAIFrameStateFromSample(const GameStateSample& sample, bool inGameplay)
+{
+    NsmbRuleAI::FrameState state {};
+    state.InGameplay = inGameplay;
+    state.Players[0].Found = sample.PlayerActor0Found != 0;
+    state.Players[0].X = sample.PlayerActor0PosX;
+    state.Players[0].Y = sample.PlayerActor0PosY;
+    state.Players[0].BattleStars = sample.Player0BattleStars;
+    state.Players[1].Found = sample.PlayerActor1Found != 0;
+    state.Players[1].X = sample.PlayerActor1PosX;
+    state.Players[1].Y = sample.PlayerActor1PosY;
+    state.Players[1].BattleStars = sample.Player1BattleStars;
+    state.StarFound = sample.VsStarFound != 0;
+    state.StarX = sample.VsStarPosX;
+    state.StarY = sample.VsStarPosY;
+    state.StarActorFound = sample.VsStarActorFound != 0;
+    state.StarActorX = sample.VsStarActorPosX;
+    state.StarActorY = sample.VsStarActorPosY;
+    return state;
+}
+
+bool RuleAIProvidesInputForPlayer(int player)
+{
+    if (!G.RuleAIEnabled)
+        return false;
+    if (G.RuleAIHostOnly && G.NetRole != Role::Host)
+        return false;
+    if (G.RuleAIClientOnly && G.NetRole != Role::Client)
+        return false;
+    return NsmbRuleAI::ControlsPlayer(
+        RuleAIConfig(),
+        player,
+        CurrentPacketBridgeLocalPlayer());
+}
+
+InputState ApplyRuleBasedAIInput(
+    int instanceID,
+    melonDS::u32 frame,
+    melonDS::NDS* nds,
+    int player,
+    const InputState& fallback)
+{
+    if (!G.RuleAIEnabled || frame < G.RuleAIStartFrame || !nds || !nds->MainRAM)
+        return fallback;
+    if (G.RuleAIHostOnly && G.NetRole != Role::Host)
+        return fallback;
+    if (G.RuleAIClientOnly && G.NetRole != Role::Client)
+        return fallback;
+    const NsmbRuleAI::Config config = RuleAIConfig();
+    const int localPlayer = CurrentPacketBridgeLocalPlayer();
+    if (!NsmbRuleAI::ControlsPlayer(config, player, localPlayer))
+        return fallback;
+    const bool inGameplay = IsMarioVsLuigiGameplay(nds);
+    if (!inGameplay)
+        return fallback;
+    const GameStateSample sample = ReadGameStateSample(nds);
+    return NsmbRuleAI::DecideInput(
+        config,
+        RuleAIFrameStateFromSample(sample, inGameplay),
+        instanceID,
+        frame,
+        player,
+        localPlayer,
+        fallback);
 }
 
 void FlushDelayedInputsLocked(melonDS::u32 frame);
@@ -9869,7 +9962,8 @@ void WritePacketBridgeJitScratchInputs(
             localInput,
             remoteInput,
             hasRemoteInput);
-        const melonDS::u32 keys = (~input.KeyMask) & 0x0FFF;
+        const InputState effectiveInput = ApplyRuleBasedAIInput(instanceID, frame, nds, player, input);
+        const melonDS::u32 keys = (~effectiveInput.KeyMask) & 0x0FFF;
         nds->ARM9Write16(kPacketBridgeJitScratchKeysAddr + static_cast<melonDS::u32>(player * 2),
             static_cast<melonDS::u16>(keys));
 
@@ -9879,9 +9973,9 @@ void WritePacketBridgeJitScratchInputs(
         packet[2] = static_cast<melonDS::u8>(keys & 0xFF);
         packet[3] = static_cast<melonDS::u8>((keys >> 8) & 0xFF);
         packet[4] = action;
-        packet[5] = input.Touching ? 1 : 0;
-        packet[6] = static_cast<melonDS::u8>(std::min<int>(input.TouchX, 255));
-        packet[7] = static_cast<melonDS::u8>(std::min<int>(input.TouchY, 191));
+        packet[5] = effectiveInput.Touching ? 1 : 0;
+        packet[6] = static_cast<melonDS::u8>(std::min<int>(effectiveInput.TouchX, 255));
+        packet[7] = static_cast<melonDS::u8>(std::min<int>(effectiveInput.TouchY, 191));
         for (melonDS::u32 i = 0; i < 44; i++)
             packet[8 + i] = nds->ARM9Read8(0x020888E8 + i);
         packet[0x29] = nds->ARM9Read8(0x02088A4C);
@@ -10314,7 +10408,8 @@ void WritePacketBridgeJitScratchIfNeeded(
     }
 
     const int localPlayer = CurrentPacketBridgeLocalPlayer();
-    if (G.InputNetplayOnly && G.WaitForPeerBeforeStart && G.NetplayStartFrame > 0)
+    if (G.InputNetplayOnly && G.WaitForPeerBeforeStart && G.NetplayStartFrame > 0
+        && !RuleAIProvidesInputForPlayer(localPlayer ^ 1))
     {
         const melonDS::u32 delay = static_cast<melonDS::u32>(std::max(0, G.Delay));
         const melonDS::u32 sendStartFrame = (G.NetplayStartFrame > delay)
@@ -10377,9 +10472,11 @@ void WritePacketBridgeJitScratchIfNeeded(
         ThrottleInputNetplayFrameLead(nds, frame, sendFrame);
         throttleUs = static_cast<unsigned long long>(ElapsedUs(throttleStart));
 
+        const bool ruleAIProvidesRemoteInput = RuleAIProvidesInputForPlayer(localPlayer ^ 1);
         if (!hasRemoteInput
             && !G.RollbackEnabled
             && G.LocalWaitsForRemote
+            && !ruleAIProvidesRemoteInput
             && (!G.InputNetplayOnly || G.NetplayStartFrame == 0 || logicalFrame >= G.NetplayStartFrame))
         {
             const auto waitStart = std::chrono::steady_clock::now();
@@ -14850,6 +14947,22 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH_FRAME", 0)));
     G.InputNetplayOnly = EnvFlag("MELONDS_NSML_INPUT_NETPLAY_ONLY");
     G.InputNetplayTraceEnabled = EnvFlag("MELONDS_NSML_INPUT_NETPLAY_TRACE");
+    G.RuleAIEnabled = EnvFlag("MELONDS_NSML_RULE_AI");
+    G.RuleAIHostOnly = EnvFlag("MELONDS_NSML_RULE_AI_HOST_ONLY");
+    G.RuleAIClientOnly = EnvFlag("MELONDS_NSML_RULE_AI_CLIENT_ONLY");
+    G.RuleAIPlayerSpec = EnvCString("MELONDS_NSML_RULE_AI_PLAYER", "remote");
+    G.RuleAIStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_RULE_AI_START_FRAME", 0)));
+    G.RuleAIHorizontalDeadzone = std::clamp(
+        EnvInt("MELONDS_NSML_RULE_AI_HORIZONTAL_DEADZONE", 0x4000), 0, 0x200000);
+    G.RuleAICloseRange = std::clamp(
+        EnvInt("MELONDS_NSML_RULE_AI_CLOSE_RANGE", 0x22000), 0x1000, 0x200000);
+    G.RuleAIJumpInterval = std::clamp(
+        EnvInt("MELONDS_NSML_RULE_AI_JUMP_INTERVAL", 42), 1, 600);
+    G.RuleAIJumpFrames = std::clamp(
+        EnvInt("MELONDS_NSML_RULE_AI_JUMP_FRAMES", 9), 0, G.RuleAIJumpInterval);
+    G.RuleAITraceEnabled = EnvFlag("MELONDS_NSML_RULE_AI_TRACE");
+    G.RuleAITraceInterval = std::max(1, EnvInt("MELONDS_NSML_RULE_AI_TRACE_INTERVAL", 60));
     G.NetworkPumpThreadEnabled = EnvFlag("MELONDS_NSML_NET_PUMP_THREAD");
     G.NetworkPumpSleepUs = std::clamp(EnvInt("MELONDS_NSML_NET_PUMP_SLEEP_US", 250), 50, 5000);
     G.InputWaitPollUs = std::clamp(EnvInt("MELONDS_NSML_INPUT_WAIT_POLL_US", 100), 50, 5000);
@@ -15381,6 +15494,25 @@ void InitFromEnvironment()
         G.MvlStageSceneSettings,
         G.MvlCourseMode.c_str(),
         G.MvlBigStarTarget);
+    if (G.RuleAIEnabled)
+    {
+        std::printf(
+            "NSMB RuleAI: enabled player=%s startFrame=%u deadzone=0x%X closeRange=0x%X jump=%d/%d trace=%d traceInterval=%d\n",
+            G.RuleAIPlayerSpec.c_str(),
+            G.RuleAIStartFrame,
+            G.RuleAIHorizontalDeadzone,
+            G.RuleAICloseRange,
+            G.RuleAIJumpFrames,
+            G.RuleAIJumpInterval,
+            G.RuleAITraceEnabled ? 1 : 0,
+            G.RuleAITraceInterval);
+        if (G.RuleAIHostOnly || G.RuleAIClientOnly)
+        {
+            std::printf("NSMB RuleAI: roleFilter hostOnly=%d clientOnly=%d\n",
+                G.RuleAIHostOnly ? 1 : 0,
+                G.RuleAIClientOnly ? 1 : 0);
+        }
+    }
     std::fflush(stdout);
 }
 
@@ -15541,7 +15673,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         inputFrame = G.TestFrameCount[instanceID];
     phaseTrace.SetFrame(inputFrame);
 
-    if (G.Enabled && G.InputNetplayOnly && G.WaitForPeerBeforeStart && inputFrame == 0)
+    if (G.Enabled && G.InputNetplayOnly && G.WaitForPeerBeforeStart && inputFrame == 0
+        && !RuleAIProvidesInputForPlayer(CurrentPacketBridgeLocalPlayer() ^ 1))
     {
         WaitForPeerIfNeeded(true);
         {
@@ -15720,7 +15853,14 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     WaitAtFrameBarrier(GBeforeFrameBarrier, instanceID, inputFrame, "before");
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Barrier);
 
-    const InputState testInput = ApplyInputScript(instanceID, inputFrame, polledInput);
+    InputState testInput = ApplyInputScript(instanceID, inputFrame, polledInput);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        testInput = ApplyRuleBasedAIInput(
+            instanceID,
+            inputFrame,
+            nds,
+            CurrentPacketBridgeLocalPlayer(),
+            testInput);
     const melonDS::u32 syncFrame = G.TestEnabled ? inputFrame : frame;
 
     if (G.Enabled && G.InputNetplayOnly)
