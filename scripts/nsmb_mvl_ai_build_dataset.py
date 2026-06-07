@@ -165,10 +165,24 @@ def nearest_object(
     return best
 
 
-def build_row(record: dict[str, Any], player: int) -> dict[str, int]:
+def label_held(record: dict[str, Any], player: int, source: str) -> int | None:
     inputs = record["inputs"]
     applied = inputs.get(f"appliedPlayer{player}", {})
-    held = num(applied.get("held"))
+    if source == "applied":
+        return num(applied.get("held")) if applied.get("valid") else None
+    if source == "player":
+        return num((inputs.get(f"player{player}") or {}).get("held"))
+    if source == "console":
+        return num((inputs.get(f"console{player}") or {}).get("held"))
+    if applied.get("valid"):
+        return num(applied.get("held"))
+    return num((inputs.get(f"player{player}") or {}).get("held"))
+
+
+def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[str, int]:
+    held = label_held(record, player, label_source)
+    if held is None:
+        raise ValueError("record has no usable label")
     players = record["players"]
     self_player = players[player]
     opponent = players[player ^ 1]
@@ -201,6 +215,7 @@ def build_row(record: dict[str, Any], player: int) -> dict[str, int]:
         "stage_id": num((record.get("stage") or {}).get("id")),
         "stage_group": num((record.get("stage") or {}).get("group")),
         "player": player,
+        "label_source": {"auto": 0, "applied": 1, "player": 2, "console": 3}[label_source],
         "in_gameplay": num(record.get("inGameplay")),
         "self_found": num(self_player.get("found")),
         "self_x": self_pos["x"],
@@ -323,6 +338,15 @@ def main() -> int:
     parser.add_argument("input", type=Path, help="AI play log JSONL")
     parser.add_argument("output", type=Path, help="output CSV")
     parser.add_argument("--player", type=int, choices=[0, 1], default=1)
+    parser.add_argument(
+        "--label-source",
+        choices=["auto", "applied", "player", "console"],
+        default="auto",
+        help=(
+            "input label source: auto uses appliedPlayerN when present and playerN otherwise; "
+            "player/console are useful for human play logs"
+        ),
+    )
     parser.add_argument("--min-frame", type=int, default=0)
     parser.add_argument("--require-player-found", action="store_true")
     args = parser.parse_args()
@@ -331,12 +355,11 @@ def main() -> int:
     for record in iter_records(args.input):
         if num(record.get("frame")) < args.min_frame:
             continue
-        applied = (record.get("inputs") or {}).get(f"appliedPlayer{args.player}", {})
-        if not applied.get("valid"):
-            continue
         if args.require_player_found and not record["players"][args.player].get("found"):
             continue
-        rows.append(build_row(record, args.player))
+        if label_held(record, args.player, args.label_source) is None:
+            continue
+        rows.append(build_row(record, args.player, args.label_source))
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     if not rows:
