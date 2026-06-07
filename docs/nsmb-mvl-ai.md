@@ -93,6 +93,7 @@
 - 完了: `scripts/run-nsmb-mvl-split-local-input-smoke.ps1` に `-AllowRemoteInputTimeoutFallback` と `-InternalWaitTimeoutMs` を追加し、モデルinput script評価時にremote input timeoutを即時fallbackへ近づけられるようにした。
 - 完了: 手動人間記録の既定を、2窓host/client同期ではなく `single_client_authoritative` に変更した。`run-nsmb-mvl-human-recording.ps1` はデフォルトでclient/Luigi側1窓だけを起動し、その1つのmelonDSインスタンスからMario/Luigi/敵/アイテム/地形/入力ラベルを同一frameの権威ログとして保存する。2窓同期は `-DualWindow` の実験オプションに残すが、現時点ではpeer接続待ちと入力遅延が実プレイ記録に不適なので学習ログ既定には使わない。
 - 完了: client-only手動記録は入力遅延を `InputDelayFrames=0` にし、JITを既定で有効にする。`logs/codex-human-recording-single-client-scripted-20260608` では2200Fを約55.5fpsで完走し、dataset 1332行、nonzeroLabelRows 1300、`recording-audit.json` passを確認した。無操作ログは `nonzeroLabelRows=0` で監査failになり、学習用に無入力記録を弾ける。
+- 完了: AI play logは学習内容を変えない範囲でflush頻度を調整できるようにした。`MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL=60` が既定で、JSONLの各行内容は変えずにofstream flushだけを60行ごとにまとめ、終了時に明示flushする。固定seed `0x12345678`、2200F、`AIPlayLogInterval=1`、`AIPlayLogMaxObjects=128` の比較では、`flushInterval=1` が active fps 53.52 / 25ms超44frame、`flushInterval=60` が active fps 55.75 / 25ms超12frame。両者の `ai-playlog.jsonl` は1410行、52,779,281 bytes、SHA256 `DB3A75B422241D06407748D50010EA13073430EAF46072645844C52BDC87D817` で完全一致した。
 
 ## AI Play Log
 
@@ -100,6 +101,7 @@
 
 - `MELONDS_NSML_AI_PLAY_LOG=<path>`: JSONL出力先。
 - `MELONDS_NSML_AI_PLAY_LOG_INTERVAL=1`: ログ間隔。学習データ収集は1、smoke/目視検査は30などでよい。
+- `MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL=60`: JSONLを何行ごとにflushするか。0なら終了時flushのみ。ログ内容は変えず、実プレイ時のディスクI/Oスパイクだけを抑えるための設定。異常終了時は最後の最大N行がOS/iostream bufferに残る可能性があるため、重要な手動記録ではmelonDSを正常終了させる。
 - `MELONDS_NSML_AI_PLAY_LOG_START_FRAME=0`
 - `MELONDS_NSML_AI_PLAY_LOG_END_FRAME=0`: 0なら終了指定なし。
 - `MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS=32`: 1フレームに保存するactive object上限。
@@ -398,4 +400,5 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - 学習済み `.npz` から生成したinput scriptでstage 0を実走させ、一定時間生存、Big Star接近、落下しない、相手と戦うなどのゲーム内指標をmanifestへ入れる。今回のsplit smokeはloader成功後にremote input timeoutになったため、まずharness条件を安定させる。
 - PoC内または外部sidecarで状態を逐次推論し、input script生成を介さずremote CPU入力へ戻す直結経路を作る。
 - 学習/自己対戦用には、現行の2プロセスGUI寄りsmokeではなく、描画・音声・通信待ち・stdoutを削った高速評価runnerを用意する。目標は少なくともリアルタイム60fps、自己対戦データ生成では可能なら数百fps以上。
+- AI play log性能は、次に `TraceAIPlayLog` 内のobject scan、JSON構築、ofstream書き込みを別々に計測する。今回のflush batchingはログ本文を完全一致させたままスパイクを減らしたが、長時間の手動記録でまだ60fpsを割る場合は、1行分をメモリで組み立てて1回writeする経路など、ログ内容不変の最適化だけを測定して入れる。
 - object categoryをログ実例で検証し、ステージ固有objectの意味を詰める。`0x021` は実ログでBig Star actorと同じvtableだったため `big_star_related` に分類した。`0x0F0` はrollback notes上のItem付随短命effectとして `item_spawn_effect` に分類した。`0x145` は既存RAM probeの名前表に基づいて `stage_layout` に分類した。

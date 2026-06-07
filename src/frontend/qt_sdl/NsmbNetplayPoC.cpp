@@ -1638,6 +1638,8 @@ struct State
     int RamDumpInterval = 0;
     int GameStateTraceInterval = 60;
     int AIPlayLogInterval = 1;
+    int AIPlayLogFlushInterval = 60;
+    int AIPlayLogLinesSinceFlush = 0;
     int AIPlayLogMaxObjects = 32;
     bool AIPlayLogGameplayOnly = true;
     int MemPatchInstance = -1;
@@ -15607,7 +15609,15 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     G.AIPlayLog << "],\"hash\":";
     WriteJsonHex(G.AIPlayLog, static_cast<melonDS::u32>(sample.Hash & 0xFFFFFFFFull));
     G.AIPlayLog << "}\n";
-    G.AIPlayLog.flush();
+    if (G.AIPlayLogFlushInterval > 0)
+    {
+        G.AIPlayLogLinesSinceFlush++;
+        if (G.AIPlayLogLinesSinceFlush >= G.AIPlayLogFlushInterval)
+        {
+            G.AIPlayLog.flush();
+            G.AIPlayLogLinesSinceFlush = 0;
+        }
+    }
 }
 
 void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -16593,6 +16603,7 @@ void InitFromEnvironment()
     const char* aiPlayLog = std::getenv("MELONDS_NSML_AI_PLAY_LOG");
     if (aiPlayLog && aiPlayLog[0]) G.AIPlayLogPath = aiPlayLog;
     G.AIPlayLogInterval = std::max(1, EnvInt("MELONDS_NSML_AI_PLAY_LOG_INTERVAL", 1));
+    G.AIPlayLogFlushInterval = std::max(0, EnvInt("MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL", 60));
     G.AIPlayLogStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_AI_PLAY_LOG_START_FRAME", 0)));
     G.AIPlayLogEndFrame = static_cast<melonDS::u32>(
@@ -17220,10 +17231,12 @@ void InitFromEnvironment()
         }
         else
         {
+            G.AIPlayLogLinesSinceFlush = 0;
             std::printf(
-                "NSMB AIPlayLog: enabled path=%s interval=%d start=%u end=%u maxObjects=%d gameplayOnly=%d\n",
+                "NSMB AIPlayLog: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d gameplayOnly=%d\n",
                 G.AIPlayLogPath.c_str(),
                 G.AIPlayLogInterval,
+                G.AIPlayLogFlushInterval,
                 G.AIPlayLogStartFrame,
                 G.AIPlayLogEndFrame,
                 G.AIPlayLogMaxObjects,
@@ -18687,7 +18700,10 @@ void Shutdown()
     if (G.GameStateTrace)
         G.GameStateTrace.close();
     if (G.AIPlayLog)
+    {
+        G.AIPlayLog.flush();
         G.AIPlayLog.close();
+    }
 }
 
 }

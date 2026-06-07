@@ -6,6 +6,7 @@ param(
     [string]$InputScript = "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs",
     [string]$LogDir = "",
     [int]$AIPlayLogInterval = 1,
+    [int]$AIPlayLogFlushInterval = 60,
     [int]$AIPlayLogMaxObjects = 128,
     [string]$Scenario = "",
     [ValidateSet("host", "client", "both")]
@@ -63,6 +64,7 @@ $manualArgs = @{
     MvlStage = 0
     ClientAIPlayLog = $clientAIPlayLog
     AIPlayLogInterval = $AIPlayLogInterval
+    AIPlayLogFlushInterval = $AIPlayLogFlushInterval
     AIPlayLogMaxObjects = $AIPlayLogMaxObjects
     NetworkPumpThread = $true
     NetworkPumpSleepUs = 50
@@ -150,6 +152,7 @@ $session = [ordered]@{
     hostAIPlayLog = $(if ($singleWindow) { "" } else { $hostAIPlayLog })
     clientAIPlayLog = $clientAIPlayLog
     aiPlayLogInterval = $AIPlayLogInterval
+    aiPlayLogFlushInterval = $AIPlayLogFlushInterval
     aiPlayLogMaxObjects = $AIPlayLogMaxObjects
     scenario = $Scenario
     frames = $Frames
