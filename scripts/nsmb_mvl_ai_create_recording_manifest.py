@@ -90,7 +90,7 @@ def label_value(record: dict[str, Any], player: int, source: str) -> int | None:
     return num((inputs.get(f"player{player}") or {}).get("held"))
 
 
-def summarize(playlog: Path, player: int, label_source: str) -> dict[str, Any]:
+def summarize(playlog: Path, player: int, label_source: str, max_event_samples: int) -> dict[str, Any]:
     first: dict[str, Any] | None = None
     last: dict[str, Any] | None = None
     prev_players: list[dict[str, Any]] | None = None
@@ -110,6 +110,15 @@ def summarize(playlog: Path, player: int, label_source: str) -> dict[str, Any]:
         "itemVisible": 0,
         "projectileVisible": 0,
     }
+    event_samples: dict[str, list[dict[str, Any]]] = {name: [] for name in event_counts}
+
+    def add_event_sample(name: str, record: dict[str, Any], details: dict[str, Any] | None = None) -> None:
+        if max_event_samples <= 0 or len(event_samples[name]) >= max_event_samples:
+            return
+        sample: dict[str, Any] = {"frame": num(record.get("frame"))}
+        if details:
+            sample.update(details)
+        event_samples[name].append(sample)
 
     for record in iter_records(playlog):
         rows += 1
@@ -133,33 +142,50 @@ def summarize(playlog: Path, player: int, label_source: str) -> dict[str, Any]:
                 category_frames[name] += 1
         if categories.intersection({"world_item", "neutral_item", "dropped_star_item", "item"}):
             event_counts["itemVisible"] += 1
+            add_event_sample("itemVisible", record, {"categories": sorted(categories.intersection({"world_item", "neutral_item", "dropped_star_item", "item"}))})
         if categories.intersection({"projectile", "player_fireball", "enemy_fireball"}):
             event_counts["projectileVisible"] += 1
+            add_event_sample("projectileVisible", record, {"categories": sorted(categories.intersection({"projectile", "player_fireball", "enemy_fireball"}))})
 
         block_visible = False
-        for p in players:
-            for sample in ((p.get("tileProbe") or {}).get("samples") or []):
+        block_details: dict[str, Any] | None = None
+        for player_index, p in enumerate(players):
+            for sample_index, sample in enumerate((p.get("tileProbe") or {}).get("samples") or []):
                 block = sample.get("block") or {}
                 if block.get("any") or block.get("itemBox"):
                     block_visible = True
+                    block_details = {
+                        "player": player_index,
+                        "sampleIndex": sample_index,
+                        "sample": sample.get("name"),
+                        "tileId": num(block.get("currentTileId")),
+                        "behavior": num(block.get("currentBehavior")),
+                        "itemBox": bool(block.get("itemBox")),
+                        "storageContents": num(block.get("storageContents")),
+                    }
                     break
             if block_visible:
                 break
         if block_visible:
             block_candidate_frames += 1
             event_counts["blockCandidateVisible"] += 1
+            add_event_sample("blockCandidateVisible", record, block_details)
 
         current_players = [player_summary(p) for p in players[:2]]
         if prev_players and len(prev_players) == len(current_players):
-            for before, after in zip(prev_players, current_players):
+            for player_index, (before, after) in enumerate(zip(prev_players, current_players)):
                 if after["battleStars"] > before["battleStars"]:
                     event_counts["starPickup"] += 1
+                    add_event_sample("starPickup", record, {"player": player_index, "before": before["battleStars"], "after": after["battleStars"]})
                 if after["coins"] != before["coins"]:
                     event_counts["coinChange"] += 1
+                    add_event_sample("coinChange", record, {"player": player_index, "before": before["coins"], "after": after["coins"]})
                 if after["powerup"] != before["powerup"]:
                     event_counts["powerupChange"] += 1
+                    add_event_sample("powerupChange", record, {"player": player_index, "before": before["powerup"], "after": after["powerup"]})
                 if after["dead"] and not before["dead"]:
                     event_counts["playerDeath"] += 1
+                    add_event_sample("playerDeath", record, {"player": player_index})
         prev_players = current_players
 
     if first is None or last is None:
@@ -182,6 +208,7 @@ def summarize(playlog: Path, player: int, label_source: str) -> dict[str, Any]:
         "categoryFrames": category_frames,
         "blockCandidateFrames": block_candidate_frames,
         "eventCounts": event_counts,
+        "eventSamples": event_samples,
     }
 
 
@@ -205,12 +232,13 @@ def main() -> int:
     parser.add_argument("--rom-id", default="")
     parser.add_argument("--scenario", default="")
     parser.add_argument("--quality", choices=["unreviewed", "accepted", "rejected", "needs_reclassification"], default="unreviewed")
+    parser.add_argument("--max-event-samples", type=int, default=64)
     parser.add_argument("--notes", default="")
     args = parser.parse_args()
 
     base = args.output.parent
     base.mkdir(parents=True, exist_ok=True)
-    summary = summarize(args.playlog, args.player, args.label_source)
+    summary = summarize(args.playlog, args.player, args.label_source, args.max_event_samples)
     replay_frames = args.frames if args.frames > 0 else int(summary.get("frameEnd") or 0)
     replay_mode = "input_script" if args.host_input_script or args.client_input_script else ""
     manifest = {

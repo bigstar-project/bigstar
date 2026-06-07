@@ -63,6 +63,7 @@
 - 完了: `scripts/run-nsmb-mvl-split-local-input-smoke.ps1` が host/client別AI play log出力先を受け取り、split local input replay中にもAI play logを保存できるようにした。
 - 完了: `scripts/run-nsmb-mvl-recording-replay.ps1` を追加した。`recording.json` からstage 0 input script replayの起動計画を復元し、完了後に `nsmb_mvl_ai_verify_replay.py` で検証する。`-DryRun` で起動前の解決パスと検証対象を確認できる。
 - 完了: `scripts/nsmb_mvl_ai_verify_replay.py` に任意のcheckpoint frame比較を追加した。`--checkpoint-interval` を指定すると、最終frameに加えて途中frameのhash、player状態、object countを比較できる。
+- 完了: `recording.json` の `summary.eventSamples` に、star/coin/powerup/death/block/item/projectile候補の代表frameを保存できるようにした。件数だけでなく、目視確認すべきframeをmanifestから辿れる。
 - 完了: Tauri GUIに `AIログ` タブを追加した。ローカルのJSONLまたはviewer JSONをファイル選択で読み込み、player中心のSVG相当相対配置、P0/P1入力、可視object数、イベント候補、カテゴリ数を確認できる。
 
 ## AI Play Log
@@ -266,6 +267,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `python scripts\nsmb_mvl_ai_verify_replay.py logs\codex-ai-stage0-tile-catalog-smoke-20260607\recording.json logs\codex-ai-stage0-tile-catalog-smoke-20260607\ai-playlog.jsonl --checkpoint-interval 30 --checkpoint-start-frame 900 --max-checkpoints 3` pass。最終frame 1290と途中checkpoint 3件を同一ログで検証。
 - `python scripts\nsmb_mvl_ai_create_recording_manifest.py ... --host-input-script ... --client-input-script ... --frames 1290` で、input script replay情報入りのテストmanifestを生成できることを確認。
 - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-nsmb-mvl-recording-replay.ps1 -RecordingManifest logs\codex-ai-stage0-tile-catalog-smoke-20260607\recording-replay-inputscript.json -DryRun -LogDir logs\codex-ai-recording-replay-dryrun-20260607` pass。manifestからhost/client input script、ROM、AI play log出力先、検証対象playlogを解決できることを確認。これは既存RuleAIログへ手動入力scriptを後付けしたdry-runであり、完全再現の実走検証ではない。
+- `python scripts\nsmb_mvl_ai_create_recording_manifest.py logs\codex-ai-stage0-tile-catalog-smoke-20260607\ai-playlog.jsonl ... --max-event-samples 5` pass。`summary.eventSamples` に `playerDeath` frame 1200 と `blockCandidateVisible` frame 1230 / `leftBody` / `tileId=71` / `storageContents=7` が出ることを確認。
 - `tools/nsmb-mvl-gui`: `pnpm run typecheck` pass。`pnpm biome check src/App.tsx src/launcher/AIReplayViewer.tsx src/launcher/AIReplayViewer.browser.test.tsx src/launcher/LauncherShell.tsx src/launcher/types.ts` pass。`pnpm vitest --config vitest.browser.config.ts run` pass（4 files / 12 tests、AIReplayViewerのJSONL読込テストを含む）。`pnpm vitest --config vitest.config.ts run` pass（4 files / 14 tests）。`pnpm playwright test` pass（3 tests）。
 - `tools/nsmb-mvl-gui`: `pnpm run ci` は `tsc --noEmit` 後の `biome check .` で停止。原因は変更外の既存ファイルを含むCRLF整形差分で、変更ファイル単位のBiomeはpassしている。
 
