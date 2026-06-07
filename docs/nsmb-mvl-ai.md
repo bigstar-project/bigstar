@@ -74,6 +74,8 @@
 - 完了: `scripts/run-nsmb-mvl-recording-postcommands.ps1` を追加し、`recording-session.json` に残した後処理コマンドをdry-run/途中再開つきで実行できるようにした。
 - 完了: AI play logに `specialObjects.fireballs` / `specialObjects.projectiles` を追加した。通常actor object listでは拾えない `Fireballs::activeFireballs` と fireball/projectile handler先頭wordを保存し、Fire Mario実ログで発射frameを見つける足場にする。
 - 完了: `specialObjects.fireballs.active` をdataset特徴量、viewer export、recording manifestの `summary.specialObjectFrames.fireballActive` / `eventSamples.fireballActive`、GUIの `AIログ` タブへ流すようにした。
+- 完了: `scripts/nsmb_mvl_ai_audit_recordings.py` を追加した。`recording.json` または `recordings-index.json` を読み、rows、gameplay rows、player found率、label率、nonzero label、stage、packet replay、必須event数を学習前に検査できる。
+- 完了: `scripts/run-nsmb-mvl-human-recording.ps1 -DryRun` を追加し、melonDSを起動せずに `recording-session.json` と後処理コマンドを確認できるようにした。通常後処理には `recording-audit.json` 生成も含める。
 
 ## AI Play Log
 
@@ -138,6 +140,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `MELONDS_NSML_AI_PLAY_LOG=<path>` でAI/人間共通の観測ログを出す。
 - 人間プレイを収集する場合は、まず `pwsh scripts\run-nsmb-mvl-human-recording.ps1` を使う。これはstage 0固定でhost/client別AI play logとpacket captureを出し、終了後に `recording-session.json` の後処理コマンドで `packet-replay.csv`、`recording.json`、`recordings-index.json`、datasetを作る。packet captureが不要な検証では `-NoPacketCapture` を指定する。
 - 記録終了後は `pwsh scripts\run-nsmb-mvl-recording-postcommands.ps1 -Session <recording-session.json>` で、packet replay変換、manifest/index、dataset生成をまとめて実行する。手順確認だけなら `-DryRun`、途中から再開する場合は `-StartAt <index>` を使う。
+- `python scripts\nsmb_mvl_ai_audit_recordings.py <recording.json|recordings-index.json> --stage 0 --min-player-found-ratio 0.5 --min-label-ratio 0.5` で、学習前の最低限の品質を確認する。packet replay完全再現を前提にする人間記録では `--require-packet-replay`、Fire Marioなど低頻度scenarioでは `--require-event fireballActive:1` のようにevent条件を追加する。
 - `python scripts\nsmb_mvl_ai_create_recording_manifest.py <playlog.jsonl> <recording.json> --kind human --player <0|1> --label-source player --stage 0` で、1本の人間/AIログを記録manifest化する。
 - `python scripts\nsmb_mvl_ai_make_recordings_index.py <recordings-index.json> <recording1.json> <recording2.json> ... --stage 0` で、複数記録を1つの学習入力に束ねる。
 - `python scripts\nsmb_mvl_ai_build_dataset.py <playlog.jsonl> <dataset.csv> --player 1 --require-player-found` で固定長特徴量へ変換する。デフォルトの `--label-source auto` は `appliedPlayerN` があればそれを使い、なければ `playerN` を使う。人間ログだけを明示する場合は `--label-source player` を指定する。
@@ -291,6 +294,10 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --label-source auto --require-player-found` pass。CSVに `fireballs_active`、`fireballs_handler_word0`、`projectiles_handler_word0` が出ることを確認。
 - 同ログから `python scripts\nsmb_mvl_ai_export_viewer_data.py ...` pass。viewer JSONに `specialObjects` が残ることを確認。`python scripts\nsmb_mvl_ai_create_recording_manifest.py ... --max-event-samples 5` pass、`summary.specialObjectFrames.fireballActive=0` と `eventSamples.fireballActive=[]` を確認。
 - `tools/nsmb-mvl-gui`: `pnpm run typecheck` pass。`pnpm biome check src/launcher/AIReplayViewer.tsx` pass。`pnpm vitest --config vitest.browser.config.ts run src/launcher/AIReplayViewer.browser.test.tsx` pass（1 file / 2 tests）。`pnpm run ci` は従来通り変更外ファイルを含むCRLF整形差分でBiome停止。
+- `python -m py_compile scripts\nsmb_mvl_ai_audit_recordings.py scripts\nsmb_mvl_ai_create_recording_manifest.py scripts\nsmb_mvl_ai_build_dataset.py` pass。
+- `python scripts\nsmb_mvl_ai_audit_recordings.py logs\codex-ai-specialobjects-smoke-20260607\recording.json --stage 0 --min-rows 1 --min-gameplay-rows 1 --min-player-found-ratio 0.5 --min-label-ratio 0.5 --min-nonzero-label-rows 1 --output ...` pass。statusは `pass`、警告としてquality unreviewedとplayer missing rowsを出す。
+- 同じrecordingに `--require-event fireballActive:1` を指定すると、`event fireballActive count 0 < 1` でfailすることを確認。低頻度scenarioの取り忘れ検出に使える。
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-nsmb-mvl-human-recording.ps1 -LogDir logs\codex-ai-human-recording-dryrun-20260607 -Frames 120 -DryRun` pass。`recording-session.json` のpostCommandsにpacket変換、host/client manifest、index、dataset、`nsmb_mvl_ai_audit_recordings.py --require-packet-replay` が入ることを確認。
 - `tools/nsmb-mvl-gui`: `pnpm run typecheck` pass。`pnpm biome check src/launcher/AIReplayViewer.tsx src/launcher/AIReplayViewer.browser.test.tsx` pass。`pnpm vitest --config vitest.browser.config.ts run src/launcher/AIReplayViewer.browser.test.tsx` pass（recording manifestのevent sample表示テストを含む）。
 - `tools/nsmb-mvl-gui`: `pnpm vitest --config vitest.config.ts run` pass（4 files / 14 tests）。`pnpm vitest --config vitest.browser.config.ts run` pass（4 files / 13 tests）。`pnpm playwright test` pass（3 tests）。
 - `tools/nsmb-mvl-gui`: `pnpm run ci` は `tsc --noEmit` 後の `biome check .` で停止。原因は変更外の既存ファイルを含むCRLF整形差分。変更ファイル単位のBiomeと全テストはpass。
@@ -303,7 +310,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - ブロック/アイテム箱の中身と叩いた後の状態をstage 0の `StageLayout::changeTile` / question block animation path と実ログで照合し、`tileProbe.samples[].block` の解釈を詰める。
 - Fire Marioでstage 0ログを取り、`specialObjects.fireballs.active` が増えるframeを起点に、handler内slotの座標/owner/速度/寿命offsetを特定する。通常actorに出るprojectileがあれば object ID/vtable/category も併せて分類する。
 - 人間プレイ記録を実際に複数本取り、`recordings-index.json` 経由のdataset、`--split-by-recording`、GUIの `AIログ` タブで、入力ラベルと目視相当状態が期待通り読めるか確認する。
-- packet capture付きの新規人間記録を取り、`run-nsmb-mvl-recording-postcommands.ps1` で `packet-replay.csv` / `recording.json` / `recordings-index.json` / datasetを生成する。
+- packet capture付きの新規人間記録を取り、`run-nsmb-mvl-recording-postcommands.ps1` で `packet-replay.csv` / `recording.json` / `recordings-index.json` / dataset / `recording-audit.json` を生成する。
 - `run-nsmb-mvl-recording-replay.ps1 -ScanFrames` でpacket replayの実走を行い、最終frame、checkpoint frame、最初の不一致reportを確認する。必要ならinput script replayとの差分も比較する。
 - 落下死ラインとステージ境界をメモリから取り、`fallRisk` と `tileProbe.holeAhead` を統合した危険判定を作る。
 - 学習済み `.npz` をPoCまたは外部sidecarから推論して入力へ戻す経路を作る。

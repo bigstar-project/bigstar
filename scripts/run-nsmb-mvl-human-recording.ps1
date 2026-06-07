@@ -14,7 +14,8 @@ param(
     [int]$PacketReplayLastFrame = 0,
     [switch]$GenerateMvlConfiguredRoms,
     [string]$MvlMatchSeed = "",
-    [switch]$AllowJit
+    [switch]$AllowJit,
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
@@ -55,6 +56,7 @@ if ($AllowJit) { $manualArgs += "-AllowJit" }
 $hostManifest = Join-Path $hostLog "recording.json"
 $clientManifest = Join-Path $clientLog "recording.json"
 $indexPath = Join-Path $logRoot "recordings-index.json"
+$auditPath = Join-Path $logRoot "recording-audit.json"
 $hostPacketCapture = Join-Path $hostLog "host.packet-capture.csv"
 $clientPacketCapture = Join-Path $clientLog "client.packet-capture.csv"
 $packetReplay = Join-Path $logRoot "packet-replay.csv"
@@ -78,6 +80,11 @@ $postCommands += @(
     "python scripts\nsmb_mvl_ai_make_recordings_index.py `"$indexPath`" `"$hostManifest`" `"$clientManifest`" --stage 0",
     "python scripts\nsmb_mvl_ai_build_dataset.py `"$indexPath`" `"$logRoot\ai-dataset-player1.csv`" --player 1 --label-source player --require-player-found"
 )
+$auditCommand = "python scripts\nsmb_mvl_ai_audit_recordings.py `"$indexPath`" --stage 0 --min-rows 1 --min-gameplay-rows 1 --min-player-found-ratio 0.5 --min-label-ratio 0.5 --min-nonzero-label-rows 1 --output `"$auditPath`""
+if (-not $NoPacketCapture) {
+    $auditCommand += " --require-packet-replay"
+}
+$postCommands += $auditCommand
 
 $session = [ordered]@{
     schema = "nsmb_mvl_ai_human_recording_session_v1"
@@ -97,10 +104,15 @@ $session = [ordered]@{
     hostPacketCapture = $hostPacketCapture
     clientPacketCapture = $clientPacketCapture
     packetReplay = $packetReplay
+    audit = $auditPath
     postCommands = $postCommands
 }
 $session | ConvertTo-Json -Depth 6 | Set-Content -Path $sessionPath -Encoding UTF8
 
 Write-Host "Starting stage 0 human recording. log=$LogDir"
 Write-Host "After closing melonDS, run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-nsmb-mvl-recording-postcommands.ps1 -Session `"$sessionPath`""
+if ($DryRun) {
+    $session | ConvertTo-Json -Depth 8
+    return
+}
 & $manualScript @manualArgs
