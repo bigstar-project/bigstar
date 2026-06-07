@@ -85,6 +85,7 @@
 - 完了: split local input smokeの `HostAIPlayLog` / `ClientAIPlayLog` 相対パスをrepo root基準の絶対パスに解決するようにし、child側LogDirとの二重パス化を避けるようにした。
 - 完了: `scripts/nsmb_mvl_ai_audit_recordings.py` を追加した。`recording.json` または `recordings-index.json` を読み、rows、gameplay rows、player found率、label率、nonzero label、stage、packet replay、必須event数を学習前に検査できる。
 - 完了: `scripts/run-nsmb-mvl-human-recording.ps1 -DryRun` を追加し、melonDSを起動せずに `recording-session.json` と後処理コマンドを確認できるようにした。通常後処理には `recording-audit.json` 生成も含める。
+- 完了: 手動2窓記録で片側の物理入力だけを無効化できるようにした。`MELONDS_NSML_NEUTRALIZE_POLLED_INPUT=1` は物理コントローラ/キー入力をニュートラルにするが、試合開始用input scriptは有効なまま残す。`scripts/run-nsmb-mvl-manual-local.ps1` には `-NeutralizeHostInput` / `-NeutralizeClientInput` を追加し、`scripts/run-nsmb-mvl-human-recording.ps1` はデフォルト `HumanSide=client` としてhost/Mario側をニュートラル化する。
 - 完了: `scripts/nsmb_mvl_ai_predict_input_script.py` を追加した。学習済み `.npz` とAI play log / recording manifest / recordings indexから推論し、melonDSのinput scriptへ戻せる。既存bootstrap scriptの前置き、反応遅延、ランダムミス、予測CSV出力に対応する。
 - 完了: `scripts/run-nsmb-mvl-split-local-input-smoke.ps1` に `-AllowRemoteInputTimeoutFallback` と `-InternalWaitTimeoutMs` を追加し、モデルinput script評価時にremote input timeoutを即時fallbackへ近づけられるようにした。
 
@@ -151,7 +152,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 ## Planned Pipeline
 
 - `MELONDS_NSML_AI_PLAY_LOG=<path>` でAI/人間共通の観測ログを出す。
-- 人間プレイを収集する場合は、まず `pwsh scripts\run-nsmb-mvl-human-recording.ps1` を使う。これはstage 0固定でhost/client別AI play logとpacket captureを出し、終了後に `recording-session.json` の後処理コマンドで `packet-replay.csv`、`recording.json`、`recordings-index.json`、datasetを作る。packet captureが不要な検証では `-NoPacketCapture` を指定する。
+- 人間プレイを収集する場合は、まず `pwsh scripts\run-nsmb-mvl-human-recording.ps1` を使う。これはstage 0固定でhost/client別AI play logとpacket captureを出し、終了後に `recording-session.json` の後処理コマンドで `packet-replay.csv`、`recording.json`、`recordings-index.json`、datasetを作る。デフォルトは `HumanSide=client` で、client/Luigiだけを人間操作対象にし、host/Mario側の物理入力は `-NeutralizeHostInput` 相当で受け付けない。packet captureが不要な検証では `-NoPacketCapture` を指定する。
 - 記録終了後は `pwsh scripts\run-nsmb-mvl-recording-postcommands.ps1 -Session <recording-session.json>` で、packet replay変換、manifest/index、dataset生成をまとめて実行する。手順確認だけなら `-DryRun`、途中から再開する場合は `-StartAt <index>` を使う。
 - `python scripts\nsmb_mvl_ai_audit_recordings.py <recording.json|recordings-index.json> --stage 0 --min-player-found-ratio 0.5 --min-label-ratio 0.5` で、学習前の最低限の品質を確認する。packet replay完全再現を前提にする人間記録では `--require-packet-replay`、Fire Marioなど低頻度scenarioでは `--require-event fireballActive:1` のようにevent条件を追加する。
 - `python scripts\nsmb_mvl_ai_audit_visual_state.py <host-ai-playlog.jsonl> <client-ai-playlog.jsonl> --output <visual-state-audit.json>` で、`visualState` 欠落、powerup/inventory raw値分布、無敵状態未確定、damage guard/shell観測frame、可視未知object、fireball owner低信頼slotを確認する。人間記録のpostCommandsにはこの監査を含める。学習前ゲートとして止めたい場合は `--strict`、または `--fail-on-visual-state-missing` / `--fail-on-invincibility-unknown` / `--fail-on-visible-unknown-object` / `--fail-on-fireball-low-confidence` を使う。
@@ -240,6 +241,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py <host-playlog> logs\codex-ai-fireball-raw-smoke-20260607\dataset.csv --player 1 --label-source applied` pass。CSVに `nearest_fireball_state_byte82`、`nearest_fireball_state_byte84`、`nearest_fireball_state_byte86`、`nearest_fireball_debug_word0` が出ることを確認。
 - 同ログから `python scripts\nsmb_mvl_ai_audit_visual_state.py <host-playlog> <client-playlog> --output logs\codex-ai-fireball-raw-smoke-20260607\visual-state-audit.json` pass。`visualStateMissing=0/0`、`invincibilityUnknown=0/0`、可視未知objectなし、fireball slot 0件を確認。
 - 同ログから `python scripts\nsmb_mvl_ai_audit_visual_state.py <host-playlog> <client-playlog> --strict --output logs\codex-ai-fireball-raw-smoke-20260607\visual-state-audit-strict.json` pass。学習前strict gateが現在のstage 0短時間ログでは通ることを確認。
+- 2026-06-08 片側物理入力ニュートラル化追加後に `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4` pass。`scripts\run-nsmb-mvl-human-recording.ps1 -DryRun -NoPacketCapture -Frames 120` でデフォルト `humanSide=client`、`neutralizeHostInput=true` を確認し、`-HumanSide host` では `neutralizeClientInput=true` になることを確認。
 - `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4` pass。
 - 2026-06-07 visual state追加後に `python -m py_compile scripts/nsmb_mvl_ai_build_dataset.py scripts/nsmb_mvl_ai_create_recording_manifest.py scripts/nsmb_mvl_ai_render_playlog_svg.py scripts/nsmb_mvl_ai_audit_visual_state.py` pass。
 - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-nsmb-mvl-human-recording.ps1 -DryRun -NoPacketCapture -Frames 120 -LogDir logs\codex-ai-visual-state-dryrun-20260607` pass。postCommandsに `nsmb_mvl_ai_audit_visual_state.py` と `visual-state-audit.json` が入ることを確認。

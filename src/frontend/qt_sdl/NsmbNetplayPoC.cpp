@@ -1545,6 +1545,8 @@ struct State
     int PacketBridgeLocalInputDelay = 0;
     bool PacketBridgeNeutralizeLocalInput = false;
     bool PacketBridgePreserveLocalTouch = false;
+    bool NeutralizePolledInput = false;
+    bool NeutralizePolledInputPreserveTouch = false;
     int PacketBridgeSendDelayFrames = 0;
     int PacketBridgeSendJitterFrames = 0;
     int InputSendDelayFrames = 0;
@@ -16300,6 +16302,8 @@ void InitFromEnvironment()
         EnvFlag("MELONDS_NSML_PACKET_BRIDGE_NEUTRALIZE_LOCAL_INPUT");
     G.PacketBridgePreserveLocalTouch =
         EnvFlag("MELONDS_NSML_PACKET_BRIDGE_PRESERVE_LOCAL_TOUCH");
+    G.NeutralizePolledInput = EnvFlag("MELONDS_NSML_NEUTRALIZE_POLLED_INPUT");
+    G.NeutralizePolledInputPreserveTouch = EnvFlag("MELONDS_NSML_NEUTRALIZE_POLLED_INPUT_PRESERVE_TOUCH");
     G.PacketBridgeSendDelayFrames = std::max(
         0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_SEND_DELAY_FRAMES", 0));
     G.PacketBridgeSendJitterFrames = std::max(
@@ -17642,7 +17646,10 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     WaitAtFrameBarrier(GBeforeFrameBarrier, instanceID, inputFrame, "before");
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Barrier);
 
-    InputState testInput = ApplyInputScript(instanceID, inputFrame, polledInput);
+    const InputState inputFallback = G.NeutralizePolledInput
+        ? (G.NeutralizePolledInputPreserveTouch ? NeutralInputPreservingTouch(polledInput) : NeutralInput())
+        : polledInput;
+    InputState testInput = ApplyInputScript(instanceID, inputFrame, inputFallback);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         testInput = ApplyRuleBasedAIInput(
             instanceID,

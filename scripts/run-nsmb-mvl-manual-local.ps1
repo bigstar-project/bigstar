@@ -54,6 +54,8 @@ param(
     [string]$ClientAIPlayLog = "",
     [int]$AIPlayLogInterval = 1,
     [int]$AIPlayLogMaxObjects = 128,
+    [switch]$NeutralizeHostInput,
+    [switch]$NeutralizeClientInput,
     [switch]$InputNetplayTrace,
     [switch]$PacketCapture,
     [switch]$PacketCaptureAllowPreGame,
@@ -447,7 +449,9 @@ $oldAIEnv = @{}
 foreach ($name in @(
     "MELONDS_NSML_AI_PLAY_LOG",
     "MELONDS_NSML_AI_PLAY_LOG_INTERVAL",
-    "MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS"
+    "MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS",
+    "MELONDS_NSML_NEUTRALIZE_POLLED_INPUT",
+    "MELONDS_NSML_NEUTRALIZE_POLLED_INPUT_PRESERVE_TOUCH"
 )) {
     $oldAIEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
 }
@@ -475,7 +479,18 @@ function Set-AIPlayLogEnv {
     $env:MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS = "$AIPlayLogMaxObjects"
 }
 
+function Set-PolledInputNeutralizeEnv {
+    param([bool]$Enabled)
+    if ($Enabled) {
+        $env:MELONDS_NSML_NEUTRALIZE_POLLED_INPUT = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_NEUTRALIZE_POLLED_INPUT -ErrorAction SilentlyContinue
+    }
+    Remove-Item Env:\MELONDS_NSML_NEUTRALIZE_POLLED_INPUT_PRESERVE_TOUCH -ErrorAction SilentlyContinue
+}
+
 Set-AIPlayLogEnv -Path $HostAIPlayLog
+Set-PolledInputNeutralizeEnv -Enabled ([bool]$NeutralizeHostInput)
 $hostProc = Start-Process -FilePath "powershell.exe" `
     -ArgumentList $hostArgs `
     -WorkingDirectory $repoRoot `
@@ -487,6 +502,7 @@ $hostProc = Start-Process -FilePath "powershell.exe" `
 Start-Sleep -Milliseconds $HostStartupDelayMs
 
 Set-AIPlayLogEnv -Path $ClientAIPlayLog
+Set-PolledInputNeutralizeEnv -Enabled ([bool]$NeutralizeClientInput)
 $clientProc = Start-Process -FilePath "powershell.exe" `
     -ArgumentList $clientArgs `
     -WorkingDirectory $repoRoot `
@@ -507,6 +523,7 @@ Write-Host "Started NSMB MvL manual local session."
 Write-Host "host wrapper pid=$($hostProc.Id) log=$hostLog"
 Write-Host "client wrapper pid=$($clientProc.Id) log=$clientLog"
 Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
+Write-Host "physical input neutralized host=$([bool]$NeutralizeHostInput) client=$([bool]$NeutralizeClientInput)"
 Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames networkPump=$([bool]$NetworkPumpThread) networkPumpSleepUs=$NetworkPumpSleepUs packetBridgeStart=$PacketBridgeStartFrame renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$([bool]$PerfBreakdown)"
 Write-Host "gameplay heartbeat interval=$GameplayHeartbeatInterval"
 if ($HostAIPlayLog -or $ClientAIPlayLog) {

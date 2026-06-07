@@ -8,7 +8,7 @@ param(
     [int]$AIPlayLogInterval = 1,
     [int]$AIPlayLogMaxObjects = 128,
     [ValidateSet("host", "client", "both")]
-    [string]$HumanSide = "host",
+    [string]$HumanSide = "client",
     [switch]$NoPacketCapture,
     [int]$PacketReplayFirstFrame = 0,
     [int]$PacketReplayLastFrame = 0,
@@ -52,6 +52,8 @@ if (-not $NoPacketCapture) { $manualArgs += "-PacketCapture" }
 if ($GenerateMvlConfiguredRoms) { $manualArgs += "-GenerateMvlConfiguredRoms" }
 if ($MvlMatchSeed -ne "") { $manualArgs += @("-MvlMatchSeed", $MvlMatchSeed) }
 if ($AllowJit) { $manualArgs += "-AllowJit" }
+if ($HumanSide -eq "client") { $manualArgs += "-NeutralizeHostInput" }
+if ($HumanSide -eq "host") { $manualArgs += "-NeutralizeClientInput" }
 
 $hostManifest = Join-Path $hostLog "recording.json"
 $clientManifest = Join-Path $clientLog "recording.json"
@@ -92,6 +94,8 @@ $session = [ordered]@{
     schema = "nsmb_mvl_ai_human_recording_session_v1"
     stageScope = 0
     humanSide = $HumanSide
+    neutralizeHostInput = ($HumanSide -eq "client")
+    neutralizeClientInput = ($HumanSide -eq "host")
     logDir = $LogDir
     hostAIPlayLog = $hostAIPlayLog
     clientAIPlayLog = $clientAIPlayLog
