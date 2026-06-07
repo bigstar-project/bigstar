@@ -30,6 +30,27 @@ def num(value: Any, default: int = 0) -> int:
     return default
 
 
+def sane_bottom_tile(tile_type: int) -> bool:
+    category_masks = [
+        0x00010000,
+        0x00020000,
+        0x00040000,
+        0x00080000,
+        0x00100000,
+        0x00200000,
+        0x00400000,
+        0x01000000,
+        0x02000000,
+        0x04000000,
+        0x08000000,
+        0x10000000,
+        0x20000000,
+        0x40000000,
+        0x80000000,
+    ]
+    return sum(1 for mask in category_masks if tile_type & mask) <= 4
+
+
 def pos_text(entity: dict[str, Any]) -> str:
     pos = entity.get("pos") or {}
     return f"{num(pos.get('x'))//4096:5d},{num(pos.get('y'))//4096:5d}"
@@ -81,6 +102,38 @@ def fall_text(player: dict[str, Any]) -> str:
     return f"{prefix}:{screen_y}/{bottom}"
 
 
+def terrain_text(player: dict[str, Any]) -> str:
+    collision_mgr = player.get("collisionMgr") or {}
+    if not collision_mgr.get("found"):
+        return "-"
+    tile_type = num(collision_mgr.get("bottomTileType"))
+    if not sane_bottom_tile(tile_type):
+        return f"raw{tile_type & 0xFFFFFFFF:08X}"
+    tile = collision_mgr.get("bottomTile") or {}
+    names = []
+    for key, label in [
+        ("solid", "S"),
+        ("partialSolid", "P"),
+        ("slope", "Sl"),
+        ("questionBlock", "?"),
+        ("brickBlock", "B"),
+        ("breakableBlock", "Br"),
+        ("coin", "Co"),
+        ("water", "W"),
+        ("harmful", "H"),
+        ("climbable", "Cl"),
+    ]:
+        if num(tile.get(key)):
+            names.append(label)
+    modifier = num(tile.get("modifier"))
+    if modifier:
+        names.append(f"M{modifier}")
+    damage = num(collision_mgr.get("damageTileType"), -1)
+    if damage >= 0:
+        names.append(f"D{damage}")
+    return "+".join(names) if names else "tile0"
+
+
 def nearest_text(record: dict[str, Any], player: int, category: str) -> str:
     visual = record.get("visualSummary") or {}
     for entry in visual.get("nearest") or []:
@@ -109,7 +162,7 @@ def main() -> int:
     args = parser.parse_args()
 
     print(
-        "frame st p input contact y/bot self(x,y) opp(x,y) star(dx,dy) hazard(dx,dy) "
+        "frame st p input contact terrain y/bot self(x,y) opp(x,y) star(dx,dy) hazard(dx,dy) "
         "visX obj active counts"
     )
     printed = 0
@@ -146,6 +199,7 @@ def main() -> int:
             f"{player} "
             f"{buttons_text(held):5s} "
             f"{contact_text(players[player]):7s} "
+            f"{terrain_text(players[player]):8s} "
             f"{fall_text(players[player]):>11s} "
             f"{pos_text(players[player]):>11s} "
             f"{pos_text(players[opponent]):>11s} "

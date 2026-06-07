@@ -106,6 +106,24 @@ CONTACT_NAMES = [
     "wrapRight",
 ]
 
+BOTTOM_TILE_NAMES = [
+    "solid",
+    "coin",
+    "questionBlock",
+    "breakableBlock",
+    "brickBlock",
+    "slope",
+    "ceilingSlope",
+    "entrance",
+    "water",
+    "climbable",
+    "partialSolid",
+    "harmful",
+    "invisibleBlock",
+    "solidOnBottom",
+    "solidOnTop",
+]
+
 
 def num(value: Any, default: int = 0) -> int:
     if isinstance(value, bool):
@@ -115,6 +133,28 @@ def num(value: Any, default: int = 0) -> int:
     if isinstance(value, str):
         return int(value, 0)
     return default
+
+
+def sane_bottom_tile(tile_type: int) -> bool:
+    category_masks = [
+        0x00010000,
+        0x00020000,
+        0x00040000,
+        0x00080000,
+        0x00100000,
+        0x00200000,
+        0x00400000,
+        0x01000000,
+        0x02000000,
+        0x04000000,
+        0x08000000,
+        0x10000000,
+        0x20000000,
+        0x40000000,
+        0x80000000,
+    ]
+    set_categories = sum(1 for mask in category_masks if tile_type & mask)
+    return set_categories <= 4
 
 
 def pos(entity: dict[str, Any]) -> dict[str, int]:
@@ -299,6 +339,27 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         contact = player_state.get("contact") or {}
         for name in CONTACT_NAMES:
             row[f"{prefix}_contact_{name}"] = num(contact.get(name))
+        collision_mgr = player_state.get("collisionMgr") or {}
+        bottom_tile = collision_mgr.get("bottomTile") or {}
+        row[f"{prefix}_collision_mgr_found"] = num(collision_mgr.get("found"))
+        row[f"{prefix}_collision_mgr_collision_result"] = num(collision_mgr.get("collisionResult"))
+        row[f"{prefix}_collision_mgr_bottom_result"] = num(collision_mgr.get("bottomResult"))
+        row[f"{prefix}_collision_mgr_bottom_tile_type"] = num(collision_mgr.get("bottomTileType"))
+        bottom_tile_type = num(collision_mgr.get("bottomTileType"))
+        bottom_tile_sane = sane_bottom_tile(bottom_tile_type)
+        row[f"{prefix}_collision_mgr_bottom_tile_sane"] = int(bottom_tile_sane)
+        row[f"{prefix}_collision_mgr_bottom_tile_y"] = num(collision_mgr.get("bottomTileY"))
+        row[f"{prefix}_collision_mgr_surface_angle"] = num(collision_mgr.get("surfaceAngle"))
+        row[f"{prefix}_collision_mgr_attached_tile_x"] = num(collision_mgr.get("attachedTileX"))
+        row[f"{prefix}_collision_mgr_attached_tile_y"] = num(collision_mgr.get("attachedTileY"))
+        row[f"{prefix}_collision_mgr_slope_tile_x"] = num(collision_mgr.get("slopeTileX"))
+        row[f"{prefix}_collision_mgr_slope_tile_y"] = num(collision_mgr.get("slopeTileY"))
+        row[f"{prefix}_collision_mgr_bottom_modifier"] = num(collision_mgr.get("bottomModifier"))
+        row[f"{prefix}_collision_mgr_top_modifier"] = num(collision_mgr.get("topModifier"))
+        row[f"{prefix}_collision_mgr_ground_slope_type"] = num(collision_mgr.get("groundSlopeType"))
+        row[f"{prefix}_collision_mgr_damage_tile_type"] = num(collision_mgr.get("damageTileType"))
+        for name in BOTTOM_TILE_NAMES:
+            row[f"{prefix}_bottom_tile_{name}"] = num(bottom_tile.get(name)) if bottom_tile_sane else 0
 
     for name, bit in BUTTON_BITS.items():
         row[f"label_{name}"] = 1 if (held & (1 << bit)) else 0
