@@ -77,6 +77,7 @@
 - 完了: `Fireballs::fireballHandler` のslot配列を読み、AI play logの `specialObjects.fireballs.slots[]` にactive slotのindex、kind、state、facing、座標、前フレーム座標、速度、player相対座標を保存するようにした。datasetには `fireballs_active_slots`、`fireballs_slot_count`、最近傍fireballの相対距離/kind/state/facingを追加した。
 - 完了: `scripts/nsmb_mvl_ai_audit_recordings.py` を追加した。`recording.json` または `recordings-index.json` を読み、rows、gameplay rows、player found率、label率、nonzero label、stage、packet replay、必須event数を学習前に検査できる。
 - 完了: `scripts/run-nsmb-mvl-human-recording.ps1 -DryRun` を追加し、melonDSを起動せずに `recording-session.json` と後処理コマンドを確認できるようにした。通常後処理には `recording-audit.json` 生成も含める。
+- 完了: `scripts/nsmb_mvl_ai_predict_input_script.py` を追加した。学習済み `.npz` とAI play log / recording manifest / recordings indexから推論し、melonDSのinput scriptへ戻せる。既存bootstrap scriptの前置き、反応遅延、ランダムミス、予測CSV出力に対応する。
 
 ## AI Play Log
 
@@ -148,6 +149,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `python scripts\nsmb_mvl_ai_build_dataset.py <recording.json|recordings-index.json> <dataset.csv> --player 1 --label-source player --require-player-found` でも固定長特徴量へ変換できる。
 - `python scripts\nsmb_mvl_ai_train_imitation.py <dataset.csv> <model.npz>` でキー入力の多ラベル分類モデルを学習する。複数記録を使う場合は `--split-by-recording` で記録単位validationにする。
 - `python scripts\nsmb_mvl_ai_predict_imitation.py <model.npz> <dataset.csv> <predictions.csv>` で学習済みモデルのオフライン推論結果を確認する。
+- `python scripts\nsmb_mvl_ai_predict_input_script.py <model.npz> <playlog.jsonl|recording.json|recordings-index.json> <model.inputs> --player 1 --prefix-script tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs --end-frame <frame>` で、学習済みモデルの予測をmelonDS input scriptへ戻す。`--reaction-delay-frames`、`--mistake-rate`、`--mistake-mode` で実プレイ向けの強さ調整候補も入れられる。
 - `python scripts\nsmb_mvl_ai_verify_replay.py <expected recording.json|playlog.jsonl> <actual playlog.jsonl>` で、melonDS replayが完全再現できているかを最終状態で検証する。
 - `pwsh scripts\run-nsmb-mvl-recording-replay.ps1 -RecordingManifest <recording.json>` で、manifest内の `replay.mode` に従ってinput script replayまたはpacket replayを起動し、host/client別AI play logを取り直して検証する。起動計画だけ確認する場合は `-DryRun` を使う。最初のズレを調べる場合は `-ScanFrames`、間引き確認は `-CheckpointInterval 30 -CheckpointStartFrame 900` などを指定する。
 - `python scripts\nsmb_mvl_ai_export_viewer_data.py <playlog.jsonl> <viewer-data.json>` で、GUI/外部ビューア向けJSONを作る。GUIの `AIログ` タブはJSONLを直接読むこともできる。
@@ -202,7 +204,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - 目視同等にするには、stage 0の実プレイ場面でタイルサンプルを増やし、穴/壁/床判定のoffsetとsolid maskを調整する必要がある。左右ラップ込みX判定、Y込みの完全可視判定、player接触地形、CollisionMgr接触結果、modifier tile、tile damage、playerの画面Y/カメラ底距離、StageLayout由来の前方/左右タイルサンプルは取れるようになった。
 - StageLayout raw probeでは、stage 0の接地中に `tileId=0x001 behavior=0x0000002A lowType=42` が出る場面があり、現行solidish maskでは床として分類できない。RuleAIとCSVのeffective判定は接地contactで偽holeを抑えるが、学習用の目視同等ログとしては低位tile typeの意味を追加で詰める必要がある。
 - ブロック/アイテム箱の「中身」はblock flagつきStageLayout tile behaviorのstorage contentsとして保存するようになった。叩いた後の状態は現在tile id/behaviorの変化として取れる想定だが、stage 0の実ログで `StageLayout::changeTile` / question block animation path と照合して詰める。
-- 自己対戦に進む前に、ログschemaを実プレイログで増強し、学習済みモデルを入力へ戻す推論経路を作る必要がある。
+- 自己対戦に進む前に、ログschemaを実プレイログで増強し、学習済みモデルを入力へ戻した状態でstage 0を閉ループ評価する必要がある。現時点では `.npz` からmelonDS input scriptを生成する経路はできたが、PoC内で状態を逐次推論して即時入力へ戻す直結経路と、モデル入力scriptでの安定した実走評価は未完了。
 - fireballなどのprojectile系objectは、通常actor object listではなく専用handlerで管理されるものがある。Fireball slot別の座標/前フレーム座標/速度/kind/state/facingは取れるようになったが、owner、寿命、当たり判定状態、kind/state/facingの意味はまだFire Mario実ログで未検証。Fire Marioでstage 0ログを取り、active slotが増えるframeと画面上のFireballを照合する必要がある。
 - `run-nsmb-mvl-recording-replay.ps1` はinput script replayとpacket replayの起動計画を扱え、`-ScanFrames` で不一致reportも残せる。ただし実際の人間記録で完全一致することは、新規記録を取って `recording-session.json` のpacket変換後処理を実行してから確認する必要がある。現時点ではpacket replayのdry-run解決までで、melonDS実走の完全再現検証は未完了。
 
@@ -305,6 +307,10 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `tools/nsmb-mvl-gui`: `pnpm run typecheck` pass。`pnpm biome check src/launcher/AIReplayViewer.tsx src/launcher/AIReplayViewer.browser.test.tsx` pass。`pnpm vitest --config vitest.browser.config.ts run src/launcher/AIReplayViewer.browser.test.tsx` pass（recording manifestのevent sample表示テストを含む）。
 - `tools/nsmb-mvl-gui`: `pnpm vitest --config vitest.config.ts run` pass（4 files / 14 tests）。`pnpm vitest --config vitest.browser.config.ts run` pass（4 files / 13 tests）。`pnpm playwright test` pass（3 tests）。
 - `tools/nsmb-mvl-gui`: `pnpm run ci` は `tsc --noEmit` 後の `biome check .` で停止。原因は変更外の既存ファイルを含むCRLF整形差分。変更ファイル単位のBiomeと全テストはpass。
+- `python -m py_compile scripts\nsmb_mvl_ai_predict_input_script.py scripts\nsmb_mvl_ai_build_dataset.py scripts\nsmb_mvl_ai_predict_imitation.py` pass。
+- `python scripts\nsmb_mvl_ai_predict_input_script.py logs\codex-ai-stage0-effective-tileprobe-smoke-20260607\ai-imitation-player1-auto.npz logs\codex-ai-stage0-effective-tileprobe-smoke-20260607\ai-playlog.jsonl logs\codex-ai-stage0-effective-tileprobe-smoke-20260607\ai-imitation-player1.inputs --player 1 --label-source auto --require-player-found --prefix-script tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs --end-frame 1700 --predictions-csv ...` pass。28行から19 spanのinput scriptを生成し、bootstrap 0-839 と model予測 870-1700 が連結されることを確認。
+- 同scriptで `--reaction-delay-frames 4 --mistake-rate 0.2 --mistake-mode drop-buttons --seed 7 --max-gap-fill 60` もpass。span開始が4frame遅れ、一部buttonがdropされる強さ調整用input scriptを生成できることを確認。
+- 生成scriptをclient側入力として `run-nsmb-mvl-split-local-input-smoke.ps1` に渡したところ、melonDS側loaderはhost 5 span / client 24 spanを正常に読み込んだ。実走はframe 870のremote input timeoutでframe limit未到達。これはinput script parse失敗ではなく、split netplay harness側のpeer待ち/接続条件として別途詰める。
 
 ## Next Actions
 
@@ -317,5 +323,6 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - packet capture付きの新規人間記録を取り、`run-nsmb-mvl-recording-postcommands.ps1` で `packet-replay.csv` / `recording.json` / `recordings-index.json` / dataset / `recording-audit.json` を生成する。
 - `run-nsmb-mvl-recording-replay.ps1 -ScanFrames` でpacket replayの実走を行い、最終frame、checkpoint frame、最初の不一致reportを確認する。必要ならinput script replayとの差分も比較する。
 - 落下死ラインとステージ境界をメモリから取り、`fallRisk` と `tileProbe.holeAhead` を統合した危険判定を作る。
-- 学習済み `.npz` をPoCまたは外部sidecarから推論して入力へ戻す経路を作る。
+- 学習済み `.npz` から生成したinput scriptでstage 0を実走させ、一定時間生存、Big Star接近、落下しない、相手と戦うなどのゲーム内指標をmanifestへ入れる。今回のsplit smokeはloader成功後にremote input timeoutになったため、まずharness条件を安定させる。
+- PoC内または外部sidecarで状態を逐次推論し、input script生成を介さずremote CPU入力へ戻す直結経路を作る。
 - object categoryをログ実例で検証し、ステージ固有objectの意味を詰める。`0x021` は実ログでBig Star actorと同じvtableだったため `big_star_related` に分類した。`0x0F0` はrollback notes上のItem付随短命effectとして `item_spawn_effect` に分類した。`0x145` は既存RAM probeの名前表に基づいて `stage_layout` に分類した。
