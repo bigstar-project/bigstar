@@ -89,6 +89,7 @@
 - 完了: `scripts/run-nsmb-mvl-human-recording.ps1` から `run-nsmb-mvl-manual-local.ps1` を呼ぶ引数渡しをhashtable splattingへ変更した。文字列配列splattingで `-Frames` が位置引数扱いになり、`Frames` に `"-Frames"` が入って変換エラーになる問題を修正した。
 - 完了: `scripts/nsmb_mvl_ai_predict_input_script.py` を追加した。学習済み `.npz` とAI play log / recording manifest / recordings indexから推論し、melonDSのinput scriptへ戻せる。既存bootstrap scriptの前置き、反応遅延、ランダムミス、予測CSV出力に対応する。
 - 完了: `scripts/run-nsmb-mvl-split-local-input-smoke.ps1` に `-AllowRemoteInputTimeoutFallback` と `-InternalWaitTimeoutMs` を追加し、モデルinput script評価時にremote input timeoutを即時fallbackへ近づけられるようにした。
+- 完了: `scripts/run-nsmb-mvl-human-recording.ps1` の既定を実プレイ優先に変更した。stage 0人間記録はデフォルトでJITを許可し、`run-nsmb-mvl-manual-local.ps1 -LowDelayWan` 相当の `InputDelayFrames=4`、`InputMaxFrameLead=4`、`InputUnreliable`、`InputBundleHistory=8` を使う。完全再現性/保守設定を優先する検証では `-Deterministic` を指定する。
 
 ## AI Play Log
 
@@ -153,7 +154,8 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 ## Planned Pipeline
 
 - `MELONDS_NSML_AI_PLAY_LOG=<path>` でAI/人間共通の観測ログを出す。
-- 人間プレイを収集する場合は、まず `pwsh scripts\run-nsmb-mvl-human-recording.ps1` を使う。これはstage 0固定でhost/client別AI play logとpacket captureを出し、終了後に `recording-session.json` の後処理コマンドで `packet-replay.csv`、`recording.json`、`recordings-index.json`、datasetを作る。デフォルトは `HumanSide=client` で、client/Luigiだけを人間操作対象にし、host/Mario側の物理入力は `-NeutralizeHostInput` 相当で受け付けない。packet captureが不要な検証では `-NoPacketCapture` を指定する。
+- 人間プレイを収集する場合は、まず `pwsh scripts\run-nsmb-mvl-human-recording.ps1` を使う。これはstage 0固定でhost/client別AI play logとpacket captureを出し、終了後に `recording-session.json` の後処理コマンドで `packet-replay.csv`、`recording.json`、`recordings-index.json`、datasetを作る。デフォルトは `HumanSide=client` で、client/Luigiだけを人間操作対象にし、host/Mario側の物理入力は `-NeutralizeHostInput` 相当で受け付けない。実プレイ成立を優先するため、通常はJITと低遅延入力同期プリセットを自動で使う。packet captureが不要な検証では `-NoPacketCapture`、完全再現性を優先した保守設定では `-Deterministic` を指定する。
+- 手動プレイがまだ重い場合は、まずログ負荷を切り分ける。学習データの本収集は `AIPlayLogInterval=1` / `AIPlayLogMaxObjects=128` が望ましいが、操作感確認では `-AIPlayLogInterval 2` や `-AIPlayLogMaxObjects 64` に落として、エミュレーション/入力同期由来の遅さかログI/O由来かを分ける。
 - 記録終了後は `pwsh scripts\run-nsmb-mvl-recording-postcommands.ps1 -Session <recording-session.json>` で、packet replay変換、manifest/index、dataset生成をまとめて実行する。手順確認だけなら `-DryRun`、途中から再開する場合は `-StartAt <index>` を使う。
 - `python scripts\nsmb_mvl_ai_audit_recordings.py <recording.json|recordings-index.json> --stage 0 --min-player-found-ratio 0.5 --min-label-ratio 0.5` で、学習前の最低限の品質を確認する。packet replay完全再現を前提にする人間記録では `--require-packet-replay`、Fire Marioなど低頻度scenarioでは `--require-event fireballActive:1` のようにevent条件を追加する。
 - `python scripts\nsmb_mvl_ai_audit_visual_state.py <host-ai-playlog.jsonl> <client-ai-playlog.jsonl> --output <visual-state-audit.json>` で、`visualState` 欠落、powerup/inventory raw値分布、無敵状態未確定、damage guard/shell観測frame、可視未知object、fireball owner低信頼slotを確認する。人間記録のpostCommandsにはこの監査を含める。学習前ゲートとして止めたい場合は `--strict`、または `--fail-on-visual-state-missing` / `--fail-on-invincibility-unknown` / `--fail-on-visible-unknown-object` / `--fail-on-fireball-low-confidence` を使う。
@@ -223,7 +225,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - powerup / inventory powerupは raw値と暫定 `visualState` としてログ/dataset/SVG/manifestへ流れるようになったが、値と画面表示の対応はまだstage 0実ログで検証していない。`mappingVerified=0` のままなので、Fire/Shell/Mega候補は学習特徴として使えるが、最終的な意味付けは未確定。
 - スター無敵、ダメージ後無敵、巨大/豆/甲羅中の一時状態について、damage guard timer/cooldown/flag、physics guard、shell stateはログ/dataset/SVG/manifestへ流れるようになった。`visualState.invincibleKnown=1` と `audit_visual_state.invincibilityUnknown=0` は確認済み。ただし、どのvisual effectがスター由来か、ダメージ後由来か、powerup適用中由来かの原因分類は未確定で、stage 0実ログで画面表示とtimer変化を照合する必要がある。
 - 自己対戦に進む前に、ログschemaを実プレイログで増強し、学習済みモデルを入力へ戻した状態でstage 0を閉ループ評価する必要がある。現時点では `.npz` からmelonDS input scriptを生成する経路はできたが、PoC内で状態を逐次推論して即時入力へ戻す直結経路と、モデル入力scriptでの安定した実走評価は未完了。
-- 性能面では、現行の2プロセスsplit input-netplay検証は学習ループ用として遅すぎる。fallbackなしではframe 870で5秒remote input timeoutに入り、fallback + `InternalWaitTimeoutMs=1` でも900F到達にhost約91秒/client約82秒、約10fps程度。これはAI推論の重さではなく、peer接続不成立時のremote input待ちと2プロセス検証harnessの問題。学習・大量評価には、PoC内直結推論、単一プロセス評価、ヘッドレス高速実行、または状態遷移だけを回す専用runnerが必要。
+- 性能面では、人間記録の入口はJIT + 低遅延入力同期を既定にしたが、現行の2プロセスsplit input-netplay検証は学習ループ用としてまだ遅すぎる。fallbackなしではframe 870で5秒remote input timeoutに入り、fallback + `InternalWaitTimeoutMs=1` でも900F到達にhost約91秒/client約82秒、約10fps程度。これはAI推論の重さではなく、peer接続不成立時のremote input待ちと2プロセス検証harnessの問題。学習・大量評価には、PoC内直結推論、単一プロセス評価、ヘッドレス高速実行、または状態遷移だけを回す専用runnerが必要。
 - fireballなどのprojectile系objectは、通常actor object listではなく専用handlerで管理されるものがある。Fireball slot別の座標/前フレーム座標/速度/kind/state/facingと暫定owner候補は取れるようになったが、真のowner offset、寿命、当たり判定状態、kind/state/facingの意味はまだFire Mario実ログで未検証。Fire Marioでstage 0ログを取り、active slotが増えるframeと画面上のFireballを照合し、owner推定をheuristicからverified offsetへ置き換える必要がある。
 - `run-nsmb-mvl-recording-replay.ps1` はinput script replayとpacket replayの起動計画を扱え、`-ScanFrames` で不一致reportも残せる。ただし実際の人間記録で完全一致することは、新規記録を取って `recording-session.json` のpacket変換後処理を実行してから確認する必要がある。現時点ではpacket replayのdry-run解決までで、melonDS実走の完全再現検証は未完了。
 

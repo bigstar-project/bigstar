@@ -15,6 +15,7 @@ param(
     [switch]$GenerateMvlConfiguredRoms,
     [string]$MvlMatchSeed = "",
     [switch]$AllowJit,
+    [switch]$Deterministic,
     [switch]$DryRun
 )
 
@@ -51,7 +52,8 @@ $manualArgs = @{
 if (-not $NoPacketCapture) { $manualArgs.PacketCapture = $true }
 if ($GenerateMvlConfiguredRoms) { $manualArgs.GenerateMvlConfiguredRoms = $true }
 if ($MvlMatchSeed -ne "") { $manualArgs.MvlMatchSeed = $MvlMatchSeed }
-if ($AllowJit) { $manualArgs.AllowJit = $true }
+if ($AllowJit -or -not $Deterministic) { $manualArgs.AllowJit = $true }
+if (-not $Deterministic) { $manualArgs.LowDelayWan = $true }
 if ($HumanSide -eq "client") { $manualArgs.NeutralizeHostInput = $true }
 if ($HumanSide -eq "host") { $manualArgs.NeutralizeClientInput = $true }
 
@@ -96,6 +98,16 @@ $session = [ordered]@{
     humanSide = $HumanSide
     neutralizeHostInput = ($HumanSide -eq "client")
     neutralizeClientInput = ($HumanSide -eq "host")
+    fastManualPreset = -not $Deterministic
+    deterministic = [bool]$Deterministic
+    allowJit = ($AllowJit -or -not $Deterministic)
+    lowDelayWan = -not $Deterministic
+    fastManualPresetDetails = [ordered]@{
+        inputDelayFrames = 4
+        inputMaxFrameLead = 4
+        inputUnreliable = $true
+        inputBundleHistory = 8
+    }
     logDir = $LogDir
     hostAIPlayLog = $hostAIPlayLog
     clientAIPlayLog = $clientAIPlayLog
