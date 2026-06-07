@@ -13743,6 +13743,88 @@ const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings)
     return "object";
 }
 
+melonDS::u32 AIObjectCategoryMask(const char* category)
+{
+    if (std::strcmp(category, "player") == 0)
+        return 1u << 0;
+    if (std::strcmp(category, "big_star_actor") == 0 ||
+        std::strcmp(category, "big_star_candidate") == 0)
+        return 1u << 1;
+    if (std::strcmp(category, "world_item") == 0 ||
+        std::strcmp(category, "neutral_item") == 0 ||
+        std::strcmp(category, "dropped_star_item") == 0)
+        return 1u << 2;
+    if (std::strcmp(category, "moving_hazard") == 0 ||
+        std::strcmp(category, "enemy_koopa") == 0)
+        return 1u << 3;
+    if (std::strcmp(category, "camera") == 0 ||
+        std::strcmp(category, "stage_scene") == 0 ||
+        std::strcmp(category, "stage_actor_manager") == 0 ||
+        std::strcmp(category, "stage_controller") == 0)
+        return 1u << 4;
+    return 1u << 5;
+}
+
+std::int64_t DistanceSquared2D(
+    melonDS::u32 ax,
+    melonDS::u32 ay,
+    melonDS::u32 bx,
+    melonDS::u32 by)
+{
+    const std::int64_t dx = static_cast<std::int64_t>(SignedU32(ax)) - SignedU32(bx);
+    const std::int64_t dy = static_cast<std::int64_t>(SignedU32(ay)) - SignedU32(by);
+    return dx * dx + dy * dy;
+}
+
+bool IsInCameraRect(
+    melonDS::u32 x,
+    melonDS::u32 y,
+    melonDS::u32 cameraX,
+    melonDS::u32 cameraY,
+    melonDS::u32 cameraWidth,
+    melonDS::u32 cameraHeight)
+{
+    std::int64_t sx = static_cast<std::int64_t>(SignedU32(x)) - SignedU32(cameraX);
+    const std::int64_t wrapWidth = G.RuleAIHorizontalWrapWidth;
+    if (wrapWidth > 0)
+    {
+        while (sx < 0)
+            sx += wrapWidth;
+        while (sx >= wrapWidth)
+            sx -= wrapWidth;
+    }
+    const std::int64_t sy = static_cast<std::int64_t>(SignedU32(y)) - SignedU32(cameraY);
+    return sx >= 0 && sy >= 0 && sx < SignedU32(cameraWidth) && sy < SignedU32(cameraHeight);
+}
+
+void WriteAIScreenJson(
+    std::ostream& out,
+    const char* name,
+    melonDS::u32 x,
+    melonDS::u32 y,
+    melonDS::u32 cameraX,
+    melonDS::u32 cameraY,
+    melonDS::u32 cameraWidth,
+    melonDS::u32 cameraHeight)
+{
+    std::int64_t screenX = static_cast<std::int64_t>(SignedU32(x)) - SignedU32(cameraX);
+    const std::int64_t wrapWidth = G.RuleAIHorizontalWrapWidth;
+    if (wrapWidth > 0)
+    {
+        while (screenX < 0)
+            screenX += wrapWidth;
+        while (screenX >= wrapWidth)
+            screenX -= wrapWidth;
+    }
+    const std::int32_t screenY = SignedU32(y) - SignedU32(cameraY);
+    const bool inViewX = screenX >= 0 && screenX < SignedU32(cameraWidth);
+    out << "\"" << name << "\":{\"x\":" << screenX
+        << ",\"y\":" << screenY
+        << ",\"inViewX\":" << (inViewX ? 1 : 0)
+        << ",\"inView\":" << (IsInCameraRect(x, y, cameraX, cameraY, cameraWidth, cameraHeight) ? 1 : 0)
+        << "}";
+}
+
 void WriteAIInputJson(std::ostream& out, const char* name, melonDS::u32 held, melonDS::u32 pressed)
 {
     out << "\"" << name << "\":{\"held\":" << held << ",\"heldHex\":";
@@ -13842,8 +13924,9 @@ void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& samp
         << "}";
 }
 
-void WriteAIObjectJson(std::ostream& out, const GameStateObjectScanEntry& entry)
+void WriteAIObjectJson(std::ostream& out, const GameStateObjectScanEntry& entry, const GameStateSample& sample)
 {
+    const char* category = AIObjectCategory(entry.ObjectID, entry.Actor.Settings);
     out << "{\"category\":\"" << AIObjectCategory(entry.ObjectID, entry.Actor.Settings)
         << "\",\"objectId\":";
     WriteJsonHex(out, entry.ObjectID, 3);
@@ -13863,7 +13946,160 @@ void WriteAIObjectJson(std::ostream& out, const GameStateObjectScanEntry& entry)
     WriteAIVec3Json(out, "pos", entry.Actor.PosX, entry.Actor.PosY, entry.Actor.PosZ);
     out << ",";
     WriteAIVec3Json(out, "vel", entry.Actor.VelX, entry.Actor.VelY, entry.Actor.VelZ);
+    out << ",\"relative\":{\"p0dx\":" << (SignedU32(entry.Actor.PosX) - SignedU32(sample.PlayerActor0PosX))
+        << ",\"p0dy\":" << (SignedU32(entry.Actor.PosY) - SignedU32(sample.PlayerActor0PosY))
+        << ",\"p1dx\":" << (SignedU32(entry.Actor.PosX) - SignedU32(sample.PlayerActor1PosX))
+        << ",\"p1dy\":" << (SignedU32(entry.Actor.PosY) - SignedU32(sample.PlayerActor1PosY))
+        << "}";
+    out << ",\"screen\":{";
+    WriteAIScreenJson(
+        out,
+        "camera0",
+        entry.Actor.PosX,
+        entry.Actor.PosY,
+        sample.StageCameraGlobalX0,
+        sample.StageCameraGlobalY0,
+        sample.StageCameraGlobalWidth0,
+        sample.StageCameraGlobalHeight0);
+    out << ",";
+    WriteAIScreenJson(
+        out,
+        "camera1",
+        entry.Actor.PosX,
+        entry.Actor.PosY,
+        sample.StageCameraGlobalX1,
+        sample.StageCameraGlobalY1,
+        sample.StageCameraGlobalWidth1,
+        sample.StageCameraGlobalHeight1);
+    out << "},\"categoryMask\":" << AIObjectCategoryMask(category);
     out << "}";
+}
+
+void WriteAINearestObjectJson(
+    std::ostream& out,
+    const char* category,
+    const GameStateObjectScanEntry* entry,
+    melonDS::u32 selfX,
+    melonDS::u32 selfY)
+{
+    out << "\"" << category << "\":{";
+    if (!entry)
+    {
+        out << "\"found\":0}";
+        return;
+    }
+    out << "\"found\":1,\"objectId\":";
+    WriteJsonHex(out, entry->ObjectID, 3);
+    out << ",\"settings\":";
+    WriteJsonHex(out, entry->Actor.Settings);
+    out << ",\"guid\":";
+    WriteJsonHex(out, entry->Actor.GUID);
+    out << ",\"dx\":" << (SignedU32(entry->Actor.PosX) - SignedU32(selfX))
+        << ",\"dy\":" << (SignedU32(entry->Actor.PosY) - SignedU32(selfY))
+        << ",\"dist2\":" << DistanceSquared2D(entry->Actor.PosX, entry->Actor.PosY, selfX, selfY)
+        << "}";
+}
+
+void WriteAIVisualSummaryJson(
+    std::ostream& out,
+    const GameStateObjectScanCache& objectScanCache,
+    const GameStateSample& sample)
+{
+    constexpr std::array<const char*, 7> categories {{
+        "big_star_actor",
+        "big_star_candidate",
+        "world_item",
+        "neutral_item",
+        "dropped_star_item",
+        "moving_hazard",
+        "enemy_koopa",
+    }};
+
+    std::map<std::string, int> categoryCounts;
+    int visibleCamera0 = 0;
+    int visibleCamera1 = 0;
+    int visibleCamera0X = 0;
+    int visibleCamera1X = 0;
+    for (const GameStateObjectScanEntry& entry : objectScanCache.Entries)
+    {
+        if (entry.LifecycleState != 1)
+            continue;
+        categoryCounts[AIObjectCategory(entry.ObjectID, entry.Actor.Settings)]++;
+        if (IsInCameraRect(
+                entry.Actor.PosX,
+                entry.Actor.PosY,
+                sample.StageCameraGlobalX0,
+                sample.StageCameraGlobalY0,
+                sample.StageCameraGlobalWidth0,
+                sample.StageCameraGlobalHeight0))
+            visibleCamera0++;
+        const std::int64_t camera0X =
+            (static_cast<std::int64_t>(SignedU32(entry.Actor.PosX)) - SignedU32(sample.StageCameraGlobalX0) +
+                G.RuleAIHorizontalWrapWidth) % std::max(1, G.RuleAIHorizontalWrapWidth);
+        if (camera0X >= 0 && camera0X < SignedU32(sample.StageCameraGlobalWidth0))
+            visibleCamera0X++;
+        if (IsInCameraRect(
+                entry.Actor.PosX,
+                entry.Actor.PosY,
+                sample.StageCameraGlobalX1,
+                sample.StageCameraGlobalY1,
+                sample.StageCameraGlobalWidth1,
+                sample.StageCameraGlobalHeight1))
+            visibleCamera1++;
+        const std::int64_t camera1X =
+            (static_cast<std::int64_t>(SignedU32(entry.Actor.PosX)) - SignedU32(sample.StageCameraGlobalX1) +
+                G.RuleAIHorizontalWrapWidth) % std::max(1, G.RuleAIHorizontalWrapWidth);
+        if (camera1X >= 0 && camera1X < SignedU32(sample.StageCameraGlobalWidth1))
+            visibleCamera1X++;
+    }
+
+    out << ",\"visualSummary\":{\"visibleCamera0\":" << visibleCamera0
+        << ",\"visibleCamera1\":" << visibleCamera1
+        << ",\"visibleCamera0X\":" << visibleCamera0X
+        << ",\"visibleCamera1X\":" << visibleCamera1X
+        << ",\"categoryCounts\":{";
+    bool firstCount = true;
+    for (const auto& [category, count] : categoryCounts)
+    {
+        if (!firstCount)
+            out << ",";
+        firstCount = false;
+        out << "\"" << category << "\":" << count;
+    }
+    out << "},\"nearest\":[";
+
+    const melonDS::u32 playerX[2] { sample.PlayerActor0PosX, sample.PlayerActor1PosX };
+    const melonDS::u32 playerY[2] { sample.PlayerActor0PosY, sample.PlayerActor1PosY };
+    for (int player = 0; player < 2; player++)
+    {
+        if (player != 0)
+            out << ",";
+        out << "{\"player\":" << player << ",\"categories\":{";
+        for (std::size_t categoryIndex = 0; categoryIndex < categories.size(); categoryIndex++)
+        {
+            const char* category = categories[categoryIndex];
+            const GameStateObjectScanEntry* nearest = nullptr;
+            std::int64_t nearestDist2 = 0;
+            for (const GameStateObjectScanEntry& entry : objectScanCache.Entries)
+            {
+                if (entry.LifecycleState != 1 ||
+                    std::strcmp(AIObjectCategory(entry.ObjectID, entry.Actor.Settings), category) != 0)
+                    continue;
+                const std::int64_t dist2 =
+                    DistanceSquared2D(entry.Actor.PosX, entry.Actor.PosY, playerX[player], playerY[player]);
+                if (!nearest || dist2 < nearestDist2)
+                {
+                    nearest = &entry;
+                    nearestDist2 = dist2;
+                }
+            }
+            if (categoryIndex != 0)
+                out << ",";
+            WriteAINearestObjectJson(out, category, nearest, playerX[player], playerY[player]);
+        }
+        out << "}}";
+    }
+    out << "]}";
 }
 
 void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -13952,6 +14188,7 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         << ",\"skipUpdate\":" << sample.ObjectSkipUpdateCount
         << ",\"skipRender\":" << sample.ObjectSkipRenderCount
         << "}";
+    WriteAIVisualSummaryJson(G.AIPlayLog, objectScanCache, sample);
 
     G.AIPlayLog << ",\"objects\":[";
     int writtenObjects = 0;
@@ -13963,7 +14200,7 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             break;
         if (writtenObjects != 0)
             G.AIPlayLog << ",";
-        WriteAIObjectJson(G.AIPlayLog, entry);
+        WriteAIObjectJson(G.AIPlayLog, entry, sample);
         writtenObjects++;
     }
     G.AIPlayLog << "],\"hash\":";

@@ -36,6 +36,22 @@ NEAREST_CATEGORIES = [
     "enemy_koopa",
 ]
 
+CATEGORY_COUNT_NAMES = [
+    "player",
+    "big_star_actor",
+    "big_star_candidate",
+    "world_item",
+    "neutral_item",
+    "dropped_star_item",
+    "moving_hazard",
+    "enemy_koopa",
+    "camera",
+    "stage_scene",
+    "stage_actor_manager",
+    "stage_controller",
+    "object",
+]
+
 
 def num(value: Any, default: int = 0) -> int:
     if isinstance(value, bool):
@@ -102,6 +118,13 @@ def build_row(record: dict[str, Any], player: int) -> dict[str, int]:
     target_pos = pos(target)
     camera = record.get("camera") or {}
     object_summary = record.get("objectSummary") or {}
+    visual_summary = record.get("visualSummary") or {}
+    category_counts = visual_summary.get("categoryCounts") or {}
+    nearest_summary = {}
+    for nearest_player in visual_summary.get("nearest") or []:
+        if num(nearest_player.get("player"), -1) == player:
+            nearest_summary = nearest_player.get("categories") or {}
+            break
 
     row: dict[str, int] = {
         "frame": num(record.get("frame")),
@@ -142,11 +165,18 @@ def build_row(record: dict[str, Any], player: int) -> dict[str, int]:
         "camera_y0": num(camera.get("globalY0")),
         "camera_width0": num(camera.get("width0")),
         "camera_height0": num(camera.get("height0")),
+        "visible_camera0": num(visual_summary.get("visibleCamera0")),
+        "visible_camera1": num(visual_summary.get("visibleCamera1")),
+        "visible_camera0_x": num(visual_summary.get("visibleCamera0X")),
+        "visible_camera1_x": num(visual_summary.get("visibleCamera1X")),
         "object_total": num(object_summary.get("total")),
         "object_active": num(object_summary.get("active")),
         "object_dead": num(object_summary.get("dead")),
         "label_held": held,
     }
+
+    for category in CATEGORY_COUNT_NAMES:
+        row[f"count_{category}"] = num(category_counts.get(category))
 
     for name, bit in BUTTON_BITS.items():
         row[f"label_{name}"] = 1 if (held & (1 << bit)) else 0
@@ -154,6 +184,12 @@ def build_row(record: dict[str, Any], player: int) -> dict[str, int]:
     objects = record.get("objects") or []
     for category in NEAREST_CATEGORIES:
         found, dx, dy, dist2 = nearest_object(objects, category, self_pos)
+        summary = nearest_summary.get(category) or {}
+        if summary:
+            found = num(summary.get("found"))
+            dx = num(summary.get("dx"))
+            dy = num(summary.get("dy"))
+            dist2 = num(summary.get("dist2"))
         prefix = f"nearest_{category}"
         row[f"{prefix}_found"] = found
         row[f"{prefix}_dx"] = dx

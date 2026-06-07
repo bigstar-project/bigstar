@@ -29,6 +29,7 @@
 - 完了: `MELONDS_NSML_AI_PLAY_LOG=<path>` で `JSONL` のAIプレイログを出せるようにした。既存の巨大CSV game-state traceとは別に、学習入力として読みやすい1行1フレーム形式にする。
 - 完了: `scripts/nsmb_mvl_ai_build_dataset.py` でJSONLから模倣学習用の固定列CSVを生成できるようにした。
 - 完了: `scripts/nsmb_mvl_ai_train_imitation.py` で固定列CSVからnumpyのみの多ラベル模倣学習モデルを学習し、`.npz` に保存できるようにした。
+- 完了: AI play logに `visualSummary` を追加し、カテゴリ別active object数、カメラX範囲内のobject数、player別の最近傍カテゴリ距離、objectごとのplayer相対座標とscreen Xを保存するようにした。
 
 ## AI Play Log
 
@@ -44,6 +45,8 @@
 JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`targets`、`camera`、`objectSummary`、`objects` を持つ。`objects` はactive objectだけを保存し、既知IDには `category` を付ける。
 
 `inputs` にはメモリ上の `console0/1`、`player0/1` に加えて、PoCが実際にそのフレーム近辺へ注入した `appliedPlayer0/1` を保存する。模倣学習の教師ラベルはまず `appliedPlayerN.held` / `heldHex` を使う。
+
+`visualSummary` には、人間が画面を見て判断する情報に近づけるための要約を保存する。現時点では左右ラップ込みの `visibleCamera0X` / `visibleCamera1X`、カテゴリ別count、player別最近傍 `big_star_actor` / `moving_hazard` などを持つ。object個別にも `relative` と `screen.camera*.inViewX` を保存する。
 
 現時点の既知カテゴリ:
 
@@ -72,7 +75,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 ## Current Blockers / Unknowns
 
 - object IDと画面上の意味の対応はまだ完全ではない。既知IDからカテゴリ付けを始め、ログを見ながら coin/enemy/item/block/hazard の分類を増やす。
-- 目視同等にするには、画面座標系への変換、地形/足場/穴、ブロック状態、アイテム箱状態が不足している。
+- 目視同等にするには、画面Y座標系への変換、地形/足場/穴、ブロック状態、アイテム箱状態が不足している。X方向は左右ラップ込みの可視判定まで入ったが、完全な `inView` はY側の対応を追加で詰める必要がある。
 - 自己対戦に進む前に、ログschemaを実プレイログで増強し、学習済みモデルを入力へ戻す推論経路を作る必要がある。
 
 ## Verification
@@ -82,9 +85,12 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - 同ログでカテゴリ `big_star_actor`、`camera`、`moving_hazard`、`player`、`stage_actor_manager`、`stage_controller`、`stage_scene` を確認。frame 900 では `appliedPlayer1.heldHex=0x810` が出ており、remote CPUの入力ラベルが保存されている。
 - `python scripts\nsmb_mvl_ai_build_dataset.py logs\codex-ai-playlog-label-smoke-20260607\ai-playlog.jsonl logs\codex-ai-playlog-label-smoke-20260607\ai-dataset-player1.csv --player 1 --require-player-found` pass。24行のCSVが生成され、`label_held`、button別 `label_*`、self/opponent/target/camera/object/nearestカテゴリ特徴を確認。
 - `python scripts\nsmb_mvl_ai_train_imitation.py logs\codex-ai-playlog-label-smoke-20260607\ai-dataset-player1.csv logs\codex-ai-playlog-label-smoke-20260607\ai-imitation-player1.npz --epochs 200 --lr 0.05` pass。24行の小データで学習と `.npz` 保存が動作することを確認。これはパイプライン検証であり、強さ評価ではない。
+- `logs/codex-ai-visual-wrapx-smoke-20260607`: visualSummary追加後のrule AI remote smoke 1600F pass。JSONL 27行、`visualSummary` 全行あり。frame 870で `visibleCamera0X=10`、`visibleCamera1X=11`、player objectの `screen.camera0.inViewX=1` を確認。
+- 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --require-player-found` pass、24行CSV生成。`visible_camera*_x` と `count_*` 特徴が追加された状態で `python scripts\nsmb_mvl_ai_train_imitation.py ... --epochs 200 --lr 0.05` pass。
 
 ## Next Actions
 
 - JSONLの先頭数行を人間が読める形で検査し、欠けている状態を追加する。
+- camera Y / player display Y の対応を解析し、完全な画面内判定を入れる。
 - 学習済み `.npz` をPoCまたは外部sidecarから推論して入力へ戻す経路を作る。
 - object categoryを増やし、coin/block/item box/terrain/hole相当の状態を足す。
