@@ -75,6 +75,10 @@ def audit_playlog(path: Path, max_samples: int, fireball_owner_min_confidence: i
     gameplay_rows = 0
     visual_state_missing = [0, 0]
     invincibility_unknown = [0, 0]
+    invincibility_candidate_frames = [0, 0]
+    damage_guard_timer_frames = [0, 0]
+    damage_cooldown_frames = [0, 0]
+    shell_state_frames = [0, 0]
     powerup_values: list[Counter[int]] = [Counter(), Counter()]
     inventory_powerup_values: list[Counter[int]] = [Counter(), Counter()]
     category_counts: Counter[str] = Counter()
@@ -106,6 +110,15 @@ def audit_playlog(path: Path, max_samples: int, fireball_owner_min_confidence: i
                 )
             elif not num(visual_state.get("invincibleKnown")):
                 invincibility_unknown[player_index] += 1
+            else:
+                if num(visual_state.get("invincibleCandidate")):
+                    invincibility_candidate_frames[player_index] += 1
+                if num(visual_state.get("damageGuardTimer")):
+                    damage_guard_timer_frames[player_index] += 1
+                if num(visual_state.get("damageCooldown")):
+                    damage_cooldown_frames[player_index] += 1
+                if num(visual_state.get("shellState")):
+                    shell_state_frames[player_index] += 1
 
         projectile_visible = False
         for obj in record.get("objects") or []:
@@ -165,6 +178,10 @@ def audit_playlog(path: Path, max_samples: int, fireball_owner_min_confidence: i
         "gameplayRows": gameplay_rows,
         "visualStateMissing": visual_state_missing,
         "invincibilityUnknown": invincibility_unknown,
+        "invincibilityCandidateFrames": invincibility_candidate_frames,
+        "damageGuardTimerFrames": damage_guard_timer_frames,
+        "damageCooldownFrames": damage_cooldown_frames,
+        "shellStateFrames": shell_state_frames,
         "powerupValues": [{str(k): v for k, v in counter.items()} for counter in powerup_values],
         "inventoryPowerupValues": [{str(k): v for k, v in counter.items()} for counter in inventory_powerup_values],
         "categoryCounts": dict(category_counts),

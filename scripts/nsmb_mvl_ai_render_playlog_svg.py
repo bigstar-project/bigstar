@@ -113,9 +113,17 @@ def visual_state_text(player: dict[str, Any]) -> str:
     if num(visual_state.get("hasReserveItemCandidate")):
         parts.append("reserve")
     if num(visual_state.get("invincibleKnown")):
-        parts.append(f"invincible={num(visual_state.get('invincibleCandidate'))}")
+        parts.append(
+            "invincible="
+            f"{num(visual_state.get('invincibleCandidate'))}"
+            f"/guard={num(visual_state.get('damageGuardTimer'))}"
+            f"/dmg={num(visual_state.get('damageCooldown'))}"
+        )
     else:
         parts.append("invincible=?")
+    shell_state = num(visual_state.get("shellState"))
+    if shell_state:
+        parts.append(f"shell={shell_state}")
     return " ".join(str(part) for part in parts)
 
 

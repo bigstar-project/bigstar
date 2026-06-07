@@ -121,6 +121,7 @@ constexpr melonDS::u32 kGamePlayerPowerupAddr = 0x0208B324;
 constexpr melonDS::u32 kGamePlayerDeadAddr = 0x0208B328;
 constexpr melonDS::u32 kGamePlayerInventoryPowerupAddr = 0x0208B32C;
 constexpr melonDS::u32 kGamePlayerCharacterAddr = 0x0208B330;
+constexpr melonDS::u32 kGamePlayerDamageGuardTimerAddr = 0x0208B344;
 constexpr melonDS::u32 kGamePlayerTransitionStatusAddr = 0x0208B354; // Game::playerVSPipeState
 constexpr melonDS::u32 kGamePlayerCountAddr = 0x0208B348;
 constexpr melonDS::u32 kGamePlayerLivesAddr = 0x0208B364;
@@ -171,14 +172,22 @@ constexpr melonDS::u32 kCollisionMgrFlagsA8Offset = 0xA8;
 constexpr melonDS::u32 kCollisionMgrTileByteABOffset = 0xAB;
 constexpr melonDS::u32 kCollisionMgrModifierStateOffset = 0xB0;
 constexpr melonDS::u32 kCollisionMgrUnknownB1Offset = 0xB1;
+constexpr melonDS::u32 kPlayerBaseShellActorPtrOffset = 0x0B8;
 constexpr melonDS::u32 kPlayerBaseUpdateLockedOffset = 0x7A8;
+constexpr melonDS::u32 kPlayerBaseDamageStateOffset = 0x7A9;
+constexpr melonDS::u32 kPlayerBasePowerupAuxStateOffset = 0x7AA;
 constexpr melonDS::u32 kPlayerBaseCharacterIDOffset = 0x7AA;
+constexpr melonDS::u32 kPlayerBasePowerupStateOffset = 0x7AB;
+constexpr melonDS::u32 kPlayerBasePowerupFormStateOffset = 0x7AC;
+constexpr melonDS::u32 kPlayerBasePowerupSubStateOffset = 0x7AD;
 constexpr melonDS::u32 kPlayerBaseTransitioningFlagOffset = 0x7B0;
 constexpr melonDS::u32 kPlayerBaseCameraFocusModeOffset = 0x7B2;
 constexpr melonDS::u32 kPlayerBaseDefeatedFlagOffset = 0x7B3;
 constexpr melonDS::u32 kPlayerBasePlayerIDOffset = 0x7B4;
 constexpr melonDS::u32 kPlayerBaseVisibleFlagOffset = 0x7B5;
+constexpr melonDS::u32 kPlayerBaseDamageGuardFlagOffset = 0x7C1;
 constexpr melonDS::u32 kPlayerBaseTransitionStepOffset = 0xBAD;
+constexpr melonDS::u32 kPlayerBasePowerupApplyLockOffset = 0xBA6;
 constexpr melonDS::u32 kPlayerBaseTileDamageFlagsOffset = 0xBB2;
 constexpr melonDS::u32 kPlayerBaseTileDamageTypeOffset = 0xBB3;
 constexpr melonDS::u32 kPlayerBaseLinkedActorOffset = 0x688;
@@ -906,6 +915,15 @@ struct GameStateSample
     melonDS::u32 PlayerActor0SubActionFlag = 0;
     melonDS::u32 PlayerActor0PhysicsFlag = 0;
     melonDS::u32 PlayerActor0DamageCooldown = 0;
+    melonDS::u32 PlayerActor0DamageState = 0;
+    melonDS::u32 PlayerActor0PowerupAuxState = 0;
+    melonDS::u32 PlayerActor0PowerupState = 0;
+    melonDS::u32 PlayerActor0PowerupFormState = 0;
+    melonDS::u32 PlayerActor0PowerupSubState = 0;
+    melonDS::u32 PlayerActor0DamageGuardFlag = 0;
+    melonDS::u32 PlayerActor0PowerupApplyLock = 0;
+    melonDS::u32 PlayerActor0ShellActorPtr = 0;
+    melonDS::u32 PlayerActor0ShellState = 0;
     melonDS::u32 PlayerActor0TransitFunc = 0;
     melonDS::u32 PlayerActor0TransitArg = 0;
     PlayerCollisionMgrSample PlayerActor0CollisionMgr;
@@ -949,6 +967,15 @@ struct GameStateSample
     melonDS::u32 PlayerActor1SubActionFlag = 0;
     melonDS::u32 PlayerActor1PhysicsFlag = 0;
     melonDS::u32 PlayerActor1DamageCooldown = 0;
+    melonDS::u32 PlayerActor1DamageState = 0;
+    melonDS::u32 PlayerActor1PowerupAuxState = 0;
+    melonDS::u32 PlayerActor1PowerupState = 0;
+    melonDS::u32 PlayerActor1PowerupFormState = 0;
+    melonDS::u32 PlayerActor1PowerupSubState = 0;
+    melonDS::u32 PlayerActor1DamageGuardFlag = 0;
+    melonDS::u32 PlayerActor1PowerupApplyLock = 0;
+    melonDS::u32 PlayerActor1ShellActorPtr = 0;
+    melonDS::u32 PlayerActor1ShellState = 0;
     melonDS::u32 PlayerActor1TransitFunc = 0;
     melonDS::u32 PlayerActor1TransitArg = 0;
     PlayerCollisionMgrSample PlayerActor1CollisionMgr;
@@ -968,6 +995,8 @@ struct GameStateSample
     melonDS::u32 Player1Powerup = 0;
     melonDS::u32 Player0InventoryPowerup = 0;
     melonDS::u32 Player1InventoryPowerup = 0;
+    melonDS::u32 Player0DamageGuardTimer = 0;
+    melonDS::u32 Player1DamageGuardTimer = 0;
     melonDS::u32 Player0Dead = 0;
     melonDS::u32 Player1Dead = 0;
     melonDS::u32 Player0Character = 0;
@@ -12915,6 +12944,15 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
                                             melonDS::u32& subActionFlag,
                                             melonDS::u32& physicsFlag,
                                             melonDS::u32& damageCooldown,
+                                            melonDS::u32& damageState,
+                                            melonDS::u32& powerupAuxState,
+                                            melonDS::u32& powerupState,
+                                            melonDS::u32& powerupFormState,
+                                            melonDS::u32& powerupSubState,
+                                            melonDS::u32& damageGuardFlag,
+                                            melonDS::u32& powerupApplyLock,
+                                            melonDS::u32& shellActorPtr,
+                                            melonDS::u32& shellState,
                                             melonDS::u32& transitFunc,
                                             melonDS::u32& transitArg)
     {
@@ -12931,6 +12969,15 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         subActionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseSubActionFlagOffset);
         physicsFlag = nds->ARM9Read32(actor.Base + kPlayerBasePhysicsFlagOffset);
         damageCooldown = nds->ARM9Read16(actor.Base + kPlayerBaseDamageCooldownOffset);
+        damageState = nds->ARM9Read8(actor.Base + kPlayerBaseDamageStateOffset);
+        powerupAuxState = nds->ARM9Read8(actor.Base + kPlayerBasePowerupAuxStateOffset);
+        powerupState = nds->ARM9Read8(actor.Base + kPlayerBasePowerupStateOffset);
+        powerupFormState = nds->ARM9Read8(actor.Base + kPlayerBasePowerupFormStateOffset);
+        powerupSubState = nds->ARM9Read8(actor.Base + kPlayerBasePowerupSubStateOffset);
+        damageGuardFlag = nds->ARM9Read8(actor.Base + kPlayerBaseDamageGuardFlagOffset);
+        powerupApplyLock = nds->ARM9Read8(actor.Base + kPlayerBasePowerupApplyLockOffset);
+        shellActorPtr = nds->ARM9Read32(actor.Base + kPlayerBaseShellActorPtrOffset);
+        shellState = (actionFlag & 0x00400000u) != 0 ? (shellActorPtr != 0 ? 2u : 1u) : 0u;
         transitFunc = nds->ARM9Read32(actor.Base + 0x990);
         transitArg = nds->ARM9Read32(actor.Base + 0x994);
     };
@@ -12947,6 +12994,15 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         sample.PlayerActor0SubActionFlag,
         sample.PlayerActor0PhysicsFlag,
         sample.PlayerActor0DamageCooldown,
+        sample.PlayerActor0DamageState,
+        sample.PlayerActor0PowerupAuxState,
+        sample.PlayerActor0PowerupState,
+        sample.PlayerActor0PowerupFormState,
+        sample.PlayerActor0PowerupSubState,
+        sample.PlayerActor0DamageGuardFlag,
+        sample.PlayerActor0PowerupApplyLock,
+        sample.PlayerActor0ShellActorPtr,
+        sample.PlayerActor0ShellState,
         sample.PlayerActor0TransitFunc,
         sample.PlayerActor0TransitArg);
     readPlayerTransitionFields(
@@ -12962,6 +13018,15 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         sample.PlayerActor1SubActionFlag,
         sample.PlayerActor1PhysicsFlag,
         sample.PlayerActor1DamageCooldown,
+        sample.PlayerActor1DamageState,
+        sample.PlayerActor1PowerupAuxState,
+        sample.PlayerActor1PowerupState,
+        sample.PlayerActor1PowerupFormState,
+        sample.PlayerActor1PowerupSubState,
+        sample.PlayerActor1DamageGuardFlag,
+        sample.PlayerActor1PowerupApplyLock,
+        sample.PlayerActor1ShellActorPtr,
+        sample.PlayerActor1ShellState,
         sample.PlayerActor1TransitFunc,
         sample.PlayerActor1TransitArg);
 
@@ -13032,6 +13097,8 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.Player1Powerup = nds->ARM9Read8(kGamePlayerPowerupAddr + 1);
     sample.Player0InventoryPowerup = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr);
     sample.Player1InventoryPowerup = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr + 1);
+    sample.Player0DamageGuardTimer = nds->ARM9Read16(kGamePlayerDamageGuardTimerAddr);
+    sample.Player1DamageGuardTimer = nds->ARM9Read16(kGamePlayerDamageGuardTimerAddr + sizeof(melonDS::u16));
     sample.Player0Dead = nds->ARM9Read8(kGamePlayerDeadAddr);
     sample.Player1Dead = nds->ARM9Read8(kGamePlayerDeadAddr + 1);
     sample.Player0Character = nds->ARM9Read8(kGamePlayerCharacterAddr);
@@ -14198,7 +14265,7 @@ const char* AIPowerupCandidateName(melonDS::u32 value)
     }
 }
 
-void WriteAIPowerupCandidateJson(std::ostream& out, const char* key, melonDS::u32 value)
+void WriteAIPowerupCandidateJson(std::ostream& out, const char* key, melonDS::u32 value, melonDS::u32 shellState = 0)
 {
     out << "\"" << key << "\":{\"raw\":" << value
         << ",\"name\":\"" << AIPowerupCandidateName(value) << "\""
@@ -14206,7 +14273,7 @@ void WriteAIPowerupCandidateJson(std::ostream& out, const char* key, melonDS::u3
         << ",\"mappingVerified\":0"
         << ",\"isPoweredUpCandidate\":" << (value != 0 ? 1 : 0)
         << ",\"canShootFireCandidate\":" << (value == 2 ? 1 : 0)
-        << ",\"isShellCandidate\":" << (value == 4 ? 1 : 0)
+        << ",\"isShellCandidate\":" << (value == 4 || shellState != 0 ? 1 : 0)
         << ",\"isMegaCandidate\":" << (value == 5 ? 1 : 0)
         << "}";
 }
@@ -14833,6 +14900,32 @@ void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& samp
         p0 ? sample.PlayerActor0TileDamageFlags : sample.PlayerActor1TileDamageFlags;
     const melonDS::u32 tileDamageType =
         p0 ? sample.PlayerActor0TileDamageType : sample.PlayerActor1TileDamageType;
+    const melonDS::u32 damageCooldown =
+        p0 ? sample.PlayerActor0DamageCooldown : sample.PlayerActor1DamageCooldown;
+    const melonDS::u32 damageState =
+        p0 ? sample.PlayerActor0DamageState : sample.PlayerActor1DamageState;
+    const melonDS::u32 powerupAuxState =
+        p0 ? sample.PlayerActor0PowerupAuxState : sample.PlayerActor1PowerupAuxState;
+    const melonDS::u32 powerupState =
+        p0 ? sample.PlayerActor0PowerupState : sample.PlayerActor1PowerupState;
+    const melonDS::u32 powerupFormState =
+        p0 ? sample.PlayerActor0PowerupFormState : sample.PlayerActor1PowerupFormState;
+    const melonDS::u32 powerupSubState =
+        p0 ? sample.PlayerActor0PowerupSubState : sample.PlayerActor1PowerupSubState;
+    const melonDS::u32 damageGuardFlag =
+        p0 ? sample.PlayerActor0DamageGuardFlag : sample.PlayerActor1DamageGuardFlag;
+    const melonDS::u32 powerupApplyLock =
+        p0 ? sample.PlayerActor0PowerupApplyLock : sample.PlayerActor1PowerupApplyLock;
+    const melonDS::u32 shellActorPtr =
+        p0 ? sample.PlayerActor0ShellActorPtr : sample.PlayerActor1ShellActorPtr;
+    const melonDS::u32 shellState =
+        p0 ? sample.PlayerActor0ShellState : sample.PlayerActor1ShellState;
+    const melonDS::u32 damageGuardTimer =
+        p0 ? sample.Player0DamageGuardTimer : sample.Player1DamageGuardTimer;
+    const bool damagePhysicsGuard =
+        (v(sample.PlayerActor0PhysicsFlag, sample.PlayerActor1PhysicsFlag) & 0x80000000u) != 0;
+    const bool invincibleCandidate =
+        damageGuardTimer != 0 || damageCooldown != 0 || damageGuardFlag != 0 || damagePhysicsGuard;
     out << "{\"index\":" << index
         << ",\"found\":" << v(sample.PlayerActor0Found, sample.PlayerActor1Found)
         << ",\"guid\":";
@@ -14886,17 +14979,33 @@ void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& samp
         << ",\"visible\":" << v(sample.PlayerActor0VisibleFlag, sample.PlayerActor1VisibleFlag)
         << ",\"defeated\":" << v(sample.PlayerActor0DefeatedFlag, sample.PlayerActor1DefeatedFlag)
         << ",\"transitioning\":" << v(sample.PlayerActor0TransitioningFlag, sample.PlayerActor1TransitioningFlag)
+        << ",\"damageCooldown\":" << damageCooldown
         << ",\"powerup\":" << v(sample.Player0Powerup, sample.Player1Powerup)
         << ",\"inventoryPowerup\":" << v(sample.Player0InventoryPowerup, sample.Player1InventoryPowerup)
         << ",\"visualState\":{";
-    WriteAIPowerupCandidateJson(out, "powerup", v(sample.Player0Powerup, sample.Player1Powerup));
+    WriteAIPowerupCandidateJson(out, "powerup", v(sample.Player0Powerup, sample.Player1Powerup), shellState);
     out << ",";
     WriteAIPowerupCandidateJson(out, "inventoryPowerup", v(sample.Player0InventoryPowerup, sample.Player1InventoryPowerup));
     out << ",\"hasReserveItemCandidate\":"
         << (v(sample.Player0InventoryPowerup, sample.Player1InventoryPowerup) != 0 ? 1 : 0)
-        << ",\"invincibleKnown\":0"
-        << ",\"invincibleCandidate\":0"
-        << ",\"notes\":\"powerup mapping and invincibility timer are not verified yet\""
+        << ",\"actorPowerupState\":" << powerupState
+        << ",\"actorPowerupFormState\":" << powerupFormState
+        << ",\"actorPowerupAuxState\":" << powerupAuxState
+        << ",\"actorPowerupSubState\":" << powerupSubState
+        << ",\"damageState\":" << damageState
+        << ",\"damageCooldown\":" << damageCooldown
+        << ",\"damageGuardFlag\":" << damageGuardFlag
+        << ",\"damageGuardTimer\":" << damageGuardTimer
+        << ",\"damagePhysicsGuard\":" << (damagePhysicsGuard ? 1 : 0)
+        << ",\"powerupApplyLock\":" << powerupApplyLock
+        << ",\"shellState\":" << shellState
+        << ",\"shellActorPtr\":";
+    WriteJsonHex(out, shellActorPtr);
+    out << ",\"invincibleKnown\":1"
+        << ",\"invincibleCandidate\":" << (invincibleCandidate ? 1 : 0)
+        << ",\"damageInvulnerableCandidate\":" << (invincibleCandidate ? 1 : 0)
+        << ",\"powerupMappingVerified\":0"
+        << ",\"notes\":\"powerup enum names are tentative; damage guard timer and shell state are disassembly-backed\""
         << "}"
         << ",\"dead\":" << v(sample.Player0Dead, sample.Player1Dead)
         << ",\"lives\":" << v(sample.Player0Lives, sample.Player1Lives)
