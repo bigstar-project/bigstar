@@ -74,6 +74,7 @@
 - 完了: `scripts/run-nsmb-mvl-recording-postcommands.ps1` を追加し、`recording-session.json` に残した後処理コマンドをdry-run/途中再開つきで実行できるようにした。
 - 完了: AI play logに `specialObjects.fireballs` / `specialObjects.projectiles` を追加した。通常actor object listでは拾えない `Fireballs::activeFireballs` と fireball/projectile handler先頭wordを保存し、Fire Mario実ログで発射frameを見つける足場にする。
 - 完了: `specialObjects.fireballs.active` をdataset特徴量、viewer export、recording manifestの `summary.specialObjectFrames.fireballActive` / `eventSamples.fireballActive`、GUIの `AIログ` タブへ流すようにした。
+- 完了: `Fireballs::fireballHandler` のslot配列を読み、AI play logの `specialObjects.fireballs.slots[]` にactive slotのindex、kind、state、facing、座標、前フレーム座標、速度、player相対座標を保存するようにした。datasetには `fireballs_active_slots`、`fireballs_slot_count`、最近傍fireballの相対距離/kind/state/facingを追加した。
 - 完了: `scripts/nsmb_mvl_ai_audit_recordings.py` を追加した。`recording.json` または `recordings-index.json` を読み、rows、gameplay rows、player found率、label率、nonzero label、stage、packet replay、必須event数を学習前に検査できる。
 - 完了: `scripts/run-nsmb-mvl-human-recording.ps1 -DryRun` を追加し、melonDSを起動せずに `recording-session.json` と後処理コマンドを確認できるようにした。通常後処理には `recording-audit.json` 生成も含める。
 
@@ -104,7 +105,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 
 `visualSummary` には、人間が画面を見て判断する情報に近づけるための要約を保存する。現時点ではY込みの `visibleCamera0/1`、左右ラップ込みX判定の `visibleCamera0X` / `visibleCamera1X`、カテゴリ別count、player別最近傍 `big_star_actor` / `moving_hazard` などを持つ。player/object個別にも `relative` と `screen.camera*.inViewX/inViewY/inView` を保存する。
 
-`specialObjects` には、通常のactor object list外で管理されるものを保存する。現時点では `fireballs.active`、`fireballs.handler`、`fireballs.words[]`、`projectiles.handler`、`projectiles.words[]` を持つ。`fireballs.active` は `Fireballs::activeFireballs`、handler addressはNSMB symbol table上の `Fireballs::fireballHandler` / `Projectiles::projectileHandler` に対応する。まだslot別の座標/owner/寿命までは未確定なので、まずFire Mario実ログでactive数が増えるframeを拾う用途に使う。
+`specialObjects` には、通常のactor object list外で管理されるものを保存する。現時点では `fireballs.active`、`fireballs.activeSlots`、`fireballs.handler`、`fireballs.handlerPtr`、`fireballs.words[]`、`fireballs.slots[]`、`projectiles.handler`、`projectiles.words[]` を持つ。`fireballs.active` は `Fireballs::activeFireballs` のraw wordで、kind別countがpackedされる可能性があるため、学習側ではactive slot件数の `activeSlots` / `slots.length` も併用する。handler addressはNSMB symbol table上の `Fireballs::fireballHandler` / `Projectiles::projectileHandler` に対応する。`fireballs.slots[]` は `FireballHandler::spawn/update` の逆アセンブルに基づき、handler pointer + 4 を起点に16 slot、stride `0x8C`、active byte `+0x80`、kind `+0x81`、state `+0x83`、facing `+0x85`、pos `+0x10`、prev pos `+0x20`、velocity `+0x30` として読んでいる。owner/lifetimeの正確なoffsetとkind/state/facingの意味は、Fire Mario stage 0実ログで検証する。
 
 現時点の既知カテゴリ:
 
@@ -202,7 +203,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - StageLayout raw probeでは、stage 0の接地中に `tileId=0x001 behavior=0x0000002A lowType=42` が出る場面があり、現行solidish maskでは床として分類できない。RuleAIとCSVのeffective判定は接地contactで偽holeを抑えるが、学習用の目視同等ログとしては低位tile typeの意味を追加で詰める必要がある。
 - ブロック/アイテム箱の「中身」はblock flagつきStageLayout tile behaviorのstorage contentsとして保存するようになった。叩いた後の状態は現在tile id/behaviorの変化として取れる想定だが、stage 0の実ログで `StageLayout::changeTile` / question block animation path と照合して詰める。
 - 自己対戦に進む前に、ログschemaを実プレイログで増強し、学習済みモデルを入力へ戻す推論経路を作る必要がある。
-- fireballなどのprojectile系objectは、通常actor object listではなく専用handlerで管理されるものがある。`specialObjects.fireballs.active` とhandler先頭wordは取れるようになったが、slot別の座標/owner/寿命はまだ未確定。Fire Marioでstage 0実ログを取り、handler内のslot構造を詰める必要がある。
+- fireballなどのprojectile系objectは、通常actor object listではなく専用handlerで管理されるものがある。Fireball slot別の座標/前フレーム座標/速度/kind/state/facingは取れるようになったが、owner、寿命、当たり判定状態、kind/state/facingの意味はまだFire Mario実ログで未検証。Fire Marioでstage 0ログを取り、active slotが増えるframeと画面上のFireballを照合する必要がある。
 - `run-nsmb-mvl-recording-replay.ps1` はinput script replayとpacket replayの起動計画を扱え、`-ScanFrames` で不一致reportも残せる。ただし実際の人間記録で完全一致することは、新規記録を取って `recording-session.json` のpacket変換後処理を実行してから確認する必要がある。現時点ではpacket replayのdry-run解決までで、melonDS実走の完全再現検証は未完了。
 
 ## Verification
@@ -293,6 +294,9 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `logs/codex-ai-specialobjects-smoke-20260607`: `specialObjects` 追加後に `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4` pass。RuleAI smoke 1300F pass。17行JSONLすべてに `specialObjects` があり、今回の通常走行では `fireballs.active=0`、handler wordsは `fireballs.words[0]=0x021C29A0`、`projectiles.words[0]=0x021C6D0C` として取得できることを確認。
 - 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --label-source auto --require-player-found` pass。CSVに `fireballs_active`、`fireballs_handler_word0`、`projectiles_handler_word0` が出ることを確認。
 - 同ログから `python scripts\nsmb_mvl_ai_export_viewer_data.py ...` pass。viewer JSONに `specialObjects` が残ることを確認。`python scripts\nsmb_mvl_ai_create_recording_manifest.py ... --max-event-samples 5` pass、`summary.specialObjectFrames.fireballActive=0` と `eventSamples.fireballActive=[]` を確認。
+- 逆アセンブル確認: `FireballHandler::spawn` / `FireballHandler::update` / `Fireball::create` / `Fireball::playerState` を `tools\nsmb_us_rom_tool.py disasm` と `tools\nsmb-mvl-rom\resources\symbols9.x` で確認。`Fireballs::activeFireballs=0x02129480`、`Fireballs::fireballHandler=0x02129484`、`Projectiles::projectileHandler=0x0212A680`、Fireball handler slotはhandler pointer + 4起点、16 slot、stride `0x8C`、active byte `+0x80`、pos `+0x10`、prev pos `+0x20`、velocity `+0x30` と判断した。
+- `logs/codex-ai-fireball-slots-smoke-20260607`: Fireball slot logging追加後に `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4` pass。RuleAI smoke 1300F pass。17行JSONLすべてに `specialObjects.fireballs.activeSlots` / `handlerPtr` / `slots` があり、通常走行では `active=0`、`activeSlots=0`、slot配列長0で欠落なし。
+- 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --label-source auto --require-player-found` pass。CSVに `fireballs_active_slots`、`fireballs_slot_count`、`nearest_fireball_*` が出ることを確認。`python scripts\nsmb_mvl_ai_create_recording_manifest.py ... --max-event-samples 5` pass、`summary.specialObjectFrames.fireballActive=0` を確認。`python scripts\nsmb_mvl_ai_export_viewer_data.py ... --max-frames 50` pass、viewer JSONにも `activeSlots` / `slots` が残ることを確認。
 - `tools/nsmb-mvl-gui`: `pnpm run typecheck` pass。`pnpm biome check src/launcher/AIReplayViewer.tsx` pass。`pnpm vitest --config vitest.browser.config.ts run src/launcher/AIReplayViewer.browser.test.tsx` pass（1 file / 2 tests）。`pnpm run ci` は従来通り変更外ファイルを含むCRLF整形差分でBiome停止。
 - `python -m py_compile scripts\nsmb_mvl_ai_audit_recordings.py scripts\nsmb_mvl_ai_create_recording_manifest.py scripts\nsmb_mvl_ai_build_dataset.py` pass。
 - `python scripts\nsmb_mvl_ai_audit_recordings.py logs\codex-ai-specialobjects-smoke-20260607\recording.json --stage 0 --min-rows 1 --min-gameplay-rows 1 --min-player-found-ratio 0.5 --min-label-ratio 0.5 --min-nonzero-label-rows 1 --output ...` pass。statusは `pass`、警告としてquality unreviewedとplayer missing rowsを出す。
@@ -308,7 +312,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - dynamic tile behavior table pointerが0のまま `tileId=0x110-0x113` を引く場面を、StageLayout初期化/`changeTile`/question block animation pathと照合する。
 - RuleAIをstage 0の実際のCPU操作経路でさらに長く走らせ、スター取得、敵回避、落下復帰、箱接触時の入力変化を確認する。
 - ブロック/アイテム箱の中身と叩いた後の状態をstage 0の `StageLayout::changeTile` / question block animation path と実ログで照合し、`tileProbe.samples[].block` の解釈を詰める。
-- Fire Marioでstage 0ログを取り、`specialObjects.fireballs.active` が増えるframeを起点に、handler内slotの座標/owner/速度/寿命offsetを特定する。通常actorに出るprojectileがあれば object ID/vtable/category も併せて分類する。
+- Fire Marioでstage 0ログを取り、`specialObjects.fireballs.activeSlots` / `slots[]` が増えるframeをGUI/SVG/viewerで画面上のFireballと照合する。owner、寿命、当たり判定状態、kind/state/facingの意味を確定し、必要ならProjectile handler側もslot別に読む。通常actorに出るprojectileがあれば object ID/vtable/category も併せて分類する。
 - 人間プレイ記録を実際に複数本取り、`recordings-index.json` 経由のdataset、`--split-by-recording`、GUIの `AIログ` タブで、入力ラベルと目視相当状態が期待通り読めるか確認する。
 - packet capture付きの新規人間記録を取り、`run-nsmb-mvl-recording-postcommands.ps1` で `packet-replay.csv` / `recording.json` / `recordings-index.json` / dataset / `recording-audit.json` を生成する。
 - `run-nsmb-mvl-recording-replay.ps1 -ScanFrames` でpacket replayの実走を行い、最終frame、checkpoint frame、最初の不一致reportを確認する。必要ならinput script replayとの差分も比較する。

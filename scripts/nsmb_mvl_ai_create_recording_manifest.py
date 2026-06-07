@@ -152,7 +152,8 @@ def summarize(playlog: Path, player: int, label_source: str, max_event_samples: 
             add_event_sample("projectileVisible", record, {"categories": sorted(categories.intersection({"projectile", "player_fireball", "enemy_fireball"}))})
         fireballs = ((record.get("specialObjects") or {}).get("fireballs")) or {}
         fireballs_active = num(fireballs.get("active"))
-        if fireballs_active > 0:
+        slots = fireballs.get("slots") or []
+        if fireballs_active > 0 or slots:
             special_object_frames["fireballActive"] += 1
             event_counts["fireballActive"] += 1
             add_event_sample(
@@ -160,7 +161,11 @@ def summarize(playlog: Path, player: int, label_source: str, max_event_samples: 
                 record,
                 {
                     "active": fireballs_active,
+                    "activeSlots": num(fireballs.get("activeSlots")),
+                    "slotCount": len(slots),
+                    "slots": slots[:4],
                     "handler": fireballs.get("handler"),
+                    "handlerPtr": fireballs.get("handlerPtr"),
                     "words": fireballs.get("words") or [],
                 },
             )

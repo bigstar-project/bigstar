@@ -207,6 +207,16 @@ constexpr melonDS::u32 kFireballsActiveCountAddr = 0x02129480;
 constexpr melonDS::u32 kFireballsHandlerAddr = 0x02129484;
 constexpr melonDS::u32 kProjectilesHandlerAddr = 0x0212A680;
 constexpr int kAISpecialHandlerWordCount = 4;
+constexpr int kAIFireballSlotCount = 16;
+constexpr melonDS::u32 kAIFireballSlotBaseOffset = 0x04;
+constexpr melonDS::u32 kAIFireballSlotStride = 0x8C;
+constexpr melonDS::u32 kAIFireballSlotPosOffset = 0x10;
+constexpr melonDS::u32 kAIFireballSlotPrevPosOffset = 0x20;
+constexpr melonDS::u32 kAIFireballSlotVelOffset = 0x30;
+constexpr melonDS::u32 kAIFireballSlotActiveOffset = 0x80;
+constexpr melonDS::u32 kAIFireballSlotKindOffset = 0x81;
+constexpr melonDS::u32 kAIFireballSlotStateOffset = 0x83;
+constexpr melonDS::u32 kAIFireballSlotFacingOffset = 0x85;
 constexpr int kAITileProbeCount = 17;
 constexpr int kObjectTraceSlots = 16;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
@@ -1177,7 +1187,21 @@ struct GameStateSample
     melonDS::u32 MovingHazardTargetVelY = 0;
     melonDS::u32 MovingHazardTargetVelZ = 0;
     melonDS::u32 FireballsActiveCount = 0;
+    melonDS::u32 FireballsHandlerPtr = 0;
     melonDS::u32 FireballsHandlerWords[kAISpecialHandlerWordCount] {};
+    melonDS::u32 FireballSlotActive[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotKind[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotState[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotFacing[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotPosX[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotPosY[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotPosZ[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotPrevX[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotPrevY[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotPrevZ[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotVelX[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotVelY[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotVelZ[kAIFireballSlotCount] {};
     melonDS::u32 ProjectilesHandlerWords[kAISpecialHandlerWordCount] {};
     melonDS::u32 ObjectScanTotal = 0;
     melonDS::u32 ObjectNotCreatedCount = 0;
@@ -13270,6 +13294,8 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
 
     if (IsARM9MainRAMAddress(kFireballsActiveCountAddr))
         sample.FireballsActiveCount = nds->ARM9Read32(kFireballsActiveCountAddr);
+    if (IsARM9MainRAMAddress(kFireballsHandlerAddr))
+        sample.FireballsHandlerPtr = nds->ARM9Read32(kFireballsHandlerAddr);
     for (int i = 0; i < kAISpecialHandlerWordCount; i++)
     {
         const melonDS::u32 fireballWordAddr = kFireballsHandlerAddr + sizeof(melonDS::u32) * i;
@@ -13278,6 +13304,30 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
             sample.FireballsHandlerWords[i] = nds->ARM9Read32(fireballWordAddr);
         if (IsARM9MainRAMAddress(projectileWordAddr))
             sample.ProjectilesHandlerWords[i] = nds->ARM9Read32(projectileWordAddr);
+    }
+    if (IsARM9MainRAMAddress(sample.FireballsHandlerPtr))
+    {
+        for (int i = 0; i < kAIFireballSlotCount; i++)
+        {
+            const melonDS::u32 slot = sample.FireballsHandlerPtr + kAIFireballSlotBaseOffset + kAIFireballSlotStride * i;
+            if (!IsARM9MainRAMAddress(slot + kAIFireballSlotActiveOffset))
+                continue;
+            sample.FireballSlotActive[i] = nds->ARM9Read8(slot + kAIFireballSlotActiveOffset);
+            if (sample.FireballSlotActive[i] == 0)
+                continue;
+            sample.FireballSlotKind[i] = nds->ARM9Read8(slot + kAIFireballSlotKindOffset);
+            sample.FireballSlotState[i] = nds->ARM9Read8(slot + kAIFireballSlotStateOffset);
+            sample.FireballSlotFacing[i] = nds->ARM9Read8(slot + kAIFireballSlotFacingOffset);
+            sample.FireballSlotPosX[i] = nds->ARM9Read32(slot + kAIFireballSlotPosOffset);
+            sample.FireballSlotPosY[i] = nds->ARM9Read32(slot + kAIFireballSlotPosOffset + sizeof(melonDS::u32));
+            sample.FireballSlotPosZ[i] = nds->ARM9Read32(slot + kAIFireballSlotPosOffset + sizeof(melonDS::u32) * 2);
+            sample.FireballSlotPrevX[i] = nds->ARM9Read32(slot + kAIFireballSlotPrevPosOffset);
+            sample.FireballSlotPrevY[i] = nds->ARM9Read32(slot + kAIFireballSlotPrevPosOffset + sizeof(melonDS::u32));
+            sample.FireballSlotPrevZ[i] = nds->ARM9Read32(slot + kAIFireballSlotPrevPosOffset + sizeof(melonDS::u32) * 2);
+            sample.FireballSlotVelX[i] = nds->ARM9Read32(slot + kAIFireballSlotVelOffset);
+            sample.FireballSlotVelY[i] = nds->ARM9Read32(slot + kAIFireballSlotVelOffset + sizeof(melonDS::u32));
+            sample.FireballSlotVelZ[i] = nds->ARM9Read32(slot + kAIFireballSlotVelOffset + sizeof(melonDS::u32) * 2);
+        }
     }
 
     const ObjectLifecycleSummary objectSummary = SummarizeObjectLifecycle(nds);
@@ -15032,12 +15082,63 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     G.AIPlayLog << ",\"specialObjects\":{\"fireballs\":{\"active\":" << sample.FireballsActiveCount
         << ",\"handler\":";
     WriteJsonHex(G.AIPlayLog, kFireballsHandlerAddr);
+    G.AIPlayLog << ",\"handlerPtr\":";
+    WriteJsonHex(G.AIPlayLog, sample.FireballsHandlerPtr);
+    int activeFireballSlots = 0;
+    for (int i = 0; i < kAIFireballSlotCount; i++)
+    {
+        if (sample.FireballSlotActive[i] != 0)
+            activeFireballSlots++;
+    }
+    G.AIPlayLog << ",\"activeSlots\":" << activeFireballSlots;
     G.AIPlayLog << ",\"words\":[";
     for (int i = 0; i < kAISpecialHandlerWordCount; i++)
     {
         if (i != 0)
             G.AIPlayLog << ",";
         WriteJsonHex(G.AIPlayLog, sample.FireballsHandlerWords[i]);
+    }
+    G.AIPlayLog << "],\"slots\":[";
+    bool firstFireballSlot = true;
+    for (int i = 0; i < kAIFireballSlotCount; i++)
+    {
+        if (sample.FireballSlotActive[i] == 0)
+            continue;
+        if (!firstFireballSlot)
+            G.AIPlayLog << ",";
+        firstFireballSlot = false;
+        G.AIPlayLog << "{\"index\":" << i
+            << ",\"active\":" << sample.FireballSlotActive[i]
+            << ",\"kind\":" << sample.FireballSlotKind[i]
+            << ",\"state\":" << sample.FireballSlotState[i]
+            << ",\"facing\":" << sample.FireballSlotFacing[i]
+            << ",";
+        WriteAIVec3Json(
+            G.AIPlayLog,
+            "pos",
+            sample.FireballSlotPosX[i],
+            sample.FireballSlotPosY[i],
+            sample.FireballSlotPosZ[i]);
+        G.AIPlayLog << ",";
+        WriteAIVec3Json(
+            G.AIPlayLog,
+            "prev",
+            sample.FireballSlotPrevX[i],
+            sample.FireballSlotPrevY[i],
+            sample.FireballSlotPrevZ[i]);
+        G.AIPlayLog << ",";
+        WriteAIVec3Json(
+            G.AIPlayLog,
+            "vel",
+            sample.FireballSlotVelX[i],
+            sample.FireballSlotVelY[i],
+            sample.FireballSlotVelZ[i]);
+        G.AIPlayLog << ",\"relative\":{\"p0dx\":"
+            << (SignedU32(sample.FireballSlotPosX[i]) - SignedU32(sample.PlayerActor0PosX))
+            << ",\"p0dy\":" << (SignedU32(sample.FireballSlotPosY[i]) - SignedU32(sample.PlayerActor0PosY))
+            << ",\"p1dx\":" << (SignedU32(sample.FireballSlotPosX[i]) - SignedU32(sample.PlayerActor1PosX))
+            << ",\"p1dy\":" << (SignedU32(sample.FireballSlotPosY[i]) - SignedU32(sample.PlayerActor1PosY))
+            << "}}";
     }
     G.AIPlayLog << "]},\"projectiles\":{\"handler\":";
     WriteJsonHex(G.AIPlayLog, kProjectilesHandlerAddr);

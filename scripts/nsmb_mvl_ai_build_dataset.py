@@ -278,6 +278,20 @@ def nearest_object(
     return best
 
 
+def nearest_special_slot(slots: list[dict[str, Any]], self_pos: dict[str, int]) -> tuple[int, int, int, int, int, int, int]:
+    best: tuple[int, int, int, int, int, int, int] | None = None
+    for slot in slots:
+        slot_pos = pos(slot)
+        dx = slot_pos["x"] - self_pos["x"]
+        dy = slot_pos["y"] - self_pos["y"]
+        dist2 = dx * dx + dy * dy
+        if best is None or dist2 < best[3]:
+            best = (1, dx, dy, dist2, num(slot.get("kind")), num(slot.get("state")), num(slot.get("facing")))
+    if best is None:
+        return (0, 0, 0, 0, 0, 0, 0)
+    return best
+
+
 def label_held(record: dict[str, Any], player: int, source: str) -> int | None:
     inputs = record["inputs"]
     applied = inputs.get(f"appliedPlayer{player}", {})
@@ -318,6 +332,8 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
     special_objects = record.get("specialObjects") or {}
     fireballs = special_objects.get("fireballs") or {}
     projectiles = special_objects.get("projectiles") or {}
+    fireball_slots = fireballs.get("slots") or []
+    nearest_fireball = nearest_special_slot(fireball_slots, self_pos)
     visual_summary = record.get("visualSummary") or {}
     category_counts = visual_summary.get("categoryCounts") or {}
     nearest_summary = {}
@@ -412,7 +428,16 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "object_active": num(object_summary.get("active")),
         "object_dead": num(object_summary.get("dead")),
         "fireballs_active": num(fireballs.get("active")),
+        "fireballs_active_slots": num(fireballs.get("activeSlots")),
+        "fireballs_slot_count": len(fireball_slots),
         "fireballs_handler_word0": num((fireballs.get("words") or [0])[0]),
+        "nearest_fireball_found": nearest_fireball[0],
+        "nearest_fireball_dx": nearest_fireball[1],
+        "nearest_fireball_dy": nearest_fireball[2],
+        "nearest_fireball_dist2": nearest_fireball[3],
+        "nearest_fireball_kind": nearest_fireball[4],
+        "nearest_fireball_state": nearest_fireball[5],
+        "nearest_fireball_facing": nearest_fireball[6],
         "projectiles_handler_word0": num((projectiles.get("words") or [0])[0]),
         "label_held": held,
     }
