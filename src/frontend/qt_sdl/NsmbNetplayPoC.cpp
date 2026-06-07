@@ -180,6 +180,25 @@ constexpr melonDS::u16 kMvlObject267ID = 0x010B;
 constexpr melonDS::u16 kVsConnectObjectID = 0x0006;
 constexpr melonDS::u16 kCourseSelectObjectID = 0x0005;
 constexpr melonDS::u16 kStageCameraObjectID = 0x013C;
+constexpr melonDS::u16 kCoinObjectID = 0x0042;
+constexpr melonDS::u16 kGoombaObjectID = 0x0053;
+constexpr melonDS::u16 kGoombaBigObjectID = 0x0054;
+constexpr melonDS::u16 kGoombaMegaObjectID = 0x0055;
+constexpr melonDS::u16 kKoopaTroopaAltObjectID = 0x005F;
+constexpr melonDS::u16 kWarpEntranceObjectID = 0x0057;
+constexpr melonDS::u16 kDonutLiftObjectID = 0x0047;
+constexpr melonDS::u16 kTrampolineObjectID = 0x00ED;
+constexpr melonDS::u16 kSpinBlockObjectID = 0x00FE;
+constexpr melonDS::u16 kSpinBlockAltObjectID = 0x00FF;
+constexpr melonDS::u16 kSpinBlockFinalObjectID = 0x0100;
+constexpr melonDS::u16 kBulletBillObjectID = 0x001B;
+constexpr melonDS::u16 kBulletBillAltObjectID = 0x00EE;
+constexpr melonDS::u16 kBulletBillBlasterObjectID = 0x00F8;
+constexpr melonDS::u16 kBulletBillBlasterAltObjectID = 0x00F9;
+constexpr melonDS::u16 kThwompObjectID = 0x0025;
+constexpr melonDS::u16 kThwompAltObjectID = 0x0026;
+constexpr melonDS::u16 kFirebarObjectID = 0x0041;
+constexpr melonDS::u16 kBobOmbObjectID = 0x0023;
 constexpr melonDS::u32 kNSMBProcessExecuteListAddr = 0x0208FB18;
 constexpr melonDS::u32 kNSMBProcessDeleteListAddr = 0x0208FB28;
 constexpr melonDS::u32 kNSMBProcessRenderListAddr = 0x0208FB38;
@@ -13728,10 +13747,36 @@ const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings)
         return "neutral_item";
     if (objectID == kVsWorldItemObjectID && settings == kVsDroppedStarItemSettings)
         return "dropped_star_item";
+    if (objectID == kVsWorldItemObjectID)
+        return "item";
     if (objectID == kVsMovingHazardObjectID && settings == kVsMovingHazardSettings)
         return "moving_hazard";
-    if (objectID == kVsKoopaTroopaObjectID)
+    if (objectID == kCoinObjectID)
+        return "coin";
+    if (objectID == kGoombaObjectID ||
+        objectID == kGoombaBigObjectID ||
+        objectID == kGoombaMegaObjectID)
+        return "enemy_goomba";
+    if (objectID == kVsKoopaTroopaObjectID ||
+        objectID == kKoopaTroopaAltObjectID)
         return "enemy_koopa";
+    if (objectID == kBulletBillObjectID ||
+        objectID == kBulletBillAltObjectID ||
+        objectID == kBulletBillBlasterObjectID ||
+        objectID == kBulletBillBlasterAltObjectID ||
+        objectID == kThwompObjectID ||
+        objectID == kThwompAltObjectID ||
+        objectID == kFirebarObjectID ||
+        objectID == kBobOmbObjectID)
+        return "hazard";
+    if (objectID == kDonutLiftObjectID ||
+        objectID == kTrampolineObjectID ||
+        objectID == kSpinBlockObjectID ||
+        objectID == kSpinBlockAltObjectID ||
+        objectID == kSpinBlockFinalObjectID)
+        return "platform";
+    if (objectID == kWarpEntranceObjectID)
+        return "warp_entrance";
     if (objectID == kStageCameraObjectID)
         return "camera";
     if (objectID == kStageSceneObjectID)
@@ -13760,11 +13805,18 @@ melonDS::u32 AIObjectCategoryMask(const char* category)
         return 1u << 1;
     if (std::strcmp(category, "world_item") == 0 ||
         std::strcmp(category, "neutral_item") == 0 ||
-        std::strcmp(category, "dropped_star_item") == 0)
+        std::strcmp(category, "dropped_star_item") == 0 ||
+        std::strcmp(category, "item") == 0 ||
+        std::strcmp(category, "coin") == 0)
         return 1u << 2;
     if (std::strcmp(category, "moving_hazard") == 0 ||
-        std::strcmp(category, "enemy_koopa") == 0)
+        std::strcmp(category, "enemy_goomba") == 0 ||
+        std::strcmp(category, "enemy_koopa") == 0 ||
+        std::strcmp(category, "hazard") == 0)
         return 1u << 3;
+    if (std::strcmp(category, "platform") == 0 ||
+        std::strcmp(category, "warp_entrance") == 0)
+        return 1u << 6;
     if (std::strcmp(category, "camera") == 0 ||
         std::strcmp(category, "stage_scene") == 0 ||
         std::strcmp(category, "stage_fx") == 0 ||
@@ -13877,10 +13929,68 @@ void WriteAIVec3Json(std::ostream& out, const char* name, melonDS::u32 x, melonD
         << ",\"z\":" << SignedU32(z) << "}";
 }
 
+void WriteAIContactJson(std::ostream& out, melonDS::u32 collisionFlag, melonDS::u32 environmentFlag)
+{
+    auto bit = [](melonDS::u32 value, melonDS::u32 mask) { return (value & mask) ? 1 : 0; };
+    const int ground =
+        bit(collisionFlag, 0x00000001) ||
+        bit(collisionFlag, 0x00002000) ||
+        bit(collisionFlag, 0x00008000) ||
+        bit(collisionFlag, 0x08000000);
+    const int wallLeft =
+        bit(collisionFlag, 0x00000008) ||
+        bit(collisionFlag, 0x00000400) ||
+        bit(collisionFlag, 0x20000000);
+    const int wallRight =
+        bit(collisionFlag, 0x00000010) ||
+        bit(collisionFlag, 0x00000800) ||
+        bit(collisionFlag, 0x40000000);
+    const int submerged =
+        bit(collisionFlag, 0x00400000) ||
+        bit(environmentFlag, 0x00000002) ||
+        bit(environmentFlag, 0x00000200);
+    out << "{\"ground\":" << ground
+        << ",\"tileGround\":" << bit(collisionFlag, 0x00000001)
+        << ",\"hoverTileGround\":" << bit(collisionFlag, 0x00002000)
+        << ",\"colliderGround\":" << bit(collisionFlag, 0x00008000)
+        << ",\"predictGround\":" << bit(collisionFlag, 0x08000000)
+        << ",\"ceiling\":" << bit(collisionFlag, 0x00000002)
+        << ",\"pushWall\":" << bit(collisionFlag, 0x00000004)
+        << ",\"wallLeft\":" << wallLeft
+        << ",\"wallRight\":" << wallRight
+        << ",\"edgeGrab\":" << bit(collisionFlag, 0x00001000)
+        << ",\"slipperyGround\":" << bit(collisionFlag, 0x00004000)
+        << ",\"water\":" << bit(collisionFlag, 0x00000020)
+        << ",\"liquid\":" << bit(collisionFlag, 0x00400000)
+        << ",\"submerged\":" << submerged
+        << ",\"quicksandTop\":" << bit(collisionFlag, 0x00010000)
+        << ",\"quicksand\":" << bit(collisionFlag, 0x00020000)
+        << ",\"rope\":" << bit(collisionFlag, 0x00040000)
+        << ",\"tightrope\":" << bit(collisionFlag, 0x00800000)
+        << ",\"ledge\":" << bit(collisionFlag, 0x01000000)
+        << ",\"pole\":" << bit(collisionFlag, 0x10000000)
+        << ",\"spikesLeft\":" << bit(collisionFlag, 0x20000000)
+        << ",\"spikesRight\":" << bit(collisionFlag, 0x40000000)
+        << ",\"slowGround\":" << bit(environmentFlag, 0x00000001)
+        << ",\"conveyorLeft\":" << bit(environmentFlag, 0x00000008)
+        << ",\"conveyorRight\":" << bit(environmentFlag, 0x00000010)
+        << ",\"snowyGround\":" << bit(environmentFlag, 0x00000020)
+        << ",\"sandyGround\":" << bit(environmentFlag, 0x00000040)
+        << ",\"destroyedGround\":" << bit(environmentFlag, 0x00000100)
+        << ",\"climbableBottom\":" << bit(environmentFlag, 0x00000400)
+        << ",\"climbableTop\":" << bit(environmentFlag, 0x00000800)
+        << ",\"destroyedCeiling\":" << bit(environmentFlag, 0x00001000)
+        << ",\"wrapLeft\":" << bit(environmentFlag, 0x00002000)
+        << ",\"wrapRight\":" << bit(environmentFlag, 0x00004000)
+        << "}";
+}
+
 void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& sample)
 {
     const bool p0 = index == 0;
     auto v = [p0](melonDS::u32 a, melonDS::u32 b) { return p0 ? a : b; };
+    const melonDS::u32 collisionFlag = v(sample.PlayerActor0CollisionFlag, sample.PlayerActor1CollisionFlag);
+    const melonDS::u32 environmentFlag = v(sample.PlayerActor0EnvironmentFlag, sample.PlayerActor1EnvironmentFlag);
     out << "{\"index\":" << index
         << ",\"found\":" << v(sample.PlayerActor0Found, sample.PlayerActor1Found)
         << ",\"guid\":";
@@ -13917,8 +14027,11 @@ void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& samp
         << ",\"subActionFlag\":" << v(sample.PlayerActor0SubActionFlag, sample.PlayerActor1SubActionFlag)
         << ",\"physicsFlag\":" << v(sample.PlayerActor0PhysicsFlag, sample.PlayerActor1PhysicsFlag)
         << ",\"transitionFlag\":" << v(sample.PlayerActor0TransitionFlag, sample.PlayerActor1TransitionFlag)
-        << ",\"collisionFlag\":" << v(sample.PlayerActor0CollisionFlag, sample.PlayerActor1CollisionFlag)
-        << ",\"environmentFlag\":" << v(sample.PlayerActor0EnvironmentFlag, sample.PlayerActor1EnvironmentFlag)
+        << ",\"collisionFlag\":" << collisionFlag
+        << ",\"environmentFlag\":" << environmentFlag
+        << ",\"contact\":";
+    WriteAIContactJson(out, collisionFlag, environmentFlag);
+    out
         << ",\"updateLocked\":" << v(sample.PlayerActor0UpdateLocked, sample.PlayerActor1UpdateLocked)
         << ",\"visible\":" << v(sample.PlayerActor0VisibleFlag, sample.PlayerActor1VisibleFlag)
         << ",\"defeated\":" << v(sample.PlayerActor0DefeatedFlag, sample.PlayerActor1DefeatedFlag)
@@ -14017,14 +14130,19 @@ void WriteAIVisualSummaryJson(
     const GameStateObjectScanCache& objectScanCache,
     const GameStateSample& sample)
 {
-    constexpr std::array<const char*, 7> categories {{
+    constexpr std::array<const char*, 12> categories {{
         "big_star_actor",
         "big_star_candidate",
         "world_item",
         "neutral_item",
         "dropped_star_item",
+        "item",
+        "coin",
         "moving_hazard",
+        "hazard",
+        "enemy_goomba",
         "enemy_koopa",
+        "platform",
     }};
 
     std::map<std::string, int> categoryCounts;

@@ -32,8 +32,13 @@ NEAREST_CATEGORIES = [
     "world_item",
     "neutral_item",
     "dropped_star_item",
+    "item",
+    "coin",
     "moving_hazard",
+    "hazard",
+    "enemy_goomba",
     "enemy_koopa",
+    "platform",
 ]
 
 CATEGORY_COUNT_NAMES = [
@@ -43,8 +48,14 @@ CATEGORY_COUNT_NAMES = [
     "world_item",
     "neutral_item",
     "dropped_star_item",
+    "item",
+    "coin",
     "moving_hazard",
+    "hazard",
+    "enemy_goomba",
     "enemy_koopa",
+    "platform",
+    "warp_entrance",
     "camera",
     "stage_scene",
     "stage_fx",
@@ -54,6 +65,42 @@ CATEGORY_COUNT_NAMES = [
     "vs_connect",
     "course_select",
     "object",
+]
+
+CONTACT_NAMES = [
+    "ground",
+    "tileGround",
+    "hoverTileGround",
+    "colliderGround",
+    "predictGround",
+    "ceiling",
+    "pushWall",
+    "wallLeft",
+    "wallRight",
+    "edgeGrab",
+    "slipperyGround",
+    "water",
+    "liquid",
+    "submerged",
+    "quicksandTop",
+    "quicksand",
+    "rope",
+    "tightrope",
+    "ledge",
+    "pole",
+    "spikesLeft",
+    "spikesRight",
+    "slowGround",
+    "conveyorLeft",
+    "conveyorRight",
+    "snowyGround",
+    "sandyGround",
+    "destroyedGround",
+    "climbableBottom",
+    "climbableTop",
+    "destroyedCeiling",
+    "wrapLeft",
+    "wrapRight",
 ]
 
 
@@ -181,6 +228,11 @@ def build_row(record: dict[str, Any], player: int) -> dict[str, int]:
 
     for category in CATEGORY_COUNT_NAMES:
         row[f"count_{category}"] = num(category_counts.get(category))
+
+    for prefix, player_state in [("self", self_player), ("opponent", opponent)]:
+        contact = player_state.get("contact") or {}
+        for name in CONTACT_NAMES:
+            row[f"{prefix}_contact_{name}"] = num(contact.get(name))
 
     for name, bit in BUTTON_BITS.items():
         row[f"label_{name}"] = 1 if (held & (1 << bit)) else 0

@@ -40,6 +40,30 @@ def buttons_text(held: int) -> str:
     return "".join(names) if names else "-"
 
 
+def contact_text(player: dict[str, Any]) -> str:
+    contact = player.get("contact") or {}
+    names = []
+    if num(contact.get("ground")):
+        names.append("G")
+    if num(contact.get("predictGround")) and not num(contact.get("ground")):
+        names.append("g?")
+    if num(contact.get("wallLeft")):
+        names.append("WL")
+    if num(contact.get("wallRight")):
+        names.append("WR")
+    if num(contact.get("ceiling")):
+        names.append("C")
+    if num(contact.get("water")) or num(contact.get("liquid")) or num(contact.get("submerged")):
+        names.append("W")
+    if num(contact.get("quicksand")) or num(contact.get("quicksandTop")):
+        names.append("Q")
+    if num(contact.get("rope")) or num(contact.get("tightrope")) or num(contact.get("pole")):
+        names.append("R")
+    if num(contact.get("spikesLeft")) or num(contact.get("spikesRight")):
+        names.append("S")
+    return "+".join(names) if names else "-"
+
+
 def nearest_text(record: dict[str, Any], player: int, category: str) -> str:
     visual = record.get("visualSummary") or {}
     for entry in visual.get("nearest") or []:
@@ -68,7 +92,7 @@ def main() -> int:
     args = parser.parse_args()
 
     print(
-        "frame st p input self(x,y) opp(x,y) star(dx,dy) hazard(dx,dy) "
+        "frame st p input contact self(x,y) opp(x,y) star(dx,dy) hazard(dx,dy) "
         "visX obj active counts"
     )
     printed = 0
@@ -82,7 +106,17 @@ def main() -> int:
         counts = visual.get("categoryCounts") or {}
         counts_text = ",".join(
             f"{name}:{num(counts.get(name))}"
-            for name in ["player", "big_star_actor", "world_item", "moving_hazard", "enemy_koopa"]
+            for name in [
+                "player",
+                "big_star_actor",
+                "world_item",
+                "coin",
+                "moving_hazard",
+                "hazard",
+                "enemy_goomba",
+                "enemy_koopa",
+                "platform",
+            ]
             if num(counts.get(name)) > 0
         )
         if not counts_text:
@@ -92,6 +126,7 @@ def main() -> int:
             f"{num((record.get('stage') or {}).get('id')):2d} "
             f"{player} "
             f"{buttons_text(held):5s} "
+            f"{contact_text(players[player]):7s} "
             f"{pos_text(players[player]):>11s} "
             f"{pos_text(players[opponent]):>11s} "
             f"{nearest_text(record, player, 'big_star_actor'):>11s} "
