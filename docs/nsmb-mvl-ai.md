@@ -31,6 +31,7 @@
 - 完了: `scripts/nsmb_mvl_ai_train_imitation.py` で固定列CSVからnumpyのみの多ラベル模倣学習モデルを学習し、`.npz` に保存できるようにした。
 - 完了: AI play logに `visualSummary` を追加し、カテゴリ別active object数、カメラX範囲内のobject数、player別の最近傍カテゴリ距離、objectごとのplayer相対座標とscreen Xを保存するようにした。
 - 完了: `scripts/nsmb_mvl_ai_inspect_playlog.py` でJSONLを人間が読むための短い表へ変換できるようにした。
+- 完了: `scripts/nsmb_mvl_ai_catalog_objects.py` でJSONL内のactive objectを object ID/settings/category ごとに集計できるようにした。
 
 ## AI Play Log
 
@@ -61,8 +62,12 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `enemy_koopa`
 - `camera`
 - `stage_scene`
+- `stage_fx`
 - `stage_actor_manager`
 - `stage_controller`
+- `mvl_object267`
+- `vs_connect`
+- `course_select`
 - `object`
 
 ## Planned Pipeline
@@ -71,6 +76,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `python scripts\nsmb_mvl_ai_build_dataset.py <playlog.jsonl> <dataset.csv> --player 1 --require-player-found` で固定長特徴量へ変換する。
 - `python scripts\nsmb_mvl_ai_train_imitation.py <dataset.csv> <model.npz>` でキー入力の多ラベル分類モデルを学習する。
 - `python scripts\nsmb_mvl_ai_inspect_playlog.py <playlog.jsonl> --player 1` で、frame、入力、player/相手/星/hazardの相対位置、可視X数、カテゴリ数を目視確認する。
+- `python scripts\nsmb_mvl_ai_catalog_objects.py <playlog.jsonl>` で、未知objectの出現頻度と代表的な相対位置を確認し、カテゴリ付けを増やす。
 - その後、同じ観測schemaを使って自己対戦学習へ進む。
 - 強さ調整は、推論時に入力反応遅延、ランダムミス、action hold制限、近傍探索幅制限を入れる。
 
@@ -90,6 +96,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `logs/codex-ai-visual-wrapx-smoke-20260607`: visualSummary追加後のrule AI remote smoke 1600F pass。JSONL 27行、`visualSummary` 全行あり。frame 870で `visibleCamera0X=10`、`visibleCamera1X=11`、player objectの `screen.camera0.inViewX=1` を確認。
 - 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --require-player-found` pass、24行CSV生成。`visible_camera*_x` と `count_*` 特徴が追加された状態で `python scripts\nsmb_mvl_ai_train_imitation.py ... --epochs 200 --lr 0.05` pass。
 - `python scripts\nsmb_mvl_ai_inspect_playlog.py logs\codex-ai-visual-wrapx-smoke-20260607\ai-playlog.jsonl --player 1 --limit 8` pass。frame 900で入力 `LY`、player1座標、Big Star相対 `696,104`、moving hazard相対 `127,-8`、カテゴリ数を表で確認。
+- `logs/codex-ai-object-catalog-smoke-20260607`: object catalog追加後のrule AI remote smoke 1600F pass。`stage_fx`、`mvl_object267`、`vs_connect` のカテゴリ化を確認。未知のまま残る代表IDは `0x021`、`0x145`。
 
 ## Next Actions
 

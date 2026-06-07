@@ -47,8 +47,12 @@ CATEGORY_COUNT_NAMES = [
     "enemy_koopa",
     "camera",
     "stage_scene",
+    "stage_fx",
     "stage_actor_manager",
     "stage_controller",
+    "mvl_object267",
+    "vs_connect",
+    "course_select",
     "object",
 ]
 

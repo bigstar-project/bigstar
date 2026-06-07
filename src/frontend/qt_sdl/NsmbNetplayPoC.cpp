@@ -13736,10 +13736,18 @@ const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings)
         return "camera";
     if (objectID == kStageSceneObjectID)
         return "stage_scene";
+    if (objectID == kStageFXObjectID)
+        return "stage_fx";
     if (objectID == kStageActorManagerObjectID)
         return "stage_actor_manager";
     if (objectID == kStageControllerObjectID)
         return "stage_controller";
+    if (objectID == kMvlObject267ID)
+        return "mvl_object267";
+    if (objectID == kVsConnectObjectID)
+        return "vs_connect";
+    if (objectID == kCourseSelectObjectID)
+        return "course_select";
     return "object";
 }
 
@@ -13759,8 +13767,12 @@ melonDS::u32 AIObjectCategoryMask(const char* category)
         return 1u << 3;
     if (std::strcmp(category, "camera") == 0 ||
         std::strcmp(category, "stage_scene") == 0 ||
+        std::strcmp(category, "stage_fx") == 0 ||
         std::strcmp(category, "stage_actor_manager") == 0 ||
-        std::strcmp(category, "stage_controller") == 0)
+        std::strcmp(category, "stage_controller") == 0 ||
+        std::strcmp(category, "mvl_object267") == 0 ||
+        std::strcmp(category, "vs_connect") == 0 ||
+        std::strcmp(category, "course_select") == 0)
         return 1u << 4;
     return 1u << 5;
 }
