@@ -114,6 +114,7 @@ def terrain_text(player: dict[str, Any]) -> str:
     names = []
     for key, label in [
         ("solid", "S"),
+        ("scanSolid", "S"),
         ("partialSolid", "P"),
         ("slope", "Sl"),
         ("questionBlock", "?"),
@@ -136,6 +137,33 @@ def terrain_text(player: dict[str, Any]) -> str:
     if num(collision_mgr.get("collisionResult")):
         names.append("C")
     return "+".join(names) if names else "terrain0"
+
+
+def tile_probe_text(player: dict[str, Any]) -> str:
+    probe = player.get("tileProbe") or {}
+    if not num(probe.get("found")):
+        return "-"
+    summary = probe.get("summary") or {}
+    sample_by_name = {
+        str(sample.get("name")): sample
+        for sample in probe.get("samples") or []
+        if isinstance(sample, dict)
+    }
+    tags = []
+    if num(summary.get("wallAhead")):
+        tags.append("wall")
+    if num(summary.get("holeAhead")):
+        tags.append("hole")
+    if num(summary.get("groundBelowSolid")):
+        tags.append("ground")
+    tile_ids = []
+    for name, label in [("aheadBody", "ab"), ("aheadBelow", "ad"), ("below", "b")]:
+        sample = sample_by_name.get(name) or {}
+        if num(sample.get("found")):
+            tile_ids.append(f"{label}:{num(sample.get('tileId')):03X}")
+    prefix = "+".join(tags) if tags else "open"
+    suffix = ",".join(tile_ids) if tile_ids else "-"
+    return f"{prefix}:{suffix}"
 
 
 def nearest_text(record: dict[str, Any], player: int, category: str) -> str:
@@ -166,7 +194,7 @@ def main() -> int:
     args = parser.parse_args()
 
     print(
-        "frame st p input contact terrain y/bot self(x,y) opp(x,y) star(dx,dy) hazard(dx,dy) "
+        "frame st p input contact terrain probe y/bot self(x,y) opp(x,y) star(dx,dy) hazard(dx,dy) "
         "visX obj active counts"
     )
     printed = 0
@@ -204,6 +232,7 @@ def main() -> int:
             f"{buttons_text(held):5s} "
             f"{contact_text(players[player]):7s} "
             f"{terrain_text(players[player]):8s} "
+            f"{tile_probe_text(players[player]):18s} "
             f"{fall_text(players[player]):>11s} "
             f"{pos_text(players[player]):>11s} "
             f"{pos_text(players[opponent]):>11s} "

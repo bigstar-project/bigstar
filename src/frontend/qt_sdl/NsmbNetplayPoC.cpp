@@ -66,6 +66,7 @@ constexpr melonDS::u32 kGameStageIDAddr = 0x02085A14;
 constexpr melonDS::u32 kGameStageGroupAddr = 0x02085A18;
 constexpr melonDS::u32 kGameLocalPlayerIDAddr = 0x02085A7C;
 constexpr melonDS::u32 kGameVsModeAddr = 0x02085A84;
+constexpr melonDS::u32 kGameWrapXAddr = 0x02085AA4;
 constexpr melonDS::u32 kNetStateBaseAddr = 0x020887E8;
 constexpr melonDS::u32 kNetCurrentLanguageAddr = 0x020887E8;
 constexpr melonDS::u32 kNetLocalAidAddr = 0x020887F0;
@@ -104,6 +105,17 @@ constexpr melonDS::u32 kInputPlayerKeysHeldAddr = 0x02087660;
 constexpr melonDS::u32 kInputPlayerKeysPressedAddr = 0x02087664;
 constexpr melonDS::u32 kStageActorFreezeFlagAddr = 0x020CA28C;
 constexpr melonDS::u32 kActorCategoryMaskAddr = 0x020CA850;
+constexpr melonDS::u32 kStageLayoutPtrAddr = 0x020CAD40;
+constexpr melonDS::u32 kStageLayoutChunkPtrTableAddr = 0x020CAFE0;
+constexpr melonDS::u32 kStageLayoutTileBehaviorBaseTableAddr = 0x020C8484;
+constexpr melonDS::u32 kStageLayoutDynamicTileBehaviorTablePtrAddr = 0x0208AF3C;
+constexpr melonDS::u32 kStageBlocksPtrAddr = 0x0208B168;
+constexpr melonDS::u32 kStageLayoutChunkMapOffset = 0x64;
+constexpr melonDS::u32 kStageLayoutWrapMaskOffset = 0x470;
+constexpr melonDS::u32 kStageLayoutPlayerDataOffset = 0x400;
+constexpr melonDS::u32 kStageLayoutPlayerDataStride = 0x0C;
+constexpr melonDS::u32 kStageLayoutPlayerCameraWrapOffset = 0x94;
+constexpr melonDS::u32 kStageLayoutCameraWrapAddOffset = 0xA8E8;
 constexpr melonDS::u32 kGamePlayerGlobalBlockAddr = 0x0208B324;
 constexpr melonDS::u32 kGamePlayerPowerupAddr = 0x0208B324;
 constexpr melonDS::u32 kGamePlayerDeadAddr = 0x0208B328;
@@ -191,6 +203,7 @@ constexpr melonDS::u32 kWorldEffectWordStart = 0x04;
 constexpr melonDS::u32 kWorldEffectWordEnd = 0xAC;
 constexpr std::size_t kWorldEffectWordCount =
     ((kWorldEffectWordEnd - kWorldEffectWordStart) / sizeof(melonDS::u32)) + 1;
+constexpr int kAITileProbeCount = 9;
 constexpr int kObjectTraceSlots = 16;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
 constexpr melonDS::u32 kMvlStageSceneDefaultSettings = 0x00B4FF00;
@@ -739,6 +752,33 @@ struct PlayerCollisionMgrSample
     melonDS::u32 UnknownB1 = 0;
 };
 
+struct AITileProbeSample
+{
+    const char* Name = "";
+    melonDS::u32 Found = 0;
+    melonDS::u32 StageLayout = 0;
+    melonDS::u32 ChunkPtr = 0;
+    melonDS::u32 BehaviorTable = 0;
+    melonDS::u32 WorldX = 0;
+    melonDS::u32 WorldY = 0;
+    melonDS::u32 PixelX = 0;
+    melonDS::u32 PixelY = 0;
+    melonDS::u32 OffsetX = 0;
+    melonDS::u32 OffsetY = 0;
+    melonDS::u32 ChunkID = 0;
+    melonDS::u32 TileID = 0;
+    melonDS::u32 Behavior = 0;
+};
+
+struct AIPlayerTileProbeSample
+{
+    melonDS::u32 Found = 0;
+    melonDS::u32 StageLayout = 0;
+    melonDS::u32 WrapX = 0;
+    melonDS::u32 Direction = 1;
+    AITileProbeSample Samples[kAITileProbeCount];
+};
+
 struct GameStateSample
 {
     melonDS::u32 StageID = 0;
@@ -854,6 +894,7 @@ struct GameStateSample
     melonDS::u32 PlayerActor0TransitFunc = 0;
     melonDS::u32 PlayerActor0TransitArg = 0;
     PlayerCollisionMgrSample PlayerActor0CollisionMgr;
+    AIPlayerTileProbeSample PlayerActor0TileProbe;
     melonDS::u32 PlayerActor0TileDamageFlags = 0;
     melonDS::u32 PlayerActor0TileDamageType = 0;
     melonDS::u32 PlayerActor1Found = 0;
@@ -896,6 +937,7 @@ struct GameStateSample
     melonDS::u32 PlayerActor1TransitFunc = 0;
     melonDS::u32 PlayerActor1TransitArg = 0;
     PlayerCollisionMgrSample PlayerActor1CollisionMgr;
+    AIPlayerTileProbeSample PlayerActor1TileProbe;
     melonDS::u32 PlayerActor1TileDamageFlags = 0;
     melonDS::u32 PlayerActor1TileDamageType = 0;
     melonDS::u32 PlayerCount = 0;
@@ -12472,6 +12514,144 @@ PlayerCollisionMgrSample ReadPlayerCollisionMgrSample(melonDS::NDS* nds, const O
     return sample;
 }
 
+std::int32_t SignedARM9U32(melonDS::u32 value)
+{
+    return static_cast<std::int32_t>(value);
+}
+
+bool ReadStageLayoutTileBehavior(
+    melonDS::NDS* nds,
+    melonDS::u32 worldX,
+    melonDS::u32 worldY,
+    melonDS::u32 playerID,
+    AITileProbeSample& out)
+{
+    if (!nds || !nds->MainRAM)
+        return false;
+
+    const melonDS::u32 stageLayout = nds->ARM9Read32(kStageLayoutPtrAddr);
+    const melonDS::u32 wrapX = nds->ARM9Read32(kGameWrapXAddr);
+    if (!IsValidMainRAMRange(nds, stageLayout, kStageLayoutCameraWrapAddOffset + sizeof(melonDS::u16)))
+        return false;
+
+    std::int32_t pixelXSigned = SignedARM9U32(worldX) >> 12;
+    const std::int32_t pixelYSigned = (-SignedARM9U32(worldY)) >> 12;
+    if (wrapX != 0)
+        pixelXSigned &= static_cast<std::int32_t>(wrapX >> 12);
+    if (pixelYSigned < 0)
+        return false;
+
+    melonDS::u32 pixelX = static_cast<melonDS::u32>(pixelXSigned) & 0xFFFFu;
+    melonDS::u32 pixelY = static_cast<melonDS::u32>(pixelYSigned) & 0xFFFFu;
+
+    const melonDS::u32 playerOffset =
+        kStageLayoutPlayerDataOffset +
+        (playerID & 1u) * kStageLayoutPlayerDataStride +
+        kStageLayoutPlayerCameraWrapOffset;
+    if (nds->ARM9Read16(stageLayout + playerOffset) == 0xFF00)
+        pixelX = (pixelX + nds->ARM9Read16(stageLayout + kStageLayoutCameraWrapAddOffset)) & 0xFFFFu;
+
+    const melonDS::u32 stageBlocks = nds->ARM9Read32(kStageBlocksPtrAddr);
+    if (IsValidMainRAMRange(nds, stageBlocks, 4) && (nds->ARM9Read16(stageBlocks + 2) & 0x20) != 0)
+        pixelX &= nds->ARM9Read16(stageLayout + kStageLayoutWrapMaskOffset);
+
+    if (pixelX >= 0x2000 || pixelY >= 0x1000)
+        return false;
+
+    const melonDS::u32 chunkIndex = (pixelX >> 8) + ((pixelY >> 8) << 5);
+    const melonDS::u32 chunkID = nds->ARM9Read8(stageLayout + kStageLayoutChunkMapOffset + chunkIndex);
+    const melonDS::u32 chunkPtr = nds->ARM9Read32(kStageLayoutChunkPtrTableAddr + chunkID * sizeof(melonDS::u32));
+    if (!IsValidMainRAMRange(nds, chunkPtr, 0x200))
+        return false;
+
+    const melonDS::u32 tileOffset = (((pixelX & 0xF0u) >> 4) << 1) + ((pixelY & 0xF0u) << 1);
+    const melonDS::u32 tileID = nds->ARM9Read16(chunkPtr + tileOffset);
+    melonDS::u32 behavior = 0;
+    melonDS::u32 behaviorTable = 0;
+    if (tileID < 0x100)
+    {
+        behaviorTable = kStageLayoutTileBehaviorBaseTableAddr;
+        behavior = nds->ARM9Read32(behaviorTable + tileID * sizeof(melonDS::u32));
+    }
+    else if (tileID < 0x600)
+    {
+        behaviorTable = nds->ARM9Read32(kStageLayoutDynamicTileBehaviorTablePtrAddr);
+        const melonDS::u32 behaviorOffset = (tileID - 0x100) * sizeof(melonDS::u32);
+        if (!IsValidMainRAMRange(nds, behaviorTable + behaviorOffset, sizeof(melonDS::u32)))
+            return false;
+        behavior = nds->ARM9Read32(behaviorTable + behaviorOffset);
+    }
+    else
+    {
+        return false;
+    }
+
+    out.Found = 1;
+    out.StageLayout = stageLayout;
+    out.ChunkPtr = chunkPtr;
+    out.BehaviorTable = behaviorTable;
+    out.WorldX = worldX;
+    out.WorldY = worldY;
+    out.PixelX = pixelX;
+    out.PixelY = pixelY;
+    out.ChunkID = chunkID;
+    out.TileID = tileID;
+    out.Behavior = behavior;
+    return true;
+}
+
+AIPlayerTileProbeSample ReadAIPlayerTileProbeSample(melonDS::NDS* nds, const ObjectScanSample& actor)
+{
+    AIPlayerTileProbeSample probe;
+    static constexpr struct ProbeDef
+    {
+        const char* Name;
+        int X;
+        int Y;
+        bool Directional;
+    } kProbeDefs[kAITileProbeCount] = {
+        {"center", 0, 0, false},
+        {"feet", 0, -16, false},
+        {"below", 0, -32, false},
+        {"aheadBody", 16, 0, true},
+        {"aheadFeet", 16, -16, true},
+        {"aheadBelow", 16, -32, true},
+        {"ahead2Feet", 32, -16, true},
+        {"ahead2Below", 32, -32, true},
+        {"above", 0, 24, false},
+    };
+
+    for (int i = 0; i < kAITileProbeCount; i++)
+        probe.Samples[i].Name = kProbeDefs[i].Name;
+
+    if (!nds || !actor.Found)
+        return probe;
+
+    const std::int32_t velX = SignedARM9U32(actor.VelX);
+    const std::int32_t direction = velX < 0 ? -1 : 1;
+    probe.Direction = static_cast<melonDS::u32>(direction);
+    probe.StageLayout = nds->ARM9Read32(kStageLayoutPtrAddr);
+    probe.WrapX = nds->ARM9Read32(kGameWrapXAddr);
+    probe.Found = IsValidMainRAMRange(nds, probe.StageLayout, kStageLayoutCameraWrapAddOffset + sizeof(melonDS::u16)) ? 1 : 0;
+    if (!probe.Found)
+        return probe;
+
+    const melonDS::u32 playerID = nds->ARM9Read8(actor.Base + kPlayerBasePlayerIDOffset) & 1u;
+    for (int i = 0; i < kAITileProbeCount; i++)
+    {
+        const int offsetX = kProbeDefs[i].Directional ? kProbeDefs[i].X * direction : kProbeDefs[i].X;
+        const int offsetY = kProbeDefs[i].Y;
+        AITileProbeSample& sample = probe.Samples[i];
+        sample.Name = kProbeDefs[i].Name;
+        sample.OffsetX = static_cast<melonDS::u32>(offsetX);
+        sample.OffsetY = static_cast<melonDS::u32>(offsetY);
+        const melonDS::u32 worldX = actor.PosX + static_cast<melonDS::u32>(offsetX * 4096);
+        const melonDS::u32 worldY = actor.PosY + static_cast<melonDS::u32>(offsetY * 4096);
+        ReadStageLayoutTileBehavior(nds, worldX, worldY, playerID, sample);
+    }
+    return probe;
+}
+
 GameStateSample ReadGameStateSample(melonDS::NDS* nds)
 {
     GameStateSample sample;
@@ -12575,6 +12755,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.PlayerActor0VelY = players.Actor0.VelY;
     sample.PlayerActor0VelZ = players.Actor0.VelZ;
     sample.PlayerActor0CollisionMgr = ReadPlayerCollisionMgrSample(nds, players.Actor0);
+    sample.PlayerActor0TileProbe = ReadAIPlayerTileProbeSample(nds, players.Actor0);
     if (players.Actor0.Found && IsValidMainRAMRange(nds, players.Actor0.Base + kPlayerBaseTileDamageTypeOffset, 1))
     {
         sample.PlayerActor0TileDamageFlags = nds->ARM9Read8(players.Actor0.Base + kPlayerBaseTileDamageFlagsOffset);
@@ -12596,6 +12777,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.PlayerActor1VelY = players.Actor1.VelY;
     sample.PlayerActor1VelZ = players.Actor1.VelZ;
     sample.PlayerActor1CollisionMgr = ReadPlayerCollisionMgrSample(nds, players.Actor1);
+    sample.PlayerActor1TileProbe = ReadAIPlayerTileProbeSample(nds, players.Actor1);
     if (players.Actor1.Found && IsValidMainRAMRange(nds, players.Actor1.Base + kPlayerBaseTileDamageTypeOffset, 1))
     {
         sample.PlayerActor1TileDamageFlags = nds->ARM9Read8(players.Actor1.Base + kPlayerBaseTileDamageFlagsOffset);
@@ -14111,6 +14293,7 @@ void WriteAITileTypeJson(std::ostream& out, melonDS::u32 tileType)
         << ",\"brickBlock\":" << bit(0x00100000)
         << ",\"slope\":" << bit(0x00200000)
         << ",\"ceilingSlope\":" << bit(0x00400000)
+        << ",\"scanSolid\":" << bit(0x00800000)
         << ",\"entrance\":" << bit(0x01000000)
         << ",\"water\":" << bit(0x02000000)
         << ",\"climbable\":" << bit(0x04000000)
@@ -14122,6 +14305,91 @@ void WriteAITileTypeJson(std::ostream& out, melonDS::u32 tileType)
         << ",\"modifier\":" << ((tileType & 0x0000F000u) >> 12)
         << ",\"storageContents\":" << (tileType & 0x00000C3Fu)
         << "}";
+}
+
+bool AITileBehaviorSolidish(melonDS::u32 tileType)
+{
+    return (tileType & (
+        0x08990000u | // CollisionMgr::scanSolidTile solid mask
+        0x00040000u | // question block
+        0x00200000u | // slope
+        0x40000000u | // solid on bottom
+        0x80000000u)) != 0;
+}
+
+void WriteAITileProbePointJson(std::ostream& out, const AITileProbeSample& sample)
+{
+    out << "{\"name\":\"" << sample.Name
+        << "\",\"found\":" << sample.Found
+        << ",\"offsetX\":" << SignedU32(sample.OffsetX)
+        << ",\"offsetY\":" << SignedU32(sample.OffsetY);
+    if (!sample.Found)
+    {
+        out << "}";
+        return;
+    }
+
+    out << ",\"worldX\":" << SignedU32(sample.WorldX)
+        << ",\"worldY\":" << SignedU32(sample.WorldY)
+        << ",\"pixelX\":" << sample.PixelX
+        << ",\"pixelY\":" << sample.PixelY
+        << ",\"chunkId\":" << sample.ChunkID
+        << ",\"tileId\":" << sample.TileID
+        << ",\"chunkPtr\":";
+    WriteJsonHex(out, sample.ChunkPtr);
+    out << ",\"behaviorTable\":";
+    WriteJsonHex(out, sample.BehaviorTable);
+    out << ",\"behavior\":";
+    WriteJsonHex(out, sample.Behavior);
+    out << ",\"tile\":";
+    WriteAITileTypeJson(out, sample.Behavior);
+    out << ",\"solidish\":" << (AITileBehaviorSolidish(sample.Behavior) ? 1 : 0)
+        << "}";
+}
+
+const AITileProbeSample* FindAITileProbePoint(const AIPlayerTileProbeSample& probe, const char* name)
+{
+    for (const AITileProbeSample& sample : probe.Samples)
+    {
+        if (std::strcmp(sample.Name, name) == 0)
+            return &sample;
+    }
+    return nullptr;
+}
+
+int AITileProbeSolidishValue(const AIPlayerTileProbeSample& probe, const char* name)
+{
+    const AITileProbeSample* sample = FindAITileProbePoint(probe, name);
+    return sample && sample->Found && AITileBehaviorSolidish(sample->Behavior) ? 1 : 0;
+}
+
+void WriteAIPlayerTileProbeJson(std::ostream& out, const AIPlayerTileProbeSample& probe)
+{
+    const int groundBelow = AITileProbeSolidishValue(probe, "below");
+    const int aheadBody = AITileProbeSolidishValue(probe, "aheadBody");
+    const int aheadFeet = AITileProbeSolidishValue(probe, "aheadFeet");
+    const int aheadBelow = AITileProbeSolidishValue(probe, "aheadBelow");
+    const int ahead2Below = AITileProbeSolidishValue(probe, "ahead2Below");
+    out << "{\"found\":" << probe.Found
+        << ",\"stageLayout\":";
+    WriteJsonHex(out, probe.StageLayout);
+    out << ",\"wrapX\":" << SignedU32(probe.WrapX)
+        << ",\"direction\":" << SignedU32(probe.Direction)
+        << ",\"summary\":{\"groundBelowSolid\":" << groundBelow
+        << ",\"aheadBodySolid\":" << aheadBody
+        << ",\"aheadFeetSolid\":" << aheadFeet
+        << ",\"aheadBelowSolid\":" << aheadBelow
+        << ",\"ahead2BelowSolid\":" << ahead2Below
+        << ",\"wallAhead\":" << (aheadBody || aheadFeet ? 1 : 0)
+        << ",\"holeAhead\":" << (probe.Found && !aheadBelow && !ahead2Below ? 1 : 0)
+        << "},\"samples\":[";
+    for (int i = 0; i < kAITileProbeCount; i++)
+    {
+        if (i != 0)
+            out << ",";
+        WriteAITileProbePointJson(out, probe.Samples[i]);
+    }
+    out << "]}";
 }
 
 void WriteAIPlayerCollisionMgrJson(std::ostream& out, const PlayerCollisionMgrSample& collisionMgr)
@@ -14241,6 +14509,8 @@ void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& samp
     const melonDS::u32 velY = v(sample.PlayerActor0VelY, sample.PlayerActor1VelY);
     const PlayerCollisionMgrSample& collisionMgr =
         p0 ? sample.PlayerActor0CollisionMgr : sample.PlayerActor1CollisionMgr;
+    const AIPlayerTileProbeSample& tileProbe =
+        p0 ? sample.PlayerActor0TileProbe : sample.PlayerActor1TileProbe;
     const melonDS::u32 tileDamageFlags =
         p0 ? sample.PlayerActor0TileDamageFlags : sample.PlayerActor1TileDamageFlags;
     const melonDS::u32 tileDamageType =
@@ -14289,6 +14559,8 @@ void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& samp
     WriteAIContactJson(out, collisionFlag, environmentFlag);
     out << ",\"collisionMgr\":";
     WriteAIPlayerCollisionMgrJson(out, collisionMgr);
+    out << ",\"tileProbe\":";
+    WriteAIPlayerTileProbeJson(out, tileProbe);
     out << ",\"tileDamage\":";
     WriteAIPlayerTileDamageJson(out, tileDamageFlags, tileDamageType);
     out

@@ -115,6 +115,7 @@ BOTTOM_TILE_NAMES = [
     "brickBlock",
     "slope",
     "ceilingSlope",
+    "scanSolid",
     "entrance",
     "water",
     "climbable",
@@ -123,6 +124,28 @@ BOTTOM_TILE_NAMES = [
     "invisibleBlock",
     "solidOnBottom",
     "solidOnTop",
+]
+
+TILE_PROBE_SAMPLE_NAMES = [
+    "center",
+    "feet",
+    "below",
+    "aheadBody",
+    "aheadFeet",
+    "aheadBelow",
+    "ahead2Feet",
+    "ahead2Below",
+    "above",
+]
+
+TILE_PROBE_SUMMARY_NAMES = [
+    "groundBelowSolid",
+    "aheadBodySolid",
+    "aheadFeetSolid",
+    "aheadBelowSolid",
+    "ahead2BelowSolid",
+    "wallAhead",
+    "holeAhead",
 ]
 
 
@@ -156,6 +179,10 @@ def sane_bottom_tile(tile_type: int) -> bool:
     ]
     set_categories = sum(1 for mask in category_masks if tile_type & mask)
     return set_categories <= 4
+
+
+def by_name(items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {str(item.get("name")): item for item in items if isinstance(item, dict)}
 
 
 def pos(entity: dict[str, Any]) -> dict[str, int]:
@@ -346,6 +373,7 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         for name in CONTACT_NAMES:
             row[f"{prefix}_contact_{name}"] = num(contact.get(name))
         collision_mgr = player_state.get("collisionMgr") or {}
+        tile_probe = player_state.get("tileProbe") or {}
         tile_damage = player_state.get("tileDamage") or {}
         bottom_tile_type = num(
             collision_mgr.get("bottomModifierTileType", collision_mgr.get("bottomTileType"))
@@ -384,6 +412,26 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
             row[f"{prefix}_bottom_modifier_tile_{name}"] = (
                 num(bottom_tile.get(name)) if bottom_tile_sane else 0
             )
+
+        tile_probe_summary = tile_probe.get("summary") or {}
+        row[f"{prefix}_tile_probe_found"] = num(tile_probe.get("found"))
+        row[f"{prefix}_tile_probe_direction"] = num(tile_probe.get("direction"), 1)
+        for name in TILE_PROBE_SUMMARY_NAMES:
+            row[f"{prefix}_tile_probe_{name}"] = num(tile_probe_summary.get(name))
+        tile_probe_samples = by_name(tile_probe.get("samples") or [])
+        for sample_name in TILE_PROBE_SAMPLE_NAMES:
+            sample = tile_probe_samples.get(sample_name) or {}
+            tile = sample.get("tile") or {}
+            sample_prefix = f"{prefix}_tile_probe_{sample_name}"
+            behavior = num(sample.get("behavior"))
+            row[f"{sample_prefix}_found"] = num(sample.get("found"))
+            row[f"{sample_prefix}_tile_id"] = num(sample.get("tileId"))
+            row[f"{sample_prefix}_behavior"] = behavior
+            row[f"{sample_prefix}_solidish"] = num(sample.get("solidish"))
+            row[f"{sample_prefix}_pixel_x"] = num(sample.get("pixelX"))
+            row[f"{sample_prefix}_pixel_y"] = num(sample.get("pixelY"))
+            for name in BOTTOM_TILE_NAMES:
+                row[f"{sample_prefix}_{name}"] = num(tile.get(name))
 
     for name, bit in BUTTON_BITS.items():
         row[f"label_{name}"] = 1 if (held & (1 << bit)) else 0

@@ -41,6 +41,7 @@
 - 完了: `scripts/nsmb_mvl_ai_predict_imitation.py` で学習済み `.npz` とdataset CSVからオフライン推論し、予測held入力、button別確率、ラベルとの一致率をCSV出力できるようにした。
 - 完了: player actor内の `CollisionMgr` を読み、AI play logの `players[].collisionMgr` に collision result、ground collision、modifier tile、attached tile、raw state byteを保存するようにした。逆アセンブルで `CollisionMgr +0x7C` がcollision result、`+0x98/+0x9C/+0xA0` がbottom/top/side modifier tile typeであることを確認し、以前の暫定 `bottomTileType` 読み取りは廃止した。
 - 完了: player本体の `+0xBB2/+0xBB3` を `players[].tileDamage` として保存するようにした。`Player::applyTileDamage` / `Player::updateCollision` の逆アセンブルで参照を確認した。
+- 完了: `StageLayout::getTileBehavior` / `getChunkID` / `readTileBehaviour` を逆アセンブルし、AI play logの `players[].tileProbe` にプレイヤー周辺/前方9点のタイルサンプルを保存するようにした。各点は actor座標からStageLayout pixel座標へ変換し、chunk id、tile id、tile behavior、solid/harmful/coin/block系カテゴリ、`solidish` を出す。summaryには `wallAhead`、`holeAhead`、`groundBelowSolid`、`aheadBodySolid`、`aheadBelowSolid` などを保存する。
 
 ## AI Play Log
 
@@ -62,6 +63,8 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 `players[].collisionMgr` には、プレイヤーactor内のCollisionMgrから読んだ地形/接触結果を保存する。主な項目は `collisionResult`、`groundCollision`、`deltaX/Y`、`attachedTileX/Y`、`bottomModifierTileType`、`topModifierTileType`、`sideModifierTileTypeLeft/Right`。`bottomModifierTile` は modifier tile typeを `solid`、`coin`、`questionBlock`、`breakableBlock`、`brickBlock`、`slope`、`water`、`partialSolid`、`harmful`、`invisibleBlock`、modifier、storage contentsへ展開したもの。これは「足元そのもの」ではなく、CollisionMgrが保持するbottom modifier tileで、前方タイルや穴の完全判定ではない。CSV/inspectでは不自然に多数のtile category bitが立つ値をsanity checkで除外する。
 
 `players[].tileDamage` には、Player本体に保存されるtile damage flags/typeを保存する。`active=1` のときはlava/poison/その他ダメージ地形などの接触候補として扱う。通常の床接地や壁接触は `contact` と `collisionMgr.collisionResult` を見る。
+
+`players[].tileProbe` には、StageLayoutから直接読んだタイル地形サンプルを保存する。サンプル点は `center`、`feet`、`below`、`aheadBody`、`aheadFeet`、`aheadBelow`、`ahead2Feet`、`ahead2Below`、`above`。各点は `pixelX/Y`、`chunkId`、`tileId`、`behavior`、`tile`、`solidish` を持つ。`tile` は `solid`、`scanSolid`、`coin`、`questionBlock`、`breakableBlock`、`brickBlock`、`slope`、`water`、`partialSolid`、`harmful` などへ展開する。`summary.holeAhead` は前方下2点がsolidishでない暫定穴判定、`summary.wallAhead` は前方body/feetがsolidishの暫定壁判定。CSVには `self_tile_probe_*` / `opponent_tile_probe_*` として展開する。
 
 `players[].screen` / `players[].fallRisk` には、playerをカメラ座標へ投影した情報を保存する。`fallRisk` は `screenY0/1`、`cameraBottomDistance0/1`、`nearCameraBottom0/1`、`belowCamera0/1`、`velYPositive/Negative` を持つ。完全な穴判定ではないが、目視上の「下へ落ちている」「画面下端に近い」を学習データに入れるための暫定特徴。
 
@@ -111,7 +114,8 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 ## Current Blockers / Unknowns
 
 - object IDと画面上の意味の対応はまだ完全ではない。coin/item/enemy/platform/hazard の初期カテゴリは入ったが、ログを見ながら block、item box、ステージ固有ギミックの分類を増やす。
-- 目視同等にするには、穴/落下死ライン、ブロック状態、アイテム箱状態、タイル地形の前方サンプルが不足している。左右ラップ込みX判定、Y込みの完全可視判定、player接触地形、CollisionMgr接触結果、modifier tile、tile damage、playerの画面Y/カメラ底距離は取れるようになった。
+- 目視同等にするには、タイルサンプルをより多い実プレイ場面で検証し、穴/壁/床判定のoffsetとsolid maskを調整する必要がある。左右ラップ込みX判定、Y込みの完全可視判定、player接触地形、CollisionMgr接触結果、modifier tile、tile damage、playerの画面Y/カメラ底距離、StageLayout由来の前方タイルサンプルは取れるようになった。
+- ブロック/アイテム箱の「中身」や叩いた後の状態は、tile behaviorとobject/effectだけではまだ完全ではない。StageLayoutの `changeTile` / question block animation path と実ログを照合して詰める。
 - 自己対戦に進む前に、ログschemaを実プレイログで増強し、学習済みモデルを入力へ戻す推論経路を作る必要がある。
 
 ## Verification
@@ -158,10 +162,17 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --require-player-found --label-source auto` pass。25行CSV生成。`count_stage_layout=1`、`count_object=0` を確認。
 - `python scripts\nsmb_mvl_ai_train_imitation.py logs\codex-ai-stage-layout-category-smoke-20260607\ai-dataset-player1-auto.csv logs\codex-ai-stage-layout-category-smoke-20260607\ai-imitation-player1-auto.npz --epochs 200 --lr 0.05` pass。`python scripts\nsmb_mvl_ai_predict_imitation.py logs\codex-ai-stage-layout-category-smoke-20260607\ai-imitation-player1-auto.npz logs\codex-ai-stage-layout-category-smoke-20260607\ai-dataset-player1-auto.csv logs\codex-ai-stage-layout-category-smoke-20260607\ai-predictions-player1-auto.csv --limit 10` pass。10行サンプルで `button_acc=0.958`、`exact=0.700`。
 - `python scripts\nsmb_mvl_ai_render_playlog_svg.py logs\codex-ai-stage-layout-category-smoke-20260607\ai-playlog.jsonl logs\codex-ai-stage-layout-category-smoke-20260607\frame-1050-player1.svg --player 1 --frame 1050` pass。
+- 逆アセンブル確認: `StageLayout::getTileBehavior` / `getChunkID` / `readTileBehaviour` / `CollisionMgr::scanSolidTile` / `getTileType` を `tools\nsmb_us_rom_tool.py --rom roms\nsmb-us.nds disasm ... --overlay-id 0` で確認。`Stage::stageLayout=0x020CAD40`、chunk pointer table `0x020CAFE0`、base tile behavior table `0x020C8484`、dynamic tile behavior table pointer `0x0208AF3C`、solid mask `0x08990000` をAI tile probe sourceに採用した。
+- `logs/codex-ai-tileprobe-yfix-smoke-20260607`: StageLayout tile probe追加後に `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4` pass。host単体の標準split smoke 1150F pass。AI play logは10行、frame 900以降で `players[1].tileProbe.found=1`、`center/below/aheadBody/aheadBelow` などの `tileId=0x001`、`behavior=0x0000002A` が保存されることを確認。
+- 同ログで `python scripts\nsmb_mvl_ai_inspect_playlog.py logs\codex-ai-tileprobe-yfix-smoke-20260607\ai-playlog.jsonl --player 1 --limit 8` pass。`probe` 列に `hole:ab:001,ad:001,b:001` のように前方/下方向のtile idが表示されることを確認。
+- 同ログから `python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --label-source auto --require-player-found` pass。9行CSV生成。`self_tile_probe_found`、`self_tile_probe_holeAhead`、`self_tile_probe_below_tile_id`、`self_tile_probe_aheadBelow_tile_id` などの列追加を確認。
+- `python scripts\nsmb_mvl_ai_train_imitation.py logs\codex-ai-tileprobe-yfix-smoke-20260607\ai-dataset-player1-auto.csv logs\codex-ai-tileprobe-yfix-smoke-20260607\ai-imitation-player1-auto.npz` pass。`python scripts\nsmb_mvl_ai_predict_imitation.py logs\codex-ai-tileprobe-yfix-smoke-20260607\ai-imitation-player1-auto.npz logs\codex-ai-tileprobe-yfix-smoke-20260607\ai-dataset-player1-auto.csv logs\codex-ai-tileprobe-yfix-smoke-20260607\ai-predictions-player1-auto.csv` pass。9行の小データで `button_acc=1.000`、`exact=1.000`。これはパイプライン検証であり、強さ評価ではない。
+- `python -m py_compile scripts\nsmb_mvl_ai_build_dataset.py scripts\nsmb_mvl_ai_inspect_playlog.py scripts\nsmb_mvl_ai_train_imitation.py scripts\nsmb_mvl_ai_predict_imitation.py` pass。
 
 ## Next Actions
 
-- camera Y / player display Y の対応を解析し、完全な画面内判定を入れる。
-- 穴/落下死ライン、ブロック/アイテム箱、前方タイル地形サンプルをメモリから取れる場所を解析してAI play logへ足す。接触結果、modifier tile、tile damageは取得済みだが、目視上の「前に穴がある」「?ブロックがある」はまだ直接取れていない。
+- StageLayout tile probeを実プレイ/複数ステージで増やして、`feet/below/ahead*` のoffsetと `holeAhead` / `wallAhead` の閾値を調整する。
+- ブロック/アイテム箱の中身と叩いた後の状態を `StageLayout::changeTile` / question block animation path と実ログで照合し、tileProbeまたはobjectカテゴリへ追加する。
+- 落下死ラインとステージ境界をメモリから取り、`fallRisk` と `tileProbe.holeAhead` を統合した危険判定を作る。
 - 学習済み `.npz` をPoCまたは外部sidecarから推論して入力へ戻す経路を作る。
 - object categoryをログ実例で検証し、ステージ固有objectの意味を詰める。`0x021` は実ログでBig Star actorと同じvtableだったため `big_star_related` に分類した。`0x0F0` はrollback notes上のItem付随短命effectとして `item_spawn_effect` に分類した。`0x145` は既存RAM probeの名前表に基づいて `stage_layout` に分類した。
