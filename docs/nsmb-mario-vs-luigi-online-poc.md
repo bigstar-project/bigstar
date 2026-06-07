@@ -7,15 +7,17 @@
 - 有効化env:
   - `MELONDS_NSML_RULE_AI=1`
   - `MELONDS_NSML_RULE_AI_PLAYER=remote|local|0|1|mario|luigi`
+  - `MELONDS_NSML_RULE_AI_WRAP_WIDTH=0x400000`（0で左右ラップ無効）
   - `MELONDS_NSML_RULE_AI_HOST_ONLY=1` / `MELONDS_NSML_RULE_AI_CLIENT_ONLY=1`
   - `MELONDS_NSML_RULE_AI_TRACE=1`
-- 現AIは、player actor座標、Big Star actor/candidate座標、相手座標、双方のBattle Starsを読み、Big Star追跡、相手追跡、スター優勢時の近距離回避を切り替える。入力は左右移動 + `Y`走り + 周期/高低差/近距離ジャンプの最小構成。
+- 現AIは、player actor座標、Big Star actor/candidate座標、相手座標、双方のBattle Starsを読み、Big Star追跡、相手追跡、スター優勢時の近距離回避を切り替える。X方向はMvLステージの左右ラップ幅を考慮し、入力は左右移動 + `Y`走り + 周期/高低差/近距離ジャンプの最小構成。
 - 1人用PoC向けに、AIがremote playerを担当する場合は input-netplay の peer wait / remote input wait をスキップし、PacketBridge JIT helper scratchへAI入力を書けるようにした。
 - `scripts/run-nsmb-mvl-rule-ai-smoke.ps1` を追加し、host単体 + remote AI + input-netplay + PacketBridge JIT helper の検証を1コマンドで走らせる。
 - Verification:
   - `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4` pass。
   - `logs/codex-rule-ai-single-host-helper-smoke-20260607`: host単体、`MELONDS_NSML_RULE_AI=1`、`MELONDS_NSML_RULE_AI_PLAYER=remote`、`-InputNetplay`、`-PacketBridgeJitHelperPatch -PacketBridgeJitHelperPatchFrame 870` で1600F pass。`NSMB RuleAI` traceで player1 の `starActor` 追跡入力が出力され、`remoteWaitCount=0`。
   - `logs/codex-rule-ai-wrapper-smoke-20260607`: 追加wrapperで1600F pass。同じく player1 の `starActor` 追跡入力と `remoteWaitCount=0` を確認。
+  - `logs/codex-rule-ai-wrapper-wrap-smoke-20260607`: 水平ラップ幅 `0x400000` で1600F pass。初期付近の `self=0x00058000`、`target=0x00370000` に対して短いラップ方向の左移動入力を選ぶことをtraceで確認。
 - Current blocker / limitation:
   - AIはまだ「ゲームが成立する最低限」の入力生成で、ステージ別経路、穴/壁/土管、スター取得保証、強さ調整、GUIからの起動設定は未実装。
   - 単体hostでAI remoteを使うには、現時点では PacketBridge JIT helper patch を明示する必要がある。

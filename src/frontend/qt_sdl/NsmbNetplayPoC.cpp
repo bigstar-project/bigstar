@@ -1405,6 +1405,7 @@ struct State
     std::string RuleAIPlayerSpec = "remote";
     melonDS::u32 RuleAIStartFrame = 0;
     int RuleAIHorizontalDeadzone = 0x4000;
+    int RuleAIHorizontalWrapWidth = 0x400000;
     int RuleAICloseRange = 0x22000;
     int RuleAIJumpInterval = 42;
     int RuleAIJumpFrames = 9;
@@ -2350,6 +2351,7 @@ NsmbRuleAI::Config RuleAIConfig()
     config.PlayerSpec = G.RuleAIPlayerSpec;
     config.StartFrame = G.RuleAIStartFrame;
     config.HorizontalDeadzone = G.RuleAIHorizontalDeadzone;
+    config.HorizontalWrapWidth = G.RuleAIHorizontalWrapWidth;
     config.CloseRange = G.RuleAICloseRange;
     config.JumpInterval = G.RuleAIJumpInterval;
     config.JumpFrames = G.RuleAIJumpFrames;
@@ -14955,6 +14957,8 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_RULE_AI_START_FRAME", 0)));
     G.RuleAIHorizontalDeadzone = std::clamp(
         EnvInt("MELONDS_NSML_RULE_AI_HORIZONTAL_DEADZONE", 0x4000), 0, 0x200000);
+    G.RuleAIHorizontalWrapWidth = std::clamp(
+        EnvInt("MELONDS_NSML_RULE_AI_WRAP_WIDTH", 0x400000), 0, 0x800000);
     G.RuleAICloseRange = std::clamp(
         EnvInt("MELONDS_NSML_RULE_AI_CLOSE_RANGE", 0x22000), 0x1000, 0x200000);
     G.RuleAIJumpInterval = std::clamp(
@@ -15497,10 +15501,11 @@ void InitFromEnvironment()
     if (G.RuleAIEnabled)
     {
         std::printf(
-            "NSMB RuleAI: enabled player=%s startFrame=%u deadzone=0x%X closeRange=0x%X jump=%d/%d trace=%d traceInterval=%d\n",
+            "NSMB RuleAI: enabled player=%s startFrame=%u deadzone=0x%X wrapWidth=0x%X closeRange=0x%X jump=%d/%d trace=%d traceInterval=%d\n",
             G.RuleAIPlayerSpec.c_str(),
             G.RuleAIStartFrame,
             G.RuleAIHorizontalDeadzone,
+            G.RuleAIHorizontalWrapWidth,
             G.RuleAICloseRange,
             G.RuleAIJumpFrames,
             G.RuleAIJumpInterval,

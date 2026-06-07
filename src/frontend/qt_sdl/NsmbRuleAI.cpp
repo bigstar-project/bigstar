@@ -42,9 +42,26 @@ bool ControlsPlayer(const Config& config, int player, int localPlayer)
     return player == (localPlayer ^ 1);
 }
 
-std::int32_t Delta(melonDS::u32 target, melonDS::u32 self)
+std::int32_t CoordinateDelta(melonDS::u32 target, melonDS::u32 self)
 {
-    return static_cast<std::int32_t>(target - self);
+    return static_cast<std::int32_t>(
+        static_cast<std::int64_t>(target) - static_cast<std::int64_t>(self));
+}
+
+std::int32_t HorizontalDelta(const Config& config, melonDS::u32 target, melonDS::u32 self)
+{
+    std::int64_t dx =
+        static_cast<std::int64_t>(target) - static_cast<std::int64_t>(self);
+    const std::int64_t wrapWidth = config.HorizontalWrapWidth;
+    if (wrapWidth > 0)
+    {
+        const std::int64_t halfWidth = wrapWidth / 2;
+        if (dx > halfWidth)
+            dx -= wrapWidth;
+        else if (dx < -halfWidth)
+            dx += wrapWidth;
+    }
+    return static_cast<std::int32_t>(dx);
 }
 
 NsmbNetplayPoC::InputState NeutralInputPreservingTouch(const NsmbNetplayPoC::InputState& source)
@@ -92,9 +109,9 @@ NsmbNetplayPoC::InputState DecideInput(
         mode = "star";
     }
 
-    std::int32_t dx = Delta(targetX, self.X);
-    const std::int32_t dy = Delta(targetY, self.Y);
-    const std::int32_t opponentDx = Delta(other.X, self.X);
+    std::int32_t dx = HorizontalDelta(config, targetX, self.X);
+    const std::int32_t dy = CoordinateDelta(targetY, self.Y);
+    const std::int32_t opponentDx = HorizontalDelta(config, other.X, self.X);
     const int absOpponentDx = std::abs(opponentDx);
 
     if (self.BattleStars > other.BattleStars && absOpponentDx < config.CloseRange)

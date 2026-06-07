@@ -18,6 +18,7 @@ struct Config
     std::string PlayerSpec = "remote";
     melonDS::u32 StartFrame = 0;
     int HorizontalDeadzone = 0x4000;
+    int HorizontalWrapWidth = 0x400000;
     int CloseRange = 0x22000;
     int JumpInterval = 42;
     int JumpFrames = 9;

@@ -6,6 +6,7 @@ param(
     [string]$LogDir = "logs\nsmb-mvl-rule-ai-smoke",
     [ValidateSet("remote", "local", "0", "1", "mario", "luigi")]
     [string]$RuleAIPlayer = "remote",
+    [int]$WrapWidth = 0x400000,
     [switch]$Trace,
     [int]$TraceInterval = 30,
     [int]$InputDelayFrames = 4,
@@ -26,6 +27,7 @@ $oldEnv = @{}
 foreach ($name in @(
     "MELONDS_NSML_RULE_AI",
     "MELONDS_NSML_RULE_AI_PLAYER",
+    "MELONDS_NSML_RULE_AI_WRAP_WIDTH",
     "MELONDS_NSML_RULE_AI_TRACE",
     "MELONDS_NSML_RULE_AI_TRACE_INTERVAL",
     "MELONDS_NSML_RULE_AI_HOST_ONLY",
@@ -37,6 +39,7 @@ foreach ($name in @(
 try {
     $env:MELONDS_NSML_RULE_AI = "1"
     $env:MELONDS_NSML_RULE_AI_PLAYER = $RuleAIPlayer
+    $env:MELONDS_NSML_RULE_AI_WRAP_WIDTH = "$WrapWidth"
     if ($Trace) {
         $env:MELONDS_NSML_RULE_AI_TRACE = "1"
         $env:MELONDS_NSML_RULE_AI_TRACE_INTERVAL = "$TraceInterval"
