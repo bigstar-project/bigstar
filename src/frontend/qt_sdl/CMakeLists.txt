@@ -13,6 +13,8 @@ set(SOURCES_QT_SDL
     EmuThread.cpp
     NsmbNetplayPoC.cpp
     NsmbNetplayPoC.h
+    NsmbImitationAI.cpp
+    NsmbImitationAI.h
     NsmbRuleAI.cpp
     NsmbRuleAI.h
     CheatImportDialog.cpp
@@ -97,6 +99,15 @@ fix_interface_includes(PkgConfig::SDL2 PkgConfig::LibArchive)
 add_compile_definitions(ARCHIVE_SUPPORT_ENABLED)
 
 add_executable(melonDS ${SOURCES_QT_SDL})
+
+add_executable(nsmb_mvl_imitation_cpp_predict
+    NsmbImitationAI.cpp
+    NsmbImitationAI.h
+    ${CMAKE_SOURCE_DIR}/tools/nsmb_mvl_imitation_cpp_predict.cpp
+)
+target_include_directories(nsmb_mvl_imitation_cpp_predict PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
 
 add_subdirectory("../../net"
     ${CMAKE_BINARY_DIR}/net)

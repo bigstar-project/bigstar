@@ -44,6 +44,7 @@
 - 完了: AI play logの `objects[]` に `offset` と `vtable` を追加した。object ID/settingsだけで意味が分からないactorも、vtableを手がかりに後から分類できる。
 - 完了: `scripts/nsmb_mvl_ai_build_dataset.py` に `--label-source auto|applied|player|console` を追加した。ルールAIログは `appliedPlayerN`、人間プレイログはメモリ上の `playerN` / `consoleN` 入力を教師ラベルにできる。
 - 完了: `scripts/nsmb_mvl_ai_predict_imitation.py` で学習済み `.npz` とdataset CSVからオフライン推論し、予測held入力、button別確率、ラベルとの一致率をCSV出力できるようにした。
+- 完了: `scripts/nsmb_mvl_ai_export_runtime_model.py` と `src/frontend/qt_sdl/NsmbImitationAI.cpp` / `.h`、`tools/nsmb_mvl_imitation_cpp_predict.cpp` を追加した。現在の `.npz` 線形模倣モデルをC++ランタイム用JSONへexportし、C++側で `x=(features-mean)/scale`、`sigmoid(x @ weights + bias)`、threshold判定を実行できる。将来の自己対戦モデルでは、このruntime model形式をMLPなどへ拡張する。
 - 完了: player actor内の `CollisionMgr` を読み、AI play logの `players[].collisionMgr` に collision result、ground collision、modifier tile、attached tile、raw state byteを保存するようにした。逆アセンブルで `CollisionMgr +0x7C` がcollision result、`+0x98/+0x9C/+0xA0` がbottom/top/side modifier tile typeであることを確認し、以前の暫定 `bottomTileType` 読み取りは廃止した。
 - 完了: player本体の `+0xBB2/+0xBB3` を `players[].tileDamage` として保存するようにした。`Player::applyTileDamage` / `Player::updateCollision` の逆アセンブルで参照を確認した。
 - 完了: `StageLayout::getTileBehavior` / `getChunkID` / `readTileBehaviour` を逆アセンブルし、AI play logの `players[].tileProbe` にプレイヤー周辺/前方/左右17点のタイルサンプルを保存するようにした。各点は actor座標からStageLayout pixel座標へ変換し、chunk id、tile id、tile behavior、solid/harmful/coin/block系カテゴリ、`solidish` を出す。summaryには `wallAhead`、`holeAhead`、`wallLeft`、`holeLeft`、`wallRight`、`holeRight`、`groundBelowSolid` などを保存する。
@@ -173,6 +174,9 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - 8コイン成立直後の降下itemは、`self_prev_coins`、`self_coin_reward_recent`、`self_coin_reward_age`、`coin_reward_item_*` として明示列にする。最近傍item全般は `nearest_item_*` に入り、objectId/settings/settings_low8/vtable/velocity/screen座標/powerup候補/避ける候補を保持する。マメマリオ系と疑われるitemは `*_is_suspected_mini_candidate` と `*_avoid_candidate` で分け、raw settingsも同時に保存する。
 - `python scripts\nsmb_mvl_ai_train_imitation.py <dataset.csv> <model.npz>` でキー入力の多ラベル分類モデルを学習する。複数記録を使う場合は `--split-by-recording` で記録単位validationにする。
 - `python scripts\nsmb_mvl_ai_predict_imitation.py <model.npz> <dataset.csv> <predictions.csv>` で学習済みモデルのオフライン推論結果を確認する。
+- `python scripts\nsmb_mvl_ai_export_runtime_model.py <model.npz> <runtime-model.json>` で、C++ランタイム用の線形ポリシーモデルへ変換する。
+- `build\release-windows-x86_64\nsmb_mvl_imitation_cpp_predict.exe <runtime-model.json> <dataset.csv> <cpp-predictions.csv>` で、C++ランタイムによるdataset CSV推論を実行する。
+- `python scripts\nsmb_mvl_ai_compare_cpp_imitation.py <model.npz> <dataset.csv> <runtime-model.json> <cpp-exe> <output-dir>` で、Python推論とC++推論の `pred_held` / button確率をフレーム単位で比較する。
 - `python scripts\nsmb_mvl_ai_predict_input_script.py <model.npz> <playlog.jsonl|recording.json|recordings-index.json> <model.inputs> --player 1 --prefix-script tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs --end-frame <frame>` で、学習済みモデルの予測をmelonDS input scriptへ戻す。`--reaction-delay-frames`、`--mistake-rate`、`--mistake-mode` で実プレイ向けの強さ調整候補も入れられる。
 - `python scripts\nsmb_mvl_ai_verify_replay.py <expected recording.json|playlog.jsonl> <actual playlog.jsonl>` で、melonDS replayが完全再現できているかを最終状態で検証する。
 - `pwsh scripts\run-nsmb-mvl-recording-replay.ps1 -RecordingManifest <recording.json>` で、manifest内の `replay.mode` に従ってinput script replayまたはpacket replayを起動し、host/client別AI play logを取り直して検証する。起動計画だけ確認する場合は `-DryRun` を使う。最初のズレを調べる場合は `-ScanFrames`、間引き確認は `-CheckpointInterval 30 -CheckpointStartFrame 900` などを指定する。
@@ -215,7 +219,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
    - 人間ログ、RuleAIログ、将来の自己対戦ログを混ぜられるよう、source/kind/player/role/stage/scenario/qualityを特徴量ではなくmetadataとして保持する。
 
 5. 学習モデルをゲーム入力へ戻して閉ループ評価する。
-   - まず既存 `.npz` の簡易モデルをPoCまたは外部sidecarから推論し、remote CPU入力へ戻す。
+   - まず既存 `.npz` の簡易モデルはC++ランタイムでdataset CSVに対してPython推論と一致するところまで確認済み。次はPoC内の `GameStateSample` / object scan / fireball handler状態から同じfeature vectorを組み立て、input script生成を介さずremote CPU入力へ戻す。
    - 推論時は直近数frameの状態、前回入力、action hold、反応遅延、ランダムミス率、無効入力抑制を入れる。
    - オフライン一致率だけでなく、stage 0で一定時間生存、Big Starへ近づく、落下しない、相手と戦う、itemを使う、というゲーム内指標で評価する。
 
@@ -234,7 +238,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `logs/nsmb-mvl-human-recording-stage0-20260608-012640` の人間ログでは、Luigiがファイアーボールを撃つ場面でも `players[1].powerup` は0固定、`inventoryPowerup` は1固定だった。一方で `players[1].visualState.actorPowerupState` / `actorPowerupFormState` は0/1/2に変化し、最終的に2が長く出る。新規ログでは `visualPowerupKindCandidate` と `canShootFireVisualCandidate` を併用し、古い同ログは新フィールド追加前の記録として扱う。
 - スター無敵、ダメージ後無敵、巨大/豆/甲羅中の一時状態について、damage guard timer/cooldown/flag、physics guard、shell stateはログ/dataset/SVG/manifestへ流れるようになった。`visualState.invincibleKnown=1` と `audit_visual_state.invincibilityUnknown=0` は確認済み。ただし、どのvisual effectがスター由来か、ダメージ後由来か、powerup適用中由来かの原因分類は未確定で、stage 0実ログで画面表示とtimer変化を照合する必要がある。
 - 8コイン報酬itemはdatasetに明示列が入ったが、item settingsと画面上の種類の対応はまだ完全ではない。`0x0001108B` は `human-stage0-item-box-001` でマメ系と疑われる報酬itemとして避ける候補にしているが、最終確定にはSVG/実機画面との追加照合が必要。raw settingsを列に残しているため、mappingだけ後から修正してdatasetを再生成できる。
-- 自己対戦に進む前に、ログschemaを実プレイログで増強し、学習済みモデルを入力へ戻した状態でstage 0を閉ループ評価する必要がある。現時点では `.npz` からmelonDS input scriptを生成する経路はできたが、PoC内で状態を逐次推論して即時入力へ戻す直結経路と、モデル入力scriptでの安定した実走評価は未完了。
+- 自己対戦に進む前に、ログschemaを実プレイログで増強し、学習済みモデルを入力へ戻した状態でstage 0を閉ループ評価する必要がある。現時点では `.npz` からmelonDS input scriptを生成する経路と、同じ線形モデルをC++で推論してPython推論と一致させる経路はできた。未完了なのは、PoC内の実RAM状態からdatasetと同一schemaのfeature vectorをC++で組み立て、逐次推論結果を即時入力へ戻す直結経路と、その閉ループ実走評価。
 - 性能/同期面では、2窓 input-netplay の手動記録はまだ学習ログ既定にできない。`logs/nsmb-mvl-human-recording-stage0-20260608-005445` と同期再試行ログではpeer接続が成立せず、host/clientのgameplay heartbeat状態も一致しなかった。`run-nsmb-mvl-netplay-route-smoke.ps1` ではpeer接続自体は成立するため、問題は手動2窓記録時の input-netplay/defer/start wait 経路にある。学習用の人間記録は、修正済みの `single_client_authoritative` で取る。
 - 学習・大量評価には、client-only記録だけでなく、PoC内直結推論、単一プロセス評価、ヘッドレス高速実行、または状態遷移だけを回す専用runnerが必要。client-only記録は実プレイログ収集には足りるが、自己対戦を高速に回すにはまだ専用化が必要。
 - fireballなどのprojectile系objectは、通常actor object listではなく専用handlerで管理されるものがある。Fireball slot別の座標/前フレーム座標/速度/source kind/state/facing、player fireball ownerは取れるようになった。`Fireball::create` の逆アセンブルにより、slot `+0x81` がsource kindで、player fireballでは `0/1` がowner player idであると確定した。残課題は寿命、当たり判定状態、state/facingの詳細意味、敵fireball kind `2/3` の画面上挙動の照合。
@@ -242,6 +246,11 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 
 ## Verification
 
+- 2026-06-09 C++模倣推論ランタイム追加後に `python -m py_compile scripts\nsmb_mvl_ai_export_runtime_model.py scripts\nsmb_mvl_ai_compare_cpp_imitation.py scripts\nsmb_mvl_ai_predict_imitation.py` pass。
+- 2026-06-09 C++模倣推論ランタイム追加後に `g++ -std=c++17 -O2 -Isrc/frontend/qt_sdl tools/nsmb_mvl_imitation_cpp_predict.cpp src/frontend/qt_sdl/NsmbImitationAI.cpp -o tmp/nsmb_mvl_imitation_cpp_predict.exe` pass。
+- 2026-06-09 C++模倣推論ランタイム追加後に `cmake --build build\release-windows-x86_64 --target nsmb_mvl_imitation_cpp_predict --config Release` pass。
+- 2026-06-09 C++模倣推論ランタイム追加後に `cmake --build build\release-windows-x86_64 --target melonDS --config Release` pass。既知の `clang++: argument unused during compilation: '-s'` と `lld-link: found both wWinMain and WinMain; using latter` 警告のみ。
+- 2026-06-09 `logs\codex-human-imitation-baseline-20260608\human-stage0-player1-imitation.npz` を `logs\codex-cpp-imitation-parity-20260609\human-stage0-player1-runtime-model.json` へexportし、`logs\codex-human-imitation-baseline-20260608\human-stage0-player1-dataset.csv` 36,281行でPython推論とC++推論を比較。`build\release-windows-x86_64\nsmb_mvl_imitation_cpp_predict.exe` で `button_acc=0.951 exact=0.569`、Python側と同一、`pred_held` 全行一致、最大確率差 `0.00000100`。
 - 2026-06-08 visual powerup候補とfireball owner追跡追加後に `python -m py_compile scripts\nsmb_mvl_ai_build_dataset.py scripts\nsmb_mvl_ai_create_recording_manifest.py scripts\nsmb_mvl_ai_audit_visual_state.py scripts\nsmb_mvl_ai_render_playlog_svg.py` pass。
 - 2026-06-08 visual powerup候補とfireball owner追跡追加後に `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4` pass。既知の `clang++: argument unused during compilation: '-s'` と `lld-link: found both wWinMain and WinMain; using latter` 警告のみ。
 - 2026-06-08 fireball owner解析: `roms\nsmb-us.nds` のoverlay10を逆アセンブルし、`Fireballs::spawnPlayerFireball` がplayer idをkindとして `Fireballs::spawn` へ渡し、`Fireball::create` がkindをslot `+0x81` へ保存することを確認。`FireballHandler::spawn` がslot indexを第5引数として渡し、slot `+0x86` へ保存するため、`+0x86` はownerではなくslot index。
@@ -403,7 +412,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `run-nsmb-mvl-recording-replay.ps1 -ScanFrames` でpacket replayの実走を行い、最終frame、checkpoint frame、最初の不一致reportを確認する。必要ならinput script replayとの差分も比較する。
 - 落下死ラインとステージ境界をメモリから取り、`fallRisk` と `tileProbe.holeAhead` を統合した危険判定を作る。
 - 学習済み `.npz` から生成したinput scriptでstage 0を実走させ、一定時間生存、Big Star接近、落下しない、相手と戦うなどのゲーム内指標をmanifestへ入れる。今回のsplit smokeはloader成功後にremote input timeoutになったため、まずharness条件を安定させる。
-- PoC内または外部sidecarで状態を逐次推論し、input script生成を介さずremote CPU入力へ戻す直結経路を作る。
+- C++模倣推論ランタイムはdataset CSV上でPython推論と一致済み。次はPoC内で `GameStateSample` / object scan / fireball handler / tileProbeからdatasetと同じfeature vectorを作る `Observation -> FeatureEncoder` を実装し、input script生成を介さずremote CPU入力へ戻す直結経路を作る。
 - 学習/自己対戦用には、現行の2プロセスGUI寄りsmokeではなく、描画・音声・通信待ち・stdoutを削った高速評価runnerを用意する。目標は少なくともリアルタイム60fps、自己対戦データ生成では可能なら数百fps以上。
 - AI play log性能は、次に `TraceAIPlayLog` 内のobject scan、JSON構築、ofstream書き込みを別々に計測する。今回のflush batchingはログ本文を完全一致させたままスパイクを減らしたが、長時間の手動記録でまだ60fpsを割る場合は、1行分をメモリで組み立てて1回writeする経路など、ログ内容不変の最適化だけを測定して入れる。
 - 8コイン報酬itemのsettings mappingを追加ログで検証する。特に `0x0001108B` をマメ系として避ける扱いでよいか、`0x00011088` / `0x00011081` / `0x00011099` / `0x000D0002` の画面上の種類は何かを、SVGと手動記録で照合する。
