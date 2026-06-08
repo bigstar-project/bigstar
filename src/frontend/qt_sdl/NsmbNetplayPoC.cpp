@@ -12,6 +12,7 @@
 */
 
 #include "NsmbNetplayPoC.h"
+#include "NsmbImitationAI.h"
 #include "NsmbRuleAI.h"
 
 #include <algorithm>
@@ -36,6 +37,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #include <QImage>
@@ -1601,6 +1603,21 @@ struct State
     int RuleAIJumpFrames = 9;
     bool RuleAITraceEnabled = false;
     int RuleAITraceInterval = 60;
+    bool ImitationAIEnabled = false;
+    bool ImitationAIHostOnly = false;
+    bool ImitationAIClientOnly = false;
+    std::string ImitationAIPlayerSpec = "remote";
+    melonDS::u32 ImitationAIStartFrame = 0;
+    double ImitationAIThreshold = 0.5;
+    melonDS::u32 ImitationAIAllowedHeldMask = 0x8F3;
+    bool ImitationAITraceEnabled = false;
+    int ImitationAITraceInterval = 60;
+    bool ImitationAIWarnMissingFeatures = true;
+    std::string ImitationAIModelPath;
+    NsmbImitationAI::LinearPolicyModel ImitationAIModel;
+    bool ImitationAIModelLoaded = false;
+    int ImitationAIFeaturesFilled = 0;
+    int ImitationAIFeaturesMissing = 0;
     bool MvlAutoRestartCheckpointLogged[16] {};
     bool DirectMvlBootUseLoadGameSM = false;
     bool DirectMvlBootPatchLoadGameSMOnly = false;
@@ -2134,6 +2151,17 @@ int EnvInt(const char* name, int fallback)
     return static_cast<int>(parsed);
 }
 
+double EnvDouble(const char* name, double fallback)
+{
+    const char* value = std::getenv(name);
+    if (!value || !value[0]) return fallback;
+    char* end = nullptr;
+    const double parsed = std::strtod(value, &end);
+    if (end == value)
+        return fallback;
+    return parsed;
+}
+
 melonDS::u32 EnvU32(const char* name, melonDS::u32 fallback)
 {
     const char* value = std::getenv(name);
@@ -2652,6 +2680,24 @@ bool RuleAIProvidesInputForPlayer(int player)
         return false;
     return NsmbRuleAI::ControlsPlayer(
         RuleAIConfig(),
+        player,
+        CurrentPacketBridgeLocalPlayer());
+}
+
+bool ImitationAIProvidesInputForPlayer(int player)
+{
+    if (!G.ImitationAIEnabled || !G.ImitationAIModelLoaded)
+        return false;
+    if (G.ImitationAIHostOnly && G.NetRole != Role::Host)
+        return false;
+    if (G.ImitationAIClientOnly && G.NetRole != Role::Client)
+        return false;
+
+    NsmbRuleAI::Config config {};
+    config.Enabled = true;
+    config.PlayerSpec = G.ImitationAIPlayerSpec;
+    return NsmbRuleAI::ControlsPlayer(
+        config,
         player,
         CurrentPacketBridgeLocalPlayer());
 }
@@ -10185,6 +10231,13 @@ int CurrentPacketBridgeLocalPlayer()
     return 0;
 }
 
+InputState ApplyImitationAIInput(
+    int instanceID,
+    melonDS::u32 frame,
+    melonDS::NDS* nds,
+    int player,
+    const InputState& fallback);
+
 InputState PacketBridgeInputForPlayer(
     int player,
     int localPlayer,
@@ -10234,7 +10287,8 @@ void WritePacketBridgeJitScratchInputs(
             localInput,
             remoteInput,
             hasRemoteInput);
-        const InputState effectiveInput = ApplyRuleBasedAIInput(instanceID, frame, nds, player, input);
+        InputState effectiveInput = ApplyRuleBasedAIInput(instanceID, frame, nds, player, input);
+        effectiveInput = ApplyImitationAIInput(instanceID, frame, nds, player, effectiveInput);
         RecordAIPlayLogAppliedInput(instanceID, frame, player, effectiveInput);
         const melonDS::u32 keys = (~effectiveInput.KeyMask) & 0x0FFF;
         nds->ARM9Write16(kPacketBridgeJitScratchKeysAddr + static_cast<melonDS::u32>(player * 2),
@@ -10682,7 +10736,8 @@ void WritePacketBridgeJitScratchIfNeeded(
 
     const int localPlayer = CurrentPacketBridgeLocalPlayer();
     if (G.InputNetplayOnly && G.WaitForPeerBeforeStart && G.NetplayStartFrame > 0
-        && !RuleAIProvidesInputForPlayer(localPlayer ^ 1))
+        && !RuleAIProvidesInputForPlayer(localPlayer ^ 1)
+        && !ImitationAIProvidesInputForPlayer(localPlayer ^ 1))
     {
         const melonDS::u32 delay = static_cast<melonDS::u32>(std::max(0, G.Delay));
         const melonDS::u32 sendStartFrame = (G.NetplayStartFrame > delay)
@@ -10745,11 +10800,13 @@ void WritePacketBridgeJitScratchIfNeeded(
         ThrottleInputNetplayFrameLead(nds, frame, sendFrame);
         throttleUs = static_cast<unsigned long long>(ElapsedUs(throttleStart));
 
-        const bool ruleAIProvidesRemoteInput = RuleAIProvidesInputForPlayer(localPlayer ^ 1);
+        const bool aiProvidesRemoteInput =
+            RuleAIProvidesInputForPlayer(localPlayer ^ 1) ||
+            ImitationAIProvidesInputForPlayer(localPlayer ^ 1);
         if (!hasRemoteInput
             && !G.RollbackEnabled
             && G.LocalWaitsForRemote
-            && !ruleAIProvidesRemoteInput
+            && !aiProvidesRemoteInput
             && (!G.InputNetplayOnly || G.NetplayStartFrame == 0 || logicalFrame >= G.NetplayStartFrame))
         {
             const auto waitStart = std::chrono::steady_clock::now();
@@ -15373,6 +15430,760 @@ void WriteAIVisualSummaryJson(
     out << "]}";
 }
 
+bool AITileTypeFeature(melonDS::u32 tileType, const std::string& name, double& out)
+{
+    auto bit = [tileType](melonDS::u32 mask) { return (tileType & mask) ? 1.0 : 0.0; };
+    if (name == "solid") out = bit(0x00010000);
+    else if (name == "coin") out = bit(0x00020000);
+    else if (name == "questionBlock") out = bit(0x00040000);
+    else if (name == "breakableBlock") out = bit(0x00080000);
+    else if (name == "brickBlock") out = bit(0x00100000);
+    else if (name == "slope") out = bit(0x00200000);
+    else if (name == "ceilingSlope") out = bit(0x00400000);
+    else if (name == "scanSolid") out = bit(0x00800000);
+    else if (name == "entrance") out = bit(0x01000000);
+    else if (name == "water") out = bit(0x02000000);
+    else if (name == "climbable") out = bit(0x04000000);
+    else if (name == "partialSolid") out = bit(0x08000000);
+    else if (name == "harmful") out = bit(0x10000000);
+    else if (name == "invisibleBlock") out = bit(0x20000000);
+    else if (name == "solidOnBottom") out = bit(0x40000000);
+    else if (name == "solidOnTop") out = bit(0x80000000);
+    else if (name == "modifier") out = static_cast<double>((tileType & 0x0000F000u) >> 12);
+    else if (name == "lowType") out = static_cast<double>(tileType & 0x000000FFu);
+    else if (name == "storageContents") out = static_cast<double>(tileType & 0x00000C3Fu);
+    else return false;
+    return true;
+}
+
+bool AIContactFeature(melonDS::u32 collisionFlag, melonDS::u32 environmentFlag, const std::string& name, double& out)
+{
+    auto bit = [](melonDS::u32 value, melonDS::u32 mask) { return (value & mask) ? 1.0 : 0.0; };
+    const double ground =
+        bit(collisionFlag, 0x00000001) ||
+        bit(collisionFlag, 0x00002000) ||
+        bit(collisionFlag, 0x00008000) ||
+        bit(collisionFlag, 0x08000000);
+    const double wallLeft =
+        bit(collisionFlag, 0x00000008) ||
+        bit(collisionFlag, 0x00000400) ||
+        bit(collisionFlag, 0x20000000);
+    const double wallRight =
+        bit(collisionFlag, 0x00000010) ||
+        bit(collisionFlag, 0x00000800) ||
+        bit(collisionFlag, 0x40000000);
+    const double submerged =
+        bit(collisionFlag, 0x00400000) ||
+        bit(environmentFlag, 0x00000002) ||
+        bit(environmentFlag, 0x00000200);
+    if (name == "ground") out = ground;
+    else if (name == "tileGround") out = bit(collisionFlag, 0x00000001);
+    else if (name == "hoverTileGround") out = bit(collisionFlag, 0x00002000);
+    else if (name == "colliderGround") out = bit(collisionFlag, 0x00008000);
+    else if (name == "predictGround") out = bit(collisionFlag, 0x08000000);
+    else if (name == "ceiling") out = bit(collisionFlag, 0x00000002);
+    else if (name == "pushWall") out = bit(collisionFlag, 0x00000004);
+    else if (name == "wallLeft") out = wallLeft;
+    else if (name == "wallRight") out = wallRight;
+    else if (name == "edgeGrab") out = bit(collisionFlag, 0x00001000);
+    else if (name == "slipperyGround") out = bit(collisionFlag, 0x00004000);
+    else if (name == "water") out = bit(collisionFlag, 0x00000020);
+    else if (name == "liquid") out = bit(collisionFlag, 0x00400000);
+    else if (name == "submerged") out = submerged;
+    else if (name == "quicksandTop") out = bit(collisionFlag, 0x00010000);
+    else if (name == "quicksand") out = bit(collisionFlag, 0x00020000);
+    else if (name == "rope") out = bit(collisionFlag, 0x00040000);
+    else if (name == "tightrope") out = bit(collisionFlag, 0x00800000);
+    else if (name == "ledge") out = bit(collisionFlag, 0x01000000);
+    else if (name == "pole") out = bit(collisionFlag, 0x10000000);
+    else if (name == "spikesLeft") out = bit(collisionFlag, 0x20000000);
+    else if (name == "spikesRight") out = bit(collisionFlag, 0x40000000);
+    else if (name == "slowGround") out = bit(environmentFlag, 0x00000001);
+    else if (name == "conveyorLeft") out = bit(environmentFlag, 0x00000008);
+    else if (name == "conveyorRight") out = bit(environmentFlag, 0x00000010);
+    else if (name == "snowyGround") out = bit(environmentFlag, 0x00000020);
+    else if (name == "sandyGround") out = bit(environmentFlag, 0x00000040);
+    else if (name == "destroyedGround") out = bit(environmentFlag, 0x00000100);
+    else if (name == "climbableBottom") out = bit(environmentFlag, 0x00000400);
+    else if (name == "climbableTop") out = bit(environmentFlag, 0x00000800);
+    else if (name == "destroyedCeiling") out = bit(environmentFlag, 0x00001000);
+    else if (name == "wrapLeft") out = bit(environmentFlag, 0x00002000);
+    else if (name == "wrapRight") out = bit(environmentFlag, 0x00004000);
+    else return false;
+    return true;
+}
+
+bool RuntimePlayerFeature(
+    const GameStateSample& sample,
+    const std::string& name,
+    int player,
+    double& out)
+{
+    const bool p0 = player == 0;
+    auto v = [p0](melonDS::u32 a, melonDS::u32 b) { return p0 ? a : b; };
+    const melonDS::u32 found = v(sample.PlayerActor0Found, sample.PlayerActor1Found);
+    const melonDS::u32 x = v(sample.PlayerActor0PosX, sample.PlayerActor1PosX);
+    const melonDS::u32 y = v(sample.PlayerActor0PosY, sample.PlayerActor1PosY);
+    const melonDS::u32 z = v(sample.PlayerActor0PosZ, sample.PlayerActor1PosZ);
+    const melonDS::u32 vx = v(sample.PlayerActor0VelX, sample.PlayerActor1VelX);
+    const melonDS::u32 vy = v(sample.PlayerActor0VelY, sample.PlayerActor1VelY);
+    const melonDS::u32 vz = v(sample.PlayerActor0VelZ, sample.PlayerActor1VelZ);
+    const melonDS::u32 collision = v(sample.PlayerActor0CollisionFlag, sample.PlayerActor1CollisionFlag);
+    const melonDS::u32 environment = v(sample.PlayerActor0EnvironmentFlag, sample.PlayerActor1EnvironmentFlag);
+    const melonDS::u32 powerup = v(sample.Player0Powerup, sample.Player1Powerup);
+    const melonDS::u32 inventoryPowerup = v(sample.Player0InventoryPowerup, sample.Player1InventoryPowerup);
+    const melonDS::u32 powerupState = v(sample.PlayerActor0PowerupState, sample.PlayerActor1PowerupState);
+    const melonDS::u32 powerupFormState = v(sample.PlayerActor0PowerupFormState, sample.PlayerActor1PowerupFormState);
+    const melonDS::u32 shellState = v(sample.PlayerActor0ShellState, sample.PlayerActor1ShellState);
+    const melonDS::u32 visualPowerup =
+        AIVisualPowerupKindCandidate(powerup, inventoryPowerup, powerupState, powerupFormState, shellState);
+    const melonDS::u32 visualSource =
+        AIVisualPowerupSourceMask(powerup, inventoryPowerup, powerupState, powerupFormState, shellState);
+    const PlayerCollisionMgrSample& collisionMgr =
+        p0 ? sample.PlayerActor0CollisionMgr : sample.PlayerActor1CollisionMgr;
+    const AIPlayerTileProbeSample& tileProbe =
+        p0 ? sample.PlayerActor0TileProbe : sample.PlayerActor1TileProbe;
+    const melonDS::u32 tileDamageFlags =
+        p0 ? sample.PlayerActor0TileDamageFlags : sample.PlayerActor1TileDamageFlags;
+    const melonDS::u32 tileDamageType =
+        p0 ? sample.PlayerActor0TileDamageType : sample.PlayerActor1TileDamageType;
+    const melonDS::u32 damageCooldown =
+        p0 ? sample.PlayerActor0DamageCooldown : sample.PlayerActor1DamageCooldown;
+    const melonDS::u32 damageGuardTimer =
+        p0 ? sample.Player0DamageGuardTimer : sample.Player1DamageGuardTimer;
+    const melonDS::u32 damageGuardFlag =
+        p0 ? sample.PlayerActor0DamageGuardFlag : sample.PlayerActor1DamageGuardFlag;
+    const bool damagePhysicsGuard =
+        (v(sample.PlayerActor0PhysicsFlag, sample.PlayerActor1PhysicsFlag) & 0x80000000u) != 0;
+
+    if (name == "found") out = found;
+    else if (name == "x") out = SignedU32(x);
+    else if (name == "y") out = SignedU32(y);
+    else if (name == "z") out = SignedU32(z);
+    else if (name == "vx") out = SignedU32(vx);
+    else if (name == "vy") out = SignedU32(vy);
+    else if (name == "vz") out = SignedU32(vz);
+    else if (name == "action") out = v(sample.PlayerActor0ActionFlag, sample.PlayerActor1ActionFlag);
+    else if (name == "sub_action") out = v(sample.PlayerActor0SubActionFlag, sample.PlayerActor1SubActionFlag);
+    else if (name == "physics") out = v(sample.PlayerActor0PhysicsFlag, sample.PlayerActor1PhysicsFlag);
+    else if (name == "collision") out = collision;
+    else if (name == "environment") out = environment;
+    else if (name == "powerup") out = powerup;
+    else if (name == "inventory_powerup") out = inventoryPowerup;
+    else if (name == "damage_cooldown") out = damageCooldown;
+    else if (name == "has_reserve_item_candidate") out = inventoryPowerup != 0 ? 1 : 0;
+    else if (name == "can_shoot_fire_candidate") out = powerup == 2 ? 1 : 0;
+    else if (name == "visual_powerup_kind_candidate") out = visualPowerup;
+    else if (name == "visual_powerup_source_mask") out = visualSource;
+    else if (name == "is_fire_visual_candidate") out = visualPowerup == 2 ? 1 : 0;
+    else if (name == "can_shoot_fire_visual_candidate") out = visualPowerup == 2 ? 1 : 0;
+    else if (name == "is_shell_candidate") out = powerup == 4 || shellState != 0 ? 1 : 0;
+    else if (name == "is_mega_candidate") out = powerup == 5 ? 1 : 0;
+    else if (name == "actor_powerup_state") out = powerupState;
+    else if (name == "actor_powerup_form_state") out = powerupFormState;
+    else if (name == "actor_powerup_aux_state") out = v(sample.PlayerActor0PowerupAuxState, sample.PlayerActor1PowerupAuxState);
+    else if (name == "actor_powerup_sub_state") out = v(sample.PlayerActor0PowerupSubState, sample.PlayerActor1PowerupSubState);
+    else if (name == "damage_state") out = v(sample.PlayerActor0DamageState, sample.PlayerActor1DamageState);
+    else if (name == "damage_guard_flag") out = damageGuardFlag;
+    else if (name == "damage_guard_timer") out = damageGuardTimer;
+    else if (name == "damage_physics_guard") out = damagePhysicsGuard ? 1 : 0;
+    else if (name == "powerup_apply_lock") out = v(sample.PlayerActor0PowerupApplyLock, sample.PlayerActor1PowerupApplyLock);
+    else if (name == "shell_state") out = shellState;
+    else if (name == "invincible_known") out = 1;
+    else if (name == "invincible_candidate") out =
+        damageGuardTimer != 0 || damageCooldown != 0 || damageGuardFlag != 0 || damagePhysicsGuard ? 1 : 0;
+    else if (name == "dead") out = v(sample.Player0Dead, sample.Player1Dead);
+    else if (name == "battle_stars") out = v(sample.Player0BattleStars, sample.Player1BattleStars);
+    else if (name == "coins") out = v(sample.Player0Coins, sample.Player1Coins);
+    else if (name == "screen0_x")
+        out = AIWrappedDeltaX(SignedU32(x), SignedU32(sample.StageCameraGlobalX0));
+    else if (name == "screen0_y")
+        out = SignedU32(y) - SignedU32(sample.StageCameraGlobalY0);
+    else if (name == "screen0_in_view_x")
+        out = IsInCameraRect(x, sample.StageCameraGlobalY0, sample.StageCameraGlobalX0, sample.StageCameraGlobalY0, sample.StageCameraGlobalWidth0, sample.StageCameraGlobalHeight0) ? 1 : 0;
+    else if (name == "screen0_in_view_y")
+        out = (SignedU32(y) - SignedU32(sample.StageCameraGlobalY0)) >= 0 &&
+            (SignedU32(y) - SignedU32(sample.StageCameraGlobalY0)) < SignedU32(sample.StageCameraGlobalHeight0) ? 1 : 0;
+    else if (name == "screen0_in_view")
+        out = IsInCameraRect(x, y, sample.StageCameraGlobalX0, sample.StageCameraGlobalY0, sample.StageCameraGlobalWidth0, sample.StageCameraGlobalHeight0) ? 1 : 0;
+    else if (name == "screen1_x")
+        out = AIWrappedDeltaX(SignedU32(x), SignedU32(sample.StageCameraGlobalX1));
+    else if (name == "screen1_y")
+        out = SignedU32(y) - SignedU32(sample.StageCameraGlobalY1);
+    else if (name == "screen1_in_view_x")
+        out = IsInCameraRect(x, sample.StageCameraGlobalY1, sample.StageCameraGlobalX1, sample.StageCameraGlobalY1, sample.StageCameraGlobalWidth1, sample.StageCameraGlobalHeight1) ? 1 : 0;
+    else if (name == "screen1_in_view_y")
+        out = (SignedU32(y) - SignedU32(sample.StageCameraGlobalY1)) >= 0 &&
+            (SignedU32(y) - SignedU32(sample.StageCameraGlobalY1)) < SignedU32(sample.StageCameraGlobalHeight1) ? 1 : 0;
+    else if (name == "screen1_in_view")
+        out = IsInCameraRect(x, y, sample.StageCameraGlobalX1, sample.StageCameraGlobalY1, sample.StageCameraGlobalWidth1, sample.StageCameraGlobalHeight1) ? 1 : 0;
+    else if (name == "camera_bottom_distance0")
+        out = SignedU32(sample.StageCameraGlobalY0) + SignedU32(sample.StageCameraGlobalHeight0) - SignedU32(y);
+    else if (name == "camera_bottom_distance1")
+        out = SignedU32(sample.StageCameraGlobalY1) + SignedU32(sample.StageCameraGlobalHeight1) - SignedU32(y);
+    else if (name == "near_camera_bottom0")
+    {
+        const int d = SignedU32(sample.StageCameraGlobalY0) + SignedU32(sample.StageCameraGlobalHeight0) - SignedU32(y);
+        out = d >= 0 && d <= 32 * 4096 ? 1 : 0;
+    }
+    else if (name == "near_camera_bottom1")
+    {
+        const int d = SignedU32(sample.StageCameraGlobalY1) + SignedU32(sample.StageCameraGlobalHeight1) - SignedU32(y);
+        out = d >= 0 && d <= 32 * 4096 ? 1 : 0;
+    }
+    else if (name == "below_camera0")
+        out = (SignedU32(y) - SignedU32(sample.StageCameraGlobalY0)) > SignedU32(sample.StageCameraGlobalHeight0) ? 1 : 0;
+    else if (name == "below_camera1")
+        out = (SignedU32(y) - SignedU32(sample.StageCameraGlobalY1)) > SignedU32(sample.StageCameraGlobalHeight1) ? 1 : 0;
+    else if (name == "vel_y_positive") out = SignedU32(vy) > 0 ? 1 : 0;
+    else if (name == "vel_y_negative") out = SignedU32(vy) < 0 ? 1 : 0;
+    else if (name.rfind("contact_", 0) == 0)
+        return AIContactFeature(collision, environment, name.substr(8), out);
+    else if (name == "collision_mgr_found") out = collisionMgr.Found;
+    else if (name == "collision_mgr_collision_result") out = collisionMgr.CollisionResult;
+    else if (name == "collision_mgr_ground_collision") out = collisionMgr.GroundCollision;
+    else if (name == "collision_mgr_delta_x") out = SignedU32(collisionMgr.DeltaX);
+    else if (name == "collision_mgr_delta_y") out = SignedU32(collisionMgr.DeltaY);
+    else if (name == "collision_mgr_bottom_modifier_tile_type") out = collisionMgr.BottomModifierTileType;
+    else if (name == "collision_mgr_bottom_modifier_tile_sane") out = 1;
+    else if (name == "collision_mgr_attached_tile_x") out = collisionMgr.AttachedTileX;
+    else if (name == "collision_mgr_attached_tile_y") out = collisionMgr.AttachedTileY;
+    else if (name == "collision_mgr_top_modifier_tile_type") out = collisionMgr.TopModifierTileType;
+    else if (name == "collision_mgr_side_modifier_tile_type_left") out = collisionMgr.SideModifierTileTypeLeft;
+    else if (name == "collision_mgr_side_modifier_tile_type_right") out = collisionMgr.SideModifierTileTypeRight;
+    else if (name == "collision_mgr_bottom_slope_type") out = static_cast<int>(static_cast<std::int8_t>(collisionMgr.BottomSlopeType));
+    else if (name == "collision_mgr_top_slope_type") out = static_cast<int>(static_cast<std::int8_t>(collisionMgr.TopSlopeType));
+    else if (name == "collision_mgr_flags_a8") out = collisionMgr.FlagsA8;
+    else if (name == "collision_mgr_tile_byte_ab") out = static_cast<int>(static_cast<std::int8_t>(collisionMgr.TileByteAB));
+    else if (name == "collision_mgr_modifier_state") out = collisionMgr.ModifierState;
+    else if (name.rfind("bottom_modifier_tile_", 0) == 0)
+        return AITileTypeFeature(collisionMgr.BottomModifierTileType, name.substr(21), out);
+    else if (name == "tile_damage_flags") out = tileDamageFlags;
+    else if (name == "tile_damage_type") out = static_cast<int>(static_cast<std::int8_t>(tileDamageType));
+    else if (name == "tile_damage_active") out = tileDamageFlags != 0 ? 1 : 0;
+    else if (name == "tile_probe_found") out = tileProbe.Found;
+    else if (name == "tile_probe_direction") out = SignedU32(tileProbe.Direction);
+    else if (name.rfind("tile_probe_", 0) == 0)
+    {
+        const std::string suffix = name.substr(11);
+        const bool contactGround = AIPlayerContactGround(collision);
+        const int groundBelow = AITileProbeSolidishValue(tileProbe, "below");
+        const int aheadBody = AITileProbeSolidishValue(tileProbe, "aheadBody");
+        const int aheadFeet = AITileProbeSolidishValue(tileProbe, "aheadFeet");
+        const int aheadBelow = AITileProbeSolidishValue(tileProbe, "aheadBelow");
+        const int ahead2Below = AITileProbeSolidishValue(tileProbe, "ahead2Below");
+        const int leftBody = AITileProbeSolidishValue(tileProbe, "leftBody");
+        const int leftFeet = AITileProbeSolidishValue(tileProbe, "leftFeet");
+        const int leftBelow = AITileProbeSolidishValue(tileProbe, "leftBelow");
+        const int left2Below = AITileProbeSolidishValue(tileProbe, "left2Below");
+        const int rightBody = AITileProbeSolidishValue(tileProbe, "rightBody");
+        const int rightFeet = AITileProbeSolidishValue(tileProbe, "rightFeet");
+        const int rightBelow = AITileProbeSolidishValue(tileProbe, "rightBelow");
+        const int right2Below = AITileProbeSolidishValue(tileProbe, "right2Below");
+        const int suppressHole = contactGround && !groundBelow ? 1 : 0;
+        if (suffix == "groundBelowSolid") out = groundBelow;
+        else if (suffix == "aheadBodySolid") out = aheadBody;
+        else if (suffix == "aheadFeetSolid") out = aheadFeet;
+        else if (suffix == "aheadBelowSolid") out = aheadBelow;
+        else if (suffix == "ahead2BelowSolid") out = ahead2Below;
+        else if (suffix == "wallAhead") out = aheadBody || aheadFeet ? 1 : 0;
+        else if (suffix == "holeAhead") out = tileProbe.Found && !aheadBelow && !ahead2Below ? 1 : 0;
+        else if (suffix == "wallLeft") out = leftBody || leftFeet ? 1 : 0;
+        else if (suffix == "holeLeft") out = tileProbe.Found && !leftBelow && !left2Below ? 1 : 0;
+        else if (suffix == "wallRight") out = rightBody || rightFeet ? 1 : 0;
+        else if (suffix == "holeRight") out = tileProbe.Found && !rightBelow && !right2Below ? 1 : 0;
+        else if (suffix == "contactGround") out = contactGround ? 1 : 0;
+        else if (suffix == "effectiveGroundBelowSolid") out = groundBelow || contactGround ? 1 : 0;
+        else if (suffix == "holeSuppressedByContact") out = suppressHole;
+        else if (suffix == "effectiveHoleAhead") out = tileProbe.Found && !aheadBelow && !ahead2Below && !suppressHole ? 1 : 0;
+        else if (suffix == "effectiveHoleLeft") out = tileProbe.Found && !leftBelow && !left2Below && !suppressHole ? 1 : 0;
+        else if (suffix == "effectiveHoleRight") out = tileProbe.Found && !rightBelow && !right2Below && !suppressHole ? 1 : 0;
+        else
+        {
+            const std::size_t pos = suffix.find('_');
+            if (pos == std::string::npos)
+                return false;
+            const std::string sampleName = suffix.substr(0, pos);
+            const std::string field = suffix.substr(pos + 1);
+            const AITileProbeSample* probeSample = FindAITileProbePoint(tileProbe, sampleName.c_str());
+            if (!probeSample)
+                return false;
+            if (field == "found") out = probeSample->Found;
+            else if (field == "status") out = probeSample->Status;
+            else if (field == "tile_id") out = probeSample->TileID;
+            else if (field == "behavior") out = probeSample->Behavior;
+            else if (field == "solidish") out = probeSample->Found && AITileBehaviorSolidish(probeSample->Behavior) ? 1 : 0;
+            else if (field == "pixel_x") out = probeSample->PixelX;
+            else if (field == "pixel_y") out = probeSample->PixelY;
+            else if (field.rfind("block_", 0) == 0)
+            {
+                const std::string blockField = field.substr(6);
+                const int question = (probeSample->Behavior & 0x00040000u) ? 1 : 0;
+                const int breakable = (probeSample->Behavior & 0x00080000u) ? 1 : 0;
+                const int brick = (probeSample->Behavior & 0x00100000u) ? 1 : 0;
+                const int invisible = (probeSample->Behavior & 0x20000000u) ? 1 : 0;
+                const melonDS::u32 storage = probeSample->Behavior & 0x00000C3Fu;
+                const int any = question || breakable || brick || invisible;
+                if (blockField == "any") out = any;
+                else if (blockField == "itemBox") out = any && storage != 0 ? 1 : 0;
+                else if (blockField == "question") out = question;
+                else if (blockField == "breakable") out = breakable;
+                else if (blockField == "brick") out = brick;
+                else if (blockField == "invisible") out = invisible;
+                else if (blockField == "hasStorageContents") out = any && storage != 0 ? 1 : 0;
+                else if (blockField == "storageContents") out = storage;
+                else if (blockField == "modifier") out = (probeSample->Behavior & 0x0000F000u) >> 12;
+                else if (blockField == "currentTileId") out = probeSample->TileID;
+                else if (blockField == "currentBehavior") out = probeSample->Behavior;
+                else return false;
+            }
+            else if (!AITileTypeFeature(probeSample->Behavior, field, out))
+            {
+                return false;
+            }
+        }
+    }
+    else return false;
+    return true;
+}
+
+const GameStateObjectScanEntry* NearestRuntimeObject(
+    const GameStateObjectScanCache& objectScanCache,
+    const char* category,
+    melonDS::u32 selfX,
+    melonDS::u32 selfY)
+{
+    const GameStateObjectScanEntry* nearest = nullptr;
+    std::int64_t nearestDist2 = 0;
+    for (const GameStateObjectScanEntry& entry : objectScanCache.Entries)
+    {
+        if (entry.LifecycleState != 1 ||
+            std::strcmp(AIObjectCategory(entry.ObjectID, entry.Actor.Settings), category) != 0)
+            continue;
+        const std::int64_t dist2 = DistanceSquared2D(entry.Actor.PosX, entry.Actor.PosY, selfX, selfY);
+        if (!nearest || dist2 < nearestDist2)
+        {
+            nearest = &entry;
+            nearestDist2 = dist2;
+        }
+    }
+    return nearest;
+}
+
+bool RuntimeObjectFeature(
+    const GameStateObjectScanCache& objectScanCache,
+    const std::string& name,
+    const std::string& prefix,
+    melonDS::u32 selfX,
+    melonDS::u32 selfY,
+    double& out)
+{
+    if (name.rfind(prefix, 0) != 0)
+        return false;
+    const std::string category = name.substr(prefix.size());
+    const std::size_t fieldPos = category.rfind('_');
+    if (fieldPos == std::string::npos)
+        return false;
+    const std::string categoryName = category.substr(0, fieldPos);
+    const std::string field = category.substr(fieldPos + 1);
+    const GameStateObjectScanEntry* nearest =
+        NearestRuntimeObject(objectScanCache, categoryName.c_str(), selfX, selfY);
+    if (field == "found") out = nearest ? 1 : 0;
+    else if (!nearest) out = 0;
+    else if (field == "dx") out = SignedU32(nearest->Actor.PosX) - SignedU32(selfX);
+    else if (field == "dy") out = SignedU32(nearest->Actor.PosY) - SignedU32(selfY);
+    else if (field == "dist") out = static_cast<double>(std::llround(std::sqrt(
+        static_cast<double>(DistanceSquared2D(nearest->Actor.PosX, nearest->Actor.PosY, selfX, selfY)))));
+    else return false;
+    return true;
+}
+
+bool IsRuntimeItemCategory(const char* category)
+{
+    return std::strcmp(category, "world_item") == 0 ||
+        std::strcmp(category, "neutral_item") == 0 ||
+        std::strcmp(category, "dropped_star_item") == 0 ||
+        std::strcmp(category, "item") == 0;
+}
+
+int RuntimeItemPowerupKindCandidate(melonDS::u32 settings)
+{
+    if (settings == 0x00090000u || settings == 0x00011089u)
+        return 2;
+    if (settings == 0x0001108Bu)
+        return 3;
+    return -1;
+}
+
+const GameStateObjectScanEntry* NearestRuntimeItem(
+    const GameStateObjectScanCache& objectScanCache,
+    melonDS::u32 selfX,
+    melonDS::u32 selfY,
+    bool requirePlainItem)
+{
+    const GameStateObjectScanEntry* nearest = nullptr;
+    std::int64_t nearestDist2 = 0;
+    for (const GameStateObjectScanEntry& entry : objectScanCache.Entries)
+    {
+        if (entry.LifecycleState != 1)
+            continue;
+        const char* category = AIObjectCategory(entry.ObjectID, entry.Actor.Settings);
+        if (!IsRuntimeItemCategory(category))
+            continue;
+        if (requirePlainItem && std::strcmp(category, "item") != 0)
+            continue;
+        const std::int64_t dist2 = DistanceSquared2D(entry.Actor.PosX, entry.Actor.PosY, selfX, selfY);
+        if (!nearest || dist2 < nearestDist2)
+        {
+            nearest = &entry;
+            nearestDist2 = dist2;
+        }
+    }
+    return nearest;
+}
+
+bool RuntimeItemFeature(
+    const GameStateObjectScanCache& objectScanCache,
+    const GameStateSample& sample,
+    const std::string& name,
+    const std::string& prefix,
+    melonDS::u32 selfX,
+    melonDS::u32 selfY,
+    bool requirePlainItem,
+    bool forceZero,
+    double& out)
+{
+    if (name.rfind(prefix, 0) != 0)
+        return false;
+    const std::string field = name.substr(prefix.size());
+    const GameStateObjectScanEntry* item =
+        forceZero ? nullptr : NearestRuntimeItem(objectScanCache, selfX, selfY, requirePlainItem);
+    if (field == "found") out = item ? 1 : 0;
+    else if (!item) out = field == "powerup_kind_candidate" ? -1 : 0;
+    else if (field == "dx") out = SignedU32(item->Actor.PosX) - SignedU32(selfX);
+    else if (field == "dy") out = SignedU32(item->Actor.PosY) - SignedU32(selfY);
+    else if (field == "dist") out = static_cast<double>(std::llround(std::sqrt(
+        static_cast<double>(DistanceSquared2D(item->Actor.PosX, item->Actor.PosY, selfX, selfY)))));
+    else if (field == "object_id") out = item->ObjectID;
+    else if (field == "settings") out = item->Actor.Settings;
+    else if (field == "settings_low8") out = item->Actor.Settings & 0xFFu;
+    else if (field == "vtable") out = item->VTable;
+    else if (field == "vx") out = SignedU32(item->Actor.VelX);
+    else if (field == "vy") out = SignedU32(item->Actor.VelY);
+    else if (field == "screen1_x") out = AIWrappedDeltaX(SignedU32(item->Actor.PosX), SignedU32(sample.StageCameraGlobalX1));
+    else if (field == "screen1_y") out = SignedU32(item->Actor.PosY) - SignedU32(sample.StageCameraGlobalY1);
+    else if (field == "screen1_in_view") out =
+        IsInCameraRect(item->Actor.PosX, item->Actor.PosY, sample.StageCameraGlobalX1, sample.StageCameraGlobalY1, sample.StageCameraGlobalWidth1, sample.StageCameraGlobalHeight1) ? 1 : 0;
+    else if (field == "powerup_kind_candidate") out = RuntimeItemPowerupKindCandidate(item->Actor.Settings);
+    else if (field == "is_fire_candidate") out = item->Actor.Settings == 0x00090000u || item->Actor.Settings == 0x00011089u ? 1 : 0;
+    else if (field == "is_dropped_star_candidate") out = item->Actor.Settings == 0x00090002u ? 1 : 0;
+    else if (field == "is_suspected_mini_candidate") out = item->Actor.Settings == 0x0001108Bu ? 1 : 0;
+    else if (field == "avoid_candidate") out = item->Actor.Settings == 0x0001108Bu ? 1 : 0;
+    else return false;
+    return true;
+}
+
+bool RuntimeFeatureValue(
+    const GameStateSample& sample,
+    const GameStateObjectScanCache& objectScanCache,
+    int instanceID,
+    melonDS::u32 frame,
+    bool inGameplay,
+    int player,
+    const std::string& name,
+    double& out)
+{
+    const int opponent = player ^ 1;
+    const melonDS::u32 selfX = player == 0 ? sample.PlayerActor0PosX : sample.PlayerActor1PosX;
+    const melonDS::u32 selfY = player == 0 ? sample.PlayerActor0PosY : sample.PlayerActor1PosY;
+
+    if (name == "frame") out = frame;
+    else if (name == "stage_id") out = sample.StageID;
+    else if (name == "stage_group") out = sample.StageGroup;
+    else if (name == "player") out = player;
+    else if (name == "label_source") out = 2;
+    else if (name == "in_gameplay") out = inGameplay ? 1 : 0;
+    else if (name == "self_prev_coins") out = -1;
+    else if (name == "self_coin_reward_recent") out = 0;
+    else if (name == "self_coin_reward_age") out = -1;
+    else if (name.rfind("self_", 0) == 0)
+        return RuntimePlayerFeature(sample, name.substr(5), player, out);
+    else if (name.rfind("opponent_", 0) == 0)
+        return RuntimePlayerFeature(sample, name.substr(9), opponent, out);
+    else if (name == "target_found") out = sample.VsStarActorFound ? 1 : (sample.VsStarFound ? 1 : 0);
+    else if (name == "target_dx")
+    {
+        const melonDS::u32 targetX = sample.VsStarActorFound ? sample.VsStarActorPosX : sample.VsStarPosX;
+        out = SignedU32(targetX) - SignedU32(selfX);
+    }
+    else if (name == "target_dy")
+    {
+        const melonDS::u32 targetY = sample.VsStarActorFound ? sample.VsStarActorPosY : sample.VsStarPosY;
+        out = SignedU32(targetY) - SignedU32(selfY);
+    }
+    else if (name == "target_dz")
+    {
+        const melonDS::u32 selfZ = player == 0 ? sample.PlayerActor0PosZ : sample.PlayerActor1PosZ;
+        const melonDS::u32 targetZ = sample.VsStarActorFound ? sample.VsStarActorPosZ : sample.VsStarPosZ;
+        out = SignedU32(targetZ) - SignedU32(selfZ);
+    }
+    else if (name == "camera_x0") out = SignedU32(sample.StageCameraGlobalX0);
+    else if (name == "camera_y0") out = SignedU32(sample.StageCameraGlobalY0);
+    else if (name == "camera_width0") out = SignedU32(sample.StageCameraGlobalWidth0);
+    else if (name == "camera_height0") out = SignedU32(sample.StageCameraGlobalHeight0);
+    else if (name == "visible_camera0" || name == "visible_camera1" ||
+             name == "visible_camera0_x" || name == "visible_camera1_x")
+    {
+        int visible0 = 0, visible1 = 0, visible0x = 0, visible1x = 0;
+        for (const GameStateObjectScanEntry& entry : objectScanCache.Entries)
+        {
+            if (entry.LifecycleState != 1)
+                continue;
+            if (IsInCameraRect(entry.Actor.PosX, entry.Actor.PosY, sample.StageCameraGlobalX0, sample.StageCameraGlobalY0, sample.StageCameraGlobalWidth0, sample.StageCameraGlobalHeight0))
+                visible0++;
+            const std::int64_t camera0X = (static_cast<std::int64_t>(SignedU32(entry.Actor.PosX)) - SignedU32(sample.StageCameraGlobalX0) + G.RuleAIHorizontalWrapWidth) % std::max(1, G.RuleAIHorizontalWrapWidth);
+            if (camera0X >= 0 && camera0X < SignedU32(sample.StageCameraGlobalWidth0))
+                visible0x++;
+            if (IsInCameraRect(entry.Actor.PosX, entry.Actor.PosY, sample.StageCameraGlobalX1, sample.StageCameraGlobalY1, sample.StageCameraGlobalWidth1, sample.StageCameraGlobalHeight1))
+                visible1++;
+            const std::int64_t camera1X = (static_cast<std::int64_t>(SignedU32(entry.Actor.PosX)) - SignedU32(sample.StageCameraGlobalX1) + G.RuleAIHorizontalWrapWidth) % std::max(1, G.RuleAIHorizontalWrapWidth);
+            if (camera1X >= 0 && camera1X < SignedU32(sample.StageCameraGlobalWidth1))
+                visible1x++;
+        }
+        if (name == "visible_camera0") out = visible0;
+        else if (name == "visible_camera1") out = visible1;
+        else if (name == "visible_camera0_x") out = visible0x;
+        else out = visible1x;
+    }
+    else if (name == "object_total") out = sample.ObjectScanTotal;
+    else if (name == "object_active") out = sample.ObjectActiveCount;
+    else if (name == "object_dead") out = sample.ObjectDeadCount;
+    else if (name == "fireballs_active") out = sample.FireballsActiveCount;
+    else if (name == "fireballs_active_slots")
+    {
+        int count = 0;
+        for (int i = 0; i < kAIFireballSlotCount; i++)
+            count += sample.FireballSlotActive[i] ? 1 : 0;
+        out = count;
+    }
+    else if (name == "fireballs_slot_count") out = kAIFireballSlotCount;
+    else if (name == "fireballs_handler_word0") out = sample.FireballsHandlerWords[0];
+    else if (name == "projectiles_handler_word0") out = sample.ProjectilesHandlerWords[0];
+    else if (RuntimeItemFeature(objectScanCache, sample, name, "nearest_item_", selfX, selfY, false, false, out))
+    {
+    }
+    else if (RuntimeItemFeature(objectScanCache, sample, name, "coin_reward_item_", selfX, selfY, true, true, out))
+    {
+    }
+    else if (name.rfind("count_", 0) == 0)
+    {
+        const std::string category = name.substr(6);
+        int count = 0;
+        for (const GameStateObjectScanEntry& entry : objectScanCache.Entries)
+            if (entry.LifecycleState == 1 && category == AIObjectCategory(entry.ObjectID, entry.Actor.Settings))
+                count++;
+        out = count;
+    }
+    else if (name.rfind("nearest_fireball_", 0) == 0)
+    {
+        const std::string field = name.substr(17);
+        int best = -1;
+        std::int64_t bestDist2 = 0;
+        for (int i = 0; i < kAIFireballSlotCount; i++)
+        {
+            if (!sample.FireballSlotActive[i])
+                continue;
+            const std::int64_t dx = SignedU32(sample.FireballSlotPosX[i]) - SignedU32(selfX);
+            const std::int64_t dy = SignedU32(sample.FireballSlotPosY[i]) - SignedU32(selfY);
+            const std::int64_t dist2 = dx * dx + dy * dy;
+            if (best < 0 || dist2 < bestDist2)
+            {
+                best = i;
+                bestDist2 = dist2;
+            }
+        }
+        if (field == "found") out = best >= 0 ? 1 : 0;
+        else if (best < 0) out = (field == "owner_candidate" || field == "stateless_owner_candidate") ? -1 : 0;
+        else
+        {
+            int confidence = 0, heuristic = 0, statelessOwner = -1, statelessConfidence = 0, statelessHeuristic = 0;
+            bool tracked = false;
+            const int owner = AIFireballOwnerCandidate(instanceID, sample, best, confidence, heuristic, statelessOwner, statelessConfidence, statelessHeuristic, tracked);
+            if (field == "dx") out = SignedU32(sample.FireballSlotPosX[best]) - SignedU32(selfX);
+            else if (field == "dy") out = SignedU32(sample.FireballSlotPosY[best]) - SignedU32(selfY);
+            else if (field == "dist2") out = bestDist2;
+            else if (field == "dist") out = static_cast<double>(std::llround(std::sqrt(static_cast<double>(bestDist2))));
+            else if (field == "kind") out = sample.FireballSlotKind[best];
+            else if (field == "state") out = sample.FireballSlotState[best];
+            else if (field == "facing") out = sample.FireballSlotFacing[best];
+            else if (field == "owner_candidate") out = owner;
+            else if (field == "owner_confidence") out = confidence;
+            else if (field == "owner_heuristic") out = heuristic;
+            else if (field == "owned_by_self_candidate") out = owner == player ? 1 : 0;
+            else if (field == "owner_tracked") out = tracked ? 1 : 0;
+            else if (field == "stateless_owner_candidate") out = statelessOwner;
+            else if (field == "stateless_owner_confidence") out = statelessConfidence;
+            else if (field == "stateless_owner_heuristic") out = statelessHeuristic;
+            else if (field == "state_byte82") out = sample.FireballSlotStateBytes[best][2];
+            else if (field == "state_byte84") out = sample.FireballSlotStateBytes[best][4];
+            else if (field == "state_byte86") out = sample.FireballSlotStateBytes[best][6];
+            else if (field == "debug_word0") out = sample.FireballSlotDebugWords[best][0];
+            else if (field == "owner_verified") out = sample.FireballSlotKind[best] <= 3 ? 1 : 0;
+            else if (field == "source_kind") out = sample.FireballSlotKind[best];
+            else return false;
+        }
+    }
+    else if (RuntimeObjectFeature(objectScanCache, name, "nearest_", selfX, selfY, out))
+    {
+    }
+    else
+    {
+        return false;
+    }
+    return true;
+}
+
+bool BuildRuntimeImitationFeatures(
+    const NsmbImitationAI::LinearPolicyModel& model,
+    const GameStateSample& sample,
+    const GameStateObjectScanCache& objectScanCache,
+    int instanceID,
+    melonDS::u32 frame,
+    bool inGameplay,
+    int player,
+    std::vector<double>& features,
+    int& filled,
+    int& missing)
+{
+    features.assign(model.FeatureCount(), 0.0);
+    filled = 0;
+    missing = 0;
+    std::unordered_set<std::string> missingNames;
+    for (std::size_t i = 0; i < model.FeatureNames.size(); i++)
+    {
+        double value = 0.0;
+        if (RuntimeFeatureValue(sample, objectScanCache, instanceID, frame, inGameplay, player, model.FeatureNames[i], value))
+        {
+            features[i] = value;
+            filled++;
+        }
+        else
+        {
+            missing++;
+            if (missingNames.size() < 12)
+                missingNames.insert(model.FeatureNames[i]);
+        }
+    }
+    if (G.ImitationAIWarnMissingFeatures && missing > 0 &&
+        G.ImitationAIFeaturesFilled == 0 && G.ImitationAIFeaturesMissing == 0)
+    {
+        std::printf(
+            "NSMB ImitationAI: feature coverage filled=%d missing=%d missingExamples=",
+            filled,
+            missing);
+        bool first = true;
+        for (const std::string& name : missingNames)
+        {
+            std::printf("%s%s", first ? "" : "|", name.c_str());
+            first = false;
+        }
+        std::printf("\n");
+    }
+    G.ImitationAIFeaturesFilled = filled;
+    G.ImitationAIFeaturesMissing = missing;
+    return filled > 0;
+}
+
+InputState ApplyImitationAIInput(
+    int instanceID,
+    melonDS::u32 frame,
+    melonDS::NDS* nds,
+    int player,
+    const InputState& fallback)
+{
+    if (!G.ImitationAIEnabled || !G.ImitationAIModelLoaded || frame < G.ImitationAIStartFrame || !nds || !nds->MainRAM)
+        return fallback;
+    if (G.ImitationAIHostOnly && G.NetRole != Role::Host)
+        return fallback;
+    if (G.ImitationAIClientOnly && G.NetRole != Role::Client)
+        return fallback;
+    if (!ImitationAIProvidesInputForPlayer(player))
+        return fallback;
+
+    const bool inGameplay = IsMarioVsLuigiGameplay(nds);
+    if (!inGameplay)
+        return fallback;
+
+    const GameStateSample sample = ReadGameStateSample(nds);
+    const GameStateObjectScanCache objectScanCache = BuildGameStateObjectScanCache(nds);
+    std::vector<double> features;
+    int filled = 0;
+    int missing = 0;
+    if (!BuildRuntimeImitationFeatures(
+            G.ImitationAIModel,
+            sample,
+            objectScanCache,
+            instanceID,
+            frame,
+            inGameplay,
+            player,
+            features,
+            filled,
+            missing))
+    {
+        return fallback;
+    }
+
+    const NsmbImitationAI::Prediction prediction =
+        NsmbImitationAI::PredictLinearPolicy(G.ImitationAIModel, features, G.ImitationAIThreshold);
+    melonDS::u32 held = prediction.Held & G.ImitationAIAllowedHeldMask;
+    auto keepHigherProbability = [&prediction, &held](int firstBit, int secondBit) {
+        const melonDS::u32 firstMask = 1u << firstBit;
+        const melonDS::u32 secondMask = 1u << secondBit;
+        if ((held & firstMask) == 0 || (held & secondMask) == 0)
+            return;
+        const double firstProb =
+            firstBit < static_cast<int>(prediction.Probabilities.size()) ? prediction.Probabilities[firstBit] : 0.0;
+        const double secondProb =
+            secondBit < static_cast<int>(prediction.Probabilities.size()) ? prediction.Probabilities[secondBit] : 0.0;
+        if (firstProb >= secondProb)
+            held &= ~secondMask;
+        else
+            held &= ~firstMask;
+    };
+    keepHigherProbability(4, 5);
+    keepHigherProbability(6, 7);
+    InputState input = NeutralInputPreservingTouch(fallback);
+    input.KeyMask = (~held) & 0x0FFFu;
+
+    if (G.ImitationAITraceEnabled &&
+        (G.ImitationAITraceInterval <= 1 ||
+            (frame % static_cast<melonDS::u32>(G.ImitationAITraceInterval)) == 0))
+    {
+        std::printf(
+            "NSMB ImitationAI: inst=%d frame=%u player=%d held=0x%03X keyMask=0x%03X features=%d/%d threshold=%.3f probs=",
+            instanceID,
+            frame,
+            player,
+            held,
+            input.KeyMask,
+            filled,
+            filled + missing,
+            G.ImitationAIThreshold);
+        for (std::size_t i = 0; i < prediction.Probabilities.size() && i < G.ImitationAIModel.Buttons.size(); i++)
+        {
+            std::printf(
+                "%s%s=%.3f",
+                i == 0 ? "" : ",",
+                G.ImitationAIModel.Buttons[i].c_str(),
+                prediction.Probabilities[i]);
+        }
+        std::printf("\n");
+    }
+
+    return input;
+}
+
 void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (G.AIPlayLogPath.empty() || !G.AIPlayLog || !nds || !nds->MainRAM)
@@ -16920,6 +17731,44 @@ void InitFromEnvironment()
         EnvInt("MELONDS_NSML_RULE_AI_JUMP_FRAMES", 9), 0, G.RuleAIJumpInterval);
     G.RuleAITraceEnabled = EnvFlag("MELONDS_NSML_RULE_AI_TRACE");
     G.RuleAITraceInterval = std::max(1, EnvInt("MELONDS_NSML_RULE_AI_TRACE_INTERVAL", 60));
+    G.ImitationAIEnabled = EnvFlag("MELONDS_NSML_IMITATION_AI");
+    G.ImitationAIHostOnly = EnvFlag("MELONDS_NSML_IMITATION_AI_HOST_ONLY");
+    G.ImitationAIClientOnly = EnvFlag("MELONDS_NSML_IMITATION_AI_CLIENT_ONLY");
+    G.ImitationAIPlayerSpec = EnvCString("MELONDS_NSML_IMITATION_AI_PLAYER", "remote");
+    G.ImitationAIStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_IMITATION_AI_START_FRAME", 0)));
+    G.ImitationAIThreshold = std::clamp(
+        EnvDouble("MELONDS_NSML_IMITATION_AI_THRESHOLD", 0.5), 0.0, 1.0);
+    G.ImitationAIAllowedHeldMask =
+        EnvU32("MELONDS_NSML_IMITATION_AI_ALLOWED_HELD_MASK", G.ImitationAIAllowedHeldMask) & 0x0FFFu;
+    G.ImitationAITraceEnabled = EnvFlag("MELONDS_NSML_IMITATION_AI_TRACE");
+    G.ImitationAITraceInterval = std::max(1, EnvInt("MELONDS_NSML_IMITATION_AI_TRACE_INTERVAL", 60));
+    G.ImitationAIWarnMissingFeatures = !EnvFlag("MELONDS_NSML_IMITATION_AI_DISABLE_FEATURE_WARNING");
+    const char* imitationModel = std::getenv("MELONDS_NSML_IMITATION_AI_MODEL");
+    if (imitationModel && imitationModel[0])
+        G.ImitationAIModelPath = imitationModel;
+    if (G.ImitationAIEnabled)
+    {
+        if (G.ImitationAIModelPath.empty())
+        {
+            std::printf("NSMB ImitationAI: enabled but MELONDS_NSML_IMITATION_AI_MODEL is empty\n");
+            G.ImitationAIEnabled = false;
+        }
+        else
+        {
+            std::string modelError;
+            G.ImitationAIModelLoaded =
+                NsmbImitationAI::LoadLinearPolicyModel(G.ImitationAIModelPath, G.ImitationAIModel, modelError);
+            if (!G.ImitationAIModelLoaded)
+            {
+                std::printf(
+                    "NSMB ImitationAI: failed to load model path=%s error=%s\n",
+                    G.ImitationAIModelPath.c_str(),
+                    modelError.c_str());
+                G.ImitationAIEnabled = false;
+            }
+        }
+    }
     G.NetworkPumpThreadEnabled = EnvFlag("MELONDS_NSML_NET_PUMP_THREAD");
     G.NetworkPumpSleepUs = std::clamp(EnvInt("MELONDS_NSML_NET_PUMP_SLEEP_US", 250), 50, 5000);
     G.InputWaitPollUs = std::clamp(EnvInt("MELONDS_NSML_INPUT_WAIT_POLL_US", 100), 50, 5000);
@@ -17497,6 +18346,28 @@ void InitFromEnvironment()
                 G.RuleAIClientOnly ? 1 : 0);
         }
     }
+    if (G.ImitationAIEnabled)
+    {
+        std::printf(
+            "NSMB ImitationAI: enabled player=%s startFrame=%u threshold=%.3f allowedHeldMask=0x%03X trace=%d traceInterval=%d model=%s features=%zu buttons=%zu schema=%s featureSchema=%s\n",
+            G.ImitationAIPlayerSpec.c_str(),
+            G.ImitationAIStartFrame,
+            G.ImitationAIThreshold,
+            G.ImitationAIAllowedHeldMask,
+            G.ImitationAITraceEnabled ? 1 : 0,
+            G.ImitationAITraceInterval,
+            G.ImitationAIModelPath.c_str(),
+            G.ImitationAIModel.FeatureCount(),
+            G.ImitationAIModel.ButtonCount(),
+            G.ImitationAIModel.Schema.c_str(),
+            G.ImitationAIModel.FeatureSchemaID.c_str());
+        if (G.ImitationAIHostOnly || G.ImitationAIClientOnly)
+        {
+            std::printf("NSMB ImitationAI: roleFilter hostOnly=%d clientOnly=%d\n",
+                G.ImitationAIHostOnly ? 1 : 0,
+                G.ImitationAIClientOnly ? 1 : 0);
+        }
+    }
     std::fflush(stdout);
 }
 
@@ -17658,7 +18529,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     phaseTrace.SetFrame(inputFrame);
 
     if (G.Enabled && G.InputNetplayOnly && G.WaitForPeerBeforeStart && inputFrame == 0
-        && !RuleAIProvidesInputForPlayer(CurrentPacketBridgeLocalPlayer() ^ 1))
+        && !RuleAIProvidesInputForPlayer(CurrentPacketBridgeLocalPlayer() ^ 1)
+        && !ImitationAIProvidesInputForPlayer(CurrentPacketBridgeLocalPlayer() ^ 1))
     {
         WaitForPeerIfNeeded(true);
         {
@@ -17843,6 +18715,13 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     InputState testInput = ApplyInputScript(instanceID, inputFrame, inputFallback);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         testInput = ApplyRuleBasedAIInput(
+            instanceID,
+            inputFrame,
+            nds,
+            CurrentPacketBridgeLocalPlayer(),
+            testInput);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        testInput = ApplyImitationAIInput(
             instanceID,
             inputFrame,
             nds,
