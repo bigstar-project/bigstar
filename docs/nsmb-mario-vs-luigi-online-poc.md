@@ -1,5 +1,20 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Current desync diagnostics - 2026-06-10
+
+- User-reported issue: rollback disabled matches can sometimes diverge between host and client.
+- GUI-launched melonDS now enables lightweight state hash exchange by default with `MELONDS_NSML_STATE_SYNC=1`, `MELONDS_NSML_STATE_SYNC_INTERVAL=60`, and `MELONDS_NSML_STATE_SYNC_EXTENDED=1`.
+  - This does not apply state. It only exchanges periodic state hashes and logs `NSMB PoC: game state mismatch ...` to melonDS stdout when host/client disagree.
+  - The mismatch line reports whether `basic`, `playerGlobal`, `wifiCandidate`, and `renderCandidate` matched, which should narrow the first diverging category without full RAM dumps.
+- `scripts/run-nsmb-mvl-manual-peer.ps1` now has `-DesyncLog`, `-DesyncLogInterval`, and `-DesyncLogExtended`.
+  - `-DesyncLog` enables the same state hash exchange and writes per-role `host.game-state.csv` / `client.game-state.csv` at the chosen interval.
+  - Start with `-DesyncLogInterval 60`; use `30` or `15` only when the first diverging frame needs tighter localization.
+  - `-DesyncLogExtended` adds broader CSV fields/hashes and should be reserved for short repro windows.
+- Expected overhead: the default GUI path is low frequency and should be much lighter than full RAM dumps or every-frame CSV tracing. Detailed CSV tracing can cause stutter if interval is too small because it scans game objects and flushes rows to disk.
+- Current blocker: the actual first-divergence category/frame still needs a reproduced GUI/manual run with the new logs.
+- Next action: collect host/client `melon.stdout.txt` from the same match, then compare the first `game state mismatch` frame and, if needed, rerun with manual `-DesyncLog` around that frame.
+- Verification: `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`, `cargo clippy-all` in `tools\nsmb-mvl-gui\src-tauri`, `corepack pnpm exec tsc --noEmit`, and manual-peer PowerShell parse check pass. `corepack pnpm run ci` in `tools\nsmb-mvl-gui` is blocked by existing Biome formatting failures caused by CRLF line endings across TS/JSON files not touched in this change.
+
 ## Current GUI netplay controls - 2026-06-07
 
 - GUI対戦設定に `InputDelayFrames`、`InputMaxFrameLead`、ロールバック有効/無効を追加した。

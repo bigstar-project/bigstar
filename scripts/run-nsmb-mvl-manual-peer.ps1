@@ -33,7 +33,11 @@ param(
     [switch]$NoStartBarrier,
     [switch]$NoDynamicCameraLead,
     [switch]$RuntimeDynamicCameraLead,
-    [switch]$SoftwareRenderer
+    [switch]$SoftwareRenderer,
+    [switch]$DesyncLog,
+    [ValidateRange(1, 3600)]
+    [int]$DesyncLogInterval = 60,
+    [switch]$DesyncLogExtended
 )
 
 $ErrorActionPreference = "Stop"
@@ -152,10 +156,22 @@ if ($InputUnreliable) {
     $params.InputBundleHistory = $InputBundleHistory
 }
 
+if ($DesyncLog) {
+    $params.StateSync = $true
+    $params.StateSyncInterval = $DesyncLogInterval
+    $params.StateSyncExtended = $true
+    $params.GameStateTrace = $true
+    $params.GameStateTraceInterval = $DesyncLogInterval
+    if ($DesyncLogExtended) {
+        $params.GameStateTraceExtended = $true
+    }
+}
+
 Write-Host "Starting NSMB MvL peer session: role=$Role peer=$Peer port=$Port"
 Write-Host "input delay=$InputDelayFrames sendDelay=$InputSendDelayFrames sendJitter=$InputSendJitterFrames max frame lead=$InputMaxFrameLead internalWaitTimeoutMs=$InternalWaitTimeoutMs unreliable=$($InputUnreliable.IsPresent) bundleHistory=$InputBundleHistory jit=$(-not $NoJit)"
 Write-Host "frameLimit=$(-not $NoFrameLimit.IsPresent) swapBuffersInterval=$SwapBuffersInterval startBarrier=$(-not $NoStartBarrier) clearMvlCameraInitHold=true runtimeDynamicCameraLead=$($RuntimeDynamicCameraLead -and -not $NoDynamicCameraLead) renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' })"
 Write-Host "mvlWins=$MvlWins mvlBigStars=$MvlBigStars mvlLives=$MvlLives mvlStage=$(if ($MvlStage -ge 0) { $MvlStage } else { 'auto/default' }) mvlSceneSettings=$(if ($MvlSceneSettings) { $MvlSceneSettings } else { 'derived' }) mvlCourseMode=$MvlCourseMode generateConfiguredRoms=$($GenerateMvlConfiguredRoms.IsPresent) mvlMatchSeed=$(if ($MvlMatchSeed) { $MvlMatchSeed } else { 'auto' })"
+Write-Host "desyncLog=$($DesyncLog.IsPresent) interval=$DesyncLogInterval extendedCsv=$($DesyncLogExtended.IsPresent)"
 Write-Host "log=$LogDir"
 Write-Host "Host controls Mario. Client controls Luigi."
 

@@ -244,6 +244,9 @@ pub(crate) fn melon_env(
     );
     env.insert("MELONDS_NSML_INPUT_UNRELIABLE".into(), "1".into());
     env.insert("MELONDS_NSML_INPUT_BUNDLE_HISTORY".into(), "8".into());
+    env.insert("MELONDS_NSML_STATE_SYNC".into(), "1".into());
+    env.insert("MELONDS_NSML_STATE_SYNC_INTERVAL".into(), "60".into());
+    env.insert("MELONDS_NSML_STATE_SYNC_EXTENDED".into(), "1".into());
     if request.settings.rollback_enabled {
         env.insert("MELONDS_NSML_ROLLBACK".into(), "1".into());
         env.insert("MELONDS_NSML_ROLLBACK_BACKEND".into(), "coredelta".into());

@@ -209,6 +209,9 @@ fn melon_env_carries_game_settings_and_netplay_start() {
     assert_eq!(env["MELONDS_NSML_MATCH_SEED"], "7");
     assert_eq!(env["MELONDS_NSML_DELAY"], "4");
     assert_eq!(env["MELONDS_NSML_INPUT_MAX_FRAME_LEAD"], "4");
+    assert_eq!(env["MELONDS_NSML_STATE_SYNC"], "1");
+    assert_eq!(env["MELONDS_NSML_STATE_SYNC_INTERVAL"], "60");
+    assert_eq!(env["MELONDS_NSML_STATE_SYNC_EXTENDED"], "1");
     assert!(!env.contains_key("MELONDS_NSML_ROLLBACK"));
 }
 
