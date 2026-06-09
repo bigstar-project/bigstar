@@ -181,6 +181,12 @@ def base_eval(path: Path, player: int, policy: str, source: str) -> dict[str, An
         "starPickups": 0,
         "coinChanges": 0,
         "powerupChanges": 0,
+        "eventSamples": {
+            "deathTransitions": [],
+            "starPickups": [],
+            "coinChanges": [],
+            "powerupChanges": [],
+        },
         "itemVisibleRows": 0,
         "projectileVisibleRows": 0,
         "fireballActiveRows": 0,
@@ -345,12 +351,34 @@ def evaluate_jsonl(path: Path, player: int, policy: str) -> dict[str, Any]:
         if prev_player is not None:
             if p.get("dead") and not prev_player.get("dead"):
                 result["deathTransitions"] += 1
+                result["eventSamples"]["deathTransitions"].append({"frame": frame})
             if num(p.get("battleStars")) > num(prev_player.get("battleStars")):
                 result["starPickups"] += 1
+                result["eventSamples"]["starPickups"].append(
+                    {
+                        "frame": frame,
+                        "before": num(prev_player.get("battleStars")),
+                        "after": num(p.get("battleStars")),
+                    }
+                )
             if num(p.get("coins")) != num(prev_player.get("coins")):
                 result["coinChanges"] += 1
+                result["eventSamples"]["coinChanges"].append(
+                    {
+                        "frame": frame,
+                        "before": num(prev_player.get("coins")),
+                        "after": num(p.get("coins")),
+                    }
+                )
             if num(p.get("visualPowerupKindCandidate")) != num(prev_player.get("visualPowerupKindCandidate")):
                 result["powerupChanges"] += 1
+                result["eventSamples"]["powerupChanges"].append(
+                    {
+                        "frame": frame,
+                        "before": num(prev_player.get("visualPowerupKindCandidate")),
+                        "after": num(p.get("visualPowerupKindCandidate")),
+                    }
+                )
         prev_player = p
         prev_opponent = o
 
@@ -421,6 +449,7 @@ def evaluate_csv(path: Path, player: int, policy: str) -> dict[str, Any]:
                     result["aliveRows"] += 1
             if result["rows"] > 1 and dead and not prev_dead:
                 result["deathTransitions"] += 1
+                result["eventSamples"]["deathTransitions"].append({"frame": frame})
             prev_dead = dead
 
             dist2 = csv_dist_to_big_star(row, player)
@@ -454,8 +483,14 @@ def evaluate_csv(path: Path, player: int, policy: str) -> dict[str, Any]:
                 board["opponentCoinsEnd"] = opponent_coins
             if prev_stars is not None and stars > prev_stars:
                 result["starPickups"] += 1
+                result["eventSamples"]["starPickups"].append(
+                    {"frame": frame, "before": prev_stars, "after": stars}
+                )
             if prev_coins is not None and coins != prev_coins:
                 result["coinChanges"] += 1
+                result["eventSamples"]["coinChanges"].append(
+                    {"frame": frame, "before": prev_coins, "after": coins}
+                )
             prev_stars = stars
             prev_coins = coins
 
