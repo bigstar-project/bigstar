@@ -1599,6 +1599,8 @@ struct State
     int RuleAIHorizontalDeadzone = 0x4000;
     int RuleAIHorizontalWrapWidth = 0x400000;
     int RuleAICloseRange = 0x22000;
+    int RuleAIHazardHorizontalRange = 0x40000;
+    int RuleAIHazardVerticalRange = 0x50000;
     int RuleAIJumpInterval = 42;
     int RuleAIJumpFrames = 9;
     bool RuleAITraceEnabled = false;
@@ -2590,6 +2592,8 @@ NsmbRuleAI::Config RuleAIConfig()
     config.HorizontalDeadzone = G.RuleAIHorizontalDeadzone;
     config.HorizontalWrapWidth = G.RuleAIHorizontalWrapWidth;
     config.CloseRange = G.RuleAICloseRange;
+    config.HazardHorizontalRange = G.RuleAIHazardHorizontalRange;
+    config.HazardVerticalRange = G.RuleAIHazardVerticalRange;
     config.JumpInterval = G.RuleAIJumpInterval;
     config.JumpFrames = G.RuleAIJumpFrames;
     config.TraceEnabled = G.RuleAITraceEnabled;
@@ -2671,6 +2675,11 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(const GameStateSample& sample,
     state.StarActorFound = sample.VsStarActorFound != 0;
     state.StarActorX = sample.VsStarActorPosX;
     state.StarActorY = sample.VsStarActorPosY;
+    state.MovingHazardFound = sample.MovingHazardFound != 0;
+    state.MovingHazardX = sample.MovingHazardPosX;
+    state.MovingHazardY = sample.MovingHazardPosY;
+    state.MovingHazardVelX = sample.MovingHazardVelX;
+    state.MovingHazardVelY = sample.MovingHazardVelY;
     return state;
 }
 
@@ -17857,6 +17866,14 @@ void InitFromEnvironment()
         EnvInt("MELONDS_NSML_RULE_AI_WRAP_WIDTH", 0x400000), 0, 0x800000);
     G.RuleAICloseRange = std::clamp(
         EnvInt("MELONDS_NSML_RULE_AI_CLOSE_RANGE", 0x22000), 0x1000, 0x200000);
+    G.RuleAIHazardHorizontalRange = std::clamp(
+        EnvInt("MELONDS_NSML_RULE_AI_HAZARD_HORIZONTAL_RANGE", G.RuleAIHazardHorizontalRange),
+        0,
+        0x200000);
+    G.RuleAIHazardVerticalRange = std::clamp(
+        EnvInt("MELONDS_NSML_RULE_AI_HAZARD_VERTICAL_RANGE", G.RuleAIHazardVerticalRange),
+        0,
+        0x200000);
     G.RuleAIJumpInterval = std::clamp(
         EnvInt("MELONDS_NSML_RULE_AI_JUMP_INTERVAL", 42), 1, 600);
     G.RuleAIJumpFrames = std::clamp(
@@ -18476,12 +18493,14 @@ void InitFromEnvironment()
     if (G.RuleAIEnabled)
     {
         std::printf(
-            "NSMB RuleAI: enabled player=%s startFrame=%u deadzone=0x%X wrapWidth=0x%X closeRange=0x%X jump=%d/%d trace=%d traceInterval=%d\n",
+            "NSMB RuleAI: enabled player=%s startFrame=%u deadzone=0x%X wrapWidth=0x%X closeRange=0x%X hazardRange=0x%X/0x%X jump=%d/%d trace=%d traceInterval=%d\n",
             G.RuleAIPlayerSpec.c_str(),
             G.RuleAIStartFrame,
             G.RuleAIHorizontalDeadzone,
             G.RuleAIHorizontalWrapWidth,
             G.RuleAICloseRange,
+            G.RuleAIHazardHorizontalRange,
+            G.RuleAIHazardVerticalRange,
             G.RuleAIJumpFrames,
             G.RuleAIJumpInterval,
             G.RuleAITraceEnabled ? 1 : 0,

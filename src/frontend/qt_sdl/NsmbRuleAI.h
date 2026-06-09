@@ -20,6 +20,8 @@ struct Config
     int HorizontalDeadzone = 0x4000;
     int HorizontalWrapWidth = 0x400000;
     int CloseRange = 0x22000;
+    int HazardHorizontalRange = 0x40000;
+    int HazardVerticalRange = 0x50000;
     int JumpInterval = 42;
     int JumpFrames = 9;
     bool TraceEnabled = false;
@@ -51,6 +53,11 @@ struct FrameState
     bool StarActorFound = false;
     melonDS::u32 StarActorX = 0;
     melonDS::u32 StarActorY = 0;
+    bool MovingHazardFound = false;
+    melonDS::u32 MovingHazardX = 0;
+    melonDS::u32 MovingHazardY = 0;
+    melonDS::u32 MovingHazardVelX = 0;
+    melonDS::u32 MovingHazardVelY = 0;
 };
 
 bool ControlsPlayer(const Config& config, int player, int localPlayer);

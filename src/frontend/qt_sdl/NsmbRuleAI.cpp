@@ -113,11 +113,31 @@ NsmbNetplayPoC::InputState DecideInput(
     const std::int32_t dy = CoordinateDelta(targetY, self.Y);
     const std::int32_t opponentDx = HorizontalDelta(config, other.X, self.X);
     const int absOpponentDx = std::abs(opponentDx);
+    const std::int32_t hazardDx =
+        state.MovingHazardFound ? HorizontalDelta(config, state.MovingHazardX, self.X) : 0;
+    const std::int32_t hazardDy =
+        state.MovingHazardFound ? CoordinateDelta(state.MovingHazardY, self.Y) : 0;
+    const bool hazardDanger =
+        state.MovingHazardFound &&
+        std::abs(hazardDx) <= config.HazardHorizontalRange &&
+        std::abs(hazardDy) <= config.HazardVerticalRange;
 
     if (self.BattleStars > other.BattleStars && absOpponentDx < config.CloseRange)
     {
         dx = opponentDx <= 0 ? config.CloseRange : -config.CloseRange;
         mode = "evade";
+    }
+    if (hazardDanger)
+    {
+        const bool hazardOnLeft = hazardDx < 0;
+        const bool escapeBlocked = hazardOnLeft ?
+            (self.WallRight || self.HoleRight) :
+            (self.WallLeft || self.HoleLeft);
+        if (escapeBlocked)
+            dx = 0;
+        else
+            dx = hazardOnLeft ? config.CloseRange : -config.CloseRange;
+        mode = "hazard";
     }
 
     NsmbNetplayPoC::InputState input = NeutralInputPreservingTouch(fallback);
@@ -145,14 +165,14 @@ NsmbNetplayPoC::InputState DecideInput(
         (movingLeft && (self.HoleLeft || self.WallLeft)) ||
         (movingRight && (self.HoleRight || self.WallRight)) ||
         (movingHorizontally && (self.HoleAhead || self.WallAhead));
-    if (periodicJump || targetAbove || closeOpponent || terrainJump)
+    if (periodicJump || targetAbove || closeOpponent || terrainJump || hazardDanger)
         PressButton(input, kButtonA);
 
     if (config.TraceEnabled &&
         (config.TraceInterval <= 1 || (frame % static_cast<melonDS::u32>(config.TraceInterval)) == 0))
     {
         std::printf(
-            "NSMB RuleAI: inst=%d frame=%u player=%d mode=%s self=%08X/%08X target=%08X/%08X opponent=%08X/%08X stars=%u/%u terrain=ground:%d ahead:%d/%d left:%d/%d right:%d/%d keys=0x%03X\n",
+            "NSMB RuleAI: inst=%d frame=%u player=%d mode=%s self=%08X/%08X target=%08X/%08X opponent=%08X/%08X stars=%u/%u hazard=%d/%d/%d terrain=ground:%d ahead:%d/%d left:%d/%d right:%d/%d keys=0x%03X\n",
             instanceID,
             frame,
             player,
@@ -165,6 +185,9 @@ NsmbNetplayPoC::InputState DecideInput(
             other.Y,
             self.BattleStars,
             other.BattleStars,
+            hazardDanger ? 1 : 0,
+            hazardDx,
+            hazardDy,
             self.GroundBelowSolid ? 1 : 0,
             self.WallAhead ? 1 : 0,
             self.HoleAhead ? 1 : 0,
