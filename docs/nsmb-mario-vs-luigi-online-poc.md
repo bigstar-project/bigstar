@@ -15,6 +15,36 @@
 - Next action: collect host/client `melon.stdout.txt` from the same match, then compare the first `game state mismatch` frame and, if needed, rerun with manual `-DesyncLog` around that frame.
 - Verification: `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`, `cargo clippy-all` in `tools\nsmb-mvl-gui\src-tauri`, `corepack pnpm exec tsc --noEmit`, and manual-peer PowerShell parse check pass. `corepack pnpm run ci` in `tools\nsmb-mvl-gui` is blocked by existing Biome formatting failures caused by CRLF line endings across TS/JSON files not touched in this change.
 
+## Current input health diagnostics - 2026-06-10
+
+- GUI-launched melonDS now enables low-overhead input transport diagnostics with `MELONDS_NSML_INPUT_HEALTH_TRACE=1`, `MELONDS_NSML_INPUT_HEALTH_TRACE_INTERVAL=120`, and `MELONDS_NSML_INPUT_HEALTH_TRACE_WAIT_THRESHOLD_MS=16`.
+  - The summary path emits one `NSMB InputHealth: event=summary ...` line every 120 logical frames, about once every 2 seconds at 60fps.
+  - Event logs are emitted for `remote-wait-resolved`, `throttle-blocked`, `throttle-resolved`, `recv-gap`, and `send-gap`.
+  - Each line reports frame/logicalFrame/sendFrame, last sent/received input frame, lead, local/remote/delayed input queue sizes, wait/throttle/network timings, and rollback/prediction flags.
+- Expected overhead: the normal path adds only a few integer checks and one low-frequency stdout line. It does not scan RAM, write CSV rows, or log every input frame. Event lines are only printed when a wait, throttle, or frame gap is observed.
+- Current blocker: still needs a real host/client reproduction to determine whether the one-sided stop corresponds to a remote wait, frame-lead throttle, receive gap, bridge packet stall, or later state hash mismatch.
+- Next action: on the next reproduction, compare both peers' `melonds.stdout.txt` around the first `NSMB InputHealth` wait/throttle/gap line and the first `game state mismatch` line, then cross-check `bridge.stdout.txt` packet counters for the same wall-clock window.
+- Verification: `cmake --build build\release-windows-x86_64 --target melonDS --config Release -j 4`, `cargo fmt --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`, `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`, `cargo clippy-all` in `tools\nsmb-mvl-gui\src-tauri`, and `git diff --check` pass. `corepack pnpm run ci` in `tools\nsmb-mvl-gui` remains blocked by existing Biome CRLF formatting failures in TS/JSON files unrelated to this change; its initial `tsc --noEmit` step passed before Biome failed.
+
+## Current desync risk review - 2026-06-10
+
+- User symptom: one peer's opponent suddenly stops on-screen, while that opponent can still move on their own screen. The stopped peer later receives movement again, but inputs made during the stop do not appear to have affected the stopped peer's simulation, causing a state split.
+- Most likely risk area is the input transport/timing layer, not RNG or stage setup:
+  - GUI uses `InputDelayFrames=4`, `InputMaxFrameLead=4`, `MELONDS_NSML_INPUT_UNRELIABLE=1`, and input bundle history `8`.
+  - The WebRTC bridge DataChannel is also unordered/unreliable with no retransmits. This means normal play currently has two lossy layers: melonDS input packets are ENet unsequenced, then the bridge sends the UDP payload over an unreliable DataChannel.
+  - Input bundle history can recover short packet loss, but a burst longer than the bundle window, or a short send/pump stall, can make the peer wait for old input and look like the opponent stopped.
+- Non-rollback input path should normally wait for exact remote input before advancing the logical frame. If the exact input never arrives, GUI's default fatal timeout should terminate the process after about 5s. A temporary stop that later recovers likely means the missing frame eventually arrived through a later bundle or delayed packet before the fatal timeout.
+- `ThrottleInputNetplayFrameLead()` sends the current future input, then blocks when `sendFrame - LastReceivedInputFrame > InputMaxFrameLead`. While blocked it pumps network but does not send additional newer input bundles. This can amplify a transient receive gap because the peer may not get fresh bundles from this side until the wait clears.
+- Previous related evidence: an older manual peer log already showed `input frame throttle timeout ... lead=5 waitedMs=5000`, so this class of one-sided lead/wait problem is known to be possible under bad timing.
+- Things that look less likely from code inspection:
+  - RNG seed/state setup: a one-sided temporary opponent stop maps more directly to missing input frames than to RNG divergence.
+  - Direct MvL stage setup: the reported mid-match stop/recovery does not match an initial setup mismatch.
+  - State hash logging itself: it was added after the report and only exchanges low-frequency reliable diagnostic packets without applying state.
+- Next actions:
+  - Consider increasing `InputBundleHistory` above `8` for WAN, or send input bundles over a reliable/partially reliable channel while keeping low latency measured.
+  - Consider changing frame-lead throttle so a blocked peer can still periodically send the latest input bundle/heartbeat while waiting.
+  - On the next reproduction, inspect both `melonds.stdout.txt` and `bridge.stdout.txt` for `NSMB InputHealth`, `remote input timeout`, `input frame throttle`, `PacketBridgeScratchSpike`, `game state mismatch`, and bridge `app->rtc` / `rtc->app` packet counter stalls.
+
 ## Current GUI netplay controls - 2026-06-07
 
 - GUI対戦設定に `InputDelayFrames`、`InputMaxFrameLead`、ロールバック有効/無効を追加した。

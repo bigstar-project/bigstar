@@ -244,6 +244,15 @@ pub(crate) fn melon_env(
     );
     env.insert("MELONDS_NSML_INPUT_UNRELIABLE".into(), "1".into());
     env.insert("MELONDS_NSML_INPUT_BUNDLE_HISTORY".into(), "8".into());
+    env.insert("MELONDS_NSML_INPUT_HEALTH_TRACE".into(), "1".into());
+    env.insert(
+        "MELONDS_NSML_INPUT_HEALTH_TRACE_INTERVAL".into(),
+        "120".into(),
+    );
+    env.insert(
+        "MELONDS_NSML_INPUT_HEALTH_TRACE_WAIT_THRESHOLD_MS".into(),
+        "16".into(),
+    );
     env.insert("MELONDS_NSML_STATE_SYNC".into(), "1".into());
     env.insert("MELONDS_NSML_STATE_SYNC_INTERVAL".into(), "60".into());
     env.insert("MELONDS_NSML_STATE_SYNC_EXTENDED".into(), "1".into());

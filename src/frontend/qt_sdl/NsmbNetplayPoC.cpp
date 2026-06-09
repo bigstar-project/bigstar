@@ -1582,6 +1582,9 @@ struct State
     bool PacketBridgeJitHelperPatchApplied[16] {};
     bool InputNetplayOnly = false;
     bool InputNetplayTraceEnabled = false;
+    bool InputHealthTraceEnabled = false;
+    int InputHealthTraceInterval = 120;
+    int InputHealthTraceWaitThresholdMs = 16;
     int InputNetplayMaxFrameLead = -1;
     bool RollbackEnabled = false;
     bool RollbackResimulate = false;
@@ -1799,6 +1802,13 @@ struct State
     melonDS::u32 LastTracedSentInputFrame = kNoFrameLimit;
     melonDS::u32 LastTracedReceivedInputFrame = kNoFrameLimit;
     melonDS::u32 LastReceivedInputFrame = kNoFrameLimit;
+    melonDS::u32 LastSentInputFrame = kNoFrameLimit;
+    melonDS::u32 LastInputHealthSummaryFrame = kNoFrameLimit;
+    melonDS::u32 LastInputHealthRemoteWaitFrame = kNoFrameLimit;
+    melonDS::u32 LastInputHealthThrottleFrame = kNoFrameLimit;
+    melonDS::u32 LastInputHealthThrottleResolvedFrame = kNoFrameLimit;
+    melonDS::u32 LastInputHealthReceiveGapFrame = kNoFrameLimit;
+    melonDS::u32 LastInputHealthSendGapFrame = kNoFrameLimit;
     melonDS::u32 LastInputFrameThrottleTraceFrame = kNoFrameLimit;
     melonDS::u32 LastSentNSMLPacketTick = 0xFFFFFFFF;
     melonDS::u32 LastReceivedNSMLPacketTick[2] { 0xFFFFFFFF, 0xFFFFFFFF };
@@ -2332,6 +2342,18 @@ InputState ApplyScriptRemotePacketInputScript(int instanceID, melonDS::u32 frame
 }
 
 void FlushDelayedInputsLocked(melonDS::u32 frame);
+void PrintInputHealthLineLocked(
+    const char* event,
+    melonDS::u32 frame,
+    melonDS::u32 logicalFrame,
+    melonDS::u32 sendFrame,
+    unsigned long long waitedUs,
+    unsigned long long throttleUs,
+    unsigned long long networkUs,
+    int lead,
+    bool hasRemoteInput,
+    bool predictedRemoteInput);
+int CurrentInputLeadLocked(melonDS::u32 sendFrame);
 
 void StoreRemoteInputLocked(melonDS::u32 frame, const InputState& receivedInput, melonDS::u32 localFrame)
 {
@@ -2388,9 +2410,28 @@ void StoreRemoteInputLocked(melonDS::u32 frame, const InputState& receivedInput,
         G.LastConfirmedRemoteInput = receivedInput;
         G.LastConfirmedRemoteInputValid = true;
     }
+    const melonDS::u32 previousLastReceived = G.LastReceivedInputFrame;
     G.RemoteInputs[frame] = receivedInput;
     if (G.LastReceivedInputFrame == kNoFrameLimit || frame > G.LastReceivedInputFrame)
         G.LastReceivedInputFrame = frame;
+    if (G.InputHealthTraceEnabled
+        && previousLastReceived != kNoFrameLimit
+        && frame > previousLastReceived + 1
+        && G.LastInputHealthReceiveGapFrame != frame)
+    {
+        G.LastInputHealthReceiveGapFrame = frame;
+        PrintInputHealthLineLocked(
+            "recv-gap",
+            localFrame,
+            frame,
+            G.LastSentInputFrame,
+            0,
+            0,
+            0,
+            CurrentInputLeadLocked(G.LastSentInputFrame == kNoFrameLimit ? frame : G.LastSentInputFrame),
+            true,
+            false);
+    }
     G.InputCond.notify_all();
     if (G.InputTraceEnabled
         && frame != G.LastTracedReceivedInputFrame
@@ -2954,6 +2995,27 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
     if (!G.Peer) return;
 
     SendMatchSeedLocked();
+
+    const melonDS::u32 previousLastSent = G.LastSentInputFrame;
+    G.LastSentInputFrame = frame;
+    if (G.InputHealthTraceEnabled
+        && previousLastSent != kNoFrameLimit
+        && frame > previousLastSent + 1
+        && G.LastInputHealthSendGapFrame != frame)
+    {
+        G.LastInputHealthSendGapFrame = frame;
+        PrintInputHealthLineLocked(
+            "send-gap",
+            frame,
+            frame,
+            frame,
+            0,
+            0,
+            0,
+            CurrentInputLeadLocked(frame),
+            false,
+            false);
+    }
 
     if (G.InputDropModulo > 0
         && (frame % static_cast<melonDS::u32>(G.InputDropModulo))
@@ -5951,6 +6013,51 @@ void PruneInputHistoryLocked(melonDS::u32 keepFromFrame)
     G.RemoteInputs.erase(G.RemoteInputs.begin(), G.RemoteInputs.lower_bound(keepFromFrame));
 }
 
+void PrintInputHealthLineLocked(
+    const char* event,
+    melonDS::u32 frame,
+    melonDS::u32 logicalFrame,
+    melonDS::u32 sendFrame,
+    unsigned long long waitedUs,
+    unsigned long long throttleUs,
+    unsigned long long networkUs,
+    int lead,
+    bool hasRemoteInput,
+    bool predictedRemoteInput)
+{
+    if (!G.InputHealthTraceEnabled)
+        return;
+
+    const melonDS::u32 lastSent = G.LastSentInputFrame;
+    const melonDS::u32 lastRecv = G.LastReceivedInputFrame;
+    std::printf(
+        "NSMB InputHealth: event=%s frame=%u logicalFrame=%u sendFrame=%u lastSent=%u lastRecv=%u lead=%d localQueue=%zu remoteQueue=%zu delayed=%zu waitMs=%.3f throttleMs=%.3f networkMs=%.3f hasRemote=%d predicted=%d rollback=%d\n",
+        event,
+        frame,
+        logicalFrame,
+        sendFrame,
+        lastSent,
+        lastRecv,
+        lead,
+        G.LocalInputs.size(),
+        G.RemoteInputs.size(),
+        G.DelayedInputs.size(),
+        static_cast<double>(waitedUs) / 1000.0,
+        static_cast<double>(throttleUs) / 1000.0,
+        static_cast<double>(networkUs) / 1000.0,
+        hasRemoteInput ? 1 : 0,
+        predictedRemoteInput ? 1 : 0,
+        G.RollbackEnabled ? 1 : 0);
+    std::fflush(stdout);
+}
+
+int CurrentInputLeadLocked(melonDS::u32 sendFrame)
+{
+    if (G.LastReceivedInputFrame == kNoFrameLimit)
+        return 0;
+    return static_cast<int>(sendFrame) - static_cast<int>(G.LastReceivedInputFrame);
+}
+
 bool IsPastTestInputRange(melonDS::u32 targetFrame)
 {
     return G.TestEnabled
@@ -6013,6 +6120,24 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
                 const auto waitedUs = static_cast<unsigned long long>(std::max<long long>(0, elapsedUs));
                 RecordRemoteInputWaitStats(waitedUs, loops);
                 TraceRemoteInputWaitSpike(targetFrame, waitedUs, loops);
+                if (G.InputHealthTraceEnabled
+                    && waitedUs >= static_cast<unsigned long long>(G.InputHealthTraceWaitThresholdMs) * 1000ULL
+                    && G.LastInputHealthRemoteWaitFrame != targetFrame)
+                {
+                    G.LastInputHealthRemoteWaitFrame = targetFrame;
+                    PrintInputHealthLineLocked(
+                        "remote-wait-resolved",
+                        targetFrame,
+                        targetFrame,
+                        G.LastSentInputFrame,
+                        waitedUs,
+                        0,
+                        0,
+                        CurrentInputLeadLocked(
+                            G.LastSentInputFrame == kNoFrameLimit ? targetFrame : G.LastSentInputFrame),
+                        true,
+                        false);
+                }
                 return it->second;
             }
         }
@@ -10227,7 +10352,24 @@ void ThrottleInputNetplayFrameLead(melonDS::NDS* nds, melonDS::u32 frame, melonD
             {
                 const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::steady_clock::now() - start).count();
-                RecordFrameLeadThrottleStats(static_cast<unsigned long long>(std::max<long long>(0, elapsedUs)), loops);
+                const auto waitedUs = static_cast<unsigned long long>(std::max<long long>(0, elapsedUs));
+                RecordFrameLeadThrottleStats(waitedUs, loops);
+                if (G.InputHealthTraceEnabled && G.LastInputHealthThrottleResolvedFrame != frame)
+                {
+                    std::lock_guard<std::mutex> lock(G.Mutex);
+                    G.LastInputHealthThrottleResolvedFrame = frame;
+                    PrintInputHealthLineLocked(
+                        "throttle-resolved",
+                        frame,
+                        frame,
+                        sendFrame,
+                        0,
+                        waitedUs,
+                        0,
+                        CurrentInputLeadLocked(sendFrame),
+                        true,
+                        false);
+                }
             }
             return;
         }
@@ -10243,6 +10385,23 @@ void ThrottleInputNetplayFrameLead(melonDS::NDS* nds, melonDS::u32 frame, melonD
                 lead,
                 G.InputNetplayMaxFrameLead);
             std::fflush(stdout);
+        }
+
+        if (G.InputHealthTraceEnabled && G.LastInputHealthThrottleFrame != frame)
+        {
+            std::lock_guard<std::mutex> lock(G.Mutex);
+            G.LastInputHealthThrottleFrame = frame;
+            PrintInputHealthLineLocked(
+                "throttle-blocked",
+                frame,
+                frame,
+                sendFrame,
+                0,
+                0,
+                0,
+                CurrentInputLeadLocked(sendFrame),
+                false,
+                false);
         }
 
         if (G.TestEnabled && G.TestWaitTimeoutMs > 0)
@@ -10336,9 +10495,10 @@ void WritePacketBridgeJitScratchIfNeeded(
     InputState remoteInput = NeutralInput();
     bool hasRemoteInput = false;
     bool predictedRemoteInput = false;
+    melonDS::u32 sendFrame = logicalFrame;
     if (G.Enabled && G.Ready)
     {
-        const melonDS::u32 sendFrame = G.InputNetplayOnly
+        sendFrame = G.InputNetplayOnly
             ? logicalFrame + static_cast<melonDS::u32>(std::max(0, G.Delay))
             : frame;
         const auto networkStart = std::chrono::steady_clock::now();
@@ -10430,6 +10590,25 @@ void WritePacketBridgeJitScratchIfNeeded(
                 predictedRemoteInput ? 1 : 0);
             std::fflush(stdout);
         }
+    }
+    if (G.InputHealthTraceEnabled
+        && G.InputHealthTraceInterval > 0
+        && logicalFrame != G.LastInputHealthSummaryFrame
+        && (logicalFrame % static_cast<melonDS::u32>(G.InputHealthTraceInterval)) == 0)
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        G.LastInputHealthSummaryFrame = logicalFrame;
+        PrintInputHealthLineLocked(
+            "summary",
+            frame,
+            logicalFrame,
+            sendFrame,
+            lockstepRemoteWaitUs,
+            throttleUs,
+            networkUs,
+            CurrentInputLeadLocked(sendFrame),
+            hasRemoteInput,
+            predictedRemoteInput);
     }
     if (beforeStart)
         return;
@@ -14850,6 +15029,11 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH_FRAME", 0)));
     G.InputNetplayOnly = EnvFlag("MELONDS_NSML_INPUT_NETPLAY_ONLY");
     G.InputNetplayTraceEnabled = EnvFlag("MELONDS_NSML_INPUT_NETPLAY_TRACE");
+    G.InputHealthTraceEnabled = EnvFlag("MELONDS_NSML_INPUT_HEALTH_TRACE");
+    G.InputHealthTraceInterval = std::clamp(
+        EnvInt("MELONDS_NSML_INPUT_HEALTH_TRACE_INTERVAL", 120), 1, 3600);
+    G.InputHealthTraceWaitThresholdMs = std::clamp(
+        EnvInt("MELONDS_NSML_INPUT_HEALTH_TRACE_WAIT_THRESHOLD_MS", 16), 1, 5000);
     G.NetworkPumpThreadEnabled = EnvFlag("MELONDS_NSML_NET_PUMP_THREAD");
     G.NetworkPumpSleepUs = std::clamp(EnvInt("MELONDS_NSML_NET_PUMP_SLEEP_US", 250), 50, 5000);
     G.InputWaitPollUs = std::clamp(EnvInt("MELONDS_NSML_INPUT_WAIT_POLL_US", 100), 50, 5000);
@@ -15315,7 +15499,7 @@ void InitFromEnvironment()
 
     G.Ready = true;
     StartNetworkPumpThreadIfNeeded();
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputSendDelay=%d inputSendJitter=%d inputSendDelayStart=%u inputSendDelayEnd=%u inputDropModulo=%d inputDropOffset=%d netPumpThread=%d netPumpSleepUs=%d inputWaitPollUs=%d rollbackInputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d rollbackPredProbeModulo=%d rollbackPredProbeLimit=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputHealthTrace=%d inputHealthInterval=%d inputHealthWaitThresholdMs=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputSendDelay=%d inputSendJitter=%d inputSendDelayStart=%u inputSendDelayEnd=%u inputDropModulo=%d inputDropOffset=%d netPumpThread=%d netPumpSleepUs=%d inputWaitPollUs=%d rollbackInputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d rollbackPredProbeModulo=%d rollbackPredProbeLimit=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -15346,6 +15530,9 @@ void InitFromEnvironment()
         G.PacketBridgeThrottleStartFrame,
         G.InputNetplayOnly ? 1 : 0,
         G.InputNetplayTraceEnabled ? 1 : 0,
+        G.InputHealthTraceEnabled ? 1 : 0,
+        G.InputHealthTraceInterval,
+        G.InputHealthTraceWaitThresholdMs,
         G.InputNetplayMaxFrameLead,
         G.InputUnreliable ? 1 : 0,
         G.InputBundleHistory,
