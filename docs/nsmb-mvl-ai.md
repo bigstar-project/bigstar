@@ -410,18 +410,11 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 
 ## Next Actions
 
-- StageLayout tile probeをstage 0の実プレイで増やし、`tileId=0x001 behavior=0x0000002A lowType=42` など低位tile typeの意味を特定して、raw `solidish` / `hole*` を接地contact補正なしでも目視に近づける。
-- dynamic tile behavior table pointerが0のまま `tileId=0x110-0x113` を引く場面を、StageLayout初期化/`changeTile`/question block animation pathと照合する。
-- RuleAIをstage 0の実際のCPU操作経路でさらに長く走らせ、スター取得、敵回避、落下復帰、箱接触時の入力変化を確認する。
-- ブロック/アイテム箱の中身と叩いた後の状態をstage 0の `StageLayout::changeTile` / question block animation path と実ログで照合し、`tileProbe.samples[].block` の解釈を詰める。
-- Fire Marioでstage 0ログを取り、`specialObjects.fireballs.activeSlots` / `slots[]` が増えるframeをGUI/SVG/viewerで画面上のFireballと照合する。owner、寿命、当たり判定状態、kind/state/facingの意味を確定し、必要ならProjectile handler側もslot別に読む。通常actorに出るprojectileがあれば object ID/vtable/category も併せて分類する。
-- 人間プレイ記録を実際に複数本取り、`recordings-index.json` 経由のdataset、`--split-by-recording`、GUIの `AIログ` タブで、入力ラベルと目視相当状態が期待通り読めるか確認する。
-- packet capture付きの新規人間記録を取り、`run-nsmb-mvl-recording-postcommands.ps1` で `packet-replay.csv` / `recording.json` / `recordings-index.json` / dataset / `recording-audit.json` を生成する。
-- `run-nsmb-mvl-recording-replay.ps1 -ScanFrames` でpacket replayの実走を行い、最終frame、checkpoint frame、最初の不一致reportを確認する。必要ならinput script replayとの差分も比較する。
-- 落下死ラインとステージ境界をメモリから取り、`fallRisk` と `tileProbe.holeAhead` を統合した危険判定を作る。
-- 学習済み `.npz` から生成したinput scriptでstage 0を実走させ、一定時間生存、Big Star接近、落下しない、相手と戦うなどのゲーム内指標をmanifestへ入れる。今回のsplit smokeはloader成功後にremote input timeoutになったため、まずharness条件を安定させる。
-- C++模倣推論ランタイムはdataset CSV上でPython推論と一致済み。次はPoC内で `GameStateSample` / object scan / fireball handler / tileProbeからdatasetと同じfeature vectorを作る `Observation -> FeatureEncoder` を実装し、input script生成を介さずremote CPU入力へ戻す直結経路を作る。
-- 学習/自己対戦用には、現行の2プロセスGUI寄りsmokeではなく、描画・音声・通信待ち・stdoutを削った高速評価runnerを用意する。目標は少なくともリアルタイム60fps、自己対戦データ生成では可能なら数百fps以上。
-- AI play log性能は、次に `TraceAIPlayLog` 内のobject scan、JSON構築、ofstream書き込みを別々に計測する。今回のflush batchingはログ本文を完全一致させたままスパイクを減らしたが、長時間の手動記録でまだ60fpsを割る場合は、1行分をメモリで組み立てて1回writeする経路など、ログ内容不変の最適化だけを測定して入れる。
-- 8コイン報酬itemのsettings mappingを追加ログで検証する。特に `0x0001108B` をマメ系として避ける扱いでよいか、`0x00011088` / `0x00011081` / `0x00011099` / `0x000D0002` の画面上の種類は何かを、SVGと手動記録で照合する。
-- object categoryをログ実例で検証し、ステージ固有objectの意味を詰める。`0x021` は実ログでBig Star actorと同じvtableだったため `big_star_related` に分類した。`0x0F0` はrollback notes上のItem付随短命effectとして `item_spawn_effect` に分類した。`0x145` は既存RAM probeの名前表に基づいて `stage_layout` に分類した。
+- 最優先: 実行時模倣AIの閉ループ評価を自動化する。stage 0で同じseed/初期条件を使い、survival frames、Big Star距離、star pickup、death/fall、item pickup/use、fireball、enemy contact、win/lossをmanifestへ保存し、線形モデル、RuleAI、無操作baselineを同じ指標で比較する。
+- 次に、固定Mario/無操作Luigiログを増やすだけでなく、scenario別に短い高品質人間ログを集める。まずは `star-chase`、`item-box`、`fire`、`enemy-hazard`、`recovery/fall-avoid`、`free-play` を各5-10本、各1-3分程度にし、`recording-audit`、`visual-state-audit`、SVG/viewer目視で破棄/採用を決める。Marioが動かないログは基礎操作データとして有効だが、対戦反応は学べないので単独で増やし続けない。
+- RuleAIは「強いAI」を目指すより先に、相手・環境揺らし・DAgger用の分布拡張器として進化させる。Big Star追跡、落下回避、近傍item/box、単純攻撃/回避を入れ、人間がRuleAI相手に操作したログと、模倣AIがRuleAI相手に失敗したログを集める。
+- 模倣学習は全12ボタン独立multi-labelのまま進めず、入力空間を実操作に寄せる。まず有効ボタンmaskを A/B/Left/Right/Up/Down/Y に制限し、左右/上下同時を禁止する。次に「方向」「jump」「dash/fire」「duck」などのfactor化、前回入力/hold duration/reaction delayを特徴量に入れ、短いノイズ入力を抑える。
+- DAgger風の反復を入れる。人間ログで初期モデルを作る、モデルを閉ループで走らせる、失敗/分布外/迷いframeをviewerで見つける、人間が同じ場面や近いscenarioをプレイして追加ラベルを入れる、datasetへ集約して再学習する。この反復を自己対戦の前に数回回す。
+- 自己対戦は、閉ループ評価で最低限「落ちずに動く」「星へ近づく」「item/fireballを扱う」が確認できてから始める。初期相手は無操作Mario、次にRuleAI、次に過去版モデル、最後にcurrent vs currentへ進める。報酬は勝敗だけでなく、star差、死亡、Big Star接近、item取得、攻撃/回避、時間生存を混ぜる。
+- 学習/自己対戦用には、2窓GUI smokeではなく高速runnerを用意する。目標は評価で60fps安定、自己対戦データ生成で数百fps以上。描画/音声/stdout/log flushを切り、必要な観測と入力だけを残す。
+- 状態取得の残課題は並行して潰す。StageLayout tile probeの低位tile意味、block/item boxの使用後tile変化、8コイン報酬item settings、スター/ダメージ/powerup無敵の原因分類、fireball寿命/当たり判定state、落下死ライン/ステージ境界を、実ログとSVG/viewerで照合する。
