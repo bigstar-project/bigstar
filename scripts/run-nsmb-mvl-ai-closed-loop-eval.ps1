@@ -15,6 +15,10 @@ param(
     [string]$ClientInputScript = "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs",
     [switch]$Trace,
     [int]$TraceInterval = 120,
+    [switch]$DisableImitationHazardGuard,
+    [int]$ImitationHazardGuardHorizontalRange = -1,
+    [int]$ImitationHazardGuardVerticalRange = -1,
+    [int]$ImitationHazardGuardCloseRange = -1,
     [switch]$SkipGameStateComparison,
     [switch]$AllowJit
 )
@@ -54,7 +58,12 @@ $envNames = @(
     "MELONDS_NSML_IMITATION_AI_TRACE",
     "MELONDS_NSML_IMITATION_AI_TRACE_INTERVAL",
     "MELONDS_NSML_IMITATION_AI_HOST_ONLY",
-    "MELONDS_NSML_IMITATION_AI_CLIENT_ONLY"
+    "MELONDS_NSML_IMITATION_AI_CLIENT_ONLY",
+    "MELONDS_NSML_IMITATION_AI_HAZARD_GUARD",
+    "MELONDS_NSML_IMITATION_AI_DISABLE_HAZARD_GUARD",
+    "MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_HORIZONTAL_RANGE",
+    "MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_VERTICAL_RANGE",
+    "MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_CLOSE_RANGE"
 )
 foreach ($name in $envNames) {
     $savedEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
@@ -93,6 +102,18 @@ try {
         $env:MELONDS_NSML_IMITATION_AI_MODEL = $modelPath
         $env:MELONDS_NSML_IMITATION_AI_PLAYER = $AIPlayer
         $env:MELONDS_NSML_IMITATION_AI_THRESHOLD = $Threshold.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+        if ($DisableImitationHazardGuard) {
+            $env:MELONDS_NSML_IMITATION_AI_HAZARD_GUARD = "0"
+        }
+        if ($ImitationHazardGuardHorizontalRange -ge 0) {
+            $env:MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_HORIZONTAL_RANGE = "$ImitationHazardGuardHorizontalRange"
+        }
+        if ($ImitationHazardGuardVerticalRange -ge 0) {
+            $env:MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_VERTICAL_RANGE = "$ImitationHazardGuardVerticalRange"
+        }
+        if ($ImitationHazardGuardCloseRange -ge 0) {
+            $env:MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_CLOSE_RANGE = "$ImitationHazardGuardCloseRange"
+        }
         if ($Trace) {
             $env:MELONDS_NSML_IMITATION_AI_TRACE = "1"
             $env:MELONDS_NSML_IMITATION_AI_TRACE_INTERVAL = "$TraceInterval"
@@ -103,7 +124,7 @@ try {
         "-Frames", "$Frames",
         "-MvlStage", "$MvlStage",
         "-MvlMatchSeed", "$MvlMatchSeed",
-        "-LogDir", $LogDir,
+        "-LogDir", $logRoot,
         "-HostInputScript", $HostInputScript,
         "-ClientInputScript", $ClientInputScript,
         "-HostAIPlayLog", $hostAIPlayLog,

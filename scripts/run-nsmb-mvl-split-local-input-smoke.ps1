@@ -259,7 +259,11 @@ if ($LowDelayWan) {
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $smokeScript = Join-Path $PSScriptRoot "run-nsmb-mvl-lan-route-smoke.ps1"
-$logRoot = Join-Path $repoRoot $LogDir
+$logRoot = if ([System.IO.Path]::IsPathRooted($LogDir)) {
+    $LogDir
+} else {
+    Join-Path $repoRoot $LogDir
+}
 $hostLog = Join-Path $logRoot "host"
 $clientLog = Join-Path $logRoot "client"
 $wrapperLog = Join-Path $logRoot "wrapper"
