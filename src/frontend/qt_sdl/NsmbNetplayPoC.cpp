@@ -1345,6 +1345,7 @@ ObjectScanSample FindObjectByID(melonDS::NDS* nds, melonDS::u16 expectedObjectID
 ObjectPairScanSample FindObjectPairByIDSortedX(melonDS::NDS* nds, melonDS::u16 expectedObjectID);
 PlayerActorScanSample FindPlayerActors(melonDS::NDS* nds);
 melonDS::u32 FindCachedObjectBaseByID(melonDS::u16 objectID);
+GameStateObjectScanCache BuildGameStateObjectScanCache(melonDS::NDS* nds);
 
 struct GameStateSyncHashes
 {
@@ -2606,7 +2607,86 @@ bool AIPlayerContactGround(melonDS::u32 collisionFlag)
     return (collisionFlag & (0x00000001u | 0x00002000u | 0x00008000u | 0x08000000u)) != 0;
 }
 
-NsmbRuleAI::FrameState RuleAIFrameStateFromSample(const GameStateSample& sample, bool inGameplay)
+std::int32_t SignedU32(melonDS::u32 value);
+std::int64_t AIWrappedDeltaX(std::int64_t x, std::int64_t origin);
+const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings);
+
+struct RuntimeHazardThreat
+{
+    bool Found = false;
+    bool Closing = false;
+    bool VeryClose = false;
+    std::int64_t Dx = 0;
+    std::int64_t Dy = 0;
+    std::int64_t VelX = 0;
+    std::int64_t VelY = 0;
+};
+
+bool IsRuntimeHazardCategory(const char* category)
+{
+    return std::strcmp(category, "moving_hazard") == 0 ||
+        std::strcmp(category, "hazard") == 0 ||
+        std::strcmp(category, "enemy_goomba") == 0 ||
+        std::strcmp(category, "enemy_koopa") == 0;
+}
+
+RuntimeHazardThreat MostDangerousRuntimeHazard(
+    const GameStateObjectScanCache& objectScanCache,
+    melonDS::u32 selfX,
+    melonDS::u32 selfY,
+    melonDS::u32 selfVelX,
+    std::int64_t horizontalRange,
+    std::int64_t verticalRange,
+    std::int64_t closeRange)
+{
+    RuntimeHazardThreat best {};
+    std::int64_t bestScore = 0;
+    auto abs64 = [](std::int64_t value) {
+        return value < 0 ? -value : value;
+    };
+
+    const std::int64_t selfVx = SignedU32(selfVelX);
+    for (const GameStateObjectScanEntry& entry : objectScanCache.Entries)
+    {
+        if (entry.LifecycleState != 1)
+            continue;
+        if (!IsRuntimeHazardCategory(AIObjectCategory(entry.ObjectID, entry.Actor.Settings)))
+            continue;
+
+        const std::int64_t dx = AIWrappedDeltaX(SignedU32(entry.Actor.PosX), SignedU32(selfX));
+        const std::int64_t dy = static_cast<std::int64_t>(SignedU32(entry.Actor.PosY)) - SignedU32(selfY);
+        if (abs64(dx) > horizontalRange || abs64(dy) > verticalRange)
+            continue;
+
+        const std::int64_t hazardVx = SignedU32(entry.Actor.VelX);
+        const std::int64_t relVx = hazardVx - selfVx;
+        const bool closing = (dx < 0 && relVx > 0) || (dx > 0 && relVx < 0);
+        const bool veryClose = abs64(dx) <= closeRange || abs64(dy) <= 0x10000;
+        std::int64_t score = abs64(dx) + abs64(dy) * 2;
+        if (closing)
+            score -= horizontalRange;
+        if (veryClose)
+            score -= closeRange;
+
+        if (!best.Found || score < bestScore)
+        {
+            best.Found = true;
+            best.Closing = closing;
+            best.VeryClose = veryClose;
+            best.Dx = dx;
+            best.Dy = dy;
+            best.VelX = hazardVx;
+            best.VelY = SignedU32(entry.Actor.VelY);
+            bestScore = score;
+        }
+    }
+    return best;
+}
+
+NsmbRuleAI::FrameState RuleAIFrameStateFromSample(
+    const GameStateSample& sample,
+    const GameStateObjectScanCache& objectScanCache,
+    bool inGameplay)
 {
     NsmbRuleAI::FrameState state {};
     auto probeSolidish = [](melonDS::u32 behavior) {
@@ -2622,9 +2702,18 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(const GameStateSample& sample,
     };
     auto fillProbeSummary = [&probePointSolidish](NsmbRuleAI::PlayerFrameState& out,
                                                    const AIPlayerTileProbeSample& probe,
-                                                   bool contactGround) {
+                                                   melonDS::u32 collisionFlag) {
+        const bool contactGround = AIPlayerContactGround(collisionFlag);
+        const bool contactWallLeft =
+            (collisionFlag & (0x00000008u | 0x00000400u | 0x20000000u)) != 0;
+        const bool contactWallRight =
+            (collisionFlag & (0x00000010u | 0x00000800u | 0x40000000u)) != 0;
         if (!probe.Found)
+        {
+            out.WallLeft = contactWallLeft;
+            out.WallRight = contactWallRight;
             return;
+        }
         out.GroundBelowSolid = probePointSolidish(probe, "below");
         const bool aheadBody = probePointSolidish(probe, "aheadBody");
         const bool aheadFeet = probePointSolidish(probe, "aheadFeet");
@@ -2640,9 +2729,9 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(const GameStateSample& sample,
         const bool right2Below = probePointSolidish(probe, "right2Below");
         out.WallAhead = aheadBody || aheadFeet;
         out.HoleAhead = !aheadBelow && !ahead2Below;
-        out.WallLeft = leftBody || leftFeet;
+        out.WallLeft = leftBody || leftFeet || contactWallLeft;
         out.HoleLeft = !leftBelow && !left2Below;
-        out.WallRight = rightBody || rightFeet;
+        out.WallRight = rightBody || rightFeet || contactWallRight;
         out.HoleRight = !rightBelow && !right2Below;
         if (contactGround && !out.GroundBelowSolid)
         {
@@ -2652,6 +2741,38 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(const GameStateSample& sample,
             out.HoleRight = false;
         }
     };
+    auto fillHazard = [&objectScanCache](NsmbRuleAI::PlayerFrameState& out,
+                                          melonDS::u32 x,
+                                          melonDS::u32 y,
+                                          melonDS::u32 vx) {
+        const RuntimeHazardThreat threat = MostDangerousRuntimeHazard(
+            objectScanCache,
+            x,
+            y,
+            vx,
+            G.RuleAIHazardHorizontalRange,
+            G.RuleAIHazardVerticalRange,
+            std::max<std::int64_t>(0x10000, G.RuleAIHazardHorizontalRange / 2));
+        out.HazardFound = threat.Found;
+        out.HazardClosing = threat.Closing;
+        out.HazardVeryClose = threat.VeryClose;
+        out.HazardDx = static_cast<std::int32_t>(std::clamp<std::int64_t>(
+            threat.Dx,
+            std::numeric_limits<std::int32_t>::min(),
+            std::numeric_limits<std::int32_t>::max()));
+        out.HazardDy = static_cast<std::int32_t>(std::clamp<std::int64_t>(
+            threat.Dy,
+            std::numeric_limits<std::int32_t>::min(),
+            std::numeric_limits<std::int32_t>::max()));
+        out.HazardVelX = static_cast<std::int32_t>(std::clamp<std::int64_t>(
+            threat.VelX,
+            std::numeric_limits<std::int32_t>::min(),
+            std::numeric_limits<std::int32_t>::max()));
+        out.HazardVelY = static_cast<std::int32_t>(std::clamp<std::int64_t>(
+            threat.VelY,
+            std::numeric_limits<std::int32_t>::min(),
+            std::numeric_limits<std::int32_t>::max()));
+    };
     state.InGameplay = inGameplay;
     state.Players[0].Found = sample.PlayerActor0Found != 0;
     state.Players[0].X = sample.PlayerActor0PosX;
@@ -2660,7 +2781,12 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(const GameStateSample& sample,
     fillProbeSummary(
         state.Players[0],
         sample.PlayerActor0TileProbe,
-        AIPlayerContactGround(sample.PlayerActor0CollisionFlag));
+        sample.PlayerActor0CollisionFlag);
+    fillHazard(
+        state.Players[0],
+        sample.PlayerActor0PosX,
+        sample.PlayerActor0PosY,
+        sample.PlayerActor0VelX);
     state.Players[1].Found = sample.PlayerActor1Found != 0;
     state.Players[1].X = sample.PlayerActor1PosX;
     state.Players[1].Y = sample.PlayerActor1PosY;
@@ -2668,7 +2794,12 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(const GameStateSample& sample,
     fillProbeSummary(
         state.Players[1],
         sample.PlayerActor1TileProbe,
-        AIPlayerContactGround(sample.PlayerActor1CollisionFlag));
+        sample.PlayerActor1CollisionFlag);
+    fillHazard(
+        state.Players[1],
+        sample.PlayerActor1PosX,
+        sample.PlayerActor1PosY,
+        sample.PlayerActor1VelX);
     state.StarFound = sample.VsStarFound != 0;
     state.StarX = sample.VsStarPosX;
     state.StarY = sample.VsStarPosY;
@@ -2745,9 +2876,10 @@ InputState ApplyRuleBasedAIInput(
     if (!inGameplay)
         return fallback;
     const GameStateSample sample = ReadGameStateSample(nds);
+    const GameStateObjectScanCache objectScanCache = BuildGameStateObjectScanCache(nds);
     return NsmbRuleAI::DecideInput(
         config,
-        RuleAIFrameStateFromSample(sample, inGameplay),
+        RuleAIFrameStateFromSample(sample, objectScanCache, inGameplay),
         instanceID,
         frame,
         player,
@@ -15871,18 +16003,24 @@ bool ApplyImitationAIHazardGuard(
 
     const melonDS::u32 selfX = p0 ? sample.PlayerActor0PosX : sample.PlayerActor1PosX;
     const melonDS::u32 selfY = p0 ? sample.PlayerActor0PosY : sample.PlayerActor1PosY;
+    const melonDS::u32 selfVelX = p0 ? sample.PlayerActor0VelX : sample.PlayerActor1VelX;
+    const melonDS::u32 collisionFlag = p0 ? sample.PlayerActor0CollisionFlag : sample.PlayerActor1CollisionFlag;
     const AIPlayerTileProbeSample& tileProbe = p0 ? sample.PlayerActor0TileProbe : sample.PlayerActor1TileProbe;
     outHazardDx = 0;
     outHazardDy = 0;
-    const GameStateObjectScanEntry* hazard = NearestRuntimeHazard(
+    const RuntimeHazardThreat threat = MostDangerousRuntimeHazard(
         objectScanCache,
         selfX,
         selfY,
+        selfVelX,
         G.ImitationAIHazardGuardHorizontalRange,
         G.ImitationAIHazardGuardVerticalRange,
-        outHazardDx,
-        outHazardDy);
-    if (!hazard)
+        G.ImitationAIHazardGuardCloseRange);
+    if (!threat.Found)
+        return false;
+    outHazardDx = threat.Dx;
+    outHazardDy = threat.Dy;
+    if (!threat.Closing && !threat.VeryClose)
         return false;
 
     auto abs64 = [](std::int64_t value) {
@@ -15893,11 +16031,14 @@ bool ApplyImitationAIHazardGuard(
     constexpr melonDS::u32 kHeldLeft = 1u << 5;
     const melonDS::u32 before = held;
     const bool wallLeft = AITileProbeSolidishValue(tileProbe, "leftBody") ||
-        AITileProbeSolidishValue(tileProbe, "leftFeet");
+        AITileProbeSolidishValue(tileProbe, "leftFeet") ||
+        (collisionFlag & (0x00000008u | 0x00000400u | 0x20000000u)) != 0;
     const bool wallRight = AITileProbeSolidishValue(tileProbe, "rightBody") ||
-        AITileProbeSolidishValue(tileProbe, "rightFeet");
+        AITileProbeSolidishValue(tileProbe, "rightFeet") ||
+        (collisionFlag & (0x00000010u | 0x00000800u | 0x40000000u)) != 0;
+    const bool pushWall = (collisionFlag & 0x00000004u) != 0;
     const bool hazardOnLeft = outHazardDx < 0;
-    const bool escapeBlocked = hazardOnLeft ? wallRight : wallLeft;
+    const bool escapeBlocked = hazardOnLeft ? (wallRight || pushWall) : (wallLeft || pushWall);
     const bool close = abs64(outHazardDx) <= G.ImitationAIHazardGuardCloseRange;
     const bool movingTowardHazard =
         (hazardOnLeft && (held & kHeldLeft) != 0) ||

@@ -7,6 +7,7 @@
 
 #include "NsmbNetplayPoC.h"
 
+#include <cstdint>
 #include <string>
 
 namespace NsmbRuleAI
@@ -41,6 +42,13 @@ struct PlayerFrameState
     bool HoleLeft = false;
     bool WallRight = false;
     bool HoleRight = false;
+    bool HazardFound = false;
+    bool HazardClosing = false;
+    bool HazardVeryClose = false;
+    std::int32_t HazardDx = 0;
+    std::int32_t HazardDy = 0;
+    std::int32_t HazardVelX = 0;
+    std::int32_t HazardVelY = 0;
 };
 
 struct FrameState

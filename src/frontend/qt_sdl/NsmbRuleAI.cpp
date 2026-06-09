@@ -113,14 +113,13 @@ NsmbNetplayPoC::InputState DecideInput(
     const std::int32_t dy = CoordinateDelta(targetY, self.Y);
     const std::int32_t opponentDx = HorizontalDelta(config, other.X, self.X);
     const int absOpponentDx = std::abs(opponentDx);
-    const std::int32_t hazardDx =
-        state.MovingHazardFound ? HorizontalDelta(config, state.MovingHazardX, self.X) : 0;
-    const std::int32_t hazardDy =
-        state.MovingHazardFound ? CoordinateDelta(state.MovingHazardY, self.Y) : 0;
+    const std::int32_t hazardDx = self.HazardFound ? self.HazardDx : 0;
+    const std::int32_t hazardDy = self.HazardFound ? self.HazardDy : 0;
     const bool hazardDanger =
-        state.MovingHazardFound &&
+        self.HazardFound &&
         std::abs(hazardDx) <= config.HazardHorizontalRange &&
-        std::abs(hazardDy) <= config.HazardVerticalRange;
+        std::abs(hazardDy) <= config.HazardVerticalRange &&
+        (self.HazardClosing || self.HazardVeryClose);
 
     if (self.BattleStars > other.BattleStars && absOpponentDx < config.CloseRange)
     {
@@ -172,7 +171,7 @@ NsmbNetplayPoC::InputState DecideInput(
         (config.TraceInterval <= 1 || (frame % static_cast<melonDS::u32>(config.TraceInterval)) == 0))
     {
         std::printf(
-            "NSMB RuleAI: inst=%d frame=%u player=%d mode=%s self=%08X/%08X target=%08X/%08X opponent=%08X/%08X stars=%u/%u hazard=%d/%d/%d terrain=ground:%d ahead:%d/%d left:%d/%d right:%d/%d keys=0x%03X\n",
+            "NSMB RuleAI: inst=%d frame=%u player=%d mode=%s self=%08X/%08X target=%08X/%08X opponent=%08X/%08X stars=%u/%u hazard=%d/%d/%d closing=%d close=%d terrain=ground:%d ahead:%d/%d left:%d/%d right:%d/%d keys=0x%03X\n",
             instanceID,
             frame,
             player,
@@ -188,6 +187,8 @@ NsmbNetplayPoC::InputState DecideInput(
             hazardDanger ? 1 : 0,
             hazardDx,
             hazardDy,
+            self.HazardClosing ? 1 : 0,
+            self.HazardVeryClose ? 1 : 0,
             self.GroundBelowSolid ? 1 : 0,
             self.WallAhead ? 1 : 0,
             self.HoleAhead ? 1 : 0,
