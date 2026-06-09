@@ -1610,6 +1610,10 @@ struct State
     melonDS::u32 ImitationAIStartFrame = 0;
     double ImitationAIThreshold = 0.5;
     melonDS::u32 ImitationAIAllowedHeldMask = 0x8F3;
+    bool ImitationAIHazardGuardEnabled = true;
+    int ImitationAIHazardGuardHorizontalRange = 0x40000;
+    int ImitationAIHazardGuardVerticalRange = 0x50000;
+    int ImitationAIHazardGuardCloseRange = 0x10000;
     bool ImitationAITraceEnabled = false;
     int ImitationAITraceInterval = 60;
     bool ImitationAIWarnMissingFeatures = true;
@@ -15798,6 +15802,127 @@ bool RuntimeObjectFeature(
     return true;
 }
 
+const GameStateObjectScanEntry* NearestRuntimeHazard(
+    const GameStateObjectScanCache& objectScanCache,
+    melonDS::u32 selfX,
+    melonDS::u32 selfY,
+    std::int64_t horizontalRange,
+    std::int64_t verticalRange,
+    std::int64_t& outDx,
+    std::int64_t& outDy)
+{
+    const GameStateObjectScanEntry* nearest = nullptr;
+    std::int64_t nearestDist2 = 0;
+    auto abs64 = [](std::int64_t value) {
+        return value < 0 ? -value : value;
+    };
+    for (const GameStateObjectScanEntry& entry : objectScanCache.Entries)
+    {
+        if (entry.LifecycleState != 1)
+            continue;
+        const char* category = AIObjectCategory(entry.ObjectID, entry.Actor.Settings);
+        if (std::strcmp(category, "moving_hazard") != 0 &&
+            std::strcmp(category, "hazard") != 0 &&
+            std::strcmp(category, "enemy_goomba") != 0 &&
+            std::strcmp(category, "enemy_koopa") != 0)
+        {
+            continue;
+        }
+        const std::int64_t dx = AIWrappedDeltaX(SignedU32(entry.Actor.PosX), SignedU32(selfX));
+        const std::int64_t dy = static_cast<std::int64_t>(SignedU32(entry.Actor.PosY)) - SignedU32(selfY);
+        if (abs64(dx) > horizontalRange || abs64(dy) > verticalRange)
+            continue;
+        const std::int64_t dist2 = dx * dx + dy * dy;
+        if (!nearest || dist2 < nearestDist2)
+        {
+            nearest = &entry;
+            nearestDist2 = dist2;
+            outDx = dx;
+            outDy = dy;
+        }
+    }
+    return nearest;
+}
+
+bool ApplyImitationAIHazardGuard(
+    const GameStateSample& sample,
+    const GameStateObjectScanCache& objectScanCache,
+    int player,
+    melonDS::u32& held,
+    std::int64_t& outHazardDx,
+    std::int64_t& outHazardDy)
+{
+    if (!G.ImitationAIHazardGuardEnabled || player < 0 || player > 1)
+        return false;
+
+    const bool p0 = player == 0;
+    const melonDS::u32 found = p0 ? sample.PlayerActor0Found : sample.PlayerActor1Found;
+    if (!found)
+        return false;
+
+    const melonDS::u32 selfX = p0 ? sample.PlayerActor0PosX : sample.PlayerActor1PosX;
+    const melonDS::u32 selfY = p0 ? sample.PlayerActor0PosY : sample.PlayerActor1PosY;
+    const AIPlayerTileProbeSample& tileProbe = p0 ? sample.PlayerActor0TileProbe : sample.PlayerActor1TileProbe;
+    outHazardDx = 0;
+    outHazardDy = 0;
+    const GameStateObjectScanEntry* hazard = NearestRuntimeHazard(
+        objectScanCache,
+        selfX,
+        selfY,
+        G.ImitationAIHazardGuardHorizontalRange,
+        G.ImitationAIHazardGuardVerticalRange,
+        outHazardDx,
+        outHazardDy);
+    if (!hazard)
+        return false;
+
+    auto abs64 = [](std::int64_t value) {
+        return value < 0 ? -value : value;
+    };
+    constexpr melonDS::u32 kHeldA = 1u << 0;
+    constexpr melonDS::u32 kHeldRight = 1u << 4;
+    constexpr melonDS::u32 kHeldLeft = 1u << 5;
+    const melonDS::u32 before = held;
+    const bool wallLeft = AITileProbeSolidishValue(tileProbe, "leftBody") ||
+        AITileProbeSolidishValue(tileProbe, "leftFeet");
+    const bool wallRight = AITileProbeSolidishValue(tileProbe, "rightBody") ||
+        AITileProbeSolidishValue(tileProbe, "rightFeet");
+    const bool hazardOnLeft = outHazardDx < 0;
+    const bool escapeBlocked = hazardOnLeft ? wallRight : wallLeft;
+    const bool close = abs64(outHazardDx) <= G.ImitationAIHazardGuardCloseRange;
+    const bool movingTowardHazard =
+        (hazardOnLeft && (held & kHeldLeft) != 0) ||
+        (!hazardOnLeft && (held & kHeldRight) != 0);
+
+    held |= kHeldA;
+    if (close || movingTowardHazard)
+    {
+        if (hazardOnLeft)
+            held &= ~kHeldLeft;
+        else
+            held &= ~kHeldRight;
+    }
+    if (!escapeBlocked)
+    {
+        if (hazardOnLeft)
+        {
+            held |= kHeldRight;
+            held &= ~kHeldLeft;
+        }
+        else
+        {
+            held |= kHeldLeft;
+            held &= ~kHeldRight;
+        }
+    }
+    else
+    {
+        held &= ~(kHeldLeft | kHeldRight);
+    }
+
+    return held != before;
+}
+
 bool IsRuntimeItemCategory(const char* category)
 {
     return std::strcmp(category, "world_item") == 0 ||
@@ -16153,6 +16278,10 @@ InputState ApplyImitationAIInput(
     };
     keepHigherProbability(4, 5);
     keepHigherProbability(6, 7);
+    std::int64_t guardHazardDx = 0;
+    std::int64_t guardHazardDy = 0;
+    const bool hazardGuardAdjusted =
+        ApplyImitationAIHazardGuard(sample, objectScanCache, player, held, guardHazardDx, guardHazardDy);
     InputState input = NeutralInputPreservingTouch(fallback);
     input.KeyMask = (~held) & 0x0FFFu;
 
@@ -16161,7 +16290,7 @@ InputState ApplyImitationAIInput(
             (frame % static_cast<melonDS::u32>(G.ImitationAITraceInterval)) == 0))
     {
         std::printf(
-            "NSMB ImitationAI: inst=%d frame=%u player=%d held=0x%03X keyMask=0x%03X features=%d/%d threshold=%.3f probs=",
+            "NSMB ImitationAI: inst=%d frame=%u player=%d held=0x%03X keyMask=0x%03X features=%d/%d threshold=%.3f hazardGuard=%d hazardDx=%lld hazardDy=%lld probs=",
             instanceID,
             frame,
             player,
@@ -16169,7 +16298,10 @@ InputState ApplyImitationAIInput(
             input.KeyMask,
             filled,
             filled + missing,
-            G.ImitationAIThreshold);
+            G.ImitationAIThreshold,
+            hazardGuardAdjusted ? 1 : 0,
+            static_cast<long long>(guardHazardDx),
+            static_cast<long long>(guardHazardDy));
         for (std::size_t i = 0; i < prediction.Probabilities.size() && i < G.ImitationAIModel.Buttons.size(); i++)
         {
             std::printf(
@@ -17741,6 +17873,21 @@ void InitFromEnvironment()
         EnvDouble("MELONDS_NSML_IMITATION_AI_THRESHOLD", 0.5), 0.0, 1.0);
     G.ImitationAIAllowedHeldMask =
         EnvU32("MELONDS_NSML_IMITATION_AI_ALLOWED_HELD_MASK", G.ImitationAIAllowedHeldMask) & 0x0FFFu;
+    G.ImitationAIHazardGuardEnabled =
+        EnvInt("MELONDS_NSML_IMITATION_AI_HAZARD_GUARD", 1) != 0 &&
+        !EnvFlag("MELONDS_NSML_IMITATION_AI_DISABLE_HAZARD_GUARD");
+    G.ImitationAIHazardGuardHorizontalRange = std::clamp(
+        EnvInt("MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_HORIZONTAL_RANGE", G.ImitationAIHazardGuardHorizontalRange),
+        0,
+        0x200000);
+    G.ImitationAIHazardGuardVerticalRange = std::clamp(
+        EnvInt("MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_VERTICAL_RANGE", G.ImitationAIHazardGuardVerticalRange),
+        0,
+        0x200000);
+    G.ImitationAIHazardGuardCloseRange = std::clamp(
+        EnvInt("MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_CLOSE_RANGE", G.ImitationAIHazardGuardCloseRange),
+        0,
+        G.ImitationAIHazardGuardHorizontalRange);
     G.ImitationAITraceEnabled = EnvFlag("MELONDS_NSML_IMITATION_AI_TRACE");
     G.ImitationAITraceInterval = std::max(1, EnvInt("MELONDS_NSML_IMITATION_AI_TRACE_INTERVAL", 60));
     G.ImitationAIWarnMissingFeatures = !EnvFlag("MELONDS_NSML_IMITATION_AI_DISABLE_FEATURE_WARNING");
@@ -18367,6 +18514,12 @@ void InitFromEnvironment()
                 G.ImitationAIHostOnly ? 1 : 0,
                 G.ImitationAIClientOnly ? 1 : 0);
         }
+        std::printf(
+            "NSMB ImitationAI: hazardGuard enabled=%d horizontalRange=0x%X verticalRange=0x%X closeRange=0x%X\n",
+            G.ImitationAIHazardGuardEnabled ? 1 : 0,
+            G.ImitationAIHazardGuardHorizontalRange,
+            G.ImitationAIHazardGuardVerticalRange,
+            G.ImitationAIHazardGuardCloseRange);
     }
     std::fflush(stdout);
 }
