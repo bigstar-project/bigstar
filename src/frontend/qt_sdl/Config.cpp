@@ -104,6 +104,7 @@ DefaultList<bool> DefaultBools =
     {"Instance*.DS.Battery.LevelOkay", true},
     {"Instance*.DSi.Battery.Charging", true},
 #ifdef JIT_ENABLED
+    {"JIT.Enable", true},
     {"JIT.BranchOptimisations", true},
     {"JIT.LiteralOptimisations", true},
 #ifndef __APPLE__
