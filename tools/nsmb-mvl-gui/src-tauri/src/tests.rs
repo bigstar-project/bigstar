@@ -23,10 +23,18 @@ fn request(role: Role) -> LaunchRequest {
         rom_path: "unused.nds".to_owned(),
         settings: GameSettings {
             course_mode: CourseMode::Random,
+            course_stages: vec![2, 3, 4, 0, 1],
             wins: 3,
             big_stars: 10,
             lives: Lives::Five,
             match_seed: "7".to_owned(),
+            rng_seeds: vec![
+                "7".to_owned(),
+                "8".to_owned(),
+                "9".to_owned(),
+                "10".to_owned(),
+                "11".to_owned(),
+            ],
             input_delay_frames: 4,
             input_max_frame_lead: 4,
             rollback_enabled: false,
@@ -200,6 +208,7 @@ fn melon_env_carries_game_settings_and_netplay_start() {
     assert_eq!(env["MELONDS_NSML_PEER"], "127.0.0.1");
     assert_eq!(env["MELONDS_NSML_MVL_STAGE"], "2");
     assert_eq!(env["MELONDS_NSML_DIRECT_MVL_BOOT_STAGE"], "2");
+    assert_eq!(env["MELONDS_NSML_MVL_STAGE_SEQUENCE"], "2,3,4,0,1");
     assert_eq!(env["MELONDS_NSML_MVL_COURSE_MODE"], "random");
     assert_eq!(env["MELONDS_NSML_MVL_WINS"], "3");
     assert_eq!(env["MELONDS_NSML_MVL_BIG_STARS"], "10");
@@ -207,6 +216,7 @@ fn melon_env_carries_game_settings_and_netplay_start() {
     assert_eq!(env["MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT"], "1");
     assert_eq!(env["MELONDS_NSML_NETPLAY_START_FRAME"], "840");
     assert_eq!(env["MELONDS_NSML_MATCH_SEED"], "7");
+    assert_eq!(env["MELONDS_NSML_MATCH_SEED_SEQUENCE"], "7,8,9,10,11");
     assert_eq!(env["MELONDS_NSML_DELAY"], "4");
     assert_eq!(env["MELONDS_NSML_INPUT_MAX_FRAME_LEAD"], "4");
     assert_eq!(env["MELONDS_NSML_INPUT_HEALTH_TRACE"], "1");
@@ -323,10 +333,13 @@ fn validation_rejects_bad_signal_url_and_room_code() {
 fn selected_stage_uses_match_seed_for_random_course() {
     let mut request = request(Role::Host);
     request.settings.match_seed = "0x0E".to_owned();
-    assert_eq!(selected_stage(&request.settings, 4).expect("stage"), 4);
+    request.settings.rng_seeds[0] = "0x0E".to_owned();
+    request.settings.course_stages = vec![4, 3, 2, 1, 0];
+    assert_eq!(selected_stage(&request.settings, 2).expect("stage"), 4);
 
     request.settings.course_mode = CourseMode::Select;
-    assert_eq!(selected_stage(&request.settings, 9).expect("stage"), 4);
+    request.settings.course_stages = vec![1, 2, 3, 4, 0];
+    assert_eq!(selected_stage(&request.settings, 9).expect("stage"), 1);
 }
 
 #[test]

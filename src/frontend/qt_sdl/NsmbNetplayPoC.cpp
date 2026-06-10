@@ -1376,6 +1376,7 @@ struct State
     melonDS::u32 DirectMvlBootFrame = 0;
     int DirectMvlBootScene = 0x0F;
     int DirectMvlBootStage = 0;
+    std::vector<int> MvlStageSequence;
     int DirectMvlBootPlayerID = -1;
     melonDS::u32 MvlStageSceneSettings = kMvlStageSceneDefaultSettings;
     std::string MvlCourseMode = "fixed";
@@ -1397,7 +1398,10 @@ struct State
     melonDS::u32 MvlAutoRestartLastRestartFrame[16] {};
     int MvlAutoRestartCount[16] {};
     int MvlAutoRestartWins[16][2] {};
+    std::vector<char> MvlAutoRestartBootstrapCheckpoint[16];
+    bool MvlAutoRestartBootstrapCheckpointLogged[16] {};
     std::vector<char> MvlAutoRestartCheckpoint[16];
+    int MvlAutoRestartCheckpointStage[16] {};
     bool MvlAutoRestartCheckpointLogged[16] {};
     bool DirectMvlBootUseLoadGameSM = false;
     bool DirectMvlBootPatchLoadGameSMOnly = false;
@@ -1775,6 +1779,7 @@ struct State
     bool MatchSeedConfigured = false;
     bool MatchSeedSent = false;
     melonDS::u32 MatchSeed = 0;
+    std::vector<melonDS::u32> MatchSeedSequence;
     bool NetplayAnyLockstepStarted = false;
     bool NetplayLockstepStarted[16] {};
     melonDS::u32 StateSaveFrame = 0;
@@ -1939,12 +1944,146 @@ bool EnvHasValue(const char* name)
     return value && value[0];
 }
 
+melonDS::u32 ComposeMvlSceneSettingsForStage(int stage)
+{
+    const melonDS::u32 clampedStage = static_cast<melonDS::u32>(std::clamp(stage, 0, 4));
+    return ((0xB4u + clampedStage) << 16) | 0xFF00u;
+}
+
+std::vector<melonDS::u32> ParseU32ListEnv(const char* name)
+{
+    std::vector<melonDS::u32> values;
+    const char* raw = std::getenv(name);
+    if (!raw || !raw[0])
+        return values;
+
+    std::stringstream stream(raw);
+    std::string token;
+    while (std::getline(stream, token, ','))
+    {
+        token.erase(std::remove_if(token.begin(), token.end(), [](unsigned char ch) {
+            return std::isspace(ch) != 0;
+        }), token.end());
+        if (token.empty())
+            continue;
+        values.push_back(static_cast<melonDS::u32>(std::strtoul(token.c_str(), nullptr, 0)));
+    }
+    return values;
+}
+
+std::vector<int> ParseStageListEnv(const char* name)
+{
+    std::vector<int> stages;
+    for (melonDS::u32 value : ParseU32ListEnv(name))
+        stages.push_back(std::clamp(static_cast<int>(value), 0, 4));
+    return stages;
+}
+
+int GameIndexForInstance(int instanceID)
+{
+    if (instanceID < 0 || instanceID >= 16)
+        return 0;
+    return std::max(0, G.MvlAutoRestartCount[instanceID]);
+}
+
+int MvlStageForGame(int instanceID)
+{
+    const int index = GameIndexForInstance(instanceID);
+    if (!G.MvlStageSequence.empty())
+        return G.MvlStageSequence[std::min(index, static_cast<int>(G.MvlStageSequence.size()) - 1)];
+    if (G.MvlCourseMode == "random" && G.MatchSeedConfigured)
+        return static_cast<int>((G.MatchSeed + static_cast<melonDS::u32>(index)) % 5u);
+    return std::clamp(G.DirectMvlBootStage, 0, 4);
+}
+
+void RefreshMvlGameSelectionForInstance(int instanceID)
+{
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    const int stage = std::clamp(MvlStageForGame(instanceID), 0, 4);
+    G.DirectMvlBootStage = stage;
+    G.MvlStageSceneSettings = ComposeMvlSceneSettingsForStage(stage);
+}
+
+melonDS::u32 MatchSeedForGame(int instanceID)
+{
+    const int index = GameIndexForInstance(instanceID);
+    if (!G.MatchSeedSequence.empty())
+        return G.MatchSeedSequence[std::min(index, static_cast<int>(G.MatchSeedSequence.size()) - 1)];
+    return G.MatchSeed + static_cast<melonDS::u32>(index);
+}
+
+melonDS::u32 MvlRestartPacketCutoffFrame()
+{
+    melonDS::u32 cutoff = 0;
+    for (melonDS::u32 frame : G.MvlAutoRestartLastRestartFrame)
+        cutoff = std::max(cutoff, frame);
+    return cutoff;
+}
+
+void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
+{
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+
+    G.LocalGameStateHashes.clear();
+    G.RemoteGameStateHashes.clear();
+    G.RemoteGameStateSamples.clear();
+    G.RemotePlayerStateSamples.clear();
+    G.RemoteWorldStateSampleValid = false;
+    G.RemoteMovingHazardStateSampleValid = false;
+    G.RemoteWorldActorSnapshotSampleValid = false;
+    G.RemoteWorldEffectStateSampleValid = false;
+    G.PendingNSMLPackets.clear();
+    G.PacketBridgePacketInputs.clear();
+    G.DelayedNSMLPackets.clear();
+
+    G.LastLoggedGameStateFrame[instanceID] = 0;
+    G.LastSentGameStateFrame[instanceID] = 0;
+    G.LastSentPlayerStateFrame[instanceID] = 0;
+    G.LastSentWorldStateFrame[instanceID] = 0;
+    for (int player = 0; player < 2; player++)
+    {
+        G.LastAppliedPlayerGlobalsFrame[instanceID][player] = 0;
+        G.PlayerActorBaseCache[instanceID][player] = 0;
+        G.PlayerActorGUIDCache[instanceID][player] = 0;
+    }
+
+    G.WorldStarActorBaseCache[instanceID] = 0;
+    G.WorldStarActorGUIDCache[instanceID] = 0;
+    G.LastSpawnedWorldItemRemoteGUID[instanceID] = 0;
+    G.LastConfirmedWorldItemRemoteGUID[instanceID] = 0;
+    G.PendingWorldItemRemoteGUID[instanceID] = 0;
+    G.PendingWorldItemFirstMissingFrame[instanceID] = 0;
+    G.LastSpawnedNeutralWorldItemRemoteGUID[instanceID] = 0;
+    G.LastConfirmedNeutralWorldItemRemoteGUID[instanceID] = 0;
+    G.PendingNeutralWorldItemRemoteGUID[instanceID] = 0;
+    G.PendingNeutralWorldItemFirstMissingFrame[instanceID] = 0;
+    G.LastSpawnedDroppedStarItemRemoteGUID[instanceID] = 0;
+    G.LastConfirmedDroppedStarItemRemoteGUID[instanceID] = 0;
+    G.PendingDroppedStarItemRemoteGUID[instanceID] = 0;
+    G.PendingDroppedStarItemFirstMissingFrame[instanceID] = 0;
+    G.WorldMovingHazardBaseCache[instanceID] = 0;
+    G.WorldMovingHazardGUIDCache[instanceID] = 0;
+    G.WorldMovingHazardCacheCounts[instanceID] = 0;
+    std::fill(std::begin(G.WorldMovingHazardBaseCaches[instanceID]), std::end(G.WorldMovingHazardBaseCaches[instanceID]), 0);
+    std::fill(std::begin(G.WorldMovingHazardGUIDCaches[instanceID]), std::end(G.WorldMovingHazardGUIDCaches[instanceID]), 0);
+    std::fill(std::begin(G.WorldMovingHazardRemoteGUIDMaps[instanceID]), std::end(G.WorldMovingHazardRemoteGUIDMaps[instanceID]), 0);
+    std::fill(std::begin(G.WorldMovingHazardLocalGUIDMaps[instanceID]), std::end(G.WorldMovingHazardLocalGUIDMaps[instanceID]), 0);
+    std::fill(std::begin(G.WorldActorSnapshotRemoteGUIDMaps[instanceID]), std::end(G.WorldActorSnapshotRemoteGUIDMaps[instanceID]), 0);
+    std::fill(std::begin(G.WorldActorSnapshotLocalGUIDMaps[instanceID]), std::end(G.WorldActorSnapshotLocalGUIDMaps[instanceID]), 0);
+
+    std::printf("NSMB MvL auto restart: reset sync caches inst=%d frame=%u cutoff=%u\n",
+        instanceID,
+        frame,
+        MvlRestartPacketCutoffFrame());
+    std::fflush(stdout);
+}
+
 melonDS::u32 ComposeMvlSceneSettingsFromEnvironment()
 {
-    const melonDS::u32 stage = std::min(
-        EnvU32("MELONDS_NSML_MVL_STAGE", EnvU32("MELONDS_NSML_DIRECT_MVL_BOOT_STAGE", 0)),
-        4u);
-    return ((0xB4u + stage) << 16) | 0xFF00u;
+    return ComposeMvlSceneSettingsForStage(static_cast<int>(
+        EnvU32("MELONDS_NSML_MVL_STAGE", EnvU32("MELONDS_NSML_DIRECT_MVL_BOOT_STAGE", 0))));
 }
 
 void ApplyMvlRuntimeConfigIfNeeded(melonDS::NDS* nds)
@@ -2550,28 +2689,32 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                 if (packet.Magic == kMagic && packet.Version == kVersion && packet.Kind == kWireKindPacket
                     && packet.Player <= 1)
                 {
-                    if (G.PacketBridgeEnabled && nds)
-                        melonDS::NSML_PushMarioVsLuigiRemotePacket(nds, packet.Player, packet.Packet);
-                    else
-                        G.PendingNSMLPackets.push_back(packet);
-                    const bool newTick = packet.Tick != G.LastReceivedNSMLPacketTick[packet.Player];
-                    G.LastReceivedNSMLPacketTick[packet.Player] = packet.Tick;
-                    G.LastReceivedNSMLPacketFrame[packet.Player] = packet.Frame;
-                    if (G.PacketBridgeTraceEnabled && newTick)
+                    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
+                    if (restartCutoff == 0 || packet.Frame > restartCutoff)
                     {
-                        const melonDS::u32 keys = packet.Packet[2] | (packet.Packet[3] << 8);
-                        std::printf("NSMB PacketBridge: recv player=%u tick=0x%04X keys=0x%04X action=0x%02X b5=0x%02X b6=0x%02X b7=0x%02X bit=0x%02X remoteFrame=%u localFrame=%u pending=%zu\n",
-                            packet.Player,
-                            packet.Tick,
-                            keys,
-                            packet.Packet[4],
-                            packet.Packet[5],
-                            packet.Packet[6],
-                            packet.Packet[7],
-                            packet.Packet[0x29],
-                            packet.Frame,
-                            localFrame,
-                            G.PendingNSMLPackets.size());
+                        if (G.PacketBridgeEnabled && nds)
+                            melonDS::NSML_PushMarioVsLuigiRemotePacket(nds, packet.Player, packet.Packet);
+                        else
+                            G.PendingNSMLPackets.push_back(packet);
+                        const bool newTick = packet.Tick != G.LastReceivedNSMLPacketTick[packet.Player];
+                        G.LastReceivedNSMLPacketTick[packet.Player] = packet.Tick;
+                        G.LastReceivedNSMLPacketFrame[packet.Player] = packet.Frame;
+                        if (G.PacketBridgeTraceEnabled && newTick)
+                        {
+                            const melonDS::u32 keys = packet.Packet[2] | (packet.Packet[3] << 8);
+                            std::printf("NSMB PacketBridge: recv player=%u tick=0x%04X keys=0x%04X action=0x%02X b5=0x%02X b6=0x%02X b7=0x%02X bit=0x%02X remoteFrame=%u localFrame=%u pending=%zu\n",
+                                packet.Player,
+                                packet.Tick,
+                                keys,
+                                packet.Packet[4],
+                                packet.Packet[5],
+                                packet.Packet[6],
+                                packet.Packet[7],
+                                packet.Packet[0x29],
+                                packet.Frame,
+                                localFrame,
+                                G.PendingNSMLPackets.size());
+                        }
                     }
                 }
             }
@@ -2582,6 +2725,9 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                 if (packet.Magic == kMagic && packet.Version == kVersion
                     && packet.Kind == kWireKindPlayerState && packet.Player <= 1)
                 {
+                    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
+                    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
+                        break;
                     G.RemotePlayerStateSamples[PlayerStateKey(packet.Player, packet.Frame)] = packet;
                     while (G.RemotePlayerStateSamples.size() > 240)
                         G.RemotePlayerStateSamples.erase(G.RemotePlayerStateSamples.begin());
@@ -2608,6 +2754,9 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                 if (packet.Magic == kMagic && packet.Version == kVersion
                     && packet.Kind == kWireKindWorldState)
                 {
+                    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
+                    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
+                        break;
                     if (!G.RemoteWorldStateSampleValid || packet.Frame >= G.RemoteWorldStateSample.Frame)
                     {
                         G.RemoteWorldStateSample = packet;
@@ -2637,6 +2786,9 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     && packet.Kind == kWireKindMovingHazardState
                     && packet.Count <= kMaxWorldMovingHazards)
                 {
+                    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
+                    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
+                        break;
                     if (!G.RemoteMovingHazardStateSampleValid || packet.Frame >= G.RemoteMovingHazardStateSample.Frame)
                     {
                         G.RemoteMovingHazardStateSample = packet;
@@ -2652,6 +2804,9 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     && packet.Kind == kWireKindWorldActorSnapshot
                     && packet.Count <= kMaxWorldActorSnapshots)
                 {
+                    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
+                    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
+                        break;
                     if (!G.RemoteWorldActorSnapshotSampleValid || packet.Frame >= G.RemoteWorldActorSnapshotSample.Frame)
                     {
                         G.RemoteWorldActorSnapshotSample = packet;
@@ -2667,6 +2822,9 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     && packet.Kind == kWireKindWorldEffectState
                     && packet.Count <= kMaxWorldEffects)
                 {
+                    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
+                    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
+                        break;
                     if (!G.RemoteWorldEffectStateSampleValid || packet.Frame >= G.RemoteWorldEffectStateSample.Frame)
                     {
                         G.RemoteWorldEffectStateSample = packet;
@@ -6922,14 +7080,12 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
         0,
         1);
     const int scene = std::clamp(G.DirectMvlBootScene, 0, 0xFFFF);
-    if (G.MvlCourseMode == "random" && !G.MatchSeedConfigured)
+    if (G.MvlCourseMode == "random" && !G.MatchSeedConfigured && G.MvlStageSequence.empty())
         return false;
-    const int configuredStage = G.MvlCourseMode == "random"
-        ? static_cast<int>((G.MatchSeed + static_cast<melonDS::u32>(std::max(0, G.MvlAutoRestartCount[instanceID]))) % 5u)
-        : G.DirectMvlBootStage;
-    const int stage = std::clamp(configuredStage, 0, 4);
+    const int stage = std::clamp(MvlStageForGame(instanceID), 0, 4);
+    G.DirectMvlBootStage = stage;
+    G.MvlStageSceneSettings = ComposeMvlSceneSettingsForStage(stage);
     melonDS::u32 vsConnectBase = 0;
-    WriteARM9U32(nds, kSceneNextSceneSettingsAddr, G.MvlStageSceneSettings);
     if (G.DirectMvlBootUseLoadGameSM)
     {
         vsConnectBase = FindObjectBaseByID(nds, 0x0006);
@@ -6939,6 +7095,7 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
             std::fflush(stdout);
             return false;
         }
+        WriteARM9U32(nds, kSceneNextSceneSettingsAddr, G.MvlStageSceneSettings);
         WriteARM9U32(nds, vsConnectBase + 0x000, 0x0208489C);
         WriteARM9U32(nds, vsConnectBase + 0x00C, 0x00020006);
         WriteARM9U32(nds, vsConnectBase + 0x078, 0x00000003);
@@ -7119,6 +7276,98 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
     return true;
 }
 
+bool WriteNetAndGameRandomSeed(melonDS::NDS* nds, melonDS::u32 seed);
+
+void SaveMvlAutoRestartBootstrapCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.MvlAutoRestartAfterResult || G.MvlTargetWins <= 1 || !nds)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (!G.MvlAutoRestartBootstrapCheckpoint[instanceID].empty())
+        return;
+    if (G.MvlAutoRestartCount[instanceID] != 0 || G.MvlAutoRestartInResult[instanceID])
+        return;
+    const bool directBootReady = G.DirectMvlBootEnabled
+        && !G.DirectMvlBootApplied[instanceID]
+        && frame >= G.DirectMvlBootFrame;
+    const melonDS::u32 generatedBootstrapFrame = G.DirectMvlBootFrame > 120
+        ? G.DirectMvlBootFrame - 120
+        : 0;
+    const bool generatedRomReady = !G.DirectMvlBootEnabled
+        && G.NetRandomPatchAuto
+        && !G.NetRandomPatchApplied[instanceID]
+        && frame >= generatedBootstrapFrame
+        && nds->ARM9Read32(kGameStageGroupAddr) != 9;
+    if (!directBootReady && !generatedRomReady)
+        return;
+
+    melonDS::Savestate state;
+    if (state.Error || !nds->DoSavestate(&state) || state.Error)
+    {
+        if (!G.MvlAutoRestartBootstrapCheckpointLogged[instanceID])
+        {
+            std::printf("NSMB MvL auto restart: failed to save bootstrap checkpoint inst=%d frame=%u\n",
+                instanceID,
+                frame);
+            std::fflush(stdout);
+            G.MvlAutoRestartBootstrapCheckpointLogged[instanceID] = true;
+        }
+        return;
+    }
+
+    G.MvlAutoRestartBootstrapCheckpoint[instanceID].assign(
+        reinterpret_cast<const char*>(state.Buffer()),
+        reinterpret_cast<const char*>(state.Buffer()) + state.Length());
+    G.MvlAutoRestartBootstrapCheckpointLogged[instanceID] = true;
+    std::printf("NSMB MvL auto restart: saved bootstrap checkpoint inst=%d frame=%u bytes=%u\n",
+        instanceID,
+        frame,
+        state.Length());
+    std::fflush(stdout);
+}
+
+bool RestoreMvlAutoRestartBootstrapCheckpoint(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, melonDS::u32 requestedSeed)
+{
+    if (!nds || instanceID < 0 || instanceID >= 16)
+        return false;
+    if (G.MvlAutoRestartBootstrapCheckpoint[instanceID].empty())
+        return false;
+
+    melonDS::Savestate state(
+        G.MvlAutoRestartBootstrapCheckpoint[instanceID].data(),
+        static_cast<melonDS::u32>(G.MvlAutoRestartBootstrapCheckpoint[instanceID].size()),
+        false);
+    if (state.Error || !nds->DoSavestate(&state) || state.Error)
+    {
+        std::printf("NSMB MvL auto restart: failed to restore bootstrap checkpoint inst=%d frame=%u bytes=%zu\n",
+            instanceID,
+            frame,
+            G.MvlAutoRestartBootstrapCheckpoint[instanceID].size());
+        std::fflush(stdout);
+        return false;
+    }
+
+    melonDS::Platform::MP_Begin(nds->UserData);
+    G.DirectMvlBootApplied[instanceID] = false;
+    G.PacketBridgeJitHelperPatchApplied[instanceID] = false;
+    G.NetRandomPatchApplied[instanceID] = false;
+    G.NetRandomPatchValue = requestedSeed;
+    if (G.NetRole == Role::Host)
+        WriteARM9U32(nds, kNetLocalAidAddr, 0);
+    else if (G.NetRole == Role::Client)
+        WriteARM9U32(nds, kNetLocalAidAddr, 1);
+    WriteNetAndGameRandomSeed(nds, requestedSeed);
+    ApplyMvlRuntimeConfigIfNeeded(nds);
+    std::printf("NSMB MvL auto restart: restored bootstrap checkpoint inst=%d frame=%u seed=0x%08X bytes=%zu\n",
+        instanceID,
+        frame,
+        requestedSeed,
+        G.MvlAutoRestartBootstrapCheckpoint[instanceID].size());
+    std::fflush(stdout);
+    return true;
+}
+
 bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.MvlAutoRestartAfterResult || G.MvlTargetWins <= 1 || !nds || instanceID < 0 || instanceID >= 16)
@@ -7186,54 +7435,71 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
         return false;
 
     const int nextRestartCount = G.MvlAutoRestartCount[instanceID] + 1;
-    const int requestedStage = G.MvlCourseMode == "random" && G.MatchSeedConfigured
-        ? static_cast<int>((G.MatchSeed + static_cast<melonDS::u32>(nextRestartCount)) % 5u)
-        : std::clamp(G.DirectMvlBootStage, 0, 4);
-    bool restoredCheckpoint = false;
-    if (!G.MvlAutoRestartCheckpoint[instanceID].empty())
+    G.MvlAutoRestartCount[instanceID] = nextRestartCount;
+    const int requestedStage = std::clamp(MvlStageForGame(instanceID), 0, 4);
+    const melonDS::u32 requestedSeed = MatchSeedForGame(instanceID);
+    G.DirectMvlBootStage = requestedStage;
+    G.MvlStageSceneSettings = ComposeMvlSceneSettingsForStage(requestedStage);
+    WriteNetAndGameRandomSeed(nds, requestedSeed);
+    int restartPath = 0;
+    if (!G.MvlAutoRestartCheckpoint[instanceID].empty()
+        && G.MvlAutoRestartCheckpointStage[instanceID] == requestedStage)
     {
         melonDS::Savestate state(
             G.MvlAutoRestartCheckpoint[instanceID].data(),
             static_cast<melonDS::u32>(G.MvlAutoRestartCheckpoint[instanceID].size()),
             false);
-        restoredCheckpoint = !state.Error && nds->DoSavestate(&state) && !state.Error;
-        if (restoredCheckpoint)
+        if (!state.Error && nds->DoSavestate(&state) && !state.Error)
         {
+            restartPath = 1;
             melonDS::Platform::MP_Begin(nds->UserData);
             G.PacketBridgeJitHelperPatchApplied[instanceID] = false;
             WriteARM9U32(nds, kGameStageGroupAddr, 0x00000009);
             WriteARM9U32(nds, kGameVsModeAddr, 0x00000001);
             WriteARM9U32(nds, kSceneNextSceneSettingsAddr, G.MvlStageSceneSettings);
+            ApplyMvlRuntimeConfigIfNeeded(nds);
+            WriteNetAndGameRandomSeed(nds, requestedSeed);
         }
     }
-
-    G.MvlAutoRestartCount[instanceID] = nextRestartCount;
-    if (!restoredCheckpoint)
+    else if (RestoreMvlAutoRestartBootstrapCheckpoint(instanceID, frame, nds, requestedSeed))
     {
-        WriteARM9U32(nds, kGameStageIDAddr, static_cast<melonDS::u32>(requestedStage));
-        WriteARM9U32(nds, kGameStageGroupAddr, 0x00000009);
-        WriteARM9U32(nds, kGameVsModeAddr, 0x00000001);
-        WriteARM9U32(nds, kSceneNextSceneSettingsAddr, G.MvlStageSceneSettings);
-        nds->ARM9Write16(kScenePreviousSceneIDAddr, kResultsScene);
-        nds->ARM9Write16(kSceneNextSceneIDAddr, 0x0003);
-        nds->ARM9Write16(kSceneCurrentSceneIDAddr, kResultsScene);
-        nds->ARM9Write16(kSceneIsSceneActiveAddr, 0x0000);
+        restartPath = 3;
+    }
+
+    if (restartPath == 3)
+    {
+        G.PacketBridgeJitHelperPatchApplied[instanceID] = false;
+    }
+    else if (restartPath == 0)
+    {
+        G.MvlAutoRestartCount[instanceID] = nextRestartCount - 1;
+        std::printf(
+            "NSMB MvL auto restart: failed inst=%d frame=%u nextGame=%d requestedStage=%d seed=0x%08X reason=no-compatible-checkpoint\n",
+            instanceID,
+            frame,
+            nextRestartCount + 1,
+            requestedStage,
+            requestedSeed);
+        std::fflush(stdout);
+        return false;
     }
     G.MvlAutoRestartLastRestartFrame[instanceID] = frame;
+    ResetMvlRuntimeSyncStateForRestart(instanceID, frame);
     G.MvlAutoRestartInResult[instanceID] = false;
     G.MvlAutoRestartResultScored[instanceID] = false;
     const int actualStage = static_cast<int>(nds->ARM9Read32(kGameStageIDAddr));
     std::printf(
-        "NSMB MvL auto restart: inst=%d frame=%u nextGame=%d stage=%d requestedStage=%d matchWins=%d/%d target=%d checkpoint=%d\n",
+        "NSMB MvL auto restart: inst=%d frame=%u nextGame=%d stage=%d requestedStage=%d seed=0x%08X matchWins=%d/%d target=%d checkpoint=%d\n",
         instanceID,
         frame,
         G.MvlAutoRestartCount[instanceID] + 1,
         actualStage,
         requestedStage,
+        requestedSeed,
         G.MvlAutoRestartWins[instanceID][0],
         G.MvlAutoRestartWins[instanceID][1],
         G.MvlTargetWins,
-        restoredCheckpoint ? 1 : 0);
+        restartPath);
     std::fflush(stdout);
     return true;
 }
@@ -7276,6 +7542,7 @@ void SaveMvlAutoRestartCheckpointIfNeeded(int instanceID, melonDS::u32 frame, me
     G.MvlAutoRestartCheckpoint[instanceID].assign(
         reinterpret_cast<const char*>(state.Buffer()),
         reinterpret_cast<const char*>(state.Buffer()) + state.Length());
+    G.MvlAutoRestartCheckpointStage[instanceID] = static_cast<int>(sample.StageID);
     G.MvlAutoRestartCheckpointLogged[instanceID] = true;
     std::printf(
         "NSMB MvL auto restart: saved checkpoint inst=%d frame=%u bytes=%u stage=%u settings=0x%08X\n",
@@ -13283,18 +13550,29 @@ void ApplyMemPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     G.MemPatchApplied[instanceID] = true;
 }
 
-void ApplyNetRandomPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+bool WriteNetAndGameRandomSeed(melonDS::NDS* nds, melonDS::u32 seed)
 {
     constexpr melonDS::u32 kNetRandomValueOffset = kNetRandomValueAddr - kMainRAMBase;
     constexpr melonDS::u32 kNetRandomCallCountOffset = kNetRandomCallCountAddr - kMainRAMBase;
     constexpr melonDS::u32 kGameRandomValueOffset = kGameRandomValueAddr - kMainRAMBase;
     constexpr melonDS::u32 kGameRandomCallCountOffset = kGameRandomCallCountAddr - kMainRAMBase;
 
+    if (!nds || !nds->MainRAM) return false;
+    if (kNetRandomValueOffset + sizeof(seed) > nds->MainRAMMask + 1) return false;
+    if (kGameRandomValueOffset + sizeof(seed) > nds->MainRAMMask + 1) return false;
+
+    std::memcpy(&nds->MainRAM[kNetRandomValueOffset], &seed, sizeof(seed));
+    nds->MainRAM[kNetRandomCallCountOffset] = 0;
+    std::memcpy(&nds->MainRAM[kGameRandomValueOffset], &seed, sizeof(seed));
+    nds->MainRAM[kGameRandomCallCountOffset] = 0;
+    return true;
+}
+
+void ApplyNetRandomPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
     if (!nds || !nds->MainRAM || !G.NetRandomPatchEnabled) return;
     if (instanceID < 0 || instanceID >= 16) return;
     if (G.NetRandomPatchApplied[instanceID]) return;
-    if (kNetRandomValueOffset + sizeof(melonDS::u32) > nds->MainRAMMask + 1) return;
-    if (kGameRandomValueOffset + sizeof(melonDS::u32) > nds->MainRAMMask + 1) return;
 
     bool shouldPatch = frame == G.NetRandomPatchFrame;
     melonDS::u8 randomCallCountBeforePatch = 0;
@@ -13308,16 +13586,16 @@ void ApplyNetRandomPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     }
     if (!shouldPatch) return;
 
-    std::memcpy(&nds->MainRAM[kNetRandomValueOffset], &G.NetRandomPatchValue, sizeof(G.NetRandomPatchValue));
-    nds->MainRAM[kNetRandomCallCountOffset] = 0;
-    std::memcpy(&nds->MainRAM[kGameRandomValueOffset], &G.NetRandomPatchValue, sizeof(G.NetRandomPatchValue));
-    nds->MainRAM[kGameRandomCallCountOffset] = 0;
+    const melonDS::u32 patchValue = (!G.MatchSeedSequence.empty() || G.MvlAutoRestartAfterResult)
+        ? MatchSeedForGame(instanceID)
+        : G.NetRandomPatchValue;
+    if (!WriteNetAndGameRandomSeed(nds, patchValue)) return;
     G.NetRandomPatchApplied[instanceID] = true;
 
     std::printf("NSMB Test: patched Net/Game random inst=%d frame=%u value=0x%08X auto=%d oldNetCount=0x%02X oldGameCount=0x%02X resetCount=1\n",
         instanceID,
         frame,
-        G.NetRandomPatchValue,
+        patchValue,
         G.NetRandomPatchAuto ? 1 : 0,
         randomCallCountBeforePatch,
         gameRandomCallCountBeforePatch);
@@ -14661,6 +14939,9 @@ void InitFromEnvironment()
     G.DirectMvlBootScene = std::clamp(EnvInt("MELONDS_NSML_DIRECT_MVL_BOOT_SCENE", 0x0F), 0, 0xFFFF);
     G.DirectMvlBootStage = std::clamp(EnvInt("MELONDS_NSML_DIRECT_MVL_BOOT_STAGE", 0), 0, 4);
     G.DirectMvlBootStage = std::clamp(EnvInt("MELONDS_NSML_MVL_STAGE", G.DirectMvlBootStage), 0, 4);
+    G.MvlStageSequence = ParseStageListEnv("MELONDS_NSML_MVL_STAGE_SEQUENCE");
+    if (!G.MvlStageSequence.empty())
+        G.DirectMvlBootStage = G.MvlStageSequence.front();
     G.DirectMvlBootPlayerID = EnvInt("MELONDS_NSML_DIRECT_MVL_BOOT_PLAYER_ID", -1);
     G.MvlStageSceneSettings = EnvHasValue("MELONDS_NSML_MVL_SCENE_SETTINGS")
         ? EnvU32("MELONDS_NSML_MVL_SCENE_SETTINGS", kMvlStageSceneDefaultSettings)
@@ -14682,13 +14963,7 @@ void InitFromEnvironment()
     G.MvlAutoRestartAfterResult = EnvFlag("MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT");
     G.MvlAutoRestartDelayFrames = static_cast<melonDS::u32>(
         std::max(1, EnvInt("MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES", 120)));
-    if (G.MvlCourseMode == "select")
-    {
-        std::printf("NSMB MvL settings: courseMode=select is not supported by direct boot; using fixed stage=%d\n",
-            G.DirectMvlBootStage);
-        G.MvlCourseMode = "fixed";
-    }
-    else if (G.MvlCourseMode != "fixed" && G.MvlCourseMode != "random")
+    if (G.MvlCourseMode != "fixed" && G.MvlCourseMode != "random" && G.MvlCourseMode != "select")
     {
         std::printf("NSMB MvL settings: unknown courseMode=%s; using fixed stage=%d\n",
             G.MvlCourseMode.c_str(),
@@ -15302,6 +15577,13 @@ void InitFromEnvironment()
         G.MatchSeed = static_cast<melonDS::u32>(std::strtoul(matchSeed, nullptr, 0));
         G.MatchSeedConfigured = true;
     }
+    G.MatchSeedSequence = ParseU32ListEnv("MELONDS_NSML_MATCH_SEED_SEQUENCE");
+    if (!G.MatchSeedSequence.empty())
+    {
+        G.MatchSeed = G.MatchSeedSequence.front();
+        G.MatchSeedConfigured = true;
+        G.NetRandomPatchValue = G.MatchSeed;
+    }
 
     const char* stateSaveDir = std::getenv("MELONDS_NSML_STATE_SAVE_DIR");
     if (stateSaveDir && stateSaveDir[0]) G.StateSaveDir = stateSaveDir;
@@ -15745,6 +16027,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::LoadState);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        RefreshMvlGameSelectionForInstance(instanceID);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ApplyMvlRuntimeConfigIfNeeded(nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::RuntimeConfig);
 
@@ -15761,9 +16045,13 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Rollback);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        SaveMvlAutoRestartBootstrapCheckpointIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         InjectDirectMvlBootCall(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+    {
         RestartMvlAfterResultIfNeeded(instanceID, inputFrame, nds);
+    }
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         InjectCourseSelectFactoryCall(instanceID, inputFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Boot);

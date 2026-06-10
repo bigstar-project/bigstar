@@ -22,6 +22,16 @@ pub(crate) fn validate_settings(settings: &GameSettings) -> Result<(), String> {
     if settings.wins < 1 || settings.wins > 3 {
         return Err("勝利数は 1-3 にしてください".into());
     }
+    let max_games = max_games_for_wins(settings.wins);
+    if settings.course_stages.len() != max_games {
+        return Err(format!(
+            "コース列は勝利数{}に対して{}試合分にしてください",
+            settings.wins, max_games
+        ));
+    }
+    if settings.course_stages.iter().any(|stage| *stage > 4) {
+        return Err("コースは 0-4 にしてください".into());
+    }
     if !matches!(settings.big_stars, 3 | 5 | 10) {
         return Err("ビッグスターは 3/5/10 のいずれかにしてください".into());
     }
@@ -31,18 +41,32 @@ pub(crate) fn validate_settings(settings: &GameSettings) -> Result<(), String> {
     if settings.input_max_frame_lead > 16 {
         return Err("InputMaxFrameLead は 0-16 にしてください".into());
     }
-    if matches!(settings.course_mode, CourseMode::Random) {
-        parse_match_seed(settings.match_seed.trim())?;
+    if settings.rng_seeds.len() != max_games {
+        return Err(format!(
+            "RNG seed は勝利数{}に対して{}試合分にしてください",
+            settings.wins, max_games
+        ));
+    }
+    for seed in &settings.rng_seeds {
+        parse_match_seed(seed.trim())?;
+    }
+    parse_match_seed(settings.match_seed.trim())?;
+    if settings
+        .rng_seeds
+        .first()
+        .is_some_and(|seed| seed.trim() != settings.match_seed.trim())
+    {
+        return Err("match_seed は RNG seed 列の先頭と一致させてください".into());
     }
     Ok(())
 }
 
 pub(crate) fn selected_stage(settings: &GameSettings, fallback_stage: u8) -> Result<u8, String> {
+    if let Some(stage) = settings.course_stages.first() {
+        return Ok((*stage).min(4));
+    }
     match settings.course_mode {
-        CourseMode::Random => {
-            let seed = parse_match_seed(settings.match_seed.trim())?;
-            Ok((seed % 5) as u8)
-        }
+        CourseMode::Random => Ok((parse_match_seed(settings.match_seed.trim())? % 5) as u8),
         CourseMode::Select => Ok(fallback_stage.min(4)),
     }
 }
@@ -75,4 +99,8 @@ pub(crate) fn lives_value(lives: Lives) -> &'static str {
         Lives::Five => "5",
         Lives::Endless => "endless",
     }
+}
+
+fn max_games_for_wins(wins: u8) -> usize {
+    usize::from(wins.saturating_mul(2).saturating_sub(1))
 }

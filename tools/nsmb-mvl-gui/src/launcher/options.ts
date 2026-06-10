@@ -1,6 +1,14 @@
 export const courseOptions = [
   { value: 'random', label: 'ランダム' },
-  { value: 'select', label: '毎回選ぶ' },
+  { value: 'select', label: '事前に選ぶ' },
+];
+
+export const stageOptions = [
+  { value: '0', label: '0: Grass' },
+  { value: '1', label: '1: Cave' },
+  { value: '2', label: '2: Snow' },
+  { value: '3', label: '3: Pipe' },
+  { value: '4', label: '4: Castle' },
 ];
 
 export const winsOptions = [1, 2, 3].map((value) => ({

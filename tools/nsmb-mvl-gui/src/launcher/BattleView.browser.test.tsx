@@ -55,10 +55,12 @@ const rooms: MatchmakingRoomsState = {
       settings: {
         big_stars: 10,
         course_mode: 'random',
+        course_stages: [0, 1, 2, 3, 4],
         input_delay_frames: 4,
         input_max_frame_lead: 4,
         lives: '3',
         match_seed: '123',
+        rng_seeds: ['123', '124', '125', '126', '127'],
         rollback_enabled: false,
         wins: 3,
       },
@@ -110,7 +112,7 @@ describe('対戦ビュー', () => {
     await expect
       .element(
         screen.getByText(
-          'room12345 / Course=random Wins=3 Star=10 Lives=3 Delay=4 Lead=4 RB=off',
+          'room12345 / Course=random[0/1/2/3/4] Wins=3 Star=10 Lives=3 Delay=4 Lead=4 RB=off',
         ),
       )
       .toBeVisible();

@@ -8,9 +8,11 @@ import {
   defaultInputMaxFrameLead,
   generateSeed,
   initialForm,
+  normalizedCourseStages,
+  normalizedRngSeeds,
   processExited,
   selectedStageFrom,
-  withRequiredSeed,
+  withRequiredPlan,
 } from '../form';
 import {
   createRoom as createMatchmakingRoom,
@@ -93,8 +95,8 @@ export function useLauncherController() {
   const currentRomPath =
     form.role === 'host' ? form.hostRomPath : form.clientRomPath;
   const selectedStage = useMemo(
-    () => selectedStageFrom(form.courseMode, form.matchSeed),
-    [form.courseMode, form.matchSeed],
+    () => selectedStageFrom(form.courseMode, form.matchSeed, form.courseStages),
+    [form.courseMode, form.courseStages, form.matchSeed],
   );
   const selectedStageLabel =
     selectedStage === null
@@ -104,8 +106,8 @@ export function useLauncherController() {
       : String(selectedStage);
   const courseNote =
     form.courseMode === 'select'
-      ? 'Choose Each Time は direct route では未対応のため、現在は固定 stage 0 で起動します。'
-      : 'Match seed から stage 0-4 を決め、起動時に生成済み共通 ROM へ渡します。';
+      ? `Game ${form.courseStages.map((stage) => stage).join(' / ')}`
+      : '起動時にコース列と各試合の seed を確定します。';
   const connectionActive =
     connectionStatus.text.startsWith('実行中') ||
     connectionStatus.text.startsWith('起動済み');
@@ -158,7 +160,21 @@ export function useLauncherController() {
     key: K,
     value: FormState[K],
   ) => {
-    setForm((current) => ({ ...current, [key]: value }));
+    setForm((current) => {
+      const next = { ...current, [key]: value };
+      if (key === 'wins' || key === 'courseMode') {
+        return {
+          ...next,
+          courseStages: normalizedCourseStages(next),
+          rngSeeds: normalizedRngSeeds(next),
+        };
+      }
+      if (key === 'matchSeed') {
+        const rngSeeds = normalizedRngSeeds(next);
+        return { ...next, rngSeeds };
+      }
+      return next;
+    });
   };
 
   const pollStatus = useCallback(async () => {
@@ -199,6 +215,7 @@ export function useLauncherController() {
       try {
         const defaults = await getDefaults();
         if (disposed) return;
+        const initialSeed = String(generateSeed());
         setForm({
           role: 'host',
           hostName: 'Player',
@@ -209,10 +226,15 @@ export function useLauncherController() {
           clientRomPath: defaults.client_rom_path,
           baseRomPath: defaults.base_rom_path,
           courseMode: 'random',
+          courseStages: initialForm.courseStages,
           wins: initialForm.wins,
           bigStars: initialForm.bigStars,
           lives: initialForm.lives,
-          matchSeed: String(generateSeed()),
+          matchSeed: initialSeed,
+          rngSeeds: normalizedRngSeeds({
+            ...initialForm,
+            matchSeed: initialSeed,
+          }),
           inputDelayFrames: initialForm.inputDelayFrames,
           inputMaxFrameLead: initialForm.inputMaxFrameLead,
           rollbackEnabled: initialForm.rollbackEnabled,
@@ -274,11 +296,18 @@ export function useLauncherController() {
   };
 
   const prepareRomsFor = async (sourceForm: FormState) => {
-    const nextForm = withRequiredSeed(sourceForm);
-    if (nextForm.matchSeed !== form.matchSeed) {
+    const nextForm = withRequiredPlan(sourceForm);
+    if (
+      JSON.stringify(currentSettings(nextForm)) !==
+      JSON.stringify(currentSettings(form))
+    ) {
       setForm(nextForm);
     }
-    const stage = selectedStageFrom(nextForm.courseMode, nextForm.matchSeed);
+    const stage = selectedStageFrom(
+      nextForm.courseMode,
+      nextForm.matchSeed,
+      nextForm.courseStages,
+    );
     if (stage === null) {
       setActivityStatus({
         text: 'Match seed は10進数、または 0x から始まる16進数で指定してください',
@@ -349,11 +378,18 @@ export function useLauncherController() {
   };
 
   const startMatchFor = async (sourceForm: FormState) => {
-    const nextForm = withRequiredSeed(sourceForm);
-    if (nextForm.matchSeed !== form.matchSeed) {
+    const nextForm = withRequiredPlan(sourceForm);
+    if (
+      JSON.stringify(currentSettings(nextForm)) !==
+      JSON.stringify(currentSettings(form))
+    ) {
       setForm(nextForm);
     }
-    const stage = selectedStageFrom(nextForm.courseMode, nextForm.matchSeed);
+    const stage = selectedStageFrom(
+      nextForm.courseMode,
+      nextForm.matchSeed,
+      nextForm.courseStages,
+    );
     if (stage === null) {
       setActivityStatus({
         text: 'Match seed は10進数、または 0x から始まる16進数で指定してください',
@@ -392,12 +428,16 @@ export function useLauncherController() {
   };
 
   const startMatch = async () => {
-    await startMatchFor(form);
+    await startMatchFor(
+      form.courseMode === 'random'
+        ? withRequiredPlan(form, { refreshRandom: true })
+        : form,
+    );
   };
 
   const createRoomMutation = useMutation({
     mutationFn: async (sourceForm: FormState) => {
-      const nextForm = withRequiredSeed(sourceForm);
+      const nextForm = withRequiredPlan(sourceForm);
       return createMatchmakingRoom({
         hostName: nextForm.hostName,
         settings: currentSettings(nextForm),
@@ -421,9 +461,10 @@ export function useLauncherController() {
     }
     try {
       setActivityStatus({ text: '部屋を作成中', kind: 'idle' });
-      const response = await createRoomMutation.mutateAsync(form);
+      const plannedForm = withRequiredPlan(form, { refreshRandom: true });
+      const response = await createRoomMutation.mutateAsync(plannedForm);
       const nextForm: FormState = {
-        ...withRequiredSeed(form),
+        ...plannedForm,
         role: 'host',
         roomCode: response.room_id,
         signalUrl: response.signal_url,
@@ -454,10 +495,12 @@ export function useLauncherController() {
         roomCode: response.room_id,
         signalUrl: response.signal_url,
         courseMode: response.settings.course_mode,
+        courseStages: response.settings.course_stages,
         wins: response.settings.wins,
         bigStars: response.settings.big_stars,
         lives: response.settings.lives,
         matchSeed: response.settings.match_seed,
+        rngSeeds: response.settings.rng_seeds,
         inputDelayFrames:
           response.settings.input_delay_frames ?? defaultInputDelayFrames,
         inputMaxFrameLead:

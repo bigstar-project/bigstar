@@ -29,8 +29,10 @@ import { SummaryItem } from '../components/SummaryItem';
 import { Button, CloseButton, Dialog, Tabs } from '../components/ui';
 import { WebRtcDiagnosticsPanel } from '../components/WebRtcDiagnosticsPanel';
 import {
+  clampStage,
   defaultInputDelayFrames,
   defaultInputMaxFrameLead,
+  maxGamesForWins,
   rollbackInputDelayFrames,
   rollbackInputMaxFrameLead,
 } from '../form';
@@ -41,6 +43,7 @@ import {
   courseOptions,
   livesOptions,
   rollbackOptions,
+  stageOptions,
   winsOptions,
 } from './options';
 import type {
@@ -384,11 +387,14 @@ function MatchSettingsFields({
         />
       </div>
       <TextField
-        label="Match seed"
+        label="Game 1 seed"
         value={form.matchSeed}
-        placeholder="ランダム時は空でも自動生成"
+        placeholder="空なら自動生成"
         onChange={(value) => updateField('matchSeed', value)}
       />
+      {form.courseMode === 'select' ? (
+        <CourseSequenceFields form={form} updateField={updateField} />
+      ) : null}
       <div
         className={css({
           display: 'grid',
@@ -425,6 +431,46 @@ function MatchSettingsFields({
           }
         />
       </div>
+    </div>
+  );
+}
+
+function CourseSequenceFields({
+  form,
+  updateField,
+}: {
+  form: FormState;
+  updateField: UpdateFormField;
+}) {
+  const games = maxGamesForWins(form.wins);
+  const stages = Array.from({ length: games }, (_, index) =>
+    clampStage(form.courseStages[index] ?? 0),
+  );
+  return (
+    <div
+      className={css({
+        display: 'grid',
+        gap: '3',
+        gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+        '@media (max-width: 900px)': {
+          gridTemplateColumns: '1fr',
+        },
+      })}
+    >
+      {stages.map((stage, index) => (
+        <SelectField
+          key={`game-${index + 1}`}
+          icon={<Flag size={18} weight="fill" />}
+          label={`Game ${index + 1}`}
+          options={stageOptions}
+          value={String(stage)}
+          onChange={(value) => {
+            const next = [...stages];
+            next[index] = clampStage(Number(value));
+            updateField('courseStages', next);
+          }}
+        />
+      ))}
     </div>
   );
 }
@@ -705,7 +751,8 @@ function RoomList({
 
 function formatRoomSettings(room: MatchmakingRoomsState['rooms'][number]) {
   const rollback = room.settings.rollback_enabled ? 'RB=on' : 'RB=off';
-  return `Course=${room.settings.course_mode} Wins=${room.settings.wins} Star=${room.settings.big_stars} Lives=${room.settings.lives} Delay=${room.settings.input_delay_frames} Lead=${room.settings.input_max_frame_lead} ${rollback}`;
+  const stages = room.settings.course_stages.join('/');
+  return `Course=${room.settings.course_mode}[${stages}] Wins=${room.settings.wins} Star=${room.settings.big_stars} Lives=${room.settings.lives} Delay=${room.settings.input_delay_frames} Lead=${room.settings.input_max_frame_lead} ${rollback}`;
 }
 
 function BattleLogPanel({

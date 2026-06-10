@@ -439,6 +439,8 @@ param(
     [string]$MvlCourseMode = "fixed",
     [switch]$GenerateMvlConfiguredRoms,
     [string]$MvlMatchSeed = "",
+    [string]$MvlStageSequence = "",
+    [string]$MvlMatchSeedSequence = "",
     [int]$RequireMvlStage = -1,
     [string]$RequireMvlSceneSettings = "",
     [string]$RequireMvlLives = "",
@@ -647,11 +649,42 @@ function Convert-ToMvlSceneSettings {
     return "0x$('{0:x6}' -f ((((0xb4 + $Stage) -band 0xff) -shl 16) -bor 0xff00))"
 }
 
-if ($GenerateMvlConfiguredRoms) {
-    if ($MvlCourseMode -eq "select") {
-        throw "MvlCourseMode=select is not supported by the current direct MvL route. Use random, or run the normal CourseSelect route."
+function Convert-ToMvlStageList {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return @()
     }
 
+    return @($Value.Split(",") | ForEach-Object {
+        $trimmed = $_.Trim()
+        if ($trimmed -eq "") {
+            throw "MvlStageSequence contains an empty stage entry: $Value"
+        }
+        $stage = [int](Convert-ToUInt32Setting -Value $trimmed -Name "MvlStageSequence")
+        if ($stage -lt 0 -or $stage -gt 4) {
+            throw "MvlStageSequence values must be between 0 and 4: $stage"
+        }
+        $stage
+    })
+}
+
+$mvlStageSequenceValues = Convert-ToMvlStageList -Value $MvlStageSequence
+if ($mvlStageSequenceValues.Count -gt 0 -and $MvlStage -lt 0) {
+    $MvlStage = $mvlStageSequenceValues[0]
+}
+if ($mvlStageSequenceValues.Count -gt 0 -and $DirectMvlBootStage -eq 0) {
+    $DirectMvlBootStage = $mvlStageSequenceValues[0]
+}
+
+if (-not [string]::IsNullOrWhiteSpace($MvlMatchSeedSequence)) {
+    $firstSeed = @($MvlMatchSeedSequence.Split(",") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+    if ($firstSeed.Count -gt 0 -and -not $MvlMatchSeed) {
+        $MvlMatchSeed = $firstSeed[0].Trim()
+    }
+}
+
+if ($GenerateMvlConfiguredRoms) {
     $configuredStage = $MvlStage
     $configuredSeed = $MvlMatchSeed
     if (-not $configuredSeed -and $NetRandomValue) {
@@ -704,8 +737,10 @@ if ($GenerateMvlConfiguredRoms) {
         "bigStars=$MvlBigStars"
         "lives=$MvlLives"
         "stage=$configuredStage"
+        "stageSequence=$MvlStageSequence"
         "sceneSettings=$configuredSceneSettings"
         "matchSeed=$configuredSeed"
+        "matchSeedSequence=$MvlMatchSeedSequence"
     ) | Set-Content -Encoding UTF8 (Join-Path $logRoot "mvl-settings.txt")
 }
 
@@ -870,6 +905,7 @@ function Start-MelonLANProcess {
     $env:MELONDS_NSML_MVL_BIG_STARS = "$MvlBigStars"
     $env:MELONDS_NSML_MVL_LIVES = "$MvlLives"
     $env:MELONDS_NSML_MVL_COURSE_MODE = "$MvlCourseMode"
+    if ($MvlStageSequence) { $env:MELONDS_NSML_MVL_STAGE_SEQUENCE = "$MvlStageSequence" } else { Remove-Item Env:\MELONDS_NSML_MVL_STAGE_SEQUENCE -ErrorAction SilentlyContinue }
     if ($MvlWins -gt 1) {
         $env:MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT = "1"
         $env:MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES = "120"
@@ -878,6 +914,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES -ErrorAction SilentlyContinue
     }
     if ($MvlMatchSeed) { $env:MELONDS_NSML_MATCH_SEED = "$MvlMatchSeed" } else { Remove-Item Env:\MELONDS_NSML_MATCH_SEED -ErrorAction SilentlyContinue }
+    if ($MvlMatchSeedSequence) { $env:MELONDS_NSML_MATCH_SEED_SEQUENCE = "$MvlMatchSeedSequence" } else { Remove-Item Env:\MELONDS_NSML_MATCH_SEED_SEQUENCE -ErrorAction SilentlyContinue }
     if ($DirectMvlBoot) {
         $env:MELONDS_NSML_DIRECT_MVL_BOOT = "1"
         if ($DirectMvlBootHostOnly) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_HOST_ONLY -ErrorAction SilentlyContinue }
@@ -905,6 +942,12 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT -ErrorAction SilentlyContinue
     }
+    if ($DirectMvlBootLoadSM) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_LOAD_SM = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_LOAD_SM -ErrorAction SilentlyContinue }
+    if ($DirectMvlBootPatchLoadSMOnly) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_PATCH_LOAD_SM_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_PATCH_LOAD_SM_ONLY -ErrorAction SilentlyContinue }
+    if ($DirectMvlBootCallUpdateSM) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_CALL_UPDATE_SM = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_UPDATE_SM -ErrorAction SilentlyContinue }
+    if ($DirectMvlBootCallStartLoad) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_CALL_START_LOAD = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_START_LOAD -ErrorAction SilentlyContinue }
+    if ($DirectMvlBootCallCourseSelect) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT -ErrorAction SilentlyContinue }
+    if ($DirectMvlBootCallObjectCourseSelect) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT -ErrorAction SilentlyContinue }
     if ($SafeStartLoadCall) {
         $env:MELONDS_NSML_SAFE_START_LOAD_CALL = "1"
         $env:MELONDS_NSML_SAFE_START_LOAD_CALL_FRAME = "$SafeStartLoadCallFrame"
@@ -3202,6 +3245,9 @@ function Start-MelonLANProcess {
         "mvlBigStars=$($env:MELONDS_NSML_MVL_BIG_STARS)"
         "mvlLives=$($env:MELONDS_NSML_MVL_LIVES)"
         "mvlCourseMode=$($env:MELONDS_NSML_MVL_COURSE_MODE)"
+        "mvlStageSequence=$($env:MELONDS_NSML_MVL_STAGE_SEQUENCE)"
+        "mvlMatchSeed=$($env:MELONDS_NSML_MATCH_SEED)"
+        "mvlMatchSeedSequence=$($env:MELONDS_NSML_MATCH_SEED_SEQUENCE)"
         "mvlAutoRestartAfterResult=$($env:MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT)"
         "mvlAutoRestartDelayFrames=$($env:MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES)"
         "packetBridgeLiveFallbackWindow=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW)"
@@ -4384,7 +4430,12 @@ foreach ($item in @(
     }
 
     $rows = @(Import-Csv $item.Path)
-    $stageRows = @($rows | Where-Object { $_.vsMode -ne "0x0" -and [int]$_.frame -ge $RequireNetLocalAidStartFrame })
+    $stageRows = @($rows | Where-Object {
+        $_.vsMode -ne "0x0" -and
+        $_.sceneCurrentSceneID -eq "0x3" -and
+        $_.stageSceneFound -eq "0x1" -and
+        [int]$_.frame -ge $RequireNetLocalAidStartFrame
+    })
     if ($stageRows.Count -eq 0) {
         throw "$($item.Role) netLocalAid check found no VS rows. See $($item.Path)"
     }

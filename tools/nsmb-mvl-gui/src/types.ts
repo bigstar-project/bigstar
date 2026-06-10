@@ -28,10 +28,12 @@ export type FormState = {
   clientRomPath: string;
   baseRomPath: string;
   courseMode: CourseMode;
+  courseStages: number[];
   wins: number;
   bigStars: number;
   lives: Lives;
   matchSeed: string;
+  rngSeeds: string[];
   inputDelayFrames: number;
   inputMaxFrameLead: number;
   rollbackEnabled: boolean;

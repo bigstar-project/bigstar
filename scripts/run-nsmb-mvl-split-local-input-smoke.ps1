@@ -16,6 +16,14 @@ param(
     [ValidateSet("fixed", "random", "select")] [string]$MvlCourseMode = "fixed",
     [switch]$GenerateMvlConfiguredRoms,
     [int]$InputDelayFrames = 16,
+    [string]$MvlStageSequence = "",
+    [string]$MvlMatchSeedSequence = "",
+    [switch]$DirectMvlBootLoadSM,
+    [switch]$DirectMvlBootPatchLoadSMOnly,
+    [switch]$DirectMvlBootCallUpdateSM,
+    [switch]$DirectMvlBootCallStartLoad,
+    [switch]$DirectMvlBootCallCourseSelect,
+    [switch]$DirectMvlBootCallObjectCourseSelect,
     [int]$InputMaxFrameLead = 2,
     [switch]$InputNetplayTrace,
     [int]$InputSendDelayFrames = 0,
@@ -281,6 +289,30 @@ $common = @(
     "-PacketBridgeStartFrame", "870",
     "-RequireNetLocalAidStartFrame", "870"
 )
+if ($MvlStageSequence -ne "") {
+    $common += @("-MvlStageSequence", "$MvlStageSequence")
+}
+if ($MvlMatchSeedSequence -ne "") {
+    $common += @("-MvlMatchSeedSequence", "$MvlMatchSeedSequence")
+}
+if ($DirectMvlBootLoadSM) {
+    $common += "-DirectMvlBootLoadSM"
+}
+if ($DirectMvlBootPatchLoadSMOnly) {
+    $common += "-DirectMvlBootPatchLoadSMOnly"
+}
+if ($DirectMvlBootCallUpdateSM) {
+    $common += "-DirectMvlBootCallUpdateSM"
+}
+if ($DirectMvlBootCallStartLoad) {
+    $common += "-DirectMvlBootCallStartLoad"
+}
+if ($DirectMvlBootCallCourseSelect) {
+    $common += "-DirectMvlBootCallCourseSelect"
+}
+if ($DirectMvlBootCallObjectCourseSelect) {
+    $common += "-DirectMvlBootCallObjectCourseSelect"
+}
 if (-not $UseLanMP) {
     $common += "-NoLanMP"
 }

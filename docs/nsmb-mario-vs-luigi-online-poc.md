@@ -26,6 +26,21 @@
 - Next action: on the next reproduction, compare both peers' `melonds.stdout.txt` around the first `NSMB InputHealth` wait/throttle/gap line and the first `game state mismatch` line, then cross-check `bridge.stdout.txt` packet counters for the same wall-clock window.
 - Verification: `cmake --build build\release-windows-x86_64 --target melonDS --config Release -j 4`, `cargo fmt --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`, `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`, `cargo clippy-all` in `tools\nsmb-mvl-gui\src-tauri`, and `git diff --check` pass. `corepack pnpm run ci` in `tools\nsmb-mvl-gui` remains blocked by existing Biome CRLF formatting failures in TS/JSON files unrelated to this change; its initial `tsc --noEmit` step passed before Biome failed.
 
+## Current stage/RNG plan sync - 2026-06-11
+
+- User request: choose or randomize courses at room creation time, precompute the maximum possible game count from the win target, and vary Big Star/item RNG seeds every game while keeping host/client synchronized.
+- GUI room settings now carry `course_stages` and `rng_seeds` arrays with exactly `wins * 2 - 1` entries. `match_seed` remains as a compatibility field and must match `rng_seeds[0]`.
+- `Course=random` generates a fresh course sequence and RNG seed sequence when the room is created or a manual random match is started. It no longer derives the course from one match seed for every game.
+- `Course=select` shows one course selector per possible game before room creation/start, so the full course order is fixed before either peer launches.
+- Matchmaking schema validates and returns the same arrays to joiners. Tauri passes them to melonDS as `MELONDS_NSML_MVL_STAGE_SEQUENCE` and `MELONDS_NSML_MATCH_SEED_SEQUENCE`.
+- melonDS now refreshes the active course from the per-game stage sequence every frame before writing the runtime config, so later games do not fall back to the first selected course after `InitFromEnvironment()`.
+- Restart behavior:
+  - Same-stage restarts keep using the existing in-game checkpoint path.
+  - Mixed-stage restarts no longer call result-scene direct `loadLevel`. melonDS saves a bootstrap checkpoint immediately before the generated/direct MvL startup path enters the first game, restores that pre-start state after a result, advances the game index, and lets the normal startup path load the requested next course.
+  - The restart path resets per-game Net/Game RNG from `MELONDS_NSML_MATCH_SEED_SEQUENCE`, clears stale sync/sample caches, and filters pre-restart packets so old stage state is not applied to the next game.
+- Verification: `cmake --build build\release-windows-x86_64 --target melonDS --config Release -j 4` passes. `logs/codex-select-stage1-initial-6500-20260611` confirms stage 1 is stable as an initial course for 6500 frames. `logs/codex-select-stage-switch-bootstrap-neutral4-20260611` passes split host/client smoke for selected sequence `0,1,2`, seed sequence `101,202,303`, and required stages `0,1` for 6500 frames with no ARM abort, stall, or remote-input timeout. `logs/codex-select-stage-same-checkpoint-neutral-20260611` passes same-stage `0,0` restart for 5200 frames.
+- Test input note: `tests/nsmb_us_direct_mvl_star_collect_once_then_neutral.inputs` is the transition smoke input. It wins the first game, then keeps both peers neutral so the test validates course transition stability rather than stage-specific movement routing in the second course.
+
 ## Current desync risk review - 2026-06-10
 
 - User symptom: one peer's opponent suddenly stops on-screen, while that opponent can still move on their own screen. The stopped peer later receives movement again, but inputs made during the stop do not appear to have affected the stopped peer's simulation, causing a state split.
@@ -116,7 +131,7 @@
   - `logs/codex-settings-visual-native-lives-5-soft` and `logs/codex-settings-visual-native-lives-endless-fixed-soft`: screenshots visibly show 5 lives for finite `5`, and the normal 3-life display for `endless`.
   - `logs/codex-settings-wins2-round2-probe`: `Wins=2` returns to game 2 after one result.
   - `logs/codex-settings-wins3-round3-native-lives3-20260601`: `Wins=3` returns to game 2 and game 3, then stops restarting after the third win.
-- Remaining course limitation: `Course=random` selects `matchSeed % 5` at match start. Checkpoint restart returns to the same course for games 2 and 3. Re-randomizing each game and normal `Choose Each Time` both require restoring the skipped CourseSelect flow and remain unsupported.
+- Previous course limitation resolved in the GUI/direct-boot path: `Course=random` and `Course=select` now use a precomputed stage sequence instead of `matchSeed % 5`. Same-stage restarts keep using checkpoints; different-stage restarts restore the saved pre-start bootstrap checkpoint and let the normal startup path load the requested stage. See "Current stage/RNG plan sync - 2026-06-11" for the latest mixed-stage verification.
 
 ## Current FPS regression triage - 2026-06-01
 

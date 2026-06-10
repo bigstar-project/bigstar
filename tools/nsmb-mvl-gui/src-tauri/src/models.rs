@@ -31,10 +31,12 @@ pub(crate) enum Role {
 #[serde(rename_all = "snake_case")]
 pub(crate) struct GameSettings {
     pub(crate) course_mode: CourseMode,
+    pub(crate) course_stages: Vec<u8>,
     pub(crate) wins: u8,
     pub(crate) big_stars: u8,
     pub(crate) lives: Lives,
     pub(crate) match_seed: String,
+    pub(crate) rng_seeds: Vec<String>,
     pub(crate) input_delay_frames: u8,
     pub(crate) input_max_frame_lead: u8,
     pub(crate) rollback_enabled: bool,

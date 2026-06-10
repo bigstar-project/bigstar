@@ -5,10 +5,12 @@ import type { WsServerMessage } from '../src/schemas';
 const gameSettings = {
   big_stars: 5,
   course_mode: 'random',
+  course_stages: [0, 1, 2],
   input_delay_frames: 4,
   input_max_frame_lead: 4,
   lives: 'endless',
   match_seed: '123',
+  rng_seeds: ['123', '124', '125'],
   rollback_enabled: false,
   wins: 2,
 };
