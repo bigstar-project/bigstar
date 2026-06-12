@@ -5,19 +5,49 @@ export const roleSchema = z.enum(['offer', 'answer']);
 export const courseModeSchema = z.enum(['random', 'select']);
 export const livesSchema = z.enum(['3', '5', 'endless']);
 
-export const gameSettingsSchema = z.object({
-  course_mode: courseModeSchema,
-  wins: z.number().int().min(1).max(3),
-  big_stars: z
-    .number()
-    .int()
-    .refine((value) => value === 3 || value === 5 || value === 10),
-  lives: livesSchema,
-  match_seed: z.string().regex(/^(0x[0-9a-f]+|[0-9]+)$/i),
-  input_delay_frames: z.number().int().min(0).max(16).default(4),
-  input_max_frame_lead: z.number().int().min(0).max(16).default(4),
-  rollback_enabled: z.boolean().default(false),
-});
+export const gameSettingsSchema = z
+  .object({
+    course_mode: courseModeSchema,
+    course_stages: z.array(z.number().int().min(0).max(4)).min(1).max(5),
+    wins: z.number().int().min(1).max(3),
+    big_stars: z
+      .number()
+      .int()
+      .refine((value) => value === 3 || value === 5 || value === 10),
+    lives: livesSchema,
+    match_seed: z.string().regex(/^(0x[0-9a-f]+|[0-9]+)$/i),
+    rng_seeds: z
+      .array(z.string().regex(/^(0x[0-9a-f]+|[0-9]+)$/i))
+      .min(1)
+      .max(5),
+    input_delay_frames: z.number().int().min(0).max(16).default(4),
+    input_max_frame_lead: z.number().int().min(0).max(16).default(4),
+    rollback_enabled: z.boolean().default(false),
+  })
+  .superRefine((settings, ctx) => {
+    const maxGames = settings.wins * 2 - 1;
+    if (settings.course_stages.length !== maxGames) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `course_stages must contain ${maxGames} entries`,
+        path: ['course_stages'],
+      });
+    }
+    if (settings.rng_seeds.length !== maxGames) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `rng_seeds must contain ${maxGames} entries`,
+        path: ['rng_seeds'],
+      });
+    }
+    if (settings.rng_seeds[0] !== settings.match_seed) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'match_seed must match rng_seeds[0]',
+        path: ['match_seed'],
+      });
+    }
+  });
 
 export const roomStatusSchema = z.enum([
   'open',

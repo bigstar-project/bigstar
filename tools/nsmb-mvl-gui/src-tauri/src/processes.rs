@@ -244,6 +244,18 @@ pub(crate) fn melon_env(
     );
     env.insert("MELONDS_NSML_INPUT_UNRELIABLE".into(), "1".into());
     env.insert("MELONDS_NSML_INPUT_BUNDLE_HISTORY".into(), "8".into());
+    env.insert("MELONDS_NSML_INPUT_HEALTH_TRACE".into(), "1".into());
+    env.insert(
+        "MELONDS_NSML_INPUT_HEALTH_TRACE_INTERVAL".into(),
+        "120".into(),
+    );
+    env.insert(
+        "MELONDS_NSML_INPUT_HEALTH_TRACE_WAIT_THRESHOLD_MS".into(),
+        "16".into(),
+    );
+    env.insert("MELONDS_NSML_STATE_SYNC".into(), "1".into());
+    env.insert("MELONDS_NSML_STATE_SYNC_INTERVAL".into(), "60".into());
+    env.insert("MELONDS_NSML_STATE_SYNC_EXTENDED".into(), "1".into());
     if request.settings.rollback_enabled {
         env.insert("MELONDS_NSML_ROLLBACK".into(), "1".into());
         env.insert("MELONDS_NSML_ROLLBACK_BACKEND".into(), "coredelta".into());
@@ -290,6 +302,16 @@ pub(crate) fn melon_env(
         "MELONDS_NSML_DIRECT_MVL_BOOT_STAGE".into(),
         stage.to_string(),
     );
+    env.insert(
+        "MELONDS_NSML_MVL_STAGE_SEQUENCE".into(),
+        request
+            .settings
+            .course_stages
+            .iter()
+            .map(u8::to_string)
+            .collect::<Vec<_>>()
+            .join(","),
+    );
 
     if matches!(request.role, Role::Client) {
         env.insert("MELONDS_NSML_PEER".into(), "127.0.0.1".into());
@@ -328,6 +350,18 @@ pub(crate) fn melon_env(
         env.insert(
             "MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES".into(),
             "120".into(),
+        );
+    }
+    if !request.settings.rng_seeds.is_empty() {
+        env.insert(
+            "MELONDS_NSML_MATCH_SEED_SEQUENCE".into(),
+            request
+                .settings
+                .rng_seeds
+                .iter()
+                .map(|seed| seed.trim().to_owned())
+                .collect::<Vec<_>>()
+                .join(","),
         );
     }
     if !request.settings.match_seed.trim().is_empty() {

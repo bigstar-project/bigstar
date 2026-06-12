@@ -3494,6 +3494,12 @@ static void TraceNSMLWrite(ARM* cpu, u32 addr, u32 value, u32 size)
     fflush(cfg.LogFile);
 }
 
+static bool NSMLWriteTraceMaybeEnabled()
+{
+    static const bool enabled = getenv("MELONDS_NSML_WRITE_TRACE") != nullptr;
+    return enabled;
+}
+
 static bool ShouldNormalizeNSMLEntranceSpawnWrites(ARM* cpu)
 {
     if (!cpu || cpu->Num != 0)
@@ -5185,13 +5191,14 @@ void ARMv5::Execute()
         }
     }
 
+    const bool nsmlRuntimeHooksEnabled = NSMLRuntimeHooksMaybeEnabled();
     while (NDS.ARM9Timestamp < NDS.ARM9Target)
     {
 #ifdef JIT_ENABLED
         if constexpr (mode == CPUExecuteMode::JIT)
         {
             u32 instrAddr = R[15] - ((CPSR&0x20)?2:4);
-            if (NSMLRuntimeHooksMaybeEnabled())
+            if (nsmlRuntimeHooksEnabled)
             {
                 HandleNSMLNetReadyHotPatch(this, instrAddr);
                 TraceNSMLPacketCapture(this, instrAddr);
@@ -5303,7 +5310,7 @@ void ARMv5::Execute()
                 if constexpr (mode == CPUExecuteMode::InterpreterGDB)
                     GdbCheckC();
                 const u32 instrAddr = R[15] - 2;
-                if (NSMLRuntimeHooksMaybeEnabled())
+                if (nsmlRuntimeHooksEnabled)
                 {
                     HandleNSMLNetReadyHotPatch(this, instrAddr);
                     TraceNSMLPacketCapture(this, instrAddr);
@@ -5412,7 +5419,7 @@ void ARMv5::Execute()
                 if constexpr (mode == CPUExecuteMode::InterpreterGDB)
                     GdbCheckC();
                 const u32 instrAddr = R[15] - 4;
-                if (NSMLRuntimeHooksMaybeEnabled())
+                if (nsmlRuntimeHooksEnabled)
                 {
                     HandleNSMLNetReadyHotPatch(this, instrAddr);
                     TraceNSMLPacketCapture(this, instrAddr);
@@ -5581,13 +5588,14 @@ void ARMv4::Execute()
         }
     }
 
+    const bool nsmlRuntimeHooksEnabled = NSMLRuntimeHooksMaybeEnabled();
     while (NDS.ARM7Timestamp < NDS.ARM7Target)
     {
 #ifdef JIT_ENABLED
         if constexpr (mode == CPUExecuteMode::JIT)
         {
             u32 instrAddr = R[15] - ((CPSR&0x20)?2:4);
-            if (NSMLRuntimeHooksMaybeEnabled())
+            if (nsmlRuntimeHooksEnabled)
                 TraceNSMLRandomCall(this, instrAddr);
 
             if ((instrAddr < FastBlockLookupStart || instrAddr >= (FastBlockLookupStart + FastBlockLookupSize))
@@ -6094,21 +6102,26 @@ u32 ARMv5::BusRead32(u32 addr)
 
 void ARMv5::BusWrite8(u32 addr, u8 val)
 {
-    val = NormalizeNSMLEntranceSpawnWrite8(this, addr, val);
-    TraceNSMLWrite(this, addr, val, 8);
+    if (NSMLEntranceSpawnWriteNormalizeEnabled())
+        val = NormalizeNSMLEntranceSpawnWrite8(this, addr, val);
+    if (NSMLWriteTraceMaybeEnabled())
+        TraceNSMLWrite(this, addr, val, 8);
     NDS.ARM9Write8(addr, val);
 }
 
 void ARMv5::BusWrite16(u32 addr, u16 val)
 {
-    TraceNSMLWrite(this, addr, val, 16);
+    if (NSMLWriteTraceMaybeEnabled())
+        TraceNSMLWrite(this, addr, val, 16);
     NDS.ARM9Write16(addr, val);
 }
 
 void ARMv5::BusWrite32(u32 addr, u32 val)
 {
-    val = NormalizeNSMLEntranceSpawnWrite32(this, addr, val);
-    TraceNSMLWrite(this, addr, val, 32);
+    if (NSMLEntranceSpawnWriteNormalizeEnabled())
+        val = NormalizeNSMLEntranceSpawnWrite32(this, addr, val);
+    if (NSMLWriteTraceMaybeEnabled())
+        TraceNSMLWrite(this, addr, val, 32);
     NDS.ARM9Write32(addr, val);
 }
 

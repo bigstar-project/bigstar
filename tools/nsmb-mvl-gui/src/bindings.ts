@@ -56,10 +56,12 @@ export type Defaults = {
 
 export type GameSettings = {
 	course_mode: CourseMode,
+	course_stages: number[],
 	wins: number,
 	big_stars: number,
 	lives: Lives,
 	match_seed: string,
+	rng_seeds: string[],
 	input_delay_frames: number,
 	input_max_frame_lead: number,
 	rollback_enabled: boolean,

@@ -1,30 +1,96 @@
 # NSMB Mario vs Luigi Online PoC
 
-## Current rule-based AI PoC - 2026-06-07
+## Current pipe-course camera Y investigation - 2026-06-12
 
-- 1人用MvLに向けた最初のCPU入力PoCとして、状態ベースのルールAIを追加した。
-- AI判断本体は `src/frontend/qt_sdl/NsmbRuleAI.cpp` / `.h` に分離し、巨大化している `NsmbNetplayPoC.cpp` 側には `GameStateSample` からAI用 `FrameState` へ詰め替える薄い接続だけを残した。
-- 有効化env:
-  - `MELONDS_NSML_RULE_AI=1`
-  - `MELONDS_NSML_RULE_AI_PLAYER=remote|local|0|1|mario|luigi`
-  - `MELONDS_NSML_RULE_AI_WRAP_WIDTH=0x400000`（0で左右ラップ無効）
-  - `MELONDS_NSML_RULE_AI_HOST_ONLY=1` / `MELONDS_NSML_RULE_AI_CLIENT_ONLY=1`
-  - `MELONDS_NSML_RULE_AI_TRACE=1`
-- 現AIは、player actor座標、Big Star actor/candidate座標、相手座標、双方のBattle Starsを読み、Big Star追跡、相手追跡、スター優勢時の近距離回避を切り替える。X方向はMvLステージの左右ラップ幅を考慮し、入力は左右移動 + `Y`走り + 周期/高低差/近距離ジャンプの最小構成。
-- 1人用PoC向けに、AIがremote playerを担当する場合は input-netplay の peer wait / remote input wait をスキップし、PacketBridge JIT helper scratchへAI入力を書けるようにした。
-- `scripts/run-nsmb-mvl-rule-ai-smoke.ps1` を追加し、host単体 + remote AI + input-netplay + PacketBridge JIT helper の検証を1コマンドで走らせる。
-- Verification:
-  - `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4` pass。
-  - `logs/codex-rule-ai-single-host-helper-smoke-20260607`: host単体、`MELONDS_NSML_RULE_AI=1`、`MELONDS_NSML_RULE_AI_PLAYER=remote`、`-InputNetplay`、`-PacketBridgeJitHelperPatch -PacketBridgeJitHelperPatchFrame 870` で1600F pass。`NSMB RuleAI` traceで player1 の `starActor` 追跡入力が出力され、`remoteWaitCount=0`。
-  - `logs/codex-rule-ai-wrapper-smoke-20260607`: 追加wrapperで1600F pass。同じく player1 の `starActor` 追跡入力と `remoteWaitCount=0` を確認。
-  - `logs/codex-rule-ai-wrapper-wrap-smoke-20260607`: 水平ラップ幅 `0x400000` で1600F pass。初期付近の `self=0x00058000`、`target=0x00370000` に対して短いラップ方向の左移動入力を選ぶことをtraceで確認。
-- Current blocker / limitation:
-  - AIはまだ「ゲームが成立する最低限」の入力生成で、ステージ別経路、穴/壁/土管、スター取得保証、強さ調整、GUIからの起動設定は未実装。
-  - 単体hostでAI remoteを使うには、現時点では PacketBridge JIT helper patch を明示する必要がある。
+- User-reported issue: pipe course only, after wall-kicking upward and making the camera move up, descending does not fully bring the camera back down.
+- Follow-up: the issue appears to reproduce only after rematch, i.e. on game 2 or later, not on the first MvL game.
+- User capture `logs/pipe-camera-repro-2g` reproduced the bug on game 2. The captured `recorded-inputs/host.inputs` was converted into a role-aware replay with common bootstrap input and host-only post-start movement for automated CSV verification.
+- Root cause found: `MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD` cleared `0x020CA880` only in game 1 because `ClearMvlCameraInitHoldApplied[instance]` stayed true across the auto-restart checkpoint restore. On game 2, `cameraDbgCA880` stayed `0x08`, and `stageCameraPositionY` stayed high after Mario landed.
+- Fix: auto-restart startup hook reset now clears `ClearMvlCameraInitHoldApplied[instance]`, and auto-restart frame rebasing also rebases the camera-init-hold clear start/end frames.
+  - Before fix replay: in `logs/codex-pipe-camera-repro2g-before-fix-trace2`, frame 4900-5400 stayed `cameraDbgCA880=0x08` and `stageCameraPositionY=0x000C8000` after Mario returned to `playerActor0Y=0xffe80000`.
+  - After fix replay: in `logs/codex-pipe-camera-repro2g-after-fix-trace-pass`, the host clears `0x020CA880` again at frame 3573 on game 2 (`old=0x08 value=0x00`), frame 4900-5400 stays `cameraDbgCA880=0x00`, and `stageCameraPositionY` settles lower at `0x00088000` for the same landing state.
+- Current finding: the visible Y camera reported by the symptom is most likely the StageCamera object fields (`stageCameraTargetY` / `stageCameraPositionY`), not the global `Stage::cameraY[player]` slots.
+  - In `logs/codex-pipe-camera-clearhold-extended-20260612`, `Stage::cameraY[0/1]` stayed fixed at `0x000E0000` and height stayed `0x000C0000`.
+  - In the same run, `stageCameraPositionY` changed independently. Host/local player 0 reached `0x000F8000` and stayed there through frame 3600, while client/local player 1 returned to `0x00000000`.
+  - That run used stage 3 (`mvlSceneSettings=0x00B7FF00`), `ClearMvlCameraInitHold`, input netplay, JIT, no draw/audio, and extended game-state trace.
+- `MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD` still behaves as intended under normal GUI/manual-peer conditions:
+  - `logs/codex-pipe-camera-clearhold-extended-20260612` shows `0x020CA880` cleared at frame 859 (`old=0x08 value=0x00`).
+  - After that, `cameraDbgCA880` only showed `0x10` then `0x00`; the old init-hold bit `0x08` did not reappear in this trace.
+- Reproduction capture support added: melonDS can now write the effective per-frame input stream to a replay-compatible `.inputs` file when `MELONDS_NSML_INPUT_RECORD_FILE` is set.
+  - Use `scripts/run-nsmb-mvl-manual-local.ps1 -RecordInput` for local repro capture. It starts both host/client windows and writes `recorded-inputs\host.inputs` / `recorded-inputs\client.inputs` under the log directory by default.
+  - `manual-local` now enables JIT by default for playable capture speed. Use `-NoJit` only for a deterministic comparison run where speed is not important.
+  - `manual-local` no longer enables the input-netplay start barrier by default. The previous default could deadlock both peers after start-ready exchange while both waited for remote input frame 840.
+  - `scripts/run-nsmb-mvl-manual-peer.ps1` also exposes `-RecordInput`, but it is only for an actual paired peer run. Do not use it as the primary one-PC repro recorder because peer/start synchronization can look like a freeze when only one side is running.
+  - The recorder runs after `ApplyInputScript`, so the output includes the startup/bootstrap input plus the user's manual controls. The resulting file can be passed back to `-InputScript` for replay.
+  - Recording now canonicalizes to the DS button mask's low 12 bits and batches file flushes, avoiding per-frame disk flushes from unrelated key-mask bit changes during manual input.
+- Reproduction note: the earlier automated inputs did not reproduce the exact wall-kick-up-then-descend path. The user capture in `logs/pipe-camera-repro-2g` is the current repro source for this bug.
+- Failed/invalid check: `logs/codex-pipe-camera-hostonly-extended-20260612` timed out because the host-only input path made the host wait for a remote start-ready peer after the client exited; the leftover melonDS process was stopped. Treat that log as invalid for camera behavior.
+- Current blocker: none for the identified rematch camera-init-hold bug. Remaining manual check is to play the pipe course rematch normally and confirm the visible camera now feels correct after wall-kick descent.
+- Next action: if manual play still shows a residual offset, capture another `-RecordInput` run after this fix and compare `stageCameraPositionY` against the now-cleared `cameraDbgCA880=0x00` path to separate normal player-height camera offset from a new camera latch.
+- Verification: `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passed after the rematch camera fix; `.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 ... -InputScript logs\pipe-camera-repro-2g\recorded-inputs\combined-replay-bootstrap-host.inputs ... -GameStateTraceExtended -ClientPacketBridgeForceGameLocalPlayerID 0` passed for `logs/codex-pipe-camera-repro2g-after-fix-trace-pass`; earlier verification includes `.\scripts\run-nsmb-mvl-split-local-input-smoke.ps1 ... -MvlStage 3 ... -GameStateTraceInterval 10` for `logs/codex-pipe-camera-y-trace-20260612`, `.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 ... -MvlStage 3 -ClearMvlCameraInitHold -GameStateTraceExtended` for `logs/codex-pipe-camera-clearhold-extended-20260612`, input recording build/replay smokes, JIT-default manual-local smoke, and `logs/codex-manual-local-start-fixed`.
+
+## Current desync diagnostics - 2026-06-10
+
+- User-reported issue: rollback disabled matches can sometimes diverge between host and client.
+- GUI-launched melonDS now enables lightweight state hash exchange by default with `MELONDS_NSML_STATE_SYNC=1`, `MELONDS_NSML_STATE_SYNC_INTERVAL=60`, and `MELONDS_NSML_STATE_SYNC_EXTENDED=1`.
+  - This does not apply state. It only exchanges periodic state hashes and logs `NSMB PoC: game state mismatch ...` to melonDS stdout when host/client disagree.
+  - The mismatch line reports whether `basic`, `playerGlobal`, `wifiCandidate`, and `renderCandidate` matched, which should narrow the first diverging category without full RAM dumps.
+- `scripts/run-nsmb-mvl-manual-peer.ps1` now has `-DesyncLog`, `-DesyncLogInterval`, and `-DesyncLogExtended`.
+  - `-DesyncLog` enables the same state hash exchange and writes per-role `host.game-state.csv` / `client.game-state.csv` at the chosen interval.
+  - Start with `-DesyncLogInterval 60`; use `30` or `15` only when the first diverging frame needs tighter localization.
+  - `-DesyncLogExtended` adds broader CSV fields/hashes and should be reserved for short repro windows.
+- Expected overhead: the default GUI path is low frequency and should be much lighter than full RAM dumps or every-frame CSV tracing. Detailed CSV tracing can cause stutter if interval is too small because it scans game objects and flushes rows to disk.
+- Current blocker: the actual first-divergence category/frame still needs a reproduced GUI/manual run with the new logs.
+- Next action: collect host/client `melon.stdout.txt` from the same match, then compare the first `game state mismatch` frame and, if needed, rerun with manual `-DesyncLog` around that frame.
+- Verification: `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`, `cargo clippy-all` in `tools\nsmb-mvl-gui\src-tauri`, `corepack pnpm exec tsc --noEmit`, and manual-peer PowerShell parse check pass. `corepack pnpm run ci` in `tools\nsmb-mvl-gui` is blocked by existing Biome formatting failures caused by CRLF line endings across TS/JSON files not touched in this change.
+
+## Current input health diagnostics - 2026-06-10
+
+- GUI-launched melonDS now enables low-overhead input transport diagnostics with `MELONDS_NSML_INPUT_HEALTH_TRACE=1`, `MELONDS_NSML_INPUT_HEALTH_TRACE_INTERVAL=120`, and `MELONDS_NSML_INPUT_HEALTH_TRACE_WAIT_THRESHOLD_MS=16`.
+  - The summary path emits one `NSMB InputHealth: event=summary ...` line every 120 logical frames, about once every 2 seconds at 60fps.
+  - Event logs are emitted for `remote-wait-resolved`, `throttle-blocked`, `throttle-resolved`, `recv-gap`, and `send-gap`.
+  - Each line reports frame/logicalFrame/sendFrame, last sent/received input frame, lead, local/remote/delayed input queue sizes, wait/throttle/network timings, and rollback/prediction flags.
+- Expected overhead: the normal path adds only a few integer checks and one low-frequency stdout line. It does not scan RAM, write CSV rows, or log every input frame. Event lines are only printed when a wait, throttle, or frame gap is observed.
+- Current blocker: still needs a real host/client reproduction to determine whether the one-sided stop corresponds to a remote wait, frame-lead throttle, receive gap, bridge packet stall, or later state hash mismatch.
+- Next action: on the next reproduction, compare both peers' `melonds.stdout.txt` around the first `NSMB InputHealth` wait/throttle/gap line and the first `game state mismatch` line, then cross-check `bridge.stdout.txt` packet counters for the same wall-clock window.
+- Verification: `cmake --build build\release-windows-x86_64 --target melonDS --config Release -j 4`, `cargo fmt --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`, `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`, `cargo clippy-all` in `tools\nsmb-mvl-gui\src-tauri`, and `git diff --check` pass. `corepack pnpm run ci` in `tools\nsmb-mvl-gui` remains blocked by existing Biome CRLF formatting failures in TS/JSON files unrelated to this change; its initial `tsc --noEmit` step passed before Biome failed.
+
+## Current stage/RNG plan sync - 2026-06-11
+
+- User request: choose or randomize courses at room creation time, precompute the maximum possible game count from the win target, and vary Big Star/item RNG seeds every game while keeping host/client synchronized.
+- GUI room settings now carry `course_stages` and `rng_seeds` arrays with exactly `wins * 2 - 1` entries. `match_seed` remains as a compatibility field and must match `rng_seeds[0]`.
+- `Course=random` generates a fresh course sequence and RNG seed sequence when the room is created or a manual random match is started. It no longer derives the course from one match seed for every game.
+- `Course=select` shows one course selector per possible game before room creation/start, so the full course order is fixed before either peer launches.
+- Matchmaking schema validates and returns the same arrays to joiners. Tauri passes them to melonDS as `MELONDS_NSML_MVL_STAGE_SEQUENCE` and `MELONDS_NSML_MATCH_SEED_SEQUENCE`.
+- melonDS now refreshes the active course from the per-game stage sequence every frame before writing the runtime config, so later games do not fall back to the first selected course after `InitFromEnvironment()`.
+- Restart behavior:
+  - Same-stage restarts keep using the existing in-game checkpoint path.
+  - Mixed-stage restarts no longer call result-scene direct `loadLevel`. That path can leave course model/effect resources from the previous stage alive and caused missing Mario/Luigi rendering, white dash/coin effects, and death-time freezes after a selected course change.
+  - melonDS now saves the bootstrap checkpoint at the stable pre-MvL transition point where scene 4 is active and already scheduled to enter scene 6. Restoring this point lets the normal VSConnect/generated-ROM startup path load the next requested course, instead of forcing a level load from the result scene or an early boot scene.
+  - Restart startup-frame scheduling is rebased from the saved checkpoint frame, so packet-bridge JIT/input netplay starts at the same relative point after restore. This avoids the second match running hundreds of frames with unsynchronized local input before the helper patch is re-applied.
+  - The restart path resets per-game Net/Game RNG from `MELONDS_NSML_MATCH_SEED_SEQUENCE`, clears stale sync/sample caches, and filters pre-restart packets so old stage state is not applied to the next game.
+- Verification: `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passes. `logs/codex-stage-switch-final-main-20260611` passes split host/client smoke for selected sequence `0,1,2`, seed sequence `101,202,303`, required stages `0,1`, required second MvL game, and required player death between frames 4900-8200 with no ARM abort, stall, or remote-input timeout. Earlier `logs/codex-stage-switch-checkpoint-rebased-20260611` passed the same scenario and confirmed the checkpoint-relative rebase fixed the second-match input/JIT timing mismatch. `logs/codex-stage1-initial-regression-3600-20260611` passes initial stage 1 split smoke for 3600 frames; `logs/codex-select-stage1-initial-6500-20260611` remains the longer initial stage 1 stability check.
+- movingHazard follow-up: the strict split CSV comparison failure was a transient verification artifact, not a persistent stage-transition desync. `logs/codex-movinghazard-frame1-noapply-20260611` traced frames 2160-2225 at interval 1 and found only one differing row: frame 2190 had `movingHazardX` off by `0x800`, plus local player visible flags swapped for that same row; frames 2189 and 2191 matched again. The split smoke wrapper now defaults to allowing only these transient fields to settle by the next trace sample when all stable fields re-match. `logs/codex-movinghazard-default-settle-20260611` passes the full 6500-frame selected sequence without `-SkipGameStateComparison` or explicit `-RollbackSettleFrames`.
+- Test input note: `tests/nsmb_us_direct_mvl_auto_stage_switch_left_two_wins.inputs` is the main mixed-stage regression input. It wins the first game, lets the precomputed stage sequence advance to stage 1, then drives player 0 left to exercise second-stage death handling. `tests/nsmb_us_direct_mvl_star_collect_left_two_wins_select_stage1.inputs` keeps the native course-selection cursor path available for manual/diagnostic stage-select transition checks.
+
+## Current desync risk review - 2026-06-10
+
+- User symptom: one peer's opponent suddenly stops on-screen, while that opponent can still move on their own screen. The stopped peer later receives movement again, but inputs made during the stop do not appear to have affected the stopped peer's simulation, causing a state split.
+- Most likely risk area is the input transport/timing layer, not RNG or stage setup:
+  - GUI uses `InputDelayFrames=4`, `InputMaxFrameLead=4`, `MELONDS_NSML_INPUT_UNRELIABLE=1`, and input bundle history `8`.
+  - The WebRTC bridge DataChannel is also unordered/unreliable with no retransmits. This means normal play currently has two lossy layers: melonDS input packets are ENet unsequenced, then the bridge sends the UDP payload over an unreliable DataChannel.
+  - Input bundle history can recover short packet loss, but a burst longer than the bundle window, or a short send/pump stall, can make the peer wait for old input and look like the opponent stopped.
+- Non-rollback input path should normally wait for exact remote input before advancing the logical frame. If the exact input never arrives, GUI's default fatal timeout should terminate the process after about 5s. A temporary stop that later recovers likely means the missing frame eventually arrived through a later bundle or delayed packet before the fatal timeout.
+- `ThrottleInputNetplayFrameLead()` sends the current future input, then blocks when `sendFrame - LastReceivedInputFrame > InputMaxFrameLead`. While blocked it pumps network but does not send additional newer input bundles. This can amplify a transient receive gap because the peer may not get fresh bundles from this side until the wait clears.
+- Previous related evidence: an older manual peer log already showed `input frame throttle timeout ... lead=5 waitedMs=5000`, so this class of one-sided lead/wait problem is known to be possible under bad timing.
+- Things that look less likely from code inspection:
+  - RNG seed/state setup: a one-sided temporary opponent stop maps more directly to missing input frames than to RNG divergence.
+  - Direct MvL stage setup: the reported mid-match stop/recovery does not match an initial setup mismatch.
+  - State hash logging itself: it was added after the report and only exchanges low-frequency reliable diagnostic packets without applying state.
 - Next actions:
-  - GUI/手動起動に「CPU相手」設定を追加し、host単体またはclient hidden AI構成を選べるようにする。
-  - AIログとgame-state traceから、スター取得までの到達率、壁で止まる位置、落下/復帰を確認してステージ別ルールを足す。
-  - `MELONDS_NSML_RULE_AI` smokeを長めに走らせ、最低1回のスター取得や相手接触が起きる入力ルールへ調整する。
+  - Consider increasing `InputBundleHistory` above `8` for WAN, or send input bundles over a reliable/partially reliable channel while keeping low latency measured.
+  - Consider changing frame-lead throttle so a blocked peer can still periodically send the latest input bundle/heartbeat while waiting.
+  - On the next reproduction, inspect both `melonds.stdout.txt` and `bridge.stdout.txt` for `NSMB InputHealth`, `remote input timeout`, `input frame throttle`, `PacketBridgeScratchSpike`, `game state mismatch`, and bridge `app->rtc` / `rtc->app` packet counter stalls.
 
 ## Current GUI netplay controls - 2026-06-07
 
@@ -97,10 +163,26 @@
   - `logs/codex-settings-visual-native-lives-5-soft` and `logs/codex-settings-visual-native-lives-endless-fixed-soft`: screenshots visibly show 5 lives for finite `5`, and the normal 3-life display for `endless`.
   - `logs/codex-settings-wins2-round2-probe`: `Wins=2` returns to game 2 after one result.
   - `logs/codex-settings-wins3-round3-native-lives3-20260601`: `Wins=3` returns to game 2 and game 3, then stops restarting after the third win.
-- Remaining course limitation: `Course=random` selects `matchSeed % 5` at match start. Checkpoint restart returns to the same course for games 2 and 3. Re-randomizing each game and normal `Choose Each Time` both require restoring the skipped CourseSelect flow and remain unsupported.
+- Previous course limitation resolved in the GUI/direct-boot path: `Course=random` and `Course=select` now use a precomputed stage sequence instead of `matchSeed % 5`. Same-stage restarts keep using checkpoints; different-stage restarts restore the saved pre-start bootstrap checkpoint and let the normal startup path load the requested stage. See "Current stage/RNG plan sync - 2026-06-11" for the latest mixed-stage verification.
 
 ## Current FPS regression triage - 2026-06-01
 
+- 2026-06-10 GUI install check:
+  - User reported that launching melonDS from the installed GUI app at `C:\Users\Sugiyama\AppData\Local\NSMB Mario vs Luigi Online` and then manually using `Open ROM` feels lower FPS than the official melonDS 1.1 package at `C:\Users\Sugiyama\Downloads\melonDS-1.1-windows-x86_64`.
+  - Corrected launch-path difference: normal direct ROM launch was running with `JIT.Enable = false`, while GUI battle launch explicitly passes `MELONDS_NSML_ALLOW_JIT=1`. The same `build\release-windows-x86_64\melonDS.exe` therefore used the interpreter for manual `Open ROM` but JIT for the battle path.
+  - Direct 300-frame NSMB boot check without JIT: `logs/codex-direct-open-300f-20260610\normal-nojit.stdout.txt` reported `NSMB Test: JIT disabled`, total `16.89fps`, and active `17.14fps`.
+  - Direct 300-frame NSMB boot check with only `MELONDS_NSML_ALLOW_JIT=1` changed: `logs/codex-direct-open-300f-20260610\allow-jit.stdout.txt` reported `NSMB Test: JIT enabled`, total `59.81fps`, and active `59.90fps`.
+  - After setting the existing release TOML to `JIT.Enable = true`, direct release exe launch without the allow-JIT env reached total `59.80fps` and active `59.88fps` in `logs/codex-direct-open-config-jit-300f-20260610`.
+  - After rebuilding `build\release-windows-x86_64\melonDS.exe`, direct release exe launch still reported `NSMB Test: JIT enabled` and active `59.90fps` in `logs/codex-direct-open-after-rebuild-300f-20260610`.
+  - The installed GUI-side binary at `C:\Users\Sugiyama\AppData\Local\NSMB Mario vs Luigi Online\melonDS.exe` also reached active `59.88fps` after changing its local `melonDS.toml` to `JIT.Enable = true`, without needing the allow-JIT env (`logs/codex-appdata-direct-config-jit-300f-20260610`).
+  - Follow-up no-env title sampling corrected the interpretation for the official package: official melonDS reached `[60/60]` with `JIT.Enable = false` after an initial `[52/60]` sample, and also reached `[60/60]` with `JIT.Enable = true`. CPU sampling averaged about `67.6%` with official `JIT.Enable = false` and `58.6%` with official `JIT.Enable = true`, so the false setting appears to be doing more interpreter work rather than secretly behaving identically to JIT. This remains an inference from config/title/CPU because the official binary does not have the fork's `NSMB Test: JIT ...` log.
+  - Fork no-env title sampling with `JIT.Enable = false` showed early `[7/60]` and `[13/60]` samples before reaching `[60/60]`; with `JIT.Enable = true` it started around `[48/60]` and then reached `[60/60]`. The earlier `17fps` 300-frame result describes the fork's `MELONDS_NSML_TEST` harness without JIT, not official standalone behavior.
+  - Follow-up source comparison against tag `1.1`: ARM interpreter implementation files are almost unchanged except trivial `popcount`/copyright updates, but `src/ARM.cpp` gained roughly 4.8k lines of NSML runtime hooks and touches `ARMv5::Execute` plus `ARMv5::BusWrite*`. Official 1.1 does not have those hooks in the interpreter-adjacent hot path.
+  - ARM.cpp hook split: the heavy trace/diagnostic bodies are gated by explicit envs such as `MELONDS_NSML_PACKET_BRIDGE`, `MELONDS_NSML_PACKET_CAPTURE_LOG`, `MELONDS_NSML_PACKET_REPLAY_FILE`, `MELONDS_NSML_RANDOM_TRACE`, `MELONDS_NSML_CALL_TRACE`, `MELONDS_NSML_TRACE_*`, `MELONDS_NSML_SAFE_*`, and `MELONDS_NSML_PACKET_BRIDGE_*`. Current GUI battle launch does not set `MELONDS_NSML_PACKET_BRIDGE`; it uses `MELONDS_NSML_INPUT_NETPLAY_ONLY`, state sync, input health trace, and the JIT helper patch from `NsmbNetplayPoC.cpp`.
+  - Open-ROM GUI launch now removes inherited `MELONDS_NSML_*` variables before setting only `MELONDS_NSML_ALLOW_JIT=1`, matching the match-launch sanitization. This prevents stale diagnostic envs from accidentally enabling ARM.cpp runtime hooks during normal manual `Open ROM`.
+  - Follow-up JIT-disabled raw-speed check with frame limiting and audio sync disabled still measured about `16.5fps` over the active window, so the slowdown is not a frontend wait/audio-sync artifact. JIT-enabled still reaches about `60fps` because it bypasses most of the interpreter hot path and uses compiled blocks/fast memory.
+  - Current interpretation: official 1.1 is not secretly using JIT when `JIT.Enable = false`; its clean interpreter path is fast enough for this ROM. The fork's JIT-disabled path is slower because NSML PoC instrumentation and diagnostics have polluted the ARM execution path. A small attempted guard around disabled write trace/entrance-normalization calls did not restore interpreter speed by itself, so the remaining fix should separate NSML runtime hooks from normal standalone ARM execution more aggressively or rely on JIT for GUI/manual launch.
+  - Fix direction: add `JIT.Enable = true` to the TOML defaults, keep the local release/install TOMLs on JIT enabled, and make the GUI's plain `open_melonds` launcher pass `MELONDS_NSML_ALLOW_JIT=1` so "launch melonDS then Open ROM" matches the battle path's performance. Separately, clean up the ARM interpreter hot path so JIT-disabled standalone launch is no longer penalized by NSML-only hooks.
 - User reported that `scripts/run-nsmb-mvl-manual-peer.ps1` no longer holds the post-`09db0f1b` 57-60 FPS behavior and can dip to about 50 FPS. Reproduced before the fix with `logs/codex-fps-regression-baseline-20260601`: active FPS was host `37.52` and client `37.38`.
 - The release build configuration still matches the optimized path: `CMAKE_BUILD_TYPE=Release`, `CMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG`, `ENABLE_JIT=ON`, `ENABLE_OGLRENDERER=ON`, and `ENABLE_LTO_RELEASE=ON`.
 - Root cause: `b5769a84c` made manual peer runs always pass MvL settings envs (`MELONDS_NSML_MVL_WINS`, `MELONDS_NSML_MVL_BIG_STARS`, `MELONDS_NSML_MVL_LIVES`) and also added those passive settings to `NSMLRuntimeHooksMaybeEnabled()`, causing ARM hot-loop runtime hook checks to be enabled during normal manual-peer play.
@@ -374,10 +456,10 @@ melonDSデフォルト相当のsoftware rendererで比較する場合:
 同一PCで2窓起動する場合:
 
 ```powershell
-.\scripts\run-nsmb-mvl-manual-local.ps1 -LowDelayWan -SoftwareRenderer -AllowJit
+.\scripts\run-nsmb-mvl-manual-local.ps1 -LowDelayWan -SoftwareRenderer
 ```
 
-`run-nsmb-mvl-manual-local.ps1` は `-AllowJit` を明示したときだけJIT有効。`run-nsmb-mvl-manual-peer.ps1` は逆に、手動/LAN実用検証の速度優先でデフォルトJIT有効、`-NoJit` で無効化する。
+`run-nsmb-mvl-manual-local.ps1` と `run-nsmb-mvl-manual-peer.ps1` は、手動/LAN実用検証の速度優先でデフォルトJIT有効。JITなしで比較する場合だけ `-NoJit` を付ける。
 
 ## 検証コマンド
 
@@ -399,7 +481,7 @@ Remove-Item Env:\MELONDS_NSML_SWAPBUFFERS_INTERVAL -ErrorAction SilentlyContinue
 
 - 通常LocalMP baseline: `logs\codex-camera-original-localmp-us-probe1` / `logs\codex-camera-original-localmp-dbgfields`。Luigi右移動時の `playerActor1X - stageCameraGlobalX1` は約 `0x60FFF`。
 - direct entry + camera init hold clear: `logs\codex-camera-clear-init-hold-hook-screens`。Luigi右移動時の `playerActor1X - stageCameraGlobalX1` は約 `0x60FFF` へ戻る。
-- `scripts\run-nsmb-mvl-manual-local.ps1 -Frames 1200 -LowDelayWan -AllowJit` で、手動local wrapperから `ClearMvlCameraInitHold` がhost/client両方に渡ることを確認。
+- `scripts\run-nsmb-mvl-manual-local.ps1 -Frames 1200 -LowDelayWan` で、手動local wrapperから `ClearMvlCameraInitHold` がhost/client両方に渡ることを確認。
 - `-CheckHostClientGameplaySync` 失敗調査:
   - 直近の frame 880/1280 付近の失敗は、検証コマンド側で `PacketBridgeStartFrame` / `PacketBridgeJitHelperPatch` などの必須フラグを落としていたために発生していた。正しい低遅延入力同期フラグでは `tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs` / 2200 frames がpass。
   - `tests\nsmb_us_direct_mvl_both_different.inputs` / 3600 frames では、player座標、スター、moving hazard、object数、入力状態などのゲームプレイ項目は全行一致したが、`netPacketTick` だけ frame 2100/2560 で一時的に差が出ていた。

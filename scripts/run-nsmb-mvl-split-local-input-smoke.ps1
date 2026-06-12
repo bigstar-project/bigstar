@@ -17,6 +17,14 @@ param(
     [ValidateSet("fixed", "random", "select")] [string]$MvlCourseMode = "fixed",
     [switch]$GenerateMvlConfiguredRoms,
     [int]$InputDelayFrames = 16,
+    [string]$MvlStageSequence = "",
+    [string]$MvlMatchSeedSequence = "",
+    [switch]$DirectMvlBootLoadSM,
+    [switch]$DirectMvlBootPatchLoadSMOnly,
+    [switch]$DirectMvlBootCallUpdateSM,
+    [switch]$DirectMvlBootCallStartLoad,
+    [switch]$DirectMvlBootCallCourseSelect,
+    [switch]$DirectMvlBootCallObjectCourseSelect,
     [int]$InputMaxFrameLead = 2,
     [switch]$InputNetplayTrace,
     [int]$InputSendDelayFrames = 0,
@@ -299,6 +307,30 @@ $common = @(
     "-PacketBridgeStartFrame", "870",
     "-RequireNetLocalAidStartFrame", "870"
 )
+if ($MvlStageSequence -ne "") {
+    $common += @("-MvlStageSequence", "$MvlStageSequence")
+}
+if ($MvlMatchSeedSequence -ne "") {
+    $common += @("-MvlMatchSeedSequence", "$MvlMatchSeedSequence")
+}
+if ($DirectMvlBootLoadSM) {
+    $common += "-DirectMvlBootLoadSM"
+}
+if ($DirectMvlBootPatchLoadSMOnly) {
+    $common += "-DirectMvlBootPatchLoadSMOnly"
+}
+if ($DirectMvlBootCallUpdateSM) {
+    $common += "-DirectMvlBootCallUpdateSM"
+}
+if ($DirectMvlBootCallStartLoad) {
+    $common += "-DirectMvlBootCallStartLoad"
+}
+if ($DirectMvlBootCallCourseSelect) {
+    $common += "-DirectMvlBootCallCourseSelect"
+}
+if ($DirectMvlBootCallObjectCourseSelect) {
+    $common += "-DirectMvlBootCallObjectCourseSelect"
+}
 if (-not $UseLanMP) {
     $common += "-NoLanMP"
 }
@@ -1149,6 +1181,10 @@ $fields = if ($IgnoreSpeculativeInputFields) {
 } else {
     @($stableFields + $inputFields)
 }
+$defaultSettleFields = @(
+    "movingHazardX", "movingHazardY",
+    "playerActor0VisibleFlag", "playerActor1VisibleFlag"
+)
 
 function RowAtFrame {
     param([object[]]$Rows, [int]$Frame)
@@ -1174,8 +1210,12 @@ foreach ($hostRow in $hostRows) {
     $clientRow = $clientByFrame[$frame]
     foreach ($field in $fields) {
         if ($hostRow.$field -ne $clientRow.$field) {
-            if ($RollbackSettleFrames -gt 0) {
-                for ($settleFrame = $frame + 1; $settleFrame -le $frame + $RollbackSettleFrames; $settleFrame++) {
+            $settleFrames = $RollbackSettleFrames
+            if ($settleFrames -le 0 -and $defaultSettleFields -contains $field) {
+                $settleFrames = [Math]::Max(1, $GameStateTraceInterval)
+            }
+            if ($settleFrames -gt 0) {
+                for ($settleFrame = $frame + 1; $settleFrame -le $frame + $settleFrames; $settleFrame++) {
                     $hostSettle = RowAtFrame -Rows $hostRows -Frame $settleFrame
                     $clientSettle = if ($clientByFrame.ContainsKey($settleFrame)) { $clientByFrame[$settleFrame] } else { $null }
                     if ($null -ne $hostSettle -and $null -ne $clientSettle -and
@@ -1184,7 +1224,7 @@ foreach ($hostRow in $hostRows) {
                         break
                     }
                 }
-                if ($settleFrame -le $frame + $RollbackSettleFrames) {
+                if ($settleFrame -le $frame + $settleFrames) {
                     break
                 }
             }

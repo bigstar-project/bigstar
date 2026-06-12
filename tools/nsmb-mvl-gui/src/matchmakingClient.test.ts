@@ -5,10 +5,12 @@ import type { GameSettings } from './types';
 const settings: GameSettings = {
   big_stars: 5,
   course_mode: 'random',
+  course_stages: [0, 1, 2, 3, 4],
   input_delay_frames: 4,
   input_max_frame_lead: 4,
   lives: 'endless',
-  match_seed: 'seed-1',
+  match_seed: '1',
+  rng_seeds: ['1', '2', '3', '4', '5'],
   rollback_enabled: false,
   wins: 3,
 };

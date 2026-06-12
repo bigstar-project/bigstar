@@ -16,7 +16,10 @@ use crate::paths::{
     find_melonds_binary, fixed_generated_rom_paths, load_launcher_settings, open_allowed_log_dir,
     save_launcher_settings,
 };
-use crate::processes::{session_status_inner, start_match_resolved, stop_existing, LaunchPaths};
+use crate::processes::{
+    remove_inherited_melonds_env_keys, session_status_inner, start_match_resolved, stop_existing,
+    LaunchPaths,
+};
 use crate::roms::prepare_roms;
 use crate::settings::validate_request;
 use crate::state::AppState;
@@ -157,6 +160,8 @@ fn launch_melonds(app: &AppHandle, args: &[&str]) -> Result<u32, String> {
     let melon_path = find_melonds_binary(app)?;
     let mut command = Command::new(&melon_path);
     command.args(args);
+    remove_inherited_melonds_env_keys(&mut command, std::env::vars_os().map(|(key, _)| key));
+    command.env("MELONDS_NSML_ALLOW_JIT", "1");
     if let Some(parent) = melon_path.parent() {
         command.current_dir(parent);
     }

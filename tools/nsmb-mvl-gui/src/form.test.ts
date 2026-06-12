@@ -4,6 +4,7 @@ import {
   initialForm,
   processExited,
   selectedStageFrom,
+  withRequiredPlan,
   withRequiredSeed,
 } from './form';
 
@@ -14,20 +15,24 @@ describe('フォーム補助関数', () => {
         ...initialForm,
         bigStars: 10,
         courseMode: 'select',
+        courseStages: [4, 3, 2, 1, 0],
         inputDelayFrames: 2,
         inputMaxFrameLead: 2,
         lives: '5',
         matchSeed: ' 0x0e ',
+        rngSeeds: ['0x0e', '2', '3', '4', '5'],
         rollbackEnabled: true,
         wins: 3,
       }),
     ).toEqual({
       big_stars: 10,
       course_mode: 'select',
+      course_stages: [4, 3, 2, 1, 0],
       input_delay_frames: 2,
       input_max_frame_lead: 2,
       lives: '5',
       match_seed: '0x0e',
+      rng_seeds: ['0x0e', '2', '3', '4', '5'],
       rollback_enabled: true,
       wins: 3,
     });
@@ -36,6 +41,7 @@ describe('フォーム補助関数', () => {
   test('10進数と16進数のシードからステージを決定する', () => {
     expect(selectedStageFrom('random', '7')).toBe(2);
     expect(selectedStageFrom('random', '0x0e')).toBe(4);
+    expect(selectedStageFrom('select', 'not-a-seed', [3, 2, 1])).toBe(3);
     expect(selectedStageFrom('select', 'not-a-seed')).toBe(0);
     expect(selectedStageFrom('random', 'not-a-seed')).toBeNull();
   });
@@ -55,7 +61,28 @@ describe('フォーム補助関数', () => {
         courseMode: 'select',
         matchSeed: '',
       }).matchSeed,
-    ).toBe('');
+    ).toBe('42');
+  });
+
+  test('勝利数から最大試合数分のコースとRNG seedを揃える', () => {
+    vi.spyOn(crypto, 'getRandomValues').mockImplementation((array) => {
+      (array as Uint32Array)[0] = 7;
+      return array;
+    });
+
+    expect(
+      withRequiredPlan({
+        ...initialForm,
+        courseStages: [4],
+        matchSeed: '11',
+        rngSeeds: [],
+        wins: 2,
+      }),
+    ).toMatchObject({
+      courseStages: [4, 4, 4],
+      matchSeed: '11',
+      rngSeeds: ['11', '7', '7'],
+    });
   });
 
   test('終了済みプロセスのステータス文字列を判定する', () => {
