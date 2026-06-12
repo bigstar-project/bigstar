@@ -82,6 +82,18 @@ def tile_summary(p: dict[str, Any]) -> dict[str, Any]:
     return ((p.get("tileProbe") or {}).get("summary")) or {}
 
 
+def tile_sample(p: dict[str, Any], name: str) -> dict[str, Any]:
+    samples = ((p.get("tileProbe") or {}).get("samples")) or []
+    for sample in samples:
+        if sample.get("name") == name:
+            return sample or {}
+    return {}
+
+
+def sample_block(sample: dict[str, Any]) -> dict[str, Any]:
+    return sample.get("block") or {}
+
+
 def nearest_hazard(record: dict[str, Any], index: int) -> dict[str, Any] | None:
     nearest = ((record.get("visualSummary") or {}).get("nearest")) or []
     if not (0 <= index < len(nearest)):
@@ -130,11 +142,15 @@ def audit(path: Path, player_index: int, sample_limit: int, stuck_records: int) 
     oscillation_windows = 0
     hazard_near_rows = 0
     hazard_death_transitions = 0
+    body_solid_rows = 0
+    item_box_body_rows = 0
 
     samples: dict[str, list[dict[str, Any]]] = {
         "deathTransitions": [],
         "hazardDeathTransitions": [],
         "hazardNearRows": [],
+        "bodySolidRows": [],
+        "itemBoxBodyRows": [],
         "blockedInputs": [],
         "holeInputs": [],
         "leftRightFlips": [],
@@ -187,6 +203,44 @@ def audit(path: Path, player_index: int, sample_limit: int, stuck_records: int) 
                 samples["hazardNearRows"],
                 sample_limit,
                 {"frame": frame, "held": f"0x{mask or 0:03X}", "x": pos_x(p), "y": pos_y(p), **hazard},
+            )
+        center = tile_sample(p, "center")
+        feet = tile_sample(p, "feet")
+        center_block = sample_block(center)
+        feet_block = sample_block(feet)
+        body_solid = bool(num(center.get("solidish")) or num(feet.get("solidish")))
+        item_box_body = bool(num(center_block.get("itemBox")) or num(feet_block.get("itemBox")))
+        if body_solid:
+            body_solid_rows += 1
+            append_sample(
+                samples["bodySolidRows"],
+                sample_limit,
+                {
+                    "frame": frame,
+                    "held": f"0x{mask or 0:03X}",
+                    "x": pos_x(p),
+                    "y": pos_y(p),
+                    "centerTileId": num(center.get("tileId")),
+                    "feetTileId": num(feet.get("tileId")),
+                    "centerBehavior": center.get("behavior"),
+                    "feetBehavior": feet.get("behavior"),
+                },
+            )
+        if item_box_body:
+            item_box_body_rows += 1
+            append_sample(
+                samples["itemBoxBodyRows"],
+                sample_limit,
+                {
+                    "frame": frame,
+                    "held": f"0x{mask or 0:03X}",
+                    "x": pos_x(p),
+                    "y": pos_y(p),
+                    "centerItemBox": num(center_block.get("itemBox")),
+                    "feetItemBox": num(feet_block.get("itemBox")),
+                    "centerContents": num(center_block.get("storageContents")),
+                    "feetContents": num(feet_block.get("storageContents")),
+                },
             )
 
         if left and wall_left or right and wall_right:
@@ -309,6 +363,8 @@ def audit(path: Path, player_index: int, sample_limit: int, stuck_records: int) 
         "oscillationWindows": oscillation_windows,
         "hazardNearRows": hazard_near_rows,
         "hazardDeathTransitions": hazard_death_transitions,
+        "bodySolidRows": body_solid_rows,
+        "itemBoxBodyRows": item_box_body_rows,
         "samples": samples,
     }
 
