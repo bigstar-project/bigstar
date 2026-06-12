@@ -27,6 +27,9 @@ BUTTON_BITS = {
 }
 
 HORIZONTAL_WRAP_WIDTH = 0x400000
+RUNTIME_HAZARD_HORIZONTAL_RANGE = 0x40000
+RUNTIME_HAZARD_VERTICAL_RANGE = 0x50000
+RUNTIME_HAZARD_CLOSE_RANGE = 0x30000
 
 
 def wrapped_dx(dx: int, wrap_width: int = HORIZONTAL_WRAP_WIDTH) -> int:
@@ -89,6 +92,13 @@ CATEGORY_COUNT_NAMES = [
     "course_select",
     "object",
 ]
+
+RUNTIME_HAZARD_CATEGORY_IDS = {
+    "moving_hazard": 1,
+    "hazard": 2,
+    "enemy_goomba": 3,
+    "enemy_koopa": 4,
+}
 
 ITEM_CATEGORIES = {
     "world_item",
@@ -326,6 +336,69 @@ def nearest_object(
     return best
 
 
+def runtime_hazard_threat(
+    objects: list[dict[str, Any]],
+    self_pos: dict[str, int],
+    self_vel: dict[str, int],
+) -> dict[str, int]:
+    best: dict[str, int] | None = None
+    best_score = 0
+    self_vx = self_vel["x"]
+    for obj in objects:
+        category = str(obj.get("category") or "")
+        category_id = RUNTIME_HAZARD_CATEGORY_IDS.get(category)
+        if category_id is None:
+            continue
+        obj_pos = pos(obj)
+        obj_vel = vel(obj)
+        dx = delta_x(obj_pos["x"], self_pos["x"])
+        dy = obj_pos["y"] - self_pos["y"]
+        if abs(dx) > RUNTIME_HAZARD_HORIZONTAL_RANGE or abs(dy) > RUNTIME_HAZARD_VERTICAL_RANGE:
+            continue
+
+        rel_vx = obj_vel["x"] - self_vx
+        closing = int((dx < 0 and rel_vx > 0) or (dx > 0 and rel_vx < 0))
+        very_close = int(abs(dx) <= RUNTIME_HAZARD_CLOSE_RANGE or abs(dy) <= 0x10000)
+        score = abs(dx) + abs(dy) * 2
+        if closing:
+            score -= RUNTIME_HAZARD_HORIZONTAL_RANGE
+        if very_close:
+            score -= RUNTIME_HAZARD_CLOSE_RANGE
+
+        candidate = {
+            "found": 1,
+            "closing": closing,
+            "very_close": very_close,
+            "dx": dx,
+            "dy": dy,
+            "vx": obj_vel["x"],
+            "vy": obj_vel["y"],
+            "dist": int(math.isqrt(dx * dx + dy * dy)),
+            "category": category_id,
+            "object_id": num(obj.get("objectId")),
+            "settings": num(obj.get("settings")),
+        }
+        if best is None or score < best_score:
+            best = candidate
+            best_score = score
+
+    if best is None:
+        return {
+            "found": 0,
+            "closing": 0,
+            "very_close": 0,
+            "dx": 0,
+            "dy": 0,
+            "vx": 0,
+            "vy": 0,
+            "dist": 0,
+            "category": 0,
+            "object_id": 0,
+            "settings": 0,
+        }
+    return best
+
+
 def nearest_item_details(
     objects: list[dict[str, Any]],
     self_pos: dict[str, int],
@@ -498,6 +571,7 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
     objects = record.get("objects") or []
     nearest_item = nearest_item_details(objects, self_pos)
     coin_reward_item = nearest_item_details(objects, self_pos, require_item_category="item")
+    runtime_hazard = runtime_hazard_threat(objects, self_pos, self_vel)
     nearest_summary = {}
     for nearest_player in visual_summary.get("nearest") or []:
         if num(nearest_player.get("player"), -1) == player:
@@ -642,6 +716,17 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "nearest_item_is_dropped_star_candidate": nearest_item["is_dropped_star_candidate"],
         "nearest_item_is_suspected_mini_candidate": nearest_item["is_suspected_mini_candidate"],
         "nearest_item_avoid_candidate": nearest_item["avoid_candidate"],
+        "runtime_hazard_found": runtime_hazard["found"],
+        "runtime_hazard_closing": runtime_hazard["closing"],
+        "runtime_hazard_very_close": runtime_hazard["very_close"],
+        "runtime_hazard_dx": runtime_hazard["dx"],
+        "runtime_hazard_dy": runtime_hazard["dy"],
+        "runtime_hazard_vx": runtime_hazard["vx"],
+        "runtime_hazard_vy": runtime_hazard["vy"],
+        "runtime_hazard_dist": runtime_hazard["dist"],
+        "runtime_hazard_category": runtime_hazard["category"],
+        "runtime_hazard_object_id": runtime_hazard["object_id"],
+        "runtime_hazard_settings": runtime_hazard["settings"],
         "coin_reward_item_found": coin_reward_item["found"] if num(record.get("_self_coin_reward_recent")) else 0,
         "coin_reward_item_dx": coin_reward_item["dx"] if num(record.get("_self_coin_reward_recent")) else 0,
         "coin_reward_item_dy": coin_reward_item["dy"] if num(record.get("_self_coin_reward_recent")) else 0,

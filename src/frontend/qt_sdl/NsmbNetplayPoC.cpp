@@ -3067,6 +3067,9 @@ struct RuntimeHazardThreat
     std::int64_t Dy = 0;
     std::int64_t VelX = 0;
     std::int64_t VelY = 0;
+    int CategoryID = 0;
+    melonDS::u32 ObjectID = 0;
+    melonDS::u32 Settings = 0;
 };
 
 bool IsRuntimeHazardCategory(const char* category)
@@ -3075,6 +3078,19 @@ bool IsRuntimeHazardCategory(const char* category)
         std::strcmp(category, "hazard") == 0 ||
         std::strcmp(category, "enemy_goomba") == 0 ||
         std::strcmp(category, "enemy_koopa") == 0;
+}
+
+int RuntimeHazardCategoryID(const char* category)
+{
+    if (std::strcmp(category, "moving_hazard") == 0)
+        return 1;
+    if (std::strcmp(category, "hazard") == 0)
+        return 2;
+    if (std::strcmp(category, "enemy_goomba") == 0)
+        return 3;
+    if (std::strcmp(category, "enemy_koopa") == 0)
+        return 4;
+    return 0;
 }
 
 RuntimeHazardThreat MostDangerousRuntimeHazard(
@@ -3097,7 +3113,8 @@ RuntimeHazardThreat MostDangerousRuntimeHazard(
     {
         if (entry.LifecycleState != 1)
             continue;
-        if (!IsRuntimeHazardCategory(AIObjectCategory(entry.ObjectID, entry.Actor.Settings)))
+        const char* category = AIObjectCategory(entry.ObjectID, entry.Actor.Settings);
+        if (!IsRuntimeHazardCategory(category))
             continue;
 
         const std::int64_t dx = AIWrappedDeltaX(SignedU32(entry.Actor.PosX), SignedU32(selfX));
@@ -3124,6 +3141,9 @@ RuntimeHazardThreat MostDangerousRuntimeHazard(
             best.Dy = dy;
             best.VelX = hazardVx;
             best.VelY = SignedU32(entry.Actor.VelY);
+            best.CategoryID = RuntimeHazardCategoryID(category);
+            best.ObjectID = entry.ObjectID;
+            best.Settings = entry.Actor.Settings;
             bestScore = score;
         }
     }
@@ -16821,6 +16841,47 @@ bool RuntimeObjectFeature(
     return true;
 }
 
+bool RuntimeHazardFeature(
+    const GameStateObjectScanCache& objectScanCache,
+    const std::string& name,
+    melonDS::u32 selfX,
+    melonDS::u32 selfY,
+    melonDS::u32 selfVelX,
+    double& out)
+{
+    constexpr std::int64_t kFeatureHazardHorizontalRange = 0x40000;
+    constexpr std::int64_t kFeatureHazardVerticalRange = 0x50000;
+    constexpr std::int64_t kFeatureHazardCloseRange = 0x30000;
+    constexpr const char* prefix = "runtime_hazard_";
+    if (name.rfind(prefix, 0) != 0)
+        return false;
+    const std::string field = name.substr(std::strlen(prefix));
+    const RuntimeHazardThreat threat = MostDangerousRuntimeHazard(
+        objectScanCache,
+        selfX,
+        selfY,
+        selfVelX,
+        kFeatureHazardHorizontalRange,
+        kFeatureHazardVerticalRange,
+        kFeatureHazardCloseRange);
+
+    if (field == "found") out = threat.Found ? 1 : 0;
+    else if (!threat.Found) out = 0;
+    else if (field == "closing") out = threat.Closing ? 1 : 0;
+    else if (field == "very_close") out = threat.VeryClose ? 1 : 0;
+    else if (field == "dx") out = threat.Dx;
+    else if (field == "dy") out = threat.Dy;
+    else if (field == "vx") out = threat.VelX;
+    else if (field == "vy") out = threat.VelY;
+    else if (field == "dist") out = static_cast<double>(std::llround(std::sqrt(
+        static_cast<double>(threat.Dx * threat.Dx + threat.Dy * threat.Dy))));
+    else if (field == "category") out = threat.CategoryID;
+    else if (field == "object_id") out = threat.ObjectID;
+    else if (field == "settings") out = threat.Settings;
+    else return false;
+    return true;
+}
+
 const GameStateObjectScanEntry* NearestRuntimeHazard(
     const GameStateObjectScanCache& objectScanCache,
     melonDS::u32 selfX,
@@ -17047,6 +17108,7 @@ bool RuntimeFeatureValue(
     const int opponent = player ^ 1;
     const melonDS::u32 selfX = player == 0 ? sample.PlayerActor0PosX : sample.PlayerActor1PosX;
     const melonDS::u32 selfY = player == 0 ? sample.PlayerActor0PosY : sample.PlayerActor1PosY;
+    const melonDS::u32 selfVelX = player == 0 ? sample.PlayerActor0VelX : sample.PlayerActor1VelX;
 
     if (name == "frame") out = frame;
     else if (name == "stage_id") out = sample.StageID;
@@ -17124,6 +17186,9 @@ bool RuntimeFeatureValue(
     {
     }
     else if (RuntimeItemFeature(objectScanCache, sample, name, "coin_reward_item_", selfX, selfY, true, true, out))
+    {
+    }
+    else if (RuntimeHazardFeature(objectScanCache, name, selfX, selfY, selfVelX, out))
     {
     }
     else if (name.rfind("count_", 0) == 0)
