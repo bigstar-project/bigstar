@@ -22,7 +22,9 @@ param(
     [switch]$SkipGameStateComparison,
     [int]$ScreenshotInterval = 0,
     [switch]$SoftwareRenderer,
-    [switch]$AllowJit
+    [switch]$AllowJit,
+    [int]$RuleAIAuditSampleLimit = 16,
+    [int]$RuleAIAuditStuckRecords = 6
 )
 
 $ErrorActionPreference = "Stop"
@@ -150,6 +152,33 @@ try {
         --policy $Policy `
         --output $summaryPath `
         --min-gameplay-rows 1
+
+    if ($Policy -eq "rule") {
+        $hostAuditPath = Join-Path $hostLog "ruleai-audit.json"
+        $clientAuditPath = Join-Path $clientLog "ruleai-audit.json"
+        $hostAuditOutput = & python (Join-Path $repoRoot "scripts\nsmb_mvl_ai_audit_ruleai.py") `
+            $hostAIPlayLog `
+            --player $evalPlayer `
+            --output $hostAuditPath `
+            --sample-limit $RuleAIAuditSampleLimit `
+            --stuck-records $RuleAIAuditStuckRecords
+        if ($LASTEXITCODE -ne 0) {
+            $hostAuditOutput | Write-Host
+            throw "RuleAI host audit failed with exit code $LASTEXITCODE"
+        }
+        $clientAuditOutput = & python (Join-Path $repoRoot "scripts\nsmb_mvl_ai_audit_ruleai.py") `
+            $clientAIPlayLog `
+            --player $evalPlayer `
+            --output $clientAuditPath `
+            --sample-limit $RuleAIAuditSampleLimit `
+            --stuck-records $RuleAIAuditStuckRecords
+        if ($LASTEXITCODE -ne 0) {
+            $clientAuditOutput | Write-Host
+            throw "RuleAI client audit failed with exit code $LASTEXITCODE"
+        }
+        Write-Host "ruleAIAuditHost=$hostAuditPath"
+        Write-Host "ruleAIAuditClient=$clientAuditPath"
+    }
 
     Write-Host "closedLoopEval=$summaryPath"
 } finally {
