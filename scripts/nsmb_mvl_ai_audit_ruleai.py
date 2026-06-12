@@ -99,6 +99,7 @@ def audit(path: Path, player_index: int, sample_limit: int, stuck_records: int) 
     blocked_input_rows = 0
     hole_input_rows = 0
     stuck_windows = 0
+    oscillation_windows = 0
 
     samples: dict[str, list[dict[str, Any]]] = {
         "deathTransitions": [],
@@ -106,6 +107,7 @@ def audit(path: Path, player_index: int, sample_limit: int, stuck_records: int) 
         "holeInputs": [],
         "leftRightFlips": [],
         "stuckWindows": [],
+        "oscillationWindows": [],
         "stateContradictions": [],
     }
 
@@ -113,6 +115,7 @@ def audit(path: Path, player_index: int, sample_limit: int, stuck_records: int) 
     prev_mask: int | None = None
     prev_dir = 0
     still_run: list[dict[str, Any]] = []
+    oscillation_run: list[dict[str, Any]] = []
 
     for record in iter_jsonl(path):
         rows += 1
@@ -169,6 +172,26 @@ def audit(path: Path, player_index: int, sample_limit: int, stuck_records: int) 
             prev_dir = direction
         prev_mask = mask
 
+        if p.get("found") and mask:
+            oscillation_run.append({"frame": frame, "x": pos_x(p), "y": pos_y(p), "held": f"0x{mask or 0:03X}"})
+            if len(oscillation_run) > stuck_records:
+                oscillation_run.pop(0)
+            if len(oscillation_run) == stuck_records:
+                xs = [entry["x"] for entry in oscillation_run]
+                ys = [entry["y"] for entry in oscillation_run]
+                if max(xs) - min(xs) <= 0x3000 and max(ys) - min(ys) <= 0x2000:
+                    oscillation_windows += 1
+                    append_sample(
+                        samples["oscillationWindows"],
+                        sample_limit,
+                        {"startFrame": oscillation_run[0]["frame"], "endFrame": oscillation_run[-1]["frame"],
+                         "minX": min(xs), "maxX": max(xs), "minY": min(ys), "maxY": max(ys),
+                         "held": oscillation_run[-1]["held"]},
+                    )
+                    oscillation_run = []
+        else:
+            oscillation_run = []
+
         if prev_record is not None:
             prev_p = player(prev_record, player_index)
             if p.get("dead") and not prev_p.get("dead"):
@@ -220,6 +243,7 @@ def audit(path: Path, player_index: int, sample_limit: int, stuck_records: int) 
         "holeInputRows": hole_input_rows,
         "leftRightFlips": left_right_flips,
         "stuckWindows": stuck_windows,
+        "oscillationWindows": oscillation_windows,
         "samples": samples,
     }
 

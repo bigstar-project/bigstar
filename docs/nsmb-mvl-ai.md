@@ -108,6 +108,8 @@
 - 完了: RuleAIに短期記憶ベースの壁脱出を追加した。目標方向が壁/穴へ向く場合は一時的に反対方向またはraw座標経路へ逃がし、死亡中は中立入力にして短期記憶をリセットする。traceには `dx/rawDx/intent/escape/still` を出す。
 - 検証: `logs/codex-ruleai-safe-revert-3300-20260613` は stage 0 / seed `0x2f52869f` / 3300F / software renderer / screenshot 300F間隔でpass。host/clientともPNG 11枚を生成し、client代表 `inst0_frame003300.png` は草原ステージ画面として目視確認済み。closed-loop評価では client `deathTransitions=0`、`aliveRows=82/84`、`bigStarDistance.approachDelta=469225177088`。
 - 残課題: 同ログのRuleAI監査では client `blockedInputRows=69`、`stuckWindows=1` が残る。frame 1290-1440付近でplayer1がブロック地形/ラップ端近辺に詰まり、`wallLeft=1/wallRight=1` の両壁扱いで左入力を続ける。両壁を単純に無視して進ませる実験ではスター取得は出たがGoomba接触死亡が増えたため不採用。次は地形スタック脱出とGoomba回避を分けて直す。
+- 完了: RuleAI監査に `oscillationWindows` を追加した。左右入力を切り替えても狭い座標範囲に留まる振動スタックを検出する。`logs/codex-ruleai-wallprobe-3300-20260613` の試作では `stuckWindows=0` になったが、スクショではブロック近辺に留まり、監査v2で `oscillationWindows=11` を検出したため採用しなかった。
+- 調査結果: frame 1500のSVGでは、selected playerの `center/feet/left/rightFeet` が itemBox tile `0x019 behavior=0x00080002` と重なっており、単純な左右反転や両壁無視ではなく、ブロック/アイテム箱地形に食い込んだ状態の脱出またはブロック叩き判断が必要。hazard検知範囲拡大と近距離踏みモードも試したが、Goomba接触死が増えたため不採用。
 
 ## AI Play Log
 
@@ -443,7 +445,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 
 ## Next Actions
 
-- 最優先: RuleAIをスクショ/SVG/監査JSONで反復改善する。`logs/codex-ruleai-safe-revert-3300-20260613` では死亡0まで戻した一方、`blockedInputRows=69`、`stuckWindows=1` が残るため、まずframe 1290-1440付近のブロック地形/ラップ端スタックを直す。両壁false positiveを単純に無視するとスター取得は増えるがGoomba接触死亡が増えるので、地形スタック脱出と敵回避を別ロジックとして扱う。改善後は同seed 3300Fだけでなく複数seed/長めframeで、死亡・停滞・スクショの3点を確認する。
+- 最優先: RuleAIをスクショ/SVG/監査JSONで反復改善する。`logs/codex-ruleai-safe-revert-3300-20260613` では死亡0まで戻した一方、`blockedInputRows=69`、`stuckWindows=1`、監査v2 `oscillationWindows=11` が残るため、まずframe 1290以降のitemBox食い込み/ブロック地形スタックを直す。両壁false positiveを単純に無視する、hazard範囲を広げる、近距離hazardへ踏みに行く、といった試作はGoomba接触死または左右振動を増やしたので不採用。次はtileProbeのcenter/feetがblock/itemBoxに重なった時だけ、通常の星追跡から「脱出/ブロック叩き」サブモードへ切り替える。
 - 次に、評価結果で弱いscenarioを特定してから、固定Mario/無操作Luigiログを増やすだけでなくscenario別に短い高品質人間ログを集める。まずは `star-chase`、`item-box`、`fire`、`enemy-hazard`、`recovery/fall-avoid`、`free-play` を各5-10本、各1-3分程度にし、`recording-audit`、`visual-state-audit`、SVG/viewer目視で破棄/採用を決める。Marioが動かないログは基礎操作データとして有効だが、対戦反応は学べないので単独で増やし続けない。
 - RuleAIは「強いAI」を目指すより先に、相手・環境揺らし・DAgger用の分布拡張器として進化させる。Big Star追跡、落下回避、近傍item/box、単純攻撃/回避を入れ、人間がRuleAI相手に操作したログと、模倣AIがRuleAI相手に失敗したログを集める。
 - 模倣学習は全12ボタン独立multi-labelのまま進めず、入力空間を実操作に寄せる。まず有効ボタンmaskを A/B/Left/Right/Up/Down/Y に制限し、左右/上下同時を禁止する。次に「方向」「jump」「dash/fire」「duck」などのfactor化、前回入力/hold duration/reaction delayを特徴量に入れ、短いノイズ入力を抑える。
