@@ -15,6 +15,7 @@ mod state;
 mod tests;
 
 use preflight::cli_preflight_check;
+#[cfg(any(debug_assertions, test))]
 use specta_typescript::Typescript;
 use state::AppState;
 use tauri_specta::{collect_commands, Builder as SpectaBuilder};
