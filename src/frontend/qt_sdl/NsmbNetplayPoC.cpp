@@ -1231,6 +1231,18 @@ struct State
     int TestQuitGraceMs = 0;
     bool InputTraceEnabled = false;
     int InputTraceInterval = 60;
+    bool InputRecordEnabled = false;
+    std::string InputRecordPath;
+    std::ofstream InputRecord;
+    std::mutex InputRecordMutex;
+    melonDS::u32 InputRecordStartFrame = 0;
+    melonDS::u32 InputRecordEndFrame = kNoFrameLimit;
+    int InputRecordInstance = -1;
+    bool InputRecordHasSpan = false;
+    melonDS::u32 InputRecordSpanStart = 0;
+    melonDS::u32 InputRecordSpanEnd = 0;
+    InputState InputRecordSpanInput;
+    int InputRecordFlushPendingSpans = 0;
     bool ScreenHashEnabled = false;
     bool GameStateTraceExtended = false;
     melonDS::u32 GameStateTraceStartFrame = 0;
@@ -2135,6 +2147,8 @@ void RebaseMvlAutoRestartStartupFrames(int instanceID, melonDS::u32 restartFrame
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.ScriptRemotePacketStartFrame);
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.ScriptRemotePacketEndFrame);
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.PacketBridgeJitHelperPatchFrame);
+    RebaseMvlAutoRestartStartupFrame(restartFrame, G.ClearMvlCameraInitHoldStartFrame);
+    RebaseMvlAutoRestartStartupFrame(restartFrame, G.ClearMvlCameraInitHoldEndFrame);
 
     G.MvlAutoRestartStartupFrameBase = restartFrame;
     std::printf(
@@ -2203,6 +2217,8 @@ void RebaseMvlAutoRestartStartupFramesFromCheckpoint(
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.ScriptRemotePacketStartFrame);
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.ScriptRemotePacketEndFrame);
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridgeJitHelperPatchFrame);
+    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.ClearMvlCameraInitHoldStartFrame);
+    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.ClearMvlCameraInitHoldEndFrame);
 
     G.MvlAutoRestartStartupFrameBase = restoreFrame > checkpointFrame ? restoreFrame - checkpointFrame : restoreFrame;
     std::printf(
@@ -2240,6 +2256,7 @@ void ResetMvlAutoRestartStartupHookState(int instanceID)
     G.ForceNetLocalAidLogged[instanceID] = false;
     G.ForceWifiCommunicatingLogged[instanceID] = false;
     G.ScriptRemotePacketLogged[instanceID] = false;
+    G.ClearMvlCameraInitHoldApplied[instanceID] = false;
     G.LocalNetplayStartReadyFrame = kNoFrameLimit;
     G.RemoteNetplayStartReadyFrame = kNoFrameLimit;
     std::fill(std::begin(G.NetplayStartWaitArrived), std::end(G.NetplayStartWaitArrived), false);
@@ -2294,6 +2311,115 @@ bool InputsEqual(const InputState& a, const InputState& b)
         && a.Touching == b.Touching
         && a.TouchX == b.TouchX
         && a.TouchY == b.TouchY;
+}
+
+std::string InputSpecForScript(const InputState& input)
+{
+    static constexpr const char* kButtonNames[12] {
+        "A",
+        "B",
+        "SELECT",
+        "START",
+        "RIGHT",
+        "LEFT",
+        "UP",
+        "DOWN",
+        "R",
+        "L",
+        "X",
+        "Y",
+    };
+
+    std::string spec;
+    for (int bit = 0; bit < 12; bit++)
+    {
+        if ((input.KeyMask & (1u << bit)) != 0)
+            continue;
+        if (!spec.empty())
+            spec += "+";
+        spec += kButtonNames[bit];
+    }
+    if (spec.empty())
+        spec = "NONE";
+    if (input.Touching)
+    {
+        spec += " ";
+        spec += std::to_string(input.TouchX);
+        spec += ",";
+        spec += std::to_string(input.TouchY);
+    }
+    return spec;
+}
+
+InputState CanonicalInputForRecord(const InputState& input)
+{
+    InputState canonical = input;
+    canonical.KeyMask &= 0xFFF;
+    return canonical;
+}
+
+void FlushInputRecordSpanLocked()
+{
+    if (!G.InputRecord || !G.InputRecordHasSpan)
+        return;
+
+    G.InputRecord << G.InputRecordSpanStart << "-" << G.InputRecordSpanEnd << " "
+        << InputSpecForScript(G.InputRecordSpanInput) << "\n";
+    G.InputRecordHasSpan = false;
+    G.InputRecordFlushPendingSpans++;
+    if (G.InputRecordFlushPendingSpans >= 64)
+    {
+        G.InputRecord.flush();
+        G.InputRecordFlushPendingSpans = 0;
+    }
+}
+
+void RecordInputIfNeeded(int instanceID, melonDS::u32 frame, const InputState& input)
+{
+    if (!G.InputRecordEnabled)
+        return;
+    if (G.InputRecordInstance >= 0 && G.InputRecordInstance != instanceID)
+        return;
+    if (frame < G.InputRecordStartFrame)
+        return;
+    if (G.InputRecordEndFrame != kNoFrameLimit && frame > G.InputRecordEndFrame)
+        return;
+
+    std::lock_guard<std::mutex> lock(G.InputRecordMutex);
+    if (!G.InputRecord)
+        return;
+
+    const InputState recordInput = CanonicalInputForRecord(input);
+    if (!G.InputRecordHasSpan)
+    {
+        G.InputRecordSpanStart = frame;
+        G.InputRecordSpanEnd = frame;
+        G.InputRecordSpanInput = recordInput;
+        G.InputRecordHasSpan = true;
+        return;
+    }
+
+    if (G.InputRecordSpanEnd + 1 == frame && InputsEqual(G.InputRecordSpanInput, recordInput))
+    {
+        G.InputRecordSpanEnd = frame;
+        return;
+    }
+    if (frame <= G.InputRecordSpanEnd)
+    {
+        if (!InputsEqual(G.InputRecordSpanInput, recordInput)
+            && G.InputRecordSpanStart == frame
+            && G.InputRecordSpanEnd == frame)
+        {
+            G.InputRecordSpanInput = recordInput;
+        }
+        return;
+    }
+
+    FlushInputRecordSpanLocked();
+    G.InputRecordSpanStart = frame;
+    G.InputRecordSpanEnd = frame;
+    G.InputRecordSpanInput = recordInput;
+    G.InputRecordHasSpan = true;
 }
 
 InputState NeutralInputPreservingTouch(const InputState& source)
@@ -15045,6 +15171,41 @@ void InitFromEnvironment()
     G.TestQuitGraceMs = std::max(0, EnvInt("MELONDS_NSML_QUIT_GRACE_MS", 0));
     G.InputTraceEnabled = EnvFlag("MELONDS_NSML_INPUT_TRACE");
     G.InputTraceInterval = std::max(1, EnvInt("MELONDS_NSML_INPUT_TRACE_INTERVAL", 60));
+    const char* inputRecord = std::getenv("MELONDS_NSML_INPUT_RECORD_FILE");
+    if (inputRecord && inputRecord[0])
+    {
+        G.InputRecordPath = inputRecord;
+        G.InputRecordStartFrame = static_cast<melonDS::u32>(
+            std::max(0, EnvInt("MELONDS_NSML_INPUT_RECORD_START_FRAME", 0)));
+        G.InputRecordEndFrame = static_cast<melonDS::u32>(
+            std::max(0, EnvInt("MELONDS_NSML_INPUT_RECORD_END_FRAME", 0)));
+        if (G.InputRecordEndFrame != kNoFrameLimit
+            && G.InputRecordEndFrame < G.InputRecordStartFrame)
+            G.InputRecordEndFrame = G.InputRecordStartFrame;
+        G.InputRecordInstance = EnvInt("MELONDS_NSML_INPUT_RECORD_INSTANCE", -1);
+        if (G.InputRecordInstance < 0 || G.InputRecordInstance >= 16)
+            G.InputRecordInstance = -1;
+        G.InputRecord.open(G.InputRecordPath, std::ios::out | std::ios::trunc);
+        if (G.InputRecord)
+        {
+            G.InputRecordEnabled = true;
+            G.InputRecord << "# NSMB input recording generated by melonDS NSML PoC\n";
+            G.InputRecord << "# startFrame=" << G.InputRecordStartFrame
+                << " endFrame=" << G.InputRecordEndFrame
+                << " instance=" << G.InputRecordInstance << "\n";
+            G.InputRecord.flush();
+            std::printf("NSMB Test: recording input to %s start=%u end=%u instance=%d\n",
+                G.InputRecordPath.c_str(),
+                G.InputRecordStartFrame,
+                G.InputRecordEndFrame,
+                G.InputRecordInstance);
+        }
+        else
+        {
+            std::printf("NSMB Test: failed to open input record file: %s\n",
+                G.InputRecordPath.c_str());
+        }
+    }
     G.ScreenHashEnabled = EnvFlag("MELONDS_NSML_SCREEN_HASH");
     G.SeedWaitTimeoutMs = std::max(0, EnvInt("MELONDS_NSML_SEED_WAIT_TIMEOUT_MS", 10000));
     G.WaitForPeerBeforeStart = EnvFlag("MELONDS_NSML_WAIT_FOR_PEER");
@@ -16459,6 +16620,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Barrier);
 
     const InputState testInput = ApplyInputScript(instanceID, inputFrame, polledInput);
+    RecordInputIfNeeded(instanceID, inputFrame, testInput);
     const melonDS::u32 syncFrame = G.TestEnabled ? inputFrame : frame;
 
     if (G.Enabled && G.InputNetplayOnly)
@@ -17275,6 +17437,12 @@ bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
         }
+        {
+            std::lock_guard<std::mutex> recordLock(G.InputRecordMutex);
+            FlushInputRecordSpanLocked();
+            if (G.InputRecord)
+                G.InputRecord.close();
+        }
         std::_Exit(0);
     }
     return true;
@@ -17284,6 +17452,13 @@ void Shutdown()
 {
     StopFrameHeartbeatThread();
     StopNetworkPumpThread();
+
+    {
+        std::lock_guard<std::mutex> recordLock(G.InputRecordMutex);
+        FlushInputRecordSpanLocked();
+        if (G.InputRecord)
+            G.InputRecord.close();
+    }
 
     std::lock_guard<std::mutex> lock(G.Mutex);
 

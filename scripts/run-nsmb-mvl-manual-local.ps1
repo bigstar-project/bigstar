@@ -39,10 +39,15 @@ param(
     [int]$WorldStateTraceObjectLifecyclesStartFrame = 0,
     [int]$WorldStateTraceObjectLifecyclesEndFrame = 0,
     [int]$HostStartupDelayMs = 1200,
+    [switch]$WaitForPeerAtNetplayStart,
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds",
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds",
     [string]$InputScript = "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs",
+    [switch]$RecordInput,
+    [string]$InputRecordDir = "",
+    [int]$InputRecordStartFrame = 0,
+    [int]$InputRecordEndFrame = 0,
     [string]$LogDir = "",
     [int]$ScreenshotInterval = 0,
     [switch]$GameStateTrace,
@@ -65,11 +70,16 @@ param(
     [switch]$GenerateMvlConfiguredRoms,
     [string]$MvlMatchSeed = "",
     [switch]$AllowJit,
+    [switch]$NoJit,
     [switch]$NoFrameLimit,
     [switch]$SoftwareRenderer
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($AllowJit -and $NoJit) {
+    throw "AllowJit and NoJit cannot be used together"
+}
 
 if ($LowLatencyRollback -and $PlanDActorSnapshot) {
     throw "LowLatencyRollback and PlanDActorSnapshot cannot be enabled together"
@@ -173,6 +183,14 @@ $hostLog = Join-Path $logRoot "host"
 $clientLog = Join-Path $logRoot "client"
 $wrapperLog = Join-Path $logRoot "wrapper"
 New-Item -ItemType Directory -Force $wrapperLog | Out-Null
+if ($InputRecordDir -eq "") {
+    $InputRecordDir = Join-Path $logRoot "recorded-inputs"
+} elseif (-not [System.IO.Path]::IsPathRooted($InputRecordDir)) {
+    $InputRecordDir = Join-Path $repoRoot $InputRecordDir
+}
+if ($RecordInput) {
+    New-Item -ItemType Directory -Force $InputRecordDir | Out-Null
+}
 
 $cfgPath = Join-Path $repoRoot "build\release-windows-x86_64\melonDS.toml"
 if (Test-Path $cfgPath) {
@@ -222,9 +240,11 @@ $common = @(
     "-PacketBridgeJitHelperPatchFrame", "$PacketBridgeStartFrame",
     "-PacketBridgeStartFrame", "$PacketBridgeStartFrame",
     "-ClearMvlCameraInitHold",
-    "-ClearMvlCameraInitHoldStartFrame", "840",
-    "-WaitForPeerAtNetplayStart"
+    "-ClearMvlCameraInitHoldStartFrame", "840"
 )
+if ($WaitForPeerAtNetplayStart) {
+    $common += "-WaitForPeerAtNetplayStart"
+}
 if ($GameStateTrace) {
     $common += @(
         "-GameStateTrace",
@@ -283,7 +303,7 @@ if ($WorldStateSkipEffects) {
 if ($NoFrameLimit) {
     $common += "-NoFrameLimit"
 }
-if ($AllowJit) {
+if (-not $NoJit) {
     $common += "-AllowJit"
 }
 if ($Rollback) {
@@ -321,6 +341,13 @@ if ($GenerateMvlConfiguredRoms) {
 }
 if ($MvlMatchSeed -ne "") {
     $common += @("-MvlMatchSeed", "$MvlMatchSeed")
+}
+if ($RecordInput) {
+    $common += @(
+        "-RecordInput",
+        "-InputRecordStartFrame", "$InputRecordStartFrame",
+        "-InputRecordEndFrame", "$InputRecordEndFrame"
+    )
 }
 
 if ($LowLatencyRollback) {
@@ -409,10 +436,13 @@ $hostArgs = @(
     "-File", $smokeScript
 ) + $common + @(
     "-RunRole", "host",
-    "-Rom", "roms\nsmb-us.nds",
+    "-Rom", $HostRom,
     "-HostRom", $HostRom,
     "-LogDir", $hostLog
 )
+if ($RecordInput) {
+    $hostArgs += @("-InputRecordFile", (Join-Path $InputRecordDir "host.inputs"))
+}
 
 $clientArgs = @(
     "-NoProfile",
@@ -421,10 +451,13 @@ $clientArgs = @(
 ) + $common + @(
     "-RunRole", "client",
     "-Peer", "127.0.0.1",
-    "-Rom", "roms\nsmb-us.nds",
+    "-Rom", $ClientRom,
     "-ClientRom", $ClientRom,
     "-LogDir", $clientLog
 )
+if ($RecordInput) {
+    $clientArgs += @("-InputRecordFile", (Join-Path $InputRecordDir "client.inputs"))
+}
 
 $hostOut = Join-Path $wrapperLog "host-wrapper.out.txt"
 $hostErr = Join-Path $wrapperLog "host-wrapper.err.txt"
@@ -453,9 +486,10 @@ Write-Host "Started NSMB MvL manual local session."
 Write-Host "host wrapper pid=$($hostProc.Id) log=$hostLog"
 Write-Host "client wrapper pid=$($clientProc.Id) log=$clientLog"
 Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
-Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames networkPump=$([bool]$NetworkPumpThread) networkPumpSleepUs=$NetworkPumpSleepUs packetBridgeStart=$PacketBridgeStartFrame renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$([bool]$PerfBreakdown)"
+Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames networkPump=$([bool]$NetworkPumpThread) networkPumpSleepUs=$NetworkPumpSleepUs packetBridgeStart=$PacketBridgeStartFrame startBarrier=$([bool]$WaitForPeerAtNetplayStart) renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$([bool]$PerfBreakdown)"
 Write-Host "gameplay heartbeat interval=$GameplayHeartbeatInterval"
 Write-Host "trace gameState=$([bool]$GameStateTrace) interval=$GameStateTraceInterval extended=$([bool]$GameStateTraceExtended) lifeChanges=$([bool]$TracePlayerLifeChanges) defeated=$([bool]$TracePlayerDefeated)"
+Write-Host "recordInput=$([bool]$RecordInput) recordDir=$(if ($RecordInput) { $InputRecordDir } else { 'disabled' }) recordStart=$InputRecordStartFrame recordEnd=$InputRecordEndFrame"
 if ($PlanDActorSnapshot) {
     Write-Host "Plan-D actor/global/world snapshot enabled playerInterval=$PlayerStateSyncInterval playerPredict=$PlayerStateMaxPredictFrames worldInterval=$WorldStateSyncInterval worldPredict=$WorldStateMaxPredictFrames worldRescan=$WorldStateActorRescanInterval itemSpawn=1 actorSnapshot=$([bool]$WorldStateApplyActorSnapshot)"
 }
@@ -469,8 +503,4 @@ if ($Rollback) {
 if ($InputUnreliable) {
     Write-Host "input unreliable bundleHistory=$InputBundleHistory"
 }
-if ($AllowJit) {
-    Write-Host "JIT is enabled for speed; deterministic sync is not guaranteed yet."
-} else {
-    Write-Host "JIT is disabled for deterministic sync."
-}
+Write-Host "jit=$(-not $NoJit)$(if ($NoJit) { ' (disabled by -NoJit)' } else { ' (default)' })"

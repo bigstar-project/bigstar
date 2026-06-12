@@ -76,6 +76,11 @@ param(
     [switch]$PacketCaptureAllowPreGame,
     [switch]$InputNetplay,
     [switch]$InputNetplayTrace,
+    [switch]$RecordInput,
+    [string]$InputRecordFile = "",
+    [int]$InputRecordStartFrame = 0,
+    [int]$InputRecordEndFrame = 0,
+    [int]$InputRecordInstance = -1,
     [switch]$AllowRemoteInputTimeoutFallback,
     [int]$InputDelayFrames = -1,
     [int]$InputSendDelayFrames = 0,
@@ -615,6 +620,31 @@ $sourceInputPath = (Resolve-Path $InputScript).Path
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $logRoot = (Resolve-Path $LogDir).Path
 
+function Get-RoleInputRecordPath {
+    param([string]$Role)
+
+    if (-not $RecordInput) {
+        return ""
+    }
+
+    if ([string]::IsNullOrWhiteSpace($InputRecordFile)) {
+        return (Join-Path $logRoot "$Role.recorded.inputs")
+    }
+
+    $resolved = [System.IO.Path]::GetFullPath($InputRecordFile)
+    if ($RunRole -ne "both") {
+        return $resolved
+    }
+
+    $dir = [System.IO.Path]::GetDirectoryName($resolved)
+    if ([string]::IsNullOrEmpty($dir)) {
+        $dir = (Get-Location).Path
+    }
+    $name = [System.IO.Path]::GetFileNameWithoutExtension($resolved)
+    $ext = [System.IO.Path]::GetExtension($resolved)
+    return (Join-Path $dir "$name.$Role$ext")
+}
+
 $hostRoot = Join-Path $logRoot "host-rom"
 $clientRoot = Join-Path $logRoot "client-rom"
 New-Item -ItemType Directory -Force -Path $hostRoot, $clientRoot | Out-Null
@@ -851,6 +881,27 @@ function Start-MelonLANProcess {
     $env:MELONDS_NSML_TEST_FRAMES = "$roleFrames"
     $env:MELONDS_NSML_ROLE = $Role
     $env:MELONDS_NSML_INPUT_SCRIPT = $RoleInput
+    $roleInputRecord = Get-RoleInputRecordPath -Role $Role
+    if ($roleInputRecord) {
+        $recordDir = Split-Path -Parent $roleInputRecord
+        if ($recordDir) {
+            New-Item -ItemType Directory -Force -Path $recordDir | Out-Null
+        }
+        Remove-Item -Force $roleInputRecord -ErrorAction SilentlyContinue
+        $env:MELONDS_NSML_INPUT_RECORD_FILE = $roleInputRecord
+        $env:MELONDS_NSML_INPUT_RECORD_START_FRAME = "$([Math]::Max(0, $InputRecordStartFrame))"
+        $env:MELONDS_NSML_INPUT_RECORD_END_FRAME = "$([Math]::Max(0, $InputRecordEndFrame))"
+        if ($InputRecordInstance -ge 0) {
+            $env:MELONDS_NSML_INPUT_RECORD_INSTANCE = "$InputRecordInstance"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_INPUT_RECORD_INSTANCE -ErrorAction SilentlyContinue
+        }
+    } else {
+        Remove-Item Env:\MELONDS_NSML_INPUT_RECORD_FILE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_INPUT_RECORD_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_INPUT_RECORD_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_INPUT_RECORD_INSTANCE -ErrorAction SilentlyContinue
+    }
     if ($NoFrameLimit) {
         $env:MELONDS_NSML_DISABLE_FRAME_LIMIT = "1"
     } else {
@@ -3412,6 +3463,11 @@ function Start-MelonLANProcess {
         "remoteInputTimeoutFatal=$($env:MELONDS_NSML_REMOTE_INPUT_TIMEOUT_FATAL)"
         "inputNetplayTraceSwitch=$InputNetplayTrace"
         "inputNetplayTraceEnv=$($env:MELONDS_NSML_INPUT_NETPLAY_TRACE)"
+        "inputRecordSwitch=$RecordInput"
+        "inputRecordFile=$($env:MELONDS_NSML_INPUT_RECORD_FILE)"
+        "inputRecordStartFrame=$($env:MELONDS_NSML_INPUT_RECORD_START_FRAME)"
+        "inputRecordEndFrame=$($env:MELONDS_NSML_INPUT_RECORD_END_FRAME)"
+        "inputRecordInstance=$($env:MELONDS_NSML_INPUT_RECORD_INSTANCE)"
         "packetBridgeJitHelperPatchSwitch=$PacketBridgeJitHelperPatch"
         "packetBridgeJitHelperPatchEnv=$($env:MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH)"
         "packetBridgeJitHelperPatchFrameEnv=$($env:MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH_FRAME)"

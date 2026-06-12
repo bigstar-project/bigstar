@@ -1,5 +1,34 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Current pipe-course camera Y investigation - 2026-06-12
+
+- User-reported issue: pipe course only, after wall-kicking upward and making the camera move up, descending does not fully bring the camera back down.
+- Follow-up: the issue appears to reproduce only after rematch, i.e. on game 2 or later, not on the first MvL game.
+- User capture `logs/pipe-camera-repro-2g` reproduced the bug on game 2. The captured `recorded-inputs/host.inputs` was converted into a role-aware replay with common bootstrap input and host-only post-start movement for automated CSV verification.
+- Root cause found: `MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD` cleared `0x020CA880` only in game 1 because `ClearMvlCameraInitHoldApplied[instance]` stayed true across the auto-restart checkpoint restore. On game 2, `cameraDbgCA880` stayed `0x08`, and `stageCameraPositionY` stayed high after Mario landed.
+- Fix: auto-restart startup hook reset now clears `ClearMvlCameraInitHoldApplied[instance]`, and auto-restart frame rebasing also rebases the camera-init-hold clear start/end frames.
+  - Before fix replay: in `logs/codex-pipe-camera-repro2g-before-fix-trace2`, frame 4900-5400 stayed `cameraDbgCA880=0x08` and `stageCameraPositionY=0x000C8000` after Mario returned to `playerActor0Y=0xffe80000`.
+  - After fix replay: in `logs/codex-pipe-camera-repro2g-after-fix-trace-pass`, the host clears `0x020CA880` again at frame 3573 on game 2 (`old=0x08 value=0x00`), frame 4900-5400 stays `cameraDbgCA880=0x00`, and `stageCameraPositionY` settles lower at `0x00088000` for the same landing state.
+- Current finding: the visible Y camera reported by the symptom is most likely the StageCamera object fields (`stageCameraTargetY` / `stageCameraPositionY`), not the global `Stage::cameraY[player]` slots.
+  - In `logs/codex-pipe-camera-clearhold-extended-20260612`, `Stage::cameraY[0/1]` stayed fixed at `0x000E0000` and height stayed `0x000C0000`.
+  - In the same run, `stageCameraPositionY` changed independently. Host/local player 0 reached `0x000F8000` and stayed there through frame 3600, while client/local player 1 returned to `0x00000000`.
+  - That run used stage 3 (`mvlSceneSettings=0x00B7FF00`), `ClearMvlCameraInitHold`, input netplay, JIT, no draw/audio, and extended game-state trace.
+- `MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD` still behaves as intended under normal GUI/manual-peer conditions:
+  - `logs/codex-pipe-camera-clearhold-extended-20260612` shows `0x020CA880` cleared at frame 859 (`old=0x08 value=0x00`).
+  - After that, `cameraDbgCA880` only showed `0x10` then `0x00`; the old init-hold bit `0x08` did not reappear in this trace.
+- Reproduction capture support added: melonDS can now write the effective per-frame input stream to a replay-compatible `.inputs` file when `MELONDS_NSML_INPUT_RECORD_FILE` is set.
+  - Use `scripts/run-nsmb-mvl-manual-local.ps1 -RecordInput` for local repro capture. It starts both host/client windows and writes `recorded-inputs\host.inputs` / `recorded-inputs\client.inputs` under the log directory by default.
+  - `manual-local` now enables JIT by default for playable capture speed. Use `-NoJit` only for a deterministic comparison run where speed is not important.
+  - `manual-local` no longer enables the input-netplay start barrier by default. The previous default could deadlock both peers after start-ready exchange while both waited for remote input frame 840.
+  - `scripts/run-nsmb-mvl-manual-peer.ps1` also exposes `-RecordInput`, but it is only for an actual paired peer run. Do not use it as the primary one-PC repro recorder because peer/start synchronization can look like a freeze when only one side is running.
+  - The recorder runs after `ApplyInputScript`, so the output includes the startup/bootstrap input plus the user's manual controls. The resulting file can be passed back to `-InputScript` for replay.
+  - Recording now canonicalizes to the DS button mask's low 12 bits and batches file flushes, avoiding per-frame disk flushes from unrelated key-mask bit changes during manual input.
+- Reproduction note: the earlier automated inputs did not reproduce the exact wall-kick-up-then-descend path. The user capture in `logs/pipe-camera-repro-2g` is the current repro source for this bug.
+- Failed/invalid check: `logs/codex-pipe-camera-hostonly-extended-20260612` timed out because the host-only input path made the host wait for a remote start-ready peer after the client exited; the leftover melonDS process was stopped. Treat that log as invalid for camera behavior.
+- Current blocker: none for the identified rematch camera-init-hold bug. Remaining manual check is to play the pipe course rematch normally and confirm the visible camera now feels correct after wall-kick descent.
+- Next action: if manual play still shows a residual offset, capture another `-RecordInput` run after this fix and compare `stageCameraPositionY` against the now-cleared `cameraDbgCA880=0x00` path to separate normal player-height camera offset from a new camera latch.
+- Verification: `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passed after the rematch camera fix; `.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 ... -InputScript logs\pipe-camera-repro-2g\recorded-inputs\combined-replay-bootstrap-host.inputs ... -GameStateTraceExtended -ClientPacketBridgeForceGameLocalPlayerID 0` passed for `logs/codex-pipe-camera-repro2g-after-fix-trace-pass`; earlier verification includes `.\scripts\run-nsmb-mvl-split-local-input-smoke.ps1 ... -MvlStage 3 ... -GameStateTraceInterval 10` for `logs/codex-pipe-camera-y-trace-20260612`, `.\scripts\run-nsmb-mvl-lan-route-smoke.ps1 ... -MvlStage 3 -ClearMvlCameraInitHold -GameStateTraceExtended` for `logs/codex-pipe-camera-clearhold-extended-20260612`, input recording build/replay smokes, JIT-default manual-local smoke, and `logs/codex-manual-local-start-fixed`.
+
 ## Current desync diagnostics - 2026-06-10
 
 - User-reported issue: rollback disabled matches can sometimes diverge between host and client.
@@ -427,10 +456,10 @@ melonDSデフォルト相当のsoftware rendererで比較する場合:
 同一PCで2窓起動する場合:
 
 ```powershell
-.\scripts\run-nsmb-mvl-manual-local.ps1 -LowDelayWan -SoftwareRenderer -AllowJit
+.\scripts\run-nsmb-mvl-manual-local.ps1 -LowDelayWan -SoftwareRenderer
 ```
 
-`run-nsmb-mvl-manual-local.ps1` は `-AllowJit` を明示したときだけJIT有効。`run-nsmb-mvl-manual-peer.ps1` は逆に、手動/LAN実用検証の速度優先でデフォルトJIT有効、`-NoJit` で無効化する。
+`run-nsmb-mvl-manual-local.ps1` と `run-nsmb-mvl-manual-peer.ps1` は、手動/LAN実用検証の速度優先でデフォルトJIT有効。JITなしで比較する場合だけ `-NoJit` を付ける。
 
 ## 検証コマンド
 
@@ -452,7 +481,7 @@ Remove-Item Env:\MELONDS_NSML_SWAPBUFFERS_INTERVAL -ErrorAction SilentlyContinue
 
 - 通常LocalMP baseline: `logs\codex-camera-original-localmp-us-probe1` / `logs\codex-camera-original-localmp-dbgfields`。Luigi右移動時の `playerActor1X - stageCameraGlobalX1` は約 `0x60FFF`。
 - direct entry + camera init hold clear: `logs\codex-camera-clear-init-hold-hook-screens`。Luigi右移動時の `playerActor1X - stageCameraGlobalX1` は約 `0x60FFF` へ戻る。
-- `scripts\run-nsmb-mvl-manual-local.ps1 -Frames 1200 -LowDelayWan -AllowJit` で、手動local wrapperから `ClearMvlCameraInitHold` がhost/client両方に渡ることを確認。
+- `scripts\run-nsmb-mvl-manual-local.ps1 -Frames 1200 -LowDelayWan` で、手動local wrapperから `ClearMvlCameraInitHold` がhost/client両方に渡ることを確認。
 - `-CheckHostClientGameplaySync` 失敗調査:
   - 直近の frame 880/1280 付近の失敗は、検証コマンド側で `PacketBridgeStartFrame` / `PacketBridgeJitHelperPatch` などの必須フラグを落としていたために発生していた。正しい低遅延入力同期フラグでは `tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs` / 2200 frames がpass。
   - `tests\nsmb_us_direct_mvl_both_different.inputs` / 3600 frames では、player座標、スター、moving hazard、object数、入力状態などのゲームプレイ項目は全行一致したが、`netPacketTick` だけ frame 2100/2560 で一時的に差が出ていた。
