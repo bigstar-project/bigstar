@@ -109,7 +109,7 @@
 - 検証: `logs/codex-ruleai-safe-revert-3300-20260613` は stage 0 / seed `0x2f52869f` / 3300F / software renderer / screenshot 300F間隔でpass。host/clientともPNG 11枚を生成し、client代表 `inst0_frame003300.png` は草原ステージ画面として目視確認済み。closed-loop評価では client `deathTransitions=0`、`aliveRows=82/84`、`bigStarDistance.approachDelta=469225177088`。
 - 残課題: 同ログのRuleAI監査では client `blockedInputRows=69`、`stuckWindows=1` が残る。frame 1290-1440付近でplayer1がブロック地形/ラップ端近辺に詰まり、`wallLeft=1/wallRight=1` の両壁扱いで左入力を続ける。両壁を単純に無視して進ませる実験ではスター取得は出たがGoomba接触死亡が増えたため不採用。次は地形スタック脱出とGoomba回避を分けて直す。
 - 完了: RuleAI監査に `oscillationWindows` を追加した。左右入力を切り替えても狭い座標範囲に留まる振動スタックを検出する。`logs/codex-ruleai-wallprobe-3300-20260613` の試作では `stuckWindows=0` になったが、スクショではブロック近辺に留まり、監査v2で `oscillationWindows=11` を検出したため採用しなかった。
-- 調査結果: frame 1500のSVGでは、selected playerの `center/feet/left/rightFeet` が itemBox tile `0x019 behavior=0x00080002` と重なっており、単純な左右反転や両壁無視ではなく、ブロック/アイテム箱地形に食い込んだ状態の脱出またはブロック叩き判断が必要。hazard検知範囲拡大と近距離踏みモードも試したが、Goomba接触死が増えたため不採用。
+- 調査結果: frame 1500のSVGでは、selected playerの `center/feet/left/rightFeet` が itemBox tile `0x019 behavior=0x00080002` と重なっており、単純な左右反転や両壁無視ではなく、ブロック/アイテム箱地形に食い込んだ状態の脱出またはブロック叩き判断が必要。hazard検知範囲拡大、近距離踏みモード、tileProbe center/feet solid時のbodyEscapeも試したが、Goomba接触死または同地点スタック継続が出たため不採用。
 
 ## AI Play Log
 
