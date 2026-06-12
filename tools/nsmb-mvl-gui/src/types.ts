@@ -1,6 +1,7 @@
 import type { CourseMode, Lives, Role } from './bindings';
 
 export type {
+  AiArtifact,
   BridgeDiagnostics,
   CourseMode,
   Defaults,
@@ -11,7 +12,11 @@ export type {
   LaunchResponse,
   Lives,
   PreflightResponse,
+  ReadAiTextFileRequest,
+  ReadAiTextFileResponse,
   Role,
+  RunAiToolRequest,
+  RunAiToolResponse,
   SaveRomPathsRequest,
   SessionStatus,
 } from './bindings';

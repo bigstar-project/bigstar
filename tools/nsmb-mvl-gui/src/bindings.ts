@@ -4,6 +4,9 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
+	listAiArtifacts: () => typedError<AiArtifact[], string>(__TAURI_INVOKE("list_ai_artifacts")),
+	readAiTextFile: (request: ReadAiTextFileRequest) => typedError<ReadAiTextFileResponse, string>(__TAURI_INVOKE("read_ai_text_file", { request })),
+	runAiTool: (request: RunAiToolRequest) => typedError<RunAiToolResponse, string>(__TAURI_INVOKE("run_ai_tool", { request })),
 	getDefaults: () => typedError<Defaults, string>(__TAURI_INVOKE("get_defaults")),
 	saveRomPaths: (request: SaveRomPathsRequest) => typedError<null, string>(__TAURI_INVOKE("save_rom_paths", { request })),
 	selectRomFile: (currentPath: string) => typedError<string | null, string>(__TAURI_INVOKE("select_rom_file", { currentPath })),
@@ -19,6 +22,13 @@ export const commands = {
 };
 
 /* Types */
+export type AiArtifact = {
+	path: string,
+	kind: string,
+	bytes: number | null,
+	modified_unix_secs: number | null,
+};
+
 export type BridgeDiagnostics = {
 	role: string | null,
 	phase: string | null,
@@ -104,7 +114,52 @@ export type PreflightResponse = {
 	bridge_smoke: string,
 };
 
+export type ReadAiTextFileRequest = {
+	path: string,
+};
+
+export type ReadAiTextFileResponse = {
+	path: string,
+	text: string,
+};
+
 export type Role = "host" | "client";
+
+export type RunAiToolRequest = {
+	task: string,
+	input_path: string | null,
+	output_path: string | null,
+	session_path: string | null,
+	dataset_path: string | null,
+	model_path: string | null,
+	runtime_model_path: string | null,
+	log_dir: string | null,
+	scenario: string | null,
+	policy: string | null,
+	seed: string | null,
+	label_source: string | null,
+	player: number | null,
+	frame: number | null,
+	frames: number | null,
+	epochs: number | null,
+	threshold: number | null,
+	max_objects: number | null,
+	dry_run: boolean | null,
+	split_by_recording: boolean | null,
+	allow_jit: boolean | null,
+	dual_window: boolean | null,
+	no_packet_capture: boolean | null,
+	scan_frames: boolean | null,
+};
+
+export type RunAiToolResponse = {
+	cwd: string,
+	command_line: string,
+	exit_code: number | null,
+	stdout: string,
+	stderr: string,
+	output_path: string | null,
+};
 
 export type SaveRomPathsRequest = {
 	base_rom_path: string,

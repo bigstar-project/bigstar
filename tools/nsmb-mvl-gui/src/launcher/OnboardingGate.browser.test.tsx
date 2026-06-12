@@ -14,6 +14,7 @@ describe('初回セットアップゲート', () => {
           openMelondsInputConfig,
           selectBaseRomAndPrepare,
         }}
+        activeView="battle"
         activityStatus={null}
         form={{ ...initialForm, baseRomPath: '' }}
         onboarding={{
@@ -22,6 +23,7 @@ describe('初回セットアップゲート', () => {
           romGenerationBusy: false,
           romsPrepared: false,
         }}
+        onOpenAi={vi.fn()}
       />,
     );
 
@@ -46,6 +48,7 @@ describe('初回セットアップゲート', () => {
           openMelondsInputConfig,
           selectBaseRomAndPrepare: vi.fn(async () => {}),
         }}
+        activeView="battle"
         activityStatus={{ kind: 'ok', text: '共通 ROM の準備が完了しました' }}
         form={{ ...initialForm, baseRomPath: 'C:\\roms\\base.nds' }}
         onboarding={{
@@ -54,6 +57,7 @@ describe('初回セットアップゲート', () => {
           romGenerationBusy: false,
           romsPrepared: true,
         }}
+        onOpenAi={vi.fn()}
       />,
     );
 
@@ -72,6 +76,7 @@ describe('初回セットアップゲート', () => {
           openMelondsInputConfig: vi.fn(async () => {}),
           selectBaseRomAndPrepare: vi.fn(async () => {}),
         }}
+        activeView="battle"
         activityStatus={null}
         form={initialForm}
         onboarding={{
@@ -80,11 +85,39 @@ describe('初回セットアップゲート', () => {
           romGenerationBusy: false,
           romsPrepared: true,
         }}
+        onOpenAi={vi.fn()}
       />,
     );
 
     await expect
       .element(screen.getByRole('heading', { name: '初回セットアップ' }))
       .not.toBeInTheDocument();
+  });
+
+  test('未セットアップでもAI開発へ移動できる', async () => {
+    const onOpenAi = vi.fn();
+
+    const screen = await render(
+      <OnboardingGate
+        actions={{
+          openMelondsInputConfig: vi.fn(async () => {}),
+          selectBaseRomAndPrepare: vi.fn(async () => {}),
+        }}
+        activeView="battle"
+        activityStatus={null}
+        form={initialForm}
+        onboarding={{
+          inputConfigOpened: false,
+          loaded: true,
+          romGenerationBusy: false,
+          romsPrepared: false,
+        }}
+        onOpenAi={onOpenAi}
+      />,
+    );
+
+    await screen.getByRole('button', { name: 'AI開発を開く' }).click();
+
+    expect(onOpenAi).toHaveBeenCalledTimes(1);
   });
 });

@@ -68,13 +68,13 @@ function updateButtonClass(updateStatus: UpdateStatus) {
 
 function viewTitle(view: View) {
   if (view === 'battle') return '対戦';
-  if (view === 'ai') return 'AIログ';
+  if (view === 'ai') return 'AI';
   return '設定';
 }
 
 function viewDescription(view: View) {
   if (view === 'battle') return 'オンラインでライバルと対戦しよう！';
-  if (view === 'ai') return '人間プレイとAIログを確認しましょう';
+  if (view === 'ai') return 'AI開発コンソール';
   return 'オンライン対戦の環境を整えましょう';
 }
 
@@ -297,7 +297,7 @@ export function LauncherShell({
                   </span>
                 </Tabs.Trigger>
                 <Tabs.Trigger
-                  aria-label="AIログ"
+                  aria-label="AI"
                   className={css({
                     alignItems: 'center',
                     borderColor: 'transparent',
@@ -346,7 +346,7 @@ export function LauncherShell({
                       },
                     })}
                   >
-                    AIログ
+                    AI
                   </span>
                 </Tabs.Trigger>
                 <Tabs.Trigger

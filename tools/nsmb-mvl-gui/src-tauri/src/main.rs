@@ -1,5 +1,6 @@
 #![cfg_attr(all(not(debug_assertions), windows), windows_subsystem = "windows")]
 
+mod ai_workbench;
 mod commands;
 mod config;
 mod models;
@@ -20,6 +21,9 @@ use tauri_specta::{collect_commands, Builder as SpectaBuilder};
 
 fn specta_builder() -> SpectaBuilder<tauri::Wry> {
     SpectaBuilder::<tauri::Wry>::new().commands(collect_commands![
+        ai_workbench::list_ai_artifacts,
+        ai_workbench::read_ai_text_file,
+        ai_workbench::run_ai_tool,
         commands::get_defaults,
         commands::save_rom_paths,
         commands::select_rom_file,

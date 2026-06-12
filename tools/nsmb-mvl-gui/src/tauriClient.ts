@@ -1,11 +1,16 @@
 import { commands } from './bindings';
 import type {
+  AiArtifact,
   Defaults,
   GenerateRomRequest,
   GenerateRomResponse,
   LaunchRequest,
   LaunchResponse,
   PreflightResponse,
+  ReadAiTextFileRequest,
+  ReadAiTextFileResponse,
+  RunAiToolRequest,
+  RunAiToolResponse,
   SaveRomPathsRequest,
   SessionStatus,
 } from './types';
@@ -34,6 +39,89 @@ const previewDefaults: Defaults = {
   input_config_opened_once: false,
   port: 8165,
 };
+
+const previewPlaylogLine = JSON.stringify({
+  schema: 'nsmb_mvl_ai_play_log_v1',
+  frame: 900,
+  hash: '0x12345678',
+  inputs: {
+    player0: { held: 0x810 },
+    player1: { held: 0x20 },
+    appliedPlayer1: { held: 0x20, valid: true },
+  },
+  players: [
+    {
+      found: 1,
+      pos: { x: 409600, y: 819200, z: 0 },
+      powerup: 0,
+      dead: 0,
+      battleStars: 0,
+      coins: 0,
+      visualState: {
+        powerup: { name: 'small' },
+        inventoryPowerup: { name: 'none' },
+      },
+      tileProbe: {
+        found: 1,
+        summary: { effectiveHoleAhead: 0, wallAhead: 0 },
+        samples: [],
+      },
+    },
+    {
+      found: 1,
+      pos: { x: 450560, y: 819200, z: 0 },
+      powerup: 2,
+      dead: 0,
+      battleStars: 1,
+      coins: 7,
+      visualState: {
+        powerup: { name: 'fire' },
+        inventoryPowerup: { name: 'none' },
+      },
+      tileProbe: {
+        found: 1,
+        summary: { effectiveHoleAhead: 1, wallAhead: 0 },
+        samples: [],
+      },
+    },
+  ],
+  objectSummary: { active: 3 },
+  visualSummary: {
+    categoryCounts: { coin: 1, player: 2, big_star_actor: 1 },
+    visibleCamera0: 3,
+    visibleCamera1: 3,
+  },
+  specialObjects: {
+    fireballs: {
+      active: 1,
+      activeSlots: 1,
+      slots: [
+        {
+          index: 0,
+          kindName: 'player1',
+          ownerCandidate: 1,
+          ownerConfidence: 100,
+          ownerVerified: 1,
+          pos: { x: 462848, y: 811008, z: 0 },
+        },
+      ],
+    },
+  },
+  objects: [
+    {
+      category: 'big_star_actor',
+      objectId: '0x00A1',
+      settings: '0x00000000',
+      pos: { x: 475136, y: 790528, z: 0 },
+    },
+    {
+      category: 'coin',
+      objectId: '0x0042',
+      settings: '0x00000000',
+      pos: { x: 458752, y: 806912, z: 0 },
+    },
+  ],
+});
 
 function isTauriRuntime() {
   return '__TAURI_INTERNALS__' in window;
@@ -146,4 +234,51 @@ export function openMelondsInputConfig() {
     return Promise.resolve(3002);
   }
   return unwrapCommand(commands.openMelondsInputConfig());
+}
+
+export function listAiArtifacts() {
+  if (!isTauriRuntime()) {
+    return Promise.resolve<AiArtifact[]>([
+      {
+        path: 'preview/logs/client/ai-playlog.jsonl',
+        kind: 'playlog',
+        bytes: previewPlaylogLine.length,
+        modified_unix_secs: Date.now() / 1000,
+      },
+      {
+        path: 'preview/logs/client/recording.json',
+        kind: 'recording',
+        bytes: 512,
+        modified_unix_secs: Date.now() / 1000 - 60,
+      },
+    ]);
+  }
+  return unwrapCommand(commands.listAiArtifacts());
+}
+
+export function readAiTextFile(request: ReadAiTextFileRequest) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve<ReadAiTextFileResponse>({
+      path: request.path,
+      text: `${previewPlaylogLine}\n${previewPlaylogLine.replace('900', '930')}\n`,
+    });
+  }
+  return unwrapCommand(commands.readAiTextFile(request));
+}
+
+export function runAiTool(request: RunAiToolRequest) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve<RunAiToolResponse>({
+      cwd: 'preview',
+      command_line: `preview ${request.task}`,
+      exit_code: 0,
+      stdout:
+        request.task === 'render_svg'
+          ? `rendered ${request.output_path ?? 'preview.svg'}`
+          : `preview ${request.task} completed`,
+      stderr: '',
+      output_path: request.output_path,
+    });
+  }
+  return unwrapCommand(commands.runAiTool(request));
 }

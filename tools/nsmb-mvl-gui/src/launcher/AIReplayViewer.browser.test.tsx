@@ -105,6 +105,35 @@ describe('AIログビューア', () => {
       .toBeVisible();
   });
 
+  test('複数行のai-playlog JSONLを読み込める', async () => {
+    const screen = await render(
+      <Tabs.Root value="ai">
+        <AIReplayViewer />
+      </Tabs.Root>,
+    );
+
+    const input =
+      document.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(input).not.toBeNull();
+    const secondLine = playlogLine.replace('"frame":900', '"frame":930');
+    const files = new DataTransfer();
+    files.items.add(
+      new File([`${playlogLine}\n${secondLine}\n`], 'ai-playlog.jsonl', {
+        type: 'application/jsonl',
+      }),
+    );
+    Object.defineProperty(input, 'files', {
+      configurable: true,
+      value: files.files,
+    });
+    input?.dispatchEvent(new Event('change', { bubbles: true }));
+
+    await expect.element(screen.getByText(/2 frames/)).toBeVisible();
+    await expect
+      .element(screen.getByText(/frame 900 \/ index 0/))
+      .toBeVisible();
+  });
+
   test('recording manifestのイベントsampleを表示する', async () => {
     const screen = await render(
       <Tabs.Root value="ai">
@@ -133,5 +162,17 @@ describe('AIログビューア', () => {
       .element(screen.getByText(/P1 block leftBody tile 0x47 storage 7/))
       .toBeVisible();
     await expect.element(screen.getByText(/manifest human/)).toBeVisible();
+  });
+
+  test('Workbenchのpreview成果物を表示する', async () => {
+    const screen = await render(
+      <Tabs.Root value="ai">
+        <AIReplayViewer />
+      </Tabs.Root>,
+    );
+
+    await expect.element(screen.getByText('AI Workbench')).toBeVisible();
+    await expect.element(screen.getByText('AI成果物')).toBeVisible();
+    await expect.element(screen.getByText(/playlog \//)).toBeVisible();
   });
 });

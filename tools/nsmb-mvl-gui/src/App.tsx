@@ -7,10 +7,11 @@ import { useLauncherController } from './launcher/useLauncherController';
 
 export function App() {
   const launcher = useLauncherController();
-  const onboardingOpen =
+  const onboardingMissing =
     launcher.onboarding.loaded &&
     (!launcher.onboarding.romsPrepared ||
       !launcher.onboarding.inputConfigOpened);
+  const onboardingOpen = onboardingMissing && launcher.activeView === 'battle';
 
   return (
     <>
@@ -47,9 +48,11 @@ export function App() {
       </div>
       <OnboardingGate
         actions={launcher.actions}
+        activeView={launcher.activeView}
         activityStatus={launcher.activityStatus}
         form={launcher.form}
         onboarding={launcher.onboarding}
+        onOpenAi={() => launcher.changeView('ai')}
       />
     </>
   );

@@ -1,12 +1,19 @@
 import {
+  ArrowClockwise,
   Crosshair,
+  Database,
+  FileText,
   FilmStrip,
   GameController,
+  Play,
+  TerminalWindow,
   UploadSimple,
 } from '@phosphor-icons/react';
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { css } from 'styled-system/css';
-import { Button, Tabs } from '../components/ui';
+import { Button, Input, Tabs } from '../components/ui';
+import { listAiArtifacts, readAiTextFile, runAiTool } from '../tauriClient';
+import type { AiArtifact, RunAiToolRequest, RunAiToolResponse } from '../types';
 import { LauncherCard, SmallInfoCard } from './LauncherCards';
 
 type Vec3 = { x?: number | string; y?: number | string; z?: number | string };
@@ -53,8 +60,17 @@ type ReplayFrame = {
   specialObjects?: {
     fireballs?: {
       active?: number | string;
+      activeSlots?: number | string;
       handler?: string;
       words?: Array<number | string>;
+      slots?: Array<{
+        index?: number | string;
+        kindName?: string;
+        ownerCandidate?: number | string;
+        ownerConfidence?: number | string;
+        ownerVerified?: number | string;
+        pos?: Vec3;
+      }>;
     };
     projectiles?: {
       handler?: string;
@@ -90,6 +106,124 @@ type ParsedReplay = {
   eventSamples: EventSamples;
   manifestLabel?: string;
 };
+type AiTaskId =
+  | 'inspect_playlog'
+  | 'render_svg'
+  | 'human_recording'
+  | 'recording_postcommands'
+  | 'build_dataset'
+  | 'train_imitation'
+  | 'export_runtime_model'
+  | 'closed_loop_eval'
+  | 'recording_replay';
+type WorkbenchForm = {
+  inputPath: string;
+  outputPath: string;
+  sessionPath: string;
+  datasetPath: string;
+  modelPath: string;
+  runtimeModelPath: string;
+  logDir: string;
+  scenario: string;
+  policy: 'imitation' | 'rule' | 'neutral';
+  seed: string;
+  labelSource: 'player' | 'applied' | 'console' | 'auto';
+  player: 0 | 1;
+  frame: number;
+  frames: number;
+  epochs: number;
+  threshold: number;
+  maxObjects: number;
+  dryRun: boolean;
+  splitByRecording: boolean;
+  allowJit: boolean;
+  dualWindow: boolean;
+  noPacketCapture: boolean;
+  scanFrames: boolean;
+};
+
+const initialWorkbenchForm: WorkbenchForm = {
+  inputPath: '',
+  outputPath: '',
+  sessionPath: '',
+  datasetPath: '',
+  modelPath: '',
+  runtimeModelPath: '',
+  logDir: '',
+  scenario: 'free-play',
+  policy: 'imitation',
+  seed: '',
+  labelSource: 'player',
+  player: 1,
+  frame: 0,
+  frames: 2600,
+  epochs: 500,
+  threshold: 0.5,
+  maxObjects: 96,
+  dryRun: false,
+  splitByRecording: true,
+  allowJit: true,
+  dualWindow: false,
+  noPacketCapture: true,
+  scanFrames: true,
+};
+
+const aiTasks: Array<{
+  id: AiTaskId;
+  label: string;
+  inputLabel: string;
+  outputLabel?: string;
+}> = [
+  {
+    id: 'inspect_playlog',
+    label: 'ログ要約',
+    inputLabel: 'ai-playlog.jsonl',
+  },
+  {
+    id: 'render_svg',
+    label: 'SVG生成',
+    inputLabel: 'ai-playlog.jsonl',
+    outputLabel: 'frame.svg',
+  },
+  {
+    id: 'human_recording',
+    label: '手動ログ収集',
+    inputLabel: '不要',
+  },
+  {
+    id: 'recording_postcommands',
+    label: '録画後処理',
+    inputLabel: 'recording-session.json',
+  },
+  {
+    id: 'build_dataset',
+    label: 'dataset作成',
+    inputLabel: 'recording/index/playlog',
+    outputLabel: 'ai-dataset-player1.csv',
+  },
+  {
+    id: 'train_imitation',
+    label: '模倣学習',
+    inputLabel: 'dataset.csv',
+    outputLabel: 'model.npz',
+  },
+  {
+    id: 'export_runtime_model',
+    label: 'runtime model出力',
+    inputLabel: 'model.npz',
+    outputLabel: 'runtime-model.json',
+  },
+  {
+    id: 'closed_loop_eval',
+    label: '閉ループ評価',
+    inputLabel: 'model.json 任意',
+  },
+  {
+    id: 'recording_replay',
+    label: 'replay検証',
+    inputLabel: 'recording.json',
+  },
+];
 
 const buttonBits: Array<[string, number]> = [
   ['A', 0],
@@ -119,27 +253,39 @@ function parseReplayText(text: string): ParsedReplay {
   const trimmed = text.trim();
   if (!trimmed) return { eventSamples: {}, frames: [] };
   if (trimmed.startsWith('{')) {
-    const parsed = JSON.parse(trimmed) as {
-      frames?: ReplayFrame[];
-      kind?: string;
-      labelSource?: string;
-      quality?: { status?: string };
-      summary?: { eventSamples?: EventSamples };
-    };
-    if (Array.isArray(parsed.frames)) {
-      return { eventSamples: {}, frames: parsed.frames };
-    }
-    if (parsed.summary?.eventSamples) {
-      const labelParts = [
-        parsed.kind,
-        parsed.labelSource,
-        parsed.quality?.status,
-      ].filter(Boolean);
-      return {
-        eventSamples: parsed.summary.eventSamples,
-        frames: [],
-        manifestLabel: labelParts.join(' / '),
+    try {
+      const parsed = JSON.parse(trimmed) as {
+        frame?: number | string;
+        frames?: ReplayFrame[];
+        kind?: string;
+        labelSource?: string;
+        quality?: { status?: string };
+        schema?: string;
+        summary?: { eventSamples?: EventSamples };
       };
+      if (Array.isArray(parsed.frames)) {
+        return { eventSamples: {}, frames: parsed.frames };
+      }
+      if (parsed.summary?.eventSamples) {
+        const labelParts = [
+          parsed.kind,
+          parsed.labelSource,
+          parsed.quality?.status,
+        ].filter(Boolean);
+        return {
+          eventSamples: parsed.summary.eventSamples,
+          frames: [],
+          manifestLabel: labelParts.join(' / '),
+        };
+      }
+      if (
+        parsed.frame !== undefined ||
+        parsed.schema === 'nsmb_mvl_ai_play_log_v1'
+      ) {
+        return { eventSamples: {}, frames: [parsed as ReplayFrame] };
+      }
+    } catch {
+      // Multi-line JSONL also starts with "{". Fall through to line-by-line parsing.
     }
   }
   return {
@@ -168,6 +314,65 @@ function hexText(value: unknown) {
   const n = numeric(value, Number.NaN);
   if (Number.isNaN(n)) return '-';
   return `0x${n.toString(16).toUpperCase()}`;
+}
+
+function basename(path: string) {
+  return path.split(/[\\/]/).pop() || path;
+}
+
+function formatBytes(value: number | null | undefined) {
+  const bytes = value ?? 0;
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${Math.round(bytes)} B`;
+}
+
+function artifactTone(kind: string) {
+  if (kind === 'playlog' || kind === 'recording') return 'green';
+  if (kind === 'svg' || kind === 'closed_loop_eval') return 'slate';
+  return 'slate';
+}
+
+function numberOrNull(value: number) {
+  return Number.isFinite(value) ? value : null;
+}
+
+function buildAiToolRequest(
+  task: AiTaskId,
+  form: WorkbenchForm,
+): RunAiToolRequest {
+  const inputPath =
+    task === 'train_imitation' && !form.inputPath.trim()
+      ? form.datasetPath
+      : task === 'export_runtime_model' && !form.inputPath.trim()
+        ? form.modelPath
+        : form.inputPath;
+  return {
+    task,
+    input_path: inputPath.trim() || null,
+    output_path: form.outputPath.trim() || null,
+    session_path: form.sessionPath.trim() || null,
+    dataset_path: form.datasetPath.trim() || null,
+    model_path: form.modelPath.trim() || null,
+    runtime_model_path: form.runtimeModelPath.trim() || null,
+    log_dir: form.logDir.trim() || null,
+    scenario: form.scenario.trim() || null,
+    policy: form.policy,
+    seed: form.seed.trim() || null,
+    label_source: form.labelSource,
+    player: form.player,
+    frame: numberOrNull(form.frame),
+    frames: numberOrNull(form.frames),
+    epochs: numberOrNull(form.epochs),
+    threshold: numberOrNull(form.threshold),
+    max_objects: numberOrNull(form.maxObjects),
+    dry_run: form.dryRun,
+    split_by_recording: form.splitByRecording,
+    allow_jit: form.allowJit,
+    dual_window: form.dualWindow,
+    no_packet_capture: form.noPacketCapture,
+    scan_frames: form.scanFrames,
+  };
 }
 
 function pos(entity?: { pos?: Vec3 }) {
@@ -280,6 +485,7 @@ function ReplayScene({
     opponentPos.y - selfPos.y,
   );
   const objects = (frame.objects ?? []).slice(0, 64);
+  const fireballSlots = frame.specialObjects?.fireballs?.slots ?? [];
 
   return (
     <svg
@@ -332,6 +538,38 @@ function ReplayScene({
           </g>
         );
       })}
+      {fireballSlots.map((slot, index) => {
+        const fireballPos = pos(slot);
+        const point = svgPoint(
+          fireballPos.x - selfPos.x,
+          fireballPos.y - selfPos.y,
+        );
+        const owner = numeric(slot.ownerCandidate, -1);
+        const color =
+          owner === 0 ? '#f87171' : owner === 1 ? '#60a5fa' : '#fb923c';
+        return (
+          <g key={`fireball-${slot.index ?? index}`}>
+            <circle
+              cx={point.x}
+              cy={point.y}
+              r="8"
+              fill={color}
+              stroke="#fed7aa"
+              strokeWidth="2"
+            />
+            <text
+              x={point.x + 10}
+              y={point.y + 4}
+              fill="#fed7aa"
+              fontSize="11"
+              fontWeight="700"
+            >
+              F{owner >= 0 ? owner : '?'}
+            </text>
+            <title>{`${slot.kindName ?? 'fireball'} owner=${owner} confidence=${numeric(slot.ownerConfidence)} verified=${numeric(slot.ownerVerified)}`}</title>
+          </g>
+        );
+      })}
       <circle cx={opponentPoint.x} cy={opponentPoint.y} r="12" fill="#60a5fa" />
       <text
         x={opponentPoint.x + 14}
@@ -351,12 +589,25 @@ function ReplayScene({
 }
 
 export function AIReplayViewer() {
+  const [artifacts, setArtifacts] = useState<AiArtifact[]>([]);
+  const [artifactsError, setArtifactsError] = useState<string | null>(null);
+  const [artifactsLoading, setArtifactsLoading] = useState(false);
   const [frames, setFrames] = useState<ReplayFrame[]>([]);
   const [eventSamples, setEventSamples] = useState<EventSamples>({});
   const [manifestLabel, setManifestLabel] = useState('');
   const [frameIndex, setFrameIndex] = useState(0);
   const [playerIndex, setPlayerIndex] = useState<0 | 1>(1);
   const [error, setError] = useState<string | null>(null);
+  const [pathInput, setPathInput] = useState('');
+  const [svgText, setSvgText] = useState('');
+  const [task, setTask] = useState<AiTaskId>('inspect_playlog');
+  const [workbenchForm, setWorkbenchForm] =
+    useState<WorkbenchForm>(initialWorkbenchForm);
+  const [commandRunning, setCommandRunning] = useState(false);
+  const [commandError, setCommandError] = useState<string | null>(null);
+  const [commandResult, setCommandResult] = useState<RunAiToolResponse | null>(
+    null,
+  );
   const frame = frames[Math.min(frameIndex, Math.max(0, frames.length - 1))];
   const previous = frames[Math.max(0, frameIndex - 1)];
   const events = useMemo(
@@ -379,35 +630,608 @@ export function AIReplayViewer() {
   );
   const categoryCounts = frame?.visualSummary?.categoryCounts ?? {};
   const fireballsActive = numeric(frame?.specialObjects?.fireballs?.active);
+  const fireballSlotCount = numeric(
+    frame?.specialObjects?.fireballs?.activeSlots,
+  );
+  const selectedTask = aiTasks.find((candidate) => candidate.id === task);
 
-  async function loadFile(file: File) {
+  const refreshArtifacts = useCallback(async () => {
+    setArtifactsLoading(true);
+    setArtifactsError(null);
     try {
-      const text = await file.text();
+      setArtifacts(await listAiArtifacts());
+    } catch (err) {
+      setArtifactsError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setArtifactsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshArtifacts();
+  }, [refreshArtifacts]);
+
+  function applyParsedReplay(parsed: ParsedReplay) {
+    const eventCount = Object.values(parsed.eventSamples).reduce(
+      (total, samples) => total + samples.length,
+      0,
+    );
+    setFrames(parsed.frames);
+    setEventSamples(parsed.eventSamples);
+    setManifestLabel(parsed.manifestLabel ?? '');
+    setFrameIndex(0);
+    setSvgText('');
+    setError(
+      parsed.frames.length || eventCount
+        ? null
+        : 'フレームまたはイベントが見つかりません',
+    );
+  }
+
+  async function loadText(text: string, label = '') {
+    try {
       const parsed = parseReplayText(text);
-      const eventCount = Object.values(parsed.eventSamples).reduce(
-        (total, samples) => total + samples.length,
-        0,
-      );
-      setFrames(parsed.frames);
-      setEventSamples(parsed.eventSamples);
-      setManifestLabel(parsed.manifestLabel ?? '');
-      setFrameIndex(0);
-      setError(
-        parsed.frames.length || eventCount
-          ? null
-          : 'フレームまたはイベントが見つかりません',
-      );
+      applyParsedReplay(parsed);
+      if (label) {
+        setPathInput(label);
+        setWorkbenchForm((current) => ({ ...current, inputPath: label }));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setFrames([]);
       setEventSamples({});
       setManifestLabel('');
+      setSvgText('');
+    }
+  }
+
+  async function loadFile(file: File) {
+    try {
+      const text = await file.text();
+      await loadText(text, file.name);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setFrames([]);
+      setEventSamples({});
+      setManifestLabel('');
+      setSvgText('');
+    }
+  }
+
+  async function loadPath(path: string) {
+    const trimmed = path.trim();
+    if (!trimmed) return;
+    try {
+      const response = await readAiTextFile({ path: trimmed });
+      if (trimmed.toLowerCase().endsWith('.svg')) {
+        setSvgText(response.text);
+        setError(null);
+        setPathInput(response.path);
+        setWorkbenchForm((current) => ({
+          ...current,
+          inputPath: response.path,
+        }));
+      } else {
+        await loadText(response.text, response.path);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function selectArtifact(artifact: AiArtifact) {
+    setPathInput(artifact.path);
+    setWorkbenchForm((current) => {
+      if (artifact.kind === 'session') {
+        return {
+          ...current,
+          sessionPath: artifact.path,
+          inputPath: artifact.path,
+        };
+      }
+      if (artifact.kind === 'dataset') {
+        return {
+          ...current,
+          datasetPath: artifact.path,
+          inputPath: artifact.path,
+        };
+      }
+      if (artifact.kind === 'model') {
+        return {
+          ...current,
+          modelPath: artifact.path,
+          inputPath: artifact.path,
+        };
+      }
+      if (artifact.kind === 'runtime_model') {
+        return {
+          ...current,
+          runtimeModelPath: artifact.path,
+          modelPath: artifact.path,
+        };
+      }
+      return { ...current, inputPath: artifact.path };
+    });
+  }
+
+  async function executeTask() {
+    setCommandRunning(true);
+    setCommandError(null);
+    setCommandResult(null);
+    try {
+      const result = await runAiTool(buildAiToolRequest(task, workbenchForm));
+      setCommandResult(result);
+      if (result.exit_code !== 0) {
+        setCommandError(`exit ${result.exit_code ?? 'unknown'}`);
+      }
+      if (task === 'render_svg' && result.output_path) {
+        const response = await readAiTextFile({ path: result.output_path });
+        setSvgText(response.text);
+        setPathInput(response.path);
+      }
+      await refreshArtifacts();
+    } catch (err) {
+      setCommandError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCommandRunning(false);
     }
   }
 
   return (
     <Tabs.Content value="ai">
       <div className={css({ display: 'grid', gap: '5' })}>
+        <div
+          className={css({
+            display: 'grid',
+            gap: '4',
+            gridTemplateColumns: 'minmax(0, 1fr) 420px',
+            '@media (max-width: 1120px)': { gridTemplateColumns: '1fr' },
+          })}
+        >
+          <LauncherCard
+            title="AI Workbench"
+            icon={<TerminalWindow size={24} weight="fill" />}
+            badge={
+              commandRunning ? 'running' : commandResult ? 'done' : undefined
+            }
+            badgeTone={commandError ? 'slate' : 'green'}
+          >
+            <div className={css({ display: 'grid', gap: '3' })}>
+              <div
+                className={css({
+                  display: 'grid',
+                  gap: '2',
+                  gridTemplateColumns: 'minmax(0, 1fr) auto auto',
+                  '@media (max-width: 840px)': { gridTemplateColumns: '1fr' },
+                })}
+              >
+                <Input
+                  aria-label="ログまたは成果物パス"
+                  value={pathInput}
+                  placeholder="logs\...\ai-playlog.jsonl / recording.json / frame.svg"
+                  onChange={(event) => {
+                    setPathInput(event.currentTarget.value);
+                    setWorkbenchForm((current) => ({
+                      ...current,
+                      inputPath: event.currentTarget.value,
+                    }));
+                  }}
+                />
+                <Button type="button" onClick={() => void loadPath(pathInput)}>
+                  <FileText size={18} weight="bold" />
+                  開く
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  loading={artifactsLoading}
+                  onClick={() => void refreshArtifacts()}
+                >
+                  <ArrowClockwise size={18} weight="bold" />
+                  更新
+                </Button>
+              </div>
+              <div
+                className={css({
+                  display: 'grid',
+                  gap: '3',
+                  gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                  '@media (max-width: 960px)': {
+                    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                  },
+                  '@media (max-width: 560px)': { gridTemplateColumns: '1fr' },
+                })}
+              >
+                <label
+                  className={css({ display: 'grid', gap: '1' })}
+                  htmlFor="ai-workbench-frame"
+                >
+                  <span
+                    className={css({
+                      color: 'fg.muted',
+                      fontWeight: 'bold',
+                      textStyle: 'xs',
+                    })}
+                  >
+                    タスク
+                  </span>
+                  <select
+                    value={task}
+                    className={css({
+                      bg: 'gray.surface.bg',
+                      borderColor: 'gray.surface.border',
+                      borderRadius: 'l1',
+                      borderWidth: '1px',
+                      color: 'fg.default',
+                      minH: '10',
+                      px: '3',
+                    })}
+                    onChange={(event) =>
+                      setTask(event.currentTarget.value as AiTaskId)
+                    }
+                  >
+                    {aiTasks.map((candidate) => (
+                      <option key={candidate.id} value={candidate.id}>
+                        {candidate.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label
+                  className={css({ display: 'grid', gap: '1' })}
+                  htmlFor="ai-workbench-player"
+                >
+                  <span
+                    className={css({
+                      color: 'fg.muted',
+                      fontWeight: 'bold',
+                      textStyle: 'xs',
+                    })}
+                  >
+                    player
+                  </span>
+                  <select
+                    id="ai-workbench-player"
+                    value={workbenchForm.player}
+                    className={css({
+                      bg: 'gray.surface.bg',
+                      borderColor: 'gray.surface.border',
+                      borderRadius: 'l1',
+                      borderWidth: '1px',
+                      color: 'fg.default',
+                      minH: '10',
+                      px: '3',
+                    })}
+                    onChange={(event) => {
+                      const value =
+                        Number(event.currentTarget.value) === 0 ? 0 : 1;
+                      setWorkbenchForm((current) => ({
+                        ...current,
+                        player: value,
+                      }));
+                      setPlayerIndex(value);
+                    }}
+                  >
+                    <option value={1}>Luigi / P1</option>
+                    <option value={0}>Mario / P0</option>
+                  </select>
+                </label>
+                <label
+                  className={css({ display: 'grid', gap: '1' })}
+                  htmlFor="ai-workbench-frame"
+                >
+                  <span
+                    className={css({
+                      color: 'fg.muted',
+                      fontWeight: 'bold',
+                      textStyle: 'xs',
+                    })}
+                  >
+                    frame
+                  </span>
+                  <Input
+                    id="ai-workbench-frame"
+                    type="number"
+                    value={workbenchForm.frame}
+                    onChange={(event) =>
+                      setWorkbenchForm((current) => ({
+                        ...current,
+                        frame: Number(event.currentTarget.value),
+                      }))
+                    }
+                  />
+                </label>
+                <label
+                  className={css({ display: 'grid', gap: '1' })}
+                  htmlFor="ai-workbench-frames"
+                >
+                  <span
+                    className={css({
+                      color: 'fg.muted',
+                      fontWeight: 'bold',
+                      textStyle: 'xs',
+                    })}
+                  >
+                    frames
+                  </span>
+                  <Input
+                    id="ai-workbench-frames"
+                    type="number"
+                    value={workbenchForm.frames}
+                    onChange={(event) =>
+                      setWorkbenchForm((current) => ({
+                        ...current,
+                        frames: Number(event.currentTarget.value),
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+              <div
+                className={css({
+                  display: 'grid',
+                  gap: '3',
+                  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                  '@media (max-width: 840px)': { gridTemplateColumns: '1fr' },
+                })}
+              >
+                <Input
+                  aria-label="出力パス"
+                  value={workbenchForm.outputPath}
+                  placeholder={selectedTask?.outputLabel ?? 'output path 任意'}
+                  onChange={(event) =>
+                    setWorkbenchForm((current) => ({
+                      ...current,
+                      outputPath: event.currentTarget.value,
+                    }))
+                  }
+                />
+                <Input
+                  aria-label="model path"
+                  value={workbenchForm.modelPath}
+                  placeholder="model.npz / runtime-model.json"
+                  onChange={(event) =>
+                    setWorkbenchForm((current) => ({
+                      ...current,
+                      modelPath: event.currentTarget.value,
+                    }))
+                  }
+                />
+                <Input
+                  aria-label="dataset path"
+                  value={workbenchForm.datasetPath}
+                  placeholder="ai-dataset-player1.csv"
+                  onChange={(event) =>
+                    setWorkbenchForm((current) => ({
+                      ...current,
+                      datasetPath: event.currentTarget.value,
+                    }))
+                  }
+                />
+                <Input
+                  aria-label="session path"
+                  value={workbenchForm.sessionPath}
+                  placeholder="recording-session.json"
+                  onChange={(event) =>
+                    setWorkbenchForm((current) => ({
+                      ...current,
+                      sessionPath: event.currentTarget.value,
+                    }))
+                  }
+                />
+                <Input
+                  aria-label="scenario"
+                  value={workbenchForm.scenario}
+                  placeholder="star-chase / item-box / fire / free-play"
+                  onChange={(event) =>
+                    setWorkbenchForm((current) => ({
+                      ...current,
+                      scenario: event.currentTarget.value,
+                    }))
+                  }
+                />
+                <Input
+                  aria-label="seed"
+                  value={workbenchForm.seed}
+                  placeholder="0x12345678"
+                  onChange={(event) =>
+                    setWorkbenchForm((current) => ({
+                      ...current,
+                      seed: event.currentTarget.value,
+                    }))
+                  }
+                />
+              </div>
+              <div
+                className={css({
+                  alignItems: 'center',
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '3',
+                })}
+              >
+                {[
+                  ['allowJit', 'JIT'],
+                  ['dryRun', 'dry-run'],
+                  ['splitByRecording', 'recording split'],
+                  ['noPacketCapture', 'no packet capture'],
+                  ['dualWindow', 'dual window'],
+                  ['scanFrames', 'scan frames'],
+                ].map(([key, label]) => (
+                  <label
+                    key={key}
+                    className={css({
+                      alignItems: 'center',
+                      color: 'fg.muted',
+                      display: 'inline-flex',
+                      fontWeight: 'bold',
+                      gap: '2',
+                      textStyle: 'sm',
+                    })}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={Boolean(
+                        workbenchForm[key as keyof WorkbenchForm],
+                      )}
+                      onChange={(event) =>
+                        setWorkbenchForm((current) => ({
+                          ...current,
+                          [key]: event.currentTarget.checked,
+                        }))
+                      }
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              <div
+                className={css({
+                  alignItems: 'center',
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '3',
+                })}
+              >
+                <Button
+                  type="button"
+                  loading={commandRunning}
+                  onClick={() => void executeTask()}
+                >
+                  <Play size={18} weight="bold" />
+                  実行
+                </Button>
+                <span
+                  className={css({
+                    color: 'fg.muted',
+                    fontWeight: 'bold',
+                    textStyle: 'sm',
+                  })}
+                >
+                  {selectedTask?.inputLabel}
+                </span>
+                {commandError ? (
+                  <span
+                    className={css({
+                      color: 'red.subtle.fg',
+                      fontWeight: 'bold',
+                      textStyle: 'sm',
+                    })}
+                  >
+                    {commandError}
+                  </span>
+                ) : null}
+              </div>
+              {commandResult ? (
+                <div className={css({ display: 'grid', gap: '2' })}>
+                  <div
+                    className={css({
+                      color: 'fg.muted',
+                      fontFamily: 'mono',
+                      overflowWrap: 'anywhere',
+                      textStyle: 'xs',
+                    })}
+                  >
+                    {commandResult.command_line}
+                  </div>
+                  <pre
+                    className={css({
+                      bg: 'gray.12',
+                      borderColor: 'gray.surface.border',
+                      borderRadius: 'l1',
+                      borderWidth: '1px',
+                      color: 'gray.1',
+                      fontFamily: 'mono',
+                      maxH: '64',
+                      overflow: 'auto',
+                      p: '3',
+                      textStyle: 'xs',
+                      whiteSpace: 'pre-wrap',
+                    })}
+                  >
+                    {commandResult.stdout || commandResult.stderr || '-'}
+                    {commandResult.stderr
+                      ? `\n\nstderr:\n${commandResult.stderr}`
+                      : ''}
+                  </pre>
+                </div>
+              ) : null}
+            </div>
+          </LauncherCard>
+
+          <LauncherCard
+            title="AI成果物"
+            icon={<Database size={24} weight="fill" />}
+            badge={`${artifacts.length}`}
+          >
+            {artifactsError ? (
+              <div
+                className={css({ color: 'red.subtle.fg', fontWeight: 'bold' })}
+              >
+                {artifactsError}
+              </div>
+            ) : null}
+            <div
+              className={css({ display: 'grid', gap: '2', overflow: 'auto' })}
+              style={{ maxHeight: 520 }}
+            >
+              {artifacts.map((artifact) => (
+                <button
+                  key={`${artifact.kind}-${artifact.path}`}
+                  type="button"
+                  className={css({
+                    bg: 'gray.subtle.bg',
+                    borderColor: 'gray.surface.border',
+                    borderRadius: 'l1',
+                    borderWidth: '1px',
+                    color: 'fg.default',
+                    display: 'grid',
+                    gap: '1',
+                    justifyItems: 'start',
+                    px: '3',
+                    py: '2',
+                    textAlign: 'left',
+                    _hover: { borderColor: 'blue.outline.border' },
+                  })}
+                  onClick={() => {
+                    selectArtifact(artifact);
+                    if (
+                      artifact.kind === 'playlog' ||
+                      artifact.kind === 'recording' ||
+                      artifact.kind === 'svg'
+                    ) {
+                      void loadPath(artifact.path);
+                    }
+                  }}
+                >
+                  <span
+                    className={css({
+                      color:
+                        artifactTone(artifact.kind) === 'green'
+                          ? 'green.subtle.fg'
+                          : 'fg.muted',
+                      fontWeight: 'black',
+                      textStyle: 'xs',
+                    })}
+                  >
+                    {artifact.kind} / {formatBytes(artifact.bytes)}
+                  </span>
+                  <span
+                    className={css({
+                      fontWeight: 'bold',
+                      maxW: 'full',
+                      overflowWrap: 'anywhere',
+                      textStyle: 'sm',
+                    })}
+                  >
+                    {basename(artifact.path)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </LauncherCard>
+        </div>
+
         <LauncherCard
           title="AIログビューア"
           icon={<FilmStrip size={24} weight="fill" />}
@@ -511,6 +1335,28 @@ export function AIReplayViewer() {
           ) : null}
         </LauncherCard>
 
+        {svgText ? (
+          <LauncherCard
+            title="生成SVG"
+            icon={<Crosshair size={24} weight="fill" />}
+          >
+            <iframe
+              className={css({
+                bg: 'gray.12',
+                borderColor: 'gray.surface.border',
+                borderRadius: 'l2',
+                borderWidth: '1px',
+                h: 'xl',
+                w: 'full',
+              })}
+              data-testid="ai-rendered-svg"
+              sandbox=""
+              srcDoc={svgText}
+              title="生成SVG"
+            />
+          </LauncherCard>
+        ) : null}
+
         {eventSampleRows.length ? (
           <LauncherCard
             title="記録イベント"
@@ -609,7 +1455,7 @@ export function AIReplayViewer() {
               <SmallInfoCard
                 label="fireball"
                 value={`${fireballsActive} active`}
-                caption={frame.specialObjects?.fireballs?.handler ?? '-'}
+                caption={`slots ${fireballSlotCount} / ${frame.specialObjects?.fireballs?.handler ?? '-'}`}
               />
               <LauncherCard
                 title="イベント"

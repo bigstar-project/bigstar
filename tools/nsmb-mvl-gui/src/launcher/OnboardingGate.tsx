@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { css } from 'styled-system/css';
 import { Button, Dialog } from '../components/ui';
 import type { FormState, StatusKind } from '../types';
-import type { LauncherActions, OnboardingState } from './types';
+import type { LauncherActions, OnboardingState, View } from './types';
 
 function StepStatus({
   complete,
@@ -135,20 +135,25 @@ function StepRow({
 
 export function OnboardingGate({
   actions,
+  activeView,
   activityStatus,
   form,
   onboarding,
+  onOpenAi,
 }: {
   actions: Pick<
     LauncherActions,
     'openMelondsInputConfig' | 'selectBaseRomAndPrepare'
   >;
+  activeView: View;
   activityStatus: { text: string; kind: StatusKind } | null;
   form: FormState;
   onboarding: OnboardingState;
+  onOpenAi: () => void;
 }) {
   if (
     !onboarding.loaded ||
+    activeView !== 'battle' ||
     (onboarding.romsPrepared && onboarding.inputConfigOpened)
   ) {
     return null;
@@ -256,6 +261,21 @@ export function OnboardingGate({
                 pendingText={onboarding.romsPrepared ? '未完了' : 'ROM生成後'}
                 title="melonDSの入力を設定"
               />
+            </div>
+
+            <div
+              className={css({
+                alignItems: 'center',
+                borderTopColor: 'gray.surface.border',
+                borderTopWidth: '1px',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                pt: '4',
+              })}
+            >
+              <Button type="button" variant="outline" onClick={onOpenAi}>
+                AI開発を開く
+              </Button>
             </div>
           </Dialog.Body>
         </Dialog.Content>
