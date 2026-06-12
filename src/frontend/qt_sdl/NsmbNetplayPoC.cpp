@@ -3197,7 +3197,7 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(
             vx,
             G.RuleAIHazardHorizontalRange,
             G.RuleAIHazardVerticalRange,
-            std::max<std::int64_t>(0x10000, G.RuleAIHazardHorizontalRange / 2));
+            std::max<std::int64_t>(0x10000, (G.RuleAIHazardHorizontalRange * 3) / 4));
         out.HazardFound = threat.Found;
         out.HazardClosing = threat.Closing;
         out.HazardVeryClose = threat.VeryClose;

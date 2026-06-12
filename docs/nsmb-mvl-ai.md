@@ -117,6 +117,7 @@
 - 完了: RuleAIに `rawWallRoute`、`guardLead`、`guardBrake`、`airRecover` を追加した。wrap距離で壁へ向かう時はraw座標方向が開いていればそちらへ回し、スター優勢時は次スター追跡を止め、速度と逆方向へ短くブレーキする。空中でスター優勢かつ穴判定が出た場合は片側壁から離れる方向へ復帰を試す。
 - 検証: `logs/codex-ruleai-guardbrake-3300-20260613` は stage 0 / seed `0x2f52869f` / 3300F / software rendererでhost/clientとも `deathTransitions=0`、それぞれ `starPickups=1`。同seedの旧safeログで残っていたclientの長時間左壁スタックは解消し、client `blockedInputRows=1`、`stuckWindows=0` まで減った。
 - 検証: `logs/codex-ruleai-guardbrake-3seed-2600-20260613` は seeds `0x2f52869f,0x13579bdf,0x12345678` / 2600Fで `avgDeathTransitions=0.5`、`avgAliveRatio=0.925`、`avgStarPickups=0.333`、`avgBigStarApproachDelta=462303582890.6667`。以前の5seed記録 `avgDeathTransitions=1.0` / `avgAliveRatio=0.8833333333` より安全側に改善したが、seed `0x13579bdf` と `0x12345678` ではまだ死亡が残る。
+- 完了: RuleAI hazardの `VeryClose` 判定を水平hazard rangeの1/2から3/4へ広げた。`logs/codex-ruleai-hazardclose-3seed-2600-20260613` は同3seed / 2600Fで `avgDeathTransitions=0.1666666667`、`avgAliveRatio=0.9527777778`、`avgStarPickups=0.333`。seed `0x13579bdf` clientと `0x12345678` host/clientの死亡は消えた一方、seed `0x12345678` hostのBig Star接近は悪化したため、次は安全を維持したままstar routeを戻す。
 
 ## AI Play Log
 
@@ -452,7 +453,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 
 ## Next Actions
 
-- 最優先: RuleAIをスクショ/SVG/監査JSONで反復改善する。`logs/codex-ruleai-guardbrake-3300-20260613` ではseed `0x2f52869f` のhost/client死亡0とスター取得1を確認し、旧safeログのclient左壁スタックは解消した。次は `logs/codex-ruleai-guardbrake-3seed-2600-20260613` で残ったseed `0x13579bdf` / `0x12345678` の死亡を、スクショと `ruleai-audit.json` で死亡原因別に潰す。特にGoomba/シェル接触死、落下死、wrap経路選択を分けて扱う。
+- 最優先: RuleAIをスクショ/SVG/監査JSONで反復改善する。`logs/codex-ruleai-hazardclose-3seed-2600-20260613` では死亡平均を `0.1666666667` まで下げたが、seed `0x13579bdf` hostのGoomba/動くhazard接触死がまだ残る。また、seed `0x12345678` hostは安全化の代わりにBig Star接近が悪化した。次は「壁際hazardからの脱出/踏み」と「hazard回避後にstar routeへ戻る条件」を分けて直す。
 - 次に、評価結果で弱いscenarioを特定してから、固定Mario/無操作Luigiログを増やすだけでなくscenario別に短い高品質人間ログを集める。まずは `star-chase`、`item-box`、`fire`、`enemy-hazard`、`recovery/fall-avoid`、`free-play` を各5-10本、各1-3分程度にし、`recording-audit`、`visual-state-audit`、SVG/viewer目視で破棄/採用を決める。Marioが動かないログは基礎操作データとして有効だが、対戦反応は学べないので単独で増やし続けない。
 - RuleAIは「強いAI」を目指すより先に、相手・環境揺らし・DAgger用の分布拡張器として進化させる。Big Star追跡、落下回避、近傍item/box、単純攻撃/回避を入れ、人間がRuleAI相手に操作したログと、模倣AIがRuleAI相手に失敗したログを集める。
 - 模倣学習は全12ボタン独立multi-labelのまま進めず、入力空間を実操作に寄せる。まず有効ボタンmaskを A/B/Left/Right/Up/Down/Y に制限し、左右/上下同時を禁止する。次に「方向」「jump」「dash/fire」「duck」などのfactor化、前回入力/hold duration/reaction delayを特徴量に入れ、短いノイズ入力を抑える。
