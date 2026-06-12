@@ -42,20 +42,25 @@ bool ControlsPlayer(const Config& config, int player, int localPlayer)
     return player == (localPlayer ^ 1);
 }
 
+std::int64_t SignedCoordinate(melonDS::u32 value)
+{
+    return static_cast<std::int64_t>(static_cast<std::int32_t>(value));
+}
+
 std::int32_t CoordinateDelta(melonDS::u32 target, melonDS::u32 self)
 {
     return static_cast<std::int32_t>(
-        static_cast<std::int64_t>(target) - static_cast<std::int64_t>(self));
+        SignedCoordinate(target) - SignedCoordinate(self));
 }
 
 std::int32_t HorizontalDelta(const Config& config, melonDS::u32 target, melonDS::u32 self)
 {
-    std::int64_t dx =
-        static_cast<std::int64_t>(target) - static_cast<std::int64_t>(self);
+    std::int64_t dx = SignedCoordinate(target) - SignedCoordinate(self);
     const std::int64_t wrapWidth = config.HorizontalWrapWidth;
     if (wrapWidth > 0)
     {
         const std::int64_t halfWidth = wrapWidth / 2;
+        dx %= wrapWidth;
         if (dx > halfWidth)
             dx -= wrapWidth;
         else if (dx < -halfWidth)
