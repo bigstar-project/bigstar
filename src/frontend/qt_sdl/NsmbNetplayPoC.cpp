@@ -15653,7 +15653,7 @@ std::int64_t DistanceSquared2D(
     melonDS::u32 bx,
     melonDS::u32 by)
 {
-    const std::int64_t dx = static_cast<std::int64_t>(SignedU32(ax)) - SignedU32(bx);
+    const std::int64_t dx = AIWrappedDeltaX(SignedU32(ax), SignedU32(bx));
     const std::int64_t dy = static_cast<std::int64_t>(SignedU32(ay)) - SignedU32(by);
     return dx * dx + dy * dy;
 }
@@ -16257,9 +16257,9 @@ void WriteAIObjectJson(std::ostream& out, const GameStateObjectScanEntry& entry,
     WriteAIVec3Json(out, "pos", entry.Actor.PosX, entry.Actor.PosY, entry.Actor.PosZ);
     out << ",";
     WriteAIVec3Json(out, "vel", entry.Actor.VelX, entry.Actor.VelY, entry.Actor.VelZ);
-    out << ",\"relative\":{\"p0dx\":" << (SignedU32(entry.Actor.PosX) - SignedU32(sample.PlayerActor0PosX))
+    out << ",\"relative\":{\"p0dx\":" << AIWrappedDeltaX(SignedU32(entry.Actor.PosX), SignedU32(sample.PlayerActor0PosX))
         << ",\"p0dy\":" << (SignedU32(entry.Actor.PosY) - SignedU32(sample.PlayerActor0PosY))
-        << ",\"p1dx\":" << (SignedU32(entry.Actor.PosX) - SignedU32(sample.PlayerActor1PosX))
+        << ",\"p1dx\":" << AIWrappedDeltaX(SignedU32(entry.Actor.PosX), SignedU32(sample.PlayerActor1PosX))
         << ",\"p1dy\":" << (SignedU32(entry.Actor.PosY) - SignedU32(sample.PlayerActor1PosY))
         << "}";
     out << ",\"screen\":{";
@@ -16305,7 +16305,7 @@ void WriteAINearestObjectJson(
     WriteJsonHex(out, entry->Actor.Settings);
     out << ",\"guid\":";
     WriteJsonHex(out, entry->Actor.GUID);
-    out << ",\"dx\":" << (SignedU32(entry->Actor.PosX) - SignedU32(selfX))
+    out << ",\"dx\":" << AIWrappedDeltaX(SignedU32(entry->Actor.PosX), SignedU32(selfX))
         << ",\"dy\":" << (SignedU32(entry->Actor.PosY) - SignedU32(selfY))
         << ",\"dist2\":" << DistanceSquared2D(entry->Actor.PosX, entry->Actor.PosY, selfX, selfY)
         << "}";
@@ -16779,7 +16779,7 @@ bool RuntimeObjectFeature(
         NearestRuntimeObject(objectScanCache, categoryName.c_str(), selfX, selfY);
     if (field == "found") out = nearest ? 1 : 0;
     else if (!nearest) out = 0;
-    else if (field == "dx") out = SignedU32(nearest->Actor.PosX) - SignedU32(selfX);
+    else if (field == "dx") out = AIWrappedDeltaX(SignedU32(nearest->Actor.PosX), SignedU32(selfX));
     else if (field == "dy") out = SignedU32(nearest->Actor.PosY) - SignedU32(selfY);
     else if (field == "dist") out = static_cast<double>(std::llround(std::sqrt(
         static_cast<double>(DistanceSquared2D(nearest->Actor.PosX, nearest->Actor.PosY, selfX, selfY)))));
@@ -16979,7 +16979,7 @@ bool RuntimeItemFeature(
         forceZero ? nullptr : NearestRuntimeItem(objectScanCache, selfX, selfY, requirePlainItem);
     if (field == "found") out = item ? 1 : 0;
     else if (!item) out = field == "powerup_kind_candidate" ? -1 : 0;
-    else if (field == "dx") out = SignedU32(item->Actor.PosX) - SignedU32(selfX);
+    else if (field == "dx") out = AIWrappedDeltaX(SignedU32(item->Actor.PosX), SignedU32(selfX));
     else if (field == "dy") out = SignedU32(item->Actor.PosY) - SignedU32(selfY);
     else if (field == "dist") out = static_cast<double>(std::llround(std::sqrt(
         static_cast<double>(DistanceSquared2D(item->Actor.PosX, item->Actor.PosY, selfX, selfY)))));
@@ -17033,7 +17033,7 @@ bool RuntimeFeatureValue(
     else if (name == "target_dx")
     {
         const melonDS::u32 targetX = sample.VsStarActorFound ? sample.VsStarActorPosX : sample.VsStarPosX;
-        out = SignedU32(targetX) - SignedU32(selfX);
+        out = AIWrappedDeltaX(SignedU32(targetX), SignedU32(selfX));
     }
     else if (name == "target_dy")
     {
@@ -17112,7 +17112,7 @@ bool RuntimeFeatureValue(
         {
             if (!sample.FireballSlotActive[i])
                 continue;
-            const std::int64_t dx = SignedU32(sample.FireballSlotPosX[i]) - SignedU32(selfX);
+            const std::int64_t dx = AIWrappedDeltaX(SignedU32(sample.FireballSlotPosX[i]), SignedU32(selfX));
             const std::int64_t dy = SignedU32(sample.FireballSlotPosY[i]) - SignedU32(selfY);
             const std::int64_t dist2 = dx * dx + dy * dy;
             if (best < 0 || dist2 < bestDist2)
@@ -17128,7 +17128,7 @@ bool RuntimeFeatureValue(
             int confidence = 0, heuristic = 0, statelessOwner = -1, statelessConfidence = 0, statelessHeuristic = 0;
             bool tracked = false;
             const int owner = AIFireballOwnerCandidate(instanceID, sample, best, confidence, heuristic, statelessOwner, statelessConfidence, statelessHeuristic, tracked);
-            if (field == "dx") out = SignedU32(sample.FireballSlotPosX[best]) - SignedU32(selfX);
+            if (field == "dx") out = AIWrappedDeltaX(SignedU32(sample.FireballSlotPosX[best]), SignedU32(selfX));
             else if (field == "dy") out = SignedU32(sample.FireballSlotPosY[best]) - SignedU32(selfY);
             else if (field == "dist2") out = bestDist2;
             else if (field == "dist") out = static_cast<double>(std::llround(std::sqrt(static_cast<double>(bestDist2))));

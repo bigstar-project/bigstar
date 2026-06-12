@@ -26,6 +26,19 @@ BUTTON_BITS = {
     "y": 11,
 }
 
+HORIZONTAL_WRAP_WIDTH = 0x400000
+
+
+def wrapped_dx(dx: int, wrap_width: int = HORIZONTAL_WRAP_WIDTH) -> int:
+    if wrap_width <= 0:
+        return dx
+    half = wrap_width // 2
+    return ((dx + half) % wrap_width) - half
+
+
+def delta_x(target_x: int, self_x: int) -> int:
+    return wrapped_dx(target_x - self_x)
+
 NEAREST_CATEGORIES = [
     "big_star_actor",
     "big_star_related",
@@ -303,7 +316,7 @@ def nearest_object(
         if obj.get("category") != category:
             continue
         obj_pos = pos(obj)
-        dx = obj_pos["x"] - self_pos["x"]
+        dx = delta_x(obj_pos["x"], self_pos["x"])
         dy = obj_pos["y"] - self_pos["y"]
         dist2 = dx * dx + dy * dy
         if best is None or dist2 < best[3]:
@@ -329,7 +342,7 @@ def nearest_item_details(
         obj_pos = pos(obj)
         obj_vel = vel(obj)
         obj_screen = screen(obj, "camera1")
-        dx = obj_pos["x"] - self_pos["x"]
+        dx = delta_x(obj_pos["x"], self_pos["x"])
         dy = obj_pos["y"] - self_pos["y"]
         dist2 = dx * dx + dy * dy
         if best is None or dist2 < best[0]:
@@ -362,7 +375,7 @@ def nearest_item_details(
     powerup_kind = item_powerup_kind_candidate(settings)
     return {
         "found": 1,
-        "dx": obj_pos["x"] - self_pos["x"],
+        "dx": delta_x(obj_pos["x"], self_pos["x"]),
         "dy": obj_pos["y"] - self_pos["y"],
         "dist": int(math.isqrt(dist2)),
         "object_id": num(obj.get("objectId")),
@@ -399,7 +412,7 @@ def nearest_special_slot(
     best: tuple[int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int] | None = None
     for slot in slots:
         slot_pos = pos(slot)
-        dx = slot_pos["x"] - self_pos["x"]
+        dx = delta_x(slot_pos["x"], self_pos["x"])
         dy = slot_pos["y"] - self_pos["y"]
         dist2 = dx * dx + dy * dy
         if best is None or dist2 < best[3]:
@@ -648,7 +661,7 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "coin_reward_item_is_suspected_mini_candidate": coin_reward_item["is_suspected_mini_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
         "coin_reward_item_avoid_candidate": coin_reward_item["avoid_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
         "target_found": num(target.get("found")),
-        "target_dx": target_pos["x"] - self_pos["x"],
+        "target_dx": delta_x(target_pos["x"], self_pos["x"]),
         "target_dy": target_pos["y"] - self_pos["y"],
         "target_dz": target_pos["z"] - self_pos["z"],
         "camera_x0": num(camera.get("globalX0")),
@@ -777,7 +790,7 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         summary = nearest_summary.get(category) or {}
         if summary:
             found = num(summary.get("found"))
-            dx = num(summary.get("dx"))
+            dx = wrapped_dx(num(summary.get("dx")))
             dy = num(summary.get("dy"))
             dist2 = num(summary.get("dist2"))
         prefix = f"nearest_{category}"

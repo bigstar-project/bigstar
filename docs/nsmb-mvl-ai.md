@@ -31,6 +31,7 @@
 - 完了: player actor、Big Star actor/candidate、Battle Starsを使ってremote CPU入力を生成できる。
 - 完了: 左右ラップ幅 `MELONDS_NSML_RULE_AI_WRAP_WIDTH=0x400000` を考慮して目標へ向かう。
 - 完了: RuleAIの左右ラップ方向計算で、player Xが負座標になったときに `u32` 座標として差分計算され、スター方向が左のままなのに右入力へ反転する問題を修正した。座標はまず符号付き32bitへ戻し、wrap幅で剰余正規化してから左右判定する。`logs/watch-ruleai/client/ai-playlog.jsonl` の終盤スタックでは旧計算だと x<0 で `dx` が正方向へ化けていたが、修正後の同区間は全sampleで左方向のままになる。
+- 完了: 同じラップ端問題が模倣学習の特徴量にも影響するため、dataset作成とC++逐次推論の `target_dx`、nearest object/item/fireball dx、AI play logのobject relative/visualSummary dxをwrap込みの最短水平差へ揃えた。旧RuleAIログはfeatureを作り直せばdxは補正されるが、旧RuleAIが出した右入力ラベル自体は残るため、ラップ端を含む旧RuleAIログは再収集または学習対象から除外する。
 - 完了: `MELONDS_NSML_AI_PLAY_LOG=<path>` で `JSONL` のAIプレイログを出せるようにした。既存の巨大CSV game-state traceとは別に、学習入力として読みやすい1行1フレーム形式にする。
 - 完了: `scripts/nsmb_mvl_ai_build_dataset.py` でJSONLから模倣学習用の固定列CSVを生成できるようにした。
 - 完了: `scripts/nsmb_mvl_ai_train_imitation.py` で固定列CSVからnumpyのみの多ラベル模倣学習モデルを学習し、`.npz` に保存できるようにした。
