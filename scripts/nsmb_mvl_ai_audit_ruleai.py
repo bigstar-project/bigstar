@@ -82,6 +82,34 @@ def tile_summary(p: dict[str, Any]) -> dict[str, Any]:
     return ((p.get("tileProbe") or {}).get("summary")) or {}
 
 
+def nearest_hazard(record: dict[str, Any], index: int) -> dict[str, Any] | None:
+    nearest = ((record.get("visualSummary") or {}).get("nearest")) or []
+    if not (0 <= index < len(nearest)):
+        return None
+    categories = (nearest[index] or {}).get("categories") or {}
+    best: dict[str, Any] | None = None
+    best_dist = 0
+    for category in ("moving_hazard", "hazard", "enemy_goomba", "enemy_koopa"):
+        entry = categories.get(category) or {}
+        if not entry.get("found"):
+            continue
+        dx = signed32(entry.get("dx"))
+        dy = signed32(entry.get("dy"))
+        dist = num(entry.get("dist2"), dx * dx + dy * dy)
+        candidate = {
+            "category": category,
+            "objectId": entry.get("objectId"),
+            "guid": entry.get("guid"),
+            "dx": dx,
+            "dy": dy,
+            "dist2": dist,
+        }
+        if best is None or dist < best_dist:
+            best = candidate
+            best_dist = dist
+    return best
+
+
 def append_sample(samples: list[dict[str, Any]], limit: int, sample: dict[str, Any]) -> None:
     if len(samples) < limit:
         samples.append(sample)
@@ -100,9 +128,13 @@ def audit(path: Path, player_index: int, sample_limit: int, stuck_records: int) 
     hole_input_rows = 0
     stuck_windows = 0
     oscillation_windows = 0
+    hazard_near_rows = 0
+    hazard_death_transitions = 0
 
     samples: dict[str, list[dict[str, Any]]] = {
         "deathTransitions": [],
+        "hazardDeathTransitions": [],
+        "hazardNearRows": [],
         "blockedInputs": [],
         "holeInputs": [],
         "leftRightFlips": [],
@@ -143,6 +175,19 @@ def audit(path: Path, player_index: int, sample_limit: int, stuck_records: int) 
         hole_left = bool(num(summary.get("effectiveHoleLeft"), summary.get("holeLeft")))
         hole_right = bool(num(summary.get("effectiveHoleRight"), summary.get("holeRight")))
         hole_ahead = bool(num(summary.get("effectiveHoleAhead"), summary.get("holeAhead")))
+        hazard = nearest_hazard(record, player_index)
+        hazard_near = (
+            hazard is not None
+            and abs(hazard["dx"]) <= 0x40000
+            and abs(hazard["dy"]) <= 0x50000
+        )
+        if hazard_near:
+            hazard_near_rows += 1
+            append_sample(
+                samples["hazardNearRows"],
+                sample_limit,
+                {"frame": frame, "held": f"0x{mask or 0:03X}", "x": pos_x(p), "y": pos_y(p), **hazard},
+            )
 
         if left and wall_left or right and wall_right:
             blocked_input_rows += 1
@@ -197,6 +242,24 @@ def audit(path: Path, player_index: int, sample_limit: int, stuck_records: int) 
             if p.get("dead") and not prev_p.get("dead"):
                 death_transitions += 1
                 append_sample(samples["deathTransitions"], sample_limit, {"frame": frame, "x": pos_x(p), "y": pos_y(p)})
+                prev_hazard = nearest_hazard(prev_record, player_index)
+                current_hazard = nearest_hazard(record, player_index)
+                death_hazard = current_hazard if current_hazard is not None else prev_hazard
+                if death_hazard is not None and abs(death_hazard["dx"]) <= 0x18000 and abs(death_hazard["dy"]) <= 0x18000:
+                    hazard_death_transitions += 1
+                    prev_mask_for_sample = held(prev_record, player_index)
+                    append_sample(
+                        samples["hazardDeathTransitions"],
+                        sample_limit,
+                        {
+                            "frame": frame,
+                            "x": pos_x(p),
+                            "y": pos_y(p),
+                            "held": f"0x{mask or 0:03X}",
+                            "prevHeld": f"0x{prev_mask_for_sample or 0:03X}",
+                            **death_hazard,
+                        },
+                    )
 
         if p.get("found") and direction != 0:
             if still_run:
@@ -244,6 +307,8 @@ def audit(path: Path, player_index: int, sample_limit: int, stuck_records: int) 
         "leftRightFlips": left_right_flips,
         "stuckWindows": stuck_windows,
         "oscillationWindows": oscillation_windows,
+        "hazardNearRows": hazard_near_rows,
+        "hazardDeathTransitions": hazard_death_transitions,
         "samples": samples,
     }
 
