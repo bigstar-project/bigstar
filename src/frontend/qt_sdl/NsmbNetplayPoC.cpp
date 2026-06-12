@@ -3042,6 +3042,8 @@ NsmbRuleAI::Config RuleAIConfig()
     config.HazardVerticalRange = G.RuleAIHazardVerticalRange;
     config.JumpInterval = G.RuleAIJumpInterval;
     config.JumpFrames = G.RuleAIJumpFrames;
+    config.WallEscapeFrames = 36;
+    config.StuckFrames = 24;
     config.TraceEnabled = G.RuleAITraceEnabled;
     config.TraceInterval = G.RuleAITraceInterval;
     return config;
@@ -3222,6 +3224,7 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(
     state.Players[0].Found = sample.PlayerActor0Found != 0;
     state.Players[0].X = sample.PlayerActor0PosX;
     state.Players[0].Y = sample.PlayerActor0PosY;
+    state.Players[0].Dead = sample.Player0Dead != 0;
     state.Players[0].BattleStars = sample.Player0BattleStars;
     fillProbeSummary(
         state.Players[0],
@@ -3235,6 +3238,7 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(
     state.Players[1].Found = sample.PlayerActor1Found != 0;
     state.Players[1].X = sample.PlayerActor1PosX;
     state.Players[1].Y = sample.PlayerActor1PosY;
+    state.Players[1].Dead = sample.Player1Dead != 0;
     state.Players[1].BattleStars = sample.Player1BattleStars;
     fillProbeSummary(
         state.Players[1],
@@ -14632,8 +14636,29 @@ void SaveScreenshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     void* topBuffer = nullptr;
     void* bottomBuffer = nullptr;
-    if (!nds->GPU.GetFramebuffers(&topBuffer, &bottomBuffer)) return;
-    if (!topBuffer || !bottomBuffer) return;
+    if (!nds->GPU.GetFramebuffers(&topBuffer, &bottomBuffer))
+    {
+        if (EnvFlag("MELONDS_NSML_SCREENSHOT_REG_TRACE"))
+        {
+            std::printf("NSMB Test: screenshot skipped inst=%d frame=%u reason=no-framebuffer\n", instanceID, frame);
+            std::fflush(stdout);
+        }
+        return;
+    }
+    if (!topBuffer || !bottomBuffer)
+    {
+        if (EnvFlag("MELONDS_NSML_SCREENSHOT_REG_TRACE"))
+        {
+            std::printf(
+                "NSMB Test: screenshot skipped inst=%d frame=%u reason=null-buffer top=%p bottom=%p\n",
+                instanceID,
+                frame,
+                topBuffer,
+                bottomBuffer);
+            std::fflush(stdout);
+        }
+        return;
+    }
 
     std::error_code ec;
     std::filesystem::create_directories(G.ScreenshotDir, ec);

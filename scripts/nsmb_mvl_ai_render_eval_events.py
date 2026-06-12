@@ -51,7 +51,8 @@ def iter_eval_event_renders(
     for eval_index, evaluation in enumerate(report.get("evaluations") or []):
         input_path = Path(str(evaluation.get("input", "")))
         if not input_path.is_absolute():
-            input_path = (base_dir / input_path).resolve()
+            cwd_path = input_path.resolve()
+            input_path = cwd_path if cwd_path.exists() else (base_dir / input_path).resolve()
         if not input_path.exists():
             continue
 

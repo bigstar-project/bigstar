@@ -102,6 +102,12 @@
 - 完了: 手動人間記録の既定を、2窓host/client同期ではなく `single_client_authoritative` に変更した。`run-nsmb-mvl-human-recording.ps1` はデフォルトでclient/Luigi側1窓だけを起動し、その1つのmelonDSインスタンスからMario/Luigi/敵/アイテム/地形/入力ラベルを同一frameの権威ログとして保存する。2窓同期は `-DualWindow` の実験オプションに残すが、現時点ではpeer接続待ちと入力遅延が実プレイ記録に不適なので学習ログ既定には使わない。
 - 完了: client-only手動記録は入力遅延を `InputDelayFrames=0` にし、JITを既定で有効にする。`logs/codex-human-recording-single-client-scripted-20260608` では2200Fを約55.5fpsで完走し、dataset 1332行、nonzeroLabelRows 1300、`recording-audit.json` passを確認した。無操作ログは `nonzeroLabelRows=0` で監査failになり、学習用に無入力記録を弾ける。
 - 完了: AI play logは学習内容を変えない範囲でflush頻度を調整できるようにした。`MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL=60` が既定で、JSONLの各行内容は変えずにofstream flushだけを60行ごとにまとめ、終了時に明示flushする。固定seed `0x12345678`、2200F、`AIPlayLogInterval=1`、`AIPlayLogMaxObjects=128` の比較では、`flushInterval=1` が active fps 53.52 / 25ms超44frame、`flushInterval=60` が active fps 55.75 / 25ms超12frame。両者の `ai-playlog.jsonl` は1410行、52,779,281 bytes、SHA256 `DB3A75B422241D06407748D50010EA13073430EAF46072645844C52BDC87D817` で完全一致した。
+- 完了: RuleAIの壁/進捗なし監査を `scripts/nsmb_mvl_ai_audit_ruleai.py` として追加した。死亡遷移、壁方向入力、穴方向入力、左右反転、停滞区間、接地/effective ground矛盾をJSONで出せる。旧 `logs/watch-ruleai-2/client/ai-playlog.jsonl` では死亡1、壁方向入力66、停滞1を検出し、修正対象を機械的に拾えることを確認した。
+- 完了: closed-loop評価からPNGスクショを取れるように、`run-nsmb-mvl-ai-closed-loop-eval.ps1 -ScreenshotInterval <n> -SoftwareRenderer` と `run-nsmb-mvl-split-local-input-smoke.ps1 -ScreenshotInterval <n> -SoftwareRenderer` を追加した。OpenGL computeではテストフック側の `GPU.GetFramebuffers()` が `no-framebuffer` になるため、スクショ評価ではsoftware rendererを使う。`MELONDS_NSML_SCREENSHOT_REG_TRACE=1` で未保存理由を出せる。
+- 完了: `scripts/nsmb_mvl_ai_render_eval_events.py` は、評価JSON内の `logs\...` repo相対入力を現在cwdからも解決するようにした。既存評価JSONからイベントSVGが0件になるケースを避ける。
+- 完了: RuleAIに短期記憶ベースの壁脱出を追加した。目標方向が壁/穴へ向く場合は一時的に反対方向またはraw座標経路へ逃がし、死亡中は中立入力にして短期記憶をリセットする。traceには `dx/rawDx/intent/escape/still` を出す。
+- 検証: `logs/codex-ruleai-safe-revert-3300-20260613` は stage 0 / seed `0x2f52869f` / 3300F / software renderer / screenshot 300F間隔でpass。host/clientともPNG 11枚を生成し、client代表 `inst0_frame003300.png` は草原ステージ画面として目視確認済み。closed-loop評価では client `deathTransitions=0`、`aliveRows=82/84`、`bigStarDistance.approachDelta=469225177088`。
+- 残課題: 同ログのRuleAI監査では client `blockedInputRows=69`、`stuckWindows=1` が残る。frame 1290-1440付近でplayer1がブロック地形/ラップ端近辺に詰まり、`wallLeft=1/wallRight=1` の両壁扱いで左入力を続ける。両壁を単純に無視して進ませる実験ではスター取得は出たがGoomba接触死亡が増えたため不採用。次は地形スタック脱出とGoomba回避を分けて直す。
 
 ## AI Play Log
 
@@ -437,7 +443,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 
 ## Next Actions
 
-- 最優先: 最新5seed評価で残った死亡/不安定さを潰す。RuleAIは star取得後死亡、item/enemy/hazard混在死亡、毎run 1 death程度残る落下/接触事故をSVG/viewerで確認し、落下復帰・敵回避・star取得後の目標切替を改善する。ImitationAIは `0x13579bdf` の1470死亡、`0x2f52869f` の2310死亡、他seedの接近指標悪化frameをDAgger対象にし、単純guardで無理に直すより失敗frame周辺の人間ラベル追加/再学習を優先する。
+- 最優先: RuleAIをスクショ/SVG/監査JSONで反復改善する。`logs/codex-ruleai-safe-revert-3300-20260613` では死亡0まで戻した一方、`blockedInputRows=69`、`stuckWindows=1` が残るため、まずframe 1290-1440付近のブロック地形/ラップ端スタックを直す。両壁false positiveを単純に無視するとスター取得は増えるがGoomba接触死亡が増えるので、地形スタック脱出と敵回避を別ロジックとして扱う。改善後は同seed 3300Fだけでなく複数seed/長めframeで、死亡・停滞・スクショの3点を確認する。
 - 次に、評価結果で弱いscenarioを特定してから、固定Mario/無操作Luigiログを増やすだけでなくscenario別に短い高品質人間ログを集める。まずは `star-chase`、`item-box`、`fire`、`enemy-hazard`、`recovery/fall-avoid`、`free-play` を各5-10本、各1-3分程度にし、`recording-audit`、`visual-state-audit`、SVG/viewer目視で破棄/採用を決める。Marioが動かないログは基礎操作データとして有効だが、対戦反応は学べないので単独で増やし続けない。
 - RuleAIは「強いAI」を目指すより先に、相手・環境揺らし・DAgger用の分布拡張器として進化させる。Big Star追跡、落下回避、近傍item/box、単純攻撃/回避を入れ、人間がRuleAI相手に操作したログと、模倣AIがRuleAI相手に失敗したログを集める。
 - 模倣学習は全12ボタン独立multi-labelのまま進めず、入力空間を実操作に寄せる。まず有効ボタンmaskを A/B/Left/Right/Up/Down/Y に制限し、左右/上下同時を禁止する。次に「方向」「jump」「dash/fire」「duck」などのfactor化、前回入力/hold duration/reaction delayを特徴量に入れ、短いノイズ入力を抑える。

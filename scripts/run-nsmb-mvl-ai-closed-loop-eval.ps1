@@ -20,6 +20,8 @@ param(
     [int]$ImitationHazardGuardVerticalRange = -1,
     [int]$ImitationHazardGuardCloseRange = -1,
     [switch]$SkipGameStateComparison,
+    [int]$ScreenshotInterval = 0,
+    [switch]$SoftwareRenderer,
     [switch]$AllowJit
 )
 
@@ -131,10 +133,12 @@ try {
         "-ClientAIPlayLog", $clientAIPlayLog,
         "-AIPlayLogInterval", "$AIPlayLogInterval",
         "-AIPlayLogMaxObjects", "$AIPlayLogMaxObjects",
+        "-ScreenshotInterval", "$ScreenshotInterval",
         "-AllowRemoteInputTimeoutFallback",
         "-SkipMovementProbe"
     )
     if ($AllowJit) { $smokeArgs += "-AllowJit" }
+    if ($SoftwareRenderer) { $smokeArgs += "-SoftwareRenderer" }
     if ($SkipGameStateComparison) { $smokeArgs += "-SkipGameStateComparison" }
 
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot "scripts\run-nsmb-mvl-split-local-input-smoke.ps1") @smokeArgs

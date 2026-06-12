@@ -14,6 +14,18 @@ constexpr int kButtonRight = 4;
 constexpr int kButtonLeft = 5;
 constexpr int kButtonY = 11;
 
+struct PlayerMemory
+{
+    bool Initialized = false;
+    melonDS::u32 LastFrame = 0;
+    std::int64_t LastX = 0;
+    int StillFrames = 0;
+    int EscapeFrames = 0;
+    int EscapeDirection = 0;
+};
+
+PlayerMemory GPlayerMemory[16][2] {};
+
 std::string Upper(std::string value)
 {
     for (char& ch : value)
@@ -69,6 +81,15 @@ std::int32_t HorizontalDelta(const Config& config, melonDS::u32 target, melonDS:
     return static_cast<std::int32_t>(dx);
 }
 
+int SignWithDeadzone(std::int32_t value, int deadzone)
+{
+    if (value > deadzone)
+        return 1;
+    if (value < -deadzone)
+        return -1;
+    return 0;
+}
+
 NsmbNetplayPoC::InputState NeutralInputPreservingTouch(const NsmbNetplayPoC::InputState& source)
 {
     NsmbNetplayPoC::InputState input {};
@@ -96,6 +117,12 @@ NsmbNetplayPoC::InputState DecideInput(
     const int opponent = player ^ 1;
     const PlayerFrameState& self = state.Players[player];
     const PlayerFrameState& other = state.Players[opponent];
+    if (self.Dead)
+    {
+        if (instanceID >= 0 && instanceID < 16)
+            GPlayerMemory[instanceID][player] = {};
+        return NeutralInputPreservingTouch(fallback);
+    }
 
     melonDS::u32 targetX = other.X;
     melonDS::u32 targetY = other.Y;
@@ -115,6 +142,7 @@ NsmbNetplayPoC::InputState DecideInput(
     }
 
     std::int32_t dx = HorizontalDelta(config, targetX, self.X);
+    const std::int32_t rawDx = CoordinateDelta(targetX, self.X);
     const std::int32_t dy = CoordinateDelta(targetY, self.Y);
     const std::int32_t opponentDx = HorizontalDelta(config, other.X, self.X);
     const int absOpponentDx = std::abs(opponentDx);
@@ -144,10 +172,68 @@ NsmbNetplayPoC::InputState DecideInput(
         mode = "hazard";
     }
 
+    PlayerMemory* memory = nullptr;
+    if (instanceID >= 0 && instanceID < 16)
+        memory = &GPlayerMemory[instanceID][player];
+
+    int horizontalIntent = SignWithDeadzone(dx, config.HorizontalDeadzone);
+    const int rawIntent = SignWithDeadzone(rawDx, config.HorizontalDeadzone);
+    const bool blockedLeft = self.WallLeft || self.HoleLeft;
+    const bool blockedRight = self.WallRight || self.HoleRight;
+    const bool intentBlocked =
+        (horizontalIntent < 0 && blockedLeft) ||
+        (horizontalIntent > 0 && blockedRight);
+
+    if (memory)
+    {
+        const std::int64_t currentX = SignedCoordinate(self.X);
+        if (!memory->Initialized || frame < memory->LastFrame)
+        {
+            memory->Initialized = true;
+            memory->StillFrames = 0;
+            memory->EscapeFrames = 0;
+        }
+        else
+        {
+            const std::int64_t movement = currentX - memory->LastX;
+            if (horizontalIntent != 0 && std::llabs(movement) < 0x300)
+                memory->StillFrames++;
+            else
+                memory->StillFrames = 0;
+        }
+        memory->LastFrame = frame;
+        memory->LastX = currentX;
+
+        if (intentBlocked)
+        {
+            const int escapeDirection =
+                (rawIntent != 0 && rawIntent != horizontalIntent) ? rawIntent : -horizontalIntent;
+            memory->EscapeDirection = escapeDirection;
+            memory->EscapeFrames = std::max(memory->EscapeFrames, config.WallEscapeFrames);
+            mode = rawIntent != 0 && rawIntent != horizontalIntent ? "wallRoute" : "wallEscape";
+        }
+        else if (horizontalIntent != 0 &&
+                 memory->StillFrames >= config.StuckFrames &&
+                 (self.WallAhead || self.WallLeft || self.WallRight || self.HoleAhead))
+        {
+            memory->EscapeDirection = -horizontalIntent;
+            memory->EscapeFrames = std::max(memory->EscapeFrames, config.WallEscapeFrames);
+            memory->StillFrames = 0;
+            mode = "stuckEscape";
+        }
+
+        if (memory->EscapeFrames > 0 && memory->EscapeDirection != 0)
+        {
+            horizontalIntent = memory->EscapeDirection;
+            dx = horizontalIntent * std::max(config.HorizontalDeadzone + 1, config.CloseRange / 2);
+            memory->EscapeFrames--;
+        }
+    }
+
     NsmbNetplayPoC::InputState input = NeutralInputPreservingTouch(fallback);
-    if (dx > config.HorizontalDeadzone)
+    if (horizontalIntent > 0)
         PressButton(input, kButtonRight);
-    else if (dx < -config.HorizontalDeadzone)
+    else if (horizontalIntent < 0)
         PressButton(input, kButtonLeft);
 
     const bool movingHorizontally =
@@ -176,7 +262,7 @@ NsmbNetplayPoC::InputState DecideInput(
         (config.TraceInterval <= 1 || (frame % static_cast<melonDS::u32>(config.TraceInterval)) == 0))
     {
         std::printf(
-            "NSMB RuleAI: inst=%d frame=%u player=%d mode=%s self=%08X/%08X target=%08X/%08X opponent=%08X/%08X stars=%u/%u hazard=%d/%d/%d closing=%d close=%d terrain=ground:%d ahead:%d/%d left:%d/%d right:%d/%d keys=0x%03X\n",
+            "NSMB RuleAI: inst=%d frame=%u player=%d mode=%s self=%08X/%08X target=%08X/%08X dx=%d rawDx=%d intent=%d escape=%d/%d still=%d opponent=%08X/%08X stars=%u/%u hazard=%d/%d/%d closing=%d close=%d terrain=ground:%d ahead:%d/%d left:%d/%d right:%d/%d keys=0x%03X\n",
             instanceID,
             frame,
             player,
@@ -185,6 +271,12 @@ NsmbNetplayPoC::InputState DecideInput(
             self.Y,
             targetX,
             targetY,
+            dx,
+            rawDx,
+            horizontalIntent,
+            memory ? memory->EscapeDirection : 0,
+            memory ? memory->EscapeFrames : 0,
+            memory ? memory->StillFrames : 0,
             other.X,
             other.Y,
             self.BattleStars,

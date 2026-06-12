@@ -25,6 +25,8 @@ struct Config
     int HazardVerticalRange = 0x50000;
     int JumpInterval = 42;
     int JumpFrames = 9;
+    int WallEscapeFrames = 36;
+    int StuckFrames = 24;
     bool TraceEnabled = false;
     int TraceInterval = 60;
 };
@@ -34,6 +36,7 @@ struct PlayerFrameState
     bool Found = false;
     melonDS::u32 X = 0;
     melonDS::u32 Y = 0;
+    bool Dead = false;
     melonDS::u32 BattleStars = 0;
     bool GroundBelowSolid = false;
     bool WallAhead = false;

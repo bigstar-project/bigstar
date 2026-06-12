@@ -131,6 +131,7 @@ param(
     [switch]$FixedFrameTime,
     [double]$TargetFps = 0.0,
     [switch]$NoDrawScreen,
+    [int]$ScreenshotInterval = 0,
     [switch]$NoAudioSync,
     [double]$MaxActiveFrameMs = 0.0,
     [int]$MaxActiveFrameOver25ms = -1,
@@ -170,10 +171,43 @@ param(
     [int]$AIPlayLogMaxObjects = 128,
     [switch]$AIPlayLogIncludeNonGameplay,
     [switch]$FpsSpikeTrace,
+    [switch]$SoftwareRenderer,
     [switch]$AllowJit
 )
 
 $ErrorActionPreference = "Stop"
+
+function Set-MelonTomlValue {
+    param(
+        [string]$Text,
+        [string]$KeyPath,
+        [string]$Value
+    )
+
+    $idx = $KeyPath.LastIndexOf('.')
+    if ($idx -lt 0) {
+        if ($Text -match "(?m)^$([regex]::Escape($KeyPath))\s*=") {
+            return ($Text -replace "(?m)^$([regex]::Escape($KeyPath))\s*=.*$", "$KeyPath = $Value")
+        }
+        return "$Text`n$KeyPath = $Value"
+    }
+
+    $section = $KeyPath.Substring(0, $idx)
+    $key = $KeyPath.Substring($idx + 1)
+    $sectionPattern = "(?ms)^\[$([regex]::Escape($section))\]\r?\n.*?(?=^\[|\z)"
+    $sectionMatch = [regex]::Match($Text, $sectionPattern)
+    if (-not $sectionMatch.Success) {
+        return "$Text`n[$section]`n$key = $Value`n"
+    }
+
+    $sectionText = $sectionMatch.Value
+    if ($sectionText -match "(?m)^$([regex]::Escape($key))\s*=") {
+        $newSection = $sectionText -replace "(?m)^$([regex]::Escape($key))\s*=.*$", "$key = $Value"
+    } else {
+        $newSection = $sectionText.TrimEnd() + "`n$key = $Value`n"
+    }
+    return $Text.Substring(0, $sectionMatch.Index) + $newSection + $Text.Substring($sectionMatch.Index + $sectionMatch.Length)
+}
 
 if ($FpsSpikeTrace -and ($MaxConsecutiveSlowFrames -ge 0 -or $MaxRollbackFrameMs -gt 0.0)) {
     $env:MELONDS_NSML_FPS_SPIKE_TRACE = "1"
@@ -272,6 +306,30 @@ $logRoot = if ([System.IO.Path]::IsPathRooted($LogDir)) {
 } else {
     Join-Path $repoRoot $LogDir
 }
+
+$cfgPath = Join-Path $repoRoot "build\release-windows-x86_64\melonDS.toml"
+if (Test-Path $cfgPath) {
+    $cfg = Get-Content $cfgPath -Raw
+    $useGL = if ($SoftwareRenderer) { 'false' } else { 'true' }
+    $renderer = if ($SoftwareRenderer) { '0' } else { '2' }
+    $replacements = [ordered]@{
+        'LimitFPS' = 'true'
+        'AudioSync' = 'false'
+        'Screen.UseGL' = $useGL
+        'Screen.VSync' = 'false'
+        'Screen.VSyncInterval' = '1'
+        '3D.Renderer' = $renderer
+        '3D.GL.ScaleFactor' = '1'
+        '3D.GL.HiresCoordinates' = 'false'
+        '3D.Soft.Threaded' = 'true'
+        'Instance0.Window0.ScreenSizing' = '0'
+        'Instance0.Window0.ShowOSD' = 'false'
+    }
+    foreach ($key in $replacements.Keys) {
+        $cfg = Set-MelonTomlValue -Text $cfg -KeyPath $key -Value $replacements[$key]
+    }
+    Set-Content -Path $cfgPath -Value $cfg -Encoding UTF8
+}
 $hostLog = Join-Path $logRoot "host"
 $clientLog = Join-Path $logRoot "client"
 $wrapperLog = Join-Path $logRoot "wrapper"
@@ -291,7 +349,7 @@ $common = @(
     "-MvlBigStars", "$MvlBigStars",
     "-MvlLives", "$MvlLives",
     "-MvlCourseMode", "$MvlCourseMode",
-    "-ScreenshotInterval", "0",
+    "-ScreenshotInterval", "$ScreenshotInterval",
     "-NoHashLog",
     "-SkipDisconnectScreenshotCheck",
     "-SkipBlankScreenshotCheck",
