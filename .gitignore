@@ -39,3 +39,4 @@ freebios/bios*
 freebios/build/
 
 roms/
+**/.alchemy/**
