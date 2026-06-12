@@ -386,12 +386,6 @@ function MatchSettingsFields({
           onChange={(value) => updateField('lives', value as Lives)}
         />
       </div>
-      <TextField
-        label="Game 1 seed"
-        value={form.matchSeed}
-        placeholder="空なら自動生成"
-        onChange={(value) => updateField('matchSeed', value)}
-      />
       {form.courseMode === 'select' ? (
         <CourseSequenceFields form={form} updateField={updateField} />
       ) : null}

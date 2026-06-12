@@ -101,7 +101,7 @@ export function useLauncherController() {
   const selectedStageLabel =
     selectedStage === null
       ? form.courseMode === 'random'
-        ? 'seed未設定'
+        ? '未確定'
         : '0'
       : String(selectedStage);
   const courseNote =
