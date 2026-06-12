@@ -3167,18 +3167,16 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(
         const bool aheadBelow = probePointSolidish(probe, "aheadBelow");
         const bool ahead2Below = probePointSolidish(probe, "ahead2Below");
         const bool leftBody = probePointSolidish(probe, "leftBody");
-        const bool leftFeet = probePointSolidish(probe, "leftFeet");
         const bool leftBelow = probePointSolidish(probe, "leftBelow");
         const bool left2Below = probePointSolidish(probe, "left2Below");
         const bool rightBody = probePointSolidish(probe, "rightBody");
-        const bool rightFeet = probePointSolidish(probe, "rightFeet");
         const bool rightBelow = probePointSolidish(probe, "rightBelow");
         const bool right2Below = probePointSolidish(probe, "right2Below");
         out.WallAhead = aheadBody || aheadFeet;
         out.HoleAhead = !aheadBelow && !ahead2Below;
-        out.WallLeft = leftBody || leftFeet || contactWallLeft;
+        out.WallLeft = leftBody || contactWallLeft;
         out.HoleLeft = !leftBelow && !left2Below;
-        out.WallRight = rightBody || rightFeet || contactWallRight;
+        out.WallRight = rightBody || contactWallRight;
         out.HoleRight = !rightBelow && !right2Below;
         if (contactGround && !out.GroundBelowSolid)
         {
@@ -3224,6 +3222,7 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(
     state.Players[0].Found = sample.PlayerActor0Found != 0;
     state.Players[0].X = sample.PlayerActor0PosX;
     state.Players[0].Y = sample.PlayerActor0PosY;
+    state.Players[0].VelX = static_cast<std::int32_t>(sample.PlayerActor0VelX);
     state.Players[0].Dead = sample.Player0Dead != 0;
     state.Players[0].BattleStars = sample.Player0BattleStars;
     fillProbeSummary(
@@ -3238,6 +3237,7 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(
     state.Players[1].Found = sample.PlayerActor1Found != 0;
     state.Players[1].X = sample.PlayerActor1PosX;
     state.Players[1].Y = sample.PlayerActor1PosY;
+    state.Players[1].VelX = static_cast<std::int32_t>(sample.PlayerActor1VelX);
     state.Players[1].Dead = sample.Player1Dead != 0;
     state.Players[1].BattleStars = sample.Player1BattleStars;
     fillProbeSummary(
@@ -15949,7 +15949,11 @@ int AITileProbeSolidishValue(const AIPlayerTileProbeSample& probe, const char* n
     return sample && sample->Found && AITileBehaviorSolidish(sample->Behavior) ? 1 : 0;
 }
 
-void WriteAIPlayerTileProbeJson(std::ostream& out, const AIPlayerTileProbeSample& probe, bool contactGround)
+void WriteAIPlayerTileProbeJson(std::ostream& out,
+                                const AIPlayerTileProbeSample& probe,
+                                bool contactGround,
+                                bool contactWallLeft,
+                                bool contactWallRight)
 {
     const int groundBelow = AITileProbeSolidishValue(probe, "below");
     const int aheadBody = AITileProbeSolidishValue(probe, "aheadBody");
@@ -15957,18 +15961,16 @@ void WriteAIPlayerTileProbeJson(std::ostream& out, const AIPlayerTileProbeSample
     const int aheadBelow = AITileProbeSolidishValue(probe, "aheadBelow");
     const int ahead2Below = AITileProbeSolidishValue(probe, "ahead2Below");
     const int leftBody = AITileProbeSolidishValue(probe, "leftBody");
-    const int leftFeet = AITileProbeSolidishValue(probe, "leftFeet");
     const int leftBelow = AITileProbeSolidishValue(probe, "leftBelow");
     const int left2Below = AITileProbeSolidishValue(probe, "left2Below");
     const int rightBody = AITileProbeSolidishValue(probe, "rightBody");
-    const int rightFeet = AITileProbeSolidishValue(probe, "rightFeet");
     const int rightBelow = AITileProbeSolidishValue(probe, "rightBelow");
     const int right2Below = AITileProbeSolidishValue(probe, "right2Below");
     const int wallAhead = aheadBody || aheadFeet ? 1 : 0;
     const int holeAhead = probe.Found && !aheadBelow && !ahead2Below ? 1 : 0;
-    const int wallLeft = leftBody || leftFeet ? 1 : 0;
+    const int wallLeft = leftBody || contactWallLeft ? 1 : 0;
     const int holeLeft = probe.Found && !leftBelow && !left2Below ? 1 : 0;
-    const int wallRight = rightBody || rightFeet ? 1 : 0;
+    const int wallRight = rightBody || contactWallRight ? 1 : 0;
     const int holeRight = probe.Found && !rightBelow && !right2Below ? 1 : 0;
     const int effectiveGroundBelow = groundBelow || contactGround ? 1 : 0;
     const int suppressHoleByContact = contactGround && !groundBelow ? 1 : 0;
@@ -16200,7 +16202,12 @@ void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& samp
     out << ",\"collisionMgr\":";
     WriteAIPlayerCollisionMgrJson(out, collisionMgr);
     out << ",\"tileProbe\":";
-    WriteAIPlayerTileProbeJson(out, tileProbe, AIPlayerContactGround(collisionFlag));
+    WriteAIPlayerTileProbeJson(
+        out,
+        tileProbe,
+        AIPlayerContactGround(collisionFlag),
+        (collisionFlag & (0x00000008u | 0x00000400u | 0x20000000u)) != 0,
+        (collisionFlag & (0x00000010u | 0x00000800u | 0x40000000u)) != 0);
     out << ",\"tileDamage\":";
     WriteAIPlayerTileDamageJson(out, tileDamageFlags, tileDamageType);
     out
@@ -16687,14 +16694,16 @@ bool RuntimePlayerFeature(
         const int aheadBelow = AITileProbeSolidishValue(tileProbe, "aheadBelow");
         const int ahead2Below = AITileProbeSolidishValue(tileProbe, "ahead2Below");
         const int leftBody = AITileProbeSolidishValue(tileProbe, "leftBody");
-        const int leftFeet = AITileProbeSolidishValue(tileProbe, "leftFeet");
         const int leftBelow = AITileProbeSolidishValue(tileProbe, "leftBelow");
         const int left2Below = AITileProbeSolidishValue(tileProbe, "left2Below");
         const int rightBody = AITileProbeSolidishValue(tileProbe, "rightBody");
-        const int rightFeet = AITileProbeSolidishValue(tileProbe, "rightFeet");
         const int rightBelow = AITileProbeSolidishValue(tileProbe, "rightBelow");
         const int right2Below = AITileProbeSolidishValue(tileProbe, "right2Below");
         const int suppressHole = contactGround && !groundBelow ? 1 : 0;
+        const int wallLeft =
+            (leftBody || (collision & (0x00000008u | 0x00000400u | 0x20000000u)) != 0) ? 1 : 0;
+        const int wallRight =
+            (rightBody || (collision & (0x00000010u | 0x00000800u | 0x40000000u)) != 0) ? 1 : 0;
         if (suffix == "groundBelowSolid") out = groundBelow;
         else if (suffix == "aheadBodySolid") out = aheadBody;
         else if (suffix == "aheadFeetSolid") out = aheadFeet;
@@ -16702,9 +16711,9 @@ bool RuntimePlayerFeature(
         else if (suffix == "ahead2BelowSolid") out = ahead2Below;
         else if (suffix == "wallAhead") out = aheadBody || aheadFeet ? 1 : 0;
         else if (suffix == "holeAhead") out = tileProbe.Found && !aheadBelow && !ahead2Below ? 1 : 0;
-        else if (suffix == "wallLeft") out = leftBody || leftFeet ? 1 : 0;
+        else if (suffix == "wallLeft") out = wallLeft;
         else if (suffix == "holeLeft") out = tileProbe.Found && !leftBelow && !left2Below ? 1 : 0;
-        else if (suffix == "wallRight") out = rightBody || rightFeet ? 1 : 0;
+        else if (suffix == "wallRight") out = wallRight;
         else if (suffix == "holeRight") out = tileProbe.Found && !rightBelow && !right2Below ? 1 : 0;
         else if (suffix == "contactGround") out = contactGround ? 1 : 0;
         else if (suffix == "effectiveGroundBelowSolid") out = groundBelow || contactGround ? 1 : 0;
@@ -16900,10 +16909,8 @@ bool ApplyImitationAIHazardGuard(
     constexpr melonDS::u32 kHeldLeft = 1u << 5;
     const melonDS::u32 before = held;
     const bool wallLeft = AITileProbeSolidishValue(tileProbe, "leftBody") ||
-        AITileProbeSolidishValue(tileProbe, "leftFeet") ||
         (collisionFlag & (0x00000008u | 0x00000400u | 0x20000000u)) != 0;
     const bool wallRight = AITileProbeSolidishValue(tileProbe, "rightBody") ||
-        AITileProbeSolidishValue(tileProbe, "rightFeet") ||
         (collisionFlag & (0x00000010u | 0x00000800u | 0x40000000u)) != 0;
     const bool pushWall = (collisionFlag & 0x00000004u) != 0;
     const bool hazardOnLeft = outHazardDx < 0;

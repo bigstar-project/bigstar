@@ -154,10 +154,20 @@ NsmbNetplayPoC::InputState DecideInput(
         std::abs(hazardDy) <= config.HazardVerticalRange &&
         (self.HazardClosing || self.HazardVeryClose);
 
-    if (self.BattleStars > other.BattleStars && absOpponentDx < config.CloseRange)
+    const bool evadingOpponent = self.BattleStars > other.BattleStars && absOpponentDx < config.CloseRange;
+    if (self.BattleStars > other.BattleStars)
     {
-        dx = opponentDx <= 0 ? config.CloseRange : -config.CloseRange;
-        mode = "evade";
+        if (evadingOpponent)
+        {
+            dx = opponentDx <= 0 ? config.CloseRange : -config.CloseRange;
+            mode = "evade";
+        }
+        else
+        {
+            const int brakeIntent = SignWithDeadzone(-self.VelX, 0x800);
+            dx = brakeIntent * std::max(config.HorizontalDeadzone + 1, config.CloseRange / 2);
+            mode = brakeIntent == 0 ? "guardLead" : "guardBrake";
+        }
     }
     if (hazardDanger)
     {
@@ -180,6 +190,37 @@ NsmbNetplayPoC::InputState DecideInput(
     const int rawIntent = SignWithDeadzone(rawDx, config.HorizontalDeadzone);
     const bool blockedLeft = self.WallLeft || self.HoleLeft;
     const bool blockedRight = self.WallRight || self.HoleRight;
+    const bool canRawRouteLeft = rawIntent < 0 && !blockedLeft;
+    const bool canRawRouteRight = rawIntent > 0 && !blockedRight;
+    if (evadingOpponent &&
+        ((horizontalIntent < 0 && blockedLeft) ||
+         (horizontalIntent > 0 && blockedRight)))
+    {
+        horizontalIntent = 0;
+        dx = 0;
+        if (memory)
+        {
+            memory->EscapeDirection = 0;
+            memory->EscapeFrames = 0;
+            memory->StillFrames = 0;
+        }
+        mode = "evadeHold";
+    }
+    if (!hazardDanger && !evadingOpponent &&
+        ((horizontalIntent < 0 && blockedLeft && canRawRouteRight) ||
+         (horizontalIntent > 0 && blockedRight && canRawRouteLeft) ||
+         (horizontalIntent == 0 && ((self.WallLeft && canRawRouteRight) || (self.WallRight && canRawRouteLeft)))))
+    {
+        horizontalIntent = rawIntent;
+        dx = horizontalIntent * std::max(config.HorizontalDeadzone + 1, config.CloseRange / 2);
+        if (memory)
+        {
+            memory->EscapeDirection = horizontalIntent;
+            memory->EscapeFrames = 0;
+            memory->StillFrames = 0;
+        }
+        mode = "rawWallRoute";
+    }
     const bool intentBlocked =
         (horizontalIntent < 0 && blockedLeft) ||
         (horizontalIntent > 0 && blockedRight);
@@ -228,6 +269,57 @@ NsmbNetplayPoC::InputState DecideInput(
             dx = horizontalIntent * std::max(config.HorizontalDeadzone + 1, config.CloseRange / 2);
             memory->EscapeFrames--;
         }
+    }
+
+    if (evadingOpponent &&
+        ((horizontalIntent < 0 && blockedLeft) ||
+         (horizontalIntent > 0 && blockedRight)))
+    {
+        horizontalIntent = 0;
+        dx = 0;
+        if (memory)
+        {
+            memory->EscapeDirection = 0;
+            memory->EscapeFrames = 0;
+            memory->StillFrames = 0;
+        }
+        mode = "evadeHold";
+    }
+
+    if (!hazardDanger && !evadingOpponent &&
+        ((horizontalIntent < 0 && blockedLeft && canRawRouteRight) ||
+         (horizontalIntent > 0 && blockedRight && canRawRouteLeft) ||
+         (horizontalIntent == 0 && ((self.WallLeft && canRawRouteRight) || (self.WallRight && canRawRouteLeft)))))
+    {
+        horizontalIntent = rawIntent;
+        dx = horizontalIntent * std::max(config.HorizontalDeadzone + 1, config.CloseRange / 2);
+        if (memory)
+        {
+            memory->EscapeDirection = horizontalIntent;
+            memory->EscapeFrames = 0;
+            memory->StillFrames = 0;
+        }
+        mode = "rawWallRoute";
+    }
+
+    if (self.BattleStars > other.BattleStars &&
+        !self.GroundBelowSolid &&
+        (self.HoleAhead || self.HoleLeft || self.HoleRight))
+    {
+        if (self.WallLeft && !self.WallRight)
+            horizontalIntent = 1;
+        else if (self.WallRight && !self.WallLeft)
+            horizontalIntent = -1;
+        else
+            horizontalIntent = 0;
+        dx = horizontalIntent * std::max(config.HorizontalDeadzone + 1, config.CloseRange / 2);
+        if (memory)
+        {
+            memory->EscapeDirection = horizontalIntent;
+            memory->EscapeFrames = 0;
+            memory->StillFrames = 0;
+        }
+        mode = horizontalIntent == 0 ? "airHold" : "airRecover";
     }
 
     NsmbNetplayPoC::InputState input = NeutralInputPreservingTouch(fallback);

@@ -36,6 +36,7 @@ struct PlayerFrameState
     bool Found = false;
     melonDS::u32 X = 0;
     melonDS::u32 Y = 0;
+    std::int32_t VelX = 0;
     bool Dead = false;
     melonDS::u32 BattleStars = 0;
     bool GroundBelowSolid = false;

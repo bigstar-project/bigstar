@@ -107,12 +107,16 @@
 - 完了: `scripts/nsmb_mvl_ai_render_eval_events.py` は、評価JSON内の `logs\...` repo相対入力を現在cwdからも解決するようにした。既存評価JSONからイベントSVGが0件になるケースを避ける。
 - 完了: RuleAIに短期記憶ベースの壁脱出を追加した。目標方向が壁/穴へ向く場合は一時的に反対方向またはraw座標経路へ逃がし、死亡中は中立入力にして短期記憶をリセットする。traceには `dx/rawDx/intent/escape/still` を出す。
 - 検証: `logs/codex-ruleai-safe-revert-3300-20260613` は stage 0 / seed `0x2f52869f` / 3300F / software renderer / screenshot 300F間隔でpass。host/clientともPNG 11枚を生成し、client代表 `inst0_frame003300.png` は草原ステージ画面として目視確認済み。closed-loop評価では client `deathTransitions=0`、`aliveRows=82/84`、`bigStarDistance.approachDelta=469225177088`。
-- 残課題: 同ログのRuleAI監査では client `blockedInputRows=69`、`stuckWindows=1` が残る。frame 1290-1440付近でplayer1がブロック地形/ラップ端近辺に詰まり、`wallLeft=1/wallRight=1` の両壁扱いで左入力を続ける。両壁を単純に無視して進ませる実験ではスター取得は出たがGoomba接触死亡が増えたため不採用。次は地形スタック脱出とGoomba回避を分けて直す。
+- 残課題: 同ログのRuleAI監査では client `blockedInputRows=69`、`stuckWindows=1` が残る。frame 1290-1440付近でplayer1がブロック地形/ラップ端近辺に詰まり、`wallLeft=1/wallRight=1` の両壁扱いで左入力を続ける。スクショ上は見えているブロックへの完全な食い込みではなく、tileProbeのfoot側が `tile=0x019 behavior=0x00080002` のstorage contentsつきbreakable tileを横壁として拾っている可能性が高い。両壁を単純に無視して進ませる実験ではスター取得は出たがGoomba接触死亡が増えたため不採用。次は地形スタック脱出とGoomba回避を分けて直す。
 - 完了: RuleAI監査に `oscillationWindows` を追加した。左右入力を切り替えても狭い座標範囲に留まる振動スタックを検出する。`logs/codex-ruleai-wallprobe-3300-20260613` の試作では `stuckWindows=0` になったが、スクショではブロック近辺に留まり、監査v2で `oscillationWindows=11` を検出したため採用しなかった。
 - 完了: RuleAI監査に `hazardNearRows` / `hazardDeathTransitions` を追加した。死亡直前の最近傍 `moving_hazard` / enemyを保存し、地形スタックを減らす代わりにシェル/敵接触死を増やす試作を自動で弾く。`logs/codex-ruleai-safe-revert-3300-20260613` は `hazardDeathTransitions=0`、失敗試作 `logs/codex-ruleai-hazardjumpmem-2100-20260613/client` は `hazardDeathTransitions=1` を検出した。
-- 完了: RuleAI監査に `bodySolidRows` / `itemBoxBodyRows` を追加した。`logs/codex-ruleai-safe-revert-3300-20260613/client` では `bodySolidRows=69`、`itemBoxBodyRows=69` で、frame 1290以降の長時間スタックが「player bodyがitemBox tile 0x019に食い込む」問題として機械的に検出できる。
+- 完了: RuleAI監査に `bodySolidRows` / `itemBoxBodyRows` を追加した。`logs/codex-ruleai-safe-revert-3300-20260613/client` では `bodySolidRows=69`、`itemBoxBodyRows=69` で、frame 1290以降の長時間スタックを機械的に検出できる。ただし `itemBoxBodyRows` は `storageContents != 0` のblock tileを暫定的にitemBox扱いしている名前で、画面上の可視ブロックへの食い込みをそのまま意味しない。
 - 完了: `scripts/run-nsmb-mvl-ai-closed-loop-eval.ps1 -Policy rule` は評価後に host/client それぞれの `ruleai-audit.json` を自動生成する。`-RuleAIAuditSampleLimit` と `-RuleAIAuditStuckRecords` でサンプル数と停滞判定窓を調整できる。
-- 調査結果: frame 1500のSVGでは、selected playerの `center/feet/left/rightFeet` が itemBox tile `0x019 behavior=0x00080002` と重なっており、単純な左右反転や両壁無視ではなく、ブロック/アイテム箱地形に食い込んだ状態の脱出またはブロック叩き判断が必要。hazard検知範囲拡大、近距離踏みモード、tileProbe center/feet solid時のbodyEscape、壁際hazard hop、危険時Aパルス/クールダウン、両壁時にraw目標方向へ逃がす修正も試したが、シェル/Goomba接触死、落下死、または同地点スタック継続が出たため不採用。
+- 調査結果: frame 1500のSVGでは、selected playerの `center/feet/left/rightFeet` が `tile=0x019 behavior=0x00080002` と重なる。これは `breakableBlock=1` かつ `storageContents=2` のtileで、巨大マリオ用の救済/隠しitem boxを含む可能性がある。スクショでは右側が空いているのにsummaryだけ `wallRight=1` になっていたため、見た目上の地形とAI用地形summaryがズレていた。hazard検知範囲拡大、近距離踏みモード、tileProbe center/feet solid時のbodyEscape、壁際hazard hop、危険時Aパルス/クールダウン、両壁時にraw目標方向へ逃がす修正も試したが、シェル/Goomba接触死、落下死、または同地点スタック継続が出たため不採用。
+- 完了: tileProbe summary / RuntimePlayerFeature / imitation hazard guard / RuleAI入力では、左右壁判定から `leftFeet/rightFeet` 単独のsolidishを外し、body側probeまたはCollisionMgrの左右接触だけで `wallLeft/wallRight` を立てるようにした。これにより、足元のstorage blockを横壁として拾うfalse positiveを抑えた。
+- 完了: RuleAIに `rawWallRoute`、`guardLead`、`guardBrake`、`airRecover` を追加した。wrap距離で壁へ向かう時はraw座標方向が開いていればそちらへ回し、スター優勢時は次スター追跡を止め、速度と逆方向へ短くブレーキする。空中でスター優勢かつ穴判定が出た場合は片側壁から離れる方向へ復帰を試す。
+- 検証: `logs/codex-ruleai-guardbrake-3300-20260613` は stage 0 / seed `0x2f52869f` / 3300F / software rendererでhost/clientとも `deathTransitions=0`、それぞれ `starPickups=1`。同seedの旧safeログで残っていたclientの長時間左壁スタックは解消し、client `blockedInputRows=1`、`stuckWindows=0` まで減った。
+- 検証: `logs/codex-ruleai-guardbrake-3seed-2600-20260613` は seeds `0x2f52869f,0x13579bdf,0x12345678` / 2600Fで `avgDeathTransitions=0.5`、`avgAliveRatio=0.925`、`avgStarPickups=0.333`、`avgBigStarApproachDelta=462303582890.6667`。以前の5seed記録 `avgDeathTransitions=1.0` / `avgAliveRatio=0.8833333333` より安全側に改善したが、seed `0x13579bdf` と `0x12345678` ではまだ死亡が残る。
 
 ## AI Play Log
 
@@ -448,11 +452,11 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 
 ## Next Actions
 
-- 最優先: RuleAIをスクショ/SVG/監査JSONで反復改善する。`logs/codex-ruleai-safe-revert-3300-20260613` では死亡0まで戻した一方、`blockedInputRows=69`、`stuckWindows=1`、監査v2 `oscillationWindows=11` が残るため、まずframe 1290以降のitemBox食い込み/ブロック地形スタックを直す。両壁false positiveを単純に無視する、hazard範囲を広げる、近距離hazardへ踏みに行く、といった試作はGoomba接触死または左右振動を増やしたので不採用。次はtileProbeのcenter/feetがblock/itemBoxに重なった時だけ、通常の星追跡から「脱出/ブロック叩き」サブモードへ切り替える。
+- 最優先: RuleAIをスクショ/SVG/監査JSONで反復改善する。`logs/codex-ruleai-guardbrake-3300-20260613` ではseed `0x2f52869f` のhost/client死亡0とスター取得1を確認し、旧safeログのclient左壁スタックは解消した。次は `logs/codex-ruleai-guardbrake-3seed-2600-20260613` で残ったseed `0x13579bdf` / `0x12345678` の死亡を、スクショと `ruleai-audit.json` で死亡原因別に潰す。特にGoomba/シェル接触死、落下死、wrap経路選択を分けて扱う。
 - 次に、評価結果で弱いscenarioを特定してから、固定Mario/無操作Luigiログを増やすだけでなくscenario別に短い高品質人間ログを集める。まずは `star-chase`、`item-box`、`fire`、`enemy-hazard`、`recovery/fall-avoid`、`free-play` を各5-10本、各1-3分程度にし、`recording-audit`、`visual-state-audit`、SVG/viewer目視で破棄/採用を決める。Marioが動かないログは基礎操作データとして有効だが、対戦反応は学べないので単独で増やし続けない。
 - RuleAIは「強いAI」を目指すより先に、相手・環境揺らし・DAgger用の分布拡張器として進化させる。Big Star追跡、落下回避、近傍item/box、単純攻撃/回避を入れ、人間がRuleAI相手に操作したログと、模倣AIがRuleAI相手に失敗したログを集める。
 - 模倣学習は全12ボタン独立multi-labelのまま進めず、入力空間を実操作に寄せる。まず有効ボタンmaskを A/B/Left/Right/Up/Down/Y に制限し、左右/上下同時を禁止する。次に「方向」「jump」「dash/fire」「duck」などのfactor化、前回入力/hold duration/reaction delayを特徴量に入れ、短いノイズ入力を抑える。
 - DAgger風の反復を入れる。人間ログで初期モデルを作る、モデルを閉ループで走らせる、失敗/分布外/迷いframeをviewerで見つける、人間が同じ場面や近いscenarioをプレイして追加ラベルを入れる、datasetへ集約して再学習する。この反復を自己対戦の前に数回回す。
 - 自己対戦は、閉ループ評価で最低限「落ちずに動く」「星へ近づく」「item/fireballを扱う」が確認できてから始める。初期相手は無操作Mario、次にRuleAI、次に過去版モデル、最後にcurrent vs currentへ進める。報酬は勝敗だけでなく、star差、死亡、Big Star接近、item取得、攻撃/回避、時間生存を混ぜる。
 - 学習/自己対戦用には、2窓GUI smokeではなく高速runnerを用意する。目標は評価で60fps安定、自己対戦データ生成で数百fps以上。描画/音声/stdout/log flushを切り、必要な観測と入力だけを残す。
-- 状態取得の残課題は並行して潰す。StageLayout tile probeの低位tile意味、block/item boxの使用後tile変化、8コイン報酬item settings、スター/ダメージ/powerup無敵の原因分類、fireball寿命/当たり判定state、落下死ライン/ステージ境界を、実ログとSVG/viewerで照合する。
+- 状態取得の残課題は並行して潰す。StageLayout tile probeの低位tile意味、storageContentsつきbreakable tileと隠し/救済item boxの区別、block/item boxの使用後tile変化、8コイン報酬item settings、スター/ダメージ/powerup無敵の原因分類、fireball寿命/当たり判定state、落下死ライン/ステージ境界を、実ログとSVG/viewerで照合する。
