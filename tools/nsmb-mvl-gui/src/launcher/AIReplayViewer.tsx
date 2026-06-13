@@ -101,6 +101,7 @@ type ReplayFrame = {
     string,
     { held?: number | string; heldHex?: string; valid?: boolean }
   >;
+  labels?: Record<string, ReplayLabel>;
   players?: PlayerState[];
   targets?: Record<string, unknown>;
   objectSummary?: Record<string, unknown>;
@@ -131,6 +132,28 @@ type ReplayFrame = {
     visibleCamera1?: number | string;
   };
   objects?: ReplayObject[];
+};
+type ReplayActionLabels = {
+  fire?: string;
+  fireId?: number | string;
+  horizontal?: string;
+  horizontalId?: number | string;
+  jump?: string;
+  jumpId?: number | string;
+  run?: string;
+  runId?: number | string;
+  vertical?: string;
+  verticalId?: number | string;
+};
+type ReplayButtonLabels = Record<string, number | string | boolean>;
+type ReplayLabel = {
+  actions?: ReplayActionLabels;
+  allowedHeld?: number | string;
+  buttons?: ReplayButtonLabels;
+  held?: number | string;
+  pressed?: number | string;
+  source?: string;
+  valid?: boolean | number;
 };
 type EventSample = {
   frame?: number | string;
@@ -358,6 +381,51 @@ function buttonsText(input?: {
     .filter(([, bit]) => (held & (1 << bit)) !== 0)
     .map(([name]) => name);
   return names.length ? names.join('+') : '-';
+}
+
+function playerLabel(frame: ReplayFrame | undefined, index: 0 | 1) {
+  return frame?.labels?.[`player${index}`];
+}
+
+function labelButtonsText(label?: ReplayLabel) {
+  if (!label || label.valid === false || label.valid === 0) return '-';
+  if (label.buttons) {
+    const names = ['up', 'down', 'left', 'right', 'y', 'b'].filter((name) =>
+      numeric(label.buttons?.[name]),
+    );
+    return names.length ? names.join('+').toUpperCase() : '-';
+  }
+  return buttonsText({ held: label.allowedHeld ?? label.held, valid: true });
+}
+
+function actionLabelText(label?: ReplayLabel) {
+  const actions = label?.actions;
+  if (!actions) return '-';
+  return `fire:${actions.fire ?? '-'}`;
+}
+
+function actionLabelCaption(label?: ReplayLabel) {
+  if (!label) return undefined;
+  const actions = label.actions;
+  const actionParts = actions
+    ? [
+        `run ${actions.run ?? '-'}`,
+        `jump ${actions.jump ?? '-'}`,
+        `h ${actions.horizontal ?? '-'}`,
+        `v ${actions.vertical ?? '-'}`,
+      ].join(' / ')
+    : '';
+  const held = label.allowedHeld ?? label.held;
+  const pressed = label.pressed;
+  const source = label.source ? `source ${label.source}` : '';
+  return [
+    actionParts,
+    `held ${hexText(held)}`,
+    `pressed ${hexText(pressed)}`,
+    source,
+  ]
+    .filter(Boolean)
+    .join(' / ');
 }
 
 function hexText(value: unknown) {
@@ -679,6 +747,18 @@ function frameEvents(frame: ReplayFrame, previous?: ReplayFrame) {
       return numeric(block.any) || numeric(block.itemBox);
     });
     if (blockHit) events.push(`P${index} block`);
+
+    const actionLabel = playerLabel(frame, index as 0 | 1)?.actions;
+    const previousActionLabel = playerLabel(previous, index as 0 | 1)?.actions;
+    if (
+      actionLabel?.fire &&
+      actionLabel.fire !== 'off' &&
+      actionLabel.fire !== previousActionLabel?.fire
+    ) {
+      events.push(
+        `P${index} fire ${previousActionLabel?.fire ?? 'off'}>${actionLabel.fire}`,
+      );
+    }
   }
   for (const category of new Set(
     (frame.objects ?? []).map((object) => objectCategory(object)),
@@ -1062,6 +1142,8 @@ export function AIReplayViewer() {
   const fireballSlotCount = numeric(
     frame?.specialObjects?.fireballs?.activeSlots,
   );
+  const player0Label = playerLabel(frame, 0);
+  const player1Label = playerLabel(frame, 1);
   const selectedTask = aiTasks.find((candidate) => candidate.id === task);
 
   const refreshArtifacts = useCallback(async () => {
@@ -1990,11 +2072,29 @@ export function AIReplayViewer() {
             >
               <SmallInfoCard
                 label="入力 P0"
-                value={buttonsText(frame.inputs?.player0)}
+                value={
+                  frame.inputs?.player0
+                    ? buttonsText(frame.inputs.player0)
+                    : labelButtonsText(player0Label)
+                }
               />
               <SmallInfoCard
                 label="入力 P1"
-                value={buttonsText(frame.inputs?.player1)}
+                value={
+                  frame.inputs?.player1
+                    ? buttonsText(frame.inputs.player1)
+                    : labelButtonsText(player1Label)
+                }
+              />
+              <SmallInfoCard
+                label="action label P0"
+                value={actionLabelText(player0Label)}
+                caption={actionLabelCaption(player0Label)}
+              />
+              <SmallInfoCard
+                label="action label P1"
+                value={actionLabelText(player1Label)}
+                caption={actionLabelCaption(player1Label)}
               />
               <SmallInfoCard
                 label="可視 object"
