@@ -63,6 +63,40 @@ def num(value: Any, default: int = 0) -> int:
     return default
 
 
+def star_invincible_candidate(player: dict[str, Any]) -> int:
+    visual_state = player.get("visualState") or {}
+    if num(visual_state.get("starInvincibleCandidate")):
+        return 1
+    return int(
+        num(player.get("inventoryPowerup")) == 2
+        and num(visual_state.get("actorPowerupState")) == 0
+        and num(visual_state.get("actorPowerupFormState")) == 0
+        and num(visual_state.get("shellState")) == 0
+    )
+
+
+def visual_powerup_kind_candidate(player: dict[str, Any]) -> int:
+    visual_state = player.get("visualState") or {}
+    powerup_state = visual_state.get("powerup") or {}
+    raw_powerup = num(powerup_state.get("raw"), num(player.get("powerup")))
+    actor_state = num(visual_state.get("actorPowerupState"))
+    actor_form = num(visual_state.get("actorPowerupFormState"))
+    shell_state = num(visual_state.get("shellState"))
+    if raw_powerup == 2 or actor_state == 2 or actor_form == 2:
+        return 2
+    if raw_powerup == 4 or shell_state:
+        return 4
+    if actor_state == 4 or actor_form == 4:
+        return 3
+    if raw_powerup == 1 or actor_state == 1 or actor_form == 1:
+        return 1
+    if raw_powerup == 5:
+        return 5
+    if raw_powerup:
+        return raw_powerup
+    return 0
+
+
 def object_category(obj: dict[str, Any]) -> str:
     category = str(obj.get("category") or "object")
     object_id = num(obj.get("objectId"))
@@ -110,6 +144,7 @@ def audit_playlog(path: Path, max_samples: int, fireball_owner_min_confidence: i
     visual_state_missing = [0, 0]
     invincibility_unknown = [0, 0]
     invincibility_candidate_frames = [0, 0]
+    star_invincibility_candidate_frames = [0, 0]
     damage_guard_timer_frames = [0, 0]
     damage_cooldown_frames = [0, 0]
     shell_state_frames = [0, 0]
@@ -138,8 +173,9 @@ def audit_playlog(path: Path, max_samples: int, fireball_owner_min_confidence: i
             powerup_values[player_index][num(player.get("powerup"), -1)] += 1
             inventory_powerup_values[player_index][num(player.get("inventoryPowerup"), -1)] += 1
             visual_state = player.get("visualState") or {}
-            visual_powerup_values[player_index][num(visual_state.get("visualPowerupKindCandidate"), -1)] += 1
-            if num(visual_state.get("isFireVisualCandidate")) or num(visual_state.get("canShootFireVisualCandidate")):
+            visual_powerup = visual_powerup_kind_candidate(player)
+            visual_powerup_values[player_index][visual_powerup] += 1
+            if visual_powerup == 2 or num(visual_state.get("canShootFireVisualCandidate")):
                 visual_fire_candidate_frames[player_index] += 1
             if not visual_state:
                 visual_state_missing[player_index] += 1
@@ -152,8 +188,11 @@ def audit_playlog(path: Path, max_samples: int, fireball_owner_min_confidence: i
             elif not num(visual_state.get("invincibleKnown")):
                 invincibility_unknown[player_index] += 1
             else:
-                if num(visual_state.get("invincibleCandidate")):
+                star_invincible = star_invincible_candidate(player)
+                if num(visual_state.get("invincibleCandidate")) or star_invincible:
                     invincibility_candidate_frames[player_index] += 1
+                if star_invincible:
+                    star_invincibility_candidate_frames[player_index] += 1
                 if num(visual_state.get("damageGuardTimer")):
                     damage_guard_timer_frames[player_index] += 1
                 if num(visual_state.get("damageCooldown")):
@@ -235,6 +274,7 @@ def audit_playlog(path: Path, max_samples: int, fireball_owner_min_confidence: i
         "visualStateMissing": visual_state_missing,
         "invincibilityUnknown": invincibility_unknown,
         "invincibilityCandidateFrames": invincibility_candidate_frames,
+        "starInvincibilityCandidateFrames": star_invincibility_candidate_frames,
         "damageGuardTimerFrames": damage_guard_timer_frames,
         "damageCooldownFrames": damage_cooldown_frames,
         "shellStateFrames": shell_state_frames,

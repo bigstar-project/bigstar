@@ -115,6 +115,7 @@ def player_summary(player: dict[str, Any]) -> dict[str, Any]:
         "actorPowerupFormState": num(visual_state.get("actorPowerupFormState")),
         "invincibleKnown": bool(visual_state.get("invincibleKnown")),
         "invincibleCandidate": bool(visual_state.get("invincibleCandidate")),
+        "starInvincibleCandidate": bool(visual_state.get("starInvincibleCandidate")),
         "battleStars": num(player.get("battleStars")),
         "coins": num(player.get("coins")),
     }

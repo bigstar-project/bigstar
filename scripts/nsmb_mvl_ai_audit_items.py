@@ -87,7 +87,7 @@ def item_kind_candidate(object_id: int, settings: int, category: str) -> tuple[s
     if settings in MEGA_MUSHROOM_ITEM_SETTINGS:
         return "mega_mushroom_candidate", 1
     if settings in INVINCIBLE_STAR_ITEM_SETTINGS:
-        return "invincible_star_candidate", 1
+        return "invincible_star", 3
     if settings in UNKNOWN_ITEM_VARIANT_SETTINGS:
         return "unknown_item_variant_candidate", 1
     return "unknown", 0

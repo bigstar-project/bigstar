@@ -145,6 +145,9 @@ ITEM_SETTINGS_SUPER_MUSHROOM_CANDIDATES = {
 }
 ITEM_SETTINGS_MEGA_MUSHROOM_CANDIDATES: set[int] = set()
 ITEM_SETTINGS_INVINCIBLE_STAR_CANDIDATES = {
+    # Observed by manual visual confirmation at
+    # logs/nsmb-mvl-human-recording-stage0-20260614-000043/client/ai-playlog.jsonl
+    # frame 22534.
     0x00011081,
 }
 ITEM_SETTINGS_SHELL_CANDIDATES = {
@@ -514,6 +517,50 @@ def visual_powerup_kind_candidate(player: dict[str, Any]) -> int:
     return 0
 
 
+def visual_powerup_source_mask_candidate(player: dict[str, Any]) -> int:
+    visual = player.get("visualState") or {}
+    visual_powerup = visual.get("powerup") or {}
+    powerup = num(visual_powerup.get("raw"), num(player.get("powerup")))
+    actor_powerup_state = num(visual.get("actorPowerupState"))
+    actor_powerup_form_state = num(visual.get("actorPowerupFormState"))
+    shell_state = num(visual.get("shellState"))
+    mask = 0
+    if powerup != 0:
+        mask |= 1
+    if actor_powerup_state != 0:
+        mask |= 4
+    if actor_powerup_form_state != 0:
+        mask |= 8
+    if shell_state != 0:
+        mask |= 16
+    return mask
+
+
+def star_invincible_candidate(player: dict[str, Any]) -> int:
+    visual = player.get("visualState") or {}
+    if num(visual.get("starInvincibleCandidate")):
+        return 1
+
+    # In the 2026-06-14 stage 0 manual log, Luigi is visually star-invincible at
+    # frame 22262 while the body actor state/form remains normal and the raw
+    # inventory field is 2. Keep this separate from body visual powerup.
+    inventory_powerup = num(player.get("inventoryPowerup"))
+    actor_powerup_state = num(visual.get("actorPowerupState"))
+    actor_powerup_form_state = num(visual.get("actorPowerupFormState"))
+    shell_state = num(visual.get("shellState"))
+    return int(
+        inventory_powerup == ITEM_KIND_FIRE_FLOWER
+        and actor_powerup_state == 0
+        and actor_powerup_form_state == 0
+        and shell_state == 0
+    )
+
+
+def invincible_candidate(player: dict[str, Any]) -> int:
+    visual = player.get("visualState") or {}
+    return int(num(visual.get("invincibleCandidate")) or star_invincible_candidate(player))
+
+
 def contextual_powerup_item_kind(current_powerup_kind: int) -> int:
     if current_powerup_kind <= 0:
         return ITEM_KIND_SUPER_MUSHROOM
@@ -562,7 +609,7 @@ def item_kind_candidate(object_id: int, settings: int, category: str, current_po
     if settings in ITEM_SETTINGS_MEGA_MUSHROOM_CANDIDATES:
         return ITEM_KIND_MEGA_MUSHROOM, ITEM_KIND_CONFIDENCE_HEURISTIC
     if settings in ITEM_SETTINGS_INVINCIBLE_STAR_CANDIDATES:
-        return ITEM_KIND_INVINCIBLE_STAR, ITEM_KIND_CONFIDENCE_HEURISTIC
+        return ITEM_KIND_INVINCIBLE_STAR, ITEM_KIND_CONFIDENCE_CONFIRMED
     if settings in ITEM_SETTINGS_UNKNOWN_ITEM_VARIANTS:
         return ITEM_KIND_UNKNOWN_ITEM_VARIANT, ITEM_KIND_CONFIDENCE_HEURISTIC
     return ITEM_KIND_UNKNOWN, ITEM_KIND_CONFIDENCE_NONE
@@ -846,6 +893,8 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
     opponent_visual_powerup = opponent_visual.get("powerup") or {}
     self_visual_powerup_kind = visual_powerup_kind_candidate(self_player)
     opponent_visual_powerup_kind = visual_powerup_kind_candidate(opponent)
+    self_star_invincible = star_invincible_candidate(self_player)
+    opponent_star_invincible = star_invincible_candidate(opponent)
     visual_summary = record.get("visualSummary") or {}
     objects = record.get("objects") or []
     category_counts: dict[str, int] = {}
@@ -912,7 +961,7 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "self_has_reserve_item_candidate": num(self_visual.get("hasReserveItemCandidate")),
         "self_can_shoot_fire_candidate": num(self_visual_powerup.get("canShootFireCandidate")),
         "self_visual_powerup_kind_candidate": self_visual_powerup_kind,
-        "self_visual_powerup_source_mask": num(self_visual.get("visualPowerupSourceMask")),
+        "self_visual_powerup_source_mask": visual_powerup_source_mask_candidate(self_player),
         "self_is_fire_visual_candidate": num(self_visual.get("isFireVisualCandidate")),
         "self_is_mini_visual_candidate": int(self_visual_powerup_kind == ITEM_KIND_MINI_MUSHROOM),
         "self_can_shoot_fire_visual_candidate": num(self_visual.get("canShootFireVisualCandidate")),
@@ -930,7 +979,8 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "self_powerup_apply_lock": num(self_visual.get("powerupApplyLock")),
         "self_shell_state": num(self_visual.get("shellState")),
         "self_invincible_known": num(self_visual.get("invincibleKnown")),
-        "self_invincible_candidate": num(self_visual.get("invincibleCandidate")),
+        "self_invincible_candidate": invincible_candidate(self_player),
+        "self_star_invincible_candidate": self_star_invincible,
         "self_dead": num(self_player.get("dead")),
         "self_battle_stars": num(self_player.get("battleStars")),
         "self_coins": num(self_player.get("coins")),
@@ -970,7 +1020,7 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "opponent_has_reserve_item_candidate": num(opponent_visual.get("hasReserveItemCandidate")),
         "opponent_can_shoot_fire_candidate": num(opponent_visual_powerup.get("canShootFireCandidate")),
         "opponent_visual_powerup_kind_candidate": opponent_visual_powerup_kind,
-        "opponent_visual_powerup_source_mask": num(opponent_visual.get("visualPowerupSourceMask")),
+        "opponent_visual_powerup_source_mask": visual_powerup_source_mask_candidate(opponent),
         "opponent_is_fire_visual_candidate": num(opponent_visual.get("isFireVisualCandidate")),
         "opponent_is_mini_visual_candidate": int(opponent_visual_powerup_kind == ITEM_KIND_MINI_MUSHROOM),
         "opponent_can_shoot_fire_visual_candidate": num(opponent_visual.get("canShootFireVisualCandidate")),
@@ -988,7 +1038,8 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "opponent_powerup_apply_lock": num(opponent_visual.get("powerupApplyLock")),
         "opponent_shell_state": num(opponent_visual.get("shellState")),
         "opponent_invincible_known": num(opponent_visual.get("invincibleKnown")),
-        "opponent_invincible_candidate": num(opponent_visual.get("invincibleCandidate")),
+        "opponent_invincible_candidate": invincible_candidate(opponent),
+        "opponent_star_invincible_candidate": opponent_star_invincible,
         "opponent_dead": num(opponent.get("dead")),
         "opponent_battle_stars": num(opponent.get("battleStars")),
         "opponent_coins": num(opponent.get("coins")),

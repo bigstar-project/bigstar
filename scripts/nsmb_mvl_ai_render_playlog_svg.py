@@ -188,9 +188,11 @@ def visual_state_text(player: dict[str, Any]) -> str:
     visual_state = player.get("visualState") or {}
     powerup = visual_state.get("powerup") or {}
     inventory = visual_state.get("inventoryPowerup") or {}
+    star_invincible = star_invincible_candidate(player)
+    inventory_name = "star_invincible_candidate" if star_invincible else inventory.get("name", player.get("inventoryPowerup", "?"))
     parts = [
         f"pwr={powerup.get('name', player.get('powerup', '?'))}",
-        f"inv={inventory.get('name', player.get('inventoryPowerup', '?'))}",
+        f"inv={inventory_name}",
     ]
     if num(visual_state.get("hasReserveItemCandidate")):
         parts.append("reserve")
@@ -201,10 +203,12 @@ def visual_state_text(player: dict[str, Any]) -> str:
         parts.append("miniVisual")
     if num(visual_state.get("canShootFireVisualCandidate")):
         parts.append("fireVisual")
+    if star_invincible:
+        parts.append("starInv")
     if num(visual_state.get("invincibleKnown")):
         parts.append(
             "invincible="
-            f"{num(visual_state.get('invincibleCandidate'))}"
+            f"{max(num(visual_state.get('invincibleCandidate')), star_invincible)}"
             f"/guard={num(visual_state.get('damageGuardTimer'))}"
             f"/dmg={num(visual_state.get('damageCooldown'))}"
         )
@@ -237,6 +241,17 @@ def corrected_visual_powerup_kind(player: dict[str, Any]) -> int:
     if raw_powerup:
         return raw_powerup
     return 0
+
+
+def star_invincible_candidate(player: dict[str, Any]) -> int:
+    visual_state = player.get("visualState") or {}
+    if num(visual_state.get("starInvincibleCandidate")):
+        return 1
+    raw_inventory = num(player.get("inventoryPowerup"))
+    actor_state = num(visual_state.get("actorPowerupState"))
+    actor_form = num(visual_state.get("actorPowerupFormState"))
+    shell_state = num(visual_state.get("shellState"))
+    return int(raw_inventory == 2 and actor_state == 0 and actor_form == 0 and shell_state == 0)
 
 
 def pos(entity: dict[str, Any]) -> dict[str, int]:

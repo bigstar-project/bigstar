@@ -15597,11 +15597,10 @@ melonDS::u32 AIVisualPowerupSourceMask(
     melonDS::u32 actorPowerupFormState,
     melonDS::u32 shellState)
 {
+    (void)inventoryPowerup;
     melonDS::u32 mask = 0;
     if (powerup != 0)
         mask |= 1;
-    if (inventoryPowerup != 0)
-        mask |= 2;
     if (actorPowerupState != 0)
         mask |= 4;
     if (actorPowerupFormState != 0)
@@ -15609,6 +15608,15 @@ melonDS::u32 AIVisualPowerupSourceMask(
     if (shellState != 0)
         mask |= 16;
     return mask;
+}
+
+bool AIStarInvincibleCandidate(
+    melonDS::u32 inventoryPowerup,
+    melonDS::u32 actorPowerupState,
+    melonDS::u32 actorPowerupFormState,
+    melonDS::u32 shellState)
+{
+    return inventoryPowerup == 2 && actorPowerupState == 0 && actorPowerupFormState == 0 && shellState == 0;
 }
 
 std::int64_t AIWrappedDeltaX(std::int64_t x, std::int64_t origin)
@@ -16484,8 +16492,12 @@ void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& samp
         p0 ? sample.Player0DamageGuardTimer : sample.Player1DamageGuardTimer;
     const bool damagePhysicsGuard =
         (v(sample.PlayerActor0PhysicsFlag, sample.PlayerActor1PhysicsFlag) & 0x80000000u) != 0;
-    const bool invincibleCandidate =
+    const bool starInvincibleCandidate =
+        AIStarInvincibleCandidate(inventoryPowerup, powerupState, powerupFormState, shellState);
+    const bool damageInvulnerableCandidate =
         damageGuardTimer != 0 || damageCooldown != 0 || damageGuardFlag != 0 || damagePhysicsGuard;
+    const bool invincibleCandidate =
+        starInvincibleCandidate || damageInvulnerableCandidate;
     out << "{\"index\":" << index
         << ",\"found\":" << v(sample.PlayerActor0Found, sample.PlayerActor1Found)
         << ",\"guid\":";
@@ -16578,7 +16590,8 @@ void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& samp
     WriteJsonHex(out, shellActorPtr);
     out << ",\"invincibleKnown\":1"
         << ",\"invincibleCandidate\":" << (invincibleCandidate ? 1 : 0)
-        << ",\"damageInvulnerableCandidate\":" << (invincibleCandidate ? 1 : 0)
+        << ",\"starInvincibleCandidate\":" << (starInvincibleCandidate ? 1 : 0)
+        << ",\"damageInvulnerableCandidate\":" << (damageInvulnerableCandidate ? 1 : 0)
         << ",\"powerupMappingVerified\":0"
         << ",\"notes\":\"powerup enum names are tentative; damage guard timer and shell state are disassembly-backed\""
         << "}"
@@ -16905,6 +16918,10 @@ bool RuntimePlayerFeature(
         p0 ? sample.PlayerActor0DamageGuardFlag : sample.PlayerActor1DamageGuardFlag;
     const bool damagePhysicsGuard =
         (v(sample.PlayerActor0PhysicsFlag, sample.PlayerActor1PhysicsFlag) & 0x80000000u) != 0;
+    const bool starInvincibleCandidate =
+        AIStarInvincibleCandidate(inventoryPowerup, powerupState, powerupFormState, shellState);
+    const bool damageInvulnerableCandidate =
+        damageGuardTimer != 0 || damageCooldown != 0 || damageGuardFlag != 0 || damagePhysicsGuard;
 
     if (name == "found") out = found;
     else if (name == "x") out = SignedU32(x);
@@ -16943,7 +16960,8 @@ bool RuntimePlayerFeature(
     else if (name == "shell_state") out = shellState;
     else if (name == "invincible_known") out = 1;
     else if (name == "invincible_candidate") out =
-        damageGuardTimer != 0 || damageCooldown != 0 || damageGuardFlag != 0 || damagePhysicsGuard ? 1 : 0;
+        starInvincibleCandidate || damageInvulnerableCandidate ? 1 : 0;
+    else if (name == "star_invincible_candidate") out = starInvincibleCandidate ? 1 : 0;
     else if (name == "dead") out = v(sample.Player0Dead, sample.Player1Dead);
     else if (name == "battle_stars") out = v(sample.Player0BattleStars, sample.Player1BattleStars);
     else if (name == "coins") out = v(sample.Player0Coins, sample.Player1Coins);
@@ -17451,7 +17469,7 @@ std::pair<int, int> RuntimeItemKindAndConfidence(
     if (RuntimeItemSettingsIsMegaMushroomCandidate(settings))
         return {kRuntimeItemKindMegaMushroom, kRuntimeItemKindConfidenceHeuristic};
     if (RuntimeItemSettingsIsInvincibleStarCandidate(settings))
-        return {kRuntimeItemKindInvincibleStar, kRuntimeItemKindConfidenceHeuristic};
+        return {kRuntimeItemKindInvincibleStar, kRuntimeItemKindConfidenceConfirmed};
     if (RuntimeItemSettingsIsUnknownItemVariantCandidate(settings))
         return {kRuntimeItemKindUnknownItemVariant, kRuntimeItemKindConfidenceHeuristic};
     return {kRuntimeItemKindUnknown, kRuntimeItemKindConfidenceNone};
