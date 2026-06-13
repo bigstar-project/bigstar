@@ -238,6 +238,12 @@ TILE_PROBE_BLOCK_NAMES = [
     "currentBehavior",
 ]
 
+TILE_PROBE_BLOCK_DERIVED_NAMES = [
+    "storageBreakableCandidate",
+    "hiddenOrRescueCandidate",
+    "visibleSolidCandidate",
+]
+
 
 def num(value: Any, default: int = 0) -> int:
     if isinstance(value, bool):
@@ -273,6 +279,73 @@ def sane_bottom_tile(tile_type: int) -> bool:
 
 def by_name(items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {str(item.get("name")): item for item in items if isinstance(item, dict)}
+
+
+def tile_sample_solidish(samples: dict[str, dict[str, Any]], name: str) -> int:
+    return num((samples.get(name) or {}).get("solidish"))
+
+
+def recompute_tile_probe_summary(
+    tile_probe: dict[str, Any],
+    contact: dict[str, Any],
+    samples: dict[str, dict[str, Any]],
+) -> dict[str, int]:
+    found = num(tile_probe.get("found"))
+    ground_below = tile_sample_solidish(samples, "below")
+    ahead_body = tile_sample_solidish(samples, "aheadBody")
+    ahead_feet = tile_sample_solidish(samples, "aheadFeet")
+    ahead_below = tile_sample_solidish(samples, "aheadBelow")
+    ahead2_below = tile_sample_solidish(samples, "ahead2Below")
+    left_body = tile_sample_solidish(samples, "leftBody")
+    left_below = tile_sample_solidish(samples, "leftBelow")
+    left2_below = tile_sample_solidish(samples, "left2Below")
+    right_body = tile_sample_solidish(samples, "rightBody")
+    right_below = tile_sample_solidish(samples, "rightBelow")
+    right2_below = tile_sample_solidish(samples, "right2Below")
+    contact_ground = num(contact.get("ground"))
+    contact_wall_left = num(contact.get("wallLeft"))
+    contact_wall_right = num(contact.get("wallRight"))
+
+    hole_ahead = int(found and not ahead_below and not ahead2_below)
+    hole_left = int(found and not left_below and not left2_below)
+    hole_right = int(found and not right_below and not right2_below)
+    hole_suppressed = int(contact_ground and not ground_below)
+
+    return {
+        "groundBelowSolid": ground_below,
+        "aheadBodySolid": ahead_body,
+        "aheadFeetSolid": ahead_feet,
+        "aheadBelowSolid": ahead_below,
+        "ahead2BelowSolid": ahead2_below,
+        "wallAhead": int(ahead_body or ahead_feet),
+        "holeAhead": hole_ahead,
+        "wallLeft": int(left_body or contact_wall_left),
+        "holeLeft": hole_left,
+        "wallRight": int(right_body or contact_wall_right),
+        "holeRight": hole_right,
+        "contactGround": contact_ground,
+        "effectiveGroundBelowSolid": int(ground_below or contact_ground),
+        "holeSuppressedByContact": hole_suppressed,
+        "effectiveHoleAhead": int(hole_ahead and not hole_suppressed),
+        "effectiveHoleLeft": int(hole_left and not hole_suppressed),
+        "effectiveHoleRight": int(hole_right and not hole_suppressed),
+    }
+
+
+def derived_tile_block_features(block: dict[str, Any]) -> dict[str, int]:
+    any_block = num(block.get("any"))
+    question = num(block.get("question"))
+    breakable = num(block.get("breakable"))
+    brick = num(block.get("brick"))
+    invisible = num(block.get("invisible"))
+    storage_contents = num(block.get("storageContents"))
+    has_storage = num(block.get("hasStorageContents")) or int(storage_contents != 0)
+    storage_breakable = int(any_block and breakable and has_storage)
+    return {
+        "storageBreakableCandidate": storage_breakable,
+        "hiddenOrRescueCandidate": int(any_block and (invisible or storage_breakable)),
+        "visibleSolidCandidate": int(any_block and (question or brick or (breakable and not invisible))),
+    }
 
 
 def pos(entity: dict[str, Any]) -> dict[str, int]:
@@ -841,16 +914,22 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
                 num(bottom_tile.get(name)) if bottom_tile_sane else 0
             )
 
-        tile_probe_summary = tile_probe.get("summary") or {}
+        raw_tile_probe_summary = tile_probe.get("summary") or {}
+        tile_probe_samples = by_name(tile_probe.get("samples") or [])
+        tile_probe_summary = recompute_tile_probe_summary(tile_probe, contact, tile_probe_samples)
         row[f"{prefix}_tile_probe_found"] = num(tile_probe.get("found"))
         row[f"{prefix}_tile_probe_direction"] = num(tile_probe.get("direction"), 1)
         for name in TILE_PROBE_SUMMARY_NAMES:
             row[f"{prefix}_tile_probe_{name}"] = num(tile_probe_summary.get(name))
-        tile_probe_samples = by_name(tile_probe.get("samples") or [])
+            row[f"{prefix}_tile_probe_raw_{name}"] = num(raw_tile_probe_summary.get(name))
+            row[f"{prefix}_tile_probe_{name}_recomputed_diff"] = int(
+                num(tile_probe_summary.get(name)) != num(raw_tile_probe_summary.get(name))
+            )
         for sample_name in TILE_PROBE_SAMPLE_NAMES:
             sample = tile_probe_samples.get(sample_name) or {}
             tile = sample.get("tile") or {}
             block = sample.get("block") or {}
+            derived_block = derived_tile_block_features(block)
             sample_prefix = f"{prefix}_tile_probe_{sample_name}"
             behavior = num(sample.get("behavior"))
             row[f"{sample_prefix}_found"] = num(sample.get("found"))
@@ -866,6 +945,8 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
                 row[f"{sample_prefix}_{name}"] = num(tile.get(name))
             for name in TILE_PROBE_BLOCK_NAMES:
                 row[f"{sample_prefix}_block_{name}"] = num(block.get(name))
+            for name in TILE_PROBE_BLOCK_DERIVED_NAMES:
+                row[f"{sample_prefix}_block_{name}"] = num(derived_block.get(name))
 
     for name, bit in BUTTON_BITS.items():
         row[f"label_{name}"] = 1 if (held & (1 << bit)) else 0
