@@ -145,12 +145,15 @@ def audit_prefix(row: dict[str, str], prefix: str, report: dict[str, Any], sampl
 
     row_has_hidden_or_rescue = False
     row_has_storage_breakable = False
+    row_has_visible_storage_breakable = False
     for sample_name in PROBE_SAMPLES:
         base = f"{prefix}_tile_probe_{sample_name}_block"
         hidden_or_rescue = num(row.get(f"{base}_hiddenOrRescueCandidate"))
         storage_breakable = num(row.get(f"{base}_storageBreakableCandidate"))
+        visible_storage_breakable = num(row.get(f"{base}_visibleStorageBreakableCandidate"))
         row_has_hidden_or_rescue = row_has_hidden_or_rescue or bool(hidden_or_rescue)
         row_has_storage_breakable = row_has_storage_breakable or bool(storage_breakable)
+        row_has_visible_storage_breakable = row_has_visible_storage_breakable or bool(visible_storage_breakable)
         if hidden_or_rescue:
             append_example(
                 p["examples"]["hiddenOrRescueCandidate"],
@@ -170,6 +173,8 @@ def audit_prefix(row: dict[str, str], prefix: str, report: dict[str, Any], sampl
         p["hiddenOrRescueCandidateRows"] += 1
     if row_has_storage_breakable:
         p["storageBreakableCandidateRows"] += 1
+    if row_has_visible_storage_breakable:
+        p["visibleStorageBreakableCandidateRows"] += 1
 
 
 def empty_player_report() -> dict[str, Any]:
@@ -181,6 +186,7 @@ def empty_player_report() -> dict[str, Any]:
         "summaryRecomputedDiffRows": 0,
         "hiddenOrRescueCandidateRows": 0,
         "storageBreakableCandidateRows": 0,
+        "visibleStorageBreakableCandidateRows": 0,
         "examples": {
             "sideWallFeetOnly": [],
             "rawWallChanged": [],

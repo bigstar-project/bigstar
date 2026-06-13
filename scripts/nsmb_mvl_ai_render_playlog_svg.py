@@ -248,9 +248,27 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
         block = sample.get("block") or {}
         block_text = ""
         if num(block.get("any")):
+            block_invisible = num(block.get("invisible"))
+            block_breakable = num(block.get("breakable"))
+            block_visible = num(
+                block.get(
+                    "visibleSolidCandidate",
+                    int(num(block.get("question")) or num(block.get("brick")) or (block_breakable and not block_invisible)),
+                )
+            )
+            block_hidden = num(block.get("hiddenOrRescueCandidate", block_invisible))
+            block_visible_storage = num(
+                block.get(
+                    "visibleStorageBreakableCandidate",
+                    int(block_breakable and num(block.get("storageContents")) != 0 and not block_invisible),
+                )
+            )
             block_text = (
-                f" block itemBox={num(block.get('itemBox'))}"
-                f" contents={num(block.get('storageContents'))}"
+                f" block visible={block_visible}"
+                f" hidden={block_hidden}"
+                f" visibleStorageBreakable={block_visible_storage}"
+                f" legacyItemBox={num(block.get('itemBox'))}"
+                f" rawLowContents={num(block.get('storageContents'))}"
             )
         parts.append(
             f'<rect x="{x - 5:.1f}" y="{y - 5:.1f}" width="10" height="10" fill="{color}" '

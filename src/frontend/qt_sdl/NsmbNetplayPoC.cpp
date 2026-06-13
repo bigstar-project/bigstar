@@ -16000,6 +16000,10 @@ void WriteAITileBlockStateJson(std::ostream& out, melonDS::u32 tileID, melonDS::
     const int anyBlock = questionBlock || breakableBlock || brickBlock || invisibleBlock;
     const int hasStorageContents = anyBlock && storageContents != 0;
     const int itemBox = hasStorageContents;
+    const int storageBreakableCandidate = anyBlock && breakableBlock && hasStorageContents;
+    const int hiddenOrRescueCandidate = anyBlock && invisibleBlock;
+    const int visibleStorageBreakableCandidate = storageBreakableCandidate && !invisibleBlock;
+    const int visibleSolidCandidate = anyBlock && (questionBlock || brickBlock || (breakableBlock && !invisibleBlock));
     out << "{\"any\":" << anyBlock
         << ",\"itemBox\":" << itemBox
         << ",\"question\":" << questionBlock
@@ -16012,6 +16016,10 @@ void WriteAITileBlockStateJson(std::ostream& out, melonDS::u32 tileID, melonDS::
         << ",\"currentTileId\":" << tileID
         << ",\"currentBehavior\":";
     WriteJsonHex(out, tileType);
+    out << ",\"storageBreakableCandidate\":" << storageBreakableCandidate
+        << ",\"hiddenOrRescueCandidate\":" << hiddenOrRescueCandidate
+        << ",\"visibleStorageBreakableCandidate\":" << visibleStorageBreakableCandidate
+        << ",\"visibleSolidCandidate\":" << visibleSolidCandidate;
     out << "}";
 }
 
@@ -16882,6 +16890,7 @@ bool RuntimePlayerFeature(
                 const int invisible = (probeSample->Behavior & 0x20000000u) ? 1 : 0;
                 const melonDS::u32 storage = probeSample->Behavior & 0x00000C3Fu;
                 const int any = question || breakable || brick || invisible;
+                const int storageBreakable = any && breakable && storage != 0 ? 1 : 0;
                 if (blockField == "any") out = any;
                 else if (blockField == "itemBox") out = any && storage != 0 ? 1 : 0;
                 else if (blockField == "question") out = question;
@@ -16893,6 +16902,10 @@ bool RuntimePlayerFeature(
                 else if (blockField == "modifier") out = (probeSample->Behavior & 0x0000F000u) >> 12;
                 else if (blockField == "currentTileId") out = probeSample->TileID;
                 else if (blockField == "currentBehavior") out = probeSample->Behavior;
+                else if (blockField == "storageBreakableCandidate") out = storageBreakable;
+                else if (blockField == "hiddenOrRescueCandidate") out = any && invisible ? 1 : 0;
+                else if (blockField == "visibleStorageBreakableCandidate") out = storageBreakable && !invisible ? 1 : 0;
+                else if (blockField == "visibleSolidCandidate") out = any && (question || brick || (breakable && !invisible)) ? 1 : 0;
                 else return false;
             }
             else if (!AITileTypeFeature(probeSample->Behavior, field, out))

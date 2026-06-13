@@ -241,6 +241,7 @@ TILE_PROBE_BLOCK_NAMES = [
 TILE_PROBE_BLOCK_DERIVED_NAMES = [
     "storageBreakableCandidate",
     "hiddenOrRescueCandidate",
+    "visibleStorageBreakableCandidate",
     "visibleSolidCandidate",
 ]
 
@@ -341,9 +342,11 @@ def derived_tile_block_features(block: dict[str, Any]) -> dict[str, int]:
     storage_contents = num(block.get("storageContents"))
     has_storage = num(block.get("hasStorageContents")) or int(storage_contents != 0)
     storage_breakable = int(any_block and breakable and has_storage)
+    visible_storage_breakable = int(storage_breakable and not invisible)
     return {
         "storageBreakableCandidate": storage_breakable,
-        "hiddenOrRescueCandidate": int(any_block and (invisible or storage_breakable)),
+        "hiddenOrRescueCandidate": int(any_block and invisible),
+        "visibleStorageBreakableCandidate": visible_storage_breakable,
         "visibleSolidCandidate": int(any_block and (question or brick or (breakable and not invisible))),
     }
 
