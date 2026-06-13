@@ -17,9 +17,15 @@ from typing import Any
 
 ITEM_CATEGORIES = {"world_item", "neutral_item", "coin_item", "dropped_star_item", "item"}
 DROP_STAR_SETTINGS_NORMALIZED = {0x1002, 0x1012, 0x1102, 0x1112}
-FIRE_ITEM_SETTINGS = {0x00090000, 0x00011089}
+FIRE_ITEM_SETTINGS_CONFIRMED = {0x00011089}
+FIRE_ITEM_SETTINGS = {0x00090000, *FIRE_ITEM_SETTINGS_CONFIRMED}
+SUPER_MUSHROOM_ITEM_SETTINGS = {0x00011088}
 COIN_ITEM_SETTINGS = {0x00090002}
 MINI_ITEM_SETTINGS = {0x0001108B}
+SHELL_ITEM_SETTINGS: set[int] = set()
+MEGA_MUSHROOM_ITEM_SETTINGS = {0x00011099}
+INVINCIBLE_STAR_ITEM_SETTINGS = {0x00011081}
+UNKNOWN_ITEM_VARIANT_SETTINGS = {0x000D0000, 0x000D0002}
 HORIZONTAL_WRAP_WIDTH = 0x400000
 
 
@@ -59,17 +65,29 @@ def object_category(obj: dict[str, Any]) -> str:
     return category
 
 
-def item_kind_candidate(object_id: int, settings: int, category: str) -> str:
+def item_kind_candidate(object_id: int, settings: int, category: str) -> tuple[str, int]:
     normalized = settings & 0x7FFFFFFF
     if category == "coin_item" or (object_id == 0x001F and settings in COIN_ITEM_SETTINGS):
-        return "coin"
+        return "coin", 3
     if category == "dropped_star_item" or (object_id == 0x0022 and normalized in DROP_STAR_SETTINGS_NORMALIZED):
-        return "dropped_battle_star"
+        return "dropped_battle_star", 3
+    if settings in FIRE_ITEM_SETTINGS_CONFIRMED:
+        return "fire_flower", 3
     if settings in FIRE_ITEM_SETTINGS:
-        return "fire_flower_candidate"
+        return "fire_flower_candidate", 2
+    if settings in SUPER_MUSHROOM_ITEM_SETTINGS:
+        return "super_mushroom_candidate", 1
     if settings in MINI_ITEM_SETTINGS:
-        return "mini_mushroom_suspected"
-    return "unknown"
+        return "mini_mushroom_candidate", 2
+    if settings in SHELL_ITEM_SETTINGS:
+        return "shell_candidate", 1
+    if settings in MEGA_MUSHROOM_ITEM_SETTINGS:
+        return "mega_mushroom_candidate", 1
+    if settings in INVINCIBLE_STAR_ITEM_SETTINGS:
+        return "invincible_star_candidate", 1
+    if settings in UNKNOWN_ITEM_VARIANT_SETTINGS:
+        return "unknown_item_variant_candidate", 1
+    return "unknown", 0
 
 
 def pos(entity: dict[str, Any]) -> dict[str, int]:
@@ -177,12 +195,14 @@ def empty_track(
     object_id = num(obj.get("objectId"))
     settings = num(obj.get("settings"))
     cluster_key = cluster_key_for(obj, category)
+    kind_candidate, kind_confidence = item_kind_candidate(object_id, settings, category)
     return {
         "key": key,
         "playlog": str(playlog),
         "clusterKey": cluster_key,
         "category": category,
-        "kindCandidate": item_kind_candidate(object_id, settings, category),
+        "kindCandidate": kind_candidate,
+        "kindConfidence": kind_confidence,
         "objectId": hex_u(object_id, 4),
         "settings": hex_u(settings),
         "settingsInt": settings,
@@ -272,6 +292,7 @@ def summarize_clusters(tracks: list[dict[str, Any]], sample_limit: int) -> list[
                 "clusterKey": key,
                 "category": track["category"],
                 "kindCandidate": track["kindCandidate"],
+                "kindConfidence": track["kindConfidence"],
                 "objectId": track["objectId"],
                 "settings": track["settings"],
                 "vtable": track["vtable"],
@@ -402,6 +423,7 @@ def write_cluster_csv(path: Path, clusters: list[dict[str, Any]]) -> None:
         "clusterKey",
         "category",
         "kindCandidate",
+        "kindConfidence",
         "objectId",
         "settings",
         "vtable",

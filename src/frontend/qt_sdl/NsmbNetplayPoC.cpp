@@ -17316,13 +17316,114 @@ bool IsRuntimeItemCategory(const char* category)
         std::strcmp(category, "item") == 0;
 }
 
+enum RuntimeItemKindCandidate
+{
+    kRuntimeItemKindUnknown = 0,
+    kRuntimeItemKindSuperMushroom = 1,
+    kRuntimeItemKindFireFlower = 2,
+    kRuntimeItemKindMiniMushroom = 3,
+    kRuntimeItemKindShell = 4,
+    kRuntimeItemKindMegaMushroom = 5,
+    kRuntimeItemKindInvincibleStar = 6,
+    kRuntimeItemKindCoin = 7,
+    kRuntimeItemKindDroppedBattleStar = 8,
+    kRuntimeItemKindUnknownItemVariant = 9,
+};
+
+enum RuntimeItemKindConfidence
+{
+    kRuntimeItemKindConfidenceNone = 0,
+    kRuntimeItemKindConfidenceHeuristic = 1,
+    kRuntimeItemKindConfidenceLogSupported = 2,
+    kRuntimeItemKindConfidenceConfirmed = 3,
+};
+
+bool RuntimeItemSettingsIsFireConfirmed(melonDS::u32 settings)
+{
+    return settings == 0x00011089u;
+}
+
+bool RuntimeItemSettingsIsFireCandidate(melonDS::u32 settings)
+{
+    return settings == 0x00090000u || RuntimeItemSettingsIsFireConfirmed(settings);
+}
+
+bool RuntimeItemSettingsIsSuperMushroomCandidate(melonDS::u32 settings)
+{
+    return settings == 0x00011088u;
+}
+
+bool RuntimeItemSettingsIsMiniMushroomCandidate(melonDS::u32 settings)
+{
+    return settings == 0x0001108Bu;
+}
+
+bool RuntimeItemSettingsIsShellCandidate(melonDS::u32)
+{
+    return false;
+}
+
+bool RuntimeItemSettingsIsMegaMushroomCandidate(melonDS::u32 settings)
+{
+    return settings == 0x00011099u;
+}
+
+bool RuntimeItemSettingsIsInvincibleStarCandidate(melonDS::u32 settings)
+{
+    return settings == 0x00011081u;
+}
+
+bool RuntimeItemSettingsIsCoinItemCandidate(melonDS::u32 settings)
+{
+    return settings == 0x00090002u;
+}
+
+bool RuntimeItemSettingsIsUnknownItemVariantCandidate(melonDS::u32 settings)
+{
+    return settings == 0x000D0000u || settings == 0x000D0002u;
+}
+
 int RuntimeItemPowerupKindCandidate(melonDS::u32 settings)
 {
-    if (settings == 0x00090000u || settings == 0x00011089u)
-        return 2;
-    if (settings == 0x0001108Bu)
-        return 3;
+    if (RuntimeItemSettingsIsSuperMushroomCandidate(settings))
+        return kRuntimeItemKindSuperMushroom;
+    if (RuntimeItemSettingsIsFireCandidate(settings))
+        return kRuntimeItemKindFireFlower;
+    if (RuntimeItemSettingsIsMiniMushroomCandidate(settings))
+        return kRuntimeItemKindMiniMushroom;
+    if (RuntimeItemSettingsIsShellCandidate(settings))
+        return kRuntimeItemKindShell;
+    if (RuntimeItemSettingsIsMegaMushroomCandidate(settings))
+        return kRuntimeItemKindMegaMushroom;
     return -1;
+}
+
+std::pair<int, int> RuntimeItemKindAndConfidence(const GameStateObjectScanEntry& item, const char* category)
+{
+    const melonDS::u32 settings = item.Actor.Settings;
+    if (std::strcmp(category, "coin_item") == 0 ||
+        (item.ObjectID == 0x001Fu && RuntimeItemSettingsIsCoinItemCandidate(settings)))
+        return {kRuntimeItemKindCoin, kRuntimeItemKindConfidenceConfirmed};
+    if (std::strcmp(category, "dropped_star_item") == 0 ||
+        (item.ObjectID == kVsBattleStarActorObjectID && IsVsDroppedStarActorSettings(settings)))
+        return {kRuntimeItemKindDroppedBattleStar, kRuntimeItemKindConfidenceConfirmed};
+    if (RuntimeItemSettingsIsFireConfirmed(settings))
+        return {kRuntimeItemKindFireFlower, kRuntimeItemKindConfidenceConfirmed};
+    if (RuntimeItemSettingsIsFireCandidate(settings))
+        return {kRuntimeItemKindFireFlower, kRuntimeItemKindConfidenceLogSupported};
+    if (RuntimeItemSettingsIsSuperMushroomCandidate(settings))
+        return {kRuntimeItemKindSuperMushroom, kRuntimeItemKindConfidenceHeuristic};
+    if (RuntimeItemSettingsIsMiniMushroomCandidate(settings))
+        return {kRuntimeItemKindMiniMushroom, kRuntimeItemKindConfidenceLogSupported};
+    if (RuntimeItemSettingsIsShellCandidate(settings))
+        return {kRuntimeItemKindShell, kRuntimeItemKindConfidenceHeuristic};
+    if (RuntimeItemSettingsIsMegaMushroomCandidate(settings))
+        return {kRuntimeItemKindMegaMushroom, kRuntimeItemKindConfidenceHeuristic};
+    if (RuntimeItemSettingsIsInvincibleStarCandidate(settings))
+        return {kRuntimeItemKindInvincibleStar, kRuntimeItemKindConfidenceHeuristic};
+    if (RuntimeItemSettingsIsUnknownItemVariantCandidate(settings))
+        return {kRuntimeItemKindUnknownItemVariant, kRuntimeItemKindConfidenceHeuristic};
+    return {kRuntimeItemKindUnknown, kRuntimeItemKindConfidenceNone};
 }
 
 const GameStateObjectScanEntry* NearestRuntimeItem(
@@ -17384,13 +17485,30 @@ bool RuntimeItemFeature(
     else if (field == "screen1_y") out = SignedU32(item->Actor.PosY) - SignedU32(sample.StageCameraGlobalY1);
     else if (field == "screen1_in_view") out =
         IsInCameraRect(item->Actor.PosX, item->Actor.PosY, sample.StageCameraGlobalX1, sample.StageCameraGlobalY1, sample.StageCameraGlobalWidth1, sample.StageCameraGlobalHeight1) ? 1 : 0;
+    else if (field == "kind_candidate")
+    {
+        const char* category = AIObjectCategory(item->ObjectID, item->Actor.Settings);
+        out = RuntimeItemKindAndConfidence(*item, category).first;
+    }
+    else if (field == "kind_confidence")
+    {
+        const char* category = AIObjectCategory(item->ObjectID, item->Actor.Settings);
+        out = RuntimeItemKindAndConfidence(*item, category).second;
+    }
     else if (field == "powerup_kind_candidate") out = RuntimeItemPowerupKindCandidate(item->Actor.Settings);
-    else if (field == "is_fire_candidate") out = item->Actor.Settings == 0x00090000u || item->Actor.Settings == 0x00011089u ? 1 : 0;
-    else if (field == "is_coin_item_candidate") out = item->Actor.Settings == 0x00090002u ? 1 : 0;
+    else if (field == "is_super_mushroom_candidate") out = RuntimeItemSettingsIsSuperMushroomCandidate(item->Actor.Settings) ? 1 : 0;
+    else if (field == "is_fire_candidate") out = RuntimeItemSettingsIsFireCandidate(item->Actor.Settings) ? 1 : 0;
+    else if (field == "is_fire_flower_candidate") out = RuntimeItemSettingsIsFireCandidate(item->Actor.Settings) ? 1 : 0;
+    else if (field == "is_coin_item_candidate") out = RuntimeItemSettingsIsCoinItemCandidate(item->Actor.Settings) ? 1 : 0;
     else if (field == "is_dropped_star_candidate") out =
         item->ObjectID == kVsBattleStarActorObjectID && IsVsDroppedStarActorSettings(item->Actor.Settings) ? 1 : 0;
-    else if (field == "is_suspected_mini_candidate") out = item->Actor.Settings == 0x0001108Bu ? 1 : 0;
-    else if (field == "avoid_candidate") out = item->Actor.Settings == 0x0001108Bu ? 1 : 0;
+    else if (field == "is_suspected_mini_candidate") out = RuntimeItemSettingsIsMiniMushroomCandidate(item->Actor.Settings) ? 1 : 0;
+    else if (field == "is_mini_mushroom_candidate") out = RuntimeItemSettingsIsMiniMushroomCandidate(item->Actor.Settings) ? 1 : 0;
+    else if (field == "is_shell_candidate") out = RuntimeItemSettingsIsShellCandidate(item->Actor.Settings) ? 1 : 0;
+    else if (field == "is_mega_mushroom_candidate") out = RuntimeItemSettingsIsMegaMushroomCandidate(item->Actor.Settings) ? 1 : 0;
+    else if (field == "is_invincible_star_candidate") out = RuntimeItemSettingsIsInvincibleStarCandidate(item->Actor.Settings) ? 1 : 0;
+    else if (field == "is_unknown_item_variant_candidate") out = RuntimeItemSettingsIsUnknownItemVariantCandidate(item->Actor.Settings) ? 1 : 0;
+    else if (field == "avoid_candidate") out = RuntimeItemSettingsIsMiniMushroomCandidate(item->Actor.Settings) ? 1 : 0;
     else return false;
     return true;
 }

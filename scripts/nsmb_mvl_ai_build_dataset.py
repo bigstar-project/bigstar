@@ -110,11 +110,42 @@ ITEM_CATEGORIES = {
 }
 
 # Best-effort item settings interpretation from current stage 0 logs.
-# Keep raw settings columns in the dataset because these mappings are not fully verified yet.
-ITEM_SETTINGS_FIRE_CANDIDATES = {
-    0x00090000,
+# Keep raw settings columns in the dataset because some mappings are still visual candidates.
+ITEM_KIND_UNKNOWN = 0
+ITEM_KIND_SUPER_MUSHROOM = 1
+ITEM_KIND_FIRE_FLOWER = 2
+ITEM_KIND_MINI_MUSHROOM = 3
+ITEM_KIND_SHELL = 4
+ITEM_KIND_MEGA_MUSHROOM = 5
+ITEM_KIND_INVINCIBLE_STAR = 6
+ITEM_KIND_COIN = 7
+ITEM_KIND_DROPPED_BATTLE_STAR = 8
+ITEM_KIND_UNKNOWN_ITEM_VARIANT = 9
+
+ITEM_KIND_CONFIDENCE_NONE = 0
+ITEM_KIND_CONFIDENCE_HEURISTIC = 1
+ITEM_KIND_CONFIDENCE_LOG_SUPPORTED = 2
+ITEM_KIND_CONFIDENCE_CONFIRMED = 3
+
+ITEM_SETTINGS_FIRE_CONFIRMED = {
+    # Observed as an 8-coin reward in human-stage0-item-box-001; collection changes
+    # visualPowerupKindCandidate from super to fire.
     0x00011089,
 }
+ITEM_SETTINGS_FIRE_CANDIDATES = {
+    0x00090000,
+    *ITEM_SETTINGS_FIRE_CONFIRMED,
+}
+ITEM_SETTINGS_SUPER_MUSHROOM_CANDIDATES = {
+    0x00011088,
+}
+ITEM_SETTINGS_MEGA_MUSHROOM_CANDIDATES = {
+    0x00011099,
+}
+ITEM_SETTINGS_INVINCIBLE_STAR_CANDIDATES = {
+    0x00011081,
+}
+ITEM_SETTINGS_SHELL_CANDIDATES: set[int] = set()
 ITEM_SETTINGS_COIN_ITEM_CANDIDATES = {
     0x00090002,
 }
@@ -122,6 +153,10 @@ ITEM_SETTINGS_SUSPECTED_MINI_CANDIDATES = {
     # Observed as an 8-coin reward candidate in human-stage0-item-box-001.
     # Treat as suspected until visually confirmed; training can explicitly avoid it.
     0x0001108B,
+}
+ITEM_SETTINGS_UNKNOWN_ITEM_VARIANTS = {
+    0x000D0000,
+    0x000D0002,
 }
 DROPPED_STAR_ACTOR_SETTINGS_NORMALIZED = {
     0x00001002,
@@ -447,11 +482,44 @@ def screen(entity: dict[str, Any], camera: str) -> dict[str, int]:
 
 
 def item_powerup_kind_candidate(settings: int) -> int:
+    if settings in ITEM_SETTINGS_SUPER_MUSHROOM_CANDIDATES:
+        return ITEM_KIND_SUPER_MUSHROOM
     if settings in ITEM_SETTINGS_FIRE_CANDIDATES:
-        return 2
+        return ITEM_KIND_FIRE_FLOWER
     if settings in ITEM_SETTINGS_SUSPECTED_MINI_CANDIDATES:
-        return 3
+        return ITEM_KIND_MINI_MUSHROOM
+    if settings in ITEM_SETTINGS_SHELL_CANDIDATES:
+        return ITEM_KIND_SHELL
+    if settings in ITEM_SETTINGS_MEGA_MUSHROOM_CANDIDATES:
+        return ITEM_KIND_MEGA_MUSHROOM
     return -1
+
+
+def item_kind_candidate(object_id: int, settings: int, category: str) -> tuple[int, int]:
+    normalized = settings & 0x7FFFFFFF
+    if category == "coin_item" or (object_id == 0x001F and settings in ITEM_SETTINGS_COIN_ITEM_CANDIDATES):
+        return ITEM_KIND_COIN, ITEM_KIND_CONFIDENCE_CONFIRMED
+    if category == "dropped_star_item" or (
+        object_id == 0x0022 and normalized in DROPPED_STAR_ACTOR_SETTINGS_NORMALIZED
+    ):
+        return ITEM_KIND_DROPPED_BATTLE_STAR, ITEM_KIND_CONFIDENCE_CONFIRMED
+    if settings in ITEM_SETTINGS_FIRE_CONFIRMED:
+        return ITEM_KIND_FIRE_FLOWER, ITEM_KIND_CONFIDENCE_CONFIRMED
+    if settings in ITEM_SETTINGS_FIRE_CANDIDATES:
+        return ITEM_KIND_FIRE_FLOWER, ITEM_KIND_CONFIDENCE_LOG_SUPPORTED
+    if settings in ITEM_SETTINGS_SUPER_MUSHROOM_CANDIDATES:
+        return ITEM_KIND_SUPER_MUSHROOM, ITEM_KIND_CONFIDENCE_HEURISTIC
+    if settings in ITEM_SETTINGS_SUSPECTED_MINI_CANDIDATES:
+        return ITEM_KIND_MINI_MUSHROOM, ITEM_KIND_CONFIDENCE_LOG_SUPPORTED
+    if settings in ITEM_SETTINGS_SHELL_CANDIDATES:
+        return ITEM_KIND_SHELL, ITEM_KIND_CONFIDENCE_HEURISTIC
+    if settings in ITEM_SETTINGS_MEGA_MUSHROOM_CANDIDATES:
+        return ITEM_KIND_MEGA_MUSHROOM, ITEM_KIND_CONFIDENCE_HEURISTIC
+    if settings in ITEM_SETTINGS_INVINCIBLE_STAR_CANDIDATES:
+        return ITEM_KIND_INVINCIBLE_STAR, ITEM_KIND_CONFIDENCE_HEURISTIC
+    if settings in ITEM_SETTINGS_UNKNOWN_ITEM_VARIANTS:
+        return ITEM_KIND_UNKNOWN_ITEM_VARIANT, ITEM_KIND_CONFIDENCE_HEURISTIC
+    return ITEM_KIND_UNKNOWN, ITEM_KIND_CONFIDENCE_NONE
 
 
 def item_avoid_candidate(settings: int) -> int:
@@ -578,11 +646,20 @@ def nearest_item_details(
             "screen_x": 0,
             "screen_y": 0,
             "screen_in_view": 0,
+            "kind_candidate": ITEM_KIND_UNKNOWN,
+            "kind_confidence": ITEM_KIND_CONFIDENCE_NONE,
             "powerup_kind_candidate": -1,
+            "is_super_mushroom_candidate": 0,
             "is_fire_candidate": 0,
+            "is_fire_flower_candidate": 0,
             "is_coin_item_candidate": 0,
             "is_dropped_star_candidate": 0,
             "is_suspected_mini_candidate": 0,
+            "is_mini_mushroom_candidate": 0,
+            "is_shell_candidate": 0,
+            "is_mega_mushroom_candidate": 0,
+            "is_invincible_star_candidate": 0,
+            "is_unknown_item_variant_candidate": 0,
             "avoid_candidate": 0,
         }
 
@@ -591,6 +668,7 @@ def nearest_item_details(
     object_id = num(obj.get("objectId"))
     category = object_category(obj)
     powerup_kind = item_powerup_kind_candidate(settings)
+    kind, confidence = item_kind_candidate(object_id, settings, category)
     return {
         "found": 1,
         "dx": delta_x(obj_pos["x"], self_pos["x"]),
@@ -605,11 +683,20 @@ def nearest_item_details(
         "screen_x": obj_screen["x"],
         "screen_y": obj_screen["y"],
         "screen_in_view": obj_screen["inView"],
+        "kind_candidate": kind,
+        "kind_confidence": confidence,
         "powerup_kind_candidate": powerup_kind,
+        "is_super_mushroom_candidate": int(kind == ITEM_KIND_SUPER_MUSHROOM),
         "is_fire_candidate": int(settings in ITEM_SETTINGS_FIRE_CANDIDATES),
+        "is_fire_flower_candidate": int(kind == ITEM_KIND_FIRE_FLOWER),
         "is_coin_item_candidate": int(settings in ITEM_SETTINGS_COIN_ITEM_CANDIDATES),
         "is_dropped_star_candidate": is_dropped_star_item_candidate(object_id, settings, category),
         "is_suspected_mini_candidate": int(settings in ITEM_SETTINGS_SUSPECTED_MINI_CANDIDATES),
+        "is_mini_mushroom_candidate": int(kind == ITEM_KIND_MINI_MUSHROOM),
+        "is_shell_candidate": int(kind == ITEM_KIND_SHELL),
+        "is_mega_mushroom_candidate": int(kind == ITEM_KIND_MEGA_MUSHROOM),
+        "is_invincible_star_candidate": int(kind == ITEM_KIND_INVINCIBLE_STAR),
+        "is_unknown_item_variant_candidate": int(kind == ITEM_KIND_UNKNOWN_ITEM_VARIANT),
         "avoid_candidate": item_avoid_candidate(settings),
     }
 
@@ -862,11 +949,20 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "nearest_item_screen1_x": nearest_item["screen_x"],
         "nearest_item_screen1_y": nearest_item["screen_y"],
         "nearest_item_screen1_in_view": nearest_item["screen_in_view"],
+        "nearest_item_kind_candidate": nearest_item["kind_candidate"],
+        "nearest_item_kind_confidence": nearest_item["kind_confidence"],
         "nearest_item_powerup_kind_candidate": nearest_item["powerup_kind_candidate"],
+        "nearest_item_is_super_mushroom_candidate": nearest_item["is_super_mushroom_candidate"],
         "nearest_item_is_fire_candidate": nearest_item["is_fire_candidate"],
+        "nearest_item_is_fire_flower_candidate": nearest_item["is_fire_flower_candidate"],
         "nearest_item_is_coin_item_candidate": nearest_item["is_coin_item_candidate"],
         "nearest_item_is_dropped_star_candidate": nearest_item["is_dropped_star_candidate"],
         "nearest_item_is_suspected_mini_candidate": nearest_item["is_suspected_mini_candidate"],
+        "nearest_item_is_mini_mushroom_candidate": nearest_item["is_mini_mushroom_candidate"],
+        "nearest_item_is_shell_candidate": nearest_item["is_shell_candidate"],
+        "nearest_item_is_mega_mushroom_candidate": nearest_item["is_mega_mushroom_candidate"],
+        "nearest_item_is_invincible_star_candidate": nearest_item["is_invincible_star_candidate"],
+        "nearest_item_is_unknown_item_variant_candidate": nearest_item["is_unknown_item_variant_candidate"],
         "nearest_item_avoid_candidate": nearest_item["avoid_candidate"],
         "runtime_hazard_found": runtime_hazard["found"],
         "runtime_hazard_closing": runtime_hazard["closing"],
@@ -892,11 +988,20 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "coin_reward_item_screen1_x": coin_reward_item["screen_x"] if num(record.get("_self_coin_reward_recent")) else 0,
         "coin_reward_item_screen1_y": coin_reward_item["screen_y"] if num(record.get("_self_coin_reward_recent")) else 0,
         "coin_reward_item_screen1_in_view": coin_reward_item["screen_in_view"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_kind_candidate": coin_reward_item["kind_candidate"] if num(record.get("_self_coin_reward_recent")) else ITEM_KIND_UNKNOWN,
+        "coin_reward_item_kind_confidence": coin_reward_item["kind_confidence"] if num(record.get("_self_coin_reward_recent")) else ITEM_KIND_CONFIDENCE_NONE,
         "coin_reward_item_powerup_kind_candidate": coin_reward_item["powerup_kind_candidate"] if num(record.get("_self_coin_reward_recent")) else -1,
+        "coin_reward_item_is_super_mushroom_candidate": coin_reward_item["is_super_mushroom_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
         "coin_reward_item_is_fire_candidate": coin_reward_item["is_fire_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_is_fire_flower_candidate": coin_reward_item["is_fire_flower_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
         "coin_reward_item_is_coin_item_candidate": coin_reward_item["is_coin_item_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
         "coin_reward_item_is_dropped_star_candidate": coin_reward_item["is_dropped_star_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
         "coin_reward_item_is_suspected_mini_candidate": coin_reward_item["is_suspected_mini_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_is_mini_mushroom_candidate": coin_reward_item["is_mini_mushroom_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_is_shell_candidate": coin_reward_item["is_shell_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_is_mega_mushroom_candidate": coin_reward_item["is_mega_mushroom_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_is_invincible_star_candidate": coin_reward_item["is_invincible_star_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_is_unknown_item_variant_candidate": coin_reward_item["is_unknown_item_variant_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
         "coin_reward_item_avoid_candidate": coin_reward_item["avoid_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
         "target_found": num(target.get("found")),
         "target_dx": delta_x(target_pos["x"], self_pos["x"]),
