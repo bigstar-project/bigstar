@@ -38,6 +38,7 @@ param(
     [ValidateSet("", "MARIO", "LUIGI", "0", "1")]
     [string]$OpponentAIPlayer = "",
     [switch]$NoGzipPlayLog,
+    [switch]$NoAutoPostprocess,
     [switch]$DryRun
 )
 
@@ -90,6 +91,7 @@ $manualArgs = @{
     AIPlayLogMaxObjects = $AIPlayLogMaxObjects
     NetworkPumpThread = $true
     NetworkPumpSleepUs = 50
+    Wait = (-not $NoAutoPostprocess)
 }
 if ($singleWindow) {
     $manualArgs.ClientOnly = $true
@@ -264,7 +266,11 @@ Write-Host "Starting stage 0 human recording. log=$LogDir mode=$($session.record
 if ($singleWindow) {
     Write-Host "Single client window is authoritative; dual-window host/client sync is not used for this recording."
 }
-Write-Host "After closing melonDS, run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-nsmb-mvl-recording-postcommands.ps1 -Session `"$sessionPath`""
+if ($NoAutoPostprocess) {
+    Write-Host "After closing melonDS, run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-nsmb-mvl-recording-postcommands.ps1 -Session `"$sessionPath`""
+} else {
+    Write-Host "After melonDS closes, postCommands will run automatically. session=$sessionPath"
+}
 if ($DryRun) {
     ConvertTo-Json -InputObject $session -Depth 8
     foreach ($name in $savedOpponentAIEnv.Keys) {
@@ -274,6 +280,10 @@ if ($DryRun) {
 }
 try {
     & $manualScript @manualArgs
+    if (-not $NoAutoPostprocess) {
+        Write-Host "melonDS exited; running recording postCommands."
+        & (Join-Path $PSScriptRoot "run-nsmb-mvl-recording-postcommands.ps1") -Session $sessionPath
+    }
 } finally {
     foreach ($name in $savedOpponentAIEnv.Keys) {
         [Environment]::SetEnvironmentVariable($name, $savedOpponentAIEnv[$name], "Process")

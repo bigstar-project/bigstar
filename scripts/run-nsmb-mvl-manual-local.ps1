@@ -99,7 +99,8 @@ param(
     [switch]$AllowJit,
     [switch]$NoJit,
     [switch]$NoFrameLimit,
-    [switch]$SoftwareRenderer
+    [switch]$SoftwareRenderer,
+    [switch]$Wait
 )
 
 $ErrorActionPreference = "Stop"
@@ -686,3 +687,21 @@ if ($InputUnreliable) {
     Write-Host "input unreliable bundleHistory=$InputBundleHistory"
 }
 Write-Host "jit=$(-not $NoJit)$(if ($NoJit) { ' (disabled by -NoJit)' } else { ' (default)' })"
+
+if ($Wait) {
+    $waitProcesses = @($clientProc)
+    if ($null -ne $hostProc) {
+        $waitProcesses += $hostProc
+    }
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($WaitTimeoutMs)
+    foreach ($proc in $waitProcesses) {
+        $remainingMs = [int][Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+        if (-not $proc.WaitForExit($remainingMs)) {
+            throw "manual local wrapper did not exit within WaitTimeoutMs=$WaitTimeoutMs. pid=$($proc.Id)"
+        }
+        if ($proc.ExitCode -ne 0) {
+            throw "manual local wrapper failed. pid=$($proc.Id) exitCode=$($proc.ExitCode)"
+        }
+    }
+    Write-Host "NSMB MvL manual local session exited."
+}
