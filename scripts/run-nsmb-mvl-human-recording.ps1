@@ -24,6 +24,15 @@ param(
     [int]$ForcePlayerPowerupsEndFrame = 0,
     [int]$ForcePlayerPowerup0 = 0,
     [int]$ForcePlayerPowerup1 = 0,
+    [switch]$ForcePlayerStarCounters,
+    [int]$ForcePlayerStarCountersStartFrame = 900,
+    [int]$ForcePlayerStarCountersEndFrame = 1500,
+    [int]$ForcePlayerBattleStars0 = 0,
+    [int]$ForcePlayerBattleStars1 = 0,
+    [int]$ForcePlayerDisplayedStars0 = 0,
+    [int]$ForcePlayerDisplayedStars1 = 0,
+    [int]$ForcePlayerCollectedStars0 = 0,
+    [int]$ForcePlayerCollectedStars1 = 0,
     [ValidateSet("none", "rule")]
     [string]$OpponentAI = "none",
     [ValidateSet("", "MARIO", "LUIGI", "0", "1")]
@@ -96,6 +105,17 @@ if ($ForcePlayerPowerups) {
     $manualArgs.ForcePlayerPowerupsEndFrame = $ForcePlayerPowerupsEndFrame
     $manualArgs.ForcePlayerPowerup0 = $ForcePlayerPowerup0
     $manualArgs.ForcePlayerPowerup1 = $ForcePlayerPowerup1
+}
+if ($ForcePlayerStarCounters) {
+    $manualArgs.ForcePlayerStarCounters = $true
+    $manualArgs.ForcePlayerStarCountersStartFrame = $ForcePlayerStarCountersStartFrame
+    $manualArgs.ForcePlayerStarCountersEndFrame = $ForcePlayerStarCountersEndFrame
+    $manualArgs.ForcePlayerBattleStars0 = $ForcePlayerBattleStars0
+    $manualArgs.ForcePlayerBattleStars1 = $ForcePlayerBattleStars1
+    $manualArgs.ForcePlayerDisplayedStars0 = $ForcePlayerDisplayedStars0
+    $manualArgs.ForcePlayerDisplayedStars1 = $ForcePlayerDisplayedStars1
+    $manualArgs.ForcePlayerCollectedStars0 = $ForcePlayerCollectedStars0
+    $manualArgs.ForcePlayerCollectedStars1 = $ForcePlayerCollectedStars1
 }
 if (-not $singleWindow) {
     if ($HumanSide -eq "client") { $manualArgs.NeutralizeHostInput = $true }
@@ -202,6 +222,17 @@ $session = [ordered]@{
     scenario = $Scenario
     opponentAI = $OpponentAI
     opponentAIPlayer = $(if ($OpponentAI -eq "rule") { $resolvedOpponentAIPlayer } else { "" })
+    forcedPlayerStarCounters = [ordered]@{
+        enabled = [bool]$ForcePlayerStarCounters
+        startFrame = $ForcePlayerStarCountersStartFrame
+        endFrame = $ForcePlayerStarCountersEndFrame
+        battleStars0 = $ForcePlayerBattleStars0
+        battleStars1 = $ForcePlayerBattleStars1
+        displayedStars0 = $ForcePlayerDisplayedStars0
+        displayedStars1 = $ForcePlayerDisplayedStars1
+        collectedStars0 = $ForcePlayerCollectedStars0
+        collectedStars1 = $ForcePlayerCollectedStars1
+    }
     frames = $Frames
     inputScript = $InputScript
     hostRom = $HostRom

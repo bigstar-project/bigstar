@@ -1,7 +1,7 @@
 param(
     [string[]]$Policies = @("rule"),
     [string[]]$Seeds = @("0x2f52869f"),
-    [string[]]$StarCases = @("even:0:0", "p0-losing:0:5", "p1-losing:5:0"),
+    [string[]]$StarCases = @("even:0:0", "p0-losing-hard:0:7", "p1-losing-hard:7:0"),
     [int]$Frames = 2600,
     [int]$MvlStage = 0,
     [string]$LogDir = "",
