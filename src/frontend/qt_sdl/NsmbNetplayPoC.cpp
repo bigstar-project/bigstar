@@ -1670,7 +1670,9 @@ struct State
     bool ImitationAIWarnMissingFeatures = true;
     std::string ImitationAIModelPath;
     NsmbImitationAI::LinearPolicyModel ImitationAIModel;
+    NsmbImitationAI::CompactActionPolicyModel ImitationAICompactModel;
     bool ImitationAIModelLoaded = false;
+    bool ImitationAICompactModelLoaded = false;
     int ImitationAIFeaturesFilled = 0;
     int ImitationAIFeaturesMissing = 0;
     bool DirectMvlBootUseLoadGameSM = false;
@@ -18067,6 +18069,257 @@ bool BuildRuntimeImitationFeatures(
     return filled > 0;
 }
 
+constexpr int kAICompactRuntimeScalarCount = 35;
+constexpr int kAICompactRuntimeTerrainChannels = 15;
+constexpr int kAICompactRuntimeEntityFeatures = 14;
+
+void AppendAICompactRuntimeScalars(
+    std::vector<double>& features,
+    const GameStateSample& sample,
+    const GameStateObjectScanCache& objectScanCache,
+    int player)
+{
+    const bool p0 = player == 0;
+    const int opponent = player ^ 1;
+    auto v = [p0](melonDS::u32 a, melonDS::u32 b) { return p0 ? a : b; };
+    auto ov = [opponent](melonDS::u32 a, melonDS::u32 b) { return opponent == 0 ? a : b; };
+    const melonDS::u32 selfX = v(sample.PlayerActor0PosX, sample.PlayerActor1PosX);
+    const melonDS::u32 selfY = v(sample.PlayerActor0PosY, sample.PlayerActor1PosY);
+    const melonDS::u32 selfVelX = v(sample.PlayerActor0VelX, sample.PlayerActor1VelX);
+    const melonDS::u32 selfVelY = v(sample.PlayerActor0VelY, sample.PlayerActor1VelY);
+    const melonDS::u32 selfPowerup = v(sample.Player0Powerup, sample.Player1Powerup);
+    const melonDS::u32 selfInventoryPowerup = v(sample.Player0InventoryPowerup, sample.Player1InventoryPowerup);
+    const melonDS::u32 selfActorPowerupState = p0 ? sample.PlayerActor0PowerupState : sample.PlayerActor1PowerupState;
+    const melonDS::u32 selfActorPowerupFormState = p0 ? sample.PlayerActor0PowerupFormState : sample.PlayerActor1PowerupFormState;
+    const melonDS::u32 selfShellState = p0 ? sample.PlayerActor0ShellState : sample.PlayerActor1ShellState;
+    const melonDS::u32 selfVisualPowerup = AIVisualPowerupKindCandidate(
+        selfPowerup, selfInventoryPowerup, selfActorPowerupState, selfActorPowerupFormState, selfShellState);
+    const melonDS::u32 opponentVisualPowerup = AIVisualPowerupKindCandidate(
+        ov(sample.Player0Powerup, sample.Player1Powerup),
+        ov(sample.Player0InventoryPowerup, sample.Player1InventoryPowerup),
+        opponent == 0 ? sample.PlayerActor0PowerupState : sample.PlayerActor1PowerupState,
+        opponent == 0 ? sample.PlayerActor0PowerupFormState : sample.PlayerActor1PowerupFormState,
+        opponent == 0 ? sample.PlayerActor0ShellState : sample.PlayerActor1ShellState);
+    const AIPlayerTileProbeSample& tileProbe = p0 ? sample.PlayerActor0TileProbe : sample.PlayerActor1TileProbe;
+    const melonDS::u32 collision = v(sample.PlayerActor0CollisionFlag, sample.PlayerActor1CollisionFlag);
+    const bool contactGround = AIPlayerContactGround(collision);
+    const bool contactWallLeft = (collision & (0x00000008u | 0x00000400u | 0x20000000u)) != 0;
+    const bool contactWallRight = (collision & (0x00000010u | 0x00000800u | 0x40000000u)) != 0;
+    const int groundBelow = AITileProbeSolidishValue(tileProbe, "below");
+    const int aheadBelow = AITileProbeSolidishValue(tileProbe, "aheadBelow");
+    const int ahead2Below = AITileProbeSolidishValue(tileProbe, "ahead2Below");
+    const int leftBelow = AITileProbeSolidishValue(tileProbe, "leftBelow");
+    const int left2Below = AITileProbeSolidishValue(tileProbe, "left2Below");
+    const int rightBelow = AITileProbeSolidishValue(tileProbe, "rightBelow");
+    const int right2Below = AITileProbeSolidishValue(tileProbe, "right2Below");
+    const int holeAhead = tileProbe.Found && !aheadBelow && !ahead2Below ? 1 : 0;
+    const int holeLeft = tileProbe.Found && !leftBelow && !left2Below ? 1 : 0;
+    const int holeRight = tileProbe.Found && !rightBelow && !right2Below ? 1 : 0;
+    const int suppressHole = contactGround && !groundBelow ? 1 : 0;
+    const RuntimeHazardThreat hazard = MostDangerousRuntimeHazard(
+        objectScanCache,
+        selfX,
+        selfY,
+        selfVelX,
+        0x40000,
+        0x50000,
+        0x30000);
+    const GameStateObjectScanEntry* nearestItem = NearestRuntimeItem(objectScanCache, selfX, selfY, false);
+    int nearestItemKind = 0;
+    int nearestItemAvoid = 0;
+    std::int64_t nearestItemDx = 0;
+    std::int64_t nearestItemDy = 0;
+    if (nearestItem)
+    {
+        const char* itemCategory = AIObjectCategory(nearestItem->ObjectID, nearestItem->Actor.Settings);
+        nearestItemKind = RuntimeItemKindAndConfidence(*nearestItem, itemCategory, selfVisualPowerup).first;
+        nearestItemAvoid = RuntimeItemSettingsIsMiniMushroomCandidate(nearestItem->Actor.Settings) ? 1 : 0;
+        nearestItemDx = AIWrappedDeltaX(SignedU32(nearestItem->Actor.PosX), SignedU32(selfX));
+        nearestItemDy = SignedU32(nearestItem->Actor.PosY) - SignedU32(selfY);
+    }
+    const bool selfStarInvincible = AIStarInvincibleCandidate(selfInventoryPowerup, selfActorPowerupState, selfActorPowerupFormState, selfShellState);
+
+    const double values[kAICompactRuntimeScalarCount] = {
+        static_cast<double>(sample.StageID),
+        static_cast<double>(sample.StageGroup),
+        static_cast<double>(SignedU32(selfX)),
+        static_cast<double>(SignedU32(selfY)),
+        static_cast<double>(SignedU32(selfVelX)),
+        static_cast<double>(SignedU32(selfVelY)),
+        static_cast<double>(selfVisualPowerup),
+        selfStarInvincible ? 1.0 : 0.0,
+        selfStarInvincible ? 1.0 : 0.0,
+        static_cast<double>(v(sample.Player0BattleStars, sample.Player1BattleStars)),
+        static_cast<double>(v(sample.Player0Coins, sample.Player1Coins)),
+        static_cast<double>(AIWrappedDeltaX(SignedU32(ov(sample.PlayerActor0PosX, sample.PlayerActor1PosX)), SignedU32(selfX))),
+        static_cast<double>(SignedU32(ov(sample.PlayerActor0PosY, sample.PlayerActor1PosY)) - SignedU32(selfY)),
+        static_cast<double>(opponentVisualPowerup),
+        static_cast<double>(ov(sample.Player0BattleStars, sample.Player1BattleStars)),
+        static_cast<double>(sample.VsStarActorFound),
+        static_cast<double>(AIWrappedDeltaX(SignedU32(sample.VsStarActorPosX), SignedU32(selfX))),
+        static_cast<double>(SignedU32(sample.VsStarActorPosY) - SignedU32(selfY)),
+        nearestItem ? 1.0 : 0.0,
+        static_cast<double>(nearestItemDx),
+        static_cast<double>(nearestItemDy),
+        static_cast<double>(nearestItemKind),
+        static_cast<double>(nearestItemAvoid),
+        hazard.Found ? 1.0 : 0.0,
+        static_cast<double>(hazard.Dx),
+        static_cast<double>(hazard.Dy),
+        hazard.Closing ? 1.0 : 0.0,
+        static_cast<double>(hazard.CategoryID),
+        static_cast<double>(groundBelow),
+        static_cast<double>((AITileProbeSolidishValue(tileProbe, "aheadBody") || AITileProbeSolidishValue(tileProbe, "aheadFeet")) ? 1 : 0),
+        static_cast<double>((AITileProbeSolidishValue(tileProbe, "leftBody") || contactWallLeft) ? 1 : 0),
+        static_cast<double>((AITileProbeSolidishValue(tileProbe, "rightBody") || contactWallRight) ? 1 : 0),
+        static_cast<double>((holeAhead && !suppressHole) ? 1 : 0),
+        static_cast<double>((holeLeft && !suppressHole) ? 1 : 0),
+        static_cast<double>((holeRight && !suppressHole) ? 1 : 0),
+    };
+    features.insert(features.end(), std::begin(values), std::end(values));
+}
+
+void AppendAICompactRuntimeTerrain(std::vector<double>& features, const AIPlayerTileProbeSample& probe)
+{
+    for (int row = 0; row < kAITileGridHeight; row++)
+    {
+        for (int col = 0; col < kAITileGridWidth; col++)
+        {
+            const AITileGridSample& cell = probe.Grid[row * kAITileGridWidth + col];
+            const melonDS::u32 mask = probe.Found ? AIObservationV2TerrainMask(cell) : 0;
+            for (int channel = 0; channel < kAICompactRuntimeTerrainChannels; channel++)
+                features.push_back((mask & (1u << channel)) ? 1.0 : 0.0);
+        }
+    }
+}
+
+struct AICompactRuntimeEntity
+{
+    double Values[kAICompactRuntimeEntityFeatures] {};
+    std::int64_t Dist2 = 0;
+};
+
+void AppendAICompactRuntimeEntities(
+    std::vector<double>& features,
+    const GameStateSample& sample,
+    const GameStateObjectScanCache& objectScanCache,
+    int instanceID,
+    int player,
+    int maxEntities)
+{
+    std::vector<AICompactRuntimeEntity> entities;
+    entities.reserve(static_cast<std::size_t>(std::max(0, maxEntities)) + kAIFireballSlotCount);
+    const melonDS::u32 selfX = player == 0 ? sample.PlayerActor0PosX : sample.PlayerActor1PosX;
+    const melonDS::u32 selfY = player == 0 ? sample.PlayerActor0PosY : sample.PlayerActor1PosY;
+    const melonDS::u32 visualPowerup = AIVisualPowerupKindCandidate(
+        player == 0 ? sample.Player0Powerup : sample.Player1Powerup,
+        player == 0 ? sample.Player0InventoryPowerup : sample.Player1InventoryPowerup,
+        player == 0 ? sample.PlayerActor0PowerupState : sample.PlayerActor1PowerupState,
+        player == 0 ? sample.PlayerActor0PowerupFormState : sample.PlayerActor1PowerupFormState,
+        player == 0 ? sample.PlayerActor0ShellState : sample.PlayerActor1ShellState);
+
+    int writtenObjects = 0;
+    for (const GameStateObjectScanEntry& entry : objectScanCache.Entries)
+    {
+        if (entry.LifecycleState != 1)
+            continue;
+        if (writtenObjects >= G.AIPlayLogMaxObjects)
+            break;
+        const char* category = AIObjectCategory(entry.ObjectID, entry.Actor.Settings);
+        const auto kind = RuntimeItemKindAndConfidence(entry, category, visualPowerup);
+        const std::int64_t dx = AIWrappedDeltaX(SignedU32(entry.Actor.PosX), SignedU32(selfX));
+        const std::int64_t dy = SignedU32(entry.Actor.PosY) - SignedU32(selfY);
+        AICompactRuntimeEntity entity {};
+        entity.Values[0] = AIObservationV2EntityCategoryID(category);
+        entity.Values[1] = kind.first;
+        entity.Values[2] = -1;
+        entity.Values[3] = static_cast<double>(dx);
+        entity.Values[4] = static_cast<double>(dy);
+        entity.Values[5] = SignedU32(entry.Actor.VelX);
+        entity.Values[6] = SignedU32(entry.Actor.VelY);
+        entity.Values[7] = entry.ObjectID;
+        entity.Values[8] = entry.Actor.Settings;
+        entity.Values[9] = entry.Actor.StateType;
+        entity.Values[10] = entry.Actor.Flags;
+        entity.Values[11] =
+            (IsInCameraRect(entry.Actor.PosX, entry.Actor.PosY, sample.StageCameraGlobalX0, sample.StageCameraGlobalY0, sample.StageCameraGlobalWidth0, sample.StageCameraGlobalHeight0) ? 1 : 0) |
+            (IsInCameraRect(entry.Actor.PosX, entry.Actor.PosY, sample.StageCameraGlobalX1, sample.StageCameraGlobalY1, sample.StageCameraGlobalWidth1, sample.StageCameraGlobalHeight1) ? 2 : 0);
+        entity.Values[12] = kind.second;
+        entity.Values[13] = 1;
+        entity.Dist2 = dx * dx + dy * dy;
+        entities.push_back(entity);
+        writtenObjects++;
+    }
+
+    for (int slot = 0; slot < kAIFireballSlotCount; slot++)
+    {
+        if (sample.FireballSlotActive[slot] == 0)
+            continue;
+        int ownerConfidence = 0;
+        int ownerHeuristic = 0;
+        int statelessOwnerCandidate = -1;
+        int statelessOwnerConfidence = 0;
+        int statelessOwnerHeuristic = 0;
+        bool ownerTracked = false;
+        const int owner = AIFireballOwnerCandidate(instanceID, sample, slot, ownerConfidence, ownerHeuristic, statelessOwnerCandidate, statelessOwnerConfidence, statelessOwnerHeuristic, ownerTracked);
+        const char* category = owner == 0 || owner == 1 ? "player_fireball" : "enemy_fireball";
+        const std::int64_t dx = AIWrappedDeltaX(SignedU32(sample.FireballSlotPosX[slot]), SignedU32(selfX));
+        const std::int64_t dy = SignedU32(sample.FireballSlotPosY[slot]) - SignedU32(selfY);
+        AICompactRuntimeEntity entity {};
+        entity.Values[0] = AIObservationV2EntityCategoryID(category);
+        entity.Values[1] = sample.FireballSlotKind[slot];
+        entity.Values[2] = owner;
+        entity.Values[3] = static_cast<double>(dx);
+        entity.Values[4] = static_cast<double>(dy);
+        entity.Values[5] = SignedU32(sample.FireballSlotVelX[slot]);
+        entity.Values[6] = SignedU32(sample.FireballSlotVelY[slot]);
+        entity.Values[7] = 0;
+        entity.Values[8] = 0;
+        entity.Values[9] = sample.FireballSlotState[slot];
+        entity.Values[10] = 0;
+        entity.Values[11] = 0;
+        entity.Values[12] = ownerConfidence;
+        entity.Values[13] = 2;
+        entity.Dist2 = dx * dx + dy * dy;
+        entities.push_back(entity);
+    }
+
+    std::stable_sort(
+        entities.begin(),
+        entities.end(),
+        [](const AICompactRuntimeEntity& a, const AICompactRuntimeEntity& b) { return a.Dist2 < b.Dist2; });
+    for (int i = 0; i < maxEntities; i++)
+    {
+        if (i < static_cast<int>(entities.size()))
+            features.insert(features.end(), std::begin(entities[i].Values), std::end(entities[i].Values));
+        else
+            features.insert(features.end(), kAICompactRuntimeEntityFeatures, 0.0);
+    }
+}
+
+bool BuildCompactRuntimeImitationFeatures(
+    const NsmbImitationAI::CompactActionPolicyModel& model,
+    const GameStateSample& sample,
+    const GameStateObjectScanCache& objectScanCache,
+    int instanceID,
+    int player,
+    std::vector<double>& features)
+{
+    const int terrainFeatures = kAITileGridHeight * kAITileGridWidth * kAICompactRuntimeTerrainChannels;
+    const int baseFeatures = kAICompactRuntimeScalarCount + terrainFeatures * 2;
+    const int total = static_cast<int>(model.FeatureCount());
+    if (total < baseFeatures || (total - baseFeatures) % kAICompactRuntimeEntityFeatures != 0)
+        return false;
+    const int maxEntities = (total - baseFeatures) / kAICompactRuntimeEntityFeatures;
+    features.clear();
+    features.reserve(model.FeatureCount());
+    AppendAICompactRuntimeScalars(features, sample, objectScanCache, player);
+    AppendAICompactRuntimeTerrain(features, player == 0 ? sample.PlayerActor0TileProbe : sample.PlayerActor1TileProbe);
+    AppendAICompactRuntimeTerrain(features, player == 0 ? sample.PlayerActor1TileProbe : sample.PlayerActor0TileProbe);
+    AppendAICompactRuntimeEntities(features, sample, objectScanCache, instanceID, player, maxEntities);
+    return features.size() == model.FeatureCount();
+}
+
 InputState ApplyImitationAIInput(
     int instanceID,
     melonDS::u32 frame,
@@ -18089,6 +18342,65 @@ InputState ApplyImitationAIInput(
 
     const GameStateSample sample = ReadGameStateSample(nds);
     const GameStateObjectScanCache objectScanCache = BuildGameStateObjectScanCache(nds);
+    if (G.ImitationAICompactModelLoaded)
+    {
+        std::vector<double> features;
+        if (!BuildCompactRuntimeImitationFeatures(
+                G.ImitationAICompactModel,
+                sample,
+                objectScanCache,
+                instanceID,
+                player,
+                features))
+        {
+            return fallback;
+        }
+        const NsmbImitationAI::CompactActionPrediction prediction =
+            NsmbImitationAI::PredictCompactActionPolicy(G.ImitationAICompactModel, features);
+        melonDS::u32 held = prediction.Held & G.ImitationAIAllowedHeldMask;
+        std::int64_t guardHazardDx = 0;
+        std::int64_t guardHazardDy = 0;
+        const bool hazardGuardAdjusted =
+            ApplyImitationAIHazardGuard(sample, objectScanCache, player, held, guardHazardDx, guardHazardDy);
+        InputState input = NeutralInputPreservingTouch(fallback);
+        input.KeyMask = (~held) & 0x0FFFu;
+
+        if (G.ImitationAITraceEnabled &&
+            (G.ImitationAITraceInterval <= 1 ||
+                (frame % static_cast<melonDS::u32>(G.ImitationAITraceInterval)) == 0))
+        {
+            std::printf(
+                "NSMB ImitationAI: inst=%d frame=%u player=%d model=compact held=0x%03X keyMask=0x%03X features=%zu hazardGuard=%d hazardDx=%lld hazardDy=%lld actions=",
+                instanceID,
+                frame,
+                player,
+                held,
+                input.KeyMask,
+                features.size(),
+                hazardGuardAdjusted ? 1 : 0,
+                static_cast<long long>(guardHazardDx),
+                static_cast<long long>(guardHazardDy));
+            for (std::size_t i = 0; i < prediction.Actions.size() && i < G.ImitationAICompactModel.Heads.size(); i++)
+            {
+                const auto& head = G.ImitationAICompactModel.Heads[i];
+                const int action = prediction.Actions[i];
+                const char* className = action >= 0 && action < static_cast<int>(head.Classes.size())
+                    ? head.Classes[static_cast<std::size_t>(action)].c_str()
+                    : "?";
+                const double confidence = i < prediction.Confidences.size() ? prediction.Confidences[i] : 0.0;
+                std::printf(
+                    "%s%s=%s(%.3f)",
+                    i == 0 ? "" : ",",
+                    head.Name.c_str(),
+                    className,
+                    confidence);
+            }
+            std::printf("\n");
+        }
+
+        return input;
+    }
+
     std::vector<double> features;
     int filled = 0;
     int missing = 0;
@@ -20148,16 +20460,27 @@ void InitFromEnvironment()
         }
         else
         {
-            std::string modelError;
-            G.ImitationAIModelLoaded =
-                NsmbImitationAI::LoadLinearPolicyModel(G.ImitationAIModelPath, G.ImitationAIModel, modelError);
-            if (!G.ImitationAIModelLoaded)
+            std::string compactError;
+            G.ImitationAICompactModelLoaded =
+                NsmbImitationAI::LoadCompactActionPolicyModel(G.ImitationAIModelPath, G.ImitationAICompactModel, compactError);
+            if (G.ImitationAICompactModelLoaded)
             {
-                std::printf(
-                    "NSMB ImitationAI: failed to load model path=%s error=%s\n",
-                    G.ImitationAIModelPath.c_str(),
-                    modelError.c_str());
-                G.ImitationAIEnabled = false;
+                G.ImitationAIModelLoaded = true;
+            }
+            else
+            {
+                std::string modelError;
+                G.ImitationAIModelLoaded =
+                    NsmbImitationAI::LoadLinearPolicyModel(G.ImitationAIModelPath, G.ImitationAIModel, modelError);
+                if (!G.ImitationAIModelLoaded)
+                {
+                    std::printf(
+                        "NSMB ImitationAI: failed to load model path=%s compactError=%s linearError=%s\n",
+                        G.ImitationAIModelPath.c_str(),
+                        compactError.c_str(),
+                        modelError.c_str());
+                    G.ImitationAIEnabled = false;
+                }
             }
         }
     }
@@ -20778,19 +21101,37 @@ void InitFromEnvironment()
     }
     if (G.ImitationAIEnabled)
     {
-        std::printf(
-            "NSMB ImitationAI: enabled player=%s startFrame=%u threshold=%.3f allowedHeldMask=0x%03X trace=%d traceInterval=%d model=%s features=%zu buttons=%zu schema=%s featureSchema=%s\n",
-            G.ImitationAIPlayerSpec.c_str(),
-            G.ImitationAIStartFrame,
-            G.ImitationAIThreshold,
-            G.ImitationAIAllowedHeldMask,
-            G.ImitationAITraceEnabled ? 1 : 0,
-            G.ImitationAITraceInterval,
-            G.ImitationAIModelPath.c_str(),
-            G.ImitationAIModel.FeatureCount(),
-            G.ImitationAIModel.ButtonCount(),
-            G.ImitationAIModel.Schema.c_str(),
-            G.ImitationAIModel.FeatureSchemaID.c_str());
+        if (G.ImitationAICompactModelLoaded)
+        {
+            std::printf(
+                "NSMB ImitationAI: enabled player=%s startFrame=%u modelType=compact allowedHeldMask=0x%03X trace=%d traceInterval=%d model=%s features=%zu heads=%zu schema=%s labelSchema=%s\n",
+                G.ImitationAIPlayerSpec.c_str(),
+                G.ImitationAIStartFrame,
+                G.ImitationAIAllowedHeldMask,
+                G.ImitationAITraceEnabled ? 1 : 0,
+                G.ImitationAITraceInterval,
+                G.ImitationAIModelPath.c_str(),
+                G.ImitationAICompactModel.FeatureCount(),
+                G.ImitationAICompactModel.Heads.size(),
+                G.ImitationAICompactModel.Schema.c_str(),
+                G.ImitationAICompactModel.LabelSchema.c_str());
+        }
+        else
+        {
+            std::printf(
+                "NSMB ImitationAI: enabled player=%s startFrame=%u modelType=linear threshold=%.3f allowedHeldMask=0x%03X trace=%d traceInterval=%d model=%s features=%zu buttons=%zu schema=%s featureSchema=%s\n",
+                G.ImitationAIPlayerSpec.c_str(),
+                G.ImitationAIStartFrame,
+                G.ImitationAIThreshold,
+                G.ImitationAIAllowedHeldMask,
+                G.ImitationAITraceEnabled ? 1 : 0,
+                G.ImitationAITraceInterval,
+                G.ImitationAIModelPath.c_str(),
+                G.ImitationAIModel.FeatureCount(),
+                G.ImitationAIModel.ButtonCount(),
+                G.ImitationAIModel.Schema.c_str(),
+                G.ImitationAIModel.FeatureSchemaID.c_str());
+        }
         if (G.ImitationAIHostOnly || G.ImitationAIClientOnly)
         {
             std::printf("NSMB ImitationAI: roleFilter hostOnly=%d clientOnly=%d\n",
