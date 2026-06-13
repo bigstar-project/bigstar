@@ -28,6 +28,7 @@ param(
     [string]$OpponentAI = "none",
     [ValidateSet("", "MARIO", "LUIGI", "0", "1")]
     [string]$OpponentAIPlayer = "",
+    [switch]$NoGzipPlayLog,
     [switch]$DryRun
 )
 
@@ -178,6 +179,9 @@ if ($packetCaptureEnabled) {
     $auditCommand += " --require-packet-replay"
 }
 $postCommands += $auditCommand
+if (-not $NoGzipPlayLog) {
+    $postCommands += "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\compress-nsmb-mvl-ai-playlogs.ps1 -Session `"$sessionPath`""
+}
 
 $session = [ordered]@{
     schema = "nsmb_mvl_ai_human_recording_session_v1"
@@ -194,6 +198,7 @@ $session = [ordered]@{
     aiPlayLogInterval = $AIPlayLogInterval
     aiPlayLogFlushInterval = $AIPlayLogFlushInterval
     aiPlayLogMaxObjects = $AIPlayLogMaxObjects
+    gzipPlayLog = (-not $NoGzipPlayLog)
     scenario = $Scenario
     opponentAI = $OpponentAI
     opponentAIPlayer = $(if ($OpponentAI -eq "rule") { $resolvedOpponentAIPlayer } else { "" })
@@ -212,7 +217,7 @@ $session = [ordered]@{
     datasetTerrainAudit = $datasetTerrainAuditPath
     postCommands = $postCommands
 }
-$session | ConvertTo-Json -Depth 6 | Set-Content -Path $sessionPath -Encoding UTF8
+ConvertTo-Json -InputObject $session -Depth 6 | Set-Content -Path $sessionPath -Encoding UTF8
 
 Write-Host "Starting stage 0 human recording. log=$LogDir mode=$($session.recordingMode)"
 if ($singleWindow) {
@@ -220,7 +225,7 @@ if ($singleWindow) {
 }
 Write-Host "After closing melonDS, run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-nsmb-mvl-recording-postcommands.ps1 -Session `"$sessionPath`""
 if ($DryRun) {
-    $session | ConvertTo-Json -Depth 8
+    ConvertTo-Json -InputObject $session -Depth 8
     foreach ($name in $savedOpponentAIEnv.Keys) {
         [Environment]::SetEnvironmentVariable($name, $savedOpponentAIEnv[$name], "Process")
     }

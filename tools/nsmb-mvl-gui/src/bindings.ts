@@ -5,6 +5,8 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 /** Commands */
 export const commands = {
 	listAiArtifacts: () => typedError<AiArtifact[], string>(__TAURI_INVOKE("list_ai_artifacts")),
+	openAiReplayLog: (request: OpenAiReplayLogRequest) => typedError<OpenAiReplayLogResponse, string>(__TAURI_INVOKE("open_ai_replay_log", { request })),
+	readAiReplayFrame: (request: ReadAiReplayFrameRequest) => typedError<ReadAiReplayFrameResponse, string>(__TAURI_INVOKE("read_ai_replay_frame", { request })),
 	readAiTextFile: (request: ReadAiTextFileRequest) => typedError<ReadAiTextFileResponse, string>(__TAURI_INVOKE("read_ai_text_file", { request })),
 	runAiTool: (request: RunAiToolRequest) => typedError<RunAiToolResponse, string>(__TAURI_INVOKE("run_ai_tool", { request })),
 	selectAiLogFile: (currentPath: string) => typedError<string | null, string>(__TAURI_INVOKE("select_ai_log_file", { currentPath })),
@@ -28,6 +30,12 @@ export type AiArtifact = {
 	kind: string,
 	bytes: number | null,
 	modified_unix_secs: number | null,
+};
+
+export type AiReplayFrameRef = {
+	index: number,
+	frame: number | null,
+	byte_offset: number | null,
 };
 
 export type BridgeDiagnostics = {
@@ -107,12 +115,36 @@ export type LaunchResponse = {
 
 export type Lives = "3" | "5" | "endless";
 
+export type OpenAiReplayLogRequest = {
+	path: string,
+};
+
+export type OpenAiReplayLogResponse = {
+	source_path: string,
+	data_path: string,
+	compressed: boolean,
+	original_bytes: number | null,
+	data_bytes: number | null,
+	frames: AiReplayFrameRef[],
+};
+
 export type PreflightResponse = {
 	melonds_path: string,
 	bridge_path: string,
 	input_script: string,
 	symbols_file: string,
 	bridge_smoke: string,
+};
+
+export type ReadAiReplayFrameRequest = {
+	data_path: string,
+	byte_offset: number | null,
+	previous_byte_offset: number | null,
+};
+
+export type ReadAiReplayFrameResponse = {
+	frame_json: string,
+	previous_frame_json: string | null,
 };
 
 export type ReadAiTextFileRequest = {

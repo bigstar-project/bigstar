@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import html
 import json
 from pathlib import Path
@@ -258,7 +259,8 @@ def state_tags(player: dict[str, Any]) -> str:
 
 
 def iter_records(path: Path) -> Any:
-    with path.open("r", encoding="utf-8") as f:
+    opener = gzip.open if path.name.lower().endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8-sig") as f:
         for line in f:
             line = line.strip()
             if line:

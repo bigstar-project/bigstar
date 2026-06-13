@@ -1,5 +1,7 @@
+use std::collections::hash_map::DefaultHasher;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::hash::{Hash, Hasher};
+use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -39,6 +41,46 @@ pub(crate) struct ReadAiTextFileResponse {
     pub(crate) sampled: bool,
     pub(crate) original_bytes: f64,
     pub(crate) sampled_lines: u32,
+}
+
+#[derive(Debug, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct OpenAiReplayLogRequest {
+    pub(crate) path: String,
+}
+
+#[derive(Debug, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct AiReplayFrameRef {
+    pub(crate) index: u32,
+    pub(crate) frame: Option<i32>,
+    pub(crate) byte_offset: f64,
+}
+
+#[derive(Debug, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct OpenAiReplayLogResponse {
+    pub(crate) source_path: String,
+    pub(crate) data_path: String,
+    pub(crate) compressed: bool,
+    pub(crate) original_bytes: f64,
+    pub(crate) data_bytes: f64,
+    pub(crate) frames: Vec<AiReplayFrameRef>,
+}
+
+#[derive(Debug, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct ReadAiReplayFrameRequest {
+    pub(crate) data_path: String,
+    pub(crate) byte_offset: f64,
+    pub(crate) previous_byte_offset: Option<f64>,
+}
+
+#[derive(Debug, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct ReadAiReplayFrameResponse {
+    pub(crate) frame_json: String,
+    pub(crate) previous_frame_json: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Type)]
@@ -139,9 +181,59 @@ pub(crate) fn read_ai_text_file(
 
 #[tauri::command]
 #[specta::specta]
+pub(crate) fn open_ai_replay_log(
+    request: OpenAiReplayLogRequest,
+) -> Result<OpenAiReplayLogResponse, String> {
+    let source_path = resolve_user_path(&request.path)?;
+    if !is_playlog_jsonl(&source_path) {
+        return Err("ai-playlog.jsonl または ai-playlog.jsonl.gz を指定してください".to_owned());
+    }
+    let source_metadata = fs::metadata(&source_path)
+        .map_err(|err| format!("playlog の情報を取得できません: {err}"))?;
+    let compressed = is_gzip_path(&source_path);
+    let data_path = if compressed {
+        ensure_gzip_replay_cache(&source_path, &source_metadata)?
+    } else {
+        source_path.clone()
+    };
+    let data_metadata = fs::metadata(&data_path)
+        .map_err(|err| format!("playlog cache の情報を取得できません: {err}"))?;
+    let frames = index_playlog_jsonl(&data_path)?;
+    if frames.is_empty() {
+        return Err("playlog にフレームが見つかりません".to_owned());
+    }
+    Ok(OpenAiReplayLogResponse {
+        source_path: source_path.to_string_lossy().into_owned(),
+        data_path: data_path.to_string_lossy().into_owned(),
+        compressed,
+        original_bytes: source_metadata.len() as f64,
+        data_bytes: data_metadata.len() as f64,
+        frames,
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn read_ai_replay_frame(
+    request: ReadAiReplayFrameRequest,
+) -> Result<ReadAiReplayFrameResponse, String> {
+    let data_path = resolve_user_path(&request.data_path)?;
+    let frame_json = read_line_at_offset(&data_path, request.byte_offset)?;
+    let previous_frame_json = request
+        .previous_byte_offset
+        .map(|offset| read_line_at_offset(&data_path, offset))
+        .transpose()?;
+    Ok(ReadAiReplayFrameResponse {
+        frame_json,
+        previous_frame_json,
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) fn select_ai_log_file(current_path: String) -> Result<Option<String>, String> {
     let mut dialog = rfd::FileDialog::new()
-        .add_filter("AI logs", &["jsonl", "json", "svg"])
+        .add_filter("AI logs", &["jsonl", "gz", "json", "svg"])
         .add_filter("All files", &["*"]);
     let current = PathBuf::from(current_path.trim());
     if current.is_file() {
@@ -425,7 +517,112 @@ fn is_playlog_jsonl(path: &Path) -> bool {
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    name == "ai-playlog.jsonl" || name.ends_with(".ai-playlog.jsonl") || name.ends_with(".jsonl")
+    name == "ai-playlog.jsonl"
+        || name == "ai-playlog.jsonl.gz"
+        || name.ends_with(".ai-playlog.jsonl")
+        || name.ends_with(".ai-playlog.jsonl.gz")
+        || name.ends_with(".jsonl")
+        || name.ends_with(".jsonl.gz")
+}
+
+fn is_gzip_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .ends_with(".gz")
+}
+
+fn ensure_gzip_replay_cache(
+    source_path: &Path,
+    source_metadata: &fs::Metadata,
+) -> Result<PathBuf, String> {
+    let modified = source_metadata
+        .modified()
+        .unwrap_or(SystemTime::UNIX_EPOCH)
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let mut hasher = DefaultHasher::new();
+    source_path.to_string_lossy().hash(&mut hasher);
+    source_metadata.len().hash(&mut hasher);
+    modified.hash(&mut hasher);
+    let cache_dir = std::env::temp_dir().join("nsmb-mvl-gui-playlog-cache");
+    fs::create_dir_all(&cache_dir)
+        .map_err(|err| format!("playlog cache directory を作れません: {err}"))?;
+    let cache_path = cache_dir.join(format!("{:016x}.jsonl", hasher.finish()));
+    if cache_path.exists() {
+        return Ok(cache_path);
+    }
+
+    let source =
+        fs::File::open(source_path).map_err(|err| format!("gzip playlog を開けません: {err}"))?;
+    let mut decoder = flate2::read::GzDecoder::new(source);
+    let temp_path = cache_path.with_extension("jsonl.tmp");
+    let mut output =
+        fs::File::create(&temp_path).map_err(|err| format!("playlog cache を作れません: {err}"))?;
+    std::io::copy(&mut decoder, &mut output)
+        .map_err(|err| format!("gzip playlog を展開できません: {err}"))?;
+    output
+        .flush()
+        .map_err(|err| format!("playlog cache をflushできません: {err}"))?;
+    fs::rename(&temp_path, &cache_path)
+        .map_err(|err| format!("playlog cache を確定できません: {err}"))?;
+    Ok(cache_path)
+}
+
+fn index_playlog_jsonl(path: &Path) -> Result<Vec<AiReplayFrameRef>, String> {
+    let file = fs::File::open(path).map_err(|err| format!("playlog を開けません: {err}"))?;
+    let mut reader = BufReader::new(file);
+    let mut frames = Vec::new();
+    let mut offset = 0_u64;
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let read_bytes = reader
+            .read_line(&mut line)
+            .map_err(|err| format!("playlog を読み込めません: {err}"))?;
+        if read_bytes == 0 {
+            break;
+        }
+        if !line.trim().is_empty() {
+            frames.push(AiReplayFrameRef {
+                index: frames.len() as u32,
+                frame: extract_json_i32_field(&line, "frame"),
+                byte_offset: offset as f64,
+            });
+        }
+        offset = offset.saturating_add(read_bytes as u64);
+    }
+    Ok(frames)
+}
+
+fn read_line_at_offset(path: &Path, byte_offset: f64) -> Result<String, String> {
+    if !byte_offset.is_finite() || byte_offset < 0.0 {
+        return Err("byte_offset が不正です".to_owned());
+    }
+    let mut file = fs::File::open(path).map_err(|err| format!("playlog を開けません: {err}"))?;
+    file.seek(SeekFrom::Start(byte_offset as u64))
+        .map_err(|err| format!("playlog の指定位置へ移動できません: {err}"))?;
+    let mut reader = BufReader::new(file);
+    let mut line = String::new();
+    reader
+        .read_line(&mut line)
+        .map_err(|err| format!("playlog frame を読み込めません: {err}"))?;
+    if line.trim().is_empty() {
+        return Err("指定位置にplaylog frameがありません".to_owned());
+    }
+    Ok(line)
+}
+
+fn extract_json_i32_field(line: &str, field: &str) -> Option<i32> {
+    let needle = format!("\"{field}\":");
+    let start = line.find(&needle)? + needle.len();
+    let rest = line[start..].trim_start();
+    let end = rest
+        .find(|ch: char| !ch.is_ascii_digit() && ch != '-')
+        .unwrap_or(rest.len());
+    rest[..end].parse().ok()
 }
 
 fn read_sampled_playlog_jsonl(path: &Path, original_bytes: u64) -> Result<(String, usize), String> {
@@ -471,7 +668,11 @@ fn read_sampled_playlog_jsonl(path: &Path, original_bytes: u64) -> Result<(Strin
 }
 
 fn artifact_kind(file_name: &str) -> Option<&'static str> {
-    if file_name == "ai-playlog.jsonl" || file_name.ends_with(".ai-playlog.jsonl") {
+    if file_name == "ai-playlog.jsonl"
+        || file_name == "ai-playlog.jsonl.gz"
+        || file_name.ends_with(".ai-playlog.jsonl")
+        || file_name.ends_with(".ai-playlog.jsonl.gz")
+    {
         Some("playlog")
     } else if file_name == "recording.json" {
         Some("recording")

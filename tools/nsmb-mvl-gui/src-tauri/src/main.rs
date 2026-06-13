@@ -23,6 +23,8 @@ use tauri_specta::{collect_commands, Builder as SpectaBuilder};
 fn specta_builder() -> SpectaBuilder<tauri::Wry> {
     SpectaBuilder::<tauri::Wry>::new().commands(collect_commands![
         ai_workbench::list_ai_artifacts,
+        ai_workbench::open_ai_replay_log,
+        ai_workbench::read_ai_replay_frame,
         ai_workbench::read_ai_text_file,
         ai_workbench::run_ai_tool,
         ai_workbench::select_ai_log_file,

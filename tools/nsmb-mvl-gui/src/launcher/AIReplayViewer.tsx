@@ -14,11 +14,19 @@ import { css } from 'styled-system/css';
 import { Button, Input, Tabs } from '../components/ui';
 import {
   listAiArtifacts,
+  openAiReplayLog,
+  readAiReplayFrame,
   readAiTextFile,
   runAiTool,
   selectAiLogFile,
 } from '../tauriClient';
-import type { AiArtifact, RunAiToolRequest, RunAiToolResponse } from '../types';
+import type {
+  AiArtifact,
+  AiReplayFrameRef,
+  OpenAiReplayLogResponse,
+  RunAiToolRequest,
+  RunAiToolResponse,
+} from '../types';
 import { LauncherCard, SmallInfoCard } from './LauncherCards';
 
 type Vec3 = { x?: number | string; y?: number | string; z?: number | string };
@@ -360,6 +368,11 @@ function hexText(value: unknown) {
 
 function basename(path: string) {
   return path.split(/[\\/]/).pop() || path;
+}
+
+function isReplayLogPath(path: string) {
+  const name = path.toLowerCase();
+  return name.endsWith('.jsonl') || name.endsWith('.jsonl.gz');
 }
 
 function formatBytes(value: number | null | undefined) {
@@ -945,6 +958,15 @@ export function AIReplayViewer() {
   const [artifactsError, setArtifactsError] = useState<string | null>(null);
   const [artifactsLoading, setArtifactsLoading] = useState(false);
   const [frames, setFrames] = useState<ReplayFrame[]>([]);
+  const [frameRefs, setFrameRefs] = useState<AiReplayFrameRef[]>([]);
+  const [replayLog, setReplayLog] = useState<OpenAiReplayLogResponse | null>(
+    null,
+  );
+  const [currentReplayFrame, setCurrentReplayFrame] =
+    useState<ReplayFrame | null>(null);
+  const [previousReplayFrame, setPreviousReplayFrame] =
+    useState<ReplayFrame | null>(null);
+  const [frameLoading, setFrameLoading] = useState(false);
   const [eventSamples, setEventSamples] = useState<EventSamples>({});
   const [manifestLabel, setManifestLabel] = useState('');
   const [frameIndex, setFrameIndex] = useState(0);
@@ -962,8 +984,11 @@ export function AIReplayViewer() {
     null,
   );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const frame = frames[Math.min(frameIndex, Math.max(0, frames.length - 1))];
-  const previous = frames[Math.max(0, frameIndex - 1)];
+  const totalFrameCount = frameRefs.length || frames.length;
+  const frame =
+    currentReplayFrame ??
+    frames[Math.min(frameIndex, Math.max(0, frames.length - 1))];
+  const previous = previousReplayFrame ?? frames[Math.max(0, frameIndex - 1)];
   const events = useMemo(
     () => (frame ? frameEvents(frame, previous) : []),
     [frame, previous],
@@ -1013,12 +1038,52 @@ export function AIReplayViewer() {
     void refreshArtifacts();
   }, [refreshArtifacts]);
 
+  useEffect(() => {
+    if (!replayLog || frameRefs.length === 0) return;
+    const selected = frameRefs[Math.min(frameIndex, frameRefs.length - 1)];
+    if (!selected) return;
+    const previousRef = frameIndex > 0 ? frameRefs[frameIndex - 1] : null;
+    let canceled = false;
+    setFrameLoading(true);
+    readAiReplayFrame({
+      byte_offset: selected.byte_offset,
+      data_path: replayLog.data_path,
+      previous_byte_offset: previousRef?.byte_offset ?? null,
+    })
+      .then((response) => {
+        if (canceled) return;
+        setCurrentReplayFrame(JSON.parse(response.frame_json) as ReplayFrame);
+        setPreviousReplayFrame(
+          response.previous_frame_json
+            ? (JSON.parse(response.previous_frame_json) as ReplayFrame)
+            : null,
+        );
+        setError(null);
+      })
+      .catch((err) => {
+        if (canceled) return;
+        setCurrentReplayFrame(null);
+        setPreviousReplayFrame(null);
+        setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!canceled) setFrameLoading(false);
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [frameIndex, frameRefs, replayLog]);
+
   function applyParsedReplay(parsed: ParsedReplay) {
     const eventCount = Object.values(parsed.eventSamples).reduce(
       (total, samples) => total + samples.length,
       0,
     );
     setFrames(parsed.frames);
+    setFrameRefs([]);
+    setReplayLog(null);
+    setCurrentReplayFrame(null);
+    setPreviousReplayFrame(null);
     setEventSamples(parsed.eventSamples);
     setManifestLabel(parsed.manifestLabel ?? '');
     setFrameIndex(0);
@@ -1053,11 +1118,33 @@ export function AIReplayViewer() {
     }
   }
 
+  async function loadReplayLogPath(path: string) {
+    const opened = await openAiReplayLog({ path });
+    setReplayLog(opened);
+    setFrameRefs(opened.frames);
+    setFrames([]);
+    setCurrentReplayFrame(null);
+    setPreviousReplayFrame(null);
+    setEventSamples({});
+    setManifestLabel('');
+    setFrameIndex(0);
+    setSvgText('');
+    setError(null);
+    setNotice(
+      `${opened.frames.length} frames を全件インデックス化しました。表示は選択中フレームだけを読み込みます。${opened.compressed ? ` gzip ${formatBytes(opened.original_bytes)} -> 展開cache ${formatBytes(opened.data_bytes)}` : ` ${formatBytes(opened.data_bytes)}`}`,
+    );
+    setPathInput(opened.source_path);
+    setWorkbenchForm((current) => ({
+      ...current,
+      inputPath: opened.source_path,
+    }));
+  }
+
   async function loadFile(file: File) {
     try {
       if (file.size > maxBrowserFileBytes) {
         setError(
-          `ファイルが大きすぎます: ${formatBytes(file.size)}。巨大なai-playlog.jsonlは上のパス入力かAI成果物一覧から開いてください。GUIが表示用に自動サンプリングします。`,
+          `ファイルが大きすぎます: ${formatBytes(file.size)}。巨大なai-playlogは上のパス入力かAI成果物一覧から開いてください。GUIが全フレームをインデックス化して表示します。`,
         );
         setFrames([]);
         setEventSamples({});
@@ -1090,6 +1177,10 @@ export function AIReplayViewer() {
     const trimmed = path.trim();
     if (!trimmed) return;
     try {
+      if (isReplayLogPath(trimmed)) {
+        await loadReplayLogPath(trimmed);
+        return;
+      }
       const response = await readAiTextFile({ path: trimmed });
       if (trimmed.toLowerCase().endsWith('.svg')) {
         setSvgText(response.text);
@@ -1101,7 +1192,7 @@ export function AIReplayViewer() {
         }));
       } else {
         const sampleNotice = response.sampled
-          ? `大きいログのため、${formatBytes(response.original_bytes)} の元ファイルから表示用に ${response.sampled_lines} frames をサンプリングしています。学習や後処理は元のフルログを使います。`
+          ? `大きいログのため、${formatBytes(response.original_bytes)} の元ファイルから表示用に ${response.sampled_lines} frames を抽出しています。playlogはパス入力から開くと全フレーム表示になります。`
           : null;
         await loadText(response.text, response.path, sampleNotice);
       }
@@ -1642,8 +1733,8 @@ export function AIReplayViewer() {
           title="AIログビューア"
           icon={<FilmStrip size={24} weight="fill" />}
           badge={
-            frames.length
-              ? `${frames.length} frames`
+            totalFrameCount
+              ? `${totalFrameCount} frames`
               : eventSampleRows.length
                 ? `${eventSampleRows.length} events`
                 : undefined
@@ -1662,7 +1753,7 @@ export function AIReplayViewer() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".jsonl,.json,.svg"
+                accept=".jsonl,.jsonl.gz,.json,.svg"
                 aria-label="AIログファイル"
                 className={css({ display: 'none' })}
                 onChange={(event) => {
@@ -1719,7 +1810,7 @@ export function AIReplayViewer() {
               <input
                 type="range"
                 min="0"
-                max={Math.max(0, frames.length - 1)}
+                max={Math.max(0, totalFrameCount - 1)}
                 value={frameIndex}
                 onChange={(event) =>
                   setFrameIndex(Number(event.currentTarget.value))
@@ -1732,8 +1823,8 @@ export function AIReplayViewer() {
                   textStyle: 'sm',
                 })}
               >
-                frame {frame.frame} / index {frameIndex} / hash{' '}
-                {frame.hash ?? '-'}
+                frame {frame.frame} / index {frameIndex}
+                {frameLoading ? ' / loading' : ''} / hash {frame.hash ?? '-'}
               </div>
             </div>
           ) : null}

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,7 +52,8 @@ def rel(path: Path | None, base: Path) -> str | None:
 
 
 def iter_records(path: Path):
-    with path.open("r", encoding="utf-8") as f:
+    opener = gzip.open if path.name.lower().endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8-sig") as f:
         for line_no, line in enumerate(f, 1):
             line = line.strip()
             if not line:

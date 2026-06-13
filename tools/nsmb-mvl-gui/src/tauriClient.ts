@@ -1,12 +1,17 @@
 import { commands } from './bindings';
 import type {
   AiArtifact,
+  AiReplayFrameRef,
   Defaults,
   GenerateRomRequest,
   GenerateRomResponse,
   LaunchRequest,
   LaunchResponse,
+  OpenAiReplayLogRequest,
+  OpenAiReplayLogResponse,
   PreflightResponse,
+  ReadAiReplayFrameRequest,
+  ReadAiReplayFrameResponse,
   ReadAiTextFileRequest,
   ReadAiTextFileResponse,
   RunAiToolRequest,
@@ -336,6 +341,41 @@ export function readAiTextFile(request: ReadAiTextFileRequest) {
     });
   }
   return unwrapCommand(commands.readAiTextFile(request));
+}
+
+export function openAiReplayLog(request: OpenAiReplayLogRequest) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve<OpenAiReplayLogResponse>({
+      compressed: false,
+      data_bytes: previewPlaylogLine.length * 2,
+      data_path: request.path,
+      frames: [
+        { byte_offset: 0, frame: 900, index: 0 },
+        { byte_offset: previewPlaylogLine.length + 1, frame: 930, index: 1 },
+      ] satisfies AiReplayFrameRef[],
+      original_bytes: previewPlaylogLine.length * 2,
+      source_path: request.path,
+    });
+  }
+  return unwrapCommand(commands.openAiReplayLog(request));
+}
+
+export function readAiReplayFrame(request: ReadAiReplayFrameRequest) {
+  if (!isTauriRuntime()) {
+    const byteOffset = request.byte_offset ?? 0;
+    return Promise.resolve<ReadAiReplayFrameResponse>({
+      frame_json:
+        byteOffset > 0
+          ? `${previewPlaylogLine.replace('900', '930')}\n`
+          : `${previewPlaylogLine}\n`,
+      previous_frame_json:
+        request.previous_byte_offset === null ||
+        request.previous_byte_offset === undefined
+          ? null
+          : `${previewPlaylogLine}\n`,
+    });
+  }
+  return unwrapCommand(commands.readAiReplayFrame(request));
 }
 
 export function selectAiLogFile(currentPath: string) {

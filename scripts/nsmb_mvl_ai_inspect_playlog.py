@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 from pathlib import Path
 from typing import Any
@@ -245,7 +246,8 @@ def nearest_any_text(record: dict[str, Any], player: int, categories: tuple[str,
 
 
 def iter_records(path: Path) -> Any:
-    with path.open("r", encoding="utf-8") as f:
+    opener = gzip.open if path.name.lower().endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8-sig") as f:
         for line in f:
             line = line.strip()
             if line:

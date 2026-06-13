@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import sys
 from collections import Counter, defaultdict
@@ -63,7 +64,8 @@ def fireball_owner_info(slot: dict[str, Any]) -> tuple[int, int, int]:
 
 
 def iter_records(path: Path):
-    with path.open("r", encoding="utf-8") as f:
+    opener = gzip.open if path.name.lower().endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8-sig") as f:
         for line_no, line in enumerate(f, 1):
             line = line.strip()
             if not line:

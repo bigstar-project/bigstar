@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gzip
 import json
 import math
 from pathlib import Path
@@ -1040,7 +1041,8 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
 
 
 def iter_records(path: Path) -> Any:
-    with path.open("r", encoding="utf-8") as f:
+    opener = gzip.open if path.name.lower().endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8-sig") as f:
         for line_no, line in enumerate(f, 1):
             line = line.strip()
             if not line:

@@ -2,6 +2,7 @@ import type { CourseMode, Lives, Role } from './bindings';
 
 export type {
   AiArtifact,
+  AiReplayFrameRef,
   BridgeDiagnostics,
   CourseMode,
   Defaults,
@@ -11,7 +12,11 @@ export type {
   LaunchRequest,
   LaunchResponse,
   Lives,
+  OpenAiReplayLogRequest,
+  OpenAiReplayLogResponse,
   PreflightResponse,
+  ReadAiReplayFrameRequest,
+  ReadAiReplayFrameResponse,
   ReadAiTextFileRequest,
   ReadAiTextFileResponse,
   Role,

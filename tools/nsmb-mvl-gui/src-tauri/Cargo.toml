@@ -9,6 +9,7 @@ tauri-build = { version = "2.5.0", features = [] }
 
 [dependencies]
 anyhow = "1"
+flate2 = "1"
 nsmb-mvl-rom = { path = "../../nsmb-mvl-rom" }
 rfd = "0.15"
 serde = { version = "1", features = ["derive"] }
