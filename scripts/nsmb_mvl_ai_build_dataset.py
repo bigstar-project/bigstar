@@ -145,15 +145,16 @@ ITEM_SETTINGS_MEGA_MUSHROOM_CANDIDATES = {
 ITEM_SETTINGS_INVINCIBLE_STAR_CANDIDATES = {
     0x00011081,
 }
-ITEM_SETTINGS_SHELL_CANDIDATES: set[int] = set()
+ITEM_SETTINGS_SHELL_CANDIDATES = {
+    # Observed by manual visual confirmation at
+    # logs/nsmb-mvl-human-recording-stage0-20260613-232727/client/ai-playlog.jsonl
+    # frame 32280.
+    0x0001108B,
+}
 ITEM_SETTINGS_COIN_ITEM_CANDIDATES = {
     0x00090002,
 }
-ITEM_SETTINGS_SUSPECTED_MINI_CANDIDATES = {
-    # Observed as an 8-coin reward candidate in human-stage0-item-box-001.
-    # Treat as suspected until visually confirmed; training can explicitly avoid it.
-    0x0001108B,
-}
+ITEM_SETTINGS_SUSPECTED_MINI_CANDIDATES: set[int] = set()
 ITEM_SETTINGS_UNKNOWN_ITEM_VARIANTS = {
     0x000D0000,
     0x000D0002,
@@ -512,7 +513,7 @@ def item_kind_candidate(object_id: int, settings: int, category: str) -> tuple[i
     if settings in ITEM_SETTINGS_SUSPECTED_MINI_CANDIDATES:
         return ITEM_KIND_MINI_MUSHROOM, ITEM_KIND_CONFIDENCE_LOG_SUPPORTED
     if settings in ITEM_SETTINGS_SHELL_CANDIDATES:
-        return ITEM_KIND_SHELL, ITEM_KIND_CONFIDENCE_HEURISTIC
+        return ITEM_KIND_SHELL, ITEM_KIND_CONFIDENCE_CONFIRMED
     if settings in ITEM_SETTINGS_MEGA_MUSHROOM_CANDIDATES:
         return ITEM_KIND_MEGA_MUSHROOM, ITEM_KIND_CONFIDENCE_HEURISTIC
     if settings in ITEM_SETTINGS_INVINCIBLE_STAR_CANDIDATES:

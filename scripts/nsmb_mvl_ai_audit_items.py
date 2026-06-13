@@ -21,8 +21,8 @@ FIRE_ITEM_SETTINGS_CONFIRMED = {0x00011089}
 FIRE_ITEM_SETTINGS = {0x00090000, *FIRE_ITEM_SETTINGS_CONFIRMED}
 SUPER_MUSHROOM_ITEM_SETTINGS = {0x00011088}
 COIN_ITEM_SETTINGS = {0x00090002}
-MINI_ITEM_SETTINGS = {0x0001108B}
-SHELL_ITEM_SETTINGS: set[int] = set()
+MINI_ITEM_SETTINGS: set[int] = set()
+SHELL_ITEM_SETTINGS = {0x0001108B}
 MEGA_MUSHROOM_ITEM_SETTINGS = {0x00011099}
 INVINCIBLE_STAR_ITEM_SETTINGS = {0x00011081}
 UNKNOWN_ITEM_VARIANT_SETTINGS = {0x000D0000, 0x000D0002}
@@ -80,7 +80,7 @@ def item_kind_candidate(object_id: int, settings: int, category: str) -> tuple[s
     if settings in MINI_ITEM_SETTINGS:
         return "mini_mushroom_candidate", 2
     if settings in SHELL_ITEM_SETTINGS:
-        return "shell_candidate", 1
+        return "shell", 3
     if settings in MEGA_MUSHROOM_ITEM_SETTINGS:
         return "mega_mushroom_candidate", 1
     if settings in INVINCIBLE_STAR_ITEM_SETTINGS:

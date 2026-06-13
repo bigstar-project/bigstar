@@ -17353,14 +17353,14 @@ bool RuntimeItemSettingsIsSuperMushroomCandidate(melonDS::u32 settings)
     return settings == 0x00011088u;
 }
 
-bool RuntimeItemSettingsIsMiniMushroomCandidate(melonDS::u32 settings)
-{
-    return settings == 0x0001108Bu;
-}
-
-bool RuntimeItemSettingsIsShellCandidate(melonDS::u32)
+bool RuntimeItemSettingsIsMiniMushroomCandidate(melonDS::u32)
 {
     return false;
+}
+
+bool RuntimeItemSettingsIsShellCandidate(melonDS::u32 settings)
+{
+    return settings == 0x0001108Bu;
 }
 
 bool RuntimeItemSettingsIsMegaMushroomCandidate(melonDS::u32 settings)
@@ -17416,7 +17416,7 @@ std::pair<int, int> RuntimeItemKindAndConfidence(const GameStateObjectScanEntry&
     if (RuntimeItemSettingsIsMiniMushroomCandidate(settings))
         return {kRuntimeItemKindMiniMushroom, kRuntimeItemKindConfidenceLogSupported};
     if (RuntimeItemSettingsIsShellCandidate(settings))
-        return {kRuntimeItemKindShell, kRuntimeItemKindConfidenceHeuristic};
+        return {kRuntimeItemKindShell, kRuntimeItemKindConfidenceConfirmed};
     if (RuntimeItemSettingsIsMegaMushroomCandidate(settings))
         return {kRuntimeItemKindMegaMushroom, kRuntimeItemKindConfidenceHeuristic};
     if (RuntimeItemSettingsIsInvincibleStarCandidate(settings))
