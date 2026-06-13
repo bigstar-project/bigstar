@@ -78,6 +78,9 @@ type ReplayObject = {
   pos?: Vec3;
   relative?: Record<string, unknown>;
 };
+type TileProbeSample = NonNullable<
+  NonNullable<PlayerState['tileProbe']>['samples']
+>[number];
 type ReplayFrame = {
   frame?: number | string;
   hash?: string;
@@ -417,6 +420,25 @@ function pos(entity?: { pos?: Vec3 }) {
 
 const sceneScale = 0.5;
 const stageWrapWidthPx = 1024;
+const tileGridSizePx = 12;
+const hiddenSceneObjectCategories = new Set([
+  'camera',
+  'course_select',
+  'mvl_object267',
+  'stage_actor_manager',
+  'stage_controller',
+  'stage_fx',
+  'stage_layout',
+  'stage_scene',
+]);
+const tileLabels = new Set([
+  'question',
+  'hidden',
+  'coin',
+  'harmful',
+  'water',
+  'partial',
+]);
 
 function fixedToPx(value: unknown) {
   return numeric(value) / 4096;
@@ -437,6 +459,13 @@ function scenePointFromPx(dxPx: number, dyPx: number) {
   };
 }
 
+function scenePointFromTile(relTileX: unknown, relTileY: unknown) {
+  return {
+    x: 320 + numeric(relTileX) * tileGridSizePx,
+    y: 180 + numeric(relTileY) * tileGridSizePx,
+  };
+}
+
 function relativeDeltaPx(
   entity: { pos?: Vec3; relative?: Record<string, unknown> },
   self: PlayerState | undefined,
@@ -450,15 +479,37 @@ function relativeDeltaPx(
   ) {
     return {
       dx: fixedToPx(entity.relative[dxKey]),
-      dy: fixedToPx(entity.relative[dyKey]),
+      dy: -fixedToPx(entity.relative[dyKey]),
     };
   }
   const entityPos = pos(entity);
   const selfPos = pos(self);
   return {
     dx: wrappedDeltaPx(entityPos.x / 4096, selfPos.x / 4096),
-    dy: (entityPos.y - selfPos.y) / 4096,
+    dy: -(entityPos.y - selfPos.y) / 4096,
   };
+}
+
+function tileProbeSampleDeltaPx(
+  sample: TileProbeSample,
+  self: PlayerState | undefined,
+) {
+  const selfPos = pos(self);
+  if (sample.worldX !== undefined || sample.worldY !== undefined) {
+    return {
+      dx: wrappedDeltaPx(fixedToPx(sample.worldX), selfPos.x / 4096),
+      dy: -((numeric(sample.worldY) - selfPos.y) / 4096),
+    };
+  }
+  return {
+    dx: numeric(sample.pixelX),
+    dy: numeric(sample.pixelY),
+  };
+}
+
+function objectIsUsefulForScene(object: ReplayObject) {
+  const category = object.category ?? 'object';
+  return !hiddenSceneObjectCategories.has(category);
 }
 
 function tileKind(
@@ -526,7 +577,11 @@ function gridCounts(player?: PlayerState) {
   const counts: Record<string, number> = {};
   for (const cell of player?.tileProbe?.grid?.cells ?? []) {
     const kind = tileKind(cell);
-    if (!kind) continue;
+    if (!kind) {
+      if (numeric(cell.status))
+        counts.unresolved = (counts.unresolved ?? 0) + 1;
+      continue;
+    }
     counts[kind.name] = (counts[kind.name] ?? 0) + 1;
   }
   return counts;
@@ -631,12 +686,17 @@ function ReplayScene({
   const opponentPos = pos(opponent);
   const opponentPoint = scenePointFromPx(
     wrappedDeltaPx(opponentPos.x / 4096, selfPos.x / 4096),
-    (opponentPos.y - selfPos.y) / 4096,
+    -(opponentPos.y - selfPos.y) / 4096,
   );
-  const objects = (frame.objects ?? []).slice(0, 64);
+  const objects = (frame.objects ?? [])
+    .filter(objectIsUsefulForScene)
+    .slice(0, 64);
   const fireballSlots = frame.specialObjects?.fireballs?.slots ?? [];
   const gridCells = (self?.tileProbe?.grid?.cells ?? []).slice(0, 220);
   const sampleCells = self?.tileProbe?.samples ?? [];
+  const hiddenObjectCount =
+    (frame.objects ?? []).length -
+    (frame.objects ?? []).filter(objectIsUsefulForScene).length;
 
   return (
     <svg
@@ -681,16 +741,14 @@ function ReplayScene({
       {gridCells.map((cell, index) => {
         const kind = tileKind(cell);
         if (!kind) return null;
-        const point = scenePointFromPx(
-          wrappedDeltaPx(numeric(cell.pixelX), selfPos.x / 4096),
-          numeric(cell.pixelY) - selfPos.y / 4096,
-        );
+        const point = scenePointFromTile(cell.relTileX, cell.relTileY);
         if (point.x < -24 || point.x > 664 || point.y < -24 || point.y > 384) {
           return null;
         }
         const block = cell.block ?? {};
         const tile = cell.tile ?? {};
-        const size = 16 * sceneScale;
+        const size = tileGridSizePx - 1;
+        const labelVisible = tileLabels.has(kind.name);
         return (
           <g key={`grid-${cell.row ?? 'r'}-${cell.col ?? index}`}>
             <rect
@@ -699,16 +757,16 @@ function ReplayScene({
               width={size}
               height={size}
               fill={kind.color}
-              opacity={kind.label ? 0.64 : 0.34}
+              opacity={kind.label ? 0.72 : 0.22}
               stroke="rgba(248,250,252,0.55)"
               strokeWidth="0.5"
             />
-            {kind.label ? (
+            {labelVisible ? (
               <text
                 x={point.x}
-                y={point.y + 3}
+                y={point.y + 2.5}
                 fill="#f8fafc"
-                fontSize="8"
+                fontSize="7"
                 fontWeight="900"
                 textAnchor="middle"
               >
@@ -721,13 +779,8 @@ function ReplayScene({
       })}
       {sampleCells.map((sample, index) => {
         if (!numeric(sample.found, 1)) return null;
-        const point = scenePointFromPx(
-          wrappedDeltaPx(
-            fixedToPx(sample.worldX ?? sample.pixelX),
-            selfPos.x / 4096,
-          ),
-          fixedToPx(sample.worldY ?? sample.pixelY) - selfPos.y / 4096,
-        );
+        const delta = tileProbeSampleDeltaPx(sample, self);
+        const point = scenePointFromPx(delta.dx, delta.dy);
         const kind = tileKind(sample) ?? {
           color: numeric(sample.solidish) ? '#22c55e' : '#64748b',
           label: '',
@@ -864,6 +917,11 @@ function ReplayScene({
           </g>
         ))}
       </g>
+      {hiddenObjectCount > 0 ? (
+        <text x="24" y="342" fill="#64748b" fontSize="9" fontWeight="700">
+          hidden system objects: {hiddenObjectCount}
+        </text>
+      ) : null}
     </svg>
   );
 }

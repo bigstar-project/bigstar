@@ -16,6 +16,20 @@ HEIGHT = 520
 CENTER_X = WIDTH // 2
 CENTER_Y = HEIGHT // 2
 STAGE_WRAP_WIDTH_PX = 1024
+TILE_GRID_SIZE_PX = 14
+
+HIDDEN_SCENE_OBJECT_CATEGORIES = {
+    "camera",
+    "course_select",
+    "mvl_object267",
+    "stage_actor_manager",
+    "stage_controller",
+    "stage_fx",
+    "stage_layout",
+    "stage_scene",
+}
+
+TILE_LABELS = {"question", "hidden", "coin", "harmful", "water", "partial"}
 
 CATEGORY_STYLE = {
     "player": ("#2563eb", "P"),
@@ -186,35 +200,30 @@ def wrapped_delta_px(a_px: float, b_px: float) -> float:
     return dx
 
 
-def player_world_px(player: dict[str, Any]) -> tuple[float, float]:
-    player_pos = pos(player)
-    return (player_pos["x"] / FIXED, player_pos["y"] / FIXED)
-
-
-def tile_cell_kind(cell: dict[str, Any]) -> tuple[str, str, str]:
+def tile_cell_kind(cell: dict[str, Any]) -> tuple[str, str, str, str]:
     tile = cell.get("tile") or {}
     block = cell.get("block") or {}
     if num(block.get("hiddenOrRescueCandidate")) or num(block.get("invisible")) or num(tile.get("invisibleBlock")):
-        return TILE_KIND_STYLE["hidden"]
+        return ("hidden", *TILE_KIND_STYLE["hidden"])
     if num(block.get("question")) or num(tile.get("questionBlock")):
-        return TILE_KIND_STYLE["question"]
+        return ("question", *TILE_KIND_STYLE["question"])
     if num(block.get("breakable")) or num(tile.get("breakableBlock")):
-        return TILE_KIND_STYLE["breakable"]
+        return ("breakable", *TILE_KIND_STYLE["breakable"])
     if num(block.get("brick")) or num(tile.get("brickBlock")):
-        return TILE_KIND_STYLE["brick"]
+        return ("brick", *TILE_KIND_STYLE["brick"])
     if num(tile.get("coin")):
-        return TILE_KIND_STYLE["coin"]
+        return ("coin", *TILE_KIND_STYLE["coin"])
     if num(tile.get("harmful")):
-        return TILE_KIND_STYLE["harmful"]
+        return ("harmful", *TILE_KIND_STYLE["harmful"])
     if num(tile.get("water")):
-        return TILE_KIND_STYLE["water"]
+        return ("water", *TILE_KIND_STYLE["water"])
     if num(tile.get("partialSolid")):
-        return TILE_KIND_STYLE["partial"]
+        return ("partial", *TILE_KIND_STYLE["partial"])
     if num(cell.get("solidish")):
-        return TILE_KIND_STYLE["solid"]
+        return ("solid", *TILE_KIND_STYLE["solid"])
     if num(cell.get("status")):
-        return TILE_KIND_STYLE["unknown"]
-    return ("", "", "")
+        return ("unresolved", "", "", "unresolved tile")
+    return ("", "", "", "")
 
 
 def object_delta_px(obj: dict[str, Any], self_player: dict[str, Any], player: int) -> tuple[float, float]:
@@ -222,10 +231,10 @@ def object_delta_px(obj: dict[str, Any], self_player: dict[str, Any], player: in
     dx_key = f"p{player}dx"
     dy_key = f"p{player}dy"
     if dx_key in rel or dy_key in rel:
-        return (num(rel.get(dx_key)) / FIXED, num(rel.get(dy_key)) / FIXED)
+        return (num(rel.get(dx_key)) / FIXED, -num(rel.get(dy_key)) / FIXED)
     obj_pos = pos(obj)
     self_pos = pos(self_player)
-    return (wrapped_delta_px(obj_pos["x"] / FIXED, self_pos["x"] / FIXED), (obj_pos["y"] - self_pos["y"]) / FIXED)
+    return (wrapped_delta_px(obj_pos["x"] / FIXED, self_pos["x"] / FIXED), -(obj_pos["y"] - self_pos["y"]) / FIXED)
 
 
 def state_tags(player: dict[str, Any]) -> str:
@@ -278,7 +287,6 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
     self_player = players[player]
     opponent = players[player ^ 1]
     self_pos = pos(self_player)
-    self_px = player_world_px(self_player)
     opponent_pos = pos(opponent)
     applied = ((record.get("inputs") or {}).get(f"appliedPlayer{player}") or {})
     held = num(applied.get("held"))
@@ -288,9 +296,9 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
     grid_cells = grid.get("cells") or []
     grid_counts: dict[str, int] = {}
     for cell in grid_cells:
-        _color, label, _description = tile_cell_kind(cell)
-        if label:
-            grid_counts[label] = grid_counts.get(label, 0) + 1
+        kind, _color, label, _description = tile_cell_kind(cell)
+        if kind:
+            grid_counts[kind] = grid_counts.get(kind, 0) + 1
         elif num(cell.get("solidish")):
             grid_counts["solid"] = grid_counts.get("solid", 0) + 1
     grid_text = " ".join(f"{key}:{value}" for key, value in sorted(grid_counts.items())) or "-"
@@ -320,35 +328,33 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
 
     # Draw wide tile grid first so objects and players stay readable.
     for cell in grid_cells:
-        color, label, description = tile_cell_kind(cell)
+        kind, color, label, description = tile_cell_kind(cell)
         if not color:
             continue
-        cell_x = num(cell.get("pixelX"))
-        cell_y = num(cell.get("pixelY"))
-        dx = wrapped_delta_px(cell_x, self_px[0])
-        dy = cell_y - self_px[1]
+        dx = num(cell.get("relTileX")) * TILE_GRID_SIZE_PX
+        dy = num(cell.get("relTileY")) * TILE_GRID_SIZE_PX
         x, y = svg_point(dx, dy)
         if x < -20 or x > WIDTH + 20 or y < -20 or y > HEIGHT + 20:
             continue
         tile = cell.get("tile") or {}
         block = cell.get("block") or {}
         tile_id = num(cell.get("tileId"))
-        opacity = "0.56" if label else "0.32"
+        opacity = "0.68" if label else "0.24"
         parts.append(
-            f'<rect x="{x - 8:.1f}" y="{y - 8:.1f}" width="16" height="16" fill="{color}" '
+            f'<rect x="{x - 6.5:.1f}" y="{y - 6.5:.1f}" width="13" height="13" fill="{color}" '
             f'opacity="{opacity}" stroke="#e2e8f0" stroke-width="0.5">'
             f'<title>grid {html.escape(description)} row={cell.get("row")} col={cell.get("col")} rel=({cell.get("relTileX")},{cell.get("relTileY")}) tile=0x{tile_id:03X} behavior={html.escape(str(cell.get("behavior")))} solidish={num(cell.get("solidish"))} question={num(block.get("question")) or num(tile.get("questionBlock"))} breakable={num(block.get("breakable")) or num(tile.get("breakableBlock"))} brick={num(block.get("brick")) or num(tile.get("brickBlock"))} hidden={num(block.get("hiddenOrRescueCandidate")) or num(block.get("invisible")) or num(tile.get("invisibleBlock"))} itemBox={num(block.get("itemBox"))} storage={num(block.get("storageContents"))} dx={dx:.0f} dy={dy:.0f}</title></rect>'
         )
-        if label:
+        if kind in TILE_LABELS:
             parts.append(
                 f'<text x="{x:.1f}" y="{y + 4:.1f}" text-anchor="middle" fill="#f8fafc" '
-                f'font-family="monospace" font-size="10" font-weight="800" filter="url(#labelShadow)">{html.escape(label)}</text>'
+                f'font-family="monospace" font-size="9" font-weight="800" filter="url(#labelShadow)">{html.escape(label)}</text>'
             )
 
     draw_marker(CENTER_X, CENTER_Y, "#38bdf8", f"P{player}", "selected player", 12)
     if opponent.get("found"):
         dx = wrapped_delta_px(opponent_pos["x"] / FIXED, self_pos["x"] / FIXED)
-        dy = (opponent_pos["y"] - self_pos["y"]) / FIXED
+        dy = -(opponent_pos["y"] - self_pos["y"]) / FIXED
         x, y = svg_point(dx, dy)
         draw_marker(x, y, "#818cf8", f"P{player ^ 1}", f"opponent dx={dx:.0f} dy={dy:.0f}", 11)
 
@@ -357,7 +363,7 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
             continue
         sample_pos = {"x": num(sample.get("worldX")), "y": num(sample.get("worldY"))}
         dx = wrapped_delta_px(sample_pos["x"] / FIXED, self_pos["x"] / FIXED)
-        dy = (sample_pos["y"] - self_pos["y"]) / FIXED
+        dy = -(sample_pos["y"] - self_pos["y"]) / FIXED
         x, y = svg_point(dx, dy)
         tile = sample.get("tile") or {}
         if num(tile.get("harmful")):
@@ -415,7 +421,7 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
         if drawn >= max_objects:
             break
         category = obj.get("category", "object")
-        if category == "player":
+        if category == "player" or category in HIDDEN_SCENE_OBJECT_CATEGORIES:
             continue
         dx, dy = object_delta_px(obj, self_player, player)
         x, y = svg_point(dx, dy)
