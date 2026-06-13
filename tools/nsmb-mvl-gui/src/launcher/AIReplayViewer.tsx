@@ -438,7 +438,7 @@ function pos(entity?: { pos?: Vec3 }) {
   };
 }
 
-const sceneScale = 0.5;
+const sceneScale = 0.75;
 const stageWrapWidthPx = 1024;
 const tileWorldSizePx = 16;
 const tileGridSizePx = tileWorldSizePx * sceneScale;
