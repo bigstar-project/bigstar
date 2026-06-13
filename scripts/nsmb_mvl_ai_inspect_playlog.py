@@ -19,6 +19,8 @@ BUTTONS = [
     ("Y", 11),
 ]
 
+HAZARD_CATEGORIES = ("enemy_goomba", "enemy_koopa", "moving_hazard", "hazard")
+
 
 def num(value: Any, default: int = 0) -> int:
     if isinstance(value, bool):
@@ -210,6 +212,38 @@ def nearest_text(record: dict[str, Any], player: int, category: str) -> str:
     return "-"
 
 
+def nearest_any_text(record: dict[str, Any], player: int, categories: tuple[str, ...]) -> str:
+    visual = record.get("visualSummary") or {}
+    for entry in visual.get("nearest") or []:
+        if num(entry.get("player"), -1) != player:
+            continue
+        category_map = entry.get("categories") or {}
+        best_category = ""
+        best_item: dict[str, Any] = {}
+        best_dist = 0
+        for category in categories:
+            item = category_map.get(category) or {}
+            if not item.get("found"):
+                continue
+            dx = num(item.get("dx"))
+            dy = num(item.get("dy"))
+            dist = dx * dx + dy * dy
+            if not best_item or dist < best_dist:
+                best_category = category
+                best_item = item
+                best_dist = dist
+        if not best_item:
+            return "-"
+        short = {
+            "enemy_goomba": "G",
+            "enemy_koopa": "K",
+            "moving_hazard": "H",
+            "hazard": "H",
+        }.get(best_category, "?")
+        return f"{short}:{num(best_item.get('dx'))//4096:4d},{num(best_item.get('dy'))//4096:4d}"
+    return "-"
+
+
 def iter_records(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as f:
         for line in f:
@@ -269,7 +303,7 @@ def main() -> int:
             f"{pos_text(players[player]):>11s} "
             f"{pos_text(players[opponent]):>11s} "
             f"{nearest_text(record, player, 'big_star_actor'):>11s} "
-            f"{nearest_text(record, player, 'moving_hazard'):>13s} "
+            f"{nearest_any_text(record, player, HAZARD_CATEGORIES):>13s} "
             f"{num(visual.get('visibleCamera0X')):4d}/{num(visual.get('visibleCamera1X')):<4d} "
             f"{num((record.get('objectSummary') or {}).get('active')):3d} "
             f"{counts_text}"

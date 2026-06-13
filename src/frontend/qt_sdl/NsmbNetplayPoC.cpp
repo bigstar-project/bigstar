@@ -15765,8 +15765,6 @@ const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings)
         return "dropped_star_item";
     if (objectID == kVsWorldItemObjectID)
         return "item";
-    if (objectID == kVsMovingHazardObjectID && settings == kVsMovingHazardSettings)
-        return "moving_hazard";
     if (objectID == kCoinObjectID)
         return "coin";
     if (objectID == kGoombaObjectID ||
@@ -15776,6 +15774,8 @@ const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings)
     if (objectID == kVsKoopaTroopaObjectID ||
         objectID == kKoopaTroopaAltObjectID)
         return "enemy_koopa";
+    if (objectID == kVsMovingHazardObjectID && settings == kVsMovingHazardSettings)
+        return "moving_hazard";
     if (objectID == kBulletBillObjectID ||
         objectID == kBulletBillAltObjectID ||
         objectID == kBulletBillBlasterObjectID ||

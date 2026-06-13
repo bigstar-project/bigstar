@@ -825,6 +825,20 @@ function ReplayScene({
               : category.includes('platform')
                 ? '#60a5fa'
                 : '#94a3b8';
+        const label =
+          category === 'enemy_goomba'
+            ? 'G'
+            : category === 'enemy_koopa'
+              ? 'K'
+              : category.includes('hazard')
+                ? 'H'
+                : category.includes('star')
+                  ? 'S'
+                  : category.includes('item')
+                    ? 'I'
+                    : category === 'coin'
+                      ? 'C'
+                      : 'O';
         return (
           <g key={`${object.objectId ?? 'obj'}-${index}`}>
             <circle
@@ -841,15 +855,7 @@ function ReplayScene({
               fontSize="9"
               fontWeight="800"
             >
-              {category.includes('star')
-                ? 'S'
-                : category.includes('item')
-                  ? 'I'
-                  : category === 'coin'
-                    ? 'C'
-                    : category.includes('enemy')
-                      ? 'E'
-                      : 'O'}
+              {label}
             </text>
             <title>{`${category} ${object.objectId ?? ''} ${object.settings ?? ''} dx=${Math.round(delta.dx)} dy=${Math.round(delta.dy)}`}</title>
           </g>
