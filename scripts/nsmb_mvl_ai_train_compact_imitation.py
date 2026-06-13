@@ -121,7 +121,7 @@ def main() -> int:
         "scale": scale.astype(np.float32),
         "head_names": np.array(HEADS),
         "input_layout": np.array(json.dumps(layout, separators=(",", ":"))),
-        "label_schema": np.array("nsmb_mvl_action_labels_v1"),
+        "label_schema": np.array("nsmb_mvl_action_labels_v2"),
     }
 
     for head_index, head in enumerate(HEADS):

@@ -408,7 +408,7 @@ function deriveActionsFromInput(input: ReplayInput, canFire: boolean) {
   const horizontalId = left && !right ? 1 : right && !left ? 2 : 0;
   const verticalId = up && !down ? 1 : down && !up ? 2 : 0;
   const jumpId = bPressed ? 1 : bHeld ? 2 : 0;
-  const fireId = canFire && yPressed ? 1 : canFire && yHeld ? 2 : 0;
+  const fireId = canFire && yPressed ? 1 : 0;
   return {
     horizontal:
       horizontalId === 1 ? 'left' : horizontalId === 2 ? 'right' : 'neutral',
@@ -419,7 +419,7 @@ function deriveActionsFromInput(input: ReplayInput, canFire: boolean) {
     jumpId,
     run: yHeld ? 'on' : 'off',
     runId: yHeld ? 1 : 0,
-    fire: fireId === 1 ? 'press' : fireId === 2 ? 'hold_or_repeat' : 'off',
+    fire: fireId === 1 ? 'press' : 'off',
     fireId,
   };
 }

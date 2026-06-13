@@ -18522,12 +18522,12 @@ void WriteAIObservationV2ActionLabelsJson(std::ostream& out, melonDS::u32 held, 
     const int verticalId = up && !down ? 1 : down && !up ? 2 : 0;
     const int jumpId = bPressed ? 1 : bHeld ? 2 : 0;
     const int runId = yHeld ? 1 : 0;
-    const int fireId = canFire && yPressed ? 1 : canFire && yHeld ? 2 : 0;
+    const int fireId = canFire && yPressed ? 1 : 0;
     const char* horizontal = horizontalId == 1 ? "left" : horizontalId == 2 ? "right" : "neutral";
     const char* vertical = verticalId == 1 ? "up" : verticalId == 2 ? "down" : "neutral";
     const char* jump = jumpId == 1 ? "press" : jumpId == 2 ? "hold" : "none";
     const char* run = runId ? "on" : "off";
-    const char* fire = fireId == 1 ? "press" : fireId == 2 ? "hold_or_repeat" : "off";
+    const char* fire = fireId == 1 ? "press" : "off";
     out << "\"actions\":{\"horizontal\":\"" << horizontal << "\",\"horizontalId\":" << horizontalId
         << ",\"vertical\":\"" << vertical << "\",\"verticalId\":" << verticalId
         << ",\"jump\":\"" << jump << "\",\"jumpId\":" << jumpId

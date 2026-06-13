@@ -73,7 +73,7 @@ ACTION_CLASSES = {
     "vertical": ["neutral", "up", "down"],
     "jump": ["none", "press", "hold"],
     "run": ["off", "on"],
-    "fire": ["off", "press", "hold_or_repeat"],
+    "fire": ["off", "press"],
 }
 
 
@@ -128,7 +128,7 @@ def action_labels(held: int, pressed: int, *, can_fire: bool) -> dict[str, Any]:
     horizontal_id = 1 if left and not right else 2 if right and not left else 0
     vertical_id = 1 if up and not down else 2 if down and not up else 0
     jump_id = 1 if b_pressed else 2 if b_held else 0
-    fire_id = 1 if can_fire and y_pressed else 2 if can_fire and y_held else 0
+    fire_id = 1 if can_fire and y_pressed else 0
     run_id = 1 if y_held else 0
 
     return {

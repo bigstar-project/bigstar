@@ -127,6 +127,11 @@ def labels(record: dict[str, Any], player: int) -> tuple[int, list[int], list[in
         legacy.num(label.get("pressed")),
         can_fire=False,
     )
+    fire_id = legacy.num(actions.get("fireId"))
+    if fire_id >= len(compact_v2.ACTION_CLASSES["fire"]):
+        raise ValueError(
+            f"unexpected fire action id {fire_id}; rebuild compact observation v2 with nsmb_mvl_action_labels_v2"
+        )
     return (
         held,
         [legacy.num(buttons.get(name)) for name in compact_v2.ALLOWED_BUTTON_BITS.keys()],
@@ -135,7 +140,7 @@ def labels(record: dict[str, Any], player: int) -> tuple[int, list[int], list[in
             legacy.num(actions.get("verticalId")),
             legacy.num(actions.get("jumpId")),
             legacy.num(actions.get("runId")),
-            legacy.num(actions.get("fireId")),
+            fire_id,
         ],
     )
 
@@ -220,7 +225,7 @@ def main() -> int:
             json.dumps(
                 {
                     "schema": "nsmb_mvl_compact_dataset_v2",
-                    "labelSchema": "nsmb_mvl_action_labels_v1",
+                    "labelSchema": "nsmb_mvl_action_labels_v2",
                     "source": str(args.input),
                     "player": args.player,
                     "maxEntities": args.max_entities,
