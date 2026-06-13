@@ -1694,9 +1694,11 @@ struct State
     std::string MemPatchFile;
     std::string GameStateTracePath;
     std::string AIPlayLogPath;
+    std::string AIObservationV2Path;
     std::ofstream HashLog;
     std::ofstream GameStateTrace;
     std::ofstream AIPlayLog;
+    std::ofstream AIObservationV2Log;
     InputState AIPlayLogLastAppliedInput[16][2] {};
     melonDS::u32 AIPlayLogLastAppliedInputFrame[16][2] {};
     bool AIPlayLogLastAppliedInputValid[16][2] {};
@@ -1711,6 +1713,7 @@ struct State
     int AIPlayLogInterval = 1;
     int AIPlayLogFlushInterval = 60;
     int AIPlayLogLinesSinceFlush = 0;
+    int AIObservationV2LinesSinceFlush = 0;
     int AIPlayLogMaxObjects = 32;
     bool AIPlayLogGameplayOnly = true;
     int MemPatchInstance = -1;
@@ -16176,6 +16179,263 @@ void WriteAITileGridCellJson(std::ostream& out, const AITileGridSample& cell)
     out << "}";
 }
 
+int AITileProbeSolidishValue(const AIPlayerTileProbeSample& probe, const char* name);
+
+int AIObservationV2EntityCategoryID(const char* category)
+{
+    if (std::strcmp(category, "player") == 0)
+        return 1;
+    if (std::strcmp(category, "big_star_actor") == 0)
+        return 2;
+    if (std::strcmp(category, "world_item") == 0)
+        return 3;
+    if (std::strcmp(category, "neutral_item") == 0)
+        return 4;
+    if (std::strcmp(category, "coin_item") == 0)
+        return 5;
+    if (std::strcmp(category, "dropped_star_item") == 0)
+        return 6;
+    if (std::strcmp(category, "coin") == 0)
+        return 7;
+    if (std::strcmp(category, "moving_hazard") == 0)
+        return 8;
+    if (std::strcmp(category, "hazard") == 0)
+        return 9;
+    if (std::strcmp(category, "projectile") == 0)
+        return 10;
+    if (std::strcmp(category, "player_fireball") == 0)
+        return 11;
+    if (std::strcmp(category, "enemy_fireball") == 0)
+        return 12;
+    if (std::strcmp(category, "enemy_goomba") == 0)
+        return 13;
+    if (std::strcmp(category, "enemy_koopa") == 0)
+        return 14;
+    if (std::strcmp(category, "platform") == 0)
+        return 15;
+    return 0;
+}
+
+melonDS::u32 AIObservationV2TerrainMask(const AITileGridSample& cell)
+{
+    if (!cell.Tile.Found)
+        return 0;
+    const melonDS::u32 t = cell.Tile.Behavior;
+    const int question = (t & 0x00040000u) ? 1 : 0;
+    const int breakable = (t & 0x00080000u) ? 1 : 0;
+    const int brick = (t & 0x00100000u) ? 1 : 0;
+    const int invisible = (t & 0x20000000u) ? 1 : 0;
+    const melonDS::u32 storage = t & 0x00000C3Fu;
+    const int anyBlock = question || breakable || brick || invisible;
+    const int hasStorage = anyBlock && storage != 0;
+    const int storageBreakable = anyBlock && breakable && hasStorage;
+    melonDS::u32 mask = 0;
+    auto bit = [&mask](int index, bool value) {
+        if (value)
+            mask |= 1u << index;
+    };
+    bit(0, AITileBehaviorSolidish(t) || (t & 0x00010000u));
+    bit(1, t & 0x00020000u);
+    bit(2, question);
+    bit(3, breakable);
+    bit(4, brick);
+    bit(5, t & 0x00200000u);
+    bit(6, t & 0x00800000u);
+    bit(7, t & 0x02000000u);
+    bit(8, t & 0x08000000u);
+    bit(9, t & 0x10000000u);
+    bit(10, invisible);
+    bit(11, anyBlock && hasStorage);
+    bit(12, anyBlock && invisible);
+    bit(13, storageBreakable && !invisible);
+    bit(14, anyBlock && (question || brick || (breakable && !invisible)));
+    return mask;
+}
+
+void WriteAIObservationV2Vec3Json(std::ostream& out, const char* name, melonDS::u32 x, melonDS::u32 y, melonDS::u32 z)
+{
+    WriteAIVec3Json(out, name, x, y, z);
+}
+
+void WriteAIObservationV2ScreenJson(
+    std::ostream& out,
+    const GameStateSample& sample,
+    melonDS::u32 x,
+    melonDS::u32 y)
+{
+    out << "\"screen\":{";
+    WriteAIScreenJson(
+        out,
+        "camera0",
+        x,
+        y,
+        sample.StageCameraGlobalX0,
+        sample.StageCameraGlobalY0,
+        sample.StageCameraGlobalWidth0,
+        sample.StageCameraGlobalHeight0);
+    out << ",";
+    WriteAIScreenJson(
+        out,
+        "camera1",
+        x,
+        y,
+        sample.StageCameraGlobalX1,
+        sample.StageCameraGlobalY1,
+        sample.StageCameraGlobalWidth1,
+        sample.StageCameraGlobalHeight1);
+    out << "}";
+}
+
+void WriteAIObservationV2TerrainJson(std::ostream& out, const AIPlayerTileProbeSample& probe)
+{
+    out << "\"terrain\":{\"encoding\":\"sparse_channel_mask_v2\""
+        << ",\"width\":" << kAITileGridWidth
+        << ",\"height\":" << kAITileGridHeight
+        << ",\"minRelTileX\":" << kAITileGridMinRelX
+        << ",\"minRelTileY\":" << kAITileGridMinRelY
+        << ",\"channels\":[\"solid\",\"coin\",\"question\",\"breakable\",\"brick\",\"slope\",\"scanSolid\",\"water\",\"partialSolid\",\"harmful\",\"invisible\",\"itemBox\",\"hiddenOrRescue\",\"visibleStorageBreakable\",\"visibleSolid\"]"
+        << ",\"omittedCellFound\":" << (probe.Found ? 1 : 0)
+        << ",\"omittedCellStatus\":0"
+        << ",\"cells\":[";
+    bool first = true;
+    if (probe.Found)
+    {
+        for (int i = 0; i < kAITileGridCount; i++)
+        {
+            const AITileGridSample& cell = probe.Grid[i];
+            const melonDS::u32 mask = AIObservationV2TerrainMask(cell);
+            const bool shouldLog = mask != 0 || !cell.Tile.Found || cell.Tile.Status != 0;
+            if (!shouldLog)
+                continue;
+            if (!first)
+                out << ",";
+            first = false;
+            out << "{\"r\":" << cell.Row
+                << ",\"c\":" << cell.Col
+                << ",\"rx\":" << SignedU32(cell.RelTileX)
+                << ",\"ry\":" << SignedU32(cell.RelTileY)
+                << ",\"found\":" << cell.Tile.Found
+                << ",\"status\":" << cell.Tile.Status
+                << ",\"mask\":" << mask
+                << ",\"tileId\":" << cell.Tile.TileID
+                << ",\"behavior\":" << cell.Tile.Behavior
+                << "}";
+        }
+    }
+    out << "]}";
+}
+
+void WriteAIObservationV2TileSummaryJson(
+    std::ostream& out,
+    const AIPlayerTileProbeSample& probe,
+    bool contactGround,
+    bool contactWallLeft,
+    bool contactWallRight)
+{
+    const int groundBelow = AITileProbeSolidishValue(probe, "below");
+    const int aheadBody = AITileProbeSolidishValue(probe, "aheadBody");
+    const int aheadFeet = AITileProbeSolidishValue(probe, "aheadFeet");
+    const int aheadBelow = AITileProbeSolidishValue(probe, "aheadBelow");
+    const int ahead2Below = AITileProbeSolidishValue(probe, "ahead2Below");
+    const int leftBody = AITileProbeSolidishValue(probe, "leftBody");
+    const int leftBelow = AITileProbeSolidishValue(probe, "leftBelow");
+    const int left2Below = AITileProbeSolidishValue(probe, "left2Below");
+    const int rightBody = AITileProbeSolidishValue(probe, "rightBody");
+    const int rightBelow = AITileProbeSolidishValue(probe, "rightBelow");
+    const int right2Below = AITileProbeSolidishValue(probe, "right2Below");
+    const int holeAhead = probe.Found && !aheadBelow && !ahead2Below ? 1 : 0;
+    const int holeLeft = probe.Found && !leftBelow && !left2Below ? 1 : 0;
+    const int holeRight = probe.Found && !rightBelow && !right2Below ? 1 : 0;
+    const int suppressHole = contactGround && !groundBelow ? 1 : 0;
+    out << "\"tileSummary\":{\"groundBelowSolid\":" << groundBelow
+        << ",\"aheadBodySolid\":" << aheadBody
+        << ",\"aheadFeetSolid\":" << aheadFeet
+        << ",\"aheadBelowSolid\":" << aheadBelow
+        << ",\"ahead2BelowSolid\":" << ahead2Below
+        << ",\"wallAhead\":" << (aheadBody || aheadFeet ? 1 : 0)
+        << ",\"holeAhead\":" << holeAhead
+        << ",\"wallLeft\":" << (leftBody || contactWallLeft ? 1 : 0)
+        << ",\"holeLeft\":" << holeLeft
+        << ",\"wallRight\":" << (rightBody || contactWallRight ? 1 : 0)
+        << ",\"holeRight\":" << holeRight
+        << ",\"contactGround\":" << (contactGround ? 1 : 0)
+        << ",\"effectiveGroundBelowSolid\":" << (groundBelow || contactGround ? 1 : 0)
+        << ",\"holeSuppressedByContact\":" << suppressHole
+        << ",\"effectiveHoleAhead\":" << (holeAhead && !suppressHole ? 1 : 0)
+        << ",\"effectiveHoleLeft\":" << (holeLeft && !suppressHole ? 1 : 0)
+        << ",\"effectiveHoleRight\":" << (holeRight && !suppressHole ? 1 : 0)
+        << "}";
+}
+
+void WriteAIObservationV2PlayerJson(std::ostream& out, int index, const GameStateSample& sample)
+{
+    const bool p0 = index == 0;
+    auto v = [p0](melonDS::u32 a, melonDS::u32 b) { return p0 ? a : b; };
+    const melonDS::u32 collision = v(sample.PlayerActor0CollisionFlag, sample.PlayerActor1CollisionFlag);
+    const melonDS::u32 environment = v(sample.PlayerActor0EnvironmentFlag, sample.PlayerActor1EnvironmentFlag);
+    const melonDS::u32 posX = v(sample.PlayerActor0PosX, sample.PlayerActor1PosX);
+    const melonDS::u32 posY = v(sample.PlayerActor0PosY, sample.PlayerActor1PosY);
+    const melonDS::u32 powerup = v(sample.Player0Powerup, sample.Player1Powerup);
+    const melonDS::u32 inventoryPowerup = v(sample.Player0InventoryPowerup, sample.Player1InventoryPowerup);
+    const melonDS::u32 actorPowerupState = p0 ? sample.PlayerActor0PowerupState : sample.PlayerActor1PowerupState;
+    const melonDS::u32 actorPowerupFormState = p0 ? sample.PlayerActor0PowerupFormState : sample.PlayerActor1PowerupFormState;
+    const melonDS::u32 shellState = p0 ? sample.PlayerActor0ShellState : sample.PlayerActor1ShellState;
+    const melonDS::u32 visualPowerup =
+        AIVisualPowerupKindCandidate(powerup, inventoryPowerup, actorPowerupState, actorPowerupFormState, shellState);
+    const melonDS::u32 visualSource =
+        AIVisualPowerupSourceMask(powerup, inventoryPowerup, actorPowerupState, actorPowerupFormState, shellState);
+    const bool damagePhysicsGuard =
+        (v(sample.PlayerActor0PhysicsFlag, sample.PlayerActor1PhysicsFlag) & 0x80000000u) != 0;
+    const melonDS::u32 damageCooldown = p0 ? sample.PlayerActor0DamageCooldown : sample.PlayerActor1DamageCooldown;
+    const melonDS::u32 damageGuardFlag = p0 ? sample.PlayerActor0DamageGuardFlag : sample.PlayerActor1DamageGuardFlag;
+    const melonDS::u32 damageGuardTimer = p0 ? sample.Player0DamageGuardTimer : sample.Player1DamageGuardTimer;
+    const bool starInvincible = AIStarInvincibleCandidate(inventoryPowerup, actorPowerupState, actorPowerupFormState, shellState);
+    const bool damageInvulnerable = damageGuardTimer != 0 || damageCooldown != 0 || damageGuardFlag != 0 || damagePhysicsGuard;
+    const AIPlayerTileProbeSample& tileProbe = p0 ? sample.PlayerActor0TileProbe : sample.PlayerActor1TileProbe;
+    const bool contactGround = AIPlayerContactGround(collision);
+    const bool contactWallLeft = (collision & (0x00000008u | 0x00000400u | 0x20000000u)) != 0;
+    const bool contactWallRight = (collision & (0x00000010u | 0x00000800u | 0x40000000u)) != 0;
+    out << "{\"found\":" << v(sample.PlayerActor0Found, sample.PlayerActor1Found)
+        << ",";
+    WriteAIObservationV2Vec3Json(
+        out,
+        "pos",
+        posX,
+        posY,
+        v(sample.PlayerActor0PosZ, sample.PlayerActor1PosZ));
+    out << ",";
+    WriteAIObservationV2Vec3Json(
+        out,
+        "vel",
+        v(sample.PlayerActor0VelX, sample.PlayerActor1VelX),
+        v(sample.PlayerActor0VelY, sample.PlayerActor1VelY),
+        v(sample.PlayerActor0VelZ, sample.PlayerActor1VelZ));
+    out << ",";
+    WriteAIObservationV2ScreenJson(out, sample, posX, posY);
+    out << ",\"contact\":";
+    WriteAIContactJson(out, collision, environment);
+    out << ",\"visual\":{\"powerupKind\":" << visualPowerup
+        << ",\"sourceMask\":" << visualSource
+        << ",\"fire\":" << (visualPowerup == 2 ? 1 : 0)
+        << ",\"mini\":" << (visualPowerup == 3 ? 1 : 0)
+        << ",\"shell\":" << (visualPowerup == 4 ? 1 : 0)
+        << ",\"mega\":" << (visualPowerup == 5 ? 1 : 0)
+        << ",\"starInvincible\":" << (starInvincible ? 1 : 0)
+        << ",\"invincible\":" << (starInvincible || damageInvulnerable ? 1 : 0)
+        << ",\"actorPowerupState\":" << actorPowerupState
+        << ",\"actorPowerupFormState\":" << actorPowerupFormState
+        << ",\"shellState\":" << shellState
+        << "}"
+        << ",\"battleStars\":" << v(sample.Player0BattleStars, sample.Player1BattleStars)
+        << ",\"coins\":" << v(sample.Player0Coins, sample.Player1Coins)
+        << ",\"dead\":" << v(sample.Player0Dead, sample.Player1Dead)
+        << ",";
+    WriteAIObservationV2TileSummaryJson(out, tileProbe, contactGround, contactWallLeft, contactWallRight);
+    out << ",";
+    WriteAIObservationV2TerrainJson(out, tileProbe);
+    out << "}";
+}
+
 const AITileProbeSample* FindAITileProbePoint(const AIPlayerTileProbeSample& probe, const char* name)
 {
     for (const AITileProbeSample& sample : probe.Samples)
@@ -17904,9 +18164,297 @@ InputState ApplyImitationAIInput(
     return input;
 }
 
+void PrepareAIPlayLogFireballOwnerTracking(int instanceID, const GameStateSample& sample)
+{
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (G.AIPlayLogFireballOwnerHandlerPtr[instanceID] != sample.FireballsHandlerPtr)
+    {
+        G.AIPlayLogFireballOwnerHandlerPtr[instanceID] = sample.FireballsHandlerPtr;
+        ResetAIFireballOwnerTracking(instanceID);
+    }
+    for (int i = 0; i < kAIFireballSlotCount; i++)
+    {
+        if (sample.FireballSlotActive[i] == 0)
+            G.AIPlayLogFireballOwnerValid[instanceID][i] = false;
+    }
+}
+
+void WriteAIObservationV2ButtonLabelsJson(std::ostream& out, melonDS::u32 held)
+{
+    out << "\"buttons\":{\"a\":" << ((held & (1u << 0)) ? 1 : 0)
+        << ",\"b\":" << ((held & (1u << 1)) ? 1 : 0)
+        << ",\"select\":" << ((held & (1u << 2)) ? 1 : 0)
+        << ",\"start\":" << ((held & (1u << 3)) ? 1 : 0)
+        << ",\"right\":" << ((held & (1u << 4)) ? 1 : 0)
+        << ",\"left\":" << ((held & (1u << 5)) ? 1 : 0)
+        << ",\"up\":" << ((held & (1u << 6)) ? 1 : 0)
+        << ",\"down\":" << ((held & (1u << 7)) ? 1 : 0)
+        << ",\"r\":" << ((held & (1u << 8)) ? 1 : 0)
+        << ",\"l\":" << ((held & (1u << 9)) ? 1 : 0)
+        << ",\"x\":" << ((held & (1u << 10)) ? 1 : 0)
+        << ",\"y\":" << ((held & (1u << 11)) ? 1 : 0)
+        << "}";
+}
+
+void WriteAIObservationV2LabelJson(std::ostream& out, const char* key, melonDS::u32 held)
+{
+    out << "\"" << key << "\":{\"valid\":1,\"held\":" << held << ",";
+    WriteAIObservationV2ButtonLabelsJson(out, held);
+    out << ",\"source\":\"player\"}";
+}
+
+void WriteAIObservationV2LabelsJson(std::ostream& out, const GameStateSample& sample)
+{
+    out << "\"labels\":{";
+    WriteAIObservationV2LabelJson(out, "player0", sample.InputPlayer0Held);
+    out << ",";
+    WriteAIObservationV2LabelJson(out, "player1", sample.InputPlayer1Held);
+    out << "}";
+}
+
+int AIObservationV2ScreenMask(const GameStateSample& sample, melonDS::u32 x, melonDS::u32 y)
+{
+    int mask = 0;
+    if (IsInCameraRect(x, y, sample.StageCameraGlobalX0, sample.StageCameraGlobalY0, sample.StageCameraGlobalWidth0, sample.StageCameraGlobalHeight0))
+        mask |= 1;
+    if (IsInCameraRect(x, y, sample.StageCameraGlobalX1, sample.StageCameraGlobalY1, sample.StageCameraGlobalWidth1, sample.StageCameraGlobalHeight1))
+        mask |= 2;
+    return mask;
+}
+
+void WriteAIObservationV2ScalarFeaturesJson(
+    std::ostream& out,
+    const GameStateSample& sample,
+    const GameStateObjectScanCache& objectScanCache,
+    int player)
+{
+    const bool p0 = player == 0;
+    const int opponent = player ^ 1;
+    auto v = [p0](melonDS::u32 a, melonDS::u32 b) { return p0 ? a : b; };
+    auto ov = [opponent](melonDS::u32 a, melonDS::u32 b) { return opponent == 0 ? a : b; };
+    const melonDS::u32 selfX = v(sample.PlayerActor0PosX, sample.PlayerActor1PosX);
+    const melonDS::u32 selfY = v(sample.PlayerActor0PosY, sample.PlayerActor1PosY);
+    const melonDS::u32 selfVelX = v(sample.PlayerActor0VelX, sample.PlayerActor1VelX);
+    const melonDS::u32 selfVelY = v(sample.PlayerActor0VelY, sample.PlayerActor1VelY);
+    const melonDS::u32 selfPowerup = v(sample.Player0Powerup, sample.Player1Powerup);
+    const melonDS::u32 selfInventoryPowerup = v(sample.Player0InventoryPowerup, sample.Player1InventoryPowerup);
+    const melonDS::u32 selfActorPowerupState = p0 ? sample.PlayerActor0PowerupState : sample.PlayerActor1PowerupState;
+    const melonDS::u32 selfActorPowerupFormState = p0 ? sample.PlayerActor0PowerupFormState : sample.PlayerActor1PowerupFormState;
+    const melonDS::u32 selfShellState = p0 ? sample.PlayerActor0ShellState : sample.PlayerActor1ShellState;
+    const melonDS::u32 selfVisualPowerup = AIVisualPowerupKindCandidate(selfPowerup, selfInventoryPowerup, selfActorPowerupState, selfActorPowerupFormState, selfShellState);
+    const melonDS::u32 opponentVisualPowerup = AIVisualPowerupKindCandidate(
+        ov(sample.Player0Powerup, sample.Player1Powerup),
+        ov(sample.Player0InventoryPowerup, sample.Player1InventoryPowerup),
+        opponent == 0 ? sample.PlayerActor0PowerupState : sample.PlayerActor1PowerupState,
+        opponent == 0 ? sample.PlayerActor0PowerupFormState : sample.PlayerActor1PowerupFormState,
+        opponent == 0 ? sample.PlayerActor0ShellState : sample.PlayerActor1ShellState);
+    const AIPlayerTileProbeSample& tileProbe = p0 ? sample.PlayerActor0TileProbe : sample.PlayerActor1TileProbe;
+    const melonDS::u32 collision = v(sample.PlayerActor0CollisionFlag, sample.PlayerActor1CollisionFlag);
+    const bool contactGround = AIPlayerContactGround(collision);
+    const bool contactWallLeft = (collision & (0x00000008u | 0x00000400u | 0x20000000u)) != 0;
+    const bool contactWallRight = (collision & (0x00000010u | 0x00000800u | 0x40000000u)) != 0;
+    const int groundBelow = AITileProbeSolidishValue(tileProbe, "below");
+    const int aheadBelow = AITileProbeSolidishValue(tileProbe, "aheadBelow");
+    const int ahead2Below = AITileProbeSolidishValue(tileProbe, "ahead2Below");
+    const int leftBelow = AITileProbeSolidishValue(tileProbe, "leftBelow");
+    const int left2Below = AITileProbeSolidishValue(tileProbe, "left2Below");
+    const int rightBelow = AITileProbeSolidishValue(tileProbe, "rightBelow");
+    const int right2Below = AITileProbeSolidishValue(tileProbe, "right2Below");
+    const int holeAhead = tileProbe.Found && !aheadBelow && !ahead2Below ? 1 : 0;
+    const int holeLeft = tileProbe.Found && !leftBelow && !left2Below ? 1 : 0;
+    const int holeRight = tileProbe.Found && !rightBelow && !right2Below ? 1 : 0;
+    const int suppressHole = contactGround && !groundBelow ? 1 : 0;
+    const RuntimeHazardThreat hazard = MostDangerousRuntimeHazard(
+        objectScanCache,
+        selfX,
+        selfY,
+        selfVelX,
+        0x40000,
+        0x50000,
+        0x30000);
+    const GameStateObjectScanEntry* nearestItem = NearestRuntimeItem(objectScanCache, selfX, selfY, false);
+    int nearestItemKind = 0;
+    int nearestItemAvoid = 0;
+    std::int64_t nearestItemDx = 0;
+    std::int64_t nearestItemDy = 0;
+    if (nearestItem)
+    {
+        const char* itemCategory = AIObjectCategory(nearestItem->ObjectID, nearestItem->Actor.Settings);
+        nearestItemKind = RuntimeItemKindAndConfidence(*nearestItem, itemCategory, selfVisualPowerup).first;
+        nearestItemAvoid = RuntimeItemSettingsIsMiniMushroomCandidate(nearestItem->Actor.Settings) ? 1 : 0;
+        nearestItemDx = AIWrappedDeltaX(SignedU32(nearestItem->Actor.PosX), SignedU32(selfX));
+        nearestItemDy = SignedU32(nearestItem->Actor.PosY) - SignedU32(selfY);
+    }
+    const bool selfStarInvincible = AIStarInvincibleCandidate(selfInventoryPowerup, selfActorPowerupState, selfActorPowerupFormState, selfShellState);
+    out << "\"stage_id\":" << sample.StageID
+        << ",\"stage_group\":" << sample.StageGroup
+        << ",\"self_x\":" << SignedU32(selfX)
+        << ",\"self_y\":" << SignedU32(selfY)
+        << ",\"self_vx\":" << SignedU32(selfVelX)
+        << ",\"self_vy\":" << SignedU32(selfVelY)
+        << ",\"self_powerup_kind\":" << selfVisualPowerup
+        << ",\"self_invincible\":" << (selfStarInvincible ? 1 : 0)
+        << ",\"self_star_invincible\":" << (selfStarInvincible ? 1 : 0)
+        << ",\"self_battle_stars\":" << v(sample.Player0BattleStars, sample.Player1BattleStars)
+        << ",\"self_coins\":" << v(sample.Player0Coins, sample.Player1Coins)
+        << ",\"opponent_dx\":" << AIWrappedDeltaX(SignedU32(ov(sample.PlayerActor0PosX, sample.PlayerActor1PosX)), SignedU32(selfX))
+        << ",\"opponent_dy\":" << (SignedU32(ov(sample.PlayerActor0PosY, sample.PlayerActor1PosY)) - SignedU32(selfY))
+        << ",\"opponent_powerup_kind\":" << opponentVisualPowerup
+        << ",\"opponent_battle_stars\":" << ov(sample.Player0BattleStars, sample.Player1BattleStars)
+        << ",\"target_found\":" << sample.VsStarActorFound
+        << ",\"target_dx\":" << AIWrappedDeltaX(SignedU32(sample.VsStarActorPosX), SignedU32(selfX))
+        << ",\"target_dy\":" << (SignedU32(sample.VsStarActorPosY) - SignedU32(selfY))
+        << ",\"nearest_item_found\":" << (nearestItem ? 1 : 0)
+        << ",\"nearest_item_dx\":" << nearestItemDx
+        << ",\"nearest_item_dy\":" << nearestItemDy
+        << ",\"nearest_item_kind\":" << nearestItemKind
+        << ",\"nearest_item_avoid\":" << nearestItemAvoid
+        << ",\"runtime_hazard_found\":" << (hazard.Found ? 1 : 0)
+        << ",\"runtime_hazard_dx\":" << hazard.Dx
+        << ",\"runtime_hazard_dy\":" << hazard.Dy
+        << ",\"runtime_hazard_closing\":" << (hazard.Closing ? 1 : 0)
+        << ",\"runtime_hazard_category\":" << hazard.CategoryID
+        << ",\"tile_groundBelowSolid\":" << groundBelow
+        << ",\"tile_wallAhead\":" << (AITileProbeSolidishValue(tileProbe, "aheadBody") || AITileProbeSolidishValue(tileProbe, "aheadFeet") ? 1 : 0)
+        << ",\"tile_wallLeft\":" << (AITileProbeSolidishValue(tileProbe, "leftBody") || contactWallLeft ? 1 : 0)
+        << ",\"tile_wallRight\":" << (AITileProbeSolidishValue(tileProbe, "rightBody") || contactWallRight ? 1 : 0)
+        << ",\"tile_effectiveHoleAhead\":" << (holeAhead && !suppressHole ? 1 : 0)
+        << ",\"tile_effectiveHoleLeft\":" << (holeLeft && !suppressHole ? 1 : 0)
+        << ",\"tile_effectiveHoleRight\":" << (holeRight && !suppressHole ? 1 : 0);
+}
+
+void WriteAIObservationV2ObjectEntityJson(std::ostream& out, const GameStateObjectScanEntry& entry, const GameStateSample& sample)
+{
+    const char* category = AIObjectCategory(entry.ObjectID, entry.Actor.Settings);
+    const melonDS::u32 p0Visual = AIVisualPowerupKindCandidate(sample.Player0Powerup, sample.Player0InventoryPowerup, sample.PlayerActor0PowerupState, sample.PlayerActor0PowerupFormState, sample.PlayerActor0ShellState);
+    const melonDS::u32 p1Visual = AIVisualPowerupKindCandidate(sample.Player1Powerup, sample.Player1InventoryPowerup, sample.PlayerActor1PowerupState, sample.PlayerActor1PowerupFormState, sample.PlayerActor1ShellState);
+    const auto p0Kind = RuntimeItemKindAndConfidence(entry, category, p0Visual);
+    const auto p1Kind = RuntimeItemKindAndConfidence(entry, category, p1Visual);
+    out << "{\"source\":\"object\",\"category\":\"" << category
+        << "\",\"categoryId\":" << AIObservationV2EntityCategoryID(category)
+        << ",\"objectId\":" << entry.ObjectID
+        << ",\"settings\":" << entry.Actor.Settings
+        << ",\"kindByPlayer\":[{\"kind\":" << p0Kind.first << ",\"confidence\":" << p0Kind.second
+        << "},{\"kind\":" << p1Kind.first << ",\"confidence\":" << p1Kind.second << "}]"
+        << ",";
+    WriteAIVec3Json(out, "pos", entry.Actor.PosX, entry.Actor.PosY, entry.Actor.PosZ);
+    out << ",";
+    WriteAIVec3Json(out, "vel", entry.Actor.VelX, entry.Actor.VelY, entry.Actor.VelZ);
+    out << ",\"relative\":{\"player0\":{\"dx\":" << AIWrappedDeltaX(SignedU32(entry.Actor.PosX), SignedU32(sample.PlayerActor0PosX))
+        << ",\"dy\":" << (SignedU32(entry.Actor.PosY) - SignedU32(sample.PlayerActor0PosY))
+        << "},\"player1\":{\"dx\":" << AIWrappedDeltaX(SignedU32(entry.Actor.PosX), SignedU32(sample.PlayerActor1PosX))
+        << ",\"dy\":" << (SignedU32(entry.Actor.PosY) - SignedU32(sample.PlayerActor1PosY))
+        << "}}"
+        << ",\"screenMask\":" << AIObservationV2ScreenMask(sample, entry.Actor.PosX, entry.Actor.PosY)
+        << ",\"state\":" << entry.Actor.StateType
+        << ",\"flags\":" << entry.Actor.Flags
+        << "}";
+}
+
+void WriteAIObservationV2FireballEntityJson(std::ostream& out, int instanceID, const GameStateSample& sample, int slot)
+{
+    int ownerConfidence = 0;
+    int ownerHeuristic = 0;
+    int statelessOwnerCandidate = -1;
+    int statelessOwnerConfidence = 0;
+    int statelessOwnerHeuristic = 0;
+    bool ownerTracked = false;
+    const int owner = AIFireballOwnerCandidate(instanceID, sample, slot, ownerConfidence, ownerHeuristic, statelessOwnerCandidate, statelessOwnerConfidence, statelessOwnerHeuristic, ownerTracked);
+    const bool ownerVerified = sample.FireballSlotKind[slot] <= 3;
+    const char* category = owner == 0 || owner == 1 ? "player_fireball" : "enemy_fireball";
+    out << "{\"source\":\"fireball\",\"category\":\"" << category
+        << "\",\"categoryId\":" << AIObservationV2EntityCategoryID(category)
+        << ",\"objectId\":0,\"settings\":0"
+        << ",\"kind\":" << sample.FireballSlotKind[slot]
+        << ",\"owner\":" << owner
+        << ",\"ownerConfidence\":" << ownerConfidence
+        << ",\"ownerVerified\":" << (ownerVerified ? 1 : 0)
+        << ",";
+    WriteAIVec3Json(out, "pos", sample.FireballSlotPosX[slot], sample.FireballSlotPosY[slot], sample.FireballSlotPosZ[slot]);
+    out << ",";
+    WriteAIVec3Json(out, "vel", sample.FireballSlotVelX[slot], sample.FireballSlotVelY[slot], sample.FireballSlotVelZ[slot]);
+    out << ",\"relative\":{\"player0\":{\"dx\":" << AIWrappedDeltaX(SignedU32(sample.FireballSlotPosX[slot]), SignedU32(sample.PlayerActor0PosX))
+        << ",\"dy\":" << (SignedU32(sample.FireballSlotPosY[slot]) - SignedU32(sample.PlayerActor0PosY))
+        << "},\"player1\":{\"dx\":" << AIWrappedDeltaX(SignedU32(sample.FireballSlotPosX[slot]), SignedU32(sample.PlayerActor1PosX))
+        << ",\"dy\":" << (SignedU32(sample.FireballSlotPosY[slot]) - SignedU32(sample.PlayerActor1PosY))
+        << "}}"
+        << ",\"screenMask\":0"
+        << ",\"state\":" << sample.FireballSlotState[slot]
+        << ",\"flags\":0}";
+}
+
+void WriteAIObservationV2Record(std::ostream& out, int instanceID, melonDS::u32 frame, const GameStateSample& sample, const GameStateObjectScanCache& objectScanCache, int localPlayer)
+{
+    out << "{\"schema\":\"nsmb_mvl_compact_observation_v2\""
+        << ",\"sourceSchema\":\"nsmb_mvl_ai_play_log_v1_direct\""
+        << ",\"recordingIndex\":0"
+        << ",\"recordingFrameIndex\":" << frame
+        << ",\"frame\":" << frame
+        << ",\"instance\":" << instanceID
+        << ",\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\""
+        << ",\"localPlayer\":" << localPlayer
+        << ",\"stage\":{\"id\":" << sample.StageID
+        << ",\"group\":" << sample.StageGroup
+        << ",\"vsMode\":" << sample.VsMode
+        << ",\"localPlayerIdMemory\":" << sample.LocalPlayerID
+        << ",\"vsCoinCount\":" << sample.VsCoinCount
+        << "},";
+    WriteAIObservationV2LabelsJson(out, sample);
+    out << ",\"players\":[";
+    WriteAIObservationV2PlayerJson(out, 0, sample);
+    out << ",";
+    WriteAIObservationV2PlayerJson(out, 1, sample);
+    out << "],\"scalarFeaturesByPlayer\":{\"player0\":{";
+    WriteAIObservationV2ScalarFeaturesJson(out, sample, objectScanCache, 0);
+    out << "},\"player1\":{";
+    WriteAIObservationV2ScalarFeaturesJson(out, sample, objectScanCache, 1);
+    out << "}},\"targets\":{\"bigStarActor\":{\"found\":" << sample.VsStarActorFound << ",";
+    WriteAIVec3Json(out, "pos", sample.VsStarActorPosX, sample.VsStarActorPosY, sample.VsStarActorPosZ);
+    out << "}},\"camera\":{\"found\":" << sample.StageCameraFound
+        << ",\"globalX0\":" << SignedU32(sample.StageCameraGlobalX0)
+        << ",\"globalX1\":" << SignedU32(sample.StageCameraGlobalX1)
+        << ",\"globalY0\":" << SignedU32(sample.StageCameraGlobalY0)
+        << ",\"globalY1\":" << SignedU32(sample.StageCameraGlobalY1)
+        << ",\"width0\":" << SignedU32(sample.StageCameraGlobalWidth0)
+        << ",\"width1\":" << SignedU32(sample.StageCameraGlobalWidth1)
+        << ",\"height0\":" << SignedU32(sample.StageCameraGlobalHeight0)
+        << ",\"height1\":" << SignedU32(sample.StageCameraGlobalHeight1)
+        << "},\"objectSummary\":{\"total\":" << sample.ObjectScanTotal
+        << ",\"active\":" << sample.ObjectActiveCount
+        << ",\"dead\":" << sample.ObjectDeadCount
+        << "},\"entities\":[";
+    bool firstEntity = true;
+    int writtenObjects = 0;
+    for (const GameStateObjectScanEntry& entry : objectScanCache.Entries)
+    {
+        if (entry.LifecycleState != 1)
+            continue;
+        if (writtenObjects >= G.AIPlayLogMaxObjects)
+            break;
+        if (!firstEntity)
+            out << ",";
+        firstEntity = false;
+        WriteAIObservationV2ObjectEntityJson(out, entry, sample);
+        writtenObjects++;
+    }
+    for (int slot = 0; slot < kAIFireballSlotCount; slot++)
+    {
+        if (sample.FireballSlotActive[slot] == 0)
+            continue;
+        if (!firstEntity)
+            out << ",";
+        firstEntity = false;
+        WriteAIObservationV2FireballEntityJson(out, instanceID, sample, slot);
+    }
+    out << "]}\n";
+}
+
 void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (G.AIPlayLogPath.empty() || !G.AIPlayLog || !nds || !nds->MainRAM)
+    const bool writeV1 = !G.AIPlayLogPath.empty() && G.AIPlayLog;
+    const bool writeV2 = !G.AIObservationV2Path.empty() && G.AIObservationV2Log;
+    if ((!writeV1 && !writeV2) || !nds || !nds->MainRAM)
         return;
     if (frame < G.AIPlayLogStartFrame)
         return;
@@ -17922,6 +18470,24 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     const GameStateSample sample = ReadGameStateSample(nds);
     const GameStateObjectScanCache objectScanCache = BuildGameStateObjectScanCache(nds);
     const int localPlayer = CurrentPacketBridgeLocalPlayer();
+    PrepareAIPlayLogFireballOwnerTracking(instanceID, sample);
+
+    if (writeV2)
+    {
+        WriteAIObservationV2Record(G.AIObservationV2Log, instanceID, frame, sample, objectScanCache, localPlayer);
+        if (G.AIPlayLogFlushInterval > 0)
+        {
+            G.AIObservationV2LinesSinceFlush++;
+            if (G.AIObservationV2LinesSinceFlush >= G.AIPlayLogFlushInterval)
+            {
+                G.AIObservationV2Log.flush();
+                G.AIObservationV2LinesSinceFlush = 0;
+            }
+        }
+    }
+
+    if (!writeV1)
+        return;
 
     G.AIPlayLog << "{\"schema\":\"nsmb_mvl_ai_play_log_v1\""
         << ",\"instance\":" << instanceID
@@ -19167,6 +19733,8 @@ void InitFromEnvironment()
     G.GameStateTraceExtended = EnvFlag("MELONDS_NSML_GAME_STATE_TRACE_EXTENDED");
     const char* aiPlayLog = std::getenv("MELONDS_NSML_AI_PLAY_LOG");
     if (aiPlayLog && aiPlayLog[0]) G.AIPlayLogPath = aiPlayLog;
+    const char* aiObservationV2Log = std::getenv("MELONDS_NSML_AI_OBSERVATION_V2_LOG");
+    if (aiObservationV2Log && aiObservationV2Log[0]) G.AIObservationV2Path = aiObservationV2Log;
     G.AIPlayLogInterval = std::max(1, EnvInt("MELONDS_NSML_AI_PLAY_LOG_INTERVAL", 1));
     G.AIPlayLogFlushInterval = std::max(0, EnvInt("MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL", 60));
     G.AIPlayLogStartFrame = static_cast<melonDS::u32>(
@@ -19882,6 +20450,32 @@ void InitFromEnvironment()
             std::printf(
                 "NSMB AIPlayLog: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d gameplayOnly=%d\n",
                 G.AIPlayLogPath.c_str(),
+                G.AIPlayLogInterval,
+                G.AIPlayLogFlushInterval,
+                G.AIPlayLogStartFrame,
+                G.AIPlayLogEndFrame,
+                G.AIPlayLogMaxObjects,
+                G.AIPlayLogGameplayOnly ? 1 : 0);
+        }
+    }
+    if ((G.TestEnabled || G.Enabled) && !G.AIObservationV2Path.empty())
+    {
+        std::error_code dirError;
+        const std::filesystem::path observationPath(G.AIObservationV2Path);
+        const std::filesystem::path observationParent = observationPath.parent_path();
+        if (!observationParent.empty())
+            std::filesystem::create_directories(observationParent, dirError);
+        G.AIObservationV2Log.open(G.AIObservationV2Path, std::ios::out | std::ios::trunc);
+        if (!G.AIObservationV2Log)
+        {
+            std::printf("NSMB AIObservationV2: failed to open path=%s\n", G.AIObservationV2Path.c_str());
+        }
+        else
+        {
+            G.AIObservationV2LinesSinceFlush = 0;
+            std::printf(
+                "NSMB AIObservationV2: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d gameplayOnly=%d\n",
+                G.AIObservationV2Path.c_str(),
                 G.AIPlayLogInterval,
                 G.AIPlayLogFlushInterval,
                 G.AIPlayLogStartFrame,
@@ -21416,6 +22010,11 @@ void Shutdown()
     {
         G.AIPlayLog.flush();
         G.AIPlayLog.close();
+    }
+    if (G.AIObservationV2Log)
+    {
+        G.AIObservationV2Log.flush();
+        G.AIObservationV2Log.close();
     }
 }
 

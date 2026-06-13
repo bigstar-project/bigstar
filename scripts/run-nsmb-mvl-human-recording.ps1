@@ -64,6 +64,8 @@ $hostLog = Join-Path $logRoot "host"
 $clientLog = Join-Path $logRoot "client"
 $hostAIPlayLog = Join-Path $hostLog "ai-playlog.jsonl"
 $clientAIPlayLog = Join-Path $clientLog "ai-playlog.jsonl"
+$hostAIObservationV2Log = Join-Path $hostLog "ai-observations-v2.jsonl"
+$clientAIObservationV2Log = Join-Path $clientLog "ai-observations-v2.jsonl"
 $sessionPath = Join-Path $logRoot "recording-session.json"
 $singleWindow = -not $DualWindow
 if ($singleWindow) {
@@ -82,6 +84,7 @@ $manualArgs = @{
     LogDir = $LogDir
     MvlStage = 0
     ClientAIPlayLog = $clientAIPlayLog
+    ClientAIObservationV2Log = $clientAIObservationV2Log
     AIPlayLogInterval = $AIPlayLogInterval
     AIPlayLogFlushInterval = $AIPlayLogFlushInterval
     AIPlayLogMaxObjects = $AIPlayLogMaxObjects
@@ -93,6 +96,7 @@ if ($singleWindow) {
     $manualArgs.InputDelayFrames = 0
 } else {
     $manualArgs.HostAIPlayLog = $hostAIPlayLog
+    $manualArgs.HostAIObservationV2Log = $hostAIObservationV2Log
 }
 $packetCaptureEnabled = (-not $NoPacketCapture) -and (-not $singleWindow)
 if ($packetCaptureEnabled) { $manualArgs.PacketCapture = $true }
@@ -129,7 +133,6 @@ $auditPath = Join-Path $logRoot "recording-audit.json"
 $visualStateAuditPath = Join-Path $logRoot "visual-state-audit.json"
 $fireballAuditPath = Join-Path $logRoot "fireball-audit.json"
 $datasetTerrainAuditPath = Join-Path $logRoot "dataset-terrain-audit.json"
-$compactObservationV2Path = Join-Path $logRoot "ai-observations-v2.jsonl.gz"
 $compactDatasetPlayer1Path = Join-Path $logRoot "ai-compact-dataset-player1.npz"
 $hostPacketCapture = Join-Path $hostLog "host.packet-capture.csv"
 $clientPacketCapture = Join-Path $clientLog "client.packet-capture.csv"
@@ -181,8 +184,7 @@ if ($singleWindow) {
         "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$clientAIPlayLog`" `"$clientManifest`" --kind human --player 1 --label-source player --stage 0 --log-dir `"$clientLog`" --frames $Frames --client-input-script `"$InputScript`" --client-rom `"$ClientRom`"$matchSeedManifestArg$scenarioManifestArg",
         "python scripts\nsmb_mvl_ai_make_recordings_index.py `"$indexPath`" `"$clientManifest`" --stage 0",
         "python scripts\nsmb_mvl_ai_build_dataset.py `"$indexPath`" `"$logRoot\ai-dataset-player1.csv`" --player 1 --label-source player --require-player-found",
-        "python scripts\nsmb_mvl_ai_convert_playlog_v2.py `"$indexPath`" `"$compactObservationV2Path`" --label-source player",
-        "python scripts\nsmb_mvl_ai_build_compact_dataset.py `"$compactObservationV2Path`" `"$compactDatasetPlayer1Path`" --player 1 --require-player-found",
+        "python scripts\nsmb_mvl_ai_build_compact_dataset.py `"$clientAIObservationV2Log`" `"$compactDatasetPlayer1Path`" --player 1 --require-player-found",
         "python scripts\nsmb_mvl_ai_audit_dataset_terrain.py `"$logRoot\ai-dataset-player1.csv`" --output `"$datasetTerrainAuditPath`"",
         "python scripts\nsmb_mvl_ai_audit_visual_state.py `"$clientAIPlayLog`" --output `"$visualStateAuditPath`"",
         "python scripts\nsmb_mvl_ai_audit_fireballs.py `"$clientAIPlayLog`" --output `"$fireballAuditPath`""
@@ -193,8 +195,7 @@ if ($singleWindow) {
         "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$clientAIPlayLog`" `"$clientManifest`" --kind human --player $clientPlayer --label-source player --stage 0 --log-dir `"$clientLog`" --frames $Frames --host-input-script `"$InputScript`" --client-input-script `"$InputScript`" --host-rom `"$HostRom`" --client-rom `"$ClientRom`"$matchSeedManifestArg$scenarioManifestArg$packetReplayArgs",
         "python scripts\nsmb_mvl_ai_make_recordings_index.py `"$indexPath`" `"$hostManifest`" `"$clientManifest`" --stage 0",
         "python scripts\nsmb_mvl_ai_build_dataset.py `"$indexPath`" `"$logRoot\ai-dataset-player1.csv`" --player 1 --label-source player --require-player-found",
-        "python scripts\nsmb_mvl_ai_convert_playlog_v2.py `"$indexPath`" `"$compactObservationV2Path`" --label-source player",
-        "python scripts\nsmb_mvl_ai_build_compact_dataset.py `"$compactObservationV2Path`" `"$compactDatasetPlayer1Path`" --player 1 --require-player-found",
+        "python scripts\nsmb_mvl_ai_build_compact_dataset.py `"$clientAIObservationV2Log`" `"$compactDatasetPlayer1Path`" --player 1 --require-player-found",
         "python scripts\nsmb_mvl_ai_audit_dataset_terrain.py `"$logRoot\ai-dataset-player1.csv`" --output `"$datasetTerrainAuditPath`"",
         "python scripts\nsmb_mvl_ai_audit_visual_state.py `"$hostAIPlayLog`" `"$clientAIPlayLog`" --output `"$visualStateAuditPath`"",
         "python scripts\nsmb_mvl_ai_audit_fireballs.py `"$hostAIPlayLog`" `"$clientAIPlayLog`" --output `"$fireballAuditPath`""
@@ -221,6 +222,8 @@ $session = [ordered]@{
     logDir = $LogDir
     hostAIPlayLog = $(if ($singleWindow) { "" } else { $hostAIPlayLog })
     clientAIPlayLog = $clientAIPlayLog
+    hostAIObservationV2Log = $(if ($singleWindow) { "" } else { $hostAIObservationV2Log })
+    clientAIObservationV2Log = $clientAIObservationV2Log
     aiPlayLogInterval = $AIPlayLogInterval
     aiPlayLogFlushInterval = $AIPlayLogFlushInterval
     aiPlayLogMaxObjects = $AIPlayLogMaxObjects
@@ -252,7 +255,6 @@ $session = [ordered]@{
     visualStateAudit = $visualStateAuditPath
     fireballAudit = $fireballAuditPath
     datasetTerrainAudit = $datasetTerrainAuditPath
-    compactObservationV2 = $compactObservationV2Path
     compactDatasetPlayer1 = $compactDatasetPlayer1Path
     postCommands = $postCommands
 }
