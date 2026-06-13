@@ -24,6 +24,10 @@ param(
     [int]$ForcePlayerPowerupsEndFrame = 0,
     [int]$ForcePlayerPowerup0 = 0,
     [int]$ForcePlayerPowerup1 = 0,
+    [ValidateSet("none", "rule")]
+    [string]$OpponentAI = "none",
+    [ValidateSet("", "MARIO", "LUIGI", "0", "1")]
+    [string]$OpponentAIPlayer = "",
     [switch]$DryRun
 )
 
@@ -108,6 +112,24 @@ $clientPacketCapture = Join-Path $clientLog "client.packet-capture.csv"
 $packetReplay = Join-Path $logRoot "packet-replay.csv"
 $hostPlayer = if ($HumanSide -eq "client") { 0 } else { 0 }
 $clientPlayer = if ($HumanSide -eq "host") { 1 } else { 1 }
+$resolvedOpponentAIPlayer = if ($OpponentAIPlayer -ne "") {
+    $OpponentAIPlayer
+} elseif ($HumanSide -eq "client") {
+    "MARIO"
+} else {
+    "LUIGI"
+}
+$savedOpponentAIEnv = @{
+    MELONDS_NSML_RULE_AI = [Environment]::GetEnvironmentVariable("MELONDS_NSML_RULE_AI", "Process")
+    MELONDS_NSML_RULE_AI_PLAYER = [Environment]::GetEnvironmentVariable("MELONDS_NSML_RULE_AI_PLAYER", "Process")
+}
+if ($OpponentAI -eq "rule") {
+    $env:MELONDS_NSML_RULE_AI = "1"
+    $env:MELONDS_NSML_RULE_AI_PLAYER = $resolvedOpponentAIPlayer
+} else {
+    Remove-Item Env:\MELONDS_NSML_RULE_AI -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_RULE_AI_PLAYER -ErrorAction SilentlyContinue
+}
 $postCommands = @()
 if ($packetCaptureEnabled) {
     $convertCommand = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\convert-nsmb-packet-capture-to-replay.ps1 -HostCapture `"$hostPacketCapture`" -ClientCapture `"$clientPacketCapture`" -Output `"$packetReplay`""
@@ -170,6 +192,8 @@ $session = [ordered]@{
     aiPlayLogFlushInterval = $AIPlayLogFlushInterval
     aiPlayLogMaxObjects = $AIPlayLogMaxObjects
     scenario = $Scenario
+    opponentAI = $OpponentAI
+    opponentAIPlayer = $(if ($OpponentAI -eq "rule") { $resolvedOpponentAIPlayer } else { "" })
     frames = $Frames
     inputScript = $InputScript
     hostRom = $HostRom
@@ -193,6 +217,15 @@ if ($singleWindow) {
 Write-Host "After closing melonDS, run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-nsmb-mvl-recording-postcommands.ps1 -Session `"$sessionPath`""
 if ($DryRun) {
     $session | ConvertTo-Json -Depth 8
+    foreach ($name in $savedOpponentAIEnv.Keys) {
+        [Environment]::SetEnvironmentVariable($name, $savedOpponentAIEnv[$name], "Process")
+    }
     return
 }
-& $manualScript @manualArgs
+try {
+    & $manualScript @manualArgs
+} finally {
+    foreach ($name in $savedOpponentAIEnv.Keys) {
+        [Environment]::SetEnvironmentVariable($name, $savedOpponentAIEnv[$name], "Process")
+    }
+}
