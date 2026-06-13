@@ -509,6 +509,10 @@ def visual_powerup_kind_candidate(player: dict[str, Any]) -> int:
         return ITEM_KIND_FIRE_FLOWER
     if powerup == ITEM_KIND_SHELL or shell_state != 0:
         return ITEM_KIND_SHELL
+    # Shell form is observed with actor state/form 5 and shellState=2 in
+    # logs/nsmb-mvl-human-recording-stage0-20260614-012339 frame 3230.
+    if actor_powerup_state == ITEM_KIND_MEGA_MUSHROOM or actor_powerup_form_state == ITEM_KIND_MEGA_MUSHROOM:
+        return ITEM_KIND_SHELL
     # Actor state/form 3 is Mega in the 2026-06-14 stage 0 manual log. Do not
     # confuse it with dataset item kind 3, which is Mini Mushroom.
     if actor_powerup_state == ITEM_KIND_MINI_MUSHROOM or actor_powerup_form_state == ITEM_KIND_MINI_MUSHROOM:

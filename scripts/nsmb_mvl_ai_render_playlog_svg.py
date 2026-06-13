@@ -234,6 +234,8 @@ def corrected_visual_powerup_kind(player: dict[str, Any]) -> int:
         return 2
     if raw_powerup == 4 or shell_state:
         return 4
+    if actor_state == 5 or actor_form == 5:
+        return 4
     if actor_state == 3 or actor_form == 3:
         return 5
     if actor_state == 4 or actor_form == 4:

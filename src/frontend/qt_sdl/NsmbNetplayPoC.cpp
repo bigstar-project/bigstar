@@ -15579,6 +15579,8 @@ melonDS::u32 AIVisualPowerupKindCandidate(
         return 2;
     if (powerup == 4 || shellState != 0)
         return 4;
+    if (actorPowerupState == 5 || actorPowerupFormState == 5)
+        return 4;
     if (actorPowerupState == 3 || actorPowerupFormState == 3)
         return 5;
     if (actorPowerupState == 4 || actorPowerupFormState == 4)
