@@ -245,6 +245,34 @@ TILE_PROBE_BLOCK_DERIVED_NAMES = [
     "visibleSolidCandidate",
 ]
 
+TILE_GRID_WIDTH = 33
+TILE_GRID_HEIGHT = 17
+TILE_GRID_TILE_NAMES = [
+    "solid",
+    "coin",
+    "questionBlock",
+    "breakableBlock",
+    "brickBlock",
+    "slope",
+    "scanSolid",
+    "water",
+    "partialSolid",
+    "harmful",
+    "invisibleBlock",
+    "lowType",
+]
+
+TILE_GRID_BLOCK_NAMES = [
+    "any",
+    "question",
+    "breakable",
+    "brick",
+    "invisible",
+    "hiddenOrRescueCandidate",
+    "visibleStorageBreakableCandidate",
+    "visibleSolidCandidate",
+]
+
 
 def num(value: Any, default: int = 0) -> int:
     if isinstance(value, bool):
@@ -280,6 +308,14 @@ def sane_bottom_tile(tile_type: int) -> bool:
 
 def by_name(items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {str(item.get("name")): item for item in items if isinstance(item, dict)}
+
+
+def by_grid_cell(items: list[dict[str, Any]]) -> dict[tuple[int, int], dict[str, Any]]:
+    return {
+        (num(item.get("row"), -1), num(item.get("col"), -1)): item
+        for item in items
+        if isinstance(item, dict)
+    }
 
 
 def tile_sample_solidish(samples: dict[str, dict[str, Any]], name: str) -> int:
@@ -950,6 +986,29 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
                 row[f"{sample_prefix}_block_{name}"] = num(block.get(name))
             for name in TILE_PROBE_BLOCK_DERIVED_NAMES:
                 row[f"{sample_prefix}_block_{name}"] = num(derived_block.get(name))
+        tile_grid = by_grid_cell(((tile_probe.get("grid") or {}).get("cells")) or [])
+        for grid_row in range(TILE_GRID_HEIGHT):
+            for grid_col in range(TILE_GRID_WIDTH):
+                cell = tile_grid.get((grid_row, grid_col)) or {}
+                tile = cell.get("tile") or {}
+                block = cell.get("block") or {}
+                derived_block = derived_tile_block_features(block)
+                cell_prefix = f"{prefix}_tile_probe_grid_r{grid_row}_c{grid_col}"
+                row[f"{cell_prefix}_found"] = num(cell.get("found"))
+                row[f"{cell_prefix}_status"] = num(cell.get("status"))
+                row[f"{cell_prefix}_rel_tile_x"] = num(cell.get("relTileX"))
+                row[f"{cell_prefix}_rel_tile_y"] = num(cell.get("relTileY"))
+                row[f"{cell_prefix}_tile_x"] = num(cell.get("tileX"))
+                row[f"{cell_prefix}_tile_y"] = num(cell.get("tileY"))
+                row[f"{cell_prefix}_tile_id"] = num(cell.get("tileId"))
+                row[f"{cell_prefix}_behavior"] = num(cell.get("behavior"))
+                row[f"{cell_prefix}_solidish"] = num(cell.get("solidish"))
+                for name in TILE_GRID_TILE_NAMES:
+                    row[f"{cell_prefix}_{name}"] = num(tile.get(name))
+                for name in TILE_GRID_BLOCK_NAMES:
+                    row[f"{cell_prefix}_block_{name}"] = num(
+                        block.get(name, derived_block.get(name))
+                    )
 
     for name, bit in BUTTON_BITS.items():
         row[f"label_{name}"] = 1 if (held & (1 << bit)) else 0

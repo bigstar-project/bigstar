@@ -234,6 +234,11 @@ constexpr melonDS::u32 kAIFireballSlotDebugWordOffset = 0x40;
 constexpr int kAIFireballSlotDebugWordCount = 16;
 constexpr int kAIFireballSlotStateByteCount = 12;
 constexpr int kAITileProbeCount = 17;
+constexpr int kAITileGridWidth = 33;
+constexpr int kAITileGridHeight = 17;
+constexpr int kAITileGridCount = kAITileGridWidth * kAITileGridHeight;
+constexpr int kAITileGridMinRelX = -16;
+constexpr int kAITileGridMinRelY = -10;
 constexpr int kObjectTraceSlots = 16;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
 constexpr melonDS::u32 kMvlStageSceneDefaultSettings = 0x00B4FF00;
@@ -801,6 +806,17 @@ struct AITileProbeSample
     melonDS::u32 Behavior = 0;
 };
 
+struct AITileGridSample
+{
+    melonDS::u32 Row = 0;
+    melonDS::u32 Col = 0;
+    melonDS::u32 RelTileX = 0;
+    melonDS::u32 RelTileY = 0;
+    melonDS::u32 TileX = 0;
+    melonDS::u32 TileY = 0;
+    AITileProbeSample Tile;
+};
+
 struct AIPlayerTileProbeSample
 {
     melonDS::u32 Found = 0;
@@ -808,6 +824,7 @@ struct AIPlayerTileProbeSample
     melonDS::u32 WrapX = 0;
     melonDS::u32 Direction = 1;
     AITileProbeSample Samples[kAITileProbeCount];
+    AITileGridSample Grid[kAITileGridCount];
 };
 
 struct GameStateSample
@@ -13975,6 +13992,10 @@ AIPlayerTileProbeSample ReadAIPlayerTileProbeSample(melonDS::NDS* nds, const Obj
         return probe;
 
     const melonDS::u32 playerID = nds->ARM9Read8(actor.Base + kPlayerBasePlayerIDOffset) & 1u;
+    const std::int32_t actorPixelX = SignedARM9U32(actor.PosX) >> 12;
+    const std::int32_t actorPixelY = (-SignedARM9U32(actor.PosY)) >> 12;
+    const std::int32_t anchorTileX = actorPixelX >> 4;
+    const std::int32_t anchorTileY = actorPixelY >> 4;
     for (int i = 0; i < kAITileProbeCount; i++)
     {
         const int offsetX = kProbeDefs[i].Directional ? kProbeDefs[i].X * direction : kProbeDefs[i].X;
@@ -13986,6 +14007,31 @@ AIPlayerTileProbeSample ReadAIPlayerTileProbeSample(melonDS::NDS* nds, const Obj
         const melonDS::u32 worldX = actor.PosX + static_cast<melonDS::u32>(offsetX * 4096);
         const melonDS::u32 worldY = actor.PosY + static_cast<melonDS::u32>(offsetY * 4096);
         ReadStageLayoutTileBehavior(nds, worldX, worldY, playerID, sample);
+    }
+    for (int row = 0; row < kAITileGridHeight; row++)
+    {
+        for (int col = 0; col < kAITileGridWidth; col++)
+        {
+            const int index = row * kAITileGridWidth + col;
+            const std::int32_t relTileX = kAITileGridMinRelX + col;
+            const std::int32_t relTileY = kAITileGridMinRelY + row;
+            const std::int32_t tileX = anchorTileX + relTileX;
+            const std::int32_t tileY = anchorTileY + relTileY;
+            AITileGridSample& cell = probe.Grid[index];
+            cell.Row = static_cast<melonDS::u32>(row);
+            cell.Col = static_cast<melonDS::u32>(col);
+            cell.RelTileX = static_cast<melonDS::u32>(relTileX);
+            cell.RelTileY = static_cast<melonDS::u32>(relTileY);
+            cell.TileX = static_cast<melonDS::u32>(tileX);
+            cell.TileY = static_cast<melonDS::u32>(tileY);
+            cell.Tile.OffsetX = static_cast<melonDS::u32>(relTileX * 16);
+            cell.Tile.OffsetY = static_cast<melonDS::u32>(-relTileY * 16);
+            const std::int32_t pixelX = tileX * 16 + 8;
+            const std::int32_t pixelY = tileY * 16 + 8;
+            const melonDS::u32 worldX = static_cast<melonDS::u32>(pixelX * 4096);
+            const melonDS::u32 worldY = static_cast<melonDS::u32>(-pixelY * 4096);
+            ReadStageLayoutTileBehavior(nds, worldX, worldY, playerID, cell.Tile);
+        }
     }
     return probe;
 }
@@ -16076,6 +16122,33 @@ void WriteAITileProbePointJson(std::ostream& out, const AITileProbeSample& sampl
         << "}";
 }
 
+void WriteAITileGridCellJson(std::ostream& out, const AITileGridSample& cell)
+{
+    out << "{\"row\":" << cell.Row
+        << ",\"col\":" << cell.Col
+        << ",\"relTileX\":" << SignedU32(cell.RelTileX)
+        << ",\"relTileY\":" << SignedU32(cell.RelTileY)
+        << ",\"tileX\":" << SignedU32(cell.TileX)
+        << ",\"tileY\":" << SignedU32(cell.TileY);
+    const AITileProbeSample& tile = cell.Tile;
+    out << ",\"found\":" << tile.Found
+        << ",\"status\":" << tile.Status
+        << ",\"pixelX\":" << tile.PixelX
+        << ",\"pixelY\":" << tile.PixelY
+        << ",\"tileId\":" << tile.TileID;
+    if (tile.Found)
+    {
+        out << ",\"behavior\":";
+        WriteJsonHex(out, tile.Behavior);
+        out << ",\"tile\":";
+        WriteAITileTypeJson(out, tile.Behavior);
+        out << ",\"block\":";
+        WriteAITileBlockStateJson(out, tile.TileID, tile.Behavior);
+        out << ",\"solidish\":" << (AITileBehaviorSolidish(tile.Behavior) ? 1 : 0);
+    }
+    out << "}";
+}
+
 const AITileProbeSample* FindAITileProbePoint(const AIPlayerTileProbeSample& probe, const char* name)
 {
     for (const AITileProbeSample& sample : probe.Samples)
@@ -16086,10 +16159,62 @@ const AITileProbeSample* FindAITileProbePoint(const AIPlayerTileProbeSample& pro
     return nullptr;
 }
 
+const AITileGridSample* FindAITileGridCell(const AIPlayerTileProbeSample& probe, int row, int col)
+{
+    if (row < 0 || row >= kAITileGridHeight || col < 0 || col >= kAITileGridWidth)
+        return nullptr;
+    return &probe.Grid[row * kAITileGridWidth + col];
+}
+
 int AITileProbeSolidishValue(const AIPlayerTileProbeSample& probe, const char* name)
 {
     const AITileProbeSample* sample = FindAITileProbePoint(probe, name);
     return sample && sample->Found && AITileBehaviorSolidish(sample->Behavior) ? 1 : 0;
+}
+
+bool AITileTypeFeature(melonDS::u32 tileType, const std::string& name, double& out);
+
+bool AITileProbeSampleFeature(const AITileProbeSample& sample, const std::string& field, double& out)
+{
+    if (field == "found") out = sample.Found;
+    else if (field == "status") out = sample.Status;
+    else if (field == "tile_id") out = sample.TileID;
+    else if (field == "behavior") out = sample.Behavior;
+    else if (field == "solidish") out = sample.Found && AITileBehaviorSolidish(sample.Behavior) ? 1 : 0;
+    else if (field == "pixel_x") out = sample.PixelX;
+    else if (field == "pixel_y") out = sample.PixelY;
+    else if (field.rfind("block_", 0) == 0)
+    {
+        const std::string blockField = field.substr(6);
+        const int question = (sample.Behavior & 0x00040000u) ? 1 : 0;
+        const int breakable = (sample.Behavior & 0x00080000u) ? 1 : 0;
+        const int brick = (sample.Behavior & 0x00100000u) ? 1 : 0;
+        const int invisible = (sample.Behavior & 0x20000000u) ? 1 : 0;
+        const melonDS::u32 storage = sample.Behavior & 0x00000C3Fu;
+        const int any = question || breakable || brick || invisible;
+        const int storageBreakable = any && breakable && storage != 0 ? 1 : 0;
+        if (blockField == "any") out = any;
+        else if (blockField == "itemBox") out = any && storage != 0 ? 1 : 0;
+        else if (blockField == "question") out = question;
+        else if (blockField == "breakable") out = breakable;
+        else if (blockField == "brick") out = brick;
+        else if (blockField == "invisible") out = invisible;
+        else if (blockField == "hasStorageContents") out = any && storage != 0 ? 1 : 0;
+        else if (blockField == "storageContents") out = storage;
+        else if (blockField == "modifier") out = (sample.Behavior & 0x0000F000u) >> 12;
+        else if (blockField == "currentTileId") out = sample.TileID;
+        else if (blockField == "currentBehavior") out = sample.Behavior;
+        else if (blockField == "storageBreakableCandidate") out = storageBreakable;
+        else if (blockField == "hiddenOrRescueCandidate") out = any && invisible ? 1 : 0;
+        else if (blockField == "visibleStorageBreakableCandidate") out = storageBreakable && !invisible ? 1 : 0;
+        else if (blockField == "visibleSolidCandidate") out = any && (question || brick || (breakable && !invisible)) ? 1 : 0;
+        else return false;
+    }
+    else if (!AITileTypeFeature(sample.Behavior, field, out))
+    {
+        return false;
+    }
+    return true;
 }
 
 void WriteAIPlayerTileProbeJson(std::ostream& out,
@@ -16146,7 +16271,18 @@ void WriteAIPlayerTileProbeJson(std::ostream& out,
             out << ",";
         WriteAITileProbePointJson(out, probe.Samples[i]);
     }
-    out << "]}";
+    out << "],\"grid\":{\"width\":" << kAITileGridWidth
+        << ",\"height\":" << kAITileGridHeight
+        << ",\"minRelTileX\":" << kAITileGridMinRelX
+        << ",\"minRelTileY\":" << kAITileGridMinRelY
+        << ",\"cells\":[";
+    for (int i = 0; i < kAITileGridCount; i++)
+    {
+        if (i != 0)
+            out << ",";
+        WriteAITileGridCellJson(out, probe.Grid[i]);
+    }
+    out << "]}}";
 }
 
 void WriteAIPlayerCollisionMgrJson(std::ostream& out, const PlayerCollisionMgrSample& collisionMgr)
@@ -16866,6 +17002,29 @@ bool RuntimePlayerFeature(
         else if (suffix == "effectiveHoleRight") out = tileProbe.Found && !rightBelow && !right2Below && !suppressHole ? 1 : 0;
         else
         {
+            if (suffix.rfind("grid_r", 0) == 0)
+            {
+                const std::size_t cpos = suffix.find("_c", 6);
+                if (cpos == std::string::npos)
+                    return false;
+                const std::size_t fieldPos = suffix.find('_', cpos + 2);
+                if (fieldPos == std::string::npos)
+                    return false;
+                const int row = std::atoi(suffix.substr(6, cpos - 6).c_str());
+                const int col = std::atoi(suffix.substr(cpos + 2, fieldPos - (cpos + 2)).c_str());
+                const std::string field = suffix.substr(fieldPos + 1);
+                const AITileGridSample* gridCell = FindAITileGridCell(tileProbe, row, col);
+                if (!gridCell)
+                    return false;
+                if (field == "row") out = SignedU32(gridCell->Row);
+                else if (field == "col") out = SignedU32(gridCell->Col);
+                else if (field == "rel_tile_x") out = SignedU32(gridCell->RelTileX);
+                else if (field == "rel_tile_y") out = SignedU32(gridCell->RelTileY);
+                else if (field == "tile_x") out = SignedU32(gridCell->TileX);
+                else if (field == "tile_y") out = SignedU32(gridCell->TileY);
+                else return AITileProbeSampleFeature(gridCell->Tile, field, out);
+                return true;
+            }
             const std::size_t pos = suffix.find('_');
             if (pos == std::string::npos)
                 return false;
@@ -16874,44 +17033,8 @@ bool RuntimePlayerFeature(
             const AITileProbeSample* probeSample = FindAITileProbePoint(tileProbe, sampleName.c_str());
             if (!probeSample)
                 return false;
-            if (field == "found") out = probeSample->Found;
-            else if (field == "status") out = probeSample->Status;
-            else if (field == "tile_id") out = probeSample->TileID;
-            else if (field == "behavior") out = probeSample->Behavior;
-            else if (field == "solidish") out = probeSample->Found && AITileBehaviorSolidish(probeSample->Behavior) ? 1 : 0;
-            else if (field == "pixel_x") out = probeSample->PixelX;
-            else if (field == "pixel_y") out = probeSample->PixelY;
-            else if (field.rfind("block_", 0) == 0)
-            {
-                const std::string blockField = field.substr(6);
-                const int question = (probeSample->Behavior & 0x00040000u) ? 1 : 0;
-                const int breakable = (probeSample->Behavior & 0x00080000u) ? 1 : 0;
-                const int brick = (probeSample->Behavior & 0x00100000u) ? 1 : 0;
-                const int invisible = (probeSample->Behavior & 0x20000000u) ? 1 : 0;
-                const melonDS::u32 storage = probeSample->Behavior & 0x00000C3Fu;
-                const int any = question || breakable || brick || invisible;
-                const int storageBreakable = any && breakable && storage != 0 ? 1 : 0;
-                if (blockField == "any") out = any;
-                else if (blockField == "itemBox") out = any && storage != 0 ? 1 : 0;
-                else if (blockField == "question") out = question;
-                else if (blockField == "breakable") out = breakable;
-                else if (blockField == "brick") out = brick;
-                else if (blockField == "invisible") out = invisible;
-                else if (blockField == "hasStorageContents") out = any && storage != 0 ? 1 : 0;
-                else if (blockField == "storageContents") out = storage;
-                else if (blockField == "modifier") out = (probeSample->Behavior & 0x0000F000u) >> 12;
-                else if (blockField == "currentTileId") out = probeSample->TileID;
-                else if (blockField == "currentBehavior") out = probeSample->Behavior;
-                else if (blockField == "storageBreakableCandidate") out = storageBreakable;
-                else if (blockField == "hiddenOrRescueCandidate") out = any && invisible ? 1 : 0;
-                else if (blockField == "visibleStorageBreakableCandidate") out = storageBreakable && !invisible ? 1 : 0;
-                else if (blockField == "visibleSolidCandidate") out = any && (question || brick || (breakable && !invisible)) ? 1 : 0;
-                else return false;
-            }
-            else if (!AITileTypeFeature(probeSample->Behavior, field, out))
-            {
+            if (!AITileProbeSampleFeature(*probeSample, field, out))
                 return false;
-            }
         }
     }
     else return false;
