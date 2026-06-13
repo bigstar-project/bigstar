@@ -109,6 +109,15 @@ target_include_directories(nsmb_mvl_imitation_cpp_predict PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
+add_executable(nsmb_mvl_compact_cpp_predict
+    NsmbImitationAI.cpp
+    NsmbImitationAI.h
+    ${CMAKE_SOURCE_DIR}/tools/nsmb_mvl_compact_cpp_predict.cpp
+)
+target_include_directories(nsmb_mvl_compact_cpp_predict PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
 add_subdirectory("../../net"
     ${CMAKE_BINARY_DIR}/net)
 

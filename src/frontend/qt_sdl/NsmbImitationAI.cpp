@@ -204,6 +204,26 @@ double Sigmoid(double x)
     return 1.0 / (1.0 + std::exp(-x));
 }
 
+std::vector<double> Softmax(const std::vector<double>& logits)
+{
+    std::vector<double> probs(logits.size(), 0.0);
+    if (logits.empty())
+        return probs;
+    const double maxLogit = *std::max_element(logits.begin(), logits.end());
+    double sum = 0.0;
+    for (std::size_t i = 0; i < logits.size(); i++)
+    {
+        const double value = std::exp(std::clamp(logits[i] - maxLogit, -40.0, 40.0));
+        probs[i] = value;
+        sum += value;
+    }
+    if (sum <= 0.0)
+        return probs;
+    for (double& value : probs)
+        value /= sum;
+    return probs;
+}
+
 bool ReadFile(const std::string& path, std::string& text, std::string& error)
 {
     std::ifstream in(path, std::ios::in | std::ios::binary);
@@ -300,6 +320,30 @@ bool LinearPolicyModel::IsUsable() const
         Weights.size() == features * buttons;
 }
 
+std::size_t CompactActionHead::ClassCount() const
+{
+    return Classes.size();
+}
+
+std::size_t CompactActionPolicyModel::FeatureCount() const
+{
+    return Mean.size();
+}
+
+bool CompactActionPolicyModel::IsUsable() const
+{
+    const std::size_t features = FeatureCount();
+    if (features == 0 || Scale.size() != features || Heads.empty())
+        return false;
+    for (const CompactActionHead& head : Heads)
+    {
+        const std::size_t classes = head.ClassCount();
+        if (head.Name.empty() || classes == 0 || head.Bias.size() != classes || head.Weights.size() != features * classes)
+            return false;
+    }
+    return true;
+}
+
 bool LoadLinearPolicyModel(
     const std::string& path,
     LinearPolicyModel& model,
@@ -346,6 +390,70 @@ bool LoadLinearPolicyModel(
     return true;
 }
 
+bool LoadCompactActionPolicyModel(
+    const std::string& path,
+    CompactActionPolicyModel& model,
+    std::string& error)
+{
+    std::string text;
+    if (!ReadFile(path, text, error))
+        return false;
+
+    CompactActionPolicyModel parsed {};
+    std::vector<std::string> headNames;
+    if (!ParseStringField(text, "schema", parsed.Schema, error) ||
+        !ParseStringField(text, "label_schema", parsed.LabelSchema, error) ||
+        !ParseStringArrayField(text, "head_names", headNames, error) ||
+        !ParseNumberArrayField(text, "mean", parsed.Mean, error) ||
+        !ParseNumberArrayField(text, "scale", parsed.Scale, error))
+    {
+        return false;
+    }
+
+    if (parsed.Schema != "nsmb_mvl_compact_action_policy_v1")
+    {
+        error = "unsupported compact action policy schema: " + parsed.Schema;
+        return false;
+    }
+
+    parsed.Heads.reserve(headNames.size());
+    for (const std::string& name : headNames)
+    {
+        CompactActionHead head {};
+        head.Name = name;
+        if (!ParseStringArrayField(text, "classes_" + name, head.Classes, error) ||
+            !ParseNumberArrayField(text, "bias_" + name, head.Bias, error))
+        {
+            return false;
+        }
+        std::size_t rows = 0;
+        std::size_t cols = 0;
+        if (!ParseNumberMatrixField(text, "weights_" + name, head.Weights, rows, cols, error))
+            return false;
+        if (rows != parsed.Mean.size() || cols != head.Classes.size())
+        {
+            error = "weight matrix shape does not match compact action head: " + name;
+            return false;
+        }
+        parsed.Heads.push_back(std::move(head));
+    }
+
+    if (!parsed.IsUsable())
+    {
+        error = "compact action model arrays have inconsistent lengths";
+        return false;
+    }
+
+    for (double& scale : parsed.Scale)
+    {
+        if (std::abs(scale) < 1e-12)
+            scale = 1.0;
+    }
+
+    model = std::move(parsed);
+    return true;
+}
+
 std::uint16_t HeldFromPrediction(const std::vector<double>& probabilities, double threshold)
 {
     std::uint16_t held = 0;
@@ -354,6 +462,43 @@ std::uint16_t HeldFromPrediction(const std::vector<double>& probabilities, doubl
     {
         if (probabilities[i] >= threshold)
             held = static_cast<std::uint16_t>(held | (1u << i));
+    }
+    return held;
+}
+
+std::uint16_t HeldFromCompactActions(
+    const std::vector<CompactActionHead>& heads,
+    const std::vector<int>& actions)
+{
+    std::uint16_t held = 0;
+    for (std::size_t i = 0; i < heads.size() && i < actions.size(); i++)
+    {
+        const std::string& name = heads[i].Name;
+        const int action = actions[i];
+        if (name == "horizontal")
+        {
+            if (action == 1)
+                held = static_cast<std::uint16_t>(held | (1u << 5));
+            else if (action == 2)
+                held = static_cast<std::uint16_t>(held | (1u << 4));
+        }
+        else if (name == "vertical")
+        {
+            if (action == 1)
+                held = static_cast<std::uint16_t>(held | (1u << 6));
+            else if (action == 2)
+                held = static_cast<std::uint16_t>(held | (1u << 7));
+        }
+        else if (name == "jump")
+        {
+            if (action != 0)
+                held = static_cast<std::uint16_t>(held | (1u << 1));
+        }
+        else if (name == "run" || name == "fire")
+        {
+            if (action != 0)
+                held = static_cast<std::uint16_t>(held | (1u << 11));
+        }
     }
     return held;
 }
@@ -381,6 +526,42 @@ Prediction PredictLinearPolicy(
         prediction.Probabilities[button] = Sigmoid(z);
     }
     prediction.Held = HeldFromPrediction(prediction.Probabilities, threshold);
+    return prediction;
+}
+
+CompactActionPrediction PredictCompactActionPolicy(
+    const CompactActionPolicyModel& model,
+    const std::vector<double>& rawFeatures)
+{
+    CompactActionPrediction prediction {};
+    const std::size_t features = model.FeatureCount();
+    if (!model.IsUsable() || rawFeatures.size() != features)
+        return prediction;
+
+    std::vector<double> x(features, 0.0);
+    for (std::size_t i = 0; i < features; i++)
+        x[i] = (rawFeatures[i] - model.Mean[i]) / model.Scale[i];
+
+    prediction.Actions.reserve(model.Heads.size());
+    prediction.Confidences.reserve(model.Heads.size());
+    for (const CompactActionHead& head : model.Heads)
+    {
+        const std::size_t classes = head.ClassCount();
+        std::vector<double> logits(classes, 0.0);
+        for (std::size_t c = 0; c < classes; c++)
+        {
+            double value = head.Bias[c];
+            for (std::size_t f = 0; f < features; f++)
+                value += x[f] * head.Weights[f * classes + c];
+            logits[c] = value;
+        }
+        const std::vector<double> probs = Softmax(logits);
+        const auto best = std::max_element(probs.begin(), probs.end());
+        const int action = best == probs.end() ? 0 : static_cast<int>(best - probs.begin());
+        prediction.Actions.push_back(action);
+        prediction.Confidences.push_back(best == probs.end() ? 0.0 : *best);
+    }
+    prediction.Held = HeldFromCompactActions(model.Heads, prediction.Actions);
     return prediction;
 }
 
