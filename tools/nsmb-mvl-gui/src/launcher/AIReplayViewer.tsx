@@ -94,13 +94,17 @@ type ReplayObject = {
 type TileProbeSample = NonNullable<
   NonNullable<PlayerState['tileProbe']>['samples']
 >[number];
+type ReplayInput = {
+  held?: number | string;
+  heldHex?: string;
+  pressed?: number | string;
+  pressedHex?: string;
+  valid?: boolean;
+};
 type ReplayFrame = {
   frame?: number | string;
   hash?: string;
-  inputs?: Record<
-    string,
-    { held?: number | string; heldHex?: string; valid?: boolean }
-  >;
+  inputs?: Record<string, ReplayInput>;
   labels?: Record<string, ReplayLabel>;
   players?: PlayerState[];
   targets?: Record<string, unknown>;
@@ -167,6 +171,7 @@ type EventSample = {
   before?: number | string;
   after?: number | string;
   active?: number | string;
+  activeSlots?: number | string;
   handler?: string;
   words?: Array<number | string>;
   categories?: string[];
@@ -383,8 +388,72 @@ function buttonsText(input?: {
   return names.length ? names.join('+') : '-';
 }
 
+function allowedHeld(held: number) {
+  return (
+    held & ((1 << 1) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7) | (1 << 11))
+  );
+}
+
+function deriveActionsFromInput(input: ReplayInput, canFire: boolean) {
+  const held = numeric(input.held ?? input.heldHex);
+  const pressed = numeric(input.pressed ?? input.pressedHex);
+  const left = (held & (1 << 5)) !== 0;
+  const right = (held & (1 << 4)) !== 0;
+  const up = (held & (1 << 6)) !== 0;
+  const down = (held & (1 << 7)) !== 0;
+  const yHeld = (held & (1 << 11)) !== 0;
+  const bHeld = (held & (1 << 1)) !== 0;
+  const yPressed = (pressed & (1 << 11)) !== 0;
+  const bPressed = (pressed & (1 << 1)) !== 0;
+  const horizontalId = left && !right ? 1 : right && !left ? 2 : 0;
+  const verticalId = up && !down ? 1 : down && !up ? 2 : 0;
+  const jumpId = bPressed ? 1 : bHeld ? 2 : 0;
+  const fireId = canFire && yPressed ? 1 : canFire && yHeld ? 2 : 0;
+  return {
+    horizontal:
+      horizontalId === 1 ? 'left' : horizontalId === 2 ? 'right' : 'neutral',
+    horizontalId,
+    vertical: verticalId === 1 ? 'up' : verticalId === 2 ? 'down' : 'neutral',
+    verticalId,
+    jump: jumpId === 1 ? 'press' : jumpId === 2 ? 'hold' : 'none',
+    jumpId,
+    run: yHeld ? 'on' : 'off',
+    runId: yHeld ? 1 : 0,
+    fire: fireId === 1 ? 'press' : fireId === 2 ? 'hold_or_repeat' : 'off',
+    fireId,
+  };
+}
+
+function deriveLabelFromV1(frame: ReplayFrame | undefined, index: 0 | 1) {
+  const input = frame?.inputs?.[`player${index}`];
+  if (!input || input.valid === false) return undefined;
+  const held = numeric(input.held ?? input.heldHex);
+  const pressed = numeric(input.pressed ?? input.pressedHex);
+  const visual = frame?.players?.[index]?.visualState ?? {};
+  const canFire =
+    numeric(visual.canShootFireVisualCandidate) ||
+    numeric(visual.isFireVisualCandidate) ||
+    numeric(visual.visualPowerupKindCandidate) === 2;
+  return {
+    actions: deriveActionsFromInput(input, Boolean(canFire)),
+    allowedHeld: allowedHeld(held),
+    buttons: {
+      up: (held & (1 << 6)) !== 0,
+      down: (held & (1 << 7)) !== 0,
+      left: (held & (1 << 5)) !== 0,
+      right: (held & (1 << 4)) !== 0,
+      y: (held & (1 << 11)) !== 0,
+      b: (held & (1 << 1)) !== 0,
+    },
+    held,
+    pressed,
+    source: 'derived-v1',
+    valid: 1,
+  } satisfies ReplayLabel;
+}
+
 function playerLabel(frame: ReplayFrame | undefined, index: 0 | 1) {
-  return frame?.labels?.[`player${index}`];
+  return frame?.labels?.[`player${index}`] ?? deriveLabelFromV1(frame, index);
 }
 
 function labelButtonsText(label?: ReplayLabel) {
@@ -672,10 +741,24 @@ function tileKind(
 }
 
 function visualPowerupName(player?: PlayerState) {
+  if (!player) return '-';
   const visual = player?.visualState ?? {};
-  const powerup = visual.powerup as { name?: string } | undefined;
   const inventory = visual.inventoryPowerup as { name?: string } | undefined;
-  const current = powerup?.name ?? `power ${numeric(player?.powerup)}`;
+  const visualKind = numeric(visual.visualPowerupKindCandidate, -1);
+  const current =
+    visualKind === 0
+      ? 'small_or_none'
+      : visualKind === 1
+        ? 'super'
+        : visualKind === 2
+          ? 'fire'
+          : visualKind === 3
+            ? 'mini'
+            : visualKind === 4
+              ? 'shell'
+              : visualKind === 5
+                ? 'mega'
+                : `visual ${visualKind}`;
   const reserve =
     inventory?.name ?? `reserve ${numeric(player?.inventoryPowerup)}`;
   return `${current} / ${reserve}`;
@@ -716,6 +799,35 @@ function compactCounts(counts: Record<string, number>) {
   return entries.length
     ? entries.map(([key, value]) => `${key}:${value}`).join(' ')
     : '-';
+}
+
+function packedFireballActiveCount(rawValue: unknown) {
+  const raw = numeric(rawValue);
+  if (raw <= 16) return raw;
+  return (
+    (raw & 0xff) +
+    ((raw >> 8) & 0xff) +
+    ((raw >> 16) & 0xff) +
+    ((raw >> 24) & 0xff)
+  );
+}
+
+function fireballSlotCount(frame?: ReplayFrame) {
+  const fireballs = frame?.specialObjects?.fireballs;
+  if (!fireballs) return 0;
+  if (fireballs.activeSlots !== undefined)
+    return numeric(fireballs.activeSlots);
+  if (fireballs.slots?.length) return fireballs.slots.length;
+  return packedFireballActiveCount(fireballs.active);
+}
+
+function fireballRawActive(frame?: ReplayFrame) {
+  return numeric(frame?.specialObjects?.fireballs?.active);
+}
+
+function fireballSampleCount(sample: EventSample) {
+  if (sample.activeSlots !== undefined) return numeric(sample.activeSlots);
+  return packedFireballActiveCount(sample.active);
 }
 
 function frameEvents(frame: ReplayFrame, previous?: ReplayFrame) {
@@ -776,7 +888,7 @@ function frameEvents(frame: ReplayFrame, previous?: ReplayFrame) {
       events.push(String(category));
     }
   }
-  const fireballsActive = numeric(frame.specialObjects?.fireballs?.active);
+  const fireballsActive = fireballSlotCount(frame);
   if (fireballsActive > 0) events.push(`fireball x${fireballsActive}`);
   return events;
 }
@@ -803,7 +915,7 @@ function eventTitle(name: string, sample: EventSample) {
     return `${player}block ${sample.sample ?? '-'}${tile}${storage}`;
   }
   if (name === 'fireballActive') {
-    return `fireball x${numeric(sample.active)}`;
+    return `fireball x${fireballSampleCount(sample)}`;
   }
   if (sample.categories?.length)
     return `${name}: ${sample.categories.join(', ')}`;
@@ -1138,10 +1250,8 @@ export function AIReplayViewer() {
     () => gridCounts(frame?.players?.[playerIndex ^ 1]),
     [frame, playerIndex],
   );
-  const fireballsActive = numeric(frame?.specialObjects?.fireballs?.active);
-  const fireballSlotCount = numeric(
-    frame?.specialObjects?.fireballs?.activeSlots,
-  );
+  const fireballsActive = fireballSlotCount(frame);
+  const fireballsRawActive = fireballRawActive(frame);
   const player0Label = playerLabel(frame, 0);
   const player1Label = playerLabel(frame, 1);
   const selectedTask = aiTasks.find((candidate) => candidate.id === task);
@@ -2104,7 +2214,7 @@ export function AIReplayViewer() {
               <SmallInfoCard
                 label="fireball"
                 value={`${fireballsActive} active`}
-                caption={`slots ${fireballSlotCount} / ${frame.specialObjects?.fireballs?.handler ?? '-'}`}
+                caption={`raw ${fireballsRawActive} / ${frame.specialObjects?.fireballs?.handler ?? '-'}`}
               />
               <SmallInfoCard
                 label={`P${playerIndex} 状態`}
