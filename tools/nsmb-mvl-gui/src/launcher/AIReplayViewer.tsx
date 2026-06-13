@@ -9,10 +9,15 @@ import {
   TerminalWindow,
   UploadSimple,
 } from '@phosphor-icons/react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { css } from 'styled-system/css';
 import { Button, Input, Tabs } from '../components/ui';
-import { listAiArtifacts, readAiTextFile, runAiTool } from '../tauriClient';
+import {
+  listAiArtifacts,
+  readAiTextFile,
+  runAiTool,
+  selectAiLogFile,
+} from '../tauriClient';
 import type { AiArtifact, RunAiToolRequest, RunAiToolResponse } from '../types';
 import { LauncherCard, SmallInfoCard } from './LauncherCards';
 
@@ -274,6 +279,8 @@ const buttonBits: Array<[string, number]> = [
   ['X', 10],
   ['Y', 11],
 ];
+
+const maxBrowserFileBytes = 64 * 1024 * 1024;
 
 function numeric(value: unknown, fallback = 0) {
   if (typeof value === 'number') return value;
@@ -943,6 +950,7 @@ export function AIReplayViewer() {
   const [frameIndex, setFrameIndex] = useState(0);
   const [playerIndex, setPlayerIndex] = useState<0 | 1>(1);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [pathInput, setPathInput] = useState('');
   const [svgText, setSvgText] = useState('');
   const [task, setTask] = useState<AiTaskId>('inspect_playlog');
@@ -953,6 +961,7 @@ export function AIReplayViewer() {
   const [commandResult, setCommandResult] = useState<RunAiToolResponse | null>(
     null,
   );
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const frame = frames[Math.min(frameIndex, Math.max(0, frames.length - 1))];
   const previous = frames[Math.max(0, frameIndex - 1)];
   const events = useMemo(
@@ -1021,10 +1030,15 @@ export function AIReplayViewer() {
     );
   }
 
-  async function loadText(text: string, label = '') {
+  async function loadText(
+    text: string,
+    label = '',
+    nextNotice: string | null = null,
+  ) {
     try {
       const parsed = parseReplayText(text);
       applyParsedReplay(parsed);
+      setNotice(nextNotice);
       if (label) {
         setPathInput(label);
         setWorkbenchForm((current) => ({ ...current, inputPath: label }));
@@ -1034,19 +1048,40 @@ export function AIReplayViewer() {
       setFrames([]);
       setEventSamples({});
       setManifestLabel('');
+      setNotice(null);
       setSvgText('');
     }
   }
 
   async function loadFile(file: File) {
     try {
+      if (file.size > maxBrowserFileBytes) {
+        setError(
+          `ファイルが大きすぎます: ${formatBytes(file.size)}。巨大なai-playlog.jsonlは上のパス入力かAI成果物一覧から開いてください。GUIが表示用に自動サンプリングします。`,
+        );
+        setFrames([]);
+        setEventSamples({});
+        setManifestLabel('');
+        setNotice(null);
+        setSvgText('');
+        return;
+      }
       const text = await file.text();
-      await loadText(text, file.name);
+      if (file.name.toLowerCase().endsWith('.svg')) {
+        setSvgText(text);
+        setError(null);
+        setNotice(null);
+        setPathInput(file.name);
+        setWorkbenchForm((current) => ({ ...current, inputPath: file.name }));
+      } else {
+        await loadText(text, file.name);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setFrames([]);
       setEventSamples({});
       setManifestLabel('');
+      setNotice(null);
       setSvgText('');
     }
   }
@@ -1065,10 +1100,28 @@ export function AIReplayViewer() {
           inputPath: response.path,
         }));
       } else {
-        await loadText(response.text, response.path);
+        const sampleNotice = response.sampled
+          ? `大きいログのため、${formatBytes(response.original_bytes)} の元ファイルから表示用に ${response.sampled_lines} frames をサンプリングしています。学習や後処理は元のフルログを使います。`
+          : null;
+        await loadText(response.text, response.path, sampleNotice);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      setNotice(null);
+    }
+  }
+
+  async function openReplayFile() {
+    try {
+      const selected = await selectAiLogFile(pathInput);
+      if (selected) {
+        await loadPath(selected);
+        return;
+      }
+      fileInputRef.current?.click();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setNotice(null);
     }
   }
 
@@ -1605,17 +1658,11 @@ export function AIReplayViewer() {
               justifyContent: 'space-between',
             })}
           >
-            <label
-              className={css({
-                alignItems: 'center',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                gap: '2',
-              })}
-            >
+            <div className={css({ alignItems: 'center', display: 'flex' })}>
               <input
+                ref={fileInputRef}
                 type="file"
-                accept=".jsonl,.json"
+                accept=".jsonl,.json,.svg"
                 aria-label="AIログファイル"
                 className={css({ display: 'none' })}
                 onChange={(event) => {
@@ -1623,13 +1670,11 @@ export function AIReplayViewer() {
                   if (file) void loadFile(file);
                 }}
               />
-              <Button type="button" asChild>
-                <span>
-                  <UploadSimple size={18} weight="bold" />
-                  ログを開く
-                </span>
+              <Button type="button" onClick={() => void openReplayFile()}>
+                <UploadSimple size={18} weight="bold" />
+                ログを開く
               </Button>
-            </label>
+            </div>
             <div className={css({ display: 'flex', gap: '2' })}>
               <Button
                 variant={playerIndex === 0 ? 'solid' : 'outline'}
@@ -1650,6 +1695,23 @@ export function AIReplayViewer() {
               className={css({ color: 'red.subtle.fg', fontWeight: 'bold' })}
             >
               {error}
+            </div>
+          ) : null}
+          {notice ? (
+            <div
+              className={css({
+                bg: 'blue.subtle.bg',
+                borderColor: 'blue.outline.border',
+                borderRadius: 'l2',
+                borderWidth: '1px',
+                color: 'blue.subtle.fg',
+                fontWeight: 'bold',
+                px: '3',
+                py: '2',
+                textStyle: 'sm',
+              })}
+            >
+              {notice}
             </div>
           ) : null}
           {frame ? (

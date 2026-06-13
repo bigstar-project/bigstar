@@ -328,11 +328,21 @@ export function listAiArtifacts() {
 export function readAiTextFile(request: ReadAiTextFileRequest) {
   if (!isTauriRuntime()) {
     return Promise.resolve<ReadAiTextFileResponse>({
+      original_bytes: previewPlaylogLine.length * 2,
       path: request.path,
+      sampled: false,
+      sampled_lines: 0,
       text: `${previewPlaylogLine}\n${previewPlaylogLine.replace('900', '930')}\n`,
     });
   }
   return unwrapCommand(commands.readAiTextFile(request));
+}
+
+export function selectAiLogFile(currentPath: string) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve<string | null>(null);
+  }
+  return unwrapCommand(commands.selectAiLogFile(currentPath));
 }
 
 export function runAiTool(request: RunAiToolRequest) {

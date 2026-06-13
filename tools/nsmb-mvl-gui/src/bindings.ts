@@ -7,6 +7,7 @@ export const commands = {
 	listAiArtifacts: () => typedError<AiArtifact[], string>(__TAURI_INVOKE("list_ai_artifacts")),
 	readAiTextFile: (request: ReadAiTextFileRequest) => typedError<ReadAiTextFileResponse, string>(__TAURI_INVOKE("read_ai_text_file", { request })),
 	runAiTool: (request: RunAiToolRequest) => typedError<RunAiToolResponse, string>(__TAURI_INVOKE("run_ai_tool", { request })),
+	selectAiLogFile: (currentPath: string) => typedError<string | null, string>(__TAURI_INVOKE("select_ai_log_file", { currentPath })),
 	getDefaults: () => typedError<Defaults, string>(__TAURI_INVOKE("get_defaults")),
 	saveRomPaths: (request: SaveRomPathsRequest) => typedError<null, string>(__TAURI_INVOKE("save_rom_paths", { request })),
 	selectRomFile: (currentPath: string) => typedError<string | null, string>(__TAURI_INVOKE("select_rom_file", { currentPath })),
@@ -121,6 +122,9 @@ export type ReadAiTextFileRequest = {
 export type ReadAiTextFileResponse = {
 	path: string,
 	text: string,
+	sampled: boolean,
+	original_bytes: number | null,
+	sampled_lines: number,
 };
 
 export type Role = "host" | "client";

@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -12,6 +13,8 @@ use specta::Type;
 use crate::paths::{ensure_parent_dir, repo_root};
 
 const MAX_TEXT_FILE_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_SAMPLED_PLAYLOG_LINES: usize = 1200;
+const MAX_SAMPLED_PLAYLOG_BYTES: usize = 48 * 1024 * 1024;
 
 #[derive(Debug, Serialize, Type)]
 #[serde(rename_all = "snake_case")]
@@ -33,6 +36,9 @@ pub(crate) struct ReadAiTextFileRequest {
 pub(crate) struct ReadAiTextFileResponse {
     pub(crate) path: String,
     pub(crate) text: String,
+    pub(crate) sampled: bool,
+    pub(crate) original_bytes: f64,
+    pub(crate) sampled_lines: u32,
 }
 
 #[derive(Debug, Deserialize, Type)]
@@ -103,11 +109,21 @@ pub(crate) fn read_ai_text_file(
     let path = resolve_user_path(&request.path)?;
     let metadata =
         fs::metadata(&path).map_err(|err| format!("ファイル情報を取得できません: {err}"))?;
-    if metadata.len() > MAX_TEXT_FILE_BYTES {
+    let original_bytes = metadata.len();
+    if original_bytes > MAX_TEXT_FILE_BYTES && is_playlog_jsonl(&path) {
+        let (text, sampled_lines) = read_sampled_playlog_jsonl(&path, original_bytes)?;
+        return Ok(ReadAiTextFileResponse {
+            path: path.to_string_lossy().into_owned(),
+            text,
+            sampled: true,
+            original_bytes: original_bytes as f64,
+            sampled_lines: sampled_lines as u32,
+        });
+    }
+    if original_bytes > MAX_TEXT_FILE_BYTES {
         return Err(format!(
             "ファイルが大きすぎます: {} bytes（上限 {} bytes）",
-            metadata.len(),
-            MAX_TEXT_FILE_BYTES
+            original_bytes, MAX_TEXT_FILE_BYTES
         ));
     }
     let text = fs::read_to_string(&path)
@@ -115,7 +131,32 @@ pub(crate) fn read_ai_text_file(
     Ok(ReadAiTextFileResponse {
         path: path.to_string_lossy().into_owned(),
         text,
+        sampled: false,
+        original_bytes: original_bytes as f64,
+        sampled_lines: 0,
     })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn select_ai_log_file(current_path: String) -> Result<Option<String>, String> {
+    let mut dialog = rfd::FileDialog::new()
+        .add_filter("AI logs", &["jsonl", "json", "svg"])
+        .add_filter("All files", &["*"]);
+    let current = PathBuf::from(current_path.trim());
+    if current.is_file() {
+        if let Some(parent) = current.parent() {
+            dialog = dialog.set_directory(parent);
+        }
+        if let Some(name) = current.file_name() {
+            dialog = dialog.set_file_name(name.to_string_lossy().into_owned());
+        }
+    } else if current.is_dir() {
+        dialog = dialog.set_directory(current);
+    }
+    Ok(dialog
+        .pick_file()
+        .map(|path| path.to_string_lossy().into_owned()))
 }
 
 #[tauri::command]
@@ -376,6 +417,57 @@ fn collect_ai_artifacts(dir: &Path, artifacts: &mut Vec<AiArtifact>) -> Result<(
         });
     }
     Ok(())
+}
+
+fn is_playlog_jsonl(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    name == "ai-playlog.jsonl" || name.ends_with(".ai-playlog.jsonl") || name.ends_with(".jsonl")
+}
+
+fn read_sampled_playlog_jsonl(path: &Path, original_bytes: u64) -> Result<(String, usize), String> {
+    let file = fs::File::open(path).map_err(|err| format!("playlog を開けません: {err}"))?;
+    let mut reader = BufReader::new(file);
+    let target_stride = std::cmp::max(1, original_bytes / MAX_SAMPLED_PLAYLOG_LINES.max(1) as u64);
+    let mut next_target_byte = 0_u64;
+    let mut current_byte = 0_u64;
+    let mut output = String::new();
+    let mut sampled_lines = 0_usize;
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        let read_bytes = reader
+            .read_line(&mut line)
+            .map_err(|err| format!("playlog を読み込めません: {err}"))?;
+        if read_bytes == 0 {
+            break;
+        }
+
+        let line_start = current_byte;
+        current_byte = current_byte.saturating_add(read_bytes as u64);
+        let should_keep =
+            sampled_lines == 0 || line_start >= next_target_byte || current_byte >= original_bytes;
+        if should_keep {
+            if output.len().saturating_add(line.len()) > MAX_SAMPLED_PLAYLOG_BYTES {
+                break;
+            }
+            output.push_str(&line);
+            sampled_lines += 1;
+            next_target_byte = line_start.saturating_add(target_stride);
+            if sampled_lines >= MAX_SAMPLED_PLAYLOG_LINES {
+                break;
+            }
+        }
+    }
+
+    if sampled_lines == 0 {
+        return Err("playlog から表示用フレームを抽出できませんでした".to_owned());
+    }
+    Ok((output, sampled_lines))
 }
 
 fn artifact_kind(file_name: &str) -> Option<&'static str> {

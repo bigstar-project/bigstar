@@ -25,6 +25,7 @@ fn specta_builder() -> SpectaBuilder<tauri::Wry> {
         ai_workbench::list_ai_artifacts,
         ai_workbench::read_ai_text_file,
         ai_workbench::run_ai_tool,
+        ai_workbench::select_ai_log_file,
         commands::get_defaults,
         commands::save_rom_paths,
         commands::select_rom_file,
