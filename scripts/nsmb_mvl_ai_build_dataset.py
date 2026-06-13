@@ -341,6 +341,26 @@ TILE_GRID_BLOCK_NAMES = [
     "visibleSolidCandidate",
 ]
 
+TERRAIN_CHANNELS_V2 = [
+    "solid",
+    "coin",
+    "question",
+    "breakable",
+    "brick",
+    "slope",
+    "scanSolid",
+    "water",
+    "partialSolid",
+    "harmful",
+    "invisible",
+    "itemBox",
+    "hiddenOrRescue",
+    "visibleStorageBreakable",
+    "visibleSolid",
+]
+
+TERRAIN_CHANNEL_INDEX = {name: index for index, name in enumerate(TERRAIN_CHANNELS_V2)}
+
 
 def num(value: Any, default: int = 0) -> int:
     if isinstance(value, bool):
@@ -410,10 +430,151 @@ def tile_sample_solidish(samples: dict[str, dict[str, Any]], name: str) -> int:
     return num((samples.get(name) or {}).get("solidish"))
 
 
+def terrain_channel_bit(name: str) -> int:
+    return 1 << TERRAIN_CHANNEL_INDEX[name]
+
+
+def terrain_mask_from_grid_cell(cell: dict[str, Any]) -> int:
+    if "mask" in cell:
+        return num(cell.get("mask"))
+    tile = cell.get("tile") or {}
+    block = cell.get("block") or {}
+    derived = derived_tile_block_features(block)
+    values = {
+        "solid": num(cell.get("solidish")) or num(tile.get("solid")),
+        "coin": num(tile.get("coin")),
+        "question": num(tile.get("questionBlock")),
+        "breakable": num(tile.get("breakableBlock")),
+        "brick": num(tile.get("brickBlock")),
+        "slope": num(tile.get("slope")),
+        "scanSolid": num(tile.get("scanSolid")),
+        "water": num(tile.get("water")),
+        "partialSolid": num(tile.get("partialSolid")),
+        "harmful": num(tile.get("harmful")),
+        "invisible": num(tile.get("invisibleBlock")) or num(block.get("invisible")),
+        "itemBox": num(block.get("itemBox")),
+        "hiddenOrRescue": num(block.get("hiddenOrRescueCandidate"), derived["hiddenOrRescueCandidate"]),
+        "visibleStorageBreakable": num(
+            block.get("visibleStorageBreakableCandidate"),
+            derived["visibleStorageBreakableCandidate"],
+        ),
+        "visibleSolid": num(block.get("visibleSolidCandidate"), derived["visibleSolidCandidate"]),
+    }
+    mask = 0
+    for name in TERRAIN_CHANNELS_V2:
+        if values[name]:
+            mask |= terrain_channel_bit(name)
+    return mask
+
+
+def terrain_grid_by_rel(tile_probe: dict[str, Any], terrain: dict[str, Any] | None = None) -> dict[tuple[int, int], int]:
+    source = terrain if terrain is not None else (tile_probe.get("grid") or {})
+    min_rel_x = num(source.get("minRelTileX"), TILE_GRID_MIN_REL_X)
+    min_rel_y = num(source.get("minRelTileY"), TILE_GRID_MIN_REL_Y)
+    cells: dict[tuple[int, int], int] = {}
+    for raw in source.get("cells") or []:
+        if not isinstance(raw, dict):
+            continue
+        if "rx" in raw or "ry" in raw:
+            rel_x = num(raw.get("rx"))
+            rel_y = num(raw.get("ry"))
+        elif "relTileX" in raw or "relTileY" in raw:
+            rel_x = num(raw.get("relTileX"))
+            rel_y = num(raw.get("relTileY"))
+        else:
+            rel_x = min_rel_x + num(raw.get("c"), num(raw.get("col")))
+            rel_y = min_rel_y + num(raw.get("r"), num(raw.get("row")))
+        cells[(rel_x, rel_y)] = terrain_mask_from_grid_cell(raw)
+    return cells
+
+
+def terrain_physical_solid(mask: int) -> int:
+    solid = bool(mask & (terrain_channel_bit("solid") | terrain_channel_bit("visibleSolid")))
+    hidden = bool(mask & (terrain_channel_bit("invisible") | terrain_channel_bit("hiddenOrRescue")))
+    return int(solid and not hidden)
+
+
+def terrain_any_solid(cells: dict[tuple[int, int], int], x_range: range, y_range: range) -> int:
+    for rel_y in y_range:
+        for rel_x in x_range:
+            if terrain_physical_solid(cells.get((rel_x, rel_y), 0)):
+                return 1
+    return 0
+
+
+def terrain_support_row(cells: dict[tuple[int, int], int]) -> int:
+    for rel_y in range(0, 7):
+        if terrain_any_solid(cells, range(-1, 2), range(rel_y, rel_y + 1)):
+            return rel_y
+    return 3
+
+
+def terrain_floor_at(cells: dict[tuple[int, int], int], rel_x: int, support_row: int) -> int:
+    return terrain_any_solid(cells, range(rel_x, rel_x + 1), range(support_row, support_row + 4))
+
+
+def terrain_derived_summary(
+    tile_probe: dict[str, Any],
+    contact: dict[str, Any],
+    terrain: dict[str, Any] | None = None,
+) -> dict[str, int]:
+    found = num(tile_probe.get("found"), num((terrain or {}).get("omittedCellFound")))
+    cells = terrain_grid_by_rel(tile_probe, terrain)
+    direction = -1 if num(tile_probe.get("direction"), 1) < 0 else 1
+    contact_ground = num(contact.get("ground"))
+    contact_wall_left = num(contact.get("wallLeft"))
+    contact_wall_right = num(contact.get("wallRight"))
+
+    support_row = terrain_support_row(cells)
+    body_y_range = range(support_row - 3, support_row)
+    ground_below = int(found and terrain_any_solid(cells, range(-1, 2), range(support_row, support_row + 4)))
+    blocked_ahead = int(
+        found
+        and terrain_any_solid(
+            cells,
+            range(min(direction, direction * 2), max(direction, direction * 2) + 1),
+            body_y_range,
+        )
+    )
+    blocked_left = int(contact_wall_left or (found and terrain_any_solid(cells, range(-1, 0), body_y_range)))
+    blocked_right = int(contact_wall_right or (found and terrain_any_solid(cells, range(1, 2), body_y_range)))
+    hole_ahead = int(
+        found
+        and not terrain_floor_at(cells, direction, support_row)
+        and not terrain_floor_at(cells, direction * 2, support_row)
+    )
+    hole_left = int(
+        found
+        and not terrain_floor_at(cells, -1, support_row)
+        and not terrain_floor_at(cells, -2, support_row)
+    )
+    hole_right = int(
+        found
+        and not terrain_floor_at(cells, 1, support_row)
+        and not terrain_floor_at(cells, 2, support_row)
+    )
+    hole_suppressed = int(contact_ground and not ground_below)
+    return {
+        "groundBelowSolid": ground_below,
+        "blockedAhead": blocked_ahead,
+        "holeAhead": hole_ahead,
+        "blockedLeft": blocked_left,
+        "holeLeft": hole_left,
+        "blockedRight": blocked_right,
+        "holeRight": hole_right,
+        "effectiveGroundBelowSolid": int(ground_below or contact_ground),
+        "holeSuppressedByContact": hole_suppressed,
+        "effectiveHoleAhead": int(hole_ahead and not hole_suppressed),
+        "effectiveHoleLeft": int(hole_left and not hole_suppressed),
+        "effectiveHoleRight": int(hole_right and not hole_suppressed),
+    }
+
+
 def recompute_tile_probe_summary(
     tile_probe: dict[str, Any],
     contact: dict[str, Any],
     samples: dict[str, dict[str, Any]],
+    terrain: dict[str, Any] | None = None,
 ) -> dict[str, int]:
     found = num(tile_probe.get("found"))
     ground_below = tile_sample_solidish(samples, "below")
@@ -436,12 +597,14 @@ def recompute_tile_probe_summary(
     hole_right = int(found and not right_below and not right2_below)
     hole_suppressed = int(contact_ground and not ground_below)
     ambiguous_side_body = int(contact_ground and left_body and right_body and not contact_wall_left and not contact_wall_right)
-    blocked_ahead = int(ahead_body or ahead_feet)
-    blocked_left = int(contact_wall_left or (left_body and not ambiguous_side_body))
-    blocked_right = int(contact_wall_right or (right_body and not ambiguous_side_body))
+    grid = terrain_derived_summary(tile_probe, contact, terrain)
+    probe_blocked_ahead = int(ahead_body or ahead_feet)
+    probe_blocked_left = int(contact_wall_left or (left_body and not ambiguous_side_body))
+    probe_blocked_right = int(contact_wall_right or (right_body and not ambiguous_side_body))
 
     return {
-        "groundBelowSolid": ground_below,
+        "source": "terrain_grid",
+        "groundBelowSolid": grid["groundBelowSolid"],
         "aheadBodySolid": ahead_body,
         "aheadFeetSolid": ahead_feet,
         "aheadBelowSolid": ahead_below,
@@ -452,19 +615,27 @@ def recompute_tile_probe_summary(
         "rightBodySolid": right_body,
         "rightBelowSolid": right_below,
         "right2BelowSolid": right2_below,
-        "blockedAhead": blocked_ahead,
-        "holeAhead": hole_ahead,
-        "blockedLeft": blocked_left,
-        "holeLeft": hole_left,
-        "blockedRight": blocked_right,
-        "holeRight": hole_right,
+        "blockedAhead": grid["blockedAhead"],
+        "holeAhead": grid["holeAhead"],
+        "blockedLeft": grid["blockedLeft"],
+        "holeLeft": grid["holeLeft"],
+        "blockedRight": grid["blockedRight"],
+        "holeRight": grid["holeRight"],
         "contactGround": contact_ground,
         "ambiguousSideBody": ambiguous_side_body,
-        "effectiveGroundBelowSolid": int(ground_below or contact_ground),
-        "holeSuppressedByContact": hole_suppressed,
-        "effectiveHoleAhead": int(hole_ahead and not hole_suppressed),
-        "effectiveHoleLeft": int(hole_left and not hole_suppressed),
-        "effectiveHoleRight": int(hole_right and not hole_suppressed),
+        "effectiveGroundBelowSolid": grid["effectiveGroundBelowSolid"],
+        "holeSuppressedByContact": grid["holeSuppressedByContact"],
+        "effectiveHoleAhead": grid["effectiveHoleAhead"],
+        "effectiveHoleLeft": grid["effectiveHoleLeft"],
+        "effectiveHoleRight": grid["effectiveHoleRight"],
+        "probeGroundBelowSolid": ground_below,
+        "probeBlockedAhead": probe_blocked_ahead,
+        "probeBlockedLeft": probe_blocked_left,
+        "probeBlockedRight": probe_blocked_right,
+        "probeHoleAhead": hole_ahead,
+        "probeHoleLeft": hole_left,
+        "probeHoleRight": hole_right,
+        "probeHoleSuppressedByContact": hole_suppressed,
     }
 
 

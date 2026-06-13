@@ -254,6 +254,7 @@ def compact_player(player: dict[str, Any]) -> dict[str, Any]:
     tile_probe = player.get("tileProbe") or {}
     samples = legacy.by_name(tile_probe.get("samples") or [])
     visual = player.get("visualState") or {}
+    terrain = compact_terrain(player)
     return {
         "found": legacy.num(player.get("found")),
         "pos": legacy.pos(player),
@@ -279,8 +280,8 @@ def compact_player(player: dict[str, Any]) -> dict[str, Any]:
         "battleStars": legacy.num(player.get("battleStars")),
         "coins": legacy.num(player.get("coins")),
         "dead": legacy.num(player.get("dead")),
-        "tileSummary": legacy.recompute_tile_probe_summary(tile_probe, contact, samples),
-        "terrain": compact_terrain(player),
+        "tileSummary": legacy.recompute_tile_probe_summary(tile_probe, contact, samples, terrain),
+        "terrain": terrain,
     }
 
 
@@ -386,10 +387,12 @@ def scalar_features_for_player(record: dict[str, Any], player: int) -> dict[str,
     target = ((record.get("targets") or {}).get("bigStarActor")) or {}
     target_pos = legacy.pos(target)
     tile_probe = self_player.get("tileProbe") or {}
+    terrain = compact_terrain(self_player)
     tile_summary = legacy.recompute_tile_probe_summary(
         tile_probe,
         self_player.get("contact") or {},
         legacy.by_name(tile_probe.get("samples") or []),
+        terrain,
     )
     objects = record.get("objects") or []
     runtime_hazard = legacy.runtime_hazard_threat(objects, self_pos, legacy.vel(self_player))

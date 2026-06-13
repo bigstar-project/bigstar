@@ -836,6 +836,28 @@ struct AIPlayerTileProbeSample
     AITileGridSample Grid[kAITileGridCount];
 };
 
+struct AITerrainDerivedSummary
+{
+    int GroundBelowSolid = 0;
+    int BlockedAhead = 0;
+    int BlockedLeft = 0;
+    int BlockedRight = 0;
+    int HoleAhead = 0;
+    int HoleLeft = 0;
+    int HoleRight = 0;
+    int EffectiveGroundBelowSolid = 0;
+    int HoleSuppressedByContact = 0;
+    int EffectiveHoleAhead = 0;
+    int EffectiveHoleLeft = 0;
+    int EffectiveHoleRight = 0;
+};
+
+AITerrainDerivedSummary DeriveAITerrainSummaryFromGrid(
+    const AIPlayerTileProbeSample& probe,
+    bool contactGround,
+    bool contactWallLeft,
+    bool contactWallRight);
+
 struct GameStateSample
 {
     melonDS::u32 StageID = 0;
@@ -3197,57 +3219,23 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(
     bool inGameplay)
 {
     NsmbRuleAI::FrameState state {};
-    auto probeSolidish = [](melonDS::u32 behavior) {
-        return (behavior & (0x08990000u | 0x00040000u | 0x00200000u | 0x40000000u | 0x80000000u)) != 0;
-    };
-    auto probePointSolidish = [&probeSolidish](const AIPlayerTileProbeSample& probe, const char* name) {
-        for (const AITileProbeSample& point : probe.Samples)
-        {
-            if (point.Found && std::strcmp(point.Name, name) == 0)
-                return probeSolidish(point.Behavior);
-        }
-        return false;
-    };
-    auto fillProbeSummary = [&probePointSolidish](NsmbRuleAI::PlayerFrameState& out,
-                                                   const AIPlayerTileProbeSample& probe,
-                                                   melonDS::u32 collisionFlag) {
+    auto fillProbeSummary = [](NsmbRuleAI::PlayerFrameState& out,
+                               const AIPlayerTileProbeSample& probe,
+                               melonDS::u32 collisionFlag) {
         const bool contactGround = AIPlayerContactGround(collisionFlag);
         const bool contactWallLeft =
             (collisionFlag & (0x00000008u | 0x00000400u | 0x20000000u)) != 0;
         const bool contactWallRight =
             (collisionFlag & (0x00000010u | 0x00000800u | 0x40000000u)) != 0;
-        if (!probe.Found)
-        {
-            out.BlockedLeft = contactWallLeft;
-            out.BlockedRight = contactWallRight;
-            return;
-        }
-        out.GroundBelowSolid = probePointSolidish(probe, "below");
-        const bool aheadBody = probePointSolidish(probe, "aheadBody");
-        const bool aheadFeet = probePointSolidish(probe, "aheadFeet");
-        const bool aheadBelow = probePointSolidish(probe, "aheadBelow");
-        const bool ahead2Below = probePointSolidish(probe, "ahead2Below");
-        const bool leftBody = probePointSolidish(probe, "leftBody");
-        const bool leftBelow = probePointSolidish(probe, "leftBelow");
-        const bool left2Below = probePointSolidish(probe, "left2Below");
-        const bool rightBody = probePointSolidish(probe, "rightBody");
-        const bool rightBelow = probePointSolidish(probe, "rightBelow");
-        const bool right2Below = probePointSolidish(probe, "right2Below");
-        const bool ambiguousSideBody =
-            contactGround && leftBody && rightBody && !contactWallLeft && !contactWallRight;
-        out.BlockedAhead = aheadBody || aheadFeet;
-        out.HoleAhead = !aheadBelow && !ahead2Below;
-        out.BlockedLeft = contactWallLeft || (leftBody && !ambiguousSideBody);
-        out.HoleLeft = !leftBelow && !left2Below;
-        out.BlockedRight = contactWallRight || (rightBody && !ambiguousSideBody);
-        out.HoleRight = !rightBelow && !right2Below;
-        if (contactGround && !out.GroundBelowSolid)
-        {
-            out.GroundBelowSolid = true;
-            out.HoleAhead = false;
-            out.HoleLeft = false;
-            out.HoleRight = false;
-        }
+        const AITerrainDerivedSummary summary =
+            DeriveAITerrainSummaryFromGrid(probe, contactGround, contactWallLeft, contactWallRight);
+        out.GroundBelowSolid = summary.EffectiveGroundBelowSolid != 0;
+        out.BlockedAhead = summary.BlockedAhead != 0;
+        out.HoleAhead = summary.EffectiveHoleAhead != 0;
+        out.BlockedLeft = summary.BlockedLeft != 0;
+        out.HoleLeft = summary.EffectiveHoleLeft != 0;
+        out.BlockedRight = summary.BlockedRight != 0;
+        out.HoleRight = summary.EffectiveHoleRight != 0;
     };
     auto fillHazard = [&objectScanCache, &sample](NsmbRuleAI::PlayerFrameState& out,
                                                   int player,
@@ -16259,6 +16247,104 @@ melonDS::u32 AIObservationV2TerrainMask(const AITileGridSample& cell)
     return mask;
 }
 
+bool AITerrainMaskPhysicalSolid(melonDS::u32 mask)
+{
+    const bool solid = (mask & ((1u << 0) | (1u << 14))) != 0;
+    const bool hidden = (mask & ((1u << 10) | (1u << 12))) != 0;
+    return solid && !hidden;
+}
+
+const AITileGridSample* FindAITileGridCellByRel(const AIPlayerTileProbeSample& probe, int relTileX, int relTileY)
+{
+    const int col = relTileX - kAITileGridMinRelX;
+    const int row = relTileY - kAITileGridMinRelY;
+    if (row < 0 || row >= kAITileGridHeight || col < 0 || col >= kAITileGridWidth)
+        return nullptr;
+    return &probe.Grid[row * kAITileGridWidth + col];
+}
+
+bool AITerrainGridCellPhysicalSolid(const AIPlayerTileProbeSample& probe, int relTileX, int relTileY)
+{
+    const AITileGridSample* cell = FindAITileGridCellByRel(probe, relTileX, relTileY);
+    return cell && probe.Found && AITerrainMaskPhysicalSolid(AIObservationV2TerrainMask(*cell));
+}
+
+bool AITerrainGridAnyPhysicalSolid(
+    const AIPlayerTileProbeSample& probe,
+    int relXMin,
+    int relXMax,
+    int relYMin,
+    int relYMax)
+{
+    if (!probe.Found)
+        return false;
+    for (int relY = relYMin; relY <= relYMax; relY++)
+    {
+        for (int relX = relXMin; relX <= relXMax; relX++)
+        {
+            if (AITerrainGridCellPhysicalSolid(probe, relX, relY))
+                return true;
+        }
+    }
+    return false;
+}
+
+int AITerrainGridSupportRow(const AIPlayerTileProbeSample& probe)
+{
+    if (!probe.Found)
+        return 3;
+    for (int relY = 0; relY <= 6; relY++)
+    {
+        if (AITerrainGridAnyPhysicalSolid(probe, -1, 1, relY, relY))
+            return relY;
+    }
+    return 3;
+}
+
+bool AITerrainGridFloorAt(const AIPlayerTileProbeSample& probe, int relX, int supportRow)
+{
+    return AITerrainGridAnyPhysicalSolid(probe, relX, relX, supportRow, supportRow + 3);
+}
+
+AITerrainDerivedSummary DeriveAITerrainSummaryFromGrid(
+    const AIPlayerTileProbeSample& probe,
+    bool contactGround,
+    bool contactWallLeft,
+    bool contactWallRight)
+{
+    AITerrainDerivedSummary out {};
+    const int direction = SignedU32(probe.Direction) < 0 ? -1 : 1;
+    const bool found = probe.Found != 0;
+    const int supportRow = AITerrainGridSupportRow(probe);
+    const int bodyMinY = supportRow - 3;
+    const int bodyMaxY = supportRow - 1;
+    out.GroundBelowSolid = found && AITerrainGridAnyPhysicalSolid(probe, -1, 1, supportRow, supportRow + 3) ? 1 : 0;
+    out.BlockedAhead = found && AITerrainGridAnyPhysicalSolid(
+        probe,
+        std::min(direction, direction * 2),
+        std::max(direction, direction * 2),
+        bodyMinY,
+        bodyMaxY) ? 1 : 0;
+    out.BlockedLeft = contactWallLeft || (found && AITerrainGridAnyPhysicalSolid(probe, -1, -1, bodyMinY, bodyMaxY)) ? 1 : 0;
+    out.BlockedRight = contactWallRight || (found && AITerrainGridAnyPhysicalSolid(probe, 1, 1, bodyMinY, bodyMaxY)) ? 1 : 0;
+
+    const bool aheadFloor1 = found && AITerrainGridFloorAt(probe, direction, supportRow);
+    const bool aheadFloor2 = found && AITerrainGridFloorAt(probe, direction * 2, supportRow);
+    const bool leftFloor1 = found && AITerrainGridFloorAt(probe, -1, supportRow);
+    const bool leftFloor2 = found && AITerrainGridFloorAt(probe, -2, supportRow);
+    const bool rightFloor1 = found && AITerrainGridFloorAt(probe, 1, supportRow);
+    const bool rightFloor2 = found && AITerrainGridFloorAt(probe, 2, supportRow);
+    out.HoleAhead = found && !aheadFloor1 && !aheadFloor2 ? 1 : 0;
+    out.HoleLeft = found && !leftFloor1 && !leftFloor2 ? 1 : 0;
+    out.HoleRight = found && !rightFloor1 && !rightFloor2 ? 1 : 0;
+    out.EffectiveGroundBelowSolid = out.GroundBelowSolid || contactGround ? 1 : 0;
+    out.HoleSuppressedByContact = contactGround && !out.GroundBelowSolid ? 1 : 0;
+    out.EffectiveHoleAhead = out.HoleAhead && !out.HoleSuppressedByContact ? 1 : 0;
+    out.EffectiveHoleLeft = out.HoleLeft && !out.HoleSuppressedByContact ? 1 : 0;
+    out.EffectiveHoleRight = out.HoleRight && !out.HoleSuppressedByContact ? 1 : 0;
+    return out;
+}
+
 void WriteAIObservationV2Vec3Json(std::ostream& out, const char* name, melonDS::u32 x, melonDS::u32 y, melonDS::u32 z)
 {
     WriteAIVec3Json(out, name, x, y, z);
@@ -16350,16 +16436,19 @@ void WriteAIObservationV2TileSummaryJson(
     const int rightBody = AITileProbeSolidishValue(probe, "rightBody");
     const int rightBelow = AITileProbeSolidishValue(probe, "rightBelow");
     const int right2Below = AITileProbeSolidishValue(probe, "right2Below");
-    const int holeAhead = probe.Found && !aheadBelow && !ahead2Below ? 1 : 0;
-    const int holeLeft = probe.Found && !leftBelow && !left2Below ? 1 : 0;
-    const int holeRight = probe.Found && !rightBelow && !right2Below ? 1 : 0;
-    const int suppressHole = contactGround && !groundBelow ? 1 : 0;
-    const int ambiguousSideBody =
+    const int probeHoleAhead = probe.Found && !aheadBelow && !ahead2Below ? 1 : 0;
+    const int probeHoleLeft = probe.Found && !leftBelow && !left2Below ? 1 : 0;
+    const int probeHoleRight = probe.Found && !rightBelow && !right2Below ? 1 : 0;
+    const int probeSuppressHole = contactGround && !groundBelow ? 1 : 0;
+    const int probeAmbiguousSideBody =
         contactGround && leftBody && rightBody && !contactWallLeft && !contactWallRight ? 1 : 0;
-    const int blockedAhead = aheadBody || aheadFeet ? 1 : 0;
-    const int blockedLeft = contactWallLeft || (leftBody && !ambiguousSideBody) ? 1 : 0;
-    const int blockedRight = contactWallRight || (rightBody && !ambiguousSideBody) ? 1 : 0;
-    out << "\"tileSummary\":{\"groundBelowSolid\":" << groundBelow
+    const int probeBlockedAhead = aheadBody || aheadFeet ? 1 : 0;
+    const int probeBlockedLeft = contactWallLeft || (leftBody && !probeAmbiguousSideBody) ? 1 : 0;
+    const int probeBlockedRight = contactWallRight || (rightBody && !probeAmbiguousSideBody) ? 1 : 0;
+    const AITerrainDerivedSummary grid =
+        DeriveAITerrainSummaryFromGrid(probe, contactGround, contactWallLeft, contactWallRight);
+    out << "\"tileSummary\":{\"source\":\"terrain_grid\""
+        << ",\"groundBelowSolid\":" << grid.GroundBelowSolid
         << ",\"aheadBodySolid\":" << aheadBody
         << ",\"aheadFeetSolid\":" << aheadFeet
         << ",\"aheadBelowSolid\":" << aheadBelow
@@ -16370,19 +16459,27 @@ void WriteAIObservationV2TileSummaryJson(
         << ",\"rightBodySolid\":" << rightBody
         << ",\"rightBelowSolid\":" << rightBelow
         << ",\"right2BelowSolid\":" << right2Below
-        << ",\"blockedAhead\":" << blockedAhead
-        << ",\"holeAhead\":" << holeAhead
-        << ",\"blockedLeft\":" << blockedLeft
-        << ",\"holeLeft\":" << holeLeft
-        << ",\"blockedRight\":" << blockedRight
-        << ",\"holeRight\":" << holeRight
+        << ",\"probeGroundBelowSolid\":" << groundBelow
+        << ",\"probeBlockedAhead\":" << probeBlockedAhead
+        << ",\"probeBlockedLeft\":" << probeBlockedLeft
+        << ",\"probeBlockedRight\":" << probeBlockedRight
+        << ",\"probeHoleAhead\":" << probeHoleAhead
+        << ",\"probeHoleLeft\":" << probeHoleLeft
+        << ",\"probeHoleRight\":" << probeHoleRight
+        << ",\"blockedAhead\":" << grid.BlockedAhead
+        << ",\"holeAhead\":" << grid.HoleAhead
+        << ",\"blockedLeft\":" << grid.BlockedLeft
+        << ",\"holeLeft\":" << grid.HoleLeft
+        << ",\"blockedRight\":" << grid.BlockedRight
+        << ",\"holeRight\":" << grid.HoleRight
         << ",\"contactGround\":" << (contactGround ? 1 : 0)
-        << ",\"ambiguousSideBody\":" << ambiguousSideBody
-        << ",\"effectiveGroundBelowSolid\":" << (groundBelow || contactGround ? 1 : 0)
-        << ",\"holeSuppressedByContact\":" << suppressHole
-        << ",\"effectiveHoleAhead\":" << (holeAhead && !suppressHole ? 1 : 0)
-        << ",\"effectiveHoleLeft\":" << (holeLeft && !suppressHole ? 1 : 0)
-        << ",\"effectiveHoleRight\":" << (holeRight && !suppressHole ? 1 : 0)
+        << ",\"ambiguousSideBody\":" << probeAmbiguousSideBody
+        << ",\"effectiveGroundBelowSolid\":" << grid.EffectiveGroundBelowSolid
+        << ",\"holeSuppressedByContact\":" << grid.HoleSuppressedByContact
+        << ",\"probeHoleSuppressedByContact\":" << probeSuppressHole
+        << ",\"effectiveHoleAhead\":" << grid.EffectiveHoleAhead
+        << ",\"effectiveHoleLeft\":" << grid.EffectiveHoleLeft
+        << ",\"effectiveHoleRight\":" << grid.EffectiveHoleRight
         << "}";
 }
 
@@ -16572,7 +16669,9 @@ void WriteAIPlayerTileProbeJson(std::ostream& out,
     const int suppressHoleByContact = contactGround && !groundBelow ? 1 : 0;
     const int ambiguousSideBody =
         contactGround && leftBody && rightBody && !contactWallLeft && !contactWallRight ? 1 : 0;
-    const int blockedAhead = wallAhead;
+    const AITerrainDerivedSummary grid =
+        DeriveAITerrainSummaryFromGrid(probe, contactGround, contactWallLeft, contactWallRight);
+    const int blockedAhead = grid.BlockedAhead;
     const int blockedLeft = contactWallLeft || (leftBody && !ambiguousSideBody) ? 1 : 0;
     const int blockedRight = contactWallRight || (rightBody && !ambiguousSideBody) ? 1 : 0;
     out << "{\"found\":" << probe.Found
@@ -16580,27 +16679,36 @@ void WriteAIPlayerTileProbeJson(std::ostream& out,
     WriteJsonHex(out, probe.StageLayout);
     out << ",\"wrapX\":" << SignedU32(probe.WrapX)
         << ",\"direction\":" << SignedU32(probe.Direction)
-        << ",\"summary\":{\"groundBelowSolid\":" << groundBelow
+        << ",\"summary\":{\"source\":\"terrain_grid\""
+        << ",\"groundBelowSolid\":" << grid.GroundBelowSolid
         << ",\"aheadBodySolid\":" << aheadBody
         << ",\"aheadFeetSolid\":" << aheadFeet
         << ",\"aheadBelowSolid\":" << aheadBelow
         << ",\"ahead2BelowSolid\":" << ahead2Below
         << ",\"wallAhead\":" << wallAhead
-        << ",\"holeAhead\":" << holeAhead
+        << ",\"holeAhead\":" << grid.HoleAhead
         << ",\"wallLeft\":" << wallLeft
-        << ",\"holeLeft\":" << holeLeft
+        << ",\"holeLeft\":" << grid.HoleLeft
         << ",\"wallRight\":" << wallRight
-        << ",\"holeRight\":" << holeRight
+        << ",\"holeRight\":" << grid.HoleRight
         << ",\"blockedAhead\":" << blockedAhead
-        << ",\"blockedLeft\":" << blockedLeft
-        << ",\"blockedRight\":" << blockedRight
+        << ",\"blockedLeft\":" << grid.BlockedLeft
+        << ",\"blockedRight\":" << grid.BlockedRight
+        << ",\"probeHoleAhead\":" << holeAhead
+        << ",\"probeHoleLeft\":" << holeLeft
+        << ",\"probeHoleRight\":" << holeRight
+        << ",\"probeBlockedLeft\":" << blockedLeft
+        << ",\"probeBlockedRight\":" << blockedRight
+        << ",\"probeGroundBelowSolid\":" << groundBelow
         << ",\"ambiguousSideBody\":" << ambiguousSideBody
         << ",\"contactGround\":" << (contactGround ? 1 : 0)
-        << ",\"effectiveGroundBelowSolid\":" << effectiveGroundBelow
-        << ",\"holeSuppressedByContact\":" << suppressHoleByContact
-        << ",\"effectiveHoleAhead\":" << (holeAhead && !suppressHoleByContact ? 1 : 0)
-        << ",\"effectiveHoleLeft\":" << (holeLeft && !suppressHoleByContact ? 1 : 0)
-        << ",\"effectiveHoleRight\":" << (holeRight && !suppressHoleByContact ? 1 : 0)
+        << ",\"probeEffectiveGroundBelowSolid\":" << effectiveGroundBelow
+        << ",\"effectiveGroundBelowSolid\":" << grid.EffectiveGroundBelowSolid
+        << ",\"holeSuppressedByContact\":" << grid.HoleSuppressedByContact
+        << ",\"probeHoleSuppressedByContact\":" << suppressHoleByContact
+        << ",\"effectiveHoleAhead\":" << grid.EffectiveHoleAhead
+        << ",\"effectiveHoleLeft\":" << grid.EffectiveHoleLeft
+        << ",\"effectiveHoleRight\":" << grid.EffectiveHoleRight
         << "},\"samples\":[";
     for (int i = 0; i < kAITileProbeCount; i++)
     {
@@ -17331,7 +17439,6 @@ bool RuntimePlayerFeature(
     {
         const std::string suffix = name.substr(11);
         const bool contactGround = AIPlayerContactGround(collision);
-        const int groundBelow = AITileProbeSolidishValue(tileProbe, "below");
         const int aheadBody = AITileProbeSolidishValue(tileProbe, "aheadBody");
         const int aheadFeet = AITileProbeSolidishValue(tileProbe, "aheadFeet");
         const int aheadBelow = AITileProbeSolidishValue(tileProbe, "aheadBelow");
@@ -17342,13 +17449,12 @@ bool RuntimePlayerFeature(
         const int rightBody = AITileProbeSolidishValue(tileProbe, "rightBody");
         const int rightBelow = AITileProbeSolidishValue(tileProbe, "rightBelow");
         const int right2Below = AITileProbeSolidishValue(tileProbe, "right2Below");
-        const int suppressHole = contactGround && !groundBelow ? 1 : 0;
         const bool contactWallLeft = (collision & (0x00000008u | 0x00000400u | 0x20000000u)) != 0;
         const bool contactWallRight = (collision & (0x00000010u | 0x00000800u | 0x40000000u)) != 0;
         const bool ambiguousSideBody = contactGround && leftBody && rightBody && !contactWallLeft && !contactWallRight;
-        const int blockedLeft = contactWallLeft || (leftBody && !ambiguousSideBody) ? 1 : 0;
-        const int blockedRight = contactWallRight || (rightBody && !ambiguousSideBody) ? 1 : 0;
-        if (suffix == "groundBelowSolid") out = groundBelow;
+        const AITerrainDerivedSummary grid =
+            DeriveAITerrainSummaryFromGrid(tileProbe, contactGround, contactWallLeft, contactWallRight);
+        if (suffix == "groundBelowSolid") out = grid.GroundBelowSolid;
         else if (suffix == "aheadBodySolid") out = aheadBody;
         else if (suffix == "aheadFeetSolid") out = aheadFeet;
         else if (suffix == "aheadBelowSolid") out = aheadBelow;
@@ -17359,19 +17465,19 @@ bool RuntimePlayerFeature(
         else if (suffix == "rightBodySolid") out = rightBody;
         else if (suffix == "rightBelowSolid") out = rightBelow;
         else if (suffix == "right2BelowSolid") out = right2Below;
-        else if (suffix == "blockedAhead" || suffix == "wallAhead") out = aheadBody || aheadFeet ? 1 : 0;
-        else if (suffix == "holeAhead") out = tileProbe.Found && !aheadBelow && !ahead2Below ? 1 : 0;
-        else if (suffix == "blockedLeft" || suffix == "wallLeft") out = blockedLeft;
-        else if (suffix == "holeLeft") out = tileProbe.Found && !leftBelow && !left2Below ? 1 : 0;
-        else if (suffix == "blockedRight" || suffix == "wallRight") out = blockedRight;
-        else if (suffix == "holeRight") out = tileProbe.Found && !rightBelow && !right2Below ? 1 : 0;
+        else if (suffix == "blockedAhead" || suffix == "wallAhead") out = grid.BlockedAhead;
+        else if (suffix == "holeAhead") out = grid.HoleAhead;
+        else if (suffix == "blockedLeft" || suffix == "wallLeft") out = grid.BlockedLeft;
+        else if (suffix == "holeLeft") out = grid.HoleLeft;
+        else if (suffix == "blockedRight" || suffix == "wallRight") out = grid.BlockedRight;
+        else if (suffix == "holeRight") out = grid.HoleRight;
         else if (suffix == "contactGround") out = contactGround ? 1 : 0;
         else if (suffix == "ambiguousSideBody") out = ambiguousSideBody ? 1 : 0;
-        else if (suffix == "effectiveGroundBelowSolid") out = groundBelow || contactGround ? 1 : 0;
-        else if (suffix == "holeSuppressedByContact") out = suppressHole;
-        else if (suffix == "effectiveHoleAhead") out = tileProbe.Found && !aheadBelow && !ahead2Below && !suppressHole ? 1 : 0;
-        else if (suffix == "effectiveHoleLeft") out = tileProbe.Found && !leftBelow && !left2Below && !suppressHole ? 1 : 0;
-        else if (suffix == "effectiveHoleRight") out = tileProbe.Found && !rightBelow && !right2Below && !suppressHole ? 1 : 0;
+        else if (suffix == "effectiveGroundBelowSolid") out = grid.EffectiveGroundBelowSolid;
+        else if (suffix == "holeSuppressedByContact") out = grid.HoleSuppressedByContact;
+        else if (suffix == "effectiveHoleAhead") out = grid.EffectiveHoleAhead;
+        else if (suffix == "effectiveHoleLeft") out = grid.EffectiveHoleLeft;
+        else if (suffix == "effectiveHoleRight") out = grid.EffectiveHoleRight;
         else
         {
             if (suffix.rfind("grid_r", 0) == 0)
@@ -17595,11 +17701,10 @@ bool ApplyImitationAIHazardGuard(
     const bool contactGround = AIPlayerContactGround(collisionFlag);
     const bool contactWallLeft = (collisionFlag & (0x00000008u | 0x00000400u | 0x20000000u)) != 0;
     const bool contactWallRight = (collisionFlag & (0x00000010u | 0x00000800u | 0x40000000u)) != 0;
-    const bool leftBody = AITileProbeSolidishValue(tileProbe, "leftBody");
-    const bool rightBody = AITileProbeSolidishValue(tileProbe, "rightBody");
-    const bool ambiguousSideBody = contactGround && leftBody && rightBody && !contactWallLeft && !contactWallRight;
-    const bool blockedLeft = contactWallLeft || (leftBody && !ambiguousSideBody);
-    const bool blockedRight = contactWallRight || (rightBody && !ambiguousSideBody);
+    const AITerrainDerivedSummary terrainSummary =
+        DeriveAITerrainSummaryFromGrid(tileProbe, contactGround, contactWallLeft, contactWallRight);
+    const bool blockedLeft = terrainSummary.BlockedLeft != 0;
+    const bool blockedRight = terrainSummary.BlockedRight != 0;
     const bool pushWall = (collisionFlag & 0x00000004u) != 0;
     const bool hazardOnLeft = outHazardDx < 0;
     const bool escapeBlocked = hazardOnLeft ? (blockedRight || pushWall) : (blockedLeft || pushWall);
@@ -18143,25 +18248,8 @@ void AppendAICompactRuntimeScalars(
     const bool contactGround = AIPlayerContactGround(collision);
     const bool contactWallLeft = (collision & (0x00000008u | 0x00000400u | 0x20000000u)) != 0;
     const bool contactWallRight = (collision & (0x00000010u | 0x00000800u | 0x40000000u)) != 0;
-    const int groundBelow = AITileProbeSolidishValue(tileProbe, "below");
-    const int aheadBody = AITileProbeSolidishValue(tileProbe, "aheadBody");
-    const int aheadFeet = AITileProbeSolidishValue(tileProbe, "aheadFeet");
-    const int aheadBelow = AITileProbeSolidishValue(tileProbe, "aheadBelow");
-    const int ahead2Below = AITileProbeSolidishValue(tileProbe, "ahead2Below");
-    const int leftBody = AITileProbeSolidishValue(tileProbe, "leftBody");
-    const int leftBelow = AITileProbeSolidishValue(tileProbe, "leftBelow");
-    const int left2Below = AITileProbeSolidishValue(tileProbe, "left2Below");
-    const int rightBody = AITileProbeSolidishValue(tileProbe, "rightBody");
-    const int rightBelow = AITileProbeSolidishValue(tileProbe, "rightBelow");
-    const int right2Below = AITileProbeSolidishValue(tileProbe, "right2Below");
-    const int holeAhead = tileProbe.Found && !aheadBelow && !ahead2Below ? 1 : 0;
-    const int holeLeft = tileProbe.Found && !leftBelow && !left2Below ? 1 : 0;
-    const int holeRight = tileProbe.Found && !rightBelow && !right2Below ? 1 : 0;
-    const int suppressHole = contactGround && !groundBelow ? 1 : 0;
-    const int ambiguousSideBody = contactGround && leftBody && rightBody && !contactWallLeft && !contactWallRight ? 1 : 0;
-    const int blockedAhead = aheadBody || aheadFeet ? 1 : 0;
-    const int blockedLeft = contactWallLeft || (leftBody && !ambiguousSideBody) ? 1 : 0;
-    const int blockedRight = contactWallRight || (rightBody && !ambiguousSideBody) ? 1 : 0;
+    const AITerrainDerivedSummary terrainSummary =
+        DeriveAITerrainSummaryFromGrid(tileProbe, contactGround, contactWallLeft, contactWallRight);
     const RuntimeHazardThreat hazard = MostDangerousRuntimeHazard(
         objectScanCache,
         selfX,
@@ -18214,13 +18302,13 @@ void AppendAICompactRuntimeScalars(
         static_cast<double>(hazard.Dy),
         hazard.Closing ? 1.0 : 0.0,
         static_cast<double>(hazard.CategoryID),
-        static_cast<double>(groundBelow),
-        static_cast<double>(blockedAhead),
-        static_cast<double>(blockedLeft),
-        static_cast<double>(blockedRight),
-        static_cast<double>((holeAhead && !suppressHole) ? 1 : 0),
-        static_cast<double>((holeLeft && !suppressHole) ? 1 : 0),
-        static_cast<double>((holeRight && !suppressHole) ? 1 : 0),
+        static_cast<double>(terrainSummary.GroundBelowSolid),
+        static_cast<double>(terrainSummary.BlockedAhead),
+        static_cast<double>(terrainSummary.BlockedLeft),
+        static_cast<double>(terrainSummary.BlockedRight),
+        static_cast<double>(terrainSummary.EffectiveHoleAhead),
+        static_cast<double>(terrainSummary.EffectiveHoleLeft),
+        static_cast<double>(terrainSummary.EffectiveHoleRight),
     };
     features.insert(features.end(), std::begin(values), std::end(values));
 }
@@ -18724,25 +18812,8 @@ void WriteAIObservationV2ScalarFeaturesJson(
     const bool contactGround = AIPlayerContactGround(collision);
     const bool contactWallLeft = (collision & (0x00000008u | 0x00000400u | 0x20000000u)) != 0;
     const bool contactWallRight = (collision & (0x00000010u | 0x00000800u | 0x40000000u)) != 0;
-    const int groundBelow = AITileProbeSolidishValue(tileProbe, "below");
-    const int aheadBody = AITileProbeSolidishValue(tileProbe, "aheadBody");
-    const int aheadFeet = AITileProbeSolidishValue(tileProbe, "aheadFeet");
-    const int aheadBelow = AITileProbeSolidishValue(tileProbe, "aheadBelow");
-    const int ahead2Below = AITileProbeSolidishValue(tileProbe, "ahead2Below");
-    const int leftBody = AITileProbeSolidishValue(tileProbe, "leftBody");
-    const int leftBelow = AITileProbeSolidishValue(tileProbe, "leftBelow");
-    const int left2Below = AITileProbeSolidishValue(tileProbe, "left2Below");
-    const int rightBody = AITileProbeSolidishValue(tileProbe, "rightBody");
-    const int rightBelow = AITileProbeSolidishValue(tileProbe, "rightBelow");
-    const int right2Below = AITileProbeSolidishValue(tileProbe, "right2Below");
-    const int holeAhead = tileProbe.Found && !aheadBelow && !ahead2Below ? 1 : 0;
-    const int holeLeft = tileProbe.Found && !leftBelow && !left2Below ? 1 : 0;
-    const int holeRight = tileProbe.Found && !rightBelow && !right2Below ? 1 : 0;
-    const int suppressHole = contactGround && !groundBelow ? 1 : 0;
-    const int ambiguousSideBody = contactGround && leftBody && rightBody && !contactWallLeft && !contactWallRight ? 1 : 0;
-    const int blockedAhead = aheadBody || aheadFeet ? 1 : 0;
-    const int blockedLeft = contactWallLeft || (leftBody && !ambiguousSideBody) ? 1 : 0;
-    const int blockedRight = contactWallRight || (rightBody && !ambiguousSideBody) ? 1 : 0;
+    const AITerrainDerivedSummary terrainSummary =
+        DeriveAITerrainSummaryFromGrid(tileProbe, contactGround, contactWallLeft, contactWallRight);
     const RuntimeHazardThreat hazard = MostDangerousRuntimeHazard(
         objectScanCache,
         selfX,
@@ -18793,13 +18864,13 @@ void WriteAIObservationV2ScalarFeaturesJson(
         << ",\"runtime_hazard_dy\":" << hazard.Dy
         << ",\"runtime_hazard_closing\":" << (hazard.Closing ? 1 : 0)
         << ",\"runtime_hazard_category\":" << hazard.CategoryID
-        << ",\"tile_groundBelowSolid\":" << groundBelow
-        << ",\"tile_blockedAhead\":" << blockedAhead
-        << ",\"tile_blockedLeft\":" << blockedLeft
-        << ",\"tile_blockedRight\":" << blockedRight
-        << ",\"tile_effectiveHoleAhead\":" << (holeAhead && !suppressHole ? 1 : 0)
-        << ",\"tile_effectiveHoleLeft\":" << (holeLeft && !suppressHole ? 1 : 0)
-        << ",\"tile_effectiveHoleRight\":" << (holeRight && !suppressHole ? 1 : 0);
+        << ",\"tile_groundBelowSolid\":" << terrainSummary.GroundBelowSolid
+        << ",\"tile_blockedAhead\":" << terrainSummary.BlockedAhead
+        << ",\"tile_blockedLeft\":" << terrainSummary.BlockedLeft
+        << ",\"tile_blockedRight\":" << terrainSummary.BlockedRight
+        << ",\"tile_effectiveHoleAhead\":" << terrainSummary.EffectiveHoleAhead
+        << ",\"tile_effectiveHoleLeft\":" << terrainSummary.EffectiveHoleLeft
+        << ",\"tile_effectiveHoleRight\":" << terrainSummary.EffectiveHoleRight;
 }
 
 void WriteAIObservationV2ObjectEntityJson(std::ostream& out, const GameStateObjectScanEntry& entry, const GameStateSample& sample)
