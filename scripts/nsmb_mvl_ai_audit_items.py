@@ -19,6 +19,7 @@ ITEM_CATEGORIES = {"world_item", "neutral_item", "coin_item", "dropped_star_item
 DROP_STAR_SETTINGS_NORMALIZED = {0x1002, 0x1012, 0x1102, 0x1112}
 FIRE_ITEM_SETTINGS_CONFIRMED = {0x00011089}
 FIRE_ITEM_SETTINGS = {0x00090000, *FIRE_ITEM_SETTINGS_CONFIRMED}
+CONTEXTUAL_POWERUP_ITEM_SETTINGS = {0x00090000}
 SUPER_MUSHROOM_ITEM_SETTINGS = {0x00011088}
 COIN_ITEM_SETTINGS = {0x00090002}
 MINI_ITEM_SETTINGS = {0x00011099}
@@ -73,6 +74,8 @@ def item_kind_candidate(object_id: int, settings: int, category: str) -> tuple[s
         return "dropped_battle_star", 3
     if settings in FIRE_ITEM_SETTINGS_CONFIRMED:
         return "fire_flower", 3
+    if settings in CONTEXTUAL_POWERUP_ITEM_SETTINGS:
+        return "adaptive_powerup", 3
     if settings in FIRE_ITEM_SETTINGS:
         return "fire_flower_candidate", 2
     if settings in SUPER_MUSHROOM_ITEM_SETTINGS:

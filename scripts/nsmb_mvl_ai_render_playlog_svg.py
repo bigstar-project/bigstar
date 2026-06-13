@@ -230,13 +230,13 @@ def corrected_visual_powerup_kind(player: dict[str, Any]) -> int:
         return 4
     if actor_state == 4 or actor_form == 4:
         return 3
+    if raw_powerup == 1 or actor_state == 1 or actor_form == 1:
+        return 1
     if raw_powerup == 5:
         return 5
     if raw_powerup:
         return raw_powerup
-    if raw_inventory:
-        return raw_inventory
-    return num(visual_state.get("visualPowerupKindCandidate"))
+    return 0
 
 
 def pos(entity: dict[str, Any]) -> dict[str, int]:

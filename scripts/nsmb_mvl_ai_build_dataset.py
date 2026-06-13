@@ -132,8 +132,12 @@ ITEM_SETTINGS_FIRE_CONFIRMED = {
     # visualPowerupKindCandidate from super to fire.
     0x00011089,
 }
-ITEM_SETTINGS_FIRE_CANDIDATES = {
+ITEM_SETTINGS_CONTEXTUAL_POWERUP_CONFIRMED = {
+    # Same actor settings are visually a Super Mushroom while the player is normal,
+    # and a Fire Flower while the player is already Super.
     0x00090000,
+}
+ITEM_SETTINGS_FIRE_CANDIDATES = {
     *ITEM_SETTINGS_FIRE_CONFIRMED,
 }
 ITEM_SETTINGS_SUPER_MUSHROOM_CANDIDATES = {
@@ -488,7 +492,6 @@ def screen(entity: dict[str, Any], camera: str) -> dict[str, int]:
 def visual_powerup_kind_candidate(player: dict[str, Any]) -> int:
     visual = player.get("visualState") or {}
     powerup = num(player.get("powerup"))
-    inventory_powerup = num(player.get("inventoryPowerup"))
     visual_powerup = visual.get("powerup") or {}
     powerup = num(visual_powerup.get("raw"), powerup)
     actor_powerup_state = num(visual.get("actorPowerupState"))
@@ -502,16 +505,27 @@ def visual_powerup_kind_candidate(player: dict[str, Any]) -> int:
     # while global powerup/raw inventory can still report super/reserve values.
     if actor_powerup_state == ITEM_KIND_SHELL or actor_powerup_form_state == ITEM_KIND_SHELL:
         return ITEM_KIND_MINI_MUSHROOM
+    if powerup == ITEM_KIND_SUPER_MUSHROOM or actor_powerup_state == ITEM_KIND_SUPER_MUSHROOM or actor_powerup_form_state == ITEM_KIND_SUPER_MUSHROOM:
+        return ITEM_KIND_SUPER_MUSHROOM
     if powerup == ITEM_KIND_MEGA_MUSHROOM:
         return ITEM_KIND_MEGA_MUSHROOM
     if powerup != 0:
         return powerup
-    if inventory_powerup != 0:
-        return inventory_powerup
-    return num(visual.get("visualPowerupKindCandidate"))
+    return 0
 
 
-def item_powerup_kind_candidate(settings: int) -> int:
+def contextual_powerup_item_kind(current_powerup_kind: int) -> int:
+    if current_powerup_kind <= 0:
+        return ITEM_KIND_SUPER_MUSHROOM
+    if current_powerup_kind in (ITEM_KIND_SUPER_MUSHROOM, ITEM_KIND_FIRE_FLOWER):
+        return ITEM_KIND_FIRE_FLOWER
+    return ITEM_KIND_UNKNOWN_ITEM_VARIANT
+
+
+def item_powerup_kind_candidate(settings: int, current_powerup_kind: int = -1) -> int:
+    if settings in ITEM_SETTINGS_CONTEXTUAL_POWERUP_CONFIRMED:
+        kind = contextual_powerup_item_kind(current_powerup_kind)
+        return kind if kind in (ITEM_KIND_SUPER_MUSHROOM, ITEM_KIND_FIRE_FLOWER) else -1
     if settings in ITEM_SETTINGS_SUPER_MUSHROOM_CANDIDATES:
         return ITEM_KIND_SUPER_MUSHROOM
     if settings in ITEM_SETTINGS_FIRE_CANDIDATES:
@@ -525,7 +539,7 @@ def item_powerup_kind_candidate(settings: int) -> int:
     return -1
 
 
-def item_kind_candidate(object_id: int, settings: int, category: str) -> tuple[int, int]:
+def item_kind_candidate(object_id: int, settings: int, category: str, current_powerup_kind: int = -1) -> tuple[int, int]:
     normalized = settings & 0x7FFFFFFF
     if category == "coin_item" or (object_id == 0x001F and settings in ITEM_SETTINGS_COIN_ITEM_CANDIDATES):
         return ITEM_KIND_COIN, ITEM_KIND_CONFIDENCE_CONFIRMED
@@ -535,6 +549,8 @@ def item_kind_candidate(object_id: int, settings: int, category: str) -> tuple[i
         return ITEM_KIND_DROPPED_BATTLE_STAR, ITEM_KIND_CONFIDENCE_CONFIRMED
     if settings in ITEM_SETTINGS_FIRE_CONFIRMED:
         return ITEM_KIND_FIRE_FLOWER, ITEM_KIND_CONFIDENCE_CONFIRMED
+    if settings in ITEM_SETTINGS_CONTEXTUAL_POWERUP_CONFIRMED:
+        return contextual_powerup_item_kind(current_powerup_kind), ITEM_KIND_CONFIDENCE_CONFIRMED
     if settings in ITEM_SETTINGS_FIRE_CANDIDATES:
         return ITEM_KIND_FIRE_FLOWER, ITEM_KIND_CONFIDENCE_LOG_SUPPORTED
     if settings in ITEM_SETTINGS_SUPER_MUSHROOM_CANDIDATES:
@@ -644,6 +660,7 @@ def nearest_item_details(
     self_pos: dict[str, int],
     *,
     require_item_category: str | None = None,
+    current_powerup_kind: int = -1,
 ) -> dict[str, int]:
     best: tuple[int, dict[str, Any], dict[str, int], dict[str, int], dict[str, int]] | None = None
     for obj in objects:
@@ -697,8 +714,8 @@ def nearest_item_details(
     settings = num(obj.get("settings"))
     object_id = num(obj.get("objectId"))
     category = object_category(obj)
-    powerup_kind = item_powerup_kind_candidate(settings)
-    kind, confidence = item_kind_candidate(object_id, settings, category)
+    powerup_kind = item_powerup_kind_candidate(settings, current_powerup_kind)
+    kind, confidence = item_kind_candidate(object_id, settings, category, current_powerup_kind)
     return {
         "found": 1,
         "dx": delta_x(obj_pos["x"], self_pos["x"]),
@@ -717,7 +734,7 @@ def nearest_item_details(
         "kind_confidence": confidence,
         "powerup_kind_candidate": powerup_kind,
         "is_super_mushroom_candidate": int(kind == ITEM_KIND_SUPER_MUSHROOM),
-        "is_fire_candidate": int(settings in ITEM_SETTINGS_FIRE_CANDIDATES),
+        "is_fire_candidate": int(kind == ITEM_KIND_FIRE_FLOWER),
         "is_fire_flower_candidate": int(kind == ITEM_KIND_FIRE_FLOWER),
         "is_coin_item_candidate": int(settings in ITEM_SETTINGS_COIN_ITEM_CANDIDATES),
         "is_dropped_star_candidate": is_dropped_star_item_candidate(object_id, settings, category),
@@ -835,8 +852,14 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
     for obj in objects:
         category = object_category(obj)
         category_counts[category] = category_counts.get(category, 0) + 1
-    nearest_item = nearest_item_details(objects, self_pos)
-    coin_reward_item = nearest_item_details(objects, self_pos, require_item_category="item")
+    current_self_powerup_kind = visual_powerup_kind_candidate(self_player)
+    nearest_item = nearest_item_details(objects, self_pos, current_powerup_kind=current_self_powerup_kind)
+    coin_reward_item = nearest_item_details(
+        objects,
+        self_pos,
+        require_item_category="item",
+        current_powerup_kind=current_self_powerup_kind,
+    )
     runtime_hazard = runtime_hazard_threat(objects, self_pos, self_vel)
     nearest_summary = {}
     for nearest_player in visual_summary.get("nearest") or []:

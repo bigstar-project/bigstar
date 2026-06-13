@@ -15581,12 +15581,12 @@ melonDS::u32 AIVisualPowerupKindCandidate(
         return 4;
     if (actorPowerupState == 4 || actorPowerupFormState == 4)
         return 3;
+    if (powerup == 1 || actorPowerupState == 1 || actorPowerupFormState == 1)
+        return 1;
     if (powerup == 5)
         return 5;
     if (powerup != 0)
         return powerup;
-    if (inventoryPowerup != 0)
-        return inventoryPowerup;
     return 0;
 }
 
@@ -17351,7 +17351,12 @@ bool RuntimeItemSettingsIsFireConfirmed(melonDS::u32 settings)
 
 bool RuntimeItemSettingsIsFireCandidate(melonDS::u32 settings)
 {
-    return settings == 0x00090000u || RuntimeItemSettingsIsFireConfirmed(settings);
+    return RuntimeItemSettingsIsFireConfirmed(settings);
+}
+
+bool RuntimeItemSettingsIsContextualPowerup(melonDS::u32 settings)
+{
+    return settings == 0x00090000u;
 }
 
 bool RuntimeItemSettingsIsSuperMushroomCandidate(melonDS::u32 settings)
@@ -17389,8 +17394,23 @@ bool RuntimeItemSettingsIsUnknownItemVariantCandidate(melonDS::u32 settings)
     return settings == 0x000D0000u || settings == 0x000D0002u;
 }
 
-int RuntimeItemPowerupKindCandidate(melonDS::u32 settings)
+int RuntimeContextualPowerupItemKind(melonDS::u32 currentPowerupKind)
 {
+    if (currentPowerupKind == kRuntimeItemKindUnknown)
+        return kRuntimeItemKindSuperMushroom;
+    if (currentPowerupKind == kRuntimeItemKindSuperMushroom ||
+        currentPowerupKind == kRuntimeItemKindFireFlower)
+        return kRuntimeItemKindFireFlower;
+    return kRuntimeItemKindUnknownItemVariant;
+}
+
+int RuntimeItemPowerupKindCandidate(melonDS::u32 settings, melonDS::u32 currentPowerupKind)
+{
+    if (RuntimeItemSettingsIsContextualPowerup(settings))
+    {
+        const int kind = RuntimeContextualPowerupItemKind(currentPowerupKind);
+        return kind == kRuntimeItemKindSuperMushroom || kind == kRuntimeItemKindFireFlower ? kind : -1;
+    }
     if (RuntimeItemSettingsIsSuperMushroomCandidate(settings))
         return kRuntimeItemKindSuperMushroom;
     if (RuntimeItemSettingsIsFireCandidate(settings))
@@ -17404,7 +17424,10 @@ int RuntimeItemPowerupKindCandidate(melonDS::u32 settings)
     return -1;
 }
 
-std::pair<int, int> RuntimeItemKindAndConfidence(const GameStateObjectScanEntry& item, const char* category)
+std::pair<int, int> RuntimeItemKindAndConfidence(
+    const GameStateObjectScanEntry& item,
+    const char* category,
+    melonDS::u32 currentPowerupKind)
 {
     const melonDS::u32 settings = item.Actor.Settings;
     if (std::strcmp(category, "coin_item") == 0 ||
@@ -17415,6 +17438,8 @@ std::pair<int, int> RuntimeItemKindAndConfidence(const GameStateObjectScanEntry&
         return {kRuntimeItemKindDroppedBattleStar, kRuntimeItemKindConfidenceConfirmed};
     if (RuntimeItemSettingsIsFireConfirmed(settings))
         return {kRuntimeItemKindFireFlower, kRuntimeItemKindConfidenceConfirmed};
+    if (RuntimeItemSettingsIsContextualPowerup(settings))
+        return {RuntimeContextualPowerupItemKind(currentPowerupKind), kRuntimeItemKindConfidenceConfirmed};
     if (RuntimeItemSettingsIsFireCandidate(settings))
         return {kRuntimeItemKindFireFlower, kRuntimeItemKindConfidenceLogSupported};
     if (RuntimeItemSettingsIsSuperMushroomCandidate(settings))
@@ -17466,6 +17491,7 @@ bool RuntimeItemFeature(
     const std::string& prefix,
     melonDS::u32 selfX,
     melonDS::u32 selfY,
+    melonDS::u32 currentPowerupKind,
     bool requirePlainItem,
     bool forceZero,
     double& out)
@@ -17494,17 +17520,29 @@ bool RuntimeItemFeature(
     else if (field == "kind_candidate")
     {
         const char* category = AIObjectCategory(item->ObjectID, item->Actor.Settings);
-        out = RuntimeItemKindAndConfidence(*item, category).first;
+        out = RuntimeItemKindAndConfidence(*item, category, currentPowerupKind).first;
     }
     else if (field == "kind_confidence")
     {
         const char* category = AIObjectCategory(item->ObjectID, item->Actor.Settings);
-        out = RuntimeItemKindAndConfidence(*item, category).second;
+        out = RuntimeItemKindAndConfidence(*item, category, currentPowerupKind).second;
     }
-    else if (field == "powerup_kind_candidate") out = RuntimeItemPowerupKindCandidate(item->Actor.Settings);
-    else if (field == "is_super_mushroom_candidate") out = RuntimeItemSettingsIsSuperMushroomCandidate(item->Actor.Settings) ? 1 : 0;
-    else if (field == "is_fire_candidate") out = RuntimeItemSettingsIsFireCandidate(item->Actor.Settings) ? 1 : 0;
-    else if (field == "is_fire_flower_candidate") out = RuntimeItemSettingsIsFireCandidate(item->Actor.Settings) ? 1 : 0;
+    else if (field == "powerup_kind_candidate") out = RuntimeItemPowerupKindCandidate(item->Actor.Settings, currentPowerupKind);
+    else if (field == "is_super_mushroom_candidate")
+    {
+        const char* category = AIObjectCategory(item->ObjectID, item->Actor.Settings);
+        out = RuntimeItemKindAndConfidence(*item, category, currentPowerupKind).first == kRuntimeItemKindSuperMushroom ? 1 : 0;
+    }
+    else if (field == "is_fire_candidate")
+    {
+        const char* category = AIObjectCategory(item->ObjectID, item->Actor.Settings);
+        out = RuntimeItemKindAndConfidence(*item, category, currentPowerupKind).first == kRuntimeItemKindFireFlower ? 1 : 0;
+    }
+    else if (field == "is_fire_flower_candidate")
+    {
+        const char* category = AIObjectCategory(item->ObjectID, item->Actor.Settings);
+        out = RuntimeItemKindAndConfidence(*item, category, currentPowerupKind).first == kRuntimeItemKindFireFlower ? 1 : 0;
+    }
     else if (field == "is_coin_item_candidate") out = RuntimeItemSettingsIsCoinItemCandidate(item->Actor.Settings) ? 1 : 0;
     else if (field == "is_dropped_star_candidate") out =
         item->ObjectID == kVsBattleStarActorObjectID && IsVsDroppedStarActorSettings(item->Actor.Settings) ? 1 : 0;
@@ -17533,6 +17571,15 @@ bool RuntimeFeatureValue(
     const melonDS::u32 selfX = player == 0 ? sample.PlayerActor0PosX : sample.PlayerActor1PosX;
     const melonDS::u32 selfY = player == 0 ? sample.PlayerActor0PosY : sample.PlayerActor1PosY;
     const melonDS::u32 selfVelX = player == 0 ? sample.PlayerActor0VelX : sample.PlayerActor1VelX;
+    const melonDS::u32 selfPowerup = player == 0 ? sample.Player0Powerup : sample.Player1Powerup;
+    const melonDS::u32 selfInventoryPowerup = player == 0 ? sample.Player0InventoryPowerup : sample.Player1InventoryPowerup;
+    const melonDS::u32 selfActorPowerupState =
+        player == 0 ? sample.PlayerActor0PowerupState : sample.PlayerActor1PowerupState;
+    const melonDS::u32 selfActorPowerupFormState =
+        player == 0 ? sample.PlayerActor0PowerupFormState : sample.PlayerActor1PowerupFormState;
+    const melonDS::u32 selfShellState = player == 0 ? sample.PlayerActor0ShellState : sample.PlayerActor1ShellState;
+    const melonDS::u32 selfVisualPowerup = AIVisualPowerupKindCandidate(
+        selfPowerup, selfInventoryPowerup, selfActorPowerupState, selfActorPowerupFormState, selfShellState);
 
     if (name == "frame") out = frame;
     else if (name == "stage_id") out = sample.StageID;
@@ -17606,10 +17653,12 @@ bool RuntimeFeatureValue(
     else if (name == "fireballs_slot_count") out = kAIFireballSlotCount;
     else if (name == "fireballs_handler_word0") out = sample.FireballsHandlerWords[0];
     else if (name == "projectiles_handler_word0") out = sample.ProjectilesHandlerWords[0];
-    else if (RuntimeItemFeature(objectScanCache, sample, name, "nearest_item_", selfX, selfY, false, false, out))
+    else if (RuntimeItemFeature(
+        objectScanCache, sample, name, "nearest_item_", selfX, selfY, selfVisualPowerup, false, false, out))
     {
     }
-    else if (RuntimeItemFeature(objectScanCache, sample, name, "coin_reward_item_", selfX, selfY, true, true, out))
+    else if (RuntimeItemFeature(
+        objectScanCache, sample, name, "coin_reward_item_", selfX, selfY, selfVisualPowerup, true, true, out))
     {
     }
     else if (RuntimeHazardFeature(objectScanCache, name, selfX, selfY, selfVelX, out))
