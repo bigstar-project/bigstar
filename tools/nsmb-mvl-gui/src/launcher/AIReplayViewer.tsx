@@ -1767,6 +1767,7 @@ export function AIReplayViewer() {
         {frame ? (
           <div
             className={css({
+              alignItems: 'start',
               display: 'grid',
               gap: '4',
               gridTemplateColumns: 'minmax(0, 1fr) 360px',
