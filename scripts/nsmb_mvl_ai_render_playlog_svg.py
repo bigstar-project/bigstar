@@ -17,7 +17,7 @@ HEIGHT = 520
 CENTER_X = WIDTH // 2
 CENTER_Y = HEIGHT // 2
 STAGE_WRAP_WIDTH_PX = 1024
-TILE_GRID_SIZE_PX = 14
+TILE_GRID_SIZE_PX = 16
 
 HIDDEN_SCENE_OBJECT_CATEGORIES = {
     "big_star_related",
@@ -202,6 +202,18 @@ def wrapped_delta_px(a_px: float, b_px: float) -> float:
     return dx
 
 
+def tile_cell_delta_px(cell: dict[str, Any], self_pos: dict[str, int]) -> tuple[float, float]:
+    if cell.get("pixelX") is not None and cell.get("pixelY") is not None:
+        return (
+            wrapped_delta_px(num(cell.get("pixelX")), self_pos["x"] / FIXED),
+            num(cell.get("pixelY")) + self_pos["y"] / FIXED,
+        )
+    return (
+        num(cell.get("relTileX")) * TILE_GRID_SIZE_PX,
+        num(cell.get("relTileY")) * TILE_GRID_SIZE_PX,
+    )
+
+
 def tile_cell_kind(cell: dict[str, Any]) -> tuple[str, str, str, str]:
     tile = cell.get("tile") or {}
     block = cell.get("block") or {}
@@ -334,8 +346,7 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
         kind, color, label, description = tile_cell_kind(cell)
         if not color:
             continue
-        dx = num(cell.get("relTileX")) * TILE_GRID_SIZE_PX
-        dy = num(cell.get("relTileY")) * TILE_GRID_SIZE_PX
+        dx, dy = tile_cell_delta_px(cell, self_pos)
         x, y = svg_point(dx, dy)
         if x < -20 or x > WIDTH + 20 or y < -20 or y > HEIGHT + 20:
             continue
@@ -346,7 +357,7 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
         parts.append(
             f'<rect x="{x - 6.5:.1f}" y="{y - 6.5:.1f}" width="13" height="13" fill="{color}" '
             f'opacity="{opacity}" stroke="#e2e8f0" stroke-width="0.5">'
-            f'<title>grid {html.escape(description)} row={cell.get("row")} col={cell.get("col")} rel=({cell.get("relTileX")},{cell.get("relTileY")}) tile=0x{tile_id:03X} behavior={html.escape(str(cell.get("behavior")))} solidish={num(cell.get("solidish"))} question={num(block.get("question")) or num(tile.get("questionBlock"))} breakable={num(block.get("breakable")) or num(tile.get("breakableBlock"))} brick={num(block.get("brick")) or num(tile.get("brickBlock"))} hidden={num(block.get("hiddenOrRescueCandidate")) or num(block.get("invisible")) or num(tile.get("invisibleBlock"))} itemBox={num(block.get("itemBox"))} storage={num(block.get("storageContents"))} dx={dx:.0f} dy={dy:.0f}</title></rect>'
+            f'<title>grid {html.escape(description)} row={cell.get("row")} col={cell.get("col")} rel=({cell.get("relTileX")},{cell.get("relTileY")}) pixel=({cell.get("pixelX")},{cell.get("pixelY")}) tile=0x{tile_id:03X} behavior={html.escape(str(cell.get("behavior")))} solidish={num(cell.get("solidish"))} question={num(block.get("question")) or num(tile.get("questionBlock"))} breakable={num(block.get("breakable")) or num(tile.get("breakableBlock"))} brick={num(block.get("brick")) or num(tile.get("brickBlock"))} hidden={num(block.get("hiddenOrRescueCandidate")) or num(block.get("invisible")) or num(tile.get("invisibleBlock"))} itemBox={num(block.get("itemBox"))} storage={num(block.get("storageContents"))} dx={dx:.0f} dy={dy:.0f}</title></rect>'
         )
         if kind in TILE_LABELS:
             parts.append(

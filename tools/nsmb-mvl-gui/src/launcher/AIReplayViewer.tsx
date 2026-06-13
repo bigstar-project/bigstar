@@ -440,7 +440,8 @@ function pos(entity?: { pos?: Vec3 }) {
 
 const sceneScale = 0.5;
 const stageWrapWidthPx = 1024;
-const tileGridSizePx = 12;
+const tileWorldSizePx = 16;
+const tileGridSizePx = tileWorldSizePx * sceneScale;
 const hiddenSceneObjectCategories = new Set([
   'big_star_related',
   'camera',
@@ -480,13 +481,6 @@ function scenePointFromPx(dxPx: number, dyPx: number) {
   };
 }
 
-function scenePointFromTile(relTileX: unknown, relTileY: unknown) {
-  return {
-    x: 320 + numeric(relTileX) * tileGridSizePx,
-    y: 180 + numeric(relTileY) * tileGridSizePx,
-  };
-}
-
 function relativeDeltaPx(
   entity: { pos?: Vec3; relative?: Record<string, unknown> },
   self: PlayerState | undefined,
@@ -508,6 +502,20 @@ function relativeDeltaPx(
   return {
     dx: wrappedDeltaPx(entityPos.x / 4096, selfPos.x / 4096),
     dy: -(entityPos.y - selfPos.y) / 4096,
+  };
+}
+
+function tileCellDeltaPx(cell: TileGridCell, self: PlayerState | undefined) {
+  const selfPos = pos(self);
+  if (cell.pixelX !== undefined && cell.pixelY !== undefined) {
+    return {
+      dx: wrappedDeltaPx(numeric(cell.pixelX), selfPos.x / 4096),
+      dy: numeric(cell.pixelY) + selfPos.y / 4096,
+    };
+  }
+  return {
+    dx: numeric(cell.relTileX) * tileWorldSizePx,
+    dy: numeric(cell.relTileY) * tileWorldSizePx,
   };
 }
 
@@ -762,13 +770,14 @@ function ReplayScene({
       {gridCells.map((cell, index) => {
         const kind = tileKind(cell);
         if (!kind) return null;
-        const point = scenePointFromTile(cell.relTileX, cell.relTileY);
+        const delta = tileCellDeltaPx(cell, self);
+        const point = scenePointFromPx(delta.dx, delta.dy);
         if (point.x < -24 || point.x > 664 || point.y < -24 || point.y > 384) {
           return null;
         }
         const block = cell.block ?? {};
         const tile = cell.tile ?? {};
-        const size = tileGridSizePx - 1;
+        const size = tileGridSizePx;
         const labelVisible = tileLabels.has(kind.name);
         return (
           <g key={`grid-${cell.row ?? 'r'}-${cell.col ?? index}`}>
@@ -794,7 +803,7 @@ function ReplayScene({
                 {kind.label}
               </text>
             ) : null}
-            <title>{`${kind.name} row=${cell.row ?? '-'} col=${cell.col ?? '-'} rel=(${cell.relTileX ?? '-'},${cell.relTileY ?? '-'}) tile=${hexText(cell.tileId)} behavior=${cell.behavior ?? '-'} solid=${numeric(cell.solidish)} q=${numeric(block.question) || numeric(tile.questionBlock)} b=${numeric(block.breakable) || numeric(tile.breakableBlock)} brick=${numeric(block.brick) || numeric(tile.brickBlock)} hidden=${numeric(block.hiddenOrRescueCandidate) || numeric(block.invisible) || numeric(tile.invisibleBlock)} itemBox=${numeric(block.itemBox)} storage=${numeric(block.storageContents)}`}</title>
+            <title>{`${kind.name} row=${cell.row ?? '-'} col=${cell.col ?? '-'} rel=(${cell.relTileX ?? '-'},${cell.relTileY ?? '-'}) pixel=(${cell.pixelX ?? '-'},${cell.pixelY ?? '-'}) dx=${Math.round(delta.dx)} dy=${Math.round(delta.dy)} tile=${hexText(cell.tileId)} behavior=${cell.behavior ?? '-'} solid=${numeric(cell.solidish)} q=${numeric(block.question) || numeric(tile.questionBlock)} b=${numeric(block.breakable) || numeric(tile.breakableBlock)} brick=${numeric(block.brick) || numeric(tile.brickBlock)} hidden=${numeric(block.hiddenOrRescueCandidate) || numeric(block.invisible) || numeric(tile.invisibleBlock)} itemBox=${numeric(block.itemBox)} storage=${numeric(block.storageContents)}`}</title>
           </g>
         );
       })}
