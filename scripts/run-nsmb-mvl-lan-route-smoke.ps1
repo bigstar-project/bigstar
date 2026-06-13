@@ -304,6 +304,11 @@ param(
     [switch]$ForcePlayerLives,
     [int]$ForcePlayerLife0 = 5,
     [int]$ForcePlayerLife1 = 5,
+    [switch]$ForcePlayerPowerups,
+    [int]$ForcePlayerPowerupsStartFrame = 0,
+    [int]$ForcePlayerPowerupsEndFrame = 0,
+    [int]$ForcePlayerPowerup0 = 0,
+    [int]$ForcePlayerPowerup1 = 0,
     [switch]$ForcePlayerInventoryPowerups,
     [int]$ForcePlayerInventoryPowerupsStartFrame = 0,
     [int]$ForcePlayerInventoryPowerupsEndFrame = 0,
@@ -1707,6 +1712,19 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_LIVES -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_LIFE0 -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_LIFE1 -ErrorAction SilentlyContinue
+    }
+    if ($ForcePlayerPowerups) {
+        $env:MELONDS_NSML_FORCE_PLAYER_POWERUPS = "1"
+        $env:MELONDS_NSML_FORCE_PLAYER_POWERUPS_START_FRAME = "$ForcePlayerPowerupsStartFrame"
+        $env:MELONDS_NSML_FORCE_PLAYER_POWERUPS_END_FRAME = "$ForcePlayerPowerupsEndFrame"
+        $env:MELONDS_NSML_FORCE_PLAYER_POWERUP0 = "$ForcePlayerPowerup0"
+        $env:MELONDS_NSML_FORCE_PLAYER_POWERUP1 = "$ForcePlayerPowerup1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_POWERUPS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_POWERUPS_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_POWERUPS_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_POWERUP0 -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_POWERUP1 -ErrorAction SilentlyContinue
     }
     if ($ForcePlayerInventoryPowerups) {
         $env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS = "1"
@@ -3421,6 +3439,12 @@ function Start-MelonLANProcess {
         "dynamicCameraBaseStep=$($env:MELONDS_NSML_DYNAMIC_CAMERA_BASE_STEP)"
         "dynamicCameraMaxStep=$($env:MELONDS_NSML_DYNAMIC_CAMERA_MAX_STEP)"
         "dynamicCameraVelocityThreshold=$($env:MELONDS_NSML_DYNAMIC_CAMERA_VELOCITY_THRESHOLD)"
+        "forcePlayerPowerupsSwitch=$ForcePlayerPowerups"
+        "forcePlayerPowerupsEnv=$($env:MELONDS_NSML_FORCE_PLAYER_POWERUPS)"
+        "forcePlayerPowerupsStart=$($env:MELONDS_NSML_FORCE_PLAYER_POWERUPS_START_FRAME)"
+        "forcePlayerPowerupsEnd=$($env:MELONDS_NSML_FORCE_PLAYER_POWERUPS_END_FRAME)"
+        "forcePlayerPowerup0=$($env:MELONDS_NSML_FORCE_PLAYER_POWERUP0)"
+        "forcePlayerPowerup1=$($env:MELONDS_NSML_FORCE_PLAYER_POWERUP1)"
         "forcePlayerInventoryPowerupsSwitch=$ForcePlayerInventoryPowerups"
         "forcePlayerInventoryPowerupsEnv=$($env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS)"
         "forcePlayerInventoryPowerupsStart=$($env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_START_FRAME)"

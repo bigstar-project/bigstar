@@ -176,6 +176,7 @@ constexpr melonDS::u32 kCollisionMgrModifierStateOffset = 0xB0;
 constexpr melonDS::u32 kCollisionMgrUnknownB1Offset = 0xB1;
 constexpr melonDS::u32 kPlayerBaseShellActorPtrOffset = 0x0B8;
 constexpr melonDS::u32 kPlayerBaseUpdateLockedOffset = 0x7A8;
+constexpr melonDS::u32 kPlayerActorPlayerIDOffset = 0x11E;
 constexpr melonDS::u32 kPlayerBaseDamageStateOffset = 0x7A9;
 constexpr melonDS::u32 kPlayerBasePowerupAuxStateOffset = 0x7AA;
 constexpr melonDS::u32 kPlayerBaseCharacterIDOffset = 0x7AA;
@@ -1776,6 +1777,12 @@ struct State
     melonDS::u32 ForcePlayerLife0 = 5;
     melonDS::u32 ForcePlayerLife1 = 5;
     bool ForcePlayerDeathCountersLogged[16] {};
+    bool ForcePlayerPowerupsEnabled = false;
+    melonDS::u32 ForcePlayerPowerupsStartFrame = 0;
+    melonDS::u32 ForcePlayerPowerupsEndFrame = 0;
+    melonDS::u32 ForcePlayerPowerup0 = 0;
+    melonDS::u32 ForcePlayerPowerup1 = 0;
+    bool ForcePlayerPowerupsLogged[16] {};
     bool ForcePlayerInventoryPowerupsEnabled = false;
     melonDS::u32 ForcePlayerInventoryPowerupsStartFrame = 0;
     melonDS::u32 ForcePlayerInventoryPowerupsEndFrame = 0;
@@ -3206,10 +3213,11 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(
             out.HoleRight = false;
         }
     };
-    auto fillHazard = [&objectScanCache](NsmbRuleAI::PlayerFrameState& out,
-                                          melonDS::u32 x,
-                                          melonDS::u32 y,
-                                          melonDS::u32 vx) {
+    auto fillHazard = [&objectScanCache, &sample](NsmbRuleAI::PlayerFrameState& out,
+                                                  int player,
+                                                  melonDS::u32 x,
+                                                  melonDS::u32 y,
+                                                  melonDS::u32 vx) {
         const RuntimeHazardThreat threat = MostDangerousRuntimeHazard(
             objectScanCache,
             x,
@@ -3218,23 +3226,66 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(
             G.RuleAIHazardHorizontalRange,
             G.RuleAIHazardVerticalRange,
             std::max<std::int64_t>(0x10000, (G.RuleAIHazardHorizontalRange * 3) / 4));
-        out.HazardFound = threat.Found;
-        out.HazardClosing = threat.Closing;
-        out.HazardVeryClose = threat.VeryClose;
+        RuntimeHazardThreat best = threat;
+        auto abs64 = [](std::int64_t value) {
+            return value < 0 ? -value : value;
+        };
+        auto scoreThreat = [&abs64](const RuntimeHazardThreat& candidate) {
+            std::int64_t score = abs64(candidate.Dx) + abs64(candidate.Dy) * 2;
+            if (candidate.Closing)
+                score -= G.RuleAIHazardHorizontalRange;
+            if (candidate.VeryClose)
+                score -= std::max<std::int64_t>(0x10000, (G.RuleAIHazardHorizontalRange * 3) / 4);
+            return score;
+        };
+        std::int64_t bestScore = best.Found ? scoreThreat(best) : 0;
+        const std::int64_t selfVx = SignedU32(vx);
+        const std::int64_t closeRange = std::max<std::int64_t>(0x10000, (G.RuleAIHazardHorizontalRange * 3) / 4);
+        for (int slot = 0; slot < kAIFireballSlotCount; slot++)
+        {
+            if (sample.FireballSlotActive[slot] == 0)
+                continue;
+            const melonDS::u32 sourceKind = sample.FireballSlotKind[slot];
+            if (sourceKind == static_cast<melonDS::u32>(player))
+                continue;
+            const std::int64_t dx = AIWrappedDeltaX(SignedU32(sample.FireballSlotPosX[slot]), SignedU32(x));
+            const std::int64_t dy = static_cast<std::int64_t>(SignedU32(sample.FireballSlotPosY[slot])) - SignedU32(y);
+            if (abs64(dx) > G.RuleAIHazardHorizontalRange || abs64(dy) > G.RuleAIHazardVerticalRange)
+                continue;
+            const std::int64_t fireVx = SignedU32(sample.FireballSlotVelX[slot]);
+            const std::int64_t relVx = fireVx - selfVx;
+            RuntimeHazardThreat candidate {};
+            candidate.Found = true;
+            candidate.Closing = (dx < 0 && relVx > 0) || (dx > 0 && relVx < 0);
+            candidate.VeryClose = abs64(dx) <= closeRange || abs64(dy) <= 0x10000;
+            candidate.Dx = dx;
+            candidate.Dy = dy;
+            candidate.VelX = fireVx;
+            candidate.VelY = SignedU32(sample.FireballSlotVelY[slot]);
+            const std::int64_t score = scoreThreat(candidate);
+            if (!best.Found || score < bestScore)
+            {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+        out.HazardFound = best.Found;
+        out.HazardClosing = best.Closing;
+        out.HazardVeryClose = best.VeryClose;
         out.HazardDx = static_cast<std::int32_t>(std::clamp<std::int64_t>(
-            threat.Dx,
+            best.Dx,
             std::numeric_limits<std::int32_t>::min(),
             std::numeric_limits<std::int32_t>::max()));
         out.HazardDy = static_cast<std::int32_t>(std::clamp<std::int64_t>(
-            threat.Dy,
+            best.Dy,
             std::numeric_limits<std::int32_t>::min(),
             std::numeric_limits<std::int32_t>::max()));
         out.HazardVelX = static_cast<std::int32_t>(std::clamp<std::int64_t>(
-            threat.VelX,
+            best.VelX,
             std::numeric_limits<std::int32_t>::min(),
             std::numeric_limits<std::int32_t>::max()));
         out.HazardVelY = static_cast<std::int32_t>(std::clamp<std::int64_t>(
-            threat.VelY,
+            best.VelY,
             std::numeric_limits<std::int32_t>::min(),
             std::numeric_limits<std::int32_t>::max()));
     };
@@ -3251,6 +3302,7 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(
         sample.PlayerActor0CollisionFlag);
     fillHazard(
         state.Players[0],
+        0,
         sample.PlayerActor0PosX,
         sample.PlayerActor0PosY,
         sample.PlayerActor0VelX);
@@ -3266,6 +3318,7 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(
         sample.PlayerActor1CollisionFlag);
     fillHazard(
         state.Players[1],
+        1,
         sample.PlayerActor1PosX,
         sample.PlayerActor1PosY,
         sample.PlayerActor1VelX);
@@ -10728,6 +10781,68 @@ void ForcePlayerInventoryPowerupsIfNeeded(int instanceID, melonDS::u32 frame, me
             G.ForcePlayerInventoryPowerup0 & 0xFF,
             G.ForcePlayerInventoryPowerup1 & 0xFF);
         G.ForcePlayerInventoryPowerupsLogged[instanceID] = true;
+    }
+}
+
+void ForcePlayerPowerupsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForcePlayerPowerupsEnabled || !nds || !nds->MainRAM)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.ForcePlayerPowerupsStartFrame)
+        return;
+    if (G.ForcePlayerPowerupsEndFrame != 0 && frame > G.ForcePlayerPowerupsEndFrame)
+        return;
+    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
+        return;
+
+    const melonDS::u8 value0 = static_cast<melonDS::u8>(G.ForcePlayerPowerup0 & 0xFF);
+    const melonDS::u8 value1 = static_cast<melonDS::u8>(G.ForcePlayerPowerup1 & 0xFF);
+    const melonDS::u8 old0 = nds->ARM9Read8(kGamePlayerPowerupAddr);
+    const melonDS::u8 old1 = nds->ARM9Read8(kGamePlayerPowerupAddr + 1);
+    nds->ARM9Write8(kGamePlayerPowerupAddr, value0);
+    nds->ARM9Write8(kGamePlayerPowerupAddr + 1, value1);
+
+    melonDS::u8 actorOldState[2] { 0xFF, 0xFF };
+    melonDS::u8 actorOldForm[2] { 0xFF, 0xFF };
+    melonDS::u32 actorBase[2] {};
+    const PlayerActorScanSample players = FindPlayerActors(nds);
+    const ObjectScanSample actors[2] { players.Actor0, players.Actor1 };
+    for (const ObjectScanSample& actor : actors)
+    {
+        if (!actor.Found || !IsARM9MainRAMAddress(actor.Base))
+            continue;
+        const melonDS::u32 player = nds->ARM9Read8(actor.Base + kPlayerActorPlayerIDOffset) & 1u;
+        const melonDS::u8 value = player == 0 ? value0 : value1;
+        actorBase[player] = actor.Base;
+        actorOldState[player] = nds->ARM9Read8(actor.Base + kPlayerBasePowerupStateOffset);
+        actorOldForm[player] = nds->ARM9Read8(actor.Base + kPlayerBasePowerupFormStateOffset);
+        nds->ARM9Write8(actor.Base + kPlayerBasePowerupStateOffset, value);
+        nds->ARM9Write8(actor.Base + kPlayerBasePowerupFormStateOffset, value);
+        nds->ARM9Write8(actor.Base + kPlayerBasePowerupSubStateOffset, 0);
+    }
+
+    if (!G.ForcePlayerPowerupsLogged[instanceID])
+    {
+        std::printf(
+            "NSMB Test: force player active powerups inst=%d frame=%u range=%u-%u "
+            "globalOld=%u/%u value=%u/%u actorBase=0x%08X/0x%08X actorStateOld=%u/%u actorFormOld=%u/%u\n",
+            instanceID,
+            frame,
+            G.ForcePlayerPowerupsStartFrame,
+            G.ForcePlayerPowerupsEndFrame,
+            old0,
+            old1,
+            value0,
+            value1,
+            actorBase[0],
+            actorBase[1],
+            actorOldState[0],
+            actorOldState[1],
+            actorOldForm[0],
+            actorOldForm[1]);
+        G.ForcePlayerPowerupsLogged[instanceID] = true;
     }
 }
 
@@ -18885,6 +19000,15 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_LIFE0", 5)));
     G.ForcePlayerLife1 = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_LIFE1", 5)));
+    G.ForcePlayerPowerupsEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_POWERUPS");
+    G.ForcePlayerPowerupsStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_POWERUPS_START_FRAME", 0)));
+    G.ForcePlayerPowerupsEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_POWERUPS_END_FRAME", 0)));
+    G.ForcePlayerPowerup0 = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_POWERUP0", 0)));
+    G.ForcePlayerPowerup1 = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_POWERUP1", 0)));
     G.ForcePlayerInventoryPowerupsEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS");
     G.ForcePlayerInventoryPowerupsStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_START_FRAME", 0)));
@@ -19975,6 +20099,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerDeathCountersIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForcePlayerPowerupsIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerInventoryPowerupsIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerStarCountersIfNeeded(instanceID, inputFrame, nds);
@@ -20637,6 +20763,8 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         RepairMvlInitialPlayerSpawnIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerActorPositionIfNeeded(instanceID, logFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForcePlayerPowerupsIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerInventoryPowerupsIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)

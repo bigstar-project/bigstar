@@ -146,6 +146,11 @@ param(
     [int]$StallStartFrame = 900,
     [switch]$UseLanMP,
     [switch]$PacketBridgePreserveLocalTouch,
+    [switch]$ForcePlayerPowerups,
+    [int]$ForcePlayerPowerupsStartFrame = 0,
+    [int]$ForcePlayerPowerupsEndFrame = 0,
+    [int]$ForcePlayerPowerup0 = 0,
+    [int]$ForcePlayerPowerup1 = 0,
     [switch]$ForcePlayerInventoryPowerups,
     [int]$ForcePlayerInventoryPowerupsStartFrame = 0,
     [int]$ForcePlayerInventoryPowerupsEndFrame = 0,
@@ -400,6 +405,15 @@ if ($PacketCapture) {
     if ($PacketCaptureAllowPreGame) {
         $common += "-PacketCaptureAllowPreGame"
     }
+}
+if ($ForcePlayerPowerups) {
+    $common += @(
+        "-ForcePlayerPowerups",
+        "-ForcePlayerPowerupsStartFrame", "$ForcePlayerPowerupsStartFrame",
+        "-ForcePlayerPowerupsEndFrame", "$ForcePlayerPowerupsEndFrame",
+        "-ForcePlayerPowerup0", "$ForcePlayerPowerup0",
+        "-ForcePlayerPowerup1", "$ForcePlayerPowerup1"
+    )
 }
 if ($ForcePlayerInventoryPowerups) {
     $common += @(

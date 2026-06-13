@@ -155,6 +155,7 @@ NsmbNetplayPoC::InputState DecideInput(
         (self.HazardClosing || self.HazardVeryClose);
 
     const bool evadingOpponent = self.BattleStars > other.BattleStars && absOpponentDx < config.CloseRange;
+    const bool starTargetVisible = state.StarActorFound || state.StarFound;
     if (self.BattleStars > other.BattleStars)
     {
         if (evadingOpponent)
@@ -162,7 +163,7 @@ NsmbNetplayPoC::InputState DecideInput(
             dx = opponentDx <= 0 ? config.CloseRange : -config.CloseRange;
             mode = "evade";
         }
-        else
+        else if (!starTargetVisible)
         {
             const int brakeIntent = SignWithDeadzone(-self.VelX, 0x800);
             dx = brakeIntent * std::max(config.HorizontalDeadzone + 1, config.CloseRange / 2);
@@ -176,10 +177,15 @@ NsmbNetplayPoC::InputState DecideInput(
             (self.WallRight || self.HoleRight) :
             (self.WallLeft || self.HoleLeft);
         if (escapeBlocked)
+        {
             dx = 0;
+            mode = "hazardHold";
+        }
         else
+        {
             dx = hazardOnLeft ? config.CloseRange : -config.CloseRange;
-        mode = "hazard";
+            mode = "hazard";
+        }
     }
 
     PlayerMemory* memory = nullptr;
@@ -300,6 +306,23 @@ NsmbNetplayPoC::InputState DecideInput(
             memory->StillFrames = 0;
         }
         mode = "rawWallRoute";
+    }
+
+    const bool leftOnlyHole = self.HoleLeft && !self.HoleRight && !self.WallRight;
+    const bool rightOnlyHole = self.HoleRight && !self.HoleLeft && !self.WallLeft;
+    if (!hazardDanger && !evadingOpponent &&
+        ((horizontalIntent < 0 && leftOnlyHole) ||
+         (horizontalIntent > 0 && rightOnlyHole)))
+    {
+        horizontalIntent = leftOnlyHole ? 1 : -1;
+        dx = horizontalIntent * std::max(config.HorizontalDeadzone + 1, config.CloseRange / 2);
+        if (memory)
+        {
+            memory->EscapeDirection = horizontalIntent;
+            memory->EscapeFrames = std::max(memory->EscapeFrames, config.WallEscapeFrames / 2);
+            memory->StillFrames = 0;
+        }
+        mode = "holeAvoid";
     }
 
     if (self.BattleStars > other.BattleStars &&

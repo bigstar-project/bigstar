@@ -19,6 +19,11 @@ param(
     [switch]$AllowJit,
     [switch]$NoJit,
     [switch]$DualWindow,
+    [switch]$ForcePlayerPowerups,
+    [int]$ForcePlayerPowerupsStartFrame = 0,
+    [int]$ForcePlayerPowerupsEndFrame = 0,
+    [int]$ForcePlayerPowerup0 = 0,
+    [int]$ForcePlayerPowerup1 = 0,
     [switch]$DryRun
 )
 
@@ -80,6 +85,13 @@ if ($packetCaptureEnabled) { $manualArgs.PacketCapture = $true }
 if ($GenerateMvlConfiguredRoms) { $manualArgs.GenerateMvlConfiguredRoms = $true }
 if ($MvlMatchSeed -ne "") { $manualArgs.MvlMatchSeed = $MvlMatchSeed }
 if ($AllowJit -or -not $NoJit) { $manualArgs.AllowJit = $true }
+if ($ForcePlayerPowerups) {
+    $manualArgs.ForcePlayerPowerups = $true
+    $manualArgs.ForcePlayerPowerupsStartFrame = $ForcePlayerPowerupsStartFrame
+    $manualArgs.ForcePlayerPowerupsEndFrame = $ForcePlayerPowerupsEndFrame
+    $manualArgs.ForcePlayerPowerup0 = $ForcePlayerPowerup0
+    $manualArgs.ForcePlayerPowerup1 = $ForcePlayerPowerup1
+}
 if (-not $singleWindow) {
     if ($HumanSide -eq "client") { $manualArgs.NeutralizeHostInput = $true }
     if ($HumanSide -eq "host") { $manualArgs.NeutralizeClientInput = $true }

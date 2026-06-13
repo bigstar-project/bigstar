@@ -16,7 +16,12 @@ param(
     [int]$TraceInterval = 120,
     [switch]$DisableImitationHazardGuard,
     [switch]$SkipGameStateComparison,
-    [switch]$AllowJit
+    [switch]$AllowJit,
+    [switch]$ForcePlayerPowerups,
+    [int]$ForcePlayerPowerupsStartFrame = 0,
+    [int]$ForcePlayerPowerupsEndFrame = 0,
+    [int]$ForcePlayerPowerup0 = 0,
+    [int]$ForcePlayerPowerup1 = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -75,6 +80,15 @@ foreach ($seed in $Seeds) {
         }
         if ($AllowJit) {
             $args += "-AllowJit"
+        }
+        if ($ForcePlayerPowerups) {
+            $args += @(
+                "-ForcePlayerPowerups",
+                "-ForcePlayerPowerupsStartFrame", "$ForcePlayerPowerupsStartFrame",
+                "-ForcePlayerPowerupsEndFrame", "$ForcePlayerPowerupsEndFrame",
+                "-ForcePlayerPowerup0", "$ForcePlayerPowerup0",
+                "-ForcePlayerPowerup1", "$ForcePlayerPowerup1"
+            )
         }
 
         & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot "scripts\run-nsmb-mvl-ai-closed-loop-eval.ps1") @args

@@ -70,6 +70,11 @@ param(
     [switch]$TracePlayerLifeChanges,
     [switch]$TracePlayerDefeated,
     [switch]$PerfBreakdown,
+    [switch]$ForcePlayerPowerups,
+    [int]$ForcePlayerPowerupsStartFrame = 0,
+    [int]$ForcePlayerPowerupsEndFrame = 0,
+    [int]$ForcePlayerPowerup0 = 0,
+    [int]$ForcePlayerPowerup1 = 0,
     [int]$PacketBridgeStartFrame = 840,
     [int]$MvlStage = -1,
     [string]$MvlSceneSettings = "",
@@ -286,6 +291,15 @@ if ($TracePlayerLifeChanges) {
 }
 if ($TracePlayerDefeated) {
     $common += "-TracePlayerDefeated"
+}
+if ($ForcePlayerPowerups) {
+    $common += @(
+        "-ForcePlayerPowerups",
+        "-ForcePlayerPowerupsStartFrame", "$ForcePlayerPowerupsStartFrame",
+        "-ForcePlayerPowerupsEndFrame", "$ForcePlayerPowerupsEndFrame",
+        "-ForcePlayerPowerup0", "$ForcePlayerPowerup0",
+        "-ForcePlayerPowerup1", "$ForcePlayerPowerup1"
+    )
 }
 if ($PlanDActorSnapshot) {
     $common += @(

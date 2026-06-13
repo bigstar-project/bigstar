@@ -23,6 +23,11 @@ param(
     [int]$ScreenshotInterval = 0,
     [switch]$SoftwareRenderer,
     [switch]$AllowJit,
+    [switch]$ForcePlayerPowerups,
+    [int]$ForcePlayerPowerupsStartFrame = 0,
+    [int]$ForcePlayerPowerupsEndFrame = 0,
+    [int]$ForcePlayerPowerup0 = 0,
+    [int]$ForcePlayerPowerup1 = 0,
     [int]$RuleAIAuditSampleLimit = 16,
     [int]$RuleAIAuditStuckRecords = 6
 )
@@ -67,7 +72,12 @@ $envNames = @(
     "MELONDS_NSML_IMITATION_AI_DISABLE_HAZARD_GUARD",
     "MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_HORIZONTAL_RANGE",
     "MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_VERTICAL_RANGE",
-    "MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_CLOSE_RANGE"
+    "MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_CLOSE_RANGE",
+    "MELONDS_NSML_FORCE_PLAYER_POWERUPS",
+    "MELONDS_NSML_FORCE_PLAYER_POWERUPS_START_FRAME",
+    "MELONDS_NSML_FORCE_PLAYER_POWERUPS_END_FRAME",
+    "MELONDS_NSML_FORCE_PLAYER_POWERUP0",
+    "MELONDS_NSML_FORCE_PLAYER_POWERUP1"
 )
 foreach ($name in $envNames) {
     $savedEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
@@ -123,6 +133,13 @@ try {
             $env:MELONDS_NSML_IMITATION_AI_TRACE_INTERVAL = "$TraceInterval"
         }
     }
+    if ($ForcePlayerPowerups) {
+        $env:MELONDS_NSML_FORCE_PLAYER_POWERUPS = "1"
+        $env:MELONDS_NSML_FORCE_PLAYER_POWERUPS_START_FRAME = "$ForcePlayerPowerupsStartFrame"
+        $env:MELONDS_NSML_FORCE_PLAYER_POWERUPS_END_FRAME = "$ForcePlayerPowerupsEndFrame"
+        $env:MELONDS_NSML_FORCE_PLAYER_POWERUP0 = "$ForcePlayerPowerup0"
+        $env:MELONDS_NSML_FORCE_PLAYER_POWERUP1 = "$ForcePlayerPowerup1"
+    }
 
     $smokeArgs = @(
         "-Frames", "$Frames",
@@ -142,6 +159,15 @@ try {
     if ($AllowJit) { $smokeArgs += "-AllowJit" }
     if ($SoftwareRenderer) { $smokeArgs += "-SoftwareRenderer" }
     if ($SkipGameStateComparison) { $smokeArgs += "-SkipGameStateComparison" }
+    if ($ForcePlayerPowerups) {
+        $smokeArgs += @(
+            "-ForcePlayerPowerups",
+            "-ForcePlayerPowerupsStartFrame", "$ForcePlayerPowerupsStartFrame",
+            "-ForcePlayerPowerupsEndFrame", "$ForcePlayerPowerupsEndFrame",
+            "-ForcePlayerPowerup0", "$ForcePlayerPowerup0",
+            "-ForcePlayerPowerup1", "$ForcePlayerPowerup1"
+        )
+    }
 
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot "scripts\run-nsmb-mvl-split-local-input-smoke.ps1") @smokeArgs
 
