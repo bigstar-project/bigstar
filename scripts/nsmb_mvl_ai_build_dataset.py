@@ -247,6 +247,8 @@ TILE_PROBE_BLOCK_DERIVED_NAMES = [
 
 TILE_GRID_WIDTH = 33
 TILE_GRID_HEIGHT = 17
+TILE_GRID_MIN_REL_X = -16
+TILE_GRID_MIN_REL_Y = -10
 TILE_GRID_TILE_NAMES = [
     "solid",
     "coin",
@@ -986,18 +988,25 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
                 row[f"{sample_prefix}_block_{name}"] = num(block.get(name))
             for name in TILE_PROBE_BLOCK_DERIVED_NAMES:
                 row[f"{sample_prefix}_block_{name}"] = num(derived_block.get(name))
-        tile_grid = by_grid_cell(((tile_probe.get("grid") or {}).get("cells")) or [])
+        tile_grid_info = tile_probe.get("grid") or {}
+        tile_grid = by_grid_cell((tile_grid_info.get("cells")) or [])
+        sparse_grid = str(tile_grid_info.get("encoding") or "") == "sparse_non_empty"
+        omitted_grid_found = num(tile_grid_info.get("omittedCellFound"), 1 if sparse_grid else 0)
+        omitted_grid_status = num(tile_grid_info.get("omittedCellStatus"), 0)
         for grid_row in range(TILE_GRID_HEIGHT):
             for grid_col in range(TILE_GRID_WIDTH):
-                cell = tile_grid.get((grid_row, grid_col)) or {}
+                cell = tile_grid.get((grid_row, grid_col))
+                omitted_cell = cell is None and sparse_grid
+                if cell is None:
+                    cell = {}
                 tile = cell.get("tile") or {}
                 block = cell.get("block") or {}
                 derived_block = derived_tile_block_features(block)
                 cell_prefix = f"{prefix}_tile_probe_grid_r{grid_row}_c{grid_col}"
-                row[f"{cell_prefix}_found"] = num(cell.get("found"))
-                row[f"{cell_prefix}_status"] = num(cell.get("status"))
-                row[f"{cell_prefix}_rel_tile_x"] = num(cell.get("relTileX"))
-                row[f"{cell_prefix}_rel_tile_y"] = num(cell.get("relTileY"))
+                row[f"{cell_prefix}_found"] = omitted_grid_found if omitted_cell else num(cell.get("found"))
+                row[f"{cell_prefix}_status"] = omitted_grid_status if omitted_cell else num(cell.get("status"))
+                row[f"{cell_prefix}_rel_tile_x"] = num(cell.get("relTileX"), TILE_GRID_MIN_REL_X + grid_col)
+                row[f"{cell_prefix}_rel_tile_y"] = num(cell.get("relTileY"), TILE_GRID_MIN_REL_Y + grid_row)
                 row[f"{cell_prefix}_tile_x"] = num(cell.get("tileX"))
                 row[f"{cell_prefix}_tile_y"] = num(cell.get("tileY"))
                 row[f"{cell_prefix}_tile_id"] = num(cell.get("tileId"))

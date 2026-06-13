@@ -16217,6 +16217,28 @@ bool AITileProbeSampleFeature(const AITileProbeSample& sample, const std::string
     return true;
 }
 
+bool AITileGridCellShouldLog(const AITileGridSample& cell)
+{
+    const AITileProbeSample& tile = cell.Tile;
+    if (!tile.Found)
+        return true;
+    const melonDS::u32 t = tile.Behavior;
+    const bool meaningful =
+        AITileBehaviorSolidish(t) ||
+        (t & (0x00020000u | // coin
+              0x00040000u | // question block
+              0x00080000u | // breakable block
+              0x00100000u | // brick block
+              0x00200000u | // slope
+              0x01000000u | // entrance
+              0x02000000u | // water
+              0x04000000u | // climbable
+              0x08000000u | // partial solid
+              0x10000000u | // harmful
+              0x20000000u)) != 0; // invisible block
+    return meaningful;
+}
+
 void WriteAIPlayerTileProbeJson(std::ostream& out,
                                 const AIPlayerTileProbeSample& probe,
                                 bool contactGround,
@@ -16271,15 +16293,28 @@ void WriteAIPlayerTileProbeJson(std::ostream& out,
             out << ",";
         WriteAITileProbePointJson(out, probe.Samples[i]);
     }
-    out << "],\"grid\":{\"width\":" << kAITileGridWidth
+    int loggedGridCells = 0;
+    for (int i = 0; i < kAITileGridCount; i++)
+        if (AITileGridCellShouldLog(probe.Grid[i]))
+            loggedGridCells++;
+    out << "],\"grid\":{\"encoding\":\"sparse_non_empty\""
+        << ",\"width\":" << kAITileGridWidth
         << ",\"height\":" << kAITileGridHeight
         << ",\"minRelTileX\":" << kAITileGridMinRelX
         << ",\"minRelTileY\":" << kAITileGridMinRelY
+        << ",\"totalCells\":" << kAITileGridCount
+        << ",\"loggedCells\":" << loggedGridCells
+        << ",\"omittedCellFound\":1"
+        << ",\"omittedCellStatus\":0"
         << ",\"cells\":[";
+    bool firstGridCell = true;
     for (int i = 0; i < kAITileGridCount; i++)
     {
-        if (i != 0)
+        if (!AITileGridCellShouldLog(probe.Grid[i]))
+            continue;
+        if (!firstGridCell)
             out << ",";
+        firstGridCell = false;
         WriteAITileGridCellJson(out, probe.Grid[i]);
     }
     out << "]}}";
