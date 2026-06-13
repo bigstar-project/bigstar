@@ -194,9 +194,11 @@ def visual_state_text(player: dict[str, Any]) -> str:
     ]
     if num(visual_state.get("hasReserveItemCandidate")):
         parts.append("reserve")
-    visual_kind = num(visual_state.get("visualPowerupKindCandidate"))
+    visual_kind = corrected_visual_powerup_kind(player)
     if visual_kind:
         parts.append(f"visualPwr={visual_kind}")
+    if visual_kind == 3:
+        parts.append("miniVisual")
     if num(visual_state.get("canShootFireVisualCandidate")):
         parts.append("fireVisual")
     if num(visual_state.get("invincibleKnown")):
@@ -212,6 +214,29 @@ def visual_state_text(player: dict[str, Any]) -> str:
     if shell_state:
         parts.append(f"shell={shell_state}")
     return " ".join(str(part) for part in parts)
+
+
+def corrected_visual_powerup_kind(player: dict[str, Any]) -> int:
+    visual_state = player.get("visualState") or {}
+    powerup = visual_state.get("powerup") or {}
+    raw_powerup = num(powerup.get("raw"), num(player.get("powerup")))
+    raw_inventory = num(player.get("inventoryPowerup"))
+    actor_state = num(visual_state.get("actorPowerupState"))
+    actor_form = num(visual_state.get("actorPowerupFormState"))
+    shell_state = num(visual_state.get("shellState"))
+    if raw_powerup == 2 or actor_state == 2 or actor_form == 2:
+        return 2
+    if raw_powerup == 4 or shell_state:
+        return 4
+    if actor_state == 4 or actor_form == 4:
+        return 3
+    if raw_powerup == 5:
+        return 5
+    if raw_powerup:
+        return raw_powerup
+    if raw_inventory:
+        return raw_inventory
+    return num(visual_state.get("visualPowerupKindCandidate"))
 
 
 def pos(entity: dict[str, Any]) -> dict[str, int]:

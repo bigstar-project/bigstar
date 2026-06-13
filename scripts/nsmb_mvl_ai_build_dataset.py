@@ -485,6 +485,32 @@ def screen(entity: dict[str, Any], camera: str) -> dict[str, int]:
     }
 
 
+def visual_powerup_kind_candidate(player: dict[str, Any]) -> int:
+    visual = player.get("visualState") or {}
+    powerup = num(player.get("powerup"))
+    inventory_powerup = num(player.get("inventoryPowerup"))
+    visual_powerup = visual.get("powerup") or {}
+    powerup = num(visual_powerup.get("raw"), powerup)
+    actor_powerup_state = num(visual.get("actorPowerupState"))
+    actor_powerup_form_state = num(visual.get("actorPowerupFormState"))
+    shell_state = num(visual.get("shellState"))
+    if powerup == ITEM_KIND_FIRE_FLOWER or actor_powerup_state == ITEM_KIND_FIRE_FLOWER or actor_powerup_form_state == ITEM_KIND_FIRE_FLOWER:
+        return ITEM_KIND_FIRE_FLOWER
+    if powerup == ITEM_KIND_SHELL or shell_state != 0:
+        return ITEM_KIND_SHELL
+    # In observed stage 0 logs, Mini Mario is represented by actor powerup state/form state 4,
+    # while global powerup/raw inventory can still report super/reserve values.
+    if actor_powerup_state == ITEM_KIND_SHELL or actor_powerup_form_state == ITEM_KIND_SHELL:
+        return ITEM_KIND_MINI_MUSHROOM
+    if powerup == ITEM_KIND_MEGA_MUSHROOM:
+        return ITEM_KIND_MEGA_MUSHROOM
+    if powerup != 0:
+        return powerup
+    if inventory_powerup != 0:
+        return inventory_powerup
+    return num(visual.get("visualPowerupKindCandidate"))
+
+
 def item_powerup_kind_candidate(settings: int) -> int:
     if settings in ITEM_SETTINGS_SUPER_MUSHROOM_CANDIDATES:
         return ITEM_KIND_SUPER_MUSHROOM
@@ -801,6 +827,8 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
     self_visual_powerup = self_visual.get("powerup") or {}
     opponent_visual = opponent.get("visualState") or {}
     opponent_visual_powerup = opponent_visual.get("powerup") or {}
+    self_visual_powerup_kind = visual_powerup_kind_candidate(self_player)
+    opponent_visual_powerup_kind = visual_powerup_kind_candidate(opponent)
     visual_summary = record.get("visualSummary") or {}
     objects = record.get("objects") or []
     category_counts: dict[str, int] = {}
@@ -860,10 +888,12 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "self_damage_cooldown": num(self_player.get("damageCooldown")),
         "self_has_reserve_item_candidate": num(self_visual.get("hasReserveItemCandidate")),
         "self_can_shoot_fire_candidate": num(self_visual_powerup.get("canShootFireCandidate")),
-        "self_visual_powerup_kind_candidate": num(self_visual.get("visualPowerupKindCandidate")),
+        "self_visual_powerup_kind_candidate": self_visual_powerup_kind,
         "self_visual_powerup_source_mask": num(self_visual.get("visualPowerupSourceMask")),
         "self_is_fire_visual_candidate": num(self_visual.get("isFireVisualCandidate")),
+        "self_is_mini_visual_candidate": int(self_visual_powerup_kind == ITEM_KIND_MINI_MUSHROOM),
         "self_can_shoot_fire_visual_candidate": num(self_visual.get("canShootFireVisualCandidate")),
+        "self_is_mini_candidate": int(self_visual_powerup_kind == ITEM_KIND_MINI_MUSHROOM),
         "self_is_shell_candidate": num(self_visual_powerup.get("isShellCandidate")),
         "self_is_mega_candidate": num(self_visual_powerup.get("isMegaCandidate")),
         "self_actor_powerup_state": num(self_visual.get("actorPowerupState")),
@@ -916,10 +946,12 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "opponent_damage_cooldown": num(opponent.get("damageCooldown")),
         "opponent_has_reserve_item_candidate": num(opponent_visual.get("hasReserveItemCandidate")),
         "opponent_can_shoot_fire_candidate": num(opponent_visual_powerup.get("canShootFireCandidate")),
-        "opponent_visual_powerup_kind_candidate": num(opponent_visual.get("visualPowerupKindCandidate")),
+        "opponent_visual_powerup_kind_candidate": opponent_visual_powerup_kind,
         "opponent_visual_powerup_source_mask": num(opponent_visual.get("visualPowerupSourceMask")),
         "opponent_is_fire_visual_candidate": num(opponent_visual.get("isFireVisualCandidate")),
+        "opponent_is_mini_visual_candidate": int(opponent_visual_powerup_kind == ITEM_KIND_MINI_MUSHROOM),
         "opponent_can_shoot_fire_visual_candidate": num(opponent_visual.get("canShootFireVisualCandidate")),
+        "opponent_is_mini_candidate": int(opponent_visual_powerup_kind == ITEM_KIND_MINI_MUSHROOM),
         "opponent_is_shell_candidate": num(opponent_visual_powerup.get("isShellCandidate")),
         "opponent_is_mega_candidate": num(opponent_visual_powerup.get("isMegaCandidate")),
         "opponent_actor_powerup_state": num(opponent_visual.get("actorPowerupState")),

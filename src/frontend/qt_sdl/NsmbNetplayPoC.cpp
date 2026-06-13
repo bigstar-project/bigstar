@@ -15562,6 +15562,7 @@ void WriteAIPowerupCandidateJson(std::ostream& out, const char* key, melonDS::u3
         << ",\"mappingVerified\":0"
         << ",\"isPoweredUpCandidate\":" << (value != 0 ? 1 : 0)
         << ",\"canShootFireCandidate\":" << (value == 2 ? 1 : 0)
+        << ",\"isMiniCandidate\":" << (value == 3 ? 1 : 0)
         << ",\"isShellCandidate\":" << (value == 4 || shellState != 0 ? 1 : 0)
         << ",\"isMegaCandidate\":" << (value == 5 ? 1 : 0)
         << "}";
@@ -15578,6 +15579,8 @@ melonDS::u32 AIVisualPowerupKindCandidate(
         return 2;
     if (powerup == 4 || shellState != 0)
         return 4;
+    if (actorPowerupState == 4 || actorPowerupFormState == 4)
+        return 3;
     if (powerup == 5)
         return 5;
     if (powerup != 0)
@@ -16557,6 +16560,7 @@ void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& samp
         << ",\"visualPowerupKindCandidate\":" << visualPowerupKind
         << ",\"visualPowerupSourceMask\":" << visualPowerupSource
         << ",\"isFireVisualCandidate\":" << (visualPowerupKind == 2 ? 1 : 0)
+        << ",\"isMiniVisualCandidate\":" << (visualPowerupKind == 3 ? 1 : 0)
         << ",\"canShootFireVisualCandidate\":"
         << ((powerup == 2 || powerupState == 2 || powerupFormState == 2) ? 1 : 0)
         << ",\"actorPowerupState\":" << powerupState
@@ -16922,7 +16926,9 @@ bool RuntimePlayerFeature(
     else if (name == "visual_powerup_kind_candidate") out = visualPowerup;
     else if (name == "visual_powerup_source_mask") out = visualSource;
     else if (name == "is_fire_visual_candidate") out = visualPowerup == 2 ? 1 : 0;
+    else if (name == "is_mini_visual_candidate") out = visualPowerup == 3 ? 1 : 0;
     else if (name == "can_shoot_fire_visual_candidate") out = visualPowerup == 2 ? 1 : 0;
+    else if (name == "is_mini_candidate") out = visualPowerup == 3 ? 1 : 0;
     else if (name == "is_shell_candidate") out = powerup == 4 || shellState != 0 ? 1 : 0;
     else if (name == "is_mega_candidate") out = powerup == 5 ? 1 : 0;
     else if (name == "actor_powerup_state") out = powerupState;
