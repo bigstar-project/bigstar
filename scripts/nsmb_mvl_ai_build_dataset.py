@@ -48,7 +48,7 @@ NEAREST_CATEGORIES = [
     "world_item",
     "neutral_item",
     "coin_item",
-    "item",
+    "dropped_star_item",
     "coin",
     "moving_hazard",
     "hazard",
@@ -122,6 +122,12 @@ ITEM_SETTINGS_SUSPECTED_MINI_CANDIDATES = {
     # Observed as an 8-coin reward candidate in human-stage0-item-box-001.
     # Treat as suspected until visually confirmed; training can explicitly avoid it.
     0x0001108B,
+}
+DROPPED_STAR_ACTOR_SETTINGS_NORMALIZED = {
+    0x00001002,
+    0x00001012,
+    0x00001102,
+    0x00001112,
 }
 COIN_REWARD_ITEM_WINDOW_FRAMES = 480
 
@@ -294,9 +300,18 @@ def object_category(obj: dict[str, Any]) -> str:
     settings = num(obj.get("settings"))
     if object_id == 0x001F and settings == 0x00090002:
         return "coin_item"
+    if object_id == 0x0022 and (settings & 0x7FFFFFFF) in DROPPED_STAR_ACTOR_SETTINGS_NORMALIZED:
+        return "dropped_star_item"
     if object_id == 0x010C and settings == 0x00001120:
         return "big_star_marker"
     return category
+
+
+def is_dropped_star_item_candidate(object_id: int, settings: int, category: str) -> int:
+    return int(
+        category == "dropped_star_item"
+        or (object_id == 0x0022 and (settings & 0x7FFFFFFF) in DROPPED_STAR_ACTOR_SETTINGS_NORMALIZED)
+    )
 
 
 def sane_bottom_tile(tile_type: int) -> bool:
@@ -573,13 +588,15 @@ def nearest_item_details(
 
     dist2, obj, obj_pos, obj_vel, obj_screen = best
     settings = num(obj.get("settings"))
+    object_id = num(obj.get("objectId"))
+    category = object_category(obj)
     powerup_kind = item_powerup_kind_candidate(settings)
     return {
         "found": 1,
         "dx": delta_x(obj_pos["x"], self_pos["x"]),
         "dy": obj_pos["y"] - self_pos["y"],
         "dist": int(math.isqrt(dist2)),
-        "object_id": num(obj.get("objectId")),
+        "object_id": object_id,
         "settings": settings,
         "settings_low8": settings & 0xFF,
         "vtable": num(obj.get("vtable")),
@@ -591,7 +608,7 @@ def nearest_item_details(
         "powerup_kind_candidate": powerup_kind,
         "is_fire_candidate": int(settings in ITEM_SETTINGS_FIRE_CANDIDATES),
         "is_coin_item_candidate": int(settings in ITEM_SETTINGS_COIN_ITEM_CANDIDATES),
-        "is_dropped_star_candidate": 0,
+        "is_dropped_star_candidate": is_dropped_star_item_candidate(object_id, settings, category),
         "is_suspected_mini_candidate": int(settings in ITEM_SETTINGS_SUSPECTED_MINI_CANDIDATES),
         "avoid_candidate": item_avoid_candidate(settings),
     }
@@ -832,6 +849,10 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "self_prev_coins": num(record.get("_self_prev_coins"), -1),
         "self_coin_reward_recent": num(record.get("_self_coin_reward_recent")),
         "self_coin_reward_age": num(record.get("_self_coin_reward_age"), -1),
+        "nearest_item_found": nearest_item["found"],
+        "nearest_item_dx": nearest_item["dx"],
+        "nearest_item_dy": nearest_item["dy"],
+        "nearest_item_dist": nearest_item["dist"],
         "nearest_item_object_id": nearest_item["object_id"],
         "nearest_item_settings": nearest_item["settings"],
         "nearest_item_settings_low8": nearest_item["settings_low8"],

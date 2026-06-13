@@ -218,6 +218,15 @@ constexpr std::size_t kWorldEffectWordCount =
 constexpr melonDS::u32 kFireballsActiveCountAddr = 0x02129480;
 constexpr melonDS::u32 kFireballsHandlerAddr = 0x02129484;
 constexpr melonDS::u32 kProjectilesHandlerAddr = 0x0212A680;
+
+bool IsVsDroppedStarActorSettings(melonDS::u32 settings)
+{
+    const melonDS::u32 normalized = settings & 0x7FFFFFFFu;
+    return normalized == 0x00001002u ||
+        normalized == 0x00001012u ||
+        normalized == 0x00001102u ||
+        normalized == 0x00001112u;
+}
 constexpr int kAISpecialHandlerWordCount = 4;
 constexpr int kAIFireballSlotCount = 16;
 constexpr melonDS::u32 kAIFireballSlotBaseOffset = 0x04;
@@ -15753,6 +15762,8 @@ const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings)
         return "player";
     if (objectID == kVsBattleStarActorObjectID && settings == kVsBattleStarActorSettings)
         return "big_star_actor";
+    if (objectID == kVsBattleStarActorObjectID && IsVsDroppedStarActorSettings(settings))
+        return "dropped_star_item";
     if (objectID == kVsBattleStarRelatedObjectID)
         return "big_star_related";
     if (objectID == kVsBattleStarCandidateObjectID)
@@ -16663,11 +16674,12 @@ void WriteAIVisualSummaryJson(
     const GameStateObjectScanCache& objectScanCache,
     const GameStateSample& sample)
 {
-    constexpr std::array<const char*, 11> categories {{
+    constexpr std::array<const char*, 12> categories {{
         "big_star_actor",
         "world_item",
         "neutral_item",
         "coin_item",
+        "dropped_star_item",
         "item",
         "coin",
         "moving_hazard",
@@ -17375,7 +17387,8 @@ bool RuntimeItemFeature(
     else if (field == "powerup_kind_candidate") out = RuntimeItemPowerupKindCandidate(item->Actor.Settings);
     else if (field == "is_fire_candidate") out = item->Actor.Settings == 0x00090000u || item->Actor.Settings == 0x00011089u ? 1 : 0;
     else if (field == "is_coin_item_candidate") out = item->Actor.Settings == 0x00090002u ? 1 : 0;
-    else if (field == "is_dropped_star_candidate") out = 0;
+    else if (field == "is_dropped_star_candidate") out =
+        item->ObjectID == kVsBattleStarActorObjectID && IsVsDroppedStarActorSettings(item->Actor.Settings) ? 1 : 0;
     else if (field == "is_suspected_mini_candidate") out = item->Actor.Settings == 0x0001108Bu ? 1 : 0;
     else if (field == "avoid_candidate") out = item->Actor.Settings == 0x0001108Bu ? 1 : 0;
     else return false;

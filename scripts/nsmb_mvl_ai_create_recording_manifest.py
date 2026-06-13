@@ -33,6 +33,13 @@ INTERESTING_CATEGORIES = [
     "enemy_fireball",
 ]
 
+DROPPED_STAR_ACTOR_SETTINGS_NORMALIZED = {
+    0x00001002,
+    0x00001012,
+    0x00001102,
+    0x00001112,
+}
+
 
 def num(value: Any, default: int = 0) -> int:
     if isinstance(value, bool):
@@ -50,6 +57,8 @@ def object_category(obj: dict[str, Any]) -> str:
     settings = num(obj.get("settings"))
     if object_id == 0x001F and settings == 0x00090002:
         return "coin_item"
+    if object_id == 0x0022 and (settings & 0x7FFFFFFF) in DROPPED_STAR_ACTOR_SETTINGS_NORMALIZED:
+        return "dropped_star_item"
     if object_id == 0x010C and settings == 0x00001120:
         return "big_star_marker"
     return category

@@ -42,6 +42,7 @@ CATEGORY_STYLE = {
     "world_item": ("#10b981", "I"),
     "neutral_item": ("#34d399", "i"),
     "coin_item": ("#eab308", "C"),
+    "dropped_star_item": ("#facc15", "S"),
     "item": ("#22c55e", "i"),
     "coin": ("#eab308", "C"),
     "moving_hazard": ("#ef4444", "H"),
@@ -52,6 +53,13 @@ CATEGORY_STYLE = {
     "warp_entrance": ("#7c3aed", "W"),
     "item_spawn_effect": ("#fb7185", "E"),
     "object": ("#94a3b8", "O"),
+}
+
+DROPPED_STAR_ACTOR_SETTINGS_NORMALIZED = {
+    0x00001002,
+    0x00001012,
+    0x00001102,
+    0x00001112,
 }
 
 
@@ -74,6 +82,8 @@ def object_category(obj: dict[str, Any]) -> str:
     settings = parse_int(obj.get("settings"))
     if object_id == 0x001F and settings == 0x00090002:
         return "coin_item"
+    if object_id == 0x0022 and (settings & 0x7FFFFFFF) in DROPPED_STAR_ACTOR_SETTINGS_NORMALIZED:
+        return "dropped_star_item"
     if object_id == 0x010C and settings == 0x00001120:
         return "big_star_marker"
     return category

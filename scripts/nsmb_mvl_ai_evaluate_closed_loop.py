@@ -15,6 +15,12 @@ BIG_STAR_CATEGORIES = ("big_star_actor",)
 ITEM_CATEGORIES = ("world_item", "neutral_item", "coin_item", "dropped_star_item", "item")
 PROJECTILE_CATEGORIES = ("projectile", "player_fireball", "enemy_fireball")
 HAZARD_CATEGORIES = ("moving_hazard", "hazard", "enemy_goomba", "enemy_koopa")
+DROPPED_STAR_ACTOR_SETTINGS_NORMALIZED = {
+    0x00001002,
+    0x00001012,
+    0x00001102,
+    0x00001112,
+}
 
 
 def num(value: Any, default: int = 0) -> int:
@@ -35,6 +41,8 @@ def object_category(obj: dict[str, Any]) -> str:
     settings = num(obj.get("settings"))
     if object_id == 0x001F and settings == 0x00090002:
         return "coin_item"
+    if object_id == 0x0022 and (settings & 0x7FFFFFFF) in DROPPED_STAR_ACTOR_SETTINGS_NORMALIZED:
+        return "dropped_star_item"
     if object_id == 0x010C and settings == 0x00001120:
         return "big_star_marker"
     return category

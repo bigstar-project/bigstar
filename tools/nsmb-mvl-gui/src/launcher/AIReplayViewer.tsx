@@ -462,6 +462,9 @@ const tileLabels = new Set([
   'water',
   'partial',
 ]);
+const droppedStarActorSettingsNormalized = new Set([
+  0x00001002, 0x00001012, 0x00001102, 0x00001112,
+]);
 
 function fixedToPx(value: unknown) {
   return numeric(value) / 4096;
@@ -541,6 +544,12 @@ function objectCategory(object: ReplayObject) {
   const objectId = numeric(object.objectId);
   const settings = numeric(object.settings);
   if (objectId === 0x001f && settings === 0x00090002) return 'coin_item';
+  if (
+    objectId === 0x0022 &&
+    droppedStarActorSettingsNormalized.has(settings & 0x7fffffff)
+  ) {
+    return 'dropped_star_item';
+  }
   if (objectId === 0x010c && settings === 0x00001120) return 'big_star_marker';
   return object.category ?? 'object';
 }
