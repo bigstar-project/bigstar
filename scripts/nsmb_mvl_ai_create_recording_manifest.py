@@ -15,8 +15,10 @@ INTERESTING_CATEGORIES = [
     "big_star_actor",
     "big_star_related",
     "big_star_candidate",
+    "big_star_marker",
     "world_item",
     "neutral_item",
+    "coin_item",
     "dropped_star_item",
     "item",
     "coin",
@@ -40,6 +42,17 @@ def num(value: Any, default: int = 0) -> int:
     if isinstance(value, str):
         return int(value, 0)
     return default
+
+
+def object_category(obj: dict[str, Any]) -> str:
+    category = str(obj.get("category") or "")
+    object_id = num(obj.get("objectId"))
+    settings = num(obj.get("settings"))
+    if object_id == 0x001F and settings == 0x00090002:
+        return "coin_item"
+    if object_id == 0x010C and settings == 0x00001120:
+        return "big_star_marker"
+    return category
 
 
 def rel(path: Path | None, base: Path) -> str | None:
@@ -163,13 +176,14 @@ def summarize(playlog: Path, player: int, label_source: str, max_event_samples: 
             if held:
                 nonzero_label_rows += 1
 
-        categories = {str(obj.get("category")) for obj in record.get("objects") or []}
+        categories = {object_category(obj) for obj in record.get("objects") or []}
         for name in category_frames:
             if name in categories:
                 category_frames[name] += 1
-        if categories.intersection({"world_item", "neutral_item", "dropped_star_item", "item"}):
+        item_categories = {"world_item", "neutral_item", "coin_item", "dropped_star_item", "item"}
+        if categories.intersection(item_categories):
             event_counts["itemVisible"] += 1
-            add_event_sample("itemVisible", record, {"categories": sorted(categories.intersection({"world_item", "neutral_item", "dropped_star_item", "item"}))})
+            add_event_sample("itemVisible", record, {"categories": sorted(categories.intersection(item_categories))})
         if categories.intersection({"projectile", "player_fireball", "enemy_fireball"}):
             event_counts["projectileVisible"] += 1
             add_event_sample("projectileVisible", record, {"categories": sorted(categories.intersection({"projectile", "player_fireball", "enemy_fireball"}))})

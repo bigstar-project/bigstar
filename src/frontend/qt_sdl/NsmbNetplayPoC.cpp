@@ -15756,13 +15756,13 @@ const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings)
     if (objectID == kVsBattleStarRelatedObjectID)
         return "big_star_related";
     if (objectID == kVsBattleStarCandidateObjectID)
-        return "big_star_candidate";
+        return "big_star_marker";
     if (objectID == kVsWorldItemObjectID && settings == kVsWorldItemSettings)
         return "world_item";
     if (objectID == kVsWorldItemObjectID && settings == kVsNeutralWorldItemSettings)
         return "neutral_item";
     if (objectID == kVsWorldItemObjectID && settings == kVsDroppedStarItemSettings)
-        return "dropped_star_item";
+        return "coin_item";
     if (objectID == kVsWorldItemObjectID)
         return "item";
     if (objectID == kCoinObjectID)
@@ -15821,11 +15821,11 @@ melonDS::u32 AIObjectCategoryMask(const char* category)
     if (std::strcmp(category, "player") == 0)
         return 1u << 0;
     if (std::strcmp(category, "big_star_actor") == 0 ||
-        std::strcmp(category, "big_star_related") == 0 ||
-        std::strcmp(category, "big_star_candidate") == 0)
+        std::strcmp(category, "big_star_related") == 0)
         return 1u << 1;
     if (std::strcmp(category, "world_item") == 0 ||
         std::strcmp(category, "neutral_item") == 0 ||
+        std::strcmp(category, "coin_item") == 0 ||
         std::strcmp(category, "dropped_star_item") == 0 ||
         std::strcmp(category, "item") == 0 ||
         std::strcmp(category, "coin") == 0)
@@ -15841,6 +15841,7 @@ melonDS::u32 AIObjectCategoryMask(const char* category)
     if (std::strcmp(category, "item_spawn_effect") == 0)
         return 1u << 7;
     if (std::strcmp(category, "camera") == 0 ||
+        std::strcmp(category, "big_star_marker") == 0 ||
         std::strcmp(category, "stage_scene") == 0 ||
         std::strcmp(category, "stage_fx") == 0 ||
         std::strcmp(category, "stage_actor_manager") == 0 ||
@@ -16662,13 +16663,11 @@ void WriteAIVisualSummaryJson(
     const GameStateObjectScanCache& objectScanCache,
     const GameStateSample& sample)
 {
-    constexpr std::array<const char*, 13> categories {{
+    constexpr std::array<const char*, 11> categories {{
         "big_star_actor",
-        "big_star_related",
-        "big_star_candidate",
         "world_item",
         "neutral_item",
-        "dropped_star_item",
+        "coin_item",
         "item",
         "coin",
         "moving_hazard",
@@ -17300,6 +17299,7 @@ bool IsRuntimeItemCategory(const char* category)
 {
     return std::strcmp(category, "world_item") == 0 ||
         std::strcmp(category, "neutral_item") == 0 ||
+        std::strcmp(category, "coin_item") == 0 ||
         std::strcmp(category, "dropped_star_item") == 0 ||
         std::strcmp(category, "item") == 0;
 }
@@ -17374,7 +17374,8 @@ bool RuntimeItemFeature(
         IsInCameraRect(item->Actor.PosX, item->Actor.PosY, sample.StageCameraGlobalX1, sample.StageCameraGlobalY1, sample.StageCameraGlobalWidth1, sample.StageCameraGlobalHeight1) ? 1 : 0;
     else if (field == "powerup_kind_candidate") out = RuntimeItemPowerupKindCandidate(item->Actor.Settings);
     else if (field == "is_fire_candidate") out = item->Actor.Settings == 0x00090000u || item->Actor.Settings == 0x00011089u ? 1 : 0;
-    else if (field == "is_dropped_star_candidate") out = item->Actor.Settings == 0x00090002u ? 1 : 0;
+    else if (field == "is_coin_item_candidate") out = item->Actor.Settings == 0x00090002u ? 1 : 0;
+    else if (field == "is_dropped_star_candidate") out = 0;
     else if (field == "is_suspected_mini_candidate") out = item->Actor.Settings == 0x0001108Bu ? 1 : 0;
     else if (field == "avoid_candidate") out = item->Actor.Settings == 0x0001108Bu ? 1 : 0;
     else return false;

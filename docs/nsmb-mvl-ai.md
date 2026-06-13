@@ -20,7 +20,7 @@
 
 - 入力ラベル: player別 held/pressed keys、console別 held/pressed keys、touch。
 - プレイヤー: actor found、座標、前フレーム座標、速度、状態/アクション/物理/衝突/環境フラグ、死亡/遷移、powerup raw値、reserve item raw値、画面上の変身/ストック候補としての `visualState`、所持/表示スター、Battle Stars、コイン、スコア。
-- 目標物: Big Star actor、Big Star candidate、落下スター/アイテム、8コイン由来アイテム。
+- 目標物: 画面上の Big Star actor、コイン/アイテム、8コイン由来アイテム。`objectId=0x010C settings=0x00001120` は内部markerで、学習用の可視Big Starとしては使わない。
 - ワールド: stage、vs mode、local player、カメラ矩形/ターゲット/位置、総コイン数。
 - オブジェクト: active objectの object ID、settings、GUID/base、state、flags、lifecycle、skip flags、座標、速度。既知IDはカテゴリ名も付ける。
 - 学習補助: frame、instance、role、inGameplay、hash、object counts。
@@ -44,6 +44,7 @@
 - 完了: `scripts/nsmb_mvl_ai_render_playlog_svg.py` でJSONLの1フレームをplayer中心のSVGに描画できるようにした。表だけでなく、星、hazard、item、coin、敵、platform、unknown objectの相対配置を目視できる。
 - 完了: SVGレンダラで `players[].tileProbe.samples` を小さな四角として描画するようにした。タイルサンプルの位置、tile id、behavior、solidish/coin/block/harmful分類をSVG上で目視確認できる。
 - 完了: AI play logの `objects[]` に `offset` と `vtable` を追加した。object ID/settingsだけで意味が分からないactorも、vtableを手がかりに後から分類できる。
+- 完了: stage 0手動ログ `logs\nsmb-mvl-human-recording-stage0-20260613-191418` のframe 1590/2255を調査し、`objectId=0x01F settings=0x00090002` は箱から出てP1 coin `1 -> 2` へ増える取得コインだったため `coin_item` に分類するよう修正した。同ログのframe 2255に出る `objectId=0x010C settings=0x00001120` は本物の `big_star_actor` とは別の内部markerなので `big_star_marker` とし、GUI/SVGでは非表示、datasetの最近傍Big Star/targetは `big_star_actor` だけを見る。
 - 完了: `scripts/nsmb_mvl_ai_build_dataset.py` に `--label-source auto|applied|player|console` を追加した。ルールAIログは `appliedPlayerN`、人間プレイログはメモリ上の `playerN` / `consoleN` 入力を教師ラベルにできる。
 - 完了: `scripts/nsmb_mvl_ai_predict_imitation.py` で学習済み `.npz` とdataset CSVからオフライン推論し、予測held入力、button別確率、ラベルとの一致率をCSV出力できるようにした。
 - 完了: `scripts/nsmb_mvl_ai_export_runtime_model.py` と `src/frontend/qt_sdl/NsmbImitationAI.cpp` / `.h`、`tools/nsmb_mvl_imitation_cpp_predict.cpp` を追加した。現在の `.npz` 線形模倣モデルをC++ランタイム用JSONへexportし、C++側で `x=(features-mean)/scale`、`sigmoid(x @ weights + bias)`、threshold判定を実行できる。将来の自己対戦モデルでは、このruntime model形式をMLPなどへ拡張する。
@@ -171,6 +172,8 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 
 `visualSummary` には、人間が画面を見て判断する情報に近づけるための要約を保存する。現時点ではY込みの `visibleCamera0/1`、左右ラップ込みX判定の `visibleCamera0X` / `visibleCamera1X`、カテゴリ別count、player別最近傍 `big_star_actor` / `enemy_goomba` / `enemy_koopa` / `moving_hazard` などを持つ。player/object個別にも `relative` と `screen.camera*.inViewX/inViewY/inView` を保存する。
 
+可視object分類では、本物の星は `big_star_actor` だけを学習用ターゲットにする。`big_star_related` と `big_star_marker` は内部補助actorとして表示/最近傍特徴から外す。旧ログに `dropped_star_item` として残っている `objectId=0x01F settings=0x00090002` は、dataset/SVG/GUIでは `coin_item` へ正規化する。
+
 `specialObjects` には、通常のactor object list外で管理されるものを保存する。現時点では `fireballs.active`、`fireballs.activeSlots`、`fireballs.handler`、`fireballs.handlerPtr`、`fireballs.words[]`、`fireballs.slots[]`、`projectiles.handler`、`projectiles.words[]` を持つ。`fireballs.active` は `Fireballs::activeFireballs` のraw wordで、kind別countがpackedされるため、学習側ではactive slot件数の `activeSlots` / `slots.length` も併用する。handler addressはNSMB symbol table上の `Fireballs::fireballHandler` / `Projectiles::projectileHandler` に対応する。`fireballs.slots[]` は `FireballHandler::spawn/update` と `Fireball::create` の逆アセンブルに基づき、handler pointer + 4 を起点に16 slot、stride `0x8C`、active byte `+0x80`、source kind `+0x81`、state `+0x83`、facing `+0x85`、slot index `+0x86`、pos `+0x10`、prev pos `+0x20`、velocity `+0x30` として読んでいる。source kindは `0=player0`、`1=player1`、`2=piranha_plant`、`3=fire_bro` で、player fireballのownerは `+0x81` から確定できる。新規ログでは `sourceKind`、`kindName`、`ownerSource=slotKind`、`ownerVerified=1` を保存する。active slotでは `stateBytesOffset=0x80` / `stateBytes[]` と `debugWordsOffset=0x40` / `debugWords[]` も保存する。`statelessOwnerCandidate` / `statelessOwnerConfidence` はkind不明projectile向けの位置/速度fallbackで、通常のplayer/enemy fireballではslot kindを優先する。lifetime、当たり判定状態、state/facingの詳細意味は、Fire Mario stage 0実ログでraw値変化と画面表示を照合して検証する。
 
 現時点の既知カテゴリ:
@@ -178,9 +181,10 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `player`
 - `big_star_actor`
 - `big_star_related`
-- `big_star_candidate`
+- `big_star_marker`
 - `world_item`
 - `neutral_item`
+- `coin_item`
 - `dropped_star_item`
 - `item`
 - `coin`
@@ -220,7 +224,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - `python scripts\nsmb_mvl_ai_build_dataset.py <playlog.jsonl> <dataset.csv> --player 1 --require-player-found` で固定長特徴量へ変換する。デフォルトの `--label-source auto` は `appliedPlayerN` があればそれを使い、なければ `playerN` を使う。人間ログだけを明示する場合は `--label-source player` を指定する。
 - `python scripts\nsmb_mvl_ai_build_dataset.py <recording.json|recordings-index.json> <dataset.csv> --player 1 --label-source player --require-player-found` でも固定長特徴量へ変換できる。
 - datasetには `nearest_<category>_*` の単純最近傍に加えて、接近中/至近性で重み付けした複合危険対象 `runtime_hazard_*` も入る。Goomba/Koopa/シェルなどへの回避を学習させる場合は、`runtime_hazard_closing`、`runtime_hazard_very_close`、`runtime_hazard_dx/dy/vx/vy` を優先的に見る。
-- 8コイン成立直後の降下itemは、`self_prev_coins`、`self_coin_reward_recent`、`self_coin_reward_age`、`coin_reward_item_*` として明示列にする。最近傍item全般は `nearest_item_*` に入り、objectId/settings/settings_low8/vtable/velocity/screen座標/powerup候補/避ける候補を保持する。マメマリオ系と疑われるitemは `*_is_suspected_mini_candidate` と `*_avoid_candidate` で分け、raw settingsも同時に保存する。
+- 8コイン成立直後の降下itemは、`self_prev_coins`、`self_coin_reward_recent`、`self_coin_reward_age`、`coin_reward_item_*` として明示列にする。最近傍item全般は `nearest_item_*` に入り、objectId/settings/settings_low8/vtable/velocity/screen座標/powerup候補/避ける候補を保持する。箱から出る取得コイン系itemは `*_is_coin_item_candidate`、マメマリオ系と疑われるitemは `*_is_suspected_mini_candidate` と `*_avoid_candidate` で分け、raw settingsも同時に保存する。旧 `*_is_dropped_star_candidate` は互換列として残すが、stage 0学習では使わない。
 - `python scripts\nsmb_mvl_ai_train_imitation.py <dataset.csv> <model.npz>` でキー入力の多ラベル分類モデルを学習する。複数記録を使う場合は `--split-by-recording` で記録単位validationにする。
 - `python scripts\nsmb_mvl_ai_predict_imitation.py <model.npz> <dataset.csv> <predictions.csv>` で学習済みモデルのオフライン推論結果を確認する。
 - `python scripts\nsmb_mvl_ai_export_runtime_model.py <model.npz> <runtime-model.json>` で、C++ランタイム用の線形ポリシーモデルへ変換する。
@@ -449,6 +453,7 @@ JSONL schema `nsmb_mvl_ai_play_log_v1` は、各行に `inputs`、`players`、`t
 - 同ログのclient frame 1500をスクショと可視化で照合し、画面上の床・土管・ブロック・hazardが `tileProbe.grid` / object表示に対応することを確認した。GUI/SVG表示側は `relTileX/relTileY` でgridを描き、camera/stage_controller/stage_layoutなどの内部objectを非表示にし、world Yを表示向けに反転する。
 - `logs/codex-tile-dynamic-behavior-fix-1600-20260613` のclient frame 870で、GUI上のスターが2個に見える原因を調査した。実スターは `objectId=0x022 category=big_star_actor` だけで、もう一方は `objectId=0x021 category=big_star_related`、全frameで座標 `(0,0,0)` の補助actorだった。GUI/SVGでは `big_star_related` を非表示にし、スター表示は `big_star_actor` 1件だけにした。
 - stage 0の敵カテゴリを確認し、旧ログでは `objectId=0x053 settings=0x00000000` が `moving_hazard` として出ていたが、これは `kGoombaObjectID` と同じIDで、画面上のクリボー相当だった。AIログ分類では `0x053/0x054/0x055` を `enemy_goomba`、`0x05E/0x05F` を `enemy_koopa` として出し、GUIでは `G` / `K` / `H` を区別表示する。内部同期名の `movingHazard` は既存のworld-state補正名として残る。
+- `logs\nsmb-mvl-human-recording-stage0-20260613-191418\client\ai-playlog.jsonl` のframe 1590で、旧 `dropped_star_item` (`objectId=0x01F settings=0x00090002`) がP1付近の箱から出たitemで、frame 1615にP1 coinが `1 -> 2` へ増えることを確認した。AIログ生成は `coin_item` へ変更し、旧ログでもdataset/SVG/GUIで `coin_item` へ正規化する。frame 2255の `big_star_candidate` (`objectId=0x010C settings=0x00001120`) は本物の `big_star_actor` と別に存在する内部markerなので `big_star_marker` とし、GUI/SVGでは非表示、dataset/closed-loop評価のBig Star距離は `big_star_actor` だけを見る。検証では `logs\codex-category-fix-check-20260613.csv` のframe 1590で `count_coin_item=1` / `count_dropped_star_item=0`、frame 2255で `count_big_star_marker=1` / `count_big_star_candidate=0` を確認した。
 - 同ログから `python scripts\nsmb_mvl_ai_inspect_playlog.py ... --player 1 --limit 10` pass、`python scripts\nsmb_mvl_ai_build_dataset.py ... --player 1 --label-source auto --require-player-found` pass。15行CSV生成。`python scripts\nsmb_mvl_ai_train_imitation.py ... --epochs 200 --lr 0.05` pass、`python scripts\nsmb_mvl_ai_predict_imitation.py ... --limit 10` pass、`button_acc=0.975`、`exact=0.900`。`python scripts\nsmb_mvl_ai_render_playlog_svg.py ... --frame 1080` pass。
 - `python -m py_compile scripts\nsmb_mvl_ai_build_dataset.py scripts\nsmb_mvl_ai_train_imitation.py scripts\nsmb_mvl_ai_create_recording_manifest.py scripts\nsmb_mvl_ai_make_recordings_index.py scripts\nsmb_mvl_ai_verify_replay.py scripts\nsmb_mvl_ai_export_viewer_data.py` pass。
 - `logs/codex-ai-stage0-tile-catalog-smoke-20260607` の既存JSONLから `recording.json` 作成、`viewer-data.json` export、`recording.json` と同一JSONLの `nsmb_mvl_ai_verify_replay.py` pass。最終frame 1290一致。

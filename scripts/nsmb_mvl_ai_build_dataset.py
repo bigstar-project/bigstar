@@ -45,11 +45,9 @@ def delta_x(target_x: int, self_x: int) -> int:
 
 NEAREST_CATEGORIES = [
     "big_star_actor",
-    "big_star_related",
-    "big_star_candidate",
     "world_item",
     "neutral_item",
-    "dropped_star_item",
+    "coin_item",
     "item",
     "coin",
     "moving_hazard",
@@ -67,8 +65,10 @@ CATEGORY_COUNT_NAMES = [
     "big_star_actor",
     "big_star_related",
     "big_star_candidate",
+    "big_star_marker",
     "world_item",
     "neutral_item",
+    "coin_item",
     "dropped_star_item",
     "item",
     "coin",
@@ -104,6 +104,7 @@ RUNTIME_HAZARD_CATEGORY_IDS = {
 ITEM_CATEGORIES = {
     "world_item",
     "neutral_item",
+    "coin_item",
     "dropped_star_item",
     "item",
 }
@@ -114,7 +115,7 @@ ITEM_SETTINGS_FIRE_CANDIDATES = {
     0x00090000,
     0x00011089,
 }
-ITEM_SETTINGS_DROPPED_STAR_CANDIDATES = {
+ITEM_SETTINGS_COIN_ITEM_CANDIDATES = {
     0x00090002,
 }
 ITEM_SETTINGS_SUSPECTED_MINI_CANDIDATES = {
@@ -287,6 +288,17 @@ def num(value: Any, default: int = 0) -> int:
     return default
 
 
+def object_category(obj: dict[str, Any]) -> str:
+    category = str(obj.get("category") or "")
+    object_id = num(obj.get("objectId"))
+    settings = num(obj.get("settings"))
+    if object_id == 0x001F and settings == 0x00090002:
+        return "coin_item"
+    if object_id == 0x010C and settings == 0x00001120:
+        return "big_star_marker"
+    return category
+
+
 def sane_bottom_tile(tile_type: int) -> bool:
     category_masks = [
         0x00010000,
@@ -438,7 +450,7 @@ def nearest_object(
 ) -> tuple[int, int, int, int]:
     best: tuple[int, int, int, int] | None = None
     for obj in objects:
-        if obj.get("category") != category:
+        if object_category(obj) != category:
             continue
         obj_pos = pos(obj)
         dx = delta_x(obj_pos["x"], self_pos["x"])
@@ -460,7 +472,7 @@ def runtime_hazard_threat(
     best_score = 0
     self_vx = self_vel["x"]
     for obj in objects:
-        category = str(obj.get("category") or "")
+        category = object_category(obj)
         category_id = RUNTIME_HAZARD_CATEGORY_IDS.get(category)
         if category_id is None:
             continue
@@ -522,7 +534,7 @@ def nearest_item_details(
 ) -> dict[str, int]:
     best: tuple[int, dict[str, Any], dict[str, int], dict[str, int], dict[str, int]] | None = None
     for obj in objects:
-        category = str(obj.get("category") or "")
+        category = object_category(obj)
         if category not in ITEM_CATEGORIES:
             continue
         if require_item_category is not None and category != require_item_category:
@@ -553,6 +565,7 @@ def nearest_item_details(
             "screen_in_view": 0,
             "powerup_kind_candidate": -1,
             "is_fire_candidate": 0,
+            "is_coin_item_candidate": 0,
             "is_dropped_star_candidate": 0,
             "is_suspected_mini_candidate": 0,
             "avoid_candidate": 0,
@@ -577,7 +590,8 @@ def nearest_item_details(
         "screen_in_view": obj_screen["inView"],
         "powerup_kind_candidate": powerup_kind,
         "is_fire_candidate": int(settings in ITEM_SETTINGS_FIRE_CANDIDATES),
-        "is_dropped_star_candidate": int(settings in ITEM_SETTINGS_DROPPED_STAR_CANDIDATES),
+        "is_coin_item_candidate": int(settings in ITEM_SETTINGS_COIN_ITEM_CANDIDATES),
+        "is_dropped_star_candidate": 0,
         "is_suspected_mini_candidate": int(settings in ITEM_SETTINGS_SUSPECTED_MINI_CANDIDATES),
         "avoid_candidate": item_avoid_candidate(settings),
     }
@@ -667,8 +681,6 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
     self_fall = self_player.get("fallRisk") or {}
     opponent_fall = opponent.get("fallRisk") or {}
     target = record["targets"]["bigStarActor"]
-    if not target.get("found"):
-        target = record["targets"]["bigStarCandidate"]
     target_pos = pos(target)
     camera = record.get("camera") or {}
     object_summary = record.get("objectSummary") or {}
@@ -682,8 +694,11 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
     opponent_visual = opponent.get("visualState") or {}
     opponent_visual_powerup = opponent_visual.get("powerup") or {}
     visual_summary = record.get("visualSummary") or {}
-    category_counts = visual_summary.get("categoryCounts") or {}
     objects = record.get("objects") or []
+    category_counts: dict[str, int] = {}
+    for obj in objects:
+        category = object_category(obj)
+        category_counts[category] = category_counts.get(category, 0) + 1
     nearest_item = nearest_item_details(objects, self_pos)
     coin_reward_item = nearest_item_details(objects, self_pos, require_item_category="item")
     runtime_hazard = runtime_hazard_threat(objects, self_pos, self_vel)
@@ -828,6 +843,7 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "nearest_item_screen1_in_view": nearest_item["screen_in_view"],
         "nearest_item_powerup_kind_candidate": nearest_item["powerup_kind_candidate"],
         "nearest_item_is_fire_candidate": nearest_item["is_fire_candidate"],
+        "nearest_item_is_coin_item_candidate": nearest_item["is_coin_item_candidate"],
         "nearest_item_is_dropped_star_candidate": nearest_item["is_dropped_star_candidate"],
         "nearest_item_is_suspected_mini_candidate": nearest_item["is_suspected_mini_candidate"],
         "nearest_item_avoid_candidate": nearest_item["avoid_candidate"],
@@ -857,6 +873,7 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "coin_reward_item_screen1_in_view": coin_reward_item["screen_in_view"] if num(record.get("_self_coin_reward_recent")) else 0,
         "coin_reward_item_powerup_kind_candidate": coin_reward_item["powerup_kind_candidate"] if num(record.get("_self_coin_reward_recent")) else -1,
         "coin_reward_item_is_fire_candidate": coin_reward_item["is_fire_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
+        "coin_reward_item_is_coin_item_candidate": coin_reward_item["is_coin_item_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
         "coin_reward_item_is_dropped_star_candidate": coin_reward_item["is_dropped_star_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
         "coin_reward_item_is_suspected_mini_candidate": coin_reward_item["is_suspected_mini_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,
         "coin_reward_item_avoid_candidate": coin_reward_item["avoid_candidate"] if num(record.get("_self_coin_reward_recent")) else 0,

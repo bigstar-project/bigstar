@@ -20,6 +20,7 @@ STAGE_WRAP_WIDTH_PX = 1024
 TILE_GRID_SIZE_PX = 16
 
 HIDDEN_SCENE_OBJECT_CATEGORIES = {
+    "big_star_marker",
     "big_star_related",
     "camera",
     "course_select",
@@ -37,10 +38,10 @@ CATEGORY_STYLE = {
     "player": ("#2563eb", "P"),
     "big_star_actor": ("#f59e0b", "S"),
     "big_star_related": ("#facc15", "R"),
-    "big_star_candidate": ("#fbbf24", "s"),
+    "big_star_marker": ("#64748b", "m"),
     "world_item": ("#10b981", "I"),
     "neutral_item": ("#34d399", "i"),
-    "dropped_star_item": ("#f97316", "D"),
+    "coin_item": ("#eab308", "C"),
     "item": ("#22c55e", "i"),
     "coin": ("#eab308", "C"),
     "moving_hazard": ("#ef4444", "H"),
@@ -52,6 +53,30 @@ CATEGORY_STYLE = {
     "item_spawn_effect": ("#fb7185", "E"),
     "object": ("#94a3b8", "O"),
 }
+
+
+def parse_int(value: Any, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value, 0)
+        except ValueError:
+            return default
+    return default
+
+
+def object_category(obj: dict[str, Any]) -> str:
+    category = str(obj.get("category") or "object")
+    object_id = parse_int(obj.get("objectId"))
+    settings = parse_int(obj.get("settings"))
+    if object_id == 0x001F and settings == 0x00090002:
+        return "coin_item"
+    if object_id == 0x010C and settings == 0x00001120:
+        return "big_star_marker"
+    return category
 
 TILE_KIND_STYLE = {
     "hidden": ("#a855f7", "H", "hidden/invisible block"),
@@ -434,7 +459,7 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
     for obj in record.get("objects") or []:
         if drawn >= max_objects:
             break
-        category = obj.get("category", "object")
+        category = object_category(obj)
         if category == "player" or category in HIDDEN_SCENE_OBJECT_CATEGORIES:
             continue
         dx, dy = object_delta_px(obj, self_player, player)

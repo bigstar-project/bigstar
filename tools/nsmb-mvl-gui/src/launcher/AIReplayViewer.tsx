@@ -443,6 +443,7 @@ const stageWrapWidthPx = 1024;
 const tileWorldSizePx = 16;
 const tileGridSizePx = tileWorldSizePx * sceneScale;
 const hiddenSceneObjectCategories = new Set([
+  'big_star_marker',
   'big_star_related',
   'camera',
   'course_select',
@@ -536,9 +537,26 @@ function tileProbeSampleDeltaPx(
   };
 }
 
+function objectCategory(object: ReplayObject) {
+  const objectId = numeric(object.objectId);
+  const settings = numeric(object.settings);
+  if (objectId === 0x001f && settings === 0x00090002) return 'coin_item';
+  if (objectId === 0x010c && settings === 0x00001120) return 'big_star_marker';
+  return object.category ?? 'object';
+}
+
 function objectIsUsefulForScene(object: ReplayObject) {
-  const category = object.category ?? 'object';
+  const category = objectCategory(object);
   return !hiddenSceneObjectCategories.has(category);
+}
+
+function normalizedCategoryCounts(frame?: ReplayFrame) {
+  const counts: Record<string, number> = {};
+  for (const object of frame?.objects ?? []) {
+    const category = objectCategory(object);
+    counts[category] = (counts[category] ?? 0) + 1;
+  }
+  return counts;
 }
 
 function tileKind(
@@ -654,11 +672,12 @@ function frameEvents(frame: ReplayFrame, previous?: ReplayFrame) {
     if (blockHit) events.push(`P${index} block`);
   }
   for (const category of new Set(
-    (frame.objects ?? []).map((object) => object.category),
+    (frame.objects ?? []).map((object) => objectCategory(object)),
   )) {
     if (
       category === 'world_item' ||
       category === 'neutral_item' ||
+      category === 'coin_item' ||
       category === 'dropped_star_item' ||
       category === 'item' ||
       category === 'item_spawn_effect' ||
@@ -844,16 +863,18 @@ function ReplayScene({
       {objects.map((object, index) => {
         const delta = relativeDeltaPx(object, self, playerIndex);
         const point = scenePointFromPx(delta.dx, delta.dy);
-        const category = object.category ?? 'object';
+        const category = objectCategory(object);
         const color = category.includes('star')
           ? '#facc15'
-          : category.includes('item') || category === 'coin'
-            ? '#34d399'
-            : category.includes('hazard') || category.includes('enemy')
-              ? '#f87171'
-              : category.includes('platform')
-                ? '#60a5fa'
-                : '#94a3b8';
+          : category === 'coin_item' || category === 'coin'
+            ? '#eab308'
+            : category.includes('item')
+              ? '#34d399'
+              : category.includes('hazard') || category.includes('enemy')
+                ? '#f87171'
+                : category.includes('platform')
+                  ? '#60a5fa'
+                  : '#94a3b8';
         const label =
           category === 'enemy_goomba'
             ? 'G'
@@ -863,10 +884,10 @@ function ReplayScene({
                 ? 'H'
                 : category.includes('star')
                   ? 'S'
-                  : category.includes('item')
-                    ? 'I'
-                    : category === 'coin'
-                      ? 'C'
+                  : category === 'coin_item' || category === 'coin'
+                    ? 'C'
+                    : category.includes('item')
+                      ? 'I'
                       : 'O';
         return (
           <g key={`${object.objectId ?? 'obj'}-${index}`}>
@@ -1016,7 +1037,10 @@ export function AIReplayViewer() {
         .slice(0, 80),
     [eventSamples],
   );
-  const categoryCounts = frame?.visualSummary?.categoryCounts ?? {};
+  const categoryCounts = useMemo(
+    () => normalizedCategoryCounts(frame),
+    [frame],
+  );
   const selfGridCounts = useMemo(
     () => gridCounts(frame?.players?.[playerIndex]),
     [frame, playerIndex],

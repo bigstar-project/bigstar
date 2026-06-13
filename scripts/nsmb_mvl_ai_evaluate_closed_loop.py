@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-BIG_STAR_CATEGORIES = ("big_star_actor", "big_star_candidate", "big_star_related")
-ITEM_CATEGORIES = ("world_item", "neutral_item", "dropped_star_item", "item")
+BIG_STAR_CATEGORIES = ("big_star_actor",)
+ITEM_CATEGORIES = ("world_item", "neutral_item", "coin_item", "dropped_star_item", "item")
 PROJECTILE_CATEGORIES = ("projectile", "player_fireball", "enemy_fireball")
 HAZARD_CATEGORIES = ("moving_hazard", "hazard", "enemy_goomba", "enemy_koopa")
 
@@ -27,6 +27,17 @@ def num(value: Any, default: int = 0) -> int:
     if isinstance(value, str) and value != "":
         return int(value, 0)
     return default
+
+
+def object_category(obj: dict[str, Any]) -> str:
+    category = str(obj.get("category") or "unknown")
+    object_id = num(obj.get("objectId"))
+    settings = num(obj.get("settings"))
+    if object_id == 0x001F and settings == 0x00090002:
+        return "coin_item"
+    if object_id == 0x010C and settings == 0x00001120:
+        return "big_star_marker"
+    return category
 
 
 def signed32(value: Any, default: int = 0) -> int:
@@ -122,7 +133,7 @@ def nearest_big_star_json(record: dict[str, Any], player: int) -> dict[str, Any]
     if p_pos is None:
         return None
     targets = record.get("targets") or {}
-    for name in ("bigStarActor", "bigStarCandidate"):
+    for name in ("bigStarActor",):
         target = targets.get(name) or {}
         if not target.get("found"):
             continue
@@ -130,7 +141,7 @@ def nearest_big_star_json(record: dict[str, Any], player: int) -> dict[str, Any]
         dx = num(pos.get("x")) - p_pos[0]
         dy = num(pos.get("y")) - p_pos[1]
         return {
-            "category": "big_star_actor" if name == "bigStarActor" else "big_star_candidate",
+            "category": "big_star_actor",
             "dx": dx,
             "dy": dy,
             "dist2": dx * dx + dy * dy,
@@ -139,13 +150,9 @@ def nearest_big_star_json(record: dict[str, Any], player: int) -> dict[str, Any]
 
 
 def category_counts(record: dict[str, Any]) -> dict[str, int]:
-    visual_summary = record.get("visualSummary") or {}
-    counts = visual_summary.get("categoryCounts")
-    if isinstance(counts, dict):
-        return {str(k): num(v) for k, v in counts.items()}
     result: dict[str, int] = {}
     for obj in record.get("objects") or []:
-        category = str(obj.get("category") or "unknown")
+        category = object_category(obj)
         result[category] = result.get(category, 0) + 1
     return result
 
