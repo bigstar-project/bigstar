@@ -692,19 +692,83 @@ if ($InputUnreliable) {
 }
 Write-Host "jit=$(-not $NoJit)$(if ($NoJit) { ' (disabled by -NoJit)' } else { ' (default)' })"
 
+function Get-ManualWrapperExitCodeOrNull {
+    param([System.Diagnostics.Process]$Process)
+
+    try {
+        $Process.Refresh()
+    } catch {
+    }
+
+    try {
+        if ($Process.HasExited) {
+            return [Nullable[int]]$Process.ExitCode
+        }
+    } catch {
+    }
+
+    return $null
+}
+
+function Test-ManualWrapperSuccessMarker {
+    param(
+        [string]$OutPath,
+        [string]$ErrPath
+    )
+
+    $hasSuccessMarker = $false
+    if (Test-Path -LiteralPath $OutPath) {
+        $hasSuccessMarker = Select-String -LiteralPath $OutPath -Pattern "NSMB Mario vs Luigi LAN route smoke passed" -Quiet
+    }
+
+    $hasErrorOutput = $false
+    if (Test-Path -LiteralPath $ErrPath) {
+        $errItem = Get-Item -LiteralPath $ErrPath -ErrorAction SilentlyContinue
+        $hasErrorOutput = ($null -ne $errItem -and $errItem.Length -gt 0)
+    }
+
+    return ($hasSuccessMarker -and -not $hasErrorOutput)
+}
+
 if ($Wait) {
-    $waitProcesses = @($clientProc)
+    $waitProcesses = @(
+        [pscustomobject]@{
+            Role = "client"
+            Process = $clientProc
+            OutPath = $clientOut
+            ErrPath = $clientErr
+        }
+    )
     if ($null -ne $hostProc) {
-        $waitProcesses += $hostProc
+        $waitProcesses += [pscustomobject]@{
+            Role = "host"
+            Process = $hostProc
+            OutPath = $hostOut
+            ErrPath = $hostErr
+        }
     }
     $deadline = [DateTime]::UtcNow.AddMilliseconds($WaitTimeoutMs)
-    foreach ($proc in $waitProcesses) {
+    foreach ($entry in $waitProcesses) {
+        $proc = $entry.Process
         $remainingMs = [int][Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
         if (-not $proc.WaitForExit($remainingMs)) {
-            throw "manual local wrapper did not exit within WaitTimeoutMs=$WaitTimeoutMs. pid=$($proc.Id)"
+            throw "manual local wrapper did not exit within WaitTimeoutMs=$WaitTimeoutMs. role=$($entry.Role) pid=$($proc.Id)"
         }
-        if ($proc.ExitCode -ne 0) {
-            throw "manual local wrapper failed. pid=$($proc.Id) exitCode=$($proc.ExitCode)"
+        try {
+            $proc.WaitForExit()
+        } catch {
+        }
+
+        $exitCode = Get-ManualWrapperExitCodeOrNull -Process $proc
+        if ($null -eq $exitCode) {
+            if (Test-ManualWrapperSuccessMarker -OutPath $entry.OutPath -ErrPath $entry.ErrPath) {
+                Write-Warning "manual local wrapper exitCode was empty, but $($entry.Role) wrapper success marker was present and stderr was empty. pid=$($proc.Id)"
+                continue
+            }
+            throw "manual local wrapper failed. role=$($entry.Role) pid=$($proc.Id) exitCode=<empty>. See $($entry.OutPath) / $($entry.ErrPath)"
+        }
+        if ($exitCode -ne 0) {
+            throw "manual local wrapper failed. role=$($entry.Role) pid=$($proc.Id) exitCode=$exitCode"
         }
     }
     Write-Host "NSMB MvL manual local session exited."
