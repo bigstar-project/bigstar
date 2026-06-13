@@ -15,6 +15,7 @@ WIDTH = 900
 HEIGHT = 520
 CENTER_X = WIDTH // 2
 CENTER_Y = HEIGHT // 2
+STAGE_WRAP_WIDTH_PX = 1024
 
 CATEGORY_STYLE = {
     "player": ("#2563eb", "P"),
@@ -34,6 +35,19 @@ CATEGORY_STYLE = {
     "warp_entrance": ("#7c3aed", "W"),
     "item_spawn_effect": ("#fb7185", "E"),
     "object": ("#94a3b8", "O"),
+}
+
+TILE_KIND_STYLE = {
+    "hidden": ("#a855f7", "H", "hidden/invisible block"),
+    "question": ("#facc15", "?", "question/item block"),
+    "breakable": ("#f97316", "B", "breakable block"),
+    "brick": ("#dc2626", "R", "brick block"),
+    "coin": ("#eab308", "C", "coin tile"),
+    "harmful": ("#ef4444", "!", "harmful tile"),
+    "water": ("#38bdf8", "W", "water"),
+    "partial": ("#14b8a6", "P", "partial solid"),
+    "solid": ("#22c55e", "", "solid terrain"),
+    "unknown": ("#64748b", "", "status/unknown tile"),
 }
 
 
@@ -162,6 +176,77 @@ def svg_point(dx_px: float, dy_px: float) -> tuple[float, float]:
     return (CENTER_X + dx_px, CENTER_Y + dy_px)
 
 
+def wrapped_delta_px(a_px: float, b_px: float) -> float:
+    dx = a_px - b_px
+    half = STAGE_WRAP_WIDTH_PX / 2
+    while dx > half:
+        dx -= STAGE_WRAP_WIDTH_PX
+    while dx < -half:
+        dx += STAGE_WRAP_WIDTH_PX
+    return dx
+
+
+def player_world_px(player: dict[str, Any]) -> tuple[float, float]:
+    player_pos = pos(player)
+    return (player_pos["x"] / FIXED, player_pos["y"] / FIXED)
+
+
+def tile_cell_kind(cell: dict[str, Any]) -> tuple[str, str, str]:
+    tile = cell.get("tile") or {}
+    block = cell.get("block") or {}
+    if num(block.get("hiddenOrRescueCandidate")) or num(block.get("invisible")) or num(tile.get("invisibleBlock")):
+        return TILE_KIND_STYLE["hidden"]
+    if num(block.get("question")) or num(tile.get("questionBlock")):
+        return TILE_KIND_STYLE["question"]
+    if num(block.get("breakable")) or num(tile.get("breakableBlock")):
+        return TILE_KIND_STYLE["breakable"]
+    if num(block.get("brick")) or num(tile.get("brickBlock")):
+        return TILE_KIND_STYLE["brick"]
+    if num(tile.get("coin")):
+        return TILE_KIND_STYLE["coin"]
+    if num(tile.get("harmful")):
+        return TILE_KIND_STYLE["harmful"]
+    if num(tile.get("water")):
+        return TILE_KIND_STYLE["water"]
+    if num(tile.get("partialSolid")):
+        return TILE_KIND_STYLE["partial"]
+    if num(cell.get("solidish")):
+        return TILE_KIND_STYLE["solid"]
+    if num(cell.get("status")):
+        return TILE_KIND_STYLE["unknown"]
+    return ("", "", "")
+
+
+def object_delta_px(obj: dict[str, Any], self_player: dict[str, Any], player: int) -> tuple[float, float]:
+    rel = obj.get("relative") or {}
+    dx_key = f"p{player}dx"
+    dy_key = f"p{player}dy"
+    if dx_key in rel or dy_key in rel:
+        return (num(rel.get(dx_key)) / FIXED, num(rel.get(dy_key)) / FIXED)
+    obj_pos = pos(obj)
+    self_pos = pos(self_player)
+    return (wrapped_delta_px(obj_pos["x"] / FIXED, self_pos["x"] / FIXED), (obj_pos["y"] - self_pos["y"]) / FIXED)
+
+
+def state_tags(player: dict[str, Any]) -> str:
+    tags = []
+    if num(player.get("dead")):
+        tags.append("dead")
+    if num(player.get("transitioning")):
+        tags.append("transition")
+    contact = player.get("contact") or {}
+    for key, label in [
+        ("ground", "ground"),
+        ("wallLeft", "wallL"),
+        ("wallRight", "wallR"),
+        ("ceiling", "ceiling"),
+        ("submerged", "water"),
+    ]:
+        if num(contact.get(key)):
+            tags.append(label)
+    return ",".join(tags) if tags else "-"
+
+
 def iter_records(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as f:
         for line in f:
@@ -193,18 +278,34 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
     self_player = players[player]
     opponent = players[player ^ 1]
     self_pos = pos(self_player)
+    self_px = player_world_px(self_player)
     opponent_pos = pos(opponent)
     applied = ((record.get("inputs") or {}).get(f"appliedPlayer{player}") or {})
     held = num(applied.get("held"))
+    opponent_applied = ((record.get("inputs") or {}).get(f"appliedPlayer{player ^ 1}") or {})
+    opponent_held = num(opponent_applied.get("held"))
+    grid = ((self_player.get("tileProbe") or {}).get("grid") or {})
+    grid_cells = grid.get("cells") or []
+    grid_counts: dict[str, int] = {}
+    for cell in grid_cells:
+        _color, label, _description = tile_cell_kind(cell)
+        if label:
+            grid_counts[label] = grid_counts.get(label, 0) + 1
+        elif num(cell.get("solidish")):
+            grid_counts["solid"] = grid_counts.get("solid", 0) + 1
+    grid_text = " ".join(f"{key}:{value}" for key, value in sorted(grid_counts.items())) or "-"
 
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{HEIGHT}" viewBox="0 0 {WIDTH} {HEIGHT}">',
         '<rect width="100%" height="100%" fill="#0f172a"/>',
+        '<defs><filter id="labelShadow"><feDropShadow dx="1" dy="1" stdDeviation="0.8" flood-color="#020617" flood-opacity="0.9"/></filter></defs>',
         f'<line x1="{CENTER_X}" y1="0" x2="{CENTER_X}" y2="{HEIGHT}" stroke="#334155" stroke-width="1"/>',
         f'<line x1="0" y1="{CENTER_Y}" x2="{WIDTH}" y2="{CENTER_Y}" stroke="#334155" stroke-width="1"/>',
-        '<rect x="8" y="8" width="884" height="76" rx="6" fill="#111827" stroke="#334155"/>',
-        f'<text x="20" y="32" fill="#e5e7eb" font-family="monospace" font-size="16">frame {num(record.get("frame"))} player {player} input {html.escape(buttons_text(held))} contact {html.escape(contact_text(self_player))}</text>',
-        f'<text x="20" y="56" fill="#9ca3af" font-family="monospace" font-size="13">state {html.escape(visual_state_text(self_player))}, tileProbe {html.escape(tile_probe_summary_text(self_player))}</text>',
+        '<rect x="8" y="8" width="884" height="108" rx="6" fill="#111827" stroke="#334155"/>',
+        f'<text x="20" y="30" fill="#e5e7eb" font-family="monospace" font-size="16">frame {num(record.get("frame"))} selected=P{player} input {html.escape(buttons_text(held))} contact {html.escape(contact_text(self_player))}</text>',
+        f'<text x="20" y="52" fill="#9ca3af" font-family="monospace" font-size="13">P{player} {html.escape(visual_state_text(self_player))} tags={html.escape(state_tags(self_player))} tileProbe={html.escape(tile_probe_summary_text(self_player))}</text>',
+        f'<text x="20" y="72" fill="#9ca3af" font-family="monospace" font-size="13">P{player ^ 1} input {html.escape(buttons_text(opponent_held))} {html.escape(visual_state_text(opponent))} tags={html.escape(state_tags(opponent))}</text>',
+        f'<text x="20" y="94" fill="#cbd5e1" font-family="monospace" font-size="13">grid {num(grid.get("loggedCells"), len(grid_cells))}/{num(grid.get("totalCells")) or "?"} cells {html.escape(grid_text)}</text>',
     ]
 
     def draw_marker(x: float, y: float, color: str, label: str, title: str, radius: int = 8) -> None:
@@ -217,17 +318,46 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
             f'font-family="monospace" font-size="10" font-weight="700">{safe_label}</text>'
         )
 
-    draw_marker(CENTER_X, CENTER_Y, "#38bdf8", "ME", "selected player", 11)
-    if opponent.get("found"):
-        dx, dy = world_delta(opponent_pos, self_pos)
+    # Draw wide tile grid first so objects and players stay readable.
+    for cell in grid_cells:
+        color, label, description = tile_cell_kind(cell)
+        if not color:
+            continue
+        cell_x = num(cell.get("pixelX"))
+        cell_y = num(cell.get("pixelY"))
+        dx = wrapped_delta_px(cell_x, self_px[0])
+        dy = cell_y - self_px[1]
         x, y = svg_point(dx, dy)
-        draw_marker(x, y, "#818cf8", "OP", f"opponent dx={dx:.0f} dy={dy:.0f}", 10)
+        if x < -20 or x > WIDTH + 20 or y < -20 or y > HEIGHT + 20:
+            continue
+        tile = cell.get("tile") or {}
+        block = cell.get("block") or {}
+        tile_id = num(cell.get("tileId"))
+        opacity = "0.56" if label else "0.32"
+        parts.append(
+            f'<rect x="{x - 8:.1f}" y="{y - 8:.1f}" width="16" height="16" fill="{color}" '
+            f'opacity="{opacity}" stroke="#e2e8f0" stroke-width="0.5">'
+            f'<title>grid {html.escape(description)} row={cell.get("row")} col={cell.get("col")} rel=({cell.get("relTileX")},{cell.get("relTileY")}) tile=0x{tile_id:03X} behavior={html.escape(str(cell.get("behavior")))} solidish={num(cell.get("solidish"))} question={num(block.get("question")) or num(tile.get("questionBlock"))} breakable={num(block.get("breakable")) or num(tile.get("breakableBlock"))} brick={num(block.get("brick")) or num(tile.get("brickBlock"))} hidden={num(block.get("hiddenOrRescueCandidate")) or num(block.get("invisible")) or num(tile.get("invisibleBlock"))} itemBox={num(block.get("itemBox"))} storage={num(block.get("storageContents"))} dx={dx:.0f} dy={dy:.0f}</title></rect>'
+        )
+        if label:
+            parts.append(
+                f'<text x="{x:.1f}" y="{y + 4:.1f}" text-anchor="middle" fill="#f8fafc" '
+                f'font-family="monospace" font-size="10" font-weight="800" filter="url(#labelShadow)">{html.escape(label)}</text>'
+            )
+
+    draw_marker(CENTER_X, CENTER_Y, "#38bdf8", f"P{player}", "selected player", 12)
+    if opponent.get("found"):
+        dx = wrapped_delta_px(opponent_pos["x"] / FIXED, self_pos["x"] / FIXED)
+        dy = (opponent_pos["y"] - self_pos["y"]) / FIXED
+        x, y = svg_point(dx, dy)
+        draw_marker(x, y, "#818cf8", f"P{player ^ 1}", f"opponent dx={dx:.0f} dy={dy:.0f}", 11)
 
     for sample in ((self_player.get("tileProbe") or {}).get("samples")) or []:
         if not num(sample.get("found")):
             continue
         sample_pos = {"x": num(sample.get("worldX")), "y": num(sample.get("worldY"))}
-        dx, dy = world_delta(sample_pos, self_pos)
+        dx = wrapped_delta_px(sample_pos["x"] / FIXED, self_pos["x"] / FIXED)
+        dy = (sample_pos["y"] - self_pos["y"]) / FIXED
         x, y = svg_point(dx, dy)
         tile = sample.get("tile") or {}
         if num(tile.get("harmful")):
@@ -287,9 +417,7 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
         category = obj.get("category", "object")
         if category == "player":
             continue
-        rel = obj.get("relative") or {}
-        dx = num(rel.get(f"p{player}dx")) / FIXED
-        dy = num(rel.get(f"p{player}dy")) / FIXED
+        dx, dy = object_delta_px(obj, self_player, player)
         x, y = svg_point(dx, dy)
         if x < -40 or x > WIDTH + 40 or y < -40 or y > HEIGHT + 40:
             continue
@@ -305,9 +433,7 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
         drawn += 1
 
     for slot in (((record.get("specialObjects") or {}).get("fireballs") or {}).get("slots")) or []:
-        rel = slot.get("relative") or {}
-        dx = num(rel.get(f"p{player}dx")) / FIXED
-        dy = num(rel.get(f"p{player}dy")) / FIXED
+        dx, dy = object_delta_px(slot, self_player, player)
         x, y = svg_point(dx, dy)
         if x < -40 or x > WIDTH + 40 or y < -40 or y > HEIGHT + 40:
             continue
@@ -338,6 +464,20 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
 
     legend_x = 20
     legend_y = HEIGHT - 24
+    for key in ["question", "breakable", "brick", "hidden", "coin", "harmful", "water", "partial", "solid"]:
+        color, label, description = TILE_KIND_STYLE[key]
+        legend_label = label or "S"
+        parts.append(f'<rect x="{legend_x - 6}" y="{legend_y - 6}" width="12" height="12" fill="{color}" opacity="0.72" stroke="#e2e8f0" stroke-width="0.5"/>')
+        parts.append(
+            f'<text x="{legend_x + 10}" y="{legend_y + 4}" fill="#cbd5e1" '
+            f'font-family="monospace" font-size="11">{html.escape(legend_label)}={html.escape(description)}</text>'
+        )
+        legend_x += 150
+        if legend_x > WIDTH - 140:
+            legend_x = 20
+            legend_y -= 18
+    legend_y -= 22
+    legend_x = 20
     for category, (color, label) in CATEGORY_STYLE.items():
         if category in {"object", "player"}:
             continue

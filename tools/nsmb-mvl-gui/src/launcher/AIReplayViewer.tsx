@@ -17,26 +17,57 @@ import type { AiArtifact, RunAiToolRequest, RunAiToolResponse } from '../types';
 import { LauncherCard, SmallInfoCard } from './LauncherCards';
 
 type Vec3 = { x?: number | string; y?: number | string; z?: number | string };
+type TileBlockState = Record<string, unknown>;
+type TileFlags = Record<string, unknown>;
+type TileGridCell = {
+  block?: TileBlockState;
+  behavior?: number | string;
+  col?: number | string;
+  found?: boolean | number;
+  pixelX?: number | string;
+  pixelY?: number | string;
+  relTileX?: number | string;
+  relTileY?: number | string;
+  row?: number | string;
+  solidish?: boolean | number;
+  status?: number | string;
+  tile?: TileFlags;
+  tileId?: number | string;
+};
 type PlayerState = {
   found?: boolean | number;
   pos?: Vec3;
   vel?: Vec3;
   powerup?: number | string;
+  inventoryPowerup?: number | string;
   dead?: number | string;
   battleStars?: number | string;
   coins?: number | string;
   contact?: Record<string, unknown>;
+  visualState?: Record<string, unknown>;
   tileProbe?: {
     found?: boolean | number;
+    grid?: {
+      cells?: TileGridCell[];
+      encoding?: string;
+      height?: number | string;
+      loggedCells?: number | string;
+      totalCells?: number | string;
+      width?: number | string;
+    };
     summary?: Record<string, unknown>;
     samples?: Array<{
+      found?: boolean | number;
       name?: string;
       pixelX?: number | string;
       pixelY?: number | string;
+      worldX?: number | string;
+      worldY?: number | string;
       tileId?: number | string;
       behavior?: number | string;
       solidish?: boolean | number;
-      block?: Record<string, unknown>;
+      block?: TileBlockState;
+      tile?: TileFlags;
     }>;
   };
 };
@@ -45,7 +76,7 @@ type ReplayObject = {
   objectId?: string;
   settings?: string;
   pos?: Vec3;
-  relative?: Record<string, Vec3>;
+  relative?: Record<string, unknown>;
 };
 type ReplayFrame = {
   frame?: number | string;
@@ -70,6 +101,7 @@ type ReplayFrame = {
         ownerConfidence?: number | string;
         ownerVerified?: number | string;
         pos?: Vec3;
+        relative?: Record<string, unknown>;
       }>;
     };
     projectiles?: {
@@ -383,11 +415,128 @@ function pos(entity?: { pos?: Vec3 }) {
   };
 }
 
-function svgPoint(dx: number, dy: number) {
+const sceneScale = 0.5;
+const stageWrapWidthPx = 1024;
+
+function fixedToPx(value: unknown) {
+  return numeric(value) / 4096;
+}
+
+function wrappedDeltaPx(aPx: number, bPx: number) {
+  let dx = aPx - bPx;
+  const half = stageWrapWidthPx / 2;
+  while (dx > half) dx -= stageWrapWidthPx;
+  while (dx < -half) dx += stageWrapWidthPx;
+  return dx;
+}
+
+function scenePointFromPx(dxPx: number, dyPx: number) {
   return {
-    x: 320 + dx / 4096 / 2,
-    y: 180 + dy / 4096 / 2,
+    x: 320 + dxPx * sceneScale,
+    y: 180 + dyPx * sceneScale,
   };
+}
+
+function relativeDeltaPx(
+  entity: { pos?: Vec3; relative?: Record<string, unknown> },
+  self: PlayerState | undefined,
+  playerIndex: 0 | 1,
+) {
+  const dxKey = `p${playerIndex}dx`;
+  const dyKey = `p${playerIndex}dy`;
+  if (
+    entity.relative &&
+    (dxKey in entity.relative || dyKey in entity.relative)
+  ) {
+    return {
+      dx: fixedToPx(entity.relative[dxKey]),
+      dy: fixedToPx(entity.relative[dyKey]),
+    };
+  }
+  const entityPos = pos(entity);
+  const selfPos = pos(self);
+  return {
+    dx: wrappedDeltaPx(entityPos.x / 4096, selfPos.x / 4096),
+    dy: (entityPos.y - selfPos.y) / 4096,
+  };
+}
+
+function tileKind(
+  cell:
+    | TileGridCell
+    | { block?: TileBlockState; tile?: TileFlags; solidish?: unknown },
+) {
+  const block = cell.block ?? {};
+  const tile = cell.tile ?? {};
+  if (
+    numeric(block.hiddenOrRescueCandidate) ||
+    numeric(block.invisible) ||
+    numeric(tile.invisibleBlock)
+  ) {
+    return { color: '#a855f7', label: 'H', name: 'hidden' };
+  }
+  if (numeric(block.question) || numeric(tile.questionBlock)) {
+    return { color: '#facc15', label: '?', name: 'question' };
+  }
+  if (numeric(block.breakable) || numeric(tile.breakableBlock)) {
+    return { color: '#f97316', label: 'B', name: 'breakable' };
+  }
+  if (numeric(block.brick) || numeric(tile.brickBlock)) {
+    return { color: '#dc2626', label: 'R', name: 'brick' };
+  }
+  if (numeric(tile.coin)) return { color: '#eab308', label: 'C', name: 'coin' };
+  if (numeric(tile.harmful))
+    return { color: '#ef4444', label: '!', name: 'harmful' };
+  if (numeric(tile.water))
+    return { color: '#38bdf8', label: 'W', name: 'water' };
+  if (numeric(tile.partialSolid))
+    return { color: '#14b8a6', label: 'P', name: 'partial' };
+  if (numeric(cell.solidish))
+    return { color: '#22c55e', label: '', name: 'solid' };
+  return null;
+}
+
+function visualPowerupName(player?: PlayerState) {
+  const visual = player?.visualState ?? {};
+  const powerup = visual.powerup as { name?: string } | undefined;
+  const inventory = visual.inventoryPowerup as { name?: string } | undefined;
+  const current = powerup?.name ?? `power ${numeric(player?.powerup)}`;
+  const reserve =
+    inventory?.name ?? `reserve ${numeric(player?.inventoryPowerup)}`;
+  return `${current} / ${reserve}`;
+}
+
+function stateFlagText(player?: PlayerState) {
+  const contact = player?.contact ?? {};
+  const summary = player?.tileProbe?.summary ?? {};
+  const flags = [
+    numeric(contact.ground) ? 'ground' : '',
+    numeric(contact.wallLeft) ? 'wallL' : '',
+    numeric(contact.wallRight) ? 'wallR' : '',
+    numeric(contact.ceiling) ? 'ceil' : '',
+    numeric(summary.effectiveHoleAhead) ? 'holeAhead' : '',
+    numeric(summary.wallAhead) ? 'wallAhead' : '',
+    numeric(summary.holeSuppressedByContact) ? 'holeSuppressed' : '',
+    numeric(player?.dead) ? 'dead' : '',
+  ].filter(Boolean);
+  return flags.length ? flags.join(' / ') : '-';
+}
+
+function gridCounts(player?: PlayerState) {
+  const counts: Record<string, number> = {};
+  for (const cell of player?.tileProbe?.grid?.cells ?? []) {
+    const kind = tileKind(cell);
+    if (!kind) continue;
+    counts[kind.name] = (counts[kind.name] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function compactCounts(counts: Record<string, number>) {
+  const entries = Object.entries(counts);
+  return entries.length
+    ? entries.map(([key, value]) => `${key}:${value}`).join(' ')
+    : '-';
 }
 
 function frameEvents(frame: ReplayFrame, previous?: ReplayFrame) {
@@ -480,12 +629,14 @@ function ReplayScene({
   const opponent = frame.players?.[playerIndex ^ 1];
   const selfPos = pos(self);
   const opponentPos = pos(opponent);
-  const opponentPoint = svgPoint(
-    opponentPos.x - selfPos.x,
-    opponentPos.y - selfPos.y,
+  const opponentPoint = scenePointFromPx(
+    wrappedDeltaPx(opponentPos.x / 4096, selfPos.x / 4096),
+    (opponentPos.y - selfPos.y) / 4096,
   );
   const objects = (frame.objects ?? []).slice(0, 64);
   const fireballSlots = frame.specialObjects?.fireballs?.slots ?? [];
+  const gridCells = (self?.tileProbe?.grid?.cells ?? []).slice(0, 220);
+  const sampleCells = self?.tileProbe?.samples ?? [];
 
   return (
     <svg
@@ -509,12 +660,107 @@ function ReplayScene({
       <title>frame {frame.frame}</title>
       <line x1="0" x2="640" y1="180" y2="180" stroke="rgba(255,255,255,0.16)" />
       <line x1="320" x2="320" y1="0" y2="360" stroke="rgba(255,255,255,0.16)" />
-      {objects.map((object, index) => {
-        const objectPos = pos(object);
-        const point = svgPoint(
-          objectPos.x - selfPos.x,
-          objectPos.y - selfPos.y,
+      <rect
+        x="12"
+        y="12"
+        width="214"
+        height="72"
+        rx="6"
+        fill="rgba(15,23,42,0.86)"
+        stroke="rgba(148,163,184,0.35)"
+      />
+      <text x="24" y="34" fill="#e2e8f0" fontSize="13" fontWeight="800">
+        frame {frame.frame} / P{playerIndex}
+      </text>
+      <text x="24" y="54" fill="#cbd5e1" fontSize="11" fontWeight="700">
+        {visualPowerupName(self)}
+      </text>
+      <text x="24" y="72" fill="#94a3b8" fontSize="10" fontWeight="700">
+        {stateFlagText(self)}
+      </text>
+      {gridCells.map((cell, index) => {
+        const kind = tileKind(cell);
+        if (!kind) return null;
+        const point = scenePointFromPx(
+          wrappedDeltaPx(numeric(cell.pixelX), selfPos.x / 4096),
+          numeric(cell.pixelY) - selfPos.y / 4096,
         );
+        if (point.x < -24 || point.x > 664 || point.y < -24 || point.y > 384) {
+          return null;
+        }
+        const block = cell.block ?? {};
+        const tile = cell.tile ?? {};
+        const size = 16 * sceneScale;
+        return (
+          <g key={`grid-${cell.row ?? 'r'}-${cell.col ?? index}`}>
+            <rect
+              x={point.x - size / 2}
+              y={point.y - size / 2}
+              width={size}
+              height={size}
+              fill={kind.color}
+              opacity={kind.label ? 0.64 : 0.34}
+              stroke="rgba(248,250,252,0.55)"
+              strokeWidth="0.5"
+            />
+            {kind.label ? (
+              <text
+                x={point.x}
+                y={point.y + 3}
+                fill="#f8fafc"
+                fontSize="8"
+                fontWeight="900"
+                textAnchor="middle"
+              >
+                {kind.label}
+              </text>
+            ) : null}
+            <title>{`${kind.name} row=${cell.row ?? '-'} col=${cell.col ?? '-'} rel=(${cell.relTileX ?? '-'},${cell.relTileY ?? '-'}) tile=${hexText(cell.tileId)} behavior=${cell.behavior ?? '-'} solid=${numeric(cell.solidish)} q=${numeric(block.question) || numeric(tile.questionBlock)} b=${numeric(block.breakable) || numeric(tile.breakableBlock)} brick=${numeric(block.brick) || numeric(tile.brickBlock)} hidden=${numeric(block.hiddenOrRescueCandidate) || numeric(block.invisible) || numeric(tile.invisibleBlock)} itemBox=${numeric(block.itemBox)} storage=${numeric(block.storageContents)}`}</title>
+          </g>
+        );
+      })}
+      {sampleCells.map((sample, index) => {
+        if (!numeric(sample.found, 1)) return null;
+        const point = scenePointFromPx(
+          wrappedDeltaPx(
+            fixedToPx(sample.worldX ?? sample.pixelX),
+            selfPos.x / 4096,
+          ),
+          fixedToPx(sample.worldY ?? sample.pixelY) - selfPos.y / 4096,
+        );
+        const kind = tileKind(sample) ?? {
+          color: numeric(sample.solidish) ? '#22c55e' : '#64748b',
+          label: '',
+          name: 'probe',
+        };
+        return (
+          <g key={`probe-${sample.name ?? index}`}>
+            <rect
+              x={point.x - 4}
+              y={point.y - 4}
+              width="8"
+              height="8"
+              fill={kind.color}
+              stroke="#f8fafc"
+              strokeWidth="1"
+            />
+            <text
+              x={point.x}
+              y={point.y - 7}
+              fill="#cbd5e1"
+              fontSize="7"
+              fontWeight="800"
+              textAnchor="middle"
+            >
+              {(sample.name ?? '?').slice(0, 2)}
+            </text>
+            <title>{`probe ${sample.name ?? '-'} ${kind.name} tile=${hexText(sample.tileId)} behavior=${sample.behavior ?? '-'}`}</title>
+          </g>
+        );
+      })}
+      {objects.map((object, index) => {
+        const delta = relativeDeltaPx(object, self, playerIndex);
+        const point = scenePointFromPx(delta.dx, delta.dy);
         const category = object.category ?? 'object';
         const color = category.includes('star')
           ? '#facc15'
@@ -534,16 +780,30 @@ function ReplayScene({
               fill={color}
               opacity="0.9"
             />
-            <title>{`${category} ${object.objectId ?? ''} ${object.settings ?? ''}`}</title>
+            <text
+              x={point.x + 9}
+              y={point.y + 3}
+              fill="#e2e8f0"
+              fontSize="9"
+              fontWeight="800"
+            >
+              {category.includes('star')
+                ? 'S'
+                : category.includes('item')
+                  ? 'I'
+                  : category === 'coin'
+                    ? 'C'
+                    : category.includes('enemy')
+                      ? 'E'
+                      : 'O'}
+            </text>
+            <title>{`${category} ${object.objectId ?? ''} ${object.settings ?? ''} dx=${Math.round(delta.dx)} dy=${Math.round(delta.dy)}`}</title>
           </g>
         );
       })}
       {fireballSlots.map((slot, index) => {
-        const fireballPos = pos(slot);
-        const point = svgPoint(
-          fireballPos.x - selfPos.x,
-          fireballPos.y - selfPos.y,
-        );
+        const delta = relativeDeltaPx(slot, self, playerIndex);
+        const point = scenePointFromPx(delta.dx, delta.dy);
         const owner = numeric(slot.ownerCandidate, -1);
         const color =
           owner === 0 ? '#f87171' : owner === 1 ? '#60a5fa' : '#fb923c';
@@ -566,7 +826,7 @@ function ReplayScene({
             >
               F{owner >= 0 ? owner : '?'}
             </text>
-            <title>{`${slot.kindName ?? 'fireball'} owner=${owner} confidence=${numeric(slot.ownerConfidence)} verified=${numeric(slot.ownerVerified)}`}</title>
+            <title>{`${slot.kindName ?? 'fireball'} owner=${owner} confidence=${numeric(slot.ownerConfidence)} verified=${numeric(slot.ownerVerified)} dx=${Math.round(delta.dx)} dy=${Math.round(delta.dy)}`}</title>
           </g>
         );
       })}
@@ -584,6 +844,26 @@ function ReplayScene({
       <text x="338" y="184" fill="#fee2e2" fontSize="12" fontWeight="700">
         P{playerIndex}
       </text>
+      <g transform="translate(408 314)">
+        {[
+          ['#facc15', '?', 'question'],
+          ['#f97316', 'B', 'breakable'],
+          ['#dc2626', 'R', 'brick'],
+          ['#a855f7', 'H', 'hidden'],
+          ['#eab308', 'C', 'coin'],
+          ['#ef4444', '!', 'harmful'],
+        ].map(([color, label, name], index) => (
+          <g
+            key={name}
+            transform={`translate(${(index % 3) * 76} ${Math.floor(index / 3) * 18})`}
+          >
+            <rect width="12" height="12" fill={color} opacity="0.78" />
+            <text x="17" y="10" fill="#cbd5e1" fontSize="10" fontWeight="700">
+              {label} {name}
+            </text>
+          </g>
+        ))}
+      </g>
     </svg>
   );
 }
@@ -629,6 +909,14 @@ export function AIReplayViewer() {
     [eventSamples],
   );
   const categoryCounts = frame?.visualSummary?.categoryCounts ?? {};
+  const selfGridCounts = useMemo(
+    () => gridCounts(frame?.players?.[playerIndex]),
+    [frame, playerIndex],
+  );
+  const opponentGridCounts = useMemo(
+    () => gridCounts(frame?.players?.[playerIndex ^ 1]),
+    [frame, playerIndex],
+  );
   const fireballsActive = numeric(frame?.specialObjects?.fireballs?.active);
   const fireballSlotCount = numeric(
     frame?.specialObjects?.fireballs?.activeSlots,
@@ -1456,6 +1744,21 @@ export function AIReplayViewer() {
                 label="fireball"
                 value={`${fireballsActive} active`}
                 caption={`slots ${fireballSlotCount} / ${frame.specialObjects?.fireballs?.handler ?? '-'}`}
+              />
+              <SmallInfoCard
+                label={`P${playerIndex} 状態`}
+                value={visualPowerupName(frame.players?.[playerIndex])}
+                caption={stateFlagText(frame.players?.[playerIndex])}
+              />
+              <SmallInfoCard
+                label={`P${playerIndex ^ 1} 状態`}
+                value={visualPowerupName(frame.players?.[playerIndex ^ 1])}
+                caption={stateFlagText(frame.players?.[playerIndex ^ 1])}
+              />
+              <SmallInfoCard
+                label="tile grid"
+                value={compactCounts(selfGridCounts)}
+                caption={`opponent: ${compactCounts(opponentGridCounts)}`}
               />
               <LauncherCard
                 title="イベント"

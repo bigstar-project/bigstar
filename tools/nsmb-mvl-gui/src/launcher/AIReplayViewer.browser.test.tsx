@@ -32,7 +32,75 @@ const playlogLine = JSON.stringify({
       coins: 0,
       tileProbe: {
         summary: { effectiveHoleAhead: 1, wallAhead: 0 },
-        samples: [],
+        samples: [
+          {
+            found: 1,
+            name: 'aheadFeet',
+            worldX: 516096,
+            worldY: 819200,
+            tileId: 25,
+            behavior: '0x00080002',
+            solidish: 1,
+            tile: { breakableBlock: 1 },
+            block: {
+              any: 1,
+              breakable: 1,
+              visibleStorageBreakableCandidate: 1,
+            },
+          },
+        ],
+        grid: {
+          encoding: 'sparse_non_empty',
+          height: 17,
+          loggedCells: 3,
+          totalCells: 561,
+          width: 33,
+          cells: [
+            {
+              behavior: '0x00050007',
+              block: { any: 1, itemBox: 1, question: 1, storageContents: 7 },
+              col: 17,
+              pixelX: 126,
+              pixelY: 200,
+              relTileX: 1,
+              relTileY: 0,
+              row: 10,
+              solidish: 1,
+              tile: { questionBlock: 1 },
+              tileId: 71,
+            },
+            {
+              behavior: '0x00080002',
+              block: {
+                any: 1,
+                breakable: 1,
+                visibleStorageBreakableCandidate: 1,
+              },
+              col: 16,
+              pixelX: 110,
+              pixelY: 216,
+              relTileX: 0,
+              relTileY: 1,
+              row: 11,
+              solidish: 1,
+              tile: { breakableBlock: 1 },
+              tileId: 25,
+            },
+            {
+              behavior: '0x00000000',
+              block: { any: 0 },
+              col: 18,
+              pixelX: 142,
+              pixelY: 184,
+              relTileX: 2,
+              relTileY: -1,
+              row: 9,
+              solidish: 0,
+              tile: { coin: 1 },
+              tileId: 0,
+            },
+          ],
+        },
       },
     },
   ],
@@ -103,6 +171,7 @@ describe('AIログビューア', () => {
     await expect
       .element(screen.getByText('coin', { exact: true }))
       .toBeVisible();
+    await expect.element(screen.getByText(/breakable:1/)).toBeVisible();
   });
 
   test('複数行のai-playlog JSONLを読み込める', async () => {
