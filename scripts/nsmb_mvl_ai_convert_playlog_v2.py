@@ -55,6 +55,27 @@ ENTITY_CATEGORY_IDS = {
     )
 }
 
+ALLOWED_BUTTON_BITS = {
+    "up": legacy.BUTTON_BITS["up"],
+    "down": legacy.BUTTON_BITS["down"],
+    "left": legacy.BUTTON_BITS["left"],
+    "right": legacy.BUTTON_BITS["right"],
+    "y": legacy.BUTTON_BITS["y"],
+    "b": legacy.BUTTON_BITS["b"],
+}
+
+ALLOWED_HELD_MASK = sum(1 << bit for bit in ALLOWED_BUTTON_BITS.values())
+
+ACTION_HEADS = ["horizontal", "vertical", "jump", "run", "fire"]
+
+ACTION_CLASSES = {
+    "horizontal": ["neutral", "left", "right"],
+    "vertical": ["neutral", "up", "down"],
+    "jump": ["none", "press", "hold"],
+    "run": ["off", "on"],
+    "fire": ["off", "press", "hold_or_repeat"],
+}
+
 
 def open_text(path: Path, mode: str) -> TextIO:
     if path.name.lower().endswith(".gz"):
@@ -65,15 +86,88 @@ def open_text(path: Path, mode: str) -> TextIO:
 def button_labels(held: int) -> dict[str, int]:
     return {
         name: 1 if (held & (1 << bit)) else 0
-        for name, bit in legacy.BUTTON_BITS.items()
+        for name, bit in ALLOWED_BUTTON_BITS.items()
+    }
+
+
+def label_pressed(record: dict[str, Any], player: int, source: str) -> int:
+    inputs = record.get("inputs") or {}
+    applied = inputs.get(f"appliedPlayer{player}") or {}
+    if source == "applied":
+        return legacy.num(applied.get("pressed")) if applied.get("valid") else 0
+    if source == "player":
+        return legacy.num((inputs.get(f"player{player}") or {}).get("pressed"))
+    if source == "console":
+        return legacy.num((inputs.get(f"console{player}") or {}).get("pressed"))
+    if applied.get("valid"):
+        return legacy.num(applied.get("pressed"))
+    return legacy.num((inputs.get(f"player{player}") or {}).get("pressed"))
+
+
+def fire_capable(record: dict[str, Any], player: int) -> bool:
+    players = record.get("players") or []
+    player_record = players[player] if len(players) > player else {}
+    visual = player_record.get("visualState") or {}
+    return bool(
+        legacy.num(visual.get("canShootFireVisualCandidate"))
+        or legacy.num(visual.get("isFireVisualCandidate"))
+        or legacy.num(visual.get("visualPowerupKindCandidate")) == 2
+    )
+
+
+def action_labels(held: int, pressed: int, *, can_fire: bool) -> dict[str, Any]:
+    left = bool(held & (1 << legacy.BUTTON_BITS["left"]))
+    right = bool(held & (1 << legacy.BUTTON_BITS["right"]))
+    up = bool(held & (1 << legacy.BUTTON_BITS["up"]))
+    down = bool(held & (1 << legacy.BUTTON_BITS["down"]))
+    y_held = bool(held & (1 << legacy.BUTTON_BITS["y"]))
+    b_held = bool(held & (1 << legacy.BUTTON_BITS["b"]))
+    y_pressed = bool(pressed & (1 << legacy.BUTTON_BITS["y"]))
+    b_pressed = bool(pressed & (1 << legacy.BUTTON_BITS["b"]))
+
+    horizontal_id = 1 if left and not right else 2 if right and not left else 0
+    vertical_id = 1 if up and not down else 2 if down and not up else 0
+    jump_id = 1 if b_pressed else 2 if b_held else 0
+    fire_id = 1 if can_fire and y_pressed else 2 if can_fire and y_held else 0
+    run_id = 1 if y_held else 0
+
+    return {
+        "horizontal": ACTION_CLASSES["horizontal"][horizontal_id],
+        "horizontalId": horizontal_id,
+        "vertical": ACTION_CLASSES["vertical"][vertical_id],
+        "verticalId": vertical_id,
+        "jump": ACTION_CLASSES["jump"][jump_id],
+        "jumpId": jump_id,
+        "run": ACTION_CLASSES["run"][run_id],
+        "runId": run_id,
+        "fire": ACTION_CLASSES["fire"][fire_id],
+        "fireId": fire_id,
     }
 
 
 def player_label(record: dict[str, Any], player: int, source: str) -> dict[str, Any]:
     held = legacy.label_held(record, player, source)
     if held is None:
-        return {"valid": 0, "held": 0, "buttons": button_labels(0), "source": source}
-    return {"valid": 1, "held": held, "buttons": button_labels(held), "source": source}
+        return {
+            "valid": 0,
+            "held": 0,
+            "pressed": 0,
+            "allowedHeld": 0,
+            "buttons": button_labels(0),
+            "actions": action_labels(0, 0, can_fire=False),
+            "source": source,
+        }
+    pressed = label_pressed(record, player, source)
+    return {
+        "valid": 1,
+        "held": held,
+        "pressed": pressed,
+        "allowedHeld": held & ALLOWED_HELD_MASK,
+        "buttons": button_labels(held),
+        "actions": action_labels(held, pressed, can_fire=fire_capable(record, player)),
+        "source": source,
+    }
+
 
 
 def terrain_mask(cell: dict[str, Any]) -> int:

@@ -18182,34 +18182,67 @@ void PrepareAIPlayLogFireballOwnerTracking(int instanceID, const GameStateSample
 
 void WriteAIObservationV2ButtonLabelsJson(std::ostream& out, melonDS::u32 held)
 {
-    out << "\"buttons\":{\"a\":" << ((held & (1u << 0)) ? 1 : 0)
-        << ",\"b\":" << ((held & (1u << 1)) ? 1 : 0)
-        << ",\"select\":" << ((held & (1u << 2)) ? 1 : 0)
-        << ",\"start\":" << ((held & (1u << 3)) ? 1 : 0)
-        << ",\"right\":" << ((held & (1u << 4)) ? 1 : 0)
-        << ",\"left\":" << ((held & (1u << 5)) ? 1 : 0)
-        << ",\"up\":" << ((held & (1u << 6)) ? 1 : 0)
+    out << "\"buttons\":{\"up\":" << ((held & (1u << 6)) ? 1 : 0)
         << ",\"down\":" << ((held & (1u << 7)) ? 1 : 0)
-        << ",\"r\":" << ((held & (1u << 8)) ? 1 : 0)
-        << ",\"l\":" << ((held & (1u << 9)) ? 1 : 0)
-        << ",\"x\":" << ((held & (1u << 10)) ? 1 : 0)
+        << ",\"left\":" << ((held & (1u << 5)) ? 1 : 0)
+        << ",\"right\":" << ((held & (1u << 4)) ? 1 : 0)
         << ",\"y\":" << ((held & (1u << 11)) ? 1 : 0)
+        << ",\"b\":" << ((held & (1u << 1)) ? 1 : 0)
         << "}";
 }
 
-void WriteAIObservationV2LabelJson(std::ostream& out, const char* key, melonDS::u32 held)
+melonDS::u32 AIObservationV2AllowedHeld(melonDS::u32 held)
 {
-    out << "\"" << key << "\":{\"valid\":1,\"held\":" << held << ",";
+    return held & ((1u << 1) | (1u << 4) | (1u << 5) | (1u << 6) | (1u << 7) | (1u << 11));
+}
+
+void WriteAIObservationV2ActionLabelsJson(std::ostream& out, melonDS::u32 held, melonDS::u32 pressed, bool canFire)
+{
+    const bool left = (held & (1u << 5)) != 0;
+    const bool right = (held & (1u << 4)) != 0;
+    const bool up = (held & (1u << 6)) != 0;
+    const bool down = (held & (1u << 7)) != 0;
+    const bool yHeld = (held & (1u << 11)) != 0;
+    const bool bHeld = (held & (1u << 1)) != 0;
+    const bool yPressed = (pressed & (1u << 11)) != 0;
+    const bool bPressed = (pressed & (1u << 1)) != 0;
+    const int horizontalId = left && !right ? 1 : right && !left ? 2 : 0;
+    const int verticalId = up && !down ? 1 : down && !up ? 2 : 0;
+    const int jumpId = bPressed ? 1 : bHeld ? 2 : 0;
+    const int runId = yHeld ? 1 : 0;
+    const int fireId = canFire && yPressed ? 1 : canFire && yHeld ? 2 : 0;
+    const char* horizontal = horizontalId == 1 ? "left" : horizontalId == 2 ? "right" : "neutral";
+    const char* vertical = verticalId == 1 ? "up" : verticalId == 2 ? "down" : "neutral";
+    const char* jump = jumpId == 1 ? "press" : jumpId == 2 ? "hold" : "none";
+    const char* run = runId ? "on" : "off";
+    const char* fire = fireId == 1 ? "press" : fireId == 2 ? "hold_or_repeat" : "off";
+    out << "\"actions\":{\"horizontal\":\"" << horizontal << "\",\"horizontalId\":" << horizontalId
+        << ",\"vertical\":\"" << vertical << "\",\"verticalId\":" << verticalId
+        << ",\"jump\":\"" << jump << "\",\"jumpId\":" << jumpId
+        << ",\"run\":\"" << run << "\",\"runId\":" << runId
+        << ",\"fire\":\"" << fire << "\",\"fireId\":" << fireId
+        << "}";
+}
+
+void WriteAIObservationV2LabelJson(std::ostream& out, const char* key, melonDS::u32 held, melonDS::u32 pressed, bool canFire)
+{
+    out << "\"" << key << "\":{\"valid\":1,\"held\":" << held
+        << ",\"pressed\":" << pressed
+        << ",\"allowedHeld\":" << AIObservationV2AllowedHeld(held) << ",";
     WriteAIObservationV2ButtonLabelsJson(out, held);
+    out << ",";
+    WriteAIObservationV2ActionLabelsJson(out, held, pressed, canFire);
     out << ",\"source\":\"player\"}";
 }
 
 void WriteAIObservationV2LabelsJson(std::ostream& out, const GameStateSample& sample)
 {
+    const melonDS::u32 p0Visual = AIVisualPowerupKindCandidate(sample.Player0Powerup, sample.Player0InventoryPowerup, sample.PlayerActor0PowerupState, sample.PlayerActor0PowerupFormState, sample.PlayerActor0ShellState);
+    const melonDS::u32 p1Visual = AIVisualPowerupKindCandidate(sample.Player1Powerup, sample.Player1InventoryPowerup, sample.PlayerActor1PowerupState, sample.PlayerActor1PowerupFormState, sample.PlayerActor1ShellState);
     out << "\"labels\":{";
-    WriteAIObservationV2LabelJson(out, "player0", sample.InputPlayer0Held);
+    WriteAIObservationV2LabelJson(out, "player0", sample.InputPlayer0Held, sample.InputPlayer0Pressed, p0Visual == 2);
     out << ",";
-    WriteAIObservationV2LabelJson(out, "player1", sample.InputPlayer1Held);
+    WriteAIObservationV2LabelJson(out, "player1", sample.InputPlayer1Held, sample.InputPlayer1Pressed, p1Visual == 2);
     out << "}";
 }
 

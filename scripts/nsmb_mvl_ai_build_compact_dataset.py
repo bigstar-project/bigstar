@@ -116,11 +116,28 @@ def scalar_features(record: dict[str, Any], player: int) -> dict[str, int]:
     return {str(key): legacy.num(value) for key, value in features.items()}
 
 
-def labels(record: dict[str, Any], player: int) -> tuple[int, list[int]]:
+def labels(record: dict[str, Any], player: int) -> tuple[int, list[int], list[int]]:
     label = ((record.get("labels") or {}).get(f"player{player}")) or {}
-    held = legacy.num(label.get("held"))
+    held = legacy.num(label.get("allowedHeld"), legacy.num(label.get("held")) & compact_v2.ALLOWED_HELD_MASK)
     buttons = label.get("buttons") or {}
-    return held, [legacy.num(buttons.get(name)) for name in legacy.BUTTON_BITS.keys()]
+    if not buttons:
+        buttons = compact_v2.button_labels(held)
+    actions = label.get("actions") or compact_v2.action_labels(
+        legacy.num(label.get("held"), held),
+        legacy.num(label.get("pressed")),
+        can_fire=False,
+    )
+    return (
+        held,
+        [legacy.num(buttons.get(name)) for name in compact_v2.ALLOWED_BUTTON_BITS.keys()],
+        [
+            legacy.num(actions.get("horizontalId")),
+            legacy.num(actions.get("verticalId")),
+            legacy.num(actions.get("jumpId")),
+            legacy.num(actions.get("runId")),
+            legacy.num(actions.get("fireId")),
+        ],
+    )
 
 
 def main() -> int:
@@ -137,6 +154,7 @@ def main() -> int:
     opponent_terrain_rows: list[np.ndarray] = []
     entity_rows: list[np.ndarray] = []
     label_rows: list[list[int]] = []
+    action_rows: list[list[int]] = []
     held_rows: list[int] = []
     frame_rows: list[int] = []
     scalar_names: list[str] | None = None
@@ -168,9 +186,10 @@ def main() -> int:
             entity_matrix[index] = np.array(entity_vector(entity, args.player), dtype=np.float32)
         entity_rows.append(entity_matrix)
 
-        held, button_values = labels(record, args.player)
+        held, button_values, action_values = labels(record, args.player)
         held_rows.append(held)
         label_rows.append(button_values)
+        action_rows.append(action_values)
         frame_rows.append(legacy.num(record.get("frame")))
 
     if scalar_names is None:
@@ -187,16 +206,26 @@ def main() -> int:
         entities=np.stack(entity_rows).astype(np.float32),
         entity_features=np.array(ENTITY_FEATURES),
         labels=np.array(label_rows, dtype=np.float32),
-        label_buttons=np.array(list(legacy.BUTTON_BITS.keys())),
+        label_buttons=np.array(list(compact_v2.ALLOWED_BUTTON_BITS.keys())),
         label_held=np.array(held_rows, dtype=np.int32),
+        actions=np.array(action_rows, dtype=np.int64),
+        action_heads=np.array(compact_v2.ACTION_HEADS),
+        action_classes_horizontal=np.array(compact_v2.ACTION_CLASSES["horizontal"]),
+        action_classes_vertical=np.array(compact_v2.ACTION_CLASSES["vertical"]),
+        action_classes_jump=np.array(compact_v2.ACTION_CLASSES["jump"]),
+        action_classes_run=np.array(compact_v2.ACTION_CLASSES["run"]),
+        action_classes_fire=np.array(compact_v2.ACTION_CLASSES["fire"]),
         frames=np.array(frame_rows, dtype=np.int32),
         metadata=np.array(
             json.dumps(
                 {
-                    "schema": "nsmb_mvl_compact_dataset_v1",
+                    "schema": "nsmb_mvl_compact_dataset_v2",
+                    "labelSchema": "nsmb_mvl_action_labels_v1",
                     "source": str(args.input),
                     "player": args.player,
                     "maxEntities": args.max_entities,
+                    "allowedButtons": list(compact_v2.ALLOWED_BUTTON_BITS.keys()),
+                    "actionHeads": compact_v2.ACTION_HEADS,
                     "rows": len(frame_rows),
                 },
                 separators=(",", ":"),
