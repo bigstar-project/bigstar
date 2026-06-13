@@ -28,6 +28,10 @@
 ## Implementation Status
 
 - 完了: ルールベースAI本体を `src/frontend/qt_sdl/NsmbRuleAI.cpp` / `.h` に分離した。
+- 完了: AI play log v1を監査用として残しつつ、学習用の `nsmb_mvl_compact_observation_v2` を追加した。`scripts/nsmb_mvl_ai_convert_playlog_v2.py` は v1 JSONL / `.jsonl.gz` / `recording.json` / `recordings-index.json` を読み、1フレームを `scalarFeaturesByPlayer`、player別 `terrain`、typed `entities`、`labels` に分けたcompact JSONLへ変換する。通常v2ではfireball debug words、object vtable、raw pointer類を落とし、地形は `33x17` の `sparse_channel_mask_v2` として `solid/coin/question/breakable/brick/harmful/hiddenOrRescue` などのbit channelで保存する。
+- 完了: `scripts/nsmb_mvl_ai_build_compact_dataset.py` を追加し、compact observation v2から `scalar`、`terrain`、`opponent_terrain`、固定上限 `entities`、`labels` を分離した `.npz` datasetを作れるようにした。これは将来の `scalar + terrain + entities` モデル用の正本候補で、従来の巨大固定列CSVは互換/baseline用として扱う。
+- 完了: compact v2の同等性検証用に、`scripts/nsmb_mvl_ai_convert_playlog_v2.py --include-legacy-features` と `scripts/nsmb_mvl_ai_legacy_csv_from_v2.py` を追加した。通常v2には巨大な旧CSV行を入れないが、検証時だけ `legacyFeatureRows` を埋め込み、v2から旧CSVを復元して既存 `nsmb_mvl_ai_build_dataset.py` の出力と比較できる。
+- 完了: `scripts/run-nsmb-mvl-human-recording.ps1` の後処理に `ai-observations-v2.jsonl.gz` と `ai-compact-dataset-player1.npz` の生成を追加した。既存の v1 `ai-playlog.jsonl(.gz)`、監査JSON、従来CSVはそのまま残す。
 - 完了: player actor、Big Star actor/candidate、Battle Starsを使ってremote CPU入力を生成できる。
 - 完了: 左右ラップ幅 `MELONDS_NSML_RULE_AI_WRAP_WIDTH=0x400000` を考慮して目標へ向かう。
 - 完了: RuleAIの左右ラップ方向計算で、player Xが負座標になったときに `u32` 座標として差分計算され、スター方向が左のままなのに右入力へ反転する問題を修正した。座標はまず符号付き32bitへ戻し、wrap幅で剰余正規化してから左右判定する。`logs/watch-ruleai/client/ai-playlog.jsonl` の終盤スタックでは旧計算だと x<0 で `dx` が正方向へ化けていたが、修正後の同区間は全sampleで左方向のままになる。
