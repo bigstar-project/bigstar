@@ -28,6 +28,15 @@ param(
     [int]$ForcePlayerPowerupsEndFrame = 0,
     [int]$ForcePlayerPowerup0 = 0,
     [int]$ForcePlayerPowerup1 = 0,
+    [switch]$ForcePlayerStarCounters,
+    [int]$ForcePlayerStarCountersStartFrame = 900,
+    [int]$ForcePlayerStarCountersEndFrame = 1500,
+    [int]$ForcePlayerBattleStars0 = 0,
+    [int]$ForcePlayerBattleStars1 = 0,
+    [int]$ForcePlayerDisplayedStars0 = 0,
+    [int]$ForcePlayerDisplayedStars1 = 0,
+    [int]$ForcePlayerCollectedStars0 = 0,
+    [int]$ForcePlayerCollectedStars1 = 0,
     [int]$RuleAIAuditSampleLimit = 16,
     [int]$RuleAIAuditStuckRecords = 6
 )
@@ -166,6 +175,19 @@ try {
             "-ForcePlayerPowerupsEndFrame", "$ForcePlayerPowerupsEndFrame",
             "-ForcePlayerPowerup0", "$ForcePlayerPowerup0",
             "-ForcePlayerPowerup1", "$ForcePlayerPowerup1"
+        )
+    }
+    if ($ForcePlayerStarCounters) {
+        $smokeArgs += @(
+            "-ForcePlayerStarCounters",
+            "-ForcePlayerStarCountersStartFrame", "$ForcePlayerStarCountersStartFrame",
+            "-ForcePlayerStarCountersEndFrame", "$ForcePlayerStarCountersEndFrame",
+            "-ForcePlayerBattleStars0", "$ForcePlayerBattleStars0",
+            "-ForcePlayerBattleStars1", "$ForcePlayerBattleStars1",
+            "-ForcePlayerDisplayedStars0", "$ForcePlayerDisplayedStars0",
+            "-ForcePlayerDisplayedStars1", "$ForcePlayerDisplayedStars1",
+            "-ForcePlayerCollectedStars0", "$ForcePlayerCollectedStars0",
+            "-ForcePlayerCollectedStars1", "$ForcePlayerCollectedStars1"
         )
     }
 
