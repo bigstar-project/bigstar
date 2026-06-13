@@ -422,6 +422,7 @@ const sceneScale = 0.5;
 const stageWrapWidthPx = 1024;
 const tileGridSizePx = 12;
 const hiddenSceneObjectCategories = new Set([
+  'big_star_related',
   'camera',
   'course_select',
   'mvl_object267',
@@ -919,7 +920,7 @@ function ReplayScene({
       </g>
       {hiddenObjectCount > 0 ? (
         <text x="24" y="342" fill="#64748b" fontSize="9" fontWeight="700">
-          hidden system objects: {hiddenObjectCount}
+          hidden helper objects: {hiddenObjectCount}
         </text>
       ) : null}
     </svg>

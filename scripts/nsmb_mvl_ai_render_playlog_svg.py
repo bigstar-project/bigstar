@@ -19,6 +19,7 @@ STAGE_WRAP_WIDTH_PX = 1024
 TILE_GRID_SIZE_PX = 14
 
 HIDDEN_SCENE_OBJECT_CATEGORIES = {
+    "big_star_related",
     "camera",
     "course_select",
     "mvl_object267",
@@ -485,7 +486,7 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
     legend_y -= 22
     legend_x = 20
     for category, (color, label) in CATEGORY_STYLE.items():
-        if category in {"object", "player"}:
+        if category in {"object", "player"} or category in HIDDEN_SCENE_OBJECT_CATEGORIES:
             continue
         parts.append(f'<circle cx="{legend_x}" cy="{legend_y}" r="6" fill="{color}"/>')
         parts.append(
