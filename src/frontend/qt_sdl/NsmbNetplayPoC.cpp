@@ -15579,6 +15579,8 @@ melonDS::u32 AIVisualPowerupKindCandidate(
         return 2;
     if (powerup == 4 || shellState != 0)
         return 4;
+    if (actorPowerupState == 3 || actorPowerupFormState == 3)
+        return 5;
     if (actorPowerupState == 4 || actorPowerupFormState == 4)
         return 3;
     if (powerup == 1 || actorPowerupState == 1 || actorPowerupFormState == 1)
@@ -16573,6 +16575,7 @@ void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& samp
         << ",\"visualPowerupSourceMask\":" << visualPowerupSource
         << ",\"isFireVisualCandidate\":" << (visualPowerupKind == 2 ? 1 : 0)
         << ",\"isMiniVisualCandidate\":" << (visualPowerupKind == 3 ? 1 : 0)
+        << ",\"isMegaVisualCandidate\":" << (visualPowerupKind == 5 ? 1 : 0)
         << ",\"canShootFireVisualCandidate\":"
         << ((powerup == 2 || powerupState == 2 || powerupFormState == 2) ? 1 : 0)
         << ",\"actorPowerupState\":" << powerupState
@@ -16944,10 +16947,11 @@ bool RuntimePlayerFeature(
     else if (name == "visual_powerup_source_mask") out = visualSource;
     else if (name == "is_fire_visual_candidate") out = visualPowerup == 2 ? 1 : 0;
     else if (name == "is_mini_visual_candidate") out = visualPowerup == 3 ? 1 : 0;
+    else if (name == "is_mega_visual_candidate") out = visualPowerup == 5 ? 1 : 0;
     else if (name == "can_shoot_fire_visual_candidate") out = visualPowerup == 2 ? 1 : 0;
     else if (name == "is_mini_candidate") out = visualPowerup == 3 ? 1 : 0;
     else if (name == "is_shell_candidate") out = powerup == 4 || shellState != 0 ? 1 : 0;
-    else if (name == "is_mega_candidate") out = powerup == 5 ? 1 : 0;
+    else if (name == "is_mega_candidate") out = visualPowerup == 5 ? 1 : 0;
     else if (name == "actor_powerup_state") out = powerupState;
     else if (name == "actor_powerup_form_state") out = powerupFormState;
     else if (name == "actor_powerup_aux_state") out = v(sample.PlayerActor0PowerupAuxState, sample.PlayerActor1PowerupAuxState);
@@ -17392,9 +17396,9 @@ bool RuntimeItemSettingsIsShellCandidate(melonDS::u32 settings)
     return settings == 0x0001108Bu;
 }
 
-bool RuntimeItemSettingsIsMegaMushroomCandidate(melonDS::u32)
+bool RuntimeItemSettingsIsMegaMushroomCandidate(melonDS::u32 settings)
 {
-    return false;
+    return settings == 0x00011085u;
 }
 
 bool RuntimeItemSettingsIsInvincibleStarCandidate(melonDS::u32 settings)
@@ -17467,7 +17471,7 @@ std::pair<int, int> RuntimeItemKindAndConfidence(
     if (RuntimeItemSettingsIsShellCandidate(settings))
         return {kRuntimeItemKindShell, kRuntimeItemKindConfidenceConfirmed};
     if (RuntimeItemSettingsIsMegaMushroomCandidate(settings))
-        return {kRuntimeItemKindMegaMushroom, kRuntimeItemKindConfidenceHeuristic};
+        return {kRuntimeItemKindMegaMushroom, kRuntimeItemKindConfidenceConfirmed};
     if (RuntimeItemSettingsIsInvincibleStarCandidate(settings))
         return {kRuntimeItemKindInvincibleStar, kRuntimeItemKindConfidenceConfirmed};
     if (RuntimeItemSettingsIsUnknownItemVariantCandidate(settings))

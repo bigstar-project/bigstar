@@ -143,7 +143,12 @@ ITEM_SETTINGS_FIRE_CANDIDATES = {
 ITEM_SETTINGS_SUPER_MUSHROOM_CANDIDATES = {
     0x00011088,
 }
-ITEM_SETTINGS_MEGA_MUSHROOM_CANDIDATES: set[int] = set()
+ITEM_SETTINGS_MEGA_MUSHROOM_CANDIDATES = {
+    # Observed by manual visual confirmation at
+    # logs/nsmb-mvl-human-recording-stage0-20260614-010450/client/ai-playlog.jsonl
+    # frame 6789; Luigi is visibly Mega by frame 6977.
+    0x00011085,
+}
 ITEM_SETTINGS_INVINCIBLE_STAR_CANDIDATES = {
     # Observed by manual visual confirmation at
     # logs/nsmb-mvl-human-recording-stage0-20260614-000043/client/ai-playlog.jsonl
@@ -504,6 +509,10 @@ def visual_powerup_kind_candidate(player: dict[str, Any]) -> int:
         return ITEM_KIND_FIRE_FLOWER
     if powerup == ITEM_KIND_SHELL or shell_state != 0:
         return ITEM_KIND_SHELL
+    # Actor state/form 3 is Mega in the 2026-06-14 stage 0 manual log. Do not
+    # confuse it with dataset item kind 3, which is Mini Mushroom.
+    if actor_powerup_state == ITEM_KIND_MINI_MUSHROOM or actor_powerup_form_state == ITEM_KIND_MINI_MUSHROOM:
+        return ITEM_KIND_MEGA_MUSHROOM
     # In observed stage 0 logs, Mini Mario is represented by actor powerup state/form state 4,
     # while global powerup/raw inventory can still report super/reserve values.
     if actor_powerup_state == ITEM_KIND_SHELL or actor_powerup_form_state == ITEM_KIND_SHELL:
@@ -607,7 +616,7 @@ def item_kind_candidate(object_id: int, settings: int, category: str, current_po
     if settings in ITEM_SETTINGS_SHELL_CANDIDATES:
         return ITEM_KIND_SHELL, ITEM_KIND_CONFIDENCE_CONFIRMED
     if settings in ITEM_SETTINGS_MEGA_MUSHROOM_CANDIDATES:
-        return ITEM_KIND_MEGA_MUSHROOM, ITEM_KIND_CONFIDENCE_HEURISTIC
+        return ITEM_KIND_MEGA_MUSHROOM, ITEM_KIND_CONFIDENCE_CONFIRMED
     if settings in ITEM_SETTINGS_INVINCIBLE_STAR_CANDIDATES:
         return ITEM_KIND_INVINCIBLE_STAR, ITEM_KIND_CONFIDENCE_CONFIRMED
     if settings in ITEM_SETTINGS_UNKNOWN_ITEM_VARIANTS:
@@ -967,7 +976,8 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "self_can_shoot_fire_visual_candidate": num(self_visual.get("canShootFireVisualCandidate")),
         "self_is_mini_candidate": int(self_visual_powerup_kind == ITEM_KIND_MINI_MUSHROOM),
         "self_is_shell_candidate": num(self_visual_powerup.get("isShellCandidate")),
-        "self_is_mega_candidate": num(self_visual_powerup.get("isMegaCandidate")),
+        "self_is_mega_visual_candidate": int(self_visual_powerup_kind == ITEM_KIND_MEGA_MUSHROOM),
+        "self_is_mega_candidate": int(self_visual_powerup_kind == ITEM_KIND_MEGA_MUSHROOM),
         "self_actor_powerup_state": num(self_visual.get("actorPowerupState")),
         "self_actor_powerup_form_state": num(self_visual.get("actorPowerupFormState")),
         "self_actor_powerup_aux_state": num(self_visual.get("actorPowerupAuxState")),
@@ -1026,7 +1036,8 @@ def build_row(record: dict[str, Any], player: int, label_source: str) -> dict[st
         "opponent_can_shoot_fire_visual_candidate": num(opponent_visual.get("canShootFireVisualCandidate")),
         "opponent_is_mini_candidate": int(opponent_visual_powerup_kind == ITEM_KIND_MINI_MUSHROOM),
         "opponent_is_shell_candidate": num(opponent_visual_powerup.get("isShellCandidate")),
-        "opponent_is_mega_candidate": num(opponent_visual_powerup.get("isMegaCandidate")),
+        "opponent_is_mega_visual_candidate": int(opponent_visual_powerup_kind == ITEM_KIND_MEGA_MUSHROOM),
+        "opponent_is_mega_candidate": int(opponent_visual_powerup_kind == ITEM_KIND_MEGA_MUSHROOM),
         "opponent_actor_powerup_state": num(opponent_visual.get("actorPowerupState")),
         "opponent_actor_powerup_form_state": num(opponent_visual.get("actorPowerupFormState")),
         "opponent_actor_powerup_aux_state": num(opponent_visual.get("actorPowerupAuxState")),

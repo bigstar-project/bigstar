@@ -105,6 +105,7 @@ def player_summary(player: dict[str, Any]) -> dict[str, Any]:
         "visualPowerupKindCandidate": num(visual_state.get("visualPowerupKindCandidate")),
         "visualPowerupSourceMask": num(visual_state.get("visualPowerupSourceMask")),
         "isFireVisualCandidate": bool(visual_state.get("isFireVisualCandidate")),
+        "isMegaVisualCandidate": bool(visual_state.get("isMegaVisualCandidate")),
         "canShootFireVisualCandidate": bool(visual_state.get("canShootFireVisualCandidate")),
         "damageCooldown": num(player.get("damageCooldown")),
         "damageGuardTimer": num(visual_state.get("damageGuardTimer")),

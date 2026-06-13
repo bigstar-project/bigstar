@@ -201,6 +201,8 @@ def visual_state_text(player: dict[str, Any]) -> str:
         parts.append(f"visualPwr={visual_kind}")
     if visual_kind == 3:
         parts.append("miniVisual")
+    if visual_kind == 5:
+        parts.append("megaVisual")
     if num(visual_state.get("canShootFireVisualCandidate")):
         parts.append("fireVisual")
     if star_invincible:
@@ -232,6 +234,8 @@ def corrected_visual_powerup_kind(player: dict[str, Any]) -> int:
         return 2
     if raw_powerup == 4 or shell_state:
         return 4
+    if actor_state == 3 or actor_form == 3:
+        return 5
     if actor_state == 4 or actor_form == 4:
         return 3
     if raw_powerup == 1 or actor_state == 1 or actor_form == 1:

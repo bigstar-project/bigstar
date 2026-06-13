@@ -86,6 +86,8 @@ def visual_powerup_kind_candidate(player: dict[str, Any]) -> int:
         return 2
     if raw_powerup == 4 or shell_state:
         return 4
+    if actor_state == 3 or actor_form == 3:
+        return 5
     if actor_state == 4 or actor_form == 4:
         return 3
     if raw_powerup == 1 or actor_state == 1 or actor_form == 1:
