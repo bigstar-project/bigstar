@@ -13,6 +13,9 @@ constexpr int kButtonA = 0;
 constexpr int kButtonRight = 4;
 constexpr int kButtonLeft = 5;
 constexpr int kButtonY = 11;
+constexpr int kHazardEscapeHoldFrames = 18;
+constexpr int kHazardJumpCycleFrames = 20;
+constexpr int kHazardJumpPressFrames = 4;
 
 struct PlayerMemory
 {
@@ -22,6 +25,9 @@ struct PlayerMemory
     int StillFrames = 0;
     int EscapeFrames = 0;
     int EscapeDirection = 0;
+    int HazardEscapeFrames = 0;
+    int HazardEscapeDirection = 0;
+    int HazardFrames = 0;
 };
 
 PlayerMemory GPlayerMemory[16][2] {};
@@ -117,10 +123,16 @@ NsmbNetplayPoC::InputState DecideInput(
     const int opponent = player ^ 1;
     const PlayerFrameState& self = state.Players[player];
     const PlayerFrameState& other = state.Players[opponent];
+    PlayerMemory* memory = nullptr;
+    if (instanceID >= 0 && instanceID < 16)
+        memory = &GPlayerMemory[instanceID][player];
+    if (memory && memory->Initialized && frame < memory->LastFrame)
+        *memory = {};
+
     if (self.Dead)
     {
-        if (instanceID >= 0 && instanceID < 16)
-            GPlayerMemory[instanceID][player] = {};
+        if (memory)
+            *memory = {};
         return NeutralInputPreservingTouch(fallback);
     }
 
@@ -153,7 +165,6 @@ NsmbNetplayPoC::InputState DecideInput(
         std::abs(hazardDx) <= config.HazardHorizontalRange &&
         std::abs(hazardDy) <= config.HazardVerticalRange &&
         (self.HazardClosing || self.HazardVeryClose);
-
     const bool evadingOpponent = self.BattleStars > other.BattleStars && absOpponentDx < config.CloseRange;
     const bool starTargetVisible = state.StarActorFound || state.StarFound;
     if (self.BattleStars > other.BattleStars)
@@ -173,9 +184,18 @@ NsmbNetplayPoC::InputState DecideInput(
     if (hazardDanger)
     {
         const bool hazardOnLeft = hazardDx < 0;
-        const bool escapeBlocked = hazardOnLeft ?
-            (self.WallRight || self.HoleRight) :
-            (self.WallLeft || self.HoleLeft);
+        int escapeDirection = hazardOnLeft ? 1 : -1;
+        if (memory)
+        {
+            if (memory->HazardEscapeFrames > 0 && memory->HazardEscapeDirection != 0)
+                escapeDirection = memory->HazardEscapeDirection;
+            memory->HazardEscapeDirection = escapeDirection;
+            memory->HazardEscapeFrames = kHazardEscapeHoldFrames;
+            memory->HazardFrames++;
+        }
+        const bool escapeBlocked = escapeDirection > 0 ?
+            (self.BlockedRight || self.HoleRight) :
+            (self.BlockedLeft || self.HoleLeft);
         if (escapeBlocked)
         {
             dx = 0;
@@ -183,19 +203,23 @@ NsmbNetplayPoC::InputState DecideInput(
         }
         else
         {
-            dx = hazardOnLeft ? config.CloseRange : -config.CloseRange;
+            dx = escapeDirection * config.CloseRange;
             mode = "hazard";
         }
     }
-
-    PlayerMemory* memory = nullptr;
-    if (instanceID >= 0 && instanceID < 16)
-        memory = &GPlayerMemory[instanceID][player];
+    else if (memory)
+    {
+        if (memory->HazardEscapeFrames > 0)
+            memory->HazardEscapeFrames--;
+        else
+            memory->HazardEscapeDirection = 0;
+        memory->HazardFrames = 0;
+    }
 
     int horizontalIntent = SignWithDeadzone(dx, config.HorizontalDeadzone);
     const int rawIntent = SignWithDeadzone(rawDx, config.HorizontalDeadzone);
-    const bool blockedLeft = self.WallLeft || self.HoleLeft;
-    const bool blockedRight = self.WallRight || self.HoleRight;
+    const bool blockedLeft = self.BlockedLeft || self.HoleLeft;
+    const bool blockedRight = self.BlockedRight || self.HoleRight;
     const bool canRawRouteLeft = rawIntent < 0 && !blockedLeft;
     const bool canRawRouteRight = rawIntent > 0 && !blockedRight;
     if (evadingOpponent &&
@@ -215,7 +239,7 @@ NsmbNetplayPoC::InputState DecideInput(
     if (!hazardDanger && !evadingOpponent &&
         ((horizontalIntent < 0 && blockedLeft && canRawRouteRight) ||
          (horizontalIntent > 0 && blockedRight && canRawRouteLeft) ||
-         (horizontalIntent == 0 && ((self.WallLeft && canRawRouteRight) || (self.WallRight && canRawRouteLeft)))))
+         (horizontalIntent == 0 && ((self.BlockedLeft && canRawRouteRight) || (self.BlockedRight && canRawRouteLeft)))))
     {
         horizontalIntent = rawIntent;
         dx = horizontalIntent * std::max(config.HorizontalDeadzone + 1, config.CloseRange / 2);
@@ -260,8 +284,8 @@ NsmbNetplayPoC::InputState DecideInput(
             mode = rawIntent != 0 && rawIntent != horizontalIntent ? "wallRoute" : "wallEscape";
         }
         else if (horizontalIntent != 0 &&
-                 memory->StillFrames >= config.StuckFrames &&
-                 (self.WallAhead || self.WallLeft || self.WallRight || self.HoleAhead))
+                  memory->StillFrames >= config.StuckFrames &&
+                  (self.BlockedAhead || self.BlockedLeft || self.BlockedRight || self.HoleAhead))
         {
             memory->EscapeDirection = -horizontalIntent;
             memory->EscapeFrames = std::max(memory->EscapeFrames, config.WallEscapeFrames);
@@ -295,7 +319,7 @@ NsmbNetplayPoC::InputState DecideInput(
     if (!hazardDanger && !evadingOpponent &&
         ((horizontalIntent < 0 && blockedLeft && canRawRouteRight) ||
          (horizontalIntent > 0 && blockedRight && canRawRouteLeft) ||
-         (horizontalIntent == 0 && ((self.WallLeft && canRawRouteRight) || (self.WallRight && canRawRouteLeft)))))
+         (horizontalIntent == 0 && ((self.BlockedLeft && canRawRouteRight) || (self.BlockedRight && canRawRouteLeft)))))
     {
         horizontalIntent = rawIntent;
         dx = horizontalIntent * std::max(config.HorizontalDeadzone + 1, config.CloseRange / 2);
@@ -308,8 +332,8 @@ NsmbNetplayPoC::InputState DecideInput(
         mode = "rawWallRoute";
     }
 
-    const bool leftOnlyHole = self.HoleLeft && !self.HoleRight && !self.WallRight;
-    const bool rightOnlyHole = self.HoleRight && !self.HoleLeft && !self.WallLeft;
+    const bool leftOnlyHole = self.HoleLeft && !self.HoleRight && !self.BlockedRight;
+    const bool rightOnlyHole = self.HoleRight && !self.HoleLeft && !self.BlockedLeft;
     if (!hazardDanger && !evadingOpponent &&
         ((horizontalIntent < 0 && leftOnlyHole) ||
          (horizontalIntent > 0 && rightOnlyHole)))
@@ -329,9 +353,9 @@ NsmbNetplayPoC::InputState DecideInput(
         !self.GroundBelowSolid &&
         (self.HoleAhead || self.HoleLeft || self.HoleRight))
     {
-        if (self.WallLeft && !self.WallRight)
+        if (self.BlockedLeft && !self.BlockedRight)
             horizontalIntent = 1;
-        else if (self.WallRight && !self.WallLeft)
+        else if (self.BlockedRight && !self.BlockedLeft)
             horizontalIntent = -1;
         else
             horizontalIntent = 0;
@@ -367,10 +391,15 @@ NsmbNetplayPoC::InputState DecideInput(
     const bool movingLeft = (input.KeyMask & (1u << kButtonLeft)) == 0;
     const bool movingRight = (input.KeyMask & (1u << kButtonRight)) == 0;
     const bool terrainJump =
-        (movingLeft && (self.HoleLeft || self.WallLeft)) ||
-        (movingRight && (self.HoleRight || self.WallRight)) ||
-        (movingHorizontally && (self.HoleAhead || self.WallAhead));
-    if (periodicJump || targetAbove || closeOpponent || terrainJump || hazardDanger)
+        (movingLeft && (self.HoleLeft || self.BlockedLeft)) ||
+        (movingRight && (self.HoleRight || self.BlockedRight)) ||
+        (movingHorizontally && (self.HoleAhead || self.BlockedAhead));
+    const int hazardFrames = memory ? memory->HazardFrames : static_cast<int>(frame % kHazardJumpCycleFrames);
+    const bool hazardJump =
+        hazardDanger &&
+        (!self.GroundBelowSolid ||
+         ((hazardFrames % kHazardJumpCycleFrames) < kHazardJumpPressFrames));
+    if (periodicJump || targetAbove || closeOpponent || terrainJump || hazardJump)
         PressButton(input, kButtonA);
 
     if (config.TraceEnabled &&
@@ -402,11 +431,11 @@ NsmbNetplayPoC::InputState DecideInput(
             self.HazardClosing ? 1 : 0,
             self.HazardVeryClose ? 1 : 0,
             self.GroundBelowSolid ? 1 : 0,
-            self.WallAhead ? 1 : 0,
+            self.BlockedAhead ? 1 : 0,
             self.HoleAhead ? 1 : 0,
-            self.WallLeft ? 1 : 0,
+            self.BlockedLeft ? 1 : 0,
             self.HoleLeft ? 1 : 0,
-            self.WallRight ? 1 : 0,
+            self.BlockedRight ? 1 : 0,
             self.HoleRight ? 1 : 0,
             input.KeyMask);
     }

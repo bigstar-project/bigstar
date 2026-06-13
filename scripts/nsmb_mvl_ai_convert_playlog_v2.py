@@ -76,6 +76,16 @@ ACTION_CLASSES = {
     "fire": ["off", "press"],
 }
 
+COMPACT_SCALAR_TILE_KEYS = [
+    "groundBelowSolid",
+    "blockedAhead",
+    "blockedLeft",
+    "blockedRight",
+    "effectiveHoleAhead",
+    "effectiveHoleLeft",
+    "effectiveHoleRight",
+]
+
 
 def open_text(path: Path, mode: str) -> TextIO:
     if path.name.lower().endswith(".gz"):
@@ -417,7 +427,7 @@ def scalar_features_for_player(record: dict[str, Any], player: int) -> dict[str,
         "runtime_hazard_dy": runtime_hazard["dy"],
         "runtime_hazard_closing": runtime_hazard["closing"],
         "runtime_hazard_category": runtime_hazard["category"],
-        **{f"tile_{name}": legacy.num(value) for name, value in tile_summary.items()},
+        **{f"tile_{name}": legacy.num(tile_summary.get(name)) for name in COMPACT_SCALAR_TILE_KEYS},
     }
 
 

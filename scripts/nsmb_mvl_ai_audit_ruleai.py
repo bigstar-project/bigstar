@@ -186,8 +186,8 @@ def audit(path: Path, player_index: int, sample_limit: int, stuck_records: int) 
         direction = -1 if left and not right else 1 if right and not left else 0
         summary = tile_summary(p)
         contact = p.get("contact") or {}
-        wall_left = bool(num(summary.get("wallLeft")) or num(contact.get("wallLeft")))
-        wall_right = bool(num(summary.get("wallRight")) or num(contact.get("wallRight")))
+        blocked_left = bool(num(summary.get("blockedLeft"), summary.get("wallLeft")) or num(contact.get("wallLeft")))
+        blocked_right = bool(num(summary.get("blockedRight"), summary.get("wallRight")) or num(contact.get("wallRight")))
         hole_left = bool(num(summary.get("effectiveHoleLeft"), summary.get("holeLeft")))
         hole_right = bool(num(summary.get("effectiveHoleRight"), summary.get("holeRight")))
         hole_ahead = bool(num(summary.get("effectiveHoleAhead"), summary.get("holeAhead")))
@@ -243,13 +243,13 @@ def audit(path: Path, player_index: int, sample_limit: int, stuck_records: int) 
                 },
             )
 
-        if left and wall_left or right and wall_right:
+        if left and blocked_left or right and blocked_right:
             blocked_input_rows += 1
             append_sample(
                 samples["blockedInputs"],
                 sample_limit,
                 {"frame": frame, "held": f"0x{mask or 0:03X}", "x": pos_x(p), "y": pos_y(p),
-                 "wallLeft": int(wall_left), "wallRight": int(wall_right)},
+                 "blockedLeft": int(blocked_left), "blockedRight": int(blocked_right)},
             )
         if left and hole_left or right and hole_right or (direction != 0 and hole_ahead):
             hole_input_rows += 1

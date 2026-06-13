@@ -269,13 +269,20 @@ TILE_PROBE_SUMMARY_NAMES = [
     "aheadFeetSolid",
     "aheadBelowSolid",
     "ahead2BelowSolid",
-    "wallAhead",
+    "leftBodySolid",
+    "leftBelowSolid",
+    "left2BelowSolid",
+    "rightBodySolid",
+    "rightBelowSolid",
+    "right2BelowSolid",
+    "blockedAhead",
     "holeAhead",
-    "wallLeft",
+    "blockedLeft",
     "holeLeft",
-    "wallRight",
+    "blockedRight",
     "holeRight",
     "contactGround",
+    "ambiguousSideBody",
     "effectiveGroundBelowSolid",
     "holeSuppressedByContact",
     "effectiveHoleAhead",
@@ -428,6 +435,10 @@ def recompute_tile_probe_summary(
     hole_left = int(found and not left_below and not left2_below)
     hole_right = int(found and not right_below and not right2_below)
     hole_suppressed = int(contact_ground and not ground_below)
+    ambiguous_side_body = int(contact_ground and left_body and right_body and not contact_wall_left and not contact_wall_right)
+    blocked_ahead = int(ahead_body or ahead_feet)
+    blocked_left = int(contact_wall_left or (left_body and not ambiguous_side_body))
+    blocked_right = int(contact_wall_right or (right_body and not ambiguous_side_body))
 
     return {
         "groundBelowSolid": ground_below,
@@ -435,13 +446,20 @@ def recompute_tile_probe_summary(
         "aheadFeetSolid": ahead_feet,
         "aheadBelowSolid": ahead_below,
         "ahead2BelowSolid": ahead2_below,
-        "wallAhead": int(ahead_body or ahead_feet),
+        "leftBodySolid": left_body,
+        "leftBelowSolid": left_below,
+        "left2BelowSolid": left2_below,
+        "rightBodySolid": right_body,
+        "rightBelowSolid": right_below,
+        "right2BelowSolid": right2_below,
+        "blockedAhead": blocked_ahead,
         "holeAhead": hole_ahead,
-        "wallLeft": int(left_body or contact_wall_left),
+        "blockedLeft": blocked_left,
         "holeLeft": hole_left,
-        "wallRight": int(right_body or contact_wall_right),
+        "blockedRight": blocked_right,
         "holeRight": hole_right,
         "contactGround": contact_ground,
+        "ambiguousSideBody": ambiguous_side_body,
         "effectiveGroundBelowSolid": int(ground_below or contact_ground),
         "holeSuppressedByContact": hole_suppressed,
         "effectiveHoleAhead": int(hole_ahead and not hole_suppressed),

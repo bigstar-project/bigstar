@@ -158,20 +158,28 @@ def tile_probe_summary_text(player: dict[str, Any]) -> str:
     summary = ((player.get("tileProbe") or {}).get("summary")) or {}
     tags = []
     pairs = [
-        ("wallAhead", "wall"),
+        ("blockedAhead", "block"),
         ("effectiveHoleAhead", "hole"),
         ("effectiveGroundBelowSolid", "ground"),
         ("holeSuppressedByContact", "suppress"),
         ("aheadBodySolid", "aheadBody"),
         ("aheadBelowSolid", "aheadBelow"),
-        ("wallLeft", "wallLeft"),
+        ("blockedLeft", "blockLeft"),
         ("effectiveHoleLeft", "holeLeft"),
-        ("wallRight", "wallRight"),
+        ("blockedRight", "blockRight"),
         ("effectiveHoleRight", "holeRight"),
     ]
     for key, label in pairs:
         if num(summary.get(key)):
             tags.append(label)
+    if not tags:
+        for key, label in [
+            ("wallAhead", "wall"),
+            ("wallLeft", "wallLeft"),
+            ("wallRight", "wallRight"),
+        ]:
+            if num(summary.get(key)):
+                tags.append(label)
     if not tags:
         for key, label in [
             ("holeAhead", "hole"),

@@ -40,11 +40,11 @@ struct PlayerFrameState
     bool Dead = false;
     melonDS::u32 BattleStars = 0;
     bool GroundBelowSolid = false;
-    bool WallAhead = false;
+    bool BlockedAhead = false;
     bool HoleAhead = false;
-    bool WallLeft = false;
+    bool BlockedLeft = false;
     bool HoleLeft = false;
-    bool WallRight = false;
+    bool BlockedRight = false;
     bool HoleRight = false;
     bool HazardFound = false;
     bool HazardClosing = false;
