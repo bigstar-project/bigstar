@@ -99,6 +99,7 @@ param(
     [switch]$AllowJit,
     [switch]$NoJit,
     [switch]$NoFrameLimit,
+    [switch]$SkipFrameLimitCheck,
     [switch]$SoftwareRenderer,
     [switch]$Wait
 )
@@ -363,6 +364,9 @@ if ($WorldStateSkipEffects) {
 }
 if ($NoFrameLimit) {
     $common += "-NoFrameLimit"
+}
+if ($SkipFrameLimitCheck) {
+    $common += "-SkipFrameLimitCheck"
 }
 if (-not $NoJit) {
     $common += "-AllowJit"

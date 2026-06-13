@@ -91,6 +91,7 @@ $manualArgs = @{
     AIPlayLogMaxObjects = $AIPlayLogMaxObjects
     NetworkPumpThread = $true
     NetworkPumpSleepUs = 50
+    SkipFrameLimitCheck = $true
     Wait = (-not $NoAutoPostprocess)
 }
 if ($singleWindow) {

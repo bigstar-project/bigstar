@@ -66,6 +66,7 @@ param(
     [int]$LanMPTraceDumpLen = 512,
     [switch]$NoHashLog,
     [switch]$NoFrameLimit,
+    [switch]$SkipFrameLimitCheck,
     [switch]$NoAudioSync,
     [switch]$NoDrawScreen,
     [switch]$FixedFrameTime,
@@ -3692,8 +3693,10 @@ if ($RunRole -eq "both" -or $RunRole -eq "client") {
 }
 
 $requiredPatterns = @()
-foreach ($info in $roleInfos) {
-    $requiredPatterns += @{ Path = $info.Out; Pattern = "frame limit reached"; Name = "$($info.Role) frame limit" }
+if (-not $SkipFrameLimitCheck) {
+    foreach ($info in $roleInfos) {
+        $requiredPatterns += @{ Path = $info.Out; Pattern = "frame limit reached"; Name = "$($info.Role) frame limit" }
+    }
 }
 if (-not $NoLanMP -and -not $PacketBridge -and -not $InputNetplay -and -not ($RunRole -ne "both" -and $ScriptRemotePacket -and $PacketBridgeArmOnly)) {
     foreach ($info in $roleInfos) {
