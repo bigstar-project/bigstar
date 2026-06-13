@@ -9,13 +9,19 @@
 namespace NsmbRuleAI
 {
 
-constexpr int kButtonA = 0;
+constexpr int kButtonB = 1;
 constexpr int kButtonRight = 4;
 constexpr int kButtonLeft = 5;
 constexpr int kButtonY = 11;
 constexpr int kHazardEscapeHoldFrames = 18;
 constexpr int kHazardJumpCycleFrames = 20;
 constexpr int kHazardJumpPressFrames = 4;
+constexpr int kHazardJumpPulseFrames = 10;
+constexpr int kHazardJumpPulseCooldownFrames = 24;
+constexpr int kHazardCategoryEnemyGoomba = 3;
+constexpr int kHazardCategoryEnemyKoopa = 4;
+constexpr int kEnemyStompHorizontalRange = 0x18000;
+constexpr int kEnemyStompVerticalRange = 0x12000;
 
 struct PlayerMemory
 {
@@ -28,6 +34,12 @@ struct PlayerMemory
     int HazardEscapeFrames = 0;
     int HazardEscapeDirection = 0;
     int HazardFrames = 0;
+    int HazardLastSide = 0;
+    int HazardLastCategoryID = 0;
+    int JumpReleaseFrames = 0;
+    int JumpPressFrames = 0;
+    int JumpCooldownFrames = 0;
+    bool LastJumpPressed = false;
 };
 
 PlayerMemory GPlayerMemory[16][2] {};
@@ -167,6 +179,7 @@ NsmbNetplayPoC::InputState DecideInput(
         (self.HazardClosing || self.HazardVeryClose);
     const bool evadingOpponent = self.BattleStars > other.BattleStars && absOpponentDx < config.CloseRange;
     const bool starTargetVisible = state.StarActorFound || state.StarFound;
+    bool forceJump = false;
     if (self.BattleStars > other.BattleStars)
     {
         if (evadingOpponent)
@@ -184,11 +197,30 @@ NsmbNetplayPoC::InputState DecideInput(
     if (hazardDanger)
     {
         const bool hazardOnLeft = hazardDx < 0;
+        const int hazardSide = hazardOnLeft ? -1 : 1;
         int escapeDirection = hazardOnLeft ? 1 : -1;
+        const int hazardDirection = hazardOnLeft ? -1 : 1;
+        const bool stompableEnemy =
+            self.HazardCategoryID == kHazardCategoryEnemyGoomba ||
+            self.HazardCategoryID == kHazardCategoryEnemyKoopa;
+        const bool stompWindow =
+            stompableEnemy &&
+            std::abs(hazardDx) <= kEnemyStompHorizontalRange &&
+            std::abs(hazardDy) <= kEnemyStompVerticalRange;
         if (memory)
         {
+            if (memory->HazardLastSide != 0 &&
+                (memory->HazardLastSide != hazardSide ||
+                 memory->HazardLastCategoryID != self.HazardCategoryID))
+            {
+                memory->HazardEscapeFrames = 0;
+                memory->HazardEscapeDirection = 0;
+                memory->HazardFrames = 0;
+            }
             if (memory->HazardEscapeFrames > 0 && memory->HazardEscapeDirection != 0)
                 escapeDirection = memory->HazardEscapeDirection;
+            memory->HazardLastSide = hazardSide;
+            memory->HazardLastCategoryID = self.HazardCategoryID;
             memory->HazardEscapeDirection = escapeDirection;
             memory->HazardEscapeFrames = kHazardEscapeHoldFrames;
             memory->HazardFrames++;
@@ -196,14 +228,28 @@ NsmbNetplayPoC::InputState DecideInput(
         const bool escapeBlocked = escapeDirection > 0 ?
             (self.BlockedRight || self.HoleRight) :
             (self.BlockedLeft || self.HoleLeft);
+        const bool hazardSideBlocked = hazardDirection > 0 ?
+            (self.BlockedRight || self.HoleRight) :
+            (self.BlockedLeft || self.HoleLeft);
         if (escapeBlocked)
         {
-            dx = 0;
-            mode = "hazardHold";
+            if (stompWindow && !hazardSideBlocked)
+            {
+                dx = hazardDirection * config.CloseRange;
+                forceJump = true;
+                mode = "hazardStomp";
+            }
+            else
+            {
+                dx = 0;
+                forceJump = stompWindow;
+                mode = "hazardHold";
+            }
         }
         else
         {
             dx = escapeDirection * config.CloseRange;
+            forceJump = stompWindow;
             mode = "hazard";
         }
     }
@@ -214,6 +260,8 @@ NsmbNetplayPoC::InputState DecideInput(
         else
             memory->HazardEscapeDirection = 0;
         memory->HazardFrames = 0;
+        memory->HazardLastSide = 0;
+        memory->HazardLastCategoryID = 0;
     }
 
     int horizontalIntent = SignWithDeadzone(dx, config.HorizontalDeadzone);
@@ -399,14 +447,43 @@ NsmbNetplayPoC::InputState DecideInput(
         hazardDanger &&
         (!self.GroundBelowSolid ||
          ((hazardFrames % kHazardJumpCycleFrames) < kHazardJumpPressFrames));
-    if (periodicJump || targetAbove || closeOpponent || terrainJump || hazardJump)
-        PressButton(input, kButtonA);
+    bool jumpPressed = periodicJump || targetAbove || closeOpponent || terrainJump || hazardJump || forceJump;
+    const bool urgentHazardJump = hazardDanger && self.GroundBelowSolid && (hazardJump || forceJump);
+    if (memory)
+    {
+        if (memory->JumpCooldownFrames > 0)
+            memory->JumpCooldownFrames--;
+        if (urgentHazardJump &&
+            memory->JumpCooldownFrames == 0 &&
+            memory->JumpReleaseFrames == 0 &&
+            memory->JumpPressFrames == 0)
+        {
+            if (memory->LastJumpPressed)
+                memory->JumpReleaseFrames = 1;
+            memory->JumpPressFrames = kHazardJumpPulseFrames;
+            memory->JumpCooldownFrames = kHazardJumpPulseCooldownFrames;
+        }
+        if (memory->JumpReleaseFrames > 0)
+        {
+            jumpPressed = false;
+            memory->JumpReleaseFrames--;
+        }
+        else if (memory->JumpPressFrames > 0)
+        {
+            jumpPressed = true;
+            memory->JumpPressFrames--;
+        }
+    }
+    if (jumpPressed)
+        PressButton(input, kButtonB);
+    if (memory)
+        memory->LastJumpPressed = jumpPressed;
 
     if (config.TraceEnabled &&
         (config.TraceInterval <= 1 || (frame % static_cast<melonDS::u32>(config.TraceInterval)) == 0))
     {
         std::printf(
-            "NSMB RuleAI: inst=%d frame=%u player=%d mode=%s self=%08X/%08X target=%08X/%08X dx=%d rawDx=%d intent=%d escape=%d/%d still=%d opponent=%08X/%08X stars=%u/%u hazard=%d/%d/%d closing=%d close=%d terrain=ground:%d ahead:%d/%d left:%d/%d right:%d/%d keys=0x%03X\n",
+            "NSMB RuleAI: inst=%d frame=%u player=%d mode=%s self=%08X/%08X target=%08X/%08X dx=%d rawDx=%d intent=%d escape=%d/%d still=%d opponent=%08X/%08X stars=%u/%u hazard=%d/%d/%d cat=%d closing=%d close=%d terrain=ground:%d ahead:%d/%d left:%d/%d right:%d/%d keys=0x%03X\n",
             instanceID,
             frame,
             player,
@@ -428,6 +505,7 @@ NsmbNetplayPoC::InputState DecideInput(
             hazardDanger ? 1 : 0,
             hazardDx,
             hazardDy,
+            self.HazardCategoryID,
             self.HazardClosing ? 1 : 0,
             self.HazardVeryClose ? 1 : 0,
             self.GroundBelowSolid ? 1 : 0,

@@ -3312,6 +3312,7 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(
             best.VelY,
             std::numeric_limits<std::int32_t>::min(),
             std::numeric_limits<std::int32_t>::max()));
+        out.HazardCategoryID = best.CategoryID;
     };
     state.InGameplay = inGameplay;
     state.Players[0].Found = sample.PlayerActor0Found != 0;

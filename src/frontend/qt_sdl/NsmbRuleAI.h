@@ -53,6 +53,7 @@ struct PlayerFrameState
     std::int32_t HazardDy = 0;
     std::int32_t HazardVelX = 0;
     std::int32_t HazardVelY = 0;
+    int HazardCategoryID = 0;
 };
 
 struct FrameState
