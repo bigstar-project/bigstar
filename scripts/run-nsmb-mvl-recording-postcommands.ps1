@@ -58,7 +58,10 @@ try {
     for ($i = $StartAt; $i -lt $commands.Count; $i++) {
         $command = [string]$commands[$i]
         Write-Host "[$($i + 1)/$($commands.Count)] $command"
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
         powershell -NoProfile -ExecutionPolicy Bypass -Command $command
+        $stopwatch.Stop()
+        Write-Host ("[$($i + 1)/$($commands.Count)] completed in {0:n1}s" -f $stopwatch.Elapsed.TotalSeconds)
         if ($LASTEXITCODE -ne 0) {
             throw "postCommand failed at index $i with exit code $LASTEXITCODE"
         }
