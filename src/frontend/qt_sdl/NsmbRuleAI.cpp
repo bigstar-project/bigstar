@@ -39,6 +39,7 @@ struct PlayerMemory
     int JumpReleaseFrames = 0;
     int JumpPressFrames = 0;
     int JumpCooldownFrames = 0;
+    int LastHorizontalIntent = 0;
     bool LastJumpPressed = false;
 };
 
@@ -270,6 +271,7 @@ NsmbNetplayPoC::InputState DecideInput(
     const bool blockedRight = self.BlockedRight || self.HoleRight;
     const bool canRawRouteLeft = rawIntent < 0 && !blockedLeft;
     const bool canRawRouteRight = rawIntent > 0 && !blockedRight;
+    const bool marioOpponentRecovery = player == 0;
     if (evadingOpponent &&
         ((horizontalIntent < 0 && blockedLeft) ||
          (horizontalIntent > 0 && blockedRight)))
@@ -382,6 +384,27 @@ NsmbNetplayPoC::InputState DecideInput(
 
     const bool leftOnlyHole = self.HoleLeft && !self.HoleRight && !self.BlockedRight;
     const bool rightOnlyHole = self.HoleRight && !self.HoleLeft && !self.BlockedLeft;
+    if (marioOpponentRecovery && !hazardDanger && !evadingOpponent && self.GroundBelowSolid && self.HoleAhead)
+    {
+        if (leftOnlyHole)
+            horizontalIntent = 1;
+        else if (rightOnlyHole)
+            horizontalIntent = -1;
+        else if (self.HoleLeft && self.HoleRight)
+        {
+            const int fallbackIntent =
+                memory && memory->LastHorizontalIntent != 0 ? memory->LastHorizontalIntent : rawIntent;
+            horizontalIntent = std::clamp(fallbackIntent, -1, 1);
+        }
+        dx = horizontalIntent * std::max(config.HorizontalDeadzone + 1, config.CloseRange / 2);
+        if (memory)
+        {
+            memory->EscapeDirection = horizontalIntent;
+            memory->EscapeFrames = std::max(memory->EscapeFrames, config.WallEscapeFrames / 2);
+            memory->StillFrames = 0;
+        }
+        mode = horizontalIntent == 0 ? "holeBrake" : "holePreempt";
+    }
     if (!hazardDanger && !evadingOpponent &&
         ((horizontalIntent < 0 && leftOnlyHole) ||
          (horizontalIntent > 0 && rightOnlyHole)))
@@ -397,16 +420,33 @@ NsmbNetplayPoC::InputState DecideInput(
         mode = "holeAvoid";
     }
 
-    if (self.BattleStars > other.BattleStars &&
+    if ((marioOpponentRecovery || self.BattleStars > other.BattleStars) &&
         !self.GroundBelowSolid &&
         (self.HoleAhead || self.HoleLeft || self.HoleRight))
     {
-        if (self.BlockedLeft && !self.BlockedRight)
+        if (self.HoleLeft && !self.HoleRight && !self.BlockedRight)
+            horizontalIntent = 1;
+        else if (self.HoleRight && !self.HoleLeft && !self.BlockedLeft)
+            horizontalIntent = -1;
+        else if (self.HoleLeft && self.HoleRight)
+        {
+            int fallbackIntent = memory ? memory->LastHorizontalIntent : 0;
+            if (fallbackIntent == 0)
+                fallbackIntent = SignWithDeadzone(self.VelX, 0x800);
+            if (fallbackIntent == 0)
+                fallbackIntent = rawIntent;
+            horizontalIntent = std::clamp(fallbackIntent, -1, 1);
+        }
+        else if (self.BlockedLeft && !self.BlockedRight)
             horizontalIntent = 1;
         else if (self.BlockedRight && !self.BlockedLeft)
             horizontalIntent = -1;
-        else
+        else if (horizontalIntent < 0 && (self.HoleLeft || self.BlockedLeft))
             horizontalIntent = 0;
+        else if (horizontalIntent > 0 && (self.HoleRight || self.BlockedRight))
+            horizontalIntent = 0;
+        else
+            horizontalIntent = std::clamp(horizontalIntent, -1, 1);
         dx = horizontalIntent * std::max(config.HorizontalDeadzone + 1, config.CloseRange / 2);
         if (memory)
         {
@@ -477,7 +517,11 @@ NsmbNetplayPoC::InputState DecideInput(
     if (jumpPressed)
         PressButton(input, kButtonB);
     if (memory)
+    {
         memory->LastJumpPressed = jumpPressed;
+        if (horizontalIntent != 0)
+            memory->LastHorizontalIntent = horizontalIntent;
+    }
 
     if (config.TraceEnabled &&
         (config.TraceInterval <= 1 || (frame % static_cast<melonDS::u32>(config.TraceInterval)) == 0))
