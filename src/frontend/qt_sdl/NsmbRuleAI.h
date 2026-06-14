@@ -44,8 +44,10 @@ struct PlayerFrameState
     bool HoleAhead = false;
     bool BlockedLeft = false;
     bool HoleLeft = false;
+    bool FarHoleLeft = false;
     bool BlockedRight = false;
     bool HoleRight = false;
+    bool FarHoleRight = false;
     bool HazardFound = false;
     bool HazardClosing = false;
     bool HazardVeryClose = false;

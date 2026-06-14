@@ -23,6 +23,7 @@ constexpr int kHazardCategoryEnemyGoomba = 3;
 constexpr int kHazardCategoryEnemyKoopa = 4;
 constexpr int kEnemyStompHorizontalRange = 0x30000;
 constexpr int kEnemyStompVerticalRange = 0x12000;
+constexpr int kUnsafeStarFloorGapRange = 0x200000;
 
 struct PlayerMemory
 {
@@ -42,6 +43,7 @@ struct PlayerMemory
     int JumpCooldownFrames = 0;
     int LastHorizontalIntent = 0;
     int UnsafeStarAvoidFrames = 0;
+    int UnsafeStarRejectFrames = 0;
     int UnsafeStarEscapeDirection = 0;
     bool LastJumpPressed = false;
 };
@@ -112,7 +114,13 @@ int SignWithDeadzone(std::int32_t value, int deadzone)
     return 0;
 }
 
-bool UnsafeStarChase(
+struct StarSafety
+{
+    bool Unsafe = false;
+    bool ActiveAvoid = false;
+};
+
+StarSafety EvaluateStarSafety(
     const Config& config,
     const PlayerFrameState& self,
     melonDS::u32 starX,
@@ -124,14 +132,24 @@ bool UnsafeStarChase(
 
     // NSMB stage coordinates decrease as objects move downward on screen.
     const bool starBelow = starDy < -0x18000;
+    const bool starNotHighAbove = starDy < 0x20000;
     const bool targetSideIsHole =
         (starIntent < 0 && self.HoleLeft) ||
         (starIntent > 0 && self.HoleRight) ||
         (starIntent == 0 && self.HoleAhead);
+    const bool targetSideHasFloorGap =
+        targetSideIsHole ||
+        (starIntent < 0 && self.FarHoleLeft) ||
+        (starIntent > 0 && self.FarHoleRight);
     const bool pitMouth =
         self.GroundBelowSolid &&
         starBelow &&
         (self.HoleAhead || targetSideIsHole);
+    const bool starBehindFloorGap =
+        self.GroundBelowSolid &&
+        starNotHighAbove &&
+        targetSideHasFloorGap &&
+        std::abs(starDx) <= kUnsafeStarFloorGapRange;
     const bool nearbyDeepDropStar =
         starBelow &&
         starDy < -0x30000 &&
@@ -140,7 +158,13 @@ bool UnsafeStarChase(
         (self.BlockedLeft && self.BlockedRight) ||
         (!self.GroundBelowSolid && (self.HoleAhead || self.HoleLeft || self.HoleRight));
 
-    return nearbyDeepDropStar || pitMouth || alreadyInVerticalPit;
+    StarSafety safety {};
+    safety.Unsafe = starBehindFloorGap || nearbyDeepDropStar || pitMouth || alreadyInVerticalPit;
+    safety.ActiveAvoid =
+        pitMouth ||
+        alreadyInVerticalPit ||
+        (nearbyDeepDropStar && (self.HoleAhead || targetSideIsHole || !self.GroundBelowSolid));
+    return safety;
 }
 
 NsmbNetplayPoC::InputState NeutralInputPreservingTouch(const NsmbNetplayPoC::InputState& source)
@@ -183,18 +207,23 @@ NsmbNetplayPoC::InputState DecideInput(
         return NeutralInputPreservingTouch(fallback);
     }
 
-    const bool starActorUnsafe =
-        state.StarActorFound &&
-        UnsafeStarChase(config, self, state.StarActorX, state.StarActorY);
-    const bool starCandidateUnsafe =
-        !state.StarActorFound &&
-        state.StarFound &&
-        UnsafeStarChase(config, self, state.StarX, state.StarY);
+    const StarSafety starActorSafety = state.StarActorFound ?
+        EvaluateStarSafety(config, self, state.StarActorX, state.StarActorY) :
+        StarSafety {};
+    const StarSafety starCandidateSafety = (!state.StarActorFound && state.StarFound) ?
+        EvaluateStarSafety(config, self, state.StarX, state.StarY) :
+        StarSafety {};
+    const bool starActorUnsafe = starActorSafety.Unsafe;
+    const bool starCandidateUnsafe = starCandidateSafety.Unsafe;
+    const bool starActorActiveAvoid = starActorSafety.ActiveAvoid;
+    const bool starCandidateActiveAvoid = starCandidateSafety.ActiveAvoid;
     if (memory && (starActorUnsafe || starCandidateUnsafe))
+        memory->UnsafeStarRejectFrames = std::max(memory->UnsafeStarRejectFrames, kUnsafeStarAvoidFrames);
+    if (memory && (starActorActiveAvoid || starCandidateActiveAvoid))
     {
         memory->UnsafeStarAvoidFrames =
             std::max(memory->UnsafeStarAvoidFrames, kUnsafeStarAvoidFrames);
-        const melonDS::u32 unsafeStarX = starActorUnsafe ? state.StarActorX : state.StarX;
+        const melonDS::u32 unsafeStarX = starActorActiveAvoid ? state.StarActorX : state.StarX;
         int escapeDirection = -SignWithDeadzone(
             HorizontalDelta(config, unsafeStarX, self.X),
             config.HorizontalDeadzone);
@@ -204,15 +233,29 @@ NsmbNetplayPoC::InputState DecideInput(
             escapeDirection = -memory->LastHorizontalIntent;
         memory->UnsafeStarEscapeDirection = std::clamp(escapeDirection, -1, 1);
     }
+    else if (memory &&
+             memory->UnsafeStarAvoidFrames > 0 &&
+             self.GroundBelowSolid &&
+             !self.HoleAhead &&
+             !self.HoleLeft &&
+             !self.HoleRight)
+    {
+        memory->UnsafeStarAvoidFrames = 0;
+        memory->UnsafeStarEscapeDirection = 0;
+    }
     const bool avoidingUnsafeStar = memory && memory->UnsafeStarAvoidFrames > 0;
     if (memory && memory->UnsafeStarAvoidFrames > 0)
         memory->UnsafeStarAvoidFrames--;
-    const bool starActorUsable = state.StarActorFound && !starActorUnsafe && !avoidingUnsafeStar;
+    const bool rejectingUnsafeStar = memory && memory->UnsafeStarRejectFrames > 0;
+    if (memory && memory->UnsafeStarRejectFrames > 0)
+        memory->UnsafeStarRejectFrames--;
+    const bool starActorUsable = state.StarActorFound && !starActorUnsafe && !avoidingUnsafeStar && !rejectingUnsafeStar;
     const bool starCandidateUsable =
         !state.StarActorFound &&
         state.StarFound &&
         !starCandidateUnsafe &&
         !avoidingUnsafeStar &&
+        !rejectingUnsafeStar &&
         self.BattleStars <= other.BattleStars;
 
     melonDS::u32 targetX = other.X;
@@ -614,7 +657,7 @@ NsmbNetplayPoC::InputState DecideInput(
         (config.TraceInterval <= 1 || (frame % static_cast<melonDS::u32>(config.TraceInterval)) == 0))
     {
         std::printf(
-            "NSMB RuleAI: inst=%d frame=%u player=%d mode=%s self=%08X/%08X target=%08X/%08X dx=%d rawDx=%d intent=%d escape=%d/%d still=%d opponent=%08X/%08X stars=%u/%u hazard=%d/%d/%d cat=%d closing=%d close=%d terrain=ground:%d ahead:%d/%d left:%d/%d right:%d/%d keys=0x%03X\n",
+            "NSMB RuleAI: inst=%d frame=%u player=%d mode=%s self=%08X/%08X target=%08X/%08X dx=%d rawDx=%d intent=%d escape=%d/%d still=%d opponent=%08X/%08X stars=%u/%u hazard=%d/%d/%d cat=%d closing=%d close=%d terrain=ground:%d ahead:%d/%d left:%d/%d/%d right:%d/%d/%d keys=0x%03X\n",
             instanceID,
             frame,
             player,
@@ -644,8 +687,10 @@ NsmbNetplayPoC::InputState DecideInput(
             self.HoleAhead ? 1 : 0,
             self.BlockedLeft ? 1 : 0,
             self.HoleLeft ? 1 : 0,
+            self.FarHoleLeft ? 1 : 0,
             self.BlockedRight ? 1 : 0,
             self.HoleRight ? 1 : 0,
+            self.FarHoleRight ? 1 : 0,
             input.KeyMask);
     }
 

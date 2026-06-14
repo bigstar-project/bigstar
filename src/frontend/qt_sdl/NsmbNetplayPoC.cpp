@@ -845,6 +845,8 @@ struct AITerrainDerivedSummary
     int HoleAhead = 0;
     int HoleLeft = 0;
     int HoleRight = 0;
+    int FarHoleLeft = 0;
+    int FarHoleRight = 0;
     int EffectiveGroundBelowSolid = 0;
     int HoleSuppressedByContact = 0;
     int EffectiveHoleAhead = 0;
@@ -3234,8 +3236,10 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(
         out.HoleAhead = summary.EffectiveHoleAhead != 0;
         out.BlockedLeft = summary.BlockedLeft != 0;
         out.HoleLeft = summary.EffectiveHoleLeft != 0;
+        out.FarHoleLeft = summary.FarHoleLeft != 0;
         out.BlockedRight = summary.BlockedRight != 0;
         out.HoleRight = summary.EffectiveHoleRight != 0;
+        out.FarHoleRight = summary.FarHoleRight != 0;
     };
     auto fillHazard = [&objectScanCache, &sample](NsmbRuleAI::PlayerFrameState& out,
                                                   int player,
@@ -16307,6 +16311,21 @@ bool AITerrainGridFloorAt(const AIPlayerTileProbeSample& probe, int relX, int su
     return AITerrainGridAnyPhysicalSolid(probe, relX, relX, supportRow, supportRow + 3);
 }
 
+int AITerrainGridFirstFloorGap(
+    const AIPlayerTileProbeSample& probe,
+    int direction,
+    int supportRow,
+    int maxSteps)
+{
+    for (int step = 1; step <= maxSteps; step++)
+    {
+        const bool floor = AITerrainGridFloorAt(probe, direction * step, supportRow);
+        if (!floor)
+            return step;
+    }
+    return 0;
+}
+
 AITerrainDerivedSummary DeriveAITerrainSummaryFromGrid(
     const AIPlayerTileProbeSample& probe,
     bool contactGround,
@@ -16338,6 +16357,8 @@ AITerrainDerivedSummary DeriveAITerrainSummaryFromGrid(
     out.HoleAhead = found && !aheadFloor1 && !aheadFloor2 ? 1 : 0;
     out.HoleLeft = found && !leftFloor1 && !leftFloor2 ? 1 : 0;
     out.HoleRight = found && !rightFloor1 && !rightFloor2 ? 1 : 0;
+    out.FarHoleLeft = found && AITerrainGridFirstFloorGap(probe, -1, supportRow, 12) > 0 ? 1 : 0;
+    out.FarHoleRight = found && AITerrainGridFirstFloorGap(probe, 1, supportRow, 12) > 0 ? 1 : 0;
     out.EffectiveGroundBelowSolid = out.GroundBelowSolid || contactGround ? 1 : 0;
     out.HoleSuppressedByContact = contactGround && !out.GroundBelowSolid ? 1 : 0;
     out.EffectiveHoleAhead = out.HoleAhead && !out.HoleSuppressedByContact ? 1 : 0;
