@@ -138,9 +138,11 @@ int main(int argc, char** argv)
         }
     }
 
+    NsmbImitationAI::TorchCompactPolicyModel torchModel;
     NsmbImitationAI::CompactActionPolicyModel model;
     std::string error;
-    if (!NsmbImitationAI::LoadCompactActionPolicyModel(modelPath, model, error))
+    bool useTorchModel = NsmbImitationAI::LoadTorchCompactPolicyModel(modelPath, torchModel, error);
+    if (!useTorchModel && !NsmbImitationAI::LoadCompactActionPolicyModel(modelPath, model, error))
     {
         std::cerr << error << "\n";
         return 1;
@@ -160,7 +162,8 @@ int main(int argc, char** argv)
     }
 
     output << "frame,cpp_held,python_held,target_held,cpp_actions,python_actions,target_actions,match_python,match_target";
-    for (const auto& head : model.Heads)
+    const auto& heads = useTorchModel ? torchModel.Heads : model.Heads;
+    for (const auto& head : heads)
         output << ",confidence_" << head.Name;
     output << "\n";
 
@@ -189,7 +192,9 @@ int main(int argc, char** argv)
         ParseIntField(line, "targetHeld", targetHeld);
         ParseIntArrayField(line, "target", target);
 
-        const auto prediction = NsmbImitationAI::PredictCompactActionPolicy(model, features);
+        const auto prediction = useTorchModel
+            ? NsmbImitationAI::PredictTorchCompactPolicy(torchModel, features)
+            : NsmbImitationAI::PredictCompactActionPolicy(model, features);
         const bool matchPython = prediction.Actions == pythonPred && static_cast<int>(prediction.Held) == pythonHeld;
         const bool matchTarget = prediction.Actions == target && static_cast<int>(prediction.Held) == targetHeld;
         pythonMatches += matchPython ? 1 : 0;

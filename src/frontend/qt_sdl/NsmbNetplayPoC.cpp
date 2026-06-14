@@ -1705,8 +1705,10 @@ struct State
     std::string ImitationAIModelPath;
     NsmbImitationAI::LinearPolicyModel ImitationAIModel;
     NsmbImitationAI::CompactActionPolicyModel ImitationAICompactModel;
+    NsmbImitationAI::TorchCompactPolicyModel ImitationAITorchCompactModel;
     bool ImitationAIModelLoaded = false;
     bool ImitationAICompactModelLoaded = false;
+    bool ImitationAITorchCompactModelLoaded = false;
     int ImitationAIFeaturesFilled = 0;
     int ImitationAIFeaturesMissing = 0;
     bool DirectMvlBootUseLoadGameSM = false;
@@ -18588,8 +18590,8 @@ void AppendAICompactRuntimeEntities(
     }
 }
 
-bool BuildCompactRuntimeImitationFeatures(
-    const NsmbImitationAI::CompactActionPolicyModel& model,
+bool BuildCompactRuntimeImitationFeaturesForCount(
+    std::size_t featureCount,
     const GameStateSample& sample,
     const GameStateObjectScanCache& objectScanCache,
     int instanceID,
@@ -18598,21 +18600,72 @@ bool BuildCompactRuntimeImitationFeatures(
 {
     const int terrainFeatures = kAITileGridHeight * kAITileGridWidth * kAICompactRuntimeTerrainChannels;
     const int baseFeatures = kAICompactRuntimeScalarCount + terrainFeatures * 2;
-    const int total = static_cast<int>(model.FeatureCount());
+    const int total = static_cast<int>(featureCount);
     if (total < baseFeatures || (total - baseFeatures) % kAICompactRuntimeEntityFeatures != 0)
         return false;
     const int maxEntities = (total - baseFeatures) / kAICompactRuntimeEntityFeatures;
     features.clear();
-    features.reserve(model.FeatureCount());
+    features.reserve(featureCount);
     AppendAICompactRuntimeScalars(features, sample, objectScanCache, player);
     AppendAICompactRuntimeTerrain(features, player == 0 ? sample.PlayerActor0TileProbe : sample.PlayerActor1TileProbe);
     AppendAICompactRuntimeTerrain(features, player == 0 ? sample.PlayerActor1TileProbe : sample.PlayerActor0TileProbe);
     AppendAICompactRuntimeEntities(features, sample, objectScanCache, instanceID, player, maxEntities);
-    return features.size() == model.FeatureCount();
+    return features.size() == featureCount;
+}
+
+bool BuildCompactRuntimeImitationFeatures(
+    const NsmbImitationAI::CompactActionPolicyModel& model,
+    const GameStateSample& sample,
+    const GameStateObjectScanCache& objectScanCache,
+    int instanceID,
+    int player,
+    std::vector<double>& features)
+{
+    return BuildCompactRuntimeImitationFeaturesForCount(
+        model.FeatureCount(),
+        sample,
+        objectScanCache,
+        instanceID,
+        player,
+        features);
+}
+
+bool BuildCompactRuntimeImitationFeatures(
+    const NsmbImitationAI::TorchCompactPolicyModel& model,
+    const GameStateSample& sample,
+    const GameStateObjectScanCache& objectScanCache,
+    int instanceID,
+    int player,
+    std::vector<double>& features)
+{
+    return BuildCompactRuntimeImitationFeaturesForCount(
+        model.FeatureCount(),
+        sample,
+        objectScanCache,
+        instanceID,
+        player,
+        features);
 }
 
 bool CompactPredictionHasFirePress(
     const NsmbImitationAI::CompactActionPolicyModel& model,
+    const NsmbImitationAI::CompactActionPrediction& prediction)
+{
+    for (std::size_t i = 0; i < model.Heads.size() && i < prediction.Actions.size(); i++)
+    {
+        const auto& head = model.Heads[i];
+        if (head.Name != "fire")
+            continue;
+        const int action = prediction.Actions[i];
+        if (action < 0 || action >= static_cast<int>(head.Classes.size()))
+            return false;
+        return head.Classes[static_cast<std::size_t>(action)] == "press";
+    }
+    return false;
+}
+
+bool CompactPredictionHasFirePress(
+    const NsmbImitationAI::TorchCompactPolicyModel& model,
     const NsmbImitationAI::CompactActionPrediction& prediction)
 {
     for (std::size_t i = 0; i < model.Heads.size() && i < prediction.Actions.size(); i++)
@@ -18721,6 +18774,69 @@ InputState ApplyImitationAIInput(
 
     const GameStateSample sample = ReadGameStateSample(nds);
     const GameStateObjectScanCache objectScanCache = BuildGameStateObjectScanCache(nds);
+    if (G.ImitationAITorchCompactModelLoaded)
+    {
+        std::vector<double> features;
+        if (!BuildCompactRuntimeImitationFeatures(
+                G.ImitationAITorchCompactModel,
+                sample,
+                objectScanCache,
+                instanceID,
+                player,
+                features))
+        {
+            ResetImitationAIFireTapState(instanceID, player);
+            return traceFallback("torchCompactFeatures");
+        }
+        const NsmbImitationAI::CompactActionPrediction prediction =
+            NsmbImitationAI::PredictTorchCompactPolicy(G.ImitationAITorchCompactModel, features);
+        melonDS::u32 held = prediction.Held & G.ImitationAIAllowedHeldMask;
+        const bool firePressIntent = CompactPredictionHasFirePress(G.ImitationAITorchCompactModel, prediction);
+        std::int64_t guardHazardDx = 0;
+        std::int64_t guardHazardDy = 0;
+        const bool hazardGuardAdjusted =
+            ApplyImitationAIHazardGuard(sample, objectScanCache, player, held, guardHazardDx, guardHazardDy);
+        const char* fireTapPhase = "none";
+        held = ApplyImitationAIFireTapRelease(instanceID, player, held, firePressIntent, fireTapPhase);
+        InputState input = NeutralInputPreservingTouch(fallback);
+        input.KeyMask = (~held) & 0x0FFFu;
+
+        if (G.ImitationAITraceEnabled &&
+            (G.ImitationAITraceInterval <= 1 ||
+                (frame % static_cast<melonDS::u32>(G.ImitationAITraceInterval)) == 0))
+        {
+            std::printf(
+                "NSMB ImitationAI: inst=%d frame=%u player=%d model=torchCompact held=0x%03X keyMask=0x%03X features=%zu hazardGuard=%d hazardDx=%lld hazardDy=%lld fireTap=%s actions=",
+                instanceID,
+                frame,
+                player,
+                held,
+                input.KeyMask,
+                features.size(),
+                hazardGuardAdjusted ? 1 : 0,
+                static_cast<long long>(guardHazardDx),
+                static_cast<long long>(guardHazardDy),
+                fireTapPhase);
+            for (std::size_t i = 0; i < prediction.Actions.size() && i < G.ImitationAITorchCompactModel.Heads.size(); i++)
+            {
+                const auto& head = G.ImitationAITorchCompactModel.Heads[i];
+                const int action = prediction.Actions[i];
+                const char* className = action >= 0 && action < static_cast<int>(head.Classes.size())
+                    ? head.Classes[static_cast<std::size_t>(action)].c_str()
+                    : "?";
+                const double confidence = i < prediction.Confidences.size() ? prediction.Confidences[i] : 0.0;
+                std::printf(
+                    "%s%s=%s(%.3f)",
+                    i == 0 ? "" : ",",
+                    head.Name.c_str(),
+                    className,
+                    confidence);
+            }
+            std::printf("\n");
+        }
+
+        return input;
+    }
     if (G.ImitationAICompactModelLoaded)
     {
         std::vector<double> features;
@@ -20835,6 +20951,15 @@ void InitFromEnvironment()
         }
         else
         {
+            std::string torchCompactError;
+            G.ImitationAITorchCompactModelLoaded =
+                NsmbImitationAI::LoadTorchCompactPolicyModel(G.ImitationAIModelPath, G.ImitationAITorchCompactModel, torchCompactError);
+            if (G.ImitationAITorchCompactModelLoaded)
+            {
+                G.ImitationAIModelLoaded = true;
+            }
+            else
+            {
             std::string compactError;
             G.ImitationAICompactModelLoaded =
                 NsmbImitationAI::LoadCompactActionPolicyModel(G.ImitationAIModelPath, G.ImitationAICompactModel, compactError);
@@ -20850,12 +20975,14 @@ void InitFromEnvironment()
                 if (!G.ImitationAIModelLoaded)
                 {
                     std::printf(
-                        "NSMB ImitationAI: failed to load model path=%s compactError=%s linearError=%s\n",
+                        "NSMB ImitationAI: failed to load model path=%s torchCompactError=%s compactError=%s linearError=%s\n",
                         G.ImitationAIModelPath.c_str(),
+                        torchCompactError.c_str(),
                         compactError.c_str(),
                         modelError.c_str());
                     G.ImitationAIEnabled = false;
                 }
+            }
             }
         }
     }
@@ -21476,7 +21603,22 @@ void InitFromEnvironment()
     }
     if (G.ImitationAIEnabled)
     {
-        if (G.ImitationAICompactModelLoaded)
+        if (G.ImitationAITorchCompactModelLoaded)
+        {
+            std::printf(
+                "NSMB ImitationAI: enabled player=%s startFrame=%u modelType=torchCompact allowedHeldMask=0x%03X trace=%d traceInterval=%d model=%s features=%zu heads=%zu schema=%s labelSchema=%s\n",
+                G.ImitationAIPlayerSpec.c_str(),
+                G.ImitationAIStartFrame,
+                G.ImitationAIAllowedHeldMask,
+                G.ImitationAITraceEnabled ? 1 : 0,
+                G.ImitationAITraceInterval,
+                G.ImitationAIModelPath.c_str(),
+                G.ImitationAITorchCompactModel.FeatureCount(),
+                G.ImitationAITorchCompactModel.Heads.size(),
+                G.ImitationAITorchCompactModel.Schema.c_str(),
+                G.ImitationAITorchCompactModel.LabelSchema.c_str());
+        }
+        else if (G.ImitationAICompactModelLoaded)
         {
             std::printf(
                 "NSMB ImitationAI: enabled player=%s startFrame=%u modelType=compact allowedHeldMask=0x%03X trace=%d traceInterval=%d model=%s features=%zu heads=%zu schema=%s labelSchema=%s\n",
