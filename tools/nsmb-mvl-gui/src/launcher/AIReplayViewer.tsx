@@ -597,6 +597,7 @@ const tileLabels = new Set([
   'coin',
   'harmful',
   'water',
+  'entrance',
   'partial',
 ]);
 const droppedStarActorSettingsNormalized = new Set([
@@ -733,6 +734,8 @@ function tileKind(
     return { color: '#ef4444', label: '!', name: 'harmful' };
   if (numeric(tile.water))
     return { color: '#38bdf8', label: 'W', name: 'water' };
+  if (numeric(tile.entrance))
+    return { color: '#16a34a', label: 'E', name: 'entrance' };
   if (numeric(tile.partialSolid))
     return { color: '#14b8a6', label: 'P', name: 'partial' };
   if (numeric(cell.solidish))
@@ -1023,7 +1026,7 @@ function ReplayScene({
                 {kind.label}
               </text>
             ) : null}
-            <title>{`${kind.name} row=${cell.row ?? '-'} col=${cell.col ?? '-'} rel=(${cell.relTileX ?? '-'},${cell.relTileY ?? '-'}) pixel=(${cell.pixelX ?? '-'},${cell.pixelY ?? '-'}) dx=${Math.round(delta.dx)} dy=${Math.round(delta.dy)} tile=${hexText(cell.tileId)} behavior=${cell.behavior ?? '-'} solid=${numeric(cell.solidish)} q=${numeric(block.question) || numeric(tile.questionBlock)} b=${numeric(block.breakable) || numeric(tile.breakableBlock)} brick=${numeric(block.brick) || numeric(tile.brickBlock)} hidden=${numeric(block.hiddenOrRescueCandidate) || numeric(block.invisible) || numeric(tile.invisibleBlock)} itemBox=${numeric(block.itemBox)} storage=${numeric(block.storageContents)}`}</title>
+            <title>{`${kind.name} row=${cell.row ?? '-'} col=${cell.col ?? '-'} rel=(${cell.relTileX ?? '-'},${cell.relTileY ?? '-'}) pixel=(${cell.pixelX ?? '-'},${cell.pixelY ?? '-'}) dx=${Math.round(delta.dx)} dy=${Math.round(delta.dy)} tile=${hexText(cell.tileId)} behavior=${cell.behavior ?? '-'} solid=${numeric(cell.solidish)} q=${numeric(block.question) || numeric(tile.questionBlock)} b=${numeric(block.breakable) || numeric(tile.breakableBlock)} brick=${numeric(block.brick) || numeric(tile.brickBlock)} hidden=${numeric(block.hiddenOrRescueCandidate) || numeric(block.invisible) || numeric(tile.invisibleBlock)} entrance=${numeric(tile.entrance)} itemBox=${numeric(block.itemBox)} storage=${numeric(block.storageContents)}`}</title>
           </g>
         );
       })}
@@ -1172,6 +1175,7 @@ function ReplayScene({
           ['#a855f7', 'H', 'hidden'],
           ['#eab308', 'C', 'coin'],
           ['#ef4444', '!', 'harmful'],
+          ['#16a34a', 'E', 'entrance'],
         ].map(([color, label, name], index) => (
           <g
             key={name}

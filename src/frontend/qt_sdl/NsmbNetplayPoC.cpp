@@ -16336,21 +16336,22 @@ melonDS::u32 AIObservationV2TerrainMask(const AITileGridSample& cell)
     bit(4, brick);
     bit(5, t & 0x00200000u);
     bit(6, t & 0x00800000u);
-    bit(7, t & 0x02000000u);
-    bit(8, t & 0x08000000u);
-    bit(9, t & 0x10000000u);
-    bit(10, invisible);
-    bit(11, anyBlock && hasStorage);
-    bit(12, anyBlock && invisible);
-    bit(13, storageBreakable && !invisible);
-    bit(14, anyBlock && (question || brick || (breakable && !invisible)));
+    bit(7, t & 0x01000000u);
+    bit(8, t & 0x02000000u);
+    bit(9, t & 0x08000000u);
+    bit(10, t & 0x10000000u);
+    bit(11, invisible);
+    bit(12, anyBlock && hasStorage);
+    bit(13, anyBlock && invisible);
+    bit(14, storageBreakable && !invisible);
+    bit(15, anyBlock && (question || brick || (breakable && !invisible)));
     return mask;
 }
 
 bool AITerrainMaskPhysicalSolid(melonDS::u32 mask)
 {
-    const bool solid = (mask & ((1u << 0) | (1u << 14))) != 0;
-    const bool hidden = (mask & ((1u << 10) | (1u << 12))) != 0;
+    const bool solid = (mask & ((1u << 0) | (1u << 15))) != 0;
+    const bool hidden = (mask & ((1u << 11) | (1u << 13))) != 0;
     return solid && !hidden;
 }
 
@@ -16542,7 +16543,7 @@ void WriteAIObservationV2TerrainJson(std::ostream& out, const AIPlayerTileProbeS
         << ",\"height\":" << kAITileGridHeight
         << ",\"minRelTileX\":" << kAITileGridMinRelX
         << ",\"minRelTileY\":" << kAITileGridMinRelY
-        << ",\"channels\":[\"solid\",\"coin\",\"question\",\"breakable\",\"brick\",\"slope\",\"scanSolid\",\"water\",\"partialSolid\",\"harmful\",\"invisible\",\"itemBox\",\"hiddenOrRescue\",\"visibleStorageBreakable\",\"visibleSolid\"]"
+        << ",\"channels\":[\"solid\",\"coin\",\"question\",\"breakable\",\"brick\",\"slope\",\"scanSolid\",\"entrance\",\"water\",\"partialSolid\",\"harmful\",\"invisible\",\"itemBox\",\"hiddenOrRescue\",\"visibleStorageBreakable\",\"visibleSolid\"]"
         << ",\"omittedCellFound\":" << (probe.Found ? 1 : 0)
         << ",\"omittedCellStatus\":0"
         << ",\"cells\":[";
@@ -18369,7 +18370,7 @@ bool BuildRuntimeImitationFeatures(
 }
 
 constexpr int kAICompactRuntimeScalarCount = 35;
-constexpr int kAICompactRuntimeTerrainChannels = 15;
+constexpr int kAICompactRuntimeTerrainChannels = 16;
 constexpr int kAICompactRuntimeEntityFeatures = 14;
 
 void AppendAICompactRuntimeScalars(

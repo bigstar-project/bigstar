@@ -32,7 +32,7 @@ HIDDEN_SCENE_OBJECT_CATEGORIES = {
     "stage_scene",
 }
 
-TILE_LABELS = {"question", "hidden", "coin", "harmful", "water", "partial"}
+TILE_LABELS = {"question", "hidden", "coin", "harmful", "water", "entrance", "partial"}
 
 CATEGORY_STYLE = {
     "player": ("#2563eb", "P"),
@@ -96,6 +96,7 @@ TILE_KIND_STYLE = {
     "coin": ("#eab308", "C", "coin tile"),
     "harmful": ("#ef4444", "!", "harmful tile"),
     "water": ("#38bdf8", "W", "water"),
+    "entrance": ("#16a34a", "E", "entrance/pipe"),
     "partial": ("#14b8a6", "P", "partial solid"),
     "solid": ("#22c55e", "", "solid terrain"),
     "unknown": ("#64748b", "", "status/unknown tile"),
@@ -320,6 +321,8 @@ def tile_cell_kind(cell: dict[str, Any]) -> tuple[str, str, str, str]:
         return ("harmful", *TILE_KIND_STYLE["harmful"])
     if num(tile.get("water")):
         return ("water", *TILE_KIND_STYLE["water"])
+    if num(tile.get("entrance")):
+        return ("entrance", *TILE_KIND_STYLE["entrance"])
     if num(tile.get("partialSolid")):
         return ("partial", *TILE_KIND_STYLE["partial"])
     if num(cell.get("solidish")):
@@ -446,7 +449,7 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
         parts.append(
             f'<rect x="{x - 6.5:.1f}" y="{y - 6.5:.1f}" width="13" height="13" fill="{color}" '
             f'opacity="{opacity}" stroke="#e2e8f0" stroke-width="0.5">'
-            f'<title>grid {html.escape(description)} row={cell.get("row")} col={cell.get("col")} rel=({cell.get("relTileX")},{cell.get("relTileY")}) pixel=({cell.get("pixelX")},{cell.get("pixelY")}) tile=0x{tile_id:03X} behavior={html.escape(str(cell.get("behavior")))} solidish={num(cell.get("solidish"))} question={num(block.get("question")) or num(tile.get("questionBlock"))} breakable={num(block.get("breakable")) or num(tile.get("breakableBlock"))} brick={num(block.get("brick")) or num(tile.get("brickBlock"))} hidden={num(block.get("hiddenOrRescueCandidate")) or num(block.get("invisible")) or num(tile.get("invisibleBlock"))} itemBox={num(block.get("itemBox"))} storage={num(block.get("storageContents"))} dx={dx:.0f} dy={dy:.0f}</title></rect>'
+            f'<title>grid {html.escape(description)} row={cell.get("row")} col={cell.get("col")} rel=({cell.get("relTileX")},{cell.get("relTileY")}) pixel=({cell.get("pixelX")},{cell.get("pixelY")}) tile=0x{tile_id:03X} behavior={html.escape(str(cell.get("behavior")))} solidish={num(cell.get("solidish"))} question={num(block.get("question")) or num(tile.get("questionBlock"))} breakable={num(block.get("breakable")) or num(tile.get("breakableBlock"))} brick={num(block.get("brick")) or num(tile.get("brickBlock"))} hidden={num(block.get("hiddenOrRescueCandidate")) or num(block.get("invisible")) or num(tile.get("invisibleBlock"))} entrance={num(tile.get("entrance"))} itemBox={num(block.get("itemBox"))} storage={num(block.get("storageContents"))} dx={dx:.0f} dy={dy:.0f}</title></rect>'
         )
         if kind in TILE_LABELS:
             parts.append(
@@ -573,7 +576,7 @@ def render(record: dict[str, Any], player: int, max_objects: int) -> str:
 
     legend_x = 20
     legend_y = HEIGHT - 24
-    for key in ["question", "breakable", "brick", "hidden", "coin", "harmful", "water", "partial", "solid"]:
+    for key in ["question", "breakable", "brick", "hidden", "coin", "harmful", "water", "entrance", "partial", "solid"]:
         color, label, description = TILE_KIND_STYLE[key]
         legend_label = label or "S"
         parts.append(f'<rect x="{legend_x - 6}" y="{legend_y - 6}" width="12" height="12" fill="{color}" opacity="0.72" stroke="#e2e8f0" stroke-width="0.5"/>')
