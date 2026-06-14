@@ -104,15 +104,23 @@ def button_labels(held: int) -> dict[str, int]:
 def label_pressed(record: dict[str, Any], player: int, source: str) -> int:
     inputs = record.get("inputs") or {}
     applied = inputs.get(f"appliedPlayer{player}") or {}
+    player_input = inputs.get(f"player{player}") or {}
+    console_input = inputs.get(f"console{player}") or {}
+    fallback_pressed = legacy.num(
+        player_input.get("pressed"),
+        legacy.num(console_input.get("pressed")),
+    )
     if source == "applied":
-        return legacy.num(applied.get("pressed")) if applied.get("valid") else 0
+        if applied.get("valid") and "pressed" in applied:
+            return legacy.num(applied.get("pressed"))
+        return fallback_pressed if applied.get("valid") else 0
     if source == "player":
-        return legacy.num((inputs.get(f"player{player}") or {}).get("pressed"))
+        return legacy.num(player_input.get("pressed"))
     if source == "console":
-        return legacy.num((inputs.get(f"console{player}") or {}).get("pressed"))
-    if applied.get("valid"):
+        return legacy.num(console_input.get("pressed"))
+    if applied.get("valid") and "pressed" in applied:
         return legacy.num(applied.get("pressed"))
-    return legacy.num((inputs.get(f"player{player}") or {}).get("pressed"))
+    return fallback_pressed
 
 
 def fire_capable(record: dict[str, Any], player: int) -> bool:
