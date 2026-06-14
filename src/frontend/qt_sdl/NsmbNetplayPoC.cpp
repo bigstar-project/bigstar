@@ -18689,20 +18689,34 @@ InputState ApplyImitationAIInput(
     int player,
     const InputState& fallback)
 {
+    auto traceFallback = [&](const char* reason) {
+        if (G.ImitationAITraceEnabled &&
+            (G.ImitationAITraceInterval <= 1 ||
+                (frame % static_cast<melonDS::u32>(G.ImitationAITraceInterval)) == 0))
+        {
+            std::printf(
+                "NSMB ImitationAI: inst=%d frame=%u player=%d fallback=%s\n",
+                instanceID,
+                frame,
+                player,
+                reason);
+        }
+        return fallback;
+    };
     if (!G.ImitationAIEnabled || !G.ImitationAIModelLoaded || frame < G.ImitationAIStartFrame || !nds || !nds->MainRAM)
-        return fallback;
+        return traceFallback("disabled");
     if (G.ImitationAIHostOnly && G.NetRole != Role::Host)
-        return fallback;
+        return traceFallback("hostOnly");
     if (G.ImitationAIClientOnly && G.NetRole != Role::Client)
-        return fallback;
+        return traceFallback("clientOnly");
     if (!ImitationAIProvidesInputForPlayer(player))
-        return fallback;
+        return traceFallback("playerFilter");
 
     const bool inGameplay = IsMarioVsLuigiGameplay(nds);
     if (!inGameplay)
     {
         ResetImitationAIFireTapState(instanceID, player);
-        return fallback;
+        return traceFallback("notGameplay");
     }
 
     const GameStateSample sample = ReadGameStateSample(nds);
@@ -18719,7 +18733,7 @@ InputState ApplyImitationAIInput(
                 features))
         {
             ResetImitationAIFireTapState(instanceID, player);
-            return fallback;
+            return traceFallback("compactFeatures");
         }
         const NsmbImitationAI::CompactActionPrediction prediction =
             NsmbImitationAI::PredictCompactActionPolicy(G.ImitationAICompactModel, features);
@@ -18786,7 +18800,7 @@ InputState ApplyImitationAIInput(
             filled,
             missing))
     {
-        return fallback;
+        return traceFallback("linearFeatures");
     }
 
     const NsmbImitationAI::Prediction prediction =
