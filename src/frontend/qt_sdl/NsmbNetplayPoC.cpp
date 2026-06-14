@@ -1698,10 +1698,18 @@ struct State
     int ImitationAIHazardGuardCloseRange = 0x10000;
     bool ImitationAITraceEnabled = false;
     int ImitationAITraceInterval = 60;
+    int ImitationAIInferInterval = 16;
+    int ImitationAINeutralHoldFrames = 8;
     bool ImitationAIWarnMissingFeatures = true;
     bool ImitationAIFireTapPressNext[16][2] {};
     bool ImitationAILastHeldValid[16][2] {};
     melonDS::u32 ImitationAILastHeld[16][2] {};
+    bool ImitationAICachedHeldValid[16][2] {};
+    melonDS::u32 ImitationAICachedHeld[16][2] {};
+    melonDS::u32 ImitationAICachedFrame[16][2] {};
+    bool ImitationAILastNonZeroHeldValid[16][2] {};
+    melonDS::u32 ImitationAILastNonZeroHeld[16][2] {};
+    melonDS::u32 ImitationAILastNonZeroFrame[16][2] {};
     std::string ImitationAIModelPath;
     NsmbImitationAI::LinearPolicyModel ImitationAIModel;
     NsmbImitationAI::CompactActionPolicyModel ImitationAICompactModel;
@@ -18688,6 +18696,12 @@ void ResetImitationAIFireTapState(int instanceID, int player)
     G.ImitationAIFireTapPressNext[instanceID][player] = false;
     G.ImitationAILastHeldValid[instanceID][player] = false;
     G.ImitationAILastHeld[instanceID][player] = 0;
+    G.ImitationAICachedHeldValid[instanceID][player] = false;
+    G.ImitationAICachedHeld[instanceID][player] = 0;
+    G.ImitationAICachedFrame[instanceID][player] = 0;
+    G.ImitationAILastNonZeroHeldValid[instanceID][player] = false;
+    G.ImitationAILastNonZeroHeld[instanceID][player] = 0;
+    G.ImitationAILastNonZeroFrame[instanceID][player] = 0;
 }
 
 melonDS::u32 ApplyImitationAIFireTapRelease(
@@ -18735,6 +18749,42 @@ melonDS::u32 ApplyImitationAIFireTapRelease(
     return held;
 }
 
+InputState BuildImitationAIInputFromHeld(const InputState& fallback, melonDS::u32 held)
+{
+    InputState input = NeutralInputPreservingTouch(fallback);
+    input.KeyMask = (~held) & 0x0FFFu;
+    return input;
+}
+
+melonDS::u32 ApplyImitationAINeutralHold(
+    int instanceID,
+    int player,
+    melonDS::u32 frame,
+    melonDS::u32 held,
+    bool& adjusted)
+{
+    adjusted = false;
+    if (instanceID < 0 || instanceID >= 16 || player < 0 || player >= 2)
+        return held;
+    if (held != 0)
+    {
+        G.ImitationAILastNonZeroHeldValid[instanceID][player] = true;
+        G.ImitationAILastNonZeroHeld[instanceID][player] = held;
+        G.ImitationAILastNonZeroFrame[instanceID][player] = frame;
+        return held;
+    }
+    if (G.ImitationAINeutralHoldFrames <= 0 || !G.ImitationAILastNonZeroHeldValid[instanceID][player])
+        return held;
+    const melonDS::u32 lastFrame = G.ImitationAILastNonZeroFrame[instanceID][player];
+    if (frame >= lastFrame &&
+        frame - lastFrame <= static_cast<melonDS::u32>(G.ImitationAINeutralHoldFrames))
+    {
+        adjusted = true;
+        return G.ImitationAILastNonZeroHeld[instanceID][player] & G.ImitationAIAllowedHeldMask;
+    }
+    return held;
+}
+
 InputState ApplyImitationAIInput(
     int instanceID,
     melonDS::u32 frame,
@@ -18772,6 +18822,33 @@ InputState ApplyImitationAIInput(
         return traceFallback("notGameplay");
     }
 
+    if (G.ImitationAITorchCompactModelLoaded &&
+        G.ImitationAIInferInterval > 1 &&
+        instanceID >= 0 && instanceID < 16 && player >= 0 && player < 2 &&
+        G.ImitationAICachedHeldValid[instanceID][player] &&
+        frame >= G.ImitationAICachedFrame[instanceID][player] &&
+        frame - G.ImitationAICachedFrame[instanceID][player] <
+            static_cast<melonDS::u32>(G.ImitationAIInferInterval))
+    {
+        const melonDS::u32 held = G.ImitationAICachedHeld[instanceID][player] & G.ImitationAIAllowedHeldMask;
+        InputState input = BuildImitationAIInputFromHeld(fallback, held);
+        if (G.ImitationAITraceEnabled &&
+            (G.ImitationAITraceInterval <= 1 ||
+                (frame % static_cast<melonDS::u32>(G.ImitationAITraceInterval)) == 0))
+        {
+            std::printf(
+                "NSMB ImitationAI: inst=%d frame=%u player=%d model=torchCompact cachedHeld=0x%03X keyMask=0x%03X inferInterval=%d cachedFrame=%u\n",
+                instanceID,
+                frame,
+                player,
+                held,
+                input.KeyMask,
+                G.ImitationAIInferInterval,
+                G.ImitationAICachedFrame[instanceID][player]);
+        }
+        return input;
+    }
+
     const GameStateSample sample = ReadGameStateSample(nds);
     const GameStateObjectScanCache objectScanCache = BuildGameStateObjectScanCache(nds);
     if (G.ImitationAITorchCompactModelLoaded)
@@ -18798,15 +18875,22 @@ InputState ApplyImitationAIInput(
             ApplyImitationAIHazardGuard(sample, objectScanCache, player, held, guardHazardDx, guardHazardDy);
         const char* fireTapPhase = "none";
         held = ApplyImitationAIFireTapRelease(instanceID, player, held, firePressIntent, fireTapPhase);
-        InputState input = NeutralInputPreservingTouch(fallback);
-        input.KeyMask = (~held) & 0x0FFFu;
+        bool neutralHoldAdjusted = false;
+        held = ApplyImitationAINeutralHold(instanceID, player, frame, held, neutralHoldAdjusted);
+        if (instanceID >= 0 && instanceID < 16 && player >= 0 && player < 2)
+        {
+            G.ImitationAICachedHeldValid[instanceID][player] = true;
+            G.ImitationAICachedHeld[instanceID][player] = held;
+            G.ImitationAICachedFrame[instanceID][player] = frame;
+        }
+        InputState input = BuildImitationAIInputFromHeld(fallback, held);
 
         if (G.ImitationAITraceEnabled &&
             (G.ImitationAITraceInterval <= 1 ||
                 (frame % static_cast<melonDS::u32>(G.ImitationAITraceInterval)) == 0))
         {
             std::printf(
-                "NSMB ImitationAI: inst=%d frame=%u player=%d model=torchCompact held=0x%03X keyMask=0x%03X features=%zu hazardGuard=%d hazardDx=%lld hazardDy=%lld fireTap=%s actions=",
+                "NSMB ImitationAI: inst=%d frame=%u player=%d model=torchCompact held=0x%03X keyMask=0x%03X features=%zu hazardGuard=%d hazardDx=%lld hazardDy=%lld fireTap=%s neutralHold=%d inferInterval=%d actions=",
                 instanceID,
                 frame,
                 player,
@@ -18816,7 +18900,9 @@ InputState ApplyImitationAIInput(
                 hazardGuardAdjusted ? 1 : 0,
                 static_cast<long long>(guardHazardDx),
                 static_cast<long long>(guardHazardDy),
-                fireTapPhase);
+                fireTapPhase,
+                neutralHoldAdjusted ? 1 : 0,
+                G.ImitationAIInferInterval);
             for (std::size_t i = 0; i < prediction.Actions.size() && i < G.ImitationAITorchCompactModel.Heads.size(); i++)
             {
                 const auto& head = G.ImitationAITorchCompactModel.Heads[i];
@@ -20938,6 +21024,9 @@ void InitFromEnvironment()
         G.ImitationAIHazardGuardHorizontalRange);
     G.ImitationAITraceEnabled = EnvFlag("MELONDS_NSML_IMITATION_AI_TRACE");
     G.ImitationAITraceInterval = std::max(1, EnvInt("MELONDS_NSML_IMITATION_AI_TRACE_INTERVAL", 60));
+    G.ImitationAIInferInterval = std::clamp(EnvInt("MELONDS_NSML_IMITATION_AI_INFER_INTERVAL", 16), 1, 30);
+    G.ImitationAINeutralHoldFrames =
+        std::clamp(EnvInt("MELONDS_NSML_IMITATION_AI_NEUTRAL_HOLD_FRAMES", 8), 0, 120);
     G.ImitationAIWarnMissingFeatures = !EnvFlag("MELONDS_NSML_IMITATION_AI_DISABLE_FEATURE_WARNING");
     const char* imitationModel = std::getenv("MELONDS_NSML_IMITATION_AI_MODEL");
     if (imitationModel && imitationModel[0])
@@ -21606,12 +21695,14 @@ void InitFromEnvironment()
         if (G.ImitationAITorchCompactModelLoaded)
         {
             std::printf(
-                "NSMB ImitationAI: enabled player=%s startFrame=%u modelType=torchCompact allowedHeldMask=0x%03X trace=%d traceInterval=%d model=%s features=%zu heads=%zu schema=%s labelSchema=%s\n",
+                "NSMB ImitationAI: enabled player=%s startFrame=%u modelType=torchCompact allowedHeldMask=0x%03X trace=%d traceInterval=%d inferInterval=%d neutralHoldFrames=%d model=%s features=%zu heads=%zu schema=%s labelSchema=%s\n",
                 G.ImitationAIPlayerSpec.c_str(),
                 G.ImitationAIStartFrame,
                 G.ImitationAIAllowedHeldMask,
                 G.ImitationAITraceEnabled ? 1 : 0,
                 G.ImitationAITraceInterval,
+                G.ImitationAIInferInterval,
+                G.ImitationAINeutralHoldFrames,
                 G.ImitationAIModelPath.c_str(),
                 G.ImitationAITorchCompactModel.FeatureCount(),
                 G.ImitationAITorchCompactModel.Heads.size(),

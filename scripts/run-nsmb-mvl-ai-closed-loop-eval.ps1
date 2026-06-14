@@ -15,6 +15,8 @@ param(
     [string]$ClientInputScript = "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs",
     [switch]$Trace,
     [int]$TraceInterval = 120,
+    [int]$ImitationInferInterval = 16,
+    [int]$ImitationNeutralHoldFrames = 8,
     [switch]$DisableImitationHazardGuard,
     [int]$ImitationHazardGuardHorizontalRange = -1,
     [int]$ImitationHazardGuardVerticalRange = -1,
@@ -75,6 +77,8 @@ $envNames = @(
     "MELONDS_NSML_IMITATION_AI_THRESHOLD",
     "MELONDS_NSML_IMITATION_AI_TRACE",
     "MELONDS_NSML_IMITATION_AI_TRACE_INTERVAL",
+    "MELONDS_NSML_IMITATION_AI_INFER_INTERVAL",
+    "MELONDS_NSML_IMITATION_AI_NEUTRAL_HOLD_FRAMES",
     "MELONDS_NSML_IMITATION_AI_HOST_ONLY",
     "MELONDS_NSML_IMITATION_AI_CLIENT_ONLY",
     "MELONDS_NSML_IMITATION_AI_HAZARD_GUARD",
@@ -125,6 +129,8 @@ try {
         $env:MELONDS_NSML_IMITATION_AI_MODEL = $modelPath
         $env:MELONDS_NSML_IMITATION_AI_PLAYER = $AIPlayer
         $env:MELONDS_NSML_IMITATION_AI_THRESHOLD = $Threshold.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+        $env:MELONDS_NSML_IMITATION_AI_INFER_INTERVAL = "$ImitationInferInterval"
+        $env:MELONDS_NSML_IMITATION_AI_NEUTRAL_HOLD_FRAMES = "$ImitationNeutralHoldFrames"
         if ($DisableImitationHazardGuard) {
             $env:MELONDS_NSML_IMITATION_AI_HAZARD_GUARD = "0"
         }
