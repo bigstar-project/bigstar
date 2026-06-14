@@ -48,6 +48,12 @@ struct PlayerFrameState
     bool BlockedRight = false;
     bool HoleRight = false;
     bool FarHoleRight = false;
+    bool StarActorFloorSupported = true;
+    bool StarCandidateFloorSupported = true;
+    bool DroppedStarFound = false;
+    melonDS::u32 DroppedStarX = 0;
+    melonDS::u32 DroppedStarY = 0;
+    bool DroppedStarFloorSupported = true;
     bool HazardFound = false;
     bool HazardClosing = false;
     bool HazardVeryClose = false;

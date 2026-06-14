@@ -42,7 +42,7 @@ CATEGORY_STYLE = {
     "world_item": ("#10b981", "I"),
     "neutral_item": ("#34d399", "i"),
     "coin_item": ("#eab308", "C"),
-    "dropped_star_item": ("#facc15", "S"),
+    "dropped_star_item": ("#fde047", "dS"),
     "item": ("#22c55e", "i"),
     "coin": ("#eab308", "C"),
     "moving_hazard": ("#ef4444", "H"),

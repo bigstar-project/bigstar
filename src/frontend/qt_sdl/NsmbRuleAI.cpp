@@ -124,7 +124,8 @@ StarSafety EvaluateStarSafety(
     const Config& config,
     const PlayerFrameState& self,
     melonDS::u32 starX,
-    melonDS::u32 starY)
+    melonDS::u32 starY,
+    bool targetFloorSupported)
 {
     const std::int32_t starDx = HorizontalDelta(config, starX, self.X);
     const std::int32_t starDy = CoordinateDelta(starY, self.Y);
@@ -150,6 +151,10 @@ StarSafety EvaluateStarSafety(
         starNotHighAbove &&
         targetSideHasFloorGap &&
         std::abs(starDx) <= kUnsafeStarFloorGapRange;
+    const bool targetUnsupported =
+        !targetFloorSupported &&
+        starNotHighAbove &&
+        std::abs(starDx) <= kUnsafeStarFloorGapRange;
     const bool nearbyDeepDropStar =
         starBelow &&
         starDy < -0x30000 &&
@@ -159,10 +164,16 @@ StarSafety EvaluateStarSafety(
         (!self.GroundBelowSolid && (self.HoleAhead || self.HoleLeft || self.HoleRight));
 
     StarSafety safety {};
-    safety.Unsafe = starBehindFloorGap || nearbyDeepDropStar || pitMouth || alreadyInVerticalPit;
+    safety.Unsafe =
+        targetUnsupported ||
+        starBehindFloorGap ||
+        nearbyDeepDropStar ||
+        pitMouth ||
+        alreadyInVerticalPit;
     safety.ActiveAvoid =
         pitMouth ||
         alreadyInVerticalPit ||
+        (targetUnsupported && starBelow && (self.HoleAhead || targetSideIsHole || !self.GroundBelowSolid)) ||
         (nearbyDeepDropStar && (self.HoleAhead || targetSideIsHole || !self.GroundBelowSolid));
     return safety;
 }
@@ -194,6 +205,7 @@ NsmbNetplayPoC::InputState DecideInput(
     const int opponent = player ^ 1;
     const PlayerFrameState& self = state.Players[player];
     const PlayerFrameState& other = state.Players[opponent];
+    const bool opponentTrackable = other.Found && !other.Dead;
     PlayerMemory* memory = nullptr;
     if (instanceID >= 0 && instanceID < 16)
         memory = &GPlayerMemory[instanceID][player];
@@ -208,22 +220,28 @@ NsmbNetplayPoC::InputState DecideInput(
     }
 
     const StarSafety starActorSafety = state.StarActorFound ?
-        EvaluateStarSafety(config, self, state.StarActorX, state.StarActorY) :
+        EvaluateStarSafety(config, self, state.StarActorX, state.StarActorY, self.StarActorFloorSupported) :
         StarSafety {};
     const StarSafety starCandidateSafety = (!state.StarActorFound && state.StarFound) ?
-        EvaluateStarSafety(config, self, state.StarX, state.StarY) :
+        EvaluateStarSafety(config, self, state.StarX, state.StarY, self.StarCandidateFloorSupported) :
+        StarSafety {};
+    const StarSafety droppedStarSafety = self.DroppedStarFound ?
+        EvaluateStarSafety(config, self, self.DroppedStarX, self.DroppedStarY, self.DroppedStarFloorSupported) :
         StarSafety {};
     const bool starActorUnsafe = starActorSafety.Unsafe;
     const bool starCandidateUnsafe = starCandidateSafety.Unsafe;
+    const bool droppedStarUnsafe = droppedStarSafety.Unsafe;
     const bool starActorActiveAvoid = starActorSafety.ActiveAvoid;
     const bool starCandidateActiveAvoid = starCandidateSafety.ActiveAvoid;
-    if (memory && (starActorUnsafe || starCandidateUnsafe))
+    const bool droppedStarActiveAvoid = droppedStarSafety.ActiveAvoid;
+    if (memory && (starActorUnsafe || starCandidateUnsafe || droppedStarUnsafe))
         memory->UnsafeStarRejectFrames = std::max(memory->UnsafeStarRejectFrames, kUnsafeStarAvoidFrames);
-    if (memory && (starActorActiveAvoid || starCandidateActiveAvoid))
+    if (memory && (starActorActiveAvoid || starCandidateActiveAvoid || droppedStarActiveAvoid))
     {
         memory->UnsafeStarAvoidFrames =
             std::max(memory->UnsafeStarAvoidFrames, kUnsafeStarAvoidFrames);
-        const melonDS::u32 unsafeStarX = starActorActiveAvoid ? state.StarActorX : state.StarX;
+        const melonDS::u32 unsafeStarX = starActorActiveAvoid ? state.StarActorX :
+            (starCandidateActiveAvoid ? state.StarX : self.DroppedStarX);
         int escapeDirection = -SignWithDeadzone(
             HorizontalDelta(config, unsafeStarX, self.X),
             config.HorizontalDeadzone);
@@ -250,6 +268,11 @@ NsmbNetplayPoC::InputState DecideInput(
     if (memory && memory->UnsafeStarRejectFrames > 0)
         memory->UnsafeStarRejectFrames--;
     const bool starActorUsable = state.StarActorFound && !starActorUnsafe && !avoidingUnsafeStar && !rejectingUnsafeStar;
+    const bool droppedStarUsable =
+        self.DroppedStarFound &&
+        !droppedStarUnsafe &&
+        !avoidingUnsafeStar &&
+        !rejectingUnsafeStar;
     const bool starCandidateUsable =
         !state.StarActorFound &&
         state.StarFound &&
@@ -258,15 +281,21 @@ NsmbNetplayPoC::InputState DecideInput(
         !rejectingUnsafeStar &&
         self.BattleStars <= other.BattleStars;
 
-    melonDS::u32 targetX = other.X;
-    melonDS::u32 targetY = other.Y;
-    const char* mode = "chase";
+    melonDS::u32 targetX = opponentTrackable ? other.X : self.X;
+    melonDS::u32 targetY = opponentTrackable ? other.Y : self.Y;
+    const char* mode = opponentTrackable ? "chase" : "hold";
 
     if (starActorUsable)
     {
         targetX = state.StarActorX;
         targetY = state.StarActorY;
         mode = "starActor";
+    }
+    else if (droppedStarUsable)
+    {
+        targetX = self.DroppedStarX;
+        targetY = self.DroppedStarY;
+        mode = "droppedStar";
     }
     else if (starCandidateUsable)
     {
@@ -290,8 +319,11 @@ NsmbNetplayPoC::InputState DecideInput(
         std::abs(hazardDx) <= config.HazardHorizontalRange &&
         std::abs(hazardDy) <= config.HazardVerticalRange &&
         (self.HazardClosing || self.HazardVeryClose);
-    const bool evadingOpponent = self.BattleStars > other.BattleStars && absOpponentDx < config.CloseRange;
-    const bool starTargetVisible = starActorUsable || starCandidateUsable;
+    const bool evadingOpponent =
+        opponentTrackable &&
+        self.BattleStars > other.BattleStars &&
+        absOpponentDx < config.CloseRange;
+    const bool starTargetVisible = starActorUsable || starCandidateUsable || droppedStarUsable;
     bool forceJump = false;
     if (avoidingUnsafeStar && !hazardDanger)
     {

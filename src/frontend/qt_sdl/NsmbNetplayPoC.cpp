@@ -860,6 +860,13 @@ AITerrainDerivedSummary DeriveAITerrainSummaryFromGrid(
     bool contactWallLeft,
     bool contactWallRight);
 
+bool AITerrainTargetHasFloorBelow(
+    const AIPlayerTileProbeSample& probe,
+    melonDS::u32 selfX,
+    melonDS::u32 selfY,
+    melonDS::u32 targetX,
+    melonDS::u32 targetY);
+
 struct GameStateSample
 {
     melonDS::u32 StageID = 0;
@@ -3215,6 +3222,32 @@ RuntimeHazardThreat MostDangerousRuntimeHazard(
     return best;
 }
 
+ObjectScanSample NearestDroppedBattleStar(
+    const GameStateObjectScanCache& objectScanCache,
+    melonDS::u32 selfX,
+    melonDS::u32 selfY)
+{
+    ObjectScanSample best {};
+    std::int64_t bestScore = 0;
+    for (const GameStateObjectScanEntry& entry : objectScanCache.Entries)
+    {
+        if (entry.LifecycleState != 1)
+            continue;
+        const char* category = AIObjectCategory(entry.ObjectID, entry.Actor.Settings);
+        if (std::strcmp(category, "dropped_star_item") != 0)
+            continue;
+        const std::int64_t dx = AIWrappedDeltaX(SignedU32(entry.Actor.PosX), SignedU32(selfX));
+        const std::int64_t dy = static_cast<std::int64_t>(SignedU32(entry.Actor.PosY)) - SignedU32(selfY);
+        const std::int64_t score = dx * dx + dy * dy;
+        if (!best.Found || score < bestScore)
+        {
+            best = entry.Actor;
+            bestScore = score;
+        }
+    }
+    return best;
+}
+
 NsmbRuleAI::FrameState RuleAIFrameStateFromSample(
     const GameStateSample& sample,
     const GameStateObjectScanCache& objectScanCache,
@@ -3357,6 +3390,68 @@ NsmbRuleAI::FrameState RuleAIFrameStateFromSample(
     state.StarActorFound = sample.VsStarActorFound != 0;
     state.StarActorX = sample.VsStarActorPosX;
     state.StarActorY = sample.VsStarActorPosY;
+    state.Players[0].StarActorFloorSupported =
+        !state.StarActorFound ||
+        AITerrainTargetHasFloorBelow(
+            sample.PlayerActor0TileProbe,
+            sample.PlayerActor0PosX,
+            sample.PlayerActor0PosY,
+            state.StarActorX,
+            state.StarActorY);
+    state.Players[1].StarActorFloorSupported =
+        !state.StarActorFound ||
+        AITerrainTargetHasFloorBelow(
+            sample.PlayerActor1TileProbe,
+            sample.PlayerActor1PosX,
+            sample.PlayerActor1PosY,
+            state.StarActorX,
+            state.StarActorY);
+    state.Players[0].StarCandidateFloorSupported =
+        !state.StarFound ||
+        AITerrainTargetHasFloorBelow(
+            sample.PlayerActor0TileProbe,
+            sample.PlayerActor0PosX,
+            sample.PlayerActor0PosY,
+            state.StarX,
+            state.StarY);
+    state.Players[1].StarCandidateFloorSupported =
+        !state.StarFound ||
+        AITerrainTargetHasFloorBelow(
+            sample.PlayerActor1TileProbe,
+            sample.PlayerActor1PosX,
+            sample.PlayerActor1PosY,
+            state.StarX,
+            state.StarY);
+    const ObjectScanSample droppedStar0 = NearestDroppedBattleStar(
+        objectScanCache,
+        sample.PlayerActor0PosX,
+        sample.PlayerActor0PosY);
+    const ObjectScanSample droppedStar1 = NearestDroppedBattleStar(
+        objectScanCache,
+        sample.PlayerActor1PosX,
+        sample.PlayerActor1PosY);
+    state.Players[0].DroppedStarFound = droppedStar0.Found != 0;
+    state.Players[0].DroppedStarX = droppedStar0.PosX;
+    state.Players[0].DroppedStarY = droppedStar0.PosY;
+    state.Players[0].DroppedStarFloorSupported =
+        !state.Players[0].DroppedStarFound ||
+        AITerrainTargetHasFloorBelow(
+            sample.PlayerActor0TileProbe,
+            sample.PlayerActor0PosX,
+            sample.PlayerActor0PosY,
+            state.Players[0].DroppedStarX,
+            state.Players[0].DroppedStarY);
+    state.Players[1].DroppedStarFound = droppedStar1.Found != 0;
+    state.Players[1].DroppedStarX = droppedStar1.PosX;
+    state.Players[1].DroppedStarY = droppedStar1.PosY;
+    state.Players[1].DroppedStarFloorSupported =
+        !state.Players[1].DroppedStarFound ||
+        AITerrainTargetHasFloorBelow(
+            sample.PlayerActor1TileProbe,
+            sample.PlayerActor1PosX,
+            sample.PlayerActor1PosY,
+            state.Players[1].DroppedStarX,
+            state.Players[1].DroppedStarY);
     state.MovingHazardFound = sample.MovingHazardFound != 0;
     state.MovingHazardX = sample.MovingHazardPosX;
     state.MovingHazardY = sample.MovingHazardPosY;
@@ -16309,6 +16404,45 @@ int AITerrainGridSupportRow(const AIPlayerTileProbeSample& probe)
 bool AITerrainGridFloorAt(const AIPlayerTileProbeSample& probe, int relX, int supportRow)
 {
     return AITerrainGridAnyPhysicalSolid(probe, relX, relX, supportRow, supportRow + 3);
+}
+
+int DivRoundNearest(std::int64_t value, std::int64_t divisor)
+{
+    if (divisor <= 0)
+        return 0;
+    if (value < 0)
+        return -static_cast<int>((-value + divisor / 2) / divisor);
+    return static_cast<int>((value + divisor / 2) / divisor);
+}
+
+bool AITerrainTargetHasFloorBelow(
+    const AIPlayerTileProbeSample& probe,
+    melonDS::u32 selfX,
+    melonDS::u32 selfY,
+    melonDS::u32 targetX,
+    melonDS::u32 targetY)
+{
+    if (!probe.Found)
+        return true;
+
+    constexpr std::int64_t kTileFixed = 16 * 4096;
+    const std::int64_t dx = AIWrappedDeltaX(SignedU32(targetX), SignedU32(selfX));
+    const std::int64_t dy = static_cast<std::int64_t>(SignedU32(targetY)) - SignedU32(selfY);
+    const int relTileX = DivRoundNearest(dx, kTileFixed);
+    const int relTileY = DivRoundNearest(-dy, kTileFixed);
+    const int maxRelX = kAITileGridMinRelX + kAITileGridWidth - 1;
+    const int maxRelY = kAITileGridMinRelY + kAITileGridHeight - 1;
+    if (relTileX < kAITileGridMinRelX || relTileX > maxRelX)
+        return true;
+
+    const int minRelY = std::max(relTileY, kAITileGridMinRelY);
+    const int maxSearchRelY = std::min(relTileY + 6, maxRelY);
+    for (int relY = minRelY; relY <= maxSearchRelY; relY++)
+    {
+        if (AITerrainGridCellPhysicalSolid(probe, relTileX, relY))
+            return true;
+    }
+    return false;
 }
 
 int AITerrainGridFirstFloorGap(

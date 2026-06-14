@@ -1065,17 +1065,22 @@ function ReplayScene({
         const delta = relativeDeltaPx(object, self, playerIndex);
         const point = scenePointFromPx(delta.dx, delta.dy);
         const category = objectCategory(object);
-        const color = category.includes('star')
-          ? '#facc15'
-          : category === 'coin_item' || category === 'coin'
-            ? '#eab308'
-            : category.includes('item')
-              ? '#34d399'
-              : category.includes('hazard') || category.includes('enemy')
-                ? '#f87171'
-                : category.includes('platform')
-                  ? '#60a5fa'
-                  : '#94a3b8';
+        const color =
+          category === 'big_star_actor'
+            ? '#f59e0b'
+            : category === 'dropped_star_item'
+              ? '#fde047'
+              : category.includes('star')
+                ? '#facc15'
+                : category === 'coin_item' || category === 'coin'
+                  ? '#eab308'
+                  : category.includes('item')
+                    ? '#34d399'
+                    : category.includes('hazard') || category.includes('enemy')
+                      ? '#f87171'
+                      : category.includes('platform')
+                        ? '#60a5fa'
+                        : '#94a3b8';
         const label =
           category === 'enemy_goomba'
             ? 'G'
@@ -1083,13 +1088,17 @@ function ReplayScene({
               ? 'K'
               : category.includes('hazard')
                 ? 'H'
-                : category.includes('star')
+                : category === 'big_star_actor'
                   ? 'S'
-                  : category === 'coin_item' || category === 'coin'
-                    ? 'C'
-                    : category.includes('item')
-                      ? 'I'
-                      : 'O';
+                  : category === 'dropped_star_item'
+                    ? 'dS'
+                    : category.includes('star')
+                      ? 'S'
+                      : category === 'coin_item' || category === 'coin'
+                        ? 'C'
+                        : category.includes('item')
+                          ? 'I'
+                          : 'O';
         return (
           <g key={`${object.objectId ?? 'obj'}-${index}`}>
             <circle
