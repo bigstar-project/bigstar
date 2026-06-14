@@ -18,9 +18,10 @@ constexpr int kHazardJumpCycleFrames = 20;
 constexpr int kHazardJumpPressFrames = 4;
 constexpr int kHazardJumpPulseFrames = 10;
 constexpr int kHazardJumpPulseCooldownFrames = 24;
+constexpr int kUnsafeStarAvoidFrames = 72;
 constexpr int kHazardCategoryEnemyGoomba = 3;
 constexpr int kHazardCategoryEnemyKoopa = 4;
-constexpr int kEnemyStompHorizontalRange = 0x18000;
+constexpr int kEnemyStompHorizontalRange = 0x30000;
 constexpr int kEnemyStompVerticalRange = 0x12000;
 
 struct PlayerMemory
@@ -40,6 +41,8 @@ struct PlayerMemory
     int JumpPressFrames = 0;
     int JumpCooldownFrames = 0;
     int LastHorizontalIntent = 0;
+    int UnsafeStarAvoidFrames = 0;
+    int UnsafeStarEscapeDirection = 0;
     bool LastJumpPressed = false;
 };
 
@@ -109,6 +112,37 @@ int SignWithDeadzone(std::int32_t value, int deadzone)
     return 0;
 }
 
+bool UnsafeStarChase(
+    const Config& config,
+    const PlayerFrameState& self,
+    melonDS::u32 starX,
+    melonDS::u32 starY)
+{
+    const std::int32_t starDx = HorizontalDelta(config, starX, self.X);
+    const std::int32_t starDy = CoordinateDelta(starY, self.Y);
+    const int starIntent = SignWithDeadzone(starDx, config.HorizontalDeadzone);
+
+    // NSMB stage coordinates decrease as objects move downward on screen.
+    const bool starBelow = starDy < -0x18000;
+    const bool targetSideIsHole =
+        (starIntent < 0 && self.HoleLeft) ||
+        (starIntent > 0 && self.HoleRight) ||
+        (starIntent == 0 && self.HoleAhead);
+    const bool pitMouth =
+        self.GroundBelowSolid &&
+        starBelow &&
+        (self.HoleAhead || targetSideIsHole);
+    const bool nearbyDeepDropStar =
+        starBelow &&
+        starDy < -0x30000 &&
+        std::abs(starDx) <= 0x80000;
+    const bool alreadyInVerticalPit =
+        (self.BlockedLeft && self.BlockedRight) ||
+        (!self.GroundBelowSolid && (self.HoleAhead || self.HoleLeft || self.HoleRight));
+
+    return nearbyDeepDropStar || pitMouth || alreadyInVerticalPit;
+}
+
 NsmbNetplayPoC::InputState NeutralInputPreservingTouch(const NsmbNetplayPoC::InputState& source)
 {
     NsmbNetplayPoC::InputState input {};
@@ -149,17 +183,49 @@ NsmbNetplayPoC::InputState DecideInput(
         return NeutralInputPreservingTouch(fallback);
     }
 
+    const bool starActorUnsafe =
+        state.StarActorFound &&
+        UnsafeStarChase(config, self, state.StarActorX, state.StarActorY);
+    const bool starCandidateUnsafe =
+        !state.StarActorFound &&
+        state.StarFound &&
+        UnsafeStarChase(config, self, state.StarX, state.StarY);
+    if (memory && (starActorUnsafe || starCandidateUnsafe))
+    {
+        memory->UnsafeStarAvoidFrames =
+            std::max(memory->UnsafeStarAvoidFrames, kUnsafeStarAvoidFrames);
+        const melonDS::u32 unsafeStarX = starActorUnsafe ? state.StarActorX : state.StarX;
+        int escapeDirection = -SignWithDeadzone(
+            HorizontalDelta(config, unsafeStarX, self.X),
+            config.HorizontalDeadzone);
+        if (escapeDirection == 0)
+            escapeDirection = SignWithDeadzone(-self.VelX, 0x800);
+        if (escapeDirection == 0 && memory->LastHorizontalIntent != 0)
+            escapeDirection = -memory->LastHorizontalIntent;
+        memory->UnsafeStarEscapeDirection = std::clamp(escapeDirection, -1, 1);
+    }
+    const bool avoidingUnsafeStar = memory && memory->UnsafeStarAvoidFrames > 0;
+    if (memory && memory->UnsafeStarAvoidFrames > 0)
+        memory->UnsafeStarAvoidFrames--;
+    const bool starActorUsable = state.StarActorFound && !starActorUnsafe && !avoidingUnsafeStar;
+    const bool starCandidateUsable =
+        !state.StarActorFound &&
+        state.StarFound &&
+        !starCandidateUnsafe &&
+        !avoidingUnsafeStar &&
+        self.BattleStars <= other.BattleStars;
+
     melonDS::u32 targetX = other.X;
     melonDS::u32 targetY = other.Y;
     const char* mode = "chase";
 
-    if (state.StarActorFound)
+    if (starActorUsable)
     {
         targetX = state.StarActorX;
         targetY = state.StarActorY;
         mode = "starActor";
     }
-    else if (state.StarFound)
+    else if (starCandidateUsable)
     {
         targetX = state.StarX;
         targetY = state.StarY;
@@ -173,15 +239,39 @@ NsmbNetplayPoC::InputState DecideInput(
     const int absOpponentDx = std::abs(opponentDx);
     const std::int32_t hazardDx = self.HazardFound ? self.HazardDx : 0;
     const std::int32_t hazardDy = self.HazardFound ? self.HazardDy : 0;
+    const bool stompableEnemyHazard =
+        self.HazardCategoryID == kHazardCategoryEnemyGoomba ||
+        self.HazardCategoryID == kHazardCategoryEnemyKoopa;
     const bool hazardDanger =
         self.HazardFound &&
         std::abs(hazardDx) <= config.HazardHorizontalRange &&
         std::abs(hazardDy) <= config.HazardVerticalRange &&
         (self.HazardClosing || self.HazardVeryClose);
     const bool evadingOpponent = self.BattleStars > other.BattleStars && absOpponentDx < config.CloseRange;
-    const bool starTargetVisible = state.StarActorFound || state.StarFound;
+    const bool starTargetVisible = starActorUsable || starCandidateUsable;
     bool forceJump = false;
-    if (self.BattleStars > other.BattleStars)
+    if (avoidingUnsafeStar && !hazardDanger)
+    {
+        int safeIntent = memory ? memory->UnsafeStarEscapeDirection : 0;
+        if (safeIntent < 0 && (self.HoleLeft || self.BlockedLeft) && !(self.HoleRight || self.BlockedRight))
+            safeIntent = 1;
+        else if (safeIntent > 0 && (self.HoleRight || self.BlockedRight) && !(self.HoleLeft || self.BlockedLeft))
+            safeIntent = -1;
+        else if (self.HoleLeft && !self.HoleRight && !self.BlockedRight)
+            safeIntent = 1;
+        else if (self.HoleRight && !self.HoleLeft && !self.BlockedLeft)
+            safeIntent = -1;
+        else if (safeIntent == 0 && memory && memory->LastHorizontalIntent != 0)
+            safeIntent = -memory->LastHorizontalIntent;
+        else if (safeIntent == 0)
+            safeIntent = SignWithDeadzone(-self.VelX, 0x800);
+        if (safeIntent == 0)
+            safeIntent = SignWithDeadzone(opponentDx, config.HorizontalDeadzone);
+        safeIntent = std::clamp(safeIntent, -1, 1);
+        dx = safeIntent * std::max(config.HorizontalDeadzone + 1, config.CloseRange / 2);
+        mode = safeIntent == 0 ? "holeStarHold" : "holeStarAvoid";
+    }
+    else if (self.BattleStars > other.BattleStars)
     {
         if (evadingOpponent)
         {
@@ -201,11 +291,8 @@ NsmbNetplayPoC::InputState DecideInput(
         const int hazardSide = hazardOnLeft ? -1 : 1;
         int escapeDirection = hazardOnLeft ? 1 : -1;
         const int hazardDirection = hazardOnLeft ? -1 : 1;
-        const bool stompableEnemy =
-            self.HazardCategoryID == kHazardCategoryEnemyGoomba ||
-            self.HazardCategoryID == kHazardCategoryEnemyKoopa;
         const bool stompWindow =
-            stompableEnemy &&
+            stompableEnemyHazard &&
             std::abs(hazardDx) <= kEnemyStompHorizontalRange &&
             std::abs(hazardDy) <= kEnemyStompVerticalRange;
         if (memory)
@@ -271,7 +358,7 @@ NsmbNetplayPoC::InputState DecideInput(
     const bool blockedRight = self.BlockedRight || self.HoleRight;
     const bool canRawRouteLeft = rawIntent < 0 && !blockedLeft;
     const bool canRawRouteRight = rawIntent > 0 && !blockedRight;
-    const bool marioOpponentRecovery = player == 0;
+    const bool holeRecovery = false;
     if (evadingOpponent &&
         ((horizontalIntent < 0 && blockedLeft) ||
          (horizontalIntent > 0 && blockedRight)))
@@ -384,7 +471,7 @@ NsmbNetplayPoC::InputState DecideInput(
 
     const bool leftOnlyHole = self.HoleLeft && !self.HoleRight && !self.BlockedRight;
     const bool rightOnlyHole = self.HoleRight && !self.HoleLeft && !self.BlockedLeft;
-    if (marioOpponentRecovery && !hazardDanger && !evadingOpponent && self.GroundBelowSolid && self.HoleAhead)
+    if (holeRecovery && !hazardDanger && !evadingOpponent && self.GroundBelowSolid && self.HoleAhead)
     {
         if (leftOnlyHole)
             horizontalIntent = 1;
@@ -420,7 +507,7 @@ NsmbNetplayPoC::InputState DecideInput(
         mode = "holeAvoid";
     }
 
-    if ((marioOpponentRecovery || self.BattleStars > other.BattleStars) &&
+    if ((holeRecovery || self.BattleStars > other.BattleStars) &&
         !self.GroundBelowSolid &&
         (self.HoleAhead || self.HoleLeft || self.HoleRight))
     {
