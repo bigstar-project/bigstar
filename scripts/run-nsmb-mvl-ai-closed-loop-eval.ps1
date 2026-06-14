@@ -40,7 +40,10 @@ param(
     [int]$ForcePlayerCollectedStars0 = 0,
     [int]$ForcePlayerCollectedStars1 = 0,
     [int]$RuleAIAuditSampleLimit = 16,
-    [int]$RuleAIAuditStuckRecords = 6
+    [int]$RuleAIAuditStuckRecords = 6,
+    [int]$ImitationAuditSampleLimit = 16,
+    [int]$ImitationAuditNeutralRecords = 3,
+    [int]$ImitationAuditStuckRecords = 6
 )
 
 $ErrorActionPreference = "Stop"
@@ -232,6 +235,33 @@ try {
         }
         Write-Host "ruleAIAuditHost=$hostAuditPath"
         Write-Host "ruleAIAuditClient=$clientAuditPath"
+    } elseif ($Policy -eq "imitation") {
+        $hostAuditPath = Join-Path $hostLog "imitation-audit.json"
+        $clientAuditPath = Join-Path $clientLog "imitation-audit.json"
+        $hostAuditOutput = & python (Join-Path $repoRoot "scripts\nsmb_mvl_ai_audit_imitation.py") `
+            $hostAIPlayLog `
+            --player $evalPlayer `
+            --output $hostAuditPath `
+            --sample-limit $ImitationAuditSampleLimit `
+            --neutral-records $ImitationAuditNeutralRecords `
+            --stuck-records $ImitationAuditStuckRecords
+        if ($LASTEXITCODE -ne 0) {
+            $hostAuditOutput | Write-Host
+            throw "ImitationAI host audit failed with exit code $LASTEXITCODE"
+        }
+        $clientAuditOutput = & python (Join-Path $repoRoot "scripts\nsmb_mvl_ai_audit_imitation.py") `
+            $clientAIPlayLog `
+            --player $evalPlayer `
+            --output $clientAuditPath `
+            --sample-limit $ImitationAuditSampleLimit `
+            --neutral-records $ImitationAuditNeutralRecords `
+            --stuck-records $ImitationAuditStuckRecords
+        if ($LASTEXITCODE -ne 0) {
+            $clientAuditOutput | Write-Host
+            throw "ImitationAI client audit failed with exit code $LASTEXITCODE"
+        }
+        Write-Host "imitationAuditHost=$hostAuditPath"
+        Write-Host "imitationAuditClient=$clientAuditPath"
     }
 
     Write-Host "closedLoopEval=$summaryPath"
