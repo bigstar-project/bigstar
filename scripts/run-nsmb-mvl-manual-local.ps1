@@ -45,6 +45,7 @@ param(
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds",
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds",
+    [switch]$CopyRomToLog,
     [string]$InputScript = "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs",
     [switch]$RecordInput,
     [string]$InputRecordDir = "",
@@ -278,6 +279,9 @@ if ($ClientOnly) {
     )
 } elseif ($WaitForPeerAtNetplayStart) {
     $common += "-WaitForPeerAtNetplayStart"
+}
+if ($CopyRomToLog) {
+    $common += "-CopyRomToLog"
 }
 if ($GameStateTrace) {
     $common += @(

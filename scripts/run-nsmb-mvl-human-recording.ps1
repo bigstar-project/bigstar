@@ -3,11 +3,14 @@ param(
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds",
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds",
+    [switch]$CopyRomToLog,
     [string]$InputScript = "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs",
     [string]$LogDir = "",
     [int]$AIPlayLogInterval = 1,
     [int]$AIPlayLogFlushInterval = 60,
     [int]$AIPlayLogMaxObjects = 128,
+    [int]$ScreenshotInterval = 0,
+    [switch]$SoftwareRenderer,
     [string]$Scenario = "",
     [ValidateSet("host", "client", "both")]
     [string]$HumanSide = "client",
@@ -19,6 +22,7 @@ param(
     [switch]$AllowJit,
     [switch]$NoJit,
     [switch]$DualWindow,
+    [switch]$SingleWindow,
     [switch]$ForcePlayerPowerups,
     [int]$ForcePlayerPowerupsStartFrame = 0,
     [int]$ForcePlayerPowerupsEndFrame = 0,
@@ -37,6 +41,7 @@ param(
     [string]$OpponentAI = "none",
     [ValidateSet("", "MARIO", "LUIGI", "0", "1")]
     [string]$OpponentAIPlayer = "",
+    [switch]$AuditPlayLog,
     [switch]$NoGzipPlayLog,
     [switch]$BuildLegacyDataset,
     [switch]$NoAutoPostprocess,
@@ -44,6 +49,13 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($DualWindow -and $SingleWindow) {
+    throw "-DualWindow and -SingleWindow cannot be used together"
+}
+if ($ScreenshotInterval -gt 0 -and -not $SoftwareRenderer) {
+    throw "-ScreenshotInterval requires -SoftwareRenderer because the OpenGL compute renderer does not produce test screenshots reliably"
+}
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if ($LogDir -eq "") {
@@ -69,11 +81,14 @@ $clientAIPlayLog = Join-Path $clientLog "ai-playlog.jsonl"
 $hostAIObservationV2Log = Join-Path $hostLog "ai-observations-v2.jsonl"
 $clientAIObservationV2Log = Join-Path $clientLog "ai-observations-v2.jsonl"
 $sessionPath = Join-Path $logRoot "recording-session.json"
-$singleWindow = -not $DualWindow
+$singleWindow = [bool]$SingleWindow
 if ($singleWindow) {
     New-Item -ItemType Directory -Force -Path $clientLog | Out-Null
 } else {
     New-Item -ItemType Directory -Force -Path $hostLog, $clientLog | Out-Null
+}
+if ($BuildLegacyDataset -and -not $AuditPlayLog) {
+    throw "-BuildLegacyDataset requires -AuditPlayLog because the legacy CSV path is built from ai-playlog v1 manifests."
 }
 
 $manualScript = Join-Path $PSScriptRoot "run-nsmb-mvl-manual-local.ps1"
@@ -82,31 +97,38 @@ $manualArgs = @{
     Exe = $Exe
     HostRom = $HostRom
     ClientRom = $ClientRom
+    CopyRomToLog = [bool]$CopyRomToLog
     InputScript = $InputScript
     LogDir = $LogDir
     MvlStage = 0
-    ClientAIPlayLog = $clientAIPlayLog
     ClientAIObservationV2Log = $clientAIObservationV2Log
     AIPlayLogInterval = $AIPlayLogInterval
     AIPlayLogFlushInterval = $AIPlayLogFlushInterval
     AIPlayLogMaxObjects = $AIPlayLogMaxObjects
+    ScreenshotInterval = $ScreenshotInterval
     NetworkPumpThread = $true
     NetworkPumpSleepUs = 50
     SkipFrameLimitCheck = $true
     Wait = (-not $NoAutoPostprocess)
 }
+if ($AuditPlayLog) {
+    $manualArgs.ClientAIPlayLog = $clientAIPlayLog
+}
 if ($singleWindow) {
     $manualArgs.ClientOnly = $true
     $manualArgs.InputDelayFrames = 0
 } else {
-    $manualArgs.HostAIPlayLog = $hostAIPlayLog
     $manualArgs.HostAIObservationV2Log = $hostAIObservationV2Log
+    if ($AuditPlayLog) {
+        $manualArgs.HostAIPlayLog = $hostAIPlayLog
+    }
 }
 $packetCaptureEnabled = (-not $NoPacketCapture) -and (-not $singleWindow)
 if ($packetCaptureEnabled) { $manualArgs.PacketCapture = $true }
 if ($GenerateMvlConfiguredRoms) { $manualArgs.GenerateMvlConfiguredRoms = $true }
 if ($MvlMatchSeed -ne "") { $manualArgs.MvlMatchSeed = $MvlMatchSeed }
 if ($AllowJit -or -not $NoJit) { $manualArgs.AllowJit = $true }
+if ($SoftwareRenderer) { $manualArgs.SoftwareRenderer = $true }
 if ($ForcePlayerPowerups) {
     $manualArgs.ForcePlayerPowerups = $true
     $manualArgs.ForcePlayerPowerupsStartFrame = $ForcePlayerPowerupsStartFrame
@@ -185,52 +207,64 @@ $scenarioManifestArg = if ($Scenario -ne "") {
 }
 if ($singleWindow) {
     $recordingPostCommands = @(
+        "python scripts\nsmb_mvl_ai_build_compact_dataset.py `"$clientAIObservationV2Log`" `"$compactDatasetPlayer1Path`" --player 1 --require-player-found"
+    )
+    if ($AuditPlayLog) {
+        $recordingPostCommands = @(
         "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$clientAIPlayLog`" `"$clientManifest`" --kind human --player 1 --label-source player --stage 0 --log-dir `"$clientLog`" --frames $Frames --client-input-script `"$InputScript`" --client-rom `"$ClientRom`"$matchSeedManifestArg$scenarioManifestArg",
         "python scripts\nsmb_mvl_ai_make_recordings_index.py `"$indexPath`" `"$clientManifest`" --stage 0",
         "python scripts\nsmb_mvl_ai_build_compact_dataset.py `"$clientAIObservationV2Log`" `"$compactDatasetPlayer1Path`" --player 1 --require-player-found",
         "python scripts\nsmb_mvl_ai_audit_visual_state.py `"$clientAIPlayLog`" --output `"$visualStateAuditPath`"",
         "python scripts\nsmb_mvl_ai_audit_fireballs.py `"$clientAIPlayLog`" --output `"$fireballAuditPath`""
-    )
-    if ($BuildLegacyDataset) {
-        $recordingPostCommands = @(
-            $recordingPostCommands[0],
-            $recordingPostCommands[1],
-            "python scripts\nsmb_mvl_ai_build_dataset.py `"$indexPath`" `"$logRoot\ai-dataset-player1.csv`" --player 1 --label-source player --require-player-found",
-            $recordingPostCommands[2],
-            "python scripts\nsmb_mvl_ai_audit_dataset_terrain.py `"$logRoot\ai-dataset-player1.csv`" --output `"$datasetTerrainAuditPath`"",
-            $recordingPostCommands[3],
-            $recordingPostCommands[4]
         )
+        if ($BuildLegacyDataset) {
+            $recordingPostCommands = @(
+                $recordingPostCommands[0],
+                $recordingPostCommands[1],
+                "python scripts\nsmb_mvl_ai_build_dataset.py `"$indexPath`" `"$logRoot\ai-dataset-player1.csv`" --player 1 --label-source player --require-player-found",
+                $recordingPostCommands[2],
+                "python scripts\nsmb_mvl_ai_audit_dataset_terrain.py `"$logRoot\ai-dataset-player1.csv`" --output `"$datasetTerrainAuditPath`"",
+                $recordingPostCommands[3],
+                $recordingPostCommands[4]
+            )
+        }
     }
     $postCommands += $recordingPostCommands
 } else {
     $recordingPostCommands = @(
+        "python scripts\nsmb_mvl_ai_build_compact_dataset.py `"$clientAIObservationV2Log`" `"$compactDatasetPlayer1Path`" --player 1 --require-player-found"
+    )
+    if ($AuditPlayLog) {
+        $recordingPostCommands = @(
         "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$hostAIPlayLog`" `"$hostManifest`" --kind human --player $hostPlayer --label-source player --stage 0 --log-dir `"$hostLog`" --frames $Frames --host-input-script `"$InputScript`" --client-input-script `"$InputScript`" --host-rom `"$HostRom`" --client-rom `"$ClientRom`"$matchSeedManifestArg$scenarioManifestArg$packetReplayArgs",
         "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$clientAIPlayLog`" `"$clientManifest`" --kind human --player $clientPlayer --label-source player --stage 0 --log-dir `"$clientLog`" --frames $Frames --host-input-script `"$InputScript`" --client-input-script `"$InputScript`" --host-rom `"$HostRom`" --client-rom `"$ClientRom`"$matchSeedManifestArg$scenarioManifestArg$packetReplayArgs",
         "python scripts\nsmb_mvl_ai_make_recordings_index.py `"$indexPath`" `"$hostManifest`" `"$clientManifest`" --stage 0",
         "python scripts\nsmb_mvl_ai_build_compact_dataset.py `"$clientAIObservationV2Log`" `"$compactDatasetPlayer1Path`" --player 1 --require-player-found",
         "python scripts\nsmb_mvl_ai_audit_visual_state.py `"$hostAIPlayLog`" `"$clientAIPlayLog`" --output `"$visualStateAuditPath`"",
         "python scripts\nsmb_mvl_ai_audit_fireballs.py `"$hostAIPlayLog`" `"$clientAIPlayLog`" --output `"$fireballAuditPath`""
-    )
-    if ($BuildLegacyDataset) {
-        $recordingPostCommands = @(
-            $recordingPostCommands[0],
-            $recordingPostCommands[1],
-            $recordingPostCommands[2],
-            "python scripts\nsmb_mvl_ai_build_dataset.py `"$indexPath`" `"$logRoot\ai-dataset-player1.csv`" --player 1 --label-source player --require-player-found",
-            $recordingPostCommands[3],
-            "python scripts\nsmb_mvl_ai_audit_dataset_terrain.py `"$logRoot\ai-dataset-player1.csv`" --output `"$datasetTerrainAuditPath`"",
-            $recordingPostCommands[4],
-            $recordingPostCommands[5]
         )
+        if ($BuildLegacyDataset) {
+            $recordingPostCommands = @(
+                $recordingPostCommands[0],
+                $recordingPostCommands[1],
+                $recordingPostCommands[2],
+                "python scripts\nsmb_mvl_ai_build_dataset.py `"$indexPath`" `"$logRoot\ai-dataset-player1.csv`" --player 1 --label-source player --require-player-found",
+                $recordingPostCommands[3],
+                "python scripts\nsmb_mvl_ai_audit_dataset_terrain.py `"$logRoot\ai-dataset-player1.csv`" --output `"$datasetTerrainAuditPath`"",
+                $recordingPostCommands[4],
+                $recordingPostCommands[5]
+            )
+        }
     }
     $postCommands += $recordingPostCommands
 }
-$auditCommand = "python scripts\nsmb_mvl_ai_audit_recordings.py `"$indexPath`" --stage 0 --min-rows 1 --min-gameplay-rows 1 --min-player-found-ratio 0.5 --min-label-ratio 0.5 --min-nonzero-label-rows 1 --output `"$auditPath`""
-if ($packetCaptureEnabled) {
-    $auditCommand += " --require-packet-replay"
+if ($AuditPlayLog) {
+    $auditCommand = "python scripts\nsmb_mvl_ai_audit_recordings.py `"$indexPath`" --stage 0 --min-rows 1 --min-gameplay-rows 1 --min-player-found-ratio 0.5 --min-label-ratio 0.5 --min-nonzero-label-rows 1 --output `"$auditPath`""
+    if ($packetCaptureEnabled) {
+        $auditCommand += " --require-packet-replay"
+    }
+    $postCommands += $auditCommand
 }
-$postCommands += $auditCommand
 if (-not $NoGzipPlayLog) {
     $postCommands += "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\compress-nsmb-mvl-ai-playlogs.ps1 -Session `"$sessionPath`""
 }
@@ -238,20 +272,24 @@ if (-not $NoGzipPlayLog) {
 $session = [ordered]@{
     schema = "nsmb_mvl_ai_human_recording_session_v1"
     stageScope = 0
-    recordingMode = $(if ($singleWindow) { "single_client_authoritative" } else { "dual_window_netplay_experimental" })
+    recordingMode = $(if ($singleWindow) { "single_client_authoritative" } else { "dual_window_netplay" })
     humanSide = $HumanSide
     neutralizeHostInput = ((-not $singleWindow) -and ($HumanSide -eq "client"))
     neutralizeClientInput = ((-not $singleWindow) -and ($HumanSide -eq "host"))
     allowJit = ($AllowJit -or -not $NoJit)
     noJit = [bool]$NoJit
+    softwareRenderer = [bool]$SoftwareRenderer
+    auditPlayLog = [bool]$AuditPlayLog
+    copyRomToLog = [bool]$CopyRomToLog
     logDir = $LogDir
-    hostAIPlayLog = $(if ($singleWindow) { "" } else { $hostAIPlayLog })
-    clientAIPlayLog = $clientAIPlayLog
+    hostAIPlayLog = $(if ((-not $singleWindow) -and $AuditPlayLog) { $hostAIPlayLog } else { "" })
+    clientAIPlayLog = $(if ($AuditPlayLog) { $clientAIPlayLog } else { "" })
     hostAIObservationV2Log = $(if ($singleWindow) { "" } else { $hostAIObservationV2Log })
     clientAIObservationV2Log = $clientAIObservationV2Log
     aiPlayLogInterval = $AIPlayLogInterval
     aiPlayLogFlushInterval = $AIPlayLogFlushInterval
     aiPlayLogMaxObjects = $AIPlayLogMaxObjects
+    screenshotInterval = $ScreenshotInterval
     gzipPlayLog = (-not $NoGzipPlayLog)
     buildLegacyDataset = [bool]$BuildLegacyDataset
     scenario = $Scenario
@@ -277,9 +315,9 @@ $session = [ordered]@{
     hostPacketCapture = $(if ($packetCaptureEnabled) { $hostPacketCapture } else { "" })
     clientPacketCapture = $(if ($packetCaptureEnabled) { $clientPacketCapture } else { "" })
     packetReplay = $(if ($packetCaptureEnabled) { $packetReplay } else { "" })
-    audit = $auditPath
-    visualStateAudit = $visualStateAuditPath
-    fireballAudit = $fireballAuditPath
+    audit = $(if ($AuditPlayLog) { $auditPath } else { "" })
+    visualStateAudit = $(if ($AuditPlayLog) { $visualStateAuditPath } else { "" })
+    fireballAudit = $(if ($AuditPlayLog) { $fireballAuditPath } else { "" })
     datasetTerrainAudit = $(if ($BuildLegacyDataset) { $datasetTerrainAuditPath } else { "" })
     compactDatasetPlayer1 = $compactDatasetPlayer1Path
     postCommands = $postCommands

@@ -13,6 +13,7 @@ param(
     [string]$Rom = "roms\nsmb.nds",
     [string]$HostRom = "",
     [string]$ClientRom = "",
+    [switch]$CopyRomToLog,
     [string]$InputScript = "tests\nsmb_mario_vs_luigi.inputs",
     [switch]$GameStateTrace,
     [int]$GameStateTraceInterval = 60,
@@ -658,6 +659,30 @@ New-Item -ItemType Directory -Force -Path $hostRoot, $clientRoot | Out-Null
 $hostRom = Join-Path $hostRoot "nsmb.nds"
 $clientRom = Join-Path $clientRoot "nsmb.nds"
 
+function Set-RunRomReference {
+    param(
+        [string]$Source,
+        [string]$Target,
+        [switch]$Copy
+    )
+
+    if (Test-Path -LiteralPath $Target -PathType Leaf) {
+        Remove-Item -LiteralPath $Target -Force
+    }
+
+    if ($Copy) {
+        Copy-Item -Force -LiteralPath $Source -Destination $Target
+        return "copy"
+    }
+
+    try {
+        New-Item -ItemType HardLink -Path $Target -Target $Source -ErrorAction Stop | Out-Null
+        return "hardlink"
+    } catch {
+        throw "Failed to create ROM hardlink from '$Target' to '$Source'. Use -CopyRomToLog if this run must store full ROM copies in the log directory. Original error: $($_.Exception.Message)"
+    }
+}
+
 function Convert-ToUInt32Setting {
     param(
         [string]$Value,
@@ -786,8 +811,27 @@ if (-not $MvlSceneSettings) {
     $MvlSceneSettings = Convert-ToMvlSceneSettings -Stage $settingsStage
 }
 
-Copy-Item -Force $hostSourceRomPath $hostRom
-Copy-Item -Force $clientSourceRomPath $clientRom
+$hostRomStorage = Set-RunRomReference -Source $hostSourceRomPath -Target $hostRom -Copy:$CopyRomToLog
+$clientRomStorage = Set-RunRomReference -Source $clientSourceRomPath -Target $clientRom -Copy:$CopyRomToLog
+@(
+    "hostSource=$hostSourceRomPath"
+    "clientSource=$clientSourceRomPath"
+    "hostTarget=$hostRom"
+    "clientTarget=$clientRom"
+    "hostStorage=$hostRomStorage"
+    "clientStorage=$clientRomStorage"
+    "copyRomToLog=$([bool]$CopyRomToLog)"
+) | Set-Content -Encoding UTF8 (Join-Path $logRoot "rom-storage.txt")
+
+if ($GenerateMvlConfiguredRoms) {
+    foreach ($generated in @($generatedHost, $generatedClient)) {
+        if ((Test-Path -LiteralPath $generated -PathType Leaf) -and
+            ($generated -ne $hostRom) -and
+            ($generated -ne $clientRom)) {
+            Remove-Item -LiteralPath $generated -Force
+        }
+    }
+}
 
 function Copy-SaveSiblings {
     param(
