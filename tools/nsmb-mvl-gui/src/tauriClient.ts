@@ -284,6 +284,7 @@ export function getSessionStatus() {
       bridge: null,
       webrtc: null,
       diagnostics_error: null,
+      game_state_mismatch: null,
     });
   }
   return unwrapCommand(commands.sessionStatus());

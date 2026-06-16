@@ -1739,6 +1739,7 @@ struct State
     std::string RamDumpDir;
     std::string MemPatchFile;
     std::string GameStateTracePath;
+    std::string DiagnosticsPath;
     std::string AIPlayLogPath;
     std::string AIObservationV2Path;
     std::ofstream HashLog;
@@ -3042,6 +3043,124 @@ melonDS::u64 CombinedGameStateHash(const GameStateSyncHashes& hashes)
     return combined;
 }
 
+std::string JsonEscape(const std::string& value)
+{
+    std::ostringstream out;
+    for (char ch : value)
+    {
+        switch (ch)
+        {
+        case '\\': out << "\\\\"; break;
+        case '"': out << "\\\""; break;
+        case '\b': out << "\\b"; break;
+        case '\f': out << "\\f"; break;
+        case '\n': out << "\\n"; break;
+        case '\r': out << "\\r"; break;
+        case '\t': out << "\\t"; break;
+        default:
+            if (static_cast<unsigned char>(ch) < 0x20)
+            {
+                out << "\\u"
+                    << std::hex << std::uppercase << std::setw(4) << std::setfill('0')
+                    << static_cast<int>(static_cast<unsigned char>(ch))
+                    << std::dec << std::nouppercase << std::setfill(' ');
+            }
+            else
+            {
+                out << ch;
+            }
+            break;
+        }
+    }
+    return out.str();
+}
+
+std::string Hex64(melonDS::u64 value)
+{
+    std::ostringstream out;
+    out << std::hex << std::uppercase << std::setw(16) << std::setfill('0')
+        << static_cast<unsigned long long>(value);
+    return out.str();
+}
+
+void WriteDiagnosticsJson(const std::string& json)
+{
+    if (G.DiagnosticsPath.empty())
+        return;
+
+    const std::filesystem::path path(G.DiagnosticsPath);
+    const std::filesystem::path tmp = path.string() + ".tmp";
+    std::error_code ec;
+    if (path.has_parent_path())
+        std::filesystem::create_directories(path.parent_path(), ec);
+
+    {
+        std::ofstream file(tmp, std::ios::binary | std::ios::trunc);
+        if (!file)
+        {
+            std::printf("NSMB PoC: failed to open diagnostics file: %s\n", tmp.string().c_str());
+            return;
+        }
+        file << json;
+        file.flush();
+        if (!file)
+        {
+            std::printf("NSMB PoC: failed to write diagnostics file: %s\n", tmp.string().c_str());
+            return;
+        }
+    }
+
+    std::filesystem::remove(path, ec);
+    ec.clear();
+    std::filesystem::rename(tmp, path, ec);
+    if (ec)
+    {
+        std::printf("NSMB PoC: failed to publish diagnostics file: %s error=%s\n",
+            path.string().c_str(),
+            ec.message().c_str());
+    }
+}
+
+void WriteGameStateMismatchDiagnostics(
+    int instanceID,
+    melonDS::u32 frame,
+    const GameStateSyncHashes& local,
+    const GameStateSyncHashes& remote)
+{
+    const melonDS::u64 localHash = CombinedGameStateHash(local);
+    const melonDS::u64 remoteHash = CombinedGameStateHash(remote);
+    const bool basicMatches = local.Basic == remote.Basic;
+    const bool playerGlobalMatches = local.PlayerGlobal == remote.PlayerGlobal;
+    const bool wifiCandidateMatches = local.WifiCandidate == remote.WifiCandidate;
+    const bool renderCandidateMatches = local.RenderCandidate == remote.RenderCandidate;
+
+    std::ostringstream line;
+    line << "NSMB PoC: game state mismatch inst=" << instanceID
+         << " frame=" << frame
+         << " local=" << Hex64(localHash)
+         << " remote=" << Hex64(remoteHash)
+         << " basic=" << (basicMatches ? 1 : 0)
+         << " playerGlobal=" << (playerGlobalMatches ? 1 : 0)
+         << " wifiCandidate=" << (wifiCandidateMatches ? 1 : 0)
+         << " renderCandidate=" << (renderCandidateMatches ? 1 : 0);
+
+    std::ostringstream json;
+    json << "{\n"
+         << "  \"game_state_mismatch\": {\n"
+         << "    \"instance\": " << instanceID << ",\n"
+         << "    \"frame\": " << frame << ",\n"
+         << "    \"local_hash\": \"" << Hex64(localHash) << "\",\n"
+         << "    \"remote_hash\": \"" << Hex64(remoteHash) << "\",\n"
+         << "    \"basic_matches\": " << (basicMatches ? "true" : "false") << ",\n"
+         << "    \"player_global_matches\": " << (playerGlobalMatches ? "true" : "false") << ",\n"
+         << "    \"wifi_candidate_matches\": " << (wifiCandidateMatches ? "true" : "false") << ",\n"
+         << "    \"render_candidate_matches\": " << (renderCandidateMatches ? "true" : "false") << ",\n"
+         << "    \"line\": \"" << JsonEscape(line.str()) << "\"\n"
+         << "  }\n"
+         << "}\n";
+    WriteDiagnosticsJson(json.str());
+}
+
 void CompareGameStateLocked(int instanceID, melonDS::u32 frame)
 {
     const melonDS::u64 key = GameStateKey(instanceID, frame);
@@ -3058,6 +3177,7 @@ void CompareGameStateLocked(int instanceID, melonDS::u32 frame)
         return;
 
     G.GameStateMismatchSeen = true;
+    WriteGameStateMismatchDiagnostics(instanceID, frame, lhs, rhs);
     std::printf("NSMB PoC: game state mismatch inst=%d frame=%u local=%016llX remote=%016llX basic=%d playerGlobal=%d wifiCandidate=%d renderCandidate=%d\n",
         instanceID,
         frame,
@@ -20647,6 +20767,8 @@ void InitFromEnvironment()
 
     const char* gameStateTrace = std::getenv("MELONDS_NSML_GAME_STATE_TRACE");
     if (gameStateTrace && gameStateTrace[0]) G.GameStateTracePath = gameStateTrace;
+    const char* diagnosticsFile = std::getenv("MELONDS_NSML_DIAGNOSTICS_FILE");
+    if (diagnosticsFile && diagnosticsFile[0]) G.DiagnosticsPath = diagnosticsFile;
     G.GameStateTraceInterval = std::max(1, EnvInt("MELONDS_NSML_GAME_STATE_TRACE_INTERVAL", 60));
     G.GameStateTraceStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_GAME_STATE_TRACE_START_FRAME", 0)));

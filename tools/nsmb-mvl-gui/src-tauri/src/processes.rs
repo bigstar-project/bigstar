@@ -9,7 +9,8 @@ use std::os::windows::process::CommandExt;
 
 use crate::config::{DEFAULT_FRAMES, NETPLAY_START_FRAME};
 use crate::models::{
-    BridgeDiagnostics, CourseMode, LaunchRequest, LaunchResponse, Role, SessionStatus,
+    BridgeDiagnostics, CourseMode, LaunchRequest, LaunchResponse, MelonDiagnostics, Role,
+    SessionStatus,
 };
 use crate::settings::selected_stage;
 use crate::state::{AppState, ManagedSession};
@@ -98,6 +99,7 @@ pub(crate) fn session_status_inner(state: &AppState) -> Result<SessionStatus, St
             bridge: None,
             webrtc: None,
             diagnostics_error: None,
+            game_state_mismatch: None,
         });
     };
 
@@ -105,6 +107,8 @@ pub(crate) fn session_status_inner(state: &AppState) -> Result<SessionStatus, St
     let bridge = process_state(&mut session.bridge)?;
     let active = melon == "running" || bridge == "running";
     let (webrtc, diagnostics_error) = read_bridge_diagnostics(&session.log_dir);
+    let game_state_mismatch = read_melon_diagnostics(&session.log_dir)
+        .and_then(|diagnostics| diagnostics.game_state_mismatch);
 
     Ok(SessionStatus {
         active,
@@ -113,6 +117,7 @@ pub(crate) fn session_status_inner(state: &AppState) -> Result<SessionStatus, St
         bridge: Some(bridge),
         webrtc,
         diagnostics_error,
+        game_state_mismatch,
     })
 }
 
@@ -256,6 +261,13 @@ pub(crate) fn melon_env(
     env.insert("MELONDS_NSML_STATE_SYNC".into(), "1".into());
     env.insert("MELONDS_NSML_STATE_SYNC_INTERVAL".into(), "60".into());
     env.insert("MELONDS_NSML_STATE_SYNC_EXTENDED".into(), "1".into());
+    env.insert(
+        "MELONDS_NSML_DIAGNOSTICS_FILE".into(),
+        log_dir
+            .join("melonds-diagnostics.json")
+            .to_string_lossy()
+            .into_owned(),
+    );
     if request.settings.rollback_enabled {
         env.insert("MELONDS_NSML_ROLLBACK".into(), "1".into());
         env.insert("MELONDS_NSML_ROLLBACK_BACKEND".into(), "coredelta".into());
@@ -415,6 +427,11 @@ pub(crate) fn read_bridge_diagnostics(
         Ok(value) => (Some(value), None),
         Err(err) => (None, Some(format!("bridge 診断 JSON を読めません: {err}"))),
     }
+}
+
+pub(crate) fn read_melon_diagnostics(log_dir: &Path) -> Option<MelonDiagnostics> {
+    let json = fs::read(log_dir.join("melonds-diagnostics.json")).ok()?;
+    serde_json::from_slice(&json).ok()
 }
 
 #[cfg(windows)]

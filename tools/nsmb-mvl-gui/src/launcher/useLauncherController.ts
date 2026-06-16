@@ -36,6 +36,7 @@ import {
 import type {
   BridgeDiagnostics,
   FormState,
+  GameStateMismatch,
   GenerateRomRequest,
   LaunchRequest,
   SaveRomPathsRequest,
@@ -78,6 +79,8 @@ export function useLauncherController() {
   const [lastLogDir, setLastLogDir] = useState('');
   const [bridgeDiagnostics, setBridgeDiagnostics] =
     useState<BridgeDiagnostics | null>(null);
+  const [gameStateMismatch, setGameStateMismatch] =
+    useState<GameStateMismatch | null>(null);
   const [defaultsLoaded, setDefaultsLoaded] = useState(false);
   const [romPreparation, setRomPreparation] = useState('未確認');
   const [onboardingRomsPrepared, setOnboardingRomsPrepared] = useState(false);
@@ -184,6 +187,7 @@ export function useLauncherController() {
         setLastLogDir(response.log_dir);
       }
       setBridgeDiagnostics(response.webrtc ?? null);
+      setGameStateMismatch(response.game_state_mismatch ?? null);
       if (processExited(response.melon) || processExited(response.bridge)) {
         setConnectionStatus({
           text: `プロセス終了 melonDS:${response.melon ?? '-'} bridge:${response.bridge ?? '-'}`,
@@ -192,11 +196,19 @@ export function useLauncherController() {
         return;
       }
       if (!response.active) {
+        setGameStateMismatch(null);
         setConnectionStatus({ text: '未接続', kind: 'idle' });
         return;
       }
       if (response.diagnostics_error) {
         setConnectionStatus({ text: response.diagnostics_error, kind: 'warn' });
+        return;
+      }
+      if (response.game_state_mismatch) {
+        setConnectionStatus({
+          text: `実行中: ゲーム状態ミスマッチ frame=${response.game_state_mismatch.frame ?? '-'}`,
+          kind: 'warn',
+        });
         return;
       }
       setConnectionStatus({
@@ -418,6 +430,7 @@ export function useLauncherController() {
       setActivityStatus({ text: `起動中 stage=${stage}`, kind: 'idle' });
       const response = await startMatchCommand(request);
       setLastLogDir(response.log_dir);
+      setGameStateMismatch(null);
       setActivityStatus({
         text: `起動済み melonDS:${response.melon_pid} bridge:${response.bridge_pid}`,
         kind: 'ok',
@@ -518,6 +531,7 @@ export function useLauncherController() {
   const stopMatch = async () => {
     try {
       await stopMatchCommand();
+      setGameStateMismatch(null);
       setActivityStatus({ text: '停止しました', kind: 'warn' });
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });
@@ -698,6 +712,7 @@ export function useLauncherController() {
     activityStatus,
     form,
     lastLogDir,
+    gameStateMismatch,
     matchmakingRooms: {
       rooms: roomsQuery.data ?? [],
       loading: roomsQuery.isFetching,

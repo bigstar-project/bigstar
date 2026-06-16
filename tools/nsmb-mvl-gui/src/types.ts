@@ -7,6 +7,7 @@ export type {
   CourseMode,
   Defaults,
   GameSettings,
+  GameStateMismatch,
   GenerateRomRequest,
   GenerateRomResponse,
   LaunchRequest,

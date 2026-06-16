@@ -7,8 +7,8 @@ use crate::models::{CourseMode, GameSettings, LaunchRequest, Lives, Role};
 use crate::paths::allowed_log_dir;
 use crate::processes::{
     build_bridge_command, build_melon_command, melon_env, read_bridge_diagnostics,
-    remove_inherited_melonds_env_keys, run_bridge_signaling_smoke, session_status_inner,
-    start_match_resolved, stop_existing, LaunchPaths,
+    read_melon_diagnostics, remove_inherited_melonds_env_keys, run_bridge_signaling_smoke,
+    session_status_inner, start_match_resolved, stop_existing, LaunchPaths,
 };
 use crate::roms::{reusable_rom_is_current, reusable_rom_marker_path, write_reusable_rom_marker};
 use crate::settings::{selected_stage, validate_request};
@@ -228,6 +228,7 @@ fn melon_env_carries_game_settings_and_netplay_start() {
     assert_eq!(env["MELONDS_NSML_STATE_SYNC"], "1");
     assert_eq!(env["MELONDS_NSML_STATE_SYNC_INTERVAL"], "60");
     assert_eq!(env["MELONDS_NSML_STATE_SYNC_EXTENDED"], "1");
+    assert!(env["MELONDS_NSML_DIAGNOSTICS_FILE"].ends_with("melonds-diagnostics.json"));
     assert!(!env.contains_key("MELONDS_NSML_ROLLBACK"));
 }
 
@@ -401,6 +402,42 @@ fn bridge_diagnostics_reads_status_json() {
 }
 
 #[test]
+fn melon_diagnostics_reads_game_state_mismatch_json() {
+    let dir = temp_log_dir("game-state-mismatch");
+    fs::write(
+        dir.join("melonds-diagnostics.json"),
+        br#"{
+          "game_state_mismatch": {
+            "instance": 0,
+            "frame": 180,
+            "local_hash": "0000000000000003",
+            "remote_hash": "0000000000000004",
+            "basic_matches": false,
+            "player_global_matches": false,
+            "wifi_candidate_matches": true,
+            "render_candidate_matches": true,
+            "line": "NSMB PoC: game state mismatch inst=0 frame=180 local=0000000000000003 remote=0000000000000004 basic=0 playerGlobal=0 wifiCandidate=1 renderCandidate=1"
+          }
+        }"#,
+    )
+    .expect("write melonds diagnostics");
+
+    let diagnostics = read_melon_diagnostics(&dir).expect("diagnostics");
+    let mismatch = diagnostics.game_state_mismatch.expect("mismatch");
+
+    assert_eq!(mismatch.instance, Some(0));
+    assert_eq!(mismatch.frame, Some(180));
+    assert_eq!(mismatch.local_hash.as_deref(), Some("0000000000000003"));
+    assert_eq!(mismatch.remote_hash.as_deref(), Some("0000000000000004"));
+    assert_eq!(mismatch.basic_matches, Some(false));
+    assert_eq!(mismatch.player_global_matches, Some(false));
+    assert_eq!(mismatch.wifi_candidate_matches, Some(true));
+    assert_eq!(mismatch.render_candidate_matches, Some(true));
+    assert!(mismatch.line.contains("frame=180"));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn allowed_log_dir_rejects_path_outside_logs_root() {
     let dir = temp_log_dir("allowed-log-dir");
     let logs = dir.join("logs");
@@ -434,6 +471,7 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
     assert!(status.active);
     assert_eq!(status.bridge.as_deref(), Some("running"));
     assert_eq!(status.melon.as_deref(), Some("running"));
+    assert!(status.game_state_mismatch.is_none());
 
     let bridge_stdout =
         wait_for_file_contains(&dir.join("logs").join("bridge.stdout.txt"), "fake-bridge");
