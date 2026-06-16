@@ -67,6 +67,18 @@ export type GameSettings = {
 	rollback_enabled: boolean,
 };
 
+export type GameStateMismatch = {
+	instance: number | null,
+	frame: number | null,
+	local_hash: string | null,
+	remote_hash: string | null,
+	basic_matches: boolean | null,
+	player_global_matches: boolean | null,
+	wifi_candidate_matches: boolean | null,
+	render_candidate_matches: boolean | null,
+	line: string,
+};
+
 export type GenerateRomRequest = {
 	source_rom: string,
 	stage: number,
@@ -127,6 +139,7 @@ export type SessionStatus = {
 	bridge: string | null,
 	webrtc: BridgeDiagnostics | null,
 	diagnostics_error: string | null,
+	game_state_mismatch: GameStateMismatch | null,
 };
 
 /* Tauri Specta runtime */

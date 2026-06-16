@@ -4,6 +4,7 @@ import { Tabs } from '../components/ui';
 import { initialForm } from '../form';
 import { BattleView } from './BattleView';
 import type {
+  DiagnosticsState,
   LauncherActions,
   LauncherSummary,
   MatchmakingRoomsState,
@@ -73,6 +74,7 @@ const rooms: MatchmakingRoomsState = {
 async function renderBattleView(
   props: {
     actionOverrides?: Partial<LauncherActions>;
+    diagnostics?: DiagnosticsState;
     matchmakingRooms?: MatchmakingRoomsState;
     summaryOverride?: Partial<LauncherSummary>;
   } = {},
@@ -84,7 +86,12 @@ async function renderBattleView(
     <Tabs.Root value="battle">
       <BattleView
         actions={launcherActions}
-        diagnostics={{ bridgeDiagnostics: null }}
+        diagnostics={
+          props.diagnostics ?? {
+            bridgeDiagnostics: null,
+            gameStateMismatch: null,
+          }
+        }
         form={{
           ...initialForm,
           baseRomPath: 'C:\\roms\\base.nds',
@@ -171,6 +178,34 @@ describe('対戦ビュー', () => {
       .toBeDisabled();
     await expect
       .element(screen.getByRole('button', { name: '停止' }))
+      .toBeVisible();
+  });
+
+  test('ゲーム状態ミスマッチを警告として表示する', async () => {
+    const { screen } = await renderBattleView({
+      diagnostics: {
+        bridgeDiagnostics: null,
+        gameStateMismatch: {
+          basic_matches: false,
+          frame: 240,
+          instance: 0,
+          line: 'NSMB PoC: game state mismatch inst=0 frame=240 local=00000000000000AA remote=00000000000000BB basic=0 playerGlobal=1 wifiCandidate=0 renderCandidate=1',
+          local_hash: '00000000000000AA',
+          player_global_matches: true,
+          remote_hash: '00000000000000BB',
+          render_candidate_matches: true,
+          wifi_candidate_matches: false,
+        },
+      },
+      summaryOverride: { connectionActive: true },
+    });
+
+    await expect
+      .element(screen.getByText('ミスマッチ', { exact: true }))
+      .toBeVisible();
+    await expect.element(screen.getByText('状態不一致を検出')).toBeVisible();
+    await expect
+      .element(screen.getByText(/NSMB PoC: game state mismatch/))
       .toBeVisible();
   });
 });

@@ -28,7 +28,10 @@ export function App() {
         >
           <BattleView
             actions={launcher.actions}
-            diagnostics={{ bridgeDiagnostics: launcher.bridgeDiagnostics }}
+            diagnostics={{
+              bridgeDiagnostics: launcher.bridgeDiagnostics,
+              gameStateMismatch: launcher.gameStateMismatch,
+            }}
             form={launcher.form}
             lastLogDir={launcher.lastLogDir}
             matchmakingRooms={launcher.matchmakingRooms}

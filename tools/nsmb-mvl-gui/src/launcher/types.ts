@@ -1,5 +1,5 @@
 import type { RoomSummary } from '../matchmakingClient';
-import type { BridgeDiagnostics, FormState } from '../types';
+import type { BridgeDiagnostics, FormState, GameStateMismatch } from '../types';
 
 export type View = 'battle' | 'settings';
 
@@ -58,6 +58,7 @@ export type OnboardingState = {
 
 export type DiagnosticsState = {
   bridgeDiagnostics: BridgeDiagnostics | null;
+  gameStateMismatch: GameStateMismatch | null;
 };
 
 export type MatchmakingRoomsState = {

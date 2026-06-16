@@ -10,7 +10,7 @@ export function LauncherCard({
   title,
 }: {
   badge?: string;
-  badgeTone?: 'green' | 'slate';
+  badgeTone?: 'green' | 'red' | 'slate' | 'yellow';
   children: ReactNode;
   icon?: ReactNode;
   title?: string;
@@ -53,10 +53,7 @@ export function LauncherCard({
             {title}
           </h2>
           {badge ? (
-            <Badge
-              colorPalette={badgeTone === 'green' ? 'green' : 'gray'}
-              variant="subtle"
-            >
+            <Badge colorPalette={badgeColorPalette(badgeTone)} variant="subtle">
               {badge}
             </Badge>
           ) : null}
@@ -67,6 +64,21 @@ export function LauncherCard({
   );
 }
 
+function badgeColorPalette(
+  tone: 'green' | 'red' | 'slate' | 'yellow',
+): 'gray' | 'green' | 'red' | 'yellow' {
+  switch (tone) {
+    case 'green':
+      return 'green';
+    case 'red':
+      return 'red';
+    case 'yellow':
+      return 'yellow';
+    default:
+      return 'gray';
+  }
+}
+
 export function InfoPanel({
   badge,
   badgeTone,
@@ -75,7 +87,7 @@ export function InfoPanel({
   title,
 }: {
   badge?: string;
-  badgeTone?: 'green' | 'slate';
+  badgeTone?: 'green' | 'red' | 'slate' | 'yellow';
   children: ReactNode;
   icon: ReactNode;
   title: string;

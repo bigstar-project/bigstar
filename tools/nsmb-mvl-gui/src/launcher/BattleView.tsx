@@ -13,6 +13,7 @@ import {
   Stop,
   Trophy,
   Users,
+  WarningCircle,
 } from '@phosphor-icons/react';
 import { useState } from 'react';
 import { css, cx } from 'styled-system/css';
@@ -36,7 +37,7 @@ import {
   rollbackInputDelayFrames,
   rollbackInputMaxFrameLead,
 } from '../form';
-import type { CourseMode, FormState, Lives } from '../types';
+import type { CourseMode, FormState, GameStateMismatch, Lives } from '../types';
 import { InfoPanel, LauncherCard, SmallInfoCard } from './LauncherCards';
 import {
   bigStarsOptions,
@@ -186,6 +187,7 @@ export function BattleView({
           />
 
           <BattleLogPanel
+            gameStateMismatch={diagnostics.gameStateMismatch}
             lastLogDir={lastLogDir}
             onOpenLogDir={() => void actions.openLogDir()}
           />
@@ -201,13 +203,37 @@ export function BattleView({
           <InfoPanel
             icon={<Broadcast size={22} weight="bold" />}
             title="接続状況"
-            badge={summary.connectionActive ? '良好' : '待機'}
-            badgeTone={summary.connectionActive ? 'green' : 'slate'}
+            badge={
+              diagnostics.gameStateMismatch
+                ? 'ミスマッチ'
+                : summary.connectionActive
+                  ? '良好'
+                  : '待機'
+            }
+            badgeTone={
+              diagnostics.gameStateMismatch
+                ? 'red'
+                : summary.connectionActive
+                  ? 'green'
+                  : 'slate'
+            }
           >
             <SummaryItem
               label="接続状態"
-              value={summary.connectionActive ? '接続中' : '未接続'}
+              value={
+                diagnostics.gameStateMismatch
+                  ? '状態不一致を検出'
+                  : summary.connectionActive
+                    ? '接続中'
+                    : '未接続'
+              }
             />
+            {diagnostics.gameStateMismatch ? (
+              <GameStateMismatchAlert
+                mismatch={diagnostics.gameStateMismatch}
+                compact
+              />
+            ) : null}
             <WebRtcDiagnosticsPanel
               diagnostics={diagnostics.bridgeDiagnostics}
               compact
@@ -750,9 +776,11 @@ function formatRoomSettings(room: MatchmakingRoomsState['rooms'][number]) {
 }
 
 function BattleLogPanel({
+  gameStateMismatch,
   lastLogDir,
   onOpenLogDir,
 }: {
+  gameStateMismatch: GameStateMismatch | null;
   lastLogDir: string;
   onOpenLogDir: () => void;
 }) {
@@ -801,7 +829,91 @@ function BattleLogPanel({
         >
           {lastLogDir || 'not started'}
         </code>
+        {gameStateMismatch ? (
+          <GameStateMismatchAlert mismatch={gameStateMismatch} />
+        ) : null}
       </div>
     </LauncherCard>
   );
+}
+
+function GameStateMismatchAlert({
+  compact = false,
+  mismatch,
+}: {
+  compact?: boolean;
+  mismatch: GameStateMismatch;
+}) {
+  return (
+    <div
+      className={css({
+        bg: 'red.subtle.bg',
+        borderColor: 'red.outline.border',
+        borderRadius: 'l2',
+        borderWidth: '1px',
+        color: 'red.subtle.fg',
+        display: 'grid',
+        gap: compact ? '1' : '2',
+        p: compact ? '3' : '4',
+      })}
+    >
+      <div
+        className={css({
+          alignItems: 'center',
+          display: 'flex',
+          gap: '2',
+          fontWeight: 'black',
+          textStyle: compact ? 'sm' : 'md',
+        })}
+      >
+        <WarningCircle size={compact ? 18 : 20} weight="fill" />
+        ゲーム状態ミスマッチ
+      </div>
+      <div
+        className={css({
+          color: 'red.subtle.fg',
+          fontWeight: 'bold',
+          overflowWrap: 'anywhere',
+          textStyle: 'sm',
+        })}
+      >
+        {formatMismatchSummary(mismatch)}
+      </div>
+      {compact ? null : (
+        <code
+          className={css({
+            bg: 'red.2',
+            borderColor: 'red.5',
+            borderRadius: 'l1',
+            borderWidth: '1px',
+            color: 'red.12',
+            fontFamily: 'mono',
+            overflowWrap: 'anywhere',
+            px: '2',
+            py: '1.5',
+            textStyle: 'xs',
+          })}
+        >
+          {mismatch.line}
+        </code>
+      )}
+    </div>
+  );
+}
+
+function formatMismatchSummary(mismatch: GameStateMismatch) {
+  return [
+    `frame=${mismatch.frame ?? '-'}`,
+    `basic=${formatMatchFlag(mismatch.basic_matches)}`,
+    `player=${formatMatchFlag(mismatch.player_global_matches)}`,
+    `wifi=${formatMatchFlag(mismatch.wifi_candidate_matches)}`,
+    `render=${formatMatchFlag(mismatch.render_candidate_matches)}`,
+  ].join(' / ');
+}
+
+function formatMatchFlag(value: boolean | null) {
+  if (value === null) {
+    return '-';
+  }
+  return value ? 'OK' : 'NG';
 }

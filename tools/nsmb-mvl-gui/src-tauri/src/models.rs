@@ -107,6 +107,25 @@ pub(crate) struct SessionStatus {
     pub(crate) bridge: Option<String>,
     pub(crate) webrtc: Option<BridgeDiagnostics>,
     pub(crate) diagnostics_error: Option<String>,
+    pub(crate) game_state_mismatch: Option<GameStateMismatch>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Type)]
+pub(crate) struct GameStateMismatch {
+    pub(crate) instance: Option<i32>,
+    pub(crate) frame: Option<u32>,
+    pub(crate) local_hash: Option<String>,
+    pub(crate) remote_hash: Option<String>,
+    pub(crate) basic_matches: Option<bool>,
+    pub(crate) player_global_matches: Option<bool>,
+    pub(crate) wifi_candidate_matches: Option<bool>,
+    pub(crate) render_candidate_matches: Option<bool>,
+    pub(crate) line: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct MelonDiagnostics {
+    pub(crate) game_state_mismatch: Option<GameStateMismatch>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Type)]
