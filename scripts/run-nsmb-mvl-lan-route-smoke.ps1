@@ -584,6 +584,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$repoRoot = Split-Path -Parent $PSScriptRoot
 
 if ($LanStartAttempts -gt 1) {
     for ($attempt = 1; $attempt -le $LanStartAttempts; $attempt++) {
@@ -782,6 +783,31 @@ if (-not $MvlSceneSettings) {
 Copy-Item -Force $hostSourceRomPath $hostRom
 Copy-Item -Force $clientSourceRomPath $clientRom
 
+function Test-UsableNsmbSave {
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) {
+        return $false
+    }
+
+    $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $Path).Path)
+    if ($bytes.Length -ne 8192) {
+        return $false
+    }
+
+    $allZero = $true
+    $allFF = $true
+    foreach ($byte in $bytes) {
+        if ($byte -ne 0x00) { $allZero = $false }
+        if ($byte -ne 0xFF) { $allFF = $false }
+        if (-not $allZero -and -not $allFF) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Copy-SaveSiblings {
     param(
         [string]$SourceRom,
@@ -793,6 +819,13 @@ function Copy-SaveSiblings {
         [System.IO.Path]::GetFileNameWithoutExtension($SourceRom))
     foreach ($suffix in @(".sav", ".sav.2")) {
         $source = "$base$suffix"
+        if ($suffix -eq ".sav") {
+            $fallback = Join-Path $repoRoot "roms\nsmb-us.sav"
+            if (-not (Test-UsableNsmbSave -Path $source) -and (Test-UsableNsmbSave -Path $fallback)) {
+                $source = $fallback
+            }
+        }
+
         if (Test-Path $source) {
             Copy-Item -Force $source (Join-Path $TargetRoot "nsmb$suffix")
         }

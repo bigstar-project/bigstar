@@ -542,7 +542,9 @@ fn patch_direct_mvl_entry(
     patch_mvl_load_thread_entrance_ids(rom)?;
     patch_is_out_of_view_vertical_camera_fallback(rom)?;
     patch_camera_focus_loop_count(rom, 2)?;
-    patch_stage_object_activation_player_id(rom, 0)?;
+    // Disabled pending a focused lifecycle proof. The original session found this
+    // hook targeted 0x0209B040, while the missing-Goomba path used 0x0209B320.
+    // patch_stage_object_activation_player_id(rom, 0)?;
     patch_player_stage_lock_vsmode_noop(rom)?;
     Ok(())
 }
@@ -780,6 +782,7 @@ fn patch_camera_focus_loop_count(rom: &mut RomImage, count: u8) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn patch_stage_object_activation_player_id(rom: &mut RomImage, player_id: u8) -> Result<()> {
     if player_id > 1 {
         bail!("stage object activation player id must be 0 or 1: {player_id}");
