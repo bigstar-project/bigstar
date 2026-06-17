@@ -421,6 +421,9 @@ function MatchSettingsFields({
           gap: '3',
           gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
           '@media (max-width: 900px)': {
+            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+          },
+          '@media (max-width: 620px)': {
             gridTemplateColumns: '1fr',
           },
         })}

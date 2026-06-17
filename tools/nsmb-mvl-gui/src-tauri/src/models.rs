@@ -10,6 +10,8 @@ pub(crate) struct LaunchRequest {
     pub(crate) port: u16,
     pub(crate) rom_path: String,
     pub(crate) settings: GameSettings,
+    #[serde(default)]
+    pub(crate) diagnostic_events_enabled: bool,
 }
 
 #[derive(Debug, Deserialize, Type)]
@@ -69,6 +71,7 @@ pub(crate) struct Defaults {
     pub(crate) roms_prepared_once: bool,
     pub(crate) input_config_opened_once: bool,
     pub(crate) port: u16,
+    pub(crate) diagnostic_events_enabled: bool,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, Type)]
@@ -77,12 +80,19 @@ pub(crate) struct LauncherSettings {
     pub(crate) base_rom_path: String,
     pub(crate) roms_prepared_once: bool,
     pub(crate) input_config_opened_once: bool,
+    pub(crate) diagnostic_events_enabled: bool,
 }
 
 #[derive(Debug, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct SaveRomPathsRequest {
     pub(crate) base_rom_path: String,
+}
+
+#[derive(Debug, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct SaveDiagnosticEventsRequest {
+    pub(crate) enabled: bool,
 }
 
 #[derive(Debug, Serialize, Type)]

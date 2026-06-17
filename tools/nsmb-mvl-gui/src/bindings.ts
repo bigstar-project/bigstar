@@ -6,6 +6,7 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 export const commands = {
 	getDefaults: () => typedError<Defaults, string>(__TAURI_INVOKE("get_defaults")),
 	saveRomPaths: (request: SaveRomPathsRequest) => typedError<null, string>(__TAURI_INVOKE("save_rom_paths", { request })),
+	saveDiagnosticEventsEnabled: (request: SaveDiagnosticEventsRequest) => typedError<null, string>(__TAURI_INVOKE("save_diagnostic_events_enabled", { request })),
 	selectRomFile: (currentPath: string) => typedError<string | null, string>(__TAURI_INVOKE("select_rom_file", { currentPath })),
 	preflightCheck: () => typedError<PreflightResponse, string>(__TAURI_INVOKE("preflight_check")),
 	generateRoms: (request: GenerateRomRequest) => typedError<GenerateRomResponse, string>(__TAURI_INVOKE("generate_roms", { request })),
@@ -52,6 +53,7 @@ export type Defaults = {
 	roms_prepared_once: boolean,
 	input_config_opened_once: boolean,
 	port: number,
+	diagnostic_events_enabled: boolean,
 };
 
 export type GameSettings = {
@@ -98,6 +100,7 @@ export type LaunchRequest = {
 	port: number,
 	rom_path: string,
 	settings: GameSettings,
+	diagnostic_events_enabled?: boolean,
 };
 
 export type LaunchResponse = {
@@ -117,6 +120,10 @@ export type PreflightResponse = {
 };
 
 export type Role = "host" | "client";
+
+export type SaveDiagnosticEventsRequest = {
+	enabled: boolean,
+};
 
 export type SaveRomPathsRequest = {
 	base_rom_path: string,

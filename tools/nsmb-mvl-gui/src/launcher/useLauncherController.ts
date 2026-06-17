@@ -28,6 +28,7 @@ import {
   openMelonds as openMelondsCommand,
   openMelondsInputConfig as openMelondsInputConfigCommand,
   runPreflightCheck,
+  saveDiagnosticEventsEnabled,
   saveRomPaths,
   selectRomFile,
   startMatch as startMatchCommand,
@@ -250,6 +251,7 @@ export function useLauncherController() {
           inputDelayFrames: initialForm.inputDelayFrames,
           inputMaxFrameLead: initialForm.inputMaxFrameLead,
           rollbackEnabled: initialForm.rollbackEnabled,
+          diagnosticEventsEnabled: defaults.diagnostic_events_enabled ?? false,
         });
         setOnboardingRomsPrepared(defaults.roms_prepared_once);
         setOnboardingInputConfigOpened(defaults.input_config_opened_once);
@@ -284,6 +286,20 @@ export function useLauncherController() {
     }, 250);
     return () => window.clearTimeout(timer);
   }, [defaultsLoaded, form.baseRomPath]);
+
+  useEffect(() => {
+    if (!defaultsLoaded) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void saveDiagnosticEventsEnabled({
+        enabled: form.diagnosticEventsEnabled,
+      }).catch((error) => {
+        setActivityStatus({ text: String(error), kind: 'warn' });
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [defaultsLoaded, form.diagnosticEventsEnabled]);
 
   const selectRomPath = async (key: SelectRomKey) => {
     try {
@@ -420,6 +436,7 @@ export function useLauncherController() {
           ? nextForm.hostRomPath
           : nextForm.clientRomPath,
       settings: currentSettings(nextForm),
+      diagnostic_events_enabled: nextForm.diagnosticEventsEnabled,
     };
 
     try {

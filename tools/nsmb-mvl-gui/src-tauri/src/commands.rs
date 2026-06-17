@@ -9,7 +9,7 @@ use std::os::windows::process::CommandExt;
 use crate::config::{DEFAULT_PORT, DEFAULT_ROOM_CODE, DEFAULT_SIGNAL_URL};
 use crate::models::{
     Defaults, GenerateRomRequest, GenerateRomResponse, LaunchRequest, LaunchResponse,
-    SaveRomPathsRequest, SessionStatus,
+    SaveDiagnosticEventsRequest, SaveRomPathsRequest, SessionStatus,
 };
 use crate::paths::{
     absolutize_existing, app_data_dir, create_log_dir, find_bridge_binary, find_input_script,
@@ -44,6 +44,7 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
         roms_prepared_once: saved.roms_prepared_once,
         input_config_opened_once: saved.input_config_opened_once,
         port: DEFAULT_PORT,
+        diagnostic_events_enabled: saved.diagnostic_events_enabled,
     })
 }
 
@@ -52,6 +53,17 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
 pub(crate) fn save_rom_paths(app: AppHandle, request: SaveRomPathsRequest) -> Result<(), String> {
     let mut settings = load_launcher_settings(&app)?;
     settings.base_rom_path = request.base_rom_path;
+    save_launcher_settings(&app, &settings)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn save_diagnostic_events_enabled(
+    app: AppHandle,
+    request: SaveDiagnosticEventsRequest,
+) -> Result<(), String> {
+    let mut settings = load_launcher_settings(&app)?;
+    settings.diagnostic_events_enabled = request.enabled;
     save_launcher_settings(&app, &settings)
 }
 

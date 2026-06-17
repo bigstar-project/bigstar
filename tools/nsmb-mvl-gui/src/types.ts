@@ -13,6 +13,7 @@ export type {
   Lives,
   PreflightResponse,
   Role,
+  SaveDiagnosticEventsRequest,
   SaveRomPathsRequest,
   SessionStatus,
 } from './bindings';
@@ -38,4 +39,5 @@ export type FormState = {
   inputDelayFrames: number;
   inputMaxFrameLead: number;
   rollbackEnabled: boolean;
+  diagnosticEventsEnabled: boolean;
 };

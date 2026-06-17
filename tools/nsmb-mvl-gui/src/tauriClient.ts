@@ -6,6 +6,7 @@ import type {
   LaunchRequest,
   LaunchResponse,
   PreflightResponse,
+  SaveDiagnosticEventsRequest,
   SaveRomPathsRequest,
   SessionStatus,
 } from './types';
@@ -32,6 +33,7 @@ const previewDefaults: Defaults = {
   base_rom_path: '',
   roms_prepared_once: false,
   input_config_opened_once: false,
+  diagnostic_events_enabled: false,
   port: 8165,
 };
 
@@ -51,6 +53,15 @@ export function saveRomPaths(request: SaveRomPathsRequest) {
     return Promise.resolve(null);
   }
   return unwrapCommand(commands.saveRomPaths(request));
+}
+
+export function saveDiagnosticEventsEnabled(
+  request: SaveDiagnosticEventsRequest,
+) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(null);
+  }
+  return unwrapCommand(commands.saveDiagnosticEventsEnabled(request));
 }
 
 export function selectRomFile(currentPath: string) {

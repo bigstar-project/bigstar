@@ -6,11 +6,17 @@ import {
   HardDrives,
   Play,
   ShieldCheck,
+  WarningCircle,
   WifiHigh,
 } from '@phosphor-icons/react';
 import { css } from 'styled-system/css';
 import { token } from 'styled-system/tokens';
-import { FilePathField, NumberField, TextField } from '../components/Fields';
+import {
+  FilePathField,
+  NumberField,
+  SelectField,
+  TextField,
+} from '../components/Fields';
 import { SummaryItem } from '../components/SummaryItem';
 import { Button, Tabs } from '../components/ui';
 import type { FormState } from '../types';
@@ -21,6 +27,11 @@ import type {
   LauncherSummary,
   UpdateFormField,
 } from './types';
+
+const diagnosticEventOptions = [
+  { value: 'off', label: 'Off' },
+  { value: 'on', label: 'On' },
+];
 
 export function SettingsView({
   actions,
@@ -137,6 +148,15 @@ export function SettingsView({
                 入力設定を開く
               </Button>
             </div>
+            <SelectField
+              icon={<WarningCircle size={18} weight="fill" />}
+              label="診断イベントログ"
+              options={diagnosticEventOptions}
+              value={form.diagnosticEventsEnabled ? 'on' : 'off'}
+              onChange={(value) =>
+                updateField('diagnosticEventsEnabled', value === 'on')
+              }
+            />
           </SettingsPanel>
 
           <div

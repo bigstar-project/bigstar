@@ -268,6 +268,16 @@ pub(crate) fn melon_env(
             .to_string_lossy()
             .into_owned(),
     );
+    if request.diagnostic_events_enabled {
+        env.insert("MELONDS_NSML_DIAGNOSTIC_EVENTS".into(), "1".into());
+        env.insert(
+            "MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE".into(),
+            log_dir
+                .join("melonds-events.jsonl")
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
     if request.settings.rollback_enabled {
         env.insert("MELONDS_NSML_ROLLBACK".into(), "1".into());
         env.insert("MELONDS_NSML_ROLLBACK_BACKEND".into(), "coredelta".into());

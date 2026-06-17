@@ -16258,7 +16258,7 @@ void InitFromEnvironment()
     const char* diagnosticEventsFile = std::getenv("MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE");
     if (diagnosticEventsFile && diagnosticEventsFile[0]) G.DiagnosticEventsPath = diagnosticEventsFile;
     G.DiagnosticEventsEnabled =
-        EnvFlag("MELONDS_NSML_DIAGNOSTIC_EVENTS") || !G.DiagnosticsPath.empty() || !G.DiagnosticEventsPath.empty();
+        EnvFlag("MELONDS_NSML_DIAGNOSTIC_EVENTS") || !G.DiagnosticEventsPath.empty();
     if (EnvFlag("MELONDS_NSML_DIAGNOSTIC_EVENTS_DISABLE"))
         G.DiagnosticEventsEnabled = false;
     G.DiagnosticRingFrames = std::clamp(

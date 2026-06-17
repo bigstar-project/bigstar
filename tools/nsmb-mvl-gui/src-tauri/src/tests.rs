@@ -20,6 +20,7 @@ fn request(role: Role) -> LaunchRequest {
         signal_url: "ws://127.0.0.1:8787/session".to_owned(),
         room_code: "room_01-test".to_owned(),
         port: 8165,
+        diagnostic_events_enabled: false,
         rom_path: "unused.nds".to_owned(),
         settings: GameSettings {
             course_mode: CourseMode::Random,
@@ -229,7 +230,23 @@ fn melon_env_carries_game_settings_and_netplay_start() {
     assert_eq!(env["MELONDS_NSML_STATE_SYNC_INTERVAL"], "60");
     assert_eq!(env["MELONDS_NSML_STATE_SYNC_EXTENDED"], "1");
     assert!(env["MELONDS_NSML_DIAGNOSTICS_FILE"].ends_with("melonds-diagnostics.json"));
+    assert!(!env.contains_key("MELONDS_NSML_DIAGNOSTIC_EVENTS"));
+    assert!(!env.contains_key("MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE"));
     assert!(!env.contains_key("MELONDS_NSML_ROLLBACK"));
+}
+
+#[test]
+fn melon_env_carries_diagnostic_event_settings_when_enabled() {
+    let mut request = request(Role::Host);
+    request.diagnostic_events_enabled = true;
+    let env = melon_env(
+        &request,
+        Path::new("bootstrap.inputs"),
+        Path::new("logs/nsmb-mvl-gui-test"),
+    );
+
+    assert_eq!(env["MELONDS_NSML_DIAGNOSTIC_EVENTS"], "1");
+    assert!(env["MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE"].ends_with("melonds-events.jsonl"));
 }
 
 #[test]

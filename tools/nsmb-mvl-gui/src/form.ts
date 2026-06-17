@@ -26,6 +26,7 @@ export const initialForm: FormState = {
   inputDelayFrames: defaultInputDelayFrames,
   inputMaxFrameLead: defaultInputMaxFrameLead,
   rollbackEnabled: false,
+  diagnosticEventsEnabled: false,
 };
 
 export function currentSettings(form: FormState): GameSettings {

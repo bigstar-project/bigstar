@@ -22,6 +22,7 @@ fn specta_builder() -> SpectaBuilder<tauri::Wry> {
     SpectaBuilder::<tauri::Wry>::new().commands(collect_commands![
         commands::get_defaults,
         commands::save_rom_paths,
+        commands::save_diagnostic_events_enabled,
         commands::select_rom_file,
         preflight::preflight_check,
         commands::generate_roms,

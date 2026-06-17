@@ -58,6 +58,7 @@ async function installGuiDriver(
                 client_rom_path: 'C:\\roms\\client.nds',
                 host_rom_path: 'C:\\roms\\host.nds',
                 input_config_opened_once: state.inputConfigOpened,
+                diagnostic_events_enabled: false,
                 port: 8165,
                 roms_prepared_once: state.romsPrepared,
                 room_code: 'test-room',
@@ -94,6 +95,10 @@ async function installGuiDriver(
               };
             }
             if (command === 'save_rom_paths') {
+              calls.push({ args: [args.request], name: command });
+              return null;
+            }
+            if (command === 'save_diagnostic_events_enabled') {
               calls.push({ args: [args.request], name: command });
               return null;
             }
@@ -229,6 +234,7 @@ test('手動接続でクライアント起動ペイロードを作れる', async
     role: 'client',
     room_code: 'manual-room',
     rom_path: 'C:\\roms\\client.nds',
+    diagnostic_events_enabled: false,
     settings: {
       big_stars: 10,
       course_mode: 'random',
@@ -261,6 +267,7 @@ test('公開ルーム参加でサーバー側の対戦設定を引き継いで�
     role: 'client',
     room_code: 'room12345',
     rom_path: 'C:\\roms\\client.nds',
+    diagnostic_events_enabled: false,
     settings,
     signal_url: 'ws://127.0.0.1:8787/session?token=join-token',
   });
