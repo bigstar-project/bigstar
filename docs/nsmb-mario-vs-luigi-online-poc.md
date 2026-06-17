@@ -59,6 +59,30 @@
 - Next action: keep manual/script MvL launch paths from starting with invalid NSMB saves. If GUI ever runs without a valid AppData save, apply the same pre-seed/validation there.
 - Verification: `cargo fmt --manifest-path tools\nsmb-mvl-rom\Cargo.toml`, `cargo test --manifest-path tools\nsmb-mvl-rom\Cargo.toml`, and `cargo clippy --manifest-path tools\nsmb-mvl-rom\Cargo.toml --all-targets -- -D warnings` passed. `cargo clippy-all` could not be used because the alias is not installed in this environment.
 
+## Current low-overhead diagnostic event logging - 2026-06-17
+
+- User request: strengthen logs before fixing the rare no-rollback desync, rematch stall, and false Mario/Luigi death issues, while keeping gameplay responsive.
+- Implemented:
+  - melonDS now keeps a per-instance in-memory diagnostic ring buffer with 360 compact frames by default. The normal path stores fixed-address player/input/frame fields, player-global sub-hashes, cached player actor fields, and input sync counters without per-frame string formatting or disk writes.
+  - Diagnostic launches write `melonds-events.jsonl`; GUI launches derive it next to `melonds-diagnostics.json`, and manual/test runs can override it with `MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE`. A `diagnostic_started` event is emitted at startup so a log capture proves whether event diagnostics were active.
+  - `playerGlobal` mismatch now emits a throttled `player_global_mismatch` JSONL event only when `playerGlobal` differs, avoiding heavy dumps for frequent basic-only mismatches. The payload includes local/remote hashes, local player-global sub-hashes, player actor hashes, latest local player snapshot, remote sample fields available from the state packet, field diffs, and the ring buffer.
+  - Mario and Luigi life/death/dead-flag/death-transition changes now emit `player_life_change` with both players' rich state, pre-event ring frames, transition/collision/environment/action fields, camera/stage context, and nearby moving hazard objects.
+  - Start-ready send/receive/accept now emits `start_ready` with local/remote frame, delta, logical start, input queue sizes, and last sent/received input frames.
+- Expected overhead:
+  - The default path copies bounded numeric snapshots in memory and writes to disk only at startup or on anomaly events.
+  - Expensive object scans, nearest-hazard searches, and large JSON payloads run only on death/mismatch events or the short post-trigger window.
+  - Full extended CSV remains opt-in for short repro runs.
+- Verification:
+  - Build: `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passes.
+  - Diagnostic enabled FPS smoke: `logs/codex-diagnostic-events-fps-20260617c` passed 3600 frames and wrote `melonds-events.jsonl` with host/client `diagnostic_started`. Active FPS: host `59.17`, client `50.82`; no `AfterHookPhaseSpike`.
+  - Diagnostic disabled comparison: `logs/codex-diagnostic-events-fps-disabled-20260617` passed 3600 frames. Active FPS: host `59.19`, client `50.86`; no `AfterHookPhaseSpike`. The measured difference is within run-to-run noise and does not show an FPS regression from the diagnostic ring/event path.
+  - Death-event check: an 8200-frame split-local run did trigger death diagnostics, but the wrapper failed its separate second-match requirement before it could be counted as a full pass. That run exposed an event-size problem: `death-transition` entries were dumping the full ring repeatedly and grew `logs/codex-diagnostic-events-real-death-20260617\melonds-events.jsonl` to about 114 MB.
+  - Death-event size fix: `death-transition` is now throttled, does not include the ring dump, and startup false-death entries without a player actor/death counter/dead flag are filtered. Real `death` events still include the ring and nearby hazard context.
+  - Post-fix death/FPS check: `logs/codex-diagnostic-events-size-check-20260617` passed 2000 frames and wrote `melonds-events.jsonl` at about 3.3 MB. It contains host/client `diagnostic_started`, host/client `death-transition` at frame 866, and host/client `player_life_change` `reason=death` for player 1 at frames 1876 and 1984 with `dead=1` and ring context. Active FPS: host `58.10`, client `57.95`; no `AfterHookPhaseSpike`.
+- Next actions:
+  - Capture the next real GUI desync/death run with `melonds-events.jsonl` and inspect `player_global_mismatch`, `player_life_change`, and `start_ready` before changing gameplay behavior.
+  - If a real false-death capture still does not identify the cause, add targeted damage/death function hooks instead of broad per-frame tracing.
+
 ## Current pipe-course camera Y investigation - 2026-06-12
 
 - User-reported issue: pipe course only, after wall-kicking upward and making the camera move up, descending does not fully bring the camera back down.
@@ -100,8 +124,8 @@
   - Start with `-DesyncLogInterval 60`; use `30` or `15` only when the first diverging frame needs tighter localization.
   - `-DesyncLogExtended` adds broader CSV fields/hashes and should be reserved for short repro windows.
 - Expected overhead: the default GUI path is low frequency and should be much lighter than full RAM dumps or every-frame CSV tracing. Detailed CSV tracing can cause stutter if interval is too small because it scans game objects and flushes rows to disk.
-- Current blocker: the actual first-divergence category/frame still needs a reproduced GUI/manual run with the new diagnostics.
-- Next action: on the next GUI reproduction, inspect each peer's GUI mismatch warning and `melonds-diagnostics.json`; if needed, rerun with manual `-DesyncLog` around that reported frame for full CSV context.
+- Current blocker: the actual first-divergence cause still needs a reproduced GUI/manual run with the new JSONL event diagnostics.
+- Next action: on the next GUI reproduction, inspect each peer's GUI mismatch warning, `melonds-diagnostics.json`, and `melonds-events.jsonl`; if the JSONL event payload is still not enough, rerun with manual `-DesyncLog` around that reported frame for full CSV context.
 - Verification: `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel`, `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`, `cargo clippy-all` in `tools\nsmb-mvl-gui\src-tauri`, `pnpm typecheck`, targeted `pnpm biome check` for changed GUI files, `pnpm test:unit`, and `pnpm test:browser` pass. `pnpm run ci` in `tools\nsmb-mvl-gui` is still blocked after `tsc` by existing Biome formatting failures caused by CRLF line endings across TS/JSON files not touched in this change.
 
 ## Current input health diagnostics - 2026-06-10
