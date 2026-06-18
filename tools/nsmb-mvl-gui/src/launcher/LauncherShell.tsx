@@ -8,6 +8,8 @@ import { Button, Tabs } from '../components/ui';
 import type { StatusKind } from '../types';
 import type { UpdateStatus, View } from './types';
 
+const currentAppVersion = __NSMB_MVL_GUI_VERSION__;
+
 function updateButtonLabel(updateStatus: UpdateStatus) {
   if (updateStatus.phase === 'checking') {
     return '確認中';
@@ -309,40 +311,62 @@ export function LauncherShell({
                 </Tabs.Trigger>
               </Tabs.List>
             </div>
-            <Button
-              type="button"
-              className={cx(
-                css({
-                  fontWeight: 'black',
-                  maxW: 'full',
-                  '@media (max-width: 1280px)': {
-                    minW: '14',
-                  },
-                }),
-                updateButtonClass(updateStatus),
-              )}
-              disabled={updateBusy}
-              title={
-                updateStatus.version ? `v${updateStatus.version}` : '更新を確認'
-              }
-              onClick={onCheckForUpdate}
+            <div
+              className={css({
+                display: 'grid',
+                gap: '2',
+                justifyItems: 'stretch',
+              })}
             >
-              <Wrench
-                className={css({ flexShrink: '0' })}
-                size={20}
-                weight="bold"
-              />
-              <span
-                className={css({
-                  textStyle: 'md',
-                  '@media (max-width: 1280px)': {
-                    display: 'none',
-                  },
-                })}
+              <Button
+                type="button"
+                className={cx(
+                  css({
+                    fontWeight: 'black',
+                    maxW: 'full',
+                    '@media (max-width: 1280px)': {
+                      minW: '14',
+                    },
+                  }),
+                  updateButtonClass(updateStatus),
+                )}
+                disabled={updateBusy}
+                title={
+                  updateStatus.version
+                    ? `v${updateStatus.version}`
+                    : '更新を確認'
+                }
+                onClick={onCheckForUpdate}
               >
-                {updateButtonLabel(updateStatus)}
-              </span>
-            </Button>
+                <Wrench
+                  className={css({ flexShrink: '0' })}
+                  size={20}
+                  weight="bold"
+                />
+                <span
+                  className={css({
+                    textStyle: 'md',
+                    '@media (max-width: 1280px)': {
+                      display: 'none',
+                    },
+                  })}
+                >
+                  {updateButtonLabel(updateStatus)}
+                </span>
+              </Button>
+              <div
+                className={css({
+                  color: 'fg.muted',
+                  display: 'flex',
+                  fontWeight: 'bold',
+                  justifyContent: 'center',
+                  textStyle: 'xs',
+                })}
+                title={`現在のバージョン v${currentAppVersion}`}
+              >
+                <span>v{currentAppVersion}</span>
+              </div>
+            </div>
           </div>
         </aside>
 

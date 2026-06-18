@@ -1,4 +1,9 @@
+import { readFileSync } from 'node:fs';
 import { expect, type Page, test } from '@playwright/test';
+
+const packageJson = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+) as { version: string };
 
 const settings = {
   course_mode: 'random',
@@ -253,6 +258,9 @@ test('初回セットアップでロム生成と入力設定を完了できる',
 
   await expect(
     page.getByRole('heading', { name: '初回セットアップ' }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(`v${packageJson.version}`, { exact: true }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'ROMを選んで生成' }).click();
   await expect.poll(() => callNames(page)).toContain('generate_roms');
