@@ -101,6 +101,9 @@ constexpr melonDS::u32 kGameRandomValueAddr = 0x02085A70;
 constexpr melonDS::u32 kInputConsoleKeysAddr = 0x02087650;
 constexpr melonDS::u32 kInputPlayerKeysHeldAddr = 0x02087660;
 constexpr melonDS::u32 kInputPlayerKeysPressedAddr = 0x02087664;
+constexpr melonDS::u32 kInputKeyXMask = 1u << 10;
+constexpr melonDS::u16 kMvlStockItemTouchX = 217;
+constexpr melonDS::u16 kMvlStockItemTouchY = 153;
 constexpr melonDS::u32 kStageActorFreezeFlagAddr = 0x020CA28C;
 constexpr melonDS::u32 kActorCategoryMaskAddr = 0x020CA850;
 constexpr melonDS::u32 kGamePlayerGlobalBlockAddr = 0x0208B324;
@@ -2461,6 +2464,21 @@ InputState NeutralInput()
 {
     InputState input {};
     input.KeyMask = 0xFFF;
+    return input;
+}
+
+InputState ConvertStockXToTouch(InputState input)
+{
+    if ((input.KeyMask & kInputKeyXMask) != 0)
+        return input;
+
+    input.KeyMask |= kInputKeyXMask;
+    if (!input.Touching)
+    {
+        input.Touching = true;
+        input.TouchX = kMvlStockItemTouchX;
+        input.TouchY = kMvlStockItemTouchY;
+    }
     return input;
 }
 
@@ -11497,10 +11515,10 @@ void PushScriptRemotePacketIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
     if (instanceID < 0 || instanceID >= 16)
         return;
 
-    const InputState input = ApplyScriptRemotePacketInputScript(
+    const InputState input = ConvertStockXToTouch(ApplyScriptRemotePacketInputScript(
         G.ScriptRemotePacketInputInstance,
         frame,
-        NeutralInput());
+        NeutralInput()));
     melonDS::u8 packet[52] {};
     const melonDS::u32 tick = nds->ARM9Read16(kNetPacketTickAddr);
     const melonDS::u32 keys = (~input.KeyMask) & 0x0FFF;
@@ -11555,10 +11573,11 @@ InputState PacketBridgeInputForPlayer(
     bool hasRemoteInput)
 {
     if (player == localPlayer)
-        return localInput;
+        return ConvertStockXToTouch(localInput);
     if (hasRemoteInput)
-        return remoteInput;
-    return ApplyScriptRemotePacketInputScript(G.ScriptRemotePacketInputInstance, frame, NeutralInput());
+        return ConvertStockXToTouch(remoteInput);
+    return ConvertStockXToTouch(
+        ApplyScriptRemotePacketInputScript(G.ScriptRemotePacketInputInstance, frame, NeutralInput()));
 }
 
 void WritePacketBridgeJitScratchInputs(
@@ -11844,9 +11863,10 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
             true,
             predictedRemote);
 
-        nds->SetKeyMask(localInput.KeyMask);
-        if (localInput.Touching)
-            nds->TouchScreen(localInput.TouchX, localInput.TouchY);
+        const InputState runtimeLocalInput = ConvertStockXToTouch(localInput);
+        nds->SetKeyMask(runtimeLocalInput.KeyMask);
+        if (runtimeLocalInput.Touching)
+            nds->TouchScreen(runtimeLocalInput.TouchX, runtimeLocalInput.TouchY);
         else
             nds->ReleaseScreen();
 
@@ -17667,9 +17687,10 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Scratch);
 
     if (G.Enabled && G.InputNetplayOnly)
-        return testInput;
+        return ConvertStockXToTouch(testInput);
 
-    if (!G.Enabled || !G.Ready) return testInput;
+    if (!G.Enabled || !G.Ready)
+        return (G.TestEnabled || G.Enabled) ? ConvertStockXToTouch(testInput) : testInput;
     if (syncFrame == 0 && G.PacketBridgeOnly)
     {
         WaitForPeerIfNeeded();
@@ -17719,15 +17740,15 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
             }
             ForceNSMLPacketBridgeNetReadyIfNeeded(instanceID, syncFrame, nds);
             if (InjectNSMLPacketBridgeDummyAlloc(instanceID, syncFrame, nds))
-                return testInput;
+                return ConvertStockXToTouch(testInput);
             InjectNSMLPacketBridgeScheduledSubMenusIfNeeded(instanceID, syncFrame, nds);
             if (InjectNSMLPacketBridgeMvlLoadThread(instanceID, syncFrame, nds))
-                return testInput;
+                return ConvertStockXToTouch(testInput);
             ForceNSMLPacketBridgeStageStartSMFieldsIfNeeded(instanceID, syncFrame, nds);
             if (InjectNSMLPacketBridgeVSConnectOnUpdateIfNeeded(instanceID, syncFrame, nds))
-                return testInput;
+                return ConvertStockXToTouch(testInput);
             if (InjectNSMLPacketBridgeStageStartSMUpdateIfNeeded(instanceID, syncFrame, nds))
-                return testInput;
+                return ConvertStockXToTouch(testInput);
             ForceNSMLPacketBridgeLoadGameSMIfNeeded(instanceID, syncFrame, nds);
             ForceNSMLStagePacketWordsIfNeeded(syncFrame, nds);
             ForceNSMLGameLocalPlayerIDIfNeeded(syncFrame, nds);
@@ -17737,7 +17758,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
             ThrottleNSMLPacketBridgeLead(nds, syncFrame);
             WaitForNSMLPacketBridgeRemote(nds, syncFrame);
         }
-        return packetBridgeInput;
+        return ConvertStockXToTouch(packetBridgeInput);
     }
 
     const bool isLocal = (instanceID == G.LocalInstance);
@@ -17770,13 +17791,13 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Network);
 
     if (!netplayApplyActive)
-        return testInput;
+        return ConvertStockXToTouch(testInput);
 
     if (G.NetplayStartFrame != 0
         && G.NetplayWarmupFrames > 0
         && syncFrame < G.NetplayStartFrame + static_cast<melonDS::u32>(G.NetplayWarmupFrames))
     {
-        return testInput;
+        return ConvertStockXToTouch(testInput);
     }
 
     const melonDS::u32 targetFrame = syncFrame;
@@ -17814,9 +17835,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         auto it = G.LocalInputs.find(targetFrame);
         const InputState delayedLocalInput = it != G.LocalInputs.end() ? it->second : NeutralInput();
         if (!G.LocalWaitsForRemote)
-            return delayedLocalInput;
+            return ConvertStockXToTouch(delayedLocalInput);
         if (IsPastTestInputRange(targetFrame))
-            return delayedLocalInput;
+            return ConvertStockXToTouch(delayedLocalInput);
     }
     else if (IsPastTestInputRange(targetFrame))
     {
@@ -17831,10 +17852,10 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         auto it = G.LocalInputs.find(targetFrame);
-        return it != G.LocalInputs.end() ? it->second : NeutralInput();
+        return ConvertStockXToTouch(it != G.LocalInputs.end() ? it->second : NeutralInput());
     }
 
-    return remoteInput;
+    return ConvertStockXToTouch(remoteInput);
 }
 
 void TracePlayerLifeChanges(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)

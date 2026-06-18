@@ -1,5 +1,19 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Stock item X-button touch mapping - 2026-06-19
+
+- User request: allow stock item use with the X button while preserving the native stock-item behavior where the item is released through the normal touch path and falls into the stage.
+- Previous direct-powerup attempt was discarded and stashed as `codex-stash-direct-stock-powerup-attempt`; it incorrectly converted the inventory item directly into `PlayerBase+0x7AB` powerup state.
+- Fix applied in `src/frontend/qt_sdl/NsmbNetplayPoC.cpp`:
+  - Added `ConvertStockXToTouch()`, which converts an active X key into lower-screen touch input at `217,153`, the existing stock-item touch coordinate used by `tests\nsmb_us_direct_mvl_stress_client_stock_touch.inputs`.
+  - The conversion is applied only to runtime inputs written to packet-bridge scratch / emulator input. Network-stored and sent inputs remain as X so the peer performs the same deterministic conversion locally.
+  - When conversion happens, the X key bit is released in the runtime key mask so the game receives stock touch rather than X plus an extra normal button action. Existing explicit touch coordinates are preserved.
+- Verification:
+  - `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passed.
+  - `scripts\run-nsmb-mvl-split-local-input-smoke.ps1` passed for 2300 frames with `tests\nsmb_us_direct_mvl_client_stock_x.inputs`, forced Luigi stock item `0x2`, and trace window `2020..2100`.
+  - CSV result confirms native stock-touch behavior, not immediate powerup: X input appears as runtime player input without bit `0x400` (`inputPlayer1Held=0x821` during the X window), `player1InventoryPowerup` remains `0x2` through frame `2065`, then becomes `0x0` by frame `2100`, while `playerActor1RequestedPowerup/currentPowerup/powerupTimer` stay `0x0`.
+- Current blocker: none for the input-sync X-to-stock-touch mapping. A visual/contact-sheet check can be added later if needed to show the falling item directly.
+
 ## Powerup / powerdown control-lock fix - 2026-06-18
 
 - User-reported issue: when Mario/Luigi powers up from an item or powers down after touching an enemy, the direct MvL path could create a short uncontrollable period. That behavior is normal in single-player Mario rules, but real Mario vs Luigi should not leave the player vulnerable during that lock.
