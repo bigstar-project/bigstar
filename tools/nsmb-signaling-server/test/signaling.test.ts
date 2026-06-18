@@ -184,6 +184,21 @@ describe('マッチメイキング HTTP API', () => {
       method: 'POST',
     });
     expect(invalidCreate.status).toBe(400);
+
+    const duplicateRandomStages = await SELF.fetch('https://match.test/rooms', {
+      body: JSON.stringify({
+        host_name: 'Host Player',
+        rom_identity: romIdentity,
+        settings: {
+          ...gameSettings,
+          course_mode: 'random',
+          course_stages: [0, 1, 0],
+        },
+      }),
+      headers: { 'content-type': 'application/json' },
+      method: 'POST',
+    });
+    expect(duplicateRandomStages.status).toBe(400);
   });
 
   test('ROM ID が一致しない参加予約を拒否する', async () => {

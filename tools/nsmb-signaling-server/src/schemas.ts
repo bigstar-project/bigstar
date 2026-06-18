@@ -34,6 +34,16 @@ export const gameSettingsSchema = z
         path: ['course_stages'],
       });
     }
+    if (
+      settings.course_mode === 'random' &&
+      new Set(settings.course_stages).size !== settings.course_stages.length
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'random course_stages must not contain duplicates',
+        path: ['course_stages'],
+      });
+    }
     if (settings.rng_seeds.length !== maxGames) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

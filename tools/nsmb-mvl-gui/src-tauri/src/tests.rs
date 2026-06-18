@@ -362,6 +362,19 @@ fn selected_stage_uses_match_seed_for_random_course() {
 }
 
 #[test]
+fn validation_rejects_duplicate_random_course_stages() {
+    let mut request = request(Role::Host);
+    request.settings.course_mode = CourseMode::Random;
+    request.settings.course_stages = vec![1, 2, 3, 2, 4];
+    assert!(validate_request(&request)
+        .expect_err("duplicate random stages rejected")
+        .contains("同じコース"));
+
+    request.settings.course_mode = CourseMode::Select;
+    validate_request(&request).expect("manual stage selection may repeat stages");
+}
+
+#[test]
 fn reusable_rom_marker_requires_current_format_and_rom_file() {
     let dir = temp_log_dir("reusable-rom-marker");
     let rom = dir.join("host.nds");
