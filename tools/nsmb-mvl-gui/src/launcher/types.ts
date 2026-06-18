@@ -15,6 +15,14 @@ export type UpdateStatus = {
   version?: string;
 };
 
+export function isUpdateRequired(updateStatus: UpdateStatus) {
+  return (
+    updateStatus.phase === 'available' ||
+    updateStatus.phase === 'downloading' ||
+    updateStatus.phase === 'installed'
+  );
+}
+
 export type UpdateFormField = <K extends keyof FormState>(
   key: K,
   value: FormState[K],
@@ -29,6 +37,8 @@ export type LauncherSummary = {
   romPreparation: string;
   romsConfigured: boolean;
   selectedStageLabel: string;
+  updateRequired: boolean;
+  updateVersion?: string;
 };
 
 export type LauncherActions = {

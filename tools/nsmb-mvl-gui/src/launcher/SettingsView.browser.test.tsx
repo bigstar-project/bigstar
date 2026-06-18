@@ -12,6 +12,7 @@ const summary: LauncherSummary = {
   romPreparation: '再利用',
   romsConfigured: true,
   selectedStageLabel: '3',
+  updateRequired: false,
 };
 
 async function renderSettingsView() {

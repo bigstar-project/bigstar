@@ -46,12 +46,13 @@ import type {
   SaveRomPathsRequest,
   StatusKind,
 } from '../types';
-import type {
-  LauncherActions,
-  LauncherSummary,
-  SelectRomKey,
-  UpdateStatus,
-  View,
+import {
+  isUpdateRequired,
+  type LauncherActions,
+  type LauncherSummary,
+  type SelectRomKey,
+  type UpdateStatus,
+  type View,
 } from './types';
 
 const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
@@ -141,6 +142,7 @@ export function useLauncherController() {
   const connectionActive =
     connectionStatus.text.startsWith('実行中') ||
     connectionStatus.text.startsWith('起動済み');
+  const updateRequired = isUpdateRequired(updateStatus);
   const romsConfigured = Boolean(
     form.hostRomPath && form.clientRomPath && form.baseRomPath,
   );
@@ -157,6 +159,8 @@ export function useLauncherController() {
     romPreparation,
     romsConfigured,
     selectedStageLabel,
+    updateRequired,
+    updateVersion: updateStatus.version,
   };
   const roomsQuery = useQuery({
     enabled: roomsQueryEnabled,
@@ -573,6 +577,15 @@ export function useLauncherController() {
     if (matchmakingActionBusyRef.current) {
       return;
     }
+    if (updateRequired) {
+      setActivityStatus({
+        text: updateStatus.version
+          ? `GUI v${updateStatus.version} への更新が必要です`
+          : 'GUI の更新が必要です',
+        kind: 'warn',
+      });
+      return;
+    }
     if (connectionActive) {
       setActivityStatus({
         text: '実行中の対戦を停止してから部屋を作成してください',
@@ -626,6 +639,15 @@ export function useLauncherController() {
 
   const joinRoom = async (roomId: string) => {
     if (matchmakingActionBusyRef.current) {
+      return;
+    }
+    if (updateRequired) {
+      setActivityStatus({
+        text: updateStatus.version
+          ? `GUI v${updateStatus.version} への更新が必要です`
+          : 'GUI の更新が必要です',
+        kind: 'warn',
+      });
       return;
     }
     if (connectionActive) {

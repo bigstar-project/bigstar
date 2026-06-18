@@ -81,6 +81,9 @@ export function BattleView({
   summary: LauncherSummary;
   updateField: UpdateFormField;
 }) {
+  const matchmakingDisabled =
+    summary.connectionActive || summary.updateRequired;
+
   return (
     <Tabs.Content value="battle">
       <form
@@ -144,7 +147,7 @@ export function BattleView({
                 </div>
                 <CreateRoomDialog
                   busy={matchmakingRooms.busy}
-                  disabled={summary.connectionActive}
+                  disabled={matchmakingDisabled}
                   form={form}
                   onCreate={actions.createRoom}
                   updateField={updateField}
@@ -170,9 +173,12 @@ export function BattleView({
                   {matchmakingRooms.error}
                 </div>
               ) : null}
+              {summary.updateRequired ? (
+                <UpdateRequiredNotice version={summary.updateVersion} />
+              ) : null}
               <RoomList
                 busy={matchmakingRooms.busy}
-                disabled={summary.connectionActive}
+                disabled={matchmakingDisabled}
                 rooms={matchmakingRooms.rooms}
                 onJoin={(roomId) => void actions.joinRoom(roomId)}
               />
@@ -332,6 +338,7 @@ function CreateRoomDialog({
                 loading={busy}
                 variant="solid"
                 colorPalette="yellow"
+                disabled={disabled}
                 onClick={async () => {
                   await onCreate();
                   setOpen(false);
@@ -768,6 +775,46 @@ function RoomList({
           </Button>
         </div>
       ))}
+    </div>
+  );
+}
+
+function UpdateRequiredNotice({ version }: { version?: string }) {
+  return (
+    <div
+      className={css({
+        alignItems: 'flex-start',
+        bg: 'yellow.subtle.bg',
+        borderColor: 'yellow.outline.border',
+        borderRadius: 'l2',
+        borderWidth: '1px',
+        color: 'yellow.subtle.fg',
+        display: 'flex',
+        gap: '3',
+        p: '3',
+      })}
+    >
+      <WarningCircle
+        className={css({ flexShrink: '0', mt: '0.5' })}
+        size={20}
+        weight="fill"
+      />
+      <div className={css({ display: 'grid', gap: '1' })}>
+        <div className={css({ fontWeight: 'black', textStyle: 'sm' })}>
+          GUI の更新が必要です
+        </div>
+        <div
+          className={css({
+            fontWeight: 'bold',
+            overflowWrap: 'anywhere',
+            textStyle: 'sm',
+          })}
+        >
+          {version
+            ? `v${version} に更新するまで、部屋の作成・参加はできません。画面左下の更新ボタンから更新してください。`
+            : '更新を適用するまで、部屋の作成・参加はできません。画面左下の更新ボタンから更新してください。'}
+        </div>
+      </div>
     </div>
   );
 }

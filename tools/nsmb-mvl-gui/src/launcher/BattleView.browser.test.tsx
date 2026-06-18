@@ -17,6 +17,7 @@ const summary: LauncherSummary = {
   romPreparation: '再利用',
   romsConfigured: true,
   selectedStageLabel: '3',
+  updateRequired: false,
 };
 
 const romIdentity = {
@@ -158,6 +159,29 @@ describe('対戦ビュー', () => {
 
     expect(updateField).toHaveBeenCalledWith('hostName', 'Alice');
     expect(launcherActions.createRoom).toHaveBeenCalledTimes(1);
+  });
+
+  test('GUI更新が必要なときは公開ルームの作成と参加を無効化する', async () => {
+    const { screen } = await renderBattleView({
+      summaryOverride: { updateRequired: true, updateVersion: '0.4.0' },
+    });
+
+    await expect
+      .element(screen.getByText('GUI の更新が必要です'))
+      .toBeVisible();
+    await expect
+      .element(
+        screen.getByText(
+          'v0.4.0 に更新するまで、部屋の作成・参加はできません。画面左下の更新ボタンから更新してください。',
+        ),
+      )
+      .toBeVisible();
+    await expect
+      .element(screen.getByRole('button', { name: '部屋を作る' }))
+      .toBeDisabled();
+    await expect
+      .element(screen.getByRole('button', { name: '参加' }))
+      .toBeDisabled();
   });
 
   test('手動開始、ロール更新、ログ操作の処理を呼ぶ', async () => {
