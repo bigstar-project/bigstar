@@ -2,6 +2,7 @@ use super::{PathBuf, SocketAddr, MAX_DATAGRAM_SIZE};
 use base64::prelude::*;
 use env_logger::{Builder as LogBuilder, Env as LogEnv, Target as LogTarget};
 use futures_util::{SinkExt, StreamExt};
+use std::env;
 use std::io::{self, Write};
 use std::net::UdpSocket;
 use std::sync::Arc;
@@ -17,6 +18,113 @@ struct WebRtcEndpoint {
     data_channel: datachannel_wrapper::DataChannel,
     peer_connection: datachannel_wrapper::PeerConnection,
     event_rx: tokio::sync::mpsc::Receiver<datachannel_wrapper::PeerConnectionEvent>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct ImpairmentConfig {
+    base_delay_ms: u64,
+    jitter_ms: u64,
+    drop_modulo: u64,
+    drop_burst_modulo: u64,
+    drop_burst_len: u64,
+}
+
+impl ImpairmentConfig {
+    fn from_env() -> Self {
+        Self {
+            base_delay_ms: parse_env_u64("NSMB_NET_BRIDGE_DELAY_MS"),
+            jitter_ms: parse_env_u64("NSMB_NET_BRIDGE_JITTER_MS"),
+            drop_modulo: parse_env_u64("NSMB_NET_BRIDGE_DROP_MODULO"),
+            drop_burst_modulo: parse_env_u64("NSMB_NET_BRIDGE_DROP_BURST_MODULO"),
+            drop_burst_len: parse_env_u64("NSMB_NET_BRIDGE_DROP_BURST_LEN"),
+        }
+    }
+
+    fn enabled(self) -> bool {
+        self.base_delay_ms > 0
+            || self.jitter_ms > 0
+            || self.drop_modulo > 0
+            || (self.drop_burst_modulo > 0 && self.drop_burst_len > 0)
+    }
+}
+
+#[derive(Debug)]
+struct ImpairmentState {
+    config: ImpairmentConfig,
+    rng: u64,
+    app_to_webrtc_seq: u64,
+    webrtc_to_app_seq: u64,
+    app_to_webrtc_dropped: u64,
+    webrtc_to_app_dropped: u64,
+}
+
+impl ImpairmentState {
+    fn new(config: ImpairmentConfig) -> Self {
+        Self {
+            config,
+            rng: 0x9E37_79B9_7F4A_7C15,
+            app_to_webrtc_seq: 0,
+            webrtc_to_app_seq: 0,
+            app_to_webrtc_dropped: 0,
+            webrtc_to_app_dropped: 0,
+        }
+    }
+
+    async fn before_app_to_webrtc_send(&mut self) -> bool {
+        self.app_to_webrtc_seq = self.app_to_webrtc_seq.wrapping_add(1);
+        let seq = self.app_to_webrtc_seq;
+        if self.should_drop(seq) {
+            self.app_to_webrtc_dropped = self.app_to_webrtc_dropped.wrapping_add(1);
+            return false;
+        }
+        self.delay().await;
+        true
+    }
+
+    async fn before_webrtc_to_app_send(&mut self) -> bool {
+        self.webrtc_to_app_seq = self.webrtc_to_app_seq.wrapping_add(1);
+        let seq = self.webrtc_to_app_seq;
+        if self.should_drop(seq) {
+            self.webrtc_to_app_dropped = self.webrtc_to_app_dropped.wrapping_add(1);
+            return false;
+        }
+        self.delay().await;
+        true
+    }
+
+    fn should_drop(&self, seq: u64) -> bool {
+        if self.config.drop_modulo > 0 && seq.is_multiple_of(self.config.drop_modulo) {
+            return true;
+        }
+        self.config.drop_burst_modulo > 0
+            && self.config.drop_burst_len > 0
+            && (seq - 1) % self.config.drop_burst_modulo < self.config.drop_burst_len
+    }
+
+    async fn delay(&mut self) {
+        let delay_ms = self.config.base_delay_ms + self.next_jitter_ms();
+        if delay_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+        }
+    }
+
+    fn next_jitter_ms(&mut self) -> u64 {
+        if self.config.jitter_ms == 0 {
+            return 0;
+        }
+        self.rng = self
+            .rng
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        self.rng % (self.config.jitter_ms + 1)
+    }
+}
+
+fn parse_env_u64(name: &str) -> u64 {
+    env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0)
 }
 
 pub struct SignalingWebRtcConfig {
@@ -1007,6 +1115,7 @@ async fn run_webrtc_udp_tunnel(
     let mut app_buf = [0u8; MAX_DATAGRAM_SIZE];
     let start = Instant::now();
     let mut stats_tick = tokio::time::interval(Duration::from_secs(2));
+    let mut impairment = ImpairmentState::new(ImpairmentConfig::from_env());
 
     let initial_target = {
         let target = local_target.lock().await;
@@ -1018,6 +1127,16 @@ async fn run_webrtc_udp_tunnel(
         "nsmb-net-bridge webrtc: connected local={} localTarget={}",
         local_addr, initial_target
     );
+    if impairment.config.enabled() {
+        println!(
+            "nsmb-net-bridge webrtc: impairment delayMs={} jitterMs={} dropModulo={} dropBurstModulo={} dropBurstLen={}",
+            impairment.config.base_delay_ms,
+            impairment.config.jitter_ms,
+            impairment.config.drop_modulo,
+            impairment.config.drop_burst_modulo,
+            impairment.config.drop_burst_len
+        );
+    }
 
     loop {
         tokio::select! {
@@ -1029,6 +1148,9 @@ async fn run_webrtc_udp_tunnel(
                         *target = Some(from);
                         println!("nsmb-net-bridge webrtc: learned local target {}", from);
                     }
+                }
+                if !impairment.before_app_to_webrtc_send().await {
+                    continue;
                 }
                 dc_tx.send(&app_buf[..len]).await?;
                 reporter.stats.app_to_webrtc_packets += 1;
@@ -1043,6 +1165,9 @@ async fn run_webrtc_udp_tunnel(
                     reporter.stats.dropped_no_local_target += 1;
                     continue;
                 };
+                if !impairment.before_webrtc_to_app_send().await {
+                    continue;
+                }
                 local_socket.send_to(&msg, target).await?;
                 reporter.stats.webrtc_to_app_packets += 1;
                 reporter.stats.webrtc_to_app_bytes += msg.len() as u64;
@@ -1068,13 +1193,15 @@ async fn run_webrtc_udp_tunnel(
             }
             _ = stats_tick.tick() => {
                 println!(
-                    "nsmb-net-bridge webrtc: t={:.1}s app->rtc={}pkts/{}B rtc->app={}pkts/{}B droppedNoLocalTarget={}",
+                    "nsmb-net-bridge webrtc: t={:.1}s app->rtc={}pkts/{}B rtc->app={}pkts/{}B droppedNoLocalTarget={} impairmentDropAppToRtc={} impairmentDropRtcToApp={}",
                     start.elapsed().as_secs_f32(),
                     reporter.stats.app_to_webrtc_packets,
                     reporter.stats.app_to_webrtc_bytes,
                     reporter.stats.webrtc_to_app_packets,
                     reporter.stats.webrtc_to_app_bytes,
-                    reporter.stats.dropped_no_local_target
+                    reporter.stats.dropped_no_local_target,
+                    impairment.app_to_webrtc_dropped,
+                    impairment.webrtc_to_app_dropped
                 );
                 reporter.observe_selected_addresses(
                     peer_connection.local_address(),

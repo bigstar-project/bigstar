@@ -4,6 +4,7 @@ export const roleSchema = z.enum(['offer', 'answer']);
 
 export const courseModeSchema = z.enum(['random', 'select']);
 export const livesSchema = z.enum(['3', '5', 'endless']);
+const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/i);
 
 export const gameSettingsSchema = z
   .object({
@@ -56,11 +57,19 @@ export const roomStatusSchema = z.enum([
   'closed',
 ]);
 
+export const romIdentitySchema = z.object({
+  rom_pair_id: sha256Schema,
+  generator_id: sha256Schema,
+  host_rom_sha256: sha256Schema,
+  client_rom_sha256: sha256Schema,
+});
+
 export const roomSummarySchema = z.object({
   room_id: z.string(),
   host_name: z.string(),
   status: roomStatusSchema,
   settings: gameSettingsSchema,
+  rom_identity: romIdentitySchema,
   created_at: z.number().int(),
   updated_at: z.number().int(),
   expires_at: z.number().int(),
@@ -71,6 +80,7 @@ export const roomSummarySchema = z.object({
 export const createRoomRequestSchema = z.object({
   host_name: z.string().trim().min(1).max(32),
   settings: gameSettingsSchema,
+  rom_identity: romIdentitySchema,
 });
 
 export const createRoomResponseSchema = z.object({
@@ -78,10 +88,12 @@ export const createRoomResponseSchema = z.object({
   host_token: z.string(),
   signal_url: z.string(),
   settings: gameSettingsSchema,
+  rom_identity: romIdentitySchema,
 });
 
 export const joinRoomRequestSchema = z.object({
   player_name: z.string().trim().min(1).max(32).optional(),
+  rom_pair_id: sha256Schema,
 });
 
 export const joinRoomResponseSchema = z.object({
@@ -89,6 +101,7 @@ export const joinRoomResponseSchema = z.object({
   join_token: z.string(),
   signal_url: z.string(),
   settings: gameSettingsSchema,
+  rom_identity: romIdentitySchema,
 });
 
 export const listRoomsResponseSchema = z.object({
@@ -159,6 +172,7 @@ export const wsServerMessageSchema = z.discriminatedUnion('type', [
 
 export type Role = z.infer<typeof roleSchema>;
 export type GameSettings = z.infer<typeof gameSettingsSchema>;
+export type RomIdentity = z.infer<typeof romIdentitySchema>;
 export type RoomStatus = z.infer<typeof roomStatusSchema>;
 export type RoomSummary = z.infer<typeof roomSummarySchema>;
 export type CreateRoomRequest = z.infer<typeof createRoomRequestSchema>;

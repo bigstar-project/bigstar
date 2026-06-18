@@ -1,6 +1,9 @@
 import { hc } from 'hono/client';
 import type { AppType } from '../../nsmb-signaling-server/src/app';
-import type { RoomSummary } from '../../nsmb-signaling-server/src/schemas';
+import type {
+  RomIdentity,
+  RoomSummary,
+} from '../../nsmb-signaling-server/src/schemas';
 import type { GameSettings } from './types';
 
 export type { RoomSummary };
@@ -9,11 +12,13 @@ type CreateRoomInput = {
   signalUrl: string;
   hostName: string;
   settings: GameSettings;
+  romIdentity: RomIdentity;
 };
 
 type JoinRoomInput = {
   signalUrl: string;
   roomId: string;
+  romPairId: string;
 };
 
 function apiBaseFromSignalUrl(signalUrl: string): string {
@@ -55,14 +60,26 @@ export async function listRooms(signalUrl: string) {
   return response.json();
 }
 
+export async function getRoom(signalUrl: string, roomId: string) {
+  const response = await clientFor(signalUrl).rooms[':roomId'].$get({
+    param: { roomId },
+  });
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+  return response.json();
+}
+
 export async function createRoom({
   hostName,
+  romIdentity,
   settings,
   signalUrl,
 }: CreateRoomInput) {
   const response = await clientFor(signalUrl).rooms.$post({
     json: {
       host_name: hostName,
+      rom_identity: romIdentity,
       settings,
     },
   });
@@ -76,10 +93,14 @@ export async function createRoom({
   };
 }
 
-export async function joinRoom({ roomId, signalUrl }: JoinRoomInput) {
+export async function joinRoom({
+  romPairId,
+  roomId,
+  signalUrl,
+}: JoinRoomInput) {
   const response = await clientFor(signalUrl).rooms[':roomId'].join.$post({
     param: { roomId },
-    json: {},
+    json: { rom_pair_id: romPairId },
   });
   if (!response.ok) {
     throw new Error(await readError(response));

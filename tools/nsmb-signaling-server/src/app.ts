@@ -106,6 +106,7 @@ const route = app
       host_name: body.host_name,
       host_token: hostToken,
       settings: body.settings,
+      rom_identity: body.rom_identity,
       now,
       expires_at: now + ROOM_TTL_MS,
     });
@@ -117,6 +118,7 @@ const route = app
         host_token: hostToken,
         signal_url: signalUrl(c.req.raw),
         settings: record.settings,
+        rom_identity: record.rom_identity,
       },
       201,
     );
@@ -141,6 +143,7 @@ const route = app
     '/rooms/:roomId/join',
     zValidator('json', joinRoomRequestSchema),
     async (c) => {
+      const body = c.req.valid('json');
       const roomId = c.req.param('roomId');
       if (!VALID_ROOM_ID.test(roomId)) {
         const { body, status } = error('invalid room id', 400);
@@ -150,9 +153,20 @@ const route = app
       const room = c.env.SIGNALING_ROOM.get(
         c.env.SIGNALING_ROOM.idFromName(roomId),
       );
+      const now = Date.now();
+      const current = await room.getRoom(now);
+      if (current === null) {
+        const { body, status } = error('room not found', 404);
+        return c.json(body, status);
+      }
+      if (current.rom_identity.rom_pair_id !== body.rom_pair_id) {
+        const { body: errorBody, status } = error('rom identity mismatch', 409);
+        return c.json(errorBody, status);
+      }
       const record = await room.reserveJoin({
         join_token: joinToken,
-        now: Date.now(),
+        rom_pair_id: body.rom_pair_id,
+        now,
       });
       const lobby = c.env.LOBBY.get(c.env.LOBBY.idFromName('global'));
       await lobby.upsertRoom(publicRoom(record));
@@ -162,6 +176,7 @@ const route = app
           join_token: joinToken,
           signal_url: signalUrl(c.req.raw),
           settings: record.settings,
+          rom_identity: record.rom_identity,
         },
         200,
       );
@@ -188,7 +203,11 @@ app.onError((err, c) => {
     const { body, status } = error(message, 404);
     return c.json(body, status);
   }
-  if (message === 'room is not joinable' || message === 'room already exists') {
+  if (
+    message === 'room is not joinable' ||
+    message === 'room already exists' ||
+    message === 'rom identity mismatch'
+  ) {
     const { body, status } = error(message, 409);
     return c.json(body, status);
   }

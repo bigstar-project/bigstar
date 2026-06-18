@@ -12,7 +12,11 @@ param(
     [string]$Exe = "",
     [string]$BridgeExe = "",
     [string]$SourceRom = "roms\nsmb-us.nds",
+    [string]$ExistingHostRom = "",
+    [string]$ExistingClientRom = "",
     [string]$InputScript = "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs",
+    [string]$HostInputScript = "",
+    [string]$ClientInputScript = "",
     [string]$LogDir = "",
     [int]$MvlStage = -1,
     [ValidateSet(1, 2, 3)] [int]$MvlWins = 2,
@@ -20,6 +24,35 @@ param(
     [ValidateSet("3", "5", "endless", "Endless")] [string]$MvlLives = "endless",
     [ValidateSet("random", "select")] [string]$MvlCourseMode = "random",
     [string]$MvlMatchSeed = "",
+    [string]$MvlStageSequence = "",
+    [string]$MvlMatchSeedSequence = "",
+    [int]$BridgeDelayMs = 0,
+    [int]$BridgeJitterMs = 0,
+    [int]$BridgeDropModulo = 0,
+    [int]$BridgeDropBurstModulo = 0,
+    [int]$BridgeDropBurstLen = 0,
+    [int]$HostBridgeDelayMs = -1,
+    [int]$HostBridgeJitterMs = -1,
+    [int]$HostBridgeDropModulo = -1,
+    [int]$HostBridgeDropBurstModulo = -1,
+    [int]$HostBridgeDropBurstLen = -1,
+    [int]$ClientBridgeDelayMs = -1,
+    [int]$ClientBridgeJitterMs = -1,
+    [int]$ClientBridgeDropModulo = -1,
+    [int]$ClientBridgeDropBurstModulo = -1,
+    [int]$ClientBridgeDropBurstLen = -1,
+    [int]$HostInputSendDelayFrames = 0,
+    [int]$HostInputSendJitterFrames = 0,
+    [int]$HostInputSendDelayStartFrame = 0,
+    [int]$HostInputSendDelayEndFrame = 0,
+    [int]$HostInputDropModulo = 0,
+    [int]$HostInputDropOffset = 0,
+    [int]$ClientInputSendDelayFrames = 0,
+    [int]$ClientInputSendJitterFrames = 0,
+    [int]$ClientInputSendDelayStartFrame = 0,
+    [int]$ClientInputSendDelayEndFrame = 0,
+    [int]$ClientInputDropModulo = 0,
+    [int]$ClientInputDropOffset = 0,
     [switch]$NoJit,
     [switch]$SoftwareRenderer
 )
@@ -175,6 +208,13 @@ function New-MelonEnv {
         [string]$RunLogDir
     )
     $localInstance = if ($Role -eq "host") { "0" } else { "1" }
+    $roleInputScript = if ($Role -eq "host" -and $HostInputScript -ne "") {
+        $HostInputScript
+    } elseif ($Role -eq "client" -and $ClientInputScript -ne "") {
+        $ClientInputScript
+    } else {
+        $InputScript
+    }
     $env = @{
         MELONDS_NSML_TEST = "1"
         MELONDS_NSML_TEST_INSTANCES = "1"
@@ -183,7 +223,7 @@ function New-MelonEnv {
         MELONDS_NSML_ROLE = $Role
         MELONDS_NSML_PORT = "$Port"
         MELONDS_NSML_LOCAL_INSTANCE = $localInstance
-        MELONDS_NSML_INPUT_SCRIPT = (Resolve-RepoPath $InputScript -MustExist)
+        MELONDS_NSML_INPUT_SCRIPT = (Resolve-RepoPath $roleInputScript -MustExist)
         MELONDS_NSML_DISABLE_HASH = "1"
         MELONDS_NSML_SCREENSHOT_DIR = (Join-Path $RunLogDir "screens")
         MELONDS_NSML_SCREENSHOT_INTERVAL = "300"
@@ -201,6 +241,13 @@ function New-MelonEnv {
         MELONDS_NSML_INPUT_UNRELIABLE = "1"
         MELONDS_NSML_INPUT_BUNDLE_HISTORY = "8"
         MELONDS_NSML_INPUT_NETPLAY_TRACE = "1"
+        MELONDS_NSML_INPUT_HEALTH_TRACE = "1"
+        MELONDS_NSML_INPUT_HEALTH_TRACE_INTERVAL = "120"
+        MELONDS_NSML_INPUT_HEALTH_TRACE_WAIT_THRESHOLD_MS = "16"
+        MELONDS_NSML_STATE_SYNC = "1"
+        MELONDS_NSML_STATE_SYNC_INTERVAL = "60"
+        MELONDS_NSML_STATE_SYNC_EXTENDED = "1"
+        MELONDS_NSML_DIAGNOSTICS_FILE = (Join-Path $RunLogDir "melonds-diagnostics.json")
         MELONDS_NSML_WAIT_FOR_PEER = "1"
         MELONDS_NSML_WAIT_FOR_PEER_AT_NETPLAY_START = "1"
         MELONDS_NSML_DEFER_NETWORK_UNTIL_START = "1"
@@ -210,25 +257,38 @@ function New-MelonEnv {
         MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD = "1"
         MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_START_FRAME = "840"
         MELONDS_NSML_MVL_STAGE = "$Stage"
+        MELONDS_NSML_MVL_STAGE_SEQUENCE = $MvlStageSequence
         MELONDS_NSML_DIRECT_MVL_BOOT_STAGE = "$Stage"
         MELONDS_NSML_MVL_COURSE_MODE = $MvlCourseMode
         MELONDS_NSML_MVL_WINS = "$MvlWins"
         MELONDS_NSML_MVL_BIG_STARS = "$MvlBigStars"
         MELONDS_NSML_MVL_LIVES = $MvlLives.ToLowerInvariant()
         MELONDS_NSML_MATCH_SEED = $Seed
+        MELONDS_NSML_MATCH_SEED_SEQUENCE = $MvlMatchSeedSequence
     }
     if ($Role -eq "client") {
         $env.MELONDS_NSML_PEER = "127.0.0.1"
+    }
+    if ($Role -eq "host") {
+        $env.MELONDS_NSML_INPUT_SEND_DELAY_FRAMES = "$HostInputSendDelayFrames"
+        $env.MELONDS_NSML_INPUT_SEND_JITTER_FRAMES = "$HostInputSendJitterFrames"
+        $env.MELONDS_NSML_INPUT_SEND_DELAY_START_FRAME = "$HostInputSendDelayStartFrame"
+        $env.MELONDS_NSML_INPUT_SEND_DELAY_END_FRAME = "$HostInputSendDelayEndFrame"
+        $env.MELONDS_NSML_INPUT_DROP_MODULO = "$HostInputDropModulo"
+        $env.MELONDS_NSML_INPUT_DROP_OFFSET = "$HostInputDropOffset"
+    } else {
+        $env.MELONDS_NSML_INPUT_SEND_DELAY_FRAMES = "$ClientInputSendDelayFrames"
+        $env.MELONDS_NSML_INPUT_SEND_JITTER_FRAMES = "$ClientInputSendJitterFrames"
+        $env.MELONDS_NSML_INPUT_SEND_DELAY_START_FRAME = "$ClientInputSendDelayStartFrame"
+        $env.MELONDS_NSML_INPUT_SEND_DELAY_END_FRAME = "$ClientInputSendDelayEndFrame"
+        $env.MELONDS_NSML_INPUT_DROP_MODULO = "$ClientInputDropModulo"
+        $env.MELONDS_NSML_INPUT_DROP_OFFSET = "$ClientInputDropOffset"
     }
     if ($MvlWins -gt 1) {
         $env.MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT = "1"
         $env.MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES = "120"
     }
     return $env
-}
-
-if ($MvlCourseMode -eq "select") {
-    throw "MvlCourseMode=select is not supported for direct-route local triage yet. Use -MvlCourseMode random."
 }
 
 if ($LogDir -eq "") {
@@ -239,10 +299,22 @@ $logRoot = Resolve-RepoPath $LogDir
 New-Item -ItemType Directory -Force $logRoot | Out-Null
 
 if ($MvlMatchSeed -eq "") {
-    $MvlMatchSeed = "0x$('{0:x8}' -f (Get-Random -Minimum 0 -Maximum ([int]::MaxValue)))"
+    $firstSeed = @($MvlMatchSeedSequence.Split(",") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+    if ($firstSeed.Count -gt 0) {
+        $MvlMatchSeed = $firstSeed[0].Trim()
+    } else {
+        $MvlMatchSeed = "0x$('{0:x8}' -f (Get-Random -Minimum 0 -Maximum ([int]::MaxValue)))"
+    }
 }
 $seedValue = Convert-ToUInt32Setting -Value $MvlMatchSeed -Name "MvlMatchSeed"
-$effectiveStage = if ($MvlStage -ge 0) { $MvlStage } else { [int]($seedValue % 5) }
+$firstStage = @($MvlStageSequence.Split(",") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+$effectiveStage = if ($MvlStage -ge 0) {
+    $MvlStage
+} elseif ($firstStage.Count -gt 0) {
+    [int]$firstStage[0].Trim()
+} else {
+    [int]($seedValue % 5)
+}
 if ($effectiveStage -lt 0 -or $effectiveStage -gt 4) {
     throw "MvlStage must be between 0 and 4: $effectiveStage"
 }
@@ -322,28 +394,95 @@ New-Item -ItemType Directory -Force $hostLog, $clientLog | Out-Null
 
 $hostRom = Join-Path $logRoot "generated-host.nds"
 $clientRom = Join-Path $logRoot "generated-client.nds"
-& (Join-Path $PSScriptRoot "generate-nsmb-mvl-stable-roms.ps1") `
-    -SourceRom (Resolve-RepoPath $SourceRom -MustExist) `
-    -HostRom $hostRom `
-    -ClientRom $clientRom `
-    -MvlStage $effectiveStage `
-    -MvlWins $MvlWins `
-    -MvlBigStars $MvlBigStars `
-    -MvlLives $MvlLives `
-    -MvlCourseMode $MvlCourseMode
+if ($ExistingHostRom -ne "" -or $ExistingClientRom -ne "") {
+    if ($ExistingHostRom -eq "" -or $ExistingClientRom -eq "") {
+        & (Join-Path $PSScriptRoot "generate-nsmb-mvl-stable-roms.ps1") `
+            -SourceRom (Resolve-RepoPath $SourceRom -MustExist) `
+            -HostRom $hostRom `
+            -ClientRom $clientRom `
+            -MvlStage $effectiveStage `
+            -MvlWins $MvlWins `
+            -MvlBigStars $MvlBigStars `
+            -MvlLives $MvlLives `
+            -MvlCourseMode $MvlCourseMode
+    }
+
+    $existingRomPairs = @()
+    if ($ExistingHostRom -ne "") {
+        $existingHostRomPath = Resolve-RepoPath $ExistingHostRom -MustExist
+        Copy-Item -LiteralPath $existingHostRomPath -Destination $hostRom -Force
+        $existingRomPairs += @{ Source = $existingHostRomPath; Destination = $hostRom }
+    }
+    if ($ExistingClientRom -ne "") {
+        $existingClientRomPath = Resolve-RepoPath $ExistingClientRom -MustExist
+        Copy-Item -LiteralPath $existingClientRomPath -Destination $clientRom -Force
+        $existingRomPairs += @{ Source = $existingClientRomPath; Destination = $clientRom }
+    }
+    foreach ($pair in $existingRomPairs) {
+        $sourceSave = [System.IO.Path]::ChangeExtension($pair.Source, ".sav")
+        if (Test-Path -LiteralPath $sourceSave) {
+            $destinationSave = [System.IO.Path]::ChangeExtension($pair.Destination, ".sav")
+            Copy-Item -LiteralPath $sourceSave -Destination $destinationSave -Force
+        }
+    }
+} else {
+    & (Join-Path $PSScriptRoot "generate-nsmb-mvl-stable-roms.ps1") `
+        -SourceRom (Resolve-RepoPath $SourceRom -MustExist) `
+        -HostRom $hostRom `
+        -ClientRom $clientRom `
+        -MvlStage $effectiveStage `
+        -MvlWins $MvlWins `
+        -MvlBigStars $MvlBigStars `
+        -MvlLives $MvlLives `
+        -MvlCourseMode $MvlCourseMode
+}
 
 @(
     "mode=$Mode"
     "signalUrl=$SignalUrl"
     "roomCode=$RoomCode"
     "seed=$MvlMatchSeed"
+    "seedSequence=$MvlMatchSeedSequence"
     "stage=$effectiveStage"
+    "stageSequence=$MvlStageSequence"
     "wins=$MvlWins"
     "bigStars=$MvlBigStars"
     "lives=$MvlLives"
     "courseMode=$MvlCourseMode"
+    "existingHostRom=$ExistingHostRom"
+    "existingClientRom=$ExistingClientRom"
+    "inputScript=$InputScript"
+    "hostInputScript=$HostInputScript"
+    "clientInputScript=$ClientInputScript"
     "melonDS=$Exe"
     "bridge=$BridgeExe"
+    "bridgeDelayMs=$BridgeDelayMs"
+    "bridgeJitterMs=$BridgeJitterMs"
+    "bridgeDropModulo=$BridgeDropModulo"
+    "bridgeDropBurstModulo=$BridgeDropBurstModulo"
+    "bridgeDropBurstLen=$BridgeDropBurstLen"
+    "hostBridgeDelayMs=$HostBridgeDelayMs"
+    "hostBridgeJitterMs=$HostBridgeJitterMs"
+    "hostBridgeDropModulo=$HostBridgeDropModulo"
+    "hostBridgeDropBurstModulo=$HostBridgeDropBurstModulo"
+    "hostBridgeDropBurstLen=$HostBridgeDropBurstLen"
+    "clientBridgeDelayMs=$ClientBridgeDelayMs"
+    "clientBridgeJitterMs=$ClientBridgeJitterMs"
+    "clientBridgeDropModulo=$ClientBridgeDropModulo"
+    "clientBridgeDropBurstModulo=$ClientBridgeDropBurstModulo"
+    "clientBridgeDropBurstLen=$ClientBridgeDropBurstLen"
+    "hostInputSendDelayFrames=$HostInputSendDelayFrames"
+    "hostInputSendJitterFrames=$HostInputSendJitterFrames"
+    "hostInputSendDelayStartFrame=$HostInputSendDelayStartFrame"
+    "hostInputSendDelayEndFrame=$HostInputSendDelayEndFrame"
+    "hostInputDropModulo=$HostInputDropModulo"
+    "hostInputDropOffset=$HostInputDropOffset"
+    "clientInputSendDelayFrames=$ClientInputSendDelayFrames"
+    "clientInputSendJitterFrames=$ClientInputSendJitterFrames"
+    "clientInputSendDelayStartFrame=$ClientInputSendDelayStartFrame"
+    "clientInputSendDelayEndFrame=$ClientInputSendDelayEndFrame"
+    "clientInputDropModulo=$ClientInputDropModulo"
+    "clientInputDropOffset=$ClientInputDropOffset"
 ) | Set-Content -Encoding UTF8 (Join-Path $logRoot "triage-settings.txt")
 
 $offerArgs = @(
@@ -360,15 +499,44 @@ $answerArgs = @(
     "--session", $RoomCode
 )
 
-$hostBridge = Start-Process -FilePath $BridgeExe -ArgumentList $offerArgs -WorkingDirectory $hostLog `
-    -RedirectStandardOutput (Join-Path $hostLog "bridge.stdout.txt") `
-    -RedirectStandardError (Join-Path $hostLog "bridge.stderr.txt") `
-    -WindowStyle Hidden -PassThru
+function New-BridgeEnv {
+    param(
+        [int]$RoleDelayMs,
+        [int]$RoleJitterMs,
+        [int]$RoleDropModulo,
+        [int]$RoleDropBurstModulo,
+        [int]$RoleDropBurstLen
+    )
+    $effectiveDelayMs = if ($RoleDelayMs -ge 0) { $RoleDelayMs } else { $BridgeDelayMs }
+    $effectiveJitterMs = if ($RoleJitterMs -ge 0) { $RoleJitterMs } else { $BridgeJitterMs }
+    $effectiveDropModulo = if ($RoleDropModulo -ge 0) { $RoleDropModulo } else { $BridgeDropModulo }
+    $effectiveDropBurstModulo = if ($RoleDropBurstModulo -ge 0) { $RoleDropBurstModulo } else { $BridgeDropBurstModulo }
+    $effectiveDropBurstLen = if ($RoleDropBurstLen -ge 0) { $RoleDropBurstLen } else { $BridgeDropBurstLen }
+    return @{
+        NSMB_NET_BRIDGE_DELAY_MS = "$effectiveDelayMs"
+        NSMB_NET_BRIDGE_JITTER_MS = "$effectiveJitterMs"
+        NSMB_NET_BRIDGE_DROP_MODULO = "$effectiveDropModulo"
+        NSMB_NET_BRIDGE_DROP_BURST_MODULO = "$effectiveDropBurstModulo"
+        NSMB_NET_BRIDGE_DROP_BURST_LEN = "$effectiveDropBurstLen"
+    }
+}
+
+$hostBridgeEnv = New-BridgeEnv -RoleDelayMs $HostBridgeDelayMs -RoleJitterMs $HostBridgeJitterMs -RoleDropModulo $HostBridgeDropModulo -RoleDropBurstModulo $HostBridgeDropBurstModulo -RoleDropBurstLen $HostBridgeDropBurstLen
+$clientBridgeEnv = New-BridgeEnv -RoleDelayMs $ClientBridgeDelayMs -RoleJitterMs $ClientBridgeJitterMs -RoleDropModulo $ClientBridgeDropModulo -RoleDropBurstModulo $ClientBridgeDropBurstModulo -RoleDropBurstLen $ClientBridgeDropBurstLen
+
+Invoke-WithMelonEnv -Env $hostBridgeEnv -Body {
+    $script:hostBridge = Start-Process -FilePath $BridgeExe -ArgumentList $offerArgs -WorkingDirectory $hostLog `
+        -RedirectStandardOutput (Join-Path $hostLog "bridge.stdout.txt") `
+        -RedirectStandardError (Join-Path $hostLog "bridge.stderr.txt") `
+        -WindowStyle Hidden -PassThru
+}
 Start-Sleep -Milliseconds 500
-$clientBridge = Start-Process -FilePath $BridgeExe -ArgumentList $answerArgs -WorkingDirectory $clientLog `
-    -RedirectStandardOutput (Join-Path $clientLog "bridge.stdout.txt") `
-    -RedirectStandardError (Join-Path $clientLog "bridge.stderr.txt") `
-    -WindowStyle Hidden -PassThru
+Invoke-WithMelonEnv -Env $clientBridgeEnv -Body {
+    $script:clientBridge = Start-Process -FilePath $BridgeExe -ArgumentList $answerArgs -WorkingDirectory $clientLog `
+        -RedirectStandardOutput (Join-Path $clientLog "bridge.stdout.txt") `
+        -RedirectStandardError (Join-Path $clientLog "bridge.stderr.txt") `
+        -WindowStyle Hidden -PassThru
+}
 
 Start-Sleep -Milliseconds $StartupDelayMs
 

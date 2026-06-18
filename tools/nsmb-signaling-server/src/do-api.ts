@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   type gameSettingsSchema,
+  type RomIdentity,
   type RoomSummary,
   roomSummarySchema,
 } from './schemas';
@@ -17,12 +18,14 @@ export type CreateRoomParams = {
   host_name: string;
   host_token: string;
   settings: z.infer<typeof gameSettingsSchema>;
+  rom_identity: RomIdentity;
   now: number;
   expires_at: number;
 };
 
 export type ReserveJoinParams = {
   join_token: string;
+  rom_pair_id: string;
   now: number;
 };
 
@@ -59,6 +62,7 @@ export function publicRoom(record: RoomRecord, peerCount = 0): RoomSummary {
     host_name: record.host_name,
     status: record.status,
     settings: record.settings,
+    rom_identity: record.rom_identity,
     created_at: record.created_at,
     updated_at: record.updated_at,
     expires_at: record.expires_at,

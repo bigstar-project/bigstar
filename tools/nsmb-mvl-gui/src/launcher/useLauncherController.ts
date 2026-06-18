@@ -16,6 +16,7 @@ import {
 } from '../form';
 import {
   createRoom as createMatchmakingRoom,
+  getRoom as getMatchmakingRoom,
   joinRoom as joinMatchmakingRoom,
   listRooms,
 } from '../matchmakingClient';
@@ -39,7 +40,9 @@ import type {
   FormState,
   GameStateMismatch,
   GenerateRomRequest,
+  GenerateRomResponse,
   LaunchRequest,
+  RomIdentity,
   SaveRomPathsRequest,
   StatusKind,
 } from '../types';
@@ -62,6 +65,21 @@ function isTauriRuntime() {
 function isWebSocketUrl(value: string) {
   return value.startsWith('ws://') || value.startsWith('wss://');
 }
+
+function assertRomPairMatches(local: RomIdentity, remote: RomIdentity) {
+  if (local.rom_pair_id !== remote.rom_pair_id) {
+    throw new Error(
+      `ROMが相手と一致しません local=${local.rom_pair_id.slice(0, 12)} remote=${remote.rom_pair_id.slice(0, 12)}`,
+    );
+  }
+}
+
+type PreparedRomCache = {
+  sourceRom: string;
+  hostRom: string;
+  clientRom: string;
+  identity: RomIdentity;
+};
 
 export function useLauncherController() {
   const queryClient = useQueryClient();
@@ -88,6 +106,7 @@ export function useLauncherController() {
   const [romGenerationBusy, setRomGenerationBusy] = useState(false);
   const [onboardingInputConfigOpened, setOnboardingInputConfigOpened] =
     useState(false);
+  const [matchmakingActionBusy, setMatchmakingActionBusy] = useState(false);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({
     phase: 'idle',
@@ -95,6 +114,13 @@ export function useLauncherController() {
   const availableUpdateRef = useRef<Awaited<ReturnType<typeof check>>>(null);
   const updateBusyRef = useRef(false);
   const updatePhaseRef = useRef<UpdateStatus['phase']>('idle');
+  const preparedRomCacheRef = useRef<PreparedRomCache | null>(null);
+  const preparedRomPromiseRef = useRef<{
+    sourceRom: string;
+    promise: Promise<GenerateRomResponse>;
+  } | null>(null);
+  const matchmakingActionBusyRef = useRef(false);
+  const startupRomPreparationKeyRef = useRef<string | null>(null);
 
   const currentRomPath =
     form.role === 'host' ? form.hostRomPath : form.clientRomPath;
@@ -324,39 +350,23 @@ export function useLauncherController() {
   };
 
   const prepareRomsFor = async (sourceForm: FormState) => {
-    const nextForm = withRequiredPlan(sourceForm);
-    if (
-      JSON.stringify(currentSettings(nextForm)) !==
-      JSON.stringify(currentSettings(form))
-    ) {
-      setForm(nextForm);
-    }
-    const stage = selectedStageFrom(
-      nextForm.courseMode,
-      nextForm.matchSeed,
-      nextForm.courseStages,
-    );
-    if (stage === null) {
-      setActivityStatus({
-        text: 'Match seed は10進数、または 0x から始まる16進数で指定してください',
-        kind: 'error',
-      });
-      return;
-    }
-
     const request: GenerateRomRequest = {
-      source_rom: nextForm.baseRomPath,
-      stage,
-      settings: currentSettings(nextForm),
+      source_rom: sourceForm.baseRomPath,
     };
 
     try {
       setRomGenerationBusy(true);
       setActivityStatus({ text: '共通 ROM を準備中', kind: 'idle' });
       const response = await generateRoms(request);
+      preparedRomCacheRef.current = {
+        sourceRom: sourceForm.baseRomPath,
+        hostRom: response.host_rom,
+        clientRom: response.client_rom,
+        identity: response.rom_identity,
+      };
       setForm((current) => ({
         ...current,
-        baseRomPath: nextForm.baseRomPath,
+        baseRomPath: sourceForm.baseRomPath,
         hostRomPath: response.host_rom,
         clientRomPath: response.client_rom,
       }));
@@ -389,21 +399,84 @@ export function useLauncherController() {
     }
   };
 
-  const ensurePreparedRoms = async (nextForm: FormState, stage: number) => {
+  const ensurePreparedRoms = useCallback(async (nextForm: FormState) => {
+    const inFlight = preparedRomPromiseRef.current;
+    if (inFlight?.sourceRom === nextForm.baseRomPath) {
+      return inFlight.promise;
+    }
     const request: GenerateRomRequest = {
       source_rom: nextForm.baseRomPath,
-      stage,
-      settings: currentSettings(nextForm),
     };
-    const response = await ensureRoms(request);
-    setForm((current) => ({
-      ...current,
-      hostRomPath: response.host_rom,
-      clientRomPath: response.client_rom,
-    }));
-    setRomPreparation(response.generated ? '初回準備済み' : '再利用');
-    return response;
+    const promise = (async () => {
+      const response = await ensureRoms(request);
+      preparedRomCacheRef.current = {
+        sourceRom: nextForm.baseRomPath,
+        hostRom: response.host_rom,
+        clientRom: response.client_rom,
+        identity: response.rom_identity,
+      };
+      setForm((current) => ({
+        ...current,
+        hostRomPath: response.host_rom,
+        clientRomPath: response.client_rom,
+      }));
+      setRomPreparation(response.generated ? '初回準備済み' : '再利用');
+      setOnboardingRomsPrepared(true);
+      return response;
+    })();
+    preparedRomPromiseRef.current = {
+      sourceRom: nextForm.baseRomPath,
+      promise,
+    };
+    try {
+      return await promise;
+    } finally {
+      if (preparedRomPromiseRef.current?.promise === promise) {
+        preparedRomPromiseRef.current = null;
+      }
+    }
+  }, []);
+
+  const cachedPreparedRomsFor = (
+    sourceForm: FormState,
+  ): GenerateRomResponse | null => {
+    const cached = preparedRomCacheRef.current;
+    if (!cached || cached.sourceRom !== sourceForm.baseRomPath) {
+      return null;
+    }
+    return {
+      host_rom: cached.hostRom,
+      client_rom: cached.clientRom,
+      generated: false,
+      rom_identity: cached.identity,
+    };
   };
+
+  useEffect(() => {
+    if (!defaultsLoaded || connectionActive || !form.baseRomPath.trim()) {
+      return;
+    }
+    const key = form.baseRomPath.trim();
+    if (startupRomPreparationKeyRef.current === key) {
+      return;
+    }
+    startupRomPreparationKeyRef.current = key;
+    setRomPreparation('起動時準備中');
+    void ensurePreparedRoms(form)
+      .then((response) => {
+        setRomPreparation(
+          response.generated ? '起動時に準備済み' : '起動時に再利用',
+        );
+      })
+      .catch((error) => {
+        startupRomPreparationKeyRef.current = null;
+        setRomPreparation('準備失敗');
+        setActivityStatus({
+          text: `起動時のROM準備に失敗しました: ${String(error)}`,
+          kind: 'warn',
+        });
+      });
+  }, [defaultsLoaded, form, connectionActive, ensurePreparedRoms]);
 
   const startMatchFor = async (sourceForm: FormState) => {
     const nextForm = withRequiredPlan(sourceForm);
@@ -440,8 +513,11 @@ export function useLauncherController() {
     };
 
     try {
-      setActivityStatus({ text: '共通 ROM を確認中', kind: 'idle' });
-      const roms = await ensurePreparedRoms(nextForm, stage);
+      let roms = cachedPreparedRomsFor(nextForm);
+      if (!roms) {
+        setActivityStatus({ text: '共通 ROM を確認中', kind: 'idle' });
+        roms = await ensurePreparedRoms(nextForm);
+      }
       request.rom_path =
         nextForm.role === 'host' ? roms.host_rom : roms.client_rom;
       setActivityStatus({ text: `起動中 stage=${stage}`, kind: 'idle' });
@@ -466,10 +542,17 @@ export function useLauncherController() {
   };
 
   const createRoomMutation = useMutation({
-    mutationFn: async (sourceForm: FormState) => {
+    mutationFn: async ({
+      romIdentity,
+      sourceForm,
+    }: {
+      romIdentity: RomIdentity;
+      sourceForm: FormState;
+    }) => {
       const nextForm = withRequiredPlan(sourceForm);
       return createMatchmakingRoom({
         hostName: nextForm.hostName,
+        romIdentity,
         settings: currentSettings(nextForm),
         signalUrl: nextForm.signalUrl,
       });
@@ -477,11 +560,19 @@ export function useLauncherController() {
   });
 
   const joinRoomMutation = useMutation({
-    mutationFn: async (roomId: string) =>
-      joinMatchmakingRoom({ roomId, signalUrl: form.signalUrl }),
+    mutationFn: async ({
+      romPairId,
+      roomId,
+    }: {
+      romPairId: string;
+      roomId: string;
+    }) => joinMatchmakingRoom({ romPairId, roomId, signalUrl: form.signalUrl }),
   });
 
   const createRoom = async () => {
+    if (matchmakingActionBusyRef.current) {
+      return;
+    }
     if (connectionActive) {
       setActivityStatus({
         text: '実行中の対戦を停止してから部屋を作成してください',
@@ -489,10 +580,32 @@ export function useLauncherController() {
       });
       return;
     }
+    matchmakingActionBusyRef.current = true;
+    setMatchmakingActionBusy(true);
     try {
-      setActivityStatus({ text: '部屋を作成中', kind: 'idle' });
+      setActivityStatus({ text: '部屋用 ROM を確認中', kind: 'idle' });
       const plannedForm = withRequiredPlan(form, { refreshRandom: true });
-      const response = await createRoomMutation.mutateAsync(plannedForm);
+      const stage = selectedStageFrom(
+        plannedForm.courseMode,
+        plannedForm.matchSeed,
+        plannedForm.courseStages,
+      );
+      if (stage === null) {
+        setActivityStatus({
+          text: 'Match seed は10進数、または 0x から始まる16進数で指定してください',
+          kind: 'error',
+        });
+        return;
+      }
+      let roms = cachedPreparedRomsFor(plannedForm);
+      if (!roms) {
+        roms = await ensurePreparedRoms(plannedForm);
+      }
+      setActivityStatus({ text: '部屋を作成中', kind: 'idle' });
+      const response = await createRoomMutation.mutateAsync({
+        romIdentity: roms.rom_identity,
+        sourceForm: plannedForm,
+      });
       const nextForm: FormState = {
         ...plannedForm,
         role: 'host',
@@ -505,10 +618,16 @@ export function useLauncherController() {
       await startMatchFor(nextForm);
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });
+    } finally {
+      matchmakingActionBusyRef.current = false;
+      setMatchmakingActionBusy(false);
     }
   };
 
   const joinRoom = async (roomId: string) => {
+    if (matchmakingActionBusyRef.current) {
+      return;
+    }
     if (connectionActive) {
       setActivityStatus({
         text: '実行中の対戦を停止してから部屋に参加してください',
@@ -516,32 +635,61 @@ export function useLauncherController() {
       });
       return;
     }
+    matchmakingActionBusyRef.current = true;
+    setMatchmakingActionBusy(true);
     try {
-      setActivityStatus({ text: '部屋に参加中', kind: 'idle' });
-      const response = await joinRoomMutation.mutateAsync(roomId);
+      setActivityStatus({ text: '部屋情報を確認中', kind: 'idle' });
+      const room = await getMatchmakingRoom(form.signalUrl, roomId);
       const nextForm: FormState = {
         ...form,
         role: 'client',
-        roomCode: response.room_id,
-        signalUrl: response.signal_url,
-        courseMode: response.settings.course_mode,
-        courseStages: response.settings.course_stages,
-        wins: response.settings.wins,
-        bigStars: response.settings.big_stars,
-        lives: response.settings.lives,
-        matchSeed: response.settings.match_seed,
-        rngSeeds: response.settings.rng_seeds,
+        roomCode: room.room_id,
+        courseMode: room.settings.course_mode,
+        courseStages: room.settings.course_stages,
+        wins: room.settings.wins,
+        bigStars: room.settings.big_stars,
+        lives: room.settings.lives,
+        matchSeed: room.settings.match_seed,
+        rngSeeds: room.settings.rng_seeds,
         inputDelayFrames:
-          response.settings.input_delay_frames ?? defaultInputDelayFrames,
+          room.settings.input_delay_frames ?? defaultInputDelayFrames,
         inputMaxFrameLead:
-          response.settings.input_max_frame_lead ?? defaultInputMaxFrameLead,
-        rollbackEnabled: response.settings.rollback_enabled ?? false,
+          room.settings.input_max_frame_lead ?? defaultInputMaxFrameLead,
+        rollbackEnabled: room.settings.rollback_enabled ?? false,
       };
+      const stage = selectedStageFrom(
+        nextForm.courseMode,
+        nextForm.matchSeed,
+        nextForm.courseStages,
+      );
+      if (stage === null) {
+        setActivityStatus({
+          text: 'Match seed は10進数、または 0x から始まる16進数で指定してください',
+          kind: 'error',
+        });
+        return;
+      }
+      let roms = cachedPreparedRomsFor(nextForm);
+      if (!roms) {
+        setActivityStatus({ text: '参加用 ROM を確認中', kind: 'idle' });
+        roms = await ensurePreparedRoms(nextForm);
+      }
+      assertRomPairMatches(roms.rom_identity, room.rom_identity);
+      setActivityStatus({ text: '部屋に参加中', kind: 'idle' });
+      const response = await joinRoomMutation.mutateAsync({
+        romPairId: roms.rom_identity.rom_pair_id,
+        roomId,
+      });
+      assertRomPairMatches(roms.rom_identity, response.rom_identity);
+      nextForm.signalUrl = response.signal_url;
       setForm(nextForm);
       await queryClient.invalidateQueries({ queryKey: ['matchmakingRooms'] });
       await startMatchFor(nextForm);
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });
+    } finally {
+      matchmakingActionBusyRef.current = false;
+      setMatchmakingActionBusy(false);
     }
   };
 
@@ -737,9 +885,13 @@ export function useLauncherController() {
         !defaultsLoaded ||
         !isWebSocketUrl(form.signalUrl) ||
         connectionActive ||
+        matchmakingActionBusy ||
         createRoomMutation.isPending ||
         joinRoomMutation.isPending,
-      busy: createRoomMutation.isPending || joinRoomMutation.isPending,
+      busy:
+        matchmakingActionBusy ||
+        createRoomMutation.isPending ||
+        joinRoomMutation.isPending,
       error: roomsQuery.error ? String(roomsQuery.error) : null,
     },
     onboarding: {

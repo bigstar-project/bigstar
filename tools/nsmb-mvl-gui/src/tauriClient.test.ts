@@ -2,6 +2,16 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { GenerateRomRequest, LaunchRequest } from './types';
 
 const invokeMock = vi.hoisted(() => vi.fn());
+const romIdentity = {
+  client_rom_sha256:
+    '2222222222222222222222222222222222222222222222222222222222222222',
+  generator_id:
+    '3333333333333333333333333333333333333333333333333333333333333333',
+  host_rom_sha256:
+    '1111111111111111111111111111111111111111111111111111111111111111',
+  rom_pair_id:
+    '4444444444444444444444444444444444444444444444444444444444444444',
+};
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
@@ -65,6 +75,7 @@ describe('タウリクライアント', () => {
         client_rom: 'C:\\roms\\client.nds',
         generated: true,
         host_rom: 'C:\\roms\\host.nds',
+        rom_identity: romIdentity,
       })
       .mockResolvedValueOnce({
         bridge_pid: 20,
@@ -73,6 +84,13 @@ describe('タウリクライアント', () => {
       });
     const client = await importClient();
     const romRequest: GenerateRomRequest = {
+      source_rom: 'C:\\roms\\base.nds',
+    };
+    const launchRequest: LaunchRequest = {
+      port: 8165,
+      role: 'host',
+      rom_path: 'C:\\roms\\host.nds',
+      room_code: 'room-1',
       settings: {
         big_stars: 5,
         course_mode: 'random',
@@ -85,15 +103,6 @@ describe('タウリクライアント', () => {
         rollback_enabled: false,
         wins: 3,
       },
-      source_rom: 'C:\\roms\\base.nds',
-      stage: 2,
-    };
-    const launchRequest: LaunchRequest = {
-      port: 8165,
-      role: 'host',
-      rom_path: 'C:\\roms\\host.nds',
-      room_code: 'room-1',
-      settings: romRequest.settings,
       diagnostic_events_enabled: true,
       signal_url: 'wss://match.example/session',
     };

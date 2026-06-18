@@ -107,6 +107,7 @@ export class SignalingRoom
       join_token: null,
       status: 'open',
       settings: params.settings,
+      rom_identity: params.rom_identity,
       created_at: params.now,
       updated_at: params.now,
       expires_at: params.expires_at,

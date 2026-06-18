@@ -13,6 +13,7 @@ export type {
   Lives,
   PreflightResponse,
   Role,
+  RomIdentity,
   SaveDiagnosticEventsRequest,
   SaveRomPathsRequest,
   SessionStatus,

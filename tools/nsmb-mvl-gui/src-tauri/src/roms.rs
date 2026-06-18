@@ -1,56 +1,215 @@
 use std::fs;
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 
 use crate::config::REUSABLE_ROM_FORMAT;
-use crate::models::{GenerateRomRequest, GenerateRomResponse};
+use crate::models::{GenerateRomRequest, GenerateRomResponse, RomIdentity};
 use crate::paths::{
     absolutize_existing, ensure_parent_dir, find_symbols_file, fixed_generated_rom_paths,
 };
-use crate::settings::{course_mode_value, lives_value, selected_stage, validate_settings};
+use crate::settings::{course_mode_value, lives_value};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+const MANIFEST_VERSION: u8 = 1;
+const ROM_GENERATOR_SOURCES: &[&str] = &[
+    include_str!("../../../nsmb-mvl-rom/src/lib.rs"),
+    include_str!("../../../nsmb-mvl-rom/src/binary.rs"),
+    include_str!("config.rs"),
+    include_str!("settings.rs"),
+];
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct RomManifestInputs {
+    manifest_version: u8,
+    rom_format: String,
+    generator_id: String,
+    source_rom_sha256: String,
+    symbols_sha256: String,
+    options: RomManifestOptions,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct RomManifestOptions {
+    stage: u8,
+    wins: u8,
+    big_stars: u8,
+    lives: String,
+    course_mode: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct RomManifest {
+    #[serde(flatten)]
+    inputs: RomManifestInputs,
+    identity: RomIdentity,
+}
 
 pub(crate) fn prepare_roms(
     app: &AppHandle,
     request: GenerateRomRequest,
     force: bool,
 ) -> Result<GenerateRomResponse, String> {
-    validate_settings(&request.settings)?;
-    let stage = selected_stage(&request.settings, request.stage)?;
     let (host_rom, client_rom) = fixed_generated_rom_paths(app)?;
-    if !force && reusable_rom_is_current(&host_rom) && reusable_rom_is_current(&client_rom) {
-        return Ok(GenerateRomResponse {
-            host_rom: host_rom.to_string_lossy().into_owned(),
-            client_rom: client_rom.to_string_lossy().into_owned(),
-            generated: false,
-        });
+    let source_rom = absolutize_existing(&request.source_rom)?;
+    let symbols = find_symbols_file(app)?;
+    let inputs = RomManifestInputs {
+        manifest_version: MANIFEST_VERSION,
+        rom_format: REUSABLE_ROM_FORMAT.to_owned(),
+        generator_id: rom_generator_id(),
+        source_rom_sha256: sha256_file(&source_rom)?,
+        symbols_sha256: sha256_file(&symbols)?,
+        options: canonical_rom_options(),
+    };
+
+    if !force {
+        if let Some(identity) = reusable_rom_identity(&host_rom, &client_rom, &inputs)? {
+            return Ok(GenerateRomResponse {
+                host_rom: host_rom.to_string_lossy().into_owned(),
+                client_rom: client_rom.to_string_lossy().into_owned(),
+                generated: false,
+                rom_identity: identity,
+            });
+        }
     }
 
-    let source_rom = absolutize_existing(&request.source_rom)?;
     ensure_parent_dir(&host_rom)?;
     ensure_parent_dir(&client_rom)?;
     let options = nsmb_mvl_rom::StableRomOptions {
         source_rom,
         host_rom: host_rom.clone(),
         client_rom: client_rom.clone(),
-        stage,
-        wins: request.settings.wins,
-        big_stars: request.settings.big_stars,
-        lives: lives_value(request.settings.lives).to_owned(),
-        course_mode: course_mode_value(request.settings.course_mode).to_owned(),
+        stage: inputs.options.stage,
+        wins: inputs.options.wins,
+        big_stars: inputs.options.big_stars,
+        lives: inputs.options.lives.clone(),
+        course_mode: inputs.options.course_mode.clone(),
         scene_settings: None,
-        symbols: find_symbols_file(app)?,
+        symbols,
     };
 
     nsmb_mvl_rom::generate_stable_roms(&options)
         .map_err(|err| format!("ROM生成に失敗しました: {err}"))?;
-    write_reusable_rom_marker(&host_rom)?;
-    write_reusable_rom_marker(&client_rom)?;
+    let identity = RomIdentity {
+        rom_pair_id: rom_pair_id(
+            &inputs.generator_id,
+            &sha256_file(&host_rom)?,
+            &sha256_file(&client_rom)?,
+        ),
+        generator_id: inputs.generator_id.clone(),
+        host_rom_sha256: sha256_file(&host_rom)?,
+        client_rom_sha256: sha256_file(&client_rom)?,
+    };
+    write_reusable_rom_manifest(
+        &host_rom,
+        &RomManifest {
+            inputs: inputs.clone(),
+            identity: identity.clone(),
+        },
+    )?;
+    write_reusable_rom_manifest(
+        &client_rom,
+        &RomManifest {
+            inputs,
+            identity: identity.clone(),
+        },
+    )?;
 
     Ok(GenerateRomResponse {
         host_rom: host_rom.to_string_lossy().into_owned(),
         client_rom: client_rom.to_string_lossy().into_owned(),
         generated: true,
+        rom_identity: identity,
     })
+}
+
+fn reusable_rom_identity(
+    host_rom: &Path,
+    client_rom: &Path,
+    inputs: &RomManifestInputs,
+) -> Result<Option<RomIdentity>, String> {
+    if !host_rom.is_file() || !client_rom.is_file() {
+        return Ok(None);
+    }
+    let Ok(host_manifest) = read_reusable_rom_manifest(host_rom) else {
+        return Ok(None);
+    };
+    let Ok(client_manifest) = read_reusable_rom_manifest(client_rom) else {
+        return Ok(None);
+    };
+    if host_manifest.inputs != *inputs
+        || client_manifest.inputs != *inputs
+        || host_manifest.identity.rom_pair_id != client_manifest.identity.rom_pair_id
+        || host_manifest.identity.host_rom_sha256 != sha256_file(host_rom)?
+        || host_manifest.identity.client_rom_sha256 != sha256_file(client_rom)?
+    {
+        return Ok(None);
+    }
+    Ok(Some(host_manifest.identity))
+}
+
+fn read_reusable_rom_manifest(rom: &Path) -> Result<RomManifest, String> {
+    let content = fs::read_to_string(reusable_rom_marker_path(rom))
+        .map_err(|err| format!("ROM manifest を読み込めません: {err}"))?;
+    serde_json::from_str(&content).map_err(|err| format!("ROM manifest の形式が不正です: {err}"))
+}
+
+fn canonical_rom_options() -> RomManifestOptions {
+    RomManifestOptions {
+        stage: 0,
+        wins: 3,
+        big_stars: 10,
+        lives: lives_value(crate::models::Lives::Three).to_owned(),
+        course_mode: course_mode_value(crate::models::CourseMode::Random).to_owned(),
+    }
+}
+
+fn write_reusable_rom_manifest(rom: &Path, manifest: &RomManifest) -> Result<(), String> {
+    let content = serde_json::to_string_pretty(manifest)
+        .map_err(|err| format!("ROM manifest をJSON化できません: {err}"))?;
+    fs::write(reusable_rom_marker_path(rom), format!("{content}\n"))
+        .map_err(|err| format!("ROM manifest を保存できません: {err}"))
+}
+
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let file = fs::File::open(path)
+        .map_err(|err| format!("{} を読み込めません: {err}", path.to_string_lossy()))?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|err| format!("{} のhash計算に失敗しました: {err}", path.to_string_lossy()))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn sha256_text(parts: &[&str]) -> String {
+    let mut hasher = Sha256::new();
+    for part in parts {
+        hasher.update(part.as_bytes());
+        hasher.update(b"\n");
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+fn rom_generator_id() -> String {
+    let mut parts = vec![env!("CARGO_PKG_VERSION"), REUSABLE_ROM_FORMAT];
+    parts.extend_from_slice(ROM_GENERATOR_SOURCES);
+    sha256_text(&parts)
+}
+
+fn rom_pair_id(generator_id: &str, host_rom_sha256: &str, client_rom_sha256: &str) -> String {
+    sha256_text(&[generator_id, host_rom_sha256, client_rom_sha256])
 }
 
 pub(crate) fn reusable_rom_marker_path(rom: &Path) -> PathBuf {
@@ -59,16 +218,39 @@ pub(crate) fn reusable_rom_marker_path(rom: &Path) -> PathBuf {
     PathBuf::from(marker)
 }
 
+#[cfg(test)]
 pub(crate) fn reusable_rom_is_current(rom: &Path) -> bool {
     rom.is_file()
-        && fs::read_to_string(reusable_rom_marker_path(rom))
-            .is_ok_and(|version| version.trim() == REUSABLE_ROM_FORMAT)
+        && read_reusable_rom_manifest(rom).is_ok_and(|manifest| {
+            manifest.inputs.manifest_version == MANIFEST_VERSION
+                && manifest.inputs.rom_format == REUSABLE_ROM_FORMAT
+        })
 }
 
+#[cfg(test)]
 pub(crate) fn write_reusable_rom_marker(rom: &Path) -> Result<(), String> {
-    fs::write(
-        reusable_rom_marker_path(rom),
-        format!("{REUSABLE_ROM_FORMAT}\n"),
-    )
-    .map_err(|err| format!("ROM形式 marker を保存できません: {err}"))
+    let fake_sha = sha256_text(&[&rom.to_string_lossy()]);
+    let manifest = RomManifest {
+        inputs: RomManifestInputs {
+            manifest_version: MANIFEST_VERSION,
+            rom_format: REUSABLE_ROM_FORMAT.to_owned(),
+            generator_id: rom_generator_id(),
+            source_rom_sha256: fake_sha.clone(),
+            symbols_sha256: fake_sha.clone(),
+            options: RomManifestOptions {
+                stage: 0,
+                wins: 1,
+                big_stars: 5,
+                lives: "3".to_owned(),
+                course_mode: "select".to_owned(),
+            },
+        },
+        identity: RomIdentity {
+            rom_pair_id: fake_sha.clone(),
+            generator_id: rom_generator_id(),
+            host_rom_sha256: fake_sha.clone(),
+            client_rom_sha256: fake_sha,
+        },
+    };
+    write_reusable_rom_manifest(rom, &manifest)
 }

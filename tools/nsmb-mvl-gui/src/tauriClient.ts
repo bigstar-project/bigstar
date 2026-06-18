@@ -37,6 +37,17 @@ const previewDefaults: Defaults = {
   port: 8165,
 };
 
+const previewRomIdentity = {
+  client_rom_sha256:
+    '2222222222222222222222222222222222222222222222222222222222222222',
+  generator_id:
+    '3333333333333333333333333333333333333333333333333333333333333333',
+  host_rom_sha256:
+    '1111111111111111111111111111111111111111111111111111111111111111',
+  rom_pair_id:
+    '4444444444444444444444444444444444444444444444444444444444444444',
+};
+
 function isTauriRuntime() {
   return '__TAURI_INTERNALS__' in window;
 }
@@ -90,6 +101,7 @@ export function generateRoms(request: GenerateRomRequest) {
       host_rom: previewDefaults.host_rom_path,
       client_rom: previewDefaults.client_rom_path,
       generated: true,
+      rom_identity: previewRomIdentity,
     });
   }
   return unwrapCommand(commands.generateRoms(request));
@@ -101,6 +113,7 @@ export function ensureRoms(request: GenerateRomRequest) {
       host_rom: previewDefaults.host_rom_path,
       client_rom: previewDefaults.client_rom_path,
       generated: false,
+      rom_identity: previewRomIdentity,
     });
   }
   return unwrapCommand(commands.ensureRoms(request));

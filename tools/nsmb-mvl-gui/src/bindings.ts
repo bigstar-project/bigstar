@@ -83,14 +83,13 @@ export type GameStateMismatch = {
 
 export type GenerateRomRequest = {
 	source_rom: string,
-	stage: number,
-	settings: GameSettings,
 };
 
 export type GenerateRomResponse = {
 	host_rom: string,
 	client_rom: string,
 	generated: boolean,
+	rom_identity: RomIdentity,
 };
 
 export type LaunchRequest = {
@@ -120,6 +119,13 @@ export type PreflightResponse = {
 };
 
 export type Role = "host" | "client";
+
+export type RomIdentity = {
+	rom_pair_id: string,
+	generator_id: string,
+	host_rom_sha256: string,
+	client_rom_sha256: string,
+};
 
 export type SaveDiagnosticEventsRequest = {
 	enabled: boolean,

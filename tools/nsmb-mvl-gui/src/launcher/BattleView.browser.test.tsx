@@ -19,6 +19,17 @@ const summary: LauncherSummary = {
   selectedStageLabel: '3',
 };
 
+const romIdentity = {
+  client_rom_sha256:
+    '2222222222222222222222222222222222222222222222222222222222222222',
+  generator_id:
+    '3333333333333333333333333333333333333333333333333333333333333333',
+  host_rom_sha256:
+    '1111111111111111111111111111111111111111111111111111111111111111',
+  rom_pair_id:
+    '4444444444444444444444444444444444444444444444444444444444444444',
+};
+
 function actions(overrides: Partial<LauncherActions> = {}) {
   return {
     checkForUpdate: vi.fn(async () => {}),
@@ -53,6 +64,7 @@ const rooms: MatchmakingRoomsState = {
       host_name: 'Host Player',
       peer_count: 1,
       room_id: 'room12345',
+      rom_identity: romIdentity,
       settings: {
         big_stars: 10,
         course_mode: 'random',

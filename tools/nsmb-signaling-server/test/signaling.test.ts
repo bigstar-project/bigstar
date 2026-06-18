@@ -15,6 +15,17 @@ const gameSettings = {
   wins: 2,
 };
 
+const romIdentity = {
+  client_rom_sha256:
+    '2222222222222222222222222222222222222222222222222222222222222222',
+  generator_id:
+    '3333333333333333333333333333333333333333333333333333333333333333',
+  host_rom_sha256:
+    '1111111111111111111111111111111111111111111111111111111111111111',
+  rom_pair_id:
+    '4444444444444444444444444444444444444444444444444444444444444444',
+};
+
 async function json<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
@@ -23,6 +34,7 @@ async function createRoom() {
   const response = await SELF.fetch('https://match.test/rooms', {
     body: JSON.stringify({
       host_name: 'Host Player',
+      rom_identity: romIdentity,
       settings: gameSettings,
     }),
     headers: { 'content-type': 'application/json' },
@@ -38,7 +50,7 @@ async function createRoom() {
 
 async function reserveJoin(roomId: string) {
   const response = await SELF.fetch(`https://match.test/rooms/${roomId}/join`, {
-    body: '{}',
+    body: JSON.stringify({ rom_pair_id: romIdentity.rom_pair_id }),
     headers: { 'content-type': 'application/json' },
     method: 'POST',
   });
@@ -135,6 +147,7 @@ describe('マッチメイキング HTTP API', () => {
         {
           can_join: true,
           host_name: 'Host Player',
+          rom_identity: romIdentity,
           room_id: created.room_id,
           settings: gameSettings,
           status: 'open',
@@ -171,6 +184,24 @@ describe('マッチメイキング HTTP API', () => {
       method: 'POST',
     });
     expect(invalidCreate.status).toBe(400);
+  });
+
+  test('ROM ID が一致しない参加予約を拒否する', async () => {
+    const created = await createRoom();
+    const response = await SELF.fetch(
+      `https://match.test/rooms/${created.room_id}/join`,
+      {
+        body: JSON.stringify({
+          rom_pair_id:
+            '5555555555555555555555555555555555555555555555555555555555555555',
+        }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      },
+    );
+
+    expect(response.status).toBe(409);
+    expect(await json(response)).toEqual({ error: 'rom identity mismatch' });
   });
 });
 

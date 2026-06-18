@@ -18,8 +18,6 @@ pub(crate) struct LaunchRequest {
 #[serde(rename_all = "snake_case")]
 pub(crate) struct GenerateRomRequest {
     pub(crate) source_rom: String,
-    pub(crate) stage: u8,
-    pub(crate) settings: GameSettings,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Type)]
@@ -107,6 +105,16 @@ pub(crate) struct GenerateRomResponse {
     pub(crate) host_rom: String,
     pub(crate) client_rom: String,
     pub(crate) generated: bool,
+    pub(crate) rom_identity: RomIdentity,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct RomIdentity {
+    pub(crate) rom_pair_id: String,
+    pub(crate) generator_id: String,
+    pub(crate) host_rom_sha256: String,
+    pub(crate) client_rom_sha256: String,
 }
 
 #[derive(Serialize, Type)]

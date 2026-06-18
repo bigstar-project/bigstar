@@ -15,6 +15,17 @@ const settings: GameSettings = {
   wins: 3,
 };
 
+const romIdentity = {
+  client_rom_sha256:
+    '2222222222222222222222222222222222222222222222222222222222222222',
+  generator_id:
+    '3333333333333333333333333333333333333333333333333333333333333333',
+  host_rom_sha256:
+    '1111111111111111111111111111111111111111111111111111111111111111',
+  rom_pair_id:
+    '4444444444444444444444444444444444444444444444444444444444444444',
+};
+
 function jsonResponse(body: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(body), {
     headers: { 'content-type': 'application/json' },
@@ -58,6 +69,7 @@ describe('マッチメイキングクライアント', () => {
     await expect(
       createRoom({
         hostName: 'Alice',
+        romIdentity,
         settings,
         signalUrl: 'wss://match.example/session',
       }),
@@ -71,6 +83,7 @@ describe('マッチメイキングクライアント', () => {
       expect.objectContaining({
         body: JSON.stringify({
           host_name: 'Alice',
+          rom_identity: romIdentity,
           settings,
         }),
         method: 'POST',
@@ -90,6 +103,7 @@ describe('マッチメイキングクライアント', () => {
 
     await expect(
       joinRoom({
+        romPairId: romIdentity.rom_pair_id,
         roomId: 'room-1',
         signalUrl: 'ws://127.0.0.1:8787/session?old=true',
       }),
@@ -101,7 +115,7 @@ describe('マッチメイキングクライアント', () => {
     expect(fetch).toHaveBeenCalledWith(
       'http://127.0.0.1:8787/rooms/room-1/join',
       expect.objectContaining({
-        body: JSON.stringify({}),
+        body: JSON.stringify({ rom_pair_id: romIdentity.rom_pair_id }),
         method: 'POST',
       }),
     );
@@ -117,6 +131,7 @@ describe('マッチメイキングクライアント', () => {
 
     await expect(
       joinRoom({
+        romPairId: romIdentity.rom_pair_id,
         roomId: 'room-1',
         signalUrl: 'wss://match.example/session',
       }),
