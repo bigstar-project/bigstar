@@ -139,7 +139,11 @@ constexpr melonDS::u32 kPlayerBaseCollisionFlagOffset = 0x788;
 constexpr melonDS::u32 kPlayerBaseEnvironmentFlagOffset = 0x790;
 constexpr melonDS::u32 kPlayerBaseDamageCooldownOffset = 0x79C;
 constexpr melonDS::u32 kPlayerBaseUpdateLockedOffset = 0x7A8;
+constexpr melonDS::u32 kPlayerBaseControlStateOffset = 0x7A9;
 constexpr melonDS::u32 kPlayerBaseCharacterIDOffset = 0x7AA;
+constexpr melonDS::u32 kPlayerBaseRequestedPowerupOffset = 0x7AB;
+constexpr melonDS::u32 kPlayerBaseCurrentPowerupOffset = 0x7AC;
+constexpr melonDS::u32 kPlayerBasePreviousPowerupOffset = 0x7AD;
 constexpr melonDS::u32 kPlayerBaseTransitioningFlagOffset = 0x7B0;
 constexpr melonDS::u32 kPlayerBaseCameraFocusModeOffset = 0x7B2;
 constexpr melonDS::u32 kPlayerBaseDefeatedFlagOffset = 0x7B3;
@@ -147,6 +151,9 @@ constexpr melonDS::u32 kPlayerBasePlayerIDOffset = 0x7B4;
 constexpr melonDS::u32 kPlayerBaseVisibleFlagOffset = 0x7B5;
 constexpr melonDS::u32 kPlayerBaseTransitionStepOffset = 0xBAD;
 constexpr melonDS::u32 kPlayerBaseLinkedActorOffset = 0x688;
+constexpr melonDS::u32 kPlayerPowerupPhaseOffset = 0xBA6;
+constexpr melonDS::u32 kPlayerPowerupTimerOffset = 0xBA7;
+constexpr melonDS::u32 kPlayerPowerupGainTimerOffset = 0xBA8;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
 constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
@@ -772,12 +779,19 @@ struct GameStateSample
     melonDS::u32 PlayerActor0CollisionFlag = 0;
     melonDS::u32 PlayerActor0EnvironmentFlag = 0;
     melonDS::u32 PlayerActor0UpdateLocked = 0;
+    melonDS::u32 PlayerActor0ControlState = 0;
     melonDS::u32 PlayerActor0CharacterIDBase = 0;
+    melonDS::u32 PlayerActor0RequestedPowerup = 0;
+    melonDS::u32 PlayerActor0CurrentPowerup = 0;
+    melonDS::u32 PlayerActor0PreviousPowerup = 0;
     melonDS::u32 PlayerActor0TransitioningFlag = 0;
     melonDS::u32 PlayerActor0CameraFocusMode = 0;
     melonDS::u32 PlayerActor0DefeatedFlag = 0;
     melonDS::u32 PlayerActor0PlayerBaseID = 0;
     melonDS::u32 PlayerActor0VisibleFlag = 0;
+    melonDS::u32 PlayerActor0PowerupPhase = 0;
+    melonDS::u32 PlayerActor0PowerupTimer = 0;
+    melonDS::u32 PlayerActor0PowerupGainTimer = 0;
     melonDS::u32 PlayerActor0ActionFlag = 0;
     melonDS::u32 PlayerActor0SubActionFlag = 0;
     melonDS::u32 PlayerActor0PhysicsFlag = 0;
@@ -811,12 +825,19 @@ struct GameStateSample
     melonDS::u32 PlayerActor1CollisionFlag = 0;
     melonDS::u32 PlayerActor1EnvironmentFlag = 0;
     melonDS::u32 PlayerActor1UpdateLocked = 0;
+    melonDS::u32 PlayerActor1ControlState = 0;
     melonDS::u32 PlayerActor1CharacterIDBase = 0;
+    melonDS::u32 PlayerActor1RequestedPowerup = 0;
+    melonDS::u32 PlayerActor1CurrentPowerup = 0;
+    melonDS::u32 PlayerActor1PreviousPowerup = 0;
     melonDS::u32 PlayerActor1TransitioningFlag = 0;
     melonDS::u32 PlayerActor1CameraFocusMode = 0;
     melonDS::u32 PlayerActor1DefeatedFlag = 0;
     melonDS::u32 PlayerActor1PlayerBaseID = 0;
     melonDS::u32 PlayerActor1VisibleFlag = 0;
+    melonDS::u32 PlayerActor1PowerupPhase = 0;
+    melonDS::u32 PlayerActor1PowerupTimer = 0;
+    melonDS::u32 PlayerActor1PowerupGainTimer = 0;
     melonDS::u32 PlayerActor1ActionFlag = 0;
     melonDS::u32 PlayerActor1SubActionFlag = 0;
     melonDS::u32 PlayerActor1PhysicsFlag = 0;
@@ -14186,14 +14207,21 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
                                              melonDS::u32& linkedActor,
                                              melonDS::u32& transitionFlag,
                                              melonDS::u32& collisionFlag,
-                                             melonDS::u32& environmentFlag,
-                                             melonDS::u32& updateLocked,
-                                             melonDS::u32& characterID,
-                                             melonDS::u32& transitioningFlag,
-                                             melonDS::u32& cameraFocusMode,
-                                             melonDS::u32& defeatedFlag,
-                                             melonDS::u32& playerBaseID,
-                                             melonDS::u32& visibleFlag)
+                                              melonDS::u32& environmentFlag,
+                                              melonDS::u32& updateLocked,
+                                              melonDS::u32& controlState,
+                                              melonDS::u32& characterID,
+                                              melonDS::u32& requestedPowerup,
+                                              melonDS::u32& currentPowerup,
+                                              melonDS::u32& previousPowerup,
+                                              melonDS::u32& transitioningFlag,
+                                              melonDS::u32& cameraFocusMode,
+                                              melonDS::u32& defeatedFlag,
+                                              melonDS::u32& playerBaseID,
+                                              melonDS::u32& visibleFlag,
+                                              melonDS::u32& powerupPhase,
+                                              melonDS::u32& powerupTimer,
+                                              melonDS::u32& powerupGainTimer)
     {
         if (!actor.Found || !IsARM9MainRAMAddress(actor.Base))
             return;
@@ -14202,12 +14230,19 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         collisionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseCollisionFlagOffset);
         environmentFlag = nds->ARM9Read32(actor.Base + kPlayerBaseEnvironmentFlagOffset);
         updateLocked = nds->ARM9Read8(actor.Base + kPlayerBaseUpdateLockedOffset);
+        controlState = nds->ARM9Read8(actor.Base + kPlayerBaseControlStateOffset);
         characterID = nds->ARM9Read8(actor.Base + kPlayerBaseCharacterIDOffset);
+        requestedPowerup = nds->ARM9Read8(actor.Base + kPlayerBaseRequestedPowerupOffset);
+        currentPowerup = nds->ARM9Read8(actor.Base + kPlayerBaseCurrentPowerupOffset);
+        previousPowerup = nds->ARM9Read8(actor.Base + kPlayerBasePreviousPowerupOffset);
         transitioningFlag = nds->ARM9Read8(actor.Base + kPlayerBaseTransitioningFlagOffset);
         cameraFocusMode = nds->ARM9Read8(actor.Base + kPlayerBaseCameraFocusModeOffset);
         defeatedFlag = nds->ARM9Read8(actor.Base + kPlayerBaseDefeatedFlagOffset);
         playerBaseID = nds->ARM9Read8(actor.Base + kPlayerBasePlayerIDOffset);
         visibleFlag = nds->ARM9Read8(actor.Base + kPlayerBaseVisibleFlagOffset);
+        powerupPhase = nds->ARM9Read8(actor.Base + kPlayerPowerupPhaseOffset);
+        powerupTimer = nds->ARM9Read8(actor.Base + kPlayerPowerupTimerOffset);
+        powerupGainTimer = nds->ARM9Read8(actor.Base + kPlayerPowerupGainTimerOffset);
     };
     readPlayerBaseRuntimeFields(
         players.Actor0,
@@ -14216,12 +14251,19 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         sample.PlayerActor0CollisionFlag,
         sample.PlayerActor0EnvironmentFlag,
         sample.PlayerActor0UpdateLocked,
+        sample.PlayerActor0ControlState,
         sample.PlayerActor0CharacterIDBase,
+        sample.PlayerActor0RequestedPowerup,
+        sample.PlayerActor0CurrentPowerup,
+        sample.PlayerActor0PreviousPowerup,
         sample.PlayerActor0TransitioningFlag,
         sample.PlayerActor0CameraFocusMode,
         sample.PlayerActor0DefeatedFlag,
         sample.PlayerActor0PlayerBaseID,
-        sample.PlayerActor0VisibleFlag);
+        sample.PlayerActor0VisibleFlag,
+        sample.PlayerActor0PowerupPhase,
+        sample.PlayerActor0PowerupTimer,
+        sample.PlayerActor0PowerupGainTimer);
     readPlayerBaseRuntimeFields(
         players.Actor1,
         sample.PlayerActor1LinkedActor,
@@ -14229,12 +14271,19 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         sample.PlayerActor1CollisionFlag,
         sample.PlayerActor1EnvironmentFlag,
         sample.PlayerActor1UpdateLocked,
+        sample.PlayerActor1ControlState,
         sample.PlayerActor1CharacterIDBase,
+        sample.PlayerActor1RequestedPowerup,
+        sample.PlayerActor1CurrentPowerup,
+        sample.PlayerActor1PreviousPowerup,
         sample.PlayerActor1TransitioningFlag,
         sample.PlayerActor1CameraFocusMode,
         sample.PlayerActor1DefeatedFlag,
         sample.PlayerActor1PlayerBaseID,
-        sample.PlayerActor1VisibleFlag);
+        sample.PlayerActor1VisibleFlag,
+        sample.PlayerActor1PowerupPhase,
+        sample.PlayerActor1PowerupTimer,
+        sample.PlayerActor1PowerupGainTimer);
 
     sample.PlayerCount = nds->ARM9Read32(kGamePlayerCountAddr);
     sample.PlayerTransitionStatus0 = nds->ARM9Read32(kGamePlayerTransitionStatusAddr);
@@ -15326,27 +15375,41 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                          << ",0x" << sample.PlayerActor1PhysicsFlag
                          << ",0x" << sample.PlayerActor1DamageCooldown
                          << ",0x" << sample.PlayerActor0LinkedActor
-                         << ",0x" << sample.PlayerActor0TransitionFlag
-                         << ",0x" << sample.PlayerActor0CollisionFlag
-                         << ",0x" << sample.PlayerActor0EnvironmentFlag
-                         << ",0x" << sample.PlayerActor0UpdateLocked
-                         << ",0x" << sample.PlayerActor0CharacterIDBase
-                         << ",0x" << sample.PlayerActor0TransitioningFlag
-                         << ",0x" << sample.PlayerActor0CameraFocusMode
-                         << ",0x" << sample.PlayerActor0DefeatedFlag
-                         << ",0x" << sample.PlayerActor0PlayerBaseID
-                         << ",0x" << sample.PlayerActor0VisibleFlag
-                         << ",0x" << sample.PlayerActor1LinkedActor
-                         << ",0x" << sample.PlayerActor1TransitionFlag
-                         << ",0x" << sample.PlayerActor1CollisionFlag
-                         << ",0x" << sample.PlayerActor1EnvironmentFlag
-                         << ",0x" << sample.PlayerActor1UpdateLocked
-                         << ",0x" << sample.PlayerActor1CharacterIDBase
-                         << ",0x" << sample.PlayerActor1TransitioningFlag
-                         << ",0x" << sample.PlayerActor1CameraFocusMode
-                         << ",0x" << sample.PlayerActor1DefeatedFlag
-                         << ",0x" << sample.PlayerActor1PlayerBaseID
-                         << ",0x" << sample.PlayerActor1VisibleFlag;
+                          << ",0x" << sample.PlayerActor0TransitionFlag
+                          << ",0x" << sample.PlayerActor0CollisionFlag
+                          << ",0x" << sample.PlayerActor0EnvironmentFlag
+                          << ",0x" << sample.PlayerActor0UpdateLocked
+                          << ",0x" << sample.PlayerActor0ControlState
+                          << ",0x" << sample.PlayerActor0CharacterIDBase
+                          << ",0x" << sample.PlayerActor0RequestedPowerup
+                          << ",0x" << sample.PlayerActor0CurrentPowerup
+                          << ",0x" << sample.PlayerActor0PreviousPowerup
+                          << ",0x" << sample.PlayerActor0TransitioningFlag
+                          << ",0x" << sample.PlayerActor0CameraFocusMode
+                          << ",0x" << sample.PlayerActor0DefeatedFlag
+                          << ",0x" << sample.PlayerActor0PlayerBaseID
+                          << ",0x" << sample.PlayerActor0VisibleFlag
+                          << ",0x" << sample.PlayerActor0PowerupPhase
+                          << ",0x" << sample.PlayerActor0PowerupTimer
+                          << ",0x" << sample.PlayerActor0PowerupGainTimer
+                          << ",0x" << sample.PlayerActor1LinkedActor
+                          << ",0x" << sample.PlayerActor1TransitionFlag
+                          << ",0x" << sample.PlayerActor1CollisionFlag
+                          << ",0x" << sample.PlayerActor1EnvironmentFlag
+                          << ",0x" << sample.PlayerActor1UpdateLocked
+                          << ",0x" << sample.PlayerActor1ControlState
+                          << ",0x" << sample.PlayerActor1CharacterIDBase
+                          << ",0x" << sample.PlayerActor1RequestedPowerup
+                          << ",0x" << sample.PlayerActor1CurrentPowerup
+                          << ",0x" << sample.PlayerActor1PreviousPowerup
+                          << ",0x" << sample.PlayerActor1TransitioningFlag
+                          << ",0x" << sample.PlayerActor1CameraFocusMode
+                          << ",0x" << sample.PlayerActor1DefeatedFlag
+                          << ",0x" << sample.PlayerActor1PlayerBaseID
+                          << ",0x" << sample.PlayerActor1VisibleFlag
+                          << ",0x" << sample.PlayerActor1PowerupPhase
+                          << ",0x" << sample.PlayerActor1PowerupTimer
+                          << ",0x" << sample.PlayerActor1PowerupGainTimer;
     }
 
     G.GameStateTrace << std::dec << '\n';
@@ -16991,7 +17054,7 @@ void InitFromEnvironment()
         {
                 G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,arm9PC,arm9LR,arm9SP,arm9CPSR,appFrameLength,appUpdateTask,appSleepPhase,appSleepControl,appSleeping,appSleepPhaseTimer,appSleepWakeUpTimer,appBootParam,appBootTarget,appBootScene,ggid,netCurrentLanguage,netLocalAid,netState14,netState1C,netState20,netState24,netExpectedConsoleCount,netMultiBootSession,netSessionState,netModuleState,netMaxSessionChildren,netMaxConsoleCount,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,stageActorFreezeFlag,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor0PlayerID,playerActor0TransitionStep,playerActor0SignalLock,playerActor0Flag192,playerActor0Flags728,playerActor0Flags72C,playerActor0Flags730,playerActor0TransitFunc,playerActor0TransitArg,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,playerActor1PlayerID,playerActor1TransitionStep,playerActor1SignalLock,playerActor1Flag192,playerActor1Flags728,playerActor1Flags72C,playerActor1Flags730,playerActor1TransitFunc,playerActor1TransitArg,playerTransitionStatus0,playerTransitionStatus1,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectByte0E2,vsConnectByte106,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord138,vsConnectWord13C,vsConnectWord140,vsConnectWord144,vsConnectWord148,vsConnectByte153,vsConnectByte154,vsConnectByte155,vsConnectByte156,vsConnectByte157,vsConnectByte158,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectSettings,courseSelectWord060,courseSelectWord064,courseSelectWord068,courseSelectWord06C,courseSelectWord070,courseSelectWord074,courseSelectWord078,courseSelectWord07C,courseSelectWord080,courseSelectWord084,courseSelectWord088,courseSelectWord08C,courseSelectWord090,stageCameraFound,stageCameraWord190,stageCameraWord194,stageCameraWord19C,stageCameraWord1A0,stageActorManagerFound,stageActorManagerBase,stageActorManagerStateType,stageControllerFound,stageControllerBase,stageControllerStateType,mvlObject267Found,mvlObject267Base,mvlObject267StateType,mvlObject267LeftFound,mvlObject267LeftBase,mvlObject267LeftStateType,mvlObject267LeftX,mvlObject267LeftY,mvlObject267LeftZ,mvlObject267RightFound,mvlObject267RightBase,mvlObject267RightStateType,mvlObject267RightX,mvlObject267RightY,mvlObject267RightZ,mvlGlobal965C,mvlGlobal9670,mvlGlobal9674,mvlGlobal9694_0,mvlGlobal9694_1,mvlStageLayoutGateCAC6C,mvlStageLayoutGateCAC74,mvlStageLayoutGateCAC7C,mvlStageLayoutGateCACDC,mvlStageLayoutGateCAE80,mvlStageLayoutGateCAE74,mvlStageLayoutGateCAEB8,mvlStageLayoutGateCAF20,mvlStageLayoutGateCAF40,mvlStageLayoutGateCA8C0,mvlStageLayoutGateCA8D0,mvlStageLayoutGateCAD30,mvlManagerBase,mvlManagerVTable,mvlManagerGuid,mvlManagerSettings,mvlManagerObjectId,mvlManagerStateType,mvlManagerFlags,mvlManagerUnk54,mvlManagerResourcesHeap,mvlManagerWordA8CC,mvlManagerWordA8D0,mvlManagerWordA8D4,mvlManagerWordA8D8,mvlManagerWordA8DC,mvlManagerWordA8E0,mvlManagerWordA8E4,mvlManagerHalfA8E8,mvlManagerHalfA8EA,mvlManagerByteA8EC,mvlManagerHalf494,mvlManagerHalf4A0,stageSceneFound,stageSceneBase,stageSceneSettings,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,stageSceneWord5618,stageSceneWord561C,stageSceneWord563C,stageSceneByte5643,stageSceneByte5644,stageSceneByte5645,stageSceneByte5646,stageSceneByte5648,stageSceneByte5649,stageSceneUpdateDispatchFunc,stageSceneUpdateDispatchArg,stageSceneRenderDispatchFunc,stageSceneRenderDispatchArg,stageSceneGlobal9280,stageSceneGlobal9284,stageSceneGlobal928C,stageSceneGlobal92B4,stageSceneGlobal92C0,stageSceneGlobal92C8,stageSceneGlobal92CC,stageSceneGlobal92D0,stageLiquidPlayerSlot,stageLiquidHeight0,stageLiquidHeight1,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY,movingHazardLastStepX,movingHazardLastStepY,movingHazardLastStepZ,movingHazardVelH,movingHazardTargetVelH,movingHazardAccelV,movingHazardTargetVelV,movingHazardAccelH,movingHazardTargetVelX,movingHazardTargetVelY,movingHazardTargetVelZ,objectScanTotal,objectNotCreatedCount,objectActiveCount,objectDeadCount,objectSkipUpdateCount,objectSkipRenderCount,objectFirstNotCreatedId,objectFirstNotCreatedBase,objectFirstNotCreatedFlags,objectSecondNotCreatedId,objectSecondNotCreatedBase,objectSecondNotCreatedFlags,objectActiveId0,objectActiveSettings0,objectActiveBase0,objectActiveId1,objectActiveSettings1,objectActiveBase1,objectActiveId2,objectActiveSettings2,objectActiveBase2,objectActiveId3,objectActiveSettings3,objectActiveBase3,objectActiveId4,objectActiveSettings4,objectActiveBase4,objectActiveId5,objectActiveSettings5,objectActiveBase5,objectActiveId6,objectActiveSettings6,objectActiveBase6,objectActiveId7,objectActiveSettings7,objectActiveBase7,objectActiveId8,objectActiveSettings8,objectActiveBase8,objectActiveId9,objectActiveSettings9,objectActiveBase9,objectActiveId10,objectActiveSettings10,objectActiveBase10,objectActiveId11,objectActiveSettings11,objectActiveBase11,objectActiveId12,objectActiveSettings12,objectActiveBase12,objectActiveId13,objectActiveSettings13,objectActiveBase13,objectActiveId14,objectActiveSettings14,objectActiveBase14,objectActiveId15,objectActiveSettings15,objectActiveBase15";
             if (G.GameStateTraceExtended)
-                G.GameStateTrace << ",playerCount,player0Powerup,player1Powerup,player0InventoryPowerup,player1InventoryPowerup,player0Dead,player1Dead,player0Character,player1Character,player0Lives,player1Lives,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,entranceSpawnID0,entranceSpawnID1,entranceTransitionFlags0,entranceTransitionFlags1,entranceSpawnPtr0,entranceSpawnPtr1,stageCameraBase,stageCameraTargetX,stageCameraTargetY,stageCameraTargetZ,stageCameraPositionX,stageCameraPositionY,stageCameraPositionZ,stageCameraUpX,stageCameraUpY,stageCameraUpZ,stageCameraUnk114,stageCameraUnk118,stageCameraUnk11C,stageCameraUnk128,stageCameraUnk12C,stageCameraRoll130,stageCameraGlobalX0,stageCameraGlobalX1,stageCameraGlobalY0,stageCameraGlobalY1,stageCameraGlobalWidth0,stageCameraGlobalWidth1,stageCameraGlobalHeight0,stageCameraGlobalHeight1,playerCameraFocusPosX0,playerCameraFocusPosX1,playerCameraFocusPosY0,playerCameraFocusPosY1,playerCameraFocusPosZ0,playerCameraFocusPosZ1,playerCameraFocusVelX0,playerCameraFocusVelX1,playerCameraFocusVelY0,playerCameraFocusVelY1,playerCameraFocusVelZ0,playerCameraFocusVelZ1,stageDisplayCameraX,cameraDbgCA880,cameraDbgCAE04,cameraDbgCAE14,cameraDbgCAD6C,cameraDbgCAD8C,cameraDbgCADB4,cameraDbgCAE60,cameraDbgCAE64,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash,playerActor0ActionFlag,playerActor0SubActionFlag,playerActor0PhysicsFlag,playerActor0DamageCooldown,playerActor1ActionFlag,playerActor1SubActionFlag,playerActor1PhysicsFlag,playerActor1DamageCooldown,playerActor0LinkedActor,playerActor0TransitionFlag,playerActor0CollisionFlag,playerActor0EnvironmentFlag,playerActor0UpdateLocked,playerActor0CharacterIDBase,playerActor0TransitioningFlag,playerActor0CameraFocusMode,playerActor0DefeatedFlag,playerActor0PlayerBaseID,playerActor0VisibleFlag,playerActor1LinkedActor,playerActor1TransitionFlag,playerActor1CollisionFlag,playerActor1EnvironmentFlag,playerActor1UpdateLocked,playerActor1CharacterIDBase,playerActor1TransitioningFlag,playerActor1CameraFocusMode,playerActor1DefeatedFlag,playerActor1PlayerBaseID,playerActor1VisibleFlag";
+                G.GameStateTrace << ",playerCount,player0Powerup,player1Powerup,player0InventoryPowerup,player1InventoryPowerup,player0Dead,player1Dead,player0Character,player1Character,player0Lives,player1Lives,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,entranceSpawnID0,entranceSpawnID1,entranceTransitionFlags0,entranceTransitionFlags1,entranceSpawnPtr0,entranceSpawnPtr1,stageCameraBase,stageCameraTargetX,stageCameraTargetY,stageCameraTargetZ,stageCameraPositionX,stageCameraPositionY,stageCameraPositionZ,stageCameraUpX,stageCameraUpY,stageCameraUpZ,stageCameraUnk114,stageCameraUnk118,stageCameraUnk11C,stageCameraUnk128,stageCameraUnk12C,stageCameraRoll130,stageCameraGlobalX0,stageCameraGlobalX1,stageCameraGlobalY0,stageCameraGlobalY1,stageCameraGlobalWidth0,stageCameraGlobalWidth1,stageCameraGlobalHeight0,stageCameraGlobalHeight1,playerCameraFocusPosX0,playerCameraFocusPosX1,playerCameraFocusPosY0,playerCameraFocusPosY1,playerCameraFocusPosZ0,playerCameraFocusPosZ1,playerCameraFocusVelX0,playerCameraFocusVelX1,playerCameraFocusVelY0,playerCameraFocusVelY1,playerCameraFocusVelZ0,playerCameraFocusVelZ1,stageDisplayCameraX,cameraDbgCA880,cameraDbgCAE04,cameraDbgCAE14,cameraDbgCAD6C,cameraDbgCAD8C,cameraDbgCADB4,cameraDbgCAE60,cameraDbgCAE64,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash,playerActor0ActionFlag,playerActor0SubActionFlag,playerActor0PhysicsFlag,playerActor0DamageCooldown,playerActor1ActionFlag,playerActor1SubActionFlag,playerActor1PhysicsFlag,playerActor1DamageCooldown,playerActor0LinkedActor,playerActor0TransitionFlag,playerActor0CollisionFlag,playerActor0EnvironmentFlag,playerActor0UpdateLocked,playerActor0ControlState,playerActor0CharacterIDBase,playerActor0RequestedPowerup,playerActor0CurrentPowerup,playerActor0PreviousPowerup,playerActor0TransitioningFlag,playerActor0CameraFocusMode,playerActor0DefeatedFlag,playerActor0PlayerBaseID,playerActor0VisibleFlag,playerActor0PowerupPhase,playerActor0PowerupTimer,playerActor0PowerupGainTimer,playerActor1LinkedActor,playerActor1TransitionFlag,playerActor1CollisionFlag,playerActor1EnvironmentFlag,playerActor1UpdateLocked,playerActor1ControlState,playerActor1CharacterIDBase,playerActor1RequestedPowerup,playerActor1CurrentPowerup,playerActor1PreviousPowerup,playerActor1TransitioningFlag,playerActor1CameraFocusMode,playerActor1DefeatedFlag,playerActor1PlayerBaseID,playerActor1VisibleFlag,playerActor1PowerupPhase,playerActor1PowerupTimer,playerActor1PowerupGainTimer";
             G.GameStateTrace << '\n';
         }
     }

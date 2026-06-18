@@ -19,6 +19,10 @@ const MVL_RUNTIME_CONFIG_SCENE_SETTINGS_OFFSET: u32 = 0x08;
 const MVL_RUNTIME_CONFIG_INITIAL_LIVES_OFFSET: u32 = 0x0C;
 const MVL_RUNTIME_CONFIG_LIFE_MODE_SELECTOR_OFFSET: u32 = 0x10;
 const MVL_RUNTIME_CONFIG_BIG_STAR_SELECTOR_OFFSET: u32 = 0x14;
+const PLAYER_BASE_REQUESTED_POWERUP_OFFSET: u32 = 0x7AB;
+const PLAYER_BASE_CURRENT_POWERUP_OFFSET: u32 = 0x7AC;
+const PLAYER_BASE_PREVIOUS_POWERUP_OFFSET: u32 = 0x7AD;
+const PLAYER_POWERUP_MEGA: u32 = 3;
 
 #[derive(Debug, Clone)]
 pub struct StableRomOptions {
@@ -546,6 +550,7 @@ fn patch_direct_mvl_entry(
     // hook targeted 0x0209B040, while the missing-Goomba path used 0x0209B320.
     // patch_stage_object_activation_player_id(rom, 0)?;
     patch_player_stage_lock_vsmode_noop(rom)?;
+    patch_player_powerup_state_allows_movement_mvl(rom)?;
     Ok(())
 }
 
@@ -564,8 +569,8 @@ fn build_direct_loadlevel_stub(
         0,                       // powerup
         0xff,                    // entrance
         1,                       // flag
-        0,                       // unused1
-        0,                       // controlOptions
+        1,                       // unused/control flag observed in VSConnect
+        0xff,                    // controlOptions observed in normal MvL load path
         0,                       // unused2
         0,                       // challengeMode
         0xffff_ffff,             // rngSeed: use network/random state
@@ -828,6 +833,40 @@ fn patch_player_stage_lock_vsmode_noop(rom: &mut RomImage) -> Result<()> {
         if old_word != original_word {
             bail!("stage lock hook 0x{func_addr:08x} expected 0x{original_word:08x}, got 0x{old_word:08x}");
         }
+    }
+    Ok(())
+}
+
+fn patch_player_powerup_state_allows_movement_mvl(rom: &mut RomImage) -> Result<()> {
+    let branch_addr = 0x020F_D310;
+    let skip_normal_update_addr = branch_addr + 4;
+    let normal_update_addr = 0x020F_D354;
+    let stub_addr = 0x020C_53D0;
+    let stub = [
+        with_cond(encode_b(stub_addr, normal_update_addr)?, 0),
+        encode_ldrb_imm(12, 4, PLAYER_BASE_PREVIOUS_POWERUP_OFFSET)?,
+        encode_cmp_imm(12, PLAYER_POWERUP_MEGA)?,
+        with_cond(encode_b(stub_addr + 0x0C, normal_update_addr)?, 0),
+        encode_ldrb_imm(12, 4, PLAYER_BASE_REQUESTED_POWERUP_OFFSET)?,
+        encode_cmp_imm(12, PLAYER_POWERUP_MEGA)?,
+        with_cond(encode_b(stub_addr + 0x18, skip_normal_update_addr)?, 0),
+        encode_ldrb_imm(12, 4, PLAYER_BASE_CURRENT_POWERUP_OFFSET)?,
+        encode_cmp_imm(12, PLAYER_POWERUP_MEGA)?,
+        with_cond(encode_b(stub_addr + 0x24, skip_normal_update_addr)?, 0),
+        encode_b(stub_addr + 0x28, normal_update_addr)?,
+    ];
+
+    ensure_zero_overlay_words(rom, 0, stub_addr, stub.len())?;
+    patch_overlay_words_by_id(rom, 0, stub_addr, &stub)?;
+
+    let old =
+        patch_overlay_words_by_id(rom, 10, branch_addr, &[encode_b(branch_addr, stub_addr)?])?;
+    let old_word = u32::from_le_bytes(old[..4].try_into()?);
+    let expected = with_cond(encode_b(branch_addr, normal_update_addr)?, 0);
+    if old_word != expected {
+        bail!(
+            "Player::onUpdate powerup-state branch @ 0x{branch_addr:08x} expected 0x{expected:08x}, got 0x{old_word:08x}"
+        );
     }
     Ok(())
 }

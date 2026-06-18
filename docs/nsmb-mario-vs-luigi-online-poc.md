@@ -1,5 +1,37 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Powerup / powerdown control-lock fix - 2026-06-18
+
+- User-reported issue: when Mario/Luigi powers up from an item or powers down after touching an enemy, the direct MvL path could create a short uncontrollable period. That behavior is normal in single-player Mario rules, but real Mario vs Luigi should not leave the player vulnerable during that lock.
+- Cause confirmed:
+  - The stable direct MvL ROM generator already skipped the global VS-inappropriate `PlayerBase::freezeStage()` (`0x0212C130`) and `PlayerBase::signalLocked()` (`0x0212C1B8`) paths, so the remaining lock was not input-netplay delay or the old global stage/player pause.
+  - `Player::updatePowerupState()` (`0x0211F83C`) enters the original powerup state machine when `PlayerBase+0x7AB` requested powerup differs from `PlayerBase+0x7AC` current powerup.
+  - `Player::preparePowerupSwitch()` (`0x0211FDC8`) sets `PlayerBase+0xBA6 = 5` and `PlayerBase+0xBA7 = 0x28`. A related scale-animation entry at `0x02120618` sets `PlayerBase+0xBA7 = 0x3C`.
+  - A synthetic direct MvL powerup request at frame 2600 showed `PlayerBase+0xBA7` counting down `0x28..0x1` while RIGHT input was present from frame 2625. Before the fix, Luigi did not move until frame 2644, giving a 19-frame input-to-movement delay in the measured window.
+  - Enemy-contact powerdown goes through `Player::losePowerup()` (`0x02104DC8`) and `PlayerBase::requestPowerupSwitch()` (`0x0212B9AC`), so it feeds the same `0xBA6/0xBA7` transition path.
+- Direct-vs-normal route difference found and fixed: the Rust stable ROM generator still passed `Game::loadLevel` stack args `0x20=0`, `0x24=0`, while the normal MvL load path and the newer C++ hotpatch path use `0x20=1`, `0x24=0xFF`. The generator now matches the normal MvL args, with a regression test.
+- Fix applied in `tools/nsmb-mvl-rom/src/lib.rs`: direct MvL stable ROM generation now keeps the native powerup animation timer, but patches `Player::onUpdate()` so normal powerup/powerdown transitions no longer skip the normal movement/main update path.
+  - `0x020FD310`: the old `beq 0x020FD354` branch after `cmp r0, #0` now branches to a small overlay-0 stub at `0x020C53D0`.
+  - The stub preserves the original skip-normal-update path only while entering `PowerupState 3` (Mega): `PlayerBase+0x7AD` previous powerup must not be Mega, and `PlayerBase+0x7AB` requested or `+0x7AC` current must be Mega.
+  - This keeps the hardening for Mega growth, but allows movement during Mega shrink/revert where `previousPowerup` is Mega. It does not treat `4` (Mini) or `5` (Shell) as Mega.
+  - This preserves `PlayerBase+0xBA6/0xBA7` animation state while preventing non-Mega and Mega-revert animation states from becoming input/physics hardening windows.
+- Diagnostics added: extended game-state CSV now logs `PlayerBase+0x7A9`, `+0x7AB`, `+0x7AC`, `+0x7AD`, `+0xBA6`, `+0xBA7`, and `+0xBA8` for both player actors. `scripts/run-nsmb-mvl-route-smoke.ps1` can now pass game-state trace start/end frames like the LAN smoke script.
+- Verification:
+  - Before fix: `logs/codex-powerup-request-beforepatch-20260618`, first RIGHT input frame 2625, first movement frame 2644, `playerActor1PowerupTimer` nonzero for 40 frames.
+  - First fix attempt removed the timer itself (`logs/codex-powerup-request-afterpatch-20260618`), which removed the hardening but also removed the animation.
+  - Animation-preserving non-Mega fix: `logs/codex-powerup-request-anim-kept-20260618`, first RIGHT input frame 2625, first movement frame 2625, `playerActor1PowerupTimer` nonzero for 40 frames (`0x28..0x1`).
+  - Mega exception verification after user correction of enum values:
+    - `logs/codex-powerup-mega3-exception-normal-20260618`: requested/current powerup `1`, first RIGHT frame 2625, first movement frame 2625, delay 0, timer nonzero for 40 frames.
+    - `logs/codex-powerup-mega3-exception-mega-20260618`: requested/current powerup `3`, first RIGHT frame 2625, first movement frame 2698, delay 73, confirming Mega keeps the original hardening path.
+    - `logs/codex-powerup-mega3-exception-shell-20260618`: requested/current powerup `5`, first RIGHT frame 2625, first movement frame 2625, delay 0, confirming Shell is not treated as Mega.
+  - Mega growth vs Mega revert verification:
+    - `logs/codex-powerup-mega-grow-only-hardens-grow-20260619b`: requested/current/previous `3/3/0`, first RIGHT frame 2625, first movement frame 2698, delay 73.
+    - `logs/codex-powerup-mega-grow-only-shrink-free-20260619`: requested/current/previous `1/1/3`, first RIGHT frame 2625, first movement frame 2625, delay 0, while the revert timer stayed nonzero for 60 frames.
+  - Basic direct MvL smoke passed with the final Mega-growth-only exception patch: `logs/codex-powerup-mega-grow-only-basic-smoke-20260619`, 3000 frames.
+  - Checks passed: `cargo fmt --manifest-path tools\nsmb-mvl-rom\Cargo.toml`, `cargo test --manifest-path tools\nsmb-mvl-rom\Cargo.toml`, `cargo clippy --manifest-path tools\nsmb-mvl-rom\Cargo.toml --all-targets -- -D warnings`, and `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel`.
+  - `cargo clippy-all` could not be used because that cargo alias is not installed in this environment.
+- Current blocker: none for the direct MvL powerup-transition hardening. A real in-stage item/enemy route can still be added later for end-to-end gameplay repro coverage; the timer cause itself is now confirmed with a targeted runtime request.
+
 ## Current ROM generator/cache divergence investigation - 2026-06-17
 
 - User-reported issue: the GUI-cached ROM renders normally, while the script/default ROM can show an effect/rendering corruption that matches the already-known bad memory-state symptom.

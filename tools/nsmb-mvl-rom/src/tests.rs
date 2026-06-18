@@ -1,6 +1,6 @@
 use super::{
     big_star_selector, build_direct_loadlevel_stub, encode_load_imm, encode_str_imm, initial_lives,
-    life_mode_selector, stage_scene_settings, DirectMvlConfig,
+    life_mode_selector, stage_scene_settings, DirectMvlConfig, PLAYER_POWERUP_MEGA,
 };
 
 #[test]
@@ -28,6 +28,14 @@ fn big_star_targets_use_the_native_selector_table() {
 }
 
 #[test]
+fn mega_powerup_exception_uses_the_native_mega_enum() {
+    assert_eq!(
+        PLAYER_POWERUP_MEGA, 3,
+        "PowerupState 3 is Mega; 4 is Mini and 5 is Shell"
+    );
+}
+
+#[test]
 fn direct_loadlevel_uses_network_random_seed() {
     let config = DirectMvlConfig {
         stage: 2,
@@ -46,5 +54,33 @@ fn direct_loadlevel_uses_network_random_seed() {
         stub.windows(2)
             .any(|pair| pair == [load_network_rng_seed, store_rng_seed]),
         "loadLevel rngSeed stack argument must be 0xffffffff so match-seeded Net/Game RNG is used"
+    );
+}
+
+#[test]
+fn direct_loadlevel_matches_normal_mvl_control_args() {
+    let config = DirectMvlConfig {
+        stage: 2,
+        player_id: 0,
+        scene_settings: 0x00b6_ff00,
+        initial_lives: 3,
+        life_mode_selector: 0,
+        big_star_selector: 1,
+    };
+    let stub = build_direct_loadlevel_stub(0x0215_0000, 0x0200_0000, 0x0210_0000, &config)
+        .expect("build direct MvL stub");
+
+    let store_control_flag = encode_str_imm(12, 13, 0x20).expect("encode control flag store");
+    let load_control_options = encode_load_imm(12, 0xff).expect("encode control options");
+    let store_control_options = encode_str_imm(12, 13, 0x24).expect("encode control options store");
+
+    assert!(
+        stub.contains(&store_control_flag),
+        "loadLevel stack arg 0x20 must match the normal MvL load path"
+    );
+    assert!(
+        stub.windows(2)
+            .any(|pair| pair == [load_control_options, store_control_options]),
+        "loadLevel stack arg 0x24 must match the normal MvL load path"
     );
 }
