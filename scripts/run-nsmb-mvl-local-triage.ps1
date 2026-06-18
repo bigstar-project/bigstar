@@ -8,6 +8,7 @@ param(
     [int]$Frames = 999999,
     [int]$InputDelayFrames = 4,
     [int]$InputMaxFrameLead = 4,
+    [int]$InputBundleHistory = 8,
     [int]$StartupDelayMs = 1500,
     [string]$Exe = "",
     [string]$BridgeExe = "",
@@ -47,12 +48,16 @@ param(
     [int]$HostInputSendDelayEndFrame = 0,
     [int]$HostInputDropModulo = 0,
     [int]$HostInputDropOffset = 0,
+    [int]$HostInputDropStartFrame = 0,
+    [int]$HostInputDropEndFrame = 0,
     [int]$ClientInputSendDelayFrames = 0,
     [int]$ClientInputSendJitterFrames = 0,
     [int]$ClientInputSendDelayStartFrame = 0,
     [int]$ClientInputSendDelayEndFrame = 0,
     [int]$ClientInputDropModulo = 0,
     [int]$ClientInputDropOffset = 0,
+    [int]$ClientInputDropStartFrame = 0,
+    [int]$ClientInputDropEndFrame = 0,
     [switch]$NoJit,
     [switch]$SoftwareRenderer
 )
@@ -239,7 +244,7 @@ function New-MelonEnv {
         MELONDS_NSML_DELAY = "$InputDelayFrames"
         MELONDS_NSML_INPUT_MAX_FRAME_LEAD = "$InputMaxFrameLead"
         MELONDS_NSML_INPUT_UNRELIABLE = "1"
-        MELONDS_NSML_INPUT_BUNDLE_HISTORY = "8"
+        MELONDS_NSML_INPUT_BUNDLE_HISTORY = "$InputBundleHistory"
         MELONDS_NSML_INPUT_NETPLAY_TRACE = "1"
         MELONDS_NSML_INPUT_HEALTH_TRACE = "1"
         MELONDS_NSML_INPUT_HEALTH_TRACE_INTERVAL = "120"
@@ -276,6 +281,8 @@ function New-MelonEnv {
         $env.MELONDS_NSML_INPUT_SEND_DELAY_END_FRAME = "$HostInputSendDelayEndFrame"
         $env.MELONDS_NSML_INPUT_DROP_MODULO = "$HostInputDropModulo"
         $env.MELONDS_NSML_INPUT_DROP_OFFSET = "$HostInputDropOffset"
+        $env.MELONDS_NSML_INPUT_DROP_START_FRAME = "$HostInputDropStartFrame"
+        $env.MELONDS_NSML_INPUT_DROP_END_FRAME = "$HostInputDropEndFrame"
     } else {
         $env.MELONDS_NSML_INPUT_SEND_DELAY_FRAMES = "$ClientInputSendDelayFrames"
         $env.MELONDS_NSML_INPUT_SEND_JITTER_FRAMES = "$ClientInputSendJitterFrames"
@@ -283,6 +290,8 @@ function New-MelonEnv {
         $env.MELONDS_NSML_INPUT_SEND_DELAY_END_FRAME = "$ClientInputSendDelayEndFrame"
         $env.MELONDS_NSML_INPUT_DROP_MODULO = "$ClientInputDropModulo"
         $env.MELONDS_NSML_INPUT_DROP_OFFSET = "$ClientInputDropOffset"
+        $env.MELONDS_NSML_INPUT_DROP_START_FRAME = "$ClientInputDropStartFrame"
+        $env.MELONDS_NSML_INPUT_DROP_END_FRAME = "$ClientInputDropEndFrame"
     }
     if ($MvlWins -gt 1) {
         $env.MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT = "1"
@@ -342,7 +351,7 @@ if ($Mode -eq "DirectUdp") {
         InputDelayFrames = $InputDelayFrames
         InputMaxFrameLead = $InputMaxFrameLead
         InputUnreliable = $true
-        InputBundleHistory = 8
+        InputBundleHistory = $InputBundleHistory
         HostStartupDelayMs = $StartupDelayMs
         Exe = $Exe
         InputScript = (Resolve-RepoPath $InputScript -MustExist)
@@ -454,6 +463,7 @@ if ($ExistingHostRom -ne "" -or $ExistingClientRom -ne "") {
     "inputScript=$InputScript"
     "hostInputScript=$HostInputScript"
     "clientInputScript=$ClientInputScript"
+    "inputBundleHistory=$InputBundleHistory"
     "melonDS=$Exe"
     "bridge=$BridgeExe"
     "bridgeDelayMs=$BridgeDelayMs"
@@ -477,12 +487,16 @@ if ($ExistingHostRom -ne "" -or $ExistingClientRom -ne "") {
     "hostInputSendDelayEndFrame=$HostInputSendDelayEndFrame"
     "hostInputDropModulo=$HostInputDropModulo"
     "hostInputDropOffset=$HostInputDropOffset"
+    "hostInputDropStartFrame=$HostInputDropStartFrame"
+    "hostInputDropEndFrame=$HostInputDropEndFrame"
     "clientInputSendDelayFrames=$ClientInputSendDelayFrames"
     "clientInputSendJitterFrames=$ClientInputSendJitterFrames"
     "clientInputSendDelayStartFrame=$ClientInputSendDelayStartFrame"
     "clientInputSendDelayEndFrame=$ClientInputSendDelayEndFrame"
     "clientInputDropModulo=$ClientInputDropModulo"
     "clientInputDropOffset=$ClientInputDropOffset"
+    "clientInputDropStartFrame=$ClientInputDropStartFrame"
+    "clientInputDropEndFrame=$ClientInputDropEndFrame"
 ) | Set-Content -Encoding UTF8 (Join-Path $logRoot "triage-settings.txt")
 
 $offerArgs = @(
