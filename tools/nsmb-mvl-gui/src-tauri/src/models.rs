@@ -12,6 +12,8 @@ pub(crate) struct LaunchRequest {
     pub(crate) settings: GameSettings,
     #[serde(default)]
     pub(crate) diagnostic_events_enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) rom_identity: Option<RomIdentity>,
 }
 
 #[derive(Debug, Deserialize, Type)]

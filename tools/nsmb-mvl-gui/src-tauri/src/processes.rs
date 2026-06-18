@@ -409,6 +409,10 @@ fn with_stdio(mut command: Command, log_dir: &Path, name: &str) -> Result<Comman
 
 fn write_launch_manifest(paths: &LaunchPaths, request: &LaunchRequest) -> Result<(), String> {
     let value = serde_json::json!({
+        "gui": {
+            "version": env!("CARGO_PKG_VERSION"),
+        },
+        "rom_identity": request.rom_identity,
         "request": request,
         "paths": {
             "log_dir": paths.log_dir,

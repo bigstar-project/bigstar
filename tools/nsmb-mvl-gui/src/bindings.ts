@@ -11,7 +11,7 @@ export const commands = {
 	preflightCheck: () => typedError<PreflightResponse, string>(__TAURI_INVOKE("preflight_check")),
 	generateRoms: (request: GenerateRomRequest) => typedError<GenerateRomResponse, string>(__TAURI_INVOKE("generate_roms", { request })),
 	ensureRoms: (request: GenerateRomRequest) => typedError<GenerateRomResponse, string>(__TAURI_INVOKE("ensure_roms", { request })),
-	startMatch: (request: LaunchRequest) => typedError<LaunchResponse, string>(__TAURI_INVOKE("start_match", { request })),
+	startMatch: (request: LaunchRequest_Deserialize) => typedError<LaunchResponse, string>(__TAURI_INVOKE("start_match", { request })),
 	stopMatch: () => typedError<null, string>(__TAURI_INVOKE("stop_match")),
 	sessionStatus: () => typedError<SessionStatus, string>(__TAURI_INVOKE("session_status")),
 	openLogDir: (path: string) => typedError<null, string>(__TAURI_INVOKE("open_log_dir", { path })),
@@ -92,7 +92,9 @@ export type GenerateRomResponse = {
 	rom_identity: RomIdentity,
 };
 
-export type LaunchRequest = {
+export type LaunchRequest = LaunchRequest_Serialize | LaunchRequest_Deserialize;
+
+export type LaunchRequest_Deserialize = {
 	role: Role,
 	signal_url: string,
 	room_code: string,
@@ -100,6 +102,18 @@ export type LaunchRequest = {
 	rom_path: string,
 	settings: GameSettings,
 	diagnostic_events_enabled?: boolean,
+	rom_identity?: RomIdentity | null,
+};
+
+export type LaunchRequest_Serialize = {
+	role: Role,
+	signal_url: string,
+	room_code: string,
+	port: number,
+	rom_path: string,
+	settings: GameSettings,
+	diagnostic_events_enabled: boolean,
+	rom_identity?: RomIdentity | null,
 };
 
 export type LaunchResponse = {

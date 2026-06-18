@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::models::{CourseMode, GameSettings, LaunchRequest, Lives, Role};
+use crate::models::{CourseMode, GameSettings, LaunchRequest, Lives, Role, RomIdentity};
 use crate::paths::allowed_log_dir;
 use crate::processes::{
     build_bridge_command, build_melon_command, melon_env, read_bridge_diagnostics,
@@ -21,6 +21,7 @@ fn request(role: Role) -> LaunchRequest {
         room_code: "room_01-test".to_owned(),
         port: 8165,
         diagnostic_events_enabled: false,
+        rom_identity: None,
         rom_path: "unused.nds".to_owned(),
         settings: GameSettings {
             course_mode: CourseMode::Random,
@@ -479,8 +480,14 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
     fs::create_dir_all(&paths.log_dir).expect("create logs");
 
     let state = AppState::default();
-    let response =
-        start_match_resolved(&state, request(Role::Host), paths).expect("start fake match");
+    let mut launch_request = request(Role::Host);
+    launch_request.rom_identity = Some(RomIdentity {
+        rom_pair_id: "pair_hash".to_owned(),
+        generator_id: "generator_hash".to_owned(),
+        host_rom_sha256: "host_hash".to_owned(),
+        client_rom_sha256: "client_hash".to_owned(),
+    });
+    let response = start_match_resolved(&state, launch_request, paths).expect("start fake match");
     assert!(response.bridge_pid > 0);
     assert!(response.melon_pid > 0);
 
@@ -499,6 +506,17 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
         wait_for_file_contains(&dir.join("logs").join("melonds.stdout.txt"), "fake-melon");
     assert!(melon_stdout.contains("role:host"));
     assert!(melon_stdout.contains("stage:2"));
+
+    let launcher_json =
+        fs::read_to_string(dir.join("logs").join("launcher.json")).expect("launcher manifest");
+    let launcher: serde_json::Value =
+        serde_json::from_str(&launcher_json).expect("parse launcher manifest");
+    assert_eq!(launcher["gui"]["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(launcher["rom_identity"]["host_rom_sha256"], "host_hash");
+    assert_eq!(
+        launcher["request"]["rom_identity"]["client_rom_sha256"],
+        "client_hash"
+    );
 
     stop_existing(&state).expect("stop fake match");
     let status = session_status_inner(&state).expect("status after stop");

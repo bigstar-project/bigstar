@@ -524,6 +524,7 @@ export function useLauncherController() {
       }
       request.rom_path =
         nextForm.role === 'host' ? roms.host_rom : roms.client_rom;
+      request.rom_identity = roms.rom_identity;
       setActivityStatus({ text: `起動中 stage=${stage}`, kind: 'idle' });
       const response = await startMatchCommand(request);
       setLastLogDir(response.log_dir);
