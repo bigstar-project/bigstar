@@ -5,6 +5,7 @@ param(
     [string]$RunRole = "both",
     [string]$Peer = "127.0.0.1",
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
+    [string]$SourceRom = "roms\nsmb-us.nds",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host.tmp.nds",
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-ui.tmp.nds",
     [string]$InputScript = "tests\nsmb_us_direct_mvl_both_different.inputs",
@@ -22,6 +23,7 @@ param(
     [switch]$NoScreenshots,
     [switch]$NoGameStateTrace,
     [switch]$NoHashLog,
+    [switch]$SkipRomEnsure,
     [switch]$NoFrameLimit,
     [switch]$FixedFrameTime,
     [double]$TargetFps = 0.0,
@@ -32,8 +34,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if ($GenerateRoms -or !(Test-Path $HostRom) -or !(Test-Path $ClientRom)) {
-    & .\scripts\generate-nsmb-mvl-stable-roms.ps1 -HostRom $HostRom -ClientRom $ClientRom
+if (!$SkipRomEnsure) {
+    $ensureParams = @{
+        SourceRom = $SourceRom
+        HostRom = $HostRom
+        ClientRom = $ClientRom
+    }
+    if ($GenerateRoms) {
+        $ensureParams.Force = $true
+    }
+    & .\scripts\generate-nsmb-mvl-stable-roms.ps1 @ensureParams
+} elseif (!(Test-Path $HostRom) -or !(Test-Path $ClientRom)) {
+    throw "ROMs are missing and SkipRomEnsure was specified: host=$HostRom client=$ClientRom"
 }
 
 $standardArgs = @{

@@ -736,19 +736,25 @@ if ($GenerateMvlConfiguredRoms) {
     }
 
     $configuredSceneSettings = if ($MvlSceneSettings) { $MvlSceneSettings } else { Convert-ToMvlSceneSettings -Stage $configuredStage }
+    $cacheRoot = Join-Path $repoRoot "roms\.cache"
+    New-Item -ItemType Directory -Force -Path $cacheRoot | Out-Null
+    $cachedHost = Join-Path $cacheRoot "nsmb-mvl-stable-host.nds"
+    $cachedClient = Join-Path $cacheRoot "nsmb-mvl-stable-client.nds"
     $generatedHost = Join-Path $logRoot "generated-host.nds"
     $generatedClient = Join-Path $logRoot "generated-client.nds"
     $generatorCourseMode = if ($MvlCourseMode -eq "fixed") { "random" } else { $MvlCourseMode }
     & (Join-Path $PSScriptRoot "generate-nsmb-mvl-stable-roms.ps1") `
         -SourceRom $romPath `
-        -HostRom $generatedHost `
-        -ClientRom $generatedClient `
+        -HostRom $cachedHost `
+        -ClientRom $cachedClient `
         -MvlStage $configuredStage `
         -MvlSceneSettings $configuredSceneSettings `
         -MvlWins $MvlWins `
         -MvlBigStars $MvlBigStars `
         -MvlLives $MvlLives `
         -MvlCourseMode $generatorCourseMode
+    Copy-Item -LiteralPath $cachedHost -Destination $generatedHost -Force
+    Copy-Item -LiteralPath $cachedClient -Destination $generatedClient -Force
 
     $hostSourceRomPath = (Resolve-Path $generatedHost).Path
     $clientSourceRomPath = (Resolve-Path $generatedClient).Path

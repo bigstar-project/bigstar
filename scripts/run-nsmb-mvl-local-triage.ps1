@@ -13,6 +13,8 @@ param(
     [string]$Exe = "",
     [string]$BridgeExe = "",
     [string]$SourceRom = "roms\nsmb-us.nds",
+    [string]$CachedHostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds",
+    [string]$CachedClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds",
     [string]$ExistingHostRom = "",
     [string]$ExistingClientRom = "",
     [string]$InputScript = "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs",
@@ -58,6 +60,7 @@ param(
     [int]$ClientInputDropOffset = 0,
     [int]$ClientInputDropStartFrame = 0,
     [int]$ClientInputDropEndFrame = 0,
+    [switch]$SkipRomEnsure,
     [switch]$NoJit,
     [switch]$SoftwareRenderer
 )
@@ -368,7 +371,7 @@ if ($Mode -eq "DirectUdp") {
         MvlBigStars = $MvlBigStars
         MvlLives = $MvlLives
         MvlCourseMode = $MvlCourseMode
-        GenerateMvlConfiguredRoms = $true
+        GenerateMvlSourceRom = $SourceRom
         MvlMatchSeed = $MvlMatchSeed
     }
     if (-not $NoJit) {
@@ -403,19 +406,25 @@ New-Item -ItemType Directory -Force $hostLog, $clientLog | Out-Null
 
 $hostRom = Join-Path $logRoot "generated-host.nds"
 $clientRom = Join-Path $logRoot "generated-client.nds"
+$cachedHostRomPath = Resolve-RepoPath $CachedHostRom
+$cachedClientRomPath = Resolve-RepoPath $CachedClientRom
+if (!$SkipRomEnsure) {
+    & (Join-Path $PSScriptRoot "generate-nsmb-mvl-stable-roms.ps1") `
+        -SourceRom (Resolve-RepoPath $SourceRom -MustExist) `
+        -HostRom $cachedHostRomPath `
+        -ClientRom $cachedClientRomPath `
+        -MvlStage $effectiveStage `
+        -MvlWins $MvlWins `
+        -MvlBigStars $MvlBigStars `
+        -MvlLives $MvlLives `
+        -MvlCourseMode $MvlCourseMode
+} else {
+    Resolve-RepoPath $CachedHostRom -MustExist | Out-Null
+    Resolve-RepoPath $CachedClientRom -MustExist | Out-Null
+}
+Copy-Item -LiteralPath $cachedHostRomPath -Destination $hostRom -Force
+Copy-Item -LiteralPath $cachedClientRomPath -Destination $clientRom -Force
 if ($ExistingHostRom -ne "" -or $ExistingClientRom -ne "") {
-    if ($ExistingHostRom -eq "" -or $ExistingClientRom -eq "") {
-        & (Join-Path $PSScriptRoot "generate-nsmb-mvl-stable-roms.ps1") `
-            -SourceRom (Resolve-RepoPath $SourceRom -MustExist) `
-            -HostRom $hostRom `
-            -ClientRom $clientRom `
-            -MvlStage $effectiveStage `
-            -MvlWins $MvlWins `
-            -MvlBigStars $MvlBigStars `
-            -MvlLives $MvlLives `
-            -MvlCourseMode $MvlCourseMode
-    }
-
     $existingRomPairs = @()
     if ($ExistingHostRom -ne "") {
         $existingHostRomPath = Resolve-RepoPath $ExistingHostRom -MustExist

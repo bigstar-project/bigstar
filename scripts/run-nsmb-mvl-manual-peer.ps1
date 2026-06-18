@@ -13,6 +13,7 @@ param(
     [switch]$InputUnreliable,
     [int]$InputBundleHistory = 8,
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
+    [string]$GenerateMvlSourceRom = "roms\nsmb-us.nds",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds",
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds",
     [string]$InputScript = "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs",
@@ -29,6 +30,7 @@ param(
     [ValidateSet("fixed", "random", "select")]
     [string]$MvlCourseMode = "fixed",
     [switch]$GenerateMvlConfiguredRoms,
+    [switch]$SkipRomEnsure,
     [string]$MvlMatchSeed = "",
     [int]$SwapBuffersInterval = 1,
     [switch]$UseFrameLimit,
@@ -88,6 +90,26 @@ if ($LogDir -eq "") {
 
 if (-not $InputUnreliable) {
     $InputUnreliable = $true
+}
+
+if (!$SkipRomEnsure -and !$GenerateMvlConfiguredRoms) {
+    $generatorCourseMode = if ($MvlCourseMode -eq "fixed") { "random" } else { $MvlCourseMode }
+    $ensureParams = @{
+        SourceRom = $GenerateMvlSourceRom
+        HostRom = $HostRom
+        ClientRom = $ClientRom
+        MvlWins = $MvlWins
+        MvlBigStars = $MvlBigStars
+        MvlLives = $MvlLives
+        MvlCourseMode = $generatorCourseMode
+    }
+    if ($MvlStage -ge 0) {
+        $ensureParams.MvlStage = $MvlStage
+    }
+    if ($MvlSceneSettings -ne "") {
+        $ensureParams.MvlSceneSettings = $MvlSceneSettings
+    }
+    & (Join-Path $PSScriptRoot "generate-nsmb-mvl-stable-roms.ps1") @ensureParams
 }
 
 $params = @{
