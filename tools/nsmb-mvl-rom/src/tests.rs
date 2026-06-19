@@ -1,8 +1,8 @@
 use super::{
     big_star_selector, build_direct_loadlevel_stub, encode_ldr_imm, encode_load_imm,
     encode_mov_imm, encode_str_imm, encode_strb_imm, initial_lives, life_mode_selector,
-    stage_scene_settings, with_cond, DirectMvlConfig, MVL_NATIVE_COURSE_SELECTOR_ADDR,
-    MVL_RUNTIME_CONFIG_STAGE_OFFSET, PLAYER_POWERUP_MEGA,
+    stage_scene_settings, with_cond, DirectMvlConfig, GAME_PLAYER_INVENTORY_POWERUP_ADDR,
+    MVL_NATIVE_COURSE_SELECTOR_ADDR, MVL_RUNTIME_CONFIG_STAGE_OFFSET, PLAYER_POWERUP_MEGA,
 };
 
 #[test]
@@ -119,5 +119,33 @@ fn direct_loadlevel_updates_native_course_selector() {
                 store_course_selector
             ]),
         "stub must store fallback/runtime stage into the native MvL course selector"
+    );
+}
+
+#[test]
+fn direct_loadlevel_clears_initial_inventory_powerups() {
+    let config = DirectMvlConfig {
+        stage: 0,
+        player_id: 1,
+        scene_settings: 0x00b4_ff00,
+        initial_lives: 3,
+        life_mode_selector: 0,
+        big_star_selector: 1,
+    };
+    let stub = build_direct_loadlevel_stub(0x0215_0000, 0x0200_0000, 0x0210_0000, &config)
+        .expect("build direct MvL stub");
+
+    let clear_value = encode_mov_imm(1, 0).expect("encode inventory clear value");
+    let clear_player0 = encode_strb_imm(1, 0, 0).expect("encode player0 inventory clear");
+    let clear_player1 = encode_strb_imm(1, 0, 1).expect("encode player1 inventory clear");
+
+    assert!(
+        stub.contains(&GAME_PLAYER_INVENTORY_POWERUP_ADDR),
+        "stub must reference Game::playerInventoryPowerup"
+    );
+    assert!(
+        stub.windows(3)
+            .any(|window| window == [clear_value, clear_player0, clear_player1]),
+        "stub must clear Mario and Luigi initial stock items after direct MvL load"
     );
 }

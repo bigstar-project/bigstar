@@ -20,6 +20,7 @@ const MVL_RUNTIME_CONFIG_INITIAL_LIVES_OFFSET: u32 = 0x0C;
 const MVL_RUNTIME_CONFIG_LIFE_MODE_SELECTOR_OFFSET: u32 = 0x10;
 const MVL_RUNTIME_CONFIG_BIG_STAR_SELECTOR_OFFSET: u32 = 0x14;
 const MVL_NATIVE_COURSE_SELECTOR_ADDR: u32 = 0x0215_C890;
+const GAME_PLAYER_INVENTORY_POWERUP_ADDR: u32 = 0x0208_B32C;
 const PLAYER_BASE_REQUESTED_POWERUP_OFFSET: u32 = 0x7AB;
 const PLAYER_BASE_CURRENT_POWERUP_OFFSET: u32 = 0x7AC;
 const PLAYER_BASE_PREVIOUS_POWERUP_OFFSET: u32 = 0x7AD;
@@ -677,6 +678,10 @@ fn build_direct_loadlevel_stub(
     words.push(encode_mov_imm(1, 1)?);
     words.push(encode_strb_imm(1, 0, 1)?);
     emit_ldr_literal(&mut words, 0, 0x0208_B098, 0xE);
+    words.push(encode_mov_imm(1, 0)?);
+    words.push(encode_strb_imm(1, 0, 0)?);
+    words.push(encode_strb_imm(1, 0, 1)?);
+    emit_ldr_literal(&mut words, 0, GAME_PLAYER_INVENTORY_POWERUP_ADDR, 0xE);
     words.push(encode_mov_imm(1, 0)?);
     words.push(encode_strb_imm(1, 0, 0)?);
     words.push(encode_strb_imm(1, 0, 1)?);

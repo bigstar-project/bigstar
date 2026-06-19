@@ -1,5 +1,24 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Initial stock item clear - 2026-06-19
+
+- User-reported issue: Luigi currently starts a direct MvL game with a Power-up Mushroom in the lower-screen stock item slot.
+- Cause interpretation: this is not intended MvL behavior. The direct route calls into level load while bypassing part of the normal CourseSelect/VSConnect setup, and it did not explicitly initialize the separate stock-item global `Game::playerInventoryPowerup` (`0x0208B32C`). The `Game::loadLevel` `powerup=0` argument controls the player powerup state, not the lower-screen stock slot, so Luigi/player1 could inherit or receive the native route's nonzero stock value until the new explicit clear.
+- Fix applied:
+  - `tools/nsmb-mvl-rom/src/lib.rs` direct load stub now clears `Game::playerInventoryPowerup[0..1]` at `0x0208B32C` immediately after `Game::loadLevel` / `loadMvsLFilesThread` and before the stage start state continues.
+  - `src/frontend/qt_sdl/NsmbNetplayPoC.cpp` and `src/ARM.cpp` direct boot / safe loadLevel trampoline paths now perform the same clear after their direct `Game::loadLevel` calls, so manual/test hotpatch routes match generated stable ROM behavior.
+  - Regression test added: `direct_loadlevel_clears_initial_inventory_powerups` checks that the generated stub references `Game::playerInventoryPowerup` and clears both player slots.
+- Verification:
+  - `cargo fmt --manifest-path tools\nsmb-mvl-rom\Cargo.toml` passed.
+  - `cargo test --manifest-path tools\nsmb-mvl-rom\Cargo.toml` passed: 8 tests.
+  - `cargo clippy --manifest-path tools\nsmb-mvl-rom\Cargo.toml --all-targets -- -D warnings` passed.
+  - `cargo clippy-all` passed in `tools\nsmb-mvl-rom`.
+  - `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passed.
+  - Generated verification ROMs under `logs\codex-initial-inventory-clear-20260619\rom`, then `scripts\run-nsmb-mvl-split-local-input-smoke.ps1` passed for 1700 frames with `-SkipRomEnsure`, `-SkipMovementProbe`, and `-SkipGameStateComparison` at `logs\codex-initial-inventory-clear-20260619\smoke-default`.
+  - Game-state CSV confirms host/client frames `900..1680` keep `player0InventoryPowerup=0x0` and `player1InventoryPowerup=0x0`.
+- Current blocker: none for removing Luigi's initial stock mushroom.
+- Next action: if user-visible packaged ROMs still show the item, regenerate or refresh the GUI cached stable ROM pair so the new generator output is used.
+
 ## Castle 8-coin Mega item investigation - 2026-06-19
 
 - User-reported issue: in normal MvL, the castle course should not spawn the Mega Mario item from the 8-coin item reward, but the current direct MvL route can.

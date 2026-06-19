@@ -7717,6 +7717,14 @@ void EmitNormalizeMvlEntranceSpawnState(std::vector<melonDS::u32>& code)
     EmitStrImm(code, 2, 0, sizeof(melonDS::u32));
 }
 
+void EmitClearInitialPlayerInventoryPowerups(std::vector<melonDS::u32>& code)
+{
+    EmitLoadImm(code, 0, kGamePlayerInventoryPowerupAddr);
+    EmitMovImm(code, 1, 0);
+    EmitStrbImm(code, 1, 0, 0);
+    EmitStrbImm(code, 1, 0, 1);
+}
+
 bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, bool autoRestart = false)
 {
     if ((!G.DirectMvlBootEnabled && !autoRestart) || !nds || instanceID < 0 || instanceID >= 16)
@@ -7830,6 +7838,7 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
         EmitARM(code, 0xE1A00000u); // nop
         EmitARM(code, kA2DJGameLoadLevelAddr);
         EmitNormalizeMvlEntranceSpawnState(code);
+        EmitClearInitialPlayerInventoryPowerups(code);
     }
     else
     {
