@@ -1,5 +1,33 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Wins / result winner detection fix - 2026-06-19
+
+- User-reported issue: the GUI exposes a match win target, but the setting may not be behaving correctly. The immediate question was whether the current runtime actually obtains who won or lost each game.
+- Findings before the fix:
+  - GUI/Tauri does pass `settings.wins` through to melonDS as `MELONDS_NSML_MVL_WINS`, and enables `MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT` only when `wins > 1`.
+  - melonDS reads that env into `G.MvlTargetWins`.
+  - Auto-restart detects the result screen by `sceneCurrentSceneID == 0x000A`.
+  - The old auto-restart scorer only compared `Game::playerBattleStars[0..1]` and `Game::playerCollectedStars[0..1]`, then fell back to `winner = 0` when the counters were tied. Existing logs such as `winner=0 stars=0/0 collected=0/0 matchWins=1/0` showed that this could increment Mario's match wins without proving Mario won.
+- Fix applied in `src/frontend/qt_sdl/NsmbNetplayPoC.cpp`:
+  - Result scoring now reads a `MvlResultSnapshot` from battle stars, displayed stars, collected stars, lives, deaths, and dead flags.
+  - Winner resolution now uses the first meaningful difference in this order: battle stars, displayed stars, collected stars, exactly one player dead, higher lives, lower deaths.
+  - The tied/unknown case no longer increments player 0. After the auto-restart delay it logs `NSMB MvL auto restart: result unresolved ...` with the full snapshot and leaves the match win counters unchanged.
+  - Result logs now include all sampled fields, for example `stars=5/0 displayed=5/0 collected=5/0 lives=3/3 deaths=0/0 dead=0/0 matchWins=2/0 target=2`.
+- Verification:
+  - `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passed.
+  - A normal `scripts\run-nsmb-mvl-split-local-result-smoke.ps1` attempt at `logs\codex-winner-detection-smoke-20260619` did not reach result by frame 6000 and failed on the wrapper's screenshot expectation, so it produced no winner log.
+  - A forced-result LAN smoke at `logs\codex-winner-detection-forced-20260619` reached the result scene on both host and client with forced player0 star counters. Both logs show `winner=0 ... matchWins=1/0 target=2`, then after restart `winner=0 ... matchWins=2/0 target=2`. The script ended with a harness-level `missing host frame limit` failure after the target wins were reached and remote input timed out, but the winner detection and match-win increment path were exercised.
+- Current blocker: no blocker for avoiding the incorrect tied `0/0 -> player0` fallback and for using richer result data. A future ROM-analysis step can still identify the native single winner/result field used by the result screen and replace the heuristic entirely.
+- Next action: run or add a deterministic real-gameplay route for a Luigi win/death-result case so both player IDs are covered without forced counters.
+
+### Direct winner field check - 2026-06-20
+
+- Follow-up question: can melonDS read a direct win/loss value instead of inferring from stars/deaths/lives?
+- Checked symbols and disassembly around `VictoryState`, `Player::transitVictory`, `PlayerBase::doVictoryTransition`, and the known `Game::player...` globals.
+- Current finding: no named or obvious global winner/result field has been identified yet. The known stable globals exposed by symbols are the per-player state values already being sampled: `playerBattleStars`, `playerDisplayedStars`, `playerCollectedStars`, `playerLives`, `playerDeaths`, and `playerDead`.
+- `VictoryState` setup initializes object/vtable state, and the visible victory-transition code manipulates player-object transition/pose state rather than exposing a simple match winner variable.
+- A direct winner value may still exist as a transient field inside the result scene/object state, but it has not been located. To prove it, trace the transition into scene `0x000A` and compare RAM/object fields for Mario-win vs Luigi-win cases.
+
 ## Initial stock item clear - 2026-06-19
 
 - User-reported issue: Luigi currently starts a direct MvL game with a Power-up Mushroom in the lower-screen stock item slot.

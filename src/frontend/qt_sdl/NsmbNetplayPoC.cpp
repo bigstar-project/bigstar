@@ -1537,6 +1537,7 @@ struct State
     melonDS::u32 MvlAutoRestartBootstrapFrame = 120;
     bool MvlAutoRestartInResult[16] {};
     bool MvlAutoRestartResultScored[16] {};
+    bool MvlAutoRestartResultUnresolvedLogged[16] {};
     melonDS::u32 MvlAutoRestartResultFrame[16] {};
     melonDS::u32 MvlAutoRestartLastRestartFrame[16] {};
     int MvlAutoRestartCount[16] {};
@@ -8117,6 +8118,68 @@ bool ResetMvlAutoRestartConsoleForNextMatch(int instanceID, melonDS::u32 frame, 
     return true;
 }
 
+struct MvlResultSnapshot
+{
+    melonDS::u32 BattleStars[2] {};
+    melonDS::u32 DisplayedStars[2] {};
+    melonDS::u32 CollectedStars[2] {};
+    melonDS::u32 Lives[2] {};
+    melonDS::u32 Deaths[2] {};
+    melonDS::u32 Dead[2] {};
+};
+
+MvlResultSnapshot ReadMvlResultSnapshot(melonDS::NDS* nds)
+{
+    MvlResultSnapshot result {};
+    if (!nds)
+        return result;
+
+    for (melonDS::u32 player = 0; player < 2; player++)
+    {
+        const melonDS::u32 wordOffset = sizeof(melonDS::u32) * player;
+        result.BattleStars[player] = nds->ARM9Read32(kGamePlayerBattleStarsAddr + wordOffset);
+        result.DisplayedStars[player] = nds->ARM9Read32(kGamePlayerDisplayedStarsAddr + wordOffset);
+        result.CollectedStars[player] = nds->ARM9Read32(kGamePlayerCollectedStarsAddr + wordOffset);
+        result.Lives[player] = nds->ARM9Read32(kGamePlayerLivesAddr + wordOffset);
+        result.Deaths[player] = nds->ARM9Read32(kGamePlayerDeathsAddr + wordOffset);
+        result.Dead[player] = nds->ARM9Read8(kGamePlayerDeadAddr + player);
+    }
+    return result;
+}
+
+int ResolveMvlResultWinner(const MvlResultSnapshot& result)
+{
+    auto higherWins = [](melonDS::u32 a, melonDS::u32 b) -> int {
+        if (a == b)
+            return -1;
+        return a > b ? 0 : 1;
+    };
+    auto lowerWins = [](melonDS::u32 a, melonDS::u32 b) -> int {
+        if (a == b)
+            return -1;
+        return a < b ? 0 : 1;
+    };
+
+    if (int winner = higherWins(result.BattleStars[0], result.BattleStars[1]); winner >= 0)
+        return winner;
+    if (int winner = higherWins(result.DisplayedStars[0], result.DisplayedStars[1]); winner >= 0)
+        return winner;
+    if (int winner = higherWins(result.CollectedStars[0], result.CollectedStars[1]); winner >= 0)
+        return winner;
+
+    const bool player0Dead = result.Dead[0] != 0;
+    const bool player1Dead = result.Dead[1] != 0;
+    if (player0Dead != player1Dead)
+        return player0Dead ? 1 : 0;
+
+    if (int winner = higherWins(result.Lives[0], result.Lives[1]); winner >= 0)
+        return winner;
+    if (int winner = lowerWins(result.Deaths[0], result.Deaths[1]); winner >= 0)
+        return winner;
+
+    return -1;
+}
+
 bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.MvlAutoRestartAfterResult || G.MvlTargetWins <= 1 || !nds || instanceID < 0 || instanceID >= 16)
@@ -8136,41 +8199,70 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
         }
         G.MvlAutoRestartInResult[instanceID] = false;
         G.MvlAutoRestartResultScored[instanceID] = false;
+        G.MvlAutoRestartResultUnresolvedLogged[instanceID] = false;
         return false;
     }
 
     if (!G.MvlAutoRestartInResult[instanceID])
     {
         G.MvlAutoRestartInResult[instanceID] = true;
+        G.MvlAutoRestartResultUnresolvedLogged[instanceID] = false;
         G.MvlAutoRestartResultFrame[instanceID] = frame;
         return false;
     }
 
     if (!G.MvlAutoRestartResultScored[instanceID])
     {
-        const melonDS::u32 battleStars0 = nds->ARM9Read32(kGamePlayerBattleStarsAddr);
-        const melonDS::u32 battleStars1 = nds->ARM9Read32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32));
-        const melonDS::u32 collectedStars0 = nds->ARM9Read32(kGamePlayerCollectedStarsAddr);
-        const melonDS::u32 collectedStars1 = nds->ARM9Read32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32));
-        int winner = -1;
-        if (battleStars0 != battleStars1)
-            winner = battleStars0 > battleStars1 ? 0 : 1;
-        else if (collectedStars0 != collectedStars1)
-            winner = collectedStars0 > collectedStars1 ? 0 : 1;
-        else
-            winner = 0;
-        if (winner >= 0)
-            G.MvlAutoRestartWins[instanceID][winner]++;
+        const MvlResultSnapshot result = ReadMvlResultSnapshot(nds);
+        const int winner = ResolveMvlResultWinner(result);
+        if (winner < 0)
+        {
+            if (!G.MvlAutoRestartResultUnresolvedLogged[instanceID]
+                && frame - G.MvlAutoRestartResultFrame[instanceID] >= G.MvlAutoRestartDelayFrames)
+            {
+                std::printf(
+                    "NSMB MvL auto restart: result unresolved inst=%d frame=%u stars=%u/%u displayed=%u/%u collected=%u/%u lives=%u/%u deaths=%u/%u dead=%u/%u matchWins=%d/%d target=%d\n",
+                    instanceID,
+                    frame,
+                    result.BattleStars[0],
+                    result.BattleStars[1],
+                    result.DisplayedStars[0],
+                    result.DisplayedStars[1],
+                    result.CollectedStars[0],
+                    result.CollectedStars[1],
+                    result.Lives[0],
+                    result.Lives[1],
+                    result.Deaths[0],
+                    result.Deaths[1],
+                    result.Dead[0],
+                    result.Dead[1],
+                    G.MvlAutoRestartWins[instanceID][0],
+                    G.MvlAutoRestartWins[instanceID][1],
+                    G.MvlTargetWins);
+                std::fflush(stdout);
+                G.MvlAutoRestartResultUnresolvedLogged[instanceID] = true;
+            }
+            return false;
+        }
+        G.MvlAutoRestartWins[instanceID][winner]++;
         G.MvlAutoRestartResultScored[instanceID] = true;
         std::printf(
-            "NSMB MvL auto restart: result inst=%d frame=%u winner=%d stars=%u/%u collected=%u/%u matchWins=%d/%d target=%d\n",
+            "NSMB MvL auto restart: result inst=%d frame=%u winner=%d stars=%u/%u displayed=%u/%u collected=%u/%u lives=%u/%u deaths=%u/%u dead=%u/%u matchWins=%d/%d target=%d\n",
             instanceID,
             frame,
             winner,
-            battleStars0,
-            battleStars1,
-            collectedStars0,
-            collectedStars1,
+            result.BattleStars[0],
+            result.BattleStars[1],
+            result.DisplayedStars[0],
+            result.DisplayedStars[1],
+            result.CollectedStars[0],
+            result.CollectedStars[1],
+            result.Lives[0],
+            result.Lives[1],
+            result.Deaths[0],
+            result.Deaths[1],
+            result.Dead[0],
+            result.Dead[1],
             G.MvlAutoRestartWins[instanceID][0],
             G.MvlAutoRestartWins[instanceID][1],
             G.MvlTargetWins);
@@ -8240,6 +8332,7 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
     ResetMvlRuntimeSyncStateForRestart(instanceID, frame);
     G.MvlAutoRestartInResult[instanceID] = false;
     G.MvlAutoRestartResultScored[instanceID] = false;
+    G.MvlAutoRestartResultUnresolvedLogged[instanceID] = false;
     const int actualStage = static_cast<int>(nds->ARM9Read32(kGameStageIDAddr));
     std::printf(
         "NSMB MvL auto restart: inst=%d frame=%u nextGame=%d stage=%d requestedStage=%d seed=0x%08X matchWins=%d/%d target=%d checkpoint=%d\n",
