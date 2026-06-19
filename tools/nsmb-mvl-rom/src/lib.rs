@@ -19,6 +19,7 @@ const MVL_RUNTIME_CONFIG_SCENE_SETTINGS_OFFSET: u32 = 0x08;
 const MVL_RUNTIME_CONFIG_INITIAL_LIVES_OFFSET: u32 = 0x0C;
 const MVL_RUNTIME_CONFIG_LIFE_MODE_SELECTOR_OFFSET: u32 = 0x10;
 const MVL_RUNTIME_CONFIG_BIG_STAR_SELECTOR_OFFSET: u32 = 0x14;
+const MVL_NATIVE_COURSE_SELECTOR_ADDR: u32 = 0x0215_C890;
 const PLAYER_BASE_REQUESTED_POWERUP_OFFSET: u32 = 0x7AB;
 const PLAYER_BASE_CURRENT_POWERUP_OFFSET: u32 = 0x7AC;
 const PLAYER_BASE_PREVIOUS_POWERUP_OFFSET: u32 = 0x7AD;
@@ -636,6 +637,14 @@ fn build_direct_loadlevel_stub(
         0,
     ));
     words.push(encode_str_imm(1, 0, 0)?);
+
+    emit_ldr_literal(&mut words, 0, MVL_NATIVE_COURSE_SELECTOR_ADDR, 0xE);
+    words.push(encode_mov_imm(1, config.stage as u32)?);
+    words.push(with_cond(
+        encode_ldr_imm(1, 4, MVL_RUNTIME_CONFIG_STAGE_OFFSET)?,
+        0,
+    ));
+    words.push(encode_strb_imm(1, 0, 0)?);
 
     emit_ldr_literal(&mut words, 0, 0x0208_B364, 0xE);
     words.push(encode_load_imm(1, config.initial_lives)?);

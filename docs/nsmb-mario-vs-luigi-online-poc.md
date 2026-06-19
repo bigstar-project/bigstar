@@ -1,5 +1,23 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Castle 8-coin Mega item investigation - 2026-06-19
+
+- User-reported issue: in normal MvL, the castle course should not spawn the Mega Mario item from the 8-coin item reward, but the current direct MvL route can.
+- Native control found:
+  - `Game::addPlayerCoin(int)` at `0x02020354` calls `0x020BF150` when a VS player reaches the 8th coin, then resets that player's coin counter.
+  - `0x020BF150` is the 8-coin item generator. It chooses a weighted slot `0..5` with `Net::getRandom()` and spawns actor `0x001F` with settings from `0x020C2DBC`: `0x1099, 0x1088, 0x1089, 0x108B, 0x1081, 0x1085`.
+  - If slot `5` is selected, the native code checks a flag at `0x02085A08` and `0x02153A80()`. When `0x02153A80()` returns `4`, it changes slot `5` to slot `4` before spawning the item.
+  - `0x02153A80()` reads selector byte `0x0215C890` through table `0x0215AEEC = [0,1,2,3,4]`; return `4` is the castle course ID. This is the native castle-specific Mega exclusion path.
+- Direct-route difference confirmed before the fix:
+  - Rust ROM generation already wrote native selectors for Big Star target (`0x0215C88C`) and life mode (`0x0215C89C`), and wrote scene settings `0x02088F38`.
+  - It did not write `0x0215C890`, the native course selector used by the 8-coin item generator.
+  - RAM dump from `logs/codex-mvl-castle-selector-ramdump-20260619` with `MvlStage=4` shows host/client at frames 1200 and 1600: `0x02088F38=0x00B8FF00`, `0x0215C88C=1`, `0x0215C89C=2`, but `0x0215C890=0`. Game-state trace also reaches `stageID=4` and `stageSceneSettings=0x00B8FF00`.
+- Fix applied in `tools/nsmb-mvl-rom/src/lib.rs`: the direct load stub now initializes the native course selector (`0x0215C890 = stage`) from the same fallback/runtime stage value used for `Game::loadLevel`.
+  - Regression test added: `direct_loadlevel_updates_native_course_selector` checks that the generated stub references `0x0215C890` and stores fallback/runtime stage into it.
+  - RAM verification: `logs/codex-mvl-castle-selector-restored-20260619` with `MvlStage=4` shows host/client at frames 1200 and 1600: `0x02088F38=0x00B8FF00`, `0x0215C88C=1`, `0x0215C890=4`, `0x0215C89C=2`.
+- Current blocker: an end-to-end 8-coin route still needs a deterministic input script or trace setup to prove candidate slot `5` is converted to slot `4` during actual item spawn. The native selector restoration itself is verified in RAM.
+- Verification: `cargo fmt --manifest-path tools\nsmb-mvl-rom\Cargo.toml`, `cargo test --manifest-path tools\nsmb-mvl-rom\Cargo.toml`, and `cargo clippy-all` passed. The RAM smoke produced the expected dumps but the wrapper still ended with the existing screenshot-directory check failure.
+
 ## Stock item X-button touch mapping - 2026-06-19
 
 - User request: allow stock item use with the X button while preserving the native stock-item behavior where the item is released through the normal touch path and falls into the stage.

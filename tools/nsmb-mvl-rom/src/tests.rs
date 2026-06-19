@@ -1,6 +1,8 @@
 use super::{
-    big_star_selector, build_direct_loadlevel_stub, encode_load_imm, encode_str_imm, initial_lives,
-    life_mode_selector, stage_scene_settings, DirectMvlConfig, PLAYER_POWERUP_MEGA,
+    big_star_selector, build_direct_loadlevel_stub, encode_ldr_imm, encode_load_imm,
+    encode_mov_imm, encode_str_imm, encode_strb_imm, initial_lives, life_mode_selector,
+    stage_scene_settings, with_cond, DirectMvlConfig, MVL_NATIVE_COURSE_SELECTOR_ADDR,
+    MVL_RUNTIME_CONFIG_STAGE_OFFSET, PLAYER_POWERUP_MEGA,
 };
 
 #[test]
@@ -82,5 +84,40 @@ fn direct_loadlevel_matches_normal_mvl_control_args() {
         stub.windows(2)
             .any(|pair| pair == [load_control_options, store_control_options]),
         "loadLevel stack arg 0x24 must match the normal MvL load path"
+    );
+}
+
+#[test]
+fn direct_loadlevel_updates_native_course_selector() {
+    let config = DirectMvlConfig {
+        stage: 4,
+        player_id: 0,
+        scene_settings: 0x00b8_ff00,
+        initial_lives: 3,
+        life_mode_selector: 2,
+        big_star_selector: 1,
+    };
+    let stub = build_direct_loadlevel_stub(0x0215_0000, 0x0200_0000, 0x0210_0000, &config)
+        .expect("build direct MvL stub");
+
+    let load_fallback_stage = encode_mov_imm(1, config.stage as u32).expect("encode stage load");
+    let load_runtime_stage = with_cond(
+        encode_ldr_imm(1, 4, MVL_RUNTIME_CONFIG_STAGE_OFFSET).expect("encode runtime stage load"),
+        0,
+    );
+    let store_course_selector = encode_strb_imm(1, 0, 0).expect("encode course selector store");
+
+    assert!(
+        stub.contains(&MVL_NATIVE_COURSE_SELECTOR_ADDR),
+        "stub must reference the native MvL course selector used by 8-coin item filtering"
+    );
+    assert!(
+        stub.windows(3).any(|window| window
+            == [
+                load_fallback_stage,
+                load_runtime_stage,
+                store_course_selector
+            ]),
+        "stub must store fallback/runtime stage into the native MvL course selector"
     );
 }
