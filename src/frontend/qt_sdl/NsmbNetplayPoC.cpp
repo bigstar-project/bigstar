@@ -396,6 +396,11 @@ constexpr melonDS::u32 kWireKindWorldEffectState = 0x54434645; // "EFCT", little
 constexpr melonDS::u32 kWireKindWorldActorSnapshot = 0x54434157; // "WACT", little endian
 constexpr std::size_t kDiagnosticRingCapacity = 720;
 constexpr melonDS::u32 kDiagnosticPostTriggerFrames = 120;
+constexpr melonDS::u32 kDiagnosticRepeatedAnomalyFrames = 120;
+constexpr melonDS::u32 kPlayerPitDeathTransitStateAddr = 0x021196B0;
+constexpr melonDS::s32 kDiagnosticFixedOne = 0x1000;
+constexpr melonDS::s32 kDiagnosticOffscreenMargin = 512 * kDiagnosticFixedOne;
+constexpr melonDS::s32 kDiagnosticLargePositionDelta = 256 * kDiagnosticFixedOne;
 constexpr std::size_t kMaxWorldMovingHazards = 4;
 constexpr std::size_t kMaxWorldEffects = 4;
 constexpr std::size_t kMaxWorldActorSnapshots = 16;
@@ -1217,6 +1222,10 @@ struct DiagnosticFrameSnapshot
     melonDS::u32 StageCameraGlobalX1 = 0;
     melonDS::u32 StageCameraGlobalY0 = 0;
     melonDS::u32 StageCameraGlobalY1 = 0;
+    melonDS::u32 StageCameraGlobalWidth0 = 0;
+    melonDS::u32 StageCameraGlobalWidth1 = 0;
+    melonDS::u32 StageCameraGlobalHeight0 = 0;
+    melonDS::u32 StageCameraGlobalHeight1 = 0;
     DiagnosticPlayerSnapshot Player[2];
 };
 
@@ -1584,6 +1593,8 @@ struct State
     melonDS::u32 DiagnosticPostTriggerUntilFrame[16] {};
     melonDS::u32 LastDiagnosticMismatchFrame[16] {};
     melonDS::u32 LastDiagnosticLifeEventFrame[16][2] {};
+    melonDS::u32 LastDiagnosticPitTransitionFrame[16][2] {};
+    melonDS::u32 LastDiagnosticPositionAnomalyFrame[16][2] {};
     std::array<DiagnosticFrameSnapshot, kDiagnosticRingCapacity> DiagnosticRing[16];
     std::size_t DiagnosticRingNext[16] {};
     int ScreenshotInterval = 0;
@@ -9478,6 +9489,10 @@ void AppendDiagnosticFrameJson(std::ostream& out, const DiagnosticFrameSnapshot&
     AppendJsonHex32(out, "cameraX1", snap.StageCameraGlobalX1); out << ",";
     AppendJsonHex32(out, "cameraY0", snap.StageCameraGlobalY0); out << ",";
     AppendJsonHex32(out, "cameraY1", snap.StageCameraGlobalY1); out << ",";
+    AppendJsonHex32(out, "cameraWidth0", snap.StageCameraGlobalWidth0); out << ",";
+    AppendJsonHex32(out, "cameraWidth1", snap.StageCameraGlobalWidth1); out << ",";
+    AppendJsonHex32(out, "cameraHeight0", snap.StageCameraGlobalHeight0); out << ",";
+    AppendJsonHex32(out, "cameraHeight1", snap.StageCameraGlobalHeight1); out << ",";
     out << "\"players\":[";
     AppendDiagnosticPlayerJson(out, snap.Player[0]);
     out << ",";
@@ -9559,6 +9574,193 @@ void AppendDiagnosticRingJson(std::ostream& out, int instanceID)
         }
     }
     out << "]";
+}
+
+melonDS::s32 DiagnosticSignedFixed(melonDS::u32 value)
+{
+    return static_cast<melonDS::s32>(value);
+}
+
+melonDS::s64 DiagnosticFixedDelta(melonDS::u32 lhs, melonDS::u32 rhs)
+{
+    return static_cast<melonDS::s64>(DiagnosticSignedFixed(lhs))
+        - static_cast<melonDS::s64>(DiagnosticSignedFixed(rhs));
+}
+
+melonDS::u32 DiagnosticCameraX(const DiagnosticFrameSnapshot& snap, int player)
+{
+    return player == 0 ? snap.StageCameraGlobalX0 : snap.StageCameraGlobalX1;
+}
+
+melonDS::u32 DiagnosticCameraY(const DiagnosticFrameSnapshot& snap, int player)
+{
+    return player == 0 ? snap.StageCameraGlobalY0 : snap.StageCameraGlobalY1;
+}
+
+melonDS::u32 DiagnosticCameraWidth(const DiagnosticFrameSnapshot& snap, int player)
+{
+    const melonDS::u32 value = player == 0 ? snap.StageCameraGlobalWidth0 : snap.StageCameraGlobalWidth1;
+    return value != 0 ? value : static_cast<melonDS::u32>(256 * kDiagnosticFixedOne);
+}
+
+melonDS::u32 DiagnosticCameraHeight(const DiagnosticFrameSnapshot& snap, int player)
+{
+    const melonDS::u32 value = player == 0 ? snap.StageCameraGlobalHeight0 : snap.StageCameraGlobalHeight1;
+    return value != 0 ? value : static_cast<melonDS::u32>(192 * kDiagnosticFixedOne);
+}
+
+void AppendDiagnosticPlayerContextJson(
+    std::ostream& out,
+    const DiagnosticFrameSnapshot& snap,
+    const DiagnosticFrameSnapshot* previous,
+    int player)
+{
+    const DiagnosticPlayerSnapshot& current = snap.Player[player];
+    const DiagnosticPlayerSnapshot* prev = previous ? &previous->Player[player] : nullptr;
+    const melonDS::u32 cameraX = DiagnosticCameraX(snap, player);
+    const melonDS::u32 cameraY = DiagnosticCameraY(snap, player);
+    const melonDS::u32 cameraWidth = DiagnosticCameraWidth(snap, player);
+    const melonDS::u32 cameraHeight = DiagnosticCameraHeight(snap, player);
+    const melonDS::s64 screenX = DiagnosticFixedDelta(current.PosX, cameraX);
+    const melonDS::s64 screenY = DiagnosticFixedDelta(current.PosY, cameraY);
+    const melonDS::s64 deltaX = prev ? DiagnosticFixedDelta(current.PosX, prev->PosX) : 0;
+    const melonDS::s64 deltaY = prev ? DiagnosticFixedDelta(current.PosY, prev->PosY) : 0;
+
+    out << "\"player\":" << player << ",";
+    AppendJsonHex32(out, "cameraX", cameraX); out << ",";
+    AppendJsonHex32(out, "cameraY", cameraY); out << ",";
+    AppendJsonHex32(out, "cameraWidth", cameraWidth); out << ",";
+    AppendJsonHex32(out, "cameraHeight", cameraHeight); out << ",";
+    out << "\"screenX\":" << screenX << ",";
+    out << "\"screenY\":" << screenY << ",";
+    out << "\"screenXPx\":" << (screenX / kDiagnosticFixedOne) << ",";
+    out << "\"screenYPx\":" << (screenY / kDiagnosticFixedOne) << ",";
+    out << "\"deltaX\":" << deltaX << ",";
+    out << "\"deltaY\":" << deltaY << ",";
+    out << "\"deltaXPx\":" << (deltaX / kDiagnosticFixedOne) << ",";
+    out << "\"deltaYPx\":" << (deltaY / kDiagnosticFixedOne) << ",";
+    out << "\"current\":";
+    AppendDiagnosticPlayerJson(out, current);
+    if (prev)
+    {
+        out << ",\"previous\":";
+        AppendDiagnosticPlayerJson(out, *prev);
+    }
+}
+
+bool DiagnosticPlayerIsLiveForPositionCheck(const DiagnosticPlayerSnapshot& player)
+{
+    return player.Found != 0
+        && player.Dead == 0
+        && player.VisibleFlag != 0
+        && player.TransitioningFlag == 0
+        && player.DefeatedFlag == 0;
+}
+
+bool DiagnosticPlayerScreenPositionAnomalous(
+    const DiagnosticFrameSnapshot& snap,
+    const DiagnosticFrameSnapshot* previous,
+    int player)
+{
+    const DiagnosticPlayerSnapshot& current = snap.Player[player];
+    if (!DiagnosticPlayerIsLiveForPositionCheck(current))
+        return false;
+
+    const melonDS::s64 screenX = DiagnosticFixedDelta(current.PosX, DiagnosticCameraX(snap, player));
+    const melonDS::s64 cameraWidth = static_cast<melonDS::s64>(DiagnosticCameraWidth(snap, player));
+    if (screenX < -static_cast<melonDS::s64>(kDiagnosticOffscreenMargin)
+        || screenX > cameraWidth + static_cast<melonDS::s64>(kDiagnosticOffscreenMargin))
+    {
+        return true;
+    }
+
+    if (previous && previous->Valid && DiagnosticPlayerIsLiveForPositionCheck(previous->Player[player]))
+    {
+        const melonDS::s64 deltaX = DiagnosticFixedDelta(current.PosX, previous->Player[player].PosX);
+        const melonDS::s64 deltaY = DiagnosticFixedDelta(current.PosY, previous->Player[player].PosY);
+        if (std::llabs(deltaX) > kDiagnosticLargePositionDelta
+            || std::llabs(deltaY) > kDiagnosticLargePositionDelta)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void EmitDiagnosticPitTransitionEvent(
+    int instanceID,
+    const DiagnosticFrameSnapshot& snap,
+    const DiagnosticFrameSnapshot* previous,
+    int player)
+{
+    if (!G.DiagnosticEventsEnabled || instanceID < 0 || instanceID >= 16 || player < 0 || player > 1)
+        return;
+    if (snap.Player[player].TransitFunc != kPlayerPitDeathTransitStateAddr)
+        return;
+    if (previous && previous->Valid && previous->Player[player].TransitFunc == kPlayerPitDeathTransitStateAddr)
+        return;
+    if (G.LastDiagnosticPitTransitionFrame[instanceID][player] != 0
+        && snap.Frame < G.LastDiagnosticPitTransitionFrame[instanceID][player] + kDiagnosticRepeatedAnomalyFrames)
+    {
+        return;
+    }
+
+    G.LastDiagnosticPitTransitionFrame[instanceID][player] = snap.Frame;
+    G.DiagnosticPostTriggerUntilFrame[instanceID] = snap.Frame + kDiagnosticPostTriggerFrames;
+
+    std::ostringstream json;
+    json << "{\"event\":\"player_pit_transition\","
+         << "\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\","
+         << "\"instance\":" << instanceID << ","
+         << "\"frame\":" << snap.Frame << ","
+         << "\"stageID\":" << snap.StageID << ","
+         << "\"stageGroup\":" << snap.StageGroup << ","
+         << "\"scene\":" << snap.SceneCurrentSceneID << ","
+         << "\"nextScene\":" << snap.SceneNextSceneID << ",";
+    AppendDiagnosticPlayerContextJson(json, snap, previous, player);
+    json << ",";
+    AppendDiagnosticRingJson(json, instanceID);
+    json << "}";
+
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    WriteDiagnosticEventLocked(json.str());
+}
+
+void EmitDiagnosticPositionAnomalyEvent(
+    int instanceID,
+    const DiagnosticFrameSnapshot& snap,
+    const DiagnosticFrameSnapshot* previous,
+    int player)
+{
+    if (!G.DiagnosticEventsEnabled || instanceID < 0 || instanceID >= 16 || player < 0 || player > 1)
+        return;
+    if (!DiagnosticPlayerScreenPositionAnomalous(snap, previous, player))
+        return;
+    if (G.LastDiagnosticPositionAnomalyFrame[instanceID][player] != 0
+        && snap.Frame < G.LastDiagnosticPositionAnomalyFrame[instanceID][player] + kDiagnosticRepeatedAnomalyFrames)
+    {
+        return;
+    }
+
+    G.LastDiagnosticPositionAnomalyFrame[instanceID][player] = snap.Frame;
+
+    std::ostringstream json;
+    json << "{\"event\":\"player_position_anomaly\","
+         << "\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\","
+         << "\"instance\":" << instanceID << ","
+         << "\"frame\":" << snap.Frame << ","
+         << "\"stageID\":" << snap.StageID << ","
+         << "\"stageGroup\":" << snap.StageGroup << ","
+         << "\"scene\":" << snap.SceneCurrentSceneID << ","
+         << "\"nextScene\":" << snap.SceneNextSceneID << ",";
+    AppendDiagnosticPlayerContextJson(json, snap, previous, player);
+    json << ",";
+    AppendDiagnosticRingJson(json, instanceID);
+    json << "}";
+
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    WriteDiagnosticEventLocked(json.str());
 }
 
 void ReadDiagnosticPlayerSnapshot(
@@ -9667,12 +9869,30 @@ void RecordDiagnosticSnapshotIfNeeded(int instanceID, melonDS::u32 frame, melonD
     snap.StageCameraGlobalX1 = nds->ARM9Read32(kStageCameraXAddr + sizeof(melonDS::u32));
     snap.StageCameraGlobalY0 = nds->ARM9Read32(kStageCameraYAddr);
     snap.StageCameraGlobalY1 = nds->ARM9Read32(kStageCameraYAddr + sizeof(melonDS::u32));
+    snap.StageCameraGlobalWidth0 = nds->ARM9Read32(kStageCameraWidthAddr);
+    snap.StageCameraGlobalWidth1 = nds->ARM9Read32(kStageCameraWidthAddr + sizeof(melonDS::u32));
+    snap.StageCameraGlobalHeight0 = nds->ARM9Read32(kStageCameraHeightAddr);
+    snap.StageCameraGlobalHeight1 = nds->ARM9Read32(kStageCameraHeightAddr + sizeof(melonDS::u32));
     ReadDiagnosticPlayerSnapshot(instanceID, frame, nds, 0, snap.Player[0]);
     ReadDiagnosticPlayerSnapshot(instanceID, frame, nds, 1, snap.Player[1]);
     if (snap.Player[0].Found && IsValidMainRAMRange(nds, snap.Player[0].Base, 0xC00))
         snap.PlayerActorHash0 = HashMainRAMRange(nds, snap.Player[0].Base, 0xC00);
     if (snap.Player[1].Found && IsValidMainRAMRange(nds, snap.Player[1].Base, 0xC00))
         snap.PlayerActorHash1 = HashMainRAMRange(nds, snap.Player[1].Base, 0xC00);
+
+    const DiagnosticFrameSnapshot* previous = nullptr;
+    if (G.DiagnosticRingNext[instanceID] != 0)
+    {
+        const std::size_t prevIdx =
+            (G.DiagnosticRingNext[instanceID] + kDiagnosticRingCapacity - 1) % kDiagnosticRingCapacity;
+        if (G.DiagnosticRing[instanceID][prevIdx].Valid)
+            previous = &G.DiagnosticRing[instanceID][prevIdx];
+    }
+    for (int player = 0; player < 2; player++)
+    {
+        EmitDiagnosticPositionAnomalyEvent(instanceID, snap, previous, player);
+        EmitDiagnosticPitTransitionEvent(instanceID, snap, previous, player);
+    }
 
     G.DiagnosticRing[instanceID][G.DiagnosticRingNext[instanceID] % kDiagnosticRingCapacity] = snap;
     G.DiagnosticRingNext[instanceID] = (G.DiagnosticRingNext[instanceID] + 1) % kDiagnosticRingCapacity;

@@ -1,8 +1,10 @@
 use super::{
-    big_star_selector, build_direct_loadlevel_stub, encode_ldr_imm, encode_load_imm,
-    encode_mov_imm, encode_str_imm, encode_strb_imm, initial_lives, life_mode_selector,
-    stage_scene_settings, with_cond, DirectMvlConfig, GAME_PLAYER_INVENTORY_POWERUP_ADDR,
-    MVL_NATIVE_COURSE_SELECTOR_ADDR, MVL_RUNTIME_CONFIG_STAGE_OFFSET, PLAYER_POWERUP_MEGA,
+    big_star_selector, build_direct_loadlevel_stub,
+    build_is_out_of_view_vertical_camera_fallback_stub, encode_cmp_imm, encode_ldr_imm,
+    encode_load_imm, encode_mov_imm, encode_str_imm, encode_strb_imm, initial_lives,
+    life_mode_selector, stage_scene_settings, with_cond, DirectMvlConfig,
+    GAME_PLAYER_INVENTORY_POWERUP_ADDR, MVL_NATIVE_COURSE_SELECTOR_ADDR,
+    MVL_RUNTIME_CONFIG_STAGE_OFFSET, PLAYER_POWERUP_MEGA,
 };
 
 #[test]
@@ -147,5 +149,27 @@ fn direct_loadlevel_clears_initial_inventory_powerups() {
         stub.windows(3)
             .any(|window| window == [clear_value, clear_player0, clear_player1]),
         "stub must clear Mario and Luigi initial stock items after direct MvL load"
+    );
+}
+
+#[test]
+fn vertical_out_of_view_fallback_preserves_player1_camera_slot() {
+    let stub = build_is_out_of_view_vertical_camera_fallback_stub(0x020c_5298)
+        .expect("build vertical out-of-view fallback stub");
+
+    let compare_player1 = encode_cmp_imm(2, 1).expect("encode player1 compare");
+    let force_slot0 = with_cond(encode_mov_imm(2, 0).expect("encode slot0 move"), 0);
+    let compare_height_zero = encode_cmp_imm(12, 0).expect("encode camera-height compare");
+
+    assert!(
+        !stub
+            .windows(2)
+            .any(|window| window == [compare_player1, force_slot0]),
+        "player1 must keep camera slot 1; forcing it to slot0 causes Luigi pit deaths"
+    );
+    assert!(
+        stub.windows(2)
+            .any(|window| window == [compare_height_zero, force_slot0]),
+        "fallback should still use slot0 only when the requested camera height is zero"
     );
 }

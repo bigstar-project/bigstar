@@ -761,8 +761,6 @@ fn build_is_out_of_view_vertical_camera_fallback_stub(start_addr: u32) -> Result
     };
 
     words.push(encode_push((1 << 4) | (1 << 14)));
-    words.push(encode_cmp_imm(2, 1)?);
-    words.push(with_cond(encode_mov_imm(2, 0)?, 0));
     emit(&mut words, 3, 0x020C_AD8C, 0xE);
     words.push(encode_ldr_reg_lsl(12, 3, 2, 2)?);
     words.push(encode_cmp_imm(12, 0)?);
