@@ -65,12 +65,12 @@ function StepRow({
         borderWidth: '1px',
         display: 'grid',
         gap: '4',
-        gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+        gridTemplateColumns: {
+          base: '1fr',
+          md: 'auto minmax(0, 1fr) auto',
+        },
         opacity: disabled ? '0.56' : '1',
         p: '4',
-        '@media (max-width: 760px)': {
-          gridTemplateColumns: '1fr',
-        },
       })}
     >
       <div

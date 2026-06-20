@@ -93,10 +93,13 @@ export function BattleView({
         className={css({
           display: 'grid',
           gap: '5',
-          gridTemplateColumns: `minmax(0, 1fr) ${token('sizes.diagnostics')}`,
-          '@media (max-width: 1380px)': {
-            gridTemplateColumns: '1fr',
+          gridTemplateColumns: {
+            base: '1fr',
+            xl: `minmax(0, 1fr) ${token('sizes.diagnostics')}`,
           },
+          maxW: { base: '3xl', xl: 'contentMax' },
+          mx: { base: 'auto', xl: '0' },
+          w: 'full',
         })}
         onSubmit={(event) => {
           event.preventDefault();
@@ -116,14 +119,11 @@ export function BattleView({
             <div className={css({ display: 'grid', gap: '3' })}>
               <div
                 className={css({
-                  alignItems: 'center',
+                  alignItems: { base: 'stretch', md: 'center' },
                   display: 'flex',
+                  flexDirection: { base: 'column', md: 'row' },
                   gap: '3',
                   justifyContent: 'space-between',
-                  '@media (max-width: 760px)': {
-                    alignItems: 'stretch',
-                    flexDirection: 'column',
-                  },
                 })}
               >
                 <div
@@ -139,7 +139,6 @@ export function BattleView({
                   <span>{matchmakingRooms.rooms.length} 件</span>
                   <Button
                     variant="outline"
-                    size="sm"
                     loading={matchmakingRooms.loading}
                     disabled={matchmakingRooms.refreshDisabled}
                     onClick={() => void actions.refreshRooms()}
@@ -261,9 +260,9 @@ export function BattleView({
             className={css({
               display: 'grid',
               gap: '3',
-              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-              '@media (max-width: 560px)': {
-                gridTemplateColumns: '1fr',
+              gridTemplateColumns: {
+                base: '1fr',
+                sm: 'repeat(2, minmax(0, 1fr))',
               },
             })}
           >
@@ -308,7 +307,6 @@ function CreateRoomDialog({
           loading={busy}
           variant="solid"
           colorPalette="yellow"
-          size="xl"
         >
           <Crown size={18} weight="fill" />
           部屋を作る
@@ -380,19 +378,18 @@ function HostedRoomNotice({
   return (
     <div
       className={css({
-        alignItems: 'center',
         bg: 'yellow.subtle.bg',
         borderColor: 'yellow.outline.border',
         borderRadius: 'l2',
         borderWidth: '1px',
         display: 'grid',
         gap: '3',
-        gridTemplateColumns: 'minmax(0, 1fr) auto auto',
-        p: '3',
-        '@media (max-width: 760px)': {
-          alignItems: 'stretch',
-          gridTemplateColumns: '1fr',
+        gridTemplateColumns: {
+          base: '1fr',
+          md: 'minmax(0, 1fr) auto auto',
         },
+        p: '3',
+        alignItems: { base: 'stretch', md: 'center' },
       })}
     >
       <div className={css({ display: 'grid', gap: '1', minW: '0' })}>
@@ -453,12 +450,10 @@ function MatchSettingsFields({
         className={css({
           display: 'grid',
           gap: '3',
-          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-          '@media (max-width: 1260px)': {
-            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-          },
-          '@media (max-width: 720px)': {
-            gridTemplateColumns: '1fr',
+          gridTemplateColumns: {
+            base: '1fr',
+            md: 'repeat(2, minmax(0, 1fr))',
+            xl: 'repeat(4, minmax(0, 1fr))',
           },
         })}
       >
@@ -498,12 +493,10 @@ function MatchSettingsFields({
         className={css({
           display: 'grid',
           gap: '3',
-          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-          '@media (max-width: 900px)': {
-            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-          },
-          '@media (max-width: 620px)': {
-            gridTemplateColumns: '1fr',
+          gridTemplateColumns: {
+            base: '1fr',
+            sm: 'repeat(2, minmax(0, 1fr))',
+            lg: 'repeat(3, minmax(0, 1fr))',
           },
         })}
       >
@@ -553,9 +546,9 @@ function CourseSequenceFields({
       className={css({
         display: 'grid',
         gap: '3',
-        gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-        '@media (max-width: 900px)': {
-          gridTemplateColumns: '1fr',
+        gridTemplateColumns: {
+          base: '1fr',
+          lg: 'repeat(3, minmax(0, 1fr))',
         },
       })}
     >
@@ -631,9 +624,9 @@ function ManualConnectionPanel({
             className={css({
               display: 'grid',
               gap: '4',
-              gridTemplateColumns: 'minmax(220px, 0.85fr) minmax(0, 1.15fr)',
-              '@media (max-width: 760px)': {
-                gridTemplateColumns: '1fr',
+              gridTemplateColumns: {
+                base: '1fr',
+                md: 'minmax(220px, 0.85fr) minmax(0, 1.15fr)',
               },
             })}
           >
@@ -649,9 +642,9 @@ function ManualConnectionPanel({
                 alignContent: 'end',
                 display: 'grid',
                 gap: '3',
-                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                '@media (max-width: 620px)': {
-                  gridTemplateColumns: '1fr',
+                gridTemplateColumns: {
+                  base: '1fr',
+                  sm: 'repeat(2, minmax(0, 1fr))',
                 },
               })}
             >
@@ -795,21 +788,20 @@ function RoomList({
         <div
           key={room.room_id}
           className={css({
-            alignItems: 'center',
             bg: 'gray.surface.bg',
             borderBottomColor: 'gray.surface.border',
             borderBottomWidth: '1px',
             display: 'grid',
             gap: '3',
-            gridTemplateColumns: 'minmax(0, 1fr) auto',
+            gridTemplateColumns: {
+              base: '1fr',
+              md: 'minmax(0, 1fr) auto',
+            },
             p: '3',
             _last: {
               borderBottomWidth: '0',
             },
-            '@media (max-width: 760px)': {
-              alignItems: 'stretch',
-              gridTemplateColumns: '1fr',
-            },
+            alignItems: { base: 'stretch', md: 'center' },
           })}
         >
           <div className={css({ display: 'grid', gap: '1', minW: '0' })}>

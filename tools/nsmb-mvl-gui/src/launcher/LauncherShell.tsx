@@ -103,9 +103,6 @@ export function LauncherShell({
           gridTemplateColumns: `${token('sizes.sidebar')} minmax(0, 1fr)`,
           minH: 'screen',
           w: 'full',
-          '@media (max-width: 1280px)': {
-            gridTemplateColumns: `${token('sizes.sidebarCompact')} minmax(0, 1fr)`,
-          },
         })}
         style={{
           backgroundAttachment: 'fixed',
@@ -127,9 +124,6 @@ export function LauncherShell({
             py: '6',
             position: 'sticky',
             top: '0',
-            '@media (max-width: 1280px)': {
-              px: '3',
-            },
           })}
         >
           <div
@@ -149,9 +143,6 @@ export function LauncherShell({
                   display: 'grid',
                   gap: '1',
                   px: '2',
-                  '@media (max-width: 1280px)': {
-                    justifyItems: 'center',
-                  },
                 })}
               >
                 <div
@@ -160,9 +151,6 @@ export function LauncherShell({
                     fontWeight: 'black',
                     lineHeight: 'none',
                     textStyle: '3xl',
-                    '@media (max-width: 1280px)': {
-                      textStyle: 'xl',
-                    },
                   })}
                 >
                   NSMB
@@ -173,9 +161,6 @@ export function LauncherShell({
                     fontWeight: 'black',
                     lineHeight: 'none',
                     textStyle: '3xl',
-                    '@media (max-width: 1280px)': {
-                      textStyle: 'xl',
-                    },
                   })}
                 >
                   <span className={css({ color: 'red.plain.fg' })}>M</span>
@@ -188,9 +173,6 @@ export function LauncherShell({
                     fontWeight: 'bold',
                     opacity: '0.8',
                     textStyle: 'xs',
-                    '@media (max-width: 1280px)': {
-                      display: 'none',
-                    },
                   })}
                 >
                   Mario vs Luigi Online
@@ -231,9 +213,6 @@ export function LauncherShell({
                     '&[data-selected] svg': {
                       color: 'yellow.plain.fg',
                     },
-                    '@media (max-width: 1280px)': {
-                      justifyContent: 'center',
-                    },
                   })}
                   value="battle"
                 >
@@ -248,9 +227,6 @@ export function LauncherShell({
                   <span
                     className={css({
                       textStyle: 'md',
-                      '@media (max-width: 1280px)': {
-                        display: 'none',
-                      },
                     })}
                   >
                     対戦
@@ -284,9 +260,6 @@ export function LauncherShell({
                     '&[data-selected] svg': {
                       color: 'yellow.plain.fg',
                     },
-                    '@media (max-width: 1280px)': {
-                      justifyContent: 'center',
-                    },
                   })}
                   value="settings"
                 >
@@ -301,9 +274,6 @@ export function LauncherShell({
                   <span
                     className={css({
                       textStyle: 'md',
-                      '@media (max-width: 1280px)': {
-                        display: 'none',
-                      },
                     })}
                   >
                     設定
@@ -324,9 +294,6 @@ export function LauncherShell({
                   css({
                     fontWeight: 'black',
                     maxW: 'full',
-                    '@media (max-width: 1280px)': {
-                      minW: '14',
-                    },
                   }),
                   updateButtonClass(updateStatus),
                 )}
@@ -346,9 +313,6 @@ export function LauncherShell({
                 <span
                   className={css({
                     textStyle: 'md',
-                    '@media (max-width: 1280px)': {
-                      display: 'none',
-                    },
                   })}
                 >
                   {updateButtonLabel(updateStatus)}
@@ -383,26 +347,17 @@ export function LauncherShell({
               gap: '6',
               maxW: 'contentMax',
               mx: 'auto',
-              px: '7',
+              px: { base: '4', md: '5', xl: '7' },
               py: '7',
               w: 'full',
-              '@media (max-width: 1280px)': {
-                px: '5',
-              },
-              '@media (max-width: 720px)': {
-                px: '4',
-              },
             })}
           >
             <header
               className={css({
                 alignItems: 'flex-start',
-                display: 'flex',
+                display: { base: 'grid', md: 'flex' },
                 gap: '5',
                 justifyContent: 'space-between',
-                '@media (max-width: 720px)': {
-                  display: 'grid',
-                },
               })}
             >
               <div
@@ -457,10 +412,8 @@ export function LauncherShell({
                 className={css({
                   alignItems: 'center',
                   display: 'flex',
+                  flexWrap: { base: 'wrap', md: 'nowrap' },
                   gap: '3',
-                  '@media (max-width: 720px)': {
-                    flexWrap: 'wrap',
-                  },
                 })}
               >
                 <StatusPill kind={connectionStatus.kind}>

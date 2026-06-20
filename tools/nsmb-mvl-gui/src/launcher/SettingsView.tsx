@@ -58,10 +58,13 @@ export function SettingsView({
         className={css({
           display: 'grid',
           gap: '5',
-          gridTemplateColumns: `minmax(0, 1fr) ${token('sizes.settingsAside')}`,
-          '@media (max-width: 1180px)': {
-            gridTemplateColumns: '1fr',
+          gridTemplateColumns: {
+            base: '1fr',
+            xl: `minmax(0, 1fr) ${token('sizes.settingsAside')}`,
           },
+          maxW: { base: '3xl', xl: 'contentMax' },
+          mx: { base: 'auto', xl: '0' },
+          w: 'full',
         })}
       >
         <section
@@ -79,9 +82,9 @@ export function SettingsView({
               className={css({
                 display: 'grid',
                 gap: '3',
-                gridTemplateColumns: 'minmax(0, 1fr) auto',
-                '@media (max-width: 760px)': {
-                  gridTemplateColumns: '1fr',
+                gridTemplateColumns: {
+                  base: '1fr',
+                  md: 'minmax(0, 1fr) auto',
                 },
               })}
             >
@@ -127,9 +130,9 @@ export function SettingsView({
               className={css({
                 display: 'grid',
                 gap: '4',
-                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                '@media (max-width: 760px)': {
-                  gridTemplateColumns: '1fr',
+                gridTemplateColumns: {
+                  base: '1fr',
+                  md: 'repeat(2, minmax(0, 1fr))',
                 },
               })}
             >
@@ -163,9 +166,9 @@ export function SettingsView({
             className={css({
               display: 'grid',
               gap: '4',
-              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-              '@media (max-width: 760px)': {
-                gridTemplateColumns: '1fr',
+              gridTemplateColumns: {
+                base: '1fr',
+                md: 'repeat(2, minmax(0, 1fr))',
               },
             })}
           >
