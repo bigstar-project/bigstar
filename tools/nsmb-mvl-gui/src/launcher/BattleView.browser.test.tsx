@@ -45,6 +45,7 @@ function actions(overrides: Partial<LauncherActions> = {}) {
     preflightCheck: vi.fn(async () => {}),
     prepareRoms: vi.fn(async () => {}),
     refreshRooms: vi.fn(async () => {}),
+    savePlayerName: vi.fn(async () => {}),
     selectBaseRomAndPrepare: vi.fn(async () => {}),
     selectRomPath: vi.fn(async () => {}),
     startMatch: vi.fn(async () => {}),
@@ -152,14 +153,15 @@ describe('対戦ビュー', () => {
   });
 
   test('部屋作成ダイアログを開いて作成処理に送信する', async () => {
-    const { launcherActions, screen, updateField } = await renderBattleView();
+    const { launcherActions, screen } = await renderBattleView();
 
     await screen.getByRole('button', { name: '部屋を作る' }).click();
     await expect.element(screen.getByRole('dialog')).toBeVisible();
-    await screen.getByLabelText('ホスト名').fill('Alice');
+    await expect
+      .element(screen.getByLabelText('プレイヤーネーム'))
+      .not.toBeInTheDocument();
     await screen.getByRole('button', { name: '作成して待機' }).click();
 
-    expect(updateField).toHaveBeenCalledWith('hostName', 'Alice');
     expect(launcherActions.createRoom).toHaveBeenCalledTimes(1);
   });
 

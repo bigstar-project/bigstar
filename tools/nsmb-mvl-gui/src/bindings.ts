@@ -7,6 +7,7 @@ export const commands = {
 	getDefaults: () => typedError<Defaults, string>(__TAURI_INVOKE("get_defaults")),
 	saveRomPaths: (request: SaveRomPathsRequest) => typedError<null, string>(__TAURI_INVOKE("save_rom_paths", { request })),
 	saveDiagnosticEventsEnabled: (request: SaveDiagnosticEventsRequest) => typedError<null, string>(__TAURI_INVOKE("save_diagnostic_events_enabled", { request })),
+	savePlayerName: (request: SavePlayerNameRequest) => typedError<null, string>(__TAURI_INVOKE("save_player_name", { request })),
 	selectRomFile: (currentPath: string) => typedError<string | null, string>(__TAURI_INVOKE("select_rom_file", { currentPath })),
 	preflightCheck: () => typedError<PreflightResponse, string>(__TAURI_INVOKE("preflight_check")),
 	generateRoms: (request: GenerateRomRequest) => typedError<GenerateRomResponse, string>(__TAURI_INVOKE("generate_roms", { request })),
@@ -50,6 +51,7 @@ export type Defaults = {
 	host_rom_path: string,
 	client_rom_path: string,
 	base_rom_path: string,
+	player_name: string,
 	roms_prepared_once: boolean,
 	input_config_opened_once: boolean,
 	port: number,
@@ -143,6 +145,10 @@ export type RomIdentity = {
 
 export type SaveDiagnosticEventsRequest = {
 	enabled: boolean,
+};
+
+export type SavePlayerNameRequest = {
+	player_name: string,
 };
 
 export type SaveRomPathsRequest = {

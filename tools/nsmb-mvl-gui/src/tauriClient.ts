@@ -7,6 +7,7 @@ import type {
   LaunchResponse,
   PreflightResponse,
   SaveDiagnosticEventsRequest,
+  SavePlayerNameRequest,
   SaveRomPathsRequest,
   SessionStatus,
 } from './types';
@@ -31,6 +32,7 @@ const previewDefaults: Defaults = {
   client_rom_path:
     'C:\\Users\\Sugiyama\\AppData\\Roaming\\dev.melonds.nsmb-mvl\\roms\\nsmb-mvl-client.nds',
   base_rom_path: '',
+  player_name: '',
   roms_prepared_once: false,
   input_config_opened_once: false,
   diagnostic_events_enabled: false,
@@ -73,6 +75,13 @@ export function saveDiagnosticEventsEnabled(
     return Promise.resolve(null);
   }
   return unwrapCommand(commands.saveDiagnosticEventsEnabled(request));
+}
+
+export function savePlayerName(request: SavePlayerNameRequest) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(null);
+  }
+  return unwrapCommand(commands.savePlayerName(request));
 }
 
 export function selectRomFile(currentPath: string) {

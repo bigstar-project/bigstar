@@ -53,6 +53,7 @@ describe('タウリクライアント', () => {
       host_rom_path: 'C:\\roms\\host.nds',
       input_config_opened_once: true,
       diagnostic_events_enabled: false,
+      player_name: 'Alice',
       port: 8165,
       roms_prepared_once: true,
       room_code: 'room-1',

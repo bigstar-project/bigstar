@@ -15,6 +15,7 @@ export type {
   Role,
   RomIdentity,
   SaveDiagnosticEventsRequest,
+  SavePlayerNameRequest,
   SaveRomPathsRequest,
   SessionStatus,
 } from './bindings';

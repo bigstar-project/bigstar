@@ -54,6 +54,7 @@ export type LauncherActions = {
   preflightCheck: () => Promise<void>;
   prepareRoms: () => Promise<void>;
   refreshRooms: () => Promise<void>;
+  savePlayerName: () => Promise<void>;
   selectBaseRomAndPrepare: () => Promise<void>;
   selectRomPath: (key: SelectRomKey) => Promise<void>;
   startMatch: () => Promise<void>;
@@ -65,6 +66,7 @@ export type OnboardingState = {
   romsPrepared: boolean;
   romGenerationBusy: boolean;
   inputConfigOpened: boolean;
+  playerNameConfigured: boolean;
 };
 
 export type DiagnosticsState = {

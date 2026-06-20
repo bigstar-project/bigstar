@@ -29,6 +29,7 @@ async function renderSettingsView() {
     preflightCheck: vi.fn(async () => {}),
     prepareRoms: vi.fn(async () => {}),
     refreshRooms: vi.fn(async () => {}),
+    savePlayerName: vi.fn(async () => {}),
     selectBaseRomAndPrepare: vi.fn(async () => {}),
     selectRomPath: vi.fn(async () => {}),
     startMatch: vi.fn(async () => {}),
@@ -43,6 +44,7 @@ async function renderSettingsView() {
         form={{
           ...initialForm,
           baseRomPath: 'C:\\roms\\base.nds',
+          hostName: 'Player',
           hostRomPath: 'C:\\roms\\host.nds',
           roomCode: 'test-room',
           signalUrl: 'ws://127.0.0.1:8787/session',
@@ -57,6 +59,16 @@ async function renderSettingsView() {
 }
 
 describe('設定ビュー', () => {
+  test('プレイヤーネームを更新して保存する', async () => {
+    const { launcherActions, screen, updateField } = await renderSettingsView();
+
+    await screen.getByLabelText('プレイヤーネーム').fill('Alice');
+    await screen.getByRole('button', { name: '保存' }).click();
+
+    expect(updateField).toHaveBeenCalledWith('hostName', 'Alice');
+    expect(launcherActions.savePlayerName).toHaveBeenCalledTimes(1);
+  });
+
   test('接続項目を更新してステータス確認を実行する', async () => {
     const { launcherActions, screen, updateField } = await renderSettingsView();
 

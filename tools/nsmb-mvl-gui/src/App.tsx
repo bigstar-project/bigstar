@@ -9,7 +9,8 @@ export function App() {
   const onboardingOpen =
     launcher.onboarding.loaded &&
     (!launcher.onboarding.romsPrepared ||
-      !launcher.onboarding.inputConfigOpened);
+      !launcher.onboarding.inputConfigOpened ||
+      !launcher.onboarding.playerNameConfigured);
 
   return (
     <>
@@ -52,6 +53,7 @@ export function App() {
         activityStatus={launcher.activityStatus}
         form={launcher.form}
         onboarding={launcher.onboarding}
+        updateField={launcher.updateField}
       />
     </>
   );

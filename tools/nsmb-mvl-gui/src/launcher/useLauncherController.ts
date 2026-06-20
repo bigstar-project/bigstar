@@ -31,6 +31,7 @@ import {
   openMelondsInputConfig as openMelondsInputConfigCommand,
   runPreflightCheck,
   saveDiagnosticEventsEnabled,
+  savePlayerName as savePlayerNameCommand,
   saveRomPaths,
   selectRomFile,
   startMatch as startMatchCommand,
@@ -113,6 +114,8 @@ export function useLauncherController() {
   const [romEnsureBusy, setRomEnsureBusy] = useState(false);
   const [romGenerationBusy, setRomGenerationBusy] = useState(false);
   const [onboardingInputConfigOpened, setOnboardingInputConfigOpened] =
+    useState(false);
+  const [onboardingPlayerNameConfigured, setOnboardingPlayerNameConfigured] =
     useState(false);
   const [matchmakingActionBusy, setMatchmakingActionBusy] = useState(false);
   const [updateBusy, setUpdateBusy] = useState(false);
@@ -271,7 +274,7 @@ export function useLauncherController() {
         const initialSeed = String(generateSeed());
         setForm({
           role: 'host',
-          hostName: 'Player',
+          hostName: defaults.player_name,
           signalUrl: defaults.signal_url,
           roomCode: defaults.room_code,
           port: defaults.port,
@@ -295,6 +298,9 @@ export function useLauncherController() {
         });
         setOnboardingRomsPrepared(defaults.roms_prepared_once);
         setOnboardingInputConfigOpened(defaults.input_config_opened_once);
+        setOnboardingPlayerNameConfigured(
+          defaults.player_name.trim().length > 0,
+        );
         setDefaultsLoaded(true);
         await pollStatus();
       } catch (error) {
@@ -626,8 +632,19 @@ export function useLauncherController() {
     matchmakingActionBusyRef.current = true;
     setMatchmakingActionBusy(true);
     try {
+      const playerName = form.hostName.trim();
+      if (!playerName) {
+        setActivityStatus({
+          text: '設定画面でプレイヤーネームを保存してください',
+          kind: 'warn',
+        });
+        return;
+      }
       setActivityStatus({ text: '部屋用 ROM を確認中', kind: 'idle' });
-      const plannedForm = withRequiredPlan(form, { refreshRandom: true });
+      const plannedForm = withRequiredPlan(
+        { ...form, hostName: playerName },
+        { refreshRandom: true },
+      );
       const stage = selectedStageFrom(
         plannedForm.courseMode,
         plannedForm.matchSeed,
@@ -882,6 +899,36 @@ export function useLauncherController() {
     }
   };
 
+  const savePlayerName = async () => {
+    const playerName = form.hostName.trim();
+    if (!playerName) {
+      setActivityStatus({
+        text: 'プレイヤーネームを入力してください',
+        kind: 'warn',
+      });
+      return;
+    }
+    if ([...playerName].length > 32) {
+      setActivityStatus({
+        text: 'プレイヤーネームは32文字以内で入力してください',
+        kind: 'warn',
+      });
+      return;
+    }
+
+    try {
+      await savePlayerNameCommand({ player_name: playerName });
+      setForm((current) => ({ ...current, hostName: playerName }));
+      setOnboardingPlayerNameConfigured(true);
+      setActivityStatus({
+        text: 'プレイヤーネームを保存しました',
+        kind: 'ok',
+      });
+    } catch (error) {
+      setActivityStatus({ text: String(error), kind: 'error' });
+    }
+  };
+
   const copyRoomCode = async () => {
     try {
       await navigator.clipboard.writeText(form.roomCode);
@@ -992,6 +1039,7 @@ export function useLauncherController() {
     preflightCheck,
     prepareRoms,
     refreshRooms,
+    savePlayerName,
     selectBaseRomAndPrepare,
     selectRomPath,
     startMatch,
@@ -1036,6 +1084,7 @@ export function useLauncherController() {
       romsPrepared: onboardingRomsPrepared,
       romGenerationBusy,
       inputConfigOpened: onboardingInputConfigOpened,
+      playerNameConfigured: onboardingPlayerNameConfigured,
     },
     romStatus:
       romEnsureBusy || romGenerationBusy

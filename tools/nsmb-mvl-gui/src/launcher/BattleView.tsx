@@ -329,13 +329,6 @@ function CreateRoomDialog({
             </Dialog.Header>
             <Dialog.Body>
               <div className={css({ display: 'grid', gap: '4' })}>
-                <TextField
-                  label="ホスト名"
-                  value={form.hostName}
-                  maxLength={32}
-                  placeholder="Player"
-                  onChange={(value) => updateField('hostName', value)}
-                />
                 <MatchSettingsFields form={form} updateField={updateField} />
               </div>
             </Dialog.Body>

@@ -68,6 +68,7 @@ pub(crate) struct Defaults {
     pub(crate) host_rom_path: String,
     pub(crate) client_rom_path: String,
     pub(crate) base_rom_path: String,
+    pub(crate) player_name: String,
     pub(crate) roms_prepared_once: bool,
     pub(crate) input_config_opened_once: bool,
     pub(crate) port: u16,
@@ -78,6 +79,7 @@ pub(crate) struct Defaults {
 #[serde(default)]
 pub(crate) struct LauncherSettings {
     pub(crate) base_rom_path: String,
+    pub(crate) player_name: String,
     pub(crate) roms_prepared_once: bool,
     pub(crate) input_config_opened_once: bool,
     pub(crate) diagnostic_events_enabled: bool,
@@ -93,6 +95,12 @@ pub(crate) struct SaveRomPathsRequest {
 #[serde(rename_all = "snake_case")]
 pub(crate) struct SaveDiagnosticEventsRequest {
     pub(crate) enabled: bool,
+}
+
+#[derive(Debug, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct SavePlayerNameRequest {
+    pub(crate) player_name: String,
 }
 
 #[derive(Debug, Serialize, Type)]

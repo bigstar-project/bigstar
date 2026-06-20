@@ -1,9 +1,19 @@
-import { CheckCircle, GameController, HardDrives } from '@phosphor-icons/react';
+import {
+  CheckCircle,
+  GameController,
+  HardDrives,
+  UserCircle,
+} from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
 import { css } from 'styled-system/css';
+import { TextField } from '../components/Fields';
 import { Button, Dialog } from '../components/ui';
 import type { FormState, StatusKind } from '../types';
-import type { LauncherActions, OnboardingState } from './types';
+import type {
+  LauncherActions,
+  OnboardingState,
+  UpdateFormField,
+} from './types';
 
 function StepStatus({
   complete,
@@ -138,18 +148,22 @@ export function OnboardingGate({
   activityStatus,
   form,
   onboarding,
+  updateField,
 }: {
   actions: Pick<
     LauncherActions,
-    'openMelondsInputConfig' | 'selectBaseRomAndPrepare'
+    'openMelondsInputConfig' | 'savePlayerName' | 'selectBaseRomAndPrepare'
   >;
   activityStatus: { text: string; kind: StatusKind } | null;
   form: FormState;
   onboarding: OnboardingState;
+  updateField: UpdateFormField;
 }) {
   if (
     !onboarding.loaded ||
-    (onboarding.romsPrepared && onboarding.inputConfigOpened)
+    (onboarding.romsPrepared &&
+      onboarding.inputConfigOpened &&
+      onboarding.playerNameConfigured)
   ) {
     return null;
   }
@@ -187,7 +201,7 @@ export function OnboardingGate({
               </Dialog.Title>
             </div>
             <Dialog.Description>
-              最初に、対戦で使うROMを作成し、melonDS側のボタン割り当てを設定してください。
+              最初に、対戦で使うROM、melonDS側のボタン割り当て、公開ルームに表示する名前を設定してください。
             </Dialog.Description>
           </Dialog.Header>
 
@@ -216,6 +230,43 @@ export function OnboardingGate({
                 gap: '3',
               })}
             >
+              <StepRow
+                action={
+                  <div
+                    className={css({
+                      display: 'grid',
+                      gap: '2',
+                      gridTemplateColumns: {
+                        base: '1fr',
+                        md: 'minmax(0, 1fr) auto',
+                      },
+                      minW: { base: '0', md: '80' },
+                    })}
+                  >
+                    <TextField
+                      label="プレイヤーネーム"
+                      value={form.hostName}
+                      maxLength={32}
+                      placeholder="Player"
+                      onChange={(value) => updateField('hostName', value)}
+                    />
+                    <Button
+                      type="button"
+                      className={css({
+                        alignSelf: 'end',
+                      })}
+                      onClick={() => void actions.savePlayerName()}
+                    >
+                      保存
+                    </Button>
+                  </div>
+                }
+                complete={onboarding.playerNameConfigured}
+                description="公開ルームの一覧で相手に表示される名前です。あとから設定画面で変更できます。"
+                icon={<UserCircle size={26} weight="fill" />}
+                pendingText="未完了"
+                title="プレイヤーネームを設定"
+              />
               <StepRow
                 action={
                   <Button

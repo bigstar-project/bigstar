@@ -9,7 +9,7 @@ use std::os::windows::process::CommandExt;
 use crate::config::{DEFAULT_PORT, DEFAULT_ROOM_CODE, DEFAULT_SIGNAL_URL};
 use crate::models::{
     Defaults, GenerateRomRequest, GenerateRomResponse, LaunchRequest, LaunchResponse,
-    SaveDiagnosticEventsRequest, SaveRomPathsRequest, SessionStatus,
+    SaveDiagnosticEventsRequest, SavePlayerNameRequest, SaveRomPathsRequest, SessionStatus,
 };
 use crate::paths::{
     absolutize_existing, app_data_dir, create_log_dir, find_bridge_binary, find_input_script,
@@ -41,6 +41,7 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
         host_rom_path: host_rom.to_string_lossy().into_owned(),
         client_rom_path: client_rom.to_string_lossy().into_owned(),
         base_rom_path: saved.base_rom_path.trim().to_owned(),
+        player_name: saved.player_name.trim().to_owned(),
         roms_prepared_once: saved.roms_prepared_once,
         input_config_opened_once: saved.input_config_opened_once,
         port: DEFAULT_PORT,
@@ -64,6 +65,25 @@ pub(crate) fn save_diagnostic_events_enabled(
 ) -> Result<(), String> {
     let mut settings = load_launcher_settings(&app)?;
     settings.diagnostic_events_enabled = request.enabled;
+    save_launcher_settings(&app, &settings)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn save_player_name(
+    app: AppHandle,
+    request: SavePlayerNameRequest,
+) -> Result<(), String> {
+    let player_name = request.player_name.trim();
+    if player_name.is_empty() {
+        return Err("プレイヤーネームを入力してください".to_owned());
+    }
+    if player_name.chars().count() > 32 {
+        return Err("プレイヤーネームは32文字以内で入力してください".to_owned());
+    }
+
+    let mut settings = load_launcher_settings(&app)?;
+    settings.player_name = player_name.to_owned();
     save_launcher_settings(&app, &settings)
 }
 

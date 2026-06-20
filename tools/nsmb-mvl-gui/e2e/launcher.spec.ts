@@ -33,15 +33,17 @@ async function installGuiDriver(
   page: Page,
   options: {
     inputConfigOpened?: boolean;
+    playerName?: string;
     romsPrepared?: boolean;
   } = {},
 ) {
   await page.addInitScript(
-    ({ inputConfigOpened, romIdentity, romsPrepared }) => {
+    ({ inputConfigOpened, playerName, romIdentity, romsPrepared }) => {
       const state = {
         active: false,
         inputConfigOpened,
         lastLogDir: null as string | null,
+        playerName,
         romsPrepared,
       };
       const calls: { args: unknown[]; name: string }[] = [];
@@ -88,6 +90,7 @@ async function installGuiDriver(
                 host_rom_path: 'C:\\roms\\host.nds',
                 input_config_opened_once: state.inputConfigOpened,
                 diagnostic_events_enabled: false,
+                player_name: state.playerName,
                 port: 8165,
                 roms_prepared_once: state.romsPrepared,
                 room_code: 'test-room',
@@ -131,6 +134,13 @@ async function installGuiDriver(
               calls.push({ args: [args.request], name: command });
               return null;
             }
+            if (command === 'save_player_name') {
+              calls.push({ args: [args.request], name: command });
+              state.playerName = (
+                args.request as { player_name: string }
+              ).player_name;
+              return null;
+            }
             if (command === 'select_rom_file') {
               return 'C:\\roms\\base.nds';
             }
@@ -156,6 +166,7 @@ async function installGuiDriver(
     },
     {
       inputConfigOpened: options.inputConfigOpened ?? true,
+      playerName: options.playerName ?? 'Player',
       romIdentity,
       romsPrepared: options.romsPrepared ?? true,
     },
@@ -249,6 +260,7 @@ function lastCall(calls: { args: unknown[]; name: string }[], name: string) {
 test('初回セットアップでロム生成と入力設定を完了できる', async ({ page }) => {
   await installGuiDriver(page, {
     inputConfigOpened: false,
+    playerName: '',
     romsPrepared: false,
   });
   await installRoomsApi(page);
@@ -262,6 +274,10 @@ test('初回セットアップでロム生成と入力設定を完了できる',
   await expect(
     page.getByText(`v${packageJson.version}`, { exact: true }),
   ).toBeVisible();
+  const onboardingDialog = page.getByRole('dialog');
+  await onboardingDialog.getByLabel('プレイヤーネーム').fill('Alice');
+  await onboardingDialog.getByRole('button', { name: '保存' }).click();
+  await expect.poll(() => callNames(page)).toContain('save_player_name');
   await page.getByRole('button', { name: 'ROMを選んで生成' }).click();
   await expect.poll(() => callNames(page)).toContain('generate_roms');
   const inputConfigButton = page.getByRole('button', {

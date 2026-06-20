@@ -6,6 +6,7 @@ import {
   HardDrives,
   Play,
   ShieldCheck,
+  UserCircle,
   WarningCircle,
   WifiHigh,
 } from '@phosphor-icons/react';
@@ -46,6 +47,7 @@ export function SettingsView({
     | 'pollStatus'
     | 'preflightCheck'
     | 'prepareRoms'
+    | 'savePlayerName'
     | 'selectRomPath'
   >;
   form: FormState;
@@ -74,6 +76,37 @@ export function SettingsView({
             gap: '4',
           })}
         >
+          <SettingsPanel
+            icon={<UserCircle size={24} weight="fill" />}
+            title="プロフィール"
+          >
+            <div
+              className={css({
+                display: 'grid',
+                gap: '3',
+                gridTemplateColumns: {
+                  base: '1fr',
+                  md: 'minmax(0, 1fr) auto',
+                },
+              })}
+            >
+              <TextField
+                label="プレイヤーネーム"
+                value={form.hostName}
+                maxLength={32}
+                placeholder="Player"
+                onChange={(value) => updateField('hostName', value)}
+              />
+              <Button
+                className={css({ alignSelf: 'end' })}
+                variant="outline"
+                onClick={() => void actions.savePlayerName()}
+              >
+                保存
+              </Button>
+            </div>
+          </SettingsPanel>
+
           <SettingsPanel
             icon={<Broadcast size={24} weight="bold" />}
             title="接続設定"
