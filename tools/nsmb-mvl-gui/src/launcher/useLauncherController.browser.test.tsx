@@ -106,6 +106,7 @@ vi.mock('../tauriClient', () => ({
     game_state_mismatch: null,
     log_dir: null,
     melon: null,
+    mvl_results: [],
     webrtc: null,
   })),
   openLogDir: vi.fn(async () => {}),

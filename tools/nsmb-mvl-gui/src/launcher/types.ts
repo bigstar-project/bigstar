@@ -1,7 +1,14 @@
 import type { RoomSummary } from '../matchmakingClient';
-import type { BridgeDiagnostics, FormState, GameStateMismatch } from '../types';
+import type {
+  BridgeDiagnostics,
+  FormState,
+  GameSettings,
+  GameStateMismatch,
+  MvlStageResult,
+  Role,
+} from '../types';
 
-export type View = 'battle' | 'settings';
+export type View = 'battle' | 'history' | 'settings';
 
 export type UpdateStatus = {
   phase:
@@ -81,4 +88,17 @@ export type MatchmakingRoomsState = {
   busy: boolean;
   error: string | null;
   hostedRoomId: string | null;
+};
+
+export type BattleMatchStatus = 'running' | 'completed' | 'stopped';
+
+export type BattleMatchRecord = {
+  id: string;
+  logDir: string;
+  role: Role;
+  roomCode: string;
+  settings: GameSettings;
+  stages: MvlStageResult[];
+  startedAt: string;
+  status: BattleMatchStatus;
 };

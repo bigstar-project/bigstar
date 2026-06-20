@@ -4,6 +4,7 @@ import { Tabs } from '../components/ui';
 import { initialForm } from '../form';
 import { BattleView } from './BattleView';
 import type {
+  BattleMatchRecord,
   DiagnosticsState,
   LauncherActions,
   LauncherSummary,
@@ -87,10 +88,61 @@ const rooms: MatchmakingRoomsState = {
   ],
 };
 
+const currentMatch: BattleMatchRecord = {
+  id: 'C:\\logs\\run1',
+  logDir: 'C:\\logs\\run1',
+  role: 'host',
+  roomCode: 'test-room',
+  settings: {
+    big_stars: 5,
+    course_mode: 'select',
+    course_stages: [2, 3, 4],
+    input_delay_frames: 4,
+    input_max_frame_lead: 4,
+    lives: '3',
+    match_seed: '123',
+    rng_seeds: ['123', '124', '125'],
+    rollback_enabled: false,
+    wins: 2,
+  },
+  stages: [
+    {
+      frame: 4320,
+      game_index: 1,
+      line: 'NSMB MvL auto restart: result inst=0 frame=4320 winner=0 stars=5/0 displayed=5/0 collected=5/0 lives=3/2 deaths=0/1 dead=0/0 matchWins=1/0 target=2',
+      luigi: {
+        collected_stars: 0,
+        dead: false,
+        deaths: 1,
+        displayed_stars: 0,
+        lives: 2,
+        stars: 0,
+      },
+      luigi_match_wins: 0,
+      mario: {
+        collected_stars: 5,
+        dead: false,
+        deaths: 0,
+        displayed_stars: 5,
+        lives: 3,
+        stars: 5,
+      },
+      mario_match_wins: 1,
+      resolved: true,
+      stage: 2,
+      target_wins: 2,
+      winner: 0,
+    },
+  ],
+  startedAt: '2026-06-20T12:00:00.000Z',
+  status: 'running',
+};
+
 async function renderBattleView(
   props: {
     actionOverrides?: Partial<LauncherActions>;
     diagnostics?: DiagnosticsState;
+    currentMatch?: BattleMatchRecord | null;
     matchmakingRooms?: MatchmakingRoomsState;
     summaryOverride?: Partial<LauncherSummary>;
   } = {},
@@ -118,6 +170,7 @@ async function renderBattleView(
         }}
         lastLogDir="C:\\logs\\run1"
         matchmakingRooms={props.matchmakingRooms ?? rooms}
+        currentMatch={props.currentMatch ?? null}
         summary={{ ...summary, ...props.summaryOverride }}
         updateField={updateField}
       />
@@ -142,6 +195,17 @@ describe('対戦ビュー', () => {
     await screen.getByRole('button', { name: '参加' }).click();
 
     expect(launcherActions.joinRoom).toHaveBeenCalledWith('room12345');
+  });
+
+  test('現在の対戦状況にステージ結果を表示する', async () => {
+    const { screen } = await renderBattleView({ currentMatch });
+
+    await expect.element(screen.getByText('現在の対戦状況')).toBeVisible();
+    await expect.element(screen.getByText('1 - 0')).toBeVisible();
+    await expect.element(screen.getByText('Mario 勝利')).toBeVisible();
+    await expect.element(screen.getByText('Stage 2')).toBeVisible();
+    await expect.element(screen.getByText('5 / 0')).toBeVisible();
+    await expect.element(screen.getByText('3 / 2')).toBeVisible();
   });
 
   test('公開ルームを手動更新する', async () => {

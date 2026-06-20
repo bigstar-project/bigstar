@@ -11,7 +11,7 @@ use std::os::windows::process::CommandExt;
 use crate::config::{DEFAULT_FRAMES, NETPLAY_START_FRAME};
 use crate::models::{
     BridgeDiagnostics, CourseMode, GameStateMismatch, LaunchRequest, LaunchResponse,
-    MelonDiagnostics, Role, SessionStatus,
+    MelonDiagnostics, MvlPlayerResult, MvlStageResult, Role, SessionStatus,
 };
 use crate::settings::selected_stage;
 use crate::state::{AppState, ManagedSession};
@@ -150,6 +150,7 @@ pub(crate) fn session_status_inner(state: &AppState) -> Result<SessionStatus, St
             webrtc: None,
             diagnostics_error: None,
             game_state_mismatch: None,
+            mvl_results: Vec::new(),
         });
     };
 
@@ -160,6 +161,7 @@ pub(crate) fn session_status_inner(state: &AppState) -> Result<SessionStatus, St
     let game_state_mismatch = read_melon_diagnostics(&session.log_dir)
         .and_then(|diagnostics| diagnostics.game_state_mismatch)
         .filter(should_show_game_state_mismatch_in_gui);
+    let mvl_results = read_mvl_results(&session.log_dir);
 
     Ok(SessionStatus {
         active,
@@ -169,6 +171,7 @@ pub(crate) fn session_status_inner(state: &AppState) -> Result<SessionStatus, St
         webrtc,
         diagnostics_error,
         game_state_mismatch,
+        mvl_results,
     })
 }
 
@@ -505,6 +508,113 @@ pub(crate) fn read_bridge_diagnostics(
 pub(crate) fn read_melon_diagnostics(log_dir: &Path) -> Option<MelonDiagnostics> {
     let json = fs::read(log_dir.join("melonds-diagnostics.json")).ok()?;
     serde_json::from_slice(&json).ok()
+}
+
+pub(crate) fn read_mvl_results(log_dir: &Path) -> Vec<MvlStageResult> {
+    let stdout = match fs::read_to_string(log_dir.join("melonds.stdout.txt")) {
+        Ok(stdout) => stdout,
+        Err(_) => return Vec::new(),
+    };
+    let stages = read_launcher_course_stages(log_dir);
+    stdout
+        .lines()
+        .filter_map(parse_mvl_result_line)
+        .enumerate()
+        .map(|(index, mut result)| {
+            result.game_index = (index + 1) as u32;
+            result.stage = stages.get(index).copied();
+            result
+        })
+        .collect()
+}
+
+fn read_launcher_course_stages(log_dir: &Path) -> Vec<u8> {
+    let json = match fs::read(log_dir.join("launcher.json")) {
+        Ok(json) => json,
+        Err(_) => return Vec::new(),
+    };
+    let value: serde_json::Value = match serde_json::from_slice(&json) {
+        Ok(value) => value,
+        Err(_) => return Vec::new(),
+    };
+    value
+        .get("request")
+        .and_then(|request| request.get("settings"))
+        .and_then(|settings| settings.get("course_stages"))
+        .and_then(serde_json::Value::as_array)
+        .map(|stages| {
+            stages
+                .iter()
+                .filter_map(serde_json::Value::as_u64)
+                .filter_map(|stage| u8::try_from(stage).ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_mvl_result_line(line: &str) -> Option<MvlStageResult> {
+    const PREFIX: &str = "NSMB MvL auto restart: result";
+    if !line.starts_with(PREFIX) {
+        return None;
+    }
+
+    let resolved = !line.starts_with("NSMB MvL auto restart: result unresolved");
+    let winner = if resolved {
+        parse_value(line, "winner").and_then(|winner| u8::try_from(winner).ok())
+    } else {
+        None
+    };
+    let frame = parse_value(line, "frame")?;
+    let (stars_mario, stars_luigi) = parse_pair(line, "stars")?;
+    let (displayed_mario, displayed_luigi) = parse_pair(line, "displayed")?;
+    let (collected_mario, collected_luigi) = parse_pair(line, "collected")?;
+    let (lives_mario, lives_luigi) = parse_pair(line, "lives")?;
+    let (deaths_mario, deaths_luigi) = parse_pair(line, "deaths")?;
+    let (dead_mario, dead_luigi) = parse_pair(line, "dead")?;
+    let (mario_match_wins, luigi_match_wins) = parse_pair(line, "matchWins")?;
+    let target_wins = parse_value(line, "target")?;
+
+    Some(MvlStageResult {
+        game_index: 0,
+        stage: None,
+        frame,
+        winner,
+        mario: MvlPlayerResult {
+            stars: stars_mario,
+            displayed_stars: displayed_mario,
+            collected_stars: collected_mario,
+            lives: lives_mario,
+            deaths: deaths_mario,
+            dead: dead_mario != 0,
+        },
+        luigi: MvlPlayerResult {
+            stars: stars_luigi,
+            displayed_stars: displayed_luigi,
+            collected_stars: collected_luigi,
+            lives: lives_luigi,
+            deaths: deaths_luigi,
+            dead: dead_luigi != 0,
+        },
+        mario_match_wins,
+        luigi_match_wins,
+        target_wins,
+        resolved,
+        line: line.to_owned(),
+    })
+}
+
+fn parse_value(line: &str, key: &str) -> Option<u32> {
+    line.split_whitespace()
+        .find_map(|part| part.strip_prefix(&format!("{key}=")))
+        .and_then(|value| value.parse().ok())
+}
+
+fn parse_pair(line: &str, key: &str) -> Option<(u32, u32)> {
+    let value = line
+        .split_whitespace()
+        .find_map(|part| part.strip_prefix(&format!("{key}=")))?;
+    let (left, right) = value.split_once('/')?;
+    Some((left.parse().ok()?, right.parse().ok()?))
 }
 
 #[cfg(windows)]

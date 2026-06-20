@@ -11,6 +11,8 @@ export type {
   LaunchRequest,
   LaunchResponse,
   Lives,
+  MvlPlayerResult,
+  MvlStageResult,
   PreflightResponse,
   Role,
   RomIdentity,

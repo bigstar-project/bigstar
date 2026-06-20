@@ -44,11 +44,14 @@ import type {
   GenerateRomRequest,
   GenerateRomResponse,
   LaunchRequest,
+  MvlStageResult,
   RomIdentity,
   SaveRomPathsRequest,
   StatusKind,
 } from '../types';
 import {
+  type BattleMatchRecord,
+  type BattleMatchStatus,
   isUpdateRequired,
   type LauncherActions,
   type LauncherSummary,
@@ -77,6 +80,17 @@ function assertRomPairMatches(local: RomIdentity, remote: RomIdentity) {
   }
 }
 
+function matchIsComplete(results: MvlStageResult[]) {
+  const latest = results.at(-1);
+  if (!latest) {
+    return false;
+  }
+  return (
+    latest.mario_match_wins >= latest.target_wins ||
+    latest.luigi_match_wins >= latest.target_wins
+  );
+}
+
 type PreparedRomCache = {
   sourceRom: string;
   hostRom: string;
@@ -92,7 +106,11 @@ type HostedRoom = {
 export function useLauncherController() {
   const queryClient = useQueryClient();
   const [activeView, setActiveView] = useState<View>(() =>
-    window.location.hash === '#settings' ? 'settings' : 'battle',
+    window.location.hash === '#settings'
+      ? 'settings'
+      : window.location.hash === '#history'
+        ? 'history'
+        : 'battle',
   );
   const [form, setForm] = useState<FormState>(initialForm);
   const [connectionStatus, setConnectionStatus] = useState({
@@ -134,6 +152,11 @@ export function useLauncherController() {
   const hostedRoomLaunchBusyRef = useRef(false);
   const startupRomPreparationKeyRef = useRef<string | null>(null);
   const [hostedRoom, setHostedRoom] = useState<HostedRoom | null>(null);
+  const [currentMatch, setCurrentMatch] = useState<BattleMatchRecord | null>(
+    null,
+  );
+  const currentMatchRef = useRef<BattleMatchRecord | null>(null);
+  const [matchHistory, setMatchHistory] = useState<BattleMatchRecord[]>([]);
 
   const currentRomPath =
     form.role === 'host' ? form.hostRomPath : form.clientRomPath;
@@ -194,6 +217,49 @@ export function useLauncherController() {
   }, [updateStatus.phase]);
 
   useEffect(() => {
+    currentMatchRef.current = currentMatch;
+  }, [currentMatch]);
+
+  const archiveCurrentMatch = useCallback(
+    (status: BattleMatchStatus = 'stopped') => {
+      const current = currentMatchRef.current;
+      if (!current) {
+        return;
+      }
+      const archived: BattleMatchRecord = {
+        ...current,
+        status: matchIsComplete(current.stages) ? 'completed' : status,
+      };
+      currentMatchRef.current = null;
+      setCurrentMatch(null);
+      setMatchHistory((history) =>
+        [
+          archived,
+          ...history.filter((match) => match.id !== archived.id),
+        ].slice(0, 50),
+      );
+    },
+    [],
+  );
+
+  const applySessionResults = useCallback(
+    (logDir: string, results: MvlStageResult[]) => {
+      const current = currentMatchRef.current;
+      if (!current || current.logDir !== logDir) {
+        return;
+      }
+      const next: BattleMatchRecord = {
+        ...current,
+        stages: results,
+        status: matchIsComplete(results) ? 'completed' : current.status,
+      };
+      currentMatchRef.current = next;
+      setCurrentMatch(next);
+    },
+    [],
+  );
+
+  useEffect(() => {
     if (!activityStatus) {
       return;
     }
@@ -229,6 +295,7 @@ export function useLauncherController() {
       const response = await getSessionStatus();
       if (response.log_dir) {
         setLastLogDir(response.log_dir);
+        applySessionResults(response.log_dir, response.mvl_results);
       }
       setBridgeDiagnostics(response.webrtc ?? null);
       setGameStateMismatch(response.game_state_mismatch ?? null);
@@ -242,6 +309,12 @@ export function useLauncherController() {
       if (!response.active) {
         setGameStateMismatch(null);
         setConnectionStatus({ text: '未接続', kind: 'idle' });
+        if (
+          response.log_dir &&
+          currentMatchRef.current?.logDir === response.log_dir
+        ) {
+          archiveCurrentMatch('stopped');
+        }
         return;
       }
       if (response.diagnostics_error) {
@@ -262,7 +335,7 @@ export function useLauncherController() {
     } catch {
       setConnectionStatus({ text: '状態取得に失敗しました', kind: 'warn' });
     }
-  }, []);
+  }, [applySessionResults, archiveCurrentMatch]);
 
   useEffect(() => {
     let disposed = false;
@@ -547,6 +620,19 @@ export function useLauncherController() {
         request.rom_identity = roms.rom_identity;
         setActivityStatus({ text: `起動中 stage=${stage}`, kind: 'idle' });
         const response = await startMatchCommand(request);
+        archiveCurrentMatch('stopped');
+        const record: BattleMatchRecord = {
+          id: response.log_dir,
+          logDir: response.log_dir,
+          role: nextForm.role,
+          roomCode: nextForm.roomCode,
+          settings: request.settings,
+          stages: [],
+          startedAt: new Date().toISOString(),
+          status: 'running',
+        };
+        currentMatchRef.current = record;
+        setCurrentMatch(record);
         setLastLogDir(response.log_dir);
         setGameStateMismatch(null);
         setActivityStatus({
@@ -559,7 +645,7 @@ export function useLauncherController() {
         return false;
       }
     },
-    [cachedPreparedRomsFor, ensurePreparedRoms, form],
+    [archiveCurrentMatch, cachedPreparedRomsFor, ensurePreparedRoms, form],
   );
 
   const startMatch = async () => {
@@ -830,6 +916,7 @@ export function useLauncherController() {
     try {
       await stopMatchCommand();
       setGameStateMismatch(null);
+      archiveCurrentMatch('stopped');
       setActivityStatus({ text: '停止しました', kind: 'warn' });
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });
@@ -1058,6 +1145,7 @@ export function useLauncherController() {
     changeView,
     connectionActive,
     connectionStatus,
+    currentMatch,
     activityStatus,
     form,
     lastLogDir,
@@ -1079,6 +1167,7 @@ export function useLauncherController() {
       error: roomsQuery.error ? String(roomsQuery.error) : null,
       hostedRoomId: hostedRoom?.roomId ?? null,
     },
+    matchHistory,
     onboarding: {
       loaded: defaultsLoaded,
       romsPrepared: onboardingRomsPrepared,

@@ -9,9 +9,9 @@ use crate::models::{
 use crate::paths::allowed_log_dir;
 use crate::processes::{
     build_bridge_command, build_melon_command, melon_env, read_bridge_diagnostics,
-    read_melon_diagnostics, remove_inherited_melonds_env_keys, run_bridge_signaling_smoke,
-    session_status_inner, should_show_game_state_mismatch_in_gui, start_match_resolved,
-    stop_existing, LaunchPaths,
+    read_melon_diagnostics, read_mvl_results, remove_inherited_melonds_env_keys,
+    run_bridge_signaling_smoke, session_status_inner, should_show_game_state_mismatch_in_gui,
+    start_match_resolved, stop_existing, LaunchPaths,
 };
 use crate::roms::{reusable_rom_is_current, reusable_rom_marker_path, write_reusable_rom_marker};
 use crate::settings::{selected_stage, validate_request};
@@ -473,6 +473,65 @@ fn melon_diagnostics_reads_game_state_mismatch_json() {
 }
 
 #[test]
+fn mvl_results_parse_melon_stdout_and_launcher_stage_sequence() {
+    let dir = temp_log_dir("mvl-results");
+    fs::write(
+        dir.join("launcher.json"),
+        br#"{
+          "request": {
+            "settings": {
+              "course_stages": [2, 3, 4, 0, 1]
+            }
+          }
+        }"#,
+    )
+    .expect("write launcher");
+    fs::write(
+        dir.join("melonds.stdout.txt"),
+        "other line\n\
+NSMB MvL auto restart: result inst=0 frame=4320 winner=0 stars=5/0 displayed=5/0 collected=5/0 lives=3/2 deaths=0/1 dead=0/0 matchWins=1/0 target=2\n\
+NSMB MvL auto restart: result inst=0 frame=8200 winner=1 stars=0/5 displayed=0/5 collected=0/5 lives=1/3 deaths=2/0 dead=1/0 matchWins=1/1 target=2\n",
+    )
+    .expect("write stdout");
+
+    let results = read_mvl_results(&dir);
+
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0].game_index, 1);
+    assert_eq!(results[0].stage, Some(2));
+    assert_eq!(results[0].winner, Some(0));
+    assert_eq!(results[0].mario.stars, 5);
+    assert_eq!(results[0].luigi.lives, 2);
+    assert_eq!(results[0].mario_match_wins, 1);
+    assert_eq!(results[0].target_wins, 2);
+    assert!(results[0].resolved);
+    assert_eq!(results[1].game_index, 2);
+    assert_eq!(results[1].stage, Some(3));
+    assert_eq!(results[1].winner, Some(1));
+    assert!(results[1].mario.dead);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn mvl_results_keep_unresolved_stage_without_winner() {
+    let dir = temp_log_dir("mvl-results-unresolved");
+    fs::write(
+        dir.join("melonds.stdout.txt"),
+        "NSMB MvL auto restart: result unresolved inst=0 frame=2400 stars=0/0 displayed=0/0 collected=0/0 lives=3/3 deaths=0/0 dead=0/0 matchWins=0/0 target=2\n",
+    )
+    .expect("write stdout");
+
+    let results = read_mvl_results(&dir);
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].winner, None);
+    assert!(!results[0].resolved);
+    assert_eq!(results[0].mario.lives, 3);
+    assert_eq!(results[0].luigi.lives, 3);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn game_state_mismatch_gui_visibility_ignores_basic_only_mismatch() {
     assert!(!should_show_game_state_mismatch_in_gui(
         &game_state_mismatch(Some(false), Some(true), Some(true), Some(true))
@@ -548,6 +607,7 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
     assert_eq!(status.bridge.as_deref(), Some("running"));
     assert_eq!(status.melon.as_deref(), Some("running"));
     assert!(status.game_state_mismatch.is_none());
+    assert!(status.mvl_results.is_empty());
 
     let bridge_stdout =
         wait_for_file_contains(&dir.join("logs").join("bridge.stdout.txt"), "fake-bridge");

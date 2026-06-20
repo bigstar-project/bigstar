@@ -39,6 +39,7 @@ import {
 } from '../form';
 import type { CourseMode, FormState, GameStateMismatch, Lives } from '../types';
 import { InfoPanel, LauncherCard, SmallInfoCard } from './LauncherCards';
+import { EmptyMatchResultCard, MatchResultCard } from './MatchResultCard';
 import {
   bigStarsOptions,
   courseOptions,
@@ -48,6 +49,7 @@ import {
   winsOptions,
 } from './options';
 import type {
+  BattleMatchRecord,
   DiagnosticsState,
   LauncherActions,
   LauncherSummary,
@@ -61,6 +63,7 @@ export function BattleView({
   form,
   lastLogDir,
   matchmakingRooms,
+  currentMatch,
   summary,
   updateField,
 }: {
@@ -79,6 +82,7 @@ export function BattleView({
   form: FormState;
   lastLogDir: string;
   matchmakingRooms: MatchmakingRoomsState;
+  currentMatch: BattleMatchRecord | null;
   summary: LauncherSummary;
   updateField: UpdateFormField;
 }) {
@@ -111,6 +115,15 @@ export function BattleView({
             gap: '4',
           })}
         >
+          {currentMatch ? (
+            <MatchResultCard match={currentMatch} title="現在の対戦状況" />
+          ) : (
+            <EmptyMatchResultCard
+              title="現在の対戦状況"
+              message="対戦を開始すると、勝敗・スター・残機の状況がここに表示されます"
+            />
+          )}
+
           <LauncherCard
             title="公開ルーム"
             icon={<Users size={24} weight="fill" />}

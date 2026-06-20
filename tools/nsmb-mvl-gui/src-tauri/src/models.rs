@@ -136,6 +136,7 @@ pub(crate) struct SessionStatus {
     pub(crate) webrtc: Option<BridgeDiagnostics>,
     pub(crate) diagnostics_error: Option<String>,
     pub(crate) game_state_mismatch: Option<GameStateMismatch>,
+    pub(crate) mvl_results: Vec<MvlStageResult>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Type)]
@@ -148,6 +149,31 @@ pub(crate) struct GameStateMismatch {
     pub(crate) player_global_matches: Option<bool>,
     pub(crate) wifi_candidate_matches: Option<bool>,
     pub(crate) render_candidate_matches: Option<bool>,
+    pub(crate) line: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Type)]
+pub(crate) struct MvlPlayerResult {
+    pub(crate) stars: u32,
+    pub(crate) displayed_stars: u32,
+    pub(crate) collected_stars: u32,
+    pub(crate) lives: u32,
+    pub(crate) deaths: u32,
+    pub(crate) dead: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, Type)]
+pub(crate) struct MvlStageResult {
+    pub(crate) game_index: u32,
+    pub(crate) stage: Option<u8>,
+    pub(crate) frame: u32,
+    pub(crate) winner: Option<u8>,
+    pub(crate) mario: MvlPlayerResult,
+    pub(crate) luigi: MvlPlayerResult,
+    pub(crate) mario_match_wins: u32,
+    pub(crate) luigi_match_wins: u32,
+    pub(crate) target_wins: u32,
+    pub(crate) resolved: bool,
     pub(crate) line: String,
 }
 

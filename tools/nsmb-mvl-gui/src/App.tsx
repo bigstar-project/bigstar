@@ -1,4 +1,5 @@
 import { BattleView } from './launcher/BattleView';
+import { HistoryView } from './launcher/HistoryView';
 import { LauncherShell } from './launcher/LauncherShell';
 import { OnboardingGate } from './launcher/OnboardingGate';
 import { SettingsView } from './launcher/SettingsView';
@@ -37,9 +38,11 @@ export function App() {
             form={launcher.form}
             lastLogDir={launcher.lastLogDir}
             matchmakingRooms={launcher.matchmakingRooms}
+            currentMatch={launcher.currentMatch}
             summary={launcher.summary}
             updateField={launcher.updateField}
           />
+          <HistoryView matches={launcher.matchHistory} />
           <SettingsView
             actions={launcher.actions}
             form={launcher.form}

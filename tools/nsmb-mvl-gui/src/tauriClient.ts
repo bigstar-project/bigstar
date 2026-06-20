@@ -156,6 +156,7 @@ export function getSessionStatus() {
       webrtc: null,
       diagnostics_error: null,
       game_state_mismatch: null,
+      mvl_results: [],
     });
   }
   return unwrapCommand(commands.sessionStatus());

@@ -126,6 +126,29 @@ export type LaunchResponse = {
 
 export type Lives = "3" | "5" | "endless";
 
+export type MvlPlayerResult = {
+	stars: number,
+	displayed_stars: number,
+	collected_stars: number,
+	lives: number,
+	deaths: number,
+	dead: boolean,
+};
+
+export type MvlStageResult = {
+	game_index: number,
+	stage: number | null,
+	frame: number,
+	winner: number | null,
+	mario: MvlPlayerResult,
+	luigi: MvlPlayerResult,
+	mario_match_wins: number,
+	luigi_match_wins: number,
+	target_wins: number,
+	resolved: boolean,
+	line: string,
+};
+
 export type PreflightResponse = {
 	melonds_path: string,
 	bridge_path: string,
@@ -173,6 +196,7 @@ export type SessionStatus = {
 	webrtc: BridgeDiagnostics | null,
 	diagnostics_error: string | null,
 	game_state_mismatch: GameStateMismatch | null,
+	mvl_results: MvlStageResult[],
 };
 
 /* Tauri Specta runtime */
