@@ -111,3 +111,13 @@ export async function joinRoom({
     signal_url: signalUrlWithToken(data.signal_url, data.join_token),
   };
 }
+
+export async function closeRoom(signalUrl: string, roomId: string) {
+  const response = await clientFor(signalUrl).rooms[':roomId'].close.$post({
+    param: { roomId },
+  });
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+  return response.json();
+}

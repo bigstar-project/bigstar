@@ -67,6 +67,7 @@ export function BattleView({
   actions: Pick<
     LauncherActions,
     | 'copyRoomCode'
+    | 'cancelHostedRoom'
     | 'createRoom'
     | 'joinRoom'
     | 'openLogDir'
@@ -82,7 +83,9 @@ export function BattleView({
   updateField: UpdateFormField;
 }) {
   const matchmakingDisabled =
-    summary.connectionActive || summary.updateRequired;
+    summary.connectionActive ||
+    summary.updateRequired ||
+    Boolean(matchmakingRooms.hostedRoomId);
 
   return (
     <Tabs.Content value="battle">
@@ -175,6 +178,14 @@ export function BattleView({
               ) : null}
               {summary.updateRequired ? (
                 <UpdateRequiredNotice version={summary.updateVersion} />
+              ) : null}
+              {matchmakingRooms.hostedRoomId ? (
+                <HostedRoomNotice
+                  busy={matchmakingRooms.busy}
+                  roomId={matchmakingRooms.hostedRoomId}
+                  onCancel={() => void actions.cancelHostedRoom()}
+                  onCopy={() => void actions.copyRoomCode()}
+                />
               ) : null}
               <RoomList
                 busy={matchmakingRooms.busy}
@@ -345,13 +356,74 @@ function CreateRoomDialog({
                 }}
               >
                 <Crown size={18} weight="fill" />
-                作成して起動
+                作成して待機
               </Button>
             </Dialog.Footer>
           </Dialog.Content>
         </Dialog.Positioner>
       </Portal>
     </Dialog.Root>
+  );
+}
+
+function HostedRoomNotice({
+  busy,
+  onCancel,
+  onCopy,
+  roomId,
+}: {
+  busy: boolean;
+  onCancel: () => void;
+  onCopy: () => void;
+  roomId: string;
+}) {
+  return (
+    <div
+      className={css({
+        alignItems: 'center',
+        bg: 'yellow.subtle.bg',
+        borderColor: 'yellow.outline.border',
+        borderRadius: 'l2',
+        borderWidth: '1px',
+        display: 'grid',
+        gap: '3',
+        gridTemplateColumns: 'minmax(0, 1fr) auto auto',
+        p: '3',
+        '@media (max-width: 760px)': {
+          alignItems: 'stretch',
+          gridTemplateColumns: '1fr',
+        },
+      })}
+    >
+      <div className={css({ display: 'grid', gap: '1', minW: '0' })}>
+        <div
+          className={css({
+            color: 'yellow.subtle.fg',
+            fontWeight: 'black',
+            textStyle: 'sm',
+          })}
+        >
+          参加者を待っています
+        </div>
+        <code
+          className={css({
+            color: 'yellow.subtle.fg',
+            fontFamily: 'mono',
+            fontWeight: 'bold',
+            overflowWrap: 'anywhere',
+            textStyle: 'sm',
+          })}
+        >
+          {roomId}
+        </code>
+      </div>
+      <Button variant="outline" disabled={busy} onClick={onCopy}>
+        部屋コードをコピー
+      </Button>
+      <Button variant="outline" loading={busy} onClick={onCancel}>
+        部屋を閉じる
+      </Button>
+    </div>
   );
 }
 

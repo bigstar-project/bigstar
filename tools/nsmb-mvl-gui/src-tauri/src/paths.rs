@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU32, Ordering};
 use tauri::{AppHandle, Manager};
 
 use crate::models::LauncherSettings;
@@ -8,19 +9,35 @@ use crate::processes::hide_child_console_window;
 
 pub(crate) fn create_log_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let root = app_data_dir(app)?;
-    let stamp = chrono_like_stamp();
-    let log_dir = root.join("logs").join(format!("nsmb-mvl-gui-{stamp}"));
-    fs::create_dir_all(&log_dir).map_err(|err| format!("log dir を作成できません: {err}"))?;
-    Ok(log_dir)
+    let logs_root = root.join("logs");
+    fs::create_dir_all(&logs_root).map_err(|err| format!("log dir を作成できません: {err}"))?;
+
+    for _ in 0..16 {
+        let stamp = chrono_like_stamp();
+        let counter = LOG_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let log_dir = logs_root.join(format!(
+            "nsmb-mvl-gui-{stamp}-{}-{counter}",
+            std::process::id()
+        ));
+        match fs::create_dir(&log_dir) {
+            Ok(()) => return Ok(log_dir),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(format!("log dir を作成できません: {err}")),
+        }
+    }
+
+    Err("log dir を一意に作成できません".to_owned())
 }
 
 fn chrono_like_stamp() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs();
+        .as_millis();
     now.to_string()
 }
+
+static LOG_DIR_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 pub(crate) fn absolutize_existing(value: &str) -> Result<PathBuf, String> {
     let path = PathBuf::from(value.trim());

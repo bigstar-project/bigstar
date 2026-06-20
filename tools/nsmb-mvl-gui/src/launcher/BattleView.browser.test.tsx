@@ -34,6 +34,7 @@ const romIdentity = {
 function actions(overrides: Partial<LauncherActions> = {}) {
   return {
     checkForUpdate: vi.fn(async () => {}),
+    cancelHostedRoom: vi.fn(async () => {}),
     copyRoomCode: vi.fn(async () => {}),
     createRoom: vi.fn(async () => {}),
     joinRoom: vi.fn(async () => {}),
@@ -57,6 +58,7 @@ const rooms: MatchmakingRoomsState = {
   error: null,
   loading: false,
   refreshDisabled: false,
+  hostedRoomId: null,
   rooms: [
     {
       can_join: true,
@@ -155,10 +157,31 @@ describe('対戦ビュー', () => {
     await screen.getByRole('button', { name: '部屋を作る' }).click();
     await expect.element(screen.getByRole('dialog')).toBeVisible();
     await screen.getByLabelText('ホスト名').fill('Alice');
-    await screen.getByRole('button', { name: '作成して起動' }).click();
+    await screen.getByRole('button', { name: '作成して待機' }).click();
 
     expect(updateField).toHaveBeenCalledWith('hostName', 'Alice');
     expect(launcherActions.createRoom).toHaveBeenCalledTimes(1);
+  });
+
+  test('部屋作成後の待機状態で部屋コード操作を表示する', async () => {
+    const { launcherActions, screen } = await renderBattleView({
+      matchmakingRooms: {
+        ...rooms,
+        hostedRoomId: 'host-room-1',
+        rooms: [],
+      },
+    });
+
+    await expect
+      .element(screen.getByText('参加者を待っています'))
+      .toBeVisible();
+    await expect.element(screen.getByText('host-room-1')).toBeVisible();
+
+    await screen.getByRole('button', { name: '部屋コードをコピー' }).click();
+    await screen.getByRole('button', { name: '部屋を閉じる' }).click();
+
+    expect(launcherActions.copyRoomCode).toHaveBeenCalledTimes(1);
+    expect(launcherActions.cancelHostedRoom).toHaveBeenCalledTimes(1);
   });
 
   test('GUI更新が必要なときは公開ルームの作成と参加を無効化する', async () => {

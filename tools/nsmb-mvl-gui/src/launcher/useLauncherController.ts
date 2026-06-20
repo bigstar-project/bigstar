@@ -15,6 +15,7 @@ import {
   withRequiredPlan,
 } from '../form';
 import {
+  closeRoom as closeMatchmakingRoom,
   createRoom as createMatchmakingRoom,
   getRoom as getMatchmakingRoom,
   joinRoom as joinMatchmakingRoom,
@@ -82,6 +83,11 @@ type PreparedRomCache = {
   identity: RomIdentity;
 };
 
+type HostedRoom = {
+  roomId: string;
+  form: FormState;
+};
+
 export function useLauncherController() {
   const queryClient = useQueryClient();
   const [activeView, setActiveView] = useState<View>(() =>
@@ -121,7 +127,9 @@ export function useLauncherController() {
     promise: Promise<GenerateRomResponse>;
   } | null>(null);
   const matchmakingActionBusyRef = useRef(false);
+  const hostedRoomLaunchBusyRef = useRef(false);
   const startupRomPreparationKeyRef = useRef<string | null>(null);
+  const [hostedRoom, setHostedRoom] = useState<HostedRoom | null>(null);
 
   const currentRomPath =
     form.role === 'host' ? form.hostRomPath : form.clientRomPath;
@@ -150,7 +158,8 @@ export function useLauncherController() {
     defaultsLoaded &&
     activeView === 'battle' &&
     isWebSocketUrl(form.signalUrl) &&
-    !connectionActive;
+    !connectionActive &&
+    !hostedRoom;
 
   const summary: LauncherSummary = {
     connectionActive,
@@ -441,20 +450,21 @@ export function useLauncherController() {
     }
   }, []);
 
-  const cachedPreparedRomsFor = (
-    sourceForm: FormState,
-  ): GenerateRomResponse | null => {
-    const cached = preparedRomCacheRef.current;
-    if (!cached || cached.sourceRom !== sourceForm.baseRomPath) {
-      return null;
-    }
-    return {
-      host_rom: cached.hostRom,
-      client_rom: cached.clientRom,
-      generated: false,
-      rom_identity: cached.identity,
-    };
-  };
+  const cachedPreparedRomsFor = useCallback(
+    (sourceForm: FormState): GenerateRomResponse | null => {
+      const cached = preparedRomCacheRef.current;
+      if (!cached || cached.sourceRom !== sourceForm.baseRomPath) {
+        return null;
+      }
+      return {
+        host_rom: cached.hostRom,
+        client_rom: cached.clientRom,
+        generated: false,
+        rom_identity: cached.identity,
+      };
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!defaultsLoaded || connectionActive || !form.baseRomPath.trim()) {
@@ -482,61 +492,66 @@ export function useLauncherController() {
       });
   }, [defaultsLoaded, form, connectionActive, ensurePreparedRoms]);
 
-  const startMatchFor = async (sourceForm: FormState) => {
-    const nextForm = withRequiredPlan(sourceForm);
-    if (
-      JSON.stringify(currentSettings(nextForm)) !==
-      JSON.stringify(currentSettings(form))
-    ) {
-      setForm(nextForm);
-    }
-    const stage = selectedStageFrom(
-      nextForm.courseMode,
-      nextForm.matchSeed,
-      nextForm.courseStages,
-    );
-    if (stage === null) {
-      setActivityStatus({
-        text: 'Match seed は10進数、または 0x から始まる16進数で指定してください',
-        kind: 'error',
-      });
-      return;
-    }
-
-    const request: LaunchRequest = {
-      role: nextForm.role,
-      signal_url: nextForm.signalUrl,
-      room_code: nextForm.roomCode,
-      port: nextForm.port,
-      rom_path:
-        nextForm.role === 'host'
-          ? nextForm.hostRomPath
-          : nextForm.clientRomPath,
-      settings: currentSettings(nextForm),
-      diagnostic_events_enabled: nextForm.diagnosticEventsEnabled,
-    };
-
-    try {
-      let roms = cachedPreparedRomsFor(nextForm);
-      if (!roms) {
-        setActivityStatus({ text: '共通 ROM を確認中', kind: 'idle' });
-        roms = await ensurePreparedRoms(nextForm);
+  const startMatchFor = useCallback(
+    async (sourceForm: FormState) => {
+      const nextForm = withRequiredPlan(sourceForm);
+      if (
+        JSON.stringify(currentSettings(nextForm)) !==
+        JSON.stringify(currentSettings(form))
+      ) {
+        setForm(nextForm);
       }
-      request.rom_path =
-        nextForm.role === 'host' ? roms.host_rom : roms.client_rom;
-      request.rom_identity = roms.rom_identity;
-      setActivityStatus({ text: `起動中 stage=${stage}`, kind: 'idle' });
-      const response = await startMatchCommand(request);
-      setLastLogDir(response.log_dir);
-      setGameStateMismatch(null);
-      setActivityStatus({
-        text: `起動済み melonDS:${response.melon_pid} bridge:${response.bridge_pid}`,
-        kind: 'ok',
-      });
-    } catch (error) {
-      setActivityStatus({ text: String(error), kind: 'error' });
-    }
-  };
+      const stage = selectedStageFrom(
+        nextForm.courseMode,
+        nextForm.matchSeed,
+        nextForm.courseStages,
+      );
+      if (stage === null) {
+        setActivityStatus({
+          text: 'Match seed は10進数、または 0x から始まる16進数で指定してください',
+          kind: 'error',
+        });
+        return false;
+      }
+
+      const request: LaunchRequest = {
+        role: nextForm.role,
+        signal_url: nextForm.signalUrl,
+        room_code: nextForm.roomCode,
+        port: nextForm.port,
+        rom_path:
+          nextForm.role === 'host'
+            ? nextForm.hostRomPath
+            : nextForm.clientRomPath,
+        settings: currentSettings(nextForm),
+        diagnostic_events_enabled: nextForm.diagnosticEventsEnabled,
+      };
+
+      try {
+        let roms = cachedPreparedRomsFor(nextForm);
+        if (!roms) {
+          setActivityStatus({ text: '共通 ROM を確認中', kind: 'idle' });
+          roms = await ensurePreparedRoms(nextForm);
+        }
+        request.rom_path =
+          nextForm.role === 'host' ? roms.host_rom : roms.client_rom;
+        request.rom_identity = roms.rom_identity;
+        setActivityStatus({ text: `起動中 stage=${stage}`, kind: 'idle' });
+        const response = await startMatchCommand(request);
+        setLastLogDir(response.log_dir);
+        setGameStateMismatch(null);
+        setActivityStatus({
+          text: `起動済み melonDS:${response.melon_pid} bridge:${response.bridge_pid}`,
+          kind: 'ok',
+        });
+        return true;
+      } catch (error) {
+        setActivityStatus({ text: String(error), kind: 'error' });
+        return false;
+      }
+    },
+    [cachedPreparedRomsFor, ensurePreparedRoms, form],
+  );
 
   const startMatch = async () => {
     await startMatchFor(
@@ -545,6 +560,10 @@ export function useLauncherController() {
         : form,
     );
   };
+  const startMatchForRef = useRef(startMatchFor);
+  useEffect(() => {
+    startMatchForRef.current = startMatchFor;
+  }, [startMatchFor]);
 
   const createRoomMutation = useMutation({
     mutationFn: async ({
@@ -594,6 +613,13 @@ export function useLauncherController() {
       });
       return;
     }
+    if (hostedRoom) {
+      setActivityStatus({
+        text: '作成済みの部屋を閉じてから新しい部屋を作成してください',
+        kind: 'warn',
+      });
+      return;
+    }
     matchmakingActionBusyRef.current = true;
     setMatchmakingActionBusy(true);
     try {
@@ -627,9 +653,12 @@ export function useLauncherController() {
         signalUrl: response.signal_url,
       };
       setForm(nextForm);
+      setHostedRoom({ roomId: response.room_id, form: nextForm });
       await queryClient.invalidateQueries({ queryKey: ['matchmakingRooms'] });
-      setActivityStatus({ text: '部屋を作成しました', kind: 'ok' });
-      await startMatchFor(nextForm);
+      setActivityStatus({
+        text: `部屋を作成しました: ${response.room_id}。参加者を待っています`,
+        kind: 'ok',
+      });
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });
     } finally {
@@ -654,6 +683,13 @@ export function useLauncherController() {
     if (connectionActive) {
       setActivityStatus({
         text: '実行中の対戦を停止してから部屋に参加してください',
+        kind: 'warn',
+      });
+      return;
+    }
+    if (hostedRoom) {
+      setActivityStatus({
+        text: '作成済みの部屋を閉じてから別の部屋に参加してください',
         kind: 'warn',
       });
       return;
@@ -707,6 +743,10 @@ export function useLauncherController() {
       nextForm.signalUrl = response.signal_url;
       setForm(nextForm);
       await queryClient.invalidateQueries({ queryKey: ['matchmakingRooms'] });
+      setActivityStatus({
+        text: '部屋に参加しました。接続を確立してからmelonDSを起動します',
+        kind: 'idle',
+      });
       await startMatchFor(nextForm);
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });
@@ -716,6 +756,56 @@ export function useLauncherController() {
     }
   };
 
+  useEffect(() => {
+    if (!hostedRoom || connectionActive || hostedRoomLaunchBusyRef.current) {
+      return;
+    }
+
+    let disposed = false;
+    const pollHostedRoom = async () => {
+      if (hostedRoomLaunchBusyRef.current) {
+        return;
+      }
+      try {
+        const room = await getMatchmakingRoom(
+          hostedRoom.form.signalUrl,
+          hostedRoom.roomId,
+        );
+        if (disposed) {
+          return;
+        }
+        if (room.status === 'open') {
+          return;
+        }
+        hostedRoomLaunchBusyRef.current = true;
+        matchmakingActionBusyRef.current = true;
+        setMatchmakingActionBusy(true);
+        setHostedRoom(null);
+        setActivityStatus({
+          text: '参加者を検出しました。接続を確立してからmelonDSを起動します',
+          kind: 'idle',
+        });
+        await startMatchForRef.current(hostedRoom.form);
+      } catch (error) {
+        if (!disposed) {
+          setHostedRoom(null);
+          setActivityStatus({ text: String(error), kind: 'error' });
+        }
+      } finally {
+        hostedRoomLaunchBusyRef.current = false;
+        matchmakingActionBusyRef.current = false;
+        setMatchmakingActionBusy(false);
+      }
+    };
+
+    void pollHostedRoom();
+    const timer = window.setInterval(() => void pollHostedRoom(), 2000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [hostedRoom, connectionActive]);
+
   const stopMatch = async () => {
     try {
       await stopMatchCommand();
@@ -723,6 +813,25 @@ export function useLauncherController() {
       setActivityStatus({ text: '停止しました', kind: 'warn' });
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });
+    }
+  };
+
+  const cancelHostedRoom = async () => {
+    if (!hostedRoom) {
+      return;
+    }
+    try {
+      setMatchmakingActionBusy(true);
+      matchmakingActionBusyRef.current = true;
+      await closeMatchmakingRoom(hostedRoom.form.signalUrl, hostedRoom.roomId);
+      setHostedRoom(null);
+      await queryClient.invalidateQueries({ queryKey: ['matchmakingRooms'] });
+      setActivityStatus({ text: '部屋を閉じました', kind: 'warn' });
+    } catch (error) {
+      setActivityStatus({ text: String(error), kind: 'error' });
+    } finally {
+      matchmakingActionBusyRef.current = false;
+      setMatchmakingActionBusy(false);
     }
   };
 
@@ -868,6 +977,7 @@ export function useLauncherController() {
   }, [checkForUpdateInBackground]);
 
   const actions: LauncherActions = {
+    cancelHostedRoom,
     checkForUpdate,
     copyRoomCode,
     createRoom,
@@ -916,6 +1026,7 @@ export function useLauncherController() {
         createRoomMutation.isPending ||
         joinRoomMutation.isPending,
       error: roomsQuery.error ? String(roomsQuery.error) : null,
+      hostedRoomId: hostedRoom?.roomId ?? null,
     },
     onboarding: {
       loaded: defaultsLoaded,

@@ -7,6 +7,7 @@
     "dev": "tauri dev",
     "prepare": "panda codegen",
     "build": "tauri build",
+    "sync:sidecars": "node scripts/sync-sidecars.mjs",
     "panda:codegen": "panda codegen",
     "typecheck": "tsc --noEmit",
     "format-and-lint": "biome check .",

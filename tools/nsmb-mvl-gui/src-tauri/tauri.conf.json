@@ -5,7 +5,7 @@
   "identifier": "dev.melonds.nsmb-mvl",
   "build": {
     "beforeDevCommand": "corepack pnpm vite:dev",
-    "beforeBuildCommand": "corepack pnpm vite:build",
+    "beforeBuildCommand": "corepack pnpm sync:sidecars && corepack pnpm vite:build",
     "devUrl": "http://127.0.0.1:1420",
     "frontendDist": "../dist"
   },

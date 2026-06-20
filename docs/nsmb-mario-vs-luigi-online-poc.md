@@ -1,5 +1,60 @@
 # NSMB Mario vs Luigi Online PoC
 
+## GUI WAN start-ready ENet connect race - 2026-06-20
+
+- User-reported issue: GUI room launch still crashed before match start. Host log directory: `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781894773390-66076-0`.
+- Paired client log found by room/seed: `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781894773242-58576-0`.
+- Findings:
+  - WebRTC/bridge reached `connected` on both sides and bridge packet counts stopped only after melonDS stopped sending, so this was not a WebRTC negotiation failure.
+  - Host melonDS received the client's start-ready packet, accepted gameplay start, then hit `NSMB Test: input frame throttle timeout frame=865 sendFrame=848 remoteInputFrame=843 lead=5 waitedMs=5000`.
+  - Client melonDS reached `NSMB InputNetplay: waiting for remote gameplay start ready ...`, but never logged `NSMB PoC: peer connected`.
+  - Cause: client initialization stored the return value of `enet_host_connect()` directly in `G.Peer`. That pointer represents a pending ENet peer, not a completed connection, so start-ready/input send paths could run before the `ENET_EVENT_TYPE_CONNECT` event.
+- Fix applied in `src/frontend/qt_sdl/NsmbNetplayPoC.cpp`:
+  - Added separate `G.ConnectingPeer` state for the pending client connect.
+  - `G.Peer` is now set only when ENet emits `ENET_EVENT_TYPE_CONNECT`.
+  - Disconnect handling clears both pending and connected peer pointers.
+  - Start-ready logs now flush immediately, making this barrier easier to diagnose in GUI logs.
+- Verification:
+  - `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passed.
+  - `corepack pnpm sync:sidecars` passed from `tools\nsmb-mvl-gui` and copied the rebuilt `melonDS.exe` plus `nsmb-net-bridge.exe` into GUI release/binaries sidecar locations.
+  - `scripts\run-nsmb-mvl-split-local-input-smoke.ps1 -Frames 1200 -WaitTimeoutMs 120000 -InputDelayFrames 4 -InputMaxFrameLead 4 -InputUnreliable -InputBundleHistory 8 -SkipMovementProbe -SkipGameStateComparison -LogRoot logs\codex-enet-connect-race-20260620` passed. The produced `logs\nsmb-mvl-split-local-input-smoke` host/client stdout both logged `NSMB PoC: peer connected` before match progress and reached frame 1200 without a fatal input throttle timeout.
+- Follow-up issue from GUI logs:
+  - Host log `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781896603278-38548-0` and paired client log `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781896601431-53528-0` showed the ENet connect race was fixed, but a second barrier weakness remained.
+  - Client sent start-ready and received the match seed, but did not receive the host's one-shot start-ready before host advanced into gameplay. Host then timed out at `frame=863 sendFrame=848 remoteInputFrame=843 lead=5`.
+  - Cause: start-ready was treated as a single reliable packet. If the side that already has the remote ready exits the barrier immediately, the other side can remain in the barrier if that one packet is missed or delayed long enough.
+- Additional fix applied:
+  - Start-ready send state now records send count and last send time.
+  - After a side has accepted the remote start-ready and entered gameplay, it resends its own start-ready every 250 ms until remote input at/after the netplay start frame is observed. The message is idempotent, so duplicate receives are safe.
+  - Added `scripts\test-nsmb-mvl-gui-sidecar-e2e.ps1`, which launches the GUI release sidecar `melonDS.exe` and `nsmb-net-bridge.exe` over WebRTC signaling, waits for both sides to reach a frame limit, checks start-ready acceptance, rejects input throttle timeout / start-ready timeout / peer disconnect, and cleans up processes.
+- Second follow-up from GUI logs:
+  - Host log `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781897816349-71344-0` and paired client log `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781897814844-57916-0` confirmed the rebuilt binary was in use because logs included `sent start ready ... count=1`, and the GUI release/build hashes matched.
+  - The remaining failure was not stale sidecars. Host had already received remote input through frame `843`, so the resend condition considered the peer alive and stopped. But with `delay=4`, the first gameplay input required after logical start `840` is frame `844`; client was still in the start-ready barrier and never produced `844+`.
+  - Fix tightened the resend stop condition from `LastReceivedInputFrame >= NetplayStartFrame` to `LastReceivedInputFrame >= NetplayStartFrame + Delay`.
+- Third follow-up from GUI logs:
+  - Host log `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781898507073-36328-0` and paired client log `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781898505370-9168-0` showed the previous e2e was insufficient: it covered the easy host-first path but not the GUI-like client-first launch ordering.
+  - Reproduced locally with GUI release sidecars, WebRTC signaling, `MvlStage=4`, `MvlMatchSeed=60589462`, and client-first melonDS launch.
+  - Causes found:
+    - A side could accept a start-ready packet that arrived before it sent its own local start-ready, letting host leave the barrier while client was still waiting.
+    - The host bridge could receive the client's first ENet UDP packet before host melonDS had bound its UDP port, log `ignored local UDP connection reset`, and drop the only early connect packet.
+    - `waitForPeerBeforeStart` could add a 10-second frame-0 skew even though the real synchronization point is the netplay-start barrier.
+    - Input bundles were sent as ENet unsequenced packets. If an older input frame fell out of the small bundle history, both sides could later block forever waiting for that missing frame.
+  - Fixes applied:
+    - Start-ready acceptance now requires a remote ready received after the local ready was sent, or confirmed post-start remote input.
+    - Start-ready is resent while still inside the barrier, not only after accepting the barrier.
+    - `waitForPeerBeforeStart` is skipped at frame 0 when `waitForPeerAtNetplayStart` is enabled, so synchronization is centralized at the gameplay-start barrier.
+    - `nsmb-net-bridge` replays early WebRTC-to-local UDP packets for fixed local targets until the local UDP app becomes reachable.
+    - Input bundles now use ENet reliable packets, and throttle wait can resend the latest input bundle as an additional recovery path.
+    - `scripts\run-nsmb-mvl-local-triage.ps1` and `scripts\test-nsmb-mvl-gui-sidecar-e2e.ps1` now support deterministic melonDS launch order and gap parameters.
+- Current verification:
+  - `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passed.
+  - `cargo build --release`, `cargo fmt`, and `cargo clippy-all` passed in `tools\nsmb-net-bridge`.
+  - `corepack pnpm sync:sidecars` passed and copied the rebuilt sidecars into GUI release/binaries locations. Final GUI sidecar hashes: `melonDS.exe` `34e591fc8831ce6f60a01c624549e3c3454195d9807fbaa1939ca3c6bc24246e`; `nsmb-net-bridge.exe` `313f860f4ece2fa4adeac5eec171777d05fb39ce238ff572dde2d49980ff2df5`.
+  - `scripts\test-nsmb-mvl-gui-sidecar-e2e.ps1 -Frames 1200 -TimeoutSeconds 180 -MvlStage 4 -MvlMatchSeed 60589462 -MelonLaunchOrder ClientFirst -MelonLaunchGapMs 500` passed at `logs\codex-gui-sidecar-e2e-clientfirst-20260620-6`.
+  - `scripts\test-nsmb-mvl-gui-sidecar-e2e.ps1 -Frames 1200 -TimeoutSeconds 180 -MvlStage 4 -MvlMatchSeed 60589462 -MelonLaunchOrder ClientFirst -MelonLaunchGapMs 1500` passed at `logs\codex-gui-sidecar-e2e-clientfirst-20260620-8`.
+  - `scripts\test-nsmb-mvl-gui-sidecar-e2e.ps1 -Frames 1200 -TimeoutSeconds 180 -MvlStage 4 -MvlMatchSeed 60589462 -MelonLaunchOrder HostFirst -MelonLaunchGapMs 500` passed at `logs\codex-gui-sidecar-e2e-hostfirst-20260620-2`.
+- Current blocker: no local WebRTC GUI-sidecar repro remains for the GUI startup/start-ready path under tested client-first and host-first launch ordering.
+- Next action: if a real GUI run still fails, compare its melonDS/bridge logs against `logs\codex-gui-sidecar-e2e-clientfirst-20260620-8` and confirm the GUI launched the same sidecar hashes.
+
 ## Wins / result winner detection fix - 2026-06-19
 
 - User-reported issue: the GUI exposes a match win target, but the setting may not be behaving correctly. The immediate question was whether the current runtime actually obtains who won or lost each game.

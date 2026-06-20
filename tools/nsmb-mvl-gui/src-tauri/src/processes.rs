@@ -3,6 +3,7 @@ use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -17,6 +18,9 @@ use crate::state::{AppState, ManagedSession};
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+const BRIDGE_CONNECT_TIMEOUT: Duration = Duration::from_secs(45);
+const BRIDGE_CONNECT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 pub(crate) struct LaunchPaths {
     pub(crate) log_dir: PathBuf,
@@ -38,6 +42,11 @@ pub(crate) fn start_match_resolved(
     let mut bridge_child = bridge
         .spawn()
         .map_err(|err| format!("bridge の起動に失敗しました: {err}"))?;
+
+    if let Err(err) = wait_for_bridge_connected(&mut bridge_child, &paths.log_dir) {
+        terminate_child(&mut bridge_child);
+        return Err(err);
+    }
 
     let mut melon = build_melon_command(
         &paths.melon_path,
@@ -71,6 +80,47 @@ pub(crate) fn start_match_resolved(
     });
 
     Ok(response)
+}
+
+fn wait_for_bridge_connected(bridge: &mut Child, log_dir: &Path) -> Result<(), String> {
+    let started = Instant::now();
+    let mut last_diagnostics_error = None;
+    loop {
+        let bridge_state = process_state(bridge)?;
+        if bridge_state != "running" {
+            let (_, diagnostics_error) = read_bridge_diagnostics(log_dir);
+            let detail = diagnostics_error
+                .or(last_diagnostics_error)
+                .unwrap_or_else(|| "診断なし".to_owned());
+            return Err(format!(
+                "bridge が接続前に終了しました state={bridge_state} detail={detail}"
+            ));
+        }
+
+        let (diagnostics, diagnostics_error) = read_bridge_diagnostics(log_dir);
+        if let Some(diagnostics) = diagnostics {
+            if diagnostics.phase.as_deref() == Some("connected") {
+                return Ok(());
+            }
+            if let Some(error) = diagnostics.last_error {
+                return Err(format!("bridge 接続に失敗しました: {error}"));
+            }
+        } else if let Some(error) = diagnostics_error {
+            last_diagnostics_error = Some(error);
+        }
+
+        if started.elapsed() >= BRIDGE_CONNECT_TIMEOUT {
+            let detail = last_diagnostics_error
+                .map(|error| format!(" detail={error}"))
+                .unwrap_or_default();
+            return Err(format!(
+                "bridge の WebRTC 接続がタイムアウトしました waitedMs={}{}",
+                BRIDGE_CONNECT_TIMEOUT.as_millis(),
+                detail
+            ));
+        }
+        std::thread::sleep(BRIDGE_CONNECT_POLL_INTERVAL);
+    }
 }
 
 pub(crate) fn stop_existing(state: &AppState) -> Result<(), String> {
@@ -157,6 +207,7 @@ pub(crate) fn build_bridge_command(
         "--status-file",
         &status_file,
     ]);
+    command.current_dir(log_dir);
     with_stdio(command, log_dir, "bridge")
 }
 
@@ -239,6 +290,7 @@ pub(crate) fn melon_env(
     env.insert("MELONDS_NSML_ALLOW_JIT".into(), "1".into());
     env.insert("MELONDS_NSML_INPUT_NETPLAY_ONLY".into(), "1".into());
     env.insert("MELONDS_NSML_REMOTE_INPUT_TIMEOUT_FATAL".into(), "1".into());
+    env.insert("MELONDS_NSML_SEED_WAIT_TIMEOUT_MS".into(), "60000".into());
     env.insert(
         "MELONDS_NSML_DELAY".into(),
         request.settings.input_delay_frames.to_string(),

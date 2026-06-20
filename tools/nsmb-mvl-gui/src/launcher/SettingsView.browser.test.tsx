@@ -18,6 +18,7 @@ const summary: LauncherSummary = {
 async function renderSettingsView() {
   const launcherActions = {
     checkForUpdate: vi.fn(async () => {}),
+    cancelHostedRoom: vi.fn(async () => {}),
     copyRoomCode: vi.fn(async () => {}),
     createRoom: vi.fn(async () => {}),
     joinRoom: vi.fn(async () => {}),

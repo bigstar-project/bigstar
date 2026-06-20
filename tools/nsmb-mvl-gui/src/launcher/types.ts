@@ -45,6 +45,7 @@ export type LauncherActions = {
   checkForUpdate: () => Promise<void>;
   copyRoomCode: () => Promise<void>;
   createRoom: () => Promise<void>;
+  cancelHostedRoom: () => Promise<void>;
   joinRoom: (roomId: string) => Promise<void>;
   openLogDir: () => Promise<void>;
   openMelonds: () => Promise<void>;
@@ -77,4 +78,5 @@ export type MatchmakingRoomsState = {
   refreshDisabled: boolean;
   busy: boolean;
   error: string | null;
+  hostedRoomId: string | null;
 };

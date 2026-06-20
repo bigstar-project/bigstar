@@ -58,7 +58,7 @@ fn fake_executable(dir: &Path, name: &str, should_sleep: bool) -> PathBuf {
         let path = dir.join(format!("{name}.cmd"));
         let body = if should_sleep {
             format!(
-                "@echo off\r\necho {name} args:%*\r\necho {name} role:%MELONDS_NSML_ROLE%\r\necho {name} stage:%MELONDS_NSML_MVL_STAGE%\r\nping -n 60 127.0.0.1 > nul\r\n"
+                "@echo off\r\necho {name} args:%*\r\necho {name} role:%MELONDS_NSML_ROLE%\r\necho {name} stage:%MELONDS_NSML_MVL_STAGE%\r\n> bridge-status.json echo ^{{\"phase\":\"connected\"^}}\r\nping -n 60 127.0.0.1 > nul\r\n"
             )
         } else {
             "@echo off\r\nexit /b 42\r\n".to_owned()
@@ -74,7 +74,7 @@ fn fake_executable(dir: &Path, name: &str, should_sleep: bool) -> PathBuf {
         let path = dir.join(name);
         let body = if should_sleep {
             format!(
-                "#!/bin/sh\necho \"{name} args:$*\"\necho \"{name} role:$MELONDS_NSML_ROLE\"\necho \"{name} stage:$MELONDS_NSML_MVL_STAGE\"\nsleep 60\n"
+                "#!/bin/sh\necho \"{name} args:$*\"\necho \"{name} role:$MELONDS_NSML_ROLE\"\necho \"{name} stage:$MELONDS_NSML_MVL_STAGE\"\nprintf '%s\\n' '{{\"phase\":\"connected\"}}' > bridge-status.json\nsleep 60\n"
             )
         } else {
             "#!/bin/sh\nexit 42\n".to_owned()
@@ -221,6 +221,7 @@ fn melon_env_carries_game_settings_and_netplay_start() {
     assert_eq!(env["MELONDS_NSML_MATCH_SEED_SEQUENCE"], "7,8,9,10,11");
     assert_eq!(env["MELONDS_NSML_DELAY"], "4");
     assert_eq!(env["MELONDS_NSML_INPUT_MAX_FRAME_LEAD"], "4");
+    assert_eq!(env["MELONDS_NSML_SEED_WAIT_TIMEOUT_MS"], "60000");
     assert_eq!(env["MELONDS_NSML_INPUT_HEALTH_TRACE"], "1");
     assert_eq!(env["MELONDS_NSML_INPUT_HEALTH_TRACE_INTERVAL"], "120");
     assert_eq!(

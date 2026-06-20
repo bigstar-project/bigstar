@@ -60,6 +60,9 @@ param(
     [int]$ClientInputDropOffset = 0,
     [int]$ClientInputDropStartFrame = 0,
     [int]$ClientInputDropEndFrame = 0,
+    [ValidateSet("HostFirst", "ClientFirst")]
+    [string]$MelonLaunchOrder = "HostFirst",
+    [int]$MelonLaunchGapMs = 500,
     [switch]$SkipRomEnsure,
     [switch]$NoJit,
     [switch]$SoftwareRenderer
@@ -506,6 +509,8 @@ if ($ExistingHostRom -ne "" -or $ExistingClientRom -ne "") {
     "clientInputDropOffset=$ClientInputDropOffset"
     "clientInputDropStartFrame=$ClientInputDropStartFrame"
     "clientInputDropEndFrame=$ClientInputDropEndFrame"
+    "melonLaunchOrder=$MelonLaunchOrder"
+    "melonLaunchGapMs=$MelonLaunchGapMs"
 ) | Set-Content -Encoding UTF8 (Join-Path $logRoot "triage-settings.txt")
 
 $offerArgs = @(
@@ -566,18 +571,32 @@ Start-Sleep -Milliseconds $StartupDelayMs
 $hostEnv = New-MelonEnv -Role host -Port $HostPort -Stage $effectiveStage -Seed $MvlMatchSeed -RunLogDir $hostLog
 $clientEnv = New-MelonEnv -Role client -Port $ClientPort -Stage $effectiveStage -Seed $MvlMatchSeed -RunLogDir $clientLog
 
-Invoke-WithMelonEnv -Env $hostEnv -Body {
-    $script:hostMelon = Start-Process -FilePath $Exe -ArgumentList @($hostRom) -WorkingDirectory $hostLog `
-        -RedirectStandardOutput (Join-Path $hostLog "melonds.stdout.txt") `
-        -RedirectStandardError (Join-Path $hostLog "melonds.stderr.txt") `
-        -PassThru
+function Start-HostMelon {
+    Invoke-WithMelonEnv -Env $hostEnv -Body {
+        $script:hostMelon = Start-Process -FilePath $Exe -ArgumentList @($hostRom) -WorkingDirectory $hostLog `
+            -RedirectStandardOutput (Join-Path $hostLog "melonds.stdout.txt") `
+            -RedirectStandardError (Join-Path $hostLog "melonds.stderr.txt") `
+            -PassThru
+    }
 }
-Start-Sleep -Milliseconds 500
-Invoke-WithMelonEnv -Env $clientEnv -Body {
-    $script:clientMelon = Start-Process -FilePath $Exe -ArgumentList @($clientRom) -WorkingDirectory $clientLog `
-        -RedirectStandardOutput (Join-Path $clientLog "melonds.stdout.txt") `
-        -RedirectStandardError (Join-Path $clientLog "melonds.stderr.txt") `
-        -PassThru
+
+function Start-ClientMelon {
+    Invoke-WithMelonEnv -Env $clientEnv -Body {
+        $script:clientMelon = Start-Process -FilePath $Exe -ArgumentList @($clientRom) -WorkingDirectory $clientLog `
+            -RedirectStandardOutput (Join-Path $clientLog "melonds.stdout.txt") `
+            -RedirectStandardError (Join-Path $clientLog "melonds.stderr.txt") `
+            -PassThru
+    }
+}
+
+if ($MelonLaunchOrder -eq "ClientFirst") {
+    Start-ClientMelon
+    Start-Sleep -Milliseconds $MelonLaunchGapMs
+    Start-HostMelon
+} else {
+    Start-HostMelon
+    Start-Sleep -Milliseconds $MelonLaunchGapMs
+    Start-ClientMelon
 }
 
 Write-Host "WebRtc: GUI is not involved, but nsmb-net-bridge WebRTC is involved."
