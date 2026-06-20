@@ -3,12 +3,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::models::{CourseMode, GameSettings, LaunchRequest, Lives, Role, RomIdentity};
+use crate::models::{
+    CourseMode, GameSettings, GameStateMismatch, LaunchRequest, Lives, Role, RomIdentity,
+};
 use crate::paths::allowed_log_dir;
 use crate::processes::{
     build_bridge_command, build_melon_command, melon_env, read_bridge_diagnostics,
     read_melon_diagnostics, remove_inherited_melonds_env_keys, run_bridge_signaling_smoke,
-    session_status_inner, start_match_resolved, stop_existing, LaunchPaths,
+    session_status_inner, should_show_game_state_mismatch_in_gui, start_match_resolved,
+    stop_existing, LaunchPaths,
 };
 use crate::roms::{reusable_rom_is_current, reusable_rom_marker_path, write_reusable_rom_marker};
 use crate::settings::{selected_stage, validate_request};
@@ -467,6 +470,41 @@ fn melon_diagnostics_reads_game_state_mismatch_json() {
     assert_eq!(mismatch.render_candidate_matches, Some(true));
     assert!(mismatch.line.contains("frame=180"));
     let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn game_state_mismatch_gui_visibility_ignores_basic_only_mismatch() {
+    assert!(!should_show_game_state_mismatch_in_gui(
+        &game_state_mismatch(Some(false), Some(true), Some(true), Some(true))
+    ));
+    assert!(should_show_game_state_mismatch_in_gui(
+        &game_state_mismatch(Some(false), Some(false), Some(true), Some(true))
+    ));
+    assert!(should_show_game_state_mismatch_in_gui(
+        &game_state_mismatch(Some(false), Some(true), Some(false), Some(true))
+    ));
+    assert!(should_show_game_state_mismatch_in_gui(
+        &game_state_mismatch(Some(false), Some(true), Some(true), Some(false))
+    ));
+}
+
+fn game_state_mismatch(
+    basic_matches: Option<bool>,
+    player_global_matches: Option<bool>,
+    wifi_candidate_matches: Option<bool>,
+    render_candidate_matches: Option<bool>,
+) -> GameStateMismatch {
+    GameStateMismatch {
+        instance: Some(0),
+        frame: Some(180),
+        local_hash: Some("0000000000000003".to_owned()),
+        remote_hash: Some("0000000000000004".to_owned()),
+        basic_matches,
+        player_global_matches,
+        wifi_candidate_matches,
+        render_candidate_matches,
+        line: "NSMB PoC: game state mismatch".to_owned(),
+    }
 }
 
 #[test]

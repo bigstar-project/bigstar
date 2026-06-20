@@ -10,8 +10,8 @@ use std::os::windows::process::CommandExt;
 
 use crate::config::{DEFAULT_FRAMES, NETPLAY_START_FRAME};
 use crate::models::{
-    BridgeDiagnostics, CourseMode, LaunchRequest, LaunchResponse, MelonDiagnostics, Role,
-    SessionStatus,
+    BridgeDiagnostics, CourseMode, GameStateMismatch, LaunchRequest, LaunchResponse,
+    MelonDiagnostics, Role, SessionStatus,
 };
 use crate::settings::selected_stage;
 use crate::state::{AppState, ManagedSession};
@@ -158,7 +158,8 @@ pub(crate) fn session_status_inner(state: &AppState) -> Result<SessionStatus, St
     let active = melon == "running" || bridge == "running";
     let (webrtc, diagnostics_error) = read_bridge_diagnostics(&session.log_dir);
     let game_state_mismatch = read_melon_diagnostics(&session.log_dir)
-        .and_then(|diagnostics| diagnostics.game_state_mismatch);
+        .and_then(|diagnostics| diagnostics.game_state_mismatch)
+        .filter(should_show_game_state_mismatch_in_gui);
 
     Ok(SessionStatus {
         active,
@@ -169,6 +170,12 @@ pub(crate) fn session_status_inner(state: &AppState) -> Result<SessionStatus, St
         diagnostics_error,
         game_state_mismatch,
     })
+}
+
+pub(crate) fn should_show_game_state_mismatch_in_gui(mismatch: &GameStateMismatch) -> bool {
+    matches!(mismatch.player_global_matches, Some(false))
+        || matches!(mismatch.wifi_candidate_matches, Some(false))
+        || matches!(mismatch.render_candidate_matches, Some(false))
 }
 
 pub(crate) fn build_bridge_command(
