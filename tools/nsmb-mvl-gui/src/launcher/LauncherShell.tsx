@@ -69,6 +69,7 @@ export function LauncherShell({
   connectionStatus,
   onCheckForUpdate,
   onViewChange,
+  romStatus,
   updateBusy,
   updateStatus,
 }: {
@@ -78,6 +79,7 @@ export function LauncherShell({
   connectionStatus: { text: string; kind: StatusKind };
   onCheckForUpdate: () => void;
   onViewChange: (view: View) => void;
+  romStatus: { text: string; kind: StatusKind } | null;
   updateBusy: boolean;
   updateStatus: UpdateStatus;
 }) {
@@ -419,6 +421,11 @@ export function LauncherShell({
                 <StatusPill kind={connectionStatus.kind}>
                   {connectionStatus.text}
                 </StatusPill>
+                {romStatus ? (
+                  <StatusPill kind={romStatus.kind} loading>
+                    {romStatus.text}
+                  </StatusPill>
+                ) : null}
                 {activityStatus ? (
                   <StatusPill kind={activityStatus.kind}>
                     {activityStatus.text}

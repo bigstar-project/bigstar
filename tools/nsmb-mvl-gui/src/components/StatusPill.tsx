@@ -1,12 +1,15 @@
 import { css, cx } from 'styled-system/css';
 import type { StatusKind } from '../types';
+import { Spinner } from './ui';
 
 export function StatusPill({
   children,
   kind,
+  loading = false,
 }: {
   children: string;
   kind: StatusKind;
+  loading?: boolean;
 }) {
   const colors: Record<StatusKind, Parameters<typeof css>[0]> = {
     idle: {
@@ -55,12 +58,18 @@ export function StatusPill({
     >
       <span
         className={css({
+          alignItems: 'center',
+          display: 'flex',
+          gap: '1.5',
           fontWeight: 'black',
           opacity: '0.75',
           textStyle: 'xs',
           textTransform: 'uppercase',
         })}
       >
+        {loading ? (
+          <Spinner size="xs" borderWidth="0.125em" color="current" />
+        ) : null}
         {label[kind]}
       </span>
       <span

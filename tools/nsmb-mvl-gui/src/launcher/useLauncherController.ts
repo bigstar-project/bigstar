@@ -110,6 +110,7 @@ export function useLauncherController() {
   const [defaultsLoaded, setDefaultsLoaded] = useState(false);
   const [romPreparation, setRomPreparation] = useState('未確認');
   const [onboardingRomsPrepared, setOnboardingRomsPrepared] = useState(false);
+  const [romEnsureBusy, setRomEnsureBusy] = useState(false);
   const [romGenerationBusy, setRomGenerationBusy] = useState(false);
   const [onboardingInputConfigOpened, setOnboardingInputConfigOpened] =
     useState(false);
@@ -421,6 +422,7 @@ export function useLauncherController() {
       source_rom: nextForm.baseRomPath,
     };
     const promise = (async () => {
+      setRomEnsureBusy(true);
       const response = await ensureRoms(request);
       preparedRomCacheRef.current = {
         sourceRom: nextForm.baseRomPath,
@@ -447,6 +449,7 @@ export function useLauncherController() {
       if (preparedRomPromiseRef.current?.promise === promise) {
         preparedRomPromiseRef.current = null;
       }
+      setRomEnsureBusy(false);
     }
   }, []);
 
@@ -1034,6 +1037,10 @@ export function useLauncherController() {
       romGenerationBusy,
       inputConfigOpened: onboardingInputConfigOpened,
     },
+    romStatus:
+      romEnsureBusy || romGenerationBusy
+        ? { text: 'ROM生成中', kind: 'idle' as StatusKind }
+        : null,
     summary,
     updateBusy,
     updateStatus,

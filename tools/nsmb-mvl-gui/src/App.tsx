@@ -23,6 +23,7 @@ export function App() {
           connectionStatus={launcher.connectionStatus}
           onCheckForUpdate={() => void launcher.actions.checkForUpdate()}
           onViewChange={launcher.changeView}
+          romStatus={launcher.romStatus}
           updateBusy={launcher.updateBusy}
           updateStatus={launcher.updateStatus}
         >
