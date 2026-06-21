@@ -283,6 +283,62 @@ $candidateDefs = @{
         InputBundleHistory = 8
         Env = @{}
     }
+    "predictrepair-delay2-playerstate" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 0
+        RollbackResimulate = $false
+        RollbackPredictOnly = $true
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            StateSync = $true
+            StateSyncExtended = $true
+            StateSyncInterval = 30
+            PlayerStateSync = $true
+            PlayerStateApply = $true
+            PlayerStateGlobals = $true
+            PlayerStateSyncInterval = 1
+            PlayerStateMaxPredictFrames = 2
+        }
+        Env = @{}
+    }
+    "predictrepair-delay2-player-world-lite" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 0
+        RollbackResimulate = $false
+        RollbackPredictOnly = $true
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            StateSync = $true
+            StateSyncExtended = $true
+            StateSyncInterval = 30
+            PlayerStateSync = $true
+            PlayerStateApply = $true
+            PlayerStateGlobals = $true
+            PlayerStateSyncInterval = 1
+            PlayerStateMaxPredictFrames = 2
+            WorldStateSync = $true
+            WorldStateApply = $true
+            WorldStateSpawnItem = $true
+            WorldStateApplyMovingHazard = $true
+            WorldStateApplyEffects = $true
+            WorldStateSyncInterval = 2
+            WorldStateMaxPredictFrames = 2
+            WorldStateActorRescanInterval = 15
+        }
+        Env = @{}
+    }
     "coredelta-baseline" = [pscustomobject]@{
         Backend = "coredelta"
         InputDelayFrames = 0
@@ -424,6 +480,14 @@ foreach ($candidateName in $Candidate) {
         if ($candidateDef.PSObject.Properties.Name -contains "RollbackSkipRenderDuringResim") {
             $rollbackSkipRenderDuringResim = [bool]$candidateDef.RollbackSkipRenderDuringResim
         }
+        $rollbackResimulate = $true
+        if ($candidateDef.PSObject.Properties.Name -contains "RollbackResimulate") {
+            $rollbackResimulate = [bool]$candidateDef.RollbackResimulate
+        }
+        $rollbackPredictOnly = $false
+        if ($candidateDef.PSObject.Properties.Name -contains "RollbackPredictOnly") {
+            $rollbackPredictOnly = [bool]$candidateDef.RollbackPredictOnly
+        }
 
         $params = @{
             Frames = $routeDef.Frames
@@ -436,6 +500,7 @@ foreach ($candidateName in $Candidate) {
             RollbackBackend = $candidateDef.Backend
             RollbackWindow = $candidateDef.RollbackWindow
             RollbackCheckpointInterval = $candidateDef.RollbackCheckpointInterval
+            RollbackResimulate = $rollbackResimulate
             RollbackInputWaitUs = $candidateDef.RollbackInputWaitUs
             RollbackMaxResimFrames = $rollbackMaxResimFrames
             InputDelayFrames = $candidateDef.InputDelayFrames
@@ -458,6 +523,14 @@ foreach ($candidateName in $Candidate) {
         }
         if ($rollbackSkipRenderDuringResim) {
             $params.RollbackSkipRenderDuringResim = $true
+        }
+        if ($rollbackPredictOnly) {
+            $params.RollbackPredictOnly = $true
+        }
+        if ($candidateDef.PSObject.Properties.Name -contains "Extra") {
+            foreach ($key in $candidateDef.Extra.Keys) {
+                $params[$key] = $candidateDef.Extra[$key]
+            }
         }
         if ($InputUnreliable) {
             $params.InputUnreliable = $true

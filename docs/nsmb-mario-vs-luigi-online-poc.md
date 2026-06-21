@@ -3,12 +3,20 @@
 ## Rollback/input-sync PoC status - 2026-06-22
 
 - Current practical rollback implementation is `tinycorepreimage` with lightweight Main RAM preimage/snapshot restore. The latest fix aligns rollback resimulation input semantics with normal frames: NSMB packet scratch gets delayed/effective input, while DS hardware input gets the raw local frame input.
+- Current hard requirement for the active goal: rollback playability must be evaluated at the GUI rollback standard `InputDelayFrames=2`. Increasing InputDelay above `2` is rejected even if it improves stability, because it defeats the purpose of rollback for this target.
 - Normal artificial jitter (`InputSendDelayFrames=3`, `InputSendJitterFrames=3`) passes the current movement-heavy suite with `tinycorepreimage-delay6-lead999-rbwait3000-maxresim2-bundle8`: stocktouch, chaos, contact, and dualstresslong passed with averages around `16.7-17.1ms` and max frame times under `47ms`.
 - Strong artificial jitter (`InputSendDelayFrames=6`, `InputSendJitterFrames=6`) exposed a real rollback correctness issue: `delay6/rbwait3000/maxresim2` can produce persistent `playerGlobal=0` mismatch. The root is that the max-resim cap can cut off an older prediction mismatch after wrong input has already affected gameplay.
-- Strong artificial jitter currently passes chaos/contact/dualstresslong with `tinycorepreimage-delay10-lead999-rbwait3000-uncapped-bundle8` in `logs/codex-goal-practical-delay10-uncapped-send6-jitter6-20260622/20260622-044053`. Results: chaos avg `17.664/17.654ms`, max `77.520/77.877ms`; contact avg `17.170/17.172ms`, max `47.603/38.975ms`; dualstresslong avg `17.727/17.734ms`, max `57.159/50.181ms`.
+- Strong artificial jitter can be made more stable by increasing delay (`delay10`/`delay12`), but those profiles are now diagnostic-only and not promotion candidates under the active goal.
+- Delay-2 measurements so far:
+  - `delay2/maxlead2` stalls under `InputSendDelayFrames=6` / `InputSendJitterFrames=6` because the peer lead throttle waits in large chunks.
+  - `delay2/maxlead999` avoids the throttle but full rollback resim can still spike around `300ms+` and produces persistent mismatch in stress routes.
+  - True predict-only repair was added to the smoke/suite scripts. `predictrepair-delay2-playerstate` is fast (`~17ms`, max `~42ms`) but fails chaos with persistent `playerGlobal=0`.
+  - `predictrepair-delay2-player-world-lite` fixes chaos and passes stocktouch/contact without freeze; under strong jitter it averages `17.5-18.7ms` with `40-44ms` max spikes, but dualstresslong can still produce persistent `playerGlobal=0` during death/transition-heavy movement.
+  - Adding same-frame wait (`RollbackInputWaitUs=1000..3000`) can remove that `playerGlobal=0` signal on the failing dualstress seed, but active FPS drops to about `52fps` at `1000us` and about `47fps` at `3000us`, so it is not a final answer.
+  - Budgeted `RollbackMaxResimFrames=2` plus world repair is still too heavy and produced a `101ms` active spike on the same dualstress seed.
 - Verification now distinguishes transient rollback-correction samples from persistent desync: a single `playerGlobal=0` sample can pass only if it settles within `RollbackSettleFrames`; repeated samples beyond the settle window still fail.
-- Current blocker: strong-jitter correctness is much better, but rollback spikes remain visible (`50-78ms` in the strong-jitter suite). Star pickup/drop, block break persistence, and 8-coin item identity still need deterministic automatic routes.
-- Next actions: keep artificial send delay/jitter in the promotion matrix, reduce deep rollback spike cost without reintroducing resim capping correctness loss, and add event-heavy routes for the manual desync classes.
+- Current blocker: with `InputDelayFrames=2`, the full-resim path is accurate but spikes badly; the predict/repair path is light but cannot always know fresh remote death/transition state under strong jitter without waiting, which lowers FPS. The next direction is a new rollback/repair architecture that avoids main-thread deep resim and avoids delay-increase dependence.
+- Next actions: keep artificial send delay/jitter in the promotion matrix, continue delay-2-only candidates, and add event-heavy routes for star pickup/drop, block break persistence, and 8-coin item identity.
 
 ## GUI ice-stage Luigi sudden-death log review - 2026-06-20
 

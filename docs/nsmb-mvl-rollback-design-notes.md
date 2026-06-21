@@ -2,10 +2,11 @@
 
 ## 2026-06-22 current status - raw-input resim and strong-jitter rollback
 
-Current rollback direction is still lightweight `tinycorepreimage`, but the practical candidate now splits into two profiles:
+Current rollback direction is still lightweight `tinycorepreimage`, but the active goal now has a stricter latency constraint:
 
-- Normal artificial jitter profile: `tinycorepreimage-delay6-lead999-rbwait3000-maxresim2-bundle8`.
-- Strong artificial jitter profile: `tinycorepreimage-delay10-lead999-rbwait3000-uncapped-bundle8`.
+- Promotion candidates must keep the GUI rollback standard `InputDelayFrames=2`.
+- Increasing InputDelay above `2` is rejected for this goal, even when it improves correctness or smoothness, because it makes rollback no longer worthwhile for the target play feel.
+- Higher-delay profiles such as `delay10` and `delay12/keyInt4` are retained only as diagnostics showing the cost/latency boundary.
 
 Completed in the latest pass:
 
@@ -14,6 +15,10 @@ Completed in the latest pass:
 - Made the state-sync gameplay hash more role-invariant. Local-only input/role/camera/net fields were removed from the strict hash, while player actor/global, MvL manager/gate, moving hazard, object lifecycle, and active object identity fields were added.
 - Added persistent `playerGlobal` mismatch detection. Split smoke now treats a one-sample rollback correction mismatch as transient when it settles within `RollbackSettleFrames`, but still fails repeated `playerGlobal=0` samples that persist beyond the settle window.
 - Added practical-suite support for artificial input send delay/jitter and the strong-jitter candidate above.
+- Added an explicit `-RollbackPredictOnly` smoke path so rollback prediction can run without silently enabling full resimulation. This is used to measure Plan-D-style repair candidates independently from restore/resim cost.
+- Added delay-2 predict/repair suite candidates:
+  - `predictrepair-delay2-playerstate`
+  - `predictrepair-delay2-player-world-lite`
 
 Verification:
 
@@ -26,16 +31,27 @@ Verification:
   - `chaos`: avg `17.664/17.654ms`, max `77.520/77.877ms`, over33 `32/30`; one transient `playerGlobal=0` at frame `1140`.
   - `contact`: avg `17.170/17.172ms`, max `47.603/38.975ms`, over33 `5/7`.
   - `dualstresslong`: avg `17.727/17.734ms`, max `57.159/50.181ms`, over33 `46/45`.
+- `delay12/keyInt4` improved the high-jitter spike profile in diagnostics, but is rejected as a promotion path because InputDelay is above `2`.
+- Delay-2 full rollback baseline:
+  - `delay2/maxlead2` under `sendDelay=6/jitter=6` stalls on peer-lead throttle rather than rollback itself.
+  - `delay2/maxlead999` avoids throttle, but deep rollback resimulation still produces about `300ms+` spikes and persistent mismatch in stress routes.
+- Delay-2 predict/repair:
+  - `predictrepair-delay2-playerstate` on chaos: fast (`16.930/17.084ms`, max `41.643/41.689ms`) but fails with persistent `playerGlobal=0` at frames `1410-1470`.
+  - `predictrepair-delay2-player-world-lite` on chaos: passes, avg `18.687/18.683ms`, max `43.353/32.226ms`.
+  - `predictrepair-delay2-player-world-lite` suite: stocktouch/contact pass; death failed only because `-NoGameStateTrace` disables the death assertion; dualstresslong fails with persistent `playerGlobal=0` around frames `1860-1920`.
+  - Reproducing the dualstress failure with diagnostics showed death/transition state arriving too late for predict-only repair. Same-frame waits (`RollbackInputWaitUs=1000/1500/3000`) can remove `playerGlobal=0`, but active FPS falls to roughly `52/50/47fps`.
+  - Budgeted resim (`RollbackMaxResimFrames=2`) plus world repair is rejected for now: it produced `101.592ms` max frame time and about `41.6fps` active in `logs/codex-goal-delay2-budgetresim2-worldlite-dual-failseed-20260622`.
 
 Current conclusion:
 
 - The previous `RollbackMaxResimFrames=2` cap is correctness-unsafe under strong jitter. If a prediction mismatch is older than the cap, capping the rollback start frame leaves already-simulated wrong input in gameplay state and can become a persistent `playerGlobal` mismatch. For correctness-focused runs, use uncapped rollback or a cap high enough to cover the network condition.
-- Deep uncapped rollback restores correctness but does not remove visible spikes. The strong-jitter candidate is around `56-58fps` active on this machine and still has `50-78ms` rollback spikes. This is better than desync, but not yet the final "comfortable 60fps with no noticeable drops" target.
-- `delay10` is a latency/performance tradeoff profile for adverse jitter. `delay8` passed correctness but performed worse, around `55fps` active with `80-95ms` spikes. Skipping intermediate resim checkpoints is rejected for now because it produced a `~300ms` host rollback spike in `logs/codex-goal-chaos-inputdelay10-send6-jitter6-uncapped-skipintermediate-2400-20260622`.
+- Deep uncapped rollback restores correctness better than predict-only repair, but at `InputDelayFrames=2` it does not remove visible spikes. Higher-delay candidates are useful diagnostics but not acceptable solutions.
+- Predict-only Plan-D repair proves that a low-cost path exists, but not yet a complete correctness path: under strong jitter, death/transition globals and player/world basics can be unknown at the current frame unless the emulator waits or resimulates.
+- Same-frame waits are not equivalent to increasing InputDelay, but the measured FPS cost is still too high for the target.
 
 Current blocker / next actions:
 
-- Reduce remaining rollback spikes without reintroducing correctness loss. The next promising direction is not capping old mismatches; it is reducing how often deep corrections happen or making them cheaper.
+- Find a new delay-2 architecture that does not depend on increasing InputDelay, long same-frame waits, or main-thread deep resim. Candidate directions: off-main-thread shadow resim with atomic state publish, more surgical authoritative repair for death/transition globals, or a ROM/actor-level rollback that replays only the minimal MvL state.
 - Add stronger event routes for star pickup/drop/recover, block break persistence, and 8-coin item identity. Current star routes are still input coverage failures, not correctness proof.
 - Keep testing with artificial send delay/jitter and movement-heavy chaos/contact routes. Average FPS alone is insufficient; `maxFrameMs`, `over33ms`, and persistent mismatch detection must stay in the promotion gate.
 

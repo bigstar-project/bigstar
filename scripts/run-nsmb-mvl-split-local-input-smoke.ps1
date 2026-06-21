@@ -44,6 +44,7 @@ param(
     [int]$RollbackResimulateDelayFrames = 0,
     [int]$RollbackMaxResimFrames = 0,
     [switch]$RollbackResimulate,
+    [switch]$RollbackPredictOnly,
     [switch]$RollbackSkipIntermediateResimCheckpoints,
     [switch]$RollbackSkipJitReset,
     [switch]$RollbackSkipRenderDuringResim,
@@ -214,7 +215,7 @@ if ($RollbackInputWaitUs -gt 0) {
 }
 $isNsmbTinyCoreRollback = $RollbackBackend -eq "nsmbtinycore" -or $RollbackBackend -eq "nsmb-tiny-core"
 $isTinyCorePreimageRollback = $RollbackBackend -eq "tinycorepreimage" -or $RollbackBackend -eq "tiny-core-preimage"
-if ($Rollback -and -not $PSBoundParameters.ContainsKey('RollbackResimulate')) {
+if ($Rollback -and -not $RollbackPredictOnly -and -not $PSBoundParameters.ContainsKey('RollbackResimulate')) {
     $RollbackResimulate = $true
 }
 if ($RollbackSkipIntermediateResimCheckpoints) {
