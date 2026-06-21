@@ -102,6 +102,41 @@ function Get-RollbackIntegrityError {
     return ""
 }
 
+function Get-TransientMismatchFields {
+    param([string]$Path)
+
+    $result = @{
+        Count = 0
+        MaxFrames = 0
+        Fields = ""
+    }
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $result
+    }
+
+    $fields = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($line in Get-Content -LiteralPath $Path -Encoding UTF8) {
+        if ($line -match "rollback transient mismatch settled frame=([0-9]+) settleFrame=([0-9]+) field=([A-Za-z0-9_]+)") {
+            $result.Count++
+            $delta = [int]$Matches[2] - [int]$Matches[1]
+            if ($delta -gt $result.MaxFrames) {
+                $result.MaxFrames = $delta
+            }
+            [void]$fields.Add($Matches[3])
+        } elseif ($line -match "rollback transient playerGlobal mismatch settled frame=([0-9]+) lastMismatchFrame=([0-9]+)") {
+            $result.Count++
+            $delta = [int]$Matches[2] - [int]$Matches[1]
+            if ($delta -gt $result.MaxFrames) {
+                $result.MaxFrames = $delta
+            }
+            [void]$fields.Add("playerGlobal")
+        }
+    }
+
+    $result.Fields = (($fields | Sort-Object) -join ";")
+    return $result
+}
+
 $candidateDefs = @{
     "tinycorepreimage-wait0" = [pscustomobject]@{
         Backend = "tinycorepreimage"
@@ -840,6 +875,123 @@ $candidateDefs = @{
             MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES = "12"
         }
     }
+    "predictrepair-delay2-player-world-actorsnap-staleglobals12-transitiontransform" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 0
+        RollbackResimulate = $false
+        RollbackPredictOnly = $true
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            StateSync = $true
+            StateApply = $true
+            StateApplyMode = "globals"
+            StateSyncExtended = $true
+            StateSyncInterval = 30
+            PlayerStateSync = $true
+            PlayerStateApply = $true
+            PlayerStateGlobals = $true
+            PlayerStateSyncInterval = 1
+            PlayerStateMaxPredictFrames = 8
+            WorldStateSync = $true
+            WorldStateApply = $true
+            WorldStateSpawnItem = $true
+            WorldStateApplyMovingHazard = $true
+            WorldStateApplyEffects = $true
+            WorldStateApplyActorSnapshot = $true
+            WorldStateSyncInterval = 2
+            WorldStateMaxPredictFrames = 8
+            WorldStateActorRescanInterval = 15
+        }
+        Env = @{
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM_START_OFFSET = "300"
+            MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES = "12"
+        }
+    }
+    "predictrepair-delay2-player-world-actorsnap-staleglobals12-transitiontransform-pred4" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 0
+        RollbackResimulate = $false
+        RollbackPredictOnly = $true
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            StateSync = $true
+            StateApply = $true
+            StateApplyMode = "globals"
+            StateSyncExtended = $true
+            StateSyncInterval = 30
+            PlayerStateSync = $true
+            PlayerStateApply = $true
+            PlayerStateGlobals = $true
+            PlayerStateSyncInterval = 1
+            PlayerStateMaxPredictFrames = 4
+            WorldStateSync = $true
+            WorldStateApply = $true
+            WorldStateSpawnItem = $true
+            WorldStateApplyMovingHazard = $true
+            WorldStateApplyEffects = $true
+            WorldStateApplyActorSnapshot = $true
+            WorldStateSyncInterval = 2
+            WorldStateMaxPredictFrames = 8
+            WorldStateActorRescanInterval = 15
+        }
+        Env = @{
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM_START_OFFSET = "300"
+            MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES = "12"
+        }
+    }
+    "predictrepair-delay2-player-world-actorsnap-staleglobals12-transitiontransform-pred0" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 0
+        RollbackResimulate = $false
+        RollbackPredictOnly = $true
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            StateSync = $true
+            StateApply = $true
+            StateApplyMode = "globals"
+            StateSyncExtended = $true
+            StateSyncInterval = 30
+            PlayerStateSync = $true
+            PlayerStateApply = $true
+            PlayerStateGlobals = $true
+            PlayerStateSyncInterval = 1
+            PlayerStateMaxPredictFrames = 0
+            WorldStateSync = $true
+            WorldStateApply = $true
+            WorldStateSpawnItem = $true
+            WorldStateApplyMovingHazard = $true
+            WorldStateApplyEffects = $true
+            WorldStateApplyActorSnapshot = $true
+            WorldStateSyncInterval = 2
+            WorldStateMaxPredictFrames = 8
+            WorldStateActorRescanInterval = 15
+        }
+        Env = @{
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM_START_OFFSET = "300"
+            MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES = "12"
+        }
+    }
     "exact-delay2-tinycorepreimage-skiprender" = [pscustomobject]@{
         Backend = "tinycorepreimage"
         InputDelayFrames = 2
@@ -909,7 +1061,7 @@ $routeDefs = @{
         Frames = 7200
         HostInput = "tests\nsmb_us_direct_mvl_stress_host_move_jump_dash_long.inputs"
         ClientInput = "tests\nsmb_us_direct_mvl_stress_client_move_jump_dash_long.inputs"
-        Extra = @{ IgnoreSpeculativeInputFields = $true; RollbackSettleFrames = 60 }
+        Extra = @{ IgnoreSpeculativeInputFields = $true; SkipMovementProbe = $true; RollbackSettleFrames = 60 }
     }
     "luigistar" = [pscustomobject]@{
         Frames = 3200
@@ -951,6 +1103,8 @@ $envKeys = @(
     "MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL",
     "MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE",
     "MELONDS_NSML_FIXED_FRAME_SLEEP",
+    "MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM",
+    "MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM_START_OFFSET",
     "MELONDS_NSML_PLAYER_STATE_FRESH_WAIT_US",
     "MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES",
     "MELONDS_NSML_PLAYER_STATE_MAX_STALE_COUNTER_FRAMES",
@@ -1081,6 +1235,7 @@ foreach ($candidateName in $Candidate) {
         $clientTiming = Get-LastLineMatching -Path $clientStdout -Pattern "NSMB Test: active frame timing"
         $hostFields = Get-TimingFields -Line $hostTiming
         $clientFields = Get-TimingFields -Line $clientTiming
+        $transientFields = Get-TransientMismatchFields -Path $runLog
         $rollbackIntegrityError = Get-RollbackIntegrityError -Paths @($hostStdout, $clientStdout)
         if ($rollbackIntegrityError) {
             if ($errorText) {
@@ -1105,6 +1260,9 @@ foreach ($candidateName in $Candidate) {
             ClientMaxMs = $clientFields.Max
             HostOver33 = $hostFields.Over33
             ClientOver33 = $clientFields.Over33
+            TransientMismatchCount = $transientFields.Count
+            MaxTransientFrames = $transientFields.MaxFrames
+            TransientMismatchFields = $transientFields.Fields
             LogDir = $caseRel
             Error = $errorText
         })
@@ -1113,5 +1271,5 @@ foreach ($candidateName in $Candidate) {
 
 $csvPath = Join-Path $runRoot "summary.csv"
 $summary | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $csvPath
-$summary | Format-Table Candidate, Route, Status, HostAvgMs, ClientAvgMs, HostMaxMs, ClientMaxMs, HostOver33, ClientOver33 -AutoSize
+$summary | Format-Table Candidate, Route, Status, HostAvgMs, ClientAvgMs, HostMaxMs, ClientMaxMs, HostOver33, ClientOver33, TransientMismatchCount, MaxTransientFrames -AutoSize
 Write-Host "summary: $csvPath"

@@ -16,6 +16,7 @@ Completed in the latest pass:
 - Added persistent `playerGlobal` mismatch detection. Split smoke now treats a one-sample rollback correction mismatch as transient when it settles within `RollbackSettleFrames`, but still fails repeated `playerGlobal=0` samples that persist beyond the settle window.
 - Added practical-suite support for artificial input send delay/jitter and the strong-jitter candidate above.
 - Added an explicit `-RollbackPredictOnly` smoke path so rollback prediction can run without silently enabling full resimulation. This is used to measure Plan-D-style repair candidates independently from restore/resim cost.
+- Practical-suite summaries now record transient mismatch count, max transient settle frames, and involved fields in addition to avg/max/over33 frame timing, so a run cannot look healthy solely because the final status or average FPS is acceptable.
 - Added delay-2 predict/repair suite candidates:
   - `predictrepair-delay2-playerstate`
   - `predictrepair-delay2-player-world-lite`
@@ -48,6 +49,9 @@ Verification:
   - `MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES=12` reduces persistent global mismatch without large average FPS cost, but dualstresslong still shows player actor respawn lag after death (`playerActor0X/Y` diverges after the player0 death/respawn window).
   - Stale transform repair is rejected: both 12F and 4F variants made player actor Y drift worse. Longer stale global/counter-only repair (`24F`) also caused stale writes or earlier playerGlobal mismatches.
   - Rechecked exact paths under the delay-2 rule: `coredelta-baseline` is still too slow (`22.350/22.349ms` avg, `301.826/341.196ms` max), and `exact-delay2-tinycorepreimage-skiprender` is also too slow (`19.093/19.337ms` avg, `163.197/166.475ms` max).
+  - Added transition-transform experiments to allow remote player transform writes during death/respawn transitions. A direct dualstresslong run once passed under strong jitter (`logs/codex-goal-suite-transitiontransform-skipmove-dualstress-20260622/20260622-080101`, `16.762/16.765ms` avg), but multi-route and repeated runs were not stable.
+  - Prediction-width sweep under strong jitter (`logs/codex-goal-suite-transition-predict-sweep-20260622/20260622-081153`) showed no promotion candidate: `pred0` passed one dualstresslong run with practical timing but failed stocktouch/chaos, `pred4` produced persistent `playerGlobal`, and `pred8` still had actor/transition mismatches and an occasional large spike.
+  - Added `MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM_START_OFFSET` after finding that transition-transform during the initial pipe/entry transition can create early `playerGlobal`/actor mismatches. Offset `300` prevents applying the transform path during match entry, but it still fails strong-jitter chaos/dualstresslong (`logs/codex-goal-suite-transition-offset300-20260622/20260622-083931`) through persistent playerGlobal, object count drift, or active-frame spikes.
 
 Current conclusion:
 
@@ -56,6 +60,7 @@ Current conclusion:
 - Predict-only Plan-D repair proves that a low-cost path exists, but not yet a complete correctness path: under strong jitter, death/transition globals and player/world basics can be unknown at the current frame unless the emulator waits or resimulates.
 - Same-frame waits are not equivalent to increasing InputDelay, but the measured FPS cost is still too high for the target.
 - Increasing GUI rollback `InputDelayFrames` above `2` is not a valid escape hatch for this goal; any viable rollback path must keep delay2 and solve correctness/perf there.
+- Current repair-only actor/global snapshot direction is likely at its limit for the active goal. It can keep average frame time near 60fps, but without either waiting, increasing delay, or doing some exact re-execution, it cannot know discontinuous current-frame events such as entry transition, death/respawn, contact, object spawn/despawn, and item lifecycle under 6F artificial send delay/jitter.
 
 Current blocker / next actions:
 

@@ -1411,6 +1411,8 @@ struct State
     bool PlayerStateApplyEnabled = false;
     bool PlayerStateGlobalsEnabled = false;
     bool PlayerStateReliable = false;
+    bool PlayerStateApplyTransformDuringTransition = false;
+    int PlayerStateTransitionTransformStartOffset = 0;
     int PlayerStateSyncInterval = 1;
     int PlayerStateMaxPredictFrames = 2;
     int PlayerStateFreshWaitUs = 500;
@@ -14622,7 +14624,11 @@ void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
 
     const ObjectScanSample localActor = GetPlayerActorCached(instanceID, remotePlayer, nds);
     const melonDS::u32 localBase = localActor.Found ? localActor.Base : 0;
+    const bool allowTransitionTransform =
+        G.PlayerStateApplyTransformDuringTransition &&
+        frame >= G.NetplayStartFrame + static_cast<melonDS::u32>(std::max(0, G.PlayerStateTransitionTransformStartOffset));
     const bool transitionMinimalApply =
+        !allowTransitionTransform &&
         G.PlayerStateGlobalsEnabled &&
         localActor.Found &&
         IsPlayerInActorTransition(nds, localBase);
@@ -17520,6 +17526,10 @@ void InitFromEnvironment()
     G.PlayerStateApplyEnabled = EnvFlag("MELONDS_NSML_PLAYER_STATE_APPLY");
     G.PlayerStateGlobalsEnabled = EnvFlag("MELONDS_NSML_PLAYER_STATE_GLOBALS");
     G.PlayerStateReliable = EnvFlag("MELONDS_NSML_PLAYER_STATE_RELIABLE");
+    G.PlayerStateApplyTransformDuringTransition =
+        EnvFlag("MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM");
+    G.PlayerStateTransitionTransformStartOffset =
+        std::max(0, EnvInt("MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM_START_OFFSET", 0));
     G.PlayerStateSyncInterval = std::max(1, EnvInt("MELONDS_NSML_PLAYER_STATE_SYNC_INTERVAL", 1));
     G.PlayerStateMaxPredictFrames = std::max(0, EnvInt("MELONDS_NSML_PLAYER_STATE_MAX_PREDICT_FRAMES", 2));
     G.PlayerStateFreshWaitUs = std::max(0, EnvInt("MELONDS_NSML_PLAYER_STATE_FRESH_WAIT_US", 500));
@@ -18114,7 +18124,7 @@ void InitFromEnvironment()
             }
         }
 
-        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d playerStateSync=%d playerStateApply=%d playerStateGlobals=%d playerStateInterval=%d playerStatePredict=%d playerStateFreshWaitUs=%d playerStateStaleGlobals=%d playerStateStaleCounters=%d playerStateStaleTransform=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
+        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d playerStateSync=%d playerStateApply=%d playerStateGlobals=%d playerStateTransitionTransform=%d playerStateTransitionTransformStartOffset=%d playerStateInterval=%d playerStatePredict=%d playerStateFreshWaitUs=%d playerStateStaleGlobals=%d playerStateStaleCounters=%d playerStateStaleTransform=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
             G.TestFrames,
             G.TestInstanceCount,
             G.FrameBarrierEnabled ? 1 : 0,
@@ -18135,6 +18145,8 @@ void InitFromEnvironment()
             G.PlayerStateSyncEnabled ? 1 : 0,
             G.PlayerStateApplyEnabled ? 1 : 0,
             G.PlayerStateGlobalsEnabled ? 1 : 0,
+            G.PlayerStateApplyTransformDuringTransition ? 1 : 0,
+            G.PlayerStateTransitionTransformStartOffset,
             G.PlayerStateSyncInterval,
             G.PlayerStateMaxPredictFrames,
             G.PlayerStateFreshWaitUs,
