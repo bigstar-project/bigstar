@@ -1,5 +1,15 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Rollback/input-sync PoC status - 2026-06-22
+
+- Current practical rollback implementation is `tinycorepreimage` with lightweight Main RAM preimage/snapshot restore. The latest fix aligns rollback resimulation input semantics with normal frames: NSMB packet scratch gets delayed/effective input, while DS hardware input gets the raw local frame input.
+- Normal artificial jitter (`InputSendDelayFrames=3`, `InputSendJitterFrames=3`) passes the current movement-heavy suite with `tinycorepreimage-delay6-lead999-rbwait3000-maxresim2-bundle8`: stocktouch, chaos, contact, and dualstresslong passed with averages around `16.7-17.1ms` and max frame times under `47ms`.
+- Strong artificial jitter (`InputSendDelayFrames=6`, `InputSendJitterFrames=6`) exposed a real rollback correctness issue: `delay6/rbwait3000/maxresim2` can produce persistent `playerGlobal=0` mismatch. The root is that the max-resim cap can cut off an older prediction mismatch after wrong input has already affected gameplay.
+- Strong artificial jitter currently passes chaos/contact/dualstresslong with `tinycorepreimage-delay10-lead999-rbwait3000-uncapped-bundle8` in `logs/codex-goal-practical-delay10-uncapped-send6-jitter6-20260622/20260622-044053`. Results: chaos avg `17.664/17.654ms`, max `77.520/77.877ms`; contact avg `17.170/17.172ms`, max `47.603/38.975ms`; dualstresslong avg `17.727/17.734ms`, max `57.159/50.181ms`.
+- Verification now distinguishes transient rollback-correction samples from persistent desync: a single `playerGlobal=0` sample can pass only if it settles within `RollbackSettleFrames`; repeated samples beyond the settle window still fail.
+- Current blocker: strong-jitter correctness is much better, but rollback spikes remain visible (`50-78ms` in the strong-jitter suite). Star pickup/drop, block break persistence, and 8-coin item identity still need deterministic automatic routes.
+- Next actions: keep artificial send delay/jitter in the promotion matrix, reduce deep rollback spike cost without reintroducing resim capping correctness loss, and add event-heavy routes for the manual desync classes.
+
 ## GUI ice-stage Luigi sudden-death log review - 2026-06-20
 
 - User-reported capture: `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781960336919-68204-0`, client role, diagnostics enabled, no rollback, random course order `[1,2,0,4,3]`.

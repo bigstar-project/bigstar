@@ -4040,7 +4040,8 @@ void PruneRollbackHistoryLocked(melonDS::u32 frame)
         const RollbackStoredState* cursor = &start->second;
         for (size_t depth = 0; depth < G.RollbackStates.size(); depth++)
         {
-            if (!cursor->MainRAMDelta || cursor->BaseFrame == kNoFrameLimit)
+            if ((!cursor->MainRAMDelta && !cursor->MainRAMFramePreimage)
+                || cursor->BaseFrame == kNoFrameLimit)
                 break;
             if (!requiredFrames.insert(cursor->BaseFrame).second)
                 break;
@@ -4931,6 +4932,7 @@ bool PrepareRollbackDeltaSaveLocked(melonDS::u32 frame, RollbackStoredState& che
     if (IsRollbackPreimageBackend())
     {
         const bool hasUsableShadow = G.RollbackFrameDeltaShadowFrame != kNoFrameLimit
+            && G.RollbackFrameDeltaShadowFrame < frame
             && !G.RollbackFrameDeltaShadowMainRAM.empty()
             && G.RollbackStates.find(G.RollbackFrameDeltaShadowFrame) != G.RollbackStates.end();
         if (hasUsableShadow)
@@ -4951,6 +4953,7 @@ bool PrepareRollbackDeltaSaveLocked(melonDS::u32 frame, RollbackStoredState& che
     if (G.RollbackBackendMode == RollbackBackend::CoreFrameDelta)
     {
         const bool hasUsableShadow = G.RollbackFrameDeltaShadowFrame != kNoFrameLimit
+            && G.RollbackFrameDeltaShadowFrame < frame
             && !G.RollbackFrameDeltaShadowMainRAM.empty()
             && G.RollbackStates.find(G.RollbackFrameDeltaShadowFrame) != G.RollbackStates.end();
         if (!forceKeyframe && hasUsableShadow)
@@ -5004,6 +5007,50 @@ bool CaptureRollbackFramePreimage(
             baseMainRAM.begin() + offset,
             baseMainRAM.begin() + offset + pageBytes);
     }
+    return true;
+}
+
+bool ShouldStoreRollbackPreimageSnapshot(melonDS::u32 frame, const RollbackStoredState& checkpoint)
+{
+    if (!IsRollbackPreimageBackend())
+        return false;
+    if (!checkpoint.MainRAMFramePreimage)
+        return true;
+    if (G.RollbackDeltaKeyframeInterval <= 1)
+        return true;
+    if (G.NetplayStartFrame != 0 && frame == G.NetplayStartFrame)
+        return true;
+    return (frame % static_cast<melonDS::u32>(G.RollbackDeltaKeyframeInterval)) == 0;
+}
+
+bool ShouldSkipDuplicateRollbackPreimageCheckpointLocked(melonDS::u32 frame)
+{
+    return IsRollbackPreimageBackend()
+        && G.RollbackFrameDeltaShadowFrame == frame
+        && G.RollbackStates.find(frame) != G.RollbackStates.end();
+}
+
+size_t RollbackPreimageFallbackLimit()
+{
+    if (!IsRollbackPreimageBackend())
+        return 0;
+    if (G.RollbackMaxResimFrames > 0)
+        return static_cast<size_t>(G.RollbackMaxResimFrames);
+    return static_cast<size_t>(std::max(4, std::min(12, G.RollbackDeltaKeyframeInterval + 2)));
+}
+
+bool CaptureRollbackPreimageSnapshotIfNeeded(
+    melonDS::u32 frame,
+    RollbackStoredState& checkpoint,
+    melonDS::NDS* nds)
+{
+    if (!ShouldStoreRollbackPreimageSnapshot(frame, checkpoint))
+        return true;
+    if (!nds || !nds->MainRAM)
+        return false;
+    const melonDS::u32 len = nds->MainRAMMask + 1;
+    checkpoint.MainRAMCopy.resize(len);
+    std::memcpy(checkpoint.MainRAMCopy.data(), nds->MainRAM, len);
     return true;
 }
 
@@ -5274,23 +5321,71 @@ bool BuildRollbackPreimageRestoreLocked(
     std::vector<melonDS::u8>& latestMainRAM)
 {
     reverseStates.clear();
-    latestMainRAM = G.RollbackFrameDeltaShadowMainRAM;
-    melonDS::u32 cursorFrame = G.RollbackFrameDeltaShadowFrame;
-    if (cursorFrame == kNoFrameLimit || cursorFrame < frame || latestMainRAM.empty())
+    latestMainRAM.clear();
+    auto target = G.RollbackStates.find(frame);
+    if (target == G.RollbackStates.end())
         return false;
 
-    for (size_t depth = 0; cursorFrame > frame && depth <= G.RollbackStates.size(); depth++)
+    struct PreimageAnchor
     {
-        auto state = G.RollbackStates.find(cursorFrame);
-        if (state == G.RollbackStates.end()
-            || !state->second.MainRAMFramePreimage
-            || state->second.BaseFrame == kNoFrameLimit
-            || state->second.BaseFrame >= cursorFrame)
-            return false;
-        reverseStates.push_back(state->second);
-        cursorFrame = state->second.BaseFrame;
+        melonDS::u32 Frame = kNoFrameLimit;
+        const std::vector<melonDS::u8>* MainRAM = nullptr;
+    };
+    std::vector<PreimageAnchor> anchors;
+    for (auto it = G.RollbackStates.lower_bound(frame); it != G.RollbackStates.end(); ++it)
+    {
+        if (!it->second.MainRAMCopy.empty())
+            anchors.push_back({it->first, &it->second.MainRAMCopy});
     }
-    return cursorFrame == frame;
+    if (G.RollbackFrameDeltaShadowFrame != kNoFrameLimit
+        && G.RollbackFrameDeltaShadowFrame >= frame
+        && !G.RollbackFrameDeltaShadowMainRAM.empty())
+    {
+        bool alreadyCovered = false;
+        for (const auto& anchor : anchors)
+        {
+            if (anchor.Frame == G.RollbackFrameDeltaShadowFrame)
+            {
+                alreadyCovered = true;
+                break;
+            }
+        }
+        if (!alreadyCovered)
+            anchors.push_back({G.RollbackFrameDeltaShadowFrame, &G.RollbackFrameDeltaShadowMainRAM});
+    }
+    std::sort(anchors.begin(), anchors.end(), [](const PreimageAnchor& a, const PreimageAnchor& b) {
+        return a.Frame < b.Frame;
+    });
+
+    for (const auto& anchor : anchors)
+    {
+        if (!anchor.MainRAM || anchor.MainRAM->empty())
+            continue;
+        melonDS::u32 cursorFrame = anchor.Frame;
+        std::vector<RollbackStoredState> candidateReverseStates;
+        bool ok = true;
+        for (size_t depth = 0; cursorFrame > frame && depth <= G.RollbackStates.size(); depth++)
+        {
+            auto state = G.RollbackStates.find(cursorFrame);
+            if (state == G.RollbackStates.end()
+                || !state->second.MainRAMFramePreimage
+                || state->second.BaseFrame == kNoFrameLimit
+                || state->second.BaseFrame >= cursorFrame)
+            {
+                ok = false;
+                break;
+            }
+            candidateReverseStates.push_back(state->second);
+            cursorFrame = state->second.BaseFrame;
+        }
+        if (ok && cursorFrame == frame)
+        {
+            reverseStates = std::move(candidateReverseStates);
+            latestMainRAM = *anchor.MainRAM;
+            return true;
+        }
+    }
+    return false;
 }
 
 bool RestoreRollbackPreimageState(
@@ -5357,6 +5452,8 @@ void SaveRollbackCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
     const auto saveStart = std::chrono::steady_clock::now();
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
+        if (ShouldSkipDuplicateRollbackPreimageCheckpointLocked(frame))
+            return;
         PrepareRollbackDeltaSaveLocked(frame, checkpoint, deltaBaseMainRAM);
     }
     const melonDS::u32 mainRAMMode = IsRollbackPreimageBackend()
@@ -5369,6 +5466,8 @@ void SaveRollbackCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
     if (checkpoint.MainRAMDelta)
         TraceRollbackDeltaPages(frame, nds, deltaBaseMainRAM);
     if (!CaptureRollbackFramePreimage(checkpoint, nds, deltaBaseMainRAM))
+        return;
+    if (!CaptureRollbackPreimageSnapshotIfNeeded(frame, checkpoint, nds))
         return;
 
     if (!SaveRollbackCheckpointBuffer(nds, checkpoint.Buffer, mainRAMMode,
@@ -5408,6 +5507,8 @@ void SaveRollbackCheckpointNowLocked(melonDS::u32 frame, melonDS::NDS* nds, bool
     RollbackStoredState checkpoint;
     std::vector<melonDS::u8> deltaBaseMainRAM;
     const auto saveStart = std::chrono::steady_clock::now();
+    if (ShouldSkipDuplicateRollbackPreimageCheckpointLocked(frame))
+        return;
     PrepareRollbackDeltaSaveLocked(frame, checkpoint, deltaBaseMainRAM);
     const melonDS::u32 mainRAMMode = IsRollbackPreimageBackend()
         ? kRollbackMainRAMModeSkip
@@ -5419,6 +5520,8 @@ void SaveRollbackCheckpointNowLocked(melonDS::u32 frame, melonDS::NDS* nds, bool
     if (checkpoint.MainRAMDelta)
         TraceRollbackDeltaPages(frame, nds, deltaBaseMainRAM);
     if (!CaptureRollbackFramePreimage(checkpoint, nds, deltaBaseMainRAM))
+        return;
+    if (!CaptureRollbackPreimageSnapshotIfNeeded(frame, checkpoint, nds))
         return;
 
     if (!SaveRollbackCheckpointBuffer(nds, checkpoint.Buffer, mainRAMMode,
@@ -5471,9 +5574,43 @@ bool RestoreRollbackCheckpointForProbeIfNeeded(int instanceID, melonDS::u32 fram
             return false;
         }
         checkpoint = state->second;
-        const bool restoreReady = IsRollbackPreimageBackend()
+        bool restoreReady = IsRollbackPreimageBackend()
             ? BuildRollbackPreimageRestoreLocked(restoreFrame, reverseStates, latestMainRAM)
             : BuildRollbackRestoreChainLocked(restoreFrame, restoreChain);
+        const size_t preimageFallbackLimit = RollbackPreimageFallbackLimit();
+        for (size_t fallbackDepth = 0;
+             !restoreReady
+             && IsRollbackPreimageBackend()
+             && checkpoint.BaseFrame != kNoFrameLimit
+             && checkpoint.BaseFrame < restoreFrame
+              && fallbackDepth < preimageFallbackLimit
+              && fallbackDepth <= G.RollbackStates.size();
+             fallbackDepth++)
+        {
+            auto baseState = G.RollbackStates.find(checkpoint.BaseFrame);
+            if (baseState != G.RollbackStates.end())
+            {
+                const melonDS::u32 originalRestoreFrame = restoreFrame;
+                restoreFrame = checkpoint.BaseFrame;
+                checkpoint = baseState->second;
+                restoreReady = BuildRollbackPreimageRestoreLocked(
+                    restoreFrame,
+                    reverseStates,
+                    latestMainRAM);
+                if (restoreReady && G.InputNetplayTraceEnabled)
+                {
+                    std::printf("NSMB Rollback: preimage probe restore backed up restoreFrame=%u base=%u current=%u\n",
+                        originalRestoreFrame,
+                        restoreFrame,
+                        frame);
+                    std::fflush(stdout);
+                }
+            }
+            else
+            {
+                break;
+            }
+        }
         if (!restoreReady)
         {
             std::printf("NSMB Rollback: cannot restore delta chain frame=%u base=%u missing\n",
@@ -12214,7 +12351,23 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
             return false;
         }
 
-        auto state = G.RollbackStates.upper_bound(mismatchFrame);
+        melonDS::u32 checkpointSearchFrame = mismatchFrame;
+        if (IsRollbackPreimageBackend()
+            && G.RollbackFrameDeltaShadowFrame != kNoFrameLimit
+            && G.RollbackFrameDeltaShadowFrame < checkpointSearchFrame)
+        {
+            checkpointSearchFrame = G.RollbackFrameDeltaShadowFrame;
+            if (G.InputNetplayTraceEnabled)
+            {
+                std::printf("NSMB Rollback: preimage restore target backed up mismatch=%u shadow=%u current=%u\n",
+                    mismatchFrame,
+                    checkpointSearchFrame,
+                    frame);
+                std::fflush(stdout);
+            }
+        }
+
+        auto state = G.RollbackStates.upper_bound(checkpointSearchFrame);
         if (state == G.RollbackStates.begin())
         {
             std::printf(
@@ -12231,16 +12384,59 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
         restoreFrame = state->first;
 
         checkpoint = state->second;
-        const bool restoreReady = IsRollbackPreimageBackend()
+        bool restoreReady = IsRollbackPreimageBackend()
             ? BuildRollbackPreimageRestoreLocked(restoreFrame, reverseStates, latestMainRAM)
             : BuildRollbackRestoreChainLocked(restoreFrame, restoreChain);
+        const size_t preimageFallbackLimit = RollbackPreimageFallbackLimit();
+        for (size_t fallbackDepth = 0;
+             !restoreReady
+             && IsRollbackPreimageBackend()
+             && checkpoint.BaseFrame != kNoFrameLimit
+             && checkpoint.BaseFrame < restoreFrame
+              && fallbackDepth < preimageFallbackLimit
+              && fallbackDepth <= G.RollbackStates.size();
+             fallbackDepth++)
+        {
+            auto baseState = G.RollbackStates.find(checkpoint.BaseFrame);
+            if (baseState != G.RollbackStates.end())
+            {
+                const melonDS::u32 originalRestoreFrame = restoreFrame;
+                restoreFrame = checkpoint.BaseFrame;
+                checkpoint = baseState->second;
+                restoreReady = BuildRollbackPreimageRestoreLocked(
+                    restoreFrame,
+                    reverseStates,
+                    latestMainRAM);
+                if (restoreReady && G.InputNetplayTraceEnabled)
+                {
+                    std::printf("NSMB Rollback: preimage restore backed up restoreFrame=%u base=%u mismatch=%u current=%u\n",
+                        originalRestoreFrame,
+                        restoreFrame,
+                        mismatchFrame,
+                        frame);
+                    std::fflush(stdout);
+                }
+            }
+            else
+            {
+                break;
+            }
+        }
         if (!restoreReady)
         {
+            const bool hasRestoreFrame = G.RollbackStates.find(restoreFrame) != G.RollbackStates.end();
+            const bool hasBaseFrame = checkpoint.BaseFrame != kNoFrameLimit
+                && G.RollbackStates.find(checkpoint.BaseFrame) != G.RollbackStates.end();
             std::printf(
-                "NSMB Rollback: cannot resimulate mismatch=%u from delta checkpoint=%u, base=%u chain missing\n",
+                "NSMB Rollback: cannot resimulate mismatch=%u current=%u from delta checkpoint=%u base=%u chain missing shadow=%u hasCheckpoint=%d hasBase=%d states=%zu\n",
                 mismatchFrame,
+                frame,
                 restoreFrame,
-                checkpoint.BaseFrame);
+                checkpoint.BaseFrame,
+                G.RollbackFrameDeltaShadowFrame,
+                hasRestoreFrame ? 1 : 0,
+                hasBaseFrame ? 1 : 0,
+                G.RollbackStates.size());
             G.PendingRollbackFrame = kNoFrameLimit;
             G.PendingRollbackObservedFrame = kNoFrameLimit;
             return false;
@@ -12281,6 +12477,7 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
     for (melonDS::u32 f = restoreFrame; f < frame; f++)
     {
         InputState localInput = NeutralInput();
+        InputState runtimeLocalInput = NeutralInput();
         InputState remoteInput = NeutralInput();
         bool predictedRemote = false;
         {
@@ -12288,6 +12485,12 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
             auto localIt = G.LocalInputs.find(f);
             if (localIt != G.LocalInputs.end())
                 localInput = localIt->second;
+            const melonDS::u32 rawLocalFrame =
+                f + static_cast<melonDS::u32>(std::max(0, G.Delay));
+            auto rawLocalIt = G.LocalInputs.find(rawLocalFrame);
+            runtimeLocalInput = rawLocalIt != G.LocalInputs.end()
+                ? rawLocalIt->second
+                : localInput;
             GetRollbackRemoteInputLocked(f, remoteInput, predictedRemote);
         }
 
@@ -12302,10 +12505,10 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
             true,
             predictedRemote);
 
-        const InputState runtimeLocalInput = ConvertStockXToTouch(localInput);
-        nds->SetKeyMask(runtimeLocalInput.KeyMask);
-        if (runtimeLocalInput.Touching)
-            nds->TouchScreen(runtimeLocalInput.TouchX, runtimeLocalInput.TouchY);
+        const InputState runtimeInput = ConvertStockXToTouch(runtimeLocalInput);
+        nds->SetKeyMask(runtimeInput.KeyMask);
+        if (runtimeInput.Touching)
+            nds->TouchScreen(runtimeInput.TouchX, runtimeInput.TouchY);
         else
             nds->ReleaseScreen();
 
@@ -15042,38 +15245,24 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         sample.ObjectActiveBase[i] = objectSummary.ActiveBase[i];
     }
 
+    const auto mixObjectSettingsForGameplay = [](melonDS::u32 settings) {
+        // Bit 0x10 is observed to differ by local player/role for otherwise
+        // identical MvL objects. Keep the location/type bits stable for sync checks.
+        return settings & ~0x10u;
+    };
+
     sample.Hash = 1469598103934665603ull;
     MixGameStateValue(sample.Hash, sample.StageID);
     MixGameStateValue(sample.Hash, sample.StageGroup);
     MixGameStateValue(sample.Hash, sample.VsMode);
-    MixGameStateValue(sample.Hash, sample.LocalPlayerID);
     MixGameStateValue(sample.Hash, sample.GGID);
-    MixGameStateValue(sample.Hash, sample.NetState14);
-    MixGameStateValue(sample.Hash, sample.NetState1C);
-    MixGameStateValue(sample.Hash, sample.NetState20);
-    MixGameStateValue(sample.Hash, sample.NetState24);
-    MixGameStateValue(sample.Hash, sample.NetState5C);
-    MixGameStateValue(sample.Hash, sample.NetPacketTick);
-    MixGameStateValue(sample.Hash, sample.NetPacketKeys);
-    MixGameStateValue(sample.Hash, sample.NetPacketAction);
-    MixGameStateValue(sample.Hash, sample.NetPacketByte5);
-    MixGameStateValue(sample.Hash, sample.NetPacketByte6);
-    MixGameStateValue(sample.Hash, sample.NetPacketByte7);
     MixGameStateValue(sample.Hash, sample.NetRandomValue);
     MixGameStateValue(sample.Hash, sample.NetRandomCallCount);
     MixGameStateValue(sample.Hash, sample.NetRandomBranchAddress);
-    MixGameStateValue(sample.Hash, sample.InputConsole0Held);
-    MixGameStateValue(sample.Hash, sample.InputConsole0Pressed);
-    MixGameStateValue(sample.Hash, sample.InputConsole1Held);
-    MixGameStateValue(sample.Hash, sample.InputConsole1Pressed);
-    MixGameStateValue(sample.Hash, sample.InputPlayer0Held);
-    MixGameStateValue(sample.Hash, sample.InputPlayer1Held);
-    MixGameStateValue(sample.Hash, sample.InputPlayer0Pressed);
-    MixGameStateValue(sample.Hash, sample.InputPlayer1Pressed);
     MixGameStateValue(sample.Hash, sample.StageActorFreezeFlag);
     MixGameStateValue(sample.Hash, sample.VsStarFound);
     MixGameStateValue(sample.Hash, sample.VsStarGUID);
-    MixGameStateValue(sample.Hash, sample.VsStarSettings);
+    MixGameStateValue(sample.Hash, mixObjectSettingsForGameplay(sample.VsStarSettings));
     MixGameStateValue(sample.Hash, sample.VsStarStateType);
     MixGameStateValue(sample.Hash, sample.VsStarFlags);
     MixGameStateValue(sample.Hash, sample.VsStarPosX);
@@ -15081,7 +15270,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.VsStarPosZ);
     MixGameStateValue(sample.Hash, sample.VsStarActorFound);
     MixGameStateValue(sample.Hash, sample.VsStarActorGUID);
-    MixGameStateValue(sample.Hash, sample.VsStarActorSettings);
+    MixGameStateValue(sample.Hash, mixObjectSettingsForGameplay(sample.VsStarActorSettings));
     MixGameStateValue(sample.Hash, sample.VsStarActorStateType);
     MixGameStateValue(sample.Hash, sample.VsStarActorFlags);
     MixGameStateValue(sample.Hash, sample.VsStarActorPosX);
@@ -15089,7 +15278,9 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.VsStarActorPosZ);
     MixGameStateValue(sample.Hash, sample.PlayerActor0Found);
     MixGameStateValue(sample.Hash, sample.PlayerActor0GUID);
-    MixGameStateValue(sample.Hash, sample.PlayerActor0Settings);
+    MixGameStateValue(sample.Hash, mixObjectSettingsForGameplay(sample.PlayerActor0Settings));
+    MixGameStateValue(sample.Hash, sample.PlayerActor0StateType);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0Flags);
     MixGameStateValue(sample.Hash, sample.PlayerActor0PosX);
     MixGameStateValue(sample.Hash, sample.PlayerActor0PosY);
     MixGameStateValue(sample.Hash, sample.PlayerActor0PosZ);
@@ -15099,9 +15290,40 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.PlayerActor0VelX);
     MixGameStateValue(sample.Hash, sample.PlayerActor0VelY);
     MixGameStateValue(sample.Hash, sample.PlayerActor0VelZ);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0PlayerID);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0TransitionStep);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0SignalLock);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0Flag192);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0Flags728);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0Flags72C);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0Flags730);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0LinkedActor);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0TransitionFlag);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0CollisionFlag);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0EnvironmentFlag);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0UpdateLocked);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0ControlState);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0CharacterIDBase);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0RequestedPowerup);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0CurrentPowerup);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0PreviousPowerup);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0TransitioningFlag);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0CameraFocusMode);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0DefeatedFlag);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0PlayerBaseID);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0VisibleFlag);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0PowerupPhase);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0PowerupTimer);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0PowerupGainTimer);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0ActionFlag);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0SubActionFlag);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0PhysicsFlag);
+    MixGameStateValue(sample.Hash, sample.PlayerActor0DamageCooldown);
     MixGameStateValue(sample.Hash, sample.PlayerActor1Found);
     MixGameStateValue(sample.Hash, sample.PlayerActor1GUID);
-    MixGameStateValue(sample.Hash, sample.PlayerActor1Settings);
+    MixGameStateValue(sample.Hash, mixObjectSettingsForGameplay(sample.PlayerActor1Settings));
+    MixGameStateValue(sample.Hash, sample.PlayerActor1StateType);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1Flags);
     MixGameStateValue(sample.Hash, sample.PlayerActor1PosX);
     MixGameStateValue(sample.Hash, sample.PlayerActor1PosY);
     MixGameStateValue(sample.Hash, sample.PlayerActor1PosZ);
@@ -15111,6 +15333,35 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.PlayerActor1VelX);
     MixGameStateValue(sample.Hash, sample.PlayerActor1VelY);
     MixGameStateValue(sample.Hash, sample.PlayerActor1VelZ);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1PlayerID);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1TransitionStep);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1SignalLock);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1Flag192);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1Flags728);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1Flags72C);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1Flags730);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1LinkedActor);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1TransitionFlag);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1CollisionFlag);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1EnvironmentFlag);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1UpdateLocked);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1ControlState);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1CharacterIDBase);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1RequestedPowerup);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1CurrentPowerup);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1PreviousPowerup);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1TransitioningFlag);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1CameraFocusMode);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1DefeatedFlag);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1PlayerBaseID);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1VisibleFlag);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1PowerupPhase);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1PowerupTimer);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1PowerupGainTimer);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1ActionFlag);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1SubActionFlag);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1PhysicsFlag);
+    MixGameStateValue(sample.Hash, sample.PlayerActor1DamageCooldown);
     MixGameStateValue(sample.Hash, sample.PlayerCount);
     MixGameStateValue(sample.Hash, sample.Player0Powerup);
     MixGameStateValue(sample.Hash, sample.Player1Powerup);
@@ -15135,17 +15386,12 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.Player0CollectedStars);
     MixGameStateValue(sample.Hash, sample.Player1CollectedStars);
     MixGameStateValue(sample.Hash, sample.VsCoinCount);
-    MixGameStateValue(sample.Hash, sample.StageCameraFound);
-    MixGameStateValue(sample.Hash, sample.StageCameraWord190);
-    MixGameStateValue(sample.Hash, sample.StageCameraWord194);
-    MixGameStateValue(sample.Hash, sample.StageCameraWord19C);
-    MixGameStateValue(sample.Hash, sample.StageCameraWord1A0);
     MixGameStateValue(sample.Hash, sample.StageSceneFound);
+    MixGameStateValue(sample.Hash, sample.StageSceneStateType);
+    MixGameStateValue(sample.Hash, sample.StageSceneFlags);
     MixGameStateValue(sample.Hash, sample.StageSceneWord154);
     MixGameStateValue(sample.Hash, sample.StageSceneWord160);
     MixGameStateValue(sample.Hash, sample.VsConnectFound);
-    MixGameStateValue(sample.Hash, sample.VsConnectWord078);
-    MixGameStateValue(sample.Hash, sample.VsConnectWord07C);
     MixGameStateValue(sample.Hash, sample.VsConnectWord114);
     MixGameStateValue(sample.Hash, sample.VsConnectWord118);
     MixGameStateValue(sample.Hash, sample.VsConnectWord120);
@@ -15154,7 +15400,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.VsConnectWord148);
     MixGameStateValue(sample.Hash, sample.VsConnectWord154);
     MixGameStateValue(sample.Hash, sample.CourseSelectFound);
-    MixGameStateValue(sample.Hash, sample.CourseSelectSettings);
+    MixGameStateValue(sample.Hash, mixObjectSettingsForGameplay(sample.CourseSelectSettings));
     MixGameStateValue(sample.Hash, sample.CourseSelectWord060);
     MixGameStateValue(sample.Hash, sample.CourseSelectWord064);
     MixGameStateValue(sample.Hash, sample.CourseSelectWord068);
@@ -15174,9 +15420,54 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.StageControllerStateType);
     MixGameStateValue(sample.Hash, sample.MvlObject267Found);
     MixGameStateValue(sample.Hash, sample.MvlObject267StateType);
+    MixGameStateValue(sample.Hash, sample.MvlObject267LeftFound);
+    MixGameStateValue(sample.Hash, sample.MvlObject267LeftStateType);
+    MixGameStateValue(sample.Hash, sample.MvlObject267LeftPosX);
+    MixGameStateValue(sample.Hash, sample.MvlObject267LeftPosY);
+    MixGameStateValue(sample.Hash, sample.MvlObject267LeftPosZ);
+    MixGameStateValue(sample.Hash, sample.MvlObject267RightFound);
+    MixGameStateValue(sample.Hash, sample.MvlObject267RightStateType);
+    MixGameStateValue(sample.Hash, sample.MvlObject267RightPosX);
+    MixGameStateValue(sample.Hash, sample.MvlObject267RightPosY);
+    MixGameStateValue(sample.Hash, sample.MvlObject267RightPosZ);
+    MixGameStateValue(sample.Hash, sample.MvlGlobal965C);
+    MixGameStateValue(sample.Hash, sample.MvlGlobal9670);
+    MixGameStateValue(sample.Hash, sample.MvlGlobal9674);
+    MixGameStateValue(sample.Hash, sample.MvlGlobal9694_0);
+    MixGameStateValue(sample.Hash, sample.MvlGlobal9694_1);
+    MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCAC6C);
+    MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCAC74);
+    MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCAC7C);
+    MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCACDC);
+    MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCAE80);
+    MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCAE74);
+    MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCAEB8);
+    MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCAF20);
+    MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCAF40);
+    MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCA8C0);
+    MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCA8D0);
+    MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCAD30);
+    MixGameStateValue(sample.Hash, sample.MvlManagerGUID);
+    MixGameStateValue(sample.Hash, mixObjectSettingsForGameplay(sample.MvlManagerSettings));
+    MixGameStateValue(sample.Hash, sample.MvlManagerObjectID);
+    MixGameStateValue(sample.Hash, sample.MvlManagerStateType);
+    MixGameStateValue(sample.Hash, sample.MvlManagerFlags);
+    MixGameStateValue(sample.Hash, sample.MvlManagerUnk54);
+    MixGameStateValue(sample.Hash, sample.MvlManagerWordA8CC);
+    MixGameStateValue(sample.Hash, sample.MvlManagerWordA8D0);
+    MixGameStateValue(sample.Hash, sample.MvlManagerWordA8D4);
+    MixGameStateValue(sample.Hash, sample.MvlManagerWordA8D8);
+    MixGameStateValue(sample.Hash, sample.MvlManagerWordA8DC);
+    MixGameStateValue(sample.Hash, sample.MvlManagerWordA8E0);
+    MixGameStateValue(sample.Hash, sample.MvlManagerWordA8E4);
+    MixGameStateValue(sample.Hash, sample.MvlManagerHalfA8E8);
+    MixGameStateValue(sample.Hash, sample.MvlManagerHalfA8EA);
+    MixGameStateValue(sample.Hash, sample.MvlManagerByteA8EC);
+    MixGameStateValue(sample.Hash, sample.MvlManagerHalf494);
+    MixGameStateValue(sample.Hash, sample.MvlManagerHalf4A0);
     MixGameStateValue(sample.Hash, sample.MovingHazardFound);
     MixGameStateValue(sample.Hash, sample.MovingHazardGUID);
-    MixGameStateValue(sample.Hash, sample.MovingHazardSettings);
+    MixGameStateValue(sample.Hash, mixObjectSettingsForGameplay(sample.MovingHazardSettings));
     MixGameStateValue(sample.Hash, sample.MovingHazardStateType);
     MixGameStateValue(sample.Hash, sample.MovingHazardFlags);
     MixGameStateValue(sample.Hash, sample.MovingHazardPosX);
@@ -15184,6 +15475,32 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.MovingHazardPosZ);
     MixGameStateValue(sample.Hash, sample.MovingHazardVelX);
     MixGameStateValue(sample.Hash, sample.MovingHazardVelY);
+    MixGameStateValue(sample.Hash, sample.MovingHazardLastStepX);
+    MixGameStateValue(sample.Hash, sample.MovingHazardLastStepY);
+    MixGameStateValue(sample.Hash, sample.MovingHazardLastStepZ);
+    MixGameStateValue(sample.Hash, sample.MovingHazardVelH);
+    MixGameStateValue(sample.Hash, sample.MovingHazardTargetVelH);
+    MixGameStateValue(sample.Hash, sample.MovingHazardAccelV);
+    MixGameStateValue(sample.Hash, sample.MovingHazardTargetVelV);
+    MixGameStateValue(sample.Hash, sample.MovingHazardAccelH);
+    MixGameStateValue(sample.Hash, sample.MovingHazardTargetVelX);
+    MixGameStateValue(sample.Hash, sample.MovingHazardTargetVelY);
+    MixGameStateValue(sample.Hash, sample.MovingHazardTargetVelZ);
+    MixGameStateValue(sample.Hash, sample.ObjectScanTotal);
+    MixGameStateValue(sample.Hash, sample.ObjectNotCreatedCount);
+    MixGameStateValue(sample.Hash, sample.ObjectActiveCount);
+    MixGameStateValue(sample.Hash, sample.ObjectDeadCount);
+    MixGameStateValue(sample.Hash, sample.ObjectSkipUpdateCount);
+    MixGameStateValue(sample.Hash, sample.ObjectSkipRenderCount);
+    MixGameStateValue(sample.Hash, sample.ObjectFirstNotCreatedID);
+    MixGameStateValue(sample.Hash, sample.ObjectFirstNotCreatedFlags);
+    MixGameStateValue(sample.Hash, sample.ObjectSecondNotCreatedID);
+    MixGameStateValue(sample.Hash, sample.ObjectSecondNotCreatedFlags);
+    for (int i = 0; i < kObjectTraceSlots; i++)
+    {
+        MixGameStateValue(sample.Hash, sample.ObjectActiveID[i]);
+        MixGameStateValue(sample.Hash, mixObjectSettingsForGameplay(sample.ObjectActiveSettings[i]));
+    }
     return sample;
 }
 
@@ -18679,9 +18996,10 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                 preimageBytes += stored.MainRAMPreimagePages.size() * sizeof(melonDS::u32)
                     + stored.MainRAMPreimage.size();
             }
-            else if ((G.RollbackBackendMode == RollbackBackend::CoreDelta
-                || G.RollbackBackendMode == RollbackBackend::CoreFrameDelta)
-                && !stored.Buffer.empty())
+            else if (((G.RollbackBackendMode == RollbackBackend::CoreDelta
+                    || G.RollbackBackendMode == RollbackBackend::CoreFrameDelta)
+                    && !stored.Buffer.empty())
+                || (IsRollbackPreimageBackend() && !stored.MainRAMCopy.empty()))
                 keyframeCheckpoints++;
             mainRAMCopyBytes += stored.MainRAMCopy.size();
         }

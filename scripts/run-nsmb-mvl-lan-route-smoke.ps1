@@ -95,6 +95,7 @@ param(
     [int]$RollbackWindow = 20,
     [int]$RollbackCheckpointInterval = 1,
     [int]$RollbackResimulateDelayFrames = 0,
+    [int]$RollbackMaxResimFrames = 0,
     [switch]$RollbackResimulate,
     [switch]$RollbackRestoreProbe,
     [string]$ProcessPriority = "AboveNormal",
@@ -2769,6 +2770,7 @@ function Start-MelonLANProcess {
             $env:MELONDS_NSML_ROLLBACK_WINDOW = "$RollbackWindow"
             $env:MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL = "$RollbackCheckpointInterval"
             $env:MELONDS_NSML_ROLLBACK_RESIMULATE_DELAY_FRAMES = "$RollbackResimulateDelayFrames"
+            $env:MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES = "$RollbackMaxResimFrames"
             if ($RollbackResimulate) {
                 $env:MELONDS_NSML_ROLLBACK_RESIMULATE = "1"
             } else {
@@ -2785,6 +2787,7 @@ function Start-MelonLANProcess {
             Remove-Item Env:\MELONDS_NSML_ROLLBACK_WINDOW -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIMULATE_DELAY_FRAMES -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIMULATE -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESTORE_PROBE -ErrorAction SilentlyContinue
         }

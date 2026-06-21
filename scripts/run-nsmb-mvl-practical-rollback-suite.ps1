@@ -1,10 +1,15 @@
 param(
-    [string[]]$Candidate = @("tinycorepreimage-rbwait1500"),
+    [string[]]$Candidate = @("tinycorepreimage-delay6-lead999-rbwait3000-maxresim2-bundle8"),
     [string[]]$Route = @("stocktouch", "chaos", "death", "contact", "dualstresslong"),
     [string]$LogRoot = "logs\nsmb-mvl-practical-rollback-suite",
     [int]$WaitTimeoutMs = 720000,
     [int]$StallTimeoutMs = 5000,
     [int]$FrameHeartbeatInterval = 30,
+    [int]$InputSendDelayFrames = 0,
+    [int]$InputSendJitterFrames = 0,
+    [switch]$InputUnreliable,
+    [switch]$NoGameStateTrace,
+    [switch]$StateSync,
     [double]$MaxActiveFrameMs = 90.0,
     [int]$MaxActiveFrameOver33ms = 80,
     [int]$MaxConsecutiveSlowFrames = 4,
@@ -100,6 +105,7 @@ function Get-RollbackIntegrityError {
 $candidateDefs = @{
     "tinycorepreimage-wait0" = [pscustomobject]@{
         Backend = "tinycorepreimage"
+        InputDelayFrames = 0
         RollbackInputWaitUs = 0
         InputMaxFrameLead = 2
         RollbackWindow = 20
@@ -109,6 +115,7 @@ $candidateDefs = @{
     }
     "tinycorepreimage-rbwait500" = [pscustomobject]@{
         Backend = "tinycorepreimage"
+        InputDelayFrames = 0
         RollbackInputWaitUs = 500
         InputMaxFrameLead = 2
         RollbackWindow = 20
@@ -118,6 +125,7 @@ $candidateDefs = @{
     }
     "tinycorepreimage-rbwait750" = [pscustomobject]@{
         Backend = "tinycorepreimage"
+        InputDelayFrames = 0
         RollbackInputWaitUs = 750
         InputMaxFrameLead = 2
         RollbackWindow = 20
@@ -127,6 +135,7 @@ $candidateDefs = @{
     }
     "tinycorepreimage-rbwait1000" = [pscustomobject]@{
         Backend = "tinycorepreimage"
+        InputDelayFrames = 0
         RollbackInputWaitUs = 1000
         InputMaxFrameLead = 2
         RollbackWindow = 20
@@ -136,6 +145,7 @@ $candidateDefs = @{
     }
     "tinycorepreimage-rbwait1500" = [pscustomobject]@{
         Backend = "tinycorepreimage"
+        InputDelayFrames = 0
         RollbackInputWaitUs = 1500
         InputMaxFrameLead = 2
         RollbackWindow = 20
@@ -145,6 +155,7 @@ $candidateDefs = @{
     }
     "tinycorepreimage-rbwait1500-window32" = [pscustomobject]@{
         Backend = "tinycorepreimage"
+        InputDelayFrames = 0
         RollbackInputWaitUs = 1500
         InputMaxFrameLead = 2
         RollbackWindow = 32
@@ -154,6 +165,7 @@ $candidateDefs = @{
     }
     "tinycorepreimage-rbwait1500-bundle8" = [pscustomobject]@{
         Backend = "tinycorepreimage"
+        InputDelayFrames = 0
         RollbackInputWaitUs = 1500
         InputMaxFrameLead = 2
         RollbackWindow = 20
@@ -163,6 +175,7 @@ $candidateDefs = @{
     }
     "tinycorepreimage-rbwait1500-lead4" = [pscustomobject]@{
         Backend = "tinycorepreimage"
+        InputDelayFrames = 0
         RollbackInputWaitUs = 1500
         InputMaxFrameLead = 4
         RollbackWindow = 20
@@ -172,6 +185,7 @@ $candidateDefs = @{
     }
     "tinycorepreimage-rbwait1500-lead8" = [pscustomobject]@{
         Backend = "tinycorepreimage"
+        InputDelayFrames = 0
         RollbackInputWaitUs = 1500
         InputMaxFrameLead = 8
         RollbackWindow = 20
@@ -181,6 +195,7 @@ $candidateDefs = @{
     }
     "tinycorepreimage-rbwait1750" = [pscustomobject]@{
         Backend = "tinycorepreimage"
+        InputDelayFrames = 0
         RollbackInputWaitUs = 1750
         InputMaxFrameLead = 2
         RollbackWindow = 20
@@ -190,6 +205,7 @@ $candidateDefs = @{
     }
     "tinycorepreimage-rbwait2000" = [pscustomobject]@{
         Backend = "tinycorepreimage"
+        InputDelayFrames = 0
         RollbackInputWaitUs = 2000
         InputMaxFrameLead = 2
         RollbackWindow = 20
@@ -197,9 +213,82 @@ $candidateDefs = @{
         InputBundleHistory = 0
         Env = @{}
     }
+    "tinycorepreimage-delay4-lead999-rbwait1500-bundle8" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 4
+        RollbackInputWaitUs = 1500
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Env = @{}
+    }
+    "tinycorepreimage-delay4-lead999-rbwait8000-bundle8" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 4
+        RollbackInputWaitUs = 8000
+        RollbackMaxResimFrames = 0
+        RollbackSkipRenderDuringResim = $false
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Env = @{}
+    }
+    "tinycorepreimage-delay4-lead999-rbwait0-maxresim2-bundle8" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 4
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 2
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Env = @{}
+    }
+    "tinycorepreimage-delay6-lead999-rbwait0-maxresim2-bundle8" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 6
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 2
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Env = @{}
+    }
+    "tinycorepreimage-delay6-lead999-rbwait3000-maxresim2-bundle8" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 6
+        RollbackInputWaitUs = 3000
+        RollbackMaxResimFrames = 2
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Env = @{}
+    }
+    "tinycorepreimage-delay10-lead999-rbwait3000-uncapped-bundle8" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 10
+        RollbackInputWaitUs = 3000
+        RollbackMaxResimFrames = 0
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Env = @{}
+    }
     "coredelta-baseline" = [pscustomobject]@{
         Backend = "coredelta"
+        InputDelayFrames = 0
         RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 0
+        RollbackSkipRenderDuringResim = $false
         InputMaxFrameLead = 8
         RollbackWindow = 20
         RollbackCheckpointInterval = 8
@@ -327,6 +416,15 @@ foreach ($candidateName in $Candidate) {
             $clientInput = $split.Client
         }
 
+        $rollbackMaxResimFrames = 0
+        if ($candidateDef.PSObject.Properties.Name -contains "RollbackMaxResimFrames") {
+            $rollbackMaxResimFrames = [int]$candidateDef.RollbackMaxResimFrames
+        }
+        $rollbackSkipRenderDuringResim = $false
+        if ($candidateDef.PSObject.Properties.Name -contains "RollbackSkipRenderDuringResim") {
+            $rollbackSkipRenderDuringResim = [bool]$candidateDef.RollbackSkipRenderDuringResim
+        }
+
         $params = @{
             Frames = $routeDef.Frames
             WaitTimeoutMs = $WaitTimeoutMs
@@ -339,8 +437,11 @@ foreach ($candidateName in $Candidate) {
             RollbackWindow = $candidateDef.RollbackWindow
             RollbackCheckpointInterval = $candidateDef.RollbackCheckpointInterval
             RollbackInputWaitUs = $candidateDef.RollbackInputWaitUs
-            InputDelayFrames = 0
+            RollbackMaxResimFrames = $rollbackMaxResimFrames
+            InputDelayFrames = $candidateDef.InputDelayFrames
             InputMaxFrameLead = $candidateDef.InputMaxFrameLead
+            InputSendDelayFrames = $InputSendDelayFrames
+            InputSendJitterFrames = $InputSendJitterFrames
             InputBundleHistory = $candidateDef.InputBundleHistory
             NetworkPumpThread = $true
             NetworkPumpSleepUs = 50
@@ -354,6 +455,23 @@ foreach ($candidateName in $Candidate) {
         }
         foreach ($key in $routeDef.Extra.Keys) {
             $params[$key] = $routeDef.Extra[$key]
+        }
+        if ($rollbackSkipRenderDuringResim) {
+            $params.RollbackSkipRenderDuringResim = $true
+        }
+        if ($InputUnreliable) {
+            $params.InputUnreliable = $true
+        }
+        if ($NoGameStateTrace) {
+            $params.NoGameStateTrace = $true
+            if ($params.ContainsKey("CheckMovingHazardProgressDuringDeath")) {
+                $params.CheckMovingHazardProgressDuringDeath = $false
+            }
+        }
+        if ($StateSync) {
+            $params.StateSync = $true
+            $params.StateSyncExtended = $true
+            $params.StateSyncInterval = 60
         }
 
         Write-Host "running practical case: candidate=$candidateName route=$routeName"

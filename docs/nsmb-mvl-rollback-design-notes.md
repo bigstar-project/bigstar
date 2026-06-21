@@ -1,5 +1,44 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
+## 2026-06-22 current status - raw-input resim and strong-jitter rollback
+
+Current rollback direction is still lightweight `tinycorepreimage`, but the practical candidate now splits into two profiles:
+
+- Normal artificial jitter profile: `tinycorepreimage-delay6-lead999-rbwait3000-maxresim2-bundle8`.
+- Strong artificial jitter profile: `tinycorepreimage-delay10-lead999-rbwait3000-uncapped-bundle8`.
+
+Completed in the latest pass:
+
+- Fixed a rollback resimulation input-semantics bug. Normal frames feed the DS hardware input from the current raw local script frame while NSMB's `Net::getConsoleKeys` sees the delayed/effective netplay input. Rollback resimulation was feeding the delayed input to both paths, so resimulated frames did not match normal execution. Resim now uses delayed/effective input for packet scratch and raw `f + InputDelayFrames` local input for DS hardware.
+- Strengthened `tinycorepreimage` restore anchoring with lightweight Main RAM snapshots/preimages. The preimage backend now keeps usable future anchors, avoids self-base preimage restores, preserves required preimage chains while pruning, and stores periodic/anchor `MainRAMCopy` snapshots.
+- Made the state-sync gameplay hash more role-invariant. Local-only input/role/camera/net fields were removed from the strict hash, while player actor/global, MvL manager/gate, moving hazard, object lifecycle, and active object identity fields were added.
+- Added persistent `playerGlobal` mismatch detection. Split smoke now treats a one-sample rollback correction mismatch as transient when it settles within `RollbackSettleFrames`, but still fails repeated `playerGlobal=0` samples that persist beyond the settle window.
+- Added practical-suite support for artificial input send delay/jitter and the strong-jitter candidate above.
+
+Verification:
+
+- Build passed before the latest script-only settle/candidate edits: `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4`.
+- Normal jitter suite, `InputSendDelayFrames=3` / `InputSendJitterFrames=3`, `delay6/rbwait3000/maxresim2`, no full game-state trace, passed stocktouch, chaos, contact, and dualstresslong in `logs/codex-goal-practical-rbwait3000-rawinput-jitter3-20260622/20260622-040447`. Averages were about `16.7-17.1ms`; max frames were `37-47ms`.
+- The same candidate passed death in `logs/codex-goal-practical-rbwait3000-rawinput-stars-death-jitter3-20260622/20260622-041022`. `luigistar` and `mariostarleft` did not prove star behavior because the route did not collect a star on either peer.
+- Strong jitter rejected `delay6/rbwait3000/maxresim2`: `InputSendDelayFrames=6` / `InputSendJitterFrames=6` produced persistent `playerGlobal=0` in chaos/dualstresslong. This is the important failure mode the user asked to catch.
+- Strong jitter with uncapped rollback correctness passed a direct chaos run at `delay10/rbwait3000` in `logs/codex-goal-chaos-inputdelay10-send6-jitter6-uncapped-settlecheck-2400-20260622`; the only `playerGlobal=0` sample was a single transient at frame `1140`.
+- Strong jitter practical suite passed chaos/contact/dualstresslong with `tinycorepreimage-delay10-lead999-rbwait3000-uncapped-bundle8` in `logs/codex-goal-practical-delay10-uncapped-send6-jitter6-20260622/20260622-044053`:
+  - `chaos`: avg `17.664/17.654ms`, max `77.520/77.877ms`, over33 `32/30`; one transient `playerGlobal=0` at frame `1140`.
+  - `contact`: avg `17.170/17.172ms`, max `47.603/38.975ms`, over33 `5/7`.
+  - `dualstresslong`: avg `17.727/17.734ms`, max `57.159/50.181ms`, over33 `46/45`.
+
+Current conclusion:
+
+- The previous `RollbackMaxResimFrames=2` cap is correctness-unsafe under strong jitter. If a prediction mismatch is older than the cap, capping the rollback start frame leaves already-simulated wrong input in gameplay state and can become a persistent `playerGlobal` mismatch. For correctness-focused runs, use uncapped rollback or a cap high enough to cover the network condition.
+- Deep uncapped rollback restores correctness but does not remove visible spikes. The strong-jitter candidate is around `56-58fps` active on this machine and still has `50-78ms` rollback spikes. This is better than desync, but not yet the final "comfortable 60fps with no noticeable drops" target.
+- `delay10` is a latency/performance tradeoff profile for adverse jitter. `delay8` passed correctness but performed worse, around `55fps` active with `80-95ms` spikes. Skipping intermediate resim checkpoints is rejected for now because it produced a `~300ms` host rollback spike in `logs/codex-goal-chaos-inputdelay10-send6-jitter6-uncapped-skipintermediate-2400-20260622`.
+
+Current blocker / next actions:
+
+- Reduce remaining rollback spikes without reintroducing correctness loss. The next promising direction is not capping old mismatches; it is reducing how often deep corrections happen or making them cheaper.
+- Add stronger event routes for star pickup/drop/recover, block break persistence, and 8-coin item identity. Current star routes are still input coverage failures, not correctness proof.
+- Keep testing with artificial send delay/jitter and movement-heavy chaos/contact routes. Average FPS alone is insufficient; `maxFrameMs`, `over33ms`, and persistent mismatch detection must stay in the promotion gate.
+
 ## 2026-06-07 GUI rollback settings exposure
 
 Current GUI default remains the non-rollback input-delay path:

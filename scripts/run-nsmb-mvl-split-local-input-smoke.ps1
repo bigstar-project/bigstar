@@ -42,8 +42,11 @@ param(
     [int]$RollbackWindow = 20,
     [int]$RollbackCheckpointInterval = 1,
     [int]$RollbackResimulateDelayFrames = 0,
+    [int]$RollbackMaxResimFrames = 0,
     [switch]$RollbackResimulate,
     [switch]$RollbackSkipIntermediateResimCheckpoints,
+    [switch]$RollbackSkipJitReset,
+    [switch]$RollbackSkipRenderDuringResim,
     [switch]$RollbackRestoreProbe,
     [int]$RollbackPredictionProbeModulo = 0,
     [int]$RollbackPredictionProbeOffset = 0,
@@ -227,8 +230,29 @@ if ($Rollback -and ($isTinyCorePreimageRollback -or $isNsmbTinyCoreRollback)) {
     $env:MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "$RollbackTinyCoreFlags"
 } elseif ($Rollback -and $RollbackBackend -match "^(nsmbcoreranges|nsmb-core-ranges)$") {
     $env:MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
-    Remove-Item Env:\MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET -ErrorAction SilentlyContinue
-    Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER -ErrorAction SilentlyContinue
+    if ($RollbackSkipJitReset) {
+        $env:MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET -ErrorAction SilentlyContinue
+    }
+    if ($RollbackSkipRenderDuringResim) {
+        $env:MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER -ErrorAction SilentlyContinue
+    }
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS -ErrorAction SilentlyContinue
+} elseif ($Rollback) {
+    Remove-Item Env:\MELONDS_NSML_SUPPRESS_PU_DEBUG -ErrorAction SilentlyContinue
+    if ($RollbackSkipJitReset) {
+        $env:MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET -ErrorAction SilentlyContinue
+    }
+    if ($RollbackSkipRenderDuringResim) {
+        $env:MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER -ErrorAction SilentlyContinue
+    }
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS -ErrorAction SilentlyContinue
 } else {
     Remove-Item Env:\MELONDS_NSML_SUPPRESS_PU_DEBUG -ErrorAction SilentlyContinue
@@ -542,7 +566,8 @@ if ($Rollback) {
         "-Rollback",
         "-RollbackWindow", "$RollbackWindow",
         "-RollbackCheckpointInterval", "$RollbackCheckpointInterval",
-        "-RollbackResimulateDelayFrames", "$RollbackResimulateDelayFrames"
+        "-RollbackResimulateDelayFrames", "$RollbackResimulateDelayFrames",
+        "-RollbackMaxResimFrames", "$RollbackMaxResimFrames"
     )
     if ($RollbackBackend -ne "") {
         $common += @("-RollbackBackend", "$RollbackBackend")
@@ -629,6 +654,30 @@ if ($hostExitFailed -or
         if (Test-Path $path) { $details += Get-Content $path -Raw }
     }
     throw "split local-input child smoke failed: hostExit=$($hostProc.ExitCode) clientExit=$($clientProc.ExitCode) $($details -join "`n")"
+}
+
+function Assert-NoRollbackIntegrityError {
+    param(
+        [string]$Role,
+        [string]$Text
+    )
+
+    $patterns = @(
+        "NSMB Rollback: cannot resimulate",
+        "NSMB Rollback: checkpoint missing",
+        "NSMB Rollback: .*chain missing",
+        "NSMB Rollback: .*restore failed",
+        "NSMB Test: .*rollback.*failed"
+    )
+    $hit = ($Text -split "`r?`n") |
+        Where-Object {
+            $line = $_
+            $patterns | Where-Object { $line -match $_ } | Select-Object -First 1
+        } |
+        Select-Object -First 1
+    if ($null -ne $hit) {
+        throw "$Role rollback integrity failure: $hit"
+    }
 }
 
 function Assert-ActiveFrameTiming {
@@ -764,6 +813,60 @@ function Assert-RollbackResimCount {
     }
 }
 
+function Assert-NoStateSyncPlayerGlobalMismatch {
+    param(
+        [string]$Role,
+        [string]$Text,
+        [string]$LogDir
+    )
+
+    $mismatches = @()
+    foreach ($line in ($Text -split "`r?`n")) {
+        if ($line -match "NSMB PoC: game state mismatch .* frame=([0-9]+).* playerGlobal=0") {
+            $mismatches += [pscustomobject]@{
+                Frame = [int]$Matches[1]
+                Line = $line
+            }
+        }
+    }
+    if ($mismatches.Count -gt 0) {
+        if ($RollbackSettleFrames -le 0) {
+            throw "$Role state sync playerGlobal mismatch: $($mismatches[0].Line)"
+        }
+
+        $streakStart = $mismatches[0]
+        $previous = $mismatches[0]
+        $separateTransientGap = $RollbackSettleFrames + [Math]::Max(1, $StateSyncInterval)
+        for ($i = 1; $i -lt $mismatches.Count; $i++) {
+            $current = $mismatches[$i]
+            if (($current.Frame - $previous.Frame) -gt $separateTransientGap) {
+                Write-Host "$Role rollback transient playerGlobal mismatch settled frame=$($streakStart.Frame) lastMismatchFrame=$($previous.Frame)"
+                $streakStart = $current
+            } elseif (($current.Frame - $streakStart.Frame) -gt $RollbackSettleFrames) {
+                throw "$Role persistent state sync playerGlobal mismatch: first=$($streakStart.Line) latest=$($current.Line) settleFrames=$RollbackSettleFrames"
+            }
+            $previous = $current
+        }
+        Write-Host "$Role rollback transient playerGlobal mismatch settled frame=$($streakStart.Frame) lastMismatchFrame=$($previous.Frame)"
+    }
+
+    $jsonMismatch = Get-ChildItem -LiteralPath $LogDir -Recurse -Filter "*.game-state-mismatch.json" -ErrorAction SilentlyContinue |
+        Where-Object {
+            $jsonText = Get-Content -LiteralPath $_.FullName -Raw -ErrorAction SilentlyContinue
+            $jsonText -match '"player_global_matches"\s*:\s*false'
+        } |
+        Select-Object -First 1
+    if ($null -ne $jsonMismatch) {
+        if ($RollbackSettleFrames -le 0 -or $mismatches.Count -eq 0) {
+            throw "$Role state sync playerGlobal mismatch json: $($jsonMismatch.FullName)"
+        }
+        Write-Host "$Role rollback transient playerGlobal mismatch json observed: $($jsonMismatch.FullName)"
+    }
+}
+
+Assert-NoRollbackIntegrityError -Role "host" -Text $hostMelonText
+Assert-NoRollbackIntegrityError -Role "client" -Text $clientMelonText
+
 if ($MaxActiveFrameMs -gt 0.0 -or $MaxActiveFrameOver25ms -ge 0 -or $MaxActiveFrameOver33ms -ge 0 -or $MaxConsecutiveSlowFrames -ge 0 -or $MaxRollbackFrameMs -gt 0.0) {
     Assert-ActiveFrameTiming -Role "host" -Text $hostMelonText -RollbackFrameLimitMs $MaxRollbackFrameMs
     Assert-ActiveFrameTiming -Role "client" -Text $clientMelonText -RollbackFrameLimitMs $MaxRollbackFrameMs
@@ -771,6 +874,10 @@ if ($MaxActiveFrameMs -gt 0.0 -or $MaxActiveFrameOver25ms -ge 0 -or $MaxActiveFr
 if ($MinRollbackResims -ge 0) {
     Assert-RollbackResimCount -Role "host" -Text $hostMelonText
     Assert-RollbackResimCount -Role "client" -Text $clientMelonText
+}
+if ($StateSync) {
+    Assert-NoStateSyncPlayerGlobalMismatch -Role "host" -Text $hostMelonText -LogDir $hostLog
+    Assert-NoStateSyncPlayerGlobalMismatch -Role "client" -Text $clientMelonText -LogDir $clientLog
 }
 
 if ($RequireWorldItemSpawn) {
