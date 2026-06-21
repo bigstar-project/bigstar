@@ -741,12 +741,20 @@ export function useLauncherController() {
 
   const joinRoomMutation = useMutation({
     mutationFn: async ({
+      playerName,
       romPairId,
       roomId,
     }: {
+      playerName: string;
       romPairId: string;
       roomId: string;
-    }) => joinMatchmakingRoom({ romPairId, roomId, signalUrl: form.signalUrl }),
+    }) =>
+      joinMatchmakingRoom({
+        playerName,
+        romPairId,
+        roomId,
+        signalUrl: form.signalUrl,
+      }),
   });
 
   const createRoom = async () => {
@@ -871,6 +879,14 @@ export function useLauncherController() {
     matchmakingActionBusyRef.current = true;
     setMatchmakingActionBusy(true);
     try {
+      const playerName = form.hostName.trim();
+      if (!playerName) {
+        setActivityStatus({
+          text: '設定画面でプレイヤーネームを保存してください',
+          kind: 'warn',
+        });
+        return;
+      }
       setActivityStatus({ text: '部屋情報を確認中', kind: 'idle' });
       const room = await getMatchmakingRoom(form.signalUrl, roomId);
       const nextForm: FormState = {
@@ -910,6 +926,7 @@ export function useLauncherController() {
       assertRomPairMatches(roms.rom_identity, room.rom_identity);
       setActivityStatus({ text: '部屋に参加中', kind: 'idle' });
       const response = await joinRoomMutation.mutateAsync({
+        playerName,
         romPairId: roms.rom_identity.rom_pair_id,
         roomId,
       });
@@ -923,7 +940,7 @@ export function useLauncherController() {
       });
       await startMatchFor(nextForm, {
         mario: playerNameOrFallback(room.host_name, '相手'),
-        luigi: playerNameOrFallback(form.hostName, 'プレイヤー'),
+        luigi: playerNameOrFallback(playerName, 'プレイヤー'),
       });
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });
@@ -962,7 +979,13 @@ export function useLauncherController() {
           text: '参加者を検出しました。接続を確立してからmelonDSを起動します',
           kind: 'idle',
         });
-        await startMatchForRef.current(hostedRoom.form, hostedRoom.playerNames);
+        await startMatchForRef.current(hostedRoom.form, {
+          ...hostedRoom.playerNames,
+          luigi: playerNameOrFallback(
+            room.client_name ?? '',
+            hostedRoom.playerNames.luigi,
+          ),
+        });
       } catch (error) {
         if (!disposed) {
           setHostedRoom(null);

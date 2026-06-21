@@ -25,6 +25,7 @@ export type CreateRoomParams = {
 
 export type ReserveJoinParams = {
   join_token: string;
+  client_name?: string;
   rom_pair_id: string;
   now: number;
 };
@@ -60,6 +61,7 @@ export function publicRoom(record: RoomRecord, peerCount = 0): RoomSummary {
   return {
     room_id: record.room_id,
     host_name: record.host_name,
+    ...(record.client_name ? { client_name: record.client_name } : {}),
     status: record.status,
     settings: record.settings,
     rom_identity: record.rom_identity,

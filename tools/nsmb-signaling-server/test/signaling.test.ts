@@ -50,12 +50,16 @@ async function createRoom() {
 
 async function reserveJoin(roomId: string) {
   const response = await SELF.fetch(`https://match.test/rooms/${roomId}/join`, {
-    body: JSON.stringify({ rom_pair_id: romIdentity.rom_pair_id }),
+    body: JSON.stringify({
+      player_name: 'Client Player',
+      rom_pair_id: romIdentity.rom_pair_id,
+    }),
     headers: { 'content-type': 'application/json' },
     method: 'POST',
   });
   expect(response.status).toBe(200);
   return json<{
+    client_name?: string;
     join_token: string;
     room_id: string;
     signal_url: string;
@@ -156,8 +160,19 @@ describe('マッチメイキング HTTP API', () => {
     });
 
     const joined = await reserveJoin(created.room_id);
+    expect(joined.client_name).toBe('Client Player');
     expect(joined.join_token).toHaveLength(32);
     expect(joined.room_id).toBe(created.room_id);
+
+    const afterJoin = await SELF.fetch(
+      `https://match.test/rooms/${created.room_id}`,
+    );
+    expect(afterJoin.status).toBe(200);
+    expect(await json(afterJoin)).toMatchObject({
+      client_name: 'Client Player',
+      room_id: created.room_id,
+      status: 'joining',
+    });
 
     const close = await SELF.fetch(
       `https://match.test/rooms/${created.room_id}/close`,

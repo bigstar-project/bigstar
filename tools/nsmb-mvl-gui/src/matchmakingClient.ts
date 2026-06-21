@@ -18,6 +18,7 @@ type CreateRoomInput = {
 type JoinRoomInput = {
   signalUrl: string;
   roomId: string;
+  playerName: string;
   romPairId: string;
 };
 
@@ -94,13 +95,14 @@ export async function createRoom({
 }
 
 export async function joinRoom({
+  playerName,
   romPairId,
   roomId,
   signalUrl,
 }: JoinRoomInput) {
   const response = await clientFor(signalUrl).rooms[':roomId'].join.$post({
     param: { roomId },
-    json: { rom_pair_id: romPairId },
+    json: { player_name: playerName, rom_pair_id: romPairId },
   });
   if (!response.ok) {
     throw new Error(await readError(response));

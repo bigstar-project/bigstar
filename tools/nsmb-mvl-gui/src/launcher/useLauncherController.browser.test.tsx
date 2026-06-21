@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => {
     romIdentity,
     roomDetail: {
       can_join: false,
+      client_name: 'Client Player',
       created_at: 1,
       expires_at: Date.now() + 600_000,
       host_name: 'Host Player',
@@ -39,7 +40,7 @@ const mocks = vi.hoisted(() => {
         wins: 3,
       },
       signal_url: 'ws://127.0.0.1:8787/session?token=host-secret',
-      status: 'matched',
+      status: 'joining',
       updated_at: 2,
     },
     startMatchMock: vi.fn((_request: LaunchRequest) =>
@@ -152,6 +153,9 @@ function LauncherHarness() {
         {launcher.matchmakingRooms.busy ? 'busy' : 'idle'}
       </output>
       <output aria-label="status">{launcher.activityStatus?.text ?? ''}</output>
+      <output aria-label="opponent">
+        {launcher.currentMatch?.playerNames.luigi ?? ''}
+      </output>
     </div>
   );
 }
@@ -191,5 +195,8 @@ describe('useLauncherController', () => {
     await expect
       .element(screen.getByLabelText('status'))
       .toHaveTextContent('起動済み');
+    await expect
+      .element(screen.getByLabelText('opponent'))
+      .toHaveTextContent('Client Player');
   });
 });

@@ -165,6 +165,7 @@ const route = app
       }
       const record = await room.reserveJoin({
         join_token: joinToken,
+        client_name: body.player_name,
         rom_pair_id: body.rom_pair_id,
         now,
       });
@@ -174,6 +175,7 @@ const route = app
         {
           room_id: roomId,
           join_token: joinToken,
+          ...(record.client_name ? { client_name: record.client_name } : {}),
           signal_url: signalUrl(c.req.raw),
           settings: record.settings,
           rom_identity: record.rom_identity,

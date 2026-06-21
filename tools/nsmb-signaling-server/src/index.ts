@@ -127,6 +127,7 @@ export class SignalingRoom
       ...room,
       status: 'joining',
       join_token: params.join_token,
+      ...(params.client_name ? { client_name: params.client_name } : {}),
       updated_at: params.now,
       can_join: false,
     });

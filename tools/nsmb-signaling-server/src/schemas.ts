@@ -77,6 +77,7 @@ export const romIdentitySchema = z.object({
 export const roomSummarySchema = z.object({
   room_id: z.string(),
   host_name: z.string(),
+  client_name: z.string().trim().min(1).max(32).optional(),
   status: roomStatusSchema,
   settings: gameSettingsSchema,
   rom_identity: romIdentitySchema,
@@ -109,6 +110,7 @@ export const joinRoomRequestSchema = z.object({
 export const joinRoomResponseSchema = z.object({
   room_id: z.string(),
   join_token: z.string(),
+  client_name: z.string().trim().min(1).max(32).optional(),
   signal_url: z.string(),
   settings: gameSettingsSchema,
   rom_identity: romIdentitySchema,
