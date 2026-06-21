@@ -14,9 +14,16 @@
   - `predictrepair-delay2-player-world-lite` fixes chaos and passes stocktouch/contact without freeze; under strong jitter it averages `17.5-18.7ms` with `40-44ms` max spikes, but dualstresslong can still produce persistent `playerGlobal=0` during death/transition-heavy movement.
   - Adding same-frame wait (`RollbackInputWaitUs=1000..3000`) can remove that `playerGlobal=0` signal on the failing dualstress seed, but active FPS drops to about `52fps` at `1000us` and about `47fps` at `3000us`, so it is not a final answer.
   - Budgeted `RollbackMaxResimFrames=2` plus world repair is still too heavy and produced a `101ms` active spike on the same dualstress seed.
+- Latest delay-2 Plan-D-style snapshot/repair experiments:
+  - `predictrepair-delay2-player-world-actorsnap-hostglobals` kept strong-jitter dualstresslong fast (`16.692/16.690ms`, max `40.671/31.881ms`) but still produced persistent `playerGlobal=0` around player death/transition.
+  - Increasing full `GameState` sync to 10F fixed the early playerGlobal window but caused spikes (`102ms` host, `649ms` client), so high-frequency full GameState sync is rejected.
+  - Short stale global repair (`MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES=12`) reduced the persistent global mismatch and kept performance practical (`16.7-16.9ms`, max roughly `43-49ms`), but dualstresslong still desyncs after death/respawn through player actor position lag.
+  - Stale remote transform repair (`4F` or `12F`) worsened player actor Y/X drift, so stale transform writes are not a promotion path.
+  - Longer stale global/counter-only variants (`24F`, counter `24F`) can reduce some counter lag but introduce earlier stale `playerGlobal` or actor drift; they are diagnostic only.
+  - Rechecking exact rollback under the delay-2 requirement is still too heavy: `coredelta-baseline` hit `22.350/22.349ms` average and `301/341ms` max; `exact-delay2-tinycorepreimage-skiprender` hit `19.093/19.337ms` average and `163/166ms` max.
 - Verification now distinguishes transient rollback-correction samples from persistent desync: a single `playerGlobal=0` sample can pass only if it settles within `RollbackSettleFrames`; repeated samples beyond the settle window still fail.
-- Current blocker: with `InputDelayFrames=2`, the full-resim path is accurate but spikes badly; the predict/repair path is light but cannot always know fresh remote death/transition state under strong jitter without waiting, which lowers FPS. The next direction is a new rollback/repair architecture that avoids main-thread deep resim and avoids delay-increase dependence.
-- Next actions: keep artificial send delay/jitter in the promotion matrix, continue delay-2-only candidates, and add event-heavy routes for star pickup/drop, block break persistence, and 8-coin item identity.
+- Current blocker: with `InputDelayFrames=2`, exact rollback still spikes too much, while the lightweight predict/repair path is fast but still loses exact player actor state around death/respawn. Raising GUI rollback delay above `2` is explicitly not acceptable for this goal.
+- Next actions: keep artificial send delay/jitter in the promotion matrix, continue delay-2-only candidates, and focus on a more fundamental actor/death-transition authority model rather than patching only individual examples. Event-heavy routes for star pickup/drop, block break persistence, and 8-coin item identity still need to be added.
 
 ## GUI ice-stage Luigi sudden-death log review - 2026-06-20
 

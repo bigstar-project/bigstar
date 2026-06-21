@@ -27,6 +27,7 @@ param(
     [switch]$PlayerStateSync,
     [switch]$PlayerStateApply,
     [switch]$PlayerStateGlobals,
+    [switch]$PlayerStateReliable,
     [int]$PlayerStateSyncInterval = 1,
     [int]$PlayerStateMaxPredictFrames = 2,
     [switch]$WorldStateSync,
@@ -1424,10 +1425,16 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_GLOBALS -ErrorAction SilentlyContinue
         }
+        if ($PlayerStateReliable) {
+            $env:MELONDS_NSML_PLAYER_STATE_RELIABLE = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_RELIABLE -ErrorAction SilentlyContinue
+        }
     } else {
         Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_SYNC -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_APPLY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_GLOBALS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_RELIABLE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_SYNC_INTERVAL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_MAX_PREDICT_FRAMES -ErrorAction SilentlyContinue
     }
@@ -3156,6 +3163,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_SYNC -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_APPLY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_GLOBALS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_RELIABLE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_SYNC_INTERVAL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PLAYER_STATE_MAX_PREDICT_FRAMES -ErrorAction SilentlyContinue
     }

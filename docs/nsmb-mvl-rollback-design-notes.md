@@ -41,6 +41,13 @@ Verification:
   - `predictrepair-delay2-player-world-lite` suite: stocktouch/contact pass; death failed only because `-NoGameStateTrace` disables the death assertion; dualstresslong fails with persistent `playerGlobal=0` around frames `1860-1920`.
   - Reproducing the dualstress failure with diagnostics showed death/transition state arriving too late for predict-only repair. Same-frame waits (`RollbackInputWaitUs=1000/1500/3000`) can remove `playerGlobal=0`, but active FPS falls to roughly `52/50/47fps`.
   - Budgeted resim (`RollbackMaxResimFrames=2`) plus world repair is rejected for now: it produced `101.592ms` max frame time and about `41.6fps` active in `logs/codex-goal-delay2-budgetresim2-worldlite-dual-failseed-20260622`.
+- Delay-2 Plan-D-style actor/global/world snapshot experiments:
+  - Added host/global apply modes, player transition-step packing, moving-hazard world-state fill/apply, player-global stale repair experiments, and field-level transient mismatch classification in the split smoke.
+  - `predictrepair-delay2-player-world-actorsnap-hostglobals` remains fast under strong jitter (`logs/codex-goal-suite-hostglobals-dualstress-20260622/20260622-071044`: `16.692/16.690ms`, max `40.671/31.881ms`) but still fails persistent `playerGlobal=0` during death/transition.
+  - Full `GameState` sync every 10F fixes the early playerGlobal window but is rejected on spikes (`logs/codex-goal-suite-hostglobals-sync10-dualstress-20260622/20260622-071407`: max `102.053/649.777ms`).
+  - `MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES=12` reduces persistent global mismatch without large average FPS cost, but dualstresslong still shows player actor respawn lag after death (`playerActor0X/Y` diverges after the player0 death/respawn window).
+  - Stale transform repair is rejected: both 12F and 4F variants made player actor Y drift worse. Longer stale global/counter-only repair (`24F`) also caused stale writes or earlier playerGlobal mismatches.
+  - Rechecked exact paths under the delay-2 rule: `coredelta-baseline` is still too slow (`22.350/22.349ms` avg, `301.826/341.196ms` max), and `exact-delay2-tinycorepreimage-skiprender` is also too slow (`19.093/19.337ms` avg, `163.197/166.475ms` max).
 
 Current conclusion:
 
@@ -48,10 +55,11 @@ Current conclusion:
 - Deep uncapped rollback restores correctness better than predict-only repair, but at `InputDelayFrames=2` it does not remove visible spikes. Higher-delay candidates are useful diagnostics but not acceptable solutions.
 - Predict-only Plan-D repair proves that a low-cost path exists, but not yet a complete correctness path: under strong jitter, death/transition globals and player/world basics can be unknown at the current frame unless the emulator waits or resimulates.
 - Same-frame waits are not equivalent to increasing InputDelay, but the measured FPS cost is still too high for the target.
+- Increasing GUI rollback `InputDelayFrames` above `2` is not a valid escape hatch for this goal; any viable rollback path must keep delay2 and solve correctness/perf there.
 
 Current blocker / next actions:
 
-- Find a new delay-2 architecture that does not depend on increasing InputDelay, long same-frame waits, or main-thread deep resim. Candidate directions: off-main-thread shadow resim with atomic state publish, more surgical authoritative repair for death/transition globals, or a ROM/actor-level rollback that replays only the minimal MvL state.
+- Find a new delay-2 architecture that does not depend on increasing InputDelay, long same-frame waits, stale transform writes, or main-thread deep resim. Candidate directions: off-main-thread shadow resim with atomic state publish, a ROM/actor-level authority model for death/respawn transition, or a minimal MvL actor rollback that replays only player/death/world state and publishes it without blocking the main frame.
 - Add stronger event routes for star pickup/drop/recover, block break persistence, and 8-coin item identity. Current star routes are still input coverage failures, not correctness proof.
 - Keep testing with artificial send delay/jitter and movement-heavy chaos/contact routes. Average FPS alone is insufficient; `maxFrameMs`, `over33ms`, and persistent mismatch detection must stay in the promotion gate.
 

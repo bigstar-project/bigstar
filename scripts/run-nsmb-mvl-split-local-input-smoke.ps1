@@ -70,6 +70,7 @@ param(
     [switch]$PlayerStateSync,
     [switch]$PlayerStateApply,
     [switch]$PlayerStateGlobals,
+    [switch]$PlayerStateReliable,
     [int]$PlayerStateSyncInterval = 1,
     [int]$PlayerStateMaxPredictFrames = 2,
     [switch]$WorldStateSync,
@@ -389,6 +390,9 @@ if ($PlayerStateSync) {
     }
     if ($PlayerStateGlobals) {
         $common += "-PlayerStateGlobals"
+    }
+    if ($PlayerStateReliable) {
+        $common += "-PlayerStateReliable"
     }
 }
 if ($WorldStateSync) {
@@ -1255,7 +1259,7 @@ foreach ($hostRow in $hostRows) {
                     $hostSettle = RowAtFrame -Rows $hostRows -Frame $settleFrame
                     $clientSettle = if ($clientByFrame.ContainsKey($settleFrame)) { $clientByFrame[$settleFrame] } else { $null }
                     if ($null -ne $hostSettle -and $null -ne $clientSettle -and
-                        (RowsMatchFields -HostRow $hostSettle -ClientRow $clientSettle -Fields $fields)) {
+                        (RowsMatchFields -HostRow $hostSettle -ClientRow $clientSettle -Fields @($field))) {
                         Write-Host "rollback transient mismatch settled frame=$frame settleFrame=$settleFrame field=$field"
                         break
                     }
