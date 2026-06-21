@@ -73,7 +73,7 @@ function viewIcon(view: View) {
     return (
       <Flag
         className={css({ color: 'red.plain.fg' })}
-        size={36}
+        size={28}
         weight="fill"
       />
     );
@@ -82,13 +82,13 @@ function viewIcon(view: View) {
     return (
       <ClockCounterClockwise
         className={css({ color: 'yellow.plain.fg' })}
-        size={36}
+        size={28}
         weight="fill"
       />
     );
   }
   return (
-    <Gear className={css({ color: 'fg.muted' })} size={36} weight="fill" />
+    <Gear className={css({ color: 'fg.muted' })} size={28} weight="fill" />
   );
 }
 
@@ -172,8 +172,8 @@ export function LauncherShell({
             borderRightWidth: '1px',
             display: 'grid',
             h: 'screen',
-            px: '4',
-            py: '6',
+            px: '3',
+            py: '4',
             position: 'sticky',
             top: '0',
           })}
@@ -187,7 +187,7 @@ export function LauncherShell({
             <div
               className={css({
                 display: 'grid',
-                gap: '8',
+                gap: '5',
               })}
             >
               <div
@@ -202,7 +202,7 @@ export function LauncherShell({
                     color: 'fg.default',
                     fontWeight: 'black',
                     lineHeight: 'none',
-                    textStyle: '3xl',
+                    textStyle: '2xl',
                   })}
                 >
                   NSMB
@@ -212,7 +212,7 @@ export function LauncherShell({
                     color: 'fg.default',
                     fontWeight: 'black',
                     lineHeight: 'none',
-                    textStyle: '3xl',
+                    textStyle: '2xl',
                   })}
                 >
                   <span className={css({ color: 'red.plain.fg' })}>M</span>
@@ -234,7 +234,7 @@ export function LauncherShell({
               <Tabs.List
                 className={css({
                   display: 'grid',
-                  gap: '3',
+                  gap: '2',
                 })}
               >
                 <Tabs.Trigger
@@ -247,8 +247,8 @@ export function LauncherShell({
                     color: 'fg.muted',
                     display: 'flex',
                     fontWeight: 'black',
-                    gap: '3',
-                    minH: '14',
+                    gap: '2.5',
+                    minH: '10',
                     outline: 'none',
                     px: '3',
                     textAlign: 'left',
@@ -273,12 +273,12 @@ export function LauncherShell({
                       color: 'fg.muted',
                       flexShrink: '0',
                     })}
-                    size={28}
+                    size={22}
                     weight="fill"
                   />
                   <span
                     className={css({
-                      textStyle: 'md',
+                      textStyle: 'sm',
                     })}
                   >
                     対戦
@@ -294,8 +294,8 @@ export function LauncherShell({
                     color: 'fg.muted',
                     display: 'flex',
                     fontWeight: 'black',
-                    gap: '3',
-                    minH: '14',
+                    gap: '2.5',
+                    minH: '10',
                     outline: 'none',
                     px: '3',
                     textAlign: 'left',
@@ -320,12 +320,12 @@ export function LauncherShell({
                       color: 'fg.muted',
                       flexShrink: '0',
                     })}
-                    size={28}
+                    size={22}
                     weight="fill"
                   />
                   <span
                     className={css({
-                      textStyle: 'md',
+                      textStyle: 'sm',
                     })}
                   >
                     履歴
@@ -341,8 +341,8 @@ export function LauncherShell({
                     color: 'fg.muted',
                     display: 'flex',
                     fontWeight: 'black',
-                    gap: '3',
-                    minH: '14',
+                    gap: '2.5',
+                    minH: '10',
                     outline: 'none',
                     px: '3',
                     textAlign: 'left',
@@ -367,12 +367,12 @@ export function LauncherShell({
                       color: 'fg.muted',
                       flexShrink: '0',
                     })}
-                    size={28}
+                    size={22}
                     weight="fill"
                   />
                   <span
                     className={css({
-                      textStyle: 'md',
+                      textStyle: 'sm',
                     })}
                   >
                     設定
@@ -406,12 +406,12 @@ export function LauncherShell({
               >
                 <Wrench
                   className={css({ flexShrink: '0' })}
-                  size={20}
+                  size={16}
                   weight="bold"
                 />
                 <span
                   className={css({
-                    textStyle: 'md',
+                    textStyle: 'sm',
                   })}
                 >
                   {updateButtonLabel(updateStatus)}
@@ -443,11 +443,11 @@ export function LauncherShell({
           <div
             className={css({
               display: 'grid',
-              gap: '6',
+              gap: '4',
               maxW: 'contentMax',
               mx: 'auto',
-              px: { base: '4', md: '5', xl: '7' },
-              py: '7',
+              px: { base: '3', md: '4', xl: '5' },
+              py: '4',
               w: 'full',
             })}
           >
@@ -455,7 +455,7 @@ export function LauncherShell({
               className={css({
                 alignItems: 'flex-start',
                 display: { base: 'grid', md: 'flex' },
-                gap: '5',
+                gap: '3',
                 justifyContent: 'space-between',
               })}
             >
@@ -469,7 +469,7 @@ export function LauncherShell({
                   className={css({
                     alignItems: 'center',
                     display: 'flex',
-                    gap: '3',
+                    gap: '2.5',
                   })}
                 >
                   {viewIcon(activeView)}
@@ -477,7 +477,7 @@ export function LauncherShell({
                     className={css({
                       color: 'fg.default',
                       fontWeight: 'black',
-                      textStyle: '3xl',
+                      textStyle: '2xl',
                     })}
                   >
                     {viewTitle(activeView)}
@@ -499,6 +499,7 @@ export function LauncherShell({
                   display: 'flex',
                   flexWrap: { base: 'wrap', md: 'nowrap' },
                   gap: '3',
+                  justifyContent: { md: 'flex-end' },
                 })}
               >
                 <StatusPill kind={connectionStatus.kind}>

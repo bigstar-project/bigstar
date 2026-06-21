@@ -110,7 +110,7 @@ export const select = defineSlotRecipe({
     },
   },
   defaultVariants: {
-    size: 'md',
+    size: 'sm',
     variant: 'outline',
   },
   variants: {

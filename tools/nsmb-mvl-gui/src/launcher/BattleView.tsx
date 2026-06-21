@@ -96,12 +96,12 @@ export function BattleView({
       <form
         className={css({
           display: 'grid',
-          gap: '5',
+          gap: '4',
           gridTemplateColumns: {
             base: '1fr',
             xl: `minmax(0, 1fr) ${token('sizes.diagnostics')}`,
           },
-          maxW: { base: '3xl', xl: 'contentMax' },
+          maxW: { base: 'xl', xl: 'contentMax' },
           mx: { base: 'auto', xl: '0' },
           w: 'full',
         })}
@@ -112,7 +112,7 @@ export function BattleView({
         <section
           className={css({
             display: 'grid',
-            gap: '4',
+            gap: '3',
           })}
         >
           {currentMatch ? (
@@ -129,13 +129,13 @@ export function BattleView({
             icon={<Users size={24} weight="fill" />}
             badge={matchmakingRooms.loading ? '更新中' : undefined}
           >
-            <div className={css({ display: 'grid', gap: '3' })}>
+            <div className={css({ display: 'grid', gap: '2.5' })}>
               <div
                 className={css({
                   alignItems: { base: 'stretch', md: 'center' },
                   display: 'flex',
                   flexDirection: { base: 'column', md: 'row' },
-                  gap: '3',
+                  gap: '2',
                   justifyContent: 'space-between',
                 })}
               >
@@ -226,7 +226,7 @@ export function BattleView({
           className={css({
             alignContent: 'start',
             display: 'grid',
-            gap: '4',
+            gap: '3',
           })}
         >
           <InfoPanel
@@ -272,7 +272,7 @@ export function BattleView({
           <div
             className={css({
               display: 'grid',
-              gap: '3',
+              gap: '2',
               gridTemplateColumns: {
                 base: '1fr',
                 sm: 'repeat(2, minmax(0, 1fr))',
@@ -285,7 +285,7 @@ export function BattleView({
               value={form.role === 'host' ? 'Mario' : 'Luigi'}
             />
             <SmallInfoCard
-              icon={<Flag size={30} weight="fill" />}
+              icon={<Flag size={24} weight="fill" />}
               label="起動ステージ"
               value={summary.selectedStageLabel}
               caption="0-4 決定"
@@ -330,7 +330,7 @@ function CreateRoomDialog({
         <Dialog.Positioner>
           <Dialog.Content
             className={css({
-              maxW: '3xl',
+              maxW: 'xl',
               w: 'full',
             })}
           >
@@ -341,7 +341,7 @@ function CreateRoomDialog({
               <Dialog.Title>部屋を作る</Dialog.Title>
             </Dialog.Header>
             <Dialog.Body>
-              <div className={css({ display: 'grid', gap: '4' })}>
+              <div className={css({ display: 'grid', gap: '3' })}>
                 <MatchSettingsFields form={form} updateField={updateField} />
               </div>
             </Dialog.Body>
@@ -389,12 +389,12 @@ function HostedRoomNotice({
         borderRadius: 'l2',
         borderWidth: '1px',
         display: 'grid',
-        gap: '3',
+        gap: '2',
         gridTemplateColumns: {
           base: '1fr',
           md: 'minmax(0, 1fr) auto auto',
         },
-        p: '3',
+        p: '2.5',
         alignItems: { base: 'stretch', md: 'center' },
       })}
     >
@@ -451,11 +451,11 @@ function MatchSettingsFields({
   };
 
   return (
-    <div className={css({ display: 'grid', gap: '3' })}>
+    <div className={css({ display: 'grid', gap: '2.5' })}>
       <div
         className={css({
           display: 'grid',
-          gap: '3',
+          gap: '2',
           gridTemplateColumns: {
             base: '1fr',
             md: 'repeat(2, minmax(0, 1fr))',
@@ -498,7 +498,7 @@ function MatchSettingsFields({
       <div
         className={css({
           display: 'grid',
-          gap: '3',
+          gap: '2',
           gridTemplateColumns: {
             base: '1fr',
             sm: 'repeat(2, minmax(0, 1fr))',
@@ -551,7 +551,7 @@ function CourseSequenceFields({
     <div
       className={css({
         display: 'grid',
-        gap: '3',
+        gap: '2',
         gridTemplateColumns: {
           base: '1fr',
           lg: 'repeat(3, minmax(0, 1fr))',
@@ -595,7 +595,7 @@ function ManualConnectionPanel({
   updateField: UpdateFormField;
 }) {
   return (
-    <LauncherCard title="手動接続" icon={<GearSix size={24} weight="fill" />}>
+    <LauncherCard title="手動接続" icon={<GearSix size={22} weight="fill" />}>
       <details
         className={css({
           borderColor: 'gray.surface.border',
@@ -611,8 +611,8 @@ function ManualConnectionPanel({
             cursor: 'pointer',
             fontWeight: 'black',
             listStyle: 'none',
-            px: '4',
-            py: '3',
+            px: '3',
+            py: '2.5',
             textStyle: 'sm',
             focusVisibleRing: 'inside',
           })}
@@ -622,14 +622,14 @@ function ManualConnectionPanel({
         <div
           className={css({
             display: 'grid',
-            gap: '5',
-            p: '4',
+            gap: '3',
+            p: '3',
           })}
         >
           <div
             className={css({
               display: 'grid',
-              gap: '4',
+              gap: '3',
               gridTemplateColumns: {
                 base: '1fr',
                 md: 'minmax(220px, 0.85fr) minmax(0, 1.15fr)',
@@ -647,7 +647,7 @@ function ManualConnectionPanel({
               className={css({
                 alignContent: 'end',
                 display: 'grid',
-                gap: '3',
+                gap: '2',
                 gridTemplateColumns: {
                   base: '1fr',
                   sm: 'repeat(2, minmax(0, 1fr))',
@@ -656,7 +656,7 @@ function ManualConnectionPanel({
             >
               <RoleButton
                 active={form.role === 'host'}
-                icon={<Crown size={26} weight="fill" />}
+                icon={<Crown size={22} weight="fill" />}
                 title="ホスト"
                 subtitle="offer側"
                 tone="red"
@@ -664,7 +664,7 @@ function ManualConnectionPanel({
               />
               <RoleButton
                 active={form.role === 'client'}
-                icon={<Users size={26} weight="fill" />}
+                icon={<Users size={22} weight="fill" />}
                 title="参加"
                 subtitle="answer側"
                 tone="green"
@@ -699,17 +699,17 @@ function StartStopButton({
       className={cx(
         css({
           borderRadius: 'l2',
-          borderWidth: '4px',
+          borderWidth: '2px',
           color: 'fg.default',
           cursor: 'pointer',
           focusVisibleRing: 'outside',
           fontWeight: 'black',
-          minH: '16',
+          minH: '12',
           overflow: 'hidden',
-          px: '6',
-          py: '4',
+          px: '4',
+          py: '2.5',
           position: 'relative',
-          textStyle: '2xl',
+          textStyle: 'lg',
           transition: 'common',
           w: 'full',
         }),
@@ -735,15 +735,15 @@ function StartStopButton({
         className={css({
           alignItems: 'center',
           display: 'flex',
-          gap: '4',
+          gap: '2.5',
           justifyContent: 'center',
         })}
       >
         {active ? '停止' : '対戦を開始'}
         {active ? (
-          <Stop size={34} weight="fill" />
+          <Stop size={24} weight="fill" />
         ) : (
-          <Play size={34} weight="fill" />
+          <Play size={24} weight="fill" />
         )}
       </span>
     </button>
@@ -771,7 +771,7 @@ function RoomList({
           borderWidth: '1px',
           color: 'fg.muted',
           fontWeight: 'semibold',
-          p: '4',
+          p: '3',
           textStyle: 'sm',
         })}
       >
@@ -798,12 +798,12 @@ function RoomList({
             borderBottomColor: 'gray.surface.border',
             borderBottomWidth: '1px',
             display: 'grid',
-            gap: '3',
+            gap: '2',
             gridTemplateColumns: {
               base: '1fr',
               md: 'minmax(0, 1fr) auto',
             },
-            p: '3',
+            p: '2.5',
             _last: {
               borderBottomWidth: '0',
             },
@@ -860,8 +860,8 @@ function UpdateRequiredNotice({ version }: { version?: string }) {
         borderWidth: '1px',
         color: 'yellow.subtle.fg',
         display: 'flex',
-        gap: '3',
-        p: '3',
+        gap: '2',
+        p: '2.5',
       })}
     >
       <WarningCircle
@@ -905,13 +905,13 @@ function BattleLogPanel({
   onOpenLogDir: () => void;
 }) {
   return (
-    <LauncherCard title="通信ログ" icon={<Broadcast size={22} />}>
-      <div className={css({ display: 'grid', gap: '3' })}>
+    <LauncherCard title="通信ログ" icon={<Broadcast size={20} />}>
+      <div className={css({ display: 'grid', gap: '2' })}>
         <div
           className={css({
             alignItems: 'center',
             display: 'flex',
-            gap: '3',
+            gap: '2',
             justifyContent: 'space-between',
           })}
         >
@@ -942,8 +942,8 @@ function BattleLogPanel({
             fontFamily: 'mono',
             fontWeight: 'semibold',
             overflowWrap: 'anywhere',
-            px: '3',
-            py: '2',
+            px: '2.5',
+            py: '1.5',
             textStyle: 'xs',
           })}
         >
@@ -974,7 +974,7 @@ function GameStateMismatchAlert({
         color: 'red.subtle.fg',
         display: 'grid',
         gap: compact ? '1' : '2',
-        p: compact ? '3' : '4',
+        p: compact ? '2.5' : '3',
       })}
     >
       <div

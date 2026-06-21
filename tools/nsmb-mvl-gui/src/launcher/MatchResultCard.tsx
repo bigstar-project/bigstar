@@ -32,8 +32,8 @@ export function MatchResultCard({
         backdropBlur: 'md',
         backdropSaturate: '180%',
         display: 'grid',
-        gap: '4',
-        p: '5',
+        gap: '3',
+        p: '3.5',
       }}
     >
       <div
@@ -41,7 +41,7 @@ export function MatchResultCard({
           alignItems: { base: 'stretch', md: 'start' },
           display: 'flex',
           flexDirection: { base: 'column', md: 'row' },
-          gap: '3',
+          gap: '2',
           justifyContent: 'space-between',
         })}
       >
@@ -52,13 +52,13 @@ export function MatchResultCard({
               color: 'fg.default',
               display: 'flex',
               fontWeight: 'black',
-              gap: '2',
-              textStyle: 'lg',
+              gap: '1.5',
+              textStyle: 'md',
             })}
           >
             <Trophy
               className={css({ color: 'yellow.plain.fg' })}
-              size={24}
+              size={20}
               weight="fill"
             />
             {title}
@@ -100,12 +100,12 @@ export function MatchResultCard({
           borderRadius: 'l2',
           borderWidth: '1px',
           display: 'grid',
-          gap: '3',
+          gap: '2',
           gridTemplateColumns: {
             base: '1fr',
             sm: 'minmax(0, 1fr) auto minmax(0, 1fr)',
           },
-          p: '4',
+          p: '3',
         })}
       >
         <PlayerScore
@@ -119,7 +119,7 @@ export function MatchResultCard({
             color: 'fg.default',
             fontWeight: 'black',
             justifySelf: 'center',
-            textStyle: '3xl',
+            textStyle: '2xl',
           })}
         >
           {marioWins} - {luigiWins}
@@ -177,8 +177,8 @@ export function EmptyMatchResultCard({
         backdropFilter: 'auto',
         backdropBlur: 'md',
         display: 'grid',
-        gap: '3',
-        p: '5',
+        gap: '2',
+        p: '3.5',
       }}
     >
       <div
@@ -187,11 +187,11 @@ export function EmptyMatchResultCard({
           color: 'fg.default',
           display: 'flex',
           fontWeight: 'black',
-          gap: '2',
-          textStyle: 'lg',
+          gap: '1.5',
+          textStyle: 'md',
         })}
       >
-        <Clock className={css({ color: 'blue.plain.fg' })} size={24} />
+        <Clock className={css({ color: 'blue.plain.fg' })} size={20} />
         {title}
       </div>
       <div
@@ -226,7 +226,7 @@ function PlayerScore({
         alignItems: 'center',
         display: 'flex',
         flexDirection: align === 'end' ? 'row-reverse' : 'row',
-        gap: '3',
+        gap: '2',
         justifyContent: align === 'end' ? 'flex-end' : 'flex-start',
         minW: '0',
       })}
@@ -234,7 +234,7 @@ function PlayerScore({
       <img
         src={imageSrc}
         alt=""
-        className={css({ h: '12', objectFit: 'contain', w: '12' })}
+        className={css({ h: '9', objectFit: 'contain', w: '9' })}
       />
       <div
         className={css({
@@ -248,7 +248,7 @@ function PlayerScore({
           className={css({
             color: winner ? 'yellow.plain.fg' : 'fg.default',
             fontWeight: 'black',
-            textStyle: 'lg',
+            textStyle: 'md',
           })}
         >
           {name}
@@ -293,12 +293,12 @@ function StageResultRow({
         borderRadius: 'l2',
         borderWidth: '1px',
         display: 'grid',
-        gap: '3',
+        gap: '2',
         gridTemplateColumns: {
           base: '1fr',
           lg: '7rem minmax(0, 1fr) minmax(0, 1fr)',
         },
-        p: '3',
+        p: '2.5',
       })}
     >
       <div className={css({ display: 'grid', gap: '1' })}>
@@ -349,7 +349,7 @@ function StageResultRow({
           display: 'flex',
           flexWrap: 'wrap',
           fontWeight: 'bold',
-          gap: '3',
+          gap: '2',
           textStyle: 'sm',
         })}
       >

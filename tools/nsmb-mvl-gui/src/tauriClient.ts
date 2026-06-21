@@ -40,6 +40,14 @@ const previewDefaults: Defaults = {
   port: 8165,
 };
 
+const readyPreviewDefaults: Defaults = {
+  ...previewDefaults,
+  base_rom_path: 'C:\\Users\\Sugiyama\\roms\\New Super Mario Bros.nds',
+  player_name: 'Preview Player',
+  roms_prepared_once: true,
+  input_config_opened_once: true,
+};
+
 const previewRomIdentity = {
   client_rom_sha256:
     '2222222222222222222222222222222222222222222222222222222222222222',
@@ -57,9 +65,20 @@ function isTauriRuntime() {
   return '__TAURI_INTERNALS__' in window;
 }
 
+function previewScenario() {
+  const search =
+    typeof window.location?.search === 'string' ? window.location.search : '';
+  const value = new URLSearchParams(search).get('preview');
+  return value === 'ready' || value === 'main' ? 'ready' : 'onboarding';
+}
+
+function previewDefaultsForCurrentUrl() {
+  return previewScenario() === 'ready' ? readyPreviewDefaults : previewDefaults;
+}
+
 export function getDefaults() {
   if (!isTauriRuntime()) {
-    return Promise.resolve(previewDefaults);
+    return Promise.resolve(previewDefaultsForCurrentUrl());
   }
   return unwrapCommand(commands.getDefaults());
 }
@@ -109,9 +128,10 @@ export function runPreflightCheck() {
 
 export function generateRoms(request: GenerateRomRequest) {
   if (!isTauriRuntime()) {
+    const defaults = previewDefaultsForCurrentUrl();
     return Promise.resolve<GenerateRomResponse>({
-      host_rom: previewDefaults.host_rom_path,
-      client_rom: previewDefaults.client_rom_path,
+      host_rom: defaults.host_rom_path,
+      client_rom: defaults.client_rom_path,
       generated: true,
       rom_identity: previewRomIdentity,
     });
@@ -121,9 +141,10 @@ export function generateRoms(request: GenerateRomRequest) {
 
 export function ensureRoms(request: GenerateRomRequest) {
   if (!isTauriRuntime()) {
+    const defaults = previewDefaultsForCurrentUrl();
     return Promise.resolve<GenerateRomResponse>({
-      host_rom: previewDefaults.host_rom_path,
-      client_rom: previewDefaults.client_rom_path,
+      host_rom: defaults.host_rom_path,
+      client_rom: defaults.client_rom_path,
       generated: false,
       rom_identity: previewRomIdentity,
     });

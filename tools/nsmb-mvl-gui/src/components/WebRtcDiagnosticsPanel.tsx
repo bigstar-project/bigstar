@@ -25,15 +25,15 @@ export function WebRtcDiagnosticsPanel({
         compact
           ? {
               display: 'grid',
-              gap: '3',
+              gap: '2',
             }
           : {
               borderColor: 'gray.surface.border',
               borderTopWidth: '1px',
               display: 'grid',
-              gap: '3',
+              gap: '2',
               mt: '1',
-              pt: '4',
+              pt: '3',
             },
       )}
     >
@@ -42,7 +42,7 @@ export function WebRtcDiagnosticsPanel({
           className={css({
             color: 'fg.default',
             fontWeight: 'black',
-            textStyle: 'lg',
+            textStyle: 'md',
           })}
         >
           WebRTC 診断

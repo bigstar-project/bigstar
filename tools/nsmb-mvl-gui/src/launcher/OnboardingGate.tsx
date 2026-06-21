@@ -74,13 +74,13 @@ function StepRow({
         borderRadius: 'l2',
         borderWidth: '1px',
         display: 'grid',
-        gap: '4',
+        gap: '3',
         gridTemplateColumns: {
           base: '1fr',
           md: 'auto minmax(0, 1fr) auto',
         },
         opacity: disabled ? '0.56' : '1',
-        p: '4',
+        p: '3',
       })}
     >
       <div
@@ -94,12 +94,12 @@ function StepRow({
           borderWidth: '1px',
           color: complete ? 'green.plain.fg' : 'blue.plain.fg',
           display: 'flex',
-          h: '12',
+          h: '10',
           justifyContent: 'center',
-          w: '12',
+          w: '10',
         })}
       >
-        {complete ? <CheckCircle size={26} weight="bold" /> : icon}
+        {complete ? <CheckCircle size={22} weight="bold" /> : icon}
       </div>
       <div
         className={css({
@@ -120,7 +120,7 @@ function StepRow({
             className={css({
               color: 'fg.default',
               fontWeight: 'black',
-              textStyle: 'lg',
+              textStyle: 'md',
             })}
           >
             {title}
@@ -183,18 +183,18 @@ export function OnboardingGate({
               className={css({
                 alignItems: 'center',
                 display: 'flex',
-                gap: '3',
+                gap: '2',
               })}
             >
               <GameController
                 className={css({ color: 'blue.plain.fg', flexShrink: '0' })}
-                size={34}
+                size={28}
                 weight="fill"
               />
               <Dialog.Title
                 className={css({
                   fontWeight: 'black',
-                  textStyle: '2xl',
+                  textStyle: 'xl',
                 })}
               >
                 初回セットアップ
@@ -208,7 +208,7 @@ export function OnboardingGate({
           <Dialog.Body
             className={css({
               display: 'grid',
-              gap: '5',
+              gap: '3',
             })}
           >
             {activityStatus ? (
@@ -227,7 +227,7 @@ export function OnboardingGate({
             <div
               className={css({
                 display: 'grid',
-                gap: '3',
+                gap: '2',
               })}
             >
               <StepRow
@@ -235,7 +235,7 @@ export function OnboardingGate({
                   <div
                     className={css({
                       display: 'grid',
-                      gap: '2',
+                      gap: '1.5',
                       gridTemplateColumns: {
                         base: '1fr',
                         md: 'minmax(0, 1fr) auto',
@@ -263,7 +263,7 @@ export function OnboardingGate({
                 }
                 complete={onboarding.playerNameConfigured}
                 description="公開ルームの一覧で相手に表示される名前です。あとから設定画面で変更できます。"
-                icon={<UserCircle size={26} weight="fill" />}
+                icon={<UserCircle size={22} weight="fill" />}
                 pendingText="未完了"
                 title="プレイヤーネームを設定"
               />
@@ -275,7 +275,7 @@ export function OnboardingGate({
                     loadingText="生成中"
                     onClick={() => void actions.selectBaseRomAndPrepare()}
                   >
-                    <HardDrives size={20} weight="fill" />
+                    <HardDrives size={18} weight="fill" />
                     ROMを選んで生成
                   </Button>
                 }
@@ -285,7 +285,7 @@ export function OnboardingGate({
                     ? form.baseRomPath
                     : '手元のベースROMを選択してください。選択すると、オンライン対戦用のROMが自動生成されます。'
                 }
-                icon={<HardDrives size={26} weight="fill" />}
+                icon={<HardDrives size={22} weight="fill" />}
                 pendingText="未完了"
                 title="オンライン対戦用ROMを生成"
               />
@@ -296,14 +296,14 @@ export function OnboardingGate({
                     disabled={!onboarding.romsPrepared}
                     onClick={() => void actions.openMelondsInputConfig()}
                   >
-                    <GameController size={20} weight="fill" />
+                    <GameController size={18} weight="fill" />
                     入力設定を開く
                   </Button>
                 }
                 complete={onboarding.inputConfigOpened}
                 description="melonDSの入力設定を開き、キーボードまたはコントローラーにボタンを割り当ててください。"
                 disabled={!onboarding.romsPrepared}
-                icon={<GameController size={26} weight="fill" />}
+                icon={<GameController size={22} weight="fill" />}
                 pendingText={onboarding.romsPrepared ? '未完了' : 'ROM生成後'}
                 title="melonDSの入力を設定"
               />

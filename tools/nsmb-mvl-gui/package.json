@@ -17,7 +17,8 @@
     "test:e2e": "playwright test",
     "ci": "tsc --noEmit && biome check . && vitest --config vitest.config.ts run && vitest --config vitest.browser.config.ts run && playwright test",
     "vite:build": "vite build",
-    "vite:dev": "vite --host 127.0.0.1"
+    "vite:dev": "vite --host 127.0.0.1",
+    "preview:browser": "vite --host 127.0.0.1"
   },
   "dependencies": {
     "@ark-ui/react": "^5.37.0",

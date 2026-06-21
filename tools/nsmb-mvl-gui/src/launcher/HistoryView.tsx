@@ -9,7 +9,7 @@ export function HistoryView({ matches }: { matches: BattleMatchRecord[] }) {
       <section
         className={css({
           display: 'grid',
-          gap: '4',
+          gap: '3',
           maxW: 'contentWide',
           mx: 'auto',
           w: 'full',

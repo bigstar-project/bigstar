@@ -59,12 +59,12 @@ export function SettingsView({
       <div
         className={css({
           display: 'grid',
-          gap: '5',
+          gap: '4',
           gridTemplateColumns: {
             base: '1fr',
             xl: `minmax(0, 1fr) ${token('sizes.settingsAside')}`,
           },
-          maxW: { base: '3xl', xl: 'contentMax' },
+          maxW: { base: 'xl', xl: 'contentMax' },
           mx: { base: 'auto', xl: '0' },
           w: 'full',
         })}
@@ -73,7 +73,7 @@ export function SettingsView({
           className={css({
             alignContent: 'start',
             display: 'grid',
-            gap: '4',
+            gap: '3',
           })}
         >
           <SettingsPanel
@@ -83,7 +83,7 @@ export function SettingsView({
             <div
               className={css({
                 display: 'grid',
-                gap: '3',
+                gap: '2',
                 gridTemplateColumns: {
                   base: '1fr',
                   md: 'minmax(0, 1fr) auto',
@@ -114,7 +114,7 @@ export function SettingsView({
             <div
               className={css({
                 display: 'grid',
-                gap: '3',
+                gap: '2',
                 gridTemplateColumns: {
                   base: '1fr',
                   md: 'minmax(0, 1fr) auto',
@@ -162,7 +162,7 @@ export function SettingsView({
             <div
               className={css({
                 display: 'grid',
-                gap: '4',
+                gap: '2',
                 gridTemplateColumns: {
                   base: '1fr',
                   md: 'repeat(2, minmax(0, 1fr))',
@@ -198,7 +198,7 @@ export function SettingsView({
           <div
             className={css({
               display: 'grid',
-              gap: '4',
+              gap: '3',
               gridTemplateColumns: {
                 base: '1fr',
                 md: 'repeat(2, minmax(0, 1fr))',
@@ -226,7 +226,7 @@ export function SettingsView({
           className={css({
             alignContent: 'start',
             display: 'grid',
-            gap: '4',
+            gap: '3',
           })}
         >
           <InfoPanel
@@ -243,8 +243,8 @@ export function SettingsView({
                 borderRadius: 'l2',
                 borderWidth: '1px',
                 display: 'flex',
-                gap: '4',
-                p: '4',
+                gap: '2.5',
+                p: '3',
               })}
             >
               <CheckCircle
@@ -252,7 +252,7 @@ export function SettingsView({
                   color: 'green.plain.fg',
                   flexShrink: '0',
                 })}
-                size={46}
+                size={32}
                 weight="bold"
               />
               <div>

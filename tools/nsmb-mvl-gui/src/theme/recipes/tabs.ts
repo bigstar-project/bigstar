@@ -171,7 +171,7 @@ export const tabs = defineSlotRecipe({
   },
 
   defaultVariants: {
-    size: 'md',
+    size: 'sm',
     variant: 'line',
   },
 });

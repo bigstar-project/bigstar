@@ -48,10 +48,10 @@ export function StatusPill({
           display: 'grid',
           gap: '0.5',
           maxW: 'statusMax',
-          minH: '12',
+          minH: '9',
           overflowWrap: 'anywhere',
-          px: '3',
-          py: '2',
+          px: '2.5',
+          py: '1.5',
         }),
         css(colors[kind]),
       )}
@@ -76,7 +76,7 @@ export function StatusPill({
         className={css({
           fontWeight: 'bold',
           lineHeight: 'snug',
-          textStyle: 'sm',
+          textStyle: 'xs',
         })}
       >
         {children}

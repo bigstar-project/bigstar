@@ -26,6 +26,10 @@ function setWindow(value: unknown) {
   vi.stubGlobal('window', value);
 }
 
+function setPreviewWindow(search = '') {
+  setWindow({ location: { search } });
+}
+
 afterEach(() => {
   invokeMock.mockReset();
   vi.unstubAllGlobals();
@@ -33,13 +37,30 @@ afterEach(() => {
 
 describe('タウリクライアント', () => {
   test('タウリ外ではコマンドを呼ばずプレビュー用デフォルト値を返す', async () => {
-    setWindow({});
+    setPreviewWindow();
     const client = await importClient();
 
     await expect(client.getDefaults()).resolves.toMatchObject({
+      input_config_opened_once: false,
+      player_name: '',
+      roms_prepared_once: false,
       room_code: 'test-room',
       signal_url:
         'wss://nsmb-mvl-signaling-prod.uniunntaro.workers.dev/session',
+    });
+
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  test('readyプレビューではオンボーディング完了済みのデフォルト値を返す', async () => {
+    setPreviewWindow('?preview=ready');
+    const client = await importClient();
+
+    await expect(client.getDefaults()).resolves.toMatchObject({
+      base_rom_path: 'C:\\Users\\Sugiyama\\roms\\New Super Mario Bros.nds',
+      input_config_opened_once: true,
+      player_name: 'Preview Player',
+      roms_prepared_once: true,
     });
 
     expect(invokeMock).not.toHaveBeenCalled();
