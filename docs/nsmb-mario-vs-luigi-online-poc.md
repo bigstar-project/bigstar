@@ -154,6 +154,14 @@
 - `VictoryState` setup initializes object/vtable state, and the visible victory-transition code manipulates player-object transition/pose state rather than exposing a simple match winner variable.
 - A direct winner value may still exist as a transient field inside the result scene/object state, but it has not been located. To prove it, trace the transition into scene `0x000A` and compare RAM/object fields for Mario-win vs Luigi-win cases.
 
+### GUI result display and final-death normalization - 2026-06-21
+
+- User-reported issue: the GUI result card should show player names rather than Mario/Luigi labels, should omit deaths because they duplicate finite-lives information, and can show nonzero lives when a player loses by the final death in 3-lives mode.
+- Implemented in the GUI: current match/history result cards now carry player-name labels, hide deaths, and display dead players as 0 lives.
+- Implemented in melonDS result logging: when the result screen snapshot has `playerDead=1` in finite-lives mode, the logged snapshot is normalized to `lives=0` and `deaths>=initialLives`. This compensates for the result scene being reached before the native lives/deaths globals necessarily expose the final decrement.
+- Current blocker: no blocker for GUI display correctness or normalized future result logs. A full real-gameplay verification route for both player IDs is still useful.
+- Next action: run a deterministic finite-lives death-result smoke that reaches result without forced counters, and confirm the GUI card shows the losing player at 0 lives.
+
 ## Initial stock item clear - 2026-06-19
 
 - User-reported issue: Luigi currently starts a direct MvL game with a Power-up Mushroom in the lower-screen stock item slot.

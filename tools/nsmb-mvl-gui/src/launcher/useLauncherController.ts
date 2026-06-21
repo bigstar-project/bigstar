@@ -101,7 +101,26 @@ type PreparedRomCache = {
 type HostedRoom = {
   roomId: string;
   form: FormState;
+  playerNames: BattleMatchRecord['playerNames'];
 };
+
+function playerNameOrFallback(value: string, fallback: string) {
+  return value.trim() || fallback;
+}
+
+function defaultPlayerNames(form: FormState): BattleMatchRecord['playerNames'] {
+  const localName = playerNameOrFallback(form.hostName, 'プレイヤー');
+  if (form.role === 'host') {
+    return {
+      mario: localName,
+      luigi: '相手',
+    };
+  }
+  return {
+    mario: '相手',
+    luigi: localName,
+  };
+}
 
 export function useLauncherController() {
   const queryClient = useQueryClient();
@@ -575,7 +594,12 @@ export function useLauncherController() {
   }, [defaultsLoaded, form, connectionActive, ensurePreparedRoms]);
 
   const startMatchFor = useCallback(
-    async (sourceForm: FormState) => {
+    async (
+      sourceForm: FormState,
+      playerNames: BattleMatchRecord['playerNames'] = defaultPlayerNames(
+        sourceForm,
+      ),
+    ) => {
       const nextForm = withRequiredPlan(sourceForm);
       if (
         JSON.stringify(currentSettings(nextForm)) !==
@@ -624,6 +648,7 @@ export function useLauncherController() {
         const record: BattleMatchRecord = {
           id: response.log_dir,
           logDir: response.log_dir,
+          playerNames,
           role: nextForm.role,
           roomCode: nextForm.roomCode,
           settings: request.settings,
@@ -759,7 +784,14 @@ export function useLauncherController() {
         signalUrl: response.signal_url,
       };
       setForm(nextForm);
-      setHostedRoom({ roomId: response.room_id, form: nextForm });
+      setHostedRoom({
+        roomId: response.room_id,
+        form: nextForm,
+        playerNames: {
+          mario: playerName,
+          luigi: '相手',
+        },
+      });
       await queryClient.invalidateQueries({ queryKey: ['matchmakingRooms'] });
       setActivityStatus({
         text: `部屋を作成しました: ${response.room_id}。参加者を待っています`,
@@ -853,7 +885,10 @@ export function useLauncherController() {
         text: '部屋に参加しました。接続を確立してからmelonDSを起動します',
         kind: 'idle',
       });
-      await startMatchFor(nextForm);
+      await startMatchFor(nextForm, {
+        mario: playerNameOrFallback(room.host_name, '相手'),
+        luigi: playerNameOrFallback(form.hostName, 'プレイヤー'),
+      });
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });
     } finally {
@@ -891,7 +926,7 @@ export function useLauncherController() {
           text: '参加者を検出しました。接続を確立してからmelonDSを起動します',
           kind: 'idle',
         });
-        await startMatchForRef.current(hostedRoom.form);
+        await startMatchForRef.current(hostedRoom.form, hostedRoom.playerNames);
       } catch (error) {
         if (!disposed) {
           setHostedRoom(null);

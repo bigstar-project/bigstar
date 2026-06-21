@@ -509,6 +509,7 @@ NSMB MvL auto restart: result inst=0 frame=8200 winner=1 stars=0/5 displayed=0/5
     assert_eq!(results[1].stage, Some(3));
     assert_eq!(results[1].winner, Some(1));
     assert!(results[1].mario.dead);
+    assert_eq!(results[1].mario.lives, 0);
     let _ = fs::remove_dir_all(dir);
 }
 

@@ -583,7 +583,7 @@ fn parse_mvl_result_line(line: &str) -> Option<MvlStageResult> {
             stars: stars_mario,
             displayed_stars: displayed_mario,
             collected_stars: collected_mario,
-            lives: lives_mario,
+            lives: result_lives(lives_mario, dead_mario),
             deaths: deaths_mario,
             dead: dead_mario != 0,
         },
@@ -591,7 +591,7 @@ fn parse_mvl_result_line(line: &str) -> Option<MvlStageResult> {
             stars: stars_luigi,
             displayed_stars: displayed_luigi,
             collected_stars: collected_luigi,
-            lives: lives_luigi,
+            lives: result_lives(lives_luigi, dead_luigi),
             deaths: deaths_luigi,
             dead: dead_luigi != 0,
         },
@@ -601,6 +601,14 @@ fn parse_mvl_result_line(line: &str) -> Option<MvlStageResult> {
         resolved,
         line: line.to_owned(),
     })
+}
+
+fn result_lives(lives: u32, dead: u32) -> u32 {
+    if dead == 0 {
+        lives
+    } else {
+        0
+    }
 }
 
 fn parse_value(line: &str, key: &str) -> Option<u32> {

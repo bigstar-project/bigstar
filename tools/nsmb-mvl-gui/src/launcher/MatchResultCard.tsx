@@ -109,7 +109,8 @@ export function MatchResultCard({
         })}
       >
         <PlayerScore
-          name="Mario"
+          imageSrc={playerMBadge}
+          name={match.playerNames.mario}
           score={marioWins}
           winner={finalWinner === 0}
         />
@@ -125,7 +126,8 @@ export function MatchResultCard({
         </div>
         <PlayerScore
           align="end"
-          name="Luigi"
+          imageSrc={playerLBadge}
+          name={match.playerNames.luigi}
           score={luigiWins}
           winner={finalWinner === 1}
         />
@@ -136,6 +138,7 @@ export function MatchResultCard({
           <StageResultRow
             key={`${match.id}-${index}`}
             result={match.stages[index] ?? null}
+            match={match}
             stage={stage}
             index={index}
           />
@@ -206,12 +209,14 @@ export function EmptyMatchResultCard({
 
 function PlayerScore({
   align = 'start',
+  imageSrc,
   name,
   score,
   winner,
 }: {
   align?: 'start' | 'end';
-  name: 'Mario' | 'Luigi';
+  imageSrc: string;
+  name: string;
   score: number;
   winner: boolean;
 }) {
@@ -227,7 +232,7 @@ function PlayerScore({
       })}
     >
       <img
-        src={name === 'Mario' ? playerMBadge : playerLBadge}
+        src={imageSrc}
         alt=""
         className={css({ h: '12', objectFit: 'contain', w: '12' })}
       />
@@ -264,18 +269,20 @@ function PlayerScore({
 
 function StageResultRow({
   index,
+  match,
   result,
   stage,
 }: {
   index: number;
+  match: BattleMatchRecord;
   result: MvlStageResult | null;
   stage: number;
 }) {
   const winnerLabel =
     result?.winner === 0
-      ? 'Mario 勝利'
+      ? `${match.playerNames.mario} 勝利`
       : result?.winner === 1
-        ? 'Luigi 勝利'
+        ? `${match.playerNames.luigi} 勝利`
         : '未確定';
   return (
     <div
@@ -350,11 +357,11 @@ function StageResultRow({
           {formatPair(result?.mario.stars, result?.luigi.stars)}
         </Metric>
         <Metric icon={<Heart size={16} weight="fill" />}>
-          {formatPair(result?.mario.lives, result?.luigi.lives)}
+          {formatPair(
+            displayLives(result?.mario.lives, result?.mario.dead),
+            displayLives(result?.luigi.lives, result?.luigi.dead),
+          )}
         </Metric>
-        <span>
-          死亡 {formatPair(result?.mario.deaths, result?.luigi.deaths)}
-        </span>
       </div>
     </div>
   );
@@ -392,10 +399,10 @@ function matchWinner(match: BattleMatchRecord) {
 function statusLabel(match: BattleMatchRecord) {
   const winner = matchWinner(match);
   if (winner === 0) {
-    return 'Mario 勝利';
+    return `${match.playerNames.mario} 勝利`;
   }
   if (winner === 1) {
-    return 'Luigi 勝利';
+    return `${match.playerNames.luigi} 勝利`;
   }
   if (match.status === 'running') {
     return '対戦中';
@@ -426,6 +433,13 @@ function formatPair(left?: number, right?: number) {
     return '- / -';
   }
   return `${left} / ${right}`;
+}
+
+function displayLives(lives?: number, dead?: boolean) {
+  if (lives === undefined) {
+    return undefined;
+  }
+  return dead ? 0 : lives;
 }
 
 function formatStartedAt(value: string) {

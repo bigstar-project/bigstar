@@ -95,6 +95,10 @@ export type BattleMatchStatus = 'running' | 'completed' | 'stopped';
 export type BattleMatchRecord = {
   id: string;
   logDir: string;
+  playerNames: {
+    mario: string;
+    luigi: string;
+  };
   role: Role;
   roomCode: string;
   settings: GameSettings;

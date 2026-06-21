@@ -91,6 +91,10 @@ const rooms: MatchmakingRoomsState = {
 const currentMatch: BattleMatchRecord = {
   id: 'C:\\logs\\run1',
   logDir: 'C:\\logs\\run1',
+  playerNames: {
+    mario: 'Alice',
+    luigi: 'Bob',
+  },
   role: 'host',
   roomCode: 'test-room',
   settings: {
@@ -202,10 +206,11 @@ describe('対戦ビュー', () => {
 
     await expect.element(screen.getByText('現在の対戦状況')).toBeVisible();
     await expect.element(screen.getByText('1 - 0')).toBeVisible();
-    await expect.element(screen.getByText('Mario 勝利')).toBeVisible();
+    await expect.element(screen.getByText('Alice 勝利')).toBeVisible();
     await expect.element(screen.getByText('Stage 2')).toBeVisible();
     await expect.element(screen.getByText('5 / 0')).toBeVisible();
     await expect.element(screen.getByText('3 / 2')).toBeVisible();
+    await expect.element(screen.getByText(/死亡/)).not.toBeInTheDocument();
   });
 
   test('公開ルームを手動更新する', async () => {

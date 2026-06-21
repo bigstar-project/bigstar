@@ -8266,6 +8266,11 @@ MvlResultSnapshot ReadMvlResultSnapshot(melonDS::NDS* nds)
         result.Lives[player] = nds->ARM9Read32(kGamePlayerLivesAddr + wordOffset);
         result.Deaths[player] = nds->ARM9Read32(kGamePlayerDeathsAddr + wordOffset);
         result.Dead[player] = nds->ARM9Read8(kGamePlayerDeadAddr + player);
+        if (G.MvlLifeModeSelector != 2 && result.Dead[player] != 0)
+        {
+            result.Lives[player] = 0;
+            result.Deaths[player] = std::max(result.Deaths[player], G.MvlInitialLives);
+        }
     }
     return result;
 }
