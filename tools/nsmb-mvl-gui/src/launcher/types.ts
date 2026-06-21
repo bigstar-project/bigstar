@@ -2,10 +2,8 @@ import type { RoomSummary } from '../matchmakingClient';
 import type {
   BridgeDiagnostics,
   FormState,
-  GameSettings,
   GameStateMismatch,
-  MvlStageResult,
-  Role,
+  MatchHistoryRecord,
 } from '../types';
 
 export type View = 'battle' | 'history' | 'settings';
@@ -90,19 +88,6 @@ export type MatchmakingRoomsState = {
   hostedRoomId: string | null;
 };
 
-export type BattleMatchStatus = 'running' | 'completed' | 'stopped';
+export type BattleMatchStatus = MatchHistoryRecord['status'];
 
-export type BattleMatchRecord = {
-  id: string;
-  logDir: string;
-  playerNames: {
-    mario: string;
-    luigi: string;
-  };
-  role: Role;
-  roomCode: string;
-  settings: GameSettings;
-  stages: MvlStageResult[];
-  startedAt: string;
-  status: BattleMatchStatus;
-};
+export type BattleMatchRecord = MatchHistoryRecord;

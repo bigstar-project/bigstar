@@ -15,6 +15,8 @@ export const commands = {
 	startMatch: (request: LaunchRequest_Deserialize) => typedError<LaunchResponse, string>(__TAURI_INVOKE("start_match", { request })),
 	stopMatch: () => typedError<null, string>(__TAURI_INVOKE("stop_match")),
 	sessionStatus: () => typedError<SessionStatus, string>(__TAURI_INVOKE("session_status")),
+	loadMatchHistory: () => typedError<MatchHistoryRecord[], string>(__TAURI_INVOKE("load_match_history")),
+	saveMatchHistory: (matches: MatchHistoryRecord[]) => typedError<null, string>(__TAURI_INVOKE("save_match_history", { matches })),
 	openLogDir: (path: string) => typedError<null, string>(__TAURI_INVOKE("open_log_dir", { path })),
 	openMelonds: () => typedError<number, string>(__TAURI_INVOKE("open_melonds")),
 	openMelondsInputConfig: () => typedError<number, string>(__TAURI_INVOKE("open_melonds_input_config")),
@@ -125,6 +127,25 @@ export type LaunchResponse = {
 };
 
 export type Lives = "3" | "5" | "endless";
+
+export type MatchHistoryRecord = {
+	id: string,
+	logDir: string,
+	playerNames: MatchPlayerNames,
+	role: Role,
+	roomCode: string,
+	settings: GameSettings,
+	stages: MvlStageResult[],
+	startedAt: string,
+	status: MatchHistoryStatus,
+};
+
+export type MatchHistoryStatus = "running" | "completed" | "stopped";
+
+export type MatchPlayerNames = {
+	mario: string,
+	luigi: string,
+};
 
 export type MvlPlayerResult = {
 	stars: number,

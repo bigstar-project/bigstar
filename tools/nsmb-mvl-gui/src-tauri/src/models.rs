@@ -152,7 +152,7 @@ pub(crate) struct GameStateMismatch {
     pub(crate) line: String,
 }
 
-#[derive(Debug, Deserialize, Serialize, Type)]
+#[derive(Clone, Debug, Deserialize, Serialize, Type)]
 pub(crate) struct MvlPlayerResult {
     pub(crate) stars: u32,
     pub(crate) displayed_stars: u32,
@@ -162,7 +162,7 @@ pub(crate) struct MvlPlayerResult {
     pub(crate) dead: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize, Type)]
+#[derive(Clone, Debug, Deserialize, Serialize, Type)]
 pub(crate) struct MvlStageResult {
     pub(crate) game_index: u32,
     pub(crate) stage: Option<u8>,
@@ -175,6 +175,35 @@ pub(crate) struct MvlStageResult {
     pub(crate) target_wins: u32,
     pub(crate) resolved: bool,
     pub(crate) line: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MatchPlayerNames {
+    pub(crate) mario: String,
+    pub(crate) luigi: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum MatchHistoryStatus {
+    Running,
+    Completed,
+    Stopped,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MatchHistoryRecord {
+    pub(crate) id: String,
+    pub(crate) log_dir: String,
+    pub(crate) player_names: MatchPlayerNames,
+    pub(crate) role: Role,
+    pub(crate) room_code: String,
+    pub(crate) settings: GameSettings,
+    pub(crate) stages: Vec<MvlStageResult>,
+    pub(crate) started_at: String,
+    pub(crate) status: MatchHistoryStatus,
 }
 
 #[derive(Debug, Deserialize)]

@@ -49,6 +49,7 @@ const mocks = vi.hoisted(() => {
         melon_pid: 1001,
       }),
     ),
+    saveMatchHistoryMock: vi.fn(async () => null),
   };
 });
 
@@ -109,6 +110,7 @@ vi.mock('../tauriClient', () => ({
     mvl_results: [],
     webrtc: null,
   })),
+  loadMatchHistory: vi.fn(async () => []),
   openLogDir: vi.fn(async () => {}),
   openMelonds: vi.fn(async () => {}),
   openMelondsInputConfig: vi.fn(async () => {}),
@@ -120,6 +122,7 @@ vi.mock('../tauriClient', () => ({
     symbols_file: 'symbols',
   })),
   saveDiagnosticEventsEnabled: vi.fn(async () => null),
+  saveMatchHistory: mocks.saveMatchHistoryMock,
   savePlayerName: vi.fn(async () => null),
   saveRomPaths: vi.fn(async () => null),
   selectRomFile: vi.fn(async (currentPath: string) => currentPath),

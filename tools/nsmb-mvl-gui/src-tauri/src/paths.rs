@@ -4,7 +4,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tauri::{AppHandle, Manager};
 
-use crate::models::LauncherSettings;
+use crate::models::{LauncherSettings, MatchHistoryRecord};
 use crate::processes::hide_child_console_window;
 
 pub(crate) fn create_log_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -305,6 +305,10 @@ fn launcher_settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir(app)?.join("launcher-settings.json"))
 }
 
+fn match_history_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_dir(app)?.join("match-history.json"))
+}
+
 pub(crate) fn load_launcher_settings(app: &AppHandle) -> Result<LauncherSettings, String> {
     let path = launcher_settings_path(app)?;
     if !path.exists() {
@@ -325,6 +329,40 @@ pub(crate) fn save_launcher_settings(
         .map_err(|err| format!("launcher settings をJSON化できません: {err}"))?;
     fs::write(&path, format!("{content}\n"))
         .map_err(|err| format!("launcher settings を保存できません: {err}"))
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct MatchHistoryDocument {
+    schema_version: u32,
+    matches: Vec<MatchHistoryRecord>,
+}
+
+pub(crate) fn load_match_history(app: &AppHandle) -> Result<Vec<MatchHistoryRecord>, String> {
+    let path = match_history_path(app)?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let content = fs::read_to_string(&path)
+        .map_err(|err| format!("match history を読み込めません: {err}"))?;
+    let document: MatchHistoryDocument = serde_json::from_str(&content)
+        .map_err(|err| format!("match history の形式が不正です: {err}"))?;
+    Ok(document.matches)
+}
+
+pub(crate) fn save_match_history(
+    app: &AppHandle,
+    matches: &[MatchHistoryRecord],
+) -> Result<(), String> {
+    const MAX_MATCH_HISTORY: usize = 100;
+    let path = match_history_path(app)?;
+    let document = MatchHistoryDocument {
+        schema_version: 1,
+        matches: matches.iter().take(MAX_MATCH_HISTORY).cloned().collect(),
+    };
+    let content = serde_json::to_string_pretty(&document)
+        .map_err(|err| format!("match history をJSON化できません: {err}"))?;
+    fs::write(&path, format!("{content}\n"))
+        .map_err(|err| format!("match history を保存できません: {err}"))
 }
 
 pub(crate) fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {

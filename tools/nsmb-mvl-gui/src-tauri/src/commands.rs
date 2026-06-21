@@ -9,12 +9,14 @@ use std::os::windows::process::CommandExt;
 use crate::config::{DEFAULT_PORT, DEFAULT_ROOM_CODE, DEFAULT_SIGNAL_URL};
 use crate::models::{
     Defaults, GenerateRomRequest, GenerateRomResponse, LaunchRequest, LaunchResponse,
-    SaveDiagnosticEventsRequest, SavePlayerNameRequest, SaveRomPathsRequest, SessionStatus,
+    MatchHistoryRecord, SaveDiagnosticEventsRequest, SavePlayerNameRequest, SaveRomPathsRequest,
+    SessionStatus,
 };
 use crate::paths::{
     absolutize_existing, app_data_dir, create_log_dir, find_bridge_binary, find_input_script,
-    find_melonds_binary, fixed_generated_rom_paths, load_launcher_settings, open_allowed_log_dir,
-    save_launcher_settings,
+    find_melonds_binary, fixed_generated_rom_paths, load_launcher_settings,
+    load_match_history as load_match_history_file, open_allowed_log_dir, save_launcher_settings,
+    save_match_history as save_match_history_file,
 };
 use crate::processes::{
     remove_inherited_melonds_env_keys, session_status_inner, start_match_resolved, stop_existing,
@@ -113,6 +115,21 @@ pub(crate) fn select_rom_file(current_path: String) -> Result<Option<String>, St
 #[specta::specta]
 pub(crate) fn open_log_dir(app: AppHandle, path: String) -> Result<(), String> {
     open_allowed_log_dir(app, path)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn load_match_history(app: AppHandle) -> Result<Vec<MatchHistoryRecord>, String> {
+    load_match_history_file(&app)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn save_match_history(
+    app: AppHandle,
+    matches: Vec<MatchHistoryRecord>,
+) -> Result<(), String> {
+    save_match_history_file(&app, &matches)
 }
 
 #[tauri::command]

@@ -26,11 +26,13 @@ import {
   generateRoms,
   getDefaults,
   getSessionStatus,
+  loadMatchHistory,
   openLogDir as openLogDirCommand,
   openMelonds as openMelondsCommand,
   openMelondsInputConfig as openMelondsInputConfigCommand,
   runPreflightCheck,
   saveDiagnosticEventsEnabled,
+  saveMatchHistory,
   savePlayerName as savePlayerNameCommand,
   saveRomPaths,
   selectRomFile,
@@ -63,6 +65,7 @@ import {
 const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const ACTIVITY_STATUS_VISIBLE_MS = 5000;
 const ROOMS_REFETCH_INTERVAL_MS = 15 * 1000;
+const MATCH_HISTORY_SAVE_DELAY_MS = 300;
 
 function isTauriRuntime() {
   return '__TAURI_INTERNALS__' in window;
@@ -176,6 +179,7 @@ export function useLauncherController() {
   );
   const currentMatchRef = useRef<BattleMatchRecord | null>(null);
   const [matchHistory, setMatchHistory] = useState<BattleMatchRecord[]>([]);
+  const [matchHistoryLoaded, setMatchHistoryLoaded] = useState(false);
 
   const currentRomPath =
     form.role === 'host' ? form.hostRomPath : form.clientRomPath;
@@ -238,6 +242,21 @@ export function useLauncherController() {
   useEffect(() => {
     currentMatchRef.current = currentMatch;
   }, [currentMatch]);
+
+  useEffect(() => {
+    if (!matchHistoryLoaded) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void saveMatchHistory(matchHistory).catch((error) => {
+        setActivityStatus({
+          text: `対戦履歴の保存に失敗しました: ${String(error)}`,
+          kind: 'warn',
+        });
+      });
+    }, MATCH_HISTORY_SAVE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [matchHistoryLoaded, matchHistory]);
 
   const archiveCurrentMatch = useCallback(
     (status: BattleMatchStatus = 'stopped') => {
@@ -393,6 +412,23 @@ export function useLauncherController() {
         setOnboardingPlayerNameConfigured(
           defaults.player_name.trim().length > 0,
         );
+        try {
+          const persistedHistory = await loadMatchHistory();
+          if (!disposed) {
+            setMatchHistory(persistedHistory.slice(0, 100));
+          }
+        } catch (error) {
+          if (!disposed) {
+            setActivityStatus({
+              text: `対戦履歴の読み込みに失敗しました: ${String(error)}`,
+              kind: 'warn',
+            });
+          }
+        } finally {
+          if (!disposed) {
+            setMatchHistoryLoaded(true);
+          }
+        }
         setDefaultsLoaded(true);
         await pollStatus();
       } catch (error) {

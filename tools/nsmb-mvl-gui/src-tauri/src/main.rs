@@ -32,6 +32,8 @@ fn specta_builder() -> SpectaBuilder<tauri::Wry> {
         commands::start_match,
         commands::stop_match,
         commands::session_status,
+        commands::load_match_history,
+        commands::save_match_history,
         commands::open_log_dir,
         commands::open_melonds,
         commands::open_melonds_input_config

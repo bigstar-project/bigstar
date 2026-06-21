@@ -5,6 +5,7 @@ import type {
   GenerateRomResponse,
   LaunchRequest,
   LaunchResponse,
+  MatchHistoryRecord,
   PreflightResponse,
   SaveDiagnosticEventsRequest,
   SavePlayerNameRequest,
@@ -49,6 +50,8 @@ const previewRomIdentity = {
   rom_pair_id:
     '4444444444444444444444444444444444444444444444444444444444444444',
 };
+
+const previewMatchHistoryKey = 'nsmb-mvl-preview-match-history';
 
 function isTauriRuntime() {
   return '__TAURI_INTERNALS__' in window;
@@ -160,6 +163,29 @@ export function getSessionStatus() {
     });
   }
   return unwrapCommand(commands.sessionStatus());
+}
+
+export function loadMatchHistory() {
+  if (!isTauriRuntime()) {
+    try {
+      const raw = window.localStorage.getItem(previewMatchHistoryKey);
+      return Promise.resolve<MatchHistoryRecord[]>(raw ? JSON.parse(raw) : []);
+    } catch {
+      return Promise.resolve<MatchHistoryRecord[]>([]);
+    }
+  }
+  return unwrapCommand(commands.loadMatchHistory());
+}
+
+export function saveMatchHistory(matches: MatchHistoryRecord[]) {
+  if (!isTauriRuntime()) {
+    window.localStorage.setItem(
+      previewMatchHistoryKey,
+      JSON.stringify(matches.slice(0, 100)),
+    );
+    return Promise.resolve(null);
+  }
+  return unwrapCommand(commands.saveMatchHistory(matches));
 }
 
 export function openLogDir(path: string) {
