@@ -56,6 +56,7 @@ public:
     void CompileBlock(ARM* cpu) noexcept;
     void ResetBlockCache() noexcept;
     void ResetBlockCacheForRollbackFast() noexcept;
+    void ResetFastBlockLookupTables() noexcept;
     void DeleteDeferredResetBlocks(u32 maxBlocks) noexcept;
 
     template <u32 num, int region>
@@ -98,7 +99,7 @@ public:
     std::unordered_map<u32, JitBlock*> JitBlocks9 {};
     std::unordered_map<u32, JitBlock*> JitBlocks7 {};
 
-    std::unordered_map<u32, JitBlock*> RestoreCandidates {};
+    std::unordered_map<u64, JitBlock*> RestoreCandidates {};
     std::vector<JitBlock*> DeferredResetBlocks {};
 
 

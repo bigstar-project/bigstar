@@ -83,6 +83,13 @@ static bool EnvFlag(const char* name) noexcept
     return getenv(name) != nullptr;
 }
 
+static u64 RestoreCandidateKey(u32 instrHash, u32 blockAddr, u32 cpuNum) noexcept
+{
+    return (static_cast<u64>(instrHash) << 32)
+        ^ (static_cast<u64>(blockAddr) << 1)
+        ^ static_cast<u64>(cpuNum & 1);
+}
+
 static_assert(offsetof(ARM, CPSR) == ARM_CPSR_offset, "");
 static_assert(offsetof(ARM, Cycles) == ARM_Cycles_offset, "");
 static_assert(offsetof(ARM, StopExecution) == ARM_StopExecution_offset, "");
@@ -518,7 +525,8 @@ void ARMJIT::RetireJitBlock(JitBlock* block) noexcept
         return;
     }
 
-    auto it = RestoreCandidates.find(block->InstrHash);
+    const u64 key = RestoreCandidateKey(block->InstrHash, block->StartAddr, block->Num);
+    auto it = RestoreCandidates.find(key);
     if (it != RestoreCandidates.end())
     {
         delete it->second;
@@ -526,7 +534,7 @@ void ARMJIT::RetireJitBlock(JitBlock* block) noexcept
     }
     else
     {
-        RestoreCandidates[block->InstrHash] = block;
+        RestoreCandidates[key] = block;
     }
 }
 
@@ -888,7 +896,8 @@ void ARMJIT::CompileBlock(ARM* cpu) noexcept
     u32 literalHash = (u32)XXH3_64bits(literalValues, numLiterals * 4);
     u32 instrHash = (u32)XXH3_64bits(instrValues, numInstrs * 4);
 
-    auto prevBlockIt = RestoreCandidates.find(instrHash);
+    const u64 restoreKey = RestoreCandidateKey(instrHash, blockAddr, cpu->Num);
+    auto prevBlockIt = RestoreCandidates.find(restoreKey);
     JitBlock* prevBlock = NULL;
     bool mayRestore = true;
     if (prevBlockIt != RestoreCandidates.end())
@@ -1148,6 +1157,15 @@ bool ARMJIT::SetupExecutableRegion(u32 num, u32 blockAddr, u64*& entry, u32& sta
     return false;
 }
 
+void ARMJIT::ResetFastBlockLookupTables() noexcept
+{
+    for (int i = 0; i < ARMJIT_Memory::memregions_Count; i++)
+    {
+        if (FastBlockLookupRegions[i])
+            memset(FastBlockLookupRegions[i], 0xFF, CodeRegionSizes[i] * sizeof(u64) / 2);
+    }
+}
+
 template void ARMJIT::CheckAndInvalidate<0, ARMJIT_Memory::memregion_MainRAM>(u32) noexcept;
 template void ARMJIT::CheckAndInvalidate<1, ARMJIT_Memory::memregion_MainRAM>(u32) noexcept;
 template void ARMJIT::CheckAndInvalidate<0, ARMJIT_Memory::memregion_SharedWRAM>(u32) noexcept;
@@ -1172,11 +1190,7 @@ void ARMJIT::ResetBlockCache() noexcept
     Memory.Reset();
 
     InvalidLiterals.Clear();
-    for (int i = 0; i < ARMJIT_Memory::memregions_Count; i++)
-    {
-        if (FastBlockLookupRegions[i])
-            memset(FastBlockLookupRegions[i], 0xFF, CodeRegionSizes[i] * sizeof(u64) / 2);
-    }
+    ResetFastBlockLookupTables();
     for (auto it = RestoreCandidates.begin(); it != RestoreCandidates.end(); it++)
         delete it->second;
     RestoreCandidates.clear();
@@ -1218,15 +1232,23 @@ void ARMJIT::ResetBlockCacheForRollbackFast() noexcept
     Memory.Reset();
     InvalidLiterals.Clear();
     const u32 regionMask = EnvU32Auto("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_REGION_MASK", 0);
+    const bool reuseCandidates =
+        EnvFlag("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_RESTORE_CANDIDATES");
 
-    for (auto it = RestoreCandidates.begin(); it != RestoreCandidates.end(); it++)
+    if (!reuseCandidates)
     {
-        if (regionMask == 0)
-            DeferredResetBlocks.push_back(it->second);
-        else
-            delete it->second;
+        for (auto it = RestoreCandidates.begin(); it != RestoreCandidates.end(); it++)
+        {
+            if (regionMask == 0)
+                DeferredResetBlocks.push_back(it->second);
+            else
+                delete it->second;
+        }
+        RestoreCandidates.clear();
     }
-    RestoreCandidates.clear();
+
+    if (reuseCandidates)
+        RestoreCandidates.reserve(RestoreCandidates.size() + JitBlocks9.size() + JitBlocks7.size());
 
     auto detachBlocks = [&](std::unordered_map<u32, JitBlock*>& blocks)
     {
@@ -1281,7 +1303,10 @@ void ARMJIT::ResetBlockCacheForRollbackFast() noexcept
             if (FastBlockLookupRegions[block->StartAddrLocal >> 27])
                 FastBlockLookupRegions[block->StartAddrLocal >> 27][(block->StartAddrLocal & 0x7FFFFFF) / 2] =
                     (u64)UINT32_MAX << 32;
-            DeferredResetBlocks.push_back(block);
+            if (reuseCandidates)
+                RetireJitBlock(block);
+            else
+                DeferredResetBlocks.push_back(block);
             it = blocks.erase(it);
         }
         if (regionMask == 0)
@@ -1290,11 +1315,15 @@ void ARMJIT::ResetBlockCacheForRollbackFast() noexcept
 
     detachBlocks(JitBlocks9);
     detachBlocks(JitBlocks7);
+    if (EnvFlag("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_CLEAR_LOOKUP"))
+        ResetFastBlockLookupTables();
     const u32 initialDeleteBudget =
         EnvU32("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_INITIAL_DELETE_BUDGET", 64);
     DeleteDeferredResetBlocks(initialDeleteBudget);
 
-    if (regionMask == 0 && !EnvFlag("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_KEEP_CODEMEM"))
+    if (regionMask == 0
+        && !reuseCandidates
+        && !EnvFlag("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_KEEP_CODEMEM"))
         JITCompiler.Reset();
 }
 
