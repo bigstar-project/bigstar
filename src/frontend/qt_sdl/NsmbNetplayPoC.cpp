@@ -1807,6 +1807,7 @@ struct State
     bool RollbackEnabled = false;
     bool RollbackResimulate = false;
     bool RollbackRestoreProbe = false;
+    bool RollbackSkipPredictedInputFrameLeadThrottle = false;
     int RollbackPredictionProbeModulo = 0;
     int RollbackPredictionProbeOffset = 0;
     int RollbackPredictionProbeLimit = -1;
@@ -1848,6 +1849,7 @@ struct State
     int RollbackMaxResimFrames = 0;
     bool RollbackPrePumpBeforeResim = false;
     bool RollbackDisableJITDuringResim = false;
+    int RollbackMaxCorrectionsPerFrame = 0;
     int RollbackInputWaitUs = 0;
     std::map<melonDS::u32, InputState> PredictedRemoteInputs;
     std::map<melonDS::u32, RollbackStoredState> RollbackStates;
@@ -1866,6 +1868,8 @@ struct State
     bool RollbackSkipFinalResimCheckpoint = false;
     melonDS::u32 LastPerfSpikeRollbackRestoreCount[16] {};
     melonDS::u32 LastPerfSpikeRollbackResimulateCount[16] {};
+    melonDS::u32 RollbackCorrectionFrame[16] {};
+    int RollbackCorrectionCount[16] {};
     melonDS::u32 RollbackPredictionProbeCount = 0;
     melonDS::u32 RollbackCheckpointSaveCount = 0;
     size_t RollbackCheckpointLastBytes = 0;
@@ -4558,6 +4562,107 @@ bool IsValidMainRAMRange(melonDS::NDS* nds, melonDS::u32 address, melonDS::u32 l
     return offset < ramLen && length <= ramLen - offset;
 }
 
+void AddChangedMainRAMPagesForJITInvalidation(
+    melonDS::NDS* nds,
+    std::vector<RollbackNSMBRangeEntry>& ranges,
+    melonDS::u32 address,
+    melonDS::u32 length,
+    const melonDS::u8* restoredBytes)
+{
+    if (!IsValidMainRAMRange(nds, address, length) || !restoredBytes)
+        return;
+    const melonDS::u32 rangeOffset = address - kMainRAMBase;
+    const melonDS::u32 rangeEnd = rangeOffset + length;
+    const melonDS::u32 firstPage = rangeOffset & ~0xFFFu;
+    const melonDS::u32 lastPageEnd = (rangeEnd + 0xFFFu) & ~0xFFFu;
+    for (melonDS::u32 page = firstPage; page < lastPageEnd; page += 0x1000)
+    {
+        const melonDS::u32 compareStart = std::max(page, rangeOffset);
+        const melonDS::u32 compareEnd = std::min(page + 0x1000u, rangeEnd);
+        if (compareStart >= compareEnd)
+            continue;
+        const melonDS::u32 compareLength = compareEnd - compareStart;
+        const melonDS::u32 rangeByteOffset = compareStart - rangeOffset;
+        if (std::memcmp(
+                nds->MainRAM + compareStart,
+                restoredBytes + rangeByteOffset,
+                compareLength) == 0)
+        {
+            continue;
+        }
+        ranges.push_back({kMainRAMBase + page, std::min(0x1000u, (nds->MainRAMMask + 1) - page)});
+    }
+}
+
+bool NSMBAddressRangesOverlap(melonDS::u32 aAddress, melonDS::u32 aLength, melonDS::u32 bAddress, melonDS::u32 bLength)
+{
+    if (aLength == 0 || bLength == 0)
+        return false;
+    const melonDS::u64 aStart = aAddress;
+    const melonDS::u64 aEnd = aStart + aLength;
+    const melonDS::u64 bStart = bAddress;
+    const melonDS::u64 bEnd = bStart + bLength;
+    return aStart < bEnd && bStart < aEnd;
+}
+
+bool NSMBForceJITAddressRangeMatches(melonDS::u32 address, melonDS::u32 length)
+{
+    const char* spec = std::getenv("MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_ADDRESS_RANGES");
+    if (!spec || !spec[0])
+        return false;
+
+    const char* p = spec;
+    while (*p)
+    {
+        while (*p && (std::isspace(static_cast<unsigned char>(*p)) || *p == ',' || *p == ';'))
+            ++p;
+        if (!*p)
+            break;
+
+        char* end = nullptr;
+        const unsigned long startParsed = std::strtoul(p, &end, 0);
+        if (end == p)
+            break;
+        p = end;
+        while (*p && std::isspace(static_cast<unsigned char>(*p)))
+            ++p;
+
+        melonDS::u32 start = static_cast<melonDS::u32>(startParsed);
+        melonDS::u32 rangeLength = 0;
+        if (*p == ':' || *p == '+')
+        {
+            ++p;
+            const unsigned long lengthParsed = std::strtoul(p, &end, 0);
+            if (end == p)
+                break;
+            rangeLength = static_cast<melonDS::u32>(lengthParsed);
+            p = end;
+        }
+        else if (*p == '-')
+        {
+            ++p;
+            const unsigned long endParsed = std::strtoul(p, &end, 0);
+            if (end == p)
+                break;
+            const melonDS::u32 endAddress = static_cast<melonDS::u32>(endParsed);
+            rangeLength = endAddress > start ? endAddress - start : 0;
+            p = end;
+        }
+        else
+        {
+            rangeLength = 0x1000;
+        }
+
+        if (NSMBAddressRangesOverlap(address, length, start, rangeLength))
+            return true;
+
+        while (*p && *p != ',' && *p != ';')
+            ++p;
+    }
+
+    return false;
+}
+
 void AddNSMBRollbackRange(
     melonDS::NDS* nds,
     std::vector<RollbackNSMBRangeEntry>& ranges,
@@ -5090,6 +5195,18 @@ bool RangeOverlaps(melonDS::u32 aStart, melonDS::u32 aLen, melonDS::u32 bStart, 
     return aStart < bEnd && bStart < aEnd;
 }
 
+bool AddressCoveredByRanges(melonDS::u32 address, const std::vector<RollbackNSMBRangeEntry>& ranges)
+{
+    for (const auto& range : ranges)
+    {
+        if (address < range.Address)
+            return false;
+        if (address < range.Address + range.Length)
+            return true;
+    }
+    return false;
+}
+
 void AppendRangeRun(std::vector<RollbackNSMBRangeEntry>& runs, melonDS::u32 address, melonDS::u32 length)
 {
     if (runs.empty())
@@ -5142,7 +5259,8 @@ void TraceRollbackDeltaPages(melonDS::u32 frame, melonDS::NDS* nds, const std::v
 {
     if (!G.RollbackDeltaPageTrace
         || (G.RollbackBackendMode != RollbackBackend::CoreDelta
-            && G.RollbackBackendMode != RollbackBackend::CoreFrameDelta))
+            && G.RollbackBackendMode != RollbackBackend::CoreFrameDelta
+            && G.RollbackBackendMode != RollbackBackend::TinyCoreRAMDelta))
         return;
     if (frame < G.RollbackDeltaPageTraceStartFrame)
         return;
@@ -5159,11 +5277,15 @@ void TraceRollbackDeltaPages(melonDS::u32 frame, melonDS::NDS* nds, const std::v
     const std::vector<RollbackNSMBRangeEntry> nsmbRanges = BuildNSMBRollbackRanges(nds);
     std::vector<RollbackNSMBRangeEntry> changedRuns;
     std::vector<RollbackNSMBRangeEntry> uncoveredRuns;
+    std::vector<RollbackNSMBRangeEntry> uncoveredChangedByteRuns;
     melonDS::u32 changedPages = 0;
     melonDS::u32 coveredPages = 0;
     melonDS::u32 uncoveredPages = 0;
+    melonDS::u32 uncoveredChangedBytePages = 0;
+    melonDS::u32 uncoveredChangedBytes = 0;
     melonDS::u32 regionPages[4] {};
     melonDS::u32 uncoveredRegionPages[4] {};
+    melonDS::u32 uncoveredChangedByteRegionPages[4] {};
 
     for (melonDS::u32 offset = 0; offset < ramLen; offset += pageSize)
     {
@@ -5200,10 +5322,30 @@ void TraceRollbackDeltaPages(melonDS::u32 frame, melonDS::NDS* nds, const std::v
             uncoveredRegionPages[regionIndex]++;
             AppendRangeRun(uncoveredRuns, address, len);
         }
+
+        bool hasUncoveredChangedByte = false;
+        for (melonDS::u32 i = 0; i < len; i++)
+        {
+            if (nds->MainRAM[offset + i] == baseMainRAM[offset + i])
+                continue;
+
+            const melonDS::u32 byteAddress = address + i;
+            if (AddressCoveredByRanges(byteAddress, nsmbRanges))
+                continue;
+
+            hasUncoveredChangedByte = true;
+            uncoveredChangedBytes++;
+            AppendRangeRun(uncoveredChangedByteRuns, byteAddress, 1);
+        }
+        if (hasUncoveredChangedByte)
+        {
+            uncoveredChangedBytePages++;
+            uncoveredChangedByteRegionPages[regionIndex]++;
+        }
     }
 
     std::printf(
-        "NSMB RollbackDeltaPages: frame=%u page=%u changedPages=%u changedBytes=%u coveredPages=%u uncoveredPages=%u uncoveredBytes=%u ranges=%zu regions=low:%u game:%u heap:%u scratch:%u uncoveredRegions=low:%u game:%u heap:%u scratch:%u\n",
+        "NSMB RollbackDeltaPages: frame=%u page=%u changedPages=%u changedBytes=%u coveredPages=%u uncoveredPages=%u uncoveredBytes=%u uncoveredChangedBytePages=%u uncoveredChangedBytes=%u ranges=%zu regions=low:%u game:%u heap:%u scratch:%u uncoveredRegions=low:%u game:%u heap:%u scratch:%u uncoveredChangedByteRegions=low:%u game:%u heap:%u scratch:%u\n",
         frame,
         pageSize,
         changedPages,
@@ -5211,6 +5353,8 @@ void TraceRollbackDeltaPages(melonDS::u32 frame, melonDS::NDS* nds, const std::v
         coveredPages,
         uncoveredPages,
         uncoveredPages * pageSize,
+        uncoveredChangedBytePages,
+        uncoveredChangedBytes,
         nsmbRanges.size(),
         regionPages[0],
         regionPages[1],
@@ -5219,9 +5363,14 @@ void TraceRollbackDeltaPages(melonDS::u32 frame, melonDS::NDS* nds, const std::v
         uncoveredRegionPages[0],
         uncoveredRegionPages[1],
         uncoveredRegionPages[2],
-        uncoveredRegionPages[3]);
+        uncoveredRegionPages[3],
+        uncoveredChangedByteRegionPages[0],
+        uncoveredChangedByteRegionPages[1],
+        uncoveredChangedByteRegionPages[2],
+        uncoveredChangedByteRegionPages[3]);
     PrintRangeRuns("NSMB RollbackDeltaPagesChanged", frame, changedRuns);
     PrintRangeRuns("NSMB RollbackDeltaPagesUncovered", frame, uncoveredRuns);
+    PrintRangeRuns("NSMB RollbackDeltaPagesUncoveredChangedBytes", frame, uncoveredChangedByteRuns);
     std::fflush(stdout);
 }
 
@@ -5747,19 +5896,70 @@ bool RestoreRollbackCheckpointBuffer(
         if (!ranges.empty())
             std::memcpy(ranges.data(), in, entriesBytes);
         in += entriesBytes;
+        const bool forceChangedPageJITInvalidation =
+            EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES");
+        std::vector<RollbackNSMBRangeEntry> changedJITRanges;
         for (const auto& range : ranges)
         {
             if (!IsValidMainRAMRange(nds, range.Address, range.Length))
                 return false;
             const melonDS::u32 offset = range.Address - kMainRAMBase;
+            if (forceChangedPageJITInvalidation)
+            {
+                AddChangedMainRAMPagesForJITInvalidation(
+                    nds,
+                    changedJITRanges,
+                    range.Address,
+                    range.Length,
+                    reinterpret_cast<const melonDS::u8*>(in));
+            }
             std::memcpy(nds->MainRAM + offset, in, range.Length);
             in += range.Length;
         }
         nds->NumFrames = header.NumFrames;
         nds->NumLagFrames = header.NumLagFrames;
         nds->LagFrameFlag = header.LagFrameFlag != 0;
-        for (const auto& range : ranges)
-            InvalidateMainRAMJITRange(nds, range.Address, range.Length);
+        const bool forceAllJITInvalidation =
+            EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION");
+        const melonDS::u32 forceSmallJITRangeMax = static_cast<melonDS::u32>(
+            std::max(0, EnvInt("MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_SMALL_RANGE_MAX", 0)));
+        size_t invalidationBytes = 0;
+        const auto invalidationStart = std::chrono::steady_clock::now();
+        const std::vector<RollbackNSMBRangeEntry>& jitInvalidationRanges =
+            forceChangedPageJITInvalidation ? changedJITRanges : ranges;
+        size_t forcedInvalidationRanges = 0;
+        size_t forcedInvalidationBytes = 0;
+        for (const auto& range : jitInvalidationRanges)
+        {
+            invalidationBytes += range.Length;
+            const bool forceJITInvalidation = forceAllJITInvalidation
+                || forceChangedPageJITInvalidation
+                || NSMBForceJITAddressRangeMatches(range.Address, range.Length)
+                || (forceSmallJITRangeMax > 0 && range.Length <= forceSmallJITRangeMax);
+            if (forceJITInvalidation)
+            {
+                forcedInvalidationRanges++;
+                forcedInvalidationBytes += range.Length;
+            }
+            InvalidateMainRAMJITRange(nds, range.Address, range.Length, forceJITInvalidation);
+        }
+        if (EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_JIT_INVALIDATION_TRACE"))
+        {
+            std::printf(
+                "NSMB RollbackJITInvalidationTrace: frame=%u ranges=%zu bytes=%zu forcedRanges=%zu forcedBytes=%zu forceAll=%d changedPages=%d smallMax=%u\n",
+                nds->NumFrames,
+                jitInvalidationRanges.size(),
+                invalidationBytes,
+                forcedInvalidationRanges,
+                forcedInvalidationBytes,
+                forceAllJITInvalidation ? 1 : 0,
+                forceChangedPageJITInvalidation ? 1 : 0,
+                forceSmallJITRangeMax);
+        }
+        RecordRollbackJITInvalidationTiming(
+            jitInvalidationRanges.size(),
+            invalidationBytes,
+            ElapsedUs(invalidationStart));
         return true;
     }
 
@@ -6072,6 +6272,16 @@ bool RestoreRollbackCheckpointForProbeIfNeeded(int instanceID, melonDS::u32 fram
     std::vector<melonDS::u8> latestMainRAM;
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
+        if (G.RollbackMaxCorrectionsPerFrame > 0)
+        {
+            if (G.RollbackCorrectionFrame[instanceID] != frame)
+            {
+                G.RollbackCorrectionFrame[instanceID] = frame;
+                G.RollbackCorrectionCount[instanceID] = 0;
+            }
+            if (G.RollbackCorrectionCount[instanceID] >= G.RollbackMaxCorrectionsPerFrame)
+                return false;
+        }
         if (G.PendingRollbackFrame == kNoFrameLimit)
             return false;
 
@@ -13149,6 +13359,15 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
             resimCheckpointSaveMaxUs,
             rollbackTotalUs);
         G.RollbackResimulateCount++;
+        if (G.RollbackMaxCorrectionsPerFrame > 0)
+        {
+            if (G.RollbackCorrectionFrame[instanceID] != frame)
+            {
+                G.RollbackCorrectionFrame[instanceID] = frame;
+                G.RollbackCorrectionCount[instanceID] = 0;
+            }
+            G.RollbackCorrectionCount[instanceID]++;
+        }
     }
     if (G.InputNetplayTraceEnabled)
     {
@@ -13387,9 +13606,15 @@ void WritePacketBridgeJitScratchIfNeeded(
         }
         networkUs = static_cast<unsigned long long>(ElapsedUs(networkStart));
 
-        const auto throttleStart = std::chrono::steady_clock::now();
-        ThrottleInputNetplayFrameLead(nds, frame, sendFrame);
-        throttleUs = static_cast<unsigned long long>(ElapsedUs(throttleStart));
+        if (!(G.RollbackEnabled
+                && G.InputNetplayOnly
+                && G.RollbackSkipPredictedInputFrameLeadThrottle
+                && predictedRemoteInput))
+        {
+            const auto throttleStart = std::chrono::steady_clock::now();
+            ThrottleInputNetplayFrameLead(nds, frame, sendFrame);
+            throttleUs = static_cast<unsigned long long>(ElapsedUs(throttleStart));
+        }
 
         if (!hasRemoteInput
             && !G.RollbackEnabled
@@ -18765,6 +18990,10 @@ void InitFromEnvironment()
         EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_FINAL_CHECKPOINT");
     G.RollbackPrePumpBeforeResim = EnvFlag("MELONDS_NSML_ROLLBACK_PRE_PUMP_BEFORE_RESIM");
     G.RollbackDisableJITDuringResim = EnvFlag("MELONDS_NSML_ROLLBACK_DISABLE_JIT_DURING_RESIM");
+    G.RollbackSkipPredictedInputFrameLeadThrottle =
+        EnvFlag("MELONDS_NSML_ROLLBACK_SKIP_PREDICTED_FRAME_LEAD_THROTTLE");
+    G.RollbackMaxCorrectionsPerFrame = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME", 0), 0, 16);
     G.RollbackInputWaitUs = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_INPUT_WAIT_US", 0), 0, 20000);
     G.RollbackRestoreProbe = EnvFlag("MELONDS_NSML_ROLLBACK_RESTORE_PROBE");

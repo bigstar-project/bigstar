@@ -4,6 +4,7 @@ param(
     [int]$ClientFrames = 0,
     [int]$WaitTimeoutMs = 240000,
     [int]$InternalWaitTimeoutMs = 5000,
+    [int]$SeedWaitTimeoutMs = -1,
     [int]$StallTimeoutMs = 0,
     [int]$FrameHeartbeatInterval = 120,
     [int]$GameplayHeartbeatInterval = 0,
@@ -2686,7 +2687,11 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
         }
-        Remove-Item Env:\MELONDS_NSML_SEED_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
+        if ($SeedWaitTimeoutMs -ge 0) {
+            $env:MELONDS_NSML_SEED_WAIT_TIMEOUT_MS = "$SeedWaitTimeoutMs"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_SEED_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
+        }
         if ($WaitForPeerBeforeStart -or ($InputNetplay -and $PacketBridgeStartFrame -gt 0)) {
             $env:MELONDS_NSML_WAIT_FOR_PEER = "1"
         } else {
@@ -3600,6 +3605,22 @@ function Get-LatestNSMBHeartbeatFrame {
     return -1
 }
 
+function Test-NSMBPeerWaitTimeout {
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) {
+        return $false
+    }
+
+    $tail = Get-Content -LiteralPath $Path -Tail 30 -ErrorAction SilentlyContinue
+    foreach ($line in $tail) {
+        if ($line -match "NSMB PoC: peer wait timeout") {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Complete-MelonLANProcess {
     param($Started)
 
@@ -3623,6 +3644,18 @@ function Complete-MelonLANProcess {
             if ($frame -gt $latestFrame) {
                 $latestFrame = $frame
                 $lastProgress = $now
+            }
+
+            $peerWaitFailMs = if ($SeedWaitTimeoutMs -ge 0) {
+                $SeedWaitTimeoutMs + [Math]::Max($StallTimeoutMs, 5000)
+            } else {
+                30000
+            }
+            if (($latestFrame -le 0) -and
+                (($now - $process.StartTime.ToUniversalTime()).TotalMilliseconds -ge $peerWaitFailMs) -and
+                (Test-NSMBPeerWaitTimeout -Path $Started.Stdout)) {
+                $process.Kill()
+                throw "melonDS process peer wait timeout. pid=$($process.Id) latestFrame=$latestFrame waitedMs=$([int]($now - $process.StartTime.ToUniversalTime()).TotalMilliseconds) stdout=$($Started.Stdout)"
             }
 
             if ($latestFrame -ge $StallStartFrame -and

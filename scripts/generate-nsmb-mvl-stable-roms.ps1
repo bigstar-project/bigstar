@@ -245,17 +245,23 @@ if (!$Force -and (Test-ReusableRoms -HostPath $hostRomPath -ClientPath $clientRo
     return
 }
 
-& cargo run --release --manifest-path (Join-Path $repoRoot "tools\nsmb-mvl-rom\Cargo.toml") -- `
-    generate-stable `
-    --source-rom $sourceRomPath `
-    --host-rom $hostRomPath `
-    --client-rom $clientRomPath `
-    --stage $MvlStage `
-    --wins $MvlWins `
-    --big-stars $MvlBigStars `
-    --lives $effectiveLives `
-    --course-mode $MvlCourseMode `
-    --scene-settings $effectiveSceneSettings
+$previousErrorActionPreference = $ErrorActionPreference
+try {
+    $ErrorActionPreference = "Continue"
+    & cargo run --release --manifest-path (Join-Path $repoRoot "tools\nsmb-mvl-rom\Cargo.toml") -- `
+        generate-stable `
+        --source-rom $sourceRomPath `
+        --host-rom $hostRomPath `
+        --client-rom $clientRomPath `
+        --stage $MvlStage `
+        --wins $MvlWins `
+        --big-stars $MvlBigStars `
+        --lives $effectiveLives `
+        --course-mode $MvlCourseMode `
+        --scene-settings $effectiveSceneSettings
+} finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+}
 
 if ($LASTEXITCODE -ne 0) {
     throw "stable MvL ROM generation failed with exit code $LASTEXITCODE"
