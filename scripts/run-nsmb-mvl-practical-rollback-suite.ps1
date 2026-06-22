@@ -1586,6 +1586,71 @@ $candidateDefs = @{
             MELONDS_NSML_ROLLBACK_PRE_PUMP_BEFORE_RESIM = "1"
         }
     }
+    "nsmbtinycore-delay2-proclist-arena-stack-noheap-maxresim2-skiprender" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 2
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Env = @{
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+        }
+    }
+    "nsmbtinycore-delay2-proclist-noheap-playerc80-maxresim2-skiprender" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 2
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            SkipMovementProbe = $true
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+        }
+    }
+    "nsmbtinycore-delay2-proclist-noheap-playerc80-hazard500-maxresim2-skiprender" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 2
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            SkipMovementProbe = $true
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_MOVING_HAZARD_OBJECT_LENGTH = "0x500"
+        }
+    }
     "exact-delay2-coredelta-skiprender" = [pscustomobject]@{
         Backend = "coredelta"
         InputDelayFrames = 2
@@ -1700,6 +1765,13 @@ $envKeys = @(
     "MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL",
     "MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE",
     "MELONDS_NSML_ROLLBACK_PRE_PUMP_BEFORE_RESIM",
+    "MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES",
+    "MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE",
+    "MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES",
+    "MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES",
+    "MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_INTERVAL",
+    "MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH",
+    "MELONDS_NSML_ROLLBACK_NSMB_MOVING_HAZARD_OBJECT_LENGTH",
     "MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT_LIFECYCLE",
     "MELONDS_NSML_WORLD_STATE_PRUNE_EXTRA_ACTOR_SNAPSHOT",
     "MELONDS_NSML_WORLD_STATE_MOVING_HAZARD_MAX_PREDICT_FRAMES",
@@ -1770,6 +1842,10 @@ foreach ($candidateName in $Candidate) {
         if ($candidateDef.PSObject.Properties.Name -contains "RollbackPredictOnly") {
             $rollbackPredictOnly = [bool]$candidateDef.RollbackPredictOnly
         }
+        $rollbackTinyCoreFlags = ""
+        if ($candidateDef.PSObject.Properties.Name -contains "RollbackTinyCoreFlags") {
+            $rollbackTinyCoreFlags = [string]$candidateDef.RollbackTinyCoreFlags
+        }
 
         $params = @{
             Frames = $routeDef.Frames
@@ -1780,6 +1856,7 @@ foreach ($candidateName in $Candidate) {
             ClientInputScript = $clientInput
             Rollback = $true
             RollbackBackend = $candidateDef.Backend
+            RollbackTinyCoreFlags = $rollbackTinyCoreFlags
             RollbackWindow = $candidateDef.RollbackWindow
             RollbackCheckpointInterval = $candidateDef.RollbackCheckpointInterval
             RollbackResimulate = $rollbackResimulate

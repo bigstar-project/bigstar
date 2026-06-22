@@ -76,12 +76,17 @@ Current conclusion:
   - Resim profiling with `InputNetplayTrace` shows the main cost is `RunFrame` during re-execution, not snapshot copy: a 2F resim commonly spends restore `~3-5ms`, checkpoint save `~1.5-5ms`, and resimulated `RunFrame` `~20-35ms`.
   - Skipping intermediate resim checkpoints did not reduce spikes, and pre-pumping network packets before resim either broke correctness under a 2F cap or remained too slow uncapped.
   - Direct raw actor memory copy is not safe as-is because actor structs contain pointers/link fields whose addresses can diverge between host and client. The next actor-authority design should be pointer-safe: copy selected non-pointer arena pages, remap actor links, or use a host-authored page-delta with exclusions.
+- NSMB process-list selected-range rollback:
+  - `nsmbtinycore` plus process-list ranges proves the checkpoint/restore side can be made cheap under delay2: process-list/no-heap saves are around `0.12-0.18ms`, restores around `3ms`, and playerC80 1500F chaos traces can keep active frames at `16.667ms` with max under `27ms`.
+  - The raw selected-range approach is still not reliable enough. `player=0xC80` fixes one chaos short trace and passes `dualstresslong`, but contact still diverges in player Y/global/moving-hazard state and chaos can stall in longer practical runs.
+  - Broadening raw ranges is dangerous. `actorArena`/`ARM9 stack` can trigger `80-100ms` resim frames or ARM9 aborts, and moving-hazard `0x500` raw tail copying makes contact run at `59/94ms` average. The evidence points to pointer-heavy or scheduler-sensitive actor internals being restored in an inconsistent state.
+  - Next architecture should use selected field/page snapshots with exclusions rather than object-tail memcpy: keep non-pointer player/contact/hazard fields, skip or remap links/vtables/process nodes, and treat full exact rollback only as an oracle.
 
 Current blocker / next actions:
 
 - Keep delay2 as a hard requirement; increasing GUI rollback InputDelay above `2` is not allowed for this goal.
 - Exact same-frame resim is now the wrong primary optimization target for delay2: even a correct 2F rollback can exceed one display frame. Continue it only as a correctness oracle/baseline.
-- Switch primary work to a new architecture: pointer-safe actor/global page-delta snapshots, off-main-thread shadow resim with atomic publish, or a minimal MvL actor rollback that replays only player/death/world state and publishes it without blocking the main frame.
+- Switch primary work away from broad raw RAM ranges. Use pointer-safe actor/global page-delta snapshots, off-main-thread shadow resim with atomic publish, or a minimal MvL actor rollback that replays only player/contact/death/world fields and publishes them without blocking the main frame.
 - Add stronger event routes for star pickup/drop/recover, block break persistence, and 8-coin item identity. Current star routes are still input coverage failures, not correctness proof.
 - Keep testing with artificial send delay/jitter and movement-heavy chaos/contact routes. Average FPS alone is insufficient; `maxFrameMs`, `over33ms`, and persistent mismatch detection must stay in the promotion gate.
 

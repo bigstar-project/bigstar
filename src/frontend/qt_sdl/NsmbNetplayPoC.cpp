@@ -4367,7 +4367,21 @@ bool ReadMainRAMAddressU16(melonDS::NDS* nds, melonDS::u32 address, melonDS::u16
 melonDS::u32 NSMBRollbackObjectSnapshotLength(melonDS::u16 objectID)
 {
     if (objectID == kPlayerObjectID)
-        return 0xC00;
+    {
+        static const int playerLength = std::clamp(
+            EnvInt("MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH", 0xC00),
+            0xC00,
+            0x1400);
+        return static_cast<melonDS::u32>(playerLength);
+    }
+    if (objectID == kVsMovingHazardObjectID)
+    {
+        static const int movingHazardLength = std::clamp(
+            EnvInt("MELONDS_NSML_ROLLBACK_NSMB_MOVING_HAZARD_OBJECT_LENGTH", 0x300),
+            0x300,
+            0x1000);
+        return static_cast<melonDS::u32>(movingHazardLength);
+    }
     if (objectID == kStageSceneObjectID)
         return 0x5800;
     if (objectID == kStageActorManagerObjectID)
