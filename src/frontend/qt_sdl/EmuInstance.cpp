@@ -1306,6 +1306,23 @@ bool EmuInstance::updateConsole() noexcept
             jitopt.GetBool("BranchOptimisations"),
             jitopt.GetBool("FastMemory"),
     };
+    if (getenv("MELONDS_NSML_ROLLBACK_CONSERVATIVE_JIT"))
+    {
+        const char* maxBlockEnv = getenv("MELONDS_NSML_ROLLBACK_CONSERVATIVE_JIT_MAX_BLOCK");
+        int maxBlockSize = maxBlockEnv ? std::atoi(maxBlockEnv) : 8;
+        _jitargs.MaxBlockSize = static_cast<unsigned>(std::clamp(maxBlockSize, 1, 32));
+        _jitargs.LiteralOptimizations = false;
+        _jitargs.BranchOptimizations = false;
+        _jitargs.FastMemory = false;
+    }
+    if (const char* maxBlockEnv = getenv("MELONDS_NSML_JIT_MAX_BLOCK_SIZE"))
+        _jitargs.MaxBlockSize = static_cast<unsigned>(std::clamp(std::atoi(maxBlockEnv), 1, 32));
+    if (const char* literalEnv = getenv("MELONDS_NSML_JIT_LITERAL_OPTIMIZATIONS"))
+        _jitargs.LiteralOptimizations = std::atoi(literalEnv) != 0;
+    if (const char* branchEnv = getenv("MELONDS_NSML_JIT_BRANCH_OPTIMIZATIONS"))
+        _jitargs.BranchOptimizations = std::atoi(branchEnv) != 0;
+    if (const char* fastMemoryEnv = getenv("MELONDS_NSML_JIT_FAST_MEMORY"))
+        _jitargs.FastMemory = std::atoi(fastMemoryEnv) != 0;
     const bool packetBridgeAllowsJIT =
         getenv("MELONDS_NSML_PACKET_BRIDGE") &&
         getenv("MELONDS_NSML_PACKET_BRIDGE_ALLOW_JIT");
@@ -1326,6 +1343,16 @@ bool EmuInstance::updateConsole() noexcept
             jitargs ? "enabled" : "disabled",
             getenv("MELONDS_NSML_PACKET_BRIDGE") ? 1 : 0,
             packetBridgeAllowsJIT ? 1 : 0);
+        if (jitargs)
+        {
+            std::printf(
+                "NSMB Test: JIT args maxBlock=%u literal=%d branch=%d fastMemory=%d conservativeRollback=%d\n",
+                jitargs->MaxBlockSize,
+                jitargs->LiteralOptimizations ? 1 : 0,
+                jitargs->BranchOptimizations ? 1 : 0,
+                jitargs->FastMemory ? 1 : 0,
+                getenv("MELONDS_NSML_ROLLBACK_CONSERVATIVE_JIT") ? 1 : 0);
+        }
     }
 #else
     std::optional<JITArgs> jitargs = std::nullopt;

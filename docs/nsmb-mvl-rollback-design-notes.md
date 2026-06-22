@@ -94,12 +94,18 @@ Current conclusion:
   - This means the safe restore boundary is not just "invalidate restored memory pages". Current JIT blocks can depend on CPU/JIT state restored by savestate in a way that is not captured by local region invalidation. Normal full JIT block reset is still the correctness boundary for exact Main RAM restore.
   - A diagnostic `MELONDS_NSML_ROLLBACK_JIT_FAST_RESET=1` path detaches all JIT blocks immediately and defers JitBlock metadata deletion. It preserved contact correctness, proving full block detachment is enough for correctness, but performance was worse than normal reset (`611ms` max with default deferred delete budget, `139/142ms` max with delete budget `0`). This suggests recompile/code-cache churn dominates after full detachment.
   - `RollbackInputWaitUs=500` without increasing delay preserved correctness but did not solve spikes (`90/107ms` max). `InputMaxFrameLead=2` under strong jitter stalled. These are not promotion paths.
+- JIT configuration boundary tests:
+  - Added NSML env overrides for JIT args so rollback can test conservative JIT without changing normal GUI settings.
+  - `MELONDS_NSML_JIT_LITERAL_OPTIMIZATIONS=0` plus `MELONDS_NSML_JIT_FAST_MEMORY=0` is the first measured skip-reset configuration that preserved correctness for the page256 `tinycoreramdelta` route set. Contact/chaos/dualstresslong showed no persistent mismatch under strong jitter.
+  - This path is not yet playable: contact still had a client `183ms` max in one run, chaos stayed around `17.7ms` average and barely missed the over33 gate, and dualstresslong still produced about `160+` over33 frames.
+  - Boundary checks show why this is specific: literal-only off, literal+branch off, and fastmem-only off still mismatched. The likely unsafe piece is the combination of fast memory/static-literal assumptions with savestate-restored CPU/memory mapping.
+  - Larger Main RAM page sizes are not safe by default on this branch. Page1024 improved chaos slightly but mismatched contact at frame `2820`, so page256 remains the safer baseline.
 
 Current blocker / next actions:
 
 - Keep delay2 as a hard requirement; increasing GUI rollback InputDelay above `2` is not allowed for this goal.
-- Exact same-frame resim is not yet a playable endpoint for delay2: even the best exact-ish `tinycoreramdelta` path still exceeds one display frame during correction. Continue it as a correctness oracle/baseline and as a source of performance measurements.
-- Switch primary work away from broad raw RAM ranges and away from simply skipping JIT reset. Use pointer-safe actor/global page-delta snapshots, off-main-thread shadow resim with atomic publish, rollback-specific JIT state reuse/snapshotting, or a minimal MvL actor rollback that replays only player/contact/death/world fields and publishes them without blocking the main frame.
+- Exact same-frame resim is not yet a playable endpoint for delay2, but the no-literal/no-fastmem skip-reset branch is now the most promising exact-ish path because it avoids full JIT reset without measured persistent mismatch on page256 contact/chaos/dualstresslong.
+- Continue optimizing this branch before returning to broad actor/global repair: reduce over33 spikes by attacking checkpoint cadence, Main RAM delta/invalidation cost, and resim scheduling while preserving delay2 and the no-mismatch result. Keep off-main-thread shadow resim or rollback-specific JIT state reuse as fallback architecture if this branch plateaus.
 - Add stronger event routes for star pickup/drop/recover, block break persistence, and 8-coin item identity. Current star routes are still input coverage failures, not correctness proof.
 - Keep testing with artificial send delay/jitter and movement-heavy chaos/contact routes. Average FPS alone is insufficient; `maxFrameMs`, `over33ms`, and persistent mismatch detection must stay in the promotion gate.
 
