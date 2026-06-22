@@ -57,6 +57,7 @@ public:
     void ResetBlockCache() noexcept;
     void ResetBlockCacheForRollbackFast() noexcept;
     void ResetFastBlockLookupTables() noexcept;
+    void ResetFastBlockLookupRegion(u32 region) noexcept;
     void DeleteDeferredResetBlocks(u32 maxBlocks) noexcept;
 
     template <u32 num, int region>
@@ -101,6 +102,7 @@ public:
 
     std::unordered_map<u64, JitBlock*> RestoreCandidates {};
     std::vector<JitBlock*> DeferredResetBlocks {};
+    u32 FastBlockLookupUsedRegionMask = 0;
 
 
     AddressRange CodeIndexITCM[ITCMPhysicalSize / 512] {};
@@ -200,6 +202,8 @@ public:
     void CompileBlock(ARM*) noexcept {}
     void ResetBlockCache() noexcept {}
     void ResetBlockCacheForRollbackFast() noexcept {}
+    void ResetFastBlockLookupTables() noexcept {}
+    void ResetFastBlockLookupRegion(u32) noexcept {}
     void DeleteDeferredResetBlocks(u32) noexcept {}
     template <u32, int>
     void CheckAndInvalidate(u32 addr) noexcept {}

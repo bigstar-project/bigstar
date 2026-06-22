@@ -39,8 +39,10 @@ public:
 
     u32 StartAddr;
     u32 StartAddrLocal;
-    u32 InstrHash, LiteralHash;
+    u64 InstrHash;
+    u32 LiteralHash;
     u8 Num;
+    u8 RestoreFlags = 0;
     u16 NumAddresses;
     u16 NumLiterals;
 

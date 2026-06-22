@@ -18,6 +18,7 @@
 
 #include "ARMJIT.h"
 #include "ARMJIT_Memory.h"
+#include <array>
 #include <string.h>
 #include <assert.h>
 #include <cstdlib>
@@ -83,11 +84,69 @@ static bool EnvFlag(const char* name) noexcept
     return getenv(name) != nullptr;
 }
 
-static u64 RestoreCandidateKey(u32 instrHash, u32 blockAddr, u32 cpuNum) noexcept
+enum : u8
 {
-    return (static_cast<u64>(instrHash) << 32)
-        ^ (static_cast<u64>(blockAddr) << 1)
+    JitBlockRestoreHasMemoryInstr = 1 << 0,
+    JitBlockRestoreHasBranchFlags = 1 << 1,
+    JitBlockRestoreHasLiterals = 1 << 2,
+};
+
+static u64 RestoreCandidateKey(u64 instrHash, u32 blockAddr, u32 localAddr, u32 cpuNum) noexcept
+{
+    return instrHash
+        ^ (static_cast<u64>(blockAddr) << 17)
+        ^ (static_cast<u64>(localAddr) << 1)
         ^ static_cast<u64>(cpuNum & 1);
+}
+
+static u64 JitCompileFingerprint(
+    const FetchedInstr instrs[],
+    int instrCount,
+    bool thumb,
+    bool hasMemoryInstr,
+    u32 cpuNum,
+    u32 maxBlockSize,
+    bool literalOptimizations,
+    bool branchOptimizations,
+    bool fastMemory) noexcept
+{
+    std::array<u32, 1 + 32 * 8> words {};
+    size_t pos = 0;
+    words[pos++] =
+        (thumb ? 1u : 0u)
+        | (hasMemoryInstr ? (1u << 1) : 0u)
+        | ((cpuNum & 1u) << 2)
+        | ((maxBlockSize & 0x3Fu) << 3)
+        | (literalOptimizations ? (1u << 9) : 0u)
+        | (branchOptimizations ? (1u << 10) : 0u)
+        | (fastMemory ? (1u << 11) : 0u)
+        | (static_cast<u32>(instrCount & 0xFF) << 24);
+
+    for (int j = 0; j < instrCount && j < 32; j++)
+    {
+        const FetchedInstr& instr = instrs[j];
+        words[pos++] = instr.Instr;
+        words[pos++] = instr.Addr;
+        words[pos++] = instr.DataRegion;
+        words[pos++] =
+            static_cast<u32>(instr.BranchFlags)
+            | (static_cast<u32>(instr.SetFlags) << 8)
+            | (static_cast<u32>(instr.DataCycles) << 16)
+            | (static_cast<u32>(instr.Info.SpecialKind) << 24);
+        words[pos++] =
+            static_cast<u32>(instr.CodeCycles)
+            | (static_cast<u32>(instr.Info.ReadFlags) << 16)
+            | (static_cast<u32>(instr.Info.WriteFlags) << 24);
+        words[pos++] =
+            static_cast<u32>(instr.Info.Kind)
+            | (static_cast<u32>(instr.Info.DstRegs) << 16);
+        words[pos++] =
+            static_cast<u32>(instr.Info.SrcRegs)
+            | (static_cast<u32>(instr.Info.NotStrictlyNeeded) << 16);
+        words[pos++] = instr.Info.EndBlock ? 1u : 0u;
+    }
+
+    return XXH3_64bits(words.data(), pos * sizeof(words[0]));
 }
 
 static_assert(offsetof(ARM, CPSR) == ARM_CPSR_offset, "");
@@ -519,13 +578,17 @@ ARMJIT::ARMJIT(melonDS::NDS& nds, std::optional<JITArgs> jit) noexcept :
 
 void ARMJIT::RetireJitBlock(JitBlock* block) noexcept
 {
-    if (EnvFlag("MELONDS_NSML_JIT_DISABLE_RESTORE_CANDIDATES"))
+    if (EnvFlag("MELONDS_NSML_JIT_DISABLE_RESTORE_CANDIDATES")
+        || (EnvFlag("MELONDS_NSML_ROLLBACK_JIT_RESTORE_NO_MEMORY_BLOCKS")
+            && (block->RestoreFlags & JitBlockRestoreHasMemoryInstr))
+        || (EnvFlag("MELONDS_NSML_ROLLBACK_JIT_RESTORE_STRAIGHTLINE_ONLY")
+            && (block->RestoreFlags & JitBlockRestoreHasBranchFlags)))
     {
         delete block;
         return;
     }
 
-    const u64 key = RestoreCandidateKey(block->InstrHash, block->StartAddr, block->Num);
+    const u64 key = RestoreCandidateKey(block->InstrHash, block->StartAddr, block->StartAddrLocal, block->Num);
     auto it = RestoreCandidates.find(key);
     if (it != RestoreCandidates.end())
     {
@@ -607,6 +670,8 @@ void ARMJIT::CompileBlock(ARM* cpu) noexcept
             JIT_DEBUGPRINT("switching out block %x %x %x\n", localAddr, blockAddr, existingBlockIt->second->StartAddr);
 
             u64* entry = &FastBlockLookupRegions[localAddr >> 27][(localAddr & 0x7FFFFFF) / 2];
+            if ((localAddr >> 27) < 32)
+                FastBlockLookupUsedRegionMask |= 1u << (localAddr >> 27);
             *entry = ((u64)blockAddr | cpu->Num) << 32;
             *entry |= JITCompiler.SubEntryOffset(existingBlockIt->second->EntryPoint);
             return;
@@ -630,9 +695,6 @@ void ARMJIT::CompileBlock(ARM* cpu) noexcept
     u32 literalLoadAddrs[MaxBlockSize];
     // they are going to be hashed
     u32 literalValues[MaxBlockSize];
-    u32 instrValues[MaxBlockSize];
-    // due to instruction merging i might not reflect the amount of actual instructions
-    u32 numInstrs = 0;
 
     u32 writeAddrs[MaxBlockSize];
     u32 numWriteAddrs = 0, writeAddrsTranslated = 0;
@@ -662,8 +724,6 @@ void ARMJIT::CompileBlock(ARM* cpu) noexcept
         nextInstrAddr[0] = nextInstrAddr[1];
         nextInstrAddr[1] = r15;
         JIT_DEBUGPRINT("instr %08x %x\n", instrs[i].Instr & (thumb ? 0xFFFF : ~0), instrs[i].Addr);
-
-        instrValues[numInstrs++] = instrs[i].Instr;
 
         u32 translatedAddr = LocaliseCodeAddress(cpu->Num, instrs[i].Addr);
         assert(translatedAddr >> 27);
@@ -894,9 +954,18 @@ void ARMJIT::CompileBlock(ARM* cpu) noexcept
     }
 
     u32 literalHash = (u32)XXH3_64bits(literalValues, numLiterals * 4);
-    u32 instrHash = (u32)XXH3_64bits(instrValues, numInstrs * 4);
+    u64 instrHash = JitCompileFingerprint(
+        instrs,
+        i,
+        thumb,
+        hasMemoryInstr,
+        cpu->Num,
+        MaxBlockSize,
+        LiteralOptimizations,
+        BranchOptimizations,
+        FastMemory);
 
-    const u64 restoreKey = RestoreCandidateKey(instrHash, blockAddr, cpu->Num);
+    const u64 restoreKey = RestoreCandidateKey(instrHash, blockAddr, localAddr, cpu->Num);
     auto prevBlockIt = RestoreCandidates.find(restoreKey);
     JitBlock* prevBlock = NULL;
     bool mayRestore = true;
@@ -905,7 +974,10 @@ void ARMJIT::CompileBlock(ARM* cpu) noexcept
         prevBlock = prevBlockIt->second;
         RestoreCandidates.erase(prevBlockIt);
 
-        mayRestore = prevBlock->StartAddr == blockAddr && prevBlock->LiteralHash == literalHash;
+        mayRestore = prevBlock->Num == cpu->Num
+            && prevBlock->StartAddr == blockAddr
+            && prevBlock->StartAddrLocal == localAddr
+            && prevBlock->LiteralHash == literalHash;
 
         if (mayRestore && prevBlock->NumAddresses == numAddressRanges)
         {
@@ -936,6 +1008,19 @@ void ARMJIT::CompileBlock(ARM* cpu) noexcept
         block = new JitBlock(cpu->Num, i, numAddressRanges, numLiterals);
         block->LiteralHash = literalHash;
         block->InstrHash = instrHash;
+        block->RestoreFlags = 0;
+        if (hasMemoryInstr)
+            block->RestoreFlags |= JitBlockRestoreHasMemoryInstr;
+        if (numLiterals > 0)
+            block->RestoreFlags |= JitBlockRestoreHasLiterals;
+        for (int j = 0; j < i; j++)
+        {
+            if (instrs[j].BranchFlags)
+            {
+                block->RestoreFlags |= JitBlockRestoreHasBranchFlags;
+                break;
+            }
+        }
         for (u32 j = 0; j < numAddressRanges; j++)
             block->AddressRanges()[j] = addressRanges[j];
         for (u32 j = 0; j < numAddressRanges; j++)
@@ -983,6 +1068,8 @@ void ARMJIT::CompileBlock(ARM* cpu) noexcept
         JitBlocks7[blockAddr] = block;
 
     u64* entry = &FastBlockLookupRegions[(localAddr >> 27)][(localAddr & 0x7FFFFFF) / 2];
+    if ((localAddr >> 27) < 32)
+        FastBlockLookupUsedRegionMask |= 1u << (localAddr >> 27);
     *entry = ((u64)blockAddr | cpu->Num) << 32;
     *entry |= JITCompiler.SubEntryOffset(block->EntryPoint);
 }
@@ -1160,10 +1247,13 @@ bool ARMJIT::SetupExecutableRegion(u32 num, u32 blockAddr, u64*& entry, u32& sta
 void ARMJIT::ResetFastBlockLookupTables() noexcept
 {
     for (int i = 0; i < ARMJIT_Memory::memregions_Count; i++)
-    {
-        if (FastBlockLookupRegions[i])
-            memset(FastBlockLookupRegions[i], 0xFF, CodeRegionSizes[i] * sizeof(u64) / 2);
-    }
+        ResetFastBlockLookupRegion(i);
+}
+
+void ARMJIT::ResetFastBlockLookupRegion(u32 region) noexcept
+{
+    if (region < ARMJIT_Memory::memregions_Count && FastBlockLookupRegions[region])
+        memset(FastBlockLookupRegions[region], 0xFF, CodeRegionSizes[region] * sizeof(u64) / 2);
 }
 
 template void ARMJIT::CheckAndInvalidate<0, ARMJIT_Memory::memregion_MainRAM>(u32) noexcept;
@@ -1226,7 +1316,8 @@ void ARMJIT::ResetBlockCache() noexcept
 
 void ARMJIT::ResetBlockCacheForRollbackFast() noexcept
 {
-    Log(LogLevel::Debug, "Fast-resetting JIT block cache for rollback...\n");
+    if (EnvFlag("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_TRACE"))
+        Log(LogLevel::Debug, "Fast-resetting JIT block cache for rollback...\n");
 
     JitEnableWrite();
     Memory.Reset();
@@ -1250,6 +1341,7 @@ void ARMJIT::ResetBlockCacheForRollbackFast() noexcept
     if (reuseCandidates)
         RestoreCandidates.reserve(RestoreCandidates.size() + JitBlocks9.size() + JitBlocks7.size());
 
+    u32 lookupClearRegionMask = 0;
     auto detachBlocks = [&](std::unordered_map<u32, JitBlock*>& blocks)
     {
         for (auto it = blocks.begin(); it != blocks.end();)
@@ -1276,6 +1368,9 @@ void ARMJIT::ResetBlockCacheForRollbackFast() noexcept
             for (int j = 0; j < block->NumAddresses; j++)
             {
                 u32 addr = block->AddressRanges()[j];
+                const u32 regionNum = addr >> 27;
+                if (regionNum < 32)
+                    lookupClearRegionMask |= 1u << regionNum;
                 AddressRange* range = &CodeMemRegions[addr >> 27][(addr & 0x7FFFFFF) / 512];
                 if (regionMask == 0)
                 {
@@ -1300,8 +1395,11 @@ void ARMJIT::ResetBlockCacheForRollbackFast() noexcept
                     }
                 }
             }
-            if (FastBlockLookupRegions[block->StartAddrLocal >> 27])
-                FastBlockLookupRegions[block->StartAddrLocal >> 27][(block->StartAddrLocal & 0x7FFFFFF) / 2] =
+            const u32 startRegion = block->StartAddrLocal >> 27;
+            if (startRegion < 32)
+                lookupClearRegionMask |= 1u << startRegion;
+            if (startRegion < ARMJIT_Memory::memregions_Count && FastBlockLookupRegions[startRegion])
+                FastBlockLookupRegions[startRegion][(block->StartAddrLocal & 0x7FFFFFF) / 2] =
                     (u64)UINT32_MAX << 32;
             if (reuseCandidates)
                 RetireJitBlock(block);
@@ -1315,7 +1413,23 @@ void ARMJIT::ResetBlockCacheForRollbackFast() noexcept
 
     detachBlocks(JitBlocks9);
     detachBlocks(JitBlocks7);
-    if (EnvFlag("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_CLEAR_LOOKUP"))
+    if (EnvFlag("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_CLEAR_LOOKUP_USED"))
+    {
+        for (u32 region = 0; region < ARMJIT_Memory::memregions_Count && region < 32; region++)
+        {
+            if (FastBlockLookupUsedRegionMask & (1u << region))
+                ResetFastBlockLookupRegion(region);
+        }
+    }
+    else if (EnvFlag("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_CLEAR_LOOKUP_DIRTY"))
+    {
+        for (u32 region = 0; region < ARMJIT_Memory::memregions_Count && region < 32; region++)
+        {
+            if (lookupClearRegionMask & (1u << region))
+                ResetFastBlockLookupRegion(region);
+        }
+    }
+    else if (EnvFlag("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_CLEAR_LOOKUP"))
         ResetFastBlockLookupTables();
     const u32 initialDeleteBudget =
         EnvU32("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_INITIAL_DELETE_BUDGET", 64);

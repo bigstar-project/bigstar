@@ -129,12 +129,17 @@ Current conclusion:
   - `jitrc-noclear-cp1` was faster but also mismatched (`logs/rb-jitrc-noclear/20260622-165619`), so stale fast lookup state is a real correctness hazard. `KEEP_CODEMEM+CLEAR_LOOKUP` stalled, and partial-volatile clear lookup also stalled, so retaining code memory or only detaching selected volatile regions is not currently viable.
   - Conservative JIT settings on the fast-reset/clear path (`jitfr-mb8-cp1`) also mismatched under strong jitter, so lowering JIT block size/optimizations is not a safe substitute for full reset.
   - The full-reset oracle was rechecked after these changes and remains the correctness boundary: `exact-delay2-tinycoreramdelta-key2-page256-maxresim1-skiprender` produced no persistent mismatch on contact/chaos with strong jitter in `logs/rb-fullreset-oracle-recheck/20260622-171225`, but still failed playability (`contact` max `87.370/95.125`, `chaos` max `90.768/89.482`, over33 `67/66` on chaos).
+- 2026-06-22 rollback JIT restore fingerprint follow-up:
+  - Added a stronger restore-candidate compile fingerprint: decoded instruction metadata, branch flags, cycle/data-region assumptions, JIT options, `StartAddrLocal`, and CPU number now participate in the reuse key/validation.
+  - This confirms the broad diagnosis but does not solve it by itself. Full restore-candidate reuse still mismatched in trace-free repeats (`logs/rb-jitrc-localkey-notrace/20260622-175422`), so some JIT block classes remain unsafe even after the stronger fingerprint.
+  - Dirty/used-region fast lookup clear is too narrow. Both `jitrc-dirty-cp1` and `jitrc-used-cp1` reproduced contact mismatch, so full fast lookup clear remains the safe boundary for now.
+  - A conservative reuse filter that refuses memory-instruction blocks is the best candidate from this pass. `jitrc-nomem-cp1` had no mismatch on contact/chaos under delay2 strong jitter in `logs/rb-jitrc-nomem/20260622-175856`, but still failed playability: contact was just over the spike gate (`90.034/89.234ms`), and chaos remained too spiky (`114.307/148.275ms`).
 
 Current blocker / next actions:
 
 - Keep delay2 as a hard requirement; increasing GUI rollback InputDelay above `2` is not allowed for this goal.
 - Exact same-frame resim is not yet a playable endpoint for delay2. The most reliable correctness boundary is still full `JIT.Reset()` on restore; fast/skip/reuse variants remain diagnostic because they can produce player actor position mismatch or stalls.
-- Continue from the full-reset cp1 `tinycoreramdelta` baseline as the correctness oracle, but do not treat it as playable. The next real path needs either a stronger rollback-JIT design that validates all CPU/JIT assumptions, not just instruction bytes, or a new rollback architecture that avoids same-frame cold-JIT re-execution while keeping host/client state exact.
+- Continue from the full-reset cp1 `tinycoreramdelta` baseline as the correctness oracle, but do not treat it as playable. `jitrc-nomem-cp1` is the current experimental JIT-reuse lead, not a solution; it needs repeat/dual validation and more safe-block classification. If that stalls, move to a new rollback architecture that avoids same-frame cold-JIT re-execution while keeping host/client state exact.
 - Add stronger event routes for star pickup/drop/recover, block break persistence, and 8-coin item identity. Current star routes are still input coverage failures, not correctness proof.
 - Keep testing with artificial send delay/jitter and movement-heavy chaos/contact routes. Average FPS alone is insufficient; `maxFrameMs`, `over33ms`, and persistent mismatch detection must stay in the promotion gate.
 
