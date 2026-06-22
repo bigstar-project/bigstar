@@ -76,6 +76,10 @@ Current conclusion:
   - Optional extra-actor pruning was added, currently restricted to duplicated `0x10C` star-candidate actors because broad pruning removed desyncs but caused large spikes (`330-605ms`) and lower active FPS.
   - The practical comparison now uses significant active-object multiset comparison, excluding known local-role `StageFX(0x12)` and `MvsLObject267(0x10B)`, rather than raw `objectActiveCount`/`objectDeadCount`.
   - `predictrepair-delay2-player-world-actorsnap32-lifecycle-prune-transition90-pred0` passed `dualstresslong` with delay2 strong jitter in `logs/codex-goal-actorsnap32-prune10c-transition90-repeat-send6-jitter6-20260622/20260622-094618` (`16.690/16.691ms`, max `60.372/31.202ms`) but `chaos` still failed the spike gate in the same run (`158/117ms` max), and other `chaos` runs still expose moving-hazard or playerGlobal timing windows.
+  - Retake in `logs/codex-goal-delay2-predictrepair-retake/20260622-204429` confirmed the tradeoff: this family is fast enough for `dualstresslong` but still fails `contact`/`chaos` through moving-hazard, playerGlobal, and active-object lifecycle drift.
+  - Moving-hazard spawn/link-clear combinations are not a generic fix. `hazardspawnclear` kept one dualstress route fast but still mismatched `contact` and produced a `~100-130ms` spike cluster around remote hazard spawn in `logs/codex-goal-delay2-predictrepair-spawnclear/20260622-205934`.
+  - Fresh-sample waiting is rejected. It still failed `contact`/`chaos` and stalled `dualstresslong` in `logs/codex-goal-delay2-predictrepair-fresh/20260622-211049`, so it behaves like hidden delay/wait rather than rollback.
+  - Current interpretation: Plan-D repair cannot be made exact by patching individual examples such as hazard/star. The next version needs a generic active-object lifecycle model, including spawn/despawn/remap semantics, and must be checked against the exact `tinycoreramdelta` oracle.
 - Latest exact rollback delay2 rechecks:
   - Raising GUI rollback `InputDelayFrames` above `2` is explicitly out of scope for this goal. It can remain a diagnostic, but it is not a valid fix path.
   - `RollbackMaxResimFrames=1` is too aggressive and breaks correctness (`playerActor1X` mismatch at frame `990`).
@@ -141,13 +145,14 @@ Current conclusion:
   - Added a stronger restore-candidate compile fingerprint: decoded instruction metadata, branch flags, cycle/data-region assumptions, JIT options, `StartAddrLocal`, and CPU number now participate in the reuse key/validation.
   - This confirms the broad diagnosis but does not solve it by itself. Full restore-candidate reuse still mismatched in trace-free repeats (`logs/rb-jitrc-localkey-notrace/20260622-175422`), so some JIT block classes remain unsafe even after the stronger fingerprint.
   - Dirty/used-region fast lookup clear is too narrow. Both `jitrc-dirty-cp1` and `jitrc-used-cp1` reproduced contact mismatch, so full fast lookup clear remains the safe boundary for now.
-  - A conservative reuse filter that refuses memory-instruction blocks is the best candidate from this pass. `jitrc-nomem-cp1` had no mismatch on contact/chaos under delay2 strong jitter in `logs/rb-jitrc-nomem/20260622-175856`, but still failed playability: contact was just over the spike gate (`90.034/89.234ms`), and chaos remained too spiky (`114.307/148.275ms`).
+  - A conservative reuse filter that refuses memory-instruction blocks avoided mismatch in several runs, but it is not playable. Retake `logs/codex-goal-delay2-jitrc-retake/20260622-202917` failed contact/chaos/dualstresslong performance with averages `18.5-20.5ms`, max spikes `106-188ms`, and high over33 counts. `jitrc-straight-cp1` and `jitrc-nofastmem-cp1` also failed performance; `jitrc-straight-cp1` produced a `986ms` chaos spike.
 
 Current blocker / next actions:
 
 - Keep delay2 as a hard requirement; increasing GUI rollback InputDelay above `2` is not allowed for this goal.
-- Exact same-frame resim is not yet a playable endpoint for delay2. The most reliable correctness boundary is still full `JIT.Reset()` on restore; fast/skip/reuse variants remain diagnostic because they can produce player actor position mismatch or stalls.
-- Continue from the full-reset cp1 `tinycoreramdelta` baseline as the correctness oracle, but do not treat it as playable. `jitrc-nomem-cp1` is the current experimental JIT-reuse lead, not a solution; it needs repeat/dual validation and more safe-block classification. If that stalls, move to a new rollback architecture that avoids same-frame cold-JIT re-execution while keeping host/client state exact.
+- Exact same-frame resim is not yet a playable endpoint for delay2. The most reliable correctness boundary is still full/precise-invalidated `tinycoreramdelta`, but it remains too spiky because correction work happens inside the visible frame.
+- Plan-D-style selected repair is fast enough but not yet exact. It still drifts in active object lifecycle and player/global transitions under complex inputs.
+- Continue using `tinycoreramdelta` as the correctness oracle. The next practical direction should either build a generic active-object lifecycle snapshot/apply model validated against that oracle, or prototype a new rollback architecture that avoids doing all correction resimulation inside the visible frame.
 - Add stronger event routes for star pickup/drop/recover, block break persistence, and 8-coin item identity. Current star routes are still input coverage failures, not correctness proof.
 - Keep testing with artificial send delay/jitter and movement-heavy chaos/contact routes. Average FPS alone is insufficient; `maxFrameMs`, `over33ms`, and persistent mismatch detection must stay in the promotion gate.
 

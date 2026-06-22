@@ -1436,6 +1436,7 @@ struct State
     bool WorldStateApplyActorSnapshot = false;
     bool WorldStateApplyActorSnapshotLifecycle = false;
     bool WorldStatePruneExtraActorSnapshot = false;
+    bool WorldStatePreferFreshSamples = false;
     bool WorldStateTraceMovingHazards = false;
     bool WorldStateTraceObjectLifecycles = false;
     bool WorldStateTraceActorInternals = false;
@@ -18098,6 +18099,8 @@ void InitFromEnvironment()
         EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT_LIFECYCLE");
     G.WorldStatePruneExtraActorSnapshot =
         EnvFlag("MELONDS_NSML_WORLD_STATE_PRUNE_EXTRA_ACTOR_SNAPSHOT");
+    G.WorldStatePreferFreshSamples =
+        EnvFlag("MELONDS_NSML_WORLD_STATE_PREFER_FRESH_SAMPLES");
     G.WorldStateTraceMovingHazards = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS");
     G.WorldStateTraceObjectLifecycles = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES");
     G.WorldStateTraceActorInternals = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS");
@@ -19248,7 +19251,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteGameState(instanceID, inputFrame, nds);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        ApplyRemoteMovingHazardState(instanceID, inputFrame, nds);
+        ApplyRemoteMovingHazardState(instanceID, inputFrame, nds, G.WorldStatePreferFreshSamples);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteWorldActorSnapshotState(instanceID, inputFrame, nds);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
@@ -19256,7 +19259,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteWorldEffectState(instanceID, inputFrame, nds);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        ApplyRemotePlayerState(instanceID, inputFrame, nds);
+        ApplyRemotePlayerState(instanceID, inputFrame, nds, G.WorldStatePreferFreshSamples);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         SyncWorldState(instanceID, inputFrame, nds);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
