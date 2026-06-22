@@ -1146,6 +1146,8 @@ struct ObjectScanSample
     melonDS::u32 TargetVelX = 0;
     melonDS::u32 TargetVelY = 0;
     melonDS::u32 TargetVelZ = 0;
+    melonDS::u32 Extra154 = 0;
+    melonDS::u32 Extra158 = 0;
 };
 
 struct PlayerActorScanSample
@@ -1423,7 +1425,9 @@ struct State
     bool WorldStateApplyEnabled = false;
     bool WorldStateApplyStarActor = true;
     bool WorldStateSpawnItem = false;
+    bool WorldStateSpawnMovingHazard = false;
     bool WorldStateApplyMovingHazard = false;
+    bool WorldStateClearMovingHazardLinkFields = false;
     bool WorldStateApplyEffects = false;
     bool WorldStateApplyActorSnapshot = false;
     bool WorldStateApplyActorSnapshotLifecycle = false;
@@ -1437,6 +1441,8 @@ struct State
     melonDS::u32 WorldStateTraceObjectLifecyclesEndFrame = kNoFrameLimit;
     int WorldStateSyncInterval = 2;
     int WorldStateMaxPredictFrames = 1;
+    int WorldStateMovingHazardMaxPredictFrames = -1;
+    int WorldStateMovingHazardMaxPredictEndOffset = -1;
     int WorldStateActorRescanInterval = 0;
     int SeedWaitTimeoutMs = 10000;
     bool WaitForPeerBeforeStart = false;
@@ -2046,6 +2052,9 @@ struct State
     melonDS::u32 LastConfirmedDroppedStarItemRemoteGUID[16] {};
     melonDS::u32 PendingDroppedStarItemRemoteGUID[16] {};
     melonDS::u32 PendingDroppedStarItemFirstMissingFrame[16] {};
+    melonDS::u32 LastSpawnedMovingHazardRemoteGUIDs[16][kMaxWorldMovingHazards] {};
+    melonDS::u32 PendingMovingHazardRemoteGUIDs[16][kMaxWorldMovingHazards] {};
+    melonDS::u32 PendingMovingHazardFirstMissingFrames[16][kMaxWorldMovingHazards] {};
     melonDS::u32 WorldMovingHazardBaseCache[16] {};
     melonDS::u32 WorldMovingHazardGUIDCache[16] {};
     melonDS::u32 WorldMovingHazardBaseCaches[16][kMaxWorldMovingHazards] {};
@@ -2290,6 +2299,9 @@ void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
     G.LastConfirmedDroppedStarItemRemoteGUID[instanceID] = 0;
     G.PendingDroppedStarItemRemoteGUID[instanceID] = 0;
     G.PendingDroppedStarItemFirstMissingFrame[instanceID] = 0;
+    std::fill(std::begin(G.LastSpawnedMovingHazardRemoteGUIDs[instanceID]), std::end(G.LastSpawnedMovingHazardRemoteGUIDs[instanceID]), 0);
+    std::fill(std::begin(G.PendingMovingHazardRemoteGUIDs[instanceID]), std::end(G.PendingMovingHazardRemoteGUIDs[instanceID]), 0);
+    std::fill(std::begin(G.PendingMovingHazardFirstMissingFrames[instanceID]), std::end(G.PendingMovingHazardFirstMissingFrames[instanceID]), 0);
     G.WorldMovingHazardBaseCache[instanceID] = 0;
     G.WorldMovingHazardGUIDCache[instanceID] = 0;
     G.WorldMovingHazardCacheCounts[instanceID] = 0;
@@ -9476,6 +9488,8 @@ bool ReadPlayerActorByBase(melonDS::NDS* nds, melonDS::u32 base, melonDS::u32 ex
     actor.StateType = stateType;
     actor.Flags = flags;
     ReadObjectTransform(nds, off, actor);
+    ReadMainRAMU32(nds, off + 0x154, actor.Extra154);
+    ReadMainRAMU32(nds, off + 0x158, actor.Extra158);
     return true;
 }
 
@@ -10294,7 +10308,7 @@ void AppendNearbyHazardsJson(std::ostream& out, melonDS::NDS* nds)
 {
     out << "\"nearbyMovingHazards\":[";
     const std::vector<ObjectScanSample> hazards =
-        FindActiveObjectsByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
+        FindActiveObjectsByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings, true);
     const std::size_t count = std::min<std::size_t>(hazards.size(), kMaxWorldMovingHazards);
     for (std::size_t i = 0; i < count; i++)
     {
@@ -10494,7 +10508,7 @@ void TraceWorldMovingHazardsIfNeeded(int instanceID, melonDS::u32 frame, melonDS
     G.LastTracedWorldMovingHazardsFrame[instanceID] = frame;
 
     const std::vector<ObjectScanSample> actors =
-        FindActiveObjectsByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
+        FindActiveObjectsByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings, true);
     std::printf("NSMB WorldHazards: role=%s inst=%d frame=%u count=%zu",
         G.NetRole == Role::Host ? "host" : "client",
         instanceID,
@@ -10765,7 +10779,7 @@ std::vector<ObjectScanSample> GetWorldMovingHazardsCached(int instanceID, melonD
                     kVsMovingHazardObjectID,
                     kVsMovingHazardSettings,
                     actor) ||
-                actor.StateType != 1)
+                actor.StateType != 1 && actor.StateType != 2)
             {
                 valid = false;
                 break;
@@ -10777,7 +10791,7 @@ std::vector<ObjectScanSample> GetWorldMovingHazardsCached(int instanceID, melonD
         actors.clear();
     }
 
-    actors = FindActiveObjectsByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
+    actors = FindActiveObjectsByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings, true);
     if (actors.size() > kMaxWorldMovingHazards)
         actors.erase(actors.begin(), actors.end() - kMaxWorldMovingHazards);
     G.WorldMovingHazardCacheCounts[instanceID] = static_cast<melonDS::u32>(actors.size());
@@ -13807,6 +13821,18 @@ melonDS::u64 WorldMovingHazardMatchDistance(
         componentDistance(remoteActor.PosZ, localActor.PosZ);
 }
 
+melonDS::u32 WorldStateMovingHazardPredictLimit(melonDS::u32 frame)
+{
+    if (G.WorldStateMovingHazardMaxPredictFrames < 0)
+        return static_cast<melonDS::u32>(std::max(0, G.WorldStateMaxPredictFrames));
+
+    if (G.WorldStateMovingHazardMaxPredictEndOffset >= 0 &&
+        frame > G.NetplayStartFrame + static_cast<melonDS::u32>(G.WorldStateMovingHazardMaxPredictEndOffset))
+        return static_cast<melonDS::u32>(std::max(0, G.WorldStateMaxPredictFrames));
+
+    return static_cast<melonDS::u32>(std::max(0, G.WorldStateMovingHazardMaxPredictFrames));
+}
+
 void ApplyRemoteWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.Enabled || !G.WorldStateApplyActorSnapshot || G.NetRole != Role::Client || !nds || !nds->MainRAM)
@@ -13902,6 +13928,9 @@ void ApplyRemoteWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melo
     const melonDS::u32 predictFrames = std::min(
         frame > sample.Frame ? frame - sample.Frame : 0,
         static_cast<melonDS::u32>(std::max(0, G.WorldStateMaxPredictFrames)));
+    const melonDS::u32 movingHazardPredictFrames = std::min(
+        frame > sample.Frame ? frame - sample.Frame : 0,
+        WorldStateMovingHazardPredictLimit(frame));
     melonDS::u32 applied = 0;
     melonDS::u32 pruned = 0;
     bool mapChanged = false;
@@ -14002,11 +14031,13 @@ void ApplyRemoteWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melo
     }
 }
 
-bool SpawnRemoteWorldItem(
+bool SpawnRemoteWorldActor(
     int instanceID,
     melonDS::u32 frame,
     melonDS::NDS* nds,
-    const WireWorldActorState& state)
+    const WireWorldActorState& state,
+    melonDS::u16 objectID,
+    const char* label)
 {
     if (!nds || !nds->MainRAM || !state.Found || (state.StateType != 1 && state.StateType != 2))
         return false;
@@ -14029,7 +14060,7 @@ bool SpawnRemoteWorldItem(
     EmitStackArg(code, 0x00, 0);
     EmitStackArg(code, 0x04, 0);
     EmitStackArg(code, 0x08, 0);
-    EmitLoadImm(code, 0, kVsWorldItemObjectID);
+    EmitLoadImm(code, 0, objectID);
     EmitLoadImm(code, 1, state.Settings);
     EmitLoadImm(code, 2, kDirectBootTrampolineDataAddr);
     EmitLoadImm(code, 3, kDirectBootTrampolineDataAddr + 0x0C);
@@ -14054,9 +14085,11 @@ bool SpawnRemoteWorldItem(
     }
 
     std::printf(
-        "NSMB WorldItem: spawn inst=%d frame=%u remoteGuid=%u settings=%08X pos=%08X/%08X/%08X trampoline=%08X return=%08X\n",
+        "NSMB %s: spawn inst=%d frame=%u object=%03X remoteGuid=%u settings=%08X pos=%08X/%08X/%08X trampoline=%08X return=%08X\n",
+        label,
         instanceID,
         frame,
+        objectID,
         state.GUID,
         state.Settings,
         state.PosX,
@@ -14067,6 +14100,15 @@ bool SpawnRemoteWorldItem(
     std::fflush(stdout);
     nds->ARM9.JumpTo(kDirectBootTrampolineAddr);
     return true;
+}
+
+bool SpawnRemoteWorldItem(
+    int instanceID,
+    melonDS::u32 frame,
+    melonDS::NDS* nds,
+    const WireWorldActorState& state)
+{
+    return SpawnRemoteWorldActor(instanceID, frame, nds, state, kVsWorldItemObjectID, "WorldItem");
 }
 
 struct WorldItemApplyResult
@@ -14170,6 +14212,9 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
     const melonDS::u32 predictFrames = std::min(
         frame > sample.Frame ? frame - sample.Frame : 0,
         static_cast<melonDS::u32>(std::max(0, G.WorldStateMaxPredictFrames)));
+    const melonDS::u32 movingHazardPredictFrames = std::min(
+        frame > sample.Frame ? frame - sample.Frame : 0,
+        WorldStateMovingHazardPredictLimit(frame));
     const bool applyHostAuthoritativeWorld = G.NetRole == Role::Client;
     bool starApplied = false;
     if (applyHostAuthoritativeWorld)
@@ -14241,17 +14286,22 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
             kVsMovingHazardSettings,
             true);
         if (localHazard.Found)
-            movingHazardApplied = ApplyWireWorldActorState(nds, sample.MovingHazard, predictFrames, localHazard.Base);
+            movingHazardApplied = ApplyWireWorldActorState(
+                nds,
+                sample.MovingHazard,
+                movingHazardPredictFrames,
+                localHazard.Base);
     }
 
     if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
         (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
     {
-        std::printf("NSMB WorldState: apply inst=%d frame=%u sampleFrame=%u predict=%u star=%d neutralItem=%d neutralSpawn=%d item=%d itemSpawn=%d droppedItem=%d droppedSpawn=%d hazard=%d hazardPos=%08X/%08X\n",
+        std::printf("NSMB WorldState: apply inst=%d frame=%u sampleFrame=%u predict=%u hazardPredict=%u star=%d neutralItem=%d neutralSpawn=%d item=%d itemSpawn=%d droppedItem=%d droppedSpawn=%d hazard=%d hazardPos=%08X/%08X\n",
             instanceID,
             frame,
             sample.Frame,
             predictFrames,
+            movingHazardPredictFrames,
             starApplied ? 1 : 0,
             neutralWorldItemResult.Applied ? 1 : 0,
             neutralWorldItemResult.Spawned ? 1 : 0,
@@ -14298,12 +14348,12 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
     const std::size_t remoteCount = std::min(
         static_cast<std::size_t>(sample.Count),
         kMaxWorldMovingHazards);
-    if (localActors.size() != remoteCount)
+    if (remoteCount == 0)
         return;
     const std::size_t pairCount = remoteCount;
     const melonDS::u32 predictFrames = std::min(
         frame > sample.Frame ? frame - sample.Frame : 0,
-        static_cast<melonDS::u32>(std::max(0, G.WorldStateMaxPredictFrames)));
+        WorldStateMovingHazardPredictLimit(frame));
     int localIndices[kMaxWorldMovingHazards] { -1, -1, -1, -1 };
     bool localUsed[kMaxWorldMovingHazards] {};
     melonDS::u32 nextRemoteGUIDs[kMaxWorldMovingHazards] {};
@@ -14355,23 +14405,64 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
                 closestDistance = distance;
             }
         }
-        if (closestIndex == localActors.size())
-            return;
-        localIndices[i] = static_cast<int>(closestIndex);
-        localUsed[closestIndex] = true;
+        if (closestIndex != localActors.size())
+        {
+            localIndices[i] = static_cast<int>(closestIndex);
+            localUsed[closestIndex] = true;
+        }
     }
 
     bool mapChanged = false;
+    melonDS::u32 applied = 0;
+    melonDS::u32 spawned = 0;
     for (std::size_t i = 0; i < pairCount; i++)
     {
-        const ObjectScanSample& localActor = localActors[localIndices[i]];
         const WireWorldActorState& remoteActor = sample.Actors[i];
+        if (localIndices[i] < 0)
+        {
+            if (G.WorldStateSpawnMovingHazard &&
+                remoteActor.Found &&
+                (remoteActor.StateType == 1 || remoteActor.StateType == 2))
+            {
+                melonDS::u32& pendingGUID = G.PendingMovingHazardRemoteGUIDs[instanceID][i];
+                melonDS::u32& pendingFrame = G.PendingMovingHazardFirstMissingFrames[instanceID][i];
+                melonDS::u32& lastSpawnedGUID = G.LastSpawnedMovingHazardRemoteGUIDs[instanceID][i];
+                if (pendingGUID != remoteActor.GUID)
+                {
+                    pendingGUID = remoteActor.GUID;
+                    pendingFrame = frame;
+                }
+
+                if (lastSpawnedGUID != remoteActor.GUID &&
+                    frame - pendingFrame >= kVsWorldItemNaturalSpawnGraceFrames &&
+                    SpawnRemoteWorldActor(instanceID, frame, nds, remoteActor, kVsMovingHazardObjectID, "MovingHazard"))
+                {
+                    lastSpawnedGUID = remoteActor.GUID;
+                    spawned++;
+                    G.WorldMovingHazardCacheCounts[instanceID] = 0;
+                }
+            }
+            continue;
+        }
+
+        const ObjectScanSample& localActor = localActors[localIndices[i]];
         nextRemoteGUIDs[i] = remoteActor.GUID;
         nextLocalGUIDs[i] = localActor.GUID;
+        G.PendingMovingHazardRemoteGUIDs[instanceID][i] = 0;
+        G.PendingMovingHazardFirstMissingFrames[instanceID][i] = 0;
+        G.LastSpawnedMovingHazardRemoteGUIDs[instanceID][i] = remoteActor.GUID;
         mapChanged = mapChanged ||
             G.WorldMovingHazardRemoteGUIDMaps[instanceID][i] != nextRemoteGUIDs[i] ||
             G.WorldMovingHazardLocalGUIDMaps[instanceID][i] != nextLocalGUIDs[i];
-        ApplyWireWorldMovingHazardState(nds, remoteActor, predictFrames, localActor.Base);
+        if (ApplyWireWorldMovingHazardState(nds, remoteActor, predictFrames, localActor.Base))
+        {
+            if (G.WorldStateClearMovingHazardLinkFields)
+            {
+                nds->ARM9Write32(localActor.Base + 0x154, 0);
+                nds->ARM9Write32(localActor.Base + 0x158, 0);
+            }
+            applied++;
+        }
     }
 
     for (std::size_t i = 0; i < kMaxWorldMovingHazards; i++)
@@ -14382,12 +14473,15 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
         G.WorldMovingHazardRemoteGUIDMaps[instanceID][i] = nextRemoteGUIDs[i];
         G.WorldMovingHazardLocalGUIDMaps[instanceID][i] = nextLocalGUIDs[i];
     }
-    if (mapChanged && G.WorldStateTraceMovingHazards)
+    if ((mapChanged || spawned > 0) && G.WorldStateTraceMovingHazards)
     {
-        std::printf("NSMB WorldHazards: map inst=%d frame=%u count=%zu",
+        std::printf("NSMB WorldHazards: map inst=%d frame=%u remote=%zu local=%zu applied=%u spawned=%u",
             instanceID,
             frame,
-            pairCount);
+            remoteCount,
+            localActors.size(),
+            applied,
+            spawned);
         for (std::size_t i = 0; i < pairCount; i++)
             std::printf(" slot%zu=%u/%u", i, nextRemoteGUIDs[i], nextLocalGUIDs[i]);
         std::printf("\n");
@@ -15489,7 +15583,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         sample.MvlManagerHalf4A0 = nds->ARM9Read16(sample.MvlManagerBase + 0x4A0);
     }
     const ObjectScanSample movingHazard =
-        FindNewestActiveObjectByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
+        FindNewestActiveObjectByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings, true);
     sample.MovingHazardFound = movingHazard.Found;
     sample.MovingHazardGUID = movingHazard.GUID;
     sample.MovingHazardSettings = movingHazard.Settings;
@@ -17615,9 +17709,12 @@ void InitFromEnvironment()
     G.WorldStateApplyEnabled = EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY");
     G.WorldStateApplyStarActor = !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_STAR");
     G.WorldStateSpawnItem = EnvFlag("MELONDS_NSML_WORLD_STATE_SPAWN_ITEM");
+    G.WorldStateSpawnMovingHazard = EnvFlag("MELONDS_NSML_WORLD_STATE_SPAWN_MOVING_HAZARD");
     G.WorldStateApplyMovingHazard =
         EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD") &&
         !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD");
+    G.WorldStateClearMovingHazardLinkFields =
+        EnvFlag("MELONDS_NSML_WORLD_STATE_CLEAR_MOVING_HAZARD_LINK_FIELDS");
     G.WorldStateApplyEffects =
         EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS") &&
         !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_EFFECTS");
@@ -17638,6 +17735,14 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_END_FRAME", 0)));
     G.WorldStateSyncInterval = std::max(1, EnvInt("MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL", 2));
     G.WorldStateMaxPredictFrames = std::max(0, EnvInt("MELONDS_NSML_WORLD_STATE_MAX_PREDICT_FRAMES", 1));
+    G.WorldStateMovingHazardMaxPredictFrames =
+        EnvInt("MELONDS_NSML_WORLD_STATE_MOVING_HAZARD_MAX_PREDICT_FRAMES", -1);
+    if (G.WorldStateMovingHazardMaxPredictFrames < -1)
+        G.WorldStateMovingHazardMaxPredictFrames = -1;
+    G.WorldStateMovingHazardMaxPredictEndOffset =
+        EnvInt("MELONDS_NSML_WORLD_STATE_MOVING_HAZARD_MAX_PREDICT_END_OFFSET", -1);
+    if (G.WorldStateMovingHazardMaxPredictEndOffset < -1)
+        G.WorldStateMovingHazardMaxPredictEndOffset = -1;
     G.WorldStateActorRescanInterval = std::max(0, EnvInt("MELONDS_NSML_WORLD_STATE_ACTOR_RESCAN_INTERVAL", 0));
 
     const char* memPatchFile = std::getenv("MELONDS_NSML_MEM_PATCH_FILE");
@@ -19181,7 +19286,7 @@ void TraceGameplayHeartbeatIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
         std::printf("%03X:%08X", objects.ActiveID[i], objects.ActiveSettings[i]);
     }
     const std::vector<ObjectScanSample> hazards =
-        FindActiveObjectsByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
+        FindActiveObjectsByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings, true);
     std::printf(" hazards=");
     const std::size_t hazardCount = std::min(hazards.size(), kMaxWorldMovingHazards);
     for (std::size_t i = 0; i < kMaxWorldMovingHazards; i++)

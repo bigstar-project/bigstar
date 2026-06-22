@@ -68,12 +68,20 @@ Current conclusion:
   - Optional extra-actor pruning was added, currently restricted to duplicated `0x10C` star-candidate actors because broad pruning removed desyncs but caused large spikes (`330-605ms`) and lower active FPS.
   - The practical comparison now uses significant active-object multiset comparison, excluding known local-role `StageFX(0x12)` and `MvsLObject267(0x10B)`, rather than raw `objectActiveCount`/`objectDeadCount`.
   - `predictrepair-delay2-player-world-actorsnap32-lifecycle-prune-transition90-pred0` passed `dualstresslong` with delay2 strong jitter in `logs/codex-goal-actorsnap32-prune10c-transition90-repeat-send6-jitter6-20260622/20260622-094618` (`16.690/16.691ms`, max `60.372/31.202ms`) but `chaos` still failed the spike gate in the same run (`158/117ms` max), and other `chaos` runs still expose moving-hazard or playerGlobal timing windows.
+- Latest exact rollback delay2 rechecks:
+  - Raising GUI rollback `InputDelayFrames` above `2` is explicitly out of scope for this goal. It can remain a diagnostic, but it is not a valid fix path.
+  - `RollbackMaxResimFrames=1` is too aggressive and breaks correctness (`playerActor1X` mismatch at frame `990`).
+  - `RollbackMaxResimFrames=2` is the best exact delay2 point measured so far, but it still has visible spikes: `17.497/17.509ms` average, `55.537/58.361ms` max, over33 `82/83` on chaos with `InputSendDelayFrames=6` / `InputSendJitterFrames=6`.
+  - `InputMaxFrameLead=2` plus micro-wait stalls under the same strong-jitter condition; `InputMaxFrameLead=999` plus micro-wait avoids stalls but worsens average timing. These do not solve the active goal.
+  - Resim profiling with `InputNetplayTrace` shows the main cost is `RunFrame` during re-execution, not snapshot copy: a 2F resim commonly spends restore `~3-5ms`, checkpoint save `~1.5-5ms`, and resimulated `RunFrame` `~20-35ms`.
+  - Skipping intermediate resim checkpoints did not reduce spikes, and pre-pumping network packets before resim either broke correctness under a 2F cap or remained too slow uncapped.
+  - Direct raw actor memory copy is not safe as-is because actor structs contain pointers/link fields whose addresses can diverge between host and client. The next actor-authority design should be pointer-safe: copy selected non-pointer arena pages, remap actor links, or use a host-authored page-delta with exclusions.
 
 Current blocker / next actions:
 
 - Keep delay2 as a hard requirement; increasing GUI rollback InputDelay above `2` is not allowed for this goal.
-- Continue the actor-authority path only if it keeps both correctness and spike profile: fix early moving-hazard sample availability, trace the remaining `chaos` `playerGlobal` windows, and reduce the `chaos` frame `1800-1830` spike.
-- If the actor-authority path keeps producing route-specific patches, switch to a new architecture: off-main-thread shadow resim with atomic publish, or a minimal MvL actor rollback that replays only player/death/world state and publishes it without blocking the main frame.
+- Exact same-frame resim is now the wrong primary optimization target for delay2: even a correct 2F rollback can exceed one display frame. Continue it only as a correctness oracle/baseline.
+- Switch primary work to a new architecture: pointer-safe actor/global page-delta snapshots, off-main-thread shadow resim with atomic publish, or a minimal MvL actor rollback that replays only player/death/world state and publishes it without blocking the main frame.
 - Add stronger event routes for star pickup/drop/recover, block break persistence, and 8-coin item identity. Current star routes are still input coverage failures, not correctness proof.
 - Keep testing with artificial send delay/jitter and movement-heavy chaos/contact routes. Average FPS alone is insufficient; `maxFrameMs`, `over33ms`, and persistent mismatch detection must stay in the promotion gate.
 
