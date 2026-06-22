@@ -56,6 +56,8 @@ public:
     void CompileBlock(ARM* cpu) noexcept;
     void ResetBlockCache() noexcept;
     void ResetBlockCacheForRollbackFast() noexcept;
+    void ResetMemoryAndFastLookupForRollback() noexcept;
+    void ResetFastLookupForRollback() noexcept;
     void ResetFastBlockLookupTables() noexcept;
     void ResetFastBlockLookupRegion(u32 region) noexcept;
     void DeleteDeferredResetBlocks(u32 maxBlocks) noexcept;
@@ -202,6 +204,8 @@ public:
     void CompileBlock(ARM*) noexcept {}
     void ResetBlockCache() noexcept {}
     void ResetBlockCacheForRollbackFast() noexcept {}
+    void ResetMemoryAndFastLookupForRollback() noexcept {}
+    void ResetFastLookupForRollback() noexcept {}
     void ResetFastBlockLookupTables() noexcept {}
     void ResetFastBlockLookupRegion(u32) noexcept {}
     void DeleteDeferredResetBlocks(u32) noexcept {}

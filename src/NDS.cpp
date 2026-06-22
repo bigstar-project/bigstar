@@ -126,6 +126,18 @@ static bool NSMLRollbackJITMemoryResetOnly()
     return enabled;
 }
 
+static bool NSMLRollbackJITMapResetOnly()
+{
+    static const bool enabled = getenv("MELONDS_NSML_ROLLBACK_JIT_MAP_RESET_ONLY") != nullptr;
+    return enabled;
+}
+
+static bool NSMLRollbackJITLookupResetOnly()
+{
+    static const bool enabled = getenv("MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY") != nullptr;
+    return enabled;
+}
+
 static bool NSMLRollbackJITFastReset()
 {
     static const bool enabled = getenv("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET") != nullptr;
@@ -1156,6 +1168,10 @@ bool NDS::DoRollbackSavestate(
         {
             if (NSMLRollbackJITFastReset())
                 JIT.ResetBlockCacheForRollbackFast();
+            else if (NSMLRollbackJITLookupResetOnly())
+                JIT.ResetFastLookupForRollback();
+            else if (NSMLRollbackJITMapResetOnly())
+                JIT.ResetMemoryAndFastLookupForRollback();
             else if (NSMLRollbackJITMemoryResetOnly())
                 JIT.Memory.Reset();
             else
@@ -1322,6 +1338,10 @@ bool NDS::DoRollbackTinyCoreSavestate(Savestate* file, u32 requestedTinyCoreFlag
         {
             if (NSMLRollbackJITFastReset())
                 JIT.ResetBlockCacheForRollbackFast();
+            else if (NSMLRollbackJITLookupResetOnly())
+                JIT.ResetFastLookupForRollback();
+            else if (NSMLRollbackJITMapResetOnly())
+                JIT.ResetMemoryAndFastLookupForRollback();
             else if (NSMLRollbackJITMemoryResetOnly())
                 JIT.Memory.Reset();
             else

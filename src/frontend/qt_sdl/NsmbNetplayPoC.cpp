@@ -4307,6 +4307,16 @@ bool RollbackJITMemoryResetOnlyEnabled()
     return std::getenv("MELONDS_NSML_ROLLBACK_JIT_MEMORY_RESET_ONLY") != nullptr;
 }
 
+bool RollbackJITMapResetOnlyEnabled()
+{
+    return std::getenv("MELONDS_NSML_ROLLBACK_JIT_MAP_RESET_ONLY") != nullptr;
+}
+
+bool RollbackJITLookupResetOnlyEnabled()
+{
+    return std::getenv("MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY") != nullptr;
+}
+
 void InvalidateJITLocalRegionRange(
     melonDS::NDS* nds,
     int region,
@@ -4380,12 +4390,18 @@ void InvalidateMainRAMJITRange(
     const melonDS::u32 offset = address - kMainRAMBase;
     if (force)
     {
-        InvalidateJITLocalRegionRange(
-            nds,
-            melonDS::ARMJIT_Memory::memregion_MainRAM,
-            offset & nds->MainRAMMask,
-            length,
-            nds->MainRAMMask + 1);
+        const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+        const melonDS::u32 start = offset & nds->MainRAMMask;
+        const melonDS::u32 clampedLength = std::min(length, ramLen - start);
+        const melonDS::u32 alignedStart = start & ~0xFu;
+        const melonDS::u32 endRaw = start + clampedLength;
+        const melonDS::u32 alignedEnd = std::min(ramLen, (endRaw + 0xFu) & ~0xFu);
+        for (melonDS::u32 addr = alignedStart; addr < alignedEnd; addr += 0x10)
+        {
+            const melonDS::u32 mainRAMAddr = kMainRAMBase + addr;
+            nds->JIT.CheckAndInvalidate<0, melonDS::ARMJIT_Memory::memregion_MainRAM>(mainRAMAddr);
+            nds->JIT.CheckAndInvalidate<1, melonDS::ARMJIT_Memory::memregion_MainRAM>(mainRAMAddr);
+        }
         return;
     }
     const melonDS::u32 start = offset & ~0xFFFu;
@@ -5540,7 +5556,10 @@ bool RestoreRollbackCheckpointBuffer(
         nds->NumLagFrames = header.NumLagFrames;
         nds->LagFrameFlag = header.LagFrameFlag != 0;
         const bool forceJITInvalidation =
-            RollbackSkipJITResetEnabled() || RollbackJITMemoryResetOnlyEnabled();
+            RollbackSkipJITResetEnabled()
+            || RollbackJITMemoryResetOnlyEnabled()
+            || RollbackJITMapResetOnlyEnabled()
+            || RollbackJITLookupResetOnlyEnabled();
         for (const auto& range : ranges)
             InvalidateMainRAMJITRange(nds, range.Address, range.Length, forceJITInvalidation);
         if (forceJITInvalidation)
@@ -12976,6 +12995,7 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
         std::lock_guard<std::mutex> lock(G.Mutex);
         RefreshRollbackFrameDeltaShadowLocked(frame, nds);
         RecordRollbackCheckpointRestoreLocked(restoreUs);
+        G.RollbackRestoreCount++;
         RecordRollbackResimTimingLocked(
             resimulated,
             resimRunFrameTotalUs,

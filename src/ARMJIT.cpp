@@ -1441,6 +1441,25 @@ void ARMJIT::ResetBlockCacheForRollbackFast() noexcept
         JITCompiler.Reset();
 }
 
+void ARMJIT::ResetMemoryAndFastLookupForRollback() noexcept
+{
+    if (EnvFlag("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_TRACE"))
+        Log(LogLevel::Debug, "Resetting JIT memory mapping and fast lookup for rollback...\n");
+
+    Memory.Reset();
+    ResetFastBlockLookupTables();
+    FastBlockLookupUsedRegionMask = 0;
+}
+
+void ARMJIT::ResetFastLookupForRollback() noexcept
+{
+    if (EnvFlag("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_TRACE"))
+        Log(LogLevel::Debug, "Resetting JIT fast lookup for rollback...\n");
+
+    ResetFastBlockLookupTables();
+    FastBlockLookupUsedRegionMask = 0;
+}
+
 void ARMJIT::JitEnableWrite() noexcept
 {
     #if defined(__APPLE__) && defined(__aarch64__)
