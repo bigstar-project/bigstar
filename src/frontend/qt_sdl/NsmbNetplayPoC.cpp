@@ -1857,6 +1857,7 @@ struct State
     melonDS::u32 RollbackResimulateCount = 0;
     bool RollbackSkipRenderDuringResim = false;
     bool RollbackSkipIntermediateResimCheckpoints = false;
+    bool RollbackSkipFinalResimCheckpoint = false;
     melonDS::u32 LastPerfSpikeRollbackRestoreCount[16] {};
     melonDS::u32 LastPerfSpikeRollbackResimulateCount[16] {};
     melonDS::u32 RollbackPredictionProbeCount = 0;
@@ -4317,6 +4318,11 @@ bool RollbackJITLookupResetOnlyEnabled()
     return std::getenv("MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY") != nullptr;
 }
 
+bool RollbackJITCodeChunkInvalidationEnabled()
+{
+    return std::getenv("MELONDS_NSML_ROLLBACK_JIT_CODE_CHUNK_INVALIDATION") != nullptr;
+}
+
 void InvalidateJITLocalRegionRange(
     melonDS::NDS* nds,
     int region,
@@ -4396,11 +4402,30 @@ void InvalidateMainRAMJITRange(
         const melonDS::u32 alignedStart = start & ~0xFu;
         const melonDS::u32 endRaw = start + clampedLength;
         const melonDS::u32 alignedEnd = std::min(ramLen, (endRaw + 0xFu) & ~0xFu);
-        for (melonDS::u32 addr = alignedStart; addr < alignedEnd; addr += 0x10)
+        if (RollbackJITCodeChunkInvalidationEnabled())
         {
-            const melonDS::u32 mainRAMAddr = kMainRAMBase + addr;
-            nds->JIT.CheckAndInvalidate<0, melonDS::ARMJIT_Memory::memregion_MainRAM>(mainRAMAddr);
-            nds->JIT.CheckAndInvalidate<1, melonDS::ARMJIT_Memory::memregion_MainRAM>(mainRAMAddr);
+            for (melonDS::u32 chunk = alignedStart & ~0x1FFu; chunk < alignedEnd; chunk += 0x200)
+            {
+                const melonDS::u32 chunkIndex = (chunk & 0x7FFFFFFu) / 512;
+                if (nds->JIT.CodeMemRegions[melonDS::ARMJIT_Memory::memregion_MainRAM][chunkIndex].Code == 0)
+                    continue;
+                const melonDS::u32 chunkEnd = std::min(alignedEnd, chunk + 0x200);
+                for (melonDS::u32 addr = std::max(alignedStart, chunk); addr < chunkEnd; addr += 0x10)
+                {
+                    const melonDS::u32 mainRAMAddr = kMainRAMBase + addr;
+                    nds->JIT.CheckAndInvalidate<0, melonDS::ARMJIT_Memory::memregion_MainRAM>(mainRAMAddr);
+                    nds->JIT.CheckAndInvalidate<1, melonDS::ARMJIT_Memory::memregion_MainRAM>(mainRAMAddr);
+                }
+            }
+        }
+        else
+        {
+            for (melonDS::u32 addr = alignedStart; addr < alignedEnd; addr += 0x10)
+            {
+                const melonDS::u32 mainRAMAddr = kMainRAMBase + addr;
+                nds->JIT.CheckAndInvalidate<0, melonDS::ARMJIT_Memory::memregion_MainRAM>(mainRAMAddr);
+                nds->JIT.CheckAndInvalidate<1, melonDS::ARMJIT_Memory::memregion_MainRAM>(mainRAMAddr);
+            }
         }
         return;
     }
@@ -12966,7 +12991,8 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
         resimulated++;
 
         const bool saveResimCheckpoint =
-            !G.RollbackSkipIntermediateResimCheckpoints || (f + 1) == frame;
+            (!G.RollbackSkipIntermediateResimCheckpoints || (f + 1) == frame)
+            && (!G.RollbackSkipFinalResimCheckpoint || (f + 1) != frame);
         if (saveResimCheckpoint)
         {
             const auto checkpointSaveStart = std::chrono::steady_clock::now();
@@ -18309,6 +18335,8 @@ void InitFromEnvironment()
     G.RollbackSkipRenderDuringResim = EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER");
     G.RollbackSkipIntermediateResimCheckpoints =
         EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS");
+    G.RollbackSkipFinalResimCheckpoint =
+        EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_FINAL_CHECKPOINT");
     G.RollbackPrePumpBeforeResim = EnvFlag("MELONDS_NSML_ROLLBACK_PRE_PUMP_BEFORE_RESIM");
     G.RollbackDisableJITDuringResim = EnvFlag("MELONDS_NSML_ROLLBACK_DISABLE_JIT_DURING_RESIM");
     G.RollbackInputWaitUs = std::clamp(

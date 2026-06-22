@@ -2783,6 +2783,56 @@ $candidateDefs = @{
             MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
         }
     }
+    "skipjit-codechunk-cp1" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_JIT_CODE_CHUNK_INVALIDATION = "1"
+        }
+    }
+    "skipjit-skipfinalcp-cp1" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_RESIM_SKIP_FINAL_CHECKPOINT = "1"
+        }
+    }
     "jitlookup-cp1" = [pscustomobject]@{
         Backend = "tinycoreramdelta"
         InputDelayFrames = 2
@@ -3850,6 +3900,8 @@ $envKeys = @(
     "MELONDS_NSML_JIT_DISABLE_RESTORE_CANDIDATES",
     "MELONDS_NSML_ROLLBACK_JIT_MAP_RESET_ONLY",
     "MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY",
+    "MELONDS_NSML_ROLLBACK_JIT_CODE_CHUNK_INVALIDATION",
+    "MELONDS_NSML_ROLLBACK_RESIM_SKIP_FINAL_CHECKPOINT",
     "MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_KEEP_CODEMEM",
     "MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_CLEAR_LOOKUP",
     "MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_CLEAR_LOOKUP_DIRTY",
