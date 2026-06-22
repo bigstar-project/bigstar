@@ -378,7 +378,11 @@ void EmuThread::run()
                 const double nsmlRunFrameStart = nsmlPerfPhaseTiming
                     ? SDL_GetPerformanceCounter() * perfCountsSec
                     : 0.0;
-                nlines = emuInstance->nds->RunFrame();
+                const bool nsmlSkipRunFrame =
+                    NsmbNetplayPoC::ConsumeRollbackSkipRunFrame(
+                        emuInstance->instanceID,
+                        frameBeforeRun);
+                nlines = nsmlSkipRunFrame ? 263 : emuInstance->nds->RunFrame();
                 const double nsmlAfterRunFrameStart = nsmlPerfPhaseTiming
                     ? SDL_GetPerformanceCounter() * perfCountsSec
                     : 0.0;

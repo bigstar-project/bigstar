@@ -1456,7 +1456,18 @@ void ARMJIT::ResetFastLookupForRollback() noexcept
     if (EnvFlag("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_TRACE"))
         Log(LogLevel::Debug, "Resetting JIT fast lookup for rollback...\n");
 
-    ResetFastBlockLookupTables();
+    if (EnvFlag("MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_USED_ONLY"))
+    {
+        for (u32 region = 0; region < ARMJIT_Memory::memregions_Count && region < 32; region++)
+        {
+            if (FastBlockLookupUsedRegionMask & (1u << region))
+                ResetFastBlockLookupRegion(region);
+        }
+    }
+    else
+    {
+        ResetFastBlockLookupTables();
+    }
     FastBlockLookupUsedRegionMask = 0;
 }
 

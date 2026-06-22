@@ -232,7 +232,11 @@ if ($RollbackSkipIntermediateResimCheckpoints) {
 }
 if ($Rollback -and ($isTinyCorePreimageRollback -or $isNsmbTinyCoreRollback)) {
     $env:MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
-    $env:MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+    if ($RollbackSkipJitReset) {
+        $env:MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+    } elseif (-not $env:MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET) {
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET -ErrorAction SilentlyContinue
+    }
     $env:MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
     if ($RollbackTinyCoreFlags -eq "") { $RollbackTinyCoreFlags = "0x241" }
     $env:MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "$RollbackTinyCoreFlags"

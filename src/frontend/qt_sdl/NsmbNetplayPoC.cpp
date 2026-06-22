@@ -1850,6 +1850,7 @@ struct State
     bool RollbackPrePumpBeforeResim = false;
     bool RollbackDisableJITDuringResim = false;
     int RollbackMaxCorrectionsPerFrame = 0;
+    int RollbackFrameLeadThrottleBudgetUs = 0;
     int RollbackInputWaitUs = 0;
     std::map<melonDS::u32, InputState> PredictedRemoteInputs;
     std::map<melonDS::u32, RollbackStoredState> RollbackStates;
@@ -1866,10 +1867,13 @@ struct State
     bool RollbackSkipRenderDuringResim = false;
     bool RollbackSkipIntermediateResimCheckpoints = false;
     bool RollbackSkipFinalResimCheckpoint = false;
+    bool RollbackResimConsumeCurrentFrame = false;
     melonDS::u32 LastPerfSpikeRollbackRestoreCount[16] {};
     melonDS::u32 LastPerfSpikeRollbackResimulateCount[16] {};
     melonDS::u32 RollbackCorrectionFrame[16] {};
     int RollbackCorrectionCount[16] {};
+    bool RollbackSkipRunFrame[16] {};
+    melonDS::u32 RollbackSkipRunFrameFrame[16] {};
     melonDS::u32 RollbackPredictionProbeCount = 0;
     melonDS::u32 RollbackCheckpointSaveCount = 0;
     size_t RollbackCheckpointLastBytes = 0;
@@ -3773,7 +3777,10 @@ void FrameHeartbeatThreadMain()
             G.FrameHeartbeat.flush();
             writtenFrame = frame;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (G.RollbackEnabled && G.RollbackFrameLeadThrottleBudgetUs > 0)
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        else
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
 
@@ -4437,6 +4444,19 @@ bool RollbackJITCodeChunkInvalidationEnabled()
     return std::getenv("MELONDS_NSML_ROLLBACK_JIT_CODE_CHUNK_INVALIDATION") != nullptr;
 }
 
+bool RollbackResetFastLookupForInvalidatedRegionsEnabled()
+{
+    return std::getenv("MELONDS_NSML_ROLLBACK_JIT_RESET_LOOKUP_INVALIDATED_REGIONS") != nullptr;
+}
+
+void ResetJITFastLookupRegionIfNeeded(melonDS::NDS* nds, int region)
+{
+    if (!nds || !RollbackResetFastLookupForInvalidatedRegionsEnabled())
+        return;
+
+    nds->JIT.ResetFastBlockLookupRegion(static_cast<melonDS::u32>(region));
+}
+
 void InvalidateJITLocalRegionRange(
     melonDS::NDS* nds,
     int region,
@@ -4463,18 +4483,21 @@ void InvalidateTinyCoreRollbackJITRegions(melonDS::NDS* nds)
         0,
         melonDS::SharedWRAMSize,
         melonDS::SharedWRAMSize);
+    ResetJITFastLookupRegionIfNeeded(nds, melonDS::ARMJIT_Memory::memregion_SharedWRAM);
     InvalidateJITLocalRegionRange(
         nds,
         melonDS::ARMJIT_Memory::memregion_WRAM7,
         0,
         melonDS::ARM7WRAMSize,
         melonDS::ARM7WRAMSize);
+    ResetJITFastLookupRegionIfNeeded(nds, melonDS::ARMJIT_Memory::memregion_WRAM7);
     InvalidateJITLocalRegionRange(
         nds,
         melonDS::ARMJIT_Memory::memregion_ITCM,
         0,
         melonDS::ITCMPhysicalSize,
         melonDS::ITCMPhysicalSize);
+    ResetJITFastLookupRegionIfNeeded(nds, melonDS::ARMJIT_Memory::memregion_ITCM);
 }
 
 void InvalidateMainRAMJIT(melonDS::NDS* nds, melonDS::u32 len, bool force = false)
@@ -5851,6 +5874,8 @@ bool RestoreRollbackCheckpointBuffer(
             invalidationBytes += range.Length;
             InvalidateMainRAMJITRange(nds, range.Address, range.Length, forceJITInvalidation);
         }
+        if (forceJITInvalidation)
+            ResetJITFastLookupRegionIfNeeded(nds, melonDS::ARMJIT_Memory::memregion_MainRAM);
         if (forceJITInvalidation)
             InvalidateTinyCoreRollbackJITRegions(nds);
         RecordRollbackJITInvalidationTiming(
@@ -13267,7 +13292,9 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
     const bool restoreJITAfterResim = G.RollbackDisableJITDuringResim && nds->IsJITEnabled();
     if (restoreJITAfterResim)
         nds->SetRollbackJITEnabledNoReset(false);
-    for (melonDS::u32 f = restoreFrame; f < frame; f++)
+    const bool consumeCurrentFrame = G.RollbackResimConsumeCurrentFrame;
+    const melonDS::u32 targetFrame = consumeCurrentFrame ? frame + 1 : frame;
+    for (melonDS::u32 f = restoreFrame; f < targetFrame; f++)
     {
         InputState localInput = NeutralInput();
         InputState runtimeLocalInput = NeutralInput();
@@ -13321,7 +13348,7 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
 
         const bool saveResimCheckpoint =
             (!G.RollbackSkipIntermediateResimCheckpoints || (f + 1) == frame)
-            && (!G.RollbackSkipFinalResimCheckpoint || (f + 1) != frame);
+            && (!G.RollbackSkipFinalResimCheckpoint || (f + 1) != targetFrame);
         if (saveResimCheckpoint)
         {
             const auto checkpointSaveStart = std::chrono::steady_clock::now();
@@ -13348,7 +13375,7 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
     const unsigned long long rollbackTotalUs = ElapsedUs(rollbackStart);
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
-        RefreshRollbackFrameDeltaShadowLocked(frame, nds);
+        RefreshRollbackFrameDeltaShadowLocked(targetFrame, nds);
         RecordRollbackCheckpointRestoreLocked(restoreUs);
         G.RollbackRestoreCount++;
         RecordRollbackResimTimingLocked(
@@ -13368,12 +13395,18 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
             }
             G.RollbackCorrectionCount[instanceID]++;
         }
+        if (consumeCurrentFrame)
+        {
+            G.RollbackSkipRunFrame[instanceID] = true;
+            G.RollbackSkipRunFrameFrame[instanceID] = frame;
+        }
     }
     if (G.InputNetplayTraceEnabled)
     {
-        std::printf("NSMB Rollback: resimulated from checkpoint=%u mismatch=%u to current=%u frames=%u bytes=%zu restoreUs=%llu runUs=%llu runMaxUs=%llu checkpointSaveUs=%llu checkpointSaveMaxUs=%llu totalUs=%llu\n",
+        std::printf("NSMB Rollback: resimulated from checkpoint=%u mismatch=%u to target=%u current=%u frames=%u bytes=%zu restoreUs=%llu runUs=%llu runMaxUs=%llu checkpointSaveUs=%llu checkpointSaveMaxUs=%llu totalUs=%llu\n",
             restoreFrame,
             mismatchFrame,
+            targetFrame,
             frame,
             resimulated,
             RollbackCheckpointBytes(checkpoint),
@@ -13477,10 +13510,34 @@ void ThrottleInputNetplayFrameLead(melonDS::NDS* nds, melonDS::u32 frame, melonD
                 false);
         }
 
+        const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - start).count();
+        if (G.RollbackEnabled
+            && G.RollbackFrameLeadThrottleBudgetUs > 0
+            && elapsedUs >= G.RollbackFrameLeadThrottleBudgetUs)
+        {
+            RecordFrameLeadThrottleStats(
+                static_cast<unsigned long long>(std::max<long long>(0, elapsedUs)),
+                loops);
+            if (G.InputNetplayTraceEnabled && G.LastInputFrameThrottleTraceFrame != frame)
+            {
+                G.LastInputFrameThrottleTraceFrame = frame;
+                std::printf("NSMB InputNetplay: frame throttle budget exhausted frame=%u sendFrame=%u remoteInputFrame=%u lead=%d maxLead=%d budgetUs=%d waitedUs=%lld\n",
+                    frame,
+                    sendFrame,
+                    remoteFrame,
+                    lead,
+                    G.InputNetplayMaxFrameLead,
+                    G.RollbackFrameLeadThrottleBudgetUs,
+                    static_cast<long long>(std::max<long long>(0, elapsedUs)));
+                std::fflush(stdout);
+            }
+            return;
+        }
+
         if (G.TestEnabled && G.TestWaitTimeoutMs > 0)
         {
-            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - start).count();
+            const auto elapsed = elapsedUs / 1000;
             if (elapsed >= G.TestWaitTimeoutMs)
             {
                 std::printf("NSMB Test: input frame throttle timeout frame=%u sendFrame=%u remoteInputFrame=%u lead=%d waitedMs=%d\n",
@@ -13614,6 +13671,17 @@ void WritePacketBridgeJitScratchIfNeeded(
             const auto throttleStart = std::chrono::steady_clock::now();
             ThrottleInputNetplayFrameLead(nds, frame, sendFrame);
             throttleUs = static_cast<unsigned long long>(ElapsedUs(throttleStart));
+        }
+        if (G.RollbackEnabled && G.InputNetplayOnly && predictedRemoteInput)
+        {
+            std::lock_guard<std::mutex> lock(G.Mutex);
+            auto it = G.RemoteInputs.find(logicalFrame);
+            if (it != G.RemoteInputs.end())
+            {
+                remoteInput = it->second;
+                hasRemoteInput = true;
+                predictedRemoteInput = false;
+            }
         }
 
         if (!hasRemoteInput
@@ -18302,6 +18370,21 @@ bool IsEnabled()
     return G.Enabled;
 }
 
+bool ConsumeRollbackSkipRunFrame(int instanceID, melonDS::u32 frame)
+{
+    InitFromEnvironment();
+    if (!G.Enabled || !G.RollbackEnabled || instanceID < 0 || instanceID >= 16)
+        return false;
+
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    if (!G.RollbackSkipRunFrame[instanceID] || G.RollbackSkipRunFrameFrame[instanceID] != frame)
+        return false;
+
+    G.RollbackSkipRunFrame[instanceID] = false;
+    G.RollbackSkipRunFrameFrame[instanceID] = kNoFrameLimit;
+    return true;
+}
+
 void InitFromEnvironment()
 {
     if (G.EnvChecked.load(std::memory_order_acquire)) return;
@@ -18988,12 +19071,16 @@ void InitFromEnvironment()
         EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS");
     G.RollbackSkipFinalResimCheckpoint =
         EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_FINAL_CHECKPOINT");
+    G.RollbackResimConsumeCurrentFrame =
+        EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_CONSUME_CURRENT_FRAME");
     G.RollbackPrePumpBeforeResim = EnvFlag("MELONDS_NSML_ROLLBACK_PRE_PUMP_BEFORE_RESIM");
     G.RollbackDisableJITDuringResim = EnvFlag("MELONDS_NSML_ROLLBACK_DISABLE_JIT_DURING_RESIM");
     G.RollbackSkipPredictedInputFrameLeadThrottle =
         EnvFlag("MELONDS_NSML_ROLLBACK_SKIP_PREDICTED_FRAME_LEAD_THROTTLE");
     G.RollbackMaxCorrectionsPerFrame = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME", 0), 0, 16);
+    G.RollbackFrameLeadThrottleBudgetUs = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US", 0), 0, 50000);
     G.RollbackInputWaitUs = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_INPUT_WAIT_US", 0), 0, 20000);
     G.RollbackRestoreProbe = EnvFlag("MELONDS_NSML_ROLLBACK_RESTORE_PROBE");

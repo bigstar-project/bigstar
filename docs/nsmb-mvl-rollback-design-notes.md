@@ -11,6 +11,14 @@ Current rollback direction has moved from repair-only `tinycorepreimage` toward 
 
 Completed in the latest pass:
 
+- 2026-06-23 continuation after rebuilding melonDS:
+  - Removed an accidental forced `MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET=1` from the split smoke wrapper's `nsmbtinycore` / `tinycorepreimage` path. This made later JIT reset comparisons reflect the candidate's requested env instead of the wrapper default.
+  - Added `MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US` candidates and measured `InputMaxFrameLead=0/1/2` under delay2 without raising `InputDelayFrames`.
+  - `jitlookup-cp1-maxlead0-leadbudget2ms` is the current correctness-oriented local oracle: no-artificial-delay chaos passed (`17.743/17.743ms`, max `52.965/41.046`) in `logs/codex-goal-jitlookup-no-artificial-delay/20260623-074901`.
+  - The same path is not jitter-playable: delay1/jitter1 and delay2/jitter2 produce correction spikes above `100ms` while staying mismatch-free. This confirms that exactness is available, but correction placement/cost is still not acceptable.
+  - Added diagnostic JIT knobs `MELONDS_NSML_ROLLBACK_JIT_RESET_LOOKUP_INVALIDATED_REGIONS` and `MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_USED_ONLY`. They did not promote: skip-reset plus invalidated-region lookup reset stayed fast but still mismatched, and used-only lookup reset preserved correctness but kept large restore spikes.
+  - Tried consuming the current frame during rollback resim and skipping the following normal `RunFrame`. It is rejected for now: the correction becomes two resimulated frames and worsened the measured spike.
+  - Current conclusion from this pass: the next useful work is not more checkpoint slimming or small waits. The hard part is either safe JIT/block reuse across rollback restore, or moving exact correction off the displayed frame without polluting the settled checkpoint.
 - Rechecked exact-ish delay2 rollback after the user clarified that raising GUI rollback InputDelay from `2` is invalid. `tinycoreramdelta` remains the correctness oracle, but same-frame correction still causes visible spikes under `InputSendDelayFrames=6` / `InputSendJitterFrames=6`.
 - Added `InputBundleFuture` as an experimental optimistic future-input bundle. It sends held-input future frames without increasing local input delay and detects later remote-input corrections as rollback mismatches. The first `future4` checks were rejected: they increased correction/spike pressure and did not beat the baseline (`logs/codex-goal-delay2-futurebundle-contact-chaos/20260623-001740`).
 - Retested page-size/JIT-invalidation variants. `skipjit-page512-cp1` is the closest exact-ish point from this continuation: contact passed and chaos stayed mismatch-free, but chaos still failed smoothness (`18.156/18.315ms` avg, max `101.526/91.335`, over33 `61/52`) in `logs/codex-goal-delay2-codechunk-contact-chaos/20260623-002325`.
