@@ -1395,6 +1395,119 @@ $candidateDefs = @{
         InputBundleHistory = 8
         Env = @{}
     }
+    "exact-delay2-tinycorepreimage-maxresim3-skiprender" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 3
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Env = @{}
+    }
+    "trace-exact-delay2-tinycorepreimage-maxresim3-skiprender" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 3
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            InputNetplayTrace = $true
+        }
+        Env = @{
+            MELONDS_NSML_INPUT_TRACE_INTERVAL = "60"
+        }
+    }
+    "exact-delay2-tinycorepreimage-maxresim3-skipmidcp-skiprender" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 3
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackSkipIntermediateResimCheckpoints = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Env = @{}
+    }
+    "exact-delay2-rbwait250-tinycorepreimage-maxresim3-skiprender" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 250
+        RollbackMaxResimFrames = 3
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Env = @{}
+    }
+    "exact-delay2-rbwait500-tinycorepreimage-maxresim3-skiprender" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 500
+        RollbackMaxResimFrames = 3
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Env = @{}
+    }
+    "exact-delay2-prepump-tinycorepreimage-maxresim3-skiprender" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 3
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Env = @{
+            MELONDS_NSML_ROLLBACK_PRE_PUMP_BEFORE_RESIM = "1"
+        }
+    }
+    "exact-delay2-tinycorepreimage-maxresim4-skiprender" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Env = @{}
+    }
     "exact-delay2-tinycorepreimage-maxresim1-skiprender" = [pscustomobject]@{
         Backend = "tinycorepreimage"
         InputDelayFrames = 2
@@ -2039,6 +2152,32 @@ $candidateDefs = @{
             RollbackSkipJitReset = $true
         }
         Env = @{
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+        }
+    }
+    "trace-exact-delay2-tinycoreramdelta-key2-page256-cp1-maxresim1-skipjit-skiprender" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+            RollbackSkipJitReset = $true
+            InputNetplayTrace = $true
+        }
+        Env = @{
+            MELONDS_NSML_INPUT_TRACE_INTERVAL = "60"
             MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
             MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
         }

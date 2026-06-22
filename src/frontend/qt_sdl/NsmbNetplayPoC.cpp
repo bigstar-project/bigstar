@@ -1879,6 +1879,11 @@ struct State
     unsigned long long RollbackResimCheckpointSaveMaxUs = 0;
     unsigned long long RollbackResimCorrectionTotalUs = 0;
     unsigned long long RollbackResimCorrectionMaxUs = 0;
+    melonDS::u32 RollbackJITInvalidationOpCount = 0;
+    unsigned long long RollbackJITInvalidationRangeCount = 0;
+    unsigned long long RollbackJITInvalidationBytes = 0;
+    unsigned long long RollbackJITInvalidationTotalUs = 0;
+    unsigned long long RollbackJITInvalidationMaxUs = 0;
     melonDS::u32 LastRollbackTraceFrame = kNoFrameLimit;
     melonDS::u32 ForceStageSceneStartGateStartFrame = 0;
     melonDS::u32 ForceStageSceneStartGateEndFrame = 0;
@@ -4236,6 +4241,17 @@ void RecordRollbackResimTimingLocked(
         G.RollbackResimCorrectionMaxUs = correctionTotalUs;
 }
 
+void RecordRollbackJITInvalidationTiming(size_t rangeCount, size_t bytes, unsigned long long elapsedUs)
+{
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    G.RollbackJITInvalidationOpCount++;
+    G.RollbackJITInvalidationRangeCount += static_cast<unsigned long long>(rangeCount);
+    G.RollbackJITInvalidationBytes += static_cast<unsigned long long>(bytes);
+    G.RollbackJITInvalidationTotalUs += elapsedUs;
+    if (elapsedUs > G.RollbackJITInvalidationMaxUs)
+        G.RollbackJITInvalidationMaxUs = elapsedUs;
+}
+
 void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
 {
     if (instanceID < 0 || instanceID >= 16 || !G.ActiveTimerStarted[instanceID])
@@ -5585,10 +5601,19 @@ bool RestoreRollbackCheckpointBuffer(
             || RollbackJITMemoryResetOnlyEnabled()
             || RollbackJITMapResetOnlyEnabled()
             || RollbackJITLookupResetOnlyEnabled();
+        size_t invalidationBytes = 0;
+        const auto invalidationStart = std::chrono::steady_clock::now();
         for (const auto& range : ranges)
+        {
+            invalidationBytes += range.Length;
             InvalidateMainRAMJITRange(nds, range.Address, range.Length, forceJITInvalidation);
+        }
         if (forceJITInvalidation)
             InvalidateTinyCoreRollbackJITRegions(nds);
+        RecordRollbackJITInvalidationTiming(
+            ranges.size(),
+            invalidationBytes,
+            ElapsedUs(invalidationStart));
         return true;
     }
 
@@ -19793,6 +19818,15 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         const unsigned long long resimTotalAvgUs = G.RollbackMeasuredResimOpCount == 0
             ? 0
             : G.RollbackResimCorrectionTotalUs / G.RollbackMeasuredResimOpCount;
+        const unsigned long long jitInvAvgUs = G.RollbackJITInvalidationOpCount == 0
+            ? 0
+            : G.RollbackJITInvalidationTotalUs / G.RollbackJITInvalidationOpCount;
+        const unsigned long long jitInvAvgRanges = G.RollbackJITInvalidationOpCount == 0
+            ? 0
+            : G.RollbackJITInvalidationRangeCount / G.RollbackJITInvalidationOpCount;
+        const unsigned long long jitInvAvgBytes = G.RollbackJITInvalidationOpCount == 0
+            ? 0
+            : G.RollbackJITInvalidationBytes / G.RollbackJITInvalidationOpCount;
         size_t deltaCheckpoints = 0;
         size_t keyframeCheckpoints = 0;
         size_t preimageCheckpoints = 0;
@@ -19817,7 +19851,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             mainRAMCopyBytes += stored.MainRAMCopy.size();
         }
         std::printf(
-            "NSMB Rollback: frame=%u backend=%s checkpoints=%zu checkpointSaves=%u bytesLast=%zu bytesMin=%zu bytesMax=%zu bytesAvg=%zu saveAvgUs=%llu saveMaxUs=%llu restoreOps=%u restoreAvgUs=%llu restoreMaxUs=%llu resimOps=%u resimFrames=%llu resimRunAvgUs=%llu resimRunMaxUs=%llu resimSaveAvgUs=%llu resimSaveMaxUs=%llu resimTotalAvgUs=%llu resimTotalMaxUs=%llu delta=%zu keyframes=%zu preimages=%zu preimageBytes=%zu mainRAMCopies=%zu keyInt=%d page=%d coreSkip=0x%X tinyFlags=0x%X wide=%d deltaDiscovered=%d actorArena=%d arm9Stack=%d skipInput=%d restoreDiff=%d procList=%d heapScan=%d procObjs=%u procNodes=%u heapObjs=%u scanInt=%d heapScanInt=%d scanRefresh=%u scanCacheHits=%u heapScanRefresh=%u heapScanCacheHits=%u predicted=%zu predictions=%u predProbe=%u mismatches=%u restores=%u resims=%u pending=%u observed=%u\n",
+            "NSMB Rollback: frame=%u backend=%s checkpoints=%zu checkpointSaves=%u bytesLast=%zu bytesMin=%zu bytesMax=%zu bytesAvg=%zu saveAvgUs=%llu saveMaxUs=%llu restoreOps=%u restoreAvgUs=%llu restoreMaxUs=%llu resimOps=%u resimFrames=%llu resimRunAvgUs=%llu resimRunMaxUs=%llu resimSaveAvgUs=%llu resimSaveMaxUs=%llu resimTotalAvgUs=%llu resimTotalMaxUs=%llu jitInvOps=%u jitInvAvgUs=%llu jitInvMaxUs=%llu jitInvAvgRanges=%llu jitInvAvgBytes=%llu delta=%zu keyframes=%zu preimages=%zu preimageBytes=%zu mainRAMCopies=%zu keyInt=%d page=%d coreSkip=0x%X tinyFlags=0x%X wide=%d deltaDiscovered=%d actorArena=%d arm9Stack=%d skipInput=%d restoreDiff=%d procList=%d heapScan=%d procObjs=%u procNodes=%u heapObjs=%u scanInt=%d heapScanInt=%d scanRefresh=%u scanCacheHits=%u heapScanRefresh=%u heapScanCacheHits=%u predicted=%zu predictions=%u predProbe=%u mismatches=%u restores=%u resims=%u pending=%u observed=%u\n",
             logFrame,
             RollbackBackendName(),
             G.RollbackStates.size(),
@@ -19839,6 +19873,11 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             G.RollbackResimCheckpointSaveMaxUs,
             resimTotalAvgUs,
             G.RollbackResimCorrectionMaxUs,
+            G.RollbackJITInvalidationOpCount,
+            jitInvAvgUs,
+            G.RollbackJITInvalidationMaxUs,
+            jitInvAvgRanges,
+            jitInvAvgBytes,
             deltaCheckpoints,
             keyframeCheckpoints,
             preimageCheckpoints,
