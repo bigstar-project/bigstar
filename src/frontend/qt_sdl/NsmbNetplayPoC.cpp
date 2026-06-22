@@ -1898,6 +1898,13 @@ struct State
     unsigned long long RollbackJITInvalidationBytes = 0;
     unsigned long long RollbackJITInvalidationTotalUs = 0;
     unsigned long long RollbackJITInvalidationMaxUs = 0;
+    melonDS::u32 RollbackRestorePhaseOpCount = 0;
+    unsigned long long RollbackRestoreCoreTotalUs = 0;
+    unsigned long long RollbackRestoreCoreMaxUs = 0;
+    unsigned long long RollbackRestoreCopyTotalUs = 0;
+    unsigned long long RollbackRestoreCopyMaxUs = 0;
+    unsigned long long RollbackRestoreJITTotalUs = 0;
+    unsigned long long RollbackRestoreJITMaxUs = 0;
     melonDS::u32 LastRollbackTraceFrame = kNoFrameLimit;
     melonDS::u32 ForceStageSceneStartGateStartFrame = 0;
     melonDS::u32 ForceStageSceneStartGateEndFrame = 0;
@@ -4357,6 +4364,24 @@ void RecordRollbackJITInvalidationTiming(size_t rangeCount, size_t bytes, unsign
         G.RollbackJITInvalidationMaxUs = elapsedUs;
 }
 
+void RecordRollbackRestorePhaseTiming(
+    unsigned long long coreUs,
+    unsigned long long copyUs,
+    unsigned long long jitUs)
+{
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    G.RollbackRestorePhaseOpCount++;
+    G.RollbackRestoreCoreTotalUs += coreUs;
+    if (coreUs > G.RollbackRestoreCoreMaxUs)
+        G.RollbackRestoreCoreMaxUs = coreUs;
+    G.RollbackRestoreCopyTotalUs += copyUs;
+    if (copyUs > G.RollbackRestoreCopyMaxUs)
+        G.RollbackRestoreCopyMaxUs = copyUs;
+    G.RollbackRestoreJITTotalUs += jitUs;
+    if (jitUs > G.RollbackRestoreJITMaxUs)
+        G.RollbackRestoreJITMaxUs = jitUs;
+}
+
 void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
 {
     if (instanceID < 0 || instanceID >= 16 || !G.ActiveTimerStarted[instanceID])
@@ -4402,7 +4427,7 @@ void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
         G.LastPerfSpikeRollbackRestoreCount[instanceID] = G.RollbackRestoreCount;
         G.LastPerfSpikeRollbackResimulateCount[instanceID] = G.RollbackResimulateCount;
         std::printf(
-            "NSMB PerfSpike: inst=%d frame=%u frameTimeUs=%llu thresholdUs=%d rollbackRestores=%u rollbackResims=%u rollbackRestoreDelta=%u rollbackResimDelta=%u saveMaxUs=%llu restoreMaxUs=%llu resimRunMaxUs=%llu resimSaveMaxUs=%llu resimTotalMaxUs=%llu\n",
+            "NSMB PerfSpike: inst=%d frame=%u frameTimeUs=%llu thresholdUs=%d rollbackRestores=%u rollbackResims=%u rollbackRestoreDelta=%u rollbackResimDelta=%u saveMaxUs=%llu restoreMaxUs=%llu restoreCoreMaxUs=%llu restoreCopyMaxUs=%llu restoreJITMaxUs=%llu resimRunMaxUs=%llu resimSaveMaxUs=%llu resimTotalMaxUs=%llu\n",
             instanceID,
             frame,
             elapsedUs,
@@ -4413,6 +4438,9 @@ void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
             resimDelta,
             G.RollbackCheckpointSaveMaxUs,
             G.RollbackCheckpointRestoreMaxUs,
+            G.RollbackRestoreCoreMaxUs,
+            G.RollbackRestoreCopyMaxUs,
+            G.RollbackRestoreJITMaxUs,
             G.RollbackResimRunFrameMaxUs,
             G.RollbackResimCheckpointSaveMaxUs,
             G.RollbackResimCorrectionMaxUs);
@@ -4447,6 +4475,11 @@ bool RollbackJITCodeChunkInvalidationEnabled()
 bool RollbackResetFastLookupForInvalidatedRegionsEnabled()
 {
     return std::getenv("MELONDS_NSML_ROLLBACK_JIT_RESET_LOOKUP_INVALIDATED_REGIONS") != nullptr;
+}
+
+bool RollbackSkipRestoredJITInvalidationEnabled()
+{
+    return std::getenv("MELONDS_NSML_ROLLBACK_SKIP_RESTORED_JIT_INVALIDATION") != nullptr;
 }
 
 void ResetJITFastLookupRegionIfNeeded(melonDS::NDS* nds, int region)
@@ -5834,9 +5867,11 @@ bool RestoreRollbackCheckpointBuffer(
 
         const char* in = buffer.data() + sizeof(header);
         melonDS::Savestate coreState(const_cast<char*>(in), static_cast<melonDS::u32>(coreBytes), false);
+        const auto coreRestoreStart = std::chrono::steady_clock::now();
         const bool restored = nds->DoRollbackTinyCoreSavestate(
             &coreState,
             static_cast<melonDS::u32>(G.RollbackTinyCoreFlags));
+        const unsigned long long coreRestoreUs = ElapsedUs(coreRestoreStart);
         if (coreState.Error || !restored || coreState.Error)
             return false;
         in += coreBytes;
@@ -5846,6 +5881,7 @@ bool RestoreRollbackCheckpointBuffer(
             std::memcpy(ranges.data(), in, entriesBytes);
         in += entriesBytes;
 
+        const auto copyStart = std::chrono::steady_clock::now();
         for (const auto& range : ranges)
         {
             if (!IsValidMainRAMRange(nds, range.Address, range.Length))
@@ -5856,6 +5892,7 @@ bool RestoreRollbackCheckpointBuffer(
             std::memcpy(nds->MainRAM + offset, in, range.Length);
             in += range.Length;
         }
+        const unsigned long long copyUs = ElapsedUs(copyStart);
         if (static_cast<size_t>(in - buffer.data()) != buffer.size())
             return false;
 
@@ -5869,19 +5906,29 @@ bool RestoreRollbackCheckpointBuffer(
             || RollbackJITLookupResetOnlyEnabled();
         size_t invalidationBytes = 0;
         const auto invalidationStart = std::chrono::steady_clock::now();
-        for (const auto& range : ranges)
+        const bool skipRestoredJITInvalidation =
+            forceJITInvalidation && RollbackSkipRestoredJITInvalidationEnabled();
+        if (!skipRestoredJITInvalidation)
         {
-            invalidationBytes += range.Length;
-            InvalidateMainRAMJITRange(nds, range.Address, range.Length, forceJITInvalidation);
+            for (const auto& range : ranges)
+            {
+                invalidationBytes += range.Length;
+                InvalidateMainRAMJITRange(nds, range.Address, range.Length, forceJITInvalidation);
+            }
+            if (forceJITInvalidation)
+                ResetJITFastLookupRegionIfNeeded(nds, melonDS::ARMJIT_Memory::memregion_MainRAM);
+            if (forceJITInvalidation)
+                InvalidateTinyCoreRollbackJITRegions(nds);
         }
-        if (forceJITInvalidation)
-            ResetJITFastLookupRegionIfNeeded(nds, melonDS::ARMJIT_Memory::memregion_MainRAM);
-        if (forceJITInvalidation)
-            InvalidateTinyCoreRollbackJITRegions(nds);
+        const unsigned long long jitInvalidationUs = ElapsedUs(invalidationStart);
         RecordRollbackJITInvalidationTiming(
             ranges.size(),
             invalidationBytes,
-            ElapsedUs(invalidationStart));
+            jitInvalidationUs);
+        RecordRollbackRestorePhaseTiming(
+            coreRestoreUs,
+            copyUs,
+            jitInvalidationUs);
         return true;
     }
 

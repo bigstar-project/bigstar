@@ -79,6 +79,8 @@ private:
     bool LiteralOptimizations = false;
     bool BranchOptimizations = false;
     bool FastMemory = false;
+    void ClearFastBlockLookupUsage() noexcept;
+    void MarkFastBlockLookupOffsetUsed(u32 region, u32 offset) noexcept;
 
 public:
     melonDS::NDS& NDS;
@@ -105,6 +107,10 @@ public:
     std::unordered_map<u64, JitBlock*> RestoreCandidates {};
     std::vector<JitBlock*> DeferredResetBlocks {};
     u32 FastBlockLookupUsedRegionMask = 0;
+    u32 FastBlockLookupUsedOffsetMin[ARMJIT_Memory::memregions_Count] {};
+    u32 FastBlockLookupUsedOffsetMax[ARMJIT_Memory::memregions_Count] {};
+    std::vector<u32> FastBlockLookupUsedChunks[ARMJIT_Memory::memregions_Count] {};
+    std::vector<u8> FastBlockLookupUsedChunkMarks[ARMJIT_Memory::memregions_Count] {};
 
 
     AddressRange CodeIndexITCM[ITCMPhysicalSize / 512] {};

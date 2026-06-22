@@ -574,7 +574,57 @@ ARMJIT::ARMJIT(melonDS::NDS& nds, std::optional<JITArgs> jit) noexcept :
         LiteralOptimizations(jit.has_value() ? jit->LiteralOptimizations : false),
         BranchOptimizations(jit.has_value() ? jit->BranchOptimizations : false),
         FastMemory((jit.has_value() ? jit->FastMemory : false) && ARMJIT_Memory::IsFastMemSupported())
-{}
+{
+    ClearFastBlockLookupUsage();
+}
+
+void ARMJIT::ClearFastBlockLookupUsage() noexcept
+{
+    FastBlockLookupUsedRegionMask = 0;
+    for (u32 region = 0; region < ARMJIT_Memory::memregions_Count; region++)
+    {
+        FastBlockLookupUsedOffsetMin[region] = UINT32_MAX;
+        FastBlockLookupUsedOffsetMax[region] = 0;
+        if (!FastBlockLookupUsedChunkMarks[region].empty())
+            std::fill(
+                FastBlockLookupUsedChunkMarks[region].begin(),
+                FastBlockLookupUsedChunkMarks[region].end(),
+                0);
+        FastBlockLookupUsedChunks[region].clear();
+    }
+}
+
+void ARMJIT::MarkFastBlockLookupOffsetUsed(u32 region, u32 offset) noexcept
+{
+    if (region >= ARMJIT_Memory::memregions_Count
+        || !FastBlockLookupRegions[region]
+        || offset >= CodeRegionSizes[region])
+        return;
+
+    if (region < 32)
+        FastBlockLookupUsedRegionMask |= 1u << region;
+    offset &= ~1u;
+    FastBlockLookupUsedOffsetMin[region] = std::min(FastBlockLookupUsedOffsetMin[region], offset);
+    FastBlockLookupUsedOffsetMax[region] = std::max(FastBlockLookupUsedOffsetMax[region], offset);
+
+    static const bool trackUsedChunks =
+        EnvFlag("MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_USED_CHUNKS")
+        || EnvFlag("MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_COMPILED_CHUNKS");
+    if (!trackUsedChunks)
+        return;
+
+    const u32 chunk = offset / 512;
+    const u32 chunkCount = (CodeRegionSizes[region] + 511) / 512;
+    if (chunk >= chunkCount)
+        return;
+    if (FastBlockLookupUsedChunkMarks[region].empty())
+        FastBlockLookupUsedChunkMarks[region].assign(chunkCount, 0);
+    if (!FastBlockLookupUsedChunkMarks[region][chunk])
+    {
+        FastBlockLookupUsedChunkMarks[region][chunk] = 1;
+        FastBlockLookupUsedChunks[region].push_back(chunk);
+    }
+}
 
 void ARMJIT::RetireJitBlock(JitBlock* block) noexcept
 {
@@ -670,8 +720,7 @@ void ARMJIT::CompileBlock(ARM* cpu) noexcept
             JIT_DEBUGPRINT("switching out block %x %x %x\n", localAddr, blockAddr, existingBlockIt->second->StartAddr);
 
             u64* entry = &FastBlockLookupRegions[localAddr >> 27][(localAddr & 0x7FFFFFF) / 2];
-            if ((localAddr >> 27) < 32)
-                FastBlockLookupUsedRegionMask |= 1u << (localAddr >> 27);
+            MarkFastBlockLookupOffsetUsed(localAddr >> 27, localAddr & 0x7FFFFFF);
             *entry = ((u64)blockAddr | cpu->Num) << 32;
             *entry |= JITCompiler.SubEntryOffset(existingBlockIt->second->EntryPoint);
             return;
@@ -1068,8 +1117,7 @@ void ARMJIT::CompileBlock(ARM* cpu) noexcept
         JitBlocks7[blockAddr] = block;
 
     u64* entry = &FastBlockLookupRegions[(localAddr >> 27)][(localAddr & 0x7FFFFFF) / 2];
-    if ((localAddr >> 27) < 32)
-        FastBlockLookupUsedRegionMask |= 1u << (localAddr >> 27);
+    MarkFastBlockLookupOffsetUsed(localAddr >> 27, localAddr & 0x7FFFFFF);
     *entry = ((u64)blockAddr | cpu->Num) << 32;
     *entry |= JITCompiler.SubEntryOffset(block->EntryPoint);
 }
@@ -1205,6 +1253,36 @@ void ARMJIT::CheckAndInvalidateWVRAM(int bank) noexcept
 JitBlockEntry ARMJIT::LookUpBlock(u32 num, u64* entries, u32 offset, u32 addr) noexcept
 {
     u64* entry = &entries[offset / 2];
+    static const bool trackUsedLookup =
+        EnvFlag("MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_USED_SPANS")
+        || EnvFlag("MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_USED_CHUNKS");
+    if (trackUsedLookup)
+    {
+        static thread_local const u64* cachedEntries = nullptr;
+        static thread_local u32 cachedRegion = UINT32_MAX;
+        static thread_local u32 cachedBaseOffset = 0;
+        if (entries != cachedEntries)
+        {
+            cachedEntries = entries;
+            cachedRegion = UINT32_MAX;
+            cachedBaseOffset = 0;
+            for (u32 region = 0; region < ARMJIT_Memory::memregions_Count; region++)
+            {
+                const u64* base = FastBlockLookupRegions[region];
+                if (!base)
+                    continue;
+                const size_t entryCount = CodeRegionSizes[region] / 2;
+                if (entries >= base && entries < base + entryCount)
+                {
+                    cachedRegion = region;
+                    cachedBaseOffset = static_cast<u32>((entries - base) * 2);
+                    break;
+                }
+            }
+        }
+        if (cachedRegion != UINT32_MAX)
+            MarkFastBlockLookupOffsetUsed(cachedRegion, cachedBaseOffset + offset);
+    }
     if (*entry >> 32 == (addr | num))
         return JITCompiler.AddEntryOffset((u32)*entry);
     return NULL;
@@ -1281,6 +1359,7 @@ void ARMJIT::ResetBlockCache() noexcept
 
     InvalidLiterals.Clear();
     ResetFastBlockLookupTables();
+    ClearFastBlockLookupUsage();
     for (auto it = RestoreCandidates.begin(); it != RestoreCandidates.end(); it++)
         delete it->second;
     RestoreCandidates.clear();
@@ -1448,7 +1527,7 @@ void ARMJIT::ResetMemoryAndFastLookupForRollback() noexcept
 
     Memory.Reset();
     ResetFastBlockLookupTables();
-    FastBlockLookupUsedRegionMask = 0;
+    ClearFastBlockLookupUsage();
 }
 
 void ARMJIT::ResetFastLookupForRollback() noexcept
@@ -1456,7 +1535,50 @@ void ARMJIT::ResetFastLookupForRollback() noexcept
     if (EnvFlag("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_TRACE"))
         Log(LogLevel::Debug, "Resetting JIT fast lookup for rollback...\n");
 
-    if (EnvFlag("MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_USED_ONLY"))
+    if (EnvFlag("MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_USED_CHUNKS")
+        || EnvFlag("MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_COMPILED_CHUNKS"))
+    {
+        for (u32 region = 0; region < ARMJIT_Memory::memregions_Count; region++)
+        {
+            if (!FastBlockLookupRegions[region])
+                continue;
+            for (const u32 chunk : FastBlockLookupUsedChunks[region])
+            {
+                const u32 startOffset = chunk * 512;
+                if (startOffset >= CodeRegionSizes[region])
+                    continue;
+                const u32 bytes = std::min<u32>(512, CodeRegionSizes[region] - startOffset);
+                memset(
+                    FastBlockLookupRegions[region] + startOffset / 2,
+                    0xFF,
+                    static_cast<size_t>((bytes + 1) / 2) * sizeof(u64));
+            }
+        }
+    }
+    else if (EnvFlag("MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_USED_SPANS"))
+    {
+        for (u32 region = 0; region < ARMJIT_Memory::memregions_Count; region++)
+        {
+            if (!FastBlockLookupRegions[region]
+                || FastBlockLookupUsedOffsetMin[region] == UINT32_MAX)
+                continue;
+            const u32 startOffset = std::min(
+                FastBlockLookupUsedOffsetMin[region],
+                CodeRegionSizes[region] - 2);
+            const u32 endOffset = std::min(
+                FastBlockLookupUsedOffsetMax[region],
+                CodeRegionSizes[region] - 2);
+            if (endOffset < startOffset)
+                continue;
+            const u32 startIndex = startOffset / 2;
+            const u32 endIndex = endOffset / 2;
+            memset(
+                FastBlockLookupRegions[region] + startIndex,
+                0xFF,
+                static_cast<size_t>(endIndex - startIndex + 1) * sizeof(u64));
+        }
+    }
+    else if (EnvFlag("MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_USED_ONLY"))
     {
         for (u32 region = 0; region < ARMJIT_Memory::memregions_Count && region < 32; region++)
         {
@@ -1468,7 +1590,7 @@ void ARMJIT::ResetFastLookupForRollback() noexcept
     {
         ResetFastBlockLookupTables();
     }
-    FastBlockLookupUsedRegionMask = 0;
+    ClearFastBlockLookupUsage();
 }
 
 void ARMJIT::JitEnableWrite() noexcept

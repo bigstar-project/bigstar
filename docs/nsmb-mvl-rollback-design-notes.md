@@ -11,6 +11,13 @@ Current rollback direction has moved from repair-only `tinycorepreimage` toward 
 
 Completed in the latest pass:
 
+- 2026-06-23 follow-up after the JIT-boundary commit:
+  - Added ARM JIT fast-lookup usage tracking variants (`MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_USED_SPANS`, `...USED_CHUNKS`, `...COMPILED_CHUNKS`). Used-span/used-chunk tracking is too expensive in the hot path, but compiled-chunk reset is useful when combined with exact restore.
+  - Added restore phase spike fields and measured the old exact-ish cliff directly: core restore/copy are small (`~3ms` and `<0.5ms`), while restored-range JIT invalidation can be `~70ms`.
+  - Added `MELONDS_NSML_ROLLBACK_SKIP_RESTORED_JIT_INVALIDATION` for the `tinycoreramdelta` + lookup-reset path. With compiled-chunk lookup reset, `jitlookup-compiledchunks-skiprestorejit-cp1-maxlead0-leadbudget2ms` removes the `100ms+` JIT-invalidation cliff and stays mismatch-free in measured chaos runs.
+  - Current best measurement: no-artificial chaos passed at `17.641/17.640ms`, max `41.451/40.562` (`logs/codex-goal-skiprestorejit-no-artificial/20260623-083040`); delay2/jitter2 stayed mismatch-free but still failed the strict smoothness gate at `18.762/18.764ms`, max `43.823/54.127`, over33 `4/4` (`logs/codex-goal-skiprestorejit-delay2/20260623-083205`).
+  - Rejected in this pass: code-chunk invalidation for this backend, 4ms/6ms lead budgets, maxlead2, max-correction-per-frame limiting, and current-frame consume. These either worsen average FPS or increase correction frequency.
+  - Updated conclusion: the old dominant cost was broad restored-range JIT invalidation and that can be removed for this NSMB path. The remaining exact rollback problem is same-visible-frame resimulation/placement: even a cheap restore still adds one or more resimulated `RunFrame`s to the displayed frame.
 - 2026-06-23 continuation after rebuilding melonDS:
   - Removed an accidental forced `MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET=1` from the split smoke wrapper's `nsmbtinycore` / `tinycorepreimage` path. This made later JIT reset comparisons reflect the candidate's requested env instead of the wrapper default.
   - Added `MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US` candidates and measured `InputMaxFrameLead=0/1/2` under delay2 without raising `InputDelayFrames`.
