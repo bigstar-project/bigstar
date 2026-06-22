@@ -403,7 +403,7 @@ constexpr melonDS::s32 kDiagnosticOffscreenMargin = 512 * kDiagnosticFixedOne;
 constexpr melonDS::s32 kDiagnosticLargePositionDelta = 256 * kDiagnosticFixedOne;
 constexpr std::size_t kMaxWorldMovingHazards = 4;
 constexpr std::size_t kMaxWorldEffects = 4;
-constexpr std::size_t kMaxWorldActorSnapshots = 16;
+constexpr std::size_t kMaxWorldActorSnapshots = 32;
 
 static_assert(sizeof(WireSeed) == 16);
 
@@ -676,7 +676,7 @@ struct WireWorldActorSnapshotState
 };
 
 static_assert(sizeof(WireWorldObjectActorState) == 104);
-static_assert(sizeof(WireWorldActorSnapshotState) == 1688);
+static_assert(sizeof(WireWorldActorSnapshotState) == 3352);
 
 struct WireWorldEffectSlot
 {
@@ -1426,6 +1426,8 @@ struct State
     bool WorldStateApplyMovingHazard = false;
     bool WorldStateApplyEffects = false;
     bool WorldStateApplyActorSnapshot = false;
+    bool WorldStateApplyActorSnapshotLifecycle = false;
+    bool WorldStatePruneExtraActorSnapshot = false;
     bool WorldStateTraceMovingHazards = false;
     bool WorldStateTraceObjectLifecycles = false;
     bool WorldStateTraceActorInternals = false;
@@ -1827,6 +1829,7 @@ struct State
     int RollbackDeltaPageTraceMaxRuns = 12;
     int RollbackResimulateDelayFrames = 0;
     int RollbackMaxResimFrames = 0;
+    bool RollbackPrePumpBeforeResim = false;
     int RollbackInputWaitUs = 0;
     std::map<melonDS::u32, InputState> PredictedRemoteInputs;
     std::map<melonDS::u32, RollbackStoredState> RollbackStates;
@@ -13732,6 +13735,18 @@ bool ApplyWireWorldActorState(
         state.VelZ);
 }
 
+bool ApplyWireWorldActorLifecycleState(melonDS::NDS* nds, const WireWorldActorState& state, melonDS::u32 localBase)
+{
+    if (!nds || !nds->MainRAM || !state.Found || state.StateType == 0 || state.StateType > 2)
+        return false;
+    if (!IsValidMainRAMRange(nds, localBase, 0x14))
+        return false;
+
+    nds->ARM9Write16(localBase + 0x0E, static_cast<melonDS::u16>(state.StateType));
+    nds->ARM9Write32(localBase + 0x10, state.Flags);
+    return true;
+}
+
 bool ApplyWireWorldMovingHazardState(
     melonDS::NDS* nds,
     const WireWorldActorState& state,
@@ -13888,6 +13903,7 @@ void ApplyRemoteWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melo
         frame > sample.Frame ? frame - sample.Frame : 0,
         static_cast<melonDS::u32>(std::max(0, G.WorldStateMaxPredictFrames)));
     melonDS::u32 applied = 0;
+    melonDS::u32 pruned = 0;
     bool mapChanged = false;
     for (std::size_t i = 0; i < remoteCount; i++)
     {
@@ -13896,11 +13912,69 @@ void ApplyRemoteWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melo
 
         const WireWorldObjectActorState& remoteActor = sample.Actors[i];
         const WorldActorSnapshotCandidate& localActor = localActors[localIndices[i]];
+        if (G.WorldStateApplyActorSnapshotLifecycle)
+            ApplyWireWorldActorLifecycleState(nds, remoteActor.Actor, localActor.Actor.Base);
         if (ApplyWireWorldActorState(nds, remoteActor.Actor, predictFrames, localActor.Actor.Base))
         {
             applied++;
             nextRemoteGUIDs[i] = remoteActor.Actor.GUID;
             nextLocalGUIDs[i] = localActor.Actor.GUID;
+        }
+    }
+
+    if (G.WorldStatePruneExtraActorSnapshot)
+    {
+        for (std::size_t localIndex = 0; localIndex < localActors.size() && localIndex < kMaxWorldActorSnapshots; localIndex++)
+        {
+            if (localUsed[localIndex])
+                continue;
+
+            const WorldActorSnapshotCandidate& localActor = localActors[localIndex];
+            if (localActor.ObjectID != kVsBattleStarCandidateObjectID)
+                continue;
+
+            bool remoteHasSameType = false;
+            for (std::size_t remoteIndex = 0; remoteIndex < remoteCount; remoteIndex++)
+            {
+                const WireWorldObjectActorState& remoteActor = sample.Actors[remoteIndex];
+                if (remoteActor.ObjectID == localActor.ObjectID &&
+                    remoteActor.Actor.Settings == localActor.Actor.Settings)
+                {
+                    remoteHasSameType = true;
+                    break;
+                }
+            }
+            if (!remoteHasSameType)
+                continue;
+
+            if (ApplyWireWorldActorLifecycleState(nds, WireWorldActorState {
+                1,
+                localActor.Actor.GUID,
+                localActor.Actor.Settings,
+                2,
+                localActor.Actor.Flags,
+                localActor.Actor.PosX,
+                localActor.Actor.PosY,
+                localActor.Actor.PosZ,
+                localActor.Actor.PrevX,
+                localActor.Actor.PrevY,
+                localActor.Actor.PrevZ,
+                localActor.Actor.VelX,
+                localActor.Actor.VelY,
+                localActor.Actor.VelZ,
+                localActor.Actor.LastStepX,
+                localActor.Actor.LastStepY,
+                localActor.Actor.LastStepZ,
+                localActor.Actor.VelH,
+                localActor.Actor.TargetVelH,
+                localActor.Actor.AccelV,
+                localActor.Actor.TargetVelV,
+                localActor.Actor.AccelH,
+                localActor.Actor.TargetVelX,
+                localActor.Actor.TargetVelY,
+                localActor.Actor.TargetVelZ
+            }, localActor.Actor.Base))
+                pruned++;
         }
     }
 
@@ -13916,12 +13990,13 @@ void ApplyRemoteWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melo
     if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
         (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
     {
-        std::printf("NSMB WorldActors: apply inst=%d frame=%u sampleFrame=%u count=%zu applied=%u predict=%u mapChanged=%d\n",
+        std::printf("NSMB WorldActors: apply inst=%d frame=%u sampleFrame=%u count=%zu applied=%u pruned=%u predict=%u mapChanged=%d\n",
             instanceID,
             frame,
             sample.Frame,
             remoteCount,
             applied,
+            pruned,
             predictFrames,
             mapChanged ? 1 : 0);
     }
@@ -17547,6 +17622,10 @@ void InitFromEnvironment()
         EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS") &&
         !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_EFFECTS");
     G.WorldStateApplyActorSnapshot = EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT");
+    G.WorldStateApplyActorSnapshotLifecycle =
+        EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT_LIFECYCLE");
+    G.WorldStatePruneExtraActorSnapshot =
+        EnvFlag("MELONDS_NSML_WORLD_STATE_PRUNE_EXTRA_ACTOR_SNAPSHOT");
     G.WorldStateTraceMovingHazards = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS");
     G.WorldStateTraceObjectLifecycles = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES");
     G.WorldStateTraceActorInternals = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS");
@@ -17801,6 +17880,7 @@ void InitFromEnvironment()
     G.RollbackSkipRenderDuringResim = EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER");
     G.RollbackSkipIntermediateResimCheckpoints =
         EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS");
+    G.RollbackPrePumpBeforeResim = EnvFlag("MELONDS_NSML_ROLLBACK_PRE_PUMP_BEFORE_RESIM");
     G.RollbackInputWaitUs = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_INPUT_WAIT_US", 0), 0, 20000);
     G.RollbackRestoreProbe = EnvFlag("MELONDS_NSML_ROLLBACK_RESTORE_PROBE");
@@ -18282,7 +18362,7 @@ void InitFromEnvironment()
     G.Ready = true;
     EmitDiagnosticStartupEvent();
     StartNetworkPumpThreadIfNeeded();
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputHealthTrace=%d inputHealthInterval=%d inputHealthWaitThresholdMs=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputSendDelay=%d inputSendJitter=%d inputSendDelayStart=%u inputSendDelayEnd=%u inputDropModulo=%d inputDropOffset=%d inputDropStart=%u inputDropEnd=%u netPumpThread=%d netPumpSleepUs=%d inputWaitPollUs=%d rollbackInputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d rollbackPredProbeModulo=%d rollbackPredProbeLimit=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputHealthTrace=%d inputHealthInterval=%d inputHealthWaitThresholdMs=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputSendDelay=%d inputSendJitter=%d inputSendDelayStart=%u inputSendDelayEnd=%u inputDropModulo=%d inputDropOffset=%d inputDropStart=%u inputDropEnd=%u netPumpThread=%d netPumpSleepUs=%d inputWaitPollUs=%d rollbackInputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackPrePump=%d rollbackRestoreProbe=%d rollbackPredProbeModulo=%d rollbackPredProbeLimit=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -18337,6 +18417,7 @@ void InitFromEnvironment()
         G.RollbackCheckpointInterval,
         G.RollbackResimulateDelayFrames,
         G.RollbackResimulate ? 1 : 0,
+        G.RollbackPrePumpBeforeResim ? 1 : 0,
         G.RollbackRestoreProbe ? 1 : 0,
         G.RollbackPredictionProbeModulo,
         G.RollbackPredictionProbeLimit,
@@ -18544,6 +18625,12 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         ApplyPacketBridgeJitHelperPatchIfNeeded(instanceID, inputFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::JitPatch);
 
+    if (G.Enabled && G.RollbackPrePumpBeforeResim && G.InputNetplayOnly && instanceID >= 0 && instanceID < 16 && nds)
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        PumpNetworkLocked(nds, inputFrame);
+        ApplyPendingNSMLPacketsLocked(nds);
+    }
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         RollbackResimulateIfNeeded(instanceID, inputFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Rollback);

@@ -61,10 +61,19 @@ Current conclusion:
 - Same-frame waits are not equivalent to increasing InputDelay, but the measured FPS cost is still too high for the target.
 - Increasing GUI rollback `InputDelayFrames` above `2` is not a valid escape hatch for this goal; any viable rollback path must keep delay2 and solve correctness/perf there.
 - Current repair-only actor/global snapshot direction is likely at its limit for the active goal. It can keep average frame time near 60fps, but without either waiting, increasing delay, or doing some exact re-execution, it cannot know discontinuous current-frame events such as entry transition, death/respawn, contact, object spawn/despawn, and item lifecycle under 6F artificial send delay/jitter.
+- Exact rollback pre-pump experiment: `MELONDS_NSML_ROLLBACK_PRE_PUMP_BEFORE_RESIM=1` reduced resim operations/frames slightly in one 1800F dualstress trace, but max/avg spikes did not improve (`~149-158ms` max active frame) and max per-resim-frame cost worsened. This is not a promotion path.
+- Plan-D actor lifecycle experiment:
+  - `WireWorldActorSnapshotState` now carries 32 actors instead of 16.
+  - Optional actor snapshot lifecycle apply can write remote `stateType`/flags onto matched local actors.
+  - Optional extra-actor pruning was added, currently restricted to duplicated `0x10C` star-candidate actors because broad pruning removed desyncs but caused large spikes (`330-605ms`) and lower active FPS.
+  - The practical comparison now uses significant active-object multiset comparison, excluding known local-role `StageFX(0x12)` and `MvsLObject267(0x10B)`, rather than raw `objectActiveCount`/`objectDeadCount`.
+  - `predictrepair-delay2-player-world-actorsnap32-lifecycle-prune-transition90-pred0` passed `dualstresslong` with delay2 strong jitter in `logs/codex-goal-actorsnap32-prune10c-transition90-repeat-send6-jitter6-20260622/20260622-094618` (`16.690/16.691ms`, max `60.372/31.202ms`) but `chaos` still failed the spike gate in the same run (`158/117ms` max), and other `chaos` runs still expose moving-hazard or playerGlobal timing windows.
 
 Current blocker / next actions:
 
-- Find a new delay-2 architecture that does not depend on increasing InputDelay, long same-frame waits, stale transform writes, or main-thread deep resim. Candidate directions: off-main-thread shadow resim with atomic state publish, a ROM/actor-level authority model for death/respawn transition, or a minimal MvL actor rollback that replays only player/death/world state and publishes it without blocking the main frame.
+- Keep delay2 as a hard requirement; increasing GUI rollback InputDelay above `2` is not allowed for this goal.
+- Continue the actor-authority path only if it keeps both correctness and spike profile: fix early moving-hazard sample availability, trace the remaining `chaos` `playerGlobal` windows, and reduce the `chaos` frame `1800-1830` spike.
+- If the actor-authority path keeps producing route-specific patches, switch to a new architecture: off-main-thread shadow resim with atomic publish, or a minimal MvL actor rollback that replays only player/death/world state and publishes it without blocking the main frame.
 - Add stronger event routes for star pickup/drop/recover, block break persistence, and 8-coin item identity. Current star routes are still input coverage failures, not correctness proof.
 - Keep testing with artificial send delay/jitter and movement-heavy chaos/contact routes. Average FPS alone is insufficient; `maxFrameMs`, `over33ms`, and persistent mismatch detection must stay in the promotion gate.
 

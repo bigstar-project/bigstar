@@ -57,6 +57,7 @@ param(
     [string]$RollbackPredictionProbeKeyMask = "",
     [int]$RollbackInputWaitUs = 0,
     [int]$RollbackSettleFrames = 0,
+    [int]$GameStateCompareStartFrame = 900,
     [switch]$IgnoreSpeculativeInputFields,
     [int]$GameStateTraceInterval = 30,
     [int]$GameStateTraceStartFrame = 0,
@@ -1208,7 +1209,7 @@ $stableFields = @(
     "playerActor0Found", "playerActor0X", "playerActor0Y", "playerActor0Z",
     "playerActor1Found", "playerActor1X", "playerActor1Y", "playerActor1Z",
     "movingHazardFound", "movingHazardX", "movingHazardY",
-    "objectActiveCount", "objectDeadCount",
+    "significantActiveObjects",
     "player0Lives", "player1Lives", "player0BattleStars", "player1BattleStars",
     "player0Dead", "player1Dead", "player0InventoryPowerup", "player1InventoryPowerup",
     "playerGlobalHash", "wifiCandidateHash",
@@ -1234,22 +1235,51 @@ function RowAtFrame {
 function RowsMatchFields {
     param([object]$HostRow, [object]$ClientRow, [string[]]$Fields)
     foreach ($field in $Fields) {
-        if ($HostRow.$field -ne $ClientRow.$field) {
+        if ((Get-ComparableGameStateField -Row $HostRow -Field $field) -ne
+            (Get-ComparableGameStateField -Row $ClientRow -Field $field)) {
             return $false
         }
     }
     return $true
 }
 
+function Get-SignificantActiveObjects {
+    param([object]$Row)
+    $objects = New-Object System.Collections.Generic.List[string]
+    for ($i = 0; $i -lt 16; $i++) {
+        $idText = $Row.("objectActiveId$i")
+        if (-not $idText -or $idText -eq "0x0") {
+            continue
+        }
+        $id = [Convert]::ToInt32($idText.Substring(2), 16)
+        if ($id -eq 0x0012 -or $id -eq 0x010B) {
+            continue
+        }
+        $settings = $Row.("objectActiveSettings$i")
+        [void]$objects.Add("$idText/$settings")
+    }
+    return (($objects | Sort-Object) -join ";")
+}
+
+function Get-ComparableGameStateField {
+    param([object]$Row, [string]$Field)
+    if ($Field -eq "significantActiveObjects") {
+        return Get-SignificantActiveObjects -Row $Row
+    }
+    return $Row.$Field
+}
+
 foreach ($hostRow in $hostRows) {
     $frame = [int]$hostRow.frame
-    if ($frame -lt 900) { continue }
+    if ($frame -lt $GameStateCompareStartFrame) { continue }
     if (-not $clientByFrame.ContainsKey($frame)) {
         throw "missing client frame $frame"
     }
     $clientRow = $clientByFrame[$frame]
     foreach ($field in $fields) {
-        if ($hostRow.$field -ne $clientRow.$field) {
+        $hostValue = Get-ComparableGameStateField -Row $hostRow -Field $field
+        $clientValue = Get-ComparableGameStateField -Row $clientRow -Field $field
+        if ($hostValue -ne $clientValue) {
             $settleFrames = $RollbackSettleFrames
             if ($settleFrames -le 0 -and $defaultSettleFields -contains $field) {
                 $settleFrames = [Math]::Max(1, $GameStateTraceInterval)
@@ -1268,7 +1298,7 @@ foreach ($hostRow in $hostRows) {
                     break
                 }
             }
-            throw "gameplay mismatch frame=$frame field=$field host=$($hostRow.$field) client=$($clientRow.$field)"
+            throw "gameplay mismatch frame=$frame field=$field host=$hostValue client=$clientValue"
         }
     }
 }

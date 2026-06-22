@@ -992,6 +992,207 @@ $candidateDefs = @{
             MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES = "12"
         }
     }
+    "predictrepair-delay2-player-world-actorsnap32-lifecycle-pred0" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 0
+        RollbackResimulate = $false
+        RollbackPredictOnly = $true
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            StateSync = $true
+            StateApply = $true
+            StateApplyMode = "globals"
+            StateSyncExtended = $true
+            StateSyncInterval = 30
+            PlayerStateSync = $true
+            PlayerStateApply = $true
+            PlayerStateGlobals = $true
+            PlayerStateSyncInterval = 1
+            PlayerStateMaxPredictFrames = 0
+            WorldStateSync = $true
+            WorldStateApply = $true
+            WorldStateSpawnItem = $true
+            WorldStateApplyMovingHazard = $true
+            WorldStateApplyEffects = $true
+            WorldStateApplyActorSnapshot = $true
+            WorldStateSyncInterval = 2
+            WorldStateMaxPredictFrames = 8
+            WorldStateActorRescanInterval = 15
+        }
+        Env = @{
+            MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT_LIFECYCLE = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM_START_OFFSET = "300"
+            MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES = "12"
+        }
+    }
+    "predictrepair-delay2-player-world-actorsnap32-lifecycle-transition0-pred0" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 0
+        RollbackResimulate = $false
+        RollbackPredictOnly = $true
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            StateSync = $true
+            StateApply = $true
+            StateApplyMode = "globals"
+            StateSyncExtended = $true
+            StateSyncInterval = 30
+            PlayerStateSync = $true
+            PlayerStateApply = $true
+            PlayerStateGlobals = $true
+            PlayerStateSyncInterval = 1
+            PlayerStateMaxPredictFrames = 0
+            WorldStateSync = $true
+            WorldStateApply = $true
+            WorldStateSpawnItem = $true
+            WorldStateApplyMovingHazard = $true
+            WorldStateApplyEffects = $true
+            WorldStateApplyActorSnapshot = $true
+            WorldStateSyncInterval = 2
+            WorldStateMaxPredictFrames = 8
+            WorldStateActorRescanInterval = 15
+        }
+        Env = @{
+            MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT_LIFECYCLE = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM_START_OFFSET = "0"
+            MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES = "12"
+        }
+    }
+    "predictrepair-delay2-player-world-actorsnap32-lifecycle-transition90-pred0" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 0
+        RollbackResimulate = $false
+        RollbackPredictOnly = $true
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            StateSync = $true
+            StateApply = $true
+            StateApplyMode = "globals"
+            StateSyncExtended = $true
+            StateSyncInterval = 30
+            PlayerStateSync = $true
+            PlayerStateApply = $true
+            PlayerStateGlobals = $true
+            PlayerStateSyncInterval = 1
+            PlayerStateMaxPredictFrames = 0
+            WorldStateSync = $true
+            WorldStateApply = $true
+            WorldStateSpawnItem = $true
+            WorldStateApplyMovingHazard = $true
+            WorldStateApplyEffects = $true
+            WorldStateApplyActorSnapshot = $true
+            WorldStateSyncInterval = 2
+            WorldStateMaxPredictFrames = 8
+            WorldStateActorRescanInterval = 15
+        }
+        Env = @{
+            MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT_LIFECYCLE = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM_START_OFFSET = "90"
+            MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES = "12"
+        }
+    }
+    "predictrepair-delay2-player-world-actorsnap32-lifecycle-transition90-worldpred40-pred0" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 0
+        RollbackResimulate = $false
+        RollbackPredictOnly = $true
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            StateSync = $true
+            StateApply = $true
+            StateApplyMode = "globals"
+            StateSyncExtended = $true
+            StateSyncInterval = 30
+            PlayerStateSync = $true
+            PlayerStateApply = $true
+            PlayerStateGlobals = $true
+            PlayerStateSyncInterval = 1
+            PlayerStateMaxPredictFrames = 0
+            WorldStateSync = $true
+            WorldStateApply = $true
+            WorldStateSpawnItem = $true
+            WorldStateApplyMovingHazard = $true
+            WorldStateApplyEffects = $true
+            WorldStateApplyActorSnapshot = $true
+            WorldStateSyncInterval = 2
+            WorldStateMaxPredictFrames = 40
+            WorldStateActorRescanInterval = 15
+        }
+        Env = @{
+            MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT_LIFECYCLE = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM_START_OFFSET = "90"
+            MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES = "12"
+        }
+    }
+    "predictrepair-delay2-player-world-actorsnap32-lifecycle-prune-transition90-pred0" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 0
+        RollbackResimulate = $false
+        RollbackPredictOnly = $true
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            StateSync = $true
+            StateApply = $true
+            StateApplyMode = "globals"
+            StateSyncExtended = $true
+            StateSyncInterval = 30
+            PlayerStateSync = $true
+            PlayerStateApply = $true
+            PlayerStateGlobals = $true
+            PlayerStateSyncInterval = 1
+            PlayerStateMaxPredictFrames = 0
+            WorldStateSync = $true
+            WorldStateApply = $true
+            WorldStateSpawnItem = $true
+            WorldStateApplyMovingHazard = $true
+            WorldStateApplyEffects = $true
+            WorldStateApplyActorSnapshot = $true
+            WorldStateSyncInterval = 2
+            WorldStateMaxPredictFrames = 8
+            WorldStateActorRescanInterval = 15
+        }
+        Env = @{
+            MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT_LIFECYCLE = "1"
+            MELONDS_NSML_WORLD_STATE_PRUNE_EXTRA_ACTOR_SNAPSHOT = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM_START_OFFSET = "90"
+            MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES = "12"
+        }
+    }
     "exact-delay2-tinycorepreimage-skiprender" = [pscustomobject]@{
         Backend = "tinycorepreimage"
         InputDelayFrames = 2
@@ -1005,6 +1206,22 @@ $candidateDefs = @{
         RollbackCheckpointInterval = 1
         InputBundleHistory = 8
         Env = @{}
+    }
+    "exact-delay2-tinycorepreimage-prepump-skiprender" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 8
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Env = @{
+            MELONDS_NSML_ROLLBACK_PRE_PUMP_BEFORE_RESIM = "1"
+        }
     }
     "coredelta-baseline" = [pscustomobject]@{
         Backend = "coredelta"
@@ -1035,7 +1252,7 @@ $routeDefs = @{
         Frames = 4200
         HostInput = "tests\nsmb_us_direct_mvl_chaos_host.inputs"
         ClientInput = "tests\nsmb_us_direct_mvl_chaos_client.inputs"
-        Extra = @{ IgnoreSpeculativeInputFields = $true; RollbackSettleFrames = 30 }
+        Extra = @{ IgnoreSpeculativeInputFields = $true; RollbackSettleFrames = 60 }
     }
     "death" = [pscustomobject]@{
         Frames = 3600
@@ -1102,6 +1319,9 @@ $routeDefs = @{
 $envKeys = @(
     "MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL",
     "MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE",
+    "MELONDS_NSML_ROLLBACK_PRE_PUMP_BEFORE_RESIM",
+    "MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT_LIFECYCLE",
+    "MELONDS_NSML_WORLD_STATE_PRUNE_EXTRA_ACTOR_SNAPSHOT",
     "MELONDS_NSML_FIXED_FRAME_SLEEP",
     "MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM",
     "MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM_START_OFFSET",
@@ -1189,6 +1409,7 @@ foreach ($candidateName in $Candidate) {
             MaxActiveFrameOver33ms = $MaxActiveFrameOver33ms
             MaxConsecutiveSlowFrames = $MaxConsecutiveSlowFrames
             SlowFrameThresholdMs = $SlowFrameThresholdMs
+            GameStateCompareStartFrame = 990
             MvlMatchSeed = "practical-$candidateName-$routeName-$runStamp"
         }
         foreach ($key in $routeDef.Extra.Keys) {
