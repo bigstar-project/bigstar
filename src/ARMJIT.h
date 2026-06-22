@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <optional>
 #include <memory>
+#include <vector>
 #include "types.h"
 #include "MemConstants.h"
 #include "Args.h"
@@ -54,6 +55,8 @@ public:
     void JitEnableExecute() noexcept;
     void CompileBlock(ARM* cpu) noexcept;
     void ResetBlockCache() noexcept;
+    void ResetBlockCacheForRollbackFast() noexcept;
+    void DeleteDeferredResetBlocks(u32 maxBlocks) noexcept;
 
     template <u32 num, int region>
     void CheckAndInvalidate(u32 addr) noexcept
@@ -96,6 +99,7 @@ public:
     std::unordered_map<u32, JitBlock*> JitBlocks7 {};
 
     std::unordered_map<u32, JitBlock*> RestoreCandidates {};
+    std::vector<JitBlock*> DeferredResetBlocks {};
 
 
     AddressRange CodeIndexITCM[ITCMPhysicalSize / 512] {};
@@ -194,6 +198,8 @@ public:
     void JitEnableExecute() noexcept {}
     void CompileBlock(ARM*) noexcept {}
     void ResetBlockCache() noexcept {}
+    void ResetBlockCacheForRollbackFast() noexcept {}
+    void DeleteDeferredResetBlocks(u32) noexcept {}
     template <u32, int>
     void CheckAndInvalidate(u32 addr) noexcept {}
 

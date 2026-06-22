@@ -20,6 +20,7 @@
 #include "ARMJIT_Memory.h"
 #include <string.h>
 #include <assert.h>
+#include <cstdlib>
 #include <unordered_map>
 
 #define XXH_STATIC_LINKING_ONLY
@@ -531,6 +532,12 @@ void ARMJIT::SetFastMemory(bool enabled) noexcept
 
 void ARMJIT::CompileBlock(ARM* cpu) noexcept
 {
+    static const u32 deferredDeleteBudget = []() -> u32 {
+        const char* value = getenv("MELONDS_NSML_ROLLBACK_JIT_DEFERRED_DELETE_BUDGET");
+        return value ? static_cast<u32>(std::max(0, atoi(value))) : 4;
+    }();
+    DeleteDeferredResetBlocks(deferredDeleteBudget);
+
     bool thumb = cpu->CPSR & 0x20;
 
     u32 blockAddr = cpu->R[15] - (thumb ? 2 : 4);
@@ -1076,6 +1083,16 @@ void ARMJIT::blockSanityCheck(u32 num, u32 blockAddr, JitBlockEntry entry) noexc
     assert(JITCompiler.AddEntryOffset((u32)FastBlockLookupRegions[localAddr >> 27][(localAddr & 0x7FFFFFF) / 2]) == entry);
 }
 
+void ARMJIT::DeleteDeferredResetBlocks(u32 maxBlocks) noexcept
+{
+    while (maxBlocks > 0 && !DeferredResetBlocks.empty())
+    {
+        delete DeferredResetBlocks.back();
+        DeferredResetBlocks.pop_back();
+        maxBlocks--;
+    }
+}
+
 bool ARMJIT::SetupExecutableRegion(u32 num, u32 blockAddr, u64*& entry, u32& start, u32& size) noexcept
 {
     // amazingly ignoring the DTCM is the proper behaviour for code fetches
@@ -1152,6 +1169,45 @@ void ARMJIT::ResetBlockCache() noexcept
     }
     JitBlocks9.clear();
     JitBlocks7.clear();
+
+    JITCompiler.Reset();
+}
+
+void ARMJIT::ResetBlockCacheForRollbackFast() noexcept
+{
+    Log(LogLevel::Debug, "Fast-resetting JIT block cache for rollback...\n");
+
+    JitEnableWrite();
+    Memory.Reset();
+    InvalidLiterals.Clear();
+
+    for (auto it = RestoreCandidates.begin(); it != RestoreCandidates.end(); it++)
+        DeferredResetBlocks.push_back(it->second);
+    RestoreCandidates.clear();
+
+    auto detachBlocks = [&](std::unordered_map<u32, JitBlock*>& blocks)
+    {
+        for (auto it : blocks)
+        {
+            JitBlock* block = it.second;
+            for (int j = 0; j < block->NumAddresses; j++)
+            {
+                u32 addr = block->AddressRanges()[j];
+                AddressRange* range = &CodeMemRegions[addr >> 27][(addr & 0x7FFFFFF) / 512];
+                range->Blocks.Clear();
+                range->Code = 0;
+            }
+            if (FastBlockLookupRegions[block->StartAddrLocal >> 27])
+                FastBlockLookupRegions[block->StartAddrLocal >> 27][(block->StartAddrLocal & 0x7FFFFFF) / 2] =
+                    (u64)UINT32_MAX << 32;
+            DeferredResetBlocks.push_back(block);
+        }
+        blocks.clear();
+    };
+
+    detachBlocks(JitBlocks9);
+    detachBlocks(JitBlocks7);
+    DeleteDeferredResetBlocks(64);
 
     JITCompiler.Reset();
 }

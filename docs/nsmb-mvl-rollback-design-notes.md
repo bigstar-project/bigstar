@@ -2,7 +2,7 @@
 
 ## 2026-06-22 current status - raw-input resim and strong-jitter rollback
 
-Current rollback direction is still lightweight `tinycorepreimage`, but the active goal now has a stricter latency constraint:
+Current rollback direction has moved from repair-only `tinycorepreimage` toward exact-ish `tinycoreramdelta` as the correctness oracle, while the next practical path likely needs a new non-blocking or pointer-safe snapshot architecture. The active goal has a strict latency constraint:
 
 - Promotion candidates must keep the GUI rollback standard `InputDelayFrames=2`.
 - Increasing InputDelay above `2` is rejected for this goal, even when it improves correctness or smoothness, because it makes rollback no longer worthwhile for the target play feel.
@@ -23,7 +23,7 @@ Completed in the latest pass:
 
 Verification:
 
-- Build passed before the latest script-only settle/candidate edits: `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4`.
+- Latest build passed after the JIT reset experiments: `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel 4`.
 - Normal jitter suite, `InputSendDelayFrames=3` / `InputSendJitterFrames=3`, `delay6/rbwait3000/maxresim2`, no full game-state trace, passed stocktouch, chaos, contact, and dualstresslong in `logs/codex-goal-practical-rbwait3000-rawinput-jitter3-20260622/20260622-040447`. Averages were about `16.7-17.1ms`; max frames were `37-47ms`.
 - The same candidate passed death in `logs/codex-goal-practical-rbwait3000-rawinput-stars-death-jitter3-20260622/20260622-041022`. `luigistar` and `mariostarleft` did not prove star behavior because the route did not collect a star on either peer.
 - Strong jitter rejected `delay6/rbwait3000/maxresim2`: `InputSendDelayFrames=6` / `InputSendJitterFrames=6` produced persistent `playerGlobal=0` in chaos/dualstresslong. This is the important failure mode the user asked to catch.
@@ -87,12 +87,19 @@ Current conclusion:
   - Contact with that candidate had no persistent mismatch but still failed the spike gate: `17.407/17.360ms` average, `93.251/92.990ms` max, over33 `17/14`.
   - Dualstresslong and chaos also had no persistent mismatch, but remained above the smoothness target: averages `18.1-18.3ms`, max up to `163ms`, and over33 `78-167`.
   - `tinycoreramdelta` cannot safely use the tinycorepreimage/nsmbtinycore default JIT-reset skip. With `RollbackSkipJitReset`, contact became faster but produced persistent player actor position mismatch. The wrapper now treats `tinycoreramdelta` separately: tiny flags and resim render skip are applied, but JIT reset skip is opt-in only.
+- Latest JIT reset boundary tests:
+  - The active goal remains delay2-only. Increasing GUI rollback `InputDelayFrames` above `2` is rejected and is not a valid mitigation.
+  - Forced JIT invalidation was added for Main RAM delta ranges plus tiny-core-restored Shared WRAM, ARM7 WRAM, and ITCM. It also uses 16-byte invalidation to cover literal dependencies, not only code pages.
+  - Even with that invalidation, `RollbackSkipJitReset` still mismatched (`playerActor0X` at frame `2010`) on contact in `logs/nsmb-mvl-rollback-jit-forceinv16-contact/20260622-134436`. `MELONDS_NSML_ROLLBACK_JIT_MEMORY_RESET_ONLY=1` failed the same way in `logs/nsmb-mvl-rollback-jit-memreset16-contact/20260622-134604`.
+  - This means the safe restore boundary is not just "invalidate restored memory pages". Current JIT blocks can depend on CPU/JIT state restored by savestate in a way that is not captured by local region invalidation. Normal full JIT block reset is still the correctness boundary for exact Main RAM restore.
+  - A diagnostic `MELONDS_NSML_ROLLBACK_JIT_FAST_RESET=1` path detaches all JIT blocks immediately and defers JitBlock metadata deletion. It preserved contact correctness, proving full block detachment is enough for correctness, but performance was worse than normal reset (`611ms` max with default deferred delete budget, `139/142ms` max with delete budget `0`). This suggests recompile/code-cache churn dominates after full detachment.
+  - `RollbackInputWaitUs=500` without increasing delay preserved correctness but did not solve spikes (`90/107ms` max). `InputMaxFrameLead=2` under strong jitter stalled. These are not promotion paths.
 
 Current blocker / next actions:
 
 - Keep delay2 as a hard requirement; increasing GUI rollback InputDelay above `2` is not allowed for this goal.
 - Exact same-frame resim is not yet a playable endpoint for delay2: even the best exact-ish `tinycoreramdelta` path still exceeds one display frame during correction. Continue it as a correctness oracle/baseline and as a source of performance measurements.
-- Switch primary work away from broad raw RAM ranges. Use pointer-safe actor/global page-delta snapshots, off-main-thread shadow resim with atomic publish, or a minimal MvL actor rollback that replays only player/contact/death/world fields and publishes them without blocking the main frame.
+- Switch primary work away from broad raw RAM ranges and away from simply skipping JIT reset. Use pointer-safe actor/global page-delta snapshots, off-main-thread shadow resim with atomic publish, rollback-specific JIT state reuse/snapshotting, or a minimal MvL actor rollback that replays only player/contact/death/world fields and publishes them without blocking the main frame.
 - Add stronger event routes for star pickup/drop/recover, block break persistence, and 8-coin item identity. Current star routes are still input coverage failures, not correctness proof.
 - Keep testing with artificial send delay/jitter and movement-heavy chaos/contact routes. Average FPS alone is insufficient; `maxFrameMs`, `over33ms`, and persistent mismatch detection must stay in the promotion gate.
 

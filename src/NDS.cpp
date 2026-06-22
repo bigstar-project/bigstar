@@ -120,6 +120,18 @@ static bool NSMLRollbackSkipJITReset()
     return enabled;
 }
 
+static bool NSMLRollbackJITMemoryResetOnly()
+{
+    static const bool enabled = getenv("MELONDS_NSML_ROLLBACK_JIT_MEMORY_RESET_ONLY") != nullptr;
+    return enabled;
+}
+
+static bool NSMLRollbackJITFastReset()
+{
+    static const bool enabled = getenv("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET") != nullptr;
+    return enabled;
+}
+
 // timing notes
 //
 // * this implementation is technically wrong for VRAM
@@ -1141,7 +1153,14 @@ bool NDS::DoRollbackSavestate(
 
 #ifdef JIT_ENABLED
         if (!NSMLRollbackSkipJITReset())
-            JIT.Reset();
+        {
+            if (NSMLRollbackJITFastReset())
+                JIT.ResetBlockCacheForRollbackFast();
+            else if (NSMLRollbackJITMemoryResetOnly())
+                JIT.Memory.Reset();
+            else
+                JIT.Reset();
+        }
 #endif
     }
 
@@ -1300,7 +1319,14 @@ bool NDS::DoRollbackTinyCoreSavestate(Savestate* file, u32 requestedTinyCoreFlag
 
 #ifdef JIT_ENABLED
         if (!NSMLRollbackSkipJITReset())
-            JIT.Reset();
+        {
+            if (NSMLRollbackJITFastReset())
+                JIT.ResetBlockCacheForRollbackFast();
+            else if (NSMLRollbackJITMemoryResetOnly())
+                JIT.Memory.Reset();
+            else
+                JIT.Reset();
+        }
 #endif
     }
 

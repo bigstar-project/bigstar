@@ -44,6 +44,7 @@
 
 #include "NDS.h"
 #include "ARM.h"
+#include "MemConstants.h"
 #include "Savestate.h"
 #include "LocalMP.h"
 #include "MPInterface.h"
@@ -4295,11 +4296,70 @@ void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
     }
 }
 
-void InvalidateMainRAMJIT(melonDS::NDS* nds, melonDS::u32 len)
+bool RollbackSkipJITResetEnabled()
 {
-    static const bool skipInvalidation = std::getenv("MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET") != nullptr;
-    if (skipInvalidation || !nds || len == 0)
+    return std::getenv("MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET") != nullptr;
+}
+
+bool RollbackJITMemoryResetOnlyEnabled()
+{
+    return std::getenv("MELONDS_NSML_ROLLBACK_JIT_MEMORY_RESET_ONLY") != nullptr;
+}
+
+void InvalidateJITLocalRegionRange(
+    melonDS::NDS* nds,
+    int region,
+    melonDS::u32 start,
+    melonDS::u32 length,
+    melonDS::u32 regionLength)
+{
+    if (!nds || length == 0 || start >= regionLength)
         return;
+
+    const melonDS::u32 clampedLength = std::min(length, regionLength - start);
+    const melonDS::u32 alignedStart = start & ~0xFu;
+    const melonDS::u32 endRaw = start + clampedLength;
+    const melonDS::u32 alignedEnd = std::min(regionLength, (endRaw + 0xFu) & ~0xFu);
+    for (melonDS::u32 addr = alignedStart; addr < alignedEnd; addr += 0x10)
+        nds->JIT.InvalidateByAddr((static_cast<melonDS::u32>(region) << 27) | addr);
+}
+
+void InvalidateTinyCoreRollbackJITRegions(melonDS::NDS* nds)
+{
+    InvalidateJITLocalRegionRange(
+        nds,
+        melonDS::ARMJIT_Memory::memregion_SharedWRAM,
+        0,
+        melonDS::SharedWRAMSize,
+        melonDS::SharedWRAMSize);
+    InvalidateJITLocalRegionRange(
+        nds,
+        melonDS::ARMJIT_Memory::memregion_WRAM7,
+        0,
+        melonDS::ARM7WRAMSize,
+        melonDS::ARM7WRAMSize);
+    InvalidateJITLocalRegionRange(
+        nds,
+        melonDS::ARMJIT_Memory::memregion_ITCM,
+        0,
+        melonDS::ITCMPhysicalSize,
+        melonDS::ITCMPhysicalSize);
+}
+
+void InvalidateMainRAMJIT(melonDS::NDS* nds, melonDS::u32 len, bool force = false)
+{
+    if ((!force && RollbackSkipJITResetEnabled()) || !nds || len == 0)
+        return;
+    if (force)
+    {
+        InvalidateJITLocalRegionRange(
+            nds,
+            melonDS::ARMJIT_Memory::memregion_MainRAM,
+            0,
+            len,
+            nds->MainRAMMask + 1);
+        return;
+    }
     for (melonDS::u32 offset = 0; offset < len; offset += 0x1000)
     {
         const melonDS::u32 addr = kMainRAMBase + offset;
@@ -4308,12 +4368,25 @@ void InvalidateMainRAMJIT(melonDS::NDS* nds, melonDS::u32 len)
     }
 }
 
-void InvalidateMainRAMJITRange(melonDS::NDS* nds, melonDS::u32 address, melonDS::u32 length)
+void InvalidateMainRAMJITRange(
+    melonDS::NDS* nds,
+    melonDS::u32 address,
+    melonDS::u32 length,
+    bool force = false)
 {
-    static const bool skipInvalidation = std::getenv("MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET") != nullptr;
-    if (skipInvalidation || !nds || length == 0 || address < kMainRAMBase)
+    if ((!force && RollbackSkipJITResetEnabled()) || !nds || length == 0 || address < kMainRAMBase)
         return;
     const melonDS::u32 offset = address - kMainRAMBase;
+    if (force)
+    {
+        InvalidateJITLocalRegionRange(
+            nds,
+            melonDS::ARMJIT_Memory::memregion_MainRAM,
+            offset & nds->MainRAMMask,
+            length,
+            nds->MainRAMMask + 1);
+        return;
+    }
     const melonDS::u32 start = offset & ~0xFFFu;
     const melonDS::u32 end = (offset + length + 0xFFFu) & ~0xFFFu;
     for (melonDS::u32 page = start; page < end; page += 0x1000)
@@ -5465,8 +5538,12 @@ bool RestoreRollbackCheckpointBuffer(
         nds->NumFrames = header.NumFrames;
         nds->NumLagFrames = header.NumLagFrames;
         nds->LagFrameFlag = header.LagFrameFlag != 0;
+        const bool forceJITInvalidation =
+            RollbackSkipJITResetEnabled() || RollbackJITMemoryResetOnlyEnabled();
         for (const auto& range : ranges)
-            InvalidateMainRAMJITRange(nds, range.Address, range.Length);
+            InvalidateMainRAMJITRange(nds, range.Address, range.Length, forceJITInvalidation);
+        if (forceJITInvalidation)
+            InvalidateTinyCoreRollbackJITRegions(nds);
         return true;
     }
 
