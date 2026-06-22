@@ -3941,7 +3941,7 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
     packet.TouchY = input.TouchY;
     packet.Touching = input.Touching ? 1 : 0;
 
-    const bool sendBundle = G.InputUnreliable && G.InputBundleHistory > 0;
+    const bool sendBundle = G.InputBundleHistory > 0;
     const std::vector<char> bundlePayload = sendBundle
         ? BuildInputBundlePayloadLocked(frame, input)
         : std::vector<char> {};

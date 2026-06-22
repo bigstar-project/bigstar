@@ -2019,6 +2019,55 @@ $candidateDefs = @{
             MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
         }
     }
+    "exact-delay2-tinycoreramdelta-key2-page256-cp1-maxresim1-skipjit-skiprender" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+            RollbackSkipJitReset = $true
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+        }
+    }
+    "exact-delay2-tinycoreramdelta-key2-page256-cp1-resimdelay1-maxresim1-skipjit-skiprender" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackResimulateDelayFrames = 1
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+            RollbackSkipJitReset = $true
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+        }
+    }
     "exact-delay2-conservativejit8-tinycoreramdelta-key2-page256-cp2-maxresim1-skipjit-skiprender" = [pscustomobject]@{
         Backend = "tinycoreramdelta"
         InputDelayFrames = 2
@@ -2378,6 +2427,32 @@ $candidateDefs = @{
         InputMaxFrameLead = 999
         RollbackWindow = 64
         RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_ROLLBACK_JIT_FAST_RESET = "1"
+            MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_INITIAL_DELETE_BUDGET = "0"
+            MELONDS_NSML_ROLLBACK_JIT_DEFERRED_DELETE_BUDGET = "0"
+        }
+    }
+    "exact-delay2-fastjitreset-nodelete0-tinycoreramdelta-key2-page256-cp1-maxresim1-skiprender" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
         InputBundleHistory = 8
         Extra = @{
             IgnoreSpeculativeInputFields = $true
@@ -3209,6 +3284,10 @@ foreach ($candidateName in $Candidate) {
         if ($candidateDef.PSObject.Properties.Name -contains "RollbackTinyCoreFlags") {
             $rollbackTinyCoreFlags = [string]$candidateDef.RollbackTinyCoreFlags
         }
+        $rollbackResimulateDelayFrames = 0
+        if ($candidateDef.PSObject.Properties.Name -contains "RollbackResimulateDelayFrames") {
+            $rollbackResimulateDelayFrames = [int]$candidateDef.RollbackResimulateDelayFrames
+        }
 
         $params = @{
             Frames = $routeDef.Frames
@@ -3223,6 +3302,7 @@ foreach ($candidateName in $Candidate) {
             RollbackWindow = $candidateDef.RollbackWindow
             RollbackCheckpointInterval = $candidateDef.RollbackCheckpointInterval
             RollbackResimulate = $rollbackResimulate
+            RollbackResimulateDelayFrames = $rollbackResimulateDelayFrames
             RollbackInputWaitUs = $candidateDef.RollbackInputWaitUs
             RollbackMaxResimFrames = $rollbackMaxResimFrames
             InputDelayFrames = $candidateDef.InputDelayFrames

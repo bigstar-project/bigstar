@@ -116,12 +116,18 @@ Current conclusion:
     - `pv-volatile` and `pv-volatile-j8nf` mismatched on repeat, so partial fast reset is not deterministic enough to promote.
   - `RollbackResimulateDelayFrames=2` coalescing on the normal-reset baseline did not solve visible spikes (`host maxFrameMs=114.364`, client `91.620`).
   - Working conclusion: safe exact-ish delay2 rollback currently requires full JIT block reset/detachment. The remaining cost is cold JIT/resim execution. Skipping or partially reusing JIT blocks is fast but still incorrect, so the next architecture should focus on pointer-safe JIT reuse or avoiding same-frame cold-JIT re-execution, not on increasing delay.
+- 2026-06-22 reliable-bundle / cp1 follow-up:
+  - Fixed a transport experiment bug: `InputBundleHistory=8` was set on practical candidates, but reliable input sends only bundled history when `InputUnreliable` was also enabled. Reliable sends now emit input bundles whenever `InputBundleHistory > 0`, so strong-jitter correction packets carry recent history in the normal reliable path.
+  - This reduced some skip-reset mismatch frequency, but it did not make JIT reuse safe. `exact-delay2-tinycoreramdelta-key2-page256-cp1-maxresim1-skipjit-skiprender` stayed fast-ish in some traced chaos runs, but trace-free repeats mismatched (`playerActor1X` at frame `990` on chaos; `playerActor0X` at frame `2010` on contact).
+  - Correction coalescing is not a safe escape hatch. `exact-delay2-tinycoreramdelta-key2-page256-cp1-resimdelay1-maxresim1-skipjit-skiprender` lowered max frame times but immediately mismatched `playerActor0X` at frame `990`.
+  - Full `JIT.Reset()` plus cp1 is now the best correctness-oriented delay2 baseline measured in this pass. `exact-delay2-tinycoreramdelta-key2-page256-maxresim1-skiprender` passed contact under `InputSendDelayFrames=6` / `InputSendJitterFrames=6` (`17.179/17.026ms`, max `77.298/70.225`, over33 `13/5`) in `logs/nsmbrb-fullreset-cp1-bundle-chaos-contact-trace/20260622-162822`, but chaos still failed the spike gate (`18.161/18.148ms`, max `109.969/86.596`, over33 `67/72`).
+  - Fast reset cp1 remains unsafe. `exact-delay2-fastjitreset-nodelete0-tinycoreramdelta-key2-page256-cp1-maxresim1-skiprender` improved restore max to about `13.7ms` in trace but contact mismatched `playerActor0X` at frame `2010`; it is diagnostic-only.
 
 Current blocker / next actions:
 
 - Keep delay2 as a hard requirement; increasing GUI rollback InputDelay above `2` is not allowed for this goal.
-- Exact same-frame resim is not yet a playable endpoint for delay2. The reliable boundary remains full/fast JIT block detachment, and the remaining spike is cold JIT/resim execution rather than checkpoint copy/restore.
-- Continue from the fast-reset nodelete0 correctness baseline, but do not treat it as playable. The next real path needs either pointer-safe rollback JIT reuse or a new rollback architecture that avoids same-frame cold-JIT re-execution while keeping host/client state exact.
+- Exact same-frame resim is not yet a playable endpoint for delay2. The most reliable correctness boundary is full `JIT.Reset()` on restore; fast/skip reset variants are still diagnostic because they can produce player actor position mismatch.
+- Continue from the full-reset cp1 `tinycoreramdelta` baseline as the correctness oracle, but do not treat it as playable. The next real path needs either pointer-safe rollback JIT reuse or a new rollback architecture that avoids same-frame cold-JIT re-execution while keeping host/client state exact.
 - Add stronger event routes for star pickup/drop/recover, block break persistence, and 8-coin item identity. Current star routes are still input coverage failures, not correctness proof.
 - Keep testing with artificial send delay/jitter and movement-heavy chaos/contact routes. Average FPS alone is insufficient; `maxFrameMs`, `over33ms`, and persistent mismatch detection must stay in the promotion gate.
 
