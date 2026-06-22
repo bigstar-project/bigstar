@@ -1559,6 +1559,7 @@ struct State
     melonDS::u32 InputSendDelayEndFrame = kNoFrameLimit;
     bool InputUnreliable = false;
     int InputBundleHistory = 0;
+    int InputBundleFuture = 0;
     int InputDropModulo = 0;
     int InputDropOffset = 0;
     melonDS::u32 InputDropStartFrame = 0;
@@ -3194,8 +3195,53 @@ void StoreRemoteInputLocked(melonDS::u32 frame, const InputState& receivedInput,
 
     if (G.RollbackEnabled)
     {
+        bool remoteCorrection = false;
+        auto confirmed = G.RemoteInputs.find(frame);
+        if (confirmed != G.RemoteInputs.end()
+            && !InputsEqual(confirmed->second, receivedInput))
+        {
+            remoteCorrection = true;
+            const InputState previousInput = confirmed->second;
+            G.RollbackMismatchCount++;
+            const melonDS::u32 observedFrame = localFrame == kNoFrameLimit
+                ? frame
+                : localFrame;
+            const bool frameAlreadySimulated = localFrame == kNoFrameLimit || frame < localFrame;
+            if (frameAlreadySimulated
+                && (G.PendingRollbackFrame == kNoFrameLimit
+                    || frame < G.PendingRollbackFrame))
+            {
+                G.PendingRollbackFrame = frame;
+                G.PendingRollbackObservedFrame = observedFrame;
+            }
+            else if (frameAlreadySimulated && G.PendingRollbackObservedFrame == kNoFrameLimit)
+            {
+                G.PendingRollbackObservedFrame = observedFrame;
+            }
+            G.PredictedRemoteInputs.erase(G.PredictedRemoteInputs.lower_bound(frame),
+                G.PredictedRemoteInputs.end());
+            if (G.InputNetplayTraceEnabled)
+            {
+                std::printf(
+                    "NSMB Rollback: remote input correction frame=%u previous={keys=0x%03X touch=%d x=%u y=%u} actual={keys=0x%03X touch=%d x=%u y=%u} pending=%u mismatches=%u\n",
+                    frame,
+                    previousInput.KeyMask,
+                    previousInput.Touching ? 1 : 0,
+                    previousInput.TouchX,
+                    previousInput.TouchY,
+                    receivedInput.KeyMask,
+                    receivedInput.Touching ? 1 : 0,
+                    receivedInput.TouchX,
+                    receivedInput.TouchY,
+                    G.PendingRollbackFrame,
+                    G.RollbackMismatchCount);
+                std::fflush(stdout);
+            }
+        }
+
         auto predicted = G.PredictedRemoteInputs.find(frame);
-        if (predicted != G.PredictedRemoteInputs.end()
+        if (!remoteCorrection
+            && predicted != G.PredictedRemoteInputs.end()
             && !InputsEqual(predicted->second, receivedInput))
         {
             const InputState predictedInput = predicted->second;
@@ -3505,6 +3551,24 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     {
                         G.RemoteMovingHazardStateSample = packet;
                         G.RemoteMovingHazardStateSampleValid = true;
+                    }
+                    if (G.WorldStateTraceMovingHazards &&
+                        (G.InputTraceInterval <= 1 || (localFrame != kNoFrameLimit && (localFrame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0)))
+                    {
+                        std::printf("NSMB WorldHazards: recv localFrame=%u packetFrame=%u count=%u",
+                            localFrame,
+                            packet.Frame,
+                            packet.Count);
+                        for (melonDS::u32 i = 0; i < packet.Count; i++)
+                        {
+                            std::printf(" slot%u=%u/%08X/%08X/%u",
+                                i,
+                                packet.Actors[i].GUID,
+                                packet.Actors[i].PosX,
+                                packet.Actors[i].PosY,
+                                packet.Actors[i].StateType);
+                        }
+                        std::printf("\n");
                     }
                 }
             }
@@ -3871,13 +3935,30 @@ void FlushDelayedInputsLocked(melonDS::u32 frame)
 std::vector<char> BuildInputBundlePayloadLocked(melonDS::u32 frame, const InputState& input)
 {
     const int history = std::clamp(G.InputBundleHistory, 0, 31);
+    const int future = std::clamp(G.InputBundleFuture, 0, 31 - history);
     std::vector<WireInputBundleEntry> entries;
-    entries.reserve(static_cast<size_t>(history + 1));
+    entries.reserve(static_cast<size_t>(history + 1 + future));
     for (int offset = history; offset >= 0; offset--)
     {
         if (static_cast<melonDS::u32>(offset) > frame)
             continue;
         const melonDS::u32 entryFrame = frame - static_cast<melonDS::u32>(offset);
+        InputState entryInput = input;
+        auto existing = G.LocalInputs.find(entryFrame);
+        if (existing != G.LocalInputs.end())
+            entryInput = existing->second;
+        entries.push_back({
+            entryFrame,
+            entryInput.KeyMask,
+            entryInput.TouchX,
+            entryInput.TouchY,
+            entryInput.Touching ? static_cast<melonDS::u8>(1) : static_cast<melonDS::u8>(0),
+            {},
+        });
+    }
+    for (int offset = 1; offset <= future; offset++)
+    {
+        const melonDS::u32 entryFrame = frame + static_cast<melonDS::u32>(offset);
         InputState entryInput = input;
         auto existing = G.LocalInputs.find(entryFrame);
         if (existing != G.LocalInputs.end())
@@ -3960,7 +4041,7 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
     packet.TouchY = input.TouchY;
     packet.Touching = input.Touching ? 1 : 0;
 
-    const bool sendBundle = G.InputBundleHistory > 0;
+    const bool sendBundle = G.InputBundleHistory > 0 || G.InputBundleFuture > 0;
     const std::vector<char> bundlePayload = sendBundle
         ? BuildInputBundlePayloadLocked(frame, input)
         : std::vector<char> {};
@@ -4024,7 +4105,7 @@ void MaybeResendLatestInputForFrameLeadLocked()
         return;
 
     const InputState& input = it->second;
-    if (G.InputBundleHistory > 0)
+    if (G.InputBundleHistory > 0 || G.InputBundleFuture > 0)
     {
         const std::vector<char> payload = BuildInputBundlePayloadLocked(G.LastSentInputFrame, input);
         SendInputPayloadNowLocked(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE);
@@ -14738,6 +14819,18 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
             return;
         sample = G.RemoteWorldStateSample;
     }
+    if (sample.Frame > frame)
+    {
+        if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled || G.WorldStateTraceMovingHazards) &&
+            (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
+        {
+            std::printf("NSMB WorldState: skip-future inst=%d frame=%u sampleFrame=%u\n",
+                instanceID,
+                frame,
+                sample.Frame);
+        }
+        return;
+    }
 
     const melonDS::u32 predictFrames = std::min(
         frame > sample.Frame ? frame - sample.Frame : 0,
@@ -14873,11 +14966,55 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
         if (!sampleValid || (preferFreshSample && sample.Frame < frame))
             return;
     }
+    if (sample.Frame > frame)
+    {
+        if (G.WorldStateTraceMovingHazards &&
+            (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
+        {
+            std::printf("NSMB WorldHazards: skip-future inst=%d frame=%u sampleFrame=%u count=%u\n",
+                instanceID,
+                frame,
+                sample.Frame,
+                sample.Count);
+        }
+        return;
+    }
 
     const std::vector<ObjectScanSample> localActors = GetWorldMovingHazardsCached(instanceID, frame, nds);
     const std::size_t remoteCount = std::min(
         static_cast<std::size_t>(sample.Count),
         kMaxWorldMovingHazards);
+    if (G.WorldStateTraceMovingHazards &&
+        (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0 ||
+            (remoteCount == 0 && !localActors.empty()) || (remoteCount != localActors.size())))
+    {
+        std::printf("NSMB WorldHazards: apply-sample inst=%d frame=%u sampleFrame=%u remote=%zu local=%zu predict=%u",
+            instanceID,
+            frame,
+            sample.Frame,
+            remoteCount,
+            localActors.size(),
+            frame > sample.Frame ? frame - sample.Frame : 0);
+        for (std::size_t i = 0; i < remoteCount; i++)
+        {
+            std::printf(" r%zu=%u/%08X/%08X/%u",
+                i,
+                sample.Actors[i].GUID,
+                sample.Actors[i].PosX,
+                sample.Actors[i].PosY,
+                sample.Actors[i].StateType);
+        }
+        for (std::size_t i = 0; i < localActors.size(); i++)
+        {
+            std::printf(" l%zu=%u/%08X/%08X/%u",
+                i,
+                localActors[i].GUID,
+                localActors[i].PosX,
+                localActors[i].PosY,
+                localActors[i].StateType);
+        }
+        std::printf("\n");
+    }
     if (remoteCount == 0)
         return;
     const std::size_t pairCount = remoteCount;
@@ -14952,7 +15089,9 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
         const WireWorldActorState& remoteActor = sample.Actors[i];
         if (localIndices[i] < 0)
         {
-            if ((G.WorldStateActivateDormantMovingHazard || G.WorldStateSpawnMovingHazard) &&
+            if ((G.WorldStateRestoreMovingHazardLastBase ||
+                    G.WorldStateActivateDormantMovingHazard ||
+                    G.WorldStateSpawnMovingHazard) &&
                 remoteActor.Found &&
                 (remoteActor.StateType == 1 || remoteActor.StateType == 2))
             {
@@ -14965,8 +15104,7 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
                     pendingFrame = frame;
                 }
 
-                if (G.WorldStateRestoreMovingHazardLastBase &&
-                    lastSpawnedGUID != remoteActor.GUID)
+                if (G.WorldStateRestoreMovingHazardLastBase)
                 {
                     const melonDS::u32 lastBase = FindBestLastMovingHazardBase(instanceID, nds, remoteActor);
                     if (lastBase != 0 &&
@@ -14977,17 +15115,41 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
                             nds->ARM9Write32(lastBase + 0x154, 0);
                             nds->ARM9Write32(lastBase + 0x158, 0);
                         }
-                        lastSpawnedGUID = remoteActor.GUID;
                         restored++;
                         nextRemoteGUIDs[i] = remoteActor.GUID;
                         nextLocalGUIDs[i] = G.WorldMovingHazardLocalGUIDMaps[instanceID][i];
                         mapChanged = true;
                         G.WorldMovingHazardCacheCounts[instanceID] = 0;
                     }
+                    else if (G.WorldStateTraceMovingHazards)
+                    {
+                        std::printf(
+                            "NSMB WorldHazards: restore-miss inst=%d frame=%u remoteGuid=%u settings=%08X pos=%08X/%08X lastBases=",
+                            instanceID,
+                            frame,
+                            remoteActor.GUID,
+                            remoteActor.Settings,
+                            remoteActor.PosX,
+                            remoteActor.PosY);
+                        for (std::size_t mapIndex = 0; mapIndex < kMaxWorldMovingHazards; mapIndex++)
+                        {
+                            const melonDS::u32 base = G.LastWorldMovingHazardLocalBases[instanceID][mapIndex];
+                            melonDS::u16 objectID = 0;
+                            melonDS::u32 settings = 0;
+                            melonDS::u16 stateType = 0;
+                            if (base != 0 && IsValidMainRAMRange(nds, base, 0x14))
+                            {
+                                ReadMainRAMAddressU16(nds, base + 0x0C, objectID);
+                                ReadMainRAMAddressU32(nds, base + 0x08, settings);
+                                ReadMainRAMAddressU16(nds, base + 0x0E, stateType);
+                            }
+                            std::printf(" [%zu]=%08X/%03X/%08X/%u", mapIndex, base, objectID, settings, stateType);
+                        }
+                        std::printf("\n");
+                    }
                 }
 
-                if (lastSpawnedGUID != remoteActor.GUID &&
-                    frame - pendingFrame >= kVsWorldItemNaturalSpawnGraceFrames)
+                if (frame - pendingFrame >= kVsWorldItemNaturalSpawnGraceFrames)
                 {
                     if (G.WorldStateActivateDormantMovingHazard)
                     {
@@ -15017,11 +15179,12 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
                         }
                     }
 
-                    if (lastSpawnedGUID != remoteActor.GUID &&
+                    if ((lastSpawnedGUID != remoteActor.GUID || localActors.empty()) &&
                         G.WorldStateSpawnMovingHazard &&
                         SpawnRemoteWorldActor(instanceID, frame, nds, remoteActor, kVsMovingHazardObjectID, "MovingHazard"))
                     {
                         lastSpawnedGUID = remoteActor.GUID;
+                        pendingFrame = frame;
                         spawned++;
                         G.WorldMovingHazardCacheCounts[instanceID] = 0;
                     }
@@ -15042,11 +15205,6 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
             G.WorldMovingHazardLocalGUIDMaps[instanceID][i] != nextLocalGUIDs[i];
         if (ApplyWireWorldMovingHazardState(nds, remoteActor, predictFrames, localActor.Base))
         {
-            if (G.WorldStateClearMovingHazardLinkFields)
-            {
-                nds->ARM9Write32(localActor.Base + 0x154, 0);
-                nds->ARM9Write32(localActor.Base + 0x158, 0);
-            }
             applied++;
         }
     }
@@ -17545,6 +17703,24 @@ void SyncMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
 
     std::lock_guard<std::mutex> lock(G.Mutex);
     if (!G.Peer) return;
+    if (G.WorldStateTraceMovingHazards &&
+        (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0 || packet.Count == 0))
+    {
+        std::printf("NSMB WorldHazards: send inst=%d frame=%u count=%u",
+            instanceID,
+            frame,
+            packet.Count);
+        for (melonDS::u32 i = 0; i < packet.Count; i++)
+        {
+            std::printf(" slot%u=%u/%08X/%08X/%u",
+                i,
+                packet.Actors[i].GUID,
+                packet.Actors[i].PosX,
+                packet.Actors[i].PosY,
+                packet.Actors[i].StateType);
+        }
+        std::printf("\n");
+    }
     ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), 0);
     if (enetPacket)
         enet_peer_send(G.Peer, 0, enetPacket);
@@ -18118,6 +18294,8 @@ void InitFromEnvironment()
     G.InputUnreliable = EnvFlag("MELONDS_NSML_INPUT_UNRELIABLE");
     G.InputBundleHistory = std::clamp(
         EnvInt("MELONDS_NSML_INPUT_BUNDLE_HISTORY", 0), 0, 31);
+    G.InputBundleFuture = std::clamp(
+        EnvInt("MELONDS_NSML_INPUT_BUNDLE_FUTURE", 0), 0, 31 - G.InputBundleHistory);
     G.InputDropModulo = std::max(0, EnvInt("MELONDS_NSML_INPUT_DROP_MODULO", 0));
     G.InputDropOffset = std::max(0, EnvInt("MELONDS_NSML_INPUT_DROP_OFFSET", 0));
     if (G.InputDropModulo > 0)
@@ -19072,7 +19250,7 @@ void InitFromEnvironment()
     G.Ready = true;
     EmitDiagnosticStartupEvent();
     StartNetworkPumpThreadIfNeeded();
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputHealthTrace=%d inputHealthInterval=%d inputHealthWaitThresholdMs=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputSendDelay=%d inputSendJitter=%d inputSendDelayStart=%u inputSendDelayEnd=%u inputDropModulo=%d inputDropOffset=%d inputDropStart=%u inputDropEnd=%u netPumpThread=%d netPumpSleepUs=%d inputWaitPollUs=%d rollbackInputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackPrePump=%d rollbackRestoreProbe=%d rollbackPredProbeModulo=%d rollbackPredProbeLimit=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputHealthTrace=%d inputHealthInterval=%d inputHealthWaitThresholdMs=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputBundleFuture=%d inputSendDelay=%d inputSendJitter=%d inputSendDelayStart=%u inputSendDelayEnd=%u inputDropModulo=%d inputDropOffset=%d inputDropStart=%u inputDropEnd=%u netPumpThread=%d netPumpSleepUs=%d inputWaitPollUs=%d rollbackInputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackPrePump=%d rollbackRestoreProbe=%d rollbackPredProbeModulo=%d rollbackPredProbeLimit=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -19109,6 +19287,7 @@ void InitFromEnvironment()
         G.InputNetplayMaxFrameLead,
         G.InputUnreliable ? 1 : 0,
         G.InputBundleHistory,
+        G.InputBundleFuture,
         G.InputSendDelayFrames,
         G.InputSendJitterFrames,
         G.InputSendDelayStartFrame,
