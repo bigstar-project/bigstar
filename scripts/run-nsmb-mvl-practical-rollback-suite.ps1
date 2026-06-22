@@ -1454,6 +1454,272 @@ $candidateDefs = @{
             MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES = "12"
         }
     }
+    "predictrepair-delay2-player-world-actorsnap32-lifecycle-prune-transition90-starsnapspawn-pred0" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 0
+        RollbackResimulate = $false
+        RollbackPredictOnly = $true
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            StateSync = $true
+            StateApply = $true
+            StateApplyMode = "globals"
+            StateSyncExtended = $true
+            StateSyncInterval = 30
+            PlayerStateSync = $true
+            PlayerStateApply = $true
+            PlayerStateGlobals = $true
+            PlayerStateSyncInterval = 1
+            PlayerStateMaxPredictFrames = 0
+            WorldStateSync = $true
+            WorldStateApply = $true
+            WorldStateSpawnItem = $true
+            WorldStateApplyMovingHazard = $true
+            WorldStateApplyEffects = $true
+            WorldStateApplyActorSnapshot = $true
+            WorldStateSyncInterval = 2
+            WorldStateMaxPredictFrames = 8
+            WorldStateActorRescanInterval = 15
+        }
+        Env = @{
+            MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT_LIFECYCLE = "1"
+            MELONDS_NSML_WORLD_STATE_PRUNE_EXTRA_ACTOR_SNAPSHOT = "1"
+            MELONDS_NSML_WORLD_STATE_SPAWN_ACTOR_SNAPSHOT_STAR_CANDIDATE = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM_START_OFFSET = "90"
+            MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES = "12"
+        }
+    }
+    "predictrepair-delay2-player-world-actorsnap32-lifecycle-prune-transition90-staractivate-pred0" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 0
+        RollbackResimulate = $false
+        RollbackPredictOnly = $true
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            StateSync = $true
+            StateApply = $true
+            StateApplyMode = "globals"
+            StateSyncExtended = $true
+            StateSyncInterval = 30
+            PlayerStateSync = $true
+            PlayerStateApply = $true
+            PlayerStateGlobals = $true
+            PlayerStateSyncInterval = 1
+            PlayerStateMaxPredictFrames = 0
+            WorldStateSync = $true
+            WorldStateApply = $true
+            WorldStateSpawnItem = $true
+            WorldStateApplyMovingHazard = $true
+            WorldStateApplyEffects = $true
+            WorldStateApplyActorSnapshot = $true
+            WorldStateSyncInterval = 2
+            WorldStateMaxPredictFrames = 8
+            WorldStateActorRescanInterval = 15
+        }
+        Env = @{
+            MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT_LIFECYCLE = "1"
+            MELONDS_NSML_WORLD_STATE_PRUNE_EXTRA_ACTOR_SNAPSHOT = "1"
+            MELONDS_NSML_WORLD_STATE_ACTIVATE_DORMANT_ACTOR_SNAPSHOT_STAR_CANDIDATE = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM_START_OFFSET = "90"
+            MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES = "12"
+        }
+    }
+    "predictrepair-delay2-player-world-actorsnap32-lifecycle-prune-transition90-activate-pred0" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 0
+        RollbackResimulate = $false
+        RollbackPredictOnly = $true
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            StateSync = $true
+            StateApply = $true
+            StateApplyMode = "globals"
+            StateSyncExtended = $true
+            StateSyncInterval = 30
+            PlayerStateSync = $true
+            PlayerStateApply = $true
+            PlayerStateGlobals = $true
+            PlayerStateSyncInterval = 1
+            PlayerStateMaxPredictFrames = 0
+            WorldStateSync = $true
+            WorldStateApply = $true
+            WorldStateSpawnItem = $true
+            WorldStateApplyMovingHazard = $true
+            WorldStateApplyEffects = $true
+            WorldStateApplyActorSnapshot = $true
+            WorldStateSyncInterval = 2
+            WorldStateMaxPredictFrames = 8
+            WorldStateActorRescanInterval = 15
+        }
+        Env = @{
+            MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT_LIFECYCLE = "1"
+            MELONDS_NSML_WORLD_STATE_PRUNE_EXTRA_ACTOR_SNAPSHOT = "1"
+            MELONDS_NSML_WORLD_STATE_ACTIVATE_DORMANT_ACTOR_SNAPSHOT_STAR_CANDIDATE = "1"
+            MELONDS_NSML_WORLD_STATE_ACTIVATE_DORMANT_MOVING_HAZARD = "1"
+            MELONDS_NSML_WORLD_STATE_CLEAR_MOVING_HAZARD_LINK_FIELDS = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM_START_OFFSET = "90"
+            MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES = "12"
+        }
+    }
+    "predictrepair-delay2-player-world-actorsnap32-lifecycle-prune-transition90-restorebase-pred0" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 0
+        RollbackResimulate = $false
+        RollbackPredictOnly = $true
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            StateSync = $true
+            StateApply = $true
+            StateApplyMode = "globals"
+            StateSyncExtended = $true
+            StateSyncInterval = 30
+            PlayerStateSync = $true
+            PlayerStateApply = $true
+            PlayerStateGlobals = $true
+            PlayerStateSyncInterval = 1
+            PlayerStateMaxPredictFrames = 0
+            WorldStateSync = $true
+            WorldStateApply = $true
+            WorldStateSpawnItem = $true
+            WorldStateApplyMovingHazard = $true
+            WorldStateApplyEffects = $true
+            WorldStateApplyActorSnapshot = $true
+            WorldStateSyncInterval = 2
+            WorldStateMaxPredictFrames = 8
+            WorldStateActorRescanInterval = 15
+        }
+        Env = @{
+            MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT_LIFECYCLE = "1"
+            MELONDS_NSML_WORLD_STATE_PRUNE_EXTRA_ACTOR_SNAPSHOT = "1"
+            MELONDS_NSML_WORLD_STATE_ACTIVATE_DORMANT_ACTOR_SNAPSHOT_STAR_CANDIDATE = "1"
+            MELONDS_NSML_WORLD_STATE_ACTIVATE_DORMANT_MOVING_HAZARD = "1"
+            MELONDS_NSML_WORLD_STATE_RESTORE_MOVING_HAZARD_LAST_BASE = "1"
+            MELONDS_NSML_WORLD_STATE_CLEAR_MOVING_HAZARD_LINK_FIELDS = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM_START_OFFSET = "90"
+            MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES = "12"
+        }
+    }
+    "trace-predictrepair-delay2-player-world-actorsnap32-lifecycle-prune-transition90-restorebase-pred0" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 0
+        RollbackResimulate = $false
+        RollbackPredictOnly = $true
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            StateSync = $true
+            StateApply = $true
+            StateApplyMode = "globals"
+            StateSyncExtended = $true
+            StateSyncInterval = 30
+            PlayerStateSync = $true
+            PlayerStateApply = $true
+            PlayerStateGlobals = $true
+            PlayerStateSyncInterval = 1
+            PlayerStateMaxPredictFrames = 0
+            WorldStateSync = $true
+            WorldStateApply = $true
+            WorldStateSpawnItem = $true
+            WorldStateApplyMovingHazard = $true
+            WorldStateApplyEffects = $true
+            WorldStateApplyActorSnapshot = $true
+            WorldStateSyncInterval = 2
+            WorldStateMaxPredictFrames = 8
+            WorldStateActorRescanInterval = 15
+            InputNetplayTrace = $true
+            InputTraceInterval = 30
+        }
+        Env = @{
+            MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT_LIFECYCLE = "1"
+            MELONDS_NSML_WORLD_STATE_PRUNE_EXTRA_ACTOR_SNAPSHOT = "1"
+            MELONDS_NSML_WORLD_STATE_ACTIVATE_DORMANT_ACTOR_SNAPSHOT_STAR_CANDIDATE = "1"
+            MELONDS_NSML_WORLD_STATE_ACTIVATE_DORMANT_MOVING_HAZARD = "1"
+            MELONDS_NSML_WORLD_STATE_RESTORE_MOVING_HAZARD_LAST_BASE = "1"
+            MELONDS_NSML_WORLD_STATE_CLEAR_MOVING_HAZARD_LINK_FIELDS = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM_START_OFFSET = "90"
+            MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES = "12"
+        }
+    }
+    "predictrepair-delay2-player-world-actorsnap32-lifecycle-prune-transition90-restorebase-hazardpred0-pred0" = [pscustomobject]@{
+        Backend = "tinycorepreimage"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 0
+        RollbackResimulate = $false
+        RollbackPredictOnly = $true
+        RollbackSkipRenderDuringResim = $true
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            StateSync = $true
+            StateApply = $true
+            StateApplyMode = "globals"
+            StateSyncExtended = $true
+            StateSyncInterval = 30
+            PlayerStateSync = $true
+            PlayerStateApply = $true
+            PlayerStateGlobals = $true
+            PlayerStateSyncInterval = 1
+            PlayerStateMaxPredictFrames = 0
+            WorldStateSync = $true
+            WorldStateApply = $true
+            WorldStateSpawnItem = $true
+            WorldStateApplyMovingHazard = $true
+            WorldStateApplyEffects = $true
+            WorldStateApplyActorSnapshot = $true
+            WorldStateSyncInterval = 2
+            WorldStateMaxPredictFrames = 8
+            WorldStateActorRescanInterval = 15
+        }
+        Env = @{
+            MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT_LIFECYCLE = "1"
+            MELONDS_NSML_WORLD_STATE_PRUNE_EXTRA_ACTOR_SNAPSHOT = "1"
+            MELONDS_NSML_WORLD_STATE_ACTIVATE_DORMANT_ACTOR_SNAPSHOT_STAR_CANDIDATE = "1"
+            MELONDS_NSML_WORLD_STATE_ACTIVATE_DORMANT_MOVING_HAZARD = "1"
+            MELONDS_NSML_WORLD_STATE_RESTORE_MOVING_HAZARD_LAST_BASE = "1"
+            MELONDS_NSML_WORLD_STATE_CLEAR_MOVING_HAZARD_LINK_FIELDS = "1"
+            MELONDS_NSML_WORLD_STATE_MOVING_HAZARD_MAX_PREDICT_FRAMES = "0"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM = "1"
+            MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM_START_OFFSET = "90"
+            MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES = "12"
+        }
+    }
     "exact-delay2-tinycorepreimage-skiprender" = [pscustomobject]@{
         Backend = "tinycorepreimage"
         InputDelayFrames = 2
@@ -4102,9 +4368,13 @@ $envKeys = @(
     "MELONDS_NSML_ROLLBACK_NSMB_MOVING_HAZARD_OBJECT_LENGTH",
     "MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT_LIFECYCLE",
     "MELONDS_NSML_WORLD_STATE_PRUNE_EXTRA_ACTOR_SNAPSHOT",
+    "MELONDS_NSML_WORLD_STATE_SPAWN_ACTOR_SNAPSHOT_STAR_CANDIDATE",
+    "MELONDS_NSML_WORLD_STATE_ACTIVATE_DORMANT_ACTOR_SNAPSHOT_STAR_CANDIDATE",
     "MELONDS_NSML_WORLD_STATE_MOVING_HAZARD_MAX_PREDICT_FRAMES",
     "MELONDS_NSML_WORLD_STATE_MOVING_HAZARD_MAX_PREDICT_END_OFFSET",
     "MELONDS_NSML_WORLD_STATE_SPAWN_MOVING_HAZARD",
+    "MELONDS_NSML_WORLD_STATE_ACTIVATE_DORMANT_MOVING_HAZARD",
+    "MELONDS_NSML_WORLD_STATE_RESTORE_MOVING_HAZARD_LAST_BASE",
     "MELONDS_NSML_WORLD_STATE_CLEAR_MOVING_HAZARD_LINK_FIELDS",
     "MELONDS_NSML_FIXED_FRAME_SLEEP",
     "MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM",
