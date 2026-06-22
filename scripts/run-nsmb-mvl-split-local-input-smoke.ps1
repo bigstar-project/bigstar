@@ -216,7 +216,10 @@ if ($RollbackInputWaitUs -gt 0) {
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_INPUT_WAIT_US -ErrorAction SilentlyContinue
 }
 $isNsmbTinyCoreRollback = $RollbackBackend -eq "nsmbtinycore" -or $RollbackBackend -eq "nsmb-tiny-core"
-$isTinyCorePreimageRollback = $RollbackBackend -eq "tinycorepreimage" -or $RollbackBackend -eq "tiny-core-preimage"
+$isTinyCorePreimageRollback = $RollbackBackend -eq "tinycorepreimage" `
+    -or $RollbackBackend -eq "tiny-core-preimage"
+$isTinyCoreRAMDeltaRollback = $RollbackBackend -eq "tinycoreramdelta" `
+    -or $RollbackBackend -eq "tiny-core-ram-delta"
 if ($Rollback -and -not $RollbackPredictOnly -and -not $PSBoundParameters.ContainsKey('RollbackResimulate')) {
     $RollbackResimulate = $true
 }
@@ -228,6 +231,16 @@ if ($RollbackSkipIntermediateResimCheckpoints) {
 if ($Rollback -and ($isTinyCorePreimageRollback -or $isNsmbTinyCoreRollback)) {
     $env:MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
     $env:MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+    $env:MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
+    if ($RollbackTinyCoreFlags -eq "") { $RollbackTinyCoreFlags = "0x241" }
+    $env:MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "$RollbackTinyCoreFlags"
+} elseif ($Rollback -and $isTinyCoreRAMDeltaRollback) {
+    $env:MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
+    if ($RollbackSkipJitReset) {
+        $env:MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET -ErrorAction SilentlyContinue
+    }
     $env:MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
     if ($RollbackTinyCoreFlags -eq "") { $RollbackTinyCoreFlags = "0x241" }
     $env:MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "$RollbackTinyCoreFlags"
@@ -1210,9 +1223,14 @@ $stableFields = @(
     "playerActor1Found", "playerActor1X", "playerActor1Y", "playerActor1Z",
     "movingHazardFound", "movingHazardX", "movingHazardY",
     "significantActiveObjects",
+    "playerCount", "player0Powerup", "player1Powerup",
     "player0Lives", "player1Lives", "player0BattleStars", "player1BattleStars",
+    "player0Coins", "player1Coins", "player0Score", "player1Score",
+    "player0DisplayedStars", "player1DisplayedStars",
+    "player0Deaths", "player1Deaths", "player0CollectedStars", "player1CollectedStars",
     "player0Dead", "player1Dead", "player0InventoryPowerup", "player1InventoryPowerup",
-    "playerGlobalHash", "wifiCandidateHash",
+    "playerTransitionStatus0", "playerTransitionStatus1",
+    "wifiCandidateHash",
     "playerActor0UpdateLocked", "playerActor1UpdateLocked",
     "playerActor0VisibleFlag", "playerActor1VisibleFlag"
 )

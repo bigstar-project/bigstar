@@ -81,11 +81,17 @@ Current conclusion:
   - The raw selected-range approach is still not reliable enough. `player=0xC80` fixes one chaos short trace and passes `dualstresslong`, but contact still diverges in player Y/global/moving-hazard state and chaos can stall in longer practical runs.
   - Broadening raw ranges is dangerous. `actorArena`/`ARM9 stack` can trigger `80-100ms` resim frames or ARM9 aborts, and moving-hazard `0x500` raw tail copying makes contact run at `59/94ms` average. The evidence points to pointer-heavy or scheduler-sensitive actor internals being restored in an inconsistent state.
   - Next architecture should use selected field/page snapshots with exclusions rather than object-tail memcpy: keep non-pointer player/contact/hazard fields, skip or remap links/vtables/process nodes, and treat full exact rollback only as an oracle.
+- Tiny core + Main RAM delta rollback:
+  - Added `tinycoreramdelta`, a new backend that stores tiny core state plus full/delta Main RAM page ranges. This avoids full core savestate cost while keeping Main RAM exact.
+  - It confirms the current tradeoff: exact-ish rollback can remove mismatch under delay2 strong jitter, but same-frame rollback still causes visible spikes. The best measured candidate is `exact-delay2-tinycoreramdelta-key2-page256-cp2-maxresim1-skiprender`.
+  - Contact with that candidate had no persistent mismatch but still failed the spike gate: `17.407/17.360ms` average, `93.251/92.990ms` max, over33 `17/14`.
+  - Dualstresslong and chaos also had no persistent mismatch, but remained above the smoothness target: averages `18.1-18.3ms`, max up to `163ms`, and over33 `78-167`.
+  - `tinycoreramdelta` cannot safely use the tinycorepreimage/nsmbtinycore default JIT-reset skip. With `RollbackSkipJitReset`, contact became faster but produced persistent player actor position mismatch. The wrapper now treats `tinycoreramdelta` separately: tiny flags and resim render skip are applied, but JIT reset skip is opt-in only.
 
 Current blocker / next actions:
 
 - Keep delay2 as a hard requirement; increasing GUI rollback InputDelay above `2` is not allowed for this goal.
-- Exact same-frame resim is now the wrong primary optimization target for delay2: even a correct 2F rollback can exceed one display frame. Continue it only as a correctness oracle/baseline.
+- Exact same-frame resim is not yet a playable endpoint for delay2: even the best exact-ish `tinycoreramdelta` path still exceeds one display frame during correction. Continue it as a correctness oracle/baseline and as a source of performance measurements.
 - Switch primary work away from broad raw RAM ranges. Use pointer-safe actor/global page-delta snapshots, off-main-thread shadow resim with atomic publish, or a minimal MvL actor rollback that replays only player/contact/death/world fields and publishes them without blocking the main frame.
 - Add stronger event routes for star pickup/drop/recover, block break persistence, and 8-coin item identity. Current star routes are still input coverage failures, not correctness proof.
 - Keep testing with artificial send delay/jitter and movement-heavy chaos/contact routes. Average FPS alone is insufficient; `maxFrameMs`, `over33ms`, and persistent mismatch detection must stay in the promotion gate.
