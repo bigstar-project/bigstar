@@ -25,6 +25,8 @@ const romIdentity = {
   rom_pair_id:
     '4444444444444444444444444444444444444444444444444444444444444444',
 };
+const hostProfileId = '11111111-1111-4111-8111-111111111111';
+const clientProfileId = '22222222-2222-4222-8222-222222222222';
 
 async function json<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
@@ -34,6 +36,7 @@ async function createRoom() {
   const response = await SELF.fetch('https://match.test/rooms', {
     body: JSON.stringify({
       host_name: 'Host Player',
+      host_player_profile_id: hostProfileId,
       rom_identity: romIdentity,
       settings: gameSettings,
     }),
@@ -42,6 +45,7 @@ async function createRoom() {
   });
   expect(response.status).toBe(201);
   return json<{
+    host_player_profile_id?: string;
     host_token: string;
     room_id: string;
     signal_url: string;
@@ -52,6 +56,7 @@ async function reserveJoin(roomId: string) {
   const response = await SELF.fetch(`https://match.test/rooms/${roomId}/join`, {
     body: JSON.stringify({
       player_name: 'Client Player',
+      player_profile_id: clientProfileId,
       rom_pair_id: romIdentity.rom_pair_id,
     }),
     headers: { 'content-type': 'application/json' },
@@ -60,6 +65,8 @@ async function reserveJoin(roomId: string) {
   expect(response.status).toBe(200);
   return json<{
     client_name?: string;
+    client_player_profile_id?: string;
+    host_player_profile_id?: string;
     join_token: string;
     room_id: string;
     signal_url: string;
@@ -142,6 +149,9 @@ describe('マッチメイキング HTTP API', () => {
     const created = await createRoom();
     expect(created.room_id).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
     expect(created.host_token).toHaveLength(32);
+    expect(created).toMatchObject({
+      host_player_profile_id: hostProfileId,
+    });
     expect(created.signal_url).toBe('wss://match.test/session');
 
     const listed = await SELF.fetch('https://match.test/rooms');
@@ -151,6 +161,7 @@ describe('マッチメイキング HTTP API', () => {
         {
           can_join: true,
           host_name: 'Host Player',
+          host_player_profile_id: hostProfileId,
           rom_identity: romIdentity,
           room_id: created.room_id,
           settings: gameSettings,
@@ -161,6 +172,8 @@ describe('マッチメイキング HTTP API', () => {
 
     const joined = await reserveJoin(created.room_id);
     expect(joined.client_name).toBe('Client Player');
+    expect(joined.client_player_profile_id).toBe(clientProfileId);
+    expect(joined.host_player_profile_id).toBe(hostProfileId);
     expect(joined.join_token).toHaveLength(32);
     expect(joined.room_id).toBe(created.room_id);
 
@@ -170,6 +183,8 @@ describe('マッチメイキング HTTP API', () => {
     expect(afterJoin.status).toBe(200);
     expect(await json(afterJoin)).toMatchObject({
       client_name: 'Client Player',
+      client_player_profile_id: clientProfileId,
+      host_player_profile_id: hostProfileId,
       room_id: created.room_id,
       status: 'joining',
     });

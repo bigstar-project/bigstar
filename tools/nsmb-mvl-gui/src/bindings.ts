@@ -54,6 +54,7 @@ export type Defaults = {
 	client_rom_path: string,
 	base_rom_path: string,
 	player_name: string,
+	player_profile_id: string,
 	roms_prepared_once: boolean,
 	input_config_opened_once: boolean,
 	port: number,
@@ -131,6 +132,7 @@ export type Lives = "3" | "5" | "endless";
 export type MatchHistoryRecord = {
 	id: string,
 	logDir: string,
+	playerIds: MatchPlayerIds,
 	playerNames: MatchPlayerNames,
 	role: Role,
 	roomCode: string,
@@ -141,6 +143,11 @@ export type MatchHistoryRecord = {
 };
 
 export type MatchHistoryStatus = "running" | "completed" | "stopped";
+
+export type MatchPlayerIds = {
+	mario: string,
+	luigi: string,
+};
 
 export type MatchPlayerNames = {
 	mario: string,

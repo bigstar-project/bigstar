@@ -104,6 +104,7 @@ const route = app
     const record = await room.createRoom({
       room_id: roomId,
       host_name: body.host_name,
+      host_player_profile_id: body.host_player_profile_id,
       host_token: hostToken,
       settings: body.settings,
       rom_identity: body.rom_identity,
@@ -116,6 +117,9 @@ const route = app
       {
         room_id: roomId,
         host_token: hostToken,
+        ...(record.host_player_profile_id
+          ? { host_player_profile_id: record.host_player_profile_id }
+          : {}),
         signal_url: signalUrl(c.req.raw),
         settings: record.settings,
         rom_identity: record.rom_identity,
@@ -166,6 +170,7 @@ const route = app
       const record = await room.reserveJoin({
         join_token: joinToken,
         client_name: body.player_name,
+        client_player_profile_id: body.player_profile_id,
         rom_pair_id: body.rom_pair_id,
         now,
       });
@@ -175,7 +180,13 @@ const route = app
         {
           room_id: roomId,
           join_token: joinToken,
+          ...(record.host_player_profile_id
+            ? { host_player_profile_id: record.host_player_profile_id }
+            : {}),
           ...(record.client_name ? { client_name: record.client_name } : {}),
+          ...(record.client_player_profile_id
+            ? { client_player_profile_id: record.client_player_profile_id }
+            : {}),
           signal_url: signalUrl(c.req.raw),
           settings: record.settings,
           rom_identity: record.rom_identity,

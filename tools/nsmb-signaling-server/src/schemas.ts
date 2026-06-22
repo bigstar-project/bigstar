@@ -5,6 +5,7 @@ export const roleSchema = z.enum(['offer', 'answer']);
 export const courseModeSchema = z.enum(['random', 'select']);
 export const livesSchema = z.enum(['3', '5', 'endless']);
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/i);
+const playerProfileIdSchema = z.string().uuid();
 
 export const gameSettingsSchema = z
   .object({
@@ -77,7 +78,9 @@ export const romIdentitySchema = z.object({
 export const roomSummarySchema = z.object({
   room_id: z.string(),
   host_name: z.string(),
+  host_player_profile_id: playerProfileIdSchema.optional(),
   client_name: z.string().trim().min(1).max(32).optional(),
+  client_player_profile_id: playerProfileIdSchema.optional(),
   status: roomStatusSchema,
   settings: gameSettingsSchema,
   rom_identity: romIdentitySchema,
@@ -90,6 +93,7 @@ export const roomSummarySchema = z.object({
 
 export const createRoomRequestSchema = z.object({
   host_name: z.string().trim().min(1).max(32),
+  host_player_profile_id: playerProfileIdSchema.optional(),
   settings: gameSettingsSchema,
   rom_identity: romIdentitySchema,
 });
@@ -97,6 +101,7 @@ export const createRoomRequestSchema = z.object({
 export const createRoomResponseSchema = z.object({
   room_id: z.string(),
   host_token: z.string(),
+  host_player_profile_id: playerProfileIdSchema.optional(),
   signal_url: z.string(),
   settings: gameSettingsSchema,
   rom_identity: romIdentitySchema,
@@ -104,13 +109,16 @@ export const createRoomResponseSchema = z.object({
 
 export const joinRoomRequestSchema = z.object({
   player_name: z.string().trim().min(1).max(32).optional(),
+  player_profile_id: playerProfileIdSchema.optional(),
   rom_pair_id: sha256Schema,
 });
 
 export const joinRoomResponseSchema = z.object({
   room_id: z.string(),
   join_token: z.string(),
+  host_player_profile_id: playerProfileIdSchema.optional(),
   client_name: z.string().trim().min(1).max(32).optional(),
+  client_player_profile_id: playerProfileIdSchema.optional(),
   signal_url: z.string(),
   settings: gameSettingsSchema,
   rom_identity: romIdentitySchema,

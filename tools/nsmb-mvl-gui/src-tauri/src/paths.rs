@@ -353,7 +353,7 @@ pub(crate) fn save_match_history(
     app: &AppHandle,
     matches: &[MatchHistoryRecord],
 ) -> Result<(), String> {
-    const MAX_MATCH_HISTORY: usize = 100;
+    const MAX_MATCH_HISTORY: usize = 1000;
     let path = match_history_path(app)?;
     let document = MatchHistoryDocument {
         schema_version: 1,

@@ -16,6 +16,7 @@ export type RoomRecord = z.infer<typeof roomRecordSchema>;
 export type CreateRoomParams = {
   room_id: string;
   host_name: string;
+  host_player_profile_id?: string;
   host_token: string;
   settings: z.infer<typeof gameSettingsSchema>;
   rom_identity: RomIdentity;
@@ -26,6 +27,7 @@ export type CreateRoomParams = {
 export type ReserveJoinParams = {
   join_token: string;
   client_name?: string;
+  client_player_profile_id?: string;
   rom_pair_id: string;
   now: number;
 };
@@ -61,7 +63,13 @@ export function publicRoom(record: RoomRecord, peerCount = 0): RoomSummary {
   return {
     room_id: record.room_id,
     host_name: record.host_name,
+    ...(record.host_player_profile_id
+      ? { host_player_profile_id: record.host_player_profile_id }
+      : {}),
     ...(record.client_name ? { client_name: record.client_name } : {}),
+    ...(record.client_player_profile_id
+      ? { client_player_profile_id: record.client_player_profile_id }
+      : {}),
     status: record.status,
     settings: record.settings,
     rom_identity: record.rom_identity,

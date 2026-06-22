@@ -7,11 +7,11 @@ import type { LauncherActions, LauncherSummary } from './types';
 
 const summary: LauncherSummary = {
   connectionActive: false,
-  courseNote: 'Match seed から stage 0-4 を決めます。',
+  courseNote: '起動時にコース列と各試合の seed を確定します。',
   currentRomPath: 'C:\\roms\\host.nds',
   romPreparation: '再利用',
   romsConfigured: true,
-  selectedStageLabel: '3',
+  selectedStageLabel: '土管',
   updateRequired: false,
 };
 

@@ -48,10 +48,10 @@ If a new UI component is needed, first check whether Park UI has the desired com
 
 ```powershell
 cd tools/nsmb-mvl-gui
-pnpm dlx @park-ui/cli@next add <component-name>
+pnpm dlx @park-ui/cli@latest add <component-name>
 ```
 
-Use the canonical Park UI component name from the docs, for example `dialog`, `tabs`, `select`, `tooltip`, or `menu`. After adding components, review generated files under `src/components/ui` and `src/theme/recipes`, then adapt them to the app's existing design conventions as needed.
+Use the canonical Park UI component name from the docs, for example `dialog`, `tabs`, `select`, `tooltip`, `collapsible`, or `menu`. After adding components, review generated files under `src/components/ui` and `src/theme/recipes`, then adapt them to the app's existing design conventions as needed.
 
 ## Code Quality Checks
 

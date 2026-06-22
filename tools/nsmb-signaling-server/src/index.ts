@@ -103,6 +103,9 @@ export class SignalingRoom
     const room = roomRecordSchema.parse({
       room_id: params.room_id,
       host_name: params.host_name,
+      ...(params.host_player_profile_id
+        ? { host_player_profile_id: params.host_player_profile_id }
+        : {}),
       host_token: params.host_token,
       join_token: null,
       status: 'open',
@@ -128,6 +131,9 @@ export class SignalingRoom
       status: 'joining',
       join_token: params.join_token,
       ...(params.client_name ? { client_name: params.client_name } : {}),
+      ...(params.client_player_profile_id
+        ? { client_player_profile_id: params.client_player_profile_id }
+        : {}),
       updated_at: params.now,
       can_join: false,
     });

@@ -28,6 +28,8 @@ const romIdentity = {
   rom_pair_id:
     '4444444444444444444444444444444444444444444444444444444444444444',
 };
+const hostProfileId = '11111111-1111-4111-8111-111111111111';
+const clientProfileId = '22222222-2222-4222-8222-222222222222';
 
 async function installGuiDriver(
   page: Page,
@@ -38,12 +40,19 @@ async function installGuiDriver(
   } = {},
 ) {
   await page.addInitScript(
-    ({ inputConfigOpened, playerName, romIdentity, romsPrepared }) => {
+    ({
+      hostProfileId,
+      inputConfigOpened,
+      playerName,
+      romIdentity,
+      romsPrepared,
+    }) => {
       const state = {
         active: false,
         inputConfigOpened,
         lastLogDir: null as string | null,
         playerName,
+        playerProfileId: hostProfileId,
         romsPrepared,
       };
       const calls: { args: unknown[]; name: string }[] = [];
@@ -91,6 +100,7 @@ async function installGuiDriver(
                 input_config_opened_once: state.inputConfigOpened,
                 diagnostic_events_enabled: false,
                 player_name: state.playerName,
+                player_profile_id: state.playerProfileId,
                 port: 8165,
                 roms_prepared_once: state.romsPrepared,
                 room_code: 'test-room',
@@ -165,6 +175,7 @@ async function installGuiDriver(
       });
     },
     {
+      hostProfileId,
       inputConfigOpened: options.inputConfigOpened ?? true,
       playerName: options.playerName ?? 'Player',
       romIdentity,
@@ -188,6 +199,7 @@ async function installRoomsApi(page: Page) {
             created_at: 1,
             expires_at: Date.now() + 600_000,
             host_name: 'Host Player',
+            host_player_profile_id: hostProfileId,
             peer_count: 1,
             room_id: 'room12345',
             settings,
@@ -211,6 +223,7 @@ async function installRoomsApi(page: Page) {
         created_at: 1,
         expires_at: Date.now() + 600_000,
         host_name: 'Host Player',
+        host_player_profile_id: hostProfileId,
         peer_count: 1,
         room_id: 'room12345',
         settings,
@@ -225,6 +238,8 @@ async function installRoomsApi(page: Page) {
       contentType: 'application/json',
       json: {
         join_token: 'join-token',
+        host_player_profile_id: hostProfileId,
+        client_player_profile_id: clientProfileId,
         room_id: 'room12345',
         rom_identity: romIdentity,
         settings,

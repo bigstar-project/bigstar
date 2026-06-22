@@ -13,11 +13,11 @@ import type {
 
 const summary: LauncherSummary = {
   connectionActive: false,
-  courseNote: 'Match seed から stage 0-4 を決めます。',
+  courseNote: '起動時にコース列と各試合の seed を確定します。',
   currentRomPath: 'C:\\roms\\host.nds',
   romPreparation: '再利用',
   romsConfigured: true,
-  selectedStageLabel: '3',
+  selectedStageLabel: '土管',
   updateRequired: false,
 };
 
@@ -94,6 +94,10 @@ const currentMatch: BattleMatchRecord = {
   playerNames: {
     mario: 'Alice',
     luigi: 'Bob',
+  },
+  playerIds: {
+    mario: '11111111-1111-4111-8111-111111111111',
+    luigi: '22222222-2222-4222-8222-222222222222',
   },
   role: 'host',
   roomCode: 'test-room',
@@ -203,13 +207,39 @@ describe('対戦ビュー', () => {
 
   test('現在の対戦状況にステージ結果を表示する', async () => {
     const { screen } = await renderBattleView({ currentMatch });
+    const startedTime = new Date(currentMatch.startedAt).toLocaleTimeString(
+      'ja-JP',
+      {
+        hour: '2-digit',
+        minute: '2-digit',
+      },
+    );
+    const startedDate = new Date(currentMatch.startedAt).toLocaleDateString(
+      'ja-JP',
+      {
+        day: '2-digit',
+        month: '2-digit',
+      },
+    );
 
     await expect.element(screen.getByText('現在の対戦状況')).toBeVisible();
+    await expect.element(screen.getByText('対戦中')).toBeVisible();
     await expect.element(screen.getByText('1 - 0')).toBeVisible();
-    await expect.element(screen.getByText('Alice 勝利')).toBeVisible();
-    await expect.element(screen.getByText('Stage 2')).toBeVisible();
-    await expect.element(screen.getByText('5 / 0')).toBeVisible();
-    await expect.element(screen.getByText('3 / 2')).toBeVisible();
+    await expect.element(screen.getByText(startedTime)).not.toBeInTheDocument();
+    await expect.element(screen.getByText(startedDate)).not.toBeInTheDocument();
+    await expect
+      .element(screen.getByTestId('stage-dots'))
+      .not.toBeInTheDocument();
+    await expect.element(screen.getByText('ゲーム')).toBeVisible();
+    await expect.element(screen.getByText('雪')).toBeVisible();
+    await expect.element(screen.getByText('Game 1')).not.toBeInTheDocument();
+    await expect.element(screen.getByText('未プレイ')).not.toBeInTheDocument();
+    await expect.element(screen.getByText('勝者')).toBeVisible();
+    await expect.element(screen.getByText('マリオ')).toBeVisible();
+    await expect.element(screen.getByText('ルイージ')).toBeVisible();
+    await expect.element(screen.getByText('C:\\logs\\run1')).toBeVisible();
+    await expect.element(screen.getByText('5 / 0')).not.toBeInTheDocument();
+    await expect.element(screen.getByText('3 / 2')).not.toBeInTheDocument();
     await expect.element(screen.getByText(/死亡/)).not.toBeInTheDocument();
   });
 

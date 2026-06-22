@@ -2,6 +2,7 @@ import { absoluteCenter } from './absolute-center';
 import { badge } from './badge';
 import { button } from './button';
 import { card } from './card';
+import { collapsible } from './collapsible';
 import { dialog } from './dialog';
 import { field } from './field';
 import { group } from './group';
@@ -23,5 +24,6 @@ export const recipes = {
   absoluteCenter,
   spinner,
   dialog,
+  collapsible,
 };
 export const slotRecipes = {};

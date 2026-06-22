@@ -11,6 +11,7 @@ export type { RoomSummary };
 type CreateRoomInput = {
   signalUrl: string;
   hostName: string;
+  hostProfileId: string;
   settings: GameSettings;
   romIdentity: RomIdentity;
 };
@@ -19,6 +20,7 @@ type JoinRoomInput = {
   signalUrl: string;
   roomId: string;
   playerName: string;
+  playerProfileId: string;
   romPairId: string;
 };
 
@@ -73,6 +75,7 @@ export async function getRoom(signalUrl: string, roomId: string) {
 
 export async function createRoom({
   hostName,
+  hostProfileId,
   romIdentity,
   settings,
   signalUrl,
@@ -80,6 +83,7 @@ export async function createRoom({
   const response = await clientFor(signalUrl).rooms.$post({
     json: {
       host_name: hostName,
+      host_player_profile_id: hostProfileId,
       rom_identity: romIdentity,
       settings,
     },
@@ -96,13 +100,18 @@ export async function createRoom({
 
 export async function joinRoom({
   playerName,
+  playerProfileId,
   romPairId,
   roomId,
   signalUrl,
 }: JoinRoomInput) {
   const response = await clientFor(signalUrl).rooms[':roomId'].join.$post({
     param: { roomId },
-    json: { player_name: playerName, rom_pair_id: romPairId },
+    json: {
+      player_name: playerName,
+      player_profile_id: playerProfileId,
+      rom_pair_id: romPairId,
+    },
   });
   if (!response.ok) {
     throw new Error(await readError(response));

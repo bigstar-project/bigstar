@@ -33,7 +33,11 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
     fs::create_dir_all(&app_dir)
         .map_err(|err| format!("アプリデータディレクトリを作成できません: {err}"))?;
     let (host_rom, client_rom) = fixed_generated_rom_paths(&app)?;
-    let saved = load_launcher_settings(&app)?;
+    let mut saved = load_launcher_settings(&app)?;
+    if saved.player_profile_id.trim().is_empty() {
+        saved.player_profile_id = uuid::Uuid::new_v4().to_string();
+        save_launcher_settings(&app, &saved)?;
+    }
     let signal_url =
         std::env::var("NSMB_MVL_SIGNAL_URL").unwrap_or_else(|_| DEFAULT_SIGNAL_URL.to_owned());
 
@@ -44,6 +48,7 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
         client_rom_path: client_rom.to_string_lossy().into_owned(),
         base_rom_path: saved.base_rom_path.trim().to_owned(),
         player_name: saved.player_name.trim().to_owned(),
+        player_profile_id: saved.player_profile_id.trim().to_owned(),
         roms_prepared_once: saved.roms_prepared_once,
         input_config_opened_once: saved.input_config_opened_once,
         port: DEFAULT_PORT,

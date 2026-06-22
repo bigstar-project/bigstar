@@ -14,6 +14,7 @@ import {
   selectedStageFrom,
   withRequiredPlan,
 } from '../form';
+import { maxMatchHistoryRecords } from '../matchHistory';
 import {
   closeRoom as closeMatchmakingRoom,
   createRoom as createMatchmakingRoom,
@@ -51,6 +52,7 @@ import type {
   SaveRomPathsRequest,
   StatusKind,
 } from '../types';
+import { stageLabel } from './options';
 import {
   type BattleMatchRecord,
   type BattleMatchStatus,
@@ -104,6 +106,7 @@ type PreparedRomCache = {
 type HostedRoom = {
   roomId: string;
   form: FormState;
+  playerIds: BattleMatchRecord['playerIds'];
   playerNames: BattleMatchRecord['playerNames'];
 };
 
@@ -122,6 +125,22 @@ function defaultPlayerNames(form: FormState): BattleMatchRecord['playerNames'] {
   return {
     mario: '相手',
     luigi: localName,
+  };
+}
+
+function defaultPlayerIds(
+  form: FormState,
+  localProfileId: string,
+): BattleMatchRecord['playerIds'] {
+  if (form.role === 'host') {
+    return {
+      mario: localProfileId,
+      luigi: '',
+    };
+  }
+  return {
+    mario: '',
+    luigi: localProfileId,
   };
 }
 
@@ -180,6 +199,7 @@ export function useLauncherController() {
   const currentMatchRef = useRef<BattleMatchRecord | null>(null);
   const [matchHistory, setMatchHistory] = useState<BattleMatchRecord[]>([]);
   const [matchHistoryLoaded, setMatchHistoryLoaded] = useState(false);
+  const [playerProfileId, setPlayerProfileId] = useState('');
 
   const currentRomPath =
     form.role === 'host' ? form.hostRomPath : form.clientRomPath;
@@ -191,11 +211,11 @@ export function useLauncherController() {
     selectedStage === null
       ? form.courseMode === 'random'
         ? '未確定'
-        : '0'
-      : String(selectedStage);
+        : stageLabel(0)
+      : stageLabel(selectedStage);
   const courseNote =
     form.courseMode === 'select'
-      ? `Game ${form.courseStages.map((stage) => stage).join(' / ')}`
+      ? `ゲーム ${form.courseStages.map((stage) => stageLabel(stage)).join(' / ')}`
       : '起動時にコース列と各試合の seed を確定します。';
   const connectionActive =
     connectionStatus.text.startsWith('実行中') ||
@@ -268,13 +288,13 @@ export function useLauncherController() {
         ...current,
         status: matchIsComplete(current.stages) ? 'completed' : status,
       };
-      currentMatchRef.current = null;
-      setCurrentMatch(null);
+      currentMatchRef.current = archived;
+      setCurrentMatch(archived);
       setMatchHistory((history) =>
         [
           archived,
           ...history.filter((match) => match.id !== archived.id),
-        ].slice(0, 50),
+        ].slice(0, maxMatchHistoryRecords),
       );
     },
     [],
@@ -349,7 +369,8 @@ export function useLauncherController() {
         setConnectionStatus({ text: '未接続', kind: 'idle' });
         if (
           response.log_dir &&
-          currentMatchRef.current?.logDir === response.log_dir
+          currentMatchRef.current?.logDir === response.log_dir &&
+          currentMatchRef.current.status === 'running'
         ) {
           archiveCurrentMatch('stopped');
         }
@@ -407,6 +428,7 @@ export function useLauncherController() {
           rollbackEnabled: initialForm.rollbackEnabled,
           diagnosticEventsEnabled: defaults.diagnostic_events_enabled ?? false,
         });
+        setPlayerProfileId(defaults.player_profile_id);
         setOnboardingRomsPrepared(defaults.roms_prepared_once);
         setOnboardingInputConfigOpened(defaults.input_config_opened_once);
         setOnboardingPlayerNameConfigured(
@@ -415,7 +437,7 @@ export function useLauncherController() {
         try {
           const persistedHistory = await loadMatchHistory();
           if (!disposed) {
-            setMatchHistory(persistedHistory.slice(0, 100));
+            setMatchHistory(persistedHistory.slice(0, maxMatchHistoryRecords));
           }
         } catch (error) {
           if (!disposed) {
@@ -635,6 +657,10 @@ export function useLauncherController() {
       playerNames: BattleMatchRecord['playerNames'] = defaultPlayerNames(
         sourceForm,
       ),
+      playerIds: BattleMatchRecord['playerIds'] = defaultPlayerIds(
+        sourceForm,
+        playerProfileId,
+      ),
     ) => {
       const nextForm = withRequiredPlan(sourceForm);
       if (
@@ -684,6 +710,7 @@ export function useLauncherController() {
         const record: BattleMatchRecord = {
           id: response.log_dir,
           logDir: response.log_dir,
+          playerIds,
           playerNames,
           role: nextForm.role,
           roomCode: nextForm.roomCode,
@@ -706,7 +733,13 @@ export function useLauncherController() {
         return false;
       }
     },
-    [archiveCurrentMatch, cachedPreparedRomsFor, ensurePreparedRoms, form],
+    [
+      archiveCurrentMatch,
+      cachedPreparedRomsFor,
+      ensurePreparedRoms,
+      form,
+      playerProfileId,
+    ],
   );
 
   const startMatch = async () => {
@@ -732,6 +765,7 @@ export function useLauncherController() {
       const nextForm = withRequiredPlan(sourceForm);
       return createMatchmakingRoom({
         hostName: nextForm.hostName,
+        hostProfileId: playerProfileId,
         romIdentity,
         settings: currentSettings(nextForm),
         signalUrl: nextForm.signalUrl,
@@ -751,6 +785,7 @@ export function useLauncherController() {
     }) =>
       joinMatchmakingRoom({
         playerName,
+        playerProfileId,
         romPairId,
         roomId,
         signalUrl: form.signalUrl,
@@ -831,6 +866,10 @@ export function useLauncherController() {
       setHostedRoom({
         roomId: response.room_id,
         form: nextForm,
+        playerIds: {
+          mario: playerProfileId,
+          luigi: '',
+        },
         playerNames: {
           mario: playerName,
           luigi: '相手',
@@ -938,10 +977,20 @@ export function useLauncherController() {
         text: '部屋に参加しました。接続を確立してからmelonDSを起動します',
         kind: 'idle',
       });
-      await startMatchFor(nextForm, {
-        mario: playerNameOrFallback(room.host_name, '相手'),
-        luigi: playerNameOrFallback(playerName, 'プレイヤー'),
-      });
+      await startMatchFor(
+        nextForm,
+        {
+          mario: playerNameOrFallback(room.host_name, '相手'),
+          luigi: playerNameOrFallback(playerName, 'プレイヤー'),
+        },
+        {
+          mario:
+            room.host_player_profile_id ??
+            response.host_player_profile_id ??
+            '',
+          luigi: playerProfileId,
+        },
+      );
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });
     } finally {
@@ -979,13 +1028,20 @@ export function useLauncherController() {
           text: '参加者を検出しました。接続を確立してからmelonDSを起動します',
           kind: 'idle',
         });
-        await startMatchForRef.current(hostedRoom.form, {
-          ...hostedRoom.playerNames,
-          luigi: playerNameOrFallback(
-            room.client_name ?? '',
-            hostedRoom.playerNames.luigi,
-          ),
-        });
+        await startMatchForRef.current(
+          hostedRoom.form,
+          {
+            ...hostedRoom.playerNames,
+            luigi: playerNameOrFallback(
+              room.client_name ?? '',
+              hostedRoom.playerNames.luigi,
+            ),
+          },
+          {
+            ...hostedRoom.playerIds,
+            luigi: room.client_player_profile_id ?? '',
+          },
+        );
       } catch (error) {
         if (!disposed) {
           setHostedRoom(null);

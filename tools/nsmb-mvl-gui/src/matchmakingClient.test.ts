@@ -25,6 +25,8 @@ const romIdentity = {
   rom_pair_id:
     '4444444444444444444444444444444444444444444444444444444444444444',
 };
+const hostProfileId = '11111111-1111-4111-8111-111111111111';
+const clientProfileId = '22222222-2222-4222-8222-222222222222';
 
 function jsonResponse(body: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(body), {
@@ -69,6 +71,7 @@ describe('マッチメイキングクライアント', () => {
     await expect(
       createRoom({
         hostName: 'Alice',
+        hostProfileId,
         romIdentity,
         settings,
         signalUrl: 'wss://match.example/session',
@@ -83,6 +86,7 @@ describe('マッチメイキングクライアント', () => {
       expect.objectContaining({
         body: JSON.stringify({
           host_name: 'Alice',
+          host_player_profile_id: hostProfileId,
           rom_identity: romIdentity,
           settings,
         }),
@@ -104,6 +108,7 @@ describe('マッチメイキングクライアント', () => {
     await expect(
       joinRoom({
         playerName: 'Bob',
+        playerProfileId: clientProfileId,
         romPairId: romIdentity.rom_pair_id,
         roomId: 'room-1',
         signalUrl: 'ws://127.0.0.1:8787/session?old=true',
@@ -118,6 +123,7 @@ describe('マッチメイキングクライアント', () => {
       expect.objectContaining({
         body: JSON.stringify({
           player_name: 'Bob',
+          player_profile_id: clientProfileId,
           rom_pair_id: romIdentity.rom_pair_id,
         }),
         method: 'POST',
@@ -136,6 +142,7 @@ describe('マッチメイキングクライアント', () => {
     await expect(
       joinRoom({
         playerName: 'Bob',
+        playerProfileId: clientProfileId,
         romPairId: romIdentity.rom_pair_id,
         roomId: 'room-1',
         signalUrl: 'wss://match.example/session',

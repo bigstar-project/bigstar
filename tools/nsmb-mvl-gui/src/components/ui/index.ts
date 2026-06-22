@@ -8,6 +8,7 @@ export {
 } from './button';
 export * as Card from './card';
 export { CloseButton, type CloseButtonProps } from './close-button';
+export * as Collapsible from './collapsible';
 export * as Dialog from './dialog';
 export * as Field from './field';
 export { Group, type GroupProps } from './group';

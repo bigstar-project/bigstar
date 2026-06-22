@@ -18,6 +18,7 @@ specta = "=2.0.0-rc.25"
 specta-typescript = "0.0.12"
 tauri = { version = "2.9.0", features = [] }
 tauri-specta = { version = "=2.0.0-rc.25", features = ["typescript", "derive"] }
+uuid = { version = "1", features = ["v4"] }
 
 [lints.rust]
 unsafe_code = "forbid"

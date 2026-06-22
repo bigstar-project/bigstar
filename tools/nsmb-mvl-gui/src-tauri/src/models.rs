@@ -69,6 +69,7 @@ pub(crate) struct Defaults {
     pub(crate) client_rom_path: String,
     pub(crate) base_rom_path: String,
     pub(crate) player_name: String,
+    pub(crate) player_profile_id: String,
     pub(crate) roms_prepared_once: bool,
     pub(crate) input_config_opened_once: bool,
     pub(crate) port: u16,
@@ -80,6 +81,7 @@ pub(crate) struct Defaults {
 pub(crate) struct LauncherSettings {
     pub(crate) base_rom_path: String,
     pub(crate) player_name: String,
+    pub(crate) player_profile_id: String,
     pub(crate) roms_prepared_once: bool,
     pub(crate) input_config_opened_once: bool,
     pub(crate) diagnostic_events_enabled: bool,
@@ -186,6 +188,13 @@ pub(crate) struct MatchPlayerNames {
 
 #[derive(Clone, Debug, Deserialize, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct MatchPlayerIds {
+    pub(crate) mario: String,
+    pub(crate) luigi: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub(crate) enum MatchHistoryStatus {
     Running,
     Completed,
@@ -197,6 +206,7 @@ pub(crate) enum MatchHistoryStatus {
 pub(crate) struct MatchHistoryRecord {
     pub(crate) id: String,
     pub(crate) log_dir: String,
+    pub(crate) player_ids: MatchPlayerIds,
     pub(crate) player_names: MatchPlayerNames,
     pub(crate) role: Role,
     pub(crate) room_code: String,

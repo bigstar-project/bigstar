@@ -288,7 +288,7 @@ export function BattleView({
               icon={<Flag size={24} weight="fill" />}
               label="起動ステージ"
               value={summary.selectedStageLabel}
-              caption="0-4 決定"
+              caption="コース決定"
             />
           </div>
         </aside>
@@ -562,7 +562,7 @@ function CourseSequenceFields({
         <SelectField
           key={`game-${index + 1}`}
           icon={<Flag size={18} weight="fill" />}
-          label={`Game ${index + 1}`}
+          label={`ゲーム ${index + 1}`}
           options={stageOptions}
           value={String(stage)}
           onChange={(value) => {

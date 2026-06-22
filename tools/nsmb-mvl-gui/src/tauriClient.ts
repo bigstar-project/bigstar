@@ -1,6 +1,13 @@
 import { commands } from './bindings';
+import { maxMatchHistoryRecords } from './matchHistory';
+import {
+  previewDefaults,
+  previewMatchHistory,
+  previewMatchHistoryKey,
+  previewRomIdentity,
+  readyPreviewDefaults,
+} from './previewData';
 import type {
-  Defaults,
   GenerateRomRequest,
   GenerateRomResponse,
   LaunchRequest,
@@ -24,42 +31,6 @@ async function unwrapCommand<T>(
   }
   return response.data;
 }
-
-const previewDefaults: Defaults = {
-  signal_url: 'wss://nsmb-mvl-signaling-prod.uniunntaro.workers.dev/session',
-  room_code: 'test-room',
-  host_rom_path:
-    'C:\\Users\\Sugiyama\\AppData\\Roaming\\dev.melonds.nsmb-mvl\\roms\\nsmb-mvl-host.nds',
-  client_rom_path:
-    'C:\\Users\\Sugiyama\\AppData\\Roaming\\dev.melonds.nsmb-mvl\\roms\\nsmb-mvl-client.nds',
-  base_rom_path: '',
-  player_name: '',
-  roms_prepared_once: false,
-  input_config_opened_once: false,
-  diagnostic_events_enabled: false,
-  port: 8165,
-};
-
-const readyPreviewDefaults: Defaults = {
-  ...previewDefaults,
-  base_rom_path: 'C:\\Users\\Sugiyama\\roms\\New Super Mario Bros.nds',
-  player_name: 'Preview Player',
-  roms_prepared_once: true,
-  input_config_opened_once: true,
-};
-
-const previewRomIdentity = {
-  client_rom_sha256:
-    '2222222222222222222222222222222222222222222222222222222222222222',
-  generator_id:
-    '3333333333333333333333333333333333333333333333333333333333333333',
-  host_rom_sha256:
-    '1111111111111111111111111111111111111111111111111111111111111111',
-  rom_pair_id:
-    '4444444444444444444444444444444444444444444444444444444444444444',
-};
-
-const previewMatchHistoryKey = 'nsmb-mvl-preview-match-history';
 
 function isTauriRuntime() {
   return '__TAURI_INTERNALS__' in window;
@@ -190,9 +161,15 @@ export function loadMatchHistory() {
   if (!isTauriRuntime()) {
     try {
       const raw = window.localStorage.getItem(previewMatchHistoryKey);
-      return Promise.resolve<MatchHistoryRecord[]>(raw ? JSON.parse(raw) : []);
+      const stored = raw ? (JSON.parse(raw) as MatchHistoryRecord[]) : [];
+      if (stored.length > 0 || previewScenario() !== 'ready') {
+        return Promise.resolve<MatchHistoryRecord[]>(stored);
+      }
+      return Promise.resolve<MatchHistoryRecord[]>(previewMatchHistory());
     } catch {
-      return Promise.resolve<MatchHistoryRecord[]>([]);
+      return Promise.resolve<MatchHistoryRecord[]>(
+        previewScenario() === 'ready' ? previewMatchHistory() : [],
+      );
     }
   }
   return unwrapCommand(commands.loadMatchHistory());
@@ -202,7 +179,7 @@ export function saveMatchHistory(matches: MatchHistoryRecord[]) {
   if (!isTauriRuntime()) {
     window.localStorage.setItem(
       previewMatchHistoryKey,
-      JSON.stringify(matches.slice(0, 100)),
+      JSON.stringify(matches.slice(0, maxMatchHistoryRecords)),
     );
     return Promise.resolve(null);
   }

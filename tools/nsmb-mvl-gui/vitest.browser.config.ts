@@ -4,6 +4,9 @@ import tsconfigPaths from 'vite-tsconfig-paths';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  optimizeDeps: {
+    include: ['@ark-ui/react/collapsible'],
+  },
   plugins: [react(), tsconfigPaths()],
   test: {
     include: ['src/**/*.browser.test.{ts,tsx}'],

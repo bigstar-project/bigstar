@@ -1,11 +1,13 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import { describe, expect, test, vi } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import type { LaunchRequest, LaunchResponse } from '../types';
 import { useLauncherController } from './useLauncherController';
 
 const mocks = vi.hoisted(() => {
+  const hostProfileId = '11111111-1111-4111-8111-111111111111';
+  const clientProfileId = '22222222-2222-4222-8222-222222222222';
   const romIdentity = {
     client_rom_sha256:
       '2222222222222222222222222222222222222222222222222222222222222222',
@@ -21,9 +23,11 @@ const mocks = vi.hoisted(() => {
     roomDetail: {
       can_join: false,
       client_name: 'Client Player',
+      client_player_profile_id: clientProfileId,
       created_at: 1,
       expires_at: Date.now() + 600_000,
       host_name: 'Host Player',
+      host_player_profile_id: hostProfileId,
       peer_count: 2,
       room_id: 'host-room-1',
       rom_identity: romIdentity,
@@ -51,6 +55,7 @@ const mocks = vi.hoisted(() => {
       }),
     ),
     saveMatchHistoryMock: vi.fn(async () => null),
+    hostProfileId,
   };
 });
 
@@ -96,6 +101,7 @@ vi.mock('../tauriClient', () => ({
     host_rom_path: 'C:\\roms\\host.nds',
     input_config_opened_once: true,
     player_name: 'Host Player',
+    player_profile_id: mocks.hostProfileId,
     port: 8165,
     roms_prepared_once: true,
     room_code: 'test-room',
@@ -131,6 +137,10 @@ vi.mock('../tauriClient', () => ({
   stopMatch: vi.fn(async () => {}),
 }));
 
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
 function TestProviders({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -148,6 +158,9 @@ function LauncherHarness() {
     <div>
       <button type="button" onClick={() => void launcher.actions.createRoom()}>
         create
+      </button>
+      <button type="button" onClick={() => void launcher.actions.stopMatch()}>
+        stop
       </button>
       <output aria-label="busy">
         {launcher.matchmakingRooms.busy ? 'busy' : 'idle'}
@@ -195,6 +208,28 @@ describe('useLauncherController', () => {
     await expect
       .element(screen.getByLabelText('status'))
       .toHaveTextContent('起動済み');
+    await expect
+      .element(screen.getByLabelText('opponent'))
+      .toHaveTextContent('Client Player');
+  });
+
+  test('stopped match remains visible until the next match starts', async () => {
+    const screen = await render(
+      <TestProviders>
+        <LauncherHarness />
+      </TestProviders>,
+    );
+
+    await screen.getByRole('button', { name: 'create' }).click();
+    await vi.waitFor(() =>
+      expect(mocks.startMatchMock).toHaveBeenCalledTimes(1),
+    );
+    await expect
+      .element(screen.getByLabelText('opponent'))
+      .toHaveTextContent('Client Player');
+
+    await screen.getByRole('button', { name: 'stop' }).click();
+
     await expect
       .element(screen.getByLabelText('opponent'))
       .toHaveTextContent('Client Player');
