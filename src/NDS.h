@@ -501,9 +501,11 @@ public: // TODO: Encapsulate the rest of these members
 #ifdef JIT_ENABLED
     [[nodiscard]] bool IsJITEnabled() const noexcept { return EnableJIT; }
     void SetJITArgs(std::optional<JITArgs> args) noexcept;
+    void SetRollbackJITEnabledNoReset(bool enabled) noexcept { EnableJIT = enabled; }
 #else
     [[nodiscard]] bool IsJITEnabled() const noexcept { return false; }
     void SetJITArgs(std::optional<JITArgs> args) noexcept {}
+    void SetRollbackJITEnabledNoReset(bool) noexcept {}
 #endif
 
 #ifdef GDBSTUB_ENABLED

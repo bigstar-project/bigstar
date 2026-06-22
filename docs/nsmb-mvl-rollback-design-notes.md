@@ -106,6 +106,16 @@ Current conclusion:
   - `FpsSpikeTrace` is now plumbed through the practical suite. Trace shows the remaining spike is not checkpoint copy/restore: restore max is about `8.7ms`, checkpoint save about `2-3ms`, but rollback/resim phases hit `40-70ms` after JIT block detachment.
   - `MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_KEEP_CODEMEM=1` is unsafe. Keeping code memory while detaching block maps reduced timing but produced contact mismatch at frame `2820`.
   - Same-frame wait combined with fast reset is not a fix: `RollbackInputWaitUs=1000` worsened active averages to about `18.2ms`, and `1500us` mismatched.
+- 2026-06-22 delay2 JIT-boundary retake:
+  - The active goal has been restated as delay2-only. Raising GUI rollback `InputDelayFrames` above `2` is rejected even if it hides desync or smooths spikes.
+  - Interpreter/no-JIT contact passed with the same delay2 strong-jitter input (`logs/nsmbrb-interp-contact/run1`), so the tiny-core/Main RAM delta state is broadly sufficient for that route. It is not playable because the run took about `228s` for 3600 frames.
+  - Normal full `JIT.Reset()` on restore preserved contact correctness but stayed too slow: `17.759/17.752ms` average and `128.823/127.090ms` max in `logs/nsmbrb-normaljitreset-contact/20260622-155447`.
+  - Region-masked fast reset was tested with short candidates:
+    - `pv-main` mismatched contact.
+    - `pv-maincore`, `pv-mainshared`, and `pv-mainshared-arm7` avoided persistent mismatch in one contact sweep but still exceeded the spike gate.
+    - `pv-volatile` and `pv-volatile-j8nf` mismatched on repeat, so partial fast reset is not deterministic enough to promote.
+  - `RollbackResimulateDelayFrames=2` coalescing on the normal-reset baseline did not solve visible spikes (`host maxFrameMs=114.364`, client `91.620`).
+  - Working conclusion: safe exact-ish delay2 rollback currently requires full JIT block reset/detachment. The remaining cost is cold JIT/resim execution. Skipping or partially reusing JIT blocks is fast but still incorrect, so the next architecture should focus on pointer-safe JIT reuse or avoiding same-frame cold-JIT re-execution, not on increasing delay.
 
 Current blocker / next actions:
 

@@ -65,6 +65,19 @@ static u32 EnvU32(const char* name, u32 fallback) noexcept
     return static_cast<u32>(parsed);
 }
 
+static u32 EnvU32Auto(const char* name, u32 fallback) noexcept
+{
+    const char* value = getenv(name);
+    if (!value || !*value)
+        return fallback;
+
+    char* end = nullptr;
+    const unsigned long parsed = std::strtoul(value, &end, 0);
+    if (end == value)
+        return fallback;
+    return static_cast<u32>(parsed);
+}
+
 static bool EnvFlag(const char* name) noexcept
 {
     return getenv(name) != nullptr;
@@ -1204,29 +1217,75 @@ void ARMJIT::ResetBlockCacheForRollbackFast() noexcept
     JitEnableWrite();
     Memory.Reset();
     InvalidLiterals.Clear();
+    const u32 regionMask = EnvU32Auto("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_REGION_MASK", 0);
 
     for (auto it = RestoreCandidates.begin(); it != RestoreCandidates.end(); it++)
-        DeferredResetBlocks.push_back(it->second);
+    {
+        if (regionMask == 0)
+            DeferredResetBlocks.push_back(it->second);
+        else
+            delete it->second;
+    }
     RestoreCandidates.clear();
 
     auto detachBlocks = [&](std::unordered_map<u32, JitBlock*>& blocks)
     {
-        for (auto it : blocks)
+        for (auto it = blocks.begin(); it != blocks.end();)
         {
-            JitBlock* block = it.second;
+            JitBlock* block = it->second;
+            bool detach = regionMask == 0;
+            if (!detach)
+            {
+                for (int j = 0; j < block->NumAddresses; j++)
+                {
+                    const u32 region = block->AddressRanges()[j] >> 27;
+                    if (region < 32 && (regionMask & (1u << region)) != 0)
+                    {
+                        detach = true;
+                        break;
+                    }
+                }
+            }
+            if (!detach)
+            {
+                ++it;
+                continue;
+            }
             for (int j = 0; j < block->NumAddresses; j++)
             {
                 u32 addr = block->AddressRanges()[j];
                 AddressRange* range = &CodeMemRegions[addr >> 27][(addr & 0x7FFFFFF) / 512];
-                range->Blocks.Clear();
-                range->Code = 0;
+                if (regionMask == 0)
+                {
+                    range->Blocks.Clear();
+                    range->Code = 0;
+                }
+                else
+                {
+                    range->Blocks.RemoveByValue(block);
+                    range->Code = 0;
+                    for (int k = 0; k < range->Blocks.Length; k++)
+                    {
+                        JitBlock* other = range->Blocks[k];
+                        for (int l = 0; l < other->NumAddresses; l++)
+                        {
+                            if (other->AddressRanges()[l] == addr)
+                            {
+                                range->Code |= other->AddressMasks()[l];
+                                break;
+                            }
+                        }
+                    }
+                }
             }
             if (FastBlockLookupRegions[block->StartAddrLocal >> 27])
                 FastBlockLookupRegions[block->StartAddrLocal >> 27][(block->StartAddrLocal & 0x7FFFFFF) / 2] =
                     (u64)UINT32_MAX << 32;
             DeferredResetBlocks.push_back(block);
+            it = blocks.erase(it);
         }
-        blocks.clear();
+        if (regionMask == 0)
+            blocks.clear();
     };
 
     detachBlocks(JitBlocks9);
@@ -1235,7 +1294,7 @@ void ARMJIT::ResetBlockCacheForRollbackFast() noexcept
         EnvU32("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_INITIAL_DELETE_BUDGET", 64);
     DeleteDeferredResetBlocks(initialDeleteBudget);
 
-    if (!EnvFlag("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_KEEP_CODEMEM"))
+    if (regionMask == 0 && !EnvFlag("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_KEEP_CODEMEM"))
         JITCompiler.Reset();
 }
 

@@ -1841,6 +1841,7 @@ struct State
     int RollbackResimulateDelayFrames = 0;
     int RollbackMaxResimFrames = 0;
     bool RollbackPrePumpBeforeResim = false;
+    bool RollbackDisableJITDuringResim = false;
     int RollbackInputWaitUs = 0;
     std::map<melonDS::u32, InputState> PredictedRemoteInputs;
     std::map<melonDS::u32, RollbackStoredState> RollbackStates;
@@ -12890,6 +12891,9 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
     unsigned long long resimRunFrameMaxUs = 0;
     unsigned long long resimCheckpointSaveTotalUs = 0;
     unsigned long long resimCheckpointSaveMaxUs = 0;
+    const bool restoreJITAfterResim = G.RollbackDisableJITDuringResim && nds->IsJITEnabled();
+    if (restoreJITAfterResim)
+        nds->SetRollbackJITEnabledNoReset(false);
     for (melonDS::u32 f = restoreFrame; f < frame; f++)
     {
         InputState localInput = NeutralInput();
@@ -12964,6 +12968,8 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
                 nds->NumFrames);
         }
     }
+    if (restoreJITAfterResim)
+        nds->SetRollbackJITEnabledNoReset(true);
 
     const unsigned long long rollbackTotalUs = ElapsedUs(rollbackStart);
     {
@@ -18284,6 +18290,7 @@ void InitFromEnvironment()
     G.RollbackSkipIntermediateResimCheckpoints =
         EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS");
     G.RollbackPrePumpBeforeResim = EnvFlag("MELONDS_NSML_ROLLBACK_PRE_PUMP_BEFORE_RESIM");
+    G.RollbackDisableJITDuringResim = EnvFlag("MELONDS_NSML_ROLLBACK_DISABLE_JIT_DURING_RESIM");
     G.RollbackInputWaitUs = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_INPUT_WAIT_US", 0), 0, 20000);
     G.RollbackRestoreProbe = EnvFlag("MELONDS_NSML_ROLLBACK_RESTORE_PROBE");
