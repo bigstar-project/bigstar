@@ -52,6 +52,24 @@ namespace melonDS
 using Platform::Log;
 using Platform::LogLevel;
 
+static u32 EnvU32(const char* name, u32 fallback) noexcept
+{
+    const char* value = getenv(name);
+    if (!value || !*value)
+        return fallback;
+
+    char* end = nullptr;
+    const unsigned long parsed = std::strtoul(value, &end, 10);
+    if (end == value)
+        return fallback;
+    return static_cast<u32>(parsed);
+}
+
+static bool EnvFlag(const char* name) noexcept
+{
+    return getenv(name) != nullptr;
+}
+
 static_assert(offsetof(ARM, CPSR) == ARM_CPSR_offset, "");
 static_assert(offsetof(ARM, Cycles) == ARM_Cycles_offset, "");
 static_assert(offsetof(ARM, StopExecution) == ARM_StopExecution_offset, "");
@@ -481,6 +499,12 @@ ARMJIT::ARMJIT(melonDS::NDS& nds, std::optional<JITArgs> jit) noexcept :
 
 void ARMJIT::RetireJitBlock(JitBlock* block) noexcept
 {
+    if (EnvFlag("MELONDS_NSML_JIT_DISABLE_RESTORE_CANDIDATES"))
+    {
+        delete block;
+        return;
+    }
+
     auto it = RestoreCandidates.find(block->InstrHash);
     if (it != RestoreCandidates.end())
     {
@@ -1207,9 +1231,12 @@ void ARMJIT::ResetBlockCacheForRollbackFast() noexcept
 
     detachBlocks(JitBlocks9);
     detachBlocks(JitBlocks7);
-    DeleteDeferredResetBlocks(64);
+    const u32 initialDeleteBudget =
+        EnvU32("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_INITIAL_DELETE_BUDGET", 64);
+    DeleteDeferredResetBlocks(initialDeleteBudget);
 
-    JITCompiler.Reset();
+    if (!EnvFlag("MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_KEEP_CODEMEM"))
+        JITCompiler.Reset();
 }
 
 void ARMJIT::JitEnableWrite() noexcept

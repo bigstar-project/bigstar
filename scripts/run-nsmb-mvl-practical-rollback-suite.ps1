@@ -10,6 +10,7 @@ param(
     [switch]$InputUnreliable,
     [switch]$NoGameStateTrace,
     [switch]$StateSync,
+    [switch]$FpsSpikeTrace,
     [double]$MaxActiveFrameMs = 90.0,
     [int]$MaxActiveFrameOver33ms = 80,
     [int]$MaxConsecutiveSlowFrames = 4,
@@ -2147,6 +2148,386 @@ $candidateDefs = @{
             MELONDS_NSML_JIT_FAST_MEMORY = "0"
         }
     }
+    "exact-delay2-jitmb16-noliteral-nofastmem-tinycoreramdelta-key2-page256-cp2-maxresim1-skipjit-skiprender" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+            RollbackSkipJitReset = $true
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_JIT_MAX_BLOCK_SIZE = "16"
+            MELONDS_NSML_JIT_LITERAL_OPTIMIZATIONS = "0"
+            MELONDS_NSML_JIT_FAST_MEMORY = "0"
+        }
+    }
+    "exact-delay2-jitmb8-noliteral-nofastmem-tinycoreramdelta-key2-page256-cp2-maxresim1-skipjit-skiprender" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+            RollbackSkipJitReset = $true
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_JIT_MAX_BLOCK_SIZE = "8"
+            MELONDS_NSML_JIT_LITERAL_OPTIMIZATIONS = "0"
+            MELONDS_NSML_JIT_FAST_MEMORY = "0"
+        }
+    }
+    "exact-delay2-jitmb8-noliteral-nofastmem-tinycoreramdelta-key2-page256-cp1-maxresim1-skipjit-skiprender" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+            RollbackSkipJitReset = $true
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_JIT_MAX_BLOCK_SIZE = "8"
+            MELONDS_NSML_JIT_LITERAL_OPTIMIZATIONS = "0"
+            MELONDS_NSML_JIT_FAST_MEMORY = "0"
+        }
+    }
+    "exact-delay2-jitmb8-noliteral-nofastmem-tinycoreramdelta-key2-page256-cp3-maxresim1-skipjit-skiprender" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 3
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+            RollbackSkipJitReset = $true
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_JIT_MAX_BLOCK_SIZE = "8"
+            MELONDS_NSML_JIT_LITERAL_OPTIMIZATIONS = "0"
+            MELONDS_NSML_JIT_FAST_MEMORY = "0"
+        }
+    }
+    "exact-delay2-jitmb8-noliteral-nofastmem-tinycoreramdelta-key2-page512-cp2-maxresim1-skipjit-skiprender" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+            RollbackSkipJitReset = $true
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "512"
+            MELONDS_NSML_JIT_MAX_BLOCK_SIZE = "8"
+            MELONDS_NSML_JIT_LITERAL_OPTIMIZATIONS = "0"
+            MELONDS_NSML_JIT_FAST_MEMORY = "0"
+        }
+    }
+    "exact-delay2-jitmb8-noliteral-nobranch-nofastmem-tinycoreramdelta-key2-page256-cp2-maxresim1-skipjit-skiprender" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+            RollbackSkipJitReset = $true
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_JIT_MAX_BLOCK_SIZE = "8"
+            MELONDS_NSML_JIT_LITERAL_OPTIMIZATIONS = "0"
+            MELONDS_NSML_JIT_BRANCH_OPTIMIZATIONS = "0"
+            MELONDS_NSML_JIT_FAST_MEMORY = "0"
+        }
+    }
+    "exact-delay2-jitmb4-noliteral-nofastmem-tinycoreramdelta-key2-page256-cp2-maxresim1-skipjit-skiprender" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+            RollbackSkipJitReset = $true
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_JIT_MAX_BLOCK_SIZE = "4"
+            MELONDS_NSML_JIT_LITERAL_OPTIMIZATIONS = "0"
+            MELONDS_NSML_JIT_FAST_MEMORY = "0"
+        }
+    }
+    "exact-delay2-jitmb4-noliteral-nobranch-nofastmem-tinycoreramdelta-key2-page256-cp2-maxresim1-skipjit-skiprender" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+            RollbackSkipJitReset = $true
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_JIT_MAX_BLOCK_SIZE = "4"
+            MELONDS_NSML_JIT_LITERAL_OPTIMIZATIONS = "0"
+            MELONDS_NSML_JIT_BRANCH_OPTIMIZATIONS = "0"
+            MELONDS_NSML_JIT_FAST_MEMORY = "0"
+        }
+    }
+    "exact-delay2-fastjitreset-nodelete0-tinycoreramdelta-key2-page256-cp2-maxresim1-skiprender" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_ROLLBACK_JIT_FAST_RESET = "1"
+            MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_INITIAL_DELETE_BUDGET = "0"
+            MELONDS_NSML_ROLLBACK_JIT_DEFERRED_DELETE_BUDGET = "0"
+        }
+    }
+    "exact-delay2-fastjitreset-nodelete0-jitmb8-noliteral-nofastmem-tinycoreramdelta-key2-page256-cp2-maxresim1-skiprender" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_ROLLBACK_JIT_FAST_RESET = "1"
+            MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_INITIAL_DELETE_BUDGET = "0"
+            MELONDS_NSML_ROLLBACK_JIT_DEFERRED_DELETE_BUDGET = "0"
+            MELONDS_NSML_JIT_MAX_BLOCK_SIZE = "8"
+            MELONDS_NSML_JIT_LITERAL_OPTIMIZATIONS = "0"
+            MELONDS_NSML_JIT_FAST_MEMORY = "0"
+        }
+    }
+    "exact-delay2-rbwait1000-fastjitreset-nodelete0-tinycoreramdelta-key2-page256-cp2-maxresim1-skiprender" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 1000
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_ROLLBACK_JIT_FAST_RESET = "1"
+            MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_INITIAL_DELETE_BUDGET = "0"
+            MELONDS_NSML_ROLLBACK_JIT_DEFERRED_DELETE_BUDGET = "0"
+        }
+    }
+    "exact-delay2-rbwait1500-fastjitreset-nodelete0-tinycoreramdelta-key2-page256-cp2-maxresim1-skiprender" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 1500
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_ROLLBACK_JIT_FAST_RESET = "1"
+            MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_INITIAL_DELETE_BUDGET = "0"
+            MELONDS_NSML_ROLLBACK_JIT_DEFERRED_DELETE_BUDGET = "0"
+        }
+    }
+    "exact-delay2-jitmb8-noliteral-nofastmem-norestorecand-tinycoreramdelta-key2-page256-cp2-maxresim1-skipjit-skiprender" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+            RollbackSkipJitReset = $true
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_JIT_MAX_BLOCK_SIZE = "8"
+            MELONDS_NSML_JIT_LITERAL_OPTIMIZATIONS = "0"
+            MELONDS_NSML_JIT_FAST_MEMORY = "0"
+            MELONDS_NSML_JIT_DISABLE_RESTORE_CANDIDATES = "1"
+        }
+    }
+    "exact-delay2-fastjitreset-keepcodemem-nodelete0-tinycoreramdelta-key2-page256-cp2-maxresim1-skiprender" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_ROLLBACK_JIT_FAST_RESET = "1"
+            MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_INITIAL_DELETE_BUDGET = "0"
+            MELONDS_NSML_ROLLBACK_JIT_DEFERRED_DELETE_BUDGET = "0"
+            MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_KEEP_CODEMEM = "1"
+        }
+    }
     "exact-delay2-jitnoliteral-nofastmem-tinycoreramdelta-key2-page1024-cp2-maxresim1-skipjit-skiprender" = [pscustomobject]@{
         Backend = "tinycoreramdelta"
         InputDelayFrames = 2
@@ -2505,7 +2886,18 @@ $envKeys = @(
     "MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES",
     "MELONDS_NSML_PLAYER_STATE_MAX_STALE_COUNTER_FRAMES",
     "MELONDS_NSML_PLAYER_STATE_MAX_STALE_TRANSFORM_FRAMES",
-    "MELONDS_NSML_INPUT_TRACE_INTERVAL"
+    "MELONDS_NSML_INPUT_TRACE_INTERVAL",
+    "MELONDS_NSML_ROLLBACK_CONSERVATIVE_JIT",
+    "MELONDS_NSML_ROLLBACK_CONSERVATIVE_JIT_MAX_BLOCK",
+    "MELONDS_NSML_JIT_MAX_BLOCK_SIZE",
+    "MELONDS_NSML_JIT_LITERAL_OPTIMIZATIONS",
+    "MELONDS_NSML_JIT_BRANCH_OPTIMIZATIONS",
+    "MELONDS_NSML_JIT_FAST_MEMORY",
+    "MELONDS_NSML_ROLLBACK_JIT_FAST_RESET",
+    "MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_INITIAL_DELETE_BUDGET",
+    "MELONDS_NSML_ROLLBACK_JIT_DEFERRED_DELETE_BUDGET",
+    "MELONDS_NSML_JIT_DISABLE_RESTORE_CANDIDATES",
+    "MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_KEEP_CODEMEM"
 )
 
 $summary = New-Object System.Collections.Generic.List[object]
@@ -2628,6 +3020,9 @@ foreach ($candidateName in $Candidate) {
             $params.StateSync = $true
             $params.StateSyncExtended = $true
             $params.StateSyncInterval = 60
+        }
+        if ($FpsSpikeTrace) {
+            $params.FpsSpikeTrace = $true
         }
 
         Write-Host "running practical case: candidate=$candidateName route=$routeName"
