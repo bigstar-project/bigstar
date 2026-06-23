@@ -1466,6 +1466,7 @@ struct State
     std::chrono::steady_clock::time_point LastNetplayStartReadySentAt;
     std::chrono::steady_clock::time_point LastInputFrameLeadResendAt;
     int InputFrameLeadResendCount = 0;
+    int InputFrameLeadResendIntervalMs = 50;
     melonDS::u32 LocalNetplayStartReadyFrame = kNoFrameLimit;
     melonDS::u32 RemoteNetplayStartReadyFrame = kNoFrameLimit;
     bool RemoteNetplayStartReadyAfterLocal = false;
@@ -1863,6 +1864,7 @@ struct State
     bool RollbackDisableJITDuringResim = false;
     int RollbackMaxCorrectionsPerFrame = 0;
     int RollbackFrameLeadThrottleBudgetUs = 0;
+    int InputFrameLeadThrottlePollUs = 1000;
     int RollbackInputWaitUs = 0;
     bool RollbackSkipAudioBufferDuringResim = false;
     std::map<melonDS::u32, InputState> PredictedRemoteInputs;
@@ -4144,7 +4146,7 @@ void MaybeResendLatestInputForFrameLeadLocked()
 
     const auto now = std::chrono::steady_clock::now();
     if (G.InputFrameLeadResendCount > 0
-        && now - G.LastInputFrameLeadResendAt < std::chrono::milliseconds(50))
+        && now - G.LastInputFrameLeadResendAt < std::chrono::milliseconds(G.InputFrameLeadResendIntervalMs))
     {
         return;
     }
@@ -13764,7 +13766,7 @@ void ThrottleInputNetplayFrameLead(melonDS::NDS* nds, melonDS::u32 frame, melonD
             }
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        std::this_thread::sleep_for(std::chrono::microseconds(G.InputFrameLeadThrottlePollUs));
     }
 }
 
@@ -19283,6 +19285,10 @@ void InitFromEnvironment()
     G.NetworkPumpThreadEnabled = EnvFlag("MELONDS_NSML_NET_PUMP_THREAD");
     G.NetworkPumpSleepUs = std::clamp(EnvInt("MELONDS_NSML_NET_PUMP_SLEEP_US", 250), 50, 5000);
     G.InputWaitPollUs = std::clamp(EnvInt("MELONDS_NSML_INPUT_WAIT_POLL_US", 100), 50, 5000);
+    G.InputFrameLeadResendIntervalMs = std::clamp(
+        EnvInt("MELONDS_NSML_INPUT_FRAME_LEAD_RESEND_INTERVAL_MS", 50), 1, 1000);
+    G.InputFrameLeadThrottlePollUs = std::clamp(
+        EnvInt("MELONDS_NSML_INPUT_FRAME_LEAD_THROTTLE_POLL_US", 1000), 50, 5000);
     G.RollbackEnabled = EnvFlag("MELONDS_NSML_ROLLBACK");
     G.RollbackResimulate = EnvFlag("MELONDS_NSML_ROLLBACK_RESIMULATE");
     G.RollbackSkipRenderDuringResim = EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER");
