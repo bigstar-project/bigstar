@@ -5235,7 +5235,11 @@ void AddNSMBRollbackDeltaDiscoveredRanges(melonDS::NDS* nds, std::vector<Rollbac
 
 void AddNSMBRollbackActorArenaRanges(melonDS::NDS* nds, std::vector<RollbackNSMBRangeEntry>& ranges)
 {
-    AddNSMBRollbackRange(nds, ranges, 0x021B2600, 0x5000);
+    static const int actorArenaLength = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_LENGTH", 0x5000),
+        0x5000,
+        0x20000);
+    AddNSMBRollbackRange(nds, ranges, 0x021B2600, static_cast<melonDS::u32>(actorArenaLength));
     AddNSMBRollbackRange(nds, ranges, 0x02088B00, 0x200);
 }
 
