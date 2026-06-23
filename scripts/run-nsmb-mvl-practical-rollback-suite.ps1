@@ -6860,6 +6860,25 @@ $candidateDefs = @{
             MELONDS_NSML_FIXED_FRAME_SLEEP = "1"
         }
     }
+    "norollback-delay4-lead4-bundle8" = [pscustomobject]@{
+        RollbackEnabled = $false
+        Backend = ""
+        InputDelayFrames = 4
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 0
+        RollbackResimulate = $false
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $false
+        InputMaxFrameLead = 4
+        RollbackWindow = 20
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+    }
 }
 
 $routeDefs = @{
@@ -7080,6 +7099,10 @@ foreach ($candidateName in $Candidate) {
         if ($candidateDef.PSObject.Properties.Name -contains "AllowJit") {
             $allowJit = [bool]$candidateDef.AllowJit
         }
+        $rollbackEnabled = $true
+        if ($candidateDef.PSObject.Properties.Name -contains "RollbackEnabled") {
+            $rollbackEnabled = [bool]$candidateDef.RollbackEnabled
+        }
 
         $params = @{
             Frames = $routeDef.Frames
@@ -7091,7 +7114,6 @@ foreach ($candidateName in $Candidate) {
             LogDir = $caseRel
             HostInputScript = $hostInput
             ClientInputScript = $clientInput
-            Rollback = $true
             RollbackBackend = $candidateDef.Backend
             RollbackTinyCoreFlags = $rollbackTinyCoreFlags
             RollbackWindow = $candidateDef.RollbackWindow
@@ -7114,6 +7136,9 @@ foreach ($candidateName in $Candidate) {
             SlowFrameThresholdMs = $SlowFrameThresholdMs
             GameStateCompareStartFrame = 990
             MvlMatchSeed = "practical-$candidateName-$routeName-$runStamp"
+        }
+        if ($rollbackEnabled) {
+            $params.Rollback = $true
         }
         if ($allowJit) {
             $params.AllowJit = $true
