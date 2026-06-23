@@ -1809,6 +1809,7 @@ struct State
     bool RollbackResimulate = false;
     bool RollbackRestoreProbe = false;
     bool RollbackSkipPredictedInputFrameLeadThrottle = false;
+    bool RollbackThrottleAppliedFrameLead = false;
     int RollbackPredictionProbeModulo = 0;
     int RollbackPredictionProbeOffset = 0;
     int RollbackPredictionProbeLimit = -1;
@@ -13742,8 +13743,12 @@ void WritePacketBridgeJitScratchIfNeeded(
                 && G.RollbackSkipPredictedInputFrameLeadThrottle
                 && predictedRemoteInput))
         {
+            const melonDS::u32 throttleFrame =
+                (G.RollbackEnabled && G.InputNetplayOnly && G.RollbackThrottleAppliedFrameLead)
+                    ? logicalFrame
+                    : sendFrame;
             const auto throttleStart = std::chrono::steady_clock::now();
-            ThrottleInputNetplayFrameLead(nds, frame, sendFrame);
+            ThrottleInputNetplayFrameLead(nds, frame, throttleFrame);
             throttleUs = static_cast<unsigned long long>(ElapsedUs(throttleStart));
         }
         if (G.RollbackEnabled && G.InputNetplayOnly && predictedRemoteInput)
@@ -19154,6 +19159,8 @@ void InitFromEnvironment()
     G.RollbackDisableJITDuringResim = EnvFlag("MELONDS_NSML_ROLLBACK_DISABLE_JIT_DURING_RESIM");
     G.RollbackSkipPredictedInputFrameLeadThrottle =
         EnvFlag("MELONDS_NSML_ROLLBACK_SKIP_PREDICTED_FRAME_LEAD_THROTTLE");
+    G.RollbackThrottleAppliedFrameLead =
+        EnvFlag("MELONDS_NSML_ROLLBACK_THROTTLE_APPLIED_FRAME_LEAD");
     G.RollbackMaxCorrectionsPerFrame = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME", 0), 0, 16);
     G.RollbackFrameLeadThrottleBudgetUs = std::clamp(
