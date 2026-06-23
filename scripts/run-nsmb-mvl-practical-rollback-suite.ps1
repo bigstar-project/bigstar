@@ -5556,6 +5556,34 @@ $candidateDefs = @{
             MELONDS_NSML_ROLLBACK_SKIP_RESTORED_JIT_INVALIDATION = "1"
         }
     }
+    "jitlookup-compiledchunks-skiprestorejit-rbwait1000-poll50-cp1-maxlead0-leadbudget2ms" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 1000
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 0
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_INPUT_WAIT_POLL_US = "50"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "2000"
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_COMPILED_CHUNKS = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_RESTORED_JIT_INVALIDATION = "1"
+        }
+    }
     "jitlookup-compiledchunks-skiprestorejit-rbwait1000-cp1-maxlead0-leadbudget4ms" = [pscustomobject]@{
         Backend = "tinycoreramdelta"
         InputDelayFrames = 2
@@ -7378,6 +7406,7 @@ $envKeys = @(
     "MELONDS_NSML_PLAYER_STATE_MAX_STALE_COUNTER_FRAMES",
     "MELONDS_NSML_PLAYER_STATE_MAX_STALE_TRANSFORM_FRAMES",
     "MELONDS_NSML_INPUT_TRACE_INTERVAL",
+    "MELONDS_NSML_INPUT_WAIT_POLL_US",
     "MELONDS_NSML_ROLLBACK_CONSERVATIVE_JIT",
     "MELONDS_NSML_ROLLBACK_CONSERVATIVE_JIT_MAX_BLOCK",
     "MELONDS_NSML_JIT_MAX_BLOCK_SIZE",
