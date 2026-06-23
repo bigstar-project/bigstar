@@ -13605,7 +13605,7 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
         if (consumeCurrentFrame)
         {
             G.RollbackSkipRunFrame[instanceID] = true;
-            G.RollbackSkipRunFrameFrame[instanceID] = frame;
+            G.RollbackSkipRunFrameFrame[instanceID] = targetFrame;
         }
     }
     if (G.InputNetplayTraceEnabled)
