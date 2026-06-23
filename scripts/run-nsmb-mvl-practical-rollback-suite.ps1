@@ -3073,6 +3073,406 @@ $candidateDefs = @{
             MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
         }
     }
+    "nsmbtc-rb1000-mr2-limit1-arena-stack-devices-gpu3dlight" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 1000
+        RollbackMaxResimFrames = 2
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x27D"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "2000"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "nsmbtc-rb1000-mr2-limit1-skippredlead-arena-stack-devices-gpu3dlight" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 1000
+        RollbackMaxResimFrames = 2
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x27D"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_SKIP_PREDICTED_FRAME_LEAD_THROTTLE = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "2000"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "nsmbtc-rb1000-mr2-limit1-appliedlead-skippredlead-arena-stack-devices-gpu3dlight" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 1000
+        RollbackMaxResimFrames = 2
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x27D"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_SKIP_PREDICTED_FRAME_LEAD_THROTTLE = "1"
+            MELONDS_NSML_ROLLBACK_THROTTLE_APPLIED_FRAME_LEAD = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "2000"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "nsmbtc-rb1000-mr2-lead999-limit1-arena-stack-devices-gpu3dlight" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 1000
+        RollbackMaxResimFrames = 2
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x27D"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "2000"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "nsmbtc-rb1000-mr2-lead4-limit1-arena-stack-devices-gpu3dlight" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 1000
+        RollbackMaxResimFrames = 2
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x27D"
+        InputMaxFrameLead = 4
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "2000"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "nsmbtc-rb1000-mr2-lead6-limit1-arena-stack-devices-gpu3dlight" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 1000
+        RollbackMaxResimFrames = 2
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x27D"
+        InputMaxFrameLead = 6
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "2000"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "nsmbtc-rb0-mr8-lead999-arena-stack-devices-gpu3dlight" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 8
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x27D"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "nsmbtc-rb0-mr8-lead999-limit1-arena-stack-devices-gpu3dlight" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 8
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x27D"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "nsmbtc-rb0-mr8-lead999-limit1-skipmidcp-arena-stack-devices-gpu3dlight" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 8
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x27D"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS = "1"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "nsmbtc-rb0-mr6-lead999-limit1-arena-stack-devices-gpu3dlight" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 6
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x27D"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "nsmbtc-rb0-mr8-lead999-limit1-cp2-arena-stack-devices-gpu3dlight" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 8
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x27D"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "nsmbtc-rb0-mr4-lead999-limit1-arena-stack-devices-gpu3dlight" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x27D"
+        InputMaxFrameLead = 999
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "nsmbtc-rb1000-mr2-limit1-arena-stack-gpu3donly" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 1000
+        RollbackMaxResimFrames = 2
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x341"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "2000"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
     "nsmbtc-rb1000-mr2-limit1-arena-stack-gpu3d" = [pscustomobject]@{
         Backend = "nsmbtinycore"
         InputDelayFrames = 2
@@ -3177,6 +3577,70 @@ $candidateDefs = @{
         RollbackPredictOnly = $false
         RollbackSkipRenderDuringResim = $true
         RollbackTinyCoreFlags = "0x37D"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "2000"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_INTERVAL = "60"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "nsmbtc-rb1000-mr2-limit1-arena-stack-heap60-devices-gpu3dlight" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 1000
+        RollbackMaxResimFrames = 2
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x27D"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "2000"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_INTERVAL = "60"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "nsmbtc-rb1000-mr2-limit1-arena-stack-heap60-gpu3donly" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 1000
+        RollbackMaxResimFrames = 2
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x341"
         InputMaxFrameLead = 2
         RollbackWindow = 64
         RollbackCheckpointInterval = 1
