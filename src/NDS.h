@@ -420,6 +420,7 @@ public: // TODO: Encapsulate the rest of these members
     std::unique_ptr<GBACart::CartCommon> EjectGBACart() { return GBACartSlot.EjectCart(); }
 
     u32 RunFrame();
+    void SetRollbackSkipAudioBuffer(bool skip) noexcept { RollbackSkipAudioBuffer = skip; }
 
     bool IsRunning() const noexcept { return Running; }
 
@@ -542,6 +543,7 @@ protected:
     u16 KeyCnt[2];
     bool Running;
     bool RunningGame;
+    bool RollbackSkipAudioBuffer = false;
     u64 LastSysClockCycles;
     u64 FrameStartTimestamp;
     u64 NextTarget();

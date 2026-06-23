@@ -1564,6 +1564,8 @@ struct State
     bool InputUnreliable = false;
     int InputBundleHistory = 0;
     int InputBundleFuture = 0;
+    bool InputBundleFutureAssumeHeld = false;
+    bool InputBundleFutureSpeculative = false;
     int InputDropModulo = 0;
     int InputDropOffset = 0;
     melonDS::u32 InputDropStartFrame = 0;
@@ -1862,6 +1864,7 @@ struct State
     int RollbackMaxCorrectionsPerFrame = 0;
     int RollbackFrameLeadThrottleBudgetUs = 0;
     int RollbackInputWaitUs = 0;
+    bool RollbackSkipAudioBufferDuringResim = false;
     std::map<melonDS::u32, InputState> PredictedRemoteInputs;
     std::map<melonDS::u32, RollbackStoredState> RollbackStates;
     std::vector<melonDS::u8> RollbackFrameDeltaShadowMainRAM;
@@ -3353,6 +3356,17 @@ void StoreRemoteInputLocked(melonDS::u32 frame, const InputState& receivedInput,
     }
 }
 
+void StoreSpeculativeRemoteInputLocked(melonDS::u32 frame, const InputState& receivedInput, melonDS::u32 localFrame)
+{
+    if (!G.RollbackEnabled || localFrame == kNoFrameLimit || frame <= localFrame)
+        return;
+    if (G.RemoteInputs.find(frame) != G.RemoteInputs.end())
+        return;
+
+    G.PredictedRemoteInputs[frame] = receivedInput;
+    G.InputCond.notify_all();
+}
+
 void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kNoFrameLimit)
 {
     if (!G.Host) return;
@@ -3427,7 +3441,10 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                             entry.TouchX,
                             entry.TouchY,
                         };
-                        StoreRemoteInputLocked(entry.Frame, receivedInput, localFrame);
+                        if (G.InputBundleFutureSpeculative && entry.Frame > localFrame)
+                            StoreSpeculativeRemoteInputLocked(entry.Frame, receivedInput, localFrame);
+                        else
+                            StoreRemoteInputLocked(entry.Frame, receivedInput, localFrame);
                     }
                 }
             }
@@ -3989,10 +4006,12 @@ std::vector<char> BuildInputBundlePayloadLocked(melonDS::u32 frame, const InputS
     for (int offset = 1; offset <= future; offset++)
     {
         const melonDS::u32 entryFrame = frame + static_cast<melonDS::u32>(offset);
+        InputState entryInput = input;
         auto existing = G.LocalInputs.find(entryFrame);
-        if (existing == G.LocalInputs.end())
+        if (existing != G.LocalInputs.end())
+            entryInput = existing->second;
+        else if (!G.InputBundleFutureAssumeHeld)
             continue;
-        const InputState& entryInput = existing->second;
         entries.push_back({
             entryFrame,
             entryInput.KeyMask,
@@ -13516,12 +13535,17 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
         const bool skipRender = G.RollbackSkipRenderDuringResim;
         if (skipRender)
             nds->GPU.SetRollbackSkipRender(true);
+        const bool skipAudioBuffer = G.RollbackSkipAudioBufferDuringResim;
+        if (skipAudioBuffer)
+            nds->SetRollbackSkipAudioBuffer(true);
         const auto runFrameStart = std::chrono::steady_clock::now();
         nds->RunFrame();
         const unsigned long long runFrameUs = ElapsedUs(runFrameStart);
         resimRunFrameTotalUs += runFrameUs;
         if (runFrameUs > resimRunFrameMaxUs)
             resimRunFrameMaxUs = runFrameUs;
+        if (skipAudioBuffer)
+            nds->SetRollbackSkipAudioBuffer(false);
         if (skipRender)
             nds->GPU.SetRollbackSkipRender(false);
         ApplyRollbackResimPostFramePatches(f + 1, nds);
@@ -18791,6 +18815,10 @@ void InitFromEnvironment()
         EnvInt("MELONDS_NSML_INPUT_BUNDLE_HISTORY", 0), 0, 31);
     G.InputBundleFuture = std::clamp(
         EnvInt("MELONDS_NSML_INPUT_BUNDLE_FUTURE", 0), 0, 31 - G.InputBundleHistory);
+    G.InputBundleFutureAssumeHeld =
+        EnvFlag("MELONDS_NSML_INPUT_BUNDLE_FUTURE_ASSUME_HELD");
+    G.InputBundleFutureSpeculative =
+        EnvFlag("MELONDS_NSML_INPUT_BUNDLE_FUTURE_SPECULATIVE");
     G.InputDropModulo = std::max(0, EnvInt("MELONDS_NSML_INPUT_DROP_MODULO", 0));
     G.InputDropOffset = std::max(0, EnvInt("MELONDS_NSML_INPUT_DROP_OFFSET", 0));
     if (G.InputDropModulo > 0)
@@ -19258,6 +19286,8 @@ void InitFromEnvironment()
     G.RollbackEnabled = EnvFlag("MELONDS_NSML_ROLLBACK");
     G.RollbackResimulate = EnvFlag("MELONDS_NSML_ROLLBACK_RESIMULATE");
     G.RollbackSkipRenderDuringResim = EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER");
+    G.RollbackSkipAudioBufferDuringResim =
+        EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_AUDIO_BUFFER");
     G.RollbackSkipIntermediateResimCheckpoints =
         EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS");
     G.RollbackSkipFinalResimCheckpoint =
