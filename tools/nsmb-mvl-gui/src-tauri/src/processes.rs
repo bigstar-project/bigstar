@@ -516,7 +516,7 @@ pub(crate) fn read_mvl_results(log_dir: &Path) -> Vec<MvlStageResult> {
         Err(_) => return Vec::new(),
     };
     let stages = read_launcher_course_stages(log_dir);
-    stdout
+    let mut results: Vec<MvlStageResult> = stdout
         .lines()
         .filter_map(parse_mvl_result_line)
         .enumerate()
@@ -525,7 +525,9 @@ pub(crate) fn read_mvl_results(log_dir: &Path) -> Vec<MvlStageResult> {
             result.stage = stages.get(index).copied();
             result
         })
-        .collect()
+        .collect();
+    apply_corrected_match_wins(&mut results);
+    results
 }
 
 fn read_launcher_course_stages(log_dir: &Path) -> Vec<u8> {
@@ -559,11 +561,6 @@ fn parse_mvl_result_line(line: &str) -> Option<MvlStageResult> {
     }
 
     let resolved = !line.starts_with("NSMB MvL auto restart: result unresolved");
-    let winner = if resolved {
-        parse_value(line, "winner").and_then(|winner| u8::try_from(winner).ok())
-    } else {
-        None
-    };
     let frame = parse_value(line, "frame")?;
     let (stars_mario, stars_luigi) = parse_pair(line, "stars")?;
     let (displayed_mario, displayed_luigi) = parse_pair(line, "displayed")?;
@@ -573,6 +570,12 @@ fn parse_mvl_result_line(line: &str) -> Option<MvlStageResult> {
     let (dead_mario, dead_luigi) = parse_pair(line, "dead")?;
     let (mario_match_wins, luigi_match_wins) = parse_pair(line, "matchWins")?;
     let target_wins = parse_value(line, "target")?;
+    let logged_winner = if resolved {
+        parse_value(line, "winner").and_then(|winner| u8::try_from(winner).ok())
+    } else {
+        None
+    };
+    let winner = corrected_stage_winner(logged_winner, dead_mario, dead_luigi);
 
     Some(MvlStageResult {
         game_index: 0,
@@ -601,6 +604,32 @@ fn parse_mvl_result_line(line: &str) -> Option<MvlStageResult> {
         resolved,
         line: line.to_owned(),
     })
+}
+
+fn corrected_stage_winner(
+    logged_winner: Option<u8>,
+    dead_mario: u32,
+    dead_luigi: u32,
+) -> Option<u8> {
+    match (dead_mario != 0, dead_luigi != 0) {
+        (true, false) => Some(1),
+        (false, true) => Some(0),
+        _ => logged_winner,
+    }
+}
+
+fn apply_corrected_match_wins(results: &mut [MvlStageResult]) {
+    let mut mario_wins = 0;
+    let mut luigi_wins = 0;
+    for result in results {
+        match result.winner {
+            Some(0) if result.resolved => mario_wins += 1,
+            Some(1) if result.resolved => luigi_wins += 1,
+            _ => {}
+        }
+        result.mario_match_wins = mario_wins;
+        result.luigi_match_wins = luigi_wins;
+    }
 }
 
 fn result_lives(lives: u32, dead: u32) -> u32 {

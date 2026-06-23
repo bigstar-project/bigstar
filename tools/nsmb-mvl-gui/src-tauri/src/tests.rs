@@ -7,6 +7,7 @@ use crate::models::{
     CourseMode, GameSettings, GameStateMismatch, LaunchRequest, Lives, Role, RomIdentity,
 };
 use crate::paths::allowed_log_dir;
+use crate::paths::load_match_history_document_content;
 use crate::processes::{
     build_bridge_command, build_melon_command, melon_env, read_bridge_diagnostics,
     read_melon_diagnostics, read_mvl_results, remove_inherited_melonds_env_keys,
@@ -511,6 +512,134 @@ NSMB MvL auto restart: result inst=0 frame=8200 winner=1 stars=0/5 displayed=0/5
     assert!(results[1].mario.dead);
     assert_eq!(results[1].mario.lives, 0);
     let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn mvl_results_prefer_death_loss_over_logged_star_winner() {
+    let dir = temp_log_dir("mvl-results-death-winner");
+    fs::write(
+        dir.join("melonds.stdout.txt"),
+        "NSMB MvL auto restart: result inst=0 frame=4320 winner=0 stars=5/3 displayed=5/3 collected=5/3 lives=1/2 deaths=2/1 dead=1/0 matchWins=1/0 target=2\n\
+NSMB MvL auto restart: result inst=0 frame=8200 winner=0 stars=5/0 displayed=5/0 collected=5/0 lives=2/1 deaths=1/2 dead=0/1 matchWins=2/0 target=2\n",
+    )
+    .expect("write stdout");
+
+    let results = read_mvl_results(&dir);
+
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0].winner, Some(1));
+    assert_eq!(results[0].mario.lives, 0);
+    assert_eq!(results[0].mario_match_wins, 0);
+    assert_eq!(results[0].luigi_match_wins, 1);
+    assert_eq!(results[1].winner, Some(0));
+    assert_eq!(results[1].mario_match_wins, 1);
+    assert_eq!(results[1].luigi_match_wins, 1);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn match_history_v1_migration_recomputes_death_decided_winners() {
+    let document = serde_json::json!({
+        "schema_version": 1,
+        "matches": [
+            {
+                "id": "match-1",
+                "logDir": "C:\\logs\\match-1",
+                "playerIds": {
+                    "mario": "host-id",
+                    "luigi": "client-id"
+                },
+                "playerNames": {
+                    "mario": "Host",
+                    "luigi": "Client"
+                },
+                "role": "host",
+                "roomCode": "room-1",
+                "settings": {
+                    "course_mode": "random",
+                    "course_stages": [0, 1, 2, 3, 4],
+                    "wins": 3,
+                    "big_stars": 5,
+                    "lives": "3",
+                    "match_seed": "1",
+                    "rng_seeds": ["1", "2", "3", "4", "5"],
+                    "input_delay_frames": 4,
+                    "input_max_frame_lead": 4,
+                    "rollback_enabled": false
+                },
+                "stages": [
+                    {
+                        "game_index": 1,
+                        "stage": 0,
+                        "frame": 4320,
+                        "winner": 0,
+                        "mario": {
+                            "stars": 5,
+                            "displayed_stars": 5,
+                            "collected_stars": 5,
+                            "lives": 0,
+                            "deaths": 3,
+                            "dead": true
+                        },
+                        "luigi": {
+                            "stars": 3,
+                            "displayed_stars": 3,
+                            "collected_stars": 3,
+                            "lives": 1,
+                            "deaths": 2,
+                            "dead": false
+                        },
+                        "mario_match_wins": 1,
+                        "luigi_match_wins": 0,
+                        "target_wins": 3,
+                        "resolved": true,
+                        "line": "old winner favoured stars"
+                    },
+                    {
+                        "game_index": 2,
+                        "stage": 1,
+                        "frame": 8200,
+                        "winner": 1,
+                        "mario": {
+                            "stars": 2,
+                            "displayed_stars": 2,
+                            "collected_stars": 2,
+                            "lives": 2,
+                            "deaths": 1,
+                            "dead": false
+                        },
+                        "luigi": {
+                            "stars": 5,
+                            "displayed_stars": 5,
+                            "collected_stars": 5,
+                            "lives": 0,
+                            "deaths": 3,
+                            "dead": true
+                        },
+                        "mario_match_wins": 1,
+                        "luigi_match_wins": 1,
+                        "target_wins": 3,
+                        "resolved": true,
+                        "line": "old winner favoured stars"
+                    }
+                ],
+                "startedAt": "2026-06-24T00:00:00.000Z",
+                "status": "completed"
+            }
+        ]
+    });
+
+    let (matches, migrated) =
+        load_match_history_document_content(&document.to_string()).expect("migrate history");
+
+    assert!(migrated);
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].stages[0].winner, Some(1));
+    assert_eq!(matches[0].stages[0].mario_match_wins, 0);
+    assert_eq!(matches[0].stages[0].luigi_match_wins, 1);
+    assert_eq!(matches[0].stages[1].winner, Some(0));
+    assert_eq!(matches[0].stages[1].mario_match_wins, 1);
+    assert_eq!(matches[0].stages[1].luigi_match_wins, 1);
 }
 
 #[test]

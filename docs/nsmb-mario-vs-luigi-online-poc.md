@@ -1,5 +1,23 @@
 # NSMB Mario vs Luigi Online PoC
 
+## MvL auto-restart death-result winner fix - 2026-06-24
+
+- User-reported issue: when a stage is decided by a death, the match result can still be judged by star count. This affects both current-match/result display and the melonDS-side auto-restart win counter.
+- Cause:
+  - `src/frontend/qt_sdl/NsmbNetplayPoC.cpp` resolved `BattleStars`, `DisplayedStars`, and `CollectedStars` before checking the per-player `Dead` flags, so a dead player could be counted as the stage winner if they had more stars.
+  - The GUI parsed `melonds.stdout.txt` and trusted the logged `winner` / `matchWins`, so existing logs with this condition also displayed the wrong winner and wrong cumulative match score.
+- Fix:
+  - melonDS auto-restart winner resolution now checks one-sided death first. If exactly one player is dead, the dead side loses before any star/life/death-count fallback is considered.
+  - GUI result parsing also corrects one-sided-death winners when reading logs and recomputes cumulative `mario_match_wins` / `luigi_match_wins` from the corrected per-stage winners. This keeps current-match display and persisted/reloaded history consistent, including older logs from before the melonDS fix.
+  - Rebuilt `melonDS.exe` and synced GUI sidecars so normal GUI launches use the updated auto-restart binary.
+- Verification:
+  - `cargo fmt`, `cargo test`, and `cargo clippy-all` passed in `tools/nsmb-mvl-gui/src-tauri`.
+  - `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passed. Existing unrelated warnings remain in `src/net/Netplay.cpp` and linker flags.
+  - `corepack pnpm sync:sidecars` passed and synced `melonDS.exe` with sha256 `f166839a9435d8170712cd9bde72e080b2c53672ddc9c0d35f15ecf3e0e300de`.
+  - `pnpm run ci` in `tools/nsmb-mvl-gui` still fails at Biome because existing TypeScript/JSON files are CRLF-formatted relative to Biome's expected output; this is unrelated to the Rust/C++ logic change.
+- Next action:
+  - Run a manual GUI best-of-3/5 match where a player with more stars loses their final life, and confirm the stdout log increments the living player's `matchWins` and stops only when that corrected side reaches the configured target.
+
 ## GUI ice-stage Luigi sudden-death log review - 2026-06-20
 
 - User-reported capture: `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781960336919-68204-0`, client role, diagnostics enabled, no rollback, random course order `[1,2,0,4,3]`.

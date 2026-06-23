@@ -8288,17 +8288,17 @@ int ResolveMvlResultWinner(const MvlResultSnapshot& result)
         return a < b ? 0 : 1;
     };
 
+    const bool player0Dead = result.Dead[0] != 0;
+    const bool player1Dead = result.Dead[1] != 0;
+    if (player0Dead != player1Dead)
+        return player0Dead ? 1 : 0;
+
     if (int winner = higherWins(result.BattleStars[0], result.BattleStars[1]); winner >= 0)
         return winner;
     if (int winner = higherWins(result.DisplayedStars[0], result.DisplayedStars[1]); winner >= 0)
         return winner;
     if (int winner = higherWins(result.CollectedStars[0], result.CollectedStars[1]); winner >= 0)
         return winner;
-
-    const bool player0Dead = result.Dead[0] != 0;
-    const bool player1Dead = result.Dead[1] != 0;
-    if (player0Dead != player1Dead)
-        return player0Dead ? 1 : 0;
 
     if (int winner = higherWins(result.Lives[0], result.Lives[1]); winner >= 0)
         return winner;
