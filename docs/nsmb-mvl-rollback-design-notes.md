@@ -11,6 +11,13 @@ Current rollback direction has moved from repair-only `tinycorepreimage` toward 
 
 Completed in the latest pass:
 
+- 2026-06-23 selected snapshot retake after exact-foreground profiling:
+  - The exact foreground path (`tinycoreramdelta` / `jitlookup-compiledchunks-skiprestorejit`) established the lower bound: checkpoint bytes and broad JIT invalidation are no longer dominant, but visible-frame restore + one resimulated `RunFrame` still pushes averages toward `18ms+` and creates correction spikes.
+  - Returned to the Plan-D-ish `nsmbtinycore` selected-range backend. The current best diagnostic candidate is `nsmbtc-rb1000-mr2-limit1`: process-list selected ranges, delta-discovered ranges, player object `0xC80`, tiny core flags `0x241`, JIT reset skipped, `RollbackInputWaitUs=1000`, `RollbackMaxResimFrames=2`, `InputMaxFrameLead=2`, and `MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME=1`.
+  - Normal/no-artificial routes are now much closer to playable than the exact path. `chaos` passed at `17.072/17.080ms` with rollback-derived spikes/restores `0/0` in `logs/codex-goal-resume-nsmbtinycore-limit1/20260623-111627`. `contact`, `death`, and `dualstresslong` also passed in `logs/codex-goal-resume-nsmbtinycore-limit1-routes/20260623-112604` with averages `16.704-16.751ms` and no persistent mismatch.
+  - Selected snapshot cost is low enough that checkpoint save is no longer the problem: save avg `~0.15-0.18ms`, restore avg `~3.3-3.7ms`, resimulated `RunFrame` avg `~12-15ms`.
+  - The remaining blocker is narrower but real. Artificial `InputSendJitterFrames=2` still hit a client rollback spike of `41.647ms`, and fixed `InputSendDelayFrames=2` hit `40.587ms`. Fixed `InputSendDelayFrames=3` turns into a rollback storm (`~19ms` averages and many rollback spikes). So this is an experimental best path, not a completed rollback solution.
+  - Design implication: selected process-list snapshot is again the main practical line. It must be validated against the exact oracle and made robust around object/process lifecycle, but it avoids the exact path's steady checkpoint/resim wall. The next step should refine correction placement and process-list lifecycle state, not raise InputDelay or patch only individual hazards/stars.
 - 2026-06-23 follow-up after the JIT-boundary commit:
   - Added ARM JIT fast-lookup usage tracking variants (`MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_USED_SPANS`, `...USED_CHUNKS`, `...COMPILED_CHUNKS`). Used-span/used-chunk tracking is too expensive in the hot path, but compiled-chunk reset is useful when combined with exact restore.
   - Added restore phase spike fields and measured the old exact-ish cliff directly: core restore/copy are small (`~3ms` and `<0.5ms`), while restored-range JIT invalidation can be `~70ms`.
