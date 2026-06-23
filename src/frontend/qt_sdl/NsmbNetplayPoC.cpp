@@ -3977,10 +3977,10 @@ std::vector<char> BuildInputBundlePayloadLocked(melonDS::u32 frame, const InputS
     for (int offset = 1; offset <= future; offset++)
     {
         const melonDS::u32 entryFrame = frame + static_cast<melonDS::u32>(offset);
-        InputState entryInput = input;
         auto existing = G.LocalInputs.find(entryFrame);
-        if (existing != G.LocalInputs.end())
-            entryInput = existing->second;
+        if (existing == G.LocalInputs.end())
+            continue;
+        const InputState& entryInput = existing->second;
         entries.push_back({
             entryFrame,
             entryInput.KeyMask,

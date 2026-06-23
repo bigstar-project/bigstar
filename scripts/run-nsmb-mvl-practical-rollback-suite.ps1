@@ -14,6 +14,7 @@ param(
     [switch]$NoGameStateTrace,
     [switch]$StateSync,
     [switch]$FpsSpikeTrace,
+    [double]$MaxAverageFrameMs = 0.0,
     [double]$MaxActiveFrameMs = 90.0,
     [int]$MaxActiveFrameOver33ms = 80,
     [int]$MaxConsecutiveSlowFrames = 4,
@@ -5150,6 +5151,171 @@ $candidateDefs = @{
             MELONDS_NSML_ROLLBACK_SKIP_RESTORED_JIT_INVALIDATION = "1"
         }
     }
+    "jitlookup-compiledchunks-skiprestorejit-cp2-maxlead0-leadbudget2ms" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 0
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "2000"
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_COMPILED_CHUNKS = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_RESTORED_JIT_INVALIDATION = "1"
+        }
+    }
+    "jitlookup-compiledchunks-skiprestorejit-prepump-cp1-maxlead0-leadbudget2ms" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 0
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "2000"
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_COMPILED_CHUNKS = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_RESTORED_JIT_INVALIDATION = "1"
+            MELONDS_NSML_ROLLBACK_PRE_PUMP_BEFORE_RESIM = "1"
+        }
+    }
+    "jitlookup-compiledchunks-skiprestorejit-future4-cp1-maxlead0-leadbudget2ms" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 0
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "2000"
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_COMPILED_CHUNKS = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_RESTORED_JIT_INVALIDATION = "1"
+            MELONDS_NSML_INPUT_BUNDLE_FUTURE = "4"
+        }
+    }
+    "jitlookup-compiledchunks-skiprestorejit-rbwait500-cp1-maxlead0-leadbudget2ms" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 500
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 0
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "2000"
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_COMPILED_CHUNKS = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_RESTORED_JIT_INVALIDATION = "1"
+        }
+    }
+    "jitlookup-compiledchunks-skiprestorejit-rbwait1000-cp1-maxlead0-leadbudget2ms" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 1000
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 0
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "2000"
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_COMPILED_CHUNKS = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_RESTORED_JIT_INVALIDATION = "1"
+        }
+    }
+    "jitlookup-compiledchunks-skiprestorejit-skipfinal-cp1-maxlead0-leadbudget2ms" = [pscustomobject]@{
+        Backend = "tinycoreramdelta"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 1
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x241"
+        InputMaxFrameLead = 0
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "2000"
+            MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_COMPILED_CHUNKS = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_RESTORED_JIT_INVALIDATION = "1"
+            MELONDS_NSML_ROLLBACK_RESIM_SKIP_FINAL_CHECKPOINT = "1"
+        }
+    }
     "jitlookup-compiledchunks-skiprestorejit-cp1-maxlead0-leadbudget2ms-maxcorr1" = [pscustomobject]@{
         Backend = "tinycoreramdelta"
         InputDelayFrames = 2
@@ -7003,6 +7169,23 @@ foreach ($candidateName in $Candidate) {
         $hostFields = Get-TimingFields -Line $hostTiming
         $clientFields = Get-TimingFields -Line $clientTiming
         $transientFields = Get-TransientMismatchFields -Path $runLog
+        if ($MaxAverageFrameMs -gt 0.0) {
+            $avgFailures = New-Object System.Collections.Generic.List[string]
+            if ($hostFields.Avg -ne "" -and ([double]$hostFields.Avg) -gt $MaxAverageFrameMs) {
+                $avgFailures.Add("host avg frame too high: avgMs=$($hostFields.Avg) limit=$MaxAverageFrameMs")
+            }
+            if ($clientFields.Avg -ne "" -and ([double]$clientFields.Avg) -gt $MaxAverageFrameMs) {
+                $avgFailures.Add("client avg frame too high: avgMs=$($clientFields.Avg) limit=$MaxAverageFrameMs")
+            }
+            if ($avgFailures.Count -gt 0) {
+                $avgError = $avgFailures -join "; "
+                if ($errorText) {
+                    $errorText = "$errorText; $avgError"
+                } else {
+                    $errorText = $avgError
+                }
+            }
+        }
         $rollbackIntegrityError = Get-RollbackIntegrityError -Paths @($hostStdout, $clientStdout)
         if ($rollbackIntegrityError) {
             if ($errorText) {
