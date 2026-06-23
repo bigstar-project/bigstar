@@ -672,7 +672,7 @@ function StageMetric({
         className={css({
           color: 'fg.default',
           fontVariantNumeric: 'tabular-nums',
-          fontWeight: 'black',
+          fontWeight: 'bold',
           minW: '[1.2em]',
           textAlign: 'right',
         })}
