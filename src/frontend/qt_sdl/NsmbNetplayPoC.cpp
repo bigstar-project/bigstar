@@ -1372,6 +1372,10 @@ struct State
     melonDS::u32 ActiveFrameOver33ms[16] {};
     int ActiveFrameSpikeThresholdUs = 25000;
     bool ActiveFrameSpikeTrace = false;
+    int ActiveFrameSpikeTraceMaxLines = 200;
+    melonDS::u32 ActiveFrameSpikeTraceLines[16] {};
+    melonDS::u32 ActiveFrameCurrentSlowRun[16] {};
+    melonDS::u32 ActiveFrameMaxSlowRun[16] {};
     int FrameHeartbeatInterval = 0;
     melonDS::u32 LastFrameHeartbeat[16] {};
     int GameplayHeartbeatInterval = 0;
@@ -1801,6 +1805,8 @@ struct State
     bool InputNetplayOnly = false;
     bool InputNetplayTraceEnabled = false;
     bool RollbackStatsTraceEnabled = false;
+    bool RollbackStatsTraceSummaryOnly = false;
+    int RollbackStatsTraceInterval = 120;
     bool InputHealthTraceEnabled = false;
     int InputHealthTraceInterval = 120;
     int InputHealthTraceWaitThresholdMs = 16;
@@ -1874,6 +1880,8 @@ struct State
     bool RollbackResimConsumeCurrentFrame = false;
     melonDS::u32 LastPerfSpikeRollbackRestoreCount[16] {};
     melonDS::u32 LastPerfSpikeRollbackResimulateCount[16] {};
+    melonDS::u32 ActiveFrameRollbackSpikeCount[16] {};
+    unsigned long long ActiveFrameRollbackSpikeMaxUs[16] {};
     melonDS::u32 RollbackCorrectionFrame[16] {};
     int RollbackCorrectionCount[16] {};
     bool RollbackSkipRunFrame[16] {};
@@ -4326,6 +4334,49 @@ bool IsRollbackPreimageBackend()
         || G.RollbackBackendMode == RollbackBackend::TinyCorePreimage;
 }
 
+void PrintRollbackSummaryStatsLocked(melonDS::u32 frame)
+{
+    if (!G.RollbackEnabled)
+        return;
+
+    const unsigned long long saveAvgUs = G.RollbackCheckpointSaveCount == 0
+        ? 0
+        : G.RollbackCheckpointSaveTotalUs / G.RollbackCheckpointSaveCount;
+    const unsigned long long restoreAvgUs = G.RollbackCheckpointRestoreOpCount == 0
+        ? 0
+        : G.RollbackCheckpointRestoreTotalUs / G.RollbackCheckpointRestoreOpCount;
+    const unsigned long long resimRunAvgUs = G.RollbackMeasuredResimFrameCount == 0
+        ? 0
+        : G.RollbackResimRunFrameTotalUs / G.RollbackMeasuredResimFrameCount;
+    const unsigned long long resimTotalAvgUs = G.RollbackMeasuredResimOpCount == 0
+        ? 0
+        : G.RollbackResimCorrectionTotalUs / G.RollbackMeasuredResimOpCount;
+
+    std::printf(
+        "NSMB Rollback: frame=%u backend=%s summary=1 checkpointSaves=%u saveAvgUs=%llu saveMaxUs=%llu restoreOps=%u restoreAvgUs=%llu restoreMaxUs=%llu resimOps=%u resimFrames=%llu resimRunAvgUs=%llu resimRunMaxUs=%llu resimTotalAvgUs=%llu resimTotalMaxUs=%llu predicted=%zu predictions=%u restores=%u resims=%u pending=%u observed=%u\n",
+        frame,
+        RollbackBackendName(),
+        G.RollbackCheckpointSaveCount,
+        saveAvgUs,
+        G.RollbackCheckpointSaveMaxUs,
+        G.RollbackCheckpointRestoreOpCount,
+        restoreAvgUs,
+        G.RollbackCheckpointRestoreMaxUs,
+        G.RollbackMeasuredResimOpCount,
+        G.RollbackMeasuredResimFrameCount,
+        resimRunAvgUs,
+        G.RollbackResimRunFrameMaxUs,
+        resimTotalAvgUs,
+        G.RollbackResimCorrectionMaxUs,
+        G.PredictedRemoteInputs.size(),
+        G.RollbackPredictionCount,
+        G.RollbackRestoreCount,
+        G.RollbackResimulateCount,
+        G.PendingRollbackFrame,
+        G.PendingRollbackObservedFrame);
+    std::fflush(stdout);
+}
+
 unsigned long long ElapsedUs(std::chrono::steady_clock::time_point start)
 {
     return static_cast<unsigned long long>(
@@ -4411,6 +4462,48 @@ void RecordRollbackRestorePhaseTiming(
         G.RollbackRestoreJITMaxUs = jitUs;
 }
 
+bool ReserveActiveFrameSpikeTraceLine(int instanceID)
+{
+    if (!G.ActiveFrameSpikeTrace)
+        return false;
+    if (instanceID < 0 || instanceID >= 16)
+        return false;
+    if (G.ActiveFrameSpikeTraceMaxLines <= 0)
+        return false;
+    if (G.ActiveFrameSpikeTraceLines[instanceID] >= static_cast<melonDS::u32>(G.ActiveFrameSpikeTraceMaxLines))
+        return false;
+
+    G.ActiveFrameSpikeTraceLines[instanceID]++;
+    return true;
+}
+
+void RecordActiveFrameSlowSample(
+    int instanceID,
+    unsigned long long elapsedUs,
+    melonDS::u32 rollbackRestoreDelta,
+    melonDS::u32 rollbackResimDelta)
+{
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+
+    if (elapsedUs < static_cast<unsigned long long>(G.ActiveFrameSpikeThresholdUs))
+    {
+        G.ActiveFrameCurrentSlowRun[instanceID] = 0;
+        return;
+    }
+
+    G.ActiveFrameCurrentSlowRun[instanceID]++;
+    if (G.ActiveFrameCurrentSlowRun[instanceID] > G.ActiveFrameMaxSlowRun[instanceID])
+        G.ActiveFrameMaxSlowRun[instanceID] = G.ActiveFrameCurrentSlowRun[instanceID];
+
+    if (rollbackRestoreDelta > 0 || rollbackResimDelta > 0)
+    {
+        G.ActiveFrameRollbackSpikeCount[instanceID]++;
+        if (elapsedUs > G.ActiveFrameRollbackSpikeMaxUs[instanceID])
+            G.ActiveFrameRollbackSpikeMaxUs[instanceID] = elapsedUs;
+    }
+}
+
 void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
 {
     if (instanceID < 0 || instanceID >= 16 || !G.ActiveTimerStarted[instanceID])
@@ -4447,14 +4540,20 @@ void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
     if (elapsedUs > 33334)
         G.ActiveFrameOver33ms[instanceID]++;
 
-    if (G.ActiveFrameSpikeTrace && elapsedUs >= static_cast<unsigned long long>(G.ActiveFrameSpikeThresholdUs))
+    const bool isSpike = elapsedUs >= static_cast<unsigned long long>(G.ActiveFrameSpikeThresholdUs);
+    const melonDS::u32 restoreDelta =
+        isSpike ? (G.RollbackRestoreCount - G.LastPerfSpikeRollbackRestoreCount[instanceID]) : 0;
+    const melonDS::u32 resimDelta =
+        isSpike ? (G.RollbackResimulateCount - G.LastPerfSpikeRollbackResimulateCount[instanceID]) : 0;
+    if (isSpike)
     {
-        const melonDS::u32 restoreDelta =
-            G.RollbackRestoreCount - G.LastPerfSpikeRollbackRestoreCount[instanceID];
-        const melonDS::u32 resimDelta =
-            G.RollbackResimulateCount - G.LastPerfSpikeRollbackResimulateCount[instanceID];
         G.LastPerfSpikeRollbackRestoreCount[instanceID] = G.RollbackRestoreCount;
         G.LastPerfSpikeRollbackResimulateCount[instanceID] = G.RollbackResimulateCount;
+    }
+    RecordActiveFrameSlowSample(instanceID, elapsedUs, restoreDelta, resimDelta);
+
+    if (isSpike && ReserveActiveFrameSpikeTraceLine(instanceID))
+    {
         std::printf(
             "NSMB PerfSpike: inst=%d frame=%u frameTimeUs=%llu thresholdUs=%d rollbackRestores=%u rollbackResims=%u rollbackRestoreDelta=%u rollbackResimDelta=%u saveMaxUs=%llu restoreMaxUs=%llu restoreCoreMaxUs=%llu restoreCopyMaxUs=%llu restoreJITMaxUs=%llu resimRunMaxUs=%llu resimSaveMaxUs=%llu resimTotalMaxUs=%llu\n",
             instanceID,
@@ -7962,16 +8061,19 @@ void RecordRemoteInputWaitStats(unsigned long long elapsedUs, unsigned long long
     G.RemoteInputWaitMaxUs = std::max(G.RemoteInputWaitMaxUs, elapsedUs);
 }
 
-void TraceRemoteInputWaitSpike(melonDS::u32 targetFrame, unsigned long long elapsedUs, unsigned long long loops)
+void TraceRemoteInputWaitSpike(int instanceID, melonDS::u32 targetFrame, unsigned long long elapsedUs, unsigned long long loops)
 {
     if (!G.ActiveFrameSpikeTrace
         || elapsedUs < static_cast<unsigned long long>(std::min(G.ActiveFrameSpikeThresholdUs, 10000)))
     {
         return;
     }
+    if (!ReserveActiveFrameSpikeTraceLine(instanceID))
+        return;
 
     std::printf(
-        "NSMB RemoteInputWaitSpike: frame=%u waitedMs=%.3f loops=%llu\n",
+        "NSMB RemoteInputWaitSpike: inst=%d frame=%u waitedMs=%.3f loops=%llu\n",
+        instanceID,
         targetFrame,
         static_cast<double>(elapsedUs) / 1000.0,
         loops);
@@ -8008,7 +8110,7 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
                     std::chrono::steady_clock::now() - start).count();
                 const auto waitedUs = static_cast<unsigned long long>(std::max<long long>(0, elapsedUs));
                 RecordRemoteInputWaitStats(waitedUs, loops);
-                TraceRemoteInputWaitSpike(targetFrame, waitedUs, loops);
+                TraceRemoteInputWaitSpike(G.LocalInstance, targetFrame, waitedUs, loops);
                 if (G.InputHealthTraceEnabled
                     && waitedUs >= static_cast<unsigned long long>(G.InputHealthTraceWaitThresholdMs) * 1000ULL
                     && G.LastInputHealthRemoteWaitFrame != targetFrame)
@@ -8047,7 +8149,7 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
                     std::chrono::steady_clock::now() - start).count();
                 const auto recordedWaitedUs = static_cast<unsigned long long>(std::max<long long>(0, waitedUs));
                 RecordRemoteInputWaitStats(recordedWaitedUs, loops);
-                TraceRemoteInputWaitSpike(targetFrame, recordedWaitedUs, loops);
+                TraceRemoteInputWaitSpike(G.LocalInstance, targetFrame, recordedWaitedUs, loops);
                 return NeutralInput();
             }
         }
@@ -13797,7 +13899,7 @@ void WritePacketBridgeJitScratchIfNeeded(
         const unsigned long long totalUs = static_cast<unsigned long long>(ElapsedUs(scratchStart));
         const unsigned long long thresholdUs = static_cast<unsigned long long>(
             std::min(G.ActiveFrameSpikeThresholdUs, 10000));
-        if (totalUs >= thresholdUs)
+        if (totalUs >= thresholdUs && ReserveActiveFrameSpikeTraceLine(instanceID))
         {
             std::printf(
                 "NSMB PacketBridgeScratchSpike: inst=%d frame=%u logicalFrame=%u totalMs=%.3f peerStartWaitMs=%.3f networkMs=%.3f throttleMs=%.3f lockstepRemoteWaitMs=%.3f writeMs=%.3f wrote=%d beforeStart=%d hasRemote=%d predictedRemote=%d\n",
@@ -18486,6 +18588,8 @@ void InitFromEnvironment()
     G.ActiveFrameSpikeThresholdUs = std::clamp(
         EnvInt("MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS", 25), 1, 1000) * 1000;
     G.ActiveFrameSpikeTrace = EnvFlag("MELONDS_NSML_FPS_SPIKE_TRACE");
+    G.ActiveFrameSpikeTraceMaxLines = std::clamp(
+        EnvInt("MELONDS_NSML_FPS_SPIKE_TRACE_MAX_LINES", 200), 0, 100000);
     G.FrameHeartbeatInterval = std::clamp(
         EnvInt("MELONDS_NSML_FRAME_HEARTBEAT_INTERVAL", 0), 0, 3600);
     G.GameplayHeartbeatInterval = std::clamp(
@@ -19136,6 +19240,9 @@ void InitFromEnvironment()
     G.InputNetplayOnly = EnvFlag("MELONDS_NSML_INPUT_NETPLAY_ONLY");
     G.InputNetplayTraceEnabled = EnvFlag("MELONDS_NSML_INPUT_NETPLAY_TRACE");
     G.RollbackStatsTraceEnabled = EnvFlag("MELONDS_NSML_ROLLBACK_STATS_TRACE");
+    G.RollbackStatsTraceSummaryOnly = EnvFlag("MELONDS_NSML_ROLLBACK_STATS_TRACE_SUMMARY_ONLY");
+    G.RollbackStatsTraceInterval = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_STATS_TRACE_INTERVAL", 120), 1, 3600);
     G.InputHealthTraceEnabled = EnvFlag("MELONDS_NSML_INPUT_HEALTH_TRACE");
     G.InputHealthTraceInterval = std::clamp(
         EnvInt("MELONDS_NSML_INPUT_HEALTH_TRACE_INTERVAL", 120), 1, 3600);
@@ -19772,6 +19879,8 @@ public:
         const auto tailUs = ElapsedUs(Last, now);
         const auto totalUs = ElapsedUs(Start, now);
         if (totalUs < std::min(G.ActiveFrameSpikeThresholdUs, 10000))
+            return;
+        if (!ReserveActiveFrameSpikeTraceLine(InstanceID))
             return;
 
         std::printf(
@@ -20609,8 +20718,9 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     if (G.RollbackEnabled
         && (G.InputNetplayTraceEnabled || G.RollbackStatsTraceEnabled)
+        && !G.RollbackStatsTraceSummaryOnly
         && logFrame != G.LastRollbackTraceFrame
-        && (logFrame % 120) == 0)
+        && (logFrame % static_cast<melonDS::u32>(G.RollbackStatsTraceInterval)) == 0)
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         G.LastRollbackTraceFrame = logFrame;
@@ -20809,7 +20919,8 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     {
         const auto totalUs = std::chrono::duration_cast<std::chrono::microseconds>(
             afterSyncPlayer - afterHookCallStart).count();
-        if (totalUs >= std::min(G.ActiveFrameSpikeThresholdUs, 10000))
+        if (totalUs >= std::min(G.ActiveFrameSpikeThresholdUs, 10000)
+            && ReserveActiveFrameSpikeTraceLine(instanceID))
         {
             const auto elapsedMs = [](auto start, auto end) {
                 return std::chrono::duration<double, std::milli>(end - start).count();
@@ -20926,8 +21037,10 @@ bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
                     static_cast<double>(timingSamples) / 1000.0;
                 const double maxFrameMs =
                     static_cast<double>(G.ActiveFrameMaxUs[instanceID]) / 1000.0;
+                const double rollbackMaxFrameMs =
+                    static_cast<double>(G.ActiveFrameRollbackSpikeMaxUs[instanceID]) / 1000.0;
                 std::printf(
-                    "NSMB Test: active frame timing startFrame=%u samples=%u avgFrameMs=%.3f maxFrameMs=%.3f maxFrame=%u over16ms=%u over25ms=%u over33ms=%u spikeThresholdMs=%.3f\n",
+                    "NSMB Test: active frame timing startFrame=%u samples=%u avgFrameMs=%.3f maxFrameMs=%.3f maxFrame=%u over16ms=%u over25ms=%u over33ms=%u maxConsecutiveSlowFrames=%u rollbackSpikeCount=%u rollbackMaxFrameMs=%.3f spikeThresholdMs=%.3f spikeTraceLines=%u spikeTraceLimit=%d\n",
                     G.ActiveTimerStartFrame[instanceID],
                     timingSamples,
                     avgFrameMs,
@@ -20936,9 +21049,16 @@ bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
                     G.ActiveFrameOver16ms[instanceID],
                     G.ActiveFrameOver25ms[instanceID],
                     G.ActiveFrameOver33ms[instanceID],
-                    static_cast<double>(G.ActiveFrameSpikeThresholdUs) / 1000.0);
+                    G.ActiveFrameMaxSlowRun[instanceID],
+                    G.ActiveFrameRollbackSpikeCount[instanceID],
+                    rollbackMaxFrameMs,
+                    static_cast<double>(G.ActiveFrameSpikeThresholdUs) / 1000.0,
+                    G.ActiveFrameSpikeTraceLines[instanceID],
+                    G.ActiveFrameSpikeTraceMaxLines);
             }
         }
+        if (G.RollbackStatsTraceEnabled && G.RollbackStatsTraceSummaryOnly)
+            PrintRollbackSummaryStatsLocked(G.TestFrames);
         if (G.Enabled && G.InputNetplayOnly)
         {
             const double remoteAvgUs = G.RemoteInputWaitCount > 0

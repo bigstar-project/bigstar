@@ -38,6 +38,7 @@ param(
     [int]$InputDropOffset = 0,
     [switch]$Rollback,
     [switch]$RollbackStatsTrace,
+    [switch]$RollbackStatsTraceSummaryOnly,
     [string]$RollbackBackend = "",
     [string]$RollbackTinyCoreFlags = "",
     [int]$RollbackWindow = 20,
@@ -47,6 +48,7 @@ param(
     [switch]$RollbackResimulate,
     [switch]$RollbackPredictOnly,
     [switch]$RollbackSkipIntermediateResimCheckpoints,
+    [switch]$RollbackSkipFinalResimCheckpoint,
     [switch]$RollbackSkipJitReset,
     [switch]$RollbackSkipRenderDuringResim,
     [switch]$RollbackRestoreProbe,
@@ -64,6 +66,7 @@ param(
     [int]$GameStateTraceStartFrame = 0,
     [int]$GameStateTraceEndFrame = 0,
     [switch]$NoGameStateTrace,
+    [switch]$GameStateTraceExtended,
     [switch]$StateSync,
     [switch]$StateApply,
     [int]$StateSyncInterval = 60,
@@ -175,6 +178,9 @@ $ErrorActionPreference = "Stop"
 if ($FpsSpikeTrace -and ($MaxConsecutiveSlowFrames -ge 0 -or $MaxRollbackFrameMs -gt 0.0)) {
     $env:MELONDS_NSML_FPS_SPIKE_TRACE = "1"
     $env:MELONDS_NSML_PERF_SPIKE_PHASE_TRACE = "1"
+    if (-not $env:MELONDS_NSML_FPS_SPIKE_TRACE_MAX_LINES) {
+        $env:MELONDS_NSML_FPS_SPIKE_TRACE_MAX_LINES = "200"
+    }
     $currentSpikeThreshold = 0.0
     $targetSpikeThreshold = if ($MaxRollbackFrameMs -gt 0.0) {
         [Math]::Min($SlowFrameThresholdMs, $MaxRollbackFrameMs)
@@ -193,9 +199,18 @@ if ($FpsSpikeTrace -and ($MaxConsecutiveSlowFrames -ge 0 -or $MaxRollbackFrameMs
     Remove-Item Env:\MELONDS_NSML_FPS_SPIKE_TRACE -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_PERF_SPIKE_PHASE_TRACE -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_FPS_SPIKE_TRACE_MAX_LINES -ErrorAction SilentlyContinue
 }
 if ($RollbackStatsTrace) {
     $env:MELONDS_NSML_ROLLBACK_STATS_TRACE = "1"
+    if ($RollbackStatsTraceSummaryOnly) {
+        $env:MELONDS_NSML_ROLLBACK_STATS_TRACE_SUMMARY_ONLY = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_STATS_TRACE_SUMMARY_ONLY -ErrorAction SilentlyContinue
+    }
+} else {
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_STATS_TRACE -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_STATS_TRACE_SUMMARY_ONLY -ErrorAction SilentlyContinue
 }
 
 if ($RollbackPredictionProbeModulo -gt 0) {
@@ -233,6 +248,11 @@ if ($RollbackSkipIntermediateResimCheckpoints) {
     $env:MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS = "1"
 } else {
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS -ErrorAction SilentlyContinue
+}
+if ($RollbackSkipFinalResimCheckpoint) {
+    $env:MELONDS_NSML_ROLLBACK_RESIM_SKIP_FINAL_CHECKPOINT = "1"
+} else {
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIM_SKIP_FINAL_CHECKPOINT -ErrorAction SilentlyContinue
 }
 if ($Rollback -and ($isTinyCorePreimageRollback -or $isNsmbTinyCoreRollback)) {
     $env:MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
@@ -384,11 +404,13 @@ if ($ForcePlayerInventoryPowerups) {
 if (-not $NoGameStateTrace) {
     $common += @(
         "-GameStateTrace",
-        "-GameStateTraceExtended",
         "-GameStateTraceInterval", "$GameStateTraceInterval",
         "-GameStateTraceStartFrame", "$GameStateTraceStartFrame",
         "-GameStateTraceEndFrame", "$GameStateTraceEndFrame"
     )
+    if ($GameStateTraceExtended) {
+        $common += "-GameStateTraceExtended"
+    }
 }
 if ($StateSync) {
     $common += @(
@@ -732,6 +754,18 @@ function Assert-ActiveFrameTiming {
     $maxFrameMs = [double]$Matches[1]
     $over25ms = [int]$Matches[2]
     $over33ms = [int]$Matches[3]
+    $summaryMaxConsecutiveSlowFrames = $null
+    if ($line -match "maxConsecutiveSlowFrames=([0-9]+)") {
+        $summaryMaxConsecutiveSlowFrames = [int]$Matches[1]
+    }
+    $summaryRollbackMaxFrameMs = $null
+    if ($line -match "rollbackMaxFrameMs=([0-9.]+)") {
+        $summaryRollbackMaxFrameMs = [double]$Matches[1]
+    }
+    $summaryRollbackSpikeCount = $null
+    if ($line -match "rollbackSpikeCount=([0-9]+)") {
+        $summaryRollbackSpikeCount = [int]$Matches[1]
+    }
     if ($MaxActiveFrameMs -gt 0.0 -and $maxFrameMs -gt $MaxActiveFrameMs) {
         throw "$Role active frame spike too high: maxFrameMs=$maxFrameMs limit=$MaxActiveFrameMs"
     }
@@ -744,27 +778,31 @@ function Assert-ActiveFrameTiming {
 
     if ($MaxConsecutiveSlowFrames -ge 0) {
         $maxRun = 0
-        $run = 0
-        $lastFrame = -1
-        foreach ($perfLine in ($Text -split "`r?`n")) {
-            if ($perfLine -notmatch "NSMB PerfSpike: .*frame=([0-9]+) frameTimeUs=([0-9]+)") {
-                continue
-            }
+        if ($null -ne $summaryMaxConsecutiveSlowFrames) {
+            $maxRun = $summaryMaxConsecutiveSlowFrames
+        } else {
+            $run = 0
+            $lastFrame = -1
+            foreach ($perfLine in ($Text -split "`r?`n")) {
+                if ($perfLine -notmatch "NSMB PerfSpike: .*frame=([0-9]+) frameTimeUs=([0-9]+)") {
+                    continue
+                }
 
-            $frame = [int]$Matches[1]
-            $frameMs = [double]$Matches[2] / 1000.0
-            if ($frameMs -lt $SlowFrameThresholdMs) {
-                continue
-            }
+                $frame = [int]$Matches[1]
+                $frameMs = [double]$Matches[2] / 1000.0
+                if ($frameMs -lt $SlowFrameThresholdMs) {
+                    continue
+                }
 
-            if ($lastFrame -ge 0 -and $frame -eq ($lastFrame + 1)) {
-                $run++
-            } else {
-                $run = 1
-            }
-            $lastFrame = $frame
-            if ($run -gt $maxRun) {
-                $maxRun = $run
+                if ($lastFrame -ge 0 -and $frame -eq ($lastFrame + 1)) {
+                    $run++
+                } else {
+                    $run = 1
+                }
+                $lastFrame = $frame
+                if ($run -gt $maxRun) {
+                    $maxRun = $run
+                }
             }
         }
 
@@ -776,35 +814,42 @@ function Assert-ActiveFrameTiming {
     if ($RollbackFrameLimitMs -gt 0.0) {
         $maxRollbackFrameMs = 0.0
         $rollbackSpikeCount = 0
-        $lastRestores = 0
-        $lastResims = 0
-        foreach ($perfLine in ($Text -split "`r?`n")) {
-            if ($perfLine -notmatch "NSMB PerfSpike: .*frame=([0-9]+) frameTimeUs=([0-9]+)") {
-                continue
+        if ($null -ne $summaryRollbackMaxFrameMs) {
+            $maxRollbackFrameMs = $summaryRollbackMaxFrameMs
+            if ($null -ne $summaryRollbackSpikeCount) {
+                $rollbackSpikeCount = $summaryRollbackSpikeCount
             }
+        } else {
+            $lastRestores = 0
+            $lastResims = 0
+            foreach ($perfLine in ($Text -split "`r?`n")) {
+                if ($perfLine -notmatch "NSMB PerfSpike: .*frame=([0-9]+) frameTimeUs=([0-9]+)") {
+                    continue
+                }
 
-            $frameMs = [double]$Matches[2] / 1000.0
-            $restoreDelta = 0
-            $resimDelta = 0
-            if ($perfLine -match "rollbackRestoreDelta=([0-9]+).*rollbackResimDelta=([0-9]+)") {
-                $restoreDelta = [int]$Matches[1]
-                $resimDelta = [int]$Matches[2]
-            } elseif ($perfLine -match "rollbackRestores=([0-9]+).*rollbackResims=([0-9]+)") {
-                $restores = [int]$Matches[1]
-                $resims = [int]$Matches[2]
-                $restoreDelta = $restores - $lastRestores
-                $resimDelta = $resims - $lastResims
-                $lastRestores = $restores
-                $lastResims = $resims
-            }
+                $frameMs = [double]$Matches[2] / 1000.0
+                $restoreDelta = 0
+                $resimDelta = 0
+                if ($perfLine -match "rollbackRestoreDelta=([0-9]+).*rollbackResimDelta=([0-9]+)") {
+                    $restoreDelta = [int]$Matches[1]
+                    $resimDelta = [int]$Matches[2]
+                } elseif ($perfLine -match "rollbackRestores=([0-9]+).*rollbackResims=([0-9]+)") {
+                    $restores = [int]$Matches[1]
+                    $resims = [int]$Matches[2]
+                    $restoreDelta = $restores - $lastRestores
+                    $resimDelta = $resims - $lastResims
+                    $lastRestores = $restores
+                    $lastResims = $resims
+                }
 
-            if ($restoreDelta -le 0 -and $resimDelta -le 0) {
-                continue
-            }
+                if ($restoreDelta -le 0 -and $resimDelta -le 0) {
+                    continue
+                }
 
-            $rollbackSpikeCount++
-            if ($frameMs -gt $maxRollbackFrameMs) {
-                $maxRollbackFrameMs = $frameMs
+                $rollbackSpikeCount++
+                if ($frameMs -gt $maxRollbackFrameMs) {
+                    $maxRollbackFrameMs = $frameMs
+                }
             }
         }
 
@@ -844,7 +889,7 @@ function Assert-RollbackResimCount {
     }
 }
 
-function Assert-NoStateSyncPlayerGlobalMismatch {
+function Assert-NoStateSyncMismatch {
     param(
         [string]$Role,
         [string]$Text,
@@ -853,7 +898,7 @@ function Assert-NoStateSyncPlayerGlobalMismatch {
 
     $mismatches = @()
     foreach ($line in ($Text -split "`r?`n")) {
-        if ($line -match "NSMB PoC: game state mismatch .* frame=([0-9]+).* playerGlobal=0") {
+        if ($line -match "NSMB PoC: game state mismatch .* frame=([0-9]+)") {
             $mismatches += [pscustomobject]@{
                 Frame = [int]$Matches[1]
                 Line = $line
@@ -862,7 +907,7 @@ function Assert-NoStateSyncPlayerGlobalMismatch {
     }
     if ($mismatches.Count -gt 0) {
         if ($RollbackSettleFrames -le 0) {
-            throw "$Role state sync playerGlobal mismatch: $($mismatches[0].Line)"
+            throw "$Role state sync mismatch: $($mismatches[0].Line)"
         }
 
         $streakStart = $mismatches[0]
@@ -871,33 +916,37 @@ function Assert-NoStateSyncPlayerGlobalMismatch {
         for ($i = 1; $i -lt $mismatches.Count; $i++) {
             $current = $mismatches[$i]
             if (($current.Frame - $previous.Frame) -gt $separateTransientGap) {
-                Write-Host "$Role rollback transient playerGlobal mismatch settled frame=$($streakStart.Frame) lastMismatchFrame=$($previous.Frame)"
+                Write-Host "$Role rollback transient state sync mismatch settled frame=$($streakStart.Frame) lastMismatchFrame=$($previous.Frame)"
                 $streakStart = $current
-            } elseif (($current.Frame - $streakStart.Frame) -gt $RollbackSettleFrames) {
-                throw "$Role persistent state sync playerGlobal mismatch: first=$($streakStart.Line) latest=$($current.Line) settleFrames=$RollbackSettleFrames"
+            } elseif (($current.Frame - $streakStart.Frame) -ge $RollbackSettleFrames) {
+                throw "$Role persistent state sync mismatch: first=$($streakStart.Line) latest=$($current.Line) settleFrames=$RollbackSettleFrames"
             }
             $previous = $current
         }
-        Write-Host "$Role rollback transient playerGlobal mismatch settled frame=$($streakStart.Frame) lastMismatchFrame=$($previous.Frame)"
+        Write-Host "$Role rollback transient state sync mismatch settled frame=$($streakStart.Frame) lastMismatchFrame=$($previous.Frame)"
     }
 
     $jsonMismatch = Get-ChildItem -LiteralPath $LogDir -Recurse -Filter "*.game-state-mismatch.json" -ErrorAction SilentlyContinue |
         Where-Object {
             $jsonText = Get-Content -LiteralPath $_.FullName -Raw -ErrorAction SilentlyContinue
-            $jsonText -match '"player_global_matches"\s*:\s*false'
+            $jsonText -match '"(basic|player_global|wifi_candidate|render_candidate)_matches"\s*:\s*false'
         } |
         Select-Object -First 1
     if ($null -ne $jsonMismatch) {
         if ($RollbackSettleFrames -le 0 -or $mismatches.Count -eq 0) {
-            throw "$Role state sync playerGlobal mismatch json: $($jsonMismatch.FullName)"
+            throw "$Role state sync mismatch json: $($jsonMismatch.FullName)"
         }
-        Write-Host "$Role rollback transient playerGlobal mismatch json observed: $($jsonMismatch.FullName)"
+        Write-Host "$Role rollback transient state sync mismatch json observed: $($jsonMismatch.FullName)"
     }
 }
 
 Assert-NoRollbackIntegrityError -Role "host" -Text $hostMelonText
 Assert-NoRollbackIntegrityError -Role "client" -Text $clientMelonText
 
+if ($StateSync) {
+    Assert-NoStateSyncMismatch -Role "host" -Text $hostMelonText -LogDir $hostLog
+    Assert-NoStateSyncMismatch -Role "client" -Text $clientMelonText -LogDir $clientLog
+}
 if ($MaxActiveFrameMs -gt 0.0 -or $MaxActiveFrameOver25ms -ge 0 -or $MaxActiveFrameOver33ms -ge 0 -or $MaxConsecutiveSlowFrames -ge 0 -or $MaxRollbackFrameMs -gt 0.0) {
     Assert-ActiveFrameTiming -Role "host" -Text $hostMelonText -RollbackFrameLimitMs $MaxRollbackFrameMs
     Assert-ActiveFrameTiming -Role "client" -Text $clientMelonText -RollbackFrameLimitMs $MaxRollbackFrameMs
@@ -905,10 +954,6 @@ if ($MaxActiveFrameMs -gt 0.0 -or $MaxActiveFrameOver25ms -ge 0 -or $MaxActiveFr
 if ($MinRollbackResims -ge 0) {
     Assert-RollbackResimCount -Role "host" -Text $hostMelonText
     Assert-RollbackResimCount -Role "client" -Text $clientMelonText
-}
-if ($StateSync) {
-    Assert-NoStateSyncPlayerGlobalMismatch -Role "host" -Text $hostMelonText -LogDir $hostLog
-    Assert-NoStateSyncPlayerGlobalMismatch -Role "client" -Text $clientMelonText -LogDir $clientLog
 }
 
 if ($RequireWorldItemSpawn) {
@@ -1235,17 +1280,22 @@ $stableFields = @(
     "playerActor1Found", "playerActor1X", "playerActor1Y", "playerActor1Z",
     "movingHazardFound", "movingHazardX", "movingHazardY",
     "significantActiveObjects",
+    "playerTransitionStatus0", "playerTransitionStatus1",
+    "wifiCandidateHash"
+)
+$extendedStableFields = @(
     "playerCount", "player0Powerup", "player1Powerup",
     "player0Lives", "player1Lives", "player0BattleStars", "player1BattleStars",
     "player0Coins", "player1Coins", "player0Score", "player1Score",
     "player0DisplayedStars", "player1DisplayedStars",
     "player0Deaths", "player1Deaths", "player0CollectedStars", "player1CollectedStars",
     "player0Dead", "player1Dead", "player0InventoryPowerup", "player1InventoryPowerup",
-    "playerTransitionStatus0", "playerTransitionStatus1",
-    "wifiCandidateHash",
     "playerActor0UpdateLocked", "playerActor1UpdateLocked",
     "playerActor0VisibleFlag", "playerActor1VisibleFlag"
 )
+if ($GameStateTraceExtended) {
+    $stableFields = @($stableFields + $extendedStableFields)
+}
 $inputFields = @("inputPlayer0Held", "inputPlayer1Held", "inputPlayer0Pressed", "inputPlayer1Pressed")
 $fields = if ($IgnoreSpeculativeInputFields) {
     $stableFields

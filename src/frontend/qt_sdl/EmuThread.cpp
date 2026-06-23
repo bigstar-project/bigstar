@@ -166,6 +166,12 @@ void EmuThread::run()
         std::atof(getenv("MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS")
             ? getenv("MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS")
             : "25"));
+    const int nsmlPerfSpikePhaseTraceMaxLines = std::max(
+        0,
+        std::atoi(getenv("MELONDS_NSML_FPS_SPIKE_TRACE_MAX_LINES")
+            ? getenv("MELONDS_NSML_FPS_SPIKE_TRACE_MAX_LINES")
+            : "200"));
+    int nsmlPerfSpikePhaseTraceLines = 0;
     double nsmlPerfBeforeHook = 0.0;
     double nsmlPerfRunFrame = 0.0;
     double nsmlPerfAfterHook = 0.0;
@@ -599,8 +605,11 @@ frame_limit_done:
                 const double nsmlPhaseEnd = SDL_GetPerformanceCounter() * perfCountsSec;
                 const double nsmlPhaseTotal = nsmlPhaseEnd - nsmlPerfPhaseLastFrameEnd;
                 nsmlPerfPhaseLastFrameEnd = nsmlPhaseEnd;
-                if (nsmlPhaseTotal * 1000.0 >= nsmlPerfSpikePhaseThresholdMs)
+                if (nsmlPhaseTotal * 1000.0 >= nsmlPerfSpikePhaseThresholdMs
+                    && nsmlPerfSpikePhaseTraceMaxLines > 0
+                    && nsmlPerfSpikePhaseTraceLines < nsmlPerfSpikePhaseTraceMaxLines)
                 {
+                    nsmlPerfSpikePhaseTraceLines++;
                     const double nsmlPhaseAccounted =
                         nsmlPhaseMP
                         + nsmlPhaseInput
