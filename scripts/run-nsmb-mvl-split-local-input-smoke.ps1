@@ -37,6 +37,7 @@ param(
     [int]$InputDropModulo = 0,
     [int]$InputDropOffset = 0,
     [switch]$Rollback,
+    [switch]$RollbackStatsTrace,
     [string]$RollbackBackend = "",
     [string]$RollbackTinyCoreFlags = "",
     [int]$RollbackWindow = 20,
@@ -192,6 +193,9 @@ if ($FpsSpikeTrace -and ($MaxConsecutiveSlowFrames -ge 0 -or $MaxRollbackFrameMs
     Remove-Item Env:\MELONDS_NSML_FPS_SPIKE_TRACE -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_PERF_SPIKE_PHASE_TRACE -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS -ErrorAction SilentlyContinue
+}
+if ($RollbackStatsTrace) {
+    $env:MELONDS_NSML_ROLLBACK_STATS_TRACE = "1"
 }
 
 if ($RollbackPredictionProbeModulo -gt 0) {
