@@ -19,6 +19,7 @@
 #include <chrono>
 #include <cctype>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -108,6 +109,10 @@ constexpr melonDS::u16 kMvlStockItemTouchY = 153;
 constexpr melonDS::u32 kStageActorFreezeFlagAddr = 0x020CA28C;
 constexpr melonDS::u32 kActorCategoryMaskAddr = 0x020CA850;
 constexpr melonDS::u32 kGamePlayerGlobalBlockAddr = 0x0208B324;
+constexpr melonDS::u32 kGamePlayerGlobalBlockLen = 0xC0;
+constexpr melonDS::u32 kGamePlayerGlobalChunkLen = 0x10;
+constexpr std::size_t kGamePlayerGlobalChunkCount =
+    kGamePlayerGlobalBlockLen / kGamePlayerGlobalChunkLen;
 constexpr melonDS::u32 kGamePlayerPowerupAddr = 0x0208B324;
 constexpr melonDS::u32 kGamePlayerDeadAddr = 0x0208B328;
 constexpr melonDS::u32 kGamePlayerInventoryPowerupAddr = 0x0208B32C;
@@ -450,6 +455,10 @@ struct WireGameState
     melonDS::u32 StageGroup;
     melonDS::u32 VsMode;
     melonDS::u32 LocalPlayerID;
+    melonDS::u32 ScenePreviousSceneID;
+    melonDS::u32 SceneNextSceneID;
+    melonDS::u32 SceneCurrentSceneID;
+    melonDS::u32 SceneNextSceneSettings;
     melonDS::u32 GGID;
     melonDS::u32 NetRandomValue;
     melonDS::u32 NetRandomCallCount;
@@ -540,6 +549,8 @@ struct WireGameState
     melonDS::u32 MovingHazardPosZ;
     melonDS::u32 MovingHazardVelX;
     melonDS::u32 MovingHazardVelY;
+    melonDS::u32 PlayerGlobalChunkHashLo[kGamePlayerGlobalChunkCount];
+    melonDS::u32 PlayerGlobalChunkHashHi[kGamePlayerGlobalChunkCount];
     melonDS::u32 BasicHashLo;
     melonDS::u32 BasicHashHi;
     melonDS::u32 PlayerGlobalHashLo;
@@ -550,7 +561,7 @@ struct WireGameState
     melonDS::u32 RenderCandidateHashHi;
 };
 
-static_assert(sizeof(WireGameState) == 428);
+static_assert(sizeof(WireGameState) == 540);
 
 struct WirePlayerState
 {
@@ -1306,6 +1317,7 @@ struct GameStateSyncHashes
     melonDS::u64 PlayerGlobal = 0;
     melonDS::u64 WifiCandidate = 0;
     melonDS::u64 RenderCandidate = 0;
+    std::array<melonDS::u64, kGamePlayerGlobalChunkCount> PlayerGlobalChunks {};
 };
 
 melonDS::u32 FindObjectBaseByID(melonDS::NDS* nds, melonDS::u16 objectID);
@@ -1410,6 +1422,8 @@ struct State
     melonDS::u32 GameStateTraceEndFrame = 0;
     bool GameStateSyncEnabled = false;
     bool GameStateSyncExtended = false;
+    bool GameStateSyncConfirmedOnly = false;
+    bool GameStateSyncSampleWordDiff = false;
     bool GameStateApplyEnabled = false;
     bool GameStateApplyCriticalGlobals = true;
     bool GameStateApplyStarObjects = true;
@@ -1844,6 +1858,7 @@ struct State
     bool RollbackNSMBHeapScanRanges = true;
     bool RollbackNSMBSafeObjectFieldRanges = false;
     bool RollbackNSMBFullPlayerObjectWithSafeRanges = false;
+    std::set<melonDS::u16> RollbackNSMBFullObjectIDsWithSafeRanges;
     int RollbackNSMBScanInterval = 1;
     int RollbackNSMBHeapScanInterval = 1;
     RollbackNSMBDynamicRangeCache RollbackNSMBDynamicRanges;
@@ -2050,6 +2065,7 @@ struct State
     std::map<melonDS::u32, InputState> RemoteInputs;
     std::map<melonDS::u64, GameStateSyncHashes> LocalGameStateHashes;
     std::map<melonDS::u64, GameStateSyncHashes> RemoteGameStateHashes;
+    std::map<melonDS::u64, GameStateSample> LocalGameStateSamples;
     std::map<melonDS::u64, GameStateSample> RemoteGameStateSamples;
     std::map<melonDS::u64, WirePlayerState> RemotePlayerStateSamples;
     WireWorldState RemoteWorldStateSample {};
@@ -3010,6 +3026,128 @@ melonDS::u64 CombinedGameStateHash(const GameStateSyncHashes& hashes)
     return combined;
 }
 
+std::string PlayerGlobalChunkDiffSummary(const GameStateSyncHashes& local, const GameStateSyncHashes& remote)
+{
+    std::ostringstream out;
+    bool first = true;
+    auto writeHex32 = [&out](melonDS::u32 value) {
+        out << std::hex << std::uppercase << std::setw(8) << std::setfill('0')
+            << static_cast<unsigned int>(value)
+            << std::dec << std::nouppercase << std::setfill(' ');
+    };
+    auto writeHex64 = [&out](melonDS::u64 value) {
+        out << std::hex << std::uppercase << std::setw(16) << std::setfill('0')
+            << static_cast<unsigned long long>(value)
+            << std::dec << std::nouppercase << std::setfill(' ');
+    };
+    for (std::size_t i = 0; i < kGamePlayerGlobalChunkCount; i++)
+    {
+        if (local.PlayerGlobalChunks[i] == remote.PlayerGlobalChunks[i])
+            continue;
+        if (!first)
+            out << ";";
+        first = false;
+        out << "off=0x";
+        writeHex32(static_cast<melonDS::u32>(i * kGamePlayerGlobalChunkLen));
+        out << " local=";
+        writeHex64(local.PlayerGlobalChunks[i]);
+        out << " remote=";
+        writeHex64(remote.PlayerGlobalChunks[i]);
+    }
+    return out.str();
+}
+
+std::string GameStateSampleDiffSummary(const GameStateSample& local, const GameStateSample& remote)
+{
+    std::ostringstream out;
+    int count = 0;
+    auto writeHex32 = [&out](melonDS::u32 value) {
+        out << std::hex << std::uppercase << std::setw(8) << std::setfill('0')
+            << static_cast<unsigned int>(value)
+            << std::dec << std::nouppercase << std::setfill(' ');
+    };
+    auto diff = [&](const char* name, melonDS::u32 a, melonDS::u32 b) {
+        if (a == b || count >= 24)
+            return;
+        if (count != 0)
+            out << ";";
+        out << name << "=0x";
+        writeHex32(a);
+        out << "/0x";
+        writeHex32(b);
+        count++;
+    };
+
+    diff("stageID", local.StageID, remote.StageID);
+    diff("scene", local.SceneCurrentSceneID, remote.SceneCurrentSceneID);
+    diff("nextScene", local.SceneNextSceneID, remote.SceneNextSceneID);
+    diff("starFound", local.VsStarFound, remote.VsStarFound);
+    diff("starGUID", local.VsStarGUID, remote.VsStarGUID);
+    diff("starBase", local.VsStarBase, remote.VsStarBase);
+    diff("starX", local.VsStarPosX, remote.VsStarPosX);
+    diff("starY", local.VsStarPosY, remote.VsStarPosY);
+    diff("starActorFound", local.VsStarActorFound, remote.VsStarActorFound);
+    diff("starActorBase", local.VsStarActorBase, remote.VsStarActorBase);
+    diff("p0X", local.PlayerActor0PosX, remote.PlayerActor0PosX);
+    diff("p0Y", local.PlayerActor0PosY, remote.PlayerActor0PosY);
+    diff("p1X", local.PlayerActor1PosX, remote.PlayerActor1PosX);
+    diff("p1Y", local.PlayerActor1PosY, remote.PlayerActor1PosY);
+    diff("p0Transition", local.PlayerTransitionStatus0, remote.PlayerTransitionStatus0);
+    diff("p1Transition", local.PlayerTransitionStatus1, remote.PlayerTransitionStatus1);
+    diff("p0Powerup", local.Player0Powerup, remote.Player0Powerup);
+    diff("p1Powerup", local.Player1Powerup, remote.Player1Powerup);
+    diff("p0Stars", local.Player0BattleStars, remote.Player0BattleStars);
+    diff("p1Stars", local.Player1BattleStars, remote.Player1BattleStars);
+    diff("p0Coins", local.Player0Coins, remote.Player0Coins);
+    diff("p1Coins", local.Player1Coins, remote.Player1Coins);
+    diff("vsCoinCount", local.VsCoinCount, remote.VsCoinCount);
+    diff("p0Deaths", local.Player0Deaths, remote.Player0Deaths);
+    diff("p1Deaths", local.Player1Deaths, remote.Player1Deaths);
+    diff("p0CollectedStars", local.Player0CollectedStars, remote.Player0CollectedStars);
+    diff("p1CollectedStars", local.Player1CollectedStars, remote.Player1CollectedStars);
+    diff("hazardFound", local.MovingHazardFound, remote.MovingHazardFound);
+    diff("hazardX", local.MovingHazardPosX, remote.MovingHazardPosX);
+    diff("hazardY", local.MovingHazardPosY, remote.MovingHazardPosY);
+
+    return out.str();
+}
+
+std::string GameStateSampleWordDiffSummary(const GameStateSample& local, const GameStateSample& remote)
+{
+    constexpr std::size_t wordCount = offsetof(GameStateSample, Hash) / sizeof(melonDS::u32);
+    const auto* localWords = reinterpret_cast<const melonDS::u32*>(&local);
+    const auto* remoteWords = reinterpret_cast<const melonDS::u32*>(&remote);
+    std::ostringstream out;
+    int count = 0;
+    int total = 0;
+    auto writeHex32 = [&out](melonDS::u32 value) {
+        out << std::hex << std::uppercase << std::setw(8) << std::setfill('0')
+            << static_cast<unsigned int>(value)
+            << std::dec << std::nouppercase << std::setfill(' ');
+    };
+
+    for (std::size_t i = 0; i < wordCount; i++)
+    {
+        if (localWords[i] == remoteWords[i])
+            continue;
+        if (count < 24)
+        {
+            if (count != 0)
+                out << ";";
+            out << "w" << i << "=0x";
+            writeHex32(localWords[i]);
+            out << "/0x";
+            writeHex32(remoteWords[i]);
+            count++;
+        }
+        total++;
+    }
+
+    if (total > count)
+        out << ";more=" << (total - count);
+    return out.str();
+}
+
 std::string JsonEscape(const std::string& value)
 {
     std::ostringstream out;
@@ -3165,6 +3303,41 @@ void CompareGameStateLocked(int instanceID, melonDS::u32 frame)
         static_cast<unsigned long long>(rhs.PlayerGlobal),
         static_cast<unsigned long long>(rhs.WifiCandidate),
         static_cast<unsigned long long>(rhs.RenderCandidate));
+    if (lhs.PlayerGlobal != rhs.PlayerGlobal)
+    {
+        const std::string chunkDiffs = PlayerGlobalChunkDiffSummary(lhs, rhs);
+        if (!chunkDiffs.empty())
+        {
+            std::printf("NSMB PoC: playerGlobal chunk mismatch inst=%d frame=%u %s\n",
+                instanceID,
+                frame,
+                chunkDiffs.c_str());
+        }
+    }
+    auto localSample = G.LocalGameStateSamples.find(key);
+    auto remoteSample = G.RemoteGameStateSamples.find(key);
+    if (localSample != G.LocalGameStateSamples.end() && remoteSample != G.RemoteGameStateSamples.end())
+    {
+        const std::string sampleDiffs = GameStateSampleDiffSummary(localSample->second, remoteSample->second);
+        if (!sampleDiffs.empty())
+        {
+            std::printf("NSMB PoC: game state sample diff inst=%d frame=%u %s\n",
+                instanceID,
+                frame,
+                sampleDiffs.c_str());
+        }
+        if (G.GameStateSyncSampleWordDiff && lhs.Basic != rhs.Basic)
+        {
+            const std::string wordDiffs = GameStateSampleWordDiffSummary(localSample->second, remoteSample->second);
+            if (!wordDiffs.empty())
+            {
+                std::printf("NSMB PoC: game state sample word diff inst=%d frame=%u %s\n",
+                    instanceID,
+                    frame,
+                    wordDiffs.c_str());
+            }
+        }
+    }
 }
 
 InputState ApplyInputSpans(
@@ -3667,6 +3840,12 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     hashes.PlayerGlobal = (static_cast<melonDS::u64>(packet.PlayerGlobalHashHi) << 32) | packet.PlayerGlobalHashLo;
                     hashes.WifiCandidate = (static_cast<melonDS::u64>(packet.WifiCandidateHashHi) << 32) | packet.WifiCandidateHashLo;
                     hashes.RenderCandidate = (static_cast<melonDS::u64>(packet.RenderCandidateHashHi) << 32) | packet.RenderCandidateHashLo;
+                    for (std::size_t i = 0; i < kGamePlayerGlobalChunkCount; i++)
+                    {
+                        hashes.PlayerGlobalChunks[i] =
+                            (static_cast<melonDS::u64>(packet.PlayerGlobalChunkHashHi[i]) << 32)
+                            | packet.PlayerGlobalChunkHashLo[i];
+                    }
                     const int packetInstance = static_cast<int>(packet.Instance);
                     const melonDS::u64 key = GameStateKey(packetInstance, packet.Frame);
                     G.RemoteGameStateHashes[key] = hashes;
@@ -3676,6 +3855,10 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     sample.StageGroup = packet.StageGroup;
                     sample.VsMode = packet.VsMode;
                     sample.LocalPlayerID = packet.LocalPlayerID;
+                    sample.ScenePreviousSceneID = packet.ScenePreviousSceneID;
+                    sample.SceneNextSceneID = packet.SceneNextSceneID;
+                    sample.SceneCurrentSceneID = packet.SceneCurrentSceneID;
+                    sample.SceneNextSceneSettings = packet.SceneNextSceneSettings;
                     sample.GGID = packet.GGID;
                     sample.NetRandomValue = packet.NetRandomValue;
                     sample.NetRandomCallCount = packet.NetRandomCallCount;
@@ -4986,6 +5169,12 @@ bool ReadMainRAMAddressU16(melonDS::NDS* nds, melonDS::u32 address, melonDS::u16
 
 melonDS::u32 NSMBRollbackObjectSnapshotLength(melonDS::u16 objectID);
 
+bool NSMBRollbackFullObjectIDWithSafeRanges(melonDS::u16 objectID)
+{
+    return G.RollbackNSMBFullObjectIDsWithSafeRanges.find(objectID) !=
+        G.RollbackNSMBFullObjectIDsWithSafeRanges.end();
+}
+
 bool AddNSMBRollbackSafeObjectFieldRanges(
     melonDS::NDS* nds,
     std::vector<RollbackNSMBRangeEntry>& ranges,
@@ -4994,6 +5183,12 @@ bool AddNSMBRollbackSafeObjectFieldRanges(
 {
     if (!G.RollbackNSMBSafeObjectFieldRanges)
         return false;
+
+    if (NSMBRollbackFullObjectIDWithSafeRanges(objectID))
+    {
+        AddNSMBRollbackObjectRange(nds, ranges, base, NSMBRollbackObjectSnapshotLength(objectID));
+        return true;
+    }
 
     if (objectID == kPlayerObjectID)
     {
@@ -11089,8 +11284,8 @@ void RecordDiagnosticSnapshotIfNeeded(int instanceID, melonDS::u32 frame, melonD
     snap.InputPlayer1Held = nds->ARM9Read16(kInputPlayerKeysHeldAddr + 0x2);
     snap.LastSentInputFrame = G.LastSentInputFrame;
     snap.LastReceivedInputFrame = G.LastReceivedInputFrame;
-    snap.PlayerGlobalHash = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, 0xC0);
-    snap.PlayerGlobalHash0 = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, 0x60);
+    snap.PlayerGlobalHash = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, kGamePlayerGlobalBlockLen);
+    snap.PlayerGlobalHash0 = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, kGamePlayerGlobalBlockLen / 2);
     snap.PlayerGlobalHash1 = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr + 0x60, 0x60);
     snap.StageCameraGlobalX0 = nds->ARM9Read32(kStageCameraXAddr);
     snap.StageCameraGlobalX1 = nds->ARM9Read32(kStageCameraXAddr + sizeof(melonDS::u32));
@@ -11174,6 +11369,25 @@ void AppendRemoteSampleDiffJson(std::ostream& out, const GameStateSample& local,
     out << "]";
 }
 
+void AppendPlayerGlobalChunkDiffsJson(std::ostream& out, const GameStateSyncHashes& local, const GameStateSyncHashes& remote)
+{
+    bool first = true;
+    out << "\"playerGlobalChunkDiffs\":[";
+    for (std::size_t i = 0; i < kGamePlayerGlobalChunkCount; i++)
+    {
+        if (local.PlayerGlobalChunks[i] == remote.PlayerGlobalChunks[i])
+            continue;
+        if (!first)
+            out << ",";
+        first = false;
+        out << "{\"offset\":\"0x" << Hex32(static_cast<melonDS::u32>(i * kGamePlayerGlobalChunkLen))
+            << "\",\"len\":\"0x" << Hex32(kGamePlayerGlobalChunkLen)
+            << "\",\"local\":\"0x" << Hex64(local.PlayerGlobalChunks[i])
+            << "\",\"remote\":\"0x" << Hex64(remote.PlayerGlobalChunks[i]) << "\"}";
+    }
+    out << "]";
+}
+
 void EmitGameStateMismatchEventLocked(
     int instanceID,
     melonDS::u32 frame,
@@ -11232,6 +11446,7 @@ void EmitGameStateMismatchEventLocked(
     AppendJsonHex64(json, "remoteWifiCandidate", remote.WifiCandidate); json << ",";
     AppendJsonHex64(json, "localRenderCandidate", local.RenderCandidate); json << ",";
     AppendJsonHex64(json, "remoteRenderCandidate", remote.RenderCandidate); json << ",";
+    AppendPlayerGlobalChunkDiffsJson(json, local, remote); json << ",";
     json << "\"latestRemotePlayerStates\":[";
     for (melonDS::u32 player = 0; player < 2; player++)
     {
@@ -13347,6 +13562,12 @@ void ForceMvlRuntimeStateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::N
 void ForceMvlStageLayoutGateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
 void ClearMvlCameraInitHoldIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
 void ForceMvlStageLayoutBufferIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
+void ApplyRemoteWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
+void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
+void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, bool preferFreshSample);
+void ApplyRemoteWorldEffectState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
+void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, bool preferFreshSample);
+void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
 
 void ApplyRollbackResimFramePatches(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
@@ -13386,9 +13607,19 @@ void ApplyRollbackResimFramePatches(int instanceID, melonDS::u32 frame, melonDS:
     ForceActorCategoryMaskIfNeeded(instanceID, frame, nds);
     ForcePlayerSignalUnlockIfNeeded(instanceID, frame, nds);
     ForcePlayerUpdateEnableIfNeeded(instanceID, frame, nds);
+
+    if (G.Enabled)
+    {
+        ApplyRemoteGameState(instanceID, frame, nds);
+        ApplyRemoteMovingHazardState(instanceID, frame, nds, G.WorldStatePreferFreshSamples);
+        ApplyRemoteWorldActorSnapshotState(instanceID, frame, nds);
+        ApplyRemoteWorldState(instanceID, frame, nds);
+        ApplyRemoteWorldEffectState(instanceID, frame, nds);
+        ApplyRemotePlayerState(instanceID, frame, nds, G.WorldStatePreferFreshSamples);
+    }
 }
 
-void ApplyRollbackResimPostFramePatches(melonDS::u32 frame, melonDS::NDS* nds)
+void ApplyRollbackResimPostFramePatches(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!nds)
         return;
@@ -13398,6 +13629,16 @@ void ApplyRollbackResimPostFramePatches(melonDS::u32 frame, melonDS::NDS* nds)
     melonDS::NSML_RefreshMarioVsLuigiPacketSlots(nds);
     ForceNSMLStagePacketWordsIfNeeded(frame, nds);
     ForceNSMLGameLocalPlayerIDIfNeeded(frame, nds);
+
+    if (G.Enabled && instanceID >= 0 && instanceID < 16)
+    {
+        ApplyRemoteGameState(instanceID, frame, nds);
+        ApplyRemoteMovingHazardState(instanceID, frame, nds, true);
+        ApplyRemoteWorldActorSnapshotState(instanceID, frame, nds);
+        ApplyRemoteWorldState(instanceID, frame, nds);
+        ApplyRemoteWorldEffectState(instanceID, frame, nds);
+        ApplyRemotePlayerState(instanceID, frame, nds, true);
+    }
 }
 
 bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -13639,7 +13880,7 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
             nds->SetRollbackSkipAudioBuffer(false);
         if (skipRender)
             nds->GPU.SetRollbackSkipRender(false);
-        ApplyRollbackResimPostFramePatches(f + 1, nds);
+        ApplyRollbackResimPostFramePatches(instanceID, f + 1, nds);
         resimulated++;
 
         const bool saveResimCheckpoint =
@@ -17783,7 +18024,7 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     if (G.GameStateTraceExtended)
     {
-        const melonDS::u64 playerGlobalHash = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, 0xC0);
+        const melonDS::u64 playerGlobalHash = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, kGamePlayerGlobalBlockLen);
         const melonDS::u64 wifiCandidateHash = HashMainRAMRange(nds, kGameCandidateWifiBlockAddr, 0x2200);
         const melonDS::u64 renderCandidateHash = HashMainRAMRange(nds, kGameCandidateRenderBlockAddr, 0x240);
         const melonDS::u64 netStateHash = HashMainRAMRange(nds, kNetStateBaseAddr, 0x180);
@@ -17917,19 +18158,57 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     G.GameStateTrace.flush();
 }
 
+bool IsRollbackGameStateSyncStableLocked(melonDS::u32 frame)
+{
+    if (!G.RollbackEnabled || !G.InputNetplayOnly)
+        return true;
+    if (G.PendingRollbackFrame != kNoFrameLimit)
+        return false;
+
+    const melonDS::u32 requiredInputFrame = frame == 0 ? 0 : frame - 1;
+    if (G.NetplayStartFrame != 0 && requiredInputFrame < G.NetplayStartFrame)
+        return true;
+    if (G.RemoteInputs.find(requiredInputFrame) == G.RemoteInputs.end())
+        return false;
+
+    for (const auto& [predictedFrame, predictedInput] : G.PredictedRemoteInputs)
+    {
+        (void)predictedInput;
+        if (predictedFrame > requiredInputFrame)
+            break;
+        if (G.RemoteInputs.find(predictedFrame) == G.RemoteInputs.end())
+            return false;
+    }
+
+    return true;
+}
+
 void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.Enabled || !G.GameStateSyncEnabled || !nds) return;
     if (instanceID < 0 || instanceID >= 16) return;
     if (frame < G.NetplayStartFrame) return;
     if ((frame % static_cast<melonDS::u32>(G.GameStateSyncInterval)) != 0) return;
+    if (G.GameStateSyncConfirmedOnly)
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        if (!IsRollbackGameStateSyncStableLocked(frame))
+            return;
+    }
 
     const GameStateSample sample = ReadGameStateSample(nds);
     GameStateSyncHashes hashes;
     hashes.Basic = sample.Hash;
     if (G.GameStateSyncExtended)
     {
-        hashes.PlayerGlobal = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, 0xC0);
+        hashes.PlayerGlobal = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, kGamePlayerGlobalBlockLen);
+        for (std::size_t i = 0; i < kGamePlayerGlobalChunkCount; i++)
+        {
+            hashes.PlayerGlobalChunks[i] = HashMainRAMRange(
+                nds,
+                kGamePlayerGlobalBlockAddr + static_cast<melonDS::u32>(i * kGamePlayerGlobalChunkLen),
+                kGamePlayerGlobalChunkLen);
+        }
         hashes.WifiCandidate = HashMainRAMRange(nds, kGameCandidateWifiBlockAddr, 0x2200);
         hashes.RenderCandidate = HashMainRAMRange(nds, kGameCandidateRenderBlockAddr, 0x240);
     }
@@ -17938,7 +18217,9 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if (G.LastSentGameStateFrame[instanceID] == frame) return;
     G.LastSentGameStateFrame[instanceID] = frame;
 
-    G.LocalGameStateHashes[GameStateKey(instanceID, frame)] = hashes;
+    const melonDS::u64 key = GameStateKey(instanceID, frame);
+    G.LocalGameStateHashes[key] = hashes;
+    G.LocalGameStateSamples[key] = sample;
     CompareGameStateLocked(instanceID, frame);
 
     if (!G.Peer) return;
@@ -17953,6 +18234,10 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     packet.StageGroup = sample.StageGroup;
     packet.VsMode = sample.VsMode;
     packet.LocalPlayerID = sample.LocalPlayerID;
+    packet.ScenePreviousSceneID = sample.ScenePreviousSceneID;
+    packet.SceneNextSceneID = sample.SceneNextSceneID;
+    packet.SceneCurrentSceneID = sample.SceneCurrentSceneID;
+    packet.SceneNextSceneSettings = sample.SceneNextSceneSettings;
     packet.GGID = sample.GGID;
     packet.NetRandomValue = sample.NetRandomValue;
     packet.NetRandomCallCount = sample.NetRandomCallCount;
@@ -18043,6 +18328,11 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     packet.MovingHazardPosZ = sample.MovingHazardPosZ;
     packet.MovingHazardVelX = sample.MovingHazardVelX;
     packet.MovingHazardVelY = sample.MovingHazardVelY;
+    for (std::size_t i = 0; i < kGamePlayerGlobalChunkCount; i++)
+    {
+        packet.PlayerGlobalChunkHashLo[i] = static_cast<melonDS::u32>(hashes.PlayerGlobalChunks[i] & 0xFFFFFFFFu);
+        packet.PlayerGlobalChunkHashHi[i] = static_cast<melonDS::u32>(hashes.PlayerGlobalChunks[i] >> 32);
+    }
     packet.BasicHashLo = static_cast<melonDS::u32>(hashes.Basic & 0xFFFFFFFFu);
     packet.BasicHashHi = static_cast<melonDS::u32>(hashes.Basic >> 32);
     packet.PlayerGlobalHashLo = static_cast<melonDS::u32>(hashes.PlayerGlobal & 0xFFFFFFFFu);
@@ -19030,6 +19320,8 @@ void InitFromEnvironment()
     G.GameStateTraceExtended = EnvFlag("MELONDS_NSML_GAME_STATE_TRACE_EXTENDED");
     G.GameStateSyncEnabled = EnvFlag("MELONDS_NSML_STATE_SYNC");
     G.GameStateSyncExtended = EnvFlag("MELONDS_NSML_STATE_SYNC_EXTENDED");
+    G.GameStateSyncConfirmedOnly = EnvFlag("MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY");
+    G.GameStateSyncSampleWordDiff = EnvFlag("MELONDS_NSML_STATE_SYNC_SAMPLE_WORD_DIFF");
     G.GameStateApplyEnabled = EnvFlag("MELONDS_NSML_STATE_APPLY");
     G.GameStateApplyCriticalGlobals = true;
     G.GameStateApplyStarObjects = true;
@@ -19473,6 +19765,12 @@ void InitFromEnvironment()
         EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES");
     G.RollbackNSMBFullPlayerObjectWithSafeRanges =
         EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES");
+    G.RollbackNSMBFullObjectIDsWithSafeRanges.clear();
+    for (melonDS::u32 objectID : ParseU32ListEnv("MELONDS_NSML_ROLLBACK_NSMB_FULL_OBJECT_IDS_WITH_SAFE_RANGES"))
+    {
+        if (objectID <= 0xFFFF)
+            G.RollbackNSMBFullObjectIDsWithSafeRanges.insert(static_cast<melonDS::u16>(objectID));
+    }
     G.RollbackNSMBScanInterval = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL", 1), 1, 600);
     G.RollbackNSMBHeapScanInterval = std::clamp(

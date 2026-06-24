@@ -11,6 +11,17 @@ Current rollback direction has moved from repair-only `tinycorepreimage` toward 
 
 Completed in the latest pass:
 
+- 2026-06-24 selected `nsmbtinycore` full-star lifecycle retake after the stash-loss redo:
+  - Added `WireGameState` diagnostics for Scene fields and `playerGlobal` 0x10-byte chunk hashes, plus local-vs-remote `GameStateSample` summaries. A raw sample word-diff diagnostic is now gated by `MELONDS_NSML_STATE_SYNC_SAMPLE_WORD_DIFF` because the wire sample intentionally does not carry every local diagnostic field.
+  - Added `MELONDS_NSML_ROLLBACK_NSMB_FULL_OBJECT_IDS_WITH_SAFE_RANGES` so the safe-field selected snapshot can full-copy selected actor object IDs without widening every actor. This is used to test actor lifecycle coverage in a Plan-D-ish way rather than only patching named symptoms.
+  - Best correctness-shaped selected candidate in this redo is `b1750-fullstar-core249`: player object full snapshot length `0xC80`, process-list + heap15 + delta-discovered ranges, and full snapshots for star actor IDs `0x0022,0x010C`. A chaos/sendDelay2/jitter2 run completed with only a short transient `playerActor0Y`/`playerGlobal` mismatch in one retake, and another run had no persistent mismatch summary. It is still not playable: averages stay around `18.1ms`, rollback frames reach `~60-65ms`, restore avg is `~6.6-6.8ms`, and resimulated `RunFrame` avg is `~14-15ms`.
+  - Rejected adjacent selected candidates:
+    `b1750-fullcollect-core249` (`0x001F` full-copy) worsened star lifecycle and produced persistent mismatch;
+    `b1750-fullstar-player1000-core249` caused severe `260-286ms` spikes and later broad player/coin/hazard divergence;
+    `b1500/b1600/b1700-fullstar-core249` lowered or shifted average cost but introduced persistent star/player/global divergence;
+    `b1500-lead1-fullstar-core249` caused a client-side stall (`~84ms` average);
+    `b1750-poll100-fullstar-core249` and `b1750-resimdelay1-fullstar-core249` both worsened correctness despite timing-shape changes.
+  - Current interpretation: selected full-star snapshots are a useful lifecycle improvement, but the same tradeoff remains. The correctness-safe selected point is still ~55fps-class with visible correction spikes, while the 16.9ms-class budget/lead variants let prediction run too far and desync broad game state. Next work should either reduce foreground correction frequency without lowering `InputDelayFrames=2`, or move correction into a shadow/non-blocking path; more actor-by-actor full-copy widening is not enough.
 - 2026-06-24 strong-jitter retake after the GPU3DLight selected snapshot work:
   - Restored the lost suite/local-triage work after the stash accident. The local triage wrapper now hardlinks log ROMs by default, like the route-smoke wrapper, so rollback iteration should no longer create hundreds of MB of duplicated ROMs per run unless `-CopyRomToLog` is explicitly requested.
   - Added selected-snapshot instrumentation and knobs for the Plan-D-ish line: process-list metadata ranges, arbitrary extra ranges, full player object snapshots under safe-field mode, and selected-backend delta-page coverage tracing. The trace path is diagnostic only; it keeps the `nsmbtinycore` checkpoint format unchanged and only compares current Main RAM against the previous checkpoint when `MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE=1`.
