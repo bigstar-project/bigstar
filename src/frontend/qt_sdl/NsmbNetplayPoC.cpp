@@ -27,6 +27,7 @@
 #include <fstream>
 #include <iomanip>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <filesystem>
 #include <iterator>
@@ -1831,6 +1832,19 @@ struct State
     bool RollbackEnabled = false;
     bool RollbackResimulate = false;
     bool RollbackRestoreProbe = false;
+    bool ShadowCloneProbeEnabled = false;
+    int ShadowCloneProbeInstance = 0;
+    melonDS::u32 ShadowCloneProbeFrame = 0;
+    melonDS::u32 ShadowCloneProbePeripheralFlags = 0;
+    bool ShadowCloneProbeFullState = false;
+    bool ShadowCloneProbeSkipRender = true;
+    bool ShadowCloneProbeSkipAudioBuffer = true;
+    int ShadowCloneProbeWarmRuns = 1;
+    bool ShadowCloneProbePending = false;
+    bool ShadowCloneProbeFreezeNetwork = false;
+    melonDS::u32 ShadowCloneProbeExpectedFrame = 0;
+    melonDS::u64 ShadowCloneProbeExpectedHash = 0;
+    std::unique_ptr<melonDS::NDS> ShadowCloneProbeNDS;
     bool RollbackSkipPredictedInputFrameLeadThrottle = false;
     bool RollbackThrottleAppliedFrameLead = false;
     int RollbackPredictionProbeModulo = 0;
@@ -3546,7 +3560,7 @@ void StoreSpeculativeRemoteInputLocked(melonDS::u32 frame, const InputState& rec
 
 void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kNoFrameLimit)
 {
-    if (!G.Host) return;
+    if (!G.Host || G.ShadowCloneProbeFreezeNetwork) return;
 
     FlushDelayedInputsLocked(localFrame);
 
@@ -8932,6 +8946,370 @@ melonDS::u64 HashNDS(melonDS::NDS* nds)
     }
 
     return hash;
+}
+
+bool RunShadowCloneProbeIfNeeded(
+    int instanceID,
+    melonDS::u32 frame,
+    melonDS::NDS* nds,
+    const InputState& input)
+{
+    (void)input;
+    if (!G.ShadowCloneProbeEnabled
+        || G.ShadowCloneProbePending
+        || G.NetRole != Role::Host
+        || instanceID != G.ShadowCloneProbeInstance
+        || frame != G.ShadowCloneProbeFrame
+        || !nds)
+    {
+        return false;
+    }
+
+    const auto* sourceCart = nds->NDSCartSlot.GetCart();
+    if (!sourceCart)
+    {
+        std::printf("NSMB ShadowProbe: no source cart inst=%d frame=%u\n", instanceID, frame);
+        return false;
+    }
+
+    std::printf("NSMB ShadowProbe: begin inst=%d frame=%u romBytes=%u\n",
+        instanceID,
+        frame,
+        sourceCart->GetROMLength());
+    std::fflush(stdout);
+
+    const auto totalStart = std::chrono::steady_clock::now();
+    const auto constructStart = totalStart;
+    melonDS::NDSArgs args;
+    args.ARM7BIOS = std::make_unique<melonDS::ARM7BIOSImage>(nds->GetARM7BIOS());
+    args.ARM9BIOS = std::make_unique<melonDS::ARM9BIOSImage>(nds->GetARM9BIOS());
+    if (nds->IsJITEnabled())
+    {
+        args.JIT = melonDS::JITArgs {
+            static_cast<unsigned>(nds->JIT.GetMaxBlockSize()),
+            nds->JIT.LiteralOptimizationsEnabled(),
+            nds->JIT.BranchOptimizationsEnabled(),
+            nds->JIT.FastMemoryEnabled(),
+        };
+    }
+    else
+    {
+        args.JIT = std::nullopt;
+    }
+    auto shadow = std::make_unique<melonDS::NDS>(std::move(args), nds->UserData);
+    std::printf("NSMB ShadowProbe: core constructed inst=%d frame=%u\n", instanceID, frame);
+    std::fflush(stdout);
+    shadow->Reset();
+    std::printf("NSMB ShadowProbe: core reset inst=%d frame=%u\n", instanceID, frame);
+    std::fflush(stdout);
+    auto shadowCart = melonDS::NDSCart::ParseROM(
+        sourceCart->GetROM(),
+        sourceCart->GetROMLength(),
+        nds->UserData);
+    if (!shadowCart)
+    {
+        std::printf("NSMB ShadowProbe: cart clone failed inst=%d frame=%u\n", instanceID, frame);
+        melonDS::NDS::Current = nds;
+        return false;
+    }
+    std::printf("NSMB ShadowProbe: cart cloned inst=%d frame=%u\n", instanceID, frame);
+    std::fflush(stdout);
+    shadow->SetNDSCart(std::move(shadowCart));
+    shadow->Start();
+    const unsigned long long constructUs = ElapsedUs(constructStart);
+
+    const auto saveStart = std::chrono::steady_clock::now();
+    melonDS::Savestate savedState;
+    constexpr melonDS::u32 kShadowUnsafePeripheralFlags = 0x3C;
+    const melonDS::u32 shadowTinyCoreFlags =
+        (static_cast<melonDS::u32>(G.RollbackTinyCoreFlags) & ~kShadowUnsafePeripheralFlags)
+        | (G.ShadowCloneProbePeripheralFlags & kShadowUnsafePeripheralFlags);
+    const bool saved = G.ShadowCloneProbeFullState
+        ? nds->DoSavestate(&savedState)
+        : nds->DoRollbackTinyCoreSavestate(&savedState, shadowTinyCoreFlags);
+    const melonDS::u32 mainRAMBytes = nds->MainRAMMask + 1;
+    std::vector<melonDS::u8> mainRAM;
+    if (!G.ShadowCloneProbeFullState)
+    {
+        mainRAM.resize(mainRAMBytes);
+        std::memcpy(mainRAM.data(), nds->MainRAM, mainRAMBytes);
+    }
+    const unsigned long long saveUs = ElapsedUs(saveStart);
+    std::printf("NSMB ShadowProbe: foreground saved inst=%d frame=%u coreBytes=%u mainRAMBytes=%u flags=0x%X saved=%d error=%d\n",
+        instanceID,
+        frame,
+        savedState.Length(),
+        mainRAMBytes,
+        shadowTinyCoreFlags,
+        saved ? 1 : 0,
+        savedState.Error ? 1 : 0);
+    std::fflush(stdout);
+    if (!saved || savedState.Error)
+    {
+        std::printf("NSMB ShadowProbe: foreground save failed inst=%d frame=%u\n", instanceID, frame);
+        melonDS::NSML_ClearMarioVsLuigiHostState(shadow.get());
+        melonDS::NDS::Current = nds;
+        return false;
+    }
+
+    const auto restoreStart = std::chrono::steady_clock::now();
+    melonDS::Savestate restoreState(
+        savedState.Buffer(),
+        savedState.Length(),
+        false);
+    const bool restored = G.ShadowCloneProbeFullState
+        ? shadow->DoSavestate(&restoreState)
+        : shadow->DoRollbackTinyCoreSavestate(&restoreState, shadowTinyCoreFlags);
+    if (!G.ShadowCloneProbeFullState && restored && !restoreState.Error)
+        std::memcpy(shadow->MainRAM, mainRAM.data(), mainRAMBytes);
+    const unsigned long long restoreUs = ElapsedUs(restoreStart);
+    std::printf("NSMB ShadowProbe: shadow restored inst=%d frame=%u restored=%d error=%d\n",
+        instanceID,
+        frame,
+        restored ? 1 : 0,
+        restoreState.Error ? 1 : 0);
+    std::fflush(stdout);
+    if (!restored || restoreState.Error)
+    {
+        std::printf("NSMB ShadowProbe: shadow restore failed inst=%d frame=%u bytes=%u\n",
+            instanceID,
+            frame,
+            savedState.Length());
+        melonDS::NSML_ClearMarioVsLuigiHostState(shadow.get());
+        melonDS::NDS::Current = nds;
+        return false;
+    }
+
+    ApplyMvlRuntimeConfigIfNeeded(shadow.get());
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        G.ShadowCloneProbeFreezeNetwork = true;
+    }
+    melonDS::NSML_CloneMarioVsLuigiHostState(nds, shadow.get());
+    shadow->CurCPU = nds->CurCPU;
+    shadow->KeyInput = nds->KeyInput;
+    melonDS::NSML_BeginRollbackEventTrace(nds);
+    melonDS::NSML_BeginRollbackEventTrace(shadow.get());
+    const melonDS::u64 preShadowHash = HashNDS(shadow.get());
+    const melonDS::u64 preForegroundHash = HashNDS(nds);
+    melonDS::Savestate verifyForeground;
+    melonDS::Savestate verifyShadow;
+    const bool verifyForegroundSaved = nds->DoRollbackTinyCoreSavestate(
+        &verifyForeground,
+        shadowTinyCoreFlags);
+    const bool verifyShadowSaved = shadow->DoRollbackTinyCoreSavestate(
+        &verifyShadow,
+        shadowTinyCoreFlags);
+    size_t verifyDiffBytes = 0;
+    size_t verifyFirstDiff = std::numeric_limits<size_t>::max();
+    if (verifyForegroundSaved && verifyShadowSaved
+        && !verifyForeground.Error && !verifyShadow.Error
+        && verifyForeground.Length() == verifyShadow.Length())
+    {
+        const auto* foregroundBytes = static_cast<const melonDS::u8*>(verifyForeground.Buffer());
+        const auto* shadowBytes = static_cast<const melonDS::u8*>(verifyShadow.Buffer());
+        for (size_t offset = 0; offset < verifyForeground.Length(); offset++)
+        {
+            if (foregroundBytes[offset] != shadowBytes[offset])
+            {
+                if (verifyFirstDiff == std::numeric_limits<size_t>::max())
+                    verifyFirstDiff = offset;
+                verifyDiffBytes++;
+            }
+        }
+    }
+    std::printf(
+        "NSMB ShadowProbe: pre-run match=%d shadowHash=%016llX foregroundHash=%016llX shadowARM9=%llu foregroundARM9=%llu shadowARM7=%llu foregroundARM7=%llu shadowCPU=%d foregroundCPU=%d verifyForeground=%d verifyShadow=%d verifyBytes=%u verifyDiffBytes=%zu verifyFirstDiff=%zu\n",
+        preShadowHash == preForegroundHash ? 1 : 0,
+        static_cast<unsigned long long>(preShadowHash),
+        static_cast<unsigned long long>(preForegroundHash),
+        static_cast<unsigned long long>(shadow->ARM9Timestamp),
+        static_cast<unsigned long long>(nds->ARM9Timestamp),
+        static_cast<unsigned long long>(shadow->ARM7Timestamp),
+        static_cast<unsigned long long>(nds->ARM7Timestamp),
+        shadow->CurCPU,
+        nds->CurCPU,
+        verifyForegroundSaved && !verifyForeground.Error ? 1 : 0,
+        verifyShadowSaved && !verifyShadow.Error ? 1 : 0,
+        verifyForeground.Length(),
+        verifyDiffBytes,
+        verifyFirstDiff);
+    std::fflush(stdout);
+    if (G.ShadowCloneProbeSkipRender)
+        shadow->GPU.SetRollbackSkipRender(true);
+    if (G.ShadowCloneProbeSkipAudioBuffer)
+        shadow->SetRollbackSkipAudioBuffer(true);
+    const auto runStart = std::chrono::steady_clock::now();
+    shadow->RunFrame();
+    unsigned long long runUs = ElapsedUs(runStart);
+    for (int warmRun = 1; warmRun < G.ShadowCloneProbeWarmRuns; warmRun++)
+    {
+        melonDS::Savestate warmRestoreState(
+            savedState.Buffer(),
+            savedState.Length(),
+            false);
+        const bool warmRestored = G.ShadowCloneProbeFullState
+            ? shadow->DoSavestate(&warmRestoreState)
+            : shadow->DoRollbackTinyCoreSavestate(&warmRestoreState, shadowTinyCoreFlags);
+        if (!warmRestored || warmRestoreState.Error)
+        {
+            std::printf("NSMB ShadowProbe: warm restore failed run=%d\n", warmRun);
+            break;
+        }
+        if (!G.ShadowCloneProbeFullState)
+            std::memcpy(shadow->MainRAM, mainRAM.data(), mainRAMBytes);
+        ApplyMvlRuntimeConfigIfNeeded(shadow.get());
+        melonDS::NSML_CloneMarioVsLuigiHostState(nds, shadow.get());
+        shadow->CurCPU = nds->CurCPU;
+        shadow->KeyInput = nds->KeyInput;
+        melonDS::NSML_ClearRollbackEventTrace(shadow.get());
+        melonDS::NSML_BeginRollbackEventTrace(shadow.get());
+        const auto warmRunStart = std::chrono::steady_clock::now();
+        shadow->RunFrame();
+        const unsigned long long warmRunUs = ElapsedUs(warmRunStart);
+        runUs += warmRunUs;
+        std::printf("NSMB ShadowProbe: warm run=%d runUs=%llu\n", warmRun, warmRunUs);
+        std::fflush(stdout);
+    }
+    if (G.ShadowCloneProbeSkipAudioBuffer)
+        shadow->SetRollbackSkipAudioBuffer(false);
+    if (G.ShadowCloneProbeSkipRender)
+        shadow->GPU.SetRollbackSkipRender(false);
+
+    const auto hashStart = std::chrono::steady_clock::now();
+    const melonDS::u64 expectedHash = HashNDS(shadow.get());
+    const unsigned long long hashUs = ElapsedUs(hashStart);
+    const unsigned long long totalUs = ElapsedUs(totalStart);
+    G.ShadowCloneProbePending = true;
+    G.ShadowCloneProbeExpectedFrame = shadow->NumFrames;
+    G.ShadowCloneProbeExpectedHash = expectedHash;
+    G.ShadowCloneProbeNDS = std::move(shadow);
+    melonDS::NDS::Current = nds;
+
+    std::printf(
+        "NSMB ShadowProbe: prepared inst=%d frame=%u targetFrame=%u coreBytes=%u mainRAMBytes=%u constructUs=%llu saveUs=%llu restoreUs=%llu runUs=%llu hashUs=%llu totalUs=%llu expectedHash=%016llX\n",
+        instanceID,
+        frame,
+        G.ShadowCloneProbeExpectedFrame,
+        savedState.Length(),
+        mainRAMBytes,
+        constructUs,
+        saveUs,
+        restoreUs,
+        runUs,
+        hashUs,
+        totalUs,
+        static_cast<unsigned long long>(expectedHash));
+    std::fflush(stdout);
+    return true;
+}
+
+void CompareShadowCloneProbeIfNeeded(int instanceID, melonDS::NDS* nds)
+{
+    if (!G.ShadowCloneProbePending
+        || instanceID != G.ShadowCloneProbeInstance
+        || !nds
+        || nds->NumFrames < G.ShadowCloneProbeExpectedFrame)
+    {
+        return;
+    }
+
+    const auto compareStart = std::chrono::steady_clock::now();
+    const melonDS::u64 actualHash = HashNDS(nds);
+    const unsigned long long compareUs = ElapsedUs(compareStart);
+    const bool match = nds->NumFrames == G.ShadowCloneProbeExpectedFrame
+        && actualHash == G.ShadowCloneProbeExpectedHash;
+    const melonDS::RollbackEventTraceComparison eventComparison =
+        melonDS::NSML_CompareAndClearRollbackEventTraces(nds, G.ShadowCloneProbeNDS.get());
+    melonDS::u32 differingBytes = 0;
+    melonDS::u32 differingRuns = 0;
+    std::ostringstream firstRuns;
+    if (G.ShadowCloneProbeNDS && nds->MainRAM && G.ShadowCloneProbeNDS->MainRAM)
+    {
+        const melonDS::u32 bytes = std::min(nds->MainRAMMask, G.ShadowCloneProbeNDS->MainRAMMask) + 1;
+        bool inRun = false;
+        melonDS::u32 runStart = 0;
+        for (melonDS::u32 offset = 0; offset < bytes; offset++)
+        {
+            const bool differs = nds->MainRAM[offset] != G.ShadowCloneProbeNDS->MainRAM[offset];
+            if (differs)
+            {
+                differingBytes++;
+                if (!inRun)
+                {
+                    inRun = true;
+                    runStart = offset;
+                    differingRuns++;
+                }
+            }
+            else if (inRun)
+            {
+                if (differingRuns <= 12)
+                {
+                    if (differingRuns > 1)
+                        firstRuns << ',';
+                    firstRuns << std::hex << std::uppercase
+                              << (kMainRAMBase + runStart) << '-'
+                              << (kMainRAMBase + offset - 1) << std::dec;
+                }
+                inRun = false;
+            }
+        }
+        if (inRun && differingRuns <= 12)
+        {
+            if (differingRuns > 1)
+                firstRuns << ',';
+            firstRuns << std::hex << std::uppercase
+                      << (kMainRAMBase + runStart) << '-'
+                      << (kMainRAMBase + bytes - 1) << std::dec;
+        }
+    }
+    std::printf(
+        "NSMB ShadowProbe: compared inst=%d frame=%u expectedFrame=%u match=%d compareUs=%llu expectedHash=%016llX actualHash=%016llX expectedARM9=%llu actualARM9=%llu expectedARM7=%llu actualARM7=%llu expectedKeys=%08X actualKeys=%08X differingBytes=%u differingRuns=%u firstRuns=%s foregroundEvents=%zu shadowEvents=%zu firstEventDiff=%zu foregroundEvent=%u:%u:%u:%llu:%llu:%llu shadowEvent=%u:%u:%u:%llu:%llu:%llu\n",
+        instanceID,
+        nds->NumFrames,
+        G.ShadowCloneProbeExpectedFrame,
+        match ? 1 : 0,
+        compareUs,
+        static_cast<unsigned long long>(G.ShadowCloneProbeExpectedHash),
+        static_cast<unsigned long long>(actualHash),
+        G.ShadowCloneProbeNDS
+            ? static_cast<unsigned long long>(G.ShadowCloneProbeNDS->ARM9Timestamp) : 0,
+        static_cast<unsigned long long>(nds->ARM9Timestamp),
+        G.ShadowCloneProbeNDS
+            ? static_cast<unsigned long long>(G.ShadowCloneProbeNDS->ARM7Timestamp) : 0,
+        static_cast<unsigned long long>(nds->ARM7Timestamp),
+        G.ShadowCloneProbeNDS ? G.ShadowCloneProbeNDS->KeyInput : 0,
+        nds->KeyInput,
+        differingBytes,
+        differingRuns,
+        firstRuns.str().c_str(),
+        eventComparison.ForegroundCount,
+        eventComparison.ShadowCount,
+        eventComparison.FirstDifference,
+        eventComparison.Foreground.EventID,
+        eventComparison.Foreground.FuncID,
+        eventComparison.Foreground.Param,
+        static_cast<unsigned long long>(eventComparison.Foreground.SysTimestamp),
+        static_cast<unsigned long long>(eventComparison.Foreground.ARM9Timestamp),
+        static_cast<unsigned long long>(eventComparison.Foreground.ARM7Timestamp),
+        eventComparison.Shadow.EventID,
+        eventComparison.Shadow.FuncID,
+        eventComparison.Shadow.Param,
+        static_cast<unsigned long long>(eventComparison.Shadow.SysTimestamp),
+        static_cast<unsigned long long>(eventComparison.Shadow.ARM9Timestamp),
+        static_cast<unsigned long long>(eventComparison.Shadow.ARM7Timestamp));
+    std::fflush(stdout);
+
+    melonDS::NSML_ClearMarioVsLuigiHostState(G.ShadowCloneProbeNDS.get());
+    melonDS::NSML_ClearRollbackEventTrace(G.ShadowCloneProbeNDS.get());
+    G.ShadowCloneProbeNDS.reset();
+    G.ShadowCloneProbePending = false;
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        G.ShadowCloneProbeFreezeNetwork = false;
+    }
+    melonDS::NDS::Current = nds;
 }
 
 melonDS::u64 HashFramebuffers(melonDS::NDS* nds)
@@ -19696,6 +20074,21 @@ void InitFromEnvironment()
     G.RollbackInputWaitUs = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_INPUT_WAIT_US", 0), 0, 20000);
     G.RollbackRestoreProbe = EnvFlag("MELONDS_NSML_ROLLBACK_RESTORE_PROBE");
+    G.ShadowCloneProbeEnabled = EnvFlag("MELONDS_NSML_SHADOW_CLONE_PROBE");
+    G.ShadowCloneProbeInstance = std::clamp(
+        EnvInt("MELONDS_NSML_SHADOW_CLONE_PROBE_INSTANCE", 0), 0, 15);
+    G.ShadowCloneProbeFrame = static_cast<melonDS::u32>(std::max(
+        0,
+        EnvInt("MELONDS_NSML_SHADOW_CLONE_PROBE_FRAME", 0)));
+    G.ShadowCloneProbePeripheralFlags = static_cast<melonDS::u32>(std::clamp(
+        EnvInt("MELONDS_NSML_SHADOW_CLONE_PROBE_PERIPHERAL_FLAGS", 0), 0, 0x3C));
+    G.ShadowCloneProbeFullState = EnvFlag("MELONDS_NSML_SHADOW_CLONE_PROBE_FULL_STATE");
+    G.ShadowCloneProbeSkipRender =
+        EnvInt("MELONDS_NSML_SHADOW_CLONE_PROBE_SKIP_RENDER", 1) != 0;
+    G.ShadowCloneProbeSkipAudioBuffer =
+        EnvInt("MELONDS_NSML_SHADOW_CLONE_PROBE_SKIP_AUDIO_BUFFER", 1) != 0;
+    G.ShadowCloneProbeWarmRuns = std::clamp(
+        EnvInt("MELONDS_NSML_SHADOW_CLONE_PROBE_WARM_RUNS", 1), 1, 8);
     G.RollbackPredictionProbeModulo = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_MODULO", 0), 0, 600);
     G.RollbackPredictionProbeOffset = std::clamp(
@@ -20808,6 +21201,19 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     return ConvertStockXToTouch(remoteInput);
 }
 
+void BeforeCoreRunFrame(
+    int instanceID,
+    melonDS::u32 frame,
+    melonDS::NDS* nds,
+    const InputState& input)
+{
+    InitFromEnvironment();
+    melonDS::u32 probeFrame = frame;
+    if (G.TestEnabled && instanceID >= 0 && instanceID < 16)
+        probeFrame = G.TestFrameCount[instanceID];
+    RunShadowCloneProbeIfNeeded(instanceID, probeFrame, nds, input);
+}
+
 void TracePlayerLifeChanges(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if ((!G.TracePlayerLifeChanges && !G.DiagnosticEventsEnabled) || !nds || !nds->MainRAM) return;
@@ -21047,6 +21453,8 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if ((!G.Enabled && !G.TestEnabled) || !nds) return;
 
     if (instanceID < 0 || instanceID >= 16) return;
+
+    CompareShadowCloneProbeIfNeeded(instanceID, nds);
 
     melonDS::u32 logFrame = frame;
     if (G.TestEnabled)
@@ -21537,6 +21945,12 @@ void Shutdown()
 {
     StopFrameHeartbeatThread();
     StopNetworkPumpThread();
+
+    melonDS::NSML_ClearMarioVsLuigiHostState(G.ShadowCloneProbeNDS.get());
+    melonDS::NSML_ClearRollbackEventTrace(G.ShadowCloneProbeNDS.get());
+    G.ShadowCloneProbeNDS.reset();
+    G.ShadowCloneProbePending = false;
+    G.ShadowCloneProbeFreezeNetwork = false;
 
     {
         std::lock_guard<std::mutex> recordLock(G.InputRecordMutex);

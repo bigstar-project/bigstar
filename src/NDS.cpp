@@ -18,6 +18,10 @@
 
 #include <assert.h>
 #include <algorithm>
+#include <atomic>
+#include <map>
+#include <mutex>
+#include <vector>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,6 +53,68 @@
 
 namespace melonDS
 {
+static std::atomic<bool> NSMLRollbackEventTraceActive { false };
+static std::mutex NSMLRollbackEventTraceMutex;
+static std::map<NDS*, std::vector<RollbackEventTraceEntry>> NSMLRollbackEventTraces;
+
+void NSML_BeginRollbackEventTrace(NDS* nds)
+{
+    if (!nds)
+        return;
+    std::lock_guard<std::mutex> lock(NSMLRollbackEventTraceMutex);
+    NSMLRollbackEventTraces[nds].clear();
+    NSMLRollbackEventTraceActive.store(true, std::memory_order_release);
+}
+
+void NSML_ClearRollbackEventTrace(NDS* nds)
+{
+    if (!nds)
+        return;
+    std::lock_guard<std::mutex> lock(NSMLRollbackEventTraceMutex);
+    NSMLRollbackEventTraces.erase(nds);
+    if (NSMLRollbackEventTraces.empty())
+        NSMLRollbackEventTraceActive.store(false, std::memory_order_release);
+}
+
+RollbackEventTraceComparison NSML_CompareAndClearRollbackEventTraces(NDS* foreground, NDS* shadow)
+{
+    RollbackEventTraceComparison result;
+    std::lock_guard<std::mutex> lock(NSMLRollbackEventTraceMutex);
+    const auto foregroundIt = NSMLRollbackEventTraces.find(foreground);
+    const auto shadowIt = NSMLRollbackEventTraces.find(shadow);
+    static const std::vector<RollbackEventTraceEntry> empty;
+    const auto& foregroundTrace = foregroundIt != NSMLRollbackEventTraces.end()
+        ? foregroundIt->second : empty;
+    const auto& shadowTrace = shadowIt != NSMLRollbackEventTraces.end()
+        ? shadowIt->second : empty;
+    result.ForegroundCount = foregroundTrace.size();
+    result.ShadowCount = shadowTrace.size();
+    result.FirstDifference = std::min(result.ForegroundCount, result.ShadowCount);
+    for (size_t index = 0; index < result.FirstDifference; index++)
+    {
+        const auto& a = foregroundTrace[index];
+        const auto& b = shadowTrace[index];
+        if (a.SysTimestamp != b.SysTimestamp
+            || a.ARM9Timestamp != b.ARM9Timestamp
+            || a.ARM7Timestamp != b.ARM7Timestamp
+            || a.EventID != b.EventID
+            || a.FuncID != b.FuncID
+            || a.Param != b.Param)
+        {
+            result.FirstDifference = index;
+            break;
+        }
+    }
+    if (result.FirstDifference < result.ForegroundCount)
+        result.Foreground = foregroundTrace[result.FirstDifference];
+    if (result.FirstDifference < result.ShadowCount)
+        result.Shadow = shadowTrace[result.FirstDifference];
+    NSMLRollbackEventTraces.erase(foreground);
+    NSMLRollbackEventTraces.erase(shadow);
+    if (NSMLRollbackEventTraces.empty())
+        NSMLRollbackEventTraceActive.store(false, std::memory_order_release);
+    return result;
+}
 using namespace Platform;
 
 const s32 kMaxIterationCycles = 64;
@@ -1434,6 +1500,23 @@ void NDS::RunSystem(u64 timestamp)
             if (evt.Timestamp <= SysTimestamp)
             {
                 SchedListMask &= ~(1<<i);
+
+                if (NSMLRollbackEventTraceActive.load(std::memory_order_acquire))
+                {
+                    std::lock_guard<std::mutex> lock(NSMLRollbackEventTraceMutex);
+                    auto trace = NSMLRollbackEventTraces.find(this);
+                    if (trace != NSMLRollbackEventTraces.end() && trace->second.size() < 4096)
+                    {
+                        trace->second.push_back({
+                            SysTimestamp,
+                            ARM9Timestamp,
+                            ARM7Timestamp,
+                            static_cast<u32>(i),
+                            evt.FuncID,
+                            evt.Param,
+                        });
+                    }
+                }
 
                 EventFunc func = evt.Funcs[evt.FuncID];
                 func(evt.That, evt.Param);

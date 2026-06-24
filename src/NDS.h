@@ -584,5 +584,28 @@ protected:
     virtual void DoSavestateExtra(Savestate* file) {}
 };
 
+struct RollbackEventTraceEntry
+{
+    u64 SysTimestamp = 0;
+    u64 ARM9Timestamp = 0;
+    u64 ARM7Timestamp = 0;
+    u32 EventID = 0;
+    u32 FuncID = 0;
+    u32 Param = 0;
+};
+
+struct RollbackEventTraceComparison
+{
+    size_t ForegroundCount = 0;
+    size_t ShadowCount = 0;
+    size_t FirstDifference = 0;
+    RollbackEventTraceEntry Foreground;
+    RollbackEventTraceEntry Shadow;
+};
+
+void NSML_BeginRollbackEventTrace(NDS* nds);
+RollbackEventTraceComparison NSML_CompareAndClearRollbackEventTraces(NDS* foreground, NDS* shadow);
+void NSML_ClearRollbackEventTrace(NDS* nds);
+
 }
 #endif // NDS_H

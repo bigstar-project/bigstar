@@ -436,6 +436,8 @@ bool NSML_BuildMarioVsLuigiLocalPacket(NDS* nds, u8 outPacket[52], u32* outTick,
 void NSML_PushMarioVsLuigiRemotePacket(NDS* nds, u32 player, const u8 packet[52]);
 bool NSML_HasMarioVsLuigiRemotePacket(NDS* nds, u32 player, u32 tick);
 void NSML_RefreshMarioVsLuigiPacketSlots(NDS* nds);
+void NSML_CloneMarioVsLuigiHostState(NDS* source, NDS* destination);
+void NSML_ClearMarioVsLuigiHostState(NDS* nds);
 
 }
 #endif // ARM_H

@@ -369,6 +369,11 @@ void EmuThread::run()
 
             // RTC sync
             emuInstance->syncRTC();
+            NsmbNetplayPoC::BeforeCoreRunFrame(
+                emuInstance->instanceID,
+                emuInstance->nds->NumFrames,
+                emuInstance->nds,
+                inputState);
 
 
             // emulate

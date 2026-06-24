@@ -1,10 +1,27 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Shadow rollback feasibility - 2026-06-24
+
+- Active requirement remains unchanged: GUI rollback uses `InputDelayFrames=2`; raising delay is not an accepted fix. The current goal is still mismatch-free complex play near 60fps without rollback spikes.
+- Added an environment-gated core-only shadow probe at the actual `NDS::RunFrame()` boundary, after input and RTC sync. It clones BIOS, ROM, JIT settings, tiny-core/full peripheral state, Main RAM, and NSMB packet-replay host state into a second `NDS`, then compares one shadow frame with the foreground frame. The probe also reports Main RAM diff runs and scheduler-event divergence.
+- A normal full savestate initially stalled because the cloned cart had null frontend userdata. Passing the source userdata to `NDSCart::ParseROM` fixed cart/SPI restore. The practical tiny-core clone is about `214KB` core plus `4MB` Main RAM; measured save is about `1.8-2.4ms`, restore `4.3-5.3ms`, and initial shadow construction `41-92ms`.
+- A newly created shadow is not deterministic even when its pre-run Main RAM/CPU hash and reserialized `214397`-byte tiny-core state match byte-for-byte. The first scheduler divergence occurs before the first RTC event: event/sys and ARM9 timing can match while ARM7 has already advanced by a different block amount. The resulting one-frame difference is about `3KB` of Main RAM across gameplay/global/object ranges.
+- Replaying the same checkpoint warms the shadow JIT: cold shadow `RunFrame` is about `37-45ms`, while later runs fall to about `16-25ms`. Four same-frame warm replays still do not converge to foreground state, so "construct a shadow only when correction arrives" is rejected.
+- Current direction: keep the event/clone diagnostics, but move to a persistent shadow that exists from the start and retains its execution/JIT history. It must run off the displayed thread and reuse existing checkpoints. The next gate is whether a persistent worker can stay caught up without reducing foreground FPS; if not, return to the selected lifecycle snapshot direction.
+- Verification logs: `logs/codex-shadow-events2/20260624-142916` identifies the first ARM7/event divergence; `logs/codex-shadow-warm2/20260624-144126` and `logs/codex-shadow-warm4/20260624-144221` show JIT warm-up speed without state convergence.
+
 ## Rollback/input-sync PoC status - 2026-06-22
 
 - Current rollback work has two measured delay2 exact-style baselines, neither promotable yet: `tinycoreramdelta` is the correctness oracle for exact Main RAM restore, while `tinycorepreimage` is the lighter restore path used to measure the remaining resimulation cost.
 - Current hard requirement for the active goal: rollback playability must be evaluated at the GUI rollback standard `InputDelayFrames=2`. Increasing InputDelay above `2` is rejected even if it improves stability, because it defeats the purpose of rollback for this target.
 - Latest continuation keeps that as a hard rule. Attempts should not "fix" rollback by raising GUI rollback InputDelay above `2`; higher-delay runs are diagnostics only.
+- 2026-06-24 fixed-seed rollback continuation:
+  - Added `-MvlMatchSeed` to `run-nsmb-mvl-practical-rollback-suite.ps1` so A/B rollback candidates can share the same MvL match seed. Earlier candidate comparisons used the candidate name in the seed, so part of the observed difference could be seed variance.
+  - Rejected the renderer-vblank-skip resim diagnostic. Skipping renderer `VBlank()` / `Finish3DRendering()` during resim made the exact-ish oracle produce persistent StateSync mismatch and did not improve the performance boundary, so the code experiment was reverted and not kept as a candidate.
+  - Fixed-seed `chaos` with sendDelay2/jitter2 and no StateSync showed the selected GPU3DLight boundary more clearly: `mr2` stayed correctness-shaped but averaged about `18.855ms` with rollback max `59/53ms`; `mr1` reduced max to about `44ms` but still averaged `17.9-18.0ms`; `rb0/mr2` lowered average slightly to `17.7ms` but worsened max to `55/63ms`.
+  - StateSync rejected the tempting `mr1` timing shape: the same fixed seed produced persistent `playerGlobal` mismatch starting around frame `1260`. The `mr2` selected GPU3DLight candidate stayed StateSync-clean in the same seed, but still averaged `19.018/19.016ms` with rollback max up to `69.216ms`.
+  - Current status: correctness currently points back to `nsmbtc-rb1000-mr2-limit1-arena-stack-devices-gpu3dlight`, but it is not playable under the active gate. The measured cost is still foreground correction: restore around `4.6ms`, resimulated `RunFrame` around `14ms`, and resim total around `25ms`. More checkpoint slimming or tiny wait changes alone is unlikely to reach stable 60fps.
+  - Superseded next action: the fixed-seed comparison established the foreground cost boundary; current work is the persistent-shadow feasibility step summarized above.
 - 2026-06-24 latest selected-snapshot redo after the stash-loss report:
   - Rebuilt melonDS and restored the active selected `nsmbtinycore` work. Added state-sync diagnostics for scene fields, `playerGlobal` chunk hashes, and optional sample word diffs (`MELONDS_NSML_STATE_SYNC_SAMPLE_WORD_DIFF`).
   - Added `MELONDS_NSML_ROLLBACK_NSMB_FULL_OBJECT_IDS_WITH_SAFE_RANGES` and practical-suite candidates that full-snapshot selected actor IDs inside the safe-field selected snapshot. The useful candidate is `b1750-fullstar-core249`, which full-snapshots star actor IDs `0x0022,0x010C` while keeping player object length `0xC80`.

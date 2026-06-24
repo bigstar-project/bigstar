@@ -68,6 +68,38 @@ static std::map<NDS*, NSMLLocalPacketCapture> NSMLLocalPackets;
 static std::map<NDS*, std::map<u32, NSMLPacketReplayEntry>> NSMLLiveReplayPackets;
 static std::map<NDS*, std::map<u32, u32>> NSMLPreservedNetWords;
 
+void NSML_CloneMarioVsLuigiHostState(NDS* source, NDS* destination)
+{
+    if (!source || !destination || source == destination)
+        return;
+    std::lock_guard<std::mutex> lock(NSMLPacketBridgeMutex);
+
+    if (const auto local = NSMLLocalPackets.find(source); local != NSMLLocalPackets.end())
+        NSMLLocalPackets[destination] = local->second;
+    else
+        NSMLLocalPackets.erase(destination);
+
+    if (const auto replay = NSMLLiveReplayPackets.find(source); replay != NSMLLiveReplayPackets.end())
+        NSMLLiveReplayPackets[destination] = replay->second;
+    else
+        NSMLLiveReplayPackets.erase(destination);
+
+    if (const auto words = NSMLPreservedNetWords.find(source); words != NSMLPreservedNetWords.end())
+        NSMLPreservedNetWords[destination] = words->second;
+    else
+        NSMLPreservedNetWords.erase(destination);
+}
+
+void NSML_ClearMarioVsLuigiHostState(NDS* nds)
+{
+    if (!nds)
+        return;
+    std::lock_guard<std::mutex> lock(NSMLPacketBridgeMutex);
+    NSMLLocalPackets.erase(nds);
+    NSMLLiveReplayPackets.erase(nds);
+    NSMLPreservedNetWords.erase(nds);
+}
+
 static bool NSMLEnvFlag(const char* name)
 {
     const char* value = getenv(name);
@@ -4629,10 +4661,11 @@ void ARM::DoSavestate(Savestate* file)
     file->Var32((u32*)&Cycles);
     //file->Var32((u32*)&CyclesToRun);
 
-    // hack to make save states compatible
-    u32 halted = Halted;
-    file->Var32(&halted);
-    Halted = halted;
+    // Preserve IRQ and idle-loop execution state in the existing 32-bit slot.
+    // Older states stored only Halted here and therefore still decode correctly.
+    u32 stopExecution = StopExecution;
+    file->Var32(&stopExecution);
+    StopExecution = stopExecution;
 
     file->VarArray(R, 16*sizeof(u32));
     file->Var32(&CPSR);

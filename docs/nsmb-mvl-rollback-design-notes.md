@@ -1,5 +1,14 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
+## 2026-06-24 persistent-shadow decision
+
+- A second core-only `NDS` can be constructed and restored in-process, and melonDS already supports multiple instances with thread-local `NDS::Current`. ROM/cart userdata and NSMB host-side packet replay state must be cloned explicitly.
+- Creating the shadow at correction time is not viable. Although the serialized tiny-core state and Main RAM are identical before execution, savestate does not capture the execution/JIT history needed to reproduce the same first scheduler interval. The first measured split is ARM7 progress before the RTC event, followed by roughly `3KB` of Main RAM divergence.
+- Cold shadow replay is also too slow (`37-45ms` for the first frame). Retaining the same JIT cache lowers later frames to `16-25ms`, but repeated same-frame warm restores do not converge. Therefore cache warmth alone is insufficient; the shadow must evolve from the same early execution history.
+- The only remaining version of direction 1 worth implementing is a persistent worker shadow initialized near frame 0, fed the same effective inputs/patches, and corrected with existing checkpoints without clearing its JIT cache. Foreground commit must remain a bounded restore-only operation. Measure foreground contention, worker lag, commit cost, and mismatch independently.
+- Rejection rule: if the worker cannot remain within the rollback window while foreground stays near 60fps, or if persistent history still diverges, stop expanding the shadow design and return to the selected actor/global/lifecycle snapshot approach.
+- Diagnostic implementation is intentionally environment-gated (`MELONDS_NSML_SHADOW_CLONE_PROBE*`) and is not a GUI/default rollback backend.
+
 ## 2026-06-22 current status - raw-input resim and strong-jitter rollback
 
 Current rollback direction has moved from repair-only `tinycorepreimage` toward exact-ish `tinycoreramdelta` as the correctness oracle, while the next practical path likely needs a new non-blocking or pointer-safe snapshot architecture. The active goal has a strict latency constraint:
@@ -8,6 +17,16 @@ Current rollback direction has moved from repair-only `tinycorepreimage` toward 
 - Increasing InputDelay above `2` is rejected for this goal, even when it improves correctness or smoothness, because it makes rollback no longer worthwhile for the target play feel.
 - Higher-delay profiles such as `delay10` and `delay12/keyInt4` are retained only as diagnostics showing the cost/latency boundary.
 - Latest continuation keeps that rule: changing GUI rollback `InputDelayFrames` from `2` to a larger value is not an acceptable solution. All new strong-jitter checks below used `InputDelayFrames=2`.
+
+2026-06-24 fixed-seed update:
+
+- Added a practical-suite `-MvlMatchSeed` override. This matters because the previous suite default included the candidate name in the match seed, so candidate A/B runs were not fully comparable.
+- Rejected renderer-vblank skipping during rollback resim. It was tested as a possible way to make resim cheaper, but exact-ish StateSync started persistent mismatch around frame `1020` and performance did not improve enough. The implementation experiment was removed; it should not be promoted.
+- Fixed-seed selected GPU3DLight results split correctness from timing more cleanly:
+  - `nsmbtc-rb1000-mr2-limit1-arena-stack-devices-gpu3dlight`: no StateSync mismatch in the measured fixed seed, but still `18.855ms` average without StateSync and `19.018ms` with StateSync; rollback max reached `59-69ms`.
+  - `nsmbtc-rb1000-mr1-limit1-arena-stack-devices-gpu3dlight`: lower max frame time in no-StateSync (`~44ms`) but persistent `playerGlobal` mismatch with StateSync from frame `1260`, so it is correctness-unsafe.
+  - `rb0/mr2` lowers average only modestly and worsens max rollback spikes, while an earlier `rb500` sweep can stall. These are not promotion paths.
+- Design implication: the current selected GPU3DLight line is useful and closer than full exact restore, but the same architectural wall remains. The correctness-shaped `mr2` path still performs restore plus one resimulated `RunFrame` on the visible frame. That cost floor is about `4-5ms` restore plus `14ms` resim run, before normal frame work. Reaching the active goal probably requires moving correction off the displayed frame or making the selected lifecycle snapshot deterministic enough to avoid full foreground replay, not just adding actor ranges or increasing wait.
 
 Completed in the latest pass:
 
