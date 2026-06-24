@@ -1,6 +1,6 @@
 import type { CourseMode, FormState, GameSettings } from './types';
 
-export const defaultInputDelayFrames = 4;
+export const defaultInputDelayFrames = 3;
 export const defaultInputMaxFrameLead = 4;
 export const rollbackInputDelayFrames = 2;
 export const rollbackInputMaxFrameLead = 2;
