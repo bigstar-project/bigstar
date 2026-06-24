@@ -272,6 +272,77 @@ function Get-RollbackStatsFields {
     return $result
 }
 
+function Get-PersistentShadowFields {
+    param([string]$Path)
+
+    $result = @{
+        Enqueued = ""
+        Completed = ""
+        Dropped = ""
+        Continuous = ""
+        ContinuousInvalid = ""
+        ContinuityErrors = ""
+        LatestLag = ""
+        MaxLag = ""
+        EnqueueAvgUs = ""
+        EnqueueMaxUs = ""
+        RestoreAvgUs = ""
+        RestoreMaxUs = ""
+        RunAvgUs = ""
+        RunMaxUs = ""
+        Compared = ""
+        Match = ""
+        DifferingBytes = ""
+    }
+    $line = Get-LastLineMatching -Path $Path -Pattern "NSMB PersistentShadow: summary"
+    if (-not $line) {
+        return $result
+    }
+
+    foreach ($key in @(
+        "enqueued",
+        "completed",
+        "dropped",
+        "continuous",
+        "continuousInvalid",
+        "continuityErrors",
+        "latestLag",
+        "maxLag",
+        "enqueueAvgUs",
+        "enqueueMaxUs",
+        "restoreAvgUs",
+        "restoreMaxUs",
+        "runAvgUs",
+        "runMaxUs",
+        "compared",
+        "match",
+        "differingBytes"
+    )) {
+        if ($line -match "$key=([0-9.]+)") {
+            switch ($key) {
+                "enqueued" { $result.Enqueued = $Matches[1] }
+                "completed" { $result.Completed = $Matches[1] }
+                "dropped" { $result.Dropped = $Matches[1] }
+                "continuous" { $result.Continuous = $Matches[1] }
+                "continuousInvalid" { $result.ContinuousInvalid = $Matches[1] }
+                "continuityErrors" { $result.ContinuityErrors = $Matches[1] }
+                "latestLag" { $result.LatestLag = $Matches[1] }
+                "maxLag" { $result.MaxLag = $Matches[1] }
+                "enqueueAvgUs" { $result.EnqueueAvgUs = $Matches[1] }
+                "enqueueMaxUs" { $result.EnqueueMaxUs = $Matches[1] }
+                "restoreAvgUs" { $result.RestoreAvgUs = $Matches[1] }
+                "restoreMaxUs" { $result.RestoreMaxUs = $Matches[1] }
+                "runAvgUs" { $result.RunAvgUs = $Matches[1] }
+                "runMaxUs" { $result.RunMaxUs = $Matches[1] }
+                "compared" { $result.Compared = $Matches[1] }
+                "match" { $result.Match = $Matches[1] }
+                "differingBytes" { $result.DifferingBytes = $Matches[1] }
+            }
+        }
+    }
+    return $result
+}
+
 function Get-RollbackIntegrityError {
     param([string[]]$Paths)
     $patterns = @(
@@ -4183,6 +4254,89 @@ $candidateDefs = @{
             MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
         }
     }
+    "nsmbtc-rb0-mr6-lead6-budget2ms-lookupjit-limit1-cp12-adaptive2-prescratch3-shadowprobe-confirmedstate-arena-stack-devices-gpu3dlight" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 6
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x27D"
+        InputMaxFrameLead = 6
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 12
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_PRE_SCRATCH_RESIM = "1"
+            MELONDS_NSML_ROLLBACK_PRE_SCRATCH_RESIM_INTERVAL = "3"
+            MELONDS_NSML_ROLLBACK_ADAPTIVE_CHECKPOINT_CRITICAL_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "2000"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+            MELONDS_NSML_PERSISTENT_SHADOW_PROBE = "1"
+            MELONDS_NSML_PERSISTENT_SHADOW_START_FRAME = "900"
+            MELONDS_NSML_PERSISTENT_SHADOW_END_FRAME = "1500"
+            MELONDS_NSML_PERSISTENT_SHADOW_COMPARE_FRAME = "1500"
+            MELONDS_NSML_PERSISTENT_SHADOW_MAX_QUEUE = "180"
+            MELONDS_NSML_PERSISTENT_SHADOW_SUMMARY_DRAIN_MS = "3000"
+        }
+    }
+    "nsmbtc-rb0-mr6-lead6-budget2ms-lookupjit-limit1-cp12-adaptive2-prescratch3-shadowcont-confirmedstate-arena-stack-devices-gpu3dlight" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 6
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x27D"
+        InputMaxFrameLead = 6
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 12
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_PRE_SCRATCH_RESIM = "1"
+            MELONDS_NSML_ROLLBACK_PRE_SCRATCH_RESIM_INTERVAL = "3"
+            MELONDS_NSML_ROLLBACK_ADAPTIVE_CHECKPOINT_CRITICAL_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "2000"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+            MELONDS_NSML_PERSISTENT_SHADOW_PROBE = "1"
+            MELONDS_NSML_PERSISTENT_SHADOW_CONTINUOUS = "1"
+            MELONDS_NSML_PERSISTENT_SHADOW_START_FRAME = "900"
+            MELONDS_NSML_PERSISTENT_SHADOW_END_FRAME = "1500"
+            MELONDS_NSML_PERSISTENT_SHADOW_COMPARE_FRAME = "1499"
+            MELONDS_NSML_PERSISTENT_SHADOW_MAX_QUEUE = "1024"
+            MELONDS_NSML_PERSISTENT_SHADOW_SUMMARY_DRAIN_MS = "3000"
+        }
+    }
     "nsmbtc-rb0-mr6-lead6-budget2ms-lookupjit-limit1-cp12-adaptive2-prescratch3-consume-confirmedstate-arena-stack-devices-gpu3dlight" = [pscustomobject]@{
         Backend = "nsmbtinycore"
         InputDelayFrames = 2
@@ -5714,6 +5868,1486 @@ $candidateDefs = @{
             MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
             MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "1"
             MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_INTERVAL = "15"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "trace-nsmbtc-rb0-mr4-lead2-budget1750us-lookupjit-limit1-proclist-safe-fields-fullplayer-heap15-extra2p-delta-core249-worddiff" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_SAMPLE_WORD_DIFF = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_INTERVAL = "15"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "trace-nsmbtc-rb0-mr4-lead2-budget1750us-lookupjit-limit1-proclist-safe-fields-fullplayer-heap15-extra2p-delta-core249-confirmed-worddiff" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_STATE_SYNC_SAMPLE_WORD_DIFF = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_INTERVAL = "15"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "nsmbtc-rb0-mr4-lead2-budget1750us-lookupjit-limit1-proclist-safe-fields-fullplayer-heap15-extra2p-delta-core249-confirmed" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_INTERVAL = "15"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "nsmbtc-rb0-mr4-lead2-budget1750us-lookupjit-limit1-arena-stack-proclist-safe-fields-fullplayer-heap15-extra2p-delta-core249-confirmed" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_INTERVAL = "15"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "b1750-confirmed-arena-core249" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_INTERVAL = "15"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "b1750-confirmed-arena-nostack-noheap-core249" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "b1750-arena-lite-changedjit" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1000-arena-lite-changedjit" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1000"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1250-arena-lite-changedjit" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1250"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1500-arena-lite-changedjit" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1500"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b2000-arena-lite-changedjit" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "2000"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1750-arena-lite-changedjit-poll100" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_INPUT_FRAME_LEAD_THROTTLE_POLL_US = "100"
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1750-arena-lite-changedjit-maxcorr2" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "2"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1750-arena-lite-changedjit-postframe" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_RESIM_POST_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1750-arena-lite-changedjit-rbwait100" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 100
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1750-arena-lite-changedjit-skipresimcp" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackSkipIntermediateResimCheckpoints = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1750-arena-lite-changedjit-skipresimcp-final" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackSkipIntermediateResimCheckpoints = $true
+        RollbackSkipFinalResimCheckpoint = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1750-arena-lite-changedjit-audioskip" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_RESIM_SKIP_AUDIO_BUFFER = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1750-arena-lite-changedjit-cp2" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1500-arena-lite-changedjit-cp2" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1500"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1000-arena-lite-changedjit-cp2" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1000"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1750-arena-lite-changedjit-cp2-lead0" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 0
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1500-arena-lite-changedjit-cp2-lead0" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 0
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1500"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1250-arena-lite-changedjit-cp2-lead0" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 0
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 2
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1250"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1750-arena-lite-changedjit-rbwait250" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 250
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1750-arena-lite-changedjit-rbwait500" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 500
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1750-arena-lite-skiprestorejit" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_SKIP_RESTORED_JIT_INVALIDATION = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "b1750-arena-lite-prescratch2" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_PRE_SCRATCH_RESIM = "1"
+            MELONDS_NSML_ROLLBACK_PRE_SCRATCH_RESIM_INTERVAL = "2"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "b1750-arena-lite-prescratch3" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_PRE_SCRATCH_RESIM = "1"
+            MELONDS_NSML_ROLLBACK_PRE_SCRATCH_RESIM_INTERVAL = "3"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "b1750-arena-lite-consume" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_RESIM_CONSUME_CURRENT_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "b1750-arena-lite-changedjit-consume" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_RESIM_CONSUME_CURRENT_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1750-arena-lite-changedjit-lead1" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 1
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1750-arena-lite-changedjit-lead0" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 0
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1000-arena-lite-changedjit-lead0" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 0
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1000"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b500-arena-lite-changedjit-lead0" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 0
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "500"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1000-arena-lite-changedjit-lead1" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 1
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1000"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1250-arena-lite-changedjit-lead0" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 0
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1250"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1500-arena-lite-changedjit-lead1" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 1
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1500"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1000-arena-lite-changedjit-lead0-rbwait100" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 100
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 0
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1000"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1000-arena-lite-changedjit-lead0-rbwait250" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 250
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 0
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1000"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_CHANGED_PAGES = "1"
+        }
+    }
+    "b1750-mr2-confirmed-arena-nostack-noheap-core249" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 2
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "b1750-mr3-confirmed-arena-nostack-noheap-core249" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 0
+        RollbackMaxResimFrames = 3
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
+            MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
+            MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES = "0x021B5C00+0x400;0x021B6C00+0x400"
+            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_FORCE_JIT_RANGE_INVALIDATION = "1"
+        }
+    }
+    "b1750-rbwait250-confirmed-arena-nostack-noheap-core249" = [pscustomobject]@{
+        Backend = "nsmbtinycore"
+        InputDelayFrames = 2
+        RollbackInputWaitUs = 250
+        RollbackMaxResimFrames = 4
+        RollbackResimulate = $true
+        RollbackPredictOnly = $false
+        RollbackSkipRenderDuringResim = $true
+        RollbackTinyCoreFlags = "0x249"
+        InputMaxFrameLead = 2
+        RollbackWindow = 64
+        RollbackCheckpointInterval = 1
+        InputBundleHistory = 8
+        Extra = @{
+            IgnoreSpeculativeInputFields = $true
+            SkipMovementProbe = $true
+            RollbackSettleFrames = 60
+        }
+        Env = @{
+            MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US = "1750"
+            MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME = "1"
+            MELONDS_NSML_ROLLBACK_JIT_LOOKUP_RESET_ONLY = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
+            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
             MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES = "1"
             MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES = "1"
             MELONDS_NSML_ROLLBACK_NSMB_PLAYER_OBJECT_LENGTH = "0xC80"
@@ -14471,6 +16105,13 @@ $envKeys = @(
     "MELONDS_NSML_ROLLBACK_RESIM_POST_FRAME",
     "MELONDS_NSML_ROLLBACK_PRE_SCRATCH_RESIM",
     "MELONDS_NSML_ROLLBACK_PRE_SCRATCH_RESIM_INTERVAL",
+    "MELONDS_NSML_PERSISTENT_SHADOW_PROBE",
+    "MELONDS_NSML_PERSISTENT_SHADOW_CONTINUOUS",
+    "MELONDS_NSML_PERSISTENT_SHADOW_START_FRAME",
+    "MELONDS_NSML_PERSISTENT_SHADOW_END_FRAME",
+    "MELONDS_NSML_PERSISTENT_SHADOW_COMPARE_FRAME",
+    "MELONDS_NSML_PERSISTENT_SHADOW_MAX_QUEUE",
+    "MELONDS_NSML_PERSISTENT_SHADOW_SUMMARY_DRAIN_MS",
     "MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_KEEP_CODEMEM",
     "MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_CLEAR_LOOKUP",
     "MELONDS_NSML_ROLLBACK_JIT_FAST_RESET_CLEAR_LOOKUP_DIRTY",
@@ -14671,6 +16312,8 @@ foreach ($candidateName in $Candidate) {
         $clientScratchSpikes = Get-ScratchSpikeFields -Path $clientStdout
         $hostRollbackStats = Get-RollbackStatsFields -Path $hostStdout
         $clientRollbackStats = Get-RollbackStatsFields -Path $clientStdout
+        $hostPersistentShadow = Get-PersistentShadowFields -Path $hostStdout
+        $clientPersistentShadow = Get-PersistentShadowFields -Path $clientStdout
         $transientFields = Get-TransientMismatchFields -Path $runLog
         if ($MaxAverageFrameMs -gt 0.0) {
             $avgFailures = New-Object System.Collections.Generic.List[string]
@@ -14757,6 +16400,40 @@ foreach ($candidateName in $Candidate) {
             ClientRestores = $clientRollbackStats.Restores
             HostResims = $hostRollbackStats.Resims
             ClientResims = $clientRollbackStats.Resims
+            HostShadowEnqueued = $hostPersistentShadow.Enqueued
+            ClientShadowEnqueued = $clientPersistentShadow.Enqueued
+            HostShadowCompleted = $hostPersistentShadow.Completed
+            ClientShadowCompleted = $clientPersistentShadow.Completed
+            HostShadowDropped = $hostPersistentShadow.Dropped
+            ClientShadowDropped = $clientPersistentShadow.Dropped
+            HostShadowContinuous = $hostPersistentShadow.Continuous
+            ClientShadowContinuous = $clientPersistentShadow.Continuous
+            HostShadowContinuousInvalid = $hostPersistentShadow.ContinuousInvalid
+            ClientShadowContinuousInvalid = $clientPersistentShadow.ContinuousInvalid
+            HostShadowContinuityErrors = $hostPersistentShadow.ContinuityErrors
+            ClientShadowContinuityErrors = $clientPersistentShadow.ContinuityErrors
+            HostShadowLatestLag = $hostPersistentShadow.LatestLag
+            ClientShadowLatestLag = $clientPersistentShadow.LatestLag
+            HostShadowMaxLag = $hostPersistentShadow.MaxLag
+            ClientShadowMaxLag = $clientPersistentShadow.MaxLag
+            HostShadowEnqueueAvgUs = $hostPersistentShadow.EnqueueAvgUs
+            ClientShadowEnqueueAvgUs = $clientPersistentShadow.EnqueueAvgUs
+            HostShadowEnqueueMaxUs = $hostPersistentShadow.EnqueueMaxUs
+            ClientShadowEnqueueMaxUs = $clientPersistentShadow.EnqueueMaxUs
+            HostShadowRestoreAvgUs = $hostPersistentShadow.RestoreAvgUs
+            ClientShadowRestoreAvgUs = $clientPersistentShadow.RestoreAvgUs
+            HostShadowRestoreMaxUs = $hostPersistentShadow.RestoreMaxUs
+            ClientShadowRestoreMaxUs = $clientPersistentShadow.RestoreMaxUs
+            HostShadowRunAvgUs = $hostPersistentShadow.RunAvgUs
+            ClientShadowRunAvgUs = $clientPersistentShadow.RunAvgUs
+            HostShadowRunMaxUs = $hostPersistentShadow.RunMaxUs
+            ClientShadowRunMaxUs = $clientPersistentShadow.RunMaxUs
+            HostShadowCompared = $hostPersistentShadow.Compared
+            ClientShadowCompared = $clientPersistentShadow.Compared
+            HostShadowMatch = $hostPersistentShadow.Match
+            ClientShadowMatch = $clientPersistentShadow.Match
+            HostShadowDifferingBytes = $hostPersistentShadow.DifferingBytes
+            ClientShadowDifferingBytes = $clientPersistentShadow.DifferingBytes
             TransientMismatchCount = $transientFields.Count
             MaxTransientFrames = $transientFields.MaxFrames
             TransientMismatchFields = $transientFields.Fields

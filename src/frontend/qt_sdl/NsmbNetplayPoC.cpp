@@ -1370,6 +1370,7 @@ struct State
         melonDS::u32 Frame = 0;
         melonDS::u32 KeyInput = 0;
         int CurCPU = 0;
+        bool HasState = false;
         std::vector<char> Core;
         std::vector<melonDS::u8> MainRAM;
     };
@@ -1869,27 +1870,44 @@ struct State
     bool ShadowCloneProbeSkipAudioBuffer = true;
     int ShadowCloneProbeWarmRuns = 1;
     bool PersistentShadowProbeEnabled = false;
+    bool PersistentShadowContinuous = false;
     melonDS::u32 PersistentShadowStartFrame = 900;
     melonDS::u32 PersistentShadowEndFrame = 1100;
     melonDS::u32 PersistentShadowCompareFrame = 1100;
     int PersistentShadowMaxQueue = 64;
+    int PersistentShadowSummaryDrainMs = 0;
     std::mutex PersistentShadowMutex;
     std::condition_variable PersistentShadowCond;
     std::thread PersistentShadowThread;
     bool PersistentShadowStop = false;
     bool PersistentShadowStarted = false;
+    bool PersistentShadowBootstrapQueued = false;
+    bool PersistentShadowBootstrapRestored = false;
+    bool PersistentShadowContinuousInvalid = false;
+    melonDS::u32 PersistentShadowContinuityErrors = 0;
     melonDS::NDS* PersistentShadowSource = nullptr;
     std::unique_ptr<melonDS::NDS> PersistentShadowNDS;
     std::deque<PersistentShadowJob> PersistentShadowJobs;
     melonDS::u32 PersistentShadowCompletedFrame = 0;
+    melonDS::u32 PersistentShadowLatestQueuedFrame = 0;
+    melonDS::u32 PersistentShadowMaxFrameLag = 0;
     melonDS::u32 PersistentShadowDroppedJobs = 0;
+    melonDS::u32 PersistentShadowEnqueuedJobs = 0;
+    std::size_t PersistentShadowMaxQueueDepth = 0;
+    unsigned long long PersistentShadowEnqueueTotalUs = 0;
+    unsigned long long PersistentShadowEnqueueMaxUs = 0;
     unsigned long long PersistentShadowRestoreTotalUs = 0;
+    unsigned long long PersistentShadowRestoreMaxUs = 0;
     unsigned long long PersistentShadowRunTotalUs = 0;
+    unsigned long long PersistentShadowRunMaxUs = 0;
     melonDS::u32 PersistentShadowCompletedJobs = 0;
     bool PersistentShadowForegroundExpected = false;
     melonDS::u64 PersistentShadowForegroundHash = 0;
     std::vector<melonDS::u8> PersistentShadowForegroundMainRAM;
     bool PersistentShadowCompareReady = false;
+    bool PersistentShadowCompared = false;
+    bool PersistentShadowCompareMatch = false;
+    std::size_t PersistentShadowDifferingBytes = 0;
     melonDS::u64 PersistentShadowCompareHash = 0;
     std::vector<melonDS::u8> PersistentShadowCompareMainRAM;
     bool ShadowCloneProbePending = false;
@@ -3382,6 +3400,28 @@ void CompareGameStateLocked(int instanceID, melonDS::u32 frame)
         && lhs.RenderCandidate == rhs.RenderCandidate)
         return;
 
+    auto localSample = G.LocalGameStateSamples.find(key);
+    auto remoteSample = G.RemoteGameStateSamples.find(key);
+    const bool haveComparableSamples =
+        localSample != G.LocalGameStateSamples.end() && remoteSample != G.RemoteGameStateSamples.end();
+    std::string sampleDiffs;
+    if (haveComparableSamples)
+        sampleDiffs = GameStateSampleDiffSummary(localSample->second, remoteSample->second);
+
+    const bool extendedStateMatches =
+        lhs.PlayerGlobal == rhs.PlayerGlobal
+        && lhs.WifiCandidate == rhs.WifiCandidate
+        && lhs.RenderCandidate == rhs.RenderCandidate;
+    if (lhs.Basic != rhs.Basic && extendedStateMatches && haveComparableSamples && sampleDiffs.empty())
+    {
+        std::printf("NSMB PoC: hidden-basic drift inst=%d frame=%u localBasic=%016llX remoteBasic=%016llX playerGlobal=1 wifiCandidate=1 renderCandidate=1\n",
+            instanceID,
+            frame,
+            static_cast<unsigned long long>(lhs.Basic),
+            static_cast<unsigned long long>(rhs.Basic));
+        return;
+    }
+
     G.GameStateMismatchSeen = true;
     WriteGameStateMismatchDiagnostics(instanceID, frame, lhs, rhs);
     EmitGameStateMismatchEventLocked(instanceID, frame, lhs, rhs);
@@ -3423,11 +3463,8 @@ void CompareGameStateLocked(int instanceID, melonDS::u32 frame)
                 wordDiffs.c_str());
         }
     }
-    auto localSample = G.LocalGameStateSamples.find(key);
-    auto remoteSample = G.RemoteGameStateSamples.find(key);
-    if (localSample != G.LocalGameStateSamples.end() && remoteSample != G.RemoteGameStateSamples.end())
+    if (haveComparableSamples)
     {
-        const std::string sampleDiffs = GameStateSampleDiffSummary(localSample->second, remoteSample->second);
         if (!sampleDiffs.empty())
         {
             std::printf("NSMB PoC: game state sample diff inst=%d frame=%u %s\n",
@@ -9468,6 +9505,9 @@ void PrintPersistentShadowComparisonLocked()
     const bool match = G.PersistentShadowForegroundHash == G.PersistentShadowCompareHash
         && differingBytes == 0
         && G.PersistentShadowForegroundMainRAM.size() == G.PersistentShadowCompareMainRAM.size();
+    G.PersistentShadowCompared = true;
+    G.PersistentShadowCompareMatch = match;
+    G.PersistentShadowDifferingBytes = differingBytes;
     const double restoreAvgUs = G.PersistentShadowCompletedJobs > 0
         ? static_cast<double>(G.PersistentShadowRestoreTotalUs) / G.PersistentShadowCompletedJobs
         : 0.0;
@@ -9492,6 +9532,66 @@ void PrintPersistentShadowComparisonLocked()
     G.PersistentShadowCompareMainRAM.clear();
 }
 
+void PrintPersistentShadowSummaryLocked(melonDS::u32 frame)
+{
+    if (!G.PersistentShadowProbeEnabled)
+        return;
+
+    const double enqueueAvgUs = G.PersistentShadowEnqueuedJobs > 0
+        ? static_cast<double>(G.PersistentShadowEnqueueTotalUs) / G.PersistentShadowEnqueuedJobs
+        : 0.0;
+    const double restoreAvgUs = G.PersistentShadowCompletedJobs > 0
+        ? static_cast<double>(G.PersistentShadowRestoreTotalUs) / G.PersistentShadowCompletedJobs
+        : 0.0;
+    const double runAvgUs = G.PersistentShadowCompletedJobs > 0
+        ? static_cast<double>(G.PersistentShadowRunTotalUs) / G.PersistentShadowCompletedJobs
+        : 0.0;
+    const melonDS::u32 latestLag =
+        G.PersistentShadowLatestQueuedFrame >= G.PersistentShadowCompletedFrame
+        ? G.PersistentShadowLatestQueuedFrame - G.PersistentShadowCompletedFrame
+        : 0;
+    std::printf(
+        "NSMB PersistentShadow: summary frame=%u started=%d continuous=%d continuousInvalid=%d continuityErrors=%u enqueued=%u completed=%u dropped=%u queued=%zu maxQueue=%zu latestQueuedFrame=%u completedFrame=%u latestLag=%u maxLag=%u enqueueAvgUs=%.1f enqueueMaxUs=%llu restoreAvgUs=%.1f restoreMaxUs=%llu runAvgUs=%.1f runMaxUs=%llu compared=%d match=%d differingBytes=%zu\n",
+        frame,
+        G.PersistentShadowStarted ? 1 : 0,
+        G.PersistentShadowContinuous ? 1 : 0,
+        G.PersistentShadowContinuousInvalid ? 1 : 0,
+        G.PersistentShadowContinuityErrors,
+        G.PersistentShadowEnqueuedJobs,
+        G.PersistentShadowCompletedJobs,
+        G.PersistentShadowDroppedJobs,
+        G.PersistentShadowJobs.size(),
+        G.PersistentShadowMaxQueueDepth,
+        G.PersistentShadowLatestQueuedFrame,
+        G.PersistentShadowCompletedFrame,
+        latestLag,
+        G.PersistentShadowMaxFrameLag,
+        enqueueAvgUs,
+        G.PersistentShadowEnqueueMaxUs,
+        restoreAvgUs,
+        G.PersistentShadowRestoreMaxUs,
+        runAvgUs,
+        G.PersistentShadowRunMaxUs,
+        G.PersistentShadowCompared ? 1 : 0,
+        G.PersistentShadowCompareMatch ? 1 : 0,
+        G.PersistentShadowDifferingBytes);
+    std::fflush(stdout);
+}
+
+void WaitPersistentShadowDrainForSummary()
+{
+    if (!G.PersistentShadowProbeEnabled || G.PersistentShadowSummaryDrainMs <= 0)
+        return;
+
+    const auto deadline = std::chrono::steady_clock::now()
+        + std::chrono::milliseconds(G.PersistentShadowSummaryDrainMs);
+    std::unique_lock<std::mutex> lock(G.PersistentShadowMutex);
+    G.PersistentShadowCond.wait_until(lock, deadline, [] {
+        return G.PersistentShadowJobs.empty()
+            && G.PersistentShadowCompletedFrame >= G.PersistentShadowLatestQueuedFrame;
+    });
+}
+
 void PersistentShadowWorkerMain()
 {
     for (;;)
@@ -9511,18 +9611,42 @@ void PersistentShadowWorkerMain()
         melonDS::NDS* shadow = G.PersistentShadowNDS.get();
         if (!shadow)
             continue;
-        melonDS::Savestate state(job.Core.data(), static_cast<melonDS::u32>(job.Core.size()), false);
-        const auto restoreStart = std::chrono::steady_clock::now();
-        const bool restored = shadow->DoRollbackTinyCoreSavestate(
-            &state,
-            static_cast<melonDS::u32>(G.RollbackTinyCoreFlags));
-        if (restored && !state.Error && shadow->MainRAM
-            && job.MainRAM.size() == shadow->MainRAMMask + 1)
+
+        bool restored = true;
+        bool restoreError = false;
+        unsigned long long restoreUs = 0;
+        const bool needsRestore = !G.PersistentShadowContinuous || !G.PersistentShadowBootstrapRestored;
+        if (needsRestore)
         {
-            std::memcpy(shadow->MainRAM, job.MainRAM.data(), job.MainRAM.size());
+            if (!job.HasState)
+            {
+                std::lock_guard<std::mutex> lock(G.PersistentShadowMutex);
+                G.PersistentShadowContinuousInvalid = true;
+                G.PersistentShadowContinuityErrors++;
+                continue;
+            }
+            melonDS::NDS::Current = shadow;
+            melonDS::Savestate state(job.Core.data(), static_cast<melonDS::u32>(job.Core.size()), false);
+            const auto restoreStart = std::chrono::steady_clock::now();
+            restored = shadow->DoRollbackTinyCoreSavestate(
+                &state,
+                static_cast<melonDS::u32>(G.RollbackTinyCoreFlags));
+            if (restored && !state.Error && shadow->MainRAM
+                && job.MainRAM.size() == shadow->MainRAMMask + 1)
+            {
+                std::memcpy(shadow->MainRAM, job.MainRAM.data(), job.MainRAM.size());
+            }
+            restoreUs = ElapsedUs(restoreStart);
+            restoreError = state.Error;
         }
-        const unsigned long long restoreUs = ElapsedUs(restoreStart);
-        if (!restored || state.Error)
+        else if (G.PersistentShadowCompletedFrame != 0
+            && job.Frame != G.PersistentShadowCompletedFrame + 1)
+        {
+            std::lock_guard<std::mutex> lock(G.PersistentShadowMutex);
+            G.PersistentShadowContinuousInvalid = true;
+            G.PersistentShadowContinuityErrors++;
+        }
+        if (!restored || restoreError)
         {
             std::printf("NSMB PersistentShadow: restore failed frame=%u\n", job.Frame);
             std::fflush(stdout);
@@ -9533,6 +9657,7 @@ void PersistentShadowWorkerMain()
         melonDS::NSML_CloneMarioVsLuigiHostState(G.PersistentShadowSource, shadow);
         shadow->CurCPU = job.CurCPU;
         shadow->KeyInput = job.KeyInput;
+        melonDS::NDS::Current = shadow;
         shadow->GPU.SetRollbackSkipRender(true);
         shadow->SetRollbackSkipAudioBuffer(true);
         const auto runStart = std::chrono::steady_clock::now();
@@ -9552,10 +9677,24 @@ void PersistentShadowWorkerMain()
 
         {
             std::lock_guard<std::mutex> lock(G.PersistentShadowMutex);
+            if (needsRestore && G.PersistentShadowContinuous)
+                G.PersistentShadowBootstrapRestored = true;
             G.PersistentShadowCompletedFrame = job.Frame;
             G.PersistentShadowCompletedJobs++;
             G.PersistentShadowRestoreTotalUs += restoreUs;
+            if (restoreUs > G.PersistentShadowRestoreMaxUs)
+                G.PersistentShadowRestoreMaxUs = restoreUs;
             G.PersistentShadowRunTotalUs += runUs;
+            if (runUs > G.PersistentShadowRunMaxUs)
+                G.PersistentShadowRunMaxUs = runUs;
+            if (G.PersistentShadowCompletedFrame != 0
+                && G.PersistentShadowLatestQueuedFrame >= G.PersistentShadowCompletedFrame)
+            {
+                const melonDS::u32 lag =
+                    G.PersistentShadowLatestQueuedFrame - G.PersistentShadowCompletedFrame;
+                if (lag > G.PersistentShadowMaxFrameLag)
+                    G.PersistentShadowMaxFrameLag = lag;
+            }
             if (compareFrame)
             {
                 G.PersistentShadowCompareHash = compareHash;
@@ -9576,6 +9715,7 @@ void PersistentShadowWorkerMain()
                 std::fflush(stdout);
             }
         }
+        G.PersistentShadowCond.notify_all();
     }
 }
 
@@ -9639,30 +9779,67 @@ void QueuePersistentShadowFrameIfNeeded(melonDS::u32 frame, melonDS::NDS* nds)
     if (!StartPersistentShadowIfNeeded(nds))
         return;
 
-    melonDS::Savestate state;
-    if (!nds->DoRollbackTinyCoreSavestate(
-            &state,
-            static_cast<melonDS::u32>(G.RollbackTinyCoreFlags))
-        || state.Error)
+    bool needsState = true;
     {
-        return;
+        std::lock_guard<std::mutex> lock(G.PersistentShadowMutex);
+        needsState = !G.PersistentShadowContinuous || !G.PersistentShadowBootstrapQueued;
+    }
+
+    const auto enqueueStart = std::chrono::steady_clock::now();
+    melonDS::Savestate state;
+    if (needsState)
+    {
+        if (!nds->DoRollbackTinyCoreSavestate(
+                &state,
+                static_cast<melonDS::u32>(G.RollbackTinyCoreFlags))
+            || state.Error)
+        {
+            return;
+        }
     }
     State::PersistentShadowJob job;
     job.Frame = frame;
     job.KeyInput = nds->KeyInput;
     job.CurCPU = nds->CurCPU;
-    job.Core.assign(
-        static_cast<const char*>(state.Buffer()),
-        static_cast<const char*>(state.Buffer()) + state.Length());
-    job.MainRAM.assign(nds->MainRAM, nds->MainRAM + nds->MainRAMMask + 1);
+    job.HasState = needsState;
+    if (needsState)
+    {
+        job.Core.assign(
+            static_cast<const char*>(state.Buffer()),
+            static_cast<const char*>(state.Buffer()) + state.Length());
+        job.MainRAM.assign(nds->MainRAM, nds->MainRAM + nds->MainRAMMask + 1);
+    }
     {
         std::lock_guard<std::mutex> lock(G.PersistentShadowMutex);
+        const unsigned long long enqueueUs = ElapsedUs(enqueueStart);
+        G.PersistentShadowEnqueuedJobs++;
+        G.PersistentShadowEnqueueTotalUs += enqueueUs;
+        if (enqueueUs > G.PersistentShadowEnqueueMaxUs)
+            G.PersistentShadowEnqueueMaxUs = enqueueUs;
+        G.PersistentShadowLatestQueuedFrame = frame;
         if (static_cast<int>(G.PersistentShadowJobs.size()) >= G.PersistentShadowMaxQueue)
         {
             G.PersistentShadowJobs.pop_front();
             G.PersistentShadowDroppedJobs++;
+            if (G.PersistentShadowContinuous)
+            {
+                G.PersistentShadowContinuousInvalid = true;
+                G.PersistentShadowContinuityErrors++;
+            }
         }
+        if (needsState)
+            G.PersistentShadowBootstrapQueued = true;
         G.PersistentShadowJobs.push_back(std::move(job));
+        if (G.PersistentShadowJobs.size() > G.PersistentShadowMaxQueueDepth)
+            G.PersistentShadowMaxQueueDepth = G.PersistentShadowJobs.size();
+        if (G.PersistentShadowCompletedFrame != 0
+            && G.PersistentShadowLatestQueuedFrame >= G.PersistentShadowCompletedFrame)
+        {
+            const melonDS::u32 lag =
+                G.PersistentShadowLatestQueuedFrame - G.PersistentShadowCompletedFrame;
+            if (lag > G.PersistentShadowMaxFrameLag)
+                G.PersistentShadowMaxFrameLag = lag;
+        }
     }
     G.PersistentShadowCond.notify_one();
 }
@@ -20511,6 +20688,7 @@ void InitFromEnvironment()
     G.ShadowCloneProbeWarmRuns = std::clamp(
         EnvInt("MELONDS_NSML_SHADOW_CLONE_PROBE_WARM_RUNS", 1), 1, 8);
     G.PersistentShadowProbeEnabled = EnvFlag("MELONDS_NSML_PERSISTENT_SHADOW_PROBE");
+    G.PersistentShadowContinuous = EnvFlag("MELONDS_NSML_PERSISTENT_SHADOW_CONTINUOUS");
     G.PersistentShadowStartFrame = static_cast<melonDS::u32>(std::max(
         0,
         EnvInt("MELONDS_NSML_PERSISTENT_SHADOW_START_FRAME", 900)));
@@ -20522,7 +20700,9 @@ void InitFromEnvironment()
         static_cast<int>(G.PersistentShadowStartFrame),
         static_cast<int>(G.PersistentShadowEndFrame)));
     G.PersistentShadowMaxQueue = std::clamp(
-        EnvInt("MELONDS_NSML_PERSISTENT_SHADOW_MAX_QUEUE", 64), 1, 180);
+        EnvInt("MELONDS_NSML_PERSISTENT_SHADOW_MAX_QUEUE", 64), 1, 5000);
+    G.PersistentShadowSummaryDrainMs = std::clamp(
+        EnvInt("MELONDS_NSML_PERSISTENT_SHADOW_SUMMARY_DRAIN_MS", 0), 0, 10000);
     G.RollbackPredictionProbeModulo = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_MODULO", 0), 0, 600);
     G.RollbackPredictionProbeOffset = std::clamp(
@@ -21242,6 +21422,16 @@ private:
     long long RemoteWaitUs = 0;
 };
 
+bool HasConsumedRollbackFramePending(int instanceID, melonDS::u32 inputFrame)
+{
+    if (!G.RollbackResimConsumeCurrentFrame || instanceID < 0 || instanceID >= 16)
+        return false;
+
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    return G.RollbackSkipRunFrame[instanceID]
+        && G.RollbackSkipRunFrameFrame[instanceID] == inputFrame + 1;
+}
+
 InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, const InputState& polledInput)
 {
     BeforeHookPhaseTrace phaseTrace(instanceID, frame);
@@ -21289,10 +21479,16 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         PumpNetworkLocked(nds, inputFrame);
         ApplyPendingNSMLPacketsLocked(nds);
     }
+    bool consumedRollbackFrame = false;
     if (!G.RollbackResimulatePostFrame
         && (G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+    {
         RollbackResimulateIfNeeded(instanceID, inputFrame, nds);
+        consumedRollbackFrame = HasConsumedRollbackFramePending(instanceID, inputFrame);
+    }
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Rollback);
+    if (consumedRollbackFrame)
+        return polledInput;
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         SaveMvlAutoRestartBootstrapCheckpointIfNeeded(instanceID, inputFrame, nds);
@@ -22351,6 +22547,12 @@ bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
         }
         if (G.RollbackStatsTraceEnabled && G.RollbackStatsTraceSummaryOnly)
             PrintRollbackSummaryStatsLocked(G.TestFrames);
+        if (G.PersistentShadowProbeEnabled)
+        {
+            WaitPersistentShadowDrainForSummary();
+            std::lock_guard<std::mutex> shadowLock(G.PersistentShadowMutex);
+            PrintPersistentShadowSummaryLocked(G.TestFrames);
+        }
         if (G.Enabled && G.InputNetplayOnly)
         {
             const double remoteAvgUs = G.RemoteInputWaitCount > 0
