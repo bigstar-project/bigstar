@@ -1943,6 +1943,8 @@ struct State
     int RollbackResimulateDelayFrames = 0;
     int RollbackMaxResimFrames = 0;
     bool RollbackResimulatePostFrame = false;
+    bool RollbackPreScratchResim = false;
+    int RollbackPreScratchResimInterval = 1;
     bool RollbackPrePumpBeforeResim = false;
     bool RollbackDisableJITDuringResim = false;
     int RollbackMaxCorrectionsPerFrame = 0;
@@ -6790,13 +6792,19 @@ void SaveRollbackCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
     RollbackStoredState checkpoint;
     std::vector<melonDS::u8> deltaBaseMainRAM;
     const auto saveStart = std::chrono::steady_clock::now();
+    unsigned long long lockPrepareUs = 0;
+    unsigned long long captureUs = 0;
+    unsigned long long bufferSaveUs = 0;
+    unsigned long long storePruneUs = 0;
     {
+        const auto lockPrepareStart = std::chrono::steady_clock::now();
         std::lock_guard<std::mutex> lock(G.Mutex);
         if (!ShouldSaveRollbackCheckpointLocked(frame))
             return;
         if (ShouldSkipDuplicateRollbackPreimageCheckpointLocked(frame))
             return;
         PrepareRollbackDeltaSaveLocked(frame, checkpoint, deltaBaseMainRAM);
+        lockPrepareUs = ElapsedUs(lockPrepareStart);
     }
     const melonDS::u32 mainRAMMode = IsRollbackPreimageBackend()
         ? kRollbackMainRAMModeSkip
@@ -6808,11 +6816,14 @@ void SaveRollbackCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
     if ((checkpoint.MainRAMDelta || (G.RollbackDeltaPageTrace && IsRollbackNSMBRangeBackend()))
         && !deltaBaseMainRAM.empty())
         TraceRollbackDeltaPages(frame, nds, deltaBaseMainRAM);
+    const auto captureStart = std::chrono::steady_clock::now();
     if (!CaptureRollbackFramePreimage(checkpoint, nds, deltaBaseMainRAM))
         return;
     if (!CaptureRollbackPreimageSnapshotIfNeeded(frame, checkpoint, nds))
         return;
+    captureUs = ElapsedUs(captureStart);
 
+    const auto bufferSaveStart = std::chrono::steady_clock::now();
     if (!SaveRollbackCheckpointBuffer(nds, checkpoint.Buffer, mainRAMMode,
         checkpoint.MainRAMDelta ? deltaBaseMainRAM.data() : nullptr))
     {
@@ -6820,6 +6831,7 @@ void SaveRollbackCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
             std::printf("NSMB Rollback: failed to save checkpoint inst=%d frame=%u\n", instanceID, frame);
         return;
     }
+    bufferSaveUs = ElapsedUs(bufferSaveStart);
     if (G.RollbackBackendMode == RollbackBackend::CoreDelta && !checkpoint.MainRAMDelta && nds->MainRAM)
     {
         const melonDS::u32 len = nds->MainRAMMask + 1;
@@ -6829,6 +6841,7 @@ void SaveRollbackCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
     CaptureNSMBRestoreShadowIfNeeded(checkpoint, nds);
 
     {
+        const auto storePruneStart = std::chrono::steady_clock::now();
         std::lock_guard<std::mutex> lock(G.Mutex);
         G.RollbackStates[frame] = std::move(checkpoint);
         RefreshRollbackFrameDeltaShadowLocked(frame, nds);
@@ -6837,6 +6850,21 @@ void SaveRollbackCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
             ElapsedUs(saveStart));
         G.RollbackCheckpointSaveCount++;
         PruneRollbackHistoryLocked(frame);
+        storePruneUs = ElapsedUs(storePruneStart);
+    }
+    const unsigned long long totalUs = ElapsedUs(saveStart);
+    if (G.ActiveFrameSpikeTrace && totalUs >= static_cast<unsigned long long>(std::min(G.ActiveFrameSpikeThresholdUs, 10000)))
+    {
+        std::printf(
+            "NSMB RollbackCheckpointSpike: inst=%d frame=%u totalMs=%.3f prepareMs=%.3f captureMs=%.3f bufferSaveMs=%.3f storePruneMs=%.3f\n",
+            instanceID,
+            frame,
+            static_cast<double>(totalUs) / 1000.0,
+            static_cast<double>(lockPrepareUs) / 1000.0,
+            static_cast<double>(captureUs) / 1000.0,
+            static_cast<double>(bufferSaveUs) / 1000.0,
+            static_cast<double>(storePruneUs) / 1000.0);
+        std::fflush(stdout);
     }
 }
 
@@ -20450,6 +20478,10 @@ void InitFromEnvironment()
         EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_CONSUME_CURRENT_FRAME");
     G.RollbackResimulatePostFrame =
         EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_POST_FRAME");
+    G.RollbackPreScratchResim =
+        EnvFlag("MELONDS_NSML_ROLLBACK_PRE_SCRATCH_RESIM");
+    G.RollbackPreScratchResimInterval = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_PRE_SCRATCH_RESIM_INTERVAL", 1), 1, 30);
     G.RollbackPrePumpBeforeResim = EnvFlag("MELONDS_NSML_ROLLBACK_PRE_PUMP_BEFORE_RESIM");
     G.RollbackDisableJITDuringResim = EnvFlag("MELONDS_NSML_ROLLBACK_DISABLE_JIT_DURING_RESIM");
     G.RollbackSkipPredictedInputFrameLeadThrottle =
@@ -21419,6 +21451,23 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     if (G.Enabled && G.InputNetplayOnly)
         WaitForRemoteNetplayStartReadyIfNeeded(nds, syncFrame);
+
+    if (G.Enabled
+        && G.RollbackPreScratchResim
+        && !G.RollbackResimulatePostFrame
+        && G.InputNetplayOnly
+        && instanceID >= 0
+        && instanceID < 16
+        && nds
+        && (syncFrame % static_cast<melonDS::u32>(G.RollbackPreScratchResimInterval)) == 0)
+    {
+        {
+            std::lock_guard<std::mutex> lock(G.Mutex);
+            PumpNetworkLocked(nds, syncFrame);
+            ApplyPendingNSMLPacketsLocked(nds);
+        }
+        RollbackResimulateIfNeeded(instanceID, syncFrame, nds);
+    }
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         SaveRollbackCheckpointIfNeeded(instanceID, syncFrame, nds);
