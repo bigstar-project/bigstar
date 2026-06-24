@@ -4,7 +4,13 @@ import { MatchRecordCollapsible } from './MatchRecordCollapsible';
 import { EmptyMatchResultCard } from './MatchResultCard';
 import type { BattleMatchRecord } from './types';
 
-export function HistoryView({ matches }: { matches: BattleMatchRecord[] }) {
+export function HistoryView({
+  matches,
+  onDeleteMatch,
+}: {
+  matches: BattleMatchRecord[];
+  onDeleteMatch?: (matchId: string) => Promise<void> | void;
+}) {
   const visibleMatches = matches.filter(hasPlayedResult);
   const groupedMatches = groupMatchesByDate(visibleMatches);
 
@@ -74,6 +80,11 @@ export function HistoryView({ matches }: { matches: BattleMatchRecord[] }) {
                       defaultOpen={false}
                       key={match.id}
                       match={match}
+                      onDelete={
+                        onDeleteMatch
+                          ? () => onDeleteMatch(match.id)
+                          : undefined
+                      }
                     />
                   ))}
                 </div>

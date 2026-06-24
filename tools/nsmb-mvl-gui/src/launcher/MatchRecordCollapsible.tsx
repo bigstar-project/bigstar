@@ -1,17 +1,26 @@
+import { Portal } from '@ark-ui/react';
 import {
   CaretDown,
   CircleNotch,
   MinusCircle,
   Star,
+  Trash,
   Trophy,
   XCircle,
 } from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
+import { useState } from 'react';
 import { css, cx } from 'styled-system/css';
 import lifeMushroom from '../assets/life-mushroom.png';
 import playerLBadge from '../assets/player-l.png';
 import playerMBadge from '../assets/player-m.png';
-import { Badge, Collapsible } from '../components/ui';
+import {
+  Badge,
+  Button,
+  CloseButton,
+  Collapsible,
+  Dialog,
+} from '../components/ui';
 import type { MvlStageResult, Role } from '../types';
 import { stageLabel } from './options';
 import type { BattleMatchRecord } from './types';
@@ -22,11 +31,13 @@ type MatchOutcome = 'win' | 'loss' | 'stopped' | 'running' | 'complete';
 export function MatchRecordCollapsible({
   defaultOpen,
   match,
+  onDelete,
   showStageDots = true,
   showStartedAt = true,
 }: {
   defaultOpen: boolean;
   match: BattleMatchRecord;
+  onDelete?: () => Promise<void> | void;
   showStageDots?: boolean;
   showStartedAt?: boolean;
 }) {
@@ -230,21 +241,111 @@ export function MatchRecordCollapsible({
             </tbody>
           </table>
         </div>
-        {match.logDir ? (
-          <code
+        {match.logDir || onDelete ? (
+          <div
             className={css({
-              color: 'fg.subtle',
-              fontFamily: 'mono',
-              fontWeight: 'semibold',
-              overflowWrap: 'anywhere',
-              textStyle: 'xs',
+              alignItems: 'center',
+              display: 'grid',
+              gap: '2',
+              gridTemplateColumns: 'minmax(0, 1fr) auto',
             })}
           >
-            {match.logDir}
-          </code>
+            {match.logDir ? (
+              <code
+                className={css({
+                  color: 'fg.subtle',
+                  fontFamily: 'mono',
+                  fontWeight: 'semibold',
+                  minW: '0',
+                  overflowWrap: 'anywhere',
+                  textStyle: 'xs',
+                })}
+              >
+                {match.logDir}
+              </code>
+            ) : (
+              <span />
+            )}
+            {onDelete ? <DeleteMatchButton onDelete={onDelete} /> : null}
+          </div>
         ) : null}
       </Collapsible.Content>
     </Collapsible.Root>
+  );
+}
+
+function DeleteMatchButton({
+  onDelete,
+}: {
+  onDelete: () => Promise<void> | void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  return (
+    <Dialog.Root
+      open={confirming}
+      onOpenChange={(details) => setConfirming(details.open)}
+    >
+      <Dialog.Trigger asChild>
+        <Button
+          aria-label="対戦履歴を削除"
+          className={css({
+            color: 'red.plain.fg',
+          })}
+          size="xs"
+          variant="outline"
+        >
+          <Trash size={16} weight="bold" />
+          削除
+        </Button>
+      </Dialog.Trigger>
+      <Portal>
+        <Dialog.Backdrop />
+        <Dialog.Positioner>
+          <Dialog.Content
+            className={css({
+              maxW: 'md',
+              w: 'full',
+            })}
+          >
+            <Dialog.CloseTrigger>
+              <CloseButton />
+            </Dialog.CloseTrigger>
+            <Dialog.Header>
+              <Dialog.Title>対戦履歴を削除しますか？</Dialog.Title>
+              <Dialog.Description>
+                この対戦履歴はローカルの保存データから削除されます。
+              </Dialog.Description>
+            </Dialog.Header>
+            <Dialog.Footer>
+              <Dialog.ActionTrigger asChild>
+                <Button disabled={deleting} variant="outline">
+                  キャンセル
+                </Button>
+              </Dialog.ActionTrigger>
+              <Button
+                colorPalette="red"
+                loading={deleting}
+                onClick={async () => {
+                  setDeleting(true);
+                  try {
+                    await onDelete();
+                    setConfirming(false);
+                  } finally {
+                    setDeleting(false);
+                  }
+                }}
+                variant="solid"
+              >
+                <Trash size={16} weight="bold" />
+                削除する
+              </Button>
+            </Dialog.Footer>
+          </Dialog.Content>
+        </Dialog.Positioner>
+      </Portal>
+    </Dialog.Root>
   );
 }
 

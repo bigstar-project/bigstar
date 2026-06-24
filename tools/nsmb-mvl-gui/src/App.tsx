@@ -42,7 +42,10 @@ export function App() {
             summary={launcher.summary}
             updateField={launcher.updateField}
           />
-          <HistoryView matches={launcher.matchHistory} />
+          <HistoryView
+            matches={launcher.matchHistory}
+            onDeleteMatch={launcher.actions.deleteMatchHistory}
+          />
           <SettingsView
             actions={launcher.actions}
             form={launcher.form}

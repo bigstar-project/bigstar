@@ -21,6 +21,7 @@ async function renderSettingsView() {
     cancelHostedRoom: vi.fn(async () => {}),
     copyRoomCode: vi.fn(async () => {}),
     createRoom: vi.fn(async () => {}),
+    deleteMatchHistory: vi.fn(async () => {}),
     joinRoom: vi.fn(async () => {}),
     openLogDir: vi.fn(async () => {}),
     openMelonds: vi.fn(async () => {}),

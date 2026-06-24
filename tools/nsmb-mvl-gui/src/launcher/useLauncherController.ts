@@ -198,6 +198,7 @@ export function useLauncherController() {
   );
   const currentMatchRef = useRef<BattleMatchRecord | null>(null);
   const [matchHistory, setMatchHistory] = useState<BattleMatchRecord[]>([]);
+  const matchHistoryRef = useRef<BattleMatchRecord[]>([]);
   const [matchHistoryLoaded, setMatchHistoryLoaded] = useState(false);
   const [playerProfileId, setPlayerProfileId] = useState('');
 
@@ -264,6 +265,10 @@ export function useLauncherController() {
   }, [currentMatch]);
 
   useEffect(() => {
+    matchHistoryRef.current = matchHistory;
+  }, [matchHistory]);
+
+  useEffect(() => {
     if (!matchHistoryLoaded) {
       return;
     }
@@ -290,6 +295,10 @@ export function useLauncherController() {
       };
       currentMatchRef.current = archived;
       setCurrentMatch(archived);
+      matchHistoryRef.current = [
+        archived,
+        ...matchHistoryRef.current.filter((match) => match.id !== archived.id),
+      ].slice(0, maxMatchHistoryRecords);
       setMatchHistory((history) =>
         [
           archived,
@@ -299,6 +308,29 @@ export function useLauncherController() {
     },
     [],
   );
+
+  const deleteMatchHistory = useCallback(async (matchId: string) => {
+    const nextHistory = matchHistoryRef.current.filter(
+      (match) => match.id !== matchId,
+    );
+    if (nextHistory.length === matchHistoryRef.current.length) {
+      return;
+    }
+    matchHistoryRef.current = nextHistory;
+    setMatchHistory(nextHistory);
+    try {
+      await saveMatchHistory(nextHistory);
+      setActivityStatus({
+        text: '対戦履歴を削除しました',
+        kind: 'warn',
+      });
+    } catch (error) {
+      setActivityStatus({
+        text: `対戦履歴の保存に失敗しました: ${String(error)}`,
+        kind: 'error',
+      });
+    }
+  }, []);
 
   const applySessionResults = useCallback(
     (logDir: string, results: MvlStageResult[]) => {
@@ -437,7 +469,12 @@ export function useLauncherController() {
         try {
           const persistedHistory = await loadMatchHistory();
           if (!disposed) {
-            setMatchHistory(persistedHistory.slice(0, maxMatchHistoryRecords));
+            const loadedHistory = persistedHistory.slice(
+              0,
+              maxMatchHistoryRecords,
+            );
+            matchHistoryRef.current = loadedHistory;
+            setMatchHistory(loadedHistory);
           }
         } catch (error) {
           if (!disposed) {
@@ -1268,6 +1305,7 @@ export function useLauncherController() {
     checkForUpdate,
     copyRoomCode,
     createRoom,
+    deleteMatchHistory,
     joinRoom,
     openLogDir,
     openMelonds,
