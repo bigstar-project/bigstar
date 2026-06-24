@@ -9,6 +9,7 @@ export const globalCss = {
     html: {
       colorPalette: 'gray',
       colorScheme: 'dark',
+      overscrollBehavior: 'none',
     },
     body: {
       // background: 'app.bg',
@@ -20,6 +21,7 @@ export const globalCss = {
 
       background: 'app.bg',
       color: 'fg.default',
+      overscrollBehavior: 'none',
     },
     // 'button, input, select': {
     //   font: 'inherit',
