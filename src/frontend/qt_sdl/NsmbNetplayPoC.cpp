@@ -1840,8 +1840,10 @@ struct State
     bool RollbackNSMBSkipInputRanges = false;
     bool RollbackNSMBRestoreDiffTrace = false;
     bool RollbackNSMBProcessListRanges = false;
+    bool RollbackNSMBProcessListMetadataRanges = false;
     bool RollbackNSMBHeapScanRanges = true;
     bool RollbackNSMBSafeObjectFieldRanges = false;
+    bool RollbackNSMBFullPlayerObjectWithSafeRanges = false;
     int RollbackNSMBScanInterval = 1;
     int RollbackNSMBHeapScanInterval = 1;
     RollbackNSMBDynamicRangeCache RollbackNSMBDynamicRanges;
@@ -4355,6 +4357,13 @@ bool IsRollbackPreimageBackend()
         || G.RollbackBackendMode == RollbackBackend::TinyCorePreimage;
 }
 
+bool IsRollbackNSMBRangeBackend()
+{
+    return G.RollbackBackendMode == RollbackBackend::NSMBRanges
+        || G.RollbackBackendMode == RollbackBackend::NSMBCoreRanges
+        || G.RollbackBackendMode == RollbackBackend::NSMBTinyCoreRanges;
+}
+
 void PrintRollbackSummaryStatsLocked(melonDS::u32 frame)
 {
     if (!G.RollbackEnabled)
@@ -4879,6 +4888,57 @@ void AddNSMBRollbackRange(
     ranges.push_back({address, length});
 }
 
+void AddNSMBRollbackExtraAddressRanges(melonDS::NDS* nds, std::vector<RollbackNSMBRangeEntry>& ranges)
+{
+    const char* spec = std::getenv("MELONDS_NSML_ROLLBACK_NSMB_EXTRA_RANGES");
+    if (!spec || !spec[0])
+        return;
+
+    const char* p = spec;
+    while (*p)
+    {
+        while (*p && (std::isspace(static_cast<unsigned char>(*p)) || *p == ',' || *p == ';'))
+            ++p;
+        if (!*p)
+            break;
+
+        char* end = nullptr;
+        const unsigned long startParsed = std::strtoul(p, &end, 0);
+        if (end == p)
+            break;
+        p = end;
+        while (*p && std::isspace(static_cast<unsigned char>(*p)))
+            ++p;
+
+        melonDS::u32 rangeLength = 0x100;
+        if (*p == ':' || *p == '+')
+        {
+            ++p;
+            const unsigned long lengthParsed = std::strtoul(p, &end, 0);
+            if (end == p)
+                break;
+            rangeLength = static_cast<melonDS::u32>(lengthParsed);
+            p = end;
+        }
+        else if (*p == '-')
+        {
+            ++p;
+            const unsigned long endParsed = std::strtoul(p, &end, 0);
+            if (end == p)
+                break;
+            const melonDS::u32 endAddress = static_cast<melonDS::u32>(endParsed);
+            const melonDS::u32 start = static_cast<melonDS::u32>(startParsed);
+            rangeLength = endAddress > start ? endAddress - start : 0;
+            p = end;
+        }
+
+        AddNSMBRollbackRange(nds, ranges, static_cast<melonDS::u32>(startParsed), rangeLength);
+
+        while (*p && *p != ',' && *p != ';')
+            ++p;
+    }
+}
+
 void AddNSMBRollbackObjectRange(
     melonDS::NDS* nds,
     std::vector<RollbackNSMBRangeEntry>& ranges,
@@ -4924,6 +4984,8 @@ bool ReadMainRAMAddressU16(melonDS::NDS* nds, melonDS::u32 address, melonDS::u16
     return true;
 }
 
+melonDS::u32 NSMBRollbackObjectSnapshotLength(melonDS::u16 objectID);
+
 bool AddNSMBRollbackSafeObjectFieldRanges(
     melonDS::NDS* nds,
     std::vector<RollbackNSMBRangeEntry>& ranges,
@@ -4935,6 +4997,12 @@ bool AddNSMBRollbackSafeObjectFieldRanges(
 
     if (objectID == kPlayerObjectID)
     {
+        if (G.RollbackNSMBFullPlayerObjectWithSafeRanges)
+        {
+            AddNSMBRollbackObjectRange(nds, ranges, base, NSMBRollbackObjectSnapshotLength(objectID));
+            return true;
+        }
+
         constexpr NSMBRollbackObjectFieldRange playerRanges[] = {
             {0x00, 0x20},   // object identity/state/flags
             {0x5C, 0x34},   // position, previous position, last-step vector
@@ -4969,8 +5037,6 @@ bool AddNSMBRollbackSafeObjectFieldRanges(
 
     return false;
 }
-
-melonDS::u32 NSMBRollbackObjectSnapshotLength(melonDS::u16 objectID);
 
 void AddNSMBRollbackObjectRanges(
     melonDS::NDS* nds,
@@ -5058,6 +5124,9 @@ void AddNSMBRollbackProcessListRangesFromList(
     std::set<melonDS::u32>& seenBases,
     melonDS::u32 listAddress)
 {
+    if (G.RollbackNSMBProcessListMetadataRanges)
+        AddNSMBRollbackRange(nds, ranges, listAddress, 0x08);
+
     melonDS::u32 node = 0;
     if (!ReadMainRAMAddressU32(nds, listAddress, node))
         return;
@@ -5067,6 +5136,9 @@ void AddNSMBRollbackProcessListRangesFromList(
     {
         if (!seenNodes.insert(node).second)
             break;
+
+        if (G.RollbackNSMBProcessListMetadataRanges)
+            AddNSMBRollbackRange(nds, ranges, node, 0x0C);
 
         melonDS::u32 next = 0;
         melonDS::u32 base = 0;
@@ -5365,6 +5437,7 @@ std::vector<RollbackNSMBRangeEntry> BuildNSMBRollbackRanges(melonDS::NDS* nds)
         AddNSMBRollbackActorArenaRanges(nds, ranges);
     if (G.RollbackNSMBArm9StackRange)
         AddNSMBRollbackArm9StackRange(nds, ranges);
+    AddNSMBRollbackExtraAddressRanges(nds, ranges);
 
     AddNSMBRollbackDynamicRanges(nds, ranges);
 
@@ -5469,7 +5542,8 @@ void TraceRollbackDeltaPages(melonDS::u32 frame, melonDS::NDS* nds, const std::v
     if (!G.RollbackDeltaPageTrace
         || (G.RollbackBackendMode != RollbackBackend::CoreDelta
             && G.RollbackBackendMode != RollbackBackend::CoreFrameDelta
-            && G.RollbackBackendMode != RollbackBackend::TinyCoreRAMDelta))
+            && G.RollbackBackendMode != RollbackBackend::TinyCoreRAMDelta
+            && !IsRollbackNSMBRangeBackend()))
         return;
     if (frame < G.RollbackDeltaPageTraceStartFrame)
         return;
@@ -5658,8 +5732,20 @@ bool PrepareRollbackDeltaSaveLocked(melonDS::u32 frame, RollbackStoredState& che
     if (G.RollbackBackendMode != RollbackBackend::CoreDelta
         && G.RollbackBackendMode != RollbackBackend::CoreFrameDelta
         && G.RollbackBackendMode != RollbackBackend::TinyCoreRAMDelta
+        && !(G.RollbackDeltaPageTrace && IsRollbackNSMBRangeBackend())
         && !IsRollbackPreimageBackend())
         return true;
+
+    if (G.RollbackDeltaPageTrace && IsRollbackNSMBRangeBackend())
+    {
+        const bool hasUsableShadow = G.RollbackFrameDeltaShadowFrame != kNoFrameLimit
+            && G.RollbackFrameDeltaShadowFrame < frame
+            && !G.RollbackFrameDeltaShadowMainRAM.empty()
+            && G.RollbackStates.find(G.RollbackFrameDeltaShadowFrame) != G.RollbackStates.end();
+        if (hasUsableShadow)
+            baseMainRAM = G.RollbackFrameDeltaShadowMainRAM;
+        return true;
+    }
 
     if (IsRollbackPreimageBackend())
     {
@@ -6362,6 +6448,7 @@ void RefreshRollbackFrameDeltaShadowLocked(melonDS::u32 frame, melonDS::NDS* nds
 {
     if ((G.RollbackBackendMode != RollbackBackend::CoreFrameDelta
             && G.RollbackBackendMode != RollbackBackend::TinyCoreRAMDelta
+            && !(G.RollbackDeltaPageTrace && IsRollbackNSMBRangeBackend())
             && !IsRollbackPreimageBackend())
         || !nds || !nds->MainRAM)
         return;
@@ -6401,7 +6488,8 @@ void SaveRollbackCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
             : (G.RollbackBackendMode == RollbackBackend::CoreSparse ? kRollbackMainRAMModeSparse : kRollbackMainRAMModeFull));
     if (checkpoint.MainRAMDelta && (!nds->MainRAM || deltaBaseMainRAM.size() != nds->MainRAMMask + 1))
         return;
-    if (checkpoint.MainRAMDelta)
+    if ((checkpoint.MainRAMDelta || (G.RollbackDeltaPageTrace && IsRollbackNSMBRangeBackend()))
+        && !deltaBaseMainRAM.empty())
         TraceRollbackDeltaPages(frame, nds, deltaBaseMainRAM);
     if (!CaptureRollbackFramePreimage(checkpoint, nds, deltaBaseMainRAM))
         return;
@@ -6455,7 +6543,8 @@ void SaveRollbackCheckpointNowLocked(melonDS::u32 frame, melonDS::NDS* nds, bool
             : (G.RollbackBackendMode == RollbackBackend::CoreSparse ? kRollbackMainRAMModeSparse : kRollbackMainRAMModeFull));
     if (checkpoint.MainRAMDelta && (!nds->MainRAM || deltaBaseMainRAM.size() != nds->MainRAMMask + 1))
         return;
-    if (checkpoint.MainRAMDelta)
+    if ((checkpoint.MainRAMDelta || (G.RollbackDeltaPageTrace && IsRollbackNSMBRangeBackend()))
+        && !deltaBaseMainRAM.empty())
         TraceRollbackDeltaPages(frame, nds, deltaBaseMainRAM);
     if (!CaptureRollbackFramePreimage(checkpoint, nds, deltaBaseMainRAM))
         return;
@@ -19377,9 +19466,13 @@ void InitFromEnvironment()
     G.RollbackNSMBSkipInputRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_SKIP_INPUT_RANGES");
     G.RollbackNSMBRestoreDiffTrace = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_RESTORE_DIFF_TRACE");
     G.RollbackNSMBProcessListRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES");
+    G.RollbackNSMBProcessListMetadataRanges =
+        EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_METADATA_RANGES");
     G.RollbackNSMBHeapScanRanges = EnvInt("MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES", 1) != 0;
     G.RollbackNSMBSafeObjectFieldRanges =
         EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_SAFE_OBJECT_FIELD_RANGES");
+    G.RollbackNSMBFullPlayerObjectWithSafeRanges =
+        EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_FULL_PLAYER_OBJECT_WITH_SAFE_RANGES");
     G.RollbackNSMBScanInterval = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL", 1), 1, 600);
     G.RollbackNSMBHeapScanInterval = std::clamp(

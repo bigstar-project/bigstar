@@ -64,6 +64,7 @@ param(
     [string]$MelonLaunchOrder = "HostFirst",
     [int]$MelonLaunchGapMs = 500,
     [switch]$SkipRomEnsure,
+    [switch]$CopyRomToLog,
     [switch]$NoJit,
     [switch]$SoftwareRenderer
 )
@@ -182,6 +183,30 @@ function Set-EnvValue {
         Remove-Item "Env:\$Name" -ErrorAction SilentlyContinue
     } else {
         Set-Item "Env:\$Name" $Value
+    }
+}
+
+function Set-RunRomReference {
+    param(
+        [string]$Source,
+        [string]$Target,
+        [switch]$Copy
+    )
+
+    if (Test-Path -LiteralPath $Target -PathType Leaf) {
+        Remove-Item -LiteralPath $Target -Force
+    }
+
+    if ($Copy) {
+        Copy-Item -LiteralPath $Source -Destination $Target -Force
+        return "copy"
+    }
+
+    try {
+        New-Item -ItemType HardLink -Path $Target -Target $Source -ErrorAction Stop | Out-Null
+        return "hardlink"
+    } catch {
+        throw "Failed to create ROM hardlink from '$Target' to '$Source'. Use -CopyRomToLog if this run must store full ROM copies in the log directory. Original error: $($_.Exception.Message)"
     }
 }
 
@@ -411,6 +436,8 @@ $hostRom = Join-Path $logRoot "generated-host.nds"
 $clientRom = Join-Path $logRoot "generated-client.nds"
 $cachedHostRomPath = Resolve-RepoPath $CachedHostRom
 $cachedClientRomPath = Resolve-RepoPath $CachedClientRom
+$hostRomSource = $cachedHostRomPath
+$clientRomSource = $cachedClientRomPath
 if (!$SkipRomEnsure) {
     & (Join-Path $PSScriptRoot "generate-nsmb-mvl-stable-roms.ps1") `
         -SourceRom (Resolve-RepoPath $SourceRom -MustExist) `
@@ -425,38 +452,41 @@ if (!$SkipRomEnsure) {
     Resolve-RepoPath $CachedHostRom -MustExist | Out-Null
     Resolve-RepoPath $CachedClientRom -MustExist | Out-Null
 }
-Copy-Item -LiteralPath $cachedHostRomPath -Destination $hostRom -Force
-Copy-Item -LiteralPath $cachedClientRomPath -Destination $clientRom -Force
 if ($ExistingHostRom -ne "" -or $ExistingClientRom -ne "") {
     $existingRomPairs = @()
     if ($ExistingHostRom -ne "") {
         $existingHostRomPath = Resolve-RepoPath $ExistingHostRom -MustExist
-        Copy-Item -LiteralPath $existingHostRomPath -Destination $hostRom -Force
+        $hostRomSource = $existingHostRomPath
         $existingRomPairs += @{ Source = $existingHostRomPath; Destination = $hostRom }
     }
     if ($ExistingClientRom -ne "") {
         $existingClientRomPath = Resolve-RepoPath $ExistingClientRom -MustExist
-        Copy-Item -LiteralPath $existingClientRomPath -Destination $clientRom -Force
+        $clientRomSource = $existingClientRomPath
         $existingRomPairs += @{ Source = $existingClientRomPath; Destination = $clientRom }
     }
-    foreach ($pair in $existingRomPairs) {
-        $sourceSave = [System.IO.Path]::ChangeExtension($pair.Source, ".sav")
-        if (Test-Path -LiteralPath $sourceSave) {
-            $destinationSave = [System.IO.Path]::ChangeExtension($pair.Destination, ".sav")
-            Copy-Item -LiteralPath $sourceSave -Destination $destinationSave -Force
-        }
-    }
-} else {
-    & (Join-Path $PSScriptRoot "generate-nsmb-mvl-stable-roms.ps1") `
-        -SourceRom (Resolve-RepoPath $SourceRom -MustExist) `
-        -HostRom $hostRom `
-        -ClientRom $clientRom `
-        -MvlStage $effectiveStage `
-        -MvlWins $MvlWins `
-        -MvlBigStars $MvlBigStars `
-        -MvlLives $MvlLives `
-        -MvlCourseMode $MvlCourseMode
 }
+$hostRomStorage = Set-RunRomReference -Source $hostRomSource -Target $hostRom -Copy:$CopyRomToLog
+$clientRomStorage = Set-RunRomReference -Source $clientRomSource -Target $clientRom -Copy:$CopyRomToLog
+foreach ($pair in @(
+    @{ Source = $hostRomSource; Destination = $hostRom },
+    @{ Source = $clientRomSource; Destination = $clientRom }
+)) {
+    $sourceSave = [System.IO.Path]::ChangeExtension($pair.Source, ".sav")
+    if (Test-Path -LiteralPath $sourceSave) {
+        $destinationSave = [System.IO.Path]::ChangeExtension($pair.Destination, ".sav")
+        Copy-Item -LiteralPath $sourceSave -Destination $destinationSave -Force
+    }
+}
+
+@(
+    "copyRomToLog=$([bool]$CopyRomToLog)"
+    "hostRomSource=$hostRomSource"
+    "clientRomSource=$clientRomSource"
+    "hostRomTarget=$hostRom"
+    "clientRomTarget=$clientRom"
+    "hostRomStorage=$hostRomStorage"
+    "clientRomStorage=$clientRomStorage"
+) | Set-Content -Encoding UTF8 (Join-Path $logRoot "rom-storage.txt")
 
 @(
     "mode=$Mode"
@@ -472,6 +502,9 @@ if ($ExistingHostRom -ne "" -or $ExistingClientRom -ne "") {
     "courseMode=$MvlCourseMode"
     "existingHostRom=$ExistingHostRom"
     "existingClientRom=$ExistingClientRom"
+    "copyRomToLog=$([bool]$CopyRomToLog)"
+    "hostRomStorage=$hostRomStorage"
+    "clientRomStorage=$clientRomStorage"
     "inputScript=$InputScript"
     "hostInputScript=$HostInputScript"
     "clientInputScript=$ClientInputScript"
