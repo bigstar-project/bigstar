@@ -1469,6 +1469,12 @@ struct State
     bool PlayerStateReliable = false;
     bool PlayerStateReliableOnGlobalChange = false;
     int PlayerStateReliableInterval = 0;
+    bool PlayerStateTreatTransitionStatusLocal = false;
+    bool PlayerStateReapplyOverwrittenGlobals = false;
+    bool PlayerStateReapplyCriticalGlobalsOnly = false;
+    bool PlayerStateApplyTrace = false;
+    melonDS::u32 PlayerStateApplyTraceStartFrame = 0;
+    melonDS::u32 PlayerStateApplyTraceEndFrame = kNoFrameLimit;
     bool PlayerStateApplyTransformDuringTransition = false;
     int PlayerStateTransitionTransformStartOffset = 0;
     int PlayerStateSyncInterval = 1;
@@ -3879,6 +3885,29 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                             packet.VelX,
                             packet.VelY,
                             G.RemotePlayerStateSamples.size());
+                    }
+                    if (G.PlayerStateApplyTrace &&
+                        localFrame != kNoFrameLimit &&
+                        localFrame >= G.PlayerStateApplyTraceStartFrame &&
+                        localFrame <= G.PlayerStateApplyTraceEndFrame)
+                    {
+                        const bool periodic =
+                            G.InputTraceInterval <= 1 ||
+                            (localFrame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0;
+                        if (periodic || packet.Powerup || packet.Dead || packet.Deaths || packet.BattleStars)
+                        {
+                            std::printf("NSMB PlayerStateApplyTrace: recv localFrame=%u packetFrame=%u player=%u found=%u powerup=%u dead=%u deaths=%u trans=%08X stars=%u stored=%zu\n",
+                                localFrame,
+                                packet.Frame,
+                                packet.Player,
+                                packet.Found,
+                                packet.Powerup,
+                                packet.Dead,
+                                packet.Deaths,
+                                packet.TransitionStatus,
+                                packet.BattleStars,
+                                G.RemotePlayerStateSamples.size());
+                        }
                     }
                 }
             }
@@ -9929,11 +9958,18 @@ melonDS::u64 HashPlayerGlobalForSync(melonDS::NDS* nds)
     const melonDS::u32 ringEnd = std::min(
         availableLen,
         ringStart + kGamePlayerJumpPressedRingBufferLen);
+    const melonDS::u32 transitionStart =
+        kGamePlayerTransitionStatusAddr - kGamePlayerGlobalBlockAddr;
+    const melonDS::u32 transitionEnd = std::min(
+        availableLen,
+        transitionStart + static_cast<melonDS::u32>(sizeof(melonDS::u32) * 2));
 
     melonDS::u64 hash = 1469598103934665603ull;
     for (melonDS::u32 i = 0; i < availableLen; i++)
     {
         if (i >= ringStart && i < ringEnd)
+            continue;
+        if (G.PlayerStateTreatTransitionStatusLocal && i >= transitionStart && i < transitionEnd)
             continue;
         hash ^= nds->MainRAM[globalOffset + i];
         hash *= 1099511628211ull;
@@ -17187,7 +17223,8 @@ bool WritePlayerGlobalState(melonDS::NDS* nds, const WirePlayerState& state)
     ok = WriteMainRAMAddrU8IfChanged(nds, kGamePlayerInventoryPowerupAddr + player, static_cast<melonDS::u8>(state.InventoryPowerup & 0xFFu)) && ok;
     ok = WriteMainRAMAddrU8IfChanged(nds, deadAddr, static_cast<melonDS::u8>(state.Dead & 0xFFu)) && ok;
     ok = WriteMainRAMAddrU8IfChanged(nds, kGamePlayerCharacterAddr + player, static_cast<melonDS::u8>(state.Character & 0xFFu)) && ok;
-    ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32) * player, state.TransitionStatus) && ok;
+    if (!G.PlayerStateTreatTransitionStatusLocal)
+        ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32) * player, state.TransitionStatus) && ok;
     ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerCoinsAddr + sizeof(melonDS::u32) * player, state.Coins) && ok;
     ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerScoreAddr + sizeof(melonDS::u32) * player, state.Score) && ok;
     ok = WriteMainRAMAddrU32IfChanged(nds, deathsAddr, state.Deaths) && ok;
@@ -17206,7 +17243,8 @@ melonDS::u64 HashWirePlayerReliableGlobals(const WirePlayerState& state)
     MixGameStateValue(hash, state.InventoryPowerup);
     MixGameStateValue(hash, state.Dead);
     MixGameStateValue(hash, state.Character);
-    MixGameStateValue(hash, state.TransitionStatus);
+    if (!G.PlayerStateTreatTransitionStatusLocal)
+        MixGameStateValue(hash, state.TransitionStatus);
     MixGameStateValue(hash, state.Lives);
     MixGameStateValue(hash, state.BattleStars);
     MixGameStateValue(hash, state.Coins);
@@ -17231,6 +17269,20 @@ bool WritePlayerCounterState(melonDS::NDS* nds, const WirePlayerState& state)
     ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerBattleStarsAddr + sizeof(melonDS::u32) * player, state.BattleStars) && ok;
     ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32) * player, state.DisplayedStars) && ok;
     ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32) * player, state.CollectedStars) && ok;
+    return ok;
+}
+
+bool WritePlayerCriticalGlobalState(melonDS::NDS* nds, const WirePlayerState& state)
+{
+    if (!nds || !nds->MainRAM || state.Player > 1)
+        return false;
+
+    const melonDS::u32 player = state.Player;
+    bool ok = true;
+    ok = WriteMainRAMAddrU8IfChanged(nds, kGamePlayerPowerupAddr + player, static_cast<melonDS::u8>(state.Powerup & 0xFFu)) && ok;
+    ok = WriteMainRAMAddrU8IfChanged(nds, kGamePlayerInventoryPowerupAddr + player, static_cast<melonDS::u8>(state.InventoryPowerup & 0xFFu)) && ok;
+    ok = WriteMainRAMAddrU8IfChanged(nds, kGamePlayerDeadAddr + player, static_cast<melonDS::u8>(state.Dead & 0xFFu)) && ok;
+    ok = WritePlayerCounterState(nds, state) && ok;
     return ok;
 }
 
@@ -17287,6 +17339,10 @@ void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
     if (frame < G.NetplayStartFrame) return;
 
     const int remotePlayer = CurrentPacketBridgeLocalPlayer() ^ 1;
+    const bool applyTrace =
+        G.PlayerStateApplyTrace &&
+        frame >= G.PlayerStateApplyTraceStartFrame &&
+        frame <= G.PlayerStateApplyTraceEndFrame;
     WirePlayerState sample {};
     melonDS::u32 sampleFrame = 0;
     bool sampleValid = false;
@@ -17305,7 +17361,19 @@ void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
             std::this_thread::sleep_for(std::chrono::microseconds(100));
         }
         if (!sampleValid)
+        {
+            if (applyTrace &&
+                (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
+            {
+                std::printf("NSMB PlayerStateApplyTrace: no-sample inst=%d frame=%u remotePlayer=%d preferFresh=%d stored=%zu\n",
+                    instanceID,
+                    frame,
+                    remotePlayer,
+                    preferFreshSample ? 1 : 0,
+                    G.RemotePlayerStateSamples.size());
+            }
             return;
+        }
     }
     const bool staleFreshSample = preferFreshSample && sampleFrame < frame;
     const melonDS::u32 staleFrames = staleFreshSample ? (frame - sampleFrame) : 0;
@@ -17326,14 +17394,106 @@ void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
     if (staleFreshSample && !allowStaleGlobalsOnly && !allowStaleCountersOnly && !allowStaleTransform)
         return;
 
+    WirePlayerState localGlobalsBefore {};
+    bool criticalGlobalsDifferBefore = false;
+    bool globalsDifferBefore = false;
+    if (G.PlayerStateGlobalsEnabled && remotePlayer >= 0 && remotePlayer <= 1)
+    {
+        localGlobalsBefore.Player = static_cast<melonDS::u32>(remotePlayer);
+        ReadPlayerGlobalState(nds, static_cast<melonDS::u32>(remotePlayer), localGlobalsBefore);
+        criticalGlobalsDifferBefore =
+            localGlobalsBefore.Powerup != sample.Powerup ||
+            localGlobalsBefore.InventoryPowerup != sample.InventoryPowerup ||
+            localGlobalsBefore.Dead != sample.Dead ||
+            localGlobalsBefore.Lives != sample.Lives ||
+            localGlobalsBefore.BattleStars != sample.BattleStars ||
+            localGlobalsBefore.Coins != sample.Coins ||
+            localGlobalsBefore.Score != sample.Score ||
+            localGlobalsBefore.DisplayedStars != sample.DisplayedStars ||
+            localGlobalsBefore.Deaths != sample.Deaths ||
+            localGlobalsBefore.CollectedStars != sample.CollectedStars;
+        globalsDifferBefore =
+            criticalGlobalsDifferBefore ||
+            (!G.PlayerStateTreatTransitionStatusLocal &&
+                localGlobalsBefore.TransitionStatus != sample.TransitionStatus);
+    }
+    const melonDS::u32 sampleAge = sampleFrame < frame ? (frame - sampleFrame) : 0;
+    const bool reapplyDiff = G.PlayerStateReapplyCriticalGlobalsOnly
+        ? criticalGlobalsDifferBefore
+        : globalsDifferBefore;
+    const bool canReapplyOverwrittenGlobals =
+        G.PlayerStateReapplyOverwrittenGlobals &&
+        reapplyDiff &&
+        sampleFrame >= G.LastAppliedPlayerGlobalsFrame[instanceID][remotePlayer] &&
+        (sampleFrame >= frame ||
+            (G.PlayerStateMaxStaleGlobalFrames > 0 &&
+                sampleAge <= static_cast<melonDS::u32>(G.PlayerStateMaxStaleGlobalFrames)));
     const bool shouldApplyGlobals =
         G.PlayerStateGlobalsEnabled &&
-        sampleFrame > G.LastAppliedPlayerGlobalsFrame[instanceID][remotePlayer];
+        (sampleFrame > G.LastAppliedPlayerGlobalsFrame[instanceID][remotePlayer] ||
+            canReapplyOverwrittenGlobals);
+    const bool reapplyCriticalOnly =
+        canReapplyOverwrittenGlobals &&
+        G.PlayerStateReapplyCriticalGlobalsOnly &&
+        sampleFrame <= G.LastAppliedPlayerGlobalsFrame[instanceID][remotePlayer];
     const bool globalsApplied = shouldApplyGlobals && (allowStaleCountersOnly && !allowStaleGlobalsOnly && !allowStaleTransform
         ? WritePlayerCounterState(nds, sample)
-        : WritePlayerGlobalState(nds, sample));
+        : (reapplyCriticalOnly
+            ? WritePlayerCriticalGlobalState(nds, sample)
+            : WritePlayerGlobalState(nds, sample)));
     if (globalsApplied && !(allowStaleCountersOnly && !allowStaleGlobalsOnly && !allowStaleTransform))
         G.LastAppliedPlayerGlobalsFrame[instanceID][remotePlayer] = sampleFrame;
+    if (applyTrace)
+    {
+        WirePlayerState localGlobalsAfter {};
+        localGlobalsAfter.Player = static_cast<melonDS::u32>(remotePlayer);
+        ReadPlayerGlobalState(nds, static_cast<melonDS::u32>(remotePlayer), localGlobalsAfter);
+        const bool globalsDifferAfter =
+            localGlobalsAfter.Powerup != sample.Powerup ||
+            localGlobalsAfter.InventoryPowerup != sample.InventoryPowerup ||
+            localGlobalsAfter.Dead != sample.Dead ||
+            (!G.PlayerStateTreatTransitionStatusLocal &&
+                localGlobalsAfter.TransitionStatus != sample.TransitionStatus) ||
+            localGlobalsAfter.Lives != sample.Lives ||
+            localGlobalsAfter.BattleStars != sample.BattleStars ||
+            localGlobalsAfter.Coins != sample.Coins ||
+            localGlobalsAfter.Score != sample.Score ||
+            localGlobalsAfter.DisplayedStars != sample.DisplayedStars ||
+            localGlobalsAfter.Deaths != sample.Deaths ||
+            localGlobalsAfter.CollectedStars != sample.CollectedStars;
+        const bool periodic =
+            G.InputTraceInterval <= 1 ||
+            (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0;
+        if (globalsDifferBefore || globalsDifferAfter || staleFreshSample || (periodic && (globalsApplied || !shouldApplyGlobals)))
+        {
+            std::printf("NSMB PlayerStateApplyTrace: globals inst=%d frame=%u sampleFrame=%u remotePlayer=%d preferFresh=%d stale=%u should=%d applied=%d lastApplied=%u found=%u beforePw=%u samplePw=%u afterPw=%u beforeDead=%u sampleDead=%u afterDead=%u beforeDeaths=%u sampleDeaths=%u afterDeaths=%u beforeTrans=%08X sampleTrans=%08X afterTrans=%08X beforeStars=%u sampleStars=%u afterStars=%u\n",
+                instanceID,
+                frame,
+                sampleFrame,
+                remotePlayer,
+                preferFreshSample ? 1 : 0,
+                sampleFrame < frame ? (frame - sampleFrame) : 0,
+                shouldApplyGlobals ? 1 : 0,
+                globalsApplied ? 1 : 0,
+                G.LastAppliedPlayerGlobalsFrame[instanceID][remotePlayer],
+                sample.Found,
+                localGlobalsBefore.Powerup,
+                sample.Powerup,
+                localGlobalsAfter.Powerup,
+                localGlobalsBefore.Dead,
+                sample.Dead,
+                localGlobalsAfter.Dead,
+                localGlobalsBefore.Deaths,
+                sample.Deaths,
+                localGlobalsAfter.Deaths,
+                localGlobalsBefore.TransitionStatus,
+                sample.TransitionStatus,
+                localGlobalsAfter.TransitionStatus,
+                localGlobalsBefore.BattleStars,
+                sample.BattleStars,
+                localGlobalsAfter.BattleStars);
+        }
+    }
     if ((allowStaleGlobalsOnly || allowStaleCountersOnly) && !allowStaleTransform)
     {
         if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
@@ -20415,6 +20575,16 @@ void InitFromEnvironment()
     G.PlayerStateReliable = EnvFlag("MELONDS_NSML_PLAYER_STATE_RELIABLE");
     G.PlayerStateReliableOnGlobalChange = EnvFlag("MELONDS_NSML_PLAYER_STATE_RELIABLE_ON_GLOBAL_CHANGE");
     G.PlayerStateReliableInterval = std::max(0, EnvInt("MELONDS_NSML_PLAYER_STATE_RELIABLE_INTERVAL", 0));
+    G.PlayerStateTreatTransitionStatusLocal = EnvFlag("MELONDS_NSML_PLAYER_STATE_TREAT_TRANSITION_STATUS_LOCAL");
+    G.PlayerStateReapplyOverwrittenGlobals = EnvFlag("MELONDS_NSML_PLAYER_STATE_REAPPLY_OVERWRITTEN_GLOBALS");
+    G.PlayerStateReapplyCriticalGlobalsOnly = EnvFlag("MELONDS_NSML_PLAYER_STATE_REAPPLY_CRITICAL_GLOBALS_ONLY");
+    G.PlayerStateApplyTrace = EnvFlag("MELONDS_NSML_PLAYER_STATE_APPLY_TRACE");
+    G.PlayerStateApplyTraceStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_PLAYER_STATE_APPLY_TRACE_START_FRAME", 0)));
+    G.PlayerStateApplyTraceEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_PLAYER_STATE_APPLY_TRACE_END_FRAME", 0)));
+    if (G.PlayerStateApplyTraceEndFrame == 0)
+        G.PlayerStateApplyTraceEndFrame = kNoFrameLimit;
     G.PlayerStateApplyTransformDuringTransition =
         EnvFlag("MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM");
     G.PlayerStateTransitionTransformStartOffset =
