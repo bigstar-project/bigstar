@@ -13,7 +13,7 @@ const settings = {
   lives: '3',
   match_seed: '123',
   rng_seeds: ['123', '124', '125', '126', '127'],
-  input_delay_frames: 4,
+  input_delay_frames: 3,
   input_max_frame_lead: 4,
   rollback_enabled: false,
 };
@@ -338,7 +338,7 @@ test('手動接続でクライアント起動ペイロードを作れる', async
     settings: {
       big_stars: 10,
       course_mode: 'random',
-      input_delay_frames: 4,
+      input_delay_frames: 3,
       input_max_frame_lead: 4,
       lives: '3',
       rollback_enabled: false,
