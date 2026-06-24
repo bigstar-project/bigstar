@@ -1,6 +1,25 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
+## 2026-06-25 current design boundary
+
+- Hard constraint is unchanged: GUI rollback must stay at `InputDelayFrames=2`. Increasing delay is diagnostic only and is not a solution for this goal.
+- There are currently two partial paths, neither complete:
+  - Exact/cartlite rollback is still the correctness reference, but foreground correction is too expensive. Latest exact/cartlite retakes keep restore around `6.5-6.6ms` and resimulated `RunFrame` around `14-15ms`; even when checkpoint save is small, one visible-frame correction can exceed the frame budget. Adding `0x02088800+0x300` for net-random state fixed one first-diff class but did not make exact rollback smooth or fully mismatch-free.
+  - Plan-D-ish predict/repair selected state is fast enough to be interesting. The current best measured shape is `predictrepair-delay2-player-world-actorsnap32-lifecycle-pruneabsentstar-transition0-staractivate-playerpred2`: dualstresslong reached about `16.684/16.686ms`, host max `42.569ms`, client max `32.259ms`, and removed the active-star client-only drift. It still mismatches around player transition/Y state, so it is not yet correct.
+- Current persistent-shadow implementation is rejected as-is. After the continuous-shadow clone fix, it still averaged about `35.7ms` host / `22.0ms` client with shadow `RunFrame` around `36.6ms` and `ShadowMatch=0`. It is not a non-blocking backend unless redesigned as a continuously running input-fed shadow that preserves execution history.
+- StateSync validation was cleaned up before judging the latest runs:
+  - `Game::playerJumpPressedRingBuffer` is excluded from `playerGlobal` sync hash.
+  - `Basic` hash ignores unstable GUID/object-scan diagnostics and dead/inactive star candidates.
+  - Those fields remain logged for diagnostics, but they should not promote/reject candidates by themselves.
+- Current design implication: checkpoint byte trimming alone is exhausted. Exact rollback is bounded by restore + resimulation placement; Plan-D can hit the FPS target but still needs semantic player/global and moving-hazard lifecycle repair. The next useful work is root classification of deterministic game state in those areas, not more broad page widening or single-symptom actor patches.
+- Follow-up measurement narrowed the Plan-D path:
+  - Per-frame reliable `PlayerState` is not viable under artificial delay/jitter because reliable traffic can stall the peers.
+  - Low-rate reliable player-state keyframes (`MELONDS_NSML_PLAYER_STATE_RELIABLE_INTERVAL=30`) are viable for no-artificial dualstresslong and keep the fast shape.
+  - The current strongest artificial-delay shape is `pland-p4-kf30-hazardlife`: player prediction up to 4F, 30F reliable player keyframes, and moving-hazard lifecycle repair. It keeps `chaos` with sendDelay2/jitter2 around `16.7ms` and removes persistent StateSync mismatch, but dualstresslong still exposes player death/global drift. A player fresh-wait variant fixes that route but regresses chaos, so the unresolved design issue is timing-sensitive player global application, not raw packet loss alone.
+
 ## 2026-06-24 adaptive checkpoint and correction-placement boundary
+
+- Historical section: some candidate names and "best current" claims below were superseded by the 2026-06-25 retakes above.
 
 - The latest retake keeps the hard rule: `InputDelayFrames=2` is fixed. The current issue is no longer raw checkpoint byte size alone; it is when and how much foreground correction/resimulation is allowed to run before the frame is presented or sampled.
 - Latest selected-backend update: Cart runtime state is part of the practical correctness boundary. Full Cart state (`0x249 + 0x10`) can suppress some star/object lifecycle drift, but full Cart savestate computes/checks ROM/SRAM-related state and raises checkpoint save average to about `1.2ms`. A new rollback-only cart runtime subset (`tinyFlags` bit `0x400`) saves NDS cart slot/interface/KEY/transfer state plus retail SRAM command/status fields while skipping full SRAM bytes, checksum, GBA cart state, and save-file writeback.

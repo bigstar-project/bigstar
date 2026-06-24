@@ -1,6 +1,34 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Current rollback status - 2026-06-25
+
+- Active goal remains open: keep GUI rollback at `InputDelayFrames=2`, avoid persistent host/client StateSync mismatch after rollback settles, and keep complex practical play close to 60fps without visible correction spikes. Raising input delay is still not an accepted fix.
+- The 2026-06-24 `b1500-arena-lite-changedjit-cp2-cartlite-mr1` conclusion below is now historical, not promoted. A repeat retake invalidated it with persistent `playerGlobal` mismatch, and later hash cleanup showed that some earlier `Basic`/GUID/object-scan mismatches were validation noise rather than gameplay state.
+- Validation hygiene added in the latest pass:
+  - `playerGlobal` hashing now skips `Game::playerJumpPressedRingBuffer` at `0x0208B3D4..+0x10`, because it is input-history/ring-buffer state and produced false-positive drift.
+  - `Basic` hash no longer depends on unstable GUID/object-scan diagnostics or dead/inactive star candidates; those fields still stay in logs/CSV for diagnosis.
+- Persistent shadow was retested after avoiding per-frame host-only re-clone, but the current implementation is rejected for now: `logs/rollback-shadowcont-continuousfix-20260624/20260624-210745` averaged about `35.7ms` host / `22.0ms` client, shadow `RunFrame` averaged about `36.6ms`, `ShadowMatch=0`, and Main RAM still diverged by thousands of bytes. This is CPU contention plus divergent shadow history, not a usable non-blocking backend yet.
+- Exact/cartlite retake boundary:
+  - `b1500-arena-lite-changedjit-cp2-cartlite-mr2-stack` is no longer a smooth solution. In `logs/rb-exact-hashstable-20260625/20260625-044215`, `chaos` avoided StateSync mismatch but failed performance (`17.468/17.468ms`, max about `69/72ms`, over33 `30/27`); `dualstresslong` also mismatched around `1980/2040`.
+  - Adding the net-random range `0x02088800+0x300` removed the first `netRandom` mismatch from the exact retake, but `logs/rb-exact-netrandom-20260625/20260625-044644` still failed correctness and performance. Restore avg remains about `6.6ms`, resimulated `RunFrame` about `14-15ms`, so foreground exact rollback still has a structural spike wall even after checkpoint save is small.
+- Current best Plan-D-ish timing shape is `predictrepair-delay2-player-world-actorsnap32-lifecycle-pruneabsentstar-transition0-staractivate-playerpred2`:
+  - `logs/rb-pland-pruneabsentstar-20260625/20260625-043620` keeps dualstresslong near the target (`16.684/16.686ms`, max `42.569/32.259`, host over33 `5`, client over33 `0`) and fixes the active-star client-only drift seen in earlier runs.
+  - It is not goal-complete: persistent mismatch still appears around `1680/1740`, mainly player transition/Y state. Moving-hazard lifecycle drift can also appear later in nearby runs.
+- Latest Plan-D follow-up:
+  - Full reliable per-frame `PlayerState` removes one no-artificial persistent mismatch, but reliable traffic can stall under artificial delay/jitter, so it is rejected as a default.
+  - Added `MELONDS_NSML_PLAYER_STATE_RELIABLE_INTERVAL` for low-rate reliable player-state keyframes. `predictrepair...playerpred2-reliablekf30` passes no-artificial dualstresslong at `16.688/16.689ms` with no persistent mismatch, while keeping max frame times around `43/31ms`.
+  - Increasing player prediction to 4F plus reliable keyframes and moving-hazard lifecycle (`pland-p4-kf30-hazardlife`) is the current strongest artificial-delay Plan-D candidate. Under `InputSendDelayFrames=2` / `InputSendJitterFrames=2`, `chaos` ran at `16.698/16.666ms`, max `44.146/30.377ms`, and no persistent StateSync mismatch; the remaining fail was the route's client local-input probe plus transient star-object diffs.
+  - The same candidate is not complete: artificial `dualstresslong` still has persistent player-global/death mismatch around `3420/3540` (`logs/rb-p4hz-dual/20260625-052145`). A player fresh-wait 1000us variant fixes that dualstresslong run but regresses artificial chaos to early transition/player/hazard/star drift, so it is not promoted.
+- Rejected in the latest pass:
+  - `statefresh500/1000` and `statefresh250` can push some mismatches later but cost client FPS (`18ms+` class) and are not promotable.
+  - `starspawnactivate`/spawn-heavy variants caused earlier mismatches or severe stalls/timeouts; one run left host active around `12fps`.
+  - `transition0-staractivate-fresh-pred0` was too slow (`34/65ms` class in chaos).
+  - Current persistent-shadow implementation is not a fallback until it is redesigned as a continuously fed shadow, not restore-and-run-per-frame.
+- Next actions: keep `pland-p4-kf30-hazardlife` as the current fast Plan-D baseline, then resolve the remaining player death/global and star object lifecycle drift without adding per-frame reliable traffic or broad waits. Use exact/cartlite only as a correctness reference. If this becomes actor-by-actor whack-a-mole again, switch architecture rather than widening ranges blindly.
+
 ## Delay2 rollback adaptive-checkpoint retake - 2026-06-24
+
+- Historical section: superseded where it describes `mr1`/cartlite as the current best or clean result. The current status is summarized above.
 
 - Active goal is still open: keep GUI-standard `InputDelayFrames=2`, avoid host/client state mismatch after rollback settles, and keep practical complex play near 60fps without visible correction spikes. Raising input delay is still rejected.
 - Latest continuation after the shadow/Plan-D split:

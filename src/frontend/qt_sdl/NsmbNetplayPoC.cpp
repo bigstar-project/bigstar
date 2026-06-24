@@ -115,6 +115,8 @@ constexpr melonDS::u32 kGamePlayerGlobalBlockLen = 0xC0;
 constexpr melonDS::u32 kGamePlayerGlobalChunkLen = 0x10;
 constexpr std::size_t kGamePlayerGlobalChunkCount =
     kGamePlayerGlobalBlockLen / kGamePlayerGlobalChunkLen;
+constexpr melonDS::u32 kGamePlayerJumpPressedRingBufferAddr = 0x0208B3D4;
+constexpr melonDS::u32 kGamePlayerJumpPressedRingBufferLen = 0x10;
 constexpr melonDS::u32 kGamePlayerPowerupAddr = 0x0208B324;
 constexpr melonDS::u32 kGamePlayerDeadAddr = 0x0208B328;
 constexpr melonDS::u32 kGamePlayerInventoryPowerupAddr = 0x0208B32C;
@@ -1460,10 +1462,13 @@ struct State
     bool GameStateApplyPlayerActors = true;
     bool GameStateApplyRemotePlayerOnly = false;
     int GameStateSyncInterval = 60;
+    int GameStateApplyFreshWaitUs = 0;
     bool PlayerStateSyncEnabled = false;
     bool PlayerStateApplyEnabled = false;
     bool PlayerStateGlobalsEnabled = false;
     bool PlayerStateReliable = false;
+    bool PlayerStateReliableOnGlobalChange = false;
+    int PlayerStateReliableInterval = 0;
     bool PlayerStateApplyTransformDuringTransition = false;
     int PlayerStateTransitionTransformStartOffset = 0;
     int PlayerStateSyncInterval = 1;
@@ -1486,6 +1491,7 @@ struct State
     bool WorldStateApplyActorSnapshot = false;
     bool WorldStateApplyActorSnapshotLifecycle = false;
     bool WorldStatePruneExtraActorSnapshot = false;
+    bool WorldStatePruneAbsentActorSnapshotStarCandidate = false;
     bool WorldStateSpawnActorSnapshotStarCandidate = false;
     bool WorldStateActivateDormantActorSnapshotStarCandidate = false;
     bool WorldStatePreferFreshSamples = false;
@@ -2188,6 +2194,8 @@ struct State
     melonDS::u64 LastLoggedGameStateFrame[16] {};
     melonDS::u64 LastSentGameStateFrame[16] {};
     melonDS::u64 LastSentPlayerStateFrame[16] {};
+    bool LastReliablePlayerGlobalHashValid[16][2] {};
+    melonDS::u64 LastReliablePlayerGlobalHash[16][2] {};
     melonDS::u64 LastSentWorldStateFrame[16] {};
     melonDS::u32 LastAppliedPlayerGlobalsFrame[16][2] {};
     melonDS::u32 PlayerActorBaseCache[16][2] {};
@@ -2439,6 +2447,8 @@ void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
     for (int player = 0; player < 2; player++)
     {
         G.LastAppliedPlayerGlobalsFrame[instanceID][player] = 0;
+        G.LastReliablePlayerGlobalHashValid[instanceID][player] = false;
+        G.LastReliablePlayerGlobalHash[instanceID][player] = 0;
         G.PlayerActorBaseCache[instanceID][player] = 0;
         G.PlayerActorGUIDCache[instanceID][player] = 0;
     }
@@ -9654,7 +9664,8 @@ void PersistentShadowWorkerMain()
         }
 
         ApplyMvlRuntimeConfigIfNeeded(shadow);
-        melonDS::NSML_CloneMarioVsLuigiHostState(G.PersistentShadowSource, shadow);
+        if (needsRestore || !G.PersistentShadowContinuous)
+            melonDS::NSML_CloneMarioVsLuigiHostState(G.PersistentShadowSource, shadow);
         shadow->CurCPU = job.CurCPU;
         shadow->KeyInput = job.KeyInput;
         melonDS::NDS::Current = shadow;
@@ -9897,6 +9908,34 @@ melonDS::u64 HashMainRAMRange(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32
     for (melonDS::u32 i = 0; i < len; i++)
     {
         hash ^= nds->MainRAM[offset + i];
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+melonDS::u64 HashPlayerGlobalForSync(melonDS::NDS* nds)
+{
+    if (!nds || !nds->MainRAM)
+        return 0;
+
+    const melonDS::u32 globalOffset = kGamePlayerGlobalBlockAddr - kMainRAMBase;
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (globalOffset >= ramLen)
+        return 0;
+
+    const melonDS::u32 availableLen = std::min(kGamePlayerGlobalBlockLen, ramLen - globalOffset);
+    const melonDS::u32 ringStart =
+        kGamePlayerJumpPressedRingBufferAddr - kGamePlayerGlobalBlockAddr;
+    const melonDS::u32 ringEnd = std::min(
+        availableLen,
+        ringStart + kGamePlayerJumpPressedRingBufferLen);
+
+    melonDS::u64 hash = 1469598103934665603ull;
+    for (melonDS::u32 i = 0; i < availableLen; i++)
+    {
+        if (i >= ringStart && i < ringEnd)
+            continue;
+        hash ^= nds->MainRAM[globalOffset + i];
         hash *= 1099511628211ull;
     }
     return hash;
@@ -16341,7 +16380,7 @@ void ApplyRemoteWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melo
                     break;
                 }
             }
-            if (!remoteHasSameType)
+            if (!remoteHasSameType && !G.WorldStatePruneAbsentActorSnapshotStarCandidate)
                 continue;
 
             if (ApplyWireWorldActorLifecycleState(nds, WireWorldActorState {
@@ -17158,6 +17197,26 @@ bool WritePlayerGlobalState(melonDS::NDS* nds, const WirePlayerState& state)
     return ok;
 }
 
+melonDS::u64 HashWirePlayerReliableGlobals(const WirePlayerState& state)
+{
+    melonDS::u64 hash = 1469598103934665603ull;
+    MixGameStateValue(hash, state.Player);
+    MixGameStateValue(hash, state.PlayerCount);
+    MixGameStateValue(hash, state.Powerup);
+    MixGameStateValue(hash, state.InventoryPowerup);
+    MixGameStateValue(hash, state.Dead);
+    MixGameStateValue(hash, state.Character);
+    MixGameStateValue(hash, state.TransitionStatus);
+    MixGameStateValue(hash, state.Lives);
+    MixGameStateValue(hash, state.BattleStars);
+    MixGameStateValue(hash, state.Coins);
+    MixGameStateValue(hash, state.Score);
+    MixGameStateValue(hash, state.DisplayedStars);
+    MixGameStateValue(hash, state.Deaths);
+    MixGameStateValue(hash, state.CollectedStars);
+    return hash;
+}
+
 bool WritePlayerCounterState(melonDS::NDS* nds, const WirePlayerState& state)
 {
     if (!nds || !nds->MainRAM || state.Player > 1)
@@ -17376,10 +17435,23 @@ void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     GameStateSample sample;
     melonDS::u32 sampleFrame = 0;
+    bool sampleValid = false;
+    const auto waitDeadline = std::chrono::steady_clock::now() +
+        std::chrono::microseconds(std::max(0, G.GameStateApplyFreshWaitUs));
     {
-        std::lock_guard<std::mutex> lock(G.Mutex);
-        PumpNetworkLocked();
-        if (!FindLatestRemoteGameStateLocked(instanceID, frame, sample, sampleFrame))
+        while (true)
+        {
+            {
+                std::lock_guard<std::mutex> lock(G.Mutex);
+                PumpNetworkLocked();
+                sampleValid = FindLatestRemoteGameStateLocked(instanceID, frame, sample, sampleFrame);
+            }
+            if (G.GameStateApplyFreshWaitUs <= 0 || (sampleValid && sampleFrame >= frame) ||
+                std::chrono::steady_clock::now() >= waitDeadline)
+                break;
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
+        if (!sampleValid)
             return;
     }
 
@@ -18155,6 +18227,8 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         return settings & ~0x10u;
     };
 
+    const bool hashVsStar = sample.VsStarFound && sample.VsStarStateType == 1;
+
     sample.Hash = 1469598103934665603ull;
     MixGameStateValue(sample.Hash, sample.StageID);
     MixGameStateValue(sample.Hash, sample.StageGroup);
@@ -18164,16 +18238,17 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.NetRandomCallCount);
     MixGameStateValue(sample.Hash, sample.NetRandomBranchAddress);
     MixGameStateValue(sample.Hash, sample.StageActorFreezeFlag);
-    MixGameStateValue(sample.Hash, sample.VsStarFound);
-    MixGameStateValue(sample.Hash, sample.VsStarGUID);
-    MixGameStateValue(sample.Hash, mixObjectSettingsForGameplay(sample.VsStarSettings));
-    MixGameStateValue(sample.Hash, sample.VsStarStateType);
-    MixGameStateValue(sample.Hash, sample.VsStarFlags);
-    MixGameStateValue(sample.Hash, sample.VsStarPosX);
-    MixGameStateValue(sample.Hash, sample.VsStarPosY);
-    MixGameStateValue(sample.Hash, sample.VsStarPosZ);
+    MixGameStateValue(sample.Hash, hashVsStar ? 1u : 0u);
+    if (hashVsStar)
+    {
+        MixGameStateValue(sample.Hash, mixObjectSettingsForGameplay(sample.VsStarSettings));
+        MixGameStateValue(sample.Hash, sample.VsStarStateType);
+        MixGameStateValue(sample.Hash, sample.VsStarFlags);
+        MixGameStateValue(sample.Hash, sample.VsStarPosX);
+        MixGameStateValue(sample.Hash, sample.VsStarPosY);
+        MixGameStateValue(sample.Hash, sample.VsStarPosZ);
+    }
     MixGameStateValue(sample.Hash, sample.VsStarActorFound);
-    MixGameStateValue(sample.Hash, sample.VsStarActorGUID);
     MixGameStateValue(sample.Hash, mixObjectSettingsForGameplay(sample.VsStarActorSettings));
     MixGameStateValue(sample.Hash, sample.VsStarActorStateType);
     MixGameStateValue(sample.Hash, sample.VsStarActorFlags);
@@ -18181,7 +18256,6 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.VsStarActorPosY);
     MixGameStateValue(sample.Hash, sample.VsStarActorPosZ);
     MixGameStateValue(sample.Hash, sample.PlayerActor0Found);
-    MixGameStateValue(sample.Hash, sample.PlayerActor0GUID);
     MixGameStateValue(sample.Hash, mixObjectSettingsForGameplay(sample.PlayerActor0Settings));
     MixGameStateValue(sample.Hash, sample.PlayerActor0StateType);
     MixGameStateValue(sample.Hash, sample.PlayerActor0Flags);
@@ -18224,7 +18298,6 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.PlayerActor0PhysicsFlag);
     MixGameStateValue(sample.Hash, sample.PlayerActor0DamageCooldown);
     MixGameStateValue(sample.Hash, sample.PlayerActor1Found);
-    MixGameStateValue(sample.Hash, sample.PlayerActor1GUID);
     MixGameStateValue(sample.Hash, mixObjectSettingsForGameplay(sample.PlayerActor1Settings));
     MixGameStateValue(sample.Hash, sample.PlayerActor1StateType);
     MixGameStateValue(sample.Hash, sample.PlayerActor1Flags);
@@ -18351,7 +18424,6 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCA8C0);
     MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCA8D0);
     MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCAD30);
-    MixGameStateValue(sample.Hash, sample.MvlManagerGUID);
     MixGameStateValue(sample.Hash, mixObjectSettingsForGameplay(sample.MvlManagerSettings));
     MixGameStateValue(sample.Hash, sample.MvlManagerObjectID);
     MixGameStateValue(sample.Hash, sample.MvlManagerStateType);
@@ -18370,7 +18442,6 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.MvlManagerHalf494);
     MixGameStateValue(sample.Hash, sample.MvlManagerHalf4A0);
     MixGameStateValue(sample.Hash, sample.MovingHazardFound);
-    MixGameStateValue(sample.Hash, sample.MovingHazardGUID);
     MixGameStateValue(sample.Hash, mixObjectSettingsForGameplay(sample.MovingHazardSettings));
     MixGameStateValue(sample.Hash, sample.MovingHazardStateType);
     MixGameStateValue(sample.Hash, sample.MovingHazardFlags);
@@ -18390,21 +18461,6 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.MovingHazardTargetVelX);
     MixGameStateValue(sample.Hash, sample.MovingHazardTargetVelY);
     MixGameStateValue(sample.Hash, sample.MovingHazardTargetVelZ);
-    MixGameStateValue(sample.Hash, sample.ObjectScanTotal);
-    MixGameStateValue(sample.Hash, sample.ObjectNotCreatedCount);
-    MixGameStateValue(sample.Hash, sample.ObjectActiveCount);
-    MixGameStateValue(sample.Hash, sample.ObjectDeadCount);
-    MixGameStateValue(sample.Hash, sample.ObjectSkipUpdateCount);
-    MixGameStateValue(sample.Hash, sample.ObjectSkipRenderCount);
-    MixGameStateValue(sample.Hash, sample.ObjectFirstNotCreatedID);
-    MixGameStateValue(sample.Hash, sample.ObjectFirstNotCreatedFlags);
-    MixGameStateValue(sample.Hash, sample.ObjectSecondNotCreatedID);
-    MixGameStateValue(sample.Hash, sample.ObjectSecondNotCreatedFlags);
-    for (int i = 0; i < kObjectTraceSlots; i++)
-    {
-        MixGameStateValue(sample.Hash, sample.ObjectActiveID[i]);
-        MixGameStateValue(sample.Hash, mixObjectSettingsForGameplay(sample.ObjectActiveSettings[i]));
-    }
     return sample;
 }
 
@@ -19144,7 +19200,7 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     hashes.Basic = sample.Hash;
     if (G.GameStateSyncExtended)
     {
-        hashes.PlayerGlobal = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, kGamePlayerGlobalBlockLen);
+        hashes.PlayerGlobal = HashPlayerGlobalForSync(nds);
         for (std::size_t i = 0; i < kGamePlayerGlobalChunkCount; i++)
         {
             hashes.PlayerGlobalChunks[i] = HashMainRAMRange(
@@ -19360,9 +19416,24 @@ void SyncPlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             | ((static_cast<melonDS::u32>(nds->ARM9Read8(actor.Base + kPlayerBaseTransitionStepOffset)) & 0xFFu) << 24);
     }
 
+    const melonDS::u64 reliableGlobalHash = HashWirePlayerReliableGlobals(packet);
+    bool reliableByGlobalChange = false;
+
     std::lock_guard<std::mutex> lock(G.Mutex);
     if (G.LastSentPlayerStateFrame[instanceID] == frame) return;
     G.LastSentPlayerStateFrame[instanceID] = frame;
+    if (G.PlayerStateReliableOnGlobalChange && packet.Player < 2)
+    {
+        const int player = static_cast<int>(packet.Player);
+        reliableByGlobalChange =
+            !G.LastReliablePlayerGlobalHashValid[instanceID][player] ||
+            G.LastReliablePlayerGlobalHash[instanceID][player] != reliableGlobalHash;
+        if (reliableByGlobalChange)
+        {
+            G.LastReliablePlayerGlobalHashValid[instanceID][player] = true;
+            G.LastReliablePlayerGlobalHash[instanceID][player] = reliableGlobalHash;
+        }
+    }
     if (!G.Peer)
     {
         if (G.InputTraceEnabled &&
@@ -19389,10 +19460,14 @@ void SyncPlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             packet.VelY);
     }
 
+    const bool reliableByInterval =
+        G.PlayerStateReliableInterval > 0 &&
+        (frame % static_cast<melonDS::u32>(G.PlayerStateReliableInterval)) == 0;
+    const bool sendReliable = G.PlayerStateReliable || reliableByGlobalChange || reliableByInterval;
     ENetPacket* enetPacket = enet_packet_create(
         &packet,
         sizeof(packet),
-        G.PlayerStateReliable ? ENET_PACKET_FLAG_RELIABLE : 0);
+        sendReliable ? ENET_PACKET_FLAG_RELIABLE : 0);
     if (enetPacket)
         enet_peer_send(G.Peer, 0, enetPacket);
 }
@@ -20333,10 +20408,13 @@ void InitFromEnvironment()
         }
     }
     G.GameStateSyncInterval = std::max(1, EnvInt("MELONDS_NSML_STATE_SYNC_INTERVAL", 60));
+    G.GameStateApplyFreshWaitUs = std::max(0, EnvInt("MELONDS_NSML_STATE_APPLY_FRESH_WAIT_US", 0));
     G.PlayerStateSyncEnabled = EnvFlag("MELONDS_NSML_PLAYER_STATE_SYNC");
     G.PlayerStateApplyEnabled = EnvFlag("MELONDS_NSML_PLAYER_STATE_APPLY");
     G.PlayerStateGlobalsEnabled = EnvFlag("MELONDS_NSML_PLAYER_STATE_GLOBALS");
     G.PlayerStateReliable = EnvFlag("MELONDS_NSML_PLAYER_STATE_RELIABLE");
+    G.PlayerStateReliableOnGlobalChange = EnvFlag("MELONDS_NSML_PLAYER_STATE_RELIABLE_ON_GLOBAL_CHANGE");
+    G.PlayerStateReliableInterval = std::max(0, EnvInt("MELONDS_NSML_PLAYER_STATE_RELIABLE_INTERVAL", 0));
     G.PlayerStateApplyTransformDuringTransition =
         EnvFlag("MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM");
     G.PlayerStateTransitionTransformStartOffset =
@@ -20371,6 +20449,8 @@ void InitFromEnvironment()
         EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT_LIFECYCLE");
     G.WorldStatePruneExtraActorSnapshot =
         EnvFlag("MELONDS_NSML_WORLD_STATE_PRUNE_EXTRA_ACTOR_SNAPSHOT");
+    G.WorldStatePruneAbsentActorSnapshotStarCandidate =
+        EnvFlag("MELONDS_NSML_WORLD_STATE_PRUNE_ABSENT_ACTOR_SNAPSHOT_STAR_CANDIDATE");
     G.WorldStateSpawnActorSnapshotStarCandidate =
         EnvFlag("MELONDS_NSML_WORLD_STATE_SPAWN_ACTOR_SNAPSHOT_STAR_CANDIDATE");
     G.WorldStateActivateDormantActorSnapshotStarCandidate =
