@@ -106,6 +106,11 @@ void CartCommon::DoSavestate(Savestate* file)
     file->VarBool(&SPISelected);
 }
 
+void CartCommon::DoRollbackRuntimeSavestate(Savestate* file)
+{
+    DoSavestate(file);
+}
+
 void CartCommon::SetResetState(bool reset)
 {
     if (reset == ResetState)

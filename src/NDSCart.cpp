@@ -290,6 +290,49 @@ void NDSCartSlot::DoSavestate(Savestate* file) noexcept
     }
 }
 
+void NDSCartSlot::DoRollbackRuntimeSavestate(Savestate* file) noexcept
+{
+    file->Section((Num==0) ? "NDCr" : "NC2r");
+
+    file->Var8(&LogicalNum);
+
+    file->Var64(&Key2_X);
+    file->Var64(&Key2_Y);
+
+    file->Var8(&CPUSelect);
+    file->Var8(&PowerState);
+    file->VarBool(&CartActive);
+
+    for (auto& inter : Interfaces)
+        inter.DoSavestate(file);
+
+    u32 carttype = 0;
+    if (Cart)
+        carttype = Cart->Type();
+
+    if (file->Saving)
+    {
+        file->Var32(&carttype);
+    }
+    else
+    {
+        u32 savetype;
+        file->Var32(&savetype);
+        if (savetype != carttype) return;
+    }
+
+    if (Cart)
+        Cart->DoRollbackRuntimeSavestate(file);
+
+    if (!file->Saving)
+    {
+        SetLogicalNum(LogicalNum);
+
+        if (!Cart)
+            CartActive = false;
+    }
+}
+
 
 bool ReadROMParams(u32 gamecode, ROMListEntry* params)
 {

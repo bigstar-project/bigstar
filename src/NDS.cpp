@@ -1283,6 +1283,7 @@ bool NDS::DoRollbackTinyCoreSavestate(Savestate* file, u32 requestedTinyCoreFlag
     constexpr u32 kRollbackTinyCoreGPUVRAM = 1 << 7;
     constexpr u32 kRollbackTinyCoreGPU3D = 1 << 8;
     constexpr u32 kRollbackTinyCoreGPU3DLight = 1 << 9;
+    constexpr u32 kRollbackTinyCoreCartRuntime = 1 << 10;
 
     file->VarArray(SharedWRAM, SharedWRAMSize);
     file->VarArray(ARM7WRAM, ARM7WRAMSize);
@@ -1365,7 +1366,11 @@ bool NDS::DoRollbackTinyCoreSavestate(Savestate* file, u32 requestedTinyCoreFlag
     ARM9.DoSavestate(file);
     ARM7.DoSavestate(file);
 
-    if (tinyCoreFlags & kRollbackTinyCoreCart)
+    if (tinyCoreFlags & kRollbackTinyCoreCartRuntime)
+    {
+        NDSCartSlot.DoRollbackRuntimeSavestate(file);
+    }
+    else if (tinyCoreFlags & kRollbackTinyCoreCart)
     {
         NDSCartSlot.DoSavestate(file);
         if (ConsoleType == 0)

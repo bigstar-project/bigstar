@@ -35,6 +35,7 @@ public:
     void Reset() override;
 
     void DoSavestate(Savestate* file) override;
+    void DoRollbackRuntimeSavestate(Savestate* file) override;
 
     void SPISelect() override;
     u8 SPITransmitReceive(u8 val) override;

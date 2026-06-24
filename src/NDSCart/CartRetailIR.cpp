@@ -68,6 +68,13 @@ void CartRetailIR::DoSavestate(Savestate* file)
     file->Var8(&IRCmd);
 }
 
+void CartRetailIR::DoRollbackRuntimeSavestate(Savestate* file)
+{
+    CartRetail::DoRollbackRuntimeSavestate(file);
+
+    file->Var8(&IRCmd);
+}
+
 void CartRetailIR::SPISelect()
 {
     CartRetail::SPISelect();

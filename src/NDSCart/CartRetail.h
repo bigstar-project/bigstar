@@ -54,6 +54,7 @@ public:
     void Reset() override;
 
     void DoSavestate(Savestate* file) override;
+    void DoRollbackRuntimeSavestate(Savestate* file) override;
 
     void SetSaveMemory(const u8* savedata, u32 savelen) override;
 

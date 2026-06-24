@@ -143,6 +143,20 @@ void CartRetail::DoSavestate(Savestate* file)
         Platform::WriteNDSSave(SRAM.get(), SRAMLength, 0, SRAMLength, UserData);
 }
 
+void CartRetail::DoRollbackRuntimeSavestate(Savestate* file)
+{
+    CartCommon::DoSavestate(file);
+
+    file->Var32(&SRAMLength);
+    file->Var32(&SRAMPos);
+    file->Var8(&SRAMCmd);
+    file->Var32(&SRAMAddr);
+    file->Var8(&SRAMStatus);
+
+    file->Var32(&SRAMSaveAddr);
+    file->Var32(&SRAMSaveLen);
+}
+
 void CartRetail::SetSaveMemory(const u8* savedata, u32 savelen)
 {
     if (!SRAM) return;

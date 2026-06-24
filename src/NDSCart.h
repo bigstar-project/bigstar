@@ -70,6 +70,7 @@ public:
     ~NDSCartSlot() noexcept;
     void Reset() noexcept;
     void DoSavestate(Savestate* file) noexcept;
+    void DoRollbackRuntimeSavestate(Savestate* file) noexcept;
 
     void DecryptSecureArea(u8* out) noexcept;
 
