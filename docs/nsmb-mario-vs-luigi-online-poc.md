@@ -1,5 +1,23 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Delay2 rollback adaptive-checkpoint retake - 2026-06-24
+
+- Active goal is still open: keep GUI-standard `InputDelayFrames=2`, avoid host/client state mismatch after rollback settles, and keep practical complex play near 60fps without visible correction spikes. Raising input delay is still rejected.
+- Rebuilt Release and continued from the selected `nsmbtinycore` / GPU3DLight line. Added raw `playerGlobal` word diagnostics to the game-state packet so persistent `playerGlobal` mismatches now identify the first differing 32-bit word. Added player actor runtime flags `+0x728/+0x72C/+0x730` to the wire player state; this removed one early `playerActor0Flags728` diff, but did not make no-resim actor/global repair exact.
+- Rejected no-resim/host-authored world-gate repair as a final path. Applying MVL stage layout gate words directly was unsafe and worsened/froze runs, so it is now gated behind `MELONDS_NSML_WORLD_STATE_APPLY_MVL_STAGE_LAYOUT_GATES` and off by default.
+- Rejected `MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS` for the current exact path: it reduced some average cost but caused StateSync mismatch under the same seed.
+- Optimized `SaveRollbackCheckpointBuffer` by removing an intermediate `coreBuffer` allocation/copy for tiny-core range checkpoints. Same-seed `mr6/cp2` improved from a bad `20.4ms` retake back to about `18.7ms`, but the goal was still not met.
+- Fixed adaptive checkpoint risk classification so old already-confirmed predictions no longer force every later frame into the critical checkpoint interval. This enabled useful `cp12 + adaptive critical` tests.
+- Current best short-run exact-ish candidate is `nsmbtc-rb0-mr6-lead6-budget2ms-lookupjit-limit1-cp12-adaptive1-arena-stack-devices-gpu3dlight`: `chaos1500` passed with `17.925/17.857ms`, max `75.584/94.831ms`, no transient mismatch. It is not promoted: longer `chaos` showed StateSync samples during unconfirmed input edges unless confirmed-only state sync is used.
+- Added confirmed-only StateSync candidate variants (`MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY=1`) to avoid treating pre-rollback predicted-input frames as persistent gameplay mismatch. This is validation hygiene, not a gameplay fix: stable frames are still checked after inputs are confirmed.
+- Best long-run shapes remain split:
+  - `critical2` no-wait is fast on long `chaos` (`17.144/16.846ms`, max below `100ms`) but mismatched gameplay at frame `990`.
+  - `limit2` removes that mismatch but is too slow/spiky (`18.873/18.876ms`, max `148.718/119.725ms`).
+  - `rbwait100/250` variants preserve StateSync but worsen long-run average to about `18.7-18.8ms`; `rbwait50` is worse.
+  - `MELONDS_NSML_ROLLBACK_RESIM_SKIP_AUDIO_BUFFER=1` improved average in one run but hit ARM9 prefetch abort at frame `2665`, so it is rejected.
+- `death` route is currently not a valid rollback discriminator: `norollback-delay4-lead4-bundle8` also fails the route's death assertion, while performance is fine. Use `chaos`/`chaos1500` with StateSync for the current rollback loop until the route assertion is fixed.
+- Current interpretation: adaptive checkpointing can pull the exact-ish selected path into the 17-18ms range for short runs, but the remaining hard tradeoff is still correction placement. No-wait can be fast but lets a correction settle too late; allowing more corrections or micro-waiting restores correctness but pushes visible-frame cost back over the target. Next work should focus on processing pending corrections before stable-gameplay sampling/commit, or moving correction work off the displayed frame, not widening actor ranges blindly.
+
 ## Shadow rollback feasibility - 2026-06-24
 
 - Active requirement remains unchanged: GUI rollback uses `InputDelayFrames=2`; raising delay is not an accepted fix. The current goal is still mismatch-free complex play near 60fps without rollback spikes.

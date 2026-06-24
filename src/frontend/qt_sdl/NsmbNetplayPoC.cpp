@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <fstream>
 #include <iomanip>
 #include <map>
@@ -550,6 +551,7 @@ struct WireGameState
     melonDS::u32 MovingHazardPosZ;
     melonDS::u32 MovingHazardVelX;
     melonDS::u32 MovingHazardVelY;
+    melonDS::u32 PlayerGlobalWords[kGamePlayerGlobalBlockLen / sizeof(melonDS::u32)];
     melonDS::u32 PlayerGlobalChunkHashLo[kGamePlayerGlobalChunkCount];
     melonDS::u32 PlayerGlobalChunkHashHi[kGamePlayerGlobalChunkCount];
     melonDS::u32 BasicHashLo;
@@ -562,7 +564,7 @@ struct WireGameState
     melonDS::u32 RenderCandidateHashHi;
 };
 
-static_assert(sizeof(WireGameState) == 540);
+static_assert(sizeof(WireGameState) == 732);
 
 struct WirePlayerState
 {
@@ -593,6 +595,9 @@ struct WirePlayerState
     melonDS::u32 TransitionFlag;
     melonDS::u32 CollisionFlag;
     melonDS::u32 EnvironmentFlag;
+    melonDS::u32 ActorFlags728;
+    melonDS::u32 ActorFlags72C;
+    melonDS::u32 ActorFlags730;
     melonDS::u32 RuntimeFlags0;
     melonDS::u32 RuntimeFlags1;
     melonDS::u32 PlayerCount;
@@ -610,7 +615,7 @@ struct WirePlayerState
     melonDS::u32 CollectedStars;
 };
 
-static_assert(sizeof(WirePlayerState) == 168);
+static_assert(sizeof(WirePlayerState) == 180);
 
 struct WireWorldActorState
 {
@@ -651,6 +656,18 @@ struct WireWorldState
     melonDS::u32 StageLiquidPlayerSlot;
     melonDS::u32 StageLiquidHeight0;
     melonDS::u32 StageLiquidHeight1;
+    melonDS::u32 MvlStageLayoutGateCAC6C;
+    melonDS::u32 MvlStageLayoutGateCAC74;
+    melonDS::u32 MvlStageLayoutGateCAC7C;
+    melonDS::u32 MvlStageLayoutGateCACDC;
+    melonDS::u32 MvlStageLayoutGateCAE80;
+    melonDS::u32 MvlStageLayoutGateCAE74;
+    melonDS::u32 MvlStageLayoutGateCAEB8;
+    melonDS::u32 MvlStageLayoutGateCAF20;
+    melonDS::u32 MvlStageLayoutGateCAF40;
+    melonDS::u32 MvlStageLayoutGateCA8C0;
+    melonDS::u32 MvlStageLayoutGateCA8D0;
+    melonDS::u32 MvlStageLayoutGateCAD30;
     WireWorldActorState Star;
     WireWorldActorState NeutralItem;
     WireWorldActorState Item;
@@ -659,7 +676,7 @@ struct WireWorldState
 };
 
 static_assert(sizeof(WireWorldActorState) == 100);
-static_assert(sizeof(WireWorldState) == 532);
+static_assert(sizeof(WireWorldState) == 580);
 
 struct WireMovingHazardState
 {
@@ -1319,6 +1336,7 @@ struct GameStateSyncHashes
     melonDS::u64 WifiCandidate = 0;
     melonDS::u64 RenderCandidate = 0;
     std::array<melonDS::u64, kGamePlayerGlobalChunkCount> PlayerGlobalChunks {};
+    std::array<melonDS::u32, kGamePlayerGlobalBlockLen / sizeof(melonDS::u32)> PlayerGlobalWords {};
 };
 
 melonDS::u32 FindObjectBaseByID(melonDS::NDS* nds, melonDS::u16 objectID);
@@ -1347,6 +1365,15 @@ int CurrentPacketBridgeLocalPlayer();
 
 struct State
 {
+    struct PersistentShadowJob
+    {
+        melonDS::u32 Frame = 0;
+        melonDS::u32 KeyInput = 0;
+        int CurCPU = 0;
+        std::vector<char> Core;
+        std::vector<melonDS::u8> MainRAM;
+    };
+
     std::mutex Mutex;
     std::mutex PerfMutex;
     std::atomic<bool> EnvChecked { false };
@@ -1448,6 +1475,7 @@ struct State
     bool WorldStateApplyEnabled = false;
     bool WorldStateApplyStarActor = true;
     bool WorldStateSpawnItem = false;
+    bool WorldStateApplyMvlStageLayoutGates = false;
     bool WorldStateSpawnMovingHazard = false;
     bool WorldStateActivateDormantMovingHazard = false;
     bool WorldStateRestoreMovingHazardLastBase = false;
@@ -1840,6 +1868,30 @@ struct State
     bool ShadowCloneProbeSkipRender = true;
     bool ShadowCloneProbeSkipAudioBuffer = true;
     int ShadowCloneProbeWarmRuns = 1;
+    bool PersistentShadowProbeEnabled = false;
+    melonDS::u32 PersistentShadowStartFrame = 900;
+    melonDS::u32 PersistentShadowEndFrame = 1100;
+    melonDS::u32 PersistentShadowCompareFrame = 1100;
+    int PersistentShadowMaxQueue = 64;
+    std::mutex PersistentShadowMutex;
+    std::condition_variable PersistentShadowCond;
+    std::thread PersistentShadowThread;
+    bool PersistentShadowStop = false;
+    bool PersistentShadowStarted = false;
+    melonDS::NDS* PersistentShadowSource = nullptr;
+    std::unique_ptr<melonDS::NDS> PersistentShadowNDS;
+    std::deque<PersistentShadowJob> PersistentShadowJobs;
+    melonDS::u32 PersistentShadowCompletedFrame = 0;
+    melonDS::u32 PersistentShadowDroppedJobs = 0;
+    unsigned long long PersistentShadowRestoreTotalUs = 0;
+    unsigned long long PersistentShadowRunTotalUs = 0;
+    melonDS::u32 PersistentShadowCompletedJobs = 0;
+    bool PersistentShadowForegroundExpected = false;
+    melonDS::u64 PersistentShadowForegroundHash = 0;
+    std::vector<melonDS::u8> PersistentShadowForegroundMainRAM;
+    bool PersistentShadowCompareReady = false;
+    melonDS::u64 PersistentShadowCompareHash = 0;
+    std::vector<melonDS::u8> PersistentShadowCompareMainRAM;
     bool ShadowCloneProbePending = false;
     bool ShadowCloneProbeFreezeNetwork = false;
     melonDS::u32 ShadowCloneProbeExpectedFrame = 0;
@@ -3071,6 +3123,39 @@ std::string PlayerGlobalChunkDiffSummary(const GameStateSyncHashes& local, const
     return out.str();
 }
 
+std::string PlayerGlobalWordDiffSummary(const GameStateSyncHashes& local, const GameStateSyncHashes& remote)
+{
+    constexpr std::size_t wordCount = kGamePlayerGlobalBlockLen / sizeof(melonDS::u32);
+    std::ostringstream out;
+    auto writeHex32 = [&out](melonDS::u32 value) {
+        out << std::hex << std::uppercase << std::setw(8) << std::setfill('0')
+            << static_cast<unsigned int>(value)
+            << std::dec << std::nouppercase << std::setfill(' ');
+    };
+    int emitted = 0;
+    for (std::size_t i = 0; i < wordCount; i++)
+    {
+        if (local.PlayerGlobalWords[i] == remote.PlayerGlobalWords[i])
+            continue;
+        if (emitted > 0)
+            out << " ";
+        const melonDS::u32 offset = static_cast<melonDS::u32>(i * sizeof(melonDS::u32));
+        out << "word+0x";
+        writeHex32(offset);
+        out << "=local:0x";
+        writeHex32(local.PlayerGlobalWords[i]);
+        out << "/remote:0x";
+        writeHex32(remote.PlayerGlobalWords[i]);
+        emitted++;
+        if (emitted >= 16)
+        {
+            out << " ...";
+            break;
+        }
+    }
+    return out.str();
+}
+
 std::string GameStateSampleDiffSummary(const GameStateSample& local, const GameStateSample& remote)
 {
     std::ostringstream out;
@@ -3326,6 +3411,14 @@ void CompareGameStateLocked(int instanceID, melonDS::u32 frame)
                 instanceID,
                 frame,
                 chunkDiffs.c_str());
+        }
+        const std::string wordDiffs = PlayerGlobalWordDiffSummary(lhs, rhs);
+        if (!wordDiffs.empty())
+        {
+            std::printf("NSMB PoC: playerGlobal word mismatch inst=%d frame=%u %s\n",
+                instanceID,
+                frame,
+                wordDiffs.c_str());
         }
     }
     auto localSample = G.LocalGameStateSamples.find(key);
@@ -3859,6 +3952,10 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                         hashes.PlayerGlobalChunks[i] =
                             (static_cast<melonDS::u64>(packet.PlayerGlobalChunkHashHi[i]) << 32)
                             | packet.PlayerGlobalChunkHashLo[i];
+                    }
+                    for (std::size_t i = 0; i < hashes.PlayerGlobalWords.size(); i++)
+                    {
+                        hashes.PlayerGlobalWords[i] = packet.PlayerGlobalWords[i];
                     }
                     const int packetInstance = static_cast<int>(packet.Instance);
                     const melonDS::u64 key = GameStateKey(packetInstance, packet.Frame);
@@ -4499,8 +4596,19 @@ bool ShouldSaveRollbackCheckpointLocked(melonDS::u32 frame)
     if (G.RollbackAdaptiveCheckpointCriticalInterval <= 0)
         return false;
 
-    bool predictionRisk = G.PendingRollbackFrame != kNoFrameLimit
-        || !G.PredictedRemoteInputs.empty();
+    bool predictionRisk = G.PendingRollbackFrame != kNoFrameLimit;
+    if (!predictionRisk)
+    {
+        for (const auto& [predictedFrame, predictedInput] : G.PredictedRemoteInputs)
+        {
+            (void)predictedInput;
+            if (G.RemoteInputs.find(predictedFrame) == G.RemoteInputs.end())
+            {
+                predictionRisk = true;
+                break;
+            }
+        }
+    }
     if (!predictionRisk
         && G.NetplayStartFrame != 0
         && frame >= G.NetplayStartFrame
@@ -6121,9 +6229,8 @@ bool SaveRollbackCheckpointBuffer(
         if (!coreSaved || coreState.Error)
             return false;
 
-        std::vector<char> coreBuffer(
-            static_cast<const char*>(coreState.Buffer()),
-            static_cast<const char*>(coreState.Buffer()) + coreState.Length());
+        const char* coreBuffer = static_cast<const char*>(coreState.Buffer());
+        const size_t coreBufferSize = coreState.Length();
 
         const melonDS::u32 len = nds->MainRAMMask + 1;
         melonDS::u32 pageSize = static_cast<melonDS::u32>(G.RollbackMainRAMPageSize);
@@ -6157,14 +6264,14 @@ bool SaveRollbackCheckpointBuffer(
         header.LagFrameFlag = nds->LagFrameFlag ? 1 : 0;
         header.RangeCount = static_cast<melonDS::u32>(ranges.size());
         header.TotalRangeBytes = totalBytes;
-        header.Reserved = static_cast<melonDS::u32>(coreBuffer.size());
+        header.Reserved = static_cast<melonDS::u32>(coreBufferSize);
 
-        buffer.resize(sizeof(header) + coreBuffer.size() + ranges.size() * sizeof(RollbackNSMBRangeEntry) + totalBytes);
+        buffer.resize(sizeof(header) + coreBufferSize + ranges.size() * sizeof(RollbackNSMBRangeEntry) + totalBytes);
         char* out = buffer.data();
         std::memcpy(out, &header, sizeof(header));
         out += sizeof(header);
-        std::memcpy(out, coreBuffer.data(), coreBuffer.size());
-        out += coreBuffer.size();
+        std::memcpy(out, coreBuffer, coreBufferSize);
+        out += coreBufferSize;
         if (!ranges.empty())
         {
             std::memcpy(out, ranges.data(), ranges.size() * sizeof(RollbackNSMBRangeEntry));
@@ -6187,11 +6294,12 @@ bool SaveRollbackCheckpointBuffer(
         if (ranges.empty())
             return false;
 
-        std::vector<char> coreBuffer;
+        const char* coreBuffer = nullptr;
+        size_t coreBufferSize = 0;
+        melonDS::Savestate coreState;
         if (G.RollbackBackendMode == RollbackBackend::NSMBCoreRanges
             || G.RollbackBackendMode == RollbackBackend::NSMBTinyCoreRanges)
         {
-            melonDS::Savestate coreState;
             const bool coreSaved = G.RollbackBackendMode == RollbackBackend::NSMBTinyCoreRanges
                 ? nds->DoRollbackTinyCoreSavestate(&coreState,
                     static_cast<melonDS::u32>(G.RollbackTinyCoreFlags))
@@ -6201,8 +6309,8 @@ bool SaveRollbackCheckpointBuffer(
             {
                 return false;
             }
-            coreBuffer.assign(static_cast<const char*>(coreState.Buffer()),
-                static_cast<const char*>(coreState.Buffer()) + coreState.Length());
+            coreBuffer = static_cast<const char*>(coreState.Buffer());
+            coreBufferSize = coreState.Length();
         }
 
         melonDS::u32 totalBytes = 0;
@@ -6217,16 +6325,16 @@ bool SaveRollbackCheckpointBuffer(
         header.LagFrameFlag = nds->LagFrameFlag ? 1 : 0;
         header.RangeCount = static_cast<melonDS::u32>(ranges.size());
         header.TotalRangeBytes = totalBytes;
-        header.Reserved = static_cast<melonDS::u32>(coreBuffer.size());
+        header.Reserved = static_cast<melonDS::u32>(coreBufferSize);
 
-        buffer.resize(sizeof(header) + coreBuffer.size() + ranges.size() * sizeof(RollbackNSMBRangeEntry) + totalBytes);
+        buffer.resize(sizeof(header) + coreBufferSize + ranges.size() * sizeof(RollbackNSMBRangeEntry) + totalBytes);
         char* out = buffer.data();
         std::memcpy(out, &header, sizeof(header));
         out += sizeof(header);
-        if (!coreBuffer.empty())
+        if (coreBuffer && coreBufferSize > 0)
         {
-            std::memcpy(out, coreBuffer.data(), coreBuffer.size());
-            out += coreBuffer.size();
+            std::memcpy(out, coreBuffer, coreBufferSize);
+            out += coreBufferSize;
         }
         std::memcpy(out, ranges.data(), ranges.size() * sizeof(RollbackNSMBRangeEntry));
         out += ranges.size() * sizeof(RollbackNSMBRangeEntry);
@@ -9310,6 +9418,241 @@ void CompareShadowCloneProbeIfNeeded(int instanceID, melonDS::NDS* nds)
         G.ShadowCloneProbeFreezeNetwork = false;
     }
     melonDS::NDS::Current = nds;
+}
+
+void PrintPersistentShadowComparisonLocked()
+{
+    if (!G.PersistentShadowForegroundExpected || !G.PersistentShadowCompareReady)
+        return;
+
+    size_t differingBytes = 0;
+    const size_t bytes = std::min(
+        G.PersistentShadowForegroundMainRAM.size(),
+        G.PersistentShadowCompareMainRAM.size());
+    for (size_t offset = 0; offset < bytes; offset++)
+    {
+        if (G.PersistentShadowForegroundMainRAM[offset]
+            != G.PersistentShadowCompareMainRAM[offset])
+        {
+            differingBytes++;
+        }
+    }
+    const bool match = G.PersistentShadowForegroundHash == G.PersistentShadowCompareHash
+        && differingBytes == 0
+        && G.PersistentShadowForegroundMainRAM.size() == G.PersistentShadowCompareMainRAM.size();
+    const double restoreAvgUs = G.PersistentShadowCompletedJobs > 0
+        ? static_cast<double>(G.PersistentShadowRestoreTotalUs) / G.PersistentShadowCompletedJobs
+        : 0.0;
+    const double runAvgUs = G.PersistentShadowCompletedJobs > 0
+        ? static_cast<double>(G.PersistentShadowRunTotalUs) / G.PersistentShadowCompletedJobs
+        : 0.0;
+    std::printf(
+        "NSMB PersistentShadow: compared frame=%u match=%d foregroundHash=%016llX shadowHash=%016llX differingBytes=%zu completed=%u dropped=%u restoreAvgUs=%.1f runAvgUs=%.1f\n",
+        G.PersistentShadowCompareFrame,
+        match ? 1 : 0,
+        static_cast<unsigned long long>(G.PersistentShadowForegroundHash),
+        static_cast<unsigned long long>(G.PersistentShadowCompareHash),
+        differingBytes,
+        G.PersistentShadowCompletedJobs,
+        G.PersistentShadowDroppedJobs,
+        restoreAvgUs,
+        runAvgUs);
+    std::fflush(stdout);
+    G.PersistentShadowForegroundExpected = false;
+    G.PersistentShadowCompareReady = false;
+    G.PersistentShadowForegroundMainRAM.clear();
+    G.PersistentShadowCompareMainRAM.clear();
+}
+
+void PersistentShadowWorkerMain()
+{
+    for (;;)
+    {
+        State::PersistentShadowJob job;
+        {
+            std::unique_lock<std::mutex> lock(G.PersistentShadowMutex);
+            G.PersistentShadowCond.wait(lock, [] {
+                return G.PersistentShadowStop || !G.PersistentShadowJobs.empty();
+            });
+            if (G.PersistentShadowStop && G.PersistentShadowJobs.empty())
+                return;
+            job = std::move(G.PersistentShadowJobs.front());
+            G.PersistentShadowJobs.pop_front();
+        }
+
+        melonDS::NDS* shadow = G.PersistentShadowNDS.get();
+        if (!shadow)
+            continue;
+        melonDS::Savestate state(job.Core.data(), static_cast<melonDS::u32>(job.Core.size()), false);
+        const auto restoreStart = std::chrono::steady_clock::now();
+        const bool restored = shadow->DoRollbackTinyCoreSavestate(
+            &state,
+            static_cast<melonDS::u32>(G.RollbackTinyCoreFlags));
+        if (restored && !state.Error && shadow->MainRAM
+            && job.MainRAM.size() == shadow->MainRAMMask + 1)
+        {
+            std::memcpy(shadow->MainRAM, job.MainRAM.data(), job.MainRAM.size());
+        }
+        const unsigned long long restoreUs = ElapsedUs(restoreStart);
+        if (!restored || state.Error)
+        {
+            std::printf("NSMB PersistentShadow: restore failed frame=%u\n", job.Frame);
+            std::fflush(stdout);
+            continue;
+        }
+
+        ApplyMvlRuntimeConfigIfNeeded(shadow);
+        melonDS::NSML_CloneMarioVsLuigiHostState(G.PersistentShadowSource, shadow);
+        shadow->CurCPU = job.CurCPU;
+        shadow->KeyInput = job.KeyInput;
+        shadow->GPU.SetRollbackSkipRender(true);
+        shadow->SetRollbackSkipAudioBuffer(true);
+        const auto runStart = std::chrono::steady_clock::now();
+        shadow->RunFrame();
+        const unsigned long long runUs = ElapsedUs(runStart);
+        shadow->SetRollbackSkipAudioBuffer(false);
+        shadow->GPU.SetRollbackSkipRender(false);
+
+        const bool compareFrame = job.Frame == G.PersistentShadowCompareFrame;
+        melonDS::u64 compareHash = 0;
+        std::vector<melonDS::u8> compareMainRAM;
+        if (compareFrame)
+        {
+            compareHash = HashNDS(shadow);
+            compareMainRAM.assign(shadow->MainRAM, shadow->MainRAM + shadow->MainRAMMask + 1);
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(G.PersistentShadowMutex);
+            G.PersistentShadowCompletedFrame = job.Frame;
+            G.PersistentShadowCompletedJobs++;
+            G.PersistentShadowRestoreTotalUs += restoreUs;
+            G.PersistentShadowRunTotalUs += runUs;
+            if (compareFrame)
+            {
+                G.PersistentShadowCompareHash = compareHash;
+                G.PersistentShadowCompareMainRAM = std::move(compareMainRAM);
+                G.PersistentShadowCompareReady = true;
+                PrintPersistentShadowComparisonLocked();
+            }
+            if ((G.PersistentShadowCompletedJobs % 30) == 0)
+            {
+                std::printf(
+                    "NSMB PersistentShadow: progress completedFrame=%u completed=%u queued=%zu dropped=%u restoreUs=%llu runUs=%llu\n",
+                    G.PersistentShadowCompletedFrame,
+                    G.PersistentShadowCompletedJobs,
+                    G.PersistentShadowJobs.size(),
+                    G.PersistentShadowDroppedJobs,
+                    restoreUs,
+                    runUs);
+                std::fflush(stdout);
+            }
+        }
+    }
+}
+
+bool StartPersistentShadowIfNeeded(melonDS::NDS* source)
+{
+    if (G.PersistentShadowStarted)
+        return true;
+    if (!source || !source->NDSCartSlot.GetCart())
+        return false;
+
+    melonDS::NDSArgs args;
+    args.ARM7BIOS = std::make_unique<melonDS::ARM7BIOSImage>(source->GetARM7BIOS());
+    args.ARM9BIOS = std::make_unique<melonDS::ARM9BIOSImage>(source->GetARM9BIOS());
+    if (source->IsJITEnabled())
+    {
+        args.JIT = melonDS::JITArgs {
+            static_cast<unsigned>(source->JIT.GetMaxBlockSize()),
+            source->JIT.LiteralOptimizationsEnabled(),
+            source->JIT.BranchOptimizationsEnabled(),
+            source->JIT.FastMemoryEnabled(),
+        };
+    }
+    else
+    {
+        args.JIT = std::nullopt;
+    }
+    auto shadow = std::make_unique<melonDS::NDS>(std::move(args), source->UserData);
+    shadow->Reset();
+    const auto* sourceCart = source->NDSCartSlot.GetCart();
+    auto cart = melonDS::NDSCart::ParseROM(
+        sourceCart->GetROM(),
+        sourceCart->GetROMLength(),
+        source->UserData);
+    if (!cart)
+        return false;
+    shadow->SetNDSCart(std::move(cart));
+    shadow->Start();
+
+    G.PersistentShadowSource = source;
+    G.PersistentShadowNDS = std::move(shadow);
+    G.PersistentShadowStop = false;
+    G.PersistentShadowStarted = true;
+    G.PersistentShadowThread = std::thread(PersistentShadowWorkerMain);
+    melonDS::NDS::Current = source;
+    std::printf("NSMB PersistentShadow: started startFrame=%u endFrame=%u compareFrame=%u maxQueue=%d\n",
+        G.PersistentShadowStartFrame,
+        G.PersistentShadowEndFrame,
+        G.PersistentShadowCompareFrame,
+        G.PersistentShadowMaxQueue);
+    std::fflush(stdout);
+    return true;
+}
+
+void QueuePersistentShadowFrameIfNeeded(melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.PersistentShadowProbeEnabled || G.NetRole != Role::Host || !nds
+        || frame < G.PersistentShadowStartFrame || frame > G.PersistentShadowEndFrame)
+    {
+        return;
+    }
+    if (!StartPersistentShadowIfNeeded(nds))
+        return;
+
+    melonDS::Savestate state;
+    if (!nds->DoRollbackTinyCoreSavestate(
+            &state,
+            static_cast<melonDS::u32>(G.RollbackTinyCoreFlags))
+        || state.Error)
+    {
+        return;
+    }
+    State::PersistentShadowJob job;
+    job.Frame = frame;
+    job.KeyInput = nds->KeyInput;
+    job.CurCPU = nds->CurCPU;
+    job.Core.assign(
+        static_cast<const char*>(state.Buffer()),
+        static_cast<const char*>(state.Buffer()) + state.Length());
+    job.MainRAM.assign(nds->MainRAM, nds->MainRAM + nds->MainRAMMask + 1);
+    {
+        std::lock_guard<std::mutex> lock(G.PersistentShadowMutex);
+        if (static_cast<int>(G.PersistentShadowJobs.size()) >= G.PersistentShadowMaxQueue)
+        {
+            G.PersistentShadowJobs.pop_front();
+            G.PersistentShadowDroppedJobs++;
+        }
+        G.PersistentShadowJobs.push_back(std::move(job));
+    }
+    G.PersistentShadowCond.notify_one();
+}
+
+void RecordPersistentShadowForegroundIfNeeded(melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.PersistentShadowProbeEnabled || G.NetRole != Role::Host || !nds
+        || frame != G.PersistentShadowCompareFrame)
+    {
+        return;
+    }
+    const melonDS::u64 hash = HashNDS(nds);
+    std::vector<melonDS::u8> mainRAM(nds->MainRAM, nds->MainRAM + nds->MainRAMMask + 1);
+    std::lock_guard<std::mutex> lock(G.PersistentShadowMutex);
+    G.PersistentShadowForegroundHash = hash;
+    G.PersistentShadowForegroundMainRAM = std::move(mainRAM);
+    G.PersistentShadowForegroundExpected = true;
+    PrintPersistentShadowComparisonLocked();
 }
 
 melonDS::u64 HashFramebuffers(melonDS::NDS* nds)
@@ -14286,7 +14629,6 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
     }
     if (restoreJITAfterResim)
         nds->SetRollbackJITEnabledNoReset(true);
-
     const unsigned long long rollbackTotalUs = ElapsedUs(rollbackStart);
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
@@ -16056,6 +16398,21 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
     {
         WriteMainRAMAddrU32IfChanged(nds, 0x020CAE0C, sample.StageLiquidHeight0);
         WriteMainRAMAddrU32IfChanged(nds, 0x020CAE10, sample.StageLiquidHeight1);
+        if (G.WorldStateApplyMvlStageLayoutGates)
+        {
+            WriteMainRAMAddrU8IfChanged(nds, 0x020CAC6C, static_cast<melonDS::u8>(sample.MvlStageLayoutGateCAC6C & 0xFFu));
+            WriteMainRAMAddrU8IfChanged(nds, 0x020CAC74, static_cast<melonDS::u8>(sample.MvlStageLayoutGateCAC74 & 0xFFu));
+            WriteMainRAMAddrU8IfChanged(nds, 0x020CAC7C, static_cast<melonDS::u8>(sample.MvlStageLayoutGateCAC7C & 0xFFu));
+            WriteMainRAMAddrU8IfChanged(nds, 0x020CACDC, static_cast<melonDS::u8>(sample.MvlStageLayoutGateCACDC & 0xFFu));
+            WriteMainRAMAddrU32IfChanged(nds, 0x020CAE80, sample.MvlStageLayoutGateCAE80);
+            WriteMainRAMAddrU8IfChanged(nds, 0x020CAE74, static_cast<melonDS::u8>(sample.MvlStageLayoutGateCAE74 & 0xFFu));
+            WriteMainRAMAddrU32IfChanged(nds, 0x020CAEB8, sample.MvlStageLayoutGateCAEB8);
+            WriteMainRAMAddrU32IfChanged(nds, 0x020CAF20, sample.MvlStageLayoutGateCAF20);
+            WriteMainRAMAddrU32IfChanged(nds, 0x020CAF40, sample.MvlStageLayoutGateCAF40);
+            WriteMainRAMAddrU8IfChanged(nds, 0x020CA8C0, static_cast<melonDS::u8>(sample.MvlStageLayoutGateCA8C0 & 0xFFu));
+            WriteMainRAMAddrU8IfChanged(nds, 0x020CA8D0, static_cast<melonDS::u8>(sample.MvlStageLayoutGateCA8D0 & 0xFFu));
+            WriteMainRAMAddrU8IfChanged(nds, 0x020CAD30, static_cast<melonDS::u8>(sample.MvlStageLayoutGateCAD30 & 0xFFu));
+        }
         const ObjectScanSample star = GetWorldActorCached(
             instanceID,
             frame,
@@ -16500,6 +16857,9 @@ bool WritePlayerRuntimeStateByBase(melonDS::NDS* nds, melonDS::u32 base, const W
     nds->ARM9Write32(base + kPlayerBaseTransitionFlagOffset, state.TransitionFlag);
     nds->ARM9Write32(base + kPlayerBaseCollisionFlagOffset, state.CollisionFlag);
     nds->ARM9Write32(base + kPlayerBaseEnvironmentFlagOffset, state.EnvironmentFlag);
+    nds->ARM9Write32(base + 0x728, state.ActorFlags728);
+    nds->ARM9Write32(base + 0x72C, state.ActorFlags72C);
+    nds->ARM9Write32(base + 0x730, state.ActorFlags730);
     nds->ARM9Write16(base + kPlayerBaseDamageCooldownOffset, static_cast<melonDS::u16>(state.DamageCooldown & 0xFFFFu));
     nds->ARM9Write8(base + kPlayerBaseUpdateLockedOffset, static_cast<melonDS::u8>(state.RuntimeFlags0 & 0xFFu));
     nds->ARM9Write8(base + kPlayerBaseCharacterIDOffset, static_cast<melonDS::u8>((state.RuntimeFlags0 >> 8) & 0xFFu));
@@ -18587,6 +18947,14 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                 kGamePlayerGlobalBlockAddr + static_cast<melonDS::u32>(i * kGamePlayerGlobalChunkLen),
                 kGamePlayerGlobalChunkLen);
         }
+        const melonDS::u32 playerGlobalOffset = kGamePlayerGlobalBlockAddr - kMainRAMBase;
+        for (std::size_t i = 0; i < hashes.PlayerGlobalWords.size(); i++)
+        {
+            ReadMainRAMU32(
+                nds,
+                playerGlobalOffset + static_cast<melonDS::u32>(i * sizeof(melonDS::u32)),
+                hashes.PlayerGlobalWords[i]);
+        }
         hashes.WifiCandidate = HashMainRAMRange(nds, kGameCandidateWifiBlockAddr, 0x2200);
         hashes.RenderCandidate = HashMainRAMRange(nds, kGameCandidateRenderBlockAddr, 0x240);
     }
@@ -18711,6 +19079,10 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         packet.PlayerGlobalChunkHashLo[i] = static_cast<melonDS::u32>(hashes.PlayerGlobalChunks[i] & 0xFFFFFFFFu);
         packet.PlayerGlobalChunkHashHi[i] = static_cast<melonDS::u32>(hashes.PlayerGlobalChunks[i] >> 32);
     }
+    for (std::size_t i = 0; i < hashes.PlayerGlobalWords.size(); i++)
+    {
+        packet.PlayerGlobalWords[i] = hashes.PlayerGlobalWords[i];
+    }
     packet.BasicHashLo = static_cast<melonDS::u32>(hashes.Basic & 0xFFFFFFFFu);
     packet.BasicHashHi = static_cast<melonDS::u32>(hashes.Basic >> 32);
     packet.PlayerGlobalHashLo = static_cast<melonDS::u32>(hashes.PlayerGlobal & 0xFFFFFFFFu);
@@ -18768,6 +19140,9 @@ void SyncPlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         packet.TransitionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseTransitionFlagOffset);
         packet.CollisionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseCollisionFlagOffset);
         packet.EnvironmentFlag = nds->ARM9Read32(actor.Base + kPlayerBaseEnvironmentFlagOffset);
+        packet.ActorFlags728 = nds->ARM9Read32(actor.Base + 0x728);
+        packet.ActorFlags72C = nds->ARM9Read32(actor.Base + 0x72C);
+        packet.ActorFlags730 = nds->ARM9Read32(actor.Base + 0x730);
         packet.RuntimeFlags0 =
             (static_cast<melonDS::u32>(nds->ARM9Read8(actor.Base + kPlayerBaseUpdateLockedOffset)) & 0xFFu)
             | ((static_cast<melonDS::u32>(nds->ARM9Read8(actor.Base + kPlayerBaseCharacterIDOffset)) & 0xFFu) << 8)
@@ -18875,6 +19250,18 @@ void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     packet.StageLiquidPlayerSlot = nds->ARM9Read32(0x02085A7C);
     packet.StageLiquidHeight0 = nds->ARM9Read32(0x020CAE0C);
     packet.StageLiquidHeight1 = nds->ARM9Read32(0x020CAE10);
+    packet.MvlStageLayoutGateCAC6C = nds->ARM9Read8(0x020CAC6C);
+    packet.MvlStageLayoutGateCAC74 = nds->ARM9Read8(0x020CAC74);
+    packet.MvlStageLayoutGateCAC7C = nds->ARM9Read8(0x020CAC7C);
+    packet.MvlStageLayoutGateCACDC = nds->ARM9Read8(0x020CACDC);
+    packet.MvlStageLayoutGateCAE80 = nds->ARM9Read32(0x020CAE80);
+    packet.MvlStageLayoutGateCAE74 = nds->ARM9Read8(0x020CAE74);
+    packet.MvlStageLayoutGateCAEB8 = nds->ARM9Read32(0x020CAEB8);
+    packet.MvlStageLayoutGateCAF20 = nds->ARM9Read32(0x020CAF20);
+    packet.MvlStageLayoutGateCAF40 = nds->ARM9Read32(0x020CAF40);
+    packet.MvlStageLayoutGateCA8C0 = nds->ARM9Read8(0x020CA8C0);
+    packet.MvlStageLayoutGateCA8D0 = nds->ARM9Read8(0x020CA8D0);
+    packet.MvlStageLayoutGateCAD30 = nds->ARM9Read8(0x020CAD30);
     FillWireWorldActorState(star, packet.Star);
     FillWireWorldActorState(neutralItem, packet.NeutralItem);
     FillWireWorldActorState(item, packet.Item);
@@ -19759,6 +20146,8 @@ void InitFromEnvironment()
     G.WorldStateApplyEnabled = EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY");
     G.WorldStateApplyStarActor = !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_STAR");
     G.WorldStateSpawnItem = EnvFlag("MELONDS_NSML_WORLD_STATE_SPAWN_ITEM");
+    G.WorldStateApplyMvlStageLayoutGates =
+        EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_MVL_STAGE_LAYOUT_GATES");
     G.WorldStateSpawnMovingHazard = EnvFlag("MELONDS_NSML_WORLD_STATE_SPAWN_MOVING_HAZARD");
     G.WorldStateActivateDormantMovingHazard =
         EnvFlag("MELONDS_NSML_WORLD_STATE_ACTIVATE_DORMANT_MOVING_HAZARD");
@@ -20089,6 +20478,19 @@ void InitFromEnvironment()
         EnvInt("MELONDS_NSML_SHADOW_CLONE_PROBE_SKIP_AUDIO_BUFFER", 1) != 0;
     G.ShadowCloneProbeWarmRuns = std::clamp(
         EnvInt("MELONDS_NSML_SHADOW_CLONE_PROBE_WARM_RUNS", 1), 1, 8);
+    G.PersistentShadowProbeEnabled = EnvFlag("MELONDS_NSML_PERSISTENT_SHADOW_PROBE");
+    G.PersistentShadowStartFrame = static_cast<melonDS::u32>(std::max(
+        0,
+        EnvInt("MELONDS_NSML_PERSISTENT_SHADOW_START_FRAME", 900)));
+    G.PersistentShadowEndFrame = static_cast<melonDS::u32>(std::max(
+        static_cast<int>(G.PersistentShadowStartFrame),
+        EnvInt("MELONDS_NSML_PERSISTENT_SHADOW_END_FRAME", 1100)));
+    G.PersistentShadowCompareFrame = static_cast<melonDS::u32>(std::clamp(
+        EnvInt("MELONDS_NSML_PERSISTENT_SHADOW_COMPARE_FRAME", 1100),
+        static_cast<int>(G.PersistentShadowStartFrame),
+        static_cast<int>(G.PersistentShadowEndFrame)));
+    G.PersistentShadowMaxQueue = std::clamp(
+        EnvInt("MELONDS_NSML_PERSISTENT_SHADOW_MAX_QUEUE", 64), 1, 180);
     G.RollbackPredictionProbeModulo = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_MODULO", 0), 0, 600);
     G.RollbackPredictionProbeOffset = std::clamp(
@@ -21212,6 +21614,7 @@ void BeforeCoreRunFrame(
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16)
         probeFrame = G.TestFrameCount[instanceID];
     RunShadowCloneProbeIfNeeded(instanceID, probeFrame, nds, input);
+    QueuePersistentShadowFrameIfNeeded(probeFrame, nds);
 }
 
 void TracePlayerLifeChanges(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -21455,6 +21858,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if (instanceID < 0 || instanceID >= 16) return;
 
     CompareShadowCloneProbeIfNeeded(instanceID, nds);
+    RecordPersistentShadowForegroundIfNeeded(frame, nds);
 
     melonDS::u32 logFrame = frame;
     if (G.TestEnabled)
@@ -21945,6 +22349,17 @@ void Shutdown()
 {
     StopFrameHeartbeatThread();
     StopNetworkPumpThread();
+
+    {
+        std::lock_guard<std::mutex> lock(G.PersistentShadowMutex);
+        G.PersistentShadowStop = true;
+    }
+    G.PersistentShadowCond.notify_all();
+    if (G.PersistentShadowThread.joinable())
+        G.PersistentShadowThread.join();
+    melonDS::NSML_ClearMarioVsLuigiHostState(G.PersistentShadowNDS.get());
+    G.PersistentShadowNDS.reset();
+    G.PersistentShadowStarted = false;
 
     melonDS::NSML_ClearMarioVsLuigiHostState(G.ShadowCloneProbeNDS.get());
     melonDS::NSML_ClearRollbackEventTrace(G.ShadowCloneProbeNDS.get());

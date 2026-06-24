@@ -1,5 +1,18 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
+## 2026-06-24 adaptive checkpoint and correction-placement boundary
+
+- The latest retake keeps the hard rule: `InputDelayFrames=2` is fixed. The current issue is no longer raw checkpoint byte size alone; it is when and how much foreground correction/resimulation is allowed to run before the frame is presented or sampled.
+- Added raw `playerGlobal` word diagnostics and additional player actor runtime flags. These helped identify first-diff fields, but also confirmed that no-resim actor/global repair remains approximate. Complex input still creates whole-state divergence unless an exact replay path eventually corrects it.
+- Tiny-core range checkpoint save was simplified by copying the core savestate directly into the final rollback buffer instead of first building a temporary `coreBuffer`. This reduces checkpoint overhead slightly, but does not remove the foreground resim cost.
+- Adaptive checkpointing is now more meaningful: prediction risk ignores already-confirmed predictions. `cp12 + adaptive critical` can keep short `chaos1500` runs below the 18ms average gate with no mismatch, whereas fixed `cp2` pays too much steady checkpoint cost.
+- Validation needs confirmed-input awareness. Without `MELONDS_NSML_STATE_SYNC_CONFIRMED_ONLY=1`, StateSync can report frames where one side has not yet received an input edge that rollback is supposed to correct. Confirmed-only validation should be used for rollback candidates, while still checking later stable frames for real divergence.
+- The useful boundary from the latest sweep:
+  - fast/no-wait correction (`critical2`) can average around `17ms` on long `chaos`, but can leave gameplay mismatch when many corrections queue up;
+  - raising `MELONDS_NSML_ROLLBACK_MAX_CORRECTIONS_PER_FRAME` or adding micro-wait restores correctness in measured runs, but average/max frame time moves back above the target;
+  - skipping resim intermediate checkpoints or audio buffer either breaks correctness or hits ARM9 aborts in the selected path.
+- Design implication: the next viable exact-ish path is not "make checkpoint N bytes smaller". It is a correction scheduling problem: drain or coalesce pending corrections before commit without pushing work into the visible frame, or move replay into a persistent/background shadow. Selected actor/global snapshots can still be explored, but only if they are validated against the exact-ish oracle and do not rely on per-symptom range widening.
+
 ## 2026-06-24 persistent-shadow decision
 
 - A second core-only `NDS` can be constructed and restored in-process, and melonDS already supports multiple instances with thread-local `NDS::Current`. ROM/cart userdata and NSMB host-side packet replay state must be cloned explicitly.
