@@ -671,6 +671,7 @@ struct WireWorldState
     melonDS::u32 MvlStageLayoutGateCA8D0;
     melonDS::u32 MvlStageLayoutGateCAD30;
     WireWorldActorState Star;
+    WireWorldActorState StarCandidate;
     WireWorldActorState NeutralItem;
     WireWorldActorState Item;
     WireWorldActorState DroppedStarItem;
@@ -678,7 +679,7 @@ struct WireWorldState
 };
 
 static_assert(sizeof(WireWorldActorState) == 100);
-static_assert(sizeof(WireWorldState) == 580);
+static_assert(sizeof(WireWorldState) == 680);
 
 struct WireMovingHazardState
 {
@@ -1329,6 +1330,10 @@ std::vector<ObjectScanSample> FindActiveObjectsByIDAndSettings(
     melonDS::u16 expectedObjectID,
     melonDS::u32 expectedSettings,
     bool includeStateType2 = false);
+std::vector<ObjectScanSample> FindActiveObjectsByID(
+    melonDS::NDS* nds,
+    melonDS::u16 expectedObjectID,
+    bool includeStateType2 = false);
 void RecordDiagnosticSnapshotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
 
 struct GameStateSyncHashes
@@ -1503,6 +1508,9 @@ struct State
     bool WorldStateSyncEnabled = false;
     bool WorldStateApplyEnabled = false;
     bool WorldStateApplyStarActor = true;
+    bool WorldStateApplyStarCandidate = true;
+    int WorldStateStarCandidateDeepScanInterval = 30;
+    int WorldStateStarCandidateFreshWaitUs = 0;
     bool WorldStateSpawnItem = false;
     bool WorldStateApplyMvlStageLayoutGates = false;
     bool WorldStateSpawnMovingHazard = false;
@@ -1512,6 +1520,8 @@ struct State
     bool WorldStateApplyMovingHazard = false;
     bool WorldStateClearMovingHazardLinkFields = false;
     bool WorldStateFreezeLocalMovingHazardUpdate = false;
+    bool WorldStatePruneExtraMovingHazard = false;
+    int WorldStatePruneExtraMovingHazardDelayFrames = 0;
     bool WorldStateApplyEffects = false;
     bool WorldStateApplyActorSnapshot = false;
     bool WorldStateApplyActorSnapshotLifecycle = false;
@@ -2253,11 +2263,14 @@ struct State
     melonDS::u32 WorldMovingHazardGUIDCaches[16][kMaxWorldMovingHazards] {};
     melonDS::u32 WorldMovingHazardRemoteGUIDMaps[16][kMaxWorldMovingHazards] {};
     melonDS::u32 WorldMovingHazardLocalGUIDMaps[16][kMaxWorldMovingHazards] {};
+    melonDS::u32 PendingExtraMovingHazardLocalGUIDs[16][kMaxWorldMovingHazards] {};
+    melonDS::u32 PendingExtraMovingHazardFirstFrames[16][kMaxWorldMovingHazards] {};
     melonDS::u32 WorldActorSnapshotRemoteGUIDMaps[16][kMaxWorldActorSnapshots] {};
     melonDS::u32 WorldActorSnapshotLocalGUIDMaps[16][kMaxWorldActorSnapshots] {};
     melonDS::u32 PendingWorldActorSnapshotRemoteGUIDs[16][kMaxWorldActorSnapshots] {};
     melonDS::u32 PendingWorldActorSnapshotFirstMissingFrames[16][kMaxWorldActorSnapshots] {};
     melonDS::u32 LastSpawnedWorldActorSnapshotRemoteGUIDs[16][kMaxWorldActorSnapshots] {};
+    melonDS::u32 LastStarCandidateDeepScanFrame[16] {};
     melonDS::u32 WorldMovingHazardCacheCounts[16] {};
     melonDS::u32 LastTracedWorldMovingHazardsFrame[16] {};
     melonDS::u32 LastTracedWorldEffectsFrame[16] {};
@@ -2507,11 +2520,14 @@ void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
     std::fill(std::begin(G.WorldMovingHazardGUIDCaches[instanceID]), std::end(G.WorldMovingHazardGUIDCaches[instanceID]), 0);
     std::fill(std::begin(G.WorldMovingHazardRemoteGUIDMaps[instanceID]), std::end(G.WorldMovingHazardRemoteGUIDMaps[instanceID]), 0);
     std::fill(std::begin(G.WorldMovingHazardLocalGUIDMaps[instanceID]), std::end(G.WorldMovingHazardLocalGUIDMaps[instanceID]), 0);
+    std::fill(std::begin(G.PendingExtraMovingHazardLocalGUIDs[instanceID]), std::end(G.PendingExtraMovingHazardLocalGUIDs[instanceID]), 0);
+    std::fill(std::begin(G.PendingExtraMovingHazardFirstFrames[instanceID]), std::end(G.PendingExtraMovingHazardFirstFrames[instanceID]), 0);
     std::fill(std::begin(G.WorldActorSnapshotRemoteGUIDMaps[instanceID]), std::end(G.WorldActorSnapshotRemoteGUIDMaps[instanceID]), 0);
     std::fill(std::begin(G.WorldActorSnapshotLocalGUIDMaps[instanceID]), std::end(G.WorldActorSnapshotLocalGUIDMaps[instanceID]), 0);
     std::fill(std::begin(G.PendingWorldActorSnapshotRemoteGUIDs[instanceID]), std::end(G.PendingWorldActorSnapshotRemoteGUIDs[instanceID]), 0);
     std::fill(std::begin(G.PendingWorldActorSnapshotFirstMissingFrames[instanceID]), std::end(G.PendingWorldActorSnapshotFirstMissingFrames[instanceID]), 0);
     std::fill(std::begin(G.LastSpawnedWorldActorSnapshotRemoteGUIDs[instanceID]), std::end(G.LastSpawnedWorldActorSnapshotRemoteGUIDs[instanceID]), 0);
+    G.LastStarCandidateDeepScanFrame[instanceID] = 0;
 
     std::printf("NSMB MvL auto restart: reset sync caches inst=%d frame=%u cutoff=%u\n",
         instanceID,
@@ -12707,11 +12723,61 @@ bool ReadObjectByBase(
     return true;
 }
 
-std::vector<ObjectScanSample> FindActiveObjectsByIDAndSettings(
+bool ReadObjectByBaseIDOnly(
     melonDS::NDS* nds,
+    melonDS::u32 base,
+    melonDS::u32 expectedGUID,
     melonDS::u16 expectedObjectID,
-    melonDS::u32 expectedSettings,
-    bool includeStateType2)
+    ObjectScanSample& actor)
+{
+    actor = {};
+    if (!nds || !nds->MainRAM || base < kMainRAMBase)
+        return false;
+
+    const melonDS::u32 off = base - kMainRAMBase;
+    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
+    if (off + 0x120 > ramLen)
+        return false;
+
+    melonDS::u32 vtable = 0;
+    melonDS::u32 guid = 0;
+    melonDS::u32 settings = 0;
+    melonDS::u16 objectID = 0;
+    melonDS::u16 stateType = 0;
+    melonDS::u32 flags = 0;
+    if (!ReadMainRAMU32(nds, off, vtable) ||
+        !ReadMainRAMU32(nds, off + 4, guid) ||
+        !ReadMainRAMU32(nds, off + 8, settings) ||
+        !ReadMainRAMU16(nds, off + 0x0C, objectID) ||
+        !ReadMainRAMU16(nds, off + 0x0E, stateType) ||
+        !ReadMainRAMU32(nds, off + 0x10, flags))
+        return false;
+
+    if (vtable < kMainRAMBase || vtable >= kMainRAMBase + ramLen)
+        return false;
+    if (guid == 0 || guid >= 0x10000)
+        return false;
+    if (expectedGUID != 0 && guid != expectedGUID)
+        return false;
+    if (objectID != expectedObjectID)
+        return false;
+    if (stateType != 1 && stateType != 2 && stateType != 3)
+        return false;
+    if (flags >= 0x10000000)
+        return false;
+
+    actor.Found = 1;
+    actor.GUID = guid;
+    actor.Base = base;
+    actor.Settings = settings;
+    actor.StateType = stateType;
+    actor.Flags = flags;
+    ReadObjectTransform(nds, off, actor);
+    return true;
+}
+
+template <typename Reader>
+std::vector<ObjectScanSample> FindActiveObjectsByProcessLists(melonDS::NDS* nds, Reader&& reader, bool includeStateType2)
 {
     std::vector<ObjectScanSample> actors;
     if (!nds || !nds->MainRAM)
@@ -12739,7 +12805,7 @@ std::vector<ObjectScanSample> FindActiveObjectsByIDAndSettings(
                 continue;
 
             ObjectScanSample actor;
-            if (!ReadObjectByBase(nds, base, 0, expectedObjectID, expectedSettings, actor))
+            if (!reader(base, actor))
                 continue;
             if (actor.StateType == 1 || (includeStateType2 && actor.StateType == 2))
                 actors.push_back(actor);
@@ -12759,6 +12825,33 @@ std::vector<ObjectScanSample> FindActiveObjectsByIDAndSettings(
     return actors;
 }
 
+std::vector<ObjectScanSample> FindActiveObjectsByIDAndSettings(
+    melonDS::NDS* nds,
+    melonDS::u16 expectedObjectID,
+    melonDS::u32 expectedSettings,
+    bool includeStateType2)
+{
+    return FindActiveObjectsByProcessLists(
+        nds,
+        [&](melonDS::u32 base, ObjectScanSample& actor) {
+            return ReadObjectByBase(nds, base, 0, expectedObjectID, expectedSettings, actor);
+        },
+        includeStateType2);
+}
+
+std::vector<ObjectScanSample> FindActiveObjectsByID(
+    melonDS::NDS* nds,
+    melonDS::u16 expectedObjectID,
+    bool includeStateType2)
+{
+    return FindActiveObjectsByProcessLists(
+        nds,
+        [&](melonDS::u32 base, ObjectScanSample& actor) {
+            return ReadObjectByBaseIDOnly(nds, base, 0, expectedObjectID, actor);
+        },
+        includeStateType2);
+}
+
 ObjectScanSample FindNewestActiveObjectByIDAndSettings(
     melonDS::NDS* nds,
     melonDS::u16 expectedObjectID,
@@ -12767,6 +12860,18 @@ ObjectScanSample FindNewestActiveObjectByIDAndSettings(
 {
     const std::vector<ObjectScanSample> actors =
         FindActiveObjectsByIDAndSettings(nds, expectedObjectID, expectedSettings, includeStateType2);
+    if (actors.empty())
+        return {};
+    return actors.back();
+}
+
+ObjectScanSample FindNewestActiveObjectByID(
+    melonDS::NDS* nds,
+    melonDS::u16 expectedObjectID,
+    bool includeStateType2 = false)
+{
+    const std::vector<ObjectScanSample> actors =
+        FindActiveObjectsByID(nds, expectedObjectID, includeStateType2);
     if (actors.empty())
         return {};
     return actors.back();
@@ -16236,6 +16341,41 @@ void FreezeLocalMovingHazardUpdate(melonDS::NDS* nds, melonDS::u32 base)
     nds->ARM9Write8(base + 0x13, static_cast<melonDS::u8>(nds->ARM9Read8(base + 0x13) | 0x02));
 }
 
+bool DeactivateLocalMovingHazard(melonDS::NDS* nds, const ObjectScanSample& actor)
+{
+    if (!actor.Found)
+        return false;
+
+    WireWorldActorState inactive {};
+    FillWireWorldActorState(actor, inactive);
+    inactive.StateType = 2;
+    return ApplyWireWorldActorLifecycleState(nds, inactive, actor.Base);
+}
+
+bool ExtraMovingHazardPruneDelayElapsed(int instanceID, std::size_t localIndex, melonDS::u32 frame, const ObjectScanSample& actor)
+{
+    if (instanceID < 0 || instanceID >= 16 || localIndex >= kMaxWorldMovingHazards || !actor.Found)
+        return false;
+
+    melonDS::u32& pendingGUID = G.PendingExtraMovingHazardLocalGUIDs[instanceID][localIndex];
+    melonDS::u32& pendingFrame = G.PendingExtraMovingHazardFirstFrames[instanceID][localIndex];
+    if (pendingGUID != actor.GUID)
+    {
+        pendingGUID = actor.GUID;
+        pendingFrame = frame;
+    }
+
+    return frame - pendingFrame >= static_cast<melonDS::u32>(std::max(0, G.WorldStatePruneExtraMovingHazardDelayFrames));
+}
+
+void ClearExtraMovingHazardPrunePending(int instanceID, std::size_t localIndex)
+{
+    if (instanceID < 0 || instanceID >= 16 || localIndex >= kMaxWorldMovingHazards)
+        return;
+    G.PendingExtraMovingHazardLocalGUIDs[instanceID][localIndex] = 0;
+    G.PendingExtraMovingHazardFirstFrames[instanceID][localIndex] = 0;
+}
+
 bool ApplyRemoteBattleStarActorState(
     melonDS::NDS* nds,
     const WireWorldActorState& remoteStar,
@@ -16270,6 +16410,53 @@ bool ApplyRemoteBattleStarActorState(
             kVsBattleStarActorObjectID,
             kVsBattleStarActorSettings);
     if (!localStar.Found || localStar.StateType != 1)
+        return false;
+
+    WireWorldActorState inactiveStar {};
+    FillWireWorldActorState(localStar, inactiveStar);
+    inactiveStar.StateType = 2;
+    return ApplyWireWorldActorLifecycleState(nds, inactiveStar, localStar.Base);
+}
+
+bool ApplyRemoteBattleStarCandidateState(
+    int instanceID,
+    melonDS::u32 frame,
+    melonDS::NDS* nds,
+    const WireWorldActorState& remoteStar,
+    melonDS::u32 predictFrames)
+{
+    if (instanceID < 0 || instanceID >= 16 || !nds || !nds->MainRAM)
+        return false;
+
+    ObjectScanSample localStar;
+    if (remoteStar.Found && (remoteStar.StateType == 1 || remoteStar.StateType == 2))
+    {
+        localStar = FindNewestActiveObjectByIDAndSettings(
+            nds,
+            kVsBattleStarCandidateObjectID,
+            remoteStar.Settings,
+            true);
+        if (!localStar.Found)
+            localStar = FindNewestActiveObjectByID(nds, kVsBattleStarCandidateObjectID, true);
+        if (!localStar.Found)
+            return false;
+
+        ApplyWireWorldActorLifecycleState(nds, remoteStar, localStar.Base);
+        return ApplyWireWorldActorState(nds, remoteStar, predictFrames, localStar.Base);
+    }
+
+    localStar = FindNewestActiveObjectByID(nds, kVsBattleStarCandidateObjectID, true);
+    if (!localStar.Found && G.WorldStateStarCandidateDeepScanInterval > 0)
+    {
+        melonDS::u32& lastDeepScanFrame = G.LastStarCandidateDeepScanFrame[instanceID];
+        if (lastDeepScanFrame == 0 ||
+            frame - lastDeepScanFrame >= static_cast<melonDS::u32>(G.WorldStateStarCandidateDeepScanInterval))
+        {
+            lastDeepScanFrame = frame;
+            localStar = FindVsBattleStarCandidate(nds);
+        }
+    }
+    if (!localStar.Found || (localStar.StateType != 1 && localStar.StateType != 2))
         return false;
 
     WireWorldActorState inactiveStar {};
@@ -16559,11 +16746,11 @@ void ApplyRemoteWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melo
         sample = G.RemoteWorldActorSnapshotSample;
     }
 
-    const std::vector<WorldActorSnapshotCandidate> localActors = CollectWorldActorSnapshotCandidates(nds);
     const std::size_t remoteCount = std::min(
         static_cast<std::size_t>(sample.Count),
         kMaxWorldActorSnapshots);
-    if (remoteCount == 0 || localActors.empty())
+    const std::vector<WorldActorSnapshotCandidate> localActors = CollectWorldActorSnapshotCandidates(nds);
+    if (localActors.empty())
         return;
 
     std::array<int, kMaxWorldActorSnapshots> localIndices {};
@@ -16971,11 +17158,33 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
 
     WireWorldState sample {};
     {
-        std::lock_guard<std::mutex> lock(G.Mutex);
-        PumpNetworkLocked();
-        if (!G.RemoteWorldStateSampleValid)
+        const auto waitDeadline = std::chrono::steady_clock::now() +
+            std::chrono::microseconds(std::max(0, G.WorldStateStarCandidateFreshWaitUs));
+        bool sampleValid = false;
+        while (true)
+        {
+            {
+                std::lock_guard<std::mutex> lock(G.Mutex);
+                PumpNetworkLocked();
+                if (G.RemoteWorldStateSampleValid)
+                {
+                    sample = G.RemoteWorldStateSample;
+                    sampleValid = true;
+                }
+            }
+            if (G.WorldStateStarCandidateFreshWaitUs <= 0 ||
+                sample.Frame >= frame ||
+                std::chrono::steady_clock::now() >= waitDeadline)
+            {
+                break;
+            }
+            if (G.WorldStateStarCandidateFreshWaitUs > 500)
+                std::this_thread::sleep_for(std::chrono::microseconds(50));
+            else
+                std::this_thread::yield();
+        }
+        if (!sampleValid)
             return;
-        sample = G.RemoteWorldStateSample;
     }
     if (sample.Frame > frame)
     {
@@ -16998,6 +17207,7 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
         WorldStateMovingHazardPredictLimit(frame));
     const bool applyHostAuthoritativeWorld = G.NetRole == Role::Client;
     bool starApplied = false;
+    bool starCandidateApplied = false;
     if (applyHostAuthoritativeWorld)
     {
         WriteMainRAMAddrU32IfChanged(nds, 0x020CAE0C, sample.StageLiquidHeight0);
@@ -17028,6 +17238,14 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
         starApplied =
             G.WorldStateApplyStarActor &&
             ApplyRemoteBattleStarActorState(nds, sample.Star, predictFrames, star);
+        starCandidateApplied =
+            G.WorldStateApplyStarCandidate &&
+            ApplyRemoteBattleStarCandidateState(
+                instanceID,
+                frame,
+                nds,
+                sample.StarCandidate,
+                predictFrames);
     }
     WorldItemApplyResult worldItemResult {};
     WorldItemApplyResult neutralWorldItemResult {};
@@ -17086,17 +17304,53 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
                 movingHazardPredictFrames,
                 localHazard.Base);
     }
+    else if (G.WorldStateApplyMovingHazard &&
+        G.WorldStatePruneExtraMovingHazard &&
+        applyHostAuthoritativeWorld &&
+        !sample.MovingHazard.Found)
+    {
+        const std::vector<ObjectScanSample> localHazards =
+            GetWorldMovingHazardsCached(instanceID, frame, nds);
+        melonDS::u32 pruned = 0;
+        for (std::size_t localIndex = 0; localIndex < localHazards.size() && localIndex < kMaxWorldMovingHazards; localIndex++)
+        {
+            const ObjectScanSample& localHazard = localHazards[localIndex];
+            if (!ExtraMovingHazardPruneDelayElapsed(instanceID, localIndex, frame, localHazard))
+                continue;
+            if (DeactivateLocalMovingHazard(nds, localHazard))
+            {
+                pruned++;
+                ClearExtraMovingHazardPrunePending(instanceID, localIndex);
+            }
+        }
+        if (pruned > 0)
+        {
+            G.WorldMovingHazardCacheCounts[instanceID] = 0;
+            std::fill(std::begin(G.WorldMovingHazardRemoteGUIDMaps[instanceID]), std::end(G.WorldMovingHazardRemoteGUIDMaps[instanceID]), 0);
+            std::fill(std::begin(G.WorldMovingHazardLocalGUIDMaps[instanceID]), std::end(G.WorldMovingHazardLocalGUIDMaps[instanceID]), 0);
+            if (G.WorldStateTraceMovingHazards)
+            {
+                std::printf("NSMB WorldState: prune-extra-hazard inst=%d frame=%u sampleFrame=%u local=%zu pruned=%u\n",
+                    instanceID,
+                    frame,
+                    sample.Frame,
+                    localHazards.size(),
+                    pruned);
+            }
+        }
+    }
 
     if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
         (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
     {
-        std::printf("NSMB WorldState: apply inst=%d frame=%u sampleFrame=%u predict=%u hazardPredict=%u star=%d neutralItem=%d neutralSpawn=%d item=%d itemSpawn=%d droppedItem=%d droppedSpawn=%d hazard=%d hazardPos=%08X/%08X\n",
+        std::printf("NSMB WorldState: apply inst=%d frame=%u sampleFrame=%u predict=%u hazardPredict=%u star=%d starCandidate=%d neutralItem=%d neutralSpawn=%d item=%d itemSpawn=%d droppedItem=%d droppedSpawn=%d hazard=%d hazardPos=%08X/%08X\n",
             instanceID,
             frame,
             sample.Frame,
             predictFrames,
             movingHazardPredictFrames,
             starApplied ? 1 : 0,
+            starCandidateApplied ? 1 : 0,
             neutralWorldItemResult.Applied ? 1 : 0,
             neutralWorldItemResult.Spawned ? 1 : 0,
             worldItemResult.Applied ? 1 : 0,
@@ -17194,7 +17448,40 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
         std::printf("\n");
     }
     if (remoteCount == 0)
+    {
+        if (G.WorldStatePruneExtraMovingHazard && !localActors.empty())
+        {
+            melonDS::u32 pruned = 0;
+            for (std::size_t localIndex = 0; localIndex < localActors.size() && localIndex < kMaxWorldMovingHazards; localIndex++)
+            {
+                const ObjectScanSample& localActor = localActors[localIndex];
+                if (!ExtraMovingHazardPruneDelayElapsed(instanceID, localIndex, frame, localActor))
+                    continue;
+
+                if (DeactivateLocalMovingHazard(nds, localActor))
+                {
+                    pruned++;
+                    ClearExtraMovingHazardPrunePending(instanceID, localIndex);
+                }
+            }
+            if (pruned > 0)
+            {
+                G.WorldMovingHazardCacheCounts[instanceID] = 0;
+                std::fill(std::begin(G.WorldMovingHazardRemoteGUIDMaps[instanceID]), std::end(G.WorldMovingHazardRemoteGUIDMaps[instanceID]), 0);
+                std::fill(std::begin(G.WorldMovingHazardLocalGUIDMaps[instanceID]), std::end(G.WorldMovingHazardLocalGUIDMaps[instanceID]), 0);
+                if (G.WorldStateTraceMovingHazards)
+                {
+                    std::printf("NSMB WorldHazards: prune-all inst=%d frame=%u sampleFrame=%u local=%zu pruned=%u\n",
+                        instanceID,
+                        frame,
+                        sample.Frame,
+                        localActors.size(),
+                        pruned);
+                }
+            }
+        }
         return;
+    }
     const std::size_t pairCount = remoteCount;
     const melonDS::u32 predictFrames = std::min(
         frame > sample.Frame ? frame - sample.Frame : 0,
@@ -17215,6 +17502,7 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
             {
                 localIndices[i] = static_cast<int>(localIndex);
                 localUsed[localIndex] = true;
+                ClearExtraMovingHazardPrunePending(instanceID, localIndex);
                 break;
             }
         }
@@ -17242,6 +17530,7 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
                 {
                     localIndices[i] = static_cast<int>(localIndex);
                     localUsed[localIndex] = true;
+                    ClearExtraMovingHazardPrunePending(instanceID, localIndex);
                     break;
                 }
             }
@@ -17279,6 +17568,7 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
         {
             localIndices[i] = static_cast<int>(closestIndex);
             localUsed[closestIndex] = true;
+            ClearExtraMovingHazardPrunePending(instanceID, closestIndex);
         }
     }
 
@@ -17487,6 +17777,27 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
         }
     }
 
+    melonDS::u32 pruned = 0;
+    if (G.WorldStatePruneExtraMovingHazard)
+    {
+        for (std::size_t localIndex = 0; localIndex < localActors.size() && localIndex < kMaxWorldMovingHazards; localIndex++)
+        {
+            if (localUsed[localIndex])
+                continue;
+
+            const ObjectScanSample& localActor = localActors[localIndex];
+            if (!ExtraMovingHazardPruneDelayElapsed(instanceID, localIndex, frame, localActor))
+                continue;
+
+            if (DeactivateLocalMovingHazard(nds, localActor))
+            {
+                pruned++;
+                ClearExtraMovingHazardPrunePending(instanceID, localIndex);
+                G.WorldMovingHazardCacheCounts[instanceID] = 0;
+            }
+        }
+    }
+
     for (std::size_t i = 0; i < kMaxWorldMovingHazards; i++)
     {
         mapChanged = mapChanged ||
@@ -17495,9 +17806,9 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
         G.WorldMovingHazardRemoteGUIDMaps[instanceID][i] = nextRemoteGUIDs[i];
         G.WorldMovingHazardLocalGUIDMaps[instanceID][i] = nextLocalGUIDs[i];
     }
-    if ((mapChanged || spawned > 0 || activated > 0 || restored > 0) && G.WorldStateTraceMovingHazards)
+    if ((mapChanged || spawned > 0 || activated > 0 || restored > 0 || pruned > 0) && G.WorldStateTraceMovingHazards)
     {
-        std::printf("NSMB WorldHazards: map inst=%d frame=%u remote=%zu local=%zu applied=%u spawned=%u activated=%u restored=%u",
+        std::printf("NSMB WorldHazards: map inst=%d frame=%u remote=%zu local=%zu applied=%u spawned=%u activated=%u restored=%u pruned=%u",
             instanceID,
             frame,
             remoteCount,
@@ -17505,7 +17816,8 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
             applied,
             spawned,
             activated,
-            restored);
+            restored,
+            pruned);
         for (std::size_t i = 0; i < pairCount; i++)
             std::printf(" slot%zu=%u/%u", i, nextRemoteGUIDs[i], nextLocalGUIDs[i]);
         std::printf("\n");
@@ -18800,7 +19112,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         sample.MvlManagerHalf4A0 = nds->ARM9Read16(sample.MvlManagerBase + 0x4A0);
     }
     const ObjectScanSample movingHazard =
-        FindNewestActiveObjectByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings, true);
+        FindNewestActiveObjectByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings, false);
     sample.MovingHazardFound = movingHazard.Found;
     sample.MovingHazardGUID = movingHazard.GUID;
     sample.MovingHazardSettings = movingHazard.Settings;
@@ -20112,6 +20424,7 @@ void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         kVsBattleStarActorSettings,
         G.WorldStarActorBaseCache,
         G.WorldStarActorGUIDCache);
+    const ObjectScanSample starCandidate = FindVsBattleStarCandidate(nds);
     ObjectScanSample item;
     ObjectScanSample neutralItem;
     ObjectScanSample droppedStarItem;
@@ -20165,6 +20478,7 @@ void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     packet.MvlStageLayoutGateCA8D0 = nds->ARM9Read8(0x020CA8D0);
     packet.MvlStageLayoutGateCAD30 = nds->ARM9Read8(0x020CAD30);
     FillWireWorldActorState(star, packet.Star);
+    FillWireWorldActorState(starCandidate, packet.StarCandidate);
     FillWireWorldActorState(neutralItem, packet.NeutralItem);
     FillWireWorldActorState(item, packet.Item);
     FillWireWorldActorState(droppedStarItem, packet.DroppedStarItem);
@@ -20178,10 +20492,11 @@ void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
         (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
     {
-        std::printf("NSMB WorldState: send inst=%d frame=%u star=%u neutralItem=%u item=%u droppedItem=%u hazard=%u hazardPos=%08X/%08X\n",
+        std::printf("NSMB WorldState: send inst=%d frame=%u star=%u starCandidate=%u neutralItem=%u item=%u droppedItem=%u hazard=%u hazardPos=%08X/%08X\n",
             instanceID,
             frame,
             packet.Star.Found,
+            packet.StarCandidate.Found,
             packet.NeutralItem.Found,
             packet.Item.Found,
             packet.DroppedStarItem.Found,
@@ -20288,16 +20603,14 @@ void SyncWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melonDS::ND
     if ((frame % static_cast<melonDS::u32>(G.WorldStateSyncInterval)) != 0)
         return;
 
-    const std::vector<WorldActorSnapshotCandidate> actors = CollectWorldActorSnapshotCandidates(nds);
-    if (actors.empty())
-        return;
-
     WireWorldActorSnapshotState packet {};
     packet.Magic = kMagic;
     packet.Version = kVersion;
     packet.Kind = kWireKindWorldActorSnapshot;
     packet.Frame = frame;
     packet.Instance = static_cast<melonDS::u32>(instanceID);
+
+    const std::vector<WorldActorSnapshotCandidate> actors = CollectWorldActorSnapshotCandidates(nds);
     packet.Count = static_cast<melonDS::u32>(std::min(actors.size(), kMaxWorldActorSnapshots));
     for (melonDS::u32 i = 0; i < packet.Count; i++)
     {
@@ -21064,6 +21377,12 @@ void InitFromEnvironment()
     G.WorldStateSyncEnabled = EnvFlag("MELONDS_NSML_WORLD_STATE_SYNC");
     G.WorldStateApplyEnabled = EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY");
     G.WorldStateApplyStarActor = !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_STAR");
+    G.WorldStateApplyStarCandidate =
+        !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_STAR_CANDIDATE");
+    G.WorldStateStarCandidateDeepScanInterval =
+        std::max(0, EnvInt("MELONDS_NSML_WORLD_STATE_STAR_CANDIDATE_DEEP_SCAN_INTERVAL", 30));
+    G.WorldStateStarCandidateFreshWaitUs =
+        std::max(0, EnvInt("MELONDS_NSML_WORLD_STATE_STAR_CANDIDATE_FRESH_WAIT_US", 0));
     G.WorldStateSpawnItem = EnvFlag("MELONDS_NSML_WORLD_STATE_SPAWN_ITEM");
     G.WorldStateApplyMvlStageLayoutGates =
         EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_MVL_STAGE_LAYOUT_GATES");
@@ -21081,6 +21400,10 @@ void InitFromEnvironment()
         EnvFlag("MELONDS_NSML_WORLD_STATE_CLEAR_MOVING_HAZARD_LINK_FIELDS");
     G.WorldStateFreezeLocalMovingHazardUpdate =
         EnvFlag("MELONDS_NSML_WORLD_STATE_FREEZE_LOCAL_MOVING_HAZARD_UPDATE");
+    G.WorldStatePruneExtraMovingHazard =
+        EnvFlag("MELONDS_NSML_WORLD_STATE_PRUNE_EXTRA_MOVING_HAZARD");
+    G.WorldStatePruneExtraMovingHazardDelayFrames =
+        std::max(0, EnvInt("MELONDS_NSML_WORLD_STATE_PRUNE_EXTRA_MOVING_HAZARD_DELAY_FRAMES", 0));
     G.WorldStateApplyEffects =
         EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS") &&
         !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_EFFECTS");
