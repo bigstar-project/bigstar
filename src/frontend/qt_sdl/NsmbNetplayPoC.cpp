@@ -1983,6 +1983,8 @@ struct State
     int RollbackFrameLeadThrottleBudgetUs = 0;
     int InputFrameLeadThrottlePollUs = 1000;
     int RollbackInputWaitUs = 0;
+    int RollbackStartupInputWaitUs = 0;
+    int RollbackStartupInputWaitFrames = 0;
     bool RollbackSkipAudioBufferDuringResim = false;
     std::map<melonDS::u32, InputState> PredictedRemoteInputs;
     std::map<melonDS::u32, RollbackStoredState> RollbackStates;
@@ -3549,6 +3551,7 @@ void PrintInputHealthLineLocked(
     bool hasRemoteInput,
     bool predictedRemoteInput);
 int CurrentInputLeadLocked(melonDS::u32 sendFrame);
+int RollbackRemoteInputWaitBudgetUsLocked(melonDS::u32 logicalFrame);
 
 void StoreRemoteInputLocked(melonDS::u32 frame, const InputState& receivedInput, melonDS::u32 localFrame)
 {
@@ -8699,9 +8702,10 @@ bool TryWaitForRollbackRemoteInputLocked(
     melonDS::NDS* nds,
     melonDS::u32 localFrame,
     melonDS::u32 targetFrame,
-    InputState& input)
+    InputState& input,
+    int waitUs)
 {
-    if (G.RollbackInputWaitUs <= 0)
+    if (waitUs <= 0)
         return false;
     if (!lock.owns_lock())
         return false;
@@ -8729,7 +8733,7 @@ bool TryWaitForRollbackRemoteInputLocked(
 
         const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - start).count();
-        const long long remainingUs = static_cast<long long>(G.RollbackInputWaitUs) - elapsedUs;
+        const long long remainingUs = static_cast<long long>(waitUs) - elapsedUs;
         if (remainingUs <= 0)
         {
             RecordRemoteInputWaitStats(static_cast<unsigned long long>(std::max<long long>(0, elapsedUs)), loops);
@@ -15190,7 +15194,13 @@ void WritePacketBridgeJitScratchIfNeeded(
             }
             else if (G.RollbackEnabled && G.InputNetplayOnly
                 && (G.NetplayStartFrame == 0 || logicalFrame >= G.NetplayStartFrame)
-                && TryWaitForRollbackRemoteInputLocked(lock, nds, frame, logicalFrame, remoteInput))
+                && TryWaitForRollbackRemoteInputLocked(
+                    lock,
+                    nds,
+                    frame,
+                    logicalFrame,
+                    remoteInput,
+                    RollbackRemoteInputWaitBudgetUsLocked(logicalFrame)))
             {
                 hasRemoteInput = true;
             }
@@ -16204,6 +16214,22 @@ melonDS::u32 CountProcessListRefsToBase(melonDS::NDS* nds, melonDS::u32 targetBa
         }
     }
     return refs;
+}
+
+int RollbackRemoteInputWaitBudgetUsLocked(melonDS::u32 logicalFrame)
+{
+    int waitUs = G.RollbackInputWaitUs;
+    if (G.RollbackStartupInputWaitUs <= 0 || G.RollbackStartupInputWaitFrames <= 0)
+        return waitUs;
+    if (G.NetplayStartFrame == 0 || logicalFrame < G.NetplayStartFrame)
+        return waitUs;
+
+    const melonDS::u32 startupEnd = G.NetplayStartFrame
+        + static_cast<melonDS::u32>(G.RollbackStartupInputWaitFrames);
+    if (logicalFrame >= startupEnd)
+        return waitUs;
+
+    return std::max(waitUs, G.RollbackStartupInputWaitUs);
 }
 
 void PrintProcessListRefsToBase(melonDS::NDS* nds, melonDS::u32 targetBase)
@@ -21105,6 +21131,10 @@ void InitFromEnvironment()
         EnvInt("MELONDS_NSML_ROLLBACK_FRAME_LEAD_THROTTLE_BUDGET_US", 0), 0, 50000);
     G.RollbackInputWaitUs = std::clamp(
         EnvInt("MELONDS_NSML_ROLLBACK_INPUT_WAIT_US", 0), 0, 20000);
+    G.RollbackStartupInputWaitUs = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_STARTUP_INPUT_WAIT_US", 0), 0, 50000);
+    G.RollbackStartupInputWaitFrames = std::clamp(
+        EnvInt("MELONDS_NSML_ROLLBACK_STARTUP_INPUT_WAIT_FRAMES", 0), 0, 600);
     G.RollbackRestoreProbe = EnvFlag("MELONDS_NSML_ROLLBACK_RESTORE_PROBE");
     G.ShadowCloneProbeEnabled = EnvFlag("MELONDS_NSML_SHADOW_CLONE_PROBE");
     G.ShadowCloneProbeInstance = std::clamp(

@@ -163,6 +163,7 @@ static bool NSMLRuntimeHooksMaybeEnabled()
         NSMLEnvFlag("MELONDS_NSML_PACKET_REPLAY_FILE") ||
         NSMLEnvFlag("MELONDS_NSML_RANDOM_TRACE") ||
         NSMLEnvFlag("MELONDS_NSML_CALL_TRACE") ||
+        NSMLEnvFlag("MELONDS_NSML_ACTOR_LIFECYCLE_CALL_TRACE") ||
         NSMLEnvFlag("MELONDS_NSML_STAGE_START_DISPATCH_TRACE") ||
         NSMLEnvFlag("MELONDS_NSML_TRACE_STAGE_CAMERA") ||
         NSMLEnvFlag("MELONDS_NSML_TRACE_PLAYER_RENDER") ||
@@ -3742,6 +3743,247 @@ static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
     return true;
 }
 
+static u32 CountNSMLProcessListRefsToBase(ARM* cpu, u32 targetBase)
+{
+    if (!cpu || !IsNSMLMainRAMAddress(targetBase))
+        return 0;
+
+    constexpr u32 processLists[] = {
+        0x0208FB18, // execute
+        0x0208FB28, // delete
+        0x0208FB38, // render
+        0x0208FB48, // create
+        0x0208FB58, 0x0208FB60, 0x0208FB68, 0x0208FB70,
+        0x0208FB78, 0x0208FB80, 0x0208FB88, 0x0208FB90,
+    };
+
+    u32 count = 0;
+    for (const u32 listAddr : processLists)
+    {
+        u32 node = ReadNSMLTrace32(cpu, listAddr);
+        for (int i = 0; i < 512 && IsNSMLMainRAMAddress(node); i++)
+        {
+            const u32 next = ReadNSMLTrace32(cpu, node + 0x04);
+            const u32 base = ReadNSMLTrace32(cpu, node + 0x08);
+            if (base == targetBase)
+                count++;
+            if (next == node)
+                break;
+            node = next;
+        }
+    }
+    return count;
+}
+
+static const char* NSMLActorLifecycleCallName(u32 instrAddr)
+{
+    switch (instrAddr)
+    {
+    case 0x0204D57C: return "ProcessNode::unlink";
+    case 0x020438E8: return "LinkedList::append";
+    case 0x02043920: return "LinkedList::remove";
+    case 0x020438B0: return "LinkedList::prepend";
+    case 0x02043990: return "LinkedList::insert";
+    case 0x0204D598: return "ProcessManager::updateProcessLists";
+    case 0x020A0B64: return "Actor::spawnActor";
+    case 0x020A0D7C: return "Actor::preCreate";
+    case 0x020A0D70: return "Actor::postCreate";
+    case 0x020A0D50: return "Actor::preDestroy";
+    case 0x020A0D44: return "Actor::postDestroy";
+    case 0x020A0CAC: return "Actor::preUpdate";
+    case 0x020A0CA0: return "Actor::postUpdate";
+    case 0x020A0C48: return "Actor::preRender";
+    case 0x020A0C3C: return "Actor::postRender";
+    default: return "unknown";
+    }
+}
+
+static bool TraceNSMLActorLifecycleCall(ARM* cpu, u32 instrAddr)
+{
+    struct ActorLifecycleTraceConfig
+    {
+        bool Checked = false;
+        bool Enabled = false;
+        u32 StartFrame = 0;
+        u32 EndFrame = 0xFFFFFFFF;
+        u32 MaxLines = 20000;
+        u32 Lines = 0;
+        bool IncludeUpdateRender = false;
+        std::vector<u32> ObjectIDs;
+        FILE* LogFile = nullptr;
+    };
+
+    static ActorLifecycleTraceConfig cfg;
+    if (!cfg.Checked)
+    {
+        std::lock_guard<std::mutex> configLock(NSMLTraceConfigMutex);
+        if (!cfg.Checked)
+        {
+            cfg.Enabled = NSMLEnvFlag("MELONDS_NSML_ACTOR_LIFECYCLE_CALL_TRACE");
+            if (const char* startFrame = getenv("MELONDS_NSML_ACTOR_LIFECYCLE_CALL_TRACE_START_FRAME"))
+                cfg.StartFrame = static_cast<u32>(strtoul(startFrame, nullptr, 0));
+            if (const char* endFrame = getenv("MELONDS_NSML_ACTOR_LIFECYCLE_CALL_TRACE_END_FRAME"))
+                cfg.EndFrame = static_cast<u32>(strtoul(endFrame, nullptr, 0));
+            if (const char* maxLines = getenv("MELONDS_NSML_ACTOR_LIFECYCLE_CALL_TRACE_MAX_LINES"))
+                cfg.MaxLines = static_cast<u32>(strtoul(maxLines, nullptr, 0));
+            cfg.IncludeUpdateRender = NSMLEnvFlag("MELONDS_NSML_ACTOR_LIFECYCLE_CALL_TRACE_UPDATE_RENDER");
+            ParseNSMLU32List(getenv("MELONDS_NSML_ACTOR_LIFECYCLE_CALL_TRACE_OBJECT_IDS"), cfg.ObjectIDs);
+            if (cfg.ObjectIDs.empty())
+                cfg.ObjectIDs.push_back(0x0053);
+            if (const char* logPath = getenv("MELONDS_NSML_ACTOR_LIFECYCLE_CALL_TRACE_LOG"))
+            {
+                if (logPath[0])
+                {
+                    cfg.LogFile = fopen(logPath, "w");
+                    if (cfg.LogFile)
+                    {
+                        fprintf(cfg.LogFile,
+                            "nds,frame,pc,name,caller,lr,sp,cpsr,r0,r1,r2,r3,base,node,objectID,settings,state,type,skipFlags,flags,guid,posX,posY,posZ,listRefs\n");
+                    }
+                }
+            }
+            if (!cfg.LogFile)
+            {
+                cfg.LogFile = stdout;
+                fprintf(cfg.LogFile,
+                    "NSMB ActorLifecycleCallTrace: header nds,frame,pc,name,caller,lr,sp,cpsr,r0,r1,r2,r3,base,node,objectID,settings,state,type,skipFlags,flags,guid,posX,posY,posZ,listRefs\n");
+            }
+            cfg.Enabled = cfg.Enabled && cfg.LogFile;
+            cfg.Checked = true;
+        }
+    }
+
+    if (!cfg.Enabled || !cpu || cpu->Num != 0)
+        return false;
+    if (cpu->NDS.NumFrames < cfg.StartFrame || cpu->NDS.NumFrames > cfg.EndFrame)
+        return false;
+    if (cfg.MaxLines != 0 && cfg.Lines >= cfg.MaxLines)
+        return false;
+
+    bool watchedCall = false;
+    switch (instrAddr)
+    {
+    case 0x0204D57C: // ProcessNode::unlink
+    case 0x020438E8: // LinkedList::append
+    case 0x02043920: // LinkedList::remove
+    case 0x020438B0: // LinkedList::prepend
+    case 0x02043990: // LinkedList::insert
+    case 0x0204D598: // ProcessManager::updateProcessLists
+    case 0x020A0B64: // Actor::spawnActor
+    case 0x020A0D7C: // Actor::preCreate
+    case 0x020A0D70: // Actor::postCreate
+    case 0x020A0D50: // Actor::preDestroy
+    case 0x020A0D44: // Actor::postDestroy
+        watchedCall = true;
+        break;
+    case 0x020A0CAC: // Actor::preUpdate
+    case 0x020A0CA0: // Actor::postUpdate
+    case 0x020A0C48: // Actor::preRender
+    case 0x020A0C3C: // Actor::postRender
+        watchedCall = cfg.IncludeUpdateRender;
+        break;
+    default:
+        break;
+    }
+    if (!watchedCall)
+        return false;
+
+    u32 node = 0;
+    u32 base = 0;
+    if (instrAddr == 0x0204D57C)
+    {
+        node = cpu->R[0];
+        if (IsNSMLMainRAMAddress(node))
+            base = ReadNSMLTrace32(cpu, node + 0x08);
+    }
+    else if (instrAddr == 0x020438E8 || instrAddr == 0x02043920 ||
+             instrAddr == 0x020438B0 || instrAddr == 0x02043990)
+    {
+        node = cpu->R[1];
+        if (IsNSMLMainRAMAddress(node))
+            base = ReadNSMLTrace32(cpu, node + 0x08);
+    }
+    else if (instrAddr != 0x020A0B64 && instrAddr != 0x0204D598)
+    {
+        base = cpu->R[0];
+    }
+
+    u32 objectID = instrAddr == 0x020A0B64 ? (cpu->R[0] & 0xFFFFu) : 0;
+    u32 settings = instrAddr == 0x020A0B64 ? cpu->R[1] : 0;
+    u32 state = 0;
+    u32 type = 0;
+    u32 skipFlags = 0;
+    u32 flags = 0;
+    u32 guid = 0;
+    u32 posX = 0;
+    u32 posY = 0;
+    u32 posZ = 0;
+    u32 listRefs = 0;
+
+    if (IsNSMLMainRAMAddress(base))
+    {
+        guid = ReadNSMLTrace32(cpu, base + 0x04);
+        settings = ReadNSMLTrace32(cpu, base + 0x08);
+        objectID = ReadNSMLTrace32(cpu, base + 0x0C) & 0xFFFFu;
+        state = ReadNSMLTraceByte(cpu, base + 0x0E);
+        flags = ReadNSMLTrace32(cpu, base + 0x10);
+        type = ReadNSMLTraceByte(cpu, base + 0x12);
+        skipFlags = ReadNSMLTraceByte(cpu, base + 0x13);
+        posX = ReadNSMLTrace32(cpu, base + 0x60);
+        posY = ReadNSMLTrace32(cpu, base + 0x64);
+        posZ = ReadNSMLTrace32(cpu, base + 0x68);
+        listRefs = CountNSMLProcessListRefsToBase(cpu, base);
+    }
+
+    bool objectMatched = instrAddr == 0x0204D598;
+    for (const u32 expectedObjectID : cfg.ObjectIDs)
+    {
+        if (objectID == expectedObjectID)
+        {
+            objectMatched = true;
+            break;
+        }
+    }
+    if (!objectMatched)
+        return false;
+
+    const u32 lr = cpu->R[14];
+    const u32 caller = lr >= 4 ? lr - 4 : lr;
+    std::lock_guard<std::mutex> outputLock(NSMLTraceOutputMutex);
+    if (cfg.LogFile == stdout)
+        fprintf(cfg.LogFile, "NSMB ActorLifecycleCallTrace: ");
+    fprintf(cfg.LogFile,
+        "%p,%u,%08X,%s,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%03X,%08X,%u,%u,%02X,%08X,%u,%08X,%08X,%08X,%u\n",
+        static_cast<void*>(&cpu->NDS),
+        cpu->NDS.NumFrames,
+        instrAddr,
+        NSMLActorLifecycleCallName(instrAddr),
+        caller,
+        lr,
+        cpu->R[13],
+        cpu->CPSR,
+        cpu->R[0],
+        cpu->R[1],
+        cpu->R[2],
+        cpu->R[3],
+        base,
+        node,
+        objectID,
+        settings,
+        state,
+        type,
+        skipFlags,
+        flags,
+        guid,
+        posX,
+        posY,
+        posZ,
+        listRefs);
+    fflush(cfg.LogFile);
+    cfg.Lines++;
+    return true;
+}
+
 bool TraceNSMLRandomCall(ARM* cpu, u32 instrAddr)
 {
     return TraceNSMLRandomCallImpl(cpu, instrAddr, 0, false);
@@ -5306,6 +5548,7 @@ void ARMv5::Execute()
                 TraceNSMLPlayerDefeatedEntry(this, instrAddr);
                 TraceNSMLStageStartDispatch(this, instrAddr);
                 TraceNSMLCallImpl(this, instrAddr);
+                TraceNSMLActorLifecycleCall(this, instrAddr);
                 TraceNSMLRandomCall(this, instrAddr);
             }
 
@@ -5440,6 +5683,7 @@ void ARMv5::Execute()
                     TraceNSMLPlayerDefeatedEntry(this, instrAddr);
                     TraceNSMLStageStartDispatch(this, instrAddr);
                     TraceNSMLCallImpl(this, instrAddr);
+                    TraceNSMLActorLifecycleCall(this, instrAddr);
                     TraceNSMLRandomCall(this, instrAddr);
                 }
 
@@ -5549,6 +5793,7 @@ void ARMv5::Execute()
                     TraceNSMLPlayerDefeatedEntry(this, instrAddr);
                     TraceNSMLStageStartDispatch(this, instrAddr);
                     TraceNSMLCallImpl(this, instrAddr);
+                    TraceNSMLActorLifecycleCall(this, instrAddr);
                     TraceNSMLRandomCall(this, instrAddr);
                 }
 
