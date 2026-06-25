@@ -1364,14 +1364,29 @@ bool IsARM9MainRAMAddress(melonDS::u32 addr)
 }
 
 int CurrentPacketBridgeLocalPlayer();
+void WritePacketBridgeJitScratchInputs(
+    int instanceID,
+    melonDS::u32 frame,
+    melonDS::NDS* nds,
+    int localPlayer,
+    const InputState& localInput,
+    const InputState& remoteInput,
+    bool hasRemoteInput,
+    bool predictedRemoteInput);
 
 struct State
 {
     struct PersistentShadowJob
     {
+        int InstanceID = -1;
         melonDS::u32 Frame = 0;
         melonDS::u32 KeyInput = 0;
         int CurCPU = 0;
+        int LocalPlayer = 0;
+        InputState LocalInput {};
+        InputState RemoteInput {};
+        bool HasRemoteInput = false;
+        bool PredictedRemoteInput = false;
         bool HasState = false;
         std::vector<char> Core;
         std::vector<melonDS::u8> MainRAM;
@@ -4608,6 +4623,29 @@ bool GetRollbackRemoteInputLocked(melonDS::u32 frame, InputState& input, bool& p
     G.RollbackPredictionCount++;
     predicted = true;
     return true;
+}
+
+bool PeekRollbackRemoteInputLocked(melonDS::u32 frame, InputState& input, bool& predicted)
+{
+    auto confirmed = G.RemoteInputs.find(frame);
+    if (confirmed != G.RemoteInputs.end())
+    {
+        input = confirmed->second;
+        predicted = false;
+        return true;
+    }
+
+    auto existingPrediction = G.PredictedRemoteInputs.find(frame);
+    if (existingPrediction != G.PredictedRemoteInputs.end())
+    {
+        input = existingPrediction->second;
+        predicted = true;
+        return true;
+    }
+
+    input = NeutralInput();
+    predicted = false;
+    return false;
 }
 
 void PruneRollbackHistoryLocked(melonDS::u32 frame)
@@ -9703,6 +9741,15 @@ void PersistentShadowWorkerMain()
             melonDS::NSML_CloneMarioVsLuigiHostState(G.PersistentShadowSource, shadow);
         shadow->CurCPU = job.CurCPU;
         shadow->KeyInput = job.KeyInput;
+        WritePacketBridgeJitScratchInputs(
+            job.InstanceID,
+            job.Frame,
+            shadow,
+            job.LocalPlayer,
+            job.LocalInput,
+            job.RemoteInput,
+            job.HasRemoteInput,
+            job.PredictedRemoteInput);
         melonDS::NDS::Current = shadow;
         shadow->GPU.SetRollbackSkipRender(true);
         shadow->SetRollbackSkipAudioBuffer(true);
@@ -9815,7 +9862,7 @@ bool StartPersistentShadowIfNeeded(melonDS::NDS* source)
     return true;
 }
 
-void QueuePersistentShadowFrameIfNeeded(melonDS::u32 frame, melonDS::NDS* nds)
+void QueuePersistentShadowFrameIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.PersistentShadowProbeEnabled || G.NetRole != Role::Host || !nds
         || frame < G.PersistentShadowStartFrame || frame > G.PersistentShadowEndFrame)
@@ -9844,9 +9891,11 @@ void QueuePersistentShadowFrameIfNeeded(melonDS::u32 frame, melonDS::NDS* nds)
         }
     }
     State::PersistentShadowJob job;
+    job.InstanceID = instanceID;
     job.Frame = frame;
     job.KeyInput = nds->KeyInput;
     job.CurCPU = nds->CurCPU;
+    job.LocalPlayer = CurrentPacketBridgeLocalPlayer();
     job.HasState = needsState;
     if (needsState)
     {
@@ -9854,6 +9903,16 @@ void QueuePersistentShadowFrameIfNeeded(melonDS::u32 frame, melonDS::NDS* nds)
             static_cast<const char*>(state.Buffer()),
             static_cast<const char*>(state.Buffer()) + state.Length());
         job.MainRAM.assign(nds->MainRAM, nds->MainRAM + nds->MainRAMMask + 1);
+    }
+    if (G.InputNetplayOnly)
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        auto localIt = G.LocalInputs.find(frame);
+        job.LocalInput = localIt != G.LocalInputs.end() ? localIt->second : NeutralInput();
+        job.HasRemoteInput = PeekRollbackRemoteInputLocked(
+            frame,
+            job.RemoteInput,
+            job.PredictedRemoteInput);
     }
     {
         std::lock_guard<std::mutex> lock(G.PersistentShadowMutex);
@@ -22324,7 +22383,7 @@ void BeforeCoreRunFrame(
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16)
         probeFrame = G.TestFrameCount[instanceID];
     RunShadowCloneProbeIfNeeded(instanceID, probeFrame, nds, input);
-    QueuePersistentShadowFrameIfNeeded(probeFrame, nds);
+    QueuePersistentShadowFrameIfNeeded(instanceID, probeFrame, nds);
 }
 
 void TracePlayerLifeChanges(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
