@@ -1435,6 +1435,7 @@ struct State
     melonDS::u32 ActiveFrameOver33ms[16] {};
     int ActiveFrameSpikeThresholdUs = 25000;
     bool ActiveFrameSpikeTrace = false;
+    bool PerfSpikePhaseTrace = false;
     int ActiveFrameSpikeTraceMaxLines = 200;
     melonDS::u32 ActiveFrameSpikeTraceLines[16] {};
     melonDS::u32 ActiveFrameCurrentSlowRun[16] {};
@@ -1509,6 +1510,7 @@ struct State
     bool WorldStateApplyEnabled = false;
     bool WorldStateApplyStarActor = true;
     bool WorldStateApplyStarCandidate = true;
+    bool WorldStateSpawnStarCandidate = false;
     int WorldStateStarCandidateDeepScanInterval = 30;
     int WorldStateStarCandidateFreshWaitUs = 0;
     bool WorldStateSpawnItem = false;
@@ -1542,6 +1544,8 @@ struct State
     int WorldStateMaxPredictFrames = 1;
     int WorldStateMovingHazardMaxPredictFrames = -1;
     int WorldStateMovingHazardMaxPredictEndOffset = -1;
+    int WorldStateMovingHazardPredictBiasFrames = 0;
+    int WorldStateMovingHazardMaxStaleFreshFrames = 0;
     int WorldStateActorRescanInterval = 0;
     int SeedWaitTimeoutMs = 10000;
     bool WaitForPeerBeforeStart = false;
@@ -2241,6 +2245,9 @@ struct State
     melonDS::u32 PlayerActorGUIDCache[16][2] {};
     melonDS::u32 WorldStarActorBaseCache[16] {};
     melonDS::u32 WorldStarActorGUIDCache[16] {};
+    melonDS::u32 WorldStarCandidateBaseCache[16] {};
+    melonDS::u32 WorldStarCandidateGUIDCache[16] {};
+    melonDS::u32 LastSpawnedStarCandidateRemoteGUID[16] {};
     melonDS::u32 LastSpawnedWorldItemRemoteGUID[16] {};
     melonDS::u32 LastConfirmedWorldItemRemoteGUID[16] {};
     melonDS::u32 PendingWorldItemRemoteGUID[16] {};
@@ -2271,6 +2278,8 @@ struct State
     melonDS::u32 PendingWorldActorSnapshotFirstMissingFrames[16][kMaxWorldActorSnapshots] {};
     melonDS::u32 LastSpawnedWorldActorSnapshotRemoteGUIDs[16][kMaxWorldActorSnapshots] {};
     melonDS::u32 LastStarCandidateDeepScanFrame[16] {};
+    melonDS::u32 LastStarCandidateSyncDeepScanFrame[16] {};
+    melonDS::u32 LastStarCandidatePruneFrame[16] {};
     melonDS::u32 WorldMovingHazardCacheCounts[16] {};
     melonDS::u32 LastTracedWorldMovingHazardsFrame[16] {};
     melonDS::u32 LastTracedWorldEffectsFrame[16] {};
@@ -2497,6 +2506,9 @@ void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
 
     G.WorldStarActorBaseCache[instanceID] = 0;
     G.WorldStarActorGUIDCache[instanceID] = 0;
+    G.WorldStarCandidateBaseCache[instanceID] = 0;
+    G.WorldStarCandidateGUIDCache[instanceID] = 0;
+    G.LastSpawnedStarCandidateRemoteGUID[instanceID] = 0;
     G.LastSpawnedWorldItemRemoteGUID[instanceID] = 0;
     G.LastConfirmedWorldItemRemoteGUID[instanceID] = 0;
     G.PendingWorldItemRemoteGUID[instanceID] = 0;
@@ -2528,6 +2540,8 @@ void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
     std::fill(std::begin(G.PendingWorldActorSnapshotFirstMissingFrames[instanceID]), std::end(G.PendingWorldActorSnapshotFirstMissingFrames[instanceID]), 0);
     std::fill(std::begin(G.LastSpawnedWorldActorSnapshotRemoteGUIDs[instanceID]), std::end(G.LastSpawnedWorldActorSnapshotRemoteGUIDs[instanceID]), 0);
     G.LastStarCandidateDeepScanFrame[instanceID] = 0;
+    G.LastStarCandidateSyncDeepScanFrame[instanceID] = 0;
+    G.LastStarCandidatePruneFrame[instanceID] = 0;
 
     std::printf("NSMB MvL auto restart: reset sync caches inst=%d frame=%u cutoff=%u\n",
         instanceID,
@@ -3231,6 +3245,12 @@ std::string PlayerGlobalWordDiffSummary(const GameStateSyncHashes& local, const 
     return out.str();
 }
 
+melonDS::u32 NormalizeMovingHazardFlagsForSync(melonDS::u32 flags)
+{
+    constexpr melonDS::u32 kLocalFreezeSkipUpdateBit = 0x02000000u;
+    return flags & ~kLocalFreezeSkipUpdateBit;
+}
+
 std::string GameStateSampleDiffSummary(const GameStateSample& local, const GameStateSample& remote)
 {
     std::ostringstream out;
@@ -3280,6 +3300,7 @@ std::string GameStateSampleDiffSummary(const GameStateSample& local, const GameS
     diff("p0CollectedStars", local.Player0CollectedStars, remote.Player0CollectedStars);
     diff("p1CollectedStars", local.Player1CollectedStars, remote.Player1CollectedStars);
     diff("hazardFound", local.MovingHazardFound, remote.MovingHazardFound);
+    diff("hazardFlags", NormalizeMovingHazardFlagsForSync(local.MovingHazardFlags), NormalizeMovingHazardFlagsForSync(remote.MovingHazardFlags));
     diff("hazardX", local.MovingHazardPosX, remote.MovingHazardPosX);
     diff("hazardY", local.MovingHazardPosY, remote.MovingHazardPosY);
 
@@ -6992,7 +7013,7 @@ void SaveRollbackCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
         storePruneUs = ElapsedUs(storePruneStart);
     }
     const unsigned long long totalUs = ElapsedUs(saveStart);
-    if (G.ActiveFrameSpikeTrace && totalUs >= static_cast<unsigned long long>(std::min(G.ActiveFrameSpikeThresholdUs, 10000)))
+    if (G.PerfSpikePhaseTrace && totalUs >= static_cast<unsigned long long>(std::min(G.ActiveFrameSpikeThresholdUs, 10000)))
     {
         std::printf(
             "NSMB RollbackCheckpointSpike: inst=%d frame=%u totalMs=%.3f prepareMs=%.3f captureMs=%.3f bufferSaveMs=%.3f storePruneMs=%.3f\n",
@@ -8661,7 +8682,7 @@ void RecordRemoteInputWaitStats(unsigned long long elapsedUs, unsigned long long
 
 void TraceRemoteInputWaitSpike(int instanceID, melonDS::u32 targetFrame, unsigned long long elapsedUs, unsigned long long loops)
 {
-    if (!G.ActiveFrameSpikeTrace
+    if (!G.PerfSpikePhaseTrace
         || elapsedUs < static_cast<unsigned long long>(std::min(G.ActiveFrameSpikeThresholdUs, 10000)))
     {
         return;
@@ -11269,7 +11290,8 @@ ObjectScanSample FindCachedObject(
     melonDS::u16 expectedObjectID,
     bool matchSettings,
     melonDS::u32 expectedSettings,
-    bool strict)
+    bool strict,
+    bool activeOnly = false)
 {
     if (!ActiveGameStateObjectScanCache)
         return {};
@@ -11281,6 +11303,8 @@ ObjectScanSample FindCachedObject(
         if (matchSettings && entry.Actor.Settings != expectedSettings)
             continue;
         if (strict && !IsCachedObjectStrict(entry))
+            continue;
+        if (activeOnly && entry.Actor.StateType != 1)
             continue;
         return entry.Actor;
     }
@@ -11305,13 +11329,13 @@ melonDS::u32 FindCachedObjectBaseByID(melonDS::u16 objectID)
     return 0;
 }
 
-ObjectScanSample FindVsBattleStarCandidate(melonDS::NDS* nds)
+ObjectScanSample FindVsBattleStarCandidate(melonDS::NDS* nds, bool activeOnly = false)
 {
     ObjectScanSample sample;
     if (!nds || !nds->MainRAM)
         return sample;
     if (ActiveGameStateObjectScanCache)
-        return FindCachedObject(kVsBattleStarCandidateObjectID, false, 0, true);
+        return FindCachedObject(kVsBattleStarCandidateObjectID, false, 0, true, activeOnly);
 
     const melonDS::u32 ramLen = nds->MainRAMMask + 1;
     if (ramLen < 0x120)
@@ -11337,7 +11361,7 @@ ObjectScanSample FindVsBattleStarCandidate(melonDS::NDS* nds)
             continue;
         if (objectID != kVsBattleStarCandidateObjectID)
             continue;
-        if (stateType != 1 && stateType != 2 && stateType != 3)
+        if (activeOnly ? stateType != 1 : (stateType != 1 && stateType != 2 && stateType != 3))
             continue;
         if (flags >= 0x10000000)
             continue;
@@ -13212,6 +13236,41 @@ ObjectScanSample GetWorldActorCached(
     return actor;
 }
 
+ObjectScanSample GetWorldStarCandidateCached(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    ObjectScanSample actor;
+    if (instanceID < 0 || instanceID >= 16)
+        return actor;
+
+    if (G.WorldStarCandidateBaseCache[instanceID] != 0 &&
+        ReadObjectByBaseIDOnly(
+            nds,
+            G.WorldStarCandidateBaseCache[instanceID],
+            G.WorldStarCandidateGUIDCache[instanceID],
+            kVsBattleStarCandidateObjectID,
+            actor) &&
+        actor.StateType == 1)
+    {
+        return actor;
+    }
+
+    actor = FindNewestActiveObjectByID(nds, kVsBattleStarCandidateObjectID, true);
+    if (!actor.Found && G.WorldStateStarCandidateDeepScanInterval > 0)
+    {
+        melonDS::u32& lastDeepScanFrame = G.LastStarCandidateSyncDeepScanFrame[instanceID];
+        if (lastDeepScanFrame == 0 ||
+            frame - lastDeepScanFrame >= static_cast<melonDS::u32>(G.WorldStateStarCandidateDeepScanInterval))
+        {
+            lastDeepScanFrame = frame;
+            actor = FindVsBattleStarCandidate(nds, true);
+        }
+    }
+
+    G.WorldStarCandidateBaseCache[instanceID] = actor.Found ? actor.Base : 0;
+    G.WorldStarCandidateGUIDCache[instanceID] = actor.Found ? actor.GUID : 0;
+    return actor;
+}
+
 void ForcePlayerActorIDsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.ForcePlayerActorIDsEnabled || !nds)
@@ -13499,7 +13558,7 @@ void ApplyVsStarSnap(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     ObjectScanSample star = FindObjectByIDAndSettings(nds, kVsBattleStarActorObjectID, kVsBattleStarActorSettings);
     if (!star.Found)
-        star = FindVsBattleStarCandidate(nds);
+        star = FindVsBattleStarCandidate(nds, true);
     const PlayerActorScanSample players = FindPlayerActors(nds);
     const ObjectScanSample& player = (G.VsStarSnapPlayerSlot == 1) ? players.Actor1 : players.Actor0;
     if (!star.Found || !player.Found)
@@ -13638,7 +13697,7 @@ void ApplyPlayerSnapToStar(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
 
     ObjectScanSample star = FindObjectByIDAndSettings(nds, kVsBattleStarActorObjectID, kVsBattleStarActorSettings);
     if (!star.Found)
-        star = FindVsBattleStarCandidate(nds);
+        star = FindVsBattleStarCandidate(nds, true);
     const PlayerActorScanSample players = FindPlayerActors(nds);
     const ObjectScanSample& player = (G.PlayerSnapToStarSlot == 1) ? players.Actor1 : players.Actor0;
     if (!star.Found || !player.Found)
@@ -13675,7 +13734,7 @@ void ApplyPlayerStickToStar(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
 
     ObjectScanSample star = FindObjectByIDAndSettings(nds, kVsBattleStarActorObjectID, kVsBattleStarActorSettings);
     if (!star.Found)
-        star = FindVsBattleStarCandidate(nds);
+        star = FindVsBattleStarCandidate(nds, true);
     const PlayerActorScanSample players = FindPlayerActors(nds);
     const ObjectScanSample& player = (G.PlayerStickToStarSlot == 1) ? players.Actor1 : players.Actor0;
     if (!star.Found || !player.Found)
@@ -15296,7 +15355,7 @@ void WritePacketBridgeJitScratchIfNeeded(
     if (G.ScriptRemotePacketEndFrame != 0 && frame > G.ScriptRemotePacketEndFrame)
         return;
 
-    const bool traceScratch = G.ActiveFrameSpikeTrace;
+    const bool traceScratch = G.PerfSpikePhaseTrace;
     const auto scratchStart = std::chrono::steady_clock::now();
     unsigned long long peerStartWaitUs = 0;
     unsigned long long networkUs = 0;
@@ -16418,6 +16477,47 @@ bool ApplyRemoteBattleStarActorState(
     return ApplyWireWorldActorLifecycleState(nds, inactiveStar, localStar.Base);
 }
 
+melonDS::u32 PruneExtraBattleStarCandidates(
+    int instanceID,
+    melonDS::u32 frame,
+    melonDS::NDS* nds,
+    melonDS::u32 keepBase)
+{
+    if (!nds || !nds->MainRAM)
+        return 0;
+    if (instanceID < 0 || instanceID >= 16)
+        return 0;
+    const melonDS::u32 interval =
+        static_cast<melonDS::u32>(std::max(1, G.WorldStateStarCandidateDeepScanInterval));
+    melonDS::u32& lastPruneFrame = G.LastStarCandidatePruneFrame[instanceID];
+    if (lastPruneFrame != 0 && frame - lastPruneFrame < interval)
+        return 0;
+    lastPruneFrame = frame;
+
+    melonDS::u32 pruned = 0;
+    const std::vector<ObjectScanSample> actors =
+        FindActiveObjectsByID(nds, kVsBattleStarCandidateObjectID, true);
+    for (const ObjectScanSample& actor : actors)
+    {
+        if (!actor.Found || actor.Base == keepBase || actor.StateType != 1)
+            continue;
+
+        WireWorldActorState inactiveStar {};
+        FillWireWorldActorState(actor, inactiveStar);
+        inactiveStar.StateType = 2;
+        if (ApplyWireWorldActorLifecycleState(nds, inactiveStar, actor.Base))
+        {
+            if (G.WorldStarCandidateBaseCache[instanceID] == actor.Base)
+            {
+                G.WorldStarCandidateBaseCache[instanceID] = 0;
+                G.WorldStarCandidateGUIDCache[instanceID] = 0;
+            }
+            pruned++;
+        }
+    }
+    return pruned;
+}
+
 bool ApplyRemoteBattleStarCandidateState(
     int instanceID,
     melonDS::u32 frame,
@@ -16438,11 +16538,28 @@ bool ApplyRemoteBattleStarCandidateState(
             true);
         if (!localStar.Found)
             localStar = FindNewestActiveObjectByID(nds, kVsBattleStarCandidateObjectID, true);
+        if (!localStar.Found &&
+            G.WorldStateSpawnStarCandidate &&
+            G.LastSpawnedStarCandidateRemoteGUID[instanceID] != remoteStar.GUID &&
+            SpawnRemoteWorldActor(
+                instanceID,
+                frame,
+                nds,
+                remoteStar,
+                kVsBattleStarCandidateObjectID,
+                "StarCandidate"))
+        {
+            G.LastSpawnedStarCandidateRemoteGUID[instanceID] = remoteStar.GUID;
+            return true;
+        }
         if (!localStar.Found)
             return false;
 
         ApplyWireWorldActorLifecycleState(nds, remoteStar, localStar.Base);
-        return ApplyWireWorldActorState(nds, remoteStar, predictFrames, localStar.Base);
+        const bool applied = ApplyWireWorldActorState(nds, remoteStar, predictFrames, localStar.Base);
+        if (applied && G.WorldStatePruneAbsentActorSnapshotStarCandidate)
+            PruneExtraBattleStarCandidates(instanceID, frame, nds, localStar.Base);
+        return applied;
     }
 
     localStar = FindNewestActiveObjectByID(nds, kVsBattleStarCandidateObjectID, true);
@@ -16462,7 +16579,10 @@ bool ApplyRemoteBattleStarCandidateState(
     WireWorldActorState inactiveStar {};
     FillWireWorldActorState(localStar, inactiveStar);
     inactiveStar.StateType = 2;
-    return ApplyWireWorldActorLifecycleState(nds, inactiveStar, localStar.Base);
+    const bool applied = ApplyWireWorldActorLifecycleState(nds, inactiveStar, localStar.Base);
+    if (applied && G.WorldStatePruneAbsentActorSnapshotStarCandidate)
+        PruneExtraBattleStarCandidates(instanceID, frame, nds, 0);
+    return applied;
 }
 
 bool IsWorldActorHeaderAtBase(
@@ -16728,6 +16848,15 @@ melonDS::u32 WorldStateMovingHazardPredictLimit(melonDS::u32 frame)
     return static_cast<melonDS::u32>(std::max(0, G.WorldStateMovingHazardMaxPredictFrames));
 }
 
+melonDS::u32 WorldStateMovingHazardPredictFrames(melonDS::u32 frame, melonDS::u32 sampleFrame)
+{
+    const int lagFrames = frame > sampleFrame ? static_cast<int>(frame - sampleFrame) : 0;
+    const int biasedFrames = std::max(0, lagFrames + G.WorldStateMovingHazardPredictBiasFrames);
+    return std::min(
+        static_cast<melonDS::u32>(biasedFrames),
+        WorldStateMovingHazardPredictLimit(frame));
+}
+
 void ApplyRemoteWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.Enabled || !G.WorldStateApplyActorSnapshot || G.NetRole != Role::Client || !nds || !nds->MainRAM)
@@ -16823,9 +16952,8 @@ void ApplyRemoteWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melo
     const melonDS::u32 predictFrames = std::min(
         frame > sample.Frame ? frame - sample.Frame : 0,
         static_cast<melonDS::u32>(std::max(0, G.WorldStateMaxPredictFrames)));
-    const melonDS::u32 movingHazardPredictFrames = std::min(
-        frame > sample.Frame ? frame - sample.Frame : 0,
-        WorldStateMovingHazardPredictLimit(frame));
+    const melonDS::u32 movingHazardPredictFrames =
+        WorldStateMovingHazardPredictFrames(frame, sample.Frame);
     melonDS::u32 applied = 0;
     melonDS::u32 pruned = 0;
     melonDS::u32 spawned = 0;
@@ -17388,8 +17516,16 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
                 break;
             std::this_thread::sleep_for(std::chrono::microseconds(100));
         }
-        if (!sampleValid || (preferFreshSample && sample.Frame < frame))
+        if (!sampleValid)
             return;
+        const melonDS::u32 staleFreshFrames = sample.Frame < frame ? frame - sample.Frame : 0;
+        if (preferFreshSample &&
+            sample.Frame < frame &&
+            (G.WorldStateMovingHazardMaxStaleFreshFrames <= 0 ||
+                staleFreshFrames > static_cast<melonDS::u32>(G.WorldStateMovingHazardMaxStaleFreshFrames)))
+        {
+            return;
+        }
     }
     if (sample.Frame > frame)
     {
@@ -17483,9 +17619,8 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
         return;
     }
     const std::size_t pairCount = remoteCount;
-    const melonDS::u32 predictFrames = std::min(
-        frame > sample.Frame ? frame - sample.Frame : 0,
-        WorldStateMovingHazardPredictLimit(frame));
+    const melonDS::u32 predictFrames =
+        WorldStateMovingHazardPredictFrames(frame, sample.Frame);
     int localIndices[kMaxWorldMovingHazards] { -1, -1, -1, -1 };
     bool localUsed[kMaxWorldMovingHazards] {};
     bool remoteHadMap[kMaxWorldMovingHazards] {};
@@ -18159,7 +18294,9 @@ void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
         ReadPlayerGlobalState(nds, static_cast<melonDS::u32>(remotePlayer), localGlobalsBefore);
         deathTransitionGlobalsDifferBefore =
             localGlobalsBefore.Dead != sample.Dead ||
-            localGlobalsBefore.Deaths != sample.Deaths;
+            localGlobalsBefore.Deaths != sample.Deaths ||
+            (!G.PlayerStateTreatTransitionStatusLocal &&
+                localGlobalsBefore.TransitionStatus != sample.TransitionStatus);
         criticalGlobalsDifferBefore =
             localGlobalsBefore.Powerup != sample.Powerup ||
             localGlobalsBefore.InventoryPowerup != sample.InventoryPowerup ||
@@ -18336,19 +18473,23 @@ void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
         ? WritePlayerMinimalTransitionStateByBase(nds, localBase, sample)
         : (transformApplied && WritePlayerRuntimeStateByBase(nds, localBase, sample));
 
-    if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
+    if ((applyTrace || G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
         (G.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0))
     {
-        std::printf("NSMB PlayerState: apply inst=%d frame=%u sampleFrame=%u remotePlayer=%d predict=%u transitionMin=%d transform=%d runtime=%d globals=%d pos=%08X/%08X vel=%08X/%08X lives=%u deaths=%u dead=%u stars=%u\n",
+        std::printf("NSMB PlayerState: apply inst=%d frame=%u sampleFrame=%u remotePlayer=%d stale=%u predict=%u transitionMin=%d transform=%d runtime=%d globals=%d localFound=%u localPos=%08X/%08X samplePos=%08X/%08X vel=%08X/%08X lives=%u deaths=%u dead=%u stars=%u\n",
             instanceID,
             frame,
             sampleFrame,
             remotePlayer,
+            sampleAge,
             predictFrames,
             transitionMinimalApply ? 1 : 0,
             transformApplied ? 1 : 0,
             runtimeApplied ? 1 : 0,
             globalsApplied ? 1 : 0,
+            localActor.Found,
+            localActor.PosX,
+            localActor.PosY,
             sample.PosX,
             sample.PosY,
             sample.VelX,
@@ -18665,7 +18806,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.SceneCurrentSceneID = nds->ARM9Read16(kSceneCurrentSceneIDAddr);
     sample.SceneNextSceneSettings = nds->ARM9Read32(kSceneNextSceneSettingsAddr);
 
-    const ObjectScanSample star = FindVsBattleStarCandidate(nds);
+    const ObjectScanSample star = FindVsBattleStarCandidate(nds, true);
     sample.VsStarFound = star.Found;
     sample.VsStarGUID = star.GUID;
     sample.VsStarBase = star.Base;
@@ -19329,18 +19470,8 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.StageActorManagerStateType);
     MixGameStateValue(sample.Hash, sample.StageControllerFound);
     MixGameStateValue(sample.Hash, sample.StageControllerStateType);
-    MixGameStateValue(sample.Hash, sample.MvlObject267Found);
-    MixGameStateValue(sample.Hash, sample.MvlObject267StateType);
-    MixGameStateValue(sample.Hash, sample.MvlObject267LeftFound);
-    MixGameStateValue(sample.Hash, sample.MvlObject267LeftStateType);
-    MixGameStateValue(sample.Hash, sample.MvlObject267LeftPosX);
-    MixGameStateValue(sample.Hash, sample.MvlObject267LeftPosY);
-    MixGameStateValue(sample.Hash, sample.MvlObject267LeftPosZ);
-    MixGameStateValue(sample.Hash, sample.MvlObject267RightFound);
-    MixGameStateValue(sample.Hash, sample.MvlObject267RightStateType);
-    MixGameStateValue(sample.Hash, sample.MvlObject267RightPosX);
-    MixGameStateValue(sample.Hash, sample.MvlObject267RightPosY);
-    MixGameStateValue(sample.Hash, sample.MvlObject267RightPosZ);
+    // 0x10B and fine camera/layout words are local-view artifacts in MvL.
+    // Keep them in CSV traces, but exclude them from gameplay sync hash.
     MixGameStateValue(sample.Hash, sample.MvlGlobal965C);
     MixGameStateValue(sample.Hash, sample.MvlGlobal9670);
     MixGameStateValue(sample.Hash, sample.MvlGlobal9674);
@@ -19353,8 +19484,6 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCAE80);
     MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCAE74);
     MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCAEB8);
-    MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCAF20);
-    MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCAF40);
     MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCA8C0);
     MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCA8D0);
     MixGameStateValue(sample.Hash, sample.MvlStageLayoutGateCAD30);
@@ -19378,7 +19507,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     MixGameStateValue(sample.Hash, sample.MovingHazardFound);
     MixGameStateValue(sample.Hash, mixObjectSettingsForGameplay(sample.MovingHazardSettings));
     MixGameStateValue(sample.Hash, sample.MovingHazardStateType);
-    MixGameStateValue(sample.Hash, sample.MovingHazardFlags);
+    MixGameStateValue(sample.Hash, NormalizeMovingHazardFlagsForSync(sample.MovingHazardFlags));
     MixGameStateValue(sample.Hash, sample.MovingHazardPosX);
     MixGameStateValue(sample.Hash, sample.MovingHazardPosY);
     MixGameStateValue(sample.Hash, sample.MovingHazardPosZ);
@@ -20424,7 +20553,7 @@ void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         kVsBattleStarActorSettings,
         G.WorldStarActorBaseCache,
         G.WorldStarActorGUIDCache);
-    const ObjectScanSample starCandidate = FindVsBattleStarCandidate(nds);
+    const ObjectScanSample starCandidate = GetWorldStarCandidateCached(instanceID, frame, nds);
     ObjectScanSample item;
     ObjectScanSample neutralItem;
     ObjectScanSample droppedStarItem;
@@ -20977,6 +21106,7 @@ void InitFromEnvironment()
     G.ActiveFrameSpikeThresholdUs = std::clamp(
         EnvInt("MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS", 25), 1, 1000) * 1000;
     G.ActiveFrameSpikeTrace = EnvFlag("MELONDS_NSML_FPS_SPIKE_TRACE");
+    G.PerfSpikePhaseTrace = EnvFlag("MELONDS_NSML_PERF_SPIKE_PHASE_TRACE");
     G.ActiveFrameSpikeTraceMaxLines = std::clamp(
         EnvInt("MELONDS_NSML_FPS_SPIKE_TRACE_MAX_LINES", 200), 0, 100000);
     G.FrameHeartbeatInterval = std::clamp(
@@ -21379,6 +21509,8 @@ void InitFromEnvironment()
     G.WorldStateApplyStarActor = !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_STAR");
     G.WorldStateApplyStarCandidate =
         !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_STAR_CANDIDATE");
+    G.WorldStateSpawnStarCandidate =
+        EnvFlag("MELONDS_NSML_WORLD_STATE_SPAWN_STAR_CANDIDATE");
     G.WorldStateStarCandidateDeepScanInterval =
         std::max(0, EnvInt("MELONDS_NSML_WORLD_STATE_STAR_CANDIDATE_DEEP_SCAN_INTERVAL", 30));
     G.WorldStateStarCandidateFreshWaitUs =
@@ -21442,6 +21574,10 @@ void InitFromEnvironment()
         EnvInt("MELONDS_NSML_WORLD_STATE_MOVING_HAZARD_MAX_PREDICT_END_OFFSET", -1);
     if (G.WorldStateMovingHazardMaxPredictEndOffset < -1)
         G.WorldStateMovingHazardMaxPredictEndOffset = -1;
+    G.WorldStateMovingHazardPredictBiasFrames =
+        std::clamp(EnvInt("MELONDS_NSML_WORLD_STATE_MOVING_HAZARD_PREDICT_BIAS_FRAMES", 0), -8, 8);
+    G.WorldStateMovingHazardMaxStaleFreshFrames =
+        std::clamp(EnvInt("MELONDS_NSML_WORLD_STATE_MOVING_HAZARD_MAX_STALE_FRESH_FRAMES", 0), 0, 30);
     G.WorldStateActorRescanInterval = std::max(0, EnvInt("MELONDS_NSML_WORLD_STATE_ACTOR_RESCAN_INTERVAL", 0));
 
     const char* memPatchFile = std::getenv("MELONDS_NSML_MEM_PATCH_FILE");
@@ -22352,7 +22488,7 @@ public:
     };
 
     BeforeHookPhaseTrace(int instanceID, melonDS::u32 frame)
-        : Enabled(G.ActiveFrameSpikeTrace)
+        : Enabled(G.PerfSpikePhaseTrace)
         , InstanceID(instanceID)
         , Frame(frame)
         , Start(std::chrono::steady_clock::now())
@@ -23459,7 +23595,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     SyncPlayerState(instanceID, logFrame, nds);
     const auto afterSyncPlayer = std::chrono::steady_clock::now();
 
-    if (G.ActiveFrameSpikeTrace)
+    if (G.PerfSpikePhaseTrace)
     {
         const auto totalUs = std::chrono::duration_cast<std::chrono::microseconds>(
             afterSyncPlayer - afterHookCallStart).count();

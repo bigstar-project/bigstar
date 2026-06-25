@@ -170,6 +170,7 @@ param(
     [int]$HostStartupDelayMs = 1200,
     [string]$LogDir = "logs\nsmb-mvl-split-local-input-smoke",
     [switch]$FpsSpikeTrace,
+    [switch]$PerfSpikePhaseTrace,
     [switch]$AllowJit
 )
 
@@ -177,7 +178,11 @@ $ErrorActionPreference = "Stop"
 
 if ($FpsSpikeTrace -and ($MaxConsecutiveSlowFrames -ge 0 -or $MaxRollbackFrameMs -gt 0.0)) {
     $env:MELONDS_NSML_FPS_SPIKE_TRACE = "1"
-    $env:MELONDS_NSML_PERF_SPIKE_PHASE_TRACE = "1"
+    if ($PerfSpikePhaseTrace) {
+        $env:MELONDS_NSML_PERF_SPIKE_PHASE_TRACE = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_PERF_SPIKE_PHASE_TRACE -ErrorAction SilentlyContinue
+    }
     if (-not $env:MELONDS_NSML_FPS_SPIKE_TRACE_MAX_LINES) {
         $env:MELONDS_NSML_FPS_SPIKE_TRACE_MAX_LINES = "200"
     }
