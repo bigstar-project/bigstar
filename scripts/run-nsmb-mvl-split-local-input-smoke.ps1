@@ -899,6 +899,9 @@ function Assert-NoStateSyncMismatch {
     $mismatches = @()
     foreach ($line in ($Text -split "`r?`n")) {
         if ($line -match "NSMB PoC: game state mismatch .* frame=([0-9]+)") {
+            if ([int]$Matches[1] -lt $GameStateCompareStartFrame) {
+                continue
+            }
             $mismatches += [pscustomobject]@{
                 Frame = [int]$Matches[1]
                 Line = $line

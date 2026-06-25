@@ -3,6 +3,13 @@
 ## 2026-06-25 current design boundary
 
 - Hard constraint is unchanged: GUI rollback must stay at `InputDelayFrames=2`. Increasing delay is diagnostic only and is not a solution for this goal.
+- 2026-06-26 retake tightened the boundary:
+  - Foreground exact-ish rollback is still bounded by visible-frame replay. `nsmbtc-rb0-mr2-limit1-arena-stack-devices-gpu3dlight` and the new `limit2` variant both stayed around `18.3-18.5ms` average with many over33 frames under chaos sendDelay2/jitter2; `limit2` did not remove StateSync mismatch and did not make the path playable.
+  - Reducing to `maxresim1` is not safe. The new `nsmbtc-rb0-mr1-limit1-arena-stack-devices-gpu3dlight` candidate lowers the replay window but leaves persistent `playerGlobal` mismatch near `1020/1080`.
+  - `tinycoreramdelta` maxresim1 is worse than `nsmbtinycore` in this workload: it still mismatches and produces `100ms+` correction frames, so it is not the practical exact baseline.
+  - Plan-D-ish repair remains the only shape near 60fps, but the latest word-diff run shows the remaining error is systemic: moving-hazard position/list membership, player transition/Y state, player globals, and hidden basic state can diverge together. Treating enemies/stars/hazards as isolated symptoms will not converge quickly enough.
+  - Persistent shadow continuous is rejected again for the current implementation. The worker can complete queued jobs, but shadow `RunFrame` averaged about `34ms`, foreground host average rose to `20ms`, and the shadow state still differed from foreground by `8967` Main RAM bytes. This is not an application bug around missing commit; the underlying second-core replay is too slow/divergent as currently constructed.
+  - Direct process-list relink for restored moving hazards was explicitly tested and removed from runnable candidates after ARM9 prefetch aborts. The useful diagnostic is `listRefs=0` after memory restore: it proves the selected snapshot has object bytes without game-owned process-list/lifecycle ownership.
 - There are currently two partial paths, neither complete:
   - Exact/cartlite rollback is still the correctness reference, but foreground correction is too expensive. Latest exact/cartlite retakes keep restore around `6.5-6.6ms` and resimulated `RunFrame` around `14-15ms`; even when checkpoint save is small, one visible-frame correction can exceed the frame budget. Adding `0x02088800+0x300` for net-random state fixed one first-diff class but did not make exact rollback smooth or fully mismatch-free.
   - Plan-D-ish predict/repair selected state is fast enough to be interesting. The current best measured shape is `predictrepair-delay2-player-world-actorsnap32-lifecycle-pruneabsentstar-transition0-staractivate-playerpred2`: dualstresslong reached about `16.684/16.686ms`, host max `42.569ms`, client max `32.259ms`, and removed the active-star client-only drift. It still mismatches around player transition/Y state, so it is not yet correct.
@@ -11,7 +18,7 @@
   - `Game::playerJumpPressedRingBuffer` is excluded from `playerGlobal` sync hash.
   - `Basic` hash ignores unstable GUID/object-scan diagnostics and dead/inactive star candidates.
   - Those fields remain logged for diagnostics, but they should not promote/reject candidates by themselves.
-- Current design implication: checkpoint byte trimming alone is exhausted. Exact rollback is bounded by restore + resimulation placement; Plan-D can hit the FPS target but still needs semantic player/global and moving-hazard lifecycle repair. The next useful work is root classification of deterministic game state in those areas, not more broad page widening or single-symptom actor patches.
+- Current design implication: checkpoint byte trimming and same-frame correction scheduling are exhausted for the current foreground architecture. Exact rollback is bounded by restore + resimulation placement; Plan-D can hit the FPS target but needs a semantic authoritative-state model. The next useful work is root classification of deterministic player/global state and ROM/game-code analysis of moving-hazard actor lifecycle, especially safe activation/list insertion, not more broad page widening or single-symptom actor patches.
 - Follow-up measurement narrowed the Plan-D path:
   - Per-frame reliable `PlayerState` is not viable under artificial delay/jitter because reliable traffic can stall the peers.
   - Low-rate reliable player-state keyframes (`MELONDS_NSML_PLAYER_STATE_RELIABLE_INTERVAL=30`) are viable for no-artificial dualstresslong and keep the fast shape.

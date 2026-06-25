@@ -3,6 +3,15 @@
 ## Current rollback status - 2026-06-25
 
 - Active goal remains open: keep GUI rollback at `InputDelayFrames=2`, avoid persistent host/client StateSync mismatch after rollback settles, and keep complex practical play close to 60fps without visible correction spikes. Raising input delay is still not an accepted fix.
+- 2026-06-26 continuation summary:
+  - Rebuilt and retested the current foreground exact-ish and Plan-D-ish boundaries with `InputDelayFrames=2`, `InputSendDelayFrames=2`, `InputSendJitterFrames=2`, and spike detection enabled.
+  - `pland-p4-kf30-hz-dynpred-redeath` remains the best timing shape but is still correctness-unsafe: `logs/rb-continue-mr1-mr2-pland/20260626-004533` measured about `16.855/16.856ms`, but StateSync still diverged around `3900/3960`. Trace run `logs/rb-continue-pland-worddiff/20260626-004951` showed the mismatch is broad, not a single actor symptom: early frames include moving-hazard position plus player transition/Y/global drift, and later frames show hidden-basic drift.
+  - `nsmbtc-rb0-mr1-limit1-arena-stack-devices-gpu3dlight` was added as a direct no-wait/maxresim1 boundary. It reduced some spikes but mismatched from `1020/1080` and averaged `17.382/18.472ms`, so maxresim1 is not a safe promotion.
+  - `nsmbtc-rb0-mr2-limit2-arena-stack-devices-gpu3dlight` was added to test whether faster backlog clearing fixes MR2 drift. It did not: `logs/rb-continue-mr2-limit2/20260626-010042` still averaged about `18.337/18.400ms`, had `31/33` over33 frames, and persistent `playerGlobal` mismatch. This rejects "raise corrections per visible frame" as the 60fps path.
+  - `tinycoreramdelta` maxresim1 variants were retested in `logs/rb-continue-ramdelta-mr1/20260626-005130`; they were both slower and spikier than `nsmbtinycore` (`100ms+` max frames) and still mismatched, so they are not the next path.
+  - Process-list/safe-field selected rollback variants in `logs/rb-continue-proclist-safe/20260626-005558` did not produce a clean middle point. The best average stayed near the budget (`16.852/16.872ms` for `b1750-stack-core249`) but gameplay mismatched at frame `990`.
+  - Persistent shadow continuous was retested in `logs/rb-continue-shadowcont/20260626-010352`. It is still rejected as a backend: host avg `20.026ms`, max `823.889ms`, shadow `RunFrame` avg `34215.7us`, max lag `25`, `ShadowMatch=0`, and `8967` differing Main RAM bytes. It can be kept as instrumentation only, not a playable non-blocking path.
+  - Moving-hazard diagnostics now show the key failure mode more clearly: restore can write the hazard object memory, but `listRefs=0` means it is not in process lists and is not really alive. A direct process-list relink experiment caused ARM9 prefetch aborts and was removed from runnable candidates; the next hazard work needs ROM/actor lifecycle analysis for the real insertion/activation path, not manual list stitching.
 - The 2026-06-24 `b1500-arena-lite-changedjit-cp2-cartlite-mr1` conclusion below is now historical, not promoted. A repeat retake invalidated it with persistent `playerGlobal` mismatch, and later hash cleanup showed that some earlier `Basic`/GUID/object-scan mismatches were validation noise rather than gameplay state.
 - Validation hygiene added in the latest pass:
   - `playerGlobal` hashing now skips `Game::playerJumpPressedRingBuffer` at `0x0208B3D4..+0x10`, because it is input-history/ring-buffer state and produced false-positive drift.
@@ -28,7 +37,7 @@
   - `starspawnactivate`/spawn-heavy variants caused earlier mismatches or severe stalls/timeouts; one run left host active around `12fps`.
   - `transition0-staractivate-fresh-pred0` was too slow (`34/65ms` class in chaos).
   - Current persistent-shadow implementation is not a fallback until it is redesigned as a continuously fed shadow, not restore-and-run-per-frame.
-- Next actions: keep both `pland-p4-kf30-hazardlife` and `pland-p0-kf30-hazardlife` as comparison baselines. The next useful work is to separate prediction from authoritative correction more cleanly: player transform prediction should not decide player global/death correctness, and moving-hazard lifecycle needs a stable map/apply path rather than expensive spawn. Use exact/cartlite only as a correctness reference.
+- Next actions: keep Plan-D as the timing baseline and `nsmbtinycore` MR2 as the foreground correctness/cost reference. The next useful work is root actor/global lifecycle analysis: separate player transform prediction from authoritative globals/death state, and find the real moving-hazard dormant/respawn process-list insertion path in ROM/game code. Current shadow and foreground exact variants are measured boundaries, not promotion candidates.
 
 ## Delay2 rollback adaptive-checkpoint retake - 2026-06-24
 

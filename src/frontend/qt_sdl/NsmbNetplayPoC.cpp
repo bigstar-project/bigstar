@@ -1472,6 +1472,7 @@ struct State
     bool PlayerStateTreatTransitionStatusLocal = false;
     bool PlayerStateReapplyOverwrittenGlobals = false;
     bool PlayerStateReapplyCriticalGlobalsOnly = false;
+    bool PlayerStateReapplyDeathTransitionGlobalsOnly = false;
     bool PlayerStateApplyTrace = false;
     melonDS::u32 PlayerStateApplyTraceStartFrame = 0;
     melonDS::u32 PlayerStateApplyTraceEndFrame = kNoFrameLimit;
@@ -1479,6 +1480,7 @@ struct State
     int PlayerStateTransitionTransformStartOffset = 0;
     int PlayerStateSyncInterval = 1;
     int PlayerStateMaxPredictFrames = 2;
+    bool PlayerStateZeroPredictDuringTransition = false;
     int PlayerStateFreshWaitUs = 500;
     int PlayerStateMaxStaleGlobalFrames = 0;
     int PlayerStateMaxStaleCounterFrames = 0;
@@ -16159,6 +16161,96 @@ melonDS::u64 WorldMovingHazardMatchDistance(
     const WireWorldActorState& remoteActor,
     const ObjectScanSample& localActor);
 
+melonDS::u32 CountProcessListRefsToBase(melonDS::NDS* nds, melonDS::u32 targetBase)
+{
+    if (!nds || !nds->MainRAM || !IsValidMainRAMRange(nds, targetBase, 0x14))
+        return 0;
+
+    const melonDS::u32 lists[] = {
+        kNSMBProcessExecuteListAddr,
+        kNSMBProcessDeleteListAddr,
+        kNSMBProcessRenderListAddr,
+        kNSMBProcessCreateListAddr,
+        kNSMBProcessIDLookupListsAddr + 0x00,
+        kNSMBProcessIDLookupListsAddr + 0x08,
+        kNSMBProcessIDLookupListsAddr + 0x10,
+        kNSMBProcessIDLookupListsAddr + 0x18,
+        kNSMBProcessIDLookupListsAddr + 0x20,
+        kNSMBProcessIDLookupListsAddr + 0x28,
+        kNSMBProcessIDLookupListsAddr + 0x30,
+        kNSMBProcessIDLookupListsAddr + 0x38,
+    };
+
+    melonDS::u32 refs = 0;
+    for (const melonDS::u32 listAddress : lists)
+    {
+        melonDS::u32 node = 0;
+        if (!ReadMainRAMAddressU32(nds, listAddress, node))
+            continue;
+
+        std::set<melonDS::u32> seenNodes;
+        for (int i = 0; i < 512 && IsValidMainRAMRange(nds, node, 0x0C); i++)
+        {
+            if (!seenNodes.insert(node).second)
+                break;
+
+            melonDS::u32 next = 0;
+            melonDS::u32 base = 0;
+            ReadMainRAMAddressU32(nds, node + 0x04, next);
+            ReadMainRAMAddressU32(nds, node + 0x08, base);
+            if (base == targetBase)
+                refs++;
+            node = next;
+        }
+    }
+    return refs;
+}
+
+void PrintProcessListRefsToBase(melonDS::NDS* nds, melonDS::u32 targetBase)
+{
+    struct NamedList
+    {
+        const char* Name;
+        melonDS::u32 Address;
+    };
+    const NamedList lists[] = {
+        { "exec", kNSMBProcessExecuteListAddr },
+        { "delete", kNSMBProcessDeleteListAddr },
+        { "render", kNSMBProcessRenderListAddr },
+        { "create", kNSMBProcessCreateListAddr },
+        { "id0", kNSMBProcessIDLookupListsAddr + 0x00 },
+        { "id1", kNSMBProcessIDLookupListsAddr + 0x08 },
+        { "id2", kNSMBProcessIDLookupListsAddr + 0x10 },
+        { "id3", kNSMBProcessIDLookupListsAddr + 0x18 },
+        { "id4", kNSMBProcessIDLookupListsAddr + 0x20 },
+        { "id5", kNSMBProcessIDLookupListsAddr + 0x28 },
+        { "id6", kNSMBProcessIDLookupListsAddr + 0x30 },
+        { "id7", kNSMBProcessIDLookupListsAddr + 0x38 },
+    };
+
+    for (const NamedList& list : lists)
+    {
+        melonDS::u32 node = 0;
+        if (!ReadMainRAMAddressU32(nds, list.Address, node))
+            continue;
+
+        std::set<melonDS::u32> seenNodes;
+        for (int i = 0; i < 512 && IsValidMainRAMRange(nds, node, 0x0C); i++)
+        {
+            if (!seenNodes.insert(node).second)
+                break;
+
+            melonDS::u32 next = 0;
+            melonDS::u32 base = 0;
+            ReadMainRAMAddressU32(nds, node + 0x04, next);
+            ReadMainRAMAddressU32(nds, node + 0x08, base);
+            if (base == targetBase)
+                std::printf(" %s:%08X->%08X", list.Name, node, next);
+            node = next;
+        }
+    }
+}
+
 melonDS::u32 FindBestLastMovingHazardBase(int instanceID, melonDS::NDS* nds, const WireWorldActorState& remoteActor)
 {
     if (instanceID < 0 || instanceID >= 16)
@@ -16861,6 +16953,13 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
                 localActors[i].PosX,
                 localActors[i].PosY,
                 localActors[i].StateType);
+            if (G.WorldStateTraceMovingHazards)
+            {
+                std::printf("/base=%08X/refs=%u",
+                    localActors[i].Base,
+                    CountProcessListRefsToBase(nds, localActors[i].Base));
+                PrintProcessListRefsToBase(nds, localActors[i].Base);
+            }
         }
         std::printf("\n");
     }
@@ -16874,6 +16973,7 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
     bool localUsed[kMaxWorldMovingHazards] {};
     melonDS::u32 nextRemoteGUIDs[kMaxWorldMovingHazards] {};
     melonDS::u32 nextLocalGUIDs[kMaxWorldMovingHazards] {};
+    melonDS::u32 restoredBases[kMaxWorldMovingHazards] {};
 
     for (std::size_t i = 0; i < pairCount; i++)
     {
@@ -16956,19 +17056,66 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
                 if (G.WorldStateRestoreMovingHazardLastBase)
                 {
                     const melonDS::u32 lastBase = FindBestLastMovingHazardBase(instanceID, nds, remoteActor);
-                    if (lastBase != 0 &&
+                    bool baseAlreadyUsed = false;
+                    for (std::size_t localIndex = 0; localIndex < localActors.size(); localIndex++)
+                    {
+                        if (localUsed[localIndex] && localActors[localIndex].Base == lastBase)
+                        {
+                            baseAlreadyUsed = true;
+                            break;
+                        }
+                    }
+                    for (const melonDS::u32 restoredBase : restoredBases)
+                    {
+                        if (restoredBase != 0 && restoredBase == lastBase)
+                        {
+                            baseAlreadyUsed = true;
+                            break;
+                        }
+                    }
+
+                    if (!baseAlreadyUsed && lastBase != 0 &&
                         ApplyWireWorldMovingHazardState(nds, remoteActor, predictFrames, lastBase))
                     {
+                        melonDS::u32 localGUID = 0;
+                        ReadMainRAMAddressU32(nds, lastBase + 0x04, localGUID);
                         if (G.WorldStateClearMovingHazardLinkFields)
                         {
                             nds->ARM9Write32(lastBase + 0x154, 0);
                             nds->ARM9Write32(lastBase + 0x158, 0);
                         }
                         restored++;
+                        restoredBases[i] = lastBase;
                         nextRemoteGUIDs[i] = remoteActor.GUID;
-                        nextLocalGUIDs[i] = G.WorldMovingHazardLocalGUIDMaps[instanceID][i];
+                        nextLocalGUIDs[i] = localGUID;
+                        G.LastWorldMovingHazardLocalBases[instanceID][i] = lastBase;
                         mapChanged = true;
                         G.WorldMovingHazardCacheCounts[instanceID] = 0;
+                        if (G.WorldStateTraceMovingHazards)
+                        {
+                            melonDS::u16 objectID = 0;
+                            melonDS::u32 settings = 0;
+                            melonDS::u16 stateType = 0;
+                            melonDS::u32 flags = 0;
+                            ReadMainRAMAddressU16(nds, lastBase + 0x0C, objectID);
+                            ReadMainRAMAddressU32(nds, lastBase + 0x08, settings);
+                            ReadMainRAMAddressU16(nds, lastBase + 0x0E, stateType);
+                            ReadMainRAMAddressU32(nds, lastBase + 0x10, flags);
+                            std::printf(
+                                "NSMB WorldHazards: restore-hit inst=%d frame=%u remoteGuid=%u localGuid=%u base=%08X object=%03X settings=%08X state=%u flags=%08X listRefs=%u pos=%08X/%08X\n",
+                                instanceID,
+                                frame,
+                                remoteActor.GUID,
+                                localGUID,
+                                lastBase,
+                                objectID,
+                                settings,
+                                stateType,
+                                flags,
+                                CountProcessListRefsToBase(nds, lastBase),
+                                nds->ARM9Read32(lastBase + 0x60),
+                                nds->ARM9Read32(lastBase + 0x64));
+                        }
                     }
                     else if (G.WorldStateTraceMovingHazards)
                     {
@@ -17286,6 +17433,20 @@ bool WritePlayerCriticalGlobalState(melonDS::NDS* nds, const WirePlayerState& st
     return ok;
 }
 
+bool WritePlayerDeathTransitionGlobalState(melonDS::NDS* nds, const WirePlayerState& state)
+{
+    if (!nds || !nds->MainRAM || state.Player > 1)
+        return false;
+
+    const melonDS::u32 player = state.Player;
+    bool ok = true;
+    ok = WriteMainRAMAddrU8IfChanged(nds, kGamePlayerDeadAddr + player, static_cast<melonDS::u8>(state.Dead & 0xFFu)) && ok;
+    if (!G.PlayerStateTreatTransitionStatusLocal)
+        ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32) * player, state.TransitionStatus) && ok;
+    ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerDeathsAddr + sizeof(melonDS::u32) * player, state.Deaths) && ok;
+    return ok;
+}
+
 bool FindLatestRemoteGameStateLocked(int instanceID, melonDS::u32 frame, GameStateSample& sample, melonDS::u32& sampleFrame)
 {
     bool found = false;
@@ -17396,11 +17557,15 @@ void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
 
     WirePlayerState localGlobalsBefore {};
     bool criticalGlobalsDifferBefore = false;
+    bool deathTransitionGlobalsDifferBefore = false;
     bool globalsDifferBefore = false;
     if (G.PlayerStateGlobalsEnabled && remotePlayer >= 0 && remotePlayer <= 1)
     {
         localGlobalsBefore.Player = static_cast<melonDS::u32>(remotePlayer);
         ReadPlayerGlobalState(nds, static_cast<melonDS::u32>(remotePlayer), localGlobalsBefore);
+        deathTransitionGlobalsDifferBefore =
+            localGlobalsBefore.Dead != sample.Dead ||
+            localGlobalsBefore.Deaths != sample.Deaths;
         criticalGlobalsDifferBefore =
             localGlobalsBefore.Powerup != sample.Powerup ||
             localGlobalsBefore.InventoryPowerup != sample.InventoryPowerup ||
@@ -17418,9 +17583,11 @@ void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
                 localGlobalsBefore.TransitionStatus != sample.TransitionStatus);
     }
     const melonDS::u32 sampleAge = sampleFrame < frame ? (frame - sampleFrame) : 0;
-    const bool reapplyDiff = G.PlayerStateReapplyCriticalGlobalsOnly
-        ? criticalGlobalsDifferBefore
-        : globalsDifferBefore;
+    const bool reapplyDiff = G.PlayerStateReapplyDeathTransitionGlobalsOnly
+        ? deathTransitionGlobalsDifferBefore
+        : (G.PlayerStateReapplyCriticalGlobalsOnly
+            ? criticalGlobalsDifferBefore
+            : globalsDifferBefore);
     const bool canReapplyOverwrittenGlobals =
         G.PlayerStateReapplyOverwrittenGlobals &&
         reapplyDiff &&
@@ -17436,11 +17603,17 @@ void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
         canReapplyOverwrittenGlobals &&
         G.PlayerStateReapplyCriticalGlobalsOnly &&
         sampleFrame <= G.LastAppliedPlayerGlobalsFrame[instanceID][remotePlayer];
+    const bool reapplyDeathTransitionOnly =
+        canReapplyOverwrittenGlobals &&
+        G.PlayerStateReapplyDeathTransitionGlobalsOnly &&
+        sampleFrame <= G.LastAppliedPlayerGlobalsFrame[instanceID][remotePlayer];
     const bool globalsApplied = shouldApplyGlobals && (allowStaleCountersOnly && !allowStaleGlobalsOnly && !allowStaleTransform
         ? WritePlayerCounterState(nds, sample)
-        : (reapplyCriticalOnly
+        : (reapplyDeathTransitionOnly
+            ? WritePlayerDeathTransitionGlobalState(nds, sample)
+            : (reapplyCriticalOnly
             ? WritePlayerCriticalGlobalState(nds, sample)
-            : WritePlayerGlobalState(nds, sample)));
+            : WritePlayerGlobalState(nds, sample))));
     if (globalsApplied && !(allowStaleCountersOnly && !allowStaleGlobalsOnly && !allowStaleTransform))
         G.LastAppliedPlayerGlobalsFrame[instanceID][remotePlayer] = sampleFrame;
     if (applyTrace)
@@ -17543,9 +17716,16 @@ void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
         G.PlayerStateGlobalsEnabled &&
         localActor.Found &&
         IsPlayerInActorTransition(nds, localBase);
+    const bool sampleInTransition =
+        sample.TransitionStatus > 1 ||
+        sample.Dead != 0;
+    const int maxPredictFrames =
+        (G.PlayerStateZeroPredictDuringTransition && sampleInTransition)
+            ? 0
+            : G.PlayerStateMaxPredictFrames;
     const melonDS::u32 predictFrames = std::min(
         frame - sampleFrame,
-        static_cast<melonDS::u32>(std::max(0, G.PlayerStateMaxPredictFrames)));
+        static_cast<melonDS::u32>(std::max(0, maxPredictFrames)));
     const bool transformApplied = !transitionMinimalApply && WriteObjectTransformByBase(
             nds,
             localBase,
@@ -20578,6 +20758,8 @@ void InitFromEnvironment()
     G.PlayerStateTreatTransitionStatusLocal = EnvFlag("MELONDS_NSML_PLAYER_STATE_TREAT_TRANSITION_STATUS_LOCAL");
     G.PlayerStateReapplyOverwrittenGlobals = EnvFlag("MELONDS_NSML_PLAYER_STATE_REAPPLY_OVERWRITTEN_GLOBALS");
     G.PlayerStateReapplyCriticalGlobalsOnly = EnvFlag("MELONDS_NSML_PLAYER_STATE_REAPPLY_CRITICAL_GLOBALS_ONLY");
+    G.PlayerStateReapplyDeathTransitionGlobalsOnly =
+        EnvFlag("MELONDS_NSML_PLAYER_STATE_REAPPLY_DEATH_TRANSITION_GLOBALS_ONLY");
     G.PlayerStateApplyTrace = EnvFlag("MELONDS_NSML_PLAYER_STATE_APPLY_TRACE");
     G.PlayerStateApplyTraceStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_PLAYER_STATE_APPLY_TRACE_START_FRAME", 0)));
@@ -20591,6 +20773,8 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_PLAYER_STATE_TRANSITION_TRANSFORM_START_OFFSET", 0));
     G.PlayerStateSyncInterval = std::max(1, EnvInt("MELONDS_NSML_PLAYER_STATE_SYNC_INTERVAL", 1));
     G.PlayerStateMaxPredictFrames = std::max(0, EnvInt("MELONDS_NSML_PLAYER_STATE_MAX_PREDICT_FRAMES", 2));
+    G.PlayerStateZeroPredictDuringTransition =
+        EnvFlag("MELONDS_NSML_PLAYER_STATE_ZERO_PREDICT_DURING_TRANSITION");
     G.PlayerStateFreshWaitUs = std::max(0, EnvInt("MELONDS_NSML_PLAYER_STATE_FRESH_WAIT_US", 500));
     G.PlayerStateMaxStaleGlobalFrames = std::max(0, EnvInt("MELONDS_NSML_PLAYER_STATE_MAX_STALE_GLOBAL_FRAMES", 0));
     G.PlayerStateMaxStaleCounterFrames = std::max(0, EnvInt("MELONDS_NSML_PLAYER_STATE_MAX_STALE_COUNTER_FRAMES", 0));
@@ -21289,7 +21473,7 @@ void InitFromEnvironment()
             }
         }
 
-        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d playerStateSync=%d playerStateApply=%d playerStateGlobals=%d playerStateTransitionTransform=%d playerStateTransitionTransformStartOffset=%d playerStateInterval=%d playerStatePredict=%d playerStateFreshWaitUs=%d playerStateStaleGlobals=%d playerStateStaleCounters=%d playerStateStaleTransform=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
+        std::printf("NSMB Test: enabled frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d playerStateSync=%d playerStateApply=%d playerStateGlobals=%d playerStateTransitionTransform=%d playerStateTransitionTransformStartOffset=%d playerStateInterval=%d playerStatePredict=%d playerStateZeroPredictTransition=%d playerStateFreshWaitUs=%d playerStateStaleGlobals=%d playerStateStaleCounters=%d playerStateStaleTransform=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
             G.TestFrames,
             G.TestInstanceCount,
             G.FrameBarrierEnabled ? 1 : 0,
@@ -21314,6 +21498,7 @@ void InitFromEnvironment()
             G.PlayerStateTransitionTransformStartOffset,
             G.PlayerStateSyncInterval,
             G.PlayerStateMaxPredictFrames,
+            G.PlayerStateZeroPredictDuringTransition ? 1 : 0,
             G.PlayerStateFreshWaitUs,
             G.PlayerStateMaxStaleGlobalFrames,
             G.PlayerStateMaxStaleCounterFrames,
