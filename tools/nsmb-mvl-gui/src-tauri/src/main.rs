@@ -2,6 +2,7 @@
 
 mod commands;
 mod config;
+mod crash_report;
 mod models;
 mod paths;
 mod preflight;

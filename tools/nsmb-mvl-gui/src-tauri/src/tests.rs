@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::crash_report::{create_log_archive, match_result_decided};
 use crate::models::{
     CourseMode, GameSettings, GameStateMismatch, LaunchRequest, Lives, Role, RomIdentity,
 };
@@ -24,6 +25,7 @@ fn request(role: Role) -> LaunchRequest {
         signal_url: "ws://127.0.0.1:8787/session".to_owned(),
         room_code: "room_01-test".to_owned(),
         port: 8165,
+        player_names: None,
         diagnostic_events_enabled: false,
         rom_identity: None,
         rom_path: "unused.nds".to_owned(),
@@ -659,6 +661,43 @@ fn mvl_results_keep_unresolved_stage_without_winner() {
     assert!(!results[0].resolved);
     assert_eq!(results[0].mario.lives, 3);
     assert_eq!(results[0].luigi.lives, 3);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn match_result_decided_requires_target_win() {
+    let dir = temp_log_dir("mvl-match-decided");
+    fs::write(
+        dir.join("melonds.stdout.txt"),
+        "NSMB MvL auto restart: result inst=0 frame=4320 winner=0 stars=5/0 displayed=5/0 collected=5/0 lives=3/2 deaths=0/1 dead=0/0 matchWins=1/0 target=2\n\
+NSMB MvL auto restart: result inst=0 frame=8200 winner=0 stars=5/0 displayed=5/0 collected=5/0 lives=3/2 deaths=0/1 dead=0/0 matchWins=2/0 target=2\n",
+    )
+    .expect("write stdout");
+
+    let results = read_mvl_results(&dir);
+
+    assert!(match_result_decided(&results));
+    assert!(!match_result_decided(&results[..1]));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn crash_log_archive_excludes_diagnostic_events() {
+    let dir = temp_log_dir("crash-archive");
+    fs::write(dir.join("melonds.stdout.txt"), "stdout").expect("write stdout");
+    fs::write(dir.join("melonds-events.jsonl"), "large diagnostic events")
+        .expect("write diagnostic events");
+    fs::create_dir_all(dir.join("screens")).expect("create screens");
+    fs::write(dir.join("screens").join("frame.txt"), "screen").expect("write nested file");
+
+    let archive = create_log_archive(&dir).expect("create archive");
+    let file = fs::File::open(&archive).expect("open archive");
+    let mut zip = zip::ZipArchive::new(file).expect("read archive");
+    assert!(zip.by_name("melonds.stdout.txt").is_ok());
+    assert!(zip.by_name("screens/frame.txt").is_ok());
+    assert!(zip.by_name("melonds-events.jsonl").is_err());
+
+    let _ = fs::remove_file(archive);
     let _ = fs::remove_dir_all(dir);
 }
 

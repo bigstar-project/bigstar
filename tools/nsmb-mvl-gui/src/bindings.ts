@@ -110,6 +110,7 @@ export type LaunchRequest_Deserialize = {
 	port: number,
 	rom_path: string,
 	settings: GameSettings,
+	player_names?: MatchPlayerNames | null,
 	diagnostic_events_enabled?: boolean,
 	rom_identity?: RomIdentity | null,
 };
@@ -121,6 +122,7 @@ export type LaunchRequest_Serialize = {
 	port: number,
 	rom_path: string,
 	settings: GameSettings,
+	player_names?: MatchPlayerNames | null,
 	diagnostic_events_enabled: boolean,
 	rom_identity?: RomIdentity | null,
 };

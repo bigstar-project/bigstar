@@ -10,6 +10,8 @@ pub(crate) struct LaunchRequest {
     pub(crate) port: u16,
     pub(crate) rom_path: String,
     pub(crate) settings: GameSettings,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) player_names: Option<MatchPlayerNames>,
     #[serde(default)]
     pub(crate) diagnostic_events_enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]

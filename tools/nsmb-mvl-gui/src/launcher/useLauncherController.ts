@@ -874,6 +874,7 @@ export function useLauncherController() {
             ? nextForm.hostRomPath
             : nextForm.clientRomPath,
         settings: currentSettings(nextForm),
+        player_names: playerNames,
         diagnostic_events_enabled: nextForm.diagnosticEventsEnabled,
       };
 

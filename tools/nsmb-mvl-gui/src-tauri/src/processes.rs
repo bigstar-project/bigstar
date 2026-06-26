@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use std::os::windows::process::CommandExt;
 
 use crate::config::{DEFAULT_FRAMES, NETPLAY_START_FRAME};
+use crate::crash_report::{match_result_decided, send_crash_report_async};
 use crate::models::{
     BridgeDiagnostics, CourseMode, GameStateMismatch, LaunchRequest, LaunchResponse,
     MelonDiagnostics, MvlPlayerResult, MvlStageResult, Role, SessionStatus,
@@ -77,6 +78,8 @@ pub(crate) fn start_match_resolved(
         melon: melon_child,
         bridge: bridge_child,
         log_dir: paths.log_dir,
+        player_names: request.player_names,
+        crash_report_sent: false,
     });
 
     Ok(response)
@@ -162,6 +165,18 @@ pub(crate) fn session_status_inner(state: &AppState) -> Result<SessionStatus, St
         .and_then(|diagnostics| diagnostics.game_state_mismatch)
         .filter(should_show_game_state_mismatch_in_gui);
     let mvl_results = read_mvl_results(&session.log_dir);
+    if !session.crash_report_sent
+        && (melon != "running" || bridge != "running")
+        && !match_result_decided(&mvl_results)
+    {
+        session.crash_report_sent = true;
+        send_crash_report_async(
+            session.log_dir.clone(),
+            melon.clone(),
+            bridge.clone(),
+            session.player_names.clone(),
+        );
+    }
 
     Ok(SessionStatus {
         active,
