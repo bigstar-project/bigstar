@@ -2,6 +2,7 @@ import { useMutation } from '@tanstack/react-query';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { check } from '@tauri-apps/plugin-updater';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isDistributionBuild } from '../buildProfile';
 import {
   currentSettings,
   defaultInputDelayFrames,
@@ -268,12 +269,14 @@ export function useLauncherController() {
       }
 
       const seen = lobbySeenRoomIdsRef.current ?? new Set<string>();
+      const excludeOwnRooms = isDistributionBuild();
       for (const room of nextRooms) {
         const isOwnHostedRoom =
-          room.room_id === hostedRoomRef.current?.roomId ||
-          ownRoomIdsRef.current.has(room.room_id) ||
-          (room.host_player_profile_id !== undefined &&
-            room.host_player_profile_id === playerProfileIdRef.current);
+          excludeOwnRooms &&
+          (room.room_id === hostedRoomRef.current?.roomId ||
+            ownRoomIdsRef.current.has(room.room_id) ||
+            (room.host_player_profile_id !== undefined &&
+              room.host_player_profile_id === playerProfileIdRef.current));
         if (isOwnHostedRoom) {
           seen.add(room.room_id);
           continue;

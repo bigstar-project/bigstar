@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import {
   getRoom,
@@ -176,6 +176,10 @@ beforeEach(() => {
   window.location.hash = '';
 });
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 function roomSummary(
   roomId: string,
   hostProfileId = '33333333-3333-4333-8333-333333333333',
@@ -347,6 +351,8 @@ describe('useLauncherController', () => {
   });
 
   test('lobby websocket snapshot does not notify rooms hosted by the local player', async () => {
+    vi.stubGlobal('__NSMB_MVL_BUILD_PROFILE__', 'distribution');
+
     await render(
       <TestProviders>
         <LauncherHarness />
@@ -371,6 +377,28 @@ describe('useLauncherController', () => {
       expect.objectContaining({ room_id: 'own-room' }),
     );
     expect(notifyNewRoomAvailable).toHaveBeenCalledTimes(1);
+  });
+
+  test('local build can notify rooms hosted by the local player for two-window debugging', async () => {
+    vi.stubGlobal('__NSMB_MVL_BUILD_PROFILE__', 'local');
+
+    await render(
+      <TestProviders>
+        <LauncherHarness />
+      </TestProviders>,
+    );
+
+    await vi.waitFor(() => expect(subscribeLobbyRooms).toHaveBeenCalled());
+    mocks.lobbyHandlers.at(-1)?.onSnapshot([]);
+    mocks.lobbyHandlers
+      .at(-1)
+      ?.onSnapshot([roomSummary('own-room', mocks.hostProfileId)]);
+
+    await vi.waitFor(() =>
+      expect(notifyNewRoomAvailable).toHaveBeenCalledWith(
+        expect.objectContaining({ room_id: 'own-room' }),
+      ),
+    );
   });
 
   test('lobby websocket snapshot does not notify new rooms when the setting is disabled', async () => {

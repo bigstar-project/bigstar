@@ -329,7 +329,7 @@ jobs:
         working-directory: tools/nsmb-mvl-gui
         run: pnpm install --frozen-lockfile
       - name: Test Tauri backend
-        run: cargo test --release --manifest-path tools/nsmb-mvl-gui/src-tauri/Cargo.toml
+        run: cargo test --release --features single-instance --manifest-path tools/nsmb-mvl-gui/src-tauri/Cargo.toml
       - name: Resolve release metadata
         id: release-meta
         shell: pwsh
@@ -341,6 +341,7 @@ jobs:
         working-directory: tools/nsmb-mvl-gui
         shell: pwsh
         env:
+          NSMB_MVL_BUILD_PROFILE: distribution
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
@@ -351,9 +352,9 @@ jobs:
             if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
               $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
             }
-            pnpm tauri build --ci --config src-tauri/tauri.release.conf.json
+            pnpm tauri build --ci --features single-instance --config src-tauri/tauri.release.conf.json
           } else {
-            pnpm tauri build
+            pnpm tauri build --features single-instance
           }
       - name: Run packaged app preflight
         shell: pwsh

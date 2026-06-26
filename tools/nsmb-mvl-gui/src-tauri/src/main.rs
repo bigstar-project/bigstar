@@ -74,10 +74,13 @@ fn main() {
         .expect("failed to export TypeScript bindings");
     let startup_launch = std::env::args().any(|arg| arg == STARTUP_ARG);
 
-    tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            show_main_window(app.get_webview_window("main"));
-        }))
+    let builder = tauri::Builder::default();
+    #[cfg(feature = "single-instance")]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        show_main_window(app.get_webview_window("main"));
+    }));
+
+    builder
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec![STARTUP_ARG]),

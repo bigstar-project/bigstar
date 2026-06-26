@@ -4,6 +4,10 @@ version = "0.1.0"
 description = "NSMB Mario vs Luigi online launcher"
 edition = "2021"
 
+[features]
+default = []
+single-instance = ["dep:tauri-plugin-single-instance"]
+
 [build-dependencies]
 tauri-build = { version = "2.5.0", features = [] }
 
@@ -19,7 +23,7 @@ specta-typescript = "0.0.12"
 tauri = { version = "2.9.0", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-notification = "2"
-tauri-plugin-single-instance = "2"
+tauri-plugin-single-instance = { version = "2", optional = true }
 tauri-specta = { version = "=2.0.0-rc.25", features = ["typescript", "derive"] }
 uuid = { version = "1", features = ["v4"] }
 
