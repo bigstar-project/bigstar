@@ -99,7 +99,7 @@ export function showNewRoomNotification(
 
 export function getStartupEnabled() {
   if (!isTauriRuntime()) {
-    return Promise.resolve(true);
+    return Promise.resolve(false);
   }
   return unwrapCommand(commands.getStartupEnabled());
 }

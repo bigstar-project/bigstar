@@ -21,6 +21,7 @@ use specta_typescript::Typescript;
 use state::AppState;
 use tauri::{menu::MenuBuilder, tray::TrayIconBuilder, Manager, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
+use tauri_plugin_autostart::ManagerExt;
 use tauri_specta::{collect_commands, Builder as SpectaBuilder};
 use windowing::show_main_window;
 
@@ -106,6 +107,9 @@ fn main() {
         .setup(move |app| {
             specta_builder.mount_events(app);
             setup_tray(app)?;
+            if let Err(err) = apply_startup_default_off_migration(app.handle()) {
+                eprintln!("{err}");
+            }
             if startup_launch {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.hide();
@@ -141,6 +145,27 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 
     tray.build(app)?;
     Ok(())
+}
+
+fn apply_startup_default_off_migration(app: &tauri::AppHandle) -> Result<(), String> {
+    let mut settings = paths::load_launcher_settings(app)?;
+    if settings.startup_default_off_migration_applied {
+        return Ok(());
+    }
+
+    let autolaunch = app.autolaunch();
+    if autolaunch
+        .is_enabled()
+        .map_err(|err| format!("スタートアップ設定を取得できません: {err}"))?
+    {
+        autolaunch
+            .disable()
+            .map_err(|err| format!("スタートアップ解除に失敗しました: {err}"))?;
+    }
+
+    settings.startup_configured = true;
+    settings.startup_default_off_migration_applied = true;
+    paths::save_launcher_settings(app, &settings)
 }
 
 #[cfg(test)]

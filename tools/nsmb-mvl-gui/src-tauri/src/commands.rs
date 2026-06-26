@@ -130,14 +130,9 @@ pub(crate) fn get_startup_enabled(app: AppHandle) -> Result<bool, String> {
         return Ok(enabled);
     }
 
-    if !enabled {
-        autolaunch
-            .enable()
-            .map_err(|err| format!("スタートアップ登録に失敗しました: {err}"))?;
-    }
     settings.startup_configured = true;
     save_launcher_settings(&app, &settings)?;
-    Ok(true)
+    Ok(enabled)
 }
 
 #[tauri::command]

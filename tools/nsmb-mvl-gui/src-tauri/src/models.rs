@@ -89,6 +89,7 @@ pub(crate) struct LauncherSettings {
     pub(crate) input_config_opened_once: bool,
     pub(crate) diagnostic_events_enabled: bool,
     pub(crate) startup_configured: bool,
+    pub(crate) startup_default_off_migration_applied: bool,
     #[serde(default = "default_new_room_notifications_enabled")]
     pub(crate) new_room_notifications_enabled: bool,
 }
@@ -107,6 +108,7 @@ impl Default for LauncherSettings {
             input_config_opened_once: false,
             diagnostic_events_enabled: false,
             startup_configured: false,
+            startup_default_off_migration_applied: false,
             new_room_notifications_enabled: default_new_room_notifications_enabled(),
         }
     }
