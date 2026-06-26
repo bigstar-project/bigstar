@@ -62,9 +62,7 @@ describe('履歴ビュー', () => {
 
     await screen.getByText('3 - 1').click();
 
-    await screen
-      .getByRole('button', { name: '対戦履歴を削除' })
-      .click();
+    await screen.getByRole('button', { name: '対戦履歴を削除' }).click();
 
     expect(onDeleteMatch).not.toHaveBeenCalled();
     await expect

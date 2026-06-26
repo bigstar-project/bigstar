@@ -74,9 +74,10 @@ pub(crate) struct Defaults {
     pub(crate) input_config_opened_once: bool,
     pub(crate) port: u16,
     pub(crate) diagnostic_events_enabled: bool,
+    pub(crate) new_room_notifications_enabled: bool,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize, Type)]
+#[derive(Debug, Deserialize, Serialize, Type)]
 #[serde(default)]
 pub(crate) struct LauncherSettings {
     pub(crate) base_rom_path: String,
@@ -85,6 +86,26 @@ pub(crate) struct LauncherSettings {
     pub(crate) roms_prepared_once: bool,
     pub(crate) input_config_opened_once: bool,
     pub(crate) diagnostic_events_enabled: bool,
+    #[serde(default = "default_new_room_notifications_enabled")]
+    pub(crate) new_room_notifications_enabled: bool,
+}
+
+fn default_new_room_notifications_enabled() -> bool {
+    true
+}
+
+impl Default for LauncherSettings {
+    fn default() -> Self {
+        Self {
+            base_rom_path: String::new(),
+            player_name: String::new(),
+            player_profile_id: String::new(),
+            roms_prepared_once: false,
+            input_config_opened_once: false,
+            diagnostic_events_enabled: false,
+            new_room_notifications_enabled: default_new_room_notifications_enabled(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Type)]
@@ -96,6 +117,12 @@ pub(crate) struct SaveRomPathsRequest {
 #[derive(Debug, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct SaveDiagnosticEventsRequest {
+    pub(crate) enabled: bool,
+}
+
+#[derive(Debug, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct SaveNewRoomNotificationsRequest {
     pub(crate) enabled: bool,
 }
 

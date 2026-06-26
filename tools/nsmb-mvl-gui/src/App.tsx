@@ -49,6 +49,7 @@ export function App() {
           <SettingsView
             actions={launcher.actions}
             form={launcher.form}
+            startup={launcher.startup}
             summary={launcher.summary}
             updateField={launcher.updateField}
           />

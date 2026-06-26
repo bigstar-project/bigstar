@@ -19,4 +19,5 @@ export * as NumberInput from './number-input';
 export * as Select from './select';
 export { Span, type SpanProps } from './span';
 export { Spinner, type SpinnerProps } from './spinner';
+export * as Switch from './switch';
 export * as Tabs from './tabs';

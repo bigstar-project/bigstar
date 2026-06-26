@@ -10,6 +10,7 @@ import { input } from './input';
 import { numberInput } from './number-input';
 import { select } from './select';
 import { spinner } from './spinner';
+import { switchRecipe } from './switch';
 import { tabs } from './tabs';
 export const recipes = {
   button,
@@ -25,5 +26,6 @@ export const recipes = {
   spinner,
   dialog,
   collapsible,
+  switchRecipe,
 };
 export const slotRecipes = {};

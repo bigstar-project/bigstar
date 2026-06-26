@@ -27,6 +27,7 @@ export const initialForm: FormState = {
   inputMaxFrameLead: defaultInputMaxFrameLead,
   rollbackEnabled: false,
   diagnosticEventsEnabled: false,
+  newRoomNotificationsEnabled: true,
 };
 
 export function currentSettings(form: FormState): GameSettings {

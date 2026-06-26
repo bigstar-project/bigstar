@@ -2,6 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use tauri::{AppHandle, State};
+use tauri_plugin_autostart::ManagerExt;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -9,8 +10,8 @@ use std::os::windows::process::CommandExt;
 use crate::config::{DEFAULT_PORT, DEFAULT_ROOM_CODE, DEFAULT_SIGNAL_URL};
 use crate::models::{
     Defaults, GenerateRomRequest, GenerateRomResponse, LaunchRequest, LaunchResponse,
-    MatchHistoryRecord, SaveDiagnosticEventsRequest, SavePlayerNameRequest, SaveRomPathsRequest,
-    SessionStatus,
+    MatchHistoryRecord, SaveDiagnosticEventsRequest, SaveNewRoomNotificationsRequest,
+    SavePlayerNameRequest, SaveRomPathsRequest, SessionStatus,
 };
 use crate::paths::{
     absolutize_existing, app_data_dir, create_log_dir, find_bridge_binary, find_input_script,
@@ -53,6 +54,7 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
         input_config_opened_once: saved.input_config_opened_once,
         port: DEFAULT_PORT,
         diagnostic_events_enabled: saved.diagnostic_events_enabled,
+        new_room_notifications_enabled: saved.new_room_notifications_enabled,
     })
 }
 
@@ -77,6 +79,17 @@ pub(crate) fn save_diagnostic_events_enabled(
 
 #[tauri::command]
 #[specta::specta]
+pub(crate) fn save_new_room_notifications_enabled(
+    app: AppHandle,
+    request: SaveNewRoomNotificationsRequest,
+) -> Result<(), String> {
+    let mut settings = load_launcher_settings(&app)?;
+    settings.new_room_notifications_enabled = request.enabled;
+    save_launcher_settings(&app, &settings)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) fn save_player_name(
     app: AppHandle,
     request: SavePlayerNameRequest,
@@ -92,6 +105,29 @@ pub(crate) fn save_player_name(
     let mut settings = load_launcher_settings(&app)?;
     settings.player_name = player_name.to_owned();
     save_launcher_settings(&app, &settings)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn get_startup_enabled(app: AppHandle) -> Result<bool, String> {
+    app.autolaunch()
+        .is_enabled()
+        .map_err(|err| format!("スタートアップ設定を取得できません: {err}"))
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn set_startup_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let autolaunch = app.autolaunch();
+    if enabled {
+        autolaunch
+            .enable()
+            .map_err(|err| format!("スタートアップ登録に失敗しました: {err}"))
+    } else {
+        autolaunch
+            .disable()
+            .map_err(|err| format!("スタートアップ解除に失敗しました: {err}"))
+    }
 }
 
 #[tauri::command]

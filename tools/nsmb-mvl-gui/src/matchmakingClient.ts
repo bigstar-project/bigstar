@@ -1,6 +1,8 @@
 import { hc } from 'hono/client';
 import type { AppType } from '../../nsmb-signaling-server/src/app';
 import type {
+  HostRoomEventMessage,
+  LobbyRoomsMessage,
   RomIdentity,
   RoomSummary,
 } from '../../nsmb-signaling-server/src/schemas';
@@ -24,6 +26,20 @@ type JoinRoomInput = {
   romPairId: string;
 };
 
+type LobbyRoomsHandlers = {
+  onSnapshot: (rooms: RoomSummary[]) => void;
+  onError?: (error: Error) => void;
+  onClose?: () => void;
+  onOpen?: () => void;
+};
+
+type HostRoomEventsHandlers = {
+  onJoined: (room: RoomSummary) => void;
+  onError?: (error: Error) => void;
+  onClose?: () => void;
+  onOpen?: () => void;
+};
+
 function apiBaseFromSignalUrl(signalUrl: string): string {
   const url = new URL(signalUrl);
   url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
@@ -33,9 +49,41 @@ function apiBaseFromSignalUrl(signalUrl: string): string {
   return url.toString();
 }
 
+function webSocketUrlFromSignalUrl(signalUrl: string): URL {
+  const url = new URL(signalUrl);
+  url.protocol =
+    url.protocol === 'https:'
+      ? 'wss:'
+      : url.protocol === 'http:'
+        ? 'ws:'
+        : url.protocol;
+  return url;
+}
+
 function signalUrlWithToken(signalUrl: string, token: string): string {
   const url = new URL(signalUrl);
   url.searchParams.set('token', token);
+  return url.toString();
+}
+
+export function lobbyRoomsSubscribeUrl(signalUrl: string): string {
+  const url = webSocketUrlFromSignalUrl(signalUrl);
+  url.pathname = '/rooms/subscribe';
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+}
+
+export function hostRoomEventsUrl(signalUrl: string, roomId: string): string {
+  const source = new URL(signalUrl);
+  const token = source.searchParams.get('token');
+  const url = webSocketUrlFromSignalUrl(signalUrl);
+  url.pathname = `/rooms/${encodeURIComponent(roomId)}/events`;
+  url.search = '';
+  url.hash = '';
+  if (token) {
+    url.searchParams.set('token', token);
+  }
   return url.toString();
 }
 
@@ -61,6 +109,57 @@ export async function listRooms(signalUrl: string) {
     throw new Error(await readError(response));
   }
   return response.json();
+}
+
+export function subscribeLobbyRooms(
+  signalUrl: string,
+  handlers: LobbyRoomsHandlers,
+): () => void {
+  const socket = new WebSocket(lobbyRoomsSubscribeUrl(signalUrl));
+  socket.addEventListener('open', () => handlers.onOpen?.());
+  socket.addEventListener('message', (event) => {
+    try {
+      const message = JSON.parse(String(event.data)) as LobbyRoomsMessage;
+      if (message.type === 'rooms_snapshot' && Array.isArray(message.rooms)) {
+        handlers.onSnapshot(message.rooms);
+      }
+    } catch (error) {
+      handlers.onError?.(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
+  });
+  socket.addEventListener('error', () => {
+    handlers.onError?.(new Error('lobby websocket error'));
+  });
+  socket.addEventListener('close', () => handlers.onClose?.());
+  return () => socket.close();
+}
+
+export function subscribeHostRoomEvents(
+  signalUrl: string,
+  roomId: string,
+  handlers: HostRoomEventsHandlers,
+): () => void {
+  const socket = new WebSocket(hostRoomEventsUrl(signalUrl, roomId));
+  socket.addEventListener('open', () => handlers.onOpen?.());
+  socket.addEventListener('message', (event) => {
+    try {
+      const message = JSON.parse(String(event.data)) as HostRoomEventMessage;
+      if (message.type === 'joined') {
+        handlers.onJoined(message.room);
+      }
+    } catch (error) {
+      handlers.onError?.(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
+  });
+  socket.addEventListener('error', () => {
+    handlers.onError?.(new Error('host room events websocket error'));
+  });
+  socket.addEventListener('close', () => handlers.onClose?.());
+  return () => socket.close();
 }
 
 export async function getRoom(signalUrl: string, roomId: string) {

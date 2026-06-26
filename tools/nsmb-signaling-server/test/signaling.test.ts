@@ -1,6 +1,15 @@
 import { SELF } from 'cloudflare:test';
 import { describe, expect, test } from 'vitest';
-import type { WsServerMessage } from '../src/schemas';
+import type {
+  HostRoomEventMessage,
+  LobbyRoomsMessage,
+  WsServerMessage,
+} from '../src/schemas';
+
+type ServerTestMessage =
+  | HostRoomEventMessage
+  | LobbyRoomsMessage
+  | WsServerMessage;
 
 const gameSettings = {
   big_stars: 5,
@@ -96,10 +105,10 @@ async function connectWebSocket(url: string) {
   expect(ws).toBeDefined();
   ws?.accept();
 
-  const messages: WsServerMessage[] = [];
-  const waiters: Array<(message: WsServerMessage) => void> = [];
+  const messages: ServerTestMessage[] = [];
+  const waiters: Array<(message: ServerTestMessage) => void> = [];
   ws?.addEventListener('message', (event: MessageEvent) => {
-    const message = JSON.parse(String(event.data)) as WsServerMessage;
+    const message = JSON.parse(String(event.data)) as ServerTestMessage;
     messages.push(message);
     waiters.shift()?.(message);
   });
@@ -108,7 +117,7 @@ async function connectWebSocket(url: string) {
     close: () => ws?.close(),
     messages,
     nextMessage: () =>
-      new Promise<WsServerMessage>((resolve, reject) => {
+      new Promise<ServerTestMessage>((resolve, reject) => {
         const next = messages.shift();
         if (next) {
           resolve(next);
@@ -129,7 +138,7 @@ async function connectWebSocket(url: string) {
 
 async function waitForMessage(
   socket: Awaited<ReturnType<typeof connectWebSocket>>,
-  type: WsServerMessage['type'],
+  type: ServerTestMessage['type'],
 ) {
   for (let index = 0; index < 8; index += 1) {
     const message = await socket.nextMessage();
@@ -138,6 +147,32 @@ async function waitForMessage(
     }
   }
   throw new Error(`message ${type} was not received`);
+}
+
+async function waitForRoomsSnapshot(
+  socket: Awaited<ReturnType<typeof connectWebSocket>>,
+  predicate: (roomIds: string[]) => boolean,
+) {
+  for (let index = 0; index < 8; index += 1) {
+    const message = await waitForMessage(socket, 'rooms_snapshot');
+    if (message.type !== 'rooms_snapshot') {
+      continue;
+    }
+    const roomIds = message.rooms.map((room) => room.room_id);
+    if (predicate(roomIds)) {
+      return message;
+    }
+  }
+  throw new Error('matching rooms_snapshot was not received');
+}
+
+function hostEventsUrl(signalUrl: string, roomId: string, token: string) {
+  const url = new URL(signalUrl);
+  url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
+  url.pathname = `/rooms/${roomId}/events`;
+  url.search = '';
+  url.searchParams.set('token', token);
+  return url.toString();
 }
 
 describe('マッチメイキング HTTP API', () => {
@@ -247,6 +282,100 @@ describe('マッチメイキング HTTP API', () => {
 
     expect(response.status).toBe(409);
     expect(await json(response)).toEqual({ error: 'rom identity mismatch' });
+  });
+});
+
+describe('Lobby WebSocket API', () => {
+  test('接続時snapshotと部屋更新snapshotをpushする', async () => {
+    const created = await createRoom();
+    const lobby = await connectWebSocket('https://match.test/rooms/subscribe');
+
+    await waitForRoomsSnapshot(lobby, (roomIds) =>
+      roomIds.includes(created.room_id),
+    );
+
+    const second = await createRoom();
+    await waitForRoomsSnapshot(lobby, (roomIds) =>
+      [created.room_id, second.room_id].every((roomId) =>
+        roomIds.includes(roomId),
+      ),
+    );
+
+    await reserveJoin(created.room_id);
+    await waitForRoomsSnapshot(
+      lobby,
+      (roomIds) => !roomIds.includes(created.room_id),
+    );
+
+    const close = await SELF.fetch(
+      `https://match.test/rooms/${second.room_id}/close`,
+      { method: 'POST' },
+    );
+    expect(close.status).toBe(200);
+    await waitForRoomsSnapshot(
+      lobby,
+      (roomIds) => !roomIds.includes(second.room_id),
+    );
+
+    lobby.close();
+  });
+});
+
+describe('部屋主イベント WebSocket API', () => {
+  test('参加予約が成功した瞬間に部屋主へjoinedイベントをpushする', async () => {
+    const created = await createRoom();
+    const events = await connectWebSocket(
+      hostEventsUrl(created.signal_url, created.room_id, created.host_token),
+    );
+
+    await reserveJoin(created.room_id);
+    const joined = await waitForMessage(events, 'joined');
+
+    expect(joined).toMatchObject({
+      room: {
+        client_name: 'Client Player',
+        client_player_profile_id: clientProfileId,
+        room_id: created.room_id,
+        status: 'joining',
+      },
+      type: 'joined',
+    });
+
+    events.close();
+  });
+
+  test('参加予約後に接続してもjoinedイベントを即時snapshotとして受け取る', async () => {
+    const created = await createRoom();
+    await reserveJoin(created.room_id);
+
+    const events = await connectWebSocket(
+      hostEventsUrl(created.signal_url, created.room_id, created.host_token),
+    );
+    const joined = await waitForMessage(events, 'joined');
+
+    expect(joined).toMatchObject({
+      room: {
+        client_name: 'Client Player',
+        room_id: created.room_id,
+        status: 'joining',
+      },
+      type: 'joined',
+    });
+
+    events.close();
+  });
+
+  test('不正なhost tokenを拒否する', async () => {
+    const created = await createRoom();
+    const response = await SELF.fetch(
+      hostEventsUrl(created.signal_url, created.room_id, 'wrong-token'),
+      {
+        headers: { Upgrade: 'websocket' },
+      },
+    );
+
+    expect(response.status).toBe(403);
+    expect(await json(response)).toEqual({ error: 'invalid room token' });
   });
 });
 

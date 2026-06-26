@@ -33,6 +33,7 @@ async function renderSettingsView() {
     savePlayerName: vi.fn(async () => {}),
     selectBaseRomAndPrepare: vi.fn(async () => {}),
     selectRomPath: vi.fn(async () => {}),
+    setStartupEnabled: vi.fn(async () => {}),
     startMatch: vi.fn(async () => {}),
     stopMatch: vi.fn(async () => {}),
   } satisfies LauncherActions;
@@ -50,6 +51,7 @@ async function renderSettingsView() {
           roomCode: 'test-room',
           signalUrl: 'ws://127.0.0.1:8787/session',
         }}
+        startup={{ enabled: false, loading: false }}
         summary={summary}
         updateField={updateField}
       />
@@ -60,6 +62,22 @@ async function renderSettingsView() {
 }
 
 describe('設定ビュー', () => {
+  test('設定セクションを指定された順番で表示する', async () => {
+    await renderSettingsView();
+
+    const headings = Array.from(document.querySelectorAll('h2')).map(
+      (heading) => heading.textContent?.trim(),
+    );
+
+    expect(headings.slice(0, 5)).toEqual([
+      'プロフィール',
+      '常駐・通知',
+      'melonDS設定',
+      'ROM設定',
+      '接続設定',
+    ]);
+  });
+
   test('プレイヤーネームを更新して保存する', async () => {
     const { launcherActions, screen, updateField } = await renderSettingsView();
 
@@ -101,6 +119,25 @@ describe('設定ビュー', () => {
     expect(launcherActions.openMelondsInputConfig).toHaveBeenCalledTimes(1);
     expect(launcherActions.preflightCheck).toHaveBeenCalledTimes(1);
     expect(launcherActions.prepareRoms).toHaveBeenCalledTimes(1);
+  });
+
+  test('スタートアップ起動をSwitchで切り替える', async () => {
+    const { launcherActions, screen } = await renderSettingsView();
+
+    await screen.getByText('Windowsログイン時に起動').click();
+
+    expect(launcherActions.setStartupEnabled).toHaveBeenCalledWith(true);
+  });
+
+  test('新規部屋通知をSwitchで切り替える', async () => {
+    const { screen, updateField } = await renderSettingsView();
+
+    await screen.getByText('新規部屋通知').click();
+
+    expect(updateField).toHaveBeenCalledWith(
+      'newRoomNotificationsEnabled',
+      false,
+    );
   });
 
   test('現在の設定状態を要約して表示する', async () => {

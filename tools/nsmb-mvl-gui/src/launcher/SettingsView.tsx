@@ -1,4 +1,5 @@
 import {
+  BellRinging,
   Broadcast,
   CheckCircle,
   FlagCheckered,
@@ -19,13 +20,14 @@ import {
   TextField,
 } from '../components/Fields';
 import { SummaryItem } from '../components/SummaryItem';
-import { Button, Tabs } from '../components/ui';
+import { Button, Switch, Tabs } from '../components/ui';
 import type { FormState } from '../types';
 import { InfoPanel, SettingsPanel } from './LauncherCards';
 import { shortPath } from './path';
 import type {
   LauncherActions,
   LauncherSummary,
+  StartupState,
   UpdateFormField,
 } from './types';
 
@@ -37,6 +39,7 @@ const diagnosticEventOptions = [
 export function SettingsView({
   actions,
   form,
+  startup,
   summary,
   updateField,
 }: {
@@ -49,8 +52,10 @@ export function SettingsView({
     | 'prepareRoms'
     | 'savePlayerName'
     | 'selectRomPath'
+    | 'setStartupEnabled'
   >;
   form: FormState;
+  startup: StartupState;
   summary: LauncherSummary;
   updateField: UpdateFormField;
 }) {
@@ -108,56 +113,95 @@ export function SettingsView({
           </SettingsPanel>
 
           <SettingsPanel
-            icon={<Broadcast size={24} weight="bold" />}
-            title="接続設定"
+            icon={<BellRinging size={24} weight="fill" />}
+            title="常駐・通知"
           >
-            <div
+            <Switch.Root
+              checked={startup.enabled}
+              disabled={startup.loading}
+              onCheckedChange={(details) =>
+                void actions.setStartupEnabled(details.checked)
+              }
               className={css({
-                display: 'grid',
-                gap: '2',
-                gridTemplateColumns: {
-                  base: '1fr',
-                  md: 'minmax(0, 1fr) auto',
-                },
+                alignItems: 'center',
+                bg: 'app.panel',
+                borderColor: 'border',
+                borderRadius: 'l2',
+                borderWidth: '1px',
+                colorPalette: 'blue',
+                display: 'flex',
+                gap: '3',
+                justifyContent: 'space-between',
+                minH: '16',
+                p: '3',
+                w: 'full',
               })}
             >
-              <TextField
-                label="シグナリングサーバー"
-                value={form.signalUrl}
-                onChange={(value) => updateField('signalUrl', value)}
-              />
-              <Button
-                className={css({ alignSelf: 'end' })}
-                variant="outline"
-                onClick={() => void actions.pollStatus()}
+              <Switch.HiddenInput />
+              <div
+                className={css({
+                  display: 'grid',
+                  gap: '1',
+                  minW: '0',
+                })}
               >
-                <WifiHigh size={18} weight="bold" />
-                接続確認
-              </Button>
-            </div>
-            <NumberField
-              label="UDP ポート"
-              value={form.port}
-              min={1}
-              max={65535}
-              onChange={(value) => updateField('port', value)}
-            />
-          </SettingsPanel>
-
-          <SettingsPanel
-            icon={<HardDrives size={24} weight="fill" />}
-            title="ROM 設定"
-          >
-            <FilePathField
-              label="ベース ROM"
-              value={form.baseRomPath}
-              onBrowse={() => void actions.selectRomPath('baseRomPath')}
-            />
+                <Switch.Label className={css({fontSize: 'sm'})}>Windowsログイン時に起動</Switch.Label>
+                <div
+                  className={css({
+                    color: 'fg.muted',
+                    textStyle: 'xs',
+                  })}
+                >
+                  タスクトレイに最小化された状態で起動します
+                </div>
+              </div>
+              <Switch.Control />
+            </Switch.Root>
+            <Switch.Root
+              checked={form.newRoomNotificationsEnabled}
+              onCheckedChange={(details) =>
+                updateField('newRoomNotificationsEnabled', details.checked)
+              }
+              className={css({
+                alignItems: 'center',
+                bg: 'app.panel',
+                borderColor: 'border',
+                borderRadius: 'l2',
+                borderWidth: '1px',
+                colorPalette: 'blue',
+                display: 'flex',
+                gap: '3',
+                justifyContent: 'space-between',
+                minH: '16',
+                p: '3',
+                w: 'full',
+              })}
+            >
+              <Switch.HiddenInput />
+              <div
+                className={css({
+                  display: 'grid',
+                  gap: '1',
+                  minW: '0',
+                })}
+              >
+                <Switch.Label className={css({fontSize: 'sm'})}>新規部屋通知</Switch.Label>
+                <div
+                  className={css({
+                    color: 'fg.muted',
+                    textStyle: 'xs',
+                  })}
+                >
+                  新しい部屋が作られたときに通知を受け取ることができます
+                </div>
+              </div>
+              <Switch.Control />
+            </Switch.Root>
           </SettingsPanel>
 
           <SettingsPanel
             icon={<GameController size={24} weight="fill" />}
-            title="melonDS 設定"
+            title="melonDS設定"
           >
             <div
               className={css({
@@ -192,6 +236,54 @@ export function SettingsView({
               onChange={(value) =>
                 updateField('diagnosticEventsEnabled', value === 'on')
               }
+            />
+          </SettingsPanel>
+
+          <SettingsPanel
+            icon={<HardDrives size={24} weight="fill" />}
+            title="ROM設定"
+          >
+            <FilePathField
+              label="ベース ROM"
+              value={form.baseRomPath}
+              onBrowse={() => void actions.selectRomPath('baseRomPath')}
+            />
+          </SettingsPanel>
+
+          <SettingsPanel
+            icon={<Broadcast size={24} weight="bold" />}
+            title="接続設定"
+          >
+            <div
+              className={css({
+                display: 'grid',
+                gap: '2',
+                gridTemplateColumns: {
+                  base: '1fr',
+                  md: 'minmax(0, 1fr) auto',
+                },
+              })}
+            >
+              <TextField
+                label="シグナリングサーバー"
+                value={form.signalUrl}
+                onChange={(value) => updateField('signalUrl', value)}
+              />
+              <Button
+                className={css({ alignSelf: 'end' })}
+                variant="outline"
+                onClick={() => void actions.pollStatus()}
+              >
+                <WifiHigh size={18} weight="bold" />
+                接続確認
+              </Button>
+            </div>
+            <NumberField
+              label="UDP ポート"
+              value={form.port}
+              min={1}
+              max={65535}
+              onChange={(value) => updateField('port', value)}
             />
           </SettingsPanel>
 

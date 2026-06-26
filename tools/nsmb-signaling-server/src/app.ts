@@ -11,7 +11,7 @@ import {
 
 const ROOM_ID_BYTES = 9;
 const TOKEN_BYTES = 24;
-const ROOM_TTL_MS = 10 * 60 * 1000;
+const ROOM_TTL_MS = 3 * 60 * 60 * 1000;
 const VALID_ROOM_ID = /^[A-Za-z0-9_-]{8,64}$/;
 const VALID_SESSION_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const DEFAULT_CORS_ORIGINS = [
@@ -74,6 +74,10 @@ app.use('*', async (c, next) => {
   return corsMiddleware(c, next);
 });
 
+function expectedWebSocket(request: Request) {
+  return request.headers.get('Upgrade') === 'websocket';
+}
+
 app.get('/session', async (c) => {
   const session = sessionId(c.req.raw);
   if (!session || !VALID_SESSION_ID.test(session)) {
@@ -88,6 +92,14 @@ app.get('/session', async (c) => {
 
 const route = app
   .get('/health', (c) => c.json({ ok: true }, 200))
+  .get('/rooms/subscribe', async (c) => {
+    if (!expectedWebSocket(c.req.raw)) {
+      const { body, status } = error('expected websocket upgrade', 400);
+      return c.json(body, status);
+    }
+    const lobby = c.env.LOBBY.get(c.env.LOBBY.idFromName('global'));
+    return lobby.fetch(c.req.raw);
+  })
   .get('/rooms', async (c) => {
     const lobby = c.env.LOBBY.get(c.env.LOBBY.idFromName('global'));
     const rooms = await lobby.listRooms(Date.now());
@@ -126,6 +138,21 @@ const route = app
       },
       201,
     );
+  })
+  .get('/rooms/:roomId/events', async (c) => {
+    const roomId = c.req.param('roomId');
+    if (!VALID_ROOM_ID.test(roomId)) {
+      const { body, status } = error('invalid room id', 400);
+      return c.json(body, status);
+    }
+    if (!expectedWebSocket(c.req.raw)) {
+      const { body, status } = error('expected websocket upgrade', 400);
+      return c.json(body, status);
+    }
+    const room = c.env.SIGNALING_ROOM.get(
+      c.env.SIGNALING_ROOM.idFromName(roomId),
+    );
+    return room.fetch(c.req.raw);
   })
   .get('/rooms/:roomId', async (c) => {
     const roomId = c.req.param('roomId');

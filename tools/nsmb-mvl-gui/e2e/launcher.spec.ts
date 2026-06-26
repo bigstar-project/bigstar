@@ -99,6 +99,7 @@ async function installGuiDriver(
                 host_rom_path: 'C:\\roms\\host.nds',
                 input_config_opened_once: state.inputConfigOpened,
                 diagnostic_events_enabled: false,
+                new_room_notifications_enabled: true,
                 player_name: state.playerName,
                 player_profile_id: state.playerProfileId,
                 port: 8165,
@@ -144,6 +145,10 @@ async function installGuiDriver(
               calls.push({ args: [args.request], name: command });
               return null;
             }
+            if (command === 'save_new_room_notifications_enabled') {
+              calls.push({ args: [args.request], name: command });
+              return null;
+            }
             if (command === 'save_player_name') {
               calls.push({ args: [args.request], name: command });
               state.playerName = (
@@ -185,6 +190,60 @@ async function installGuiDriver(
 }
 
 async function installRoomsApi(page: Page) {
+  const publicRoom = {
+    can_join: true,
+    created_at: 1,
+    expires_at: Date.now() + 600_000,
+    host_name: 'Host Player',
+    host_player_profile_id: hostProfileId,
+    peer_count: 1,
+    room_id: 'room12345',
+    settings,
+    rom_identity: romIdentity,
+    status: 'open',
+    updated_at: 1,
+  };
+  await page.addInitScript((publicRoom) => {
+    class RoomsWebSocket extends EventTarget {
+      readonly url: string;
+      readyState: number = WebSocket.CONNECTING;
+
+      constructor(url: string | URL) {
+        super();
+        this.url = String(url);
+        window.setTimeout(() => {
+          this.readyState = WebSocket.OPEN;
+          this.dispatchEvent(new Event('open'));
+          if (new URL(this.url).pathname === '/rooms/subscribe') {
+            this.dispatchEvent(
+              new MessageEvent('message', {
+                data: JSON.stringify({
+                  rooms: [publicRoom],
+                  type: 'rooms_snapshot',
+                }),
+              }),
+            );
+          }
+        }, 0);
+      }
+
+      close() {
+        this.readyState = WebSocket.CLOSED;
+        this.dispatchEvent(new CloseEvent('close'));
+      }
+
+      send() {}
+    }
+
+    Object.assign(RoomsWebSocket, {
+      CLOSED: WebSocket.CLOSED,
+      CLOSING: WebSocket.CLOSING,
+      CONNECTING: WebSocket.CONNECTING,
+      OPEN: WebSocket.OPEN,
+    });
+    window.WebSocket = RoomsWebSocket as unknown as typeof WebSocket;
+  }, publicRoom);
+
   await page.route('**/rooms', async (route) => {
     if (route.request().method() !== 'GET') {
       await route.fallback();
@@ -193,21 +252,7 @@ async function installRoomsApi(page: Page) {
     await route.fulfill({
       contentType: 'application/json',
       json: {
-        rooms: [
-          {
-            can_join: true,
-            created_at: 1,
-            expires_at: Date.now() + 600_000,
-            host_name: 'Host Player',
-            host_player_profile_id: hostProfileId,
-            peer_count: 1,
-            room_id: 'room12345',
-            settings,
-            rom_identity: romIdentity,
-            status: 'open',
-            updated_at: 1,
-          },
-        ],
+        rooms: [publicRoom],
       },
     });
   });

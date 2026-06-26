@@ -50,6 +50,7 @@ function actions(overrides: Partial<LauncherActions> = {}) {
     savePlayerName: vi.fn(async () => {}),
     selectBaseRomAndPrepare: vi.fn(async () => {}),
     selectRomPath: vi.fn(async () => {}),
+    setStartupEnabled: vi.fn(async () => {}),
     startMatch: vi.fn(async () => {}),
     stopMatch: vi.fn(async () => {}),
     ...overrides,

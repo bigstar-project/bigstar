@@ -20,6 +20,7 @@ export type {
   Role,
   RomIdentity,
   SaveDiagnosticEventsRequest,
+  SaveNewRoomNotificationsRequest,
   SavePlayerNameRequest,
   SaveRomPathsRequest,
   SessionStatus,
@@ -47,4 +48,5 @@ export type FormState = {
   inputMaxFrameLead: number;
   rollbackEnabled: boolean;
   diagnosticEventsEnabled: boolean;
+  newRoomNotificationsEnabled: boolean;
 };

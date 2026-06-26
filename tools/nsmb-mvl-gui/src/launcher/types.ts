@@ -63,6 +63,7 @@ export type LauncherActions = {
   savePlayerName: () => Promise<void>;
   selectBaseRomAndPrepare: () => Promise<void>;
   selectRomPath: (key: SelectRomKey) => Promise<void>;
+  setStartupEnabled: (enabled: boolean) => Promise<void>;
   startMatch: () => Promise<void>;
   stopMatch: () => Promise<void>;
 };
@@ -87,6 +88,11 @@ export type MatchmakingRoomsState = {
   busy: boolean;
   error: string | null;
   hostedRoomId: string | null;
+};
+
+export type StartupState = {
+  enabled: boolean;
+  loading: boolean;
 };
 
 export type BattleMatchStatus = MatchHistoryRecord['status'];

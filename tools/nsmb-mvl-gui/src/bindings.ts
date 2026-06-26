@@ -7,6 +7,7 @@ export const commands = {
 	getDefaults: () => typedError<Defaults, string>(__TAURI_INVOKE("get_defaults")),
 	saveRomPaths: (request: SaveRomPathsRequest) => typedError<null, string>(__TAURI_INVOKE("save_rom_paths", { request })),
 	saveDiagnosticEventsEnabled: (request: SaveDiagnosticEventsRequest) => typedError<null, string>(__TAURI_INVOKE("save_diagnostic_events_enabled", { request })),
+	saveNewRoomNotificationsEnabled: (request: SaveNewRoomNotificationsRequest) => typedError<null, string>(__TAURI_INVOKE("save_new_room_notifications_enabled", { request })),
 	savePlayerName: (request: SavePlayerNameRequest) => typedError<null, string>(__TAURI_INVOKE("save_player_name", { request })),
 	selectRomFile: (currentPath: string) => typedError<string | null, string>(__TAURI_INVOKE("select_rom_file", { currentPath })),
 	preflightCheck: () => typedError<PreflightResponse, string>(__TAURI_INVOKE("preflight_check")),
@@ -20,6 +21,8 @@ export const commands = {
 	openLogDir: (path: string) => typedError<null, string>(__TAURI_INVOKE("open_log_dir", { path })),
 	openMelonds: () => typedError<number, string>(__TAURI_INVOKE("open_melonds")),
 	openMelondsInputConfig: () => typedError<number, string>(__TAURI_INVOKE("open_melonds_input_config")),
+	getStartupEnabled: () => typedError<boolean, string>(__TAURI_INVOKE("get_startup_enabled")),
+	setStartupEnabled: (enabled: boolean) => typedError<null, string>(__TAURI_INVOKE("set_startup_enabled", { enabled })),
 };
 
 /* Types */
@@ -59,6 +62,7 @@ export type Defaults = {
 	input_config_opened_once: boolean,
 	port: number,
 	diagnostic_events_enabled: boolean,
+	new_room_notifications_enabled: boolean,
 };
 
 export type GameSettings = {
@@ -195,6 +199,10 @@ export type RomIdentity = {
 };
 
 export type SaveDiagnosticEventsRequest = {
+	enabled: boolean,
+};
+
+export type SaveNewRoomNotificationsRequest = {
 	enabled: boolean,
 };
 

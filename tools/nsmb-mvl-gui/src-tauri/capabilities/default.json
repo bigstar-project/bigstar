@@ -4,7 +4,9 @@
   "description": "Default permissions for the NSMB MvL launcher",
   "windows": ["main"],
   "permissions": [
+    "autostart:default",
     "core:default",
+    "notification:default",
     "process:allow-restart",
     "updater:default"
   ]

@@ -190,6 +190,16 @@ export const wsServerMessageSchema = z.discriminatedUnion('type', [
   }),
 ]);
 
+export const lobbyRoomsMessageSchema = z.object({
+  type: z.literal('rooms_snapshot'),
+  rooms: z.array(roomSummarySchema),
+});
+
+export const hostRoomEventMessageSchema = z.object({
+  type: z.literal('joined'),
+  room: roomSummarySchema,
+});
+
 export type Role = z.infer<typeof roleSchema>;
 export type GameSettings = z.infer<typeof gameSettingsSchema>;
 export type RomIdentity = z.infer<typeof romIdentitySchema>;
@@ -200,3 +210,5 @@ export type CreateRoomResponse = z.infer<typeof createRoomResponseSchema>;
 export type JoinRoomResponse = z.infer<typeof joinRoomResponseSchema>;
 export type WsClientMessage = z.infer<typeof wsClientMessageSchema>;
 export type WsServerMessage = z.infer<typeof wsServerMessageSchema>;
+export type LobbyRoomsMessage = z.infer<typeof lobbyRoomsMessageSchema>;
+export type HostRoomEventMessage = z.infer<typeof hostRoomEventMessageSchema>;

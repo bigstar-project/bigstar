@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { check } from '@tauri-apps/plugin-updater';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -21,12 +21,17 @@ import {
   getRoom as getMatchmakingRoom,
   joinRoom as joinMatchmakingRoom,
   listRooms,
+  type RoomSummary,
+  subscribeHostRoomEvents,
+  subscribeLobbyRooms,
 } from '../matchmakingClient';
+import { notifyNewRoomAvailable } from '../roomNotifications';
 import {
   ensureRoms,
   generateRoms,
   getDefaults,
   getSessionStatus,
+  getStartupEnabled,
   loadMatchHistory,
   openLogDir as openLogDirCommand,
   openMelonds as openMelondsCommand,
@@ -34,9 +39,11 @@ import {
   runPreflightCheck,
   saveDiagnosticEventsEnabled,
   saveMatchHistory,
+  saveNewRoomNotificationsEnabled,
   savePlayerName as savePlayerNameCommand,
   saveRomPaths,
   selectRomFile,
+  setStartupEnabled as setStartupEnabledCommand,
   startMatch as startMatchCommand,
   stopMatch as stopMatchCommand,
 } from '../tauriClient';
@@ -66,7 +73,7 @@ import {
 
 const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const ACTIVITY_STATUS_VISIBLE_MS = 5000;
-const ROOMS_REFETCH_INTERVAL_MS = 15 * 1000;
+const MATCHMAKING_WS_RECONNECT_DELAY_MS = 5000;
 const MATCH_HISTORY_SAVE_DELAY_MS = 300;
 
 function isTauriRuntime() {
@@ -145,7 +152,6 @@ function defaultPlayerIds(
 }
 
 export function useLauncherController() {
-  const queryClient = useQueryClient();
   const [activeView, setActiveView] = useState<View>(() =>
     window.location.hash === '#settings'
       ? 'settings'
@@ -168,6 +174,11 @@ export function useLauncherController() {
   const [gameStateMismatch, setGameStateMismatch] =
     useState<GameStateMismatch | null>(null);
   const [defaultsLoaded, setDefaultsLoaded] = useState(false);
+  const [startupEnabled, setStartupEnabledState] = useState(false);
+  const [startupLoading, setStartupLoading] = useState(false);
+  const [rooms, setRooms] = useState<RoomSummary[]>([]);
+  const [roomsLoading, setRoomsLoading] = useState(false);
+  const [roomsError, setRoomsError] = useState<string | null>(null);
   const [romPreparation, setRomPreparation] = useState('未確認');
   const [onboardingRomsPrepared, setOnboardingRomsPrepared] = useState(false);
   const [romEnsureBusy, setRomEnsureBusy] = useState(false);
@@ -191,7 +202,14 @@ export function useLauncherController() {
   } | null>(null);
   const matchmakingActionBusyRef = useRef(false);
   const hostedRoomLaunchBusyRef = useRef(false);
+  const connectionActiveRef = useRef(false);
+  const hostedRoomRef = useRef<HostedRoom | null>(null);
+  const playerProfileIdRef = useRef('');
+  const newRoomNotificationsEnabledRef = useRef(true);
+  const ownRoomIdsRef = useRef<Set<string>>(new Set());
   const startupRomPreparationKeyRef = useRef<string | null>(null);
+  const lobbyRoomSignalUrlRef = useRef<string | null>(null);
+  const lobbySeenRoomIdsRef = useRef<Set<string> | null>(null);
   const [hostedRoom, setHostedRoom] = useState<HostedRoom | null>(null);
   const [currentMatch, setCurrentMatch] = useState<BattleMatchRecord | null>(
     null,
@@ -225,13 +243,6 @@ export function useLauncherController() {
   const romsConfigured = Boolean(
     form.hostRomPath && form.clientRomPath && form.baseRomPath,
   );
-  const roomsQueryEnabled =
-    defaultsLoaded &&
-    activeView === 'battle' &&
-    isWebSocketUrl(form.signalUrl) &&
-    !connectionActive &&
-    !hostedRoom;
-
   const summary: LauncherSummary = {
     connectionActive,
     courseNote,
@@ -242,15 +253,120 @@ export function useLauncherController() {
     updateRequired,
     updateVersion: updateStatus.version,
   };
-  const roomsQuery = useQuery({
-    enabled: roomsQueryEnabled,
-    queryFn: async () => {
-      const response = await listRooms(form.signalUrl);
-      return response.rooms;
+
+  const applyLobbySnapshot = useCallback(
+    (nextRooms: RoomSummary[], options: { notify: boolean }) => {
+      setRooms(nextRooms);
+      setRoomsError(null);
+
+      if (lobbyRoomSignalUrlRef.current !== form.signalUrl) {
+        lobbyRoomSignalUrlRef.current = form.signalUrl;
+        lobbySeenRoomIdsRef.current = new Set(
+          nextRooms.map((room) => room.room_id),
+        );
+        return;
+      }
+
+      const seen = lobbySeenRoomIdsRef.current ?? new Set<string>();
+      for (const room of nextRooms) {
+        const isOwnHostedRoom =
+          room.room_id === hostedRoomRef.current?.roomId ||
+          ownRoomIdsRef.current.has(room.room_id) ||
+          (room.host_player_profile_id !== undefined &&
+            room.host_player_profile_id === playerProfileIdRef.current);
+        if (isOwnHostedRoom) {
+          seen.add(room.room_id);
+          continue;
+        }
+        if (!seen.has(room.room_id)) {
+          seen.add(room.room_id);
+          if (options.notify && newRoomNotificationsEnabledRef.current) {
+            void notifyNewRoomAvailable(room.room_id).catch(() => {});
+          }
+        }
+      }
+      lobbySeenRoomIdsRef.current = seen;
     },
-    queryKey: ['matchmakingRooms', form.signalUrl],
-    refetchInterval: roomsQueryEnabled ? ROOMS_REFETCH_INTERVAL_MS : false,
-  });
+    [form.signalUrl],
+  );
+
+  useEffect(() => {
+    connectionActiveRef.current = connectionActive;
+  }, [connectionActive]);
+
+  useEffect(() => {
+    hostedRoomRef.current = hostedRoom;
+  }, [hostedRoom]);
+
+  useEffect(() => {
+    playerProfileIdRef.current = playerProfileId;
+  }, [playerProfileId]);
+
+  useEffect(() => {
+    newRoomNotificationsEnabledRef.current = form.newRoomNotificationsEnabled;
+  }, [form.newRoomNotificationsEnabled]);
+
+  useEffect(() => {
+    if (
+      !defaultsLoaded ||
+      !isWebSocketUrl(form.signalUrl) ||
+      connectionActive
+    ) {
+      setRoomsLoading(false);
+      setRooms([]);
+      setRoomsError(null);
+      lobbyRoomSignalUrlRef.current = null;
+      lobbySeenRoomIdsRef.current = null;
+      return;
+    }
+
+    let disposed = false;
+    let unsubscribe: (() => void) | null = null;
+    let reconnectTimer: number | null = null;
+
+    const connect = () => {
+      if (disposed) {
+        return;
+      }
+      setRoomsLoading(true);
+      unsubscribe = subscribeLobbyRooms(form.signalUrl, {
+        onClose: () => {
+          unsubscribe = null;
+          if (!disposed) {
+            reconnectTimer = window.setTimeout(
+              connect,
+              MATCHMAKING_WS_RECONNECT_DELAY_MS,
+            );
+          }
+        },
+        onError: (error) => {
+          if (!disposed) {
+            setRoomsError(String(error));
+          }
+        },
+        onOpen: () => {
+          if (!disposed) {
+            setRoomsLoading(false);
+          }
+        },
+        onSnapshot: (nextRooms) => {
+          if (!disposed) {
+            setRoomsLoading(false);
+            applyLobbySnapshot(nextRooms, { notify: true });
+          }
+        },
+      });
+    };
+
+    connect();
+    return () => {
+      disposed = true;
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+      }
+      unsubscribe?.();
+    };
+  }, [applyLobbySnapshot, connectionActive, defaultsLoaded, form.signalUrl]);
 
   useEffect(() => {
     updateBusyRef.current = updateBusy;
@@ -459,6 +575,8 @@ export function useLauncherController() {
           inputMaxFrameLead: initialForm.inputMaxFrameLead,
           rollbackEnabled: initialForm.rollbackEnabled,
           diagnosticEventsEnabled: defaults.diagnostic_events_enabled ?? false,
+          newRoomNotificationsEnabled:
+            defaults.new_room_notifications_enabled ?? true,
         });
         setPlayerProfileId(defaults.player_profile_id);
         setOnboardingRomsPrepared(defaults.roms_prepared_once);
@@ -466,6 +584,16 @@ export function useLauncherController() {
         setOnboardingPlayerNameConfigured(
           defaults.player_name.trim().length > 0,
         );
+        try {
+          setStartupEnabledState(await getStartupEnabled());
+        } catch (error) {
+          if (!disposed) {
+            setActivityStatus({
+              text: `スタートアップ設定の読み込みに失敗しました: ${String(error)}`,
+              kind: 'warn',
+            });
+          }
+        }
         try {
           const persistedHistory = await loadMatchHistory();
           if (!disposed) {
@@ -533,6 +661,20 @@ export function useLauncherController() {
     }, 250);
     return () => window.clearTimeout(timer);
   }, [defaultsLoaded, form.diagnosticEventsEnabled]);
+
+  useEffect(() => {
+    if (!defaultsLoaded) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void saveNewRoomNotificationsEnabled({
+        enabled: form.newRoomNotificationsEnabled,
+      }).catch((error) => {
+        setActivityStatus({ text: String(error), kind: 'warn' });
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [defaultsLoaded, form.newRoomNotificationsEnabled]);
 
   const selectRomPath = async (key: SelectRomKey) => {
     try {
@@ -893,6 +1035,7 @@ export function useLauncherController() {
         romIdentity: roms.rom_identity,
         sourceForm: plannedForm,
       });
+      ownRoomIdsRef.current.add(response.room_id);
       const nextForm: FormState = {
         ...plannedForm,
         role: 'host',
@@ -912,7 +1055,6 @@ export function useLauncherController() {
           luigi: '相手',
         },
       });
-      await queryClient.invalidateQueries({ queryKey: ['matchmakingRooms'] });
       setActivityStatus({
         text: `部屋を作成しました: ${response.room_id}。参加者を待っています`,
         kind: 'ok',
@@ -1009,7 +1151,6 @@ export function useLauncherController() {
       assertRomPairMatches(roms.rom_identity, response.rom_identity);
       nextForm.signalUrl = response.signal_url;
       setForm(nextForm);
-      await queryClient.invalidateQueries({ queryKey: ['matchmakingRooms'] });
       setActivityStatus({
         text: '部屋に参加しました。接続を確立してからmelonDSを起動します',
         kind: 'idle',
@@ -1036,68 +1177,99 @@ export function useLauncherController() {
     }
   };
 
+  const launchHostedRoomFromEvent = useCallback(async (room: RoomSummary) => {
+    const currentHostedRoom = hostedRoomRef.current;
+    if (
+      !currentHostedRoom ||
+      currentHostedRoom.roomId !== room.room_id ||
+      connectionActiveRef.current ||
+      hostedRoomLaunchBusyRef.current
+    ) {
+      return;
+    }
+
+    try {
+      hostedRoomLaunchBusyRef.current = true;
+      matchmakingActionBusyRef.current = true;
+      setMatchmakingActionBusy(true);
+      setHostedRoom(null);
+      setActivityStatus({
+        text: '参加者を検出しました。接続を確立してからmelonDSを起動します',
+        kind: 'idle',
+      });
+      await startMatchForRef.current(
+        currentHostedRoom.form,
+        {
+          ...currentHostedRoom.playerNames,
+          luigi: playerNameOrFallback(
+            room.client_name ?? '',
+            currentHostedRoom.playerNames.luigi,
+          ),
+        },
+        {
+          ...currentHostedRoom.playerIds,
+          luigi: room.client_player_profile_id ?? '',
+        },
+      );
+    } catch (error) {
+      setHostedRoom(null);
+      setActivityStatus({ text: String(error), kind: 'error' });
+    } finally {
+      hostedRoomLaunchBusyRef.current = false;
+      matchmakingActionBusyRef.current = false;
+      setMatchmakingActionBusy(false);
+    }
+  }, []);
+
   useEffect(() => {
-    if (!hostedRoom || connectionActive || hostedRoomLaunchBusyRef.current) {
+    if (!hostedRoom || connectionActive) {
       return;
     }
 
     let disposed = false;
-    const pollHostedRoom = async () => {
-      if (hostedRoomLaunchBusyRef.current) {
+    let unsubscribe: (() => void) | null = null;
+    let reconnectTimer: number | null = null;
+
+    const connect = () => {
+      if (disposed) {
         return;
       }
-      try {
-        const room = await getMatchmakingRoom(
-          hostedRoom.form.signalUrl,
-          hostedRoom.roomId,
-        );
-        if (disposed) {
-          return;
-        }
-        if (room.status === 'open') {
-          return;
-        }
-        hostedRoomLaunchBusyRef.current = true;
-        matchmakingActionBusyRef.current = true;
-        setMatchmakingActionBusy(true);
-        setHostedRoom(null);
-        setActivityStatus({
-          text: '参加者を検出しました。接続を確立してからmelonDSを起動します',
-          kind: 'idle',
-        });
-        await startMatchForRef.current(
-          hostedRoom.form,
-          {
-            ...hostedRoom.playerNames,
-            luigi: playerNameOrFallback(
-              room.client_name ?? '',
-              hostedRoom.playerNames.luigi,
-            ),
+      unsubscribe = subscribeHostRoomEvents(
+        hostedRoom.form.signalUrl,
+        hostedRoom.roomId,
+        {
+          onClose: () => {
+            unsubscribe = null;
+            if (!disposed && !hostedRoomLaunchBusyRef.current) {
+              reconnectTimer = window.setTimeout(
+                connect,
+                MATCHMAKING_WS_RECONNECT_DELAY_MS,
+              );
+            }
           },
-          {
-            ...hostedRoom.playerIds,
-            luigi: room.client_player_profile_id ?? '',
+          onError: (error) => {
+            if (!disposed) {
+              setRoomsError(String(error));
+            }
           },
-        );
-      } catch (error) {
-        if (!disposed) {
-          setHostedRoom(null);
-          setActivityStatus({ text: String(error), kind: 'error' });
-        }
-      } finally {
-        hostedRoomLaunchBusyRef.current = false;
-        matchmakingActionBusyRef.current = false;
-        setMatchmakingActionBusy(false);
-      }
+          onJoined: (room) => {
+            if (!disposed) {
+              void launchHostedRoomFromEvent(room);
+            }
+          },
+        },
+      );
     };
 
-    void pollHostedRoom();
-    const timer = window.setInterval(() => void pollHostedRoom(), 2000);
+    connect();
     return () => {
       disposed = true;
-      window.clearInterval(timer);
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+      }
+      unsubscribe?.();
     };
-  }, [hostedRoom, connectionActive]);
+  }, [connectionActive, hostedRoom, launchHostedRoomFromEvent]);
 
   const stopMatch = async () => {
     try {
@@ -1118,8 +1290,11 @@ export function useLauncherController() {
       setMatchmakingActionBusy(true);
       matchmakingActionBusyRef.current = true;
       await closeMatchmakingRoom(hostedRoom.form.signalUrl, hostedRoom.roomId);
+      ownRoomIdsRef.current.delete(hostedRoom.roomId);
       setHostedRoom(null);
-      await queryClient.invalidateQueries({ queryKey: ['matchmakingRooms'] });
+      setRooms((current) =>
+        current.filter((room) => room.room_id !== hostedRoom.roomId),
+      );
       setActivityStatus({ text: '部屋を閉じました', kind: 'warn' });
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });
@@ -1130,10 +1305,22 @@ export function useLauncherController() {
   };
 
   const refreshRooms = async () => {
+    if (!isWebSocketUrl(form.signalUrl)) {
+      setActivityStatus({
+        text: 'シグナリングURLは ws:// または wss:// で指定してください',
+        kind: 'warn',
+      });
+      return;
+    }
     try {
-      await roomsQuery.refetch();
+      setRoomsLoading(true);
+      const response = await listRooms(form.signalUrl);
+      applyLobbySnapshot(response.rooms, { notify: false });
     } catch (error) {
+      setRoomsError(String(error));
       setActivityStatus({ text: String(error), kind: 'error' });
+    } finally {
+      setRoomsLoading(false);
     }
   };
 
@@ -1200,6 +1387,26 @@ export function useLauncherController() {
       });
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });
+    }
+  };
+
+  const setStartupEnabled = async (enabled: boolean) => {
+    const previous = startupEnabled;
+    setStartupLoading(true);
+    setStartupEnabledState(enabled);
+    try {
+      await setStartupEnabledCommand(enabled);
+      setActivityStatus({
+        text: enabled
+          ? 'Windowsログイン時の起動を登録しました'
+          : 'Windowsログイン時の起動を解除しました',
+        kind: 'ok',
+      });
+    } catch (error) {
+      setStartupEnabledState(previous);
+      setActivityStatus({ text: String(error), kind: 'error' });
+    } finally {
+      setStartupLoading(false);
     }
   };
 
@@ -1317,6 +1524,7 @@ export function useLauncherController() {
     savePlayerName,
     selectBaseRomAndPrepare,
     selectRomPath,
+    setStartupEnabled,
     startMatch,
     stopMatch,
   };
@@ -1339,8 +1547,8 @@ export function useLauncherController() {
     lastLogDir,
     gameStateMismatch,
     matchmakingRooms: {
-      rooms: roomsQuery.data ?? [],
-      loading: roomsQuery.isFetching,
+      rooms,
+      loading: roomsLoading,
       refreshDisabled:
         !defaultsLoaded ||
         !isWebSocketUrl(form.signalUrl) ||
@@ -1352,7 +1560,7 @@ export function useLauncherController() {
         matchmakingActionBusy ||
         createRoomMutation.isPending ||
         joinRoomMutation.isPending,
-      error: roomsQuery.error ? String(roomsQuery.error) : null,
+      error: roomsError,
       hostedRoomId: hostedRoom?.roomId ?? null,
     },
     matchHistory,
@@ -1367,6 +1575,10 @@ export function useLauncherController() {
       romEnsureBusy || romGenerationBusy
         ? { text: 'ROM生成中', kind: 'idle' as StatusKind }
         : null,
+    startup: {
+      enabled: startupEnabled,
+      loading: startupLoading,
+    },
     summary,
     updateBusy,
     updateStatus,

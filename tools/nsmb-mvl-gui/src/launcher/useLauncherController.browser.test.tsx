@@ -2,6 +2,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
+import {
+  getRoom,
+  listRooms,
+  subscribeHostRoomEvents,
+  subscribeLobbyRooms,
+} from '../matchmakingClient';
+import { notifyNewRoomAvailable } from '../roomNotifications';
+import { getDefaults } from '../tauriClient';
 import type { LaunchRequest, LaunchResponse } from '../types';
 import { useLauncherController } from './useLauncherController';
 
@@ -47,6 +55,13 @@ const mocks = vi.hoisted(() => {
       status: 'joining',
       updated_at: 2,
     },
+    hostRoomEventHandlers: [] as Array<{
+      onJoined: (room: unknown) => void;
+    }>,
+    lobbyHandlers: [] as Array<{
+      onOpen?: () => void;
+      onSnapshot: (rooms: unknown[]) => void;
+    }>,
     startMatchMock: vi.fn((_request: LaunchRequest) =>
       Promise.resolve<LaunchResponse>({
         bridge_pid: 2001,
@@ -79,6 +94,19 @@ vi.mock('../matchmakingClient', () => ({
     signal_url: 'ws://127.0.0.1:8787/session?token=join-secret',
   })),
   listRooms: vi.fn(async () => ({ rooms: [] })),
+  subscribeHostRoomEvents: vi.fn((_signalUrl, _roomId, handlers) => {
+    mocks.hostRoomEventHandlers.push(handlers);
+    return vi.fn();
+  }),
+  subscribeLobbyRooms: vi.fn((_signalUrl, handlers) => {
+    mocks.lobbyHandlers.push(handlers);
+    handlers.onOpen?.();
+    return vi.fn();
+  }),
+}));
+
+vi.mock('../roomNotifications', () => ({
+  notifyNewRoomAvailable: vi.fn(async () => true),
 }));
 
 vi.mock('../tauriClient', () => ({
@@ -100,6 +128,7 @@ vi.mock('../tauriClient', () => ({
     diagnostic_events_enabled: false,
     host_rom_path: 'C:\\roms\\host.nds',
     input_config_opened_once: true,
+    new_room_notifications_enabled: true,
     player_name: 'Host Player',
     player_profile_id: mocks.hostProfileId,
     port: 8165,
@@ -117,6 +146,7 @@ vi.mock('../tauriClient', () => ({
     mvl_results: [],
     webrtc: null,
   })),
+  getStartupEnabled: vi.fn(async () => false),
   loadMatchHistory: vi.fn(async () => []),
   openLogDir: vi.fn(async () => {}),
   openMelonds: vi.fn(async () => {}),
@@ -130,16 +160,45 @@ vi.mock('../tauriClient', () => ({
   })),
   saveDiagnosticEventsEnabled: vi.fn(async () => null),
   saveMatchHistory: mocks.saveMatchHistoryMock,
+  saveNewRoomNotificationsEnabled: vi.fn(async () => null),
   savePlayerName: vi.fn(async () => null),
   saveRomPaths: vi.fn(async () => null),
   selectRomFile: vi.fn(async (currentPath: string) => currentPath),
+  setStartupEnabled: vi.fn(async () => null),
   startMatch: mocks.startMatchMock,
   stopMatch: vi.fn(async () => {}),
 }));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.hostRoomEventHandlers = [];
+  mocks.lobbyHandlers = [];
+  window.location.hash = '';
 });
+
+function roomSummary(
+  roomId: string,
+  hostProfileId = '33333333-3333-4333-8333-333333333333',
+) {
+  return {
+    can_join: true,
+    created_at: 1,
+    expires_at: Date.now() + 600_000,
+    host_name: 'Host Player',
+    host_player_profile_id: hostProfileId,
+    peer_count: 1,
+    room_id: roomId,
+    rom_identity: mocks.romIdentity,
+    settings: {
+      ...mocks.roomDetail.settings,
+      big_stars: 10 as const,
+      course_mode: 'random' as const,
+      lives: '3' as const,
+    },
+    status: 'open' as const,
+    updated_at: 1,
+  };
+}
 
 function TestProviders({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({
@@ -169,6 +228,15 @@ function LauncherHarness() {
       <output aria-label="opponent">
         {launcher.currentMatch?.playerNames.luigi ?? ''}
       </output>
+      <output aria-label="room-count">
+        {launcher.matchmakingRooms.rooms.length}
+      </output>
+      <button
+        type="button"
+        onClick={() => void launcher.actions.refreshRooms()}
+      >
+        refresh
+      </button>
     </div>
   );
 }
@@ -191,8 +259,13 @@ describe('useLauncherController', () => {
 
     await screen.getByRole('button', { name: 'create' }).click();
     await vi.waitFor(() =>
+      expect(subscribeHostRoomEvents).toHaveBeenCalledTimes(1),
+    );
+    mocks.hostRoomEventHandlers.at(-1)?.onJoined(mocks.roomDetail);
+    await vi.waitFor(() =>
       expect(mocks.startMatchMock).toHaveBeenCalledTimes(1),
     );
+    expect(getRoom).not.toHaveBeenCalled();
 
     resolveStartMatch({
       bridge_pid: 2001,
@@ -222,6 +295,10 @@ describe('useLauncherController', () => {
 
     await screen.getByRole('button', { name: 'create' }).click();
     await vi.waitFor(() =>
+      expect(subscribeHostRoomEvents).toHaveBeenCalledTimes(1),
+    );
+    mocks.hostRoomEventHandlers.at(-1)?.onJoined(mocks.roomDetail);
+    await vi.waitFor(() =>
       expect(mocks.startMatchMock).toHaveBeenCalledTimes(1),
     );
     await expect
@@ -233,5 +310,114 @@ describe('useLauncherController', () => {
     await expect
       .element(screen.getByLabelText('opponent'))
       .toHaveTextContent('Client Player');
+  });
+
+  test('lobby websocket snapshot updates rooms and notifies only rooms added after the initial snapshot', async () => {
+    window.location.hash = '#settings';
+    const screen = await render(
+      <TestProviders>
+        <LauncherHarness />
+      </TestProviders>,
+    );
+
+    await vi.waitFor(() => expect(subscribeLobbyRooms).toHaveBeenCalled());
+    mocks.lobbyHandlers.at(-1)?.onSnapshot([roomSummary('old-room')]);
+
+    await expect
+      .element(screen.getByLabelText('room-count'))
+      .toHaveTextContent('1');
+    expect(notifyNewRoomAvailable).not.toHaveBeenCalled();
+
+    mocks.lobbyHandlers
+      .at(-1)
+      ?.onSnapshot([roomSummary('old-room'), roomSummary('new-room')]);
+
+    await vi.waitFor(() =>
+      expect(notifyNewRoomAvailable).toHaveBeenCalledWith('new-room'),
+    );
+    await expect
+      .element(screen.getByLabelText('room-count'))
+      .toHaveTextContent('2');
+    expect(listRooms).not.toHaveBeenCalled();
+  });
+
+  test('lobby websocket snapshot does not notify rooms hosted by the local player', async () => {
+    await render(
+      <TestProviders>
+        <LauncherHarness />
+      </TestProviders>,
+    );
+
+    await vi.waitFor(() => expect(subscribeLobbyRooms).toHaveBeenCalled());
+    mocks.lobbyHandlers.at(-1)?.onSnapshot([]);
+    mocks.lobbyHandlers
+      .at(-1)
+      ?.onSnapshot([
+        roomSummary('old-room'),
+        roomSummary('own-room', mocks.hostProfileId),
+      ]);
+
+    await vi.waitFor(() =>
+      expect(notifyNewRoomAvailable).toHaveBeenCalledWith('old-room'),
+    );
+    expect(notifyNewRoomAvailable).not.toHaveBeenCalledWith('own-room');
+    expect(notifyNewRoomAvailable).toHaveBeenCalledTimes(1);
+  });
+
+  test('lobby websocket snapshot does not notify new rooms when the setting is disabled', async () => {
+    vi.mocked(getDefaults).mockResolvedValueOnce({
+      base_rom_path: 'C:\\roms\\base.nds',
+      client_rom_path: 'C:\\roms\\client.nds',
+      diagnostic_events_enabled: false,
+      host_rom_path: 'C:\\roms\\host.nds',
+      input_config_opened_once: true,
+      new_room_notifications_enabled: false,
+      player_name: 'Host Player',
+      player_profile_id: mocks.hostProfileId,
+      port: 8165,
+      roms_prepared_once: true,
+      room_code: 'test-room',
+      signal_url: 'ws://127.0.0.1:8787/session',
+    });
+
+    const screen = await render(
+      <TestProviders>
+        <LauncherHarness />
+      </TestProviders>,
+    );
+
+    await vi.waitFor(() => expect(subscribeLobbyRooms).toHaveBeenCalled());
+    mocks.lobbyHandlers.at(-1)?.onSnapshot([roomSummary('old-room')]);
+    mocks.lobbyHandlers
+      .at(-1)
+      ?.onSnapshot([roomSummary('old-room'), roomSummary('new-room')]);
+
+    await expect
+      .element(screen.getByLabelText('room-count'))
+      .toHaveTextContent('2');
+    expect(notifyNewRoomAvailable).not.toHaveBeenCalled();
+  });
+
+  test('manual room refresh uses GET rooms as a snapshot fallback without notification', async () => {
+    const listRoomsMock = vi.mocked(listRooms);
+    listRoomsMock.mockResolvedValueOnce({
+      rooms: [roomSummary('manual-room')],
+    });
+
+    const screen = await render(
+      <TestProviders>
+        <LauncherHarness />
+      </TestProviders>,
+    );
+
+    await screen.getByRole('button', { name: 'refresh' }).click();
+
+    await vi.waitFor(() =>
+      expect(listRoomsMock).toHaveBeenCalledWith('ws://127.0.0.1:8787/session'),
+    );
+    await expect
+      .element(screen.getByLabelText('room-count'))
+      .toHaveTextContent('1');
+    expect(notifyNewRoomAvailable).not.toHaveBeenCalled();
   });
 });

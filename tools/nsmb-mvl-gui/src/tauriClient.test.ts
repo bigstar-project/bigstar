@@ -81,6 +81,27 @@ describe('タウリクライアント', () => {
     expect(invokeMock).not.toHaveBeenCalled();
   });
 
+  test('プレビューではスタートアップ設定をローカルfallbackで扱う', async () => {
+    setPreviewWindow();
+    const client = await importClient();
+
+    await expect(client.getStartupEnabled()).resolves.toBe(false);
+    await expect(client.setStartupEnabled(true)).resolves.toBeNull();
+
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  test('プレビューでは新規部屋通知設定の保存でコマンドを呼ばない', async () => {
+    setPreviewWindow();
+    const client = await importClient();
+
+    await expect(
+      client.saveNewRoomNotificationsEnabled({ enabled: false }),
+    ).resolves.toBeNull();
+
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
   test('readyプレビューでは保存済み履歴が空なら仮の対戦履歴を返す', async () => {
     setPreviewWindowWithStorage('?preview=ready', null);
     const client = await importClient();
@@ -163,6 +184,7 @@ describe('タウリクライアント', () => {
       host_rom_path: 'C:\\roms\\host.nds',
       input_config_opened_once: true,
       diagnostic_events_enabled: false,
+      new_room_notifications_enabled: true,
       player_name: 'Alice',
       player_profile_id: '33333333-3333-4333-8333-333333333333',
       port: 8165,

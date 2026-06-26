@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { createRoom, joinRoom, listRooms } from './matchmakingClient';
+import {
+  createRoom,
+  hostRoomEventsUrl,
+  joinRoom,
+  listRooms,
+  lobbyRoomsSubscribeUrl,
+} from './matchmakingClient';
 import type { GameSettings } from './types';
 
 const settings: GameSettings = {
@@ -40,6 +46,24 @@ afterEach(() => {
 });
 
 describe('マッチメイキングクライアント', () => {
+  test('Lobby WebSocket 購読URLをシグナリングURLから組み立てる', () => {
+    expect(
+      lobbyRoomsSubscribeUrl('wss://match.example/session?token=secret'),
+    ).toBe('wss://match.example/rooms/subscribe');
+    expect(lobbyRoomsSubscribeUrl('http://127.0.0.1:8787/session')).toBe(
+      'ws://127.0.0.1:8787/rooms/subscribe',
+    );
+  });
+
+  test('部屋主イベントURLはhost tokenだけを引き継ぐ', () => {
+    expect(
+      hostRoomEventsUrl(
+        'wss://match.example/session?room=old&role=offer&token=host-secret',
+        'room-1',
+      ),
+    ).toBe('wss://match.example/rooms/room-1/events?token=host-secret');
+  });
+
   test('シグナリング用ウェブソケット URL から HTTP API の部屋一覧を取得する', async () => {
     const fetch = vi.fn(async () =>
       jsonResponse({

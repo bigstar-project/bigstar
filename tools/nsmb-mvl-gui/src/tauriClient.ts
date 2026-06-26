@@ -15,6 +15,7 @@ import type {
   MatchHistoryRecord,
   PreflightResponse,
   SaveDiagnosticEventsRequest,
+  SaveNewRoomNotificationsRequest,
   SavePlayerNameRequest,
   SaveRomPathsRequest,
   SessionStatus,
@@ -70,11 +71,34 @@ export function saveDiagnosticEventsEnabled(
   return unwrapCommand(commands.saveDiagnosticEventsEnabled(request));
 }
 
+export function saveNewRoomNotificationsEnabled(
+  request: SaveNewRoomNotificationsRequest,
+) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(null);
+  }
+  return unwrapCommand(commands.saveNewRoomNotificationsEnabled(request));
+}
+
 export function savePlayerName(request: SavePlayerNameRequest) {
   if (!isTauriRuntime()) {
     return Promise.resolve(null);
   }
   return unwrapCommand(commands.savePlayerName(request));
+}
+
+export function getStartupEnabled() {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(false);
+  }
+  return unwrapCommand(commands.getStartupEnabled());
+}
+
+export function setStartupEnabled(enabled: boolean) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(null);
+  }
+  return unwrapCommand(commands.setStartupEnabled(enabled));
 }
 
 export function selectRomFile(currentPath: string) {
