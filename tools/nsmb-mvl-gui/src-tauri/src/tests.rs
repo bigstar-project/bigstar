@@ -225,6 +225,7 @@ fn melon_env_carries_game_settings_and_netplay_start() {
     assert_eq!(env["MELONDS_NSML_MATCH_SEED_SEQUENCE"], "7,8,9,10,11");
     assert_eq!(env["MELONDS_NSML_DELAY"], "4");
     assert_eq!(env["MELONDS_NSML_INPUT_MAX_FRAME_LEAD"], "4");
+    assert_eq!(env["MELONDS_NSML_WAIT_TIMEOUT_MS"], "60000");
     assert_eq!(env["MELONDS_NSML_SEED_WAIT_TIMEOUT_MS"], "60000");
     assert_eq!(env["MELONDS_NSML_INPUT_HEALTH_TRACE"], "1");
     assert_eq!(env["MELONDS_NSML_INPUT_HEALTH_TRACE_INTERVAL"], "120");

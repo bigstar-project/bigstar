@@ -300,6 +300,7 @@ pub(crate) fn melon_env(
     env.insert("MELONDS_NSML_ALLOW_JIT".into(), "1".into());
     env.insert("MELONDS_NSML_INPUT_NETPLAY_ONLY".into(), "1".into());
     env.insert("MELONDS_NSML_REMOTE_INPUT_TIMEOUT_FATAL".into(), "1".into());
+    env.insert("MELONDS_NSML_WAIT_TIMEOUT_MS".into(), "60000".into());
     env.insert("MELONDS_NSML_SEED_WAIT_TIMEOUT_MS".into(), "60000".into());
     env.insert(
         "MELONDS_NSML_DELAY".into(),

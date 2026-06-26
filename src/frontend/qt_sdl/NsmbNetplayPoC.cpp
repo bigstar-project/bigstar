@@ -1362,7 +1362,7 @@ struct State
     std::thread FrameHeartbeatThread;
     int HashInterval = 60;
     bool HashEnabled = true;
-    int TestWaitTimeoutMs = 5000;
+    int TestWaitTimeoutMs = 60000;
     int TestQuitGraceMs = 0;
     bool InputTraceEnabled = false;
     int InputTraceInterval = 60;
@@ -7039,6 +7039,8 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
         {
             std::lock_guard<std::mutex> lock(G.Mutex);
             PumpNetworkLocked();
+            MaybeResendNetplayStartReadyLocked();
+            MaybeResendLatestInputForFrameLeadLocked();
 
             auto it = G.RemoteInputs.find(targetFrame);
             if (it != G.RemoteInputs.end())
@@ -16623,7 +16625,7 @@ void InitFromEnvironment()
     G.SerialRunEnabled = EnvFlag("MELONDS_NSML_SERIAL_RUN");
     G.HashEnabled = !EnvFlag("MELONDS_NSML_DISABLE_HASH");
     G.HashInterval = std::max(1, EnvInt("MELONDS_NSML_HASH_INTERVAL", 60));
-    G.TestWaitTimeoutMs = std::max(0, EnvInt("MELONDS_NSML_WAIT_TIMEOUT_MS", 5000));
+    G.TestWaitTimeoutMs = std::max(0, EnvInt("MELONDS_NSML_WAIT_TIMEOUT_MS", 60000));
     G.TestQuitGraceMs = std::max(0, EnvInt("MELONDS_NSML_QUIT_GRACE_MS", 0));
     G.InputTraceEnabled = EnvFlag("MELONDS_NSML_INPUT_TRACE");
     G.InputTraceInterval = std::max(1, EnvInt("MELONDS_NSML_INPUT_TRACE_INTERVAL", 60));
