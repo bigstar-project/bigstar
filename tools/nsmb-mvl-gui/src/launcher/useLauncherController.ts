@@ -281,7 +281,7 @@ export function useLauncherController() {
         if (!seen.has(room.room_id)) {
           seen.add(room.room_id);
           if (options.notify && newRoomNotificationsEnabledRef.current) {
-            void notifyNewRoomAvailable(room.room_id).catch(() => {});
+            void notifyNewRoomAvailable(room).catch(() => {});
           }
         }
       }

@@ -81,11 +81,11 @@ describe('タウリクライアント', () => {
     expect(invokeMock).not.toHaveBeenCalled();
   });
 
-  test('プレビューではスタートアップ設定をローカルfallbackで扱う', async () => {
+  test('プレビューではスタートアップ設定をデフォルトONのローカルfallbackで扱う', async () => {
     setPreviewWindow();
     const client = await importClient();
 
-    await expect(client.getStartupEnabled()).resolves.toBe(false);
+    await expect(client.getStartupEnabled()).resolves.toBe(true);
     await expect(client.setStartupEnabled(true)).resolves.toBeNull();
 
     expect(invokeMock).not.toHaveBeenCalled();

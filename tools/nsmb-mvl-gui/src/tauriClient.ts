@@ -89,7 +89,7 @@ export function savePlayerName(request: SavePlayerNameRequest) {
 
 export function getStartupEnabled() {
   if (!isTauriRuntime()) {
-    return Promise.resolve(false);
+    return Promise.resolve(true);
   }
   return unwrapCommand(commands.getStartupEnabled());
 }

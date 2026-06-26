@@ -5,7 +5,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   optimizeDeps: {
-    include: ['@ark-ui/react/collapsible'],
+    include: ['@ark-ui/react/collapsible', '@tauri-apps/api/window'],
   },
   plugins: [react(), tsconfigPaths()],
   test: {

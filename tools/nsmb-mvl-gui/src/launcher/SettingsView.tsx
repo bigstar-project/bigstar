@@ -145,7 +145,9 @@ export function SettingsView({
                   minW: '0',
                 })}
               >
-                <Switch.Label className={css({fontSize: 'sm'})}>Windowsログイン時に起動</Switch.Label>
+                <Switch.Label className={css({ fontSize: 'sm' })}>
+                  Windowsログイン時に起動
+                </Switch.Label>
                 <div
                   className={css({
                     color: 'fg.muted',
@@ -185,7 +187,9 @@ export function SettingsView({
                   minW: '0',
                 })}
               >
-                <Switch.Label className={css({fontSize: 'sm'})}>新規部屋通知</Switch.Label>
+                <Switch.Label className={css({ fontSize: 'sm' })}>
+                  新規部屋通知
+                </Switch.Label>
                 <div
                   className={css({
                     color: 'fg.muted',

@@ -333,7 +333,12 @@ describe('useLauncherController', () => {
       ?.onSnapshot([roomSummary('old-room'), roomSummary('new-room')]);
 
     await vi.waitFor(() =>
-      expect(notifyNewRoomAvailable).toHaveBeenCalledWith('new-room'),
+      expect(notifyNewRoomAvailable).toHaveBeenCalledWith(
+        expect.objectContaining({
+          host_name: 'Host Player',
+          room_id: 'new-room',
+        }),
+      ),
     );
     await expect
       .element(screen.getByLabelText('room-count'))
@@ -358,9 +363,13 @@ describe('useLauncherController', () => {
       ]);
 
     await vi.waitFor(() =>
-      expect(notifyNewRoomAvailable).toHaveBeenCalledWith('old-room'),
+      expect(notifyNewRoomAvailable).toHaveBeenCalledWith(
+        expect.objectContaining({ room_id: 'old-room' }),
+      ),
     );
-    expect(notifyNewRoomAvailable).not.toHaveBeenCalledWith('own-room');
+    expect(notifyNewRoomAvailable).not.toHaveBeenCalledWith(
+      expect.objectContaining({ room_id: 'own-room' }),
+    );
     expect(notifyNewRoomAvailable).toHaveBeenCalledTimes(1);
   });
 

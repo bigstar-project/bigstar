@@ -110,9 +110,24 @@ pub(crate) fn save_player_name(
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn get_startup_enabled(app: AppHandle) -> Result<bool, String> {
-    app.autolaunch()
+    let autolaunch = app.autolaunch();
+    let enabled = autolaunch
         .is_enabled()
-        .map_err(|err| format!("スタートアップ設定を取得できません: {err}"))
+        .map_err(|err| format!("スタートアップ設定を取得できません: {err}"))?;
+    let mut settings = load_launcher_settings(&app)?;
+
+    if settings.startup_configured {
+        return Ok(enabled);
+    }
+
+    if !enabled {
+        autolaunch
+            .enable()
+            .map_err(|err| format!("スタートアップ登録に失敗しました: {err}"))?;
+    }
+    settings.startup_configured = true;
+    save_launcher_settings(&app, &settings)?;
+    Ok(true)
 }
 
 #[tauri::command]
@@ -127,7 +142,10 @@ pub(crate) fn set_startup_enabled(app: AppHandle, enabled: bool) -> Result<(), S
         autolaunch
             .disable()
             .map_err(|err| format!("スタートアップ解除に失敗しました: {err}"))
-    }
+    }?;
+    let mut settings = load_launcher_settings(&app)?;
+    settings.startup_configured = true;
+    save_launcher_settings(&app, &settings)
 }
 
 #[tauri::command]
