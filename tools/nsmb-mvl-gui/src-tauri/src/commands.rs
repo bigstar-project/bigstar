@@ -7,7 +7,7 @@ use tauri_plugin_autostart::ManagerExt;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use crate::config::{DEFAULT_PORT, DEFAULT_ROOM_CODE, DEFAULT_SIGNAL_URL};
+use crate::config::{default_signal_url, DEFAULT_PORT, DEFAULT_ROOM_CODE};
 use crate::models::{
     Defaults, GenerateRomRequest, GenerateRomResponse, LaunchRequest, LaunchResponse,
     MatchHistoryRecord, SaveDiagnosticEventsRequest, SaveNewRoomNotificationsRequest,
@@ -40,7 +40,7 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
         save_launcher_settings(&app, &saved)?;
     }
     let signal_url =
-        std::env::var("NSMB_MVL_SIGNAL_URL").unwrap_or_else(|_| DEFAULT_SIGNAL_URL.to_owned());
+        std::env::var("NSMB_MVL_SIGNAL_URL").unwrap_or_else(|_| default_signal_url().to_owned());
 
     Ok(Defaults {
         signal_url,

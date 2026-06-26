@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tauri dev",
     "prepare": "panda codegen",
-    "build": "tauri build",
+    "build": "node scripts/build-tauri.mjs",
     "sync:sidecars": "node scripts/sync-sidecars.mjs",
     "panda:codegen": "panda codegen",
     "typecheck": "tsc --noEmit",
