@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   }),
   requestPermission: vi.fn(),
   sendNotification: vi.fn(),
+  showNewRoomNotification: vi.fn(),
   window: {
     setFocus: vi.fn(async () => {}),
     show: vi.fn(async () => {}),
@@ -27,6 +28,10 @@ vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: vi.fn(() => mocks.window),
 }));
 
+vi.mock('./tauriClient', () => ({
+  showNewRoomNotification: mocks.showNewRoomNotification,
+}));
+
 async function importNotifications() {
   vi.resetModules();
   return import('./roomNotifications');
@@ -42,6 +47,7 @@ describe('room notifications', () => {
   test('新規部屋通知は部屋IDではなく相手名を本文に使う', async () => {
     vi.stubGlobal('window', { __TAURI_INTERNALS__: {} });
     mocks.isPermissionGranted.mockResolvedValueOnce(true);
+    mocks.showNewRoomNotification.mockResolvedValueOnce(false);
     const { notifyNewRoomAvailable } = await importNotifications();
 
     await expect(
@@ -62,9 +68,30 @@ describe('room notifications', () => {
     });
   });
 
+  test('Windowsネイティブ通知で処理できた場合はJS通知を重ねて出さない', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} });
+    mocks.isPermissionGranted.mockResolvedValueOnce(true);
+    mocks.showNewRoomNotification.mockResolvedValueOnce(true);
+    const { notifyNewRoomAvailable } = await importNotifications();
+
+    await expect(
+      notifyNewRoomAvailable({
+        host_name: 'Alice',
+        room_id: 'room-1',
+      }),
+    ).resolves.toBe(true);
+
+    expect(mocks.showNewRoomNotification).toHaveBeenCalledWith({
+      title: '新しい部屋があります',
+      body: 'Aliceさんが部屋を作成しました',
+    });
+    expect(mocks.sendNotification).not.toHaveBeenCalled();
+  });
+
   test('新規部屋通知の押下でメインウィンドウを表示してフォーカスする', async () => {
     vi.stubGlobal('window', { __TAURI_INTERNALS__: {} });
     mocks.isPermissionGranted.mockResolvedValueOnce(true);
+    mocks.showNewRoomNotification.mockResolvedValueOnce(false);
     const { notifyNewRoomAvailable } = await importNotifications();
 
     await notifyNewRoomAvailable({

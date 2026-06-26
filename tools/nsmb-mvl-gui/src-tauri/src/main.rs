@@ -10,6 +10,7 @@ mod processes;
 mod roms;
 mod settings;
 mod state;
+mod windowing;
 
 #[cfg(test)]
 mod tests;
@@ -18,9 +19,10 @@ use preflight::cli_preflight_check;
 #[cfg(any(debug_assertions, test))]
 use specta_typescript::Typescript;
 use state::AppState;
-use tauri::{menu::MenuBuilder, tray::TrayIconBuilder, Manager, WebviewWindow, WindowEvent};
+use tauri::{menu::MenuBuilder, tray::TrayIconBuilder, Manager, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_specta::{collect_commands, Builder as SpectaBuilder};
+use windowing::show_main_window;
 
 const STARTUP_ARG: &str = "--startup";
 const TRAY_SHOW_ID: &str = "show";
@@ -32,6 +34,7 @@ fn specta_builder() -> SpectaBuilder<tauri::Wry> {
         commands::save_rom_paths,
         commands::save_diagnostic_events_enabled,
         commands::save_new_room_notifications_enabled,
+        commands::show_new_room_notification,
         commands::save_player_name,
         commands::select_rom_file,
         preflight::preflight_check,
@@ -138,13 +141,6 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 
     tray.build(app)?;
     Ok(())
-}
-
-fn show_main_window(window: Option<WebviewWindow>) {
-    if let Some(window) = window {
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
 }
 
 #[cfg(test)]

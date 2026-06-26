@@ -5,6 +5,7 @@ import {
   requestPermission,
   sendNotification,
 } from '@tauri-apps/plugin-notification';
+import { showNewRoomNotification } from './tauriClient';
 
 type NewRoomNotificationRoom = {
   host_name: string;
@@ -57,9 +58,19 @@ export async function notifyNewRoomAvailable(room: NewRoomNotificationRoom) {
 
   await installNotificationActionHandler();
   const opponentName = room.host_name.trim() || '相手';
+  const title = '新しい部屋があります';
+  const body = `${opponentName}さんが部屋を作成しました`;
+  const handledByNativeNotification = await showNewRoomNotification({
+    title,
+    body,
+  }).catch(() => false);
+  if (handledByNativeNotification) {
+    return true;
+  }
+
   sendNotification({
     title: '新しい部屋があります',
-    body: `${opponentName}さんが部屋を作成しました`,
+    body,
     autoCancel: true,
     extra: {
       kind: newRoomNotificationKind,

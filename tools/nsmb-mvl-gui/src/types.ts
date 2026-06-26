@@ -24,6 +24,7 @@ export type {
   SavePlayerNameRequest,
   SaveRomPathsRequest,
   SessionStatus,
+  ShowNewRoomNotificationRequest,
 } from './bindings';
 
 export type StatusKind = 'idle' | 'ok' | 'warn' | 'error';

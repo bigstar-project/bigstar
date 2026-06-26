@@ -32,6 +32,7 @@
     ],
     "resources": {
       "../../../tests/nsmb_us_direct_mvl_minimal_bootstrap.inputs": "resources/nsmb_us_direct_mvl_minimal_bootstrap.inputs",
+      "resources/notification_sound.wav": "resources/notification_sound.wav",
       "../../../tools/nsmb-mvl-rom/resources/symbols9.x": "resources/symbols9.x"
     }
   },

@@ -19,6 +19,7 @@ import type {
   SavePlayerNameRequest,
   SaveRomPathsRequest,
   SessionStatus,
+  ShowNewRoomNotificationRequest,
 } from './types';
 
 async function unwrapCommand<T>(
@@ -85,6 +86,15 @@ export function savePlayerName(request: SavePlayerNameRequest) {
     return Promise.resolve(null);
   }
   return unwrapCommand(commands.savePlayerName(request));
+}
+
+export function showNewRoomNotification(
+  request: ShowNewRoomNotificationRequest,
+) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(false);
+  }
+  return unwrapCommand(commands.showNewRoomNotification(request));
 }
 
 export function getStartupEnabled() {

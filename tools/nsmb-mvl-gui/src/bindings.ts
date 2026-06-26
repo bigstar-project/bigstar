@@ -8,6 +8,7 @@ export const commands = {
 	saveRomPaths: (request: SaveRomPathsRequest) => typedError<null, string>(__TAURI_INVOKE("save_rom_paths", { request })),
 	saveDiagnosticEventsEnabled: (request: SaveDiagnosticEventsRequest) => typedError<null, string>(__TAURI_INVOKE("save_diagnostic_events_enabled", { request })),
 	saveNewRoomNotificationsEnabled: (request: SaveNewRoomNotificationsRequest) => typedError<null, string>(__TAURI_INVOKE("save_new_room_notifications_enabled", { request })),
+	showNewRoomNotification: (request: ShowNewRoomNotificationRequest) => typedError<boolean, string>(__TAURI_INVOKE("show_new_room_notification", { request })),
 	savePlayerName: (request: SavePlayerNameRequest) => typedError<null, string>(__TAURI_INVOKE("save_player_name", { request })),
 	selectRomFile: (currentPath: string) => typedError<string | null, string>(__TAURI_INVOKE("select_rom_file", { currentPath })),
 	preflightCheck: () => typedError<PreflightResponse, string>(__TAURI_INVOKE("preflight_check")),
@@ -235,6 +236,11 @@ export type SessionStatus = {
 	diagnostics_error: string | null,
 	game_state_mismatch: GameStateMismatch | null,
 	mvl_results: MvlStageResult[],
+};
+
+export type ShowNewRoomNotificationRequest = {
+	title: string,
+	body: string,
 };
 
 /* Tauri Specta runtime */

@@ -132,6 +132,13 @@ pub(crate) struct SaveNewRoomNotificationsRequest {
 
 #[derive(Debug, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
+pub(crate) struct ShowNewRoomNotificationRequest {
+    pub(crate) title: String,
+    pub(crate) body: String,
+}
+
+#[derive(Debug, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
 pub(crate) struct SavePlayerNameRequest {
     pub(crate) player_name: String,
 }
