@@ -13,6 +13,8 @@ set(SOURCES_QT_SDL
     EmuThread.cpp
     NsmbNetplayPoC.cpp
     NsmbNetplayPoC.h
+    NsmbAiObservation.cpp
+    NsmbAiObservation.h
     NsmbImitationAI.cpp
     NsmbImitationAI.h
     NsmbRuleAI.cpp
@@ -67,6 +69,8 @@ set(SOURCES_QT_SDL
     LANDialog.cpp
     NetplayDialog.cpp
 )
+
+set_source_files_properties(NsmbAiObservation.cpp PROPERTIES HEADER_FILE_ONLY ON)
 
 option(USE_QT6 "Use Qt 6 instead of Qt 5" ON)
 
