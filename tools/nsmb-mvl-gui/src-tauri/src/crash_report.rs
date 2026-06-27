@@ -7,6 +7,7 @@ use crate::models::{MatchPlayerNames, MvlStageResult};
 const DISCORD_WEBHOOK_URL: &str = "https://discord.com/api/webhooks/1520085291006689542/VP_H4C_dYDabMW0PQf35y0iz238Q4CYLgDU5AscdUkVoeT4VxtLiJ3qGYeQiGUtvWMzX";
 const DIAGNOSTIC_EVENT_LOG: &str = "melonds-events.jsonl";
 const REPORT_STATUS_FILE: &str = "discord-crash-report.txt";
+const USER_LOG_ARCHIVE_PREFIX: &str = "nsmb-mvl-logs";
 
 pub(crate) fn match_result_decided(results: &[MvlStageResult]) -> bool {
     results.iter().any(|result| {
@@ -98,20 +99,50 @@ pub(crate) fn create_log_archive(log_dir: &Path) -> Result<PathBuf, String> {
                 .unwrap_or("logs")
         )
     ));
-    let file = File::create(&archive_path)
-        .map_err(|err| format!("crash log archive を作成できません: {err}"))?;
+    create_log_archive_at(log_dir, &archive_path, ArchiveMode::Crash)
+}
+
+pub(crate) fn create_user_log_archive(log_dir: &Path) -> Result<PathBuf, String> {
+    let archive_path = log_dir.join(format!(
+        "{USER_LOG_ARCHIVE_PREFIX}-{}-{}.zip",
+        unix_timestamp_seconds(),
+        sanitize_file_name(
+            log_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("logs")
+        )
+    ));
+    create_log_archive_at(log_dir, &archive_path, ArchiveMode::User)
+}
+
+fn create_log_archive_at(
+    log_dir: &Path,
+    archive_path: &Path,
+    mode: ArchiveMode,
+) -> Result<PathBuf, String> {
+    let file =
+        File::create(archive_path).map_err(|err| format!("log archive を作成できません: {err}"))?;
     let mut zip = zip::ZipWriter::new(file);
-    add_dir_to_zip(&mut zip, log_dir, log_dir)
-        .map_err(|err| format!("crash log archive にログを追加できません: {err}"))?;
+    add_dir_to_zip(&mut zip, log_dir, log_dir, archive_path, mode)
+        .map_err(|err| format!("log archive にログを追加できません: {err}"))?;
     zip.finish()
-        .map_err(|err| format!("crash log archive を完了できません: {err}"))?;
-    Ok(archive_path)
+        .map_err(|err| format!("log archive を完了できません: {err}"))?;
+    Ok(archive_path.to_path_buf())
+}
+
+#[derive(Clone, Copy)]
+enum ArchiveMode {
+    Crash,
+    User,
 }
 
 fn add_dir_to_zip<W: Write + io::Seek>(
     zip: &mut zip::ZipWriter<W>,
     root: &Path,
     dir: &Path,
+    archive_path: &Path,
+    mode: ArchiveMode,
 ) -> io::Result<()> {
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated);
@@ -120,10 +151,10 @@ fn add_dir_to_zip<W: Write + io::Seek>(
         let path = entry.path();
         let metadata = entry.metadata()?;
         if metadata.is_dir() {
-            add_dir_to_zip(zip, root, &path)?;
+            add_dir_to_zip(zip, root, &path, archive_path, mode)?;
             continue;
         }
-        if !metadata.is_file() || should_exclude_log_file(&path) {
+        if !metadata.is_file() || should_exclude_log_file(&path, archive_path, mode) {
             continue;
         }
         let relative = path.strip_prefix(root).unwrap_or(&path);
@@ -142,10 +173,33 @@ fn add_dir_to_zip<W: Write + io::Seek>(
     Ok(())
 }
 
-fn should_exclude_log_file(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.eq_ignore_ascii_case(DIAGNOSTIC_EVENT_LOG))
+fn should_exclude_log_file(path: &Path, archive_path: &Path, mode: ArchiveMode) -> bool {
+    if same_path(path, archive_path) {
+        return true;
+    }
+    let file_name = path.file_name().and_then(|name| name.to_str());
+    if matches!(mode, ArchiveMode::Crash)
+        && file_name.is_some_and(|name| name.eq_ignore_ascii_case(DIAGNOSTIC_EVENT_LOG))
+    {
+        return true;
+    }
+    file_name.is_some_and(|name| {
+        name.starts_with(USER_LOG_ARCHIVE_PREFIX) && name.to_ascii_lowercase().ends_with(".zip")
+    })
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left == right,
+    }
+}
+
+fn unix_timestamp_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 fn sanitize_file_name(value: &str) -> String {

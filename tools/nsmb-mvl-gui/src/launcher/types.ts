@@ -49,11 +49,12 @@ export type LauncherSummary = {
 export type LauncherActions = {
   checkForUpdate: () => Promise<void>;
   copyRoomCode: () => Promise<void>;
+  createLogArchive: (logDir: string) => Promise<void>;
   createRoom: () => Promise<void>;
   deleteMatchHistory: (matchId: string) => Promise<void>;
   cancelHostedRoom: () => Promise<void>;
   joinRoom: (roomId: string) => Promise<void>;
-  openLogDir: () => Promise<void>;
+  openLogDir: (logDir?: string) => Promise<void>;
   openMelonds: () => Promise<void>;
   openMelondsInputConfig: () => Promise<void>;
   pollStatus: () => Promise<void>;
@@ -66,6 +67,7 @@ export type LauncherActions = {
   setStartupEnabled: (enabled: boolean) => Promise<void>;
   startMatch: () => Promise<void>;
   stopMatch: () => Promise<void>;
+  uploadLogArchive: (logDir: string) => Promise<void>;
 };
 
 export type OnboardingState = {

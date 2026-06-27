@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::crash_report::{create_log_archive, match_result_decided};
+use crate::crash_report::{create_log_archive, create_user_log_archive, match_result_decided};
 use crate::models::{
     CourseMode, GameSettings, GameStateMismatch, LaunchRequest, Lives, Role, RomIdentity,
 };
@@ -762,6 +762,23 @@ fn crash_log_archive_excludes_diagnostic_events() {
     assert!(zip.by_name("melonds-events.jsonl").is_err());
 
     let _ = fs::remove_file(archive);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn user_log_archive_includes_diagnostic_events_and_excludes_previous_archives() {
+    let dir = temp_log_dir("user-archive");
+    fs::write(dir.join("bridge.stderr.txt"), "bridge").expect("write bridge log");
+    fs::write(dir.join("melonds-events.jsonl"), "{}\n").expect("write diagnostics");
+    fs::write(dir.join("nsmb-mvl-logs-old.zip"), "old archive").expect("write old archive");
+
+    let archive = create_user_log_archive(&dir).expect("create user archive");
+    let file = fs::File::open(&archive).expect("open archive");
+    let mut zip = zip::ZipArchive::new(file).expect("read archive");
+    assert!(zip.by_name("bridge.stderr.txt").is_ok());
+    assert!(zip.by_name("melonds-events.jsonl").is_ok());
+    assert!(zip.by_name("nsmb-mvl-logs-old.zip").is_err());
+
     let _ = fs::remove_dir_all(dir);
 }
 

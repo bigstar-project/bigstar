@@ -1,5 +1,5 @@
 import alchemy from 'alchemy';
-import { DurableObjectNamespace, Worker } from 'alchemy/cloudflare';
+import { DurableObjectNamespace, R2Bucket, Worker } from 'alchemy/cloudflare';
 import { CloudflareStateStore } from 'alchemy/state';
 
 const shouldUseStateStore =
@@ -25,6 +25,19 @@ const lobby = DurableObjectNamespace('lobby', {
   sqlite: true,
 });
 
+const logArchives = await R2Bucket('log-archives', {
+  lifecycle: [
+    {
+      id: 'delete-after-1-day',
+      conditions: { prefix: '' },
+      enabled: true,
+      deleteObjectsTransition: {
+        condition: { type: 'Age', maxAge: 24 * 60 * 60 },
+      },
+    },
+  ],
+});
+
 const defaultCorsOrigins = [
   'http://127.0.0.1:1420',
   'http://localhost:1420',
@@ -39,9 +52,11 @@ export const signaling = await Worker('signaling', {
   bindings: {
     SIGNALING_ROOM: signalingRoom,
     LOBBY: lobby,
+    LOG_ARCHIVES: logArchives,
     DEFAULT_ICE_SERVERS:
       process.env.DEFAULT_ICE_SERVERS ?? 'stun:stun.l.google.com:19302',
     CORS_ORIGINS: process.env.CORS_ORIGINS ?? defaultCorsOrigins,
+    LOG_UPLOAD_TOKEN: process.env.LOG_UPLOAD_TOKEN ?? '',
   },
   bundle: {
     minify: true,

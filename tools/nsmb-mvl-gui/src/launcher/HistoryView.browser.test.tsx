@@ -73,4 +73,31 @@ describe('履歴ビュー', () => {
 
     expect(onDeleteMatch).toHaveBeenCalledWith(playedMatch.id);
   });
+
+  test('履歴を展開するとログ操作ボタンからログフォルダを渡す', async () => {
+    const [playedMatch] = previewMatchHistory();
+    const onOpenLogDir = vi.fn();
+    const onCreateLogArchive = vi.fn();
+    const onUploadLogArchive = vi.fn();
+
+    const screen = await render(
+      <Tabs.Root value="history">
+        <HistoryView
+          matches={[playedMatch]}
+          onCreateLogArchive={onCreateLogArchive}
+          onOpenLogDir={onOpenLogDir}
+          onUploadLogArchive={onUploadLogArchive}
+        />
+      </Tabs.Root>,
+    );
+
+    await screen.getByText('3 - 1').click();
+    await screen.getByRole('button', { name: 'ログを開く' }).click();
+    await screen.getByRole('button', { name: 'zipを作成' }).click();
+    await screen.getByRole('button', { name: 'ログを送信' }).click();
+
+    expect(onOpenLogDir).toHaveBeenCalledWith(playedMatch.logDir);
+    expect(onCreateLogArchive).toHaveBeenCalledWith(playedMatch.logDir);
+    expect(onUploadLogArchive).toHaveBeenCalledWith(playedMatch.logDir);
+  });
 });

@@ -285,6 +285,59 @@ describe('マッチメイキング HTTP API', () => {
   });
 });
 
+describe('ログアーカイブ upload API', () => {
+  test('upload tokenと1GB上限を検証してmultipart uploadを開始する', async () => {
+    const unauthorized = await SELF.fetch(
+      'https://match.test/log-archives/uploads',
+      {
+        body: JSON.stringify({
+          file_name: 'logs.zip',
+          size: 1024,
+        }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      },
+    );
+    expect(unauthorized.status).toBe(403);
+
+    const tooLarge = await SELF.fetch(
+      'https://match.test/log-archives/uploads',
+      {
+        body: JSON.stringify({
+          file_name: 'logs.zip',
+          size: 1024 * 1024 * 1024 + 1,
+        }),
+        headers: {
+          'content-type': 'application/json',
+          'x-nsmb-mvl-log-upload-token': 'test-upload-token',
+        },
+        method: 'POST',
+      },
+    );
+    expect(tooLarge.status).toBe(400);
+
+    const created = await SELF.fetch(
+      'https://match.test/log-archives/uploads',
+      {
+        body: JSON.stringify({
+          file_name: 'logs.zip',
+          size: 1024,
+        }),
+        headers: {
+          'content-type': 'application/json',
+          'x-nsmb-mvl-log-upload-token': 'test-upload-token',
+        },
+        method: 'POST',
+      },
+    );
+    expect(created.status).toBe(201);
+    expect(await json(created)).toMatchObject({
+      max_part_size: 64 * 1024 * 1024,
+      max_size: 1024 * 1024 * 1024,
+    });
+  });
+});
+
 describe('Lobby WebSocket API', () => {
   test('接続時snapshotと部屋更新snapshotをpushする', async () => {
     const created = await createRoom();

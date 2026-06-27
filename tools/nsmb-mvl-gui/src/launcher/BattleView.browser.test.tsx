@@ -37,6 +37,7 @@ function actions(overrides: Partial<LauncherActions> = {}) {
     checkForUpdate: vi.fn(async () => {}),
     cancelHostedRoom: vi.fn(async () => {}),
     copyRoomCode: vi.fn(async () => {}),
+    createLogArchive: vi.fn(async () => {}),
     createRoom: vi.fn(async () => {}),
     deleteMatchHistory: vi.fn(async () => {}),
     joinRoom: vi.fn(async () => {}),
@@ -53,6 +54,7 @@ function actions(overrides: Partial<LauncherActions> = {}) {
     setStartupEnabled: vi.fn(async () => {}),
     startMatch: vi.fn(async () => {}),
     stopMatch: vi.fn(async () => {}),
+    uploadLogArchive: vi.fn(async () => {}),
     ...overrides,
   };
 }

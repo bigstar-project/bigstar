@@ -21,6 +21,8 @@ export const commands = {
 	loadMatchHistory: () => typedError<MatchHistoryRecord[], string>(__TAURI_INVOKE("load_match_history")),
 	saveMatchHistory: (matches: MatchHistoryRecord[]) => typedError<null, string>(__TAURI_INVOKE("save_match_history", { matches })),
 	openLogDir: (path: string) => typedError<null, string>(__TAURI_INVOKE("open_log_dir", { path })),
+	createLogArchive: (logDir: string) => typedError<LogArchiveResponse, string>(__TAURI_INVOKE("create_log_archive", { logDir })),
+	uploadLogArchive: (request: UploadLogArchiveRequest) => typedError<UploadLogArchiveResponse, string>(__TAURI_INVOKE("upload_log_archive", { request })),
 	openMelonds: () => typedError<number, string>(__TAURI_INVOKE("open_melonds")),
 	openMelondsInputConfig: () => typedError<number, string>(__TAURI_INVOKE("open_melonds_input_config")),
 	getStartupEnabled: () => typedError<boolean, string>(__TAURI_INVOKE("get_startup_enabled")),
@@ -66,6 +68,7 @@ export type Defaults = {
 	diagnostic_events_enabled: boolean,
 	detailed_logs_enabled: boolean,
 	new_room_notifications_enabled: boolean,
+	log_archive_upload_token: string,
 };
 
 export type GameSettings = {
@@ -139,6 +142,11 @@ export type LaunchResponse = {
 };
 
 export type Lives = "3" | "5" | "endless";
+
+export type LogArchiveResponse = {
+	archive_path: string,
+	size: number,
+};
 
 export type MatchHistoryRecord = {
 	id: string,
@@ -249,6 +257,18 @@ export type SessionStatus = {
 export type ShowNewRoomNotificationRequest = {
 	title: string,
 	body: string,
+};
+
+export type UploadLogArchiveRequest = {
+	log_dir: string,
+	upload_url: string,
+	upload_token: string,
+};
+
+export type UploadLogArchiveResponse = {
+	archive_path: string,
+	key: string,
+	size: number,
 };
 
 /* Tauri Specta runtime */

@@ -80,6 +80,7 @@ pub(crate) struct Defaults {
     pub(crate) diagnostic_events_enabled: bool,
     pub(crate) detailed_logs_enabled: bool,
     pub(crate) new_room_notifications_enabled: bool,
+    pub(crate) log_archive_upload_token: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Type)]
@@ -154,6 +155,27 @@ pub(crate) struct ShowNewRoomNotificationRequest {
 #[serde(rename_all = "snake_case")]
 pub(crate) struct SavePlayerNameRequest {
     pub(crate) player_name: String,
+}
+
+#[derive(Debug, Serialize, Type)]
+pub(crate) struct LogArchiveResponse {
+    pub(crate) archive_path: String,
+    pub(crate) size: u32,
+}
+
+#[derive(Debug, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct UploadLogArchiveRequest {
+    pub(crate) log_dir: String,
+    pub(crate) upload_url: String,
+    pub(crate) upload_token: String,
+}
+
+#[derive(Debug, Serialize, Type)]
+pub(crate) struct UploadLogArchiveResponse {
+    pub(crate) archive_path: String,
+    pub(crate) key: String,
+    pub(crate) size: u32,
 }
 
 #[derive(Debug, Serialize, Type)]

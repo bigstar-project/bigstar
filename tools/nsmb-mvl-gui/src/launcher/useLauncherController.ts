@@ -28,6 +28,7 @@ import {
 } from '../matchmakingClient';
 import { notifyNewRoomAvailable } from '../roomNotifications';
 import {
+  createLogArchive as createLogArchiveCommand,
   ensureRoms,
   generateRoms,
   getDefaults,
@@ -48,6 +49,7 @@ import {
   setStartupEnabled as setStartupEnabledCommand,
   startMatch as startMatchCommand,
   stopMatch as stopMatchCommand,
+  uploadLogArchive as uploadLogArchiveCommand,
 } from '../tauriClient';
 import type {
   BridgeDiagnostics,
@@ -84,6 +86,23 @@ function isTauriRuntime() {
 
 function isWebSocketUrl(value: string) {
   return value.startsWith('ws://') || value.startsWith('wss://');
+}
+
+function logArchiveUploadUrl(signalUrl: string) {
+  const url = new URL(signalUrl);
+  if (url.protocol === 'wss:') {
+    url.protocol = 'https:';
+  } else if (url.protocol === 'ws:') {
+    url.protocol = 'http:';
+  } else if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new Error(
+      'ログアップロード先は ws:// または wss:// から導出してください',
+    );
+  }
+  url.pathname = '/log-archives';
+  url.search = '';
+  url.hash = '';
+  return url.toString().replace(/\/$/, '');
 }
 
 function assertRomPairMatches(local: RomIdentity, remote: RomIdentity) {
@@ -221,6 +240,7 @@ export function useLauncherController() {
   const matchHistoryRef = useRef<BattleMatchRecord[]>([]);
   const [matchHistoryLoaded, setMatchHistoryLoaded] = useState(false);
   const [playerProfileId, setPlayerProfileId] = useState('');
+  const [logArchiveUploadToken, setLogArchiveUploadToken] = useState('');
 
   const currentRomPath =
     form.role === 'host' ? form.hostRomPath : form.clientRomPath;
@@ -584,6 +604,7 @@ export function useLauncherController() {
             defaults.new_room_notifications_enabled ?? true,
         });
         setPlayerProfileId(defaults.player_profile_id);
+        setLogArchiveUploadToken(defaults.log_archive_upload_token ?? '');
         setOnboardingRomsPrepared(defaults.roms_prepared_once);
         setOnboardingInputConfigOpened(defaults.input_config_opened_once);
         setOnboardingPlayerNameConfigured(
@@ -1345,12 +1366,41 @@ export function useLauncherController() {
     }
   };
 
-  const openLogDir = async () => {
-    if (!lastLogDir) {
+  const openLogDir = async (logDir?: string) => {
+    const target = logDir ?? lastLogDir;
+    if (!target) {
       return;
     }
     try {
-      await openLogDirCommand(lastLogDir);
+      await openLogDirCommand(target);
+    } catch (error) {
+      setActivityStatus({ text: String(error), kind: 'error' });
+    }
+  };
+
+  const createLogArchive = async (logDir: string) => {
+    try {
+      const response = await createLogArchiveCommand(logDir);
+      setActivityStatus({
+        text: `ログzipを作成しました: ${response.archive_path}`,
+        kind: 'ok',
+      });
+    } catch (error) {
+      setActivityStatus({ text: String(error), kind: 'error' });
+    }
+  };
+
+  const uploadLogArchive = async (logDir: string) => {
+    try {
+      const response = await uploadLogArchiveCommand({
+        log_dir: logDir,
+        upload_url: logArchiveUploadUrl(form.signalUrl),
+        upload_token: logArchiveUploadToken,
+      });
+      setActivityStatus({
+        text: `ログzipをアップロードしました: ${response.key}`,
+        kind: 'ok',
+      });
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });
     }
@@ -1532,6 +1582,7 @@ export function useLauncherController() {
     cancelHostedRoom,
     checkForUpdate,
     copyRoomCode,
+    createLogArchive,
     createRoom,
     deleteMatchHistory,
     joinRoom,
@@ -1548,6 +1599,7 @@ export function useLauncherController() {
     setStartupEnabled,
     startMatch,
     stopMatch,
+    uploadLogArchive,
   };
 
   const changeView = (view: View) => {

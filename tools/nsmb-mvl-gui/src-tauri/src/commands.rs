@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use tauri::{AppHandle, Manager, State};
@@ -8,15 +9,16 @@ use tauri_plugin_autostart::ManagerExt;
 use std::os::windows::process::CommandExt;
 
 use crate::config::{default_signal_url, DEFAULT_PORT, DEFAULT_ROOM_CODE};
+use crate::crash_report::create_user_log_archive;
 use crate::models::{
     Defaults, GenerateRomRequest, GenerateRomResponse, LaunchRequest, LaunchResponse,
-    MatchHistoryRecord, SaveDetailedLogsRequest, SaveDiagnosticEventsRequest,
+    LogArchiveResponse, MatchHistoryRecord, SaveDetailedLogsRequest, SaveDiagnosticEventsRequest,
     SaveNewRoomNotificationsRequest, SavePlayerNameRequest, SaveRomPathsRequest, SessionStatus,
-    ShowNewRoomNotificationRequest,
+    ShowNewRoomNotificationRequest, UploadLogArchiveRequest, UploadLogArchiveResponse,
 };
 use crate::paths::{
-    absolutize_existing, app_data_dir, create_log_dir, find_bridge_binary, find_input_script,
-    find_melonds_binary, fixed_generated_rom_paths, load_launcher_settings,
+    absolutize_existing, allowed_log_dir, app_data_dir, create_log_dir, find_bridge_binary,
+    find_input_script, find_melonds_binary, fixed_generated_rom_paths, load_launcher_settings,
     load_match_history as load_match_history_file, open_allowed_log_dir, save_launcher_settings,
     save_match_history as save_match_history_file,
 };
@@ -28,6 +30,9 @@ use crate::roms::prepare_roms;
 use crate::settings::validate_request;
 use crate::state::AppState;
 use crate::windowing::show_main_window;
+
+const MAX_LOG_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024;
+const LOG_ARCHIVE_UPLOAD_PART_BYTES: usize = 32 * 1024 * 1024;
 
 #[tauri::command]
 #[specta::specta]
@@ -58,6 +63,10 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
         diagnostic_events_enabled: saved.diagnostic_events_enabled,
         detailed_logs_enabled: saved.detailed_logs_enabled,
         new_room_notifications_enabled: saved.new_room_notifications_enabled,
+        log_archive_upload_token: std::env::var("NSMB_MVL_LOG_UPLOAD_TOKEN")
+            .unwrap_or_default()
+            .trim()
+            .to_owned(),
     })
 }
 
@@ -196,6 +205,36 @@ pub(crate) fn open_log_dir(app: AppHandle, path: String) -> Result<(), String> {
 
 #[tauri::command]
 #[specta::specta]
+pub(crate) fn create_log_archive(
+    app: AppHandle,
+    log_dir: String,
+) -> Result<LogArchiveResponse, String> {
+    let log_dir = resolve_allowed_log_dir(&app, &log_dir)?;
+    let archive_path = create_user_log_archive(&log_dir)?;
+    let size = archive_size(&archive_path)?;
+    Ok(LogArchiveResponse {
+        archive_path: archive_path.to_string_lossy().into_owned(),
+        size: archive_size_for_gui(size)?,
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn upload_log_archive(
+    app: AppHandle,
+    request: UploadLogArchiveRequest,
+) -> Result<UploadLogArchiveResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let log_dir = resolve_allowed_log_dir(&app, &request.log_dir)?;
+        let archive_path = create_user_log_archive(&log_dir)?;
+        upload_log_archive_inner(&archive_path, &request)
+    })
+    .await
+    .map_err(|err| format!("log archive upload worker が停止しました: {err}"))?
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) fn load_match_history(app: AppHandle) -> Result<Vec<MatchHistoryRecord>, String> {
     load_match_history_file(&app)
 }
@@ -299,6 +338,169 @@ fn launch_melonds(app: &AppHandle, args: &[&str]) -> Result<u32, String> {
         .spawn()
         .map(|child| child.id())
         .map_err(|err| format!("melonDS の起動に失敗しました: {err}"))
+}
+
+fn resolve_allowed_log_dir(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
+    let logs_root = app_data_dir(app)?.join("logs");
+    fs::create_dir_all(&logs_root).map_err(|err| format!("ログ保存先を作成できません: {err}"))?;
+    allowed_log_dir(&logs_root, &PathBuf::from(path.trim()))
+}
+
+fn archive_size(path: &Path) -> Result<u64, String> {
+    fs::metadata(path)
+        .map(|metadata| metadata.len())
+        .map_err(|err| format!("log archive のサイズを取得できません: {err}"))
+}
+
+#[derive(serde::Serialize)]
+struct CreateUploadRequest {
+    file_name: String,
+    size: u64,
+}
+
+#[derive(serde::Deserialize)]
+struct CreateUploadResponse {
+    key: String,
+    upload_id: String,
+    max_size: u64,
+    max_part_size: usize,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct UploadedPart {
+    #[serde(rename = "partNumber")]
+    part_number: u16,
+    etag: String,
+}
+
+#[derive(serde::Serialize)]
+struct CompleteUploadRequest {
+    key: String,
+    parts: Vec<UploadedPart>,
+}
+
+#[derive(serde::Deserialize)]
+struct CompleteUploadResponse {
+    key: String,
+}
+
+fn upload_log_archive_inner(
+    archive_path: &Path,
+    request: &UploadLogArchiveRequest,
+) -> Result<UploadLogArchiveResponse, String> {
+    let size = archive_size(archive_path)?;
+    if size > MAX_LOG_ARCHIVE_BYTES {
+        return Err(format!("log archive が1GBを超えています: {} bytes", size));
+    }
+    let base_url = normalized_upload_url(&request.upload_url)?;
+    let file_name = archive_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("nsmb-mvl-logs.zip")
+        .to_owned();
+    let client = reqwest::blocking::Client::new();
+    let create_response: CreateUploadResponse = send_json(
+        client
+            .post(format!("{base_url}/uploads"))
+            .json(&CreateUploadRequest { file_name, size }),
+        &request.upload_token,
+        "log archive upload の開始",
+    )?;
+    if create_response.max_size > 0 && size > create_response.max_size {
+        return Err(format!(
+            "log archive がサーバー上限を超えています: {} bytes",
+            size
+        ));
+    }
+    let part_size = create_response
+        .max_part_size
+        .clamp(1, LOG_ARCHIVE_UPLOAD_PART_BYTES);
+    let mut file =
+        fs::File::open(archive_path).map_err(|err| format!("log archive を読めません: {err}"))?;
+    let mut parts = Vec::new();
+    let mut part_number: u16 = 1;
+    loop {
+        let mut buffer = vec![0_u8; part_size];
+        let read = file
+            .read(&mut buffer)
+            .map_err(|err| format!("log archive の読み込みに失敗しました: {err}"))?;
+        if read == 0 {
+            break;
+        }
+        buffer.truncate(read);
+        let mut part_url = reqwest::Url::parse(&format!(
+            "{base_url}/uploads/{}/parts/{part_number}",
+            create_response.upload_id
+        ))
+        .map_err(|err| format!("log archive upload URL が不正です: {err}"))?;
+        part_url
+            .query_pairs_mut()
+            .append_pair("key", &create_response.key);
+        let part: UploadedPart = send_json(
+            client.put(part_url).body(buffer),
+            &request.upload_token,
+            "log archive part の送信",
+        )?;
+        parts.push(part);
+        part_number = part_number
+            .checked_add(1)
+            .ok_or_else(|| "log archive part 数が多すぎます".to_owned())?;
+    }
+    let complete: CompleteUploadResponse = send_json(
+        client
+            .post(format!(
+                "{base_url}/uploads/{}/complete",
+                create_response.upload_id
+            ))
+            .json(&CompleteUploadRequest {
+                key: create_response.key,
+                parts,
+            }),
+        &request.upload_token,
+        "log archive upload の完了",
+    )?;
+    Ok(UploadLogArchiveResponse {
+        archive_path: archive_path.to_string_lossy().into_owned(),
+        key: complete.key,
+        size: archive_size_for_gui(size)?,
+    })
+}
+
+fn archive_size_for_gui(size: u64) -> Result<u32, String> {
+    if size > u32::MAX as u64 {
+        return Err(format!("log archive が大きすぎます: {size} bytes"));
+    }
+    Ok(size as u32)
+}
+
+fn normalized_upload_url(value: &str) -> Result<String, String> {
+    let url = reqwest::Url::parse(value.trim())
+        .map_err(|err| format!("log archive upload URL が不正です: {err}"))?;
+    match url.scheme() {
+        "http" | "https" => Ok(url.as_str().trim_end_matches('/').to_owned()),
+        _ => Err("log archive upload URL は http:// または https:// を指定してください".to_owned()),
+    }
+}
+
+fn send_json<T: serde::de::DeserializeOwned>(
+    mut request: reqwest::blocking::RequestBuilder,
+    token: &str,
+    label: &str,
+) -> Result<T, String> {
+    if !token.trim().is_empty() {
+        request = request.header("x-nsmb-mvl-log-upload-token", token.trim());
+    }
+    let response = request
+        .send()
+        .map_err(|err| format!("{label}に失敗しました: {err}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().unwrap_or_else(|_| String::new());
+        return Err(format!("{label}に失敗しました status={status} {body}"));
+    }
+    response
+        .json()
+        .map_err(|err| format!("{label}のレスポンス形式が不正です: {err}"))
 }
 
 async fn prepare_roms_on_blocking_thread(

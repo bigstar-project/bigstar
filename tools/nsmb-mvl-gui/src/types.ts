@@ -11,6 +11,7 @@ export type {
   LaunchRequest,
   LaunchResponse,
   Lives,
+  LogArchiveResponse,
   MatchHistoryRecord,
   MatchHistoryStatus,
   MatchPlayerNames,
@@ -26,6 +27,8 @@ export type {
   SaveRomPathsRequest,
   SessionStatus,
   ShowNewRoomNotificationRequest,
+  UploadLogArchiveRequest,
+  UploadLogArchiveResponse,
 } from './bindings';
 
 export type StatusKind = 'idle' | 'ok' | 'warn' | 'error';

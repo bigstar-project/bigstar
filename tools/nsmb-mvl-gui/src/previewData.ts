@@ -15,6 +15,7 @@ export const previewDefaults: Defaults = {
   diagnostic_events_enabled: false,
   detailed_logs_enabled: false,
   new_room_notifications_enabled: true,
+  log_archive_upload_token: '',
   port: 8165,
 };
 

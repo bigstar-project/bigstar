@@ -12,6 +12,7 @@ import type {
   GenerateRomResponse,
   LaunchRequest,
   LaunchResponse,
+  LogArchiveResponse,
   MatchHistoryRecord,
   PreflightResponse,
   SaveDetailedLogsRequest,
@@ -21,6 +22,8 @@ import type {
   SaveRomPathsRequest,
   SessionStatus,
   ShowNewRoomNotificationRequest,
+  UploadLogArchiveRequest,
+  UploadLogArchiveResponse,
 } from './types';
 
 async function unwrapCommand<T>(
@@ -233,6 +236,27 @@ export function openLogDir(path: string) {
     return Promise.resolve(null);
   }
   return unwrapCommand(commands.openLogDir(path));
+}
+
+export function createLogArchive(logDir: string) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve<LogArchiveResponse>({
+      archive_path: `${logDir}\\nsmb-mvl-logs-preview.zip`,
+      size: 1024,
+    });
+  }
+  return unwrapCommand(commands.createLogArchive(logDir));
+}
+
+export function uploadLogArchive(request: UploadLogArchiveRequest) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve<UploadLogArchiveResponse>({
+      archive_path: `${request.log_dir}\\nsmb-mvl-logs-preview.zip`,
+      key: 'log-archives/preview/nsmb-mvl-logs-preview.zip',
+      size: 1024,
+    });
+  }
+  return unwrapCommand(commands.uploadLogArchive(request));
 }
 
 export function openMelonds() {
