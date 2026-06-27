@@ -7,18 +7,21 @@ import type { LauncherActions, LauncherSummary } from './types';
 
 const summary: LauncherSummary = {
   connectionActive: false,
-  courseNote: 'Match seed から stage 0-4 を決めます。',
+  courseNote: '起動時にコース列と各試合の seed を確定します。',
   currentRomPath: 'C:\\roms\\host.nds',
   romPreparation: '再利用',
   romsConfigured: true,
-  selectedStageLabel: '3',
+  selectedStageLabel: '土管',
+  updateRequired: false,
 };
 
 async function renderSettingsView() {
   const launcherActions = {
     checkForUpdate: vi.fn(async () => {}),
+    cancelHostedRoom: vi.fn(async () => {}),
     copyRoomCode: vi.fn(async () => {}),
     createRoom: vi.fn(async () => {}),
+    deleteMatchHistory: vi.fn(async () => {}),
     joinRoom: vi.fn(async () => {}),
     openLogDir: vi.fn(async () => {}),
     openMelonds: vi.fn(async () => {}),
@@ -27,8 +30,10 @@ async function renderSettingsView() {
     preflightCheck: vi.fn(async () => {}),
     prepareRoms: vi.fn(async () => {}),
     refreshRooms: vi.fn(async () => {}),
+    savePlayerName: vi.fn(async () => {}),
     selectBaseRomAndPrepare: vi.fn(async () => {}),
     selectRomPath: vi.fn(async () => {}),
+    setStartupEnabled: vi.fn(async () => {}),
     startMatch: vi.fn(async () => {}),
     stopMatch: vi.fn(async () => {}),
   } satisfies LauncherActions;
@@ -41,10 +46,12 @@ async function renderSettingsView() {
         form={{
           ...initialForm,
           baseRomPath: 'C:\\roms\\base.nds',
+          hostName: 'Player',
           hostRomPath: 'C:\\roms\\host.nds',
           roomCode: 'test-room',
           signalUrl: 'ws://127.0.0.1:8787/session',
         }}
+        startup={{ enabled: false, loading: false }}
         summary={summary}
         updateField={updateField}
       />
@@ -55,6 +62,32 @@ async function renderSettingsView() {
 }
 
 describe('設定ビュー', () => {
+  test('設定セクションを指定された順番で表示する', async () => {
+    await renderSettingsView();
+
+    const headings = Array.from(document.querySelectorAll('h2')).map(
+      (heading) => heading.textContent?.trim(),
+    );
+
+    expect(headings.slice(0, 5)).toEqual([
+      'プロフィール',
+      '常駐・通知',
+      'melonDS設定',
+      'ROM設定',
+      '接続設定',
+    ]);
+  });
+
+  test('プレイヤーネームを更新して保存する', async () => {
+    const { launcherActions, screen, updateField } = await renderSettingsView();
+
+    await screen.getByLabelText('プレイヤーネーム').fill('Alice');
+    await screen.getByRole('button', { name: '保存' }).click();
+
+    expect(updateField).toHaveBeenCalledWith('hostName', 'Alice');
+    expect(launcherActions.savePlayerName).toHaveBeenCalledTimes(1);
+  });
+
   test('接続項目を更新してステータス確認を実行する', async () => {
     const { launcherActions, screen, updateField } = await renderSettingsView();
 
@@ -86,6 +119,25 @@ describe('設定ビュー', () => {
     expect(launcherActions.openMelondsInputConfig).toHaveBeenCalledTimes(1);
     expect(launcherActions.preflightCheck).toHaveBeenCalledTimes(1);
     expect(launcherActions.prepareRoms).toHaveBeenCalledTimes(1);
+  });
+
+  test('スタートアップ起動をSwitchで切り替える', async () => {
+    const { launcherActions, screen } = await renderSettingsView();
+
+    await screen.getByText('Windowsログイン時に起動').click();
+
+    expect(launcherActions.setStartupEnabled).toHaveBeenCalledWith(true);
+  });
+
+  test('新規部屋通知をSwitchで切り替える', async () => {
+    const { screen, updateField } = await renderSettingsView();
+
+    await screen.getByText('新規部屋通知').click();
+
+    expect(updateField).toHaveBeenCalledWith(
+      'newRoomNotificationsEnabled',
+      false,
+    );
   });
 
   test('現在の設定状態を要約して表示する', async () => {

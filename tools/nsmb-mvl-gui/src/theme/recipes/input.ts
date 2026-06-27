@@ -19,7 +19,7 @@ export const input = {
     },
   },
   defaultVariants: {
-    size: 'md',
+    size: 'sm',
     variant: 'outline',
   },
   variants: {

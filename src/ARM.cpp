@@ -938,6 +938,12 @@ static void NSMLEmitNormalizeMvlEntranceSpawnState(std::vector<u32>& code)
     code.push_back(0xE5864004u); // str r4, [r6, #4]
 }
 
+static void NSMLEmitClearInitialPlayerInventoryPowerups(std::vector<u32>& code)
+{
+    NSMLEmitStoreImm8(code, 0x0208B32C, 0);
+    NSMLEmitStoreImm8(code, 0x0208B32D, 0);
+}
+
 static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
 {
     static int enabled = -1;
@@ -1354,6 +1360,7 @@ static bool HandleNSMLSafeLevelCall(ARM* cpu, u32 instrAddr)
         NSMLEmitStackArg(code, 0x30, 0xFFFFFFFFu);
         NSMLEmitBLViaIP(code, loadLevelAddr);
         NSMLEmitNormalizeMvlEntranceSpawnState(code);
+        NSMLEmitClearInitialPlayerInventoryPowerups(code);
         code.push_back(0xE28DD034u); // add sp, sp, #0x34
         if (loadLevelFilesReady > 0)
         {

@@ -1,4 +1,5 @@
 import {
+  BellRinging,
   Broadcast,
   CheckCircle,
   FlagCheckered,
@@ -6,25 +7,39 @@ import {
   HardDrives,
   Play,
   ShieldCheck,
+  UserCircle,
+  WarningCircle,
   WifiHigh,
 } from '@phosphor-icons/react';
 import { css } from 'styled-system/css';
 import { token } from 'styled-system/tokens';
-import { FilePathField, NumberField, TextField } from '../components/Fields';
+import {
+  FilePathField,
+  NumberField,
+  SelectField,
+  TextField,
+} from '../components/Fields';
 import { SummaryItem } from '../components/SummaryItem';
-import { Button, Tabs } from '../components/ui';
+import { Button, Switch, Tabs } from '../components/ui';
 import type { FormState } from '../types';
 import { InfoPanel, SettingsPanel } from './LauncherCards';
 import { shortPath } from './path';
 import type {
   LauncherActions,
   LauncherSummary,
+  StartupState,
   UpdateFormField,
 } from './types';
+
+const diagnosticEventOptions = [
+  { value: 'off', label: 'Off' },
+  { value: 'on', label: 'On' },
+];
 
 export function SettingsView({
   actions,
   form,
+  startup,
   summary,
   updateField,
 }: {
@@ -35,9 +50,12 @@ export function SettingsView({
     | 'pollStatus'
     | 'preflightCheck'
     | 'prepareRoms'
+    | 'savePlayerName'
     | 'selectRomPath'
+    | 'setStartupEnabled'
   >;
   form: FormState;
+  startup: StartupState;
   summary: LauncherSummary;
   updateField: UpdateFormField;
 }) {
@@ -46,20 +64,196 @@ export function SettingsView({
       <div
         className={css({
           display: 'grid',
-          gap: '5',
-          gridTemplateColumns: `minmax(0, 1fr) ${token('sizes.settingsAside')}`,
-          '@media (max-width: 1180px)': {
-            gridTemplateColumns: '1fr',
+          gap: '4',
+          gridTemplateColumns: {
+            base: '1fr',
+            xl: `minmax(0, 1fr) ${token('sizes.settingsAside')}`,
           },
+          maxW: { base: 'xl', xl: 'contentMax' },
+          mx: { base: 'auto', xl: '0' },
+          w: 'full',
         })}
       >
         <section
           className={css({
             alignContent: 'start',
             display: 'grid',
-            gap: '4',
+            gap: '3',
           })}
         >
+          <SettingsPanel
+            icon={<UserCircle size={24} weight="fill" />}
+            title="プロフィール"
+          >
+            <div
+              className={css({
+                display: 'grid',
+                gap: '2',
+                gridTemplateColumns: {
+                  base: '1fr',
+                  md: 'minmax(0, 1fr) auto',
+                },
+              })}
+            >
+              <TextField
+                label="プレイヤーネーム"
+                value={form.hostName}
+                maxLength={32}
+                placeholder="Player"
+                onChange={(value) => updateField('hostName', value)}
+              />
+              <Button
+                className={css({ alignSelf: 'end' })}
+                variant="outline"
+                onClick={() => void actions.savePlayerName()}
+              >
+                保存
+              </Button>
+            </div>
+          </SettingsPanel>
+
+          <SettingsPanel
+            icon={<BellRinging size={24} weight="fill" />}
+            title="常駐・通知"
+          >
+            <Switch.Root
+              checked={startup.enabled}
+              disabled={startup.loading}
+              onCheckedChange={(details) =>
+                void actions.setStartupEnabled(details.checked)
+              }
+              className={css({
+                alignItems: 'center',
+                bg: 'app.panel',
+                borderColor: 'border',
+                borderRadius: 'l2',
+                borderWidth: '1px',
+                colorPalette: 'blue',
+                display: 'flex',
+                gap: '3',
+                justifyContent: 'space-between',
+                minH: '16',
+                p: '3',
+                w: 'full',
+              })}
+            >
+              <Switch.HiddenInput />
+              <div
+                className={css({
+                  display: 'grid',
+                  gap: '1',
+                  minW: '0',
+                })}
+              >
+                <Switch.Label className={css({ fontSize: 'sm' })}>
+                  Windowsログイン時に起動
+                </Switch.Label>
+                <div
+                  className={css({
+                    color: 'fg.muted',
+                    textStyle: 'xs',
+                  })}
+                >
+                  タスクトレイに最小化された状態で起動します
+                </div>
+              </div>
+              <Switch.Control />
+            </Switch.Root>
+            <Switch.Root
+              checked={form.newRoomNotificationsEnabled}
+              onCheckedChange={(details) =>
+                updateField('newRoomNotificationsEnabled', details.checked)
+              }
+              className={css({
+                alignItems: 'center',
+                bg: 'app.panel',
+                borderColor: 'border',
+                borderRadius: 'l2',
+                borderWidth: '1px',
+                colorPalette: 'blue',
+                display: 'flex',
+                gap: '3',
+                justifyContent: 'space-between',
+                minH: '16',
+                p: '3',
+                w: 'full',
+              })}
+            >
+              <Switch.HiddenInput />
+              <div
+                className={css({
+                  display: 'grid',
+                  gap: '1',
+                  minW: '0',
+                })}
+              >
+                <Switch.Label className={css({ fontSize: 'sm' })}>
+                  新規部屋通知
+                </Switch.Label>
+                <div
+                  className={css({
+                    color: 'fg.muted',
+                    textStyle: 'xs',
+                  })}
+                >
+                  新しい部屋が作られたときに通知を受け取ることができます
+                </div>
+              </div>
+              <Switch.Control />
+            </Switch.Root>
+          </SettingsPanel>
+
+          <SettingsPanel
+            icon={<GameController size={24} weight="fill" />}
+            title="melonDS設定"
+          >
+            <div
+              className={css({
+                display: 'grid',
+                gap: '2',
+                gridTemplateColumns: {
+                  base: '1fr',
+                  md: 'repeat(2, minmax(0, 1fr))',
+                },
+              })}
+            >
+              <Button
+                variant="outline"
+                onClick={() => void actions.openMelonds()}
+              >
+                <Play size={20} weight="fill" />
+                melonDS を開く
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => void actions.openMelondsInputConfig()}
+              >
+                <GameController size={20} weight="fill" />
+                入力設定を開く
+              </Button>
+            </div>
+            <SelectField
+              icon={<WarningCircle size={18} weight="fill" />}
+              label="診断イベントログ"
+              options={diagnosticEventOptions}
+              value={form.diagnosticEventsEnabled ? 'on' : 'off'}
+              onChange={(value) =>
+                updateField('diagnosticEventsEnabled', value === 'on')
+              }
+            />
+          </SettingsPanel>
+
+          <SettingsPanel
+            icon={<HardDrives size={24} weight="fill" />}
+            title="ROM設定"
+          >
+            <FilePathField
+              label="ベース ROM"
+              value={form.baseRomPath}
+              onBrowse={() => void actions.selectRomPath('baseRomPath')}
+            />
+          </SettingsPanel>
+
           <SettingsPanel
             icon={<Broadcast size={24} weight="bold" />}
             title="接続設定"
@@ -67,10 +261,10 @@ export function SettingsView({
             <div
               className={css({
                 display: 'grid',
-                gap: '3',
-                gridTemplateColumns: 'minmax(0, 1fr) auto',
-                '@media (max-width: 760px)': {
-                  gridTemplateColumns: '1fr',
+                gap: '2',
+                gridTemplateColumns: {
+                  base: '1fr',
+                  md: 'minmax(0, 1fr) auto',
                 },
               })}
             >
@@ -97,55 +291,13 @@ export function SettingsView({
             />
           </SettingsPanel>
 
-          <SettingsPanel
-            icon={<HardDrives size={24} weight="fill" />}
-            title="ROM 設定"
-          >
-            <FilePathField
-              label="ベース ROM"
-              value={form.baseRomPath}
-              onBrowse={() => void actions.selectRomPath('baseRomPath')}
-            />
-          </SettingsPanel>
-
-          <SettingsPanel
-            icon={<GameController size={24} weight="fill" />}
-            title="melonDS 設定"
-          >
-            <div
-              className={css({
-                display: 'grid',
-                gap: '4',
-                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                '@media (max-width: 760px)': {
-                  gridTemplateColumns: '1fr',
-                },
-              })}
-            >
-              <Button
-                variant="outline"
-                onClick={() => void actions.openMelonds()}
-              >
-                <Play size={20} weight="fill" />
-                melonDS を開く
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => void actions.openMelondsInputConfig()}
-              >
-                <GameController size={20} weight="fill" />
-                入力設定を開く
-              </Button>
-            </div>
-          </SettingsPanel>
-
           <div
             className={css({
               display: 'grid',
-              gap: '4',
-              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-              '@media (max-width: 760px)': {
-                gridTemplateColumns: '1fr',
+              gap: '3',
+              gridTemplateColumns: {
+                base: '1fr',
+                md: 'repeat(2, minmax(0, 1fr))',
               },
             })}
           >
@@ -170,7 +322,7 @@ export function SettingsView({
           className={css({
             alignContent: 'start',
             display: 'grid',
-            gap: '4',
+            gap: '3',
           })}
         >
           <InfoPanel
@@ -187,8 +339,8 @@ export function SettingsView({
                 borderRadius: 'l2',
                 borderWidth: '1px',
                 display: 'flex',
-                gap: '4',
-                p: '4',
+                gap: '2.5',
+                p: '3',
               })}
             >
               <CheckCircle
@@ -196,7 +348,7 @@ export function SettingsView({
                   color: 'green.plain.fg',
                   flexShrink: '0',
                 })}
-                size={46}
+                size={32}
                 weight="bold"
               />
               <div>

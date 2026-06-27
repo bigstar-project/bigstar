@@ -12,6 +12,7 @@ describe('初回セットアップゲート', () => {
       <OnboardingGate
         actions={{
           openMelondsInputConfig,
+          savePlayerName: vi.fn(async () => {}),
           selectBaseRomAndPrepare,
         }}
         activeView="battle"
@@ -20,10 +21,12 @@ describe('初回セットアップゲート', () => {
         onboarding={{
           inputConfigOpened: false,
           loaded: true,
+          playerNameConfigured: false,
           romGenerationBusy: false,
           romsPrepared: false,
         }}
         onOpenAi={vi.fn()}
+        updateField={vi.fn()}
       />,
     );
 
@@ -46,6 +49,7 @@ describe('初回セットアップゲート', () => {
       <OnboardingGate
         actions={{
           openMelondsInputConfig,
+          savePlayerName: vi.fn(async () => {}),
           selectBaseRomAndPrepare: vi.fn(async () => {}),
         }}
         activeView="battle"
@@ -54,10 +58,12 @@ describe('初回セットアップゲート', () => {
         onboarding={{
           inputConfigOpened: false,
           loaded: true,
+          playerNameConfigured: true,
           romGenerationBusy: false,
           romsPrepared: true,
         }}
         onOpenAi={vi.fn()}
+        updateField={vi.fn()}
       />,
     );
 
@@ -69,11 +75,45 @@ describe('初回セットアップゲート', () => {
     expect(openMelondsInputConfig).toHaveBeenCalledTimes(1);
   });
 
+  test('プレイヤーネームを入力して保存できる', async () => {
+    const savePlayerName = vi.fn(async () => {});
+    const updateField = vi.fn();
+
+    const screen = await render(
+      <OnboardingGate
+        actions={{
+          openMelondsInputConfig: vi.fn(async () => {}),
+          savePlayerName,
+          selectBaseRomAndPrepare: vi.fn(async () => {}),
+        }}
+        activeView="battle"
+        activityStatus={null}
+        form={{ ...initialForm, hostName: '' }}
+        onboarding={{
+          inputConfigOpened: true,
+          loaded: true,
+          playerNameConfigured: false,
+          romGenerationBusy: false,
+          romsPrepared: true,
+        }}
+        onOpenAi={vi.fn()}
+        updateField={updateField}
+      />,
+    );
+
+    await screen.getByLabelText('プレイヤーネーム').fill('Alice');
+    await screen.getByRole('button', { name: '保存' }).click();
+
+    expect(updateField).toHaveBeenCalledWith('hostName', 'Alice');
+    expect(savePlayerName).toHaveBeenCalledTimes(1);
+  });
+
   test('セットアップ完了後は表示しない', async () => {
     const screen = await render(
       <OnboardingGate
         actions={{
           openMelondsInputConfig: vi.fn(async () => {}),
+          savePlayerName: vi.fn(async () => {}),
           selectBaseRomAndPrepare: vi.fn(async () => {}),
         }}
         activeView="battle"
@@ -82,10 +122,12 @@ describe('初回セットアップゲート', () => {
         onboarding={{
           inputConfigOpened: true,
           loaded: true,
+          playerNameConfigured: true,
           romGenerationBusy: false,
           romsPrepared: true,
         }}
         onOpenAi={vi.fn()}
+        updateField={vi.fn()}
       />,
     );
 
@@ -101,6 +143,7 @@ describe('初回セットアップゲート', () => {
       <OnboardingGate
         actions={{
           openMelondsInputConfig: vi.fn(async () => {}),
+          savePlayerName: vi.fn(async () => {}),
           selectBaseRomAndPrepare: vi.fn(async () => {}),
         }}
         activeView="battle"
@@ -109,10 +152,12 @@ describe('初回セットアップゲート', () => {
         onboarding={{
           inputConfigOpened: false,
           loaded: true,
+          playerNameConfigured: false,
           romGenerationBusy: false,
           romsPrepared: false,
         }}
         onOpenAi={onOpenAi}
+        updateField={vi.fn()}
       />,
     );
 

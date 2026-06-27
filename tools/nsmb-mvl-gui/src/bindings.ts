@@ -12,16 +12,24 @@ export const commands = {
 	selectAiLogFile: (currentPath: string) => typedError<string | null, string>(__TAURI_INVOKE("select_ai_log_file", { currentPath })),
 	getDefaults: () => typedError<Defaults, string>(__TAURI_INVOKE("get_defaults")),
 	saveRomPaths: (request: SaveRomPathsRequest) => typedError<null, string>(__TAURI_INVOKE("save_rom_paths", { request })),
+	saveDiagnosticEventsEnabled: (request: SaveDiagnosticEventsRequest) => typedError<null, string>(__TAURI_INVOKE("save_diagnostic_events_enabled", { request })),
+	saveNewRoomNotificationsEnabled: (request: SaveNewRoomNotificationsRequest) => typedError<null, string>(__TAURI_INVOKE("save_new_room_notifications_enabled", { request })),
+	showNewRoomNotification: (request: ShowNewRoomNotificationRequest) => typedError<boolean, string>(__TAURI_INVOKE("show_new_room_notification", { request })),
+	savePlayerName: (request: SavePlayerNameRequest) => typedError<null, string>(__TAURI_INVOKE("save_player_name", { request })),
 	selectRomFile: (currentPath: string) => typedError<string | null, string>(__TAURI_INVOKE("select_rom_file", { currentPath })),
 	preflightCheck: () => typedError<PreflightResponse, string>(__TAURI_INVOKE("preflight_check")),
 	generateRoms: (request: GenerateRomRequest) => typedError<GenerateRomResponse, string>(__TAURI_INVOKE("generate_roms", { request })),
 	ensureRoms: (request: GenerateRomRequest) => typedError<GenerateRomResponse, string>(__TAURI_INVOKE("ensure_roms", { request })),
-	startMatch: (request: LaunchRequest) => typedError<LaunchResponse, string>(__TAURI_INVOKE("start_match", { request })),
+	startMatch: (request: LaunchRequest_Deserialize) => typedError<LaunchResponse, string>(__TAURI_INVOKE("start_match", { request })),
 	stopMatch: () => typedError<null, string>(__TAURI_INVOKE("stop_match")),
 	sessionStatus: () => typedError<SessionStatus, string>(__TAURI_INVOKE("session_status")),
+	loadMatchHistory: () => typedError<MatchHistoryRecord[], string>(__TAURI_INVOKE("load_match_history")),
+	saveMatchHistory: (matches: MatchHistoryRecord[]) => typedError<null, string>(__TAURI_INVOKE("save_match_history", { matches })),
 	openLogDir: (path: string) => typedError<null, string>(__TAURI_INVOKE("open_log_dir", { path })),
 	openMelonds: () => typedError<number, string>(__TAURI_INVOKE("open_melonds")),
 	openMelondsInputConfig: () => typedError<number, string>(__TAURI_INVOKE("open_melonds_input_config")),
+	getStartupEnabled: () => typedError<boolean, string>(__TAURI_INVOKE("get_startup_enabled")),
+	setStartupEnabled: (enabled: boolean) => typedError<null, string>(__TAURI_INVOKE("set_startup_enabled", { enabled })),
 };
 
 /* Types */
@@ -68,9 +76,13 @@ export type Defaults = {
 	host_rom_path: string,
 	client_rom_path: string,
 	base_rom_path: string,
+	player_name: string,
+	player_profile_id: string,
 	roms_prepared_once: boolean,
 	input_config_opened_once: boolean,
 	port: number,
+	diagnostic_events_enabled: boolean,
+	new_room_notifications_enabled: boolean,
 };
 
 export type GameSettings = {
@@ -100,23 +112,39 @@ export type GameStateMismatch = {
 
 export type GenerateRomRequest = {
 	source_rom: string,
-	stage: number,
-	settings: GameSettings,
 };
 
 export type GenerateRomResponse = {
 	host_rom: string,
 	client_rom: string,
 	generated: boolean,
+	rom_identity: RomIdentity,
 };
 
-export type LaunchRequest = {
+export type LaunchRequest = LaunchRequest_Serialize | LaunchRequest_Deserialize;
+
+export type LaunchRequest_Deserialize = {
 	role: Role,
 	signal_url: string,
 	room_code: string,
 	port: number,
 	rom_path: string,
 	settings: GameSettings,
+	player_names?: MatchPlayerNames | null,
+	diagnostic_events_enabled?: boolean,
+	rom_identity?: RomIdentity | null,
+};
+
+export type LaunchRequest_Serialize = {
+	role: Role,
+	signal_url: string,
+	room_code: string,
+	port: number,
+	rom_path: string,
+	settings: GameSettings,
+	player_names?: MatchPlayerNames | null,
+	diagnostic_events_enabled: boolean,
+	rom_identity?: RomIdentity | null,
 };
 
 export type LaunchResponse = {
@@ -138,6 +166,54 @@ export type OpenAiReplayLogResponse = {
 	original_bytes: number | null,
 	data_bytes: number | null,
 	frames: AiReplayFrameRef[],
+};
+
+export type MatchHistoryRecord = {
+	id: string,
+	logDir: string,
+	playerIds: MatchPlayerIds,
+	playerNames: MatchPlayerNames,
+	role: Role,
+	roomCode: string,
+	settings: GameSettings,
+	stages: MvlStageResult[],
+	startedAt: string,
+	status: MatchHistoryStatus,
+};
+
+export type MatchHistoryStatus = "running" | "completed" | "stopped";
+
+export type MatchPlayerIds = {
+	mario: string,
+	luigi: string,
+};
+
+export type MatchPlayerNames = {
+	mario: string,
+	luigi: string,
+};
+
+export type MvlPlayerResult = {
+	stars: number,
+	displayed_stars: number,
+	collected_stars: number,
+	lives: number,
+	deaths: number,
+	dead: boolean,
+};
+
+export type MvlStageResult = {
+	game_index: number,
+	stage: number | null,
+	frame: number,
+	winner: number | null,
+	mario: MvlPlayerResult,
+	luigi: MvlPlayerResult,
+	mario_match_wins: number,
+	luigi_match_wins: number,
+	target_wins: number,
+	resolved: boolean,
+	line: string,
 };
 
 export type PreflightResponse = {
@@ -209,6 +285,25 @@ export type RunAiToolResponse = {
 	output_path: string | null,
 };
 
+export type RomIdentity = {
+	rom_pair_id: string,
+	generator_id: string,
+	host_rom_sha256: string,
+	client_rom_sha256: string,
+};
+
+export type SaveDiagnosticEventsRequest = {
+	enabled: boolean,
+};
+
+export type SaveNewRoomNotificationsRequest = {
+	enabled: boolean,
+};
+
+export type SavePlayerNameRequest = {
+	player_name: string,
+};
+
 export type SaveRomPathsRequest = {
 	base_rom_path: string,
 };
@@ -231,6 +326,12 @@ export type SessionStatus = {
 	webrtc: BridgeDiagnostics | null,
 	diagnostics_error: string | null,
 	game_state_mismatch: GameStateMismatch | null,
+	mvl_results: MvlStageResult[],
+};
+
+export type ShowNewRoomNotificationRequest = {
+	title: string,
+	body: string,
 };
 
 /* Tauri Specta runtime */

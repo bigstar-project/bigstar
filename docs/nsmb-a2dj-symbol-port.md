@@ -6,7 +6,21 @@ JP版 `A2DJ` 向けに、US版 `NSMB-Code-Reference` の優先シンボルを移
 
 まず必要な乱数同期まわりでは、`Game` / `Stage` グローバルと `Net` グローバルの一部をRAM dumpから移植できた。
 
-Net系の優先関数は、JP RAM上の復号済みARM9コードで先頭命令と参照リテラルを確認できた。ROMパッチに入る前の残件は、`Stage::getRandom()` と Big Star / 8コインアイテム生成側の呼び出し元特定。
+Net系の優先関数は、JP RAM上の復号済みARM9コードで先頭命令と参照リテラルを確認できた。ROMパッチに入る前の残件は、`Stage::getRandom()` と、USで見つかった通常MvL 8コインアイテム制御のJP側アドレス移植。
+
+2026-06-19 調査結果: direct MvL の城ステージで、本来出ないはずの巨大マリオアイテムが8コインアイテムとして出る件は、通常MvL側に既存のMega除外制御がある。`Game::addPlayerCoin(int)` (`0x02020354`) はVS時に8枚目で `0x020BF150` を呼び、ここが8コインアイテム生成本体。生成本体は `Net::getRandom()` (`0x0200E6F4`) でスロット `0..5` を抽選し、候補5が選ばれた場合だけ `0x02153A80()` の戻りを見て、戻りが `4` なら候補4へ差し替える。`0x02153A80()` は `0x0215C890` をインデックスにして `0x0215AEEC = [0,1,2,3,4]` から現在コースIDを返すため、この分岐が本来の「城コースではMega候補を別候補へ落とす」制御と見られる。
+
+direct MvL の旧ROM生成は `sceneSettings=0x00B8FF00` により実ステージ自体は城へ入れるが、8コイン制御が読む `0x0215C890` を初期化していなかった。stage 4 RAMダンプ `logs/codex-mvl-castle-selector-ramdump-20260619` では、frame 1200/1600 の host/client とも `0x02088F38=0x00B8FF00`, `0x0215C88C=1`, `0x0215C89C=2`, `0x0215C890=0` だった。したがって、城でも `0x02153A80()` は `0` を返し、通常MvLのMega除外分岐が発火していなかった。
+
+2026-06-19 修正: `tools/nsmb-mvl-rom/src/lib.rs` の direct load stub で、fallback/runtime stageから `0x0215C890 = stage` を初期化するようにした。`logs/codex-mvl-castle-selector-restored-20260619` の stage 4 RAM確認では、host/client frame 1200/1600 とも `0x0215C890=4` に戻った。これで、城専用Mega除外パッチを足さずに通常MvLのコースID入力を復元できた。
+
+現在のブロッカー: US側の原因は特定済み。JP/A2DJ向けには `0x020BF150` 相当の8コイン生成関数、`0x02153A80` 相当のコースID取得関数、`0x0215C890` 相当のセレクタglobalを移植する必要がある。
+
+次の調査入口:
+
+1. US側は8コイン取得ルートを追加し、候補5が城で候補4へ差し替わることを実アイテム生成で確認する。
+2. 同じ箇所で、関連する `0x0215C894` も通常コース設定UIの別セレクタとして使われているため、8コイン以外の副作用を避けるなら通常ルートでの役割をもう一段確認する。
+3. A2DJ移植では、US literal/reference patternから `0x0215C890` 相当を探し、8コイン分岐が同じ構造か確認する。
 
 ## A2DJ Priority Symbols
 
@@ -230,16 +244,10 @@ Expected RNG synchronization contract:
 - If the caller sequence differs, forcing only the seed is insufficient because the random stream is consumed at different positions.
 - Input lockstep is what should normally keep the caller sequence equal; caller logging is how we prove it.
 
-## Current Next Actions
-
-1. 8コインアイテム取得用の入力スクリプトを追加し、同じ `Net::random` timeline で消費箇所を確認する。
-2. seed配布済みのhost/client 2プロセスで、入力同期開始後のremote input timeoutを減らす。
-3. seed配布済みの2プロセスでスター取得まで走らせ、再生成スターのRNG timelineもhost/clientで一致するか確認する。
-4. `0x0212D418` のBig Star選択処理はROMパッチ候補として保持するが、直接固定するより、まずはmatch seed固定を優先する。
-
 ## Next Actions
 
-1. `Stage::getRandom()` のJP関数アドレスまたはinline呼び出し箇所を確認する。
-2. Big Star生成と8コイン時アイテム生成がどちらも `Net::random` 系を使うか、write watch / Ghidraで確認する。
-3. 乱数固定は `Game::random` ではなく、まず `Net::random` 側を優先する。
-4. ROMパッチ前に、melonDS側のメモリパッチで `Net::random.value` / `Net::randomCallCount` 固定実験を行う。
+1. 8コイン取得ルートで候補5が候補4へ差し替わることを検証する。
+2. A2DJで `0x020BF150` / `0x02153A80` / `0x0215C890` 相当を移植し、通常MvLの城Mega除外分岐がUSと同じ構造か確認する。
+3. 関連する `0x0215C894` の役割を確認し、direct MvLで追加復元すべき通常MvL設定値がないか判断する。
+4. `Stage::getRandom()` のJP関数アドレスまたはinline呼び出し箇所を確認する。
+5. `0x0212D418` のBig Star選択処理はROMパッチ候補として保持するが、直接固定するより、まずはmatch seed固定を優先する。

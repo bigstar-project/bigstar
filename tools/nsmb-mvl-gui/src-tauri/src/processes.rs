@@ -3,20 +3,25 @@ use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
 use crate::config::{DEFAULT_FRAMES, NETPLAY_START_FRAME};
+use crate::crash_report::{match_result_decided, send_crash_report_async};
 use crate::models::{
-    BridgeDiagnostics, CourseMode, LaunchRequest, LaunchResponse, MelonDiagnostics, Role,
-    SessionStatus,
+    BridgeDiagnostics, CourseMode, GameStateMismatch, LaunchRequest, LaunchResponse,
+    MelonDiagnostics, MvlPlayerResult, MvlStageResult, Role, SessionStatus,
 };
 use crate::settings::selected_stage;
 use crate::state::{AppState, ManagedSession};
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+const BRIDGE_CONNECT_TIMEOUT: Duration = Duration::from_secs(45);
+const BRIDGE_CONNECT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 pub(crate) struct LaunchPaths {
     pub(crate) log_dir: PathBuf,
@@ -38,6 +43,11 @@ pub(crate) fn start_match_resolved(
     let mut bridge_child = bridge
         .spawn()
         .map_err(|err| format!("bridge の起動に失敗しました: {err}"))?;
+
+    if let Err(err) = wait_for_bridge_connected(&mut bridge_child, &paths.log_dir) {
+        terminate_child(&mut bridge_child);
+        return Err(err);
+    }
 
     let mut melon = build_melon_command(
         &paths.melon_path,
@@ -68,9 +78,52 @@ pub(crate) fn start_match_resolved(
         melon: melon_child,
         bridge: bridge_child,
         log_dir: paths.log_dir,
+        player_names: request.player_names,
+        crash_report_sent: false,
     });
 
     Ok(response)
+}
+
+fn wait_for_bridge_connected(bridge: &mut Child, log_dir: &Path) -> Result<(), String> {
+    let started = Instant::now();
+    let mut last_diagnostics_error = None;
+    loop {
+        let bridge_state = process_state(bridge)?;
+        if bridge_state != "running" {
+            let (_, diagnostics_error) = read_bridge_diagnostics(log_dir);
+            let detail = diagnostics_error
+                .or(last_diagnostics_error)
+                .unwrap_or_else(|| "診断なし".to_owned());
+            return Err(format!(
+                "bridge が接続前に終了しました state={bridge_state} detail={detail}"
+            ));
+        }
+
+        let (diagnostics, diagnostics_error) = read_bridge_diagnostics(log_dir);
+        if let Some(diagnostics) = diagnostics {
+            if diagnostics.phase.as_deref() == Some("connected") {
+                return Ok(());
+            }
+            if let Some(error) = diagnostics.last_error {
+                return Err(format!("bridge 接続に失敗しました: {error}"));
+            }
+        } else if let Some(error) = diagnostics_error {
+            last_diagnostics_error = Some(error);
+        }
+
+        if started.elapsed() >= BRIDGE_CONNECT_TIMEOUT {
+            let detail = last_diagnostics_error
+                .map(|error| format!(" detail={error}"))
+                .unwrap_or_default();
+            return Err(format!(
+                "bridge の WebRTC 接続がタイムアウトしました waitedMs={}{}",
+                BRIDGE_CONNECT_TIMEOUT.as_millis(),
+                detail
+            ));
+        }
+        std::thread::sleep(BRIDGE_CONNECT_POLL_INTERVAL);
+    }
 }
 
 pub(crate) fn stop_existing(state: &AppState) -> Result<(), String> {
@@ -100,6 +153,7 @@ pub(crate) fn session_status_inner(state: &AppState) -> Result<SessionStatus, St
             webrtc: None,
             diagnostics_error: None,
             game_state_mismatch: None,
+            mvl_results: Vec::new(),
         });
     };
 
@@ -108,7 +162,21 @@ pub(crate) fn session_status_inner(state: &AppState) -> Result<SessionStatus, St
     let active = melon == "running" || bridge == "running";
     let (webrtc, diagnostics_error) = read_bridge_diagnostics(&session.log_dir);
     let game_state_mismatch = read_melon_diagnostics(&session.log_dir)
-        .and_then(|diagnostics| diagnostics.game_state_mismatch);
+        .and_then(|diagnostics| diagnostics.game_state_mismatch)
+        .filter(should_show_game_state_mismatch_in_gui);
+    let mvl_results = read_mvl_results(&session.log_dir);
+    if !session.crash_report_sent
+        && (melon != "running" || bridge != "running")
+        && !match_result_decided(&mvl_results)
+    {
+        session.crash_report_sent = true;
+        send_crash_report_async(
+            session.log_dir.clone(),
+            melon.clone(),
+            bridge.clone(),
+            session.player_names.clone(),
+        );
+    }
 
     Ok(SessionStatus {
         active,
@@ -118,7 +186,14 @@ pub(crate) fn session_status_inner(state: &AppState) -> Result<SessionStatus, St
         webrtc,
         diagnostics_error,
         game_state_mismatch,
+        mvl_results,
     })
+}
+
+pub(crate) fn should_show_game_state_mismatch_in_gui(mismatch: &GameStateMismatch) -> bool {
+    matches!(mismatch.player_global_matches, Some(false))
+        || matches!(mismatch.wifi_candidate_matches, Some(false))
+        || matches!(mismatch.render_candidate_matches, Some(false))
 }
 
 pub(crate) fn build_bridge_command(
@@ -157,6 +232,7 @@ pub(crate) fn build_bridge_command(
         "--status-file",
         &status_file,
     ]);
+    command.current_dir(log_dir);
     with_stdio(command, log_dir, "bridge")
 }
 
@@ -239,6 +315,8 @@ pub(crate) fn melon_env(
     env.insert("MELONDS_NSML_ALLOW_JIT".into(), "1".into());
     env.insert("MELONDS_NSML_INPUT_NETPLAY_ONLY".into(), "1".into());
     env.insert("MELONDS_NSML_REMOTE_INPUT_TIMEOUT_FATAL".into(), "1".into());
+    env.insert("MELONDS_NSML_WAIT_TIMEOUT_MS".into(), "60000".into());
+    env.insert("MELONDS_NSML_SEED_WAIT_TIMEOUT_MS".into(), "60000".into());
     env.insert(
         "MELONDS_NSML_DELAY".into(),
         request.settings.input_delay_frames.to_string(),
@@ -268,6 +346,16 @@ pub(crate) fn melon_env(
             .to_string_lossy()
             .into_owned(),
     );
+    if request.diagnostic_events_enabled {
+        env.insert("MELONDS_NSML_DIAGNOSTIC_EVENTS".into(), "1".into());
+        env.insert(
+            "MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE".into(),
+            log_dir
+                .join("melonds-events.jsonl")
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
     if request.settings.rollback_enabled {
         env.insert("MELONDS_NSML_ROLLBACK".into(), "1".into());
         env.insert("MELONDS_NSML_ROLLBACK_BACKEND".into(), "coredelta".into());
@@ -399,6 +487,10 @@ fn with_stdio(mut command: Command, log_dir: &Path, name: &str) -> Result<Comman
 
 fn write_launch_manifest(paths: &LaunchPaths, request: &LaunchRequest) -> Result<(), String> {
     let value = serde_json::json!({
+        "gui": {
+            "version": env!("CARGO_PKG_VERSION"),
+        },
+        "rom_identity": request.rom_identity,
         "request": request,
         "paths": {
             "log_dir": paths.log_dir,
@@ -432,6 +524,150 @@ pub(crate) fn read_bridge_diagnostics(
 pub(crate) fn read_melon_diagnostics(log_dir: &Path) -> Option<MelonDiagnostics> {
     let json = fs::read(log_dir.join("melonds-diagnostics.json")).ok()?;
     serde_json::from_slice(&json).ok()
+}
+
+pub(crate) fn read_mvl_results(log_dir: &Path) -> Vec<MvlStageResult> {
+    let stdout = match fs::read_to_string(log_dir.join("melonds.stdout.txt")) {
+        Ok(stdout) => stdout,
+        Err(_) => return Vec::new(),
+    };
+    let stages = read_launcher_course_stages(log_dir);
+    let mut results: Vec<MvlStageResult> = stdout
+        .lines()
+        .filter_map(parse_mvl_result_line)
+        .enumerate()
+        .map(|(index, mut result)| {
+            result.game_index = (index + 1) as u32;
+            result.stage = stages.get(index).copied();
+            result
+        })
+        .collect();
+    apply_corrected_match_wins(&mut results);
+    results
+}
+
+fn read_launcher_course_stages(log_dir: &Path) -> Vec<u8> {
+    let json = match fs::read(log_dir.join("launcher.json")) {
+        Ok(json) => json,
+        Err(_) => return Vec::new(),
+    };
+    let value: serde_json::Value = match serde_json::from_slice(&json) {
+        Ok(value) => value,
+        Err(_) => return Vec::new(),
+    };
+    value
+        .get("request")
+        .and_then(|request| request.get("settings"))
+        .and_then(|settings| settings.get("course_stages"))
+        .and_then(serde_json::Value::as_array)
+        .map(|stages| {
+            stages
+                .iter()
+                .filter_map(serde_json::Value::as_u64)
+                .filter_map(|stage| u8::try_from(stage).ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_mvl_result_line(line: &str) -> Option<MvlStageResult> {
+    const PREFIX: &str = "NSMB MvL auto restart: result";
+    if !line.starts_with(PREFIX) {
+        return None;
+    }
+
+    let resolved = !line.starts_with("NSMB MvL auto restart: result unresolved");
+    let frame = parse_value(line, "frame")?;
+    let (stars_mario, stars_luigi) = parse_pair(line, "stars")?;
+    let (displayed_mario, displayed_luigi) = parse_pair(line, "displayed")?;
+    let (collected_mario, collected_luigi) = parse_pair(line, "collected")?;
+    let (lives_mario, lives_luigi) = parse_pair(line, "lives")?;
+    let (deaths_mario, deaths_luigi) = parse_pair(line, "deaths")?;
+    let (dead_mario, dead_luigi) = parse_pair(line, "dead")?;
+    let (mario_match_wins, luigi_match_wins) = parse_pair(line, "matchWins")?;
+    let target_wins = parse_value(line, "target")?;
+    let logged_winner = if resolved {
+        parse_value(line, "winner").and_then(|winner| u8::try_from(winner).ok())
+    } else {
+        None
+    };
+    let winner = corrected_stage_winner(logged_winner, dead_mario, dead_luigi);
+
+    Some(MvlStageResult {
+        game_index: 0,
+        stage: None,
+        frame,
+        winner,
+        mario: MvlPlayerResult {
+            stars: stars_mario,
+            displayed_stars: displayed_mario,
+            collected_stars: collected_mario,
+            lives: result_lives(lives_mario, dead_mario),
+            deaths: deaths_mario,
+            dead: dead_mario != 0,
+        },
+        luigi: MvlPlayerResult {
+            stars: stars_luigi,
+            displayed_stars: displayed_luigi,
+            collected_stars: collected_luigi,
+            lives: result_lives(lives_luigi, dead_luigi),
+            deaths: deaths_luigi,
+            dead: dead_luigi != 0,
+        },
+        mario_match_wins,
+        luigi_match_wins,
+        target_wins,
+        resolved,
+        line: line.to_owned(),
+    })
+}
+
+fn corrected_stage_winner(
+    logged_winner: Option<u8>,
+    dead_mario: u32,
+    dead_luigi: u32,
+) -> Option<u8> {
+    match (dead_mario != 0, dead_luigi != 0) {
+        (true, false) => Some(1),
+        (false, true) => Some(0),
+        _ => logged_winner,
+    }
+}
+
+fn apply_corrected_match_wins(results: &mut [MvlStageResult]) {
+    let mut mario_wins = 0;
+    let mut luigi_wins = 0;
+    for result in results {
+        match result.winner {
+            Some(0) if result.resolved => mario_wins += 1,
+            Some(1) if result.resolved => luigi_wins += 1,
+            _ => {}
+        }
+        result.mario_match_wins = mario_wins;
+        result.luigi_match_wins = luigi_wins;
+    }
+}
+
+fn result_lives(lives: u32, dead: u32) -> u32 {
+    if dead == 0 {
+        lives
+    } else {
+        0
+    }
+}
+
+fn parse_value(line: &str, key: &str) -> Option<u32> {
+    line.split_whitespace()
+        .find_map(|part| part.strip_prefix(&format!("{key}=")))
+        .and_then(|value| value.parse().ok())
+}
+
+fn parse_pair(line: &str, key: &str) -> Option<(u32, u32)> {
+    let value = line
+        .split_whitespace()
+        .find_map(|part| part.strip_prefix(&format!("{key}=")))?;
+    let (left, right) = value.split_once('/')?;
+    Some((left.parse().ok()?, right.parse().ok()?))
 }
 
 #[cfg(windows)]

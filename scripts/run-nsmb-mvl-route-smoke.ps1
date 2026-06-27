@@ -8,6 +8,8 @@ param(
     [string]$LogDir = "logs",
     [switch]$GameStateTrace,
     [int]$GameStateTraceInterval = 60,
+    [int]$GameStateTraceStartFrame = 0,
+    [int]$GameStateTraceEndFrame = 0,
     [switch]$GameStateTraceExtended,
     [string]$RamDumpFrames = "",
     [int]$RamDumpInterval = 0,
@@ -134,6 +136,8 @@ foreach ($name in @(
     "MELONDS_NSML_DISABLE_HASH",
     "MELONDS_NSML_HASH_LOG",
     "MELONDS_NSML_HASH_INTERVAL",
+    "MELONDS_NSML_GAME_STATE_TRACE_START_FRAME",
+    "MELONDS_NSML_GAME_STATE_TRACE_END_FRAME",
     "MELONDS_NSML_SCREENSHOT_DIR",
     "MELONDS_NSML_SCREENSHOT_INTERVAL",
     "MELONDS_NSML_QUIET_LOG",
@@ -205,6 +209,16 @@ if ($NoRngPatch) {
 if ($GameStateTrace) {
     $env:MELONDS_NSML_GAME_STATE_TRACE = (Join-Path (Resolve-Path $LogDir).Path "nsmb-mvl-route.game-state.csv")
     $env:MELONDS_NSML_GAME_STATE_TRACE_INTERVAL = "$GameStateTraceInterval"
+    if ($GameStateTraceStartFrame -gt 0) {
+        $env:MELONDS_NSML_GAME_STATE_TRACE_START_FRAME = "$GameStateTraceStartFrame"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_GAME_STATE_TRACE_START_FRAME -ErrorAction SilentlyContinue
+    }
+    if ($GameStateTraceEndFrame -gt 0) {
+        $env:MELONDS_NSML_GAME_STATE_TRACE_END_FRAME = "$GameStateTraceEndFrame"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_GAME_STATE_TRACE_END_FRAME -ErrorAction SilentlyContinue
+    }
     if ($GameStateTraceExtended) {
         $env:MELONDS_NSML_GAME_STATE_TRACE_EXTENDED = "1"
     } else {
@@ -213,6 +227,8 @@ if ($GameStateTrace) {
 } else {
     Remove-Item Env:\MELONDS_NSML_GAME_STATE_TRACE -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_GAME_STATE_TRACE_INTERVAL -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_GAME_STATE_TRACE_START_FRAME -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_GAME_STATE_TRACE_END_FRAME -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_GAME_STATE_TRACE_EXTENDED -ErrorAction SilentlyContinue
 }
 if ($RamDumpFrames -or $RamDumpInterval -gt 0) {

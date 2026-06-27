@@ -1,5 +1,6 @@
 import {
   Brain,
+  ClockCounterClockwise,
   Flag,
   FlagCheckered,
   Gear,
@@ -13,6 +14,8 @@ import { StatusPill } from '../components/StatusPill';
 import { Button, Tabs } from '../components/ui';
 import type { StatusKind } from '../types';
 import type { UpdateStatus, View } from './types';
+
+const currentAppVersion = __NSMB_MVL_GUI_VERSION__;
 
 function updateButtonLabel(updateStatus: UpdateStatus) {
   if (updateStatus.phase === 'checking') {
@@ -67,14 +70,28 @@ function updateButtonClass(updateStatus: UpdateStatus) {
 }
 
 function viewTitle(view: View) {
-  if (view === 'battle') return '対戦';
-  if (view === 'ai') return 'AI';
+  if (view === 'battle') {
+    return '対戦';
+  }
+  if (view === 'ai') {
+    return 'AI';
+  }
+  if (view === 'history') {
+    return '対戦履歴';
+  }
   return '設定';
 }
 
 function viewDescription(view: View) {
-  if (view === 'battle') return 'オンラインでライバルと対戦しよう！';
-  if (view === 'ai') return 'AI開発コンソール';
+  if (view === 'battle') {
+    return 'オンラインでライバルと対戦しよう！';
+  }
+  if (view === 'ai') {
+    return 'AI開発コンソール';
+  }
+  if (view === 'history') {
+    return 'これまでの試合結果を確認しましょう';
+  }
   return 'オンライン対戦の環境を整えましょう';
 }
 
@@ -83,7 +100,7 @@ function viewIcon(view: View) {
     return (
       <Flag
         className={css({ color: 'red.plain.fg' })}
-        size={36}
+        size={28}
         weight="fill"
       />
     );
@@ -92,16 +109,24 @@ function viewIcon(view: View) {
     return (
       <Brain
         className={css({ color: 'yellow.plain.fg' })}
-        size={36}
+        size={28}
+        weight="fill"
+      />
+    );
+  }
+  if (view === 'history') {
+    return (
+      <ClockCounterClockwise
+        className={css({ color: 'yellow.plain.fg' })}
+        size={28}
         weight="fill"
       />
     );
   }
   return (
-    <Gear className={css({ color: 'fg.muted' })} size={36} weight="fill" />
+    <Gear className={css({ color: 'fg.muted' })} size={28} weight="fill" />
   );
 }
-
 export function LauncherShell({
   activeView,
   activityStatus,
@@ -109,6 +134,7 @@ export function LauncherShell({
   connectionStatus,
   onCheckForUpdate,
   onViewChange,
+  romStatus,
   updateBusy,
   updateStatus,
 }: {
@@ -118,6 +144,7 @@ export function LauncherShell({
   connectionStatus: { text: string; kind: StatusKind };
   onCheckForUpdate: () => void;
   onViewChange: (view: View) => void;
+  romStatus: { text: string; kind: StatusKind } | null;
   updateBusy: boolean;
   updateStatus: UpdateStatus;
 }) {
@@ -143,9 +170,6 @@ export function LauncherShell({
           gridTemplateColumns: `${token('sizes.sidebar')} minmax(0, 1fr)`,
           minH: 'screen',
           w: 'full',
-          '@media (max-width: 1280px)': {
-            gridTemplateColumns: `${token('sizes.sidebarCompact')} minmax(0, 1fr)`,
-          },
         })}
         style={{
           backgroundAttachment: 'fixed',
@@ -163,13 +187,10 @@ export function LauncherShell({
             borderRightWidth: '1px',
             display: 'grid',
             h: 'screen',
-            px: '4',
-            py: '6',
+            px: '3',
+            py: '4',
             position: 'sticky',
             top: '0',
-            '@media (max-width: 1280px)': {
-              px: '3',
-            },
           })}
         >
           <div
@@ -181,7 +202,7 @@ export function LauncherShell({
             <div
               className={css({
                 display: 'grid',
-                gap: '8',
+                gap: '5',
               })}
             >
               <div
@@ -189,9 +210,6 @@ export function LauncherShell({
                   display: 'grid',
                   gap: '1',
                   px: '2',
-                  '@media (max-width: 1280px)': {
-                    justifyItems: 'center',
-                  },
                 })}
               >
                 <div
@@ -199,10 +217,7 @@ export function LauncherShell({
                     color: 'fg.default',
                     fontWeight: 'black',
                     lineHeight: 'none',
-                    textStyle: '3xl',
-                    '@media (max-width: 1280px)': {
-                      textStyle: 'xl',
-                    },
+                    textStyle: '2xl',
                   })}
                 >
                   NSMB
@@ -212,10 +227,7 @@ export function LauncherShell({
                     color: 'fg.default',
                     fontWeight: 'black',
                     lineHeight: 'none',
-                    textStyle: '3xl',
-                    '@media (max-width: 1280px)': {
-                      textStyle: 'xl',
-                    },
+                    textStyle: '2xl',
                   })}
                 >
                   <span className={css({ color: 'red.plain.fg' })}>M</span>
@@ -228,9 +240,6 @@ export function LauncherShell({
                     fontWeight: 'bold',
                     opacity: '0.8',
                     textStyle: 'xs',
-                    '@media (max-width: 1280px)': {
-                      display: 'none',
-                    },
                   })}
                 >
                   Mario vs Luigi Online
@@ -240,7 +249,7 @@ export function LauncherShell({
               <Tabs.List
                 className={css({
                   display: 'grid',
-                  gap: '3',
+                  gap: '2',
                 })}
               >
                 <Tabs.Trigger
@@ -253,8 +262,8 @@ export function LauncherShell({
                     color: 'fg.muted',
                     display: 'flex',
                     fontWeight: 'black',
-                    gap: '3',
-                    minH: '14',
+                    gap: '2.5',
+                    minH: '10',
                     outline: 'none',
                     px: '3',
                     textAlign: 'left',
@@ -271,9 +280,6 @@ export function LauncherShell({
                     '&[data-selected] svg': {
                       color: 'yellow.plain.fg',
                     },
-                    '@media (max-width: 1280px)': {
-                      justifyContent: 'center',
-                    },
                   })}
                   value="battle"
                 >
@@ -282,15 +288,12 @@ export function LauncherShell({
                       color: 'fg.muted',
                       flexShrink: '0',
                     })}
-                    size={28}
+                    size={22}
                     weight="fill"
                   />
                   <span
                     className={css({
-                      textStyle: 'md',
-                      '@media (max-width: 1280px)': {
-                        display: 'none',
-                      },
+                      textStyle: 'sm',
                     })}
                   >
                     対戦
@@ -306,8 +309,8 @@ export function LauncherShell({
                     color: 'fg.muted',
                     display: 'flex',
                     fontWeight: 'black',
-                    gap: '3',
-                    minH: '14',
+                    gap: '2.5',
+                    minH: '10',
                     outline: 'none',
                     px: '3',
                     textAlign: 'left',
@@ -324,9 +327,6 @@ export function LauncherShell({
                     '&[data-selected] svg': {
                       color: 'yellow.plain.fg',
                     },
-                    '@media (max-width: 1280px)': {
-                      justifyContent: 'center',
-                    },
                   })}
                   value="ai"
                 >
@@ -335,18 +335,62 @@ export function LauncherShell({
                       color: 'fg.muted',
                       flexShrink: '0',
                     })}
-                    size={28}
+                    size={22}
                     weight="fill"
                   />
                   <span
                     className={css({
-                      textStyle: 'md',
-                      '@media (max-width: 1280px)': {
-                        display: 'none',
-                      },
+                      textStyle: 'sm',
                     })}
                   >
                     AI
+                  </span>
+                </Tabs.Trigger>
+                <Tabs.Trigger
+                  aria-label="対戦履歴"
+                  className={css({
+                    alignItems: 'center',
+                    borderColor: 'transparent',
+                    borderRadius: 'l2',
+                    borderWidth: '1px',
+                    color: 'fg.muted',
+                    display: 'flex',
+                    fontWeight: 'black',
+                    gap: '2.5',
+                    minH: '10',
+                    outline: 'none',
+                    px: '3',
+                    textAlign: 'left',
+                    transition: 'common',
+                    _hover: {
+                      bg: 'blue.subtle.bg',
+                      borderColor: 'blue.outline.border',
+                    },
+                    '&[data-selected]': {
+                      bg: 'blue.subtle.bg',
+                      borderColor: 'blue.solid.bg',
+                      color: 'fg.default',
+                    },
+                    '&[data-selected] svg': {
+                      color: 'yellow.plain.fg',
+                    },
+                  })}
+                  value="history"
+                >
+                  <ClockCounterClockwise
+                    className={css({
+                      color: 'fg.muted',
+                      flexShrink: '0',
+                    })}
+                    size={22}
+                    weight="fill"
+                  />
+                  <span
+                    className={css({
+                      textStyle: 'sm',
+                    })}
+                  >
+                    履歴
                   </span>
                 </Tabs.Trigger>
                 <Tabs.Trigger
@@ -359,8 +403,8 @@ export function LauncherShell({
                     color: 'fg.muted',
                     display: 'flex',
                     fontWeight: 'black',
-                    gap: '3',
-                    minH: '14',
+                    gap: '2.5',
+                    minH: '10',
                     outline: 'none',
                     px: '3',
                     textAlign: 'left',
@@ -377,9 +421,6 @@ export function LauncherShell({
                     '&[data-selected] svg': {
                       color: 'yellow.plain.fg',
                     },
-                    '@media (max-width: 1280px)': {
-                      justifyContent: 'center',
-                    },
                   })}
                   value="settings"
                 >
@@ -388,15 +429,12 @@ export function LauncherShell({
                       color: 'fg.muted',
                       flexShrink: '0',
                     })}
-                    size={28}
+                    size={22}
                     weight="fill"
                   />
                   <span
                     className={css({
-                      textStyle: 'md',
-                      '@media (max-width: 1280px)': {
-                        display: 'none',
-                      },
+                      textStyle: 'sm',
                     })}
                   >
                     設定
@@ -404,40 +442,56 @@ export function LauncherShell({
                 </Tabs.Trigger>
               </Tabs.List>
             </div>
-            <Button
-              type="button"
-              className={cx(
-                css({
-                  fontWeight: 'black',
-                  maxW: 'full',
-                  '@media (max-width: 1280px)': {
-                    minW: '14',
-                  },
-                }),
-                updateButtonClass(updateStatus),
-              )}
-              disabled={updateBusy}
-              title={
-                updateStatus.version ? `v${updateStatus.version}` : '更新を確認'
-              }
-              onClick={onCheckForUpdate}
+            <div
+              className={css({
+                display: 'grid',
+                gap: '2',
+                justifyItems: 'stretch',
+              })}
             >
-              <Wrench
-                className={css({ flexShrink: '0' })}
-                size={20}
-                weight="bold"
-              />
-              <span
-                className={css({
-                  textStyle: 'md',
-                  '@media (max-width: 1280px)': {
-                    display: 'none',
-                  },
-                })}
+              <Button
+                type="button"
+                className={cx(
+                  css({
+                    fontWeight: 'black',
+                    maxW: 'full',
+                  }),
+                  updateButtonClass(updateStatus),
+                )}
+                disabled={updateBusy}
+                title={
+                  updateStatus.version
+                    ? `v${updateStatus.version}`
+                    : '更新を確認'
+                }
+                onClick={onCheckForUpdate}
               >
-                {updateButtonLabel(updateStatus)}
-              </span>
-            </Button>
+                <Wrench
+                  className={css({ flexShrink: '0' })}
+                  size={16}
+                  weight="bold"
+                />
+                <span
+                  className={css({
+                    textStyle: 'sm',
+                  })}
+                >
+                  {updateButtonLabel(updateStatus)}
+                </span>
+              </Button>
+              <div
+                className={css({
+                  color: 'fg.muted',
+                  display: 'flex',
+                  fontWeight: 'bold',
+                  justifyContent: 'center',
+                  textStyle: 'xs',
+                })}
+                title={`現在のバージョン v${currentAppVersion}`}
+              >
+                <span>v{currentAppVersion}</span>
+              </div>
+            </div>
           </div>
         </aside>
 
@@ -451,29 +505,20 @@ export function LauncherShell({
           <div
             className={css({
               display: 'grid',
-              gap: '6',
+              gap: '4',
               maxW: 'contentMax',
               mx: 'auto',
-              px: '7',
-              py: '7',
+              px: { base: '3', md: '4', xl: '5' },
+              py: '4',
               w: 'full',
-              '@media (max-width: 1280px)': {
-                px: '5',
-              },
-              '@media (max-width: 720px)': {
-                px: '4',
-              },
             })}
           >
             <header
               className={css({
                 alignItems: 'flex-start',
-                display: 'flex',
-                gap: '5',
+                display: { base: 'grid', md: 'flex' },
+                gap: '3',
                 justifyContent: 'space-between',
-                '@media (max-width: 720px)': {
-                  display: 'grid',
-                },
               })}
             >
               <div
@@ -486,7 +531,7 @@ export function LauncherShell({
                   className={css({
                     alignItems: 'center',
                     display: 'flex',
-                    gap: '3',
+                    gap: '2.5',
                   })}
                 >
                   {viewIcon(activeView)}
@@ -494,7 +539,7 @@ export function LauncherShell({
                     className={css({
                       color: 'fg.default',
                       fontWeight: 'black',
-                      textStyle: '3xl',
+                      textStyle: '2xl',
                     })}
                   >
                     {viewTitle(activeView)}
@@ -514,15 +559,19 @@ export function LauncherShell({
                 className={css({
                   alignItems: 'center',
                   display: 'flex',
+                  flexWrap: { base: 'wrap', md: 'nowrap' },
                   gap: '3',
-                  '@media (max-width: 720px)': {
-                    flexWrap: 'wrap',
-                  },
+                  justifyContent: { md: 'flex-end' },
                 })}
               >
                 <StatusPill kind={connectionStatus.kind}>
                   {connectionStatus.text}
                 </StatusPill>
+                {romStatus ? (
+                  <StatusPill kind={romStatus.kind} loading>
+                    {romStatus.text}
+                  </StatusPill>
+                ) : null}
                 {activityStatus ? (
                   <StatusPill kind={activityStatus.kind}>
                     {activityStatus.text}

@@ -28,9 +28,9 @@ export function RoleButton({
           borderWidth: '1px',
           display: 'flex',
           focusVisibleRing: 'outside',
-          gap: '3',
-          minH: '20',
-          p: '4',
+          gap: '2.5',
+          minH: '14',
+          p: '3',
           textAlign: 'left',
           transition: 'common',
           cursor: 'pointer',
@@ -95,7 +95,7 @@ export function RoleButton({
           className={css({
             fontWeight: 'black',
             lineHeight: 'tight',
-            textStyle: 'xl',
+            textStyle: 'md',
           })}
         >
           {title}
@@ -105,7 +105,7 @@ export function RoleButton({
             color: 'fg.muted',
             fontWeight: 'semibold',
             lineHeight: 'tight',
-            textStyle: 'sm',
+            textStyle: 'xs',
           })}
         >
           {subtitle}
@@ -132,7 +132,7 @@ export function TextField({
     <Field.Root
       className={css({
         display: 'grid',
-        gap: '1.5',
+        gap: '1',
         minW: '0',
       })}
     >
@@ -140,7 +140,7 @@ export function TextField({
         className={css({
           color: 'fg.muted',
           fontWeight: 'black',
-          textStyle: 'sm',
+          textStyle: 'xs',
         })}
       >
         {label}
@@ -174,7 +174,7 @@ export function FilePathField({
     <Field.Root
       className={css({
         display: 'grid',
-        gap: '1.5',
+        gap: '1',
         minW: '0',
       })}
     >
@@ -182,7 +182,7 @@ export function FilePathField({
         className={css({
           color: 'fg.muted',
           fontWeight: 'black',
-          textStyle: 'sm',
+          textStyle: 'xs',
         })}
       >
         {label}
@@ -190,7 +190,7 @@ export function FilePathField({
       <div
         className={css({
           display: 'grid',
-          gap: '2',
+          gap: '1.5',
           gridTemplateColumns: 'minmax(0, 1fr) auto',
         })}
       >
@@ -230,7 +230,7 @@ export function NumberField({
     <Field.Root
       className={css({
         display: 'grid',
-        gap: '1.5',
+        gap: '1',
         minW: '0',
       })}
     >
@@ -238,7 +238,7 @@ export function NumberField({
         className={css({
           color: 'fg.muted',
           fontWeight: 'black',
-          textStyle: 'sm',
+          textStyle: 'xs',
         })}
       >
         {label}
@@ -278,7 +278,7 @@ export function SelectField({
     <div
       className={css({
         display: 'grid',
-        gap: '1.5',
+        gap: '1',
         minW: '0',
       })}
     >
@@ -298,7 +298,7 @@ export function SelectField({
           className={css({
             color: 'fg.muted',
             fontWeight: 'black',
-            textStyle: 'sm',
+            textStyle: 'xs',
           })}
         >
           {label}

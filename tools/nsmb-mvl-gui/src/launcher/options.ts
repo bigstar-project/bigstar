@@ -3,13 +3,15 @@ export const courseOptions = [
   { value: 'select', label: '事前に選ぶ' },
 ];
 
+const stageLabels = ['草原', '地下', '雪', '土管', '城'] as const;
+
 export const stageOptions = [
-  { value: '0', label: '0: Grass' },
-  { value: '1', label: '1: Cave' },
-  { value: '2', label: '2: Snow' },
-  { value: '3', label: '3: Pipe' },
-  { value: '4', label: '4: Castle' },
+  ...stageLabels.map((label, index) => ({ value: String(index), label })),
 ];
+
+export function stageLabel(stage: number) {
+  return stageLabels[stage] ?? `ステージ${stage}`;
+}
 
 export const winsOptions = [1, 2, 3].map((value) => ({
   value: String(value),

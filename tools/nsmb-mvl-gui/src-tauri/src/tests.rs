@@ -3,12 +3,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::models::{CourseMode, GameSettings, LaunchRequest, Lives, Role};
+use crate::crash_report::{create_log_archive, match_result_decided};
+use crate::models::{
+    CourseMode, GameSettings, GameStateMismatch, LaunchRequest, Lives, Role, RomIdentity,
+};
 use crate::paths::allowed_log_dir;
+use crate::paths::load_match_history_document_content;
 use crate::processes::{
     build_bridge_command, build_melon_command, melon_env, read_bridge_diagnostics,
-    read_melon_diagnostics, remove_inherited_melonds_env_keys, run_bridge_signaling_smoke,
-    session_status_inner, start_match_resolved, stop_existing, LaunchPaths,
+    read_melon_diagnostics, read_mvl_results, remove_inherited_melonds_env_keys,
+    run_bridge_signaling_smoke, session_status_inner, should_show_game_state_mismatch_in_gui,
+    start_match_resolved, stop_existing, LaunchPaths,
 };
 use crate::roms::{reusable_rom_is_current, reusable_rom_marker_path, write_reusable_rom_marker};
 use crate::settings::{selected_stage, validate_request};
@@ -20,6 +25,9 @@ fn request(role: Role) -> LaunchRequest {
         signal_url: "ws://127.0.0.1:8787/session".to_owned(),
         room_code: "room_01-test".to_owned(),
         port: 8165,
+        player_names: None,
+        diagnostic_events_enabled: false,
+        rom_identity: None,
         rom_path: "unused.nds".to_owned(),
         settings: GameSettings {
             course_mode: CourseMode::Random,
@@ -56,7 +64,7 @@ fn fake_executable(dir: &Path, name: &str, should_sleep: bool) -> PathBuf {
         let path = dir.join(format!("{name}.cmd"));
         let body = if should_sleep {
             format!(
-                "@echo off\r\necho {name} args:%*\r\necho {name} role:%MELONDS_NSML_ROLE%\r\necho {name} stage:%MELONDS_NSML_MVL_STAGE%\r\nping -n 60 127.0.0.1 > nul\r\n"
+                "@echo off\r\necho {name} args:%*\r\necho {name} role:%MELONDS_NSML_ROLE%\r\necho {name} stage:%MELONDS_NSML_MVL_STAGE%\r\n> bridge-status.json echo ^{{\"phase\":\"connected\"^}}\r\nping -n 60 127.0.0.1 > nul\r\n"
             )
         } else {
             "@echo off\r\nexit /b 42\r\n".to_owned()
@@ -72,7 +80,7 @@ fn fake_executable(dir: &Path, name: &str, should_sleep: bool) -> PathBuf {
         let path = dir.join(name);
         let body = if should_sleep {
             format!(
-                "#!/bin/sh\necho \"{name} args:$*\"\necho \"{name} role:$MELONDS_NSML_ROLE\"\necho \"{name} stage:$MELONDS_NSML_MVL_STAGE\"\nsleep 60\n"
+                "#!/bin/sh\necho \"{name} args:$*\"\necho \"{name} role:$MELONDS_NSML_ROLE\"\necho \"{name} stage:$MELONDS_NSML_MVL_STAGE\"\nprintf '%s\\n' '{{\"phase\":\"connected\"}}' > bridge-status.json\nsleep 60\n"
             )
         } else {
             "#!/bin/sh\nexit 42\n".to_owned()
@@ -219,6 +227,8 @@ fn melon_env_carries_game_settings_and_netplay_start() {
     assert_eq!(env["MELONDS_NSML_MATCH_SEED_SEQUENCE"], "7,8,9,10,11");
     assert_eq!(env["MELONDS_NSML_DELAY"], "4");
     assert_eq!(env["MELONDS_NSML_INPUT_MAX_FRAME_LEAD"], "4");
+    assert_eq!(env["MELONDS_NSML_WAIT_TIMEOUT_MS"], "60000");
+    assert_eq!(env["MELONDS_NSML_SEED_WAIT_TIMEOUT_MS"], "60000");
     assert_eq!(env["MELONDS_NSML_INPUT_HEALTH_TRACE"], "1");
     assert_eq!(env["MELONDS_NSML_INPUT_HEALTH_TRACE_INTERVAL"], "120");
     assert_eq!(
@@ -229,7 +239,23 @@ fn melon_env_carries_game_settings_and_netplay_start() {
     assert_eq!(env["MELONDS_NSML_STATE_SYNC_INTERVAL"], "60");
     assert_eq!(env["MELONDS_NSML_STATE_SYNC_EXTENDED"], "1");
     assert!(env["MELONDS_NSML_DIAGNOSTICS_FILE"].ends_with("melonds-diagnostics.json"));
+    assert!(!env.contains_key("MELONDS_NSML_DIAGNOSTIC_EVENTS"));
+    assert!(!env.contains_key("MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE"));
     assert!(!env.contains_key("MELONDS_NSML_ROLLBACK"));
+}
+
+#[test]
+fn melon_env_carries_diagnostic_event_settings_when_enabled() {
+    let mut request = request(Role::Host);
+    request.diagnostic_events_enabled = true;
+    let env = melon_env(
+        &request,
+        Path::new("bootstrap.inputs"),
+        Path::new("logs/nsmb-mvl-gui-test"),
+    );
+
+    assert_eq!(env["MELONDS_NSML_DIAGNOSTIC_EVENTS"], "1");
+    assert!(env["MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE"].ends_with("melonds-events.jsonl"));
 }
 
 #[test]
@@ -344,6 +370,19 @@ fn selected_stage_uses_match_seed_for_random_course() {
 }
 
 #[test]
+fn validation_rejects_duplicate_random_course_stages() {
+    let mut request = request(Role::Host);
+    request.settings.course_mode = CourseMode::Random;
+    request.settings.course_stages = vec![1, 2, 3, 2, 4];
+    assert!(validate_request(&request)
+        .expect_err("duplicate random stages rejected")
+        .contains("同じコース"));
+
+    request.settings.course_mode = CourseMode::Select;
+    validate_request(&request).expect("manual stage selection may repeat stages");
+}
+
+#[test]
 fn reusable_rom_marker_requires_current_format_and_rom_file() {
     let dir = temp_log_dir("reusable-rom-marker");
     let rom = dir.join("host.nds");
@@ -438,6 +477,266 @@ fn melon_diagnostics_reads_game_state_mismatch_json() {
 }
 
 #[test]
+fn mvl_results_parse_melon_stdout_and_launcher_stage_sequence() {
+    let dir = temp_log_dir("mvl-results");
+    fs::write(
+        dir.join("launcher.json"),
+        br#"{
+          "request": {
+            "settings": {
+              "course_stages": [2, 3, 4, 0, 1]
+            }
+          }
+        }"#,
+    )
+    .expect("write launcher");
+    fs::write(
+        dir.join("melonds.stdout.txt"),
+        "other line\n\
+NSMB MvL auto restart: result inst=0 frame=4320 winner=0 stars=5/0 displayed=5/0 collected=5/0 lives=3/2 deaths=0/1 dead=0/0 matchWins=1/0 target=2\n\
+NSMB MvL auto restart: result inst=0 frame=8200 winner=1 stars=0/5 displayed=0/5 collected=0/5 lives=1/3 deaths=2/0 dead=1/0 matchWins=1/1 target=2\n",
+    )
+    .expect("write stdout");
+
+    let results = read_mvl_results(&dir);
+
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0].game_index, 1);
+    assert_eq!(results[0].stage, Some(2));
+    assert_eq!(results[0].winner, Some(0));
+    assert_eq!(results[0].mario.stars, 5);
+    assert_eq!(results[0].luigi.lives, 2);
+    assert_eq!(results[0].mario_match_wins, 1);
+    assert_eq!(results[0].target_wins, 2);
+    assert!(results[0].resolved);
+    assert_eq!(results[1].game_index, 2);
+    assert_eq!(results[1].stage, Some(3));
+    assert_eq!(results[1].winner, Some(1));
+    assert!(results[1].mario.dead);
+    assert_eq!(results[1].mario.lives, 0);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn mvl_results_prefer_death_loss_over_logged_star_winner() {
+    let dir = temp_log_dir("mvl-results-death-winner");
+    fs::write(
+        dir.join("melonds.stdout.txt"),
+        "NSMB MvL auto restart: result inst=0 frame=4320 winner=0 stars=5/3 displayed=5/3 collected=5/3 lives=1/2 deaths=2/1 dead=1/0 matchWins=1/0 target=2\n\
+NSMB MvL auto restart: result inst=0 frame=8200 winner=0 stars=5/0 displayed=5/0 collected=5/0 lives=2/1 deaths=1/2 dead=0/1 matchWins=2/0 target=2\n",
+    )
+    .expect("write stdout");
+
+    let results = read_mvl_results(&dir);
+
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0].winner, Some(1));
+    assert_eq!(results[0].mario.lives, 0);
+    assert_eq!(results[0].mario_match_wins, 0);
+    assert_eq!(results[0].luigi_match_wins, 1);
+    assert_eq!(results[1].winner, Some(0));
+    assert_eq!(results[1].mario_match_wins, 1);
+    assert_eq!(results[1].luigi_match_wins, 1);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn match_history_v1_migration_recomputes_death_decided_winners() {
+    let document = serde_json::json!({
+        "schema_version": 1,
+        "matches": [
+            {
+                "id": "match-1",
+                "logDir": "C:\\logs\\match-1",
+                "playerIds": {
+                    "mario": "host-id",
+                    "luigi": "client-id"
+                },
+                "playerNames": {
+                    "mario": "Host",
+                    "luigi": "Client"
+                },
+                "role": "host",
+                "roomCode": "room-1",
+                "settings": {
+                    "course_mode": "random",
+                    "course_stages": [0, 1, 2, 3, 4],
+                    "wins": 3,
+                    "big_stars": 5,
+                    "lives": "3",
+                    "match_seed": "1",
+                    "rng_seeds": ["1", "2", "3", "4", "5"],
+                    "input_delay_frames": 4,
+                    "input_max_frame_lead": 4,
+                    "rollback_enabled": false
+                },
+                "stages": [
+                    {
+                        "game_index": 1,
+                        "stage": 0,
+                        "frame": 4320,
+                        "winner": 0,
+                        "mario": {
+                            "stars": 5,
+                            "displayed_stars": 5,
+                            "collected_stars": 5,
+                            "lives": 0,
+                            "deaths": 3,
+                            "dead": true
+                        },
+                        "luigi": {
+                            "stars": 3,
+                            "displayed_stars": 3,
+                            "collected_stars": 3,
+                            "lives": 1,
+                            "deaths": 2,
+                            "dead": false
+                        },
+                        "mario_match_wins": 1,
+                        "luigi_match_wins": 0,
+                        "target_wins": 3,
+                        "resolved": true,
+                        "line": "old winner favoured stars"
+                    },
+                    {
+                        "game_index": 2,
+                        "stage": 1,
+                        "frame": 8200,
+                        "winner": 1,
+                        "mario": {
+                            "stars": 2,
+                            "displayed_stars": 2,
+                            "collected_stars": 2,
+                            "lives": 2,
+                            "deaths": 1,
+                            "dead": false
+                        },
+                        "luigi": {
+                            "stars": 5,
+                            "displayed_stars": 5,
+                            "collected_stars": 5,
+                            "lives": 0,
+                            "deaths": 3,
+                            "dead": true
+                        },
+                        "mario_match_wins": 1,
+                        "luigi_match_wins": 1,
+                        "target_wins": 3,
+                        "resolved": true,
+                        "line": "old winner favoured stars"
+                    }
+                ],
+                "startedAt": "2026-06-24T00:00:00.000Z",
+                "status": "completed"
+            }
+        ]
+    });
+
+    let (matches, migrated) =
+        load_match_history_document_content(&document.to_string()).expect("migrate history");
+
+    assert!(migrated);
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].stages[0].winner, Some(1));
+    assert_eq!(matches[0].stages[0].mario_match_wins, 0);
+    assert_eq!(matches[0].stages[0].luigi_match_wins, 1);
+    assert_eq!(matches[0].stages[1].winner, Some(0));
+    assert_eq!(matches[0].stages[1].mario_match_wins, 1);
+    assert_eq!(matches[0].stages[1].luigi_match_wins, 1);
+}
+
+#[test]
+fn mvl_results_keep_unresolved_stage_without_winner() {
+    let dir = temp_log_dir("mvl-results-unresolved");
+    fs::write(
+        dir.join("melonds.stdout.txt"),
+        "NSMB MvL auto restart: result unresolved inst=0 frame=2400 stars=0/0 displayed=0/0 collected=0/0 lives=3/3 deaths=0/0 dead=0/0 matchWins=0/0 target=2\n",
+    )
+    .expect("write stdout");
+
+    let results = read_mvl_results(&dir);
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].winner, None);
+    assert!(!results[0].resolved);
+    assert_eq!(results[0].mario.lives, 3);
+    assert_eq!(results[0].luigi.lives, 3);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn match_result_decided_requires_target_win() {
+    let dir = temp_log_dir("mvl-match-decided");
+    fs::write(
+        dir.join("melonds.stdout.txt"),
+        "NSMB MvL auto restart: result inst=0 frame=4320 winner=0 stars=5/0 displayed=5/0 collected=5/0 lives=3/2 deaths=0/1 dead=0/0 matchWins=1/0 target=2\n\
+NSMB MvL auto restart: result inst=0 frame=8200 winner=0 stars=5/0 displayed=5/0 collected=5/0 lives=3/2 deaths=0/1 dead=0/0 matchWins=2/0 target=2\n",
+    )
+    .expect("write stdout");
+
+    let results = read_mvl_results(&dir);
+
+    assert!(match_result_decided(&results));
+    assert!(!match_result_decided(&results[..1]));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn crash_log_archive_excludes_diagnostic_events() {
+    let dir = temp_log_dir("crash-archive");
+    fs::write(dir.join("melonds.stdout.txt"), "stdout").expect("write stdout");
+    fs::write(dir.join("melonds-events.jsonl"), "large diagnostic events")
+        .expect("write diagnostic events");
+    fs::create_dir_all(dir.join("screens")).expect("create screens");
+    fs::write(dir.join("screens").join("frame.txt"), "screen").expect("write nested file");
+
+    let archive = create_log_archive(&dir).expect("create archive");
+    let file = fs::File::open(&archive).expect("open archive");
+    let mut zip = zip::ZipArchive::new(file).expect("read archive");
+    assert!(zip.by_name("melonds.stdout.txt").is_ok());
+    assert!(zip.by_name("screens/frame.txt").is_ok());
+    assert!(zip.by_name("melonds-events.jsonl").is_err());
+
+    let _ = fs::remove_file(archive);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn game_state_mismatch_gui_visibility_ignores_basic_only_mismatch() {
+    assert!(!should_show_game_state_mismatch_in_gui(
+        &game_state_mismatch(Some(false), Some(true), Some(true), Some(true))
+    ));
+    assert!(should_show_game_state_mismatch_in_gui(
+        &game_state_mismatch(Some(false), Some(false), Some(true), Some(true))
+    ));
+    assert!(should_show_game_state_mismatch_in_gui(
+        &game_state_mismatch(Some(false), Some(true), Some(false), Some(true))
+    ));
+    assert!(should_show_game_state_mismatch_in_gui(
+        &game_state_mismatch(Some(false), Some(true), Some(true), Some(false))
+    ));
+}
+
+fn game_state_mismatch(
+    basic_matches: Option<bool>,
+    player_global_matches: Option<bool>,
+    wifi_candidate_matches: Option<bool>,
+    render_candidate_matches: Option<bool>,
+) -> GameStateMismatch {
+    GameStateMismatch {
+        instance: Some(0),
+        frame: Some(180),
+        local_hash: Some("0000000000000003".to_owned()),
+        remote_hash: Some("0000000000000004".to_owned()),
+        basic_matches,
+        player_global_matches,
+        wifi_candidate_matches,
+        render_candidate_matches,
+        line: "NSMB PoC: game state mismatch".to_owned(),
+    }
+}
+
+#[test]
 fn allowed_log_dir_rejects_path_outside_logs_root() {
     let dir = temp_log_dir("allowed-log-dir");
     let logs = dir.join("logs");
@@ -462,8 +761,14 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
     fs::create_dir_all(&paths.log_dir).expect("create logs");
 
     let state = AppState::default();
-    let response =
-        start_match_resolved(&state, request(Role::Host), paths).expect("start fake match");
+    let mut launch_request = request(Role::Host);
+    launch_request.rom_identity = Some(RomIdentity {
+        rom_pair_id: "pair_hash".to_owned(),
+        generator_id: "generator_hash".to_owned(),
+        host_rom_sha256: "host_hash".to_owned(),
+        client_rom_sha256: "client_hash".to_owned(),
+    });
+    let response = start_match_resolved(&state, launch_request, paths).expect("start fake match");
     assert!(response.bridge_pid > 0);
     assert!(response.melon_pid > 0);
 
@@ -472,6 +777,7 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
     assert_eq!(status.bridge.as_deref(), Some("running"));
     assert_eq!(status.melon.as_deref(), Some("running"));
     assert!(status.game_state_mismatch.is_none());
+    assert!(status.mvl_results.is_empty());
 
     let bridge_stdout =
         wait_for_file_contains(&dir.join("logs").join("bridge.stdout.txt"), "fake-bridge");
@@ -482,6 +788,17 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
         wait_for_file_contains(&dir.join("logs").join("melonds.stdout.txt"), "fake-melon");
     assert!(melon_stdout.contains("role:host"));
     assert!(melon_stdout.contains("stage:2"));
+
+    let launcher_json =
+        fs::read_to_string(dir.join("logs").join("launcher.json")).expect("launcher manifest");
+    let launcher: serde_json::Value =
+        serde_json::from_str(&launcher_json).expect("parse launcher manifest");
+    assert_eq!(launcher["gui"]["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(launcher["rom_identity"]["host_rom_sha256"], "host_hash");
+    assert_eq!(
+        launcher["request"]["rom_identity"]["client_rom_sha256"],
+        "client_hash"
+    );
 
     stop_existing(&state).expect("stop fake match");
     let status = session_status_inner(&state).expect("status after stop");

@@ -592,6 +592,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$repoRoot = Split-Path -Parent $PSScriptRoot
 
 if ($LanStartAttempts -gt 1) {
     for ($attempt = 1; $attempt -le $LanStartAttempts; $attempt++) {
@@ -767,19 +768,25 @@ if ($GenerateMvlConfiguredRoms) {
     }
 
     $configuredSceneSettings = if ($MvlSceneSettings) { $MvlSceneSettings } else { Convert-ToMvlSceneSettings -Stage $configuredStage }
+    $cacheRoot = Join-Path $repoRoot "roms\.cache"
+    New-Item -ItemType Directory -Force -Path $cacheRoot | Out-Null
+    $cachedHost = Join-Path $cacheRoot "nsmb-mvl-stable-host.nds"
+    $cachedClient = Join-Path $cacheRoot "nsmb-mvl-stable-client.nds"
     $generatedHost = Join-Path $logRoot "generated-host.nds"
     $generatedClient = Join-Path $logRoot "generated-client.nds"
     $generatorCourseMode = if ($MvlCourseMode -eq "fixed") { "random" } else { $MvlCourseMode }
     & (Join-Path $PSScriptRoot "generate-nsmb-mvl-stable-roms.ps1") `
         -SourceRom $romPath `
-        -HostRom $generatedHost `
-        -ClientRom $generatedClient `
+        -HostRom $cachedHost `
+        -ClientRom $cachedClient `
         -MvlStage $configuredStage `
         -MvlSceneSettings $configuredSceneSettings `
         -MvlWins $MvlWins `
         -MvlBigStars $MvlBigStars `
         -MvlLives $MvlLives `
         -MvlCourseMode $generatorCourseMode
+    Copy-Item -LiteralPath $cachedHost -Destination $generatedHost -Force
+    Copy-Item -LiteralPath $cachedClient -Destination $generatedClient -Force
 
     $hostSourceRomPath = (Resolve-Path $generatedHost).Path
     $clientSourceRomPath = (Resolve-Path $generatedClient).Path
@@ -833,6 +840,31 @@ if ($GenerateMvlConfiguredRoms) {
     }
 }
 
+function Test-UsableNsmbSave {
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) {
+        return $false
+    }
+
+    $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $Path).Path)
+    if ($bytes.Length -ne 8192) {
+        return $false
+    }
+
+    $allZero = $true
+    $allFF = $true
+    foreach ($byte in $bytes) {
+        if ($byte -ne 0x00) { $allZero = $false }
+        if ($byte -ne 0xFF) { $allFF = $false }
+        if (-not $allZero -and -not $allFF) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Copy-SaveSiblings {
     param(
         [string]$SourceRom,
@@ -844,6 +876,13 @@ function Copy-SaveSiblings {
         [System.IO.Path]::GetFileNameWithoutExtension($SourceRom))
     foreach ($suffix in @(".sav", ".sav.2")) {
         $source = "$base$suffix"
+        if ($suffix -eq ".sav") {
+            $fallback = Join-Path $repoRoot "roms\nsmb-us.sav"
+            if (-not (Test-UsableNsmbSave -Path $source) -and (Test-UsableNsmbSave -Path $fallback)) {
+                $source = $fallback
+            }
+        }
+
         if (Test-Path $source) {
             Copy-Item -Force $source (Join-Path $TargetRoot "nsmb$suffix")
         }

@@ -20,6 +20,17 @@ Run the GUI during development:
 corepack pnpm dev
 ```
 
+Run the React UI in a browser without Tauri or sidecars:
+
+```powershell
+corepack pnpm preview:browser
+```
+
+Open `http://127.0.0.1:1420/?preview=ready` to inspect the main launcher UI
+with onboarding completed and sample match history when no preview history has
+been stored. Open `http://127.0.0.1:1420/` to inspect the first-run onboarding
+flow.
+
 Build a bundle:
 
 ```powershell

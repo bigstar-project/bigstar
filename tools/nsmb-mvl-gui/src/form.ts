@@ -1,6 +1,6 @@
 import type { CourseMode, FormState, GameSettings } from './types';
 
-export const defaultInputDelayFrames = 4;
+export const defaultInputDelayFrames = 3;
 export const defaultInputMaxFrameLead = 4;
 export const rollbackInputDelayFrames = 2;
 export const rollbackInputMaxFrameLead = 2;
@@ -26,6 +26,8 @@ export const initialForm: FormState = {
   inputDelayFrames: defaultInputDelayFrames,
   inputMaxFrameLead: defaultInputMaxFrameLead,
   rollbackEnabled: false,
+  diagnosticEventsEnabled: false,
+  newRoomNotificationsEnabled: true,
 };
 
 export function currentSettings(form: FormState): GameSettings {
@@ -77,7 +79,10 @@ export function normalizedCourseStages(
 ): number[] {
   const count = maxGamesForWins(form.wins);
   if (form.courseMode === 'random' && refreshRandom) {
-    return Array.from({ length: count }, () => generateStage());
+    return generateUniqueStageSequence(count);
+  }
+  if (form.courseMode === 'random') {
+    return normalizeRandomCourseStages(form.courseStages, count);
   }
   const source =
     form.courseStages.length > 0
@@ -137,10 +142,49 @@ export function generateSeed(): number {
   return bytes[0] || Date.now() >>> 0;
 }
 
-export function generateStage(): number {
+export function generateUniqueStageSequence(count: number): number[] {
+  const stages = Array.from({ length: courseCount }, (_, index) => index);
+  for (let index = stages.length - 1; index > 0; index -= 1) {
+    const swapIndex = generateRandomIndex(index + 1);
+    [stages[index], stages[swapIndex]] = [stages[swapIndex], stages[index]];
+  }
+  return stages.slice(0, Math.min(courseCount, Math.max(0, Math.trunc(count))));
+}
+
+function normalizeRandomCourseStages(
+  source: number[],
+  count: number,
+): number[] {
+  const normalizedCount = Math.min(courseCount, Math.max(0, Math.trunc(count)));
+  const used = new Set<number>();
+  const stages: number[] = [];
+  for (const value of source) {
+    const stage = clampStage(value);
+    if (used.has(stage)) {
+      continue;
+    }
+    used.add(stage);
+    stages.push(stage);
+    if (stages.length === normalizedCount) {
+      return stages;
+    }
+  }
+  for (let stage = 0; stage < courseCount; stage += 1) {
+    if (used.has(stage)) {
+      continue;
+    }
+    stages.push(stage);
+    if (stages.length === normalizedCount) {
+      break;
+    }
+  }
+  return stages;
+}
+
+function generateRandomIndex(limit: number): number {
   const bytes = new Uint32Array(1);
   crypto.getRandomValues(bytes);
-  return bytes[0] % courseCount;
+  return bytes[0] % limit;
 }
 
 export function clampStage(value: number): number {

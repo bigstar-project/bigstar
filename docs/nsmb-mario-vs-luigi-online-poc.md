@@ -1,5 +1,423 @@
 # NSMB Mario vs Luigi Online PoC
 
+## MvL auto-restart death-result winner fix - 2026-06-24
+
+- User-reported issue: when a stage is decided by a death, the match result can still be judged by star count. This affects both current-match/result display and the melonDS-side auto-restart win counter.
+- Cause:
+  - `src/frontend/qt_sdl/NsmbNetplayPoC.cpp` resolved `BattleStars`, `DisplayedStars`, and `CollectedStars` before checking the per-player `Dead` flags, so a dead player could be counted as the stage winner if they had more stars.
+  - The GUI parsed `melonds.stdout.txt` and trusted the logged `winner` / `matchWins`, so existing logs with this condition also displayed the wrong winner and wrong cumulative match score.
+- Fix:
+  - melonDS auto-restart winner resolution now checks one-sided death first. If exactly one player is dead, the dead side loses before any star/life/death-count fallback is considered.
+  - GUI result parsing also corrects one-sided-death winners when reading logs and recomputes cumulative `mario_match_wins` / `luigi_match_wins` from the corrected per-stage winners. This keeps current-match display and persisted/reloaded history consistent, including older logs from before the melonDS fix.
+  - Rebuilt `melonDS.exe` and synced GUI sidecars so normal GUI launches use the updated auto-restart binary.
+- Verification:
+  - `cargo fmt`, `cargo test`, and `cargo clippy-all` passed in `tools/nsmb-mvl-gui/src-tauri`.
+  - `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passed. Existing unrelated warnings remain in `src/net/Netplay.cpp` and linker flags.
+  - `corepack pnpm sync:sidecars` passed and synced `melonDS.exe` with sha256 `f166839a9435d8170712cd9bde72e080b2c53672ddc9c0d35f15ecf3e0e300de`.
+  - `pnpm run ci` in `tools/nsmb-mvl-gui` still fails at Biome because existing TypeScript/JSON files are CRLF-formatted relative to Biome's expected output; this is unrelated to the Rust/C++ logic change.
+- Next action:
+  - Run a manual GUI best-of-3/5 match where a player with more stars loses their final life, and confirm the stdout log increments the living player's `matchWins` and stops only when that corrected side reaches the configured target.
+
+## GUI ice-stage Luigi sudden-death log review - 2026-06-20
+
+- User-reported capture: `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781960336919-68204-0`, client role, diagnostics enabled, no rollback, random course order `[1,2,0,4,3]`.
+- Target: second match / ice stage (`stageID=2`, `stageGroup=9`) first and second Luigi sudden deaths.
+- Findings:
+  - The run logged 195 `game state mismatch` rows, all `basic=0 playerGlobal=1 wifiCandidate=1 renderCandidate=1`. No `playerGlobal=0` mismatch appears in this capture, so the visible sudden death is not explained by the known player-global desync signal.
+  - Rematch/start-ready for the second match looks aligned: checkpoint restore at frame `3398`, current stage request `stage=2`, local and remote start-ready both at frame `3562`, logical start `3544`, and input health summaries continue with `hasRemote=1`.
+  - Ice-stage Luigi death events group into pairs because the first event is the death transition and the second is the later lives/deaths counter update. First death starts at frame `3914` with `Player::standardDeathTransitState` (`0x02119B24`) and later updates lives/deaths at frame `4022` with `Player::viewTransitState` (`0x0211870C`).
+  - Second death starts at frame `4773` with `Player::pitDeathTransitState` (`0x021196B0`) and later updates lives/deaths at frame `4893` with `Player::viewTransitState`. The ring shows Luigi's signed X around `-106.6` while camera X is about `1833`, so this looks like offscreen/pit handling or world-coordinate wrap rather than a standard enemy hit.
+  - A later third Luigi death starts at frame `5479` with `Player::pitDeathTransitState`, but the user specifically asked about the first two.
+- Current interpretation:
+  - This capture points away from input transport/rematch epoch failure and toward a gameplay/world-state problem specific to ice-stage player position, floor/pit bounds, or object/contact state.
+  - The current death JSON does not include the exact caller that entered `standardDeathTransitState` / `pitDeathTransitState`, so it can classify the death path but not prove the original function/collision source.
+- Additional capture reviewed: `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781961545732-68204-2` paired with host log `...\nsmb-mvl-gui-1781961545985-67380-2`.
+  - Settings: no rollback, selected course order `[2,2,3,3,3]`, matching ROM identity on host/client.
+  - Host and client logged identical Luigi pit-death frames for the first reported sudden death in each of the first three matches: frame `3437` stage `2`, frame `13271` stage `2`, and frame `17478` stage `3`.
+  - At those frames Luigi was in `Player::pitDeathTransitState` (`0x021196B0`) with identical host/client position and flags. Examples: frame `3437` x `431.5`, y `-379.69`; frame `13271` x `369.75`, y `-375.47`; frame `17478` x `296`, y `-342.81`.
+  - The preceding ring shows Luigi staying horizontally around the same screen region while Y keeps falling, with no nearby moving hazards logged. This points more strongly to floor/stage collision or pit-bound handling than to host/client desync.
+  - The mismatch lines in this run are still `basic=0 playerGlobal=1 wifiCandidate=1 renderCandidate=1`; no `playerGlobal=0` signal appears around the sudden deaths.
+- Additional capture reviewed with the new `player_position_anomaly` / `player_pit_transition` logs active: client log `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781962346160-66120-0` paired with host log `...\nsmb-mvl-gui-1781962347955-43224-0`.
+  - Settings: no rollback, selected course order `[2,3,2,3,2]`, matching ROM identity on host/client.
+  - Host/client events again match exactly at the reported sudden-death frames, and diagnostics still show only `basic=0 playerGlobal=1 wifiCandidate=1 renderCandidate=1` mismatches.
+  - First match, user-reported Luigi first death: frame `4512`, stage `2`, player `1` / character `1`, entering `Player::pitDeathTransitState` (`0x021196B0`), x `519.06`, y `-404.75`, screenX about `131px`, screenY about `-660px`. Host/client values match exactly. The preceding ring shows Luigi already below the camera for hundreds of frames, with repeated y values around `-400`; this is a floor/pit-bound problem, not a transport-only desync.
+  - Note: frame `1220` in the same first match is player `0` / character `0`, so it is a separate Mario death and not the user-reported Luigi sudden death.
+  - Second match, reported deaths: frame `12950`, `17563`, and `19532`, stage `3`, player `1` / character `1`, all entering `Player::pitDeathTransitState` (`0x021196B0`). Screen X is in-view (`94-122px` range), while screen Y is below the camera (`-604` to `-624px`), and the ring repeatedly shows y near `-400`. This again points to floor/stage collision or pit-bound handling, not transport desync.
+- Current cause:
+  - This is most likely not a no-rollback input-sync bug. The host/client RAM-derived player state is identical at the sudden-death frames, and no `playerGlobal=0` mismatch appears around them.
+  - The GUI run uses the stable direct-entry ROM plus runtime `MELONDS_NSML_MVL_STAGE` / stage-sequence override, while `MELONDS_NSML_DIRECT_MVL_BOOT` is disabled. At match start both players are placed into the direct-entry spawn transition at fixed coordinates, for example stage 2 frame `861` uses p0 `x=0x00018000 y=0xFFE78000` and p1 `x=0x00068000 y=0xFFE78000`; stage 3 frame `11262` uses p0 `x=0x00058000 y=0xFFE78000` and p1 `x=0x000A8000 y=0xFFE78000`.
+  - ROM course data check: stage 2 maps to `course/J03_1.bin` and its entrance records are `(x=0x10,y=0x180)` / `(x=0x60,y=0x180)`. Stage 3 maps to `course/J04_1.bin` and its entrance records are `(x=0x50,y=0x180)` / `(x=0xA0,y=0x180)`. Runtime coordinates match the normal entrance transform `(x + 8, -(y + 8))`, producing stage 2 `(24,-392)` / `(104,-392)` and stage 3 `(88,-392)` / `(168,-392)`. So direct-entry is not inventing a bad initial player Y for these courses; it is using the course entrance Y.
+  - The GUI only enables the camera-init-hold clear (`MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD`). It does not enable the older entrance-spawn normalization or initial-spawn repair knobs; entrance normalization is intentionally disabled in normal GUI runs because it previously broke stage 3 edge pipes.
+  - Stage-start comparison was run for GUI-like direct-entry starts on all five courses with `MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD=1`, one-frame game-state trace, and the stable host/client ROMs. Normal LocalMP/native baseline could not be reproduced with the current automation input because it never reached `stageGroup=0x9` / `vsMode=1`, so this comparison is direct-entry stage-to-stage rather than native-to-direct.
+  - 2026-06-21 recheck: `logs\codex-compare-direct-stage2-20260621` (`-NoLanMP`) and `logs\codex-compare-localmp-stage2-20260621` (LAN env enabled, but still stable direct-entry ROMs) both start stage 2 at frame `861` with identical Y: p0 `0xFFE78000` (-392) and p1 `0xFFE78000` (-392), then settle to about `0xFFEA0000` (-352). This proves the LAN wrapper flag itself is not changing the direct-entry initial Y, but it is not a native LocalMP comparison.
+  - US clean normal-LocalMP attempts `logs\codex-compare-clean-localmp-stage2-20260621`, `logs\codex-compare-clean-us-localmp-camera-probe-20260621`, and `logs\codex-compare-us-localmp-route-camera-probe-20260621` did not reach gameplay; they ended around `sceneCurrentSceneID=0x6/0x9`, `sceneNextSceneID=0x181`, `stageGroup=0x0`, `vsMode=0`, and no player actors. The Japanese normal-LocalMP route `logs\codex-compare-jp-localmp-route-20260621` reaches its route, but the current US-address game-state trace is invalid for that ROM (`stageGroup=0xffff`), so it cannot answer the Y question.
+  - First normal player frame summary: stage 0 screenY `-320`, stage 1 `-412`, stage 2 `-608`, stage 3 `-576`, stage 4 `-352`. At the same point all stages have `entranceSpawnID=0/1`, spawn pointer delta `0x14`, `cameraDbgCA880=0`, collision flags `0x800b001/0x800b001`, and physics flags `0x83/0x83`.
+  - This weakens the earlier entrance-pointer hypothesis. The initial Y is not the direct cause: direct-entry starts stage 2/3 from the course entrance Y and no-movement runs survive. The fatal differentiator is the ROM-side vertical out-of-view camera slot used later during a fall.
+  - 2026-06-21 root cause found: the stable Rust ROM generator patched `StageActor::isOutOfViewVertical` through a fallback stub at `0x020C5298`, and that stub rewrote slot argument `1` to `0` before reading `Stage::cameraY` / `Stage::cameraHeight`. The Python patcher kept this behavior behind the diagnostic `camera-player1-out-of-view-slot0` option, but `tools\nsmb-mvl-rom\src\lib.rs` made it unconditional.
+  - Therefore Luigi/player1 vertical out-of-view checks could use player0's camera. In the user capture, client `localPlayerID=1` still has `cameraY0=0x0008C000` (140px) and `cameraY1=0x00100000` (256px) just before the frame-4512 death. Luigi is player1/slot1, but the patched vertical check used slot0, so the lower camera limit became `0xFFEB4000`; Luigi's falling object bottom crossed that limit before reaching the lower floor, and the game entered `Player::pitDeathTransitState`.
+- Follow-up cause narrowing:
+  - A temporary diagnostic-only vertical out-of-view trace around the ROM-side `StageActor::isOutOfViewVertical` fallback stub was used during investigation, then removed after root-cause verification. In stage 2, neither the first 200 frames after start nor a 3800-frame no-JIT run with the current automated route produced player vertical out-of-view hits. This weakened the theory that the ROM-side vertical out-of-view fallback directly kills Luigi at stage start.
+  - A no-movement stage 2 run survived 8000 frames. The death is therefore not caused by initial spawn/camera state alone.
+  - Existing `MELONDS_NSML_FORCE_PLAYER_ACTOR_POSITION` was used to place Luigi at the stage 2 user-log fall coordinate (`x=568`, `y=-336`). This reproduced the loss of ground collision: after the forced frame, collision changed to `0x00002000` and Luigi fell with `velY=-4`, closely matching the user log around frames `4486-4511`.
+  - The forced stage 2 replay did not enter `pitDeathTransitState`; it later contacted a lower floor around `y=-432`. This was because its `Stage::cameraY[0]` did not match the user capture and stayed around `220px` while falling. With the same forced player state and input tail, forcing camera slot0 Y to the user-log value `0x0008C000` reproduced the pit transition at frame `1024`, x `552.9998`, y `-404.0625`, before the lower floor.
+  - Stage 3 coordinate forcing near the reported pipe position (`x=92`, `y=-400`) also did not enter pit death by itself.
+  - 2026-06-21 direct-entry automation: stage 2 `RIGHT+B` and `LEFT+B` single-player remote-input injection both survived 6500 frames without `pitDeathTransitState`. Rightward movement reached the same X band as the user death but landed on the lower floor at `y=0xFFE50000` (-432). Leftward movement also stayed alive and settled on floor collision.
+  - A forced state matching the user log's upper-platform fall (`x=0x0022B040`, `y=0xFFEADA80`, `velX=0xFFFFEFB0`, `velY=0`, `action=0x00100000`, `subAction=0x48`, `physics=0x82`, `collision=0x2000`) plus the same input tail (`0x22 -> 0x02 -> 0`) still landed on the lower floor when camera slot0 was not forced. Adding the user-log camera slot0 Y reproduced the sudden death, so the missing condition was camera slot0 position, not hidden collision/contact state.
+  - Stage 2 `course/J03_1_bgdat.bin` around the reported death point contains an upper floor object around tile `x=35..36,y=21` and lower floor objects around tile `x=25..48,y=26..31`. The real log shows Luigi falling from the upper-floor height (`y=-336`) toward the lower floor, but entering `pitDeathTransitState` near `y=-404.75` before reaching the lower floor at `y=-432`. This now matches the slot0-camera vertical out-of-view limit, not a missing floor tile.
+  - Temporary no-JIT vertical trace for the reproduced case confirmed the bad slot use: `NSMB VerticalOutOfView` logged player1 with `argSlot=1` but `usedSlot=0`; at frame `1023` the player1 row had `triggered=1`, `cameraY=0x0008C000`, `cameraHeight=0x000C0000`, and `limit=0xFFEB4000`.
+- Fix/logging update:
+  - Fixed `tools\nsmb-mvl-rom\src\lib.rs`: the vertical out-of-view fallback stub now preserves the requested player camera slot and only falls back to slot0 when the requested slot's `Stage::cameraHeight` is zero. Added `vertical_out_of_view_fallback_preserves_player1_camera_slot` to prevent reintroducing the unconditional player1-to-slot0 rewrite.
+  - Added targeted low-volume death/offscreen diagnostics for GUI diagnostic mode in `src/frontend/qt_sdl/NsmbNetplayPoC.cpp`.
+  - The diagnostic frame ring now records per-player camera width/height in addition to camera X/Y, so screen-relative player position can be interpreted from the JSONL event alone.
+  - Added `player_pit_transition` JSONL events when either player enters `Player::pitDeathTransitState` (`0x021196B0`). The event includes current/previous player state, screen-relative X/Y, per-frame delta X/Y, stage/camera data, and the recent diagnostic ring.
+  - Added throttled `player_position_anomaly` JSONL events when a live visible player is far outside the current camera range or crosses a large X/Y discontinuity. This should catch the frame where Luigi goes offscreen before the later pit-death transition.
+  - Removed temporary stdout/JIT trace hooks and forced-state repro extensions after verification. Normal GUI diagnostics now keep only the low-volume JSONL events above when diagnostic events are enabled.
+- Verification:
+  - `cargo fmt --manifest-path tools\nsmb-mvl-rom\Cargo.toml`, `cargo test --manifest-path tools\nsmb-mvl-rom\Cargo.toml`, and `cargo clippy --manifest-path tools\nsmb-mvl-rom\Cargo.toml --all-targets -- -D warnings` passed after the ROM generator fix.
+  - `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passed.
+  - `logs\codex-stage2-luigi-right-remote-pittrace-20260621`: stage 2 rightward remote-input injection survived 6500 frames, no pit transition.
+  - `logs\codex-stage2-luigi-left-remote-pittrace-20260621`: stage 2 leftward remote-input injection survived 6500 frames, no pit transition.
+  - `logs\codex-stage2-luigi-forced-fall-tail-pittrace-20260621`: forced user-log fall-tail state plus matching input tail survived 1300 frames and landed on the lower floor, no pit transition because camera slot0 did not match the user capture.
+  - `logs\codex-stage2-forced-tail-cameraY140-slot1to0-pittrace-20260621`: same forced fall-tail state plus camera slot0 Y forced to `0x0008C000` reproduced `Player::pitDeathTransitState` at frame `1024`.
+  - `logs\codex-stage2-forced-tail-cameraY140-verticaltrace-nojit-20260621`: no-JIT vertical trace confirmed `argSlot=1 usedSlot=0` for player1 and `triggered=1` at frame `1023`.
+  - After the ROM generator fix, `scripts\run-nsmb-mvl-lan-route-smoke.ps1 ... -GenerateMvlConfiguredRoms` regenerated the stable host/client ROMs with `romPairId=1c1f219838d6e4ac0b2cc80d6ae7f202f7433b213f7adc37002f79e66cde2a13`.
+  - `logs\codex-stage2-forced-tail-cameraY140-after-slotfix-20260621`: the same forced fall-tail state plus camera slot0 Y forced to `0x0008C000` survived 1300 frames, produced 0 pit transitions, and Luigi landed on the lower floor at frame `1031`, y `-432`, while `cameraY0=140px` and `cameraY1=256px`.
+  - `logs\codex-stage2-forced-tail-cameraY140-after-slotfix-verticaltrace-nojit-20260621`: updated no-JIT vertical trace confirmed player1 `argSlot=1 usedSlot=1`, `cameraY=0x00100000`, `triggered=0` at frames `1022-1032`; player1 triggered rows count is 0.
+  - `logs\codex-stage2-pittrace-jit-volume-20260621`: historical JIT-enabled stage 2 smoke with the temporary pit-transition trace survived 1300 frames and produced 0 `NSMB PitTransitAssign` rows during ordinary non-death movement. That temporary trace has since been removed.
+  - `cargo fmt --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`, `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`, `cargo clippy-all` in `tools\nsmb-mvl-gui\src-tauri`, and `pnpm run ci` in `tools\nsmb-mvl-gui` passed.
+- Next action:
+  - Run a manual GUI match on the ice/pipe stages with freshly prepared stable ROMs and confirm Luigi no longer suddenly pit-dies while falling from upper platforms.
+  - Add a vertical/fall-state regression check to the route smoke. The current `-RequireMvlInitialSpawnState` only checks entrance IDs/pointers and X deltas, so it missed this class of issue.
+
+## GUI WAN start-ready ENet connect race - 2026-06-20
+
+- User-reported issue: GUI room launch still crashed before match start. Host log directory: `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781894773390-66076-0`.
+- Paired client log found by room/seed: `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781894773242-58576-0`.
+- Findings:
+  - WebRTC/bridge reached `connected` on both sides and bridge packet counts stopped only after melonDS stopped sending, so this was not a WebRTC negotiation failure.
+  - Host melonDS received the client's start-ready packet, accepted gameplay start, then hit `NSMB Test: input frame throttle timeout frame=865 sendFrame=848 remoteInputFrame=843 lead=5 waitedMs=5000`.
+  - Client melonDS reached `NSMB InputNetplay: waiting for remote gameplay start ready ...`, but never logged `NSMB PoC: peer connected`.
+  - Cause: client initialization stored the return value of `enet_host_connect()` directly in `G.Peer`. That pointer represents a pending ENet peer, not a completed connection, so start-ready/input send paths could run before the `ENET_EVENT_TYPE_CONNECT` event.
+- Fix applied in `src/frontend/qt_sdl/NsmbNetplayPoC.cpp`:
+  - Added separate `G.ConnectingPeer` state for the pending client connect.
+  - `G.Peer` is now set only when ENet emits `ENET_EVENT_TYPE_CONNECT`.
+  - Disconnect handling clears both pending and connected peer pointers.
+  - Start-ready logs now flush immediately, making this barrier easier to diagnose in GUI logs.
+- Verification:
+  - `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passed.
+  - `corepack pnpm sync:sidecars` passed from `tools\nsmb-mvl-gui` and copied the rebuilt `melonDS.exe` plus `nsmb-net-bridge.exe` into GUI release/binaries sidecar locations.
+  - `scripts\run-nsmb-mvl-split-local-input-smoke.ps1 -Frames 1200 -WaitTimeoutMs 120000 -InputDelayFrames 4 -InputMaxFrameLead 4 -InputUnreliable -InputBundleHistory 8 -SkipMovementProbe -SkipGameStateComparison -LogRoot logs\codex-enet-connect-race-20260620` passed. The produced `logs\nsmb-mvl-split-local-input-smoke` host/client stdout both logged `NSMB PoC: peer connected` before match progress and reached frame 1200 without a fatal input throttle timeout.
+- Follow-up issue from GUI logs:
+  - Host log `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781896603278-38548-0` and paired client log `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781896601431-53528-0` showed the ENet connect race was fixed, but a second barrier weakness remained.
+  - Client sent start-ready and received the match seed, but did not receive the host's one-shot start-ready before host advanced into gameplay. Host then timed out at `frame=863 sendFrame=848 remoteInputFrame=843 lead=5`.
+  - Cause: start-ready was treated as a single reliable packet. If the side that already has the remote ready exits the barrier immediately, the other side can remain in the barrier if that one packet is missed or delayed long enough.
+- Additional fix applied:
+  - Start-ready send state now records send count and last send time.
+  - After a side has accepted the remote start-ready and entered gameplay, it resends its own start-ready every 250 ms until remote input at/after the netplay start frame is observed. The message is idempotent, so duplicate receives are safe.
+  - Added `scripts\test-nsmb-mvl-gui-sidecar-e2e.ps1`, which launches the GUI release sidecar `melonDS.exe` and `nsmb-net-bridge.exe` over WebRTC signaling, waits for both sides to reach a frame limit, checks start-ready acceptance, rejects input throttle timeout / start-ready timeout / peer disconnect, and cleans up processes.
+- Second follow-up from GUI logs:
+  - Host log `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781897816349-71344-0` and paired client log `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781897814844-57916-0` confirmed the rebuilt binary was in use because logs included `sent start ready ... count=1`, and the GUI release/build hashes matched.
+  - The remaining failure was not stale sidecars. Host had already received remote input through frame `843`, so the resend condition considered the peer alive and stopped. But with `delay=4`, the first gameplay input required after logical start `840` is frame `844`; client was still in the start-ready barrier and never produced `844+`.
+  - Fix tightened the resend stop condition from `LastReceivedInputFrame >= NetplayStartFrame` to `LastReceivedInputFrame >= NetplayStartFrame + Delay`.
+- Third follow-up from GUI logs:
+  - Host log `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781898507073-36328-0` and paired client log `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\logs\nsmb-mvl-gui-1781898505370-9168-0` showed the previous e2e was insufficient: it covered the easy host-first path but not the GUI-like client-first launch ordering.
+  - Reproduced locally with GUI release sidecars, WebRTC signaling, `MvlStage=4`, `MvlMatchSeed=60589462`, and client-first melonDS launch.
+  - Causes found:
+    - A side could accept a start-ready packet that arrived before it sent its own local start-ready, letting host leave the barrier while client was still waiting.
+    - The host bridge could receive the client's first ENet UDP packet before host melonDS had bound its UDP port, log `ignored local UDP connection reset`, and drop the only early connect packet.
+    - `waitForPeerBeforeStart` could add a 10-second frame-0 skew even though the real synchronization point is the netplay-start barrier.
+    - Input bundles were sent as ENet unsequenced packets. If an older input frame fell out of the small bundle history, both sides could later block forever waiting for that missing frame.
+  - Fixes applied:
+    - Start-ready acceptance now requires a remote ready received after the local ready was sent, or confirmed post-start remote input.
+    - Start-ready is resent while still inside the barrier, not only after accepting the barrier.
+    - `waitForPeerBeforeStart` is skipped at frame 0 when `waitForPeerAtNetplayStart` is enabled, so synchronization is centralized at the gameplay-start barrier.
+    - `nsmb-net-bridge` replays early WebRTC-to-local UDP packets for fixed local targets until the local UDP app becomes reachable.
+    - Input bundles now use ENet reliable packets, and throttle wait can resend the latest input bundle as an additional recovery path.
+    - `scripts\run-nsmb-mvl-local-triage.ps1` and `scripts\test-nsmb-mvl-gui-sidecar-e2e.ps1` now support deterministic melonDS launch order and gap parameters.
+- Current verification:
+  - `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passed.
+  - `cargo build --release`, `cargo fmt`, and `cargo clippy-all` passed in `tools\nsmb-net-bridge`.
+  - `corepack pnpm sync:sidecars` passed and copied the rebuilt sidecars into GUI release/binaries locations. Final GUI sidecar hashes: `melonDS.exe` `34e591fc8831ce6f60a01c624549e3c3454195d9807fbaa1939ca3c6bc24246e`; `nsmb-net-bridge.exe` `313f860f4ece2fa4adeac5eec171777d05fb39ce238ff572dde2d49980ff2df5`.
+  - `scripts\test-nsmb-mvl-gui-sidecar-e2e.ps1 -Frames 1200 -TimeoutSeconds 180 -MvlStage 4 -MvlMatchSeed 60589462 -MelonLaunchOrder ClientFirst -MelonLaunchGapMs 500` passed at `logs\codex-gui-sidecar-e2e-clientfirst-20260620-6`.
+  - `scripts\test-nsmb-mvl-gui-sidecar-e2e.ps1 -Frames 1200 -TimeoutSeconds 180 -MvlStage 4 -MvlMatchSeed 60589462 -MelonLaunchOrder ClientFirst -MelonLaunchGapMs 1500` passed at `logs\codex-gui-sidecar-e2e-clientfirst-20260620-8`.
+  - `scripts\test-nsmb-mvl-gui-sidecar-e2e.ps1 -Frames 1200 -TimeoutSeconds 180 -MvlStage 4 -MvlMatchSeed 60589462 -MelonLaunchOrder HostFirst -MelonLaunchGapMs 500` passed at `logs\codex-gui-sidecar-e2e-hostfirst-20260620-2`.
+- Current blocker: no local WebRTC GUI-sidecar repro remains for the GUI startup/start-ready path under tested client-first and host-first launch ordering.
+- Next action: if a real GUI run still fails, compare its melonDS/bridge logs against `logs\codex-gui-sidecar-e2e-clientfirst-20260620-8` and confirm the GUI launched the same sidecar hashes.
+
+## Wins / result winner detection fix - 2026-06-19
+
+- User-reported issue: the GUI exposes a match win target, but the setting may not be behaving correctly. The immediate question was whether the current runtime actually obtains who won or lost each game.
+- Findings before the fix:
+  - GUI/Tauri does pass `settings.wins` through to melonDS as `MELONDS_NSML_MVL_WINS`, and enables `MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT` only when `wins > 1`.
+  - melonDS reads that env into `G.MvlTargetWins`.
+  - Auto-restart detects the result screen by `sceneCurrentSceneID == 0x000A`.
+  - The old auto-restart scorer only compared `Game::playerBattleStars[0..1]` and `Game::playerCollectedStars[0..1]`, then fell back to `winner = 0` when the counters were tied. Existing logs such as `winner=0 stars=0/0 collected=0/0 matchWins=1/0` showed that this could increment Mario's match wins without proving Mario won.
+- Fix applied in `src/frontend/qt_sdl/NsmbNetplayPoC.cpp`:
+  - Result scoring now reads a `MvlResultSnapshot` from battle stars, displayed stars, collected stars, lives, deaths, and dead flags.
+  - Winner resolution now uses the first meaningful difference in this order: battle stars, displayed stars, collected stars, exactly one player dead, higher lives, lower deaths.
+  - The tied/unknown case no longer increments player 0. After the auto-restart delay it logs `NSMB MvL auto restart: result unresolved ...` with the full snapshot and leaves the match win counters unchanged.
+  - Result logs now include all sampled fields, for example `stars=5/0 displayed=5/0 collected=5/0 lives=3/3 deaths=0/0 dead=0/0 matchWins=2/0 target=2`.
+- Verification:
+  - `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passed.
+  - A normal `scripts\run-nsmb-mvl-split-local-result-smoke.ps1` attempt at `logs\codex-winner-detection-smoke-20260619` did not reach result by frame 6000 and failed on the wrapper's screenshot expectation, so it produced no winner log.
+  - A forced-result LAN smoke at `logs\codex-winner-detection-forced-20260619` reached the result scene on both host and client with forced player0 star counters. Both logs show `winner=0 ... matchWins=1/0 target=2`, then after restart `winner=0 ... matchWins=2/0 target=2`. The script ended with a harness-level `missing host frame limit` failure after the target wins were reached and remote input timed out, but the winner detection and match-win increment path were exercised.
+- Current blocker: no blocker for avoiding the incorrect tied `0/0 -> player0` fallback and for using richer result data. A future ROM-analysis step can still identify the native single winner/result field used by the result screen and replace the heuristic entirely.
+- Next action: run or add a deterministic real-gameplay route for a Luigi win/death-result case so both player IDs are covered without forced counters.
+
+### Direct winner field check - 2026-06-20
+
+- Follow-up question: can melonDS read a direct win/loss value instead of inferring from stars/deaths/lives?
+- Checked symbols and disassembly around `VictoryState`, `Player::transitVictory`, `PlayerBase::doVictoryTransition`, and the known `Game::player...` globals.
+- Current finding: no named or obvious global winner/result field has been identified yet. The known stable globals exposed by symbols are the per-player state values already being sampled: `playerBattleStars`, `playerDisplayedStars`, `playerCollectedStars`, `playerLives`, `playerDeaths`, and `playerDead`.
+- `VictoryState` setup initializes object/vtable state, and the visible victory-transition code manipulates player-object transition/pose state rather than exposing a simple match winner variable.
+- A direct winner value may still exist as a transient field inside the result scene/object state, but it has not been located. To prove it, trace the transition into scene `0x000A` and compare RAM/object fields for Mario-win vs Luigi-win cases.
+
+### GUI result display and final-death normalization - 2026-06-21
+
+- User-reported issue: the GUI result card should show player names rather than Mario/Luigi labels, should omit deaths because they duplicate finite-lives information, and can show nonzero lives when a player loses by the final death in 3-lives mode.
+- Implemented in the GUI: current match/history result cards now carry player-name labels, hide deaths, and display dead players as 0 lives.
+- Implemented in melonDS result logging: when the result screen snapshot has `playerDead=1` in finite-lives mode, the logged snapshot is normalized to `lives=0` and `deaths>=initialLives`. This compensates for the result scene being reached before the native lives/deaths globals necessarily expose the final decrement.
+- Current blocker: no blocker for GUI display correctness or normalized future result logs. A full real-gameplay verification route for both player IDs is still useful.
+- Next action: run a deterministic finite-lives death-result smoke that reaches result without forced counters, and confirm the GUI card shows the losing player at 0 lives.
+
+## Initial stock item clear - 2026-06-19
+
+- User-reported issue: Luigi currently starts a direct MvL game with a Power-up Mushroom in the lower-screen stock item slot.
+- Cause interpretation: this is not intended MvL behavior. The direct route calls into level load while bypassing part of the normal CourseSelect/VSConnect setup, and it did not explicitly initialize the separate stock-item global `Game::playerInventoryPowerup` (`0x0208B32C`). The `Game::loadLevel` `powerup=0` argument controls the player powerup state, not the lower-screen stock slot, so Luigi/player1 could inherit or receive the native route's nonzero stock value until the new explicit clear.
+- Fix applied:
+  - `tools/nsmb-mvl-rom/src/lib.rs` direct load stub now clears `Game::playerInventoryPowerup[0..1]` at `0x0208B32C` immediately after `Game::loadLevel` / `loadMvsLFilesThread` and before the stage start state continues.
+  - `src/frontend/qt_sdl/NsmbNetplayPoC.cpp` and `src/ARM.cpp` direct boot / safe loadLevel trampoline paths now perform the same clear after their direct `Game::loadLevel` calls, so manual/test hotpatch routes match generated stable ROM behavior.
+  - Regression test added: `direct_loadlevel_clears_initial_inventory_powerups` checks that the generated stub references `Game::playerInventoryPowerup` and clears both player slots.
+- Verification:
+  - `cargo fmt --manifest-path tools\nsmb-mvl-rom\Cargo.toml` passed.
+  - `cargo test --manifest-path tools\nsmb-mvl-rom\Cargo.toml` passed: 8 tests.
+  - `cargo clippy --manifest-path tools\nsmb-mvl-rom\Cargo.toml --all-targets -- -D warnings` passed.
+  - `cargo clippy-all` passed in `tools\nsmb-mvl-rom`.
+  - `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passed.
+  - Generated verification ROMs under `logs\codex-initial-inventory-clear-20260619\rom`, then `scripts\run-nsmb-mvl-split-local-input-smoke.ps1` passed for 1700 frames with `-SkipRomEnsure`, `-SkipMovementProbe`, and `-SkipGameStateComparison` at `logs\codex-initial-inventory-clear-20260619\smoke-default`.
+  - Game-state CSV confirms host/client frames `900..1680` keep `player0InventoryPowerup=0x0` and `player1InventoryPowerup=0x0`.
+- Current blocker: none for removing Luigi's initial stock mushroom.
+- Next action: if user-visible packaged ROMs still show the item, regenerate or refresh the GUI cached stable ROM pair so the new generator output is used.
+
+## Castle 8-coin Mega item investigation - 2026-06-19
+
+- User-reported issue: in normal MvL, the castle course should not spawn the Mega Mario item from the 8-coin item reward, but the current direct MvL route can.
+- Native control found:
+  - `Game::addPlayerCoin(int)` at `0x02020354` calls `0x020BF150` when a VS player reaches the 8th coin, then resets that player's coin counter.
+  - `0x020BF150` is the 8-coin item generator. It chooses a weighted slot `0..5` with `Net::getRandom()` and spawns actor `0x001F` with settings from `0x020C2DBC`: `0x1099, 0x1088, 0x1089, 0x108B, 0x1081, 0x1085`.
+  - If slot `5` is selected, the native code checks a flag at `0x02085A08` and `0x02153A80()`. When `0x02153A80()` returns `4`, it changes slot `5` to slot `4` before spawning the item.
+  - `0x02153A80()` reads selector byte `0x0215C890` through table `0x0215AEEC = [0,1,2,3,4]`; return `4` is the castle course ID. This is the native castle-specific Mega exclusion path.
+- Direct-route difference confirmed before the fix:
+  - Rust ROM generation already wrote native selectors for Big Star target (`0x0215C88C`) and life mode (`0x0215C89C`), and wrote scene settings `0x02088F38`.
+  - It did not write `0x0215C890`, the native course selector used by the 8-coin item generator.
+  - RAM dump from `logs/codex-mvl-castle-selector-ramdump-20260619` with `MvlStage=4` shows host/client at frames 1200 and 1600: `0x02088F38=0x00B8FF00`, `0x0215C88C=1`, `0x0215C89C=2`, but `0x0215C890=0`. Game-state trace also reaches `stageID=4` and `stageSceneSettings=0x00B8FF00`.
+- Fix applied in `tools/nsmb-mvl-rom/src/lib.rs`: the direct load stub now initializes the native course selector (`0x0215C890 = stage`) from the same fallback/runtime stage value used for `Game::loadLevel`.
+  - Regression test added: `direct_loadlevel_updates_native_course_selector` checks that the generated stub references `0x0215C890` and stores fallback/runtime stage into it.
+  - RAM verification: `logs/codex-mvl-castle-selector-restored-20260619` with `MvlStage=4` shows host/client at frames 1200 and 1600: `0x02088F38=0x00B8FF00`, `0x0215C88C=1`, `0x0215C890=4`, `0x0215C89C=2`.
+- Current blocker: an end-to-end 8-coin route still needs a deterministic input script or trace setup to prove candidate slot `5` is converted to slot `4` during actual item spawn. The native selector restoration itself is verified in RAM.
+- Verification: `cargo fmt --manifest-path tools\nsmb-mvl-rom\Cargo.toml`, `cargo test --manifest-path tools\nsmb-mvl-rom\Cargo.toml`, and `cargo clippy-all` passed. The RAM smoke produced the expected dumps but the wrapper still ended with the existing screenshot-directory check failure.
+
+## Stock item X-button touch mapping - 2026-06-19
+
+- User request: allow stock item use with the X button while preserving the native stock-item behavior where the item is released through the normal touch path and falls into the stage.
+- Previous direct-powerup attempt was discarded and stashed as `codex-stash-direct-stock-powerup-attempt`; it incorrectly converted the inventory item directly into `PlayerBase+0x7AB` powerup state.
+- Fix applied in `src/frontend/qt_sdl/NsmbNetplayPoC.cpp`:
+  - Added `ConvertStockXToTouch()`, which converts an active X key into lower-screen touch input at `217,153`, the existing stock-item touch coordinate used by `tests\nsmb_us_direct_mvl_stress_client_stock_touch.inputs`.
+  - The conversion is applied only to runtime inputs written to packet-bridge scratch / emulator input. Network-stored and sent inputs remain as X so the peer performs the same deterministic conversion locally.
+  - When conversion happens, the X key bit is released in the runtime key mask so the game receives stock touch rather than X plus an extra normal button action. Existing explicit touch coordinates are preserved.
+- Verification:
+  - `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passed.
+  - `scripts\run-nsmb-mvl-split-local-input-smoke.ps1` passed for 2300 frames with `tests\nsmb_us_direct_mvl_client_stock_x.inputs`, forced Luigi stock item `0x2`, and trace window `2020..2100`.
+  - CSV result confirms native stock-touch behavior, not immediate powerup: X input appears as runtime player input without bit `0x400` (`inputPlayer1Held=0x821` during the X window), `player1InventoryPowerup` remains `0x2` through frame `2065`, then becomes `0x0` by frame `2100`, while `playerActor1RequestedPowerup/currentPowerup/powerupTimer` stay `0x0`.
+- Current blocker: none for the input-sync X-to-stock-touch mapping. A visual/contact-sheet check can be added later if needed to show the falling item directly.
+
+## Powerup / powerdown control-lock fix - 2026-06-18
+
+- User-reported issue: when Mario/Luigi powers up from an item or powers down after touching an enemy, the direct MvL path could create a short uncontrollable period. That behavior is normal in single-player Mario rules, but real Mario vs Luigi should not leave the player vulnerable during that lock.
+- Cause confirmed:
+  - The stable direct MvL ROM generator already skipped the global VS-inappropriate `PlayerBase::freezeStage()` (`0x0212C130`) and `PlayerBase::signalLocked()` (`0x0212C1B8`) paths, so the remaining lock was not input-netplay delay or the old global stage/player pause.
+  - `Player::updatePowerupState()` (`0x0211F83C`) enters the original powerup state machine when `PlayerBase+0x7AB` requested powerup differs from `PlayerBase+0x7AC` current powerup.
+  - `Player::preparePowerupSwitch()` (`0x0211FDC8`) sets `PlayerBase+0xBA6 = 5` and `PlayerBase+0xBA7 = 0x28`. A related scale-animation entry at `0x02120618` sets `PlayerBase+0xBA7 = 0x3C`.
+  - A synthetic direct MvL powerup request at frame 2600 showed `PlayerBase+0xBA7` counting down `0x28..0x1` while RIGHT input was present from frame 2625. Before the fix, Luigi did not move until frame 2644, giving a 19-frame input-to-movement delay in the measured window.
+  - Enemy-contact powerdown goes through `Player::losePowerup()` (`0x02104DC8`) and `PlayerBase::requestPowerupSwitch()` (`0x0212B9AC`), so it feeds the same `0xBA6/0xBA7` transition path.
+- Direct-vs-normal route difference found and fixed: the Rust stable ROM generator still passed `Game::loadLevel` stack args `0x20=0`, `0x24=0`, while the normal MvL load path and the newer C++ hotpatch path use `0x20=1`, `0x24=0xFF`. The generator now matches the normal MvL args, with a regression test.
+- Fix applied in `tools/nsmb-mvl-rom/src/lib.rs`: direct MvL stable ROM generation now keeps the native powerup animation timer, but patches `Player::onUpdate()` so normal powerup/powerdown transitions no longer skip the normal movement/main update path.
+  - `0x020FD310`: the old `beq 0x020FD354` branch after `cmp r0, #0` now branches to a small overlay-0 stub at `0x020C53D0`.
+  - The stub preserves the original skip-normal-update path only while entering `PowerupState 3` (Mega): `PlayerBase+0x7AD` previous powerup must not be Mega, and `PlayerBase+0x7AB` requested or `+0x7AC` current must be Mega.
+  - This keeps the hardening for Mega growth, but allows movement during Mega shrink/revert where `previousPowerup` is Mega. It does not treat `4` (Mini) or `5` (Shell) as Mega.
+  - This preserves `PlayerBase+0xBA6/0xBA7` animation state while preventing non-Mega and Mega-revert animation states from becoming input/physics hardening windows.
+- Diagnostics added: extended game-state CSV now logs `PlayerBase+0x7A9`, `+0x7AB`, `+0x7AC`, `+0x7AD`, `+0xBA6`, `+0xBA7`, and `+0xBA8` for both player actors. `scripts/run-nsmb-mvl-route-smoke.ps1` can now pass game-state trace start/end frames like the LAN smoke script.
+- Verification:
+  - Before fix: `logs/codex-powerup-request-beforepatch-20260618`, first RIGHT input frame 2625, first movement frame 2644, `playerActor1PowerupTimer` nonzero for 40 frames.
+  - First fix attempt removed the timer itself (`logs/codex-powerup-request-afterpatch-20260618`), which removed the hardening but also removed the animation.
+  - Animation-preserving non-Mega fix: `logs/codex-powerup-request-anim-kept-20260618`, first RIGHT input frame 2625, first movement frame 2625, `playerActor1PowerupTimer` nonzero for 40 frames (`0x28..0x1`).
+  - Mega exception verification after user correction of enum values:
+    - `logs/codex-powerup-mega3-exception-normal-20260618`: requested/current powerup `1`, first RIGHT frame 2625, first movement frame 2625, delay 0, timer nonzero for 40 frames.
+    - `logs/codex-powerup-mega3-exception-mega-20260618`: requested/current powerup `3`, first RIGHT frame 2625, first movement frame 2698, delay 73, confirming Mega keeps the original hardening path.
+    - `logs/codex-powerup-mega3-exception-shell-20260618`: requested/current powerup `5`, first RIGHT frame 2625, first movement frame 2625, delay 0, confirming Shell is not treated as Mega.
+  - Mega growth vs Mega revert verification:
+    - `logs/codex-powerup-mega-grow-only-hardens-grow-20260619b`: requested/current/previous `3/3/0`, first RIGHT frame 2625, first movement frame 2698, delay 73.
+    - `logs/codex-powerup-mega-grow-only-shrink-free-20260619`: requested/current/previous `1/1/3`, first RIGHT frame 2625, first movement frame 2625, delay 0, while the revert timer stayed nonzero for 60 frames.
+  - Basic direct MvL smoke passed with the final Mega-growth-only exception patch: `logs/codex-powerup-mega-grow-only-basic-smoke-20260619`, 3000 frames.
+  - Checks passed: `cargo fmt --manifest-path tools\nsmb-mvl-rom\Cargo.toml`, `cargo test --manifest-path tools\nsmb-mvl-rom\Cargo.toml`, `cargo clippy --manifest-path tools\nsmb-mvl-rom\Cargo.toml --all-targets -- -D warnings`, and `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel`.
+  - `cargo clippy-all` could not be used because that cargo alias is not installed in this environment.
+- Current blocker: none for the direct MvL powerup-transition hardening. A real in-stage item/enemy route can still be added later for end-to-end gameplay repro coverage; the timer cause itself is now confirmed with a targeted runtime request.
+
+## Current ROM generator/cache divergence investigation - 2026-06-17
+
+- User-reported issue: the GUI-cached ROM renders normally, while the script/default ROM can show an effect/rendering corruption that matches the already-known bad memory-state symptom.
+- Finding: the script default ROMs are not stale. Regenerating ROMs from `roms\nsmb-us.nds` with `scripts\generate-nsmb-mvl-stable-roms.ps1` for stage 0, wins 2, Big Stars 5, endless lives, and random course mode produced SHA-identical output to the current `roms\nsmb-us-direct-mvl-entry-stable-*-netaid.tmp.nds` files.
+  - Default/fresh host SHA-256: `b228dc2b3e7bed1661edd037743a80ae053bbb4f1620439dcd6a64618dbf961d`.
+  - Default/fresh client SHA-256: `13b7f22d8a0b37f8836e051bbe6454cd335bdfec57d154b6c98dc66fd635ac23`.
+- GUI is reusing cached AppData ROMs generated earlier on 2026-06-06:
+  - `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\roms\nsmb-mvl-host.nds` SHA-256 `9473bbb2252ac2f9b962940b5e2513e6800af7ebea9d17a3ce35d0b1017f1e09`.
+  - `C:\Users\Sugiyama\AppData\Roaming\dev.melonds.nsmb-mvl\roms\nsmb-mvl-client.nds` SHA-256 `0e8b07d5ddfcb0378d26ab1fd1d3f3e8f91715b48895f9423a0df977f0b70055`.
+- FNT/FAT named NitroFS files are identical by hash across the script default/fresh ROMs and the GUI cached ROMs. The meaningful differences are in ARM9 overlay payloads/tables.
+- Additional v3 baseline check: generating ROMs from commit `48f2db8c` (`nsmb-mvl-reusable-runtime-config-v3` introduction) produced host SHA `04f4f7ef7e73fd739588a6fc59ee1b2a4136f16dd7def368aa2db72dc0ed186c` and client SHA `0b98ad83b0401043e7b61322378d260990a168b4d9c16c505a29d4e89f4718b3`.
+  - Those v3-baseline ROMs do not match the GUI cached full-ROM hashes, but their overlay 0 payload hash is identical to the GUI cached ROMs: `dfd2521701aa6558`, compressed size 122592 bytes.
+  - Current generated ROM overlay 0 hash is `81f1ed92896af89c`, compressed size 122616 bytes.
+  - Therefore the suspicious difference for the visual/memory symptom is specifically the post-v3 overlay 0 change, not the GUI cache marker itself.
+- Overlay comparison:
+  - Current default/fresh host vs current default/fresh client differs only in overlay 52.
+  - GUI host vs GUI client differs only in overlay 52.
+  - Current default/fresh ROMs vs GUI cached ROMs differ in overlay 0 and overlay 52.
+  - v3-baseline ROMs vs GUI cached ROMs differ only in overlay 52, which is expected to vary with role/runtime/bootstrap configuration and is less suspicious for the observed rendering corruption.
+  - Current overlay 0 compressed payload is 122616 bytes; GUI overlay 0 is 122592 bytes.
+  - Current/fresh host has a 0x200 smaller internal layout than current/fresh client and GUI cached ROMs because the compressed overlay payload layout differs.
+- Earlier ROM-side suspect: `patch_stage_object_activation_player_id(rom, 0)` from commit `d597d5ce`. It is the only clear post-v3 functional addition that changes overlay 0 and it touches stage/object activation code, making it a plausible sync-risk area. However, later script testing with byte-identical GUI ROMs still reproduced the rendering bug, so this is no longer the primary explanation for the script-only visual corruption.
+- Codex session-history check: the original `stage-object-activation-player-id` patch was first added on 2026-05-28 while investigating raw `client localPlayerID=1` missing the first Goomba. The session then found that the patch hit the `0x0209B040` activation path, but the Goomba spawn path actually went through `0x0209B320`; the session explicitly concluded that `stage-object-activation-player-id --player-id 0` did not restore Goomba spawn and likely targeted the wrong path. The later concrete cause found in that session was `Game::wrapX` left at `0xFFFFFFFF` on raw client local1, making the `0x0209B320` activation width zero; forcing wrapX restored the Goomba but still left speed/simulation differences.
+- Risk assessment: the current Rust activation-player hook should therefore not be treated as proven necessary based on the original Goomba investigation alone. It may still have been carried forward as a broad Plan-D actor-activation mitigation, but the available session evidence is weaker than the current code/docs implied. The hook is also invasive: it overwrites two instructions in overlay 0, writes a stack slot, calls `getPlayer`, and then resumes in the original function. Keep it disabled unless a focused lifecycle test on the current launch path shows that removing it causes a persistent non-local actor activation gap.
+- Candidate generated: the `patch_stage_object_activation_player_id(rom, 0)` call is temporarily commented out in `tools\nsmb-mvl-rom\src\lib.rs`, and candidate ROMs were generated under `logs\codex-rom-diff-20260617\no-stage-activation-patch`.
+  - Host SHA-256: `04f4f7ef7e73fd739588a6fc59ee1b2a4136f16dd7def368aa2db72dc0ed186c`.
+  - Client SHA-256: `0b98ad83b0401043e7b61322378d260990a168b4d9c16c505a29d4e89f4718b3`.
+  - Candidate overlay 0 hash is `dfd2521701aa6558`, compressed size 122592 bytes, matching the v3-baseline/GUI-cached overlay 0. This confirms the candidate removes only the suspicious post-v3 overlay 0 change.
+- Correction after manual feedback: the no-activation-patch stage-0 candidate still reproduced the rendering bug, while the GUI cached ROM did not. Rechecking overlay 52 showed the previous candidate still did not match the GUI cached ROM.
+  - The GUI cached ROM's direct-load fallback values are stage 4 / wins 2 / Big Stars 5 / lives endless / random. The stage 4 value comes from the GUI generation-time match seed path (`2707570089 % 5 == 4`) in the 2026-06-06 launcher logs; older launcher logs did not yet include `course_stages`.
+  - Regenerating the current working-tree ROM generator with `patch_stage_object_activation_player_id(rom, 0)` disabled and fallback settings stage 4 / wins 2 / Big Stars 5 / lives endless / random produced byte-identical ROMs to the GUI cache:
+    - `logs\codex-rom-compare-20260617\current-stage4-host.nds` SHA-256 `9473bbb2252ac2f9b962940b5e2513e6800af7ebea9d17a3ce35d0b1017f1e09`.
+    - `logs\codex-rom-compare-20260617\current-stage4-client.nds` SHA-256 `0e8b07d5ddfcb0378d26ab1fd1d3f3e8f91715b48895f9423a0df977f0b70055`.
+  - The script default ROMs differ from that GUI cache by exactly two logical causes: overlay 0 has the 27-byte `patch_stage_object_activation_player_id` hook enabled, and overlay 52 has the stage 0 scene-setting fallback (`0x00B4FF00`) instead of GUI's stage 4 fallback (`0x00B8FF00`). Full-file SHA differences are much larger because tiny overlay changes alter compressed sizes and shift later NitroFS file offsets.
+- Current ROM freshness answer: the GUI cache file is newer by timestamp and matches the current dirty working-tree generator when using stage 4 and activation-patch disabled. The script default ROMs are older files from 2026-06-02; before the temporary activation-patch disable, regenerating the default stage-0 script ROM from repo code produced byte-identical output to those files, so they were not stale for their own generation options. They are different because they encode different stage fallback and activation-patch state, not because one is a partially regenerated copy of the other.
+- Second correction after testing the byte-identical GUI-cache-fallback ROM through the script: the rendering bug still reproduced. This rules out ROM bytes alone as the primary difference.
+  - The executable hashes are identical across `build\release-windows-x86_64\melonDS.exe`, `tools\nsmb-mvl-gui\src-tauri\target\release\melonDS.exe`, and the GUI bundled binary.
+  - The major remaining visual-path difference is renderer config. `run-nsmb-mvl-manual-local.ps1` rewrites `build\release-windows-x86_64\melonDS.toml` to `UseGL=true` and `Renderer=2`; the script log confirms `Created a OpenGL context`.
+  - The GUI path reads `tools\nsmb-mvl-gui\src-tauri\target\release\melonDS.toml`, which currently has `UseGL=false` and `Renderer=0`.
+  - User clarification: GUI ROM was also tested through the same script path, so renderer config cannot explain GUI-ROM-vs-generated-ROM behavior inside script runs.
+  - Script logs with GUI ROM SHA (`logs\nsmb-mvl-manual-local-20260617-041515` and `logs\manual-normal-lowdelay-20260617-042104`) both use the OpenGL path. The observed script-run differences are input/network options: `041515` used input delay 16, max lead 2, reliable input, no bundle history; `042104` used the low-delay WAN profile, input delay 4, max lead 4, unreliable input, bundle history 8.
+- User correction: the exact comparison pair is `logs\nsmb-mvl-manual-local-20260617-042419` as the bad/render-corrupted run and `logs\nsmb-mvl-manual-local-20260617-042554` as the normal run.
+  - Both runs used byte-identical GUI cached ROMs: host SHA-256 `9473bbb2252ac2f9b962940b5e2513e6800af7ebea9d17a3ce35d0b1017f1e09`, client SHA-256 `0e8b07d5ddfcb0378d26ab1fd1d3f3e8f91715b48895f9423a0df977f0b70055`.
+  - Both runs used the same script/OpenGL path, the same input delay/profile (`inputDelayFrames=4`, `inputMaxFrameLead=4`, unreliable input with bundle history 8), and matching relevant environment settings. Renderer and ROM bytes are therefore ruled out for this pair.
+  - The key observed difference is save initialization. In `042419`, both host and client failed to open `host-rom/nsmb.sav` or `client-rom/nsmb.sav` at startup, emitted many `SaveManager: Flush requested` lines, and later created a fresh 8192-byte save. In `042554`, both peers opened an existing `nsmb.sav` immediately at startup and did not enter that flush storm.
+  - The script only copies save siblings from the selected source ROM basename (`<SourceRomWithoutExtension>.sav` / `.sav.2`) into the per-run `nsmb.sav`. This means otherwise identical script runs can start from different save state depending on whether the source-ROM sibling save existed at launch time.
+- Hip-drop visual repro:
+  - Added `tests\nsmb_us_direct_mvl_hipdrop_probe.inputs` to boot MvL, move Mario right, jump, then hold DOWN for a ground-pound landing.
+  - `logs\codex-hipdrop-nosave-repro-20260617-sw1` reproduced the white square effect around frames 1066-1078 with GUI ROM bytes and no source save sibling. Contact sheet: `hipdrop-contact-1048-1084.png`; zoom comparison: `hipdrop-nosave-vs-withsave-zoom.png`.
+  - `logs\codex-hipdrop-withsave-repro-20260617-sw1` and `logs\codex-hipdrop-withsave-seed46412691-20260617-sw1` used the same ROM/input and a valid save. They showed only the normal small smoke particles, not the solid white square.
+  - Invalid save tests (`logs\codex-hipdrop-ffsav-repro-20260617-sw1` with all `0xFF`, and `logs\codex-hipdrop-zerosav-repro-20260617-sw1` with all zeroes) reproduced the bad path even though the file existed. Therefore the trigger is not file existence alone; it is booting MvL from invalid/unformatted NSMB save contents.
+  - Bad/invalid save path: many `SaveManager: Flush requested` lines, Net/Game random auto patch at frame 791, `oldNetCount=0x00`, and Mario's frame-1020 actor sample `000020A0`.
+  - Valid save path: no save-format flush storm, Net/Game random auto patch at frame 785, `oldNetCount=0x01`, and Mario's frame-1020 actor sample `00000120`. Forcing the same `MvlMatchSeed=0x46412691` kept the valid-save path normal, so RNG seed value is not the cause.
+- Fix applied for script runs: `scripts\run-nsmb-mvl-lan-route-smoke.ps1` now treats missing, all-zero, or all-`0xFF` 8192-byte `nsmb.sav` as unusable and falls back to the repo stable `roms\nsmb-us.sav`.
+  - Verification: rerunning the no-save ROM source through `logs\codex-hipdrop-nosave-after-fallback-20260617-sw2` pre-seeded the stable save SHA-256 `42ffb80e234c01d5784bdc291fee41c26e59f66295d7f105c798ba8dde11b2ee`, opened `nsmb.sav` at startup, patched Net/Game random at frame 785 with `oldNetCount=0x01`, and no longer showed the solid white square in the frame 1048-1084 contact sheet.
+- Current blocker: none for the script-side white-square reproduction. The remaining underlying emulator/game behavior is that invalid/unformatted NSMB save contents change early boot/MvL timing and can produce corrupted-looking ground-pound smoke.
+- Next action: keep manual/script MvL launch paths from starting with invalid NSMB saves. If GUI ever runs without a valid AppData save, apply the same pre-seed/validation there.
+- Verification: `cargo fmt --manifest-path tools\nsmb-mvl-rom\Cargo.toml`, `cargo test --manifest-path tools\nsmb-mvl-rom\Cargo.toml`, and `cargo clippy --manifest-path tools\nsmb-mvl-rom\Cargo.toml --all-targets -- -D warnings` passed. `cargo clippy-all` could not be used because the alias is not installed in this environment.
+
+## Current low-overhead diagnostic event logging - 2026-06-17
+
+- User request: strengthen logs before fixing the rare no-rollback desync, rematch stall, and false Mario/Luigi death issues, while keeping gameplay responsive.
+- Implemented:
+  - melonDS now keeps a per-instance in-memory diagnostic ring buffer with 360 compact frames by default. The normal path stores fixed-address player/input/frame fields, player-global sub-hashes, cached player actor fields, and input sync counters without per-frame string formatting or disk writes.
+  - Diagnostic launches write `melonds-events.jsonl`; GUI launches derive it next to `melonds-diagnostics.json`, and manual/test runs can override it with `MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE`. A `diagnostic_started` event is emitted at startup so a log capture proves whether event diagnostics were active.
+  - `playerGlobal` mismatch now emits a throttled `player_global_mismatch` JSONL event only when `playerGlobal` differs, avoiding heavy dumps for frequent basic-only mismatches. The payload includes local/remote hashes, local player-global sub-hashes, player actor hashes, latest local player snapshot, remote sample fields available from the state packet, field diffs, and the ring buffer.
+  - Mario and Luigi life/death/dead-flag/death-transition changes now emit `player_life_change` with both players' rich state, pre-event ring frames, transition/collision/environment/action fields, camera/stage context, and nearby moving hazard objects.
+  - Start-ready send/receive/accept now emits `start_ready` with local/remote frame, delta, logical start, input queue sizes, and last sent/received input frames.
+- Expected overhead:
+  - The default path copies bounded numeric snapshots in memory and writes to disk only at startup or on anomaly events.
+  - Expensive object scans, nearest-hazard searches, and large JSON payloads run only on death/mismatch events or the short post-trigger window.
+  - Full extended CSV remains opt-in for short repro runs.
+- Verification:
+  - Build: `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passes.
+  - Diagnostic enabled FPS smoke: `logs/codex-diagnostic-events-fps-20260617c` passed 3600 frames and wrote `melonds-events.jsonl` with host/client `diagnostic_started`. Active FPS: host `59.17`, client `50.82`; no `AfterHookPhaseSpike`.
+  - Diagnostic disabled comparison: `logs/codex-diagnostic-events-fps-disabled-20260617` passed 3600 frames. Active FPS: host `59.19`, client `50.86`; no `AfterHookPhaseSpike`. The measured difference is within run-to-run noise and does not show an FPS regression from the diagnostic ring/event path.
+  - Death-event check: an 8200-frame split-local run did trigger death diagnostics, but the wrapper failed its separate second-match requirement before it could be counted as a full pass. That run exposed an event-size problem: `death-transition` entries were dumping the full ring repeatedly and grew `logs/codex-diagnostic-events-real-death-20260617\melonds-events.jsonl` to about 114 MB.
+  - Death-event size fix: `death-transition` is now throttled, does not include the ring dump, and startup false-death entries without a player actor/death counter/dead flag are filtered. Real `death` events still include the ring and nearby hazard context.
+  - Post-fix death/FPS check: `logs/codex-diagnostic-events-size-check-20260617` passed 2000 frames and wrote `melonds-events.jsonl` at about 3.3 MB. It contains host/client `diagnostic_started`, host/client `death-transition` at frame 866, and host/client `player_life_change` `reason=death` for player 1 at frames 1876 and 1984 with `dead=1` and ring context. Active FPS: host `58.10`, client `57.95`; no `AfterHookPhaseSpike`.
+- Next actions:
+  - Use the real GUI death capture `nsmb-mvl-gui-1781960336919-68204-0` as the current source for ice-stage Luigi sudden-death analysis.
+  - Add targeted damage/death function hooks instead of broad per-frame tracing, because the current `player_life_change` event classifies the transition path but not the caller/collision source.
+
+## Current no-rollback desync triage - 2026-06-18
+
+- User request: start fixing the rare no-rollback sync divergence and the second-match start/load failure, first by deciding what the existing mismatch logs actually prove.
+- Finding: `basic=0 playerGlobal=1` is too broad to treat as a gameplay desync by itself. The `basic` hash is built from `ReadGameStateSample()` and intentionally mixes local/volatile diagnostic fields such as local player ID, net state words, packet tick/key/action/bytes, console/player input slots, stage/camera words, course-select words, and object/candidate scan data. Those fields can differ while the gameplay-relevant player state still remains usable.
+- Log evidence: `1781618163` had 614 basic-only mismatches and still completed 3 matches; `1781619493` had 709 and progressed through 5 matches; `1781621971` had 712 and progressed through 4 matches. Treat basic-only mismatch as a noisy diagnostic signal, not a user-facing desync warning, unless paired with a more specific gameplay hash.
+- Finding: `playerGlobal=0` remains a strong signal. The affected logs were `1781618856`, `1781619326`, `1781620292`, and `1781621451`, matching the user's reports of visible/persistent divergence. The old logs only contain the whole `0x0208B324..+0xC0` player-global hash, so they prove that the player-global block diverged but do not identify the exact byte/field that diverged.
+- Correlation: the first or persistent `playerGlobal` mismatches cluster around input synchronization stress: `throttle-blocked`/`throttle-resolved`, input frame throttle timeout, remote input timeout, peer disconnect, or start-ready timeout. This points more toward missing/late exact-frame remote input or rematch/start barrier state getting out of phase than random RAM corruption.
+- Current interpretation: with rollback disabled, the runtime must not advance a gameplay frame with missing remote input and then later accept that input as if it could be replayed. If that path happens, the visible symptom would be exactly the reported "opponent stops, later moves again, but the inputs during the stop were not applied locally." Current code is intended to wait for the exact remote frame in the no-rollback path, so the next fix work should prove whether any bypass/timeout/restart path can still let a peer continue with neutral/stale input.
+- Artificial delay tests:
+  - `logs/codex-delay-desync-stress-20260618-a`: continuous host/client stress input, input delay 4, max lead 4, send delay 8, jitter 8, unreliable input with bundle history 8. It completed 7200 frames with 210 basic-only mismatches, zero `playerGlobal=0`, and no remote/throttle timeout.
+  - `logs/codex-delay-desync-stress-20260618-b`: same stress input with send delay 12, jitter 12, unreliable input, bundle history 8, and deterministic drop modulo 17. It still had zero `playerGlobal=0`; the client only timed out on the final exact input frame after the host had already reached its frame limit.
+  - `logs/codex-delay-desync-stress-20260618-d`: direct host/client launch with fallback allowed (`remoteTimeoutFatal=0`), wait timeout 120 ms, send delay 16, jitter 16, unreliable input, no bundle history, drop modulo 19. This produced 604 remote input timeouts, 842 frame-lead throttle timeouts, and 72 `playerGlobal=0` mismatches. The first `playerGlobal=0` was at frame 1200, immediately after repeated remote input/throttle timeouts around frames 1183-1198. This confirms that advancing no-rollback gameplay with missing exact-frame remote input is sufficient to create the player-global divergence.
+- WebRTC/no-rollback reproduction checks:
+  - `logs/codex-webrtc-norollback-stress-20260618-b`: real `nsmb-net-bridge` WebRTC signaling path, input delay 4, max lead 4, unreliable input with bundle history 8, 12000 frames. It completed at about 50 FPS with no `game state mismatch ... playerGlobal=0`, no remote input timeout, and no frame throttle timeout. It did produce only basic-only mismatch.
+  - Added test-only bridge impairment knobs to `tools\nsmb-net-bridge`: `NSMB_NET_BRIDGE_DELAY_MS`, `NSMB_NET_BRIDGE_JITTER_MS`, and `NSMB_NET_BRIDGE_DROP_MODULO`. Defaults are zero, so normal bridge/GUI behavior is unchanged. `scripts\run-nsmb-mvl-local-triage.ps1` can pass them as `-BridgeDelayMs`, `-BridgeJitterMs`, and `-BridgeDropModulo`.
+  - `logs/codex-webrtc-norollback-impair-20260618-a`: WebRTC path with bridge delay 25 ms, jitter 55 ms, and drop modulo 37. Under the test harness it stopped with no-rollback frame-lead throttle timeout around frame 1359/1365, not `playerGlobal=0`. This matches the intended protection: when remote input falls too far behind, gameplay does not advance with fabricated input.
+  - `logs/codex-webrtc-norollback-impair-20260618-b`: WebRTC path with bridge delay 40 ms and jitter 90 ms, no drop. It was stopped manually after about 290 seconds / frame 2220 because it was deliberately slow. It had no `game state mismatch ... playerGlobal=0`; logged mismatches remained basic-only and player-global component hashes matched on both peers.
+  - Added triage support for exact GUI-like select-mode stage/seed sequences, AppData ROM/save reuse, role-specific input scripts, role-specific input delay/drop, and role-specific bridge impairment. Defaults preserve the existing normal triage path.
+  - `logs/codex-webrtc-norollback-appdata-stress-1781620292-b`: AppData host/client ROMs and saves, installed GUI melonDS, exact `1781620292` stage/seed sequence, WebRTC no rollback, minimal/stress input. It reproduced the GUI timing and basic-only mismatches but did not reproduce `playerGlobal=0`; player-global stayed equal through 8000 frames.
+  - `logs/codex-webrtc-norollback-sweep2-1781620292-*`: multiple asymmetric host/client input scripts under the same no-rollback WebRTC settings did not reproduce `playerGlobal=0`. Some scripts hit start-ready timeout, which remains relevant to the second-match/start issue but is not the same player-global corruption.
+  - `logs/codex-webrtc-norollback-mixed-currenthost-appclient-1781620292-a`: host used the current generated ROM while client used the AppData GUI client ROM. This reproduced `game state mismatch ... playerGlobal=0` immediately at frame 840 on both peers, with no rollback enabled and WebRTC involved. The generated host ROM SHA-256 was `06B30C10115BC959049F1BAC52F48C130ACFE6BA8ECC2BFFC46C7A0F1379EA8A`; the AppData client ROM SHA-256 was `0E8B07D5DDFCB0378D26AB1FD1D3F3E8F91715B48895F9423A0DF977F0B70055`. This proves peer ROM/patch mismatch is sufficient to break `playerGlobal`.
+- Current conclusion from delay/WebRTC tests: random communication delay, including the actual WebRTC sidecar path, did not break `playerGlobal` while exact-frame remote input was eventually available. `playerGlobal` broke in the deliberately invalid fallback test where missing exact-frame remote input was allowed to continue as neutral/stale input, and in the mixed-ROM test where peers had different patched ROM bytes. Ordinary local WebRTC jitter alone remains unproven as a cause.
+- Updated suspicion: the user's real `playerGlobal` logs are less likely to be caused by ordinary WebRTC jitter alone. Higher-risk areas are peer ROM/patch identity mismatch, rematch/start-ready rebasing, match transition state, or another game-state nondeterminism that is merely correlated with input stalls.
+- Second-match stall recheck:
+  - There are two concrete failure shapes in the GUI logs.
+  - In `1781620292`, local reached result at frame `4320`, then blocked at old-game input lead before the local restart could run: `input frame throttle timeout frame=4342 sendFrame=4326 remoteInputFrame=4321 lead=5`. While local was stuck waiting for old-game input, it received the peer's next-game `start ready frame=4513`. `1781619326` shows the same class: local timed out at old-game `frame=3153 sendFrame=3104 remoteInputFrame=3099`, while a remote next-game `start ready frame=3348` arrived. This means the no-rollback throttle can prevent a peer from reaching its restart/next-game barrier if the other peer already transitioned and stopped sending old-game frames.
+  - In `1781618856`, local did reach restart and accepted the remote ready (`localFrame=24899`, `remoteFrame=24911`, local `logicalStart=24847`) but then immediately timed out waiting for `remote input frame=24847`. The log directly before timeout shows `recv-gap ... logicalFrame=24849 ... lastRecv=24849`, meaning the remote's new-game input stream began at `24849`; the local was waiting for `24847`/`24848`, which never arrived. This points to per-peer logical-start labels disagreeing after restart. The current start-ready packet carries only the peer's raw ready frame, not the peer's logical start/epoch, so the receiver cannot verify or negotiate a common first logical input frame.
+  - Successful `1781618163` restarted twice with identical accepted ready frames (`7561/7561`, then `29499/29499`) and matching logical starts. It still had many normal throttle block/resolved events, so throttle by itself is not the bug; the fatal condition is throttle/remote wait crossing a result/restart generation boundary or a mismatched first logical frame after that boundary.
+  - Reproduction check `logs/codex-rematch-repro-webrtc-baseline-20260618-b`: WebRTC, no rollback, role-specific stress input, stage/seed sequence `0,1,2` / `101,202,303`. Baseline restarted cleanly through the first result: result `3934`, restore `4053`, both peers sent/accepted start-ready `4233`, logical start `4199`. It still logged normal `recv-gap`/`send-gap`, confirming gaps alone are not fatal.
+  - Reproduction pattern 1 `logs/codex-rematch-repro-old-throttle-20260618-a`: client input send delay `3920..4080 +420f` reproduced old-generation input lead timeout at the match boundary. Host stopped at `input frame throttle timeout frame=3946 sendFrame=3924 remoteInputFrame=3919 lead=5`; client similarly stopped at `frame=3951 sendFrame=3929 remoteInputFrame=3924`. This proves an artificial delay at result time can strand peers in the old input epoch before restart.
+  - Reproduction pattern 2 required a test-only raw-frame input drop range because normal bundle history repairs single dropped frames. Added disabled-by-default triage knobs for `MELONDS_NSML_INPUT_DROP_START_FRAME` / `END_FRAME` and `-InputBundleHistory`.
+  - `logs/codex-rematch-repro-post-ready-range-drop-20260618-a`: dropping client frames `4199..4210` after restart with normal `inputMaxFrameLead=4` produced start-ready accept first, then throttle timeout: host accepted remote start-ready `4233` with logical start `4199`, then stopped at `input frame throttle timeout frame=4233 sendFrame=4203 remoteInputFrame=4030 lead=173`.
+  - `logs/codex-rematch-repro-post-ready-remote-timeout-20260618-a`: same post-ready drop, but with `inputMaxFrameLead=999` to avoid the throttle guard, reproduced the direct exact-frame wait shape. Host accepted remote start-ready `4233` / logical start `4199`, then timed out at `remote input timeout frame=4199`; client dropped frames `4203..4208` and timed out waiting for host `frame=4204`. This matches the `1781618856` failure class: ready is accepted for the next game, then the receiver waits for a first logical input frame that the peer's new input stream does not provide.
+- Rematch input-boundary fix:
+  - Restart now clears local/remote input queues, delayed input packets, predicted inputs, last sent/received input frame counters, start-ready state, and input-health trace markers. Late old-epoch input packets and old start-ready packets below the current `NetplayStartFrame` are ignored instead of poisoning the new match's `LastReceivedInputFrame`.
+  - Script ROM freshness fix: `scripts\generate-nsmb-mvl-stable-roms.ps1` now writes and validates sidecar manifests keyed by generator source hash, source ROM SHA-256, stable-generation options, and generated host/client ROM hashes. Matching ROM pairs are reused; `-Force` regenerates explicitly.
+  - Manual/script launch paths that previously reused default stable ROM files now run the stable ROM ensure step before play: `manual-local`, `manual-peer`, `split-local-input-smoke`, `split-local-result-smoke`, `stable-split`, and the `local-triage` wrapper. `lan-route` configured-ROM generation now uses a shared `roms\.cache` pair and copies it into the run log instead of regenerating for every timestamped log directory.
+  - Follow-up fix: the manual wrapper ensure calls now use hashtable splatting. The previous array splat form was parsed positionally in Windows PowerShell and could pass the host ROM path into `MvlStage`.
+  - Verification: PowerShell parser checks passed for all modified scripts. A test pair under `logs\codex-rom-cache-test` generated once from `roms\nsmb-us.nds`; a second identical run reported `stable MvL ROMs are up to date`.
+  - Additional verification: `logs\codex-rom-cache-splat-test` exercised the fixed hashtable-splat call shape with `MvlBigStars=3`; the first run generated and the second run skipped as up to date.
+  - When both peers accept start-ready, the input epoch is primed by inserting neutral local/remote input for the input-delay warmup range `[logicalStart, logicalStart + delay)`. This removes the previous dependency on the first post-ready bundle containing historical frames and prevents the receiver from waiting for frames that the peer has not actually begun sending in the new epoch.
+  - While the result scene is waiting for auto-restart and the match is not complete, input-netplay scratch/lockstep is paused so old-game frame-lead throttle cannot block the local process from reaching the restart barrier.
+  - Review correction: `ResetMvlRuntimeSyncStateForRestart()` now performs the restart input/cache reset under `G.Mutex`, matching the network pump thread's `PumpNetworkLocked()` / `StoreRemoteInputLocked()` synchronization and avoiding concurrent `RemoteInputs` / `DelayedInputs` map/vector access when `MELONDS_NSML_NET_PUMP_THREAD` is enabled.
+- GUI ROM reuse audit before the fix:
+  - The GUI does call `ensure_roms()` before `start_match()`, so it attempts to prepare ROMs on every launch.
+  - Before this fix, `prepare_roms()` reused cached ROMs when `nsmb-mvl-host.nds` and `nsmb-mvl-client.nds` existed and their sidecar `.nsmb-mvl-version` files equaled the fixed `REUSABLE_ROM_FORMAT` string. It did not include or check the source ROM hash, generated ROM hash, `nsmb-mvl-rom` code hash, bundled app/build version, role ROM pair hash, or generation settings in the marker.
+  - Before this fix, the signaling/matchmaking schema sent gameplay settings only. It did not send ROM/patch hash or reject peers with different generated ROM bytes.
+  - Local evidence: AppData `nsmb-mvl-host.nds` and `nsmb-mvl-client.nds` both have marker `nsmb-mvl-reusable-runtime-config-v3`, but the AppData host ROM SHA-256 is `9473BBB2252AC2F9B962940B5E2513E6800AF7EBEA9D17A3CE35D0B1017F1E09`, while a current generated host ROM in the mixed repro was `06B30C10115BC959049F1BAC52F48C130ACFE6BA8ECC2BFFC46C7A0F1379EA8A`. This proves marker-current cached ROMs can differ from current generated output.
+- ROM identity fix implemented:
+  - The GUI reusable ROM sidecar is now a JSON manifest instead of a single marker string. It records manifest version, ROM format, generator identity, source ROM SHA-256, symbols SHA-256, generation options, generated host/client ROM SHA-256, and a `rom_pair_id`.
+  - `generator_id` is derived from the GUI package version, `REUSABLE_ROM_FORMAT`, and compile-time contents of the ROM generator/settings sources used by the GUI path. If those generator sources change, the manifest no longer matches and the GUI regenerates cached ROMs.
+  - `ensure_roms()` verifies both the manifest inputs and the actual generated host/client file hashes before reusing AppData ROMs. Old `.nsmb-mvl-version` marker files are not considered current and will be replaced on the next ROM preparation.
+  - Public matchmaking rooms now include `rom_identity`, and join requests send the local `rom_pair_id`. The GUI prepares/checks ROMs before room creation and before joining, and both the GUI and signaling HTTP API reject a public-room join when the `rom_pair_id` differs.
+  - Manual room-code connection still has no HTTP room metadata to compare against; it continues to rely on the local manifest regeneration check.
+  - Follow-up: GUI-generated ROMs are now treated as a runtime-configurable common ROM pair instead of being regenerated for every stage/wins/lives setting. The embedded direct-load fallback options are canonical, while actual match settings continue to come from the launcher runtime config.
+  - Follow-up: when a saved base ROM path exists, the GUI starts `ensure_roms()` in the background at launcher startup and stores the prepared ROM identity in memory. Public room creation, public room join, and manual start reuse that prepared pair when the source ROM path matches, so joining normally does not wait for ROM generation.
+- Next actions:
+  - Consider extending start-ready with an explicit restart/input epoch and sender logical start for stronger cross-version diagnostics. The current fix rejects stale ready frames below `NetplayStartFrame`, but the wire packet still carries only the raw ready frame.
+  - Use the new `player_global_mismatch` JSONL payload on the next reproduction to identify whether the exact divergence is player slot 0/1 state, death/transition/life/star state, actor state, or start/restart state.
+  - If manual room-code connections also need cross-peer ROM checking, add a WebSocket-side hello/identity exchange to the bridge protocol in addition to the public-room HTTP check.
+  - Keep testing whether the historical `playerGlobal=0` captures disappear after the manifest/`rom_pair_id` fix.
+- Verification:
+  - `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml` passed.
+  - `cargo clippy --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml -- -D warnings` passed.
+  - `pnpm run ci` passed in `tools\nsmb-signaling-server`.
+  - `pnpm run ci` passed in `tools\nsmb-mvl-gui`.
+  - After the startup prewarm/common-ROM follow-up, `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`, `cargo clippy --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml -- -D warnings`, and `pnpm run ci` in `tools\nsmb-mvl-gui` passed again.
+  - `cargo clippy-all` could not be used because the subcommand/alias is not installed in this environment.
+  - Rematch-boundary reproduction verification: `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passed after adding disabled-by-default triage drop-range knobs. WebRTC no-rollback runs under `logs/codex-rematch-repro-old-throttle-20260618-a`, `logs/codex-rematch-repro-post-ready-range-drop-20260618-a`, and `logs/codex-rematch-repro-post-ready-remote-timeout-20260618-a` reproduced the two rematch input-generation failure classes described above.
+  - After the rematch input-boundary fix, `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passed. The previous reproductions no longer fail: `logs/codex-rematch-fix-old-throttle-20260618-a` reached frame limit `7000`; `logs/codex-rematch-fix-post-ready-remote-timeout-20260618-a` reached frame limit `5600` with `inputMaxFrameLead=999`; and `logs/codex-rematch-fix-post-ready-range-drop-20260618-a` reached frame limit `5600` with normal `inputMaxFrameLead=4`. None logged `input frame throttle timeout`, `remote input timeout`, or `game state mismatch ... playerGlobal=0`.
+  - After the mutex correction for restart reset, `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passed.
+
 ## Current pipe-course camera Y investigation - 2026-06-12
 
 - User-reported issue: pipe course only, after wall-kicking upward and making the camera move up, descending does not fully bring the camera back down.
@@ -41,8 +459,8 @@
   - Start with `-DesyncLogInterval 60`; use `30` or `15` only when the first diverging frame needs tighter localization.
   - `-DesyncLogExtended` adds broader CSV fields/hashes and should be reserved for short repro windows.
 - Expected overhead: the default GUI path is low frequency and should be much lighter than full RAM dumps or every-frame CSV tracing. Detailed CSV tracing can cause stutter if interval is too small because it scans game objects and flushes rows to disk.
-- Current blocker: the actual first-divergence category/frame still needs a reproduced GUI/manual run with the new diagnostics.
-- Next action: on the next GUI reproduction, inspect each peer's GUI mismatch warning and `melonds-diagnostics.json`; if needed, rerun with manual `-DesyncLog` around that reported frame for full CSV context.
+- Current blocker: the actual first-divergence cause still needs a reproduced GUI/manual run with the new JSONL event diagnostics.
+- Next action: on the next GUI reproduction, inspect each peer's GUI mismatch warning, `melonds-diagnostics.json`, and `melonds-events.jsonl`; if the JSONL event payload is still not enough, rerun with manual `-DesyncLog` around that reported frame for full CSV context.
 - Verification: `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel`, `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`, `cargo clippy-all` in `tools\nsmb-mvl-gui\src-tauri`, `pnpm typecheck`, targeted `pnpm biome check` for changed GUI files, `pnpm test:unit`, and `pnpm test:browser` pass. `pnpm run ci` in `tools\nsmb-mvl-gui` is still blocked after `tsc` by existing Biome formatting failures caused by CRLF line endings across TS/JSON files not touched in this change.
 
 ## Current input health diagnostics - 2026-06-10
@@ -52,9 +470,18 @@
   - Event logs are emitted for `remote-wait-resolved`, `throttle-blocked`, `throttle-resolved`, `recv-gap`, and `send-gap`.
   - Each line reports frame/logicalFrame/sendFrame, last sent/received input frame, lead, local/remote/delayed input queue sizes, wait/throttle/network timings, and rollback/prediction flags.
 - Expected overhead: the normal path adds only a few integer checks and one low-frequency stdout line. It does not scan RAM, write CSV rows, or log every input frame. Event lines are only printed when a wait, throttle, or frame gap is observed.
-- Current blocker: still needs a real host/client reproduction to determine whether the one-sided stop corresponds to a remote wait, frame-lead throttle, receive gap, bridge packet stall, or later state hash mismatch.
-- Next action: on the next reproduction, compare both peers' `melonds.stdout.txt` around the first `NSMB InputHealth` wait/throttle/gap line and the first `game state mismatch` line, then cross-check `bridge.stdout.txt` packet counters for the same wall-clock window.
-- Verification: `cmake --build build\release-windows-x86_64 --target melonDS --config Release -j 4`, `cargo fmt --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`, `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`, `cargo clippy-all` in `tools\nsmb-mvl-gui\src-tauri`, and `git diff --check` pass. `corepack pnpm run ci` in `tools\nsmb-mvl-gui` remains blocked by existing Biome CRLF formatting failures in TS/JSON files unrelated to this change; its initial `tsc --noEmit` step passed before Biome failed.
+- 2026-06-26 paired WAN GUI log analysis:
+  - Local `nsmb-mvl-gui-1782476155650-59808-2` / session `pJeOEDXbRRUr` pairs with opponent `nsmb-mvl-gui-1782476156266-19832-3`. Both bridges remained WebRTC-connected, then both peers stopped on adjacent exact-frame waits: local `remote input timeout frame=35961`, opponent `remote input timeout frame=35957`.
+  - Local `nsmb-mvl-gui-1782477341140-59808-4` / session `BrYkbS7ym5Md` pairs with opponent `nsmb-mvl-gui-1782477341738-19832-5`. Both bridges remained connected. Opponent stopped at `remote input timeout frame=35771`; local stopped at `remote input timeout frame=35775` after logging `peer disconnected`, likely because the opponent process had already terminated from the timeout.
+  - Local `nsmb-mvl-gui-1782478181713-59808-7` / session `fp43nUwzy-f9` pairs with opponent `nsmb-mvl-gui-1782478182316-19832-8`. Both bridges remained connected. After result/restart/start-ready on the opponent side, both peers hit the same frame-lead guard shape: local `input frame throttle timeout frame=29472 sendFrame=29458 remoteInputFrame=29453 lead=5`; opponent `frame=29467 sendFrame=29453 remoteInputFrame=29448 lead=5`.
+  - In all three pairs, bridge status ended `connection_state=connected`, `ice_state=completed`, and `last_error=null`. Packet counters flattened around the failure window, but there was no ICE/signaling disconnect or `dropped_no_local_target` evidence.
+  - `melonds-diagnostics.json` on each peer showed mirrored local/remote state hashes with `basic_matches=false` but `player_global_matches=true`, `wifi_candidate_matches=true`, and `render_candidate_matches=true`. This points away from gameplay actor divergence as the immediate stop cause.
+- 2026-06-26 blocked-input keepalive change:
+  - The fatal input wait timeout default changed from 5000 ms to 60000 ms, and GUI launches now explicitly pass `MELONDS_NSML_WAIT_TIMEOUT_MS=60000`.
+  - `remote input` waits now pump network, resend start-ready when still applicable, and resend the latest local input bundle on the same 50 ms cadence used by frame-lead throttle waits. This keeps a peer from going silent while it is blocked on an exact remote frame.
+- Current blocker: no code-level blocker remains for the paired-log failure shape. It still needs a real WAN replay/manual run to verify that bridge packet counters keep advancing through wait/throttle windows and that neither side reaches `remote input timeout` or `input frame throttle timeout`.
+- Next action: run the same WAN GUI scenario with paired logs, then compare `melonds.stdout.txt`, `bridge-status.json`, and bridge packet counters around any long `remote-wait` or `throttle` window.
+- Verification: `cargo fmt --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`, `git diff --check`, `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel`, `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`, and `cargo clippy-all` in `tools\nsmb-mvl-gui\src-tauri` pass. `corepack pnpm --version` reports `10.26.2`, and `corepack pnpm run ci` in `tools\nsmb-mvl-gui` passes.
 
 ## Current stage/RNG plan sync - 2026-06-11
 

@@ -16,6 +16,7 @@ param(
     [ValidateSet("3", "5", "endless", "Endless")] [string]$MvlLives = "endless",
     [ValidateSet("fixed", "random", "select")] [string]$MvlCourseMode = "fixed",
     [switch]$GenerateMvlConfiguredRoms,
+    [switch]$SkipRomEnsure,
     [int]$InputDelayFrames = 16,
     [string]$MvlStageSequence = "",
     [string]$MvlMatchSeedSequence = "",
@@ -603,6 +604,25 @@ if ($MvlSceneSettings -ne "") {
 }
 if ($GenerateMvlConfiguredRoms) {
     $common += @("-GenerateMvlConfiguredRoms", "-Rom", "$GenerateMvlSourceRom")
+}
+if (!$SkipRomEnsure -and !$GenerateMvlConfiguredRoms) {
+    $generatorCourseMode = if ($MvlCourseMode -eq "fixed") { "random" } else { $MvlCourseMode }
+    $ensureParams = @{
+        SourceRom = $GenerateMvlSourceRom
+        HostRom = $HostRom
+        ClientRom = $ClientRom
+        MvlWins = $MvlWins
+        MvlBigStars = $MvlBigStars
+        MvlLives = $MvlLives
+        MvlCourseMode = $generatorCourseMode
+    }
+    if ($MvlStage -ge 0) {
+        $ensureParams.MvlStage = $MvlStage
+    }
+    if ($MvlSceneSettings -ne "") {
+        $ensureParams.MvlSceneSettings = $MvlSceneSettings
+    }
+    & (Join-Path $PSScriptRoot "generate-nsmb-mvl-stable-roms.ps1") @ensureParams
 }
 if ($InputUnreliable) {
     $common += "-InputUnreliable"

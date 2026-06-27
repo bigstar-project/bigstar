@@ -1,12 +1,20 @@
 import { commands } from './bindings';
+import { maxMatchHistoryRecords } from './matchHistory';
+import {
+  previewDefaults,
+  previewMatchHistory,
+  previewMatchHistoryKey,
+  previewRomIdentity,
+  readyPreviewDefaults,
+} from './previewData';
 import type {
   AiArtifact,
   AiReplayFrameRef,
-  Defaults,
   GenerateRomRequest,
   GenerateRomResponse,
   LaunchRequest,
   LaunchResponse,
+  MatchHistoryRecord,
   OpenAiReplayLogRequest,
   OpenAiReplayLogResponse,
   PreflightResponse,
@@ -16,8 +24,12 @@ import type {
   ReadAiTextFileResponse,
   RunAiToolRequest,
   RunAiToolResponse,
+  SaveDiagnosticEventsRequest,
+  SaveNewRoomNotificationsRequest,
+  SavePlayerNameRequest,
   SaveRomPathsRequest,
   SessionStatus,
+  ShowNewRoomNotificationRequest,
 } from './types';
 
 async function unwrapCommand<T>(
@@ -31,19 +43,6 @@ async function unwrapCommand<T>(
   }
   return response.data;
 }
-
-const previewDefaults: Defaults = {
-  signal_url: 'wss://nsmb-mvl-signaling-prod.uniunntaro.workers.dev/session',
-  room_code: 'test-room',
-  host_rom_path:
-    'C:\\Users\\Sugiyama\\AppData\\Roaming\\dev.melonds.nsmb-mvl\\roms\\nsmb-mvl-host.nds',
-  client_rom_path:
-    'C:\\Users\\Sugiyama\\AppData\\Roaming\\dev.melonds.nsmb-mvl\\roms\\nsmb-mvl-client.nds',
-  base_rom_path: '',
-  roms_prepared_once: false,
-  input_config_opened_once: false,
-  port: 8165,
-};
 
 const previewPlaylogLine = JSON.stringify({
   schema: 'nsmb_mvl_ai_play_log_v1',
@@ -201,9 +200,20 @@ function isTauriRuntime() {
   return '__TAURI_INTERNALS__' in window;
 }
 
+function previewScenario() {
+  const search =
+    typeof window.location?.search === 'string' ? window.location.search : '';
+  const value = new URLSearchParams(search).get('preview');
+  return value === 'ready' || value === 'main' ? 'ready' : 'onboarding';
+}
+
+function previewDefaultsForCurrentUrl() {
+  return previewScenario() === 'ready' ? readyPreviewDefaults : previewDefaults;
+}
+
 export function getDefaults() {
   if (!isTauriRuntime()) {
-    return Promise.resolve(previewDefaults);
+    return Promise.resolve(previewDefaultsForCurrentUrl());
   }
   return unwrapCommand(commands.getDefaults());
 }
@@ -213,6 +223,54 @@ export function saveRomPaths(request: SaveRomPathsRequest) {
     return Promise.resolve(null);
   }
   return unwrapCommand(commands.saveRomPaths(request));
+}
+
+export function saveDiagnosticEventsEnabled(
+  request: SaveDiagnosticEventsRequest,
+) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(null);
+  }
+  return unwrapCommand(commands.saveDiagnosticEventsEnabled(request));
+}
+
+export function saveNewRoomNotificationsEnabled(
+  request: SaveNewRoomNotificationsRequest,
+) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(null);
+  }
+  return unwrapCommand(commands.saveNewRoomNotificationsEnabled(request));
+}
+
+export function savePlayerName(request: SavePlayerNameRequest) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(null);
+  }
+  return unwrapCommand(commands.savePlayerName(request));
+}
+
+export function showNewRoomNotification(
+  request: ShowNewRoomNotificationRequest,
+) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(false);
+  }
+  return unwrapCommand(commands.showNewRoomNotification(request));
+}
+
+export function getStartupEnabled() {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(false);
+  }
+  return unwrapCommand(commands.getStartupEnabled());
+}
+
+export function setStartupEnabled(enabled: boolean) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(null);
+  }
+  return unwrapCommand(commands.setStartupEnabled(enabled));
 }
 
 export function selectRomFile(currentPath: string) {
@@ -237,10 +295,12 @@ export function runPreflightCheck() {
 
 export function generateRoms(request: GenerateRomRequest) {
   if (!isTauriRuntime()) {
+    const defaults = previewDefaultsForCurrentUrl();
     return Promise.resolve<GenerateRomResponse>({
-      host_rom: previewDefaults.host_rom_path,
-      client_rom: previewDefaults.client_rom_path,
+      host_rom: defaults.host_rom_path,
+      client_rom: defaults.client_rom_path,
       generated: true,
+      rom_identity: previewRomIdentity,
     });
   }
   return unwrapCommand(commands.generateRoms(request));
@@ -248,10 +308,12 @@ export function generateRoms(request: GenerateRomRequest) {
 
 export function ensureRoms(request: GenerateRomRequest) {
   if (!isTauriRuntime()) {
+    const defaults = previewDefaultsForCurrentUrl();
     return Promise.resolve<GenerateRomResponse>({
-      host_rom: previewDefaults.host_rom_path,
-      client_rom: previewDefaults.client_rom_path,
+      host_rom: defaults.host_rom_path,
+      client_rom: defaults.client_rom_path,
       generated: false,
+      rom_identity: previewRomIdentity,
     });
   }
   return unwrapCommand(commands.ensureRoms(request));
@@ -285,9 +347,39 @@ export function getSessionStatus() {
       webrtc: null,
       diagnostics_error: null,
       game_state_mismatch: null,
+      mvl_results: [],
     });
   }
   return unwrapCommand(commands.sessionStatus());
+}
+
+export function loadMatchHistory() {
+  if (!isTauriRuntime()) {
+    try {
+      const raw = window.localStorage.getItem(previewMatchHistoryKey);
+      const stored = raw ? (JSON.parse(raw) as MatchHistoryRecord[]) : [];
+      if (stored.length > 0 || previewScenario() !== 'ready') {
+        return Promise.resolve<MatchHistoryRecord[]>(stored);
+      }
+      return Promise.resolve<MatchHistoryRecord[]>(previewMatchHistory());
+    } catch {
+      return Promise.resolve<MatchHistoryRecord[]>(
+        previewScenario() === 'ready' ? previewMatchHistory() : [],
+      );
+    }
+  }
+  return unwrapCommand(commands.loadMatchHistory());
+}
+
+export function saveMatchHistory(matches: MatchHistoryRecord[]) {
+  if (!isTauriRuntime()) {
+    window.localStorage.setItem(
+      previewMatchHistoryKey,
+      JSON.stringify(matches.slice(0, maxMatchHistoryRecords)),
+    );
+    return Promise.resolve(null);
+  }
+  return unwrapCommand(commands.saveMatchHistory(matches));
 }
 
 export function openLogDir(path: string) {

@@ -24,8 +24,8 @@ export function LauncherCard({
         backdropBlur: 'md',
         backdropSaturate: '180%',
         display: 'grid',
-        gap: '4',
-        p: '5',
+        gap: '3',
+        p: '3.5',
       }}
     >
       {title ? (
@@ -33,7 +33,7 @@ export function LauncherCard({
           className={css({
             alignItems: 'center',
             display: 'flex',
-            gap: '3',
+            gap: '2',
             justifyContent: 'space-between',
           })}
         >
@@ -43,8 +43,8 @@ export function LauncherCard({
               color: 'fg.default',
               display: 'flex',
               fontWeight: 'black',
-              gap: '2',
-              textStyle: 'lg',
+              gap: '1.5',
+              textStyle: 'md',
             })}
           >
             {icon ? (
@@ -59,7 +59,7 @@ export function LauncherCard({
           ) : null}
         </div>
       ) : null}
-      <div className={css({ display: 'grid', gap: '3' })}>{children}</div>
+      <div className={css({ display: 'grid', gap: '2.5' })}>{children}</div>
     </Card.Root>
   );
 }
@@ -137,9 +137,9 @@ export function SmallInfoCard({
         backdropBlur: 'lg',
         backdropSaturate: '180%',
         display: 'grid',
-        gap: '2',
-        minH: '28',
-        p: '4',
+        gap: '1.5',
+        minH: '20',
+        p: '3',
       }}
     >
       <div
@@ -157,8 +157,8 @@ export function SmallInfoCard({
           color: 'fg.default',
           display: 'flex',
           fontWeight: 'black',
-          gap: '3',
-          textStyle: 'xl',
+          gap: '2',
+          textStyle: 'lg',
         })}
       >
         {imageSrc ? (
@@ -166,9 +166,9 @@ export function SmallInfoCard({
             src={imageSrc}
             alt=""
             className={css({
-              h: '12',
+              h: '9',
               objectFit: 'contain',
-              w: '12',
+              w: '9',
             })}
           />
         ) : (

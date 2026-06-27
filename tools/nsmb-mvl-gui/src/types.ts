@@ -13,6 +13,11 @@ export type {
   LaunchRequest,
   LaunchResponse,
   Lives,
+  MatchHistoryRecord,
+  MatchHistoryStatus,
+  MatchPlayerNames,
+  MvlPlayerResult,
+  MvlStageResult,
   OpenAiReplayLogRequest,
   OpenAiReplayLogResponse,
   PreflightResponse,
@@ -21,10 +26,15 @@ export type {
   ReadAiTextFileRequest,
   ReadAiTextFileResponse,
   Role,
+  RomIdentity,
   RunAiToolRequest,
   RunAiToolResponse,
+  SaveDiagnosticEventsRequest,
+  SaveNewRoomNotificationsRequest,
+  SavePlayerNameRequest,
   SaveRomPathsRequest,
   SessionStatus,
+  ShowNewRoomNotificationRequest,
 } from './bindings';
 
 export type StatusKind = 'idle' | 'ok' | 'warn' | 'error';
@@ -48,4 +58,6 @@ export type FormState = {
   inputDelayFrames: number;
   inputMaxFrameLead: number;
   rollbackEnabled: boolean;
+  diagnosticEventsEnabled: boolean;
+  newRoomNotificationsEnabled: boolean;
 };

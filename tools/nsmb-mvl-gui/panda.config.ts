@@ -49,15 +49,15 @@ export default defineConfig({
         },
         sizes: {
           appMin: { value: "920px" },
-          contentMax: { value: "1260px" },
-          contentWide: { value: "min(1260px, calc(100vw - 284px))" },
+          contentMax: { value: "982px" },
+          contentWide: { value: "min(982px, calc(100vw - 244px))" },
           contentCompact: { value: "calc(100vw - 92px)" },
-          statusMax: { value: "48ch" },
-          sidebar: { value: "236px" },
+          statusMax: { value: "42ch" },
+          sidebar: { value: "204px" },
           sidebarCompact: { value: "92px" },
-          diagnostics: { value: "390px" },
-          cta: { value: "72px" },
-          settingsAside: { value: "360px" }
+          diagnostics: { value: "350px" },
+          cta: { value: "60px" },
+          settingsAside: { value: "350px" }
         }
       },
 

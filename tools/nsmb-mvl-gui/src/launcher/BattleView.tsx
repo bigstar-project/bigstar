@@ -39,6 +39,7 @@ import {
 } from '../form';
 import type { CourseMode, FormState, GameStateMismatch, Lives } from '../types';
 import { InfoPanel, LauncherCard, SmallInfoCard } from './LauncherCards';
+import { EmptyMatchResultCard, MatchResultCard } from './MatchResultCard';
 import {
   bigStarsOptions,
   courseOptions,
@@ -48,6 +49,7 @@ import {
   winsOptions,
 } from './options';
 import type {
+  BattleMatchRecord,
   DiagnosticsState,
   LauncherActions,
   LauncherSummary,
@@ -61,12 +63,14 @@ export function BattleView({
   form,
   lastLogDir,
   matchmakingRooms,
+  currentMatch,
   summary,
   updateField,
 }: {
   actions: Pick<
     LauncherActions,
     | 'copyRoomCode'
+    | 'cancelHostedRoom'
     | 'createRoom'
     | 'joinRoom'
     | 'openLogDir'
@@ -78,19 +82,28 @@ export function BattleView({
   form: FormState;
   lastLogDir: string;
   matchmakingRooms: MatchmakingRoomsState;
+  currentMatch: BattleMatchRecord | null;
   summary: LauncherSummary;
   updateField: UpdateFormField;
 }) {
+  const matchmakingDisabled =
+    summary.connectionActive ||
+    summary.updateRequired ||
+    Boolean(matchmakingRooms.hostedRoomId);
+
   return (
     <Tabs.Content value="battle">
       <form
         className={css({
           display: 'grid',
-          gap: '5',
-          gridTemplateColumns: `minmax(0, 1fr) ${token('sizes.diagnostics')}`,
-          '@media (max-width: 1380px)': {
-            gridTemplateColumns: '1fr',
+          gap: '4',
+          gridTemplateColumns: {
+            base: '1fr',
+            xl: `minmax(0, 1fr) ${token('sizes.diagnostics')}`,
           },
+          maxW: { base: 'xl', xl: 'contentMax' },
+          mx: { base: 'auto', xl: '0' },
+          w: 'full',
         })}
         onSubmit={(event) => {
           event.preventDefault();
@@ -99,25 +112,31 @@ export function BattleView({
         <section
           className={css({
             display: 'grid',
-            gap: '4',
+            gap: '3',
           })}
         >
+          {currentMatch ? (
+            <MatchResultCard match={currentMatch} title="現在の対戦状況" />
+          ) : (
+            <EmptyMatchResultCard
+              title="現在の対戦状況"
+              message="対戦を開始すると、勝敗・スター・残機の状況がここに表示されます"
+            />
+          )}
+
           <LauncherCard
             title="公開ルーム"
             icon={<Users size={24} weight="fill" />}
             badge={matchmakingRooms.loading ? '更新中' : undefined}
           >
-            <div className={css({ display: 'grid', gap: '3' })}>
+            <div className={css({ display: 'grid', gap: '2.5' })}>
               <div
                 className={css({
-                  alignItems: 'center',
+                  alignItems: { base: 'stretch', md: 'center' },
                   display: 'flex',
-                  gap: '3',
+                  flexDirection: { base: 'column', md: 'row' },
+                  gap: '2',
                   justifyContent: 'space-between',
-                  '@media (max-width: 760px)': {
-                    alignItems: 'stretch',
-                    flexDirection: 'column',
-                  },
                 })}
               >
                 <div
@@ -133,7 +152,6 @@ export function BattleView({
                   <span>{matchmakingRooms.rooms.length} 件</span>
                   <Button
                     variant="outline"
-                    size="sm"
                     loading={matchmakingRooms.loading}
                     disabled={matchmakingRooms.refreshDisabled}
                     onClick={() => void actions.refreshRooms()}
@@ -144,7 +162,7 @@ export function BattleView({
                 </div>
                 <CreateRoomDialog
                   busy={matchmakingRooms.busy}
-                  disabled={summary.connectionActive}
+                  disabled={matchmakingDisabled}
                   form={form}
                   onCreate={actions.createRoom}
                   updateField={updateField}
@@ -170,9 +188,20 @@ export function BattleView({
                   {matchmakingRooms.error}
                 </div>
               ) : null}
+              {summary.updateRequired ? (
+                <UpdateRequiredNotice version={summary.updateVersion} />
+              ) : null}
+              {matchmakingRooms.hostedRoomId ? (
+                <HostedRoomNotice
+                  busy={matchmakingRooms.busy}
+                  roomId={matchmakingRooms.hostedRoomId}
+                  onCancel={() => void actions.cancelHostedRoom()}
+                  onCopy={() => void actions.copyRoomCode()}
+                />
+              ) : null}
               <RoomList
                 busy={matchmakingRooms.busy}
-                disabled={summary.connectionActive}
+                disabled={matchmakingDisabled}
                 rooms={matchmakingRooms.rooms}
                 onJoin={(roomId) => void actions.joinRoom(roomId)}
               />
@@ -197,7 +226,7 @@ export function BattleView({
           className={css({
             alignContent: 'start',
             display: 'grid',
-            gap: '4',
+            gap: '3',
           })}
         >
           <InfoPanel
@@ -243,10 +272,10 @@ export function BattleView({
           <div
             className={css({
               display: 'grid',
-              gap: '3',
-              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-              '@media (max-width: 560px)': {
-                gridTemplateColumns: '1fr',
+              gap: '2',
+              gridTemplateColumns: {
+                base: '1fr',
+                sm: 'repeat(2, minmax(0, 1fr))',
               },
             })}
           >
@@ -256,10 +285,10 @@ export function BattleView({
               value={form.role === 'host' ? 'Mario' : 'Luigi'}
             />
             <SmallInfoCard
-              icon={<Flag size={30} weight="fill" />}
+              icon={<Flag size={24} weight="fill" />}
               label="起動ステージ"
               value={summary.selectedStageLabel}
-              caption="0-4 決定"
+              caption="コース決定"
             />
           </div>
         </aside>
@@ -291,7 +320,6 @@ function CreateRoomDialog({
           loading={busy}
           variant="solid"
           colorPalette="yellow"
-          size="xl"
         >
           <Crown size={18} weight="fill" />
           部屋を作る
@@ -302,7 +330,7 @@ function CreateRoomDialog({
         <Dialog.Positioner>
           <Dialog.Content
             className={css({
-              maxW: '3xl',
+              maxW: 'xl',
               w: 'full',
             })}
           >
@@ -313,14 +341,7 @@ function CreateRoomDialog({
               <Dialog.Title>部屋を作る</Dialog.Title>
             </Dialog.Header>
             <Dialog.Body>
-              <div className={css({ display: 'grid', gap: '4' })}>
-                <TextField
-                  label="ホスト名"
-                  value={form.hostName}
-                  maxLength={32}
-                  placeholder="Player"
-                  onChange={(value) => updateField('hostName', value)}
-                />
+              <div className={css({ display: 'grid', gap: '3' })}>
                 <MatchSettingsFields form={form} updateField={updateField} />
               </div>
             </Dialog.Body>
@@ -332,19 +353,80 @@ function CreateRoomDialog({
                 loading={busy}
                 variant="solid"
                 colorPalette="yellow"
+                disabled={disabled}
                 onClick={async () => {
                   await onCreate();
                   setOpen(false);
                 }}
               >
                 <Crown size={18} weight="fill" />
-                作成して起動
+                作成して待機
               </Button>
             </Dialog.Footer>
           </Dialog.Content>
         </Dialog.Positioner>
       </Portal>
     </Dialog.Root>
+  );
+}
+
+function HostedRoomNotice({
+  busy,
+  onCancel,
+  onCopy,
+  roomId,
+}: {
+  busy: boolean;
+  onCancel: () => void;
+  onCopy: () => void;
+  roomId: string;
+}) {
+  return (
+    <div
+      className={css({
+        bg: 'yellow.subtle.bg',
+        borderColor: 'yellow.outline.border',
+        borderRadius: 'l2',
+        borderWidth: '1px',
+        display: 'grid',
+        gap: '2',
+        gridTemplateColumns: {
+          base: '1fr',
+          md: 'minmax(0, 1fr) auto auto',
+        },
+        p: '2.5',
+        alignItems: { base: 'stretch', md: 'center' },
+      })}
+    >
+      <div className={css({ display: 'grid', gap: '1', minW: '0' })}>
+        <div
+          className={css({
+            color: 'yellow.subtle.fg',
+            fontWeight: 'black',
+            textStyle: 'sm',
+          })}
+        >
+          参加者を待っています
+        </div>
+        <code
+          className={css({
+            color: 'yellow.subtle.fg',
+            fontFamily: 'mono',
+            fontWeight: 'bold',
+            overflowWrap: 'anywhere',
+            textStyle: 'sm',
+          })}
+        >
+          {roomId}
+        </code>
+      </div>
+      <Button variant="outline" disabled={busy} onClick={onCopy}>
+        部屋コードをコピー
+      </Button>
+      <Button variant="outline" loading={busy} onClick={onCancel}>
+        部屋を閉じる
+      </Button>
+    </div>
   );
 }
 
@@ -369,17 +451,15 @@ function MatchSettingsFields({
   };
 
   return (
-    <div className={css({ display: 'grid', gap: '3' })}>
+    <div className={css({ display: 'grid', gap: '2.5' })}>
       <div
         className={css({
           display: 'grid',
-          gap: '3',
-          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-          '@media (max-width: 1260px)': {
-            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-          },
-          '@media (max-width: 720px)': {
-            gridTemplateColumns: '1fr',
+          gap: '2',
+          gridTemplateColumns: {
+            base: '1fr',
+            md: 'repeat(2, minmax(0, 1fr))',
+            xl: 'repeat(4, minmax(0, 1fr))',
           },
         })}
       >
@@ -418,10 +498,11 @@ function MatchSettingsFields({
       <div
         className={css({
           display: 'grid',
-          gap: '3',
-          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-          '@media (max-width: 900px)': {
-            gridTemplateColumns: '1fr',
+          gap: '2',
+          gridTemplateColumns: {
+            base: '1fr',
+            sm: 'repeat(2, minmax(0, 1fr))',
+            lg: 'repeat(3, minmax(0, 1fr))',
           },
         })}
       >
@@ -470,10 +551,10 @@ function CourseSequenceFields({
     <div
       className={css({
         display: 'grid',
-        gap: '3',
-        gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-        '@media (max-width: 900px)': {
-          gridTemplateColumns: '1fr',
+        gap: '2',
+        gridTemplateColumns: {
+          base: '1fr',
+          lg: 'repeat(3, minmax(0, 1fr))',
         },
       })}
     >
@@ -481,7 +562,7 @@ function CourseSequenceFields({
         <SelectField
           key={`game-${index + 1}`}
           icon={<Flag size={18} weight="fill" />}
-          label={`Game ${index + 1}`}
+          label={`ゲーム ${index + 1}`}
           options={stageOptions}
           value={String(stage)}
           onChange={(value) => {
@@ -514,7 +595,7 @@ function ManualConnectionPanel({
   updateField: UpdateFormField;
 }) {
   return (
-    <LauncherCard title="手動接続" icon={<GearSix size={24} weight="fill" />}>
+    <LauncherCard title="手動接続" icon={<GearSix size={22} weight="fill" />}>
       <details
         className={css({
           borderColor: 'gray.surface.border',
@@ -530,8 +611,8 @@ function ManualConnectionPanel({
             cursor: 'pointer',
             fontWeight: 'black',
             listStyle: 'none',
-            px: '4',
-            py: '3',
+            px: '3',
+            py: '2.5',
             textStyle: 'sm',
             focusVisibleRing: 'inside',
           })}
@@ -541,17 +622,17 @@ function ManualConnectionPanel({
         <div
           className={css({
             display: 'grid',
-            gap: '5',
-            p: '4',
+            gap: '3',
+            p: '3',
           })}
         >
           <div
             className={css({
               display: 'grid',
-              gap: '4',
-              gridTemplateColumns: 'minmax(220px, 0.85fr) minmax(0, 1.15fr)',
-              '@media (max-width: 760px)': {
-                gridTemplateColumns: '1fr',
+              gap: '3',
+              gridTemplateColumns: {
+                base: '1fr',
+                md: 'minmax(220px, 0.85fr) minmax(0, 1.15fr)',
               },
             })}
           >
@@ -566,16 +647,16 @@ function ManualConnectionPanel({
               className={css({
                 alignContent: 'end',
                 display: 'grid',
-                gap: '3',
-                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                '@media (max-width: 620px)': {
-                  gridTemplateColumns: '1fr',
+                gap: '2',
+                gridTemplateColumns: {
+                  base: '1fr',
+                  sm: 'repeat(2, minmax(0, 1fr))',
                 },
               })}
             >
               <RoleButton
                 active={form.role === 'host'}
-                icon={<Crown size={26} weight="fill" />}
+                icon={<Crown size={22} weight="fill" />}
                 title="ホスト"
                 subtitle="offer側"
                 tone="red"
@@ -583,7 +664,7 @@ function ManualConnectionPanel({
               />
               <RoleButton
                 active={form.role === 'client'}
-                icon={<Users size={26} weight="fill" />}
+                icon={<Users size={22} weight="fill" />}
                 title="参加"
                 subtitle="answer側"
                 tone="green"
@@ -618,17 +699,17 @@ function StartStopButton({
       className={cx(
         css({
           borderRadius: 'l2',
-          borderWidth: '4px',
+          borderWidth: '2px',
           color: 'fg.default',
           cursor: 'pointer',
           focusVisibleRing: 'outside',
           fontWeight: 'black',
-          minH: '16',
+          minH: '12',
           overflow: 'hidden',
-          px: '6',
-          py: '4',
+          px: '4',
+          py: '2.5',
           position: 'relative',
-          textStyle: '2xl',
+          textStyle: 'lg',
           transition: 'common',
           w: 'full',
         }),
@@ -654,15 +735,15 @@ function StartStopButton({
         className={css({
           alignItems: 'center',
           display: 'flex',
-          gap: '4',
+          gap: '2.5',
           justifyContent: 'center',
         })}
       >
         {active ? '停止' : '対戦を開始'}
         {active ? (
-          <Stop size={34} weight="fill" />
+          <Stop size={24} weight="fill" />
         ) : (
-          <Play size={34} weight="fill" />
+          <Play size={24} weight="fill" />
         )}
       </span>
     </button>
@@ -690,7 +771,7 @@ function RoomList({
           borderWidth: '1px',
           color: 'fg.muted',
           fontWeight: 'semibold',
-          p: '4',
+          p: '3',
           textStyle: 'sm',
         })}
       >
@@ -713,21 +794,20 @@ function RoomList({
         <div
           key={room.room_id}
           className={css({
-            alignItems: 'center',
             bg: 'gray.surface.bg',
             borderBottomColor: 'gray.surface.border',
             borderBottomWidth: '1px',
             display: 'grid',
-            gap: '3',
-            gridTemplateColumns: 'minmax(0, 1fr) auto',
-            p: '3',
+            gap: '2',
+            gridTemplateColumns: {
+              base: '1fr',
+              md: 'minmax(0, 1fr) auto',
+            },
+            p: '2.5',
             _last: {
               borderBottomWidth: '0',
             },
-            '@media (max-width: 760px)': {
-              alignItems: 'stretch',
-              gridTemplateColumns: '1fr',
-            },
+            alignItems: { base: 'stretch', md: 'center' },
           })}
         >
           <div className={css({ display: 'grid', gap: '1', minW: '0' })}>
@@ -769,6 +849,46 @@ function RoomList({
   );
 }
 
+function UpdateRequiredNotice({ version }: { version?: string }) {
+  return (
+    <div
+      className={css({
+        alignItems: 'flex-start',
+        bg: 'yellow.subtle.bg',
+        borderColor: 'yellow.outline.border',
+        borderRadius: 'l2',
+        borderWidth: '1px',
+        color: 'yellow.subtle.fg',
+        display: 'flex',
+        gap: '2',
+        p: '2.5',
+      })}
+    >
+      <WarningCircle
+        className={css({ flexShrink: '0', mt: '0.5' })}
+        size={20}
+        weight="fill"
+      />
+      <div className={css({ display: 'grid', gap: '1' })}>
+        <div className={css({ fontWeight: 'black', textStyle: 'sm' })}>
+          GUI の更新が必要です
+        </div>
+        <div
+          className={css({
+            fontWeight: 'bold',
+            overflowWrap: 'anywhere',
+            textStyle: 'sm',
+          })}
+        >
+          {version
+            ? `v${version} に更新するまで、部屋の作成・参加はできません。画面左下の更新ボタンから更新してください。`
+            : '更新を適用するまで、部屋の作成・参加はできません。画面左下の更新ボタンから更新してください。'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function formatRoomSettings(room: MatchmakingRoomsState['rooms'][number]) {
   const rollback = room.settings.rollback_enabled ? 'RB=on' : 'RB=off';
   const stages = room.settings.course_stages.join('/');
@@ -785,13 +905,13 @@ function BattleLogPanel({
   onOpenLogDir: () => void;
 }) {
   return (
-    <LauncherCard title="通信ログ" icon={<Broadcast size={22} />}>
-      <div className={css({ display: 'grid', gap: '3' })}>
+    <LauncherCard title="通信ログ" icon={<Broadcast size={20} />}>
+      <div className={css({ display: 'grid', gap: '2' })}>
         <div
           className={css({
             alignItems: 'center',
             display: 'flex',
-            gap: '3',
+            gap: '2',
             justifyContent: 'space-between',
           })}
         >
@@ -822,8 +942,8 @@ function BattleLogPanel({
             fontFamily: 'mono',
             fontWeight: 'semibold',
             overflowWrap: 'anywhere',
-            px: '3',
-            py: '2',
+            px: '2.5',
+            py: '1.5',
             textStyle: 'xs',
           })}
         >
@@ -854,7 +974,7 @@ function GameStateMismatchAlert({
         color: 'red.subtle.fg',
         display: 'grid',
         gap: compact ? '1' : '2',
-        p: compact ? '3' : '4',
+        p: compact ? '2.5' : '3',
       })}
     >
       <div

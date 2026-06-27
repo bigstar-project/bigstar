@@ -32,6 +32,11 @@ pub(crate) fn validate_settings(settings: &GameSettings) -> Result<(), String> {
     if settings.course_stages.iter().any(|stage| *stage > 4) {
         return Err("コースは 0-4 にしてください".into());
     }
+    if matches!(settings.course_mode, CourseMode::Random)
+        && has_duplicate_stage(&settings.course_stages)
+    {
+        return Err("ランダムコースでは同じコースを2度選べません".into());
+    }
     if !matches!(settings.big_stars, 3 | 5 | 10) {
         return Err("ビッグスターは 3/5/10 のいずれかにしてください".into());
     }
@@ -84,6 +89,21 @@ fn parse_match_seed(value: &str) -> Result<u32, String> {
         value.parse::<u32>()
     };
     parsed.map_err(|_| "マッチシードは10進数か0x始まりの16進数で指定してください".to_owned())
+}
+
+fn has_duplicate_stage(stages: &[u8]) -> bool {
+    let mut seen = [false; 5];
+    for stage in stages {
+        let index = usize::from(*stage);
+        if index >= seen.len() {
+            continue;
+        }
+        if seen[index] {
+            return true;
+        }
+        seen[index] = true;
+    }
+    false
 }
 
 pub(crate) fn course_mode_value(course_mode: CourseMode) -> &'static str {

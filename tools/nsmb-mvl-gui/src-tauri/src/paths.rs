@@ -1,26 +1,43 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU32, Ordering};
 use tauri::{AppHandle, Manager};
 
-use crate::models::LauncherSettings;
+use crate::models::{LauncherSettings, MatchHistoryRecord, MvlStageResult};
 use crate::processes::hide_child_console_window;
 
 pub(crate) fn create_log_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let root = app_data_dir(app)?;
-    let stamp = chrono_like_stamp();
-    let log_dir = root.join("logs").join(format!("nsmb-mvl-gui-{stamp}"));
-    fs::create_dir_all(&log_dir).map_err(|err| format!("log dir を作成できません: {err}"))?;
-    Ok(log_dir)
+    let logs_root = root.join("logs");
+    fs::create_dir_all(&logs_root).map_err(|err| format!("log dir を作成できません: {err}"))?;
+
+    for _ in 0..16 {
+        let stamp = chrono_like_stamp();
+        let counter = LOG_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let log_dir = logs_root.join(format!(
+            "nsmb-mvl-gui-{stamp}-{}-{counter}",
+            std::process::id()
+        ));
+        match fs::create_dir(&log_dir) {
+            Ok(()) => return Ok(log_dir),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(format!("log dir を作成できません: {err}")),
+        }
+    }
+
+    Err("log dir を一意に作成できません".to_owned())
 }
 
 fn chrono_like_stamp() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs();
+        .as_millis();
     now.to_string()
 }
+
+static LOG_DIR_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 pub(crate) fn absolutize_existing(value: &str) -> Result<PathBuf, String> {
     let path = PathBuf::from(value.trim());
@@ -288,6 +305,10 @@ fn launcher_settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir(app)?.join("launcher-settings.json"))
 }
 
+fn match_history_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_dir(app)?.join("match-history.json"))
+}
+
 pub(crate) fn load_launcher_settings(app: &AppHandle) -> Result<LauncherSettings, String> {
     let path = launcher_settings_path(app)?;
     if !path.exists() {
@@ -308,6 +329,116 @@ pub(crate) fn save_launcher_settings(
         .map_err(|err| format!("launcher settings をJSON化できません: {err}"))?;
     fs::write(&path, format!("{content}\n"))
         .map_err(|err| format!("launcher settings を保存できません: {err}"))
+}
+
+const CURRENT_MATCH_HISTORY_SCHEMA_VERSION: u32 = 2;
+const MAX_MATCH_HISTORY: usize = 1000;
+
+#[derive(serde::Deserialize)]
+struct MatchHistoryDocumentHeader {
+    schema_version: u32,
+}
+
+#[derive(serde::Deserialize)]
+struct MatchHistoryDocumentV1 {
+    matches: Vec<MatchHistoryRecord>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct MatchHistoryDocumentV2 {
+    schema_version: u32,
+    matches: Vec<MatchHistoryRecord>,
+}
+
+pub(crate) fn load_match_history(app: &AppHandle) -> Result<Vec<MatchHistoryRecord>, String> {
+    let path = match_history_path(app)?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let content = fs::read_to_string(&path)
+        .map_err(|err| format!("match history を読み込めません: {err}"))?;
+    let (mut matches, migrated) = load_match_history_document_content(&content)?;
+    matches.truncate(MAX_MATCH_HISTORY);
+    if migrated {
+        write_match_history_document(&path, &matches)?;
+    }
+    Ok(matches)
+}
+
+pub(crate) fn save_match_history(
+    app: &AppHandle,
+    matches: &[MatchHistoryRecord],
+) -> Result<(), String> {
+    let path = match_history_path(app)?;
+    write_match_history_document(&path, matches)
+}
+
+pub(crate) fn load_match_history_document_content(
+    content: &str,
+) -> Result<(Vec<MatchHistoryRecord>, bool), String> {
+    let header: MatchHistoryDocumentHeader = serde_json::from_str(content)
+        .map_err(|err| format!("match history の形式が不正です: {err}"))?;
+    match header.schema_version {
+        1 => {
+            let document: MatchHistoryDocumentV1 = serde_json::from_str(content)
+                .map_err(|err| format!("match history v1 の形式が不正です: {err}"))?;
+            let mut matches = document.matches;
+            migrate_match_history_v1_to_v2(&mut matches);
+            Ok((matches, true))
+        }
+        CURRENT_MATCH_HISTORY_SCHEMA_VERSION => {
+            let document: MatchHistoryDocumentV2 = serde_json::from_str(content)
+                .map_err(|err| format!("match history v2 の形式が不正です: {err}"))?;
+            Ok((document.matches, false))
+        }
+        version => Err(format!(
+            "未対応のmatch history schema_versionです: {version}"
+        )),
+    }
+}
+
+fn write_match_history_document(path: &Path, matches: &[MatchHistoryRecord]) -> Result<(), String> {
+    let document = MatchHistoryDocumentV2 {
+        schema_version: CURRENT_MATCH_HISTORY_SCHEMA_VERSION,
+        matches: matches.iter().take(MAX_MATCH_HISTORY).cloned().collect(),
+    };
+    let content = serde_json::to_string_pretty(&document)
+        .map_err(|err| format!("match history をJSON化できません: {err}"))?;
+    fs::write(path, format!("{content}\n"))
+        .map_err(|err| format!("match history を保存できません: {err}"))
+}
+
+fn migrate_match_history_v1_to_v2(matches: &mut [MatchHistoryRecord]) {
+    for record in matches {
+        normalize_stage_winners(&mut record.stages);
+    }
+}
+
+fn normalize_stage_winners(stages: &mut [MvlStageResult]) {
+    let mut mario_wins = 0;
+    let mut luigi_wins = 0;
+    for stage in stages {
+        stage.winner = corrected_stage_winner(stage.winner, stage.mario.dead, stage.luigi.dead);
+        match stage.winner {
+            Some(0) if stage.resolved => mario_wins += 1,
+            Some(1) if stage.resolved => luigi_wins += 1,
+            _ => {}
+        }
+        stage.mario_match_wins = mario_wins;
+        stage.luigi_match_wins = luigi_wins;
+    }
+}
+
+fn corrected_stage_winner(
+    logged_winner: Option<u8>,
+    mario_dead: bool,
+    luigi_dead: bool,
+) -> Option<u8> {
+    match (mario_dead, luigi_dead) {
+        (true, false) => Some(1),
+        (false, true) => Some(0),
+        _ => logged_winner,
+    }
 }
 
 pub(crate) fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {

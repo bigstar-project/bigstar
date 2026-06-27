@@ -1,5 +1,6 @@
 import { AIReplayViewer } from './launcher/AIReplayViewer';
 import { BattleView } from './launcher/BattleView';
+import { HistoryView } from './launcher/HistoryView';
 import { LauncherShell } from './launcher/LauncherShell';
 import { OnboardingGate } from './launcher/OnboardingGate';
 import { SettingsView } from './launcher/SettingsView';
@@ -10,8 +11,9 @@ export function App() {
   const onboardingMissing =
     launcher.onboarding.loaded &&
     (!launcher.onboarding.romsPrepared ||
-      !launcher.onboarding.inputConfigOpened);
-  const onboardingOpen = onboardingMissing && launcher.activeView === 'battle';
+      !launcher.onboarding.inputConfigOpened ||
+      !launcher.onboarding.playerNameConfigured);
+  const onboardingOpen = onboardingMissing && launcher.activeView !== 'ai';
 
   return (
     <>
@@ -25,6 +27,7 @@ export function App() {
           connectionStatus={launcher.connectionStatus}
           onCheckForUpdate={() => void launcher.actions.checkForUpdate()}
           onViewChange={launcher.changeView}
+          romStatus={launcher.romStatus}
           updateBusy={launcher.updateBusy}
           updateStatus={launcher.updateStatus}
         >
@@ -37,13 +40,19 @@ export function App() {
             form={launcher.form}
             lastLogDir={launcher.lastLogDir}
             matchmakingRooms={launcher.matchmakingRooms}
+            currentMatch={launcher.currentMatch}
             summary={launcher.summary}
             updateField={launcher.updateField}
           />
           <AIReplayViewer />
+          <HistoryView
+            matches={launcher.matchHistory}
+            onDeleteMatch={launcher.actions.deleteMatchHistory}
+          />
           <SettingsView
             actions={launcher.actions}
             form={launcher.form}
+            startup={launcher.startup}
             summary={launcher.summary}
             updateField={launcher.updateField}
           />
@@ -56,6 +65,7 @@ export function App() {
         form={launcher.form}
         onboarding={launcher.onboarding}
         onOpenAi={() => launcher.changeView('ai')}
+        updateField={launcher.updateField}
       />
     </>
   );

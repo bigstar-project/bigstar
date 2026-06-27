@@ -12,6 +12,8 @@ import {
   roomRecordSchema,
 } from './do-api';
 import {
+  hostRoomEventMessageSchema,
+  lobbyRoomsMessageSchema,
   type Role,
   type RoomSummary,
   roleSchema,
@@ -21,11 +23,24 @@ import {
 } from './schemas';
 
 type Attachment = {
+  type: 'signal';
   role: Role;
   session: string;
   token: string | null;
   joinedAt: number;
   legacy: boolean;
+};
+
+type HostEventsAttachment = {
+  type: 'host-events';
+  roomId: string;
+  token: string;
+  joinedAt: number;
+};
+
+type LobbyAttachment = {
+  type: 'lobby';
+  joinedAt: number;
 };
 
 type RelaySignalMessage = Exclude<WsClientMessage, { type: 'ping' }> & {
@@ -43,11 +58,24 @@ const LOBBY_ROOMS_KEY = 'rooms';
 const QUEUED_SIGNALS_KEY = 'queued-signals';
 
 const attachmentSchema = z.object({
+  type: z.literal('signal'),
   role: roleSchema,
   session: z.string(),
   token: z.string().nullable(),
   joinedAt: z.number(),
   legacy: z.boolean(),
+});
+
+const hostEventsAttachmentSchema = z.object({
+  type: z.literal('host-events'),
+  roomId: z.string(),
+  token: z.string(),
+  joinedAt: z.number(),
+});
+
+const lobbyAttachmentSchema = z.object({
+  type: z.literal('lobby'),
+  joinedAt: z.number(),
 });
 
 function json(data: unknown, init?: ResponseInit): Response {
@@ -81,6 +109,18 @@ function getAttachment(ws: WebSocket): Attachment | null {
   return parsed.success ? parsed.data : null;
 }
 
+function getHostEventsAttachment(ws: WebSocket): HostEventsAttachment | null {
+  const parsed = hostEventsAttachmentSchema.safeParse(
+    ws.deserializeAttachment(),
+  );
+  return parsed.success ? parsed.data : null;
+}
+
+function getLobbyAttachment(ws: WebSocket): LobbyAttachment | null {
+  const parsed = lobbyAttachmentSchema.safeParse(ws.deserializeAttachment());
+  return parsed.success ? parsed.data : null;
+}
+
 function peerCount(sockets: WebSocket[]): number {
   return sockets.filter((socket) => getAttachment(socket) !== null).length;
 }
@@ -103,10 +143,14 @@ export class SignalingRoom
     const room = roomRecordSchema.parse({
       room_id: params.room_id,
       host_name: params.host_name,
+      ...(params.host_player_profile_id
+        ? { host_player_profile_id: params.host_player_profile_id }
+        : {}),
       host_token: params.host_token,
       join_token: null,
       status: 'open',
       settings: params.settings,
+      rom_identity: params.rom_identity,
       created_at: params.now,
       updated_at: params.now,
       expires_at: params.expires_at,
@@ -126,10 +170,15 @@ export class SignalingRoom
       ...room,
       status: 'joining',
       join_token: params.join_token,
+      ...(params.client_name ? { client_name: params.client_name } : {}),
+      ...(params.client_player_profile_id
+        ? { client_player_profile_id: params.client_player_profile_id }
+        : {}),
       updated_at: params.now,
       can_join: false,
     });
     await this.ctx.storage.put(ROOM_KEY, next);
+    this.notifyHostJoined(next);
     return next;
   }
 
@@ -160,6 +209,9 @@ export class SignalingRoom
     const url = new URL(request.url);
     if (request.headers.get('Upgrade') !== 'websocket') {
       return json({ error: 'expected websocket upgrade' }, { status: 426 });
+    }
+    if (url.pathname.endsWith('/events')) {
+      return this.fetchHostEvents(url);
     }
 
     const session =
@@ -195,6 +247,7 @@ export class SignalingRoom
     const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment({
+      type: 'signal',
       role: role.data,
       session,
       token,
@@ -238,6 +291,12 @@ export class SignalingRoom
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
     const attachment = getAttachment(ws);
     if (attachment === null) {
+      if (getHostEventsAttachment(ws) !== null) {
+        if (message === '{"type":"ping"}') {
+          send(ws, { type: 'pong' });
+        }
+        return;
+      }
       ws.close(1011, 'missing websocket attachment');
       return;
     }
@@ -314,6 +373,39 @@ export class SignalingRoom
     }
   }
 
+  private async fetchHostEvents(url: URL): Promise<Response> {
+    const token = url.searchParams.get('token');
+    const room = await this.ctx.storage.get<RoomRecord>(ROOM_KEY);
+    if (!room || room.status === 'closed' || room.expires_at <= Date.now()) {
+      return json({ error: 'room is closed' }, { status: 410 });
+    }
+    if (!token || token !== room.host_token) {
+      return json({ error: 'invalid room token' }, { status: 403 });
+    }
+
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
+    this.ctx.acceptWebSocket(server);
+    server.serializeAttachment({
+      type: 'host-events',
+      roomId: room.room_id,
+      token,
+      joinedAt: Date.now(),
+    } satisfies HostEventsAttachment);
+
+    if (room.status !== 'open') {
+      send(
+        server,
+        hostRoomEventMessageSchema.parse({
+          type: 'joined',
+          room: publicRoom(room, peerCount(this.ctx.getWebSockets())),
+        }),
+      );
+    }
+
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
   private async requireRoom(now: number): Promise<RoomRecord> {
     const room = await this.getRoom(now);
     if (room === null) {
@@ -337,6 +429,19 @@ export class SignalingRoom
     await this.env.LOBBY.get(this.env.LOBBY.idFromName('global')).upsertRoom(
       publicRoom(next, 2),
     );
+  }
+
+  private notifyHostJoined(room: RoomRecord): void {
+    const event = hostRoomEventMessageSchema.parse({
+      type: 'joined',
+      room: publicRoom(room, peerCount(this.ctx.getWebSockets())),
+    });
+    for (const socket of this.ctx.getWebSockets()) {
+      const attachment = getHostEventsAttachment(socket);
+      if (attachment?.roomId === room.room_id) {
+        send(socket, event);
+      }
+    }
   }
 
   private getSocketByRole(role: Role): WebSocket | null {
@@ -396,29 +501,65 @@ export class LobbyObject
   implements LobbyObjectApi
 {
   async listRooms(now: number): Promise<RoomSummary[]> {
-    const rooms = await this.readRooms();
-    const fresh = Object.fromEntries(
-      Object.entries(rooms).filter(
-        ([, room]) =>
-          room.status !== 'closed' && room.expires_at > now && room.can_join,
-      ),
-    );
-    if (Object.keys(fresh).length !== Object.keys(rooms).length) {
-      await this.ctx.storage.put(LOBBY_ROOMS_KEY, fresh);
+    const { changed, rooms } = await this.freshRooms(now);
+    if (changed) {
+      this.broadcastSnapshot(rooms);
     }
-    return Object.values(fresh).sort((a, b) => b.created_at - a.created_at);
+    return rooms;
   }
 
   async upsertRoom(room: RoomSummary): Promise<void> {
     const rooms = await this.readRooms();
     rooms[room.room_id] = roomSummarySchema.parse(room);
     await this.ctx.storage.put(LOBBY_ROOMS_KEY, rooms);
+    this.broadcastSnapshot(this.sortedJoinableRooms(rooms, Date.now()));
   }
 
   async removeRoom(roomId: string): Promise<void> {
     const rooms = await this.readRooms();
     delete rooms[roomId];
     await this.ctx.storage.put(LOBBY_ROOMS_KEY, rooms);
+    this.broadcastSnapshot(this.sortedJoinableRooms(rooms, Date.now()));
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    if (request.headers.get('Upgrade') !== 'websocket') {
+      return json({ error: 'expected websocket upgrade' }, { status: 426 });
+    }
+
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
+    this.ctx.acceptWebSocket(server);
+    server.serializeAttachment({
+      type: 'lobby',
+      joinedAt: Date.now(),
+    } satisfies LobbyAttachment);
+    const { changed, rooms } = await this.freshRooms(Date.now());
+    if (changed) {
+      this.broadcastSnapshot(rooms);
+    }
+    send(
+      server,
+      lobbyRoomsMessageSchema.parse({
+        type: 'rooms_snapshot',
+        rooms,
+      }),
+    );
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
+    if (getLobbyAttachment(ws) === null) {
+      ws.close(1011, 'missing websocket attachment');
+      return;
+    }
+    if (message === '{"type":"ping"}') {
+      send(ws, { type: 'pong' });
+    }
+  }
+
+  webSocketClose(_ws: WebSocket): void {
+    // Attachments are maintained by the runtime; no storage cleanup is needed.
   }
 
   private async readRooms(): Promise<Record<string, RoomSummary>> {
@@ -427,5 +568,49 @@ export class LobbyObject
         LOBBY_ROOMS_KEY,
       )) ?? {}
     );
+  }
+
+  private async freshRooms(
+    now: number,
+  ): Promise<{ changed: boolean; rooms: RoomSummary[] }> {
+    const rooms = await this.readRooms();
+    const fresh = Object.fromEntries(
+      Object.entries(rooms).filter(
+        ([, room]) =>
+          room.status !== 'closed' && room.expires_at > now && room.can_join,
+      ),
+    );
+    const changed = Object.keys(fresh).length !== Object.keys(rooms).length;
+    if (changed) {
+      await this.ctx.storage.put(LOBBY_ROOMS_KEY, fresh);
+    }
+    return {
+      changed,
+      rooms: this.sortedJoinableRooms(fresh, now),
+    };
+  }
+
+  private sortedJoinableRooms(
+    rooms: Record<string, RoomSummary>,
+    now: number,
+  ): RoomSummary[] {
+    return Object.values(rooms)
+      .filter(
+        (room) =>
+          room.status !== 'closed' && room.expires_at > now && room.can_join,
+      )
+      .sort((a, b) => b.created_at - a.created_at);
+  }
+
+  private broadcastSnapshot(rooms: RoomSummary[]): void {
+    const message = lobbyRoomsMessageSchema.parse({
+      type: 'rooms_snapshot',
+      rooms,
+    });
+    for (const socket of this.ctx.getWebSockets()) {
+      if (getLobbyAttachment(socket) !== null) {
+        send(socket, message);
+      }
+    }
   }
 }

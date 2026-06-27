@@ -1,12 +1,13 @@
 {
   "name": "nsmb-mvl-gui",
-  "version": "0.3.5",
+  "version": "0.6.1",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
     "prepare": "panda codegen",
-    "build": "tauri build",
+    "build": "node scripts/build-tauri.mjs",
+    "sync:sidecars": "node scripts/sync-sidecars.mjs",
     "panda:codegen": "panda codegen",
     "typecheck": "tsc --noEmit",
     "format-and-lint": "biome check .",
@@ -16,13 +17,16 @@
     "test:e2e": "playwright test",
     "ci": "tsc --noEmit && biome check . && vitest --config vitest.config.ts run && vitest --config vitest.browser.config.ts run && playwright test",
     "vite:build": "vite build",
-    "vite:dev": "vite --host 127.0.0.1"
+    "vite:dev": "vite --host 127.0.0.1",
+    "preview:browser": "vite --host 127.0.0.1"
   },
   "dependencies": {
     "@ark-ui/react": "^5.37.0",
     "@phosphor-icons/react": "^2.1.10",
     "@tanstack/react-query": "^5.101.0",
     "@tauri-apps/api": "^2.9.0",
+    "@tauri-apps/plugin-autostart": "~2.5.1",
+    "@tauri-apps/plugin-notification": "~2.3.3",
     "@tauri-apps/plugin-process": "~2.3.1",
     "@tauri-apps/plugin-updater": "~2.10.1",
     "hono": "^4.12.23",

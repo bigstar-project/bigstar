@@ -105,6 +105,9 @@ constexpr melonDS::u32 kGameRandomValueAddr = 0x02085A70;
 constexpr melonDS::u32 kInputConsoleKeysAddr = 0x02087650;
 constexpr melonDS::u32 kInputPlayerKeysHeldAddr = 0x02087660;
 constexpr melonDS::u32 kInputPlayerKeysPressedAddr = 0x02087664;
+constexpr melonDS::u32 kInputKeyXMask = 1u << 10;
+constexpr melonDS::u16 kMvlStockItemTouchX = 217;
+constexpr melonDS::u16 kMvlStockItemTouchY = 153;
 constexpr melonDS::u32 kStageActorFreezeFlagAddr = 0x020CA28C;
 constexpr melonDS::u32 kActorCategoryMaskAddr = 0x020CA850;
 constexpr melonDS::u32 kStageLayoutPtrAddr = 0x020CAD40;
@@ -177,11 +180,15 @@ constexpr melonDS::u32 kCollisionMgrUnknownB1Offset = 0xB1;
 constexpr melonDS::u32 kPlayerBaseShellActorPtrOffset = 0x0B8;
 constexpr melonDS::u32 kPlayerBaseUpdateLockedOffset = 0x7A8;
 constexpr melonDS::u32 kPlayerActorPlayerIDOffset = 0x11E;
+constexpr melonDS::u32 kPlayerBaseControlStateOffset = 0x7A9;
 constexpr melonDS::u32 kPlayerBaseDamageStateOffset = 0x7A9;
 constexpr melonDS::u32 kPlayerBasePowerupAuxStateOffset = 0x7AA;
 constexpr melonDS::u32 kPlayerBaseCharacterIDOffset = 0x7AA;
+constexpr melonDS::u32 kPlayerBaseRequestedPowerupOffset = 0x7AB;
 constexpr melonDS::u32 kPlayerBasePowerupStateOffset = 0x7AB;
+constexpr melonDS::u32 kPlayerBaseCurrentPowerupOffset = 0x7AC;
 constexpr melonDS::u32 kPlayerBasePowerupFormStateOffset = 0x7AC;
+constexpr melonDS::u32 kPlayerBasePreviousPowerupOffset = 0x7AD;
 constexpr melonDS::u32 kPlayerBasePowerupSubStateOffset = 0x7AD;
 constexpr melonDS::u32 kPlayerBaseTransitioningFlagOffset = 0x7B0;
 constexpr melonDS::u32 kPlayerBaseCameraFocusModeOffset = 0x7B2;
@@ -194,6 +201,9 @@ constexpr melonDS::u32 kPlayerBasePowerupApplyLockOffset = 0xBA6;
 constexpr melonDS::u32 kPlayerBaseTileDamageFlagsOffset = 0xBB2;
 constexpr melonDS::u32 kPlayerBaseTileDamageTypeOffset = 0xBB3;
 constexpr melonDS::u32 kPlayerBaseLinkedActorOffset = 0x688;
+constexpr melonDS::u32 kPlayerPowerupPhaseOffset = 0xBA6;
+constexpr melonDS::u32 kPlayerPowerupTimerOffset = 0xBA7;
+constexpr melonDS::u32 kPlayerPowerupGainTimerOffset = 0xBA8;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
 constexpr melonDS::u16 kVsBattleStarRelatedObjectID = 0x0021;
@@ -486,6 +496,13 @@ constexpr melonDS::u32 kWireKindWorldState = 0x41545357; // "WSTA", little endia
 constexpr melonDS::u32 kWireKindMovingHazardState = 0x415A4148; // "HAZA", little endian
 constexpr melonDS::u32 kWireKindWorldEffectState = 0x54434645; // "EFCT", little endian
 constexpr melonDS::u32 kWireKindWorldActorSnapshot = 0x54434157; // "WACT", little endian
+constexpr std::size_t kDiagnosticRingCapacity = 720;
+constexpr melonDS::u32 kDiagnosticPostTriggerFrames = 120;
+constexpr melonDS::u32 kDiagnosticRepeatedAnomalyFrames = 120;
+constexpr melonDS::u32 kPlayerPitDeathTransitStateAddr = 0x021196B0;
+constexpr melonDS::s32 kDiagnosticFixedOne = 0x1000;
+constexpr melonDS::s32 kDiagnosticOffscreenMargin = 512 * kDiagnosticFixedOne;
+constexpr melonDS::s32 kDiagnosticLargePositionDelta = 256 * kDiagnosticFixedOne;
 constexpr std::size_t kMaxWorldMovingHazards = 4;
 constexpr std::size_t kMaxWorldEffects = 4;
 constexpr std::size_t kMaxWorldActorSnapshots = 16;
@@ -969,12 +986,19 @@ struct GameStateSample
     melonDS::u32 PlayerActor0CollisionFlag = 0;
     melonDS::u32 PlayerActor0EnvironmentFlag = 0;
     melonDS::u32 PlayerActor0UpdateLocked = 0;
+    melonDS::u32 PlayerActor0ControlState = 0;
     melonDS::u32 PlayerActor0CharacterIDBase = 0;
+    melonDS::u32 PlayerActor0RequestedPowerup = 0;
+    melonDS::u32 PlayerActor0CurrentPowerup = 0;
+    melonDS::u32 PlayerActor0PreviousPowerup = 0;
     melonDS::u32 PlayerActor0TransitioningFlag = 0;
     melonDS::u32 PlayerActor0CameraFocusMode = 0;
     melonDS::u32 PlayerActor0DefeatedFlag = 0;
     melonDS::u32 PlayerActor0PlayerBaseID = 0;
     melonDS::u32 PlayerActor0VisibleFlag = 0;
+    melonDS::u32 PlayerActor0PowerupPhase = 0;
+    melonDS::u32 PlayerActor0PowerupTimer = 0;
+    melonDS::u32 PlayerActor0PowerupGainTimer = 0;
     melonDS::u32 PlayerActor0ActionFlag = 0;
     melonDS::u32 PlayerActor0SubActionFlag = 0;
     melonDS::u32 PlayerActor0PhysicsFlag = 0;
@@ -1021,12 +1045,19 @@ struct GameStateSample
     melonDS::u32 PlayerActor1CollisionFlag = 0;
     melonDS::u32 PlayerActor1EnvironmentFlag = 0;
     melonDS::u32 PlayerActor1UpdateLocked = 0;
+    melonDS::u32 PlayerActor1ControlState = 0;
     melonDS::u32 PlayerActor1CharacterIDBase = 0;
+    melonDS::u32 PlayerActor1RequestedPowerup = 0;
+    melonDS::u32 PlayerActor1CurrentPowerup = 0;
+    melonDS::u32 PlayerActor1PreviousPowerup = 0;
     melonDS::u32 PlayerActor1TransitioningFlag = 0;
     melonDS::u32 PlayerActor1CameraFocusMode = 0;
     melonDS::u32 PlayerActor1DefeatedFlag = 0;
     melonDS::u32 PlayerActor1PlayerBaseID = 0;
     melonDS::u32 PlayerActor1VisibleFlag = 0;
+    melonDS::u32 PlayerActor1PowerupPhase = 0;
+    melonDS::u32 PlayerActor1PowerupTimer = 0;
+    melonDS::u32 PlayerActor1PowerupGainTimer = 0;
     melonDS::u32 PlayerActor1ActionFlag = 0;
     melonDS::u32 PlayerActor1SubActionFlag = 0;
     melonDS::u32 PlayerActor1PhysicsFlag = 0;
@@ -1360,6 +1391,90 @@ struct ObjectPairScanSample
     ObjectScanSample Right;
 };
 
+struct DiagnosticPlayerSnapshot
+{
+    melonDS::u32 Found = 0;
+    melonDS::u32 Base = 0;
+    melonDS::u32 GUID = 0;
+    melonDS::u32 Settings = 0;
+    melonDS::u32 StateType = 0;
+    melonDS::u32 Flags = 0;
+    melonDS::u32 PosX = 0;
+    melonDS::u32 PosY = 0;
+    melonDS::u32 PosZ = 0;
+    melonDS::u32 PrevX = 0;
+    melonDS::u32 PrevY = 0;
+    melonDS::u32 PrevZ = 0;
+    melonDS::u32 VelX = 0;
+    melonDS::u32 VelY = 0;
+    melonDS::u32 VelZ = 0;
+    melonDS::u32 ActionFlag = 0;
+    melonDS::u32 SubActionFlag = 0;
+    melonDS::u32 PhysicsFlag = 0;
+    melonDS::u32 DamageCooldown = 0;
+    melonDS::u32 TransitionFlag = 0;
+    melonDS::u32 CollisionFlag = 0;
+    melonDS::u32 EnvironmentFlag = 0;
+    melonDS::u32 LinkedActor = 0;
+    melonDS::u32 TransitionStep = 0;
+    melonDS::u32 UpdateLocked = 0;
+    melonDS::u32 CharacterIDBase = 0;
+    melonDS::u32 TransitioningFlag = 0;
+    melonDS::u32 CameraFocusMode = 0;
+    melonDS::u32 DefeatedFlag = 0;
+    melonDS::u32 PlayerBaseID = 0;
+    melonDS::u32 VisibleFlag = 0;
+    melonDS::u32 TransitFunc = 0;
+    melonDS::u32 TransitArg = 0;
+    melonDS::u32 Powerup = 0;
+    melonDS::u32 InventoryPowerup = 0;
+    melonDS::u32 Dead = 0;
+    melonDS::u32 Character = 0;
+    melonDS::u32 TransitionStatus = 0;
+    melonDS::u32 Lives = 0;
+    melonDS::u32 BattleStars = 0;
+    melonDS::u32 Coins = 0;
+    melonDS::u32 Score = 0;
+    melonDS::u32 DisplayedStars = 0;
+    melonDS::u32 Deaths = 0;
+    melonDS::u32 CollectedStars = 0;
+};
+
+struct DiagnosticFrameSnapshot
+{
+    bool Valid = false;
+    melonDS::u32 Frame = 0;
+    melonDS::u32 Instance = 0;
+    melonDS::u32 StageID = 0;
+    melonDS::u32 StageGroup = 0;
+    melonDS::u32 VsMode = 0;
+    melonDS::u32 LocalPlayerID = 0;
+    melonDS::u32 SceneCurrentSceneID = 0;
+    melonDS::u32 SceneNextSceneID = 0;
+    melonDS::u32 StageActorFreezeFlag = 0;
+    melonDS::u32 PlayerCount = 0;
+    melonDS::u32 InputConsole0Held = 0;
+    melonDS::u32 InputConsole1Held = 0;
+    melonDS::u32 InputPlayer0Held = 0;
+    melonDS::u32 InputPlayer1Held = 0;
+    melonDS::u32 LastSentInputFrame = 0;
+    melonDS::u32 LastReceivedInputFrame = 0;
+    melonDS::u64 PlayerGlobalHash = 0;
+    melonDS::u64 PlayerGlobalHash0 = 0;
+    melonDS::u64 PlayerGlobalHash1 = 0;
+    melonDS::u64 PlayerActorHash0 = 0;
+    melonDS::u64 PlayerActorHash1 = 0;
+    melonDS::u32 StageCameraGlobalX0 = 0;
+    melonDS::u32 StageCameraGlobalX1 = 0;
+    melonDS::u32 StageCameraGlobalY0 = 0;
+    melonDS::u32 StageCameraGlobalY1 = 0;
+    melonDS::u32 StageCameraGlobalWidth0 = 0;
+    melonDS::u32 StageCameraGlobalWidth1 = 0;
+    melonDS::u32 StageCameraGlobalHeight0 = 0;
+    melonDS::u32 StageCameraGlobalHeight1 = 0;
+    DiagnosticPlayerSnapshot Player[2];
+};
+
 struct ObjectLifecycleSummary
 {
     melonDS::u32 Total = 0;
@@ -1404,6 +1519,12 @@ ObjectPairScanSample FindObjectPairByIDSortedX(melonDS::NDS* nds, melonDS::u16 e
 PlayerActorScanSample FindPlayerActors(melonDS::NDS* nds);
 melonDS::u32 FindCachedObjectBaseByID(melonDS::u16 objectID);
 GameStateObjectScanCache BuildGameStateObjectScanCache(melonDS::NDS* nds);
+std::vector<ObjectScanSample> FindActiveObjectsByIDAndSettings(
+    melonDS::NDS* nds,
+    melonDS::u16 expectedObjectID,
+    melonDS::u32 expectedSettings,
+    bool includeStateType2 = false);
+void RecordDiagnosticSnapshotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
 
 struct GameStateSyncHashes
 {
@@ -1415,6 +1536,19 @@ struct GameStateSyncHashes
 
 melonDS::u32 FindObjectBaseByID(melonDS::NDS* nds, melonDS::u16 objectID);
 bool WriteARM9U32(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 value);
+void EmitGameStateMismatchEventLocked(
+    int instanceID,
+    melonDS::u32 frame,
+    const GameStateSyncHashes& local,
+    const GameStateSyncHashes& remote);
+void EmitPlayerLifeEvent(
+    int instanceID,
+    melonDS::u32 frame,
+    int player,
+    const char* reason,
+    const GameStateSample& sample,
+    melonDS::NDS* nds);
+void EmitStartReadyEventLocked(const char* direction, melonDS::u32 localFrame, melonDS::u32 remoteFrame);
 
 bool IsARM9MainRAMAddress(melonDS::u32 addr)
 {
@@ -1475,7 +1609,7 @@ struct State
     std::thread FrameHeartbeatThread;
     int HashInterval = 60;
     bool HashEnabled = true;
-    int TestWaitTimeoutMs = 5000;
+    int TestWaitTimeoutMs = 60000;
     int TestQuitGraceMs = 0;
     bool InputTraceEnabled = false;
     int InputTraceInterval = 60;
@@ -1533,8 +1667,14 @@ struct State
     bool WaitForPeerAtNetplayStart = false;
     bool WaitedForPeerAtNetplayStart = false;
     bool NetplayStartReadySent = false;
+    int NetplayStartReadySendCount = 0;
+    std::chrono::steady_clock::time_point LastNetplayStartReadySentAt;
+    std::chrono::steady_clock::time_point LastInputFrameLeadResendAt;
+    int InputFrameLeadResendCount = 0;
     melonDS::u32 LocalNetplayStartReadyFrame = kNoFrameLimit;
     melonDS::u32 RemoteNetplayStartReadyFrame = kNoFrameLimit;
+    bool RemoteNetplayStartReadyAfterLocal = false;
+    melonDS::u32 InputEpochPrimedStartFrame = kNoFrameLimit;
     bool NetplayStartWaitArrived[16] {};
     bool NetplayStartWaitComplete = false;
     bool DeferNetworkUntilStart = false;
@@ -1632,6 +1772,8 @@ struct State
     int InputBundleHistory = 0;
     int InputDropModulo = 0;
     int InputDropOffset = 0;
+    melonDS::u32 InputDropStartFrame = 0;
+    melonDS::u32 InputDropEndFrame = 0;
     std::map<melonDS::u32, InputState> PacketBridgePacketInputs;
     std::vector<DelayedWireNSMLPacket> DelayedNSMLPackets;
     std::vector<DelayedWireInput> DelayedInputs;
@@ -1660,6 +1802,7 @@ struct State
     melonDS::u32 MvlAutoRestartBootstrapFrame = 120;
     bool MvlAutoRestartInResult[16] {};
     bool MvlAutoRestartResultScored[16] {};
+    bool MvlAutoRestartResultUnresolvedLogged[16] {};
     melonDS::u32 MvlAutoRestartResultFrame[16] {};
     melonDS::u32 MvlAutoRestartLastRestartFrame[16] {};
     int MvlAutoRestartCount[16] {};
@@ -1740,12 +1883,23 @@ struct State
     std::string MemPatchFile;
     std::string GameStateTracePath;
     std::string DiagnosticsPath;
+    std::string DiagnosticEventsPath;
     std::string AIPlayLogPath;
     std::string AIObservationV2Path;
     std::ofstream HashLog;
     std::ofstream GameStateTrace;
+    std::ofstream DiagnosticEvents;
     std::ofstream AIPlayLog;
     std::ofstream AIObservationV2Log;
+    bool DiagnosticEventsEnabled = false;
+    int DiagnosticRingFrames = 360;
+    melonDS::u32 DiagnosticPostTriggerUntilFrame[16] {};
+    melonDS::u32 LastDiagnosticMismatchFrame[16] {};
+    melonDS::u32 LastDiagnosticLifeEventFrame[16][2] {};
+    melonDS::u32 LastDiagnosticPitTransitionFrame[16][2] {};
+    melonDS::u32 LastDiagnosticPositionAnomalyFrame[16][2] {};
+    std::array<DiagnosticFrameSnapshot, kDiagnosticRingCapacity> DiagnosticRing[16];
+    std::size_t DiagnosticRingNext[16] {};
     InputState AIPlayLogLastAppliedInput[16][2] {};
     melonDS::u32 AIPlayLogLastAppliedInputFrame[16][2] {};
     bool AIPlayLogLastAppliedInputValid[16][2] {};
@@ -2128,6 +2282,7 @@ struct State
     melonDS::u32 StateLoadFrame = 0;
     bool StateLoadFrameSet = false;
     ENetHost* Host = nullptr;
+    ENetPeer* ConnectingPeer = nullptr;
     ENetPeer* Peer = nullptr;
     bool ENetInitialized = false;
     std::map<melonDS::u32, InputState> LocalInputs;
@@ -2379,6 +2534,8 @@ void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
     if (instanceID < 0 || instanceID >= 16)
         return;
 
+    std::lock_guard<std::mutex> lock(G.Mutex);
+
     G.LocalGameStateHashes.clear();
     G.RemoteGameStateHashes.clear();
     G.RemoteGameStateSamples.clear();
@@ -2390,6 +2547,31 @@ void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
     G.PendingNSMLPackets.clear();
     G.PacketBridgePacketInputs.clear();
     G.DelayedNSMLPackets.clear();
+    G.DelayedInputs.clear();
+    G.LocalInputs.clear();
+    G.RemoteInputs.clear();
+    G.PredictedRemoteInputs.clear();
+    G.LastReceivedInputFrame = kNoFrameLimit;
+    G.LastSentInputFrame = kNoFrameLimit;
+    G.LastTracedSentInputFrame = kNoFrameLimit;
+    G.LastTracedReceivedInputFrame = kNoFrameLimit;
+    G.LastInputHealthSummaryFrame = kNoFrameLimit;
+    G.LastInputHealthRemoteWaitFrame = kNoFrameLimit;
+    G.LastInputHealthThrottleFrame = kNoFrameLimit;
+    G.LastInputHealthThrottleResolvedFrame = kNoFrameLimit;
+    G.LastInputHealthReceiveGapFrame = kNoFrameLimit;
+    G.LastInputHealthSendGapFrame = kNoFrameLimit;
+    G.LastInputFrameThrottleTraceFrame = kNoFrameLimit;
+    G.NetplayStartReadySent = false;
+    G.NetplayStartReadySendCount = 0;
+    G.LastNetplayStartReadySentAt = {};
+    G.LastInputFrameLeadResendAt = {};
+    G.InputFrameLeadResendCount = 0;
+    G.WaitedForPeerAtNetplayStart = false;
+    G.LocalNetplayStartReadyFrame = kNoFrameLimit;
+    G.RemoteNetplayStartReadyFrame = kNoFrameLimit;
+    G.RemoteNetplayStartReadyAfterLocal = false;
+    G.InputEpochPrimedStartFrame = kNoFrameLimit;
 
     G.LastLoggedGameStateFrame[instanceID] = 0;
     G.LastSentGameStateFrame[instanceID] = 0;
@@ -2595,10 +2777,16 @@ void ResetMvlAutoRestartStartupHookState(int instanceID)
     G.ClearMvlCameraInitHoldApplied[instanceID] = false;
     G.LocalNetplayStartReadyFrame = kNoFrameLimit;
     G.RemoteNetplayStartReadyFrame = kNoFrameLimit;
+    G.RemoteNetplayStartReadyAfterLocal = false;
+    G.InputEpochPrimedStartFrame = kNoFrameLimit;
     std::fill(std::begin(G.NetplayStartWaitArrived), std::end(G.NetplayStartWaitArrived), false);
     G.NetplayStartWaitComplete = false;
     G.WaitedForPeerAtNetplayStart = false;
     G.NetplayStartReadySent = false;
+    G.NetplayStartReadySendCount = 0;
+    G.LastNetplayStartReadySentAt = {};
+    G.LastInputFrameLeadResendAt = {};
+    G.InputFrameLeadResendCount = 0;
     G.NetplayLockstepStarted[instanceID] = false;
     G.NetplayAnyLockstepStarted = false;
 }
@@ -2638,6 +2826,21 @@ InputState NeutralInput()
 {
     InputState input {};
     input.KeyMask = 0xFFF;
+    return input;
+}
+
+InputState ConvertStockXToTouch(InputState input)
+{
+    if ((input.KeyMask & kInputKeyXMask) != 0)
+        return input;
+
+    input.KeyMask |= kInputKeyXMask;
+    if (!input.Touching)
+    {
+        input.Touching = true;
+        input.TouchX = kMvlStockItemTouchX;
+        input.TouchY = kMvlStockItemTouchY;
+    }
     return input;
 }
 
@@ -3178,6 +3381,7 @@ void CompareGameStateLocked(int instanceID, melonDS::u32 frame)
 
     G.GameStateMismatchSeen = true;
     WriteGameStateMismatchDiagnostics(instanceID, frame, lhs, rhs);
+    EmitGameStateMismatchEventLocked(instanceID, frame, lhs, rhs);
     std::printf("NSMB PoC: game state mismatch inst=%d frame=%u local=%016llX remote=%016llX basic=%d playerGlobal=%d wifiCandidate=%d renderCandidate=%d\n",
         instanceID,
         frame,
@@ -3679,6 +3883,18 @@ int CurrentInputLeadLocked(melonDS::u32 sendFrame);
 
 void StoreRemoteInputLocked(melonDS::u32 frame, const InputState& receivedInput, melonDS::u32 localFrame)
 {
+    if (G.InputNetplayOnly && G.NetplayStartFrame != 0 && frame < G.NetplayStartFrame)
+    {
+        if (G.InputNetplayTraceEnabled && G.LastTracedReceivedInputFrame != frame)
+        {
+            G.LastTracedReceivedInputFrame = frame;
+            std::printf("NSMB InputNetplay: ignored old input frame=%u currentStart=%u\n",
+                frame,
+                G.NetplayStartFrame);
+        }
+        return;
+    }
+
     if (G.RollbackEnabled)
     {
         auto predicted = G.PredictedRemoteInputs.find(frame);
@@ -3784,11 +4000,15 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
         {
         case ENET_EVENT_TYPE_CONNECT:
             G.Peer = event.peer;
+            if (G.ConnectingPeer == event.peer)
+                G.ConnectingPeer = nullptr;
             G.MatchSeedSent = false;
             G.NetplayStartReadySent = false;
             G.RemoteNetplayStartReadyFrame = kNoFrameLimit;
+            G.RemoteNetplayStartReadyAfterLocal = false;
             G.InputCond.notify_all();
             std::printf("NSMB PoC: peer connected\n");
+            std::fflush(stdout);
             break;
 
         case ENET_EVENT_TYPE_RECEIVE:
@@ -3860,9 +4080,21 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                 }
                 else if (packet.Magic == kMagic && packet.Version == kVersion && packet.Kind == kWireKindStartReady)
                 {
-                    G.RemoteNetplayStartReadyFrame = packet.Seed;
-                    G.InputCond.notify_all();
-                    std::printf("NSMB InputNetplay: received start ready frame=%u\n", packet.Seed);
+                    if (G.InputNetplayOnly && G.NetplayStartFrame != 0 && packet.Seed < G.NetplayStartFrame)
+                    {
+                        std::printf("NSMB InputNetplay: ignored old start ready frame=%u currentStart=%u\n",
+                            packet.Seed,
+                            G.NetplayStartFrame);
+                    }
+                    else
+                    {
+                        G.RemoteNetplayStartReadyFrame = packet.Seed;
+                        if (G.LocalNetplayStartReadyFrame != kNoFrameLimit)
+                            G.RemoteNetplayStartReadyAfterLocal = true;
+                        EmitStartReadyEventLocked("recv", localFrame, packet.Seed);
+                        G.InputCond.notify_all();
+                        std::printf("NSMB InputNetplay: received start ready frame=%u\n", packet.Seed);
+                    }
                 }
             }
             else if (event.packet->dataLength == sizeof(WireNSMLPacket))
@@ -4124,6 +4356,8 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
         case ENET_EVENT_TYPE_DISCONNECT:
             std::printf("NSMB PoC: peer disconnected\n");
             if (G.Peer == event.peer) G.Peer = nullptr;
+            if (G.ConnectingPeer == event.peer) G.ConnectingPeer = nullptr;
+            std::fflush(stdout);
             break;
 
         default:
@@ -4239,9 +4473,9 @@ void SendMatchSeedLocked()
     std::printf("NSMB PoC: sent match seed 0x%08X\n", G.MatchSeed);
 }
 
-void SendNetplayStartReadyLocked(melonDS::u32 frame)
+void SendNetplayStartReadyLocked(melonDS::u32 frame, bool force = false)
 {
-    if (!G.Peer || G.NetplayStartReadySent)
+    if (!G.Peer || (G.NetplayStartReadySent && !force))
         return;
 
     WireSeed packet {};
@@ -4256,7 +4490,38 @@ void SendNetplayStartReadyLocked(melonDS::u32 frame)
     enet_peer_send(G.Peer, 0, enetPacket);
     enet_host_flush(G.Host);
     G.NetplayStartReadySent = true;
-    std::printf("NSMB InputNetplay: sent start ready frame=%u\n", frame);
+    G.NetplayStartReadySendCount++;
+    G.LastNetplayStartReadySentAt = std::chrono::steady_clock::now();
+    EmitStartReadyEventLocked(force ? "resend" : "send", frame, G.RemoteNetplayStartReadyFrame);
+    std::printf("NSMB InputNetplay: %s start ready frame=%u count=%d\n",
+        force ? "resent" : "sent",
+        frame,
+        G.NetplayStartReadySendCount);
+    std::fflush(stdout);
+}
+
+void MaybeResendNetplayStartReadyLocked(bool allowBeforeAccepted = false)
+{
+    if (!G.Peer || !G.InputNetplayOnly
+        || (!allowBeforeAccepted && !G.WaitedForPeerAtNetplayStart)
+        || !G.NetplayStartReadySent || G.LocalNetplayStartReadyFrame == kNoFrameLimit)
+    {
+        return;
+    }
+
+    const melonDS::u32 firstGameplayInputFrame =
+        G.NetplayStartFrame + static_cast<melonDS::u32>(std::max(0, G.Delay));
+    if (G.LastReceivedInputFrame != kNoFrameLimit && G.LastReceivedInputFrame >= firstGameplayInputFrame)
+        return;
+
+    const auto now = std::chrono::steady_clock::now();
+    if (G.NetplayStartReadySendCount > 0
+        && now - G.LastNetplayStartReadySentAt < std::chrono::milliseconds(250))
+    {
+        return;
+    }
+
+    SendNetplayStartReadyLocked(G.LocalNetplayStartReadyFrame, true);
 }
 
 void SendInputPayloadNowLocked(const void* data, size_t size, melonDS::u32 flags)
@@ -4336,6 +4601,7 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
     if (!G.Peer) return;
 
     SendMatchSeedLocked();
+    MaybeResendNetplayStartReadyLocked();
 
     const melonDS::u32 previousLastSent = G.LastSentInputFrame;
     G.LastSentInputFrame = frame;
@@ -4358,15 +4624,21 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
             false);
     }
 
-    if (G.InputDropModulo > 0
+    const bool dropByModulo = G.InputDropModulo > 0
         && (frame % static_cast<melonDS::u32>(G.InputDropModulo))
-            == static_cast<melonDS::u32>(G.InputDropOffset))
+            == static_cast<melonDS::u32>(G.InputDropOffset);
+    const bool dropByRange = G.InputDropStartFrame > 0
+        && frame >= G.InputDropStartFrame
+        && (G.InputDropEndFrame == 0 || frame <= G.InputDropEndFrame);
+    if (dropByModulo || dropByRange)
     {
         if (G.InputNetplayTraceEnabled)
-            std::printf("NSMB InputNetplay: dropped local input packet frame=%u modulo=%d offset=%d\n",
+            std::printf("NSMB InputNetplay: dropped local input packet frame=%u modulo=%d offset=%d range=%u-%u\n",
                 frame,
                 G.InputDropModulo,
-                G.InputDropOffset);
+                G.InputDropOffset,
+                G.InputDropStartFrame,
+                G.InputDropEndFrame);
         return;
     }
 
@@ -4383,7 +4655,7 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
     const std::vector<char> bundlePayload = sendBundle
         ? BuildInputBundlePayloadLocked(frame, input)
         : std::vector<char> {};
-    const melonDS::u32 sendFlags = sendBundle ? ENET_PACKET_FLAG_UNSEQUENCED : ENET_PACKET_FLAG_RELIABLE;
+    const melonDS::u32 sendFlags = ENET_PACKET_FLAG_RELIABLE;
 
     const bool sendDelayActive =
         frame >= G.InputSendDelayStartFrame
@@ -4423,6 +4695,53 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
             frame,
             input.KeyMask,
             G.LocalInputs.size());
+    }
+}
+
+void MaybeResendLatestInputForFrameLeadLocked()
+{
+    if (!G.Peer || !G.InputNetplayOnly || G.LastSentInputFrame == kNoFrameLimit)
+        return;
+
+    const auto now = std::chrono::steady_clock::now();
+    if (G.InputFrameLeadResendCount > 0
+        && now - G.LastInputFrameLeadResendAt < std::chrono::milliseconds(50))
+    {
+        return;
+    }
+
+    auto it = G.LocalInputs.find(G.LastSentInputFrame);
+    if (it == G.LocalInputs.end())
+        return;
+
+    const InputState& input = it->second;
+    if (G.InputBundleHistory > 0)
+    {
+        const std::vector<char> payload = BuildInputBundlePayloadLocked(G.LastSentInputFrame, input);
+        SendInputPayloadNowLocked(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE);
+    }
+    else
+    {
+        WireInput packet {};
+        packet.Magic = kMagic;
+        packet.Version = kVersion;
+        packet.Frame = G.LastSentInputFrame;
+        packet.KeyMask = input.KeyMask;
+        packet.TouchX = input.TouchX;
+        packet.TouchY = input.TouchY;
+        packet.Touching = input.Touching ? 1 : 0;
+        SendInputWireNowLocked(packet);
+    }
+
+    G.LastInputFrameLeadResendAt = now;
+    G.InputFrameLeadResendCount++;
+    if (G.InputNetplayTraceEnabled
+        && (G.InputFrameLeadResendCount == 1 || (G.InputFrameLeadResendCount % 20) == 0))
+    {
+        std::printf("NSMB InputNetplay: resent latest input frame=%u count=%d\n",
+            G.LastSentInputFrame,
+            G.InputFrameLeadResendCount);
+        std::fflush(stdout);
     }
 }
 
@@ -7399,6 +7718,40 @@ int CurrentInputLeadLocked(melonDS::u32 sendFrame)
     return static_cast<int>(sendFrame) - static_cast<int>(G.LastReceivedInputFrame);
 }
 
+void PrimeInputNetplayEpochStartLocked(melonDS::u32 localFrame)
+{
+    if (!G.InputNetplayOnly || G.NetplayStartFrame == 0
+        || G.InputEpochPrimedStartFrame == G.NetplayStartFrame)
+    {
+        return;
+    }
+
+    PruneInputHistoryLocked(G.NetplayStartFrame);
+
+    const melonDS::u32 delay = static_cast<melonDS::u32>(std::max(0, G.Delay));
+    const melonDS::u32 firstInputFrame = G.NetplayStartFrame + delay;
+    for (melonDS::u32 frame = G.NetplayStartFrame; frame < firstInputFrame; frame++)
+    {
+        G.LocalInputs.emplace(frame, NeutralInput());
+        G.RemoteInputs.emplace(frame, NeutralInput());
+    }
+    if (delay > 0)
+    {
+        const melonDS::u32 primedThrough = firstInputFrame - 1;
+        if (G.LastReceivedInputFrame == kNoFrameLimit || G.LastReceivedInputFrame < primedThrough)
+            G.LastReceivedInputFrame = primedThrough;
+    }
+    G.InputEpochPrimedStartFrame = G.NetplayStartFrame;
+    G.InputCond.notify_all();
+
+    std::printf("NSMB InputNetplay: primed epoch start localFrame=%u logicalStart=%u firstInput=%u delay=%u\n",
+        localFrame,
+        G.NetplayStartFrame,
+        firstInputFrame,
+        delay);
+    std::fflush(stdout);
+}
+
 bool IsPastTestInputRange(melonDS::u32 targetFrame)
 {
     return G.TestEnabled
@@ -7452,6 +7805,8 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
         {
             std::lock_guard<std::mutex> lock(G.Mutex);
             PumpNetworkLocked();
+            MaybeResendNetplayStartReadyLocked();
+            MaybeResendLatestInputForFrameLeadLocked();
 
             auto it = G.RemoteInputs.find(targetFrame);
             if (it != G.RemoteInputs.end())
@@ -7766,7 +8121,10 @@ void WaitForRemoteNetplayStartReadyIfNeeded(melonDS::NDS* nds, melonDS::u32 sync
         return;
 
     if (G.LocalNetplayStartReadyFrame == kNoFrameLimit)
+    {
         G.LocalNetplayStartReadyFrame = syncFrame;
+        G.RemoteNetplayStartReadyAfterLocal = false;
+    }
 
     std::printf("NSMB InputNetplay: waiting for remote gameplay start ready localFrame=%u logicalStart=%u\n",
         syncFrame,
@@ -7781,9 +8139,17 @@ void WaitForRemoteNetplayStartReadyIfNeeded(melonDS::NDS* nds, melonDS::u32 sync
             PumpNetworkLocked(nds, syncFrame);
             SendMatchSeedLocked();
             SendNetplayStartReadyLocked(syncFrame);
-            if (G.RemoteNetplayStartReadyFrame != kNoFrameLimit)
+            MaybeResendNetplayStartReadyLocked(true);
+            const melonDS::u32 firstGameplayInputFrame =
+                G.NetplayStartFrame + static_cast<melonDS::u32>(std::max(0, G.Delay));
+            const bool hasPostStartRemoteInput =
+                G.LastReceivedInputFrame != kNoFrameLimit && G.LastReceivedInputFrame >= firstGameplayInputFrame;
+            if (G.RemoteNetplayStartReadyFrame != kNoFrameLimit
+                && (G.RemoteNetplayStartReadyAfterLocal || hasPostStartRemoteInput))
             {
                 G.WaitedForPeerAtNetplayStart = true;
+                PrimeInputNetplayEpochStartLocked(syncFrame);
+                EmitStartReadyEventLocked("accept", syncFrame, G.RemoteNetplayStartReadyFrame);
                 std::printf("NSMB InputNetplay: remote gameplay start ready accepted remoteFrame=%u localFrame=%u logicalStart=%u\n",
                     G.RemoteNetplayStartReadyFrame,
                     syncFrame,
@@ -7804,6 +8170,7 @@ void WaitForRemoteNetplayStartReadyIfNeeded(melonDS::NDS* nds, melonDS::u32 sync
                     G.SeedWaitTimeoutMs);
                 std::fflush(stdout);
                 G.LocalNetplayStartReadyFrame = kNoFrameLimit;
+                G.RemoteNetplayStartReadyAfterLocal = false;
                 G.NetplayStartReadySent = false;
                 return;
             }
@@ -8242,6 +8609,14 @@ void EmitNormalizeMvlEntranceSpawnState(std::vector<melonDS::u32>& code)
     EmitStrImm(code, 2, 0, sizeof(melonDS::u32));
 }
 
+void EmitClearInitialPlayerInventoryPowerups(std::vector<melonDS::u32>& code)
+{
+    EmitLoadImm(code, 0, kGamePlayerInventoryPowerupAddr);
+    EmitMovImm(code, 1, 0);
+    EmitStrbImm(code, 1, 0, 0);
+    EmitStrbImm(code, 1, 0, 1);
+}
+
 bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, bool autoRestart = false)
 {
     if ((!G.DirectMvlBootEnabled && !autoRestart) || !nds || instanceID < 0 || instanceID >= 16)
@@ -8355,6 +8730,7 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
         EmitARM(code, 0xE1A00000u); // nop
         EmitARM(code, kA2DJGameLoadLevelAddr);
         EmitNormalizeMvlEntranceSpawnState(code);
+        EmitClearInitialPlayerInventoryPowerups(code);
     }
     else
     {
@@ -8633,6 +9009,73 @@ bool ResetMvlAutoRestartConsoleForNextMatch(int instanceID, melonDS::u32 frame, 
     return true;
 }
 
+struct MvlResultSnapshot
+{
+    melonDS::u32 BattleStars[2] {};
+    melonDS::u32 DisplayedStars[2] {};
+    melonDS::u32 CollectedStars[2] {};
+    melonDS::u32 Lives[2] {};
+    melonDS::u32 Deaths[2] {};
+    melonDS::u32 Dead[2] {};
+};
+
+MvlResultSnapshot ReadMvlResultSnapshot(melonDS::NDS* nds)
+{
+    MvlResultSnapshot result {};
+    if (!nds)
+        return result;
+
+    for (melonDS::u32 player = 0; player < 2; player++)
+    {
+        const melonDS::u32 wordOffset = sizeof(melonDS::u32) * player;
+        result.BattleStars[player] = nds->ARM9Read32(kGamePlayerBattleStarsAddr + wordOffset);
+        result.DisplayedStars[player] = nds->ARM9Read32(kGamePlayerDisplayedStarsAddr + wordOffset);
+        result.CollectedStars[player] = nds->ARM9Read32(kGamePlayerCollectedStarsAddr + wordOffset);
+        result.Lives[player] = nds->ARM9Read32(kGamePlayerLivesAddr + wordOffset);
+        result.Deaths[player] = nds->ARM9Read32(kGamePlayerDeathsAddr + wordOffset);
+        result.Dead[player] = nds->ARM9Read8(kGamePlayerDeadAddr + player);
+        if (G.MvlLifeModeSelector != 2 && result.Dead[player] != 0)
+        {
+            result.Lives[player] = 0;
+            result.Deaths[player] = std::max(result.Deaths[player], G.MvlInitialLives);
+        }
+    }
+    return result;
+}
+
+int ResolveMvlResultWinner(const MvlResultSnapshot& result)
+{
+    auto higherWins = [](melonDS::u32 a, melonDS::u32 b) -> int {
+        if (a == b)
+            return -1;
+        return a > b ? 0 : 1;
+    };
+    auto lowerWins = [](melonDS::u32 a, melonDS::u32 b) -> int {
+        if (a == b)
+            return -1;
+        return a < b ? 0 : 1;
+    };
+
+    const bool player0Dead = result.Dead[0] != 0;
+    const bool player1Dead = result.Dead[1] != 0;
+    if (player0Dead != player1Dead)
+        return player0Dead ? 1 : 0;
+
+    if (int winner = higherWins(result.BattleStars[0], result.BattleStars[1]); winner >= 0)
+        return winner;
+    if (int winner = higherWins(result.DisplayedStars[0], result.DisplayedStars[1]); winner >= 0)
+        return winner;
+    if (int winner = higherWins(result.CollectedStars[0], result.CollectedStars[1]); winner >= 0)
+        return winner;
+
+    if (int winner = higherWins(result.Lives[0], result.Lives[1]); winner >= 0)
+        return winner;
+    if (int winner = lowerWins(result.Deaths[0], result.Deaths[1]); winner >= 0)
+        return winner;
+
+    return -1;
+}
+
 bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.MvlAutoRestartAfterResult || G.MvlTargetWins <= 1 || !nds || instanceID < 0 || instanceID >= 16)
@@ -8652,41 +9095,70 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
         }
         G.MvlAutoRestartInResult[instanceID] = false;
         G.MvlAutoRestartResultScored[instanceID] = false;
+        G.MvlAutoRestartResultUnresolvedLogged[instanceID] = false;
         return false;
     }
 
     if (!G.MvlAutoRestartInResult[instanceID])
     {
         G.MvlAutoRestartInResult[instanceID] = true;
+        G.MvlAutoRestartResultUnresolvedLogged[instanceID] = false;
         G.MvlAutoRestartResultFrame[instanceID] = frame;
         return false;
     }
 
     if (!G.MvlAutoRestartResultScored[instanceID])
     {
-        const melonDS::u32 battleStars0 = nds->ARM9Read32(kGamePlayerBattleStarsAddr);
-        const melonDS::u32 battleStars1 = nds->ARM9Read32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32));
-        const melonDS::u32 collectedStars0 = nds->ARM9Read32(kGamePlayerCollectedStarsAddr);
-        const melonDS::u32 collectedStars1 = nds->ARM9Read32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32));
-        int winner = -1;
-        if (battleStars0 != battleStars1)
-            winner = battleStars0 > battleStars1 ? 0 : 1;
-        else if (collectedStars0 != collectedStars1)
-            winner = collectedStars0 > collectedStars1 ? 0 : 1;
-        else
-            winner = 0;
-        if (winner >= 0)
-            G.MvlAutoRestartWins[instanceID][winner]++;
+        const MvlResultSnapshot result = ReadMvlResultSnapshot(nds);
+        const int winner = ResolveMvlResultWinner(result);
+        if (winner < 0)
+        {
+            if (!G.MvlAutoRestartResultUnresolvedLogged[instanceID]
+                && frame - G.MvlAutoRestartResultFrame[instanceID] >= G.MvlAutoRestartDelayFrames)
+            {
+                std::printf(
+                    "NSMB MvL auto restart: result unresolved inst=%d frame=%u stars=%u/%u displayed=%u/%u collected=%u/%u lives=%u/%u deaths=%u/%u dead=%u/%u matchWins=%d/%d target=%d\n",
+                    instanceID,
+                    frame,
+                    result.BattleStars[0],
+                    result.BattleStars[1],
+                    result.DisplayedStars[0],
+                    result.DisplayedStars[1],
+                    result.CollectedStars[0],
+                    result.CollectedStars[1],
+                    result.Lives[0],
+                    result.Lives[1],
+                    result.Deaths[0],
+                    result.Deaths[1],
+                    result.Dead[0],
+                    result.Dead[1],
+                    G.MvlAutoRestartWins[instanceID][0],
+                    G.MvlAutoRestartWins[instanceID][1],
+                    G.MvlTargetWins);
+                std::fflush(stdout);
+                G.MvlAutoRestartResultUnresolvedLogged[instanceID] = true;
+            }
+            return false;
+        }
+        G.MvlAutoRestartWins[instanceID][winner]++;
         G.MvlAutoRestartResultScored[instanceID] = true;
         std::printf(
-            "NSMB MvL auto restart: result inst=%d frame=%u winner=%d stars=%u/%u collected=%u/%u matchWins=%d/%d target=%d\n",
+            "NSMB MvL auto restart: result inst=%d frame=%u winner=%d stars=%u/%u displayed=%u/%u collected=%u/%u lives=%u/%u deaths=%u/%u dead=%u/%u matchWins=%d/%d target=%d\n",
             instanceID,
             frame,
             winner,
-            battleStars0,
-            battleStars1,
-            collectedStars0,
-            collectedStars1,
+            result.BattleStars[0],
+            result.BattleStars[1],
+            result.DisplayedStars[0],
+            result.DisplayedStars[1],
+            result.CollectedStars[0],
+            result.CollectedStars[1],
+            result.Lives[0],
+            result.Lives[1],
+            result.Deaths[0],
+            result.Deaths[1],
+            result.Dead[0],
+            result.Dead[1],
             G.MvlAutoRestartWins[instanceID][0],
             G.MvlAutoRestartWins[instanceID][1],
             G.MvlTargetWins);
@@ -8756,6 +9228,7 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
     ResetMvlRuntimeSyncStateForRestart(instanceID, frame);
     G.MvlAutoRestartInResult[instanceID] = false;
     G.MvlAutoRestartResultScored[instanceID] = false;
+    G.MvlAutoRestartResultUnresolvedLogged[instanceID] = false;
     const int actualStage = static_cast<int>(nds->ARM9Read32(kGameStageIDAddr));
     std::printf(
         "NSMB MvL auto restart: inst=%d frame=%u nextGame=%d stage=%d requestedStage=%d seed=0x%08X matchWins=%d/%d target=%d checkpoint=%d\n",
@@ -8771,6 +9244,24 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
         restartPath);
     std::fflush(stdout);
     return true;
+}
+
+bool ShouldPauseInputNetplayForMvlAutoRestart(int instanceID, melonDS::NDS* nds)
+{
+    if (!G.InputNetplayOnly || !G.MvlAutoRestartAfterResult || G.MvlTargetWins <= 1
+        || !nds || instanceID < 0 || instanceID >= 16)
+    {
+        return false;
+    }
+
+    constexpr melonDS::u16 kResultsScene = 0x000A;
+    if (nds->ARM9Read16(kSceneCurrentSceneIDAddr) != kResultsScene)
+        return false;
+    if (!G.MvlAutoRestartInResult[instanceID])
+        return false;
+
+    const int leadingWins = std::max(G.MvlAutoRestartWins[instanceID][0], G.MvlAutoRestartWins[instanceID][1]);
+    return leadingWins < G.MvlTargetWins;
 }
 
 void SaveMvlAutoRestartCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -9605,6 +10096,803 @@ ObjectScanSample GetPlayerActorCached(int instanceID, int player, melonDS::NDS* 
     return actor;
 }
 
+std::string Hex32(melonDS::u32 value)
+{
+    std::ostringstream out;
+    out << std::hex << std::uppercase << std::setw(8) << std::setfill('0') << value;
+    return out.str();
+}
+
+bool EnsureDiagnosticEventsOpenLocked()
+{
+    if (!G.DiagnosticEventsEnabled || G.DiagnosticEventsPath.empty())
+        return false;
+    if (G.DiagnosticEvents.is_open())
+        return true;
+
+    const std::filesystem::path path(G.DiagnosticEventsPath);
+    std::error_code ec;
+    if (path.has_parent_path())
+        std::filesystem::create_directories(path.parent_path(), ec);
+    G.DiagnosticEvents.open(path, std::ios::out | std::ios::app | std::ios::binary);
+    if (!G.DiagnosticEvents)
+    {
+        std::printf("NSMB Diagnostics: failed to open event log: %s\n", path.string().c_str());
+        G.DiagnosticEventsEnabled = false;
+        return false;
+    }
+    return true;
+}
+
+void WriteDiagnosticEventLocked(const std::string& json)
+{
+    if (!EnsureDiagnosticEventsOpenLocked())
+        return;
+    G.DiagnosticEvents << json << '\n';
+    G.DiagnosticEvents.flush();
+}
+
+void EmitStartReadyEventLocked(const char* direction, melonDS::u32 localFrame, melonDS::u32 remoteFrame)
+{
+    if (!G.DiagnosticEventsEnabled)
+        return;
+
+    const long long delta = (localFrame == kNoFrameLimit || remoteFrame == kNoFrameLimit)
+        ? 0
+        : static_cast<long long>(remoteFrame) - static_cast<long long>(localFrame);
+    std::ostringstream json;
+    json << "{\"event\":\"start_ready\","
+         << "\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\","
+         << "\"direction\":\"" << (direction ? direction : "unknown") << "\","
+         << "\"localFrame\":" << localFrame << ","
+         << "\"remoteFrame\":" << remoteFrame << ","
+         << "\"delta\":" << delta << ","
+         << "\"logicalStart\":" << G.NetplayStartFrame << ","
+         << "\"lastSentInputFrame\":" << G.LastSentInputFrame << ","
+         << "\"lastReceivedInputFrame\":" << G.LastReceivedInputFrame << ","
+         << "\"localQueue\":" << G.LocalInputs.size() << ","
+         << "\"remoteQueue\":" << G.RemoteInputs.size() << ","
+         << "\"delayedInputs\":" << G.DelayedInputs.size()
+         << "}";
+    WriteDiagnosticEventLocked(json.str());
+}
+
+void EmitDiagnosticStartupEvent()
+{
+    if (!G.DiagnosticEventsEnabled)
+        return;
+
+    std::ostringstream json;
+    json << "{\"event\":\"diagnostic_started\","
+         << "\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\","
+         << "\"ringFrames\":" << G.DiagnosticRingFrames << ","
+         << "\"stateSync\":" << (G.GameStateSyncEnabled ? "true" : "false") << ","
+         << "\"stateSyncExtended\":" << (G.GameStateSyncExtended ? "true" : "false") << ","
+         << "\"stateSyncInterval\":" << G.GameStateSyncInterval << ","
+         << "\"diagnosticsFile\":\"" << JsonEscape(G.DiagnosticsPath) << "\","
+         << "\"eventsFile\":\"" << JsonEscape(G.DiagnosticEventsPath) << "\""
+         << "}";
+    WriteDiagnosticEventLocked(json.str());
+}
+
+void AppendJsonHex32(std::ostream& out, const char* key, melonDS::u32 value)
+{
+    out << "\"" << key << "\":\"0x" << Hex32(value) << "\"";
+}
+
+void AppendJsonHex64(std::ostream& out, const char* key, melonDS::u64 value)
+{
+    out << "\"" << key << "\":\"0x" << Hex64(value) << "\"";
+}
+
+void AppendDiagnosticPlayerJson(std::ostream& out, const DiagnosticPlayerSnapshot& player)
+{
+    out << "{";
+    out << "\"found\":" << player.Found << ",";
+    AppendJsonHex32(out, "base", player.Base); out << ",";
+    out << "\"guid\":" << player.GUID << ",";
+    AppendJsonHex32(out, "settings", player.Settings); out << ",";
+    out << "\"stateType\":" << player.StateType << ",";
+    AppendJsonHex32(out, "flags", player.Flags); out << ",";
+    AppendJsonHex32(out, "x", player.PosX); out << ",";
+    AppendJsonHex32(out, "y", player.PosY); out << ",";
+    AppendJsonHex32(out, "z", player.PosZ); out << ",";
+    AppendJsonHex32(out, "prevX", player.PrevX); out << ",";
+    AppendJsonHex32(out, "prevY", player.PrevY); out << ",";
+    AppendJsonHex32(out, "velX", player.VelX); out << ",";
+    AppendJsonHex32(out, "velY", player.VelY); out << ",";
+    AppendJsonHex32(out, "action", player.ActionFlag); out << ",";
+    AppendJsonHex32(out, "subAction", player.SubActionFlag); out << ",";
+    AppendJsonHex32(out, "physics", player.PhysicsFlag); out << ",";
+    AppendJsonHex32(out, "damageCooldown", player.DamageCooldown); out << ",";
+    AppendJsonHex32(out, "transitionFlag", player.TransitionFlag); out << ",";
+    AppendJsonHex32(out, "collisionFlag", player.CollisionFlag); out << ",";
+    AppendJsonHex32(out, "environmentFlag", player.EnvironmentFlag); out << ",";
+    AppendJsonHex32(out, "linkedActor", player.LinkedActor); out << ",";
+    out << "\"transitionStep\":" << player.TransitionStep << ",";
+    out << "\"updateLocked\":" << player.UpdateLocked << ",";
+    out << "\"characterIDBase\":" << player.CharacterIDBase << ",";
+    out << "\"transitioningFlag\":" << player.TransitioningFlag << ",";
+    out << "\"cameraFocusMode\":" << player.CameraFocusMode << ",";
+    out << "\"defeatedFlag\":" << player.DefeatedFlag << ",";
+    out << "\"playerBaseID\":" << player.PlayerBaseID << ",";
+    out << "\"visibleFlag\":" << player.VisibleFlag << ",";
+    AppendJsonHex32(out, "transitFunc", player.TransitFunc); out << ",";
+    AppendJsonHex32(out, "transitArg", player.TransitArg); out << ",";
+    out << "\"powerup\":" << player.Powerup << ",";
+    out << "\"inventoryPowerup\":" << player.InventoryPowerup << ",";
+    out << "\"dead\":" << player.Dead << ",";
+    out << "\"character\":" << player.Character << ",";
+    out << "\"transitionStatus\":" << player.TransitionStatus << ",";
+    out << "\"lives\":" << player.Lives << ",";
+    out << "\"battleStars\":" << player.BattleStars << ",";
+    out << "\"coins\":" << player.Coins << ",";
+    out << "\"score\":" << player.Score << ",";
+    out << "\"displayedStars\":" << player.DisplayedStars << ",";
+    out << "\"deaths\":" << player.Deaths << ",";
+    out << "\"collectedStars\":" << player.CollectedStars;
+    out << "}";
+}
+
+void AppendDiagnosticFrameJson(std::ostream& out, const DiagnosticFrameSnapshot& snap)
+{
+    out << "{";
+    out << "\"frame\":" << snap.Frame << ",";
+    out << "\"instance\":" << snap.Instance << ",";
+    out << "\"stageID\":" << snap.StageID << ",";
+    out << "\"stageGroup\":" << snap.StageGroup << ",";
+    out << "\"vsMode\":" << snap.VsMode << ",";
+    out << "\"localPlayerID\":" << snap.LocalPlayerID << ",";
+    out << "\"scene\":" << snap.SceneCurrentSceneID << ",";
+    out << "\"nextScene\":" << snap.SceneNextSceneID << ",";
+    out << "\"freeze\":" << snap.StageActorFreezeFlag << ",";
+    out << "\"playerCount\":" << snap.PlayerCount << ",";
+    AppendJsonHex32(out, "inputConsole0", snap.InputConsole0Held); out << ",";
+    AppendJsonHex32(out, "inputConsole1", snap.InputConsole1Held); out << ",";
+    AppendJsonHex32(out, "inputPlayer0", snap.InputPlayer0Held); out << ",";
+    AppendJsonHex32(out, "inputPlayer1", snap.InputPlayer1Held); out << ",";
+    out << "\"lastSentInputFrame\":" << snap.LastSentInputFrame << ",";
+    out << "\"lastReceivedInputFrame\":" << snap.LastReceivedInputFrame << ",";
+    AppendJsonHex64(out, "playerGlobalHash", snap.PlayerGlobalHash); out << ",";
+    AppendJsonHex64(out, "playerGlobalHash0", snap.PlayerGlobalHash0); out << ",";
+    AppendJsonHex64(out, "playerGlobalHash1", snap.PlayerGlobalHash1); out << ",";
+    AppendJsonHex64(out, "playerActorHash0", snap.PlayerActorHash0); out << ",";
+    AppendJsonHex64(out, "playerActorHash1", snap.PlayerActorHash1); out << ",";
+    AppendJsonHex32(out, "cameraX0", snap.StageCameraGlobalX0); out << ",";
+    AppendJsonHex32(out, "cameraX1", snap.StageCameraGlobalX1); out << ",";
+    AppendJsonHex32(out, "cameraY0", snap.StageCameraGlobalY0); out << ",";
+    AppendJsonHex32(out, "cameraY1", snap.StageCameraGlobalY1); out << ",";
+    AppendJsonHex32(out, "cameraWidth0", snap.StageCameraGlobalWidth0); out << ",";
+    AppendJsonHex32(out, "cameraWidth1", snap.StageCameraGlobalWidth1); out << ",";
+    AppendJsonHex32(out, "cameraHeight0", snap.StageCameraGlobalHeight0); out << ",";
+    AppendJsonHex32(out, "cameraHeight1", snap.StageCameraGlobalHeight1); out << ",";
+    out << "\"players\":[";
+    AppendDiagnosticPlayerJson(out, snap.Player[0]);
+    out << ",";
+    AppendDiagnosticPlayerJson(out, snap.Player[1]);
+    out << "]}";
+}
+
+void AppendGameStatePlayerJson(std::ostream& out, const GameStateSample& sample, int player)
+{
+    const bool p0 = player == 0;
+    DiagnosticPlayerSnapshot snap;
+    snap.Found = p0 ? sample.PlayerActor0Found : sample.PlayerActor1Found;
+    snap.Base = p0 ? sample.PlayerActor0Base : sample.PlayerActor1Base;
+    snap.GUID = p0 ? sample.PlayerActor0GUID : sample.PlayerActor1GUID;
+    snap.Settings = p0 ? sample.PlayerActor0Settings : sample.PlayerActor1Settings;
+    snap.StateType = p0 ? sample.PlayerActor0StateType : sample.PlayerActor1StateType;
+    snap.Flags = p0 ? sample.PlayerActor0Flags : sample.PlayerActor1Flags;
+    snap.PosX = p0 ? sample.PlayerActor0PosX : sample.PlayerActor1PosX;
+    snap.PosY = p0 ? sample.PlayerActor0PosY : sample.PlayerActor1PosY;
+    snap.PosZ = p0 ? sample.PlayerActor0PosZ : sample.PlayerActor1PosZ;
+    snap.PrevX = p0 ? sample.PlayerActor0PrevX : sample.PlayerActor1PrevX;
+    snap.PrevY = p0 ? sample.PlayerActor0PrevY : sample.PlayerActor1PrevY;
+    snap.PrevZ = p0 ? sample.PlayerActor0PrevZ : sample.PlayerActor1PrevZ;
+    snap.VelX = p0 ? sample.PlayerActor0VelX : sample.PlayerActor1VelX;
+    snap.VelY = p0 ? sample.PlayerActor0VelY : sample.PlayerActor1VelY;
+    snap.VelZ = p0 ? sample.PlayerActor0VelZ : sample.PlayerActor1VelZ;
+    snap.ActionFlag = p0 ? sample.PlayerActor0ActionFlag : sample.PlayerActor1ActionFlag;
+    snap.SubActionFlag = p0 ? sample.PlayerActor0SubActionFlag : sample.PlayerActor1SubActionFlag;
+    snap.PhysicsFlag = p0 ? sample.PlayerActor0PhysicsFlag : sample.PlayerActor1PhysicsFlag;
+    snap.DamageCooldown = p0 ? sample.PlayerActor0DamageCooldown : sample.PlayerActor1DamageCooldown;
+    snap.TransitionFlag = p0 ? sample.PlayerActor0TransitionFlag : sample.PlayerActor1TransitionFlag;
+    snap.CollisionFlag = p0 ? sample.PlayerActor0CollisionFlag : sample.PlayerActor1CollisionFlag;
+    snap.EnvironmentFlag = p0 ? sample.PlayerActor0EnvironmentFlag : sample.PlayerActor1EnvironmentFlag;
+    snap.LinkedActor = p0 ? sample.PlayerActor0LinkedActor : sample.PlayerActor1LinkedActor;
+    snap.TransitionStep = p0 ? sample.PlayerActor0TransitionStep : sample.PlayerActor1TransitionStep;
+    snap.UpdateLocked = p0 ? sample.PlayerActor0UpdateLocked : sample.PlayerActor1UpdateLocked;
+    snap.CharacterIDBase = p0 ? sample.PlayerActor0CharacterIDBase : sample.PlayerActor1CharacterIDBase;
+    snap.TransitioningFlag = p0 ? sample.PlayerActor0TransitioningFlag : sample.PlayerActor1TransitioningFlag;
+    snap.CameraFocusMode = p0 ? sample.PlayerActor0CameraFocusMode : sample.PlayerActor1CameraFocusMode;
+    snap.DefeatedFlag = p0 ? sample.PlayerActor0DefeatedFlag : sample.PlayerActor1DefeatedFlag;
+    snap.PlayerBaseID = p0 ? sample.PlayerActor0PlayerBaseID : sample.PlayerActor1PlayerBaseID;
+    snap.VisibleFlag = p0 ? sample.PlayerActor0VisibleFlag : sample.PlayerActor1VisibleFlag;
+    snap.TransitFunc = p0 ? sample.PlayerActor0TransitFunc : sample.PlayerActor1TransitFunc;
+    snap.TransitArg = p0 ? sample.PlayerActor0TransitArg : sample.PlayerActor1TransitArg;
+    snap.Powerup = p0 ? sample.Player0Powerup : sample.Player1Powerup;
+    snap.InventoryPowerup = p0 ? sample.Player0InventoryPowerup : sample.Player1InventoryPowerup;
+    snap.Dead = p0 ? sample.Player0Dead : sample.Player1Dead;
+    snap.Character = p0 ? sample.Player0Character : sample.Player1Character;
+    snap.TransitionStatus = p0 ? sample.PlayerTransitionStatus0 : sample.PlayerTransitionStatus1;
+    snap.Lives = p0 ? sample.Player0Lives : sample.Player1Lives;
+    snap.BattleStars = p0 ? sample.Player0BattleStars : sample.Player1BattleStars;
+    snap.Coins = p0 ? sample.Player0Coins : sample.Player1Coins;
+    snap.Score = p0 ? sample.Player0Score : sample.Player1Score;
+    snap.DisplayedStars = p0 ? sample.Player0DisplayedStars : sample.Player1DisplayedStars;
+    snap.Deaths = p0 ? sample.Player0Deaths : sample.Player1Deaths;
+    snap.CollectedStars = p0 ? sample.Player0CollectedStars : sample.Player1CollectedStars;
+    AppendDiagnosticPlayerJson(out, snap);
+}
+
+void AppendDiagnosticRingJson(std::ostream& out, int instanceID)
+{
+    out << "\"ring\":[";
+    if (instanceID >= 0 && instanceID < 16)
+    {
+        bool first = true;
+        const std::size_t ringFrames = static_cast<std::size_t>(
+            std::clamp(G.DiagnosticRingFrames, 1, static_cast<int>(kDiagnosticRingCapacity)));
+        const std::size_t next = G.DiagnosticRingNext[instanceID] % kDiagnosticRingCapacity;
+        for (std::size_t i = 0; i < ringFrames; i++)
+        {
+            const std::size_t idx = (next + kDiagnosticRingCapacity - ringFrames + i) % kDiagnosticRingCapacity;
+            const DiagnosticFrameSnapshot& snap = G.DiagnosticRing[instanceID][idx];
+            if (!snap.Valid)
+                continue;
+            if (!first)
+                out << ",";
+            first = false;
+            AppendDiagnosticFrameJson(out, snap);
+        }
+    }
+    out << "]";
+}
+
+melonDS::s32 DiagnosticSignedFixed(melonDS::u32 value)
+{
+    return static_cast<melonDS::s32>(value);
+}
+
+melonDS::s64 DiagnosticFixedDelta(melonDS::u32 lhs, melonDS::u32 rhs)
+{
+    return static_cast<melonDS::s64>(DiagnosticSignedFixed(lhs))
+        - static_cast<melonDS::s64>(DiagnosticSignedFixed(rhs));
+}
+
+melonDS::u32 DiagnosticCameraX(const DiagnosticFrameSnapshot& snap, int player)
+{
+    return player == 0 ? snap.StageCameraGlobalX0 : snap.StageCameraGlobalX1;
+}
+
+melonDS::u32 DiagnosticCameraY(const DiagnosticFrameSnapshot& snap, int player)
+{
+    return player == 0 ? snap.StageCameraGlobalY0 : snap.StageCameraGlobalY1;
+}
+
+melonDS::u32 DiagnosticCameraWidth(const DiagnosticFrameSnapshot& snap, int player)
+{
+    const melonDS::u32 value = player == 0 ? snap.StageCameraGlobalWidth0 : snap.StageCameraGlobalWidth1;
+    return value != 0 ? value : static_cast<melonDS::u32>(256 * kDiagnosticFixedOne);
+}
+
+melonDS::u32 DiagnosticCameraHeight(const DiagnosticFrameSnapshot& snap, int player)
+{
+    const melonDS::u32 value = player == 0 ? snap.StageCameraGlobalHeight0 : snap.StageCameraGlobalHeight1;
+    return value != 0 ? value : static_cast<melonDS::u32>(192 * kDiagnosticFixedOne);
+}
+
+void AppendDiagnosticPlayerContextJson(
+    std::ostream& out,
+    const DiagnosticFrameSnapshot& snap,
+    const DiagnosticFrameSnapshot* previous,
+    int player)
+{
+    const DiagnosticPlayerSnapshot& current = snap.Player[player];
+    const DiagnosticPlayerSnapshot* prev = previous ? &previous->Player[player] : nullptr;
+    const melonDS::u32 cameraX = DiagnosticCameraX(snap, player);
+    const melonDS::u32 cameraY = DiagnosticCameraY(snap, player);
+    const melonDS::u32 cameraWidth = DiagnosticCameraWidth(snap, player);
+    const melonDS::u32 cameraHeight = DiagnosticCameraHeight(snap, player);
+    const melonDS::s64 screenX = DiagnosticFixedDelta(current.PosX, cameraX);
+    const melonDS::s64 screenY = DiagnosticFixedDelta(current.PosY, cameraY);
+    const melonDS::s64 deltaX = prev ? DiagnosticFixedDelta(current.PosX, prev->PosX) : 0;
+    const melonDS::s64 deltaY = prev ? DiagnosticFixedDelta(current.PosY, prev->PosY) : 0;
+
+    out << "\"player\":" << player << ",";
+    AppendJsonHex32(out, "cameraX", cameraX); out << ",";
+    AppendJsonHex32(out, "cameraY", cameraY); out << ",";
+    AppendJsonHex32(out, "cameraWidth", cameraWidth); out << ",";
+    AppendJsonHex32(out, "cameraHeight", cameraHeight); out << ",";
+    out << "\"screenX\":" << screenX << ",";
+    out << "\"screenY\":" << screenY << ",";
+    out << "\"screenXPx\":" << (screenX / kDiagnosticFixedOne) << ",";
+    out << "\"screenYPx\":" << (screenY / kDiagnosticFixedOne) << ",";
+    out << "\"deltaX\":" << deltaX << ",";
+    out << "\"deltaY\":" << deltaY << ",";
+    out << "\"deltaXPx\":" << (deltaX / kDiagnosticFixedOne) << ",";
+    out << "\"deltaYPx\":" << (deltaY / kDiagnosticFixedOne) << ",";
+    out << "\"current\":";
+    AppendDiagnosticPlayerJson(out, current);
+    if (prev)
+    {
+        out << ",\"previous\":";
+        AppendDiagnosticPlayerJson(out, *prev);
+    }
+}
+
+bool DiagnosticPlayerIsLiveForPositionCheck(const DiagnosticPlayerSnapshot& player)
+{
+    return player.Found != 0
+        && player.Dead == 0
+        && player.VisibleFlag != 0
+        && player.TransitioningFlag == 0
+        && player.DefeatedFlag == 0;
+}
+
+bool DiagnosticPlayerScreenPositionAnomalous(
+    const DiagnosticFrameSnapshot& snap,
+    const DiagnosticFrameSnapshot* previous,
+    int player)
+{
+    const DiagnosticPlayerSnapshot& current = snap.Player[player];
+    if (!DiagnosticPlayerIsLiveForPositionCheck(current))
+        return false;
+
+    const melonDS::s64 screenX = DiagnosticFixedDelta(current.PosX, DiagnosticCameraX(snap, player));
+    const melonDS::s64 cameraWidth = static_cast<melonDS::s64>(DiagnosticCameraWidth(snap, player));
+    if (screenX < -static_cast<melonDS::s64>(kDiagnosticOffscreenMargin)
+        || screenX > cameraWidth + static_cast<melonDS::s64>(kDiagnosticOffscreenMargin))
+    {
+        return true;
+    }
+
+    if (previous && previous->Valid && DiagnosticPlayerIsLiveForPositionCheck(previous->Player[player]))
+    {
+        const melonDS::s64 deltaX = DiagnosticFixedDelta(current.PosX, previous->Player[player].PosX);
+        const melonDS::s64 deltaY = DiagnosticFixedDelta(current.PosY, previous->Player[player].PosY);
+        if (std::llabs(deltaX) > kDiagnosticLargePositionDelta
+            || std::llabs(deltaY) > kDiagnosticLargePositionDelta)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void EmitDiagnosticPitTransitionEvent(
+    int instanceID,
+    const DiagnosticFrameSnapshot& snap,
+    const DiagnosticFrameSnapshot* previous,
+    int player)
+{
+    if (!G.DiagnosticEventsEnabled || instanceID < 0 || instanceID >= 16 || player < 0 || player > 1)
+        return;
+    if (snap.Player[player].TransitFunc != kPlayerPitDeathTransitStateAddr)
+        return;
+    if (previous && previous->Valid && previous->Player[player].TransitFunc == kPlayerPitDeathTransitStateAddr)
+        return;
+    if (G.LastDiagnosticPitTransitionFrame[instanceID][player] != 0
+        && snap.Frame < G.LastDiagnosticPitTransitionFrame[instanceID][player] + kDiagnosticRepeatedAnomalyFrames)
+    {
+        return;
+    }
+
+    G.LastDiagnosticPitTransitionFrame[instanceID][player] = snap.Frame;
+    G.DiagnosticPostTriggerUntilFrame[instanceID] = snap.Frame + kDiagnosticPostTriggerFrames;
+
+    std::ostringstream json;
+    json << "{\"event\":\"player_pit_transition\","
+         << "\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\","
+         << "\"instance\":" << instanceID << ","
+         << "\"frame\":" << snap.Frame << ","
+         << "\"stageID\":" << snap.StageID << ","
+         << "\"stageGroup\":" << snap.StageGroup << ","
+         << "\"scene\":" << snap.SceneCurrentSceneID << ","
+         << "\"nextScene\":" << snap.SceneNextSceneID << ",";
+    AppendDiagnosticPlayerContextJson(json, snap, previous, player);
+    json << ",";
+    AppendDiagnosticRingJson(json, instanceID);
+    json << "}";
+
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    WriteDiagnosticEventLocked(json.str());
+}
+
+void EmitDiagnosticPositionAnomalyEvent(
+    int instanceID,
+    const DiagnosticFrameSnapshot& snap,
+    const DiagnosticFrameSnapshot* previous,
+    int player)
+{
+    if (!G.DiagnosticEventsEnabled || instanceID < 0 || instanceID >= 16 || player < 0 || player > 1)
+        return;
+    if (!DiagnosticPlayerScreenPositionAnomalous(snap, previous, player))
+        return;
+    if (G.LastDiagnosticPositionAnomalyFrame[instanceID][player] != 0
+        && snap.Frame < G.LastDiagnosticPositionAnomalyFrame[instanceID][player] + kDiagnosticRepeatedAnomalyFrames)
+    {
+        return;
+    }
+
+    G.LastDiagnosticPositionAnomalyFrame[instanceID][player] = snap.Frame;
+
+    std::ostringstream json;
+    json << "{\"event\":\"player_position_anomaly\","
+         << "\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\","
+         << "\"instance\":" << instanceID << ","
+         << "\"frame\":" << snap.Frame << ","
+         << "\"stageID\":" << snap.StageID << ","
+         << "\"stageGroup\":" << snap.StageGroup << ","
+         << "\"scene\":" << snap.SceneCurrentSceneID << ","
+         << "\"nextScene\":" << snap.SceneNextSceneID << ",";
+    AppendDiagnosticPlayerContextJson(json, snap, previous, player);
+    json << ",";
+    AppendDiagnosticRingJson(json, instanceID);
+    json << "}";
+
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    WriteDiagnosticEventLocked(json.str());
+}
+
+void ReadDiagnosticPlayerSnapshot(
+    int instanceID,
+    melonDS::u32 frame,
+    melonDS::NDS* nds,
+    int player,
+    DiagnosticPlayerSnapshot& out)
+{
+    out = {};
+    if (!nds || !nds->MainRAM || player < 0 || player > 1)
+        return;
+
+    ObjectScanSample actor;
+    const melonDS::u32 cachedBase = G.PlayerActorBaseCache[instanceID][player];
+    const melonDS::u32 cachedGUID = G.PlayerActorGUIDCache[instanceID][player];
+    if (cachedBase != 0)
+        ReadPlayerActorByBase(nds, cachedBase, cachedGUID, actor);
+    if (!actor.Found && (frame % 60) == 0)
+        actor = GetPlayerActorCached(instanceID, player, nds);
+
+    out.Found = actor.Found;
+    out.Base = actor.Base;
+    out.GUID = actor.GUID;
+    out.Settings = actor.Settings;
+    out.StateType = actor.StateType;
+    out.Flags = actor.Flags;
+    out.PosX = actor.PosX;
+    out.PosY = actor.PosY;
+    out.PosZ = actor.PosZ;
+    out.PrevX = actor.PrevX;
+    out.PrevY = actor.PrevY;
+    out.PrevZ = actor.PrevZ;
+    out.VelX = actor.VelX;
+    out.VelY = actor.VelY;
+    out.VelZ = actor.VelZ;
+
+    if (actor.Found && IsValidMainRAMRange(nds, actor.Base, kPlayerBaseTransitionStepOffset + 1))
+    {
+        out.ActionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseActionFlagOffset);
+        out.SubActionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseSubActionFlagOffset);
+        out.PhysicsFlag = nds->ARM9Read32(actor.Base + kPlayerBasePhysicsFlagOffset);
+        out.DamageCooldown = nds->ARM9Read16(actor.Base + kPlayerBaseDamageCooldownOffset);
+        out.TransitionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseTransitionFlagOffset);
+        out.CollisionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseCollisionFlagOffset);
+        out.EnvironmentFlag = nds->ARM9Read32(actor.Base + kPlayerBaseEnvironmentFlagOffset);
+        out.LinkedActor = nds->ARM9Read32(actor.Base + kPlayerBaseLinkedActorOffset);
+        out.TransitionStep = nds->ARM9Read8(actor.Base + kPlayerBaseTransitionStepOffset);
+        out.UpdateLocked = nds->ARM9Read8(actor.Base + kPlayerBaseUpdateLockedOffset);
+        out.CharacterIDBase = nds->ARM9Read8(actor.Base + kPlayerBaseCharacterIDOffset);
+        out.TransitioningFlag = nds->ARM9Read8(actor.Base + kPlayerBaseTransitioningFlagOffset);
+        out.CameraFocusMode = nds->ARM9Read8(actor.Base + kPlayerBaseCameraFocusModeOffset);
+        out.DefeatedFlag = nds->ARM9Read8(actor.Base + kPlayerBaseDefeatedFlagOffset);
+        out.PlayerBaseID = nds->ARM9Read8(actor.Base + kPlayerBasePlayerIDOffset);
+        out.VisibleFlag = nds->ARM9Read8(actor.Base + kPlayerBaseVisibleFlagOffset);
+        out.TransitFunc = nds->ARM9Read32(actor.Base + 0x990);
+        out.TransitArg = nds->ARM9Read32(actor.Base + 0x994);
+    }
+
+    const melonDS::u32 p = static_cast<melonDS::u32>(player);
+    out.Powerup = nds->ARM9Read8(kGamePlayerPowerupAddr + p);
+    out.InventoryPowerup = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr + p);
+    out.Dead = nds->ARM9Read8(kGamePlayerDeadAddr + p);
+    out.Character = nds->ARM9Read8(kGamePlayerCharacterAddr + p);
+    out.TransitionStatus = nds->ARM9Read32(kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32) * p);
+    out.Lives = nds->ARM9Read32(kGamePlayerLivesAddr + sizeof(melonDS::u32) * p);
+    out.BattleStars = nds->ARM9Read32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32) * p);
+    out.Coins = nds->ARM9Read32(kGamePlayerCoinsAddr + sizeof(melonDS::u32) * p);
+    out.Score = nds->ARM9Read32(kGamePlayerScoreAddr + sizeof(melonDS::u32) * p);
+    out.DisplayedStars = nds->ARM9Read32(kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32) * p);
+    out.Deaths = nds->ARM9Read32(kGamePlayerDeathsAddr + sizeof(melonDS::u32) * p);
+    out.CollectedStars = nds->ARM9Read32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32) * p);
+}
+
+void RecordDiagnosticSnapshotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.DiagnosticEventsEnabled || !nds || !nds->MainRAM)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.NetplayStartFrame)
+        return;
+
+    DiagnosticFrameSnapshot snap;
+    snap.Valid = true;
+    snap.Frame = frame;
+    snap.Instance = static_cast<melonDS::u32>(instanceID);
+    snap.StageID = nds->ARM9Read32(kGameStageIDAddr);
+    snap.StageGroup = nds->ARM9Read32(kGameStageGroupAddr);
+    snap.VsMode = nds->ARM9Read32(kGameVsModeAddr);
+    snap.LocalPlayerID = nds->ARM9Read32(kGameLocalPlayerIDAddr);
+    snap.SceneCurrentSceneID = nds->ARM9Read16(kSceneCurrentSceneIDAddr);
+    snap.SceneNextSceneID = nds->ARM9Read16(kSceneNextSceneIDAddr);
+    snap.StageActorFreezeFlag = nds->ARM9Read8(kStageActorFreezeFlagAddr);
+    snap.PlayerCount = nds->ARM9Read32(kGamePlayerCountAddr);
+    snap.InputConsole0Held = nds->ARM9Read16(kInputConsoleKeysAddr + 0x0);
+    snap.InputConsole1Held = nds->ARM9Read16(kInputConsoleKeysAddr + 0x4);
+    snap.InputPlayer0Held = nds->ARM9Read16(kInputPlayerKeysHeldAddr + 0x0);
+    snap.InputPlayer1Held = nds->ARM9Read16(kInputPlayerKeysHeldAddr + 0x2);
+    snap.LastSentInputFrame = G.LastSentInputFrame;
+    snap.LastReceivedInputFrame = G.LastReceivedInputFrame;
+    snap.PlayerGlobalHash = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, 0xC0);
+    snap.PlayerGlobalHash0 = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, 0x60);
+    snap.PlayerGlobalHash1 = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr + 0x60, 0x60);
+    snap.StageCameraGlobalX0 = nds->ARM9Read32(kStageCameraXAddr);
+    snap.StageCameraGlobalX1 = nds->ARM9Read32(kStageCameraXAddr + sizeof(melonDS::u32));
+    snap.StageCameraGlobalY0 = nds->ARM9Read32(kStageCameraYAddr);
+    snap.StageCameraGlobalY1 = nds->ARM9Read32(kStageCameraYAddr + sizeof(melonDS::u32));
+    snap.StageCameraGlobalWidth0 = nds->ARM9Read32(kStageCameraWidthAddr);
+    snap.StageCameraGlobalWidth1 = nds->ARM9Read32(kStageCameraWidthAddr + sizeof(melonDS::u32));
+    snap.StageCameraGlobalHeight0 = nds->ARM9Read32(kStageCameraHeightAddr);
+    snap.StageCameraGlobalHeight1 = nds->ARM9Read32(kStageCameraHeightAddr + sizeof(melonDS::u32));
+    ReadDiagnosticPlayerSnapshot(instanceID, frame, nds, 0, snap.Player[0]);
+    ReadDiagnosticPlayerSnapshot(instanceID, frame, nds, 1, snap.Player[1]);
+    if (snap.Player[0].Found && IsValidMainRAMRange(nds, snap.Player[0].Base, 0xC00))
+        snap.PlayerActorHash0 = HashMainRAMRange(nds, snap.Player[0].Base, 0xC00);
+    if (snap.Player[1].Found && IsValidMainRAMRange(nds, snap.Player[1].Base, 0xC00))
+        snap.PlayerActorHash1 = HashMainRAMRange(nds, snap.Player[1].Base, 0xC00);
+
+    const DiagnosticFrameSnapshot* previous = nullptr;
+    if (G.DiagnosticRingNext[instanceID] != 0)
+    {
+        const std::size_t prevIdx =
+            (G.DiagnosticRingNext[instanceID] + kDiagnosticRingCapacity - 1) % kDiagnosticRingCapacity;
+        if (G.DiagnosticRing[instanceID][prevIdx].Valid)
+            previous = &G.DiagnosticRing[instanceID][prevIdx];
+    }
+    for (int player = 0; player < 2; player++)
+    {
+        EmitDiagnosticPositionAnomalyEvent(instanceID, snap, previous, player);
+        EmitDiagnosticPitTransitionEvent(instanceID, snap, previous, player);
+    }
+
+    G.DiagnosticRing[instanceID][G.DiagnosticRingNext[instanceID] % kDiagnosticRingCapacity] = snap;
+    G.DiagnosticRingNext[instanceID] = (G.DiagnosticRingNext[instanceID] + 1) % kDiagnosticRingCapacity;
+
+    if (G.DiagnosticPostTriggerUntilFrame[instanceID] != 0
+        && frame >= G.DiagnosticPostTriggerUntilFrame[instanceID])
+    {
+        const melonDS::u32 triggerFrame = G.DiagnosticPostTriggerUntilFrame[instanceID];
+        G.DiagnosticPostTriggerUntilFrame[instanceID] = 0;
+        std::ostringstream json;
+        json << "{\"event\":\"diagnostic_post_window\","
+             << "\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\","
+             << "\"instance\":" << instanceID << ","
+             << "\"frame\":" << frame << ","
+             << "\"triggerUntilFrame\":" << triggerFrame << ",";
+        AppendDiagnosticRingJson(json, instanceID);
+        json << "}";
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        WriteDiagnosticEventLocked(json.str());
+    }
+}
+
+void AppendRemoteSampleDiffJson(std::ostream& out, const GameStateSample& local, const GameStateSample& remote)
+{
+    auto diffHex = [&out](const char* name, melonDS::u32 a, melonDS::u32 b, bool& first) {
+        if (a == b)
+            return;
+        if (!first)
+            out << ",";
+        first = false;
+        out << "{\"field\":\"" << name << "\",\"local\":\"0x" << Hex32(a)
+            << "\",\"remote\":\"0x" << Hex32(b) << "\"}";
+    };
+
+    bool first = true;
+    out << "\"remoteSampleDiffs\":[";
+    diffHex("stageID", local.StageID, remote.StageID, first);
+    diffHex("stageGroup", local.StageGroup, remote.StageGroup, first);
+    diffHex("player0PosX", local.PlayerActor0PosX, remote.PlayerActor0PosX, first);
+    diffHex("player0PosY", local.PlayerActor0PosY, remote.PlayerActor0PosY, first);
+    diffHex("player0VelX", local.PlayerActor0VelX, remote.PlayerActor0VelX, first);
+    diffHex("player0VelY", local.PlayerActor0VelY, remote.PlayerActor0VelY, first);
+    diffHex("player1PosX", local.PlayerActor1PosX, remote.PlayerActor1PosX, first);
+    diffHex("player1PosY", local.PlayerActor1PosY, remote.PlayerActor1PosY, first);
+    diffHex("player1VelX", local.PlayerActor1VelX, remote.PlayerActor1VelX, first);
+    diffHex("player1VelY", local.PlayerActor1VelY, remote.PlayerActor1VelY, first);
+    diffHex("player0Deaths", local.Player0Deaths, remote.Player0Deaths, first);
+    diffHex("player1Deaths", local.Player1Deaths, remote.Player1Deaths, first);
+    diffHex("player0BattleStars", local.Player0BattleStars, remote.Player0BattleStars, first);
+    diffHex("player1BattleStars", local.Player1BattleStars, remote.Player1BattleStars, first);
+    diffHex("vsCoinCount", local.VsCoinCount, remote.VsCoinCount, first);
+    out << "]";
+}
+
+void EmitGameStateMismatchEventLocked(
+    int instanceID,
+    melonDS::u32 frame,
+    const GameStateSyncHashes& local,
+    const GameStateSyncHashes& remote)
+{
+    if (!G.DiagnosticEventsEnabled || instanceID < 0 || instanceID >= 16)
+        return;
+    if (local.PlayerGlobal == remote.PlayerGlobal)
+        return;
+    if (G.LastDiagnosticMismatchFrame[instanceID] != 0
+        && frame < G.LastDiagnosticMismatchFrame[instanceID] + 300)
+        return;
+
+    G.LastDiagnosticMismatchFrame[instanceID] = frame;
+    G.DiagnosticPostTriggerUntilFrame[instanceID] = frame + kDiagnosticPostTriggerFrames;
+
+    GameStateSample remoteSample;
+    bool hasRemoteSample = false;
+    auto remoteIt = G.RemoteGameStateSamples.find(GameStateKey(instanceID, frame));
+    if (remoteIt != G.RemoteGameStateSamples.end())
+    {
+        remoteSample = remoteIt->second;
+        hasRemoteSample = true;
+    }
+
+    GameStateSample localSample;
+    bool hasLocalSample = false;
+    const DiagnosticFrameSnapshot* latest = nullptr;
+    if (G.DiagnosticRingNext[instanceID] != 0)
+    {
+        const std::size_t idx =
+            (G.DiagnosticRingNext[instanceID] + kDiagnosticRingCapacity - 1) % kDiagnosticRingCapacity;
+        if (G.DiagnosticRing[instanceID][idx].Valid)
+            latest = &G.DiagnosticRing[instanceID][idx];
+    }
+
+    std::ostringstream json;
+    json << "{\"event\":\"player_global_mismatch\","
+         << "\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\","
+         << "\"instance\":" << instanceID << ","
+         << "\"frame\":" << frame << ",";
+    AppendJsonHex64(json, "localBasic", local.Basic); json << ",";
+    AppendJsonHex64(json, "remoteBasic", remote.Basic); json << ",";
+    AppendJsonHex64(json, "localPlayerGlobal", local.PlayerGlobal); json << ",";
+    AppendJsonHex64(json, "remotePlayerGlobal", remote.PlayerGlobal); json << ",";
+    AppendJsonHex64(json, "localWifiCandidate", local.WifiCandidate); json << ",";
+    AppendJsonHex64(json, "remoteWifiCandidate", remote.WifiCandidate); json << ",";
+    AppendJsonHex64(json, "localRenderCandidate", local.RenderCandidate); json << ",";
+    AppendJsonHex64(json, "remoteRenderCandidate", remote.RenderCandidate); json << ",";
+    if (latest)
+    {
+        AppendJsonHex64(json, "localPlayerGlobalHash0", latest->PlayerGlobalHash0); json << ",";
+        AppendJsonHex64(json, "localPlayerGlobalHash1", latest->PlayerGlobalHash1); json << ",";
+        AppendJsonHex64(json, "localPlayerActorHash0", latest->PlayerActorHash0); json << ",";
+        AppendJsonHex64(json, "localPlayerActorHash1", latest->PlayerActorHash1); json << ",";
+        json << "\"latestLocal\":";
+        AppendDiagnosticFrameJson(json, *latest);
+        json << ",";
+    }
+    if (hasRemoteSample)
+    {
+        json << "\"remotePlayers\":[";
+        AppendGameStatePlayerJson(json, remoteSample, 0);
+        json << ",";
+        AppendGameStatePlayerJson(json, remoteSample, 1);
+        json << "],";
+        if (latest)
+        {
+            localSample.StageID = latest->StageID;
+            localSample.StageGroup = latest->StageGroup;
+            localSample.PlayerActor0PosX = latest->Player[0].PosX;
+            localSample.PlayerActor0PosY = latest->Player[0].PosY;
+            localSample.PlayerActor0VelX = latest->Player[0].VelX;
+            localSample.PlayerActor0VelY = latest->Player[0].VelY;
+            localSample.PlayerActor1PosX = latest->Player[1].PosX;
+            localSample.PlayerActor1PosY = latest->Player[1].PosY;
+            localSample.PlayerActor1VelX = latest->Player[1].VelX;
+            localSample.PlayerActor1VelY = latest->Player[1].VelY;
+            localSample.Player0Deaths = latest->Player[0].Deaths;
+            localSample.Player1Deaths = latest->Player[1].Deaths;
+            localSample.Player0BattleStars = latest->Player[0].BattleStars;
+            localSample.Player1BattleStars = latest->Player[1].BattleStars;
+            localSample.VsCoinCount = latest->Player[0].Coins + latest->Player[1].Coins;
+            hasLocalSample = true;
+        }
+        if (hasLocalSample)
+        {
+            AppendRemoteSampleDiffJson(json, localSample, remoteSample);
+            json << ",";
+        }
+    }
+    AppendDiagnosticRingJson(json, instanceID);
+    json << "}";
+    WriteDiagnosticEventLocked(json.str());
+}
+
+void AppendNearbyHazardsJson(std::ostream& out, melonDS::NDS* nds)
+{
+    out << "\"nearbyMovingHazards\":[";
+    const std::vector<ObjectScanSample> hazards =
+        FindActiveObjectsByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
+    const std::size_t count = std::min<std::size_t>(hazards.size(), kMaxWorldMovingHazards);
+    for (std::size_t i = 0; i < count; i++)
+    {
+        if (i != 0)
+            out << ",";
+        out << "{";
+        out << "\"guid\":" << hazards[i].GUID << ",";
+        AppendJsonHex32(out, "base", hazards[i].Base); out << ",";
+        AppendJsonHex32(out, "x", hazards[i].PosX); out << ",";
+        AppendJsonHex32(out, "y", hazards[i].PosY); out << ",";
+        AppendJsonHex32(out, "velX", hazards[i].VelX); out << ",";
+        AppendJsonHex32(out, "velY", hazards[i].VelY); out << ",";
+        out << "\"stateType\":" << hazards[i].StateType << ",";
+        AppendJsonHex32(out, "flags", hazards[i].Flags);
+        out << "}";
+    }
+    out << "]";
+}
+
+void EmitPlayerLifeEvent(
+    int instanceID,
+    melonDS::u32 frame,
+    int player,
+    const char* reason,
+    const GameStateSample& sample,
+    melonDS::NDS* nds)
+{
+    if (!G.DiagnosticEventsEnabled || instanceID < 0 || instanceID >= 16 || player < 0 || player > 1)
+        return;
+    const bool transitionOnly = reason && std::strcmp(reason, "death-transition") == 0;
+    if (G.LastDiagnosticLifeEventFrame[instanceID][player] == frame)
+        return;
+    if (transitionOnly
+        && G.LastDiagnosticLifeEventFrame[instanceID][player] != 0
+        && frame < G.LastDiagnosticLifeEventFrame[instanceID][player] + 300)
+    {
+        return;
+    }
+
+    G.LastDiagnosticLifeEventFrame[instanceID][player] = frame;
+    if (!transitionOnly)
+        G.DiagnosticPostTriggerUntilFrame[instanceID] = frame + kDiagnosticPostTriggerFrames;
+
+    std::ostringstream json;
+    json << "{\"event\":\"player_life_change\","
+         << "\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\","
+         << "\"reason\":\"" << (reason ? reason : "change") << "\","
+         << "\"instance\":" << instanceID << ","
+         << "\"frame\":" << frame << ","
+         << "\"player\":" << player << ","
+         << "\"stageID\":" << sample.StageID << ","
+         << "\"stageGroup\":" << sample.StageGroup << ","
+         << "\"scene\":" << sample.SceneCurrentSceneID << ","
+         << "\"nextScene\":" << sample.SceneNextSceneID << ","
+         << "\"players\":[";
+    AppendGameStatePlayerJson(json, sample, 0);
+    json << ",";
+    AppendGameStatePlayerJson(json, sample, 1);
+    json << "],";
+    AppendNearbyHazardsJson(json, nds);
+    if (!transitionOnly)
+    {
+        json << ",";
+        AppendDiagnosticRingJson(json, instanceID);
+    }
+    json << "}";
+
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    WriteDiagnosticEventLocked(json.str());
+}
+
 bool ReadObjectByBase(
     melonDS::NDS* nds,
     melonDS::u32 base,
@@ -9663,7 +10951,7 @@ std::vector<ObjectScanSample> FindActiveObjectsByIDAndSettings(
     melonDS::NDS* nds,
     melonDS::u16 expectedObjectID,
     melonDS::u32 expectedSettings,
-    bool includeStateType2 = false)
+    bool includeStateType2)
 {
     std::vector<ObjectScanSample> actors;
     if (!nds || !nds->MainRAM)
@@ -11496,10 +12784,10 @@ void PushScriptRemotePacketIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
     if (instanceID < 0 || instanceID >= 16)
         return;
 
-    const InputState input = ApplyScriptRemotePacketInputScript(
+    const InputState input = ConvertStockXToTouch(ApplyScriptRemotePacketInputScript(
         G.ScriptRemotePacketInputInstance,
         frame,
-        NeutralInput());
+        NeutralInput()));
     melonDS::u8 packet[52] {};
     const melonDS::u32 tick = nds->ARM9Read16(kNetPacketTickAddr);
     const melonDS::u32 keys = (~input.KeyMask) & 0x0FFF;
@@ -11561,10 +12849,11 @@ InputState PacketBridgeInputForPlayer(
     bool hasRemoteInput)
 {
     if (player == localPlayer)
-        return localInput;
+        return ConvertStockXToTouch(localInput);
     if (hasRemoteInput)
-        return remoteInput;
-    return ApplyScriptRemotePacketInputScript(G.ScriptRemotePacketInputInstance, frame, NeutralInput());
+        return ConvertStockXToTouch(remoteInput);
+    return ConvertStockXToTouch(
+        ApplyScriptRemotePacketInputScript(G.ScriptRemotePacketInputInstance, frame, NeutralInput()));
 }
 
 void WritePacketBridgeJitScratchInputs(
@@ -11853,9 +13142,10 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
             true,
             predictedRemote);
 
-        nds->SetKeyMask(localInput.KeyMask);
-        if (localInput.Touching)
-            nds->TouchScreen(localInput.TouchX, localInput.TouchY);
+        const InputState runtimeLocalInput = ConvertStockXToTouch(localInput);
+        nds->SetKeyMask(runtimeLocalInput.KeyMask);
+        if (runtimeLocalInput.Touching)
+            nds->TouchScreen(runtimeLocalInput.TouchX, runtimeLocalInput.TouchY);
         else
             nds->ReleaseScreen();
 
@@ -11948,6 +13238,7 @@ void ThrottleInputNetplayFrameLead(melonDS::NDS* nds, melonDS::u32 frame, melonD
         {
             std::lock_guard<std::mutex> lock(G.Mutex);
             PumpNetworkLocked(nds, frame);
+            MaybeResendNetplayStartReadyLocked();
             remoteFrame = G.LastReceivedInputFrame;
         }
 
@@ -11983,6 +13274,10 @@ void ThrottleInputNetplayFrameLead(melonDS::NDS* nds, melonDS::u32 frame, melonD
             return;
         }
         blocked = true;
+        {
+            std::lock_guard<std::mutex> lock(G.Mutex);
+            MaybeResendLatestInputForFrameLeadLocked();
+        }
 
         if (G.InputNetplayTraceEnabled && G.LastInputFrameThrottleTraceFrame != frame)
         {
@@ -14506,14 +15801,21 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
                                              melonDS::u32& linkedActor,
                                              melonDS::u32& transitionFlag,
                                              melonDS::u32& collisionFlag,
-                                             melonDS::u32& environmentFlag,
-                                             melonDS::u32& updateLocked,
-                                             melonDS::u32& characterID,
-                                             melonDS::u32& transitioningFlag,
-                                             melonDS::u32& cameraFocusMode,
-                                             melonDS::u32& defeatedFlag,
-                                             melonDS::u32& playerBaseID,
-                                             melonDS::u32& visibleFlag)
+                                              melonDS::u32& environmentFlag,
+                                              melonDS::u32& updateLocked,
+                                              melonDS::u32& controlState,
+                                              melonDS::u32& characterID,
+                                              melonDS::u32& requestedPowerup,
+                                              melonDS::u32& currentPowerup,
+                                              melonDS::u32& previousPowerup,
+                                              melonDS::u32& transitioningFlag,
+                                              melonDS::u32& cameraFocusMode,
+                                              melonDS::u32& defeatedFlag,
+                                              melonDS::u32& playerBaseID,
+                                              melonDS::u32& visibleFlag,
+                                              melonDS::u32& powerupPhase,
+                                              melonDS::u32& powerupTimer,
+                                              melonDS::u32& powerupGainTimer)
     {
         if (!actor.Found || !IsARM9MainRAMAddress(actor.Base))
             return;
@@ -14522,12 +15824,19 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         collisionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseCollisionFlagOffset);
         environmentFlag = nds->ARM9Read32(actor.Base + kPlayerBaseEnvironmentFlagOffset);
         updateLocked = nds->ARM9Read8(actor.Base + kPlayerBaseUpdateLockedOffset);
+        controlState = nds->ARM9Read8(actor.Base + kPlayerBaseControlStateOffset);
         characterID = nds->ARM9Read8(actor.Base + kPlayerBaseCharacterIDOffset);
+        requestedPowerup = nds->ARM9Read8(actor.Base + kPlayerBaseRequestedPowerupOffset);
+        currentPowerup = nds->ARM9Read8(actor.Base + kPlayerBaseCurrentPowerupOffset);
+        previousPowerup = nds->ARM9Read8(actor.Base + kPlayerBasePreviousPowerupOffset);
         transitioningFlag = nds->ARM9Read8(actor.Base + kPlayerBaseTransitioningFlagOffset);
         cameraFocusMode = nds->ARM9Read8(actor.Base + kPlayerBaseCameraFocusModeOffset);
         defeatedFlag = nds->ARM9Read8(actor.Base + kPlayerBaseDefeatedFlagOffset);
         playerBaseID = nds->ARM9Read8(actor.Base + kPlayerBasePlayerIDOffset);
         visibleFlag = nds->ARM9Read8(actor.Base + kPlayerBaseVisibleFlagOffset);
+        powerupPhase = nds->ARM9Read8(actor.Base + kPlayerPowerupPhaseOffset);
+        powerupTimer = nds->ARM9Read8(actor.Base + kPlayerPowerupTimerOffset);
+        powerupGainTimer = nds->ARM9Read8(actor.Base + kPlayerPowerupGainTimerOffset);
     };
     readPlayerBaseRuntimeFields(
         players.Actor0,
@@ -14536,12 +15845,19 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         sample.PlayerActor0CollisionFlag,
         sample.PlayerActor0EnvironmentFlag,
         sample.PlayerActor0UpdateLocked,
+        sample.PlayerActor0ControlState,
         sample.PlayerActor0CharacterIDBase,
+        sample.PlayerActor0RequestedPowerup,
+        sample.PlayerActor0CurrentPowerup,
+        sample.PlayerActor0PreviousPowerup,
         sample.PlayerActor0TransitioningFlag,
         sample.PlayerActor0CameraFocusMode,
         sample.PlayerActor0DefeatedFlag,
         sample.PlayerActor0PlayerBaseID,
-        sample.PlayerActor0VisibleFlag);
+        sample.PlayerActor0VisibleFlag,
+        sample.PlayerActor0PowerupPhase,
+        sample.PlayerActor0PowerupTimer,
+        sample.PlayerActor0PowerupGainTimer);
     readPlayerBaseRuntimeFields(
         players.Actor1,
         sample.PlayerActor1LinkedActor,
@@ -14549,12 +15865,19 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         sample.PlayerActor1CollisionFlag,
         sample.PlayerActor1EnvironmentFlag,
         sample.PlayerActor1UpdateLocked,
+        sample.PlayerActor1ControlState,
         sample.PlayerActor1CharacterIDBase,
+        sample.PlayerActor1RequestedPowerup,
+        sample.PlayerActor1CurrentPowerup,
+        sample.PlayerActor1PreviousPowerup,
         sample.PlayerActor1TransitioningFlag,
         sample.PlayerActor1CameraFocusMode,
         sample.PlayerActor1DefeatedFlag,
         sample.PlayerActor1PlayerBaseID,
-        sample.PlayerActor1VisibleFlag);
+        sample.PlayerActor1VisibleFlag,
+        sample.PlayerActor1PowerupPhase,
+        sample.PlayerActor1PowerupTimer,
+        sample.PlayerActor1PowerupGainTimer);
 
     sample.PlayerCount = nds->ARM9Read32(kGamePlayerCountAddr);
     sample.PlayerTransitionStatus0 = nds->ARM9Read32(kGamePlayerTransitionStatusAddr);
@@ -15720,27 +17043,41 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                          << ",0x" << sample.PlayerActor1PhysicsFlag
                          << ",0x" << sample.PlayerActor1DamageCooldown
                          << ",0x" << sample.PlayerActor0LinkedActor
-                         << ",0x" << sample.PlayerActor0TransitionFlag
-                         << ",0x" << sample.PlayerActor0CollisionFlag
-                         << ",0x" << sample.PlayerActor0EnvironmentFlag
-                         << ",0x" << sample.PlayerActor0UpdateLocked
-                         << ",0x" << sample.PlayerActor0CharacterIDBase
-                         << ",0x" << sample.PlayerActor0TransitioningFlag
-                         << ",0x" << sample.PlayerActor0CameraFocusMode
-                         << ",0x" << sample.PlayerActor0DefeatedFlag
-                         << ",0x" << sample.PlayerActor0PlayerBaseID
-                         << ",0x" << sample.PlayerActor0VisibleFlag
-                         << ",0x" << sample.PlayerActor1LinkedActor
-                         << ",0x" << sample.PlayerActor1TransitionFlag
-                         << ",0x" << sample.PlayerActor1CollisionFlag
-                         << ",0x" << sample.PlayerActor1EnvironmentFlag
-                         << ",0x" << sample.PlayerActor1UpdateLocked
-                         << ",0x" << sample.PlayerActor1CharacterIDBase
-                         << ",0x" << sample.PlayerActor1TransitioningFlag
-                         << ",0x" << sample.PlayerActor1CameraFocusMode
-                         << ",0x" << sample.PlayerActor1DefeatedFlag
-                         << ",0x" << sample.PlayerActor1PlayerBaseID
-                         << ",0x" << sample.PlayerActor1VisibleFlag;
+                          << ",0x" << sample.PlayerActor0TransitionFlag
+                          << ",0x" << sample.PlayerActor0CollisionFlag
+                          << ",0x" << sample.PlayerActor0EnvironmentFlag
+                          << ",0x" << sample.PlayerActor0UpdateLocked
+                          << ",0x" << sample.PlayerActor0ControlState
+                          << ",0x" << sample.PlayerActor0CharacterIDBase
+                          << ",0x" << sample.PlayerActor0RequestedPowerup
+                          << ",0x" << sample.PlayerActor0CurrentPowerup
+                          << ",0x" << sample.PlayerActor0PreviousPowerup
+                          << ",0x" << sample.PlayerActor0TransitioningFlag
+                          << ",0x" << sample.PlayerActor0CameraFocusMode
+                          << ",0x" << sample.PlayerActor0DefeatedFlag
+                          << ",0x" << sample.PlayerActor0PlayerBaseID
+                          << ",0x" << sample.PlayerActor0VisibleFlag
+                          << ",0x" << sample.PlayerActor0PowerupPhase
+                          << ",0x" << sample.PlayerActor0PowerupTimer
+                          << ",0x" << sample.PlayerActor0PowerupGainTimer
+                          << ",0x" << sample.PlayerActor1LinkedActor
+                          << ",0x" << sample.PlayerActor1TransitionFlag
+                          << ",0x" << sample.PlayerActor1CollisionFlag
+                          << ",0x" << sample.PlayerActor1EnvironmentFlag
+                          << ",0x" << sample.PlayerActor1UpdateLocked
+                          << ",0x" << sample.PlayerActor1ControlState
+                          << ",0x" << sample.PlayerActor1CharacterIDBase
+                          << ",0x" << sample.PlayerActor1RequestedPowerup
+                          << ",0x" << sample.PlayerActor1CurrentPowerup
+                          << ",0x" << sample.PlayerActor1PreviousPowerup
+                          << ",0x" << sample.PlayerActor1TransitioningFlag
+                          << ",0x" << sample.PlayerActor1CameraFocusMode
+                          << ",0x" << sample.PlayerActor1DefeatedFlag
+                          << ",0x" << sample.PlayerActor1PlayerBaseID
+                          << ",0x" << sample.PlayerActor1VisibleFlag
+                          << ",0x" << sample.PlayerActor1PowerupPhase
+                          << ",0x" << sample.PlayerActor1PowerupTimer
+                          << ",0x" << sample.PlayerActor1PowerupGainTimer;
     }
 
     G.GameStateTrace << std::dec << '\n';
@@ -20502,7 +21839,7 @@ void InitFromEnvironment()
     G.SerialRunEnabled = EnvFlag("MELONDS_NSML_SERIAL_RUN");
     G.HashEnabled = !EnvFlag("MELONDS_NSML_DISABLE_HASH");
     G.HashInterval = std::max(1, EnvInt("MELONDS_NSML_HASH_INTERVAL", 60));
-    G.TestWaitTimeoutMs = std::max(0, EnvInt("MELONDS_NSML_WAIT_TIMEOUT_MS", 5000));
+    G.TestWaitTimeoutMs = std::max(0, EnvInt("MELONDS_NSML_WAIT_TIMEOUT_MS", 60000));
     G.TestQuitGraceMs = std::max(0, EnvInt("MELONDS_NSML_QUIT_GRACE_MS", 0));
     G.InputTraceEnabled = EnvFlag("MELONDS_NSML_INPUT_TRACE");
     G.InputTraceInterval = std::max(1, EnvInt("MELONDS_NSML_INPUT_TRACE_INTERVAL", 60));
@@ -20688,6 +22025,12 @@ void InitFromEnvironment()
     G.InputDropOffset = std::max(0, EnvInt("MELONDS_NSML_INPUT_DROP_OFFSET", 0));
     if (G.InputDropModulo > 0)
         G.InputDropOffset %= G.InputDropModulo;
+    G.InputDropStartFrame = static_cast<melonDS::u32>(
+        std::clamp(EnvInt("MELONDS_NSML_INPUT_DROP_START_FRAME", 0), 0, 1000000));
+    G.InputDropEndFrame = static_cast<melonDS::u32>(
+        std::clamp(EnvInt("MELONDS_NSML_INPUT_DROP_END_FRAME", 0), 0, 1000000));
+    if (G.InputDropEndFrame > 0 && G.InputDropEndFrame < G.InputDropStartFrame)
+        G.InputDropEndFrame = G.InputDropStartFrame;
     G.InputNetplayMaxFrameLead =
         EnvInt("MELONDS_NSML_INPUT_MAX_FRAME_LEAD", G.InputNetplayOnly ? 2 : -1);
     G.DirectMvlBootEnabled = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT");
@@ -20769,6 +22112,27 @@ void InitFromEnvironment()
     if (gameStateTrace && gameStateTrace[0]) G.GameStateTracePath = gameStateTrace;
     const char* diagnosticsFile = std::getenv("MELONDS_NSML_DIAGNOSTICS_FILE");
     if (diagnosticsFile && diagnosticsFile[0]) G.DiagnosticsPath = diagnosticsFile;
+    const char* diagnosticEventsFile = std::getenv("MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE");
+    if (diagnosticEventsFile && diagnosticEventsFile[0]) G.DiagnosticEventsPath = diagnosticEventsFile;
+    G.DiagnosticEventsEnabled =
+        EnvFlag("MELONDS_NSML_DIAGNOSTIC_EVENTS") || !G.DiagnosticEventsPath.empty();
+    if (EnvFlag("MELONDS_NSML_DIAGNOSTIC_EVENTS_DISABLE"))
+        G.DiagnosticEventsEnabled = false;
+    G.DiagnosticRingFrames = std::clamp(
+        EnvInt("MELONDS_NSML_DIAGNOSTIC_RING_FRAMES", 360),
+        60,
+        static_cast<int>(kDiagnosticRingCapacity));
+    if (G.DiagnosticEventsEnabled && G.DiagnosticEventsPath.empty() && !G.DiagnosticsPath.empty())
+    {
+        std::filesystem::path eventsPath(G.DiagnosticsPath);
+        eventsPath.replace_filename("melonds-events.jsonl");
+        G.DiagnosticEventsPath = eventsPath.string();
+    }
+    if (G.DiagnosticEventsEnabled && !G.DiagnosticEventsPath.empty())
+    {
+        std::error_code ec;
+        std::filesystem::remove(G.DiagnosticEventsPath, ec);
+    }
     G.GameStateTraceInterval = std::max(1, EnvInt("MELONDS_NSML_GAME_STATE_TRACE_INTERVAL", 60));
     G.GameStateTraceStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_GAME_STATE_TRACE_START_FRAME", 0)));
@@ -21497,7 +22861,7 @@ void InitFromEnvironment()
         {
                 G.GameStateTrace << "instance,frame,stageID,stageGroup,vsMode,localPlayerID,arm9PC,arm9LR,arm9SP,arm9CPSR,appFrameLength,appUpdateTask,appSleepPhase,appSleepControl,appSleeping,appSleepPhaseTimer,appSleepWakeUpTimer,appBootParam,appBootTarget,appBootScene,ggid,netCurrentLanguage,netLocalAid,netState14,netState1C,netState20,netState24,netExpectedConsoleCount,netMultiBootSession,netSessionState,netModuleState,netMaxSessionChildren,netMaxConsoleCount,netState5C,netPacketTick,netPacketKeys,netPacketAction,netPacketByte5,netPacketByte6,netPacketByte7,netRandomValue,netRandomCallCount,netRandomBranchAddress,inputConsole0Held,inputConsole0Pressed,inputConsole1Held,inputConsole1Pressed,inputPlayer0Held,inputPlayer1Held,inputPlayer0Pressed,inputPlayer1Pressed,stageActorFreezeFlag,sceneIsSceneActive,scenePreviousSceneID,sceneNextSceneID,sceneCurrentSceneID,sceneNextSceneSettings,vsStarFound,vsStarGuid,vsStarBase,vsStarSettings,vsStarStateType,vsStarFlags,vsStarX,vsStarY,vsStarZ,vsStarActorFound,vsStarActorGuid,vsStarActorBase,vsStarActorSettings,vsStarActorStateType,vsStarActorFlags,vsStarActorX,vsStarActorY,vsStarActorZ,playerActor0Found,playerActor0Guid,playerActor0Base,playerActor0Settings,playerActor0StateType,playerActor0Flags,playerActor0X,playerActor0Y,playerActor0Z,playerActor0PrevX,playerActor0PrevY,playerActor0PrevZ,playerActor0VelX,playerActor0VelY,playerActor0VelZ,playerActor0PlayerID,playerActor0TransitionStep,playerActor0SignalLock,playerActor0Flag192,playerActor0Flags728,playerActor0Flags72C,playerActor0Flags730,playerActor0TransitFunc,playerActor0TransitArg,playerActor1Found,playerActor1Guid,playerActor1Base,playerActor1Settings,playerActor1StateType,playerActor1Flags,playerActor1X,playerActor1Y,playerActor1Z,playerActor1PrevX,playerActor1PrevY,playerActor1PrevZ,playerActor1VelX,playerActor1VelY,playerActor1VelZ,playerActor1PlayerID,playerActor1TransitionStep,playerActor1SignalLock,playerActor1Flag192,playerActor1Flags728,playerActor1Flags72C,playerActor1Flags730,playerActor1TransitFunc,playerActor1TransitArg,playerTransitionStatus0,playerTransitionStatus1,vsConnectFound,vsConnectBase,vsConnectWord078,vsConnectWord07C,vsConnectByte0E2,vsConnectByte106,vsConnectWord114,vsConnectWord118,vsConnectWord120,vsConnectWord128,vsConnectWord138,vsConnectWord13C,vsConnectWord140,vsConnectWord144,vsConnectWord148,vsConnectByte153,vsConnectByte154,vsConnectByte155,vsConnectByte156,vsConnectByte157,vsConnectByte158,vsConnectWord154,courseSelectFound,courseSelectBase,courseSelectSettings,courseSelectWord060,courseSelectWord064,courseSelectWord068,courseSelectWord06C,courseSelectWord070,courseSelectWord074,courseSelectWord078,courseSelectWord07C,courseSelectWord080,courseSelectWord084,courseSelectWord088,courseSelectWord08C,courseSelectWord090,stageCameraFound,stageCameraWord190,stageCameraWord194,stageCameraWord19C,stageCameraWord1A0,stageActorManagerFound,stageActorManagerBase,stageActorManagerStateType,stageControllerFound,stageControllerBase,stageControllerStateType,mvlObject267Found,mvlObject267Base,mvlObject267StateType,mvlObject267LeftFound,mvlObject267LeftBase,mvlObject267LeftStateType,mvlObject267LeftX,mvlObject267LeftY,mvlObject267LeftZ,mvlObject267RightFound,mvlObject267RightBase,mvlObject267RightStateType,mvlObject267RightX,mvlObject267RightY,mvlObject267RightZ,mvlGlobal965C,mvlGlobal9670,mvlGlobal9674,mvlGlobal9694_0,mvlGlobal9694_1,mvlStageLayoutGateCAC6C,mvlStageLayoutGateCAC74,mvlStageLayoutGateCAC7C,mvlStageLayoutGateCACDC,mvlStageLayoutGateCAE80,mvlStageLayoutGateCAE74,mvlStageLayoutGateCAEB8,mvlStageLayoutGateCAF20,mvlStageLayoutGateCAF40,mvlStageLayoutGateCA8C0,mvlStageLayoutGateCA8D0,mvlStageLayoutGateCAD30,mvlManagerBase,mvlManagerVTable,mvlManagerGuid,mvlManagerSettings,mvlManagerObjectId,mvlManagerStateType,mvlManagerFlags,mvlManagerUnk54,mvlManagerResourcesHeap,mvlManagerWordA8CC,mvlManagerWordA8D0,mvlManagerWordA8D4,mvlManagerWordA8D8,mvlManagerWordA8DC,mvlManagerWordA8E0,mvlManagerWordA8E4,mvlManagerHalfA8E8,mvlManagerHalfA8EA,mvlManagerByteA8EC,mvlManagerHalf494,mvlManagerHalf4A0,stageSceneFound,stageSceneBase,stageSceneSettings,stageSceneStateType,stageSceneFlags,stageSceneWord154,stageSceneWord160,stageSceneWord5618,stageSceneWord561C,stageSceneWord563C,stageSceneByte5643,stageSceneByte5644,stageSceneByte5645,stageSceneByte5646,stageSceneByte5648,stageSceneByte5649,stageSceneUpdateDispatchFunc,stageSceneUpdateDispatchArg,stageSceneRenderDispatchFunc,stageSceneRenderDispatchArg,stageSceneGlobal9280,stageSceneGlobal9284,stageSceneGlobal928C,stageSceneGlobal92B4,stageSceneGlobal92C0,stageSceneGlobal92C8,stageSceneGlobal92CC,stageSceneGlobal92D0,stageLiquidPlayerSlot,stageLiquidHeight0,stageLiquidHeight1,movingHazardFound,movingHazardGuid,movingHazardSettings,movingHazardStateType,movingHazardFlags,movingHazardX,movingHazardY,movingHazardZ,movingHazardVelX,movingHazardVelY,movingHazardLastStepX,movingHazardLastStepY,movingHazardLastStepZ,movingHazardVelH,movingHazardTargetVelH,movingHazardAccelV,movingHazardTargetVelV,movingHazardAccelH,movingHazardTargetVelX,movingHazardTargetVelY,movingHazardTargetVelZ,objectScanTotal,objectNotCreatedCount,objectActiveCount,objectDeadCount,objectSkipUpdateCount,objectSkipRenderCount,objectFirstNotCreatedId,objectFirstNotCreatedBase,objectFirstNotCreatedFlags,objectSecondNotCreatedId,objectSecondNotCreatedBase,objectSecondNotCreatedFlags,objectActiveId0,objectActiveSettings0,objectActiveBase0,objectActiveId1,objectActiveSettings1,objectActiveBase1,objectActiveId2,objectActiveSettings2,objectActiveBase2,objectActiveId3,objectActiveSettings3,objectActiveBase3,objectActiveId4,objectActiveSettings4,objectActiveBase4,objectActiveId5,objectActiveSettings5,objectActiveBase5,objectActiveId6,objectActiveSettings6,objectActiveBase6,objectActiveId7,objectActiveSettings7,objectActiveBase7,objectActiveId8,objectActiveSettings8,objectActiveBase8,objectActiveId9,objectActiveSettings9,objectActiveBase9,objectActiveId10,objectActiveSettings10,objectActiveBase10,objectActiveId11,objectActiveSettings11,objectActiveBase11,objectActiveId12,objectActiveSettings12,objectActiveBase12,objectActiveId13,objectActiveSettings13,objectActiveBase13,objectActiveId14,objectActiveSettings14,objectActiveBase14,objectActiveId15,objectActiveSettings15,objectActiveBase15";
             if (G.GameStateTraceExtended)
-                G.GameStateTrace << ",playerCount,player0Powerup,player1Powerup,player0InventoryPowerup,player1InventoryPowerup,player0Dead,player1Dead,player0Character,player1Character,player0Lives,player1Lives,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,entranceSpawnID0,entranceSpawnID1,entranceTransitionFlags0,entranceTransitionFlags1,entranceSpawnPtr0,entranceSpawnPtr1,stageCameraBase,stageCameraTargetX,stageCameraTargetY,stageCameraTargetZ,stageCameraPositionX,stageCameraPositionY,stageCameraPositionZ,stageCameraUpX,stageCameraUpY,stageCameraUpZ,stageCameraUnk114,stageCameraUnk118,stageCameraUnk11C,stageCameraUnk128,stageCameraUnk12C,stageCameraRoll130,stageCameraGlobalX0,stageCameraGlobalX1,stageCameraGlobalY0,stageCameraGlobalY1,stageCameraGlobalWidth0,stageCameraGlobalWidth1,stageCameraGlobalHeight0,stageCameraGlobalHeight1,playerCameraFocusPosX0,playerCameraFocusPosX1,playerCameraFocusPosY0,playerCameraFocusPosY1,playerCameraFocusPosZ0,playerCameraFocusPosZ1,playerCameraFocusVelX0,playerCameraFocusVelX1,playerCameraFocusVelY0,playerCameraFocusVelY1,playerCameraFocusVelZ0,playerCameraFocusVelZ1,stageDisplayCameraX,cameraDbgCA880,cameraDbgCAE04,cameraDbgCAE14,cameraDbgCAD6C,cameraDbgCAD8C,cameraDbgCADB4,cameraDbgCAE60,cameraDbgCAE64,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash,playerActor0ActionFlag,playerActor0SubActionFlag,playerActor0PhysicsFlag,playerActor0DamageCooldown,playerActor1ActionFlag,playerActor1SubActionFlag,playerActor1PhysicsFlag,playerActor1DamageCooldown,playerActor0LinkedActor,playerActor0TransitionFlag,playerActor0CollisionFlag,playerActor0EnvironmentFlag,playerActor0UpdateLocked,playerActor0CharacterIDBase,playerActor0TransitioningFlag,playerActor0CameraFocusMode,playerActor0DefeatedFlag,playerActor0PlayerBaseID,playerActor0VisibleFlag,playerActor1LinkedActor,playerActor1TransitionFlag,playerActor1CollisionFlag,playerActor1EnvironmentFlag,playerActor1UpdateLocked,playerActor1CharacterIDBase,playerActor1TransitioningFlag,playerActor1CameraFocusMode,playerActor1DefeatedFlag,playerActor1PlayerBaseID,playerActor1VisibleFlag";
+                G.GameStateTrace << ",playerCount,player0Powerup,player1Powerup,player0InventoryPowerup,player1InventoryPowerup,player0Dead,player1Dead,player0Character,player1Character,player0Lives,player1Lives,player0BattleStars,player1BattleStars,player0Coins,player1Coins,player0Score,player1Score,player0DisplayedStars,player1DisplayedStars,player0Deaths,player1Deaths,player0CollectedStars,player1CollectedStars,vsCoinCount,entranceSpawnID0,entranceSpawnID1,entranceTransitionFlags0,entranceTransitionFlags1,entranceSpawnPtr0,entranceSpawnPtr1,stageCameraBase,stageCameraTargetX,stageCameraTargetY,stageCameraTargetZ,stageCameraPositionX,stageCameraPositionY,stageCameraPositionZ,stageCameraUpX,stageCameraUpY,stageCameraUpZ,stageCameraUnk114,stageCameraUnk118,stageCameraUnk11C,stageCameraUnk128,stageCameraUnk12C,stageCameraRoll130,stageCameraGlobalX0,stageCameraGlobalX1,stageCameraGlobalY0,stageCameraGlobalY1,stageCameraGlobalWidth0,stageCameraGlobalWidth1,stageCameraGlobalHeight0,stageCameraGlobalHeight1,playerCameraFocusPosX0,playerCameraFocusPosX1,playerCameraFocusPosY0,playerCameraFocusPosY1,playerCameraFocusPosZ0,playerCameraFocusPosZ1,playerCameraFocusVelX0,playerCameraFocusVelX1,playerCameraFocusVelY0,playerCameraFocusVelY1,playerCameraFocusVelZ0,playerCameraFocusVelZ1,stageDisplayCameraX,cameraDbgCA880,cameraDbgCAE04,cameraDbgCAE14,cameraDbgCAD6C,cameraDbgCAD8C,cameraDbgCADB4,cameraDbgCAE60,cameraDbgCAE64,playerGlobalHash,wifiCandidateHash,renderCandidateHash,netStateHash,playerActor0ActionFlag,playerActor0SubActionFlag,playerActor0PhysicsFlag,playerActor0DamageCooldown,playerActor1ActionFlag,playerActor1SubActionFlag,playerActor1PhysicsFlag,playerActor1DamageCooldown,playerActor0LinkedActor,playerActor0TransitionFlag,playerActor0CollisionFlag,playerActor0EnvironmentFlag,playerActor0UpdateLocked,playerActor0ControlState,playerActor0CharacterIDBase,playerActor0RequestedPowerup,playerActor0CurrentPowerup,playerActor0PreviousPowerup,playerActor0TransitioningFlag,playerActor0CameraFocusMode,playerActor0DefeatedFlag,playerActor0PlayerBaseID,playerActor0VisibleFlag,playerActor0PowerupPhase,playerActor0PowerupTimer,playerActor0PowerupGainTimer,playerActor1LinkedActor,playerActor1TransitionFlag,playerActor1CollisionFlag,playerActor1EnvironmentFlag,playerActor1UpdateLocked,playerActor1ControlState,playerActor1CharacterIDBase,playerActor1RequestedPowerup,playerActor1CurrentPowerup,playerActor1PreviousPowerup,playerActor1TransitioningFlag,playerActor1CameraFocusMode,playerActor1DefeatedFlag,playerActor1PlayerBaseID,playerActor1VisibleFlag,playerActor1PowerupPhase,playerActor1PowerupTimer,playerActor1PowerupGainTimer";
             G.GameStateTrace << '\n';
         }
     }
@@ -21649,6 +23013,11 @@ void InitFromEnvironment()
             G.MvlStageSceneSettings,
             G.MvlCourseMode.c_str(),
             G.MvlBigStarTarget);
+        std::printf("NSMB Diagnostics: events=%d path=%s ringFrames=%d diagnosticsFile=%s\n",
+            G.DiagnosticEventsEnabled ? 1 : 0,
+            G.DiagnosticEventsPath.empty() ? "<none>" : G.DiagnosticEventsPath.c_str(),
+            G.DiagnosticRingFrames,
+            G.DiagnosticsPath.empty() ? "<none>" : G.DiagnosticsPath.c_str());
         std::fflush(stdout);
     }
 
@@ -21708,7 +23077,12 @@ void InitFromEnvironment()
             ENetAddress address {};
             enet_address_set_host(&address, G.PeerHost);
             address.port = G.Port;
-            G.Peer = enet_host_connect(G.Host, &address, 1, 0);
+            G.ConnectingPeer = enet_host_connect(G.Host, &address, 1, 0);
+            if (!G.ConnectingPeer)
+            {
+                std::printf("NSMB PoC: failed to queue peer connect\n");
+                std::fflush(stdout);
+            }
         }
     }
 
@@ -21720,8 +23094,9 @@ void InitFromEnvironment()
     }
 
     G.Ready = true;
+    EmitDiagnosticStartupEvent();
     StartNetworkPumpThreadIfNeeded();
-    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputHealthTrace=%d inputHealthInterval=%d inputHealthWaitThresholdMs=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputSendDelay=%d inputSendJitter=%d inputSendDelayStart=%u inputSendDelayEnd=%u inputDropModulo=%d inputDropOffset=%d netPumpThread=%d netPumpSleepUs=%d inputWaitPollUs=%d rollbackInputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d rollbackPredProbeModulo=%d rollbackPredProbeLimit=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
+    std::printf("NSMB PoC: enabled role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputHealthTrace=%d inputHealthInterval=%d inputHealthWaitThresholdMs=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputSendDelay=%d inputSendJitter=%d inputSendDelayStart=%u inputSendDelayEnd=%u inputDropModulo=%d inputDropOffset=%d inputDropStart=%u inputDropEnd=%u netPumpThread=%d netPumpSleepUs=%d inputWaitPollUs=%d rollbackInputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d rollbackPredProbeModulo=%d rollbackPredProbeLimit=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d directBootLoadSM=%d directBootPatchLoadSMOnly=%d directBootCallUpdateSM=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
         G.PeerHost,
@@ -21764,6 +23139,8 @@ void InitFromEnvironment()
         G.InputSendDelayEndFrame,
         G.InputDropModulo,
         G.InputDropOffset,
+        G.InputDropStartFrame,
+        G.InputDropEndFrame,
         G.NetworkPumpThreadEnabled ? 1 : 0,
         G.NetworkPumpSleepUs,
         G.InputWaitPollUs,
@@ -22039,7 +23416,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         && !RuleAIProvidesInputForPlayer(CurrentPacketBridgeLocalPlayer() ^ 1)
         && !ImitationAIProvidesInputForPlayer(CurrentPacketBridgeLocalPlayer() ^ 1))
     {
-        WaitForPeerIfNeeded(true);
+        if (!G.WaitForPeerAtNetplayStart)
+            WaitForPeerIfNeeded(true);
         {
             std::lock_guard<std::mutex> lock(G.Mutex);
             PumpNetworkLocked(nds, inputFrame);
@@ -22257,14 +23635,18 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         SaveRollbackCheckpointIfNeeded(instanceID, syncFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Checkpoint);
 
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+    const bool pauseInputNetplayForRestart = G.Enabled
+        && ShouldPauseInputNetplayForMvlAutoRestart(instanceID, nds);
+    if (!pauseInputNetplayForRestart
+        && (G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         WritePacketBridgeJitScratchIfNeeded(instanceID, syncFrame, nds, testInput);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Scratch);
 
     if (G.Enabled && G.InputNetplayOnly)
-        return testInput;
+        return ConvertStockXToTouch(testInput);
 
-    if (!G.Enabled || !G.Ready) return testInput;
+    if (!G.Enabled || !G.Ready)
+        return (G.TestEnabled || G.Enabled) ? ConvertStockXToTouch(testInput) : testInput;
     if (syncFrame == 0 && G.PacketBridgeOnly)
     {
         WaitForPeerIfNeeded();
@@ -22314,15 +23696,15 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
             }
             ForceNSMLPacketBridgeNetReadyIfNeeded(instanceID, syncFrame, nds);
             if (InjectNSMLPacketBridgeDummyAlloc(instanceID, syncFrame, nds))
-                return testInput;
+                return ConvertStockXToTouch(testInput);
             InjectNSMLPacketBridgeScheduledSubMenusIfNeeded(instanceID, syncFrame, nds);
             if (InjectNSMLPacketBridgeMvlLoadThread(instanceID, syncFrame, nds))
-                return testInput;
+                return ConvertStockXToTouch(testInput);
             ForceNSMLPacketBridgeStageStartSMFieldsIfNeeded(instanceID, syncFrame, nds);
             if (InjectNSMLPacketBridgeVSConnectOnUpdateIfNeeded(instanceID, syncFrame, nds))
-                return testInput;
+                return ConvertStockXToTouch(testInput);
             if (InjectNSMLPacketBridgeStageStartSMUpdateIfNeeded(instanceID, syncFrame, nds))
-                return testInput;
+                return ConvertStockXToTouch(testInput);
             ForceNSMLPacketBridgeLoadGameSMIfNeeded(instanceID, syncFrame, nds);
             ForceNSMLStagePacketWordsIfNeeded(syncFrame, nds);
             ForceNSMLGameLocalPlayerIDIfNeeded(syncFrame, nds);
@@ -22332,7 +23714,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
             ThrottleNSMLPacketBridgeLead(nds, syncFrame);
             WaitForNSMLPacketBridgeRemote(nds, syncFrame);
         }
-        return packetBridgeInput;
+        return ConvertStockXToTouch(packetBridgeInput);
     }
 
     const bool isLocal = (instanceID == G.LocalInstance);
@@ -22365,13 +23747,13 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Network);
 
     if (!netplayApplyActive)
-        return testInput;
+        return ConvertStockXToTouch(testInput);
 
     if (G.NetplayStartFrame != 0
         && G.NetplayWarmupFrames > 0
         && syncFrame < G.NetplayStartFrame + static_cast<melonDS::u32>(G.NetplayWarmupFrames))
     {
-        return testInput;
+        return ConvertStockXToTouch(testInput);
     }
 
     const melonDS::u32 targetFrame = syncFrame;
@@ -22409,9 +23791,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         auto it = G.LocalInputs.find(targetFrame);
         const InputState delayedLocalInput = it != G.LocalInputs.end() ? it->second : NeutralInput();
         if (!G.LocalWaitsForRemote)
-            return delayedLocalInput;
+            return ConvertStockXToTouch(delayedLocalInput);
         if (IsPastTestInputRange(targetFrame))
-            return delayedLocalInput;
+            return ConvertStockXToTouch(delayedLocalInput);
     }
     else if (IsPastTestInputRange(targetFrame))
     {
@@ -22426,19 +23808,27 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         auto it = G.LocalInputs.find(targetFrame);
-        return it != G.LocalInputs.end() ? it->second : NeutralInput();
+        return ConvertStockXToTouch(it != G.LocalInputs.end() ? it->second : NeutralInput());
     }
 
-    return remoteInput;
+    return ConvertStockXToTouch(remoteInput);
 }
 
 void TracePlayerLifeChanges(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (!G.TracePlayerLifeChanges || !nds || !nds->MainRAM) return;
+    if ((!G.TracePlayerLifeChanges && !G.DiagnosticEventsEnabled) || !nds || !nds->MainRAM) return;
     if (instanceID < 0 || instanceID >= 16) return;
 
     GameStateSample& last = G.LastPlayerLifeSample[instanceID];
     const bool valid = G.LastPlayerLifeSampleValid[instanceID];
+    const melonDS::u32 oldPlayer0Lives = last.Player0Lives;
+    const melonDS::u32 oldPlayer1Lives = last.Player1Lives;
+    const melonDS::u32 oldPlayer0Deaths = last.Player0Deaths;
+    const melonDS::u32 oldPlayer1Deaths = last.Player1Deaths;
+    const melonDS::u32 oldPlayer0Dead = last.Player0Dead;
+    const melonDS::u32 oldPlayer1Dead = last.Player1Dead;
+    const melonDS::u32 oldTransition0 = last.PlayerTransitionStatus0;
+    const melonDS::u32 oldTransition1 = last.PlayerTransitionStatus1;
     const melonDS::u32 player0Lives = nds->ARM9Read32(kGamePlayerLivesAddr);
     const melonDS::u32 player1Lives = nds->ARM9Read32(kGamePlayerLivesAddr + sizeof(melonDS::u32));
     const melonDS::u32 player0Deaths = nds->ARM9Read32(kGamePlayerDeathsAddr);
@@ -22476,73 +23866,104 @@ void TracePlayerLifeChanges(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
         }
 
         const GameStateSample sample = ReadGameStateSample(nds);
-        std::printf(
-            "NSMB LifeDelta: inst=%d frame=%u lives=%u/%u deaths=%u/%u dead=%u/%u trans=%u/%u "
-            "cam={x=%08X/%08X y=%08X/%08X w=%08X/%08X h=%08X/%08X} "
-            "p0={found=%u base=%08X pid11E=%u pid7B4=%u def=%u tring=%u updLock=%u vis=%u x=%08X y=%08X vel=%08X/%08X flags=%08X act=%08X sub=%08X phy=%08X transFlag=%08X coll=%08X env=%08X linked=%08X transitFunc=%08X transitArg=%08X} "
-            "p1={found=%u base=%08X pid11E=%u pid7B4=%u def=%u tring=%u updLock=%u vis=%u x=%08X y=%08X vel=%08X/%08X flags=%08X act=%08X sub=%08X phy=%08X transFlag=%08X coll=%08X env=%08X linked=%08X transitFunc=%08X transitArg=%08X}\n",
-            instanceID,
-            frame,
-            sample.Player0Lives,
-            sample.Player1Lives,
-            sample.Player0Deaths,
-            sample.Player1Deaths,
-            sample.Player0Dead,
-            sample.Player1Dead,
-            sample.PlayerTransitionStatus0,
-            sample.PlayerTransitionStatus1,
-            sample.StageCameraGlobalX0,
-            sample.StageCameraGlobalX1,
-            sample.StageCameraGlobalY0,
-            sample.StageCameraGlobalY1,
-            sample.StageCameraGlobalWidth0,
-            sample.StageCameraGlobalWidth1,
-            sample.StageCameraGlobalHeight0,
-            sample.StageCameraGlobalHeight1,
-            sample.PlayerActor0Found,
-            sample.PlayerActor0Base,
-            sample.PlayerActor0PlayerID,
-            sample.PlayerActor0PlayerBaseID,
-            sample.PlayerActor0DefeatedFlag,
-            sample.PlayerActor0TransitioningFlag,
-            sample.PlayerActor0UpdateLocked,
-            sample.PlayerActor0VisibleFlag,
-            sample.PlayerActor0PosX,
-            sample.PlayerActor0PosY,
-            sample.PlayerActor0VelX,
-            sample.PlayerActor0VelY,
-            sample.PlayerActor0Flags,
-            sample.PlayerActor0ActionFlag,
-            sample.PlayerActor0SubActionFlag,
-            sample.PlayerActor0PhysicsFlag,
-            sample.PlayerActor0TransitionFlag,
-            sample.PlayerActor0CollisionFlag,
-            sample.PlayerActor0EnvironmentFlag,
-            sample.PlayerActor0LinkedActor,
-            sample.PlayerActor0TransitFunc,
-            sample.PlayerActor0TransitArg,
-            sample.PlayerActor1Found,
-            sample.PlayerActor1Base,
-            sample.PlayerActor1PlayerID,
-            sample.PlayerActor1PlayerBaseID,
-            sample.PlayerActor1DefeatedFlag,
-            sample.PlayerActor1TransitioningFlag,
-            sample.PlayerActor1UpdateLocked,
-            sample.PlayerActor1VisibleFlag,
-            sample.PlayerActor1PosX,
-            sample.PlayerActor1PosY,
-            sample.PlayerActor1VelX,
-            sample.PlayerActor1VelY,
-            sample.PlayerActor1Flags,
-            sample.PlayerActor1ActionFlag,
-            sample.PlayerActor1SubActionFlag,
-            sample.PlayerActor1PhysicsFlag,
-            sample.PlayerActor1TransitionFlag,
-            sample.PlayerActor1CollisionFlag,
-            sample.PlayerActor1EnvironmentFlag,
-            sample.PlayerActor1LinkedActor,
-            sample.PlayerActor1TransitFunc,
-            sample.PlayerActor1TransitArg);
+        if (G.TracePlayerLifeChanges)
+        {
+            std::printf(
+                "NSMB LifeDelta: inst=%d frame=%u lives=%u/%u deaths=%u/%u dead=%u/%u trans=%u/%u "
+                "cam={x=%08X/%08X y=%08X/%08X w=%08X/%08X h=%08X/%08X} "
+                "p0={found=%u base=%08X pid11E=%u pid7B4=%u def=%u tring=%u updLock=%u vis=%u x=%08X y=%08X vel=%08X/%08X flags=%08X act=%08X sub=%08X phy=%08X transFlag=%08X coll=%08X env=%08X linked=%08X transitFunc=%08X transitArg=%08X} "
+                "p1={found=%u base=%08X pid11E=%u pid7B4=%u def=%u tring=%u updLock=%u vis=%u x=%08X y=%08X vel=%08X/%08X flags=%08X act=%08X sub=%08X phy=%08X transFlag=%08X coll=%08X env=%08X linked=%08X transitFunc=%08X transitArg=%08X}\n",
+                instanceID,
+                frame,
+                sample.Player0Lives,
+                sample.Player1Lives,
+                sample.Player0Deaths,
+                sample.Player1Deaths,
+                sample.Player0Dead,
+                sample.Player1Dead,
+                sample.PlayerTransitionStatus0,
+                sample.PlayerTransitionStatus1,
+                sample.StageCameraGlobalX0,
+                sample.StageCameraGlobalX1,
+                sample.StageCameraGlobalY0,
+                sample.StageCameraGlobalY1,
+                sample.StageCameraGlobalWidth0,
+                sample.StageCameraGlobalWidth1,
+                sample.StageCameraGlobalHeight0,
+                sample.StageCameraGlobalHeight1,
+                sample.PlayerActor0Found,
+                sample.PlayerActor0Base,
+                sample.PlayerActor0PlayerID,
+                sample.PlayerActor0PlayerBaseID,
+                sample.PlayerActor0DefeatedFlag,
+                sample.PlayerActor0TransitioningFlag,
+                sample.PlayerActor0UpdateLocked,
+                sample.PlayerActor0VisibleFlag,
+                sample.PlayerActor0PosX,
+                sample.PlayerActor0PosY,
+                sample.PlayerActor0VelX,
+                sample.PlayerActor0VelY,
+                sample.PlayerActor0Flags,
+                sample.PlayerActor0ActionFlag,
+                sample.PlayerActor0SubActionFlag,
+                sample.PlayerActor0PhysicsFlag,
+                sample.PlayerActor0TransitionFlag,
+                sample.PlayerActor0CollisionFlag,
+                sample.PlayerActor0EnvironmentFlag,
+                sample.PlayerActor0LinkedActor,
+                sample.PlayerActor0TransitFunc,
+                sample.PlayerActor0TransitArg,
+                sample.PlayerActor1Found,
+                sample.PlayerActor1Base,
+                sample.PlayerActor1PlayerID,
+                sample.PlayerActor1PlayerBaseID,
+                sample.PlayerActor1DefeatedFlag,
+                sample.PlayerActor1TransitioningFlag,
+                sample.PlayerActor1UpdateLocked,
+                sample.PlayerActor1VisibleFlag,
+                sample.PlayerActor1PosX,
+                sample.PlayerActor1PosY,
+                sample.PlayerActor1VelX,
+                sample.PlayerActor1VelY,
+                sample.PlayerActor1Flags,
+                sample.PlayerActor1ActionFlag,
+                sample.PlayerActor1SubActionFlag,
+                sample.PlayerActor1PhysicsFlag,
+                sample.PlayerActor1TransitionFlag,
+                sample.PlayerActor1CollisionFlag,
+                sample.PlayerActor1EnvironmentFlag,
+                sample.PlayerActor1LinkedActor,
+                sample.PlayerActor1TransitFunc,
+                sample.PlayerActor1TransitArg);
+        }
+
+        if (valid)
+        {
+            const bool player0DeathEvent =
+                (sample.PlayerActor0Found != 0 || player0Deaths != 0 || player0Dead != 0) &&
+                (player0Deaths > oldPlayer0Deaths ||
+                    player0Lives < oldPlayer0Lives ||
+                    (player0Dead != oldPlayer0Dead && player0Dead != 0));
+            const bool player1DeathEvent =
+                (sample.PlayerActor1Found != 0 || player1Deaths != 0 || player1Dead != 0) &&
+                (player1Deaths > oldPlayer1Deaths ||
+                    player1Lives < oldPlayer1Lives ||
+                    (player1Dead != oldPlayer1Dead && player1Dead != 0));
+            const bool player0TransitionEvent =
+                !player0DeathEvent && transition0 != oldTransition0 &&
+                (sample.PlayerActor0DefeatedFlag != 0 || sample.PlayerActor0TransitioningFlag != 0);
+            const bool player1TransitionEvent =
+                !player1DeathEvent && transition1 != oldTransition1 &&
+                (sample.PlayerActor1DefeatedFlag != 0 || sample.PlayerActor1TransitioningFlag != 0);
+            if (player0DeathEvent)
+                EmitPlayerLifeEvent(instanceID, frame, 0, "death", sample, nds);
+            else if (player0TransitionEvent)
+                EmitPlayerLifeEvent(instanceID, frame, 0, "death-transition", sample, nds);
+            if (player1DeathEvent)
+                EmitPlayerLifeEvent(instanceID, frame, 1, "death", sample, nds);
+            else if (player1TransitionEvent)
+                EmitPlayerLifeEvent(instanceID, frame, 1, "death-transition", sample, nds);
+        }
     }
     G.LastPlayerLifeSampleValid[instanceID] = true;
 }
@@ -22718,6 +24139,10 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         TracePlayerLifeChanges(instanceID, logFrame, nds);
     const auto afterLifeTrace = std::chrono::steady_clock::now();
+
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        RecordDiagnosticSnapshotIfNeeded(instanceID, logFrame, nds);
+    const auto afterDiagnosticSnapshot = std::chrono::steady_clock::now();
 
     if (G.RollbackEnabled
         && G.InputNetplayTraceEnabled
@@ -22912,7 +24337,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                 return std::chrono::duration<double, std::milli>(end - start).count();
             };
             std::printf(
-                "NSMB AfterHookPhaseSpike: inst=%d frame=%u totalMs=%.3f initMs=%.3f heartbeatMs=%.3f barrierMs=%.3f bridgeMs=%.3f lifeTraceMs=%.3f rollbackTraceMs=%.3f runtimeForceMs=%.3f artifactsMs=%.3f preSnapshotTailMs=%.3f applyHazardMs=%.3f applyWorldMs=%.3f applyPlayerMs=%.3f traceMs=%.3f syncGameMs=%.3f syncWorldMs=%.3f syncHazardMs=%.3f syncPlayerMs=%.3f\n",
+                "NSMB AfterHookPhaseSpike: inst=%d frame=%u totalMs=%.3f initMs=%.3f heartbeatMs=%.3f barrierMs=%.3f bridgeMs=%.3f lifeTraceMs=%.3f diagnosticSnapshotMs=%.3f rollbackTraceMs=%.3f runtimeForceMs=%.3f artifactsMs=%.3f preSnapshotTailMs=%.3f applyHazardMs=%.3f applyWorldMs=%.3f applyPlayerMs=%.3f traceMs=%.3f syncGameMs=%.3f syncWorldMs=%.3f syncHazardMs=%.3f syncPlayerMs=%.3f\n",
                 instanceID,
                 logFrame,
                 elapsedMs(afterHookCallStart, afterSyncPlayer),
@@ -22921,7 +24346,8 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                 elapsedMs(afterHeartbeat, afterBarrier),
                 elapsedMs(afterBarrier, afterBridge),
                 elapsedMs(afterBridge, afterLifeTrace),
-                elapsedMs(afterLifeTrace, afterRollbackTrace),
+                elapsedMs(afterLifeTrace, afterDiagnosticSnapshot),
+                elapsedMs(afterDiagnosticSnapshot, afterRollbackTrace),
                 elapsedMs(afterRollbackTrace, afterRuntimeForce),
                 elapsedMs(afterRuntimeForce, afterArtifacts),
                 elapsedMs(afterArtifacts, afterPreSnapshot),
@@ -23096,6 +24522,7 @@ void Shutdown()
     {
         enet_host_destroy(G.Host);
         G.Host = nullptr;
+        G.ConnectingPeer = nullptr;
         G.Peer = nullptr;
     }
 

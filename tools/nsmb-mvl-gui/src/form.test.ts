@@ -1,7 +1,9 @@
 import { describe, expect, test, vi } from 'vitest';
 import {
   currentSettings,
+  generateUniqueStageSequence,
   initialForm,
+  normalizedCourseStages,
   processExited,
   selectedStageFrom,
   withRequiredPlan,
@@ -79,10 +81,37 @@ describe('フォーム補助関数', () => {
         wins: 2,
       }),
     ).toMatchObject({
-      courseStages: [4, 4, 4],
+      courseStages: [4, 0, 1],
       matchSeed: '11',
       rngSeeds: ['11', '7', '7'],
     });
+  });
+
+  test('ランダムコースは最大5試合分を重複なしで生成する', () => {
+    vi.spyOn(crypto, 'getRandomValues').mockImplementation((array) => {
+      (array as Uint32Array)[0] = 7;
+      return array;
+    });
+
+    expect(generateUniqueStageSequence(5)).toEqual([0, 4, 1, 3, 2]);
+    expect(
+      normalizedCourseStages({
+        courseMode: 'random',
+        courseStages: [4, 4, 3],
+        wins: 2,
+      }),
+    ).toEqual([4, 3, 0]);
+    expect(
+      withRequiredPlan(
+        {
+          ...initialForm,
+          matchSeed: '11',
+          rngSeeds: [],
+          wins: 3,
+        },
+        { refreshRandom: true },
+      ).courseStages,
+    ).toEqual([0, 4, 1, 3, 2]);
   });
 
   test('終了済みプロセスのステータス文字列を判定する', () => {

@@ -1,0 +1,19 @@
+# Direct MvL hip-drop visual probe.
+# Boot into Mario vs Luigi, then make Mario jump and hold DOWN to ground-pound.
+
+inst0 0-619 NONE
+inst0 620-627 DOWN
+inst0 628-659 NONE
+inst0 660-667 A
+inst0 668-959 NONE
+inst0 960-1027 RIGHT+Y
+inst0 1028-1035 RIGHT+Y+A
+inst0 1036-1067 RIGHT+Y
+inst0 1068-1180 DOWN
+inst0 1181-1800 NONE
+
+inst1 0-619 NONE
+inst1 620-627 DOWN
+inst1 628-659 NONE
+inst1 660-667 A
+inst1 668-1800 NONE

@@ -1,5 +1,9 @@
 # Repository Working Rules
 
+## Package Manager
+
+Use pnpm for Node.js projects unless instructed otherwise. In the Codex environment, a bundled pnpm can appear earlier on `PATH` than the project-managed pnpm, so run pnpm commands in this repository through Corepack, for example `corepack pnpm ...`.
+
 ## Git Operations
 
 Do not push automatically. Only run `git push` when the user explicitly asks for a push in the current conversation.
@@ -48,15 +52,15 @@ If a new UI component is needed, first check whether Park UI has the desired com
 
 ```powershell
 cd tools/nsmb-mvl-gui
-pnpm dlx @park-ui/cli@next add <component-name>
+corepack pnpm dlx @park-ui/cli@latest add <component-name>
 ```
 
-Use the canonical Park UI component name from the docs, for example `dialog`, `tabs`, `select`, `tooltip`, or `menu`. After adding components, review generated files under `src/components/ui` and `src/theme/recipes`, then adapt them to the app's existing design conventions as needed.
+Use the canonical Park UI component name from the docs, for example `dialog`, `tabs`, `select`, `tooltip`, `collapsible`, or `menu`. After adding components, review generated files under `src/components/ui` and `src/theme/recipes`, then adapt them to the app's existing design conventions as needed.
 
 ## Code Quality Checks
 
 When changing Rust code, run Rust formatting and Clippy before ending the turn. Use `cargo fmt` for the affected crate/workspace, then run the local strict Clippy alias, normally `cargo clippy-all`, which treats warnings as errors.
 
-When changing TypeScript code, run Biome and typecheck before ending the turn. Use the package's existing scripts, such as `pnpm biome check`/`pnpm biome format` and `pnpm typecheck`, or the repo-local equivalents if the package defines different script names.
+When changing TypeScript code, run Biome and typecheck before ending the turn. Use the package's existing scripts through Corepack, such as `corepack pnpm biome check`/`corepack pnpm biome format` and `corepack pnpm typecheck`, or the repo-local equivalents if the package defines different script names.
 
-After changing a pnpm-managed package, always run that package's `pnpm run ci` before ending the turn. If the package has no `ci` script or the command cannot be run, state the reason clearly in the final response.
+After changing a pnpm-managed package, always run that package's `corepack pnpm run ci` before ending the turn. If the package has no `ci` script or the command cannot be run, state the reason clearly in the final response.

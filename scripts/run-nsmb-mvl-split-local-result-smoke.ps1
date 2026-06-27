@@ -2,6 +2,7 @@ param(
     [int]$Frames = 6000,
     [int]$WaitTimeoutMs = 420000,
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
+    [string]$GenerateMvlSourceRom = "roms\nsmb-us.nds",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds",
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds",
     [string]$InputScript = "tests\nsmb_us_direct_mvl_star_collect_left.inputs",
@@ -15,7 +16,8 @@ param(
     [int]$ScreenshotInterval = 6000,
     [int]$GameStateTraceInterval = 120,
     [int]$HostStartupDelayMs = 1200,
-    [string]$LogDir = "logs\nsmb-mvl-split-local-result-smoke"
+    [string]$LogDir = "logs\nsmb-mvl-split-local-result-smoke",
+    [switch]$SkipRomEnsure
 )
 
 $ErrorActionPreference = "Stop"
@@ -37,6 +39,13 @@ $clientLog = Join-Path $logRoot "client"
 $wrapperLog = Join-Path $logRoot "wrapper"
 New-Item -ItemType Directory -Force $wrapperLog | Out-Null
 Remove-Item -Recurse -Force $hostLog, $clientLog -ErrorAction SilentlyContinue
+
+if (!$SkipRomEnsure) {
+    & (Join-Path $PSScriptRoot "generate-nsmb-mvl-stable-roms.ps1") `
+        -SourceRom $GenerateMvlSourceRom `
+        -HostRom $HostRom `
+        -ClientRom $ClientRom
+}
 
 $common = @(
     "-WaitTimeoutMs", "$WaitTimeoutMs",
