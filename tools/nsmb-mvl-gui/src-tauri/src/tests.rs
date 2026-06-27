@@ -204,6 +204,13 @@ fn bridge_command_enables_detailed_logs_when_requested() {
         env_value(&command, "NSMB_MVL_DETAILED_LOGS").as_deref(),
         Some("1")
     );
+    assert_eq!(
+        env_value(&command, "NSMB_MVL_BRIDGE_LIVENESS").as_deref(),
+        Some("1")
+    );
+    assert!(env_value(&command, "NSMB_MVL_BRIDGE_EVENTS_FILE")
+        .as_deref()
+        .is_some_and(|value| value.ends_with("bridge-events.jsonl")));
     let _ = fs::remove_dir_all(log_dir);
 }
 
@@ -301,6 +308,12 @@ fn melon_env_enables_detailed_logs_when_requested() {
         env["MELONDS_NSML_INPUT_HEALTH_TRACE_WAIT_THRESHOLD_MS"],
         "1"
     );
+    assert_eq!(env["MELONDS_NSML_HANG_DIAGNOSTICS"], "1");
+    assert!(env["MELONDS_NSML_WATCHDOG_FILE"].ends_with("melonds-watchdog.jsonl"));
+    assert!(env["MELONDS_NSML_PHASE_EVENTS_FILE"].ends_with("melonds-phase-events.jsonl"));
+    assert!(env["MELONDS_NSML_HANG_DUMP_FILE"].ends_with("melonds-hang.dmp"));
+    assert_eq!(env["MELONDS_NSML_FRAME_HEARTBEAT_INTERVAL"], "30");
+    assert_eq!(env["MELONDS_NSML_GAMEPLAY_HEARTBEAT_INTERVAL"], "30");
     assert!(env["MELONDS_NSML_GAME_STATE_TRACE"].ends_with("melonds-game-state.csv"));
     assert_eq!(env["MELONDS_NSML_GAME_STATE_TRACE_INTERVAL"], "30");
     assert_eq!(env["MELONDS_NSML_GAME_STATE_TRACE_EXTENDED"], "1");

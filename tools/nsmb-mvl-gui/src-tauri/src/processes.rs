@@ -225,15 +225,23 @@ pub(crate) fn build_bridge_command(
 ) -> Result<Command, String> {
     let mut command = Command::new(bridge_path);
     command.args(bridge_args(request, log_dir));
-    command.envs(bridge_env(request));
+    command.envs(bridge_env(request, log_dir));
     command.current_dir(log_dir);
     with_stdio(command, log_dir, "bridge")
 }
 
-fn bridge_env(request: &LaunchRequest) -> BTreeMap<String, String> {
+fn bridge_env(request: &LaunchRequest, log_dir: &Path) -> BTreeMap<String, String> {
     let mut env = BTreeMap::new();
     if request.detailed_logs_enabled {
         env.insert("NSMB_MVL_DETAILED_LOGS".to_owned(), "1".to_owned());
+        env.insert("NSMB_MVL_BRIDGE_LIVENESS".to_owned(), "1".to_owned());
+        env.insert(
+            "NSMB_MVL_BRIDGE_EVENTS_FILE".to_owned(),
+            log_dir
+                .join("bridge-events.jsonl")
+                .to_string_lossy()
+                .into_owned(),
+        );
     }
     env
 }
@@ -367,6 +375,33 @@ pub(crate) fn melon_env(
     env.insert("MELONDS_NSML_INPUT_UNRELIABLE".into(), "1".into());
     env.insert("MELONDS_NSML_INPUT_BUNDLE_HISTORY".into(), "8".into());
     if request.detailed_logs_enabled {
+        env.insert("MELONDS_NSML_HANG_DIAGNOSTICS".into(), "1".into());
+        env.insert(
+            "MELONDS_NSML_WATCHDOG_FILE".into(),
+            log_dir
+                .join("melonds-watchdog.jsonl")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        env.insert(
+            "MELONDS_NSML_PHASE_EVENTS_FILE".into(),
+            log_dir
+                .join("melonds-phase-events.jsonl")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        env.insert(
+            "MELONDS_NSML_HANG_DUMP_FILE".into(),
+            log_dir
+                .join("melonds-hang.dmp")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        env.insert("MELONDS_NSML_FRAME_HEARTBEAT_INTERVAL".into(), "30".into());
+        env.insert(
+            "MELONDS_NSML_GAMEPLAY_HEARTBEAT_INTERVAL".into(),
+            "30".into(),
+        );
         env.insert("MELONDS_NSML_INPUT_TRACE".into(), "1".into());
         env.insert("MELONDS_NSML_INPUT_TRACE_INTERVAL".into(), "1".into());
         env.insert("MELONDS_NSML_INPUT_NETPLAY_TRACE".into(), "1".into());
@@ -588,7 +623,7 @@ fn write_launch_manifest(paths: &LaunchPaths, request: &LaunchRequest) -> Result
             "bridge": {
                 "cwd": paths.log_dir,
                 "args": bridge_args(request, &paths.log_dir),
-                "env": bridge_env(request),
+                "env": bridge_env(request, &paths.log_dir),
             },
             "melonds": {
                 "cwd": paths.log_dir,
