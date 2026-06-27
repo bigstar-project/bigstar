@@ -13,6 +13,7 @@ export const previewDefaults: Defaults = {
   roms_prepared_once: false,
   input_config_opened_once: false,
   diagnostic_events_enabled: false,
+  detailed_logs_enabled: false,
   new_room_notifications_enabled: true,
   port: 8165,
 };

@@ -19,6 +19,7 @@ export type {
   PreflightResponse,
   Role,
   RomIdentity,
+  SaveDetailedLogsRequest,
   SaveDiagnosticEventsRequest,
   SaveNewRoomNotificationsRequest,
   SavePlayerNameRequest,
@@ -49,5 +50,6 @@ export type FormState = {
   inputMaxFrameLead: number;
   rollbackEnabled: boolean;
   diagnosticEventsEnabled: boolean;
+  detailedLogsEnabled: boolean;
   newRoomNotificationsEnabled: boolean;
 };

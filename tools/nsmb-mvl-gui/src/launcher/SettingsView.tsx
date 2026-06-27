@@ -241,6 +241,48 @@ export function SettingsView({
                 updateField('diagnosticEventsEnabled', value === 'on')
               }
             />
+            <Switch.Root
+              checked={form.detailedLogsEnabled}
+              onCheckedChange={(details) =>
+                updateField('detailedLogsEnabled', details.checked)
+              }
+              className={css({
+                alignItems: 'center',
+                bg: 'app.panel',
+                borderColor: 'border',
+                borderRadius: 'l2',
+                borderWidth: '1px',
+                colorPalette: 'blue',
+                display: 'flex',
+                gap: '3',
+                justifyContent: 'space-between',
+                minH: '16',
+                p: '3',
+                w: 'full',
+              })}
+            >
+              <Switch.HiddenInput />
+              <div
+                className={css({
+                  display: 'grid',
+                  gap: '1',
+                  minW: '0',
+                })}
+              >
+                <Switch.Label className={css({ fontSize: 'sm' })}>
+                  詳細ログ
+                </Switch.Label>
+                <div
+                  className={css({
+                    color: 'fg.muted',
+                    textStyle: 'xs',
+                  })}
+                >
+                  入力、通信、画面状態のログを増やして原因調査しやすくします
+                </div>
+              </div>
+              <Switch.Control />
+            </Switch.Root>
           </SettingsPanel>
 
           <SettingsPanel

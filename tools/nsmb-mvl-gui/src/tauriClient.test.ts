@@ -184,6 +184,7 @@ describe('タウリクライアント', () => {
       host_rom_path: 'C:\\roms\\host.nds',
       input_config_opened_once: true,
       diagnostic_events_enabled: false,
+      detailed_logs_enabled: false,
       new_room_notifications_enabled: true,
       player_name: 'Alice',
       player_profile_id: '33333333-3333-4333-8333-333333333333',
@@ -238,6 +239,7 @@ describe('タウリクライアント', () => {
         wins: 3,
       },
       diagnostic_events_enabled: true,
+      detailed_logs_enabled: true,
       signal_url: 'wss://match.example/session',
     };
 

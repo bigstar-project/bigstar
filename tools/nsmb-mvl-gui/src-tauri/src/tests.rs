@@ -27,6 +27,7 @@ fn request(role: Role) -> LaunchRequest {
         port: 8165,
         player_names: None,
         diagnostic_events_enabled: false,
+        detailed_logs_enabled: false,
         rom_identity: None,
         rom_path: "unused.nds".to_owned(),
         settings: GameSettings {
@@ -187,6 +188,22 @@ fn bridge_command_uses_signaling_offer_for_host() {
     assert!(args
         .windows(2)
         .any(|pair| pair[0] == "--status-file" && pair[1].ends_with("bridge-status.json")));
+    assert_eq!(env_value(&command, "NSMB_MVL_DETAILED_LOGS"), None);
+    let _ = fs::remove_dir_all(log_dir);
+}
+
+#[test]
+fn bridge_command_enables_detailed_logs_when_requested() {
+    let log_dir = temp_log_dir("bridge-detailed-logs");
+    let mut request = request(Role::Host);
+    request.detailed_logs_enabled = true;
+    let command =
+        build_bridge_command(Path::new("bridge.exe"), &request, &log_dir).expect("bridge command");
+
+    assert_eq!(
+        env_value(&command, "NSMB_MVL_DETAILED_LOGS").as_deref(),
+        Some("1")
+    );
     let _ = fs::remove_dir_all(log_dir);
 }
 
@@ -229,12 +246,19 @@ fn melon_env_carries_game_settings_and_netplay_start() {
     assert_eq!(env["MELONDS_NSML_INPUT_MAX_FRAME_LEAD"], "4");
     assert_eq!(env["MELONDS_NSML_WAIT_TIMEOUT_MS"], "60000");
     assert_eq!(env["MELONDS_NSML_SEED_WAIT_TIMEOUT_MS"], "60000");
+    assert_eq!(env["MELONDS_NSML_SCREENSHOT_INTERVAL"], "0");
+    assert!(!env.contains_key("MELONDS_NSML_INPUT_TRACE"));
+    assert!(!env.contains_key("MELONDS_NSML_INPUT_TRACE_INTERVAL"));
+    assert!(!env.contains_key("MELONDS_NSML_INPUT_NETPLAY_TRACE"));
     assert_eq!(env["MELONDS_NSML_INPUT_HEALTH_TRACE"], "1");
     assert_eq!(env["MELONDS_NSML_INPUT_HEALTH_TRACE_INTERVAL"], "120");
     assert_eq!(
         env["MELONDS_NSML_INPUT_HEALTH_TRACE_WAIT_THRESHOLD_MS"],
         "16"
     );
+    assert!(!env.contains_key("MELONDS_NSML_GAME_STATE_TRACE"));
+    assert!(!env.contains_key("MELONDS_NSML_GAME_STATE_TRACE_INTERVAL"));
+    assert!(!env.contains_key("MELONDS_NSML_GAME_STATE_TRACE_EXTENDED"));
     assert_eq!(env["MELONDS_NSML_STATE_SYNC"], "1");
     assert_eq!(env["MELONDS_NSML_STATE_SYNC_INTERVAL"], "60");
     assert_eq!(env["MELONDS_NSML_STATE_SYNC_EXTENDED"], "1");
@@ -254,6 +278,33 @@ fn melon_env_carries_diagnostic_event_settings_when_enabled() {
         Path::new("logs/nsmb-mvl-gui-test"),
     );
 
+    assert_eq!(env["MELONDS_NSML_DIAGNOSTIC_EVENTS"], "1");
+    assert!(env["MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE"].ends_with("melonds-events.jsonl"));
+}
+
+#[test]
+fn melon_env_enables_detailed_logs_when_requested() {
+    let mut request = request(Role::Host);
+    request.detailed_logs_enabled = true;
+    let env = melon_env(
+        &request,
+        Path::new("bootstrap.inputs"),
+        Path::new("logs/nsmb-mvl-gui-test"),
+    );
+
+    assert_eq!(env["MELONDS_NSML_SCREENSHOT_INTERVAL"], "60");
+    assert_eq!(env["MELONDS_NSML_INPUT_TRACE"], "1");
+    assert_eq!(env["MELONDS_NSML_INPUT_TRACE_INTERVAL"], "1");
+    assert_eq!(env["MELONDS_NSML_INPUT_NETPLAY_TRACE"], "1");
+    assert_eq!(env["MELONDS_NSML_INPUT_HEALTH_TRACE_INTERVAL"], "30");
+    assert_eq!(
+        env["MELONDS_NSML_INPUT_HEALTH_TRACE_WAIT_THRESHOLD_MS"],
+        "1"
+    );
+    assert!(env["MELONDS_NSML_GAME_STATE_TRACE"].ends_with("melonds-game-state.csv"));
+    assert_eq!(env["MELONDS_NSML_GAME_STATE_TRACE_INTERVAL"], "30");
+    assert_eq!(env["MELONDS_NSML_GAME_STATE_TRACE_EXTENDED"], "1");
+    assert_eq!(env["MELONDS_NSML_STATE_SYNC_INTERVAL"], "30");
     assert_eq!(env["MELONDS_NSML_DIAGNOSTIC_EVENTS"], "1");
     assert!(env["MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE"].ends_with("melonds-events.jsonl"));
 }
@@ -758,6 +809,8 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
     let bridge = fake_executable(&dir, "fake-bridge", true);
     let melon = fake_executable(&dir, "fake-melon", true);
     let paths = launch_paths(&dir, bridge, melon);
+    let bridge_path = paths.bridge_path.clone();
+    let melon_path = paths.melon_path.clone();
     fs::create_dir_all(&paths.log_dir).expect("create logs");
 
     let state = AppState::default();
@@ -799,6 +852,45 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
         launcher["request"]["rom_identity"]["client_rom_sha256"],
         "client_hash"
     );
+    assert_eq!(
+        launcher["artifacts"]["bridge"]["path"].as_str(),
+        Some(bridge_path.to_string_lossy().as_ref())
+    );
+    assert_eq!(
+        launcher["artifacts"]["melonds"]["path"].as_str(),
+        Some(melon_path.to_string_lossy().as_ref())
+    );
+    assert_eq!(
+        launcher["artifacts"]["bridge"]["sha256"]
+            .as_str()
+            .map(str::len),
+        Some(64)
+    );
+    assert_eq!(
+        launcher["artifacts"]["melonds"]["sha256"]
+            .as_str()
+            .map(str::len),
+        Some(64)
+    );
+    assert_eq!(launcher["launch"]["bridge"]["args"][0], "webrtc-offer");
+    assert_eq!(
+        launcher["launch"]["bridge"]["env"]
+            .as_object()
+            .map(|env| env.len()),
+        Some(0)
+    );
+    assert_eq!(launcher["request"]["detailed_logs_enabled"], false);
+    assert_eq!(
+        launcher["launch"]["melonds"]["env"]
+            .as_object()
+            .and_then(|env| env.get("MELONDS_NSML_INPUT_NETPLAY_TRACE")),
+        None
+    );
+    assert_eq!(
+        launcher["launch"]["melonds"]["env"]["MELONDS_NSML_MVL_STAGE_SEQUENCE"],
+        "2,3,4,0,1"
+    );
+    assert_eq!(launcher["runtime"]["os"], std::env::consts::OS);
 
     stop_existing(&state).expect("stop fake match");
     let status = session_status_inner(&state).expect("status after stop");

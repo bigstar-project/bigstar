@@ -10,8 +10,9 @@ use std::os::windows::process::CommandExt;
 use crate::config::{default_signal_url, DEFAULT_PORT, DEFAULT_ROOM_CODE};
 use crate::models::{
     Defaults, GenerateRomRequest, GenerateRomResponse, LaunchRequest, LaunchResponse,
-    MatchHistoryRecord, SaveDiagnosticEventsRequest, SaveNewRoomNotificationsRequest,
-    SavePlayerNameRequest, SaveRomPathsRequest, SessionStatus, ShowNewRoomNotificationRequest,
+    MatchHistoryRecord, SaveDetailedLogsRequest, SaveDiagnosticEventsRequest,
+    SaveNewRoomNotificationsRequest, SavePlayerNameRequest, SaveRomPathsRequest, SessionStatus,
+    ShowNewRoomNotificationRequest,
 };
 use crate::paths::{
     absolutize_existing, app_data_dir, create_log_dir, find_bridge_binary, find_input_script,
@@ -55,6 +56,7 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
         input_config_opened_once: saved.input_config_opened_once,
         port: DEFAULT_PORT,
         diagnostic_events_enabled: saved.diagnostic_events_enabled,
+        detailed_logs_enabled: saved.detailed_logs_enabled,
         new_room_notifications_enabled: saved.new_room_notifications_enabled,
     })
 }
@@ -75,6 +77,17 @@ pub(crate) fn save_diagnostic_events_enabled(
 ) -> Result<(), String> {
     let mut settings = load_launcher_settings(&app)?;
     settings.diagnostic_events_enabled = request.enabled;
+    save_launcher_settings(&app, &settings)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn save_detailed_logs_enabled(
+    app: AppHandle,
+    request: SaveDetailedLogsRequest,
+) -> Result<(), String> {
+    let mut settings = load_launcher_settings(&app)?;
+    settings.detailed_logs_enabled = request.enabled;
     save_launcher_settings(&app, &settings)
 }
 

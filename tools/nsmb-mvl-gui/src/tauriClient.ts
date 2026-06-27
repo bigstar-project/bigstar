@@ -14,6 +14,7 @@ import type {
   LaunchResponse,
   MatchHistoryRecord,
   PreflightResponse,
+  SaveDetailedLogsRequest,
   SaveDiagnosticEventsRequest,
   SaveNewRoomNotificationsRequest,
   SavePlayerNameRequest,
@@ -70,6 +71,13 @@ export function saveDiagnosticEventsEnabled(
     return Promise.resolve(null);
   }
   return unwrapCommand(commands.saveDiagnosticEventsEnabled(request));
+}
+
+export function saveDetailedLogsEnabled(request: SaveDetailedLogsRequest) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(null);
+  }
+  return unwrapCommand(commands.saveDetailedLogsEnabled(request));
 }
 
 export function saveNewRoomNotificationsEnabled(

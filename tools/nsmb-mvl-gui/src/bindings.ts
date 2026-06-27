@@ -7,6 +7,7 @@ export const commands = {
 	getDefaults: () => typedError<Defaults, string>(__TAURI_INVOKE("get_defaults")),
 	saveRomPaths: (request: SaveRomPathsRequest) => typedError<null, string>(__TAURI_INVOKE("save_rom_paths", { request })),
 	saveDiagnosticEventsEnabled: (request: SaveDiagnosticEventsRequest) => typedError<null, string>(__TAURI_INVOKE("save_diagnostic_events_enabled", { request })),
+	saveDetailedLogsEnabled: (request: SaveDetailedLogsRequest) => typedError<null, string>(__TAURI_INVOKE("save_detailed_logs_enabled", { request })),
 	saveNewRoomNotificationsEnabled: (request: SaveNewRoomNotificationsRequest) => typedError<null, string>(__TAURI_INVOKE("save_new_room_notifications_enabled", { request })),
 	showNewRoomNotification: (request: ShowNewRoomNotificationRequest) => typedError<boolean, string>(__TAURI_INVOKE("show_new_room_notification", { request })),
 	savePlayerName: (request: SavePlayerNameRequest) => typedError<null, string>(__TAURI_INVOKE("save_player_name", { request })),
@@ -63,6 +64,7 @@ export type Defaults = {
 	input_config_opened_once: boolean,
 	port: number,
 	diagnostic_events_enabled: boolean,
+	detailed_logs_enabled: boolean,
 	new_room_notifications_enabled: boolean,
 };
 
@@ -113,6 +115,7 @@ export type LaunchRequest_Deserialize = {
 	settings: GameSettings,
 	player_names?: MatchPlayerNames | null,
 	diagnostic_events_enabled?: boolean,
+	detailed_logs_enabled?: boolean,
 	rom_identity?: RomIdentity | null,
 };
 
@@ -125,6 +128,7 @@ export type LaunchRequest_Serialize = {
 	settings: GameSettings,
 	player_names?: MatchPlayerNames | null,
 	diagnostic_events_enabled: boolean,
+	detailed_logs_enabled: boolean,
 	rom_identity?: RomIdentity | null,
 };
 
@@ -199,6 +203,10 @@ export type RomIdentity = {
 	generator_id: string,
 	host_rom_sha256: string,
 	client_rom_sha256: string,
+};
+
+export type SaveDetailedLogsRequest = {
+	enabled: boolean,
 };
 
 export type SaveDiagnosticEventsRequest = {

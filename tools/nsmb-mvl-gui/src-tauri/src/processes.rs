@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs::{self, File};
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -16,6 +17,7 @@ use crate::models::{
 };
 use crate::settings::selected_stage;
 use crate::state::{AppState, ManagedSession};
+use sha2::{Digest, Sha256};
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -222,38 +224,47 @@ pub(crate) fn build_bridge_command(
     log_dir: &Path,
 ) -> Result<Command, String> {
     let mut command = Command::new(bridge_path);
+    command.args(bridge_args(request, log_dir));
+    command.envs(bridge_env(request));
+    command.current_dir(log_dir);
+    with_stdio(command, log_dir, "bridge")
+}
+
+fn bridge_env(request: &LaunchRequest) -> BTreeMap<String, String> {
+    let mut env = BTreeMap::new();
+    if request.detailed_logs_enabled {
+        env.insert("NSMB_MVL_DETAILED_LOGS".to_owned(), "1".to_owned());
+    }
+    env
+}
+
+fn bridge_args(request: &LaunchRequest, log_dir: &Path) -> Vec<String> {
+    let mut args = Vec::new();
     match request.role {
         Role::Host => {
-            command.args([
-                "webrtc-offer",
-                "--local-bind",
-                "127.0.0.1:0",
-                "--local-target",
-                &format!("127.0.0.1:{}", request.port),
-            ]);
+            args.push("webrtc-offer".to_owned());
+            args.push("--local-bind".to_owned());
+            args.push("127.0.0.1:0".to_owned());
+            args.push("--local-target".to_owned());
+            args.push(format!("127.0.0.1:{}", request.port));
         }
         Role::Client => {
-            command.args([
-                "webrtc-answer",
-                "--local-bind",
-                &format!("127.0.0.1:{}", request.port),
-            ]);
+            args.push("webrtc-answer".to_owned());
+            args.push("--local-bind".to_owned());
+            args.push(format!("127.0.0.1:{}", request.port));
         }
     }
     let status_file = log_dir
         .join("bridge-status.json")
         .to_string_lossy()
         .into_owned();
-    command.args([
-        "--signal",
-        request.signal_url.trim(),
-        "--session",
-        request.room_code.trim(),
-        "--status-file",
-        &status_file,
-    ]);
-    command.current_dir(log_dir);
-    with_stdio(command, log_dir, "bridge")
+    args.push("--signal".to_owned());
+    args.push(request.signal_url.trim().to_owned());
+    args.push("--session".to_owned());
+    args.push(request.room_code.trim().to_owned());
+    args.push("--status-file".to_owned());
+    args.push(status_file);
+    args
 }
 
 pub(crate) fn build_melon_command(
@@ -327,7 +338,15 @@ pub(crate) fn melon_env(
         "MELONDS_NSML_SCREENSHOT_DIR".into(),
         log_dir.join("screens").to_string_lossy().into_owned(),
     );
-    env.insert("MELONDS_NSML_SCREENSHOT_INTERVAL".into(), "0".into());
+    env.insert(
+        "MELONDS_NSML_SCREENSHOT_INTERVAL".into(),
+        if request.detailed_logs_enabled {
+            "60"
+        } else {
+            "0"
+        }
+        .into(),
+    );
     env.insert(
         "MELONDS_NSML_FIXED_RTC".into(),
         "2020-01-01T00:00:00".into(),
@@ -347,17 +366,51 @@ pub(crate) fn melon_env(
     );
     env.insert("MELONDS_NSML_INPUT_UNRELIABLE".into(), "1".into());
     env.insert("MELONDS_NSML_INPUT_BUNDLE_HISTORY".into(), "8".into());
+    if request.detailed_logs_enabled {
+        env.insert("MELONDS_NSML_INPUT_TRACE".into(), "1".into());
+        env.insert("MELONDS_NSML_INPUT_TRACE_INTERVAL".into(), "1".into());
+        env.insert("MELONDS_NSML_INPUT_NETPLAY_TRACE".into(), "1".into());
+    }
     env.insert("MELONDS_NSML_INPUT_HEALTH_TRACE".into(), "1".into());
     env.insert(
         "MELONDS_NSML_INPUT_HEALTH_TRACE_INTERVAL".into(),
-        "120".into(),
+        if request.detailed_logs_enabled {
+            "30"
+        } else {
+            "120"
+        }
+        .into(),
     );
     env.insert(
         "MELONDS_NSML_INPUT_HEALTH_TRACE_WAIT_THRESHOLD_MS".into(),
-        "16".into(),
+        if request.detailed_logs_enabled {
+            "1"
+        } else {
+            "16"
+        }
+        .into(),
     );
+    if request.detailed_logs_enabled {
+        env.insert(
+            "MELONDS_NSML_GAME_STATE_TRACE".into(),
+            log_dir
+                .join("melonds-game-state.csv")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        env.insert("MELONDS_NSML_GAME_STATE_TRACE_INTERVAL".into(), "30".into());
+        env.insert("MELONDS_NSML_GAME_STATE_TRACE_EXTENDED".into(), "1".into());
+    }
     env.insert("MELONDS_NSML_STATE_SYNC".into(), "1".into());
-    env.insert("MELONDS_NSML_STATE_SYNC_INTERVAL".into(), "60".into());
+    env.insert(
+        "MELONDS_NSML_STATE_SYNC_INTERVAL".into(),
+        if request.detailed_logs_enabled {
+            "30"
+        } else {
+            "60"
+        }
+        .into(),
+    );
     env.insert("MELONDS_NSML_STATE_SYNC_EXTENDED".into(), "1".into());
     env.insert(
         "MELONDS_NSML_DIAGNOSTICS_FILE".into(),
@@ -366,7 +419,7 @@ pub(crate) fn melon_env(
             .to_string_lossy()
             .into_owned(),
     );
-    if request.diagnostic_events_enabled {
+    if request.diagnostic_events_enabled || request.detailed_logs_enabled {
         env.insert("MELONDS_NSML_DIAGNOSTIC_EVENTS".into(), "1".into());
         env.insert(
             "MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE".into(),
@@ -506,9 +559,15 @@ fn with_stdio(mut command: Command, log_dir: &Path, name: &str) -> Result<Comman
 }
 
 fn write_launch_manifest(paths: &LaunchPaths, request: &LaunchRequest) -> Result<(), String> {
+    let current_exe = std::env::current_exe().ok();
     let value = serde_json::json!({
         "gui": {
             "version": env!("CARGO_PKG_VERSION"),
+            "package": env!("CARGO_PKG_NAME"),
+            "exe": current_exe
+                .as_deref()
+                .map(file_fingerprint)
+                .unwrap_or_else(|| serde_json::json!({ "error": "current_exe unavailable" })),
         },
         "rom_identity": request.rom_identity,
         "request": request,
@@ -518,12 +577,81 @@ fn write_launch_manifest(paths: &LaunchPaths, request: &LaunchRequest) -> Result
             "melonds": paths.melon_path,
             "input_script": paths.input_script,
             "rom": paths.rom_path,
-        }
+        },
+        "artifacts": {
+            "bridge": file_fingerprint(&paths.bridge_path),
+            "melonds": file_fingerprint(&paths.melon_path),
+            "input_script": file_fingerprint(&paths.input_script),
+            "rom": file_fingerprint(&paths.rom_path),
+        },
+        "launch": {
+            "bridge": {
+                "cwd": paths.log_dir,
+                "args": bridge_args(request, &paths.log_dir),
+                "env": bridge_env(request),
+            },
+            "melonds": {
+                "cwd": paths.log_dir,
+                "args": [paths.rom_path.to_string_lossy().into_owned()],
+                "env": melon_env(request, &paths.input_script, &paths.log_dir),
+            },
+        },
+        "runtime": {
+            "os": std::env::consts::OS,
+            "arch": std::env::consts::ARCH,
+            "family": std::env::consts::FAMILY,
+            "current_dir": std::env::current_dir()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_else(|err| format!("error: {err}")),
+        },
     });
     let json = serde_json::to_vec_pretty(&value)
         .map_err(|err| format!("launcher manifest を生成できません: {err}"))?;
     fs::write(paths.log_dir.join("launcher.json"), json)
         .map_err(|err| format!("launcher manifest を保存できません: {err}"))
+}
+
+fn file_fingerprint(path: &Path) -> serde_json::Value {
+    match file_fingerprint_result(path) {
+        Ok(value) => value,
+        Err(err) => serde_json::json!({
+            "path": path,
+            "error": err,
+        }),
+    }
+}
+
+fn file_fingerprint_result(path: &Path) -> Result<serde_json::Value, String> {
+    let metadata = fs::metadata(path).map_err(|err| format!("metadata を読み込めません: {err}"))?;
+    let modified_unix_ms = metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis());
+    Ok(serde_json::json!({
+        "path": path,
+        "bytes": metadata.len(),
+        "modified_unix_ms": modified_unix_ms,
+        "sha256": sha256_file(path)?,
+    }))
+}
+
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let file =
+        File::open(path).map_err(|err| format!("{} を読み込めません: {err}", path.display()))?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|err| format!("{} のhash計算に失敗しました: {err}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 pub(crate) fn read_bridge_diagnostics(

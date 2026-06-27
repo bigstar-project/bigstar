@@ -7,7 +7,7 @@ use std::env;
 use std::io::{self, Write};
 use std::net::UdpSocket;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::net::{TcpListener, TcpStream, UdpSocket as TokioUdpSocket};
 use tokio::sync::Mutex as TokioMutex;
 use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
@@ -138,6 +138,15 @@ fn parse_env_u64(name: &str) -> u64 {
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(0)
+}
+
+fn env_flag(name: &str) -> bool {
+    env::var(name)
+        .map(|value| {
+            let normalized = value.trim().to_ascii_lowercase();
+            !normalized.is_empty() && normalized != "0" && normalized != "false"
+        })
+        .unwrap_or(false)
 }
 
 pub struct SignalingWebRtcConfig {
@@ -1128,9 +1137,14 @@ async fn run_webrtc_udp_tunnel(
     let (mut dc_tx, mut dc_rx) = data_channel.split();
     let mut app_buf = [0u8; MAX_DATAGRAM_SIZE];
     let start = Instant::now();
-    let mut stats_tick = tokio::time::interval(Duration::from_secs(2));
+    let detailed_logs = env_flag("NSMB_MVL_DETAILED_LOGS");
+    let mut stats_tick =
+        tokio::time::interval(Duration::from_secs(if detailed_logs { 1 } else { 2 }));
     let mut local_replay_tick = tokio::time::interval(LOCAL_APP_REPLAY_INTERVAL);
     let mut impairment = ImpairmentState::new(ImpairmentConfig::from_env());
+    let mut last_stats = reporter.stats;
+    let mut last_impairment_app_to_webrtc_dropped = 0;
+    let mut last_impairment_webrtc_to_app_dropped = 0;
     let mut local_app_seen = false;
     let mut pending_local_replays: VecDeque<PendingLocalDatagram> = VecDeque::new();
 
@@ -1268,17 +1282,60 @@ async fn run_webrtc_udp_tunnel(
                 }
             }
             _ = stats_tick.tick() => {
-                println!(
-                    "nsmb-net-bridge webrtc: t={:.1}s app->rtc={}pkts/{}B rtc->app={}pkts/{}B droppedNoLocalTarget={} impairmentDropAppToRtc={} impairmentDropRtcToApp={}",
-                    start.elapsed().as_secs_f32(),
-                    reporter.stats.app_to_webrtc_packets,
-                    reporter.stats.app_to_webrtc_bytes,
-                    reporter.stats.webrtc_to_app_packets,
-                    reporter.stats.webrtc_to_app_bytes,
-                    reporter.stats.dropped_no_local_target,
-                    impairment.app_to_webrtc_dropped,
-                    impairment.webrtc_to_app_dropped
-                );
+                if detailed_logs {
+                    let unix_ms = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|duration| duration.as_millis())
+                        .unwrap_or(0);
+                    let delta_app_packets = reporter.stats.app_to_webrtc_packets
+                        .saturating_sub(last_stats.app_to_webrtc_packets);
+                    let delta_app_bytes = reporter.stats.app_to_webrtc_bytes
+                        .saturating_sub(last_stats.app_to_webrtc_bytes);
+                    let delta_rtc_packets = reporter.stats.webrtc_to_app_packets
+                        .saturating_sub(last_stats.webrtc_to_app_packets);
+                    let delta_rtc_bytes = reporter.stats.webrtc_to_app_bytes
+                        .saturating_sub(last_stats.webrtc_to_app_bytes);
+                    let delta_no_local_target = reporter.stats.dropped_no_local_target
+                        .saturating_sub(last_stats.dropped_no_local_target);
+                    let delta_impairment_app = impairment.app_to_webrtc_dropped
+                        .saturating_sub(last_impairment_app_to_webrtc_dropped);
+                    let delta_impairment_rtc = impairment.webrtc_to_app_dropped
+                        .saturating_sub(last_impairment_webrtc_to_app_dropped);
+                    println!(
+                        "nsmb-net-bridge webrtc: tUnixMs={} t={:.1}s app->rtc={}pkts/{}B(+{}pkts/+{}B) rtc->app={}pkts/{}B(+{}pkts/+{}B) droppedNoLocalTarget={}({}+) impairmentDropAppToRtc={}({}+) impairmentDropRtcToApp={}({}+)",
+                        unix_ms,
+                        start.elapsed().as_secs_f32(),
+                        reporter.stats.app_to_webrtc_packets,
+                        reporter.stats.app_to_webrtc_bytes,
+                        delta_app_packets,
+                        delta_app_bytes,
+                        reporter.stats.webrtc_to_app_packets,
+                        reporter.stats.webrtc_to_app_bytes,
+                        delta_rtc_packets,
+                        delta_rtc_bytes,
+                        reporter.stats.dropped_no_local_target,
+                        delta_no_local_target,
+                        impairment.app_to_webrtc_dropped,
+                        delta_impairment_app,
+                        impairment.webrtc_to_app_dropped,
+                        delta_impairment_rtc
+                    );
+                    last_stats = reporter.stats;
+                    last_impairment_app_to_webrtc_dropped = impairment.app_to_webrtc_dropped;
+                    last_impairment_webrtc_to_app_dropped = impairment.webrtc_to_app_dropped;
+                } else {
+                    println!(
+                        "nsmb-net-bridge webrtc: t={:.1}s app->rtc={}pkts/{}B rtc->app={}pkts/{}B droppedNoLocalTarget={} impairmentDropAppToRtc={} impairmentDropRtcToApp={}",
+                        start.elapsed().as_secs_f32(),
+                        reporter.stats.app_to_webrtc_packets,
+                        reporter.stats.app_to_webrtc_bytes,
+                        reporter.stats.webrtc_to_app_packets,
+                        reporter.stats.webrtc_to_app_bytes,
+                        reporter.stats.dropped_no_local_target,
+                        impairment.app_to_webrtc_dropped,
+                        impairment.webrtc_to_app_dropped
+                    );
+                }
                 reporter.observe_selected_addresses(
                     peer_connection.local_address(),
                     peer_connection.remote_address(),

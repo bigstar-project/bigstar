@@ -38,6 +38,7 @@ import {
   openMelonds as openMelondsCommand,
   openMelondsInputConfig as openMelondsInputConfigCommand,
   runPreflightCheck,
+  saveDetailedLogsEnabled,
   saveDiagnosticEventsEnabled,
   saveMatchHistory,
   saveNewRoomNotificationsEnabled,
@@ -578,6 +579,7 @@ export function useLauncherController() {
           inputMaxFrameLead: initialForm.inputMaxFrameLead,
           rollbackEnabled: initialForm.rollbackEnabled,
           diagnosticEventsEnabled: defaults.diagnostic_events_enabled ?? false,
+          detailedLogsEnabled: defaults.detailed_logs_enabled ?? false,
           newRoomNotificationsEnabled:
             defaults.new_room_notifications_enabled ?? true,
         });
@@ -664,6 +666,20 @@ export function useLauncherController() {
     }, 250);
     return () => window.clearTimeout(timer);
   }, [defaultsLoaded, form.diagnosticEventsEnabled]);
+
+  useEffect(() => {
+    if (!defaultsLoaded) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void saveDetailedLogsEnabled({
+        enabled: form.detailedLogsEnabled,
+      }).catch((error) => {
+        setActivityStatus({ text: String(error), kind: 'warn' });
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [defaultsLoaded, form.detailedLogsEnabled]);
 
   useEffect(() => {
     if (!defaultsLoaded) {
@@ -876,6 +892,7 @@ export function useLauncherController() {
         settings: currentSettings(nextForm),
         player_names: playerNames,
         diagnostic_events_enabled: nextForm.diagnosticEventsEnabled,
+        detailed_logs_enabled: nextForm.detailedLogsEnabled,
       };
 
       try {

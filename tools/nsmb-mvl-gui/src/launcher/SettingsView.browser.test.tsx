@@ -140,6 +140,14 @@ describe('設定ビュー', () => {
     );
   });
 
+  test('詳細ログをSwitchで切り替える', async () => {
+    const { screen, updateField } = await renderSettingsView();
+
+    await screen.getByText('詳細ログ').click();
+
+    expect(updateField).toHaveBeenCalledWith('detailedLogsEnabled', true);
+  });
+
   test('現在の設定状態を要約して表示する', async () => {
     const { screen } = await renderSettingsView();
 
