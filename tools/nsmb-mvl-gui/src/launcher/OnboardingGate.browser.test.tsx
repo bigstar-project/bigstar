@@ -165,4 +165,33 @@ describe('初回セットアップゲート', () => {
 
     expect(onOpenAi).toHaveBeenCalledTimes(1);
   });
+
+  test('AI開発機能が無効なビルドではAI開発ボタンを表示しない', async () => {
+    const screen = await render(
+      <OnboardingGate
+        actions={{
+          openMelondsInputConfig: vi.fn(async () => {}),
+          savePlayerName: vi.fn(async () => {}),
+          selectBaseRomAndPrepare: vi.fn(async () => {}),
+        }}
+        activeView="battle"
+        activityStatus={null}
+        aiDevToolsEnabled={false}
+        form={initialForm}
+        onboarding={{
+          inputConfigOpened: false,
+          loaded: true,
+          playerNameConfigured: false,
+          romGenerationBusy: false,
+          romsPrepared: false,
+        }}
+        onOpenAi={vi.fn()}
+        updateField={vi.fn()}
+      />,
+    );
+
+    await expect
+      .element(screen.getByRole('button', { name: 'AI開発を開く' }))
+      .not.toBeInTheDocument();
+  });
 });

@@ -7,6 +7,7 @@
     "dev": "tauri dev",
     "prepare": "panda codegen",
     "build": "node scripts/build-tauri.mjs",
+    "build:distribution": "node scripts/build-tauri.mjs --build-profile distribution",
     "sync:sidecars": "node scripts/sync-sidecars.mjs",
     "panda:codegen": "panda codegen",
     "typecheck": "tsc --noEmit",

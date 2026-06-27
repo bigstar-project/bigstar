@@ -148,6 +148,7 @@ export function OnboardingGate({
   actions,
   activeView,
   activityStatus,
+  aiDevToolsEnabled = true,
   form,
   onboarding,
   onOpenAi,
@@ -159,6 +160,7 @@ export function OnboardingGate({
   >;
   activeView: View;
   activityStatus: { text: string; kind: StatusKind } | null;
+  aiDevToolsEnabled?: boolean;
   form: FormState;
   onboarding: OnboardingState;
   onOpenAi: () => void;
@@ -315,20 +317,22 @@ export function OnboardingGate({
               />
             </div>
 
-            <div
-              className={css({
-                alignItems: 'center',
-                borderTopColor: 'gray.surface.border',
-                borderTopWidth: '1px',
-                display: 'flex',
-                justifyContent: 'flex-end',
-                pt: '4',
-              })}
-            >
-              <Button type="button" variant="outline" onClick={onOpenAi}>
-                AI開発を開く
-              </Button>
-            </div>
+            {aiDevToolsEnabled ? (
+              <div
+                className={css({
+                  alignItems: 'center',
+                  borderTopColor: 'gray.surface.border',
+                  borderTopWidth: '1px',
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  pt: '4',
+                })}
+              >
+                <Button type="button" variant="outline" onClick={onOpenAi}>
+                  AI開発を開く
+                </Button>
+              </div>
+            ) : null}
           </Dialog.Body>
         </Dialog.Content>
       </Dialog.Positioner>

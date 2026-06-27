@@ -1,4 +1,5 @@
-import { AIReplayViewer } from './launcher/AIReplayViewer';
+import { AIReplayViewer } from '@/launcher/AIReplayViewer';
+import { areAiDevToolsEnabled } from './buildProfile';
 import { BattleView } from './launcher/BattleView';
 import { HistoryView } from './launcher/HistoryView';
 import { LauncherShell } from './launcher/LauncherShell';
@@ -8,6 +9,7 @@ import { useLauncherController } from './launcher/useLauncherController';
 
 export function App() {
   const launcher = useLauncherController();
+  const aiDevToolsEnabled = areAiDevToolsEnabled();
   const onboardingMissing =
     launcher.onboarding.loaded &&
     (!launcher.onboarding.romsPrepared ||
@@ -27,6 +29,7 @@ export function App() {
           connectionStatus={launcher.connectionStatus}
           onCheckForUpdate={() => void launcher.actions.checkForUpdate()}
           onViewChange={launcher.changeView}
+          aiDevToolsEnabled={aiDevToolsEnabled}
           romStatus={launcher.romStatus}
           updateBusy={launcher.updateBusy}
           updateStatus={launcher.updateStatus}
@@ -44,7 +47,7 @@ export function App() {
             summary={launcher.summary}
             updateField={launcher.updateField}
           />
-          <AIReplayViewer />
+          {aiDevToolsEnabled ? <AIReplayViewer /> : null}
           <HistoryView
             matches={launcher.matchHistory}
             onDeleteMatch={launcher.actions.deleteMatchHistory}
@@ -64,6 +67,7 @@ export function App() {
         activityStatus={launcher.activityStatus}
         form={launcher.form}
         onboarding={launcher.onboarding}
+        aiDevToolsEnabled={aiDevToolsEnabled}
         onOpenAi={() => launcher.changeView('ai')}
         updateField={launcher.updateField}
       />

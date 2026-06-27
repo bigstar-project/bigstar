@@ -2,7 +2,7 @@ import { useMutation } from '@tanstack/react-query';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { check } from '@tauri-apps/plugin-updater';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { isDistributionBuild } from '../buildProfile';
+import { areAiDevToolsEnabled, isDistributionBuild } from '../buildProfile';
 import {
   currentSettings,
   defaultInputDelayFrames,
@@ -153,12 +153,15 @@ function defaultPlayerIds(
 }
 
 export function useLauncherController() {
+  const aiDevToolsEnabled = areAiDevToolsEnabled();
   const [activeView, setActiveView] = useState<View>(() =>
     window.location.hash === '#settings'
       ? 'settings'
       : window.location.hash === '#history'
         ? 'history'
-        : 'battle',
+        : window.location.hash === '#ai' && areAiDevToolsEnabled()
+          ? 'ai'
+          : 'battle',
   );
   const [form, setForm] = useState<FormState>(initialForm);
   const [connectionStatus, setConnectionStatus] = useState({
@@ -1534,6 +1537,9 @@ export function useLauncherController() {
   };
 
   const changeView = (view: View) => {
+    if (view === 'ai' && !aiDevToolsEnabled) {
+      return;
+    }
     setActiveView(view);
     window.history.replaceState(null, '', `#${view}`);
   };

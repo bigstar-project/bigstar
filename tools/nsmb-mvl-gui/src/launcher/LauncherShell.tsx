@@ -130,6 +130,7 @@ function viewIcon(view: View) {
 export function LauncherShell({
   activeView,
   activityStatus,
+  aiDevToolsEnabled = true,
   children,
   connectionStatus,
   onCheckForUpdate,
@@ -140,6 +141,7 @@ export function LauncherShell({
 }: {
   activeView: View;
   activityStatus: { text: string; kind: StatusKind } | null;
+  aiDevToolsEnabled?: boolean;
   children: ReactNode;
   connectionStatus: { text: string; kind: StatusKind };
   onCheckForUpdate: () => void;
@@ -299,53 +301,55 @@ export function LauncherShell({
                     対戦
                   </span>
                 </Tabs.Trigger>
-                <Tabs.Trigger
-                  aria-label="AI"
-                  className={css({
-                    alignItems: 'center',
-                    borderColor: 'transparent',
-                    borderRadius: 'l2',
-                    borderWidth: '1px',
-                    color: 'fg.muted',
-                    display: 'flex',
-                    fontWeight: 'black',
-                    gap: '2.5',
-                    minH: '10',
-                    outline: 'none',
-                    px: '3',
-                    textAlign: 'left',
-                    transition: 'common',
-                    _hover: {
-                      bg: 'blue.subtle.bg',
-                      borderColor: 'blue.outline.border',
-                    },
-                    '&[data-selected]': {
-                      bg: 'blue.subtle.bg',
-                      borderColor: 'blue.solid.bg',
-                      color: 'fg.default',
-                    },
-                    '&[data-selected] svg': {
-                      color: 'yellow.plain.fg',
-                    },
-                  })}
-                  value="ai"
-                >
-                  <Brain
+                {aiDevToolsEnabled ? (
+                  <Tabs.Trigger
+                    aria-label="AI"
                     className={css({
+                      alignItems: 'center',
+                      borderColor: 'transparent',
+                      borderRadius: 'l2',
+                      borderWidth: '1px',
                       color: 'fg.muted',
-                      flexShrink: '0',
+                      display: 'flex',
+                      fontWeight: 'black',
+                      gap: '2.5',
+                      minH: '10',
+                      outline: 'none',
+                      px: '3',
+                      textAlign: 'left',
+                      transition: 'common',
+                      _hover: {
+                        bg: 'blue.subtle.bg',
+                        borderColor: 'blue.outline.border',
+                      },
+                      '&[data-selected]': {
+                        bg: 'blue.subtle.bg',
+                        borderColor: 'blue.solid.bg',
+                        color: 'fg.default',
+                      },
+                      '&[data-selected] svg': {
+                        color: 'yellow.plain.fg',
+                      },
                     })}
-                    size={22}
-                    weight="fill"
-                  />
-                  <span
-                    className={css({
-                      textStyle: 'sm',
-                    })}
+                    value="ai"
                   >
-                    AI
-                  </span>
-                </Tabs.Trigger>
+                    <Brain
+                      className={css({
+                        color: 'fg.muted',
+                        flexShrink: '0',
+                      })}
+                      size={22}
+                      weight="fill"
+                    />
+                    <span
+                      className={css({
+                        textStyle: 'sm',
+                      })}
+                    >
+                      AI
+                    </span>
+                  </Tabs.Trigger>
+                ) : null}
                 <Tabs.Trigger
                   aria-label="対戦履歴"
                   className={css({

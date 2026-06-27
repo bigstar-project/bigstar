@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { currentBuildProfile, isDistributionBuild } from './buildProfile';
+import {
+  areAiDevToolsEnabled,
+  currentBuildProfile,
+  isDistributionBuild,
+} from './buildProfile';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -16,5 +20,13 @@ describe('build profile', () => {
 
     expect(currentBuildProfile()).toBe('distribution');
     expect(isDistributionBuild()).toBe(true);
+  });
+
+  test('AI開発機能は明示的にfalseのときだけ無効化する', () => {
+    expect(areAiDevToolsEnabled()).toBe(true);
+
+    vi.stubGlobal('__NSMB_MVL_AI_DEVTOOLS_ENABLED__', false);
+
+    expect(areAiDevToolsEnabled()).toBe(false);
   });
 });
