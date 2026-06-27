@@ -20,8 +20,8 @@ use crate::paths::{
     save_match_history as save_match_history_file,
 };
 use crate::processes::{
-    remove_inherited_melonds_env_keys, session_status_inner, start_match_resolved, stop_existing,
-    LaunchPaths,
+    remove_inherited_melonds_env_keys, session_status_inner, start_match_resolved,
+    stop_existing_with_unresolved_report, LaunchPaths,
 };
 use crate::roms::prepare_roms;
 use crate::settings::validate_request;
@@ -260,7 +260,7 @@ pub(crate) async fn ensure_roms(
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn stop_match(state: State<'_, AppState>) -> Result<(), String> {
-    stop_existing(state.inner())
+    stop_existing_with_unresolved_report(state.inner())
 }
 
 #[tauri::command]

@@ -22,13 +22,19 @@ pub(crate) fn send_crash_report_async(
     melon_state: String,
     bridge_state: String,
     player_names: Option<MatchPlayerNames>,
+    reason: &'static str,
 ) {
     std::thread::spawn(move || {
-        let result =
-            send_crash_report(&log_dir, &melon_state, &bridge_state, player_names.as_ref());
+        let result = send_crash_report(
+            &log_dir,
+            &melon_state,
+            &bridge_state,
+            player_names.as_ref(),
+            reason,
+        );
         let message = match result {
-            Ok(()) => "Discord crash report sent".to_owned(),
-            Err(err) => format!("Discord crash report failed: {err}"),
+            Ok(()) => "Discord unresolved session report sent".to_owned(),
+            Err(err) => format!("Discord unresolved session report failed: {err}"),
         };
         let _ = fs::write(log_dir.join(REPORT_STATUS_FILE), message);
     });
@@ -39,6 +45,7 @@ fn send_crash_report(
     melon_state: &str,
     bridge_state: &str,
     player_names: Option<&MatchPlayerNames>,
+    reason: &str,
 ) -> Result<(), String> {
     let archive_path = create_log_archive(log_dir)?;
     let archive_name = archive_path
@@ -51,7 +58,7 @@ fn send_crash_report(
 
     let payload = serde_json::json!({
         "content": format!(
-            "NSMB MvL crash report: melonDS={melon_state} bridge={bridge_state}\nplayers: Mario={} Luigi={}\nlog_dir={}",
+            "NSMB MvL unresolved session report: reason={reason} melonDS={melon_state} bridge={bridge_state}\nplayers: Mario={} Luigi={}\nlog_dir={}",
             player_names.map(|names| names.mario.as_str()).unwrap_or("-"),
             player_names.map(|names| names.luigi.as_str()).unwrap_or("-"),
             log_dir.display()

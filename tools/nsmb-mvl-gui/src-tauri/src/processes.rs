@@ -127,6 +127,14 @@ fn wait_for_bridge_connected(bridge: &mut Child, log_dir: &Path) -> Result<(), S
 }
 
 pub(crate) fn stop_existing(state: &AppState) -> Result<(), String> {
+    stop_existing_inner(state, false)
+}
+
+pub(crate) fn stop_existing_with_unresolved_report(state: &AppState) -> Result<(), String> {
+    stop_existing_inner(state, true)
+}
+
+fn stop_existing_inner(state: &AppState, report_unresolved: bool) -> Result<(), String> {
     let mut guard = state
         .session
         .lock()
@@ -134,6 +142,17 @@ pub(crate) fn stop_existing(state: &AppState) -> Result<(), String> {
     if let Some(mut session) = guard.take() {
         terminate_child(&mut session.melon);
         terminate_child(&mut session.bridge);
+        let mvl_results = read_mvl_results(&session.log_dir);
+        if report_unresolved && !session.crash_report_sent && !match_result_decided(&mvl_results) {
+            session.crash_report_sent = true;
+            send_crash_report_async(
+                session.log_dir,
+                "stopped_by_user".to_owned(),
+                "stopped_by_user".to_owned(),
+                session.player_names,
+                "user_stop",
+            );
+        }
     }
     Ok(())
 }
@@ -175,6 +194,7 @@ pub(crate) fn session_status_inner(state: &AppState) -> Result<SessionStatus, St
             melon.clone(),
             bridge.clone(),
             session.player_names.clone(),
+            "process_exit",
         );
     }
 
