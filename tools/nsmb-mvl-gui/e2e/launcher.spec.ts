@@ -96,9 +96,11 @@ async function installGuiDriver(
               return {
                 base_rom_path: state.romsPrepared ? 'C:\\roms\\base.nds' : '',
                 client_rom_path: 'C:\\roms\\client.nds',
+                detailed_logs_enabled: false,
                 host_rom_path: 'C:\\roms\\host.nds',
                 input_config_opened_once: state.inputConfigOpened,
                 diagnostic_events_enabled: false,
+                log_archive_upload_token: '',
                 new_room_notifications_enabled: true,
                 player_name: state.playerName,
                 player_profile_id: state.playerProfileId,
@@ -122,6 +124,16 @@ async function installGuiDriver(
               calls.push({ args: [args.path], name: command });
               return null;
             }
+            if (command === 'cleanup_detailed_logs') {
+              calls.push({ args: [], name: command });
+              return {
+                deleted_dirs: 0,
+                deleted_files: 0,
+                freed_bytes: 0,
+                scanned_log_dirs: 0,
+                skipped_active_log_dirs: 0,
+              };
+            }
             if (command === 'open_melonds_input_config') {
               calls.push({ args: [], name: command });
               state.inputConfigOpened = true;
@@ -142,6 +154,10 @@ async function installGuiDriver(
               return null;
             }
             if (command === 'save_diagnostic_events_enabled') {
+              calls.push({ args: [args.request], name: command });
+              return null;
+            }
+            if (command === 'save_detailed_logs_enabled') {
               calls.push({ args: [args.request], name: command });
               return null;
             }

@@ -49,6 +49,7 @@ fn specta_builder() -> SpectaBuilder<tauri::Wry> {
         commands::save_match_history,
         commands::open_log_dir,
         commands::create_log_archive,
+        commands::cleanup_detailed_logs,
         commands::upload_log_archive,
         commands::open_melonds,
         commands::open_melonds_input_config,

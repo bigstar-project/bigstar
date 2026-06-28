@@ -2,6 +2,7 @@ import type { CourseMode, Lives, Role } from './bindings';
 
 export type {
   BridgeDiagnostics,
+  CleanupDetailedLogsResponse,
   CourseMode,
   Defaults,
   GameSettings,

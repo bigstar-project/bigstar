@@ -163,6 +163,15 @@ pub(crate) struct LogArchiveResponse {
     pub(crate) size: u32,
 }
 
+#[derive(Debug, Serialize, Type)]
+pub(crate) struct CleanupDetailedLogsResponse {
+    pub(crate) scanned_log_dirs: u32,
+    pub(crate) skipped_active_log_dirs: u32,
+    pub(crate) deleted_files: u32,
+    pub(crate) deleted_dirs: u32,
+    pub(crate) freed_bytes: u32,
+}
+
 #[derive(Debug, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct UploadLogArchiveRequest {

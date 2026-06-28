@@ -8,6 +8,7 @@ import {
   readyPreviewDefaults,
 } from './previewData';
 import type {
+  CleanupDetailedLogsResponse,
   GenerateRomRequest,
   GenerateRomResponse,
   LaunchRequest,
@@ -246,6 +247,19 @@ export function createLogArchive(logDir: string) {
     });
   }
   return unwrapCommand(commands.createLogArchive(logDir));
+}
+
+export function cleanupDetailedLogs() {
+  if (!isTauriRuntime()) {
+    return Promise.resolve<CleanupDetailedLogsResponse>({
+      scanned_log_dirs: 4,
+      skipped_active_log_dirs: 0,
+      deleted_files: 12,
+      deleted_dirs: 4,
+      freed_bytes: 64 * 1024 * 1024,
+    });
+  }
+  return unwrapCommand(commands.cleanupDetailedLogs());
 }
 
 export function uploadLogArchive(request: UploadLogArchiveRequest) {

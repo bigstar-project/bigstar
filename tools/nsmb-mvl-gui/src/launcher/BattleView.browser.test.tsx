@@ -36,6 +36,7 @@ function actions(overrides: Partial<LauncherActions> = {}) {
   return {
     checkForUpdate: vi.fn(async () => {}),
     cancelHostedRoom: vi.fn(async () => {}),
+    cleanupDetailedLogs: vi.fn(async () => {}),
     copyRoomCode: vi.fn(async () => {}),
     createLogArchive: vi.fn(async () => {}),
     createRoom: vi.fn(async () => {}),

@@ -11,10 +11,11 @@ use std::os::windows::process::CommandExt;
 use crate::config::{default_signal_url, DEFAULT_PORT, DEFAULT_ROOM_CODE};
 use crate::crash_report::create_user_log_archive;
 use crate::models::{
-    Defaults, GenerateRomRequest, GenerateRomResponse, LaunchRequest, LaunchResponse,
-    LogArchiveResponse, MatchHistoryRecord, SaveDetailedLogsRequest, SaveDiagnosticEventsRequest,
-    SaveNewRoomNotificationsRequest, SavePlayerNameRequest, SaveRomPathsRequest, SessionStatus,
-    ShowNewRoomNotificationRequest, UploadLogArchiveRequest, UploadLogArchiveResponse,
+    CleanupDetailedLogsResponse, Defaults, GenerateRomRequest, GenerateRomResponse, LaunchRequest,
+    LaunchResponse, LogArchiveResponse, MatchHistoryRecord, SaveDetailedLogsRequest,
+    SaveDiagnosticEventsRequest, SaveNewRoomNotificationsRequest, SavePlayerNameRequest,
+    SaveRomPathsRequest, SessionStatus, ShowNewRoomNotificationRequest, UploadLogArchiveRequest,
+    UploadLogArchiveResponse,
 };
 use crate::paths::{
     absolutize_existing, allowed_log_dir, app_data_dir, create_log_dir, find_bridge_binary,
@@ -33,6 +34,16 @@ use crate::windowing::show_main_window;
 
 const MAX_LOG_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024;
 const LOG_ARCHIVE_UPLOAD_PART_BYTES: usize = 32 * 1024 * 1024;
+const DETAILED_LOG_FILES: &[&str] = &[
+    "bridge-events.jsonl",
+    "melonds-events.jsonl",
+    "melonds-game-state.csv",
+    "melonds-hang.dmp",
+    "melonds-phase-events.jsonl",
+    "melonds.stdout.txt",
+    "melonds-watchdog.jsonl",
+];
+const DETAILED_LOG_DIRS: &[&str] = &["screens"];
 
 #[tauri::command]
 #[specta::specta]
@@ -220,6 +231,22 @@ pub(crate) fn create_log_archive(
 
 #[tauri::command]
 #[specta::specta]
+pub(crate) fn cleanup_detailed_logs(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<CleanupDetailedLogsResponse, String> {
+    let logs_root = app_data_dir(&app)?.join("logs");
+    let active_log_dir = state
+        .session
+        .lock()
+        .map_err(|_| "session state を取得できません".to_owned())?
+        .as_ref()
+        .map(|session| session.log_dir.clone());
+    cleanup_detailed_logs_in_root(&logs_root, active_log_dir.as_deref())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) async fn upload_log_archive(
     app: AppHandle,
     request: UploadLogArchiveRequest,
@@ -344,6 +371,102 @@ fn resolve_allowed_log_dir(app: &AppHandle, path: &str) -> Result<PathBuf, Strin
     let logs_root = app_data_dir(app)?.join("logs");
     fs::create_dir_all(&logs_root).map_err(|err| format!("ログ保存先を作成できません: {err}"))?;
     allowed_log_dir(&logs_root, &PathBuf::from(path.trim()))
+}
+
+pub(crate) fn cleanup_detailed_logs_in_root(
+    logs_root: &Path,
+    active_log_dir: Option<&Path>,
+) -> Result<CleanupDetailedLogsResponse, String> {
+    let mut response = CleanupDetailedLogsResponse {
+        scanned_log_dirs: 0,
+        skipped_active_log_dirs: 0,
+        deleted_files: 0,
+        deleted_dirs: 0,
+        freed_bytes: 0,
+    };
+
+    if !logs_root.exists() {
+        return Ok(response);
+    }
+
+    let active_log_dir = active_log_dir.and_then(|path| path.canonicalize().ok());
+    for entry in
+        fs::read_dir(logs_root).map_err(|err| format!("ログフォルダを読み込めません: {err}"))?
+    {
+        let entry = entry.map_err(|err| format!("ログフォルダの項目を読み込めません: {err}"))?;
+        let metadata = entry
+            .metadata()
+            .map_err(|err| format!("ログフォルダの項目情報を取得できません: {err}"))?;
+        if !metadata.is_dir() {
+            continue;
+        }
+
+        let log_dir = entry.path();
+        if active_log_dir
+            .as_ref()
+            .is_some_and(|active| log_dir.canonicalize().ok().as_ref() == Some(active))
+        {
+            response.skipped_active_log_dirs += 1;
+            continue;
+        }
+
+        response.scanned_log_dirs += 1;
+        for file_name in DETAILED_LOG_FILES {
+            let path = log_dir.join(file_name);
+            if !path.is_file() {
+                continue;
+            }
+            response.freed_bytes = response.freed_bytes.saturating_add(
+                path.metadata()
+                    .map(|meta| bytes_for_gui(meta.len()))
+                    .unwrap_or_default(),
+            );
+            fs::remove_file(&path)
+                .map_err(|err| format!("詳細ログを削除できません {}: {err}", path.display()))?;
+            response.deleted_files += 1;
+        }
+        for dir_name in DETAILED_LOG_DIRS {
+            let path = log_dir.join(dir_name);
+            if !path.is_dir() {
+                continue;
+            }
+            let (files, bytes) = dir_stats(&path)?;
+            fs::remove_dir_all(&path).map_err(|err| {
+                format!("詳細ログフォルダを削除できません {}: {err}", path.display())
+            })?;
+            response.deleted_files += files;
+            response.deleted_dirs += 1;
+            response.freed_bytes = response.freed_bytes.saturating_add(bytes);
+        }
+    }
+
+    Ok(response)
+}
+
+fn dir_stats(path: &Path) -> Result<(u32, u32), String> {
+    let mut files = 0;
+    let mut bytes: u32 = 0;
+    for entry in fs::read_dir(path)
+        .map_err(|err| format!("フォルダを読み込めません {}: {err}", path.display()))?
+    {
+        let entry = entry.map_err(|err| format!("フォルダ項目を読み込めません: {err}"))?;
+        let metadata = entry
+            .metadata()
+            .map_err(|err| format!("フォルダ項目情報を取得できません: {err}"))?;
+        if metadata.is_dir() {
+            let (child_files, child_bytes) = dir_stats(&entry.path())?;
+            files += child_files;
+            bytes = bytes.saturating_add(child_bytes);
+        } else if metadata.is_file() {
+            files += 1;
+            bytes = bytes.saturating_add(bytes_for_gui(metadata.len()));
+        }
+    }
+    Ok((files, bytes))
+}
+
+fn bytes_for_gui(bytes: u64) -> u32 {
+    bytes.min(u32::MAX as u64) as u32
 }
 
 fn archive_size(path: &Path) -> Result<u64, String> {

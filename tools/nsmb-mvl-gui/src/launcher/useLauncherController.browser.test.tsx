@@ -154,6 +154,13 @@ vi.mock('../tauriClient', () => ({
   })),
   getStartupEnabled: vi.fn(async () => false),
   loadMatchHistory: vi.fn(async () => []),
+  cleanupDetailedLogs: vi.fn(async () => ({
+    deleted_dirs: 1,
+    deleted_files: 3,
+    freed_bytes: 1024,
+    scanned_log_dirs: 2,
+    skipped_active_log_dirs: 0,
+  })),
   openLogDir: vi.fn(async () => {}),
   openMelonds: vi.fn(async () => {}),
   openMelondsInputConfig: vi.fn(async () => {}),

@@ -1,3 +1,4 @@
+import { Portal } from '@ark-ui/react';
 import {
   BellRinging,
   Broadcast,
@@ -7,10 +8,12 @@ import {
   HardDrives,
   Play,
   ShieldCheck,
+  Trash,
   UserCircle,
   WarningCircle,
   WifiHigh,
 } from '@phosphor-icons/react';
+import { useState } from 'react';
 import { css } from 'styled-system/css';
 import { token } from 'styled-system/tokens';
 import {
@@ -20,7 +23,7 @@ import {
   TextField,
 } from '../components/Fields';
 import { SummaryItem } from '../components/SummaryItem';
-import { Button, Switch, Tabs } from '../components/ui';
+import { Button, CloseButton, Dialog, Switch, Tabs } from '../components/ui';
 import type { FormState } from '../types';
 import { InfoPanel, SettingsPanel } from './LauncherCards';
 import { shortPath } from './path';
@@ -47,6 +50,7 @@ export function SettingsView({
     LauncherActions,
     | 'openMelonds'
     | 'openMelondsInputConfig'
+    | 'cleanupDetailedLogs'
     | 'pollStatus'
     | 'preflightCheck'
     | 'prepareRoms'
@@ -59,6 +63,9 @@ export function SettingsView({
   summary: LauncherSummary;
   updateField: UpdateFormField;
 }) {
+  const [cleanupConfirmOpen, setCleanupConfirmOpen] = useState(false);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+
   return (
     <Tabs.Content value="settings">
       <div
@@ -283,6 +290,62 @@ export function SettingsView({
               </div>
               <Switch.Control />
             </Switch.Root>
+            <Dialog.Root
+              open={cleanupConfirmOpen}
+              onOpenChange={(details) => setCleanupConfirmOpen(details.open)}
+            >
+              <Dialog.Trigger asChild>
+                <Button variant="outline">
+                  <Trash size={18} weight="bold" />
+                  古い詳細ログを削除
+                </Button>
+              </Dialog.Trigger>
+              <Portal>
+                <Dialog.Backdrop />
+                <Dialog.Positioner>
+                  <Dialog.Content
+                    className={css({
+                      maxW: 'md',
+                      w: 'full',
+                    })}
+                  >
+                    <Dialog.CloseTrigger>
+                      <CloseButton />
+                    </Dialog.CloseTrigger>
+                    <Dialog.Header>
+                      <Dialog.Title>古い詳細ログを削除しますか？</Dialog.Title>
+                      <Dialog.Description>
+                        対戦履歴、作成済みzip、現在実行中の対戦ログは残ります。
+                      </Dialog.Description>
+                    </Dialog.Header>
+                    <Dialog.Footer>
+                      <Dialog.ActionTrigger asChild>
+                        <Button disabled={cleanupBusy} variant="outline">
+                          キャンセル
+                        </Button>
+                      </Dialog.ActionTrigger>
+                      <Button
+                        colorPalette="red"
+                        loading={cleanupBusy}
+                        onClick={async () => {
+                          setCleanupBusy(true);
+                          try {
+                            await actions.cleanupDetailedLogs();
+                            setCleanupConfirmOpen(false);
+                          } finally {
+                            setCleanupBusy(false);
+                          }
+                        }}
+                        variant="solid"
+                      >
+                        <Trash size={18} weight="bold" />
+                        削除する
+                      </Button>
+                    </Dialog.Footer>
+                  </Dialog.Content>
+                </Dialog.Positioner>
+              </Portal>
+            </Dialog.Root>
           </SettingsPanel>
 
           <SettingsPanel

@@ -28,6 +28,7 @@ import {
 } from '../matchmakingClient';
 import { notifyNewRoomAvailable } from '../roomNotifications';
 import {
+  cleanupDetailedLogs as cleanupDetailedLogsCommand,
   createLogArchive as createLogArchiveCommand,
   ensureRoms,
   generateRoms,
@@ -122,6 +123,21 @@ function matchIsComplete(results: MvlStageResult[]) {
     latest.mario_match_wins >= latest.target_wins ||
     latest.luigi_match_wins >= latest.target_wins
   );
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) {
+    return `${bytes}B`;
+  }
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes / 1024;
+  for (const unit of units) {
+    if (value < 1024 || unit === 'GB') {
+      return `${value.toFixed(value < 10 ? 1 : 0)}${unit}`;
+    }
+    value /= 1024;
+  }
+  return `${bytes}B`;
 }
 
 type PreparedRomCache = {
@@ -1406,6 +1422,21 @@ export function useLauncherController() {
     }
   };
 
+  const cleanupDetailedLogs = async () => {
+    try {
+      const response = await cleanupDetailedLogsCommand();
+      setActivityStatus({
+        text:
+          response.deleted_files === 0 && response.deleted_dirs === 0
+            ? '削除できる古い詳細ログはありません'
+            : `古い詳細ログを削除しました: ${response.deleted_files}ファイル / ${formatBytes(response.freed_bytes)}`,
+        kind: 'ok',
+      });
+    } catch (error) {
+      setActivityStatus({ text: String(error), kind: 'error' });
+    }
+  };
+
   const openMelonds = async () => {
     try {
       const pid = await openMelondsCommand();
@@ -1581,6 +1612,7 @@ export function useLauncherController() {
   const actions: LauncherActions = {
     cancelHostedRoom,
     checkForUpdate,
+    cleanupDetailedLogs,
     copyRoomCode,
     createLogArchive,
     createRoom,

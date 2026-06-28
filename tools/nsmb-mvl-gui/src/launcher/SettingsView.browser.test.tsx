@@ -19,6 +19,7 @@ async function renderSettingsView() {
   const launcherActions = {
     checkForUpdate: vi.fn(async () => {}),
     cancelHostedRoom: vi.fn(async () => {}),
+    cleanupDetailedLogs: vi.fn(async () => {}),
     copyRoomCode: vi.fn(async () => {}),
     createLogArchive: vi.fn(async () => {}),
     createRoom: vi.fn(async () => {}),
@@ -145,9 +146,18 @@ describe('設定ビュー', () => {
   test('詳細ログをSwitchで切り替える', async () => {
     const { screen, updateField } = await renderSettingsView();
 
-    await screen.getByText('詳細ログ').click();
+    await screen.getByText('詳細ログ', { exact: true }).click();
 
     expect(updateField).toHaveBeenCalledWith('detailedLogsEnabled', true);
+  });
+
+  test('古い詳細ログの削除を確認して実行する', async () => {
+    const { launcherActions, screen } = await renderSettingsView();
+
+    await screen.getByRole('button', { name: '古い詳細ログを削除' }).click();
+    await screen.getByRole('button', { name: '削除する' }).click();
+
+    expect(launcherActions.cleanupDetailedLogs).toHaveBeenCalledTimes(1);
   });
 
   test('現在の設定状態を要約して表示する', async () => {

@@ -22,6 +22,7 @@ export const commands = {
 	saveMatchHistory: (matches: MatchHistoryRecord[]) => typedError<null, string>(__TAURI_INVOKE("save_match_history", { matches })),
 	openLogDir: (path: string) => typedError<null, string>(__TAURI_INVOKE("open_log_dir", { path })),
 	createLogArchive: (logDir: string) => typedError<LogArchiveResponse, string>(__TAURI_INVOKE("create_log_archive", { logDir })),
+	cleanupDetailedLogs: () => typedError<CleanupDetailedLogsResponse, string>(__TAURI_INVOKE("cleanup_detailed_logs")),
 	uploadLogArchive: (request: UploadLogArchiveRequest) => typedError<UploadLogArchiveResponse, string>(__TAURI_INVOKE("upload_log_archive", { request })),
 	openMelonds: () => typedError<number, string>(__TAURI_INVOKE("open_melonds")),
 	openMelondsInputConfig: () => typedError<number, string>(__TAURI_INVOKE("open_melonds_input_config")),
@@ -50,6 +51,14 @@ export type BridgeStats = {
 	webrtc_to_app_packets: number | null,
 	webrtc_to_app_bytes: number | null,
 	dropped_no_local_target: number | null,
+};
+
+export type CleanupDetailedLogsResponse = {
+	scanned_log_dirs: number,
+	skipped_active_log_dirs: number,
+	deleted_files: number,
+	deleted_dirs: number,
+	freed_bytes: number,
 };
 
 export type CourseMode = "random" | "select";

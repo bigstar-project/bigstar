@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::commands::cleanup_detailed_logs_in_root;
 use crate::crash_report::{create_log_archive, create_user_log_archive, match_result_decided};
 use crate::models::{
     CourseMode, GameSettings, GameStateMismatch, LaunchRequest, Lives, Role, RomIdentity,
@@ -780,6 +781,39 @@ fn user_log_archive_includes_diagnostic_events_and_excludes_previous_archives() 
     assert!(zip.by_name("nsmb-mvl-logs-old.zip").is_err());
 
     let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn cleanup_detailed_logs_removes_only_heavy_detail_files_and_skips_active_log_dir() {
+    let root = temp_log_dir("cleanup-detail-logs");
+    let old_run = root.join("old-run");
+    let active_run = root.join("active-run");
+    fs::create_dir_all(old_run.join("screens")).expect("create old logs");
+    fs::create_dir_all(&active_run).expect("create active logs");
+    fs::write(old_run.join("melonds-events.jsonl"), "events").expect("write detailed event log");
+    fs::write(old_run.join("bridge-events.jsonl"), "bridge").expect("write bridge event log");
+    fs::write(old_run.join("melonds.stdout.txt"), "stdout").expect("write melon stdout");
+    fs::write(old_run.join("screens").join("frame.png"), "png").expect("write screenshot");
+    fs::write(old_run.join("launcher.json"), "{}").expect("write retained launcher log");
+    fs::write(old_run.join("nsmb-mvl-logs-existing.zip"), "zip").expect("write retained archive");
+    fs::write(active_run.join("melonds-events.jsonl"), "active").expect("write active log");
+
+    let response = cleanup_detailed_logs_in_root(&root, Some(&active_run)).expect("cleanup logs");
+
+    assert_eq!(response.scanned_log_dirs, 1);
+    assert_eq!(response.skipped_active_log_dirs, 1);
+    assert_eq!(response.deleted_files, 4);
+    assert_eq!(response.deleted_dirs, 1);
+    assert!(response.freed_bytes > 0);
+    assert!(!old_run.join("melonds-events.jsonl").exists());
+    assert!(!old_run.join("bridge-events.jsonl").exists());
+    assert!(!old_run.join("melonds.stdout.txt").exists());
+    assert!(!old_run.join("screens").exists());
+    assert!(old_run.join("launcher.json").exists());
+    assert!(old_run.join("nsmb-mvl-logs-existing.zip").exists());
+    assert!(active_run.join("melonds-events.jsonl").exists());
+
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]

@@ -48,6 +48,7 @@ export type LauncherSummary = {
 
 export type LauncherActions = {
   checkForUpdate: () => Promise<void>;
+  cleanupDetailedLogs: () => Promise<void>;
   copyRoomCode: () => Promise<void>;
   createLogArchive: (logDir: string) => Promise<void>;
   createRoom: () => Promise<void>;
