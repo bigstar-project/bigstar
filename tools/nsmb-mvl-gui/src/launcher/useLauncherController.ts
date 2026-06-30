@@ -109,9 +109,20 @@ function logArchiveUploadUrl(signalUrl: string) {
 function assertRomPairMatches(local: RomIdentity, remote: RomIdentity) {
   if (local.rom_pair_id !== remote.rom_pair_id) {
     throw new Error(
-      `ROMが相手と一致しません local=${local.rom_pair_id.slice(0, 12)} remote=${remote.rom_pair_id.slice(0, 12)}`,
+      `ROMまたはbridgeが相手と一致しません local=${local.rom_pair_id.slice(0, 12)} remote=${remote.rom_pair_id.slice(0, 12)}`,
     );
   }
+}
+
+type CompleteRomIdentity = RomIdentity & { bridge_sha256: string };
+
+function requireCompleteRomIdentity(
+  identity: RomIdentity,
+): CompleteRomIdentity {
+  if (!identity.bridge_sha256) {
+    throw new Error('bridge hash を含む対戦 identity を生成できませんでした');
+  }
+  return identity as CompleteRomIdentity;
 }
 
 function matchIsComplete(results: MvlStageResult[]) {
@@ -996,7 +1007,7 @@ export function useLauncherController() {
       romIdentity,
       sourceForm,
     }: {
-      romIdentity: RomIdentity;
+      romIdentity: CompleteRomIdentity;
       sourceForm: FormState;
     }) => {
       const nextForm = withRequiredPlan(sourceForm);
@@ -1090,7 +1101,7 @@ export function useLauncherController() {
       }
       setActivityStatus({ text: '部屋を作成中', kind: 'idle' });
       const response = await createRoomMutation.mutateAsync({
-        romIdentity: roms.rom_identity,
+        romIdentity: requireCompleteRomIdentity(roms.rom_identity),
         sourceForm: plannedForm,
       });
       ownRoomIdsRef.current.add(response.room_id);

@@ -884,6 +884,7 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
         generator_id: "generator_hash".to_owned(),
         host_rom_sha256: "host_hash".to_owned(),
         client_rom_sha256: "client_hash".to_owned(),
+        bridge_sha256: "bridge_hash".to_owned(),
     });
     let response = start_match_resolved(&state, launch_request, paths).expect("start fake match");
     assert!(response.bridge_pid > 0);
@@ -915,6 +916,10 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
     assert_eq!(
         launcher["request"]["rom_identity"]["client_rom_sha256"],
         "client_hash"
+    );
+    assert_eq!(
+        launcher["request"]["rom_identity"]["bridge_sha256"],
+        "bridge_hash"
     );
     assert_eq!(
         launcher["artifacts"]["bridge"]["path"].as_str(),

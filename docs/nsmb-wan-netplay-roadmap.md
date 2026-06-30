@@ -1,5 +1,24 @@
 # NSMB Mario vs Luigi WAN Netplay Roadmap
 
+## Current work: bridge hash match identity - 2026-07-01
+
+- User request: the matchmaking path already checks the generated ROM pair identity before launch; add bridge binary hash exchange/checking to the same pre-match identity check.
+- Implemented:
+  - Tauri ROM preparation now computes the current `nsmb-net-bridge` sidecar SHA-256 and stores it as `rom_identity.bridge_sha256`.
+  - `rom_pair_id` now includes `generator_id`, host ROM SHA-256, client ROM SHA-256, and bridge SHA-256, so bridge mismatch fails the existing room join identity check before melonDS/bridge launch.
+  - Existing reusable ROMs do not need to be regenerated just because the bridge changed. The launcher recomputes the identity from current ROM hashes plus current bridge hash and refreshes the sidecar marker manifest.
+  - The signaling server schema now requires `bridge_sha256` in `rom_identity`, and join mismatch errors now report `match identity mismatch`.
+  - GUI mismatch copy now says `ROMまたはbridgeが相手と一致しません`.
+- Verification passed:
+  - `cargo fmt --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`
+  - `cargo test --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml`
+  - `cargo clippy --manifest-path tools\nsmb-mvl-gui\src-tauri\Cargo.toml --all-targets -- -D warnings`
+  - `corepack pnpm run ci` in `tools\nsmb-signaling-server`
+  - `corepack pnpm run ci` in `tools\nsmb-mvl-gui`
+- Current blocker: deployed clients and signaling server must be updated together because new room payloads require `bridge_sha256`.
+- Next actions:
+  - Rebuild/sync GUI sidecars and deploy the signaling Worker before relying on this check in real matchmaking.
+
 ## Current work: Tauri CI bridge/Tauri build speedup - 2026-06-03
 
 - User request: real GitHub Actions history shows `bridge` and `tauri` are long; optimize the completed-run bottlenecks, not the currently running action.

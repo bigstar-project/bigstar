@@ -334,7 +334,10 @@ const route = app
         return c.json(body, status);
       }
       if (current.rom_identity.rom_pair_id !== body.rom_pair_id) {
-        const { body: errorBody, status } = error('rom identity mismatch', 409);
+        const { body: errorBody, status } = error(
+          'match identity mismatch',
+          409,
+        );
         return c.json(errorBody, status);
       }
       const record = await room.reserveJoin({
@@ -389,7 +392,7 @@ app.onError((err, c) => {
   if (
     message === 'room is not joinable' ||
     message === 'room already exists' ||
-    message === 'rom identity mismatch'
+    message === 'match identity mismatch'
   ) {
     const { body, status } = error(message, 409);
     return c.json(body, status);

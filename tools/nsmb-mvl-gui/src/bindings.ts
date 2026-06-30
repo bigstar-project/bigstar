@@ -220,6 +220,7 @@ export type RomIdentity = {
 	generator_id: string,
 	host_rom_sha256: string,
 	client_rom_sha256: string,
+	bridge_sha256?: string,
 };
 
 export type SaveDetailedLogsRequest = {

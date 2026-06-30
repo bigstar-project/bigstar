@@ -33,6 +33,8 @@ const romIdentity = {
     '1111111111111111111111111111111111111111111111111111111111111111',
   rom_pair_id:
     '4444444444444444444444444444444444444444444444444444444444444444',
+  bridge_sha256:
+    '5555555555555555555555555555555555555555555555555555555555555555',
 };
 const hostProfileId = '11111111-1111-4111-8111-111111111111';
 const clientProfileId = '22222222-2222-4222-8222-222222222222';
@@ -281,7 +283,7 @@ describe('マッチメイキング HTTP API', () => {
     );
 
     expect(response.status).toBe(409);
-    expect(await json(response)).toEqual({ error: 'rom identity mismatch' });
+    expect(await json(response)).toEqual({ error: 'match identity mismatch' });
   });
 });
 
