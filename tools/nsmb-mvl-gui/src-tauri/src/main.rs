@@ -22,6 +22,7 @@ use state::AppState;
 use tauri::{menu::MenuBuilder, tray::TrayIconBuilder, Manager, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_autostart::ManagerExt;
+use tauri_plugin_window_state::{StateFlags, WindowExt};
 use tauri_specta::{collect_commands, Builder as SpectaBuilder};
 use windowing::show_main_window;
 
@@ -97,6 +98,12 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(window_state_flags())
+                .skip_initial_state("main")
+                .build(),
+        )
         .manage(AppState::default())
         .invoke_handler(specta_builder.invoke_handler())
         .on_window_event(|window, event| {
@@ -114,9 +121,10 @@ fn main() {
             if let Err(err) = apply_startup_default_off_migration(app.handle()) {
                 eprintln!("{err}");
             }
-            if startup_launch {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.hide();
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.restore_state(window_state_flags());
+                if !startup_launch {
+                    show_main_window(Some(window));
                 }
             }
             Ok(())
@@ -124,6 +132,10 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_, _| {});
+}
+
+fn window_state_flags() -> StateFlags {
+    StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED | StateFlags::FULLSCREEN
 }
 
 fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
