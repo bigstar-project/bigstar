@@ -19,7 +19,11 @@ use preflight::cli_preflight_check;
 #[cfg(any(debug_assertions, test))]
 use specta_typescript::Typescript;
 use state::AppState;
-use tauri::{menu::MenuBuilder, tray::TrayIconBuilder, Manager, WindowEvent};
+use tauri::{
+    menu::MenuBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager, WindowEvent,
+};
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_window_state::{StateFlags, WindowExt};
@@ -149,6 +153,23 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         .menu(&menu)
         .tooltip("NSMB Mario vs Luigi Online")
         .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            let should_show = matches!(
+                event,
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                } | TrayIconEvent::DoubleClick {
+                    button: MouseButton::Left,
+                    ..
+                }
+            );
+            if should_show {
+                let app = tray.app_handle();
+                show_main_window(app.get_webview_window("main"));
+            }
+        })
         .on_menu_event(|app, event| match event.id().as_ref() {
             TRAY_SHOW_ID => show_main_window(app.get_webview_window("main")),
             TRAY_QUIT_ID => app.exit(0),
