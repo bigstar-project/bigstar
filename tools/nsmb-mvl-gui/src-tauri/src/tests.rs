@@ -986,3 +986,30 @@ fn start_match_resolved_does_not_store_session_when_melon_spawn_fails() {
 
     let _ = fs::remove_dir_all(dir);
 }
+
+#[test]
+fn session_status_terminates_bridge_when_melon_exits() {
+    let dir = temp_log_dir("peer-exit-bridge");
+    let bridge = fake_executable(&dir, "fake-bridge", true);
+    let melon = fake_executable(&dir, "fake-melon", false);
+    let paths = launch_paths(&dir, bridge, melon);
+    fs::create_dir_all(&paths.log_dir).expect("create logs");
+
+    let state = AppState::default();
+    start_match_resolved(&state, request(Role::Host), paths).expect("start fake match");
+
+    for _ in 0..40 {
+        let status = session_status_inner(&state).expect("status");
+        if status.melon.as_deref() != Some("running") {
+            assert_ne!(status.bridge.as_deref(), Some("running"));
+            assert!(!status.active);
+            let _ = fs::remove_dir_all(dir);
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    stop_existing(&state).expect("cleanup fake match");
+    let _ = fs::remove_dir_all(dir);
+    panic!("melon process did not exit during test");
+}

@@ -6,6 +6,7 @@ mod crash_report;
 mod models;
 mod paths;
 mod preflight;
+mod process_job;
 mod processes;
 mod roms;
 mod settings;
@@ -122,6 +123,7 @@ fn main() {
         .setup(move |app| {
             specta_builder.mount_events(app);
             setup_tray(app)?;
+            start_session_supervisor(app.handle().clone());
             if let Err(err) = apply_startup_default_off_migration(app.handle()) {
                 eprintln!("{err}");
             }
@@ -140,6 +142,18 @@ fn main() {
 
 fn window_state_flags() -> StateFlags {
     StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED | StateFlags::FULLSCREEN
+}
+
+fn start_session_supervisor(app: tauri::AppHandle) {
+    let _ = std::thread::Builder::new()
+        .name("nsmb-mvl-session-supervisor".to_owned())
+        .spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            let state = app.state::<AppState>();
+            if let Err(err) = processes::supervise_session_inner(state.inner()) {
+                eprintln!("session supervisor failed: {err}");
+            }
+        });
 }
 
 fn setup_tray(app: &tauri::App) -> tauri::Result<()> {

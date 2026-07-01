@@ -15,6 +15,7 @@ use crate::models::{
     BridgeDiagnostics, CourseMode, GameStateMismatch, LaunchRequest, LaunchResponse,
     MelonDiagnostics, MvlPlayerResult, MvlStageResult, Role, SessionStatus,
 };
+use crate::process_job::ChildProcessJob;
 use crate::settings::selected_stage;
 use crate::state::{AppState, ManagedSession};
 use sha2::{Digest, Sha256};
@@ -40,11 +41,16 @@ pub(crate) fn start_match_resolved(
 ) -> Result<LaunchResponse, String> {
     stop_existing(state)?;
     write_launch_manifest(&paths, &request)?;
+    let process_job = ChildProcessJob::create()?;
 
     let mut bridge = build_bridge_command(&paths.bridge_path, &request, &paths.log_dir)?;
     let mut bridge_child = bridge
         .spawn()
         .map_err(|err| format!("bridge の起動に失敗しました: {err}"))?;
+    if let Err(err) = process_job.assign_child(&bridge_child, "bridge") {
+        terminate_child(&mut bridge_child);
+        return Err(err);
+    }
 
     if let Err(err) = wait_for_bridge_connected(&mut bridge_child, &paths.log_dir) {
         terminate_child(&mut bridge_child);
@@ -65,6 +71,12 @@ pub(crate) fn start_match_resolved(
             return Err(format!("melonDS の起動に失敗しました: {err}"));
         }
     };
+    if let Err(err) = process_job.assign_child(&melon_child, "melonDS") {
+        let mut melon_child = melon_child;
+        terminate_child(&mut melon_child);
+        terminate_child(&mut bridge_child);
+        return Err(err);
+    }
 
     let response = LaunchResponse {
         log_dir: paths.log_dir.to_string_lossy().into_owned(),
@@ -79,6 +91,7 @@ pub(crate) fn start_match_resolved(
     *guard = Some(ManagedSession {
         melon: melon_child,
         bridge: bridge_child,
+        _process_job: process_job,
         log_dir: paths.log_dir,
         player_names: request.player_names,
         crash_report_sent: false,
@@ -178,13 +191,50 @@ pub(crate) fn session_status_inner(state: &AppState) -> Result<SessionStatus, St
         });
     };
 
-    let melon = process_state(&mut session.melon)?;
-    let bridge = process_state(&mut session.bridge)?;
+    let (melon, bridge, mvl_results) = refresh_session_processes(session)?;
     let active = melon == "running" || bridge == "running";
     let (webrtc, diagnostics_error) = read_bridge_diagnostics(&session.log_dir);
     let game_state_mismatch = read_melon_diagnostics(&session.log_dir)
         .and_then(|diagnostics| diagnostics.game_state_mismatch)
         .filter(should_show_game_state_mismatch_in_gui);
+
+    Ok(SessionStatus {
+        active,
+        log_dir: Some(session.log_dir.to_string_lossy().into_owned()),
+        melon: Some(melon),
+        bridge: Some(bridge),
+        webrtc,
+        diagnostics_error,
+        game_state_mismatch,
+        mvl_results,
+    })
+}
+
+pub(crate) fn supervise_session_inner(state: &AppState) -> Result<(), String> {
+    let mut guard = state
+        .session
+        .lock()
+        .map_err(|_| "session state lock failed".to_owned())?;
+    if let Some(session) = guard.as_mut() {
+        let _ = refresh_session_processes(session)?;
+    }
+    Ok(())
+}
+
+fn refresh_session_processes(
+    session: &mut ManagedSession,
+) -> Result<(String, String, Vec<MvlStageResult>), String> {
+    let mut melon = process_state(&mut session.melon)?;
+    let mut bridge = process_state(&mut session.bridge)?;
+
+    if melon != "running" && bridge == "running" {
+        terminate_child(&mut session.bridge);
+        bridge = process_state(&mut session.bridge)?;
+    } else if bridge != "running" && melon == "running" {
+        terminate_child(&mut session.melon);
+        melon = process_state(&mut session.melon)?;
+    }
+
     let mvl_results = read_mvl_results(&session.log_dir);
     if !session.crash_report_sent
         && (melon != "running" || bridge != "running")
@@ -200,16 +250,7 @@ pub(crate) fn session_status_inner(state: &AppState) -> Result<SessionStatus, St
         );
     }
 
-    Ok(SessionStatus {
-        active,
-        log_dir: Some(session.log_dir.to_string_lossy().into_owned()),
-        melon: Some(melon),
-        bridge: Some(bridge),
-        webrtc,
-        diagnostics_error,
-        game_state_mismatch,
-        mvl_results,
-    })
+    Ok((melon, bridge, mvl_results))
 }
 
 pub(crate) fn should_show_game_state_mismatch_in_gui(mismatch: &GameStateMismatch) -> bool {

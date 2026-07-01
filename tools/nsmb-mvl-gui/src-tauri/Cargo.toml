@@ -40,3 +40,4 @@ tauri-plugin-updater = "2"
 [target.'cfg(windows)'.dependencies]
 rodio = { version = "0.22.2", default-features = false, features = ["playback", "wav"] }
 tauri-winrt-notification = "0.7.2"
+win32job = "2.0.3"
