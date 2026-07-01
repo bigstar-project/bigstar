@@ -40,6 +40,7 @@ import {
   openMelonds as openMelondsCommand,
   openMelondsInputConfig as openMelondsInputConfigCommand,
   runPreflightCheck,
+  saveAiPlayLogEnabled,
   saveDetailedLogsEnabled,
   saveDiagnosticEventsEnabled,
   saveMatchHistory,
@@ -630,6 +631,7 @@ export function useLauncherController() {
           rollbackEnabled: initialForm.rollbackEnabled,
           diagnosticEventsEnabled: defaults.diagnostic_events_enabled ?? false,
           detailedLogsEnabled: defaults.detailed_logs_enabled ?? false,
+          aiPlayLogEnabled: defaults.ai_play_log_enabled ?? false,
           newRoomNotificationsEnabled:
             defaults.new_room_notifications_enabled ?? true,
         });
@@ -731,6 +733,20 @@ export function useLauncherController() {
     }, 250);
     return () => window.clearTimeout(timer);
   }, [defaultsLoaded, form.detailedLogsEnabled]);
+
+  useEffect(() => {
+    if (!defaultsLoaded) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void saveAiPlayLogEnabled({
+        enabled: form.aiPlayLogEnabled,
+      }).catch((error) => {
+        setActivityStatus({ text: String(error), kind: 'warn' });
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [defaultsLoaded, form.aiPlayLogEnabled]);
 
   useEffect(() => {
     if (!defaultsLoaded) {
@@ -944,6 +960,7 @@ export function useLauncherController() {
         player_names: playerNames,
         diagnostic_events_enabled: nextForm.diagnosticEventsEnabled,
         detailed_logs_enabled: nextForm.detailedLogsEnabled,
+        ai_play_log_enabled: nextForm.aiPlayLogEnabled,
       };
 
       try {

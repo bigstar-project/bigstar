@@ -290,6 +290,48 @@ export function SettingsView({
               </div>
               <Switch.Control />
             </Switch.Root>
+            <Switch.Root
+              checked={form.aiPlayLogEnabled}
+              onCheckedChange={(details) =>
+                updateField('aiPlayLogEnabled', details.checked)
+              }
+              className={css({
+                alignItems: 'center',
+                bg: 'app.panel',
+                borderColor: 'border',
+                borderRadius: 'l2',
+                borderWidth: '1px',
+                colorPalette: 'blue',
+                display: 'flex',
+                gap: '3',
+                justifyContent: 'space-between',
+                minH: '16',
+                p: '3',
+                w: 'full',
+              })}
+            >
+              <Switch.HiddenInput />
+              <div
+                className={css({
+                  display: 'grid',
+                  gap: '1',
+                  minW: '0',
+                })}
+              >
+                <Switch.Label className={css({ fontSize: 'sm' })}>
+                  AI用プレイログ
+                </Switch.Label>
+                <div
+                  className={css({
+                    color: 'fg.muted',
+                    textStyle: 'xs',
+                  })}
+                >
+                  stage 0の対戦中だけcompact observation v2ログを保存します
+                </div>
+              </div>
+              <Switch.Control />
+            </Switch.Root>
             <Dialog.Root
               open={cleanupConfirmOpen}
               onOpenChange={(details) => setCleanupConfirmOpen(details.open)}

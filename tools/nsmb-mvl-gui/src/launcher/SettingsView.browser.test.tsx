@@ -151,6 +151,14 @@ describe('設定ビュー', () => {
     expect(updateField).toHaveBeenCalledWith('detailedLogsEnabled', true);
   });
 
+  test('AI用プレイログをSwitchで切り替える', async () => {
+    const { screen, updateField } = await renderSettingsView();
+
+    await screen.getByText('AI用プレイログ').click();
+
+    expect(updateField).toHaveBeenCalledWith('aiPlayLogEnabled', true);
+  });
+
   test('古い詳細ログの削除を確認して実行する', async () => {
     const { launcherActions, screen } = await renderSettingsView();
 

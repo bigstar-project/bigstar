@@ -3755,7 +3755,10 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     const int localPlayer = CurrentPacketBridgeLocalPlayer();
     PrepareAIPlayLogFireballOwnerTracking(instanceID, sample);
 
-    if (writeV2)
+    const bool v2StageAllowed = G.AIObservationV2StageFilter < 0 ||
+        (sample.StageGroup == 9 && sample.StageID == static_cast<melonDS::u32>(G.AIObservationV2StageFilter));
+
+    if (writeV2 && v2StageAllowed)
     {
         WriteAIObservationV2Record(G.AIObservationV2Log, instanceID, frame, sample, objectScanCache, localPlayer);
         if (G.AIPlayLogFlushInterval > 0)

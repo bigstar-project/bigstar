@@ -14,6 +14,7 @@ export const commands = {
 	saveRomPaths: (request: SaveRomPathsRequest) => typedError<null, string>(__TAURI_INVOKE("save_rom_paths", { request })),
 	saveDiagnosticEventsEnabled: (request: SaveDiagnosticEventsRequest) => typedError<null, string>(__TAURI_INVOKE("save_diagnostic_events_enabled", { request })),
 	saveDetailedLogsEnabled: (request: SaveDetailedLogsRequest) => typedError<null, string>(__TAURI_INVOKE("save_detailed_logs_enabled", { request })),
+	saveAiPlayLogEnabled: (request: SaveAiPlayLogRequest) => typedError<null, string>(__TAURI_INVOKE("save_ai_play_log_enabled", { request })),
 	saveNewRoomNotificationsEnabled: (request: SaveNewRoomNotificationsRequest) => typedError<null, string>(__TAURI_INVOKE("save_new_room_notifications_enabled", { request })),
 	showNewRoomNotification: (request: ShowNewRoomNotificationRequest) => typedError<boolean, string>(__TAURI_INVOKE("show_new_room_notification", { request })),
 	savePlayerName: (request: SavePlayerNameRequest) => typedError<null, string>(__TAURI_INVOKE("save_player_name", { request })),
@@ -95,6 +96,7 @@ export type Defaults = {
 	port: number,
 	diagnostic_events_enabled: boolean,
 	detailed_logs_enabled: boolean,
+	ai_play_log_enabled: boolean,
 	new_room_notifications_enabled: boolean,
 	log_archive_upload_token: string,
 };
@@ -147,6 +149,7 @@ export type LaunchRequest_Deserialize = {
 	player_names?: MatchPlayerNames | null,
 	diagnostic_events_enabled?: boolean,
 	detailed_logs_enabled?: boolean,
+	ai_play_log_enabled?: boolean,
 	rom_identity?: RomIdentity | null,
 };
 
@@ -160,6 +163,7 @@ export type LaunchRequest_Serialize = {
 	player_names?: MatchPlayerNames | null,
 	diagnostic_events_enabled: boolean,
 	detailed_logs_enabled: boolean,
+	ai_play_log_enabled: boolean,
 	rom_identity?: RomIdentity | null,
 };
 
@@ -312,6 +316,10 @@ export type RunAiToolResponse = {
 	stdout: string,
 	stderr: string,
 	output_path: string | null,
+};
+
+export type SaveAiPlayLogRequest = {
+	enabled: boolean,
 };
 
 export type SaveDetailedLogsRequest = {

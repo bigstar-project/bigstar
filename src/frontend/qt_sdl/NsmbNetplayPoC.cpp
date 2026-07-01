@@ -1931,6 +1931,7 @@ struct State
     int AIPlayLogLinesSinceFlush = 0;
     int AIObservationV2LinesSinceFlush = 0;
     int AIPlayLogMaxObjects = 32;
+    int AIObservationV2StageFilter = -1;
     bool AIPlayLogGameplayOnly = true;
     int MemPatchInstance = -1;
     melonDS::u32 MemPatchFrame = 0;
@@ -18691,6 +18692,9 @@ void InitFromEnvironment()
     G.AIPlayLogEndFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_AI_PLAY_LOG_END_FRAME", 0)));
     G.AIPlayLogMaxObjects = std::clamp(EnvInt("MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS", 32), 0, 256);
+    G.AIObservationV2StageFilter = EnvHasValue("MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER")
+        ? std::clamp(EnvInt("MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER", -1), -1, 4)
+        : -1;
     G.AIPlayLogGameplayOnly = !EnvFlag("MELONDS_NSML_AI_PLAY_LOG_INCLUDE_NON_GAMEPLAY");
     G.GameStateSyncEnabled = EnvFlag("MELONDS_NSML_STATE_SYNC");
     G.GameStateSyncExtended = EnvFlag("MELONDS_NSML_STATE_SYNC_EXTENDED");
@@ -19448,13 +19452,14 @@ void InitFromEnvironment()
         {
             G.AIObservationV2LinesSinceFlush = 0;
             std::printf(
-                "NSMB AIObservationV2: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d gameplayOnly=%d\n",
+                "NSMB AIObservationV2: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d stageFilter=%d gameplayOnly=%d\n",
                 G.AIObservationV2Path.c_str(),
                 G.AIPlayLogInterval,
                 G.AIPlayLogFlushInterval,
                 G.AIPlayLogStartFrame,
                 G.AIPlayLogEndFrame,
                 G.AIPlayLogMaxObjects,
+                G.AIObservationV2StageFilter,
                 G.AIPlayLogGameplayOnly ? 1 : 0);
         }
     }

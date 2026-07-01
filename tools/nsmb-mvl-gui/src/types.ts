@@ -31,6 +31,7 @@ export type {
   RomIdentity,
   RunAiToolRequest,
   RunAiToolResponse,
+  SaveAiPlayLogRequest,
   SaveDetailedLogsRequest,
   SaveDiagnosticEventsRequest,
   SaveNewRoomNotificationsRequest,
@@ -65,5 +66,6 @@ export type FormState = {
   rollbackEnabled: boolean;
   diagnosticEventsEnabled: boolean;
   detailedLogsEnabled: boolean;
+  aiPlayLogEnabled: boolean;
   newRoomNotificationsEnabled: boolean;
 };

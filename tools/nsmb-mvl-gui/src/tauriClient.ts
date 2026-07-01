@@ -26,6 +26,7 @@ import type {
   ReadAiTextFileResponse,
   RunAiToolRequest,
   RunAiToolResponse,
+  SaveAiPlayLogRequest,
   SaveDetailedLogsRequest,
   SaveDiagnosticEventsRequest,
   SaveNewRoomNotificationsRequest,
@@ -244,6 +245,13 @@ export function saveDetailedLogsEnabled(request: SaveDetailedLogsRequest) {
     return Promise.resolve(null);
   }
   return unwrapCommand(commands.saveDetailedLogsEnabled(request));
+}
+
+export function saveAiPlayLogEnabled(request: SaveAiPlayLogRequest) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(null);
+  }
+  return unwrapCommand(commands.saveAiPlayLogEnabled(request));
 }
 
 export function saveNewRoomNotificationsEnabled(

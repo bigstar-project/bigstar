@@ -12,10 +12,10 @@ use crate::config::{default_signal_url, DEFAULT_PORT, DEFAULT_ROOM_CODE};
 use crate::crash_report::create_user_log_archive;
 use crate::models::{
     CleanupDetailedLogsResponse, Defaults, GenerateRomRequest, GenerateRomResponse, LaunchRequest,
-    LaunchResponse, LogArchiveResponse, MatchHistoryRecord, SaveDetailedLogsRequest,
-    SaveDiagnosticEventsRequest, SaveNewRoomNotificationsRequest, SavePlayerNameRequest,
-    SaveRomPathsRequest, SessionStatus, ShowNewRoomNotificationRequest, UploadLogArchiveRequest,
-    UploadLogArchiveResponse,
+    LaunchResponse, LogArchiveResponse, MatchHistoryRecord, SaveAiPlayLogRequest,
+    SaveDetailedLogsRequest, SaveDiagnosticEventsRequest, SaveNewRoomNotificationsRequest,
+    SavePlayerNameRequest, SaveRomPathsRequest, SessionStatus, ShowNewRoomNotificationRequest,
+    UploadLogArchiveRequest, UploadLogArchiveResponse,
 };
 use crate::paths::{
     absolutize_existing, allowed_log_dir, app_data_dir, create_log_dir, find_bridge_binary,
@@ -73,6 +73,7 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
         port: DEFAULT_PORT,
         diagnostic_events_enabled: saved.diagnostic_events_enabled,
         detailed_logs_enabled: saved.detailed_logs_enabled,
+        ai_play_log_enabled: saved.ai_play_log_enabled,
         new_room_notifications_enabled: saved.new_room_notifications_enabled,
         log_archive_upload_token: std::env::var("NSMB_MVL_LOG_UPLOAD_TOKEN")
             .unwrap_or_default()
@@ -108,6 +109,17 @@ pub(crate) fn save_detailed_logs_enabled(
 ) -> Result<(), String> {
     let mut settings = load_launcher_settings(&app)?;
     settings.detailed_logs_enabled = request.enabled;
+    save_launcher_settings(&app, &settings)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn save_ai_play_log_enabled(
+    app: AppHandle,
+    request: SaveAiPlayLogRequest,
+) -> Result<(), String> {
+    let mut settings = load_launcher_settings(&app)?;
+    settings.ai_play_log_enabled = request.enabled;
     save_launcher_settings(&app, &settings)
 }
 

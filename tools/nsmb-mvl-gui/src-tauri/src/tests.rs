@@ -29,6 +29,7 @@ fn request(role: Role) -> LaunchRequest {
         player_names: None,
         diagnostic_events_enabled: false,
         detailed_logs_enabled: false,
+        ai_play_log_enabled: false,
         rom_identity: None,
         rom_path: "unused.nds".to_owned(),
         settings: GameSettings {
@@ -267,6 +268,8 @@ fn melon_env_carries_game_settings_and_netplay_start() {
     assert!(!env.contains_key("MELONDS_NSML_GAME_STATE_TRACE"));
     assert!(!env.contains_key("MELONDS_NSML_GAME_STATE_TRACE_INTERVAL"));
     assert!(!env.contains_key("MELONDS_NSML_GAME_STATE_TRACE_EXTENDED"));
+    assert!(!env.contains_key("MELONDS_NSML_AI_OBSERVATION_V2_LOG"));
+    assert!(!env.contains_key("MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER"));
     assert_eq!(env["MELONDS_NSML_STATE_SYNC"], "1");
     assert_eq!(env["MELONDS_NSML_STATE_SYNC_INTERVAL"], "60");
     assert_eq!(env["MELONDS_NSML_STATE_SYNC_EXTENDED"], "1");
@@ -274,6 +277,38 @@ fn melon_env_carries_game_settings_and_netplay_start() {
     assert!(!env.contains_key("MELONDS_NSML_DIAGNOSTIC_EVENTS"));
     assert!(!env.contains_key("MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE"));
     assert!(!env.contains_key("MELONDS_NSML_ROLLBACK"));
+}
+
+#[test]
+fn melon_env_enables_ai_play_log_v2_when_requested() {
+    let mut request = request(Role::Host);
+    request.ai_play_log_enabled = true;
+    let env = melon_env(
+        &request,
+        Path::new("bootstrap.inputs"),
+        Path::new("logs/nsmb-mvl-gui-test"),
+    );
+
+    assert!(env["MELONDS_NSML_AI_OBSERVATION_V2_LOG"].ends_with("ai-observations-v2.jsonl"));
+    assert_eq!(env["MELONDS_NSML_AI_PLAY_LOG_INTERVAL"], "1");
+    assert_eq!(env["MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL"], "300");
+    assert_eq!(env["MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER"], "0");
+    assert!(!env.contains_key("MELONDS_NSML_AI_PLAY_LOG"));
+}
+
+#[test]
+fn melon_env_enables_ai_play_log_v2_for_client() {
+    let mut request = request(Role::Client);
+    request.ai_play_log_enabled = true;
+    let env = melon_env(
+        &request,
+        Path::new("bootstrap.inputs"),
+        Path::new("logs/nsmb-mvl-gui-test"),
+    );
+
+    assert_eq!(env["MELONDS_NSML_ROLE"], "client");
+    assert!(env["MELONDS_NSML_AI_OBSERVATION_V2_LOG"].ends_with("ai-observations-v2.jsonl"));
+    assert_eq!(env["MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER"], "0");
 }
 
 #[test]
@@ -879,6 +914,7 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
 
     let state = AppState::default();
     let mut launch_request = request(Role::Host);
+    launch_request.ai_play_log_enabled = true;
     launch_request.rom_identity = Some(RomIdentity {
         rom_pair_id: "pair_hash".to_owned(),
         generator_id: "generator_hash".to_owned(),
@@ -949,11 +985,21 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
         Some(0)
     );
     assert_eq!(launcher["request"]["detailed_logs_enabled"], false);
+    assert_eq!(launcher["request"]["ai_play_log_enabled"], true);
     assert_eq!(
         launcher["launch"]["melonds"]["env"]
             .as_object()
             .and_then(|env| env.get("MELONDS_NSML_INPUT_NETPLAY_TRACE")),
         None
+    );
+    assert!(
+        launcher["launch"]["melonds"]["env"]["MELONDS_NSML_AI_OBSERVATION_V2_LOG"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("ai-observations-v2.jsonl"))
+    );
+    assert_eq!(
+        launcher["launch"]["melonds"]["env"]["MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER"],
+        "0"
     );
     assert_eq!(
         launcher["launch"]["melonds"]["env"]["MELONDS_NSML_MVL_STAGE_SEQUENCE"],

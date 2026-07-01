@@ -561,6 +561,24 @@ pub(crate) fn melon_env(
             .collect::<Vec<_>>()
             .join(","),
     );
+    if request.ai_play_log_enabled {
+        env.insert(
+            "MELONDS_NSML_AI_OBSERVATION_V2_LOG".into(),
+            log_dir
+                .join("ai-observations-v2.jsonl")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        env.insert("MELONDS_NSML_AI_PLAY_LOG_INTERVAL".into(), "1".into());
+        env.insert(
+            "MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL".into(),
+            "300".into(),
+        );
+        env.insert(
+            "MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER".into(),
+            "0".into(),
+        );
+    }
 
     if matches!(request.role, Role::Client) {
         env.insert("MELONDS_NSML_PEER".into(), "127.0.0.1".into());

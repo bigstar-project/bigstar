@@ -1,5 +1,15 @@
 # NSMB Mario vs Luigi Online PoC
 
+## GUI AI v2 playlog toggle - 2026-07-01
+
+- Goal: allow real GUI-launched online matches to emit lightweight AI training observations without enabling the heavier v1 audit playlog.
+- Design:
+  - The GUI setting `AI用プレイログ` controls `LaunchRequest.ai_play_log_enabled` and is persisted in launcher settings. Default is off.
+  - When enabled, GUI melonDS launches pass `MELONDS_NSML_AI_OBSERVATION_V2_LOG=<logdir>\ai-observations-v2.jsonl`, `MELONDS_NSML_AI_PLAY_LOG_INTERVAL=1`, `MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL=300`, and `MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER=0`.
+  - melonDS keeps v1 behavior unchanged. The v2 stage filter is optional; when set, v2 records are written only while the sampled runtime state is MvL stage group 9 and stage ID 0.
+- Verification target:
+  - Confirm host/Mario and client/Luigi GUI launches both create `ai-observations-v2.jsonl` on stage 0 when the setting is on, create no v2 file when off, and do not write non-stage-0 frames when the match sequence moves to other stages.
+
 ## MvL auto-restart death-result winner fix - 2026-06-24
 
 - User-reported issue: when a stage is decided by a death, the match result can still be judged by star count. This affects both current-match/result display and the melonDS-side auto-restart win counter.
