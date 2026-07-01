@@ -4,10 +4,11 @@ use env_logger::{Builder as LogBuilder, Env as LogEnv, Target as LogTarget};
 use futures_util::{SinkExt, StreamExt};
 use std::collections::VecDeque;
 use std::env;
+use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::net::UdpSocket;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::net::{TcpListener, TcpStream, UdpSocket as TokioUdpSocket};
 use tokio::sync::Mutex as TokioMutex;
 use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
@@ -138,6 +139,59 @@ fn parse_env_u64(name: &str) -> u64 {
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(0)
+}
+
+fn env_flag(name: &str) -> bool {
+    env::var(name)
+        .map(|value| {
+            let normalized = value.trim().to_ascii_lowercase();
+            !normalized.is_empty() && normalized != "0" && normalized != "false"
+        })
+        .unwrap_or(false)
+}
+
+fn env_path(name: &str) -> Option<PathBuf> {
+    env::var_os(name).and_then(|value| {
+        if value.as_os_str().is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(value))
+        }
+    })
+}
+
+fn unix_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
+}
+
+fn append_bridge_event(path: Option<&PathBuf>, value: serde_json::Value) {
+    let Some(path) = path else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let line = match serde_json::to_string(&value) {
+        Ok(line) => line,
+        Err(error) => {
+            eprintln!("nsmb-net-bridge diagnostics: event encode failed error={error}");
+            return;
+        }
+    };
+    match OpenOptions::new().create(true).append(true).open(path) {
+        Ok(mut file) => {
+            let _ = writeln!(file, "{line}");
+        }
+        Err(error) => {
+            eprintln!(
+                "nsmb-net-bridge diagnostics: event write failed path={} error={error}",
+                path.display()
+            );
+        }
+    }
 }
 
 pub struct SignalingWebRtcConfig {
@@ -1128,9 +1182,22 @@ async fn run_webrtc_udp_tunnel(
     let (mut dc_tx, mut dc_rx) = data_channel.split();
     let mut app_buf = [0u8; MAX_DATAGRAM_SIZE];
     let start = Instant::now();
-    let mut stats_tick = tokio::time::interval(Duration::from_secs(2));
+    let detailed_logs = env_flag("NSMB_MVL_DETAILED_LOGS");
+    let liveness_logs = detailed_logs || env_flag("NSMB_MVL_BRIDGE_LIVENESS");
+    let bridge_events_path = env_path("NSMB_MVL_BRIDGE_EVENTS_FILE");
+    let mut stats_tick =
+        tokio::time::interval(Duration::from_secs(if detailed_logs { 1 } else { 2 }));
     let mut local_replay_tick = tokio::time::interval(LOCAL_APP_REPLAY_INTERVAL);
     let mut impairment = ImpairmentState::new(ImpairmentConfig::from_env());
+    let mut last_stats = reporter.stats;
+    let mut last_impairment_app_to_webrtc_dropped = 0;
+    let mut last_impairment_webrtc_to_app_dropped = 0;
+    let mut last_app_to_webrtc_instant: Option<Instant> = None;
+    let mut last_webrtc_to_app_instant: Option<Instant> = None;
+    let mut last_app_to_webrtc_unix_ms: Option<u128> = None;
+    let mut last_webrtc_to_app_unix_ms: Option<u128> = None;
+    let mut peer_connection_state = "unknown".to_owned();
+    let data_channel_state = "open".to_owned();
     let mut local_app_seen = false;
     let mut pending_local_replays: VecDeque<PendingLocalDatagram> = VecDeque::new();
 
@@ -1143,6 +1210,17 @@ async fn run_webrtc_udp_tunnel(
     println!(
         "nsmb-net-bridge webrtc: connected local={} localTarget={}",
         local_addr, initial_target
+    );
+    append_bridge_event(
+        bridge_events_path.as_ref(),
+        serde_json::json!({
+            "tUnixMs": unix_ms(),
+            "event": "tunnel-start",
+            "local": local_addr.to_string(),
+            "localTarget": initial_target,
+            "detailedLogs": detailed_logs,
+            "livenessLogs": liveness_logs,
+        }),
     );
     if impairment.config.enabled() {
         println!(
@@ -1186,24 +1264,109 @@ async fn run_webrtc_udp_tunnel(
                 if !impairment.before_app_to_webrtc_send().await {
                     continue;
                 }
-                dc_tx.send(&app_buf[..len]).await?;
+                let send_start = Instant::now();
+                match dc_tx.send(&app_buf[..len]).await {
+                    Ok(()) => {
+                        let now = Instant::now();
+                        let now_unix_ms = unix_ms();
+                        last_app_to_webrtc_instant = Some(now);
+                        last_app_to_webrtc_unix_ms = Some(now_unix_ms);
+                        if liveness_logs {
+                            let send_ms = send_start.elapsed().as_secs_f64() * 1000.0;
+                            if send_ms >= 10.0 {
+                                append_bridge_event(
+                                    bridge_events_path.as_ref(),
+                                    serde_json::json!({
+                                        "tUnixMs": now_unix_ms,
+                                        "event": "slow-app-to-rtc-send",
+                                        "bytes": len,
+                                        "sendMs": send_ms,
+                                    }),
+                                );
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        append_bridge_event(
+                            bridge_events_path.as_ref(),
+                            serde_json::json!({
+                                "tUnixMs": unix_ms(),
+                                "event": "app-to-rtc-send-error",
+                                "bytes": len,
+                                "error": err.to_string(),
+                            }),
+                        );
+                        return Err(err.into());
+                    }
+                }
                 reporter.stats.app_to_webrtc_packets += 1;
                 reporter.stats.app_to_webrtc_bytes += len as u64;
             }
             msg = dc_rx.receive() => {
                 let Some(msg) = msg else {
+                    append_bridge_event(
+                        bridge_events_path.as_ref(),
+                        serde_json::json!({
+                            "tUnixMs": unix_ms(),
+                            "event": "data-channel-closed",
+                            "peerConnectionState": &peer_connection_state,
+                        }),
+                    );
                     return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "WebRTC data channel closed").into());
                 };
                 let target = *local_target.lock().await;
                 let Some(target) = target else {
                     reporter.stats.dropped_no_local_target += 1;
+                    append_bridge_event(
+                        bridge_events_path.as_ref(),
+                        serde_json::json!({
+                            "tUnixMs": unix_ms(),
+                            "event": "drop-no-local-target",
+                            "bytes": msg.len(),
+                            "droppedNoLocalTarget": reporter.stats.dropped_no_local_target,
+                        }),
+                    );
                     continue;
                 };
                 if !impairment.before_webrtc_to_app_send().await {
                     continue;
                 }
                 let msg_len = msg.len();
-                local_socket.send_to(&msg, target).await?;
+                let send_start = Instant::now();
+                match local_socket.send_to(&msg, target).await {
+                    Ok(sent) => {
+                        let now = Instant::now();
+                        let now_unix_ms = unix_ms();
+                        last_webrtc_to_app_instant = Some(now);
+                        last_webrtc_to_app_unix_ms = Some(now_unix_ms);
+                        if sent != msg_len || (liveness_logs && send_start.elapsed() >= Duration::from_millis(10)) {
+                            append_bridge_event(
+                                bridge_events_path.as_ref(),
+                                serde_json::json!({
+                                    "tUnixMs": now_unix_ms,
+                                    "event": if sent == msg_len { "slow-rtc-to-app-send" } else { "partial-rtc-to-app-send" },
+                                    "bytes": msg_len,
+                                    "sent": sent,
+                                    "target": target.to_string(),
+                                    "sendMs": send_start.elapsed().as_secs_f64() * 1000.0,
+                                }),
+                            );
+                        }
+                    }
+                    Err(err) => {
+                        append_bridge_event(
+                            bridge_events_path.as_ref(),
+                            serde_json::json!({
+                                "tUnixMs": unix_ms(),
+                                "event": "rtc-to-app-send-error",
+                                "bytes": msg_len,
+                                "target": target.to_string(),
+                                "error": err.to_string(),
+                            }),
+                        );
+                        return Err(err.into());
+                    }
+                }
                 if fixed_local_target && !local_app_seen {
                     let now = Instant::now();
                     if pending_local_replays.len() >= LOCAL_APP_REPLAY_LIMIT {
@@ -1226,6 +1389,17 @@ async fn run_webrtc_udp_tunnel(
                 };
                 reporter.observe_event(&event);
                 if let datachannel_wrapper::PeerConnectionEvent::ConnectionStateChange(state) = event {
+                    peer_connection_state = format!("{state:?}");
+                    append_bridge_event(
+                        bridge_events_path.as_ref(),
+                        serde_json::json!({
+                            "tUnixMs": unix_ms(),
+                            "event": "peer-connection-state",
+                            "state": &peer_connection_state,
+                            "lastAppToRtcUnixMs": last_app_to_webrtc_unix_ms,
+                            "lastRtcToAppUnixMs": last_webrtc_to_app_unix_ms,
+                        }),
+                    );
                     if matches!(
                         state,
                         datachannel_wrapper::ConnectionState::Disconnected
@@ -1254,7 +1428,20 @@ async fn run_webrtc_udp_tunnel(
                     if now.duration_since(pending.last_sent) < LOCAL_APP_REPLAY_INTERVAL {
                         continue;
                     }
-                    local_socket.send_to(&pending.payload, pending.target).await?;
+                    if let Err(err) = local_socket.send_to(&pending.payload, pending.target).await {
+                        append_bridge_event(
+                            bridge_events_path.as_ref(),
+                            serde_json::json!({
+                                "tUnixMs": unix_ms(),
+                                "event": "early-replay-send-error",
+                                "bytes": pending.payload.len(),
+                                "target": pending.target.to_string(),
+                                "attempts": pending.attempts,
+                                "error": err.to_string(),
+                            }),
+                        );
+                        return Err(err.into());
+                    }
                     pending.last_sent = now;
                     pending.attempts = pending.attempts.saturating_add(1);
                     if pending.attempts == 2 || pending.attempts % 20 == 0 {
@@ -1268,17 +1455,100 @@ async fn run_webrtc_udp_tunnel(
                 }
             }
             _ = stats_tick.tick() => {
-                println!(
-                    "nsmb-net-bridge webrtc: t={:.1}s app->rtc={}pkts/{}B rtc->app={}pkts/{}B droppedNoLocalTarget={} impairmentDropAppToRtc={} impairmentDropRtcToApp={}",
-                    start.elapsed().as_secs_f32(),
-                    reporter.stats.app_to_webrtc_packets,
-                    reporter.stats.app_to_webrtc_bytes,
-                    reporter.stats.webrtc_to_app_packets,
-                    reporter.stats.webrtc_to_app_bytes,
-                    reporter.stats.dropped_no_local_target,
-                    impairment.app_to_webrtc_dropped,
-                    impairment.webrtc_to_app_dropped
-                );
+                if detailed_logs {
+                    let unix_ms = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|duration| duration.as_millis())
+                        .unwrap_or(0);
+                    let delta_app_packets = reporter.stats.app_to_webrtc_packets
+                        .saturating_sub(last_stats.app_to_webrtc_packets);
+                    let delta_app_bytes = reporter.stats.app_to_webrtc_bytes
+                        .saturating_sub(last_stats.app_to_webrtc_bytes);
+                    let delta_rtc_packets = reporter.stats.webrtc_to_app_packets
+                        .saturating_sub(last_stats.webrtc_to_app_packets);
+                    let delta_rtc_bytes = reporter.stats.webrtc_to_app_bytes
+                        .saturating_sub(last_stats.webrtc_to_app_bytes);
+                    let delta_no_local_target = reporter.stats.dropped_no_local_target
+                        .saturating_sub(last_stats.dropped_no_local_target);
+                    let delta_impairment_app = impairment.app_to_webrtc_dropped
+                        .saturating_sub(last_impairment_app_to_webrtc_dropped);
+                    let delta_impairment_rtc = impairment.webrtc_to_app_dropped
+                        .saturating_sub(last_impairment_webrtc_to_app_dropped);
+                    let since_last_app_to_rtc_ms = last_app_to_webrtc_instant
+                        .map(|instant| instant.elapsed().as_millis());
+                    let since_last_rtc_to_app_ms = last_webrtc_to_app_instant
+                        .map(|instant| instant.elapsed().as_millis());
+                    println!(
+                        "nsmb-net-bridge webrtc: tUnixMs={} t={:.1}s app->rtc={}pkts/{}B(+{}pkts/+{}B) rtc->app={}pkts/{}B(+{}pkts/+{}B) lastAppToRtc={:?} sinceLastAppToRtcMs={:?} lastRtcToApp={:?} sinceLastRtcToAppMs={:?} pcState={} dcState={} droppedNoLocalTarget={}({}+) impairmentDropAppToRtc={}({}+) impairmentDropRtcToApp={}({}+)",
+                        unix_ms,
+                        start.elapsed().as_secs_f32(),
+                        reporter.stats.app_to_webrtc_packets,
+                        reporter.stats.app_to_webrtc_bytes,
+                        delta_app_packets,
+                        delta_app_bytes,
+                        reporter.stats.webrtc_to_app_packets,
+                        reporter.stats.webrtc_to_app_bytes,
+                        delta_rtc_packets,
+                        delta_rtc_bytes,
+                        last_app_to_webrtc_unix_ms,
+                        since_last_app_to_rtc_ms,
+                        last_webrtc_to_app_unix_ms,
+                        since_last_rtc_to_app_ms,
+                        &peer_connection_state,
+                        &data_channel_state,
+                        reporter.stats.dropped_no_local_target,
+                        delta_no_local_target,
+                        impairment.app_to_webrtc_dropped,
+                        delta_impairment_app,
+                        impairment.webrtc_to_app_dropped,
+                        delta_impairment_rtc
+                    );
+                    if liveness_logs {
+                        append_bridge_event(
+                            bridge_events_path.as_ref(),
+                            serde_json::json!({
+                                "tUnixMs": unix_ms,
+                                "event": "liveness",
+                                "elapsedSeconds": start.elapsed().as_secs_f32(),
+                                "appToRtcPackets": reporter.stats.app_to_webrtc_packets,
+                                "appToRtcBytes": reporter.stats.app_to_webrtc_bytes,
+                                "deltaAppToRtcPackets": delta_app_packets,
+                                "deltaAppToRtcBytes": delta_app_bytes,
+                                "rtcToAppPackets": reporter.stats.webrtc_to_app_packets,
+                                "rtcToAppBytes": reporter.stats.webrtc_to_app_bytes,
+                                "deltaRtcToAppPackets": delta_rtc_packets,
+                                "deltaRtcToAppBytes": delta_rtc_bytes,
+                                "lastAppToRtcUnixMs": last_app_to_webrtc_unix_ms,
+                                "sinceLastAppToRtcMs": since_last_app_to_rtc_ms,
+                                "lastRtcToAppUnixMs": last_webrtc_to_app_unix_ms,
+                                "sinceLastRtcToAppMs": since_last_rtc_to_app_ms,
+                                "peerConnectionState": &peer_connection_state,
+                                "dataChannelState": &data_channel_state,
+                                "droppedNoLocalTarget": reporter.stats.dropped_no_local_target,
+                                "deltaDroppedNoLocalTarget": delta_no_local_target,
+                                "impairmentDropAppToRtc": impairment.app_to_webrtc_dropped,
+                                "deltaImpairmentDropAppToRtc": delta_impairment_app,
+                                "impairmentDropRtcToApp": impairment.webrtc_to_app_dropped,
+                                "deltaImpairmentDropRtcToApp": delta_impairment_rtc,
+                            }),
+                        );
+                    }
+                    last_stats = reporter.stats;
+                    last_impairment_app_to_webrtc_dropped = impairment.app_to_webrtc_dropped;
+                    last_impairment_webrtc_to_app_dropped = impairment.webrtc_to_app_dropped;
+                } else {
+                    println!(
+                        "nsmb-net-bridge webrtc: t={:.1}s app->rtc={}pkts/{}B rtc->app={}pkts/{}B droppedNoLocalTarget={} impairmentDropAppToRtc={} impairmentDropRtcToApp={}",
+                        start.elapsed().as_secs_f32(),
+                        reporter.stats.app_to_webrtc_packets,
+                        reporter.stats.app_to_webrtc_bytes,
+                        reporter.stats.webrtc_to_app_packets,
+                        reporter.stats.webrtc_to_app_bytes,
+                        reporter.stats.dropped_no_local_target,
+                        impairment.app_to_webrtc_dropped,
+                        impairment.webrtc_to_app_dropped
+                    );
+                }
                 reporter.observe_selected_addresses(
                     peer_connection.local_address(),
                     peer_connection.remote_address(),

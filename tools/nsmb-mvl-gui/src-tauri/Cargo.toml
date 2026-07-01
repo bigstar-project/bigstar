@@ -25,9 +25,10 @@ tauri = { version = "2.9.0", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-single-instance = { version = "2", optional = true }
+tauri-plugin-window-state = "2"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["typescript", "derive"] }
 uuid = { version = "1", features = ["v4"] }
-reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "multipart", "rustls"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "json", "multipart", "rustls"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [lints.rust]
@@ -40,3 +41,4 @@ tauri-plugin-updater = "2"
 [target.'cfg(windows)'.dependencies]
 rodio = { version = "0.22.2", default-features = false, features = ["playback", "wav"] }
 tauri-winrt-notification = "0.7.2"
+win32job = "2.0.3"

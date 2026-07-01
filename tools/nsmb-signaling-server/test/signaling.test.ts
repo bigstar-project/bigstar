@@ -33,6 +33,8 @@ const romIdentity = {
     '1111111111111111111111111111111111111111111111111111111111111111',
   rom_pair_id:
     '4444444444444444444444444444444444444444444444444444444444444444',
+  bridge_sha256:
+    '5555555555555555555555555555555555555555555555555555555555555555',
 };
 const hostProfileId = '11111111-1111-4111-8111-111111111111';
 const clientProfileId = '22222222-2222-4222-8222-222222222222';
@@ -281,7 +283,60 @@ describe('マッチメイキング HTTP API', () => {
     );
 
     expect(response.status).toBe(409);
-    expect(await json(response)).toEqual({ error: 'rom identity mismatch' });
+    expect(await json(response)).toEqual({ error: 'match identity mismatch' });
+  });
+});
+
+describe('ログアーカイブ upload API', () => {
+  test('upload tokenと1GB上限を検証してmultipart uploadを開始する', async () => {
+    const unauthorized = await SELF.fetch(
+      'https://match.test/log-archives/uploads',
+      {
+        body: JSON.stringify({
+          file_name: 'logs.zip',
+          size: 1024,
+        }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      },
+    );
+    expect(unauthorized.status).toBe(403);
+
+    const tooLarge = await SELF.fetch(
+      'https://match.test/log-archives/uploads',
+      {
+        body: JSON.stringify({
+          file_name: 'logs.zip',
+          size: 1024 * 1024 * 1024 + 1,
+        }),
+        headers: {
+          'content-type': 'application/json',
+          'x-nsmb-mvl-log-upload-token': 'test-upload-token',
+        },
+        method: 'POST',
+      },
+    );
+    expect(tooLarge.status).toBe(400);
+
+    const created = await SELF.fetch(
+      'https://match.test/log-archives/uploads',
+      {
+        body: JSON.stringify({
+          file_name: 'logs.zip',
+          size: 1024,
+        }),
+        headers: {
+          'content-type': 'application/json',
+          'x-nsmb-mvl-log-upload-token': 'test-upload-token',
+        },
+        method: 'POST',
+      },
+    );
+    expect(created.status).toBe(201);
+    expect(await json(created)).toMatchObject({
+      max_part_size: 64 * 1024 * 1024,
+      max_size: 1024 * 1024 * 1024,
+    });
   });
 });
 

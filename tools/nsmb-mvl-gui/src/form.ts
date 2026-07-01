@@ -27,6 +27,7 @@ export const initialForm: FormState = {
   inputMaxFrameLead: defaultInputMaxFrameLead,
   rollbackEnabled: false,
   diagnosticEventsEnabled: false,
+  detailedLogsEnabled: false,
   newRoomNotificationsEnabled: true,
 };
 

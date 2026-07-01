@@ -25,6 +25,8 @@ const mocks = vi.hoisted(() => {
       '1111111111111111111111111111111111111111111111111111111111111111',
     rom_pair_id:
       '4444444444444444444444444444444444444444444444444444444444444444',
+    bridge_sha256:
+      '5555555555555555555555555555555555555555555555555555555555555555',
   };
   return {
     romIdentity,
@@ -110,6 +112,10 @@ vi.mock('../roomNotifications', () => ({
 }));
 
 vi.mock('../tauriClient', () => ({
+  createLogArchive: vi.fn(async () => ({
+    archive_path: 'C:\\logs\\run1\\nsmb-mvl-logs.zip',
+    size: 1024,
+  })),
   ensureRoms: vi.fn(async () => ({
     client_rom: 'C:\\roms\\client.nds',
     generated: false,
@@ -126,8 +132,10 @@ vi.mock('../tauriClient', () => ({
     base_rom_path: 'C:\\roms\\base.nds',
     client_rom_path: 'C:\\roms\\client.nds',
     diagnostic_events_enabled: false,
+    detailed_logs_enabled: false,
     host_rom_path: 'C:\\roms\\host.nds',
     input_config_opened_once: true,
+    log_archive_upload_token: '',
     new_room_notifications_enabled: true,
     player_name: 'Host Player',
     player_profile_id: mocks.hostProfileId,
@@ -148,6 +156,13 @@ vi.mock('../tauriClient', () => ({
   })),
   getStartupEnabled: vi.fn(async () => false),
   loadMatchHistory: vi.fn(async () => []),
+  cleanupDetailedLogs: vi.fn(async () => ({
+    deleted_dirs: 1,
+    deleted_files: 3,
+    freed_bytes: 1024,
+    scanned_log_dirs: 2,
+    skipped_active_log_dirs: 0,
+  })),
   openLogDir: vi.fn(async () => {}),
   openMelonds: vi.fn(async () => {}),
   openMelondsInputConfig: vi.fn(async () => {}),
@@ -159,6 +174,7 @@ vi.mock('../tauriClient', () => ({
     symbols_file: 'symbols',
   })),
   saveDiagnosticEventsEnabled: vi.fn(async () => null),
+  saveDetailedLogsEnabled: vi.fn(async () => null),
   saveMatchHistory: mocks.saveMatchHistoryMock,
   saveNewRoomNotificationsEnabled: vi.fn(async () => null),
   savePlayerName: vi.fn(async () => null),
@@ -167,6 +183,11 @@ vi.mock('../tauriClient', () => ({
   setStartupEnabled: vi.fn(async () => null),
   startMatch: mocks.startMatchMock,
   stopMatch: vi.fn(async () => {}),
+  uploadLogArchive: vi.fn(async () => ({
+    archive_path: 'C:\\logs\\run1\\nsmb-mvl-logs.zip',
+    key: 'log-archives/test/nsmb-mvl-logs.zip',
+    size: 1024,
+  })),
 }));
 
 beforeEach(() => {
@@ -406,8 +427,10 @@ describe('useLauncherController', () => {
       base_rom_path: 'C:\\roms\\base.nds',
       client_rom_path: 'C:\\roms\\client.nds',
       diagnostic_events_enabled: false,
+      detailed_logs_enabled: false,
       host_rom_path: 'C:\\roms\\host.nds',
       input_config_opened_once: true,
+      log_archive_upload_token: '',
       new_room_notifications_enabled: false,
       player_name: 'Host Player',
       player_profile_id: mocks.hostProfileId,

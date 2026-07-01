@@ -73,6 +73,7 @@ export const romIdentitySchema = z.object({
   generator_id: sha256Schema,
   host_rom_sha256: sha256Schema,
   client_rom_sha256: sha256Schema,
+  bridge_sha256: sha256Schema,
 });
 
 export const roomSummarySchema = z.object({

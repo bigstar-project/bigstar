@@ -10,10 +10,12 @@ import {
 import type {
   AiArtifact,
   AiReplayFrameRef,
+  CleanupDetailedLogsResponse,
   GenerateRomRequest,
   GenerateRomResponse,
   LaunchRequest,
   LaunchResponse,
+  LogArchiveResponse,
   MatchHistoryRecord,
   OpenAiReplayLogRequest,
   OpenAiReplayLogResponse,
@@ -24,12 +26,15 @@ import type {
   ReadAiTextFileResponse,
   RunAiToolRequest,
   RunAiToolResponse,
+  SaveDetailedLogsRequest,
   SaveDiagnosticEventsRequest,
   SaveNewRoomNotificationsRequest,
   SavePlayerNameRequest,
   SaveRomPathsRequest,
   SessionStatus,
   ShowNewRoomNotificationRequest,
+  UploadLogArchiveRequest,
+  UploadLogArchiveResponse,
 } from './types';
 
 async function unwrapCommand<T>(
@@ -234,6 +239,13 @@ export function saveDiagnosticEventsEnabled(
   return unwrapCommand(commands.saveDiagnosticEventsEnabled(request));
 }
 
+export function saveDetailedLogsEnabled(request: SaveDetailedLogsRequest) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(null);
+  }
+  return unwrapCommand(commands.saveDetailedLogsEnabled(request));
+}
+
 export function saveNewRoomNotificationsEnabled(
   request: SaveNewRoomNotificationsRequest,
 ) {
@@ -387,6 +399,40 @@ export function openLogDir(path: string) {
     return Promise.resolve(null);
   }
   return unwrapCommand(commands.openLogDir(path));
+}
+
+export function createLogArchive(logDir: string) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve<LogArchiveResponse>({
+      archive_path: `${logDir}\\nsmb-mvl-logs-preview.zip`,
+      size: 1024,
+    });
+  }
+  return unwrapCommand(commands.createLogArchive(logDir));
+}
+
+export function cleanupDetailedLogs() {
+  if (!isTauriRuntime()) {
+    return Promise.resolve<CleanupDetailedLogsResponse>({
+      scanned_log_dirs: 4,
+      skipped_active_log_dirs: 0,
+      deleted_files: 12,
+      deleted_dirs: 4,
+      freed_bytes: 64 * 1024 * 1024,
+    });
+  }
+  return unwrapCommand(commands.cleanupDetailedLogs());
+}
+
+export function uploadLogArchive(request: UploadLogArchiveRequest) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve<UploadLogArchiveResponse>({
+      archive_path: `${request.log_dir}\\nsmb-mvl-logs-preview.zip`,
+      key: 'log-archives/preview/nsmb-mvl-logs-preview.zip',
+      size: 1024,
+    });
+  }
+  return unwrapCommand(commands.uploadLogArchive(request));
 }
 
 export function openMelonds() {

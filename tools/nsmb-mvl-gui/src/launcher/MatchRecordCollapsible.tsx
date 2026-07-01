@@ -2,6 +2,9 @@ import { Portal } from '@ark-ui/react';
 import {
   CaretDown,
   CircleNotch,
+  CloudArrowUp,
+  FileZip,
+  FolderOpen,
   MinusCircle,
   Star,
   Trash,
@@ -32,12 +35,18 @@ export function MatchRecordCollapsible({
   defaultOpen,
   match,
   onDelete,
+  onCreateLogArchive,
+  onOpenLogDir,
+  onUploadLogArchive,
   showStageDots = true,
   showStartedAt = true,
 }: {
   defaultOpen: boolean;
   match: BattleMatchRecord;
+  onCreateLogArchive?: () => Promise<void> | void;
   onDelete?: () => Promise<void> | void;
+  onOpenLogDir?: () => Promise<void> | void;
+  onUploadLogArchive?: () => Promise<void> | void;
   showStageDots?: boolean;
   showStartedAt?: boolean;
 }) {
@@ -244,10 +253,10 @@ export function MatchRecordCollapsible({
         {match.logDir || onDelete ? (
           <div
             className={css({
-              alignItems: 'center',
+              alignItems: { base: 'stretch', md: 'center' },
               display: 'grid',
               gap: '2',
-              gridTemplateColumns: 'minmax(0, 1fr) auto',
+              gridTemplateColumns: { base: '1fr', md: 'minmax(0, 1fr) auto' },
             })}
           >
             {match.logDir ? (
@@ -266,11 +275,73 @@ export function MatchRecordCollapsible({
             ) : (
               <span />
             )}
-            {onDelete ? <DeleteMatchButton onDelete={onDelete} /> : null}
+            <div
+              className={css({
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '2',
+                justifyContent: { base: 'flex-start', md: 'flex-end' },
+              })}
+            >
+              {match.logDir && onOpenLogDir ? (
+                <LogActionButton
+                  icon={<FolderOpen size={16} weight="bold" />}
+                  label="ログを開く"
+                  onClick={onOpenLogDir}
+                />
+              ) : null}
+              {match.logDir && onCreateLogArchive ? (
+                <LogActionButton
+                  icon={<FileZip size={16} weight="bold" />}
+                  label="zipを作成"
+                  onClick={onCreateLogArchive}
+                />
+              ) : null}
+              {match.logDir && onUploadLogArchive ? (
+                <LogActionButton
+                  icon={<CloudArrowUp size={16} weight="bold" />}
+                  label="ログを送信"
+                  onClick={onUploadLogArchive}
+                />
+              ) : null}
+              {onDelete ? <DeleteMatchButton onDelete={onDelete} /> : null}
+            </div>
           </div>
         ) : null}
       </Collapsible.Content>
     </Collapsible.Root>
+  );
+}
+
+function LogActionButton({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => Promise<void> | void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <Button
+      disabled={busy}
+      loading={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          await onClick();
+        } finally {
+          setBusy(false);
+        }
+      }}
+      size="xs"
+      variant="outline"
+    >
+      {icon}
+      {label}
+    </Button>
   );
 }
 

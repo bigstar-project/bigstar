@@ -4,6 +4,7 @@ export type {
   AiArtifact,
   AiReplayFrameRef,
   BridgeDiagnostics,
+  CleanupDetailedLogsResponse,
   CourseMode,
   Defaults,
   GameSettings,
@@ -13,6 +14,7 @@ export type {
   LaunchRequest,
   LaunchResponse,
   Lives,
+  LogArchiveResponse,
   MatchHistoryRecord,
   MatchHistoryStatus,
   MatchPlayerNames,
@@ -29,12 +31,15 @@ export type {
   RomIdentity,
   RunAiToolRequest,
   RunAiToolResponse,
+  SaveDetailedLogsRequest,
   SaveDiagnosticEventsRequest,
   SaveNewRoomNotificationsRequest,
   SavePlayerNameRequest,
   SaveRomPathsRequest,
   SessionStatus,
   ShowNewRoomNotificationRequest,
+  UploadLogArchiveRequest,
+  UploadLogArchiveResponse,
 } from './bindings';
 
 export type StatusKind = 'idle' | 'ok' | 'warn' | 'error';
@@ -59,5 +64,6 @@ export type FormState = {
   inputMaxFrameLead: number;
   rollbackEnabled: boolean;
   diagnosticEventsEnabled: boolean;
+  detailedLogsEnabled: boolean;
   newRoomNotificationsEnabled: boolean;
 };

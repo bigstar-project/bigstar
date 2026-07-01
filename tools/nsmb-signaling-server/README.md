@@ -18,7 +18,11 @@ Deployment is intentionally left to the repository owner:
 
 ```powershell
 corepack pnpm deploy --stage prod
+corepack pnpm deploy --stage develop
 ```
+
+GitHub Actions deploys `main` with the `prod` Alchemy stage and `develop` with
+the `develop` Alchemy stage.
 
 ## WebSocket Endpoint
 

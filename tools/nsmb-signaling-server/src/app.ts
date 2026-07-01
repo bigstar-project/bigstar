@@ -1,6 +1,7 @@
 import { zValidator } from '@hono/zod-validator';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { z } from 'zod';
 import { type MatchmakingEnv, publicRoom } from './do-api';
 import {
   createRoomRequestSchema,
@@ -12,8 +13,11 @@ import {
 const ROOM_ID_BYTES = 9;
 const TOKEN_BYTES = 24;
 const ROOM_TTL_MS = 3 * 60 * 60 * 1000;
+const MAX_LOG_ARCHIVE_BYTES = 1024 * 1024 * 1024;
+const MAX_LOG_ARCHIVE_PART_BYTES = 64 * 1024 * 1024;
 const VALID_ROOM_ID = /^[A-Za-z0-9_-]{8,64}$/;
 const VALID_SESSION_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const VALID_R2_KEY = /^[A-Za-z0-9/_ .-]{1,512}$/;
 const DEFAULT_CORS_ORIGINS = [
   'http://127.0.0.1:1420',
   'http://localhost:1420',
@@ -62,13 +66,64 @@ function error(error: string, status: 400 | 404 | 409 | 500) {
   return { body: errorResponseSchema.parse({ error }), status };
 }
 
+function authError(c: Context<{ Bindings: MatchmakingEnv }>) {
+  const token = c.env.LOG_UPLOAD_TOKEN?.trim();
+  if (!token) {
+    return null;
+  }
+  if (c.req.header('x-nsmb-mvl-log-upload-token') === token) {
+    return null;
+  }
+  return c.json(
+    errorResponseSchema.parse({ error: 'invalid upload token' }),
+    403,
+  );
+}
+
+const createLogArchiveUploadRequestSchema = z.object({
+  file_name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(160)
+    .regex(/\.zip$/i),
+  size: z.number().int().min(1).max(MAX_LOG_ARCHIVE_BYTES),
+});
+
+const completeLogArchiveUploadRequestSchema = z.object({
+  key: z.string().regex(VALID_R2_KEY),
+  parts: z
+    .array(
+      z.object({
+        etag: z.string().min(1),
+        partNumber: z.number().int().min(1).max(10_000),
+      }),
+    )
+    .min(1)
+    .max(10_000),
+});
+
+function sanitizeArchiveFileName(value: string): string {
+  const base = value
+    .replace(/[\\/:*?"<>|]+/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return base.toLowerCase().endsWith('.zip') ? base : `${base}.zip`;
+}
+
+function newLogArchiveKey(fileName: string): string {
+  const now = new Date();
+  const date = now.toISOString().slice(0, 10);
+  return `log-archives/${date}/${randomUrlToken(18)}-${sanitizeArchiveFileName(fileName)}`;
+}
+
 export const app = new Hono<{ Bindings: MatchmakingEnv }>();
 
 app.use('*', async (c, next) => {
   const corsMiddleware = cors({
     origin: corsOrigins(c.env.CORS_ORIGINS),
-    allowHeaders: ['Content-Type'],
-    allowMethods: ['GET', 'POST', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'x-nsmb-mvl-log-upload-token'],
+    allowMethods: ['GET', 'POST', 'PUT', 'OPTIONS'],
     maxAge: 600,
   });
   return corsMiddleware(c, next);
@@ -105,6 +160,94 @@ const route = app
     const rooms = await lobby.listRooms(Date.now());
     return c.json(listRoomsResponseSchema.parse({ rooms }), 200);
   })
+  .post(
+    '/log-archives/uploads',
+    zValidator('json', createLogArchiveUploadRequestSchema),
+    async (c) => {
+      const unauthorized = authError(c);
+      if (unauthorized) {
+        return unauthorized;
+      }
+      const body = c.req.valid('json');
+      const key = newLogArchiveKey(body.file_name);
+      const upload = await c.env.LOG_ARCHIVES.createMultipartUpload(key, {
+        httpMetadata: {
+          contentType: 'application/zip',
+          contentDisposition: `attachment; filename="${sanitizeArchiveFileName(body.file_name)}"`,
+        },
+        customMetadata: {
+          declaredSize: String(body.size),
+        },
+      });
+      return c.json(
+        {
+          key,
+          upload_id: upload.uploadId,
+          max_size: MAX_LOG_ARCHIVE_BYTES,
+          max_part_size: MAX_LOG_ARCHIVE_PART_BYTES,
+        },
+        201,
+      );
+    },
+  )
+  .put('/log-archives/uploads/:uploadId/parts/:partNumber', async (c) => {
+    const unauthorized = authError(c);
+    if (unauthorized) {
+      return unauthorized;
+    }
+    const uploadId = c.req.param('uploadId');
+    const partNumber = Number(c.req.param('partNumber'));
+    const key = c.req.query('key');
+    if (!key || !VALID_R2_KEY.test(key) || !Number.isInteger(partNumber)) {
+      const { body, status } = error('invalid upload part request', 400);
+      return c.json(body, status);
+    }
+    if (partNumber < 1 || partNumber > 10_000) {
+      const { body, status } = error('invalid part number', 400);
+      return c.json(body, status);
+    }
+    const contentLength = Number(c.req.header('content-length') ?? '0');
+    if (
+      !Number.isFinite(contentLength) ||
+      contentLength <= 0 ||
+      contentLength > MAX_LOG_ARCHIVE_PART_BYTES
+    ) {
+      const { body, status } = error('invalid upload part size', 400);
+      return c.json(body, status);
+    }
+    if (!c.req.raw.body) {
+      const { body, status } = error('missing upload part body', 400);
+      return c.json(body, status);
+    }
+    const upload = c.env.LOG_ARCHIVES.resumeMultipartUpload(key, uploadId);
+    const part = await upload.uploadPart(partNumber, await c.req.arrayBuffer());
+    return c.json(part, 200);
+  })
+  .post(
+    '/log-archives/uploads/:uploadId/complete',
+    zValidator('json', completeLogArchiveUploadRequestSchema),
+    async (c) => {
+      const unauthorized = authError(c);
+      if (unauthorized) {
+        return unauthorized;
+      }
+      const uploadId = c.req.param('uploadId');
+      const body = c.req.valid('json');
+      const upload = c.env.LOG_ARCHIVES.resumeMultipartUpload(
+        body.key,
+        uploadId,
+      );
+      const object = await upload.complete(body.parts);
+      return c.json(
+        {
+          key: object.key,
+          etag: object.etag,
+          size: object.size,
+        },
+        200,
+      );
+    },
+  )
   .post('/rooms', zValidator('json', createRoomRequestSchema), async (c) => {
     const body = c.req.valid('json');
     const roomId = newRoomId();
@@ -191,7 +334,10 @@ const route = app
         return c.json(body, status);
       }
       if (current.rom_identity.rom_pair_id !== body.rom_pair_id) {
-        const { body: errorBody, status } = error('rom identity mismatch', 409);
+        const { body: errorBody, status } = error(
+          'match identity mismatch',
+          409,
+        );
         return c.json(errorBody, status);
       }
       const record = await room.reserveJoin({
@@ -246,7 +392,7 @@ app.onError((err, c) => {
   if (
     message === 'room is not joinable' ||
     message === 'room already exists' ||
-    message === 'rom identity mismatch'
+    message === 'match identity mismatch'
   ) {
     const { body, status } = error(message, 409);
     return c.json(body, status);

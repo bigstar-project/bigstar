@@ -11,6 +11,8 @@ const romIdentity = {
     '1111111111111111111111111111111111111111111111111111111111111111',
   rom_pair_id:
     '4444444444444444444444444444444444444444444444444444444444444444',
+  bridge_sha256:
+    '5555555555555555555555555555555555555555555555555555555555555555',
 };
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -184,6 +186,7 @@ describe('タウリクライアント', () => {
       host_rom_path: 'C:\\roms\\host.nds',
       input_config_opened_once: true,
       diagnostic_events_enabled: false,
+      detailed_logs_enabled: false,
       new_room_notifications_enabled: true,
       player_name: 'Alice',
       player_profile_id: '33333333-3333-4333-8333-333333333333',
@@ -238,6 +241,7 @@ describe('タウリクライアント', () => {
         wins: 3,
       },
       diagnostic_events_enabled: true,
+      detailed_logs_enabled: true,
       signal_url: 'wss://match.example/session',
     };
 

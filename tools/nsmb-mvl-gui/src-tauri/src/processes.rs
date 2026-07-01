@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs::{self, File};
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -14,8 +15,10 @@ use crate::models::{
     BridgeDiagnostics, CourseMode, GameStateMismatch, LaunchRequest, LaunchResponse,
     MelonDiagnostics, MvlPlayerResult, MvlStageResult, Role, SessionStatus,
 };
+use crate::process_job::ChildProcessJob;
 use crate::settings::selected_stage;
 use crate::state::{AppState, ManagedSession};
+use sha2::{Digest, Sha256};
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -38,11 +41,16 @@ pub(crate) fn start_match_resolved(
 ) -> Result<LaunchResponse, String> {
     stop_existing(state)?;
     write_launch_manifest(&paths, &request)?;
+    let process_job = ChildProcessJob::create()?;
 
     let mut bridge = build_bridge_command(&paths.bridge_path, &request, &paths.log_dir)?;
     let mut bridge_child = bridge
         .spawn()
         .map_err(|err| format!("bridge の起動に失敗しました: {err}"))?;
+    if let Err(err) = process_job.assign_child(&bridge_child, "bridge") {
+        terminate_child(&mut bridge_child);
+        return Err(err);
+    }
 
     if let Err(err) = wait_for_bridge_connected(&mut bridge_child, &paths.log_dir) {
         terminate_child(&mut bridge_child);
@@ -63,6 +71,12 @@ pub(crate) fn start_match_resolved(
             return Err(format!("melonDS の起動に失敗しました: {err}"));
         }
     };
+    if let Err(err) = process_job.assign_child(&melon_child, "melonDS") {
+        let mut melon_child = melon_child;
+        terminate_child(&mut melon_child);
+        terminate_child(&mut bridge_child);
+        return Err(err);
+    }
 
     let response = LaunchResponse {
         log_dir: paths.log_dir.to_string_lossy().into_owned(),
@@ -77,6 +91,7 @@ pub(crate) fn start_match_resolved(
     *guard = Some(ManagedSession {
         melon: melon_child,
         bridge: bridge_child,
+        _process_job: process_job,
         log_dir: paths.log_dir,
         player_names: request.player_names,
         crash_report_sent: false,
@@ -127,6 +142,14 @@ fn wait_for_bridge_connected(bridge: &mut Child, log_dir: &Path) -> Result<(), S
 }
 
 pub(crate) fn stop_existing(state: &AppState) -> Result<(), String> {
+    stop_existing_inner(state, false)
+}
+
+pub(crate) fn stop_existing_with_unresolved_report(state: &AppState) -> Result<(), String> {
+    stop_existing_inner(state, true)
+}
+
+fn stop_existing_inner(state: &AppState, report_unresolved: bool) -> Result<(), String> {
     let mut guard = state
         .session
         .lock()
@@ -134,6 +157,17 @@ pub(crate) fn stop_existing(state: &AppState) -> Result<(), String> {
     if let Some(mut session) = guard.take() {
         terminate_child(&mut session.melon);
         terminate_child(&mut session.bridge);
+        let mvl_results = read_mvl_results(&session.log_dir);
+        if report_unresolved && !session.crash_report_sent && !match_result_decided(&mvl_results) {
+            session.crash_report_sent = true;
+            send_crash_report_async(
+                session.log_dir,
+                "stopped_by_user".to_owned(),
+                "stopped_by_user".to_owned(),
+                session.player_names,
+                "user_stop",
+            );
+        }
     }
     Ok(())
 }
@@ -157,26 +191,12 @@ pub(crate) fn session_status_inner(state: &AppState) -> Result<SessionStatus, St
         });
     };
 
-    let melon = process_state(&mut session.melon)?;
-    let bridge = process_state(&mut session.bridge)?;
+    let (melon, bridge, mvl_results) = refresh_session_processes(session)?;
     let active = melon == "running" || bridge == "running";
     let (webrtc, diagnostics_error) = read_bridge_diagnostics(&session.log_dir);
     let game_state_mismatch = read_melon_diagnostics(&session.log_dir)
         .and_then(|diagnostics| diagnostics.game_state_mismatch)
         .filter(should_show_game_state_mismatch_in_gui);
-    let mvl_results = read_mvl_results(&session.log_dir);
-    if !session.crash_report_sent
-        && (melon != "running" || bridge != "running")
-        && !match_result_decided(&mvl_results)
-    {
-        session.crash_report_sent = true;
-        send_crash_report_async(
-            session.log_dir.clone(),
-            melon.clone(),
-            bridge.clone(),
-            session.player_names.clone(),
-        );
-    }
 
     Ok(SessionStatus {
         active,
@@ -188,6 +208,49 @@ pub(crate) fn session_status_inner(state: &AppState) -> Result<SessionStatus, St
         game_state_mismatch,
         mvl_results,
     })
+}
+
+pub(crate) fn supervise_session_inner(state: &AppState) -> Result<(), String> {
+    let mut guard = state
+        .session
+        .lock()
+        .map_err(|_| "session state lock failed".to_owned())?;
+    if let Some(session) = guard.as_mut() {
+        let _ = refresh_session_processes(session)?;
+    }
+    Ok(())
+}
+
+fn refresh_session_processes(
+    session: &mut ManagedSession,
+) -> Result<(String, String, Vec<MvlStageResult>), String> {
+    let mut melon = process_state(&mut session.melon)?;
+    let mut bridge = process_state(&mut session.bridge)?;
+
+    if melon != "running" && bridge == "running" {
+        terminate_child(&mut session.bridge);
+        bridge = process_state(&mut session.bridge)?;
+    } else if bridge != "running" && melon == "running" {
+        terminate_child(&mut session.melon);
+        melon = process_state(&mut session.melon)?;
+    }
+
+    let mvl_results = read_mvl_results(&session.log_dir);
+    if !session.crash_report_sent
+        && (melon != "running" || bridge != "running")
+        && !match_result_decided(&mvl_results)
+    {
+        session.crash_report_sent = true;
+        send_crash_report_async(
+            session.log_dir.clone(),
+            melon.clone(),
+            bridge.clone(),
+            session.player_names.clone(),
+            "process_exit",
+        );
+    }
+
+    Ok((melon, bridge, mvl_results))
 }
 
 pub(crate) fn should_show_game_state_mismatch_in_gui(mismatch: &GameStateMismatch) -> bool {
@@ -202,38 +265,55 @@ pub(crate) fn build_bridge_command(
     log_dir: &Path,
 ) -> Result<Command, String> {
     let mut command = Command::new(bridge_path);
+    command.args(bridge_args(request, log_dir));
+    command.envs(bridge_env(request, log_dir));
+    command.current_dir(log_dir);
+    with_stdio(command, log_dir, "bridge")
+}
+
+fn bridge_env(request: &LaunchRequest, log_dir: &Path) -> BTreeMap<String, String> {
+    let mut env = BTreeMap::new();
+    if request.detailed_logs_enabled {
+        env.insert("NSMB_MVL_DETAILED_LOGS".to_owned(), "1".to_owned());
+        env.insert("NSMB_MVL_BRIDGE_LIVENESS".to_owned(), "1".to_owned());
+        env.insert(
+            "NSMB_MVL_BRIDGE_EVENTS_FILE".to_owned(),
+            log_dir
+                .join("bridge-events.jsonl")
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
+    env
+}
+
+fn bridge_args(request: &LaunchRequest, log_dir: &Path) -> Vec<String> {
+    let mut args = Vec::new();
     match request.role {
         Role::Host => {
-            command.args([
-                "webrtc-offer",
-                "--local-bind",
-                "127.0.0.1:0",
-                "--local-target",
-                &format!("127.0.0.1:{}", request.port),
-            ]);
+            args.push("webrtc-offer".to_owned());
+            args.push("--local-bind".to_owned());
+            args.push("127.0.0.1:0".to_owned());
+            args.push("--local-target".to_owned());
+            args.push(format!("127.0.0.1:{}", request.port));
         }
         Role::Client => {
-            command.args([
-                "webrtc-answer",
-                "--local-bind",
-                &format!("127.0.0.1:{}", request.port),
-            ]);
+            args.push("webrtc-answer".to_owned());
+            args.push("--local-bind".to_owned());
+            args.push(format!("127.0.0.1:{}", request.port));
         }
     }
     let status_file = log_dir
         .join("bridge-status.json")
         .to_string_lossy()
         .into_owned();
-    command.args([
-        "--signal",
-        request.signal_url.trim(),
-        "--session",
-        request.room_code.trim(),
-        "--status-file",
-        &status_file,
-    ]);
-    command.current_dir(log_dir);
-    with_stdio(command, log_dir, "bridge")
+    args.push("--signal".to_owned());
+    args.push(request.signal_url.trim().to_owned());
+    args.push("--session".to_owned());
+    args.push(request.room_code.trim().to_owned());
+    args.push("--status-file".to_owned());
+    args.push(status_file);
+    args
 }
 
 pub(crate) fn build_melon_command(
@@ -307,7 +387,15 @@ pub(crate) fn melon_env(
         "MELONDS_NSML_SCREENSHOT_DIR".into(),
         log_dir.join("screens").to_string_lossy().into_owned(),
     );
-    env.insert("MELONDS_NSML_SCREENSHOT_INTERVAL".into(), "0".into());
+    env.insert(
+        "MELONDS_NSML_SCREENSHOT_INTERVAL".into(),
+        if request.detailed_logs_enabled {
+            "60"
+        } else {
+            "0"
+        }
+        .into(),
+    );
     env.insert(
         "MELONDS_NSML_FIXED_RTC".into(),
         "2020-01-01T00:00:00".into(),
@@ -327,17 +415,78 @@ pub(crate) fn melon_env(
     );
     env.insert("MELONDS_NSML_INPUT_UNRELIABLE".into(), "1".into());
     env.insert("MELONDS_NSML_INPUT_BUNDLE_HISTORY".into(), "8".into());
+    if request.detailed_logs_enabled {
+        env.insert("MELONDS_NSML_HANG_DIAGNOSTICS".into(), "1".into());
+        env.insert(
+            "MELONDS_NSML_WATCHDOG_FILE".into(),
+            log_dir
+                .join("melonds-watchdog.jsonl")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        env.insert(
+            "MELONDS_NSML_PHASE_EVENTS_FILE".into(),
+            log_dir
+                .join("melonds-phase-events.jsonl")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        env.insert(
+            "MELONDS_NSML_HANG_DUMP_FILE".into(),
+            log_dir
+                .join("melonds-hang.dmp")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        env.insert("MELONDS_NSML_FRAME_HEARTBEAT_INTERVAL".into(), "30".into());
+        env.insert(
+            "MELONDS_NSML_GAMEPLAY_HEARTBEAT_INTERVAL".into(),
+            "30".into(),
+        );
+        env.insert("MELONDS_NSML_INPUT_TRACE".into(), "1".into());
+        env.insert("MELONDS_NSML_INPUT_TRACE_INTERVAL".into(), "1".into());
+        env.insert("MELONDS_NSML_INPUT_NETPLAY_TRACE".into(), "1".into());
+    }
     env.insert("MELONDS_NSML_INPUT_HEALTH_TRACE".into(), "1".into());
     env.insert(
         "MELONDS_NSML_INPUT_HEALTH_TRACE_INTERVAL".into(),
-        "120".into(),
+        if request.detailed_logs_enabled {
+            "30"
+        } else {
+            "120"
+        }
+        .into(),
     );
     env.insert(
         "MELONDS_NSML_INPUT_HEALTH_TRACE_WAIT_THRESHOLD_MS".into(),
-        "16".into(),
+        if request.detailed_logs_enabled {
+            "1"
+        } else {
+            "16"
+        }
+        .into(),
     );
+    if request.detailed_logs_enabled {
+        env.insert(
+            "MELONDS_NSML_GAME_STATE_TRACE".into(),
+            log_dir
+                .join("melonds-game-state.csv")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        env.insert("MELONDS_NSML_GAME_STATE_TRACE_INTERVAL".into(), "30".into());
+        env.insert("MELONDS_NSML_GAME_STATE_TRACE_EXTENDED".into(), "1".into());
+    }
     env.insert("MELONDS_NSML_STATE_SYNC".into(), "1".into());
-    env.insert("MELONDS_NSML_STATE_SYNC_INTERVAL".into(), "60".into());
+    env.insert(
+        "MELONDS_NSML_STATE_SYNC_INTERVAL".into(),
+        if request.detailed_logs_enabled {
+            "30"
+        } else {
+            "60"
+        }
+        .into(),
+    );
     env.insert("MELONDS_NSML_STATE_SYNC_EXTENDED".into(), "1".into());
     env.insert(
         "MELONDS_NSML_DIAGNOSTICS_FILE".into(),
@@ -346,7 +495,7 @@ pub(crate) fn melon_env(
             .to_string_lossy()
             .into_owned(),
     );
-    if request.diagnostic_events_enabled {
+    if request.diagnostic_events_enabled || request.detailed_logs_enabled {
         env.insert("MELONDS_NSML_DIAGNOSTIC_EVENTS".into(), "1".into());
         env.insert(
             "MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE".into(),
@@ -486,9 +635,15 @@ fn with_stdio(mut command: Command, log_dir: &Path, name: &str) -> Result<Comman
 }
 
 fn write_launch_manifest(paths: &LaunchPaths, request: &LaunchRequest) -> Result<(), String> {
+    let current_exe = std::env::current_exe().ok();
     let value = serde_json::json!({
         "gui": {
             "version": env!("CARGO_PKG_VERSION"),
+            "package": env!("CARGO_PKG_NAME"),
+            "exe": current_exe
+                .as_deref()
+                .map(file_fingerprint)
+                .unwrap_or_else(|| serde_json::json!({ "error": "current_exe unavailable" })),
         },
         "rom_identity": request.rom_identity,
         "request": request,
@@ -498,12 +653,81 @@ fn write_launch_manifest(paths: &LaunchPaths, request: &LaunchRequest) -> Result
             "melonds": paths.melon_path,
             "input_script": paths.input_script,
             "rom": paths.rom_path,
-        }
+        },
+        "artifacts": {
+            "bridge": file_fingerprint(&paths.bridge_path),
+            "melonds": file_fingerprint(&paths.melon_path),
+            "input_script": file_fingerprint(&paths.input_script),
+            "rom": file_fingerprint(&paths.rom_path),
+        },
+        "launch": {
+            "bridge": {
+                "cwd": paths.log_dir,
+                "args": bridge_args(request, &paths.log_dir),
+                "env": bridge_env(request, &paths.log_dir),
+            },
+            "melonds": {
+                "cwd": paths.log_dir,
+                "args": [paths.rom_path.to_string_lossy().into_owned()],
+                "env": melon_env(request, &paths.input_script, &paths.log_dir),
+            },
+        },
+        "runtime": {
+            "os": std::env::consts::OS,
+            "arch": std::env::consts::ARCH,
+            "family": std::env::consts::FAMILY,
+            "current_dir": std::env::current_dir()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_else(|err| format!("error: {err}")),
+        },
     });
     let json = serde_json::to_vec_pretty(&value)
         .map_err(|err| format!("launcher manifest を生成できません: {err}"))?;
     fs::write(paths.log_dir.join("launcher.json"), json)
         .map_err(|err| format!("launcher manifest を保存できません: {err}"))
+}
+
+fn file_fingerprint(path: &Path) -> serde_json::Value {
+    match file_fingerprint_result(path) {
+        Ok(value) => value,
+        Err(err) => serde_json::json!({
+            "path": path,
+            "error": err,
+        }),
+    }
+}
+
+fn file_fingerprint_result(path: &Path) -> Result<serde_json::Value, String> {
+    let metadata = fs::metadata(path).map_err(|err| format!("metadata を読み込めません: {err}"))?;
+    let modified_unix_ms = metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis());
+    Ok(serde_json::json!({
+        "path": path,
+        "bytes": metadata.len(),
+        "modified_unix_ms": modified_unix_ms,
+        "sha256": sha256_file(path)?,
+    }))
+}
+
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let file =
+        File::open(path).map_err(|err| format!("{} を読み込めません: {err}", path.display()))?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|err| format!("{} のhash計算に失敗しました: {err}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 pub(crate) fn read_bridge_diagnostics(

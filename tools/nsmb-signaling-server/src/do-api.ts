@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { signaling } from '../alchemy.run';
 import {
   type gameSettingsSchema,
   type RomIdentity,
@@ -45,6 +46,8 @@ export type LobbyObjectApi = {
   removeRoom(roomId: string): Promise<void>;
 };
 
+type AlchemyEnv = typeof signaling.Env;
+
 type TypedDurableObjectNamespace<T> = {
   idFromName(name: string): unknown;
   get(id: unknown): T & {
@@ -55,8 +58,10 @@ type TypedDurableObjectNamespace<T> = {
 export type MatchmakingEnv = {
   SIGNALING_ROOM: TypedDurableObjectNamespace<RoomObjectApi>;
   LOBBY: TypedDurableObjectNamespace<LobbyObjectApi>;
-  DEFAULT_ICE_SERVERS?: string;
-  CORS_ORIGINS?: string;
+  LOG_ARCHIVES: AlchemyEnv['LOG_ARCHIVES'];
+  DEFAULT_ICE_SERVERS?: AlchemyEnv['DEFAULT_ICE_SERVERS'];
+  CORS_ORIGINS?: AlchemyEnv['CORS_ORIGINS'];
+  LOG_UPLOAD_TOKEN?: AlchemyEnv['LOG_UPLOAD_TOKEN'];
 };
 
 export function publicRoom(record: RoomRecord, peerCount = 0): RoomSummary {

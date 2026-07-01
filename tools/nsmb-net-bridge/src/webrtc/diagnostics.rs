@@ -7,7 +7,7 @@ use serde_json::json;
 
 use super::{candidate_by_address, candidate_type, selected_route, WebRtcEndpoint};
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub(super) struct PacketStats {
     pub(super) app_to_webrtc_packets: u64,
     pub(super) app_to_webrtc_bytes: u64,

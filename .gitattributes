@@ -1,3 +1,8 @@
+# Line Endings
+.gitattributes                                text eol=lf
+tools/nsmb-mvl-gui/**                         text=auto eol=lf
+tools/nsmb-signaling-server/**                text=auto eol=lf
+
 # Vendored Dependencies
 src/frontend/glad/**                         linguist-vendored
 src/frontend/qt_sdl/gif-h/**                 linguist-vendored

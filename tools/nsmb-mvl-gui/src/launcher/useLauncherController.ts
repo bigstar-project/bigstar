@@ -28,6 +28,8 @@ import {
 } from '../matchmakingClient';
 import { notifyNewRoomAvailable } from '../roomNotifications';
 import {
+  cleanupDetailedLogs as cleanupDetailedLogsCommand,
+  createLogArchive as createLogArchiveCommand,
   ensureRoms,
   generateRoms,
   getDefaults,
@@ -38,6 +40,7 @@ import {
   openMelonds as openMelondsCommand,
   openMelondsInputConfig as openMelondsInputConfigCommand,
   runPreflightCheck,
+  saveDetailedLogsEnabled,
   saveDiagnosticEventsEnabled,
   saveMatchHistory,
   saveNewRoomNotificationsEnabled,
@@ -47,6 +50,7 @@ import {
   setStartupEnabled as setStartupEnabledCommand,
   startMatch as startMatchCommand,
   stopMatch as stopMatchCommand,
+  uploadLogArchive as uploadLogArchiveCommand,
 } from '../tauriClient';
 import type {
   BridgeDiagnostics,
@@ -85,12 +89,40 @@ function isWebSocketUrl(value: string) {
   return value.startsWith('ws://') || value.startsWith('wss://');
 }
 
+function logArchiveUploadUrl(signalUrl: string) {
+  const url = new URL(signalUrl);
+  if (url.protocol === 'wss:') {
+    url.protocol = 'https:';
+  } else if (url.protocol === 'ws:') {
+    url.protocol = 'http:';
+  } else if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new Error(
+      'ログアップロード先は ws:// または wss:// から導出してください',
+    );
+  }
+  url.pathname = '/log-archives';
+  url.search = '';
+  url.hash = '';
+  return url.toString().replace(/\/$/, '');
+}
+
 function assertRomPairMatches(local: RomIdentity, remote: RomIdentity) {
   if (local.rom_pair_id !== remote.rom_pair_id) {
     throw new Error(
-      `ROMが相手と一致しません local=${local.rom_pair_id.slice(0, 12)} remote=${remote.rom_pair_id.slice(0, 12)}`,
+      `ROMまたはbridgeが相手と一致しません local=${local.rom_pair_id.slice(0, 12)} remote=${remote.rom_pair_id.slice(0, 12)}`,
     );
   }
+}
+
+type CompleteRomIdentity = RomIdentity & { bridge_sha256: string };
+
+function requireCompleteRomIdentity(
+  identity: RomIdentity,
+): CompleteRomIdentity {
+  if (!identity.bridge_sha256) {
+    throw new Error('bridge hash を含む対戦 identity を生成できませんでした');
+  }
+  return identity as CompleteRomIdentity;
 }
 
 function matchIsComplete(results: MvlStageResult[]) {
@@ -102,6 +134,21 @@ function matchIsComplete(results: MvlStageResult[]) {
     latest.mario_match_wins >= latest.target_wins ||
     latest.luigi_match_wins >= latest.target_wins
   );
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) {
+    return `${bytes}B`;
+  }
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes / 1024;
+  for (const unit of units) {
+    if (value < 1024 || unit === 'GB') {
+      return `${value.toFixed(value < 10 ? 1 : 0)}${unit}`;
+    }
+    value /= 1024;
+  }
+  return `${bytes}B`;
 }
 
 type PreparedRomCache = {
@@ -223,6 +270,7 @@ export function useLauncherController() {
   const matchHistoryRef = useRef<BattleMatchRecord[]>([]);
   const [matchHistoryLoaded, setMatchHistoryLoaded] = useState(false);
   const [playerProfileId, setPlayerProfileId] = useState('');
+  const [logArchiveUploadToken, setLogArchiveUploadToken] = useState('');
 
   const currentRomPath =
     form.role === 'host' ? form.hostRomPath : form.clientRomPath;
@@ -581,10 +629,12 @@ export function useLauncherController() {
           inputMaxFrameLead: initialForm.inputMaxFrameLead,
           rollbackEnabled: initialForm.rollbackEnabled,
           diagnosticEventsEnabled: defaults.diagnostic_events_enabled ?? false,
+          detailedLogsEnabled: defaults.detailed_logs_enabled ?? false,
           newRoomNotificationsEnabled:
             defaults.new_room_notifications_enabled ?? true,
         });
         setPlayerProfileId(defaults.player_profile_id);
+        setLogArchiveUploadToken(defaults.log_archive_upload_token ?? '');
         setOnboardingRomsPrepared(defaults.roms_prepared_once);
         setOnboardingInputConfigOpened(defaults.input_config_opened_once);
         setOnboardingPlayerNameConfigured(
@@ -667,6 +717,20 @@ export function useLauncherController() {
     }, 250);
     return () => window.clearTimeout(timer);
   }, [defaultsLoaded, form.diagnosticEventsEnabled]);
+
+  useEffect(() => {
+    if (!defaultsLoaded) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void saveDetailedLogsEnabled({
+        enabled: form.detailedLogsEnabled,
+      }).catch((error) => {
+        setActivityStatus({ text: String(error), kind: 'warn' });
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [defaultsLoaded, form.detailedLogsEnabled]);
 
   useEffect(() => {
     if (!defaultsLoaded) {
@@ -879,6 +943,7 @@ export function useLauncherController() {
         settings: currentSettings(nextForm),
         player_names: playerNames,
         diagnostic_events_enabled: nextForm.diagnosticEventsEnabled,
+        detailed_logs_enabled: nextForm.detailedLogsEnabled,
       };
 
       try {
@@ -945,7 +1010,7 @@ export function useLauncherController() {
       romIdentity,
       sourceForm,
     }: {
-      romIdentity: RomIdentity;
+      romIdentity: CompleteRomIdentity;
       sourceForm: FormState;
     }) => {
       const nextForm = withRequiredPlan(sourceForm);
@@ -1039,7 +1104,7 @@ export function useLauncherController() {
       }
       setActivityStatus({ text: '部屋を作成中', kind: 'idle' });
       const response = await createRoomMutation.mutateAsync({
-        romIdentity: roms.rom_identity,
+        romIdentity: requireCompleteRomIdentity(roms.rom_identity),
         sourceForm: plannedForm,
       });
       ownRoomIdsRef.current.add(response.room_id);
@@ -1331,12 +1396,56 @@ export function useLauncherController() {
     }
   };
 
-  const openLogDir = async () => {
-    if (!lastLogDir) {
+  const openLogDir = async (logDir?: string) => {
+    const target = logDir ?? lastLogDir;
+    if (!target) {
       return;
     }
     try {
-      await openLogDirCommand(lastLogDir);
+      await openLogDirCommand(target);
+    } catch (error) {
+      setActivityStatus({ text: String(error), kind: 'error' });
+    }
+  };
+
+  const createLogArchive = async (logDir: string) => {
+    try {
+      const response = await createLogArchiveCommand(logDir);
+      setActivityStatus({
+        text: `ログzipを作成しました: ${response.archive_path}`,
+        kind: 'ok',
+      });
+    } catch (error) {
+      setActivityStatus({ text: String(error), kind: 'error' });
+    }
+  };
+
+  const uploadLogArchive = async (logDir: string) => {
+    try {
+      const response = await uploadLogArchiveCommand({
+        log_dir: logDir,
+        upload_url: logArchiveUploadUrl(form.signalUrl),
+        upload_token: logArchiveUploadToken,
+      });
+      setActivityStatus({
+        text: `ログzipをアップロードしました: ${response.key}`,
+        kind: 'ok',
+      });
+    } catch (error) {
+      setActivityStatus({ text: String(error), kind: 'error' });
+    }
+  };
+
+  const cleanupDetailedLogs = async () => {
+    try {
+      const response = await cleanupDetailedLogsCommand();
+      setActivityStatus({
+        text:
+          response.deleted_files === 0 && response.deleted_dirs === 0
+            ? '削除できる古い詳細ログはありません'
+            : `古い詳細ログを削除しました: ${response.deleted_files}ファイル / ${formatBytes(response.freed_bytes)}`,
+        kind: 'ok',
+      });
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });
     }
@@ -1517,7 +1626,9 @@ export function useLauncherController() {
   const actions: LauncherActions = {
     cancelHostedRoom,
     checkForUpdate,
+    cleanupDetailedLogs,
     copyRoomCode,
+    createLogArchive,
     createRoom,
     deleteMatchHistory,
     joinRoom,
@@ -1534,6 +1645,7 @@ export function useLauncherController() {
     setStartupEnabled,
     startMatch,
     stopMatch,
+    uploadLogArchive,
   };
 
   const changeView = (view: View) => {

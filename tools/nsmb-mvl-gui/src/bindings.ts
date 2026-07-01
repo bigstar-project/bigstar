@@ -13,6 +13,7 @@ export const commands = {
 	getDefaults: () => typedError<Defaults, string>(__TAURI_INVOKE("get_defaults")),
 	saveRomPaths: (request: SaveRomPathsRequest) => typedError<null, string>(__TAURI_INVOKE("save_rom_paths", { request })),
 	saveDiagnosticEventsEnabled: (request: SaveDiagnosticEventsRequest) => typedError<null, string>(__TAURI_INVOKE("save_diagnostic_events_enabled", { request })),
+	saveDetailedLogsEnabled: (request: SaveDetailedLogsRequest) => typedError<null, string>(__TAURI_INVOKE("save_detailed_logs_enabled", { request })),
 	saveNewRoomNotificationsEnabled: (request: SaveNewRoomNotificationsRequest) => typedError<null, string>(__TAURI_INVOKE("save_new_room_notifications_enabled", { request })),
 	showNewRoomNotification: (request: ShowNewRoomNotificationRequest) => typedError<boolean, string>(__TAURI_INVOKE("show_new_room_notification", { request })),
 	savePlayerName: (request: SavePlayerNameRequest) => typedError<null, string>(__TAURI_INVOKE("save_player_name", { request })),
@@ -26,6 +27,9 @@ export const commands = {
 	loadMatchHistory: () => typedError<MatchHistoryRecord[], string>(__TAURI_INVOKE("load_match_history")),
 	saveMatchHistory: (matches: MatchHistoryRecord[]) => typedError<null, string>(__TAURI_INVOKE("save_match_history", { matches })),
 	openLogDir: (path: string) => typedError<null, string>(__TAURI_INVOKE("open_log_dir", { path })),
+	createLogArchive: (logDir: string) => typedError<LogArchiveResponse, string>(__TAURI_INVOKE("create_log_archive", { logDir })),
+	cleanupDetailedLogs: () => typedError<CleanupDetailedLogsResponse, string>(__TAURI_INVOKE("cleanup_detailed_logs")),
+	uploadLogArchive: (request: UploadLogArchiveRequest) => typedError<UploadLogArchiveResponse, string>(__TAURI_INVOKE("upload_log_archive", { request })),
 	openMelonds: () => typedError<number, string>(__TAURI_INVOKE("open_melonds")),
 	openMelondsInputConfig: () => typedError<number, string>(__TAURI_INVOKE("open_melonds_input_config")),
 	getStartupEnabled: () => typedError<boolean, string>(__TAURI_INVOKE("get_startup_enabled")),
@@ -68,6 +72,14 @@ export type BridgeStats = {
 	dropped_no_local_target: number | null,
 };
 
+export type CleanupDetailedLogsResponse = {
+	scanned_log_dirs: number,
+	skipped_active_log_dirs: number,
+	deleted_files: number,
+	deleted_dirs: number,
+	freed_bytes: number,
+};
+
 export type CourseMode = "random" | "select";
 
 export type Defaults = {
@@ -82,7 +94,9 @@ export type Defaults = {
 	input_config_opened_once: boolean,
 	port: number,
 	diagnostic_events_enabled: boolean,
+	detailed_logs_enabled: boolean,
 	new_room_notifications_enabled: boolean,
+	log_archive_upload_token: string,
 };
 
 export type GameSettings = {
@@ -132,6 +146,7 @@ export type LaunchRequest_Deserialize = {
 	settings: GameSettings,
 	player_names?: MatchPlayerNames | null,
 	diagnostic_events_enabled?: boolean,
+	detailed_logs_enabled?: boolean,
 	rom_identity?: RomIdentity | null,
 };
 
@@ -144,6 +159,7 @@ export type LaunchRequest_Serialize = {
 	settings: GameSettings,
 	player_names?: MatchPlayerNames | null,
 	diagnostic_events_enabled: boolean,
+	detailed_logs_enabled: boolean,
 	rom_identity?: RomIdentity | null,
 };
 
@@ -155,17 +171,9 @@ export type LaunchResponse = {
 
 export type Lives = "3" | "5" | "endless";
 
-export type OpenAiReplayLogRequest = {
-	path: string,
-};
-
-export type OpenAiReplayLogResponse = {
-	source_path: string,
-	data_path: string,
-	compressed: boolean,
-	original_bytes: number | null,
-	data_bytes: number | null,
-	frames: AiReplayFrameRef[],
+export type LogArchiveResponse = {
+	archive_path: string,
+	size: number,
 };
 
 export type MatchHistoryRecord = {
@@ -216,6 +224,19 @@ export type MvlStageResult = {
 	line: string,
 };
 
+export type OpenAiReplayLogRequest = {
+	path: string,
+};
+
+export type OpenAiReplayLogResponse = {
+	source_path: string,
+	data_path: string,
+	compressed: boolean,
+	original_bytes: number | null,
+	data_bytes: number | null,
+	frames: AiReplayFrameRef[],
+};
+
 export type PreflightResponse = {
 	melonds_path: string,
 	bridge_path: string,
@@ -248,6 +269,14 @@ export type ReadAiTextFileResponse = {
 };
 
 export type Role = "host" | "client";
+
+export type RomIdentity = {
+	rom_pair_id: string,
+	generator_id: string,
+	host_rom_sha256: string,
+	client_rom_sha256: string,
+	bridge_sha256?: string,
+};
 
 export type RunAiToolRequest = {
 	task: string,
@@ -285,11 +314,8 @@ export type RunAiToolResponse = {
 	output_path: string | null,
 };
 
-export type RomIdentity = {
-	rom_pair_id: string,
-	generator_id: string,
-	host_rom_sha256: string,
-	client_rom_sha256: string,
+export type SaveDetailedLogsRequest = {
+	enabled: boolean,
 };
 
 export type SaveDiagnosticEventsRequest = {
@@ -332,6 +358,18 @@ export type SessionStatus = {
 export type ShowNewRoomNotificationRequest = {
 	title: string,
 	body: string,
+};
+
+export type UploadLogArchiveRequest = {
+	log_dir: string,
+	upload_url: string,
+	upload_token: string,
+};
+
+export type UploadLogArchiveResponse = {
+	archive_path: string,
+	key: string,
+	size: number,
 };
 
 /* Tauri Specta runtime */

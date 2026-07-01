@@ -30,13 +30,17 @@ const romIdentity = {
     '1111111111111111111111111111111111111111111111111111111111111111',
   rom_pair_id:
     '4444444444444444444444444444444444444444444444444444444444444444',
+  bridge_sha256:
+    '5555555555555555555555555555555555555555555555555555555555555555',
 };
 
 function actions(overrides: Partial<LauncherActions> = {}) {
   return {
     checkForUpdate: vi.fn(async () => {}),
     cancelHostedRoom: vi.fn(async () => {}),
+    cleanupDetailedLogs: vi.fn(async () => {}),
     copyRoomCode: vi.fn(async () => {}),
+    createLogArchive: vi.fn(async () => {}),
     createRoom: vi.fn(async () => {}),
     deleteMatchHistory: vi.fn(async () => {}),
     joinRoom: vi.fn(async () => {}),
@@ -53,6 +57,7 @@ function actions(overrides: Partial<LauncherActions> = {}) {
     setStartupEnabled: vi.fn(async () => {}),
     startMatch: vi.fn(async () => {}),
     stopMatch: vi.fn(async () => {}),
+    uploadLogArchive: vi.fn(async () => {}),
     ...overrides,
   };
 }

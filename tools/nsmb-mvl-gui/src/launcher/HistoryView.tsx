@@ -6,10 +6,16 @@ import type { BattleMatchRecord } from './types';
 
 export function HistoryView({
   matches,
+  onCreateLogArchive,
   onDeleteMatch,
+  onOpenLogDir,
+  onUploadLogArchive,
 }: {
   matches: BattleMatchRecord[];
+  onCreateLogArchive?: (logDir: string) => Promise<void> | void;
   onDeleteMatch?: (matchId: string) => Promise<void> | void;
+  onOpenLogDir?: (logDir: string) => Promise<void> | void;
+  onUploadLogArchive?: (logDir: string) => Promise<void> | void;
 }) {
   const visibleMatches = matches.filter(hasPlayedResult);
   const groupedMatches = groupMatchesByDate(visibleMatches);
@@ -80,9 +86,24 @@ export function HistoryView({
                       defaultOpen={false}
                       key={match.id}
                       match={match}
+                      onCreateLogArchive={
+                        onCreateLogArchive && match.logDir
+                          ? () => onCreateLogArchive(match.logDir)
+                          : undefined
+                      }
                       onDelete={
                         onDeleteMatch
                           ? () => onDeleteMatch(match.id)
+                          : undefined
+                      }
+                      onOpenLogDir={
+                        onOpenLogDir && match.logDir
+                          ? () => onOpenLogDir(match.logDir)
+                          : undefined
+                      }
+                      onUploadLogArchive={
+                        onUploadLogArchive && match.logDir
+                          ? () => onUploadLogArchive(match.logDir)
                           : undefined
                       }
                     />

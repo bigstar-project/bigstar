@@ -6,7 +6,8 @@ use tauri::AppHandle;
 use crate::config::REUSABLE_ROM_FORMAT;
 use crate::models::{GenerateRomRequest, GenerateRomResponse, RomIdentity};
 use crate::paths::{
-    absolutize_existing, ensure_parent_dir, find_symbols_file, fixed_generated_rom_paths,
+    absolutize_existing, ensure_parent_dir, find_bridge_binary, find_symbols_file,
+    fixed_generated_rom_paths,
 };
 use crate::settings::{course_mode_value, lives_value};
 use serde::{Deserialize, Serialize};
@@ -57,6 +58,7 @@ pub(crate) fn prepare_roms(
     let (host_rom, client_rom) = fixed_generated_rom_paths(app)?;
     let source_rom = absolutize_existing(&request.source_rom)?;
     let symbols = find_symbols_file(app)?;
+    let bridge_sha256 = sha256_file(&find_bridge_binary(app)?)?;
     let inputs = RomManifestInputs {
         manifest_version: MANIFEST_VERSION,
         rom_format: REUSABLE_ROM_FORMAT.to_owned(),
@@ -67,7 +69,23 @@ pub(crate) fn prepare_roms(
     };
 
     if !force {
-        if let Some(identity) = reusable_rom_identity(&host_rom, &client_rom, &inputs)? {
+        if let Some(identity) =
+            reusable_rom_identity(&host_rom, &client_rom, &inputs, &bridge_sha256)?
+        {
+            write_reusable_rom_manifest(
+                &host_rom,
+                &RomManifest {
+                    inputs: inputs.clone(),
+                    identity: identity.clone(),
+                },
+            )?;
+            write_reusable_rom_manifest(
+                &client_rom,
+                &RomManifest {
+                    inputs,
+                    identity: identity.clone(),
+                },
+            )?;
             return Ok(GenerateRomResponse {
                 host_rom: host_rom.to_string_lossy().into_owned(),
                 client_rom: client_rom.to_string_lossy().into_owned(),
@@ -94,16 +112,12 @@ pub(crate) fn prepare_roms(
 
     nsmb_mvl_rom::generate_stable_roms(&options)
         .map_err(|err| format!("ROM生成に失敗しました: {err}"))?;
-    let identity = RomIdentity {
-        rom_pair_id: rom_pair_id(
-            &inputs.generator_id,
-            &sha256_file(&host_rom)?,
-            &sha256_file(&client_rom)?,
-        ),
-        generator_id: inputs.generator_id.clone(),
-        host_rom_sha256: sha256_file(&host_rom)?,
-        client_rom_sha256: sha256_file(&client_rom)?,
-    };
+    let identity = rom_identity(
+        &inputs.generator_id,
+        &sha256_file(&host_rom)?,
+        &sha256_file(&client_rom)?,
+        &bridge_sha256,
+    );
     write_reusable_rom_manifest(
         &host_rom,
         &RomManifest {
@@ -131,6 +145,7 @@ fn reusable_rom_identity(
     host_rom: &Path,
     client_rom: &Path,
     inputs: &RomManifestInputs,
+    bridge_sha256: &str,
 ) -> Result<Option<RomIdentity>, String> {
     if !host_rom.is_file() || !client_rom.is_file() {
         return Ok(None);
@@ -141,15 +156,21 @@ fn reusable_rom_identity(
     let Ok(client_manifest) = read_reusable_rom_manifest(client_rom) else {
         return Ok(None);
     };
+    let host_rom_sha256 = sha256_file(host_rom)?;
+    let client_rom_sha256 = sha256_file(client_rom)?;
     if host_manifest.inputs != *inputs
         || client_manifest.inputs != *inputs
-        || host_manifest.identity.rom_pair_id != client_manifest.identity.rom_pair_id
-        || host_manifest.identity.host_rom_sha256 != sha256_file(host_rom)?
-        || host_manifest.identity.client_rom_sha256 != sha256_file(client_rom)?
+        || host_manifest.identity.host_rom_sha256 != host_rom_sha256
+        || host_manifest.identity.client_rom_sha256 != client_rom_sha256
     {
         return Ok(None);
     }
-    Ok(Some(host_manifest.identity))
+    Ok(Some(rom_identity(
+        &inputs.generator_id,
+        &host_rom_sha256,
+        &client_rom_sha256,
+        bridge_sha256,
+    )))
 }
 
 fn read_reusable_rom_manifest(rom: &Path) -> Result<RomManifest, String> {
@@ -208,8 +229,38 @@ fn rom_generator_id() -> String {
     sha256_text(&parts)
 }
 
-fn rom_pair_id(generator_id: &str, host_rom_sha256: &str, client_rom_sha256: &str) -> String {
-    sha256_text(&[generator_id, host_rom_sha256, client_rom_sha256])
+fn rom_identity(
+    generator_id: &str,
+    host_rom_sha256: &str,
+    client_rom_sha256: &str,
+    bridge_sha256: &str,
+) -> RomIdentity {
+    RomIdentity {
+        rom_pair_id: rom_pair_id(
+            generator_id,
+            host_rom_sha256,
+            client_rom_sha256,
+            bridge_sha256,
+        ),
+        generator_id: generator_id.to_owned(),
+        host_rom_sha256: host_rom_sha256.to_owned(),
+        client_rom_sha256: client_rom_sha256.to_owned(),
+        bridge_sha256: bridge_sha256.to_owned(),
+    }
+}
+
+fn rom_pair_id(
+    generator_id: &str,
+    host_rom_sha256: &str,
+    client_rom_sha256: &str,
+    bridge_sha256: &str,
+) -> String {
+    sha256_text(&[
+        generator_id,
+        host_rom_sha256,
+        client_rom_sha256,
+        bridge_sha256,
+    ])
 }
 
 pub(crate) fn reusable_rom_marker_path(rom: &Path) -> PathBuf {
@@ -249,7 +300,8 @@ pub(crate) fn write_reusable_rom_marker(rom: &Path) -> Result<(), String> {
             rom_pair_id: fake_sha.clone(),
             generator_id: rom_generator_id(),
             host_rom_sha256: fake_sha.clone(),
-            client_rom_sha256: fake_sha,
+            client_rom_sha256: fake_sha.clone(),
+            bridge_sha256: fake_sha,
         },
     };
     write_reusable_rom_manifest(rom, &manifest)

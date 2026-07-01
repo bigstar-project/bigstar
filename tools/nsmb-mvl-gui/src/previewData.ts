@@ -13,7 +13,9 @@ export const previewDefaults: Defaults = {
   roms_prepared_once: false,
   input_config_opened_once: false,
   diagnostic_events_enabled: false,
+  detailed_logs_enabled: false,
   new_room_notifications_enabled: true,
+  log_archive_upload_token: '',
   port: 8165,
 };
 
@@ -34,6 +36,8 @@ export const previewRomIdentity = {
     '1111111111111111111111111111111111111111111111111111111111111111',
   rom_pair_id:
     '4444444444444444444444444444444444444444444444444444444444444444',
+  bridge_sha256:
+    '5555555555555555555555555555555555555555555555555555555555555555',
 };
 
 export const previewMatchHistoryKey = 'nsmb-mvl-preview-match-history-v2';
