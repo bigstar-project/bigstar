@@ -15,7 +15,6 @@ import {
   selectedStageFrom,
   withRequiredPlan,
 } from '../form';
-import { maxMatchHistoryRecords } from '../matchHistory';
 import {
   closeRoom as closeMatchmakingRoom,
   createRoom as createMatchmakingRoom,
@@ -465,13 +464,11 @@ export function useLauncherController() {
       matchHistoryRef.current = [
         archived,
         ...matchHistoryRef.current.filter((match) => match.id !== archived.id),
-      ].slice(0, maxMatchHistoryRecords);
-      setMatchHistory((history) =>
-        [
-          archived,
-          ...history.filter((match) => match.id !== archived.id),
-        ].slice(0, maxMatchHistoryRecords),
-      );
+      ];
+      setMatchHistory((history) => [
+        archived,
+        ...history.filter((match) => match.id !== archived.id),
+      ]);
     },
     [],
   );
@@ -650,12 +647,8 @@ export function useLauncherController() {
         try {
           const persistedHistory = await loadMatchHistory();
           if (!disposed) {
-            const loadedHistory = persistedHistory.slice(
-              0,
-              maxMatchHistoryRecords,
-            );
-            matchHistoryRef.current = loadedHistory;
-            setMatchHistory(loadedHistory);
+            matchHistoryRef.current = persistedHistory;
+            setMatchHistory(persistedHistory);
           }
         } catch (error) {
           if (!disposed) {

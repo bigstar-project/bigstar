@@ -10,6 +10,9 @@ use std::os::windows::process::CommandExt;
 
 use crate::config::{default_signal_url, DEFAULT_PORT, DEFAULT_ROOM_CODE};
 use crate::crash_report::create_user_log_archive;
+use crate::history_store::{
+    load_match_history as load_match_history_db, save_match_history as save_match_history_db,
+};
 use crate::models::{
     CleanupDetailedLogsResponse, Defaults, GenerateRomRequest, GenerateRomResponse, LaunchRequest,
     LaunchResponse, LogArchiveResponse, MatchHistoryRecord, SaveDetailedLogsRequest,
@@ -20,8 +23,7 @@ use crate::models::{
 use crate::paths::{
     absolutize_existing, allowed_log_dir, app_data_dir, create_log_dir, find_bridge_binary,
     find_input_script, find_melonds_binary, fixed_generated_rom_paths, load_launcher_settings,
-    load_match_history as load_match_history_file, open_allowed_log_dir, save_launcher_settings,
-    save_match_history as save_match_history_file,
+    open_allowed_log_dir, save_launcher_settings,
 };
 use crate::processes::{
     remove_inherited_melonds_env_keys, session_status_inner, start_match_resolved,
@@ -263,7 +265,7 @@ pub(crate) async fn upload_log_archive(
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn load_match_history(app: AppHandle) -> Result<Vec<MatchHistoryRecord>, String> {
-    load_match_history_file(&app)
+    load_match_history_db(&app)
 }
 
 #[tauri::command]
@@ -272,7 +274,7 @@ pub(crate) fn save_match_history(
     app: AppHandle,
     matches: Vec<MatchHistoryRecord>,
 ) -> Result<(), String> {
-    save_match_history_file(&app, &matches)
+    save_match_history_db(&app, &matches)
 }
 
 #[tauri::command]

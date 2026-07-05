@@ -3,6 +3,7 @@
 mod commands;
 mod config;
 mod crash_report;
+mod history_store;
 mod models;
 mod paths;
 mod preflight;
