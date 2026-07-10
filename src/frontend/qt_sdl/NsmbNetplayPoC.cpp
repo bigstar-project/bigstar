@@ -17115,6 +17115,27 @@ bool IsEnabled()
     return G.Enabled;
 }
 
+PerformanceCounters GetPerformanceCounters()
+{
+    InitFromEnvironment();
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    PerformanceCounters counters;
+    counters.RemoteInputWaitCount = G.RemoteInputWaitCount;
+    counters.RemoteInputWaitUs = G.RemoteInputWaitUs;
+    counters.RemoteInputWaitMaxUs = G.RemoteInputWaitMaxUs;
+    counters.FrameLeadThrottleCount = G.FrameLeadThrottleCount;
+    counters.FrameLeadThrottleUs = G.FrameLeadThrottleUs;
+    counters.FrameLeadThrottleMaxUs = G.FrameLeadThrottleMaxUs;
+    counters.LastSentInputFrame = G.LastSentInputFrame;
+    counters.LastReceivedInputFrame = G.LastReceivedInputFrame;
+    if (G.LastSentInputFrame != kNoFrameLimit && G.LastReceivedInputFrame != kNoFrameLimit)
+    {
+        counters.InputLead = static_cast<int>(G.LastSentInputFrame)
+            - static_cast<int>(G.LastReceivedInputFrame);
+    }
+    return counters;
+}
+
 void InitFromEnvironment()
 {
     if (G.EnvChecked.load(std::memory_order_acquire)) return;

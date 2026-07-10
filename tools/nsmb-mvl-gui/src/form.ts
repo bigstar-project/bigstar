@@ -28,6 +28,7 @@ export const initialForm: FormState = {
   rollbackEnabled: false,
   diagnosticEventsEnabled: false,
   detailedLogsEnabled: false,
+  performanceLogsEnabled: false,
   newRoomNotificationsEnabled: true,
 };
 

@@ -415,6 +415,15 @@ pub(crate) fn melon_env(
     );
     env.insert("MELONDS_NSML_INPUT_UNRELIABLE".into(), "1".into());
     env.insert("MELONDS_NSML_INPUT_BUNDLE_HISTORY".into(), "8".into());
+    if request.performance_logs_enabled {
+        env.insert(
+            "MELONDS_NSML_PERFORMANCE_LOG".into(),
+            log_dir
+                .join("melonds-performance.jsonl")
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
     if request.detailed_logs_enabled {
         env.insert("MELONDS_NSML_HANG_DIAGNOSTICS".into(), "1".into());
         env.insert(

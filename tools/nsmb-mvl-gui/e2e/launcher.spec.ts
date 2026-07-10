@@ -99,6 +99,7 @@ async function installGuiDriver(
                 base_rom_path: state.romsPrepared ? 'C:\\roms\\base.nds' : '',
                 client_rom_path: 'C:\\roms\\client.nds',
                 detailed_logs_enabled: false,
+                performance_logs_enabled: false,
                 host_rom_path: 'C:\\roms\\host.nds',
                 input_config_opened_once: state.inputConfigOpened,
                 diagnostic_events_enabled: false,
@@ -160,6 +161,10 @@ async function installGuiDriver(
               return null;
             }
             if (command === 'save_detailed_logs_enabled') {
+              calls.push({ args: [args.request], name: command });
+              return null;
+            }
+            if (command === 'save_performance_logs_enabled') {
               calls.push({ args: [args.request], name: command });
               return null;
             }
@@ -380,6 +385,9 @@ test('手動接続でクライアント起動ペイロードを作れる', async
 
   await page.goto('/');
   await waitForGuiReady(page);
+  await page.getByRole('tab', { name: '設定' }).click();
+  await page.getByText('パフォーマンスログ', { exact: true }).click();
+  await page.getByRole('tab', { name: '対戦', exact: true }).click();
   await page.getByText('部屋コードとロールを編集').click();
   await page.getByLabel('部屋コード').fill('manual-room');
   await page
@@ -398,6 +406,7 @@ test('手動接続でクライアント起動ペイロードを作れる', async
     room_code: 'manual-room',
     rom_path: 'C:\\roms\\client.nds',
     diagnostic_events_enabled: false,
+    performance_logs_enabled: true,
     settings: {
       big_stars: 10,
       course_mode: 'random',

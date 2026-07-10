@@ -26,7 +26,21 @@ struct InputState
     melonDS::u16 TouchY = 0;
 };
 
+struct PerformanceCounters
+{
+    unsigned long long RemoteInputWaitCount = 0;
+    unsigned long long RemoteInputWaitUs = 0;
+    unsigned long long RemoteInputWaitMaxUs = 0;
+    unsigned long long FrameLeadThrottleCount = 0;
+    unsigned long long FrameLeadThrottleUs = 0;
+    unsigned long long FrameLeadThrottleMaxUs = 0;
+    melonDS::u32 LastSentInputFrame = 0;
+    melonDS::u32 LastReceivedInputFrame = 0;
+    int InputLead = 0;
+};
+
 bool IsEnabled();
+PerformanceCounters GetPerformanceCounters();
 void InitFromEnvironment();
 InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, const InputState& polledInput);
 void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);

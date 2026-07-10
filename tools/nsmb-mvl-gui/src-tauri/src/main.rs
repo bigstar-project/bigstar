@@ -42,6 +42,7 @@ fn specta_builder() -> SpectaBuilder<tauri::Wry> {
         commands::save_rom_paths,
         commands::save_diagnostic_events_enabled,
         commands::save_detailed_logs_enabled,
+        commands::save_performance_logs_enabled,
         commands::save_new_room_notifications_enabled,
         commands::show_new_room_notification,
         commands::save_player_name,

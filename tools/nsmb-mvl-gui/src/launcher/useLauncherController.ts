@@ -43,6 +43,7 @@ import {
   saveDiagnosticEventsEnabled,
   saveMatchHistory,
   saveNewRoomNotificationsEnabled,
+  savePerformanceLogsEnabled,
   savePlayerName as savePlayerNameCommand,
   saveRomPaths,
   selectRomFile,
@@ -624,6 +625,7 @@ export function useLauncherController() {
           rollbackEnabled: initialForm.rollbackEnabled,
           diagnosticEventsEnabled: defaults.diagnostic_events_enabled ?? false,
           detailedLogsEnabled: defaults.detailed_logs_enabled ?? false,
+          performanceLogsEnabled: defaults.performance_logs_enabled ?? false,
           newRoomNotificationsEnabled:
             defaults.new_room_notifications_enabled ?? true,
         });
@@ -721,6 +723,20 @@ export function useLauncherController() {
     }, 250);
     return () => window.clearTimeout(timer);
   }, [defaultsLoaded, form.detailedLogsEnabled]);
+
+  useEffect(() => {
+    if (!defaultsLoaded) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void savePerformanceLogsEnabled({
+        enabled: form.performanceLogsEnabled,
+      }).catch((error) => {
+        setActivityStatus({ text: String(error), kind: 'warn' });
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [defaultsLoaded, form.performanceLogsEnabled]);
 
   useEffect(() => {
     if (!defaultsLoaded) {
@@ -934,6 +950,7 @@ export function useLauncherController() {
         player_names: playerNames,
         diagnostic_events_enabled: nextForm.diagnosticEventsEnabled,
         detailed_logs_enabled: nextForm.detailedLogsEnabled,
+        performance_logs_enabled: nextForm.performanceLogsEnabled,
       };
 
       try {

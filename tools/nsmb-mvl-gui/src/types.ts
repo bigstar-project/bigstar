@@ -24,6 +24,7 @@ export type {
   SaveDetailedLogsRequest,
   SaveDiagnosticEventsRequest,
   SaveNewRoomNotificationsRequest,
+  SavePerformanceLogsRequest,
   SavePlayerNameRequest,
   SaveRomPathsRequest,
   SessionStatus,
@@ -55,5 +56,6 @@ export type FormState = {
   rollbackEnabled: boolean;
   diagnosticEventsEnabled: boolean;
   detailedLogsEnabled: boolean;
+  performanceLogsEnabled: boolean;
   newRoomNotificationsEnabled: boolean;
 };

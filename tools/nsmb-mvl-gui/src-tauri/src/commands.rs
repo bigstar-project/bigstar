@@ -16,9 +16,9 @@ use crate::history_store::{
 use crate::models::{
     CleanupDetailedLogsResponse, Defaults, GenerateRomRequest, GenerateRomResponse, LaunchRequest,
     LaunchResponse, LogArchiveResponse, MatchHistoryRecord, SaveDetailedLogsRequest,
-    SaveDiagnosticEventsRequest, SaveNewRoomNotificationsRequest, SavePlayerNameRequest,
-    SaveRomPathsRequest, SessionStatus, ShowNewRoomNotificationRequest, UploadLogArchiveRequest,
-    UploadLogArchiveResponse,
+    SaveDiagnosticEventsRequest, SaveNewRoomNotificationsRequest, SavePerformanceLogsRequest,
+    SavePlayerNameRequest, SaveRomPathsRequest, SessionStatus, ShowNewRoomNotificationRequest,
+    UploadLogArchiveRequest, UploadLogArchiveResponse,
 };
 use crate::paths::{
     absolutize_existing, allowed_log_dir, app_data_dir, create_log_dir, find_bridge_binary,
@@ -41,6 +41,7 @@ const DETAILED_LOG_FILES: &[&str] = &[
     "melonds-events.jsonl",
     "melonds-game-state.csv",
     "melonds-hang.dmp",
+    "melonds-performance.jsonl",
     "melonds-phase-events.jsonl",
     "melonds.stdout.txt",
     "melonds-watchdog.jsonl",
@@ -75,6 +76,7 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
         port: DEFAULT_PORT,
         diagnostic_events_enabled: saved.diagnostic_events_enabled,
         detailed_logs_enabled: saved.detailed_logs_enabled,
+        performance_logs_enabled: saved.performance_logs_enabled,
         new_room_notifications_enabled: saved.new_room_notifications_enabled,
         log_archive_upload_token: std::env::var("NSMB_MVL_LOG_UPLOAD_TOKEN")
             .unwrap_or_default()
@@ -110,6 +112,17 @@ pub(crate) fn save_detailed_logs_enabled(
 ) -> Result<(), String> {
     let mut settings = load_launcher_settings(&app)?;
     settings.detailed_logs_enabled = request.enabled;
+    save_launcher_settings(&app, &settings)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn save_performance_logs_enabled(
+    app: AppHandle,
+    request: SavePerformanceLogsRequest,
+) -> Result<(), String> {
+    let mut settings = load_launcher_settings(&app)?;
+    settings.performance_logs_enabled = request.enabled;
     save_launcher_settings(&app, &settings)
 }
 

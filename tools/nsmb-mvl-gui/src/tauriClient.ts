@@ -19,6 +19,7 @@ import type {
   SaveDetailedLogsRequest,
   SaveDiagnosticEventsRequest,
   SaveNewRoomNotificationsRequest,
+  SavePerformanceLogsRequest,
   SavePlayerNameRequest,
   SaveRomPathsRequest,
   SessionStatus,
@@ -82,6 +83,15 @@ export function saveDetailedLogsEnabled(request: SaveDetailedLogsRequest) {
     return Promise.resolve(null);
   }
   return unwrapCommand(commands.saveDetailedLogsEnabled(request));
+}
+
+export function savePerformanceLogsEnabled(
+  request: SavePerformanceLogsRequest,
+) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(null);
+  }
+  return unwrapCommand(commands.savePerformanceLogsEnabled(request));
 }
 
 export function saveNewRoomNotificationsEnabled(

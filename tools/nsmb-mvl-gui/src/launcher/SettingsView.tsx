@@ -249,6 +249,48 @@ export function SettingsView({
               }
             />
             <Switch.Root
+              checked={form.performanceLogsEnabled}
+              onCheckedChange={(details) =>
+                updateField('performanceLogsEnabled', details.checked)
+              }
+              className={css({
+                alignItems: 'center',
+                bg: 'app.panel',
+                borderColor: 'border',
+                borderRadius: 'l2',
+                borderWidth: '1px',
+                colorPalette: 'blue',
+                display: 'flex',
+                gap: '3',
+                justifyContent: 'space-between',
+                minH: '16',
+                p: '3',
+                w: 'full',
+              })}
+            >
+              <Switch.HiddenInput />
+              <div
+                className={css({
+                  display: 'grid',
+                  gap: '1',
+                  minW: '0',
+                })}
+              >
+                <Switch.Label className={css({ fontSize: 'sm' })}>
+                  パフォーマンスログ
+                </Switch.Label>
+                <div
+                  className={css({
+                    color: 'fg.muted',
+                    textStyle: 'xs',
+                  })}
+                >
+                  FPS低下時の処理時間、音声待ち、CPU時間を低負荷で記録します
+                </div>
+              </div>
+              <Switch.Control />
+            </Switch.Root>
+            <Switch.Root
               checked={form.detailedLogsEnabled}
               onCheckedChange={(details) =>
                 updateField('detailedLogsEnabled', details.checked)
