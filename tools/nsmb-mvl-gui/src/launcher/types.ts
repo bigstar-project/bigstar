@@ -52,7 +52,6 @@ export type LauncherActions = {
   copyRoomCode: () => Promise<void>;
   createLogArchive: (logDir: string) => Promise<void>;
   createRoom: () => Promise<void>;
-  deleteMatchHistory: (matchId: string) => Promise<void>;
   cancelHostedRoom: () => Promise<void>;
   joinRoom: (roomId: string) => Promise<void>;
   openLogDir: (logDir?: string) => Promise<void>;

@@ -1,16 +1,31 @@
-import { useState } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { type ReactNode, useState } from 'react';
 import { describe, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import { Tabs } from '../components/ui';
 import { previewMatchHistory } from '../previewData';
 import { HistoryView } from './HistoryView';
 
+function HistoryTestProviders({ children }: { children: ReactNode }) {
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      }),
+  );
+  return (
+    <QueryClientProvider client={queryClient}>
+      <Tabs.Root value="history">{children}</Tabs.Root>
+    </QueryClientProvider>
+  );
+}
+
 describe('履歴ビュー', () => {
   test('ダッシュボードとフィルターを表示する', async () => {
     const screen = await render(
-      <Tabs.Root value="history">
+      <HistoryTestProviders>
         <HistoryView matches={previewMatchHistory()} />
-      </Tabs.Root>,
+      </HistoryTestProviders>,
     );
 
     await expect.element(screen.getByText('対戦勝率')).toBeVisible();
@@ -49,9 +64,9 @@ describe('履歴ビュー', () => {
 
   test('対戦相手の名前から個別戦績へ移動する', async () => {
     const screen = await render(
-      <Tabs.Root value="history">
+      <HistoryTestProviders>
         <HistoryView matches={previewMatchHistory()} />
-      </Tabs.Root>,
+      </HistoryTestProviders>,
     );
 
     await screen.getByText('3 - 1').click();
@@ -71,23 +86,23 @@ describe('履歴ビュー', () => {
     function DeletableHistory() {
       const [matches, setMatches] = useState(previewMatchHistory());
       return (
-        <Tabs.Root value="history">
+        <HistoryTestProviders>
           <HistoryView
             matches={matches}
-            revision={matches.length}
             onDeleteMatch={async (matchId) => {
               setMatches((current) =>
                 current.filter((match) => match.id !== matchId),
               );
             }}
           />
-        </Tabs.Root>
+        </HistoryTestProviders>
       );
     }
 
     const screen = await render(<DeletableHistory />);
     await screen.getByText('3 - 1').click();
     await screen.getByRole('button', { name: 'Rivalとの戦績を見る' }).click();
+    await screen.getByText('3 - 1').click();
     await screen.getByRole('button', { name: '対戦履歴を削除' }).click();
     await screen.getByRole('button', { name: '削除する' }).click();
 
@@ -101,9 +116,9 @@ describe('履歴ビュー', () => {
 
   test('最新の対戦をデフォルトでは展開しない', async () => {
     const screen = await render(
-      <Tabs.Root value="history">
+      <HistoryTestProviders>
         <HistoryView matches={previewMatchHistory()} />
-      </Tabs.Root>,
+      </HistoryTestProviders>,
     );
 
     await expect.element(screen.getByText('3 - 1')).toBeVisible();
@@ -128,9 +143,9 @@ describe('履歴ビュー', () => {
     };
 
     const screen = await render(
-      <Tabs.Root value="history">
+      <HistoryTestProviders>
         <HistoryView matches={[unplayedMatch, playedMatch]} />
-      </Tabs.Root>,
+      </HistoryTestProviders>,
     );
 
     await expect.element(screen.getByText('3 - 1')).toBeVisible();
@@ -145,9 +160,9 @@ describe('履歴ビュー', () => {
     const onDeleteMatch = vi.fn();
 
     const screen = await render(
-      <Tabs.Root value="history">
+      <HistoryTestProviders>
         <HistoryView matches={[playedMatch]} onDeleteMatch={onDeleteMatch} />
-      </Tabs.Root>,
+      </HistoryTestProviders>,
     );
 
     await expect
@@ -175,14 +190,14 @@ describe('履歴ビュー', () => {
     const onUploadLogArchive = vi.fn();
 
     const screen = await render(
-      <Tabs.Root value="history">
+      <HistoryTestProviders>
         <HistoryView
           matches={[playedMatch]}
           onCreateLogArchive={onCreateLogArchive}
           onOpenLogDir={onOpenLogDir}
           onUploadLogArchive={onUploadLogArchive}
         />
-      </Tabs.Root>,
+      </HistoryTestProviders>,
     );
 
     await screen.getByText('3 - 1').click();

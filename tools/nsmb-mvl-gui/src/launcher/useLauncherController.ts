@@ -1,6 +1,5 @@
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { relaunch } from '@tauri-apps/plugin-process';
-import { check } from '@tauri-apps/plugin-updater';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isDistributionBuild } from '../buildProfile';
 import {
@@ -22,19 +21,21 @@ import {
   joinRoom as joinMatchmakingRoom,
   listRooms,
   type RoomSummary,
-  subscribeHostRoomEvents,
-  subscribeLobbyRooms,
 } from '../matchmakingClient';
+import { matchHistoryKeys } from '../queries/historyQueryKeys';
+import {
+  defaultsQueryOptions,
+  launcherQueryKeys,
+  sessionStatusQueryOptions,
+  startupEnabledQueryOptions,
+  updateQueryOptions,
+} from '../queries/launcherQueries';
 import { notifyNewRoomAvailable } from '../roomNotifications';
 import {
   cleanupDetailedLogs as cleanupDetailedLogsCommand,
   createLogArchive as createLogArchiveCommand,
-  deleteMatchHistory as deleteMatchHistoryCommand,
   ensureRoms,
   generateRoms,
-  getDefaults,
-  getSessionStatus,
-  getStartupEnabled,
   openLogDir as openLogDirCommand,
   openMelonds as openMelondsCommand,
   openMelondsInputConfig as openMelondsInputConfigCommand,
@@ -54,6 +55,7 @@ import {
 } from '../tauriClient';
 import type {
   BridgeDiagnostics,
+  Defaults,
   FormState,
   GameStateMismatch,
   GenerateRomRequest,
@@ -61,7 +63,7 @@ import type {
   LaunchRequest,
   MvlStageResult,
   RomIdentity,
-  SaveRomPathsRequest,
+  SessionStatus,
   StatusKind,
 } from '../types';
 import { stageLabel } from './options';
@@ -75,10 +77,12 @@ import {
   type UpdateStatus,
   type View,
 } from './types';
+import {
+  useHostedRoomSubscription,
+  useLobbyRoomsSubscription,
+} from './useMatchmakingSubscriptions';
 
-const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const ACTIVITY_STATUS_VISIBLE_MS = 5000;
-const MATCHMAKING_WS_RECONNECT_DELAY_MS = 5000;
 
 function isTauriRuntime() {
   return '__TAURI_INTERNALS__' in window;
@@ -168,6 +172,32 @@ type HostedRoom = {
   playerNames: BattleMatchRecord['playerNames'];
 };
 
+type PersistedSetting =
+  | { kind: 'baseRomPath'; value: string }
+  | { kind: 'diagnosticEvents'; value: boolean }
+  | { kind: 'detailedLogs'; value: boolean }
+  | { kind: 'performanceLogs'; value: boolean }
+  | { kind: 'newRoomNotifications'; value: boolean };
+
+function withPersistedSetting(
+  defaults: Defaults | undefined,
+  setting: PersistedSetting,
+) {
+  if (!defaults) return defaults;
+  switch (setting.kind) {
+    case 'baseRomPath':
+      return { ...defaults, base_rom_path: setting.value };
+    case 'diagnosticEvents':
+      return { ...defaults, diagnostic_events_enabled: setting.value };
+    case 'detailedLogs':
+      return { ...defaults, detailed_logs_enabled: setting.value };
+    case 'performanceLogs':
+      return { ...defaults, performance_logs_enabled: setting.value };
+    case 'newRoomNotifications':
+      return { ...defaults, new_room_notifications_enabled: setting.value };
+  }
+}
+
 function playerNameOrFallback(value: string, fallback: string) {
   return value.trim() || fallback;
 }
@@ -203,6 +233,19 @@ function defaultPlayerIds(
 }
 
 export function useLauncherController() {
+  const queryClient = useQueryClient();
+  const defaultsQuery = useQuery(defaultsQueryOptions());
+  const startupEnabledQuery = useQuery(startupEnabledQueryOptions());
+  const sessionStatusQuery = useQuery(
+    sessionStatusQueryOptions(defaultsQuery.isSuccess),
+  );
+  const updateQuery = useQuery(updateQueryOptions(isTauriRuntime()));
+  const installUpdateMutation = useMutation({
+    mutationFn: async (update: NonNullable<typeof updateQuery.data>) => {
+      await update.downloadAndInstall();
+      await relaunch();
+    },
+  });
   const [activeView, setActiveView] = useState<View>(() =>
     window.location.hash === '#settings'
       ? 'settings'
@@ -224,9 +267,6 @@ export function useLauncherController() {
     useState<BridgeDiagnostics | null>(null);
   const [gameStateMismatch, setGameStateMismatch] =
     useState<GameStateMismatch | null>(null);
-  const [defaultsLoaded, setDefaultsLoaded] = useState(false);
-  const [startupEnabled, setStartupEnabledState] = useState(false);
-  const [startupLoading, setStartupLoading] = useState(false);
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [roomsError, setRoomsError] = useState<string | null>(null);
@@ -239,13 +279,6 @@ export function useLauncherController() {
   const [onboardingPlayerNameConfigured, setOnboardingPlayerNameConfigured] =
     useState(false);
   const [matchmakingActionBusy, setMatchmakingActionBusy] = useState(false);
-  const [updateBusy, setUpdateBusy] = useState(false);
-  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({
-    phase: 'idle',
-  });
-  const availableUpdateRef = useRef<Awaited<ReturnType<typeof check>>>(null);
-  const updateBusyRef = useRef(false);
-  const updatePhaseRef = useRef<UpdateStatus['phase']>('idle');
   const preparedRomCacheRef = useRef<PreparedRomCache | null>(null);
   const preparedRomPromiseRef = useRef<{
     sourceRom: string;
@@ -266,9 +299,23 @@ export function useLauncherController() {
     null,
   );
   const currentMatchRef = useRef<BattleMatchRecord | null>(null);
-  const [historyRevision, setHistoryRevision] = useState(0);
   const [playerProfileId, setPlayerProfileId] = useState('');
   const [logArchiveUploadToken, setLogArchiveUploadToken] = useState('');
+  const defaultsInitializedRef = useRef(false);
+
+  const defaultsLoaded =
+    defaultsQuery.isSuccess && defaultsInitializedRef.current;
+  const startupEnabled = startupEnabledQuery.data ?? false;
+  const updateBusy = updateQuery.isFetching || installUpdateMutation.isPending;
+  const updateStatus: UpdateStatus = installUpdateMutation.isPending
+    ? { phase: 'downloading', version: updateQuery.data?.version }
+    : installUpdateMutation.isError || updateQuery.isError
+      ? { phase: 'error', version: updateQuery.data?.version }
+      : updateQuery.isFetching
+        ? { phase: 'checking' }
+        : updateQuery.data
+          ? { phase: 'available', version: updateQuery.data.version }
+          : { phase: 'none' };
 
   const currentRomPath =
     form.role === 'host' ? form.hostRomPath : form.clientRomPath;
@@ -303,6 +350,86 @@ export function useLauncherController() {
     updateRequired,
     updateVersion: updateStatus.version,
   };
+
+  const reportMutationError = useCallback((error: unknown) => {
+    setActivityStatus({ text: String(error), kind: 'error' });
+  }, []);
+
+  const persistSettingMutation = useMutation({
+    mutationFn: async (setting: PersistedSetting) => {
+      switch (setting.kind) {
+        case 'baseRomPath':
+          await saveRomPaths({ base_rom_path: setting.value });
+          break;
+        case 'diagnosticEvents':
+          await saveDiagnosticEventsEnabled({ enabled: setting.value });
+          break;
+        case 'detailedLogs':
+          await saveDetailedLogsEnabled({ enabled: setting.value });
+          break;
+        case 'performanceLogs':
+          await savePerformanceLogsEnabled({ enabled: setting.value });
+          break;
+        case 'newRoomNotifications':
+          await saveNewRoomNotificationsEnabled({ enabled: setting.value });
+          break;
+      }
+    },
+    networkMode: 'always',
+    onError: reportMutationError,
+    onSuccess: (_result, setting) => {
+      queryClient.setQueryData<Defaults>(
+        launcherQueryKeys.defaults,
+        (defaults) => withPersistedSetting(defaults, setting),
+      );
+    },
+    scope: { id: 'launcher-settings' },
+  });
+  const upsertHistoryMutation = useMutation({
+    mutationFn: upsertMatchHistoryCommand,
+    networkMode: 'always',
+    onError: (error) => {
+      setActivityStatus({
+        text: `対戦履歴の保存に失敗しました: ${String(error)}`,
+        kind: 'warn',
+      });
+    },
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: matchHistoryKeys.all }),
+    scope: { id: 'match-history-write' },
+  });
+  const upsertHistory = upsertHistoryMutation.mutate;
+  const startMatchMutation = useMutation({
+    mutationFn: startMatchCommand,
+    networkMode: 'always',
+  });
+  const launchMatch = startMatchMutation.mutateAsync;
+  const stopMatchMutation = useMutation({
+    mutationFn: stopMatchCommand,
+    networkMode: 'always',
+  });
+  const startupMutation = useMutation({
+    mutationFn: setStartupEnabledCommand,
+    networkMode: 'always',
+    onError: reportMutationError,
+    onSuccess: (_result, enabled) => {
+      queryClient.setQueryData(launcherQueryKeys.startupEnabled, enabled);
+    },
+  });
+  const savePlayerNameMutation = useMutation({
+    mutationFn: savePlayerNameCommand,
+    networkMode: 'always',
+    onError: reportMutationError,
+    onSuccess: (_result, request) => {
+      queryClient.setQueryData<Defaults>(
+        launcherQueryKeys.defaults,
+        (defaults) =>
+          defaults
+            ? { ...defaults, player_name: request.player_name }
+            : defaults,
+      );
+    },
+  });
 
   const applyLobbySnapshot = useCallback(
     (nextRooms: RoomSummary[], options: { notify: boolean }) => {
@@ -351,86 +478,33 @@ export function useLauncherController() {
   }, [hostedRoom]);
 
   useEffect(() => {
-    playerProfileIdRef.current = playerProfileId;
-  }, [playerProfileId]);
-
-  useEffect(() => {
     newRoomNotificationsEnabledRef.current = form.newRoomNotificationsEnabled;
   }, [form.newRoomNotificationsEnabled]);
 
-  useEffect(() => {
-    if (
-      !defaultsLoaded ||
-      !isWebSocketUrl(form.signalUrl) ||
-      connectionActive
-    ) {
-      setRoomsLoading(false);
-      setRooms([]);
-      setRoomsError(null);
-      lobbyRoomSignalUrlRef.current = null;
-      lobbySeenRoomIdsRef.current = null;
-      return;
-    }
-
-    let disposed = false;
-    let unsubscribe: (() => void) | null = null;
-    let reconnectTimer: number | null = null;
-
-    const connect = () => {
-      if (disposed) {
-        return;
-      }
-      setRoomsLoading(true);
-      unsubscribe = subscribeLobbyRooms(form.signalUrl, {
-        onClose: () => {
-          unsubscribe = null;
-          if (!disposed) {
-            reconnectTimer = window.setTimeout(
-              connect,
-              MATCHMAKING_WS_RECONNECT_DELAY_MS,
-            );
-          }
-        },
-        onError: (error) => {
-          if (!disposed) {
-            setRoomsError(String(error));
-          }
-        },
-        onOpen: () => {
-          if (!disposed) {
-            setRoomsLoading(false);
-          }
-        },
-        onSnapshot: (nextRooms) => {
-          if (!disposed) {
-            setRoomsLoading(false);
-            applyLobbySnapshot(nextRooms, { notify: true });
-          }
-        },
-      });
-    };
-
-    connect();
-    return () => {
-      disposed = true;
-      if (reconnectTimer !== null) {
-        window.clearTimeout(reconnectTimer);
-      }
-      unsubscribe?.();
-    };
-  }, [applyLobbySnapshot, connectionActive, defaultsLoaded, form.signalUrl]);
-
-  useEffect(() => {
-    updateBusyRef.current = updateBusy;
-  }, [updateBusy]);
-
-  useEffect(() => {
-    updatePhaseRef.current = updateStatus.phase;
-  }, [updateStatus.phase]);
-
-  useEffect(() => {
-    currentMatchRef.current = currentMatch;
-  }, [currentMatch]);
+  const disableLobby = useCallback(() => {
+    setRooms([]);
+    setRoomsError(null);
+    lobbyRoomSignalUrlRef.current = null;
+    lobbySeenRoomIdsRef.current = null;
+  }, []);
+  const handleRoomsError = useCallback((error: unknown) => {
+    setRoomsError(String(error));
+  }, []);
+  const handleLobbySnapshot = useCallback(
+    (nextRooms: RoomSummary[]) => {
+      applyLobbySnapshot(nextRooms, { notify: true });
+    },
+    [applyLobbySnapshot],
+  );
+  useLobbyRoomsSubscription({
+    enabled:
+      defaultsLoaded && isWebSocketUrl(form.signalUrl) && !connectionActive,
+    onDisabled: disableLobby,
+    onError: handleRoomsError,
+    onLoadingChange: setRoomsLoading,
+    onSnapshot: handleLobbySnapshot,
+    signalUrl: form.signalUrl,
+  });
 
   const archiveCurrentMatch = useCallback(
     (status: BattleMatchStatus = 'stopped') => {
@@ -444,33 +518,10 @@ export function useLauncherController() {
       };
       currentMatchRef.current = archived;
       setCurrentMatch(archived);
-      void upsertMatchHistoryCommand(archived)
-        .then(() => setHistoryRevision((revision) => revision + 1))
-        .catch((error) => {
-          setActivityStatus({
-            text: `対戦履歴の保存に失敗しました: ${String(error)}`,
-            kind: 'warn',
-          });
-        });
+      upsertHistory(archived);
     },
-    [],
+    [upsertHistory],
   );
-
-  const deleteMatchHistory = useCallback(async (matchId: string) => {
-    try {
-      await deleteMatchHistoryCommand(matchId);
-      setHistoryRevision((revision) => revision + 1);
-      setActivityStatus({
-        text: '対戦履歴を削除しました',
-        kind: 'warn',
-      });
-    } catch (error) {
-      setActivityStatus({
-        text: `対戦履歴の保存に失敗しました: ${String(error)}`,
-        kind: 'error',
-      });
-    }
-  }, []);
 
   const applySessionResults = useCallback(
     (logDir: string, results: MvlStageResult[]) => {
@@ -489,17 +540,10 @@ export function useLauncherController() {
       currentMatchRef.current = next;
       setCurrentMatch(next);
       if (next.status === 'completed') {
-        void upsertMatchHistoryCommand(next)
-          .then(() => setHistoryRevision((revision) => revision + 1))
-          .catch((error) => {
-            setActivityStatus({
-              text: `対戦履歴の保存に失敗しました: ${String(error)}`,
-              kind: 'warn',
-            });
-          });
+        upsertHistory(next);
       }
     },
-    [],
+    [upsertHistory],
   );
 
   useEffect(() => {
@@ -531,11 +575,45 @@ export function useLauncherController() {
       }
       return next;
     });
+    if (!defaultsLoaded) {
+      return;
+    }
+    switch (key) {
+      case 'baseRomPath':
+        persistSettingMutation.mutate({
+          kind: 'baseRomPath',
+          value: String(value),
+        });
+        break;
+      case 'diagnosticEventsEnabled':
+        persistSettingMutation.mutate({
+          kind: 'diagnosticEvents',
+          value: Boolean(value),
+        });
+        break;
+      case 'detailedLogsEnabled':
+        persistSettingMutation.mutate({
+          kind: 'detailedLogs',
+          value: Boolean(value),
+        });
+        break;
+      case 'performanceLogsEnabled':
+        persistSettingMutation.mutate({
+          kind: 'performanceLogs',
+          value: Boolean(value),
+        });
+        break;
+      case 'newRoomNotificationsEnabled':
+        persistSettingMutation.mutate({
+          kind: 'newRoomNotifications',
+          value: Boolean(value),
+        });
+        break;
+    }
   };
 
-  const pollStatus = useCallback(async () => {
-    try {
-      const response = await getSessionStatus();
+  const applySessionStatus = useCallback(
+    (response: SessionStatus) => {
       if (response.log_dir) {
         setLastLogDir(response.log_dir);
         applySessionResults(response.log_dir, response.mvl_results);
@@ -576,151 +654,80 @@ export function useLauncherController() {
         text: `実行中 melonDS:${response.melon ?? '-'} bridge:${response.bridge ?? '-'}`,
         kind: 'ok',
       });
-    } catch {
+    },
+    [applySessionResults, archiveCurrentMatch],
+  );
+
+  useEffect(() => {
+    const defaults = defaultsQuery.data;
+    if (!defaults || defaultsInitializedRef.current) {
+      return;
+    }
+    defaultsInitializedRef.current = true;
+    const initialSeed = String(generateSeed());
+    setForm({
+      role: 'host',
+      hostName: defaults.player_name,
+      signalUrl: defaults.signal_url,
+      roomCode: defaults.room_code,
+      port: defaults.port,
+      hostRomPath: defaults.host_rom_path,
+      clientRomPath: defaults.client_rom_path,
+      baseRomPath: defaults.base_rom_path,
+      courseMode: 'random',
+      courseStages: initialForm.courseStages,
+      wins: initialForm.wins,
+      bigStars: initialForm.bigStars,
+      lives: initialForm.lives,
+      matchSeed: initialSeed,
+      rngSeeds: normalizedRngSeeds({
+        ...initialForm,
+        matchSeed: initialSeed,
+      }),
+      inputDelayFrames: initialForm.inputDelayFrames,
+      inputMaxFrameLead: initialForm.inputMaxFrameLead,
+      rollbackEnabled: initialForm.rollbackEnabled,
+      diagnosticEventsEnabled: defaults.diagnostic_events_enabled ?? false,
+      detailedLogsEnabled: defaults.detailed_logs_enabled ?? false,
+      performanceLogsEnabled: defaults.performance_logs_enabled ?? false,
+      newRoomNotificationsEnabled:
+        defaults.new_room_notifications_enabled ?? true,
+    });
+    setPlayerProfileId(defaults.player_profile_id);
+    playerProfileIdRef.current = defaults.player_profile_id;
+    setLogArchiveUploadToken(defaults.log_archive_upload_token ?? '');
+    setOnboardingRomsPrepared(defaults.roms_prepared_once);
+    setOnboardingInputConfigOpened(defaults.input_config_opened_once);
+    setOnboardingPlayerNameConfigured(defaults.player_name.trim().length > 0);
+  }, [defaultsQuery.data]);
+
+  useEffect(() => {
+    if (sessionStatusQuery.data) {
+      applySessionStatus(sessionStatusQuery.data);
+    }
+  }, [applySessionStatus, sessionStatusQuery.data]);
+
+  useEffect(() => {
+    if (defaultsQuery.error) {
+      setActivityStatus({ text: String(defaultsQuery.error), kind: 'error' });
+    } else if (startupEnabledQuery.error) {
+      setActivityStatus({
+        text: `スタートアップ設定の読み込みに失敗しました: ${String(startupEnabledQuery.error)}`,
+        kind: 'warn',
+      });
+    }
+    if (sessionStatusQuery.error) {
       setConnectionStatus({ text: '状態取得に失敗しました', kind: 'warn' });
     }
-  }, [applySessionResults, archiveCurrentMatch]);
+  }, [
+    defaultsQuery.error,
+    sessionStatusQuery.error,
+    startupEnabledQuery.error,
+  ]);
 
-  useEffect(() => {
-    let disposed = false;
-
-    async function init() {
-      try {
-        const defaults = await getDefaults();
-        if (disposed) return;
-        const initialSeed = String(generateSeed());
-        setForm({
-          role: 'host',
-          hostName: defaults.player_name,
-          signalUrl: defaults.signal_url,
-          roomCode: defaults.room_code,
-          port: defaults.port,
-          hostRomPath: defaults.host_rom_path,
-          clientRomPath: defaults.client_rom_path,
-          baseRomPath: defaults.base_rom_path,
-          courseMode: 'random',
-          courseStages: initialForm.courseStages,
-          wins: initialForm.wins,
-          bigStars: initialForm.bigStars,
-          lives: initialForm.lives,
-          matchSeed: initialSeed,
-          rngSeeds: normalizedRngSeeds({
-            ...initialForm,
-            matchSeed: initialSeed,
-          }),
-          inputDelayFrames: initialForm.inputDelayFrames,
-          inputMaxFrameLead: initialForm.inputMaxFrameLead,
-          rollbackEnabled: initialForm.rollbackEnabled,
-          diagnosticEventsEnabled: defaults.diagnostic_events_enabled ?? false,
-          detailedLogsEnabled: defaults.detailed_logs_enabled ?? false,
-          performanceLogsEnabled: defaults.performance_logs_enabled ?? false,
-          newRoomNotificationsEnabled:
-            defaults.new_room_notifications_enabled ?? true,
-        });
-        setPlayerProfileId(defaults.player_profile_id);
-        setLogArchiveUploadToken(defaults.log_archive_upload_token ?? '');
-        setOnboardingRomsPrepared(defaults.roms_prepared_once);
-        setOnboardingInputConfigOpened(defaults.input_config_opened_once);
-        setOnboardingPlayerNameConfigured(
-          defaults.player_name.trim().length > 0,
-        );
-        try {
-          setStartupEnabledState(await getStartupEnabled());
-        } catch (error) {
-          if (!disposed) {
-            setActivityStatus({
-              text: `スタートアップ設定の読み込みに失敗しました: ${String(error)}`,
-              kind: 'warn',
-            });
-          }
-        }
-        setDefaultsLoaded(true);
-        await pollStatus();
-      } catch (error) {
-        if (!disposed) {
-          setActivityStatus({ text: String(error), kind: 'error' });
-        }
-      }
-    }
-
-    void init();
-    const timer = window.setInterval(pollStatus, 2000);
-    return () => {
-      disposed = true;
-      window.clearInterval(timer);
-    };
-  }, [pollStatus]);
-
-  useEffect(() => {
-    if (!defaultsLoaded) {
-      return;
-    }
-    const request: SaveRomPathsRequest = {
-      base_rom_path: form.baseRomPath,
-    };
-    const timer = window.setTimeout(() => {
-      void saveRomPaths(request).catch((error) => {
-        setActivityStatus({ text: String(error), kind: 'warn' });
-      });
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [defaultsLoaded, form.baseRomPath]);
-
-  useEffect(() => {
-    if (!defaultsLoaded) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      void saveDiagnosticEventsEnabled({
-        enabled: form.diagnosticEventsEnabled,
-      }).catch((error) => {
-        setActivityStatus({ text: String(error), kind: 'warn' });
-      });
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [defaultsLoaded, form.diagnosticEventsEnabled]);
-
-  useEffect(() => {
-    if (!defaultsLoaded) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      void saveDetailedLogsEnabled({
-        enabled: form.detailedLogsEnabled,
-      }).catch((error) => {
-        setActivityStatus({ text: String(error), kind: 'warn' });
-      });
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [defaultsLoaded, form.detailedLogsEnabled]);
-
-  useEffect(() => {
-    if (!defaultsLoaded) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      void savePerformanceLogsEnabled({
-        enabled: form.performanceLogsEnabled,
-      }).catch((error) => {
-        setActivityStatus({ text: String(error), kind: 'warn' });
-      });
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [defaultsLoaded, form.performanceLogsEnabled]);
-
-  useEffect(() => {
-    if (!defaultsLoaded) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      void saveNewRoomNotificationsEnabled({
-        enabled: form.newRoomNotificationsEnabled,
-      }).catch((error) => {
-        setActivityStatus({ text: String(error), kind: 'warn' });
-      });
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [defaultsLoaded, form.newRoomNotificationsEnabled]);
+  const pollStatus = useCallback(async () => {
+    await sessionStatusQuery.refetch();
+  }, [sessionStatusQuery]);
 
   const selectRomPath = async (key: SelectRomKey) => {
     try {
@@ -767,6 +774,9 @@ export function useLauncherController() {
       }));
       setRomPreparation('準備済み');
       setOnboardingRomsPrepared(true);
+      void queryClient.invalidateQueries({
+        queryKey: launcherQueryKeys.defaults,
+      });
       setActivityStatus({ text: '共通 ROM の準備が完了しました', kind: 'ok' });
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });
@@ -787,52 +797,61 @@ export function useLauncherController() {
       }
       const nextForm = { ...form, baseRomPath: selected };
       setForm(nextForm);
-      await saveRomPaths({ base_rom_path: selected });
+      await persistSettingMutation.mutateAsync({
+        kind: 'baseRomPath',
+        value: selected,
+      });
       await prepareRomsFor(nextForm);
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });
     }
   };
 
-  const ensurePreparedRoms = useCallback(async (nextForm: FormState) => {
-    const inFlight = preparedRomPromiseRef.current;
-    if (inFlight?.sourceRom === nextForm.baseRomPath) {
-      return inFlight.promise;
-    }
-    const request: GenerateRomRequest = {
-      source_rom: nextForm.baseRomPath,
-    };
-    const promise = (async () => {
-      setRomEnsureBusy(true);
-      const response = await ensureRoms(request);
-      preparedRomCacheRef.current = {
-        sourceRom: nextForm.baseRomPath,
-        hostRom: response.host_rom,
-        clientRom: response.client_rom,
-        identity: response.rom_identity,
-      };
-      setForm((current) => ({
-        ...current,
-        hostRomPath: response.host_rom,
-        clientRomPath: response.client_rom,
-      }));
-      setRomPreparation(response.generated ? '初回準備済み' : '再利用');
-      setOnboardingRomsPrepared(true);
-      return response;
-    })();
-    preparedRomPromiseRef.current = {
-      sourceRom: nextForm.baseRomPath,
-      promise,
-    };
-    try {
-      return await promise;
-    } finally {
-      if (preparedRomPromiseRef.current?.promise === promise) {
-        preparedRomPromiseRef.current = null;
+  const ensurePreparedRoms = useCallback(
+    async (nextForm: FormState) => {
+      const inFlight = preparedRomPromiseRef.current;
+      if (inFlight?.sourceRom === nextForm.baseRomPath) {
+        return inFlight.promise;
       }
-      setRomEnsureBusy(false);
-    }
-  }, []);
+      const request: GenerateRomRequest = {
+        source_rom: nextForm.baseRomPath,
+      };
+      const promise = (async () => {
+        setRomEnsureBusy(true);
+        const response = await ensureRoms(request);
+        preparedRomCacheRef.current = {
+          sourceRom: nextForm.baseRomPath,
+          hostRom: response.host_rom,
+          clientRom: response.client_rom,
+          identity: response.rom_identity,
+        };
+        setForm((current) => ({
+          ...current,
+          hostRomPath: response.host_rom,
+          clientRomPath: response.client_rom,
+        }));
+        setRomPreparation(response.generated ? '初回準備済み' : '再利用');
+        setOnboardingRomsPrepared(true);
+        void queryClient.invalidateQueries({
+          queryKey: launcherQueryKeys.defaults,
+        });
+        return response;
+      })();
+      preparedRomPromiseRef.current = {
+        sourceRom: nextForm.baseRomPath,
+        promise,
+      };
+      try {
+        return await promise;
+      } finally {
+        if (preparedRomPromiseRef.current?.promise === promise) {
+          preparedRomPromiseRef.current = null;
+        }
+        setRomEnsureBusy(false);
+      }
+    },
+    [queryClient],
+  );
 
   const cachedPreparedRomsFor = useCallback(
     (sourceForm: FormState): GenerateRomResponse | null => {
@@ -933,7 +952,7 @@ export function useLauncherController() {
           nextForm.role === 'host' ? roms.host_rom : roms.client_rom;
         request.rom_identity = roms.rom_identity;
         setActivityStatus({ text: `起動中 stage=${stage}`, kind: 'idle' });
-        const response = await startMatchCommand(request);
+        const response = await launchMatch(request);
         archiveCurrentMatch('stopped');
         const record: BattleMatchRecord = {
           id: response.log_dir,
@@ -966,6 +985,7 @@ export function useLauncherController() {
       cachedPreparedRomsFor,
       ensurePreparedRoms,
       form,
+      launchMatch,
       playerProfileId,
     ],
   );
@@ -1270,59 +1290,23 @@ export function useLauncherController() {
     }
   }, []);
 
-  useEffect(() => {
-    if (!hostedRoom || connectionActive) {
-      return;
-    }
-
-    let disposed = false;
-    let unsubscribe: (() => void) | null = null;
-    let reconnectTimer: number | null = null;
-
-    const connect = () => {
-      if (disposed) {
-        return;
-      }
-      unsubscribe = subscribeHostRoomEvents(
-        hostedRoom.form.signalUrl,
-        hostedRoom.roomId,
-        {
-          onClose: () => {
-            unsubscribe = null;
-            if (!disposed && !hostedRoomLaunchBusyRef.current) {
-              reconnectTimer = window.setTimeout(
-                connect,
-                MATCHMAKING_WS_RECONNECT_DELAY_MS,
-              );
-            }
-          },
-          onError: (error) => {
-            if (!disposed) {
-              setRoomsError(String(error));
-            }
-          },
-          onJoined: (room) => {
-            if (!disposed) {
-              void launchHostedRoomFromEvent(room);
-            }
-          },
-        },
-      );
-    };
-
-    connect();
-    return () => {
-      disposed = true;
-      if (reconnectTimer !== null) {
-        window.clearTimeout(reconnectTimer);
-      }
-      unsubscribe?.();
-    };
-  }, [connectionActive, hostedRoom, launchHostedRoomFromEvent]);
+  const handleHostedRoomJoined = useCallback(
+    (room: RoomSummary) => {
+      void launchHostedRoomFromEvent(room);
+    },
+    [launchHostedRoomFromEvent],
+  );
+  useHostedRoomSubscription({
+    enabled: Boolean(hostedRoom) && !connectionActive,
+    onError: handleRoomsError,
+    onJoined: handleHostedRoomJoined,
+    roomId: hostedRoom?.roomId ?? '',
+    signalUrl: hostedRoom?.form.signalUrl ?? '',
+  });
 
   const stopMatch = async () => {
     try {
-      await stopMatchCommand();
+      await stopMatchMutation.mutateAsync();
       setGameStateMismatch(null);
       archiveCurrentMatch('stopped');
       setActivityStatus({ text: '停止しました', kind: 'warn' });
@@ -1471,35 +1455,29 @@ export function useLauncherController() {
     }
 
     try {
-      await savePlayerNameCommand({ player_name: playerName });
+      await savePlayerNameMutation.mutateAsync({ player_name: playerName });
       setForm((current) => ({ ...current, hostName: playerName }));
       setOnboardingPlayerNameConfigured(true);
       setActivityStatus({
         text: 'プレイヤーネームを保存しました',
         kind: 'ok',
       });
-    } catch (error) {
-      setActivityStatus({ text: String(error), kind: 'error' });
+    } catch {
+      return;
     }
   };
 
   const setStartupEnabled = async (enabled: boolean) => {
-    const previous = startupEnabled;
-    setStartupLoading(true);
-    setStartupEnabledState(enabled);
     try {
-      await setStartupEnabledCommand(enabled);
+      await startupMutation.mutateAsync(enabled);
       setActivityStatus({
         text: enabled
           ? 'Windowsログイン時の起動を登録しました'
           : 'Windowsログイン時の起動を解除しました',
         kind: 'ok',
       });
-    } catch (error) {
-      setStartupEnabledState(previous);
-      setActivityStatus({ text: String(error), kind: 'error' });
-    } finally {
-      setStartupLoading(false);
+    } catch {
+      return;
     }
   };
 
@@ -1515,90 +1493,16 @@ export function useLauncherController() {
     }
   };
 
-  const checkForUpdate = useCallback(async () => {
+  const checkForUpdate = async () => {
     if (!isTauriRuntime()) {
-      setUpdateStatus({ phase: 'none' });
       return;
     }
-
-    if (updateStatus.phase === 'available' && availableUpdateRef.current) {
-      try {
-        setUpdateBusy(true);
-        setUpdateStatus({
-          phase: 'downloading',
-          version: availableUpdateRef.current.version,
-        });
-        await availableUpdateRef.current.downloadAndInstall((event) => {
-          if (event.event === 'Finished') {
-            setUpdateStatus({
-              phase: 'installed',
-              version: availableUpdateRef.current?.version,
-            });
-          }
-        });
-        await relaunch();
-      } catch {
-        setUpdateStatus({
-          phase: 'error',
-          version: availableUpdateRef.current?.version,
-        });
-      } finally {
-        setUpdateBusy(false);
-      }
-      return;
+    if (updateQuery.data) {
+      await installUpdateMutation.mutateAsync(updateQuery.data);
+    } else {
+      await updateQuery.refetch();
     }
-
-    try {
-      setUpdateBusy(true);
-      setUpdateStatus({ phase: 'checking' });
-      const update = await check();
-      if (!update) {
-        availableUpdateRef.current = null;
-        setUpdateStatus({ phase: 'none' });
-        return;
-      }
-      availableUpdateRef.current = update;
-      setUpdateStatus({ phase: 'available', version: update.version });
-    } catch {
-      setUpdateStatus({ phase: 'error' });
-    } finally {
-      setUpdateBusy(false);
-    }
-  }, [updateStatus.phase]);
-
-  const checkForUpdateInBackground = useCallback(async () => {
-    if (
-      !isTauriRuntime() ||
-      updateBusyRef.current ||
-      updatePhaseRef.current === 'available' ||
-      updatePhaseRef.current === 'checking' ||
-      updatePhaseRef.current === 'downloading'
-    ) {
-      return;
-    }
-    try {
-      setUpdateStatus({ phase: 'checking' });
-      const update = await check();
-      if (!update) {
-        availableUpdateRef.current = null;
-        setUpdateStatus({ phase: 'none' });
-        return;
-      }
-      availableUpdateRef.current = update;
-      setUpdateStatus({ phase: 'available', version: update.version });
-    } catch {
-      setUpdateStatus({ phase: 'error' });
-    }
-  }, []);
-
-  useEffect(() => {
-    void checkForUpdateInBackground();
-    const timer = window.setInterval(
-      () => void checkForUpdateInBackground(),
-      UPDATE_CHECK_INTERVAL_MS,
-    );
-    return () => window.clearInterval(timer);
-  }, [checkForUpdateInBackground]);
+  };
 
   const actions: LauncherActions = {
     cancelHostedRoom,
@@ -1607,7 +1511,6 @@ export function useLauncherController() {
     copyRoomCode,
     createLogArchive,
     createRoom,
-    deleteMatchHistory,
     joinRoom,
     openLogDir,
     openMelonds,
@@ -1659,7 +1562,6 @@ export function useLauncherController() {
       error: roomsError,
       hostedRoomId: hostedRoom?.roomId ?? null,
     },
-    historyRevision,
     onboarding: {
       loaded: defaultsLoaded,
       romsPrepared: onboardingRomsPrepared,
@@ -1673,7 +1575,7 @@ export function useLauncherController() {
         : null,
     startup: {
       enabled: startupEnabled,
-      loading: startupLoading,
+      loading: startupEnabledQuery.isPending || startupMutation.isPending,
     },
     summary,
     updateBusy,

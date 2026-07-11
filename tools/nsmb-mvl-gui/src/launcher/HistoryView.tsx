@@ -4,27 +4,29 @@ import {
   Funnel,
   SpinnerGap,
 } from '@phosphor-icons/react';
-import { useEffect, useMemo, useState } from 'react';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
 import { css } from 'styled-system/css';
 import { SelectField } from '../components/Fields';
 import { Button, Tabs } from '../components/ui';
+import { hasPlayedResult } from '../matchHistory';
 import {
-  hasPlayedResult,
-  previewHistoryDashboard,
-  previewHistoryOpponents,
-  queryPreviewMatchHistory,
-} from '../matchHistory';
-import {
-  loadMatchHistoryDashboard,
-  loadMatchHistoryOpponents,
-  queryMatchHistory,
-} from '../tauriClient';
+  matchHistoryDashboardOptions,
+  matchHistoryKeys,
+  matchHistoryListOptions,
+  matchHistoryOpponentsOptions,
+} from '../queries/historyQueries';
+import { deleteMatchHistory } from '../tauriClient';
 import type {
   MatchHistoryDashboard,
   MatchHistoryFilter,
   MatchHistoryOpponent,
   MatchHistoryOutcome,
-  MatchHistoryPage,
 } from '../types';
 import { MatchRecordCollapsible } from './MatchRecordCollapsible';
 import { EmptyMatchResultCard } from './MatchResultCard';
@@ -42,14 +44,12 @@ type PeriodValue =
 
 export function HistoryView({
   matches,
-  revision = 0,
   onCreateLogArchive,
   onDeleteMatch,
   onOpenLogDir,
   onUploadLogArchive,
 }: {
   matches?: BattleMatchRecord[];
-  revision?: number;
   onCreateLogArchive?: (logDir: string) => Promise<void> | void;
   onDeleteMatch?: (matchId: string) => Promise<void> | void;
   onOpenLogDir?: (logDir: string) => Promise<void> | void;
@@ -62,102 +62,63 @@ export function HistoryView({
   const [outcome, setOutcome] = useState<'all' | MatchHistoryOutcome>(
     'completed',
   );
-  const [opponents, setOpponents] = useState<MatchHistoryOpponent[]>([]);
-  const [opponentsLoaded, setOpponentsLoaded] = useState(false);
-  const [dashboard, setDashboard] = useState<MatchHistoryDashboard | null>(
-    null,
-  );
-  const [page, setPage] = useState<MatchHistoryPage | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  const opponentsQuery = useQuery(matchHistoryOpponentsOptions(matches));
+  const opponents = opponentsQuery.data ?? [];
+  const selectedOpponent =
+    opponents.find((opponent) => opponent.playerId === opponentId) ?? null;
+  const effectiveOpponentId =
+    opponentId === 'all' || opponentsQuery.isPending || selectedOpponent
+      ? opponentId
+      : 'all';
 
   const baseFilter = useMemo(
-    () => createHistoryFilter(period, opponentId, stage),
-    [opponentId, period, stage],
+    () => createHistoryFilter(period, effectiveOpponentId, stage),
+    [effectiveOpponentId, period, stage],
   );
   const listFilter = useMemo<MatchHistoryFilter>(
     () => ({ ...baseFilter, outcome: outcome === 'all' ? null : outcome }),
     [baseFilter, outcome],
   );
 
-  useEffect(() => {
-    if (revision < 0) return;
-    let disposed = false;
-    const load = async () => {
-      try {
-        const result = matches
-          ? previewHistoryOpponents(matches)
-          : await loadMatchHistoryOpponents();
-        if (!disposed) {
-          setOpponents(result);
-          setOpponentsLoaded(true);
-        }
-      } catch (loadError) {
-        if (!disposed) setError(String(loadError));
+  const dashboardQuery = useQuery(
+    matchHistoryDashboardOptions(baseFilter, matches),
+  );
+  const historyQuery = useInfiniteQuery(
+    matchHistoryListOptions(listFilter, pageSize, matches),
+  );
+  const deleteMutation = useMutation({
+    mutationFn: async (matchId: string) => {
+      if (onDeleteMatch) {
+        await onDeleteMatch(matchId);
+      } else {
+        await deleteMatchHistory(matchId);
       }
-    };
-    void load();
-    return () => {
-      disposed = true;
-    };
-  }, [matches, revision]);
+    },
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: matchHistoryKeys.all }),
+  });
 
-  useEffect(() => {
-    if (
-      !opponentsLoaded ||
-      opponentId === 'all' ||
-      opponents.some((opponent) => opponent.playerId === opponentId)
-    ) {
-      return;
-    }
-    setOpponentId('all');
-    setOpponentName(null);
-  }, [opponentId, opponents, opponentsLoaded]);
-
-  useEffect(() => {
-    if (revision < 0) return;
-    let disposed = false;
-    setLoading(true);
-    setError(null);
-    const load = async () => {
-      try {
-        const [nextDashboard, nextPage] = matches
-          ? [
-              previewHistoryDashboard(matches, baseFilter),
-              queryPreviewMatchHistory(matches, {
-                filter: listFilter,
-                cursor: null,
-                limit: pageSize,
-              }),
-            ]
-          : await Promise.all([
-              loadMatchHistoryDashboard(baseFilter),
-              queryMatchHistory({
-                filter: listFilter,
-                cursor: null,
-                limit: pageSize,
-              }),
-            ]);
-        if (!disposed) {
-          setDashboard(nextDashboard);
-          setPage(nextPage);
-        }
-      } catch (loadError) {
-        if (!disposed) setError(String(loadError));
-      } finally {
-        if (!disposed) setLoading(false);
+  const dashboard = dashboardQuery.data ?? null;
+  const page = historyQuery.data
+    ? {
+        matches: historyQuery.data.pages.flatMap((entry) => entry.matches),
+        nextCursor: historyQuery.data.pages.at(-1)?.nextCursor ?? null,
+        total: historyQuery.data.pages[0]?.total ?? 0,
       }
-    };
-    void load();
-    return () => {
-      disposed = true;
-    };
-  }, [baseFilter, listFilter, matches, revision]);
-
-  const selectedOpponent =
-    opponents.find((opponent) => opponent.playerId === opponentId) ?? null;
-  const detailName = opponentName ?? selectedOpponent?.latestName ?? null;
+    : null;
+  const loading = historyQuery.isPending || dashboardQuery.isPending;
+  const loadingMore = historyQuery.isFetchingNextPage;
+  const error =
+    deleteMutation.error ??
+    opponentsQuery.error ??
+    dashboardQuery.error ??
+    historyQuery.error;
+  const detailName =
+    effectiveOpponentId === 'all'
+      ? null
+      : (opponentName ?? selectedOpponent?.latestName ?? null);
   const visibleMatches = (page?.matches ?? []).filter(hasPlayedResult);
   const groupedMatches = groupMatchesByDate(visibleMatches);
 
@@ -168,31 +129,7 @@ export function HistoryView({
     setOutcome('completed');
   };
 
-  const loadMore = async () => {
-    if (!page?.nextCursor || loadingMore) return;
-    setLoadingMore(true);
-    try {
-      const nextPage = matches
-        ? queryPreviewMatchHistory(matches, {
-            filter: listFilter,
-            cursor: page.nextCursor,
-            limit: pageSize,
-          })
-        : await queryMatchHistory({
-            filter: listFilter,
-            cursor: page.nextCursor,
-            limit: pageSize,
-          });
-      setPage({
-        ...nextPage,
-        matches: [...page.matches, ...nextPage.matches],
-      });
-    } catch (loadError) {
-      setError(String(loadError));
-    } finally {
-      setLoadingMore(false);
-    }
-  };
+  const loadMore = () => historyQuery.fetchNextPage();
 
   return (
     <Tabs.Content value="history">
@@ -235,7 +172,7 @@ export function HistoryView({
         ) : null}
 
         <HistoryFilters
-          opponentId={opponentId}
+          opponentId={effectiveOpponentId}
           opponents={opponents}
           outcome={outcome}
           period={period}
@@ -273,7 +210,7 @@ export function HistoryView({
               textStyle: 'sm',
             })}
           >
-            戦績を読み込めませんでした: {error}
+            戦績を読み込めませんでした: {String(error)}
           </div>
         ) : null}
 
@@ -329,32 +266,16 @@ export function HistoryView({
                             ? () => onCreateLogArchive(match.logDir)
                             : undefined
                         }
-                        onDelete={
-                          onDeleteMatch
-                            ? async () => {
-                                await onDeleteMatch(match.id);
-                                setPage((current) =>
-                                  current
-                                    ? {
-                                        ...current,
-                                        matches: current.matches.filter(
-                                          (candidate) =>
-                                            candidate.id !== match.id,
-                                        ),
-                                        total: Math.max(0, current.total - 1),
-                                      }
-                                    : current,
-                                );
-                              }
-                            : undefined
-                        }
+                        onDelete={() => deleteMutation.mutateAsync(match.id)}
                         onOpenLogDir={
                           onOpenLogDir && match.logDir
                             ? () => onOpenLogDir(match.logDir)
                             : undefined
                         }
                         onSelectOpponent={
-                          opponentId === 'all' ? selectOpponent : undefined
+                          effectiveOpponentId === 'all'
+                            ? selectOpponent
+                            : undefined
                         }
                         onUploadLogArchive={
                           onUploadLogArchive && match.logDir
