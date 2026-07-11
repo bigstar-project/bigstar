@@ -1,6 +1,7 @@
 import { Portal } from '@ark-ui/react';
 import {
   CaretDown,
+  ChartLineUp,
   CircleNotch,
   CloudArrowUp,
   FileZip,
@@ -37,6 +38,7 @@ export function MatchRecordCollapsible({
   onDelete,
   onCreateLogArchive,
   onOpenLogDir,
+  onSelectOpponent,
   onUploadLogArchive,
   showStageDots = true,
   showStartedAt = true,
@@ -46,6 +48,7 @@ export function MatchRecordCollapsible({
   onCreateLogArchive?: () => Promise<void> | void;
   onDelete?: () => Promise<void> | void;
   onOpenLogDir?: () => Promise<void> | void;
+  onSelectOpponent?: (playerId: string, playerName: string) => void;
   onUploadLogArchive?: () => Promise<void> | void;
   showStageDots?: boolean;
   showStartedAt?: boolean;
@@ -171,6 +174,25 @@ export function MatchRecordCollapsible({
           py: '3',
         })}
       >
+        {onSelectOpponent ? (
+          <div className={css({ display: 'flex', justifyContent: 'flex-end' })}>
+            <Button
+              onClick={() => {
+                const opponentSide = selfSide === 'mario' ? 'luigi' : 'mario';
+                onSelectOpponent(
+                  match.playerIds[opponentSide],
+                  match.playerNames[opponentSide],
+                );
+              }}
+              size="xs"
+              variant="plain"
+            >
+              <ChartLineUp size={16} weight="bold" />
+              {match.playerNames[selfSide === 'mario' ? 'luigi' : 'mario']}
+              との戦績を見る
+            </Button>
+          </div>
+        ) : null}
         <div
           className={css({
             borderColor: 'gray.surface.border',
@@ -787,10 +809,7 @@ function StageResultTableRow({
             style={{ height: 16, width: 16 }}
           />
           <span
-            className={css({
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            })}
+            className={css({ overflow: 'hidden', textOverflow: 'ellipsis' })}
           >
             {winnerName}
           </span>

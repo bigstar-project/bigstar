@@ -108,7 +108,19 @@ describe('タウリクライアント', () => {
     setPreviewWindowWithStorage('?preview=ready', null);
     const client = await importClient();
 
-    const history = await client.loadMatchHistory();
+    const history = (
+      await client.queryMatchHistory({
+        filter: {
+          recentMatches: null,
+          sinceStartedAt: null,
+          opponentPlayerId: null,
+          stage: null,
+          outcome: null,
+        },
+        cursor: null,
+        limit: 50,
+      })
+    ).matches;
 
     expect(history).toEqual(
       expect.arrayContaining([
@@ -145,6 +157,7 @@ describe('タウリクライアント', () => {
         {
           id: 'stored-match',
           logDir: '',
+          playerIds: { mario: 'stored-mario', luigi: 'stored-luigi' },
           playerNames: { mario: 'Stored Mario', luigi: 'Stored Luigi' },
           role: 'host',
           roomCode: 'stored-room',
@@ -160,20 +173,62 @@ describe('タウリクライアント', () => {
             rollback_enabled: false,
             wins: 1,
           },
-          stages: [],
+          stages: [
+            {
+              game_index: 0,
+              stage: 0,
+              frame: 6000,
+              winner: 0,
+              mario: {
+                stars: 10,
+                displayed_stars: 10,
+                collected_stars: 10,
+                lives: 3,
+                deaths: 0,
+                dead: false,
+              },
+              luigi: {
+                stars: 7,
+                displayed_stars: 7,
+                collected_stars: 7,
+                lives: 2,
+                deaths: 1,
+                dead: false,
+              },
+              mario_match_wins: 1,
+              luigi_match_wins: 0,
+              target_wins: 1,
+              resolved: true,
+              line: 'stored game=0 stage=0 winner=0',
+            },
+          ],
           startedAt: '2026-06-21T00:00:00.000Z',
-          status: 'running',
+          status: 'completed',
         },
       ]),
     );
     const client = await importClient();
 
-    await expect(client.loadMatchHistory()).resolves.toMatchObject([
-      {
-        id: 'stored-match',
-        playerNames: { mario: 'Stored Mario', luigi: 'Stored Luigi' },
-      },
-    ]);
+    await expect(
+      client.queryMatchHistory({
+        filter: {
+          recentMatches: null,
+          sinceStartedAt: null,
+          opponentPlayerId: null,
+          stage: null,
+          outcome: null,
+        },
+        cursor: null,
+        limit: 50,
+      }),
+    ).resolves.toMatchObject({
+      matches: [
+        {
+          id: 'stored-match',
+          playerNames: { mario: 'Stored Mario', luigi: 'Stored Luigi' },
+        },
+      ],
+    });
 
     expect(invokeMock).not.toHaveBeenCalled();
   });

@@ -29,19 +29,18 @@ import { notifyNewRoomAvailable } from '../roomNotifications';
 import {
   cleanupDetailedLogs as cleanupDetailedLogsCommand,
   createLogArchive as createLogArchiveCommand,
+  deleteMatchHistory as deleteMatchHistoryCommand,
   ensureRoms,
   generateRoms,
   getDefaults,
   getSessionStatus,
   getStartupEnabled,
-  loadMatchHistory,
   openLogDir as openLogDirCommand,
   openMelonds as openMelondsCommand,
   openMelondsInputConfig as openMelondsInputConfigCommand,
   runPreflightCheck,
   saveDetailedLogsEnabled,
   saveDiagnosticEventsEnabled,
-  saveMatchHistory,
   saveNewRoomNotificationsEnabled,
   savePerformanceLogsEnabled,
   savePlayerName as savePlayerNameCommand,
@@ -51,6 +50,7 @@ import {
   startMatch as startMatchCommand,
   stopMatch as stopMatchCommand,
   uploadLogArchive as uploadLogArchiveCommand,
+  upsertMatchHistory as upsertMatchHistoryCommand,
 } from '../tauriClient';
 import type {
   BridgeDiagnostics,
@@ -79,7 +79,6 @@ import {
 const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const ACTIVITY_STATUS_VISIBLE_MS = 5000;
 const MATCHMAKING_WS_RECONNECT_DELAY_MS = 5000;
-const MATCH_HISTORY_SAVE_DELAY_MS = 300;
 
 function isTauriRuntime() {
   return '__TAURI_INTERNALS__' in window;
@@ -134,6 +133,10 @@ function matchIsComplete(results: MvlStageResult[]) {
     latest.mario_match_wins >= latest.target_wins ||
     latest.luigi_match_wins >= latest.target_wins
   );
+}
+
+function stageResultsEqual(left: MvlStageResult[], right: MvlStageResult[]) {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function formatBytes(bytes: number) {
@@ -263,9 +266,7 @@ export function useLauncherController() {
     null,
   );
   const currentMatchRef = useRef<BattleMatchRecord | null>(null);
-  const [matchHistory, setMatchHistory] = useState<BattleMatchRecord[]>([]);
-  const matchHistoryRef = useRef<BattleMatchRecord[]>([]);
-  const [matchHistoryLoaded, setMatchHistoryLoaded] = useState(false);
+  const [historyRevision, setHistoryRevision] = useState(0);
   const [playerProfileId, setPlayerProfileId] = useState('');
   const [logArchiveUploadToken, setLogArchiveUploadToken] = useState('');
 
@@ -431,25 +432,6 @@ export function useLauncherController() {
     currentMatchRef.current = currentMatch;
   }, [currentMatch]);
 
-  useEffect(() => {
-    matchHistoryRef.current = matchHistory;
-  }, [matchHistory]);
-
-  useEffect(() => {
-    if (!matchHistoryLoaded) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      void saveMatchHistory(matchHistory).catch((error) => {
-        setActivityStatus({
-          text: `対戦履歴の保存に失敗しました: ${String(error)}`,
-          kind: 'warn',
-        });
-      });
-    }, MATCH_HISTORY_SAVE_DELAY_MS);
-    return () => window.clearTimeout(timer);
-  }, [matchHistoryLoaded, matchHistory]);
-
   const archiveCurrentMatch = useCallback(
     (status: BattleMatchStatus = 'stopped') => {
       const current = currentMatchRef.current;
@@ -462,29 +444,22 @@ export function useLauncherController() {
       };
       currentMatchRef.current = archived;
       setCurrentMatch(archived);
-      matchHistoryRef.current = [
-        archived,
-        ...matchHistoryRef.current.filter((match) => match.id !== archived.id),
-      ];
-      setMatchHistory((history) => [
-        archived,
-        ...history.filter((match) => match.id !== archived.id),
-      ]);
+      void upsertMatchHistoryCommand(archived)
+        .then(() => setHistoryRevision((revision) => revision + 1))
+        .catch((error) => {
+          setActivityStatus({
+            text: `対戦履歴の保存に失敗しました: ${String(error)}`,
+            kind: 'warn',
+          });
+        });
     },
     [],
   );
 
   const deleteMatchHistory = useCallback(async (matchId: string) => {
-    const nextHistory = matchHistoryRef.current.filter(
-      (match) => match.id !== matchId,
-    );
-    if (nextHistory.length === matchHistoryRef.current.length) {
-      return;
-    }
-    matchHistoryRef.current = nextHistory;
-    setMatchHistory(nextHistory);
     try {
-      await saveMatchHistory(nextHistory);
+      await deleteMatchHistoryCommand(matchId);
+      setHistoryRevision((revision) => revision + 1);
       setActivityStatus({
         text: '対戦履歴を削除しました',
         kind: 'warn',
@@ -503,6 +478,9 @@ export function useLauncherController() {
       if (!current || current.logDir !== logDir) {
         return;
       }
+      if (stageResultsEqual(current.stages, results)) {
+        return;
+      }
       const next: BattleMatchRecord = {
         ...current,
         stages: results,
@@ -510,6 +488,16 @@ export function useLauncherController() {
       };
       currentMatchRef.current = next;
       setCurrentMatch(next);
+      if (next.status === 'completed') {
+        void upsertMatchHistoryCommand(next)
+          .then(() => setHistoryRevision((revision) => revision + 1))
+          .catch((error) => {
+            setActivityStatus({
+              text: `対戦履歴の保存に失敗しました: ${String(error)}`,
+              kind: 'warn',
+            });
+          });
+      }
     },
     [],
   );
@@ -644,24 +632,6 @@ export function useLauncherController() {
               text: `スタートアップ設定の読み込みに失敗しました: ${String(error)}`,
               kind: 'warn',
             });
-          }
-        }
-        try {
-          const persistedHistory = await loadMatchHistory();
-          if (!disposed) {
-            matchHistoryRef.current = persistedHistory;
-            setMatchHistory(persistedHistory);
-          }
-        } catch (error) {
-          if (!disposed) {
-            setActivityStatus({
-              text: `対戦履歴の読み込みに失敗しました: ${String(error)}`,
-              kind: 'warn',
-            });
-          }
-        } finally {
-          if (!disposed) {
-            setMatchHistoryLoaded(true);
           }
         }
         setDefaultsLoaded(true);
@@ -1689,7 +1659,7 @@ export function useLauncherController() {
       error: roomsError,
       hostedRoomId: hostedRoom?.roomId ?? null,
     },
-    matchHistory,
+    historyRevision,
     onboarding: {
       loaded: defaultsLoaded,
       romsPrepared: onboardingRomsPrepared,

@@ -71,7 +71,7 @@ const mocks = vi.hoisted(() => {
         melon_pid: 1001,
       }),
     ),
-    saveMatchHistoryMock: vi.fn(async () => null),
+    upsertMatchHistoryMock: vi.fn(async () => null),
     hostProfileId,
   };
 });
@@ -156,7 +156,7 @@ vi.mock('../tauriClient', () => ({
     webrtc: null,
   })),
   getStartupEnabled: vi.fn(async () => false),
-  loadMatchHistory: vi.fn(async () => []),
+  deleteMatchHistory: vi.fn(async () => null),
   cleanupDetailedLogs: vi.fn(async () => ({
     deleted_dirs: 1,
     deleted_files: 3,
@@ -177,7 +177,6 @@ vi.mock('../tauriClient', () => ({
   saveDiagnosticEventsEnabled: vi.fn(async () => null),
   saveDetailedLogsEnabled: vi.fn(async () => null),
   savePerformanceLogsEnabled: vi.fn(async () => null),
-  saveMatchHistory: mocks.saveMatchHistoryMock,
   saveNewRoomNotificationsEnabled: vi.fn(async () => null),
   savePlayerName: vi.fn(async () => null),
   saveRomPaths: vi.fn(async () => null),
@@ -185,6 +184,7 @@ vi.mock('../tauriClient', () => ({
   setStartupEnabled: vi.fn(async () => null),
   startMatch: mocks.startMatchMock,
   stopMatch: vi.fn(async () => {}),
+  upsertMatchHistory: mocks.upsertMatchHistoryMock,
   uploadLogArchive: vi.fn(async () => ({
     archive_path: 'C:\\logs\\run1\\nsmb-mvl-logs.zip',
     key: 'log-archives/test/nsmb-mvl-logs.zip',

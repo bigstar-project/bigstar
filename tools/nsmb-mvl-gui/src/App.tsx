@@ -43,7 +43,7 @@ export function App() {
             updateField={launcher.updateField}
           />
           <HistoryView
-            matches={launcher.matchHistory}
+            revision={launcher.historyRevision}
             onCreateLogArchive={launcher.actions.createLogArchive}
             onDeleteMatch={launcher.actions.deleteMatchHistory}
             onOpenLogDir={launcher.actions.openLogDir}

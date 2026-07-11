@@ -19,8 +19,11 @@ export const commands = {
 	startMatch: (request: LaunchRequest_Deserialize) => typedError<LaunchResponse, string>(__TAURI_INVOKE("start_match", { request })),
 	stopMatch: () => typedError<null, string>(__TAURI_INVOKE("stop_match")),
 	sessionStatus: () => typedError<SessionStatus, string>(__TAURI_INVOKE("session_status")),
-	loadMatchHistory: () => typedError<MatchHistoryRecord[], string>(__TAURI_INVOKE("load_match_history")),
-	saveMatchHistory: (matches: MatchHistoryRecord[]) => typedError<null, string>(__TAURI_INVOKE("save_match_history", { matches })),
+	upsertMatchHistory: (record: MatchHistoryRecord) => typedError<null, string>(__TAURI_INVOKE("upsert_match_history", { record })),
+	deleteMatchHistory: (matchId: string) => typedError<null, string>(__TAURI_INVOKE("delete_match_history", { matchId })),
+	queryMatchHistory: (request: MatchHistoryPageRequest) => typedError<MatchHistoryPage, string>(__TAURI_INVOKE("query_match_history", { request })),
+	loadMatchHistoryDashboard: (filter: MatchHistoryFilter) => typedError<MatchHistoryDashboard, string>(__TAURI_INVOKE("load_match_history_dashboard", { filter })),
+	loadMatchHistoryOpponents: () => typedError<MatchHistoryOpponent[], string>(__TAURI_INVOKE("load_match_history_opponents")),
 	openLogDir: (path: string) => typedError<null, string>(__TAURI_INVOKE("open_log_dir", { path })),
 	createLogArchive: (logDir: string) => typedError<LogArchiveResponse, string>(__TAURI_INVOKE("create_log_archive", { logDir })),
 	cleanupDetailedLogs: () => typedError<CleanupDetailedLogsResponse, string>(__TAURI_INVOKE("cleanup_detailed_logs")),
@@ -161,6 +164,46 @@ export type LogArchiveResponse = {
 	size: number,
 };
 
+export type MatchHistoryCursor = {
+	startedAt: string,
+	id: string,
+};
+
+export type MatchHistoryDashboard = {
+	summary: MatchHistorySummary,
+	trend: MatchHistoryTrendPoint[],
+	stages: MatchHistoryStageStatistics[],
+};
+
+export type MatchHistoryFilter = {
+	recentMatches: number | null,
+	sinceStartedAt: string | null,
+	opponentPlayerId: string | null,
+	stage: number | null,
+	outcome: MatchHistoryOutcome | null,
+};
+
+export type MatchHistoryOpponent = {
+	playerId: string,
+	latestName: string,
+	matches: number,
+	lastPlayedAt: string,
+};
+
+export type MatchHistoryOutcome = "completed" | "win" | "loss" | "stopped";
+
+export type MatchHistoryPage = {
+	matches: MatchHistoryRecord[],
+	nextCursor: MatchHistoryCursor | null,
+	total: number,
+};
+
+export type MatchHistoryPageRequest = {
+	filter: MatchHistoryFilter,
+	cursor: MatchHistoryCursor | null,
+	limit: number,
+};
+
 export type MatchHistoryRecord = {
 	id: string,
 	logDir: string,
@@ -174,7 +217,33 @@ export type MatchHistoryRecord = {
 	status: MatchHistoryStatus,
 };
 
+export type MatchHistoryStageStatistics = {
+	stage: number,
+	wins: number,
+	losses: number,
+};
+
 export type MatchHistoryStatus = "running" | "completed" | "stopped";
+
+export type MatchHistoryStreakKind = "win" | "loss";
+
+export type MatchHistorySummary = {
+	wins: number,
+	losses: number,
+	stopped: number,
+	gameWins: number,
+	gameLosses: number,
+	streak: number,
+	streakKind: MatchHistoryStreakKind | null,
+};
+
+export type MatchHistoryTrendPoint = {
+	matchId: string,
+	startedAt: string,
+	opponentName: string,
+	won: boolean,
+	rollingWinRate: number | null,
+};
 
 export type MatchPlayerIds = {
 	mario: string,
@@ -298,4 +367,3 @@ async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; dat
         return { status: "error", error: e as any };
     }
 }
-

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { describe, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import { Tabs } from '../components/ui';
@@ -5,6 +6,99 @@ import { previewMatchHistory } from '../previewData';
 import { HistoryView } from './HistoryView';
 
 describe('履歴ビュー', () => {
+  test('ダッシュボードとフィルターを表示する', async () => {
+    const screen = await render(
+      <Tabs.Root value="history">
+        <HistoryView matches={previewMatchHistory()} />
+      </Tabs.Root>,
+    );
+
+    await expect.element(screen.getByText('対戦勝率')).toBeVisible();
+    await expect.element(screen.getByText('ゲーム勝率')).toBeVisible();
+    await expect
+      .element(screen.getByRole('img', { name: '勝率推移グラフ' }))
+      .toBeVisible();
+    await expect
+      .element(screen.getByRole('img', { name: '勝率推移グラフ' }))
+      .toHaveAttribute('viewBox', '0 0 280 100');
+    await expect.element(screen.getByText('ステージ別勝率')).toBeVisible();
+    await expect
+      .element(screen.getByRole('combobox', { name: '期間' }))
+      .toBeVisible();
+    await expect
+      .element(screen.getByRole('combobox', { name: '期間' }))
+      .toHaveTextContent('全期間');
+    await expect
+      .element(screen.getByRole('combobox', { name: '対戦相手' }))
+      .toBeVisible();
+    await expect
+      .element(screen.getByRole('combobox', { name: 'ステージ' }))
+      .toBeVisible();
+    await expect
+      .element(screen.getByRole('combobox', { name: '履歴の結果' }))
+      .toBeVisible();
+    await expect
+      .element(screen.getByRole('combobox', { name: '履歴の結果' }))
+      .toHaveTextContent('完了した対戦');
+    await expect.element(screen.getByText('3件')).toBeVisible();
+
+    await screen.getByRole('combobox', { name: '履歴の結果' }).click();
+    await screen.getByRole('option', { name: 'すべて' }).click();
+    await expect.element(screen.getByText('4件')).toBeVisible();
+  });
+
+  test('対戦相手の名前から個別戦績へ移動する', async () => {
+    const screen = await render(
+      <Tabs.Root value="history">
+        <HistoryView matches={previewMatchHistory()} />
+      </Tabs.Root>,
+    );
+
+    await screen.getByText('3 - 1').click();
+    await screen.getByRole('button', { name: 'Rivalとの戦績を見る' }).click();
+
+    await expect
+      .element(screen.getByRole('heading', { name: 'Rivalとの戦績' }))
+      .toBeVisible();
+    await expect.element(screen.getByText('1勝 0敗')).toBeVisible();
+    await screen.getByRole('button', { name: '全対戦履歴に戻る' }).click();
+    await expect
+      .element(screen.getByRole('heading', { name: 'Rivalとの戦績' }))
+      .not.toBeInTheDocument();
+  });
+
+  test('相手の最後の履歴を削除したら全履歴へ戻る', async () => {
+    function DeletableHistory() {
+      const [matches, setMatches] = useState(previewMatchHistory());
+      return (
+        <Tabs.Root value="history">
+          <HistoryView
+            matches={matches}
+            revision={matches.length}
+            onDeleteMatch={async (matchId) => {
+              setMatches((current) =>
+                current.filter((match) => match.id !== matchId),
+              );
+            }}
+          />
+        </Tabs.Root>
+      );
+    }
+
+    const screen = await render(<DeletableHistory />);
+    await screen.getByText('3 - 1').click();
+    await screen.getByRole('button', { name: 'Rivalとの戦績を見る' }).click();
+    await screen.getByRole('button', { name: '対戦履歴を削除' }).click();
+    await screen.getByRole('button', { name: '削除する' }).click();
+
+    await expect
+      .element(screen.getByRole('heading', { name: 'Rivalとの戦績' }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(screen.getByRole('combobox', { name: '対戦相手' }))
+      .toHaveTextContent('すべて');
+  });
+
   test('最新の対戦をデフォルトでは展開しない', async () => {
     const screen = await render(
       <Tabs.Root value="history">
