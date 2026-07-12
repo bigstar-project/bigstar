@@ -11,7 +11,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import { parseAsString, parseAsStringLiteral, useQueryStates } from 'nuqs';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { css, cx } from 'styled-system/css';
 import { surface } from 'styled-system/recipes';
 import { SelectField } from '../components/Fields';
@@ -146,6 +146,7 @@ export function HistoryView({
     : null;
   const loading = historyQuery.isPending || dashboardQuery.isPending;
   const loadingMore = historyQuery.isFetchingNextPage;
+  const loadMoreRef = useRef<HTMLDivElement>(null);
   const error =
     deleteMutation.error ??
     opponentsQuery.error ??
@@ -175,7 +176,31 @@ export function HistoryView({
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const loadMore = () => historyQuery.fetchNextPage();
+  useEffect(() => {
+    const target = loadMoreRef.current;
+    if (
+      !target ||
+      !historyQuery.hasNextPage ||
+      typeof IntersectionObserver === 'undefined'
+    )
+      return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting && !historyQuery.isFetchingNextPage) {
+          void historyQuery.fetchNextPage();
+        }
+      },
+      { rootMargin: '300px 0px' },
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [
+    historyQuery.fetchNextPage,
+    historyQuery.hasNextPage,
+    historyQuery.isFetchingNextPage,
+  ]);
 
   return (
     <Tabs.Content value="history">
@@ -353,15 +378,30 @@ export function HistoryView({
             </div>
           )}
           {page?.nextCursor ? (
-            <Button
-              alignSelf="center"
-              loading={loadingMore}
-              onClick={() => void loadMore()}
-              size="sm"
-              variant="outline"
+            <div
+              className={css({
+                alignItems: 'center',
+                color: 'fg.muted',
+                display: 'flex',
+                h: '10',
+                justifyContent: 'center',
+              })}
+              data-history-load-more=""
+              ref={loadMoreRef}
             >
-              さらに読み込む
-            </Button>
+              {loadingMore ? (
+                <output
+                  aria-label="対戦履歴を読み込み中"
+                  className={css({ display: 'inline-flex' })}
+                >
+                  <SpinnerGap
+                    aria-hidden="true"
+                    className={css({ animation: 'spin' })}
+                    size={20}
+                  />
+                </output>
+              ) : null}
+            </div>
           ) : null}
         </section>
       </section>

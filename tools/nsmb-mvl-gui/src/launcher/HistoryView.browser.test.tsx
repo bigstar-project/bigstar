@@ -245,6 +245,42 @@ describe('履歴ビュー', () => {
     await expect.element(screen.getByText('0 - 0')).not.toBeInTheDocument();
   });
 
+  test('一覧の末尾までスクロールすると次の履歴を自動で読み込む', async () => {
+    const [baseMatch] = previewMatchHistory();
+    const matches = Array.from({ length: 51 }, (_, index) => ({
+      ...baseMatch,
+      id: `infinite-scroll-${String(index).padStart(2, '0')}`,
+      playerNames: {
+        ...baseMatch.playerNames,
+        luigi: index === 50 ? '51件目の対戦相手' : `対戦相手 ${index + 1}`,
+      },
+      startedAt: new Date(
+        Date.UTC(2026, 5, 30) - index * 86_400_000,
+      ).toISOString(),
+    }));
+    await render(
+      <HistoryTestProviders>
+        <HistoryView matches={matches} />
+      </HistoryTestProviders>,
+    );
+
+    const historyTriggers = () =>
+      document.querySelectorAll(
+        '[data-scope="collapsible"][data-part="trigger"]',
+      );
+    await vi.waitFor(() => expect(historyTriggers()).toHaveLength(50));
+
+    const loadMoreTarget = document.querySelector<HTMLElement>(
+      '[data-history-load-more]',
+    );
+    expect(loadMoreTarget).not.toBeNull();
+    loadMoreTarget?.scrollIntoView();
+
+    await vi.waitFor(() => expect(historyTriggers()).toHaveLength(51));
+    expect(historyTriggers().item(50)).toHaveTextContent('51件目の対戦相手');
+    expect(document.querySelector('[data-history-load-more]')).toBeNull();
+  });
+
   test('履歴を展開して確認したときだけ削除対象 ID を渡す', async () => {
     const [playedMatch] = previewMatchHistory();
     const onDeleteMatch = vi.fn();
