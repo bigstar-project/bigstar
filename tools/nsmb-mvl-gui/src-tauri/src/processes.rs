@@ -600,16 +600,14 @@ pub(crate) fn melon_env(
         }
         .into(),
     );
-    if request.settings.wins > 1 {
-        env.insert(
-            "MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT".into(),
-            "1".into(),
-        );
-        env.insert(
-            "MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES".into(),
-            "120".into(),
-        );
-    }
+    env.insert(
+        "MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT".into(),
+        "1".into(),
+    );
+    env.insert(
+        "MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES".into(),
+        "120".into(),
+    );
     if !request.settings.rng_seeds.is_empty() {
         env.insert(
             "MELONDS_NSML_MATCH_SEED_SEQUENCE".into(),

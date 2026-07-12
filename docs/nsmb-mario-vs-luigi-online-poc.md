@@ -1,5 +1,27 @@
 # NSMB Mario vs Luigi Online PoC
 
+## GUI target-wins=1 history recording fix - 2026-07-13
+
+- User report: matches configured for one required win on 2026-07-12 appeared to be missing from match history.
+- Confirmed two target-wins=1 host runs in the local app-data logs: `nsmb-mvl-gui-1783865347535-57548-2` and `nsmb-mvl-gui-1783865543931-57548-3`. Both launch manifests contain `wins: 1`, but both `melonds.stdout.txt` files contain zero `NSMB MvL auto restart: result` rows. Neither log directory appears in `match-history.sqlite3`.
+- Nearby target-wins=2/3 runs do contain result rows and were persisted as completed matches. The database contains the 23:32 target-wins=2 match and the subsequent target-wins=3 matches, confirming that the history database itself was writable.
+- Root cause:
+  - `tools/nsmb-mvl-gui/src-tauri/src/processes.rs` only sets `MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT=1` when `wins > 1`.
+  - `src/frontend/qt_sdl/NsmbNetplayPoC.cpp::RestartMvlAfterResultIfNeeded` also returns immediately when `MvlTargetWins <= 1`.
+  - Result logging and winner extraction are implemented inside that auto-restart function, so disabling restart for a one-win match also unintentionally disables result observation. The GUI consequently receives an empty stage-result list and does not persist a played history record.
+- Fix:
+  - The GUI launcher now enables `MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT` and its result-observation delay for every valid target win count, including one.
+  - melonDS now enters `RestartMvlAfterResultIfNeeded` for target-wins=1, reads and logs the result snapshot, then uses the existing `leadingWins >= MvlTargetWins` branch to stop without restarting the game.
+  - Added a Rust regression test verifying that a one-win launch enables result observation.
+  - Rebuilt melonDS and synced the GUI sidecar; synced melonDS sha256 is `cc192004051dfd1b77e8a782d2f67a73e5cb4723ee264432e663bbcb5292742b`.
+- Current blocker: none for the code path. The two historical runs remain intentionally unrecovered because they contain no result snapshot and the user did not request reconstruction.
+- Next action: manually play one target-wins=1 GUI match with the rebuilt app and confirm one result row is shown and persisted as a completed history entry without starting a rematch.
+- Verification status:
+  - `cargo fmt`, all 44 Rust tests, and `cargo clippy-all` passed in `tools/nsmb-mvl-gui/src-tauri`.
+  - `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passed. Existing unrelated `src/net/Netplay.cpp` format and linker warnings remain.
+  - `corepack pnpm sync:sidecars` passed.
+  - `corepack pnpm run ci` passed: TypeScript, Biome, 36 unit tests, 44 browser tests, and 2 Playwright tests.
+
 ## GUI WAN 30-40 FPS investigation - 2026-07-10
 
 - User report: one otherwise high-spec gaming laptop falls to roughly 30-40 FPS during battles over povo tethering. Ping settles near 50 ms, raising input delay from 3 to 15 does not restore 60 FPS, switching software/OpenGL rendering does not change the symptom, and aggregate Task Manager CPU/GPU usage remains low. Another povo tethering setup usually sustains 60 FPS.

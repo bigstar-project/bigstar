@@ -279,6 +279,24 @@ fn melon_env_carries_game_settings_and_netplay_start() {
 }
 
 #[test]
+fn melon_env_observes_results_for_single_win_matches() {
+    let mut request = request(Role::Host);
+    request.settings.wins = 1;
+    request.settings.course_stages = vec![2];
+    request.settings.rng_seeds = vec!["7".to_owned()];
+
+    let env = melon_env(
+        &request,
+        Path::new("bootstrap.inputs"),
+        Path::new("logs/nsmb-mvl-gui-test"),
+    );
+
+    assert_eq!(env["MELONDS_NSML_MVL_WINS"], "1");
+    assert_eq!(env["MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT"], "1");
+    assert_eq!(env["MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES"], "120");
+}
+
+#[test]
 fn melon_env_carries_diagnostic_event_settings_when_enabled() {
     let mut request = request(Role::Host);
     request.diagnostic_events_enabled = true;

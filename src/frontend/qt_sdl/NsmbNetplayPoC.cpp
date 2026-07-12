@@ -8802,7 +8802,7 @@ int ResolveMvlResultWinner(const MvlResultSnapshot& result)
 
 bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (!G.MvlAutoRestartAfterResult || G.MvlTargetWins <= 1 || !nds || instanceID < 0 || instanceID >= 16)
+    if (!G.MvlAutoRestartAfterResult || G.MvlTargetWins < 1 || !nds || instanceID < 0 || instanceID >= 16)
         return false;
 
     constexpr melonDS::u16 kResultsScene = 0x000A;
