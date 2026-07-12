@@ -4,6 +4,9 @@ import tsconfigPaths from 'vite-tsconfig-paths';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  define: {
+    __NSMB_MVL_GUI_VERSION__: JSON.stringify('test'),
+  },
   optimizeDeps: {
     include: ['@ark-ui/react/collapsible', '@tauri-apps/api/window'],
   },

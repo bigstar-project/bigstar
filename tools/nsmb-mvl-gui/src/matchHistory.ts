@@ -159,20 +159,27 @@ export function previewHistoryDashboard(
     streak += 1;
   }
 
-  const chronological = [...completed].reverse().slice(-60);
-  const trend = chronological.map((match, index) => {
-    const window = chronological.slice(Math.max(0, index - 9), index + 1);
-    const windowWins = window.filter(
-      (candidate) => matchOutcome(candidate) === 'win',
-    ).length;
-    return {
-      matchId: match.id,
-      startedAt: match.startedAt,
-      opponentName: opponentPlayerName(match),
-      won: matchOutcome(match) === 'win',
-      rollingWinRate: windowWins / window.length,
-    };
-  });
+  const chronologicalWithLookback = [...completed].reverse().slice(-69);
+  const visibleStart = Math.max(0, chronologicalWithLookback.length - 60);
+  const trend = chronologicalWithLookback
+    .slice(visibleStart)
+    .map((match, visibleIndex) => {
+      const index = visibleStart + visibleIndex;
+      const window = chronologicalWithLookback.slice(
+        Math.max(0, index - 9),
+        index + 1,
+      );
+      const windowWins = window.filter(
+        (candidate) => matchOutcome(candidate) === 'win',
+      ).length;
+      return {
+        matchId: match.id,
+        startedAt: match.startedAt,
+        opponentName: opponentPlayerName(match),
+        won: matchOutcome(match) === 'win',
+        rollingWinRate: windowWins / window.length,
+      };
+    });
   return {
     summary: {
       wins,

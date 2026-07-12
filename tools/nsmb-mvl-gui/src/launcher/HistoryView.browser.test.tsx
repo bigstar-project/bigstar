@@ -1,10 +1,15 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { NuqsAdapter } from 'nuqs/adapters/react';
 import { type ReactNode, useState } from 'react';
-import { describe, expect, test, vi } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import { Tabs } from '../components/ui';
 import { previewMatchHistory } from '../previewData';
 import { HistoryView } from './HistoryView';
+
+beforeEach(() => {
+  window.history.replaceState(null, '', '?view=history');
+});
 
 function HistoryTestProviders({ children }: { children: ReactNode }) {
   const [queryClient] = useState(
@@ -15,12 +20,40 @@ function HistoryTestProviders({ children }: { children: ReactNode }) {
   );
   return (
     <QueryClientProvider client={queryClient}>
-      <Tabs.Root value="history">{children}</Tabs.Root>
+      <NuqsAdapter>
+        <Tabs.Root value="history">{children}</Tabs.Root>
+      </NuqsAdapter>
     </QueryClientProvider>
   );
 }
 
 describe('履歴ビュー', () => {
+  test('URLからすべてのフィルターを復元する', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '?view=history&period=recent30&opponent=preview-profile-rival&name=Rival&stage=2&outcome=win',
+    );
+    const screen = await render(
+      <HistoryTestProviders>
+        <HistoryView matches={previewMatchHistory()} />
+      </HistoryTestProviders>,
+    );
+
+    await expect
+      .element(screen.getByRole('combobox', { name: '期間' }))
+      .toHaveTextContent('直近30戦');
+    await expect
+      .element(screen.getByRole('combobox', { name: '対戦相手' }))
+      .toHaveTextContent('Rival');
+    await expect
+      .element(screen.getByRole('combobox', { name: 'ステージ' }))
+      .toHaveTextContent('雪');
+    await expect
+      .element(screen.getByRole('combobox', { name: '履歴の結果' }))
+      .toHaveTextContent('勝利');
+  });
+
   test('ダッシュボードとフィルターを表示する', async () => {
     const screen = await render(
       <HistoryTestProviders>
@@ -63,6 +96,9 @@ describe('履歴ビュー', () => {
   });
 
   test('対戦相手の名前から個別戦績へ移動する', async () => {
+    const scrollTo = vi
+      .spyOn(window, 'scrollTo')
+      .mockImplementation(() => undefined);
     const screen = await render(
       <HistoryTestProviders>
         <HistoryView matches={previewMatchHistory()} />
@@ -72,14 +108,68 @@ describe('履歴ビュー', () => {
     await screen.getByText('3 - 1').click();
     await screen.getByRole('button', { name: 'Rivalとの戦績を見る' }).click();
 
+    await vi.waitFor(() => {
+      const search = new URLSearchParams(window.location.search);
+      expect(search.get('opponent')).toBe('preview-profile-rival');
+      expect(search.get('name')).toBe('Rival');
+    });
+
     await expect
       .element(screen.getByRole('heading', { name: 'Rivalとの戦績' }))
       .toBeVisible();
     await expect.element(screen.getByText('1勝 0敗')).toBeVisible();
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' });
+    expect(
+      document.querySelector(
+        '[data-scope="collapsible"][data-part="root"][data-state="open"]',
+      ),
+    ).toBeNull();
     await screen.getByRole('button', { name: '全対戦履歴に戻る' }).click();
     await expect
       .element(screen.getByRole('heading', { name: 'Rivalとの戦績' }))
       .not.toBeInTheDocument();
+    scrollTo.mockRestore();
+  });
+
+  test('対戦相手フィルターをルート履歴に記録して復元する', async () => {
+    const screen = await render(
+      <HistoryTestProviders>
+        <HistoryView matches={previewMatchHistory()} />
+      </HistoryTestProviders>,
+    );
+
+    await screen.getByRole('combobox', { name: '対戦相手' }).click();
+    const rivalOption = [
+      ...document.querySelectorAll<HTMLElement>('[role=option]'),
+    ].find((option) => option.textContent?.includes('Rival'));
+    expect(rivalOption).toBeDefined();
+    rivalOption?.click();
+    await vi.waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get('opponent')).toBe(
+        'preview-profile-rival',
+      ),
+    );
+
+    window.history.replaceState(null, '', '?view=history');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    await expect
+      .element(screen.getByRole('combobox', { name: '対戦相手' }))
+      .toHaveTextContent('すべて');
+  });
+
+  test('対戦詳細の表は自分と相手の名前をヘッダーに表示する', async () => {
+    const screen = await render(
+      <HistoryTestProviders>
+        <HistoryView matches={previewMatchHistory()} />
+      </HistoryTestProviders>,
+    );
+
+    await screen.getByText('3 - 1').click();
+
+    const headers = [...document.querySelectorAll('th')].map((header) =>
+      header.textContent?.trim(),
+    );
+    expect(headers.slice(3, 5)).toEqual(['Preview Player', 'Rival']);
   });
 
   test('相手の最後の履歴を削除したら全履歴へ戻る', async () => {

@@ -4,9 +4,7 @@ import {
   Broadcast,
   Crown,
   Flag,
-  GearSix,
   Heart,
-  Play,
   RadioButton,
   Rewind,
   Star,
@@ -17,15 +15,9 @@ import {
 } from '@phosphor-icons/react';
 import { useState } from 'react';
 import { css, cx } from 'styled-system/css';
+import { surface } from 'styled-system/recipes';
 import { token } from 'styled-system/tokens';
-import playerLBadge from '../assets/player-l.png';
-import playerMBadge from '../assets/player-m.png';
-import {
-  NumberField,
-  RoleButton,
-  SelectField,
-  TextField,
-} from '../components/Fields';
+import { NumberField, SelectField } from '../components/Fields';
 import { SummaryItem } from '../components/SummaryItem';
 import { Button, CloseButton, Dialog, Tabs } from '../components/ui';
 import { WebRtcDiagnosticsPanel } from '../components/WebRtcDiagnosticsPanel';
@@ -38,8 +30,8 @@ import {
   rollbackInputMaxFrameLead,
 } from '../form';
 import type { CourseMode, FormState, GameStateMismatch, Lives } from '../types';
-import { InfoPanel, LauncherCard, SmallInfoCard } from './LauncherCards';
-import { EmptyMatchResultCard, MatchResultCard } from './MatchResultCard';
+import { InfoPanel, LauncherCard } from './LauncherCards';
+import { MatchResultCard } from './MatchResultCard';
 import {
   bigStarsOptions,
   courseOptions,
@@ -61,7 +53,6 @@ export function BattleView({
   actions,
   diagnostics,
   form,
-  lastLogDir,
   matchmakingRooms,
   currentMatch,
   summary,
@@ -73,14 +64,11 @@ export function BattleView({
     | 'cancelHostedRoom'
     | 'createRoom'
     | 'joinRoom'
-    | 'openLogDir'
     | 'refreshRooms'
-    | 'startMatch'
     | 'stopMatch'
   >;
   diagnostics: DiagnosticsState;
   form: FormState;
-  lastLogDir: string;
   matchmakingRooms: MatchmakingRoomsState;
   currentMatch: BattleMatchRecord | null;
   summary: LauncherSummary;
@@ -95,34 +83,25 @@ export function BattleView({
     <Tabs.Content value="battle">
       <form
         className={css({
+          alignItems: 'start',
           display: 'grid',
           gap: '4',
           gridTemplateColumns: {
             base: '1fr',
             xl: `minmax(0, 1fr) ${token('sizes.diagnostics')}`,
           },
-          maxW: { base: 'xl', xl: 'contentMax' },
-          mx: { base: 'auto', xl: '0' },
+          maxW: 'contentMax',
+          mx: 'auto',
           w: 'full',
         })}
         onSubmit={(event) => {
           event.preventDefault();
         }}
       >
-        <section
-          className={css({
-            display: 'grid',
-            gap: '3',
-          })}
-        >
+        <section className={css({ display: 'grid', gap: '3' })}>
           {currentMatch ? (
             <MatchResultCard match={currentMatch} title="現在の対戦状況" />
-          ) : (
-            <EmptyMatchResultCard
-              title="現在の対戦状況"
-              message="対戦を開始すると、勝敗・スター・残機の状況がここに表示されます"
-            />
-          )}
+          ) : null}
 
           <LauncherCard
             title="公開ルーム"
@@ -160,22 +139,30 @@ export function BattleView({
                     更新
                   </Button>
                 </div>
-                <CreateRoomDialog
-                  busy={matchmakingRooms.busy}
-                  disabled={matchmakingDisabled}
-                  form={form}
-                  onCreate={actions.createRoom}
-                  updateField={updateField}
-                />
-                {summary.connectionActive ? (
-                  <Button
-                    variant="outline"
-                    onClick={() => void actions.stopMatch()}
-                  >
-                    <Stop size={18} weight="fill" />
-                    停止
-                  </Button>
-                ) : null}
+                <div
+                  className={css({
+                    display: 'flex',
+                    flexDirection: { base: 'column', md: 'row' },
+                    gap: '2',
+                  })}
+                >
+                  {summary.connectionActive ? (
+                    <Button
+                      variant="outline"
+                      onClick={() => void actions.stopMatch()}
+                    >
+                      <Stop size={18} weight="fill" />
+                      停止
+                    </Button>
+                  ) : null}
+                  <CreateRoomDialog
+                    busy={matchmakingRooms.busy}
+                    disabled={matchmakingDisabled}
+                    form={form}
+                    onCreate={actions.createRoom}
+                    updateField={updateField}
+                  />
+                </div>
               </div>
               {matchmakingRooms.error ? (
                 <div
@@ -185,7 +172,7 @@ export function BattleView({
                     textStyle: 'sm',
                   })}
                 >
-                  {matchmakingRooms.error}
+                  公開ルームを取得できませんでした。更新をお試しください。
                 </div>
               ) : null}
               {summary.updateRequired ? (
@@ -199,36 +186,19 @@ export function BattleView({
                   onCopy={() => void actions.copyRoomCode()}
                 />
               ) : null}
-              <RoomList
-                busy={matchmakingRooms.busy}
-                disabled={matchmakingDisabled}
-                rooms={matchmakingRooms.rooms}
-                onJoin={(roomId) => void actions.joinRoom(roomId)}
-              />
+              {!matchmakingRooms.error ? (
+                <RoomList
+                  busy={matchmakingRooms.busy}
+                  disabled={matchmakingDisabled}
+                  rooms={matchmakingRooms.rooms}
+                  onJoin={(roomId) => void actions.joinRoom(roomId)}
+                />
+              ) : null}
             </div>
           </LauncherCard>
-
-          <ManualConnectionPanel
-            actions={actions}
-            form={form}
-            summary={summary}
-            updateField={updateField}
-          />
-
-          <BattleLogPanel
-            gameStateMismatch={diagnostics.gameStateMismatch}
-            lastLogDir={lastLogDir}
-            onOpenLogDir={() => void actions.openLogDir()}
-          />
         </section>
 
-        <aside
-          className={css({
-            alignContent: 'start',
-            display: 'grid',
-            gap: '3',
-          })}
-        >
+        <aside className={css({ alignContent: 'start', display: 'grid' })}>
           <InfoPanel
             icon={<Broadcast size={22} weight="bold" />}
             title="接続状況"
@@ -236,8 +206,8 @@ export function BattleView({
               diagnostics.gameStateMismatch
                 ? 'ミスマッチ'
                 : summary.connectionActive
-                  ? '良好'
-                  : '待機'
+                  ? '接続中'
+                  : '未接続'
             }
             badgeTone={
               diagnostics.gameStateMismatch
@@ -260,7 +230,6 @@ export function BattleView({
             {diagnostics.gameStateMismatch ? (
               <GameStateMismatchAlert
                 mismatch={diagnostics.gameStateMismatch}
-                compact
               />
             ) : null}
             <WebRtcDiagnosticsPanel
@@ -268,29 +237,6 @@ export function BattleView({
               compact
             />
           </InfoPanel>
-
-          <div
-            className={css({
-              display: 'grid',
-              gap: '2',
-              gridTemplateColumns: {
-                base: '1fr',
-                sm: 'repeat(2, minmax(0, 1fr))',
-              },
-            })}
-          >
-            <SmallInfoCard
-              imageSrc={form.role === 'host' ? playerMBadge : playerLBadge}
-              label="操作キャラ"
-              value={form.role === 'host' ? 'Mario' : 'Luigi'}
-            />
-            <SmallInfoCard
-              icon={<Flag size={24} weight="fill" />}
-              label="起動ステージ"
-              value={summary.selectedStageLabel}
-              caption="コース決定"
-            />
-          </div>
         </aside>
       </form>
     </Tabs.Content>
@@ -583,173 +529,6 @@ function clampNetplaySetting(value: number) {
   return Math.min(16, Math.max(0, Math.trunc(value)));
 }
 
-function ManualConnectionPanel({
-  actions,
-  form,
-  summary,
-  updateField,
-}: {
-  actions: Pick<LauncherActions, 'startMatch' | 'stopMatch'>;
-  form: FormState;
-  summary: LauncherSummary;
-  updateField: UpdateFormField;
-}) {
-  return (
-    <LauncherCard title="手動接続" icon={<GearSix size={22} weight="fill" />}>
-      <details
-        className={css({
-          borderColor: 'gray.surface.border',
-          borderRadius: 'l2',
-          borderWidth: '1px',
-          overflow: 'hidden',
-        })}
-      >
-        <summary
-          className={css({
-            bg: 'gray.surface.bg',
-            color: 'fg.default',
-            cursor: 'pointer',
-            fontWeight: 'black',
-            listStyle: 'none',
-            px: '3',
-            py: '2.5',
-            textStyle: 'sm',
-            focusVisibleRing: 'inside',
-          })}
-        >
-          部屋コードとロールを編集
-        </summary>
-        <div
-          className={css({
-            display: 'grid',
-            gap: '3',
-            p: '3',
-          })}
-        >
-          <div
-            className={css({
-              display: 'grid',
-              gap: '3',
-              gridTemplateColumns: {
-                base: '1fr',
-                md: 'minmax(220px, 0.85fr) minmax(0, 1.15fr)',
-              },
-            })}
-          >
-            <TextField
-              label="部屋コード"
-              value={form.roomCode}
-              maxLength={64}
-              placeholder="test-room"
-              onChange={(value) => updateField('roomCode', value)}
-            />
-            <div
-              className={css({
-                alignContent: 'end',
-                display: 'grid',
-                gap: '2',
-                gridTemplateColumns: {
-                  base: '1fr',
-                  sm: 'repeat(2, minmax(0, 1fr))',
-                },
-              })}
-            >
-              <RoleButton
-                active={form.role === 'host'}
-                icon={<Crown size={22} weight="fill" />}
-                title="ホスト"
-                subtitle="offer側"
-                tone="red"
-                onClick={() => updateField('role', 'host')}
-              />
-              <RoleButton
-                active={form.role === 'client'}
-                icon={<Users size={22} weight="fill" />}
-                title="参加"
-                subtitle="answer側"
-                tone="green"
-                onClick={() => updateField('role', 'client')}
-              />
-            </div>
-          </div>
-          <MatchSettingsFields form={form} updateField={updateField} />
-          <StartStopButton
-            active={summary.connectionActive}
-            onStart={() => void actions.startMatch()}
-            onStop={() => void actions.stopMatch()}
-          />
-        </div>
-      </details>
-    </LauncherCard>
-  );
-}
-
-function StartStopButton({
-  active,
-  onStart,
-  onStop,
-}: {
-  active: boolean;
-  onStart: () => void;
-  onStop: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={cx(
-        css({
-          borderRadius: 'l2',
-          borderWidth: '2px',
-          color: 'fg.default',
-          cursor: 'pointer',
-          focusVisibleRing: 'outside',
-          fontWeight: 'black',
-          minH: '12',
-          overflow: 'hidden',
-          px: '4',
-          py: '2.5',
-          position: 'relative',
-          textStyle: 'lg',
-          transition: 'common',
-          w: 'full',
-        }),
-        active
-          ? css({
-              bg: 'gray.3',
-              borderColor: 'gray.3',
-              _hover: {
-                bg: 'red.subtle.bg',
-              },
-            })
-          : css({
-              bg: 'red.700',
-              borderColor: 'yellow.500',
-              _hover: {
-                bg: 'red.600',
-              },
-            }),
-      )}
-      onClick={active ? onStop : onStart}
-    >
-      <span
-        className={css({
-          alignItems: 'center',
-          display: 'flex',
-          gap: '2.5',
-          justifyContent: 'center',
-        })}
-      >
-        {active ? '停止' : '対戦を開始'}
-        {active ? (
-          <Stop size={24} weight="fill" />
-        ) : (
-          <Play size={24} weight="fill" />
-        )}
-      </span>
-    </button>
-  );
-}
-
 function RoomList({
   busy,
   disabled,
@@ -764,16 +543,15 @@ function RoomList({
   if (rooms.length === 0) {
     return (
       <div
-        className={css({
-          bg: 'gray.surface.bg',
-          borderColor: 'gray.surface.border',
-          borderRadius: 'l2',
-          borderWidth: '1px',
-          color: 'fg.muted',
-          fontWeight: 'semibold',
-          p: '3',
-          textStyle: 'sm',
-        })}
+        className={cx(
+          surface({ variant: 'inset' }),
+          css({
+            color: 'fg.muted',
+            fontWeight: 'semibold',
+            p: '3',
+            textStyle: 'sm',
+          }),
+        )}
       >
         募集中の部屋はありません
       </div>
@@ -782,19 +560,15 @@ function RoomList({
 
   return (
     <div
-      className={css({
-        borderColor: 'gray.surface.border',
-        borderRadius: 'l2',
-        borderWidth: '1px',
-        display: 'grid',
-        overflow: 'hidden',
-      })}
+      className={cx(
+        surface({ variant: 'inset' }),
+        css({ display: 'grid', overflow: 'hidden' }),
+      )}
     >
       {rooms.map((room) => (
         <div
           key={room.room_id}
           className={css({
-            bg: 'gray.surface.bg',
             borderBottomColor: 'gray.surface.border',
             borderBottomWidth: '1px',
             display: 'grid',
@@ -893,68 +667,6 @@ function formatRoomSettings(room: MatchmakingRoomsState['rooms'][number]) {
   const rollback = room.settings.rollback_enabled ? 'RB=on' : 'RB=off';
   const stages = room.settings.course_stages.join('/');
   return `Course=${room.settings.course_mode}[${stages}] Wins=${room.settings.wins} Star=${room.settings.big_stars} Lives=${room.settings.lives} Delay=${room.settings.input_delay_frames} Lead=${room.settings.input_max_frame_lead} ${rollback}`;
-}
-
-function BattleLogPanel({
-  gameStateMismatch,
-  lastLogDir,
-  onOpenLogDir,
-}: {
-  gameStateMismatch: GameStateMismatch | null;
-  lastLogDir: string;
-  onOpenLogDir: () => void;
-}) {
-  return (
-    <LauncherCard title="通信ログ" icon={<Broadcast size={20} />}>
-      <div className={css({ display: 'grid', gap: '2' })}>
-        <div
-          className={css({
-            alignItems: 'center',
-            display: 'flex',
-            gap: '2',
-            justifyContent: 'space-between',
-          })}
-        >
-          <span
-            className={css({
-              color: 'fg.muted',
-              fontWeight: 'bold',
-              textStyle: 'sm',
-            })}
-          >
-            Log directory
-          </span>
-          <Button
-            variant="outline"
-            disabled={!lastLogDir}
-            onClick={onOpenLogDir}
-          >
-            ログを開く
-          </Button>
-        </div>
-        <code
-          className={css({
-            bg: 'gray.surface.bg',
-            borderColor: 'gray.surface.border',
-            borderRadius: 'l2',
-            borderWidth: '1px',
-            color: 'fg.muted',
-            fontFamily: 'mono',
-            fontWeight: 'semibold',
-            overflowWrap: 'anywhere',
-            px: '2.5',
-            py: '1.5',
-            textStyle: 'xs',
-          })}
-        >
-          {lastLogDir || 'not started'}
-        </code>
-        {gameStateMismatch ? (
-          <GameStateMismatchAlert mismatch={gameStateMismatch} />
-        ) : null}
-      </div>
-    </LauncherCard>
-  );
 }
 
 function GameStateMismatchAlert({

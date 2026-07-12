@@ -14,7 +14,8 @@ import {
   WifiHigh,
 } from '@phosphor-icons/react';
 import { useState } from 'react';
-import { css } from 'styled-system/css';
+import { css, cx } from 'styled-system/css';
+import { surface } from 'styled-system/recipes';
 import { token } from 'styled-system/tokens';
 import {
   FilePathField,
@@ -38,6 +39,20 @@ const diagnosticEventOptions = [
   { value: 'off', label: 'Off' },
   { value: 'on', label: 'On' },
 ];
+
+const settingsSwitchClassName = cx(
+  surface({ variant: 'inset' }),
+  css({
+    alignItems: 'center',
+    colorPalette: 'blue',
+    display: 'flex',
+    gap: '3',
+    justifyContent: 'space-between',
+    minH: '16',
+    p: '3',
+    w: 'full',
+  }),
+);
 
 export function SettingsView({
   actions,
@@ -129,20 +144,7 @@ export function SettingsView({
               onCheckedChange={(details) =>
                 void actions.setStartupEnabled(details.checked)
               }
-              className={css({
-                alignItems: 'center',
-                bg: 'app.panel',
-                borderColor: 'border',
-                borderRadius: 'l2',
-                borderWidth: '1px',
-                colorPalette: 'blue',
-                display: 'flex',
-                gap: '3',
-                justifyContent: 'space-between',
-                minH: '16',
-                p: '3',
-                w: 'full',
-              })}
+              className={settingsSwitchClassName}
             >
               <Switch.HiddenInput />
               <div
@@ -171,20 +173,7 @@ export function SettingsView({
               onCheckedChange={(details) =>
                 updateField('newRoomNotificationsEnabled', details.checked)
               }
-              className={css({
-                alignItems: 'center',
-                bg: 'app.panel',
-                borderColor: 'border',
-                borderRadius: 'l2',
-                borderWidth: '1px',
-                colorPalette: 'blue',
-                display: 'flex',
-                gap: '3',
-                justifyContent: 'space-between',
-                minH: '16',
-                p: '3',
-                w: 'full',
-              })}
+              className={settingsSwitchClassName}
             >
               <Switch.HiddenInput />
               <div
@@ -253,20 +242,7 @@ export function SettingsView({
               onCheckedChange={(details) =>
                 updateField('performanceLogsEnabled', details.checked)
               }
-              className={css({
-                alignItems: 'center',
-                bg: 'app.panel',
-                borderColor: 'border',
-                borderRadius: 'l2',
-                borderWidth: '1px',
-                colorPalette: 'blue',
-                display: 'flex',
-                gap: '3',
-                justifyContent: 'space-between',
-                minH: '16',
-                p: '3',
-                w: 'full',
-              })}
+              className={settingsSwitchClassName}
             >
               <Switch.HiddenInput />
               <div
@@ -295,20 +271,7 @@ export function SettingsView({
               onCheckedChange={(details) =>
                 updateField('detailedLogsEnabled', details.checked)
               }
-              className={css({
-                alignItems: 'center',
-                bg: 'app.panel',
-                borderColor: 'border',
-                borderRadius: 'l2',
-                borderWidth: '1px',
-                colorPalette: 'blue',
-                display: 'flex',
-                gap: '3',
-                justifyContent: 'space-between',
-                minH: '16',
-                p: '3',
-                w: 'full',
-              })}
+              className={settingsSwitchClassName}
             >
               <Switch.HiddenInput />
               <div

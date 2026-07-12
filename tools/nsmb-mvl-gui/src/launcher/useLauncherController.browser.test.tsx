@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { NuqsAdapter } from 'nuqs/adapters/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
@@ -196,7 +197,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.hostRoomEventHandlers = [];
   mocks.lobbyHandlers = [];
-  window.location.hash = '';
+  window.history.replaceState(null, '', window.location.pathname);
 });
 
 afterEach(() => {
@@ -234,7 +235,9 @@ function TestProviders({ children }: { children: ReactNode }) {
     },
   });
   return (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      <NuqsAdapter>{children}</NuqsAdapter>
+    </QueryClientProvider>
   );
 }
 
@@ -258,6 +261,13 @@ function LauncherHarness() {
       <output aria-label="room-count">
         {launcher.matchmakingRooms.rooms.length}
       </output>
+      <output aria-label="active-view">{launcher.activeView}</output>
+      <button type="button" onClick={() => launcher.changeView('history')}>
+        history
+      </button>
+      <button type="button" onClick={() => launcher.changeView('settings')}>
+        settings
+      </button>
       <button
         type="button"
         onClick={() => void launcher.actions.refreshRooms()}
@@ -269,6 +279,33 @@ function LauncherHarness() {
 }
 
 describe('useLauncherController', () => {
+  test('画面遷移を履歴に追加してpopstateで復元する', async () => {
+    const pushState = vi.spyOn(window.history, 'pushState');
+    const screen = await render(
+      <TestProviders>
+        <LauncherHarness />
+      </TestProviders>,
+    );
+
+    await screen.getByRole('button', { name: 'settings' }).click();
+    await vi.waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get('view')).toBe(
+        'settings',
+      ),
+    );
+    expect(pushState).toHaveBeenCalled();
+    await expect
+      .element(screen.getByLabelText('active-view'))
+      .toHaveTextContent('settings');
+
+    window.history.replaceState(null, '', '?view=battle');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    await expect
+      .element(screen.getByLabelText('active-view'))
+      .toHaveTextContent('battle');
+    pushState.mockRestore();
+  });
+
   test('hosted room auto launch clears matchmaking busy after startMatch resolves', async () => {
     let resolveStartMatch: (response: LaunchResponse) => void = () => {};
     mocks.startMatchMock.mockImplementationOnce(
@@ -340,7 +377,7 @@ describe('useLauncherController', () => {
   });
 
   test('lobby websocket snapshot updates rooms and notifies only rooms added after the initial snapshot', async () => {
-    window.location.hash = '#settings';
+    window.history.replaceState(null, '', '?view=settings');
     const screen = await render(
       <TestProviders>
         <LauncherHarness />

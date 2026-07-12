@@ -1,6 +1,6 @@
-import { css, cx } from 'styled-system/css';
+import { css } from 'styled-system/css';
 import type { StatusKind } from '../types';
-import { Spinner } from './ui';
+import { Badge, Spinner } from './ui';
 
 export function StatusPill({
   children,
@@ -11,76 +11,28 @@ export function StatusPill({
   kind: StatusKind;
   loading?: boolean;
 }) {
-  const colors: Record<StatusKind, Parameters<typeof css>[0]> = {
-    idle: {
-      bg: 'gray.surface.bg',
-      borderColor: 'gray.surface.border',
-      color: 'fg.muted',
-    },
-    ok: {
-      bg: 'green.subtle.bg',
-      borderColor: 'green.outline.border',
-      color: 'green.subtle.fg',
-    },
-    warn: {
-      bg: 'yellow.subtle.bg',
-      borderColor: 'yellow.outline.border',
-      color: 'yellow.subtle.fg',
-    },
-    error: {
-      bg: 'red.subtle.bg',
-      borderColor: 'red.outline.border',
-      color: 'red.subtle.fg',
-    },
-  };
-  const label: Record<StatusKind, string> = {
-    idle: '待機',
-    ok: '正常',
-    warn: '注意',
-    error: 'エラー',
+  const palette: Record<StatusKind, 'gray' | 'green' | 'yellow' | 'red'> = {
+    idle: 'gray',
+    ok: 'green',
+    warn: 'yellow',
+    error: 'red',
   };
   return (
-    <div
-      className={cx(
-        css({
-          borderRadius: 'l2',
-          borderWidth: '1px',
-          display: 'grid',
-          gap: '0.5',
-          maxW: 'statusMax',
-          minH: '9',
-          overflowWrap: 'anywhere',
-          px: '2.5',
-          py: '1.5',
-        }),
-        css(colors[kind]),
-      )}
+    <Badge
+      colorPalette={palette[kind]}
+      variant="subtle"
+      className={css({
+        gap: '1.5',
+        maxW: 'statusMax',
+        overflowWrap: 'anywhere',
+        px: '2.5',
+        py: '1.5',
+      })}
     >
-      <span
-        className={css({
-          alignItems: 'center',
-          display: 'flex',
-          gap: '1.5',
-          fontWeight: 'black',
-          opacity: '0.75',
-          textStyle: 'xs',
-          textTransform: 'uppercase',
-        })}
-      >
-        {loading ? (
-          <Spinner size="xs" borderWidth="0.125em" color="current" />
-        ) : null}
-        {label[kind]}
-      </span>
-      <span
-        className={css({
-          fontWeight: 'bold',
-          lineHeight: 'snug',
-          textStyle: 'xs',
-        })}
-      >
-        {children}
-      </span>
-    </div>
+      {loading ? (
+        <Spinner size="xs" borderWidth="0.125em" color="current" />
+      ) : null}
+      {children}
+    </Badge>
   );
 }

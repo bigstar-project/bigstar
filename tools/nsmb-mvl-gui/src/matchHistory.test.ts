@@ -155,4 +155,30 @@ describe('対戦履歴集計', () => {
     expect(page.matches).toHaveLength(50);
     expect(page.nextCursor).not.toBeNull();
   });
+
+  test('勝率推移の先頭にも表示範囲より前の9戦を含める', () => {
+    const [template] = previewMatchHistory();
+    const matches = Array.from({ length: 70 }, (_, index) => ({
+      ...template,
+      id: `trend-${String(index).padStart(2, '0')}`,
+      startedAt: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
+      stages:
+        index === 10
+          ? template.stages.map((stage, gameIndex) => ({
+              ...stage,
+              winner: 1 as const,
+              mario_match_wins: 0,
+              luigi_match_wins: gameIndex + 1,
+            }))
+          : template.stages,
+    }));
+
+    const dashboard = previewHistoryDashboard(matches, allFilter);
+
+    expect(dashboard.trend).toHaveLength(60);
+    expect(dashboard.trend[0]).toMatchObject({
+      matchId: 'trend-10',
+      rollingWinRate: 0.9,
+    });
+  });
 });

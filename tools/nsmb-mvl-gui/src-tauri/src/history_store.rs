@@ -268,7 +268,7 @@ impl<'conn> HistoryRepository<'conn> {
                SELECT id, started_at, opponent_player_name, match_winner \
                FROM filtered_matches \
                WHERE status = 'completed' AND match_winner IS NOT NULL \
-               ORDER BY started_at DESC, id DESC LIMIT 60\
+               ORDER BY started_at DESC, id DESC LIMIT 69\
              ) ORDER BY started_at ASC, id ASC",
             scope.cte
         );
@@ -290,8 +290,11 @@ impl<'conn> HistoryRepository<'conn> {
         for row in rows {
             raw.push(row.map_err(|err| format!("勝率推移行を読めません: {err}"))?);
         }
-        let mut trend = Vec::with_capacity(raw.len());
-        for (index, (match_id, started_at, opponent_name, outcome)) in raw.iter().enumerate() {
+        let visible_start = raw.len().saturating_sub(60);
+        let mut trend = Vec::with_capacity(raw.len() - visible_start);
+        for (index, (match_id, started_at, opponent_name, outcome)) in
+            raw.iter().enumerate().skip(visible_start)
+        {
             let start = index.saturating_sub(9);
             let window = &raw[start..=index];
             let window_wins = window
@@ -1203,6 +1206,40 @@ mod tests {
                 .iter()
                 .all(|record| matches!(record.status, MatchHistoryStatus::Completed)));
         }
+    }
+
+    #[test]
+    fn trend_includes_nine_matches_before_the_visible_range() {
+        let mut conn = Connection::open_in_memory().expect("open in-memory db");
+        run_migrations(&mut conn).expect("run migrations");
+        let mut repository = HistoryRepository::new(&mut conn);
+        for index in 0..70 {
+            let started_at = format!(
+                "2026-07-{:02}T{:02}:{:02}:00.000Z",
+                1 + index / (24 * 60),
+                (index / 60) % 24,
+                index % 60
+            );
+            let mut record = local_win_record(&format!("trend-{index:02}"), &started_at, "rival-a");
+            if index == 10 {
+                for (game_index, stage) in record.stages.iter_mut().enumerate() {
+                    stage.winner = Some(1);
+                    stage.mario_match_wins = 0;
+                    stage.luigi_match_wins = u32::try_from(game_index + 1).expect("game index");
+                }
+            }
+            repository
+                .upsert_match(&record)
+                .expect("upsert trend match");
+        }
+
+        let dashboard = repository
+            .dashboard(&MatchHistoryFilter::default())
+            .expect("load dashboard");
+
+        assert_eq!(dashboard.trend.len(), 60);
+        assert_eq!(dashboard.trend[0].match_id, "trend-10");
+        assert!((dashboard.trend[0].rolling_win_rate - 0.9).abs() < f64::EPSILON);
     }
 
     #[test]

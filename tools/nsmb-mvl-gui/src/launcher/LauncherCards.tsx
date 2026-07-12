@@ -16,50 +16,52 @@ export function LauncherCard({
   title?: string;
 }) {
   return (
-    <Card.Root
-      variant="outline"
-      css={{
-        bg: 'app.card',
-        backdropFilter: 'auto',
-        backdropBlur: 'md',
-        backdropSaturate: '180%',
-        display: 'grid',
-        gap: '3',
-        p: '3.5',
-      }}
-    >
+    <Card.Root variant="glass">
       {title ? (
-        <div
-          className={css({
+        <Card.Header
+          css={{
             alignItems: 'center',
-            display: 'flex',
+            flexDirection: 'row',
             gap: '2',
             justifyContent: 'space-between',
-          })}
+            p: '3.5',
+            pb: '0',
+          }}
         >
-          <h2
-            className={css({
+          <Card.Title
+            asChild
+            css={{
               alignItems: 'center',
-              color: 'fg.default',
               display: 'flex',
-              fontWeight: 'black',
-              gap: '1.5',
+              fontWeight: 'semibold',
+              gap: '2',
               textStyle: 'md',
-            })}
+            }}
           >
-            {icon ? (
-              <span className={css({ color: 'blue.plain.fg' })}>{icon}</span>
-            ) : null}
-            {title}
-          </h2>
+            <h2>
+              {icon ? (
+                <span className={css({ color: 'blue.plain.fg' })}>{icon}</span>
+              ) : null}
+              {title}
+            </h2>
+          </Card.Title>
           {badge ? (
             <Badge colorPalette={badgeColorPalette(badgeTone)} variant="subtle">
               {badge}
             </Badge>
           ) : null}
-        </div>
+        </Card.Header>
       ) : null}
-      <div className={css({ display: 'grid', gap: '2.5' })}>{children}</div>
+      <Card.Body
+        css={{
+          display: 'grid',
+          gap: '2.5',
+          p: '3.5',
+          pt: title ? '3' : '3.5',
+        }}
+      >
+        {children}
+      </Card.Body>
     </Card.Root>
   );
 }
@@ -130,12 +132,8 @@ export function SmallInfoCard({
 }) {
   return (
     <Card.Root
-      variant="outline"
+      variant="glass"
       css={{
-        bg: 'app.card',
-        backdropFilter: 'auto',
-        backdropBlur: 'lg',
-        backdropSaturate: '180%',
         display: 'grid',
         gap: '1.5',
         minH: '20',

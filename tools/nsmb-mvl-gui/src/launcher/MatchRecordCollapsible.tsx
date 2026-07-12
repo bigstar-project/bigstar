@@ -53,10 +53,12 @@ export function MatchRecordCollapsible({
   showStageDots?: boolean;
   showStartedAt?: boolean;
 }) {
+  const [open, setOpen] = useState(defaultOpen);
   const latestStage = match.stages.at(-1);
-  const marioWins = latestStage?.mario_match_wins ?? 0;
-  const luigiWins = latestStage?.luigi_match_wins ?? 0;
   const selfSide = sideFromRole(match.role);
+  const opponentSide = oppositeSide(selfSide);
+  const selfWins = matchWinsFor(latestStage, selfSide);
+  const opponentWins = matchWinsFor(latestStage, opponentSide);
   const winner = matchWinner(match);
   const outcome = matchOutcome(match, selfSide);
   const playedStages = match.stages
@@ -78,7 +80,8 @@ export function MatchRecordCollapsible({
           bg: 'black.a3',
         },
       })}
-      defaultOpen={defaultOpen}
+      open={open}
+      onOpenChange={(details) => setOpen(details.open)}
     >
       <Collapsible.Trigger
         className={cx(
@@ -129,9 +132,10 @@ export function MatchRecordCollapsible({
           })}
         >
           <PlayerSummary
-            side="mario"
-            name={match.playerNames.mario}
-            isWinner={winner === 'mario'}
+            side={selfSide}
+            name={match.playerNames[selfSide]}
+            isWinner={winner === selfSide}
+            position="left"
           />
           <div
             className={css({
@@ -144,12 +148,13 @@ export function MatchRecordCollapsible({
               whiteSpace: 'nowrap',
             })}
           >
-            {marioWins} - {luigiWins}
+            {selfWins} - {opponentWins}
           </div>
           <PlayerSummary
-            side="luigi"
-            name={match.playerNames.luigi}
-            isWinner={winner === 'luigi'}
+            side={opponentSide}
+            name={match.playerNames[opponentSide]}
+            isWinner={winner === opponentSide}
+            position="right"
           />
         </div>
         {showStageDots ? <StageDots match={match} selfSide={selfSide} /> : null}
@@ -179,6 +184,7 @@ export function MatchRecordCollapsible({
             <Button
               onClick={() => {
                 const opponentSide = selfSide === 'mario' ? 'luigi' : 'mario';
+                setOpen(false);
                 onSelectOpponent(
                   match.playerIds[opponentSide],
                   match.playerNames[opponentSide],
@@ -199,6 +205,7 @@ export function MatchRecordCollapsible({
             borderRadius: 'l2',
             borderWidth: '1px',
             overflowX: 'auto',
+            overflowY: 'hidden',
           })}
         >
           <table
@@ -232,10 +239,10 @@ export function MatchRecordCollapsible({
                 <StageHeader rowSpan={2}>ステージ</StageHeader>
                 <StageHeader rowSpan={2}>勝者</StageHeader>
                 <StageHeader align="center" colSpan={2}>
-                  マリオ
+                  {match.playerNames[selfSide]}
                 </StageHeader>
                 <StageHeader align="center" colSpan={2}>
-                  ルイージ
+                  {match.playerNames[opponentSide]}
                 </StageHeader>
               </tr>
               <tr
@@ -267,6 +274,7 @@ export function MatchRecordCollapsible({
                   key={`${match.id}-${result.game_index}`}
                   match={match}
                   result={result}
+                  selfSide={selfSide}
                 />
               ))}
             </tbody>
@@ -549,10 +557,12 @@ function OutcomeBadge({ outcome }: { outcome: MatchOutcome }) {
 function PlayerSummary({
   isWinner,
   name,
+  position,
   side,
 }: {
   isWinner: boolean;
   name: string;
+  position: 'left' | 'right';
   side: PlayerSide;
 }) {
   return (
@@ -561,14 +571,15 @@ function PlayerSummary({
         alignItems: 'center',
         display: 'flex',
         gap: '2',
-        justifyContent: side === 'mario' ? 'flex-end' : 'flex-start',
-        justifySelf: side === 'mario' ? 'end' : 'start',
+        justifyContent: position === 'left' ? 'flex-end' : 'flex-start',
+        justifySelf: position === 'left' ? 'end' : 'start',
         maxW: 'full',
         minW: '0',
         overflow: 'hidden',
         whiteSpace: 'nowrap',
         w: 'full',
       })}
+      data-player-position={position}
     >
       <img
         src={side === 'mario' ? playerMBadge : playerLBadge}
@@ -771,16 +782,21 @@ function StageResultTableRow({
   index,
   match,
   result,
+  selfSide,
 }: {
   index: number;
   match: BattleMatchRecord;
   result: MvlStageResult;
+  selfSide: PlayerSide;
 }) {
   const winner = sideFromWinner(result.winner);
   if (!winner) {
     return null;
   }
   const winnerName = match.playerNames[winner];
+  const opponentSide = oppositeSide(selfSide);
+  const selfResult = result[selfSide];
+  const opponentResult = result[opponentSide];
 
   return (
     <tr className={css({ _hover: { bg: 'white.a1' } })}>
@@ -816,21 +832,21 @@ function StageResultTableRow({
         </span>
       </StageCell>
       <StageCell align="center">
-        <StageMetric type="star" value={result.mario.stars} />
+        <StageMetric type="star" value={selfResult.stars} />
       </StageCell>
       <StageCell align="center">
         <StageMetric
           type="life"
-          value={displayLives(result.mario.lives, result.mario.dead)}
+          value={displayLives(selfResult.lives, selfResult.dead)}
         />
       </StageCell>
       <StageCell align="center">
-        <StageMetric type="star" value={result.luigi.stars} />
+        <StageMetric type="star" value={opponentResult.stars} />
       </StageCell>
       <StageCell align="center">
         <StageMetric
           type="life"
-          value={displayLives(result.luigi.lives, result.luigi.dead)}
+          value={displayLives(opponentResult.lives, opponentResult.dead)}
         />
       </StageCell>
     </tr>
@@ -927,6 +943,16 @@ function matchWinner(match: BattleMatchRecord): PlayerSide | null {
 
 function sideFromRole(role: Role): PlayerSide {
   return role === 'host' ? 'mario' : 'luigi';
+}
+
+function oppositeSide(side: PlayerSide): PlayerSide {
+  return side === 'mario' ? 'luigi' : 'mario';
+}
+
+function matchWinsFor(result: MvlStageResult | undefined, side: PlayerSide) {
+  return side === 'mario'
+    ? (result?.mario_match_wins ?? 0)
+    : (result?.luigi_match_wins ?? 0);
 }
 
 function sideFromWinner(winner?: number | null): PlayerSide | null {

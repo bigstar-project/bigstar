@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { parseAsStringLiteral, useQueryState } from 'nuqs';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isDistributionBuild } from '../buildProfile';
 import {
@@ -246,12 +247,11 @@ export function useLauncherController() {
       await relaunch();
     },
   });
-  const [activeView, setActiveView] = useState<View>(() =>
-    window.location.hash === '#settings'
-      ? 'settings'
-      : window.location.hash === '#history'
-        ? 'history'
-        : 'battle',
+  const [activeView, setActiveView] = useQueryState(
+    'view',
+    parseAsStringLiteral(['battle', 'history', 'settings'] as const)
+      .withDefault('battle')
+      .withOptions({ history: 'push' }),
   );
   const [form, setForm] = useState<FormState>(initialForm);
   const [connectionStatus, setConnectionStatus] = useState({
@@ -267,6 +267,7 @@ export function useLauncherController() {
     useState<BridgeDiagnostics | null>(null);
   const [gameStateMismatch, setGameStateMismatch] =
     useState<GameStateMismatch | null>(null);
+
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [roomsError, setRoomsError] = useState<string | null>(null);
@@ -1529,8 +1530,7 @@ export function useLauncherController() {
   };
 
   const changeView = (view: View) => {
-    setActiveView(view);
-    window.history.replaceState(null, '', `#${view}`);
+    void setActiveView(view);
   };
 
   return {

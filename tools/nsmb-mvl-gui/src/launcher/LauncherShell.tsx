@@ -6,15 +6,46 @@ import {
   Wrench,
 } from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
+import { useHotkeys } from 'react-hotkeys-hook';
 import { css, cx } from 'styled-system/css';
 import { token } from 'styled-system/tokens';
 import launcherBg from '../assets/launcher-bg.png';
 import { StatusPill } from '../components/StatusPill';
-import { Button, Tabs } from '../components/ui';
+import { Button, Kbd, Tabs } from '../components/ui';
 import type { StatusKind } from '../types';
 import type { UpdateStatus, View } from './types';
 
 const currentAppVersion = __NSMB_MVL_GUI_VERSION__;
+const viewOrder: View[] = ['battle', 'history', 'settings'];
+
+const sidebarTabClass = css({
+  borderRadius: 'l2',
+  justifyContent: 'flex-start',
+  textAlign: 'left',
+  transition: 'colors',
+  transitionProperty: 'colors',
+  w: 'full',
+  _hover: {
+    bg: 'blue.outline.bg.hover',
+  },
+  '&:hover [data-sidebar-shortcut]': {
+    opacity: '1',
+  },
+  '&[data-selected] svg': {
+    color: 'yellow.plain.fg',
+  },
+  '&[data-selected]': {
+    color: 'fg.default',
+  },
+});
+
+const sidebarShortcutClass = css({
+  color: 'fg.subtle',
+  ml: 'auto',
+  opacity: '0',
+  pointerEvents: 'none',
+  transition: 'common',
+});
 
 function updateButtonLabel(updateStatus: UpdateStatus) {
   if (updateStatus.phase === 'checking') {
@@ -72,7 +103,7 @@ function viewIcon(view: View) {
   if (view === 'battle') {
     return (
       <Flag
-        className={css({ color: 'red.plain.fg' })}
+        className={css({ color: 'blue.plain.fg' })}
         size={28}
         weight="fill"
       />
@@ -81,14 +112,14 @@ function viewIcon(view: View) {
   if (view === 'history') {
     return (
       <ClockCounterClockwise
-        className={css({ color: 'yellow.plain.fg' })}
+        className={css({ color: 'blue.plain.fg' })}
         size={28}
         weight="fill"
       />
     );
   }
   return (
-    <Gear className={css({ color: 'fg.muted' })} size={28} weight="fill" />
+    <Gear className={css({ color: 'blue.plain.fg' })} size={28} weight="fill" />
   );
 }
 
@@ -100,16 +131,6 @@ function viewTitle(view: View) {
     return '対戦履歴';
   }
   return '設定';
-}
-
-function viewDescription(view: View) {
-  if (view === 'battle') {
-    return 'オンラインでライバルと対戦しよう！';
-  }
-  if (view === 'history') {
-    return 'これまでの試合結果を確認しましょう';
-  }
-  return 'オンライン対戦の環境を整えましょう';
 }
 
 export function LauncherShell({
@@ -133,8 +154,32 @@ export function LauncherShell({
   updateBusy: boolean;
   updateStatus: UpdateStatus;
 }) {
+  useHotkeys(
+    ['ctrl+1', 'ctrl+2', 'ctrl+3'],
+    (event) => {
+      const view = viewOrder[Number(event.key) - 1];
+      if (view) onViewChange(view);
+    },
+    { enableOnFormTags: false, preventDefault: true },
+    [onViewChange],
+  );
+
+  useHotkeys(
+    ['ctrl+tab', 'ctrl+shift+tab'],
+    (event) => {
+      const currentIndex = viewOrder.indexOf(activeView);
+      const direction = event.shiftKey ? -1 : 1;
+      const nextIndex =
+        (currentIndex + direction + viewOrder.length) % viewOrder.length;
+      onViewChange(viewOrder[nextIndex]);
+    },
+    { enableOnFormTags: false, preventDefault: true },
+    [activeView, onViewChange],
+  );
+
   return (
     <Tabs.Root
+      colorPalette="gray"
       className={css({
         backgroundImage: `linear-gradient(180deg, rgba(3, 10, 20, 0.36) 0%, rgba(3, 10, 20, 0.22) 42%, rgba(3, 10, 20, 0.58) 100%), url(${launcherBg})`,
         backgroundAttachment: 'fixed',
@@ -142,18 +187,22 @@ export function LauncherShell({
         backgroundRepeat: 'no-repeat',
         backgroundSize: 'cover',
         color: 'fg.default',
-        minH: 'screen',
+        h: 'full',
+        overflow: 'hidden',
         w: 'full',
       })}
       orientation="vertical"
+      size="md"
       value={activeView}
+      variant="subtle"
       onValueChange={(details) => onViewChange(details.value as View)}
     >
       <main
         className={css({
           display: 'grid',
           gridTemplateColumns: `${token('sizes.sidebar')} minmax(0, 1fr)`,
-          minH: 'screen',
+          h: 'full',
+          minH: '0',
           w: 'full',
         })}
         style={{
@@ -171,11 +220,9 @@ export function LauncherShell({
             bg: 'app.sidebar',
             borderRightWidth: '1px',
             display: 'grid',
-            h: 'screen',
+            h: 'full',
             px: '3',
             py: '4',
-            position: 'sticky',
-            top: '0',
           })}
         >
           <div
@@ -235,42 +282,16 @@ export function LauncherShell({
                 className={css({
                   display: 'grid',
                   gap: '2',
+                  position: 'relative',
                 })}
               >
                 <Tabs.Trigger
                   aria-label="対戦"
-                  className={css({
-                    alignItems: 'center',
-                    borderColor: 'transparent',
-                    borderRadius: 'l2',
-                    borderWidth: '1px',
-                    color: 'fg.muted',
-                    display: 'flex',
-                    fontWeight: 'black',
-                    gap: '2.5',
-                    minH: '10',
-                    outline: 'none',
-                    px: '3',
-                    textAlign: 'left',
-                    transition: 'common',
-                    _hover: {
-                      bg: 'blue.subtle.bg',
-                      borderColor: 'blue.outline.border',
-                    },
-                    '&[data-selected]': {
-                      bg: 'blue.subtle.bg',
-                      borderColor: 'blue.solid.bg',
-                      color: 'fg.default',
-                    },
-                    '&[data-selected] svg': {
-                      color: 'yellow.plain.fg',
-                    },
-                  })}
+                  className={sidebarTabClass}
                   value="battle"
                 >
                   <FlagCheckered
                     className={css({
-                      color: 'fg.muted',
                       flexShrink: '0',
                     })}
                     size={22}
@@ -283,41 +304,23 @@ export function LauncherShell({
                   >
                     対戦
                   </span>
+                  <Kbd
+                    className={sidebarShortcutClass}
+                    colorPalette="gray"
+                    data-sidebar-shortcut
+                    size="sm"
+                    variant="surface"
+                  >
+                    Ctrl+1
+                  </Kbd>
                 </Tabs.Trigger>
                 <Tabs.Trigger
                   aria-label="対戦履歴"
-                  className={css({
-                    alignItems: 'center',
-                    borderColor: 'transparent',
-                    borderRadius: 'l2',
-                    borderWidth: '1px',
-                    color: 'fg.muted',
-                    display: 'flex',
-                    fontWeight: 'black',
-                    gap: '2.5',
-                    minH: '10',
-                    outline: 'none',
-                    px: '3',
-                    textAlign: 'left',
-                    transition: 'common',
-                    _hover: {
-                      bg: 'blue.subtle.bg',
-                      borderColor: 'blue.outline.border',
-                    },
-                    '&[data-selected]': {
-                      bg: 'blue.subtle.bg',
-                      borderColor: 'blue.solid.bg',
-                      color: 'fg.default',
-                    },
-                    '&[data-selected] svg': {
-                      color: 'yellow.plain.fg',
-                    },
-                  })}
+                  className={sidebarTabClass}
                   value="history"
                 >
                   <ClockCounterClockwise
                     className={css({
-                      color: 'fg.muted',
                       flexShrink: '0',
                     })}
                     size={22}
@@ -330,41 +333,23 @@ export function LauncherShell({
                   >
                     履歴
                   </span>
+                  <Kbd
+                    className={sidebarShortcutClass}
+                    colorPalette="gray"
+                    data-sidebar-shortcut
+                    size="sm"
+                    variant="surface"
+                  >
+                    Ctrl+2
+                  </Kbd>
                 </Tabs.Trigger>
                 <Tabs.Trigger
                   aria-label="設定"
-                  className={css({
-                    alignItems: 'center',
-                    borderColor: 'transparent',
-                    borderRadius: 'l2',
-                    borderWidth: '1px',
-                    color: 'fg.muted',
-                    display: 'flex',
-                    fontWeight: 'black',
-                    gap: '2.5',
-                    minH: '10',
-                    outline: 'none',
-                    px: '3',
-                    textAlign: 'left',
-                    transition: 'common',
-                    _hover: {
-                      bg: 'blue.subtle.bg',
-                      borderColor: 'blue.outline.border',
-                    },
-                    '&[data-selected]': {
-                      bg: 'blue.subtle.bg',
-                      borderColor: 'blue.solid.bg',
-                      color: 'fg.default',
-                    },
-                    '&[data-selected] svg': {
-                      color: 'yellow.plain.fg',
-                    },
-                  })}
+                  className={sidebarTabClass}
                   value="settings"
                 >
                   <Gear
                     className={css({
-                      color: 'fg.muted',
                       flexShrink: '0',
                     })}
                     size={22}
@@ -377,7 +362,17 @@ export function LauncherShell({
                   >
                     設定
                   </span>
+                  <Kbd
+                    className={sidebarShortcutClass}
+                    colorPalette="gray"
+                    data-sidebar-shortcut
+                    size="sm"
+                    variant="surface"
+                  >
+                    Ctrl+3
+                  </Kbd>
                 </Tabs.Trigger>
+                <Tabs.Indicator className={css({ bg: 'blue.subtle.bg' })} />
               </Tabs.List>
             </div>
             <div
@@ -437,7 +432,9 @@ export function LauncherShell({
           className={css({
             backgroundImage:
               'linear-gradient(180deg, rgba(7, 17, 31, 0.5) 0%, rgba(10, 21, 38, 0.38) 58%, rgba(6, 11, 20, 0.58) 100%)',
+            h: 'full',
             minW: '0',
+            overflowY: 'auto',
           })}
         >
           <div
@@ -459,12 +456,7 @@ export function LauncherShell({
                 justifyContent: 'space-between',
               })}
             >
-              <div
-                className={css({
-                  display: 'grid',
-                  gap: '1',
-                })}
-              >
+              <div>
                 <div
                   className={css({
                     alignItems: 'center',
@@ -476,22 +468,13 @@ export function LauncherShell({
                   <h1
                     className={css({
                       color: 'fg.default',
-                      fontWeight: 'black',
+                      fontWeight: 'bold',
                       textStyle: '2xl',
                     })}
                   >
                     {viewTitle(activeView)}
                   </h1>
                 </div>
-                <p
-                  className={css({
-                    color: 'fg.muted',
-                    fontWeight: 'semibold',
-                    textStyle: 'sm',
-                  })}
-                >
-                  {viewDescription(activeView)}
-                </p>
               </div>
               <div
                 className={css({

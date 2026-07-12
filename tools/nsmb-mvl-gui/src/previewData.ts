@@ -41,7 +41,7 @@ export const previewRomIdentity = {
     '5555555555555555555555555555555555555555555555555555555555555555',
 };
 
-export const previewMatchHistoryKey = 'nsmb-mvl-preview-match-history-v2';
+export const previewMatchHistoryKey = 'nsmb-mvl-preview-match-history-v3';
 
 const previewMatchSettings = {
   big_stars: 10,

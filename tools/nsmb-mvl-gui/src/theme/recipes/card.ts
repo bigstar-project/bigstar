@@ -55,7 +55,19 @@ export const card = defineSlotRecipe({
       outline: {
         root: {
           bg: 'gray.surface.bg',
+          borderColor: 'gray.surface.border',
           borderWidth: '1px',
+        },
+      },
+      glass: {
+        root: {
+          bg: 'app.card',
+          backdropFilter: 'auto',
+          backdropBlur: 'md',
+          backdropSaturate: '180%',
+          borderColor: 'gray.surface.border',
+          borderWidth: '1px',
+          boxShadow: 'panel',
         },
       },
       subtle: {

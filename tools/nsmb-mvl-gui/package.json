@@ -18,7 +18,7 @@
     "ci": "tsc --noEmit && biome check . && vitest --config vitest.config.ts run && vitest --config vitest.browser.config.ts run && playwright test",
     "vite:build": "vite build",
     "vite:dev": "vite --host 127.0.0.1",
-    "preview:browser": "vite --host 127.0.0.1"
+    "preview:browser": "vite --host 127.0.0.1 --port 1421"
   },
   "dependencies": {
     "@ark-ui/react": "^5.37.0",
@@ -32,8 +32,10 @@
     "@tauri-apps/plugin-window-state": "~2.4.1",
     "hono": "^4.12.23",
     "lucide-react": "^1.17.0",
+    "nuqs": "2.9.0",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "react-hotkeys-hook": "^5.3.3"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.12",

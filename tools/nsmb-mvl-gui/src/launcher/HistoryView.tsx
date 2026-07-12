@@ -10,8 +10,10 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
-import { css } from 'styled-system/css';
+import { parseAsString, parseAsStringLiteral, useQueryStates } from 'nuqs';
+import { useMemo } from 'react';
+import { css, cx } from 'styled-system/css';
+import { surface } from 'styled-system/recipes';
 import { SelectField } from '../components/Fields';
 import { Button, Tabs } from '../components/ui';
 import { hasPlayedResult } from '../matchHistory';
@@ -41,6 +43,7 @@ type PeriodValue =
   | 'days7'
   | 'days30'
   | 'all';
+type StageValue = 'all' | '0' | '1' | '2' | '3' | '4';
 
 export function HistoryView({
   matches,
@@ -55,13 +58,46 @@ export function HistoryView({
   onOpenLogDir?: (logDir: string) => Promise<void> | void;
   onUploadLogArchive?: (logDir: string) => Promise<void> | void;
 }) {
-  const [period, setPeriod] = useState<PeriodValue>('all');
-  const [opponentId, setOpponentId] = useState('all');
-  const [opponentName, setOpponentName] = useState<string | null>(null);
-  const [stage, setStage] = useState('all');
-  const [outcome, setOutcome] = useState<'all' | MatchHistoryOutcome>(
-    'completed',
+  const [filters, setFilters] = useQueryStates(
+    {
+      period: parseAsStringLiteral([
+        'recent10',
+        'recent30',
+        'recent100',
+        'days7',
+        'days30',
+        'all',
+      ] as const).withDefault('all'),
+      opponent: parseAsString.withDefault('all'),
+      opponentName: parseAsString,
+      stage: parseAsStringLiteral([
+        'all',
+        '0',
+        '1',
+        '2',
+        '3',
+        '4',
+      ] as const).withDefault('all'),
+      outcome: parseAsStringLiteral([
+        'all',
+        'completed',
+        'win',
+        'loss',
+        'stopped',
+      ] as const).withDefault('completed'),
+    },
+    {
+      history: 'push',
+      urlKeys: { opponentName: 'name' },
+    },
   );
+  const {
+    period,
+    opponent: opponentId,
+    opponentName,
+    stage,
+    outcome,
+  } = filters;
   const queryClient = useQueryClient();
 
   const opponentsQuery = useQuery(matchHistoryOpponentsOptions(matches));
@@ -122,11 +158,21 @@ export function HistoryView({
   const visibleMatches = (page?.matches ?? []).filter(hasPlayedResult);
   const groupedMatches = groupMatchesByDate(visibleMatches);
 
+  const navigateToOpponent = (playerId: string, playerName: string | null) => {
+    void setFilters({
+      opponent: playerId,
+      opponentName: playerId === 'all' ? null : playerName,
+    });
+  };
+
   const selectOpponent = (playerId: string, playerName: string) => {
     if (!playerId) return;
-    setOpponentId(playerId);
-    setOpponentName(playerName);
-    setOutcome('completed');
+    void setFilters({
+      opponent: playerId,
+      opponentName: playerName,
+      outcome: 'completed',
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const loadMore = () => historyQuery.fetchNextPage();
@@ -149,8 +195,7 @@ export function HistoryView({
             <Button
               aria-label="全対戦履歴に戻る"
               onClick={() => {
-                setOpponentId('all');
-                setOpponentName(null);
+                navigateToOpponent('all', null);
               }}
               size="xs"
               variant="plain"
@@ -178,39 +223,57 @@ export function HistoryView({
           period={period}
           stage={stage}
           onOpponentChange={(value) => {
-            setOpponentId(value);
-            setOpponentName(
+            navigateToOpponent(
+              value,
               opponents.find((opponent) => opponent.playerId === value)
                 ?.latestName ?? null,
             );
           }}
-          onOutcomeChange={setOutcome}
-          onPeriodChange={setPeriod}
-          onStageChange={setStage}
+          onOutcomeChange={(value) => void setFilters({ outcome: value })}
+          onPeriodChange={(value) => void setFilters({ period: value })}
+          onStageChange={(value) => void setFilters({ stage: value })}
           onReset={() => {
-            setPeriod('all');
-            setOpponentId('all');
-            setOpponentName(null);
-            setStage('all');
-            setOutcome('completed');
+            void setFilters({
+              period: 'all',
+              opponent: 'all',
+              opponentName: null,
+              stage: 'all',
+              outcome: 'completed',
+            });
           }}
         />
 
         {error ? (
           <div
             className={css({
+              alignItems: 'center',
               bg: 'red.subtle.bg',
               borderColor: 'red.outline.border',
               borderRadius: 'l2',
               borderWidth: '1px',
               color: 'red.subtle.fg',
-              fontWeight: 'bold',
+              display: 'flex',
+              fontWeight: 'semibold',
+              gap: '3',
+              justifyContent: 'space-between',
               px: '3',
               py: '2',
               textStyle: 'sm',
             })}
           >
-            戦績を読み込めませんでした: {String(error)}
+            <span>戦績を読み込めませんでした。</span>
+            <Button
+              colorPalette="red"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                void opponentsQuery.refetch();
+                void dashboardQuery.refetch();
+                void historyQuery.refetch();
+              }}
+            >
+              再読み込み
+            </Button>
           </div>
         ) : null}
 
@@ -322,26 +385,25 @@ function HistoryFilters({
   opponents: MatchHistoryOpponent[];
   outcome: 'all' | MatchHistoryOutcome;
   period: PeriodValue;
-  stage: string;
+  stage: StageValue;
   onOpponentChange: (value: string) => void;
   onOutcomeChange: (value: 'all' | MatchHistoryOutcome) => void;
   onPeriodChange: (value: PeriodValue) => void;
   onReset: () => void;
-  onStageChange: (value: string) => void;
+  onStageChange: (value: StageValue) => void;
 }) {
   return (
     <div
-      className={css({
-        alignItems: 'end',
-        bg: 'app.card',
-        borderColor: 'gray.surface.border',
-        borderRadius: 'l2',
-        borderWidth: '1px',
-        display: 'grid',
-        gap: '2',
-        gridTemplateColumns: 'repeat(4, minmax(0, 1fr)) auto',
-        p: '3',
-      })}
+      className={cx(
+        surface(),
+        css({
+          alignItems: 'end',
+          display: 'grid',
+          gap: '2',
+          gridTemplateColumns: 'repeat(4, minmax(0, 1fr)) auto',
+          p: '3',
+        }),
+      )}
     >
       <FilterSelect
         label="期間"
@@ -374,7 +436,7 @@ function HistoryFilters({
       <FilterSelect
         label="ステージ"
         value={stage}
-        onChange={onStageChange}
+        onChange={(value) => onStageChange(value as StageValue)}
         options={[
           ['all', 'すべて'],
           ...[0, 1, 2, 3, 4].map(
@@ -457,20 +519,15 @@ function StatisticsDashboard({
           value={`${summary.wins}勝 ${summary.losses}敗`}
           note={`${summary.stopped}中断`}
         />
+        <StatCard label="対戦勝率" value={matchRate} note="中断を除いて算出" />
         <StatCard
-          label="対戦勝率"
-          value={matchRate}
-          note="完了した対戦のみ"
-          accent
-        />
-        <StatCard
-          label="現在の調子"
+          label="直近の連続結果"
           value={
             summary.streakKind
               ? `${summary.streak}${summary.streakKind === 'win' ? '連勝' : '連敗'}`
               : '—'
           }
-          note="最新の完了対戦から"
+          note="完了した対戦を集計"
         />
         <StatCard
           label={
@@ -480,7 +537,6 @@ function StatisticsDashboard({
           }
           value={gameRate}
           note={`${summary.gameWins}勝 ${summary.gameLosses}敗`}
-          accent
         />
       </div>
       <div
@@ -498,28 +554,26 @@ function StatisticsDashboard({
 }
 
 function StatCard({
-  accent = false,
   label,
   note,
   value,
 }: {
-  accent?: boolean;
   label: string;
   note: string;
   value: string;
 }) {
   return (
     <div
-      className={css({
-        bg: 'app.card',
-        borderColor: accent ? 'blue.outline.border' : 'gray.surface.border',
-        borderRadius: 'l2',
-        borderWidth: '1px',
-        display: 'grid',
-        gap: '1',
-        minH: '24',
-        p: '3',
-      })}
+      className={cx(
+        surface(),
+        css({
+          borderColor: 'gray.surface.border',
+          display: 'grid',
+          gap: '1',
+          minH: '24',
+          p: '3',
+        }),
+      )}
     >
       <span
         className={css({
@@ -532,7 +586,7 @@ function StatCard({
       </span>
       <strong
         className={css({
-          color: accent ? 'blue.plain.fg' : 'fg.default',
+          color: 'fg.default',
           fontSize: '2xl',
           fontWeight: 'black',
           lineHeight: 'tight',
@@ -564,8 +618,8 @@ function WinRateChart({ points }: { points: MatchHistoryDashboard['trend'] }) {
         })}
       >
         <div>
-          <h3 className={panelTitleClassName}>最近の勝率推移</h3>
-          <p className={panelNoteClassName}>直近10対戦の移動勝率</p>
+          <h3 className={panelTitleClassName}>10戦勝率の推移</h3>
+          <p className={panelNoteClassName}>完了した対戦のみ</p>
         </div>
         <ChartLineUp
           className={css({ color: 'blue.plain.fg' })}
@@ -631,7 +685,7 @@ function WinRateChart({ points }: { points: MatchHistoryDashboard['trend'] }) {
               className={css({ color: 'blue.solid.bg' })}
               strokeLinecap="round"
               strokeLinejoin="round"
-              strokeWidth="2"
+              strokeWidth="1.25"
             />
             {coordinates.map(({ point, x, y }) => (
               <circle
@@ -644,7 +698,7 @@ function WinRateChart({ points }: { points: MatchHistoryDashboard['trend'] }) {
                   color: point.won ? 'yellow.solid.bg' : 'red.solid.bg',
                 })}
               >
-                <title>{`${formatDate(point.startedAt)} ${point.opponentName} ${point.won ? '勝利' : '敗北'}・移動勝率${Math.round((point.rollingWinRate ?? 0) * 100)}%`}</title>
+                <title>{`${formatDate(point.startedAt)} ${point.opponentName} ${point.won ? '勝利' : '敗北'}・この対戦までの直近10戦 ${Math.round((point.rollingWinRate ?? 0) * 100)}%`}</title>
               </circle>
             ))}
           </svg>
@@ -748,19 +802,18 @@ function EmptyAnalysis({ message }: { message: string }) {
 function LoadingCard() {
   return (
     <div
-      className={css({
-        alignItems: 'center',
-        bg: 'app.card',
-        borderColor: 'gray.surface.border',
-        borderRadius: 'l2',
-        borderWidth: '1px',
-        color: 'fg.muted',
-        display: 'flex',
-        gap: '2',
-        justifyContent: 'center',
-        minH: '32',
-        textStyle: 'sm',
-      })}
+      className={cx(
+        surface(),
+        css({
+          alignItems: 'center',
+          color: 'fg.muted',
+          display: 'flex',
+          gap: '2',
+          justifyContent: 'center',
+          minH: '32',
+          textStyle: 'sm',
+        }),
+      )}
     >
       <SpinnerGap className={css({ animation: 'spin' })} size={20} />
       対戦履歴を読み込んでいます
@@ -798,32 +851,22 @@ function DateGroupHeader({ label }: { label: string }) {
   );
 }
 
-const historyCardClassName = css({
-  bg: 'app.card',
-  backdropFilter: 'auto',
-  backdropBlur: 'md',
-  backdropSaturate: '180%',
-  borderColor: 'gray.surface.border',
-  borderRadius: 'l2',
-  borderWidth: '1px',
-  overflow: 'hidden',
-});
+const historyCardClassName = cx(surface(), css({ overflow: 'hidden' }));
 
-const panelClassName = css({
-  bg: 'app.card',
-  borderColor: 'gray.surface.border',
-  borderRadius: 'l2',
-  borderWidth: '1px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '3',
-  minH: '56',
-  p: '3',
-});
+const panelClassName = cx(
+  surface(),
+  css({
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '3',
+    minH: '56',
+    p: '3',
+  }),
+);
 
 const panelTitleClassName = css({
   color: 'fg.default',
-  fontWeight: 'black',
+  fontWeight: 'semibold',
   textStyle: 'md',
 });
 const panelNoteClassName = css({ color: 'fg.muted', textStyle: 'xs' });

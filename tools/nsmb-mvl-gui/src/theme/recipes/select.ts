@@ -12,7 +12,10 @@ export const select = defineSlotRecipe({
       width: 'full',
     },
     content: {
-      background: 'gray.surface.bg',
+      background: 'app.card',
+      backdropFilter: 'auto',
+      backdropBlur: 'md',
+      backdropSaturate: '180%',
       borderRadius: 'l2',
       boxShadow: 'md',
       display: 'flex',
@@ -21,7 +24,7 @@ export const select = defineSlotRecipe({
       minWidth: 'max(var(--reference-width), {sizes.40})',
       outline: 0,
       overflowY: 'auto',
-      zIndex: 'dropdown',
+      zIndex: 'popover',
       _open: {
         animationStyle: 'slide-fade-in',
         animationDuration: 'slow',

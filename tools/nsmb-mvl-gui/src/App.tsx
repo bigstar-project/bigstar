@@ -1,3 +1,5 @@
+import { css } from 'styled-system/css';
+import { AppTitlebar } from './components/AppTitlebar';
 import { BattleView } from './launcher/BattleView';
 import { HistoryView } from './launcher/HistoryView';
 import { LauncherShell } from './launcher/LauncherShell';
@@ -14,9 +16,11 @@ export function App() {
       !launcher.onboarding.playerNameConfigured);
 
   return (
-    <>
+    <div className={css({ h: 'dvh', overflow: 'hidden' })}>
+      <AppTitlebar />
       <div
         aria-hidden={onboardingOpen ? true : undefined}
+        className={css({ h: '[calc(100dvh - 2rem)]', overflow: 'hidden' })}
         inert={onboardingOpen ? true : undefined}
       >
         <LauncherShell
@@ -36,7 +40,6 @@ export function App() {
               gameStateMismatch: launcher.gameStateMismatch,
             }}
             form={launcher.form}
-            lastLogDir={launcher.lastLogDir}
             matchmakingRooms={launcher.matchmakingRooms}
             currentMatch={launcher.currentMatch}
             summary={launcher.summary}
@@ -63,6 +66,6 @@ export function App() {
         onboarding={launcher.onboarding}
         updateField={launcher.updateField}
       />
-    </>
+    </div>
   );
 }

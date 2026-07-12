@@ -5,7 +5,8 @@ import {
   UserCircle,
 } from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
-import { css } from 'styled-system/css';
+import { css, cx } from 'styled-system/css';
+import { surface } from 'styled-system/recipes';
 import { TextField } from '../components/Fields';
 import { Button, Dialog } from '../components/ui';
 import type { FormState, StatusKind } from '../types';
@@ -67,21 +68,23 @@ function StepRow({
 }) {
   return (
     <section
-      className={css({
-        alignItems: 'center',
-        bg: 'gray.surface.bg',
-        borderColor: complete ? 'green.outline.border' : 'gray.surface.border',
-        borderRadius: 'l2',
-        borderWidth: '1px',
-        display: 'grid',
-        gap: '3',
-        gridTemplateColumns: {
-          base: '1fr',
-          md: 'auto minmax(0, 1fr) auto',
-        },
-        opacity: disabled ? '0.56' : '1',
-        p: '3',
-      })}
+      className={cx(
+        surface({ variant: 'inset' }),
+        css({
+          alignItems: 'center',
+          borderColor: complete
+            ? 'green.outline.border'
+            : 'gray.surface.border',
+          display: 'grid',
+          gap: '3',
+          gridTemplateColumns: {
+            base: '1fr',
+            md: 'auto minmax(0, 1fr) auto',
+          },
+          opacity: disabled ? '0.56' : '1',
+          p: '3',
+        }),
+      )}
     >
       <div
         className={css({
@@ -119,7 +122,7 @@ function StepRow({
           <h2
             className={css({
               color: 'fg.default',
-              fontWeight: 'black',
+              fontWeight: 'semibold',
               textStyle: 'md',
             })}
           >
