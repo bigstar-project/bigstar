@@ -10,7 +10,14 @@ export default defineConfig({
   optimizeDeps: {
     include: ['@ark-ui/react/collapsible', '@tauri-apps/api/window'],
   },
-  plugins: [react(), tsconfigPaths()],
+  plugins: [
+    react({
+      babel: {
+        plugins: ['babel-plugin-react-compiler'],
+      },
+    }),
+    tsconfigPaths(),
+  ],
   test: {
     include: ['src/**/*.browser.test.{ts,tsx}'],
     browser: {

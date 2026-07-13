@@ -219,6 +219,44 @@ describe('履歴ビュー', () => {
     ).toBeNull();
   });
 
+  test('対戦の詳細DOMを初回展開まで生成しない', async () => {
+    const screen = await render(
+      <HistoryTestProviders>
+        <HistoryView matches={previewMatchHistory()} />
+      </HistoryTestProviders>,
+    );
+
+    const details = () =>
+      document.querySelectorAll(
+        '[data-scope="collapsible"][data-part="content"]',
+      );
+
+    expect(details()).toHaveLength(0);
+    expect(document.querySelectorAll('th')).toHaveLength(0);
+
+    const triggerContent = screen.getByText('3 - 1');
+    await triggerContent.click();
+    await vi.waitFor(() =>
+      expect(document.querySelectorAll('th').length).toBeGreaterThan(0),
+    );
+    expect(details()).toHaveLength(1);
+
+    const detailsElement = details().item(0) as HTMLElement;
+    const detailsBody = detailsElement.querySelector(
+      '[data-match-details-body]',
+    ) as HTMLElement;
+    expect(detailsElement.className).not.toContain('py_3');
+    expect(detailsElement.className).not.toContain('bd-t-w_1px');
+    expect(detailsBody.className).toContain('py_3');
+    expect(detailsBody.className).toContain('bd-t-w_1px');
+
+    await triggerContent.click();
+    await vi.waitFor(() =>
+      expect(details().item(0)?.getAttribute('data-state')).toBe('closed'),
+    );
+    expect(details()).toHaveLength(1);
+  });
+
   test('未プレイだけの対戦は履歴に表示しない', async () => {
     const [playedMatch] = previewMatchHistory();
     const unplayedMatch = {

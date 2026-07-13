@@ -14,7 +14,14 @@ export default defineConfig({
     'globalThis.__NSMB_MVL_BUILD_PROFILE__': JSON.stringify(buildProfile),
     __NSMB_MVL_GUI_VERSION__: JSON.stringify(packageJson.version),
   },
-  plugins: [react(), tsconfigPaths()],
+  plugins: [
+    react({
+      babel: {
+        plugins: ['babel-plugin-react-compiler'],
+      },
+    }),
+    tsconfigPaths(),
+  ],
   server: {
     host: '127.0.0.1',
     port: 1420,

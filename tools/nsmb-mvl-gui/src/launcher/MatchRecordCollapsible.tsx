@@ -74,6 +74,8 @@ export function MatchRecordCollapsible({
       className={css({
         borderBottomColor: 'gray.surface.border',
         borderBottomWidth: '1px',
+        containIntrinsicSize: '[auto 4.5rem]',
+        contentVisibility: 'auto',
         display: 'grid',
         _last: { borderBottomWidth: '0' },
         '&[data-state=open]': {
@@ -81,6 +83,7 @@ export function MatchRecordCollapsible({
         },
       })}
       open={open}
+      lazyMount
       onOpenChange={(details) => setOpen(details.open)}
     >
       <Collapsible.Trigger
@@ -171,173 +174,182 @@ export function MatchRecordCollapsible({
       </Collapsible.Trigger>
       <Collapsible.Content
         className={css({
-          borderTopColor: 'gray.surface.border',
-          borderTopWidth: '1px',
-          display: 'grid',
-          gap: '2',
-          px: '4',
-          py: '3',
+          contain: 'layout paint',
         })}
       >
-        {onSelectOpponent ? (
-          <div className={css({ display: 'flex', justifyContent: 'flex-end' })}>
-            <Button
-              onClick={() => {
-                const opponentSide = selfSide === 'mario' ? 'luigi' : 'mario';
-                setOpen(false);
-                onSelectOpponent(
-                  match.playerIds[opponentSide],
-                  match.playerNames[opponentSide],
-                );
-              }}
-              size="xs"
-              variant="plain"
-            >
-              <ChartLineUp size={16} weight="bold" />
-              {match.playerNames[selfSide === 'mario' ? 'luigi' : 'mario']}
-              との戦績を見る
-            </Button>
-          </div>
-        ) : null}
         <div
           className={css({
-            borderColor: 'gray.surface.border',
-            borderRadius: 'l2',
-            borderWidth: '1px',
-            overflowX: 'auto',
-            overflowY: 'hidden',
+            borderTopColor: 'gray.surface.border',
+            borderTopWidth: '1px',
+            display: 'grid',
+            gap: '2',
+            px: '4',
+            py: '3',
           })}
+          data-match-details-body=""
         >
-          <table
-            className={css({
-              borderCollapse: 'collapse',
-              minW: '[28rem]',
-              tableLayout: 'fixed',
-              textStyle: 'xs',
-              w: 'full',
-            })}
-          >
-            <colgroup>
-              <col className={css({ w: '[3.25rem]' })} />
-              <col className={css({ w: '[4.25rem]' })} />
-              <col className={css({ w: '[7rem]' })} />
-              <col className={css({ w: '[3.25rem]' })} />
-              <col className={css({ w: '[3.25rem]' })} />
-              <col className={css({ w: '[3.25rem]' })} />
-              <col className={css({ w: '[3.25rem]' })} />
-            </colgroup>
-            <thead>
-              <tr
-                className={css({
-                  bg: 'white.a1',
-                  color: 'fg.muted',
-                  fontWeight: 'black',
-                  textAlign: 'left',
-                })}
+          {onSelectOpponent ? (
+            <div
+              className={css({ display: 'flex', justifyContent: 'flex-end' })}
+            >
+              <Button
+                onClick={() => {
+                  const opponentSide = selfSide === 'mario' ? 'luigi' : 'mario';
+                  setOpen(false);
+                  onSelectOpponent(
+                    match.playerIds[opponentSide],
+                    match.playerNames[opponentSide],
+                  );
+                }}
+                size="xs"
+                variant="plain"
               >
-                <StageHeader rowSpan={2}>ゲーム</StageHeader>
-                <StageHeader rowSpan={2}>ステージ</StageHeader>
-                <StageHeader rowSpan={2}>勝者</StageHeader>
-                <StageHeader align="center" colSpan={2}>
-                  {match.playerNames[selfSide]}
-                </StageHeader>
-                <StageHeader align="center" colSpan={2}>
-                  {match.playerNames[opponentSide]}
-                </StageHeader>
-              </tr>
-              <tr
-                className={css({
-                  bg: 'white.a1',
-                  color: 'fg.muted',
-                  fontWeight: 'black',
-                  textAlign: 'left',
-                })}
-              >
-                <StageHeader align="center" compact>
-                  スター
-                </StageHeader>
-                <StageHeader align="center" compact>
-                  ライフ
-                </StageHeader>
-                <StageHeader align="center" compact>
-                  スター
-                </StageHeader>
-                <StageHeader align="center" compact>
-                  ライフ
-                </StageHeader>
-              </tr>
-            </thead>
-            <tbody>
-              {playedStages.map(({ index, result }) => (
-                <StageResultTableRow
-                  index={index}
-                  key={`${match.id}-${result.game_index}`}
-                  match={match}
-                  result={result}
-                  selfSide={selfSide}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {match.logDir || onDelete ? (
+                <ChartLineUp size={16} weight="bold" />
+                {match.playerNames[selfSide === 'mario' ? 'luigi' : 'mario']}
+                との戦績を見る
+              </Button>
+            </div>
+          ) : null}
           <div
             className={css({
-              alignItems: { base: 'stretch', md: 'center' },
-              display: 'grid',
-              gap: '2',
-              gridTemplateColumns: { base: '1fr', md: 'minmax(0, 1fr) auto' },
+              borderColor: 'gray.surface.border',
+              borderRadius: 'l2',
+              borderWidth: '1px',
+              overflowX: 'auto',
+              overflowY: 'hidden',
             })}
           >
-            {match.logDir ? (
-              <code
-                className={css({
-                  color: 'fg.subtle',
-                  fontFamily: 'mono',
-                  fontWeight: 'semibold',
-                  minW: '0',
-                  overflowWrap: 'anywhere',
-                  textStyle: 'xs',
-                })}
-              >
-                {match.logDir}
-              </code>
-            ) : (
-              <span />
-            )}
-            <div
+            <table
               className={css({
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: '2',
-                justifyContent: { base: 'flex-start', md: 'flex-end' },
+                borderCollapse: 'collapse',
+                minW: '[28rem]',
+                tableLayout: 'fixed',
+                textStyle: 'xs',
+                w: 'full',
               })}
             >
-              {match.logDir && onOpenLogDir ? (
-                <LogActionButton
-                  icon={<FolderOpen size={16} weight="bold" />}
-                  label="ログを開く"
-                  onClick={onOpenLogDir}
-                />
-              ) : null}
-              {match.logDir && onCreateLogArchive ? (
-                <LogActionButton
-                  icon={<FileZip size={16} weight="bold" />}
-                  label="zipを作成"
-                  onClick={onCreateLogArchive}
-                />
-              ) : null}
-              {match.logDir && onUploadLogArchive ? (
-                <LogActionButton
-                  icon={<CloudArrowUp size={16} weight="bold" />}
-                  label="ログを送信"
-                  onClick={onUploadLogArchive}
-                />
-              ) : null}
-              {onDelete ? <DeleteMatchButton onDelete={onDelete} /> : null}
-            </div>
+              <colgroup>
+                <col className={css({ w: '[3.25rem]' })} />
+                <col className={css({ w: '[4.25rem]' })} />
+                <col className={css({ w: '[7rem]' })} />
+                <col className={css({ w: '[3.25rem]' })} />
+                <col className={css({ w: '[3.25rem]' })} />
+                <col className={css({ w: '[3.25rem]' })} />
+                <col className={css({ w: '[3.25rem]' })} />
+              </colgroup>
+              <thead>
+                <tr
+                  className={css({
+                    bg: 'white.a1',
+                    color: 'fg.muted',
+                    fontWeight: 'black',
+                    textAlign: 'left',
+                  })}
+                >
+                  <StageHeader rowSpan={2}>ゲーム</StageHeader>
+                  <StageHeader rowSpan={2}>ステージ</StageHeader>
+                  <StageHeader rowSpan={2}>勝者</StageHeader>
+                  <StageHeader align="center" colSpan={2}>
+                    {match.playerNames[selfSide]}
+                  </StageHeader>
+                  <StageHeader align="center" colSpan={2}>
+                    {match.playerNames[opponentSide]}
+                  </StageHeader>
+                </tr>
+                <tr
+                  className={css({
+                    bg: 'white.a1',
+                    color: 'fg.muted',
+                    fontWeight: 'black',
+                    textAlign: 'left',
+                  })}
+                >
+                  <StageHeader align="center" compact>
+                    スター
+                  </StageHeader>
+                  <StageHeader align="center" compact>
+                    ライフ
+                  </StageHeader>
+                  <StageHeader align="center" compact>
+                    スター
+                  </StageHeader>
+                  <StageHeader align="center" compact>
+                    ライフ
+                  </StageHeader>
+                </tr>
+              </thead>
+              <tbody>
+                {playedStages.map(({ index, result }) => (
+                  <StageResultTableRow
+                    index={index}
+                    key={`${match.id}-${result.game_index}`}
+                    match={match}
+                    result={result}
+                    selfSide={selfSide}
+                  />
+                ))}
+              </tbody>
+            </table>
           </div>
-        ) : null}
+          {match.logDir || onDelete ? (
+            <div
+              className={css({
+                alignItems: { base: 'stretch', md: 'center' },
+                display: 'grid',
+                gap: '2',
+                gridTemplateColumns: { base: '1fr', md: 'minmax(0, 1fr) auto' },
+              })}
+            >
+              {match.logDir ? (
+                <code
+                  className={css({
+                    color: 'fg.subtle',
+                    fontFamily: 'mono',
+                    fontWeight: 'semibold',
+                    minW: '0',
+                    overflowWrap: 'anywhere',
+                    textStyle: 'xs',
+                  })}
+                >
+                  {match.logDir}
+                </code>
+              ) : (
+                <span />
+              )}
+              <div
+                className={css({
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '2',
+                  justifyContent: { base: 'flex-start', md: 'flex-end' },
+                })}
+              >
+                {match.logDir && onOpenLogDir ? (
+                  <LogActionButton
+                    icon={<FolderOpen size={16} weight="bold" />}
+                    label="ログを開く"
+                    onClick={onOpenLogDir}
+                  />
+                ) : null}
+                {match.logDir && onCreateLogArchive ? (
+                  <LogActionButton
+                    icon={<FileZip size={16} weight="bold" />}
+                    label="zipを作成"
+                    onClick={onCreateLogArchive}
+                  />
+                ) : null}
+                {match.logDir && onUploadLogArchive ? (
+                  <LogActionButton
+                    icon={<CloudArrowUp size={16} weight="bold" />}
+                    label="ログを送信"
+                    onClick={onUploadLogArchive}
+                  />
+                ) : null}
+                {onDelete ? <DeleteMatchButton onDelete={onDelete} /> : null}
+              </div>
+            </div>
+          ) : null}
+        </div>
       </Collapsible.Content>
     </Collapsible.Root>
   );
