@@ -3,8 +3,10 @@
 
 #include "types.h"
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace NsmbNetplayPoC::WireProtocol {
@@ -332,6 +334,45 @@ bool ShouldAcceptStartReady(bool hasRemoteReadyFrame,
                             bool remoteReadyAfterLocal,
                             bool hasPostStartRemoteInput);
 bool ShouldResendStartReady(const StartReadyResendState &state);
+
+class Runtime {
+public:
+  using Clock = std::chrono::steady_clock;
+
+  void ResetStartHandshake();
+  void OnPeerConnected();
+  void ResetReadyWaitAfterTimeout();
+
+  bool MatchSeedSent() const;
+  void MarkMatchSeedSent();
+  bool CanSendStartReady(bool force) const;
+  void MarkStartReadySent(Clock::time_point sentAt);
+
+  void BeginLocalReady(melonDS::u32 frame);
+  void ReceiveRemoteReady(melonDS::u32 frame);
+  void MarkWaitedForPeerAtStart();
+  void MarkInputEpochPrimed(melonDS::u32 startFrame);
+
+  bool WaitedForPeerAtStart() const;
+  bool StartReadySent() const;
+  int StartReadySendCount() const;
+  Clock::time_point LastStartReadySentAt() const;
+  std::optional<melonDS::u32> LocalReadyFrame() const;
+  std::optional<melonDS::u32> RemoteReadyFrame() const;
+  bool RemoteReadyAfterLocal() const;
+  bool InputEpochPrimedFor(melonDS::u32 startFrame) const;
+
+private:
+  bool MatchSeedSent_ = false;
+  bool WaitedForPeerAtStart_ = false;
+  bool StartReadySent_ = false;
+  int StartReadySendCount_ = 0;
+  Clock::time_point LastStartReadySentAt_;
+  std::optional<melonDS::u32> LocalReadyFrame_;
+  std::optional<melonDS::u32> RemoteReadyFrame_;
+  bool RemoteReadyAfterLocal_ = false;
+  std::optional<melonDS::u32> InputEpochPrimedStartFrame_;
+};
 
 } // namespace NsmbNetplayPoC::SessionPolicy
 

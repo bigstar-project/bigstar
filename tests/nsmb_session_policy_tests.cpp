@@ -1,5 +1,6 @@
 #include "NsmbNetplayProtocol.h"
 
+#include <chrono>
 #include <cstdio>
 
 namespace {
@@ -79,11 +80,94 @@ void TestResendPolicy() {
   CHECK(!ShouldResendStartReady(state));
 }
 
+void TestRuntimeReadyOrderingAndSendState() {
+  using NsmbNetplayPoC::SessionPolicy::Runtime;
+  Runtime runtime;
+  const auto sentAt = Runtime::Clock::time_point(std::chrono::seconds(5));
+
+  CHECK(!runtime.MatchSeedSent());
+  runtime.MarkMatchSeedSent();
+  CHECK(runtime.MatchSeedSent());
+  CHECK(runtime.CanSendStartReady(false));
+  runtime.MarkStartReadySent(sentAt);
+  CHECK(runtime.StartReadySent());
+  CHECK(runtime.StartReadySendCount() == 1);
+  CHECK(runtime.LastStartReadySentAt() == sentAt);
+  CHECK(!runtime.CanSendStartReady(false));
+  CHECK(runtime.CanSendStartReady(true));
+
+  runtime.ReceiveRemoteReady(90);
+  CHECK(runtime.RemoteReadyFrame() == 90);
+  CHECK(!runtime.RemoteReadyAfterLocal());
+  runtime.BeginLocalReady(100);
+  CHECK(runtime.LocalReadyFrame() == 100);
+  CHECK(!runtime.RemoteReadyAfterLocal());
+  runtime.ReceiveRemoteReady(101);
+  CHECK(runtime.RemoteReadyFrame() == 101);
+  CHECK(runtime.RemoteReadyAfterLocal());
+  runtime.BeginLocalReady(999);
+  CHECK(runtime.LocalReadyFrame() == 100);
+
+  Runtime zeroSentinel;
+  zeroSentinel.BeginLocalReady(0);
+  zeroSentinel.ReceiveRemoteReady(0);
+  zeroSentinel.MarkInputEpochPrimed(0);
+  CHECK(!zeroSentinel.LocalReadyFrame());
+  CHECK(!zeroSentinel.RemoteReadyFrame());
+  CHECK(!zeroSentinel.InputEpochPrimedFor(0));
+}
+
+void TestRuntimeResetContracts() {
+  using NsmbNetplayPoC::SessionPolicy::Runtime;
+  Runtime runtime;
+  const auto sentAt = Runtime::Clock::time_point(std::chrono::seconds(7));
+  runtime.MarkMatchSeedSent();
+  runtime.BeginLocalReady(100);
+  runtime.ReceiveRemoteReady(101);
+  runtime.MarkStartReadySent(sentAt);
+  runtime.MarkWaitedForPeerAtStart();
+  runtime.MarkInputEpochPrimed(80);
+  CHECK(runtime.InputEpochPrimedFor(80));
+
+  runtime.OnPeerConnected();
+  CHECK(!runtime.MatchSeedSent());
+  CHECK(!runtime.StartReadySent());
+  CHECK(!runtime.RemoteReadyFrame());
+  CHECK(!runtime.RemoteReadyAfterLocal());
+  CHECK(runtime.LocalReadyFrame() == 100);
+  CHECK(runtime.WaitedForPeerAtStart());
+  CHECK(runtime.StartReadySendCount() == 1);
+  CHECK(runtime.InputEpochPrimedFor(80));
+
+  runtime.ReceiveRemoteReady(102);
+  runtime.MarkStartReadySent(sentAt);
+  runtime.ResetReadyWaitAfterTimeout();
+  CHECK(!runtime.LocalReadyFrame());
+  CHECK(runtime.RemoteReadyFrame() == 102);
+  CHECK(!runtime.RemoteReadyAfterLocal());
+  CHECK(!runtime.StartReadySent());
+  CHECK(runtime.StartReadySendCount() == 2);
+
+  runtime.MarkMatchSeedSent();
+  runtime.ResetStartHandshake();
+  CHECK(runtime.MatchSeedSent());
+  CHECK(!runtime.WaitedForPeerAtStart());
+  CHECK(!runtime.StartReadySent());
+  CHECK(runtime.StartReadySendCount() == 0);
+  CHECK(runtime.LastStartReadySentAt() == Runtime::Clock::time_point {});
+  CHECK(!runtime.LocalReadyFrame());
+  CHECK(!runtime.RemoteReadyFrame());
+  CHECK(!runtime.RemoteReadyAfterLocal());
+  CHECK(!runtime.InputEpochPrimedFor(80));
+}
+
 } // namespace
 
 int main() {
   TestStartFrameAndReceivePolicy();
   TestResendPolicy();
+  TestRuntimeReadyOrderingAndSendState();
+  TestRuntimeResetContracts();
 
   if (Failures != 0) {
     std::fprintf(stderr, "nsmb session policy tests failed: %d\n", Failures);

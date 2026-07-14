@@ -588,16 +588,9 @@ struct State
     melonDS::u32 AIPlayLogStartFrame = 0;
     melonDS::u32 AIPlayLogEndFrame = 0;
     Config::StateSyncConfig StateSync;
-    bool WaitedForPeerAtNetplayStart = false;
-    bool NetplayStartReadySent = false;
-    int NetplayStartReadySendCount = 0;
-    std::chrono::steady_clock::time_point LastNetplayStartReadySentAt;
+    SessionPolicy::Runtime Session;
     std::chrono::steady_clock::time_point LastInputFrameLeadResendAt;
     int InputFrameLeadResendCount = 0;
-    melonDS::u32 LocalNetplayStartReadyFrame = kNoFrameLimit;
-    melonDS::u32 RemoteNetplayStartReadyFrame = kNoFrameLimit;
-    bool RemoteNetplayStartReadyAfterLocal = false;
-    melonDS::u32 InputEpochPrimedStartFrame = kNoFrameLimit;
     bool NetplayStartWaitArrived[16] {};
     bool NetplayStartWaitComplete = false;
     Config::PacketBridgeConfig PacketBridge;
@@ -738,7 +731,6 @@ struct State
     melonDS::u32 NetRandomPatchValue = 0;
     bool NetRandomPatchApplied[16] {};
     bool MatchSeedConfigured = false;
-    bool MatchSeedSent = false;
     melonDS::u32 MatchSeed = 0;
     std::vector<melonDS::u32> MatchSeedSequence;
     bool NetplayAnyLockstepStarted = false;
@@ -1272,16 +1264,9 @@ void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
     G.HangLocalQueue.store(0, std::memory_order_release);
     G.HangRemoteQueue.store(0, std::memory_order_release);
     G.HangDelayedQueue.store(0, std::memory_order_release);
-    G.NetplayStartReadySent = false;
-    G.NetplayStartReadySendCount = 0;
-    G.LastNetplayStartReadySentAt = {};
+    G.Session.ResetStartHandshake();
     G.LastInputFrameLeadResendAt = {};
     G.InputFrameLeadResendCount = 0;
-    G.WaitedForPeerAtNetplayStart = false;
-    G.LocalNetplayStartReadyFrame = kNoFrameLimit;
-    G.RemoteNetplayStartReadyFrame = kNoFrameLimit;
-    G.RemoteNetplayStartReadyAfterLocal = false;
-    G.InputEpochPrimedStartFrame = kNoFrameLimit;
 
     G.LastLoggedGameStateFrame[instanceID] = 0;
     G.LastSentGameStateFrame[instanceID] = 0;
@@ -1438,16 +1423,9 @@ void ResetMvlAutoRestartStartupHookState(int instanceID)
     G.LastPacketBridgeForcedTickFrame[instanceID] = 0;
     G.ScriptRemotePacketLogged[instanceID] = false;
     G.ClearMvlCameraInitHoldApplied[instanceID] = false;
-    G.LocalNetplayStartReadyFrame = kNoFrameLimit;
-    G.RemoteNetplayStartReadyFrame = kNoFrameLimit;
-    G.RemoteNetplayStartReadyAfterLocal = false;
-    G.InputEpochPrimedStartFrame = kNoFrameLimit;
     std::fill(std::begin(G.NetplayStartWaitArrived), std::end(G.NetplayStartWaitArrived), false);
     G.NetplayStartWaitComplete = false;
-    G.WaitedForPeerAtNetplayStart = false;
-    G.NetplayStartReadySent = false;
-    G.NetplayStartReadySendCount = 0;
-    G.LastNetplayStartReadySentAt = {};
+    G.Session.ResetStartHandshake();
     G.LastInputFrameLeadResendAt = {};
     G.InputFrameLeadResendCount = 0;
     G.NetplayLockstepStarted[instanceID] = false;
@@ -2159,9 +2137,7 @@ void HandleReceivedSessionLocked(const void* data, std::size_t size, melonDS::u3
         return;
     }
 
-    G.RemoteNetplayStartReadyFrame = message.Value;
-    if (G.LocalNetplayStartReadyFrame != kNoFrameLimit)
-        G.RemoteNetplayStartReadyAfterLocal = true;
+    G.Session.ReceiveRemoteReady(message.Value);
     EmitStartReadyEventLocked("recv", localFrame, message.Value);
     G.InputCond.notify_all();
     std::printf("NSMB InputNetplay: received start ready frame=%u\n", message.Value);
@@ -2394,10 +2370,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
         {
         case ENET_EVENT_TYPE_CONNECT:
             G.Transport.HandleConnected(event.peer);
-            G.MatchSeedSent = false;
-            G.NetplayStartReadySent = false;
-            G.RemoteNetplayStartReadyFrame = kNoFrameLimit;
-            G.RemoteNetplayStartReadyAfterLocal = false;
+            G.Session.OnPeerConnected();
             UpdateHangNetplaySnapshotLocked(localFrame);
             G.InputCond.notify_all();
             std::printf("NSMB PoC: peer connected tUnixMs=%llu localFrame=%u peer=%d connectingPeer=%d lastSent=%u lastRecv=%u localQueue=%zu remoteQueue=%zu\n",
@@ -2524,9 +2497,9 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                 G.Delivery.PendingCount(),
                 G.InputFrameLeadResendCount,
                 G.Connection.StartFrame,
-                G.LocalNetplayStartReadyFrame,
-                G.RemoteNetplayStartReadyFrame,
-                G.RemoteNetplayStartReadyAfterLocal ? 1 : 0,
+                G.Session.LocalReadyFrame().value_or(kNoFrameLimit),
+                G.Session.RemoteReadyFrame().value_or(kNoFrameLimit),
+                G.Session.RemoteReadyAfterLocal() ? 1 : 0,
                 event.data);
             G.Transport.HandleDisconnected(event.peer);
             UpdateHangNetplaySnapshotLocked(localFrame);
@@ -2629,7 +2602,8 @@ void StopNetworkPumpThread()
 
 void SendMatchSeedLocked()
 {
-    if (!G.Transport.IsConnected() || G.NetRole != Role::Host || !G.MatchSeedConfigured || G.MatchSeedSent)
+    if (!G.Transport.IsConnected() || G.NetRole != Role::Host
+        || !G.MatchSeedConfigured || G.Session.MatchSeedSent())
         return;
 
     const std::vector<char> payload = SessionProtocol::Encode({
@@ -2639,13 +2613,13 @@ void SendMatchSeedLocked()
     if (G.Transport.Send(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE, true)
         == NsmbNetplayTransport::SendUnavailable)
         return;
-    G.MatchSeedSent = true;
+    G.Session.MarkMatchSeedSent();
     std::printf("NSMB PoC: sent match seed 0x%08X\n", G.MatchSeed);
 }
 
 void SendNetplayStartReadyLocked(melonDS::u32 frame, bool force = false)
 {
-    if (!G.Transport.IsConnected() || (G.NetplayStartReadySent && !force))
+    if (!G.Transport.IsConnected() || !G.Session.CanSendStartReady(force))
         return;
 
     const std::vector<char> payload = SessionProtocol::Encode({
@@ -2655,14 +2629,15 @@ void SendNetplayStartReadyLocked(melonDS::u32 frame, bool force = false)
     if (G.Transport.Send(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE, true)
         == NsmbNetplayTransport::SendUnavailable)
         return;
-    G.NetplayStartReadySent = true;
-    G.NetplayStartReadySendCount++;
-    G.LastNetplayStartReadySentAt = std::chrono::steady_clock::now();
-    EmitStartReadyEventLocked(force ? "resend" : "send", frame, G.RemoteNetplayStartReadyFrame);
+    G.Session.MarkStartReadySent(std::chrono::steady_clock::now());
+    EmitStartReadyEventLocked(
+        force ? "resend" : "send",
+        frame,
+        G.Session.RemoteReadyFrame().value_or(kNoFrameLimit));
     std::printf("NSMB InputNetplay: %s start ready frame=%u count=%d\n",
         force ? "resent" : "sent",
         frame,
-        G.NetplayStartReadySendCount);
+        G.Session.StartReadySendCount());
     std::fflush(stdout);
 }
 
@@ -2670,26 +2645,28 @@ void MaybeResendNetplayStartReadyLocked(bool allowBeforeAccepted = false)
 {
     const auto now = std::chrono::steady_clock::now();
     const auto elapsedSinceLastSend = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now - G.LastNetplayStartReadySentAt).count();
+        now - G.Session.LastStartReadySentAt()).count();
     if (!SessionPolicy::ShouldResendStartReady({
             G.Transport.IsConnected(),
             G.Input.NetplayOnly,
             allowBeforeAccepted,
-            G.WaitedForPeerAtNetplayStart,
-            G.NetplayStartReadySent,
-            G.LocalNetplayStartReadyFrame != kNoFrameLimit,
+            G.Session.WaitedForPeerAtStart(),
+            G.Session.StartReadySent(),
+            G.Session.LocalReadyFrame().has_value(),
             G.LastReceivedInputFrame != kNoFrameLimit,
             G.LastReceivedInputFrame,
             G.Connection.StartFrame,
             G.Connection.Delay,
-            G.NetplayStartReadySendCount,
+            G.Session.StartReadySendCount(),
             elapsedSinceLastSend,
         }))
     {
         return;
     }
 
-    SendNetplayStartReadyLocked(G.LocalNetplayStartReadyFrame, true);
+    SendNetplayStartReadyLocked(
+        G.Session.LocalReadyFrame().value_or(kNoFrameLimit),
+        true);
 }
 
 void SendInputPayloadNowLocked(const void* data, size_t size, melonDS::u32 flags)
@@ -3931,9 +3908,9 @@ void PrintInputHealthLineLocked(
         G.Transport.IsConnecting() ? 1 : 0,
         G.InputFrameLeadResendCount,
         G.Connection.StartFrame,
-        G.LocalNetplayStartReadyFrame,
-        G.RemoteNetplayStartReadyFrame,
-        G.RemoteNetplayStartReadyAfterLocal ? 1 : 0);
+        G.Session.LocalReadyFrame().value_or(kNoFrameLimit),
+        G.Session.RemoteReadyFrame().value_or(kNoFrameLimit),
+        G.Session.RemoteReadyAfterLocal() ? 1 : 0);
     std::fflush(stdout);
 }
 
@@ -3947,7 +3924,7 @@ int CurrentInputLeadLocked(melonDS::u32 sendFrame)
 void PrimeInputNetplayEpochStartLocked(melonDS::u32 localFrame)
 {
     if (!G.Input.NetplayOnly || G.Connection.StartFrame == 0
-        || G.InputEpochPrimedStartFrame == G.Connection.StartFrame)
+        || G.Session.InputEpochPrimedFor(G.Connection.StartFrame))
     {
         return;
     }
@@ -3967,7 +3944,7 @@ void PrimeInputNetplayEpochStartLocked(melonDS::u32 localFrame)
         if (G.LastReceivedInputFrame == kNoFrameLimit || G.LastReceivedInputFrame < primedThrough)
             G.LastReceivedInputFrame = primedThrough;
     }
-    G.InputEpochPrimedStartFrame = G.Connection.StartFrame;
+    G.Session.MarkInputEpochPrimed(G.Connection.StartFrame);
     G.InputCond.notify_all();
 
     std::printf("NSMB InputNetplay: primed epoch start localFrame=%u logicalStart=%u firstInput=%u delay=%u\n",
@@ -4133,8 +4110,8 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
                     G.Delivery.PendingCount(),
                     G.InputFrameLeadResendCount,
                     G.Connection.StartFrame,
-                    G.LocalNetplayStartReadyFrame,
-                    G.RemoteNetplayStartReadyFrame);
+                    G.Session.LocalReadyFrame().value_or(kNoFrameLimit),
+                    G.Session.RemoteReadyFrame().value_or(kNoFrameLimit));
                 std::fflush(stdout);
                 G.HangRemoteWaitActive.store(0, std::memory_order_release);
                 TraceHangPhase("timeout", "remote-input-wait", -1, targetFrame, targetFrame, G.LastSentInputFrame);
@@ -4301,11 +4278,12 @@ bool IsInputNetplayGameplayStartReady(melonDS::NDS* nds)
 
 melonDS::u32 InputNetplayLogicalFrame(melonDS::u32 rawFrame)
 {
-    if (!G.Input.NetplayOnly || G.LocalNetplayStartReadyFrame == kNoFrameLimit)
+    const auto localReadyFrame = G.Session.LocalReadyFrame();
+    if (!G.Input.NetplayOnly || !localReadyFrame)
         return rawFrame;
-    if (rawFrame < G.LocalNetplayStartReadyFrame)
+    if (rawFrame < *localReadyFrame)
         return rawFrame;
-    return G.Connection.StartFrame + (rawFrame - G.LocalNetplayStartReadyFrame);
+    return G.Connection.StartFrame + (rawFrame - *localReadyFrame);
 }
 
 bool AllNetplayStartWaitArrivedLocked()
@@ -4324,7 +4302,7 @@ void WaitForPeerAtNetplayStartBarrier(int instanceID, melonDS::u32 syncFrame)
     if (!G.Enabled || !G.Harness.WaitForPeerAtNetplayStart || G.NetRole != Role::Host
         || G.Input.NetplayOnly
         || G.Connection.StartFrame == 0 || syncFrame != G.Connection.StartFrame
-        || instanceID < 0 || instanceID >= 16 || G.WaitedForPeerAtNetplayStart)
+        || instanceID < 0 || instanceID >= 16 || G.Session.WaitedForPeerAtStart())
     {
         return;
     }
@@ -4392,7 +4370,7 @@ void WaitForPeerAtNetplayStartBarrier(int instanceID, melonDS::u32 syncFrame)
 
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
-        G.WaitedForPeerAtNetplayStart = true;
+        G.Session.MarkWaitedForPeerAtStart();
         G.NetplayStartWaitComplete = true;
         G.BarrierCond.notify_all();
     }
@@ -4404,18 +4382,14 @@ void WaitForRemoteNetplayStartReadyIfNeeded(melonDS::NDS* nds, melonDS::u32 sync
 {
     if (!G.Enabled || !G.Input.NetplayOnly || !G.Harness.WaitForPeerAtNetplayStart
         || G.Connection.StartFrame == 0 || syncFrame < G.Connection.StartFrame
-        || G.WaitedForPeerAtNetplayStart)
+        || G.Session.WaitedForPeerAtStart())
     {
         return;
     }
     if (!IsInputNetplayGameplayStartReady(nds))
         return;
 
-    if (G.LocalNetplayStartReadyFrame == kNoFrameLimit)
-    {
-        G.LocalNetplayStartReadyFrame = syncFrame;
-        G.RemoteNetplayStartReadyAfterLocal = false;
-    }
+    G.Session.BeginLocalReady(syncFrame);
 
     std::printf("NSMB InputNetplay: waiting for remote gameplay start ready localFrame=%u logicalStart=%u\n",
         syncFrame,
@@ -4437,15 +4411,17 @@ void WaitForRemoteNetplayStartReadyIfNeeded(melonDS::NDS* nds, melonDS::u32 sync
                 G.Connection.StartFrame,
                 G.Connection.Delay);
             if (SessionPolicy::ShouldAcceptStartReady(
-                    G.RemoteNetplayStartReadyFrame != kNoFrameLimit,
-                    G.RemoteNetplayStartReadyAfterLocal,
+                    G.Session.RemoteReadyFrame().has_value(),
+                    G.Session.RemoteReadyAfterLocal(),
                     hasPostStartRemoteInput))
             {
-                G.WaitedForPeerAtNetplayStart = true;
+                G.Session.MarkWaitedForPeerAtStart();
                 PrimeInputNetplayEpochStartLocked(syncFrame);
-                EmitStartReadyEventLocked("accept", syncFrame, G.RemoteNetplayStartReadyFrame);
+                const melonDS::u32 remoteReadyFrame =
+                    G.Session.RemoteReadyFrame().value_or(kNoFrameLimit);
+                EmitStartReadyEventLocked("accept", syncFrame, remoteReadyFrame);
                 std::printf("NSMB InputNetplay: remote gameplay start ready accepted remoteFrame=%u localFrame=%u logicalStart=%u\n",
-                    G.RemoteNetplayStartReadyFrame,
+                    remoteReadyFrame,
                     syncFrame,
                     G.Connection.StartFrame);
                 std::fflush(stdout);
@@ -4463,9 +4439,7 @@ void WaitForRemoteNetplayStartReadyIfNeeded(melonDS::NDS* nds, melonDS::u32 sync
                     syncFrame,
                     G.Harness.SeedWaitTimeoutMs);
                 std::fflush(stdout);
-                G.LocalNetplayStartReadyFrame = kNoFrameLimit;
-                G.RemoteNetplayStartReadyAfterLocal = false;
-                G.NetplayStartReadySent = false;
+                G.Session.ResetReadyWaitAfterTimeout();
                 return;
             }
         }
@@ -7489,7 +7463,7 @@ void WritePacketBridgeJitScratchIfNeeded(
     const melonDS::u32 logicalFrame = InputNetplayLogicalFrame(frame);
     if (G.Input.NetplayOnly
         && G.Harness.WaitForPeerAtNetplayStart
-        && G.LocalNetplayStartReadyFrame == kNoFrameLimit)
+        && !G.Session.LocalReadyFrame())
     {
         return;
     }

@@ -120,6 +120,96 @@ bool ShouldResendStartReady(const StartReadyResendState &state) {
          state.ElapsedSinceLastSendMs >= kStartReadyResendIntervalMs;
 }
 
+void Runtime::ResetStartHandshake() {
+  WaitedForPeerAtStart_ = false;
+  StartReadySent_ = false;
+  StartReadySendCount_ = 0;
+  LastStartReadySentAt_ = {};
+  LocalReadyFrame_.reset();
+  RemoteReadyFrame_.reset();
+  RemoteReadyAfterLocal_ = false;
+  InputEpochPrimedStartFrame_.reset();
+}
+
+void Runtime::OnPeerConnected() {
+  MatchSeedSent_ = false;
+  StartReadySent_ = false;
+  RemoteReadyFrame_.reset();
+  RemoteReadyAfterLocal_ = false;
+}
+
+void Runtime::ResetReadyWaitAfterTimeout() {
+  LocalReadyFrame_.reset();
+  RemoteReadyAfterLocal_ = false;
+  StartReadySent_ = false;
+}
+
+bool Runtime::MatchSeedSent() const { return MatchSeedSent_; }
+
+void Runtime::MarkMatchSeedSent() { MatchSeedSent_ = true; }
+
+bool Runtime::CanSendStartReady(bool force) const {
+  return !StartReadySent_ || force;
+}
+
+void Runtime::MarkStartReadySent(Clock::time_point sentAt) {
+  StartReadySent_ = true;
+  StartReadySendCount_++;
+  LastStartReadySentAt_ = sentAt;
+}
+
+void Runtime::BeginLocalReady(melonDS::u32 frame) {
+  if (LocalReadyFrame_)
+    return;
+  if (frame == 0)
+    LocalReadyFrame_.reset();
+  else
+    LocalReadyFrame_ = frame;
+  RemoteReadyAfterLocal_ = false;
+}
+
+void Runtime::ReceiveRemoteReady(melonDS::u32 frame) {
+  if (frame == 0)
+    RemoteReadyFrame_.reset();
+  else
+    RemoteReadyFrame_ = frame;
+  if (LocalReadyFrame_)
+    RemoteReadyAfterLocal_ = true;
+}
+
+void Runtime::MarkWaitedForPeerAtStart() { WaitedForPeerAtStart_ = true; }
+
+void Runtime::MarkInputEpochPrimed(melonDS::u32 startFrame) {
+  if (startFrame == 0)
+    InputEpochPrimedStartFrame_.reset();
+  else
+    InputEpochPrimedStartFrame_ = startFrame;
+}
+
+bool Runtime::WaitedForPeerAtStart() const { return WaitedForPeerAtStart_; }
+
+bool Runtime::StartReadySent() const { return StartReadySent_; }
+
+int Runtime::StartReadySendCount() const { return StartReadySendCount_; }
+
+Runtime::Clock::time_point Runtime::LastStartReadySentAt() const {
+  return LastStartReadySentAt_;
+}
+
+std::optional<melonDS::u32> Runtime::LocalReadyFrame() const {
+  return LocalReadyFrame_;
+}
+
+std::optional<melonDS::u32> Runtime::RemoteReadyFrame() const {
+  return RemoteReadyFrame_;
+}
+
+bool Runtime::RemoteReadyAfterLocal() const { return RemoteReadyAfterLocal_; }
+
+bool Runtime::InputEpochPrimedFor(melonDS::u32 startFrame) const {
+  return InputEpochPrimedStartFrame_ == startFrame;
+}
+
 } // namespace NsmbNetplayPoC::SessionPolicy
 
 namespace NsmbNetplayPoC::PacketClassifier {
