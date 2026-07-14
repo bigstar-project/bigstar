@@ -23,6 +23,7 @@
 #include "NsmbGameStateReader.h"
 #include "NsmbGameStateWriter.h"
 #include "NsmbRollbackStore.h"
+#include "NsmbAiObservation.h"
 #include "NsmbInputTimeline.h"
 #include "NsmbImitationAI.h"
 #include "NsmbRuleAI.h"
@@ -580,14 +581,7 @@ struct State
     melonDS::u32 LastDiagnosticPositionAnomalyFrame[16][2] {};
     std::array<DiagnosticFrameSnapshot, kDiagnosticRingCapacity> DiagnosticRing[16];
     std::size_t DiagnosticRingNext[16] {};
-    InputState AIPlayLogLastAppliedInput[16][2] {};
-    melonDS::u32 AIPlayLogLastAppliedInputFrame[16][2] {};
-    bool AIPlayLogLastAppliedInputValid[16][2] {};
-    melonDS::u32 AIPlayLogFireballOwnerHandlerPtr[16] {};
-    bool AIPlayLogFireballOwnerValid[16][kAIFireballSlotCount] {};
-    int AIPlayLogFireballOwner[16][kAIFireballSlotCount] {};
-    int AIPlayLogFireballOwnerConfidence[16][kAIFireballSlotCount] {};
-    int AIPlayLogFireballOwnerHeuristic[16][kAIFireballSlotCount] {};
+    AIObservation::TrackingRuntime AIObservationTracking;
     int AIPlayLogLinesSinceFlush = 0;
     int AIObservationV2LinesSinceFlush = 0;
     int AIObservationV3LinesSinceFlush = 0;
@@ -1254,11 +1248,7 @@ bool ImitationAIProvidesInputForPlayer(int player)
 
 void RecordAIPlayLogAppliedInput(int instanceID, melonDS::u32 frame, int player, const InputState& input)
 {
-    if (instanceID < 0 || instanceID >= 16 || player < 0 || player >= 2)
-        return;
-    G.AIPlayLogLastAppliedInput[instanceID][player] = input;
-    G.AIPlayLogLastAppliedInputFrame[instanceID][player] = frame;
-    G.AIPlayLogLastAppliedInputValid[instanceID][player] = true;
+    G.AIObservationTracking.RecordAppliedInput(instanceID, frame, player, input);
 }
 
 InputState ApplyRuleBasedAIInput(
@@ -7084,7 +7074,6 @@ std::int32_t SignedU32(melonDS::u32 value)
     return static_cast<std::int32_t>(value);
 }
 
-#include "NsmbAiObservation.h"
 #include "NsmbAiObservation.cpp"
 
 void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)

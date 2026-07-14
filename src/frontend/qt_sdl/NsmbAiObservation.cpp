@@ -225,19 +225,6 @@ int AIFireballOwnerCandidateStateless(const GameStateSample& sample, int slotInd
     return -1;
 }
 
-void ResetAIFireballOwnerTracking(int instanceID)
-{
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    for (int i = 0; i < kAIFireballSlotCount; i++)
-    {
-        G.AIPlayLogFireballOwnerValid[instanceID][i] = false;
-        G.AIPlayLogFireballOwner[instanceID][i] = -1;
-        G.AIPlayLogFireballOwnerConfidence[instanceID][i] = 0;
-        G.AIPlayLogFireballOwnerHeuristic[instanceID][i] = 0;
-    }
-}
-
 int AIFireballOwnerCandidate(
     int instanceID,
     const GameStateSample& sample,
@@ -260,29 +247,15 @@ int AIFireballOwnerCandidate(
     if (instanceID < 0 || instanceID >= 16)
         return statelessOwner;
 
-    if (statelessOwner >= 0 && statelessConfidence >= 55)
-    {
-        if (!G.AIPlayLogFireballOwnerValid[instanceID][slotIndex] ||
-            statelessOwner == G.AIPlayLogFireballOwner[instanceID][slotIndex] ||
-            statelessConfidence >= 80)
-        {
-            G.AIPlayLogFireballOwnerValid[instanceID][slotIndex] = true;
-            G.AIPlayLogFireballOwner[instanceID][slotIndex] = statelessOwner;
-            G.AIPlayLogFireballOwnerConfidence[instanceID][slotIndex] =
-                std::max(G.AIPlayLogFireballOwnerConfidence[instanceID][slotIndex], std::min(95, statelessConfidence + 20));
-            G.AIPlayLogFireballOwnerHeuristic[instanceID][slotIndex] = 10 + statelessHeuristic;
-        }
-    }
-
-    if (G.AIPlayLogFireballOwnerValid[instanceID][slotIndex])
-    {
-        tracked = true;
-        confidence = G.AIPlayLogFireballOwnerConfidence[instanceID][slotIndex];
-        heuristic = G.AIPlayLogFireballOwnerHeuristic[instanceID][slotIndex];
-        return G.AIPlayLogFireballOwner[instanceID][slotIndex];
-    }
-
-    return statelessOwner;
+    return G.AIObservationTracking.ResolveFireballOwner(
+        instanceID,
+        slotIndex,
+        statelessOwner,
+        statelessConfidence,
+        statelessHeuristic,
+        confidence,
+        heuristic,
+        tracked);
 }
 
 const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings)
@@ -468,17 +441,18 @@ void WriteAIInputJson(std::ostream& out, const char* name, melonDS::u32 held, me
 void WriteAIAppliedInputJson(std::ostream& out, int instanceID, int player)
 {
     out << "\"appliedPlayer" << player << "\":{";
-    if (instanceID < 0 || instanceID >= 16 || player < 0 || player >= 2 ||
-        !G.AIPlayLogLastAppliedInputValid[instanceID][player])
+    const AIObservation::TrackingRuntime::AppliedInputRecord* record =
+        G.AIObservationTracking.AppliedInput(instanceID, player);
+    if (!record)
     {
         out << "\"valid\":0}";
         return;
     }
 
-    const InputState& input = G.AIPlayLogLastAppliedInput[instanceID][player];
+    const InputState& input = record->Input;
     const melonDS::u32 held = (~input.KeyMask) & 0x0FFF;
     out << "\"valid\":1"
-        << ",\"frame\":" << G.AIPlayLogLastAppliedInputFrame[instanceID][player]
+        << ",\"frame\":" << record->Frame
         << ",\"keyMask\":";
     WriteJsonHex(out, input.KeyMask, 3);
     out << ",\"held\":" << held << ",\"heldHex\":";
@@ -3545,15 +3519,11 @@ void PrepareAIPlayLogFireballOwnerTracking(int instanceID, const GameStateSample
 {
     if (instanceID < 0 || instanceID >= 16)
         return;
-    if (G.AIPlayLogFireballOwnerHandlerPtr[instanceID] != sample.FireballsHandlerPtr)
-    {
-        G.AIPlayLogFireballOwnerHandlerPtr[instanceID] = sample.FireballsHandlerPtr;
-        ResetAIFireballOwnerTracking(instanceID);
-    }
+    G.AIObservationTracking.UpdateFireballHandler(instanceID, sample.FireballsHandlerPtr);
     for (int i = 0; i < kAIFireballSlotCount; i++)
     {
         if (sample.FireballSlotActive[i] == 0)
-            G.AIPlayLogFireballOwnerValid[instanceID][i] = false;
+            G.AIObservationTracking.InvalidateFireballOwner(instanceID, i);
     }
 }
 
@@ -4009,18 +3979,14 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     WriteJsonHex(G.AIPlayLog, kFireballsHandlerAddr);
     G.AIPlayLog << ",\"handlerPtr\":";
     WriteJsonHex(G.AIPlayLog, sample.FireballsHandlerPtr);
-    if (instanceID >= 0 && instanceID < 16 && G.AIPlayLogFireballOwnerHandlerPtr[instanceID] != sample.FireballsHandlerPtr)
-    {
-        G.AIPlayLogFireballOwnerHandlerPtr[instanceID] = sample.FireballsHandlerPtr;
-        ResetAIFireballOwnerTracking(instanceID);
-    }
+    G.AIObservationTracking.UpdateFireballHandler(instanceID, sample.FireballsHandlerPtr);
     int activeFireballSlots = 0;
     for (int i = 0; i < kAIFireballSlotCount; i++)
     {
         if (sample.FireballSlotActive[i] != 0)
             activeFireballSlots++;
-        else if (instanceID >= 0 && instanceID < 16)
-            G.AIPlayLogFireballOwnerValid[instanceID][i] = false;
+        else
+            G.AIObservationTracking.InvalidateFireballOwner(instanceID, i);
     }
     G.AIPlayLog << ",\"activeSlots\":" << activeFireballSlots;
     G.AIPlayLog << ",\"words\":[";

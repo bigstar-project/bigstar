@@ -1,5 +1,6 @@
 #include "NsmbGameState.h"
 #include "NsmbGameStateWriter.h"
+#include "NsmbAiObservation.h"
 
 #include <algorithm>
 #include <chrono>
@@ -404,6 +405,53 @@ void TestGameStateTraceWriterLifecycle() {
   CHECK(!removeError);
 }
 
+void TestAIObservationTrackingRuntime() {
+  NsmbNetplayPoC::AIObservation::TrackingRuntime runtime;
+  CHECK(runtime.AppliedInput(0, 0) == nullptr);
+
+  NsmbNetplayPoC::InputState input;
+  input.KeyMask = 0x123;
+  input.Touching = true;
+  input.TouchX = 45;
+  input.TouchY = 67;
+  runtime.RecordAppliedInput(0, 42, 1, input);
+  const auto *record = runtime.AppliedInput(0, 1);
+  CHECK(record != nullptr);
+  CHECK(record && record->Frame == 42u);
+  CHECK(record && record->Input.KeyMask == 0x123u);
+  CHECK(record && record->Input.Touching);
+  runtime.RecordAppliedInput(16, 99, 0, input);
+  CHECK(runtime.AppliedInput(16, 0) == nullptr);
+
+  int confidence = 0;
+  int heuristic = 0;
+  bool tracked = false;
+  CHECK(runtime.ResolveFireballOwner(0, 3, 0, 55, 1, confidence,
+                                     heuristic, tracked) == 0);
+  CHECK(tracked);
+  CHECK(confidence == 75);
+  CHECK(heuristic == 11);
+
+  CHECK(runtime.ResolveFireballOwner(0, 3, 1, 55, 2, confidence,
+                                     heuristic, tracked) == 0);
+  CHECK(tracked);
+  CHECK(runtime.ResolveFireballOwner(0, 3, 1, 80, 3, confidence,
+                                     heuristic, tracked) == 1);
+  CHECK(confidence == 95);
+  CHECK(heuristic == 13);
+
+  runtime.InvalidateFireballOwner(0, 3);
+  CHECK(runtime.ResolveFireballOwner(0, 3, -1, 0, 0, confidence,
+                                     heuristic, tracked) == -1);
+  CHECK(!tracked);
+  runtime.ResolveFireballOwner(0, 3, 0, 80, 4, confidence, heuristic,
+                               tracked);
+  runtime.UpdateFireballHandler(0, 0x12345678);
+  CHECK(runtime.ResolveFireballOwner(0, 3, -1, 0, 0, confidence,
+                                     heuristic, tracked) == -1);
+  CHECK(!tracked);
+}
+
 } // namespace
 
 int main() {
@@ -416,6 +464,7 @@ int main() {
   TestStateSyncRuntimeRestartContract();
   TestGameStateTraceRowFormatting();
   TestGameStateTraceWriterLifecycle();
+  TestAIObservationTrackingRuntime();
   if (Failures != 0) {
     std::fprintf(stderr, "nsmb game state tests failed: %d\n", Failures);
     return 1;
