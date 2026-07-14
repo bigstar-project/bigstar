@@ -4205,6 +4205,106 @@ ReceiveDisposition HandleReceivedPlayerStateLocked(
     return ReceiveDisposition::CleanupPacket;
 }
 
+ReceiveDisposition HandleReceivedWorldStateLocked(
+    const void* data,
+    std::size_t size,
+    melonDS::u32 localFrame)
+{
+    WireWorldState packet;
+    std::memcpy(&packet, data, size);
+    if (packet.Magic != kMagic || packet.Version != kVersion || packet.Kind != kWireKindWorldState)
+        return ReceiveDisposition::CleanupPacket;
+
+    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
+    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
+        return ReceiveDisposition::SkipPacketCleanup;
+    if (!G.RemoteWorldStateSampleValid || packet.Frame >= G.RemoteWorldStateSample.Frame)
+    {
+        G.RemoteWorldStateSample = packet;
+        G.RemoteWorldStateSampleValid = true;
+    }
+    if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled)
+        && (G.InputTraceInterval <= 1
+            || (localFrame != kNoFrameLimit
+                && (localFrame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0)))
+    {
+        std::printf("NSMB WorldState: recv localFrame=%u packetFrame=%u star=%u neutralItem=%u item=%u droppedItem=%u hazard=%u hazardPos=%08X/%08X\n",
+            localFrame,
+            packet.Frame,
+            packet.Star.Found,
+            packet.NeutralItem.Found,
+            packet.Item.Found,
+            packet.DroppedStarItem.Found,
+            packet.MovingHazard.Found,
+            packet.MovingHazard.PosX,
+            packet.MovingHazard.PosY);
+    }
+    return ReceiveDisposition::CleanupPacket;
+}
+
+ReceiveDisposition HandleReceivedMovingHazardStateLocked(const void* data, std::size_t size)
+{
+    WireMovingHazardState packet;
+    std::memcpy(&packet, data, size);
+    if (packet.Magic != kMagic || packet.Version != kVersion
+        || packet.Kind != kWireKindMovingHazardState || packet.Count > kMaxWorldMovingHazards)
+    {
+        return ReceiveDisposition::CleanupPacket;
+    }
+
+    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
+    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
+        return ReceiveDisposition::SkipPacketCleanup;
+    if (!G.RemoteMovingHazardStateSampleValid || packet.Frame >= G.RemoteMovingHazardStateSample.Frame)
+    {
+        G.RemoteMovingHazardStateSample = packet;
+        G.RemoteMovingHazardStateSampleValid = true;
+    }
+    return ReceiveDisposition::CleanupPacket;
+}
+
+ReceiveDisposition HandleReceivedWorldActorSnapshotStateLocked(const void* data, std::size_t size)
+{
+    WireWorldActorSnapshotState packet;
+    std::memcpy(&packet, data, size);
+    if (packet.Magic != kMagic || packet.Version != kVersion
+        || packet.Kind != kWireKindWorldActorSnapshot || packet.Count > kMaxWorldActorSnapshots)
+    {
+        return ReceiveDisposition::CleanupPacket;
+    }
+
+    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
+    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
+        return ReceiveDisposition::SkipPacketCleanup;
+    if (!G.RemoteWorldActorSnapshotSampleValid || packet.Frame >= G.RemoteWorldActorSnapshotSample.Frame)
+    {
+        G.RemoteWorldActorSnapshotSample = packet;
+        G.RemoteWorldActorSnapshotSampleValid = true;
+    }
+    return ReceiveDisposition::CleanupPacket;
+}
+
+ReceiveDisposition HandleReceivedWorldEffectStateLocked(const void* data, std::size_t size)
+{
+    WireWorldEffectState packet;
+    std::memcpy(&packet, data, size);
+    if (packet.Magic != kMagic || packet.Version != kVersion
+        || packet.Kind != kWireKindWorldEffectState || packet.Count > kMaxWorldEffects)
+    {
+        return ReceiveDisposition::CleanupPacket;
+    }
+
+    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
+    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
+        return ReceiveDisposition::SkipPacketCleanup;
+    if (!G.RemoteWorldEffectStateSampleValid || packet.Frame >= G.RemoteWorldEffectStateSample.Frame)
+    {
+        G.RemoteWorldEffectStateSample = packet;
+        G.RemoteWorldEffectStateSampleValid = true;
+    }
+    return ReceiveDisposition::CleanupPacket;
+}
+
 void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kNoFrameLimit)
 {
     if (!G.Host) return;
@@ -4300,87 +4400,43 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
             }
             else if (packetClass == PacketClassifier::PacketClass::WorldState)
             {
-                WireWorldState packet;
-                std::memcpy(&packet, event.packet->data, sizeof(packet));
-                if (packet.Magic == kMagic && packet.Version == kVersion
-                    && packet.Kind == kWireKindWorldState)
+                if (HandleReceivedWorldStateLocked(
+                        event.packet->data,
+                        event.packet->dataLength,
+                        localFrame)
+                    == ReceiveDisposition::SkipPacketCleanup)
                 {
-                    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
-                    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
-                        break;
-                    if (!G.RemoteWorldStateSampleValid || packet.Frame >= G.RemoteWorldStateSample.Frame)
-                    {
-                        G.RemoteWorldStateSample = packet;
-                        G.RemoteWorldStateSampleValid = true;
-                    }
-                    if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
-                        (G.InputTraceInterval <= 1 || (localFrame != kNoFrameLimit && (localFrame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0)))
-                    {
-                        std::printf("NSMB WorldState: recv localFrame=%u packetFrame=%u star=%u neutralItem=%u item=%u droppedItem=%u hazard=%u hazardPos=%08X/%08X\n",
-                            localFrame,
-                            packet.Frame,
-                            packet.Star.Found,
-                            packet.NeutralItem.Found,
-                            packet.Item.Found,
-                            packet.DroppedStarItem.Found,
-                            packet.MovingHazard.Found,
-                            packet.MovingHazard.PosX,
-                            packet.MovingHazard.PosY);
-                    }
+                    break;
                 }
             }
             else if (packetClass == PacketClassifier::PacketClass::MovingHazardState)
             {
-                WireMovingHazardState packet;
-                std::memcpy(&packet, event.packet->data, sizeof(packet));
-                if (packet.Magic == kMagic && packet.Version == kVersion
-                    && packet.Kind == kWireKindMovingHazardState
-                    && packet.Count <= kMaxWorldMovingHazards)
+                if (HandleReceivedMovingHazardStateLocked(
+                        event.packet->data,
+                        event.packet->dataLength)
+                    == ReceiveDisposition::SkipPacketCleanup)
                 {
-                    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
-                    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
-                        break;
-                    if (!G.RemoteMovingHazardStateSampleValid || packet.Frame >= G.RemoteMovingHazardStateSample.Frame)
-                    {
-                        G.RemoteMovingHazardStateSample = packet;
-                        G.RemoteMovingHazardStateSampleValid = true;
-                    }
+                    break;
                 }
             }
             else if (packetClass == PacketClassifier::PacketClass::WorldActorSnapshotState)
             {
-                WireWorldActorSnapshotState packet;
-                std::memcpy(&packet, event.packet->data, sizeof(packet));
-                if (packet.Magic == kMagic && packet.Version == kVersion
-                    && packet.Kind == kWireKindWorldActorSnapshot
-                    && packet.Count <= kMaxWorldActorSnapshots)
+                if (HandleReceivedWorldActorSnapshotStateLocked(
+                        event.packet->data,
+                        event.packet->dataLength)
+                    == ReceiveDisposition::SkipPacketCleanup)
                 {
-                    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
-                    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
-                        break;
-                    if (!G.RemoteWorldActorSnapshotSampleValid || packet.Frame >= G.RemoteWorldActorSnapshotSample.Frame)
-                    {
-                        G.RemoteWorldActorSnapshotSample = packet;
-                        G.RemoteWorldActorSnapshotSampleValid = true;
-                    }
+                    break;
                 }
             }
             else if (packetClass == PacketClassifier::PacketClass::WorldEffectState)
             {
-                WireWorldEffectState packet;
-                std::memcpy(&packet, event.packet->data, sizeof(packet));
-                if (packet.Magic == kMagic && packet.Version == kVersion
-                    && packet.Kind == kWireKindWorldEffectState
-                    && packet.Count <= kMaxWorldEffects)
+                if (HandleReceivedWorldEffectStateLocked(
+                        event.packet->data,
+                        event.packet->dataLength)
+                    == ReceiveDisposition::SkipPacketCleanup)
                 {
-                    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
-                    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
-                        break;
-                    if (!G.RemoteWorldEffectStateSampleValid || packet.Frame >= G.RemoteWorldEffectStateSample.Frame)
-                    {
-                        G.RemoteWorldEffectStateSample = packet;
-                        G.RemoteWorldEffectStateSampleValid = true;
-                    }
+                    break;
                 }
             }
             else if (packetClass == PacketClassifier::PacketClass::GameState)
