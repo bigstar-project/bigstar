@@ -80,6 +80,18 @@ void TestUnsignedParsingPreservesExistingInvalidValueBehavior() {
   CHECK(ParseU32("invalid", 99) == 0u);
 }
 
+void TestUnsignedListParsingPreservesLegacySemantics() {
+  using NsmbNetplayPoC::Config::ParseU32List;
+  CHECK(ParseU32List(nullptr).empty());
+  CHECK(ParseU32List("").empty());
+  const auto values = ParseU32List(" 1, 0x10, invalid, , 03 ");
+  CHECK(values.size() == 4);
+  CHECK(values[0] == 1u);
+  CHECK(values[1] == 16u);
+  CHECK(values[2] == 0u);
+  CHECK(values[3] == 3u);
+}
+
 void TestBootstrapConfigDefaults() {
   const MapEnvironment environment;
   const auto config = NsmbNetplayPoC::Config::LoadBootstrapConfig(environment);
@@ -343,6 +355,102 @@ void TestRollbackConfigReadsClampsAndDependencies() {
   CHECK(config.MaxResimFrames == 0);
 }
 
+void TestMvlConfigDefaults() {
+  const MapEnvironment environment;
+  const auto config = NsmbNetplayPoC::Config::LoadMvlConfig(environment);
+  CHECK(!config.DirectBootEnabled);
+  CHECK(!config.DirectBootHostOnly);
+  CHECK(!config.DirectBootClientOnly);
+  CHECK(config.DirectBootFrame == 900u);
+  CHECK(config.DirectBootScene == 0x0F);
+  CHECK(config.DirectBootStage == 0);
+  CHECK(config.StageSequence.empty());
+  CHECK(config.DirectBootPlayerID == -1);
+  CHECK(config.StageSceneSettings == 0x00B4FF00u);
+  CHECK(config.CourseMode == "fixed");
+  CHECK(config.InvalidCourseMode.empty());
+  CHECK(config.TargetWins == 2);
+  CHECK(config.BigStarTarget == 5);
+  CHECK(!config.RuntimeConfigEnabled);
+  CHECK(config.InitialLives == 3u);
+  CHECK(config.LifeModeSelector == 2u);
+  CHECK(config.BigStarSelector == 1u);
+  CHECK(!config.NormalizeEntranceSpawnWrites);
+  CHECK(!config.AutoRestartAfterResult);
+  CHECK(config.AutoRestartDelayFrames == 120u);
+  CHECK(config.AutoRestartBootstrapFrame == 120u);
+  CHECK(!config.UseLoadGameStateMachine);
+  CHECK(!config.ForceCourseSelectFactory);
+}
+
+void TestMvlConfigReadsClampsAndPreservesPriority() {
+  MapEnvironment environment;
+  environment.Values = {
+      {"MELONDS_NSML_DIRECT_MVL_BOOT", "1"},
+      {"MELONDS_NSML_DIRECT_MVL_BOOT_HOST_ONLY", "1"},
+      {"MELONDS_NSML_DIRECT_MVL_BOOT_CLIENT_ONLY", "1"},
+      {"MELONDS_NSML_DIRECT_MVL_BOOT_FRAME", "-4"},
+      {"MELONDS_NSML_DIRECT_MVL_BOOT_SCENE", "99999"},
+      {"MELONDS_NSML_DIRECT_MVL_BOOT_STAGE", "9"},
+      {"MELONDS_NSML_MVL_STAGE", "-3"},
+      {"MELONDS_NSML_MVL_STAGE_SEQUENCE", " 4, 9, invalid, , 2 "},
+      {"MELONDS_NSML_DIRECT_MVL_BOOT_PLAYER_ID", "7"},
+      {"MELONDS_NSML_MVL_COURSE_MODE", "unsupported"},
+      {"MELONDS_NSML_MVL_WINS", "0"},
+      {"MELONDS_NSML_MVL_BIG_STARS", "99"},
+      {"MELONDS_NSML_MVL_LIVES", "5"},
+      {"MELONDS_NSML_NORMALIZE_MVL_ENTRANCE_SPAWN_WRITES", "1"},
+      {"MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT", "1"},
+      {"MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES", "-1"},
+      {"MELONDS_NSML_MVL_AUTO_RESTART_BOOTSTRAP_FRAME", "2000000"},
+      {"MELONDS_NSML_DIRECT_MVL_BOOT_LOAD_SM", "1"},
+      {"MELONDS_NSML_DIRECT_MVL_BOOT_PATCH_LOAD_SM_ONLY", "1"},
+      {"MELONDS_NSML_DIRECT_MVL_BOOT_CALL_UPDATE_SM", "1"},
+      {"MELONDS_NSML_DIRECT_MVL_BOOT_CALL_START_LOAD", "1"},
+      {"MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT", "1"},
+      {"MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT", "1"},
+      {"MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY", "1"},
+      {"MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY_FRAME", "-5"},
+      {"MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY_PLAYER_ARG", "3"},
+  };
+
+  auto config = NsmbNetplayPoC::Config::LoadMvlConfig(environment);
+  CHECK(config.DirectBootEnabled);
+  CHECK(config.DirectBootHostOnly);
+  CHECK(config.DirectBootClientOnly);
+  CHECK(config.DirectBootFrame == 0u);
+  CHECK(config.DirectBootScene == 0xFFFF);
+  CHECK(config.StageSequence == std::vector<int>({4, 4, 0, 2}));
+  CHECK(config.DirectBootStage == 4);
+  CHECK(config.DirectBootPlayerID == 7);
+  CHECK(config.StageSceneSettings == 0x00B4FF00u);
+  CHECK(config.CourseMode == "fixed");
+  CHECK(config.InvalidCourseMode == "unsupported");
+  CHECK(config.TargetWins == 1);
+  CHECK(config.BigStarTarget == 10);
+  CHECK(config.RuntimeConfigEnabled);
+  CHECK(config.InitialLives == 5u);
+  CHECK(config.LifeModeSelector == 0u);
+  CHECK(config.BigStarSelector == 2u);
+  CHECK(config.NormalizeEntranceSpawnWrites);
+  CHECK(config.AutoRestartAfterResult);
+  CHECK(config.AutoRestartDelayFrames == 1u);
+  CHECK(config.AutoRestartBootstrapFrame == 1000000u);
+  CHECK(config.UseLoadGameStateMachine);
+  CHECK(config.PatchLoadGameStateMachineOnly);
+  CHECK(config.CallUpdateLoadGameStateMachine);
+  CHECK(config.CallStartLoadLevel);
+  CHECK(config.CallCreateCourseSelect);
+  CHECK(config.CallObjectCourseSelect);
+  CHECK(config.ForceCourseSelectFactory);
+  CHECK(config.ForceCourseSelectFactoryFrame == 0u);
+  CHECK(config.ForceCourseSelectFactoryPlayerArg == 3);
+
+  environment.Values["MELONDS_NSML_MVL_SCENE_SETTINGS"] = "invalid";
+  config = NsmbNetplayPoC::Config::LoadMvlConfig(environment);
+  CHECK(config.StageSceneSettings == 0u);
+}
+
 } // namespace
 
 int main() {
@@ -351,6 +459,7 @@ int main() {
   TestIntegerParsingPreservesBaseAndFallback();
   TestDoubleParsingPreservesFallback();
   TestUnsignedParsingPreservesExistingInvalidValueBehavior();
+  TestUnsignedListParsingPreservesLegacySemantics();
   TestBootstrapConfigDefaults();
   TestBootstrapConfigReadsAndClampsEnvironment();
   TestConnectionConfigDefaultsAndRoleFallback();
@@ -359,6 +468,8 @@ int main() {
   TestInputConfigReadsClampsAndNormalizesRanges();
   TestRollbackConfigDefaultsAndBackendAliases();
   TestRollbackConfigReadsClampsAndDependencies();
+  TestMvlConfigDefaults();
+  TestMvlConfigReadsClampsAndPreservesPriority();
 
   if (Failures != 0) {
     std::fprintf(stderr, "nsmb netplay config tests failed: %d\n", Failures);

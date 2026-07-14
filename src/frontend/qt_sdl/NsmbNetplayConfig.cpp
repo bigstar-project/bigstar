@@ -1,8 +1,10 @@
 #include "NsmbNetplayConfig.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
+#include <sstream>
 
 namespace NsmbNetplayPoC::Config {
 
@@ -12,6 +14,11 @@ class ProcessEnvironment final : public Environment {
 public:
   const char *Get(const char *name) const override { return std::getenv(name); }
 };
+
+std::uint32_t ComposeMvlSceneSettingsForStage(int stage) {
+  const auto clampedStage = static_cast<std::uint32_t>(std::clamp(stage, 0, 4));
+  return ((0xB4u + clampedStage) << 16) | 0xFF00u;
+}
 
 } // namespace
 
@@ -56,6 +63,27 @@ std::uint32_t ParseU32(const char *value, std::uint32_t fallback) {
   return static_cast<std::uint32_t>(std::strtoul(value, nullptr, 0));
 }
 
+std::vector<std::uint32_t> ParseU32List(const char *value) {
+  std::vector<std::uint32_t> values;
+  if (!value || !value[0])
+    return values;
+
+  std::stringstream stream(value);
+  std::string token;
+  while (std::getline(stream, token, ',')) {
+    token.erase(std::remove_if(token.begin(), token.end(),
+                               [](unsigned char character) {
+                                 return std::isspace(character) != 0;
+                               }),
+                token.end());
+    if (token.empty())
+      continue;
+    values.push_back(
+        static_cast<std::uint32_t>(std::strtoul(token.c_str(), nullptr, 0)));
+  }
+  return values;
+}
+
 bool HasValue(const char *value) { return value && value[0]; }
 
 bool ReadFlag(const Environment &environment, const char *name) {
@@ -83,6 +111,11 @@ std::uint32_t ReadU32(const Environment &environment, const char *name,
 
 bool ReadHasValue(const Environment &environment, const char *name) {
   return HasValue(environment.Get(name));
+}
+
+std::vector<std::uint32_t> ReadU32List(const Environment &environment,
+                                       const char *name) {
+  return ParseU32List(environment.Get(name));
 }
 
 BootstrapConfig LoadBootstrapConfig(const Environment &environment) {
@@ -333,6 +366,102 @@ RollbackConfig LoadRollbackConfig() {
   return LoadRollbackConfig(GetProcessEnvironment());
 }
 
+MvlConfig LoadMvlConfig(const Environment &environment) {
+  MvlConfig config;
+  config.DirectBootEnabled =
+      ReadFlag(environment, "MELONDS_NSML_DIRECT_MVL_BOOT");
+  config.DirectBootHostOnly =
+      ReadFlag(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_HOST_ONLY");
+  config.DirectBootClientOnly =
+      ReadFlag(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_CLIENT_ONLY");
+  config.DirectBootFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_FRAME", 900)));
+  config.DirectBootScene = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_SCENE", 0x0F), 0,
+      0xFFFF);
+
+  const int directStage = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_STAGE", 0), 0, 4);
+  const int mvlStage = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_MVL_STAGE", directStage), 0, 4);
+  config.DirectBootStage = mvlStage;
+  for (const std::uint32_t stage :
+       ReadU32List(environment, "MELONDS_NSML_MVL_STAGE_SEQUENCE"))
+    config.StageSequence.push_back(std::clamp(static_cast<int>(stage), 0, 4));
+  if (!config.StageSequence.empty())
+    config.DirectBootStage = config.StageSequence.front();
+  config.DirectBootPlayerID =
+      ReadInt(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_PLAYER_ID", -1);
+
+  if (ReadHasValue(environment, "MELONDS_NSML_MVL_SCENE_SETTINGS")) {
+    config.StageSceneSettings =
+        ReadU32(environment, "MELONDS_NSML_MVL_SCENE_SETTINGS", 0x00B4FF00);
+  } else {
+    const auto sceneStage = static_cast<int>(
+        ReadU32(environment, "MELONDS_NSML_MVL_STAGE",
+                ReadU32(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_STAGE", 0)));
+    config.StageSceneSettings = ComposeMvlSceneSettingsForStage(sceneStage);
+  }
+
+  config.CourseMode =
+      ReadCString(environment, "MELONDS_NSML_MVL_COURSE_MODE", "fixed");
+  if (config.CourseMode != "fixed" && config.CourseMode != "random" &&
+      config.CourseMode != "select") {
+    config.InvalidCourseMode = config.CourseMode;
+    config.CourseMode = "fixed";
+  }
+  config.TargetWins =
+      std::clamp(ReadInt(environment, "MELONDS_NSML_MVL_WINS", 2), 1, 3);
+  config.BigStarTarget =
+      std::clamp(ReadInt(environment, "MELONDS_NSML_MVL_BIG_STARS", 5), 3, 10);
+  config.RuntimeConfigEnabled =
+      ReadHasValue(environment, "MELONDS_NSML_MVL_STAGE") ||
+      ReadHasValue(environment, "MELONDS_NSML_MVL_SCENE_SETTINGS") ||
+      ReadHasValue(environment, "MELONDS_NSML_MVL_BIG_STARS") ||
+      ReadHasValue(environment, "MELONDS_NSML_MVL_LIVES");
+  const std::string lives =
+      ReadCString(environment, "MELONDS_NSML_MVL_LIVES", "endless");
+  config.InitialLives = lives == "5" ? 5u : 3u;
+  config.LifeModeSelector = lives == "endless" || lives == "Endless" ? 2u : 0u;
+  config.BigStarSelector = config.BigStarTarget == 3    ? 0u
+                           : config.BigStarTarget == 10 ? 2u
+                                                        : 1u;
+  config.NormalizeEntranceSpawnWrites =
+      ReadFlag(environment, "MELONDS_NSML_NORMALIZE_MVL_ENTRANCE_SPAWN_WRITES");
+  config.AutoRestartAfterResult =
+      ReadFlag(environment, "MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT");
+  config.AutoRestartDelayFrames = static_cast<std::uint32_t>(
+      std::max(1, ReadInt(environment,
+                          "MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES", 120)));
+  config.AutoRestartBootstrapFrame = static_cast<std::uint32_t>(
+      std::clamp(ReadInt(environment,
+                         "MELONDS_NSML_MVL_AUTO_RESTART_BOOTSTRAP_FRAME", 120),
+                 0, 1000000));
+
+  config.UseLoadGameStateMachine =
+      ReadFlag(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_LOAD_SM");
+  config.PatchLoadGameStateMachineOnly =
+      ReadFlag(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_PATCH_LOAD_SM_ONLY");
+  config.CallUpdateLoadGameStateMachine =
+      ReadFlag(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_CALL_UPDATE_SM");
+  config.CallStartLoadLevel =
+      ReadFlag(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_CALL_START_LOAD");
+  config.CallCreateCourseSelect =
+      ReadFlag(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT");
+  config.CallObjectCourseSelect = ReadFlag(
+      environment, "MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT");
+  config.ForceCourseSelectFactory =
+      ReadFlag(environment, "MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY");
+  config.ForceCourseSelectFactoryFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY_FRAME",
+                 0)));
+  config.ForceCourseSelectFactoryPlayerArg = ReadInt(
+      environment, "MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY_PLAYER_ARG", -1);
+  return config;
+}
+
+MvlConfig LoadMvlConfig() { return LoadMvlConfig(GetProcessEnvironment()); }
+
 bool EnvFlag(const char *name) {
   return ReadFlag(GetProcessEnvironment(), name);
 }
@@ -351,6 +480,10 @@ double EnvDouble(const char *name, double fallback) {
 
 std::uint32_t EnvU32(const char *name, std::uint32_t fallback) {
   return ReadU32(GetProcessEnvironment(), name, fallback);
+}
+
+std::vector<std::uint32_t> EnvU32List(const char *name) {
+  return ReadU32List(GetProcessEnvironment(), name);
 }
 
 bool EnvHasValue(const char *name) {

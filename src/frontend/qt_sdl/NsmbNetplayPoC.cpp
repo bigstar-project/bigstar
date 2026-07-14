@@ -1698,35 +1698,6 @@ melonDS::u32 ComposeMvlSceneSettingsForStage(int stage)
     return ((0xB4u + clampedStage) << 16) | 0xFF00u;
 }
 
-std::vector<melonDS::u32> ParseU32ListEnv(const char* name)
-{
-    std::vector<melonDS::u32> values;
-    const char* raw = std::getenv(name);
-    if (!raw || !raw[0])
-        return values;
-
-    std::stringstream stream(raw);
-    std::string token;
-    while (std::getline(stream, token, ','))
-    {
-        token.erase(std::remove_if(token.begin(), token.end(), [](unsigned char ch) {
-            return std::isspace(ch) != 0;
-        }), token.end());
-        if (token.empty())
-            continue;
-        values.push_back(static_cast<melonDS::u32>(std::strtoul(token.c_str(), nullptr, 0)));
-    }
-    return values;
-}
-
-std::vector<int> ParseStageListEnv(const char* name)
-{
-    std::vector<int> stages;
-    for (melonDS::u32 value : ParseU32ListEnv(name))
-        stages.push_back(std::clamp(static_cast<int>(value), 0, 4));
-    return stages;
-}
-
 int GameIndexForInstance(int instanceID)
 {
     if (instanceID < 0 || instanceID >= 16)
@@ -2036,12 +2007,6 @@ void ResetMvlAutoRestartStartupHookState(int instanceID)
     G.InputFrameLeadResendCount = 0;
     G.NetplayLockstepStarted[instanceID] = false;
     G.NetplayAnyLockstepStarted = false;
-}
-
-melonDS::u32 ComposeMvlSceneSettingsFromEnvironment()
-{
-    return ComposeMvlSceneSettingsForStage(static_cast<int>(
-        EnvU32("MELONDS_NSML_MVL_STAGE", EnvU32("MELONDS_NSML_DIRECT_MVL_BOOT_STAGE", 0))));
 }
 
 void ApplyMvlRuntimeConfigIfNeeded(melonDS::NDS* nds)
@@ -14832,56 +14797,42 @@ void InitFromEnvironment()
     G.InputDropStartFrame = inputConfig.DropStartFrame;
     G.InputDropEndFrame = inputConfig.DropEndFrame;
     G.InputNetplayMaxFrameLead = inputConfig.MaxFrameLead;
-    G.DirectMvlBootEnabled = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT");
-    G.DirectMvlBootHostOnly = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_HOST_ONLY");
-    G.DirectMvlBootClientOnly = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_CLIENT_ONLY");
-    G.DirectMvlBootFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_DIRECT_MVL_BOOT_FRAME", 900)));
-    G.DirectMvlBootScene = std::clamp(EnvInt("MELONDS_NSML_DIRECT_MVL_BOOT_SCENE", 0x0F), 0, 0xFFFF);
-    G.DirectMvlBootStage = std::clamp(EnvInt("MELONDS_NSML_DIRECT_MVL_BOOT_STAGE", 0), 0, 4);
-    G.DirectMvlBootStage = std::clamp(EnvInt("MELONDS_NSML_MVL_STAGE", G.DirectMvlBootStage), 0, 4);
-    G.MvlStageSequence = ParseStageListEnv("MELONDS_NSML_MVL_STAGE_SEQUENCE");
-    if (!G.MvlStageSequence.empty())
-        G.DirectMvlBootStage = G.MvlStageSequence.front();
-    G.DirectMvlBootPlayerID = EnvInt("MELONDS_NSML_DIRECT_MVL_BOOT_PLAYER_ID", -1);
-    G.MvlStageSceneSettings = EnvHasValue("MELONDS_NSML_MVL_SCENE_SETTINGS")
-        ? EnvU32("MELONDS_NSML_MVL_SCENE_SETTINGS", kMvlStageSceneDefaultSettings)
-        : ComposeMvlSceneSettingsFromEnvironment();
-    G.MvlCourseMode = EnvCString("MELONDS_NSML_MVL_COURSE_MODE", "fixed");
-    G.MvlTargetWins = std::clamp(EnvInt("MELONDS_NSML_MVL_WINS", 2), 1, 3);
-    G.MvlBigStarTarget = std::clamp(EnvInt("MELONDS_NSML_MVL_BIG_STARS", 5), 3, 10);
-    G.MvlRuntimeConfigEnabled =
-        EnvHasValue("MELONDS_NSML_MVL_STAGE")
-        || EnvHasValue("MELONDS_NSML_MVL_SCENE_SETTINGS")
-        || EnvHasValue("MELONDS_NSML_MVL_BIG_STARS")
-        || EnvHasValue("MELONDS_NSML_MVL_LIVES");
-    const std::string mvlLives = EnvCString("MELONDS_NSML_MVL_LIVES", "endless");
-    G.MvlInitialLives = mvlLives == "5" ? 5u : 3u;
-    G.MvlLifeModeSelector = mvlLives == "endless" || mvlLives == "Endless" ? 2u : 0u;
-    G.MvlBigStarSelector = G.MvlBigStarTarget == 3 ? 0u : G.MvlBigStarTarget == 10 ? 2u : 1u;
-    G.NormalizeMvlEntranceSpawnWritesEnabled = EnvFlag("MELONDS_NSML_NORMALIZE_MVL_ENTRANCE_SPAWN_WRITES");
-    G.MvlAutoRestartAfterResult = EnvFlag("MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT");
-    G.MvlAutoRestartDelayFrames = static_cast<melonDS::u32>(
-        std::max(1, EnvInt("MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES", 120)));
-    G.MvlAutoRestartBootstrapFrame = static_cast<melonDS::u32>(
-        std::clamp(EnvInt("MELONDS_NSML_MVL_AUTO_RESTART_BOOTSTRAP_FRAME", 120), 0, 1000000));
-    if (G.MvlCourseMode != "fixed" && G.MvlCourseMode != "random" && G.MvlCourseMode != "select")
+    const Config::MvlConfig mvlConfig = Config::LoadMvlConfig();
+    G.DirectMvlBootEnabled = mvlConfig.DirectBootEnabled;
+    G.DirectMvlBootHostOnly = mvlConfig.DirectBootHostOnly;
+    G.DirectMvlBootClientOnly = mvlConfig.DirectBootClientOnly;
+    G.DirectMvlBootFrame = mvlConfig.DirectBootFrame;
+    G.DirectMvlBootScene = mvlConfig.DirectBootScene;
+    G.DirectMvlBootStage = mvlConfig.DirectBootStage;
+    G.MvlStageSequence = mvlConfig.StageSequence;
+    G.DirectMvlBootPlayerID = mvlConfig.DirectBootPlayerID;
+    G.MvlStageSceneSettings = mvlConfig.StageSceneSettings;
+    G.MvlCourseMode = mvlConfig.CourseMode;
+    G.MvlTargetWins = mvlConfig.TargetWins;
+    G.MvlBigStarTarget = mvlConfig.BigStarTarget;
+    G.MvlRuntimeConfigEnabled = mvlConfig.RuntimeConfigEnabled;
+    G.MvlInitialLives = mvlConfig.InitialLives;
+    G.MvlLifeModeSelector = mvlConfig.LifeModeSelector;
+    G.MvlBigStarSelector = mvlConfig.BigStarSelector;
+    G.NormalizeMvlEntranceSpawnWritesEnabled = mvlConfig.NormalizeEntranceSpawnWrites;
+    G.MvlAutoRestartAfterResult = mvlConfig.AutoRestartAfterResult;
+    G.MvlAutoRestartDelayFrames = mvlConfig.AutoRestartDelayFrames;
+    G.MvlAutoRestartBootstrapFrame = mvlConfig.AutoRestartBootstrapFrame;
+    if (!mvlConfig.InvalidCourseMode.empty())
     {
         std::printf("NSMB MvL settings: unknown courseMode=%s; using fixed stage=%d\n",
-            G.MvlCourseMode.c_str(),
+            mvlConfig.InvalidCourseMode.c_str(),
             G.DirectMvlBootStage);
-        G.MvlCourseMode = "fixed";
     }
-    G.DirectMvlBootUseLoadGameSM = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_LOAD_SM");
-    G.DirectMvlBootPatchLoadGameSMOnly = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_PATCH_LOAD_SM_ONLY");
-    G.DirectMvlBootCallUpdateLoadGameSM = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_CALL_UPDATE_SM");
-    G.DirectMvlBootCallStartLoadLevel = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_CALL_START_LOAD");
-    G.DirectMvlBootCallCreateCourseSelect = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT");
-    G.DirectMvlBootCallObjectCourseSelect = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT");
-    G.ForceCourseSelectFactory = EnvFlag("MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY");
-    G.ForceCourseSelectFactoryFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY_FRAME", 0)));
-    G.ForceCourseSelectFactoryPlayerArg = EnvInt("MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY_PLAYER_ARG", -1);
+    G.DirectMvlBootUseLoadGameSM = mvlConfig.UseLoadGameStateMachine;
+    G.DirectMvlBootPatchLoadGameSMOnly = mvlConfig.PatchLoadGameStateMachineOnly;
+    G.DirectMvlBootCallUpdateLoadGameSM = mvlConfig.CallUpdateLoadGameStateMachine;
+    G.DirectMvlBootCallStartLoadLevel = mvlConfig.CallStartLoadLevel;
+    G.DirectMvlBootCallCreateCourseSelect = mvlConfig.CallCreateCourseSelect;
+    G.DirectMvlBootCallObjectCourseSelect = mvlConfig.CallObjectCourseSelect;
+    G.ForceCourseSelectFactory = mvlConfig.ForceCourseSelectFactory;
+    G.ForceCourseSelectFactoryFrame = mvlConfig.ForceCourseSelectFactoryFrame;
+    G.ForceCourseSelectFactoryPlayerArg = mvlConfig.ForceCourseSelectFactoryPlayerArg;
 
     const char* inputScript = std::getenv("MELONDS_NSML_INPUT_SCRIPT");
     if (inputScript && inputScript[0]) G.InputScriptPath = inputScript;
@@ -15442,7 +15393,7 @@ void InitFromEnvironment()
         G.MatchSeed = static_cast<melonDS::u32>(std::strtoul(matchSeed, nullptr, 0));
         G.MatchSeedConfigured = true;
     }
-    G.MatchSeedSequence = ParseU32ListEnv("MELONDS_NSML_MATCH_SEED_SEQUENCE");
+    G.MatchSeedSequence = Config::EnvU32List("MELONDS_NSML_MATCH_SEED_SEQUENCE");
     if (!G.MatchSeedSequence.empty())
     {
         G.MatchSeed = G.MatchSeedSequence.front();

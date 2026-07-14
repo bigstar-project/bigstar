@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace NsmbNetplayPoC::Config {
 
@@ -111,11 +112,45 @@ struct RollbackConfig {
   int MaxResimFrames = 0;
 };
 
+struct MvlConfig {
+  bool DirectBootEnabled = false;
+  bool DirectBootHostOnly = false;
+  bool DirectBootClientOnly = false;
+  std::uint32_t DirectBootFrame = 900;
+  int DirectBootScene = 0x0F;
+  int DirectBootStage = 0;
+  std::vector<int> StageSequence;
+  int DirectBootPlayerID = -1;
+  std::uint32_t StageSceneSettings = 0x00B4FF00;
+  std::string CourseMode = "fixed";
+  std::string InvalidCourseMode;
+  int TargetWins = 2;
+  int BigStarTarget = 5;
+  bool RuntimeConfigEnabled = false;
+  std::uint32_t InitialLives = 3;
+  std::uint32_t LifeModeSelector = 2;
+  std::uint32_t BigStarSelector = 1;
+  bool NormalizeEntranceSpawnWrites = false;
+  bool AutoRestartAfterResult = false;
+  std::uint32_t AutoRestartDelayFrames = 120;
+  std::uint32_t AutoRestartBootstrapFrame = 120;
+  bool UseLoadGameStateMachine = false;
+  bool PatchLoadGameStateMachineOnly = false;
+  bool CallUpdateLoadGameStateMachine = false;
+  bool CallStartLoadLevel = false;
+  bool CallCreateCourseSelect = false;
+  bool CallObjectCourseSelect = false;
+  bool ForceCourseSelectFactory = false;
+  std::uint32_t ForceCourseSelectFactoryFrame = 0;
+  int ForceCourseSelectFactoryPlayerArg = -1;
+};
+
 bool ParseFlag(const char *value);
 const char *ValueOr(const char *value, const char *fallback);
 int ParseInt(const char *value, int fallback);
 double ParseDouble(const char *value, double fallback);
 std::uint32_t ParseU32(const char *value, std::uint32_t fallback);
+std::vector<std::uint32_t> ParseU32List(const char *value);
 bool HasValue(const char *value);
 
 bool ReadFlag(const Environment &environment, const char *name);
@@ -127,6 +162,8 @@ double ReadDouble(const Environment &environment, const char *name,
 std::uint32_t ReadU32(const Environment &environment, const char *name,
                       std::uint32_t fallback);
 bool ReadHasValue(const Environment &environment, const char *name);
+std::vector<std::uint32_t> ReadU32List(const Environment &environment,
+                                       const char *name);
 
 BootstrapConfig LoadBootstrapConfig(const Environment &environment);
 BootstrapConfig LoadBootstrapConfig();
@@ -138,12 +175,15 @@ InputConfig LoadInputConfig(const Environment &environment,
 InputConfig LoadInputConfig(bool netplayOnlyForMaxFrameLeadDefault);
 RollbackConfig LoadRollbackConfig(const Environment &environment);
 RollbackConfig LoadRollbackConfig();
+MvlConfig LoadMvlConfig(const Environment &environment);
+MvlConfig LoadMvlConfig();
 
 bool EnvFlag(const char *name);
 const char *EnvCString(const char *name, const char *fallback);
 int EnvInt(const char *name, int fallback);
 double EnvDouble(const char *name, double fallback);
 std::uint32_t EnvU32(const char *name, std::uint32_t fallback);
+std::vector<std::uint32_t> EnvU32List(const char *name);
 bool EnvHasValue(const char *name);
 
 } // namespace NsmbNetplayPoC::Config
