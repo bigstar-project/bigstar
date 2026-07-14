@@ -13,6 +13,7 @@
 
 #include "NsmbNetplayPoC.h"
 #include "NsmbNetplayConfig.h"
+#include "NsmbNetplayCoordinator.h"
 #include "NsmbInputDelivery.h"
 #include "NsmbInputProtocol.h"
 #include "NsmbNetplayProtocol.h"
@@ -532,8 +533,7 @@ struct State
     int InputRecordFlushPendingSpans = 0;
     Config::StateSyncConfig StateSync;
     SessionPolicy::Runtime Session;
-    bool NetplayStartWaitArrived[16] {};
-    bool NetplayStartWaitComplete = false;
+    Coordination::Runtime Coordinator;
     Config::PacketBridgeConfig PacketBridge;
     Config::InputConfig Input;
     InputTimeline::Runtime InputRuntime;
@@ -659,15 +659,6 @@ struct State
     melonDS::u64 LastLoggedHashFrame[16] {};
     melonDS::u64 LastLoggedGameStateFrame[16] {};
     melonDS::u32 TestFrameCount[16] {};
-    bool StateSaved[16] {};
-    bool StateLoaded[16] {};
-    bool LocalMPSaved = false;
-    bool LocalMPLoadStarted = false;
-    bool LocalMPLoadFinished = false;
-    bool LocalMPLoaded = false;
-    melonDS::u32 SerialFrame = 0;
-    int SerialInstance = 0;
-    std::condition_variable BarrierCond;
     std::condition_variable InputCond;
     bool NetworkPumpThreadStarted = false;
     bool NetworkPumpStop = false;
@@ -683,17 +674,6 @@ void TraceHangPhase(const char* event, const char* phase, int instanceID = -1,
 void UpdateHangGameSnapshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
 void StartHangWatchdogIfNeeded();
 void StopHangWatchdog();
-
-struct FrameBarrier
-{
-    bool Waiting[16] {};
-    melonDS::u32 Frame[16] {};
-    int Generation = 0;
-};
-
-FrameBarrier GBeforeFrameBarrier;
-FrameBarrier GAfterFrameBarrier;
-FrameBarrier GNetplayFrameBarrier;
 
 using Config::EnvCString;
 using Config::EnvDouble;
@@ -923,8 +903,7 @@ void ResetMvlAutoRestartStartupHookState(int instanceID)
     G.LastPacketBridgeForcedTickFrame[instanceID] = 0;
     G.ScriptRemotePacketLogged[instanceID] = false;
     G.ClearMvlCameraInitHoldApplied[instanceID] = false;
-    std::fill(std::begin(G.NetplayStartWaitArrived), std::end(G.NetplayStartWaitArrived), false);
-    G.NetplayStartWaitComplete = false;
+    G.Coordinator.ResetNetplayStartWait();
     G.Session.ResetStartHandshake();
     G.InputRuntime.LastInputFrameLeadResendAt = {};
     G.InputRuntime.InputFrameLeadResendCount = 0;
@@ -3721,17 +3700,6 @@ melonDS::u32 InputNetplayLogicalFrame(melonDS::u32 rawFrame)
     return G.Connection.StartFrame + (rawFrame - *localReadyFrame);
 }
 
-bool AllNetplayStartWaitArrivedLocked()
-{
-    const int count = std::max(1, std::min(G.Bootstrap.TestInstanceCount, 16));
-    for (int i = 0; i < count; i++)
-    {
-        if (!G.NetplayStartWaitArrived[i])
-            return false;
-    }
-    return true;
-}
-
 void WaitForPeerAtNetplayStartBarrier(int instanceID, melonDS::u32 syncFrame)
 {
     if (!G.Enabled || !G.Harness.WaitForPeerAtNetplayStart || G.NetRole != Role::Host
@@ -3742,62 +3710,14 @@ void WaitForPeerAtNetplayStartBarrier(int instanceID, melonDS::u32 syncFrame)
         return;
     }
 
-    const bool isLocal = (instanceID == G.Connection.LocalInstance);
-    {
-        std::unique_lock<std::mutex> lock(G.Mutex);
-        if (G.NetplayStartWaitComplete)
-            return;
-
-        G.NetplayStartWaitArrived[instanceID] = true;
-        G.BarrierCond.notify_all();
-
-        const auto deadline = std::chrono::steady_clock::now()
-            + std::chrono::milliseconds(G.Harness.SeedWaitTimeoutMs);
-
-        if (isLocal)
-        {
-            while (!AllNetplayStartWaitArrivedLocked())
-            {
-                if (G.Harness.SeedWaitTimeoutMs > 0)
-                {
-                    if (G.BarrierCond.wait_until(lock, deadline) == std::cv_status::timeout)
-                    {
-                        std::printf("NSMB PoC: netplay start local barrier timeout inst=%d frame=%u waitedMs=%d\n",
-                            instanceID,
-                            syncFrame,
-                            G.Harness.SeedWaitTimeoutMs);
-                        break;
-                    }
-                }
-                else
-                {
-                    G.BarrierCond.wait(lock);
-                }
-            }
-        }
-        else
-        {
-            while (!G.NetplayStartWaitComplete)
-            {
-                if (G.Harness.SeedWaitTimeoutMs > 0)
-                {
-                    if (G.BarrierCond.wait_until(lock, deadline) == std::cv_status::timeout)
-                    {
-                        std::printf("NSMB PoC: netplay start peer wait barrier timeout inst=%d frame=%u waitedMs=%d\n",
-                            instanceID,
-                            syncFrame,
-                            G.Harness.SeedWaitTimeoutMs);
-                        return;
-                    }
-                }
-                else
-                {
-                    G.BarrierCond.wait(lock);
-                }
-            }
-            return;
-        }
-    }
+    const auto waitResult = G.Coordinator.WaitForNetplayStart(
+        instanceID,
+        G.Connection.LocalInstance,
+        G.Bootstrap.TestInstanceCount,
+        syncFrame,
+        G.Harness.SeedWaitTimeoutMs);
+    if (waitResult != Coordination::NetplayStartWaitResult::LocalLeader)
+        return;
 
     std::printf("NSMB PoC: waiting for peer at netplay start frame=%u\n", syncFrame);
     std::fflush(stdout);
@@ -3806,9 +3726,8 @@ void WaitForPeerAtNetplayStartBarrier(int instanceID, melonDS::u32 syncFrame)
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         G.Session.MarkWaitedForPeerAtStart();
-        G.NetplayStartWaitComplete = true;
-        G.BarrierCond.notify_all();
     }
+    G.Coordinator.CompleteNetplayStartWait();
     std::printf("NSMB PoC: peer wait at netplay start finished frame=%u\n", syncFrame);
     std::fflush(stdout);
 }
@@ -3883,70 +3802,24 @@ void WaitForRemoteNetplayStartReadyIfNeeded(melonDS::NDS* nds, melonDS::u32 sync
     }
 }
 
-bool WaitAtFrameBarrier(FrameBarrier& barrier, int instanceID, melonDS::u32 frame, const char* name)
+bool WaitAtFrameBarrier(
+    Coordination::FrameBarrierKind kind,
+    int instanceID,
+    melonDS::u32 frame,
+    const char* name)
 {
     if (!G.TestEnabled || !G.Harness.FrameBarrierEnabled || G.Bootstrap.TestInstanceCount <= 1)
         return true;
     if (instanceID < 0 || instanceID >= G.Bootstrap.TestInstanceCount)
         return true;
 
-    std::unique_lock<std::mutex> lock(G.Mutex);
-    const int generation = barrier.Generation;
-    barrier.Waiting[instanceID] = true;
-    barrier.Frame[instanceID] = frame;
-
-    const auto allArrived = [&]() {
-        for (int i = 0; i < G.Bootstrap.TestInstanceCount; i++)
-        {
-            if (!barrier.Waiting[i] || barrier.Frame[i] != frame)
-                return false;
-        }
-        return true;
-    };
-
-    const auto release = [&]() {
-        for (int i = 0; i < G.Bootstrap.TestInstanceCount; i++)
-            barrier.Waiting[i] = false;
-        barrier.Generation++;
-        G.BarrierCond.notify_all();
-    };
-
-    if (allArrived())
-    {
-        release();
-        return true;
-    }
-
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(G.Bootstrap.WaitTimeoutMs);
-    while (barrier.Generation == generation)
-    {
-        if (G.Bootstrap.WaitTimeoutMs > 0)
-        {
-            if (G.BarrierCond.wait_until(lock, deadline) == std::cv_status::timeout)
-            {
-                std::printf("NSMB Test: %s frame barrier timeout inst=%d frame=%u waitedMs=%d\n",
-                    name,
-                    instanceID,
-                    frame,
-                    G.Bootstrap.WaitTimeoutMs);
-                barrier.Waiting[instanceID] = false;
-                G.BarrierCond.notify_all();
-                return false;
-            }
-        }
-        else
-        {
-            G.BarrierCond.wait(lock);
-        }
-
-        if (allArrived())
-        {
-            release();
-            return true;
-        }
-    }
-
-    return true;
+    return G.Coordinator.WaitAtFrameBarrier(
+        kind,
+        instanceID,
+        frame,
+        G.Bootstrap.TestInstanceCount,
+        G.Bootstrap.WaitTimeoutMs,
+        name);
 }
 
 bool WaitForSerialRunTurn(int instanceID, melonDS::u32 frame)
@@ -3956,31 +3829,11 @@ bool WaitForSerialRunTurn(int instanceID, melonDS::u32 frame)
     if (instanceID < 0 || instanceID >= G.Bootstrap.TestInstanceCount)
         return true;
 
-    std::unique_lock<std::mutex> lock(G.Mutex);
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(G.Bootstrap.WaitTimeoutMs);
-    for (;;)
-    {
-        if (G.SerialFrame == frame && G.SerialInstance == instanceID)
-            return true;
-
-        if (G.Bootstrap.WaitTimeoutMs > 0)
-        {
-            if (G.BarrierCond.wait_until(lock, deadline) == std::cv_status::timeout)
-            {
-                std::printf("NSMB Test: serial run timeout inst=%d frame=%u expectedInst=%d expectedFrame=%u waitedMs=%d\n",
-                    instanceID,
-                    frame,
-                    G.SerialInstance,
-                    G.SerialFrame,
-                    G.Bootstrap.WaitTimeoutMs);
-                return false;
-            }
-        }
-        else
-        {
-            G.BarrierCond.wait(lock);
-        }
-    }
+    return G.Coordinator.WaitForSerialTurn(
+        instanceID,
+        frame,
+        G.Bootstrap.TestInstanceCount,
+        G.Bootstrap.WaitTimeoutMs);
 }
 
 void AdvanceSerialRunTurn(int instanceID, melonDS::u32 frame)
@@ -3990,17 +3843,7 @@ void AdvanceSerialRunTurn(int instanceID, melonDS::u32 frame)
     if (instanceID < 0 || instanceID >= G.Bootstrap.TestInstanceCount)
         return;
 
-    std::lock_guard<std::mutex> lock(G.Mutex);
-    if (G.SerialFrame != frame || G.SerialInstance != instanceID)
-        return;
-
-    G.SerialInstance++;
-    if (G.SerialInstance >= G.Bootstrap.TestInstanceCount)
-    {
-        G.SerialInstance = 0;
-        G.SerialFrame++;
-    }
-    G.BarrierCond.notify_all();
+    G.Coordinator.AdvanceSerialTurn(instanceID, frame, G.Bootstrap.TestInstanceCount);
 }
 
 melonDS::u64 HashNDS(melonDS::NDS* nds)
@@ -7735,7 +7578,7 @@ std::filesystem::path LocalMPStatePath(const std::string& dir)
 bool SaveState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (G.Harness.StateSaveDir.empty() || G.Harness.StateSaveFrame == 0) return false;
-    if (frame != G.Harness.StateSaveFrame || G.StateSaved[instanceID]) return false;
+    if (frame != G.Harness.StateSaveFrame || G.Coordinator.IsStateSaved(instanceID)) return false;
 
     std::error_code ec;
     std::filesystem::create_directories(G.Harness.StateSaveDir, ec);
@@ -7769,10 +7612,7 @@ bool SaveState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         return false;
     }
 
-    {
-        std::lock_guard<std::mutex> lock(G.Mutex);
-        G.StateSaved[instanceID] = true;
-    }
+    G.Coordinator.MarkStateSaved(instanceID);
     std::printf("NSMB Test: saved state inst=%d frame=%u path=%ls bytes=%u\n",
         instanceID,
         frame,
@@ -7781,27 +7621,12 @@ bool SaveState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     return true;
 }
 
-bool AllStatesSavedLocked()
-{
-    for (int i = 0; i < G.Bootstrap.TestInstanceCount; i++)
-    {
-        if (!G.StateSaved[i])
-            return false;
-    }
-    return true;
-}
-
 bool SaveLocalMPState(melonDS::u32 frame)
 {
-    std::string stateSaveDir;
-    {
-        std::lock_guard<std::mutex> lock(G.Mutex);
-        if (G.Harness.StateSaveDir.empty() || G.Harness.StateSaveFrame == 0) return false;
-        if (frame != G.Harness.StateSaveFrame || G.LocalMPSaved) return false;
-        if (!AllStatesSavedLocked()) return false;
-        G.LocalMPSaved = true;
-        stateSaveDir = G.Harness.StateSaveDir;
-    }
+    if (G.Harness.StateSaveDir.empty() || G.Harness.StateSaveFrame == 0) return false;
+    if (frame != G.Harness.StateSaveFrame) return false;
+    if (!G.Coordinator.TryBeginLocalMPSave(G.Bootstrap.TestInstanceCount)) return false;
+    const std::string stateSaveDir = G.Harness.StateSaveDir;
 
     if (melonDS::MPInterface::GetType() != melonDS::MPInterface_Local)
     {
@@ -7852,19 +7677,7 @@ bool WaitForStateLoadBarrier(int instanceID)
     const auto start = std::chrono::steady_clock::now();
     for (;;)
     {
-        {
-            std::lock_guard<std::mutex> lock(G.Mutex);
-            bool allLoaded = true;
-            for (int i = 0; i < G.Bootstrap.TestInstanceCount; i++)
-            {
-                if (!G.StateLoaded[i])
-                {
-                    allLoaded = false;
-                    break;
-                }
-            }
-            if (allLoaded) return true;
-        }
+        if (G.Coordinator.AllStatesLoaded(G.Bootstrap.TestInstanceCount)) return true;
 
         if (G.Bootstrap.WaitTimeoutMs > 0)
         {
@@ -7888,11 +7701,9 @@ bool WaitForLocalMPLoadFinished(int instanceID)
     const auto start = std::chrono::steady_clock::now();
     for (;;)
     {
-        {
-            std::lock_guard<std::mutex> lock(G.Mutex);
-            if (G.LocalMPLoadFinished)
-                return G.LocalMPLoaded;
-        }
+        const auto [finished, loaded] = G.Coordinator.LocalMPLoadStatus();
+        if (finished)
+            return loaded;
 
         if (G.Bootstrap.WaitTimeoutMs > 0)
         {
@@ -7913,18 +7724,9 @@ bool WaitForLocalMPLoadFinished(int instanceID)
 
 bool LoadLocalMPStateOnce(int instanceID)
 {
-    std::string stateLoadDir;
-    bool shouldLoad = false;
-    {
-        std::lock_guard<std::mutex> lock(G.Mutex);
-        if (G.Harness.StateLoadDir.empty() || !G.Harness.StateLoadFrameSet) return false;
-        if (!G.LocalMPLoadStarted)
-        {
-            G.LocalMPLoadStarted = true;
-            shouldLoad = true;
-            stateLoadDir = G.Harness.StateLoadDir;
-        }
-    }
+    if (G.Harness.StateLoadDir.empty() || !G.Harness.StateLoadFrameSet) return false;
+    const std::string stateLoadDir = G.Harness.StateLoadDir;
+    const bool shouldLoad = G.Coordinator.TryBeginLocalMPLoad();
 
     if (!shouldLoad)
         return WaitForLocalMPLoadFinished(instanceID);
@@ -7960,11 +7762,7 @@ bool LoadLocalMPStateOnce(int instanceID)
         }
     }
 
-    {
-        std::lock_guard<std::mutex> lock(G.Mutex);
-        G.LocalMPLoaded = loaded;
-        G.LocalMPLoadFinished = true;
-    }
+    G.Coordinator.FinishLocalMPLoad(loaded);
     return loaded;
 }
 
@@ -7975,7 +7773,7 @@ bool LoadState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         if (G.Harness.StateLoadDir.empty() || !G.Harness.StateLoadFrameSet) return false;
-        if (frame != G.Harness.StateLoadFrame || G.StateLoaded[instanceID]) return false;
+        if (frame != G.Harness.StateLoadFrame || G.Coordinator.IsStateLoaded(instanceID)) return false;
         stateLoadDir = G.Harness.StateLoadDir;
         stateLoadFrame = G.Harness.StateLoadFrame;
     }
@@ -8012,10 +7810,7 @@ bool LoadState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     // instance with LocalMP before restoring the shared LocalMP queue snapshot.
     melonDS::Platform::MP_Begin(nds->UserData);
 
-    {
-        std::lock_guard<std::mutex> lock(G.Mutex);
-        G.StateLoaded[instanceID] = true;
-    }
+    G.Coordinator.MarkStateLoaded(instanceID);
     std::printf("NSMB Test: loaded state inst=%d frame=%u path=%ls bytes=%zu\n",
         instanceID,
         stateLoadFrame,
@@ -8860,7 +8655,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::ActorState);
     WaitForSerialRunTurn(instanceID, inputFrame);
-    WaitAtFrameBarrier(GBeforeFrameBarrier, instanceID, inputFrame, "before");
+    WaitAtFrameBarrier(Coordination::FrameBarrierKind::Before, instanceID, inputFrame, "before");
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Barrier);
 
     const InputState inputFallback = G.Harness.NeutralizePolledInput
@@ -9007,7 +8802,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     const melonDS::u32 targetFrame = syncFrame;
 
     if (G.Harness.NetplayFrameBarrierEnabled)
-        WaitAtFrameBarrier(GNetplayFrameBarrier, instanceID, targetFrame, "netplay");
+        WaitAtFrameBarrier(Coordination::FrameBarrierKind::Netplay, instanceID, targetFrame, "netplay");
 
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && !G.NetplayLockstepStarted[instanceID])
     {
@@ -9495,7 +9290,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         TraceGameplayHeartbeatIfNeeded(instanceID, logFrame, nds);
 
     TraceHangPhase("begin", "after-frame-barriers", instanceID, logFrame, logFrame, logFrame);
-    WaitAtFrameBarrier(GAfterFrameBarrier, instanceID, logFrame, "after");
+    WaitAtFrameBarrier(Coordination::FrameBarrierKind::After, instanceID, logFrame, "after");
     AdvanceSerialRunTurn(instanceID, logFrame - 1);
     WaitForPeerAtNetplayStartBarrier(instanceID, logFrame);
     const auto afterBarrier = std::chrono::steady_clock::now();

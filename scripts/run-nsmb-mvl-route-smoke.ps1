@@ -15,6 +15,8 @@ param(
     [int]$RamDumpInterval = 0,
     [string]$StateSaveDir = "",
     [int]$StateSaveFrame = 0,
+    [string]$StateLoadDir = "",
+    [int]$StateLoadFrame = -1,
     [switch]$AllowJit,
     [switch]$NoFrameLimit,
     [switch]$NoScreenshots,
@@ -42,6 +44,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($FrameBarrier -and $SerialRun) {
+    throw "FrameBarrier and SerialRun are mutually exclusive: frame barrier requires both instances at the same frame, while serial run completes one instance before advancing the other."
+}
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
@@ -235,6 +241,17 @@ if ($StateSaveDir -and $StateSaveFrame -gt 0) {
 } else {
     Remove-Item Env:\MELONDS_NSML_STATE_SAVE_DIR -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_STATE_SAVE_FRAME -ErrorAction SilentlyContinue
+}
+if ($StateLoadDir) {
+    $env:MELONDS_NSML_STATE_LOAD_DIR = (Resolve-Path $StateLoadDir).Path
+    if ($StateLoadFrame -lt 0) {
+        $env:MELONDS_NSML_STATE_LOAD_FRAME = "0"
+    } else {
+        $env:MELONDS_NSML_STATE_LOAD_FRAME = "$StateLoadFrame"
+    }
+} else {
+    Remove-Item Env:\MELONDS_NSML_STATE_LOAD_DIR -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_STATE_LOAD_FRAME -ErrorAction SilentlyContinue
 }
 if ($PlayerStickToStarStartFrame -gt 0) {
     $env:MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME = "$PlayerStickToStarStartFrame"

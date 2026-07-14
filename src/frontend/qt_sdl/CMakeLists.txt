@@ -27,6 +27,8 @@ set(SOURCES_QT_SDL
     NsmbNetplayTransport.h
     NsmbNetplayDiagnostics.cpp
     NsmbNetplayDiagnostics.h
+    NsmbNetplayCoordinator.cpp
+    NsmbNetplayCoordinator.h
     NsmbGameState.cpp
     NsmbGameStateReader.cpp
     NsmbGameStateWriter.cpp
@@ -318,6 +320,22 @@ add_subdirectory("../../net"
     ${CMAKE_BINARY_DIR}/net)
 
 if (BUILD_TESTING)
+    add_executable(nsmb_netplay_coordinator_tests
+        NsmbNetplayCoordinator.cpp
+        NsmbNetplayCoordinator.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_netplay_coordinator_tests.cpp
+    )
+    target_include_directories(nsmb_netplay_coordinator_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_netplay_coordinator_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-netplay-coordinator COMMAND nsmb_netplay_coordinator_tests)
+
     add_executable(nsmb_netplay_transport_tests
         NsmbNetplayTransport.cpp
         NsmbNetplayTransport.h
