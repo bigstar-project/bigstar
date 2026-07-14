@@ -703,6 +703,114 @@ void TestDiagnosticsConfigReadsClampsAndPreservesPriority() {
   CHECK(config.InputRecordInstance == 15);
 }
 
+void TestAIConfigDefaults() {
+  const MapEnvironment environment;
+  const auto config = NsmbNetplayPoC::Config::LoadAIConfig(environment);
+  CHECK(!config.Rule.Enabled);
+  CHECK(!config.Rule.HostOnly);
+  CHECK(!config.Rule.ClientOnly);
+  CHECK(config.Rule.PlayerSpec == "remote");
+  CHECK(config.Rule.StartFrame == 0u);
+  CHECK(config.Rule.HorizontalDeadzone == 0x4000);
+  CHECK(config.Rule.HorizontalWrapWidth == 0x400000);
+  CHECK(config.Rule.CloseRange == 0x22000);
+  CHECK(config.Rule.HazardHorizontalRange == 0x40000);
+  CHECK(config.Rule.HazardVerticalRange == 0x50000);
+  CHECK(config.Rule.JumpInterval == 42);
+  CHECK(config.Rule.JumpFrames == 9);
+  CHECK(!config.Rule.TraceEnabled);
+  CHECK(config.Rule.TraceInterval == 60);
+
+  CHECK(!config.Imitation.Enabled);
+  CHECK(!config.Imitation.HostOnly);
+  CHECK(!config.Imitation.ClientOnly);
+  CHECK(config.Imitation.PlayerSpec == "remote");
+  CHECK(config.Imitation.StartFrame == 0u);
+  CHECK(config.Imitation.Threshold == 0.5);
+  CHECK(config.Imitation.AllowedHeldMask == 0x8F3u);
+  CHECK(config.Imitation.HazardGuardEnabled);
+  CHECK(config.Imitation.HazardGuardHorizontalRange == 0x40000);
+  CHECK(config.Imitation.HazardGuardVerticalRange == 0x50000);
+  CHECK(config.Imitation.HazardGuardCloseRange == 0x10000);
+  CHECK(!config.Imitation.TraceEnabled);
+  CHECK(config.Imitation.TraceInterval == 60);
+  CHECK(config.Imitation.InferInterval == 16);
+  CHECK(config.Imitation.NeutralHoldFrames == 8);
+  CHECK(config.Imitation.WarnMissingFeatures);
+  CHECK(config.Imitation.ModelPath.empty());
+}
+
+void TestAIConfigReadsClampsAndPreservesDependencies() {
+  MapEnvironment environment;
+  environment.Values = {
+      {"MELONDS_NSML_RULE_AI", "1"},
+      {"MELONDS_NSML_RULE_AI_HOST_ONLY", "1"},
+      {"MELONDS_NSML_RULE_AI_CLIENT_ONLY", "1"},
+      {"MELONDS_NSML_RULE_AI_PLAYER", "self"},
+      {"MELONDS_NSML_RULE_AI_START_FRAME", "-1"},
+      {"MELONDS_NSML_RULE_AI_HORIZONTAL_DEADZONE", "-1"},
+      {"MELONDS_NSML_RULE_AI_WRAP_WIDTH", "99999999"},
+      {"MELONDS_NSML_RULE_AI_CLOSE_RANGE", "0"},
+      {"MELONDS_NSML_RULE_AI_HAZARD_HORIZONTAL_RANGE", "99999999"},
+      {"MELONDS_NSML_RULE_AI_HAZARD_VERTICAL_RANGE", "-1"},
+      {"MELONDS_NSML_RULE_AI_JUMP_INTERVAL", "3"},
+      {"MELONDS_NSML_RULE_AI_JUMP_FRAMES", "9"},
+      {"MELONDS_NSML_RULE_AI_TRACE", "1"},
+      {"MELONDS_NSML_RULE_AI_TRACE_INTERVAL", "0"},
+      {"MELONDS_NSML_IMITATION_AI", "1"},
+      {"MELONDS_NSML_IMITATION_AI_HOST_ONLY", "1"},
+      {"MELONDS_NSML_IMITATION_AI_CLIENT_ONLY", "1"},
+      {"MELONDS_NSML_IMITATION_AI_PLAYER", "local"},
+      {"MELONDS_NSML_IMITATION_AI_START_FRAME", "-1"},
+      {"MELONDS_NSML_IMITATION_AI_THRESHOLD", "2"},
+      {"MELONDS_NSML_IMITATION_AI_ALLOWED_HELD_MASK", "0xFFFF"},
+      {"MELONDS_NSML_IMITATION_AI_HAZARD_GUARD", "1"},
+      {"MELONDS_NSML_IMITATION_AI_DISABLE_HAZARD_GUARD", "1"},
+      {"MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_HORIZONTAL_RANGE", "100"},
+      {"MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_VERTICAL_RANGE", "99999999"},
+      {"MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_CLOSE_RANGE", "200"},
+      {"MELONDS_NSML_IMITATION_AI_TRACE", "1"},
+      {"MELONDS_NSML_IMITATION_AI_TRACE_INTERVAL", "0"},
+      {"MELONDS_NSML_IMITATION_AI_INFER_INTERVAL", "0"},
+      {"MELONDS_NSML_IMITATION_AI_NEUTRAL_HOLD_FRAMES", "999"},
+      {"MELONDS_NSML_IMITATION_AI_DISABLE_FEATURE_WARNING", "1"},
+      {"MELONDS_NSML_IMITATION_AI_MODEL", "model.json"},
+  };
+  const auto config = NsmbNetplayPoC::Config::LoadAIConfig(environment);
+  CHECK(config.Rule.Enabled);
+  CHECK(config.Rule.HostOnly);
+  CHECK(config.Rule.ClientOnly);
+  CHECK(config.Rule.PlayerSpec == "self");
+  CHECK(config.Rule.StartFrame == 0u);
+  CHECK(config.Rule.HorizontalDeadzone == 0);
+  CHECK(config.Rule.HorizontalWrapWidth == 0x800000);
+  CHECK(config.Rule.CloseRange == 0x1000);
+  CHECK(config.Rule.HazardHorizontalRange == 0x200000);
+  CHECK(config.Rule.HazardVerticalRange == 0);
+  CHECK(config.Rule.JumpInterval == 3);
+  CHECK(config.Rule.JumpFrames == 3);
+  CHECK(config.Rule.TraceEnabled);
+  CHECK(config.Rule.TraceInterval == 1);
+
+  CHECK(config.Imitation.Enabled);
+  CHECK(config.Imitation.HostOnly);
+  CHECK(config.Imitation.ClientOnly);
+  CHECK(config.Imitation.PlayerSpec == "local");
+  CHECK(config.Imitation.StartFrame == 0u);
+  CHECK(config.Imitation.Threshold == 1.0);
+  CHECK(config.Imitation.AllowedHeldMask == 0x0FFFu);
+  CHECK(!config.Imitation.HazardGuardEnabled);
+  CHECK(config.Imitation.HazardGuardHorizontalRange == 100);
+  CHECK(config.Imitation.HazardGuardVerticalRange == 0x200000);
+  CHECK(config.Imitation.HazardGuardCloseRange == 100);
+  CHECK(config.Imitation.TraceEnabled);
+  CHECK(config.Imitation.TraceInterval == 1);
+  CHECK(config.Imitation.InferInterval == 1);
+  CHECK(config.Imitation.NeutralHoldFrames == 120);
+  CHECK(!config.Imitation.WarnMissingFeatures);
+  CHECK(config.Imitation.ModelPath == "model.json");
+}
+
 void TestStateSyncConfigDefaultsAndApplyModes() {
   MapEnvironment environment;
   auto config = NsmbNetplayPoC::Config::LoadStateSyncConfig(environment);
@@ -847,6 +955,8 @@ int main() {
   TestMvlConfigReadsClampsAndPreservesPriority();
   TestDiagnosticsConfigDefaults();
   TestDiagnosticsConfigReadsClampsAndPreservesPriority();
+  TestAIConfigDefaults();
+  TestAIConfigReadsClampsAndPreservesDependencies();
   TestStateSyncConfigDefaultsAndApplyModes();
   TestStateSyncConfigReadsClampsAndSkipPriorities();
 

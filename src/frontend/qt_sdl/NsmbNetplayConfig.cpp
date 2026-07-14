@@ -661,6 +661,95 @@ DiagnosticsConfig LoadDiagnosticsConfig(int diagnosticRingCapacity) {
   return LoadDiagnosticsConfig(GetProcessEnvironment(), diagnosticRingCapacity);
 }
 
+AIConfig LoadAIConfig(const Environment &environment) {
+  AIConfig config;
+  config.Rule.Enabled = ReadFlag(environment, "MELONDS_NSML_RULE_AI");
+  config.Rule.HostOnly =
+      ReadFlag(environment, "MELONDS_NSML_RULE_AI_HOST_ONLY");
+  config.Rule.ClientOnly =
+      ReadFlag(environment, "MELONDS_NSML_RULE_AI_CLIENT_ONLY");
+  config.Rule.PlayerSpec =
+      ReadCString(environment, "MELONDS_NSML_RULE_AI_PLAYER", "remote");
+  config.Rule.StartFrame = static_cast<std::uint32_t>(
+      std::max(0, ReadInt(environment, "MELONDS_NSML_RULE_AI_START_FRAME", 0)));
+  config.Rule.HorizontalDeadzone = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_RULE_AI_HORIZONTAL_DEADZONE", 0x4000),
+      0, 0x200000);
+  config.Rule.HorizontalWrapWidth = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_RULE_AI_WRAP_WIDTH", 0x400000), 0,
+      0x800000);
+  config.Rule.CloseRange = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_RULE_AI_CLOSE_RANGE", 0x22000), 0x1000,
+      0x200000);
+  config.Rule.HazardHorizontalRange = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_RULE_AI_HAZARD_HORIZONTAL_RANGE",
+              0x40000),
+      0, 0x200000);
+  config.Rule.HazardVerticalRange =
+      std::clamp(ReadInt(environment,
+                         "MELONDS_NSML_RULE_AI_HAZARD_VERTICAL_RANGE", 0x50000),
+                 0, 0x200000);
+  config.Rule.JumpInterval = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_RULE_AI_JUMP_INTERVAL", 42), 1, 600);
+  config.Rule.JumpFrames =
+      std::clamp(ReadInt(environment, "MELONDS_NSML_RULE_AI_JUMP_FRAMES", 9), 0,
+                 config.Rule.JumpInterval);
+  config.Rule.TraceEnabled =
+      ReadFlag(environment, "MELONDS_NSML_RULE_AI_TRACE");
+  config.Rule.TraceInterval = std::max(
+      1, ReadInt(environment, "MELONDS_NSML_RULE_AI_TRACE_INTERVAL", 60));
+
+  config.Imitation.Enabled = ReadFlag(environment, "MELONDS_NSML_IMITATION_AI");
+  config.Imitation.HostOnly =
+      ReadFlag(environment, "MELONDS_NSML_IMITATION_AI_HOST_ONLY");
+  config.Imitation.ClientOnly =
+      ReadFlag(environment, "MELONDS_NSML_IMITATION_AI_CLIENT_ONLY");
+  config.Imitation.PlayerSpec =
+      ReadCString(environment, "MELONDS_NSML_IMITATION_AI_PLAYER", "remote");
+  config.Imitation.StartFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_IMITATION_AI_START_FRAME", 0)));
+  config.Imitation.Threshold = std::clamp(
+      ReadDouble(environment, "MELONDS_NSML_IMITATION_AI_THRESHOLD", 0.5), 0.0,
+      1.0);
+  config.Imitation.AllowedHeldMask =
+      ReadU32(environment, "MELONDS_NSML_IMITATION_AI_ALLOWED_HELD_MASK",
+              0x8F3) &
+      0x0FFFu;
+  config.Imitation.HazardGuardEnabled =
+      ReadInt(environment, "MELONDS_NSML_IMITATION_AI_HAZARD_GUARD", 1) != 0 &&
+      !ReadFlag(environment, "MELONDS_NSML_IMITATION_AI_DISABLE_HAZARD_GUARD");
+  config.Imitation.HazardGuardHorizontalRange = std::clamp(
+      ReadInt(environment,
+              "MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_HORIZONTAL_RANGE",
+              0x40000),
+      0, 0x200000);
+  config.Imitation.HazardGuardVerticalRange = std::clamp(
+      ReadInt(environment,
+              "MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_VERTICAL_RANGE", 0x50000),
+      0, 0x200000);
+  config.Imitation.HazardGuardCloseRange = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_CLOSE_RANGE",
+              0x10000),
+      0, config.Imitation.HazardGuardHorizontalRange);
+  config.Imitation.TraceEnabled =
+      ReadFlag(environment, "MELONDS_NSML_IMITATION_AI_TRACE");
+  config.Imitation.TraceInterval = std::max(
+      1, ReadInt(environment, "MELONDS_NSML_IMITATION_AI_TRACE_INTERVAL", 60));
+  config.Imitation.InferInterval = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_IMITATION_AI_INFER_INTERVAL", 16), 1,
+      30);
+  config.Imitation.NeutralHoldFrames = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_IMITATION_AI_NEUTRAL_HOLD_FRAMES", 8),
+      0, 120);
+  config.Imitation.WarnMissingFeatures = !ReadFlag(
+      environment, "MELONDS_NSML_IMITATION_AI_DISABLE_FEATURE_WARNING");
+  config.Imitation.ModelPath =
+      ReadCString(environment, "MELONDS_NSML_IMITATION_AI_MODEL", "");
+  return config;
+}
+
+AIConfig LoadAIConfig() { return LoadAIConfig(GetProcessEnvironment()); }
+
 StateSyncConfig LoadStateSyncConfig(const Environment &environment) {
   StateSyncConfig config;
   config.GameEnabled = ReadFlag(environment, "MELONDS_NSML_STATE_SYNC");

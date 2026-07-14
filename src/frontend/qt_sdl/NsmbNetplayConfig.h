@@ -220,6 +220,48 @@ struct DiagnosticsConfig {
   bool AIPlayLogGameplayOnly = true;
 };
 
+struct RuleAISettings {
+  bool Enabled = false;
+  bool HostOnly = false;
+  bool ClientOnly = false;
+  std::string PlayerSpec = "remote";
+  std::uint32_t StartFrame = 0;
+  int HorizontalDeadzone = 0x4000;
+  int HorizontalWrapWidth = 0x400000;
+  int CloseRange = 0x22000;
+  int HazardHorizontalRange = 0x40000;
+  int HazardVerticalRange = 0x50000;
+  int JumpInterval = 42;
+  int JumpFrames = 9;
+  bool TraceEnabled = false;
+  int TraceInterval = 60;
+};
+
+struct ImitationAISettings {
+  bool Enabled = false;
+  bool HostOnly = false;
+  bool ClientOnly = false;
+  std::string PlayerSpec = "remote";
+  std::uint32_t StartFrame = 0;
+  double Threshold = 0.5;
+  std::uint32_t AllowedHeldMask = 0x8F3;
+  bool HazardGuardEnabled = true;
+  int HazardGuardHorizontalRange = 0x40000;
+  int HazardGuardVerticalRange = 0x50000;
+  int HazardGuardCloseRange = 0x10000;
+  bool TraceEnabled = false;
+  int TraceInterval = 60;
+  int InferInterval = 16;
+  int NeutralHoldFrames = 8;
+  bool WarnMissingFeatures = true;
+  std::string ModelPath;
+};
+
+struct AIConfig {
+  RuleAISettings Rule;
+  ImitationAISettings Imitation;
+};
+
 struct StateSyncConfig {
   bool GameEnabled = false;
   bool GameExtended = false;
@@ -291,6 +333,8 @@ MvlConfig LoadMvlConfig();
 DiagnosticsConfig LoadDiagnosticsConfig(const Environment &environment,
                                         int diagnosticRingCapacity);
 DiagnosticsConfig LoadDiagnosticsConfig(int diagnosticRingCapacity);
+AIConfig LoadAIConfig(const Environment &environment);
+AIConfig LoadAIConfig();
 StateSyncConfig LoadStateSyncConfig(const Environment &environment);
 StateSyncConfig LoadStateSyncConfig();
 

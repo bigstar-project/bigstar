@@ -12255,66 +12255,38 @@ void InitFromEnvironment()
     G.InputHealthTraceEnabled = inputConfig.HealthTrace;
     G.InputHealthTraceInterval = inputConfig.HealthTraceInterval;
     G.InputHealthTraceWaitThresholdMs = inputConfig.HealthTraceWaitThresholdMs;
-    G.RuleAIEnabled = EnvFlag("MELONDS_NSML_RULE_AI");
-    G.RuleAIHostOnly = EnvFlag("MELONDS_NSML_RULE_AI_HOST_ONLY");
-    G.RuleAIClientOnly = EnvFlag("MELONDS_NSML_RULE_AI_CLIENT_ONLY");
-    G.RuleAIPlayerSpec = EnvCString("MELONDS_NSML_RULE_AI_PLAYER", "remote");
-    G.RuleAIStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_RULE_AI_START_FRAME", 0)));
-    G.RuleAIHorizontalDeadzone = std::clamp(
-        EnvInt("MELONDS_NSML_RULE_AI_HORIZONTAL_DEADZONE", 0x4000), 0, 0x200000);
-    G.RuleAIHorizontalWrapWidth = std::clamp(
-        EnvInt("MELONDS_NSML_RULE_AI_WRAP_WIDTH", 0x400000), 0, 0x800000);
-    G.RuleAICloseRange = std::clamp(
-        EnvInt("MELONDS_NSML_RULE_AI_CLOSE_RANGE", 0x22000), 0x1000, 0x200000);
-    G.RuleAIHazardHorizontalRange = std::clamp(
-        EnvInt("MELONDS_NSML_RULE_AI_HAZARD_HORIZONTAL_RANGE", G.RuleAIHazardHorizontalRange),
-        0,
-        0x200000);
-    G.RuleAIHazardVerticalRange = std::clamp(
-        EnvInt("MELONDS_NSML_RULE_AI_HAZARD_VERTICAL_RANGE", G.RuleAIHazardVerticalRange),
-        0,
-        0x200000);
-    G.RuleAIJumpInterval = std::clamp(
-        EnvInt("MELONDS_NSML_RULE_AI_JUMP_INTERVAL", 42), 1, 600);
-    G.RuleAIJumpFrames = std::clamp(
-        EnvInt("MELONDS_NSML_RULE_AI_JUMP_FRAMES", 9), 0, G.RuleAIJumpInterval);
-    G.RuleAITraceEnabled = EnvFlag("MELONDS_NSML_RULE_AI_TRACE");
-    G.RuleAITraceInterval = std::max(1, EnvInt("MELONDS_NSML_RULE_AI_TRACE_INTERVAL", 60));
-    G.ImitationAIEnabled = EnvFlag("MELONDS_NSML_IMITATION_AI");
-    G.ImitationAIHostOnly = EnvFlag("MELONDS_NSML_IMITATION_AI_HOST_ONLY");
-    G.ImitationAIClientOnly = EnvFlag("MELONDS_NSML_IMITATION_AI_CLIENT_ONLY");
-    G.ImitationAIPlayerSpec = EnvCString("MELONDS_NSML_IMITATION_AI_PLAYER", "remote");
-    G.ImitationAIStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_IMITATION_AI_START_FRAME", 0)));
-    G.ImitationAIThreshold = std::clamp(
-        EnvDouble("MELONDS_NSML_IMITATION_AI_THRESHOLD", 0.5), 0.0, 1.0);
-    G.ImitationAIAllowedHeldMask =
-        EnvU32("MELONDS_NSML_IMITATION_AI_ALLOWED_HELD_MASK", G.ImitationAIAllowedHeldMask) & 0x0FFFu;
-    G.ImitationAIHazardGuardEnabled =
-        EnvInt("MELONDS_NSML_IMITATION_AI_HAZARD_GUARD", 1) != 0 &&
-        !EnvFlag("MELONDS_NSML_IMITATION_AI_DISABLE_HAZARD_GUARD");
-    G.ImitationAIHazardGuardHorizontalRange = std::clamp(
-        EnvInt("MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_HORIZONTAL_RANGE", G.ImitationAIHazardGuardHorizontalRange),
-        0,
-        0x200000);
-    G.ImitationAIHazardGuardVerticalRange = std::clamp(
-        EnvInt("MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_VERTICAL_RANGE", G.ImitationAIHazardGuardVerticalRange),
-        0,
-        0x200000);
-    G.ImitationAIHazardGuardCloseRange = std::clamp(
-        EnvInt("MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_CLOSE_RANGE", G.ImitationAIHazardGuardCloseRange),
-        0,
-        G.ImitationAIHazardGuardHorizontalRange);
-    G.ImitationAITraceEnabled = EnvFlag("MELONDS_NSML_IMITATION_AI_TRACE");
-    G.ImitationAITraceInterval = std::max(1, EnvInt("MELONDS_NSML_IMITATION_AI_TRACE_INTERVAL", 60));
-    G.ImitationAIInferInterval = std::clamp(EnvInt("MELONDS_NSML_IMITATION_AI_INFER_INTERVAL", 16), 1, 30);
-    G.ImitationAINeutralHoldFrames =
-        std::clamp(EnvInt("MELONDS_NSML_IMITATION_AI_NEUTRAL_HOLD_FRAMES", 8), 0, 120);
-    G.ImitationAIWarnMissingFeatures = !EnvFlag("MELONDS_NSML_IMITATION_AI_DISABLE_FEATURE_WARNING");
-    const char* imitationModel = std::getenv("MELONDS_NSML_IMITATION_AI_MODEL");
-    if (imitationModel && imitationModel[0])
-        G.ImitationAIModelPath = imitationModel;
+    const Config::AIConfig aiConfig = Config::LoadAIConfig();
+    G.RuleAIEnabled = aiConfig.Rule.Enabled;
+    G.RuleAIHostOnly = aiConfig.Rule.HostOnly;
+    G.RuleAIClientOnly = aiConfig.Rule.ClientOnly;
+    G.RuleAIPlayerSpec = aiConfig.Rule.PlayerSpec;
+    G.RuleAIStartFrame = aiConfig.Rule.StartFrame;
+    G.RuleAIHorizontalDeadzone = aiConfig.Rule.HorizontalDeadzone;
+    G.RuleAIHorizontalWrapWidth = aiConfig.Rule.HorizontalWrapWidth;
+    G.RuleAICloseRange = aiConfig.Rule.CloseRange;
+    G.RuleAIHazardHorizontalRange = aiConfig.Rule.HazardHorizontalRange;
+    G.RuleAIHazardVerticalRange = aiConfig.Rule.HazardVerticalRange;
+    G.RuleAIJumpInterval = aiConfig.Rule.JumpInterval;
+    G.RuleAIJumpFrames = aiConfig.Rule.JumpFrames;
+    G.RuleAITraceEnabled = aiConfig.Rule.TraceEnabled;
+    G.RuleAITraceInterval = aiConfig.Rule.TraceInterval;
+    G.ImitationAIEnabled = aiConfig.Imitation.Enabled;
+    G.ImitationAIHostOnly = aiConfig.Imitation.HostOnly;
+    G.ImitationAIClientOnly = aiConfig.Imitation.ClientOnly;
+    G.ImitationAIPlayerSpec = aiConfig.Imitation.PlayerSpec;
+    G.ImitationAIStartFrame = aiConfig.Imitation.StartFrame;
+    G.ImitationAIThreshold = aiConfig.Imitation.Threshold;
+    G.ImitationAIAllowedHeldMask = aiConfig.Imitation.AllowedHeldMask;
+    G.ImitationAIHazardGuardEnabled = aiConfig.Imitation.HazardGuardEnabled;
+    G.ImitationAIHazardGuardHorizontalRange = aiConfig.Imitation.HazardGuardHorizontalRange;
+    G.ImitationAIHazardGuardVerticalRange = aiConfig.Imitation.HazardGuardVerticalRange;
+    G.ImitationAIHazardGuardCloseRange = aiConfig.Imitation.HazardGuardCloseRange;
+    G.ImitationAITraceEnabled = aiConfig.Imitation.TraceEnabled;
+    G.ImitationAITraceInterval = aiConfig.Imitation.TraceInterval;
+    G.ImitationAIInferInterval = aiConfig.Imitation.InferInterval;
+    G.ImitationAINeutralHoldFrames = aiConfig.Imitation.NeutralHoldFrames;
+    G.ImitationAIWarnMissingFeatures = aiConfig.Imitation.WarnMissingFeatures;
+    G.ImitationAIModelPath = aiConfig.Imitation.ModelPath;
     if (G.ImitationAIEnabled)
     {
         if (G.ImitationAIModelPath.empty())
