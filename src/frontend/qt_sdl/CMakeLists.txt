@@ -21,6 +21,8 @@ set(SOURCES_QT_SDL
     NsmbInputProtocol.h
     NsmbInputDelivery.cpp
     NsmbInputDelivery.h
+    NsmbSessionProtocol.cpp
+    NsmbSessionProtocol.h
     NsmbAiObservation.cpp
     NsmbAiObservation.h
     NsmbImitationAI.cpp
@@ -197,6 +199,22 @@ if (BUILD_TESTING)
         AUTORCC OFF
     )
     add_test(NAME nsmb-input-delivery COMMAND nsmb_input_delivery_tests)
+
+    add_executable(nsmb_session_protocol_tests
+        NsmbSessionProtocol.cpp
+        NsmbSessionProtocol.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_session_protocol_tests.cpp
+    )
+    target_include_directories(nsmb_session_protocol_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_session_protocol_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-session-protocol COMMAND nsmb_session_protocol_tests)
 endif()
 
 add_subdirectory("../../net"

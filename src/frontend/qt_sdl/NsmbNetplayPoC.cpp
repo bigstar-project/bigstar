@@ -15,6 +15,7 @@
 #include "NsmbNetplayConfig.h"
 #include "NsmbInputDelivery.h"
 #include "NsmbInputProtocol.h"
+#include "NsmbSessionProtocol.h"
 #include "NsmbInputTimeline.h"
 #include "NsmbImitationAI.h"
 #include "NsmbRuleAI.h"
@@ -451,16 +452,6 @@ struct RollbackStoredState
     bool MainRAMFramePreimage = false;
 };
 
-struct WireSeed
-{
-    melonDS::u32 Magic;
-    melonDS::u32 Version;
-    melonDS::u32 Kind;
-    melonDS::u32 Seed;
-};
-
-constexpr melonDS::u32 kWireKindSeed = 0x44454553; // "SEED", little endian
-constexpr melonDS::u32 kWireKindStartReady = 0x54525453; // "STRT", little endian
 constexpr melonDS::u32 kWireKindState = 0x54415453; // "STAT", little endian
 constexpr melonDS::u32 kWireKindPacket = 0x4B434150; // "PACK", little endian
 constexpr melonDS::u32 kWireKindPlayerState = 0x41545350; // "PSTA", little endian
@@ -478,8 +469,6 @@ constexpr melonDS::s32 kDiagnosticLargePositionDelta = 256 * kDiagnosticFixedOne
 constexpr std::size_t kMaxWorldMovingHazards = 4;
 constexpr std::size_t kMaxWorldEffects = 4;
 constexpr std::size_t kMaxWorldActorSnapshots = 16;
-
-static_assert(sizeof(WireSeed) == 16);
 
 struct WireNSMLPacket
 {
@@ -4131,7 +4120,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     StoreRemoteInputLocked(packet.Frame, packet.Input, localFrame);
                 }
             }
-            else if (event.packet->dataLength > sizeof(WireSeed)
+            else if (event.packet->dataLength > SessionProtocol::kSessionPacketSize
                 && event.packet->dataLength != sizeof(WireNSMLPacket)
                 && event.packet->dataLength != sizeof(WireGameState)
                 && event.packet->dataLength != sizeof(WirePlayerState)
@@ -4150,39 +4139,42 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                         StoreRemoteInputLocked(entry.Frame, entry.Input, localFrame);
                 }
             }
-            else if (event.packet->dataLength == sizeof(WireSeed))
+            else if (event.packet->dataLength == SessionProtocol::kSessionPacketSize)
             {
-                WireSeed packet;
-                std::memcpy(&packet, event.packet->data, sizeof(packet));
-                if (packet.Magic == kMagic && packet.Version == kVersion && packet.Kind == kWireKindSeed)
+                SessionProtocol::Message message;
+                const bool decoded = SessionProtocol::Decode(
+                    event.packet->data,
+                    event.packet->dataLength,
+                    message);
+                if (decoded && message.Kind == SessionProtocol::MessageKind::MatchSeed)
                 {
-                    G.MatchSeed = packet.Seed;
+                    G.MatchSeed = message.Value;
                     G.MatchSeedConfigured = true;
                     G.InputCond.notify_all();
                     if (G.StateLoadDir.empty() && !G.PacketBridgeOnly)
                     {
-                        G.NetRandomPatchValue = packet.Seed;
+                        G.NetRandomPatchValue = message.Value;
                         G.NetRandomPatchEnabled = true;
                         G.NetRandomPatchAuto = true;
                     }
-                    std::printf("NSMB PoC: received match seed 0x%08X\n", packet.Seed);
+                    std::printf("NSMB PoC: received match seed 0x%08X\n", message.Value);
                 }
-                else if (packet.Magic == kMagic && packet.Version == kVersion && packet.Kind == kWireKindStartReady)
+                else if (decoded && message.Kind == SessionProtocol::MessageKind::StartReady)
                 {
-                    if (G.InputNetplayOnly && G.NetplayStartFrame != 0 && packet.Seed < G.NetplayStartFrame)
+                    if (G.InputNetplayOnly && G.NetplayStartFrame != 0 && message.Value < G.NetplayStartFrame)
                     {
                         std::printf("NSMB InputNetplay: ignored old start ready frame=%u currentStart=%u\n",
-                            packet.Seed,
+                            message.Value,
                             G.NetplayStartFrame);
                     }
                     else
                     {
-                        G.RemoteNetplayStartReadyFrame = packet.Seed;
+                        G.RemoteNetplayStartReadyFrame = message.Value;
                         if (G.LocalNetplayStartReadyFrame != kNoFrameLimit)
                             G.RemoteNetplayStartReadyAfterLocal = true;
-                        EmitStartReadyEventLocked("recv", localFrame, packet.Seed);
+                        EmitStartReadyEventLocked("recv", localFrame, message.Value);
                         G.InputCond.notify_all();
-                        std::printf("NSMB InputNetplay: received start ready frame=%u\n", packet.Seed);
+                        std::printf("NSMB InputNetplay: received start ready frame=%u\n", message.Value);
                     }
                 }
             }
@@ -4567,13 +4559,11 @@ void SendMatchSeedLocked()
     if (!G.Peer || G.NetRole != Role::Host || !G.MatchSeedConfigured || G.MatchSeedSent)
         return;
 
-    WireSeed packet {};
-    packet.Magic = kMagic;
-    packet.Version = kVersion;
-    packet.Kind = kWireKindSeed;
-    packet.Seed = G.MatchSeed;
-
-    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE);
+    const std::vector<char> payload = SessionProtocol::Encode({
+        SessionProtocol::MessageKind::MatchSeed,
+        G.MatchSeed,
+    });
+    ENetPacket* enetPacket = enet_packet_create(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE);
     if (!enetPacket) return;
 
     enet_peer_send(G.Peer, 0, enetPacket);
@@ -4587,13 +4577,11 @@ void SendNetplayStartReadyLocked(melonDS::u32 frame, bool force = false)
     if (!G.Peer || (G.NetplayStartReadySent && !force))
         return;
 
-    WireSeed packet {};
-    packet.Magic = kMagic;
-    packet.Version = kVersion;
-    packet.Kind = kWireKindStartReady;
-    packet.Seed = frame;
-
-    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE);
+    const std::vector<char> payload = SessionProtocol::Encode({
+        SessionProtocol::MessageKind::StartReady,
+        frame,
+    });
+    ENetPacket* enetPacket = enet_packet_create(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE);
     if (!enetPacket) return;
 
     enet_peer_send(G.Peer, 0, enetPacket);
