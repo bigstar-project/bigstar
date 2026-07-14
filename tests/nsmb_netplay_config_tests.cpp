@@ -373,6 +373,96 @@ void TestRuntimePatchConfigReadsAndClampsEnvironment() {
   CHECK(config.PacketBridgeJitHelperPatchFrame == 0u);
 }
 
+void TestHarnessConfigDefaults() {
+  const MapEnvironment environment;
+  const auto config = NsmbNetplayPoC::Config::LoadHarnessConfig(environment);
+  CHECK(!config.FrameBarrierEnabled);
+  CHECK(!config.SerialRunEnabled);
+  CHECK(config.SeedWaitTimeoutMs == 10000);
+  CHECK(!config.WaitForPeerBeforeStart);
+  CHECK(!config.WaitForPeerAtNetplayStart);
+  CHECK(!config.DeferNetworkUntilStart);
+  CHECK(!config.NetplayFrameBarrierEnabled);
+  CHECK(!config.NeutralizePolledInput);
+  CHECK(!config.NeutralizePolledInputPreserveTouch);
+  CHECK(!config.NetworkPumpThreadEnabled);
+  CHECK(config.NetworkPumpSleepUs == 250);
+  CHECK(config.MemPatchFile.empty());
+  CHECK(config.MemPatchFrame == 0u);
+  CHECK(!config.MemPatchFrameSet);
+  CHECK(config.MemPatchInstance == -1);
+  CHECK(config.MemPatchRanges.empty());
+  CHECK(config.StateSaveDir.empty());
+  CHECK(config.StateSaveFrame == 0u);
+  CHECK(config.StateLoadDir.empty());
+  CHECK(config.StateLoadFrame == 0u);
+  CHECK(!config.StateLoadFrameSet);
+}
+
+void TestHarnessConfigReadsClampsAndPreservesPresence() {
+  MapEnvironment environment;
+  environment.Values = {
+      {"MELONDS_NSML_FRAME_BARRIER", "1"},
+      {"MELONDS_NSML_SERIAL_RUN", "1"},
+      {"MELONDS_NSML_SEED_WAIT_TIMEOUT_MS", "-1"},
+      {"MELONDS_NSML_WAIT_FOR_PEER", "1"},
+      {"MELONDS_NSML_WAIT_FOR_PEER_AT_NETPLAY_START", "1"},
+      {"MELONDS_NSML_DEFER_NETWORK_UNTIL_START", "1"},
+      {"MELONDS_NSML_NETPLAY_FRAME_BARRIER", "1"},
+      {"MELONDS_NSML_NEUTRALIZE_POLLED_INPUT", "1"},
+      {"MELONDS_NSML_NEUTRALIZE_POLLED_INPUT_PRESERVE_TOUCH", "1"},
+      {"MELONDS_NSML_NET_PUMP_THREAD", "1"},
+      {"MELONDS_NSML_NET_PUMP_SLEEP_US", "1"},
+      {"MELONDS_NSML_MEM_PATCH_FILE", "patch.bin"},
+      {"MELONDS_NSML_MEM_PATCH_FRAME", "invalid"},
+      {"MELONDS_NSML_MEM_PATCH_INSTANCE", "-4"},
+      {"MELONDS_NSML_MEM_PATCH_RANGES", "10-20,30"},
+      {"MELONDS_NSML_STATE_SAVE_DIR", "save-dir"},
+      {"MELONDS_NSML_STATE_SAVE_FRAME", "-3"},
+      {"MELONDS_NSML_STATE_LOAD_DIR", "load-dir"},
+      {"MELONDS_NSML_STATE_LOAD_FRAME", "invalid"},
+  };
+
+  auto config = NsmbNetplayPoC::Config::LoadHarnessConfig(environment);
+  CHECK(config.FrameBarrierEnabled);
+  CHECK(config.SerialRunEnabled);
+  CHECK(config.SeedWaitTimeoutMs == 0);
+  CHECK(config.WaitForPeerBeforeStart);
+  CHECK(config.WaitForPeerAtNetplayStart);
+  CHECK(config.DeferNetworkUntilStart);
+  CHECK(config.NetplayFrameBarrierEnabled);
+  CHECK(config.NeutralizePolledInput);
+  CHECK(config.NeutralizePolledInputPreserveTouch);
+  CHECK(config.NetworkPumpThreadEnabled);
+  CHECK(config.NetworkPumpSleepUs == 50);
+  CHECK(config.MemPatchFile == "patch.bin");
+  CHECK(config.MemPatchFrameSet);
+  CHECK(config.MemPatchFrame == 0u);
+  CHECK(config.MemPatchInstance == -4);
+  CHECK(config.MemPatchRanges == "10-20,30");
+  CHECK(config.StateSaveDir == "save-dir");
+  CHECK(config.StateSaveFrame == 0u);
+  CHECK(config.StateLoadDir == "load-dir");
+  CHECK(config.StateLoadFrameSet);
+  CHECK(config.StateLoadFrame == 0u);
+
+  environment.Values["MELONDS_NSML_NET_PUMP_SLEEP_US"] = "99999";
+  environment.Values["MELONDS_NSML_MEM_PATCH_FRAME"] = "42";
+  environment.Values["MELONDS_NSML_STATE_LOAD_FRAME"] = "84";
+  config = NsmbNetplayPoC::Config::LoadHarnessConfig(environment);
+  CHECK(config.NetworkPumpSleepUs == 5000);
+  CHECK(config.MemPatchFrame == 42u);
+  CHECK(config.StateLoadFrame == 84u);
+
+  environment.Values["MELONDS_NSML_MEM_PATCH_FRAME"] = "0x10";
+  environment.Values["MELONDS_NSML_STATE_SAVE_FRAME"] = "0x10";
+  environment.Values["MELONDS_NSML_STATE_LOAD_FRAME"] = "0x10";
+  config = NsmbNetplayPoC::Config::LoadHarnessConfig(environment);
+  CHECK(config.MemPatchFrame == 0u);
+  CHECK(config.StateSaveFrame == 16u);
+  CHECK(config.StateLoadFrame == 0u);
+}
+
 void TestPacketBridgeConfigDefaults() {
   const MapEnvironment environment;
   const auto config =
@@ -1062,6 +1152,8 @@ int main() {
   TestInputConfigReadsClampsAndNormalizesRanges();
   TestRuntimePatchConfigDefaults();
   TestRuntimePatchConfigReadsAndClampsEnvironment();
+  TestHarnessConfigDefaults();
+  TestHarnessConfigReadsClampsAndPreservesPresence();
   TestPacketBridgeConfigDefaults();
   TestPacketBridgeConfigReadsAndClampsEnvironment();
   TestRollbackConfigDefaultsAndBackendAliases();

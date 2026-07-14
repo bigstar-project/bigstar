@@ -104,6 +104,30 @@ struct RuntimePatchConfig {
   std::uint32_t PacketBridgeJitHelperPatchFrame = 0;
 };
 
+struct HarnessConfig {
+  bool FrameBarrierEnabled = false;
+  bool SerialRunEnabled = false;
+  int SeedWaitTimeoutMs = 10000;
+  bool WaitForPeerBeforeStart = false;
+  bool WaitForPeerAtNetplayStart = false;
+  bool DeferNetworkUntilStart = false;
+  bool NetplayFrameBarrierEnabled = false;
+  bool NeutralizePolledInput = false;
+  bool NeutralizePolledInputPreserveTouch = false;
+  bool NetworkPumpThreadEnabled = false;
+  int NetworkPumpSleepUs = 250;
+  std::string MemPatchFile;
+  std::uint32_t MemPatchFrame = 0;
+  bool MemPatchFrameSet = false;
+  int MemPatchInstance = -1;
+  std::string MemPatchRanges;
+  std::string StateSaveDir;
+  std::uint32_t StateSaveFrame = 0;
+  std::string StateLoadDir;
+  std::uint32_t StateLoadFrame = 0;
+  bool StateLoadFrameSet = false;
+};
+
 inline constexpr int PacketBridgePumpEventLimit = 64;
 
 struct PacketBridgeConfig {
@@ -370,6 +394,8 @@ InputConfig LoadInputConfig(const Environment &environment,
 InputConfig LoadInputConfig(bool netplayOnlyForMaxFrameLeadDefault);
 RuntimePatchConfig LoadRuntimePatchConfig(const Environment &environment);
 RuntimePatchConfig LoadRuntimePatchConfig();
+HarnessConfig LoadHarnessConfig(const Environment &environment);
+HarnessConfig LoadHarnessConfig();
 PacketBridgeConfig LoadPacketBridgeConfig(const Environment &environment);
 PacketBridgeConfig LoadPacketBridgeConfig();
 RollbackConfig LoadRollbackConfig(const Environment &environment);

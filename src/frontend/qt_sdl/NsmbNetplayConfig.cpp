@@ -355,6 +355,62 @@ RuntimePatchConfig LoadRuntimePatchConfig() {
   return LoadRuntimePatchConfig(GetProcessEnvironment());
 }
 
+HarnessConfig LoadHarnessConfig(const Environment &environment) {
+  HarnessConfig config;
+  config.FrameBarrierEnabled =
+      ReadFlag(environment, "MELONDS_NSML_FRAME_BARRIER");
+  config.SerialRunEnabled = ReadFlag(environment, "MELONDS_NSML_SERIAL_RUN");
+  config.SeedWaitTimeoutMs = std::max(
+      0, ReadInt(environment, "MELONDS_NSML_SEED_WAIT_TIMEOUT_MS", 10000));
+  config.WaitForPeerBeforeStart =
+      ReadFlag(environment, "MELONDS_NSML_WAIT_FOR_PEER");
+  config.WaitForPeerAtNetplayStart =
+      ReadFlag(environment, "MELONDS_NSML_WAIT_FOR_PEER_AT_NETPLAY_START");
+  config.DeferNetworkUntilStart =
+      ReadFlag(environment, "MELONDS_NSML_DEFER_NETWORK_UNTIL_START");
+  config.NetplayFrameBarrierEnabled =
+      ReadFlag(environment, "MELONDS_NSML_NETPLAY_FRAME_BARRIER");
+  config.NeutralizePolledInput =
+      ReadFlag(environment, "MELONDS_NSML_NEUTRALIZE_POLLED_INPUT");
+  config.NeutralizePolledInputPreserveTouch = ReadFlag(
+      environment, "MELONDS_NSML_NEUTRALIZE_POLLED_INPUT_PRESERVE_TOUCH");
+  config.NetworkPumpThreadEnabled =
+      ReadFlag(environment, "MELONDS_NSML_NET_PUMP_THREAD");
+  config.NetworkPumpSleepUs = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_NET_PUMP_SLEEP_US", 250), 50, 5000);
+
+  config.MemPatchFile =
+      ReadCString(environment, "MELONDS_NSML_MEM_PATCH_FILE", "");
+  config.MemPatchFrameSet =
+      ReadHasValue(environment, "MELONDS_NSML_MEM_PATCH_FRAME");
+  if (config.MemPatchFrameSet) {
+    config.MemPatchFrame = static_cast<std::uint32_t>(std::max(
+        0, std::atoi(environment.Get("MELONDS_NSML_MEM_PATCH_FRAME"))));
+  }
+  config.MemPatchInstance =
+      ReadInt(environment, "MELONDS_NSML_MEM_PATCH_INSTANCE", -1);
+  config.MemPatchRanges =
+      ReadCString(environment, "MELONDS_NSML_MEM_PATCH_RANGES", "");
+
+  config.StateSaveDir =
+      ReadCString(environment, "MELONDS_NSML_STATE_SAVE_DIR", "");
+  config.StateSaveFrame = static_cast<std::uint32_t>(
+      std::max(0, ReadInt(environment, "MELONDS_NSML_STATE_SAVE_FRAME", 0)));
+  config.StateLoadDir =
+      ReadCString(environment, "MELONDS_NSML_STATE_LOAD_DIR", "");
+  config.StateLoadFrameSet =
+      ReadHasValue(environment, "MELONDS_NSML_STATE_LOAD_FRAME");
+  if (config.StateLoadFrameSet) {
+    config.StateLoadFrame = static_cast<std::uint32_t>(std::max(
+        0, std::atoi(environment.Get("MELONDS_NSML_STATE_LOAD_FRAME"))));
+  }
+  return config;
+}
+
+HarnessConfig LoadHarnessConfig() {
+  return LoadHarnessConfig(GetProcessEnvironment());
+}
+
 PacketBridgeConfig LoadPacketBridgeConfig(const Environment &environment) {
   PacketBridgeConfig config;
   config.Enabled = ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE");
