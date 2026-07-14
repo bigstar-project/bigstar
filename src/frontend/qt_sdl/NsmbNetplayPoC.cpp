@@ -4063,6 +4063,62 @@ void StoreRemoteInputLocked(melonDS::u32 frame, const InputState& receivedInput,
     }
 }
 
+void HandleReceivedInputLocked(const void* data, std::size_t size, melonDS::u32 localFrame)
+{
+    InputProtocol::FramedInput packet;
+    if (InputProtocol::DecodeInput(data, size, packet))
+        StoreRemoteInputLocked(packet.Frame, packet.Input, localFrame);
+}
+
+void HandleReceivedInputBundleLocked(const void* data, std::size_t size, melonDS::u32 localFrame)
+{
+    std::vector<InputProtocol::FramedInput> entries;
+    if (!InputProtocol::DecodeInputBundle(data, size, entries))
+        return;
+    for (const InputProtocol::FramedInput& entry : entries)
+        StoreRemoteInputLocked(entry.Frame, entry.Input, localFrame);
+}
+
+void HandleReceivedSessionLocked(const void* data, std::size_t size, melonDS::u32 localFrame)
+{
+    SessionProtocol::Message message;
+    if (!SessionProtocol::Decode(data, size, message))
+        return;
+
+    if (message.Kind == SessionProtocol::MessageKind::MatchSeed)
+    {
+        G.MatchSeed = message.Value;
+        G.MatchSeedConfigured = true;
+        G.InputCond.notify_all();
+        if (G.StateLoadDir.empty() && !G.PacketBridgeOnly)
+        {
+            G.NetRandomPatchValue = message.Value;
+            G.NetRandomPatchEnabled = true;
+            G.NetRandomPatchAuto = true;
+        }
+        std::printf("NSMB PoC: received match seed 0x%08X\n", message.Value);
+        return;
+    }
+
+    if (SessionPolicy::IsOldStartReady(
+            G.InputNetplayOnly,
+            G.NetplayStartFrame,
+            message.Value))
+    {
+        std::printf("NSMB InputNetplay: ignored old start ready frame=%u currentStart=%u\n",
+            message.Value,
+            G.NetplayStartFrame);
+        return;
+    }
+
+    G.RemoteNetplayStartReadyFrame = message.Value;
+    if (G.LocalNetplayStartReadyFrame != kNoFrameLimit)
+        G.RemoteNetplayStartReadyAfterLocal = true;
+    EmitStartReadyEventLocked("recv", localFrame, message.Value);
+    G.InputCond.notify_all();
+    std::printf("NSMB InputNetplay: received start ready frame=%u\n", message.Value);
+}
+
 void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kNoFrameLimit)
 {
     if (!G.Host) return;
@@ -4127,68 +4183,15 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                 });
             if (packetClass == PacketClassifier::PacketClass::Input)
             {
-                InputProtocol::FramedInput packet;
-                if (InputProtocol::DecodeInput(
-                        event.packet->data,
-                        event.packet->dataLength,
-                        packet))
-                {
-                    StoreRemoteInputLocked(packet.Frame, packet.Input, localFrame);
-                }
+                HandleReceivedInputLocked(event.packet->data, event.packet->dataLength, localFrame);
             }
             else if (packetClass == PacketClassifier::PacketClass::InputBundleCandidate)
             {
-                std::vector<InputProtocol::FramedInput> entries;
-                if (InputProtocol::DecodeInputBundle(
-                        event.packet->data,
-                        event.packet->dataLength,
-                        entries))
-                {
-                    for (const InputProtocol::FramedInput& entry : entries)
-                        StoreRemoteInputLocked(entry.Frame, entry.Input, localFrame);
-                }
+                HandleReceivedInputBundleLocked(event.packet->data, event.packet->dataLength, localFrame);
             }
             else if (packetClass == PacketClassifier::PacketClass::Session)
             {
-                SessionProtocol::Message message;
-                const bool decoded = SessionProtocol::Decode(
-                    event.packet->data,
-                    event.packet->dataLength,
-                    message);
-                if (decoded && message.Kind == SessionProtocol::MessageKind::MatchSeed)
-                {
-                    G.MatchSeed = message.Value;
-                    G.MatchSeedConfigured = true;
-                    G.InputCond.notify_all();
-                    if (G.StateLoadDir.empty() && !G.PacketBridgeOnly)
-                    {
-                        G.NetRandomPatchValue = message.Value;
-                        G.NetRandomPatchEnabled = true;
-                        G.NetRandomPatchAuto = true;
-                    }
-                    std::printf("NSMB PoC: received match seed 0x%08X\n", message.Value);
-                }
-                else if (decoded && message.Kind == SessionProtocol::MessageKind::StartReady)
-                {
-                    if (SessionPolicy::IsOldStartReady(
-                            G.InputNetplayOnly,
-                            G.NetplayStartFrame,
-                            message.Value))
-                    {
-                        std::printf("NSMB InputNetplay: ignored old start ready frame=%u currentStart=%u\n",
-                            message.Value,
-                            G.NetplayStartFrame);
-                    }
-                    else
-                    {
-                        G.RemoteNetplayStartReadyFrame = message.Value;
-                        if (G.LocalNetplayStartReadyFrame != kNoFrameLimit)
-                            G.RemoteNetplayStartReadyAfterLocal = true;
-                        EmitStartReadyEventLocked("recv", localFrame, message.Value);
-                        G.InputCond.notify_all();
-                        std::printf("NSMB InputNetplay: received start ready frame=%u\n", message.Value);
-                    }
-                }
+                HandleReceivedSessionLocked(event.packet->data, event.packet->dataLength, localFrame);
             }
             else if (packetClass == PacketClassifier::PacketClass::NSMLPacket)
             {
