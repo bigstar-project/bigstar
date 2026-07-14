@@ -5,6 +5,7 @@
 #ifndef NSMBIMITATIONAI_H
 #define NSMBIMITATIONAI_H
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -173,6 +174,99 @@ bool LoadTorchCompactPolicyModel(
     const std::string& path,
     TorchCompactPolicyModel& model,
     std::string& error);
+
+enum class ModelType
+{
+    None,
+    Linear,
+    Compact,
+    TorchCompact,
+};
+
+struct ModelLoadErrors
+{
+    std::string TorchCompact;
+    std::string Compact;
+    std::string Linear;
+};
+
+class Runtime
+{
+public:
+    struct HeldRecord
+    {
+        std::uint32_t Held = 0;
+        std::uint32_t Frame = 0;
+    };
+
+    void SetEnabled(bool enabled) { Enabled = enabled; }
+    void Disable() { Enabled = false; }
+    bool IsEnabled() const { return Enabled; }
+
+    bool LoadModel(const std::string& path, ModelLoadErrors& errors);
+    bool HasModel() const { return LoadedModelType != ModelType::None; }
+    ModelType LoadedType() const { return LoadedModelType; }
+    bool HasCompactModel() const { return LoadedModelType == ModelType::Compact; }
+    bool HasTorchCompactModel() const { return LoadedModelType == ModelType::TorchCompact; }
+    const LinearPolicyModel& LinearModel() const { return Linear; }
+    const CompactActionPolicyModel& CompactModel() const { return Compact; }
+    const TorchCompactPolicyModel& TorchCompactModel() const { return TorchCompact; }
+
+    void ResetPlayer(int instanceID, int player);
+    std::uint32_t ApplyFireTapRelease(
+        int instanceID,
+        int player,
+        std::uint32_t held,
+        std::uint32_t allowedHeldMask,
+        bool firePressIntent,
+        const char*& phase);
+    std::uint32_t ApplyNeutralHold(
+        int instanceID,
+        int player,
+        std::uint32_t frame,
+        std::uint32_t held,
+        int neutralHoldFrames,
+        std::uint32_t allowedHeldMask,
+        bool& adjusted);
+
+    const HeldRecord* CachedHeld(int instanceID, int player) const;
+    void CacheHeld(int instanceID, int player, std::uint32_t frame, std::uint32_t held);
+
+    bool HasFeatureCoverage() const { return FeaturesFilled != 0 || FeaturesMissing != 0; }
+    void RecordFeatureCoverage(int filled, int missing)
+    {
+        FeaturesFilled = filled;
+        FeaturesMissing = missing;
+    }
+    int FeatureCountFilled() const { return FeaturesFilled; }
+    int FeatureCountMissing() const { return FeaturesMissing; }
+
+private:
+    struct PlayerState
+    {
+        bool FireTapPressNext = false;
+        bool LastHeldValid = false;
+        std::uint32_t LastHeld = 0;
+        bool CachedHeldValid = false;
+        HeldRecord Cached;
+        bool LastNonZeroHeldValid = false;
+        HeldRecord LastNonZero;
+    };
+
+    static bool ValidPlayer(int instanceID, int player)
+    {
+        return instanceID >= 0 && instanceID < 16 && player >= 0 && player < 2;
+    }
+
+    bool Enabled = false;
+    ModelType LoadedModelType = ModelType::None;
+    LinearPolicyModel Linear;
+    CompactActionPolicyModel Compact;
+    TorchCompactPolicyModel TorchCompact;
+    std::array<std::array<PlayerState, 2>, 16> Players {};
+    int FeaturesFilled = 0;
+    int FeaturesMissing = 0;
+};
 
 Prediction PredictLinearPolicy(
     const LinearPolicyModel& model,

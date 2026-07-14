@@ -2771,7 +2771,7 @@ bool BuildRuntimeImitationFeatures(
         }
     }
     if (G.AI.Imitation.WarnMissingFeatures && missing > 0 &&
-        G.ImitationAIFeaturesFilled == 0 && G.ImitationAIFeaturesMissing == 0)
+        !G.ImitationAI.HasFeatureCoverage())
     {
         std::printf(
             "NSMB ImitationAI: feature coverage filled=%d missing=%d missingExamples=",
@@ -2785,8 +2785,7 @@ bool BuildRuntimeImitationFeatures(
         }
         std::printf("\n");
     }
-    G.ImitationAIFeaturesFilled = filled;
-    G.ImitationAIFeaturesMissing = missing;
+    G.ImitationAI.RecordFeatureCoverage(filled, missing);
     return filled > 0;
 }
 
@@ -3142,100 +3141,11 @@ bool CompactPredictionHasFirePress(
     return false;
 }
 
-void ResetImitationAIFireTapState(int instanceID, int player)
-{
-    if (instanceID < 0 || instanceID >= 16 || player < 0 || player >= 2)
-        return;
-    G.ImitationAIFireTapPressNext[instanceID][player] = false;
-    G.ImitationAILastHeldValid[instanceID][player] = false;
-    G.ImitationAILastHeld[instanceID][player] = 0;
-    G.ImitationAICachedHeldValid[instanceID][player] = false;
-    G.ImitationAICachedHeld[instanceID][player] = 0;
-    G.ImitationAICachedFrame[instanceID][player] = 0;
-    G.ImitationAILastNonZeroHeldValid[instanceID][player] = false;
-    G.ImitationAILastNonZeroHeld[instanceID][player] = 0;
-    G.ImitationAILastNonZeroFrame[instanceID][player] = 0;
-}
-
-melonDS::u32 ApplyImitationAIFireTapRelease(
-    int instanceID,
-    int player,
-    melonDS::u32 held,
-    bool firePressIntent,
-    const char*& outPhase)
-{
-    outPhase = "none";
-    if (instanceID < 0 || instanceID >= 16 || player < 0 || player >= 2)
-        return held;
-
-    constexpr melonDS::u32 kHeldY = 1u << 11;
-    if ((G.AI.Imitation.AllowedHeldMask & kHeldY) == 0)
-    {
-        G.ImitationAIFireTapPressNext[instanceID][player] = false;
-        G.ImitationAILastHeld[instanceID][player] = held;
-        G.ImitationAILastHeldValid[instanceID][player] = true;
-        return held;
-    }
-
-    if (G.ImitationAIFireTapPressNext[instanceID][player])
-    {
-        held |= kHeldY;
-        G.ImitationAIFireTapPressNext[instanceID][player] = false;
-        outPhase = "press";
-    }
-    else
-    {
-        const bool yHeldNow = (held & kHeldY) != 0;
-        const bool yHeldLast =
-            G.ImitationAILastHeldValid[instanceID][player] &&
-            (G.ImitationAILastHeld[instanceID][player] & kHeldY) != 0;
-        if (firePressIntent && yHeldNow && yHeldLast)
-        {
-            held &= ~kHeldY;
-            G.ImitationAIFireTapPressNext[instanceID][player] = true;
-            outPhase = "release";
-        }
-    }
-
-    G.ImitationAILastHeld[instanceID][player] = held;
-    G.ImitationAILastHeldValid[instanceID][player] = true;
-    return held;
-}
-
 InputState BuildImitationAIInputFromHeld(const InputState& fallback, melonDS::u32 held)
 {
     InputState input = NeutralInputPreservingTouch(fallback);
     input.KeyMask = (~held) & 0x0FFFu;
     return input;
-}
-
-melonDS::u32 ApplyImitationAINeutralHold(
-    int instanceID,
-    int player,
-    melonDS::u32 frame,
-    melonDS::u32 held,
-    bool& adjusted)
-{
-    adjusted = false;
-    if (instanceID < 0 || instanceID >= 16 || player < 0 || player >= 2)
-        return held;
-    if (held != 0)
-    {
-        G.ImitationAILastNonZeroHeldValid[instanceID][player] = true;
-        G.ImitationAILastNonZeroHeld[instanceID][player] = held;
-        G.ImitationAILastNonZeroFrame[instanceID][player] = frame;
-        return held;
-    }
-    if (G.AI.Imitation.NeutralHoldFrames <= 0 || !G.ImitationAILastNonZeroHeldValid[instanceID][player])
-        return held;
-    const melonDS::u32 lastFrame = G.ImitationAILastNonZeroFrame[instanceID][player];
-    if (frame >= lastFrame &&
-        frame - lastFrame <= static_cast<melonDS::u32>(G.AI.Imitation.NeutralHoldFrames))
-    {
-        adjusted = true;
-        return G.ImitationAILastNonZeroHeld[instanceID][player] & G.AI.Imitation.AllowedHeldMask;
-    }
-    return held;
 }
 
 InputState ApplyImitationAIInput(
@@ -3259,7 +3169,7 @@ InputState ApplyImitationAIInput(
         }
         return fallback;
     };
-    if (!G.ImitationAIEnabled || !G.ImitationAIModelLoaded || frame < G.AI.Imitation.StartFrame || !nds || !nds->MainRAM)
+    if (!G.ImitationAI.IsEnabled() || !G.ImitationAI.HasModel() || frame < G.AI.Imitation.StartFrame || !nds || !nds->MainRAM)
         return traceFallback("disabled");
     if (G.AI.Imitation.HostOnly && G.NetRole != Role::Host)
         return traceFallback("hostOnly");
@@ -3271,19 +3181,20 @@ InputState ApplyImitationAIInput(
     const bool inGameplay = IsMarioVsLuigiGameplay(nds);
     if (!inGameplay)
     {
-        ResetImitationAIFireTapState(instanceID, player);
+        G.ImitationAI.ResetPlayer(instanceID, player);
         return traceFallback("notGameplay");
     }
 
-    if (G.ImitationAITorchCompactModelLoaded &&
+    const NsmbImitationAI::Runtime::HeldRecord* cachedHeld =
+        G.ImitationAI.CachedHeld(instanceID, player);
+    if (G.ImitationAI.HasTorchCompactModel() &&
         G.AI.Imitation.InferInterval > 1 &&
-        instanceID >= 0 && instanceID < 16 && player >= 0 && player < 2 &&
-        G.ImitationAICachedHeldValid[instanceID][player] &&
-        frame >= G.ImitationAICachedFrame[instanceID][player] &&
-        frame - G.ImitationAICachedFrame[instanceID][player] <
+        cachedHeld &&
+        frame >= cachedHeld->Frame &&
+        frame - cachedHeld->Frame <
             static_cast<melonDS::u32>(G.AI.Imitation.InferInterval))
     {
-        const melonDS::u32 held = G.ImitationAICachedHeld[instanceID][player] & G.AI.Imitation.AllowedHeldMask;
+        const melonDS::u32 held = cachedHeld->Held & G.AI.Imitation.AllowedHeldMask;
         InputState input = BuildImitationAIInputFromHeld(fallback, held);
         if (G.AI.Imitation.TraceEnabled &&
             (G.AI.Imitation.TraceInterval <= 1 ||
@@ -3297,45 +3208,53 @@ InputState ApplyImitationAIInput(
                 held,
                 input.KeyMask,
                 G.AI.Imitation.InferInterval,
-                G.ImitationAICachedFrame[instanceID][player]);
+                cachedHeld->Frame);
         }
         return input;
     }
 
     const GameStateSample sample = ReadGameStateSample(nds);
     const GameStateObjectScanCache objectScanCache = BuildGameStateObjectScanCache(nds);
-    if (G.ImitationAITorchCompactModelLoaded)
+    if (G.ImitationAI.HasTorchCompactModel())
     {
         std::vector<double> features;
         if (!BuildCompactRuntimeImitationFeatures(
-                G.ImitationAITorchCompactModel,
+                G.ImitationAI.TorchCompactModel(),
                 sample,
                 objectScanCache,
                 instanceID,
                 player,
                 features))
         {
-            ResetImitationAIFireTapState(instanceID, player);
+            G.ImitationAI.ResetPlayer(instanceID, player);
             return traceFallback("torchCompactFeatures");
         }
         const NsmbImitationAI::CompactActionPrediction prediction =
-            NsmbImitationAI::PredictTorchCompactPolicy(G.ImitationAITorchCompactModel, features);
+            NsmbImitationAI::PredictTorchCompactPolicy(G.ImitationAI.TorchCompactModel(), features);
         melonDS::u32 held = prediction.Held & G.AI.Imitation.AllowedHeldMask;
-        const bool firePressIntent = CompactPredictionHasFirePress(G.ImitationAITorchCompactModel, prediction);
+        const bool firePressIntent = CompactPredictionHasFirePress(G.ImitationAI.TorchCompactModel(), prediction);
         std::int64_t guardHazardDx = 0;
         std::int64_t guardHazardDy = 0;
         const bool hazardGuardAdjusted =
             ApplyImitationAIHazardGuard(sample, objectScanCache, player, held, guardHazardDx, guardHazardDy);
         const char* fireTapPhase = "none";
-        held = ApplyImitationAIFireTapRelease(instanceID, player, held, firePressIntent, fireTapPhase);
+        held = G.ImitationAI.ApplyFireTapRelease(
+            instanceID,
+            player,
+            held,
+            G.AI.Imitation.AllowedHeldMask,
+            firePressIntent,
+            fireTapPhase);
         bool neutralHoldAdjusted = false;
-        held = ApplyImitationAINeutralHold(instanceID, player, frame, held, neutralHoldAdjusted);
-        if (instanceID >= 0 && instanceID < 16 && player >= 0 && player < 2)
-        {
-            G.ImitationAICachedHeldValid[instanceID][player] = true;
-            G.ImitationAICachedHeld[instanceID][player] = held;
-            G.ImitationAICachedFrame[instanceID][player] = frame;
-        }
+        held = G.ImitationAI.ApplyNeutralHold(
+            instanceID,
+            player,
+            frame,
+            held,
+            G.AI.Imitation.NeutralHoldFrames,
+            G.AI.Imitation.AllowedHeldMask,
+            neutralHoldAdjusted);
+        G.ImitationAI.CacheHeld(instanceID, player, frame, held);
         InputState input = BuildImitationAIInputFromHeld(fallback, held);
 
         if (G.AI.Imitation.TraceEnabled &&
@@ -3356,9 +3275,9 @@ InputState ApplyImitationAIInput(
                 fireTapPhase,
                 neutralHoldAdjusted ? 1 : 0,
                 G.AI.Imitation.InferInterval);
-            for (std::size_t i = 0; i < prediction.Actions.size() && i < G.ImitationAITorchCompactModel.Heads.size(); i++)
+            for (std::size_t i = 0; i < prediction.Actions.size() && i < G.ImitationAI.TorchCompactModel().Heads.size(); i++)
             {
-                const auto& head = G.ImitationAITorchCompactModel.Heads[i];
+                const auto& head = G.ImitationAI.TorchCompactModel().Heads[i];
                 const int action = prediction.Actions[i];
                 const char* className = action >= 0 && action < static_cast<int>(head.Classes.size())
                     ? head.Classes[static_cast<std::size_t>(action)].c_str()
@@ -3376,30 +3295,36 @@ InputState ApplyImitationAIInput(
 
         return input;
     }
-    if (G.ImitationAICompactModelLoaded)
+    if (G.ImitationAI.HasCompactModel())
     {
         std::vector<double> features;
         if (!BuildCompactRuntimeImitationFeatures(
-                G.ImitationAICompactModel,
+                G.ImitationAI.CompactModel(),
                 sample,
                 objectScanCache,
                 instanceID,
                 player,
                 features))
         {
-            ResetImitationAIFireTapState(instanceID, player);
+            G.ImitationAI.ResetPlayer(instanceID, player);
             return traceFallback("compactFeatures");
         }
         const NsmbImitationAI::CompactActionPrediction prediction =
-            NsmbImitationAI::PredictCompactActionPolicy(G.ImitationAICompactModel, features);
+            NsmbImitationAI::PredictCompactActionPolicy(G.ImitationAI.CompactModel(), features);
         melonDS::u32 held = prediction.Held & G.AI.Imitation.AllowedHeldMask;
-        const bool firePressIntent = CompactPredictionHasFirePress(G.ImitationAICompactModel, prediction);
+        const bool firePressIntent = CompactPredictionHasFirePress(G.ImitationAI.CompactModel(), prediction);
         std::int64_t guardHazardDx = 0;
         std::int64_t guardHazardDy = 0;
         const bool hazardGuardAdjusted =
             ApplyImitationAIHazardGuard(sample, objectScanCache, player, held, guardHazardDx, guardHazardDy);
         const char* fireTapPhase = "none";
-        held = ApplyImitationAIFireTapRelease(instanceID, player, held, firePressIntent, fireTapPhase);
+        held = G.ImitationAI.ApplyFireTapRelease(
+            instanceID,
+            player,
+            held,
+            G.AI.Imitation.AllowedHeldMask,
+            firePressIntent,
+            fireTapPhase);
         InputState input = NeutralInputPreservingTouch(fallback);
         input.KeyMask = (~held) & 0x0FFFu;
 
@@ -3419,9 +3344,9 @@ InputState ApplyImitationAIInput(
                 static_cast<long long>(guardHazardDx),
                 static_cast<long long>(guardHazardDy),
                 fireTapPhase);
-            for (std::size_t i = 0; i < prediction.Actions.size() && i < G.ImitationAICompactModel.Heads.size(); i++)
+            for (std::size_t i = 0; i < prediction.Actions.size() && i < G.ImitationAI.CompactModel().Heads.size(); i++)
             {
-                const auto& head = G.ImitationAICompactModel.Heads[i];
+                const auto& head = G.ImitationAI.CompactModel().Heads[i];
                 const int action = prediction.Actions[i];
                 const char* className = action >= 0 && action < static_cast<int>(head.Classes.size())
                     ? head.Classes[static_cast<std::size_t>(action)].c_str()
@@ -3444,7 +3369,7 @@ InputState ApplyImitationAIInput(
     int filled = 0;
     int missing = 0;
     if (!BuildRuntimeImitationFeatures(
-            G.ImitationAIModel,
+            G.ImitationAI.LinearModel(),
             sample,
             objectScanCache,
             instanceID,
@@ -3459,7 +3384,7 @@ InputState ApplyImitationAIInput(
     }
 
     const NsmbImitationAI::Prediction prediction =
-        NsmbImitationAI::PredictLinearPolicy(G.ImitationAIModel, features, G.AI.Imitation.Threshold);
+        NsmbImitationAI::PredictLinearPolicy(G.ImitationAI.LinearModel(), features, G.AI.Imitation.Threshold);
     melonDS::u32 held = prediction.Held & G.AI.Imitation.AllowedHeldMask;
     auto keepHigherProbability = [&prediction, &held](int firstBit, int secondBit) {
         const melonDS::u32 firstMask = 1u << firstBit;
@@ -3501,12 +3426,12 @@ InputState ApplyImitationAIInput(
             hazardGuardAdjusted ? 1 : 0,
             static_cast<long long>(guardHazardDx),
             static_cast<long long>(guardHazardDy));
-        for (std::size_t i = 0; i < prediction.Probabilities.size() && i < G.ImitationAIModel.Buttons.size(); i++)
+        for (std::size_t i = 0; i < prediction.Probabilities.size() && i < G.ImitationAI.LinearModel().Buttons.size(); i++)
         {
             std::printf(
                 "%s%s=%.3f",
                 i == 0 ? "" : ",",
-                G.ImitationAIModel.Buttons[i].c_str(),
+                G.ImitationAI.LinearModel().Buttons[i].c_str(),
                 prediction.Probabilities[i]);
         }
         std::printf("\n");

@@ -549,24 +549,7 @@ struct State
     int MvlAutoRestartCheckpointStage[16] {};
     bool MvlAutoRestartCheckpointLogged[16] {};
     Config::AIConfig AI;
-    bool ImitationAIEnabled = false;
-    bool ImitationAIFireTapPressNext[16][2] {};
-    bool ImitationAILastHeldValid[16][2] {};
-    melonDS::u32 ImitationAILastHeld[16][2] {};
-    bool ImitationAICachedHeldValid[16][2] {};
-    melonDS::u32 ImitationAICachedHeld[16][2] {};
-    melonDS::u32 ImitationAICachedFrame[16][2] {};
-    bool ImitationAILastNonZeroHeldValid[16][2] {};
-    melonDS::u32 ImitationAILastNonZeroHeld[16][2] {};
-    melonDS::u32 ImitationAILastNonZeroFrame[16][2] {};
-    NsmbImitationAI::LinearPolicyModel ImitationAIModel;
-    NsmbImitationAI::CompactActionPolicyModel ImitationAICompactModel;
-    NsmbImitationAI::TorchCompactPolicyModel ImitationAITorchCompactModel;
-    bool ImitationAIModelLoaded = false;
-    bool ImitationAICompactModelLoaded = false;
-    bool ImitationAITorchCompactModelLoaded = false;
-    int ImitationAIFeaturesFilled = 0;
-    int ImitationAIFeaturesMissing = 0;
+    NsmbImitationAI::Runtime ImitationAI;
     bool DirectMvlBootApplied[16] {};
     Config::RuntimePatchConfig RuntimePatch;
     Config::HarnessConfig Harness;
@@ -1224,7 +1207,7 @@ bool RuleAIProvidesInputForPlayer(int player)
 
 bool ImitationAIProvidesInputForPlayer(int player)
 {
-    if (!G.ImitationAIEnabled || !G.ImitationAIModelLoaded)
+    if (!G.ImitationAI.IsEnabled() || !G.ImitationAI.HasModel())
         return false;
     if (G.AI.Imitation.HostOnly && G.NetRole != Role::Host)
         return false;
@@ -7616,48 +7599,26 @@ void InitFromEnvironment()
         G.MemPatchRanges.clear();
     }
     G.AI = Config::LoadAIConfig();
-    G.ImitationAIEnabled = G.AI.Imitation.Enabled;
-    if (G.ImitationAIEnabled)
+    G.ImitationAI.SetEnabled(G.AI.Imitation.Enabled);
+    if (G.ImitationAI.IsEnabled())
     {
         if (G.AI.Imitation.ModelPath.empty())
         {
             std::printf("NSMB ImitationAI: enabled but MELONDS_NSML_IMITATION_AI_MODEL is empty\n");
-            G.ImitationAIEnabled = false;
+            G.ImitationAI.Disable();
         }
         else
         {
-            std::string torchCompactError;
-            G.ImitationAITorchCompactModelLoaded =
-                NsmbImitationAI::LoadTorchCompactPolicyModel(G.AI.Imitation.ModelPath, G.ImitationAITorchCompactModel, torchCompactError);
-            if (G.ImitationAITorchCompactModelLoaded)
+            NsmbImitationAI::ModelLoadErrors errors;
+            if (!G.ImitationAI.LoadModel(G.AI.Imitation.ModelPath, errors))
             {
-                G.ImitationAIModelLoaded = true;
-            }
-            else
-            {
-            std::string compactError;
-            G.ImitationAICompactModelLoaded =
-                NsmbImitationAI::LoadCompactActionPolicyModel(G.AI.Imitation.ModelPath, G.ImitationAICompactModel, compactError);
-            if (G.ImitationAICompactModelLoaded)
-            {
-                G.ImitationAIModelLoaded = true;
-            }
-            else
-            {
-                std::string modelError;
-                G.ImitationAIModelLoaded =
-                    NsmbImitationAI::LoadLinearPolicyModel(G.AI.Imitation.ModelPath, G.ImitationAIModel, modelError);
-                if (!G.ImitationAIModelLoaded)
-                {
-                    std::printf(
-                        "NSMB ImitationAI: failed to load model path=%s torchCompactError=%s compactError=%s linearError=%s\n",
-                        G.AI.Imitation.ModelPath.c_str(),
-                        torchCompactError.c_str(),
-                        compactError.c_str(),
-                        modelError.c_str());
-                    G.ImitationAIEnabled = false;
-                }
-            }
+                std::printf(
+                    "NSMB ImitationAI: failed to load model path=%s torchCompactError=%s compactError=%s linearError=%s\n",
+                    G.AI.Imitation.ModelPath.c_str(),
+                    errors.TorchCompact.c_str(),
+                    errors.Compact.c_str(),
+                    errors.Linear.c_str());
+                G.ImitationAI.Disable();
             }
         }
     }
@@ -7969,9 +7930,9 @@ void InitFromEnvironment()
                 G.AI.Rule.ClientOnly ? 1 : 0);
         }
     }
-    if (G.ImitationAIEnabled)
+    if (G.ImitationAI.IsEnabled())
     {
-        if (G.ImitationAITorchCompactModelLoaded)
+        if (G.ImitationAI.HasTorchCompactModel())
         {
             std::printf(
                 "NSMB ImitationAI: enabled player=%s startFrame=%u modelType=torchCompact allowedHeldMask=0x%03X trace=%d traceInterval=%d inferInterval=%d neutralHoldFrames=%d model=%s features=%zu heads=%zu schema=%s labelSchema=%s\n",
@@ -7983,12 +7944,12 @@ void InitFromEnvironment()
                 G.AI.Imitation.InferInterval,
                 G.AI.Imitation.NeutralHoldFrames,
                 G.AI.Imitation.ModelPath.c_str(),
-                G.ImitationAITorchCompactModel.FeatureCount(),
-                G.ImitationAITorchCompactModel.Heads.size(),
-                G.ImitationAITorchCompactModel.Schema.c_str(),
-                G.ImitationAITorchCompactModel.LabelSchema.c_str());
+                G.ImitationAI.TorchCompactModel().FeatureCount(),
+                G.ImitationAI.TorchCompactModel().Heads.size(),
+                G.ImitationAI.TorchCompactModel().Schema.c_str(),
+                G.ImitationAI.TorchCompactModel().LabelSchema.c_str());
         }
-        else if (G.ImitationAICompactModelLoaded)
+        else if (G.ImitationAI.HasCompactModel())
         {
             std::printf(
                 "NSMB ImitationAI: enabled player=%s startFrame=%u modelType=compact allowedHeldMask=0x%03X trace=%d traceInterval=%d model=%s features=%zu heads=%zu schema=%s labelSchema=%s\n",
@@ -7998,10 +7959,10 @@ void InitFromEnvironment()
                 G.AI.Imitation.TraceEnabled ? 1 : 0,
                 G.AI.Imitation.TraceInterval,
                 G.AI.Imitation.ModelPath.c_str(),
-                G.ImitationAICompactModel.FeatureCount(),
-                G.ImitationAICompactModel.Heads.size(),
-                G.ImitationAICompactModel.Schema.c_str(),
-                G.ImitationAICompactModel.LabelSchema.c_str());
+                G.ImitationAI.CompactModel().FeatureCount(),
+                G.ImitationAI.CompactModel().Heads.size(),
+                G.ImitationAI.CompactModel().Schema.c_str(),
+                G.ImitationAI.CompactModel().LabelSchema.c_str());
         }
         else
         {
@@ -8014,10 +7975,10 @@ void InitFromEnvironment()
                 G.AI.Imitation.TraceEnabled ? 1 : 0,
                 G.AI.Imitation.TraceInterval,
                 G.AI.Imitation.ModelPath.c_str(),
-                G.ImitationAIModel.FeatureCount(),
-                G.ImitationAIModel.ButtonCount(),
-                G.ImitationAIModel.Schema.c_str(),
-                G.ImitationAIModel.FeatureSchemaID.c_str());
+                G.ImitationAI.LinearModel().FeatureCount(),
+                G.ImitationAI.LinearModel().ButtonCount(),
+                G.ImitationAI.LinearModel().Schema.c_str(),
+                G.ImitationAI.LinearModel().FeatureSchemaID.c_str());
         }
         if (G.AI.Imitation.HostOnly || G.AI.Imitation.ClientOnly)
         {

@@ -299,6 +299,21 @@ if (BUILD_TESTING)
     )
     add_test(NAME nsmb-rule-ai COMMAND nsmb_rule_ai_tests)
 
+    add_executable(nsmb_imitation_ai_tests
+        NsmbImitationAI.cpp
+        NsmbImitationAI.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_imitation_ai_tests.cpp
+    )
+    target_include_directories(nsmb_imitation_ai_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    set_target_properties(nsmb_imitation_ai_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-imitation-ai COMMAND nsmb_imitation_ai_tests)
+
     add_executable(nsmb_rollback_store_tests
         NsmbRollbackStore.cpp
         NsmbRollbackStore.h
