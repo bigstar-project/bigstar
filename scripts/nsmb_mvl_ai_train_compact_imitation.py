@@ -102,6 +102,14 @@ def main() -> int:
     args = parser.parse_args()
 
     data = np.load(args.dataset, allow_pickle=False)
+    dataset_metadata = json.loads(str(data["metadata"].item()))
+    dataset_schema = str(dataset_metadata.get("schema", ""))
+    input_schema = str(dataset_metadata.get("observationSchema", "")) or {
+        "nsmb_mvl_compact_dataset_v2": "nsmb_mvl_compact_observation_v2",
+        "nsmb_mvl_compact_dataset_v3": "nsmb_mvl_compact_observation_v3",
+    }.get(dataset_schema, "")
+    if not input_schema:
+        raise ValueError(f"unsupported dataset schema for compact policy: {dataset_schema or '<missing>'}")
     if "actions" not in data:
         raise ValueError(f"{args.dataset}: missing action labels; rebuild compact dataset first")
     x_raw, layout = flatten_inputs(data)
@@ -121,6 +129,8 @@ def main() -> int:
         "scale": scale.astype(np.float32),
         "head_names": np.array(HEADS),
         "input_layout": np.array(json.dumps(layout, separators=(",", ":"))),
+        "input_schema": np.array(input_schema),
+        "scalar_schema": np.array(dataset_metadata.get("scalarSchema", "nsmb_mvl_scalar_features_v2")),
         "label_schema": np.array("nsmb_mvl_action_labels_v2"),
     }
 

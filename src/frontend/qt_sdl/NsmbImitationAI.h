@@ -47,10 +47,13 @@ struct CompactActionHead
 struct CompactActionPolicyModel
 {
     std::string Schema;
+    std::string InputSchema;
+    std::string ScalarSchema;
     std::string LabelSchema;
     std::vector<double> Mean;
     std::vector<double> Scale;
     std::vector<CompactActionHead> Heads;
+    int ScalarCount = 0;
 
     std::size_t FeatureCount() const;
     bool IsUsable() const;
@@ -111,6 +114,8 @@ struct RuntimeConv2DLayer
 struct TorchCompactPolicyModel
 {
     std::string Schema;
+    std::string InputSchema;
+    std::string ScalarSchema;
     std::string LabelSchema;
     std::vector<std::string> HeadNames;
     std::vector<CompactActionHead> Heads;

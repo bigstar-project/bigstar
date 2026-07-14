@@ -61,8 +61,8 @@ param(
     [switch]$GameStateTraceExtended,
     [string]$HostAIPlayLog = "",
     [string]$ClientAIPlayLog = "",
-    [string]$HostAIObservationV2Log = "",
-    [string]$ClientAIObservationV2Log = "",
+    [string]$HostAIObservationV3Log = "",
+    [string]$ClientAIObservationV3Log = "",
     [int]$AIPlayLogInterval = 1,
     [int]$AIPlayLogFlushInterval = 60,
     [int]$AIPlayLogMaxObjects = 128,
@@ -558,7 +558,7 @@ $clientErr = Join-Path $wrapperLog "client-wrapper.err.txt"
 $oldAIEnv = @{}
 foreach ($name in @(
     "MELONDS_NSML_AI_PLAY_LOG",
-    "MELONDS_NSML_AI_OBSERVATION_V2_LOG",
+    "MELONDS_NSML_AI_OBSERVATION_V3_LOG",
     "MELONDS_NSML_AI_PLAY_LOG_INTERVAL",
     "MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL",
     "MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS",
@@ -571,11 +571,11 @@ foreach ($name in @(
 function Set-AIPlayLogEnv {
     param(
         [string]$Path,
-        [string]$ObservationV2Path
+        [string]$ObservationV3Path
     )
-    if ($Path -eq "" -and $ObservationV2Path -eq "") {
+    if ($Path -eq "" -and $ObservationV3Path -eq "") {
         Remove-Item Env:\MELONDS_NSML_AI_PLAY_LOG -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_AI_OBSERVATION_V2_LOG -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_AI_OBSERVATION_V3_LOG -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_AI_PLAY_LOG_INTERVAL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS -ErrorAction SilentlyContinue
@@ -596,19 +596,19 @@ function Set-AIPlayLogEnv {
         }
         $env:MELONDS_NSML_AI_PLAY_LOG = $resolved
     }
-    if ($ObservationV2Path -eq "") {
-        Remove-Item Env:\MELONDS_NSML_AI_OBSERVATION_V2_LOG -ErrorAction SilentlyContinue
+    if ($ObservationV3Path -eq "") {
+        Remove-Item Env:\MELONDS_NSML_AI_OBSERVATION_V3_LOG -ErrorAction SilentlyContinue
     } else {
-        $resolvedV2 = if ([System.IO.Path]::IsPathRooted($ObservationV2Path)) {
-            $ObservationV2Path
+        $resolvedV3 = if ([System.IO.Path]::IsPathRooted($ObservationV3Path)) {
+            $ObservationV3Path
         } else {
-            Join-Path $repoRoot $ObservationV2Path
+            Join-Path $repoRoot $ObservationV3Path
         }
-        $parentV2 = Split-Path -Parent $resolvedV2
-        if ($parentV2) {
-            New-Item -ItemType Directory -Force -Path $parentV2 | Out-Null
+        $parentV3 = Split-Path -Parent $resolvedV3
+        if ($parentV3) {
+            New-Item -ItemType Directory -Force -Path $parentV3 | Out-Null
         }
-        $env:MELONDS_NSML_AI_OBSERVATION_V2_LOG = $resolvedV2
+        $env:MELONDS_NSML_AI_OBSERVATION_V3_LOG = $resolvedV3
     }
     $env:MELONDS_NSML_AI_PLAY_LOG_INTERVAL = "$AIPlayLogInterval"
     $env:MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL = "$AIPlayLogFlushInterval"
@@ -627,7 +627,7 @@ function Set-PolledInputNeutralizeEnv {
 
 $hostProc = $null
 if (-not $ClientOnly) {
-    Set-AIPlayLogEnv -Path $HostAIPlayLog -ObservationV2Path $HostAIObservationV2Log
+    Set-AIPlayLogEnv -Path $HostAIPlayLog -ObservationV3Path $HostAIObservationV3Log
     Set-PolledInputNeutralizeEnv -Enabled ([bool]$NeutralizeHostInput)
     $hostProc = Start-Process -FilePath "powershell.exe" `
         -ArgumentList $hostArgs `
@@ -662,7 +662,7 @@ if (-not $ClientOnly) {
     }
 }
 
-Set-AIPlayLogEnv -Path $ClientAIPlayLog -ObservationV2Path $ClientAIObservationV2Log
+Set-AIPlayLogEnv -Path $ClientAIPlayLog -ObservationV3Path $ClientAIObservationV3Log
 Set-PolledInputNeutralizeEnv -Enabled ([bool]$NeutralizeClientInput)
 $clientProc = Start-Process -FilePath "powershell.exe" `
     -ArgumentList $clientArgs `
@@ -698,8 +698,8 @@ Write-Host "gameplay heartbeat interval=$GameplayHeartbeatInterval"
 if ($HostAIPlayLog -or $ClientAIPlayLog) {
     Write-Host "AI play log host=$(if ($HostAIPlayLog) { $HostAIPlayLog } else { 'off' }) client=$(if ($ClientAIPlayLog) { $ClientAIPlayLog } else { 'off' }) interval=$AIPlayLogInterval flushInterval=$AIPlayLogFlushInterval maxObjects=$AIPlayLogMaxObjects"
 }
-if ($HostAIObservationV2Log -or $ClientAIObservationV2Log) {
-    Write-Host "AI observation v2 host=$(if ($HostAIObservationV2Log) { $HostAIObservationV2Log } else { 'off' }) client=$(if ($ClientAIObservationV2Log) { $ClientAIObservationV2Log } else { 'off' }) interval=$AIPlayLogInterval flushInterval=$AIPlayLogFlushInterval maxObjects=$AIPlayLogMaxObjects"
+if ($HostAIObservationV3Log -or $ClientAIObservationV3Log) {
+    Write-Host "AI observation v3 host=$(if ($HostAIObservationV3Log) { $HostAIObservationV3Log } else { 'off' }) client=$(if ($ClientAIObservationV3Log) { $ClientAIObservationV3Log } else { 'off' }) interval=$AIPlayLogInterval flushInterval=$AIPlayLogFlushInterval maxObjects=$AIPlayLogMaxObjects"
 }
 Write-Host "trace gameState=$([bool]$GameStateTrace) interval=$GameStateTraceInterval extended=$([bool]$GameStateTraceExtended) lifeChanges=$([bool]$TracePlayerLifeChanges) defeated=$([bool]$TracePlayerDefeated)"
 Write-Host "recordInput=$([bool]$RecordInput) recordDir=$(if ($RecordInput) { $InputRecordDir } else { 'disabled' }) recordStart=$InputRecordStartFrame recordEnd=$InputRecordEndFrame"

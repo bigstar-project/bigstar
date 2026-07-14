@@ -767,8 +767,11 @@ bool LoadCompactActionPolicyModel(
     CompactActionPolicyModel parsed {};
     std::vector<std::string> headNames;
     if (!ParseStringField(text, "schema", parsed.Schema, error) ||
+        !ParseStringField(text, "input_schema", parsed.InputSchema, error) ||
+        !ParseStringField(text, "scalar_schema", parsed.ScalarSchema, error) ||
         !ParseStringField(text, "label_schema", parsed.LabelSchema, error) ||
         !ParseStringArrayField(text, "head_names", headNames, error) ||
+        !ParseIntField(text, "scalar", parsed.ScalarCount, error) ||
         !ParseNumberArrayField(text, "mean", parsed.Mean, error) ||
         !ParseNumberArrayField(text, "scale", parsed.Scale, error))
     {
@@ -778,6 +781,15 @@ bool LoadCompactActionPolicyModel(
     if (parsed.Schema != "nsmb_mvl_compact_action_policy_v1")
     {
         error = "unsupported compact action policy schema: " + parsed.Schema;
+        return false;
+    }
+    if ((parsed.InputSchema == "nsmb_mvl_compact_observation_v2" && parsed.ScalarCount != 35) ||
+        (parsed.InputSchema == "nsmb_mvl_compact_observation_v3" && parsed.ScalarCount != 47) ||
+        (parsed.InputSchema != "nsmb_mvl_compact_observation_v2" &&
+            parsed.InputSchema != "nsmb_mvl_compact_observation_v3"))
+    {
+        error = "compact policy input schema/scalar count mismatch: " + parsed.InputSchema +
+            " scalar=" + std::to_string(parsed.ScalarCount);
         return false;
     }
 
@@ -830,6 +842,8 @@ bool LoadTorchCompactPolicyModel(
 
     TorchCompactPolicyModel parsed {};
     if (!ParseStringField(text, "schema", parsed.Schema, error) ||
+        !ParseStringField(text, "input_schema", parsed.InputSchema, error) ||
+        !ParseStringField(text, "scalar_schema", parsed.ScalarSchema, error) ||
         !ParseStringField(text, "label_schema", parsed.LabelSchema, error) ||
         !ParseStringArrayField(text, "head_names", parsed.HeadNames, error) ||
         !ParseNumberArrayField(text, "scalar_mean", parsed.ScalarMean, error) ||
@@ -851,6 +865,15 @@ bool LoadTorchCompactPolicyModel(
     if (parsed.Schema != "nsmb_mvl_torch_compact_policy_runtime_v1")
     {
         error = "unsupported torch compact policy schema: " + parsed.Schema;
+        return false;
+    }
+    if ((parsed.InputSchema == "nsmb_mvl_compact_observation_v2" && parsed.ScalarCount != 35) ||
+        (parsed.InputSchema == "nsmb_mvl_compact_observation_v3" && parsed.ScalarCount != 47) ||
+        (parsed.InputSchema != "nsmb_mvl_compact_observation_v2" &&
+            parsed.InputSchema != "nsmb_mvl_compact_observation_v3"))
+    {
+        error = "compact policy input schema/scalar count mismatch: " + parsed.InputSchema +
+            " scalar=" + std::to_string(parsed.ScalarCount);
         return false;
     }
 

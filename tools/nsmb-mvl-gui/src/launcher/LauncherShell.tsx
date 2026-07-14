@@ -332,38 +332,11 @@ export function LauncherShell({
                 {aiDevToolsEnabled ? (
                   <Tabs.Trigger
                     aria-label="AI"
-                    className={css({
-                      alignItems: 'center',
-                      borderColor: 'transparent',
-                      borderRadius: 'l2',
-                      borderWidth: '1px',
-                      color: 'fg.muted',
-                      display: 'flex',
-                      fontWeight: 'black',
-                      gap: '2.5',
-                      minH: '10',
-                      outline: 'none',
-                      px: '3',
-                      textAlign: 'left',
-                      transition: 'common',
-                      _hover: {
-                        bg: 'blue.subtle.bg',
-                        borderColor: 'blue.outline.border',
-                      },
-                      '&[data-selected]': {
-                        bg: 'blue.subtle.bg',
-                        borderColor: 'blue.solid.bg',
-                        color: 'fg.default',
-                      },
-                      '&[data-selected] svg': {
-                        color: 'yellow.plain.fg',
-                      },
-                    })}
+                    className={sidebarTabClass}
                     value="ai"
                   >
                     <Brain
                       className={css({
-                        color: 'fg.muted',
                         flexShrink: '0',
                       })}
                       size={22}

@@ -21,6 +21,8 @@ def main() -> int:
     model = np.load(args.model, allow_pickle=False)
     payload: dict[str, object] = {
         "schema": "nsmb_mvl_compact_action_policy_v1",
+        "input_schema": str(model["input_schema"]),
+        "scalar_schema": str(model["scalar_schema"]),
         "label_schema": str(model["label_schema"]),
         "head_names": [str(value) for value in model["head_names"]],
         "input_layout": json.loads(str(model["input_layout"])),

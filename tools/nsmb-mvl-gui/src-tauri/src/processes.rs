@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs::{self, File};
-use std::io::{self, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant, UNIX_EPOCH};
@@ -28,9 +28,9 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 const BRIDGE_CONNECT_TIMEOUT: Duration = Duration::from_secs(45);
 const BRIDGE_CONNECT_POLL_INTERVAL: Duration = Duration::from_millis(100);
-const AI_OBSERVATION_V2_LOG: &str = "ai-observations-v2.jsonl";
-const AI_OBSERVATION_V2_GZIP_LOG: &str = "ai-observations-v2.jsonl.gz";
-const AI_OBSERVATION_V2_GZIP_TEMP: &str = "ai-observations-v2.jsonl.gz.tmp";
+const AI_OBSERVATION_V3_LOG: &str = "ai-observations-v3.jsonl";
+const AI_OBSERVATION_V3_GZIP_LOG: &str = "ai-observations-v3.jsonl.gz";
+const AI_OBSERVATION_V3_GZIP_TEMP: &str = "ai-observations-v3.jsonl.gz.tmp";
 
 pub(crate) struct LaunchPaths {
     pub(crate) log_dir: PathBuf,
@@ -163,7 +163,7 @@ fn stop_existing_inner(state: &AppState, report_unresolved: bool) -> Result<(), 
     if let Some(mut session) = guard.take() {
         terminate_child(&mut session.melon);
         terminate_child(&mut session.bridge);
-        let compression_result = finalize_ai_observation_v2_log(&session.log_dir);
+        let compression_result = finalize_ai_observation_v3_log(&session.log_dir);
         let mvl_results = read_mvl_results(&session.log_dir);
         if report_unresolved && !session.crash_report_sent && !match_result_decided(&mvl_results) {
             session.crash_report_sent = true;
@@ -244,7 +244,7 @@ fn refresh_session_processes(
     }
 
     let compression_result = if melon != "running" {
-        finalize_ai_observation_v2_log(&session.log_dir)
+        finalize_ai_observation_v3_log(&session.log_dir)
     } else {
         Ok(false)
     };
@@ -267,20 +267,20 @@ fn refresh_session_processes(
     Ok((melon, bridge, mvl_results))
 }
 
-pub(crate) fn finalize_ai_observation_v2_log(log_dir: &Path) -> Result<bool, String> {
-    let source_path = log_dir.join(AI_OBSERVATION_V2_LOG);
+pub(crate) fn finalize_ai_observation_v3_log(log_dir: &Path) -> Result<bool, String> {
+    let source_path = log_dir.join(AI_OBSERVATION_V3_LOG);
     if !source_path.exists() {
         return Ok(false);
     }
     if !source_path.is_file() {
         return Err(format!(
-            "AI observation v2 log がファイルではありません: {}",
+            "AI observation v3 log がファイルではありません: {}",
             source_path.display()
         ));
     }
 
-    let gzip_path = log_dir.join(AI_OBSERVATION_V2_GZIP_LOG);
-    let temp_path = log_dir.join(AI_OBSERVATION_V2_GZIP_TEMP);
+    let gzip_path = log_dir.join(AI_OBSERVATION_V3_GZIP_LOG);
+    let temp_path = log_dir.join(AI_OBSERVATION_V3_GZIP_TEMP);
     if temp_path.exists() {
         fs::remove_file(&temp_path).map_err(|err| {
             format!(
@@ -293,44 +293,58 @@ pub(crate) fn finalize_ai_observation_v2_log(log_dir: &Path) -> Result<bool, Str
     let result = (|| -> Result<(), String> {
         let input = File::open(&source_path).map_err(|err| {
             format!(
-                "AI observation v2 log を開けません: {}: {err}",
+                "AI observation v3 log を開けません: {}: {err}",
                 source_path.display()
             )
         })?;
         let output = File::create(&temp_path).map_err(|err| {
             format!(
-                "AI observation v2 gzip一時ファイルを作成できません: {}: {err}",
+                "AI observation v3 gzip一時ファイルを作成できません: {}: {err}",
                 temp_path.display()
             )
         })?;
         let mut reader = BufReader::new(input);
         let mut encoder = GzEncoder::new(output, Compression::default());
-        io::copy(&mut reader, &mut encoder)
-            .map_err(|err| format!("AI observation v2 log をgzip圧縮できません: {err}"))?;
+        let mut line = Vec::new();
+        loop {
+            line.clear();
+            let bytes_read = reader
+                .read_until(b'\n', &mut line)
+                .map_err(|err| format!("AI observation v3 log を読み込めません: {err}"))?;
+            if bytes_read == 0 {
+                break;
+            }
+            if !line.ends_with(b"\n") {
+                break;
+            }
+            encoder
+                .write_all(&line)
+                .map_err(|err| format!("AI observation v3 log をgzip圧縮できません: {err}"))?;
+        }
         let output = encoder
             .finish()
-            .map_err(|err| format!("AI observation v2 gzipを完了できません: {err}"))?;
+            .map_err(|err| format!("AI observation v3 gzipを完了できません: {err}"))?;
         output
             .sync_all()
-            .map_err(|err| format!("AI observation v2 gzipを同期できません: {err}"))?;
+            .map_err(|err| format!("AI observation v3 gzipを同期できません: {err}"))?;
 
         if gzip_path.exists() {
             fs::remove_file(&gzip_path).map_err(|err| {
                 format!(
-                    "既存のAI observation v2 gzipを置換できません: {}: {err}",
+                    "既存のAI observation v3 gzipを置換できません: {}: {err}",
                     gzip_path.display()
                 )
             })?;
         }
         fs::rename(&temp_path, &gzip_path).map_err(|err| {
             format!(
-                "AI observation v2 gzipを確定できません: {}: {err}",
+                "AI observation v3 gzipを確定できません: {}: {err}",
                 gzip_path.display()
             )
         })?;
         fs::remove_file(&source_path).map_err(|err| {
             format!(
-                "圧縮済みAI observation v2元ログを削除できません: {}: {err}",
+                "圧縮済みAI observation v3元ログを削除できません: {}: {err}",
                 source_path.display()
             )
         })?;
@@ -662,9 +676,9 @@ pub(crate) fn melon_env(
     );
     if request.ai_play_log_enabled {
         env.insert(
-            "MELONDS_NSML_AI_OBSERVATION_V2_LOG".into(),
+            "MELONDS_NSML_AI_OBSERVATION_V3_LOG".into(),
             log_dir
-                .join("ai-observations-v2.jsonl")
+                .join("ai-observations-v3.jsonl")
                 .to_string_lossy()
                 .into_owned(),
         );
@@ -674,7 +688,7 @@ pub(crate) fn melon_env(
             "300".into(),
         );
         env.insert(
-            "MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER".into(),
+            "MELONDS_NSML_AI_OBSERVATION_V3_STAGE_FILTER".into(),
             "0".into(),
         );
     }

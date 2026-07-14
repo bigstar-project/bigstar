@@ -78,8 +78,8 @@ $hostLog = Join-Path $logRoot "host"
 $clientLog = Join-Path $logRoot "client"
 $hostAIPlayLog = Join-Path $hostLog "ai-playlog.jsonl"
 $clientAIPlayLog = Join-Path $clientLog "ai-playlog.jsonl"
-$hostAIObservationV2Log = Join-Path $hostLog "ai-observations-v2.jsonl"
-$clientAIObservationV2Log = Join-Path $clientLog "ai-observations-v2.jsonl"
+$hostAIObservationV3Log = Join-Path $hostLog "ai-observations-v3.jsonl"
+$clientAIObservationV3Log = Join-Path $clientLog "ai-observations-v3.jsonl"
 $sessionPath = Join-Path $logRoot "recording-session.json"
 $singleWindow = [bool]$SingleWindow
 if ($singleWindow) {
@@ -101,7 +101,7 @@ $manualArgs = @{
     InputScript = $InputScript
     LogDir = $LogDir
     MvlStage = 0
-    ClientAIObservationV2Log = $clientAIObservationV2Log
+    ClientAIObservationV3Log = $clientAIObservationV3Log
     AIPlayLogInterval = $AIPlayLogInterval
     AIPlayLogFlushInterval = $AIPlayLogFlushInterval
     AIPlayLogMaxObjects = $AIPlayLogMaxObjects
@@ -118,7 +118,7 @@ if ($singleWindow) {
     $manualArgs.ClientOnly = $true
     $manualArgs.InputDelayFrames = 0
 } else {
-    $manualArgs.HostAIObservationV2Log = $hostAIObservationV2Log
+    $manualArgs.HostAIObservationV3Log = $hostAIObservationV3Log
     if ($AuditPlayLog) {
         $manualArgs.HostAIPlayLog = $hostAIPlayLog
     }
@@ -207,13 +207,13 @@ $scenarioManifestArg = if ($Scenario -ne "") {
 }
 if ($singleWindow) {
     $recordingPostCommands = @(
-        "python scripts\nsmb_mvl_ai_build_compact_dataset.py `"$clientAIObservationV2Log`" `"$compactDatasetPlayer1Path`" --player 1 --require-player-found"
+        "python scripts\nsmb_mvl_ai_build_compact_dataset_v3.py `"$clientAIObservationV3Log`" `"$compactDatasetPlayer1Path`" --player 1 --require-player-found"
     )
     if ($AuditPlayLog) {
         $recordingPostCommands = @(
         "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$clientAIPlayLog`" `"$clientManifest`" --kind human --player 1 --label-source player --stage 0 --log-dir `"$clientLog`" --frames $Frames --client-input-script `"$InputScript`" --client-rom `"$ClientRom`"$matchSeedManifestArg$scenarioManifestArg",
         "python scripts\nsmb_mvl_ai_make_recordings_index.py `"$indexPath`" `"$clientManifest`" --stage 0",
-        "python scripts\nsmb_mvl_ai_build_compact_dataset.py `"$clientAIObservationV2Log`" `"$compactDatasetPlayer1Path`" --player 1 --require-player-found",
+        "python scripts\nsmb_mvl_ai_build_compact_dataset_v3.py `"$clientAIObservationV3Log`" `"$compactDatasetPlayer1Path`" --player 1 --require-player-found",
         "python scripts\nsmb_mvl_ai_audit_visual_state.py `"$clientAIPlayLog`" --output `"$visualStateAuditPath`"",
         "python scripts\nsmb_mvl_ai_audit_fireballs.py `"$clientAIPlayLog`" --output `"$fireballAuditPath`""
         )
@@ -232,14 +232,14 @@ if ($singleWindow) {
     $postCommands += $recordingPostCommands
 } else {
     $recordingPostCommands = @(
-        "python scripts\nsmb_mvl_ai_build_compact_dataset.py `"$clientAIObservationV2Log`" `"$compactDatasetPlayer1Path`" --player 1 --require-player-found"
+        "python scripts\nsmb_mvl_ai_build_compact_dataset_v3.py `"$clientAIObservationV3Log`" `"$compactDatasetPlayer1Path`" --player 1 --require-player-found"
     )
     if ($AuditPlayLog) {
         $recordingPostCommands = @(
         "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$hostAIPlayLog`" `"$hostManifest`" --kind human --player $hostPlayer --label-source player --stage 0 --log-dir `"$hostLog`" --frames $Frames --host-input-script `"$InputScript`" --client-input-script `"$InputScript`" --host-rom `"$HostRom`" --client-rom `"$ClientRom`"$matchSeedManifestArg$scenarioManifestArg$packetReplayArgs",
         "python scripts\nsmb_mvl_ai_create_recording_manifest.py `"$clientAIPlayLog`" `"$clientManifest`" --kind human --player $clientPlayer --label-source player --stage 0 --log-dir `"$clientLog`" --frames $Frames --host-input-script `"$InputScript`" --client-input-script `"$InputScript`" --host-rom `"$HostRom`" --client-rom `"$ClientRom`"$matchSeedManifestArg$scenarioManifestArg$packetReplayArgs",
         "python scripts\nsmb_mvl_ai_make_recordings_index.py `"$indexPath`" `"$hostManifest`" `"$clientManifest`" --stage 0",
-        "python scripts\nsmb_mvl_ai_build_compact_dataset.py `"$clientAIObservationV2Log`" `"$compactDatasetPlayer1Path`" --player 1 --require-player-found",
+        "python scripts\nsmb_mvl_ai_build_compact_dataset_v3.py `"$clientAIObservationV3Log`" `"$compactDatasetPlayer1Path`" --player 1 --require-player-found",
         "python scripts\nsmb_mvl_ai_audit_visual_state.py `"$hostAIPlayLog`" `"$clientAIPlayLog`" --output `"$visualStateAuditPath`"",
         "python scripts\nsmb_mvl_ai_audit_fireballs.py `"$hostAIPlayLog`" `"$clientAIPlayLog`" --output `"$fireballAuditPath`""
         )
@@ -284,8 +284,8 @@ $session = [ordered]@{
     logDir = $LogDir
     hostAIPlayLog = $(if ((-not $singleWindow) -and $AuditPlayLog) { $hostAIPlayLog } else { "" })
     clientAIPlayLog = $(if ($AuditPlayLog) { $clientAIPlayLog } else { "" })
-    hostAIObservationV2Log = $(if ($singleWindow) { "" } else { $hostAIObservationV2Log })
-    clientAIObservationV2Log = $clientAIObservationV2Log
+    hostAIObservationV3Log = $(if ($singleWindow) { "" } else { $hostAIObservationV3Log })
+    clientAIObservationV3Log = $clientAIObservationV3Log
     aiPlayLogInterval = $AIPlayLogInterval
     aiPlayLogFlushInterval = $AIPlayLogFlushInterval
     aiPlayLogMaxObjects = $AIPlayLogMaxObjects

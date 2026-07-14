@@ -85,8 +85,8 @@ $sessionData = Get-Content -LiteralPath $sessionPath -Raw -Encoding UTF8 | Conve
 
 $hostGzip = Compress-Jsonl -Path ([string]$sessionData.hostAIPlayLog)
 $clientGzip = Compress-Jsonl -Path ([string]$sessionData.clientAIPlayLog)
-$hostObservationV2Gzip = Compress-Jsonl -Path ([string]$sessionData.hostAIObservationV2Log)
-$clientObservationV2Gzip = Compress-Jsonl -Path ([string]$sessionData.clientAIObservationV2Log)
+$hostObservationV3Gzip = Compress-Jsonl -Path ([string]$sessionData.hostAIObservationV3Log)
+$clientObservationV3Gzip = Compress-Jsonl -Path ([string]$sessionData.clientAIObservationV3Log)
 
 $sessionDir = Split-Path -Parent $sessionPath
 $hostManifest = Join-Path (Join-Path $sessionDir "host") "recording.json"
@@ -101,14 +101,14 @@ if (-not [string]::IsNullOrWhiteSpace($hostGzip)) {
 if (-not [string]::IsNullOrWhiteSpace($clientGzip)) {
     $sessionData.clientAIPlayLog = $clientGzip
 }
-if (-not [string]::IsNullOrWhiteSpace($hostObservationV2Gzip)) {
-    $sessionData.hostAIObservationV2Log = $hostObservationV2Gzip
+if (-not [string]::IsNullOrWhiteSpace($hostObservationV3Gzip)) {
+    $sessionData.hostAIObservationV3Log = $hostObservationV3Gzip
 }
-if (-not [string]::IsNullOrWhiteSpace($clientObservationV2Gzip)) {
-    $sessionData.clientAIObservationV2Log = $clientObservationV2Gzip
+if (-not [string]::IsNullOrWhiteSpace($clientObservationV3Gzip)) {
+    $sessionData.clientAIObservationV3Log = $clientObservationV3Gzip
 }
 $sessionData | Add-Member -NotePropertyName gzipPlayLog -NotePropertyValue $true -Force
 ConvertTo-Json -InputObject $sessionData -Depth 32 | Set-Content -LiteralPath $sessionPath -Encoding UTF8
 
 Write-Host "Compressed AI playlogs: host=$(if ($hostGzip) { $hostGzip } else { 'off' }) client=$(if ($clientGzip) { $clientGzip } else { 'off' })"
-Write-Host "Compressed AI observation v2 logs: host=$(if ($hostObservationV2Gzip) { $hostObservationV2Gzip } else { 'off' }) client=$(if ($clientObservationV2Gzip) { $clientObservationV2Gzip } else { 'off' })"
+Write-Host "Compressed AI observation v3 logs: host=$(if ($hostObservationV3Gzip) { $hostObservationV3Gzip } else { 'off' }) client=$(if ($clientObservationV3Gzip) { $clientObservationV3Gzip } else { 'off' })"

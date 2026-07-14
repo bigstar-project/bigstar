@@ -82,6 +82,8 @@ def main() -> int:
     payload: dict[str, Any] = {
         "schema": "nsmb_mvl_torch_compact_policy_runtime_v1",
         "source_schema": metadata.get("schema", ""),
+        "input_schema": input_meta.get("inputSchema", ""),
+        "scalar_schema": input_meta.get("scalarSchema", ""),
         "label_schema": "nsmb_mvl_action_labels_v2",
         "head_names": head_names,
         "input_layout": {

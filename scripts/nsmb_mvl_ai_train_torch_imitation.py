@@ -287,6 +287,16 @@ def main() -> int:
         torch.backends.cudnn.benchmark = True
 
     raw = np.load(args.dataset, allow_pickle=False)
+    dataset_metadata = json.loads(str(raw["metadata"].item()))
+    dataset_schema = str(dataset_metadata.get("schema", ""))
+    input_schema = str(dataset_metadata.get("observationSchema", ""))
+    if not input_schema:
+        input_schema = {
+            "nsmb_mvl_compact_dataset_v2": "nsmb_mvl_compact_observation_v2",
+            "nsmb_mvl_compact_dataset_v3": "nsmb_mvl_compact_observation_v3",
+        }.get(dataset_schema, "")
+    if not input_schema:
+        raise ValueError(f"unsupported dataset schema for compact policy: {dataset_schema or '<missing>'}")
     actions = raw["actions"].astype(np.int64)
     train_indices, val_indices = split_indices(len(actions), args.validation_fraction, args.seed)
     stats = normalization_stats(raw, train_indices)
@@ -417,6 +427,8 @@ def main() -> int:
         "device": str(device),
         "torchVersion": torch.__version__,
         "input": {
+            "inputSchema": input_schema,
+            "scalarSchema": str(dataset_metadata.get("scalarSchema", "nsmb_mvl_scalar_features_v2")),
             "scalarDim": int(raw["scalar"].shape[1]),
             "terrainHeight": int(raw["terrain"].shape[1]),
             "terrainWidth": int(raw["terrain"].shape[2]),

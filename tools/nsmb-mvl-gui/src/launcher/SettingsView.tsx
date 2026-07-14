@@ -300,20 +300,7 @@ export function SettingsView({
               onCheckedChange={(details) =>
                 updateField('aiPlayLogEnabled', details.checked)
               }
-              className={css({
-                alignItems: 'center',
-                bg: 'app.panel',
-                borderColor: 'border',
-                borderRadius: 'l2',
-                borderWidth: '1px',
-                colorPalette: 'blue',
-                display: 'flex',
-                gap: '3',
-                justifyContent: 'space-between',
-                minH: '16',
-                p: '3',
-                w: 'full',
-              })}
+              className={settingsSwitchClassName}
             >
               <Switch.HiddenInput />
               <div
@@ -332,7 +319,7 @@ export function SettingsView({
                     textStyle: 'xs',
                   })}
                 >
-                  stage 0の対戦中だけcompact observation v2ログを保存します
+                  stage 0の対戦中だけcompact observation v3ログを保存します
                 </div>
               </div>
               <Switch.Control />

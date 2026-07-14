@@ -63,6 +63,19 @@ melonDS::u32 AIVisualPowerupKindCandidate(
     return 0;
 }
 
+// Stable, backfillable body-size category derived from the visual form.
+// 0=mini, 1=small, 2=large (super/fire/shell), 3=mega.
+melonDS::u32 AIPlayerBodySizeClass(melonDS::u32 visualPowerupKind)
+{
+    if (visualPowerupKind == 3)
+        return 0;
+    if (visualPowerupKind == 5)
+        return 3;
+    if (visualPowerupKind == 1 || visualPowerupKind == 2 || visualPowerupKind == 4)
+        return 2;
+    return 1;
+}
+
 melonDS::u32 AIVisualPowerupSourceMask(
     melonDS::u32 powerup,
     melonDS::u32 inventoryPowerup,
@@ -1011,7 +1024,64 @@ void WriteAIObservationV2TileSummaryJson(
         << "}";
 }
 
-void WriteAIObservationV2PlayerJson(std::ostream& out, int index, const GameStateSample& sample)
+void WriteAIPlayerHitboxJson(std::ostream& out, const PlayerHitboxSample& hitbox)
+{
+    out << "{\"found\":" << hitbox.Found;
+    if (!hitbox.Found)
+    {
+        out << "}";
+        return;
+    }
+    const std::int64_t centerX = SignedU32(hitbox.CenterOffsetX);
+    const std::int64_t centerY = SignedU32(hitbox.CenterOffsetY);
+    const std::int64_t halfWidth = SignedU32(hitbox.HalfWidth);
+    const std::int64_t halfHeight = SignedU32(hitbox.HalfHeight);
+    out << ",\"fixedPointShift\":12"
+        << ",\"centerOffsetX\":" << centerX
+        << ",\"centerOffsetY\":" << centerY
+        << ",\"halfWidth\":" << halfWidth
+        << ",\"halfHeight\":" << halfHeight
+        << ",\"width\":" << (halfWidth * 2)
+        << ",\"height\":" << (halfHeight * 2)
+        << ",\"minOffsetX\":" << (centerX - halfWidth)
+        << ",\"maxOffsetX\":" << (centerX + halfWidth)
+        << ",\"minOffsetY\":" << (centerY - halfHeight)
+        << ",\"maxOffsetY\":" << (centerY + halfHeight)
+        << "}";
+}
+
+void WriteAICollisionSensorJson(std::ostream& out, const PlayerCollisionMgrSample::Sensor& sensor)
+{
+    out << "{\"found\":" << sensor.Found;
+    if (!sensor.Found)
+    {
+        out << "}";
+        return;
+    }
+    out << ",\"base\":";
+    WriteJsonHex(out, sensor.Base);
+    out << ",\"type\":" << sensor.Type
+        << ",\"fixedPointShift\":12"
+        << ",\"value1\":" << SignedU32(sensor.Value1)
+        << ",\"value2\":" << SignedU32(sensor.Value2)
+        << ",\"value3\":" << SignedU32(sensor.Value3)
+        << "}";
+}
+
+void WriteAICollisionSensorsJson(std::ostream& out, const PlayerCollisionMgrSample& collisionMgr)
+{
+    out << "{\"bottom\":";
+    WriteAICollisionSensorJson(out, collisionMgr.BottomSensor);
+    out << ",\"top\":";
+    WriteAICollisionSensorJson(out, collisionMgr.TopSensor);
+    out << ",\"side\":";
+    WriteAICollisionSensorJson(out, collisionMgr.SideSensor);
+    out << ",\"line\":";
+    WriteAICollisionSensorJson(out, collisionMgr.LineSensor);
+    out << "}";
+}
+
+void WriteAIObservationV2PlayerJson(std::ostream& out, int index, const GameStateSample& sample, bool exactHitboxSchema)
 {
     const bool p0 = index == 0;
     auto v = [p0](melonDS::u32 a, melonDS::u32 b) { return p0 ? a : b; };
@@ -1036,6 +1106,9 @@ void WriteAIObservationV2PlayerJson(std::ostream& out, int index, const GameStat
     const bool starInvincible = AIStarInvincibleCandidate(inventoryPowerup, actorPowerupState, actorPowerupFormState, shellState);
     const bool damageInvulnerable = damageGuardTimer != 0 || damageCooldown != 0 || damageGuardFlag != 0 || damagePhysicsGuard;
     const AIPlayerTileProbeSample& tileProbe = p0 ? sample.PlayerActor0TileProbe : sample.PlayerActor1TileProbe;
+    const PlayerHitboxSample& hitbox = p0 ? sample.PlayerActor0Hitbox : sample.PlayerActor1Hitbox;
+    const PlayerCollisionMgrSample& collisionMgr =
+        p0 ? sample.PlayerActor0CollisionMgr : sample.PlayerActor1CollisionMgr;
     const bool contactGround = AIPlayerContactGround(collision);
     const bool contactWallLeft = (collision & (0x00000008u | 0x00000400u | 0x20000000u)) != 0;
     const bool contactWallRight = (collision & (0x00000010u | 0x00000800u | 0x40000000u)) != 0;
@@ -1058,6 +1131,15 @@ void WriteAIObservationV2PlayerJson(std::ostream& out, int index, const GameStat
     WriteAIObservationV2ScreenJson(out, sample, posX, posY);
     out << ",\"contact\":";
     WriteAIContactJson(out, collision, environment);
+    if (exactHitboxSchema)
+    {
+        out << ",\"bodySize\":{\"class\":" << AIPlayerBodySizeClass(visualPowerup)
+            << ",\"source\":\"visualPowerupKind\"}";
+        out << ",\"hitbox\":";
+        WriteAIPlayerHitboxJson(out, hitbox);
+        out << ",\"collisionSensors\":";
+        WriteAICollisionSensorsJson(out, collisionMgr);
+    }
     out << ",\"visual\":{\"powerupKind\":" << visualPowerup
         << ",\"sourceMask\":" << visualSource
         << ",\"fire\":" << (visualPowerup == 2 ? 1 : 0)
@@ -1315,7 +1397,9 @@ void WriteAIPlayerCollisionMgrJson(std::ostream& out, const PlayerCollisionMgrSa
         << ",\"tileByteAB\":" << static_cast<int>(static_cast<std::int8_t>(collisionMgr.TileByteAB))
         << ",\"modifierState\":" << collisionMgr.ModifierState
         << ",\"unknownB1\":" << static_cast<int>(static_cast<std::int8_t>(collisionMgr.UnknownB1))
-        << "}";
+        << ",\"sensors\":";
+    WriteAICollisionSensorsJson(out, collisionMgr);
+    out << "}";
 }
 
 void WriteAIPlayerTileDamageJson(std::ostream& out, melonDS::u32 flags, melonDS::u32 type)
@@ -1470,6 +1554,8 @@ void WriteAIPlayerJson(std::ostream& out, int index, const GameStateSample& samp
     WriteAIContactJson(out, collisionFlag, environmentFlag);
     out << ",\"collisionMgr\":";
     WriteAIPlayerCollisionMgrJson(out, collisionMgr);
+    out << ",\"hitbox\":";
+    WriteAIPlayerHitboxJson(out, p0 ? sample.PlayerActor0Hitbox : sample.PlayerActor1Hitbox);
     out << ",\"tileProbe\":";
     WriteAIPlayerTileProbeJson(
         out,
@@ -2740,7 +2826,8 @@ bool BuildRuntimeImitationFeatures(
     return filled > 0;
 }
 
-constexpr int kAICompactRuntimeScalarCount = 35;
+constexpr int kAICompactRuntimeLegacyScalarCount = 35;
+constexpr int kAICompactRuntimeScalarCount = 47;
 constexpr int kAICompactRuntimeTerrainChannels = 16;
 constexpr int kAICompactRuntimeEntityFeatures = 14;
 
@@ -2748,7 +2835,8 @@ void AppendAICompactRuntimeScalars(
     std::vector<double>& features,
     const GameStateSample& sample,
     const GameStateObjectScanCache& objectScanCache,
-    int player)
+    int player,
+    int scalarCount)
 {
     const bool p0 = player == 0;
     const int opponent = player ^ 1;
@@ -2771,6 +2859,8 @@ void AppendAICompactRuntimeScalars(
         opponent == 0 ? sample.PlayerActor0PowerupState : sample.PlayerActor1PowerupState,
         opponent == 0 ? sample.PlayerActor0PowerupFormState : sample.PlayerActor1PowerupFormState,
         opponent == 0 ? sample.PlayerActor0ShellState : sample.PlayerActor1ShellState);
+    const PlayerHitboxSample& selfHitbox = p0 ? sample.PlayerActor0Hitbox : sample.PlayerActor1Hitbox;
+    const PlayerHitboxSample& opponentHitbox = p0 ? sample.PlayerActor1Hitbox : sample.PlayerActor0Hitbox;
     const AIPlayerTileProbeSample& tileProbe = p0 ? sample.PlayerActor0TileProbe : sample.PlayerActor1TileProbe;
     const melonDS::u32 collision = v(sample.PlayerActor0CollisionFlag, sample.PlayerActor1CollisionFlag);
     const bool contactGround = AIPlayerContactGround(collision);
@@ -2801,7 +2891,7 @@ void AppendAICompactRuntimeScalars(
     }
     const bool selfStarInvincible = AIStarInvincibleCandidate(selfInventoryPowerup, selfActorPowerupState, selfActorPowerupFormState, selfShellState);
 
-    const double values[kAICompactRuntimeScalarCount] = {
+    const double legacyValues[kAICompactRuntimeLegacyScalarCount] = {
         static_cast<double>(sample.StageID),
         static_cast<double>(sample.StageGroup),
         static_cast<double>(SignedU32(selfX)),
@@ -2838,7 +2928,34 @@ void AppendAICompactRuntimeScalars(
         static_cast<double>(terrainSummary.EffectiveHoleLeft),
         static_cast<double>(terrainSummary.EffectiveHoleRight),
     };
-    features.insert(features.end(), std::begin(values), std::end(values));
+    if (scalarCount == kAICompactRuntimeLegacyScalarCount)
+    {
+        features.insert(features.end(), std::begin(legacyValues), std::end(legacyValues));
+        return;
+    }
+
+    // Keep the serialized scalar order: size follows the corresponding powerup kind.
+    features.insert(features.end(), std::begin(legacyValues), std::begin(legacyValues) + 7);
+    features.push_back(static_cast<double>(AIPlayerBodySizeClass(selfVisualPowerup)));
+    if (scalarCount == kAICompactRuntimeScalarCount)
+    {
+        features.push_back(static_cast<double>(selfHitbox.Found));
+        features.push_back(static_cast<double>(SignedU32(selfHitbox.CenterOffsetX)));
+        features.push_back(static_cast<double>(SignedU32(selfHitbox.CenterOffsetY)));
+        features.push_back(static_cast<double>(SignedU32(selfHitbox.HalfWidth)));
+        features.push_back(static_cast<double>(SignedU32(selfHitbox.HalfHeight)));
+    }
+    features.insert(features.end(), std::begin(legacyValues) + 7, std::begin(legacyValues) + 14);
+    features.push_back(static_cast<double>(AIPlayerBodySizeClass(opponentVisualPowerup)));
+    if (scalarCount == kAICompactRuntimeScalarCount)
+    {
+        features.push_back(static_cast<double>(opponentHitbox.Found));
+        features.push_back(static_cast<double>(SignedU32(opponentHitbox.CenterOffsetX)));
+        features.push_back(static_cast<double>(SignedU32(opponentHitbox.CenterOffsetY)));
+        features.push_back(static_cast<double>(SignedU32(opponentHitbox.HalfWidth)));
+        features.push_back(static_cast<double>(SignedU32(opponentHitbox.HalfHeight)));
+    }
+    features.insert(features.end(), std::begin(legacyValues) + 14, std::end(legacyValues));
 }
 
 void AppendAICompactRuntimeTerrain(std::vector<double>& features, const AIPlayerTileProbeSample& probe)
@@ -2961,6 +3078,7 @@ void AppendAICompactRuntimeEntities(
 
 bool BuildCompactRuntimeImitationFeaturesForCount(
     std::size_t featureCount,
+    const std::string& inputSchema,
     const GameStateSample& sample,
     const GameStateObjectScanCache& objectScanCache,
     int instanceID,
@@ -2968,14 +3086,22 @@ bool BuildCompactRuntimeImitationFeaturesForCount(
     std::vector<double>& features)
 {
     const int terrainFeatures = kAITileGridHeight * kAITileGridWidth * kAICompactRuntimeTerrainChannels;
-    const int baseFeatures = kAICompactRuntimeScalarCount + terrainFeatures * 2;
     const int total = static_cast<int>(featureCount);
-    if (total < baseFeatures || (total - baseFeatures) % kAICompactRuntimeEntityFeatures != 0)
+    const int legacyBaseFeatures = kAICompactRuntimeLegacyScalarCount + terrainFeatures * 2;
+    const int baseFeatures = kAICompactRuntimeScalarCount + terrainFeatures * 2;
+    const int selectedScalarCount = inputSchema == "nsmb_mvl_compact_observation_v3"
+        ? kAICompactRuntimeScalarCount
+        : (inputSchema == "nsmb_mvl_compact_observation_v2" ? kAICompactRuntimeLegacyScalarCount : 0);
+    const int selectedBaseFeatures = selectedScalarCount == kAICompactRuntimeScalarCount
+        ? baseFeatures
+        : legacyBaseFeatures;
+    if (selectedScalarCount == 0 || total < selectedBaseFeatures ||
+        (total - selectedBaseFeatures) % kAICompactRuntimeEntityFeatures != 0)
         return false;
-    const int maxEntities = (total - baseFeatures) / kAICompactRuntimeEntityFeatures;
+    const int maxEntities = (total - selectedBaseFeatures) / kAICompactRuntimeEntityFeatures;
     features.clear();
     features.reserve(featureCount);
-    AppendAICompactRuntimeScalars(features, sample, objectScanCache, player);
+    AppendAICompactRuntimeScalars(features, sample, objectScanCache, player, selectedScalarCount);
     AppendAICompactRuntimeTerrain(features, player == 0 ? sample.PlayerActor0TileProbe : sample.PlayerActor1TileProbe);
     AppendAICompactRuntimeTerrain(features, player == 0 ? sample.PlayerActor1TileProbe : sample.PlayerActor0TileProbe);
     AppendAICompactRuntimeEntities(features, sample, objectScanCache, instanceID, player, maxEntities);
@@ -2992,6 +3118,7 @@ bool BuildCompactRuntimeImitationFeatures(
 {
     return BuildCompactRuntimeImitationFeaturesForCount(
         model.FeatureCount(),
+        model.InputSchema,
         sample,
         objectScanCache,
         instanceID,
@@ -3009,6 +3136,7 @@ bool BuildCompactRuntimeImitationFeatures(
 {
     return BuildCompactRuntimeImitationFeaturesForCount(
         model.FeatureCount(),
+        model.InputSchema,
         sample,
         objectScanCache,
         instanceID,
@@ -3519,7 +3647,8 @@ void WriteAIObservationV2ScalarFeaturesJson(
     std::ostream& out,
     const GameStateSample& sample,
     const GameStateObjectScanCache& objectScanCache,
-    int player)
+    int player,
+    bool exactHitboxSchema)
 {
     const bool p0 = player == 0;
     const int opponent = player ^ 1;
@@ -3541,6 +3670,8 @@ void WriteAIObservationV2ScalarFeaturesJson(
         opponent == 0 ? sample.PlayerActor0PowerupState : sample.PlayerActor1PowerupState,
         opponent == 0 ? sample.PlayerActor0PowerupFormState : sample.PlayerActor1PowerupFormState,
         opponent == 0 ? sample.PlayerActor0ShellState : sample.PlayerActor1ShellState);
+    const PlayerHitboxSample& selfHitbox = p0 ? sample.PlayerActor0Hitbox : sample.PlayerActor1Hitbox;
+    const PlayerHitboxSample& opponentHitbox = p0 ? sample.PlayerActor1Hitbox : sample.PlayerActor0Hitbox;
     const AIPlayerTileProbeSample& tileProbe = p0 ? sample.PlayerActor0TileProbe : sample.PlayerActor1TileProbe;
     const melonDS::u32 collision = v(sample.PlayerActor0CollisionFlag, sample.PlayerActor1CollisionFlag);
     const bool contactGround = AIPlayerContactGround(collision);
@@ -3576,15 +3707,33 @@ void WriteAIObservationV2ScalarFeaturesJson(
         << ",\"self_y\":" << SignedU32(selfY)
         << ",\"self_vx\":" << SignedU32(selfVelX)
         << ",\"self_vy\":" << SignedU32(selfVelY)
-        << ",\"self_powerup_kind\":" << selfVisualPowerup
-        << ",\"self_invincible\":" << (selfStarInvincible ? 1 : 0)
+        << ",\"self_powerup_kind\":" << selfVisualPowerup;
+    if (exactHitboxSchema)
+    {
+        out << ",\"self_body_size_class\":" << AIPlayerBodySizeClass(selfVisualPowerup)
+            << ",\"self_hitbox_found\":" << selfHitbox.Found
+            << ",\"self_hitbox_center_offset_x\":" << SignedU32(selfHitbox.CenterOffsetX)
+            << ",\"self_hitbox_center_offset_y\":" << SignedU32(selfHitbox.CenterOffsetY)
+            << ",\"self_hitbox_half_width\":" << SignedU32(selfHitbox.HalfWidth)
+            << ",\"self_hitbox_half_height\":" << SignedU32(selfHitbox.HalfHeight);
+    }
+    out << ",\"self_invincible\":" << (selfStarInvincible ? 1 : 0)
         << ",\"self_star_invincible\":" << (selfStarInvincible ? 1 : 0)
         << ",\"self_battle_stars\":" << v(sample.Player0BattleStars, sample.Player1BattleStars)
         << ",\"self_coins\":" << v(sample.Player0Coins, sample.Player1Coins)
         << ",\"opponent_dx\":" << AIWrappedDeltaX(SignedU32(ov(sample.PlayerActor0PosX, sample.PlayerActor1PosX)), SignedU32(selfX))
         << ",\"opponent_dy\":" << (SignedU32(ov(sample.PlayerActor0PosY, sample.PlayerActor1PosY)) - SignedU32(selfY))
-        << ",\"opponent_powerup_kind\":" << opponentVisualPowerup
-        << ",\"opponent_battle_stars\":" << ov(sample.Player0BattleStars, sample.Player1BattleStars)
+        << ",\"opponent_powerup_kind\":" << opponentVisualPowerup;
+    if (exactHitboxSchema)
+    {
+        out << ",\"opponent_body_size_class\":" << AIPlayerBodySizeClass(opponentVisualPowerup)
+            << ",\"opponent_hitbox_found\":" << opponentHitbox.Found
+            << ",\"opponent_hitbox_center_offset_x\":" << SignedU32(opponentHitbox.CenterOffsetX)
+            << ",\"opponent_hitbox_center_offset_y\":" << SignedU32(opponentHitbox.CenterOffsetY)
+            << ",\"opponent_hitbox_half_width\":" << SignedU32(opponentHitbox.HalfWidth)
+            << ",\"opponent_hitbox_half_height\":" << SignedU32(opponentHitbox.HalfHeight);
+    }
+    out << ",\"opponent_battle_stars\":" << ov(sample.Player0BattleStars, sample.Player1BattleStars)
         << ",\"target_found\":" << sample.VsStarActorFound
         << ",\"target_dx\":" << AIWrappedDeltaX(SignedU32(sample.VsStarActorPosX), SignedU32(selfX))
         << ",\"target_dy\":" << (SignedU32(sample.VsStarActorPosY) - SignedU32(selfY))
@@ -3667,9 +3816,13 @@ void WriteAIObservationV2FireballEntityJson(std::ostream& out, int instanceID, c
         << ",\"flags\":0}";
 }
 
-void WriteAIObservationV2Record(std::ostream& out, int instanceID, melonDS::u32 frame, const GameStateSample& sample, const GameStateObjectScanCache& objectScanCache, int localPlayer)
+void WriteAIObservationV2Record(std::ostream& out, int instanceID, melonDS::u32 frame, const GameStateSample& sample, const GameStateObjectScanCache& objectScanCache, int localPlayer, bool exactHitboxSchema)
 {
-    out << "{\"schema\":\"nsmb_mvl_compact_observation_v2\""
+    // A checkpoint restore can run while a frame is being finalized. Build the
+    // complete JSONL record before touching the file so it cannot leave a
+    // structurally partial line after a stage transition.
+    std::ostringstream record;
+    record << "{\"schema\":\"nsmb_mvl_compact_observation_v" << (exactHitboxSchema ? 3 : 2) << "\""
         << ",\"sourceSchema\":\"nsmb_mvl_ai_play_log_v1_direct\""
         << ",\"recordingIndex\":0"
         << ",\"recordingFrameIndex\":" << frame
@@ -3683,18 +3836,18 @@ void WriteAIObservationV2Record(std::ostream& out, int instanceID, melonDS::u32 
         << ",\"localPlayerIdMemory\":" << sample.LocalPlayerID
         << ",\"vsCoinCount\":" << sample.VsCoinCount
         << "},";
-    WriteAIObservationV2LabelsJson(out, sample);
-    out << ",\"players\":[";
-    WriteAIObservationV2PlayerJson(out, 0, sample);
-    out << ",";
-    WriteAIObservationV2PlayerJson(out, 1, sample);
-    out << "],\"scalarFeaturesByPlayer\":{\"player0\":{";
-    WriteAIObservationV2ScalarFeaturesJson(out, sample, objectScanCache, 0);
-    out << "},\"player1\":{";
-    WriteAIObservationV2ScalarFeaturesJson(out, sample, objectScanCache, 1);
-    out << "}},\"targets\":{\"bigStarActor\":{\"found\":" << sample.VsStarActorFound << ",";
-    WriteAIVec3Json(out, "pos", sample.VsStarActorPosX, sample.VsStarActorPosY, sample.VsStarActorPosZ);
-    out << "}},\"camera\":{\"found\":" << sample.StageCameraFound
+    WriteAIObservationV2LabelsJson(record, sample);
+    record << ",\"players\":[";
+    WriteAIObservationV2PlayerJson(record, 0, sample, exactHitboxSchema);
+    record << ",";
+    WriteAIObservationV2PlayerJson(record, 1, sample, exactHitboxSchema);
+    record << "],\"scalarFeaturesByPlayer\":{\"player0\":{";
+    WriteAIObservationV2ScalarFeaturesJson(record, sample, objectScanCache, 0, exactHitboxSchema);
+    record << "},\"player1\":{";
+    WriteAIObservationV2ScalarFeaturesJson(record, sample, objectScanCache, 1, exactHitboxSchema);
+    record << "}},\"targets\":{\"bigStarActor\":{\"found\":" << sample.VsStarActorFound << ",";
+    WriteAIVec3Json(record, "pos", sample.VsStarActorPosX, sample.VsStarActorPosY, sample.VsStarActorPosZ);
+    record << "}},\"camera\":{\"found\":" << sample.StageCameraFound
         << ",\"globalX0\":" << SignedU32(sample.StageCameraGlobalX0)
         << ",\"globalX1\":" << SignedU32(sample.StageCameraGlobalX1)
         << ",\"globalY0\":" << SignedU32(sample.StageCameraGlobalY0)
@@ -3716,9 +3869,9 @@ void WriteAIObservationV2Record(std::ostream& out, int instanceID, melonDS::u32 
         if (writtenObjects >= G.AIPlayLogMaxObjects)
             break;
         if (!firstEntity)
-            out << ",";
+            record << ",";
         firstEntity = false;
-        WriteAIObservationV2ObjectEntityJson(out, entry, sample);
+        WriteAIObservationV2ObjectEntityJson(record, entry, sample);
         writtenObjects++;
     }
     for (int slot = 0; slot < kAIFireballSlotCount; slot++)
@@ -3726,18 +3879,20 @@ void WriteAIObservationV2Record(std::ostream& out, int instanceID, melonDS::u32 
         if (sample.FireballSlotActive[slot] == 0)
             continue;
         if (!firstEntity)
-            out << ",";
+            record << ",";
         firstEntity = false;
-        WriteAIObservationV2FireballEntityJson(out, instanceID, sample, slot);
+        WriteAIObservationV2FireballEntityJson(record, instanceID, sample, slot);
     }
-    out << "]}\n";
+    record << "]}\n";
+    out << record.str();
 }
 
 void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     const bool writeV1 = !G.AIPlayLogPath.empty() && G.AIPlayLog;
     const bool writeV2 = !G.AIObservationV2Path.empty() && G.AIObservationV2Log;
-    if ((!writeV1 && !writeV2) || !nds || !nds->MainRAM)
+    const bool writeV3 = !G.AIObservationV3Path.empty() && G.AIObservationV3Log;
+    if ((!writeV1 && !writeV2 && !writeV3) || !nds || !nds->MainRAM)
         return;
     if (frame < G.AIPlayLogStartFrame)
         return;
@@ -3757,10 +3912,12 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     const bool v2StageAllowed = G.AIObservationV2StageFilter < 0 ||
         (sample.StageGroup == 9 && sample.StageID == static_cast<melonDS::u32>(G.AIObservationV2StageFilter));
+    const bool v3StageAllowed = G.AIObservationV3StageFilter < 0 ||
+        (sample.StageGroup == 9 && sample.StageID == static_cast<melonDS::u32>(G.AIObservationV3StageFilter));
 
     if (writeV2 && v2StageAllowed)
     {
-        WriteAIObservationV2Record(G.AIObservationV2Log, instanceID, frame, sample, objectScanCache, localPlayer);
+        WriteAIObservationV2Record(G.AIObservationV2Log, instanceID, frame, sample, objectScanCache, localPlayer, false);
         if (G.AIPlayLogFlushInterval > 0)
         {
             G.AIObservationV2LinesSinceFlush++;
@@ -3768,6 +3925,20 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             {
                 G.AIObservationV2Log.flush();
                 G.AIObservationV2LinesSinceFlush = 0;
+            }
+        }
+    }
+
+    if (writeV3 && v3StageAllowed)
+    {
+        WriteAIObservationV2Record(G.AIObservationV3Log, instanceID, frame, sample, objectScanCache, localPlayer, true);
+        if (G.AIPlayLogFlushInterval > 0)
+        {
+            G.AIObservationV3LinesSinceFlush++;
+            if (G.AIObservationV3LinesSinceFlush >= G.AIPlayLogFlushInterval)
+            {
+                G.AIObservationV3Log.flush();
+                G.AIObservationV3LinesSinceFlush = 0;
             }
         }
     }

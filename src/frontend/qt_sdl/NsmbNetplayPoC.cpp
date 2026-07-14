@@ -173,6 +173,14 @@ constexpr melonDS::u32 kPlayerBaseCollisionFlagOffset = 0x788;
 constexpr melonDS::u32 kPlayerBaseEnvironmentFlagOffset = 0x790;
 constexpr melonDS::u32 kPlayerBaseDamageCooldownOffset = 0x79C;
 constexpr melonDS::u32 kPlayerStageActorCollisionMgrOffset = 0x1D0;
+constexpr melonDS::u32 kPlayerHitboxCenterOffsetX = 0x960;
+constexpr melonDS::u32 kPlayerHitboxCenterOffsetY = 0x964;
+constexpr melonDS::u32 kStageActorHitboxHalfWidthOffset = 0x13C;
+constexpr melonDS::u32 kStageActorHitboxHalfHeightOffset = 0x140;
+constexpr melonDS::u32 kCollisionMgrBottomSensorPtrOffset = 0x08;
+constexpr melonDS::u32 kCollisionMgrTopSensorPtrOffset = 0x0C;
+constexpr melonDS::u32 kCollisionMgrSideSensorPtrOffset = 0x10;
+constexpr melonDS::u32 kCollisionMgrLineSensorPtrOffset = 0x14;
 constexpr melonDS::u32 kCollisionMgrDeltaXOffset = 0x74;
 constexpr melonDS::u32 kCollisionMgrDeltaYOffset = 0x78;
 constexpr melonDS::u32 kCollisionMgrCollisionResultOffset = 0x7C;
@@ -804,6 +812,16 @@ static_assert(sizeof(WireWorldEffectState) == 760);
 
 struct PlayerCollisionMgrSample
 {
+    struct Sensor
+    {
+        melonDS::u32 Found = 0;
+        melonDS::u32 Base = 0;
+        melonDS::u32 Type = 0;
+        melonDS::u32 Value1 = 0;
+        melonDS::u32 Value2 = 0;
+        melonDS::u32 Value3 = 0;
+    };
+
     melonDS::u32 Found = 0;
     melonDS::u32 Base = 0;
     melonDS::u32 DeltaX = 0;
@@ -826,6 +844,19 @@ struct PlayerCollisionMgrSample
     melonDS::u32 TileByteAB = 0;
     melonDS::u32 ModifierState = 0;
     melonDS::u32 UnknownB1 = 0;
+    Sensor BottomSensor;
+    Sensor TopSensor;
+    Sensor SideSensor;
+    Sensor LineSensor;
+};
+
+struct PlayerHitboxSample
+{
+    melonDS::u32 Found = 0;
+    melonDS::u32 CenterOffsetX = 0;
+    melonDS::u32 CenterOffsetY = 0;
+    melonDS::u32 HalfWidth = 0;
+    melonDS::u32 HalfHeight = 0;
 };
 
 struct AITileProbeSample
@@ -1030,6 +1061,7 @@ struct GameStateSample
     melonDS::u32 PlayerActor0TransitFunc = 0;
     melonDS::u32 PlayerActor0TransitArg = 0;
     PlayerCollisionMgrSample PlayerActor0CollisionMgr;
+    PlayerHitboxSample PlayerActor0Hitbox;
     AIPlayerTileProbeSample PlayerActor0TileProbe;
     melonDS::u32 PlayerActor0TileDamageFlags = 0;
     melonDS::u32 PlayerActor0TileDamageType = 0;
@@ -1089,6 +1121,7 @@ struct GameStateSample
     melonDS::u32 PlayerActor1TransitFunc = 0;
     melonDS::u32 PlayerActor1TransitArg = 0;
     PlayerCollisionMgrSample PlayerActor1CollisionMgr;
+    PlayerHitboxSample PlayerActor1Hitbox;
     AIPlayerTileProbeSample PlayerActor1TileProbe;
     melonDS::u32 PlayerActor1TileDamageFlags = 0;
     melonDS::u32 PlayerActor1TileDamageType = 0;
@@ -1901,11 +1934,13 @@ struct State
     std::string DiagnosticEventsPath;
     std::string AIPlayLogPath;
     std::string AIObservationV2Path;
+    std::string AIObservationV3Path;
     std::ofstream HashLog;
     std::ofstream GameStateTrace;
     std::ofstream DiagnosticEvents;
     std::ofstream AIPlayLog;
     std::ofstream AIObservationV2Log;
+    std::ofstream AIObservationV3Log;
     bool DiagnosticEventsEnabled = false;
     int DiagnosticRingFrames = 360;
     melonDS::u32 DiagnosticPostTriggerUntilFrame[16] {};
@@ -1930,8 +1965,10 @@ struct State
     int AIPlayLogFlushInterval = 60;
     int AIPlayLogLinesSinceFlush = 0;
     int AIObservationV2LinesSinceFlush = 0;
+    int AIObservationV3LinesSinceFlush = 0;
     int AIPlayLogMaxObjects = 32;
     int AIObservationV2StageFilter = -1;
+    int AIObservationV3StageFilter = -1;
     bool AIPlayLogGameplayOnly = true;
     int MemPatchInstance = -1;
     melonDS::u32 MemPatchFrame = 0;
@@ -15864,6 +15901,38 @@ PlayerCollisionMgrSample ReadPlayerCollisionMgrSample(melonDS::NDS* nds, const O
     sample.TileByteAB = nds->ARM9Read8(base + kCollisionMgrTileByteABOffset);
     sample.ModifierState = nds->ARM9Read8(base + kCollisionMgrModifierStateOffset);
     sample.UnknownB1 = nds->ARM9Read8(base + kCollisionMgrUnknownB1Offset);
+    auto readSensor = [nds](melonDS::u32 sensorBase) {
+        PlayerCollisionMgrSample::Sensor sensor;
+        if (!IsValidMainRAMRange(nds, sensorBase, 0x10))
+            return sensor;
+        sensor.Found = 1;
+        sensor.Base = sensorBase;
+        sensor.Type = nds->ARM9Read32(sensorBase);
+        sensor.Value1 = nds->ARM9Read32(sensorBase + 4);
+        sensor.Value2 = nds->ARM9Read32(sensorBase + 8);
+        sensor.Value3 = nds->ARM9Read32(sensorBase + 12);
+        return sensor;
+    };
+    sample.BottomSensor = readSensor(nds->ARM9Read32(base + kCollisionMgrBottomSensorPtrOffset));
+    sample.TopSensor = readSensor(nds->ARM9Read32(base + kCollisionMgrTopSensorPtrOffset));
+    sample.SideSensor = readSensor(nds->ARM9Read32(base + kCollisionMgrSideSensorPtrOffset));
+    sample.LineSensor = readSensor(nds->ARM9Read32(base + kCollisionMgrLineSensorPtrOffset));
+    return sample;
+}
+
+PlayerHitboxSample ReadPlayerHitboxSample(melonDS::NDS* nds, const ObjectScanSample& actor)
+{
+    PlayerHitboxSample sample;
+    if (!nds || !actor.Found ||
+        !IsValidMainRAMRange(nds, actor.Base + kPlayerHitboxCenterOffsetX, 8) ||
+        !IsValidMainRAMRange(nds, actor.Base + kStageActorHitboxHalfWidthOffset, 8))
+        return sample;
+
+    sample.Found = 1;
+    sample.CenterOffsetX = nds->ARM9Read32(actor.Base + kPlayerHitboxCenterOffsetX);
+    sample.CenterOffsetY = nds->ARM9Read32(actor.Base + kPlayerHitboxCenterOffsetY);
+    sample.HalfWidth = nds->ARM9Read32(actor.Base + kStageActorHitboxHalfWidthOffset);
+    sample.HalfHeight = nds->ARM9Read32(actor.Base + kStageActorHitboxHalfHeightOffset);
     return sample;
 }
 
@@ -16169,6 +16238,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.PlayerActor0VelY = players.Actor0.VelY;
     sample.PlayerActor0VelZ = players.Actor0.VelZ;
     sample.PlayerActor0CollisionMgr = ReadPlayerCollisionMgrSample(nds, players.Actor0);
+    sample.PlayerActor0Hitbox = ReadPlayerHitboxSample(nds, players.Actor0);
     sample.PlayerActor0TileProbe = ReadAIPlayerTileProbeSample(nds, players.Actor0);
     if (players.Actor0.Found && IsValidMainRAMRange(nds, players.Actor0.Base + kPlayerBaseTileDamageTypeOffset, 1))
     {
@@ -16191,6 +16261,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.PlayerActor1VelY = players.Actor1.VelY;
     sample.PlayerActor1VelZ = players.Actor1.VelZ;
     sample.PlayerActor1CollisionMgr = ReadPlayerCollisionMgrSample(nds, players.Actor1);
+    sample.PlayerActor1Hitbox = ReadPlayerHitboxSample(nds, players.Actor1);
     sample.PlayerActor1TileProbe = ReadAIPlayerTileProbeSample(nds, players.Actor1);
     if (players.Actor1.Found && IsValidMainRAMRange(nds, players.Actor1.Base + kPlayerBaseTileDamageTypeOffset, 1))
     {
@@ -18706,6 +18777,8 @@ void InitFromEnvironment()
     if (aiPlayLog && aiPlayLog[0]) G.AIPlayLogPath = aiPlayLog;
     const char* aiObservationV2Log = std::getenv("MELONDS_NSML_AI_OBSERVATION_V2_LOG");
     if (aiObservationV2Log && aiObservationV2Log[0]) G.AIObservationV2Path = aiObservationV2Log;
+    const char* aiObservationV3Log = std::getenv("MELONDS_NSML_AI_OBSERVATION_V3_LOG");
+    if (aiObservationV3Log && aiObservationV3Log[0]) G.AIObservationV3Path = aiObservationV3Log;
     G.AIPlayLogInterval = std::max(1, EnvInt("MELONDS_NSML_AI_PLAY_LOG_INTERVAL", 1));
     G.AIPlayLogFlushInterval = std::max(0, EnvInt("MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL", 60));
     G.AIPlayLogStartFrame = static_cast<melonDS::u32>(
@@ -18715,6 +18788,9 @@ void InitFromEnvironment()
     G.AIPlayLogMaxObjects = std::clamp(EnvInt("MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS", 32), 0, 256);
     G.AIObservationV2StageFilter = EnvHasValue("MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER")
         ? std::clamp(EnvInt("MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER", -1), -1, 4)
+        : -1;
+    G.AIObservationV3StageFilter = EnvHasValue("MELONDS_NSML_AI_OBSERVATION_V3_STAGE_FILTER")
+        ? std::clamp(EnvInt("MELONDS_NSML_AI_OBSERVATION_V3_STAGE_FILTER", -1), -1, 4)
         : -1;
     G.AIPlayLogGameplayOnly = !EnvFlag("MELONDS_NSML_AI_PLAY_LOG_INCLUDE_NON_GAMEPLAY");
     G.GameStateSyncEnabled = EnvFlag("MELONDS_NSML_STATE_SYNC");
@@ -19481,6 +19557,33 @@ void InitFromEnvironment()
                 G.AIPlayLogEndFrame,
                 G.AIPlayLogMaxObjects,
                 G.AIObservationV2StageFilter,
+                G.AIPlayLogGameplayOnly ? 1 : 0);
+        }
+    }
+    if ((G.TestEnabled || G.Enabled) && !G.AIObservationV3Path.empty())
+    {
+        std::error_code dirError;
+        const std::filesystem::path observationPath(G.AIObservationV3Path);
+        const std::filesystem::path observationParent = observationPath.parent_path();
+        if (!observationParent.empty())
+            std::filesystem::create_directories(observationParent, dirError);
+        G.AIObservationV3Log.open(G.AIObservationV3Path, std::ios::out | std::ios::trunc);
+        if (!G.AIObservationV3Log)
+        {
+            std::printf("NSMB AIObservationV3: failed to open path=%s\n", G.AIObservationV3Path.c_str());
+        }
+        else
+        {
+            G.AIObservationV3LinesSinceFlush = 0;
+            std::printf(
+                "NSMB AIObservationV3: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d stageFilter=%d gameplayOnly=%d\n",
+                G.AIObservationV3Path.c_str(),
+                G.AIPlayLogInterval,
+                G.AIPlayLogFlushInterval,
+                G.AIPlayLogStartFrame,
+                G.AIPlayLogEndFrame,
+                G.AIPlayLogMaxObjects,
+                G.AIObservationV3StageFilter,
                 G.AIPlayLogGameplayOnly ? 1 : 0);
         }
     }
@@ -21139,6 +21242,11 @@ void Shutdown()
     {
         G.AIObservationV2Log.flush();
         G.AIObservationV2Log.close();
+    }
+    if (G.AIObservationV3Log)
+    {
+        G.AIObservationV3Log.flush();
+        G.AIObservationV3Log.close();
     }
 }
 
