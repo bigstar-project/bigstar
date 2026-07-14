@@ -846,7 +846,7 @@ struct State
     int ImitationAIFeaturesMissing = 0;
     bool DirectMvlBootApplied[16] {};
     std::string InputScriptPath;
-    std::string ScriptRemotePacketInputScriptPath;
+    Config::RuntimePatchConfig RuntimePatch;
     std::string HashLogPath;
     std::string ScreenshotDir;
     std::string StateSaveDir;
@@ -898,53 +898,13 @@ struct State
     melonDS::u32 MemPatchFrame = 0;
     bool MemPatchFrameSet = false;
     bool MemPatchApplied[16] {};
-    melonDS::u32 PlayerStickToStarStartFrame = 0;
-    melonDS::u32 PlayerStickToStarEndFrame = 0;
-    int PlayerStickToStarSlot = 0;
-    bool ForcePlayerDeathCountersEnabled = false;
-    bool ForcePlayerDeathCountersHostOnly = false;
-    bool ForcePlayerDeathCountersClientOnly = false;
-    melonDS::u32 ForcePlayerDeathCountersStartFrame = 0;
-    melonDS::u32 ForcePlayerDeathCountersEndFrame = 0;
-    melonDS::u32 ForcePlayerDeathCounter0 = 0;
-    melonDS::u32 ForcePlayerDeathCounter1 = 0;
-    bool ForcePlayerLivesEnabled = false;
-    melonDS::u32 ForcePlayerLife0 = 5;
-    melonDS::u32 ForcePlayerLife1 = 5;
     bool ForcePlayerDeathCountersLogged[16] {};
-    bool ForcePlayerPowerupsEnabled = false;
-    melonDS::u32 ForcePlayerPowerupsStartFrame = 0;
-    melonDS::u32 ForcePlayerPowerupsEndFrame = 0;
-    melonDS::u32 ForcePlayerPowerup0 = 0;
-    melonDS::u32 ForcePlayerPowerup1 = 0;
     bool ForcePlayerPowerupsLogged[16] {};
-    bool ForcePlayerInventoryPowerupsEnabled = false;
-    melonDS::u32 ForcePlayerInventoryPowerupsStartFrame = 0;
-    melonDS::u32 ForcePlayerInventoryPowerupsEndFrame = 0;
-    melonDS::u32 ForcePlayerInventoryPowerup0 = 0;
-    melonDS::u32 ForcePlayerInventoryPowerup1 = 0;
     bool ForcePlayerInventoryPowerupsLogged[16] {};
-    bool ForcePlayerStarCountersEnabled = false;
-    melonDS::u32 ForcePlayerStarCountersStartFrame = 0;
-    melonDS::u32 ForcePlayerStarCountersEndFrame = 0;
-    melonDS::u32 ForcePlayerBattleStars0 = 0;
-    melonDS::u32 ForcePlayerBattleStars1 = 0;
-    melonDS::u32 ForcePlayerDisplayedStars0 = 0;
-    melonDS::u32 ForcePlayerDisplayedStars1 = 0;
-    melonDS::u32 ForcePlayerCollectedStars0 = 0;
-    melonDS::u32 ForcePlayerCollectedStars1 = 0;
     bool ForcePlayerStarCountersLogged[16] {};
-    bool TracePlayerLifeChanges = false;
     bool LastPlayerLifeSampleValid[16] {};
     GameStateSample LastPlayerLifeSample[16] {};
-    bool ScriptRemotePacketEnabled = false;
-    int ScriptRemotePacketPlayer = -1;
-    int ScriptRemotePacketInputInstance = -1;
-    melonDS::u32 ScriptRemotePacketStartFrame = 0;
-    melonDS::u32 ScriptRemotePacketEndFrame = 0;
     bool ScriptRemotePacketLogged[16] {};
-    bool PacketBridgeJitHelperPatchEnabled = false;
-    melonDS::u32 PacketBridgeJitHelperPatchFrame = 0;
     bool PacketBridgeJitHelperPatchApplied[16] {};
     melonDS::u32 PacketBridgeJitHelperPatchResumeFrame[16] {};
     bool InputNetplayOnly = false;
@@ -1669,9 +1629,9 @@ void RebaseMvlAutoRestartStartupFrames(int instanceID, melonDS::u32 restartFrame
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.InputSendDelayStartFrame);
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.InputSendDelayEndFrame);
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.DirectMvlBootFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.ScriptRemotePacketStartFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.ScriptRemotePacketEndFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.PacketBridgeJitHelperPatchFrame);
+    RebaseMvlAutoRestartStartupFrame(restartFrame, G.RuntimePatch.ScriptRemotePacketStartFrame);
+    RebaseMvlAutoRestartStartupFrame(restartFrame, G.RuntimePatch.ScriptRemotePacketEndFrame);
+    RebaseMvlAutoRestartStartupFrame(restartFrame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.ClearMvlCameraInitHoldStartFrame);
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.ClearMvlCameraInitHoldEndFrame);
 
@@ -1682,7 +1642,7 @@ void RebaseMvlAutoRestartStartupFrames(int instanceID, melonDS::u32 restartFrame
         restartFrame,
         G.DirectMvlBootFrame,
         G.NetplayStartFrame,
-        G.PacketBridgeJitHelperPatchFrame);
+        G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
     std::fflush(stdout);
 }
 
@@ -1722,9 +1682,9 @@ void RebaseMvlAutoRestartStartupFramesFromCheckpoint(
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.InputSendDelayStartFrame);
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.InputSendDelayEndFrame);
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.DirectMvlBootFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.ScriptRemotePacketStartFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.ScriptRemotePacketEndFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridgeJitHelperPatchFrame);
+    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.RuntimePatch.ScriptRemotePacketStartFrame);
+    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.RuntimePatch.ScriptRemotePacketEndFrame);
+    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.ClearMvlCameraInitHoldStartFrame);
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.ClearMvlCameraInitHoldEndFrame);
 
@@ -1736,7 +1696,7 @@ void RebaseMvlAutoRestartStartupFramesFromCheckpoint(
         checkpointFrame,
         G.DirectMvlBootFrame,
         G.NetplayStartFrame,
-        G.PacketBridgeJitHelperPatchFrame);
+        G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
     std::fflush(stdout);
 }
 
@@ -6257,13 +6217,13 @@ void SchedulePacketBridgeJitHelperPatchAfterRestore(
         return;
 
     G.PacketBridgeJitHelperPatchResumeFrame[instanceID] = 0;
-    if (!G.PacketBridgeJitHelperPatchEnabled)
+    if (!G.RuntimePatch.PacketBridgeJitHelperPatchEnabled)
     {
         G.PacketBridgeJitHelperPatchApplied[instanceID] = false;
         return;
     }
 
-    if (checkpointFrame >= G.PacketBridgeJitHelperPatchFrame)
+    if (checkpointFrame >= G.RuntimePatch.PacketBridgeJitHelperPatchFrame)
     {
         G.PacketBridgeJitHelperPatchApplied[instanceID] = true;
         std::printf(
@@ -6271,12 +6231,12 @@ void SchedulePacketBridgeJitHelperPatchAfterRestore(
             instanceID,
             restoreFrame,
             checkpointFrame,
-            G.PacketBridgeJitHelperPatchFrame);
+            G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
         std::fflush(stdout);
         return;
     }
 
-    melonDS::u32 delay = G.PacketBridgeJitHelperPatchFrame - checkpointFrame;
+    melonDS::u32 delay = G.RuntimePatch.PacketBridgeJitHelperPatchFrame - checkpointFrame;
     if (delay > 6)
         delay -= 6;
     G.PacketBridgeJitHelperPatchApplied[instanceID] = false;
@@ -6286,7 +6246,7 @@ void SchedulePacketBridgeJitHelperPatchAfterRestore(
         instanceID,
         restoreFrame,
         checkpointFrame,
-        G.PacketBridgeJitHelperPatchFrame,
+        G.RuntimePatch.PacketBridgeJitHelperPatchFrame,
         G.PacketBridgeJitHelperPatchResumeFrame[instanceID]);
     std::fflush(stdout);
 }
@@ -7920,8 +7880,8 @@ bool WriteObjectWordByIDAndSettings(
 
 void ApplyPlayerStickToStar(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (G.PlayerStickToStarStartFrame == 0 && G.PlayerStickToStarEndFrame == 0) return;
-    if (frame < G.PlayerStickToStarStartFrame || frame > G.PlayerStickToStarEndFrame) return;
+    if (G.RuntimePatch.PlayerStickToStarStartFrame == 0 && G.RuntimePatch.PlayerStickToStarEndFrame == 0) return;
+    if (frame < G.RuntimePatch.PlayerStickToStarStartFrame || frame > G.RuntimePatch.PlayerStickToStarEndFrame) return;
     if (instanceID < 0 || instanceID >= 16) return;
     if (!nds || !nds->MainRAM) return;
 
@@ -7929,10 +7889,10 @@ void ApplyPlayerStickToStar(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
     if (!star.Found)
         star = FindVsBattleStarCandidate(nds);
     const PlayerActorScanSample players = FindPlayerActors(nds);
-    const ObjectScanSample& player = (G.PlayerStickToStarSlot == 1) ? players.Actor1 : players.Actor0;
+    const ObjectScanSample& player = (G.RuntimePatch.PlayerStickToStarSlot == 1) ? players.Actor1 : players.Actor0;
     if (!star.Found || !player.Found)
     {
-        if (frame == G.PlayerStickToStarStartFrame)
+        if (frame == G.RuntimePatch.PlayerStickToStarStartFrame)
         {
             std::printf("NSMB Test: player stick to VS star skipped inst=%d frame=%u star=%u player=%u\n",
                 instanceID,
@@ -7944,13 +7904,13 @@ void ApplyPlayerStickToStar(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
     }
 
     WriteObjectTransform(nds, player, star.PosX, star.PosY, star.PosZ, true);
-    if (frame == G.PlayerStickToStarStartFrame)
+    if (frame == G.RuntimePatch.PlayerStickToStarStartFrame)
     {
         std::printf("NSMB Test: started player stick to VS star inst=%d frame=%u-%u slot=%d playerGuid=0x%X starGuid=0x%X pos=0x%08X,0x%08X,0x%08X\n",
             instanceID,
-            G.PlayerStickToStarStartFrame,
-            G.PlayerStickToStarEndFrame,
-            G.PlayerStickToStarSlot,
+            G.RuntimePatch.PlayerStickToStarStartFrame,
+            G.RuntimePatch.PlayerStickToStarEndFrame,
+            G.RuntimePatch.PlayerStickToStarSlot,
             player.GUID,
             star.GUID,
             star.PosX,
@@ -7961,17 +7921,17 @@ void ApplyPlayerStickToStar(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
 
 void ForcePlayerDeathCountersIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (!G.ForcePlayerDeathCountersEnabled || !nds || !nds->MainRAM)
+    if (!G.RuntimePatch.ForcePlayerDeathCountersEnabled || !nds || !nds->MainRAM)
         return;
-    if (G.ForcePlayerDeathCountersHostOnly && G.NetRole != Role::Host)
+    if (G.RuntimePatch.ForcePlayerDeathCountersHostOnly && G.NetRole != Role::Host)
         return;
-    if (G.ForcePlayerDeathCountersClientOnly && G.NetRole != Role::Client)
+    if (G.RuntimePatch.ForcePlayerDeathCountersClientOnly && G.NetRole != Role::Client)
         return;
     if (instanceID < 0 || instanceID >= 16)
         return;
-    if (frame < G.ForcePlayerDeathCountersStartFrame)
+    if (frame < G.RuntimePatch.ForcePlayerDeathCountersStartFrame)
         return;
-    if (G.ForcePlayerDeathCountersEndFrame != 0 && frame > G.ForcePlayerDeathCountersEndFrame)
+    if (G.RuntimePatch.ForcePlayerDeathCountersEndFrame != 0 && frame > G.RuntimePatch.ForcePlayerDeathCountersEndFrame)
         return;
     if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
         return;
@@ -7980,12 +7940,12 @@ void ForcePlayerDeathCountersIfNeeded(int instanceID, melonDS::u32 frame, melonD
     const melonDS::u32 old1 = nds->ARM9Read32(kGamePlayerDeathsAddr + sizeof(melonDS::u32));
     const melonDS::u32 oldLife0 = nds->ARM9Read32(kGamePlayerLivesAddr);
     const melonDS::u32 oldLife1 = nds->ARM9Read32(kGamePlayerLivesAddr + sizeof(melonDS::u32));
-    nds->ARM9Write32(kGamePlayerDeathsAddr, G.ForcePlayerDeathCounter0);
-    nds->ARM9Write32(kGamePlayerDeathsAddr + sizeof(melonDS::u32), G.ForcePlayerDeathCounter1);
-    if (G.ForcePlayerLivesEnabled)
+    nds->ARM9Write32(kGamePlayerDeathsAddr, G.RuntimePatch.ForcePlayerDeathCounter0);
+    nds->ARM9Write32(kGamePlayerDeathsAddr + sizeof(melonDS::u32), G.RuntimePatch.ForcePlayerDeathCounter1);
+    if (G.RuntimePatch.ForcePlayerLivesEnabled)
     {
-        nds->ARM9Write32(kGamePlayerLivesAddr, G.ForcePlayerLife0);
-        nds->ARM9Write32(kGamePlayerLivesAddr + sizeof(melonDS::u32), G.ForcePlayerLife1);
+        nds->ARM9Write32(kGamePlayerLivesAddr, G.RuntimePatch.ForcePlayerLife0);
+        nds->ARM9Write32(kGamePlayerLivesAddr + sizeof(melonDS::u32), G.RuntimePatch.ForcePlayerLife1);
     }
 
     if (!G.ForcePlayerDeathCountersLogged[instanceID])
@@ -7994,38 +7954,38 @@ void ForcePlayerDeathCountersIfNeeded(int instanceID, melonDS::u32 frame, melonD
             "NSMB Test: force player death counters inst=%d frame=%u range=%u-%u old=%u/%u value=%u/%u lives=%u/%u->%u/%u enabled=%d\n",
             instanceID,
             frame,
-            G.ForcePlayerDeathCountersStartFrame,
-            G.ForcePlayerDeathCountersEndFrame,
+            G.RuntimePatch.ForcePlayerDeathCountersStartFrame,
+            G.RuntimePatch.ForcePlayerDeathCountersEndFrame,
             old0,
             old1,
-            G.ForcePlayerDeathCounter0,
-            G.ForcePlayerDeathCounter1,
+            G.RuntimePatch.ForcePlayerDeathCounter0,
+            G.RuntimePatch.ForcePlayerDeathCounter1,
             oldLife0,
             oldLife1,
-            G.ForcePlayerLife0,
-            G.ForcePlayerLife1,
-            G.ForcePlayerLivesEnabled ? 1 : 0);
+            G.RuntimePatch.ForcePlayerLife0,
+            G.RuntimePatch.ForcePlayerLife1,
+            G.RuntimePatch.ForcePlayerLivesEnabled ? 1 : 0);
         G.ForcePlayerDeathCountersLogged[instanceID] = true;
     }
 }
 
 void ForcePlayerInventoryPowerupsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (!G.ForcePlayerInventoryPowerupsEnabled || !nds || !nds->MainRAM)
+    if (!G.RuntimePatch.ForcePlayerInventoryPowerupsEnabled || !nds || !nds->MainRAM)
         return;
     if (instanceID < 0 || instanceID >= 16)
         return;
-    if (frame < G.ForcePlayerInventoryPowerupsStartFrame)
+    if (frame < G.RuntimePatch.ForcePlayerInventoryPowerupsStartFrame)
         return;
-    if (G.ForcePlayerInventoryPowerupsEndFrame != 0 && frame > G.ForcePlayerInventoryPowerupsEndFrame)
+    if (G.RuntimePatch.ForcePlayerInventoryPowerupsEndFrame != 0 && frame > G.RuntimePatch.ForcePlayerInventoryPowerupsEndFrame)
         return;
     if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
         return;
 
     const melonDS::u8 old0 = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr);
     const melonDS::u8 old1 = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr + 1);
-    nds->ARM9Write8(kGamePlayerInventoryPowerupAddr, static_cast<melonDS::u8>(G.ForcePlayerInventoryPowerup0 & 0xFF));
-    nds->ARM9Write8(kGamePlayerInventoryPowerupAddr + 1, static_cast<melonDS::u8>(G.ForcePlayerInventoryPowerup1 & 0xFF));
+    nds->ARM9Write8(kGamePlayerInventoryPowerupAddr, static_cast<melonDS::u8>(G.RuntimePatch.ForcePlayerInventoryPowerup0 & 0xFF));
+    nds->ARM9Write8(kGamePlayerInventoryPowerupAddr + 1, static_cast<melonDS::u8>(G.RuntimePatch.ForcePlayerInventoryPowerup1 & 0xFF));
 
     if (!G.ForcePlayerInventoryPowerupsLogged[instanceID])
     {
@@ -8033,31 +7993,31 @@ void ForcePlayerInventoryPowerupsIfNeeded(int instanceID, melonDS::u32 frame, me
             "NSMB Test: force player inventory powerups inst=%d frame=%u range=%u-%u old=%u/%u value=%u/%u\n",
             instanceID,
             frame,
-            G.ForcePlayerInventoryPowerupsStartFrame,
-            G.ForcePlayerInventoryPowerupsEndFrame,
+            G.RuntimePatch.ForcePlayerInventoryPowerupsStartFrame,
+            G.RuntimePatch.ForcePlayerInventoryPowerupsEndFrame,
             old0,
             old1,
-            G.ForcePlayerInventoryPowerup0 & 0xFF,
-            G.ForcePlayerInventoryPowerup1 & 0xFF);
+            G.RuntimePatch.ForcePlayerInventoryPowerup0 & 0xFF,
+            G.RuntimePatch.ForcePlayerInventoryPowerup1 & 0xFF);
         G.ForcePlayerInventoryPowerupsLogged[instanceID] = true;
     }
 }
 
 void ForcePlayerPowerupsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (!G.ForcePlayerPowerupsEnabled || !nds || !nds->MainRAM)
+    if (!G.RuntimePatch.ForcePlayerPowerupsEnabled || !nds || !nds->MainRAM)
         return;
     if (instanceID < 0 || instanceID >= 16)
         return;
-    if (frame < G.ForcePlayerPowerupsStartFrame)
+    if (frame < G.RuntimePatch.ForcePlayerPowerupsStartFrame)
         return;
-    if (G.ForcePlayerPowerupsEndFrame != 0 && frame > G.ForcePlayerPowerupsEndFrame)
+    if (G.RuntimePatch.ForcePlayerPowerupsEndFrame != 0 && frame > G.RuntimePatch.ForcePlayerPowerupsEndFrame)
         return;
     if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
         return;
 
-    const melonDS::u8 value0 = static_cast<melonDS::u8>(G.ForcePlayerPowerup0 & 0xFF);
-    const melonDS::u8 value1 = static_cast<melonDS::u8>(G.ForcePlayerPowerup1 & 0xFF);
+    const melonDS::u8 value0 = static_cast<melonDS::u8>(G.RuntimePatch.ForcePlayerPowerup0 & 0xFF);
+    const melonDS::u8 value1 = static_cast<melonDS::u8>(G.RuntimePatch.ForcePlayerPowerup1 & 0xFF);
     const melonDS::u8 old0 = nds->ARM9Read8(kGamePlayerPowerupAddr);
     const melonDS::u8 old1 = nds->ARM9Read8(kGamePlayerPowerupAddr + 1);
     nds->ARM9Write8(kGamePlayerPowerupAddr, value0);
@@ -8089,8 +8049,8 @@ void ForcePlayerPowerupsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::ND
             "globalOld=%u/%u value=%u/%u actorBase=0x%08X/0x%08X actorStateOld=%u/%u actorFormOld=%u/%u\n",
             instanceID,
             frame,
-            G.ForcePlayerPowerupsStartFrame,
-            G.ForcePlayerPowerupsEndFrame,
+            G.RuntimePatch.ForcePlayerPowerupsStartFrame,
+            G.RuntimePatch.ForcePlayerPowerupsEndFrame,
             old0,
             old1,
             value0,
@@ -8107,13 +8067,13 @@ void ForcePlayerPowerupsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::ND
 
 void ForcePlayerStarCountersIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (!G.ForcePlayerStarCountersEnabled || !nds || !nds->MainRAM)
+    if (!G.RuntimePatch.ForcePlayerStarCountersEnabled || !nds || !nds->MainRAM)
         return;
     if (instanceID < 0 || instanceID >= 16)
         return;
-    if (frame < G.ForcePlayerStarCountersStartFrame)
+    if (frame < G.RuntimePatch.ForcePlayerStarCountersStartFrame)
         return;
-    if (G.ForcePlayerStarCountersEndFrame != 0 && frame > G.ForcePlayerStarCountersEndFrame)
+    if (G.RuntimePatch.ForcePlayerStarCountersEndFrame != 0 && frame > G.RuntimePatch.ForcePlayerStarCountersEndFrame)
         return;
     if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
         return;
@@ -8125,12 +8085,12 @@ void ForcePlayerStarCountersIfNeeded(int instanceID, melonDS::u32 frame, melonDS
     const melonDS::u32 oldCollected0 = nds->ARM9Read32(kGamePlayerCollectedStarsAddr);
     const melonDS::u32 oldCollected1 = nds->ARM9Read32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32));
 
-    nds->ARM9Write32(kGamePlayerBattleStarsAddr, G.ForcePlayerBattleStars0);
-    nds->ARM9Write32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32), G.ForcePlayerBattleStars1);
-    nds->ARM9Write32(kGamePlayerDisplayedStarsAddr, G.ForcePlayerDisplayedStars0);
-    nds->ARM9Write32(kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32), G.ForcePlayerDisplayedStars1);
-    nds->ARM9Write32(kGamePlayerCollectedStarsAddr, G.ForcePlayerCollectedStars0);
-    nds->ARM9Write32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32), G.ForcePlayerCollectedStars1);
+    nds->ARM9Write32(kGamePlayerBattleStarsAddr, G.RuntimePatch.ForcePlayerBattleStars0);
+    nds->ARM9Write32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32), G.RuntimePatch.ForcePlayerBattleStars1);
+    nds->ARM9Write32(kGamePlayerDisplayedStarsAddr, G.RuntimePatch.ForcePlayerDisplayedStars0);
+    nds->ARM9Write32(kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32), G.RuntimePatch.ForcePlayerDisplayedStars1);
+    nds->ARM9Write32(kGamePlayerCollectedStarsAddr, G.RuntimePatch.ForcePlayerCollectedStars0);
+    nds->ARM9Write32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32), G.RuntimePatch.ForcePlayerCollectedStars1);
 
     if (!G.ForcePlayerStarCountersLogged[instanceID])
     {
@@ -8139,36 +8099,36 @@ void ForcePlayerStarCountersIfNeeded(int instanceID, melonDS::u32 frame, melonDS
             "battle=%u/%u->%u/%u displayed=%u/%u->%u/%u collected=%u/%u->%u/%u\n",
             instanceID,
             frame,
-            G.ForcePlayerStarCountersStartFrame,
-            G.ForcePlayerStarCountersEndFrame,
+            G.RuntimePatch.ForcePlayerStarCountersStartFrame,
+            G.RuntimePatch.ForcePlayerStarCountersEndFrame,
             oldBattle0,
             oldBattle1,
-            G.ForcePlayerBattleStars0,
-            G.ForcePlayerBattleStars1,
+            G.RuntimePatch.ForcePlayerBattleStars0,
+            G.RuntimePatch.ForcePlayerBattleStars1,
             oldDisplayed0,
             oldDisplayed1,
-            G.ForcePlayerDisplayedStars0,
-            G.ForcePlayerDisplayedStars1,
+            G.RuntimePatch.ForcePlayerDisplayedStars0,
+            G.RuntimePatch.ForcePlayerDisplayedStars1,
             oldCollected0,
             oldCollected1,
-            G.ForcePlayerCollectedStars0,
-            G.ForcePlayerCollectedStars1);
+            G.RuntimePatch.ForcePlayerCollectedStars0,
+            G.RuntimePatch.ForcePlayerCollectedStars1);
         G.ForcePlayerStarCountersLogged[instanceID] = true;
     }
 }
 
 void PushScriptRemotePacketIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (!G.ScriptRemotePacketEnabled || !nds || !nds->MainRAM)
+    if (!G.RuntimePatch.ScriptRemotePacketEnabled || !nds || !nds->MainRAM)
         return;
-    if (G.ScriptRemotePacketPlayer < 0 || G.ScriptRemotePacketPlayer > 1)
+    if (G.RuntimePatch.ScriptRemotePacketPlayer < 0 || G.RuntimePatch.ScriptRemotePacketPlayer > 1)
         return;
-    if (G.ScriptRemotePacketInputInstance < 0 || G.ScriptRemotePacketInputInstance >= 16)
+    if (G.RuntimePatch.ScriptRemotePacketInputInstance < 0 || G.RuntimePatch.ScriptRemotePacketInputInstance >= 16)
         return;
-    const melonDS::u32 startFrame = G.ScriptRemotePacketEnabled
-        ? G.ScriptRemotePacketStartFrame
-        : G.PacketBridgeJitHelperPatchFrame;
-    const melonDS::u32 endFrame = G.ScriptRemotePacketEnabled ? G.ScriptRemotePacketEndFrame : 0;
+    const melonDS::u32 startFrame = G.RuntimePatch.ScriptRemotePacketEnabled
+        ? G.RuntimePatch.ScriptRemotePacketStartFrame
+        : G.RuntimePatch.PacketBridgeJitHelperPatchFrame;
+    const melonDS::u32 endFrame = G.RuntimePatch.ScriptRemotePacketEnabled ? G.RuntimePatch.ScriptRemotePacketEndFrame : 0;
     if (frame < startFrame)
         return;
     if (endFrame != 0 && frame > endFrame)
@@ -8177,7 +8137,7 @@ void PushScriptRemotePacketIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
         return;
 
     const InputState input = ConvertStockXToTouch(ApplyScriptRemotePacketInputScript(
-        G.ScriptRemotePacketInputInstance,
+        G.RuntimePatch.ScriptRemotePacketInputInstance,
         frame,
         NeutralInput()));
     melonDS::u8 packet[52] {};
@@ -8197,7 +8157,7 @@ void PushScriptRemotePacketIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
 
     melonDS::NSML_PushMarioVsLuigiRemotePacket(
         nds,
-        static_cast<melonDS::u32>(G.ScriptRemotePacketPlayer),
+        static_cast<melonDS::u32>(G.RuntimePatch.ScriptRemotePacketPlayer),
         packet);
 
     if (!G.ScriptRemotePacketLogged[instanceID])
@@ -8205,10 +8165,10 @@ void PushScriptRemotePacketIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
         std::printf("NSMB Test: script remote packet inst=%d frame=%u range=%u-%u player=%d inputInstance=%d tick=0x%04X keys=0x%04X\n",
             instanceID,
             frame,
-            G.ScriptRemotePacketStartFrame,
-            G.ScriptRemotePacketEndFrame,
-            G.ScriptRemotePacketPlayer,
-            G.ScriptRemotePacketInputInstance,
+            G.RuntimePatch.ScriptRemotePacketStartFrame,
+            G.RuntimePatch.ScriptRemotePacketEndFrame,
+            G.RuntimePatch.ScriptRemotePacketPlayer,
+            G.RuntimePatch.ScriptRemotePacketInputInstance,
             tick,
             keys);
         G.ScriptRemotePacketLogged[instanceID] = true;
@@ -8243,7 +8203,7 @@ InputState PacketBridgeInputForPlayer(
     if (hasRemoteInput)
         return ConvertStockXToTouch(remoteInput);
     return ConvertStockXToTouch(
-        ApplyScriptRemotePacketInputScript(G.ScriptRemotePacketInputInstance, frame, NeutralInput()));
+        ApplyScriptRemotePacketInputScript(G.RuntimePatch.ScriptRemotePacketInputInstance, frame, NeutralInput()));
 }
 
 void WritePacketBridgeJitScratchInputs(
@@ -8700,20 +8660,20 @@ void WritePacketBridgeJitScratchIfNeeded(
     melonDS::NDS* nds,
     const InputState& localInput)
 {
-    if (!G.PacketBridgeJitHelperPatchEnabled || !nds || !nds->MainRAM)
+    if (!G.RuntimePatch.PacketBridgeJitHelperPatchEnabled || !nds || !nds->MainRAM)
         return;
-    if (!G.ScriptRemotePacketEnabled && !G.Enabled)
+    if (!G.RuntimePatch.ScriptRemotePacketEnabled && !G.Enabled)
         return;
-    if (G.ScriptRemotePacketEnabled &&
-        (G.ScriptRemotePacketInputInstance < 0 || G.ScriptRemotePacketInputInstance >= 16))
+    if (G.RuntimePatch.ScriptRemotePacketEnabled &&
+        (G.RuntimePatch.ScriptRemotePacketInputInstance < 0 || G.RuntimePatch.ScriptRemotePacketInputInstance >= 16))
         return;
-    melonDS::u32 startFrame = G.ScriptRemotePacketStartFrame;
+    melonDS::u32 startFrame = G.RuntimePatch.ScriptRemotePacketStartFrame;
     if (G.InputNetplayOnly)
     {
-        startFrame = std::max(startFrame, G.PacketBridgeJitHelperPatchFrame);
+        startFrame = std::max(startFrame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
         startFrame = std::max(startFrame, G.NetplayStartFrame);
     }
-    if (G.ScriptRemotePacketEndFrame != 0 && frame > G.ScriptRemotePacketEndFrame)
+    if (G.RuntimePatch.ScriptRemotePacketEndFrame != 0 && frame > G.RuntimePatch.ScriptRemotePacketEndFrame)
         return;
 
     const bool traceScratch = G.ActiveFrameSpikeTrace;
@@ -8883,11 +8843,11 @@ void WritePacketBridgeJitScratchIfNeeded(
 
 void ApplyPacketBridgeJitHelperPatchIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (!G.PacketBridgeJitHelperPatchEnabled || !nds || !nds->MainRAM)
+    if (!G.RuntimePatch.PacketBridgeJitHelperPatchEnabled || !nds || !nds->MainRAM)
         return;
     if (instanceID < 0 || instanceID >= 16)
         return;
-    melonDS::u32 patchFrame = G.PacketBridgeJitHelperPatchFrame;
+    melonDS::u32 patchFrame = G.RuntimePatch.PacketBridgeJitHelperPatchFrame;
     if (G.PacketBridgeJitHelperPatchResumeFrame[instanceID] != 0)
         patchFrame = std::max(patchFrame, G.PacketBridgeJitHelperPatchResumeFrame[instanceID]);
     if (G.PacketBridgeJitHelperPatchApplied[instanceID] || frame < patchFrame)
@@ -11725,6 +11685,7 @@ void InitFromEnvironment()
     G.PacketBridgeSendDelayFrames = packetBridgeConfig.SendDelayFrames;
     G.PacketBridgeSendJitterFrames = packetBridgeConfig.SendJitterFrames;
     const Config::InputConfig inputConfig = Config::LoadInputConfig(G.InputNetplayOnly);
+    G.RuntimePatch = Config::LoadRuntimePatchConfig();
     G.InputSendDelayFrames = inputConfig.SendDelayFrames;
     G.InputSendJitterFrames = inputConfig.SendJitterFrames;
     G.InputSendDelayStartFrame = inputConfig.SendDelayStartFrame;
@@ -11766,10 +11727,6 @@ void InitFromEnvironment()
 
     const char* inputScript = std::getenv("MELONDS_NSML_INPUT_SCRIPT");
     if (inputScript && inputScript[0]) G.InputScriptPath = inputScript;
-
-    const char* scriptRemotePacketInputScript = std::getenv("MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT");
-    if (scriptRemotePacketInputScript && scriptRemotePacketInputScript[0])
-        G.ScriptRemotePacketInputScriptPath = scriptRemotePacketInputScript;
 
     G.HashLogPath = diagnosticsConfig.HashLogPath;
     G.ScreenshotDir = diagnosticsConfig.ScreenshotDir;
@@ -11853,75 +11810,6 @@ void InitFromEnvironment()
         std::printf("NSMB Test: invalid memory patch range list\n");
         G.MemPatchRanges.clear();
     }
-    G.PlayerStickToStarStartFrame = static_cast<melonDS::u32>(std::max(0, EnvInt("MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME", 0)));
-    G.PlayerStickToStarEndFrame = static_cast<melonDS::u32>(std::max(0, EnvInt("MELONDS_NSML_PLAYER_STICK_TO_STAR_END_FRAME", 0)));
-    if (G.PlayerStickToStarEndFrame == 0)
-        G.PlayerStickToStarEndFrame = G.PlayerStickToStarStartFrame;
-    if (G.PlayerStickToStarEndFrame < G.PlayerStickToStarStartFrame)
-        std::swap(G.PlayerStickToStarStartFrame, G.PlayerStickToStarEndFrame);
-    G.PlayerStickToStarSlot = std::clamp(EnvInt("MELONDS_NSML_PLAYER_STICK_TO_STAR_SLOT", 0), 0, 1);
-    G.ForcePlayerDeathCountersEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS");
-    G.ForcePlayerDeathCountersHostOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_HOST_ONLY");
-    G.ForcePlayerDeathCountersClientOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_CLIENT_ONLY");
-    G.ForcePlayerDeathCountersStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_START_FRAME", 0)));
-    G.ForcePlayerDeathCountersEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_END_FRAME", 0)));
-    G.ForcePlayerDeathCounter0 = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTER0", 0)));
-    G.ForcePlayerDeathCounter1 = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTER1", 0)));
-    G.ForcePlayerLivesEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_LIVES");
-    G.ForcePlayerLife0 = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_LIFE0", 5)));
-    G.ForcePlayerLife1 = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_LIFE1", 5)));
-    G.ForcePlayerPowerupsEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_POWERUPS");
-    G.ForcePlayerPowerupsStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_POWERUPS_START_FRAME", 0)));
-    G.ForcePlayerPowerupsEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_POWERUPS_END_FRAME", 0)));
-    G.ForcePlayerPowerup0 = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_POWERUP0", 0)));
-    G.ForcePlayerPowerup1 = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_POWERUP1", 0)));
-    G.ForcePlayerInventoryPowerupsEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS");
-    G.ForcePlayerInventoryPowerupsStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_START_FRAME", 0)));
-    G.ForcePlayerInventoryPowerupsEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_END_FRAME", 0)));
-    G.ForcePlayerInventoryPowerup0 = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP0", 0)));
-    G.ForcePlayerInventoryPowerup1 = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP1", 0)));
-    G.ForcePlayerStarCountersEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS");
-    G.ForcePlayerStarCountersStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS_START_FRAME", 0)));
-    G.ForcePlayerStarCountersEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS_END_FRAME", 0)));
-    G.ForcePlayerBattleStars0 = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_BATTLE_STARS0", 0)));
-    G.ForcePlayerBattleStars1 = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_BATTLE_STARS1", 0)));
-    G.ForcePlayerDisplayedStars0 = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_DISPLAYED_STARS0", 0)));
-    G.ForcePlayerDisplayedStars1 = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_DISPLAYED_STARS1", 0)));
-    G.ForcePlayerCollectedStars0 = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_COLLECTED_STARS0", 0)));
-    G.ForcePlayerCollectedStars1 = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_COLLECTED_STARS1", 0)));
-    G.TracePlayerLifeChanges = EnvFlag("MELONDS_NSML_TRACE_PLAYER_LIFE_CHANGES");
-    G.ScriptRemotePacketEnabled = EnvFlag("MELONDS_NSML_SCRIPT_REMOTE_PACKET");
-    G.ScriptRemotePacketPlayer = EnvInt("MELONDS_NSML_SCRIPT_REMOTE_PACKET_PLAYER", -1);
-    G.ScriptRemotePacketInputInstance = EnvInt("MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_INSTANCE", -1);
-    G.ScriptRemotePacketStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_SCRIPT_REMOTE_PACKET_START_FRAME", 0)));
-    G.ScriptRemotePacketEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_SCRIPT_REMOTE_PACKET_END_FRAME", 0)));
-    G.PacketBridgeJitHelperPatchEnabled = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH");
-    G.PacketBridgeJitHelperPatchFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH_FRAME", 0)));
     G.InputNetplayOnly = inputConfig.NetplayOnly;
     G.InputNetplayTraceEnabled = inputConfig.NetplayTrace;
     G.InputHealthTraceEnabled = inputConfig.HealthTrace;
@@ -12186,8 +12074,8 @@ void InitFromEnvironment()
     {
         if (!LoadInputScriptLocked())
             G.TestEnabled = false;
-        if (!G.ScriptRemotePacketInputScriptPath.empty() &&
-            !LoadInputScriptFileLocked(G.ScriptRemotePacketInputScriptPath, GScriptRemotePacketInputScript))
+        if (!G.RuntimePatch.ScriptRemotePacketInputScriptPath.empty() &&
+            !LoadInputScriptFileLocked(G.RuntimePatch.ScriptRemotePacketInputScriptPath, GScriptRemotePacketInputScript))
         {
             G.TestEnabled = false;
         }
@@ -12996,7 +12884,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
 void TracePlayerLifeChanges(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if ((!G.TracePlayerLifeChanges && !G.DiagnosticEventsEnabled) || !nds || !nds->MainRAM) return;
+    if ((!G.RuntimePatch.TracePlayerLifeChanges && !G.DiagnosticEventsEnabled) || !nds || !nds->MainRAM) return;
     if (instanceID < 0 || instanceID >= 16) return;
 
     GameStateSample& last = G.LastPlayerLifeSample[instanceID];
@@ -13046,7 +12934,7 @@ void TracePlayerLifeChanges(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
         }
 
         const GameStateSample sample = ReadGameStateSample(nds);
-        if (G.TracePlayerLifeChanges)
+        if (G.RuntimePatch.TracePlayerLifeChanges)
         {
             std::printf(
                 "NSMB LifeDelta: inst=%d frame=%u lives=%u/%u deaths=%u/%u dead=%u/%u trans=%u/%u "

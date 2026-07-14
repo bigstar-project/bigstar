@@ -233,6 +233,128 @@ InputConfig LoadInputConfig(bool netplayOnlyForMaxFrameLeadDefault) {
                          netplayOnlyForMaxFrameLeadDefault);
 }
 
+RuntimePatchConfig LoadRuntimePatchConfig(const Environment &environment) {
+  RuntimePatchConfig config;
+  config.ScriptRemotePacketInputScriptPath = ReadCString(
+      environment, "MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT", "");
+  config.PlayerStickToStarStartFrame = static_cast<std::uint32_t>(
+      std::max(0, ReadInt(environment,
+                          "MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME", 0)));
+  config.PlayerStickToStarEndFrame = static_cast<std::uint32_t>(
+      std::max(0, ReadInt(environment,
+                          "MELONDS_NSML_PLAYER_STICK_TO_STAR_END_FRAME", 0)));
+  if (config.PlayerStickToStarEndFrame == 0)
+    config.PlayerStickToStarEndFrame = config.PlayerStickToStarStartFrame;
+  if (config.PlayerStickToStarEndFrame < config.PlayerStickToStarStartFrame)
+    std::swap(config.PlayerStickToStarStartFrame,
+              config.PlayerStickToStarEndFrame);
+  config.PlayerStickToStarSlot = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_PLAYER_STICK_TO_STAR_SLOT", 0), 0, 1);
+  config.ForcePlayerDeathCountersEnabled =
+      ReadFlag(environment, "MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS");
+  config.ForcePlayerDeathCountersHostOnly = ReadFlag(
+      environment, "MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_HOST_ONLY");
+  config.ForcePlayerDeathCountersClientOnly = ReadFlag(
+      environment, "MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_CLIENT_ONLY");
+  config.ForcePlayerDeathCountersStartFrame =
+      static_cast<std::uint32_t>(std::max(
+          0,
+          ReadInt(environment,
+                  "MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_START_FRAME", 0)));
+  config.ForcePlayerDeathCountersEndFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment,
+                 "MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS_END_FRAME", 0)));
+  config.ForcePlayerDeathCounter0 = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTER0", 0)));
+  config.ForcePlayerDeathCounter1 = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTER1", 0)));
+  config.ForcePlayerLivesEnabled =
+      ReadFlag(environment, "MELONDS_NSML_FORCE_PLAYER_LIVES");
+  config.ForcePlayerLife0 = static_cast<std::uint32_t>(
+      std::max(0, ReadInt(environment, "MELONDS_NSML_FORCE_PLAYER_LIFE0", 5)));
+  config.ForcePlayerLife1 = static_cast<std::uint32_t>(
+      std::max(0, ReadInt(environment, "MELONDS_NSML_FORCE_PLAYER_LIFE1", 5)));
+  config.ForcePlayerPowerupsEnabled =
+      ReadFlag(environment, "MELONDS_NSML_FORCE_PLAYER_POWERUPS");
+  config.ForcePlayerPowerupsStartFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_FORCE_PLAYER_POWERUPS_START_FRAME",
+                 0)));
+  config.ForcePlayerPowerupsEndFrame = static_cast<std::uint32_t>(
+      std::max(0, ReadInt(environment,
+                          "MELONDS_NSML_FORCE_PLAYER_POWERUPS_END_FRAME", 0)));
+  config.ForcePlayerPowerup0 = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_FORCE_PLAYER_POWERUP0", 0)));
+  config.ForcePlayerPowerup1 = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_FORCE_PLAYER_POWERUP1", 0)));
+  config.ForcePlayerInventoryPowerupsEnabled =
+      ReadFlag(environment, "MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS");
+  config.ForcePlayerInventoryPowerupsStartFrame =
+      static_cast<std::uint32_t>(std::max(
+          0, ReadInt(environment,
+                     "MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_START_FRAME",
+                     0)));
+  config.ForcePlayerInventoryPowerupsEndFrame =
+      static_cast<std::uint32_t>(std::max(
+          0, ReadInt(environment,
+                     "MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_END_FRAME",
+                     0)));
+  config.ForcePlayerInventoryPowerup0 = static_cast<std::uint32_t>(
+      std::max(0, ReadInt(environment,
+                          "MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP0", 0)));
+  config.ForcePlayerInventoryPowerup1 = static_cast<std::uint32_t>(
+      std::max(0, ReadInt(environment,
+                          "MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP1", 0)));
+  config.ForcePlayerStarCountersEnabled =
+      ReadFlag(environment, "MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS");
+  config.ForcePlayerStarCountersStartFrame = static_cast<std::uint32_t>(
+      std::max(0, ReadInt(environment,
+                          "MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS_START_FRAME",
+                          0)));
+  config.ForcePlayerStarCountersEndFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment,
+                 "MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS_END_FRAME", 0)));
+  config.ForcePlayerBattleStars0 = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_FORCE_PLAYER_BATTLE_STARS0", 0)));
+  config.ForcePlayerBattleStars1 = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_FORCE_PLAYER_BATTLE_STARS1", 0)));
+  config.ForcePlayerDisplayedStars0 = static_cast<std::uint32_t>(
+      std::max(0, ReadInt(environment,
+                          "MELONDS_NSML_FORCE_PLAYER_DISPLAYED_STARS0", 0)));
+  config.ForcePlayerDisplayedStars1 = static_cast<std::uint32_t>(
+      std::max(0, ReadInt(environment,
+                          "MELONDS_NSML_FORCE_PLAYER_DISPLAYED_STARS1", 0)));
+  config.ForcePlayerCollectedStars0 = static_cast<std::uint32_t>(
+      std::max(0, ReadInt(environment,
+                          "MELONDS_NSML_FORCE_PLAYER_COLLECTED_STARS0", 0)));
+  config.ForcePlayerCollectedStars1 = static_cast<std::uint32_t>(
+      std::max(0, ReadInt(environment,
+                          "MELONDS_NSML_FORCE_PLAYER_COLLECTED_STARS1", 0)));
+  config.TracePlayerLifeChanges =
+      ReadFlag(environment, "MELONDS_NSML_TRACE_PLAYER_LIFE_CHANGES");
+  config.ScriptRemotePacketEnabled =
+      ReadFlag(environment, "MELONDS_NSML_SCRIPT_REMOTE_PACKET");
+  config.ScriptRemotePacketPlayer =
+      ReadInt(environment, "MELONDS_NSML_SCRIPT_REMOTE_PACKET_PLAYER", -1);
+  config.ScriptRemotePacketInputInstance = ReadInt(
+      environment, "MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_INSTANCE", -1);
+  config.ScriptRemotePacketStartFrame = static_cast<std::uint32_t>(
+      std::max(0, ReadInt(environment,
+                          "MELONDS_NSML_SCRIPT_REMOTE_PACKET_START_FRAME", 0)));
+  config.ScriptRemotePacketEndFrame = static_cast<std::uint32_t>(
+      std::max(0, ReadInt(environment,
+                          "MELONDS_NSML_SCRIPT_REMOTE_PACKET_END_FRAME", 0)));
+  config.PacketBridgeJitHelperPatchEnabled =
+      ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH");
+  config.PacketBridgeJitHelperPatchFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment,
+                 "MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH_FRAME", 0)));
+  return config;
+}
+
+RuntimePatchConfig LoadRuntimePatchConfig() {
+  return LoadRuntimePatchConfig(GetProcessEnvironment());
+}
+
 PacketBridgeConfig LoadPacketBridgeConfig(const Environment &environment) {
   PacketBridgeConfig config;
   config.Enabled = ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE");

@@ -60,6 +60,50 @@ struct InputConfig {
   int WaitPollUs = 100;
 };
 
+struct RuntimePatchConfig {
+  std::string ScriptRemotePacketInputScriptPath;
+  std::uint32_t PlayerStickToStarStartFrame = 0;
+  std::uint32_t PlayerStickToStarEndFrame = 0;
+  int PlayerStickToStarSlot = 0;
+  bool ForcePlayerDeathCountersEnabled = false;
+  bool ForcePlayerDeathCountersHostOnly = false;
+  bool ForcePlayerDeathCountersClientOnly = false;
+  std::uint32_t ForcePlayerDeathCountersStartFrame = 0;
+  std::uint32_t ForcePlayerDeathCountersEndFrame = 0;
+  std::uint32_t ForcePlayerDeathCounter0 = 0;
+  std::uint32_t ForcePlayerDeathCounter1 = 0;
+  bool ForcePlayerLivesEnabled = false;
+  std::uint32_t ForcePlayerLife0 = 5;
+  std::uint32_t ForcePlayerLife1 = 5;
+  bool ForcePlayerPowerupsEnabled = false;
+  std::uint32_t ForcePlayerPowerupsStartFrame = 0;
+  std::uint32_t ForcePlayerPowerupsEndFrame = 0;
+  std::uint32_t ForcePlayerPowerup0 = 0;
+  std::uint32_t ForcePlayerPowerup1 = 0;
+  bool ForcePlayerInventoryPowerupsEnabled = false;
+  std::uint32_t ForcePlayerInventoryPowerupsStartFrame = 0;
+  std::uint32_t ForcePlayerInventoryPowerupsEndFrame = 0;
+  std::uint32_t ForcePlayerInventoryPowerup0 = 0;
+  std::uint32_t ForcePlayerInventoryPowerup1 = 0;
+  bool ForcePlayerStarCountersEnabled = false;
+  std::uint32_t ForcePlayerStarCountersStartFrame = 0;
+  std::uint32_t ForcePlayerStarCountersEndFrame = 0;
+  std::uint32_t ForcePlayerBattleStars0 = 0;
+  std::uint32_t ForcePlayerBattleStars1 = 0;
+  std::uint32_t ForcePlayerDisplayedStars0 = 0;
+  std::uint32_t ForcePlayerDisplayedStars1 = 0;
+  std::uint32_t ForcePlayerCollectedStars0 = 0;
+  std::uint32_t ForcePlayerCollectedStars1 = 0;
+  bool TracePlayerLifeChanges = false;
+  bool ScriptRemotePacketEnabled = false;
+  int ScriptRemotePacketPlayer = -1;
+  int ScriptRemotePacketInputInstance = -1;
+  std::uint32_t ScriptRemotePacketStartFrame = 0;
+  std::uint32_t ScriptRemotePacketEndFrame = 0;
+  bool PacketBridgeJitHelperPatchEnabled = false;
+  std::uint32_t PacketBridgeJitHelperPatchFrame = 0;
+};
+
 inline constexpr int PacketBridgePumpEventLimit = 64;
 
 struct PacketBridgeConfig {
@@ -324,6 +368,8 @@ ConnectionConfig LoadConnectionConfig(bool testEnabled);
 InputConfig LoadInputConfig(const Environment &environment,
                             bool netplayOnlyForMaxFrameLeadDefault);
 InputConfig LoadInputConfig(bool netplayOnlyForMaxFrameLeadDefault);
+RuntimePatchConfig LoadRuntimePatchConfig(const Environment &environment);
+RuntimePatchConfig LoadRuntimePatchConfig();
 PacketBridgeConfig LoadPacketBridgeConfig(const Environment &environment);
 PacketBridgeConfig LoadPacketBridgeConfig();
 RollbackConfig LoadRollbackConfig(const Environment &environment);
