@@ -13452,6 +13452,70 @@ private:
     long long RemoteWaitUs = 0;
 };
 
+bool CanRunFrameHooks(int instanceID, melonDS::NDS* nds)
+{
+    return (G.TestEnabled || G.Enabled)
+        && instanceID >= 0
+        && instanceID < 16
+        && nds;
+}
+
+void RunBeforeFrameRuntimeConfigPhase(int instanceID, melonDS::NDS* nds)
+{
+    if (!CanRunFrameHooks(instanceID, nds))
+        return;
+    RefreshMvlGameSelectionForInstance(instanceID);
+    ApplyMvlRuntimeConfigIfNeeded(nds);
+}
+
+void RunBeforeFrameBootPhase(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!CanRunFrameHooks(instanceID, nds))
+        return;
+    SaveMvlAutoRestartBootstrapCheckpointIfNeeded(instanceID, frame, nds);
+    InjectDirectMvlBootCall(instanceID, frame, nds);
+    RestartMvlAfterResultIfNeeded(instanceID, frame, nds);
+}
+
+void RunBeforeFramePatchPhase(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!CanRunFrameHooks(instanceID, nds))
+        return;
+    if (G.TestEnabled)
+        ApplyMemPatch(instanceID, frame, nds);
+    ApplyNetRandomPatch(instanceID, frame, nds);
+}
+
+void RunBeforeFrameSetupPhase(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!CanRunFrameHooks(instanceID, nds))
+        return;
+    PushScriptRemotePacketIfNeeded(instanceID, frame, nds);
+    NormalizeMvlEntranceSpawnStateIfNeeded(instanceID, frame, nds);
+    ClearMvlCameraInitHoldIfNeeded(instanceID, frame, nds);
+    ForcePlayerDeathCountersIfNeeded(instanceID, frame, nds);
+    ForcePlayerPowerupsIfNeeded(instanceID, frame, nds);
+    ForcePlayerInventoryPowerupsIfNeeded(instanceID, frame, nds);
+    ForcePlayerStarCountersIfNeeded(instanceID, frame, nds);
+}
+
+void RunBeforeFrameActorStatePhase(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.Enabled || instanceID < 0 || instanceID >= 16 || !nds)
+        return;
+    ApplyRemoteGameState(instanceID, frame, nds);
+    ApplyRemoteMovingHazardState(instanceID, frame, nds);
+    ApplyRemoteWorldActorSnapshotState(instanceID, frame, nds);
+    ApplyRemoteWorldState(instanceID, frame, nds);
+    ApplyRemoteWorldEffectState(instanceID, frame, nds);
+    ApplyRemotePlayerState(instanceID, frame, nds);
+    SyncWorldState(instanceID, frame, nds);
+    SyncWorldEffectState(instanceID, frame, nds);
+    SyncMovingHazardState(instanceID, frame, nds);
+    SyncWorldActorSnapshotState(instanceID, frame, nds);
+    SyncPlayerState(instanceID, frame, nds);
+}
+
 InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, const InputState& polledInput)
 {
     BeforeHookPhaseTrace phaseTrace(instanceID, frame);
@@ -13481,10 +13545,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         LoadState(instanceID, inputFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::LoadState);
 
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        RefreshMvlGameSelectionForInstance(instanceID);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ApplyMvlRuntimeConfigIfNeeded(nds);
+    RunBeforeFrameRuntimeConfigPhase(instanceID, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::RuntimeConfig);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
@@ -13499,22 +13560,10 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         RollbackResimulateIfNeeded(instanceID, inputFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Rollback);
 
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        SaveMvlAutoRestartBootstrapCheckpointIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        InjectDirectMvlBootCall(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-    {
-        RestartMvlAfterResultIfNeeded(instanceID, inputFrame, nds);
-    }
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+    RunBeforeFrameBootPhase(instanceID, inputFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Boot);
 
-    if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
-        ApplyMemPatch(instanceID, inputFrame, nds);
-
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ApplyNetRandomPatch(instanceID, inputFrame, nds);
+    RunBeforeFramePatchPhase(instanceID, inputFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Patch);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
@@ -13527,44 +13576,10 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyPlayerStickToStar(instanceID, inputFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::TestSnap);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        PushScriptRemotePacketIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        NormalizeMvlEntranceSpawnStateIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ClearMvlCameraInitHoldIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForcePlayerDeathCountersIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForcePlayerPowerupsIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForcePlayerInventoryPowerupsIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForcePlayerStarCountersIfNeeded(instanceID, inputFrame, nds);
+    RunBeforeFrameSetupPhase(instanceID, inputFrame, nds);
 
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Setup);
-    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        ApplyRemoteGameState(instanceID, inputFrame, nds);
-    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        ApplyRemoteMovingHazardState(instanceID, inputFrame, nds);
-    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        ApplyRemoteWorldActorSnapshotState(instanceID, inputFrame, nds);
-    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        ApplyRemoteWorldState(instanceID, inputFrame, nds);
-    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        ApplyRemoteWorldEffectState(instanceID, inputFrame, nds);
-    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        ApplyRemotePlayerState(instanceID, inputFrame, nds);
-    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        SyncWorldState(instanceID, inputFrame, nds);
-    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        SyncWorldEffectState(instanceID, inputFrame, nds);
-    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        SyncMovingHazardState(instanceID, inputFrame, nds);
-    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        SyncWorldActorSnapshotState(instanceID, inputFrame, nds);
-    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        SyncPlayerState(instanceID, inputFrame, nds);
+    RunBeforeFrameActorStatePhase(instanceID, inputFrame, nds);
 
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::ActorState);
     WaitForSerialRunTurn(instanceID, inputFrame);
