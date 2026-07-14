@@ -196,6 +196,11 @@ ReadPlayerHitboxSample(melonDS::NDS *nds, const ObjectScanSample &actor);
 GameStateModel::AIPlayerTileProbeSample
 ReadAIPlayerTileProbeSample(melonDS::NDS *nds, const ObjectScanSample &actor);
 
+melonDS::u64 HashNDS(melonDS::NDS *nds);
+melonDS::u64 HashFramebuffers(melonDS::NDS *nds);
+melonDS::u64 HashMainRAMRange(melonDS::NDS *nds, melonDS::u32 address,
+                              melonDS::u32 length);
+
 } // namespace NsmbNetplayPoC::GameStateReader
 
 #endif

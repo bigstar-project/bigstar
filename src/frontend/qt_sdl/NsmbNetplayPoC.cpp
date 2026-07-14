@@ -141,6 +141,9 @@ using GameStateReader::FindPlayerActors;
 using GameStateReader::FindVsBattleStarCandidate;
 using GameStateReader::GetPlayerActorCached;
 using GameStateReader::HasActiveObjectScanCache;
+using GameStateReader::HashFramebuffers;
+using GameStateReader::HashMainRAMRange;
+using GameStateReader::HashNDS;
 using GameStateReader::ReadObjectByBase;
 using GameStateReader::ReadAIPlayerTileProbeSample;
 using GameStateReader::ReadPlayerActorByBase;
@@ -3664,78 +3667,6 @@ void AdvanceSerialRunTurn(int instanceID, melonDS::u32 frame)
         return;
 
     G.Coordinator.AdvanceSerialTurn(instanceID, frame, G.Bootstrap.TestInstanceCount);
-}
-
-melonDS::u64 HashNDS(melonDS::NDS* nds)
-{
-    // FNV-1a over the state that most quickly reveals gameplay divergence.
-    melonDS::u64 hash = 1469598103934665603ull;
-    const auto mix = [&](melonDS::u64 value) {
-        for (int i = 0; i < 8; i++)
-        {
-            hash ^= (value >> (i * 8)) & 0xFF;
-            hash *= 1099511628211ull;
-        }
-    };
-
-    mix(nds->NumFrames);
-    mix(nds->ARM9Timestamp);
-    mix(nds->ARM7Timestamp);
-    mix(nds->KeyInput);
-
-    if (nds->MainRAM)
-    {
-        const melonDS::u32 len = std::min<melonDS::u32>(nds->MainRAMMask + 1, 0x400000);
-        for (melonDS::u32 i = 0; i < len; i++)
-        {
-            hash ^= nds->MainRAM[i];
-            hash *= 1099511628211ull;
-        }
-    }
-
-    return hash;
-}
-
-melonDS::u64 HashFramebuffers(melonDS::NDS* nds)
-{
-    void* topBuffer = nullptr;
-    void* bottomBuffer = nullptr;
-    if (!nds || !nds->GPU.GetFramebuffers(&topBuffer, &bottomBuffer) || !topBuffer || !bottomBuffer)
-        return 0;
-
-    melonDS::u64 hash = 1469598103934665603ull;
-    const auto mixBytes = [&](const void* data, std::size_t len) {
-        const auto* bytes = reinterpret_cast<const melonDS::u8*>(data);
-        for (std::size_t i = 0; i < len; i++)
-        {
-            hash ^= bytes[i];
-            hash *= 1099511628211ull;
-        }
-    };
-
-    mixBytes(topBuffer, 256 * 192 * 4);
-    mixBytes(bottomBuffer, 256 * 192 * 4);
-    return hash;
-}
-
-melonDS::u64 HashMainRAMRange(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 len)
-{
-    if (!nds || !nds->MainRAM || addr < kMainRAMBase)
-        return 0;
-
-    const melonDS::u32 offset = addr - kMainRAMBase;
-    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
-    if (offset >= ramLen)
-        return 0;
-
-    len = std::min(len, ramLen - offset);
-    melonDS::u64 hash = 1469598103934665603ull;
-    for (melonDS::u32 i = 0; i < len; i++)
-    {
-        hash ^= nds->MainRAM[offset + i];
-        hash *= 1099511628211ull;
-    }
-    return hash;
 }
 
 bool IsMainRAMAddress(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 size = 1)

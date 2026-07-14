@@ -3,6 +3,7 @@
 #include "NDS.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <set>
 
@@ -284,6 +285,71 @@ bool ReadStageLayoutTileBehavior(melonDS::NDS *nds, melonDS::u32 worldX,
 }
 
 } // namespace
+
+melonDS::u64 HashNDS(melonDS::NDS *nds) {
+  melonDS::u64 hash = 1469598103934665603ull;
+  const auto mix = [&](melonDS::u64 value) {
+    for (int index = 0; index < 8; index++) {
+      hash ^= (value >> (index * 8)) & 0xFF;
+      hash *= 1099511628211ull;
+    }
+  };
+
+  mix(nds->NumFrames);
+  mix(nds->ARM9Timestamp);
+  mix(nds->ARM7Timestamp);
+  mix(nds->KeyInput);
+
+  if (nds->MainRAM) {
+    const melonDS::u32 length =
+        std::min<melonDS::u32>(nds->MainRAMMask + 1, 0x400000);
+    for (melonDS::u32 offset = 0; offset < length; offset++) {
+      hash ^= nds->MainRAM[offset];
+      hash *= 1099511628211ull;
+    }
+  }
+  return hash;
+}
+
+melonDS::u64 HashFramebuffers(melonDS::NDS *nds) {
+  void *topBuffer = nullptr;
+  void *bottomBuffer = nullptr;
+  if (!nds || !nds->GPU.GetFramebuffers(&topBuffer, &bottomBuffer) ||
+      !topBuffer || !bottomBuffer)
+    return 0;
+
+  melonDS::u64 hash = 1469598103934665603ull;
+  const auto mixBytes = [&](const void *data, std::size_t length) {
+    const auto *bytes = reinterpret_cast<const melonDS::u8 *>(data);
+    for (std::size_t index = 0; index < length; index++) {
+      hash ^= bytes[index];
+      hash *= 1099511628211ull;
+    }
+  };
+
+  mixBytes(topBuffer, 256 * 192 * 4);
+  mixBytes(bottomBuffer, 256 * 192 * 4);
+  return hash;
+}
+
+melonDS::u64 HashMainRAMRange(melonDS::NDS *nds, melonDS::u32 address,
+                              melonDS::u32 length) {
+  if (!nds || !nds->MainRAM || address < kMainRAMBase)
+    return 0;
+
+  const melonDS::u32 offset = address - kMainRAMBase;
+  const melonDS::u32 ramLength = nds->MainRAMMask + 1;
+  if (offset >= ramLength)
+    return 0;
+
+  length = std::min(length, ramLength - offset);
+  melonDS::u64 hash = 1469598103934665603ull;
+  for (melonDS::u32 index = 0; index < length; index++) {
+    hash ^= nds->MainRAM[offset + index];
+    hash *= 1099511628211ull;
+  }
+  return hash;
+}
 
 void ReadCoreState(melonDS::NDS *nds, GameStateModel::GameStateSample &sample) {
   sample.StageID = nds->ARM9Read32(0x02085A14);
