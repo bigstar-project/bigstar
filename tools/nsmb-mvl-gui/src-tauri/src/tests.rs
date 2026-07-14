@@ -1,5 +1,6 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -11,10 +12,10 @@ use crate::models::{
 use crate::paths::allowed_log_dir;
 use crate::paths::load_match_history_document_content;
 use crate::processes::{
-    build_bridge_command, build_melon_command, melon_env, read_bridge_diagnostics,
-    read_melon_diagnostics, read_mvl_results, remove_inherited_melonds_env_keys,
-    run_bridge_signaling_smoke, session_status_inner, should_show_game_state_mismatch_in_gui,
-    start_match_resolved, stop_existing, LaunchPaths,
+    build_bridge_command, build_melon_command, finalize_ai_observation_v2_log, melon_env,
+    read_bridge_diagnostics, read_melon_diagnostics, read_mvl_results,
+    remove_inherited_melonds_env_keys, run_bridge_signaling_smoke, session_status_inner,
+    should_show_game_state_mismatch_in_gui, start_match_resolved, stop_existing, LaunchPaths,
 };
 use crate::roms::{reusable_rom_is_current, reusable_rom_marker_path, write_reusable_rom_marker};
 use crate::settings::{selected_stage, validate_request};
@@ -60,6 +61,47 @@ fn temp_log_dir(name: &str) -> PathBuf {
     let _ = fs::remove_dir_all(&path);
     fs::create_dir_all(&path).expect("create temp log dir");
     path
+}
+
+#[test]
+fn finalized_ai_observation_v2_log_is_gzipped_and_source_is_removed() {
+    let dir = temp_log_dir("ai-observation-v2-gzip");
+    let source = dir.join("ai-observations-v2.jsonl");
+    let gzip = dir.join("ai-observations-v2.jsonl.gz");
+    let content = "{\"frame\":1,\"held\":0}\n{\"frame\":2,\"held\":1}\n";
+    fs::write(&source, content).expect("write source AI log");
+
+    assert!(finalize_ai_observation_v2_log(&dir).expect("compress AI log"));
+    assert!(!source.exists());
+    assert!(gzip.is_file());
+
+    let file = fs::File::open(&gzip).expect("open gzip AI log");
+    let mut decoder = flate2::read::GzDecoder::new(file);
+    let mut decoded = String::new();
+    decoder
+        .read_to_string(&mut decoded)
+        .expect("decode gzip AI log");
+    assert_eq!(decoded, content);
+    assert!(!finalize_ai_observation_v2_log(&dir).expect("finalize again"));
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn failed_ai_observation_v2_compression_keeps_source_log() {
+    let dir = temp_log_dir("ai-observation-v2-gzip-failure");
+    let source = dir.join("ai-observations-v2.jsonl");
+    let gzip = dir.join("ai-observations-v2.jsonl.gz");
+    fs::write(&source, "{\"frame\":1}\n").expect("write source AI log");
+    fs::create_dir(&gzip).expect("block gzip destination with directory");
+
+    let error = finalize_ai_observation_v2_log(&dir).expect_err("compression must fail");
+    assert!(error.contains("置換できません"));
+    assert!(source.is_file());
+    assert!(gzip.is_dir());
+    assert!(!dir.join("ai-observations-v2.jsonl.gz.tmp").exists());
+
+    let _ = fs::remove_dir_all(dir);
 }
 
 fn fake_executable(dir: &Path, name: &str, should_sleep: bool) -> PathBuf {
@@ -1044,9 +1086,16 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
     );
     assert_eq!(launcher["runtime"]["os"], std::env::consts::OS);
 
+    let ai_log = dir.join("logs").join("ai-observations-v2.jsonl");
+    fs::write(&ai_log, "{\"frame\":1}\n").expect("write active AI log");
     stop_existing(&state).expect("stop fake match");
     let status = session_status_inner(&state).expect("status after stop");
     assert!(!status.active);
+    assert!(!ai_log.exists());
+    assert!(dir
+        .join("logs")
+        .join("ai-observations-v2.jsonl.gz")
+        .is_file());
 
     let _ = fs::remove_dir_all(dir);
 }
@@ -1080,12 +1129,19 @@ fn session_status_terminates_bridge_when_melon_exits() {
 
     let state = AppState::default();
     start_match_resolved(&state, request(Role::Host), paths).expect("start fake match");
+    let ai_log = dir.join("logs").join("ai-observations-v2.jsonl");
+    fs::write(&ai_log, "{\"frame\":1}\n").expect("write active AI log");
 
     for _ in 0..40 {
         let status = session_status_inner(&state).expect("status");
         if status.melon.as_deref() != Some("running") {
             assert_ne!(status.bridge.as_deref(), Some("running"));
             assert!(!status.active);
+            assert!(!ai_log.exists());
+            assert!(dir
+                .join("logs")
+                .join("ai-observations-v2.jsonl.gz")
+                .is_file());
             let _ = fs::remove_dir_all(dir);
             return;
         }

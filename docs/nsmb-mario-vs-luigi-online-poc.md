@@ -7,9 +7,10 @@
   - The GUI setting `AI用プレイログ` controls `LaunchRequest.ai_play_log_enabled` and is persisted in launcher settings. Default is off.
   - When enabled, GUI melonDS launches pass `MELONDS_NSML_AI_OBSERVATION_V2_LOG=<logdir>\ai-observations-v2.jsonl`, `MELONDS_NSML_AI_PLAY_LOG_INTERVAL=1`, `MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL=300`, and `MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER=0`.
   - melonDS keeps v1 behavior unchanged. The v2 stage filter is optional; when set, v2 records are written only while the sampled runtime state is MvL stage group 9 and stage ID 0.
+  - During a match the log remains plain JSONL so melonDS can append safely. When melonDS exits, the GUI observes the process exit or handles an explicit stop, writes `ai-observations-v2.jsonl.gz` through a temporary file, syncs and renames it, then deletes the source JSONL only after compression succeeds. A compression failure leaves the source JSONL intact.
 - Current blocker: none in the implementation; end-to-end GUI play verification remains.
-- Next action: confirm host/Mario and client/Luigi GUI launches both create `ai-observations-v2.jsonl` on stage 0 when the setting is on, create no v2 file when off, and do not write non-stage-0 frames when the match sequence moves to other stages.
-- Verification status: after integrating the latest `main`, `cargo fmt`, all 46 Rust tests, `cargo clippy-all`, and the GUI `corepack pnpm run ci` suite pass (37 unit tests, 52 browser tests, and 2 Playwright tests). Manual online-match verification is not yet complete.
+- Next action: confirm host/Mario and client/Luigi GUI launches create `ai-observations-v2.jsonl` while stage 0 is active, replace it with a readable `ai-observations-v2.jsonl.gz` after exit/stop, create no v2 file when the setting is off, and do not record non-stage-0 frames.
+- Verification status: `cargo fmt`, all 48 Rust tests, `cargo clippy-all`, and the GUI `corepack pnpm run ci` suite pass (37 unit tests, 52 browser tests, and 2 Playwright tests). Rust coverage verifies gzip contents, source deletion after success, source preservation on failure, idempotent finalization, explicit stop, and detected melonDS exit. Manual online-match verification is not yet complete.
 
 ## GUI target-wins=1 history recording fix - 2026-07-13
 
