@@ -20,12 +20,6 @@ param(
     [int]$InputDelayFrames = 16,
     [string]$MvlStageSequence = "",
     [string]$MvlMatchSeedSequence = "",
-    [switch]$DirectMvlBootLoadSM,
-    [switch]$DirectMvlBootPatchLoadSMOnly,
-    [switch]$DirectMvlBootCallUpdateSM,
-    [switch]$DirectMvlBootCallStartLoad,
-    [switch]$DirectMvlBootCallCourseSelect,
-    [switch]$DirectMvlBootCallObjectCourseSelect,
     [int]$InputMaxFrameLead = 2,
     [switch]$InputNetplayTrace,
     [int]$InputSendDelayFrames = 0,
@@ -376,24 +370,6 @@ if ($MvlStageSequence -ne "") {
 }
 if ($MvlMatchSeedSequence -ne "") {
     $common += @("-MvlMatchSeedSequence", "$MvlMatchSeedSequence")
-}
-if ($DirectMvlBootLoadSM) {
-    $common += "-DirectMvlBootLoadSM"
-}
-if ($DirectMvlBootPatchLoadSMOnly) {
-    $common += "-DirectMvlBootPatchLoadSMOnly"
-}
-if ($DirectMvlBootCallUpdateSM) {
-    $common += "-DirectMvlBootCallUpdateSM"
-}
-if ($DirectMvlBootCallStartLoad) {
-    $common += "-DirectMvlBootCallStartLoad"
-}
-if ($DirectMvlBootCallCourseSelect) {
-    $common += "-DirectMvlBootCallCourseSelect"
-}
-if ($DirectMvlBootCallObjectCourseSelect) {
-    $common += "-DirectMvlBootCallObjectCourseSelect"
 }
 if (-not $UseLanMP) {
     $common += "-NoLanMP"

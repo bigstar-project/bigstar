@@ -457,12 +457,6 @@ param(
     [int]$RequireMvlStage = -1,
     [string]$RequireMvlSceneSettings = "",
     [string]$RequireMvlLives = "",
-    [switch]$DirectMvlBootLoadSM,
-    [switch]$DirectMvlBootPatchLoadSMOnly,
-    [switch]$DirectMvlBootCallUpdateSM,
-    [switch]$DirectMvlBootCallStartLoad,
-    [switch]$DirectMvlBootCallCourseSelect,
-    [switch]$DirectMvlBootCallObjectCourseSelect,
     [switch]$SafeStartLoadCall,
     [int]$SafeStartLoadCallFrame = 1900,
     [string]$SafeStartLoadCallPC = "0x0200F944",
@@ -525,11 +519,6 @@ param(
     [switch]$PacketBridgeSafeCreateLoadGameSM,
     [int]$PacketBridgeSafeCreateLoadGameSMFrame = 0,
     [string]$PacketBridgeSafeCreateLoadGameSMPC = "0x02151E94",
-    [switch]$ForceCourseSelectFactory,
-    [switch]$ForceCourseSelectFactoryClientOnly,
-    [int]$ForceCourseSelectFactoryFrame = 2300,
-    [int]$HostForceCourseSelectFactoryPlayerArg = 1,
-    [int]$ClientForceCourseSelectFactoryPlayerArg = 0,
     [switch]$CallTrace,
     [string]$CallTraceAddrs = "",
     [int]$CallTraceStartFrame = 0,
@@ -1063,12 +1052,6 @@ function Start-MelonLANProcess {
         $env:MELONDS_NSML_DIRECT_MVL_BOOT_FRAME = "$DirectMvlBootFrame"
         $env:MELONDS_NSML_DIRECT_MVL_BOOT_STAGE = "$DirectMvlBootStage"
         $env:MELONDS_NSML_DIRECT_MVL_BOOT_PLAYER_ID = $(if ($Role -eq "client") { "1" } else { "0" })
-        if ($DirectMvlBootLoadSM) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_LOAD_SM = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_LOAD_SM -ErrorAction SilentlyContinue }
-        if ($DirectMvlBootPatchLoadSMOnly) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_PATCH_LOAD_SM_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_PATCH_LOAD_SM_ONLY -ErrorAction SilentlyContinue }
-        if ($DirectMvlBootCallUpdateSM) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_CALL_UPDATE_SM = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_UPDATE_SM -ErrorAction SilentlyContinue }
-        if ($DirectMvlBootCallStartLoad) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_CALL_START_LOAD = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_START_LOAD -ErrorAction SilentlyContinue }
-        if ($DirectMvlBootCallCourseSelect) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT -ErrorAction SilentlyContinue }
-        if ($DirectMvlBootCallObjectCourseSelect) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT -ErrorAction SilentlyContinue }
     } else {
         Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_HOST_ONLY -ErrorAction SilentlyContinue
@@ -1076,19 +1059,7 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_STAGE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_PLAYER_ID -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_LOAD_SM -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_PATCH_LOAD_SM_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_UPDATE_SM -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_START_LOAD -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT -ErrorAction SilentlyContinue
     }
-    if ($DirectMvlBootLoadSM) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_LOAD_SM = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_LOAD_SM -ErrorAction SilentlyContinue }
-    if ($DirectMvlBootPatchLoadSMOnly) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_PATCH_LOAD_SM_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_PATCH_LOAD_SM_ONLY -ErrorAction SilentlyContinue }
-    if ($DirectMvlBootCallUpdateSM) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_CALL_UPDATE_SM = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_UPDATE_SM -ErrorAction SilentlyContinue }
-    if ($DirectMvlBootCallStartLoad) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_CALL_START_LOAD = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_START_LOAD -ErrorAction SilentlyContinue }
-    if ($DirectMvlBootCallCourseSelect) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT -ErrorAction SilentlyContinue }
-    if ($DirectMvlBootCallObjectCourseSelect) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT -ErrorAction SilentlyContinue }
     if ($SafeStartLoadCall) {
         $env:MELONDS_NSML_SAFE_START_LOAD_CALL = "1"
         $env:MELONDS_NSML_SAFE_START_LOAD_CALL_FRAME = "$SafeStartLoadCallFrame"
@@ -1362,19 +1333,6 @@ function Start-MelonLANProcess {
     } else {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_RUN_VSCONNECT_ON_UPDATE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_RUN_VSCONNECT_ON_UPDATE_START_FRAME -ErrorAction SilentlyContinue
-    }
-    if ($ForceCourseSelectFactory -and (-not $ForceCourseSelectFactoryClientOnly -or $Role -eq "client")) {
-        $env:MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY = "1"
-        $env:MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY_FRAME = "$ForceCourseSelectFactoryFrame"
-        if ($Role -eq "host") {
-            $env:MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY_PLAYER_ARG = "$HostForceCourseSelectFactoryPlayerArg"
-        } else {
-            $env:MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY_PLAYER_ARG = "$ClientForceCourseSelectFactoryPlayerArg"
-        }
-    } else {
-        Remove-Item Env:\MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY_PLAYER_ARG -ErrorAction SilentlyContinue
     }
     if ($GuardPlayerModelRenderPtrs) {
         $env:MELONDS_NSML_GUARD_PLAYER_MODEL_RENDER_PTRS = "1"

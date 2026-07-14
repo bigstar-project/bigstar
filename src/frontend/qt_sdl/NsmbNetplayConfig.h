@@ -134,15 +134,6 @@ struct MvlConfig {
   bool AutoRestartAfterResult = false;
   std::uint32_t AutoRestartDelayFrames = 120;
   std::uint32_t AutoRestartBootstrapFrame = 120;
-  bool UseLoadGameStateMachine = false;
-  bool PatchLoadGameStateMachineOnly = false;
-  bool CallUpdateLoadGameStateMachine = false;
-  bool CallStartLoadLevel = false;
-  bool CallCreateCourseSelect = false;
-  bool CallObjectCourseSelect = false;
-  bool ForceCourseSelectFactory = false;
-  std::uint32_t ForceCourseSelectFactoryFrame = 0;
-  int ForceCourseSelectFactoryPlayerArg = -1;
 };
 
 struct StateSyncConfig {

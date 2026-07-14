@@ -379,8 +379,6 @@ void TestMvlConfigDefaults() {
   CHECK(!config.AutoRestartAfterResult);
   CHECK(config.AutoRestartDelayFrames == 120u);
   CHECK(config.AutoRestartBootstrapFrame == 120u);
-  CHECK(!config.UseLoadGameStateMachine);
-  CHECK(!config.ForceCourseSelectFactory);
 }
 
 void TestMvlConfigReadsClampsAndPreservesPriority() {
@@ -403,15 +401,6 @@ void TestMvlConfigReadsClampsAndPreservesPriority() {
       {"MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT", "1"},
       {"MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES", "-1"},
       {"MELONDS_NSML_MVL_AUTO_RESTART_BOOTSTRAP_FRAME", "2000000"},
-      {"MELONDS_NSML_DIRECT_MVL_BOOT_LOAD_SM", "1"},
-      {"MELONDS_NSML_DIRECT_MVL_BOOT_PATCH_LOAD_SM_ONLY", "1"},
-      {"MELONDS_NSML_DIRECT_MVL_BOOT_CALL_UPDATE_SM", "1"},
-      {"MELONDS_NSML_DIRECT_MVL_BOOT_CALL_START_LOAD", "1"},
-      {"MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT", "1"},
-      {"MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT", "1"},
-      {"MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY", "1"},
-      {"MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY_FRAME", "-5"},
-      {"MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY_PLAYER_ARG", "3"},
   };
 
   auto config = NsmbNetplayPoC::Config::LoadMvlConfig(environment);
@@ -436,15 +425,6 @@ void TestMvlConfigReadsClampsAndPreservesPriority() {
   CHECK(config.AutoRestartAfterResult);
   CHECK(config.AutoRestartDelayFrames == 1u);
   CHECK(config.AutoRestartBootstrapFrame == 1000000u);
-  CHECK(config.UseLoadGameStateMachine);
-  CHECK(config.PatchLoadGameStateMachineOnly);
-  CHECK(config.CallUpdateLoadGameStateMachine);
-  CHECK(config.CallStartLoadLevel);
-  CHECK(config.CallCreateCourseSelect);
-  CHECK(config.CallObjectCourseSelect);
-  CHECK(config.ForceCourseSelectFactory);
-  CHECK(config.ForceCourseSelectFactoryFrame == 0u);
-  CHECK(config.ForceCourseSelectFactoryPlayerArg == 3);
 
   environment.Values["MELONDS_NSML_MVL_SCENE_SETTINGS"] = "invalid";
   config = NsmbNetplayPoC::Config::LoadMvlConfig(environment);

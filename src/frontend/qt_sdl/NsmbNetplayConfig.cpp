@@ -438,25 +438,6 @@ MvlConfig LoadMvlConfig(const Environment &environment) {
                          "MELONDS_NSML_MVL_AUTO_RESTART_BOOTSTRAP_FRAME", 120),
                  0, 1000000));
 
-  config.UseLoadGameStateMachine =
-      ReadFlag(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_LOAD_SM");
-  config.PatchLoadGameStateMachineOnly =
-      ReadFlag(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_PATCH_LOAD_SM_ONLY");
-  config.CallUpdateLoadGameStateMachine =
-      ReadFlag(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_CALL_UPDATE_SM");
-  config.CallStartLoadLevel =
-      ReadFlag(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_CALL_START_LOAD");
-  config.CallCreateCourseSelect =
-      ReadFlag(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT");
-  config.CallObjectCourseSelect = ReadFlag(
-      environment, "MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT");
-  config.ForceCourseSelectFactory =
-      ReadFlag(environment, "MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY");
-  config.ForceCourseSelectFactoryFrame = static_cast<std::uint32_t>(std::max(
-      0, ReadInt(environment, "MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY_FRAME",
-                 0)));
-  config.ForceCourseSelectFactoryPlayerArg = ReadInt(
-      environment, "MELONDS_NSML_FORCE_COURSE_SELECT_FACTORY_PLAYER_ARG", -1);
   return config;
 }
 
