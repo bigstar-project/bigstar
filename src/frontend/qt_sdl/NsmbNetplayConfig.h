@@ -174,10 +174,6 @@ enum class RollbackBackend {
   CoreFrameDelta,
   CorePreimage,
   TinyCorePreimage,
-  NSMBRanges,
-  NSMBCoreRanges,
-  NSMBTinyCoreRanges,
-  ARM9RAM,
 };
 
 struct RollbackConfig {
@@ -200,20 +196,6 @@ struct RollbackConfig {
   int MainRAMPageSize = 4096;
   int CoreSkipMask = 0;
   int TinyCoreFlags = 0;
-  bool NSMBWideRanges = false;
-  bool NSMBDeltaDiscoveredRanges = false;
-  bool NSMBActorArenaRanges = false;
-  bool NSMBArm9StackRange = false;
-  bool NSMBSkipInputRanges = false;
-  bool NSMBRestoreDiffTrace = false;
-  bool NSMBProcessListRanges = false;
-  bool NSMBHeapScanRanges = true;
-  int NSMBScanInterval = 1;
-  int NSMBHeapScanInterval = 1;
-  bool DeltaPageTrace = false;
-  std::uint32_t DeltaPageTraceStartFrame = 0;
-  std::uint32_t DeltaPageTraceEndFrame = 0;
-  int DeltaPageTraceMaxRuns = 12;
   int ResimulateDelayFrames = 0;
   int MaxResimFrames = 0;
 };

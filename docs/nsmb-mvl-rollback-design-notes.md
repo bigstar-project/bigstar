@@ -1,5 +1,11 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
+## 2026-07-15 rejected backend cleanup
+
+The historical sections below retain the experiments and measurements that led to the current design, but `nsmbranges`, `nsmbcoreranges`, `nsmbtinycore`, and `arm9ram` are no longer supported runtime backends. They had failed correctness checks or served only as negative controls, and no current GUI path, refactor regression tier, or practical rollback candidate selected them. Their dedicated fixed/dynamic NSMB range scanner, ARM9-only format, diagnostics, config variables, and launcher/sweep branches were removed during the `NsmbNetplayPoC` refactor.
+
+The retained runtime backends are `savestate`, `corelite`, `coresparse`, `coredelta`, `coreframedelta`, `corepreimage`, and `tinycorepreimage`. The GUI rollback toggle still selects `coredelta`; the refactor rollback golden and practical candidate use `tinycorepreimage`. Old command lines in later historical sections are evidence records, not currently runnable recommendations.
+
 ## 2026-06-07 GUI rollback settings exposure
 
 Current GUI default remains the non-rollback input-delay path:

@@ -183,7 +183,6 @@ if ($PlanDActorSnapshot) {
     if (-not $PSBoundParameters.ContainsKey('GameplayHeartbeatInterval')) { $GameplayHeartbeatInterval = 120 }
 }
 
-$isNsmbTinyCoreRollback = $RollbackBackend -eq "nsmbtinycore" -or $RollbackBackend -eq "nsmb-tiny-core"
 $isTinyCorePreimageRollback = $RollbackBackend -eq "tinycorepreimage" -or $RollbackBackend -eq "tiny-core-preimage"
 
 if ($LowLatencyRollback -and $isTinyCorePreimageRollback) {
@@ -191,15 +190,6 @@ if ($LowLatencyRollback -and $isTinyCorePreimageRollback) {
     if (-not $PSBoundParameters.ContainsKey('RollbackWindow')) { $RollbackWindow = 32 }
     if (-not $PSBoundParameters.ContainsKey('RollbackCheckpointInterval')) { $RollbackCheckpointInterval = 1 }
     if (-not $PSBoundParameters.ContainsKey('RollbackInputWaitUs')) { $RollbackInputWaitUs = 1500 }
-    if (-not $PSBoundParameters.ContainsKey('NetworkPumpThread')) { $NetworkPumpThread = $true }
-    if (-not $PSBoundParameters.ContainsKey('NetworkPumpSleepUs')) { $NetworkPumpSleepUs = 50 }
-}
-
-if ($LowLatencyRollback -and $isNsmbTinyCoreRollback) {
-    if (-not $PSBoundParameters.ContainsKey('InputMaxFrameLead')) { $InputMaxFrameLead = 1 }
-    if (-not $PSBoundParameters.ContainsKey('RollbackCheckpointInterval')) { $RollbackCheckpointInterval = 1 }
-    if (-not $PSBoundParameters.ContainsKey('RollbackInputWaitUs')) { $RollbackInputWaitUs = 2500 }
-    if (-not $PSBoundParameters.ContainsKey('RollbackMaxResimFrames')) { $RollbackMaxResimFrames = 1 }
     if (-not $PSBoundParameters.ContainsKey('NetworkPumpThread')) { $NetworkPumpThread = $true }
     if (-not $PSBoundParameters.ContainsKey('NetworkPumpSleepUs')) { $NetworkPumpSleepUs = 50 }
 }
@@ -454,37 +444,13 @@ if ($LowLatencyRollback) {
         Remove-Item Env:\MELONDS_NSML_FPS_SPIKE_TRACE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PERF_SPIKE_PHASE_TRACE -ErrorAction SilentlyContinue
     }
-    if ($isNsmbTinyCoreRollback) {
-        $env:MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
-        $env:MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
-        $env:MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
-        $env:MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
-        $env:MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
-        $env:MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
-        $env:MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
-        $env:MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
-        $env:MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
-        if ($RollbackTinyCoreFlags -eq "") { $RollbackTinyCoreFlags = "0x241" }
-        $env:MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "$RollbackTinyCoreFlags"
-    } elseif ($isTinyCorePreimageRollback) {
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL -ErrorAction SilentlyContinue
+    if ($isTinyCorePreimageRollback) {
         $env:MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
         $env:MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
         $env:MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
         if ($RollbackTinyCoreFlags -eq "") { $RollbackTinyCoreFlags = "0x241" }
         $env:MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "$RollbackTinyCoreFlags"
     } else {
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SUPPRESS_PU_DEBUG -ErrorAction SilentlyContinue

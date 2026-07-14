@@ -601,9 +601,6 @@ void TestRollbackConfigDefaultsAndBackendAliases() {
   CHECK(config.CheckpointInterval == 1);
   CHECK(config.DeltaKeyframeInterval == 10);
   CHECK(config.MainRAMPageSize == 4096);
-  CHECK(config.NSMBHeapScanRanges);
-  CHECK(config.NSMBScanInterval == 1);
-  CHECK(config.NSMBHeapScanInterval == 1);
 
   const std::pair<const char *, RollbackBackend> aliases[] = {
       {"core-lite", RollbackBackend::CoreLite},
@@ -612,10 +609,8 @@ void TestRollbackConfigDefaultsAndBackendAliases() {
       {"coreframedelta", RollbackBackend::CoreFrameDelta},
       {"core-preimage", RollbackBackend::CorePreimage},
       {"tiny-core-preimage", RollbackBackend::TinyCorePreimage},
-      {"nsmb-ranges", RollbackBackend::NSMBRanges},
-      {"nsmbcoreranges", RollbackBackend::NSMBCoreRanges},
-      {"nsmb-tiny-core", RollbackBackend::NSMBTinyCoreRanges},
-      {"ram", RollbackBackend::ARM9RAM},
+      {"nsmb-ranges", RollbackBackend::Savestate},
+      {"ram", RollbackBackend::Savestate},
       {"unknown", RollbackBackend::Savestate},
   };
   for (const auto &alias : aliases) {
@@ -646,9 +641,6 @@ void TestRollbackConfigReadsClampsAndDependencies() {
       {"MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE", "300"},
       {"MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK", "99"},
       {"MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS", "9999"},
-      {"MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES", "0"},
-      {"MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL", "77"},
-      {"MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE_MAX_RUNS", "0"},
       {"MELONDS_NSML_ROLLBACK_RESIMULATE_DELAY_FRAMES", "99"},
       {"MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES", "-1"},
   };
@@ -672,10 +664,6 @@ void TestRollbackConfigReadsClampsAndDependencies() {
   CHECK(config.MainRAMPageSize == 4096);
   CHECK(config.CoreSkipMask == 31);
   CHECK(config.TinyCoreFlags == 2047);
-  CHECK(!config.NSMBHeapScanRanges);
-  CHECK(config.NSMBScanInterval == 77);
-  CHECK(config.NSMBHeapScanInterval == 77);
-  CHECK(config.DeltaPageTraceMaxRuns == 1);
   CHECK(config.ResimulateDelayFrames == 30);
   CHECK(config.MaxResimFrames == 0);
 }

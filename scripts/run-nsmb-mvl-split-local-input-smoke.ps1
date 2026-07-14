@@ -249,7 +249,6 @@ if ($RollbackInputWaitUs -gt 0) {
 } else {
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_INPUT_WAIT_US -ErrorAction SilentlyContinue
 }
-$isNsmbTinyCoreRollback = $RollbackBackend -eq "nsmbtinycore" -or $RollbackBackend -eq "nsmb-tiny-core"
 $isTinyCorePreimageRollback = $RollbackBackend -eq "tinycorepreimage" -or $RollbackBackend -eq "tiny-core-preimage"
 if ($Rollback -and -not $PSBoundParameters.ContainsKey('RollbackResimulate')) {
     $RollbackResimulate = $true
@@ -259,17 +258,12 @@ if ($RollbackSkipIntermediateResimCheckpoints) {
 } else {
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS -ErrorAction SilentlyContinue
 }
-if ($Rollback -and ($isTinyCorePreimageRollback -or $isNsmbTinyCoreRollback)) {
+if ($Rollback -and $isTinyCorePreimageRollback) {
     $env:MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
     $env:MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
     $env:MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
     if ($RollbackTinyCoreFlags -eq "") { $RollbackTinyCoreFlags = "0x241" }
     $env:MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "$RollbackTinyCoreFlags"
-} elseif ($Rollback -and $RollbackBackend -match "^(nsmbcoreranges|nsmb-core-ranges)$") {
-    $env:MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
-    Remove-Item Env:\MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET -ErrorAction SilentlyContinue
-    Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER -ErrorAction SilentlyContinue
-    Remove-Item Env:\MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS -ErrorAction SilentlyContinue
 } else {
     Remove-Item Env:\MELONDS_NSML_SUPPRESS_PU_DEBUG -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET -ErrorAction SilentlyContinue

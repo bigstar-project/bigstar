@@ -557,17 +557,6 @@ RollbackConfig LoadRollbackConfig(const Environment &environment) {
   else if (!std::strcmp(backend, "tinycorepreimage") ||
            !std::strcmp(backend, "tiny-core-preimage"))
     config.Backend = RollbackBackend::TinyCorePreimage;
-  else if (!std::strcmp(backend, "nsmbranges") ||
-           !std::strcmp(backend, "nsmb-ranges"))
-    config.Backend = RollbackBackend::NSMBRanges;
-  else if (!std::strcmp(backend, "nsmbcoreranges") ||
-           !std::strcmp(backend, "nsmb-core-ranges"))
-    config.Backend = RollbackBackend::NSMBCoreRanges;
-  else if (!std::strcmp(backend, "nsmbtinycore") ||
-           !std::strcmp(backend, "nsmb-tiny-core"))
-    config.Backend = RollbackBackend::NSMBTinyCoreRanges;
-  else if (!std::strcmp(backend, "arm9ram") || !std::strcmp(backend, "ram"))
-    config.Backend = RollbackBackend::ARM9RAM;
 
   config.Window = std::clamp(
       ReadInt(environment, "MELONDS_NSML_ROLLBACK_WINDOW", 20), 1, 180);
@@ -587,42 +576,6 @@ RollbackConfig LoadRollbackConfig(const Environment &environment) {
   config.TinyCoreFlags = std::clamp(
       ReadInt(environment, "MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS", 0), 0,
       2047);
-  config.NSMBWideRanges =
-      ReadFlag(environment, "MELONDS_NSML_ROLLBACK_NSMB_WIDE_RANGES");
-  config.NSMBDeltaDiscoveredRanges = ReadFlag(
-      environment, "MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES");
-  config.NSMBActorArenaRanges =
-      ReadFlag(environment, "MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES");
-  config.NSMBArm9StackRange =
-      ReadFlag(environment, "MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE");
-  config.NSMBSkipInputRanges =
-      ReadFlag(environment, "MELONDS_NSML_ROLLBACK_NSMB_SKIP_INPUT_RANGES");
-  config.NSMBRestoreDiffTrace =
-      ReadFlag(environment, "MELONDS_NSML_ROLLBACK_NSMB_RESTORE_DIFF_TRACE");
-  config.NSMBProcessListRanges =
-      ReadFlag(environment, "MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES");
-  config.NSMBHeapScanRanges =
-      ReadInt(environment, "MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES", 1) !=
-      0;
-  config.NSMBScanInterval = std::clamp(
-      ReadInt(environment, "MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL", 1), 1,
-      600);
-  config.NSMBHeapScanInterval = std::clamp(
-      ReadInt(environment, "MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_INTERVAL",
-              config.NSMBScanInterval),
-      1, 1800);
-  config.DeltaPageTrace =
-      ReadFlag(environment, "MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE");
-  config.DeltaPageTraceStartFrame = static_cast<std::uint32_t>(std::max(
-      0, ReadInt(environment,
-                 "MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE_START_FRAME", 0)));
-  config.DeltaPageTraceEndFrame = static_cast<std::uint32_t>(std::max(
-      0, ReadInt(environment,
-                 "MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE_END_FRAME", 0)));
-  config.DeltaPageTraceMaxRuns =
-      std::clamp(ReadInt(environment,
-                         "MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE_MAX_RUNS", 12),
-                 1, 80);
   config.ResimulateDelayFrames = std::clamp(
       ReadInt(environment, "MELONDS_NSML_ROLLBACK_RESIMULATE_DELAY_FRAMES", 0),
       0, 30);
