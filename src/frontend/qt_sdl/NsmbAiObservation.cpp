@@ -22,7 +22,7 @@ RuntimeHazardThreat MostDangerousRuntimeHazard(
 {
     return NsmbRuleAI::FindRuntimeHazard(
         {
-            G.RuleAIHorizontalWrapWidth,
+            G.AI.Rule.HorizontalWrapWidth,
             horizontalRange,
             verticalRange,
             closeRange,
@@ -140,7 +140,7 @@ bool AIStarInvincibleCandidate(
 std::int64_t AIWrappedDeltaX(std::int64_t x, std::int64_t origin)
 {
     std::int64_t dx = x - origin;
-    const std::int64_t wrapWidth = G.RuleAIHorizontalWrapWidth;
+    const std::int64_t wrapWidth = G.AI.Rule.HorizontalWrapWidth;
     if (wrapWidth <= 0)
         return dx;
     while (dx < -(wrapWidth / 2))
@@ -414,7 +414,7 @@ bool IsInCameraRect(
     melonDS::u32 cameraHeight)
 {
     std::int64_t sx = static_cast<std::int64_t>(SignedU32(x)) - SignedU32(cameraX);
-    const std::int64_t wrapWidth = G.RuleAIHorizontalWrapWidth;
+    const std::int64_t wrapWidth = G.AI.Rule.HorizontalWrapWidth;
     if (wrapWidth > 0)
     {
         while (sx < 0)
@@ -437,7 +437,7 @@ void WriteAIScreenJson(
     melonDS::u32 cameraHeight)
 {
     std::int64_t screenX = static_cast<std::int64_t>(SignedU32(x)) - SignedU32(cameraX);
-    const std::int64_t wrapWidth = G.RuleAIHorizontalWrapWidth;
+    const std::int64_t wrapWidth = G.AI.Rule.HorizontalWrapWidth;
     if (wrapWidth > 0)
     {
         while (screenX < 0)
@@ -1773,7 +1773,7 @@ void WriteAIVisualSummaryJson(
             visibleCamera0++;
         const std::int64_t camera0X =
             (static_cast<std::int64_t>(SignedU32(entry.Actor.PosX)) - SignedU32(sample.StageCameraGlobalX0) +
-                G.RuleAIHorizontalWrapWidth) % std::max(1, G.RuleAIHorizontalWrapWidth);
+                G.AI.Rule.HorizontalWrapWidth) % std::max(1, G.AI.Rule.HorizontalWrapWidth);
         if (camera0X >= 0 && camera0X < SignedU32(sample.StageCameraGlobalWidth0))
             visibleCamera0X++;
         if (IsInCameraRect(
@@ -1786,7 +1786,7 @@ void WriteAIVisualSummaryJson(
             visibleCamera1++;
         const std::int64_t camera1X =
             (static_cast<std::int64_t>(SignedU32(entry.Actor.PosX)) - SignedU32(sample.StageCameraGlobalX1) +
-                G.RuleAIHorizontalWrapWidth) % std::max(1, G.RuleAIHorizontalWrapWidth);
+                G.AI.Rule.HorizontalWrapWidth) % std::max(1, G.AI.Rule.HorizontalWrapWidth);
         if (camera1X >= 0 && camera1X < SignedU32(sample.StageCameraGlobalWidth1))
             visibleCamera1X++;
     }
@@ -2265,7 +2265,7 @@ bool ApplyImitationAIHazardGuard(
     std::int64_t& outHazardDx,
     std::int64_t& outHazardDy)
 {
-    if (!G.ImitationAIHazardGuardEnabled || player < 0 || player > 1)
+    if (!G.AI.Imitation.HazardGuardEnabled || player < 0 || player > 1)
         return false;
 
     const bool p0 = player == 0;
@@ -2285,9 +2285,9 @@ bool ApplyImitationAIHazardGuard(
         selfX,
         selfY,
         selfVelX,
-        G.ImitationAIHazardGuardHorizontalRange,
-        G.ImitationAIHazardGuardVerticalRange,
-        G.ImitationAIHazardGuardCloseRange);
+        G.AI.Imitation.HazardGuardHorizontalRange,
+        G.AI.Imitation.HazardGuardVerticalRange,
+        G.AI.Imitation.HazardGuardCloseRange);
     if (!threat.Found)
         return false;
     outHazardDx = threat.Dx;
@@ -2312,7 +2312,7 @@ bool ApplyImitationAIHazardGuard(
     const bool pushWall = (collisionFlag & 0x00000004u) != 0;
     const bool hazardOnLeft = outHazardDx < 0;
     const bool escapeBlocked = hazardOnLeft ? (blockedRight || pushWall) : (blockedLeft || pushWall);
-    const bool close = abs64(outHazardDx) <= G.ImitationAIHazardGuardCloseRange;
+    const bool close = abs64(outHazardDx) <= G.AI.Imitation.HazardGuardCloseRange;
     const bool movingTowardHazard =
         (hazardOnLeft && (held & kHeldLeft) != 0) ||
         (!hazardOnLeft && (held & kHeldRight) != 0);
@@ -2658,12 +2658,12 @@ bool RuntimeFeatureValue(
                 continue;
             if (IsInCameraRect(entry.Actor.PosX, entry.Actor.PosY, sample.StageCameraGlobalX0, sample.StageCameraGlobalY0, sample.StageCameraGlobalWidth0, sample.StageCameraGlobalHeight0))
                 visible0++;
-            const std::int64_t camera0X = (static_cast<std::int64_t>(SignedU32(entry.Actor.PosX)) - SignedU32(sample.StageCameraGlobalX0) + G.RuleAIHorizontalWrapWidth) % std::max(1, G.RuleAIHorizontalWrapWidth);
+            const std::int64_t camera0X = (static_cast<std::int64_t>(SignedU32(entry.Actor.PosX)) - SignedU32(sample.StageCameraGlobalX0) + G.AI.Rule.HorizontalWrapWidth) % std::max(1, G.AI.Rule.HorizontalWrapWidth);
             if (camera0X >= 0 && camera0X < SignedU32(sample.StageCameraGlobalWidth0))
                 visible0x++;
             if (IsInCameraRect(entry.Actor.PosX, entry.Actor.PosY, sample.StageCameraGlobalX1, sample.StageCameraGlobalY1, sample.StageCameraGlobalWidth1, sample.StageCameraGlobalHeight1))
                 visible1++;
-            const std::int64_t camera1X = (static_cast<std::int64_t>(SignedU32(entry.Actor.PosX)) - SignedU32(sample.StageCameraGlobalX1) + G.RuleAIHorizontalWrapWidth) % std::max(1, G.RuleAIHorizontalWrapWidth);
+            const std::int64_t camera1X = (static_cast<std::int64_t>(SignedU32(entry.Actor.PosX)) - SignedU32(sample.StageCameraGlobalX1) + G.AI.Rule.HorizontalWrapWidth) % std::max(1, G.AI.Rule.HorizontalWrapWidth);
             if (camera1X >= 0 && camera1X < SignedU32(sample.StageCameraGlobalWidth1))
                 visible1x++;
         }
@@ -2796,7 +2796,7 @@ bool BuildRuntimeImitationFeatures(
                 missingNames.insert(model.FeatureNames[i]);
         }
     }
-    if (G.ImitationAIWarnMissingFeatures && missing > 0 &&
+    if (G.AI.Imitation.WarnMissingFeatures && missing > 0 &&
         G.ImitationAIFeaturesFilled == 0 && G.ImitationAIFeaturesMissing == 0)
     {
         std::printf(
@@ -3195,7 +3195,7 @@ melonDS::u32 ApplyImitationAIFireTapRelease(
         return held;
 
     constexpr melonDS::u32 kHeldY = 1u << 11;
-    if ((G.ImitationAIAllowedHeldMask & kHeldY) == 0)
+    if ((G.AI.Imitation.AllowedHeldMask & kHeldY) == 0)
     {
         G.ImitationAIFireTapPressNext[instanceID][player] = false;
         G.ImitationAILastHeld[instanceID][player] = held;
@@ -3252,14 +3252,14 @@ melonDS::u32 ApplyImitationAINeutralHold(
         G.ImitationAILastNonZeroFrame[instanceID][player] = frame;
         return held;
     }
-    if (G.ImitationAINeutralHoldFrames <= 0 || !G.ImitationAILastNonZeroHeldValid[instanceID][player])
+    if (G.AI.Imitation.NeutralHoldFrames <= 0 || !G.ImitationAILastNonZeroHeldValid[instanceID][player])
         return held;
     const melonDS::u32 lastFrame = G.ImitationAILastNonZeroFrame[instanceID][player];
     if (frame >= lastFrame &&
-        frame - lastFrame <= static_cast<melonDS::u32>(G.ImitationAINeutralHoldFrames))
+        frame - lastFrame <= static_cast<melonDS::u32>(G.AI.Imitation.NeutralHoldFrames))
     {
         adjusted = true;
-        return G.ImitationAILastNonZeroHeld[instanceID][player] & G.ImitationAIAllowedHeldMask;
+        return G.ImitationAILastNonZeroHeld[instanceID][player] & G.AI.Imitation.AllowedHeldMask;
     }
     return held;
 }
@@ -3272,9 +3272,9 @@ InputState ApplyImitationAIInput(
     const InputState& fallback)
 {
     auto traceFallback = [&](const char* reason) {
-        if (G.ImitationAITraceEnabled &&
-            (G.ImitationAITraceInterval <= 1 ||
-                (frame % static_cast<melonDS::u32>(G.ImitationAITraceInterval)) == 0))
+        if (G.AI.Imitation.TraceEnabled &&
+            (G.AI.Imitation.TraceInterval <= 1 ||
+                (frame % static_cast<melonDS::u32>(G.AI.Imitation.TraceInterval)) == 0))
         {
             std::printf(
                 "NSMB ImitationAI: inst=%d frame=%u player=%d fallback=%s\n",
@@ -3285,11 +3285,11 @@ InputState ApplyImitationAIInput(
         }
         return fallback;
     };
-    if (!G.ImitationAIEnabled || !G.ImitationAIModelLoaded || frame < G.ImitationAIStartFrame || !nds || !nds->MainRAM)
+    if (!G.ImitationAIEnabled || !G.ImitationAIModelLoaded || frame < G.AI.Imitation.StartFrame || !nds || !nds->MainRAM)
         return traceFallback("disabled");
-    if (G.ImitationAIHostOnly && G.NetRole != Role::Host)
+    if (G.AI.Imitation.HostOnly && G.NetRole != Role::Host)
         return traceFallback("hostOnly");
-    if (G.ImitationAIClientOnly && G.NetRole != Role::Client)
+    if (G.AI.Imitation.ClientOnly && G.NetRole != Role::Client)
         return traceFallback("clientOnly");
     if (!ImitationAIProvidesInputForPlayer(player))
         return traceFallback("playerFilter");
@@ -3302,18 +3302,18 @@ InputState ApplyImitationAIInput(
     }
 
     if (G.ImitationAITorchCompactModelLoaded &&
-        G.ImitationAIInferInterval > 1 &&
+        G.AI.Imitation.InferInterval > 1 &&
         instanceID >= 0 && instanceID < 16 && player >= 0 && player < 2 &&
         G.ImitationAICachedHeldValid[instanceID][player] &&
         frame >= G.ImitationAICachedFrame[instanceID][player] &&
         frame - G.ImitationAICachedFrame[instanceID][player] <
-            static_cast<melonDS::u32>(G.ImitationAIInferInterval))
+            static_cast<melonDS::u32>(G.AI.Imitation.InferInterval))
     {
-        const melonDS::u32 held = G.ImitationAICachedHeld[instanceID][player] & G.ImitationAIAllowedHeldMask;
+        const melonDS::u32 held = G.ImitationAICachedHeld[instanceID][player] & G.AI.Imitation.AllowedHeldMask;
         InputState input = BuildImitationAIInputFromHeld(fallback, held);
-        if (G.ImitationAITraceEnabled &&
-            (G.ImitationAITraceInterval <= 1 ||
-                (frame % static_cast<melonDS::u32>(G.ImitationAITraceInterval)) == 0))
+        if (G.AI.Imitation.TraceEnabled &&
+            (G.AI.Imitation.TraceInterval <= 1 ||
+                (frame % static_cast<melonDS::u32>(G.AI.Imitation.TraceInterval)) == 0))
         {
             std::printf(
                 "NSMB ImitationAI: inst=%d frame=%u player=%d model=torchCompact cachedHeld=0x%03X keyMask=0x%03X inferInterval=%d cachedFrame=%u\n",
@@ -3322,7 +3322,7 @@ InputState ApplyImitationAIInput(
                 player,
                 held,
                 input.KeyMask,
-                G.ImitationAIInferInterval,
+                G.AI.Imitation.InferInterval,
                 G.ImitationAICachedFrame[instanceID][player]);
         }
         return input;
@@ -3346,7 +3346,7 @@ InputState ApplyImitationAIInput(
         }
         const NsmbImitationAI::CompactActionPrediction prediction =
             NsmbImitationAI::PredictTorchCompactPolicy(G.ImitationAITorchCompactModel, features);
-        melonDS::u32 held = prediction.Held & G.ImitationAIAllowedHeldMask;
+        melonDS::u32 held = prediction.Held & G.AI.Imitation.AllowedHeldMask;
         const bool firePressIntent = CompactPredictionHasFirePress(G.ImitationAITorchCompactModel, prediction);
         std::int64_t guardHazardDx = 0;
         std::int64_t guardHazardDy = 0;
@@ -3364,9 +3364,9 @@ InputState ApplyImitationAIInput(
         }
         InputState input = BuildImitationAIInputFromHeld(fallback, held);
 
-        if (G.ImitationAITraceEnabled &&
-            (G.ImitationAITraceInterval <= 1 ||
-                (frame % static_cast<melonDS::u32>(G.ImitationAITraceInterval)) == 0))
+        if (G.AI.Imitation.TraceEnabled &&
+            (G.AI.Imitation.TraceInterval <= 1 ||
+                (frame % static_cast<melonDS::u32>(G.AI.Imitation.TraceInterval)) == 0))
         {
             std::printf(
                 "NSMB ImitationAI: inst=%d frame=%u player=%d model=torchCompact held=0x%03X keyMask=0x%03X features=%zu hazardGuard=%d hazardDx=%lld hazardDy=%lld fireTap=%s neutralHold=%d inferInterval=%d actions=",
@@ -3381,7 +3381,7 @@ InputState ApplyImitationAIInput(
                 static_cast<long long>(guardHazardDy),
                 fireTapPhase,
                 neutralHoldAdjusted ? 1 : 0,
-                G.ImitationAIInferInterval);
+                G.AI.Imitation.InferInterval);
             for (std::size_t i = 0; i < prediction.Actions.size() && i < G.ImitationAITorchCompactModel.Heads.size(); i++)
             {
                 const auto& head = G.ImitationAITorchCompactModel.Heads[i];
@@ -3418,7 +3418,7 @@ InputState ApplyImitationAIInput(
         }
         const NsmbImitationAI::CompactActionPrediction prediction =
             NsmbImitationAI::PredictCompactActionPolicy(G.ImitationAICompactModel, features);
-        melonDS::u32 held = prediction.Held & G.ImitationAIAllowedHeldMask;
+        melonDS::u32 held = prediction.Held & G.AI.Imitation.AllowedHeldMask;
         const bool firePressIntent = CompactPredictionHasFirePress(G.ImitationAICompactModel, prediction);
         std::int64_t guardHazardDx = 0;
         std::int64_t guardHazardDy = 0;
@@ -3429,9 +3429,9 @@ InputState ApplyImitationAIInput(
         InputState input = NeutralInputPreservingTouch(fallback);
         input.KeyMask = (~held) & 0x0FFFu;
 
-        if (G.ImitationAITraceEnabled &&
-            (G.ImitationAITraceInterval <= 1 ||
-                (frame % static_cast<melonDS::u32>(G.ImitationAITraceInterval)) == 0))
+        if (G.AI.Imitation.TraceEnabled &&
+            (G.AI.Imitation.TraceInterval <= 1 ||
+                (frame % static_cast<melonDS::u32>(G.AI.Imitation.TraceInterval)) == 0))
         {
             std::printf(
                 "NSMB ImitationAI: inst=%d frame=%u player=%d model=compact held=0x%03X keyMask=0x%03X features=%zu hazardGuard=%d hazardDx=%lld hazardDy=%lld fireTap=%s actions=",
@@ -3485,8 +3485,8 @@ InputState ApplyImitationAIInput(
     }
 
     const NsmbImitationAI::Prediction prediction =
-        NsmbImitationAI::PredictLinearPolicy(G.ImitationAIModel, features, G.ImitationAIThreshold);
-    melonDS::u32 held = prediction.Held & G.ImitationAIAllowedHeldMask;
+        NsmbImitationAI::PredictLinearPolicy(G.ImitationAIModel, features, G.AI.Imitation.Threshold);
+    melonDS::u32 held = prediction.Held & G.AI.Imitation.AllowedHeldMask;
     auto keepHigherProbability = [&prediction, &held](int firstBit, int secondBit) {
         const melonDS::u32 firstMask = 1u << firstBit;
         const melonDS::u32 secondMask = 1u << secondBit;
@@ -3510,9 +3510,9 @@ InputState ApplyImitationAIInput(
     InputState input = NeutralInputPreservingTouch(fallback);
     input.KeyMask = (~held) & 0x0FFFu;
 
-    if (G.ImitationAITraceEnabled &&
-        (G.ImitationAITraceInterval <= 1 ||
-            (frame % static_cast<melonDS::u32>(G.ImitationAITraceInterval)) == 0))
+    if (G.AI.Imitation.TraceEnabled &&
+        (G.AI.Imitation.TraceInterval <= 1 ||
+            (frame % static_cast<melonDS::u32>(G.AI.Imitation.TraceInterval)) == 0))
     {
         std::printf(
             "NSMB ImitationAI: inst=%d frame=%u player=%d held=0x%03X keyMask=0x%03X features=%d/%d threshold=%.3f hazardGuard=%d hazardDx=%lld hazardDy=%lld probs=",
@@ -3523,7 +3523,7 @@ InputState ApplyImitationAIInput(
             input.KeyMask,
             filled,
             filled + missing,
-            G.ImitationAIThreshold,
+            G.AI.Imitation.Threshold,
             hazardGuardAdjusted ? 1 : 0,
             static_cast<long long>(guardHazardDx),
             static_cast<long long>(guardHazardDy));

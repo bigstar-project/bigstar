@@ -643,27 +643,10 @@ struct State
     std::map<melonDS::u32, InputState> PacketBridgePacketInputs;
     std::vector<DelayedWireNSMLPacket> DelayedNSMLPackets;
     std::vector<DelayedWireInput> DelayedInputs;
-    bool DirectMvlBootEnabled = false;
-    bool DirectMvlBootHostOnly = false;
-    bool DirectMvlBootClientOnly = false;
-    melonDS::u32 DirectMvlBootFrame = 0;
-    int DirectMvlBootScene = 0x0F;
-    int DirectMvlBootStage = 0;
-    std::vector<int> MvlStageSequence;
-    int DirectMvlBootPlayerID = -1;
-    melonDS::u32 MvlStageSceneSettings = kMvlStageSceneDefaultSettings;
-    std::string MvlCourseMode = "fixed";
-    int MvlTargetWins = 2;
-    int MvlBigStarTarget = 5;
-    bool MvlRuntimeConfigEnabled = false;
-    melonDS::u32 MvlInitialLives = 3;
-    melonDS::u32 MvlLifeModeSelector = 2;
-    melonDS::u32 MvlBigStarSelector = 1;
-    bool NormalizeMvlEntranceSpawnWritesEnabled = false;
+    Config::MvlConfig Mvl;
+    int MvlCurrentStage = 0;
+    melonDS::u32 MvlCurrentStageSceneSettings = kMvlStageSceneDefaultSettings;
     bool MvlEntranceSpawnNormalizedLogged[16] {};
-    bool MvlAutoRestartAfterResult = false;
-    melonDS::u32 MvlAutoRestartDelayFrames = 120;
-    melonDS::u32 MvlAutoRestartBootstrapFrame = 120;
     bool MvlAutoRestartInResult[16] {};
     bool MvlAutoRestartResultScored[16] {};
     bool MvlAutoRestartResultUnresolvedLogged[16] {};
@@ -678,36 +661,8 @@ struct State
     melonDS::u32 MvlAutoRestartCheckpointFrame[16] {};
     int MvlAutoRestartCheckpointStage[16] {};
     bool MvlAutoRestartCheckpointLogged[16] {};
-    bool RuleAIEnabled = false;
-    bool RuleAIHostOnly = false;
-    bool RuleAIClientOnly = false;
-    std::string RuleAIPlayerSpec = "remote";
-    melonDS::u32 RuleAIStartFrame = 0;
-    int RuleAIHorizontalDeadzone = 0x4000;
-    int RuleAIHorizontalWrapWidth = 0x400000;
-    int RuleAICloseRange = 0x22000;
-    int RuleAIHazardHorizontalRange = 0x40000;
-    int RuleAIHazardVerticalRange = 0x50000;
-    int RuleAIJumpInterval = 42;
-    int RuleAIJumpFrames = 9;
-    bool RuleAITraceEnabled = false;
-    int RuleAITraceInterval = 60;
+    Config::AIConfig AI;
     bool ImitationAIEnabled = false;
-    bool ImitationAIHostOnly = false;
-    bool ImitationAIClientOnly = false;
-    std::string ImitationAIPlayerSpec = "remote";
-    melonDS::u32 ImitationAIStartFrame = 0;
-    double ImitationAIThreshold = 0.5;
-    melonDS::u32 ImitationAIAllowedHeldMask = 0x8F3;
-    bool ImitationAIHazardGuardEnabled = true;
-    int ImitationAIHazardGuardHorizontalRange = 0x40000;
-    int ImitationAIHazardGuardVerticalRange = 0x50000;
-    int ImitationAIHazardGuardCloseRange = 0x10000;
-    bool ImitationAITraceEnabled = false;
-    int ImitationAITraceInterval = 60;
-    int ImitationAIInferInterval = 16;
-    int ImitationAINeutralHoldFrames = 8;
-    bool ImitationAIWarnMissingFeatures = true;
     bool ImitationAIFireTapPressNext[16][2] {};
     bool ImitationAILastHeldValid[16][2] {};
     melonDS::u32 ImitationAILastHeld[16][2] {};
@@ -717,7 +672,6 @@ struct State
     bool ImitationAILastNonZeroHeldValid[16][2] {};
     melonDS::u32 ImitationAILastNonZeroHeld[16][2] {};
     melonDS::u32 ImitationAILastNonZeroFrame[16][2] {};
-    std::string ImitationAIModelPath;
     NsmbImitationAI::LinearPolicyModel ImitationAIModel;
     NsmbImitationAI::CompactActionPolicyModel ImitationAICompactModel;
     NsmbImitationAI::TorchCompactPolicyModel ImitationAITorchCompactModel;
@@ -1302,11 +1256,11 @@ int GameIndexForInstance(int instanceID)
 int MvlStageForGame(int instanceID)
 {
     const int index = GameIndexForInstance(instanceID);
-    if (!G.MvlStageSequence.empty())
-        return G.MvlStageSequence[std::min(index, static_cast<int>(G.MvlStageSequence.size()) - 1)];
-    if (G.MvlCourseMode == "random" && G.MatchSeedConfigured)
+    if (!G.Mvl.StageSequence.empty())
+        return G.Mvl.StageSequence[std::min(index, static_cast<int>(G.Mvl.StageSequence.size()) - 1)];
+    if (G.Mvl.CourseMode == "random" && G.MatchSeedConfigured)
         return static_cast<int>((G.MatchSeed + static_cast<melonDS::u32>(index)) % 5u);
-    return std::clamp(G.DirectMvlBootStage, 0, 4);
+    return std::clamp(G.MvlCurrentStage, 0, 4);
 }
 
 void RefreshMvlGameSelectionForInstance(int instanceID)
@@ -1314,8 +1268,8 @@ void RefreshMvlGameSelectionForInstance(int instanceID)
     if (instanceID < 0 || instanceID >= 16)
         return;
     const int stage = std::clamp(MvlStageForGame(instanceID), 0, 4);
-    G.DirectMvlBootStage = stage;
-    G.MvlStageSceneSettings = ComposeMvlSceneSettingsForStage(stage);
+    G.MvlCurrentStage = stage;
+    G.MvlCurrentStageSceneSettings = ComposeMvlSceneSettingsForStage(stage);
 }
 
 melonDS::u32 MatchSeedForGame(int instanceID)
@@ -1457,7 +1411,7 @@ void RebaseMvlAutoRestartStartupFrames(int instanceID, melonDS::u32 restartFrame
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.PacketBridge.ThrottleStartFrame);
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.InputSendDelayStartFrame);
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.InputSendDelayEndFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.DirectMvlBootFrame);
+    RebaseMvlAutoRestartStartupFrame(restartFrame, G.Mvl.DirectBootFrame);
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.RuntimePatch.ScriptRemotePacketStartFrame);
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.RuntimePatch.ScriptRemotePacketEndFrame);
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
@@ -1469,7 +1423,7 @@ void RebaseMvlAutoRestartStartupFrames(int instanceID, melonDS::u32 restartFrame
         "NSMB MvL auto restart: rebased startup frames inst=%d restartFrame=%u directBoot=%u netplayStart=%u packetJit=%u\n",
         instanceID,
         restartFrame,
-        G.DirectMvlBootFrame,
+        G.Mvl.DirectBootFrame,
         G.NetplayStartFrame,
         G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
     std::fflush(stdout);
@@ -1510,7 +1464,7 @@ void RebaseMvlAutoRestartStartupFramesFromCheckpoint(
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ThrottleStartFrame);
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.InputSendDelayStartFrame);
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.InputSendDelayEndFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.DirectMvlBootFrame);
+    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Mvl.DirectBootFrame);
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.RuntimePatch.ScriptRemotePacketStartFrame);
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.RuntimePatch.ScriptRemotePacketEndFrame);
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
@@ -1523,7 +1477,7 @@ void RebaseMvlAutoRestartStartupFramesFromCheckpoint(
         instanceID,
         restoreFrame,
         checkpointFrame,
-        G.DirectMvlBootFrame,
+        G.Mvl.DirectBootFrame,
         G.NetplayStartFrame,
         G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
     std::fflush(stdout);
@@ -1558,20 +1512,20 @@ void ResetMvlAutoRestartStartupHookState(int instanceID)
 
 void ApplyMvlRuntimeConfigIfNeeded(melonDS::NDS* nds)
 {
-    if (!G.MvlRuntimeConfigEnabled || !nds)
+    if (!G.Mvl.RuntimeConfigEnabled || !nds)
         return;
 
     nds->ARM9Write32(kMvlRuntimeConfigAddr, kMvlRuntimeConfigMagic);
     nds->ARM9Write32(kMvlRuntimeConfigAddr + kMvlRuntimeConfigStageOffset,
-        static_cast<melonDS::u32>(G.DirectMvlBootStage));
+        static_cast<melonDS::u32>(G.MvlCurrentStage));
     nds->ARM9Write32(kMvlRuntimeConfigAddr + kMvlRuntimeConfigSceneSettingsOffset,
-        G.MvlStageSceneSettings);
+        G.MvlCurrentStageSceneSettings);
     nds->ARM9Write32(kMvlRuntimeConfigAddr + kMvlRuntimeConfigInitialLivesOffset,
-        G.MvlInitialLives);
+        G.Mvl.InitialLives);
     nds->ARM9Write32(kMvlRuntimeConfigAddr + kMvlRuntimeConfigLifeModeSelectorOffset,
-        G.MvlLifeModeSelector);
+        G.Mvl.LifeModeSelector);
     nds->ARM9Write32(kMvlRuntimeConfigAddr + kMvlRuntimeConfigBigStarSelectorOffset,
-        G.MvlBigStarSelector);
+        G.Mvl.BigStarSelector);
 }
 
 melonDS::u32 GenerateMatchSeed()
@@ -2007,30 +1961,30 @@ InputState ApplyScriptRemotePacketInputScript(int instanceID, melonDS::u32 frame
 NsmbRuleAI::Config RuleAIConfig()
 {
     NsmbRuleAI::Config config {};
-    config.Enabled = G.RuleAIEnabled;
-    config.PlayerSpec = G.RuleAIPlayerSpec;
-    config.StartFrame = G.RuleAIStartFrame;
-    config.HorizontalDeadzone = G.RuleAIHorizontalDeadzone;
-    config.HorizontalWrapWidth = G.RuleAIHorizontalWrapWidth;
-    config.CloseRange = G.RuleAICloseRange;
-    config.HazardHorizontalRange = G.RuleAIHazardHorizontalRange;
-    config.HazardVerticalRange = G.RuleAIHazardVerticalRange;
-    config.JumpInterval = G.RuleAIJumpInterval;
-    config.JumpFrames = G.RuleAIJumpFrames;
+    config.Enabled = G.AI.Rule.Enabled;
+    config.PlayerSpec = G.AI.Rule.PlayerSpec;
+    config.StartFrame = G.AI.Rule.StartFrame;
+    config.HorizontalDeadzone = G.AI.Rule.HorizontalDeadzone;
+    config.HorizontalWrapWidth = G.AI.Rule.HorizontalWrapWidth;
+    config.CloseRange = G.AI.Rule.CloseRange;
+    config.HazardHorizontalRange = G.AI.Rule.HazardHorizontalRange;
+    config.HazardVerticalRange = G.AI.Rule.HazardVerticalRange;
+    config.JumpInterval = G.AI.Rule.JumpInterval;
+    config.JumpFrames = G.AI.Rule.JumpFrames;
     config.WallEscapeFrames = 36;
     config.StuckFrames = 24;
-    config.TraceEnabled = G.RuleAITraceEnabled;
-    config.TraceInterval = G.RuleAITraceInterval;
+    config.TraceEnabled = G.AI.Rule.TraceEnabled;
+    config.TraceInterval = G.AI.Rule.TraceInterval;
     return config;
 }
 
 bool RuleAIProvidesInputForPlayer(int player)
 {
-    if (!G.RuleAIEnabled)
+    if (!G.AI.Rule.Enabled)
         return false;
-    if (G.RuleAIHostOnly && G.NetRole != Role::Host)
+    if (G.AI.Rule.HostOnly && G.NetRole != Role::Host)
         return false;
-    if (G.RuleAIClientOnly && G.NetRole != Role::Client)
+    if (G.AI.Rule.ClientOnly && G.NetRole != Role::Client)
         return false;
     return NsmbRuleAI::ControlsPlayer(
         RuleAIConfig(),
@@ -2042,14 +1996,14 @@ bool ImitationAIProvidesInputForPlayer(int player)
 {
     if (!G.ImitationAIEnabled || !G.ImitationAIModelLoaded)
         return false;
-    if (G.ImitationAIHostOnly && G.NetRole != Role::Host)
+    if (G.AI.Imitation.HostOnly && G.NetRole != Role::Host)
         return false;
-    if (G.ImitationAIClientOnly && G.NetRole != Role::Client)
+    if (G.AI.Imitation.ClientOnly && G.NetRole != Role::Client)
         return false;
 
     NsmbRuleAI::Config config {};
     config.Enabled = true;
-    config.PlayerSpec = G.ImitationAIPlayerSpec;
+    config.PlayerSpec = G.AI.Imitation.PlayerSpec;
     return NsmbRuleAI::ControlsPlayer(
         config,
         player,
@@ -2072,11 +2026,11 @@ InputState ApplyRuleBasedAIInput(
     int player,
     const InputState& fallback)
 {
-    if (!G.RuleAIEnabled || frame < G.RuleAIStartFrame || !nds || !nds->MainRAM)
+    if (!G.AI.Rule.Enabled || frame < G.AI.Rule.StartFrame || !nds || !nds->MainRAM)
         return fallback;
-    if (G.RuleAIHostOnly && G.NetRole != Role::Host)
+    if (G.AI.Rule.HostOnly && G.NetRole != Role::Host)
         return fallback;
-    if (G.RuleAIClientOnly && G.NetRole != Role::Client)
+    if (G.AI.Rule.ClientOnly && G.NetRole != Role::Client)
         return fallback;
     const NsmbRuleAI::Config config = RuleAIConfig();
     const int localPlayer = CurrentPacketBridgeLocalPlayer();
@@ -4491,7 +4445,7 @@ bool IsInputNetplayGameplayStartReady(melonDS::NDS* nds)
     const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(
         nds,
         kStageSceneObjectID,
-        G.MvlStageSceneSettings);
+        G.MvlCurrentStageSceneSettings);
     if (!stageScene.Found || stageScene.StateType == 0)
         return false;
 
@@ -5075,13 +5029,13 @@ void EmitClearInitialPlayerInventoryPowerups(std::vector<melonDS::u32>& code)
 
 bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, bool autoRestart = false)
 {
-    if ((!G.DirectMvlBootEnabled && !autoRestart) || !nds || instanceID < 0 || instanceID >= 16)
+    if ((!G.Mvl.DirectBootEnabled && !autoRestart) || !nds || instanceID < 0 || instanceID >= 16)
         return false;
-    if (G.DirectMvlBootHostOnly && G.NetRole != Role::Host)
+    if (G.Mvl.DirectBootHostOnly && G.NetRole != Role::Host)
         return false;
-    if (G.DirectMvlBootClientOnly && G.NetRole != Role::Client)
+    if (G.Mvl.DirectBootClientOnly && G.NetRole != Role::Client)
         return false;
-    if (G.DirectMvlBootApplied[instanceID] || (!autoRestart && frame < G.DirectMvlBootFrame))
+    if (G.DirectMvlBootApplied[instanceID] || (!autoRestart && frame < G.Mvl.DirectBootFrame))
         return false;
 
     int defaultPlayerID = instanceID;
@@ -5090,15 +5044,15 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
     else if (G.NetRole == Role::Client)
         defaultPlayerID = 1;
     const int playerID = std::clamp(
-        G.DirectMvlBootPlayerID >= 0 ? G.DirectMvlBootPlayerID : defaultPlayerID,
+        G.Mvl.DirectBootPlayerID >= 0 ? G.Mvl.DirectBootPlayerID : defaultPlayerID,
         0,
         1);
-    const int scene = std::clamp(G.DirectMvlBootScene, 0, 0xFFFF);
-    if (G.MvlCourseMode == "random" && !G.MatchSeedConfigured && G.MvlStageSequence.empty())
+    const int scene = std::clamp(G.Mvl.DirectBootScene, 0, 0xFFFF);
+    if (G.Mvl.CourseMode == "random" && !G.MatchSeedConfigured && G.Mvl.StageSequence.empty())
         return false;
     const int stage = std::clamp(MvlStageForGame(instanceID), 0, 4);
-    G.DirectMvlBootStage = stage;
-    G.MvlStageSceneSettings = ComposeMvlSceneSettingsForStage(stage);
+    G.MvlCurrentStage = stage;
+    G.MvlCurrentStageSceneSettings = ComposeMvlSceneSettingsForStage(stage);
     const melonDS::u32 oldPC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
     const melonDS::u32 returnPC = oldPC | ((nds->ARM9.CPSR & 0x20) ? 1u : 0u);
 
@@ -5166,7 +5120,7 @@ bool WriteNetAndGameRandomSeed(melonDS::NDS* nds, melonDS::u32 seed);
 
 void SaveMvlAutoRestartBootstrapCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (!G.MvlAutoRestartAfterResult || G.MvlTargetWins <= 1 || !nds)
+    if (!G.Mvl.AutoRestartAfterResult || G.Mvl.TargetWins <= 1 || !nds)
         return;
     if (instanceID < 0 || instanceID >= 16)
         return;
@@ -5174,14 +5128,14 @@ void SaveMvlAutoRestartBootstrapCheckpointIfNeeded(int instanceID, melonDS::u32 
         return;
     if (G.MvlAutoRestartCount[instanceID] != 0 || G.MvlAutoRestartInResult[instanceID])
         return;
-    const bool directBootReady = G.DirectMvlBootEnabled
+    const bool directBootReady = G.Mvl.DirectBootEnabled
         && !G.DirectMvlBootApplied[instanceID]
-        && frame >= G.DirectMvlBootFrame;
-    const melonDS::u32 generatedBootstrapFrame = G.MvlAutoRestartBootstrapFrame;
+        && frame >= G.Mvl.DirectBootFrame;
+    const melonDS::u32 generatedBootstrapFrame = G.Mvl.AutoRestartBootstrapFrame;
     const melonDS::u32 stageGroup = nds->ARM9Read32(kGameStageGroupAddr);
     const melonDS::u16 currentScene = nds->ARM9Read16(kSceneCurrentSceneIDAddr);
     const melonDS::u16 nextScene = nds->ARM9Read16(kSceneNextSceneIDAddr);
-    const bool generatedRomReady = !G.DirectMvlBootEnabled
+    const bool generatedRomReady = !G.Mvl.DirectBootEnabled
         && frame >= generatedBootstrapFrame
         && stageGroup != 9
         && currentScene == 0x0004
@@ -5361,10 +5315,10 @@ MvlResultSnapshot ReadMvlResultSnapshot(melonDS::NDS* nds)
         result.Lives[player] = nds->ARM9Read32(kGamePlayerLivesAddr + wordOffset);
         result.Deaths[player] = nds->ARM9Read32(kGamePlayerDeathsAddr + wordOffset);
         result.Dead[player] = nds->ARM9Read8(kGamePlayerDeadAddr + player);
-        if (G.MvlLifeModeSelector != 2 && result.Dead[player] != 0)
+        if (G.Mvl.LifeModeSelector != 2 && result.Dead[player] != 0)
         {
             result.Lives[player] = 0;
-            result.Deaths[player] = std::max(result.Deaths[player], G.MvlInitialLives);
+            result.Deaths[player] = std::max(result.Deaths[player], G.Mvl.InitialLives);
         }
     }
     return result;
@@ -5405,7 +5359,7 @@ int ResolveMvlResultWinner(const MvlResultSnapshot& result)
 
 bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (!G.MvlAutoRestartAfterResult || G.MvlTargetWins < 1 || !nds || instanceID < 0 || instanceID >= 16)
+    if (!G.Mvl.AutoRestartAfterResult || G.Mvl.TargetWins < 1 || !nds || instanceID < 0 || instanceID >= 16)
         return false;
 
     constexpr melonDS::u16 kResultsScene = 0x000A;
@@ -5441,7 +5395,7 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
         if (winner < 0)
         {
             if (!G.MvlAutoRestartResultUnresolvedLogged[instanceID]
-                && frame - G.MvlAutoRestartResultFrame[instanceID] >= G.MvlAutoRestartDelayFrames)
+                && frame - G.MvlAutoRestartResultFrame[instanceID] >= G.Mvl.AutoRestartDelayFrames)
             {
                 std::printf(
                     "NSMB MvL auto restart: result unresolved inst=%d frame=%u stars=%u/%u displayed=%u/%u collected=%u/%u lives=%u/%u deaths=%u/%u dead=%u/%u matchWins=%d/%d target=%d\n",
@@ -5461,7 +5415,7 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
                     result.Dead[1],
                     G.MvlAutoRestartWins[instanceID][0],
                     G.MvlAutoRestartWins[instanceID][1],
-                    G.MvlTargetWins);
+                    G.Mvl.TargetWins);
                 std::fflush(stdout);
                 G.MvlAutoRestartResultUnresolvedLogged[instanceID] = true;
             }
@@ -5488,22 +5442,22 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
             result.Dead[1],
             G.MvlAutoRestartWins[instanceID][0],
             G.MvlAutoRestartWins[instanceID][1],
-            G.MvlTargetWins);
+            G.Mvl.TargetWins);
         std::fflush(stdout);
     }
 
     const int leadingWins = std::max(G.MvlAutoRestartWins[instanceID][0], G.MvlAutoRestartWins[instanceID][1]);
-    if (leadingWins >= G.MvlTargetWins)
+    if (leadingWins >= G.Mvl.TargetWins)
         return false;
-    if (frame - G.MvlAutoRestartResultFrame[instanceID] < G.MvlAutoRestartDelayFrames)
+    if (frame - G.MvlAutoRestartResultFrame[instanceID] < G.Mvl.AutoRestartDelayFrames)
         return false;
 
     const int nextRestartCount = G.MvlAutoRestartCount[instanceID] + 1;
     G.MvlAutoRestartCount[instanceID] = nextRestartCount;
     const int requestedStage = std::clamp(MvlStageForGame(instanceID), 0, 4);
     const melonDS::u32 requestedSeed = MatchSeedForGame(instanceID);
-    G.DirectMvlBootStage = requestedStage;
-    G.MvlStageSceneSettings = ComposeMvlSceneSettingsForStage(requestedStage);
+    G.MvlCurrentStage = requestedStage;
+    G.MvlCurrentStageSceneSettings = ComposeMvlSceneSettingsForStage(requestedStage);
     WriteNetAndGameRandomSeed(nds, requestedSeed);
     int restartPath = 0;
     if (RestoreMvlAutoRestartBootstrapCheckpoint(instanceID, frame, nds, requestedSeed))
@@ -5528,7 +5482,7 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
                 G.MvlAutoRestartCheckpointFrame[instanceID]);
             WriteARM9U32(nds, kGameStageGroupAddr, 0x00000009);
             WriteARM9U32(nds, kGameVsModeAddr, 0x00000001);
-            WriteARM9U32(nds, kSceneNextSceneSettingsAddr, G.MvlStageSceneSettings);
+            WriteARM9U32(nds, kSceneNextSceneSettingsAddr, G.MvlCurrentStageSceneSettings);
             ApplyMvlRuntimeConfigIfNeeded(nds);
             WriteNetAndGameRandomSeed(nds, requestedSeed);
         }
@@ -5567,7 +5521,7 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
         requestedSeed,
         G.MvlAutoRestartWins[instanceID][0],
         G.MvlAutoRestartWins[instanceID][1],
-        G.MvlTargetWins,
+        G.Mvl.TargetWins,
         restartPath);
     std::fflush(stdout);
     return true;
@@ -5575,7 +5529,7 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
 
 bool ShouldPauseInputNetplayForMvlAutoRestart(int instanceID, melonDS::NDS* nds)
 {
-    if (!G.InputNetplayOnly || !G.MvlAutoRestartAfterResult || G.MvlTargetWins <= 1
+    if (!G.InputNetplayOnly || !G.Mvl.AutoRestartAfterResult || G.Mvl.TargetWins <= 1
         || !nds || instanceID < 0 || instanceID >= 16)
     {
         return false;
@@ -5588,12 +5542,12 @@ bool ShouldPauseInputNetplayForMvlAutoRestart(int instanceID, melonDS::NDS* nds)
         return false;
 
     const int leadingWins = std::max(G.MvlAutoRestartWins[instanceID][0], G.MvlAutoRestartWins[instanceID][1]);
-    return leadingWins < G.MvlTargetWins;
+    return leadingWins < G.Mvl.TargetWins;
 }
 
 void SaveMvlAutoRestartCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (!G.MvlAutoRestartAfterResult || G.MvlTargetWins <= 1 || !nds || !nds->MainRAM)
+    if (!G.Mvl.AutoRestartAfterResult || G.Mvl.TargetWins <= 1 || !nds || !nds->MainRAM)
         return;
     if (instanceID < 0 || instanceID >= 16)
         return;
@@ -6804,7 +6758,7 @@ void WriteObjectTransform(melonDS::NDS* nds, const ObjectScanSample& actor, melo
 
 void NormalizeMvlEntranceSpawnStateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (!G.NormalizeMvlEntranceSpawnWritesEnabled)
+    if (!G.Mvl.NormalizeEntranceSpawnWrites)
         return;
     if (!nds || !nds->MainRAM || instanceID < 0 || instanceID >= 16)
         return;
@@ -9211,8 +9165,8 @@ void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     }
     if (G.StateSync.GameApplyStageObjects && sample.StageSceneFound)
     {
-        WriteObjectWordByIDAndSettings(nds, kStageSceneObjectID, G.MvlStageSceneSettings, 0x154, sample.StageSceneWord154);
-        WriteObjectWordByIDAndSettings(nds, kStageSceneObjectID, G.MvlStageSceneSettings, 0x160, sample.StageSceneWord160);
+        WriteObjectWordByIDAndSettings(nds, kStageSceneObjectID, G.MvlCurrentStageSceneSettings, 0x154, sample.StageSceneWord154);
+        WriteObjectWordByIDAndSettings(nds, kStageSceneObjectID, G.MvlCurrentStageSceneSettings, 0x160, sample.StageSceneWord160);
     }
     if (G.StateSync.GameApplyStageObjects && sample.MovingHazardFound)
     {
@@ -9589,7 +9543,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
 
     GameStateReader::ReadPlayerAndCameraGlobals(nds, sample);
 
-    GameStateReader::ReadStageObjectState(nds, G.MvlStageSceneSettings, sample);
+    GameStateReader::ReadStageObjectState(nds, G.MvlCurrentStageSceneSettings, sample);
 
     sample.Hash = ComputeBasicGameStateHash(sample);
     return sample;
@@ -9874,7 +9828,7 @@ void ApplyNetRandomPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     }
     if (!shouldPatch) return;
 
-    const melonDS::u32 patchValue = (!G.MatchSeedSequence.empty() || G.MvlAutoRestartAfterResult)
+    const melonDS::u32 patchValue = (!G.MatchSeedSequence.empty() || G.Mvl.AutoRestartAfterResult)
         ? MatchSeedForGame(instanceID)
         : G.NetRandomPatchValue;
     if (!WriteNetAndGameRandomSeed(nds, patchValue)) return;
@@ -10658,32 +10612,14 @@ void InitFromEnvironment()
     G.InputDropStartFrame = inputConfig.DropStartFrame;
     G.InputDropEndFrame = inputConfig.DropEndFrame;
     G.InputNetplayMaxFrameLead = inputConfig.MaxFrameLead;
-    const Config::MvlConfig mvlConfig = Config::LoadMvlConfig();
-    G.DirectMvlBootEnabled = mvlConfig.DirectBootEnabled;
-    G.DirectMvlBootHostOnly = mvlConfig.DirectBootHostOnly;
-    G.DirectMvlBootClientOnly = mvlConfig.DirectBootClientOnly;
-    G.DirectMvlBootFrame = mvlConfig.DirectBootFrame;
-    G.DirectMvlBootScene = mvlConfig.DirectBootScene;
-    G.DirectMvlBootStage = mvlConfig.DirectBootStage;
-    G.MvlStageSequence = mvlConfig.StageSequence;
-    G.DirectMvlBootPlayerID = mvlConfig.DirectBootPlayerID;
-    G.MvlStageSceneSettings = mvlConfig.StageSceneSettings;
-    G.MvlCourseMode = mvlConfig.CourseMode;
-    G.MvlTargetWins = mvlConfig.TargetWins;
-    G.MvlBigStarTarget = mvlConfig.BigStarTarget;
-    G.MvlRuntimeConfigEnabled = mvlConfig.RuntimeConfigEnabled;
-    G.MvlInitialLives = mvlConfig.InitialLives;
-    G.MvlLifeModeSelector = mvlConfig.LifeModeSelector;
-    G.MvlBigStarSelector = mvlConfig.BigStarSelector;
-    G.NormalizeMvlEntranceSpawnWritesEnabled = mvlConfig.NormalizeEntranceSpawnWrites;
-    G.MvlAutoRestartAfterResult = mvlConfig.AutoRestartAfterResult;
-    G.MvlAutoRestartDelayFrames = mvlConfig.AutoRestartDelayFrames;
-    G.MvlAutoRestartBootstrapFrame = mvlConfig.AutoRestartBootstrapFrame;
-    if (!mvlConfig.InvalidCourseMode.empty())
+    G.Mvl = Config::LoadMvlConfig();
+    G.MvlCurrentStage = G.Mvl.DirectBootStage;
+    G.MvlCurrentStageSceneSettings = G.Mvl.StageSceneSettings;
+    if (!G.Mvl.InvalidCourseMode.empty())
     {
         std::printf("NSMB MvL settings: unknown courseMode=%s; using fixed stage=%d\n",
-            mvlConfig.InvalidCourseMode.c_str(),
-            G.DirectMvlBootStage);
+            G.Mvl.InvalidCourseMode.c_str(),
+            G.MvlCurrentStage);
     }
 
     const char* inputScript = std::getenv("MELONDS_NSML_INPUT_SCRIPT");
@@ -10736,41 +10672,11 @@ void InitFromEnvironment()
     G.InputHealthTraceEnabled = inputConfig.HealthTrace;
     G.InputHealthTraceInterval = inputConfig.HealthTraceInterval;
     G.InputHealthTraceWaitThresholdMs = inputConfig.HealthTraceWaitThresholdMs;
-    const Config::AIConfig aiConfig = Config::LoadAIConfig();
-    G.RuleAIEnabled = aiConfig.Rule.Enabled;
-    G.RuleAIHostOnly = aiConfig.Rule.HostOnly;
-    G.RuleAIClientOnly = aiConfig.Rule.ClientOnly;
-    G.RuleAIPlayerSpec = aiConfig.Rule.PlayerSpec;
-    G.RuleAIStartFrame = aiConfig.Rule.StartFrame;
-    G.RuleAIHorizontalDeadzone = aiConfig.Rule.HorizontalDeadzone;
-    G.RuleAIHorizontalWrapWidth = aiConfig.Rule.HorizontalWrapWidth;
-    G.RuleAICloseRange = aiConfig.Rule.CloseRange;
-    G.RuleAIHazardHorizontalRange = aiConfig.Rule.HazardHorizontalRange;
-    G.RuleAIHazardVerticalRange = aiConfig.Rule.HazardVerticalRange;
-    G.RuleAIJumpInterval = aiConfig.Rule.JumpInterval;
-    G.RuleAIJumpFrames = aiConfig.Rule.JumpFrames;
-    G.RuleAITraceEnabled = aiConfig.Rule.TraceEnabled;
-    G.RuleAITraceInterval = aiConfig.Rule.TraceInterval;
-    G.ImitationAIEnabled = aiConfig.Imitation.Enabled;
-    G.ImitationAIHostOnly = aiConfig.Imitation.HostOnly;
-    G.ImitationAIClientOnly = aiConfig.Imitation.ClientOnly;
-    G.ImitationAIPlayerSpec = aiConfig.Imitation.PlayerSpec;
-    G.ImitationAIStartFrame = aiConfig.Imitation.StartFrame;
-    G.ImitationAIThreshold = aiConfig.Imitation.Threshold;
-    G.ImitationAIAllowedHeldMask = aiConfig.Imitation.AllowedHeldMask;
-    G.ImitationAIHazardGuardEnabled = aiConfig.Imitation.HazardGuardEnabled;
-    G.ImitationAIHazardGuardHorizontalRange = aiConfig.Imitation.HazardGuardHorizontalRange;
-    G.ImitationAIHazardGuardVerticalRange = aiConfig.Imitation.HazardGuardVerticalRange;
-    G.ImitationAIHazardGuardCloseRange = aiConfig.Imitation.HazardGuardCloseRange;
-    G.ImitationAITraceEnabled = aiConfig.Imitation.TraceEnabled;
-    G.ImitationAITraceInterval = aiConfig.Imitation.TraceInterval;
-    G.ImitationAIInferInterval = aiConfig.Imitation.InferInterval;
-    G.ImitationAINeutralHoldFrames = aiConfig.Imitation.NeutralHoldFrames;
-    G.ImitationAIWarnMissingFeatures = aiConfig.Imitation.WarnMissingFeatures;
-    G.ImitationAIModelPath = aiConfig.Imitation.ModelPath;
+    G.AI = Config::LoadAIConfig();
+    G.ImitationAIEnabled = G.AI.Imitation.Enabled;
     if (G.ImitationAIEnabled)
     {
-        if (G.ImitationAIModelPath.empty())
+        if (G.AI.Imitation.ModelPath.empty())
         {
             std::printf("NSMB ImitationAI: enabled but MELONDS_NSML_IMITATION_AI_MODEL is empty\n");
             G.ImitationAIEnabled = false;
@@ -10779,7 +10685,7 @@ void InitFromEnvironment()
         {
             std::string torchCompactError;
             G.ImitationAITorchCompactModelLoaded =
-                NsmbImitationAI::LoadTorchCompactPolicyModel(G.ImitationAIModelPath, G.ImitationAITorchCompactModel, torchCompactError);
+                NsmbImitationAI::LoadTorchCompactPolicyModel(G.AI.Imitation.ModelPath, G.ImitationAITorchCompactModel, torchCompactError);
             if (G.ImitationAITorchCompactModelLoaded)
             {
                 G.ImitationAIModelLoaded = true;
@@ -10788,7 +10694,7 @@ void InitFromEnvironment()
             {
             std::string compactError;
             G.ImitationAICompactModelLoaded =
-                NsmbImitationAI::LoadCompactActionPolicyModel(G.ImitationAIModelPath, G.ImitationAICompactModel, compactError);
+                NsmbImitationAI::LoadCompactActionPolicyModel(G.AI.Imitation.ModelPath, G.ImitationAICompactModel, compactError);
             if (G.ImitationAICompactModelLoaded)
             {
                 G.ImitationAIModelLoaded = true;
@@ -10797,12 +10703,12 @@ void InitFromEnvironment()
             {
                 std::string modelError;
                 G.ImitationAIModelLoaded =
-                    NsmbImitationAI::LoadLinearPolicyModel(G.ImitationAIModelPath, G.ImitationAIModel, modelError);
+                    NsmbImitationAI::LoadLinearPolicyModel(G.AI.Imitation.ModelPath, G.ImitationAIModel, modelError);
                 if (!G.ImitationAIModelLoaded)
                 {
                     std::printf(
                         "NSMB ImitationAI: failed to load model path=%s torchCompactError=%s compactError=%s linearError=%s\n",
-                        G.ImitationAIModelPath.c_str(),
+                        G.AI.Imitation.ModelPath.c_str(),
                         torchCompactError.c_str(),
                         compactError.c_str(),
                         modelError.c_str());
@@ -11026,14 +10932,14 @@ void InitFromEnvironment()
             G.PacketBridge.MaxFrameLead,
             G.PacketBridge.ThrottleTimeoutMs,
             G.PacketBridge.ThrottleStartFrame,
-            G.DirectMvlBootEnabled ? 1 : 0,
-            G.DirectMvlBootFrame,
-            G.DirectMvlBootScene,
-            G.DirectMvlBootStage,
-            G.DirectMvlBootPlayerID,
-            G.MvlStageSceneSettings,
-            G.MvlCourseMode.c_str(),
-            G.MvlBigStarTarget);
+            G.Mvl.DirectBootEnabled ? 1 : 0,
+            G.Mvl.DirectBootFrame,
+            G.Mvl.DirectBootScene,
+            G.MvlCurrentStage,
+            G.Mvl.DirectBootPlayerID,
+            G.MvlCurrentStageSceneSettings,
+            G.Mvl.CourseMode.c_str(),
+            G.Mvl.BigStarTarget);
         std::printf("NSMB Diagnostics: events=%d path=%s ringFrames=%d diagnosticsFile=%s\n",
             G.DiagnosticEventsEnabled ? 1 : 0,
             G.DiagnosticEventsPath.empty() ? "<none>" : G.DiagnosticEventsPath.c_str(),
@@ -11177,34 +11083,34 @@ void InitFromEnvironment()
         G.Rollback.PredictionProbeLimit,
         G.MatchSeed,
         G.MatchSeedConfigured ? 1 : 0,
-        G.DirectMvlBootEnabled ? 1 : 0,
-        G.DirectMvlBootFrame,
-        G.DirectMvlBootScene,
-        G.DirectMvlBootStage,
-        G.DirectMvlBootPlayerID,
-        G.MvlStageSceneSettings,
-        G.MvlCourseMode.c_str(),
-        G.MvlBigStarTarget);
-    if (G.RuleAIEnabled)
+        G.Mvl.DirectBootEnabled ? 1 : 0,
+        G.Mvl.DirectBootFrame,
+        G.Mvl.DirectBootScene,
+        G.MvlCurrentStage,
+        G.Mvl.DirectBootPlayerID,
+        G.MvlCurrentStageSceneSettings,
+        G.Mvl.CourseMode.c_str(),
+        G.Mvl.BigStarTarget);
+    if (G.AI.Rule.Enabled)
     {
         std::printf(
             "NSMB RuleAI: enabled player=%s startFrame=%u deadzone=0x%X wrapWidth=0x%X closeRange=0x%X hazardRange=0x%X/0x%X jump=%d/%d trace=%d traceInterval=%d\n",
-            G.RuleAIPlayerSpec.c_str(),
-            G.RuleAIStartFrame,
-            G.RuleAIHorizontalDeadzone,
-            G.RuleAIHorizontalWrapWidth,
-            G.RuleAICloseRange,
-            G.RuleAIHazardHorizontalRange,
-            G.RuleAIHazardVerticalRange,
-            G.RuleAIJumpFrames,
-            G.RuleAIJumpInterval,
-            G.RuleAITraceEnabled ? 1 : 0,
-            G.RuleAITraceInterval);
-        if (G.RuleAIHostOnly || G.RuleAIClientOnly)
+            G.AI.Rule.PlayerSpec.c_str(),
+            G.AI.Rule.StartFrame,
+            G.AI.Rule.HorizontalDeadzone,
+            G.AI.Rule.HorizontalWrapWidth,
+            G.AI.Rule.CloseRange,
+            G.AI.Rule.HazardHorizontalRange,
+            G.AI.Rule.HazardVerticalRange,
+            G.AI.Rule.JumpFrames,
+            G.AI.Rule.JumpInterval,
+            G.AI.Rule.TraceEnabled ? 1 : 0,
+            G.AI.Rule.TraceInterval);
+        if (G.AI.Rule.HostOnly || G.AI.Rule.ClientOnly)
         {
             std::printf("NSMB RuleAI: roleFilter hostOnly=%d clientOnly=%d\n",
-                G.RuleAIHostOnly ? 1 : 0,
-                G.RuleAIClientOnly ? 1 : 0);
+                G.AI.Rule.HostOnly ? 1 : 0,
+                G.AI.Rule.ClientOnly ? 1 : 0);
         }
     }
     if (G.ImitationAIEnabled)
@@ -11213,14 +11119,14 @@ void InitFromEnvironment()
         {
             std::printf(
                 "NSMB ImitationAI: enabled player=%s startFrame=%u modelType=torchCompact allowedHeldMask=0x%03X trace=%d traceInterval=%d inferInterval=%d neutralHoldFrames=%d model=%s features=%zu heads=%zu schema=%s labelSchema=%s\n",
-                G.ImitationAIPlayerSpec.c_str(),
-                G.ImitationAIStartFrame,
-                G.ImitationAIAllowedHeldMask,
-                G.ImitationAITraceEnabled ? 1 : 0,
-                G.ImitationAITraceInterval,
-                G.ImitationAIInferInterval,
-                G.ImitationAINeutralHoldFrames,
-                G.ImitationAIModelPath.c_str(),
+                G.AI.Imitation.PlayerSpec.c_str(),
+                G.AI.Imitation.StartFrame,
+                G.AI.Imitation.AllowedHeldMask,
+                G.AI.Imitation.TraceEnabled ? 1 : 0,
+                G.AI.Imitation.TraceInterval,
+                G.AI.Imitation.InferInterval,
+                G.AI.Imitation.NeutralHoldFrames,
+                G.AI.Imitation.ModelPath.c_str(),
                 G.ImitationAITorchCompactModel.FeatureCount(),
                 G.ImitationAITorchCompactModel.Heads.size(),
                 G.ImitationAITorchCompactModel.Schema.c_str(),
@@ -11230,12 +11136,12 @@ void InitFromEnvironment()
         {
             std::printf(
                 "NSMB ImitationAI: enabled player=%s startFrame=%u modelType=compact allowedHeldMask=0x%03X trace=%d traceInterval=%d model=%s features=%zu heads=%zu schema=%s labelSchema=%s\n",
-                G.ImitationAIPlayerSpec.c_str(),
-                G.ImitationAIStartFrame,
-                G.ImitationAIAllowedHeldMask,
-                G.ImitationAITraceEnabled ? 1 : 0,
-                G.ImitationAITraceInterval,
-                G.ImitationAIModelPath.c_str(),
+                G.AI.Imitation.PlayerSpec.c_str(),
+                G.AI.Imitation.StartFrame,
+                G.AI.Imitation.AllowedHeldMask,
+                G.AI.Imitation.TraceEnabled ? 1 : 0,
+                G.AI.Imitation.TraceInterval,
+                G.AI.Imitation.ModelPath.c_str(),
                 G.ImitationAICompactModel.FeatureCount(),
                 G.ImitationAICompactModel.Heads.size(),
                 G.ImitationAICompactModel.Schema.c_str(),
@@ -11245,30 +11151,30 @@ void InitFromEnvironment()
         {
             std::printf(
                 "NSMB ImitationAI: enabled player=%s startFrame=%u modelType=linear threshold=%.3f allowedHeldMask=0x%03X trace=%d traceInterval=%d model=%s features=%zu buttons=%zu schema=%s featureSchema=%s\n",
-                G.ImitationAIPlayerSpec.c_str(),
-                G.ImitationAIStartFrame,
-                G.ImitationAIThreshold,
-                G.ImitationAIAllowedHeldMask,
-                G.ImitationAITraceEnabled ? 1 : 0,
-                G.ImitationAITraceInterval,
-                G.ImitationAIModelPath.c_str(),
+                G.AI.Imitation.PlayerSpec.c_str(),
+                G.AI.Imitation.StartFrame,
+                G.AI.Imitation.Threshold,
+                G.AI.Imitation.AllowedHeldMask,
+                G.AI.Imitation.TraceEnabled ? 1 : 0,
+                G.AI.Imitation.TraceInterval,
+                G.AI.Imitation.ModelPath.c_str(),
                 G.ImitationAIModel.FeatureCount(),
                 G.ImitationAIModel.ButtonCount(),
                 G.ImitationAIModel.Schema.c_str(),
                 G.ImitationAIModel.FeatureSchemaID.c_str());
         }
-        if (G.ImitationAIHostOnly || G.ImitationAIClientOnly)
+        if (G.AI.Imitation.HostOnly || G.AI.Imitation.ClientOnly)
         {
             std::printf("NSMB ImitationAI: roleFilter hostOnly=%d clientOnly=%d\n",
-                G.ImitationAIHostOnly ? 1 : 0,
-                G.ImitationAIClientOnly ? 1 : 0);
+                G.AI.Imitation.HostOnly ? 1 : 0,
+                G.AI.Imitation.ClientOnly ? 1 : 0);
         }
         std::printf(
             "NSMB ImitationAI: hazardGuard enabled=%d horizontalRange=0x%X verticalRange=0x%X closeRange=0x%X\n",
-            G.ImitationAIHazardGuardEnabled ? 1 : 0,
-            G.ImitationAIHazardGuardHorizontalRange,
-            G.ImitationAIHazardGuardVerticalRange,
-            G.ImitationAIHazardGuardCloseRange);
+            G.AI.Imitation.HazardGuardEnabled ? 1 : 0,
+            G.AI.Imitation.HazardGuardHorizontalRange,
+            G.AI.Imitation.HazardGuardVerticalRange,
+            G.AI.Imitation.HazardGuardCloseRange);
     }
     std::fflush(stdout);
 }
