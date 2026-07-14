@@ -352,7 +352,6 @@ constexpr melonDS::u32 kA2DJApplySceneRequestAddr = 0x02007ACC;
 constexpr melonDS::u32 kA2DJStartSceneTransitionAddr = 0x02011CE8;
 constexpr melonDS::u32 kA2DJCreateObjectAddr = 0x0204BF8C;
 constexpr melonDS::u32 kA2DEActorSpawnActorAddr = 0x020A0B64;
-constexpr melonDS::u32 kA2DEStageLayoutMvlInitAddr = 0x020B0714;
 constexpr melonDS::u32 kDirectBootTrampolineAddr = 0x023C0000;
 constexpr melonDS::u32 kDirectBootTrampolineDataAddr = 0x023C0400;
 // Overlay0 padding cave. Keep runtime settings out of high Main RAM, which NSMB
@@ -2233,32 +2232,12 @@ struct State
     melonDS::u32 ForceEntranceSpawnID0 = 0;
     melonDS::u32 ForceEntranceSpawnID1 = 1;
     bool ForceEntranceSpawnPointersLogged[16] {};
-    bool ForceMvlStageLayoutGateEnabled = false;
-    bool ForceMvlStageLayoutGateHostOnly = false;
-    bool ForceMvlStageLayoutGateClientOnly = false;
-    melonDS::u32 ForceMvlStageLayoutGateStartFrame = 0;
-    melonDS::u32 ForceMvlStageLayoutGateEndFrame = 0;
-    melonDS::u32 ForceMvlStageLayoutGateAddr = 0x020CAC74;
-    melonDS::u32 ForceMvlStageLayoutGateValue = 5;
-    bool ForceMvlStageLayoutGateLogged[16] {};
     bool ClearMvlCameraInitHoldEnabled = false;
     bool ClearMvlCameraInitHoldHostOnly = false;
     bool ClearMvlCameraInitHoldClientOnly = false;
     melonDS::u32 ClearMvlCameraInitHoldStartFrame = 840;
     melonDS::u32 ClearMvlCameraInitHoldEndFrame = 0;
     bool ClearMvlCameraInitHoldApplied[16] {};
-    bool ForceMvlStageLayoutBufferEnabled = false;
-    bool ForceMvlStageLayoutBufferHostOnly = false;
-    bool ForceMvlStageLayoutBufferClientOnly = false;
-    melonDS::u32 ForceMvlStageLayoutBufferStartFrame = 0;
-    melonDS::u32 ForceMvlStageLayoutBufferEndFrame = 0;
-    melonDS::u32 ForceMvlStageLayoutBufferAddr = 0x023C8000;
-    bool ForceMvlStageLayoutBufferApplied[16] {};
-    bool CallMvlStageLayoutInitEnabled = false;
-    bool CallMvlStageLayoutInitHostOnly = false;
-    bool CallMvlStageLayoutInitClientOnly = false;
-    melonDS::u32 CallMvlStageLayoutInitFrame = 0;
-    bool CallMvlStageLayoutInitApplied[16] {};
     bool NetRandomPatchEnabled = false;
     bool NetRandomPatchAuto = false;
     melonDS::u32 NetRandomPatchFrame = 0;
@@ -13069,9 +13048,7 @@ void ForceStageSceneState3GateIfNeeded(int instanceID, melonDS::u32 frame, melon
 void ForceStageSceneEventFlagsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
 void ForceMvlPlayerReadyIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
 void ForceMvlRuntimeStateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
-void ForceMvlStageLayoutGateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
 void ClearMvlCameraInitHoldIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
-void ForceMvlStageLayoutBufferIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
 
 void ApplyRollbackResimFramePatches(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
@@ -13094,8 +13071,6 @@ void ApplyRollbackResimFramePatches(int instanceID, melonDS::u32 frame, melonDS:
     NormalizeMvlEntranceSpawnStateIfNeeded(instanceID, frame, nds);
     ForcePlayerActorIDsIfNeeded(instanceID, frame, nds);
     RepairMvlInitialPlayerSpawnIfNeeded(instanceID, frame, nds);
-    ForceMvlStageLayoutBufferIfNeeded(instanceID, frame, nds);
-    ForceMvlStageLayoutGateIfNeeded(instanceID, frame, nds);
     ClearMvlCameraInitHoldIfNeeded(instanceID, frame, nds);
     ForceStageSceneEventFlagsIfNeeded(instanceID, frame, nds);
     ForceStageCameraSlotIfNeeded(instanceID, frame, nds);
@@ -13924,47 +13899,6 @@ void ForceMvlRuntimeStateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::N
     }
 }
 
-void ForceMvlStageLayoutGateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.ForceMvlStageLayoutGateEnabled || !nds || !nds->MainRAM)
-        return;
-    if (frame < G.ForceMvlStageLayoutGateStartFrame)
-        return;
-    if (G.ForceMvlStageLayoutGateEndFrame != 0 && frame > G.ForceMvlStageLayoutGateEndFrame)
-        return;
-    if (G.ForceMvlStageLayoutGateHostOnly && G.NetRole != Role::Host)
-        return;
-    if (G.ForceMvlStageLayoutGateClientOnly && G.NetRole != Role::Client)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
-        return;
-
-    const melonDS::u32 addr = G.ForceMvlStageLayoutGateAddr;
-    if (!IsARM9MainRAMAddress(addr))
-        return;
-
-    const melonDS::u8 oldValue = nds->ARM9Read8(addr);
-    const melonDS::u8 newValue = static_cast<melonDS::u8>(G.ForceMvlStageLayoutGateValue & 0xFF);
-    nds->ARM9Write8(addr, newValue);
-
-    if (!G.ForceMvlStageLayoutGateLogged[instanceID])
-    {
-        std::printf(
-            "NSMB Test: force MvL StageLayout gate inst=%d frame=%u range=%u-%u addr=%08X old=0x%02X value=0x%02X\n",
-            instanceID,
-            frame,
-            G.ForceMvlStageLayoutGateStartFrame,
-            G.ForceMvlStageLayoutGateEndFrame,
-            addr,
-            oldValue,
-            newValue);
-        std::fflush(stdout);
-        G.ForceMvlStageLayoutGateLogged[instanceID] = true;
-    }
-}
-
 void ClearMvlCameraInitHoldIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.ClearMvlCameraInitHoldEnabled || !nds || !nds->MainRAM)
@@ -14001,121 +13935,6 @@ void ClearMvlCameraInitHoldIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
         oldValue,
         newValue);
     std::fflush(stdout);
-}
-
-void ForceMvlStageLayoutBufferIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.ForceMvlStageLayoutBufferEnabled || !nds || !nds->MainRAM)
-        return;
-    if (frame < G.ForceMvlStageLayoutBufferStartFrame)
-        return;
-    if (G.ForceMvlStageLayoutBufferEndFrame != 0 && frame > G.ForceMvlStageLayoutBufferEndFrame)
-        return;
-    if (G.ForceMvlStageLayoutBufferHostOnly && G.NetRole != Role::Host)
-        return;
-    if (G.ForceMvlStageLayoutBufferClientOnly && G.NetRole != Role::Client)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
-        return;
-
-    const melonDS::u32 stageLayout = nds->ARM9Read32(0x020CAD40);
-    const melonDS::u32 buffer = G.ForceMvlStageLayoutBufferAddr;
-    if (!IsARM9MainRAMAddress(stageLayout) || !IsARM9MainRAMAddress(buffer) || !IsARM9MainRAMAddress(buffer + 0x1FFC))
-        return;
-
-    if (!G.ForceMvlStageLayoutBufferApplied[instanceID])
-    {
-        for (melonDS::u32 off = 0; off < 0x2000; off += 4)
-            nds->ARM9Write32(buffer + off, 0);
-        G.ForceMvlStageLayoutBufferApplied[instanceID] = true;
-    }
-
-    const melonDS::u32 oldValue = nds->ARM9Read32(stageLayout + 0xA8CC);
-    nds->ARM9Write32(stageLayout + 0xA8CC, buffer);
-
-    if (G.ForceMvlStageLayoutBufferApplied[instanceID])
-    {
-        static bool logged[16] {};
-        if (!logged[instanceID])
-        {
-            std::printf(
-                "NSMB Test: force MvL StageLayout buffer inst=%d frame=%u range=%u-%u stageLayout=%08X old=0x%08X buffer=%08X\n",
-                instanceID,
-                frame,
-                G.ForceMvlStageLayoutBufferStartFrame,
-                G.ForceMvlStageLayoutBufferEndFrame,
-                stageLayout,
-                oldValue,
-                buffer);
-            std::fflush(stdout);
-            logged[instanceID] = true;
-        }
-    }
-}
-
-bool CallMvlStageLayoutInitIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.CallMvlStageLayoutInitEnabled || !nds || !nds->MainRAM)
-        return false;
-    if (instanceID < 0 || instanceID >= 16)
-        return false;
-    if (G.CallMvlStageLayoutInitApplied[instanceID] || frame < G.CallMvlStageLayoutInitFrame)
-        return false;
-    if (G.CallMvlStageLayoutInitHostOnly && G.NetRole != Role::Host)
-        return false;
-    if (G.CallMvlStageLayoutInitClientOnly && G.NetRole != Role::Client)
-        return false;
-    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
-        return false;
-
-    const melonDS::u32 stageLayout = nds->ARM9Read32(0x020CAD40);
-    if (!IsARM9MainRAMAddress(stageLayout))
-        return false;
-
-    const melonDS::u32 oldPC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
-    const melonDS::u32 returnPC = oldPC | ((nds->ARM9.CPSR & 0x20) ? 1u : 0u);
-    const melonDS::u32 playerID = nds->ARM9Read32(kGameLocalPlayerIDAddr) & 1u;
-
-    std::vector<melonDS::u32> code;
-    code.reserve(32);
-    EmitARM(code, 0xE92D5FFFu); // push {r0-r12, lr}
-    EmitARM(code, 0xE10F5000u); // mrs r5, cpsr
-    EmitARM(code, 0xE92D0020u); // push {r5}
-    EmitLoadImm(code, 0, stageLayout);
-    EmitLoadImm(code, 1, playerID);
-    EmitARM(code, 0xE59FC008u); // ldr ip, [pc, #8]
-    EmitARM(code, 0xE28FE008u); // add lr, pc, #8
-    EmitARM(code, 0xE12FFF1Cu); // bx ip
-    EmitARM(code, 0xE1A00000u); // nop
-    EmitARM(code, kA2DEStageLayoutMvlInitAddr);
-    EmitARM(code, 0xE8BD0020u); // pop {r5}
-    EmitARM(code, 0xE128F005u); // msr apsr_nzcvq, r5
-    EmitARM(code, 0xE8BD5FFFu); // pop {r0-r12, lr}
-    EmitARM(code, 0xE59FC004u); // ldr ip, [pc, #4]
-    EmitARM(code, 0xE12FFF1Cu); // bx ip
-    EmitARM(code, 0xE1A00000u); // nop
-    EmitARM(code, returnPC);
-
-    for (size_t i = 0; i < code.size(); i++)
-    {
-        if (!WriteARM9U32(nds, kDirectBootTrampolineAddr + static_cast<melonDS::u32>(i * sizeof(melonDS::u32)), code[i]))
-            return false;
-    }
-
-    G.CallMvlStageLayoutInitApplied[instanceID] = true;
-    std::printf(
-        "NSMB Test: call MvL StageLayout init inst=%d frame=%u trampoline=%08X return=%08X stageLayout=%08X player=%u\n",
-        instanceID,
-        frame,
-        kDirectBootTrampolineAddr,
-        returnPC,
-        stageLayout,
-        playerID);
-    std::fflush(stdout);
-    nds->ARM9.JumpTo(kDirectBootTrampolineAddr);
-    return true;
 }
 
 bool WriteObjectPositionByGUID(melonDS::NDS* nds, melonDS::u32 guid, melonDS::u32 posX, melonDS::u32 posY, melonDS::u32 posZ)
@@ -18923,19 +18742,6 @@ void InitFromEnvironment()
     G.ForceEntranceSpawnID1 = static_cast<melonDS::u32>(
         std::strtoul(std::getenv("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_ID1")
             ? std::getenv("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_ID1") : "1", nullptr, 0));
-    G.ForceMvlStageLayoutGateEnabled = EnvFlag("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_GATE");
-    G.ForceMvlStageLayoutGateHostOnly = EnvFlag("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_GATE_HOST_ONLY");
-    G.ForceMvlStageLayoutGateClientOnly = EnvFlag("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_GATE_CLIENT_ONLY");
-    G.ForceMvlStageLayoutGateStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_GATE_START_FRAME", 0)));
-    G.ForceMvlStageLayoutGateEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_GATE_END_FRAME", 0)));
-    G.ForceMvlStageLayoutGateAddr = static_cast<melonDS::u32>(
-        std::strtoul(std::getenv("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_GATE_ADDR")
-            ? std::getenv("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_GATE_ADDR") : "0x020CAC74", nullptr, 0));
-    G.ForceMvlStageLayoutGateValue = static_cast<melonDS::u32>(
-        std::strtoul(std::getenv("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_GATE_VALUE")
-            ? std::getenv("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_GATE_VALUE") : "5", nullptr, 0));
     G.ClearMvlCameraInitHoldEnabled = EnvFlag("MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD");
     G.ClearMvlCameraInitHoldHostOnly = EnvFlag("MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_HOST_ONLY");
     G.ClearMvlCameraInitHoldClientOnly = EnvFlag("MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_CLIENT_ONLY");
@@ -18943,21 +18749,6 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_START_FRAME", 840)));
     G.ClearMvlCameraInitHoldEndFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_END_FRAME", 0)));
-    G.ForceMvlStageLayoutBufferEnabled = EnvFlag("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_BUFFER");
-    G.ForceMvlStageLayoutBufferHostOnly = EnvFlag("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_BUFFER_HOST_ONLY");
-    G.ForceMvlStageLayoutBufferClientOnly = EnvFlag("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_BUFFER_CLIENT_ONLY");
-    G.ForceMvlStageLayoutBufferStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_BUFFER_START_FRAME", 0)));
-    G.ForceMvlStageLayoutBufferEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_BUFFER_END_FRAME", 0)));
-    G.ForceMvlStageLayoutBufferAddr = static_cast<melonDS::u32>(
-        std::strtoul(std::getenv("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_BUFFER_ADDR")
-            ? std::getenv("MELONDS_NSML_FORCE_MVL_STAGE_LAYOUT_BUFFER_ADDR") : "0x023C8000", nullptr, 0));
-    G.CallMvlStageLayoutInitEnabled = EnvFlag("MELONDS_NSML_CALL_MVL_STAGE_LAYOUT_INIT");
-    G.CallMvlStageLayoutInitHostOnly = EnvFlag("MELONDS_NSML_CALL_MVL_STAGE_LAYOUT_INIT_HOST_ONLY");
-    G.CallMvlStageLayoutInitClientOnly = EnvFlag("MELONDS_NSML_CALL_MVL_STAGE_LAYOUT_INIT_CLIENT_ONLY");
-    G.CallMvlStageLayoutInitFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_CALL_MVL_STAGE_LAYOUT_INIT_FRAME", 0)));
 
     const char* netRandomValue = std::getenv("MELONDS_NSML_NET_RANDOM_VALUE");
     if (netRandomValue && netRandomValue[0])
@@ -19708,15 +19499,6 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         ForcePlayerActorIDsIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         RepairMvlInitialPlayerSpawnIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-    {
-        if (CallMvlStageLayoutInitIfNeeded(instanceID, inputFrame, nds))
-            return polledInput;
-    }
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForceMvlStageLayoutBufferIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForceMvlStageLayoutGateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ClearMvlCameraInitHoldIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
