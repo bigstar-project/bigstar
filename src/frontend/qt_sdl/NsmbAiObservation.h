@@ -5,10 +5,21 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
+#include <filesystem>
+#include <fstream>
+#include <string>
 
 namespace NsmbNetplayPoC::AIObservation {
 
-class TrackingRuntime {
+enum class LogKind : std::size_t {
+  V1,
+  V2,
+  V3,
+  Count,
+};
+
+class Runtime {
 public:
   struct AppliedInputRecord {
     InputState Input;
@@ -29,6 +40,51 @@ public:
       return nullptr;
     }
     return &AppliedInputs[instanceID][player];
+  }
+
+  bool OpenLog(LogKind kind, const std::string &path) {
+    std::ofstream &stream = Log(kind);
+    if (stream.is_open()) {
+      stream.flush();
+      stream.close();
+    }
+    stream.clear();
+    LinesSinceFlush[LogIndex(kind)] = 0;
+
+    std::error_code dirError;
+    const std::filesystem::path logPath(path);
+    const std::filesystem::path parent = logPath.parent_path();
+    if (!parent.empty())
+      std::filesystem::create_directories(parent, dirError);
+    stream.open(path, std::ios::out | std::ios::trunc);
+    return static_cast<bool>(stream);
+  }
+
+  bool CanWriteLog(LogKind kind) const {
+    const std::ofstream &stream = Logs[LogIndex(kind)];
+    return stream.is_open() && static_cast<bool>(stream);
+  }
+
+  std::ofstream &Log(LogKind kind) { return Logs[LogIndex(kind)]; }
+
+  void RecordLogLine(LogKind kind, int flushInterval) {
+    if (flushInterval <= 0)
+      return;
+    int &linesSinceFlush = LinesSinceFlush[LogIndex(kind)];
+    linesSinceFlush++;
+    if (linesSinceFlush < flushInterval)
+      return;
+    Log(kind).flush();
+    linesSinceFlush = 0;
+  }
+
+  void CloseLogs() {
+    for (std::ofstream &stream : Logs) {
+      if (!stream.is_open())
+        continue;
+      stream.flush();
+      stream.close();
+    }
   }
 
   void UpdateFireballHandler(int instanceID, melonDS::u32 handler) {
@@ -97,7 +153,15 @@ private:
   static bool ValidPlayer(int instanceID, int player) {
     return ValidInstance(instanceID) && player >= 0 && player < 2;
   }
+  static constexpr std::size_t LogIndex(LogKind kind) {
+    return static_cast<std::size_t>(kind);
+  }
 
+  static constexpr std::size_t kLogCount =
+      static_cast<std::size_t>(LogKind::Count);
+
+  std::array<std::ofstream, kLogCount> Logs;
+  std::array<int, kLogCount> LinesSinceFlush{};
   std::array<std::array<AppliedInputRecord, 2>, 16> AppliedInputs{};
   std::array<std::array<bool, 2>, 16> AppliedInputValid{};
   std::array<melonDS::u32, 16> FireballHandler{};

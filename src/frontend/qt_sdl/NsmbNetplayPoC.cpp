@@ -571,9 +571,7 @@ struct State
     Config::RuntimePatchConfig RuntimePatch;
     Config::HarnessConfig Harness;
     GameStateTraceWriter GameStateTrace;
-    std::ofstream AIPlayLog;
-    std::ofstream AIObservationV2Log;
-    std::ofstream AIObservationV3Log;
+    AIObservation::Runtime AIObservationRuntime;
     melonDS::u32 DiagnosticPostTriggerUntilFrame[16] {};
     melonDS::u32 LastDiagnosticMismatchFrame[16] {};
     melonDS::u32 LastDiagnosticLifeEventFrame[16][2] {};
@@ -581,10 +579,6 @@ struct State
     melonDS::u32 LastDiagnosticPositionAnomalyFrame[16][2] {};
     std::array<DiagnosticFrameSnapshot, kDiagnosticRingCapacity> DiagnosticRing[16];
     std::size_t DiagnosticRingNext[16] {};
-    AIObservation::TrackingRuntime AIObservationTracking;
-    int AIPlayLogLinesSinceFlush = 0;
-    int AIObservationV2LinesSinceFlush = 0;
-    int AIObservationV3LinesSinceFlush = 0;
     bool MemPatchApplied[16] {};
     bool ForcePlayerDeathCountersLogged[16] {};
     bool ForcePlayerPowerupsLogged[16] {};
@@ -1248,7 +1242,7 @@ bool ImitationAIProvidesInputForPlayer(int player)
 
 void RecordAIPlayLogAppliedInput(int instanceID, melonDS::u32 frame, int player, const InputState& input)
 {
-    G.AIObservationTracking.RecordAppliedInput(instanceID, frame, player, input);
+    G.AIObservationRuntime.RecordAppliedInput(instanceID, frame, player, input);
 }
 
 InputState ApplyRuleBasedAIInput(
@@ -7679,19 +7673,14 @@ void InitFromEnvironment()
     }
     if ((G.TestEnabled || G.Enabled) && !G.Diagnostics.AIPlayLogPath.empty())
     {
-        std::error_code dirError;
-        const std::filesystem::path aiPlayLogPath(G.Diagnostics.AIPlayLogPath);
-        const std::filesystem::path aiPlayLogParent = aiPlayLogPath.parent_path();
-        if (!aiPlayLogParent.empty())
-            std::filesystem::create_directories(aiPlayLogParent, dirError);
-        G.AIPlayLog.open(G.Diagnostics.AIPlayLogPath, std::ios::out | std::ios::trunc);
-        if (!G.AIPlayLog)
+        if (!G.AIObservationRuntime.OpenLog(
+                AIObservation::LogKind::V1,
+                G.Diagnostics.AIPlayLogPath))
         {
             std::printf("NSMB AIPlayLog: failed to open path=%s\n", G.Diagnostics.AIPlayLogPath.c_str());
         }
         else
         {
-            G.AIPlayLogLinesSinceFlush = 0;
             std::printf(
                 "NSMB AIPlayLog: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d gameplayOnly=%d\n",
                 G.Diagnostics.AIPlayLogPath.c_str(),
@@ -7705,19 +7694,14 @@ void InitFromEnvironment()
     }
     if ((G.TestEnabled || G.Enabled) && !G.Diagnostics.AIObservationV2Path.empty())
     {
-        std::error_code dirError;
-        const std::filesystem::path observationPath(G.Diagnostics.AIObservationV2Path);
-        const std::filesystem::path observationParent = observationPath.parent_path();
-        if (!observationParent.empty())
-            std::filesystem::create_directories(observationParent, dirError);
-        G.AIObservationV2Log.open(G.Diagnostics.AIObservationV2Path, std::ios::out | std::ios::trunc);
-        if (!G.AIObservationV2Log)
+        if (!G.AIObservationRuntime.OpenLog(
+                AIObservation::LogKind::V2,
+                G.Diagnostics.AIObservationV2Path))
         {
             std::printf("NSMB AIObservationV2: failed to open path=%s\n", G.Diagnostics.AIObservationV2Path.c_str());
         }
         else
         {
-            G.AIObservationV2LinesSinceFlush = 0;
             std::printf(
                 "NSMB AIObservationV2: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d stageFilter=%d gameplayOnly=%d\n",
                 G.Diagnostics.AIObservationV2Path.c_str(),
@@ -7732,19 +7716,14 @@ void InitFromEnvironment()
     }
     if ((G.TestEnabled || G.Enabled) && !G.Diagnostics.AIObservationV3Path.empty())
     {
-        std::error_code dirError;
-        const std::filesystem::path observationPath(G.Diagnostics.AIObservationV3Path);
-        const std::filesystem::path observationParent = observationPath.parent_path();
-        if (!observationParent.empty())
-            std::filesystem::create_directories(observationParent, dirError);
-        G.AIObservationV3Log.open(G.Diagnostics.AIObservationV3Path, std::ios::out | std::ios::trunc);
-        if (!G.AIObservationV3Log)
+        if (!G.AIObservationRuntime.OpenLog(
+                AIObservation::LogKind::V3,
+                G.Diagnostics.AIObservationV3Path))
         {
             std::printf("NSMB AIObservationV3: failed to open path=%s\n", G.Diagnostics.AIObservationV3Path.c_str());
         }
         else
         {
-            G.AIObservationV3LinesSinceFlush = 0;
             std::printf(
                 "NSMB AIObservationV3: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d stageFilter=%d gameplayOnly=%d\n",
                 G.Diagnostics.AIObservationV3Path.c_str(),
@@ -9195,21 +9174,7 @@ void Shutdown()
     G.Transport.Shutdown();
 
     G.GameStateTrace.Close();
-    if (G.AIPlayLog)
-    {
-        G.AIPlayLog.flush();
-        G.AIPlayLog.close();
-    }
-    if (G.AIObservationV2Log)
-    {
-        G.AIObservationV2Log.flush();
-        G.AIObservationV2Log.close();
-    }
-    if (G.AIObservationV3Log)
-    {
-        G.AIObservationV3Log.flush();
-        G.AIObservationV3Log.close();
-    }
+    G.AIObservationRuntime.CloseLogs();
 }
 
 }

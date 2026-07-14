@@ -247,7 +247,7 @@ int AIFireballOwnerCandidate(
     if (instanceID < 0 || instanceID >= 16)
         return statelessOwner;
 
-    return G.AIObservationTracking.ResolveFireballOwner(
+    return G.AIObservationRuntime.ResolveFireballOwner(
         instanceID,
         slotIndex,
         statelessOwner,
@@ -441,8 +441,8 @@ void WriteAIInputJson(std::ostream& out, const char* name, melonDS::u32 held, me
 void WriteAIAppliedInputJson(std::ostream& out, int instanceID, int player)
 {
     out << "\"appliedPlayer" << player << "\":{";
-    const AIObservation::TrackingRuntime::AppliedInputRecord* record =
-        G.AIObservationTracking.AppliedInput(instanceID, player);
+    const AIObservation::Runtime::AppliedInputRecord* record =
+        G.AIObservationRuntime.AppliedInput(instanceID, player);
     if (!record)
     {
         out << "\"valid\":0}";
@@ -3519,11 +3519,11 @@ void PrepareAIPlayLogFireballOwnerTracking(int instanceID, const GameStateSample
 {
     if (instanceID < 0 || instanceID >= 16)
         return;
-    G.AIObservationTracking.UpdateFireballHandler(instanceID, sample.FireballsHandlerPtr);
+    G.AIObservationRuntime.UpdateFireballHandler(instanceID, sample.FireballsHandlerPtr);
     for (int i = 0; i < kAIFireballSlotCount; i++)
     {
         if (sample.FireballSlotActive[i] == 0)
-            G.AIObservationTracking.InvalidateFireballOwner(instanceID, i);
+            G.AIObservationRuntime.InvalidateFireballOwner(instanceID, i);
     }
 }
 
@@ -3849,9 +3849,12 @@ void WriteAIObservationV2Record(std::ostream& out, int instanceID, melonDS::u32 
 
 void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    const bool writeV1 = !G.Diagnostics.AIPlayLogPath.empty() && G.AIPlayLog;
-    const bool writeV2 = !G.Diagnostics.AIObservationV2Path.empty() && G.AIObservationV2Log;
-    const bool writeV3 = !G.Diagnostics.AIObservationV3Path.empty() && G.AIObservationV3Log;
+    const bool writeV1 = !G.Diagnostics.AIPlayLogPath.empty() &&
+        G.AIObservationRuntime.CanWriteLog(AIObservation::LogKind::V1);
+    const bool writeV2 = !G.Diagnostics.AIObservationV2Path.empty() &&
+        G.AIObservationRuntime.CanWriteLog(AIObservation::LogKind::V2);
+    const bool writeV3 = !G.Diagnostics.AIObservationV3Path.empty() &&
+        G.AIObservationRuntime.CanWriteLog(AIObservation::LogKind::V3);
     if ((!writeV1 && !writeV2 && !writeV3) || !nds || !nds->MainRAM)
         return;
     if (frame < G.Diagnostics.AIPlayLogStartFrame)
@@ -3877,36 +3880,31 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     if (writeV2 && v2StageAllowed)
     {
-        WriteAIObservationV2Record(G.AIObservationV2Log, instanceID, frame, sample, objectScanCache, localPlayer, false);
-        if (G.Diagnostics.AIPlayLogFlushInterval > 0)
-        {
-            G.AIObservationV2LinesSinceFlush++;
-            if (G.AIObservationV2LinesSinceFlush >= G.Diagnostics.AIPlayLogFlushInterval)
-            {
-                G.AIObservationV2Log.flush();
-                G.AIObservationV2LinesSinceFlush = 0;
-            }
-        }
+        WriteAIObservationV2Record(
+            G.AIObservationRuntime.Log(AIObservation::LogKind::V2),
+            instanceID, frame, sample, objectScanCache, localPlayer, false);
+        G.AIObservationRuntime.RecordLogLine(
+            AIObservation::LogKind::V2,
+            G.Diagnostics.AIPlayLogFlushInterval);
     }
 
     if (writeV3 && v3StageAllowed)
     {
-        WriteAIObservationV2Record(G.AIObservationV3Log, instanceID, frame, sample, objectScanCache, localPlayer, true);
-        if (G.Diagnostics.AIPlayLogFlushInterval > 0)
-        {
-            G.AIObservationV3LinesSinceFlush++;
-            if (G.AIObservationV3LinesSinceFlush >= G.Diagnostics.AIPlayLogFlushInterval)
-            {
-                G.AIObservationV3Log.flush();
-                G.AIObservationV3LinesSinceFlush = 0;
-            }
-        }
+        WriteAIObservationV2Record(
+            G.AIObservationRuntime.Log(AIObservation::LogKind::V3),
+            instanceID, frame, sample, objectScanCache, localPlayer, true);
+        G.AIObservationRuntime.RecordLogLine(
+            AIObservation::LogKind::V3,
+            G.Diagnostics.AIPlayLogFlushInterval);
     }
 
     if (!writeV1)
         return;
 
-    G.AIPlayLog << "{\"schema\":\"nsmb_mvl_ai_play_log_v1\""
+    std::ofstream& aiPlayLog =
+        G.AIObservationRuntime.Log(AIObservation::LogKind::V1);
+
+    aiPlayLog << "{\"schema\":\"nsmb_mvl_ai_play_log_v1\""
         << ",\"instance\":" << instanceID
         << ",\"frame\":" << frame
         << ",\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\""
@@ -3919,43 +3917,43 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         << ",\"vsCoinCount\":" << sample.VsCoinCount
         << "}";
 
-    G.AIPlayLog << ",\"inputs\":{";
-    WriteAIInputJson(G.AIPlayLog, "console0", sample.InputConsole0Held, sample.InputConsole0Pressed);
-    G.AIPlayLog << ",";
-    WriteAIInputJson(G.AIPlayLog, "console1", sample.InputConsole1Held, sample.InputConsole1Pressed);
-    G.AIPlayLog << ",";
-    WriteAIInputJson(G.AIPlayLog, "player0", sample.InputPlayer0Held, sample.InputPlayer0Pressed);
-    G.AIPlayLog << ",";
-    WriteAIInputJson(G.AIPlayLog, "player1", sample.InputPlayer1Held, sample.InputPlayer1Pressed);
-    G.AIPlayLog << ",";
-    WriteAIAppliedInputJson(G.AIPlayLog, instanceID, 0);
-    G.AIPlayLog << ",";
-    WriteAIAppliedInputJson(G.AIPlayLog, instanceID, 1);
-    G.AIPlayLog << ",\"touchKnown\":0}";
+    aiPlayLog << ",\"inputs\":{";
+    WriteAIInputJson(aiPlayLog, "console0", sample.InputConsole0Held, sample.InputConsole0Pressed);
+    aiPlayLog << ",";
+    WriteAIInputJson(aiPlayLog, "console1", sample.InputConsole1Held, sample.InputConsole1Pressed);
+    aiPlayLog << ",";
+    WriteAIInputJson(aiPlayLog, "player0", sample.InputPlayer0Held, sample.InputPlayer0Pressed);
+    aiPlayLog << ",";
+    WriteAIInputJson(aiPlayLog, "player1", sample.InputPlayer1Held, sample.InputPlayer1Pressed);
+    aiPlayLog << ",";
+    WriteAIAppliedInputJson(aiPlayLog, instanceID, 0);
+    aiPlayLog << ",";
+    WriteAIAppliedInputJson(aiPlayLog, instanceID, 1);
+    aiPlayLog << ",\"touchKnown\":0}";
 
-    G.AIPlayLog << ",\"players\":[";
-    WriteAIPlayerJson(G.AIPlayLog, 0, sample);
-    G.AIPlayLog << ",";
-    WriteAIPlayerJson(G.AIPlayLog, 1, sample);
-    G.AIPlayLog << "]";
+    aiPlayLog << ",\"players\":[";
+    WriteAIPlayerJson(aiPlayLog, 0, sample);
+    aiPlayLog << ",";
+    WriteAIPlayerJson(aiPlayLog, 1, sample);
+    aiPlayLog << "]";
 
-    G.AIPlayLog << ",\"targets\":{\"bigStarCandidate\":{\"found\":" << sample.VsStarFound
+    aiPlayLog << ",\"targets\":{\"bigStarCandidate\":{\"found\":" << sample.VsStarFound
         << ",\"guid\":";
-    WriteJsonHex(G.AIPlayLog, sample.VsStarGUID);
-    G.AIPlayLog << ",\"base\":";
-    WriteJsonHex(G.AIPlayLog, sample.VsStarBase);
-    G.AIPlayLog << ",";
-    WriteAIVec3Json(G.AIPlayLog, "pos", sample.VsStarPosX, sample.VsStarPosY, sample.VsStarPosZ);
-    G.AIPlayLog << "},\"bigStarActor\":{\"found\":" << sample.VsStarActorFound
+    WriteJsonHex(aiPlayLog, sample.VsStarGUID);
+    aiPlayLog << ",\"base\":";
+    WriteJsonHex(aiPlayLog, sample.VsStarBase);
+    aiPlayLog << ",";
+    WriteAIVec3Json(aiPlayLog, "pos", sample.VsStarPosX, sample.VsStarPosY, sample.VsStarPosZ);
+    aiPlayLog << "},\"bigStarActor\":{\"found\":" << sample.VsStarActorFound
         << ",\"guid\":";
-    WriteJsonHex(G.AIPlayLog, sample.VsStarActorGUID);
-    G.AIPlayLog << ",\"base\":";
-    WriteJsonHex(G.AIPlayLog, sample.VsStarActorBase);
-    G.AIPlayLog << ",";
-    WriteAIVec3Json(G.AIPlayLog, "pos", sample.VsStarActorPosX, sample.VsStarActorPosY, sample.VsStarActorPosZ);
-    G.AIPlayLog << "}}";
+    WriteJsonHex(aiPlayLog, sample.VsStarActorGUID);
+    aiPlayLog << ",\"base\":";
+    WriteJsonHex(aiPlayLog, sample.VsStarActorBase);
+    aiPlayLog << ",";
+    WriteAIVec3Json(aiPlayLog, "pos", sample.VsStarActorPosX, sample.VsStarActorPosY, sample.VsStarActorPosZ);
+    aiPlayLog << "}}";
 
-    G.AIPlayLog << ",\"camera\":{\"found\":" << sample.StageCameraFound
+    aiPlayLog << ",\"camera\":{\"found\":" << sample.StageCameraFound
         << ",\"globalX0\":" << SignedU32(sample.StageCameraGlobalX0)
         << ",\"globalX1\":" << SignedU32(sample.StageCameraGlobalX1)
         << ",\"globalY0\":" << SignedU32(sample.StageCameraGlobalY0)
@@ -3966,7 +3964,7 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         << ",\"height1\":" << SignedU32(sample.StageCameraGlobalHeight1)
         << "}";
 
-    G.AIPlayLog << ",\"objectSummary\":{\"total\":" << sample.ObjectScanTotal
+    aiPlayLog << ",\"objectSummary\":{\"total\":" << sample.ObjectScanTotal
         << ",\"active\":" << sample.ObjectActiveCount
         << ",\"dead\":" << sample.ObjectDeadCount
         << ",\"notCreated\":" << sample.ObjectNotCreatedCount
@@ -3974,36 +3972,36 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         << ",\"skipRender\":" << sample.ObjectSkipRenderCount
         << "}";
 
-    G.AIPlayLog << ",\"specialObjects\":{\"fireballs\":{\"active\":" << sample.FireballsActiveCount
+    aiPlayLog << ",\"specialObjects\":{\"fireballs\":{\"active\":" << sample.FireballsActiveCount
         << ",\"handler\":";
-    WriteJsonHex(G.AIPlayLog, kFireballsHandlerAddr);
-    G.AIPlayLog << ",\"handlerPtr\":";
-    WriteJsonHex(G.AIPlayLog, sample.FireballsHandlerPtr);
-    G.AIObservationTracking.UpdateFireballHandler(instanceID, sample.FireballsHandlerPtr);
+    WriteJsonHex(aiPlayLog, kFireballsHandlerAddr);
+    aiPlayLog << ",\"handlerPtr\":";
+    WriteJsonHex(aiPlayLog, sample.FireballsHandlerPtr);
+    G.AIObservationRuntime.UpdateFireballHandler(instanceID, sample.FireballsHandlerPtr);
     int activeFireballSlots = 0;
     for (int i = 0; i < kAIFireballSlotCount; i++)
     {
         if (sample.FireballSlotActive[i] != 0)
             activeFireballSlots++;
         else
-            G.AIObservationTracking.InvalidateFireballOwner(instanceID, i);
+            G.AIObservationRuntime.InvalidateFireballOwner(instanceID, i);
     }
-    G.AIPlayLog << ",\"activeSlots\":" << activeFireballSlots;
-    G.AIPlayLog << ",\"words\":[";
+    aiPlayLog << ",\"activeSlots\":" << activeFireballSlots;
+    aiPlayLog << ",\"words\":[";
     for (int i = 0; i < kAISpecialHandlerWordCount; i++)
     {
         if (i != 0)
-            G.AIPlayLog << ",";
-        WriteJsonHex(G.AIPlayLog, sample.FireballsHandlerWords[i]);
+            aiPlayLog << ",";
+        WriteJsonHex(aiPlayLog, sample.FireballsHandlerWords[i]);
     }
-    G.AIPlayLog << "],\"slots\":[";
+    aiPlayLog << "],\"slots\":[";
     bool firstFireballSlot = true;
     for (int i = 0; i < kAIFireballSlotCount; i++)
     {
         if (sample.FireballSlotActive[i] == 0)
             continue;
         if (!firstFireballSlot)
-            G.AIPlayLog << ",";
+            aiPlayLog << ",";
         firstFireballSlot = false;
         int ownerConfidence = 0;
         int ownerHeuristic = 0;
@@ -4022,7 +4020,7 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             statelessOwnerHeuristic,
             ownerTracked);
         const bool sourceKindVerified = sample.FireballSlotKind[i] <= 3;
-        G.AIPlayLog << "{\"index\":" << i
+        aiPlayLog << "{\"index\":" << i
             << ",\"active\":" << sample.FireballSlotActive[i]
             << ",\"kind\":" << sample.FireballSlotKind[i]
             << ",\"sourceKind\":" << sample.FireballSlotKind[i]
@@ -4044,66 +4042,66 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             << ",\"statelessOwnerHeuristic\":" << statelessOwnerHeuristic
             << ",\"ownerVerified\":" << (sourceKindVerified ? 1 : 0)
             << ",\"stateBytesOffset\":";
-        WriteJsonHex(G.AIPlayLog, kAIFireballSlotActiveOffset, 2);
-        G.AIPlayLog << ",\"stateBytes\":[";
+        WriteJsonHex(aiPlayLog, kAIFireballSlotActiveOffset, 2);
+        aiPlayLog << ",\"stateBytes\":[";
         for (int j = 0; j < kAIFireballSlotStateByteCount; j++)
         {
             if (j != 0)
-                G.AIPlayLog << ",";
-            G.AIPlayLog << sample.FireballSlotStateBytes[i][j];
+                aiPlayLog << ",";
+            aiPlayLog << sample.FireballSlotStateBytes[i][j];
         }
-        G.AIPlayLog << "],\"debugWordsOffset\":";
-        WriteJsonHex(G.AIPlayLog, kAIFireballSlotDebugWordOffset, 2);
-        G.AIPlayLog << ",\"debugWords\":[";
+        aiPlayLog << "],\"debugWordsOffset\":";
+        WriteJsonHex(aiPlayLog, kAIFireballSlotDebugWordOffset, 2);
+        aiPlayLog << ",\"debugWords\":[";
         for (int j = 0; j < kAIFireballSlotDebugWordCount; j++)
         {
             if (j != 0)
-                G.AIPlayLog << ",";
-            WriteJsonHex(G.AIPlayLog, sample.FireballSlotDebugWords[i][j]);
+                aiPlayLog << ",";
+            WriteJsonHex(aiPlayLog, sample.FireballSlotDebugWords[i][j]);
         }
-        G.AIPlayLog << "]"
+        aiPlayLog << "]"
             << ",";
         WriteAIVec3Json(
-            G.AIPlayLog,
+            aiPlayLog,
             "pos",
             sample.FireballSlotPosX[i],
             sample.FireballSlotPosY[i],
             sample.FireballSlotPosZ[i]);
-        G.AIPlayLog << ",";
+        aiPlayLog << ",";
         WriteAIVec3Json(
-            G.AIPlayLog,
+            aiPlayLog,
             "prev",
             sample.FireballSlotPrevX[i],
             sample.FireballSlotPrevY[i],
             sample.FireballSlotPrevZ[i]);
-        G.AIPlayLog << ",";
+        aiPlayLog << ",";
         WriteAIVec3Json(
-            G.AIPlayLog,
+            aiPlayLog,
             "vel",
             sample.FireballSlotVelX[i],
             sample.FireballSlotVelY[i],
             sample.FireballSlotVelZ[i]);
-        G.AIPlayLog << ",\"relative\":{\"p0dx\":"
+        aiPlayLog << ",\"relative\":{\"p0dx\":"
             << AIWrappedDeltaX(SignedU32(sample.FireballSlotPosX[i]), SignedU32(sample.PlayerActor0PosX))
             << ",\"p0dy\":" << (SignedU32(sample.FireballSlotPosY[i]) - SignedU32(sample.PlayerActor0PosY))
             << ",\"p1dx\":" << AIWrappedDeltaX(SignedU32(sample.FireballSlotPosX[i]), SignedU32(sample.PlayerActor1PosX))
             << ",\"p1dy\":" << (SignedU32(sample.FireballSlotPosY[i]) - SignedU32(sample.PlayerActor1PosY))
             << "}}";
     }
-    G.AIPlayLog << "]},\"projectiles\":{\"handler\":";
-    WriteJsonHex(G.AIPlayLog, kProjectilesHandlerAddr);
-    G.AIPlayLog << ",\"words\":[";
+    aiPlayLog << "]},\"projectiles\":{\"handler\":";
+    WriteJsonHex(aiPlayLog, kProjectilesHandlerAddr);
+    aiPlayLog << ",\"words\":[";
     for (int i = 0; i < kAISpecialHandlerWordCount; i++)
     {
         if (i != 0)
-            G.AIPlayLog << ",";
-        WriteJsonHex(G.AIPlayLog, sample.ProjectilesHandlerWords[i]);
+            aiPlayLog << ",";
+        WriteJsonHex(aiPlayLog, sample.ProjectilesHandlerWords[i]);
     }
-    G.AIPlayLog << "]}}";
+    aiPlayLog << "]}}";
 
-    WriteAIVisualSummaryJson(G.AIPlayLog, objectScanCache, sample);
+    WriteAIVisualSummaryJson(aiPlayLog, objectScanCache, sample);
 
-    G.AIPlayLog << ",\"objects\":[";
+    aiPlayLog << ",\"objects\":[";
     int writtenObjects = 0;
     for (const GameStateObjectScanEntry& entry : objectScanCache.Entries)
     {
@@ -4112,21 +4110,15 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         if (writtenObjects >= G.Diagnostics.AIPlayLogMaxObjects)
             break;
         if (writtenObjects != 0)
-            G.AIPlayLog << ",";
-        WriteAIObjectJson(G.AIPlayLog, entry, sample);
+            aiPlayLog << ",";
+        WriteAIObjectJson(aiPlayLog, entry, sample);
         writtenObjects++;
     }
-    G.AIPlayLog << "],\"hash\":";
-    WriteJsonHex(G.AIPlayLog, static_cast<melonDS::u32>(sample.Hash & 0xFFFFFFFFull));
-    G.AIPlayLog << "}\n";
-    if (G.Diagnostics.AIPlayLogFlushInterval > 0)
-    {
-        G.AIPlayLogLinesSinceFlush++;
-        if (G.AIPlayLogLinesSinceFlush >= G.Diagnostics.AIPlayLogFlushInterval)
-        {
-            G.AIPlayLog.flush();
-            G.AIPlayLogLinesSinceFlush = 0;
-        }
-    }
+    aiPlayLog << "],\"hash\":";
+    WriteJsonHex(aiPlayLog, static_cast<melonDS::u32>(sample.Hash & 0xFFFFFFFFull));
+    aiPlayLog << "}\n";
+    G.AIObservationRuntime.RecordLogLine(
+        AIObservation::LogKind::V1,
+        G.Diagnostics.AIPlayLogFlushInterval);
 }
 

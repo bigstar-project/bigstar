@@ -3,6 +3,7 @@
 #include "NsmbAiObservation.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
@@ -11,6 +12,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <utility>
 
 namespace {
 
@@ -405,8 +407,9 @@ void TestGameStateTraceWriterLifecycle() {
   CHECK(!removeError);
 }
 
-void TestAIObservationTrackingRuntime() {
-  NsmbNetplayPoC::AIObservation::TrackingRuntime runtime;
+void TestAIObservationRuntime() {
+  using NsmbNetplayPoC::AIObservation::LogKind;
+  NsmbNetplayPoC::AIObservation::Runtime runtime;
   CHECK(runtime.AppliedInput(0, 0) == nullptr);
 
   NsmbNetplayPoC::InputState input;
@@ -450,6 +453,65 @@ void TestAIObservationTrackingRuntime() {
   CHECK(runtime.ResolveFireballOwner(0, 3, -1, 0, 0, confidence,
                                      heuristic, tracked) == -1);
   CHECK(!tracked);
+
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() /
+      ("nsmb-ai-observation-runtime-" +
+       std::to_string(std::chrono::steady_clock::now()
+                          .time_since_epoch()
+                          .count()));
+  const std::filesystem::path v1Path = root / "nested" / "v1.jsonl";
+  const std::filesystem::path v2Path = root / "v2.jsonl";
+  const std::filesystem::path v3Path = root / "v3.jsonl";
+  CHECK(runtime.OpenLog(LogKind::V1, v1Path.string()));
+  CHECK(runtime.OpenLog(LogKind::V2, v2Path.string()));
+  CHECK(runtime.OpenLog(LogKind::V3, v3Path.string()));
+  CHECK(runtime.CanWriteLog(LogKind::V1));
+  CHECK(runtime.CanWriteLog(LogKind::V2));
+  CHECK(runtime.CanWriteLog(LogKind::V3));
+
+  runtime.Log(LogKind::V1) << "v1-a\n";
+  runtime.RecordLogLine(LogKind::V1, 2);
+  runtime.Log(LogKind::V1) << "v1-b\n";
+  runtime.RecordLogLine(LogKind::V1, 2);
+  {
+    std::ifstream input(v1Path);
+    const std::string contents((std::istreambuf_iterator<char>(input)),
+                               std::istreambuf_iterator<char>());
+    CHECK(contents == "v1-a\nv1-b\n");
+  }
+
+  runtime.Log(LogKind::V2) << "v2\n";
+  runtime.RecordLogLine(LogKind::V2, 0);
+  runtime.Log(LogKind::V3) << "v3\n";
+  runtime.RecordLogLine(LogKind::V3, 1);
+  runtime.CloseLogs();
+  CHECK(!runtime.CanWriteLog(LogKind::V1));
+  CHECK(!runtime.CanWriteLog(LogKind::V2));
+  CHECK(!runtime.CanWriteLog(LogKind::V3));
+  for (const auto &[path, expected] :
+       std::array<std::pair<std::filesystem::path, std::string>, 3>{
+           std::pair{v1Path, std::string("v1-a\nv1-b\n")},
+           std::pair{v2Path, std::string("v2\n")},
+           std::pair{v3Path, std::string("v3\n")}}) {
+    std::ifstream input(path);
+    const std::string contents((std::istreambuf_iterator<char>(input)),
+                               std::istreambuf_iterator<char>());
+    CHECK(contents == expected);
+  }
+
+  CHECK(runtime.OpenLog(LogKind::V1, v1Path.string()));
+  runtime.Log(LogKind::V1) << "reopened\n";
+  runtime.CloseLogs();
+  {
+    std::ifstream input(v1Path);
+    const std::string contents((std::istreambuf_iterator<char>(input)),
+                               std::istreambuf_iterator<char>());
+    CHECK(contents == "reopened\n");
+  }
+  std::error_code removeError;
+  std::filesystem::remove_all(root, removeError);
+  CHECK(!removeError);
 }
 
 } // namespace
@@ -464,7 +526,7 @@ int main() {
   TestStateSyncRuntimeRestartContract();
   TestGameStateTraceRowFormatting();
   TestGameStateTraceWriterLifecycle();
-  TestAIObservationTrackingRuntime();
+  TestAIObservationRuntime();
   if (Failures != 0) {
     std::fprintf(stderr, "nsmb game state tests failed: %d\n", Failures);
     return 1;
