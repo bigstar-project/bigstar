@@ -451,6 +451,127 @@ void TestMvlConfigReadsClampsAndPreservesPriority() {
   CHECK(config.StageSceneSettings == 0u);
 }
 
+void TestStateSyncConfigDefaultsAndApplyModes() {
+  MapEnvironment environment;
+  auto config = NsmbNetplayPoC::Config::LoadStateSyncConfig(environment);
+  CHECK(!config.GameEnabled);
+  CHECK(!config.GameExtended);
+  CHECK(!config.GameApplyEnabled);
+  CHECK(config.GameApplyCriticalGlobals);
+  CHECK(config.GameApplyStarObjects);
+  CHECK(config.GameApplyStageObjects);
+  CHECK(config.GameApplyPlayerActors);
+  CHECK(!config.GameApplyRemotePlayerOnly);
+  CHECK(config.GameInterval == 60);
+  CHECK(!config.PlayerEnabled);
+  CHECK(config.PlayerInterval == 1);
+  CHECK(config.PlayerMaxPredictFrames == 2);
+  CHECK(!config.WorldEnabled);
+  CHECK(config.WorldApplyStarActor);
+  CHECK(config.WorldInterval == 2);
+  CHECK(config.WorldMaxPredictFrames == 1);
+  CHECK(config.WorldTraceObjectLifecyclesInterval == 60);
+
+  environment.Values["MELONDS_NSML_STATE_APPLY_MODE"] = "critical";
+  config = NsmbNetplayPoC::Config::LoadStateSyncConfig(environment);
+  CHECK(config.GameApplyCriticalGlobals);
+  CHECK(config.GameApplyStarObjects);
+  CHECK(!config.GameApplyStageObjects);
+  CHECK(!config.GameApplyPlayerActors);
+
+  environment.Values["MELONDS_NSML_STATE_APPLY_MODE"] = "globals";
+  config = NsmbNetplayPoC::Config::LoadStateSyncConfig(environment);
+  CHECK(config.GameApplyCriticalGlobals);
+  CHECK(!config.GameApplyStarObjects);
+  CHECK(!config.GameApplyStageObjects);
+  CHECK(!config.GameApplyPlayerActors);
+
+  environment.Values["MELONDS_NSML_STATE_APPLY_MODE"] = "objects";
+  config = NsmbNetplayPoC::Config::LoadStateSyncConfig(environment);
+  CHECK(!config.GameApplyCriticalGlobals);
+  CHECK(config.GameApplyStarObjects);
+  CHECK(config.GameApplyStageObjects);
+  CHECK(config.GameApplyPlayerActors);
+
+  environment.Values["MELONDS_NSML_STATE_APPLY_MODE"] = "remote-player";
+  config = NsmbNetplayPoC::Config::LoadStateSyncConfig(environment);
+  CHECK(!config.GameApplyCriticalGlobals);
+  CHECK(!config.GameApplyStarObjects);
+  CHECK(!config.GameApplyStageObjects);
+  CHECK(config.GameApplyPlayerActors);
+  CHECK(config.GameApplyRemotePlayerOnly);
+
+  environment.Values["MELONDS_NSML_STATE_APPLY_MODE"] = "unknown";
+  config = NsmbNetplayPoC::Config::LoadStateSyncConfig(environment);
+  CHECK(config.GameApplyCriticalGlobals);
+  CHECK(config.GameApplyStarObjects);
+  CHECK(config.GameApplyStageObjects);
+  CHECK(config.GameApplyPlayerActors);
+  CHECK(!config.GameApplyRemotePlayerOnly);
+}
+
+void TestStateSyncConfigReadsClampsAndSkipPriorities() {
+  MapEnvironment environment;
+  environment.Values = {
+      {"MELONDS_NSML_STATE_SYNC", "1"},
+      {"MELONDS_NSML_STATE_SYNC_EXTENDED", "1"},
+      {"MELONDS_NSML_STATE_APPLY", "1"},
+      {"MELONDS_NSML_STATE_SYNC_INTERVAL", "0"},
+      {"MELONDS_NSML_PLAYER_STATE_SYNC", "1"},
+      {"MELONDS_NSML_PLAYER_STATE_APPLY", "1"},
+      {"MELONDS_NSML_PLAYER_STATE_GLOBALS", "1"},
+      {"MELONDS_NSML_PLAYER_STATE_SYNC_INTERVAL", "-4"},
+      {"MELONDS_NSML_PLAYER_STATE_MAX_PREDICT_FRAMES", "-1"},
+      {"MELONDS_NSML_WORLD_STATE_SYNC", "1"},
+      {"MELONDS_NSML_WORLD_STATE_APPLY", "1"},
+      {"MELONDS_NSML_WORLD_STATE_SKIP_STAR", "1"},
+      {"MELONDS_NSML_WORLD_STATE_SPAWN_ITEM", "1"},
+      {"MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD", "1"},
+      {"MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD", "1"},
+      {"MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS", "1"},
+      {"MELONDS_NSML_WORLD_STATE_SKIP_EFFECTS", "1"},
+      {"MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT", "1"},
+      {"MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS", "1"},
+      {"MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES", "1"},
+      {"MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS", "1"},
+      {"MELONDS_NSML_WORLD_STATE_TRACE_EFFECTS", "1"},
+      {"MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_INTERVAL", "0"},
+      {"MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_START_FRAME", "-1"},
+      {"MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_END_FRAME", "-2"},
+      {"MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL", "0"},
+      {"MELONDS_NSML_WORLD_STATE_MAX_PREDICT_FRAMES", "-3"},
+      {"MELONDS_NSML_WORLD_STATE_ACTOR_RESCAN_INTERVAL", "-4"},
+  };
+
+  const auto config = NsmbNetplayPoC::Config::LoadStateSyncConfig(environment);
+  CHECK(config.GameEnabled);
+  CHECK(config.GameExtended);
+  CHECK(config.GameApplyEnabled);
+  CHECK(config.GameInterval == 1);
+  CHECK(config.PlayerEnabled);
+  CHECK(config.PlayerApplyEnabled);
+  CHECK(config.PlayerGlobalsEnabled);
+  CHECK(config.PlayerInterval == 1);
+  CHECK(config.PlayerMaxPredictFrames == 0);
+  CHECK(config.WorldEnabled);
+  CHECK(config.WorldApplyEnabled);
+  CHECK(!config.WorldApplyStarActor);
+  CHECK(config.WorldSpawnItem);
+  CHECK(!config.WorldApplyMovingHazard);
+  CHECK(!config.WorldApplyEffects);
+  CHECK(config.WorldApplyActorSnapshot);
+  CHECK(config.WorldTraceMovingHazards);
+  CHECK(config.WorldTraceObjectLifecycles);
+  CHECK(config.WorldTraceActorInternals);
+  CHECK(config.WorldTraceEffects);
+  CHECK(config.WorldTraceObjectLifecyclesInterval == 1);
+  CHECK(config.WorldTraceObjectLifecyclesStartFrame == 0u);
+  CHECK(config.WorldTraceObjectLifecyclesEndFrame == 0u);
+  CHECK(config.WorldInterval == 1);
+  CHECK(config.WorldMaxPredictFrames == 0);
+  CHECK(config.WorldActorRescanInterval == 0);
+}
+
 } // namespace
 
 int main() {
@@ -470,6 +591,8 @@ int main() {
   TestRollbackConfigReadsClampsAndDependencies();
   TestMvlConfigDefaults();
   TestMvlConfigReadsClampsAndPreservesPriority();
+  TestStateSyncConfigDefaultsAndApplyModes();
+  TestStateSyncConfigReadsClampsAndSkipPriorities();
 
   if (Failures != 0) {
     std::fprintf(stderr, "nsmb netplay config tests failed: %d\n", Failures);

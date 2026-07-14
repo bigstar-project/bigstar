@@ -14908,70 +14908,38 @@ void InitFromEnvironment()
         ? std::clamp(EnvInt("MELONDS_NSML_AI_OBSERVATION_V3_STAGE_FILTER", -1), -1, 4)
         : -1;
     G.AIPlayLogGameplayOnly = !EnvFlag("MELONDS_NSML_AI_PLAY_LOG_INCLUDE_NON_GAMEPLAY");
-    G.GameStateSyncEnabled = EnvFlag("MELONDS_NSML_STATE_SYNC");
-    G.GameStateSyncExtended = EnvFlag("MELONDS_NSML_STATE_SYNC_EXTENDED");
-    G.GameStateApplyEnabled = EnvFlag("MELONDS_NSML_STATE_APPLY");
-    G.GameStateApplyCriticalGlobals = true;
-    G.GameStateApplyStarObjects = true;
-    G.GameStateApplyStageObjects = true;
-    G.GameStateApplyPlayerActors = true;
-    G.GameStateApplyRemotePlayerOnly = false;
-    if (const char* applyMode = std::getenv("MELONDS_NSML_STATE_APPLY_MODE"))
-    {
-        if (!std::strcmp(applyMode, "critical"))
-        {
-            G.GameStateApplyStageObjects = false;
-            G.GameStateApplyPlayerActors = false;
-        }
-        else if (!std::strcmp(applyMode, "globals"))
-        {
-            G.GameStateApplyStarObjects = false;
-            G.GameStateApplyStageObjects = false;
-            G.GameStateApplyPlayerActors = false;
-        }
-        else if (!std::strcmp(applyMode, "objects"))
-        {
-            G.GameStateApplyCriticalGlobals = false;
-        }
-        else if (!std::strcmp(applyMode, "remote-player"))
-        {
-            G.GameStateApplyCriticalGlobals = false;
-            G.GameStateApplyStarObjects = false;
-            G.GameStateApplyStageObjects = false;
-            G.GameStateApplyPlayerActors = true;
-            G.GameStateApplyRemotePlayerOnly = true;
-        }
-    }
-    G.GameStateSyncInterval = std::max(1, EnvInt("MELONDS_NSML_STATE_SYNC_INTERVAL", 60));
-    G.PlayerStateSyncEnabled = EnvFlag("MELONDS_NSML_PLAYER_STATE_SYNC");
-    G.PlayerStateApplyEnabled = EnvFlag("MELONDS_NSML_PLAYER_STATE_APPLY");
-    G.PlayerStateGlobalsEnabled = EnvFlag("MELONDS_NSML_PLAYER_STATE_GLOBALS");
-    G.PlayerStateSyncInterval = std::max(1, EnvInt("MELONDS_NSML_PLAYER_STATE_SYNC_INTERVAL", 1));
-    G.PlayerStateMaxPredictFrames = std::max(0, EnvInt("MELONDS_NSML_PLAYER_STATE_MAX_PREDICT_FRAMES", 2));
-    G.WorldStateSyncEnabled = EnvFlag("MELONDS_NSML_WORLD_STATE_SYNC");
-    G.WorldStateApplyEnabled = EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY");
-    G.WorldStateApplyStarActor = !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_STAR");
-    G.WorldStateSpawnItem = EnvFlag("MELONDS_NSML_WORLD_STATE_SPAWN_ITEM");
-    G.WorldStateApplyMovingHazard =
-        EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD") &&
-        !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD");
-    G.WorldStateApplyEffects =
-        EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS") &&
-        !EnvFlag("MELONDS_NSML_WORLD_STATE_SKIP_EFFECTS");
-    G.WorldStateApplyActorSnapshot = EnvFlag("MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT");
-    G.WorldStateTraceMovingHazards = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS");
-    G.WorldStateTraceObjectLifecycles = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES");
-    G.WorldStateTraceActorInternals = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS");
-    G.WorldStateTraceEffects = EnvFlag("MELONDS_NSML_WORLD_STATE_TRACE_EFFECTS");
-    G.WorldStateTraceObjectLifecyclesInterval =
-        std::max(1, EnvInt("MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_INTERVAL", 60));
-    G.WorldStateTraceObjectLifecyclesStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_START_FRAME", 0)));
-    G.WorldStateTraceObjectLifecyclesEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_END_FRAME", 0)));
-    G.WorldStateSyncInterval = std::max(1, EnvInt("MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL", 2));
-    G.WorldStateMaxPredictFrames = std::max(0, EnvInt("MELONDS_NSML_WORLD_STATE_MAX_PREDICT_FRAMES", 1));
-    G.WorldStateActorRescanInterval = std::max(0, EnvInt("MELONDS_NSML_WORLD_STATE_ACTOR_RESCAN_INTERVAL", 0));
+    const Config::StateSyncConfig stateSyncConfig = Config::LoadStateSyncConfig();
+    G.GameStateSyncEnabled = stateSyncConfig.GameEnabled;
+    G.GameStateSyncExtended = stateSyncConfig.GameExtended;
+    G.GameStateApplyEnabled = stateSyncConfig.GameApplyEnabled;
+    G.GameStateApplyCriticalGlobals = stateSyncConfig.GameApplyCriticalGlobals;
+    G.GameStateApplyStarObjects = stateSyncConfig.GameApplyStarObjects;
+    G.GameStateApplyStageObjects = stateSyncConfig.GameApplyStageObjects;
+    G.GameStateApplyPlayerActors = stateSyncConfig.GameApplyPlayerActors;
+    G.GameStateApplyRemotePlayerOnly = stateSyncConfig.GameApplyRemotePlayerOnly;
+    G.GameStateSyncInterval = stateSyncConfig.GameInterval;
+    G.PlayerStateSyncEnabled = stateSyncConfig.PlayerEnabled;
+    G.PlayerStateApplyEnabled = stateSyncConfig.PlayerApplyEnabled;
+    G.PlayerStateGlobalsEnabled = stateSyncConfig.PlayerGlobalsEnabled;
+    G.PlayerStateSyncInterval = stateSyncConfig.PlayerInterval;
+    G.PlayerStateMaxPredictFrames = stateSyncConfig.PlayerMaxPredictFrames;
+    G.WorldStateSyncEnabled = stateSyncConfig.WorldEnabled;
+    G.WorldStateApplyEnabled = stateSyncConfig.WorldApplyEnabled;
+    G.WorldStateApplyStarActor = stateSyncConfig.WorldApplyStarActor;
+    G.WorldStateSpawnItem = stateSyncConfig.WorldSpawnItem;
+    G.WorldStateApplyMovingHazard = stateSyncConfig.WorldApplyMovingHazard;
+    G.WorldStateApplyEffects = stateSyncConfig.WorldApplyEffects;
+    G.WorldStateApplyActorSnapshot = stateSyncConfig.WorldApplyActorSnapshot;
+    G.WorldStateTraceMovingHazards = stateSyncConfig.WorldTraceMovingHazards;
+    G.WorldStateTraceObjectLifecycles = stateSyncConfig.WorldTraceObjectLifecycles;
+    G.WorldStateTraceActorInternals = stateSyncConfig.WorldTraceActorInternals;
+    G.WorldStateTraceEffects = stateSyncConfig.WorldTraceEffects;
+    G.WorldStateTraceObjectLifecyclesInterval = stateSyncConfig.WorldTraceObjectLifecyclesInterval;
+    G.WorldStateTraceObjectLifecyclesStartFrame = stateSyncConfig.WorldTraceObjectLifecyclesStartFrame;
+    G.WorldStateTraceObjectLifecyclesEndFrame = stateSyncConfig.WorldTraceObjectLifecyclesEndFrame;
+    G.WorldStateSyncInterval = stateSyncConfig.WorldInterval;
+    G.WorldStateMaxPredictFrames = stateSyncConfig.WorldMaxPredictFrames;
+    G.WorldStateActorRescanInterval = stateSyncConfig.WorldActorRescanInterval;
 
     const char* memPatchFile = std::getenv("MELONDS_NSML_MEM_PATCH_FILE");
     if (memPatchFile && memPatchFile[0]) G.MemPatchFile = memPatchFile;

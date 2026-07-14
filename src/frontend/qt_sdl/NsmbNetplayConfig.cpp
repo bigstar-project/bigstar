@@ -462,6 +462,99 @@ MvlConfig LoadMvlConfig(const Environment &environment) {
 
 MvlConfig LoadMvlConfig() { return LoadMvlConfig(GetProcessEnvironment()); }
 
+StateSyncConfig LoadStateSyncConfig(const Environment &environment) {
+  StateSyncConfig config;
+  config.GameEnabled = ReadFlag(environment, "MELONDS_NSML_STATE_SYNC");
+  config.GameExtended =
+      ReadFlag(environment, "MELONDS_NSML_STATE_SYNC_EXTENDED");
+  config.GameApplyEnabled = ReadFlag(environment, "MELONDS_NSML_STATE_APPLY");
+
+  const std::string applyMode =
+      ReadCString(environment, "MELONDS_NSML_STATE_APPLY_MODE", "");
+  if (applyMode == "critical") {
+    config.GameApplyStageObjects = false;
+    config.GameApplyPlayerActors = false;
+  } else if (applyMode == "globals") {
+    config.GameApplyStarObjects = false;
+    config.GameApplyStageObjects = false;
+    config.GameApplyPlayerActors = false;
+  } else if (applyMode == "objects") {
+    config.GameApplyCriticalGlobals = false;
+  } else if (applyMode == "remote-player") {
+    config.GameApplyCriticalGlobals = false;
+    config.GameApplyStarObjects = false;
+    config.GameApplyStageObjects = false;
+    config.GameApplyRemotePlayerOnly = true;
+  }
+  config.GameInterval =
+      std::max(1, ReadInt(environment, "MELONDS_NSML_STATE_SYNC_INTERVAL", 60));
+
+  config.PlayerEnabled =
+      ReadFlag(environment, "MELONDS_NSML_PLAYER_STATE_SYNC");
+  config.PlayerApplyEnabled =
+      ReadFlag(environment, "MELONDS_NSML_PLAYER_STATE_APPLY");
+  config.PlayerGlobalsEnabled =
+      ReadFlag(environment, "MELONDS_NSML_PLAYER_STATE_GLOBALS");
+  config.PlayerInterval = std::max(
+      1, ReadInt(environment, "MELONDS_NSML_PLAYER_STATE_SYNC_INTERVAL", 1));
+  config.PlayerMaxPredictFrames =
+      std::max(0, ReadInt(environment,
+                          "MELONDS_NSML_PLAYER_STATE_MAX_PREDICT_FRAMES", 2));
+
+  config.WorldEnabled = ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_SYNC");
+  config.WorldApplyEnabled =
+      ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_APPLY");
+  config.WorldApplyStarActor =
+      !ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_SKIP_STAR");
+  config.WorldSpawnItem =
+      ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_SPAWN_ITEM");
+  config.WorldApplyMovingHazard =
+      ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD") &&
+      !ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD");
+  config.WorldApplyEffects =
+      ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS") &&
+      !ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_SKIP_EFFECTS");
+  config.WorldApplyActorSnapshot =
+      ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT");
+  config.WorldTraceMovingHazards =
+      ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS");
+  config.WorldTraceObjectLifecycles =
+      ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES");
+  config.WorldTraceActorInternals =
+      ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS");
+  config.WorldTraceEffects =
+      ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_TRACE_EFFECTS");
+  config.WorldTraceObjectLifecyclesInterval = std::max(
+      1,
+      ReadInt(environment,
+              "MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_INTERVAL", 60));
+  config.WorldTraceObjectLifecyclesStartFrame =
+      static_cast<std::uint32_t>(std::max(
+          0, ReadInt(
+                 environment,
+                 "MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_START_FRAME",
+                 0)));
+  config.WorldTraceObjectLifecyclesEndFrame =
+      static_cast<std::uint32_t>(std::max(
+          0,
+          ReadInt(environment,
+                  "MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_END_FRAME",
+                  0)));
+  config.WorldInterval = std::max(
+      1, ReadInt(environment, "MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL", 2));
+  config.WorldMaxPredictFrames =
+      std::max(0, ReadInt(environment,
+                          "MELONDS_NSML_WORLD_STATE_MAX_PREDICT_FRAMES", 1));
+  config.WorldActorRescanInterval =
+      std::max(0, ReadInt(environment,
+                          "MELONDS_NSML_WORLD_STATE_ACTOR_RESCAN_INTERVAL", 0));
+  return config;
+}
+
+StateSyncConfig LoadStateSyncConfig() {
+  return LoadStateSyncConfig(GetProcessEnvironment());
+}
+
 bool EnvFlag(const char *name) {
   return ReadFlag(GetProcessEnvironment(), name);
 }

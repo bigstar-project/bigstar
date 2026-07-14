@@ -145,6 +145,40 @@ struct MvlConfig {
   int ForceCourseSelectFactoryPlayerArg = -1;
 };
 
+struct StateSyncConfig {
+  bool GameEnabled = false;
+  bool GameExtended = false;
+  bool GameApplyEnabled = false;
+  bool GameApplyCriticalGlobals = true;
+  bool GameApplyStarObjects = true;
+  bool GameApplyStageObjects = true;
+  bool GameApplyPlayerActors = true;
+  bool GameApplyRemotePlayerOnly = false;
+  int GameInterval = 60;
+  bool PlayerEnabled = false;
+  bool PlayerApplyEnabled = false;
+  bool PlayerGlobalsEnabled = false;
+  int PlayerInterval = 1;
+  int PlayerMaxPredictFrames = 2;
+  bool WorldEnabled = false;
+  bool WorldApplyEnabled = false;
+  bool WorldApplyStarActor = true;
+  bool WorldSpawnItem = false;
+  bool WorldApplyMovingHazard = false;
+  bool WorldApplyEffects = false;
+  bool WorldApplyActorSnapshot = false;
+  bool WorldTraceMovingHazards = false;
+  bool WorldTraceObjectLifecycles = false;
+  bool WorldTraceActorInternals = false;
+  bool WorldTraceEffects = false;
+  int WorldTraceObjectLifecyclesInterval = 60;
+  std::uint32_t WorldTraceObjectLifecyclesStartFrame = 0;
+  std::uint32_t WorldTraceObjectLifecyclesEndFrame = 0;
+  int WorldInterval = 2;
+  int WorldMaxPredictFrames = 1;
+  int WorldActorRescanInterval = 0;
+};
+
 bool ParseFlag(const char *value);
 const char *ValueOr(const char *value, const char *fallback);
 int ParseInt(const char *value, int fallback);
@@ -177,6 +211,8 @@ RollbackConfig LoadRollbackConfig(const Environment &environment);
 RollbackConfig LoadRollbackConfig();
 MvlConfig LoadMvlConfig(const Environment &environment);
 MvlConfig LoadMvlConfig();
+StateSyncConfig LoadStateSyncConfig(const Environment &environment);
+StateSyncConfig LoadStateSyncConfig();
 
 bool EnvFlag(const char *name);
 const char *EnvCString(const char *name, const char *fallback);
