@@ -320,6 +320,22 @@ add_subdirectory("../../net"
     ${CMAKE_BINARY_DIR}/net)
 
 if (BUILD_TESTING)
+    add_executable(nsmb_netplay_diagnostics_tests
+        NsmbNetplayDiagnostics.cpp
+        NsmbNetplayDiagnostics.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_netplay_diagnostics_tests.cpp
+    )
+    target_include_directories(nsmb_netplay_diagnostics_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_netplay_diagnostics_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-netplay-diagnostics COMMAND nsmb_netplay_diagnostics_tests)
+
     add_executable(nsmb_netplay_coordinator_tests
         NsmbNetplayCoordinator.cpp
         NsmbNetplayCoordinator.h

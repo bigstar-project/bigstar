@@ -1,6 +1,7 @@
 #include "NsmbNetplayDiagnostics.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -15,8 +16,10 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+// clang-format off: dbghelp requires Windows types to be declared first.
 #include <windows.h>
 #include <dbghelp.h>
+// clang-format on
 #endif
 
 namespace NsmbNetplayPoC::Diagnostics {
@@ -73,17 +76,17 @@ bool WriteMiniDump(const std::string &path) {
     return false;
   }
 
-  HANDLE file = CreateFileA(dumpPath.string().c_str(), GENERIC_WRITE, 0,
-                            nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
-                            nullptr);
+  HANDLE file =
+      CreateFileA(dumpPath.string().c_str(), GENERIC_WRITE, 0, nullptr,
+                  CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (file == INVALID_HANDLE_VALUE) {
     FreeLibrary(dbghelp);
     return false;
   }
 
-  const BOOL ok = miniDumpWriteDump(
-      GetCurrentProcess(), GetCurrentProcessId(), file, MiniDumpNormal, nullptr,
-      nullptr, nullptr);
+  const BOOL ok =
+      miniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file,
+                        MiniDumpNormal, nullptr, nullptr, nullptr);
   CloseHandle(file);
   FreeLibrary(dbghelp);
   return ok != FALSE;
@@ -94,7 +97,7 @@ bool WriteMiniDump(const std::string &) { return false; }
 
 } // namespace
 
-struct HangRuntime::Impl {
+struct Runtime::Impl {
   Config::DiagnosticsConfig Config;
   bool Host = true;
   std::ofstream WatchdogLog;
@@ -103,6 +106,13 @@ struct HangRuntime::Impl {
   std::atomic<bool> WatchdogStop{false};
   bool WatchdogThreadStarted = false;
   std::thread WatchdogThread;
+  int FrameHeartbeatInterval = 0;
+  std::array<melonDS::u32, 16> LastFrameHeartbeat{};
+  std::ofstream FrameHeartbeat;
+  std::atomic<melonDS::u32> PendingFrameHeartbeat{0};
+  std::atomic<bool> FrameHeartbeatStop{false};
+  bool FrameHeartbeatThreadStarted = false;
+  std::thread FrameHeartbeatThread;
   std::atomic<const char *> Phase{"startup"};
   std::atomic<const char *> Event{"startup"};
   std::atomic<std::uint64_t> PhaseUnixMs{0};
@@ -151,20 +161,18 @@ struct HangRuntime::Impl {
   std::atomic<melonDS::u32> Player1Transition{0};
   std::atomic<std::uint64_t> GameSnapshotUnixMs{0};
 
-  void WritePhaseEvent(std::uint64_t now, const char *event,
-                       const char *phase, int instanceID,
-                       melonDS::u32 frame, melonDS::u32 logicalFrame,
-                       melonDS::u32 sendFrame) {
+  void WritePhaseEvent(std::uint64_t now, const char *event, const char *phase,
+                       int instanceID, melonDS::u32 frame,
+                       melonDS::u32 logicalFrame, melonDS::u32 sendFrame) {
     if (!EnsureLogOpen(PhaseEventsLog, Config.HangPhaseEventsPath))
       return;
 
     PhaseEventsLog << "{\"tUnixMs\":" << now << ",\"event\":\""
                    << (event ? event : "phase") << "\",\"phase\":\""
-                   << (phase ? phase : "unknown") << "\",\"instance\":"
-                   << instanceID << ",\"frame\":" << frame
+                   << (phase ? phase : "unknown")
+                   << "\",\"instance\":" << instanceID << ",\"frame\":" << frame
                    << ",\"logicalFrame\":" << logicalFrame
-                   << ",\"sendFrame\":" << sendFrame
-                   << ",\"lastSent\":"
+                   << ",\"sendFrame\":" << sendFrame << ",\"lastSent\":"
                    << LastSentFrame.load(std::memory_order_acquire)
                    << ",\"lastRecv\":"
                    << LastRecvFrame.load(std::memory_order_acquire)
@@ -172,8 +180,7 @@ struct HangRuntime::Impl {
                    << ",\"remoteWaitActive\":"
                    << RemoteWaitActive.load(std::memory_order_acquire)
                    << ",\"remoteWaitTarget\":"
-                   << RemoteWaitTarget.load(std::memory_order_acquire)
-                   << "}\n";
+                   << RemoteWaitTarget.load(std::memory_order_acquire) << "}\n";
     PhaseEventsLog.flush();
   }
 
@@ -249,14 +256,11 @@ struct HangRuntime::Impl {
           << ",\"arm9PC\":\"0x" << std::hex
           << Arm9PC.load(std::memory_order_acquire) << "\",\"arm9LR\":\"0x"
           << Arm9LR.load(std::memory_order_acquire) << "\",\"arm9SP\":\"0x"
-          << Arm9SP.load(std::memory_order_acquire)
-          << "\",\"arm9CPSR\":\"0x"
-          << Arm9CPSR.load(std::memory_order_acquire)
-          << "\",\"stageID\":\"0x" << StageID.load(std::memory_order_acquire)
-          << "\",\"stageGroup\":\"0x"
-          << StageGroup.load(std::memory_order_acquire)
-          << "\",\"vsMode\":\"0x" << VsMode.load(std::memory_order_acquire)
-          << "\",\"netState14\":\"0x"
+          << Arm9SP.load(std::memory_order_acquire) << "\",\"arm9CPSR\":\"0x"
+          << Arm9CPSR.load(std::memory_order_acquire) << "\",\"stageID\":\"0x"
+          << StageID.load(std::memory_order_acquire) << "\",\"stageGroup\":\"0x"
+          << StageGroup.load(std::memory_order_acquire) << "\",\"vsMode\":\"0x"
+          << VsMode.load(std::memory_order_acquire) << "\",\"netState14\":\"0x"
           << NetState14.load(std::memory_order_acquire)
           << "\",\"netState1C\":\"0x"
           << NetState1C.load(std::memory_order_acquire)
@@ -285,157 +289,215 @@ struct HangRuntime::Impl {
       WatchdogLog.flush();
     }
   }
-};
 
-HangRuntime::HangRuntime() : Runtime(std::make_unique<Impl>()) {}
-
-HangRuntime::~HangRuntime() { Stop(); }
-
-void HangRuntime::Start(const Config::DiagnosticsConfig &config, bool host) {
-  Runtime->Config = config;
-  Runtime->Host = host;
-  if (!config.HangDiagnosticsEnabled || Runtime->WatchdogThreadStarted)
-    return;
-  Runtime->WatchdogStop.store(false, std::memory_order_release);
-  Runtime->WatchdogThreadStarted = true;
-  Runtime->WatchdogThread =
-      std::thread([this] { Runtime->RunWatchdog(); });
-}
-
-void HangRuntime::Stop() {
-  if (Runtime->WatchdogThreadStarted) {
-    Runtime->WatchdogStop.store(true, std::memory_order_release);
-    if (Runtime->WatchdogThread.joinable())
-      Runtime->WatchdogThread.join();
-    Runtime->WatchdogThreadStarted = false;
+  void RunFrameHeartbeat() {
+    melonDS::u32 writtenFrame = 0;
+    while (!FrameHeartbeatStop.load(std::memory_order_acquire)) {
+      const melonDS::u32 frame =
+          PendingFrameHeartbeat.load(std::memory_order_acquire);
+      if (frame != 0 && frame != writtenFrame && FrameHeartbeat) {
+        FrameHeartbeat << frame << '\n';
+        FrameHeartbeat.flush();
+        writtenFrame = frame;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
   }
 
-  std::lock_guard<std::mutex> lock(Runtime->LogMutex);
-  if (Runtime->WatchdogLog)
-    Runtime->WatchdogLog.close();
-  if (Runtime->PhaseEventsLog)
-    Runtime->PhaseEventsLog.close();
+  void StopFrameHeartbeat() {
+    if (FrameHeartbeatThreadStarted) {
+      FrameHeartbeatStop.store(true, std::memory_order_release);
+      if (FrameHeartbeatThread.joinable())
+        FrameHeartbeatThread.join();
+      FrameHeartbeatThreadStarted = false;
+    }
+    if (FrameHeartbeat.is_open())
+      FrameHeartbeat.close();
+  }
+};
+
+Runtime::Runtime() : State(std::make_unique<Impl>()) {}
+
+Runtime::~Runtime() { Stop(); }
+
+bool Runtime::ConfigureFrameHeartbeat(int interval, const std::string &path) {
+  State->FrameHeartbeatInterval = std::max(0, interval);
+  if (path.empty())
+    return false;
+
+  State->FrameHeartbeat.open(path, std::ios::out | std::ios::trunc);
+  if (!State->FrameHeartbeat)
+    return false;
+
+  State->FrameHeartbeatStop.store(false, std::memory_order_release);
+  State->FrameHeartbeatThreadStarted = true;
+  State->FrameHeartbeatThread =
+      std::thread([this] { State->RunFrameHeartbeat(); });
+  return true;
 }
 
-void HangRuntime::TracePhase(const char *event, const char *phase,
-                             int instanceID, melonDS::u32 frame,
-                             melonDS::u32 logicalFrame,
-                             melonDS::u32 sendFrame) {
-  if (!Runtime->Config.HangDiagnosticsEnabled)
+bool Runtime::PublishFrameHeartbeat(int instanceID, melonDS::u32 frame,
+                                    bool active) {
+  if (State->FrameHeartbeatInterval <= 0 || !active || instanceID < 0 ||
+      instanceID >= static_cast<int>(State->LastFrameHeartbeat.size()) ||
+      frame == State->LastFrameHeartbeat[instanceID] ||
+      (frame % static_cast<melonDS::u32>(State->FrameHeartbeatInterval)) != 0) {
+    return false;
+  }
+
+  State->LastFrameHeartbeat[instanceID] = frame;
+  std::printf("NSMB Heartbeat: inst=%d frame=%u\n", instanceID, frame);
+  if (State->FrameHeartbeat)
+    State->PendingFrameHeartbeat.store(frame, std::memory_order_release);
+  else
+    std::fflush(stdout);
+  return true;
+}
+
+void Runtime::StartHangDiagnostics(const Config::DiagnosticsConfig &config,
+                                   bool host) {
+  State->Config = config;
+  State->Host = host;
+  if (!config.HangDiagnosticsEnabled || State->WatchdogThreadStarted)
+    return;
+  State->WatchdogStop.store(false, std::memory_order_release);
+  State->WatchdogThreadStarted = true;
+  State->WatchdogThread = std::thread([this] { State->RunWatchdog(); });
+}
+
+void Runtime::Stop() {
+  if (State->WatchdogThreadStarted) {
+    State->WatchdogStop.store(true, std::memory_order_release);
+    if (State->WatchdogThread.joinable())
+      State->WatchdogThread.join();
+    State->WatchdogThreadStarted = false;
+  }
+
+  State->StopFrameHeartbeat();
+
+  std::lock_guard<std::mutex> lock(State->LogMutex);
+  if (State->WatchdogLog)
+    State->WatchdogLog.close();
+  if (State->PhaseEventsLog)
+    State->PhaseEventsLog.close();
+}
+
+void Runtime::TracePhase(const char *event, const char *phase, int instanceID,
+                         melonDS::u32 frame, melonDS::u32 logicalFrame,
+                         melonDS::u32 sendFrame) {
+  if (!State->Config.HangDiagnosticsEnabled)
     return;
 
   const std::uint64_t now = NowUnixMs();
-  Runtime->Event.store(event ? event : "phase", std::memory_order_release);
-  Runtime->Phase.store(phase ? phase : "unknown", std::memory_order_release);
-  Runtime->PhaseUnixMs.store(now, std::memory_order_release);
-  Runtime->Instance.store(instanceID, std::memory_order_release);
-  Runtime->Frame.store(frame, std::memory_order_release);
-  Runtime->LogicalFrame.store(logicalFrame, std::memory_order_release);
-  Runtime->SendFrame.store(sendFrame, std::memory_order_release);
+  State->Event.store(event ? event : "phase", std::memory_order_release);
+  State->Phase.store(phase ? phase : "unknown", std::memory_order_release);
+  State->PhaseUnixMs.store(now, std::memory_order_release);
+  State->Instance.store(instanceID, std::memory_order_release);
+  State->Frame.store(frame, std::memory_order_release);
+  State->LogicalFrame.store(logicalFrame, std::memory_order_release);
+  State->SendFrame.store(sendFrame, std::memory_order_release);
 
-  std::lock_guard<std::mutex> lock(Runtime->LogMutex);
-  Runtime->WritePhaseEvent(now, event, phase, instanceID, frame, logicalFrame,
-                           sendFrame);
+  std::lock_guard<std::mutex> lock(State->LogMutex);
+  State->WritePhaseEvent(now, event, phase, instanceID, frame, logicalFrame,
+                         sendFrame);
 }
 
-void HangRuntime::UpdateNetplaySnapshot(
+void Runtime::UpdateNetplaySnapshot(
     melonDS::u32 lastSentFrame, melonDS::u32 lastReceivedFrame,
     melonDS::u32 frameForLead, melonDS::u32 noFrameLimit,
     std::size_t localQueue, std::size_t remoteQueue, std::size_t delayedQueue,
     int peerState, int connectingPeerState) {
-  if (!Runtime->Config.HangDiagnosticsEnabled)
+  if (!State->Config.HangDiagnosticsEnabled)
     return;
-  Runtime->LastSentFrame.store(lastSentFrame, std::memory_order_release);
-  Runtime->LastRecvFrame.store(lastReceivedFrame, std::memory_order_release);
-  const int lead = frameForLead == noFrameLimit ||
-                           lastReceivedFrame == noFrameLimit
-                       ? 0
-                       : static_cast<int>(frameForLead) -
-                             static_cast<int>(lastReceivedFrame);
-  Runtime->Lead.store(lead, std::memory_order_release);
-  Runtime->LocalQueue.store(localQueue, std::memory_order_release);
-  Runtime->RemoteQueue.store(remoteQueue, std::memory_order_release);
-  Runtime->DelayedQueue.store(delayedQueue, std::memory_order_release);
-  Runtime->PeerState.store(peerState, std::memory_order_release);
-  Runtime->ConnectingPeerState.store(connectingPeerState,
-                                      std::memory_order_release);
+  State->LastSentFrame.store(lastSentFrame, std::memory_order_release);
+  State->LastRecvFrame.store(lastReceivedFrame, std::memory_order_release);
+  const int lead =
+      frameForLead == noFrameLimit || lastReceivedFrame == noFrameLimit
+          ? 0
+          : static_cast<int>(frameForLead) -
+                static_cast<int>(lastReceivedFrame);
+  State->Lead.store(lead, std::memory_order_release);
+  State->LocalQueue.store(localQueue, std::memory_order_release);
+  State->RemoteQueue.store(remoteQueue, std::memory_order_release);
+  State->DelayedQueue.store(delayedQueue, std::memory_order_release);
+  State->PeerState.store(peerState, std::memory_order_release);
+  State->ConnectingPeerState.store(connectingPeerState,
+                                   std::memory_order_release);
 }
 
-void HangRuntime::ResetNetplaySnapshot(melonDS::u32 noFrameLimit) {
-  Runtime->RemoteWaitActive.store(0, std::memory_order_release);
-  Runtime->RemoteWaitTarget.store(0, std::memory_order_release);
-  Runtime->LastSentFrame.store(noFrameLimit, std::memory_order_release);
-  Runtime->LastRecvFrame.store(noFrameLimit, std::memory_order_release);
-  Runtime->LocalQueue.store(0, std::memory_order_release);
-  Runtime->RemoteQueue.store(0, std::memory_order_release);
-  Runtime->DelayedQueue.store(0, std::memory_order_release);
+void Runtime::ResetNetplaySnapshot(melonDS::u32 noFrameLimit) {
+  State->RemoteWaitActive.store(0, std::memory_order_release);
+  State->RemoteWaitTarget.store(0, std::memory_order_release);
+  State->LastSentFrame.store(noFrameLimit, std::memory_order_release);
+  State->LastRecvFrame.store(noFrameLimit, std::memory_order_release);
+  State->LocalQueue.store(0, std::memory_order_release);
+  State->RemoteQueue.store(0, std::memory_order_release);
+  State->DelayedQueue.store(0, std::memory_order_release);
 }
 
-void HangRuntime::RecordENetService(int result) {
-  Runtime->LastENetServiceResult.store(result, std::memory_order_release);
+void Runtime::RecordENetService(int result) {
+  State->LastENetServiceResult.store(result, std::memory_order_release);
 }
 
-void HangRuntime::RecordENetEvent(int type, melonDS::u32 data) {
-  Runtime->LastENetEventType.store(type, std::memory_order_release);
-  Runtime->LastENetEventData.store(data, std::memory_order_release);
+void Runtime::RecordENetEvent(int type, melonDS::u32 data) {
+  State->LastENetEventType.store(type, std::memory_order_release);
+  State->LastENetEventData.store(data, std::memory_order_release);
 }
 
-void HangRuntime::RecordENetReceive(std::uint64_t unixMs) {
-  Runtime->LastENetRecvUnixMs.store(unixMs, std::memory_order_release);
+void Runtime::RecordENetReceive(std::uint64_t unixMs) {
+  State->LastENetRecvUnixMs.store(unixMs, std::memory_order_release);
 }
 
-void HangRuntime::RecordENetSend(int result, std::size_t bytes,
+void Runtime::RecordENetSend(int result, std::size_t bytes,
+                             std::uint64_t unixMs) {
+  State->LastENetSendResult.store(result, std::memory_order_release);
+  State->LastENetSendBytes.store(bytes, std::memory_order_release);
+  State->LastENetSendUnixMs.store(unixMs, std::memory_order_release);
+}
+
+void Runtime::BeginRemoteWait(melonDS::u32 targetFrame, std::uint64_t unixMs) {
+  State->RemoteWaitActive.store(1, std::memory_order_release);
+  State->RemoteWaitTarget.store(targetFrame, std::memory_order_release);
+  State->RemoteWaitStartUnixMs.store(unixMs, std::memory_order_release);
+  State->RemoteWaitProgressUnixMs.store(unixMs, std::memory_order_release);
+}
+
+void Runtime::ProgressRemoteWait(std::uint64_t unixMs) {
+  State->RemoteWaitProgressUnixMs.store(unixMs, std::memory_order_release);
+}
+
+void Runtime::EndRemoteWait() {
+  State->RemoteWaitActive.store(0, std::memory_order_release);
+}
+
+void Runtime::UpdateGameSnapshot(int instanceID, melonDS::u32 frame,
+                                 const GameStateModel::GameStateSample &sample,
                                  std::uint64_t unixMs) {
-  Runtime->LastENetSendResult.store(result, std::memory_order_release);
-  Runtime->LastENetSendBytes.store(bytes, std::memory_order_release);
-  Runtime->LastENetSendUnixMs.store(unixMs, std::memory_order_release);
-}
-
-void HangRuntime::BeginRemoteWait(melonDS::u32 targetFrame,
-                                  std::uint64_t unixMs) {
-  Runtime->RemoteWaitActive.store(1, std::memory_order_release);
-  Runtime->RemoteWaitTarget.store(targetFrame, std::memory_order_release);
-  Runtime->RemoteWaitStartUnixMs.store(unixMs, std::memory_order_release);
-  Runtime->RemoteWaitProgressUnixMs.store(unixMs, std::memory_order_release);
-}
-
-void HangRuntime::ProgressRemoteWait(std::uint64_t unixMs) {
-  Runtime->RemoteWaitProgressUnixMs.store(unixMs, std::memory_order_release);
-}
-
-void HangRuntime::EndRemoteWait() {
-  Runtime->RemoteWaitActive.store(0, std::memory_order_release);
-}
-
-void HangRuntime::UpdateGameSnapshot(
-    int instanceID, melonDS::u32 frame,
-    const GameStateModel::GameStateSample &sample, std::uint64_t unixMs) {
-  Runtime->Instance.store(instanceID, std::memory_order_release);
-  Runtime->Frame.store(frame, std::memory_order_release);
-  Runtime->Arm9PC.store(sample.Arm9PC, std::memory_order_release);
-  Runtime->Arm9LR.store(sample.Arm9LR, std::memory_order_release);
-  Runtime->Arm9SP.store(sample.Arm9SP, std::memory_order_release);
-  Runtime->Arm9CPSR.store(sample.Arm9CPSR, std::memory_order_release);
-  Runtime->StageID.store(sample.StageID, std::memory_order_release);
-  Runtime->StageGroup.store(sample.StageGroup, std::memory_order_release);
-  Runtime->VsMode.store(sample.VsMode, std::memory_order_release);
-  Runtime->NetState14.store(sample.NetState14, std::memory_order_release);
-  Runtime->NetState1C.store(sample.NetState1C, std::memory_order_release);
-  Runtime->NetState20.store(sample.NetState20, std::memory_order_release);
-  Runtime->NetState24.store(sample.NetState24, std::memory_order_release);
-  Runtime->NetState5C.store(sample.NetState5C, std::memory_order_release);
-  Runtime->NetPacketTick.store(sample.NetPacketTick, std::memory_order_release);
-  Runtime->AppFrameLength.store(sample.AppFrameLength,
-                                std::memory_order_release);
-  Runtime->AppUpdateTask.store(sample.AppUpdateTask, std::memory_order_release);
-  Runtime->AppSleeping.store(sample.AppSleeping, std::memory_order_release);
-  Runtime->StageSceneState.store(sample.StageSceneStateType,
+  State->Instance.store(instanceID, std::memory_order_release);
+  State->Frame.store(frame, std::memory_order_release);
+  State->Arm9PC.store(sample.Arm9PC, std::memory_order_release);
+  State->Arm9LR.store(sample.Arm9LR, std::memory_order_release);
+  State->Arm9SP.store(sample.Arm9SP, std::memory_order_release);
+  State->Arm9CPSR.store(sample.Arm9CPSR, std::memory_order_release);
+  State->StageID.store(sample.StageID, std::memory_order_release);
+  State->StageGroup.store(sample.StageGroup, std::memory_order_release);
+  State->VsMode.store(sample.VsMode, std::memory_order_release);
+  State->NetState14.store(sample.NetState14, std::memory_order_release);
+  State->NetState1C.store(sample.NetState1C, std::memory_order_release);
+  State->NetState20.store(sample.NetState20, std::memory_order_release);
+  State->NetState24.store(sample.NetState24, std::memory_order_release);
+  State->NetState5C.store(sample.NetState5C, std::memory_order_release);
+  State->NetPacketTick.store(sample.NetPacketTick, std::memory_order_release);
+  State->AppFrameLength.store(sample.AppFrameLength, std::memory_order_release);
+  State->AppUpdateTask.store(sample.AppUpdateTask, std::memory_order_release);
+  State->AppSleeping.store(sample.AppSleeping, std::memory_order_release);
+  State->StageSceneState.store(sample.StageSceneStateType,
+                               std::memory_order_release);
+  State->Player0Transition.store(sample.PlayerTransitionStatus0,
                                  std::memory_order_release);
-  Runtime->Player0Transition.store(sample.PlayerTransitionStatus0,
-                                   std::memory_order_release);
-  Runtime->Player1Transition.store(sample.PlayerTransitionStatus1,
-                                   std::memory_order_release);
-  Runtime->GameSnapshotUnixMs.store(unixMs, std::memory_order_release);
+  State->Player1Transition.store(sample.PlayerTransitionStatus1,
+                                 std::memory_order_release);
+  State->GameSnapshotUnixMs.store(unixMs, std::memory_order_release);
 }
 
 } // namespace NsmbNetplayPoC::Diagnostics

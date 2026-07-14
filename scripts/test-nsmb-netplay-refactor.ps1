@@ -120,6 +120,8 @@ if ($Tier -eq "fast" -or $Tier -eq "rollback" -or $Tier -eq "diagnostics") {
     } elseif ($Tier -eq "diagnostics") {
         $params.HangDiagnostics = $true
         $params.HangWatchdogIntervalMs = 100
+        $params.StallTimeoutMs = 10000
+        $params.FrameHeartbeatInterval = 10
     }
 } else {
     $params.InputScript = "tests\nsmb_us_direct_mvl_both_different.inputs"
@@ -166,7 +168,8 @@ if ($Tier -eq "diagnostics") {
     foreach ($role in @("host", "client")) {
         $watchdogPath = Join-Path $resolvedLogDir "$role.stdout.txt.watchdog.jsonl"
         $phasePath = Join-Path $resolvedLogDir "$role.stdout.txt.phase-events.jsonl"
-        foreach ($path in @($watchdogPath, $phasePath)) {
+        $heartbeatPath = Join-Path $resolvedLogDir "$role.stdout.txt.heartbeat"
+        foreach ($path in @($watchdogPath, $phasePath, $heartbeatPath)) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
                 throw "diagnostics smoke did not create log: $path"
             }
@@ -190,8 +193,23 @@ if ($Tier -eq "diagnostics") {
             $null -eq $phaseLast.lastSent -or $null -eq $phaseLast.remoteWaitActive) {
             throw "diagnostics phase schema mismatch: role=$role"
         }
+
+        $heartbeatFrames = @(
+            Get-Content -LiteralPath $heartbeatPath -Encoding UTF8 |
+                Where-Object { $_ -match '^\d+$' } |
+                ForEach-Object { [int]$_ }
+        )
+        if ($heartbeatFrames.Count -lt 5 -or $heartbeatFrames[-1] -lt 1200) {
+            throw "diagnostics heartbeat has insufficient coverage: role=$role count=$($heartbeatFrames.Count) last=$($heartbeatFrames[-1])"
+        }
+        for ($index = 0; $index -lt $heartbeatFrames.Count; $index++) {
+            if (($heartbeatFrames[$index] % 10) -ne 0 -or
+                ($index -gt 0 -and $heartbeatFrames[$index] -le $heartbeatFrames[$index - 1])) {
+                throw "diagnostics heartbeat sequence mismatch: role=$role index=$index frame=$($heartbeatFrames[$index])"
+            }
+        }
     }
-    Write-Host "NsmbNetplayPoC hang diagnostics coverage passed"
+    Write-Host "NsmbNetplayPoC hang diagnostics and frame heartbeat coverage passed"
 }
 
 if (($Tier -eq "fast" -or $Tier -eq "rollback" -or $Tier -eq "diagnostics") -and -not $SkipGolden) {

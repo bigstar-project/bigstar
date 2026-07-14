@@ -494,7 +494,7 @@ struct State
     std::atomic<bool> EnvChecked { false };
     Config::BootstrapConfig Bootstrap;
     Config::DiagnosticsConfig Diagnostics;
-    Diagnostics::HangRuntime HangDiagnostics;
+    Diagnostics::Runtime DiagnosticsRuntime;
     bool Enabled = false;
     bool Ready = false;
     bool TestEnabled = false;
@@ -516,13 +516,7 @@ struct State
     melonDS::u32 ActiveFrameOver16ms[16] {};
     melonDS::u32 ActiveFrameOver25ms[16] {};
     melonDS::u32 ActiveFrameOver33ms[16] {};
-    melonDS::u32 LastFrameHeartbeat[16] {};
     melonDS::u32 LastGameplayHeartbeat[16] {};
-    std::ofstream FrameHeartbeat;
-    std::atomic<melonDS::u32> PendingFrameHeartbeat { 0 };
-    std::atomic<bool> FrameHeartbeatStop { false };
-    bool FrameHeartbeatThreadStarted = false;
-    std::thread FrameHeartbeatThread;
     Config::StateSyncConfig StateSync;
     SessionPolicy::Runtime Session;
     Coordination::Runtime Coordinator;
@@ -666,7 +660,7 @@ void TraceHangPhase(const char* event, const char* phase, int instanceID = -1,
     melonDS::u32 frame = 0, melonDS::u32 logicalFrame = 0, melonDS::u32 sendFrame = 0);
 void UpdateHangGameSnapshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
 void StartHangWatchdogIfNeeded();
-void StopHangWatchdog();
+void StopDiagnostics();
 
 using Config::EnvCString;
 using Config::EnvDouble;
@@ -677,7 +671,7 @@ using Config::EnvU32;
 
 void UpdateHangNetplaySnapshotLocked(melonDS::u32 frameForLead)
 {
-    G.HangDiagnostics.UpdateNetplaySnapshot(
+    G.DiagnosticsRuntime.UpdateNetplaySnapshot(
         G.InputRuntime.LastSentInputFrame,
         G.InputRuntime.LastReceivedInputFrame,
         frameForLead,
@@ -697,17 +691,17 @@ void TraceHangPhase(
     melonDS::u32 logicalFrame,
     melonDS::u32 sendFrame)
 {
-    G.HangDiagnostics.TracePhase(event, phase, instanceID, frame, logicalFrame, sendFrame);
+    G.DiagnosticsRuntime.TracePhase(event, phase, instanceID, frame, logicalFrame, sendFrame);
 }
 
 void StartHangWatchdogIfNeeded()
 {
-    G.HangDiagnostics.Start(G.Diagnostics, G.NetRole == Role::Host);
+    G.DiagnosticsRuntime.StartHangDiagnostics(G.Diagnostics, G.NetRole == Role::Host);
 }
 
-void StopHangWatchdog()
+void StopDiagnostics()
 {
-    G.HangDiagnostics.Stop();
+    G.DiagnosticsRuntime.Stop();
 }
 
 melonDS::u32 ComposeMvlSceneSettingsForStage(int stage)
@@ -771,7 +765,7 @@ void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
     G.DelayedNSMLPackets.clear();
     G.Delivery.Clear();
     G.InputRuntime.ResetForRestart(kNoFrameLimit);
-    G.HangDiagnostics.ResetNetplaySnapshot(kNoFrameLimit);
+    G.DiagnosticsRuntime.ResetNetplaySnapshot(kNoFrameLimit);
     G.Session.ResetStartHandshake();
 
     G.LastLoggedGameStateFrame[instanceID] = 0;
@@ -1680,14 +1674,14 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
     for (int i = 0; i < maxEvents; i++)
     {
         int result = G.Transport.Service(event);
-        G.HangDiagnostics.RecordENetService(result);
+        G.DiagnosticsRuntime.RecordENetService(result);
         if (result <= 0)
         {
             UpdateHangNetplaySnapshotLocked(localFrame);
             break;
         }
 
-        G.HangDiagnostics.RecordENetEvent(static_cast<int>(event.type), event.data);
+        G.DiagnosticsRuntime.RecordENetEvent(static_cast<int>(event.type), event.data);
 
         switch (event.type)
         {
@@ -1710,7 +1704,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
 
         case ENET_EVENT_TYPE_RECEIVE:
         {
-            G.HangDiagnostics.RecordENetReceive(NowUnixMs());
+            G.DiagnosticsRuntime.RecordENetReceive(NowUnixMs());
             const PacketClassifier::PacketClass packetClass = PacketClassifier::Classify(
                 event.packet->dataLength,
                 {
@@ -1854,43 +1848,6 @@ void NetworkPumpThreadMain()
     }
 }
 
-void FrameHeartbeatThreadMain()
-{
-    melonDS::u32 writtenFrame = 0;
-    while (!G.FrameHeartbeatStop.load(std::memory_order_acquire))
-    {
-        const melonDS::u32 frame = G.PendingFrameHeartbeat.load(std::memory_order_acquire);
-        if (frame != 0 && frame != writtenFrame && G.FrameHeartbeat)
-        {
-            G.FrameHeartbeat << frame << '\n';
-            G.FrameHeartbeat.flush();
-            writtenFrame = frame;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-}
-
-void StartFrameHeartbeatThreadIfNeeded()
-{
-    if (!G.FrameHeartbeat || G.FrameHeartbeatThreadStarted)
-        return;
-
-    G.FrameHeartbeatStop.store(false, std::memory_order_release);
-    G.FrameHeartbeatThreadStarted = true;
-    G.FrameHeartbeatThread = std::thread(FrameHeartbeatThreadMain);
-}
-
-void StopFrameHeartbeatThread()
-{
-    if (!G.FrameHeartbeatThreadStarted)
-        return;
-
-    G.FrameHeartbeatStop.store(true, std::memory_order_release);
-    if (G.FrameHeartbeatThread.joinable())
-        G.FrameHeartbeatThread.join();
-    G.FrameHeartbeatThreadStarted = false;
-}
-
 void StartNetworkPumpThreadIfNeeded()
 {
     if (!G.Harness.NetworkPumpThreadEnabled || G.NetworkPumpThreadStarted)
@@ -2000,7 +1957,7 @@ void SendInputPayloadNowLocked(const void* data, size_t size, melonDS::u32 flags
     const int result = G.Transport.Send(data, size, flags, true);
     if (result == NsmbNetplayTransport::SendUnavailable)
         return;
-    G.HangDiagnostics.RecordENetSend(result, size, NowUnixMs());
+    G.DiagnosticsRuntime.RecordENetSend(result, size, NowUnixMs());
     UpdateHangNetplaySnapshotLocked(G.InputRuntime.LastSentInputFrame);
     TraceHangPhase("end", "enet-send-input", -1, G.InputRuntime.LastSentInputFrame, G.InputRuntime.LastSentInputFrame, G.InputRuntime.LastSentInputFrame);
 }
@@ -3296,7 +3253,7 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
     if (G.Diagnostics.HangDiagnosticsEnabled)
     {
         const unsigned long long now = NowUnixMs();
-        G.HangDiagnostics.BeginRemoteWait(targetFrame, now);
+        G.DiagnosticsRuntime.BeginRemoteWait(targetFrame, now);
         TraceHangPhase("begin", "remote-input-wait", -1, targetFrame, targetFrame, targetFrame);
     }
     for (;;)
@@ -3334,7 +3291,7 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
                         true,
                         false);
                 }
-                G.HangDiagnostics.EndRemoteWait();
+                G.DiagnosticsRuntime.EndRemoteWait();
                 TraceHangPhase("end", "remote-input-wait", -1, targetFrame, targetFrame, G.InputRuntime.LastSentInputFrame);
                 return it->second;
             }
@@ -3347,7 +3304,7 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
                 const long long progressSecond = std::max<long long>(0, elapsedUs) / 1000000LL;
                 if (!waitTraceStarted || progressSecond > lastProgressSecond)
                 {
-                    G.HangDiagnostics.ProgressRemoteWait(NowUnixMs());
+                    G.DiagnosticsRuntime.ProgressRemoteWait(NowUnixMs());
                     TraceHangPhase(
                         progressSecond == 0 ? "wait-start" : "wait-progress",
                         "remote-input-wait",
@@ -3399,7 +3356,7 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
                     G.Session.LocalReadyFrame().value_or(kNoFrameLimit),
                     G.Session.RemoteReadyFrame().value_or(kNoFrameLimit));
                 std::fflush(stdout);
-                G.HangDiagnostics.EndRemoteWait();
+                G.DiagnosticsRuntime.EndRemoteWait();
                 TraceHangPhase("timeout", "remote-input-wait", -1, targetFrame, targetFrame, G.InputRuntime.LastSentInputFrame);
                 if (G.Connection.RemoteInputTimeoutFatal)
                     std::_Exit(70);
@@ -6937,7 +6894,7 @@ void UpdateHangGameSnapshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
         return;
 
     const GameStateSample sample = ReadGameStateSample(nds);
-    G.HangDiagnostics.UpdateGameSnapshot(instanceID, frame, sample, NowUnixMs());
+    G.DiagnosticsRuntime.UpdateGameSnapshot(instanceID, frame, sample, NowUnixMs());
 }
 
 void SaveScreenshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -7744,11 +7701,9 @@ void InitFromEnvironment()
     G.Harness = Config::LoadHarnessConfig();
     G.Enabled = G.Bootstrap.Enabled;
     G.TestEnabled = G.Bootstrap.TestEnabled;
-    if (!G.Diagnostics.FrameHeartbeatPath.empty())
-    {
-        G.FrameHeartbeat.open(G.Diagnostics.FrameHeartbeatPath, std::ios::out | std::ios::trunc);
-        StartFrameHeartbeatThreadIfNeeded();
-    }
+    G.DiagnosticsRuntime.ConfigureFrameHeartbeat(
+        G.Diagnostics.FrameHeartbeatInterval,
+        G.Diagnostics.FrameHeartbeatPath);
     if (!G.Diagnostics.InputRecordPath.empty())
     {
         if (G.InputRecorder.Open(
@@ -8993,18 +8948,7 @@ melonDS::u32 PrepareAfterFrameLogFrame(int instanceID, melonDS::u32 frame)
     }
     RecordActiveFrameTiming(instanceID, logFrame);
     const bool heartbeatActive = G.ActiveTimerStarted[instanceID] || logFrame >= activeStartFrame;
-    if (G.Diagnostics.FrameHeartbeatInterval > 0
-        && heartbeatActive
-        && logFrame != G.LastFrameHeartbeat[instanceID]
-        && (logFrame % static_cast<melonDS::u32>(G.Diagnostics.FrameHeartbeatInterval)) == 0)
-    {
-        G.LastFrameHeartbeat[instanceID] = logFrame;
-        std::printf("NSMB Heartbeat: inst=%d frame=%u\n", instanceID, logFrame);
-        if (G.FrameHeartbeat)
-            G.PendingFrameHeartbeat.store(logFrame, std::memory_order_release);
-        else
-            std::fflush(stdout);
-    }
+    G.DiagnosticsRuntime.PublishFrameHeartbeat(instanceID, logFrame, heartbeatActive);
     return logFrame;
 }
 
@@ -9418,8 +9362,7 @@ bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
 
 void Shutdown()
 {
-    StopHangWatchdog();
-    StopFrameHeartbeatThread();
+    StopDiagnostics();
     StopNetworkPumpThread();
 
     G.InputRecorder.Close();

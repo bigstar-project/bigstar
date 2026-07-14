@@ -6,32 +6,32 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
 
 namespace NsmbNetplayPoC::Diagnostics {
 
-class HangRuntime {
+class Runtime {
 public:
-  HangRuntime();
-  ~HangRuntime();
+  Runtime();
+  ~Runtime();
 
-  HangRuntime(const HangRuntime &) = delete;
-  HangRuntime &operator=(const HangRuntime &) = delete;
+  Runtime(const Runtime &) = delete;
+  Runtime &operator=(const Runtime &) = delete;
 
-  void Start(const Config::DiagnosticsConfig &config, bool host);
+  bool ConfigureFrameHeartbeat(int interval, const std::string &path);
+  bool PublishFrameHeartbeat(int instanceID, melonDS::u32 frame, bool active);
+  void StartHangDiagnostics(const Config::DiagnosticsConfig &config, bool host);
   void Stop();
 
   void TracePhase(const char *event, const char *phase, int instanceID = -1,
-                  melonDS::u32 frame = 0,
-                  melonDS::u32 logicalFrame = 0,
+                  melonDS::u32 frame = 0, melonDS::u32 logicalFrame = 0,
                   melonDS::u32 sendFrame = 0);
   void UpdateNetplaySnapshot(melonDS::u32 lastSentFrame,
                              melonDS::u32 lastReceivedFrame,
                              melonDS::u32 frameForLead,
-                             melonDS::u32 noFrameLimit,
-                             std::size_t localQueue,
-                             std::size_t remoteQueue,
-                             std::size_t delayedQueue, int peerState,
-                             int connectingPeerState);
+                             melonDS::u32 noFrameLimit, std::size_t localQueue,
+                             std::size_t remoteQueue, std::size_t delayedQueue,
+                             int peerState, int connectingPeerState);
   void ResetNetplaySnapshot(melonDS::u32 noFrameLimit);
 
   void RecordENetService(int result);
@@ -49,7 +49,7 @@ public:
 
 private:
   struct Impl;
-  std::unique_ptr<Impl> Runtime;
+  std::unique_ptr<Impl> State;
 };
 
 } // namespace NsmbNetplayPoC::Diagnostics
