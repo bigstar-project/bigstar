@@ -134,10 +134,6 @@ using GameStateReader::PlayerActorScanSample;
 using GameStateReader::ObjectLifecycleSummary;
 using GameStateReader::GameStateObjectScanCache;
 using GameStateReader::GameStateObjectScanEntry;
-using GameStateReader::WorldActorSnapshotCandidate;
-using GameStateReader::CollectWorldActorSnapshotCandidates;
-using GameStateReader::FillWireWorldActorState;
-using GameStateReader::ReadPlayerGlobalState;
 using GameStateReader::ScopedGameStateObjectScanCache;
 using GameStateReader::BuildGameStateObjectScanCache;
 using GameStateReader::FindActiveObjectsByIDAndSettings;
@@ -151,8 +147,6 @@ using GameStateReader::FindObjectPairByIDSortedX;
 using GameStateReader::FindPlayerActors;
 using GameStateReader::FindVsBattleStarCandidate;
 using GameStateReader::GetPlayerActorCached;
-using GameStateReader::GetWorldActorCached;
-using GameStateReader::GetWorldMovingHazardsCached;
 using GameStateReader::HasActiveObjectScanCache;
 using GameStateReader::ReadObjectByBase;
 using GameStateReader::ReadAIPlayerTileProbeSample;
@@ -5930,53 +5924,6 @@ void PrintWorldActorInternalWords(
     std::printf("\n");
 }
 
-bool IsInterestingEffectCandidate(melonDS::NDS* nds, melonDS::u32 base)
-{
-    if (base < 0x02100000u)
-        return false;
-
-    for (melonDS::u32 relativeOffset = 0x04; relativeOffset <= 0x10C; relativeOffset += sizeof(melonDS::u32))
-    {
-        melonDS::u32 value = 0;
-        ReadMainRAMAddressU32(nds, base + relativeOffset, value);
-        if (value == 0 ||
-            value == 0x020391F8u ||
-            value == 0x02039208u ||
-            value == kEffectVTablePtr ||
-            value == kEffectVTableStart)
-            continue;
-        if (relativeOffset == 0xA8 && (value & 0x0000FFFFu) == 0)
-            continue;
-        return true;
-    }
-    return false;
-}
-
-bool ReadWorldEffectSlot(melonDS::NDS* nds, melonDS::u32 base, WireWorldEffectSlot& slot)
-{
-    if (!nds || !nds->MainRAM || !IsValidMainRAMRange(nds, base, kWorldEffectWordEnd + sizeof(melonDS::u32)))
-        return false;
-
-    melonDS::u32 vtable = 0;
-    if (!ReadMainRAMAddressU32(nds, base, vtable))
-        return false;
-    if (vtable != kEffectVTablePtr && vtable != kEffectVTableStart)
-        return false;
-    if (!IsInterestingEffectCandidate(nds, base))
-        return false;
-
-    slot.Found = 1;
-    slot.Base = base;
-    slot.VTable = vtable;
-    for (std::size_t i = 0; i < kWorldEffectWordCount; i++)
-    {
-        const melonDS::u32 relativeOffset =
-            kWorldEffectWordStart + static_cast<melonDS::u32>(i * sizeof(melonDS::u32));
-        ReadMainRAMAddressU32(nds, base + relativeOffset, slot.Words[i]);
-    }
-    return true;
-}
-
 void TraceWorldEffectsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.StateSync.WorldTraceEffects || !nds || !nds->MainRAM || instanceID < 0 || instanceID >= 16)
@@ -5995,7 +5942,7 @@ void TraceWorldEffectsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS*
     {
         const melonDS::u32 base = kWorldEffectSlotBase + slotIndex * kWorldEffectSlotStride;
         WireWorldEffectSlot slot {};
-        if (!ReadWorldEffectSlot(nds, base, slot))
+        if (!GameStateReader::ReadWorldEffectSlot(nds, base, slot))
             continue;
 
         const melonDS::u32 guid = 0;
@@ -7942,53 +7889,13 @@ void SyncPlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if (frame < G.Connection.StartFrame) return;
     if ((frame % static_cast<melonDS::u32>(G.StateSync.PlayerInterval)) != 0) return;
 
-    const int localPlayer = CurrentPacketBridgeLocalPlayer();
-    const ObjectScanSample actor =
-        GetPlayerActorCached(instanceID, localPlayer, nds, G.GameSync);
-    const bool found = actor.Found != 0;
-
-    WirePlayerState packet {};
-    packet.Magic = kMagic;
-    packet.Version = kVersion;
-    packet.Kind = kWireKindPlayerState;
-    packet.Frame = frame;
-    packet.Instance = static_cast<melonDS::u32>(instanceID);
-    packet.Player = static_cast<melonDS::u32>(localPlayer);
-    packet.Found = found ? 1u : 0u;
-    if (G.StateSync.PlayerGlobalsEnabled)
-        ReadPlayerGlobalState(nds, packet.Player, packet);
-    packet.GUID = actor.GUID;
-    packet.Settings = actor.Settings;
-    packet.StateType = actor.StateType;
-    packet.Flags = actor.Flags;
-    packet.PosX = actor.PosX;
-    packet.PosY = actor.PosY;
-    packet.PosZ = actor.PosZ;
-    packet.PrevX = actor.PrevX;
-    packet.PrevY = actor.PrevY;
-    packet.PrevZ = actor.PrevZ;
-    packet.VelX = actor.VelX;
-    packet.VelY = actor.VelY;
-    packet.VelZ = actor.VelZ;
-    if (found && IsARM9MainRAMAddress(actor.Base))
-    {
-        packet.ActionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseActionFlagOffset);
-        packet.SubActionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseSubActionFlagOffset);
-        packet.PhysicsFlag = nds->ARM9Read32(actor.Base + kPlayerBasePhysicsFlagOffset);
-        packet.DamageCooldown = nds->ARM9Read16(actor.Base + kPlayerBaseDamageCooldownOffset);
-        packet.TransitionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseTransitionFlagOffset);
-        packet.CollisionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseCollisionFlagOffset);
-        packet.EnvironmentFlag = nds->ARM9Read32(actor.Base + kPlayerBaseEnvironmentFlagOffset);
-        packet.RuntimeFlags0 =
-            (static_cast<melonDS::u32>(nds->ARM9Read8(actor.Base + kPlayerBaseUpdateLockedOffset)) & 0xFFu)
-            | ((static_cast<melonDS::u32>(nds->ARM9Read8(actor.Base + kPlayerBaseCharacterIDOffset)) & 0xFFu) << 8)
-            | ((static_cast<melonDS::u32>(nds->ARM9Read8(actor.Base + kPlayerBaseTransitioningFlagOffset)) & 0xFFu) << 16)
-            | ((static_cast<melonDS::u32>(nds->ARM9Read8(actor.Base + kPlayerBaseCameraFocusModeOffset)) & 0xFFu) << 24);
-        packet.RuntimeFlags1 =
-            (static_cast<melonDS::u32>(nds->ARM9Read8(actor.Base + kPlayerBaseDefeatedFlagOffset)) & 0xFFu)
-            | ((static_cast<melonDS::u32>(nds->ARM9Read8(actor.Base + kPlayerBasePlayerIDOffset)) & 0xFFu) << 8)
-            | ((static_cast<melonDS::u32>(nds->ARM9Read8(actor.Base + kPlayerBaseVisibleFlagOffset)) & 0xFFu) << 16);
-    }
+    const WirePlayerState packet = GameStateReader::BuildPlayerStatePacket(
+        nds,
+        static_cast<melonDS::u32>(instanceID),
+        frame,
+        CurrentPacketBridgeLocalPlayer(),
+        G.StateSync.PlayerGlobalsEnabled,
+        G.GameSync);
 
     std::lock_guard<std::mutex> lock(G.Mutex);
     if (G.GameSync.LastSentPlayerStateFrame[instanceID] == frame) return;
@@ -8032,47 +7939,13 @@ void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     TraceWorldObjectLifecyclesIfNeeded(instanceID, frame, nds);
     TraceWorldEffectsIfNeeded(instanceID, frame, nds);
 
-    const ObjectScanSample star = GetWorldActorCached(
-        instanceID,
-        frame,
+    const WireWorldState packet = GameStateReader::BuildWorldStatePacket(
         nds,
-        kVsBattleStarActorObjectID,
-        kVsBattleStarActorSettings,
-        G.GameSync.WorldStarActorBaseCache,
-        G.GameSync.WorldStarActorGUIDCache,
-        G.StateSync.WorldActorRescanInterval);
-    ObjectScanSample item;
-    ObjectScanSample neutralItem;
-    ObjectScanSample droppedStarItem;
-    if (G.StateSync.WorldSpawnItem)
-    {
-        neutralItem = FindNewestActiveObjectByIDAndSettings(
-            nds,
-            kVsWorldItemObjectID,
-            kVsNeutralWorldItemSettings,
-            true);
-        item = FindNewestActiveObjectByIDAndSettings(
-            nds,
-            kVsWorldItemObjectID,
-            kVsWorldItemSettings,
-            true);
-        droppedStarItem = FindNewestActiveObjectByIDAndSettings(
-            nds,
-            kVsWorldItemObjectID,
-            kVsDroppedStarItemSettings,
-            true);
-    }
-
-    WireWorldState packet {};
-    packet.Magic = kMagic;
-    packet.Version = kVersion;
-    packet.Kind = kWireKindWorldState;
-    packet.Frame = frame;
-    packet.Instance = static_cast<melonDS::u32>(instanceID);
-    FillWireWorldActorState(star, packet.Star);
-    FillWireWorldActorState(neutralItem, packet.NeutralItem);
-    FillWireWorldActorState(item, packet.Item);
-    FillWireWorldActorState(droppedStarItem, packet.DroppedStarItem);
+        static_cast<melonDS::u32>(instanceID),
+        frame,
+        G.StateSync.WorldSpawnItem,
+        G.StateSync.WorldActorRescanInterval,
+        G.GameSync);
 
     std::lock_guard<std::mutex> lock(G.Mutex);
     if (G.GameSync.LastSentWorldStateFrame[instanceID] == frame) return;
@@ -8110,21 +7983,8 @@ void SyncWorldEffectState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         return;
 
     WireWorldEffectState packet {};
-    packet.Magic = kMagic;
-    packet.Version = kVersion;
-    packet.Kind = kWireKindWorldEffectState;
-    packet.Frame = frame;
-    packet.Instance = static_cast<melonDS::u32>(instanceID);
-
-    for (melonDS::u32 slotIndex = 0; slotIndex < kWorldEffectSlotCount && packet.Count < kMaxWorldEffects; slotIndex++)
-    {
-        const melonDS::u32 base = kWorldEffectSlotBase + slotIndex * kWorldEffectSlotStride;
-        WireWorldEffectSlot slot {};
-        if (!ReadWorldEffectSlot(nds, base, slot))
-            continue;
-        packet.Effects[packet.Count++] = slot;
-    }
-    if (packet.Count == 0)
+    if (!GameStateReader::BuildWorldEffectStatePacket(
+            nds, static_cast<melonDS::u32>(instanceID), frame, packet))
         return;
 
     std::lock_guard<std::mutex> lock(G.Mutex);
@@ -8140,21 +8000,12 @@ void SyncMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
     if (frame < G.Connection.StartFrame) return;
     if ((frame % static_cast<melonDS::u32>(G.StateSync.WorldInterval)) != 0) return;
 
-    const std::vector<ObjectScanSample> actors = GetWorldMovingHazardsCached(
-        instanceID,
-        frame,
+    const WireMovingHazardState packet = GameStateReader::BuildMovingHazardStatePacket(
         nds,
-        G.GameSync,
-        G.StateSync.WorldActorRescanInterval);
-    WireMovingHazardState packet {};
-    packet.Magic = kMagic;
-    packet.Version = kVersion;
-    packet.Kind = kWireKindMovingHazardState;
-    packet.Frame = frame;
-    packet.Instance = static_cast<melonDS::u32>(instanceID);
-    packet.Count = static_cast<melonDS::u32>(std::min(actors.size(), kMaxWorldMovingHazards));
-    for (melonDS::u32 i = 0; i < packet.Count; i++)
-        FillWireWorldActorState(actors[i], packet.Actors[i]);
+        static_cast<melonDS::u32>(instanceID),
+        frame,
+        G.StateSync.WorldActorRescanInterval,
+        G.GameSync);
 
     std::lock_guard<std::mutex> lock(G.Mutex);
     if (!G.Transport.IsConnected()) return;
@@ -8173,22 +8024,10 @@ void SyncWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melonDS::ND
     if ((frame % static_cast<melonDS::u32>(G.StateSync.WorldInterval)) != 0)
         return;
 
-    const std::vector<WorldActorSnapshotCandidate> actors = CollectWorldActorSnapshotCandidates(nds);
-    if (actors.empty())
-        return;
-
     WireWorldActorSnapshotState packet {};
-    packet.Magic = kMagic;
-    packet.Version = kVersion;
-    packet.Kind = kWireKindWorldActorSnapshot;
-    packet.Frame = frame;
-    packet.Instance = static_cast<melonDS::u32>(instanceID);
-    packet.Count = static_cast<melonDS::u32>(std::min(actors.size(), kMaxWorldActorSnapshots));
-    for (melonDS::u32 i = 0; i < packet.Count; i++)
-    {
-        packet.Actors[i].ObjectID = actors[i].ObjectID;
-        FillWireWorldActorState(actors[i].Actor, packet.Actors[i].Actor);
-    }
+    if (!GameStateReader::BuildWorldActorSnapshotStatePacket(
+            nds, static_cast<melonDS::u32>(instanceID), frame, packet))
+        return;
 
     std::lock_guard<std::mutex> lock(G.Mutex);
     if (!G.Transport.IsConnected())

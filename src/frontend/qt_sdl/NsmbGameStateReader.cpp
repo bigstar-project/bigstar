@@ -15,6 +15,10 @@ constexpr melonDS::u16 kPlayerObjectID = 0x0015;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
 constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
+constexpr melonDS::u16 kVsWorldItemObjectID = 0x001F;
+constexpr melonDS::u32 kVsNeutralWorldItemSettings = 0x00080000;
+constexpr melonDS::u32 kVsWorldItemSettings = 0x00080002;
+constexpr melonDS::u32 kVsDroppedStarItemSettings = 0x00090002;
 constexpr melonDS::u16 kVsMovingHazardObjectID = 0x0053;
 constexpr melonDS::u32 kVsMovingHazardSettings = 0x00000000;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
@@ -74,6 +78,26 @@ constexpr melonDS::u32 kCollisionMgrTileByteABOffset = 0xAB;
 constexpr melonDS::u32 kCollisionMgrModifierStateOffset = 0xB0;
 constexpr melonDS::u32 kCollisionMgrUnknownB1Offset = 0xB1;
 constexpr melonDS::u32 kPlayerBasePlayerIDOffset = 0x7B4;
+constexpr melonDS::u32 kPlayerBaseActionFlagOffset = 0x778;
+constexpr melonDS::u32 kPlayerBaseSubActionFlagOffset = 0x77C;
+constexpr melonDS::u32 kPlayerBasePhysicsFlagOffset = 0x780;
+constexpr melonDS::u32 kPlayerBaseTransitionFlagOffset = 0x784;
+constexpr melonDS::u32 kPlayerBaseCollisionFlagOffset = 0x788;
+constexpr melonDS::u32 kPlayerBaseEnvironmentFlagOffset = 0x790;
+constexpr melonDS::u32 kPlayerBaseDamageCooldownOffset = 0x79C;
+constexpr melonDS::u32 kPlayerBaseUpdateLockedOffset = 0x7A8;
+constexpr melonDS::u32 kPlayerBaseCharacterIDOffset = 0x7AA;
+constexpr melonDS::u32 kPlayerBaseTransitioningFlagOffset = 0x7B0;
+constexpr melonDS::u32 kPlayerBaseCameraFocusModeOffset = 0x7B2;
+constexpr melonDS::u32 kPlayerBaseDefeatedFlagOffset = 0x7B3;
+constexpr melonDS::u32 kPlayerBaseVisibleFlagOffset = 0x7B5;
+constexpr melonDS::u32 kEffectVTableStart = 0x02126A24;
+constexpr melonDS::u32 kEffectVTablePtr = 0x02126A2C;
+constexpr melonDS::u32 kWorldEffectSlotBase = 0x021C3268;
+constexpr melonDS::u32 kWorldEffectSlotStride = 0x1D4;
+constexpr melonDS::u32 kWorldEffectSlotCount = 32;
+constexpr melonDS::u32 kWorldEffectWordStart = 0x04;
+constexpr melonDS::u32 kWorldEffectWordEnd = 0xAC;
 constexpr melonDS::u32 kGamePlayerPowerupAddr = 0x0208B324;
 constexpr melonDS::u32 kGamePlayerDeadAddr = 0x0208B328;
 constexpr melonDS::u32 kGamePlayerInventoryPowerupAddr = 0x0208B32C;
@@ -2102,6 +2126,219 @@ void ReadPlayerGlobalState(melonDS::NDS *nds, melonDS::u32 player,
                                  sizeof(melonDS::u32) * player);
   state.CollectedStars = nds->ARM9Read32(
       kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32) * player);
+}
+
+WireProtocol::WirePlayerState BuildPlayerStatePacket(
+    melonDS::NDS *nds, melonDS::u32 instance, melonDS::u32 frame,
+    int player, bool includeGlobals,
+    GameStateModel::StateSyncRuntime &runtime) {
+  const ObjectScanSample actor =
+      GetPlayerActorCached(static_cast<int>(instance), player, nds, runtime);
+  const bool found = actor.Found != 0;
+
+  WireProtocol::WirePlayerState packet{};
+  packet.Magic = WireProtocol::kMagic;
+  packet.Version = WireProtocol::kVersion;
+  packet.Kind = WireProtocol::kWireKindPlayerState;
+  packet.Frame = frame;
+  packet.Instance = instance;
+  packet.Player = static_cast<melonDS::u32>(player);
+  packet.Found = found ? 1u : 0u;
+  if (includeGlobals)
+    ReadPlayerGlobalState(nds, packet.Player, packet);
+  packet.GUID = actor.GUID;
+  packet.Settings = actor.Settings;
+  packet.StateType = actor.StateType;
+  packet.Flags = actor.Flags;
+  packet.PosX = actor.PosX;
+  packet.PosY = actor.PosY;
+  packet.PosZ = actor.PosZ;
+  packet.PrevX = actor.PrevX;
+  packet.PrevY = actor.PrevY;
+  packet.PrevZ = actor.PrevZ;
+  packet.VelX = actor.VelX;
+  packet.VelY = actor.VelY;
+  packet.VelZ = actor.VelZ;
+  if (found && IsARM9MainRAMAddress(actor.Base)) {
+    packet.ActionFlag =
+        nds->ARM9Read32(actor.Base + kPlayerBaseActionFlagOffset);
+    packet.SubActionFlag =
+        nds->ARM9Read32(actor.Base + kPlayerBaseSubActionFlagOffset);
+    packet.PhysicsFlag =
+        nds->ARM9Read32(actor.Base + kPlayerBasePhysicsFlagOffset);
+    packet.DamageCooldown =
+        nds->ARM9Read16(actor.Base + kPlayerBaseDamageCooldownOffset);
+    packet.TransitionFlag =
+        nds->ARM9Read32(actor.Base + kPlayerBaseTransitionFlagOffset);
+    packet.CollisionFlag =
+        nds->ARM9Read32(actor.Base + kPlayerBaseCollisionFlagOffset);
+    packet.EnvironmentFlag =
+        nds->ARM9Read32(actor.Base + kPlayerBaseEnvironmentFlagOffset);
+    packet.RuntimeFlags0 =
+        (static_cast<melonDS::u32>(
+             nds->ARM9Read8(actor.Base + kPlayerBaseUpdateLockedOffset)) &
+         0xFFu) |
+        ((static_cast<melonDS::u32>(
+              nds->ARM9Read8(actor.Base + kPlayerBaseCharacterIDOffset)) &
+          0xFFu)
+         << 8) |
+        ((static_cast<melonDS::u32>(
+              nds->ARM9Read8(actor.Base +
+                             kPlayerBaseTransitioningFlagOffset)) &
+          0xFFu)
+         << 16) |
+        ((static_cast<melonDS::u32>(
+              nds->ARM9Read8(actor.Base +
+                             kPlayerBaseCameraFocusModeOffset)) &
+          0xFFu)
+         << 24);
+    packet.RuntimeFlags1 =
+        (static_cast<melonDS::u32>(
+             nds->ARM9Read8(actor.Base + kPlayerBaseDefeatedFlagOffset)) &
+         0xFFu) |
+        ((static_cast<melonDS::u32>(
+              nds->ARM9Read8(actor.Base + kPlayerBasePlayerIDOffset)) &
+          0xFFu)
+         << 8) |
+        ((static_cast<melonDS::u32>(
+              nds->ARM9Read8(actor.Base + kPlayerBaseVisibleFlagOffset)) &
+          0xFFu)
+         << 16);
+  }
+  return packet;
+}
+
+WireProtocol::WireWorldState BuildWorldStatePacket(
+    melonDS::NDS *nds, melonDS::u32 instance, melonDS::u32 frame,
+    bool includeItems, int actorRescanInterval,
+    GameStateModel::StateSyncRuntime &runtime) {
+  const ObjectScanSample star = GetWorldActorCached(
+      static_cast<int>(instance), frame, nds, kVsBattleStarActorObjectID,
+      kVsBattleStarActorSettings, runtime.WorldStarActorBaseCache,
+      runtime.WorldStarActorGUIDCache, actorRescanInterval);
+  ObjectScanSample neutralItem;
+  ObjectScanSample item;
+  ObjectScanSample droppedStarItem;
+  if (includeItems) {
+    neutralItem = FindNewestActiveObjectByIDAndSettings(
+        nds, kVsWorldItemObjectID, kVsNeutralWorldItemSettings, true);
+    item = FindNewestActiveObjectByIDAndSettings(
+        nds, kVsWorldItemObjectID, kVsWorldItemSettings, true);
+    droppedStarItem = FindNewestActiveObjectByIDAndSettings(
+        nds, kVsWorldItemObjectID, kVsDroppedStarItemSettings, true);
+  }
+
+  WireProtocol::WireWorldState packet{};
+  packet.Magic = WireProtocol::kMagic;
+  packet.Version = WireProtocol::kVersion;
+  packet.Kind = WireProtocol::kWireKindWorldState;
+  packet.Frame = frame;
+  packet.Instance = instance;
+  FillWireWorldActorState(star, packet.Star);
+  FillWireWorldActorState(neutralItem, packet.NeutralItem);
+  FillWireWorldActorState(item, packet.Item);
+  FillWireWorldActorState(droppedStarItem, packet.DroppedStarItem);
+  return packet;
+}
+
+bool ReadWorldEffectSlot(melonDS::NDS *nds, melonDS::u32 base,
+                         WireProtocol::WireWorldEffectSlot &slot) {
+  if (base < 0x02100000u || !nds || !nds->MainRAM ||
+      !IsValidMainRAMRange(nds, base,
+                           kWorldEffectWordEnd + sizeof(melonDS::u32)))
+    return false;
+
+  melonDS::u32 vtable = 0;
+  if (!ReadMainRAMAddressU32(nds, base, vtable) ||
+      (vtable != kEffectVTablePtr && vtable != kEffectVTableStart))
+    return false;
+  for (melonDS::u32 relativeOffset = 0x04; relativeOffset <= 0x10C;
+       relativeOffset += sizeof(melonDS::u32)) {
+    melonDS::u32 value = 0;
+    ReadMainRAMAddressU32(nds, base + relativeOffset, value);
+    if (value == 0 || value == 0x020391F8u || value == 0x02039208u ||
+        value == kEffectVTablePtr || value == kEffectVTableStart)
+      continue;
+    if (relativeOffset == 0xA8 && (value & 0x0000FFFFu) == 0)
+      continue;
+
+    slot.Found = 1;
+    slot.Base = base;
+    slot.VTable = vtable;
+    for (std::size_t index = 0;
+         index < WireProtocol::kWorldEffectWordCount; index++) {
+      const melonDS::u32 wordOffset =
+          kWorldEffectWordStart +
+          static_cast<melonDS::u32>(index * sizeof(melonDS::u32));
+      ReadMainRAMAddressU32(nds, base + wordOffset, slot.Words[index]);
+    }
+    return true;
+  }
+  return false;
+}
+
+bool BuildWorldEffectStatePacket(
+    melonDS::NDS *nds, melonDS::u32 instance, melonDS::u32 frame,
+    WireProtocol::WireWorldEffectState &packet) {
+  packet = {};
+  packet.Magic = WireProtocol::kMagic;
+  packet.Version = WireProtocol::kVersion;
+  packet.Kind = WireProtocol::kWireKindWorldEffectState;
+  packet.Frame = frame;
+  packet.Instance = instance;
+  for (melonDS::u32 slotIndex = 0;
+       slotIndex < kWorldEffectSlotCount &&
+       packet.Count < WireProtocol::kMaxWorldEffects;
+       slotIndex++) {
+    const melonDS::u32 base =
+        kWorldEffectSlotBase + slotIndex * kWorldEffectSlotStride;
+    WireProtocol::WireWorldEffectSlot slot{};
+    if (ReadWorldEffectSlot(nds, base, slot))
+      packet.Effects[packet.Count++] = slot;
+  }
+  return packet.Count != 0;
+}
+
+WireProtocol::WireMovingHazardState BuildMovingHazardStatePacket(
+    melonDS::NDS *nds, melonDS::u32 instance, melonDS::u32 frame,
+    int actorRescanInterval, GameStateModel::StateSyncRuntime &runtime) {
+  const std::vector<ObjectScanSample> actors = GetWorldMovingHazardsCached(
+      static_cast<int>(instance), frame, nds, runtime, actorRescanInterval);
+  WireProtocol::WireMovingHazardState packet{};
+  packet.Magic = WireProtocol::kMagic;
+  packet.Version = WireProtocol::kVersion;
+  packet.Kind = WireProtocol::kWireKindMovingHazardState;
+  packet.Frame = frame;
+  packet.Instance = instance;
+  packet.Count = static_cast<melonDS::u32>(
+      std::min(actors.size(), WireProtocol::kMaxWorldMovingHazards));
+  for (melonDS::u32 index = 0; index < packet.Count; index++)
+    FillWireWorldActorState(actors[index], packet.Actors[index]);
+  return packet;
+}
+
+bool BuildWorldActorSnapshotStatePacket(
+    melonDS::NDS *nds, melonDS::u32 instance, melonDS::u32 frame,
+    WireProtocol::WireWorldActorSnapshotState &packet) {
+  const std::vector<WorldActorSnapshotCandidate> actors =
+      CollectWorldActorSnapshotCandidates(nds);
+  if (actors.empty())
+    return false;
+
+  packet = {};
+  packet.Magic = WireProtocol::kMagic;
+  packet.Version = WireProtocol::kVersion;
+  packet.Kind = WireProtocol::kWireKindWorldActorSnapshot;
+  packet.Frame = frame;
+  packet.Instance = instance;
+  packet.Count = static_cast<melonDS::u32>(
+      std::min(actors.size(), WireProtocol::kMaxWorldActorSnapshots));
+  for (melonDS::u32 index = 0; index < packet.Count; index++) {
+    packet.Actors[index].ObjectID = actors[index].ObjectID;
+    FillWireWorldActorState(actors[index].Actor,
+                            packet.Actors[index].Actor);
+  }
+  return true;
 }
 
 } // namespace NsmbNetplayPoC::GameStateReader
