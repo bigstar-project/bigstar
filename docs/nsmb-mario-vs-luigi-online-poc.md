@@ -1,5 +1,17 @@
 # NSMB Mario vs Luigi Online PoC
 
+## NsmbNetplayPoC リファクタ調査 - 2026-07-14
+
+- 現状: `src/frontend/qt_sdl/NsmbNetplayPoC.cpp` は約2万行で、単一の共有 `State G` に約884フィールド、約514種類の `MELONDS_NSML_*` 設定、ENet、入力同期、rollback、NSMB RAM access、状態同期、診断、テスト用runtime patchが集中している。`InitFromEnvironment` は約1,600行、`BeforeRunFrame` は約640行、`AfterRunFrame` は約370行。
+- 既存の安全網: `tests/` に入力fixtureが68本、NSMB smoke scriptが12本ある。特に `run-nsmb-mvl-lan-route-smoke.ps1` は、起動だけでなくstage/player/star actor、remote movement、host/client gameplay state、死亡、star取得、result scene、複数ゲーム復帰、ARM abort、切断/空画面を検査できる。
+- 方針: 全面書き換えはせず、最初に現行binaryの代表scenarioをbaseline化する。その後、(1) config/env解析、(2) wire codec、(3) input timeline/delay/prediction、(4) NSMB memory viewとsample/apply、(5) rollback store、(6) ENet transport、(7) frame orchestrationの順に、挙動変更を混ぜず小さく抽出する。公開facadeの `IsEnabled/BeforeRunFrame/AfterRunFrame/Shutdown` は当面維持する。
+- テスト方針: ROM不要のunit/contract testを常時実行し、local ROM/savestateを使うdeterministic replayと2-process loopback smokeを上位層に置く。全RAM hashだけに依存せず、stage、player座標/状態、stars/lives、scene遷移、同期eventなどのsemantic traceをgolden比較する。ROMを配布できないCIではunit testを必須、ROM統合テストはlocalまたはself-hosted/nightly gateにする。
+- 完了: CTestへ `nsmb_netplay_config_tests` を登録し、既存env valueのflag/int/double/u32/fallback semanticsをROMなし約0.1秒で検査できるようにした。`EnvFlag/EnvInt/EnvDouble/EnvU32/EnvCString/EnvHasValue` の実装は `NsmbNetplayConfig.cpp` へ抽出した。
+- 完了: `scripts/test-nsmb-netplay-refactor.ps1` にfast/standard/full tierを追加した。fastは専用の非対称入力fixture、固定match seed、stable host/client ROM、2-process ENet、JIT、実player actor更新、host/client semantic state比較を1,250 framesで実行する。standardは描画/screenshot込み3,000 frames、fullはstandardに加えてstar取得からresult sceneまでの6,000 frames smokeを実行する。
+- Current blocker: なし。fast goldenは現在のstable ROM hashも検査するため、ROM patchを意図的に変更する作業ではsemantic差分を確認してgoldenを明示更新する必要がある。
+- Next action: environment lookupを注入可能なtyped configへ拡張し、`InitFromEnvironment` の設定groupを小さく移す。同時に未参照の設定/State field/functionを参照解析し、削除候補ごとにbuild、unit、fast gameplay goldenを通す。
+- Verification status: Release `melonDS` とunit targetのbuild成功。CTestはpass。旧binary baseline 2,300 framesはpass。新fast tierは15.5秒でpassし、固定seed後は独立2 runのhost/client semantic CSVと適用inputがbyte-for-byte一致。抽出後binaryでもfast golden comparisonがpassした。
+
 ## AI observation v3 / exact player hitbox - 2026-07-14
 
 - Goal: observe the real, per-frame collision size of both players, including continuous mini/mega transformation changes, instead of inferring size only from the power-up category.

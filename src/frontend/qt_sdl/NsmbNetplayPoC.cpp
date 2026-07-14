@@ -12,6 +12,7 @@
 */
 
 #include "NsmbNetplayPoC.h"
+#include "NsmbNetplayConfig.h"
 #include "NsmbImitationAI.h"
 #include "NsmbRuleAI.h"
 
@@ -2524,52 +2525,12 @@ FrameBarrier GBeforeFrameBarrier;
 FrameBarrier GAfterFrameBarrier;
 FrameBarrier GNetplayFrameBarrier;
 
-bool EnvFlag(const char* name)
-{
-    const char* value = std::getenv(name);
-    return value && value[0] && std::strcmp(value, "0") != 0;
-}
-
-const char* EnvCString(const char* name, const char* fallback)
-{
-    const char* value = std::getenv(name);
-    return value && value[0] ? value : fallback;
-}
-
-int EnvInt(const char* name, int fallback)
-{
-    const char* value = std::getenv(name);
-    if (!value || !value[0]) return fallback;
-    char* end = nullptr;
-    const long parsed = std::strtol(value, &end, 0);
-    if (end == value)
-        return fallback;
-    return static_cast<int>(parsed);
-}
-
-double EnvDouble(const char* name, double fallback)
-{
-    const char* value = std::getenv(name);
-    if (!value || !value[0]) return fallback;
-    char* end = nullptr;
-    const double parsed = std::strtod(value, &end);
-    if (end == value)
-        return fallback;
-    return parsed;
-}
-
-melonDS::u32 EnvU32(const char* name, melonDS::u32 fallback)
-{
-    const char* value = std::getenv(name);
-    if (!value || !value[0]) return fallback;
-    return static_cast<melonDS::u32>(std::strtoul(value, nullptr, 0));
-}
-
-bool EnvHasValue(const char* name)
-{
-    const char* value = std::getenv(name);
-    return value && value[0];
-}
+using Config::EnvCString;
+using Config::EnvDouble;
+using Config::EnvFlag;
+using Config::EnvHasValue;
+using Config::EnvInt;
+using Config::EnvU32;
 
 bool EnsureHangLogOpenLocked(std::ofstream& file, const std::string& path)
 {

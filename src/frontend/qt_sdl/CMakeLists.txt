@@ -13,6 +13,8 @@ set(SOURCES_QT_SDL
     EmuThread.cpp
     NsmbNetplayPoC.cpp
     NsmbNetplayPoC.h
+    NsmbNetplayConfig.cpp
+    NsmbNetplayConfig.h
     NsmbAiObservation.cpp
     NsmbAiObservation.h
     NsmbImitationAI.cpp
@@ -121,6 +123,23 @@ add_executable(nsmb_mvl_compact_cpp_predict
 target_include_directories(nsmb_mvl_compact_cpp_predict PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
+
+if (BUILD_TESTING)
+    add_executable(nsmb_netplay_config_tests
+        NsmbNetplayConfig.cpp
+        NsmbNetplayConfig.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_netplay_config_tests.cpp
+    )
+    target_include_directories(nsmb_netplay_config_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    set_target_properties(nsmb_netplay_config_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-netplay-config COMMAND nsmb_netplay_config_tests)
+endif()
 
 add_subdirectory("../../net"
     ${CMAKE_BINARY_DIR}/net)

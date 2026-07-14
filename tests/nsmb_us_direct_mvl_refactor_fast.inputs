@@ -1,0 +1,20 @@
+# Fast deterministic gameplay fixture for NsmbNetplayPoC refactoring.
+# The direct-entry ROM has both player actors ready near frame 860. Start
+# asymmetric movement shortly afterward so the loopback test exercises real
+# NSMB input application, actor updates, and host/client state synchronization.
+
+inst0 0-619 NONE
+inst0 620-627 DOWN
+inst0 628-659 NONE
+inst0 660-667 A
+inst0 668-899 NONE
+inst0 900-1039 RIGHT+A
+inst0 1040-1249 RIGHT
+
+inst1 0-619 NONE
+inst1 620-627 DOWN
+inst1 628-659 NONE
+inst1 660-667 A
+inst1 668-899 NONE
+inst1 900-1039 LEFT+A
+inst1 1040-1249 NONE
