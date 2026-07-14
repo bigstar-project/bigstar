@@ -28,6 +28,7 @@ set(SOURCES_QT_SDL
     NsmbPacketClassifier.cpp
     NsmbPacketClassifier.h
     NsmbNetplayWire.h
+    NsmbGameState.h
     NsmbAiObservation.cpp
     NsmbAiObservation.h
     NsmbImitationAI.cpp
