@@ -144,7 +144,6 @@ using GameStateReader::SummarizeObjectLifecycle;
 using RollbackStoredState = RollbackStorage::StoredState;
 using RollbackStorage::CheckpointBytes;
 constexpr int kDefaultDelay = 6;
-constexpr int kMaxPumpEvents = 64;
 constexpr melonDS::u32 kNoFrameLimit = 0;
 constexpr melonDS::u32 kMainRAMBase = 0x02000000;
 constexpr melonDS::u32 kGameStageIDAddr = 0x02085A14;
@@ -733,7 +732,7 @@ struct State
     int PacketBridgeForceGameLocalPlayerID = -1;
     melonDS::u32 PacketBridgeForceGameLocalPlayerIDStartFrame = 0;
     bool PacketBridgeForceGameLocalPlayerIDEarly = false;
-    int PacketBridgeMaxPumpEvents = kMaxPumpEvents;
+    int PacketBridgeMaxPumpEvents = Config::PacketBridgePumpEventLimit;
     int PacketBridgeMaxTickLead = -1;
     int PacketBridgeMaxFrameLead = -1;
     int PacketBridgeThrottleTimeoutMs = 5000;
@@ -3068,7 +3067,8 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
     FlushDelayedInputsLocked(localFrame);
 
     ENetEvent event;
-    const int maxEvents = std::clamp(G.PacketBridgeMaxPumpEvents, 1, kMaxPumpEvents);
+    const int maxEvents = std::clamp(
+        G.PacketBridgeMaxPumpEvents, 1, Config::PacketBridgePumpEventLimit);
     for (int i = 0; i < maxEvents; i++)
     {
         int result = enet_host_service(G.Host, &event, 0);
@@ -12740,60 +12740,49 @@ void InitFromEnvironment()
     G.WaitForPeerAtNetplayStart = EnvFlag("MELONDS_NSML_WAIT_FOR_PEER_AT_NETPLAY_START");
     G.DeferNetworkUntilStart = EnvFlag("MELONDS_NSML_DEFER_NETWORK_UNTIL_START");
     G.NetplayFrameBarrierEnabled = EnvFlag("MELONDS_NSML_NETPLAY_FRAME_BARRIER");
-    G.PacketBridgeEnabled = EnvFlag("MELONDS_NSML_PACKET_BRIDGE");
-    G.PacketBridgeOnly = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_ONLY");
-    G.PacketBridgeAllowPreGame = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME");
-    G.PacketBridgeTraceEnabled = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_TRACE");
-    G.PacketBridgeSendLocalPlayerOnly = !EnvFlag("MELONDS_NSML_PACKET_BRIDGE_SEND_ALL");
-    G.PacketBridgeWaitEnabled = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_WAIT");
-    G.PacketBridgeWaitTimeoutMs = std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS", 0));
-    G.PacketBridgeWaitStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME", 0)));
-    G.PacketBridgeWaitTickAhead = std::clamp(EnvInt("MELONDS_NSML_PACKET_BRIDGE_WAIT_TICK_AHEAD", 0), 0, 32);
-    G.PacketBridgeDirectCaptureEnabled = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE");
-    G.PacketBridgeForceTickEnabled = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK");
-    G.PacketBridgeForceTickStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME", 0)));
-    G.PacketBridgeForceTickBase = EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE", -1);
-    G.PacketBridgeForceNetReady = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY");
-    G.PacketBridgeForceNetReadyStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME", 0)));
-    G.PacketBridgeForceNetReadyEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_END_FRAME", 0)));
-    G.PacketBridgeForceNetReadyHostOnly =
-        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_HOST_ONLY");
+    const Config::PacketBridgeConfig packetBridgeConfig =
+        Config::LoadPacketBridgeConfig();
+    G.PacketBridgeEnabled = packetBridgeConfig.Enabled;
+    G.PacketBridgeOnly = packetBridgeConfig.Only;
+    G.PacketBridgeAllowPreGame = packetBridgeConfig.AllowPreGame;
+    G.PacketBridgeTraceEnabled = packetBridgeConfig.TraceEnabled;
+    G.PacketBridgeSendLocalPlayerOnly = packetBridgeConfig.SendLocalPlayerOnly;
+    G.PacketBridgeWaitEnabled = packetBridgeConfig.WaitEnabled;
+    G.PacketBridgeWaitTimeoutMs = packetBridgeConfig.WaitTimeoutMs;
+    G.PacketBridgeWaitStartFrame = packetBridgeConfig.WaitStartFrame;
+    G.PacketBridgeWaitTickAhead = packetBridgeConfig.WaitTickAhead;
+    G.PacketBridgeDirectCaptureEnabled = packetBridgeConfig.DirectCaptureEnabled;
+    G.PacketBridgeForceTickEnabled = packetBridgeConfig.ForceTickEnabled;
+    G.PacketBridgeForceTickStartFrame = packetBridgeConfig.ForceTickStartFrame;
+    G.PacketBridgeForceTickBase = packetBridgeConfig.ForceTickBase;
+    G.PacketBridgeForceNetReady = packetBridgeConfig.ForceNetReady;
+    G.PacketBridgeForceNetReadyStartFrame =
+        packetBridgeConfig.ForceNetReadyStartFrame;
+    G.PacketBridgeForceNetReadyEndFrame = packetBridgeConfig.ForceNetReadyEndFrame;
+    G.PacketBridgeForceNetReadyHostOnly = packetBridgeConfig.ForceNetReadyHostOnly;
     G.PacketBridgeForceNetReadyClientOnly =
-        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_CLIENT_ONLY");
-    G.PacketBridgeForceNetReadyState10 =
-        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10");
+        packetBridgeConfig.ForceNetReadyClientOnly;
+    G.PacketBridgeForceNetReadyState10 = packetBridgeConfig.ForceNetReadyState10;
     G.PacketBridgeForceNetReadyState10ClientOnly =
-        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10_CLIENT_ONLY");
+        packetBridgeConfig.ForceNetReadyState10ClientOnly;
     G.PacketBridgeForceGameLocalPlayerID =
-        EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID", -1);
-    G.PacketBridgeForceGameLocalPlayerIDStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_START_FRAME", 0)));
+        packetBridgeConfig.ForceGameLocalPlayerID;
+    G.PacketBridgeForceGameLocalPlayerIDStartFrame =
+        packetBridgeConfig.ForceGameLocalPlayerIDStartFrame;
     G.PacketBridgeForceGameLocalPlayerIDEarly =
-        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_EARLY");
-    G.PacketBridgeMaxPumpEvents = std::clamp(
-        EnvInt("MELONDS_NSML_PACKET_BRIDGE_MAX_PUMP_EVENTS", kMaxPumpEvents), 1, kMaxPumpEvents);
-    G.PacketBridgeMaxTickLead = EnvInt("MELONDS_NSML_PACKET_BRIDGE_MAX_TICK_LEAD", -1);
-    G.PacketBridgeMaxFrameLead = EnvInt("MELONDS_NSML_PACKET_BRIDGE_MAX_FRAME_LEAD", -1);
-    G.PacketBridgeThrottleTimeoutMs = std::max(
-        0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_THROTTLE_TIMEOUT_MS", 5000));
-    G.PacketBridgeThrottleStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_THROTTLE_START_FRAME", 0)));
-    G.PacketBridgeLocalInputDelay = std::max(
-        0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_LOCAL_INPUT_DELAY", 0));
-    G.PacketBridgeNeutralizeLocalInput =
-        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_NEUTRALIZE_LOCAL_INPUT");
-    G.PacketBridgePreserveLocalTouch =
-        EnvFlag("MELONDS_NSML_PACKET_BRIDGE_PRESERVE_LOCAL_TOUCH");
+        packetBridgeConfig.ForceGameLocalPlayerIDEarly;
+    G.PacketBridgeMaxPumpEvents = packetBridgeConfig.MaxPumpEvents;
+    G.PacketBridgeMaxTickLead = packetBridgeConfig.MaxTickLead;
+    G.PacketBridgeMaxFrameLead = packetBridgeConfig.MaxFrameLead;
+    G.PacketBridgeThrottleTimeoutMs = packetBridgeConfig.ThrottleTimeoutMs;
+    G.PacketBridgeThrottleStartFrame = packetBridgeConfig.ThrottleStartFrame;
+    G.PacketBridgeLocalInputDelay = packetBridgeConfig.LocalInputDelay;
+    G.PacketBridgeNeutralizeLocalInput = packetBridgeConfig.NeutralizeLocalInput;
+    G.PacketBridgePreserveLocalTouch = packetBridgeConfig.PreserveLocalTouch;
     G.NeutralizePolledInput = EnvFlag("MELONDS_NSML_NEUTRALIZE_POLLED_INPUT");
     G.NeutralizePolledInputPreserveTouch = EnvFlag("MELONDS_NSML_NEUTRALIZE_POLLED_INPUT_PRESERVE_TOUCH");
-    G.PacketBridgeSendDelayFrames = std::max(
-        0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_SEND_DELAY_FRAMES", 0));
-    G.PacketBridgeSendJitterFrames = std::max(
-        0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_SEND_JITTER_FRAMES", 0));
+    G.PacketBridgeSendDelayFrames = packetBridgeConfig.SendDelayFrames;
+    G.PacketBridgeSendJitterFrames = packetBridgeConfig.SendJitterFrames;
     const Config::InputConfig inputConfig = Config::LoadInputConfig(G.InputNetplayOnly);
     G.InputSendDelayFrames = inputConfig.SendDelayFrames;
     G.InputSendJitterFrames = inputConfig.SendJitterFrames;

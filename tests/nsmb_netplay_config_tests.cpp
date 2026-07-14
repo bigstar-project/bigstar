@@ -260,6 +260,128 @@ void TestInputConfigReadsClampsAndNormalizesRanges() {
   CHECK(config.WaitPollUs == 50);
 }
 
+void TestPacketBridgeConfigDefaults() {
+  const MapEnvironment environment;
+  const auto config =
+      NsmbNetplayPoC::Config::LoadPacketBridgeConfig(environment);
+  CHECK(!config.Enabled);
+  CHECK(!config.Only);
+  CHECK(!config.AllowPreGame);
+  CHECK(!config.TraceEnabled);
+  CHECK(config.SendLocalPlayerOnly);
+  CHECK(!config.WaitEnabled);
+  CHECK(config.WaitTimeoutMs == 0);
+  CHECK(config.WaitStartFrame == 0u);
+  CHECK(config.WaitTickAhead == 0);
+  CHECK(!config.DirectCaptureEnabled);
+  CHECK(!config.ForceTickEnabled);
+  CHECK(config.ForceTickStartFrame == 0u);
+  CHECK(config.ForceTickBase == -1);
+  CHECK(!config.ForceNetReady);
+  CHECK(config.ForceNetReadyStartFrame == 0u);
+  CHECK(config.ForceNetReadyEndFrame == 0u);
+  CHECK(!config.ForceNetReadyHostOnly);
+  CHECK(!config.ForceNetReadyClientOnly);
+  CHECK(!config.ForceNetReadyState10);
+  CHECK(!config.ForceNetReadyState10ClientOnly);
+  CHECK(config.ForceGameLocalPlayerID == -1);
+  CHECK(config.ForceGameLocalPlayerIDStartFrame == 0u);
+  CHECK(!config.ForceGameLocalPlayerIDEarly);
+  CHECK(config.MaxPumpEvents ==
+        NsmbNetplayPoC::Config::PacketBridgePumpEventLimit);
+  CHECK(config.MaxTickLead == -1);
+  CHECK(config.MaxFrameLead == -1);
+  CHECK(config.ThrottleTimeoutMs == 5000);
+  CHECK(config.ThrottleStartFrame == 0u);
+  CHECK(config.LocalInputDelay == 0);
+  CHECK(!config.NeutralizeLocalInput);
+  CHECK(!config.PreserveLocalTouch);
+  CHECK(config.SendDelayFrames == 0);
+  CHECK(config.SendJitterFrames == 0);
+}
+
+void TestPacketBridgeConfigReadsAndClampsEnvironment() {
+  MapEnvironment environment;
+  environment.Values = {
+      {"MELONDS_NSML_PACKET_BRIDGE", "1"},
+      {"MELONDS_NSML_PACKET_BRIDGE_ONLY", "1"},
+      {"MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME", "1"},
+      {"MELONDS_NSML_PACKET_BRIDGE_TRACE", "1"},
+      {"MELONDS_NSML_PACKET_BRIDGE_SEND_ALL", "1"},
+      {"MELONDS_NSML_PACKET_BRIDGE_WAIT", "1"},
+      {"MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS", "-1"},
+      {"MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME", "-2"},
+      {"MELONDS_NSML_PACKET_BRIDGE_WAIT_TICK_AHEAD", "99"},
+      {"MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE", "1"},
+      {"MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK", "1"},
+      {"MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME", "-3"},
+      {"MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE", "42"},
+      {"MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY", "1"},
+      {"MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME", "5"},
+      {"MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_END_FRAME", "6"},
+      {"MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_HOST_ONLY", "1"},
+      {"MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_CLIENT_ONLY", "1"},
+      {"MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10", "1"},
+      {"MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10_CLIENT_ONLY", "1"},
+      {"MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID", "7"},
+      {"MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_START_FRAME",
+       "-8"},
+      {"MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_EARLY", "1"},
+      {"MELONDS_NSML_PACKET_BRIDGE_MAX_PUMP_EVENTS", "999"},
+      {"MELONDS_NSML_PACKET_BRIDGE_MAX_TICK_LEAD", "-9"},
+      {"MELONDS_NSML_PACKET_BRIDGE_MAX_FRAME_LEAD", "10"},
+      {"MELONDS_NSML_PACKET_BRIDGE_THROTTLE_TIMEOUT_MS", "-11"},
+      {"MELONDS_NSML_PACKET_BRIDGE_THROTTLE_START_FRAME", "-12"},
+      {"MELONDS_NSML_PACKET_BRIDGE_LOCAL_INPUT_DELAY", "-13"},
+      {"MELONDS_NSML_PACKET_BRIDGE_NEUTRALIZE_LOCAL_INPUT", "1"},
+      {"MELONDS_NSML_PACKET_BRIDGE_PRESERVE_LOCAL_TOUCH", "1"},
+      {"MELONDS_NSML_PACKET_BRIDGE_SEND_DELAY_FRAMES", "-14"},
+      {"MELONDS_NSML_PACKET_BRIDGE_SEND_JITTER_FRAMES", "15"},
+  };
+
+  auto config = NsmbNetplayPoC::Config::LoadPacketBridgeConfig(environment);
+  CHECK(config.Enabled);
+  CHECK(config.Only);
+  CHECK(config.AllowPreGame);
+  CHECK(config.TraceEnabled);
+  CHECK(!config.SendLocalPlayerOnly);
+  CHECK(config.WaitEnabled);
+  CHECK(config.WaitTimeoutMs == 0);
+  CHECK(config.WaitStartFrame == 0u);
+  CHECK(config.WaitTickAhead == 32);
+  CHECK(config.DirectCaptureEnabled);
+  CHECK(config.ForceTickEnabled);
+  CHECK(config.ForceTickStartFrame == 0u);
+  CHECK(config.ForceTickBase == 42);
+  CHECK(config.ForceNetReady);
+  CHECK(config.ForceNetReadyStartFrame == 5u);
+  CHECK(config.ForceNetReadyEndFrame == 6u);
+  CHECK(config.ForceNetReadyHostOnly);
+  CHECK(config.ForceNetReadyClientOnly);
+  CHECK(config.ForceNetReadyState10);
+  CHECK(config.ForceNetReadyState10ClientOnly);
+  CHECK(config.ForceGameLocalPlayerID == 7);
+  CHECK(config.ForceGameLocalPlayerIDStartFrame == 0u);
+  CHECK(config.ForceGameLocalPlayerIDEarly);
+  CHECK(config.MaxPumpEvents ==
+        NsmbNetplayPoC::Config::PacketBridgePumpEventLimit);
+  CHECK(config.MaxTickLead == -9);
+  CHECK(config.MaxFrameLead == 10);
+  CHECK(config.ThrottleTimeoutMs == 0);
+  CHECK(config.ThrottleStartFrame == 0u);
+  CHECK(config.LocalInputDelay == 0);
+  CHECK(config.NeutralizeLocalInput);
+  CHECK(config.PreserveLocalTouch);
+  CHECK(config.SendDelayFrames == 0);
+  CHECK(config.SendJitterFrames == 15);
+
+  environment.Values["MELONDS_NSML_PACKET_BRIDGE_MAX_PUMP_EVENTS"] = "0";
+  environment.Values["MELONDS_NSML_PACKET_BRIDGE_WAIT_TICK_AHEAD"] = "-1";
+  config = NsmbNetplayPoC::Config::LoadPacketBridgeConfig(environment);
+  CHECK(config.MaxPumpEvents == 1);
+  CHECK(config.WaitTickAhead == 0);
+}
+
 void TestRollbackConfigDefaultsAndBackendAliases() {
   using NsmbNetplayPoC::Config::RollbackBackend;
   MapEnvironment environment;
@@ -567,6 +689,8 @@ int main() {
   TestConnectionConfigReadsExistingValuesAndClamps();
   TestInputConfigDefaultsPreserveLegacyInitializationOrder();
   TestInputConfigReadsClampsAndNormalizesRanges();
+  TestPacketBridgeConfigDefaults();
+  TestPacketBridgeConfigReadsAndClampsEnvironment();
   TestRollbackConfigDefaultsAndBackendAliases();
   TestRollbackConfigReadsClampsAndDependencies();
   TestMvlConfigDefaults();

@@ -232,6 +232,96 @@ InputConfig LoadInputConfig(bool netplayOnlyForMaxFrameLeadDefault) {
                          netplayOnlyForMaxFrameLeadDefault);
 }
 
+PacketBridgeConfig LoadPacketBridgeConfig(const Environment &environment) {
+  PacketBridgeConfig config;
+  config.Enabled = ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE");
+  config.Only = ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE_ONLY");
+  config.AllowPreGame =
+      ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME");
+  config.TraceEnabled =
+      ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE_TRACE");
+  config.SendLocalPlayerOnly =
+      !ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE_SEND_ALL");
+  config.WaitEnabled = ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE_WAIT");
+  config.WaitTimeoutMs = std::max(
+      0, ReadInt(environment, "MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS", 0));
+  config.WaitStartFrame = static_cast<std::uint32_t>(
+      std::max(0, ReadInt(environment,
+                          "MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME", 0)));
+  config.WaitTickAhead = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_PACKET_BRIDGE_WAIT_TICK_AHEAD", 0), 0,
+      32);
+  config.DirectCaptureEnabled =
+      ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE");
+  config.ForceTickEnabled =
+      ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK");
+  config.ForceTickStartFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment,
+                 "MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME", 0)));
+  config.ForceTickBase =
+      ReadInt(environment, "MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE", -1);
+  config.ForceNetReady =
+      ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY");
+  config.ForceNetReadyStartFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment,
+                 "MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME", 0)));
+  config.ForceNetReadyEndFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment,
+                 "MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_END_FRAME", 0)));
+  config.ForceNetReadyHostOnly = ReadFlag(
+      environment, "MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_HOST_ONLY");
+  config.ForceNetReadyClientOnly = ReadFlag(
+      environment, "MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_CLIENT_ONLY");
+  config.ForceNetReadyState10 = ReadFlag(
+      environment, "MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10");
+  config.ForceNetReadyState10ClientOnly = ReadFlag(
+      environment,
+      "MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10_CLIENT_ONLY");
+  config.ForceGameLocalPlayerID = ReadInt(
+      environment, "MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID", -1);
+  config.ForceGameLocalPlayerIDStartFrame = static_cast<std::uint32_t>(std::max(
+      0,
+      ReadInt(
+          environment,
+          "MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_START_FRAME",
+          0)));
+  config.ForceGameLocalPlayerIDEarly =
+      ReadFlag(environment,
+               "MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_EARLY");
+  config.MaxPumpEvents = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_PACKET_BRIDGE_MAX_PUMP_EVENTS",
+              PacketBridgePumpEventLimit),
+      1, PacketBridgePumpEventLimit);
+  config.MaxTickLead =
+      ReadInt(environment, "MELONDS_NSML_PACKET_BRIDGE_MAX_TICK_LEAD", -1);
+  config.MaxFrameLead =
+      ReadInt(environment, "MELONDS_NSML_PACKET_BRIDGE_MAX_FRAME_LEAD", -1);
+  config.ThrottleTimeoutMs = std::max(
+      0, ReadInt(environment, "MELONDS_NSML_PACKET_BRIDGE_THROTTLE_TIMEOUT_MS",
+                 5000));
+  config.ThrottleStartFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_PACKET_BRIDGE_THROTTLE_START_FRAME",
+                 0)));
+  config.LocalInputDelay =
+      std::max(0, ReadInt(environment,
+                          "MELONDS_NSML_PACKET_BRIDGE_LOCAL_INPUT_DELAY", 0));
+  config.NeutralizeLocalInput = ReadFlag(
+      environment, "MELONDS_NSML_PACKET_BRIDGE_NEUTRALIZE_LOCAL_INPUT");
+  config.PreserveLocalTouch =
+      ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE_PRESERVE_LOCAL_TOUCH");
+  config.SendDelayFrames =
+      std::max(0, ReadInt(environment,
+                          "MELONDS_NSML_PACKET_BRIDGE_SEND_DELAY_FRAMES", 0));
+  config.SendJitterFrames =
+      std::max(0, ReadInt(environment,
+                          "MELONDS_NSML_PACKET_BRIDGE_SEND_JITTER_FRAMES", 0));
+  return config;
+}
+
+PacketBridgeConfig LoadPacketBridgeConfig() {
+  return LoadPacketBridgeConfig(GetProcessEnvironment());
+}
+
 RollbackConfig LoadRollbackConfig(const Environment &environment) {
   RollbackConfig config;
   config.Enabled = ReadFlag(environment, "MELONDS_NSML_ROLLBACK");

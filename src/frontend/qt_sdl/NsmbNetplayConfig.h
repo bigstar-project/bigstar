@@ -60,6 +60,44 @@ struct InputConfig {
   int WaitPollUs = 100;
 };
 
+inline constexpr int PacketBridgePumpEventLimit = 64;
+
+struct PacketBridgeConfig {
+  bool Enabled = false;
+  bool Only = false;
+  bool AllowPreGame = false;
+  bool TraceEnabled = false;
+  bool SendLocalPlayerOnly = true;
+  bool WaitEnabled = false;
+  int WaitTimeoutMs = 0;
+  std::uint32_t WaitStartFrame = 0;
+  int WaitTickAhead = 0;
+  bool DirectCaptureEnabled = false;
+  bool ForceTickEnabled = false;
+  std::uint32_t ForceTickStartFrame = 0;
+  int ForceTickBase = -1;
+  bool ForceNetReady = false;
+  std::uint32_t ForceNetReadyStartFrame = 0;
+  std::uint32_t ForceNetReadyEndFrame = 0;
+  bool ForceNetReadyHostOnly = false;
+  bool ForceNetReadyClientOnly = false;
+  bool ForceNetReadyState10 = false;
+  bool ForceNetReadyState10ClientOnly = false;
+  int ForceGameLocalPlayerID = -1;
+  std::uint32_t ForceGameLocalPlayerIDStartFrame = 0;
+  bool ForceGameLocalPlayerIDEarly = false;
+  int MaxPumpEvents = PacketBridgePumpEventLimit;
+  int MaxTickLead = -1;
+  int MaxFrameLead = -1;
+  int ThrottleTimeoutMs = 5000;
+  std::uint32_t ThrottleStartFrame = 0;
+  int LocalInputDelay = 0;
+  bool NeutralizeLocalInput = false;
+  bool PreserveLocalTouch = false;
+  int SendDelayFrames = 0;
+  int SendJitterFrames = 0;
+};
+
 enum class RollbackBackend {
   Savestate,
   CoreLite,
@@ -198,6 +236,8 @@ ConnectionConfig LoadConnectionConfig(bool testEnabled);
 InputConfig LoadInputConfig(const Environment &environment,
                             bool netplayOnlyForMaxFrameLeadDefault);
 InputConfig LoadInputConfig(bool netplayOnlyForMaxFrameLeadDefault);
+PacketBridgeConfig LoadPacketBridgeConfig(const Environment &environment);
+PacketBridgeConfig LoadPacketBridgeConfig();
 RollbackConfig LoadRollbackConfig(const Environment &environment);
 RollbackConfig LoadRollbackConfig();
 MvlConfig LoadMvlConfig(const Environment &environment);
