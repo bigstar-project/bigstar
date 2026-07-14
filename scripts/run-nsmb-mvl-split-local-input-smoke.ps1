@@ -151,12 +151,6 @@ param(
     [int]$ForcePlayerInventoryPowerupsEndFrame = 0,
     [int]$ForcePlayerInventoryPowerup0 = 0,
     [int]$ForcePlayerInventoryPowerup1 = 0,
-    [switch]$ForceStageActorFreezeFlag,
-    [switch]$ForceStageActorFreezeFlagHostOnly,
-    [switch]$ForceStageActorFreezeFlagClientOnly,
-    [int]$ForceStageActorFreezeFlagStartFrame = 0,
-    [int]$ForceStageActorFreezeFlagEndFrame = 0,
-    [string]$ForceStageActorFreezeFlagValue = "0",
     [int]$HostStartupDelayMs = 1200,
     [string]$LogDir = "logs\nsmb-mvl-split-local-input-smoke",
     [string]$HostPacketReplayFile = "",
@@ -504,20 +498,6 @@ if ($NoDrawScreen) {
 }
 if ($NoAudioSync) {
     $common += "-NoAudioSync"
-}
-if ($ForceStageActorFreezeFlag) {
-    $common += @(
-        "-ForceStageActorFreezeFlag",
-        "-ForceStageActorFreezeFlagStartFrame", "$ForceStageActorFreezeFlagStartFrame",
-        "-ForceStageActorFreezeFlagEndFrame", "$ForceStageActorFreezeFlagEndFrame",
-        "-ForceStageActorFreezeFlagValue", "$ForceStageActorFreezeFlagValue"
-    )
-    if ($ForceStageActorFreezeFlagHostOnly) {
-        $common += "-ForceStageActorFreezeFlagHostOnly"
-    }
-    if ($ForceStageActorFreezeFlagClientOnly) {
-        $common += "-ForceStageActorFreezeFlagClientOnly"
-    }
 }
 if ($InputNetplayTrace) {
     $common += "-InputNetplayTrace"

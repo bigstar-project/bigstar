@@ -15,8 +15,6 @@ param(
     [int]$RamDumpInterval = 0,
     [string]$StateSaveDir = "",
     [int]$StateSaveFrame = 0,
-    [int]$VsStarSnapFrame = 0,
-    [int]$VsStarSnapPlayerSlot = 0,
     [switch]$AllowJit,
     [switch]$NoFrameLimit,
     [switch]$NoScreenshots,
@@ -26,8 +24,6 @@ param(
     [switch]$QuietLog,
     [int]$ActiveFpsStartFrame = 0,
     [switch]$Visible,
-    [int]$PlayerSnapToStarFrame = 0,
-    [int]$PlayerSnapToStarSlot = 0,
     [int]$PlayerStickToStarStartFrame = 0,
     [int]$PlayerStickToStarEndFrame = 0,
     [int]$PlayerStickToStarSlot = 0,
@@ -103,8 +99,6 @@ foreach ($name in @(
     "MELONDS_NSML_STATE_LOAD_FRAME",
     "MELONDS_NSML_STATE_SAVE_DIR",
     "MELONDS_NSML_STATE_SAVE_FRAME",
-    "MELONDS_NSML_PLAYER_SNAP_TO_STAR_FRAME",
-    "MELONDS_NSML_PLAYER_SNAP_TO_STAR_SLOT",
     "MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME",
     "MELONDS_NSML_PLAYER_STICK_TO_STAR_END_FRAME",
     "MELONDS_NSML_PLAYER_STICK_TO_STAR_SLOT",
@@ -241,20 +235,6 @@ if ($StateSaveDir -and $StateSaveFrame -gt 0) {
 } else {
     Remove-Item Env:\MELONDS_NSML_STATE_SAVE_DIR -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_STATE_SAVE_FRAME -ErrorAction SilentlyContinue
-}
-if ($VsStarSnapFrame -gt 0) {
-    $env:MELONDS_NSML_VS_STAR_SNAP_FRAME = "$VsStarSnapFrame"
-    $env:MELONDS_NSML_VS_STAR_SNAP_PLAYER_SLOT = "$VsStarSnapPlayerSlot"
-} else {
-    Remove-Item Env:\MELONDS_NSML_VS_STAR_SNAP_FRAME -ErrorAction SilentlyContinue
-    Remove-Item Env:\MELONDS_NSML_VS_STAR_SNAP_PLAYER_SLOT -ErrorAction SilentlyContinue
-}
-if ($PlayerSnapToStarFrame -gt 0) {
-    $env:MELONDS_NSML_PLAYER_SNAP_TO_STAR_FRAME = "$PlayerSnapToStarFrame"
-    $env:MELONDS_NSML_PLAYER_SNAP_TO_STAR_SLOT = "$PlayerSnapToStarSlot"
-} else {
-    Remove-Item Env:\MELONDS_NSML_PLAYER_SNAP_TO_STAR_FRAME -ErrorAction SilentlyContinue
-    Remove-Item Env:\MELONDS_NSML_PLAYER_SNAP_TO_STAR_SLOT -ErrorAction SilentlyContinue
 }
 if ($PlayerStickToStarStartFrame -gt 0) {
     $env:MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME = "$PlayerStickToStarStartFrame"
