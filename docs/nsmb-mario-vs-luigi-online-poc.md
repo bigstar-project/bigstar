@@ -2,7 +2,7 @@
 
 ## NsmbNetplayPoC リファクタ調査 - 2026-07-14
 
-- 現状: `src/frontend/qt_sdl/NsmbNetplayPoC.cpp` は20,180行（リファクタ開始前21,253行から1,073行減）で、単一の共有 `State G` に参照中のfieldが782個、381種類の `MELONDS_NSML_*` 設定、ENet、入力同期、rollback、NSMB RAM access、状態同期、診断、テスト用runtime patchがまだ集中している。`InitFromEnvironment` は1,312行、`BeforeRunFrame` は383行、`AfterRunFrame` は371行。
+- 現状: `src/frontend/qt_sdl/NsmbNetplayPoC.cpp` は19,931行（リファクタ開始前21,253行から1,322行減）で、単一の共有 `State G` に参照中のfieldが782個、381種類の `MELONDS_NSML_*` 設定、ENet、入力同期、rollback、NSMB RAM access、状態同期、診断、テスト用runtime patchがまだ集中している。`InitFromEnvironment` は1,312行、`BeforeRunFrame` は383行、`AfterRunFrame` は371行。
 - 既存の安全網: `tests/` に入力fixtureが68本、NSMB smoke scriptが12本ある。特に `run-nsmb-mvl-lan-route-smoke.ps1` は、起動だけでなくstage/player/star actor、remote movement、host/client gameplay state、死亡、star取得、result scene、複数ゲーム復帰、ARM abort、切断/空画面を検査できる。
 - 方針: 全面書き換えはせず、最初に現行binaryの代表scenarioをbaseline化する。その後、(1) config/env解析、(2) wire codec、(3) input timeline/delay/prediction、(4) NSMB memory viewとsample/apply、(5) rollback store、(6) ENet transport、(7) frame orchestrationの順に、挙動変更を混ぜず小さく抽出する。公開facadeの `IsEnabled/BeforeRunFrame/AfterRunFrame/Shutdown` は当面維持する。
 - テスト方針: ROM不要のunit/contract testを常時実行し、local ROM/savestateを使うdeterministic replayと2-process loopback smokeを上位層に置く。全RAM hashだけに依存せず、stage、player座標/状態、stars/lives、scene遷移、同期eventなどのsemantic traceをgolden比較する。ROMを配布できないCIではunit testを必須、ROM統合テストはlocalまたはself-hosted/nightly gateにする。
@@ -26,9 +26,10 @@
 - 完了: NSML packet bridgeとplayer-stateの受信decode/state更新をclass別handlerへ分け、`PumpNetworkLocked`を365行から319行へ縮小した。player-stateの再戦cutoff時に現行コードがpacket cleanupをskipする挙動は`ReceiveDisposition`として明示的に保持した。
 - 完了: world、moving hazard、world actor snapshot、world effectの受信decode/state更新もclass別handlerへ分け、`PumpNetworkLocked`を319行から275行へ縮小した。4種すべてで再戦cutoff時のcleanup skip semanticsを`ReceiveDisposition`経由で保持し、fast/rollback実ゲームgolden一致を確認した。
 - 完了: 最後に残った380-byte game-state受信と100項目前後のsample変換をhandlerへ分け、`PumpNetworkLocked`を275行から176行へ縮小した。これでevent loopは接続・分類・handler dispatch・切断処理が中心になり、全7 CTestとfast/rollback実ゲームgoldenがpassした。
+- 完了: NSML/game/player/world/hazard/actor/effectのwire型、kind定数、配列上限、全size static assertionを、細かな型別fileではなく288行の`NsmbNetplayWire.h`へまとめて物理移動した。PoC本体は249行減り、全wire packetのABI sizeとfast/rollback実ゲームgoldenを維持した。
 - 完了: `scripts/test-nsmb-netplay-refactor.ps1` にfast/rollback/standard/full tierを追加した。fastは専用の非対称入力fixture、固定match seed、stable host/client ROM、2-process ENet、JIT、実player actor更新、host/client semantic state比較を1,250 framesで実行する。さらに両peerで11 packetごとに1 packetを決定的にdropし、8-frame history bundleによる回復後もgoldenが完全一致することを検査する。rollbackは同じpacket loss条件で`tinycorepreimage` checkpointが実gameplay中に保存され、integrity errorなしで同じgoldenへ一致することを検査する。standardは描画/screenshot込み3,000 frames、fullはstandard・rollbackに加えてstar取得からresult sceneまでの6,000 frames smokeを実行する。
 - Current blocker: リファクタ自体のblockerはなし。既存rollback精度の既知課題として、20-frame送信遅延で実resimulationを強制するとclientは21-frame resimを行う一方、window=20のhostはcheckpoint不足になる。window=32でもframe 1050の`playerActor0Y`がhost/client不一致になるため、通常のrefactor regression tierはcheckpoint保存・packet loss回復のcoverageに留める。fast goldenはstable ROM hashも検査するため、ROM patch変更時はsemantic差分確認と明示更新が必要。
-- Next action: 小fileを大量に増やすのではなく、wire型・protocol/session/classifier・受信dispatchをまとまったnetwork moduleへ物理移動し、既存の小さなnetwork関連moduleも必要に応じて統合する。次にgame-state sample/apply、rollback storeを中規模moduleとして抽出し、`NsmbNetplayPoC.cpp`の行数と責務を明確に減らす。
+- Next action: 小fileを大量に増やさず、game-state sample型とwire→sample変換を1つの中規模state-sync moduleへ物理移動する。その後、network protocol/session/classifierの小moduleをまとまりに沿って統合し、rollback storeを中規模moduleとして抽出する。
 - Verification status: Release `melonDS` と7 unit targetのbuild成功。CTest 7件は合計約0.05-0.15秒でpass。旧binary baseline 2,300 framesはpass。固定seedのfast tierはpacket lossありでもhost/client semantic stateとapplied inputがbyte-for-byte golden一致した。rollback tierも約14-15秒でcheckpoint保存・packet loss回復・golden一致を確認した。typed bootstrap/connection/input/rollback config、unused/旧runtime patch削除、input timeline/protocol/delivery/session protocol/policy、packet classifier抽出後もpassし、Clang unused診断は0件。
 
 ## AI observation v3 / exact player hitbox - 2026-07-14
