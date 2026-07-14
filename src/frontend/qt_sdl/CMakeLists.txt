@@ -270,6 +270,25 @@ if (BUILD_TESTING)
     )
     add_test(NAME nsmb-game-state COMMAND nsmb_game_state_tests)
 
+    add_executable(nsmb_rule_ai_tests
+        NsmbRuleAI.cpp
+        NsmbRuleAI.h
+        NsmbGameState.h
+        NsmbGameStateReader.h
+        NsmbNetplayPoC.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_rule_ai_tests.cpp
+    )
+    target_include_directories(nsmb_rule_ai_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_rule_ai_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-rule-ai COMMAND nsmb_rule_ai_tests)
+
     add_executable(nsmb_rollback_store_tests
         NsmbRollbackStore.cpp
         NsmbRollbackStore.h

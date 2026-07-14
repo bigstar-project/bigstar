@@ -2,6 +2,38 @@
 // This file is intentionally included from NsmbNetplayPoC.cpp inside its anonymous namespace.
 // Do not add it as a separately compiled translation unit unless the shared internal types are moved to a real header.
 
+const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings);
+
+using RuntimeHazardThreat = NsmbRuleAI::RuntimeHazardThreat;
+
+bool AIPlayerContactGround(melonDS::u32 collisionFlag)
+{
+    return NsmbRuleAI::PlayerContactGround(collisionFlag);
+}
+
+RuntimeHazardThreat MostDangerousRuntimeHazard(
+    const GameStateObjectScanCache& objectScanCache,
+    melonDS::u32 selfX,
+    melonDS::u32 selfY,
+    melonDS::u32 selfVelX,
+    std::int64_t horizontalRange,
+    std::int64_t verticalRange,
+    std::int64_t closeRange)
+{
+    return NsmbRuleAI::FindRuntimeHazard(
+        {
+            G.RuleAIHorizontalWrapWidth,
+            horizontalRange,
+            verticalRange,
+            closeRange,
+        },
+        objectScanCache,
+        selfX,
+        selfY,
+        selfVelX,
+        AIObjectCategory);
+}
+
 const char* AIPowerupCandidateName(melonDS::u32 value)
 {
     switch (value)

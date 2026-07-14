@@ -5,6 +5,7 @@
 #ifndef NSMBRULEAI_H
 #define NSMBRULEAI_H
 
+#include "NsmbGameStateReader.h"
 #include "NsmbNetplayPoC.h"
 
 #include <cstdint>
@@ -29,6 +30,30 @@ struct Config
     int StuckFrames = 24;
     bool TraceEnabled = false;
     int TraceInterval = 60;
+};
+
+using ObjectCategoryFunction = const char* (*)(melonDS::u16 objectID, melonDS::u32 settings);
+
+struct RuntimeHazardConfig
+{
+    int HorizontalWrapWidth = 0;
+    std::int64_t HorizontalRange = 0;
+    std::int64_t VerticalRange = 0;
+    std::int64_t CloseRange = 0;
+};
+
+struct RuntimeHazardThreat
+{
+    bool Found = false;
+    bool Closing = false;
+    bool VeryClose = false;
+    std::int64_t Dx = 0;
+    std::int64_t Dy = 0;
+    std::int64_t VelX = 0;
+    std::int64_t VelY = 0;
+    int CategoryID = 0;
+    melonDS::u32 ObjectID = 0;
+    melonDS::u32 Settings = 0;
 };
 
 struct PlayerFrameState
@@ -80,6 +105,30 @@ struct FrameState
     melonDS::u32 MovingHazardVelX = 0;
     melonDS::u32 MovingHazardVelY = 0;
 };
+
+struct FrameStateServices
+{
+    ObjectCategoryFunction ObjectCategory = nullptr;
+    NsmbNetplayPoC::GameStateModel::AITerrainDerivedSummary (*DeriveTerrainSummary)(
+        const NsmbNetplayPoC::GameStateModel::AIPlayerTileProbeSample& probe, bool contactGround,
+        bool contactWallLeft, bool contactWallRight) = nullptr;
+    bool (*TargetHasFloorBelow)(
+        const NsmbNetplayPoC::GameStateModel::AIPlayerTileProbeSample& probe, melonDS::u32 selfX,
+        melonDS::u32 selfY, melonDS::u32 targetX, melonDS::u32 targetY) = nullptr;
+};
+
+FrameState BuildFrameState(
+    const Config& config, const NsmbNetplayPoC::GameStateModel::GameStateSample& sample,
+    const NsmbNetplayPoC::GameStateReader::GameStateObjectScanCache& objectScanCache,
+    bool inGameplay, const FrameStateServices& services);
+
+bool PlayerContactGround(melonDS::u32 collisionFlag);
+
+RuntimeHazardThreat FindRuntimeHazard(
+    const RuntimeHazardConfig& config,
+    const NsmbNetplayPoC::GameStateReader::GameStateObjectScanCache& objectScanCache,
+    melonDS::u32 selfX, melonDS::u32 selfY, melonDS::u32 selfVelX,
+    ObjectCategoryFunction objectCategory);
 
 bool ControlsPlayer(const Config& config, int player, int localPlayer);
 
