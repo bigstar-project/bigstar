@@ -843,9 +843,7 @@ struct State
     melonDS::u32 MvlLifeModeSelector = 2;
     melonDS::u32 MvlBigStarSelector = 1;
     bool NormalizeMvlEntranceSpawnWritesEnabled = false;
-    bool RepairMvlInitialPlayerSpawnEnabled = false;
     bool MvlEntranceSpawnNormalizedLogged[16] {};
-    bool MvlInitialPlayerSpawnRepairedLogged[16] {};
     bool MvlAutoRestartAfterResult = false;
     melonDS::u32 MvlAutoRestartDelayFrames = 120;
     melonDS::u32 MvlAutoRestartBootstrapFrame = 120;
@@ -1012,14 +1010,6 @@ struct State
     int ForceStageCameraSlotSource = 0;
     int ForceStageCameraSlotDest = 1;
     bool ForceStageCameraSlotLogged[16] {};
-    bool ForceStageCameraSlotOverrideX = false;
-    bool ForceStageCameraSlotOverrideY = false;
-    bool ForceStageCameraSlotOverrideWidth = false;
-    bool ForceStageCameraSlotOverrideHeight = false;
-    melonDS::u32 ForceStageCameraSlotX = 0;
-    melonDS::u32 ForceStageCameraSlotY = 0;
-    melonDS::u32 ForceStageCameraSlotWidth = 0;
-    melonDS::u32 ForceStageCameraSlotHeight = 0;
     bool ForceStageCameraObjectXEnabled = false;
     melonDS::u32 ForceStageCameraObjectXStartFrame = 0;
     melonDS::u32 ForceStageCameraObjectXEndFrame = 0;
@@ -9671,46 +9661,6 @@ void NormalizeMvlEntranceSpawnStateIfNeeded(int instanceID, melonDS::u32 frame, 
     }
 }
 
-void RepairMvlInitialPlayerSpawnIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.RepairMvlInitialPlayerSpawnEnabled)
-        return;
-    if (!nds || !nds->MainRAM || instanceID < 0 || instanceID >= 16)
-        return;
-    if (!IsMarioVsLuigiGameplay(nds))
-        return;
-
-    const PlayerActorScanSample players = FindPlayerActors(nds);
-    if (!players.Actor0.Found || !players.Actor1.Found)
-        return;
-
-    constexpr melonDS::u32 kExpectedPlayerSpawnDeltaX = 0x00050000;
-    if (players.Actor1.PosX != 0xFFFF8000u)
-        return;
-
-    const melonDS::u32 fixedX = players.Actor0.PosX + kExpectedPlayerSpawnDeltaX;
-    WriteObjectTransform(
-        nds,
-        players.Actor1,
-        fixedX,
-        players.Actor1.PosY,
-        players.Actor1.PosZ,
-        true);
-
-    if (!G.MvlInitialPlayerSpawnRepairedLogged[instanceID])
-    {
-        G.MvlInitialPlayerSpawnRepairedLogged[instanceID] = true;
-        std::printf(
-            "NSMB MvL: repaired initial player spawn inst=%d frame=%u p0=%08X p1=%08X->%08X\n",
-            instanceID,
-            frame,
-            players.Actor0.PosX,
-            players.Actor1.PosX,
-            fixedX);
-        std::fflush(stdout);
-    }
-}
-
 void ApplyVsStarSnap(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (G.VsStarSnapFrame == 0) return;
@@ -10004,14 +9954,10 @@ void ForceStageCameraSlotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::N
     if (src == dst)
         return;
 
-    melonDS::u32 x = nds->ARM9Read32(kStageCameraXAddr + sizeof(melonDS::u32) * src);
-    melonDS::u32 y = nds->ARM9Read32(kStageCameraYAddr + sizeof(melonDS::u32) * src);
-    melonDS::u32 width = nds->ARM9Read32(kStageCameraWidthAddr + sizeof(melonDS::u32) * src);
-    melonDS::u32 height = nds->ARM9Read32(kStageCameraHeightAddr + sizeof(melonDS::u32) * src);
-    if (G.ForceStageCameraSlotOverrideX) x = G.ForceStageCameraSlotX;
-    if (G.ForceStageCameraSlotOverrideY) y = G.ForceStageCameraSlotY;
-    if (G.ForceStageCameraSlotOverrideWidth) width = G.ForceStageCameraSlotWidth;
-    if (G.ForceStageCameraSlotOverrideHeight) height = G.ForceStageCameraSlotHeight;
+    const melonDS::u32 x = nds->ARM9Read32(kStageCameraXAddr + sizeof(melonDS::u32) * src);
+    const melonDS::u32 y = nds->ARM9Read32(kStageCameraYAddr + sizeof(melonDS::u32) * src);
+    const melonDS::u32 width = nds->ARM9Read32(kStageCameraWidthAddr + sizeof(melonDS::u32) * src);
+    const melonDS::u32 height = nds->ARM9Read32(kStageCameraHeightAddr + sizeof(melonDS::u32) * src);
     if (width == 0 || height == 0)
         return;
 
@@ -10026,7 +9972,7 @@ void ForceStageCameraSlotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::N
     {
         std::printf(
             "NSMB Test: mirror Stage camera slot inst=%d frame=%u range=%u-%u src=%d dst=%d "
-            "x=%08X y=%08X width=%08X height=%08X verticalOnly=%d override=%d/%d/%d/%d\n",
+            "x=%08X y=%08X width=%08X height=%08X verticalOnly=%d\n",
             instanceID,
             frame,
             G.ForceStageCameraSlotStartFrame,
@@ -10037,11 +9983,7 @@ void ForceStageCameraSlotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::N
             y,
             width,
             height,
-            G.ForceStageCameraSlotVerticalOnly ? 1 : 0,
-            G.ForceStageCameraSlotOverrideX ? 1 : 0,
-            G.ForceStageCameraSlotOverrideY ? 1 : 0,
-            G.ForceStageCameraSlotOverrideWidth ? 1 : 0,
-            G.ForceStageCameraSlotOverrideHeight ? 1 : 0);
+            G.ForceStageCameraSlotVerticalOnly ? 1 : 0);
         G.ForceStageCameraSlotLogged[instanceID] = true;
     }
 }
@@ -10757,7 +10699,6 @@ void ApplyRollbackResimFramePatches(int instanceID, melonDS::u32 frame, melonDS:
     ForceMvlPlayerReadyIfNeeded(instanceID, frame, nds);
     ForceMvlRuntimeStateIfNeeded(instanceID, frame, nds);
     NormalizeMvlEntranceSpawnStateIfNeeded(instanceID, frame, nds);
-    RepairMvlInitialPlayerSpawnIfNeeded(instanceID, frame, nds);
     ClearMvlCameraInitHoldIfNeeded(instanceID, frame, nds);
     ForceStageSceneEventFlagsIfNeeded(instanceID, frame, nds);
     ForceStageCameraSlotIfNeeded(instanceID, frame, nds);
@@ -14919,7 +14860,6 @@ void InitFromEnvironment()
     G.MvlLifeModeSelector = mvlLives == "endless" || mvlLives == "Endless" ? 2u : 0u;
     G.MvlBigStarSelector = G.MvlBigStarTarget == 3 ? 0u : G.MvlBigStarTarget == 10 ? 2u : 1u;
     G.NormalizeMvlEntranceSpawnWritesEnabled = EnvFlag("MELONDS_NSML_NORMALIZE_MVL_ENTRANCE_SPAWN_WRITES");
-    G.RepairMvlInitialPlayerSpawnEnabled = EnvFlag("MELONDS_NSML_REPAIR_MVL_INITIAL_PLAYER_SPAWN");
     G.MvlAutoRestartAfterResult = EnvFlag("MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT");
     G.MvlAutoRestartDelayFrames = static_cast<melonDS::u32>(
         std::max(1, EnvInt("MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES", 120)));
@@ -15144,26 +15084,6 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_END_FRAME", 0)));
     G.ForceStageCameraSlotSource = std::clamp(EnvInt("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_SOURCE", 0), 0, 1);
     G.ForceStageCameraSlotDest = std::clamp(EnvInt("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_DEST", 1), 0, 1);
-    if (const char* x = std::getenv("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_X"))
-    {
-        G.ForceStageCameraSlotOverrideX = true;
-        G.ForceStageCameraSlotX = static_cast<melonDS::u32>(std::strtoul(x, nullptr, 0));
-    }
-    if (const char* y = std::getenv("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_Y"))
-    {
-        G.ForceStageCameraSlotOverrideY = true;
-        G.ForceStageCameraSlotY = static_cast<melonDS::u32>(std::strtoul(y, nullptr, 0));
-    }
-    if (const char* width = std::getenv("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_WIDTH"))
-    {
-        G.ForceStageCameraSlotOverrideWidth = true;
-        G.ForceStageCameraSlotWidth = static_cast<melonDS::u32>(std::strtoul(width, nullptr, 0));
-    }
-    if (const char* height = std::getenv("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_HEIGHT"))
-    {
-        G.ForceStageCameraSlotOverrideHeight = true;
-        G.ForceStageCameraSlotHeight = static_cast<melonDS::u32>(std::strtoul(height, nullptr, 0));
-    }
     G.ForceStageCameraObjectXEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X");
     G.ForceStageCameraObjectXStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_CAMERA_OBJECT_X_START_FRAME", 0)));
@@ -16241,8 +16161,6 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         NormalizeMvlEntranceSpawnStateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        RepairMvlInitialPlayerSpawnIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ClearMvlCameraInitHoldIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageSceneEventFlagsIfNeeded(instanceID, inputFrame, nds);
@@ -16968,8 +16886,6 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         ForcePlayerDeathCountersIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         NormalizeMvlEntranceSpawnStateIfNeeded(instanceID, logFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        RepairMvlInitialPlayerSpawnIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerPowerupsIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
