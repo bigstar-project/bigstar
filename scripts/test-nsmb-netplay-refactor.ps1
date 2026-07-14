@@ -96,6 +96,8 @@ if ($Tier -eq "fast") {
     $params.InputScript = "tests\nsmb_us_direct_mvl_refactor_fast.inputs"
     $params.Frames = 1250
     $params.GameStateTraceInterval = 10
+    $params.InputDropModulo = 11
+    $params.InputDropOffset = 3
     $params.NoDrawScreen = $true
     $params.NoAudioSync = $true
     $params.NoFrameLimit = $true
