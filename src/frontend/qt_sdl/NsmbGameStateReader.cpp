@@ -10,6 +10,16 @@ bool IsARM9MainRAMAddress(melonDS::u32 address) {
   return (address & 0xFF000000u) == 0x02000000u;
 }
 
+bool IsValidMainRAMRange(melonDS::NDS *nds, melonDS::u32 address,
+                         melonDS::u32 length) {
+  constexpr melonDS::u32 kMainRAMBase = 0x02000000;
+  if (!nds || !nds->MainRAM || length == 0 || address < kMainRAMBase)
+    return false;
+  const melonDS::u32 offset = address - kMainRAMBase;
+  const melonDS::u32 ramLength = nds->MainRAMMask + 1;
+  return offset < ramLength && length <= ramLength - offset;
+}
+
 } // namespace
 
 void ReadCoreState(melonDS::NDS *nds, GameStateModel::GameStateSample &sample) {
@@ -136,6 +146,204 @@ void ReadPlayerAndCameraGlobals(melonDS::NDS *nds,
   sample.CameraDbgCADB4 = nds->ARM9Read32(0x020CADB4);
   sample.CameraDbgCAE60 = nds->ARM9Read32(0x020CAE60);
   sample.CameraDbgCAE64 = nds->ARM9Read32(0x020CAE64);
+}
+
+void CopyPlayerActor(const ObjectScanSample &actor,
+                     GameStateModel::GameStateSample &sample, int player) {
+  if (player == 0) {
+    sample.PlayerActor0Found = actor.Found;
+    sample.PlayerActor0GUID = actor.GUID;
+    sample.PlayerActor0Base = actor.Base;
+    sample.PlayerActor0Settings = actor.Settings;
+    sample.PlayerActor0StateType = actor.StateType;
+    sample.PlayerActor0Flags = actor.Flags;
+    sample.PlayerActor0PosX = actor.PosX;
+    sample.PlayerActor0PosY = actor.PosY;
+    sample.PlayerActor0PosZ = actor.PosZ;
+    sample.PlayerActor0PrevX = actor.PrevX;
+    sample.PlayerActor0PrevY = actor.PrevY;
+    sample.PlayerActor0PrevZ = actor.PrevZ;
+    sample.PlayerActor0VelX = actor.VelX;
+    sample.PlayerActor0VelY = actor.VelY;
+    sample.PlayerActor0VelZ = actor.VelZ;
+    return;
+  }
+  sample.PlayerActor1Found = actor.Found;
+  sample.PlayerActor1GUID = actor.GUID;
+  sample.PlayerActor1Base = actor.Base;
+  sample.PlayerActor1Settings = actor.Settings;
+  sample.PlayerActor1StateType = actor.StateType;
+  sample.PlayerActor1Flags = actor.Flags;
+  sample.PlayerActor1PosX = actor.PosX;
+  sample.PlayerActor1PosY = actor.PosY;
+  sample.PlayerActor1PosZ = actor.PosZ;
+  sample.PlayerActor1PrevX = actor.PrevX;
+  sample.PlayerActor1PrevY = actor.PrevY;
+  sample.PlayerActor1PrevZ = actor.PrevZ;
+  sample.PlayerActor1VelX = actor.VelX;
+  sample.PlayerActor1VelY = actor.VelY;
+  sample.PlayerActor1VelZ = actor.VelZ;
+}
+
+void ReadPlayerTileDamage(melonDS::NDS *nds, const ObjectScanSample &actor,
+                          GameStateModel::GameStateSample &sample, int player) {
+  if (!actor.Found || !IsValidMainRAMRange(nds, actor.Base + 0xBB3, 1))
+    return;
+  const melonDS::u32 flags = nds->ARM9Read8(actor.Base + 0xBB2);
+  const melonDS::u32 type = nds->ARM9Read8(actor.Base + 0xBB3);
+  if (player == 0) {
+    sample.PlayerActor0TileDamageFlags = flags;
+    sample.PlayerActor0TileDamageType = type;
+  } else {
+    sample.PlayerActor1TileDamageFlags = flags;
+    sample.PlayerActor1TileDamageType = type;
+  }
+}
+
+void ReadPlayerTransitionState(melonDS::NDS *nds, const ObjectScanSample &actor,
+                               GameStateModel::GameStateSample &sample,
+                               int player) {
+  if (!actor.Found || !IsARM9MainRAMAddress(actor.Base))
+    return;
+
+  const melonDS::u32 playerID = nds->ARM9Read8(actor.Base + 0x11E);
+  const melonDS::u32 transitionStep = nds->ARM9Read8(actor.Base + 0xBAD);
+  const melonDS::u32 signalLock = nds->ARM9Read8(actor.Base + 0x75C);
+  const melonDS::u32 flag192 = nds->ARM9Read8(actor.Base + 0x192);
+  const melonDS::u32 flags728 = nds->ARM9Read32(actor.Base + 0x728);
+  const melonDS::u32 flags72C = nds->ARM9Read32(actor.Base + 0x72C);
+  const melonDS::u32 flags730 = nds->ARM9Read32(actor.Base + 0x730);
+  const melonDS::u32 actionFlag = nds->ARM9Read32(actor.Base + 0x778);
+  const melonDS::u32 subActionFlag = nds->ARM9Read32(actor.Base + 0x77C);
+  const melonDS::u32 physicsFlag = nds->ARM9Read32(actor.Base + 0x780);
+  const melonDS::u32 damageCooldown = nds->ARM9Read16(actor.Base + 0x79C);
+  const melonDS::u32 damageState = nds->ARM9Read8(actor.Base + 0x7A9);
+  const melonDS::u32 powerupAuxState = nds->ARM9Read8(actor.Base + 0x7AA);
+  const melonDS::u32 powerupState = nds->ARM9Read8(actor.Base + 0x7AB);
+  const melonDS::u32 powerupFormState = nds->ARM9Read8(actor.Base + 0x7AC);
+  const melonDS::u32 powerupSubState = nds->ARM9Read8(actor.Base + 0x7AD);
+  const melonDS::u32 damageGuardFlag = nds->ARM9Read8(actor.Base + 0x7C1);
+  const melonDS::u32 powerupApplyLock = nds->ARM9Read8(actor.Base + 0xBA6);
+  const melonDS::u32 shellActorPtr = nds->ARM9Read32(actor.Base + 0x0B8);
+  const melonDS::u32 shellState =
+      (actionFlag & 0x00400000u) != 0 ? (shellActorPtr != 0 ? 2u : 1u) : 0u;
+  const melonDS::u32 transitFunc = nds->ARM9Read32(actor.Base + 0x990);
+  const melonDS::u32 transitArg = nds->ARM9Read32(actor.Base + 0x994);
+
+  if (player == 0) {
+    sample.PlayerActor0PlayerID = playerID;
+    sample.PlayerActor0TransitionStep = transitionStep;
+    sample.PlayerActor0SignalLock = signalLock;
+    sample.PlayerActor0Flag192 = flag192;
+    sample.PlayerActor0Flags728 = flags728;
+    sample.PlayerActor0Flags72C = flags72C;
+    sample.PlayerActor0Flags730 = flags730;
+    sample.PlayerActor0ActionFlag = actionFlag;
+    sample.PlayerActor0SubActionFlag = subActionFlag;
+    sample.PlayerActor0PhysicsFlag = physicsFlag;
+    sample.PlayerActor0DamageCooldown = damageCooldown;
+    sample.PlayerActor0DamageState = damageState;
+    sample.PlayerActor0PowerupAuxState = powerupAuxState;
+    sample.PlayerActor0PowerupState = powerupState;
+    sample.PlayerActor0PowerupFormState = powerupFormState;
+    sample.PlayerActor0PowerupSubState = powerupSubState;
+    sample.PlayerActor0DamageGuardFlag = damageGuardFlag;
+    sample.PlayerActor0PowerupApplyLock = powerupApplyLock;
+    sample.PlayerActor0ShellActorPtr = shellActorPtr;
+    sample.PlayerActor0ShellState = shellState;
+    sample.PlayerActor0TransitFunc = transitFunc;
+    sample.PlayerActor0TransitArg = transitArg;
+    return;
+  }
+  sample.PlayerActor1PlayerID = playerID;
+  sample.PlayerActor1TransitionStep = transitionStep;
+  sample.PlayerActor1SignalLock = signalLock;
+  sample.PlayerActor1Flag192 = flag192;
+  sample.PlayerActor1Flags728 = flags728;
+  sample.PlayerActor1Flags72C = flags72C;
+  sample.PlayerActor1Flags730 = flags730;
+  sample.PlayerActor1ActionFlag = actionFlag;
+  sample.PlayerActor1SubActionFlag = subActionFlag;
+  sample.PlayerActor1PhysicsFlag = physicsFlag;
+  sample.PlayerActor1DamageCooldown = damageCooldown;
+  sample.PlayerActor1DamageState = damageState;
+  sample.PlayerActor1PowerupAuxState = powerupAuxState;
+  sample.PlayerActor1PowerupState = powerupState;
+  sample.PlayerActor1PowerupFormState = powerupFormState;
+  sample.PlayerActor1PowerupSubState = powerupSubState;
+  sample.PlayerActor1DamageGuardFlag = damageGuardFlag;
+  sample.PlayerActor1PowerupApplyLock = powerupApplyLock;
+  sample.PlayerActor1ShellActorPtr = shellActorPtr;
+  sample.PlayerActor1ShellState = shellState;
+  sample.PlayerActor1TransitFunc = transitFunc;
+  sample.PlayerActor1TransitArg = transitArg;
+}
+
+void ReadPlayerBaseRuntimeState(melonDS::NDS *nds,
+                                const ObjectScanSample &actor,
+                                GameStateModel::GameStateSample &sample,
+                                int player) {
+  if (!actor.Found || !IsARM9MainRAMAddress(actor.Base))
+    return;
+
+  const melonDS::u32 linkedActor = nds->ARM9Read32(actor.Base + 0x688);
+  const melonDS::u32 transitionFlag = nds->ARM9Read32(actor.Base + 0x784);
+  const melonDS::u32 collisionFlag = nds->ARM9Read32(actor.Base + 0x788);
+  const melonDS::u32 environmentFlag = nds->ARM9Read32(actor.Base + 0x790);
+  const melonDS::u32 updateLocked = nds->ARM9Read8(actor.Base + 0x7A8);
+  const melonDS::u32 controlState = nds->ARM9Read8(actor.Base + 0x7A9);
+  const melonDS::u32 characterID = nds->ARM9Read8(actor.Base + 0x7AA);
+  const melonDS::u32 requestedPowerup = nds->ARM9Read8(actor.Base + 0x7AB);
+  const melonDS::u32 currentPowerup = nds->ARM9Read8(actor.Base + 0x7AC);
+  const melonDS::u32 previousPowerup = nds->ARM9Read8(actor.Base + 0x7AD);
+  const melonDS::u32 transitioningFlag = nds->ARM9Read8(actor.Base + 0x7B0);
+  const melonDS::u32 cameraFocusMode = nds->ARM9Read8(actor.Base + 0x7B2);
+  const melonDS::u32 defeatedFlag = nds->ARM9Read8(actor.Base + 0x7B3);
+  const melonDS::u32 playerBaseID = nds->ARM9Read8(actor.Base + 0x7B4);
+  const melonDS::u32 visibleFlag = nds->ARM9Read8(actor.Base + 0x7B5);
+  const melonDS::u32 powerupPhase = nds->ARM9Read8(actor.Base + 0xBA6);
+  const melonDS::u32 powerupTimer = nds->ARM9Read8(actor.Base + 0xBA7);
+  const melonDS::u32 powerupGainTimer = nds->ARM9Read8(actor.Base + 0xBA8);
+
+  if (player == 0) {
+    sample.PlayerActor0LinkedActor = linkedActor;
+    sample.PlayerActor0TransitionFlag = transitionFlag;
+    sample.PlayerActor0CollisionFlag = collisionFlag;
+    sample.PlayerActor0EnvironmentFlag = environmentFlag;
+    sample.PlayerActor0UpdateLocked = updateLocked;
+    sample.PlayerActor0ControlState = controlState;
+    sample.PlayerActor0CharacterIDBase = characterID;
+    sample.PlayerActor0RequestedPowerup = requestedPowerup;
+    sample.PlayerActor0CurrentPowerup = currentPowerup;
+    sample.PlayerActor0PreviousPowerup = previousPowerup;
+    sample.PlayerActor0TransitioningFlag = transitioningFlag;
+    sample.PlayerActor0CameraFocusMode = cameraFocusMode;
+    sample.PlayerActor0DefeatedFlag = defeatedFlag;
+    sample.PlayerActor0PlayerBaseID = playerBaseID;
+    sample.PlayerActor0VisibleFlag = visibleFlag;
+    sample.PlayerActor0PowerupPhase = powerupPhase;
+    sample.PlayerActor0PowerupTimer = powerupTimer;
+    sample.PlayerActor0PowerupGainTimer = powerupGainTimer;
+    return;
+  }
+  sample.PlayerActor1LinkedActor = linkedActor;
+  sample.PlayerActor1TransitionFlag = transitionFlag;
+  sample.PlayerActor1CollisionFlag = collisionFlag;
+  sample.PlayerActor1EnvironmentFlag = environmentFlag;
+  sample.PlayerActor1UpdateLocked = updateLocked;
+  sample.PlayerActor1ControlState = controlState;
+  sample.PlayerActor1CharacterIDBase = characterID;
+  sample.PlayerActor1RequestedPowerup = requestedPowerup;
+  sample.PlayerActor1CurrentPowerup = currentPowerup;
+  sample.PlayerActor1PreviousPowerup = previousPowerup;
+  sample.PlayerActor1TransitioningFlag = transitioningFlag;
+  sample.PlayerActor1CameraFocusMode = cameraFocusMode;
+  sample.PlayerActor1DefeatedFlag = defeatedFlag;
+  sample.PlayerActor1PlayerBaseID = playerBaseID;
+  sample.PlayerActor1VisibleFlag = visibleFlag;
+  sample.PlayerActor1PowerupPhase = powerupPhase;
+  sample.PlayerActor1PowerupTimer = powerupTimer;
+  sample.PlayerActor1PowerupGainTimer = powerupGainTimer;
 }
 
 void ReadMvlGlobals(melonDS::NDS *nds,

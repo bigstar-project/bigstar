@@ -118,6 +118,9 @@ using GameStateModel::kAIFireballSlotDebugWordCount;
 using GameStateModel::kAIFireballSlotStateByteCount;
 using GameStateModel::kAISpecialHandlerWordCount;
 using GameStateModel::kObjectTraceSlots;
+using GameStateReader::ObjectPairScanSample;
+using GameStateReader::ObjectScanSample;
+using GameStateReader::PlayerActorScanSample;
 constexpr int kDefaultDelay = 6;
 constexpr int kMaxPumpEvents = 64;
 constexpr melonDS::u32 kNoFrameLimit = 0;
@@ -229,33 +232,19 @@ constexpr melonDS::u32 kCollisionMgrFlagsA8Offset = 0xA8;
 constexpr melonDS::u32 kCollisionMgrTileByteABOffset = 0xAB;
 constexpr melonDS::u32 kCollisionMgrModifierStateOffset = 0xB0;
 constexpr melonDS::u32 kCollisionMgrUnknownB1Offset = 0xB1;
-constexpr melonDS::u32 kPlayerBaseShellActorPtrOffset = 0x0B8;
 constexpr melonDS::u32 kPlayerBaseUpdateLockedOffset = 0x7A8;
 constexpr melonDS::u32 kPlayerActorPlayerIDOffset = 0x11E;
-constexpr melonDS::u32 kPlayerBaseControlStateOffset = 0x7A9;
-constexpr melonDS::u32 kPlayerBaseDamageStateOffset = 0x7A9;
-constexpr melonDS::u32 kPlayerBasePowerupAuxStateOffset = 0x7AA;
 constexpr melonDS::u32 kPlayerBaseCharacterIDOffset = 0x7AA;
-constexpr melonDS::u32 kPlayerBaseRequestedPowerupOffset = 0x7AB;
 constexpr melonDS::u32 kPlayerBasePowerupStateOffset = 0x7AB;
-constexpr melonDS::u32 kPlayerBaseCurrentPowerupOffset = 0x7AC;
 constexpr melonDS::u32 kPlayerBasePowerupFormStateOffset = 0x7AC;
-constexpr melonDS::u32 kPlayerBasePreviousPowerupOffset = 0x7AD;
 constexpr melonDS::u32 kPlayerBasePowerupSubStateOffset = 0x7AD;
 constexpr melonDS::u32 kPlayerBaseTransitioningFlagOffset = 0x7B0;
 constexpr melonDS::u32 kPlayerBaseCameraFocusModeOffset = 0x7B2;
 constexpr melonDS::u32 kPlayerBaseDefeatedFlagOffset = 0x7B3;
 constexpr melonDS::u32 kPlayerBasePlayerIDOffset = 0x7B4;
 constexpr melonDS::u32 kPlayerBaseVisibleFlagOffset = 0x7B5;
-constexpr melonDS::u32 kPlayerBaseDamageGuardFlagOffset = 0x7C1;
 constexpr melonDS::u32 kPlayerBaseTransitionStepOffset = 0xBAD;
-constexpr melonDS::u32 kPlayerBasePowerupApplyLockOffset = 0xBA6;
-constexpr melonDS::u32 kPlayerBaseTileDamageFlagsOffset = 0xBB2;
-constexpr melonDS::u32 kPlayerBaseTileDamageTypeOffset = 0xBB3;
 constexpr melonDS::u32 kPlayerBaseLinkedActorOffset = 0x688;
-constexpr melonDS::u32 kPlayerPowerupPhaseOffset = 0xBA6;
-constexpr melonDS::u32 kPlayerPowerupTimerOffset = 0xBA7;
-constexpr melonDS::u32 kPlayerPowerupGainTimerOffset = 0xBA8;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
 constexpr melonDS::u16 kVsBattleStarRelatedObjectID = 0x0021;
@@ -499,48 +488,6 @@ bool AITerrainTargetHasFloorBelow(
 
 
 GameStateSample ReadGameStateSample(melonDS::NDS* nds);
-
-struct ObjectScanSample
-{
-    melonDS::u32 Found = 0;
-    melonDS::u32 GUID = 0;
-    melonDS::u32 Base = 0;
-    melonDS::u32 Settings = 0;
-    melonDS::u32 StateType = 0;
-    melonDS::u32 Flags = 0;
-    melonDS::u32 PosX = 0;
-    melonDS::u32 PosY = 0;
-    melonDS::u32 PosZ = 0;
-    melonDS::u32 PrevX = 0;
-    melonDS::u32 PrevY = 0;
-    melonDS::u32 PrevZ = 0;
-    melonDS::u32 LastStepX = 0;
-    melonDS::u32 LastStepY = 0;
-    melonDS::u32 LastStepZ = 0;
-    melonDS::u32 VelH = 0;
-    melonDS::u32 TargetVelH = 0;
-    melonDS::u32 AccelV = 0;
-    melonDS::u32 TargetVelV = 0;
-    melonDS::u32 AccelH = 0;
-    melonDS::u32 VelX = 0;
-    melonDS::u32 VelY = 0;
-    melonDS::u32 VelZ = 0;
-    melonDS::u32 TargetVelX = 0;
-    melonDS::u32 TargetVelY = 0;
-    melonDS::u32 TargetVelZ = 0;
-};
-
-struct PlayerActorScanSample
-{
-    ObjectScanSample Actor0;
-    ObjectScanSample Actor1;
-};
-
-struct ObjectPairScanSample
-{
-    ObjectScanSample Left;
-    ObjectScanSample Right;
-};
 
 struct DiagnosticPlayerSnapshot
 {
@@ -14354,231 +14301,21 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.VsStarActorPosZ = starActor.PosZ;
 
     const PlayerActorScanSample players = FindPlayerActors(nds);
-    sample.PlayerActor0Found = players.Actor0.Found;
-    sample.PlayerActor0GUID = players.Actor0.GUID;
-    sample.PlayerActor0Base = players.Actor0.Base;
-    sample.PlayerActor0Settings = players.Actor0.Settings;
-    sample.PlayerActor0StateType = players.Actor0.StateType;
-    sample.PlayerActor0Flags = players.Actor0.Flags;
-    sample.PlayerActor0PosX = players.Actor0.PosX;
-    sample.PlayerActor0PosY = players.Actor0.PosY;
-    sample.PlayerActor0PosZ = players.Actor0.PosZ;
-    sample.PlayerActor0PrevX = players.Actor0.PrevX;
-    sample.PlayerActor0PrevY = players.Actor0.PrevY;
-    sample.PlayerActor0PrevZ = players.Actor0.PrevZ;
-    sample.PlayerActor0VelX = players.Actor0.VelX;
-    sample.PlayerActor0VelY = players.Actor0.VelY;
-    sample.PlayerActor0VelZ = players.Actor0.VelZ;
+    GameStateReader::CopyPlayerActor(players.Actor0, sample, 0);
     sample.PlayerActor0CollisionMgr = ReadPlayerCollisionMgrSample(nds, players.Actor0);
     sample.PlayerActor0Hitbox = ReadPlayerHitboxSample(nds, players.Actor0);
     sample.PlayerActor0TileProbe = ReadAIPlayerTileProbeSample(nds, players.Actor0);
-    if (players.Actor0.Found && IsValidMainRAMRange(nds, players.Actor0.Base + kPlayerBaseTileDamageTypeOffset, 1))
-    {
-        sample.PlayerActor0TileDamageFlags = nds->ARM9Read8(players.Actor0.Base + kPlayerBaseTileDamageFlagsOffset);
-        sample.PlayerActor0TileDamageType = nds->ARM9Read8(players.Actor0.Base + kPlayerBaseTileDamageTypeOffset);
-    }
-    sample.PlayerActor1Found = players.Actor1.Found;
-    sample.PlayerActor1GUID = players.Actor1.GUID;
-    sample.PlayerActor1Base = players.Actor1.Base;
-    sample.PlayerActor1Settings = players.Actor1.Settings;
-    sample.PlayerActor1StateType = players.Actor1.StateType;
-    sample.PlayerActor1Flags = players.Actor1.Flags;
-    sample.PlayerActor1PosX = players.Actor1.PosX;
-    sample.PlayerActor1PosY = players.Actor1.PosY;
-    sample.PlayerActor1PosZ = players.Actor1.PosZ;
-    sample.PlayerActor1PrevX = players.Actor1.PrevX;
-    sample.PlayerActor1PrevY = players.Actor1.PrevY;
-    sample.PlayerActor1PrevZ = players.Actor1.PrevZ;
-    sample.PlayerActor1VelX = players.Actor1.VelX;
-    sample.PlayerActor1VelY = players.Actor1.VelY;
-    sample.PlayerActor1VelZ = players.Actor1.VelZ;
+    GameStateReader::ReadPlayerTileDamage(nds, players.Actor0, sample, 0);
+    GameStateReader::CopyPlayerActor(players.Actor1, sample, 1);
     sample.PlayerActor1CollisionMgr = ReadPlayerCollisionMgrSample(nds, players.Actor1);
     sample.PlayerActor1Hitbox = ReadPlayerHitboxSample(nds, players.Actor1);
     sample.PlayerActor1TileProbe = ReadAIPlayerTileProbeSample(nds, players.Actor1);
-    if (players.Actor1.Found && IsValidMainRAMRange(nds, players.Actor1.Base + kPlayerBaseTileDamageTypeOffset, 1))
-    {
-        sample.PlayerActor1TileDamageFlags = nds->ARM9Read8(players.Actor1.Base + kPlayerBaseTileDamageFlagsOffset);
-        sample.PlayerActor1TileDamageType = nds->ARM9Read8(players.Actor1.Base + kPlayerBaseTileDamageTypeOffset);
-    }
-    auto readPlayerTransitionFields = [nds](const ObjectScanSample& actor,
-                                            melonDS::u32& playerID,
-                                            melonDS::u32& transitionStep,
-                                            melonDS::u32& signalLock,
-                                            melonDS::u32& flag192,
-                                            melonDS::u32& flags728,
-                                            melonDS::u32& flags72C,
-                                            melonDS::u32& flags730,
-                                            melonDS::u32& actionFlag,
-                                            melonDS::u32& subActionFlag,
-                                            melonDS::u32& physicsFlag,
-                                            melonDS::u32& damageCooldown,
-                                            melonDS::u32& damageState,
-                                            melonDS::u32& powerupAuxState,
-                                            melonDS::u32& powerupState,
-                                            melonDS::u32& powerupFormState,
-                                            melonDS::u32& powerupSubState,
-                                            melonDS::u32& damageGuardFlag,
-                                            melonDS::u32& powerupApplyLock,
-                                            melonDS::u32& shellActorPtr,
-                                            melonDS::u32& shellState,
-                                            melonDS::u32& transitFunc,
-                                            melonDS::u32& transitArg)
-    {
-        if (!actor.Found || !IsARM9MainRAMAddress(actor.Base))
-            return;
-        playerID = nds->ARM9Read8(actor.Base + 0x11E);
-        transitionStep = nds->ARM9Read8(actor.Base + 0xBAD);
-        signalLock = nds->ARM9Read8(actor.Base + 0x75C);
-        flag192 = nds->ARM9Read8(actor.Base + 0x192);
-        flags728 = nds->ARM9Read32(actor.Base + 0x728);
-        flags72C = nds->ARM9Read32(actor.Base + 0x72C);
-        flags730 = nds->ARM9Read32(actor.Base + 0x730);
-        actionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseActionFlagOffset);
-        subActionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseSubActionFlagOffset);
-        physicsFlag = nds->ARM9Read32(actor.Base + kPlayerBasePhysicsFlagOffset);
-        damageCooldown = nds->ARM9Read16(actor.Base + kPlayerBaseDamageCooldownOffset);
-        damageState = nds->ARM9Read8(actor.Base + kPlayerBaseDamageStateOffset);
-        powerupAuxState = nds->ARM9Read8(actor.Base + kPlayerBasePowerupAuxStateOffset);
-        powerupState = nds->ARM9Read8(actor.Base + kPlayerBasePowerupStateOffset);
-        powerupFormState = nds->ARM9Read8(actor.Base + kPlayerBasePowerupFormStateOffset);
-        powerupSubState = nds->ARM9Read8(actor.Base + kPlayerBasePowerupSubStateOffset);
-        damageGuardFlag = nds->ARM9Read8(actor.Base + kPlayerBaseDamageGuardFlagOffset);
-        powerupApplyLock = nds->ARM9Read8(actor.Base + kPlayerBasePowerupApplyLockOffset);
-        shellActorPtr = nds->ARM9Read32(actor.Base + kPlayerBaseShellActorPtrOffset);
-        shellState = (actionFlag & 0x00400000u) != 0 ? (shellActorPtr != 0 ? 2u : 1u) : 0u;
-        transitFunc = nds->ARM9Read32(actor.Base + 0x990);
-        transitArg = nds->ARM9Read32(actor.Base + 0x994);
-    };
-    readPlayerTransitionFields(
-        players.Actor0,
-        sample.PlayerActor0PlayerID,
-        sample.PlayerActor0TransitionStep,
-        sample.PlayerActor0SignalLock,
-        sample.PlayerActor0Flag192,
-        sample.PlayerActor0Flags728,
-        sample.PlayerActor0Flags72C,
-        sample.PlayerActor0Flags730,
-        sample.PlayerActor0ActionFlag,
-        sample.PlayerActor0SubActionFlag,
-        sample.PlayerActor0PhysicsFlag,
-        sample.PlayerActor0DamageCooldown,
-        sample.PlayerActor0DamageState,
-        sample.PlayerActor0PowerupAuxState,
-        sample.PlayerActor0PowerupState,
-        sample.PlayerActor0PowerupFormState,
-        sample.PlayerActor0PowerupSubState,
-        sample.PlayerActor0DamageGuardFlag,
-        sample.PlayerActor0PowerupApplyLock,
-        sample.PlayerActor0ShellActorPtr,
-        sample.PlayerActor0ShellState,
-        sample.PlayerActor0TransitFunc,
-        sample.PlayerActor0TransitArg);
-    readPlayerTransitionFields(
-        players.Actor1,
-        sample.PlayerActor1PlayerID,
-        sample.PlayerActor1TransitionStep,
-        sample.PlayerActor1SignalLock,
-        sample.PlayerActor1Flag192,
-        sample.PlayerActor1Flags728,
-        sample.PlayerActor1Flags72C,
-        sample.PlayerActor1Flags730,
-        sample.PlayerActor1ActionFlag,
-        sample.PlayerActor1SubActionFlag,
-        sample.PlayerActor1PhysicsFlag,
-        sample.PlayerActor1DamageCooldown,
-        sample.PlayerActor1DamageState,
-        sample.PlayerActor1PowerupAuxState,
-        sample.PlayerActor1PowerupState,
-        sample.PlayerActor1PowerupFormState,
-        sample.PlayerActor1PowerupSubState,
-        sample.PlayerActor1DamageGuardFlag,
-        sample.PlayerActor1PowerupApplyLock,
-        sample.PlayerActor1ShellActorPtr,
-        sample.PlayerActor1ShellState,
-        sample.PlayerActor1TransitFunc,
-        sample.PlayerActor1TransitArg);
+    GameStateReader::ReadPlayerTileDamage(nds, players.Actor1, sample, 1);
+    GameStateReader::ReadPlayerTransitionState(nds, players.Actor0, sample, 0);
+    GameStateReader::ReadPlayerTransitionState(nds, players.Actor1, sample, 1);
 
-    auto readPlayerBaseRuntimeFields = [nds](const ObjectScanSample& actor,
-                                             melonDS::u32& linkedActor,
-                                             melonDS::u32& transitionFlag,
-                                             melonDS::u32& collisionFlag,
-                                              melonDS::u32& environmentFlag,
-                                              melonDS::u32& updateLocked,
-                                              melonDS::u32& controlState,
-                                              melonDS::u32& characterID,
-                                              melonDS::u32& requestedPowerup,
-                                              melonDS::u32& currentPowerup,
-                                              melonDS::u32& previousPowerup,
-                                              melonDS::u32& transitioningFlag,
-                                              melonDS::u32& cameraFocusMode,
-                                              melonDS::u32& defeatedFlag,
-                                              melonDS::u32& playerBaseID,
-                                              melonDS::u32& visibleFlag,
-                                              melonDS::u32& powerupPhase,
-                                              melonDS::u32& powerupTimer,
-                                              melonDS::u32& powerupGainTimer)
-    {
-        if (!actor.Found || !IsARM9MainRAMAddress(actor.Base))
-            return;
-        linkedActor = nds->ARM9Read32(actor.Base + kPlayerBaseLinkedActorOffset);
-        transitionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseTransitionFlagOffset);
-        collisionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseCollisionFlagOffset);
-        environmentFlag = nds->ARM9Read32(actor.Base + kPlayerBaseEnvironmentFlagOffset);
-        updateLocked = nds->ARM9Read8(actor.Base + kPlayerBaseUpdateLockedOffset);
-        controlState = nds->ARM9Read8(actor.Base + kPlayerBaseControlStateOffset);
-        characterID = nds->ARM9Read8(actor.Base + kPlayerBaseCharacterIDOffset);
-        requestedPowerup = nds->ARM9Read8(actor.Base + kPlayerBaseRequestedPowerupOffset);
-        currentPowerup = nds->ARM9Read8(actor.Base + kPlayerBaseCurrentPowerupOffset);
-        previousPowerup = nds->ARM9Read8(actor.Base + kPlayerBasePreviousPowerupOffset);
-        transitioningFlag = nds->ARM9Read8(actor.Base + kPlayerBaseTransitioningFlagOffset);
-        cameraFocusMode = nds->ARM9Read8(actor.Base + kPlayerBaseCameraFocusModeOffset);
-        defeatedFlag = nds->ARM9Read8(actor.Base + kPlayerBaseDefeatedFlagOffset);
-        playerBaseID = nds->ARM9Read8(actor.Base + kPlayerBasePlayerIDOffset);
-        visibleFlag = nds->ARM9Read8(actor.Base + kPlayerBaseVisibleFlagOffset);
-        powerupPhase = nds->ARM9Read8(actor.Base + kPlayerPowerupPhaseOffset);
-        powerupTimer = nds->ARM9Read8(actor.Base + kPlayerPowerupTimerOffset);
-        powerupGainTimer = nds->ARM9Read8(actor.Base + kPlayerPowerupGainTimerOffset);
-    };
-    readPlayerBaseRuntimeFields(
-        players.Actor0,
-        sample.PlayerActor0LinkedActor,
-        sample.PlayerActor0TransitionFlag,
-        sample.PlayerActor0CollisionFlag,
-        sample.PlayerActor0EnvironmentFlag,
-        sample.PlayerActor0UpdateLocked,
-        sample.PlayerActor0ControlState,
-        sample.PlayerActor0CharacterIDBase,
-        sample.PlayerActor0RequestedPowerup,
-        sample.PlayerActor0CurrentPowerup,
-        sample.PlayerActor0PreviousPowerup,
-        sample.PlayerActor0TransitioningFlag,
-        sample.PlayerActor0CameraFocusMode,
-        sample.PlayerActor0DefeatedFlag,
-        sample.PlayerActor0PlayerBaseID,
-        sample.PlayerActor0VisibleFlag,
-        sample.PlayerActor0PowerupPhase,
-        sample.PlayerActor0PowerupTimer,
-        sample.PlayerActor0PowerupGainTimer);
-    readPlayerBaseRuntimeFields(
-        players.Actor1,
-        sample.PlayerActor1LinkedActor,
-        sample.PlayerActor1TransitionFlag,
-        sample.PlayerActor1CollisionFlag,
-        sample.PlayerActor1EnvironmentFlag,
-        sample.PlayerActor1UpdateLocked,
-        sample.PlayerActor1ControlState,
-        sample.PlayerActor1CharacterIDBase,
-        sample.PlayerActor1RequestedPowerup,
-        sample.PlayerActor1CurrentPowerup,
-        sample.PlayerActor1PreviousPowerup,
-        sample.PlayerActor1TransitioningFlag,
-        sample.PlayerActor1CameraFocusMode,
-        sample.PlayerActor1DefeatedFlag,
-        sample.PlayerActor1PlayerBaseID,
-        sample.PlayerActor1VisibleFlag,
-        sample.PlayerActor1PowerupPhase,
-        sample.PlayerActor1PowerupTimer,
-        sample.PlayerActor1PowerupGainTimer);
+    GameStateReader::ReadPlayerBaseRuntimeState(nds, players.Actor0, sample, 0);
+    GameStateReader::ReadPlayerBaseRuntimeState(nds, players.Actor1, sample, 1);
 
     GameStateReader::ReadPlayerAndCameraGlobals(nds, sample);
 
