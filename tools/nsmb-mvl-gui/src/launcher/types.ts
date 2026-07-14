@@ -6,7 +6,7 @@ import type {
   MatchHistoryRecord,
 } from '../types';
 
-export type View = 'battle' | 'history' | 'settings';
+export type View = 'battle' | 'ai' | 'history' | 'settings';
 
 export type UpdateStatus = {
   phase:

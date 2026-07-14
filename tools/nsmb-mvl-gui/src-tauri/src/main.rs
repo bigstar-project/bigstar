@@ -1,5 +1,6 @@
 #![cfg_attr(all(not(debug_assertions), windows), windows_subsystem = "windows")]
 
+mod ai_workbench;
 mod commands;
 mod config;
 mod crash_report;
@@ -38,10 +39,17 @@ const TRAY_QUIT_ID: &str = "quit";
 
 fn specta_builder() -> SpectaBuilder<tauri::Wry> {
     SpectaBuilder::<tauri::Wry>::new().commands(collect_commands![
+        ai_workbench::list_ai_artifacts,
+        ai_workbench::open_ai_replay_log,
+        ai_workbench::read_ai_replay_frame,
+        ai_workbench::read_ai_text_file,
+        ai_workbench::run_ai_tool,
+        ai_workbench::select_ai_log_file,
         commands::get_defaults,
         commands::save_rom_paths,
         commands::save_diagnostic_events_enabled,
         commands::save_detailed_logs_enabled,
+        commands::save_ai_play_log_enabled,
         commands::save_performance_logs_enabled,
         commands::save_new_room_notifications_enabled,
         commands::show_new_room_notification,

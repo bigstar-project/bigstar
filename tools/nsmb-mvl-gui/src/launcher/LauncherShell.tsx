@@ -1,4 +1,5 @@
 import {
+  Brain,
   ClockCounterClockwise,
   Flag,
   FlagCheckered,
@@ -99,11 +100,33 @@ function updateButtonClass(updateStatus: UpdateStatus) {
   });
 }
 
+function viewTitle(view: View) {
+  if (view === 'battle') {
+    return '対戦';
+  }
+  if (view === 'ai') {
+    return 'AI';
+  }
+  if (view === 'history') {
+    return '対戦履歴';
+  }
+  return '設定';
+}
+
 function viewIcon(view: View) {
   if (view === 'battle') {
     return (
       <Flag
         className={css({ color: 'blue.plain.fg' })}
+        size={28}
+        weight="fill"
+      />
+    );
+  }
+  if (view === 'ai') {
+    return (
+      <Brain
+        className={css({ color: 'yellow.plain.fg' })}
         size={28}
         weight="fill"
       />
@@ -123,19 +146,10 @@ function viewIcon(view: View) {
   );
 }
 
-function viewTitle(view: View) {
-  if (view === 'battle') {
-    return '対戦';
-  }
-  if (view === 'history') {
-    return '対戦履歴';
-  }
-  return '設定';
-}
-
 export function LauncherShell({
   activeView,
   activityStatus,
+  aiDevToolsEnabled = true,
   children,
   connectionStatus,
   onCheckForUpdate,
@@ -146,6 +160,7 @@ export function LauncherShell({
 }: {
   activeView: View;
   activityStatus: { text: string; kind: StatusKind } | null;
+  aiDevToolsEnabled?: boolean;
   children: ReactNode;
   connectionStatus: { text: string; kind: StatusKind };
   onCheckForUpdate: () => void;
@@ -314,6 +329,28 @@ export function LauncherShell({
                     Ctrl+1
                   </Kbd>
                 </Tabs.Trigger>
+                {aiDevToolsEnabled ? (
+                  <Tabs.Trigger
+                    aria-label="AI"
+                    className={sidebarTabClass}
+                    value="ai"
+                  >
+                    <Brain
+                      className={css({
+                        flexShrink: '0',
+                      })}
+                      size={22}
+                      weight="fill"
+                    />
+                    <span
+                      className={css({
+                        textStyle: 'sm',
+                      })}
+                    >
+                      AI
+                    </span>
+                  </Tabs.Trigger>
+                ) : null}
                 <Tabs.Trigger
                   aria-label="対戦履歴"
                   className={sidebarTabClass}

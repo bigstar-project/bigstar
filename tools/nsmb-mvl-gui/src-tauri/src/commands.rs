@@ -20,9 +20,10 @@ use crate::models::{
     CleanupDetailedLogsResponse, Defaults, GenerateRomRequest, GenerateRomResponse, LaunchRequest,
     LaunchResponse, LogArchiveResponse, MatchHistoryDashboard, MatchHistoryFilter,
     MatchHistoryOpponent, MatchHistoryPage, MatchHistoryPageRequest, MatchHistoryRecord,
-    SaveDetailedLogsRequest, SaveDiagnosticEventsRequest, SaveNewRoomNotificationsRequest,
-    SavePerformanceLogsRequest, SavePlayerNameRequest, SaveRomPathsRequest, SessionStatus,
-    ShowNewRoomNotificationRequest, UploadLogArchiveRequest, UploadLogArchiveResponse,
+    SaveAiPlayLogRequest, SaveDetailedLogsRequest, SaveDiagnosticEventsRequest,
+    SaveNewRoomNotificationsRequest, SavePerformanceLogsRequest, SavePlayerNameRequest,
+    SaveRomPathsRequest, SessionStatus, ShowNewRoomNotificationRequest, UploadLogArchiveRequest,
+    UploadLogArchiveResponse,
 };
 use crate::paths::{
     absolutize_existing, allowed_log_dir, app_data_dir, create_log_dir, find_bridge_binary,
@@ -80,6 +81,7 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
         port: DEFAULT_PORT,
         diagnostic_events_enabled: saved.diagnostic_events_enabled,
         detailed_logs_enabled: saved.detailed_logs_enabled,
+        ai_play_log_enabled: saved.ai_play_log_enabled,
         performance_logs_enabled: saved.performance_logs_enabled,
         new_room_notifications_enabled: saved.new_room_notifications_enabled,
         log_archive_upload_token: std::env::var("NSMB_MVL_LOG_UPLOAD_TOKEN")
@@ -116,6 +118,17 @@ pub(crate) fn save_detailed_logs_enabled(
 ) -> Result<(), String> {
     let mut settings = load_launcher_settings(&app)?;
     settings.detailed_logs_enabled = request.enabled;
+    save_launcher_settings(&app, &settings)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn save_ai_play_log_enabled(
+    app: AppHandle,
+    request: SaveAiPlayLogRequest,
+) -> Result<(), String> {
+    let mut settings = load_launcher_settings(&app)?;
+    settings.ai_play_log_enabled = request.enabled;
     save_launcher_settings(&app, &settings)
 }
 

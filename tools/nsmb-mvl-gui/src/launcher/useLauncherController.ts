@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { parseAsStringLiteral, useQueryState } from 'nuqs';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { isDistributionBuild } from '../buildProfile';
+import { areAiDevToolsEnabled, isDistributionBuild } from '../buildProfile';
 import {
   currentSettings,
   defaultInputDelayFrames,
@@ -41,6 +41,7 @@ import {
   openMelonds as openMelondsCommand,
   openMelondsInputConfig as openMelondsInputConfigCommand,
   runPreflightCheck,
+  saveAiPlayLogEnabled,
   saveDetailedLogsEnabled,
   saveDiagnosticEventsEnabled,
   saveNewRoomNotificationsEnabled,
@@ -178,6 +179,7 @@ type PersistedSetting =
   | { kind: 'diagnosticEvents'; value: boolean }
   | { kind: 'detailedLogs'; value: boolean }
   | { kind: 'performanceLogs'; value: boolean }
+  | { kind: 'aiPlayLog'; value: boolean }
   | { kind: 'newRoomNotifications'; value: boolean };
 
 function withPersistedSetting(
@@ -194,6 +196,8 @@ function withPersistedSetting(
       return { ...defaults, detailed_logs_enabled: setting.value };
     case 'performanceLogs':
       return { ...defaults, performance_logs_enabled: setting.value };
+    case 'aiPlayLog':
+      return { ...defaults, ai_play_log_enabled: setting.value };
     case 'newRoomNotifications':
       return { ...defaults, new_room_notifications_enabled: setting.value };
   }
@@ -234,6 +238,7 @@ function defaultPlayerIds(
 }
 
 export function useLauncherController() {
+  const aiDevToolsEnabled = areAiDevToolsEnabled();
   const queryClient = useQueryClient();
   const defaultsQuery = useQuery(defaultsQueryOptions());
   const startupEnabledQuery = useQuery(startupEnabledQueryOptions());
@@ -249,7 +254,7 @@ export function useLauncherController() {
   });
   const [activeView, setActiveView] = useQueryState(
     'view',
-    parseAsStringLiteral(['battle', 'history', 'settings'] as const)
+    parseAsStringLiteral(['battle', 'ai', 'history', 'settings'] as const)
       .withDefault('battle')
       .withOptions({ history: 'push' }),
   );
@@ -370,6 +375,9 @@ export function useLauncherController() {
           break;
         case 'performanceLogs':
           await savePerformanceLogsEnabled({ enabled: setting.value });
+          break;
+        case 'aiPlayLog':
+          await saveAiPlayLogEnabled({ enabled: setting.value });
           break;
         case 'newRoomNotifications':
           await saveNewRoomNotificationsEnabled({ enabled: setting.value });
@@ -604,6 +612,12 @@ export function useLauncherController() {
           value: Boolean(value),
         });
         break;
+      case 'aiPlayLogEnabled':
+        persistSettingMutation.mutate({
+          kind: 'aiPlayLog',
+          value: Boolean(value),
+        });
+        break;
       case 'newRoomNotificationsEnabled':
         persistSettingMutation.mutate({
           kind: 'newRoomNotifications',
@@ -691,6 +705,7 @@ export function useLauncherController() {
       diagnosticEventsEnabled: defaults.diagnostic_events_enabled ?? false,
       detailedLogsEnabled: defaults.detailed_logs_enabled ?? false,
       performanceLogsEnabled: defaults.performance_logs_enabled ?? false,
+      aiPlayLogEnabled: defaults.ai_play_log_enabled ?? false,
       newRoomNotificationsEnabled:
         defaults.new_room_notifications_enabled ?? true,
     });
@@ -941,6 +956,7 @@ export function useLauncherController() {
         diagnostic_events_enabled: nextForm.diagnosticEventsEnabled,
         detailed_logs_enabled: nextForm.detailedLogsEnabled,
         performance_logs_enabled: nextForm.performanceLogsEnabled,
+        ai_play_log_enabled: nextForm.aiPlayLogEnabled,
       };
 
       try {
@@ -1530,8 +1546,17 @@ export function useLauncherController() {
   };
 
   const changeView = (view: View) => {
+    if (view === 'ai' && !aiDevToolsEnabled) {
+      return;
+    }
     void setActiveView(view);
   };
+
+  useEffect(() => {
+    if (activeView === 'ai' && !aiDevToolsEnabled) {
+      void setActiveView('battle');
+    }
+  }, [activeView, aiDevToolsEnabled, setActiveView]);
 
   return {
     actions,

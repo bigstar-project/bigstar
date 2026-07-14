@@ -13,6 +13,7 @@ param(
     [string]$Rom = "roms\nsmb.nds",
     [string]$HostRom = "",
     [string]$ClientRom = "",
+    [switch]$CopyRomToLog,
     [string]$InputScript = "tests\nsmb_mario_vs_luigi.inputs",
     [switch]$GameStateTrace,
     [int]$GameStateTraceInterval = 60,
@@ -66,6 +67,7 @@ param(
     [int]$LanMPTraceDumpLen = 512,
     [switch]$NoHashLog,
     [switch]$NoFrameLimit,
+    [switch]$SkipFrameLimitCheck,
     [switch]$NoAudioSync,
     [switch]$NoDrawScreen,
     [switch]$FixedFrameTime,
@@ -106,6 +108,7 @@ param(
     [int]$PacketBridgeStartFrame = 0,
     [switch]$WaitForPeerBeforeStart,
     [switch]$WaitForPeerAtNetplayStart,
+    [switch]$NoImplicitInputNetplayPeerWait,
     [string]$HostLocalInstance = "",
     [string]$ClientLocalInstance = "",
     [switch]$NoLocalWait,
@@ -303,6 +306,11 @@ param(
     [switch]$ForcePlayerLives,
     [int]$ForcePlayerLife0 = 5,
     [int]$ForcePlayerLife1 = 5,
+    [switch]$ForcePlayerPowerups,
+    [int]$ForcePlayerPowerupsStartFrame = 0,
+    [int]$ForcePlayerPowerupsEndFrame = 0,
+    [int]$ForcePlayerPowerup0 = 0,
+    [int]$ForcePlayerPowerup1 = 0,
     [switch]$ForcePlayerInventoryPowerups,
     [int]$ForcePlayerInventoryPowerupsStartFrame = 0,
     [int]$ForcePlayerInventoryPowerupsEndFrame = 0,
@@ -652,6 +660,30 @@ New-Item -ItemType Directory -Force -Path $hostRoot, $clientRoot | Out-Null
 $hostRom = Join-Path $hostRoot "nsmb.nds"
 $clientRom = Join-Path $clientRoot "nsmb.nds"
 
+function Set-RunRomReference {
+    param(
+        [string]$Source,
+        [string]$Target,
+        [switch]$Copy
+    )
+
+    if (Test-Path -LiteralPath $Target -PathType Leaf) {
+        Remove-Item -LiteralPath $Target -Force
+    }
+
+    if ($Copy) {
+        Copy-Item -Force -LiteralPath $Source -Destination $Target
+        return "copy"
+    }
+
+    try {
+        New-Item -ItemType HardLink -Path $Target -Target $Source -ErrorAction Stop | Out-Null
+        return "hardlink"
+    } catch {
+        throw "Failed to create ROM hardlink from '$Target' to '$Source'. Use -CopyRomToLog if this run must store full ROM copies in the log directory. Original error: $($_.Exception.Message)"
+    }
+}
+
 function Convert-ToUInt32Setting {
     param(
         [string]$Value,
@@ -786,8 +818,27 @@ if (-not $MvlSceneSettings) {
     $MvlSceneSettings = Convert-ToMvlSceneSettings -Stage $settingsStage
 }
 
-Copy-Item -Force $hostSourceRomPath $hostRom
-Copy-Item -Force $clientSourceRomPath $clientRom
+$hostRomStorage = Set-RunRomReference -Source $hostSourceRomPath -Target $hostRom -Copy:$CopyRomToLog
+$clientRomStorage = Set-RunRomReference -Source $clientSourceRomPath -Target $clientRom -Copy:$CopyRomToLog
+@(
+    "hostSource=$hostSourceRomPath"
+    "clientSource=$clientSourceRomPath"
+    "hostTarget=$hostRom"
+    "clientTarget=$clientRom"
+    "hostStorage=$hostRomStorage"
+    "clientStorage=$clientRomStorage"
+    "copyRomToLog=$([bool]$CopyRomToLog)"
+) | Set-Content -Encoding UTF8 (Join-Path $logRoot "rom-storage.txt")
+
+if ($GenerateMvlConfiguredRoms) {
+    foreach ($generated in @($generatedHost, $generatedClient)) {
+        if ((Test-Path -LiteralPath $generated -PathType Leaf) -and
+            ($generated -ne $hostRom) -and
+            ($generated -ne $clientRom)) {
+            Remove-Item -LiteralPath $generated -Force
+        }
+    }
+}
 
 function Test-UsableNsmbSave {
     param([string]$Path)
@@ -1746,6 +1797,19 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_LIFE0 -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_LIFE1 -ErrorAction SilentlyContinue
     }
+    if ($ForcePlayerPowerups) {
+        $env:MELONDS_NSML_FORCE_PLAYER_POWERUPS = "1"
+        $env:MELONDS_NSML_FORCE_PLAYER_POWERUPS_START_FRAME = "$ForcePlayerPowerupsStartFrame"
+        $env:MELONDS_NSML_FORCE_PLAYER_POWERUPS_END_FRAME = "$ForcePlayerPowerupsEndFrame"
+        $env:MELONDS_NSML_FORCE_PLAYER_POWERUP0 = "$ForcePlayerPowerup0"
+        $env:MELONDS_NSML_FORCE_PLAYER_POWERUP1 = "$ForcePlayerPowerup1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_POWERUPS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_POWERUPS_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_POWERUPS_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_POWERUP0 -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_POWERUP1 -ErrorAction SilentlyContinue
+    }
     if ($ForcePlayerInventoryPowerups) {
         $env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS = "1"
         $env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_START_FRAME = "$ForcePlayerInventoryPowerupsStartFrame"
@@ -2679,7 +2743,7 @@ function Start-MelonLANProcess {
             Remove-Item Env:\MELONDS_NSML_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
         }
         Remove-Item Env:\MELONDS_NSML_SEED_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
-        if ($WaitForPeerBeforeStart -or ($InputNetplay -and $PacketBridgeStartFrame -gt 0)) {
+        if ($WaitForPeerBeforeStart -or ($InputNetplay -and $PacketBridgeStartFrame -gt 0 -and -not $NoImplicitInputNetplayPeerWait)) {
             $env:MELONDS_NSML_WAIT_FOR_PEER = "1"
         } else {
             Remove-Item Env:\MELONDS_NSML_WAIT_FOR_PEER -ErrorAction SilentlyContinue
@@ -3459,6 +3523,12 @@ function Start-MelonLANProcess {
         "dynamicCameraBaseStep=$($env:MELONDS_NSML_DYNAMIC_CAMERA_BASE_STEP)"
         "dynamicCameraMaxStep=$($env:MELONDS_NSML_DYNAMIC_CAMERA_MAX_STEP)"
         "dynamicCameraVelocityThreshold=$($env:MELONDS_NSML_DYNAMIC_CAMERA_VELOCITY_THRESHOLD)"
+        "forcePlayerPowerupsSwitch=$ForcePlayerPowerups"
+        "forcePlayerPowerupsEnv=$($env:MELONDS_NSML_FORCE_PLAYER_POWERUPS)"
+        "forcePlayerPowerupsStart=$($env:MELONDS_NSML_FORCE_PLAYER_POWERUPS_START_FRAME)"
+        "forcePlayerPowerupsEnd=$($env:MELONDS_NSML_FORCE_PLAYER_POWERUPS_END_FRAME)"
+        "forcePlayerPowerup0=$($env:MELONDS_NSML_FORCE_PLAYER_POWERUP0)"
+        "forcePlayerPowerup1=$($env:MELONDS_NSML_FORCE_PLAYER_POWERUP1)"
         "forcePlayerInventoryPowerupsSwitch=$ForcePlayerInventoryPowerups"
         "forcePlayerInventoryPowerupsEnv=$($env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS)"
         "forcePlayerInventoryPowerupsStart=$($env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_START_FRAME)"
@@ -3706,8 +3776,10 @@ if ($RunRole -eq "both" -or $RunRole -eq "client") {
 }
 
 $requiredPatterns = @()
-foreach ($info in $roleInfos) {
-    $requiredPatterns += @{ Path = $info.Out; Pattern = "frame limit reached"; Name = "$($info.Role) frame limit" }
+if (-not $SkipFrameLimitCheck) {
+    foreach ($info in $roleInfos) {
+        $requiredPatterns += @{ Path = $info.Out; Pattern = "frame limit reached"; Name = "$($info.Role) frame limit" }
+    }
 }
 if (-not $NoLanMP -and -not $PacketBridge -and -not $InputNetplay -and -not ($RunRole -ne "both" -and $ScriptRemotePacket -and $PacketBridgeArmOnly)) {
     foreach ($info in $roleInfos) {

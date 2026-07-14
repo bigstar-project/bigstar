@@ -1,6 +1,7 @@
 param(
     [int]$Frames = 2600,
     [int]$WaitTimeoutMs = 300000,
+    [int]$InternalWaitTimeoutMs = 5000,
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds",
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds",
@@ -31,6 +32,7 @@ param(
     [int]$InputSendJitterFrames = 0,
     [switch]$InputUnreliable,
     [int]$InputBundleHistory = 0,
+    [switch]$AllowRemoteInputTimeoutFallback,
     [switch]$NetworkPumpThread,
     [int]$NetworkPumpSleepUs = 250,
     [switch]$LowDelayWan,
@@ -130,6 +132,7 @@ param(
     [switch]$FixedFrameTime,
     [double]$TargetFps = 0.0,
     [switch]$NoDrawScreen,
+    [int]$ScreenshotInterval = 0,
     [switch]$NoAudioSync,
     [double]$MaxActiveFrameMs = 0.0,
     [int]$MaxActiveFrameOver25ms = -1,
@@ -144,6 +147,11 @@ param(
     [int]$StallStartFrame = 900,
     [switch]$UseLanMP,
     [switch]$PacketBridgePreserveLocalTouch,
+    [switch]$ForcePlayerPowerups,
+    [int]$ForcePlayerPowerupsStartFrame = 0,
+    [int]$ForcePlayerPowerupsEndFrame = 0,
+    [int]$ForcePlayerPowerup0 = 0,
+    [int]$ForcePlayerPowerup1 = 0,
     [switch]$ForcePlayerInventoryPowerups,
     [int]$ForcePlayerInventoryPowerupsStartFrame = 0,
     [int]$ForcePlayerInventoryPowerupsEndFrame = 0,
@@ -157,11 +165,55 @@ param(
     [string]$ForceStageActorFreezeFlagValue = "0",
     [int]$HostStartupDelayMs = 1200,
     [string]$LogDir = "logs\nsmb-mvl-split-local-input-smoke",
+    [string]$HostPacketReplayFile = "",
+    [string]$ClientPacketReplayFile = "",
+    [switch]$PacketCapture,
+    [switch]$PacketCaptureAllowPreGame,
+    [string]$HostAIPlayLog = "",
+    [string]$ClientAIPlayLog = "",
+    [int]$AIPlayLogInterval = 1,
+    [int]$AIPlayLogStartFrame = 0,
+    [int]$AIPlayLogEndFrame = 0,
+    [int]$AIPlayLogMaxObjects = 128,
+    [switch]$AIPlayLogIncludeNonGameplay,
     [switch]$FpsSpikeTrace,
+    [switch]$SoftwareRenderer,
     [switch]$AllowJit
 )
 
 $ErrorActionPreference = "Stop"
+
+function Set-MelonTomlValue {
+    param(
+        [string]$Text,
+        [string]$KeyPath,
+        [string]$Value
+    )
+
+    $idx = $KeyPath.LastIndexOf('.')
+    if ($idx -lt 0) {
+        if ($Text -match "(?m)^$([regex]::Escape($KeyPath))\s*=") {
+            return ($Text -replace "(?m)^$([regex]::Escape($KeyPath))\s*=.*$", "$KeyPath = $Value")
+        }
+        return "$Text`n$KeyPath = $Value"
+    }
+
+    $section = $KeyPath.Substring(0, $idx)
+    $key = $KeyPath.Substring($idx + 1)
+    $sectionPattern = "(?ms)^\[$([regex]::Escape($section))\]\r?\n.*?(?=^\[|\z)"
+    $sectionMatch = [regex]::Match($Text, $sectionPattern)
+    if (-not $sectionMatch.Success) {
+        return "$Text`n[$section]`n$key = $Value`n"
+    }
+
+    $sectionText = $sectionMatch.Value
+    if ($sectionText -match "(?m)^$([regex]::Escape($key))\s*=") {
+        $newSection = $sectionText -replace "(?m)^$([regex]::Escape($key))\s*=.*$", "$key = $Value"
+    } else {
+        $newSection = $sectionText.TrimEnd() + "`n$key = $Value`n"
+    }
+    return $Text.Substring(0, $sectionMatch.Index) + $newSection + $Text.Substring($sectionMatch.Index + $sectionMatch.Length)
+}
 
 if ($FpsSpikeTrace -and ($MaxConsecutiveSlowFrames -ge 0 -or $MaxRollbackFrameMs -gt 0.0)) {
     $env:MELONDS_NSML_FPS_SPIKE_TRACE = "1"
@@ -255,7 +307,35 @@ if ($LowDelayWan) {
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $smokeScript = Join-Path $PSScriptRoot "run-nsmb-mvl-lan-route-smoke.ps1"
-$logRoot = Join-Path $repoRoot $LogDir
+$logRoot = if ([System.IO.Path]::IsPathRooted($LogDir)) {
+    $LogDir
+} else {
+    Join-Path $repoRoot $LogDir
+}
+
+$cfgPath = Join-Path $repoRoot "build\release-windows-x86_64\melonDS.toml"
+if (Test-Path $cfgPath) {
+    $cfg = Get-Content $cfgPath -Raw
+    $useGL = if ($SoftwareRenderer) { 'false' } else { 'true' }
+    $renderer = if ($SoftwareRenderer) { '0' } else { '2' }
+    $replacements = [ordered]@{
+        'LimitFPS' = 'true'
+        'AudioSync' = 'false'
+        'Screen.UseGL' = $useGL
+        'Screen.VSync' = 'false'
+        'Screen.VSyncInterval' = '1'
+        '3D.Renderer' = $renderer
+        '3D.GL.ScaleFactor' = '1'
+        '3D.GL.HiresCoordinates' = 'false'
+        '3D.Soft.Threaded' = 'true'
+        'Instance0.Window0.ScreenSizing' = '0'
+        'Instance0.Window0.ShowOSD' = 'false'
+    }
+    foreach ($key in $replacements.Keys) {
+        $cfg = Set-MelonTomlValue -Text $cfg -KeyPath $key -Value $replacements[$key]
+    }
+    Set-Content -Path $cfgPath -Value $cfg -Encoding UTF8
+}
 $hostLog = Join-Path $logRoot "host"
 $clientLog = Join-Path $logRoot "client"
 $wrapperLog = Join-Path $logRoot "wrapper"
@@ -264,6 +344,7 @@ Remove-Item -Recurse -Force $hostLog, $clientLog -ErrorAction SilentlyContinue
 
 $common = @(
     "-WaitTimeoutMs", "$WaitTimeoutMs",
+    "-InternalWaitTimeoutMs", "$InternalWaitTimeoutMs",
     "-StallTimeoutMs", "$StallTimeoutMs",
     "-FrameHeartbeatInterval", "$FrameHeartbeatInterval",
     "-GameplayHeartbeatInterval", "$GameplayHeartbeatInterval",
@@ -274,7 +355,7 @@ $common = @(
     "-MvlBigStars", "$MvlBigStars",
     "-MvlLives", "$MvlLives",
     "-MvlCourseMode", "$MvlCourseMode",
-    "-ScreenshotInterval", "0",
+    "-ScreenshotInterval", "$ScreenshotInterval",
     "-NoHashLog",
     "-SkipDisconnectScreenshotCheck",
     "-SkipBlankScreenshotCheck",
@@ -319,6 +400,21 @@ if (-not $UseLanMP) {
 }
 if ($PacketBridgePreserveLocalTouch) {
     $common += "-PacketBridgePreserveLocalTouch"
+}
+if ($PacketCapture) {
+    $common += "-PacketCapture"
+    if ($PacketCaptureAllowPreGame) {
+        $common += "-PacketCaptureAllowPreGame"
+    }
+}
+if ($ForcePlayerPowerups) {
+    $common += @(
+        "-ForcePlayerPowerups",
+        "-ForcePlayerPowerupsStartFrame", "$ForcePlayerPowerupsStartFrame",
+        "-ForcePlayerPowerupsEndFrame", "$ForcePlayerPowerupsEndFrame",
+        "-ForcePlayerPowerup0", "$ForcePlayerPowerup0",
+        "-ForcePlayerPowerup1", "$ForcePlayerPowerup1"
+    )
 }
 if ($ForcePlayerInventoryPowerups) {
     $common += @(
@@ -534,6 +630,9 @@ if ($InputUnreliable) {
 if ($InputBundleHistory -gt 0) {
     $common += @("-InputBundleHistory", "$InputBundleHistory")
 }
+if ($AllowRemoteInputTimeoutFallback) {
+    $common += "-AllowRemoteInputTimeoutFallback"
+}
 if ($InputDropModulo -gt 0) {
     $common += @("-InputDropModulo", "$InputDropModulo", "-InputDropOffset", "$InputDropOffset")
 }
@@ -565,6 +664,9 @@ $hostArgs = @(
     "-InputScript", $HostInputScript,
     "-LogDir", $hostLog
 )
+if ($HostPacketReplayFile -ne "") {
+    $hostArgs += @("-HostPacketReplayFile", $HostPacketReplayFile)
+}
 if (-not $NoGameStateTrace) {
     $hostArgs += @("-RequireHostLocalPlayerID", "0", "-RequireHostNetLocalAid", "0")
 }
@@ -580,6 +682,9 @@ $clientArgs = @(
     "-InputScript", $ClientInputScript,
     "-LogDir", $clientLog
 )
+if ($ClientPacketReplayFile -ne "") {
+    $clientArgs += @("-ClientPacketReplayFile", $ClientPacketReplayFile)
+}
 if (-not $NoGameStateTrace) {
     $clientArgs += @("-RequireClientLocalPlayerID", "1", "-RequireClientNetLocalAid", "1")
 }
@@ -589,23 +694,82 @@ $hostErr = Join-Path $wrapperLog "host-wrapper.err.txt"
 $clientOut = Join-Path $wrapperLog "client-wrapper.out.txt"
 $clientErr = Join-Path $wrapperLog "client-wrapper.err.txt"
 
-$hostProc = Start-Process -FilePath "powershell.exe" `
-    -ArgumentList $hostArgs `
-    -WorkingDirectory $repoRoot `
-    -RedirectStandardOutput $hostOut `
-    -RedirectStandardError $hostErr `
-    -PassThru `
-    -WindowStyle Hidden
+$aiPlayLogEnvNames = @(
+    "MELONDS_NSML_AI_PLAY_LOG",
+    "MELONDS_NSML_AI_PLAY_LOG_INTERVAL",
+    "MELONDS_NSML_AI_PLAY_LOG_START_FRAME",
+    "MELONDS_NSML_AI_PLAY_LOG_END_FRAME",
+    "MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS",
+    "MELONDS_NSML_AI_PLAY_LOG_INCLUDE_NON_GAMEPLAY"
+)
+$savedAIPlayLogEnv = @{}
+foreach ($name in $aiPlayLogEnvNames) {
+    $savedAIPlayLogEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+}
 
-Start-Sleep -Milliseconds $HostStartupDelayMs
+function Set-AIPlayLogEnvForChild {
+    param([string]$Path)
 
-$clientProc = Start-Process -FilePath "powershell.exe" `
-    -ArgumentList $clientArgs `
-    -WorkingDirectory $repoRoot `
-    -RedirectStandardOutput $clientOut `
-    -RedirectStandardError $clientErr `
-    -PassThru `
-    -WindowStyle Hidden
+    if ($Path -eq "") {
+        Remove-Item Env:\MELONDS_NSML_AI_PLAY_LOG -ErrorAction SilentlyContinue
+        return
+    }
+    $resolvedPath = $Path
+    if (-not [System.IO.Path]::IsPathRooted($resolvedPath)) {
+        $resolvedPath = Join-Path $repoRoot $resolvedPath
+    }
+    $parent = Split-Path -Parent $resolvedPath
+    if ($parent -ne "") {
+        New-Item -ItemType Directory -Force -Path $parent | Out-Null
+    }
+    $env:MELONDS_NSML_AI_PLAY_LOG = $resolvedPath
+    $env:MELONDS_NSML_AI_PLAY_LOG_INTERVAL = "$AIPlayLogInterval"
+    $env:MELONDS_NSML_AI_PLAY_LOG_START_FRAME = "$AIPlayLogStartFrame"
+    $env:MELONDS_NSML_AI_PLAY_LOG_END_FRAME = "$AIPlayLogEndFrame"
+    $env:MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS = "$AIPlayLogMaxObjects"
+    if ($AIPlayLogIncludeNonGameplay) {
+        $env:MELONDS_NSML_AI_PLAY_LOG_INCLUDE_NON_GAMEPLAY = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_AI_PLAY_LOG_INCLUDE_NON_GAMEPLAY -ErrorAction SilentlyContinue
+    }
+}
+
+function Restore-AIPlayLogEnv {
+    foreach ($name in $aiPlayLogEnvNames) {
+        $value = $savedAIPlayLogEnv[$name]
+        if ($null -eq $value) {
+            [Environment]::SetEnvironmentVariable($name, $null, "Process")
+        } else {
+            [Environment]::SetEnvironmentVariable($name, $value, "Process")
+        }
+    }
+}
+
+$hostProc = $null
+$clientProc = $null
+try {
+    Set-AIPlayLogEnvForChild -Path $HostAIPlayLog
+    $hostProc = Start-Process -FilePath "powershell.exe" `
+        -ArgumentList $hostArgs `
+        -WorkingDirectory $repoRoot `
+        -RedirectStandardOutput $hostOut `
+        -RedirectStandardError $hostErr `
+        -PassThru `
+        -WindowStyle Hidden
+
+    Start-Sleep -Milliseconds $HostStartupDelayMs
+
+    Set-AIPlayLogEnvForChild -Path $ClientAIPlayLog
+    $clientProc = Start-Process -FilePath "powershell.exe" `
+        -ArgumentList $clientArgs `
+        -WorkingDirectory $repoRoot `
+        -RedirectStandardOutput $clientOut `
+        -RedirectStandardError $clientErr `
+        -PassThru `
+        -WindowStyle Hidden
+} finally {
+    Restore-AIPlayLogEnv
+}
 
 $clientProc.WaitForExit()
 $hostProc.WaitForExit()

@@ -45,6 +45,11 @@ param(
     [switch]$ForcePlayerLives,
     [int]$ForcePlayerLife0 = 5,
     [int]$ForcePlayerLife1 = 5,
+    [switch]$ForcePlayerPowerups,
+    [int]$ForcePlayerPowerupsStartFrame = 0,
+    [int]$ForcePlayerPowerupsEndFrame = 0,
+    [int]$ForcePlayerPowerup0 = 0,
+    [int]$ForcePlayerPowerup1 = 0,
     [switch]$ForcePlayerInventoryPowerups,
     [int]$ForcePlayerInventoryPowerupsStartFrame = 0,
     [int]$ForcePlayerInventoryPowerupsEndFrame = 0,
@@ -253,6 +258,15 @@ if ($ForcePlayerLives) {
         "-ForcePlayerLives",
         "-ForcePlayerLife0", "$ForcePlayerLife0",
         "-ForcePlayerLife1", "$ForcePlayerLife1"
+    )
+}
+if ($ForcePlayerPowerups) {
+    $common += @(
+        "-ForcePlayerPowerups",
+        "-ForcePlayerPowerupsStartFrame", "$ForcePlayerPowerupsStartFrame",
+        "-ForcePlayerPowerupsEndFrame", "$ForcePlayerPowerupsEndFrame",
+        "-ForcePlayerPowerup0", "$ForcePlayerPowerup0",
+        "-ForcePlayerPowerup1", "$ForcePlayerPowerup1"
     )
 }
 if ($ForcePlayerInventoryPowerups) {

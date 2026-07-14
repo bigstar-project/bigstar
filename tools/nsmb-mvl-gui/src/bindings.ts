@@ -4,10 +4,17 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
+	listAiArtifacts: () => typedError<AiArtifact[], string>(__TAURI_INVOKE("list_ai_artifacts")),
+	openAiReplayLog: (request: OpenAiReplayLogRequest) => typedError<OpenAiReplayLogResponse, string>(__TAURI_INVOKE("open_ai_replay_log", { request })),
+	readAiReplayFrame: (request: ReadAiReplayFrameRequest) => typedError<ReadAiReplayFrameResponse, string>(__TAURI_INVOKE("read_ai_replay_frame", { request })),
+	readAiTextFile: (request: ReadAiTextFileRequest) => typedError<ReadAiTextFileResponse, string>(__TAURI_INVOKE("read_ai_text_file", { request })),
+	runAiTool: (request: RunAiToolRequest) => typedError<RunAiToolResponse, string>(__TAURI_INVOKE("run_ai_tool", { request })),
+	selectAiLogFile: (currentPath: string) => typedError<string | null, string>(__TAURI_INVOKE("select_ai_log_file", { currentPath })),
 	getDefaults: () => typedError<Defaults, string>(__TAURI_INVOKE("get_defaults")),
 	saveRomPaths: (request: SaveRomPathsRequest) => typedError<null, string>(__TAURI_INVOKE("save_rom_paths", { request })),
 	saveDiagnosticEventsEnabled: (request: SaveDiagnosticEventsRequest) => typedError<null, string>(__TAURI_INVOKE("save_diagnostic_events_enabled", { request })),
 	saveDetailedLogsEnabled: (request: SaveDetailedLogsRequest) => typedError<null, string>(__TAURI_INVOKE("save_detailed_logs_enabled", { request })),
+	saveAiPlayLogEnabled: (request: SaveAiPlayLogRequest) => typedError<null, string>(__TAURI_INVOKE("save_ai_play_log_enabled", { request })),
 	savePerformanceLogsEnabled: (request: SavePerformanceLogsRequest) => typedError<null, string>(__TAURI_INVOKE("save_performance_logs_enabled", { request })),
 	saveNewRoomNotificationsEnabled: (request: SaveNewRoomNotificationsRequest) => typedError<null, string>(__TAURI_INVOKE("save_new_room_notifications_enabled", { request })),
 	showNewRoomNotification: (request: ShowNewRoomNotificationRequest) => typedError<boolean, string>(__TAURI_INVOKE("show_new_room_notification", { request })),
@@ -35,6 +42,19 @@ export const commands = {
 };
 
 /* Types */
+export type AiArtifact = {
+	path: string,
+	kind: string,
+	bytes: number | null,
+	modified_unix_secs: number | null,
+};
+
+export type AiReplayFrameRef = {
+	index: number,
+	frame: number | null,
+	byte_offset: number | null,
+};
+
 export type BridgeDiagnostics = {
 	role: string | null,
 	phase: string | null,
@@ -80,6 +100,7 @@ export type Defaults = {
 	port: number,
 	diagnostic_events_enabled: boolean,
 	detailed_logs_enabled: boolean,
+	ai_play_log_enabled: boolean,
 	performance_logs_enabled: boolean,
 	new_room_notifications_enabled: boolean,
 	log_archive_upload_token: string,
@@ -133,7 +154,8 @@ export type LaunchRequest_Deserialize = {
 	player_names?: MatchPlayerNames | null,
 	diagnostic_events_enabled?: boolean,
 	detailed_logs_enabled?: boolean,
-	performance_logs_enabled?: boolean,
+	ai_play_log_enabled?: boolean,
+	performance_logs_enabled: boolean,
 	rom_identity?: RomIdentity | null,
 };
 
@@ -147,6 +169,7 @@ export type LaunchRequest_Serialize = {
 	player_names?: MatchPlayerNames | null,
 	diagnostic_events_enabled: boolean,
 	detailed_logs_enabled: boolean,
+	ai_play_log_enabled: boolean,
 	performance_logs_enabled: boolean,
 	rom_identity?: RomIdentity | null,
 };
@@ -278,12 +301,48 @@ export type MvlStageResult = {
 	line: string,
 };
 
+export type OpenAiReplayLogRequest = {
+	path: string,
+};
+
+export type OpenAiReplayLogResponse = {
+	source_path: string,
+	data_path: string,
+	compressed: boolean,
+	original_bytes: number | null,
+	data_bytes: number | null,
+	frames: AiReplayFrameRef[],
+};
+
 export type PreflightResponse = {
 	melonds_path: string,
 	bridge_path: string,
 	input_script: string,
 	symbols_file: string,
 	bridge_smoke: string,
+};
+
+export type ReadAiReplayFrameRequest = {
+	data_path: string,
+	byte_offset: number | null,
+	previous_byte_offset: number | null,
+};
+
+export type ReadAiReplayFrameResponse = {
+	frame_json: string,
+	previous_frame_json: string | null,
+};
+
+export type ReadAiTextFileRequest = {
+	path: string,
+};
+
+export type ReadAiTextFileResponse = {
+	path: string,
+	text: string,
+	sampled: boolean,
+	original_bytes: number | null,
+	sampled_lines: number,
 };
 
 export type Role = "host" | "client";
@@ -294,6 +353,46 @@ export type RomIdentity = {
 	host_rom_sha256: string,
 	client_rom_sha256: string,
 	bridge_sha256?: string,
+};
+
+export type RunAiToolRequest = {
+	task: string,
+	input_path: string | null,
+	output_path: string | null,
+	session_path: string | null,
+	dataset_path: string | null,
+	model_path: string | null,
+	runtime_model_path: string | null,
+	log_dir: string | null,
+	scenario: string | null,
+	policy: string | null,
+	seed: string | null,
+	label_source: string | null,
+	player: number | null,
+	frame: number | null,
+	frames: number | null,
+	epochs: number | null,
+	threshold: number | null,
+	max_objects: number | null,
+	dry_run: boolean | null,
+	split_by_recording: boolean | null,
+	allow_jit: boolean | null,
+	dual_window: boolean | null,
+	no_packet_capture: boolean | null,
+	scan_frames: boolean | null,
+};
+
+export type RunAiToolResponse = {
+	cwd: string,
+	command_line: string,
+	exit_code: number | null,
+	stdout: string,
+	stderr: string,
+	output_path: string | null,
+};
+
+export type SaveAiPlayLogRequest = {
+	enabled: boolean,
 };
 
 export type SaveDetailedLogsRequest = {
@@ -367,4 +466,3 @@ async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; dat
         return { status: "error", error: e as any };
     }
 }
-

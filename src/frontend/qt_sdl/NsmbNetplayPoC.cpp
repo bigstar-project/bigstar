@@ -12,6 +12,8 @@
 */
 
 #include "NsmbNetplayPoC.h"
+#include "NsmbImitationAI.h"
+#include "NsmbRuleAI.h"
 
 #include <algorithm>
 #include <array>
@@ -35,6 +37,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #include <QImage>
@@ -73,6 +76,7 @@ constexpr melonDS::u32 kGameStageIDAddr = 0x02085A14;
 constexpr melonDS::u32 kGameStageGroupAddr = 0x02085A18;
 constexpr melonDS::u32 kGameLocalPlayerIDAddr = 0x02085A7C;
 constexpr melonDS::u32 kGameVsModeAddr = 0x02085A84;
+constexpr melonDS::u32 kGameWrapXAddr = 0x02085AA4;
 constexpr melonDS::u32 kNetStateBaseAddr = 0x020887E8;
 constexpr melonDS::u32 kNetCurrentLanguageAddr = 0x020887E8;
 constexpr melonDS::u32 kNetLocalAidAddr = 0x020887F0;
@@ -121,11 +125,23 @@ constexpr melonDS::u16 kMvlStockItemTouchX = 217;
 constexpr melonDS::u16 kMvlStockItemTouchY = 153;
 constexpr melonDS::u32 kStageActorFreezeFlagAddr = 0x020CA28C;
 constexpr melonDS::u32 kActorCategoryMaskAddr = 0x020CA850;
+constexpr melonDS::u32 kStageLayoutPtrAddr = 0x020CAD40;
+constexpr melonDS::u32 kStageLayoutChunkPtrTableAddr = 0x020CAFE0;
+constexpr melonDS::u32 kStageLayoutTileBehaviorBaseTableAddr = 0x020C8484;
+constexpr melonDS::u32 kStageLayoutDynamicTileBehaviorTablePtrAddr = 0x020CAD28;
+constexpr melonDS::u32 kStageBlocksPtrAddr = 0x0208B168;
+constexpr melonDS::u32 kStageLayoutChunkMapOffset = 0x64;
+constexpr melonDS::u32 kStageLayoutWrapMaskOffset = 0x470;
+constexpr melonDS::u32 kStageLayoutPlayerDataOffset = 0x400;
+constexpr melonDS::u32 kStageLayoutPlayerDataStride = 0x0C;
+constexpr melonDS::u32 kStageLayoutPlayerCameraWrapOffset = 0x94;
+constexpr melonDS::u32 kStageLayoutCameraWrapAddOffset = 0xA8E8;
 constexpr melonDS::u32 kGamePlayerGlobalBlockAddr = 0x0208B324;
 constexpr melonDS::u32 kGamePlayerPowerupAddr = 0x0208B324;
 constexpr melonDS::u32 kGamePlayerDeadAddr = 0x0208B328;
 constexpr melonDS::u32 kGamePlayerInventoryPowerupAddr = 0x0208B32C;
 constexpr melonDS::u32 kGamePlayerCharacterAddr = 0x0208B330;
+constexpr melonDS::u32 kGamePlayerDamageGuardTimerAddr = 0x0208B344;
 constexpr melonDS::u32 kGamePlayerTransitionStatusAddr = 0x0208B354; // Game::playerVSPipeState
 constexpr melonDS::u32 kGamePlayerCountAddr = 0x0208B348;
 constexpr melonDS::u32 kGamePlayerLivesAddr = 0x0208B364;
@@ -156,24 +172,64 @@ constexpr melonDS::u32 kPlayerBaseTransitionFlagOffset = 0x784;
 constexpr melonDS::u32 kPlayerBaseCollisionFlagOffset = 0x788;
 constexpr melonDS::u32 kPlayerBaseEnvironmentFlagOffset = 0x790;
 constexpr melonDS::u32 kPlayerBaseDamageCooldownOffset = 0x79C;
+constexpr melonDS::u32 kPlayerStageActorCollisionMgrOffset = 0x1D0;
+constexpr melonDS::u32 kPlayerHitboxCenterOffsetX = 0x960;
+constexpr melonDS::u32 kPlayerHitboxCenterOffsetY = 0x964;
+constexpr melonDS::u32 kStageActorHitboxHalfWidthOffset = 0x13C;
+constexpr melonDS::u32 kStageActorHitboxHalfHeightOffset = 0x140;
+constexpr melonDS::u32 kCollisionMgrBottomSensorPtrOffset = 0x08;
+constexpr melonDS::u32 kCollisionMgrTopSensorPtrOffset = 0x0C;
+constexpr melonDS::u32 kCollisionMgrSideSensorPtrOffset = 0x10;
+constexpr melonDS::u32 kCollisionMgrLineSensorPtrOffset = 0x14;
+constexpr melonDS::u32 kCollisionMgrDeltaXOffset = 0x74;
+constexpr melonDS::u32 kCollisionMgrDeltaYOffset = 0x78;
+constexpr melonDS::u32 kCollisionMgrCollisionResultOffset = 0x7C;
+constexpr melonDS::u32 kCollisionMgrGroundCollisionOffset = 0x80;
+constexpr melonDS::u32 kCollisionMgrAttachedTileXOffset = 0x90;
+constexpr melonDS::u32 kCollisionMgrAttachedTileYOffset = 0x92;
+constexpr melonDS::u32 kCollisionMgrBottomModifierTileTypeOffset = 0x98;
+constexpr melonDS::u32 kCollisionMgrBottomSlopeTypeOffset = 0x9A;
+constexpr melonDS::u32 kCollisionMgrTopModifierTileTypeOffset = 0x9C;
+constexpr melonDS::u32 kCollisionMgrTopSlopeTypeOffset = 0x9E;
+constexpr melonDS::u32 kCollisionMgrSideModifierTileTypeOffset = 0xA0;
+constexpr melonDS::u32 kCollisionMgrByteA4Offset = 0xA4;
+constexpr melonDS::u32 kCollisionMgrByteA5Offset = 0xA5;
+constexpr melonDS::u32 kCollisionMgrPreviousByteA4Offset = 0xA6;
+constexpr melonDS::u32 kCollisionMgrPreviousByteA5Offset = 0xA7;
+constexpr melonDS::u32 kCollisionMgrFlagsA8Offset = 0xA8;
+constexpr melonDS::u32 kCollisionMgrTileByteABOffset = 0xAB;
+constexpr melonDS::u32 kCollisionMgrModifierStateOffset = 0xB0;
+constexpr melonDS::u32 kCollisionMgrUnknownB1Offset = 0xB1;
+constexpr melonDS::u32 kPlayerBaseShellActorPtrOffset = 0x0B8;
 constexpr melonDS::u32 kPlayerBaseUpdateLockedOffset = 0x7A8;
+constexpr melonDS::u32 kPlayerActorPlayerIDOffset = 0x11E;
 constexpr melonDS::u32 kPlayerBaseControlStateOffset = 0x7A9;
+constexpr melonDS::u32 kPlayerBaseDamageStateOffset = 0x7A9;
+constexpr melonDS::u32 kPlayerBasePowerupAuxStateOffset = 0x7AA;
 constexpr melonDS::u32 kPlayerBaseCharacterIDOffset = 0x7AA;
 constexpr melonDS::u32 kPlayerBaseRequestedPowerupOffset = 0x7AB;
+constexpr melonDS::u32 kPlayerBasePowerupStateOffset = 0x7AB;
 constexpr melonDS::u32 kPlayerBaseCurrentPowerupOffset = 0x7AC;
+constexpr melonDS::u32 kPlayerBasePowerupFormStateOffset = 0x7AC;
 constexpr melonDS::u32 kPlayerBasePreviousPowerupOffset = 0x7AD;
+constexpr melonDS::u32 kPlayerBasePowerupSubStateOffset = 0x7AD;
 constexpr melonDS::u32 kPlayerBaseTransitioningFlagOffset = 0x7B0;
 constexpr melonDS::u32 kPlayerBaseCameraFocusModeOffset = 0x7B2;
 constexpr melonDS::u32 kPlayerBaseDefeatedFlagOffset = 0x7B3;
 constexpr melonDS::u32 kPlayerBasePlayerIDOffset = 0x7B4;
 constexpr melonDS::u32 kPlayerBaseVisibleFlagOffset = 0x7B5;
+constexpr melonDS::u32 kPlayerBaseDamageGuardFlagOffset = 0x7C1;
 constexpr melonDS::u32 kPlayerBaseTransitionStepOffset = 0xBAD;
+constexpr melonDS::u32 kPlayerBasePowerupApplyLockOffset = 0xBA6;
+constexpr melonDS::u32 kPlayerBaseTileDamageFlagsOffset = 0xBB2;
+constexpr melonDS::u32 kPlayerBaseTileDamageTypeOffset = 0xBB3;
 constexpr melonDS::u32 kPlayerBaseLinkedActorOffset = 0x688;
 constexpr melonDS::u32 kPlayerPowerupPhaseOffset = 0xBA6;
 constexpr melonDS::u32 kPlayerPowerupTimerOffset = 0xBA7;
 constexpr melonDS::u32 kPlayerPowerupGainTimerOffset = 0xBA8;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
+constexpr melonDS::u16 kVsBattleStarRelatedObjectID = 0x0021;
 constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
 constexpr melonDS::u16 kVsMovingHazardObjectID = 0x0053;
 constexpr melonDS::u32 kVsMovingHazardSettings = 0x00000000;
@@ -192,6 +248,39 @@ constexpr melonDS::u32 kWorldEffectWordStart = 0x04;
 constexpr melonDS::u32 kWorldEffectWordEnd = 0xAC;
 constexpr std::size_t kWorldEffectWordCount =
     ((kWorldEffectWordEnd - kWorldEffectWordStart) / sizeof(melonDS::u32)) + 1;
+constexpr melonDS::u32 kFireballsActiveCountAddr = 0x02129480;
+constexpr melonDS::u32 kFireballsHandlerAddr = 0x02129484;
+constexpr melonDS::u32 kProjectilesHandlerAddr = 0x0212A680;
+
+bool IsVsDroppedStarActorSettings(melonDS::u32 settings)
+{
+    const melonDS::u32 normalized = settings & 0x7FFFFFFFu;
+    return normalized == 0x00001002u ||
+        normalized == 0x00001012u ||
+        normalized == 0x00001102u ||
+        normalized == 0x00001112u;
+}
+constexpr int kAISpecialHandlerWordCount = 4;
+constexpr int kAIFireballSlotCount = 16;
+constexpr melonDS::u32 kAIFireballSlotBaseOffset = 0x04;
+constexpr melonDS::u32 kAIFireballSlotStride = 0x8C;
+constexpr melonDS::u32 kAIFireballSlotPosOffset = 0x10;
+constexpr melonDS::u32 kAIFireballSlotPrevPosOffset = 0x20;
+constexpr melonDS::u32 kAIFireballSlotVelOffset = 0x30;
+constexpr melonDS::u32 kAIFireballSlotActiveOffset = 0x80;
+// Fireball::create stores the spawn kind at +0x81. For player fireballs, kind 0/1 is the owner player id.
+constexpr melonDS::u32 kAIFireballSlotKindOffset = 0x81;
+constexpr melonDS::u32 kAIFireballSlotStateOffset = 0x83;
+constexpr melonDS::u32 kAIFireballSlotFacingOffset = 0x85;
+constexpr melonDS::u32 kAIFireballSlotDebugWordOffset = 0x40;
+constexpr int kAIFireballSlotDebugWordCount = 16;
+constexpr int kAIFireballSlotStateByteCount = 12;
+constexpr int kAITileProbeCount = 17;
+constexpr int kAITileGridWidth = 33;
+constexpr int kAITileGridHeight = 17;
+constexpr int kAITileGridCount = kAITileGridWidth * kAITileGridHeight;
+constexpr int kAITileGridMinRelX = -16;
+constexpr int kAITileGridMinRelY = -10;
 constexpr int kObjectTraceSlots = 16;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
 constexpr melonDS::u32 kMvlStageSceneDefaultSettings = 0x00B4FF00;
@@ -204,6 +293,27 @@ constexpr melonDS::u16 kMvlObject267ID = 0x010B;
 constexpr melonDS::u16 kVsConnectObjectID = 0x0006;
 constexpr melonDS::u16 kCourseSelectObjectID = 0x0005;
 constexpr melonDS::u16 kStageCameraObjectID = 0x013C;
+constexpr melonDS::u16 kStageLayoutObjectID = 0x0145;
+constexpr melonDS::u16 kCoinObjectID = 0x0042;
+constexpr melonDS::u16 kGoombaObjectID = 0x0053;
+constexpr melonDS::u16 kGoombaBigObjectID = 0x0054;
+constexpr melonDS::u16 kGoombaMegaObjectID = 0x0055;
+constexpr melonDS::u16 kKoopaTroopaAltObjectID = 0x005F;
+constexpr melonDS::u16 kWarpEntranceObjectID = 0x0057;
+constexpr melonDS::u16 kDonutLiftObjectID = 0x0047;
+constexpr melonDS::u16 kTrampolineObjectID = 0x00ED;
+constexpr melonDS::u16 kSpinBlockObjectID = 0x00FE;
+constexpr melonDS::u16 kSpinBlockAltObjectID = 0x00FF;
+constexpr melonDS::u16 kSpinBlockFinalObjectID = 0x0100;
+constexpr melonDS::u16 kBulletBillObjectID = 0x001B;
+constexpr melonDS::u16 kBulletBillAltObjectID = 0x00EE;
+constexpr melonDS::u16 kBulletBillBlasterObjectID = 0x00F8;
+constexpr melonDS::u16 kBulletBillBlasterAltObjectID = 0x00F9;
+constexpr melonDS::u16 kThwompObjectID = 0x0025;
+constexpr melonDS::u16 kThwompAltObjectID = 0x0026;
+constexpr melonDS::u16 kFirebarObjectID = 0x0041;
+constexpr melonDS::u16 kBobOmbObjectID = 0x0023;
+constexpr melonDS::u16 kItemSpawnEffectObjectID = 0x00F0;
 constexpr melonDS::u32 kNSMBProcessExecuteListAddr = 0x0208FB18;
 constexpr melonDS::u32 kNSMBProcessDeleteListAddr = 0x0208FB28;
 constexpr melonDS::u32 kNSMBProcessRenderListAddr = 0x0208FB38;
@@ -700,6 +810,126 @@ struct WireWorldEffectState
 static_assert(sizeof(WireWorldEffectSlot) == 184);
 static_assert(sizeof(WireWorldEffectState) == 760);
 
+struct PlayerCollisionMgrSample
+{
+    struct Sensor
+    {
+        melonDS::u32 Found = 0;
+        melonDS::u32 Base = 0;
+        melonDS::u32 Type = 0;
+        melonDS::u32 Value1 = 0;
+        melonDS::u32 Value2 = 0;
+        melonDS::u32 Value3 = 0;
+    };
+
+    melonDS::u32 Found = 0;
+    melonDS::u32 Base = 0;
+    melonDS::u32 DeltaX = 0;
+    melonDS::u32 DeltaY = 0;
+    melonDS::u32 CollisionResult = 0;
+    melonDS::u32 GroundCollision = 0;
+    melonDS::u32 AttachedTileX = 0;
+    melonDS::u32 AttachedTileY = 0;
+    melonDS::u32 BottomModifierTileType = 0;
+    melonDS::u32 BottomSlopeType = 0;
+    melonDS::u32 TopModifierTileType = 0;
+    melonDS::u32 TopSlopeType = 0;
+    melonDS::u32 SideModifierTileTypeLeft = 0;
+    melonDS::u32 SideModifierTileTypeRight = 0;
+    melonDS::u32 ByteA4 = 0;
+    melonDS::u32 ByteA5 = 0;
+    melonDS::u32 PreviousByteA4 = 0;
+    melonDS::u32 PreviousByteA5 = 0;
+    melonDS::u32 FlagsA8 = 0;
+    melonDS::u32 TileByteAB = 0;
+    melonDS::u32 ModifierState = 0;
+    melonDS::u32 UnknownB1 = 0;
+    Sensor BottomSensor;
+    Sensor TopSensor;
+    Sensor SideSensor;
+    Sensor LineSensor;
+};
+
+struct PlayerHitboxSample
+{
+    melonDS::u32 Found = 0;
+    melonDS::u32 CenterOffsetX = 0;
+    melonDS::u32 CenterOffsetY = 0;
+    melonDS::u32 HalfWidth = 0;
+    melonDS::u32 HalfHeight = 0;
+};
+
+struct AITileProbeSample
+{
+    const char* Name = "";
+    melonDS::u32 Found = 0;
+    melonDS::u32 Status = 0;
+    melonDS::u32 StageLayout = 0;
+    melonDS::u32 ChunkPtr = 0;
+    melonDS::u32 BehaviorTable = 0;
+    melonDS::u32 WorldX = 0;
+    melonDS::u32 WorldY = 0;
+    melonDS::u32 PixelX = 0;
+    melonDS::u32 PixelY = 0;
+    melonDS::u32 OffsetX = 0;
+    melonDS::u32 OffsetY = 0;
+    melonDS::u32 ChunkID = 0;
+    melonDS::u32 TileID = 0;
+    melonDS::u32 Behavior = 0;
+};
+
+struct AITileGridSample
+{
+    melonDS::u32 Row = 0;
+    melonDS::u32 Col = 0;
+    melonDS::u32 RelTileX = 0;
+    melonDS::u32 RelTileY = 0;
+    melonDS::u32 TileX = 0;
+    melonDS::u32 TileY = 0;
+    AITileProbeSample Tile;
+};
+
+struct AIPlayerTileProbeSample
+{
+    melonDS::u32 Found = 0;
+    melonDS::u32 StageLayout = 0;
+    melonDS::u32 WrapX = 0;
+    melonDS::u32 Direction = 1;
+    AITileProbeSample Samples[kAITileProbeCount];
+    AITileGridSample Grid[kAITileGridCount];
+};
+
+struct AITerrainDerivedSummary
+{
+    int GroundBelowSolid = 0;
+    int BlockedAhead = 0;
+    int BlockedLeft = 0;
+    int BlockedRight = 0;
+    int HoleAhead = 0;
+    int HoleLeft = 0;
+    int HoleRight = 0;
+    int FarHoleLeft = 0;
+    int FarHoleRight = 0;
+    int EffectiveGroundBelowSolid = 0;
+    int HoleSuppressedByContact = 0;
+    int EffectiveHoleAhead = 0;
+    int EffectiveHoleLeft = 0;
+    int EffectiveHoleRight = 0;
+};
+
+AITerrainDerivedSummary DeriveAITerrainSummaryFromGrid(
+    const AIPlayerTileProbeSample& probe,
+    bool contactGround,
+    bool contactWallLeft,
+    bool contactWallRight);
+
+bool AITerrainTargetHasFloorBelow(
+    const AIPlayerTileProbeSample& probe,
+    melonDS::u32 selfX,
+    melonDS::u32 selfY,
+    melonDS::u32 targetX,
+    melonDS::u32 targetY);
+
 struct GameStateSample
 {
     melonDS::u32 StageID = 0;
@@ -819,8 +1049,22 @@ struct GameStateSample
     melonDS::u32 PlayerActor0SubActionFlag = 0;
     melonDS::u32 PlayerActor0PhysicsFlag = 0;
     melonDS::u32 PlayerActor0DamageCooldown = 0;
+    melonDS::u32 PlayerActor0DamageState = 0;
+    melonDS::u32 PlayerActor0PowerupAuxState = 0;
+    melonDS::u32 PlayerActor0PowerupState = 0;
+    melonDS::u32 PlayerActor0PowerupFormState = 0;
+    melonDS::u32 PlayerActor0PowerupSubState = 0;
+    melonDS::u32 PlayerActor0DamageGuardFlag = 0;
+    melonDS::u32 PlayerActor0PowerupApplyLock = 0;
+    melonDS::u32 PlayerActor0ShellActorPtr = 0;
+    melonDS::u32 PlayerActor0ShellState = 0;
     melonDS::u32 PlayerActor0TransitFunc = 0;
     melonDS::u32 PlayerActor0TransitArg = 0;
+    PlayerCollisionMgrSample PlayerActor0CollisionMgr;
+    PlayerHitboxSample PlayerActor0Hitbox;
+    AIPlayerTileProbeSample PlayerActor0TileProbe;
+    melonDS::u32 PlayerActor0TileDamageFlags = 0;
+    melonDS::u32 PlayerActor0TileDamageType = 0;
     melonDS::u32 PlayerActor1Found = 0;
     melonDS::u32 PlayerActor1GUID = 0;
     melonDS::u32 PlayerActor1Base = 0;
@@ -865,8 +1109,22 @@ struct GameStateSample
     melonDS::u32 PlayerActor1SubActionFlag = 0;
     melonDS::u32 PlayerActor1PhysicsFlag = 0;
     melonDS::u32 PlayerActor1DamageCooldown = 0;
+    melonDS::u32 PlayerActor1DamageState = 0;
+    melonDS::u32 PlayerActor1PowerupAuxState = 0;
+    melonDS::u32 PlayerActor1PowerupState = 0;
+    melonDS::u32 PlayerActor1PowerupFormState = 0;
+    melonDS::u32 PlayerActor1PowerupSubState = 0;
+    melonDS::u32 PlayerActor1DamageGuardFlag = 0;
+    melonDS::u32 PlayerActor1PowerupApplyLock = 0;
+    melonDS::u32 PlayerActor1ShellActorPtr = 0;
+    melonDS::u32 PlayerActor1ShellState = 0;
     melonDS::u32 PlayerActor1TransitFunc = 0;
     melonDS::u32 PlayerActor1TransitArg = 0;
+    PlayerCollisionMgrSample PlayerActor1CollisionMgr;
+    PlayerHitboxSample PlayerActor1Hitbox;
+    AIPlayerTileProbeSample PlayerActor1TileProbe;
+    melonDS::u32 PlayerActor1TileDamageFlags = 0;
+    melonDS::u32 PlayerActor1TileDamageType = 0;
     melonDS::u32 PlayerCount = 0;
     melonDS::u32 PlayerTransitionStatus0 = 0;
     melonDS::u32 PlayerTransitionStatus1 = 0;
@@ -880,6 +1138,8 @@ struct GameStateSample
     melonDS::u32 Player1Powerup = 0;
     melonDS::u32 Player0InventoryPowerup = 0;
     melonDS::u32 Player1InventoryPowerup = 0;
+    melonDS::u32 Player0DamageGuardTimer = 0;
+    melonDS::u32 Player1DamageGuardTimer = 0;
     melonDS::u32 Player0Dead = 0;
     melonDS::u32 Player1Dead = 0;
     melonDS::u32 Player0Character = 0;
@@ -1098,6 +1358,25 @@ struct GameStateSample
     melonDS::u32 MovingHazardTargetVelX = 0;
     melonDS::u32 MovingHazardTargetVelY = 0;
     melonDS::u32 MovingHazardTargetVelZ = 0;
+    melonDS::u32 FireballsActiveCount = 0;
+    melonDS::u32 FireballsHandlerPtr = 0;
+    melonDS::u32 FireballsHandlerWords[kAISpecialHandlerWordCount] {};
+    melonDS::u32 FireballSlotActive[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotKind[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotState[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotFacing[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotPosX[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotPosY[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotPosZ[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotPrevX[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotPrevY[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotPrevZ[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotVelX[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotVelY[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotVelZ[kAIFireballSlotCount] {};
+    melonDS::u32 FireballSlotStateBytes[kAIFireballSlotCount][kAIFireballSlotStateByteCount] {};
+    melonDS::u32 FireballSlotDebugWords[kAIFireballSlotCount][kAIFireballSlotDebugWordCount] {};
+    melonDS::u32 ProjectilesHandlerWords[kAISpecialHandlerWordCount] {};
     melonDS::u32 ObjectScanTotal = 0;
     melonDS::u32 ObjectNotCreatedCount = 0;
     melonDS::u32 ObjectActiveCount = 0;
@@ -1287,6 +1566,7 @@ ObjectScanSample FindObjectByID(melonDS::NDS* nds, melonDS::u16 expectedObjectID
 ObjectPairScanSample FindObjectPairByIDSortedX(melonDS::NDS* nds, melonDS::u16 expectedObjectID);
 PlayerActorScanSample FindPlayerActors(melonDS::NDS* nds);
 melonDS::u32 FindCachedObjectBaseByID(melonDS::u16 objectID);
+GameStateObjectScanCache BuildGameStateObjectScanCache(melonDS::NDS* nds);
 std::vector<ObjectScanSample> FindActiveObjectsByIDAndSettings(
     melonDS::NDS* nds,
     melonDS::u16 expectedObjectID,
@@ -1397,6 +1677,8 @@ struct State
     bool GameStateTraceExtended = false;
     melonDS::u32 GameStateTraceStartFrame = 0;
     melonDS::u32 GameStateTraceEndFrame = 0;
+    melonDS::u32 AIPlayLogStartFrame = 0;
+    melonDS::u32 AIPlayLogEndFrame = 0;
     bool GameStateSyncEnabled = false;
     bool GameStateSyncExtended = false;
     bool GameStateApplyEnabled = false;
@@ -1526,6 +1808,8 @@ struct State
     int PacketBridgeLocalInputDelay = 0;
     bool PacketBridgeNeutralizeLocalInput = false;
     bool PacketBridgePreserveLocalTouch = false;
+    bool NeutralizePolledInput = false;
+    bool NeutralizePolledInputPreserveTouch = false;
     int PacketBridgeSendDelayFrames = 0;
     int PacketBridgeSendJitterFrames = 0;
     int InputSendDelayFrames = 0;
@@ -1578,6 +1862,54 @@ struct State
     melonDS::u32 MvlAutoRestartCheckpointFrame[16] {};
     int MvlAutoRestartCheckpointStage[16] {};
     bool MvlAutoRestartCheckpointLogged[16] {};
+    bool RuleAIEnabled = false;
+    bool RuleAIHostOnly = false;
+    bool RuleAIClientOnly = false;
+    std::string RuleAIPlayerSpec = "remote";
+    melonDS::u32 RuleAIStartFrame = 0;
+    int RuleAIHorizontalDeadzone = 0x4000;
+    int RuleAIHorizontalWrapWidth = 0x400000;
+    int RuleAICloseRange = 0x22000;
+    int RuleAIHazardHorizontalRange = 0x40000;
+    int RuleAIHazardVerticalRange = 0x50000;
+    int RuleAIJumpInterval = 42;
+    int RuleAIJumpFrames = 9;
+    bool RuleAITraceEnabled = false;
+    int RuleAITraceInterval = 60;
+    bool ImitationAIEnabled = false;
+    bool ImitationAIHostOnly = false;
+    bool ImitationAIClientOnly = false;
+    std::string ImitationAIPlayerSpec = "remote";
+    melonDS::u32 ImitationAIStartFrame = 0;
+    double ImitationAIThreshold = 0.5;
+    melonDS::u32 ImitationAIAllowedHeldMask = 0x8F3;
+    bool ImitationAIHazardGuardEnabled = true;
+    int ImitationAIHazardGuardHorizontalRange = 0x40000;
+    int ImitationAIHazardGuardVerticalRange = 0x50000;
+    int ImitationAIHazardGuardCloseRange = 0x10000;
+    bool ImitationAITraceEnabled = false;
+    int ImitationAITraceInterval = 60;
+    int ImitationAIInferInterval = 16;
+    int ImitationAINeutralHoldFrames = 8;
+    bool ImitationAIWarnMissingFeatures = true;
+    bool ImitationAIFireTapPressNext[16][2] {};
+    bool ImitationAILastHeldValid[16][2] {};
+    melonDS::u32 ImitationAILastHeld[16][2] {};
+    bool ImitationAICachedHeldValid[16][2] {};
+    melonDS::u32 ImitationAICachedHeld[16][2] {};
+    melonDS::u32 ImitationAICachedFrame[16][2] {};
+    bool ImitationAILastNonZeroHeldValid[16][2] {};
+    melonDS::u32 ImitationAILastNonZeroHeld[16][2] {};
+    melonDS::u32 ImitationAILastNonZeroFrame[16][2] {};
+    std::string ImitationAIModelPath;
+    NsmbImitationAI::LinearPolicyModel ImitationAIModel;
+    NsmbImitationAI::CompactActionPolicyModel ImitationAICompactModel;
+    NsmbImitationAI::TorchCompactPolicyModel ImitationAITorchCompactModel;
+    bool ImitationAIModelLoaded = false;
+    bool ImitationAICompactModelLoaded = false;
+    bool ImitationAITorchCompactModelLoaded = false;
+    int ImitationAIFeaturesFilled = 0;
+    int ImitationAIFeaturesMissing = 0;
     bool DirectMvlBootUseLoadGameSM = false;
     bool DirectMvlBootPatchLoadGameSMOnly = false;
     bool DirectMvlBootCallUpdateLoadGameSM = false;
@@ -1600,9 +1932,15 @@ struct State
     std::string GameStateTracePath;
     std::string DiagnosticsPath;
     std::string DiagnosticEventsPath;
+    std::string AIPlayLogPath;
+    std::string AIObservationV2Path;
+    std::string AIObservationV3Path;
     std::ofstream HashLog;
     std::ofstream GameStateTrace;
     std::ofstream DiagnosticEvents;
+    std::ofstream AIPlayLog;
+    std::ofstream AIObservationV2Log;
+    std::ofstream AIObservationV3Log;
     bool DiagnosticEventsEnabled = false;
     int DiagnosticRingFrames = 360;
     melonDS::u32 DiagnosticPostTriggerUntilFrame[16] {};
@@ -1612,9 +1950,26 @@ struct State
     melonDS::u32 LastDiagnosticPositionAnomalyFrame[16][2] {};
     std::array<DiagnosticFrameSnapshot, kDiagnosticRingCapacity> DiagnosticRing[16];
     std::size_t DiagnosticRingNext[16] {};
+    InputState AIPlayLogLastAppliedInput[16][2] {};
+    melonDS::u32 AIPlayLogLastAppliedInputFrame[16][2] {};
+    bool AIPlayLogLastAppliedInputValid[16][2] {};
+    melonDS::u32 AIPlayLogFireballOwnerHandlerPtr[16] {};
+    bool AIPlayLogFireballOwnerValid[16][kAIFireballSlotCount] {};
+    int AIPlayLogFireballOwner[16][kAIFireballSlotCount] {};
+    int AIPlayLogFireballOwnerConfidence[16][kAIFireballSlotCount] {};
+    int AIPlayLogFireballOwnerHeuristic[16][kAIFireballSlotCount] {};
     int ScreenshotInterval = 0;
     int RamDumpInterval = 0;
     int GameStateTraceInterval = 60;
+    int AIPlayLogInterval = 1;
+    int AIPlayLogFlushInterval = 60;
+    int AIPlayLogLinesSinceFlush = 0;
+    int AIObservationV2LinesSinceFlush = 0;
+    int AIObservationV3LinesSinceFlush = 0;
+    int AIPlayLogMaxObjects = 32;
+    int AIObservationV2StageFilter = -1;
+    int AIObservationV3StageFilter = -1;
+    bool AIPlayLogGameplayOnly = true;
     int MemPatchInstance = -1;
     melonDS::u32 MemPatchFrame = 0;
     bool MemPatchFrameSet = false;
@@ -1705,6 +2060,12 @@ struct State
     melonDS::u32 ForcePlayerLife0 = 5;
     melonDS::u32 ForcePlayerLife1 = 5;
     bool ForcePlayerDeathCountersLogged[16] {};
+    bool ForcePlayerPowerupsEnabled = false;
+    melonDS::u32 ForcePlayerPowerupsStartFrame = 0;
+    melonDS::u32 ForcePlayerPowerupsEndFrame = 0;
+    melonDS::u32 ForcePlayerPowerup0 = 0;
+    melonDS::u32 ForcePlayerPowerup1 = 0;
+    bool ForcePlayerPowerupsLogged[16] {};
     bool ForcePlayerInventoryPowerupsEnabled = false;
     melonDS::u32 ForcePlayerInventoryPowerupsStartFrame = 0;
     melonDS::u32 ForcePlayerInventoryPowerupsEndFrame = 0;
@@ -2184,6 +2545,17 @@ int EnvInt(const char* name, int fallback)
     if (end == value)
         return fallback;
     return static_cast<int>(parsed);
+}
+
+double EnvDouble(const char* name, double fallback)
+{
+    const char* value = std::getenv(name);
+    if (!value || !value[0]) return fallback;
+    char* end = nullptr;
+    const double parsed = std::strtod(value, &end);
+    if (end == value)
+        return fallback;
+    return parsed;
 }
 
 melonDS::u32 EnvU32(const char* name, melonDS::u32 fallback)
@@ -3446,6 +3818,438 @@ InputState ApplyScriptRemotePacketInputScript(int instanceID, melonDS::u32 frame
     if (GScriptRemotePacketInputScript.empty())
         return ApplyInputScript(instanceID, frame, fallback);
     return ApplyInputSpans(GScriptRemotePacketInputScript, instanceID, frame, fallback);
+}
+
+NsmbRuleAI::Config RuleAIConfig()
+{
+    NsmbRuleAI::Config config {};
+    config.Enabled = G.RuleAIEnabled;
+    config.PlayerSpec = G.RuleAIPlayerSpec;
+    config.StartFrame = G.RuleAIStartFrame;
+    config.HorizontalDeadzone = G.RuleAIHorizontalDeadzone;
+    config.HorizontalWrapWidth = G.RuleAIHorizontalWrapWidth;
+    config.CloseRange = G.RuleAICloseRange;
+    config.HazardHorizontalRange = G.RuleAIHazardHorizontalRange;
+    config.HazardVerticalRange = G.RuleAIHazardVerticalRange;
+    config.JumpInterval = G.RuleAIJumpInterval;
+    config.JumpFrames = G.RuleAIJumpFrames;
+    config.WallEscapeFrames = 36;
+    config.StuckFrames = 24;
+    config.TraceEnabled = G.RuleAITraceEnabled;
+    config.TraceInterval = G.RuleAITraceInterval;
+    return config;
+}
+
+bool AIPlayerContactGround(melonDS::u32 collisionFlag)
+{
+    return (collisionFlag & (0x00000001u | 0x00002000u | 0x00008000u | 0x08000000u)) != 0;
+}
+
+std::int32_t SignedU32(melonDS::u32 value);
+std::int64_t AIWrappedDeltaX(std::int64_t x, std::int64_t origin);
+const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings);
+
+struct RuntimeHazardThreat
+{
+    bool Found = false;
+    bool Closing = false;
+    bool VeryClose = false;
+    std::int64_t Dx = 0;
+    std::int64_t Dy = 0;
+    std::int64_t VelX = 0;
+    std::int64_t VelY = 0;
+    int CategoryID = 0;
+    melonDS::u32 ObjectID = 0;
+    melonDS::u32 Settings = 0;
+};
+
+bool IsRuntimeHazardCategory(const char* category)
+{
+    return std::strcmp(category, "moving_hazard") == 0 ||
+        std::strcmp(category, "hazard") == 0 ||
+        std::strcmp(category, "enemy_goomba") == 0 ||
+        std::strcmp(category, "enemy_koopa") == 0;
+}
+
+int RuntimeHazardCategoryID(const char* category)
+{
+    if (std::strcmp(category, "moving_hazard") == 0)
+        return 1;
+    if (std::strcmp(category, "hazard") == 0)
+        return 2;
+    if (std::strcmp(category, "enemy_goomba") == 0)
+        return 3;
+    if (std::strcmp(category, "enemy_koopa") == 0)
+        return 4;
+    return 0;
+}
+
+RuntimeHazardThreat MostDangerousRuntimeHazard(
+    const GameStateObjectScanCache& objectScanCache,
+    melonDS::u32 selfX,
+    melonDS::u32 selfY,
+    melonDS::u32 selfVelX,
+    std::int64_t horizontalRange,
+    std::int64_t verticalRange,
+    std::int64_t closeRange)
+{
+    RuntimeHazardThreat best {};
+    std::int64_t bestScore = 0;
+    auto abs64 = [](std::int64_t value) {
+        return value < 0 ? -value : value;
+    };
+
+    const std::int64_t selfVx = SignedU32(selfVelX);
+    for (const GameStateObjectScanEntry& entry : objectScanCache.Entries)
+    {
+        if (entry.LifecycleState != 1)
+            continue;
+        const char* category = AIObjectCategory(entry.ObjectID, entry.Actor.Settings);
+        if (!IsRuntimeHazardCategory(category))
+            continue;
+
+        const std::int64_t dx = AIWrappedDeltaX(SignedU32(entry.Actor.PosX), SignedU32(selfX));
+        const std::int64_t dy = static_cast<std::int64_t>(SignedU32(entry.Actor.PosY)) - SignedU32(selfY);
+        if (abs64(dx) > horizontalRange || abs64(dy) > verticalRange)
+            continue;
+
+        const std::int64_t hazardVx = SignedU32(entry.Actor.VelX);
+        const std::int64_t relVx = hazardVx - selfVx;
+        const bool closing = (dx < 0 && relVx > 0) || (dx > 0 && relVx < 0);
+        const bool veryClose = abs64(dx) <= closeRange || abs64(dy) <= 0x10000;
+        std::int64_t score = abs64(dx) + abs64(dy) * 2;
+        if (closing)
+            score -= horizontalRange;
+        if (veryClose)
+            score -= closeRange;
+
+        if (!best.Found || score < bestScore)
+        {
+            best.Found = true;
+            best.Closing = closing;
+            best.VeryClose = veryClose;
+            best.Dx = dx;
+            best.Dy = dy;
+            best.VelX = hazardVx;
+            best.VelY = SignedU32(entry.Actor.VelY);
+            best.CategoryID = RuntimeHazardCategoryID(category);
+            best.ObjectID = entry.ObjectID;
+            best.Settings = entry.Actor.Settings;
+            bestScore = score;
+        }
+    }
+    return best;
+}
+
+ObjectScanSample NearestDroppedBattleStar(
+    const GameStateObjectScanCache& objectScanCache,
+    melonDS::u32 selfX,
+    melonDS::u32 selfY)
+{
+    ObjectScanSample best {};
+    std::int64_t bestScore = 0;
+    for (const GameStateObjectScanEntry& entry : objectScanCache.Entries)
+    {
+        if (entry.LifecycleState != 1)
+            continue;
+        const char* category = AIObjectCategory(entry.ObjectID, entry.Actor.Settings);
+        if (std::strcmp(category, "dropped_star_item") != 0)
+            continue;
+        const std::int64_t dx = AIWrappedDeltaX(SignedU32(entry.Actor.PosX), SignedU32(selfX));
+        const std::int64_t dy = static_cast<std::int64_t>(SignedU32(entry.Actor.PosY)) - SignedU32(selfY);
+        const std::int64_t score = dx * dx + dy * dy;
+        if (!best.Found || score < bestScore)
+        {
+            best = entry.Actor;
+            bestScore = score;
+        }
+    }
+    return best;
+}
+
+NsmbRuleAI::FrameState RuleAIFrameStateFromSample(
+    const GameStateSample& sample,
+    const GameStateObjectScanCache& objectScanCache,
+    bool inGameplay)
+{
+    NsmbRuleAI::FrameState state {};
+    auto fillProbeSummary = [](NsmbRuleAI::PlayerFrameState& out,
+                               const AIPlayerTileProbeSample& probe,
+                               melonDS::u32 collisionFlag) {
+        const bool contactGround = AIPlayerContactGround(collisionFlag);
+        const bool contactWallLeft =
+            (collisionFlag & (0x00000008u | 0x00000400u | 0x20000000u)) != 0;
+        const bool contactWallRight =
+            (collisionFlag & (0x00000010u | 0x00000800u | 0x40000000u)) != 0;
+        const AITerrainDerivedSummary summary =
+            DeriveAITerrainSummaryFromGrid(probe, contactGround, contactWallLeft, contactWallRight);
+        out.GroundBelowSolid = summary.EffectiveGroundBelowSolid != 0;
+        out.BlockedAhead = summary.BlockedAhead != 0;
+        out.HoleAhead = summary.EffectiveHoleAhead != 0;
+        out.BlockedLeft = summary.BlockedLeft != 0;
+        out.HoleLeft = summary.EffectiveHoleLeft != 0;
+        out.FarHoleLeft = summary.FarHoleLeft != 0;
+        out.BlockedRight = summary.BlockedRight != 0;
+        out.HoleRight = summary.EffectiveHoleRight != 0;
+        out.FarHoleRight = summary.FarHoleRight != 0;
+    };
+    auto fillHazard = [&objectScanCache, &sample](NsmbRuleAI::PlayerFrameState& out,
+                                                  int player,
+                                                  melonDS::u32 x,
+                                                  melonDS::u32 y,
+                                                  melonDS::u32 vx) {
+        const RuntimeHazardThreat threat = MostDangerousRuntimeHazard(
+            objectScanCache,
+            x,
+            y,
+            vx,
+            G.RuleAIHazardHorizontalRange,
+            G.RuleAIHazardVerticalRange,
+            std::max<std::int64_t>(0x10000, (G.RuleAIHazardHorizontalRange * 3) / 4));
+        RuntimeHazardThreat best = threat;
+        auto abs64 = [](std::int64_t value) {
+            return value < 0 ? -value : value;
+        };
+        auto scoreThreat = [&abs64](const RuntimeHazardThreat& candidate) {
+            std::int64_t score = abs64(candidate.Dx) + abs64(candidate.Dy) * 2;
+            if (candidate.Closing)
+                score -= G.RuleAIHazardHorizontalRange;
+            if (candidate.VeryClose)
+                score -= std::max<std::int64_t>(0x10000, (G.RuleAIHazardHorizontalRange * 3) / 4);
+            return score;
+        };
+        std::int64_t bestScore = best.Found ? scoreThreat(best) : 0;
+        const std::int64_t selfVx = SignedU32(vx);
+        const std::int64_t closeRange = std::max<std::int64_t>(0x10000, (G.RuleAIHazardHorizontalRange * 3) / 4);
+        for (int slot = 0; slot < kAIFireballSlotCount; slot++)
+        {
+            if (sample.FireballSlotActive[slot] == 0)
+                continue;
+            const melonDS::u32 sourceKind = sample.FireballSlotKind[slot];
+            if (sourceKind == static_cast<melonDS::u32>(player))
+                continue;
+            const std::int64_t dx = AIWrappedDeltaX(SignedU32(sample.FireballSlotPosX[slot]), SignedU32(x));
+            const std::int64_t dy = static_cast<std::int64_t>(SignedU32(sample.FireballSlotPosY[slot])) - SignedU32(y);
+            if (abs64(dx) > G.RuleAIHazardHorizontalRange || abs64(dy) > G.RuleAIHazardVerticalRange)
+                continue;
+            const std::int64_t fireVx = SignedU32(sample.FireballSlotVelX[slot]);
+            const std::int64_t relVx = fireVx - selfVx;
+            RuntimeHazardThreat candidate {};
+            candidate.Found = true;
+            candidate.Closing = (dx < 0 && relVx > 0) || (dx > 0 && relVx < 0);
+            candidate.VeryClose = abs64(dx) <= closeRange || abs64(dy) <= 0x10000;
+            candidate.Dx = dx;
+            candidate.Dy = dy;
+            candidate.VelX = fireVx;
+            candidate.VelY = SignedU32(sample.FireballSlotVelY[slot]);
+            const std::int64_t score = scoreThreat(candidate);
+            if (!best.Found || score < bestScore)
+            {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+        out.HazardFound = best.Found;
+        out.HazardClosing = best.Closing;
+        out.HazardVeryClose = best.VeryClose;
+        out.HazardDx = static_cast<std::int32_t>(std::clamp<std::int64_t>(
+            best.Dx,
+            std::numeric_limits<std::int32_t>::min(),
+            std::numeric_limits<std::int32_t>::max()));
+        out.HazardDy = static_cast<std::int32_t>(std::clamp<std::int64_t>(
+            best.Dy,
+            std::numeric_limits<std::int32_t>::min(),
+            std::numeric_limits<std::int32_t>::max()));
+        out.HazardVelX = static_cast<std::int32_t>(std::clamp<std::int64_t>(
+            best.VelX,
+            std::numeric_limits<std::int32_t>::min(),
+            std::numeric_limits<std::int32_t>::max()));
+        out.HazardVelY = static_cast<std::int32_t>(std::clamp<std::int64_t>(
+            best.VelY,
+            std::numeric_limits<std::int32_t>::min(),
+            std::numeric_limits<std::int32_t>::max()));
+        out.HazardCategoryID = best.CategoryID;
+    };
+    state.InGameplay = inGameplay;
+    state.Players[0].Found = sample.PlayerActor0Found != 0;
+    state.Players[0].X = sample.PlayerActor0PosX;
+    state.Players[0].Y = sample.PlayerActor0PosY;
+    state.Players[0].VelX = static_cast<std::int32_t>(sample.PlayerActor0VelX);
+    state.Players[0].Dead = sample.Player0Dead != 0;
+    state.Players[0].BattleStars = sample.Player0BattleStars;
+    fillProbeSummary(
+        state.Players[0],
+        sample.PlayerActor0TileProbe,
+        sample.PlayerActor0CollisionFlag);
+    fillHazard(
+        state.Players[0],
+        0,
+        sample.PlayerActor0PosX,
+        sample.PlayerActor0PosY,
+        sample.PlayerActor0VelX);
+    state.Players[1].Found = sample.PlayerActor1Found != 0;
+    state.Players[1].X = sample.PlayerActor1PosX;
+    state.Players[1].Y = sample.PlayerActor1PosY;
+    state.Players[1].VelX = static_cast<std::int32_t>(sample.PlayerActor1VelX);
+    state.Players[1].Dead = sample.Player1Dead != 0;
+    state.Players[1].BattleStars = sample.Player1BattleStars;
+    fillProbeSummary(
+        state.Players[1],
+        sample.PlayerActor1TileProbe,
+        sample.PlayerActor1CollisionFlag);
+    fillHazard(
+        state.Players[1],
+        1,
+        sample.PlayerActor1PosX,
+        sample.PlayerActor1PosY,
+        sample.PlayerActor1VelX);
+    state.StarFound = sample.VsStarFound != 0;
+    state.StarX = sample.VsStarPosX;
+    state.StarY = sample.VsStarPosY;
+    state.StarActorFound = sample.VsStarActorFound != 0;
+    state.StarActorX = sample.VsStarActorPosX;
+    state.StarActorY = sample.VsStarActorPosY;
+    state.Players[0].StarActorFloorSupported =
+        !state.StarActorFound ||
+        AITerrainTargetHasFloorBelow(
+            sample.PlayerActor0TileProbe,
+            sample.PlayerActor0PosX,
+            sample.PlayerActor0PosY,
+            state.StarActorX,
+            state.StarActorY);
+    state.Players[1].StarActorFloorSupported =
+        !state.StarActorFound ||
+        AITerrainTargetHasFloorBelow(
+            sample.PlayerActor1TileProbe,
+            sample.PlayerActor1PosX,
+            sample.PlayerActor1PosY,
+            state.StarActorX,
+            state.StarActorY);
+    state.Players[0].StarCandidateFloorSupported =
+        !state.StarFound ||
+        AITerrainTargetHasFloorBelow(
+            sample.PlayerActor0TileProbe,
+            sample.PlayerActor0PosX,
+            sample.PlayerActor0PosY,
+            state.StarX,
+            state.StarY);
+    state.Players[1].StarCandidateFloorSupported =
+        !state.StarFound ||
+        AITerrainTargetHasFloorBelow(
+            sample.PlayerActor1TileProbe,
+            sample.PlayerActor1PosX,
+            sample.PlayerActor1PosY,
+            state.StarX,
+            state.StarY);
+    const ObjectScanSample droppedStar0 = NearestDroppedBattleStar(
+        objectScanCache,
+        sample.PlayerActor0PosX,
+        sample.PlayerActor0PosY);
+    const ObjectScanSample droppedStar1 = NearestDroppedBattleStar(
+        objectScanCache,
+        sample.PlayerActor1PosX,
+        sample.PlayerActor1PosY);
+    state.Players[0].DroppedStarFound = droppedStar0.Found != 0;
+    state.Players[0].DroppedStarX = droppedStar0.PosX;
+    state.Players[0].DroppedStarY = droppedStar0.PosY;
+    state.Players[0].DroppedStarFloorSupported =
+        !state.Players[0].DroppedStarFound ||
+        AITerrainTargetHasFloorBelow(
+            sample.PlayerActor0TileProbe,
+            sample.PlayerActor0PosX,
+            sample.PlayerActor0PosY,
+            state.Players[0].DroppedStarX,
+            state.Players[0].DroppedStarY);
+    state.Players[1].DroppedStarFound = droppedStar1.Found != 0;
+    state.Players[1].DroppedStarX = droppedStar1.PosX;
+    state.Players[1].DroppedStarY = droppedStar1.PosY;
+    state.Players[1].DroppedStarFloorSupported =
+        !state.Players[1].DroppedStarFound ||
+        AITerrainTargetHasFloorBelow(
+            sample.PlayerActor1TileProbe,
+            sample.PlayerActor1PosX,
+            sample.PlayerActor1PosY,
+            state.Players[1].DroppedStarX,
+            state.Players[1].DroppedStarY);
+    state.MovingHazardFound = sample.MovingHazardFound != 0;
+    state.MovingHazardX = sample.MovingHazardPosX;
+    state.MovingHazardY = sample.MovingHazardPosY;
+    state.MovingHazardVelX = sample.MovingHazardVelX;
+    state.MovingHazardVelY = sample.MovingHazardVelY;
+    return state;
+}
+
+bool RuleAIProvidesInputForPlayer(int player)
+{
+    if (!G.RuleAIEnabled)
+        return false;
+    if (G.RuleAIHostOnly && G.NetRole != Role::Host)
+        return false;
+    if (G.RuleAIClientOnly && G.NetRole != Role::Client)
+        return false;
+    return NsmbRuleAI::ControlsPlayer(
+        RuleAIConfig(),
+        player,
+        CurrentPacketBridgeLocalPlayer());
+}
+
+bool ImitationAIProvidesInputForPlayer(int player)
+{
+    if (!G.ImitationAIEnabled || !G.ImitationAIModelLoaded)
+        return false;
+    if (G.ImitationAIHostOnly && G.NetRole != Role::Host)
+        return false;
+    if (G.ImitationAIClientOnly && G.NetRole != Role::Client)
+        return false;
+
+    NsmbRuleAI::Config config {};
+    config.Enabled = true;
+    config.PlayerSpec = G.ImitationAIPlayerSpec;
+    return NsmbRuleAI::ControlsPlayer(
+        config,
+        player,
+        CurrentPacketBridgeLocalPlayer());
+}
+
+void RecordAIPlayLogAppliedInput(int instanceID, melonDS::u32 frame, int player, const InputState& input)
+{
+    if (instanceID < 0 || instanceID >= 16 || player < 0 || player >= 2)
+        return;
+    G.AIPlayLogLastAppliedInput[instanceID][player] = input;
+    G.AIPlayLogLastAppliedInputFrame[instanceID][player] = frame;
+    G.AIPlayLogLastAppliedInputValid[instanceID][player] = true;
+}
+
+InputState ApplyRuleBasedAIInput(
+    int instanceID,
+    melonDS::u32 frame,
+    melonDS::NDS* nds,
+    int player,
+    const InputState& fallback)
+{
+    if (!G.RuleAIEnabled || frame < G.RuleAIStartFrame || !nds || !nds->MainRAM)
+        return fallback;
+    if (G.RuleAIHostOnly && G.NetRole != Role::Host)
+        return fallback;
+    if (G.RuleAIClientOnly && G.NetRole != Role::Client)
+        return fallback;
+    const NsmbRuleAI::Config config = RuleAIConfig();
+    const int localPlayer = CurrentPacketBridgeLocalPlayer();
+    if (!NsmbRuleAI::ControlsPlayer(config, player, localPlayer))
+        return fallback;
+    const bool inGameplay = IsMarioVsLuigiGameplay(nds);
+    if (!inGameplay)
+        return fallback;
+    const GameStateSample sample = ReadGameStateSample(nds);
+    const GameStateObjectScanCache objectScanCache = BuildGameStateObjectScanCache(nds);
+    return NsmbRuleAI::DecideInput(
+        config,
+        RuleAIFrameStateFromSample(sample, objectScanCache, inGameplay),
+        instanceID,
+        frame,
+        player,
+        localPlayer,
+        fallback);
 }
 
 void FlushDelayedInputsLocked(melonDS::u32 frame);
@@ -12050,6 +12854,68 @@ void ForcePlayerInventoryPowerupsIfNeeded(int instanceID, melonDS::u32 frame, me
     }
 }
 
+void ForcePlayerPowerupsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
+{
+    if (!G.ForcePlayerPowerupsEnabled || !nds || !nds->MainRAM)
+        return;
+    if (instanceID < 0 || instanceID >= 16)
+        return;
+    if (frame < G.ForcePlayerPowerupsStartFrame)
+        return;
+    if (G.ForcePlayerPowerupsEndFrame != 0 && frame > G.ForcePlayerPowerupsEndFrame)
+        return;
+    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
+        return;
+
+    const melonDS::u8 value0 = static_cast<melonDS::u8>(G.ForcePlayerPowerup0 & 0xFF);
+    const melonDS::u8 value1 = static_cast<melonDS::u8>(G.ForcePlayerPowerup1 & 0xFF);
+    const melonDS::u8 old0 = nds->ARM9Read8(kGamePlayerPowerupAddr);
+    const melonDS::u8 old1 = nds->ARM9Read8(kGamePlayerPowerupAddr + 1);
+    nds->ARM9Write8(kGamePlayerPowerupAddr, value0);
+    nds->ARM9Write8(kGamePlayerPowerupAddr + 1, value1);
+
+    melonDS::u8 actorOldState[2] { 0xFF, 0xFF };
+    melonDS::u8 actorOldForm[2] { 0xFF, 0xFF };
+    melonDS::u32 actorBase[2] {};
+    const PlayerActorScanSample players = FindPlayerActors(nds);
+    const ObjectScanSample actors[2] { players.Actor0, players.Actor1 };
+    for (const ObjectScanSample& actor : actors)
+    {
+        if (!actor.Found || !IsARM9MainRAMAddress(actor.Base))
+            continue;
+        const melonDS::u32 player = nds->ARM9Read8(actor.Base + kPlayerActorPlayerIDOffset) & 1u;
+        const melonDS::u8 value = player == 0 ? value0 : value1;
+        actorBase[player] = actor.Base;
+        actorOldState[player] = nds->ARM9Read8(actor.Base + kPlayerBasePowerupStateOffset);
+        actorOldForm[player] = nds->ARM9Read8(actor.Base + kPlayerBasePowerupFormStateOffset);
+        nds->ARM9Write8(actor.Base + kPlayerBasePowerupStateOffset, value);
+        nds->ARM9Write8(actor.Base + kPlayerBasePowerupFormStateOffset, value);
+        nds->ARM9Write8(actor.Base + kPlayerBasePowerupSubStateOffset, 0);
+    }
+
+    if (!G.ForcePlayerPowerupsLogged[instanceID])
+    {
+        std::printf(
+            "NSMB Test: force player active powerups inst=%d frame=%u range=%u-%u "
+            "globalOld=%u/%u value=%u/%u actorBase=0x%08X/0x%08X actorStateOld=%u/%u actorFormOld=%u/%u\n",
+            instanceID,
+            frame,
+            G.ForcePlayerPowerupsStartFrame,
+            G.ForcePlayerPowerupsEndFrame,
+            old0,
+            old1,
+            value0,
+            value1,
+            actorBase[0],
+            actorBase[1],
+            actorOldState[0],
+            actorOldState[1],
+            actorOldForm[0],
+            actorOldForm[1]);
+        G.ForcePlayerPowerupsLogged[instanceID] = true;
+    }
+}
+
 void ForcePlayerStarCountersIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.ForcePlayerStarCountersEnabled || !nds || !nds->MainRAM)
@@ -12494,6 +13360,13 @@ int CurrentPacketBridgeLocalPlayer()
     return 0;
 }
 
+InputState ApplyImitationAIInput(
+    int instanceID,
+    melonDS::u32 frame,
+    melonDS::NDS* nds,
+    int player,
+    const InputState& fallback);
+
 InputState PacketBridgeInputForPlayer(
     int player,
     int localPlayer,
@@ -12544,7 +13417,10 @@ void WritePacketBridgeJitScratchInputs(
             localInput,
             remoteInput,
             hasRemoteInput);
-        const melonDS::u32 keys = (~input.KeyMask) & 0x0FFF;
+        InputState effectiveInput = ApplyRuleBasedAIInput(instanceID, frame, nds, player, input);
+        effectiveInput = ApplyImitationAIInput(instanceID, frame, nds, player, effectiveInput);
+        RecordAIPlayLogAppliedInput(instanceID, frame, player, effectiveInput);
+        const melonDS::u32 keys = (~effectiveInput.KeyMask) & 0x0FFF;
         nds->ARM9Write16(kPacketBridgeJitScratchKeysAddr + static_cast<melonDS::u32>(player * 2),
             static_cast<melonDS::u16>(keys));
 
@@ -12554,9 +13430,9 @@ void WritePacketBridgeJitScratchInputs(
         packet[2] = static_cast<melonDS::u8>(keys & 0xFF);
         packet[3] = static_cast<melonDS::u8>((keys >> 8) & 0xFF);
         packet[4] = action;
-        packet[5] = input.Touching ? 1 : 0;
-        packet[6] = static_cast<melonDS::u8>(std::min<int>(input.TouchX, 255));
-        packet[7] = static_cast<melonDS::u8>(std::min<int>(input.TouchY, 191));
+        packet[5] = effectiveInput.Touching ? 1 : 0;
+        packet[6] = static_cast<melonDS::u8>(std::min<int>(effectiveInput.TouchX, 255));
+        packet[7] = static_cast<melonDS::u8>(std::min<int>(effectiveInput.TouchY, 191));
         for (melonDS::u32 i = 0; i < 44; i++)
             packet[8 + i] = nds->ARM9Read8(0x020888E8 + i);
         packet[0x29] = nds->ARM9Read8(0x02088A4C);
@@ -13036,7 +13912,9 @@ void WritePacketBridgeJitScratchIfNeeded(
     }
 
     const int localPlayer = CurrentPacketBridgeLocalPlayer();
-    if (G.InputNetplayOnly && G.WaitForPeerBeforeStart && G.NetplayStartFrame > 0)
+    if (G.InputNetplayOnly && G.WaitForPeerBeforeStart && G.NetplayStartFrame > 0
+        && !RuleAIProvidesInputForPlayer(localPlayer ^ 1)
+        && !ImitationAIProvidesInputForPlayer(localPlayer ^ 1))
     {
         const melonDS::u32 delay = static_cast<melonDS::u32>(std::max(0, G.Delay));
         const melonDS::u32 sendStartFrame = (G.NetplayStartFrame > delay)
@@ -13100,9 +13978,13 @@ void WritePacketBridgeJitScratchIfNeeded(
         ThrottleInputNetplayFrameLead(nds, frame, sendFrame);
         throttleUs = static_cast<unsigned long long>(ElapsedUs(throttleStart));
 
+        const bool aiProvidesRemoteInput =
+            RuleAIProvidesInputForPlayer(localPlayer ^ 1) ||
+            ImitationAIProvidesInputForPlayer(localPlayer ^ 1);
         if (!hasRemoteInput
             && !G.RollbackEnabled
             && G.LocalWaitsForRemote
+            && !aiProvidesRemoteInput
             && (!G.InputNetplayOnly || G.NetplayStartFrame == 0 || logicalFrame >= G.NetplayStartFrame))
         {
             const auto waitStart = std::chrono::steady_clock::now();
@@ -14987,6 +15869,272 @@ void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     }
 }
 
+PlayerCollisionMgrSample ReadPlayerCollisionMgrSample(melonDS::NDS* nds, const ObjectScanSample& actor)
+{
+    PlayerCollisionMgrSample sample;
+    if (!nds || !actor.Found || !IsValidMainRAMRange(
+            nds,
+            actor.Base + kPlayerStageActorCollisionMgrOffset,
+            0xB8))
+        return sample;
+
+    const melonDS::u32 base = actor.Base + kPlayerStageActorCollisionMgrOffset;
+    sample.Found = 1;
+    sample.Base = base;
+    sample.DeltaX = nds->ARM9Read32(base + kCollisionMgrDeltaXOffset);
+    sample.DeltaY = nds->ARM9Read32(base + kCollisionMgrDeltaYOffset);
+    sample.CollisionResult = nds->ARM9Read32(base + kCollisionMgrCollisionResultOffset);
+    sample.GroundCollision = nds->ARM9Read32(base + kCollisionMgrGroundCollisionOffset);
+    sample.AttachedTileX = nds->ARM9Read16(base + kCollisionMgrAttachedTileXOffset);
+    sample.AttachedTileY = nds->ARM9Read16(base + kCollisionMgrAttachedTileYOffset);
+    sample.BottomModifierTileType = nds->ARM9Read16(base + kCollisionMgrBottomModifierTileTypeOffset);
+    sample.BottomSlopeType = nds->ARM9Read8(base + kCollisionMgrBottomSlopeTypeOffset);
+    sample.TopModifierTileType = nds->ARM9Read16(base + kCollisionMgrTopModifierTileTypeOffset);
+    sample.TopSlopeType = nds->ARM9Read8(base + kCollisionMgrTopSlopeTypeOffset);
+    sample.SideModifierTileTypeLeft = nds->ARM9Read16(base + kCollisionMgrSideModifierTileTypeOffset);
+    sample.SideModifierTileTypeRight = nds->ARM9Read16(base + kCollisionMgrSideModifierTileTypeOffset + 2);
+    sample.ByteA4 = nds->ARM9Read8(base + kCollisionMgrByteA4Offset);
+    sample.ByteA5 = nds->ARM9Read8(base + kCollisionMgrByteA5Offset);
+    sample.PreviousByteA4 = nds->ARM9Read8(base + kCollisionMgrPreviousByteA4Offset);
+    sample.PreviousByteA5 = nds->ARM9Read8(base + kCollisionMgrPreviousByteA5Offset);
+    sample.FlagsA8 = nds->ARM9Read8(base + kCollisionMgrFlagsA8Offset);
+    sample.TileByteAB = nds->ARM9Read8(base + kCollisionMgrTileByteABOffset);
+    sample.ModifierState = nds->ARM9Read8(base + kCollisionMgrModifierStateOffset);
+    sample.UnknownB1 = nds->ARM9Read8(base + kCollisionMgrUnknownB1Offset);
+    auto readSensor = [nds](melonDS::u32 sensorBase) {
+        PlayerCollisionMgrSample::Sensor sensor;
+        if (!IsValidMainRAMRange(nds, sensorBase, 0x10))
+            return sensor;
+        sensor.Found = 1;
+        sensor.Base = sensorBase;
+        sensor.Type = nds->ARM9Read32(sensorBase);
+        sensor.Value1 = nds->ARM9Read32(sensorBase + 4);
+        sensor.Value2 = nds->ARM9Read32(sensorBase + 8);
+        sensor.Value3 = nds->ARM9Read32(sensorBase + 12);
+        return sensor;
+    };
+    sample.BottomSensor = readSensor(nds->ARM9Read32(base + kCollisionMgrBottomSensorPtrOffset));
+    sample.TopSensor = readSensor(nds->ARM9Read32(base + kCollisionMgrTopSensorPtrOffset));
+    sample.SideSensor = readSensor(nds->ARM9Read32(base + kCollisionMgrSideSensorPtrOffset));
+    sample.LineSensor = readSensor(nds->ARM9Read32(base + kCollisionMgrLineSensorPtrOffset));
+    return sample;
+}
+
+PlayerHitboxSample ReadPlayerHitboxSample(melonDS::NDS* nds, const ObjectScanSample& actor)
+{
+    PlayerHitboxSample sample;
+    if (!nds || !actor.Found ||
+        !IsValidMainRAMRange(nds, actor.Base + kPlayerHitboxCenterOffsetX, 8) ||
+        !IsValidMainRAMRange(nds, actor.Base + kStageActorHitboxHalfWidthOffset, 8))
+        return sample;
+
+    sample.Found = 1;
+    sample.CenterOffsetX = nds->ARM9Read32(actor.Base + kPlayerHitboxCenterOffsetX);
+    sample.CenterOffsetY = nds->ARM9Read32(actor.Base + kPlayerHitboxCenterOffsetY);
+    sample.HalfWidth = nds->ARM9Read32(actor.Base + kStageActorHitboxHalfWidthOffset);
+    sample.HalfHeight = nds->ARM9Read32(actor.Base + kStageActorHitboxHalfHeightOffset);
+    return sample;
+}
+
+std::int32_t SignedARM9U32(melonDS::u32 value)
+{
+    return static_cast<std::int32_t>(value);
+}
+
+bool ReadStageLayoutTileBehavior(
+    melonDS::NDS* nds,
+    melonDS::u32 worldX,
+    melonDS::u32 worldY,
+    melonDS::u32 playerID,
+    AITileProbeSample& out)
+{
+    out.WorldX = worldX;
+    out.WorldY = worldY;
+    if (!nds || !nds->MainRAM)
+    {
+        out.Status = 1;
+        return false;
+    }
+
+    const melonDS::u32 stageLayout = nds->ARM9Read32(kStageLayoutPtrAddr);
+    const melonDS::u32 wrapX = nds->ARM9Read32(kGameWrapXAddr);
+    out.StageLayout = stageLayout;
+    if (!IsValidMainRAMRange(nds, stageLayout, kStageLayoutCameraWrapAddOffset + sizeof(melonDS::u16)))
+    {
+        out.Status = 2;
+        return false;
+    }
+
+    std::int32_t pixelXSigned = SignedARM9U32(worldX) >> 12;
+    const std::int32_t pixelYSigned = (-SignedARM9U32(worldY)) >> 12;
+    if (wrapX != 0)
+        pixelXSigned &= static_cast<std::int32_t>(wrapX >> 12);
+    if (pixelYSigned < 0)
+    {
+        out.Status = 3;
+        return false;
+    }
+
+    melonDS::u32 pixelX = static_cast<melonDS::u32>(pixelXSigned) & 0xFFFFu;
+    melonDS::u32 pixelY = static_cast<melonDS::u32>(pixelYSigned) & 0xFFFFu;
+
+    const melonDS::u32 playerOffset =
+        kStageLayoutPlayerDataOffset +
+        (playerID & 1u) * kStageLayoutPlayerDataStride +
+        kStageLayoutPlayerCameraWrapOffset;
+    if (nds->ARM9Read16(stageLayout + playerOffset) == 0xFF00)
+        pixelX = (pixelX + nds->ARM9Read16(stageLayout + kStageLayoutCameraWrapAddOffset)) & 0xFFFFu;
+
+    const melonDS::u32 stageBlocks = nds->ARM9Read32(kStageBlocksPtrAddr);
+    if (IsValidMainRAMRange(nds, stageBlocks, 4) && (nds->ARM9Read16(stageBlocks + 2) & 0x20) != 0)
+        pixelX &= nds->ARM9Read16(stageLayout + kStageLayoutWrapMaskOffset);
+
+    out.PixelX = pixelX;
+    out.PixelY = pixelY;
+    if (pixelX >= 0x2000 || pixelY >= 0x1000)
+    {
+        out.Status = 4;
+        return false;
+    }
+
+    const melonDS::u32 chunkIndex = (pixelX >> 8) + ((pixelY >> 8) << 5);
+    const melonDS::u32 chunkID = nds->ARM9Read8(stageLayout + kStageLayoutChunkMapOffset + chunkIndex);
+    out.ChunkID = chunkID;
+    const melonDS::u32 chunkPtr = nds->ARM9Read32(kStageLayoutChunkPtrTableAddr + chunkID * sizeof(melonDS::u32));
+    out.ChunkPtr = chunkPtr;
+    if (!IsValidMainRAMRange(nds, chunkPtr, 0x200))
+    {
+        out.Status = 5;
+        return false;
+    }
+
+    const melonDS::u32 tileOffset = (((pixelX & 0xF0u) >> 4) << 1) + ((pixelY & 0xF0u) << 1);
+    const melonDS::u32 tileID = nds->ARM9Read16(chunkPtr + tileOffset);
+    out.TileID = tileID;
+    melonDS::u32 behavior = 0;
+    melonDS::u32 behaviorTable = 0;
+    if (tileID < 0x100)
+    {
+        behaviorTable = kStageLayoutTileBehaviorBaseTableAddr;
+        out.BehaviorTable = behaviorTable;
+        behavior = nds->ARM9Read32(behaviorTable + tileID * sizeof(melonDS::u32));
+    }
+    else if (tileID < 0x600)
+    {
+        behaviorTable = nds->ARM9Read32(kStageLayoutDynamicTileBehaviorTablePtrAddr);
+        out.BehaviorTable = behaviorTable;
+        const melonDS::u32 behaviorOffset = (tileID - 0x100) * sizeof(melonDS::u32);
+        if (!IsValidMainRAMRange(nds, behaviorTable + behaviorOffset, sizeof(melonDS::u32)))
+        {
+            out.Status = 6;
+            return false;
+        }
+        behavior = nds->ARM9Read32(behaviorTable + behaviorOffset);
+    }
+    else
+    {
+        out.Status = 7;
+        return false;
+    }
+
+    out.Found = 1;
+    out.Status = 0;
+    out.StageLayout = stageLayout;
+    out.ChunkPtr = chunkPtr;
+    out.BehaviorTable = behaviorTable;
+    out.Behavior = behavior;
+    return true;
+}
+
+AIPlayerTileProbeSample ReadAIPlayerTileProbeSample(melonDS::NDS* nds, const ObjectScanSample& actor)
+{
+    AIPlayerTileProbeSample probe;
+    static constexpr struct ProbeDef
+    {
+        const char* Name;
+        int X;
+        int Y;
+        bool Directional;
+    } kProbeDefs[kAITileProbeCount] = {
+        {"center", 0, 0, false},
+        {"feet", 0, -24, false},
+        {"below", 0, -48, false},
+        {"aheadBody", 16, 0, true},
+        {"aheadFeet", 16, -24, true},
+        {"aheadBelow", 16, -48, true},
+        {"ahead2Feet", 32, -24, true},
+        {"ahead2Below", 32, -48, true},
+        {"above", 0, 24, false},
+        {"leftBody", -16, 0, false},
+        {"leftFeet", -16, -24, false},
+        {"leftBelow", -16, -48, false},
+        {"left2Below", -32, -48, false},
+        {"rightBody", 16, 0, false},
+        {"rightFeet", 16, -24, false},
+        {"rightBelow", 16, -48, false},
+        {"right2Below", 32, -48, false},
+    };
+
+    for (int i = 0; i < kAITileProbeCount; i++)
+        probe.Samples[i].Name = kProbeDefs[i].Name;
+
+    if (!nds || !actor.Found)
+        return probe;
+
+    const std::int32_t velX = SignedARM9U32(actor.VelX);
+    const std::int32_t direction = velX < 0 ? -1 : 1;
+    probe.Direction = static_cast<melonDS::u32>(direction);
+    probe.StageLayout = nds->ARM9Read32(kStageLayoutPtrAddr);
+    probe.WrapX = nds->ARM9Read32(kGameWrapXAddr);
+    probe.Found = IsValidMainRAMRange(nds, probe.StageLayout, kStageLayoutCameraWrapAddOffset + sizeof(melonDS::u16)) ? 1 : 0;
+    if (!probe.Found)
+        return probe;
+
+    const melonDS::u32 playerID = nds->ARM9Read8(actor.Base + kPlayerBasePlayerIDOffset) & 1u;
+    const std::int32_t actorPixelX = SignedARM9U32(actor.PosX) >> 12;
+    const std::int32_t actorPixelY = (-SignedARM9U32(actor.PosY)) >> 12;
+    const std::int32_t anchorTileX = actorPixelX >> 4;
+    const std::int32_t anchorTileY = actorPixelY >> 4;
+    for (int i = 0; i < kAITileProbeCount; i++)
+    {
+        const int offsetX = kProbeDefs[i].Directional ? kProbeDefs[i].X * direction : kProbeDefs[i].X;
+        const int offsetY = kProbeDefs[i].Y;
+        AITileProbeSample& sample = probe.Samples[i];
+        sample.Name = kProbeDefs[i].Name;
+        sample.OffsetX = static_cast<melonDS::u32>(offsetX);
+        sample.OffsetY = static_cast<melonDS::u32>(offsetY);
+        const melonDS::u32 worldX = actor.PosX + static_cast<melonDS::u32>(offsetX * 4096);
+        const melonDS::u32 worldY = actor.PosY + static_cast<melonDS::u32>(offsetY * 4096);
+        ReadStageLayoutTileBehavior(nds, worldX, worldY, playerID, sample);
+    }
+    for (int row = 0; row < kAITileGridHeight; row++)
+    {
+        for (int col = 0; col < kAITileGridWidth; col++)
+        {
+            const int index = row * kAITileGridWidth + col;
+            const std::int32_t relTileX = kAITileGridMinRelX + col;
+            const std::int32_t relTileY = kAITileGridMinRelY + row;
+            const std::int32_t tileX = anchorTileX + relTileX;
+            const std::int32_t tileY = anchorTileY + relTileY;
+            AITileGridSample& cell = probe.Grid[index];
+            cell.Row = static_cast<melonDS::u32>(row);
+            cell.Col = static_cast<melonDS::u32>(col);
+            cell.RelTileX = static_cast<melonDS::u32>(relTileX);
+            cell.RelTileY = static_cast<melonDS::u32>(relTileY);
+            cell.TileX = static_cast<melonDS::u32>(tileX);
+            cell.TileY = static_cast<melonDS::u32>(tileY);
+            cell.Tile.OffsetX = static_cast<melonDS::u32>(relTileX * 16);
+            cell.Tile.OffsetY = static_cast<melonDS::u32>(-relTileY * 16);
+            const std::int32_t pixelX = tileX * 16 + 8;
+            const std::int32_t pixelY = tileY * 16 + 8;
+            const melonDS::u32 worldX = static_cast<melonDS::u32>(pixelX * 4096);
+            const melonDS::u32 worldY = static_cast<melonDS::u32>(-pixelY * 4096);
+            ReadStageLayoutTileBehavior(nds, worldX, worldY, playerID, cell.Tile);
+        }
+    }
+    return probe;
+}
+
 GameStateSample ReadGameStateSample(melonDS::NDS* nds)
 {
     GameStateSample sample;
@@ -15089,6 +16237,14 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.PlayerActor0VelX = players.Actor0.VelX;
     sample.PlayerActor0VelY = players.Actor0.VelY;
     sample.PlayerActor0VelZ = players.Actor0.VelZ;
+    sample.PlayerActor0CollisionMgr = ReadPlayerCollisionMgrSample(nds, players.Actor0);
+    sample.PlayerActor0Hitbox = ReadPlayerHitboxSample(nds, players.Actor0);
+    sample.PlayerActor0TileProbe = ReadAIPlayerTileProbeSample(nds, players.Actor0);
+    if (players.Actor0.Found && IsValidMainRAMRange(nds, players.Actor0.Base + kPlayerBaseTileDamageTypeOffset, 1))
+    {
+        sample.PlayerActor0TileDamageFlags = nds->ARM9Read8(players.Actor0.Base + kPlayerBaseTileDamageFlagsOffset);
+        sample.PlayerActor0TileDamageType = nds->ARM9Read8(players.Actor0.Base + kPlayerBaseTileDamageTypeOffset);
+    }
     sample.PlayerActor1Found = players.Actor1.Found;
     sample.PlayerActor1GUID = players.Actor1.GUID;
     sample.PlayerActor1Base = players.Actor1.Base;
@@ -15104,6 +16260,14 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.PlayerActor1VelX = players.Actor1.VelX;
     sample.PlayerActor1VelY = players.Actor1.VelY;
     sample.PlayerActor1VelZ = players.Actor1.VelZ;
+    sample.PlayerActor1CollisionMgr = ReadPlayerCollisionMgrSample(nds, players.Actor1);
+    sample.PlayerActor1Hitbox = ReadPlayerHitboxSample(nds, players.Actor1);
+    sample.PlayerActor1TileProbe = ReadAIPlayerTileProbeSample(nds, players.Actor1);
+    if (players.Actor1.Found && IsValidMainRAMRange(nds, players.Actor1.Base + kPlayerBaseTileDamageTypeOffset, 1))
+    {
+        sample.PlayerActor1TileDamageFlags = nds->ARM9Read8(players.Actor1.Base + kPlayerBaseTileDamageFlagsOffset);
+        sample.PlayerActor1TileDamageType = nds->ARM9Read8(players.Actor1.Base + kPlayerBaseTileDamageTypeOffset);
+    }
     auto readPlayerTransitionFields = [nds](const ObjectScanSample& actor,
                                             melonDS::u32& playerID,
                                             melonDS::u32& transitionStep,
@@ -15116,6 +16280,15 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
                                             melonDS::u32& subActionFlag,
                                             melonDS::u32& physicsFlag,
                                             melonDS::u32& damageCooldown,
+                                            melonDS::u32& damageState,
+                                            melonDS::u32& powerupAuxState,
+                                            melonDS::u32& powerupState,
+                                            melonDS::u32& powerupFormState,
+                                            melonDS::u32& powerupSubState,
+                                            melonDS::u32& damageGuardFlag,
+                                            melonDS::u32& powerupApplyLock,
+                                            melonDS::u32& shellActorPtr,
+                                            melonDS::u32& shellState,
                                             melonDS::u32& transitFunc,
                                             melonDS::u32& transitArg)
     {
@@ -15132,6 +16305,15 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         subActionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseSubActionFlagOffset);
         physicsFlag = nds->ARM9Read32(actor.Base + kPlayerBasePhysicsFlagOffset);
         damageCooldown = nds->ARM9Read16(actor.Base + kPlayerBaseDamageCooldownOffset);
+        damageState = nds->ARM9Read8(actor.Base + kPlayerBaseDamageStateOffset);
+        powerupAuxState = nds->ARM9Read8(actor.Base + kPlayerBasePowerupAuxStateOffset);
+        powerupState = nds->ARM9Read8(actor.Base + kPlayerBasePowerupStateOffset);
+        powerupFormState = nds->ARM9Read8(actor.Base + kPlayerBasePowerupFormStateOffset);
+        powerupSubState = nds->ARM9Read8(actor.Base + kPlayerBasePowerupSubStateOffset);
+        damageGuardFlag = nds->ARM9Read8(actor.Base + kPlayerBaseDamageGuardFlagOffset);
+        powerupApplyLock = nds->ARM9Read8(actor.Base + kPlayerBasePowerupApplyLockOffset);
+        shellActorPtr = nds->ARM9Read32(actor.Base + kPlayerBaseShellActorPtrOffset);
+        shellState = (actionFlag & 0x00400000u) != 0 ? (shellActorPtr != 0 ? 2u : 1u) : 0u;
         transitFunc = nds->ARM9Read32(actor.Base + 0x990);
         transitArg = nds->ARM9Read32(actor.Base + 0x994);
     };
@@ -15148,6 +16330,15 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         sample.PlayerActor0SubActionFlag,
         sample.PlayerActor0PhysicsFlag,
         sample.PlayerActor0DamageCooldown,
+        sample.PlayerActor0DamageState,
+        sample.PlayerActor0PowerupAuxState,
+        sample.PlayerActor0PowerupState,
+        sample.PlayerActor0PowerupFormState,
+        sample.PlayerActor0PowerupSubState,
+        sample.PlayerActor0DamageGuardFlag,
+        sample.PlayerActor0PowerupApplyLock,
+        sample.PlayerActor0ShellActorPtr,
+        sample.PlayerActor0ShellState,
         sample.PlayerActor0TransitFunc,
         sample.PlayerActor0TransitArg);
     readPlayerTransitionFields(
@@ -15163,6 +16354,15 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         sample.PlayerActor1SubActionFlag,
         sample.PlayerActor1PhysicsFlag,
         sample.PlayerActor1DamageCooldown,
+        sample.PlayerActor1DamageState,
+        sample.PlayerActor1PowerupAuxState,
+        sample.PlayerActor1PowerupState,
+        sample.PlayerActor1PowerupFormState,
+        sample.PlayerActor1PowerupSubState,
+        sample.PlayerActor1DamageGuardFlag,
+        sample.PlayerActor1PowerupApplyLock,
+        sample.PlayerActor1ShellActorPtr,
+        sample.PlayerActor1ShellState,
         sample.PlayerActor1TransitFunc,
         sample.PlayerActor1TransitArg);
 
@@ -15261,6 +16461,8 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.Player1Powerup = nds->ARM9Read8(kGamePlayerPowerupAddr + 1);
     sample.Player0InventoryPowerup = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr);
     sample.Player1InventoryPowerup = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr + 1);
+    sample.Player0DamageGuardTimer = nds->ARM9Read16(kGamePlayerDamageGuardTimerAddr);
+    sample.Player1DamageGuardTimer = nds->ARM9Read16(kGamePlayerDamageGuardTimerAddr + sizeof(melonDS::u16));
     sample.Player0Dead = nds->ARM9Read8(kGamePlayerDeadAddr);
     sample.Player1Dead = nds->ARM9Read8(kGamePlayerDeadAddr + 1);
     sample.Player0Character = nds->ARM9Read8(kGamePlayerCharacterAddr);
@@ -15521,6 +16723,57 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.MovingHazardTargetVelY = movingHazard.TargetVelY;
     sample.MovingHazardTargetVelZ = movingHazard.TargetVelZ;
 
+    if (IsARM9MainRAMAddress(kFireballsActiveCountAddr))
+        sample.FireballsActiveCount = nds->ARM9Read32(kFireballsActiveCountAddr);
+    if (IsARM9MainRAMAddress(kFireballsHandlerAddr))
+        sample.FireballsHandlerPtr = nds->ARM9Read32(kFireballsHandlerAddr);
+    for (int i = 0; i < kAISpecialHandlerWordCount; i++)
+    {
+        const melonDS::u32 fireballWordAddr = kFireballsHandlerAddr + sizeof(melonDS::u32) * i;
+        const melonDS::u32 projectileWordAddr = kProjectilesHandlerAddr + sizeof(melonDS::u32) * i;
+        if (IsARM9MainRAMAddress(fireballWordAddr))
+            sample.FireballsHandlerWords[i] = nds->ARM9Read32(fireballWordAddr);
+        if (IsARM9MainRAMAddress(projectileWordAddr))
+            sample.ProjectilesHandlerWords[i] = nds->ARM9Read32(projectileWordAddr);
+    }
+    if (IsARM9MainRAMAddress(sample.FireballsHandlerPtr))
+    {
+        for (int i = 0; i < kAIFireballSlotCount; i++)
+        {
+            const melonDS::u32 slot = sample.FireballsHandlerPtr + kAIFireballSlotBaseOffset + kAIFireballSlotStride * i;
+            if (!IsARM9MainRAMAddress(slot + kAIFireballSlotActiveOffset))
+                continue;
+            sample.FireballSlotActive[i] = nds->ARM9Read8(slot + kAIFireballSlotActiveOffset);
+            if (sample.FireballSlotActive[i] == 0)
+                continue;
+            sample.FireballSlotKind[i] = nds->ARM9Read8(slot + kAIFireballSlotKindOffset);
+            sample.FireballSlotState[i] = nds->ARM9Read8(slot + kAIFireballSlotStateOffset);
+            sample.FireballSlotFacing[i] = nds->ARM9Read8(slot + kAIFireballSlotFacingOffset);
+            sample.FireballSlotPosX[i] = nds->ARM9Read32(slot + kAIFireballSlotPosOffset);
+            sample.FireballSlotPosY[i] = nds->ARM9Read32(slot + kAIFireballSlotPosOffset + sizeof(melonDS::u32));
+            sample.FireballSlotPosZ[i] = nds->ARM9Read32(slot + kAIFireballSlotPosOffset + sizeof(melonDS::u32) * 2);
+            sample.FireballSlotPrevX[i] = nds->ARM9Read32(slot + kAIFireballSlotPrevPosOffset);
+            sample.FireballSlotPrevY[i] = nds->ARM9Read32(slot + kAIFireballSlotPrevPosOffset + sizeof(melonDS::u32));
+            sample.FireballSlotPrevZ[i] = nds->ARM9Read32(slot + kAIFireballSlotPrevPosOffset + sizeof(melonDS::u32) * 2);
+            sample.FireballSlotVelX[i] = nds->ARM9Read32(slot + kAIFireballSlotVelOffset);
+            sample.FireballSlotVelY[i] = nds->ARM9Read32(slot + kAIFireballSlotVelOffset + sizeof(melonDS::u32));
+            sample.FireballSlotVelZ[i] = nds->ARM9Read32(slot + kAIFireballSlotVelOffset + sizeof(melonDS::u32) * 2);
+            for (int j = 0; j < kAIFireballSlotStateByteCount; j++)
+            {
+                const melonDS::u32 byteAddr = slot + kAIFireballSlotActiveOffset + static_cast<melonDS::u32>(j);
+                if (IsARM9MainRAMAddress(byteAddr))
+                    sample.FireballSlotStateBytes[i][j] = nds->ARM9Read8(byteAddr);
+            }
+            for (int j = 0; j < kAIFireballSlotDebugWordCount; j++)
+            {
+                const melonDS::u32 wordAddr =
+                    slot + kAIFireballSlotDebugWordOffset + sizeof(melonDS::u32) * static_cast<melonDS::u32>(j);
+                if (IsARM9MainRAMAddress(wordAddr))
+                    sample.FireballSlotDebugWords[i][j] = nds->ARM9Read32(wordAddr);
+            }
+        }
+    }
+
     const ObjectLifecycleSummary objectSummary = SummarizeObjectLifecycle(nds);
     sample.ObjectScanTotal = objectSummary.Total;
     sample.ObjectNotCreatedCount = objectSummary.NotCreated;
@@ -15723,8 +16976,29 @@ void SaveScreenshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     void* topBuffer = nullptr;
     void* bottomBuffer = nullptr;
-    if (!nds->GPU.GetFramebuffers(&topBuffer, &bottomBuffer)) return;
-    if (!topBuffer || !bottomBuffer) return;
+    if (!nds->GPU.GetFramebuffers(&topBuffer, &bottomBuffer))
+    {
+        if (EnvFlag("MELONDS_NSML_SCREENSHOT_REG_TRACE"))
+        {
+            std::printf("NSMB Test: screenshot skipped inst=%d frame=%u reason=no-framebuffer\n", instanceID, frame);
+            std::fflush(stdout);
+        }
+        return;
+    }
+    if (!topBuffer || !bottomBuffer)
+    {
+        if (EnvFlag("MELONDS_NSML_SCREENSHOT_REG_TRACE"))
+        {
+            std::printf(
+                "NSMB Test: screenshot skipped inst=%d frame=%u reason=null-buffer top=%p bottom=%p\n",
+                instanceID,
+                frame,
+                topBuffer,
+                bottomBuffer);
+            std::fflush(stdout);
+        }
+        return;
+    }
 
     std::error_code ec;
     std::filesystem::create_directories(G.ScreenshotDir, ec);
@@ -16408,6 +17682,23 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     G.GameStateTrace << std::dec << '\n';
     G.GameStateTrace.flush();
 }
+
+void WriteJsonHex(std::ostream& out, melonDS::u32 value, int width = 8)
+{
+    const std::ios::fmtflags flags = out.flags();
+    const char fill = out.fill();
+    out << "\"0x" << std::uppercase << std::hex << std::setw(width) << std::setfill('0') << value << "\"";
+    out.flags(flags);
+    out.fill(fill);
+}
+
+std::int32_t SignedU32(melonDS::u32 value)
+{
+    return static_cast<std::int32_t>(value);
+}
+
+#include "NsmbAiObservation.h"
+#include "NsmbAiObservation.cpp"
 
 void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
@@ -17344,6 +18635,8 @@ void InitFromEnvironment()
         EnvFlag("MELONDS_NSML_PACKET_BRIDGE_NEUTRALIZE_LOCAL_INPUT");
     G.PacketBridgePreserveLocalTouch =
         EnvFlag("MELONDS_NSML_PACKET_BRIDGE_PRESERVE_LOCAL_TOUCH");
+    G.NeutralizePolledInput = EnvFlag("MELONDS_NSML_NEUTRALIZE_POLLED_INPUT");
+    G.NeutralizePolledInputPreserveTouch = EnvFlag("MELONDS_NSML_NEUTRALIZE_POLLED_INPUT_PRESERVE_TOUCH");
     G.PacketBridgeSendDelayFrames = std::max(
         0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_SEND_DELAY_FRAMES", 0));
     G.PacketBridgeSendJitterFrames = std::max(
@@ -17480,6 +18773,26 @@ void InitFromEnvironment()
     G.GameStateTraceEndFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_GAME_STATE_TRACE_END_FRAME", 0)));
     G.GameStateTraceExtended = EnvFlag("MELONDS_NSML_GAME_STATE_TRACE_EXTENDED");
+    const char* aiPlayLog = std::getenv("MELONDS_NSML_AI_PLAY_LOG");
+    if (aiPlayLog && aiPlayLog[0]) G.AIPlayLogPath = aiPlayLog;
+    const char* aiObservationV2Log = std::getenv("MELONDS_NSML_AI_OBSERVATION_V2_LOG");
+    if (aiObservationV2Log && aiObservationV2Log[0]) G.AIObservationV2Path = aiObservationV2Log;
+    const char* aiObservationV3Log = std::getenv("MELONDS_NSML_AI_OBSERVATION_V3_LOG");
+    if (aiObservationV3Log && aiObservationV3Log[0]) G.AIObservationV3Path = aiObservationV3Log;
+    G.AIPlayLogInterval = std::max(1, EnvInt("MELONDS_NSML_AI_PLAY_LOG_INTERVAL", 1));
+    G.AIPlayLogFlushInterval = std::max(0, EnvInt("MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL", 60));
+    G.AIPlayLogStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_AI_PLAY_LOG_START_FRAME", 0)));
+    G.AIPlayLogEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_AI_PLAY_LOG_END_FRAME", 0)));
+    G.AIPlayLogMaxObjects = std::clamp(EnvInt("MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS", 32), 0, 256);
+    G.AIObservationV2StageFilter = EnvHasValue("MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER")
+        ? std::clamp(EnvInt("MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER", -1), -1, 4)
+        : -1;
+    G.AIObservationV3StageFilter = EnvHasValue("MELONDS_NSML_AI_OBSERVATION_V3_STAGE_FILTER")
+        ? std::clamp(EnvInt("MELONDS_NSML_AI_OBSERVATION_V3_STAGE_FILTER", -1), -1, 4)
+        : -1;
+    G.AIPlayLogGameplayOnly = !EnvFlag("MELONDS_NSML_AI_PLAY_LOG_INCLUDE_NON_GAMEPLAY");
     G.GameStateSyncEnabled = EnvFlag("MELONDS_NSML_STATE_SYNC");
     G.GameStateSyncExtended = EnvFlag("MELONDS_NSML_STATE_SYNC_EXTENDED");
     G.GameStateApplyEnabled = EnvFlag("MELONDS_NSML_STATE_APPLY");
@@ -17687,6 +19000,15 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_LIFE0", 5)));
     G.ForcePlayerLife1 = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_LIFE1", 5)));
+    G.ForcePlayerPowerupsEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_POWERUPS");
+    G.ForcePlayerPowerupsStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_POWERUPS_START_FRAME", 0)));
+    G.ForcePlayerPowerupsEndFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_POWERUPS_END_FRAME", 0)));
+    G.ForcePlayerPowerup0 = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_POWERUP0", 0)));
+    G.ForcePlayerPowerup1 = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_POWERUP1", 0)));
     G.ForcePlayerInventoryPowerupsEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS");
     G.ForcePlayerInventoryPowerupsStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_START_FRAME", 0)));
@@ -17777,6 +19099,110 @@ void InitFromEnvironment()
         EnvInt("MELONDS_NSML_INPUT_HEALTH_TRACE_INTERVAL", 120), 1, 3600);
     G.InputHealthTraceWaitThresholdMs = std::clamp(
         EnvInt("MELONDS_NSML_INPUT_HEALTH_TRACE_WAIT_THRESHOLD_MS", 16), 1, 5000);
+    G.RuleAIEnabled = EnvFlag("MELONDS_NSML_RULE_AI");
+    G.RuleAIHostOnly = EnvFlag("MELONDS_NSML_RULE_AI_HOST_ONLY");
+    G.RuleAIClientOnly = EnvFlag("MELONDS_NSML_RULE_AI_CLIENT_ONLY");
+    G.RuleAIPlayerSpec = EnvCString("MELONDS_NSML_RULE_AI_PLAYER", "remote");
+    G.RuleAIStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_RULE_AI_START_FRAME", 0)));
+    G.RuleAIHorizontalDeadzone = std::clamp(
+        EnvInt("MELONDS_NSML_RULE_AI_HORIZONTAL_DEADZONE", 0x4000), 0, 0x200000);
+    G.RuleAIHorizontalWrapWidth = std::clamp(
+        EnvInt("MELONDS_NSML_RULE_AI_WRAP_WIDTH", 0x400000), 0, 0x800000);
+    G.RuleAICloseRange = std::clamp(
+        EnvInt("MELONDS_NSML_RULE_AI_CLOSE_RANGE", 0x22000), 0x1000, 0x200000);
+    G.RuleAIHazardHorizontalRange = std::clamp(
+        EnvInt("MELONDS_NSML_RULE_AI_HAZARD_HORIZONTAL_RANGE", G.RuleAIHazardHorizontalRange),
+        0,
+        0x200000);
+    G.RuleAIHazardVerticalRange = std::clamp(
+        EnvInt("MELONDS_NSML_RULE_AI_HAZARD_VERTICAL_RANGE", G.RuleAIHazardVerticalRange),
+        0,
+        0x200000);
+    G.RuleAIJumpInterval = std::clamp(
+        EnvInt("MELONDS_NSML_RULE_AI_JUMP_INTERVAL", 42), 1, 600);
+    G.RuleAIJumpFrames = std::clamp(
+        EnvInt("MELONDS_NSML_RULE_AI_JUMP_FRAMES", 9), 0, G.RuleAIJumpInterval);
+    G.RuleAITraceEnabled = EnvFlag("MELONDS_NSML_RULE_AI_TRACE");
+    G.RuleAITraceInterval = std::max(1, EnvInt("MELONDS_NSML_RULE_AI_TRACE_INTERVAL", 60));
+    G.ImitationAIEnabled = EnvFlag("MELONDS_NSML_IMITATION_AI");
+    G.ImitationAIHostOnly = EnvFlag("MELONDS_NSML_IMITATION_AI_HOST_ONLY");
+    G.ImitationAIClientOnly = EnvFlag("MELONDS_NSML_IMITATION_AI_CLIENT_ONLY");
+    G.ImitationAIPlayerSpec = EnvCString("MELONDS_NSML_IMITATION_AI_PLAYER", "remote");
+    G.ImitationAIStartFrame = static_cast<melonDS::u32>(
+        std::max(0, EnvInt("MELONDS_NSML_IMITATION_AI_START_FRAME", 0)));
+    G.ImitationAIThreshold = std::clamp(
+        EnvDouble("MELONDS_NSML_IMITATION_AI_THRESHOLD", 0.5), 0.0, 1.0);
+    G.ImitationAIAllowedHeldMask =
+        EnvU32("MELONDS_NSML_IMITATION_AI_ALLOWED_HELD_MASK", G.ImitationAIAllowedHeldMask) & 0x0FFFu;
+    G.ImitationAIHazardGuardEnabled =
+        EnvInt("MELONDS_NSML_IMITATION_AI_HAZARD_GUARD", 1) != 0 &&
+        !EnvFlag("MELONDS_NSML_IMITATION_AI_DISABLE_HAZARD_GUARD");
+    G.ImitationAIHazardGuardHorizontalRange = std::clamp(
+        EnvInt("MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_HORIZONTAL_RANGE", G.ImitationAIHazardGuardHorizontalRange),
+        0,
+        0x200000);
+    G.ImitationAIHazardGuardVerticalRange = std::clamp(
+        EnvInt("MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_VERTICAL_RANGE", G.ImitationAIHazardGuardVerticalRange),
+        0,
+        0x200000);
+    G.ImitationAIHazardGuardCloseRange = std::clamp(
+        EnvInt("MELONDS_NSML_IMITATION_AI_HAZARD_GUARD_CLOSE_RANGE", G.ImitationAIHazardGuardCloseRange),
+        0,
+        G.ImitationAIHazardGuardHorizontalRange);
+    G.ImitationAITraceEnabled = EnvFlag("MELONDS_NSML_IMITATION_AI_TRACE");
+    G.ImitationAITraceInterval = std::max(1, EnvInt("MELONDS_NSML_IMITATION_AI_TRACE_INTERVAL", 60));
+    G.ImitationAIInferInterval = std::clamp(EnvInt("MELONDS_NSML_IMITATION_AI_INFER_INTERVAL", 16), 1, 30);
+    G.ImitationAINeutralHoldFrames =
+        std::clamp(EnvInt("MELONDS_NSML_IMITATION_AI_NEUTRAL_HOLD_FRAMES", 8), 0, 120);
+    G.ImitationAIWarnMissingFeatures = !EnvFlag("MELONDS_NSML_IMITATION_AI_DISABLE_FEATURE_WARNING");
+    const char* imitationModel = std::getenv("MELONDS_NSML_IMITATION_AI_MODEL");
+    if (imitationModel && imitationModel[0])
+        G.ImitationAIModelPath = imitationModel;
+    if (G.ImitationAIEnabled)
+    {
+        if (G.ImitationAIModelPath.empty())
+        {
+            std::printf("NSMB ImitationAI: enabled but MELONDS_NSML_IMITATION_AI_MODEL is empty\n");
+            G.ImitationAIEnabled = false;
+        }
+        else
+        {
+            std::string torchCompactError;
+            G.ImitationAITorchCompactModelLoaded =
+                NsmbImitationAI::LoadTorchCompactPolicyModel(G.ImitationAIModelPath, G.ImitationAITorchCompactModel, torchCompactError);
+            if (G.ImitationAITorchCompactModelLoaded)
+            {
+                G.ImitationAIModelLoaded = true;
+            }
+            else
+            {
+            std::string compactError;
+            G.ImitationAICompactModelLoaded =
+                NsmbImitationAI::LoadCompactActionPolicyModel(G.ImitationAIModelPath, G.ImitationAICompactModel, compactError);
+            if (G.ImitationAICompactModelLoaded)
+            {
+                G.ImitationAIModelLoaded = true;
+            }
+            else
+            {
+                std::string modelError;
+                G.ImitationAIModelLoaded =
+                    NsmbImitationAI::LoadLinearPolicyModel(G.ImitationAIModelPath, G.ImitationAIModel, modelError);
+                if (!G.ImitationAIModelLoaded)
+                {
+                    std::printf(
+                        "NSMB ImitationAI: failed to load model path=%s torchCompactError=%s compactError=%s linearError=%s\n",
+                        G.ImitationAIModelPath.c_str(),
+                        torchCompactError.c_str(),
+                        compactError.c_str(),
+                        modelError.c_str());
+                    G.ImitationAIEnabled = false;
+                }
+            }
+            }
+        }
+    }
     G.NetworkPumpThreadEnabled = EnvFlag("MELONDS_NSML_NET_PUMP_THREAD");
     G.NetworkPumpSleepUs = std::clamp(EnvInt("MELONDS_NSML_NET_PUMP_SLEEP_US", 250), 50, 5000);
     G.InputWaitPollUs = std::clamp(EnvInt("MELONDS_NSML_INPUT_WAIT_POLL_US", 100), 50, 5000);
@@ -18081,6 +19507,86 @@ void InitFromEnvironment()
             G.GameStateTrace << '\n';
         }
     }
+    if ((G.TestEnabled || G.Enabled) && !G.AIPlayLogPath.empty())
+    {
+        std::error_code dirError;
+        const std::filesystem::path aiPlayLogPath(G.AIPlayLogPath);
+        const std::filesystem::path aiPlayLogParent = aiPlayLogPath.parent_path();
+        if (!aiPlayLogParent.empty())
+            std::filesystem::create_directories(aiPlayLogParent, dirError);
+        G.AIPlayLog.open(G.AIPlayLogPath, std::ios::out | std::ios::trunc);
+        if (!G.AIPlayLog)
+        {
+            std::printf("NSMB AIPlayLog: failed to open path=%s\n", G.AIPlayLogPath.c_str());
+        }
+        else
+        {
+            G.AIPlayLogLinesSinceFlush = 0;
+            std::printf(
+                "NSMB AIPlayLog: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d gameplayOnly=%d\n",
+                G.AIPlayLogPath.c_str(),
+                G.AIPlayLogInterval,
+                G.AIPlayLogFlushInterval,
+                G.AIPlayLogStartFrame,
+                G.AIPlayLogEndFrame,
+                G.AIPlayLogMaxObjects,
+                G.AIPlayLogGameplayOnly ? 1 : 0);
+        }
+    }
+    if ((G.TestEnabled || G.Enabled) && !G.AIObservationV2Path.empty())
+    {
+        std::error_code dirError;
+        const std::filesystem::path observationPath(G.AIObservationV2Path);
+        const std::filesystem::path observationParent = observationPath.parent_path();
+        if (!observationParent.empty())
+            std::filesystem::create_directories(observationParent, dirError);
+        G.AIObservationV2Log.open(G.AIObservationV2Path, std::ios::out | std::ios::trunc);
+        if (!G.AIObservationV2Log)
+        {
+            std::printf("NSMB AIObservationV2: failed to open path=%s\n", G.AIObservationV2Path.c_str());
+        }
+        else
+        {
+            G.AIObservationV2LinesSinceFlush = 0;
+            std::printf(
+                "NSMB AIObservationV2: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d stageFilter=%d gameplayOnly=%d\n",
+                G.AIObservationV2Path.c_str(),
+                G.AIPlayLogInterval,
+                G.AIPlayLogFlushInterval,
+                G.AIPlayLogStartFrame,
+                G.AIPlayLogEndFrame,
+                G.AIPlayLogMaxObjects,
+                G.AIObservationV2StageFilter,
+                G.AIPlayLogGameplayOnly ? 1 : 0);
+        }
+    }
+    if ((G.TestEnabled || G.Enabled) && !G.AIObservationV3Path.empty())
+    {
+        std::error_code dirError;
+        const std::filesystem::path observationPath(G.AIObservationV3Path);
+        const std::filesystem::path observationParent = observationPath.parent_path();
+        if (!observationParent.empty())
+            std::filesystem::create_directories(observationParent, dirError);
+        G.AIObservationV3Log.open(G.AIObservationV3Path, std::ios::out | std::ios::trunc);
+        if (!G.AIObservationV3Log)
+        {
+            std::printf("NSMB AIObservationV3: failed to open path=%s\n", G.AIObservationV3Path.c_str());
+        }
+        else
+        {
+            G.AIObservationV3LinesSinceFlush = 0;
+            std::printf(
+                "NSMB AIObservationV3: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d stageFilter=%d gameplayOnly=%d\n",
+                G.AIObservationV3Path.c_str(),
+                G.AIPlayLogInterval,
+                G.AIPlayLogFlushInterval,
+                G.AIPlayLogStartFrame,
+                G.AIPlayLogEndFrame,
+                G.AIPlayLogMaxObjects,
+                G.AIObservationV3StageFilter,
+                G.AIPlayLogGameplayOnly ? 1 : 0);
+        }
+    }
 
     if (G.TestEnabled)
     {
@@ -18335,6 +19841,91 @@ void InitFromEnvironment()
         G.MvlStageSceneSettings,
         G.MvlCourseMode.c_str(),
         G.MvlBigStarTarget);
+    if (G.RuleAIEnabled)
+    {
+        std::printf(
+            "NSMB RuleAI: enabled player=%s startFrame=%u deadzone=0x%X wrapWidth=0x%X closeRange=0x%X hazardRange=0x%X/0x%X jump=%d/%d trace=%d traceInterval=%d\n",
+            G.RuleAIPlayerSpec.c_str(),
+            G.RuleAIStartFrame,
+            G.RuleAIHorizontalDeadzone,
+            G.RuleAIHorizontalWrapWidth,
+            G.RuleAICloseRange,
+            G.RuleAIHazardHorizontalRange,
+            G.RuleAIHazardVerticalRange,
+            G.RuleAIJumpFrames,
+            G.RuleAIJumpInterval,
+            G.RuleAITraceEnabled ? 1 : 0,
+            G.RuleAITraceInterval);
+        if (G.RuleAIHostOnly || G.RuleAIClientOnly)
+        {
+            std::printf("NSMB RuleAI: roleFilter hostOnly=%d clientOnly=%d\n",
+                G.RuleAIHostOnly ? 1 : 0,
+                G.RuleAIClientOnly ? 1 : 0);
+        }
+    }
+    if (G.ImitationAIEnabled)
+    {
+        if (G.ImitationAITorchCompactModelLoaded)
+        {
+            std::printf(
+                "NSMB ImitationAI: enabled player=%s startFrame=%u modelType=torchCompact allowedHeldMask=0x%03X trace=%d traceInterval=%d inferInterval=%d neutralHoldFrames=%d model=%s features=%zu heads=%zu schema=%s labelSchema=%s\n",
+                G.ImitationAIPlayerSpec.c_str(),
+                G.ImitationAIStartFrame,
+                G.ImitationAIAllowedHeldMask,
+                G.ImitationAITraceEnabled ? 1 : 0,
+                G.ImitationAITraceInterval,
+                G.ImitationAIInferInterval,
+                G.ImitationAINeutralHoldFrames,
+                G.ImitationAIModelPath.c_str(),
+                G.ImitationAITorchCompactModel.FeatureCount(),
+                G.ImitationAITorchCompactModel.Heads.size(),
+                G.ImitationAITorchCompactModel.Schema.c_str(),
+                G.ImitationAITorchCompactModel.LabelSchema.c_str());
+        }
+        else if (G.ImitationAICompactModelLoaded)
+        {
+            std::printf(
+                "NSMB ImitationAI: enabled player=%s startFrame=%u modelType=compact allowedHeldMask=0x%03X trace=%d traceInterval=%d model=%s features=%zu heads=%zu schema=%s labelSchema=%s\n",
+                G.ImitationAIPlayerSpec.c_str(),
+                G.ImitationAIStartFrame,
+                G.ImitationAIAllowedHeldMask,
+                G.ImitationAITraceEnabled ? 1 : 0,
+                G.ImitationAITraceInterval,
+                G.ImitationAIModelPath.c_str(),
+                G.ImitationAICompactModel.FeatureCount(),
+                G.ImitationAICompactModel.Heads.size(),
+                G.ImitationAICompactModel.Schema.c_str(),
+                G.ImitationAICompactModel.LabelSchema.c_str());
+        }
+        else
+        {
+            std::printf(
+                "NSMB ImitationAI: enabled player=%s startFrame=%u modelType=linear threshold=%.3f allowedHeldMask=0x%03X trace=%d traceInterval=%d model=%s features=%zu buttons=%zu schema=%s featureSchema=%s\n",
+                G.ImitationAIPlayerSpec.c_str(),
+                G.ImitationAIStartFrame,
+                G.ImitationAIThreshold,
+                G.ImitationAIAllowedHeldMask,
+                G.ImitationAITraceEnabled ? 1 : 0,
+                G.ImitationAITraceInterval,
+                G.ImitationAIModelPath.c_str(),
+                G.ImitationAIModel.FeatureCount(),
+                G.ImitationAIModel.ButtonCount(),
+                G.ImitationAIModel.Schema.c_str(),
+                G.ImitationAIModel.FeatureSchemaID.c_str());
+        }
+        if (G.ImitationAIHostOnly || G.ImitationAIClientOnly)
+        {
+            std::printf("NSMB ImitationAI: roleFilter hostOnly=%d clientOnly=%d\n",
+                G.ImitationAIHostOnly ? 1 : 0,
+                G.ImitationAIClientOnly ? 1 : 0);
+        }
+        std::printf(
+            "NSMB ImitationAI: hazardGuard enabled=%d horizontalRange=0x%X verticalRange=0x%X closeRange=0x%X\n",
+            G.ImitationAIHazardGuardEnabled ? 1 : 0,
+            G.ImitationAIHazardGuardHorizontalRange,
+            G.ImitationAIHazardGuardVerticalRange,
+            G.ImitationAIHazardGuardCloseRange);
+    }
     std::fflush(stdout);
 }
 
@@ -18495,7 +20086,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         inputFrame = G.TestFrameCount[instanceID];
     phaseTrace.SetFrame(inputFrame);
 
-    if (G.Enabled && G.InputNetplayOnly && G.WaitForPeerBeforeStart && inputFrame == 0)
+    if (G.Enabled && G.InputNetplayOnly && G.WaitForPeerBeforeStart && inputFrame == 0
+        && !RuleAIProvidesInputForPlayer(CurrentPacketBridgeLocalPlayer() ^ 1)
+        && !ImitationAIProvidesInputForPlayer(CurrentPacketBridgeLocalPlayer() ^ 1))
     {
         if (!G.WaitForPeerAtNetplayStart)
             WaitForPeerIfNeeded(true);
@@ -18638,6 +20231,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerDeathCountersIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForcePlayerPowerupsIfNeeded(instanceID, inputFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerInventoryPowerupsIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerStarCountersIfNeeded(instanceID, inputFrame, nds);
@@ -18681,7 +20276,29 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     WaitAtFrameBarrier(GBeforeFrameBarrier, instanceID, inputFrame, "before");
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Barrier);
 
-    const InputState testInput = ApplyInputScript(instanceID, inputFrame, polledInput);
+    const InputState inputFallback = G.NeutralizePolledInput
+        ? (G.NeutralizePolledInputPreserveTouch ? NeutralInputPreservingTouch(polledInput) : NeutralInput())
+        : polledInput;
+    InputState testInput = ApplyInputScript(instanceID, inputFrame, inputFallback);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        testInput = ApplyRuleBasedAIInput(
+            instanceID,
+            inputFrame,
+            nds,
+            CurrentPacketBridgeLocalPlayer(),
+            testInput);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        testInput = ApplyImitationAIInput(
+            instanceID,
+            inputFrame,
+            nds,
+            CurrentPacketBridgeLocalPlayer(),
+            testInput);
+    RecordAIPlayLogAppliedInput(
+        instanceID,
+        inputFrame,
+        CurrentPacketBridgeLocalPlayer(),
+        testInput);
     RecordInputIfNeeded(instanceID, inputFrame, testInput);
     const melonDS::u32 syncFrame = G.TestEnabled ? inputFrame : frame;
 
@@ -19336,6 +20953,8 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerActorPositionIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+        ForcePlayerPowerupsIfNeeded(instanceID, logFrame, nds);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerInventoryPowerupsIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerStarCountersIfNeeded(instanceID, logFrame, nds);
@@ -19385,6 +21004,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     const auto afterApplyPlayer = std::chrono::steady_clock::now();
     TraceHangPhase("begin", "game-state-trace", instanceID, logFrame, logFrame, logFrame);
     TraceGameState(instanceID, logFrame, nds);
+    TraceAIPlayLog(instanceID, logFrame, nds);
     const auto afterTrace = std::chrono::steady_clock::now();
     TraceHangPhase("begin", "sync-game", instanceID, logFrame, logFrame, logFrame);
     SyncGameState(instanceID, logFrame, nds);
@@ -19613,6 +21233,21 @@ void Shutdown()
 
     if (G.GameStateTrace)
         G.GameStateTrace.close();
+    if (G.AIPlayLog)
+    {
+        G.AIPlayLog.flush();
+        G.AIPlayLog.close();
+    }
+    if (G.AIObservationV2Log)
+    {
+        G.AIObservationV2Log.flush();
+        G.AIObservationV2Log.close();
+    }
+    if (G.AIObservationV3Log)
+    {
+        G.AIObservationV3Log.flush();
+        G.AIObservationV3Log.close();
+    }
 }
 
 }

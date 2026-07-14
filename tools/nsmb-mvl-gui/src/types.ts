@@ -1,6 +1,8 @@
 import type { CourseMode, Lives, Role } from './bindings';
 
 export type {
+  AiArtifact,
+  AiReplayFrameRef,
   BridgeDiagnostics,
   CleanupDetailedLogsResponse,
   CourseMode,
@@ -29,9 +31,18 @@ export type {
   MatchPlayerNames,
   MvlPlayerResult,
   MvlStageResult,
+  OpenAiReplayLogRequest,
+  OpenAiReplayLogResponse,
   PreflightResponse,
+  ReadAiReplayFrameRequest,
+  ReadAiReplayFrameResponse,
+  ReadAiTextFileRequest,
+  ReadAiTextFileResponse,
   Role,
   RomIdentity,
+  RunAiToolRequest,
+  RunAiToolResponse,
+  SaveAiPlayLogRequest,
   SaveDetailedLogsRequest,
   SaveDiagnosticEventsRequest,
   SaveNewRoomNotificationsRequest,
@@ -67,6 +78,7 @@ export type FormState = {
   rollbackEnabled: boolean;
   diagnosticEventsEnabled: boolean;
   detailedLogsEnabled: boolean;
+  aiPlayLogEnabled: boolean;
   performanceLogsEnabled: boolean;
   newRoomNotificationsEnabled: boolean;
 };

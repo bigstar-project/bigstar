@@ -37,6 +37,61 @@ function loadLocalBuildEnv() {
   return parseEnvFile(readFileSync(envPath, 'utf8'));
 }
 
+function parseBuildArgs(args) {
+  const forwardedArgs = [];
+  let buildProfile = null;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--build-profile') {
+      buildProfile = args[i + 1] ?? null;
+      i++;
+      continue;
+    }
+    if (arg.startsWith('--build-profile=')) {
+      buildProfile = arg.slice('--build-profile='.length);
+      continue;
+    }
+    forwardedArgs.push(arg);
+  }
+  if (buildProfile !== null && buildProfile !== 'local' && buildProfile !== 'distribution') {
+    console.error('--build-profile は local または distribution を指定してください');
+    process.exit(1);
+  }
+  return { buildProfile, forwardedArgs };
+}
+
+function splitFeatureList(value) {
+  return value
+    .split(/[\s,]+/)
+    .map((feature) => feature.trim())
+    .filter(Boolean);
+}
+
+function joinFeatureList(features) {
+  return [...new Set(features)].join(',');
+}
+
+function ensureCargoFeature(args, feature) {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--features') {
+      const features = splitFeatureList(args[i + 1] ?? '');
+      if (!features.includes(feature)) {
+        args[i + 1] = joinFeatureList([...features, feature]);
+      }
+      return args;
+    }
+    if (arg.startsWith('--features=')) {
+      const features = splitFeatureList(arg.slice('--features='.length));
+      if (!features.includes(feature)) {
+        args[i] = `--features=${joinFeatureList([...features, feature])}`;
+      }
+      return args;
+    }
+  }
+  return [...args, '--features', feature];
+}
+
 const pnpmCli = process.env.npm_execpath;
 if (!pnpmCli) {
   console.error('pnpm から build script を実行してください');
@@ -44,12 +99,21 @@ if (!pnpmCli) {
 }
 
 const localEnv = loadLocalBuildEnv();
+const { buildProfile, forwardedArgs } = parseBuildArgs(process.argv.slice(2));
+const tauriBuildArgs =
+  buildProfile === 'distribution'
+    ? ensureCargoFeature(forwardedArgs, 'single-instance')
+    : forwardedArgs;
 const child = spawn(
   process.execPath,
-  [pnpmCli, 'tauri', 'build', ...process.argv.slice(2)],
+  [pnpmCli, 'tauri', 'build', ...tauriBuildArgs],
   {
     cwd: process.cwd(),
-    env: { ...process.env, ...localEnv },
+    env: {
+      ...process.env,
+      ...localEnv,
+      ...(buildProfile ? { NSMB_MVL_BUILD_PROFILE: buildProfile } : {}),
+    },
     shell: false,
     stdio: 'inherit',
   },

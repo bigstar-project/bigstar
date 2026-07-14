@@ -1,5 +1,6 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -11,10 +12,10 @@ use crate::models::{
 use crate::paths::allowed_log_dir;
 use crate::paths::load_match_history_document_content;
 use crate::processes::{
-    build_bridge_command, build_melon_command, melon_env, read_bridge_diagnostics,
-    read_melon_diagnostics, read_mvl_results, remove_inherited_melonds_env_keys,
-    run_bridge_signaling_smoke, session_status_inner, should_show_game_state_mismatch_in_gui,
-    start_match_resolved, stop_existing, LaunchPaths,
+    build_bridge_command, build_melon_command, finalize_ai_observation_v3_log, melon_env,
+    read_bridge_diagnostics, read_melon_diagnostics, read_mvl_results,
+    remove_inherited_melonds_env_keys, run_bridge_signaling_smoke, session_status_inner,
+    should_show_game_state_mismatch_in_gui, start_match_resolved, stop_existing, LaunchPaths,
 };
 use crate::roms::{reusable_rom_is_current, reusable_rom_marker_path, write_reusable_rom_marker};
 use crate::settings::{selected_stage, validate_request};
@@ -29,6 +30,7 @@ fn request(role: Role) -> LaunchRequest {
         player_names: None,
         diagnostic_events_enabled: false,
         detailed_logs_enabled: false,
+        ai_play_log_enabled: false,
         performance_logs_enabled: false,
         rom_identity: None,
         rom_path: "unused.nds".to_owned(),
@@ -59,6 +61,69 @@ fn temp_log_dir(name: &str) -> PathBuf {
     let _ = fs::remove_dir_all(&path);
     fs::create_dir_all(&path).expect("create temp log dir");
     path
+}
+
+#[test]
+fn finalized_ai_observation_v3_log_is_gzipped_and_source_is_removed() {
+    let dir = temp_log_dir("ai-observation-v3-gzip");
+    let source = dir.join("ai-observations-v3.jsonl");
+    let gzip = dir.join("ai-observations-v3.jsonl.gz");
+    let content = "{\"frame\":1,\"held\":0}\n{\"frame\":2,\"held\":1}\n";
+    fs::write(&source, content).expect("write source AI log");
+
+    assert!(finalize_ai_observation_v3_log(&dir).expect("compress AI log"));
+    assert!(!source.exists());
+    assert!(gzip.is_file());
+
+    let file = fs::File::open(&gzip).expect("open gzip AI log");
+    let mut decoder = flate2::read::GzDecoder::new(file);
+    let mut decoded = String::new();
+    decoder
+        .read_to_string(&mut decoded)
+        .expect("decode gzip AI log");
+    assert_eq!(decoded, content);
+    assert!(!finalize_ai_observation_v3_log(&dir).expect("finalize again"));
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn finalized_ai_observation_v3_log_discards_incomplete_trailing_record() {
+    let dir = temp_log_dir("ai-observation-v3-incomplete-tail");
+    let source = dir.join("ai-observations-v3.jsonl");
+    let gzip = dir.join("ai-observations-v3.jsonl.gz");
+    let complete = "{\"frame\":1}\n{\"frame\":2}\n";
+    fs::write(&source, format!("{complete}{{\"frame\":3")).expect("write partial AI log");
+
+    assert!(finalize_ai_observation_v3_log(&dir).expect("compress AI log"));
+    assert!(!source.exists());
+
+    let file = fs::File::open(&gzip).expect("open gzip AI log");
+    let mut decoder = flate2::read::GzDecoder::new(file);
+    let mut decoded = String::new();
+    decoder
+        .read_to_string(&mut decoded)
+        .expect("decode gzip AI log");
+    assert_eq!(decoded, complete);
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn failed_ai_observation_v3_compression_keeps_source_log() {
+    let dir = temp_log_dir("ai-observation-v3-gzip-failure");
+    let source = dir.join("ai-observations-v3.jsonl");
+    let gzip = dir.join("ai-observations-v3.jsonl.gz");
+    fs::write(&source, "{\"frame\":1}\n").expect("write source AI log");
+    fs::create_dir(&gzip).expect("block gzip destination with directory");
+
+    let error = finalize_ai_observation_v3_log(&dir).expect_err("compression must fail");
+    assert!(error.contains("置換できません"));
+    assert!(source.is_file());
+    assert!(gzip.is_dir());
+    assert!(!dir.join("ai-observations-v3.jsonl.gz.tmp").exists());
+
+    let _ = fs::remove_dir_all(dir);
 }
 
 fn fake_executable(dir: &Path, name: &str, should_sleep: bool) -> PathBuf {
@@ -268,6 +333,8 @@ fn melon_env_carries_game_settings_and_netplay_start() {
     assert!(!env.contains_key("MELONDS_NSML_GAME_STATE_TRACE"));
     assert!(!env.contains_key("MELONDS_NSML_GAME_STATE_TRACE_INTERVAL"));
     assert!(!env.contains_key("MELONDS_NSML_GAME_STATE_TRACE_EXTENDED"));
+    assert!(!env.contains_key("MELONDS_NSML_AI_OBSERVATION_V3_LOG"));
+    assert!(!env.contains_key("MELONDS_NSML_AI_OBSERVATION_V3_STAGE_FILTER"));
     assert_eq!(env["MELONDS_NSML_STATE_SYNC"], "1");
     assert_eq!(env["MELONDS_NSML_STATE_SYNC_INTERVAL"], "60");
     assert_eq!(env["MELONDS_NSML_STATE_SYNC_EXTENDED"], "1");
@@ -279,12 +346,43 @@ fn melon_env_carries_game_settings_and_netplay_start() {
 }
 
 #[test]
+fn melon_env_enables_ai_play_log_v3_when_requested() {
+    let mut request = request(Role::Host);
+    request.ai_play_log_enabled = true;
+    let env = melon_env(
+        &request,
+        Path::new("bootstrap.inputs"),
+        Path::new("logs/nsmb-mvl-gui-test"),
+    );
+
+    assert!(env["MELONDS_NSML_AI_OBSERVATION_V3_LOG"].ends_with("ai-observations-v3.jsonl"));
+    assert_eq!(env["MELONDS_NSML_AI_PLAY_LOG_INTERVAL"], "1");
+    assert_eq!(env["MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL"], "300");
+    assert_eq!(env["MELONDS_NSML_AI_OBSERVATION_V3_STAGE_FILTER"], "0");
+    assert!(!env.contains_key("MELONDS_NSML_AI_PLAY_LOG"));
+}
+
+#[test]
+fn melon_env_enables_ai_play_log_v3_for_client() {
+    let mut request = request(Role::Client);
+    request.ai_play_log_enabled = true;
+    let env = melon_env(
+        &request,
+        Path::new("bootstrap.inputs"),
+        Path::new("logs/nsmb-mvl-gui-test"),
+    );
+
+    assert_eq!(env["MELONDS_NSML_ROLE"], "client");
+    assert!(env["MELONDS_NSML_AI_OBSERVATION_V3_LOG"].ends_with("ai-observations-v3.jsonl"));
+    assert_eq!(env["MELONDS_NSML_AI_OBSERVATION_V3_STAGE_FILTER"], "0");
+}
+
+#[test]
 fn melon_env_observes_results_for_single_win_matches() {
     let mut request = request(Role::Host);
     request.settings.wins = 1;
     request.settings.course_stages = vec![2];
     request.settings.rng_seeds = vec!["7".to_owned()];
-
     let env = melon_env(
         &request,
         Path::new("bootstrap.inputs"),
@@ -916,6 +1014,7 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
 
     let state = AppState::default();
     let mut launch_request = request(Role::Host);
+    launch_request.ai_play_log_enabled = true;
     launch_request.rom_identity = Some(RomIdentity {
         rom_pair_id: "pair_hash".to_owned(),
         generator_id: "generator_hash".to_owned(),
@@ -986,6 +1085,7 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
         Some(0)
     );
     assert_eq!(launcher["request"]["detailed_logs_enabled"], false);
+    assert_eq!(launcher["request"]["ai_play_log_enabled"], true);
     assert_eq!(launcher["request"]["performance_logs_enabled"], false);
     assert_eq!(
         launcher["launch"]["melonds"]["env"]
@@ -993,15 +1093,31 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
             .and_then(|env| env.get("MELONDS_NSML_INPUT_NETPLAY_TRACE")),
         None
     );
+    assert!(
+        launcher["launch"]["melonds"]["env"]["MELONDS_NSML_AI_OBSERVATION_V3_LOG"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("ai-observations-v3.jsonl"))
+    );
+    assert_eq!(
+        launcher["launch"]["melonds"]["env"]["MELONDS_NSML_AI_OBSERVATION_V3_STAGE_FILTER"],
+        "0"
+    );
     assert_eq!(
         launcher["launch"]["melonds"]["env"]["MELONDS_NSML_MVL_STAGE_SEQUENCE"],
         "2,3,4,0,1"
     );
     assert_eq!(launcher["runtime"]["os"], std::env::consts::OS);
 
+    let ai_log = dir.join("logs").join("ai-observations-v3.jsonl");
+    fs::write(&ai_log, "{\"frame\":1}\n").expect("write active AI log");
     stop_existing(&state).expect("stop fake match");
     let status = session_status_inner(&state).expect("status after stop");
     assert!(!status.active);
+    assert!(!ai_log.exists());
+    assert!(dir
+        .join("logs")
+        .join("ai-observations-v3.jsonl.gz")
+        .is_file());
 
     let _ = fs::remove_dir_all(dir);
 }
@@ -1035,12 +1151,19 @@ fn session_status_terminates_bridge_when_melon_exits() {
 
     let state = AppState::default();
     start_match_resolved(&state, request(Role::Host), paths).expect("start fake match");
+    let ai_log = dir.join("logs").join("ai-observations-v3.jsonl");
+    fs::write(&ai_log, "{\"frame\":1}\n").expect("write active AI log");
 
     for _ in 0..40 {
         let status = session_status_inner(&state).expect("status");
         if status.melon.as_deref() != Some("running") {
             assert_ne!(status.bridge.as_deref(), Some("running"));
             assert!(!status.active);
+            assert!(!ai_log.exists());
+            assert!(dir
+                .join("logs")
+                .join("ai-observations-v3.jsonl.gz")
+                .is_file());
             let _ = fs::remove_dir_all(dir);
             return;
         }

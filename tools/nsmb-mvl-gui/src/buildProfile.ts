@@ -9,3 +9,7 @@ export function currentBuildProfile(): BuildProfile {
 export function isDistributionBuild() {
   return currentBuildProfile() === 'distribution';
 }
+
+export function areAiDevToolsEnabled() {
+  return globalThis.__NSMB_MVL_AI_DEVTOOLS_ENABLED__ !== false;
+}

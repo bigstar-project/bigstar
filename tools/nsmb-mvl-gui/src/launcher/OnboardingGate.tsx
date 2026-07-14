@@ -14,6 +14,7 @@ import type {
   LauncherActions,
   OnboardingState,
   UpdateFormField,
+  View,
 } from './types';
 
 function StepStatus({
@@ -148,22 +149,29 @@ function StepRow({
 
 export function OnboardingGate({
   actions,
+  activeView,
   activityStatus,
+  aiDevToolsEnabled = true,
   form,
   onboarding,
+  onOpenAi,
   updateField,
 }: {
   actions: Pick<
     LauncherActions,
     'openMelondsInputConfig' | 'savePlayerName' | 'selectBaseRomAndPrepare'
   >;
+  activeView: View;
   activityStatus: { text: string; kind: StatusKind } | null;
+  aiDevToolsEnabled?: boolean;
   form: FormState;
   onboarding: OnboardingState;
+  onOpenAi: () => void;
   updateField: UpdateFormField;
 }) {
   if (
     !onboarding.loaded ||
+    activeView === 'ai' ||
     (onboarding.romsPrepared &&
       onboarding.inputConfigOpened &&
       onboarding.playerNameConfigured)
@@ -311,6 +319,23 @@ export function OnboardingGate({
                 title="melonDSの入力を設定"
               />
             </div>
+
+            {aiDevToolsEnabled ? (
+              <div
+                className={css({
+                  alignItems: 'center',
+                  borderTopColor: 'gray.surface.border',
+                  borderTopWidth: '1px',
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  pt: '4',
+                })}
+              >
+                <Button type="button" variant="outline" onClick={onOpenAi}>
+                  AI開発を開く
+                </Button>
+              </div>
+            ) : null}
           </Dialog.Body>
         </Dialog.Content>
       </Dialog.Positioner>

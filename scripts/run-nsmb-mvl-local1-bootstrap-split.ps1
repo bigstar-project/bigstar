@@ -26,6 +26,11 @@ param(
     [switch]$NoGameStateTrace,
     [switch]$NoHashLog,
     [switch]$PacketBridgePreserveLocalTouch,
+    [switch]$ForcePlayerPowerups,
+    [int]$ForcePlayerPowerupsStartFrame = 0,
+    [int]$ForcePlayerPowerupsEndFrame = 0,
+    [int]$ForcePlayerPowerup0 = 0,
+    [int]$ForcePlayerPowerup1 = 0,
     [switch]$ForcePlayerInventoryPowerups,
     [int]$ForcePlayerInventoryPowerupsStartFrame = 0,
     [int]$ForcePlayerInventoryPowerupsEndFrame = 0,
@@ -74,6 +79,13 @@ if ($NoScreenshots) { $argsForRun.NoScreenshots = $true }
 if ($NoGameStateTrace) { $argsForRun.NoGameStateTrace = $true }
 if ($NoHashLog) { $argsForRun.NoHashLog = $true }
 if ($PacketBridgePreserveLocalTouch) { $argsForRun.PacketBridgePreserveLocalTouch = $true }
+if ($ForcePlayerPowerups) {
+    $argsForRun.ForcePlayerPowerups = $true
+    $argsForRun.ForcePlayerPowerupsStartFrame = $ForcePlayerPowerupsStartFrame
+    $argsForRun.ForcePlayerPowerupsEndFrame = $ForcePlayerPowerupsEndFrame
+    $argsForRun.ForcePlayerPowerup0 = $ForcePlayerPowerup0
+    $argsForRun.ForcePlayerPowerup1 = $ForcePlayerPowerup1
+}
 if ($ForcePlayerInventoryPowerups) {
     $argsForRun.ForcePlayerInventoryPowerups = $true
     $argsForRun.ForcePlayerInventoryPowerupsStartFrame = $ForcePlayerInventoryPowerupsStartFrame

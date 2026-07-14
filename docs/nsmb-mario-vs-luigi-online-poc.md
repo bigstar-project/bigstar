@@ -1,5 +1,42 @@
 # NSMB Mario vs Luigi Online PoC
 
+## AI observation v3 / exact player hitbox - 2026-07-14
+
+- Goal: observe the real, per-frame collision size of both players, including continuous mini/mega transformation changes, instead of inferring size only from the power-up category.
+- ROM analysis:
+  - `Player::setupCollisionMgr(bool)` (`0x02107E44`, overlay 10) selects `Player::hitboxSmall/Super/Mega/Mini` and writes the active/interpolated hitbox into Player RAM.
+  - Active center offsets are Player `+0x960/+0x964`; active half width/height are StageActor `+0x13C/+0x140`. Values are signed 20.12 fixed point.
+  - Verified static targets are mini `4x6 px`, small `8x12 px`, super/fire/shell `12x20 px`, and mega `48x105 px`. Runtime action state may select a different size, so logging reads the active RAM fields rather than substituting these constants.
+  - `CollisionMgr::init` stores bottom/top/side/line sensor pointers at CollisionMgr `+0x08/+0x0C/+0x10/+0x14`; each live 16-byte sensor is now sampled as type plus three signed fixed-point values.
+- Version contract:
+  - v1 remains the verbose audit/raw log (`nsmb_mvl_ai_play_log_v1`). v2 is frozen as the old compact ML contract (`nsmb_mvl_compact_observation_v2`, 35 scalar features).
+  - Exact hitbox observations are a breaking input change and now use `nsmb_mvl_compact_observation_v3`, `ai-observations-v3.jsonl(.gz)`, and `nsmb_mvl_compact_dataset_v3` with 47 ordered scalar features.
+  - v3 records `bodySize`, the live `hitbox` center offsets/half dimensions/full dimensions/bounds, and `collisionSensors.bottom/top/side/line` for each player. The category-only body class is coarse context; the live RAM hitbox is authoritative.
+  - v3 dataset construction requires both players' exact hitboxes and every required v3 scalar. It does not zero-fill or upgrade v1/v2 data that never sampled hitboxes.
+  - Compact model artifacts carry `input_schema` and `scalar_schema`. Runtime loading/building selects 35 or 47 scalars from that declared schema and rejects unsupported or mismatched schema/count pairs; the temporary 37-scalar layout is not supported.
+  - GUI and human-recording scripts now collect v3 and post-process with the v3 dataset builder. GUI finalization writes `ai-observations-v3.jsonl.gz` atomically after melonDS exits and retains the plain source if compression fails.
+  - A stage/checkpoint transition could previously leave frame 8333 as an unterminated final JSONL record. melonDS now serializes each compact observation completely in memory before one file write; GUI gzip finalization discards only an unterminated trailing record; and the v3 dataset builder similarly warns and skips only that recoverable EOF case. Complete malformed lines still fail validation.
+- Current blocker: none in the implementation. End-to-end GUI play should still be checked visually for every form.
+- Next action: collect fresh v3 human data and train a 47-scalar model. Historical v1/v2 data remains usable only with the frozen v2/35-feature pipeline.
+- Verification status:
+  - Pre-version-split runtime evidence in `logs/codex-ai-hitbox-smoke3-20260714/host/ai-observations-v2.jsonl` has 1,418 valid rows from frames 785-2202. Forced Mega grows continuously and reaches width `196608` / height `430080` (48x105 px); all four collision sensors are present. This file used the temporary v2 schema name and is not accepted as v3 training data.
+  - `logs/codex-ai-v3-direct-smoke3-20260714` directly produced 216 valid v3 rows per host/client for frames 785-1000. Each side has 141 rows with both exact hitboxes; both player scalar maps contain exactly 47 fields, and the client v3 NPZ contains 141 rows.
+  - `logs/codex-v3-schema-fixture-20260714` verifies frozen v2 output/dataset at 35 scalars, v3 at 47 scalars, missing-hitbox rejection, valid v3 C++ compact-policy prediction, and rejection of a model falsely declaring v2 with 47 scalars.
+  - The real GUI capture `nsmb-mvl-gui-1784016703544-35556-0/ai-observations-v3.jsonl.gz`, which contains the historical partial frame 8333 tail, now recovers successfully into 7,070 v3 dataset rows while emitting one explicit warning. A Rust regression test verifies gzip finalization removes an incomplete tail and preserves all complete records.
+  - Python syntax checks and melonDS Release builds pass. GUI `cargo fmt`, all 49 Rust tests, `cargo clippy-all`, and `corepack pnpm run ci` pass (37 unit, 52 browser, 2 Playwright). Sidecar sync passes; melonDS sha256 is `69ee2c8cf3ed656a03eb2e4ac6d89a366212d194e3681c31e0c5ec4ee475f912`.
+
+## GUI AI v3 playlog toggle - 2026-07-01 / updated 2026-07-14
+
+- Goal: allow real GUI-launched online matches to emit lightweight AI training observations without enabling the heavier v1 audit playlog.
+- Design:
+  - The GUI setting `AI用プレイログ` controls `LaunchRequest.ai_play_log_enabled` and is persisted in launcher settings. Default is off.
+  - When enabled, GUI melonDS launches pass `MELONDS_NSML_AI_OBSERVATION_V3_LOG=<logdir>\ai-observations-v3.jsonl`, `MELONDS_NSML_AI_PLAY_LOG_INTERVAL=1`, `MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL=300`, and `MELONDS_NSML_AI_OBSERVATION_V3_STAGE_FILTER=0`.
+  - melonDS keeps v1 and frozen-v2 behavior available. The v3 stage filter is optional; when set, v3 records are written only while the sampled runtime state is MvL stage group 9 and stage ID 0.
+  - During a match the log remains plain JSONL so melonDS can append safely. On exit/stop the GUI atomically writes `ai-observations-v3.jsonl.gz` and deletes the source only after success.
+- Current blocker: none in the implementation; end-to-end GUI play verification remains.
+- Next action: confirm host/Mario and client/Luigi GUI launches create v3 JSONL while stage 0 is active, replace it with readable gzip after exit/stop, create no file when the setting is off, and do not record non-stage-0 frames.
+- Verification status: `cargo fmt`, all 48 Rust tests, `cargo clippy-all`, and the GUI `corepack pnpm run ci` suite pass (37 unit tests, 52 browser tests, and 2 Playwright tests). Rust coverage verifies v3 gzip contents, source deletion after success, source preservation on failure, idempotent finalization, explicit stop, and detected melonDS exit. Manual online-match verification is not yet complete.
+
 ## GUI target-wins=1 history recording fix - 2026-07-13
 
 - User report: matches configured for one required win on 2026-07-12 appeared to be missing from match history.

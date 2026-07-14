@@ -4,8 +4,8 @@ param(
     [int]$StallTimeoutMs = 0,
     [int]$StallStartFrame = 900,
     [int]$GameplayHeartbeatInterval = 120,
-    [int]$InputDelayFrames = 16,
-    [int]$InputMaxFrameLead = 2,
+    [int]$InputDelayFrames = 2,
+    [int]$InputMaxFrameLead = 4,
     [int]$InternalWaitTimeoutMs = 0,
     [int]$InputSendDelayFrames = 0,
     [int]$InputSendJitterFrames = 0,
@@ -39,11 +39,14 @@ param(
     [int]$WorldStateTraceObjectLifecyclesStartFrame = 0,
     [int]$WorldStateTraceObjectLifecyclesEndFrame = 0,
     [int]$HostStartupDelayMs = 1200,
+    [int]$HostReadyTimeoutMs = 30000,
+    [switch]$ClientOnly,
     [switch]$WaitForPeerAtNetplayStart,
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$GenerateMvlSourceRom = "roms\nsmb-us.nds",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds",
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds",
+    [switch]$CopyRomToLog,
     [string]$InputScript = "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs",
     [switch]$RecordInput,
     [string]$InputRecordDir = "",
@@ -56,10 +59,35 @@ param(
     [int]$GameStateTraceStartFrame = 0,
     [int]$GameStateTraceEndFrame = 0,
     [switch]$GameStateTraceExtended,
+    [string]$HostAIPlayLog = "",
+    [string]$ClientAIPlayLog = "",
+    [string]$HostAIObservationV3Log = "",
+    [string]$ClientAIObservationV3Log = "",
+    [int]$AIPlayLogInterval = 1,
+    [int]$AIPlayLogFlushInterval = 60,
+    [int]$AIPlayLogMaxObjects = 128,
+    [switch]$NeutralizeHostInput,
+    [switch]$NeutralizeClientInput,
     [switch]$InputNetplayTrace,
+    [switch]$PacketCapture,
+    [switch]$PacketCaptureAllowPreGame,
     [switch]$TracePlayerLifeChanges,
     [switch]$TracePlayerDefeated,
     [switch]$PerfBreakdown,
+    [switch]$ForcePlayerPowerups,
+    [int]$ForcePlayerPowerupsStartFrame = 0,
+    [int]$ForcePlayerPowerupsEndFrame = 0,
+    [int]$ForcePlayerPowerup0 = 0,
+    [int]$ForcePlayerPowerup1 = 0,
+    [switch]$ForcePlayerStarCounters,
+    [int]$ForcePlayerStarCountersStartFrame = 900,
+    [int]$ForcePlayerStarCountersEndFrame = 1500,
+    [int]$ForcePlayerBattleStars0 = 0,
+    [int]$ForcePlayerBattleStars1 = 0,
+    [int]$ForcePlayerDisplayedStars0 = 0,
+    [int]$ForcePlayerDisplayedStars1 = 0,
+    [int]$ForcePlayerCollectedStars0 = 0,
+    [int]$ForcePlayerCollectedStars1 = 0,
     [int]$PacketBridgeStartFrame = 840,
     [int]$MvlStage = -1,
     [string]$MvlSceneSettings = "",
@@ -74,7 +102,9 @@ param(
     [switch]$AllowJit,
     [switch]$NoJit,
     [switch]$NoFrameLimit,
-    [switch]$SoftwareRenderer
+    [switch]$SkipFrameLimitCheck,
+    [switch]$SoftwareRenderer,
+    [switch]$Wait
 )
 
 $ErrorActionPreference = "Stop"
@@ -264,8 +294,16 @@ $common = @(
     "-ClearMvlCameraInitHold",
     "-ClearMvlCameraInitHoldStartFrame", "840"
 )
-if ($WaitForPeerAtNetplayStart) {
+if ($ClientOnly) {
+    $common += @(
+        "-NoLocalWait",
+        "-NoImplicitInputNetplayPeerWait"
+    )
+} elseif ($WaitForPeerAtNetplayStart) {
     $common += "-WaitForPeerAtNetplayStart"
+}
+if ($CopyRomToLog) {
+    $common += "-CopyRomToLog"
 }
 if ($GameStateTrace) {
     $common += @(
@@ -281,11 +319,39 @@ if ($GameStateTrace) {
 if ($InputNetplayTrace) {
     $common += "-InputNetplayTrace"
 }
+if ($PacketCapture) {
+    $common += "-PacketCapture"
+    if ($PacketCaptureAllowPreGame) {
+        $common += "-PacketCaptureAllowPreGame"
+    }
+}
 if ($TracePlayerLifeChanges) {
     $common += "-TracePlayerLifeChanges"
 }
 if ($TracePlayerDefeated) {
     $common += "-TracePlayerDefeated"
+}
+if ($ForcePlayerPowerups) {
+    $common += @(
+        "-ForcePlayerPowerups",
+        "-ForcePlayerPowerupsStartFrame", "$ForcePlayerPowerupsStartFrame",
+        "-ForcePlayerPowerupsEndFrame", "$ForcePlayerPowerupsEndFrame",
+        "-ForcePlayerPowerup0", "$ForcePlayerPowerup0",
+        "-ForcePlayerPowerup1", "$ForcePlayerPowerup1"
+    )
+}
+if ($ForcePlayerStarCounters) {
+    $common += @(
+        "-ForcePlayerStarCounters",
+        "-ForcePlayerStarCountersStartFrame", "$ForcePlayerStarCountersStartFrame",
+        "-ForcePlayerStarCountersEndFrame", "$ForcePlayerStarCountersEndFrame",
+        "-ForcePlayerBattleStars0", "$ForcePlayerBattleStars0",
+        "-ForcePlayerBattleStars1", "$ForcePlayerBattleStars1",
+        "-ForcePlayerDisplayedStars0", "$ForcePlayerDisplayedStars0",
+        "-ForcePlayerDisplayedStars1", "$ForcePlayerDisplayedStars1",
+        "-ForcePlayerCollectedStars0", "$ForcePlayerCollectedStars0",
+        "-ForcePlayerCollectedStars1", "$ForcePlayerCollectedStars1"
+    )
 }
 if ($PlanDActorSnapshot) {
     $common += @(
@@ -324,6 +390,9 @@ if ($WorldStateSkipEffects) {
 }
 if ($NoFrameLimit) {
     $common += "-NoFrameLimit"
+}
+if ($SkipFrameLimitCheck) {
+    $common += "-SkipFrameLimitCheck"
 }
 if (-not $NoJit) {
     $common += "-AllowJit"
@@ -486,16 +555,115 @@ $hostErr = Join-Path $wrapperLog "host-wrapper.err.txt"
 $clientOut = Join-Path $wrapperLog "client-wrapper.out.txt"
 $clientErr = Join-Path $wrapperLog "client-wrapper.err.txt"
 
-$hostProc = Start-Process -FilePath "powershell.exe" `
-    -ArgumentList $hostArgs `
-    -WorkingDirectory $repoRoot `
-    -RedirectStandardOutput $hostOut `
-    -RedirectStandardError $hostErr `
-    -PassThru `
-    -WindowStyle Hidden
+$oldAIEnv = @{}
+foreach ($name in @(
+    "MELONDS_NSML_AI_PLAY_LOG",
+    "MELONDS_NSML_AI_OBSERVATION_V3_LOG",
+    "MELONDS_NSML_AI_PLAY_LOG_INTERVAL",
+    "MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL",
+    "MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS",
+    "MELONDS_NSML_NEUTRALIZE_POLLED_INPUT",
+    "MELONDS_NSML_NEUTRALIZE_POLLED_INPUT_PRESERVE_TOUCH"
+)) {
+    $oldAIEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+}
 
-Start-Sleep -Milliseconds $HostStartupDelayMs
+function Set-AIPlayLogEnv {
+    param(
+        [string]$Path,
+        [string]$ObservationV3Path
+    )
+    if ($Path -eq "" -and $ObservationV3Path -eq "") {
+        Remove-Item Env:\MELONDS_NSML_AI_PLAY_LOG -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_AI_OBSERVATION_V3_LOG -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_AI_PLAY_LOG_INTERVAL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS -ErrorAction SilentlyContinue
+        return
+    }
 
+    if ($Path -eq "") {
+        Remove-Item Env:\MELONDS_NSML_AI_PLAY_LOG -ErrorAction SilentlyContinue
+    } else {
+        $resolved = if ([System.IO.Path]::IsPathRooted($Path)) {
+            $Path
+        } else {
+            Join-Path $repoRoot $Path
+        }
+        $parent = Split-Path -Parent $resolved
+        if ($parent) {
+            New-Item -ItemType Directory -Force -Path $parent | Out-Null
+        }
+        $env:MELONDS_NSML_AI_PLAY_LOG = $resolved
+    }
+    if ($ObservationV3Path -eq "") {
+        Remove-Item Env:\MELONDS_NSML_AI_OBSERVATION_V3_LOG -ErrorAction SilentlyContinue
+    } else {
+        $resolvedV3 = if ([System.IO.Path]::IsPathRooted($ObservationV3Path)) {
+            $ObservationV3Path
+        } else {
+            Join-Path $repoRoot $ObservationV3Path
+        }
+        $parentV3 = Split-Path -Parent $resolvedV3
+        if ($parentV3) {
+            New-Item -ItemType Directory -Force -Path $parentV3 | Out-Null
+        }
+        $env:MELONDS_NSML_AI_OBSERVATION_V3_LOG = $resolvedV3
+    }
+    $env:MELONDS_NSML_AI_PLAY_LOG_INTERVAL = "$AIPlayLogInterval"
+    $env:MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL = "$AIPlayLogFlushInterval"
+    $env:MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS = "$AIPlayLogMaxObjects"
+}
+
+function Set-PolledInputNeutralizeEnv {
+    param([bool]$Enabled)
+    if ($Enabled) {
+        $env:MELONDS_NSML_NEUTRALIZE_POLLED_INPUT = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_NEUTRALIZE_POLLED_INPUT -ErrorAction SilentlyContinue
+    }
+    Remove-Item Env:\MELONDS_NSML_NEUTRALIZE_POLLED_INPUT_PRESERVE_TOUCH -ErrorAction SilentlyContinue
+}
+
+$hostProc = $null
+if (-not $ClientOnly) {
+    Set-AIPlayLogEnv -Path $HostAIPlayLog -ObservationV3Path $HostAIObservationV3Log
+    Set-PolledInputNeutralizeEnv -Enabled ([bool]$NeutralizeHostInput)
+    $hostProc = Start-Process -FilePath "powershell.exe" `
+        -ArgumentList $hostArgs `
+        -WorkingDirectory $repoRoot `
+        -RedirectStandardOutput $hostOut `
+        -RedirectStandardError $hostErr `
+        -PassThru `
+        -WindowStyle Hidden
+
+    if ($HostReadyTimeoutMs -gt 0) {
+        $hostReadyLog = Join-Path $hostLog "host.stdout.txt"
+        $hostReadyDeadline = [DateTime]::UtcNow.AddMilliseconds($HostReadyTimeoutMs)
+        $hostReady = $false
+        Write-Host "Waiting for host netplay init. log=$hostReadyLog timeoutMs=$HostReadyTimeoutMs"
+        while ([DateTime]::UtcNow -lt $hostReadyDeadline) {
+            if ((Get-Process -Id $hostProc.Id -ErrorAction SilentlyContinue) -eq $null) {
+                throw "host wrapper exited before netplay init. See $hostOut / $hostErr"
+            }
+            if (Test-Path $hostReadyLog) {
+                if (Select-String -Path $hostReadyLog -Pattern "NSMB PoC: enabled role=host" -Quiet) {
+                    $hostReady = $true
+                    break
+                }
+            }
+            Start-Sleep -Milliseconds 100
+        }
+        if (-not $hostReady) {
+            throw "host netplay init did not become ready within ${HostReadyTimeoutMs}ms. See $hostReadyLog"
+        }
+    } elseif ($HostStartupDelayMs -gt 0) {
+        Start-Sleep -Milliseconds $HostStartupDelayMs
+    }
+}
+
+Set-AIPlayLogEnv -Path $ClientAIPlayLog -ObservationV3Path $ClientAIObservationV3Log
+Set-PolledInputNeutralizeEnv -Enabled ([bool]$NeutralizeClientInput)
 $clientProc = Start-Process -FilePath "powershell.exe" `
     -ArgumentList $clientArgs `
     -WorkingDirectory $repoRoot `
@@ -504,12 +672,35 @@ $clientProc = Start-Process -FilePath "powershell.exe" `
     -PassThru `
     -WindowStyle Hidden
 
+foreach ($entry in $oldAIEnv.GetEnumerator()) {
+    if ($null -eq $entry.Value) {
+        [Environment]::SetEnvironmentVariable($entry.Key, $null, "Process")
+    } else {
+        [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
+    }
+}
+
 Write-Host "Started NSMB MvL manual local session."
-Write-Host "host wrapper pid=$($hostProc.Id) log=$hostLog"
+if ($ClientOnly) {
+    Write-Host "host wrapper disabled; client window is the authoritative human recording instance."
+} else {
+    Write-Host "host wrapper pid=$($hostProc.Id) log=$hostLog"
+}
 Write-Host "client wrapper pid=$($clientProc.Id) log=$clientLog"
-Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
+if ($ClientOnly) {
+    Write-Host "Use the client melonDS window for Luigi. Mario is observed from the same client-side game state log."
+} else {
+    Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
+}
+Write-Host "physical input neutralized host=$([bool]$NeutralizeHostInput) client=$([bool]$NeutralizeClientInput)"
 Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames networkPump=$([bool]$NetworkPumpThread) networkPumpSleepUs=$NetworkPumpSleepUs packetBridgeStart=$PacketBridgeStartFrame startBarrier=$([bool]$WaitForPeerAtNetplayStart) renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$([bool]$PerfBreakdown)"
 Write-Host "gameplay heartbeat interval=$GameplayHeartbeatInterval"
+if ($HostAIPlayLog -or $ClientAIPlayLog) {
+    Write-Host "AI play log host=$(if ($HostAIPlayLog) { $HostAIPlayLog } else { 'off' }) client=$(if ($ClientAIPlayLog) { $ClientAIPlayLog } else { 'off' }) interval=$AIPlayLogInterval flushInterval=$AIPlayLogFlushInterval maxObjects=$AIPlayLogMaxObjects"
+}
+if ($HostAIObservationV3Log -or $ClientAIObservationV3Log) {
+    Write-Host "AI observation v3 host=$(if ($HostAIObservationV3Log) { $HostAIObservationV3Log } else { 'off' }) client=$(if ($ClientAIObservationV3Log) { $ClientAIObservationV3Log } else { 'off' }) interval=$AIPlayLogInterval flushInterval=$AIPlayLogFlushInterval maxObjects=$AIPlayLogMaxObjects"
+}
 Write-Host "trace gameState=$([bool]$GameStateTrace) interval=$GameStateTraceInterval extended=$([bool]$GameStateTraceExtended) lifeChanges=$([bool]$TracePlayerLifeChanges) defeated=$([bool]$TracePlayerDefeated)"
 Write-Host "recordInput=$([bool]$RecordInput) recordDir=$(if ($RecordInput) { $InputRecordDir } else { 'disabled' }) recordStart=$InputRecordStartFrame recordEnd=$InputRecordEndFrame"
 if ($PlanDActorSnapshot) {
@@ -526,3 +717,85 @@ if ($InputUnreliable) {
     Write-Host "input unreliable bundleHistory=$InputBundleHistory"
 }
 Write-Host "jit=$(-not $NoJit)$(if ($NoJit) { ' (disabled by -NoJit)' } else { ' (default)' })"
+
+function Get-ManualWrapperExitCodeOrNull {
+    param([System.Diagnostics.Process]$Process)
+
+    try {
+        $Process.Refresh()
+    } catch {
+    }
+
+    try {
+        if ($Process.HasExited) {
+            return [Nullable[int]]$Process.ExitCode
+        }
+    } catch {
+    }
+
+    return $null
+}
+
+function Test-ManualWrapperSuccessMarker {
+    param(
+        [string]$OutPath,
+        [string]$ErrPath
+    )
+
+    $hasSuccessMarker = $false
+    if (Test-Path -LiteralPath $OutPath) {
+        $hasSuccessMarker = Select-String -LiteralPath $OutPath -Pattern "NSMB Mario vs Luigi LAN route smoke passed" -Quiet
+    }
+
+    $hasErrorOutput = $false
+    if (Test-Path -LiteralPath $ErrPath) {
+        $errItem = Get-Item -LiteralPath $ErrPath -ErrorAction SilentlyContinue
+        $hasErrorOutput = ($null -ne $errItem -and $errItem.Length -gt 0)
+    }
+
+    return ($hasSuccessMarker -and -not $hasErrorOutput)
+}
+
+if ($Wait) {
+    $waitProcesses = @(
+        [pscustomobject]@{
+            Role = "client"
+            Process = $clientProc
+            OutPath = $clientOut
+            ErrPath = $clientErr
+        }
+    )
+    if ($null -ne $hostProc) {
+        $waitProcesses += [pscustomobject]@{
+            Role = "host"
+            Process = $hostProc
+            OutPath = $hostOut
+            ErrPath = $hostErr
+        }
+    }
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($WaitTimeoutMs)
+    foreach ($entry in $waitProcesses) {
+        $proc = $entry.Process
+        $remainingMs = [int][Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+        if (-not $proc.WaitForExit($remainingMs)) {
+            throw "manual local wrapper did not exit within WaitTimeoutMs=$WaitTimeoutMs. role=$($entry.Role) pid=$($proc.Id)"
+        }
+        try {
+            $proc.WaitForExit()
+        } catch {
+        }
+
+        $exitCode = Get-ManualWrapperExitCodeOrNull -Process $proc
+        if ($null -eq $exitCode) {
+            if (Test-ManualWrapperSuccessMarker -OutPath $entry.OutPath -ErrPath $entry.ErrPath) {
+                Write-Warning "manual local wrapper exitCode was empty, but $($entry.Role) wrapper success marker was present and stderr was empty. pid=$($proc.Id)"
+                continue
+            }
+            throw "manual local wrapper failed. role=$($entry.Role) pid=$($proc.Id) exitCode=<empty>. See $($entry.OutPath) / $($entry.ErrPath)"
+        }
+        if ($exitCode -ne 0) {
+            throw "manual local wrapper failed. role=$($entry.Role) pid=$($proc.Id) exitCode=$exitCode"
+        }
+    }
+    Write-Host "NSMB MvL manual local session exited."
+}
