@@ -18401,8 +18401,9 @@ void InitFromEnvironment()
         }
     } markEnvironmentChecked;
 
-    G.Enabled = EnvFlag("MELONDS_NSML_POC");
-    G.TestEnabled = EnvFlag("MELONDS_NSML_TEST");
+    const Config::BootstrapConfig bootstrapConfig = Config::LoadBootstrapConfig();
+    G.Enabled = bootstrapConfig.Enabled;
+    G.TestEnabled = bootstrapConfig.TestEnabled;
     G.HangDiagnosticsEnabled = EnvFlag("MELONDS_NSML_HANG_DIAGNOSTICS");
     G.HangWatchdogIntervalMs = std::clamp(EnvInt("MELONDS_NSML_WATCHDOG_INTERVAL_MS", 1000), 100, 60000);
     G.HangThresholdMs = std::clamp(EnvInt("MELONDS_NSML_HANG_THRESHOLD_MS", 8000), 1000, 300000);
@@ -18412,8 +18413,8 @@ void InitFromEnvironment()
         G.HangPhaseEventsPath = phaseEventsPath;
     if (const char* dumpPath = std::getenv("MELONDS_NSML_HANG_DUMP_FILE"))
         G.HangDumpPath = dumpPath;
-    G.TestFrames = static_cast<melonDS::u32>(std::max(0, EnvInt("MELONDS_NSML_TEST_FRAMES", 0)));
-    G.TestInstanceCount = std::clamp(EnvInt("MELONDS_NSML_TEST_INSTANCES", 1), 1, 16);
+    G.TestFrames = bootstrapConfig.TestFrames;
+    G.TestInstanceCount = bootstrapConfig.TestInstanceCount;
     G.ActiveFpsStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_ACTIVE_FPS_START_FRAME", 0)));
     G.ActiveFrameSpikeThresholdUs = std::clamp(
@@ -18432,12 +18433,12 @@ void InitFromEnvironment()
     }
     G.FrameBarrierEnabled = EnvFlag("MELONDS_NSML_FRAME_BARRIER");
     G.SerialRunEnabled = EnvFlag("MELONDS_NSML_SERIAL_RUN");
-    G.HashEnabled = !EnvFlag("MELONDS_NSML_DISABLE_HASH");
-    G.HashInterval = std::max(1, EnvInt("MELONDS_NSML_HASH_INTERVAL", 60));
-    G.TestWaitTimeoutMs = std::max(0, EnvInt("MELONDS_NSML_WAIT_TIMEOUT_MS", 60000));
-    G.TestQuitGraceMs = std::max(0, EnvInt("MELONDS_NSML_QUIT_GRACE_MS", 0));
-    G.InputTraceEnabled = EnvFlag("MELONDS_NSML_INPUT_TRACE");
-    G.InputTraceInterval = std::max(1, EnvInt("MELONDS_NSML_INPUT_TRACE_INTERVAL", 60));
+    G.HashEnabled = bootstrapConfig.HashEnabled;
+    G.HashInterval = bootstrapConfig.HashInterval;
+    G.TestWaitTimeoutMs = bootstrapConfig.WaitTimeoutMs;
+    G.TestQuitGraceMs = bootstrapConfig.QuitGraceMs;
+    G.InputTraceEnabled = bootstrapConfig.InputTraceEnabled;
+    G.InputTraceInterval = bootstrapConfig.InputTraceInterval;
     const char* inputRecord = std::getenv("MELONDS_NSML_INPUT_RECORD_FILE");
     if (inputRecord && inputRecord[0])
     {

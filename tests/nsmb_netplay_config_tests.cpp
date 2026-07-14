@@ -4,10 +4,22 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <map>
+#include <string>
 
 namespace {
 
 int Failures = 0;
+
+class MapEnvironment final : public NsmbNetplayPoC::Config::Environment {
+public:
+  const char *Get(const char *name) const override {
+    const auto it = Values.find(name);
+    return it == Values.end() ? nullptr : it->second.c_str();
+  }
+
+  std::map<std::string, std::string> Values;
+};
 
 void Check(bool condition, const char *expression, int line) {
   if (condition)
@@ -68,6 +80,49 @@ void TestUnsignedParsingPreservesExistingInvalidValueBehavior() {
   CHECK(ParseU32("invalid", 99) == 0u);
 }
 
+void TestBootstrapConfigDefaults() {
+  const MapEnvironment environment;
+  const auto config = NsmbNetplayPoC::Config::LoadBootstrapConfig(environment);
+  CHECK(!config.Enabled);
+  CHECK(!config.TestEnabled);
+  CHECK(config.TestFrames == 0u);
+  CHECK(config.TestInstanceCount == 1);
+  CHECK(config.HashEnabled);
+  CHECK(config.HashInterval == 60);
+  CHECK(config.WaitTimeoutMs == 60000);
+  CHECK(config.QuitGraceMs == 0);
+  CHECK(!config.InputTraceEnabled);
+  CHECK(config.InputTraceInterval == 60);
+}
+
+void TestBootstrapConfigReadsAndClampsEnvironment() {
+  MapEnvironment environment;
+  environment.Values = {
+      {"MELONDS_NSML_POC", "1"},
+      {"MELONDS_NSML_TEST", "1"},
+      {"MELONDS_NSML_TEST_FRAMES", "-20"},
+      {"MELONDS_NSML_TEST_INSTANCES", "99"},
+      {"MELONDS_NSML_DISABLE_HASH", "1"},
+      {"MELONDS_NSML_HASH_INTERVAL", "0"},
+      {"MELONDS_NSML_WAIT_TIMEOUT_MS", "-1"},
+      {"MELONDS_NSML_QUIT_GRACE_MS", "250"},
+      {"MELONDS_NSML_INPUT_TRACE", "trace"},
+      {"MELONDS_NSML_INPUT_TRACE_INTERVAL", "0"},
+  };
+
+  const auto config = NsmbNetplayPoC::Config::LoadBootstrapConfig(environment);
+  CHECK(config.Enabled);
+  CHECK(config.TestEnabled);
+  CHECK(config.TestFrames == 0u);
+  CHECK(config.TestInstanceCount == 16);
+  CHECK(!config.HashEnabled);
+  CHECK(config.HashInterval == 1);
+  CHECK(config.WaitTimeoutMs == 0);
+  CHECK(config.QuitGraceMs == 250);
+  CHECK(config.InputTraceEnabled);
+  CHECK(config.InputTraceInterval == 1);
+}
+
 } // namespace
 
 int main() {
@@ -76,6 +131,8 @@ int main() {
   TestIntegerParsingPreservesBaseAndFallback();
   TestDoubleParsingPreservesFallback();
   TestUnsignedParsingPreservesExistingInvalidValueBehavior();
+  TestBootstrapConfigDefaults();
+  TestBootstrapConfigReadsAndClampsEnvironment();
 
   if (Failures != 0) {
     std::fprintf(stderr, "nsmb netplay config tests failed: %d\n", Failures);
