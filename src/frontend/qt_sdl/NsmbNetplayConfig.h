@@ -174,6 +174,35 @@ struct MvlConfig {
   std::uint32_t AutoRestartBootstrapFrame = 120;
 };
 
+struct DiagnosticsConfig {
+  std::string HashLogPath;
+  std::string ScreenshotDir;
+  int ScreenshotInterval = 0;
+  std::string RamDumpDir;
+  int RamDumpInterval = 0;
+  std::string RamDumpFrames;
+  std::string GameStateTracePath;
+  std::string DiagnosticsPath;
+  std::string DiagnosticEventsPath;
+  bool DiagnosticEventsEnabled = false;
+  int DiagnosticRingFrames = 360;
+  int GameStateTraceInterval = 60;
+  std::uint32_t GameStateTraceStartFrame = 0;
+  std::uint32_t GameStateTraceEndFrame = 0;
+  bool GameStateTraceExtended = false;
+  std::string AIPlayLogPath;
+  std::string AIObservationV2Path;
+  std::string AIObservationV3Path;
+  int AIPlayLogInterval = 1;
+  int AIPlayLogFlushInterval = 60;
+  std::uint32_t AIPlayLogStartFrame = 0;
+  std::uint32_t AIPlayLogEndFrame = 0;
+  int AIPlayLogMaxObjects = 32;
+  int AIObservationV2StageFilter = -1;
+  int AIObservationV3StageFilter = -1;
+  bool AIPlayLogGameplayOnly = true;
+};
+
 struct StateSyncConfig {
   bool GameEnabled = false;
   bool GameExtended = false;
@@ -242,6 +271,9 @@ RollbackConfig LoadRollbackConfig(const Environment &environment);
 RollbackConfig LoadRollbackConfig();
 MvlConfig LoadMvlConfig(const Environment &environment);
 MvlConfig LoadMvlConfig();
+DiagnosticsConfig LoadDiagnosticsConfig(const Environment &environment,
+                                        int diagnosticRingCapacity);
+DiagnosticsConfig LoadDiagnosticsConfig(int diagnosticRingCapacity);
 StateSyncConfig LoadStateSyncConfig(const Environment &environment);
 StateSyncConfig LoadStateSyncConfig();
 

@@ -12529,73 +12529,43 @@ void InitFromEnvironment()
     if (scriptRemotePacketInputScript && scriptRemotePacketInputScript[0])
         G.ScriptRemotePacketInputScriptPath = scriptRemotePacketInputScript;
 
-    const char* hashLog = std::getenv("MELONDS_NSML_HASH_LOG");
-    if (hashLog && hashLog[0]) G.HashLogPath = hashLog;
-
-    const char* screenshotDir = std::getenv("MELONDS_NSML_SCREENSHOT_DIR");
-    if (screenshotDir && screenshotDir[0]) G.ScreenshotDir = screenshotDir;
-    G.ScreenshotInterval = std::max(0, EnvInt("MELONDS_NSML_SCREENSHOT_INTERVAL", 0));
-
-    const char* ramDumpDir = std::getenv("MELONDS_NSML_RAM_DUMP_DIR");
-    if (ramDumpDir && ramDumpDir[0]) G.RamDumpDir = ramDumpDir;
-    G.RamDumpInterval = std::max(0, EnvInt("MELONDS_NSML_RAM_DUMP_INTERVAL", 0));
-    if (!ParseFrameRanges(std::getenv("MELONDS_NSML_RAM_DUMP_FRAMES"), G.RamDumpRanges))
+    const Config::DiagnosticsConfig diagnosticsConfig =
+        Config::LoadDiagnosticsConfig(static_cast<int>(kDiagnosticRingCapacity));
+    G.HashLogPath = diagnosticsConfig.HashLogPath;
+    G.ScreenshotDir = diagnosticsConfig.ScreenshotDir;
+    G.ScreenshotInterval = diagnosticsConfig.ScreenshotInterval;
+    G.RamDumpDir = diagnosticsConfig.RamDumpDir;
+    G.RamDumpInterval = diagnosticsConfig.RamDumpInterval;
+    if (!ParseFrameRanges(diagnosticsConfig.RamDumpFrames.c_str(), G.RamDumpRanges))
     {
         std::printf("NSMB Test: invalid RAM dump frame list\n");
         G.RamDumpRanges.clear();
     }
-
-    const char* gameStateTrace = std::getenv("MELONDS_NSML_GAME_STATE_TRACE");
-    if (gameStateTrace && gameStateTrace[0]) G.GameStateTracePath = gameStateTrace;
-    const char* diagnosticsFile = std::getenv("MELONDS_NSML_DIAGNOSTICS_FILE");
-    if (diagnosticsFile && diagnosticsFile[0]) G.DiagnosticsPath = diagnosticsFile;
-    const char* diagnosticEventsFile = std::getenv("MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE");
-    if (diagnosticEventsFile && diagnosticEventsFile[0]) G.DiagnosticEventsPath = diagnosticEventsFile;
-    G.DiagnosticEventsEnabled =
-        EnvFlag("MELONDS_NSML_DIAGNOSTIC_EVENTS") || !G.DiagnosticEventsPath.empty();
-    if (EnvFlag("MELONDS_NSML_DIAGNOSTIC_EVENTS_DISABLE"))
-        G.DiagnosticEventsEnabled = false;
-    G.DiagnosticRingFrames = std::clamp(
-        EnvInt("MELONDS_NSML_DIAGNOSTIC_RING_FRAMES", 360),
-        60,
-        static_cast<int>(kDiagnosticRingCapacity));
-    if (G.DiagnosticEventsEnabled && G.DiagnosticEventsPath.empty() && !G.DiagnosticsPath.empty())
-    {
-        std::filesystem::path eventsPath(G.DiagnosticsPath);
-        eventsPath.replace_filename("melonds-events.jsonl");
-        G.DiagnosticEventsPath = eventsPath.string();
-    }
+    G.GameStateTracePath = diagnosticsConfig.GameStateTracePath;
+    G.DiagnosticsPath = diagnosticsConfig.DiagnosticsPath;
+    G.DiagnosticEventsPath = diagnosticsConfig.DiagnosticEventsPath;
+    G.DiagnosticEventsEnabled = diagnosticsConfig.DiagnosticEventsEnabled;
+    G.DiagnosticRingFrames = diagnosticsConfig.DiagnosticRingFrames;
     if (G.DiagnosticEventsEnabled && !G.DiagnosticEventsPath.empty())
     {
         std::error_code ec;
         std::filesystem::remove(G.DiagnosticEventsPath, ec);
     }
-    G.GameStateTraceInterval = std::max(1, EnvInt("MELONDS_NSML_GAME_STATE_TRACE_INTERVAL", 60));
-    G.GameStateTraceStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_GAME_STATE_TRACE_START_FRAME", 0)));
-    G.GameStateTraceEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_GAME_STATE_TRACE_END_FRAME", 0)));
-    G.GameStateTraceExtended = EnvFlag("MELONDS_NSML_GAME_STATE_TRACE_EXTENDED");
-    const char* aiPlayLog = std::getenv("MELONDS_NSML_AI_PLAY_LOG");
-    if (aiPlayLog && aiPlayLog[0]) G.AIPlayLogPath = aiPlayLog;
-    const char* aiObservationV2Log = std::getenv("MELONDS_NSML_AI_OBSERVATION_V2_LOG");
-    if (aiObservationV2Log && aiObservationV2Log[0]) G.AIObservationV2Path = aiObservationV2Log;
-    const char* aiObservationV3Log = std::getenv("MELONDS_NSML_AI_OBSERVATION_V3_LOG");
-    if (aiObservationV3Log && aiObservationV3Log[0]) G.AIObservationV3Path = aiObservationV3Log;
-    G.AIPlayLogInterval = std::max(1, EnvInt("MELONDS_NSML_AI_PLAY_LOG_INTERVAL", 1));
-    G.AIPlayLogFlushInterval = std::max(0, EnvInt("MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL", 60));
-    G.AIPlayLogStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_AI_PLAY_LOG_START_FRAME", 0)));
-    G.AIPlayLogEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_AI_PLAY_LOG_END_FRAME", 0)));
-    G.AIPlayLogMaxObjects = std::clamp(EnvInt("MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS", 32), 0, 256);
-    G.AIObservationV2StageFilter = EnvHasValue("MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER")
-        ? std::clamp(EnvInt("MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER", -1), -1, 4)
-        : -1;
-    G.AIObservationV3StageFilter = EnvHasValue("MELONDS_NSML_AI_OBSERVATION_V3_STAGE_FILTER")
-        ? std::clamp(EnvInt("MELONDS_NSML_AI_OBSERVATION_V3_STAGE_FILTER", -1), -1, 4)
-        : -1;
-    G.AIPlayLogGameplayOnly = !EnvFlag("MELONDS_NSML_AI_PLAY_LOG_INCLUDE_NON_GAMEPLAY");
+    G.GameStateTraceInterval = diagnosticsConfig.GameStateTraceInterval;
+    G.GameStateTraceStartFrame = diagnosticsConfig.GameStateTraceStartFrame;
+    G.GameStateTraceEndFrame = diagnosticsConfig.GameStateTraceEndFrame;
+    G.GameStateTraceExtended = diagnosticsConfig.GameStateTraceExtended;
+    G.AIPlayLogPath = diagnosticsConfig.AIPlayLogPath;
+    G.AIObservationV2Path = diagnosticsConfig.AIObservationV2Path;
+    G.AIObservationV3Path = diagnosticsConfig.AIObservationV3Path;
+    G.AIPlayLogInterval = diagnosticsConfig.AIPlayLogInterval;
+    G.AIPlayLogFlushInterval = diagnosticsConfig.AIPlayLogFlushInterval;
+    G.AIPlayLogStartFrame = diagnosticsConfig.AIPlayLogStartFrame;
+    G.AIPlayLogEndFrame = diagnosticsConfig.AIPlayLogEndFrame;
+    G.AIPlayLogMaxObjects = diagnosticsConfig.AIPlayLogMaxObjects;
+    G.AIObservationV2StageFilter = diagnosticsConfig.AIObservationV2StageFilter;
+    G.AIObservationV3StageFilter = diagnosticsConfig.AIObservationV3StageFilter;
+    G.AIPlayLogGameplayOnly = diagnosticsConfig.AIPlayLogGameplayOnly;
     const Config::StateSyncConfig stateSyncConfig = Config::LoadStateSyncConfig();
     G.GameStateSyncEnabled = stateSyncConfig.GameEnabled;
     G.GameStateSyncExtended = stateSyncConfig.GameExtended;

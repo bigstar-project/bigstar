@@ -553,6 +553,103 @@ void TestMvlConfigReadsClampsAndPreservesPriority() {
   CHECK(config.StageSceneSettings == 0u);
 }
 
+void TestDiagnosticsConfigDefaults() {
+  const MapEnvironment environment;
+  const auto config =
+      NsmbNetplayPoC::Config::LoadDiagnosticsConfig(environment, 720);
+  CHECK(config.HashLogPath.empty());
+  CHECK(config.ScreenshotDir.empty());
+  CHECK(config.ScreenshotInterval == 0);
+  CHECK(config.RamDumpDir.empty());
+  CHECK(config.RamDumpInterval == 0);
+  CHECK(config.RamDumpFrames.empty());
+  CHECK(config.GameStateTracePath.empty());
+  CHECK(config.DiagnosticsPath.empty());
+  CHECK(config.DiagnosticEventsPath.empty());
+  CHECK(!config.DiagnosticEventsEnabled);
+  CHECK(config.DiagnosticRingFrames == 360);
+  CHECK(config.GameStateTraceInterval == 60);
+  CHECK(config.GameStateTraceStartFrame == 0u);
+  CHECK(config.GameStateTraceEndFrame == 0u);
+  CHECK(!config.GameStateTraceExtended);
+  CHECK(config.AIPlayLogPath.empty());
+  CHECK(config.AIObservationV2Path.empty());
+  CHECK(config.AIObservationV3Path.empty());
+  CHECK(config.AIPlayLogInterval == 1);
+  CHECK(config.AIPlayLogFlushInterval == 60);
+  CHECK(config.AIPlayLogStartFrame == 0u);
+  CHECK(config.AIPlayLogEndFrame == 0u);
+  CHECK(config.AIPlayLogMaxObjects == 32);
+  CHECK(config.AIObservationV2StageFilter == -1);
+  CHECK(config.AIObservationV3StageFilter == -1);
+  CHECK(config.AIPlayLogGameplayOnly);
+}
+
+void TestDiagnosticsConfigReadsClampsAndPreservesPriority() {
+  MapEnvironment environment;
+  environment.Values = {
+      {"MELONDS_NSML_HASH_LOG", "hash.log"},
+      {"MELONDS_NSML_SCREENSHOT_DIR", "screens"},
+      {"MELONDS_NSML_SCREENSHOT_INTERVAL", "-1"},
+      {"MELONDS_NSML_RAM_DUMP_DIR", "ram"},
+      {"MELONDS_NSML_RAM_DUMP_INTERVAL", "-2"},
+      {"MELONDS_NSML_RAM_DUMP_FRAMES", "10,20-30"},
+      {"MELONDS_NSML_GAME_STATE_TRACE", "state.csv"},
+      {"MELONDS_NSML_DIAGNOSTICS_FILE", "melonds-diagnostics.json"},
+      {"MELONDS_NSML_DIAGNOSTIC_EVENTS", "1"},
+      {"MELONDS_NSML_DIAGNOSTIC_RING_FRAMES", "999"},
+      {"MELONDS_NSML_GAME_STATE_TRACE_INTERVAL", "0"},
+      {"MELONDS_NSML_GAME_STATE_TRACE_START_FRAME", "-3"},
+      {"MELONDS_NSML_GAME_STATE_TRACE_END_FRAME", "4"},
+      {"MELONDS_NSML_GAME_STATE_TRACE_EXTENDED", "1"},
+      {"MELONDS_NSML_AI_PLAY_LOG", "ai.jsonl"},
+      {"MELONDS_NSML_AI_OBSERVATION_V2_LOG", "v2.jsonl"},
+      {"MELONDS_NSML_AI_OBSERVATION_V3_LOG", "v3.jsonl"},
+      {"MELONDS_NSML_AI_PLAY_LOG_INTERVAL", "0"},
+      {"MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL", "-5"},
+      {"MELONDS_NSML_AI_PLAY_LOG_START_FRAME", "-6"},
+      {"MELONDS_NSML_AI_PLAY_LOG_END_FRAME", "7"},
+      {"MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS", "999"},
+      {"MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER", "99"},
+      {"MELONDS_NSML_AI_OBSERVATION_V3_STAGE_FILTER", "-99"},
+      {"MELONDS_NSML_AI_PLAY_LOG_INCLUDE_NON_GAMEPLAY", "1"},
+  };
+
+  auto config = NsmbNetplayPoC::Config::LoadDiagnosticsConfig(environment, 720);
+  CHECK(config.HashLogPath == "hash.log");
+  CHECK(config.ScreenshotDir == "screens");
+  CHECK(config.ScreenshotInterval == 0);
+  CHECK(config.RamDumpDir == "ram");
+  CHECK(config.RamDumpInterval == 0);
+  CHECK(config.RamDumpFrames == "10,20-30");
+  CHECK(config.GameStateTracePath == "state.csv");
+  CHECK(config.DiagnosticsPath == "melonds-diagnostics.json");
+  CHECK(config.DiagnosticEventsPath == "melonds-events.jsonl");
+  CHECK(config.DiagnosticEventsEnabled);
+  CHECK(config.DiagnosticRingFrames == 720);
+  CHECK(config.GameStateTraceInterval == 1);
+  CHECK(config.GameStateTraceStartFrame == 0u);
+  CHECK(config.GameStateTraceEndFrame == 4u);
+  CHECK(config.GameStateTraceExtended);
+  CHECK(config.AIPlayLogPath == "ai.jsonl");
+  CHECK(config.AIObservationV2Path == "v2.jsonl");
+  CHECK(config.AIObservationV3Path == "v3.jsonl");
+  CHECK(config.AIPlayLogInterval == 1);
+  CHECK(config.AIPlayLogFlushInterval == 0);
+  CHECK(config.AIPlayLogStartFrame == 0u);
+  CHECK(config.AIPlayLogEndFrame == 7u);
+  CHECK(config.AIPlayLogMaxObjects == 256);
+  CHECK(config.AIObservationV2StageFilter == 4);
+  CHECK(config.AIObservationV3StageFilter == -1);
+  CHECK(!config.AIPlayLogGameplayOnly);
+
+  environment.Values["MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE"] = "custom.jsonl";
+  environment.Values["MELONDS_NSML_DIAGNOSTIC_EVENTS_DISABLE"] = "1";
+  config = NsmbNetplayPoC::Config::LoadDiagnosticsConfig(environment, 720);
+  CHECK(config.DiagnosticEventsPath == "custom.jsonl");
+  CHECK(!config.DiagnosticEventsEnabled);
+}
+
 void TestStateSyncConfigDefaultsAndApplyModes() {
   MapEnvironment environment;
   auto config = NsmbNetplayPoC::Config::LoadStateSyncConfig(environment);
@@ -695,6 +792,8 @@ int main() {
   TestRollbackConfigReadsClampsAndDependencies();
   TestMvlConfigDefaults();
   TestMvlConfigReadsClampsAndPreservesPriority();
+  TestDiagnosticsConfigDefaults();
+  TestDiagnosticsConfigReadsClampsAndPreservesPriority();
   TestStateSyncConfigDefaultsAndApplyModes();
   TestStateSyncConfigReadsClampsAndSkipPriorities();
 

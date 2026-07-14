@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <sstream>
 
 namespace NsmbNetplayPoC::Config {
@@ -532,6 +533,86 @@ MvlConfig LoadMvlConfig(const Environment &environment) {
 }
 
 MvlConfig LoadMvlConfig() { return LoadMvlConfig(GetProcessEnvironment()); }
+
+DiagnosticsConfig LoadDiagnosticsConfig(const Environment &environment,
+                                        int diagnosticRingCapacity) {
+  DiagnosticsConfig config;
+  config.HashLogPath = ReadCString(environment, "MELONDS_NSML_HASH_LOG", "");
+  config.ScreenshotDir =
+      ReadCString(environment, "MELONDS_NSML_SCREENSHOT_DIR", "");
+  config.ScreenshotInterval =
+      std::max(0, ReadInt(environment, "MELONDS_NSML_SCREENSHOT_INTERVAL", 0));
+  config.RamDumpDir = ReadCString(environment, "MELONDS_NSML_RAM_DUMP_DIR", "");
+  config.RamDumpInterval =
+      std::max(0, ReadInt(environment, "MELONDS_NSML_RAM_DUMP_INTERVAL", 0));
+  config.RamDumpFrames =
+      ReadCString(environment, "MELONDS_NSML_RAM_DUMP_FRAMES", "");
+  config.GameStateTracePath =
+      ReadCString(environment, "MELONDS_NSML_GAME_STATE_TRACE", "");
+  config.DiagnosticsPath =
+      ReadCString(environment, "MELONDS_NSML_DIAGNOSTICS_FILE", "");
+  config.DiagnosticEventsPath =
+      ReadCString(environment, "MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE", "");
+  config.DiagnosticEventsEnabled =
+      ReadFlag(environment, "MELONDS_NSML_DIAGNOSTIC_EVENTS") ||
+      !config.DiagnosticEventsPath.empty();
+  if (ReadFlag(environment, "MELONDS_NSML_DIAGNOSTIC_EVENTS_DISABLE"))
+    config.DiagnosticEventsEnabled = false;
+  config.DiagnosticRingFrames = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_DIAGNOSTIC_RING_FRAMES", 360), 60,
+      std::max(60, diagnosticRingCapacity));
+  if (config.DiagnosticEventsEnabled && config.DiagnosticEventsPath.empty() &&
+      !config.DiagnosticsPath.empty()) {
+    std::filesystem::path eventsPath(config.DiagnosticsPath);
+    eventsPath.replace_filename("melonds-events.jsonl");
+    config.DiagnosticEventsPath = eventsPath.string();
+  }
+  config.GameStateTraceInterval = std::max(
+      1, ReadInt(environment, "MELONDS_NSML_GAME_STATE_TRACE_INTERVAL", 60));
+  config.GameStateTraceStartFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_GAME_STATE_TRACE_START_FRAME", 0)));
+  config.GameStateTraceEndFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_GAME_STATE_TRACE_END_FRAME", 0)));
+  config.GameStateTraceExtended =
+      ReadFlag(environment, "MELONDS_NSML_GAME_STATE_TRACE_EXTENDED");
+  config.AIPlayLogPath =
+      ReadCString(environment, "MELONDS_NSML_AI_PLAY_LOG", "");
+  config.AIObservationV2Path =
+      ReadCString(environment, "MELONDS_NSML_AI_OBSERVATION_V2_LOG", "");
+  config.AIObservationV3Path =
+      ReadCString(environment, "MELONDS_NSML_AI_OBSERVATION_V3_LOG", "");
+  config.AIPlayLogInterval =
+      std::max(1, ReadInt(environment, "MELONDS_NSML_AI_PLAY_LOG_INTERVAL", 1));
+  config.AIPlayLogFlushInterval = std::max(
+      0, ReadInt(environment, "MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL", 60));
+  config.AIPlayLogStartFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_AI_PLAY_LOG_START_FRAME", 0)));
+  config.AIPlayLogEndFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_AI_PLAY_LOG_END_FRAME", 0)));
+  config.AIPlayLogMaxObjects = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS", 32), 0, 256);
+  config.AIObservationV2StageFilter =
+      ReadHasValue(environment, "MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER")
+          ? std::clamp(ReadInt(environment,
+                               "MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER",
+                               -1),
+                       -1, 4)
+          : -1;
+  config.AIObservationV3StageFilter =
+      ReadHasValue(environment, "MELONDS_NSML_AI_OBSERVATION_V3_STAGE_FILTER")
+          ? std::clamp(ReadInt(environment,
+                               "MELONDS_NSML_AI_OBSERVATION_V3_STAGE_FILTER",
+                               -1),
+                       -1, 4)
+          : -1;
+  config.AIPlayLogGameplayOnly =
+      !ReadFlag(environment, "MELONDS_NSML_AI_PLAY_LOG_INCLUDE_NON_GAMEPLAY");
+  return config;
+}
+
+DiagnosticsConfig LoadDiagnosticsConfig(int diagnosticRingCapacity) {
+  return LoadDiagnosticsConfig(GetProcessEnvironment(), diagnosticRingCapacity);
+}
 
 StateSyncConfig LoadStateSyncConfig(const Environment &environment) {
   StateSyncConfig config;
