@@ -716,19 +716,12 @@ struct State
     bool PacketBridgeJitHelperPatchApplied[16] {};
     melonDS::u32 PacketBridgeJitHelperPatchResumeFrame[16] {};
     Config::RollbackConfig Rollback;
-    std::map<melonDS::u32, InputState> PredictedRemoteInputs;
+    InputTimeline::PredictionRuntime RollbackInputs;
     RollbackStorage::Store RollbackStore;
-    bool LastConfirmedRemoteInputValid = false;
-    InputState LastConfirmedRemoteInput {};
-    melonDS::u32 PendingRollbackFrame = kNoFrameLimit;
-    melonDS::u32 PendingRollbackObservedFrame = kNoFrameLimit;
-    melonDS::u32 RollbackPredictionCount = 0;
-    melonDS::u32 RollbackMismatchCount = 0;
     melonDS::u32 RollbackRestoreCount = 0;
     melonDS::u32 RollbackResimulateCount = 0;
     melonDS::u32 LastPerfSpikeRollbackRestoreCount[16] {};
     melonDS::u32 LastPerfSpikeRollbackResimulateCount[16] {};
-    melonDS::u32 RollbackPredictionProbeCount = 0;
     melonDS::u32 RollbackCheckpointSaveCount = 0;
     size_t RollbackCheckpointLastBytes = 0;
     size_t RollbackCheckpointMinBytes = 0;
@@ -1275,7 +1268,7 @@ void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
     G.DelayedInputs.clear();
     G.LocalInputs.clear();
     G.RemoteInputs.clear();
-    G.PredictedRemoteInputs.clear();
+    G.RollbackInputs.ClearPredictions();
     G.LastReceivedInputFrame = kNoFrameLimit;
     G.LastSentInputFrame = kNoFrameLimit;
     G.LastTracedSentInputFrame = kNoFrameLimit;
@@ -2056,45 +2049,32 @@ void StoreRemoteInputLocked(melonDS::u32 frame, const InputState& receivedInput,
 
     if (G.Rollback.Enabled)
     {
-        auto predicted = G.PredictedRemoteInputs.find(frame);
-        if (predicted != G.PredictedRemoteInputs.end()
-            && !InputsEqual(predicted->second, receivedInput))
+        const auto confirmation = G.RollbackInputs.Confirm(
+            frame,
+            receivedInput,
+            localFrame == kNoFrameLimit
+                ? std::optional<melonDS::u32> {}
+                : std::optional<melonDS::u32> { localFrame });
+        if (confirmation.Mismatch)
         {
-            const InputState predictedInput = predicted->second;
-            G.RollbackMismatchCount++;
-            const melonDS::u32 observedFrame = localFrame == kNoFrameLimit
-                ? frame
-                : localFrame;
-            const bool frameAlreadySimulated = localFrame == kNoFrameLimit || frame < localFrame;
-            if (frameAlreadySimulated
-                && (G.PendingRollbackFrame == kNoFrameLimit
-                    || frame < G.PendingRollbackFrame))
-            {
-                G.PendingRollbackFrame = frame;
-                G.PendingRollbackObservedFrame = observedFrame;
-            }
-            else if (frameAlreadySimulated && G.PendingRollbackObservedFrame == kNoFrameLimit)
-            {
-                G.PendingRollbackObservedFrame = observedFrame;
-            }
-            G.PredictedRemoteInputs.erase(G.PredictedRemoteInputs.lower_bound(frame),
-                G.PredictedRemoteInputs.end());
             if (G.Input.NetplayTrace)
             {
+                const melonDS::u32 pendingFrame =
+                    G.RollbackInputs.PendingRollbackFrame().value_or(kNoFrameLimit);
                 std::printf(
                     "NSMB Rollback: prediction mismatch frame=%u predicted={keys=0x%03X touch=%d x=%u y=%u} actual={keys=0x%03X touch=%d x=%u y=%u} pending=%u mismatches=%u\n",
                     frame,
-                    predictedInput.KeyMask,
-                    predictedInput.Touching ? 1 : 0,
-                    predictedInput.TouchX,
-                    predictedInput.TouchY,
+                    confirmation.PredictedInput.KeyMask,
+                    confirmation.PredictedInput.Touching ? 1 : 0,
+                    confirmation.PredictedInput.TouchX,
+                    confirmation.PredictedInput.TouchY,
                     receivedInput.KeyMask,
                     receivedInput.Touching ? 1 : 0,
                     receivedInput.TouchX,
                     receivedInput.TouchY,
-                    G.PendingRollbackFrame,
-                    G.RollbackMismatchCount);
-                if (!frameAlreadySimulated)
+                    pendingFrame,
+                    G.RollbackInputs.MismatchCount());
+                if (!confirmation.FrameAlreadySimulated)
                 {
                     std::printf(
                         "NSMB Rollback: current/future mismatch applied without rollback frame=%u localFrame=%u\n",
@@ -2104,8 +2084,6 @@ void StoreRemoteInputLocked(melonDS::u32 frame, const InputState& receivedInput,
                 std::fflush(stdout);
             }
         }
-        G.LastConfirmedRemoteInput = receivedInput;
-        G.LastConfirmedRemoteInputValid = true;
     }
     const melonDS::u32 previousLastReceived = G.LastReceivedInputFrame;
     G.RemoteInputs[frame] = receivedInput;
@@ -2936,46 +2914,18 @@ void MaybeResendLatestInputForFrameLeadLocked()
 
 bool GetRollbackRemoteInputLocked(melonDS::u32 frame, InputState& input, bool& predicted)
 {
-    auto confirmed = G.RemoteInputs.find(frame);
-    if (confirmed != G.RemoteInputs.end())
-    {
-        input = confirmed->second;
-        predicted = false;
-        return true;
-    }
+    InputTimeline::PredictionProbe probe;
+    probe.Modulo = G.Rollback.PredictionProbeModulo;
+    probe.Offset = G.Rollback.PredictionProbeOffset;
+    probe.Limit = G.Rollback.PredictionProbeLimit;
+    probe.StartFrame = G.Rollback.PredictionProbeStartFrame;
+    if (G.Rollback.PredictionProbeEndFrame != kNoFrameLimit)
+        probe.EndFrame = G.Rollback.PredictionProbeEndFrame;
+    probe.KeyMask = G.Rollback.PredictionProbeKeyMask;
 
-    auto existingPrediction = G.PredictedRemoteInputs.find(frame);
-    if (existingPrediction != G.PredictedRemoteInputs.end())
-    {
-        input = existingPrediction->second;
-        predicted = true;
-        return true;
-    }
-
-    auto previousPrediction = frame > 0 ? G.PredictedRemoteInputs.find(frame - 1) : G.PredictedRemoteInputs.end();
-    if (previousPrediction != G.PredictedRemoteInputs.end())
-        input = previousPrediction->second;
-    else if (G.LastConfirmedRemoteInputValid)
-        input = G.LastConfirmedRemoteInput;
-    else
-        input = NeutralInput();
-
-    if (G.Rollback.PredictionProbeModulo > 0
-        && (G.Rollback.PredictionProbeLimit < 0
-            || G.RollbackPredictionProbeCount < static_cast<melonDS::u32>(G.Rollback.PredictionProbeLimit))
-        && frame >= G.Rollback.PredictionProbeStartFrame
-        && (G.Rollback.PredictionProbeEndFrame == kNoFrameLimit
-            || frame <= G.Rollback.PredictionProbeEndFrame)
-        && (frame % static_cast<melonDS::u32>(G.Rollback.PredictionProbeModulo))
-            == static_cast<melonDS::u32>(G.Rollback.PredictionProbeOffset))
-    {
-        input.KeyMask ^= G.Rollback.PredictionProbeKeyMask & 0xFFFu;
-        G.RollbackPredictionProbeCount++;
-    }
-
-    G.PredictedRemoteInputs.emplace(frame, input);
-    G.RollbackPredictionCount++;
-    predicted = true;
+    const auto resolved = G.RollbackInputs.Resolve(frame, G.RemoteInputs, NeutralInput(), probe);
+    input = resolved.Input;
+    predicted = resolved.Predicted;
     return true;
 }
 
@@ -2985,14 +2935,7 @@ void PruneRollbackHistoryLocked(melonDS::u32 frame)
         ? static_cast<melonDS::u32>(G.Rollback.Window)
         : 0;
     G.RollbackStore.Prune(frame, window);
-    const melonDS::u32 keepFrom = frame > window ? frame - window : 0;
-    for (auto it = G.PredictedRemoteInputs.begin(); it != G.PredictedRemoteInputs.end(); )
-    {
-        if (it->first < keepFrom && G.RemoteInputs.find(it->first) != G.RemoteInputs.end())
-            it = G.PredictedRemoteInputs.erase(it);
-        else
-            ++it;
-    }
+    G.RollbackInputs.Prune(frame, window, G.RemoteInputs);
 }
 
 bool ShouldSaveRollbackCheckpoint(melonDS::u32 frame)
@@ -3474,10 +3417,11 @@ bool RestoreRollbackCheckpointForProbeIfNeeded(int instanceID, melonDS::u32 fram
     std::vector<melonDS::u8> latestMainRAM;
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
-        if (G.PendingRollbackFrame == kNoFrameLimit)
+        const auto pendingFrame = G.RollbackInputs.PendingRollbackFrame();
+        if (!pendingFrame)
             return false;
 
-        restoreFrame = G.PendingRollbackFrame;
+        restoreFrame = *pendingFrame;
         if (!G.RollbackStore.Copy(restoreFrame, checkpoint))
         {
             std::printf(
@@ -3485,7 +3429,7 @@ bool RestoreRollbackCheckpointForProbeIfNeeded(int instanceID, melonDS::u32 fram
                 restoreFrame,
                 frame,
                 G.Rollback.Window);
-            G.PendingRollbackFrame = kNoFrameLimit;
+            G.RollbackInputs.ClearPendingRollbackFrame();
             return false;
         }
         const bool restoreReady = IsRollbackPreimageBackend()
@@ -3496,10 +3440,10 @@ bool RestoreRollbackCheckpointForProbeIfNeeded(int instanceID, melonDS::u32 fram
             std::printf("NSMB Rollback: cannot restore delta chain frame=%u base=%u missing\n",
                 restoreFrame,
                 checkpoint.BaseFrame);
-            G.PendingRollbackFrame = kNoFrameLimit;
+            G.RollbackInputs.ClearPendingRollbackFrame();
             return false;
         }
-        G.PendingRollbackFrame = kNoFrameLimit;
+        G.RollbackInputs.ClearPendingRollbackFrame();
     }
 
     const auto restoreStart = std::chrono::steady_clock::now();
@@ -7245,9 +7189,10 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
     std::vector<melonDS::u8> latestMainRAM;
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
-        if (G.PendingRollbackFrame == kNoFrameLimit)
+        const auto pendingFrame = G.RollbackInputs.PendingRollbackFrame();
+        if (!pendingFrame)
             return false;
-        mismatchFrame = G.PendingRollbackFrame;
+        mismatchFrame = *pendingFrame;
         if (mismatchFrame == frame)
         {
             if (G.Input.NetplayTrace)
@@ -7256,8 +7201,7 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
                     frame);
                 std::fflush(stdout);
             }
-            G.PendingRollbackFrame = kNoFrameLimit;
-            G.PendingRollbackObservedFrame = kNoFrameLimit;
+            G.RollbackInputs.ClearPendingRollback();
             return false;
         }
         if (mismatchFrame >= frame)
@@ -7280,9 +7224,10 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
                 mismatchFrame = cappedFrame;
             }
         }
+        const auto observedFrame = G.RollbackInputs.PendingRollbackObservedFrame();
         if (G.Rollback.ResimulateDelayFrames > 0
-            && G.PendingRollbackObservedFrame != kNoFrameLimit
-            && frame < G.PendingRollbackObservedFrame + static_cast<melonDS::u32>(G.Rollback.ResimulateDelayFrames))
+            && observedFrame
+            && frame < *observedFrame + static_cast<melonDS::u32>(G.Rollback.ResimulateDelayFrames))
         {
             return false;
         }
@@ -7295,8 +7240,7 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
                 frame,
                 G.Rollback.Window,
                 G.Rollback.CheckpointInterval);
-            G.PendingRollbackFrame = kNoFrameLimit;
-            G.PendingRollbackObservedFrame = kNoFrameLimit;
+            G.RollbackInputs.ClearPendingRollback();
             return false;
         }
         const bool restoreReady = IsRollbackPreimageBackend()
@@ -7309,12 +7253,10 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
                 mismatchFrame,
                 restoreFrame,
                 checkpoint.BaseFrame);
-            G.PendingRollbackFrame = kNoFrameLimit;
-            G.PendingRollbackObservedFrame = kNoFrameLimit;
+            G.RollbackInputs.ClearPendingRollback();
             return false;
         }
-        G.PendingRollbackFrame = kNoFrameLimit;
-        G.PendingRollbackObservedFrame = kNoFrameLimit;
+        G.RollbackInputs.ClearPendingRollback();
 
         G.RollbackStore.EraseAfter(restoreFrame);
     }
@@ -11931,14 +11873,14 @@ void TraceRollbackStatsIfNeeded(melonDS::u32 logFrame)
         G.Rollback.MainRAMPageSize,
         G.Rollback.CoreSkipMask,
         G.Rollback.TinyCoreFlags,
-        G.PredictedRemoteInputs.size(),
-        G.RollbackPredictionCount,
-        G.RollbackPredictionProbeCount,
-        G.RollbackMismatchCount,
+        G.RollbackInputs.Predictions().size(),
+        G.RollbackInputs.PredictionCount(),
+        G.RollbackInputs.PredictionProbeCount(),
+        G.RollbackInputs.MismatchCount(),
         G.RollbackRestoreCount,
         G.RollbackResimulateCount,
-        G.PendingRollbackFrame,
-        G.PendingRollbackObservedFrame);
+        G.RollbackInputs.PendingRollbackFrame().value_or(kNoFrameLimit),
+        G.RollbackInputs.PendingRollbackObservedFrame().value_or(kNoFrameLimit));
     std::fflush(stdout);
 }
 

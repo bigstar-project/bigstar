@@ -56,6 +56,156 @@ int ButtonBit(const std::string& name)
     return -1;
 }
 
+bool InputsEqual(const InputState& left, const InputState& right)
+{
+    return left.KeyMask == right.KeyMask
+        && left.Touching == right.Touching
+        && left.TouchX == right.TouchX
+        && left.TouchY == right.TouchY;
+}
+
+}
+
+ConfirmedInputResult PredictionRuntime::Confirm(
+    melonDS::u32 frame,
+    const InputState& input,
+    std::optional<melonDS::u32> localFrame)
+{
+    ConfirmedInputResult result;
+    const auto predicted = Predictions_.find(frame);
+    if (predicted != Predictions_.end() && !InputsEqual(predicted->second, input))
+    {
+        result.Mismatch = true;
+        result.PredictedInput = predicted->second;
+        result.FrameAlreadySimulated = !localFrame || frame < *localFrame;
+        MismatchCount_++;
+
+        if (result.FrameAlreadySimulated)
+        {
+            const melonDS::u32 observedFrame = localFrame.value_or(frame);
+            if (!PendingRollbackFrame_ || frame < *PendingRollbackFrame_)
+            {
+                PendingRollbackFrame_ = frame;
+                PendingRollbackObservedFrame_ = observedFrame;
+            }
+            else if (!PendingRollbackObservedFrame_)
+            {
+                PendingRollbackObservedFrame_ = observedFrame;
+            }
+        }
+        Predictions_.erase(Predictions_.lower_bound(frame), Predictions_.end());
+    }
+
+    LastConfirmedInput_ = input;
+    return result;
+}
+
+PredictedInput PredictionRuntime::Resolve(
+    melonDS::u32 frame,
+    const InputMap& confirmedInputs,
+    const InputState& neutralInput,
+    const PredictionProbe& probe)
+{
+    const auto confirmed = confirmedInputs.find(frame);
+    if (confirmed != confirmedInputs.end())
+        return { confirmed->second, false };
+
+    const auto existing = Predictions_.find(frame);
+    if (existing != Predictions_.end())
+        return { existing->second, true };
+
+    InputState input = neutralInput;
+    const auto previous = frame > 0
+        ? Predictions_.find(frame - 1)
+        : Predictions_.end();
+    if (previous != Predictions_.end())
+        input = previous->second;
+    else if (LastConfirmedInput_)
+        input = *LastConfirmedInput_;
+
+    const bool belowProbeLimit = probe.Limit < 0
+        || PredictionProbeCount_ < static_cast<melonDS::u32>(probe.Limit);
+    const bool insideProbeRange = frame >= probe.StartFrame
+        && (!probe.EndFrame || frame <= *probe.EndFrame);
+    if (probe.Modulo > 0
+        && belowProbeLimit
+        && insideProbeRange
+        && (frame % static_cast<melonDS::u32>(probe.Modulo))
+            == static_cast<melonDS::u32>(probe.Offset))
+    {
+        input.KeyMask ^= probe.KeyMask & 0xFFFu;
+        PredictionProbeCount_++;
+    }
+
+    Predictions_.emplace(frame, input);
+    PredictionCount_++;
+    return { input, true };
+}
+
+void PredictionRuntime::Prune(
+    melonDS::u32 currentFrame,
+    melonDS::u32 window,
+    const InputMap& confirmedInputs)
+{
+    const melonDS::u32 keepFrom = currentFrame > window ? currentFrame - window : 0;
+    for (auto prediction = Predictions_.begin(); prediction != Predictions_.end();)
+    {
+        if (prediction->first < keepFrom
+            && confirmedInputs.find(prediction->first) != confirmedInputs.end())
+        {
+            prediction = Predictions_.erase(prediction);
+        }
+        else
+        {
+            ++prediction;
+        }
+    }
+}
+
+void PredictionRuntime::ClearPredictions()
+{
+    Predictions_.clear();
+}
+
+const PredictionRuntime::InputMap& PredictionRuntime::Predictions() const
+{
+    return Predictions_;
+}
+
+std::optional<melonDS::u32> PredictionRuntime::PendingRollbackFrame() const
+{
+    return PendingRollbackFrame_;
+}
+
+std::optional<melonDS::u32> PredictionRuntime::PendingRollbackObservedFrame() const
+{
+    return PendingRollbackObservedFrame_;
+}
+
+void PredictionRuntime::ClearPendingRollbackFrame()
+{
+    PendingRollbackFrame_.reset();
+}
+
+void PredictionRuntime::ClearPendingRollback()
+{
+    PendingRollbackFrame_.reset();
+    PendingRollbackObservedFrame_.reset();
+}
+
+melonDS::u32 PredictionRuntime::PredictionCount() const
+{
+    return PredictionCount_;
+}
+
+melonDS::u32 PredictionRuntime::PredictionProbeCount() const
+{
+    return PredictionProbeCount_;
+}
+
+melonDS::u32 PredictionRuntime::MismatchCount() const
+{
+    return MismatchCount_;
 }
 
 bool ParseInputSpec(const std::string& spec, InputState& input)

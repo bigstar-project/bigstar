@@ -19,6 +19,128 @@ void Check(bool condition, const char* expression, int line)
 
 #define CHECK(expression) Check((expression), #expression, __LINE__)
 
+NsmbNetplayPoC::InputState Input(melonDS::u32 keys)
+{
+    NsmbNetplayPoC::InputState input;
+    input.KeyMask = keys;
+    return input;
+}
+
+bool SameInput(
+    const NsmbNetplayPoC::InputState& left,
+    const NsmbNetplayPoC::InputState& right)
+{
+    return left.KeyMask == right.KeyMask
+        && left.Touching == right.Touching
+        && left.TouchX == right.TouchX
+        && left.TouchY == right.TouchY;
+}
+
+void TestPredictionAndConfirmation()
+{
+    using NsmbNetplayPoC::InputTimeline::PredictionRuntime;
+    PredictionRuntime timeline;
+    PredictionRuntime::InputMap confirmed;
+    const auto neutral = Input(0xFFF);
+
+    auto resolved = timeline.Resolve(10, confirmed, neutral, {});
+    CHECK(resolved.Predicted);
+    CHECK(SameInput(resolved.Input, neutral));
+    CHECK(timeline.PredictionCount() == 1);
+
+    resolved = timeline.Resolve(11, confirmed, neutral, {});
+    CHECK(resolved.Predicted);
+    CHECK(SameInput(resolved.Input, neutral));
+
+    const auto matching = timeline.Confirm(10, neutral, 12);
+    CHECK(!matching.Mismatch);
+    CHECK(!timeline.PendingRollbackFrame());
+    confirmed.emplace(10, neutral);
+    resolved = timeline.Resolve(10, confirmed, Input(0), {});
+    CHECK(!resolved.Predicted);
+    CHECK(SameInput(resolved.Input, neutral));
+
+    timeline.ClearPredictions();
+    resolved = timeline.Resolve(20, confirmed, Input(0), {});
+    CHECK(resolved.Predicted);
+    CHECK(SameInput(resolved.Input, neutral));
+}
+
+void TestPredictionMismatchScheduling()
+{
+    using NsmbNetplayPoC::InputTimeline::PredictionRuntime;
+    PredictionRuntime timeline;
+    PredictionRuntime::InputMap confirmed;
+    const auto neutral = Input(0xFFF);
+    timeline.Resolve(30, confirmed, neutral, {});
+    timeline.Resolve(31, confirmed, neutral, {});
+    timeline.Resolve(32, confirmed, neutral, {});
+
+    const auto mismatch = timeline.Confirm(31, Input(0xFFE), 35);
+    CHECK(mismatch.Mismatch);
+    CHECK(mismatch.FrameAlreadySimulated);
+    CHECK(SameInput(mismatch.PredictedInput, neutral));
+    CHECK(timeline.PendingRollbackFrame() == 31);
+    CHECK(timeline.PendingRollbackObservedFrame() == 35);
+    CHECK(timeline.MismatchCount() == 1);
+    CHECK(timeline.Predictions().count(30) == 1);
+    CHECK(timeline.Predictions().count(31) == 0);
+    CHECK(timeline.Predictions().count(32) == 0);
+
+    timeline.Resolve(33, confirmed, neutral, {});
+    timeline.Confirm(33, Input(0xFFC), 40);
+    CHECK(timeline.PendingRollbackFrame() == 31);
+    CHECK(timeline.PendingRollbackObservedFrame() == 35);
+
+    timeline.Resolve(29, confirmed, neutral, {});
+    timeline.Confirm(29, Input(0xFFB), std::nullopt);
+    CHECK(timeline.PendingRollbackFrame() == 29);
+    CHECK(timeline.PendingRollbackObservedFrame() == 29);
+
+    timeline.ClearPendingRollbackFrame();
+    CHECK(!timeline.PendingRollbackFrame());
+    CHECK(timeline.PendingRollbackObservedFrame() == 29);
+    timeline.ClearPendingRollback();
+    CHECK(!timeline.PendingRollbackObservedFrame());
+
+    timeline.Resolve(40, confirmed, neutral, {});
+    const auto currentMismatch = timeline.Confirm(40, Input(0xFFD), 40);
+    CHECK(currentMismatch.Mismatch);
+    CHECK(!currentMismatch.FrameAlreadySimulated);
+    CHECK(!timeline.PendingRollbackFrame());
+}
+
+void TestPredictionProbeAndPrune()
+{
+    using NsmbNetplayPoC::InputTimeline::PredictionProbe;
+    using NsmbNetplayPoC::InputTimeline::PredictionRuntime;
+    PredictionRuntime timeline;
+    PredictionRuntime::InputMap confirmed;
+    const auto neutral = Input(0xFFF);
+    PredictionProbe probe;
+    probe.Modulo = 2;
+    probe.Offset = 1;
+    probe.Limit = 2;
+    probe.StartFrame = 5;
+    probe.EndFrame = 9;
+    probe.KeyMask = 0x1001;
+
+    CHECK(SameInput(timeline.Resolve(4, confirmed, neutral, probe).Input, neutral));
+    CHECK(timeline.Resolve(5, confirmed, neutral, probe).Input.KeyMask == 0xFFE);
+    CHECK(timeline.Resolve(6, confirmed, neutral, probe).Input.KeyMask == 0xFFE);
+    CHECK(timeline.Resolve(7, confirmed, neutral, probe).Input.KeyMask == 0xFFF);
+    timeline.Resolve(8, confirmed, neutral, probe);
+    CHECK(SameInput(timeline.Resolve(9, confirmed, neutral, probe).Input, neutral));
+    CHECK(timeline.PredictionProbeCount() == 2);
+
+    confirmed.emplace(4, neutral);
+    confirmed.emplace(5, neutral);
+    timeline.Prune(10, 4, confirmed);
+    CHECK(timeline.Predictions().count(4) == 0);
+    CHECK(timeline.Predictions().count(5) == 0);
+    CHECK(timeline.Predictions().count(7) == 1);
+}
+
 void TestButtonAndMaskParsing()
 {
     NsmbNetplayPoC::InputState input;
@@ -88,6 +210,9 @@ void TestParseErrorsAreClassified()
 
 int main()
 {
+    TestPredictionAndConfirmation();
+    TestPredictionMismatchScheduling();
+    TestPredictionProbeAndPrune();
     TestButtonAndMaskParsing();
     TestTimelineTargetsTouchAndFirstMatch();
     TestParseErrorsAreClassified();

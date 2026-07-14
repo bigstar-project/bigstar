@@ -1,5 +1,11 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
+## 2026-07-15 input prediction runtime refactor
+
+Rollbackのremote input予測状態を`NsmbNetplayPoC.cpp`のflat field群から既存の`NsmbInputTimeline`へ移した。`PredictionRuntime`が予測map、最終確定入力、prediction/probe/mismatch counter、pending rollback frameと観測frameを所有し、確定入力優先、直前予測の引継ぎ、後着mismatch時の予測tail無効化、過去frameだけをrollback対象にする既存semanticsをROM不要contract testで固定している。checkpoint保存・復元は引き続き`NsmbRollbackStore`の責務であり、入力予測との混在は避けた。
+
+固定seed・packet loss付き1,250-frame回帰は`logs/refactor-input-prediction-fast`と`logs/refactor-input-prediction-rollback`でpassした。後者は`tinycorepreimage`のcheckpoint保存coverage、host/client semantic trace、applied input、既存goldenの一致まで確認しており、この変更によるrollback policyやplayability評価の変更はない。
+
 ## 2026-07-15 rejected backend cleanup
 
 The historical sections below retain the experiments and measurements that led to the current design, but `nsmbranges`, `nsmbcoreranges`, `nsmbtinycore`, and `arm9ram` are no longer supported runtime backends. They had failed correctness checks or served only as negative controls, and no current GUI path, refactor regression tier, or practical rollback candidate selected them. Their dedicated fixed/dynamic NSMB range scanner, ARM9-only format, diagnostics, config variables, and launcher/sweep branches were removed during the `NsmbNetplayPoC` refactor.
