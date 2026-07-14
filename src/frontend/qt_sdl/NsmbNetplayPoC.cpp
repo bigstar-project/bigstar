@@ -1985,11 +1985,6 @@ struct State
     melonDS::u32 ForceStageFXSettingsEndFrame = 0;
     melonDS::u32 ForceStageFXSettingsValue = 0x00008000;
     bool ForceStageFXSettingsLogged[16] {};
-    bool CallStageScenePostCreateEnabled = false;
-    bool CallStageScenePostCreateHostOnly = false;
-    bool CallStageScenePostCreateClientOnly = false;
-    melonDS::u32 CallStageScenePostCreateFrame = 0;
-    bool CallStageScenePostCreateApplied[16] {};
     bool ForceStageActorFreezeFlagEnabled = false;
     bool ForceStageActorFreezeFlagHostOnly = false;
     bool ForceStageActorFreezeFlagClientOnly = false;
@@ -2040,12 +2035,6 @@ struct State
     melonDS::u32 ForcePlayerSignalUnlockStartFrame = 0;
     melonDS::u32 ForcePlayerSignalUnlockEndFrame = 0;
     bool ForcePlayerSignalUnlockLogged[16] {};
-    bool ForcePlayerUpdateEnableEnabled = false;
-    bool ForcePlayerUpdateEnableHostOnly = false;
-    bool ForcePlayerUpdateEnableClientOnly = false;
-    melonDS::u32 ForcePlayerUpdateEnableStartFrame = 0;
-    melonDS::u32 ForcePlayerUpdateEnableEndFrame = 0;
-    bool ForcePlayerUpdateEnableLogged[16] {};
     bool ForceStageSceneStartGateEnabled = false;
     bool ForceStageSceneStartGateHostOnly = false;
     bool ForceStageSceneStartGateClientOnly = false;
@@ -2195,29 +2184,6 @@ struct State
     melonDS::u32 ForceMvlRuntimeStateEndFrame = 0;
     melonDS::u32 ForceMvlRuntimeStateValue = 3;
     bool ForceMvlRuntimeStateLogged[16] {};
-    bool ForcePlayerActorIDsEnabled = false;
-    bool ForcePlayerActorIDsHostOnly = false;
-    bool ForcePlayerActorIDsClientOnly = false;
-    melonDS::u32 ForcePlayerActorIDsStartFrame = 0;
-    melonDS::u32 ForcePlayerActorIDsEndFrame = 0;
-    bool ForcePlayerActorIDsLogged[16] {};
-    bool ForcePlayerTransitionStatusEnabled = false;
-    bool ForcePlayerTransitionStatusHostOnly = false;
-    bool ForcePlayerTransitionStatusClientOnly = false;
-    melonDS::u32 ForcePlayerTransitionStatusStartFrame = 0;
-    melonDS::u32 ForcePlayerTransitionStatusEndFrame = 0;
-    melonDS::u32 ForcePlayerTransitionStatusValue = 2;
-    bool ForcePlayerTransitionStatusLogged[16] {};
-    bool ForceEntranceSpawnPointersEnabled = false;
-    bool ForceEntranceSpawnPointersHostOnly = false;
-    bool ForceEntranceSpawnPointersClientOnly = false;
-    melonDS::u32 ForceEntranceSpawnPointersStartFrame = 0;
-    melonDS::u32 ForceEntranceSpawnPointersEndFrame = 0;
-    melonDS::u32 ForceEntranceSpawnPtr0 = 0;
-    melonDS::u32 ForceEntranceSpawnPtr1 = 0;
-    melonDS::u32 ForceEntranceSpawnID0 = 0;
-    melonDS::u32 ForceEntranceSpawnID1 = 1;
-    bool ForceEntranceSpawnPointersLogged[16] {};
     bool ClearMvlCameraInitHoldEnabled = false;
     bool ClearMvlCameraInitHoldHostOnly = false;
     bool ClearMvlCameraInitHoldClientOnly = false;
@@ -11501,105 +11467,6 @@ ObjectScanSample GetWorldActorCached(
     return actor;
 }
 
-void ForcePlayerActorIDsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.ForcePlayerActorIDsEnabled || !nds)
-        return;
-    if (G.ForcePlayerActorIDsHostOnly && G.NetRole != Role::Host)
-        return;
-    if (G.ForcePlayerActorIDsClientOnly && G.NetRole != Role::Client)
-        return;
-    if (frame < G.ForcePlayerActorIDsStartFrame)
-        return;
-    if (G.ForcePlayerActorIDsEndFrame != 0 && frame > G.ForcePlayerActorIDsEndFrame)
-        return;
-
-    const PlayerActorScanSample players = FindPlayerActors(nds);
-    if (players.Actor0.Found)
-        nds->ARM9Write8(players.Actor0.Base + 0x11E, 0);
-    if (players.Actor1.Found)
-        nds->ARM9Write8(players.Actor1.Base + 0x11E, 1);
-
-    if (instanceID >= 0 && instanceID < 16 && !G.ForcePlayerActorIDsLogged[instanceID])
-    {
-        G.ForcePlayerActorIDsLogged[instanceID] = true;
-        std::printf(
-            "NSMB Test: force player actor IDs inst=%d frame=%u range=%u-%u p0=%08X p1=%08X\n",
-            instanceID,
-            frame,
-            G.ForcePlayerActorIDsStartFrame,
-            G.ForcePlayerActorIDsEndFrame,
-            players.Actor0.Base,
-            players.Actor1.Base);
-    }
-}
-
-void ForcePlayerTransitionStatusIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.ForcePlayerTransitionStatusEnabled || !nds)
-        return;
-    if (G.ForcePlayerTransitionStatusHostOnly && G.NetRole != Role::Host)
-        return;
-    if (G.ForcePlayerTransitionStatusClientOnly && G.NetRole != Role::Client)
-        return;
-    if (frame < G.ForcePlayerTransitionStatusStartFrame)
-        return;
-    if (G.ForcePlayerTransitionStatusEndFrame != 0 && frame > G.ForcePlayerTransitionStatusEndFrame)
-        return;
-
-    const melonDS::u32 value = G.ForcePlayerTransitionStatusValue;
-    nds->ARM9Write32(kGamePlayerTransitionStatusAddr, value);
-    nds->ARM9Write32(kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32), value);
-
-    if (instanceID >= 0 && instanceID < 16 && !G.ForcePlayerTransitionStatusLogged[instanceID])
-    {
-        G.ForcePlayerTransitionStatusLogged[instanceID] = true;
-        std::printf(
-            "NSMB Test: force player transition status inst=%d frame=%u range=%u-%u value=0x%08X\n",
-            instanceID,
-            frame,
-            G.ForcePlayerTransitionStatusStartFrame,
-            G.ForcePlayerTransitionStatusEndFrame,
-            value);
-    }
-}
-
-void ForceEntranceSpawnPointersIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.ForceEntranceSpawnPointersEnabled || !nds)
-        return;
-    if (G.ForceEntranceSpawnPointersHostOnly && G.NetRole != Role::Host)
-        return;
-    if (G.ForceEntranceSpawnPointersClientOnly && G.NetRole != Role::Client)
-        return;
-    if (frame < G.ForceEntranceSpawnPointersStartFrame)
-        return;
-    if (G.ForceEntranceSpawnPointersEndFrame != 0 && frame > G.ForceEntranceSpawnPointersEndFrame)
-        return;
-
-    nds->ARM9Write8(kEntranceSpawnEntranceIDAddr, static_cast<melonDS::u8>(G.ForceEntranceSpawnID0 & 0xFF));
-    nds->ARM9Write8(kEntranceSpawnEntranceIDAddr + 1, static_cast<melonDS::u8>(G.ForceEntranceSpawnID1 & 0xFF));
-    nds->ARM9Write8(kEntranceTransitionFlagsAddr, 0);
-    nds->ARM9Write8(kEntranceTransitionFlagsAddr + 1, 0);
-    nds->ARM9Write32(kEntranceSpawnEntranceAddr, G.ForceEntranceSpawnPtr0);
-    nds->ARM9Write32(kEntranceSpawnEntranceAddr + sizeof(melonDS::u32), G.ForceEntranceSpawnPtr1);
-
-    if (instanceID >= 0 && instanceID < 16 && !G.ForceEntranceSpawnPointersLogged[instanceID])
-    {
-        G.ForceEntranceSpawnPointersLogged[instanceID] = true;
-        std::printf(
-            "NSMB Test: force entrance spawn pointers inst=%d frame=%u range=%u-%u ptr0=%08X ptr1=%08X id0=%u id1=%u\n",
-            instanceID,
-            frame,
-            G.ForceEntranceSpawnPointersStartFrame,
-            G.ForceEntranceSpawnPointersEndFrame,
-            G.ForceEntranceSpawnPtr0,
-            G.ForceEntranceSpawnPtr1,
-            G.ForceEntranceSpawnID0,
-            G.ForceEntranceSpawnID1);
-    }
-}
-
 void WriteObjectTransform(melonDS::NDS* nds, const ObjectScanSample& actor, melonDS::u32 posX, melonDS::u32 posY, melonDS::u32 posZ, bool clearVelocity);
 
 void NormalizeMvlEntranceSpawnStateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -12198,99 +12065,6 @@ void ForceStageFXSettingsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::N
     }
 }
 
-bool CallStageScenePostCreateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.CallStageScenePostCreateEnabled || !nds || instanceID < 0 || instanceID >= 16)
-        return false;
-    if (G.CallStageScenePostCreateHostOnly && G.NetRole != Role::Host)
-        return false;
-    if (G.CallStageScenePostCreateClientOnly && G.NetRole != Role::Client)
-        return false;
-    if (G.CallStageScenePostCreateApplied[instanceID] || frame < G.CallStageScenePostCreateFrame)
-        return false;
-
-    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(
-        nds,
-        kStageSceneObjectID,
-        G.MvlStageSceneSettings);
-    if (!stageScene.Found || !IsARM9MainRAMAddress(stageScene.Base))
-    {
-        std::printf(
-            "NSMB StageScenePostCreate: inst=%d frame=%u skipped: stage scene not found\n",
-            instanceID,
-            frame);
-        std::fflush(stdout);
-        return false;
-    }
-
-    const melonDS::u32 processLink = stageScene.Base + 0x28;
-    const melonDS::u32 prevLinkBase = nds->ARM9Read32(stageScene.Base + 0x2C);
-    const melonDS::u32 objectID = nds->ARM9Read16(stageScene.Base + 0x0C);
-    if (!IsARM9MainRAMAddress(prevLinkBase))
-    {
-        G.CallStageScenePostCreateApplied[instanceID] = true;
-        std::printf(
-            "NSMB StageScenePostCreate: inst=%d frame=%u skipped: stage scene is not linked for process callback base=%08X link=%08X prev=%08X id=%u\n",
-            instanceID,
-            frame,
-            stageScene.Base,
-            processLink,
-            prevLinkBase,
-            objectID);
-        std::fflush(stdout);
-        return false;
-    }
-
-    const melonDS::u32 oldPC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
-    const melonDS::u32 returnPC = oldPC | ((nds->ARM9.CPSR & 0x20) ? 1u : 0u);
-
-    std::vector<melonDS::u32> code;
-    code.reserve(24);
-    EmitARM(code, 0xE92D5FFFu); // push {r0-r12, lr}
-    EmitARM(code, 0xE10F5000u); // mrs r5, cpsr
-    EmitARM(code, 0xE92D0020u); // push {r5}
-    // 0x0204D204 is the Base process-list postCreate callback, not an
-    // object method. Match the register shape observed on the visible US
-    // route for StageScene: r0=Success, r1=object link, r2=previous link,
-    // r3=object ID.
-    EmitLoadImm(code, 0, 1);
-    EmitLoadImm(code, 1, processLink);
-    EmitLoadImm(code, 2, prevLinkBase);
-    EmitLoadImm(code, 3, objectID);
-    EmitARM(code, 0xE59FC008u); // ldr ip, [pc, #8]
-    EmitARM(code, 0xE28FE008u); // add lr, pc, #8
-    EmitARM(code, 0xE12FFF1Cu); // bx ip
-    EmitARM(code, 0xE1A00000u); // nop
-    EmitARM(code, 0x0204D204u); // Base process-list postCreate callback in US/A2DE
-    EmitARM(code, 0xE8BD0020u); // pop {r5}
-    EmitARM(code, 0xE128F005u); // msr apsr_nzcvq, r5
-    EmitARM(code, 0xE8BD5FFFu); // pop {r0-r12, lr}
-    EmitARM(code, 0xE59FC004u); // ldr ip, [pc, #4]
-    EmitARM(code, 0xE12FFF1Cu); // bx ip
-    EmitARM(code, 0xE1A00000u); // nop
-    EmitARM(code, returnPC);
-
-    for (size_t i = 0; i < code.size(); i++)
-    {
-        if (!WriteARM9U32(nds, kDirectBootTrampolineAddr + static_cast<melonDS::u32>(i * sizeof(melonDS::u32)), code[i]))
-            return false;
-    }
-
-    G.CallStageScenePostCreateApplied[instanceID] = true;
-    std::printf(
-        "NSMB StageScenePostCreate: inst=%d frame=%u base=%08X link=%08X prev=%08X id=%u trampoline=%08X return=%08X\n",
-        instanceID,
-        frame,
-        stageScene.Base,
-        processLink,
-        prevLinkBase,
-        objectID,
-        kDirectBootTrampolineAddr,
-        returnPC);
-    std::fflush(stdout);
-    nds->ARM9.JumpTo(kDirectBootTrampolineAddr);
-    return true;
-}
 
 void ForceStageActorFreezeFlagIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
@@ -12600,65 +12374,6 @@ void ForcePlayerSignalUnlockIfNeeded(int instanceID, melonDS::u32 frame, melonDS
             global9298,
             nds->ARM9Read8(0x020C9298));
         G.ForcePlayerSignalUnlockLogged[instanceID] = true;
-    }
-}
-
-void ForcePlayerUpdateEnableIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.ForcePlayerUpdateEnableEnabled || !nds || !nds->MainRAM)
-        return;
-    if (frame < G.ForcePlayerUpdateEnableStartFrame)
-        return;
-    if (G.ForcePlayerUpdateEnableEndFrame != 0 && frame > G.ForcePlayerUpdateEnableEndFrame)
-        return;
-    if (G.ForcePlayerUpdateEnableHostOnly && G.NetRole != Role::Host)
-        return;
-    if (G.ForcePlayerUpdateEnableClientOnly && G.NetRole != Role::Client)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
-        return;
-
-    const PlayerActorScanSample players = FindPlayerActors(nds);
-    melonDS::u32 playerBases[2] {};
-    int playerCount = 0;
-    if (players.Actor0.Found && IsARM9MainRAMAddress(players.Actor0.Base))
-        playerBases[playerCount++] = players.Actor0.Base;
-    if (players.Actor1.Found && IsARM9MainRAMAddress(players.Actor1.Base))
-        playerBases[playerCount++] = players.Actor1.Base;
-
-    int changed = 0;
-    melonDS::u8 oldFlags[2] {};
-    melonDS::u8 newFlags[2] {};
-    for (int i = 0; i < playerCount; i++)
-    {
-        oldFlags[i] = nds->ARM9Read8(playerBases[i] + 0x13);
-        newFlags[i] = static_cast<melonDS::u8>(oldFlags[i] & ~0x02);
-        if (newFlags[i] != oldFlags[i])
-        {
-            nds->ARM9Write8(playerBases[i] + 0x13, newFlags[i]);
-            changed++;
-        }
-    }
-
-    if (!G.ForcePlayerUpdateEnableLogged[instanceID])
-    {
-        std::printf(
-            "NSMB Test: force player update enable inst=%d frame=%u range=%u-%u players=%d changed=%d p0=%08X %02X->%02X p1=%08X %02X->%02X\n",
-            instanceID,
-            frame,
-            G.ForcePlayerUpdateEnableStartFrame,
-            G.ForcePlayerUpdateEnableEndFrame,
-            playerCount,
-            changed,
-            playerCount > 0 ? playerBases[0] : 0,
-            playerCount > 0 ? oldFlags[0] : 0,
-            playerCount > 0 ? newFlags[0] : 0,
-            playerCount > 1 ? playerBases[1] : 0,
-            playerCount > 1 ? oldFlags[1] : 0,
-            playerCount > 1 ? newFlags[1] : 0);
-        G.ForcePlayerUpdateEnableLogged[instanceID] = true;
     }
 }
 
@@ -12975,10 +12690,7 @@ void ApplyRollbackResimFramePatches(int instanceID, melonDS::u32 frame, melonDS:
     ForceStageSceneContinueGateIfNeeded(instanceID, frame, nds);
     ForceMvlPlayerReadyIfNeeded(instanceID, frame, nds);
     ForceMvlRuntimeStateIfNeeded(instanceID, frame, nds);
-    ForcePlayerTransitionStatusIfNeeded(instanceID, frame, nds);
-    ForceEntranceSpawnPointersIfNeeded(instanceID, frame, nds);
     NormalizeMvlEntranceSpawnStateIfNeeded(instanceID, frame, nds);
-    ForcePlayerActorIDsIfNeeded(instanceID, frame, nds);
     RepairMvlInitialPlayerSpawnIfNeeded(instanceID, frame, nds);
     ClearMvlCameraInitHoldIfNeeded(instanceID, frame, nds);
     ForceStageSceneEventFlagsIfNeeded(instanceID, frame, nds);
@@ -12991,7 +12703,6 @@ void ApplyRollbackResimFramePatches(int instanceID, melonDS::u32 frame, melonDS:
     ForcePlayerStarCountersIfNeeded(instanceID, frame, nds);
     ForceStageFXSettingsIfNeeded(instanceID, frame, nds);
     ForcePlayerSignalUnlockIfNeeded(instanceID, frame, nds);
-    ForcePlayerUpdateEnableIfNeeded(instanceID, frame, nds);
 }
 
 void ApplyRollbackResimPostFramePatches(melonDS::u32 frame, melonDS::NDS* nds)
@@ -18281,11 +17992,6 @@ void InitFromEnvironment()
     G.ForceStageFXSettingsValue = static_cast<melonDS::u32>(
         std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGEFX_SETTINGS_VALUE")
             ? std::getenv("MELONDS_NSML_FORCE_STAGEFX_SETTINGS_VALUE") : "0x8000", nullptr, 0));
-    G.CallStageScenePostCreateEnabled = EnvFlag("MELONDS_NSML_CALL_STAGE_SCENE_POST_CREATE");
-    G.CallStageScenePostCreateHostOnly = EnvFlag("MELONDS_NSML_CALL_STAGE_SCENE_POST_CREATE_HOST_ONLY");
-    G.CallStageScenePostCreateClientOnly = EnvFlag("MELONDS_NSML_CALL_STAGE_SCENE_POST_CREATE_CLIENT_ONLY");
-    G.CallStageScenePostCreateFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_CALL_STAGE_SCENE_POST_CREATE_FRAME", 0)));
     G.ForceStageActorFreezeFlagEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG");
     G.ForceStageActorFreezeFlagHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_HOST_ONLY");
     G.ForceStageActorFreezeFlagClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG_CLIENT_ONLY");
@@ -18355,13 +18061,6 @@ void InitFromEnvironment()
         std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_START_FRAME", 0)));
     G.ForcePlayerSignalUnlockEndFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_END_FRAME", 0)));
-    G.ForcePlayerUpdateEnableEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_UPDATE_ENABLE");
-    G.ForcePlayerUpdateEnableHostOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_UPDATE_ENABLE_HOST_ONLY");
-    G.ForcePlayerUpdateEnableClientOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_UPDATE_ENABLE_CLIENT_ONLY");
-    G.ForcePlayerUpdateEnableStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_UPDATE_ENABLE_START_FRAME", 0)));
-    G.ForcePlayerUpdateEnableEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_UPDATE_ENABLE_END_FRAME", 0)));
     G.ForceStageSceneStartGateEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE");
     G.ForceStageSceneStartGateHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_HOST_ONLY");
     G.ForceStageSceneStartGateClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_CLIENT_ONLY");
@@ -18596,42 +18295,6 @@ void InitFromEnvironment()
     G.ForceMvlRuntimeStateValue = static_cast<melonDS::u32>(
         std::strtoul(std::getenv("MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_VALUE")
             ? std::getenv("MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_VALUE") : "3", nullptr, 0));
-    G.ForcePlayerActorIDsEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_ACTOR_IDS");
-    G.ForcePlayerActorIDsHostOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_ACTOR_IDS_HOST_ONLY");
-    G.ForcePlayerActorIDsClientOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_ACTOR_IDS_CLIENT_ONLY");
-    G.ForcePlayerActorIDsStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_ACTOR_IDS_START_FRAME", 0)));
-    G.ForcePlayerActorIDsEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_ACTOR_IDS_END_FRAME", 0)));
-    G.ForcePlayerTransitionStatusEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_TRANSITION_STATUS");
-    G.ForcePlayerTransitionStatusHostOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_TRANSITION_STATUS_HOST_ONLY");
-    G.ForcePlayerTransitionStatusClientOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_TRANSITION_STATUS_CLIENT_ONLY");
-    G.ForcePlayerTransitionStatusStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_TRANSITION_STATUS_START_FRAME", 0)));
-    G.ForcePlayerTransitionStatusEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_TRANSITION_STATUS_END_FRAME", 0)));
-    G.ForcePlayerTransitionStatusValue = static_cast<melonDS::u32>(
-        std::strtoul(std::getenv("MELONDS_NSML_FORCE_PLAYER_TRANSITION_STATUS_VALUE")
-            ? std::getenv("MELONDS_NSML_FORCE_PLAYER_TRANSITION_STATUS_VALUE") : "2", nullptr, 0));
-    G.ForceEntranceSpawnPointersEnabled = EnvFlag("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_POINTERS");
-    G.ForceEntranceSpawnPointersHostOnly = EnvFlag("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_POINTERS_HOST_ONLY");
-    G.ForceEntranceSpawnPointersClientOnly = EnvFlag("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_POINTERS_CLIENT_ONLY");
-    G.ForceEntranceSpawnPointersStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_POINTERS_START_FRAME", 0)));
-    G.ForceEntranceSpawnPointersEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_POINTERS_END_FRAME", 0)));
-    G.ForceEntranceSpawnPtr0 = static_cast<melonDS::u32>(
-        std::strtoul(std::getenv("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_PTR0")
-            ? std::getenv("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_PTR0") : "0", nullptr, 0));
-    G.ForceEntranceSpawnPtr1 = static_cast<melonDS::u32>(
-        std::strtoul(std::getenv("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_PTR1")
-            ? std::getenv("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_PTR1") : "0", nullptr, 0));
-    G.ForceEntranceSpawnID0 = static_cast<melonDS::u32>(
-        std::strtoul(std::getenv("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_ID0")
-            ? std::getenv("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_ID0") : "0", nullptr, 0));
-    G.ForceEntranceSpawnID1 = static_cast<melonDS::u32>(
-        std::strtoul(std::getenv("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_ID1")
-            ? std::getenv("MELONDS_NSML_FORCE_ENTRANCE_SPAWN_ID1") : "1", nullptr, 0));
     G.ClearMvlCameraInitHoldEnabled = EnvFlag("MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD");
     G.ClearMvlCameraInitHoldHostOnly = EnvFlag("MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_HOST_ONLY");
     G.ClearMvlCameraInitHoldClientOnly = EnvFlag("MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_CLIENT_ONLY");
@@ -19361,11 +19024,6 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageSceneActiveIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-    {
-        if (CallStageScenePostCreateIfNeeded(instanceID, inputFrame, nds))
-            return polledInput;
-    }
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageSceneStartGateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceWifiCommunicatingIfNeeded(instanceID, inputFrame, nds);
@@ -19380,13 +19038,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceMvlRuntimeStateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForcePlayerTransitionStatusIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForceEntranceSpawnPointersIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         NormalizeMvlEntranceSpawnStateIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForcePlayerActorIDsIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         RepairMvlInitialPlayerSpawnIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
@@ -19413,8 +19065,6 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         ForceStageFXSettingsIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerSignalUnlockIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForcePlayerUpdateEnableIfNeeded(instanceID, inputFrame, nds);
 
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Setup);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
