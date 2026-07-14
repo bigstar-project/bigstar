@@ -202,19 +202,51 @@ void TestRemoteStateStoreSelectionAndRestart() {
   CHECK(store.WorldEffectState() == nullptr);
 }
 
+void TestStateSyncHashComparisonContract() {
+  using namespace NsmbNetplayPoC;
+  GameStateModel::StateSyncRuntime runtime;
+  GameStateModel::GameStateSyncHashes local;
+  local.Basic = 1;
+  local.PlayerGlobal = 2;
+  CHECK(!runtime.RecordLocalGameStateHashes(3, 10, local));
+
+  GameStateModel::DecodedGameState remote;
+  remote.Instance = 3;
+  remote.Frame = 10;
+  remote.Hashes = local;
+  remote.Hashes.PlayerGlobal = 3;
+  auto mismatch = runtime.RecordRemoteGameState(remote);
+  CHECK(mismatch.has_value());
+  CHECK(mismatch && mismatch->InstanceID == 3);
+  CHECK(mismatch && mismatch->Frame == 10);
+  CHECK(mismatch && mismatch->Local.PlayerGlobal == 2);
+  CHECK(mismatch && mismatch->Remote.PlayerGlobal == 3);
+  CHECK(runtime.RecordRemoteGameState(remote).has_value());
+
+  remote.Frame = 20;
+  remote.Hashes = local;
+  CHECK(!runtime.RecordRemoteGameState(remote));
+  CHECK(!runtime.RecordLocalGameStateHashes(3, 20, local));
+
+  CHECK(!runtime.BeginGameStateSync(-1, 10));
+  CHECK(!runtime.BeginGameStateSync(3, 0));
+  CHECK(runtime.BeginGameStateSync(3, 10));
+  CHECK(!runtime.BeginGameStateSync(3, 10));
+  CHECK(runtime.BeginGameStateSync(4, 10));
+}
+
 void TestStateSyncRuntimeRestartContract() {
   using namespace NsmbNetplayPoC;
   GameStateModel::StateSyncRuntime runtime;
   GameStateModel::GameStateSyncHashes hashes;
   hashes.Basic = 1;
-  runtime.LocalGameStateHashes.emplace(GameStateModel::GameStateKey(3, 10),
-                                       hashes);
+  CHECK(!runtime.RecordLocalGameStateHashes(3, 10, hashes));
   GameStateModel::DecodedGameState remote;
   remote.Instance = 3;
   remote.Frame = 10;
-  runtime.RemoteState.StoreGameState(remote);
-  runtime.GameStateMismatchSeen = true;
-  runtime.LastSentGameStateFrame[3] = 10;
+  remote.Hashes.Basic = 2;
+  CHECK(runtime.RecordRemoteGameState(remote).has_value());
+  CHECK(runtime.BeginGameStateSync(3, 10));
   runtime.LastSentPlayerStateFrame[3] = 11;
   runtime.LastSentWorldStateFrame[3] = 12;
   runtime.LastAppliedPlayerGlobalsFrame[3][1] = 13;
@@ -250,10 +282,9 @@ void TestStateSyncRuntimeRestartContract() {
 
   runtime.ResetForRestart(3);
 
-  CHECK(runtime.LocalGameStateHashes.empty());
   CHECK(runtime.RemoteState.FindGameState(3, 10) == nullptr);
-  CHECK(runtime.GameStateMismatchSeen);
-  CHECK(runtime.LastSentGameStateFrame[3] == 0);
+  CHECK(!runtime.RecordRemoteGameState(remote));
+  CHECK(runtime.BeginGameStateSync(3, 10));
   CHECK(runtime.LastSentPlayerStateFrame[3] == 0);
   CHECK(runtime.LastSentWorldStateFrame[3] == 0);
   CHECK(runtime.LastAppliedPlayerGlobalsFrame[3][1] == 0);
@@ -381,6 +412,7 @@ int main() {
   TestGameStateHashes();
   TestWorldActorPredictionContract();
   TestRemoteStateStoreSelectionAndRestart();
+  TestStateSyncHashComparisonContract();
   TestStateSyncRuntimeRestartContract();
   TestGameStateTraceRowFormatting();
   TestGameStateTraceWriterLifecycle();

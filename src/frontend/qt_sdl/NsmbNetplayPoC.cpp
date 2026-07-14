@@ -97,6 +97,7 @@ using GameStateModel::AITerrainDerivedSummary;
 using GameStateModel::AITileGridSample;
 using GameStateModel::AITileProbeSample;
 using GameStateModel::AIPlayerTileProbeSample;
+using GameStateModel::GameStateHashMismatch;
 using GameStateModel::GameStateSample;
 using GameStateModel::GameStateSyncHashes;
 using GameStateModel::GameStateTraceHashes;
@@ -106,7 +107,6 @@ using GameStateModel::ComputeBasicGameStateHash;
 using GameStateModel::DecodedGameState;
 using GameStateModel::DecodeWireGameState;
 using GameStateModel::EncodeWireGameState;
-using GameStateModel::GameStateKey;
 using GameStateModel::StateSyncRuntime;
 using GameStateModel::PlayerCollisionMgrSample;
 using GameStateModel::PlayerHitboxSample;
@@ -1162,22 +1162,12 @@ void WriteGameStateMismatchDiagnostics(
     WriteDiagnosticsJson(json.str());
 }
 
-void CompareGameStateLocked(int instanceID, melonDS::u32 frame)
+void ReportGameStateMismatchLocked(const GameStateHashMismatch& mismatch)
 {
-    const melonDS::u64 key = GameStateKey(instanceID, frame);
-    auto local = G.GameSync.LocalGameStateHashes.find(key);
-    const GameStateSyncHashes* remote = G.GameSync.RemoteState.FindGameStateHashes(instanceID, frame);
-    if (local == G.GameSync.LocalGameStateHashes.end() || !remote)
-        return;
-    const GameStateSyncHashes& lhs = local->second;
-    const GameStateSyncHashes& rhs = *remote;
-    if (lhs.Basic == rhs.Basic
-        && lhs.PlayerGlobal == rhs.PlayerGlobal
-        && lhs.WifiCandidate == rhs.WifiCandidate
-        && lhs.RenderCandidate == rhs.RenderCandidate)
-        return;
-
-    G.GameSync.GameStateMismatchSeen = true;
+    const int instanceID = mismatch.InstanceID;
+    const melonDS::u32 frame = mismatch.Frame;
+    const GameStateSyncHashes& lhs = mismatch.Local;
+    const GameStateSyncHashes& rhs = mismatch.Remote;
     WriteGameStateMismatchDiagnostics(instanceID, frame, lhs, rhs);
     EmitGameStateMismatchEventLocked(instanceID, frame, lhs, rhs);
     std::printf("NSMB PoC: game state mismatch inst=%d frame=%u local=%016llX remote=%016llX basic=%d playerGlobal=%d wifiCandidate=%d renderCandidate=%d\n",
@@ -1653,8 +1643,9 @@ void HandleReceivedGameStateLocked(const void* data, std::size_t size)
     if (!DecodeWireGameState(packet, decoded))
         return;
 
-    G.GameSync.RemoteState.StoreGameState(decoded);
-    CompareGameStateLocked(static_cast<int>(decoded.Instance), decoded.Frame);
+    const auto mismatch = G.GameSync.RecordRemoteGameState(decoded);
+    if (mismatch)
+        ReportGameStateMismatchLocked(*mismatch);
 }
 
 void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kNoFrameLimit)
@@ -7220,11 +7211,11 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     }
 
     std::lock_guard<std::mutex> lock(G.Mutex);
-    if (G.GameSync.LastSentGameStateFrame[instanceID] == frame) return;
-    G.GameSync.LastSentGameStateFrame[instanceID] = frame;
-
-    G.GameSync.LocalGameStateHashes[GameStateKey(instanceID, frame)] = hashes;
-    CompareGameStateLocked(instanceID, frame);
+    if (!G.GameSync.BeginGameStateSync(instanceID, frame)) return;
+    const auto mismatch =
+        G.GameSync.RecordLocalGameStateHashes(instanceID, frame, hashes);
+    if (mismatch)
+        ReportGameStateMismatchLocked(*mismatch);
 
     if (!G.Transport.IsConnected()) return;
     const WireGameState packet = EncodeWireGameState(

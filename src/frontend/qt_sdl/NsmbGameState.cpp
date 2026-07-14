@@ -953,13 +953,55 @@ std::size_t RemoteStateStore::PlayerStateCount() const {
   return PlayerStates_.size();
 }
 
+bool StateSyncRuntime::BeginGameStateSync(int instanceID,
+                                          melonDS::u32 frame) {
+  if (instanceID < 0 || instanceID >= 16 ||
+      LastSentGameStateFrame_[instanceID] == frame)
+    return false;
+  LastSentGameStateFrame_[instanceID] = frame;
+  return true;
+}
+
+std::optional<GameStateHashMismatch>
+StateSyncRuntime::RecordLocalGameStateHashes(
+    int instanceID, melonDS::u32 frame, const GameStateSyncHashes &hashes) {
+  LocalGameStateHashes_[GameStateKey(instanceID, frame)] = hashes;
+  return CompareGameStateHashes(instanceID, frame);
+}
+
+std::optional<GameStateHashMismatch>
+StateSyncRuntime::RecordRemoteGameState(const DecodedGameState &state) {
+  RemoteState.StoreGameState(state);
+  return CompareGameStateHashes(static_cast<int>(state.Instance), state.Frame);
+}
+
+std::optional<GameStateHashMismatch>
+StateSyncRuntime::CompareGameStateHashes(int instanceID,
+                                         melonDS::u32 frame) const {
+  const auto local =
+      LocalGameStateHashes_.find(GameStateKey(instanceID, frame));
+  const GameStateSyncHashes *remote =
+      RemoteState.FindGameStateHashes(instanceID, frame);
+  if (local == LocalGameStateHashes_.end() || !remote)
+    return std::nullopt;
+
+  const GameStateSyncHashes &lhs = local->second;
+  if (lhs.Basic == remote->Basic &&
+      lhs.PlayerGlobal == remote->PlayerGlobal &&
+      lhs.WifiCandidate == remote->WifiCandidate &&
+      lhs.RenderCandidate == remote->RenderCandidate)
+    return std::nullopt;
+
+  return GameStateHashMismatch{instanceID, frame, lhs, *remote};
+}
+
 void StateSyncRuntime::ResetForRestart(int instanceID) {
   if (instanceID < 0 || instanceID >= 16)
     return;
 
-  LocalGameStateHashes.clear();
+  LocalGameStateHashes_.clear();
   RemoteState.ResetForRestart();
-  LastSentGameStateFrame[instanceID] = 0;
+  LastSentGameStateFrame_[instanceID] = 0;
   LastSentPlayerStateFrame[instanceID] = 0;
   LastSentWorldStateFrame[instanceID] = 0;
   for (int player = 0; player < 2; player++) {

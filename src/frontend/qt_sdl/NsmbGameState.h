@@ -598,6 +598,13 @@ struct GameStateSyncHashes {
   melonDS::u64 RenderCandidate = 0;
 };
 
+struct GameStateHashMismatch {
+  int InstanceID = 0;
+  melonDS::u32 Frame = 0;
+  GameStateSyncHashes Local;
+  GameStateSyncHashes Remote;
+};
+
 struct GameStateTraceHashes {
   melonDS::u64 PlayerGlobal = 0;
   melonDS::u64 WifiCandidate = 0;
@@ -677,11 +684,14 @@ private:
 class StateSyncRuntime {
 public:
   void ResetForRestart(int instanceID);
+  bool BeginGameStateSync(int instanceID, melonDS::u32 frame);
+  std::optional<GameStateHashMismatch>
+  RecordLocalGameStateHashes(int instanceID, melonDS::u32 frame,
+                             const GameStateSyncHashes &hashes);
+  std::optional<GameStateHashMismatch>
+  RecordRemoteGameState(const DecodedGameState &state);
 
   RemoteStateStore RemoteState;
-  std::map<melonDS::u64, GameStateSyncHashes> LocalGameStateHashes;
-  bool GameStateMismatchSeen = false;
-  melonDS::u64 LastSentGameStateFrame[16]{};
   melonDS::u64 LastSentPlayerStateFrame[16]{};
   melonDS::u64 LastSentWorldStateFrame[16]{};
   melonDS::u32 LastAppliedPlayerGlobalsFrame[16][2]{};
@@ -719,6 +729,13 @@ public:
   melonDS::u32 LastTracedWorldMovingHazardsFrame[16]{};
   melonDS::u32 LastTracedWorldEffectsFrame[16]{};
   melonDS::u32 LastTracedWorldObjectLifecyclesFrame[16]{};
+
+private:
+  std::optional<GameStateHashMismatch>
+  CompareGameStateHashes(int instanceID, melonDS::u32 frame) const;
+
+  std::map<melonDS::u64, GameStateSyncHashes> LocalGameStateHashes_;
+  melonDS::u64 LastSentGameStateFrame_[16]{};
 };
 
 melonDS::u64 ComputeBasicGameStateHash(const GameStateSample &sample);
