@@ -11,6 +11,8 @@ namespace NsmbNetplayPoC::GameStateModel {
 constexpr int kAITileProbeCount = 17;
 constexpr int kAITileGridWidth = 33;
 constexpr int kAITileGridHeight = 17;
+constexpr int kAITileGridMinRelX = -16;
+constexpr int kAITileGridMinRelY = -10;
 constexpr int kAITileGridCount = kAITileGridWidth * kAITileGridHeight;
 constexpr int kAISpecialHandlerWordCount = 4;
 constexpr int kAIFireballSlotCount = 16;

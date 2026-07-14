@@ -148,6 +148,12 @@ void ReadPlayerBaseRuntimeState(melonDS::NDS *nds,
                                 const ObjectScanSample &actor,
                                 GameStateModel::GameStateSample &sample,
                                 int player);
+GameStateModel::PlayerCollisionMgrSample
+ReadPlayerCollisionMgrSample(melonDS::NDS *nds, const ObjectScanSample &actor);
+GameStateModel::PlayerHitboxSample
+ReadPlayerHitboxSample(melonDS::NDS *nds, const ObjectScanSample &actor);
+GameStateModel::AIPlayerTileProbeSample
+ReadAIPlayerTileProbeSample(melonDS::NDS *nds, const ObjectScanSample &actor);
 
 } // namespace NsmbNetplayPoC::GameStateReader
 

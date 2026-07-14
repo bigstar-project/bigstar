@@ -32,7 +32,58 @@ constexpr melonDS::u32 kNSMBProcessRenderListAddr = 0x0208FB38;
 constexpr melonDS::u32 kNSMBProcessCreateListAddr = 0x0208FB48;
 constexpr melonDS::u32 kNSMBProcessIDLookupListsAddr = 0x0208FB58;
 
+constexpr melonDS::u32 kGameWrapXAddr = 0x02085AA4;
+constexpr melonDS::u32 kStageLayoutPtrAddr = 0x020CAD40;
+constexpr melonDS::u32 kStageLayoutChunkPtrTableAddr = 0x020CAFE0;
+constexpr melonDS::u32 kStageLayoutTileBehaviorBaseTableAddr = 0x020C8484;
+constexpr melonDS::u32 kStageLayoutDynamicTileBehaviorTablePtrAddr = 0x020CAD28;
+constexpr melonDS::u32 kStageBlocksPtrAddr = 0x0208B168;
+constexpr melonDS::u32 kStageLayoutChunkMapOffset = 0x64;
+constexpr melonDS::u32 kStageLayoutWrapMaskOffset = 0x470;
+constexpr melonDS::u32 kStageLayoutPlayerDataOffset = 0x400;
+constexpr melonDS::u32 kStageLayoutPlayerDataStride = 0x0C;
+constexpr melonDS::u32 kStageLayoutPlayerCameraWrapOffset = 0x94;
+constexpr melonDS::u32 kStageLayoutCameraWrapAddOffset = 0xA8E8;
+constexpr melonDS::u32 kPlayerStageActorCollisionMgrOffset = 0x1D0;
+constexpr melonDS::u32 kPlayerHitboxCenterOffsetX = 0x960;
+constexpr melonDS::u32 kPlayerHitboxCenterOffsetY = 0x964;
+constexpr melonDS::u32 kStageActorHitboxHalfWidthOffset = 0x13C;
+constexpr melonDS::u32 kStageActorHitboxHalfHeightOffset = 0x140;
+constexpr melonDS::u32 kCollisionMgrBottomSensorPtrOffset = 0x08;
+constexpr melonDS::u32 kCollisionMgrTopSensorPtrOffset = 0x0C;
+constexpr melonDS::u32 kCollisionMgrSideSensorPtrOffset = 0x10;
+constexpr melonDS::u32 kCollisionMgrLineSensorPtrOffset = 0x14;
+constexpr melonDS::u32 kCollisionMgrDeltaXOffset = 0x74;
+constexpr melonDS::u32 kCollisionMgrDeltaYOffset = 0x78;
+constexpr melonDS::u32 kCollisionMgrCollisionResultOffset = 0x7C;
+constexpr melonDS::u32 kCollisionMgrGroundCollisionOffset = 0x80;
+constexpr melonDS::u32 kCollisionMgrAttachedTileXOffset = 0x90;
+constexpr melonDS::u32 kCollisionMgrAttachedTileYOffset = 0x92;
+constexpr melonDS::u32 kCollisionMgrBottomModifierTileTypeOffset = 0x98;
+constexpr melonDS::u32 kCollisionMgrBottomSlopeTypeOffset = 0x9A;
+constexpr melonDS::u32 kCollisionMgrTopModifierTileTypeOffset = 0x9C;
+constexpr melonDS::u32 kCollisionMgrTopSlopeTypeOffset = 0x9E;
+constexpr melonDS::u32 kCollisionMgrSideModifierTileTypeOffset = 0xA0;
+constexpr melonDS::u32 kCollisionMgrByteA4Offset = 0xA4;
+constexpr melonDS::u32 kCollisionMgrByteA5Offset = 0xA5;
+constexpr melonDS::u32 kCollisionMgrPreviousByteA4Offset = 0xA6;
+constexpr melonDS::u32 kCollisionMgrPreviousByteA5Offset = 0xA7;
+constexpr melonDS::u32 kCollisionMgrFlagsA8Offset = 0xA8;
+constexpr melonDS::u32 kCollisionMgrTileByteABOffset = 0xAB;
+constexpr melonDS::u32 kCollisionMgrModifierStateOffset = 0xB0;
+constexpr melonDS::u32 kCollisionMgrUnknownB1Offset = 0xB1;
+constexpr melonDS::u32 kPlayerBasePlayerIDOffset = 0x7B4;
+using GameStateModel::AIPlayerTileProbeSample;
+using GameStateModel::AITileGridSample;
+using GameStateModel::AITileProbeSample;
+using GameStateModel::kAITileGridHeight;
+using GameStateModel::kAITileGridMinRelX;
+using GameStateModel::kAITileGridMinRelY;
+using GameStateModel::kAITileGridWidth;
+using GameStateModel::kAITileProbeCount;
 using GameStateModel::kObjectTraceSlots;
+using GameStateModel::PlayerCollisionMgrSample;
+using GameStateModel::PlayerHitboxSample;
 
 thread_local const GameStateObjectScanCache *ActiveGameStateObjectScanCache =
     nullptr;
@@ -88,6 +139,109 @@ bool ReadMainRAMU8(melonDS::NDS *nds, melonDS::u32 offset, melonDS::u8 &value) {
   if (!nds || !nds->MainRAM || offset > nds->MainRAMMask)
     return false;
   value = nds->MainRAM[offset];
+  return true;
+}
+
+std::int32_t SignedARM9U32(melonDS::u32 value) {
+  return static_cast<std::int32_t>(value);
+}
+
+bool ReadStageLayoutTileBehavior(melonDS::NDS *nds, melonDS::u32 worldX,
+                                 melonDS::u32 worldY, melonDS::u32 playerID,
+                                 AITileProbeSample &out) {
+  out.WorldX = worldX;
+  out.WorldY = worldY;
+  if (!nds || !nds->MainRAM) {
+    out.Status = 1;
+    return false;
+  }
+
+  const melonDS::u32 stageLayout = nds->ARM9Read32(kStageLayoutPtrAddr);
+  const melonDS::u32 wrapX = nds->ARM9Read32(kGameWrapXAddr);
+  out.StageLayout = stageLayout;
+  if (!IsValidMainRAMRange(nds, stageLayout,
+                           kStageLayoutCameraWrapAddOffset +
+                               sizeof(melonDS::u16))) {
+    out.Status = 2;
+    return false;
+  }
+
+  std::int32_t pixelXSigned = SignedARM9U32(worldX) >> 12;
+  const std::int32_t pixelYSigned = (-SignedARM9U32(worldY)) >> 12;
+  if (wrapX != 0)
+    pixelXSigned &= static_cast<std::int32_t>(wrapX >> 12);
+  if (pixelYSigned < 0) {
+    out.Status = 3;
+    return false;
+  }
+
+  melonDS::u32 pixelX = static_cast<melonDS::u32>(pixelXSigned) & 0xFFFFu;
+  const melonDS::u32 pixelY = static_cast<melonDS::u32>(pixelYSigned) & 0xFFFFu;
+  const melonDS::u32 playerOffset =
+      kStageLayoutPlayerDataOffset +
+      (playerID & 1u) * kStageLayoutPlayerDataStride +
+      kStageLayoutPlayerCameraWrapOffset;
+  if (nds->ARM9Read16(stageLayout + playerOffset) == 0xFF00)
+    pixelX = (pixelX +
+              nds->ARM9Read16(stageLayout + kStageLayoutCameraWrapAddOffset)) &
+             0xFFFFu;
+
+  const melonDS::u32 stageBlocks = nds->ARM9Read32(kStageBlocksPtrAddr);
+  if (IsValidMainRAMRange(nds, stageBlocks, 4) &&
+      (nds->ARM9Read16(stageBlocks + 2) & 0x20) != 0)
+    pixelX &= nds->ARM9Read16(stageLayout + kStageLayoutWrapMaskOffset);
+
+  out.PixelX = pixelX;
+  out.PixelY = pixelY;
+  if (pixelX >= 0x2000 || pixelY >= 0x1000) {
+    out.Status = 4;
+    return false;
+  }
+
+  const melonDS::u32 chunkIndex = (pixelX >> 8) + ((pixelY >> 8) << 5);
+  const melonDS::u32 chunkID =
+      nds->ARM9Read8(stageLayout + kStageLayoutChunkMapOffset + chunkIndex);
+  out.ChunkID = chunkID;
+  const melonDS::u32 chunkPtr = nds->ARM9Read32(kStageLayoutChunkPtrTableAddr +
+                                                chunkID * sizeof(melonDS::u32));
+  out.ChunkPtr = chunkPtr;
+  if (!IsValidMainRAMRange(nds, chunkPtr, 0x200)) {
+    out.Status = 5;
+    return false;
+  }
+
+  const melonDS::u32 tileOffset =
+      (((pixelX & 0xF0u) >> 4) << 1) + ((pixelY & 0xF0u) << 1);
+  const melonDS::u32 tileID = nds->ARM9Read16(chunkPtr + tileOffset);
+  out.TileID = tileID;
+  melonDS::u32 behavior = 0;
+  melonDS::u32 behaviorTable = 0;
+  if (tileID < 0x100) {
+    behaviorTable = kStageLayoutTileBehaviorBaseTableAddr;
+    out.BehaviorTable = behaviorTable;
+    behavior = nds->ARM9Read32(behaviorTable + tileID * sizeof(melonDS::u32));
+  } else if (tileID < 0x600) {
+    behaviorTable =
+        nds->ARM9Read32(kStageLayoutDynamicTileBehaviorTablePtrAddr);
+    out.BehaviorTable = behaviorTable;
+    const melonDS::u32 behaviorOffset = (tileID - 0x100) * sizeof(melonDS::u32);
+    if (!IsValidMainRAMRange(nds, behaviorTable + behaviorOffset,
+                             sizeof(melonDS::u32))) {
+      out.Status = 6;
+      return false;
+    }
+    behavior = nds->ARM9Read32(behaviorTable + behaviorOffset);
+  } else {
+    out.Status = 7;
+    return false;
+  }
+
+  out.Found = 1;
+  out.Status = 0;
+  out.StageLayout = stageLayout;
+  out.ChunkPtr = chunkPtr;
+  out.BehaviorTable = behaviorTable;
+  out.Behavior = behavior;
   return true;
 }
 
@@ -1558,6 +1712,177 @@ ObjectLifecycleSummary SummarizeObjectLifecycle(melonDS::NDS *nds) {
   }
 
   return summary;
+}
+
+PlayerCollisionMgrSample
+ReadPlayerCollisionMgrSample(melonDS::NDS *nds, const ObjectScanSample &actor) {
+  PlayerCollisionMgrSample sample;
+  if (!nds || !actor.Found ||
+      !IsValidMainRAMRange(
+          nds, actor.Base + kPlayerStageActorCollisionMgrOffset, 0xB8))
+    return sample;
+
+  const melonDS::u32 base = actor.Base + kPlayerStageActorCollisionMgrOffset;
+  sample.Found = 1;
+  sample.Base = base;
+  sample.DeltaX = nds->ARM9Read32(base + kCollisionMgrDeltaXOffset);
+  sample.DeltaY = nds->ARM9Read32(base + kCollisionMgrDeltaYOffset);
+  sample.CollisionResult =
+      nds->ARM9Read32(base + kCollisionMgrCollisionResultOffset);
+  sample.GroundCollision =
+      nds->ARM9Read32(base + kCollisionMgrGroundCollisionOffset);
+  sample.AttachedTileX =
+      nds->ARM9Read16(base + kCollisionMgrAttachedTileXOffset);
+  sample.AttachedTileY =
+      nds->ARM9Read16(base + kCollisionMgrAttachedTileYOffset);
+  sample.BottomModifierTileType =
+      nds->ARM9Read16(base + kCollisionMgrBottomModifierTileTypeOffset);
+  sample.BottomSlopeType =
+      nds->ARM9Read8(base + kCollisionMgrBottomSlopeTypeOffset);
+  sample.TopModifierTileType =
+      nds->ARM9Read16(base + kCollisionMgrTopModifierTileTypeOffset);
+  sample.TopSlopeType = nds->ARM9Read8(base + kCollisionMgrTopSlopeTypeOffset);
+  sample.SideModifierTileTypeLeft =
+      nds->ARM9Read16(base + kCollisionMgrSideModifierTileTypeOffset);
+  sample.SideModifierTileTypeRight =
+      nds->ARM9Read16(base + kCollisionMgrSideModifierTileTypeOffset + 2);
+  sample.ByteA4 = nds->ARM9Read8(base + kCollisionMgrByteA4Offset);
+  sample.ByteA5 = nds->ARM9Read8(base + kCollisionMgrByteA5Offset);
+  sample.PreviousByteA4 =
+      nds->ARM9Read8(base + kCollisionMgrPreviousByteA4Offset);
+  sample.PreviousByteA5 =
+      nds->ARM9Read8(base + kCollisionMgrPreviousByteA5Offset);
+  sample.FlagsA8 = nds->ARM9Read8(base + kCollisionMgrFlagsA8Offset);
+  sample.TileByteAB = nds->ARM9Read8(base + kCollisionMgrTileByteABOffset);
+  sample.ModifierState =
+      nds->ARM9Read8(base + kCollisionMgrModifierStateOffset);
+  sample.UnknownB1 = nds->ARM9Read8(base + kCollisionMgrUnknownB1Offset);
+  const auto readSensor = [nds](melonDS::u32 sensorBase) {
+    PlayerCollisionMgrSample::Sensor sensor;
+    if (!IsValidMainRAMRange(nds, sensorBase, 0x10))
+      return sensor;
+    sensor.Found = 1;
+    sensor.Base = sensorBase;
+    sensor.Type = nds->ARM9Read32(sensorBase);
+    sensor.Value1 = nds->ARM9Read32(sensorBase + 4);
+    sensor.Value2 = nds->ARM9Read32(sensorBase + 8);
+    sensor.Value3 = nds->ARM9Read32(sensorBase + 12);
+    return sensor;
+  };
+  sample.BottomSensor =
+      readSensor(nds->ARM9Read32(base + kCollisionMgrBottomSensorPtrOffset));
+  sample.TopSensor =
+      readSensor(nds->ARM9Read32(base + kCollisionMgrTopSensorPtrOffset));
+  sample.SideSensor =
+      readSensor(nds->ARM9Read32(base + kCollisionMgrSideSensorPtrOffset));
+  sample.LineSensor =
+      readSensor(nds->ARM9Read32(base + kCollisionMgrLineSensorPtrOffset));
+  return sample;
+}
+
+PlayerHitboxSample ReadPlayerHitboxSample(melonDS::NDS *nds,
+                                          const ObjectScanSample &actor) {
+  PlayerHitboxSample sample;
+  if (!nds || !actor.Found ||
+      !IsValidMainRAMRange(nds, actor.Base + kPlayerHitboxCenterOffsetX, 8) ||
+      !IsValidMainRAMRange(nds, actor.Base + kStageActorHitboxHalfWidthOffset,
+                           8))
+    return sample;
+
+  sample.Found = 1;
+  sample.CenterOffsetX =
+      nds->ARM9Read32(actor.Base + kPlayerHitboxCenterOffsetX);
+  sample.CenterOffsetY =
+      nds->ARM9Read32(actor.Base + kPlayerHitboxCenterOffsetY);
+  sample.HalfWidth =
+      nds->ARM9Read32(actor.Base + kStageActorHitboxHalfWidthOffset);
+  sample.HalfHeight =
+      nds->ARM9Read32(actor.Base + kStageActorHitboxHalfHeightOffset);
+  return sample;
+}
+
+AIPlayerTileProbeSample
+ReadAIPlayerTileProbeSample(melonDS::NDS *nds, const ObjectScanSample &actor) {
+  AIPlayerTileProbeSample probe;
+  static constexpr struct ProbeDef {
+    const char *Name;
+    int X;
+    int Y;
+    bool Directional;
+  } kProbeDefs[kAITileProbeCount] = {
+      {"center", 0, 0, false},         {"feet", 0, -24, false},
+      {"below", 0, -48, false},        {"aheadBody", 16, 0, true},
+      {"aheadFeet", 16, -24, true},    {"aheadBelow", 16, -48, true},
+      {"ahead2Feet", 32, -24, true},   {"ahead2Below", 32, -48, true},
+      {"above", 0, 24, false},         {"leftBody", -16, 0, false},
+      {"leftFeet", -16, -24, false},   {"leftBelow", -16, -48, false},
+      {"left2Below", -32, -48, false}, {"rightBody", 16, 0, false},
+      {"rightFeet", 16, -24, false},   {"rightBelow", 16, -48, false},
+      {"right2Below", 32, -48, false},
+  };
+
+  for (int i = 0; i < kAITileProbeCount; i++)
+    probe.Samples[i].Name = kProbeDefs[i].Name;
+  if (!nds || !actor.Found)
+    return probe;
+
+  const std::int32_t velX = SignedARM9U32(actor.VelX);
+  const std::int32_t direction = velX < 0 ? -1 : 1;
+  probe.Direction = static_cast<melonDS::u32>(direction);
+  probe.StageLayout = nds->ARM9Read32(kStageLayoutPtrAddr);
+  probe.WrapX = nds->ARM9Read32(kGameWrapXAddr);
+  probe.Found = IsValidMainRAMRange(nds, probe.StageLayout,
+                                    kStageLayoutCameraWrapAddOffset +
+                                        sizeof(melonDS::u16))
+                    ? 1
+                    : 0;
+  if (!probe.Found)
+    return probe;
+
+  const melonDS::u32 playerID =
+      nds->ARM9Read8(actor.Base + kPlayerBasePlayerIDOffset) & 1u;
+  const std::int32_t actorPixelX = SignedARM9U32(actor.PosX) >> 12;
+  const std::int32_t actorPixelY = (-SignedARM9U32(actor.PosY)) >> 12;
+  const std::int32_t anchorTileX = actorPixelX >> 4;
+  const std::int32_t anchorTileY = actorPixelY >> 4;
+  for (int i = 0; i < kAITileProbeCount; i++) {
+    const int offsetX = kProbeDefs[i].Directional ? kProbeDefs[i].X * direction
+                                                  : kProbeDefs[i].X;
+    const int offsetY = kProbeDefs[i].Y;
+    AITileProbeSample &sample = probe.Samples[i];
+    sample.Name = kProbeDefs[i].Name;
+    sample.OffsetX = static_cast<melonDS::u32>(offsetX);
+    sample.OffsetY = static_cast<melonDS::u32>(offsetY);
+    const melonDS::u32 worldX =
+        actor.PosX + static_cast<melonDS::u32>(offsetX * 4096);
+    const melonDS::u32 worldY =
+        actor.PosY + static_cast<melonDS::u32>(offsetY * 4096);
+    ReadStageLayoutTileBehavior(nds, worldX, worldY, playerID, sample);
+  }
+  for (int row = 0; row < kAITileGridHeight; row++) {
+    for (int col = 0; col < kAITileGridWidth; col++) {
+      const int index = row * kAITileGridWidth + col;
+      const std::int32_t relTileX = kAITileGridMinRelX + col;
+      const std::int32_t relTileY = kAITileGridMinRelY + row;
+      const std::int32_t tileX = anchorTileX + relTileX;
+      const std::int32_t tileY = anchorTileY + relTileY;
+      AITileGridSample &cell = probe.Grid[index];
+      cell.Row = static_cast<melonDS::u32>(row);
+      cell.Col = static_cast<melonDS::u32>(col);
+      cell.RelTileX = static_cast<melonDS::u32>(relTileX);
+      cell.RelTileY = static_cast<melonDS::u32>(relTileY);
+      cell.TileX = static_cast<melonDS::u32>(tileX);
+      cell.TileY = static_cast<melonDS::u32>(tileY);
+      cell.Tile.OffsetX = static_cast<melonDS::u32>(relTileX * 16);
+      cell.Tile.OffsetY = static_cast<melonDS::u32>(-relTileY * 16);
+      const std::int32_t pixelX = tileX * 16 + 8;
+      const std::int32_t pixelY = tileY * 16 + 8;
+      const melonDS::u32 worldX = static_cast<melonDS::u32>(pixelX * 4096);
+      const melonDS::u32 worldY = static_cast<melonDS::u32>(-pixelY * 4096);
+      ReadStageLayoutTileBehavior(nds, worldX, worldY, playerID, cell.Tile);
+    }
+  }
+  return probe;
 }
 
 } // namespace NsmbNetplayPoC::GameStateReader
