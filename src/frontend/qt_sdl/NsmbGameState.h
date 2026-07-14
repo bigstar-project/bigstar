@@ -1,7 +1,7 @@
 #ifndef NSMBGAMESTATE_H
 #define NSMBGAMESTATE_H
 
-#include "NsmbNetplayWire.h"
+#include "NsmbNetplayProtocol.h"
 #include "types.h"
 
 namespace NsmbNetplayPoC::GameStateModel {

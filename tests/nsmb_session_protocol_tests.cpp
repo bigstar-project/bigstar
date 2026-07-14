@@ -1,4 +1,4 @@
-#include "NsmbSessionProtocol.h"
+#include "NsmbNetplayProtocol.h"
 
 #include <cstdint>
 #include <cstdio>

@@ -21,13 +21,8 @@ set(SOURCES_QT_SDL
     NsmbInputProtocol.h
     NsmbInputDelivery.cpp
     NsmbInputDelivery.h
-    NsmbSessionProtocol.cpp
-    NsmbSessionProtocol.h
-    NsmbSessionPolicy.cpp
-    NsmbSessionPolicy.h
-    NsmbPacketClassifier.cpp
-    NsmbPacketClassifier.h
-    NsmbNetplayWire.h
+    NsmbNetplayProtocol.cpp
+    NsmbNetplayProtocol.h
     NsmbGameState.cpp
     NsmbGameState.h
     NsmbAiObservation.cpp
@@ -208,8 +203,8 @@ if (BUILD_TESTING)
     add_test(NAME nsmb-input-delivery COMMAND nsmb_input_delivery_tests)
 
     add_executable(nsmb_session_protocol_tests
-        NsmbSessionProtocol.cpp
-        NsmbSessionProtocol.h
+        NsmbNetplayProtocol.cpp
+        NsmbNetplayProtocol.h
         ${CMAKE_SOURCE_DIR}/tests/nsmb_session_protocol_tests.cpp
     )
     target_include_directories(nsmb_session_protocol_tests PRIVATE
@@ -224,8 +219,8 @@ if (BUILD_TESTING)
     add_test(NAME nsmb-session-protocol COMMAND nsmb_session_protocol_tests)
 
     add_executable(nsmb_session_policy_tests
-        NsmbSessionPolicy.cpp
-        NsmbSessionPolicy.h
+        NsmbNetplayProtocol.cpp
+        NsmbNetplayProtocol.h
         ${CMAKE_SOURCE_DIR}/tests/nsmb_session_policy_tests.cpp
     )
     target_include_directories(nsmb_session_policy_tests PRIVATE
@@ -240,12 +235,13 @@ if (BUILD_TESTING)
     add_test(NAME nsmb-session-policy COMMAND nsmb_session_policy_tests)
 
     add_executable(nsmb_packet_classifier_tests
-        NsmbPacketClassifier.cpp
-        NsmbPacketClassifier.h
+        NsmbNetplayProtocol.cpp
+        NsmbNetplayProtocol.h
         ${CMAKE_SOURCE_DIR}/tests/nsmb_packet_classifier_tests.cpp
     )
     target_include_directories(nsmb_packet_classifier_tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
     )
     set_target_properties(nsmb_packet_classifier_tests PROPERTIES
         AUTOMOC OFF
@@ -257,7 +253,7 @@ if (BUILD_TESTING)
     add_executable(nsmb_game_state_tests
         NsmbGameState.cpp
         NsmbGameState.h
-        NsmbNetplayWire.h
+        NsmbNetplayProtocol.h
         ${CMAKE_SOURCE_DIR}/tests/nsmb_game_state_tests.cpp
     )
     target_include_directories(nsmb_game_state_tests PRIVATE

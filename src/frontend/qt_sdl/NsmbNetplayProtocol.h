@@ -1,9 +1,11 @@
-#ifndef NSMBNETPLAYWIRE_H
-#define NSMBNETPLAYWIRE_H
+#ifndef NSMBNETPLAYPROTOCOL_H
+#define NSMBNETPLAYPROTOCOL_H
 
 #include "types.h"
 
 #include <cstddef>
+#include <cstdint>
+#include <vector>
 
 namespace NsmbNetplayPoC::WireProtocol {
 
@@ -280,5 +282,89 @@ static_assert(sizeof(WireWorldEffectSlot) == 184);
 static_assert(sizeof(WireWorldEffectState) == 760);
 
 } // namespace NsmbNetplayPoC::WireProtocol
+
+namespace NsmbNetplayPoC::SessionProtocol {
+
+constexpr std::size_t kSessionPacketSize = 16;
+
+enum class MessageKind {
+  MatchSeed,
+  StartReady,
+};
+
+struct Message {
+  MessageKind Kind = MessageKind::MatchSeed;
+  melonDS::u32 Value = 0;
+};
+
+std::vector<char> Encode(const Message &message);
+bool Decode(const void *data, std::size_t size, Message &message);
+
+} // namespace NsmbNetplayPoC::SessionProtocol
+
+namespace NsmbNetplayPoC::SessionPolicy {
+
+constexpr std::int64_t kStartReadyResendIntervalMs = 250;
+
+struct StartReadyResendState {
+  bool HasPeer = false;
+  bool InputNetplayOnly = false;
+  bool AllowBeforeAccepted = false;
+  bool WaitedForPeerAtStart = false;
+  bool StartReadySent = false;
+  bool HasLocalReadyFrame = false;
+  bool HasReceivedInputFrame = false;
+  melonDS::u32 LastReceivedInputFrame = 0;
+  melonDS::u32 NetplayStartFrame = 0;
+  int InputDelay = 0;
+  int SendCount = 0;
+  std::int64_t ElapsedSinceLastSendMs = 0;
+};
+
+melonDS::u32 FirstGameplayInputFrame(melonDS::u32 netplayStartFrame,
+                                     int inputDelay);
+bool HasPostStartRemoteInput(bool hasReceivedInputFrame,
+                             melonDS::u32 lastReceivedInputFrame,
+                             melonDS::u32 netplayStartFrame, int inputDelay);
+bool IsOldStartReady(bool inputNetplayOnly, melonDS::u32 netplayStartFrame,
+                     melonDS::u32 receivedReadyFrame);
+bool ShouldAcceptStartReady(bool hasRemoteReadyFrame,
+                            bool remoteReadyAfterLocal,
+                            bool hasPostStartRemoteInput);
+bool ShouldResendStartReady(const StartReadyResendState &state);
+
+} // namespace NsmbNetplayPoC::SessionPolicy
+
+namespace NsmbNetplayPoC::PacketClassifier {
+
+enum class PacketClass {
+  Unknown,
+  Input,
+  InputBundleCandidate,
+  Session,
+  NSMLPacket,
+  PlayerState,
+  WorldState,
+  MovingHazardState,
+  WorldActorSnapshotState,
+  WorldEffectState,
+  GameState,
+};
+
+struct KnownPacketSizes {
+  std::size_t Input = 0;
+  std::size_t Session = 0;
+  std::size_t NSMLPacket = 0;
+  std::size_t PlayerState = 0;
+  std::size_t WorldState = 0;
+  std::size_t MovingHazardState = 0;
+  std::size_t WorldActorSnapshotState = 0;
+  std::size_t WorldEffectState = 0;
+  std::size_t GameState = 0;
+};
+
+PacketClass Classify(std::size_t packetSize, const KnownPacketSizes &sizes);
+
+} // namespace NsmbNetplayPoC::PacketClassifier
 
 #endif

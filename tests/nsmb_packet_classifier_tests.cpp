@@ -1,4 +1,4 @@
-#include "NsmbPacketClassifier.h"
+#include "NsmbNetplayProtocol.h"
 
 #include <cstdio>
 
