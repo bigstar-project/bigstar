@@ -17,6 +17,7 @@
 #include "NsmbInputProtocol.h"
 #include "NsmbSessionProtocol.h"
 #include "NsmbSessionPolicy.h"
+#include "NsmbPacketClassifier.h"
 #include "NsmbInputTimeline.h"
 #include "NsmbImitationAI.h"
 #include "NsmbRuleAI.h"
@@ -4109,8 +4110,22 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
             break;
 
         case ENET_EVENT_TYPE_RECEIVE:
+        {
             G.HangLastENetRecvUnixMs.store(NowUnixMs(), std::memory_order_release);
-            if (event.packet->dataLength == InputProtocol::kInputPacketSize)
+            const PacketClassifier::PacketClass packetClass = PacketClassifier::Classify(
+                event.packet->dataLength,
+                {
+                    InputProtocol::kInputPacketSize,
+                    SessionProtocol::kSessionPacketSize,
+                    sizeof(WireNSMLPacket),
+                    sizeof(WirePlayerState),
+                    sizeof(WireWorldState),
+                    sizeof(WireMovingHazardState),
+                    sizeof(WireWorldActorSnapshotState),
+                    sizeof(WireWorldEffectState),
+                    sizeof(WireGameState),
+                });
+            if (packetClass == PacketClassifier::PacketClass::Input)
             {
                 InputProtocol::FramedInput packet;
                 if (InputProtocol::DecodeInput(
@@ -4121,14 +4136,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     StoreRemoteInputLocked(packet.Frame, packet.Input, localFrame);
                 }
             }
-            else if (event.packet->dataLength > SessionProtocol::kSessionPacketSize
-                && event.packet->dataLength != sizeof(WireNSMLPacket)
-                && event.packet->dataLength != sizeof(WireGameState)
-                && event.packet->dataLength != sizeof(WirePlayerState)
-                && event.packet->dataLength != sizeof(WireWorldState)
-                && event.packet->dataLength != sizeof(WireMovingHazardState)
-                && event.packet->dataLength != sizeof(WireWorldActorSnapshotState)
-                && event.packet->dataLength != sizeof(WireWorldEffectState))
+            else if (packetClass == PacketClassifier::PacketClass::InputBundleCandidate)
             {
                 std::vector<InputProtocol::FramedInput> entries;
                 if (InputProtocol::DecodeInputBundle(
@@ -4140,7 +4148,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                         StoreRemoteInputLocked(entry.Frame, entry.Input, localFrame);
                 }
             }
-            else if (event.packet->dataLength == SessionProtocol::kSessionPacketSize)
+            else if (packetClass == PacketClassifier::PacketClass::Session)
             {
                 SessionProtocol::Message message;
                 const bool decoded = SessionProtocol::Decode(
@@ -4182,7 +4190,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     }
                 }
             }
-            else if (event.packet->dataLength == sizeof(WireNSMLPacket))
+            else if (packetClass == PacketClassifier::PacketClass::NSMLPacket)
             {
                 WireNSMLPacket packet;
                 std::memcpy(&packet, event.packet->data, sizeof(packet));
@@ -4218,7 +4226,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     }
                 }
             }
-            else if (event.packet->dataLength == sizeof(WirePlayerState))
+            else if (packetClass == PacketClassifier::PacketClass::PlayerState)
             {
                 WirePlayerState packet;
                 std::memcpy(&packet, event.packet->data, sizeof(packet));
@@ -4247,7 +4255,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     }
                 }
             }
-            else if (event.packet->dataLength == sizeof(WireWorldState))
+            else if (packetClass == PacketClassifier::PacketClass::WorldState)
             {
                 WireWorldState packet;
                 std::memcpy(&packet, event.packet->data, sizeof(packet));
@@ -4278,7 +4286,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     }
                 }
             }
-            else if (event.packet->dataLength == sizeof(WireMovingHazardState))
+            else if (packetClass == PacketClassifier::PacketClass::MovingHazardState)
             {
                 WireMovingHazardState packet;
                 std::memcpy(&packet, event.packet->data, sizeof(packet));
@@ -4296,7 +4304,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     }
                 }
             }
-            else if (event.packet->dataLength == sizeof(WireWorldActorSnapshotState))
+            else if (packetClass == PacketClassifier::PacketClass::WorldActorSnapshotState)
             {
                 WireWorldActorSnapshotState packet;
                 std::memcpy(&packet, event.packet->data, sizeof(packet));
@@ -4314,7 +4322,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     }
                 }
             }
-            else if (event.packet->dataLength == sizeof(WireWorldEffectState))
+            else if (packetClass == PacketClassifier::PacketClass::WorldEffectState)
             {
                 WireWorldEffectState packet;
                 std::memcpy(&packet, event.packet->data, sizeof(packet));
@@ -4332,7 +4340,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     }
                 }
             }
-            else if (event.packet->dataLength == sizeof(WireGameState))
+            else if (packetClass == PacketClassifier::PacketClass::GameState)
             {
                 WireGameState packet;
                 std::memcpy(&packet, event.packet->data, sizeof(packet));
@@ -4438,6 +4446,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
             enet_packet_destroy(event.packet);
             UpdateHangNetplaySnapshotLocked(localFrame);
             break;
+        }
 
         case ENET_EVENT_TYPE_DISCONNECT:
             std::printf("NSMB PoC: peer disconnected tUnixMs=%llu localFrame=%u eventPeerMatches=%d peerBefore=%d connectingPeer=%d lastSent=%u lastRecv=%u lead=%d localQueue=%zu remoteQueue=%zu delayed=%zu resendCount=%d netplayStart=%u localReady=%u remoteReady=%u remoteReadyAfterLocal=%d eventData=%u\n",

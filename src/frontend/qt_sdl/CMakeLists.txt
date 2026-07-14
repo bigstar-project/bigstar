@@ -25,6 +25,8 @@ set(SOURCES_QT_SDL
     NsmbSessionProtocol.h
     NsmbSessionPolicy.cpp
     NsmbSessionPolicy.h
+    NsmbPacketClassifier.cpp
+    NsmbPacketClassifier.h
     NsmbAiObservation.cpp
     NsmbAiObservation.h
     NsmbImitationAI.cpp
@@ -233,6 +235,21 @@ if (BUILD_TESTING)
         AUTORCC OFF
     )
     add_test(NAME nsmb-session-policy COMMAND nsmb_session_policy_tests)
+
+    add_executable(nsmb_packet_classifier_tests
+        NsmbPacketClassifier.cpp
+        NsmbPacketClassifier.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_packet_classifier_tests.cpp
+    )
+    target_include_directories(nsmb_packet_classifier_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    set_target_properties(nsmb_packet_classifier_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-packet-classifier COMMAND nsmb_packet_classifier_tests)
 endif()
 
 add_subdirectory("../../net"
