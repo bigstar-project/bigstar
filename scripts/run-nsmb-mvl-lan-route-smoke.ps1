@@ -8,6 +8,7 @@ param(
     [int]$FrameHeartbeatInterval = 120,
     [int]$GameplayHeartbeatInterval = 0,
     [switch]$HangDiagnostics,
+    [switch]$DiagnosticEvents,
     [int]$HangWatchdogIntervalMs = 100,
     [int]$StallStartFrame = 900,
     [int]$StallPollMs = 500,
@@ -776,6 +777,15 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_WATCHDOG_FILE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PHASE_EVENTS_FILE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_HANG_DUMP_FILE -ErrorAction SilentlyContinue
+    }
+    if ($DiagnosticEvents) {
+        $env:MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE = "$Stdout.events.jsonl"
+        Remove-Item Env:\MELONDS_NSML_DIAGNOSTIC_EVENTS_DISABLE -ErrorAction SilentlyContinue
+        Remove-Item -Force "$Stdout.events.jsonl" -ErrorAction SilentlyContinue
+    } else {
+        Remove-Item Env:\MELONDS_NSML_DIAGNOSTIC_EVENTS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_DIAGNOSTIC_EVENTS_DISABLE -ErrorAction SilentlyContinue
     }
     $roleInputRecord = Get-RoleInputRecordPath -Role $Role
     if ($roleInputRecord) {

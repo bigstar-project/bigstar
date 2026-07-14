@@ -116,12 +116,39 @@ void TestHashLogContract() {
   std::filesystem::remove(screenPath, error);
 }
 
+void TestDiagnosticEventLogContract() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() /
+      "nsmb_netplay_diagnostics_event_test";
+  const std::filesystem::path firstPath = root / "nested" / "events.jsonl";
+  const std::filesystem::path secondPath = root / "other.jsonl";
+  std::error_code error;
+  std::filesystem::remove_all(root, error);
+
+  NsmbNetplayPoC::Diagnostics::Runtime runtime;
+  CHECK(!runtime.WriteDiagnosticEvent({}, "{}"));
+  CHECK(runtime.WriteDiagnosticEvent(firstPath.string(),
+                                     "{\"event\":\"started\"}"));
+  CHECK(ReadText(firstPath) == "{\"event\":\"started\"}\n");
+  CHECK(runtime.WriteDiagnosticEvent(firstPath.string(),
+                                     "{\"event\":\"ready\"}"));
+  CHECK(ReadText(firstPath) ==
+        "{\"event\":\"started\"}\n{\"event\":\"ready\"}\n");
+  CHECK(runtime.WriteDiagnosticEvent(secondPath.string(),
+                                     "{\"event\":\"moved\"}"));
+  runtime.Stop();
+
+  CHECK(ReadText(secondPath) == "{\"event\":\"moved\"}\n");
+  std::filesystem::remove_all(root, error);
+}
+
 } // namespace
 
 int main() {
   TestFrameHeartbeatFileContract();
   TestConsoleOnlyHeartbeatContract();
   TestHashLogContract();
+  TestDiagnosticEventLogContract();
   if (Failures != 0) {
     std::printf("nsmb_netplay_diagnostics_tests: %d failure(s)\n", Failures);
     return 1;

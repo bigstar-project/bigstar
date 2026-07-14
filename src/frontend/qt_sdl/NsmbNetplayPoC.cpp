@@ -571,7 +571,6 @@ struct State
     Config::RuntimePatchConfig RuntimePatch;
     Config::HarnessConfig Harness;
     GameStateTraceWriter GameStateTrace;
-    std::ofstream DiagnosticEvents;
     std::ofstream AIPlayLog;
     std::ofstream AIObservationV2Log;
     std::ofstream AIObservationV3Log;
@@ -4368,33 +4367,12 @@ std::string Hex32(melonDS::u32 value)
     return out.str();
 }
 
-bool EnsureDiagnosticEventsOpenLocked()
-{
-    if (!G.Diagnostics.DiagnosticEventsEnabled || G.Diagnostics.DiagnosticEventsPath.empty())
-        return false;
-    if (G.DiagnosticEvents.is_open())
-        return true;
-
-    const std::filesystem::path path(G.Diagnostics.DiagnosticEventsPath);
-    std::error_code ec;
-    if (path.has_parent_path())
-        std::filesystem::create_directories(path.parent_path(), ec);
-    G.DiagnosticEvents.open(path, std::ios::out | std::ios::app | std::ios::binary);
-    if (!G.DiagnosticEvents)
-    {
-        std::printf("NSMB Diagnostics: failed to open event log: %s\n", path.string().c_str());
-        G.Diagnostics.DiagnosticEventsEnabled = false;
-        return false;
-    }
-    return true;
-}
-
 void WriteDiagnosticEventLocked(const std::string& json)
 {
-    if (!EnsureDiagnosticEventsOpenLocked())
+    if (!G.Diagnostics.DiagnosticEventsEnabled || G.Diagnostics.DiagnosticEventsPath.empty())
         return;
-    G.DiagnosticEvents << json << '\n';
-    G.DiagnosticEvents.flush();
+    if (!G.DiagnosticsRuntime.WriteDiagnosticEvent(G.Diagnostics.DiagnosticEventsPath, json))
+        G.Diagnostics.DiagnosticEventsEnabled = false;
 }
 
 void EmitStartReadyEventLocked(const char* direction, melonDS::u32 localFrame, melonDS::u32 remoteFrame)

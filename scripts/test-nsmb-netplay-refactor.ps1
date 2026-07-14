@@ -119,6 +119,7 @@ if ($Tier -eq "fast" -or $Tier -eq "rollback" -or $Tier -eq "diagnostics") {
         $params.RollbackResimulate = $true
     } elseif ($Tier -eq "diagnostics") {
         $params.HangDiagnostics = $true
+        $params.DiagnosticEvents = $true
         $params.HangWatchdogIntervalMs = 100
         $params.StallTimeoutMs = 10000
         $params.FrameHeartbeatInterval = 10
@@ -169,7 +170,8 @@ if ($Tier -eq "diagnostics") {
         $watchdogPath = Join-Path $resolvedLogDir "$role.stdout.txt.watchdog.jsonl"
         $phasePath = Join-Path $resolvedLogDir "$role.stdout.txt.phase-events.jsonl"
         $heartbeatPath = Join-Path $resolvedLogDir "$role.stdout.txt.heartbeat"
-        foreach ($path in @($watchdogPath, $phasePath, $heartbeatPath)) {
+        $eventsPath = Join-Path $resolvedLogDir "$role.stdout.txt.events.jsonl"
+        foreach ($path in @($watchdogPath, $phasePath, $heartbeatPath, $eventsPath)) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
                 throw "diagnostics smoke did not create log: $path"
             }
@@ -179,6 +181,14 @@ if ($Tier -eq "diagnostics") {
         $phaseLines = @(Get-Content -LiteralPath $phasePath -Encoding UTF8)
         if ($watchdogLines.Count -lt 1 -or $phaseLines.Count -lt 100) {
             throw "diagnostics smoke has insufficient coverage: role=$role watchdog=$($watchdogLines.Count) phase=$($phaseLines.Count)"
+        }
+        $eventLines = @(Get-Content -LiteralPath $eventsPath -Encoding UTF8)
+        if ($eventLines.Count -lt 1) {
+            throw "diagnostic event smoke has insufficient coverage: role=$role"
+        }
+        $events = @($eventLines | ForEach-Object { $_ | ConvertFrom-Json })
+        if ($events[0].event -ne "diagnostic_started" -or $events[0].role -ne $role) {
+            throw "diagnostic event schema mismatch: role=$role first=$($eventLines[0])"
         }
 
         $watchdogFirst = $watchdogLines[0] | ConvertFrom-Json

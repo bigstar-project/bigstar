@@ -23,6 +23,8 @@ public:
   bool ConfigureHashLog(const std::string &path, bool screenHashEnabled);
   bool RecordFrameHash(int instanceID, melonDS::u32 frame,
                        melonDS::u64 stateHash, melonDS::u64 screenHash);
+  bool WriteDiagnosticEvent(const std::string &path,
+                            const std::string &json);
   void StartHangDiagnostics(const Config::DiagnosticsConfig &config, bool host);
   void Stop();
 

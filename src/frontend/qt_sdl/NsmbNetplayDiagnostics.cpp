@@ -117,6 +117,9 @@ struct Runtime::Impl {
   std::ofstream HashLog;
   bool ScreenHashEnabled = false;
   std::array<melonDS::u64, 16> LastHashFrame{};
+  std::mutex DiagnosticEventMutex;
+  std::ofstream DiagnosticEventLog;
+  std::string DiagnosticEventPath;
   std::atomic<const char *> Phase{"startup"};
   std::atomic<const char *> Event{"startup"};
   std::atomic<std::uint64_t> PhaseUnixMs{0};
@@ -410,6 +413,38 @@ bool Runtime::RecordFrameHash(int instanceID, melonDS::u32 frame,
   return true;
 }
 
+bool Runtime::WriteDiagnosticEvent(const std::string &path,
+                                   const std::string &json) {
+  std::lock_guard<std::mutex> lock(State->DiagnosticEventMutex);
+  if (path.empty())
+    return false;
+
+  if (State->DiagnosticEventLog.is_open() &&
+      State->DiagnosticEventPath != path) {
+    State->DiagnosticEventLog.close();
+  }
+  if (!State->DiagnosticEventLog.is_open()) {
+    State->DiagnosticEventLog.clear();
+    const std::filesystem::path eventPath(path);
+    std::error_code error;
+    if (eventPath.has_parent_path())
+      std::filesystem::create_directories(eventPath.parent_path(), error);
+    State->DiagnosticEventLog.open(
+        eventPath, std::ios::out | std::ios::app | std::ios::binary);
+    if (!State->DiagnosticEventLog) {
+      std::printf("NSMB Diagnostics: failed to open event log: %s\n",
+                  eventPath.string().c_str());
+      std::fflush(stdout);
+      return false;
+    }
+    State->DiagnosticEventPath = path;
+  }
+
+  State->DiagnosticEventLog << json << '\n';
+  State->DiagnosticEventLog.flush();
+  return static_cast<bool>(State->DiagnosticEventLog);
+}
+
 void Runtime::StartHangDiagnostics(const Config::DiagnosticsConfig &config,
                                    bool host) {
   State->Config = config;
@@ -435,6 +470,13 @@ void Runtime::Stop() {
     std::lock_guard<std::mutex> lock(State->HashLogMutex);
     if (State->HashLog.is_open())
       State->HashLog.close();
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(State->DiagnosticEventMutex);
+    if (State->DiagnosticEventLog.is_open())
+      State->DiagnosticEventLog.close();
+    State->DiagnosticEventPath.clear();
   }
 
   std::lock_guard<std::mutex> lock(State->LogMutex);
