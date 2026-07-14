@@ -4305,6 +4305,110 @@ ReceiveDisposition HandleReceivedWorldEffectStateLocked(const void* data, std::s
     return ReceiveDisposition::CleanupPacket;
 }
 
+void HandleReceivedGameStateLocked(const void* data, std::size_t size)
+{
+    WireGameState packet;
+    std::memcpy(&packet, data, size);
+    if (packet.Magic == kMagic && packet.Version == kVersion && packet.Kind == kWireKindState)
+    {
+        GameStateSyncHashes hashes;
+        hashes.Basic = (static_cast<melonDS::u64>(packet.BasicHashHi) << 32) | packet.BasicHashLo;
+        hashes.PlayerGlobal = (static_cast<melonDS::u64>(packet.PlayerGlobalHashHi) << 32) | packet.PlayerGlobalHashLo;
+        hashes.WifiCandidate = (static_cast<melonDS::u64>(packet.WifiCandidateHashHi) << 32) | packet.WifiCandidateHashLo;
+        hashes.RenderCandidate = (static_cast<melonDS::u64>(packet.RenderCandidateHashHi) << 32) | packet.RenderCandidateHashLo;
+        const int packetInstance = static_cast<int>(packet.Instance);
+        const melonDS::u64 key = GameStateKey(packetInstance, packet.Frame);
+        G.RemoteGameStateHashes[key] = hashes;
+
+        GameStateSample sample;
+        sample.StageID = packet.StageID;
+        sample.StageGroup = packet.StageGroup;
+        sample.VsMode = packet.VsMode;
+        sample.LocalPlayerID = packet.LocalPlayerID;
+        sample.GGID = packet.GGID;
+        sample.NetRandomValue = packet.NetRandomValue;
+        sample.NetRandomCallCount = packet.NetRandomCallCount;
+        sample.NetRandomBranchAddress = packet.NetRandomBranchAddress;
+        sample.VsStarFound = packet.VsStarFound;
+        sample.VsStarGUID = packet.VsStarGUID;
+        sample.VsStarBase = packet.VsStarBase;
+        sample.VsStarSettings = packet.VsStarSettings;
+        sample.VsStarStateType = packet.VsStarStateType;
+        sample.VsStarFlags = packet.VsStarFlags;
+        sample.VsStarPosX = packet.VsStarPosX;
+        sample.VsStarPosY = packet.VsStarPosY;
+        sample.VsStarPosZ = packet.VsStarPosZ;
+        sample.VsStarActorFound = packet.VsStarActorFound;
+        sample.VsStarActorGUID = packet.VsStarActorGUID;
+        sample.VsStarActorBase = packet.VsStarActorBase;
+        sample.VsStarActorSettings = packet.VsStarActorSettings;
+        sample.VsStarActorStateType = packet.VsStarActorStateType;
+        sample.VsStarActorFlags = packet.VsStarActorFlags;
+        sample.VsStarActorPosX = packet.VsStarActorPosX;
+        sample.VsStarActorPosY = packet.VsStarActorPosY;
+        sample.VsStarActorPosZ = packet.VsStarActorPosZ;
+        sample.PlayerActor0Found = packet.PlayerActor0Found;
+        sample.PlayerActor0GUID = packet.PlayerActor0GUID;
+        sample.PlayerActor0Settings = packet.PlayerActor0Settings;
+        sample.PlayerActor0PosX = packet.PlayerActor0PosX;
+        sample.PlayerActor0PosY = packet.PlayerActor0PosY;
+        sample.PlayerActor0PosZ = packet.PlayerActor0PosZ;
+        sample.PlayerActor0PrevX = packet.PlayerActor0PrevX;
+        sample.PlayerActor0PrevY = packet.PlayerActor0PrevY;
+        sample.PlayerActor0PrevZ = packet.PlayerActor0PrevZ;
+        sample.PlayerActor0VelX = packet.PlayerActor0VelX;
+        sample.PlayerActor0VelY = packet.PlayerActor0VelY;
+        sample.PlayerActor0VelZ = packet.PlayerActor0VelZ;
+        sample.PlayerActor1Found = packet.PlayerActor1Found;
+        sample.PlayerActor1GUID = packet.PlayerActor1GUID;
+        sample.PlayerActor1Settings = packet.PlayerActor1Settings;
+        sample.PlayerActor1PosX = packet.PlayerActor1PosX;
+        sample.PlayerActor1PosY = packet.PlayerActor1PosY;
+        sample.PlayerActor1PosZ = packet.PlayerActor1PosZ;
+        sample.PlayerActor1PrevX = packet.PlayerActor1PrevX;
+        sample.PlayerActor1PrevY = packet.PlayerActor1PrevY;
+        sample.PlayerActor1PrevZ = packet.PlayerActor1PrevZ;
+        sample.PlayerActor1VelX = packet.PlayerActor1VelX;
+        sample.PlayerActor1VelY = packet.PlayerActor1VelY;
+        sample.PlayerActor1VelZ = packet.PlayerActor1VelZ;
+        sample.PlayerCount = packet.PlayerCount;
+        sample.Player0BattleStars = packet.Player0BattleStars;
+        sample.Player1BattleStars = packet.Player1BattleStars;
+        sample.Player0Coins = packet.Player0Coins;
+        sample.Player1Coins = packet.Player1Coins;
+        sample.Player0Score = packet.Player0Score;
+        sample.Player1Score = packet.Player1Score;
+        sample.Player0DisplayedStars = packet.Player0DisplayedStars;
+        sample.Player1DisplayedStars = packet.Player1DisplayedStars;
+        sample.Player0Deaths = packet.Player0Deaths;
+        sample.Player1Deaths = packet.Player1Deaths;
+        sample.Player0CollectedStars = packet.Player0CollectedStars;
+        sample.Player1CollectedStars = packet.Player1CollectedStars;
+        sample.VsCoinCount = packet.VsCoinCount;
+        sample.StageCameraFound = packet.StageCameraFound;
+        sample.StageCameraWord190 = packet.StageCameraWord190;
+        sample.StageCameraWord194 = packet.StageCameraWord194;
+        sample.StageCameraWord19C = packet.StageCameraWord19C;
+        sample.StageCameraWord1A0 = packet.StageCameraWord1A0;
+        sample.StageSceneFound = packet.StageSceneFound;
+        sample.StageSceneWord154 = packet.StageSceneWord154;
+        sample.StageSceneWord160 = packet.StageSceneWord160;
+        sample.MovingHazardFound = packet.MovingHazardFound;
+        sample.MovingHazardGUID = packet.MovingHazardGUID;
+        sample.MovingHazardSettings = packet.MovingHazardSettings;
+        sample.MovingHazardStateType = packet.MovingHazardStateType;
+        sample.MovingHazardFlags = packet.MovingHazardFlags;
+        sample.MovingHazardPosX = packet.MovingHazardPosX;
+        sample.MovingHazardPosY = packet.MovingHazardPosY;
+        sample.MovingHazardPosZ = packet.MovingHazardPosZ;
+        sample.MovingHazardVelX = packet.MovingHazardVelX;
+        sample.MovingHazardVelY = packet.MovingHazardVelY;
+        sample.Hash = hashes.Basic;
+        G.RemoteGameStateSamples[key] = sample;
+        CompareGameStateLocked(static_cast<int>(packet.Instance), packet.Frame);
+    }
+}
+
 void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kNoFrameLimit)
 {
     if (!G.Host) return;
@@ -4441,106 +4545,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
             }
             else if (packetClass == PacketClassifier::PacketClass::GameState)
             {
-                WireGameState packet;
-                std::memcpy(&packet, event.packet->data, sizeof(packet));
-                if (packet.Magic == kMagic && packet.Version == kVersion && packet.Kind == kWireKindState)
-                {
-                    GameStateSyncHashes hashes;
-                    hashes.Basic = (static_cast<melonDS::u64>(packet.BasicHashHi) << 32) | packet.BasicHashLo;
-                    hashes.PlayerGlobal = (static_cast<melonDS::u64>(packet.PlayerGlobalHashHi) << 32) | packet.PlayerGlobalHashLo;
-                    hashes.WifiCandidate = (static_cast<melonDS::u64>(packet.WifiCandidateHashHi) << 32) | packet.WifiCandidateHashLo;
-                    hashes.RenderCandidate = (static_cast<melonDS::u64>(packet.RenderCandidateHashHi) << 32) | packet.RenderCandidateHashLo;
-                    const int packetInstance = static_cast<int>(packet.Instance);
-                    const melonDS::u64 key = GameStateKey(packetInstance, packet.Frame);
-                    G.RemoteGameStateHashes[key] = hashes;
-
-                    GameStateSample sample;
-                    sample.StageID = packet.StageID;
-                    sample.StageGroup = packet.StageGroup;
-                    sample.VsMode = packet.VsMode;
-                    sample.LocalPlayerID = packet.LocalPlayerID;
-                    sample.GGID = packet.GGID;
-                    sample.NetRandomValue = packet.NetRandomValue;
-                    sample.NetRandomCallCount = packet.NetRandomCallCount;
-                    sample.NetRandomBranchAddress = packet.NetRandomBranchAddress;
-                    sample.VsStarFound = packet.VsStarFound;
-                    sample.VsStarGUID = packet.VsStarGUID;
-                    sample.VsStarBase = packet.VsStarBase;
-                    sample.VsStarSettings = packet.VsStarSettings;
-                    sample.VsStarStateType = packet.VsStarStateType;
-                    sample.VsStarFlags = packet.VsStarFlags;
-                    sample.VsStarPosX = packet.VsStarPosX;
-                    sample.VsStarPosY = packet.VsStarPosY;
-                    sample.VsStarPosZ = packet.VsStarPosZ;
-                    sample.VsStarActorFound = packet.VsStarActorFound;
-                    sample.VsStarActorGUID = packet.VsStarActorGUID;
-                    sample.VsStarActorBase = packet.VsStarActorBase;
-                    sample.VsStarActorSettings = packet.VsStarActorSettings;
-                    sample.VsStarActorStateType = packet.VsStarActorStateType;
-                    sample.VsStarActorFlags = packet.VsStarActorFlags;
-                    sample.VsStarActorPosX = packet.VsStarActorPosX;
-                    sample.VsStarActorPosY = packet.VsStarActorPosY;
-                    sample.VsStarActorPosZ = packet.VsStarActorPosZ;
-                    sample.PlayerActor0Found = packet.PlayerActor0Found;
-                    sample.PlayerActor0GUID = packet.PlayerActor0GUID;
-                    sample.PlayerActor0Settings = packet.PlayerActor0Settings;
-                    sample.PlayerActor0PosX = packet.PlayerActor0PosX;
-                    sample.PlayerActor0PosY = packet.PlayerActor0PosY;
-                    sample.PlayerActor0PosZ = packet.PlayerActor0PosZ;
-                    sample.PlayerActor0PrevX = packet.PlayerActor0PrevX;
-                    sample.PlayerActor0PrevY = packet.PlayerActor0PrevY;
-                    sample.PlayerActor0PrevZ = packet.PlayerActor0PrevZ;
-                    sample.PlayerActor0VelX = packet.PlayerActor0VelX;
-                    sample.PlayerActor0VelY = packet.PlayerActor0VelY;
-                    sample.PlayerActor0VelZ = packet.PlayerActor0VelZ;
-                    sample.PlayerActor1Found = packet.PlayerActor1Found;
-                    sample.PlayerActor1GUID = packet.PlayerActor1GUID;
-                    sample.PlayerActor1Settings = packet.PlayerActor1Settings;
-                    sample.PlayerActor1PosX = packet.PlayerActor1PosX;
-                    sample.PlayerActor1PosY = packet.PlayerActor1PosY;
-                    sample.PlayerActor1PosZ = packet.PlayerActor1PosZ;
-                    sample.PlayerActor1PrevX = packet.PlayerActor1PrevX;
-                    sample.PlayerActor1PrevY = packet.PlayerActor1PrevY;
-                    sample.PlayerActor1PrevZ = packet.PlayerActor1PrevZ;
-                    sample.PlayerActor1VelX = packet.PlayerActor1VelX;
-                    sample.PlayerActor1VelY = packet.PlayerActor1VelY;
-                    sample.PlayerActor1VelZ = packet.PlayerActor1VelZ;
-                    sample.PlayerCount = packet.PlayerCount;
-                    sample.Player0BattleStars = packet.Player0BattleStars;
-                    sample.Player1BattleStars = packet.Player1BattleStars;
-                    sample.Player0Coins = packet.Player0Coins;
-                    sample.Player1Coins = packet.Player1Coins;
-                    sample.Player0Score = packet.Player0Score;
-                    sample.Player1Score = packet.Player1Score;
-                    sample.Player0DisplayedStars = packet.Player0DisplayedStars;
-                    sample.Player1DisplayedStars = packet.Player1DisplayedStars;
-                    sample.Player0Deaths = packet.Player0Deaths;
-                    sample.Player1Deaths = packet.Player1Deaths;
-                    sample.Player0CollectedStars = packet.Player0CollectedStars;
-                    sample.Player1CollectedStars = packet.Player1CollectedStars;
-                    sample.VsCoinCount = packet.VsCoinCount;
-                    sample.StageCameraFound = packet.StageCameraFound;
-                    sample.StageCameraWord190 = packet.StageCameraWord190;
-                    sample.StageCameraWord194 = packet.StageCameraWord194;
-                    sample.StageCameraWord19C = packet.StageCameraWord19C;
-                    sample.StageCameraWord1A0 = packet.StageCameraWord1A0;
-                    sample.StageSceneFound = packet.StageSceneFound;
-                    sample.StageSceneWord154 = packet.StageSceneWord154;
-                    sample.StageSceneWord160 = packet.StageSceneWord160;
-                    sample.MovingHazardFound = packet.MovingHazardFound;
-                    sample.MovingHazardGUID = packet.MovingHazardGUID;
-                    sample.MovingHazardSettings = packet.MovingHazardSettings;
-                    sample.MovingHazardStateType = packet.MovingHazardStateType;
-                    sample.MovingHazardFlags = packet.MovingHazardFlags;
-                    sample.MovingHazardPosX = packet.MovingHazardPosX;
-                    sample.MovingHazardPosY = packet.MovingHazardPosY;
-                    sample.MovingHazardPosZ = packet.MovingHazardPosZ;
-                    sample.MovingHazardVelX = packet.MovingHazardVelX;
-                    sample.MovingHazardVelY = packet.MovingHazardVelY;
-                    sample.Hash = hashes.Basic;
-                    G.RemoteGameStateSamples[key] = sample;
-                    CompareGameStateLocked(static_cast<int>(packet.Instance), packet.Frame);
-                }
+                HandleReceivedGameStateLocked(event.packet->data, event.packet->dataLength);
             }
             enet_packet_destroy(event.packet);
             UpdateHangNetplaySnapshotLocked(localFrame);
