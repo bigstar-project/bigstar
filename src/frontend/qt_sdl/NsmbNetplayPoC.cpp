@@ -110,6 +110,8 @@ using GameStateModel::ComputeBasicGameStateHash;
 using GameStateModel::DecodedGameState;
 using GameStateModel::DecodeWireGameState;
 using GameStateModel::EncodeWireGameState;
+using GameStateModel::GameStateKey;
+using GameStateModel::RemoteStateStore;
 using GameStateModel::WriteGameStateTraceRow;
 using GameStateModel::WriteGameStateTraceHeader;
 using GameStateModel::PlayerCollisionMgrSample;
@@ -663,17 +665,7 @@ struct State
     bool NetplayLockstepStarted[16] {};
     NsmbNetplayTransport::Transport Transport;
     std::map<melonDS::u64, GameStateSyncHashes> LocalGameStateHashes;
-    std::map<melonDS::u64, GameStateSyncHashes> RemoteGameStateHashes;
-    std::map<melonDS::u64, GameStateSample> RemoteGameStateSamples;
-    std::map<melonDS::u64, WirePlayerState> RemotePlayerStateSamples;
-    WireWorldState RemoteWorldStateSample {};
-    bool RemoteWorldStateSampleValid = false;
-    WireMovingHazardState RemoteMovingHazardStateSample {};
-    bool RemoteMovingHazardStateSampleValid = false;
-    WireWorldActorSnapshotState RemoteWorldActorSnapshotSample {};
-    bool RemoteWorldActorSnapshotSampleValid = false;
-    WireWorldEffectState RemoteWorldEffectStateSample {};
-    bool RemoteWorldEffectStateSampleValid = false;
+    RemoteStateStore RemoteState;
     std::vector<WireNSMLPacket> PendingNSMLPackets;
     bool GameStateMismatchSeen = false;
     melonDS::u32 LastSentNSMLPacketTick = 0xFFFFFFFF;
@@ -1130,13 +1122,7 @@ void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
     std::lock_guard<std::mutex> lock(G.Mutex);
 
     G.LocalGameStateHashes.clear();
-    G.RemoteGameStateHashes.clear();
-    G.RemoteGameStateSamples.clear();
-    G.RemotePlayerStateSamples.clear();
-    G.RemoteWorldStateSampleValid = false;
-    G.RemoteMovingHazardStateSampleValid = false;
-    G.RemoteWorldActorSnapshotSampleValid = false;
-    G.RemoteWorldEffectStateSampleValid = false;
+    G.RemoteState.ResetForRestart();
     G.PendingNSMLPackets.clear();
     G.PacketBridgePacketInputs.clear();
     G.DelayedNSMLPackets.clear();
@@ -1582,16 +1568,6 @@ bool ParseFrameRanges(const char* value, std::vector<std::pair<melonDS::u32, mel
     return true;
 }
 
-melonDS::u64 GameStateKey(int instanceID, melonDS::u32 frame)
-{
-    return (static_cast<melonDS::u64>(static_cast<melonDS::u32>(instanceID)) << 32) | frame;
-}
-
-melonDS::u64 PlayerStateKey(melonDS::u32 player, melonDS::u32 frame)
-{
-    return (static_cast<melonDS::u64>(player) << 32) | frame;
-}
-
 std::string JsonEscape(const std::string& value)
 {
     std::ostringstream out;
@@ -1714,11 +1690,11 @@ void CompareGameStateLocked(int instanceID, melonDS::u32 frame)
 {
     const melonDS::u64 key = GameStateKey(instanceID, frame);
     auto local = G.LocalGameStateHashes.find(key);
-    auto remote = G.RemoteGameStateHashes.find(key);
-    if (local == G.LocalGameStateHashes.end() || remote == G.RemoteGameStateHashes.end())
+    const GameStateSyncHashes* remote = G.RemoteState.FindGameStateHashes(instanceID, frame);
+    if (local == G.LocalGameStateHashes.end() || !remote)
         return;
     const GameStateSyncHashes& lhs = local->second;
-    const GameStateSyncHashes& rhs = remote->second;
+    const GameStateSyncHashes& rhs = *remote;
     if (lhs.Basic == rhs.Basic
         && lhs.PlayerGlobal == rhs.PlayerGlobal
         && lhs.WifiCandidate == rhs.WifiCandidate
@@ -2090,9 +2066,7 @@ ReceiveDisposition HandleReceivedPlayerStateLocked(
     const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
     if (restartCutoff != 0 && packet.Frame <= restartCutoff)
         return ReceiveDisposition::SkipPacketCleanup;
-    G.RemotePlayerStateSamples[PlayerStateKey(packet.Player, packet.Frame)] = packet;
-    while (G.RemotePlayerStateSamples.size() > 240)
-        G.RemotePlayerStateSamples.erase(G.RemotePlayerStateSamples.begin());
+    const std::size_t storedCount = G.RemoteState.StorePlayerState(packet);
     if ((G.Bootstrap.InputTraceEnabled || G.Input.NetplayTrace)
         && (G.Bootstrap.InputTraceInterval <= 1
             || (localFrame != kNoFrameLimit
@@ -2107,7 +2081,7 @@ ReceiveDisposition HandleReceivedPlayerStateLocked(
             packet.PosY,
             packet.VelX,
             packet.VelY,
-            G.RemotePlayerStateSamples.size());
+            storedCount);
     }
     return ReceiveDisposition::CleanupPacket;
 }
@@ -2125,11 +2099,7 @@ ReceiveDisposition HandleReceivedWorldStateLocked(
     const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
     if (restartCutoff != 0 && packet.Frame <= restartCutoff)
         return ReceiveDisposition::SkipPacketCleanup;
-    if (!G.RemoteWorldStateSampleValid || packet.Frame >= G.RemoteWorldStateSample.Frame)
-    {
-        G.RemoteWorldStateSample = packet;
-        G.RemoteWorldStateSampleValid = true;
-    }
+    G.RemoteState.StoreWorldState(packet);
     if ((G.Bootstrap.InputTraceEnabled || G.Input.NetplayTrace)
         && (G.Bootstrap.InputTraceInterval <= 1
             || (localFrame != kNoFrameLimit
@@ -2162,11 +2132,7 @@ ReceiveDisposition HandleReceivedMovingHazardStateLocked(const void* data, std::
     const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
     if (restartCutoff != 0 && packet.Frame <= restartCutoff)
         return ReceiveDisposition::SkipPacketCleanup;
-    if (!G.RemoteMovingHazardStateSampleValid || packet.Frame >= G.RemoteMovingHazardStateSample.Frame)
-    {
-        G.RemoteMovingHazardStateSample = packet;
-        G.RemoteMovingHazardStateSampleValid = true;
-    }
+    G.RemoteState.StoreMovingHazardState(packet);
     return ReceiveDisposition::CleanupPacket;
 }
 
@@ -2183,11 +2149,7 @@ ReceiveDisposition HandleReceivedWorldActorSnapshotStateLocked(const void* data,
     const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
     if (restartCutoff != 0 && packet.Frame <= restartCutoff)
         return ReceiveDisposition::SkipPacketCleanup;
-    if (!G.RemoteWorldActorSnapshotSampleValid || packet.Frame >= G.RemoteWorldActorSnapshotSample.Frame)
-    {
-        G.RemoteWorldActorSnapshotSample = packet;
-        G.RemoteWorldActorSnapshotSampleValid = true;
-    }
+    G.RemoteState.StoreWorldActorSnapshot(packet);
     return ReceiveDisposition::CleanupPacket;
 }
 
@@ -2204,11 +2166,7 @@ ReceiveDisposition HandleReceivedWorldEffectStateLocked(const void* data, std::s
     const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
     if (restartCutoff != 0 && packet.Frame <= restartCutoff)
         return ReceiveDisposition::SkipPacketCleanup;
-    if (!G.RemoteWorldEffectStateSampleValid || packet.Frame >= G.RemoteWorldEffectStateSample.Frame)
-    {
-        G.RemoteWorldEffectStateSample = packet;
-        G.RemoteWorldEffectStateSampleValid = true;
-    }
+    G.RemoteState.StoreWorldEffectState(packet);
     return ReceiveDisposition::CleanupPacket;
 }
 void HandleReceivedGameStateLocked(const void* data, std::size_t size)
@@ -2219,11 +2177,8 @@ void HandleReceivedGameStateLocked(const void* data, std::size_t size)
     if (!DecodeWireGameState(packet, decoded))
         return;
 
-    const int packetInstance = static_cast<int>(decoded.Instance);
-    const melonDS::u64 key = GameStateKey(packetInstance, decoded.Frame);
-    G.RemoteGameStateHashes[key] = decoded.Hashes;
-    G.RemoteGameStateSamples[key] = decoded.Sample;
-    CompareGameStateLocked(packetInstance, decoded.Frame);
+    G.RemoteState.StoreGameState(decoded);
+    CompareGameStateLocked(static_cast<int>(decoded.Instance), decoded.Frame);
 }
 
 void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kNoFrameLimit)
@@ -5934,10 +5889,9 @@ void EmitGameStateMismatchEventLocked(
 
     GameStateSample remoteSample;
     bool hasRemoteSample = false;
-    auto remoteIt = G.RemoteGameStateSamples.find(GameStateKey(instanceID, frame));
-    if (remoteIt != G.RemoteGameStateSamples.end())
+    if (const GameStateSample* stored = G.RemoteState.FindGameState(instanceID, frame))
     {
-        remoteSample = remoteIt->second;
+        remoteSample = *stored;
         hasRemoteSample = true;
     }
 
@@ -7928,9 +7882,10 @@ void ApplyRemoteWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melo
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         PumpNetworkLocked();
-        if (!G.RemoteWorldActorSnapshotSampleValid)
+        const WireWorldActorSnapshotState* stored = G.RemoteState.WorldActorSnapshot();
+        if (!stored)
             return;
-        sample = G.RemoteWorldActorSnapshotSample;
+        sample = *stored;
     }
 
     const std::vector<WorldActorSnapshotCandidate> localActors = CollectWorldActorSnapshotCandidates(nds);
@@ -8210,9 +8165,10 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         PumpNetworkLocked();
-        if (!G.RemoteWorldStateSampleValid)
+        const WireWorldState* stored = G.RemoteState.WorldState();
+        if (!stored)
             return;
-        sample = G.RemoteWorldStateSample;
+        sample = *stored;
     }
 
     const melonDS::u32 predictFrames = std::min(
@@ -8315,9 +8271,9 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
             {
                 std::lock_guard<std::mutex> lock(G.Mutex);
                 PumpNetworkLocked();
-                if (G.RemoteMovingHazardStateSampleValid)
+                if (const WireMovingHazardState* stored = G.RemoteState.MovingHazardState())
                 {
-                    sample = G.RemoteMovingHazardStateSample;
+                    sample = *stored;
                     sampleValid = true;
                 }
             }
@@ -8442,9 +8398,10 @@ void ApplyRemoteWorldEffectState(int instanceID, melonDS::u32 frame, melonDS::ND
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         PumpNetworkLocked();
-        if (!G.RemoteWorldEffectStateSampleValid)
+        const WireWorldEffectState* stored = G.RemoteState.WorldEffectState();
+        if (!stored)
             return;
-        sample = G.RemoteWorldEffectStateSample;
+        sample = *stored;
     }
 
     for (std::size_t i = 0; i < std::min<std::size_t>(sample.Count, kMaxWorldEffects); i++)
@@ -8591,52 +8548,6 @@ bool WritePlayerGlobalState(melonDS::NDS* nds, const WirePlayerState& state)
     return ok;
 }
 
-bool FindLatestRemoteGameStateLocked(int instanceID, melonDS::u32 frame, GameStateSample& sample, melonDS::u32& sampleFrame)
-{
-    bool found = false;
-    melonDS::u32 bestFrame = 0;
-    const melonDS::u64 instancePrefix = static_cast<melonDS::u64>(static_cast<melonDS::u32>(instanceID)) << 32;
-    for (const auto& [key, value] : G.RemoteGameStateSamples)
-    {
-        if ((key & 0xFFFFFFFF00000000ull) != instancePrefix)
-            continue;
-        const melonDS::u32 candidateFrame = static_cast<melonDS::u32>(key & 0xFFFFFFFFu);
-        if (candidateFrame > frame)
-            continue;
-        if (found && candidateFrame <= bestFrame)
-            continue;
-        found = true;
-        bestFrame = candidateFrame;
-        sample = value;
-    }
-
-    sampleFrame = bestFrame;
-    return found;
-}
-
-bool FindLatestRemotePlayerStateLocked(melonDS::u32 player, melonDS::u32 frame, WirePlayerState& sample, melonDS::u32& sampleFrame)
-{
-    bool found = false;
-    melonDS::u32 bestFrame = 0;
-    const melonDS::u64 endKey = PlayerStateKey(player + 1, 0);
-    for (auto it = G.RemotePlayerStateSamples.lower_bound(PlayerStateKey(player, 0));
-         it != G.RemotePlayerStateSamples.end() && it->first < endKey;
-         ++it)
-    {
-        const WirePlayerState& value = it->second;
-        if (value.Frame > frame)
-            continue;
-        if (found && value.Frame <= bestFrame)
-            continue;
-        found = true;
-        bestFrame = value.Frame;
-        sample = value;
-    }
-
-    sampleFrame = bestFrame;
-    return found;
-}
-
 void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, bool preferFreshSample = false)
 {
     if (!G.Enabled || !G.StateSync.PlayerApplyEnabled) return;
@@ -8654,7 +8565,8 @@ void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
             {
                 std::lock_guard<std::mutex> lock(G.Mutex);
                 PumpNetworkLocked();
-                sampleValid = FindLatestRemotePlayerStateLocked(static_cast<melonDS::u32>(remotePlayer), frame, sample, sampleFrame);
+                sampleValid = G.RemoteState.FindLatestPlayerState(
+                    static_cast<melonDS::u32>(remotePlayer), frame, sample, sampleFrame);
             }
             if (!preferFreshSample || (sampleValid && sampleFrame >= frame) || std::chrono::steady_clock::now() >= waitDeadline)
                 break;
@@ -8749,7 +8661,7 @@ void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         PumpNetworkLocked();
-        if (!FindLatestRemoteGameStateLocked(instanceID, frame, sample, sampleFrame))
+        if (!G.RemoteState.FindLatestGameState(instanceID, frame, sample, sampleFrame))
             return;
     }
 

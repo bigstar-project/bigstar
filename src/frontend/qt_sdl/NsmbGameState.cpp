@@ -4,7 +4,25 @@
 
 namespace NsmbNetplayPoC::GameStateModel {
 
+melonDS::u64 GameStateKey(int instanceID, melonDS::u32 frame) {
+  return (static_cast<melonDS::u64>(static_cast<melonDS::u32>(instanceID))
+          << 32) |
+         frame;
+}
+
+melonDS::u64 PlayerStateKey(melonDS::u32 player, melonDS::u32 frame) {
+  return (static_cast<melonDS::u64>(player) << 32) | frame;
+}
+
 namespace {
+
+template <typename State>
+bool StoreLatest(std::optional<State> &stored, const State &received) {
+  if (stored && received.Frame < stored->Frame)
+    return false;
+  stored = received;
+  return true;
+}
 
 void MixGameStateValue(melonDS::u64 &hash, melonDS::u32 value) {
   for (int index = 0; index < 4; index++) {
@@ -774,5 +792,124 @@ void WriteGameStateTraceRow(std::ostream &out, int instanceID,
 }
 
 #undef NSMB_GAME_STATE_WIRE_FIELDS
+
+void RemoteStateStore::ResetForRestart() {
+  GameStateHashes_.clear();
+  GameStates_.clear();
+  PlayerStates_.clear();
+  WorldState_.reset();
+  MovingHazardState_.reset();
+  WorldActorSnapshot_.reset();
+  WorldEffectState_.reset();
+}
+
+void RemoteStateStore::StoreGameState(const DecodedGameState &state) {
+  const melonDS::u64 key =
+      GameStateKey(static_cast<int>(state.Instance), state.Frame);
+  GameStateHashes_[key] = state.Hashes;
+  GameStates_[key] = state.Sample;
+}
+
+std::size_t RemoteStateStore::StorePlayerState(
+    const WireProtocol::WirePlayerState &state) {
+  PlayerStates_[PlayerStateKey(state.Player, state.Frame)] = state;
+  while (PlayerStates_.size() > PlayerHistoryLimit)
+    PlayerStates_.erase(PlayerStates_.begin());
+  return PlayerStates_.size();
+}
+
+bool RemoteStateStore::StoreWorldState(
+    const WireProtocol::WireWorldState &state) {
+  return StoreLatest(WorldState_, state);
+}
+
+bool RemoteStateStore::StoreMovingHazardState(
+    const WireProtocol::WireMovingHazardState &state) {
+  return StoreLatest(MovingHazardState_, state);
+}
+
+bool RemoteStateStore::StoreWorldActorSnapshot(
+    const WireProtocol::WireWorldActorSnapshotState &state) {
+  return StoreLatest(WorldActorSnapshot_, state);
+}
+
+bool RemoteStateStore::StoreWorldEffectState(
+    const WireProtocol::WireWorldEffectState &state) {
+  return StoreLatest(WorldEffectState_, state);
+}
+
+const GameStateSyncHashes *RemoteStateStore::FindGameStateHashes(
+    int instanceID, melonDS::u32 frame) const {
+  const auto found = GameStateHashes_.find(GameStateKey(instanceID, frame));
+  return found != GameStateHashes_.end() ? &found->second : nullptr;
+}
+
+const GameStateSample *RemoteStateStore::FindGameState(
+    int instanceID, melonDS::u32 frame) const {
+  const auto found = GameStates_.find(GameStateKey(instanceID, frame));
+  return found != GameStates_.end() ? &found->second : nullptr;
+}
+
+bool RemoteStateStore::FindLatestGameState(int instanceID,
+                                           melonDS::u32 frame,
+                                           GameStateSample &state,
+                                           melonDS::u32 &stateFrame) const {
+  const melonDS::u64 firstKey = GameStateKey(instanceID, 0);
+  auto found = GameStates_.upper_bound(GameStateKey(instanceID, frame));
+  if (found == GameStates_.begin()) {
+    stateFrame = 0;
+    return false;
+  }
+  --found;
+  if (found->first < firstKey) {
+    stateFrame = 0;
+    return false;
+  }
+  state = found->second;
+  stateFrame = static_cast<melonDS::u32>(found->first);
+  return true;
+}
+
+bool RemoteStateStore::FindLatestPlayerState(
+    melonDS::u32 player, melonDS::u32 frame,
+    WireProtocol::WirePlayerState &state, melonDS::u32 &stateFrame) const {
+  const melonDS::u64 firstKey = PlayerStateKey(player, 0);
+  auto found = PlayerStates_.upper_bound(PlayerStateKey(player, frame));
+  if (found == PlayerStates_.begin()) {
+    stateFrame = 0;
+    return false;
+  }
+  --found;
+  if (found->first < firstKey) {
+    stateFrame = 0;
+    return false;
+  }
+  state = found->second;
+  stateFrame = state.Frame;
+  return true;
+}
+
+const WireProtocol::WireWorldState *RemoteStateStore::WorldState() const {
+  return WorldState_ ? &*WorldState_ : nullptr;
+}
+
+const WireProtocol::WireMovingHazardState *
+RemoteStateStore::MovingHazardState() const {
+  return MovingHazardState_ ? &*MovingHazardState_ : nullptr;
+}
+
+const WireProtocol::WireWorldActorSnapshotState *
+RemoteStateStore::WorldActorSnapshot() const {
+  return WorldActorSnapshot_ ? &*WorldActorSnapshot_ : nullptr;
+}
+
+const WireProtocol::WireWorldEffectState *
+RemoteStateStore::WorldEffectState() const {
+  return WorldEffectState_ ? &*WorldEffectState_ : nullptr;
+}
+
+std::size_t RemoteStateStore::PlayerStateCount() const {
+  return PlayerStates_.size();
+}
 
 } // namespace NsmbNetplayPoC::GameStateModel

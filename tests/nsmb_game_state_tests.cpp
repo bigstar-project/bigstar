@@ -91,6 +91,87 @@ void TestGameStateHashes() {
   CHECK(CombinedGameStateHash(hashes) == 0x81FED12C6E7300F0ull);
 }
 
+void TestRemoteStateStoreSelectionAndRestart() {
+  using namespace NsmbNetplayPoC;
+  GameStateModel::RemoteStateStore store;
+
+  GameStateModel::DecodedGameState first;
+  first.Instance = 2;
+  first.Frame = 10;
+  first.Sample.StageID = 10;
+  first.Hashes.Basic = 0x10;
+  store.StoreGameState(first);
+  auto second = first;
+  second.Frame = 20;
+  second.Sample.StageID = 20;
+  second.Hashes.Basic = 0x20;
+  store.StoreGameState(second);
+
+  const auto *hashes = store.FindGameStateHashes(2, 20);
+  CHECK(hashes != nullptr);
+  CHECK(hashes && hashes->Basic == 0x20);
+  CHECK(store.FindGameState(2, 15) == nullptr);
+  CHECK(store.FindGameState(3, 20) == nullptr);
+
+  GameStateModel::GameStateSample selected;
+  melonDS::u32 selectedFrame = 0;
+  CHECK(store.FindLatestGameState(2, 15, selected, selectedFrame));
+  CHECK(selectedFrame == 10);
+  CHECK(selected.StageID == 10);
+  CHECK(!store.FindLatestGameState(1, 100, selected, selectedFrame));
+  CHECK(selectedFrame == 0);
+
+  for (melonDS::u32 frame = 0;
+       frame <= GameStateModel::RemoteStateStore::PlayerHistoryLimit; frame++) {
+    WireProtocol::WirePlayerState player{};
+    player.Player = 0;
+    player.Frame = frame;
+    player.PosX = frame;
+    store.StorePlayerState(player);
+  }
+  CHECK(store.PlayerStateCount() ==
+        GameStateModel::RemoteStateStore::PlayerHistoryLimit);
+  WireProtocol::WirePlayerState player;
+  CHECK(!store.FindLatestPlayerState(0, 0, player, selectedFrame));
+  CHECK(store.FindLatestPlayerState(0, 150, player, selectedFrame));
+  CHECK(selectedFrame == 150);
+  CHECK(player.PosX == 150);
+  CHECK(!store.FindLatestPlayerState(1, 240, player, selectedFrame));
+
+  WireProtocol::WireWorldState world{};
+  world.Frame = 20;
+  world.Star.GUID = 20;
+  CHECK(store.StoreWorldState(world));
+  world.Frame = 19;
+  world.Star.GUID = 19;
+  CHECK(!store.StoreWorldState(world));
+  CHECK(store.WorldState() && store.WorldState()->Frame == 20);
+  CHECK(store.WorldState() && store.WorldState()->Star.GUID == 20);
+  world.Frame = 20;
+  world.Star.GUID = 21;
+  CHECK(store.StoreWorldState(world));
+  CHECK(store.WorldState() && store.WorldState()->Star.GUID == 21);
+
+  WireProtocol::WireMovingHazardState hazard{};
+  hazard.Frame = 30;
+  CHECK(store.StoreMovingHazardState(hazard));
+  WireProtocol::WireWorldActorSnapshotState actors{};
+  actors.Frame = 40;
+  CHECK(store.StoreWorldActorSnapshot(actors));
+  WireProtocol::WireWorldEffectState effects{};
+  effects.Frame = 50;
+  CHECK(store.StoreWorldEffectState(effects));
+
+  store.ResetForRestart();
+  CHECK(store.FindGameStateHashes(2, 20) == nullptr);
+  CHECK(store.FindGameState(2, 20) == nullptr);
+  CHECK(store.PlayerStateCount() == 0);
+  CHECK(store.WorldState() == nullptr);
+  CHECK(store.MovingHazardState() == nullptr);
+  CHECK(store.WorldActorSnapshot() == nullptr);
+  CHECK(store.WorldEffectState() == nullptr);
+}
+
 void TestGameStateTraceRowFormatting() {
   using namespace NsmbNetplayPoC::GameStateModel;
   GameStateSample sample;
@@ -142,6 +223,7 @@ int main() {
   TestEveryWireWordRoundTrips();
   TestMalformedHeadersAreRejected();
   TestGameStateHashes();
+  TestRemoteStateStoreSelectionAndRestart();
   TestGameStateTraceRowFormatting();
   if (Failures != 0) {
     std::fprintf(stderr, "nsmb game state tests failed: %d\n", Failures);

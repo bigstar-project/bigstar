@@ -4,7 +4,10 @@
 #include "NsmbNetplayProtocol.h"
 #include "types.h"
 
+#include <cstddef>
 #include <iosfwd>
+#include <map>
+#include <optional>
 
 namespace NsmbNetplayPoC::GameStateModel {
 
@@ -605,6 +608,53 @@ struct DecodedGameState {
   melonDS::u32 Instance = 0;
   GameStateSample Sample;
   GameStateSyncHashes Hashes;
+};
+
+melonDS::u64 GameStateKey(int instanceID, melonDS::u32 frame);
+melonDS::u64 PlayerStateKey(melonDS::u32 player, melonDS::u32 frame);
+
+class RemoteStateStore {
+public:
+  static constexpr std::size_t PlayerHistoryLimit = 240;
+
+  void ResetForRestart();
+  void StoreGameState(const DecodedGameState &state);
+  std::size_t StorePlayerState(
+      const WireProtocol::WirePlayerState &state);
+  bool StoreWorldState(const WireProtocol::WireWorldState &state);
+  bool StoreMovingHazardState(
+      const WireProtocol::WireMovingHazardState &state);
+  bool StoreWorldActorSnapshot(
+      const WireProtocol::WireWorldActorSnapshotState &state);
+  bool StoreWorldEffectState(
+      const WireProtocol::WireWorldEffectState &state);
+
+  const GameStateSyncHashes *FindGameStateHashes(int instanceID,
+                                                 melonDS::u32 frame) const;
+  const GameStateSample *FindGameState(int instanceID,
+                                      melonDS::u32 frame) const;
+  bool FindLatestGameState(int instanceID, melonDS::u32 frame,
+                           GameStateSample &state,
+                           melonDS::u32 &stateFrame) const;
+  bool FindLatestPlayerState(melonDS::u32 player, melonDS::u32 frame,
+                             WireProtocol::WirePlayerState &state,
+                             melonDS::u32 &stateFrame) const;
+
+  const WireProtocol::WireWorldState *WorldState() const;
+  const WireProtocol::WireMovingHazardState *MovingHazardState() const;
+  const WireProtocol::WireWorldActorSnapshotState *WorldActorSnapshot() const;
+  const WireProtocol::WireWorldEffectState *WorldEffectState() const;
+  std::size_t PlayerStateCount() const;
+
+private:
+  std::map<melonDS::u64, GameStateSyncHashes> GameStateHashes_;
+  std::map<melonDS::u64, GameStateSample> GameStates_;
+  std::map<melonDS::u64, WireProtocol::WirePlayerState> PlayerStates_;
+  std::optional<WireProtocol::WireWorldState> WorldState_;
+  std::optional<WireProtocol::WireMovingHazardState> MovingHazardState_;
+  std::optional<WireProtocol::WireWorldActorSnapshotState>
+      WorldActorSnapshot_;
+  std::optional<WireProtocol::WireWorldEffectState> WorldEffectState_;
 };
 
 melonDS::u64 ComputeBasicGameStateHash(const GameStateSample &sample);
