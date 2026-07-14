@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("fast", "standard", "full")]
+    [ValidateSet("fast", "rollback", "standard", "full")]
     [string]$Tier = "fast",
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$Rom = "roms\nsmb-us.nds",
@@ -26,6 +26,15 @@ if ($Tier -eq "full") {
         -ClientRom $ClientRom `
         -SkipGolden:$SkipGolden `
         -LogDir "$LogDir-standard"
+
+    & $PSCommandPath `
+        -Tier rollback `
+        -Exe $Exe `
+        -Rom $Rom `
+        -HostRom $HostRom `
+        -ClientRom $ClientRom `
+        -SkipGolden:$SkipGolden `
+        -LogDir "$LogDir-rollback"
 
     & (Join-Path $PSScriptRoot "run-nsmb-mvl-split-local-result-smoke.ps1") `
         -Exe $Exe `
@@ -92,7 +101,7 @@ $params = @{
     LogDir = $LogDir
 }
 
-if ($Tier -eq "fast") {
+if ($Tier -eq "fast" -or $Tier -eq "rollback") {
     $params.InputScript = "tests\nsmb_us_direct_mvl_refactor_fast.inputs"
     $params.Frames = 1250
     $params.GameStateTraceInterval = 10
@@ -102,6 +111,17 @@ if ($Tier -eq "fast") {
     $params.NoAudioSync = $true
     $params.NoFrameLimit = $true
     $params.FixedFrameTime = $true
+    if ($Tier -eq "rollback") {
+        $params.InputUnreliable = $false
+        $params.InputBundleHistory = 0
+        $params.InputDropModulo = 0
+        $params.InputDropOffset = 0
+        $params.InputSendDelayFrames = 8
+        $params.InputNetplayTrace = $true
+        $params.Rollback = $true
+        $params.RollbackBackend = "tinycorepreimage"
+        $params.RollbackResimulate = $true
+    }
 } else {
     $params.InputScript = "tests\nsmb_us_direct_mvl_both_different.inputs"
     $params.Frames = 3000
@@ -116,7 +136,32 @@ try {
     Pop-Location
 }
 
-if ($Tier -eq "fast" -and -not $SkipGolden) {
+if ($Tier -eq "rollback") {
+    $resolvedLogDir = if ([System.IO.Path]::IsPathRooted($LogDir)) {
+        $LogDir
+    } else {
+        Join-Path $repoRoot $LogDir
+    }
+    $rollbackLogs = @(
+        (Join-Path $resolvedLogDir "host.stdout.txt"),
+        (Join-Path $resolvedLogDir "client.stdout.txt")
+    )
+    $rollbackText = ($rollbackLogs | ForEach-Object {
+        Get-Content -LiteralPath $_ -Raw -Encoding UTF8
+    }) -join "`n"
+    if ($rollbackText -notmatch 'checkpointSaves=[1-9][0-9]*') {
+        throw "rollback smoke did not save any gameplay checkpoints"
+    }
+    if ($rollbackText -notmatch 'predictions=[1-9][0-9]*') {
+        throw "rollback smoke did not exercise remote input prediction"
+    }
+    if ($rollbackText -match 'cannot resimulate|checkpoint missing|restore failed') {
+        throw "rollback smoke reported a checkpoint/restore integrity error"
+    }
+    Write-Host "NsmbNetplayPoC rollback checkpoint/prediction coverage passed"
+}
+
+if (($Tier -eq "fast" -or $Tier -eq "rollback") -and -not $SkipGolden) {
     $goldenPath = Join-Path $repoRoot "tests\nsmb_netplay_refactor_fast.golden"
     $golden = Get-Content -LiteralPath $goldenPath -Raw -Encoding UTF8 | ConvertFrom-StringData
     $resolvedLogDir = if ([System.IO.Path]::IsPathRooted($LogDir)) {
