@@ -26,6 +26,8 @@ set(SOURCES_QT_SDL
     NsmbGameState.cpp
     NsmbGameStateReader.cpp
     NsmbGameState.h
+    NsmbRollbackStore.cpp
+    NsmbRollbackStore.h
     NsmbAiObservation.cpp
     NsmbAiObservation.h
     NsmbImitationAI.cpp
@@ -267,6 +269,22 @@ if (BUILD_TESTING)
         AUTORCC OFF
     )
     add_test(NAME nsmb-game-state COMMAND nsmb_game_state_tests)
+
+    add_executable(nsmb_rollback_store_tests
+        NsmbRollbackStore.cpp
+        NsmbRollbackStore.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_rollback_store_tests.cpp
+    )
+    target_include_directories(nsmb_rollback_store_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_rollback_store_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-rollback-store COMMAND nsmb_rollback_store_tests)
 endif()
 
 add_subdirectory("../../net"
