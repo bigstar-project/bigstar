@@ -537,12 +537,11 @@ struct State
     int InputRecordFlushPendingSpans = 0;
     Config::StateSyncConfig StateSync;
     SessionPolicy::Runtime Session;
-    std::chrono::steady_clock::time_point LastInputFrameLeadResendAt;
-    int InputFrameLeadResendCount = 0;
     bool NetplayStartWaitArrived[16] {};
     bool NetplayStartWaitComplete = false;
     Config::PacketBridgeConfig PacketBridge;
     Config::InputConfig Input;
+    InputTimeline::Runtime InputRuntime;
     std::map<melonDS::u32, InputState> PacketBridgePacketInputs;
     std::vector<DelayedWireNSMLPacket> DelayedNSMLPackets;
     InputDelivery::Runtime Delivery;
@@ -622,7 +621,6 @@ struct State
     bool PacketBridgeJitHelperPatchApplied[16] {};
     melonDS::u32 PacketBridgeJitHelperPatchResumeFrame[16] {};
     Config::RollbackConfig Rollback;
-    InputTimeline::PredictionRuntime RollbackInputs;
     RollbackStorage::Store RollbackStore;
     melonDS::u32 RollbackRestoreCount = 0;
     melonDS::u32 RollbackResimulateCount = 0;
@@ -664,8 +662,6 @@ struct State
     bool NetplayAnyLockstepStarted = false;
     bool NetplayLockstepStarted[16] {};
     NsmbNetplayTransport::Transport Transport;
-    std::map<melonDS::u32, InputState> LocalInputs;
-    std::map<melonDS::u32, InputState> RemoteInputs;
     std::map<melonDS::u64, GameStateSyncHashes> LocalGameStateHashes;
     std::map<melonDS::u64, GameStateSyncHashes> RemoteGameStateHashes;
     std::map<melonDS::u64, GameStateSample> RemoteGameStateSamples;
@@ -680,17 +676,6 @@ struct State
     bool RemoteWorldEffectStateSampleValid = false;
     std::vector<WireNSMLPacket> PendingNSMLPackets;
     bool GameStateMismatchSeen = false;
-    melonDS::u32 LastTracedSentInputFrame = kNoFrameLimit;
-    melonDS::u32 LastTracedReceivedInputFrame = kNoFrameLimit;
-    melonDS::u32 LastReceivedInputFrame = kNoFrameLimit;
-    melonDS::u32 LastSentInputFrame = kNoFrameLimit;
-    melonDS::u32 LastInputHealthSummaryFrame = kNoFrameLimit;
-    melonDS::u32 LastInputHealthRemoteWaitFrame = kNoFrameLimit;
-    melonDS::u32 LastInputHealthThrottleFrame = kNoFrameLimit;
-    melonDS::u32 LastInputHealthThrottleResolvedFrame = kNoFrameLimit;
-    melonDS::u32 LastInputHealthReceiveGapFrame = kNoFrameLimit;
-    melonDS::u32 LastInputHealthSendGapFrame = kNoFrameLimit;
-    melonDS::u32 LastInputFrameThrottleTraceFrame = kNoFrameLimit;
     melonDS::u32 LastSentNSMLPacketTick = 0xFFFFFFFF;
     melonDS::u32 LastReceivedNSMLPacketTick[2] { 0xFFFFFFFF, 0xFFFFFFFF };
     melonDS::u32 LastReceivedNSMLPacketFrame[2] { 0xFFFFFFFF, 0xFFFFFFFF };
@@ -747,7 +732,6 @@ struct State
     std::condition_variable InputCond;
     bool NetworkPumpThreadStarted = false;
     bool NetworkPumpStop = false;
-    int InputWaitPollUs = 100;
     std::thread NetworkPumpThread;
     std::ofstream HangWatchdogLog;
     std::ofstream HangPhaseEventsLog;
@@ -803,14 +787,6 @@ struct State
     std::atomic<melonDS::u32> HangPlayer0Transition { 0 };
     std::atomic<melonDS::u32> HangPlayer1Transition { 0 };
     std::atomic<unsigned long long> HangGameSnapshotUnixMs { 0 };
-    unsigned long long RemoteInputWaitCount = 0;
-    unsigned long long RemoteInputWaitLoops = 0;
-    unsigned long long RemoteInputWaitUs = 0;
-    unsigned long long RemoteInputWaitMaxUs = 0;
-    unsigned long long FrameLeadThrottleCount = 0;
-    unsigned long long FrameLeadThrottleLoops = 0;
-    unsigned long long FrameLeadThrottleUs = 0;
-    unsigned long long FrameLeadThrottleMaxUs = 0;
 };
 
 State G;
@@ -867,14 +843,14 @@ void UpdateHangNetplaySnapshotLocked(melonDS::u32 frameForLead)
     if (!G.Diagnostics.HangDiagnosticsEnabled)
         return;
 
-    G.HangLastSentFrame.store(G.LastSentInputFrame, std::memory_order_release);
-    G.HangLastRecvFrame.store(G.LastReceivedInputFrame, std::memory_order_release);
-    const int lead = (frameForLead == kNoFrameLimit || G.LastReceivedInputFrame == kNoFrameLimit)
+    G.HangLastSentFrame.store(G.InputRuntime.LastSentInputFrame, std::memory_order_release);
+    G.HangLastRecvFrame.store(G.InputRuntime.LastReceivedInputFrame, std::memory_order_release);
+    const int lead = (frameForLead == kNoFrameLimit || G.InputRuntime.LastReceivedInputFrame == kNoFrameLimit)
         ? 0
-        : static_cast<int>(frameForLead) - static_cast<int>(G.LastReceivedInputFrame);
+        : static_cast<int>(frameForLead) - static_cast<int>(G.InputRuntime.LastReceivedInputFrame);
     G.HangLead.store(lead, std::memory_order_release);
-    G.HangLocalQueue.store(G.LocalInputs.size(), std::memory_order_release);
-    G.HangRemoteQueue.store(G.RemoteInputs.size(), std::memory_order_release);
+    G.HangLocalQueue.store(G.InputRuntime.LocalInputs.size(), std::memory_order_release);
+    G.HangRemoteQueue.store(G.InputRuntime.RemoteInputs.size(), std::memory_order_release);
     G.HangDelayedQueue.store(G.Delivery.PendingCount(), std::memory_order_release);
     G.HangPeerState.store(G.Transport.PeerState(), std::memory_order_release);
     G.HangConnectingPeerState.store(G.Transport.ConnectingPeerState(), std::memory_order_release);
@@ -1165,20 +1141,7 @@ void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
     G.PacketBridgePacketInputs.clear();
     G.DelayedNSMLPackets.clear();
     G.Delivery.Clear();
-    G.LocalInputs.clear();
-    G.RemoteInputs.clear();
-    G.RollbackInputs.ClearPredictions();
-    G.LastReceivedInputFrame = kNoFrameLimit;
-    G.LastSentInputFrame = kNoFrameLimit;
-    G.LastTracedSentInputFrame = kNoFrameLimit;
-    G.LastTracedReceivedInputFrame = kNoFrameLimit;
-    G.LastInputHealthSummaryFrame = kNoFrameLimit;
-    G.LastInputHealthRemoteWaitFrame = kNoFrameLimit;
-    G.LastInputHealthThrottleFrame = kNoFrameLimit;
-    G.LastInputHealthThrottleResolvedFrame = kNoFrameLimit;
-    G.LastInputHealthReceiveGapFrame = kNoFrameLimit;
-    G.LastInputHealthSendGapFrame = kNoFrameLimit;
-    G.LastInputFrameThrottleTraceFrame = kNoFrameLimit;
+    G.InputRuntime.ResetForRestart(kNoFrameLimit);
     G.HangRemoteWaitActive.store(0, std::memory_order_release);
     G.HangRemoteWaitTarget.store(0, std::memory_order_release);
     G.HangLastSentFrame.store(kNoFrameLimit, std::memory_order_release);
@@ -1187,8 +1150,6 @@ void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
     G.HangRemoteQueue.store(0, std::memory_order_release);
     G.HangDelayedQueue.store(0, std::memory_order_release);
     G.Session.ResetStartHandshake();
-    G.LastInputFrameLeadResendAt = {};
-    G.InputFrameLeadResendCount = 0;
 
     G.LastLoggedGameStateFrame[instanceID] = 0;
     G.LastSentGameStateFrame[instanceID] = 0;
@@ -1348,8 +1309,8 @@ void ResetMvlAutoRestartStartupHookState(int instanceID)
     std::fill(std::begin(G.NetplayStartWaitArrived), std::end(G.NetplayStartWaitArrived), false);
     G.NetplayStartWaitComplete = false;
     G.Session.ResetStartHandshake();
-    G.LastInputFrameLeadResendAt = {};
-    G.InputFrameLeadResendCount = 0;
+    G.InputRuntime.LastInputFrameLeadResendAt = {};
+    G.InputRuntime.InputFrameLeadResendCount = 0;
     G.NetplayLockstepStarted[instanceID] = false;
     G.NetplayAnyLockstepStarted = false;
 }
@@ -1922,9 +1883,9 @@ void StoreRemoteInputLocked(melonDS::u32 frame, const InputState& receivedInput,
 {
     if (G.Input.NetplayOnly && G.Connection.StartFrame != 0 && frame < G.Connection.StartFrame)
     {
-        if (G.Input.NetplayTrace && G.LastTracedReceivedInputFrame != frame)
+        if (G.Input.NetplayTrace && G.InputRuntime.LastTracedReceivedInputFrame != frame)
         {
-            G.LastTracedReceivedInputFrame = frame;
+            G.InputRuntime.LastTracedReceivedInputFrame = frame;
             std::printf("NSMB InputNetplay: ignored old input frame=%u currentStart=%u\n",
                 frame,
                 G.Connection.StartFrame);
@@ -1932,20 +1893,23 @@ void StoreRemoteInputLocked(melonDS::u32 frame, const InputState& receivedInput,
         return;
     }
 
+    const auto stored = G.InputRuntime.StoreRemote(
+        frame,
+        receivedInput,
+        localFrame == kNoFrameLimit
+            ? std::optional<melonDS::u32> {}
+            : std::optional<melonDS::u32> { localFrame },
+        G.Rollback.Enabled,
+        kNoFrameLimit);
     if (G.Rollback.Enabled)
     {
-        const auto confirmation = G.RollbackInputs.Confirm(
-            frame,
-            receivedInput,
-            localFrame == kNoFrameLimit
-                ? std::optional<melonDS::u32> {}
-                : std::optional<melonDS::u32> { localFrame });
+        const auto& confirmation = stored.Confirmation;
         if (confirmation.Mismatch)
         {
             if (G.Input.NetplayTrace)
             {
                 const melonDS::u32 pendingFrame =
-                    G.RollbackInputs.PendingRollbackFrame().value_or(kNoFrameLimit);
+                    G.InputRuntime.RollbackInputs.PendingRollbackFrame().value_or(kNoFrameLimit);
                 std::printf(
                     "NSMB Rollback: prediction mismatch frame=%u predicted={keys=0x%03X touch=%d x=%u y=%u} actual={keys=0x%03X touch=%d x=%u y=%u} pending=%u mismatches=%u\n",
                     frame,
@@ -1958,7 +1922,7 @@ void StoreRemoteInputLocked(melonDS::u32 frame, const InputState& receivedInput,
                     receivedInput.TouchX,
                     receivedInput.TouchY,
                     pendingFrame,
-                    G.RollbackInputs.MismatchCount());
+                    G.InputRuntime.RollbackInputs.MismatchCount());
                 if (!confirmation.FrameAlreadySimulated)
                 {
                     std::printf(
@@ -1970,42 +1934,39 @@ void StoreRemoteInputLocked(melonDS::u32 frame, const InputState& receivedInput,
             }
         }
     }
-    const melonDS::u32 previousLastReceived = G.LastReceivedInputFrame;
-    G.RemoteInputs[frame] = receivedInput;
-    if (G.LastReceivedInputFrame == kNoFrameLimit || frame > G.LastReceivedInputFrame)
-        G.LastReceivedInputFrame = frame;
-    UpdateHangNetplaySnapshotLocked(G.LastSentInputFrame == kNoFrameLimit ? frame : G.LastSentInputFrame);
+    const melonDS::u32 previousLastReceived = stored.PreviousLastReceived;
+    UpdateHangNetplaySnapshotLocked(G.InputRuntime.LastSentInputFrame == kNoFrameLimit ? frame : G.InputRuntime.LastSentInputFrame);
     if (G.Input.HealthTrace
         && previousLastReceived != kNoFrameLimit
         && frame > previousLastReceived + 1
-        && G.LastInputHealthReceiveGapFrame != frame)
+        && G.InputRuntime.LastInputHealthReceiveGapFrame != frame)
     {
-        G.LastInputHealthReceiveGapFrame = frame;
+        G.InputRuntime.LastInputHealthReceiveGapFrame = frame;
         PrintInputHealthLineLocked(
             "recv-gap",
             localFrame,
             frame,
-            G.LastSentInputFrame,
+            G.InputRuntime.LastSentInputFrame,
             0,
             0,
             0,
-            CurrentInputLeadLocked(G.LastSentInputFrame == kNoFrameLimit ? frame : G.LastSentInputFrame),
+            CurrentInputLeadLocked(G.InputRuntime.LastSentInputFrame == kNoFrameLimit ? frame : G.InputRuntime.LastSentInputFrame),
             true,
             false);
     }
     G.InputCond.notify_all();
     if ((G.Bootstrap.InputTraceEnabled || G.Input.NetplayTrace)
-        && frame != G.LastTracedReceivedInputFrame
+        && frame != G.InputRuntime.LastTracedReceivedInputFrame
         && (G.Bootstrap.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.Bootstrap.InputTraceInterval)) == 0))
     {
-        G.LastTracedReceivedInputFrame = frame;
+        G.InputRuntime.LastTracedReceivedInputFrame = frame;
         std::printf("NSMB PoC: recv input tUnixMs=%llu frame=%u keys=0x%03X remoteQueue=%zu lastSent=%u lead=%d localFrame=%u\n",
             NowUnixMs(),
             frame,
             receivedInput.KeyMask,
-            G.RemoteInputs.size(),
-            G.LastSentInputFrame,
-            CurrentInputLeadLocked(G.LastSentInputFrame == kNoFrameLimit ? frame : G.LastSentInputFrame),
+            G.InputRuntime.RemoteInputs.size(),
+            G.InputRuntime.LastSentInputFrame,
+            CurrentInputLeadLocked(G.InputRuntime.LastSentInputFrame == kNoFrameLimit ? frame : G.InputRuntime.LastSentInputFrame),
             localFrame);
         std::fflush(stdout);
     }
@@ -2300,10 +2261,10 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                 localFrame,
                 G.Transport.IsConnected() ? 1 : 0,
                 G.Transport.IsConnecting() ? 1 : 0,
-                G.LastSentInputFrame,
-                G.LastReceivedInputFrame,
-                G.LocalInputs.size(),
-                G.RemoteInputs.size());
+                G.InputRuntime.LastSentInputFrame,
+                G.InputRuntime.LastReceivedInputFrame,
+                G.InputRuntime.LocalInputs.size(),
+                G.InputRuntime.RemoteInputs.size());
             std::fflush(stdout);
             break;
 
@@ -2411,13 +2372,13 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                 G.Transport.IsPeer(event.peer) ? 1 : 0,
                 G.Transport.IsConnected() ? 1 : 0,
                 G.Transport.IsConnecting() ? 1 : 0,
-                G.LastSentInputFrame,
-                G.LastReceivedInputFrame,
-                CurrentInputLeadLocked(G.LastSentInputFrame == kNoFrameLimit ? localFrame : G.LastSentInputFrame),
-                G.LocalInputs.size(),
-                G.RemoteInputs.size(),
+                G.InputRuntime.LastSentInputFrame,
+                G.InputRuntime.LastReceivedInputFrame,
+                CurrentInputLeadLocked(G.InputRuntime.LastSentInputFrame == kNoFrameLimit ? localFrame : G.InputRuntime.LastSentInputFrame),
+                G.InputRuntime.LocalInputs.size(),
+                G.InputRuntime.RemoteInputs.size(),
                 G.Delivery.PendingCount(),
-                G.InputFrameLeadResendCount,
+                G.InputRuntime.InputFrameLeadResendCount,
                 G.Connection.StartFrame,
                 G.Session.LocalReadyFrame().value_or(kNoFrameLimit),
                 G.Session.RemoteReadyFrame().value_or(kNoFrameLimit),
@@ -2575,8 +2536,8 @@ void MaybeResendNetplayStartReadyLocked(bool allowBeforeAccepted = false)
             G.Session.WaitedForPeerAtStart(),
             G.Session.StartReadySent(),
             G.Session.LocalReadyFrame().has_value(),
-            G.LastReceivedInputFrame != kNoFrameLimit,
-            G.LastReceivedInputFrame,
+            G.InputRuntime.LastReceivedInputFrame != kNoFrameLimit,
+            G.InputRuntime.LastReceivedInputFrame,
             G.Connection.StartFrame,
             G.Connection.Delay,
             G.Session.StartReadySendCount(),
@@ -2595,15 +2556,15 @@ void SendInputPayloadNowLocked(const void* data, size_t size, melonDS::u32 flags
 {
     if (!G.Transport.IsConnected()) return;
 
-    TraceHangPhase("begin", "enet-send-input", -1, G.LastSentInputFrame, G.LastSentInputFrame, G.LastSentInputFrame);
+    TraceHangPhase("begin", "enet-send-input", -1, G.InputRuntime.LastSentInputFrame, G.InputRuntime.LastSentInputFrame, G.InputRuntime.LastSentInputFrame);
     const int result = G.Transport.Send(data, size, flags, true);
     if (result == NsmbNetplayTransport::SendUnavailable)
         return;
     G.HangLastENetSendResult.store(result, std::memory_order_release);
     G.HangLastENetSendBytes.store(size, std::memory_order_release);
     G.HangLastENetSendUnixMs.store(NowUnixMs(), std::memory_order_release);
-    UpdateHangNetplaySnapshotLocked(G.LastSentInputFrame);
-    TraceHangPhase("end", "enet-send-input", -1, G.LastSentInputFrame, G.LastSentInputFrame, G.LastSentInputFrame);
+    UpdateHangNetplaySnapshotLocked(G.InputRuntime.LastSentInputFrame);
+    TraceHangPhase("end", "enet-send-input", -1, G.InputRuntime.LastSentInputFrame, G.InputRuntime.LastSentInputFrame, G.InputRuntime.LastSentInputFrame);
 }
 
 void FlushDelayedInputsLocked(melonDS::u32 frame)
@@ -2629,15 +2590,15 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
     SendMatchSeedLocked();
     MaybeResendNetplayStartReadyLocked();
 
-    const melonDS::u32 previousLastSent = G.LastSentInputFrame;
-    G.LastSentInputFrame = frame;
+    const melonDS::u32 previousLastSent = G.InputRuntime.LastSentInputFrame;
+    G.InputRuntime.LastSentInputFrame = frame;
     UpdateHangNetplaySnapshotLocked(frame);
     if (G.Input.HealthTrace
         && previousLastSent != kNoFrameLimit
         && frame > previousLastSent + 1
-        && G.LastInputHealthSendGapFrame != frame)
+        && G.InputRuntime.LastInputHealthSendGapFrame != frame)
     {
-        G.LastInputHealthSendGapFrame = frame;
+        G.InputRuntime.LastInputHealthSendGapFrame = frame;
         PrintInputHealthLineLocked(
             "send-gap",
             frame,
@@ -2666,7 +2627,7 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
             G.Input.SendDelayStartFrame,
             G.Input.SendDelayEndFrame,
         },
-        G.LocalInputs,
+        G.InputRuntime.LocalInputs,
         std::chrono::steady_clock::now());
     if (prepared.Decision.Drop)
     {
@@ -2691,16 +2652,16 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
     }
 
     if ((G.Bootstrap.InputTraceEnabled || G.Input.NetplayTrace)
-        && frame != G.LastTracedSentInputFrame
+        && frame != G.InputRuntime.LastTracedSentInputFrame
         && (G.Bootstrap.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.Bootstrap.InputTraceInterval)) == 0))
     {
-        G.LastTracedSentInputFrame = frame;
+        G.InputRuntime.LastTracedSentInputFrame = frame;
         std::printf("NSMB PoC: sent input tUnixMs=%llu frame=%u keys=0x%03X localQueue=%zu lastRecv=%u lead=%d bundle=%d delayedFrames=%d peer=%d\n",
             NowUnixMs(),
             frame,
             input.KeyMask,
-            G.LocalInputs.size(),
-            G.LastReceivedInputFrame,
+            G.InputRuntime.LocalInputs.size(),
+            G.InputRuntime.LastReceivedInputFrame,
             CurrentInputLeadLocked(frame),
             sendBundle ? 1 : 0,
             sendDelayFrames,
@@ -2711,43 +2672,43 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
 
 void MaybeResendLatestInputForFrameLeadLocked()
 {
-    if (!G.Transport.IsConnected() || !G.Input.NetplayOnly || G.LastSentInputFrame == kNoFrameLimit)
+    if (!G.Transport.IsConnected() || !G.Input.NetplayOnly || G.InputRuntime.LastSentInputFrame == kNoFrameLimit)
         return;
 
     const auto now = std::chrono::steady_clock::now();
-    if (G.InputFrameLeadResendCount > 0
-        && now - G.LastInputFrameLeadResendAt < std::chrono::milliseconds(50))
+    if (G.InputRuntime.InputFrameLeadResendCount > 0
+        && now - G.InputRuntime.LastInputFrameLeadResendAt < std::chrono::milliseconds(50))
     {
         return;
     }
 
-    auto it = G.LocalInputs.find(G.LastSentInputFrame);
-    if (it == G.LocalInputs.end())
+    auto it = G.InputRuntime.LocalInputs.find(G.InputRuntime.LastSentInputFrame);
+    if (it == G.InputRuntime.LocalInputs.end())
         return;
 
     const InputState& input = it->second;
     const std::vector<char> payload = G.Delivery.BuildPayload(
-        G.LastSentInputFrame,
+        G.InputRuntime.LastSentInputFrame,
         input,
         G.Input.BundleHistory,
-        G.LocalInputs);
+        G.InputRuntime.LocalInputs);
     const size_t payloadBytes = payload.size();
     SendInputPayloadNowLocked(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE);
 
-    G.LastInputFrameLeadResendAt = now;
-    G.InputFrameLeadResendCount++;
+    G.InputRuntime.LastInputFrameLeadResendAt = now;
+    G.InputRuntime.InputFrameLeadResendCount++;
     if (G.Input.NetplayTrace)
     {
         std::printf("NSMB InputNetplay: resent latest input tUnixMs=%llu frame=%u count=%d payloadBytes=%zu bundleHistory=%d lastRecv=%u lead=%d localQueue=%zu remoteQueue=%zu delayed=%zu peer=%d\n",
             NowUnixMs(),
-            G.LastSentInputFrame,
-            G.InputFrameLeadResendCount,
+            G.InputRuntime.LastSentInputFrame,
+            G.InputRuntime.InputFrameLeadResendCount,
             payloadBytes,
             G.Input.BundleHistory,
-            G.LastReceivedInputFrame,
-            CurrentInputLeadLocked(G.LastSentInputFrame),
-            G.LocalInputs.size(),
-            G.RemoteInputs.size(),
+            G.InputRuntime.LastReceivedInputFrame,
+            CurrentInputLeadLocked(G.InputRuntime.LastSentInputFrame),
+            G.InputRuntime.LocalInputs.size(),
+            G.InputRuntime.RemoteInputs.size(),
             G.Delivery.PendingCount(),
             G.Transport.IsConnected() ? 1 : 0);
         std::fflush(stdout);
@@ -2765,7 +2726,7 @@ bool GetRollbackRemoteInputLocked(melonDS::u32 frame, InputState& input, bool& p
         probe.EndFrame = G.Rollback.PredictionProbeEndFrame;
     probe.KeyMask = G.Rollback.PredictionProbeKeyMask;
 
-    const auto resolved = G.RollbackInputs.Resolve(frame, G.RemoteInputs, NeutralInput(), probe);
+    const auto resolved = G.InputRuntime.RollbackInputs.Resolve(frame, G.InputRuntime.RemoteInputs, NeutralInput(), probe);
     input = resolved.Input;
     predicted = resolved.Predicted;
     return true;
@@ -2777,7 +2738,7 @@ void PruneRollbackHistoryLocked(melonDS::u32 frame)
         ? static_cast<melonDS::u32>(G.Rollback.Window)
         : 0;
     G.RollbackStore.Prune(frame, window);
-    G.RollbackInputs.Prune(frame, window, G.RemoteInputs);
+    G.InputRuntime.RollbackInputs.Prune(frame, window, G.InputRuntime.RemoteInputs);
 }
 
 bool ShouldSaveRollbackCheckpoint(melonDS::u32 frame)
@@ -3259,7 +3220,7 @@ bool RestoreRollbackCheckpointForProbeIfNeeded(int instanceID, melonDS::u32 fram
     std::vector<melonDS::u8> latestMainRAM;
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
-        const auto pendingFrame = G.RollbackInputs.PendingRollbackFrame();
+        const auto pendingFrame = G.InputRuntime.RollbackInputs.PendingRollbackFrame();
         if (!pendingFrame)
             return false;
 
@@ -3271,7 +3232,7 @@ bool RestoreRollbackCheckpointForProbeIfNeeded(int instanceID, melonDS::u32 fram
                 restoreFrame,
                 frame,
                 G.Rollback.Window);
-            G.RollbackInputs.ClearPendingRollbackFrame();
+            G.InputRuntime.RollbackInputs.ClearPendingRollbackFrame();
             return false;
         }
         const bool restoreReady = IsRollbackPreimageBackend()
@@ -3282,10 +3243,10 @@ bool RestoreRollbackCheckpointForProbeIfNeeded(int instanceID, melonDS::u32 fram
             std::printf("NSMB Rollback: cannot restore delta chain frame=%u base=%u missing\n",
                 restoreFrame,
                 checkpoint.BaseFrame);
-            G.RollbackInputs.ClearPendingRollbackFrame();
+            G.InputRuntime.RollbackInputs.ClearPendingRollbackFrame();
             return false;
         }
-        G.RollbackInputs.ClearPendingRollbackFrame();
+        G.InputRuntime.RollbackInputs.ClearPendingRollbackFrame();
     }
 
     const auto restoreStart = std::chrono::steady_clock::now();
@@ -3783,12 +3744,6 @@ void ThrottleNSMLPacketBridgeFrameLead(melonDS::NDS* nds, melonDS::u32 frame)
     }
 }
 
-void PruneInputHistoryLocked(melonDS::u32 keepFromFrame)
-{
-    G.LocalInputs.erase(G.LocalInputs.begin(), G.LocalInputs.lower_bound(keepFromFrame));
-    G.RemoteInputs.erase(G.RemoteInputs.begin(), G.RemoteInputs.lower_bound(keepFromFrame));
-}
-
 void PrintInputHealthLineLocked(
     const char* event,
     melonDS::u32 frame,
@@ -3804,8 +3759,8 @@ void PrintInputHealthLineLocked(
     if (!G.Input.HealthTrace)
         return;
 
-    const melonDS::u32 lastSent = G.LastSentInputFrame;
-    const melonDS::u32 lastRecv = G.LastReceivedInputFrame;
+    const melonDS::u32 lastSent = G.InputRuntime.LastSentInputFrame;
+    const melonDS::u32 lastRecv = G.InputRuntime.LastReceivedInputFrame;
     UpdateHangNetplaySnapshotLocked(sendFrame);
     std::printf(
         "NSMB InputHealth: tUnixMs=%llu event=%s frame=%u logicalFrame=%u sendFrame=%u lastSent=%u lastRecv=%u lead=%d localQueue=%zu remoteQueue=%zu delayed=%zu waitMs=%.3f throttleMs=%.3f networkMs=%.3f hasRemote=%d predicted=%d rollback=%d peer=%d connectingPeer=%d resendCount=%d netplayStart=%u localReady=%u remoteReady=%u remoteReadyAfterLocal=%d\n",
@@ -3817,8 +3772,8 @@ void PrintInputHealthLineLocked(
         lastSent,
         lastRecv,
         lead,
-        G.LocalInputs.size(),
-        G.RemoteInputs.size(),
+        G.InputRuntime.LocalInputs.size(),
+        G.InputRuntime.RemoteInputs.size(),
         G.Delivery.PendingCount(),
         static_cast<double>(waitedUs) / 1000.0,
         static_cast<double>(throttleUs) / 1000.0,
@@ -3828,7 +3783,7 @@ void PrintInputHealthLineLocked(
         G.Rollback.Enabled ? 1 : 0,
         G.Transport.IsConnected() ? 1 : 0,
         G.Transport.IsConnecting() ? 1 : 0,
-        G.InputFrameLeadResendCount,
+        G.InputRuntime.InputFrameLeadResendCount,
         G.Connection.StartFrame,
         G.Session.LocalReadyFrame().value_or(kNoFrameLimit),
         G.Session.RemoteReadyFrame().value_or(kNoFrameLimit),
@@ -3838,9 +3793,7 @@ void PrintInputHealthLineLocked(
 
 int CurrentInputLeadLocked(melonDS::u32 sendFrame)
 {
-    if (G.LastReceivedInputFrame == kNoFrameLimit)
-        return 0;
-    return static_cast<int>(sendFrame) - static_cast<int>(G.LastReceivedInputFrame);
+    return G.InputRuntime.Lead(sendFrame, kNoFrameLimit);
 }
 
 void PrimeInputNetplayEpochStartLocked(melonDS::u32 localFrame)
@@ -3851,21 +3804,13 @@ void PrimeInputNetplayEpochStartLocked(melonDS::u32 localFrame)
         return;
     }
 
-    PruneInputHistoryLocked(G.Connection.StartFrame);
-
     const melonDS::u32 delay = static_cast<melonDS::u32>(std::max(0, G.Connection.Delay));
     const melonDS::u32 firstInputFrame = G.Connection.StartFrame + delay;
-    for (melonDS::u32 frame = G.Connection.StartFrame; frame < firstInputFrame; frame++)
-    {
-        G.LocalInputs.emplace(frame, NeutralInput());
-        G.RemoteInputs.emplace(frame, NeutralInput());
-    }
-    if (delay > 0)
-    {
-        const melonDS::u32 primedThrough = firstInputFrame - 1;
-        if (G.LastReceivedInputFrame == kNoFrameLimit || G.LastReceivedInputFrame < primedThrough)
-            G.LastReceivedInputFrame = primedThrough;
-    }
+    G.InputRuntime.PrimeEpoch(
+        G.Connection.StartFrame,
+        delay,
+        NeutralInput(),
+        kNoFrameLimit);
     G.Session.MarkInputEpochPrimed(G.Connection.StartFrame);
     G.InputCond.notify_all();
 
@@ -3884,14 +3829,6 @@ bool IsPastTestInputRange(melonDS::u32 targetFrame)
         && targetFrame >= G.Bootstrap.TestFrames;
 }
 
-void RecordRemoteInputWaitStats(unsigned long long elapsedUs, unsigned long long loops)
-{
-    G.RemoteInputWaitCount++;
-    G.RemoteInputWaitLoops += loops;
-    G.RemoteInputWaitUs += elapsedUs;
-    G.RemoteInputWaitMaxUs = std::max(G.RemoteInputWaitMaxUs, elapsedUs);
-}
-
 void TraceRemoteInputWaitSpike(melonDS::u32 targetFrame, unsigned long long elapsedUs, unsigned long long loops)
 {
     if (!G.Diagnostics.ActiveFrameSpikeTrace
@@ -3905,14 +3842,6 @@ void TraceRemoteInputWaitSpike(melonDS::u32 targetFrame, unsigned long long elap
         targetFrame,
         static_cast<double>(elapsedUs) / 1000.0,
         loops);
-}
-
-void RecordFrameLeadThrottleStats(unsigned long long elapsedUs, unsigned long long loops)
-{
-    G.FrameLeadThrottleCount++;
-    G.FrameLeadThrottleLoops += loops;
-    G.FrameLeadThrottleUs += elapsedUs;
-    G.FrameLeadThrottleMaxUs = std::max(G.FrameLeadThrottleMaxUs, elapsedUs);
 }
 
 InputState WaitForRemoteInput(melonDS::u32 targetFrame)
@@ -3944,34 +3873,34 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
             MaybeResendNetplayStartReadyLocked();
             MaybeResendLatestInputForFrameLeadLocked();
 
-            auto it = G.RemoteInputs.find(targetFrame);
-            if (it != G.RemoteInputs.end())
+            auto it = G.InputRuntime.RemoteInputs.find(targetFrame);
+            if (it != G.InputRuntime.RemoteInputs.end())
             {
                 const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::steady_clock::now() - start).count();
                 const auto waitedUs = static_cast<unsigned long long>(std::max<long long>(0, elapsedUs));
-                RecordRemoteInputWaitStats(waitedUs, loops);
+                G.InputRuntime.RecordRemoteInputWait(waitedUs, loops);
                 TraceRemoteInputWaitSpike(targetFrame, waitedUs, loops);
                 if (G.Input.HealthTrace
                     && waitedUs >= static_cast<unsigned long long>(G.Input.HealthTraceWaitThresholdMs) * 1000ULL
-                    && G.LastInputHealthRemoteWaitFrame != targetFrame)
+                    && G.InputRuntime.LastInputHealthRemoteWaitFrame != targetFrame)
                 {
-                    G.LastInputHealthRemoteWaitFrame = targetFrame;
+                    G.InputRuntime.LastInputHealthRemoteWaitFrame = targetFrame;
                     PrintInputHealthLineLocked(
                         "remote-wait-resolved",
                         targetFrame,
                         targetFrame,
-                        G.LastSentInputFrame,
+                        G.InputRuntime.LastSentInputFrame,
                         waitedUs,
                         0,
                         0,
                         CurrentInputLeadLocked(
-                            G.LastSentInputFrame == kNoFrameLimit ? targetFrame : G.LastSentInputFrame),
+                            G.InputRuntime.LastSentInputFrame == kNoFrameLimit ? targetFrame : G.InputRuntime.LastSentInputFrame),
                         true,
                         false);
                 }
                 G.HangRemoteWaitActive.store(0, std::memory_order_release);
-                TraceHangPhase("end", "remote-input-wait", -1, targetFrame, targetFrame, G.LastSentInputFrame);
+                TraceHangPhase("end", "remote-input-wait", -1, targetFrame, targetFrame, G.InputRuntime.LastSentInputFrame);
                 return it->second;
             }
 
@@ -3990,19 +3919,19 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
                         -1,
                         targetFrame,
                         targetFrame,
-                        G.LastSentInputFrame);
+                        G.InputRuntime.LastSentInputFrame);
                     waitTraceStarted = true;
                     lastProgressSecond = progressSecond;
                     PrintInputHealthLineLocked(
                         progressSecond == 0 ? "remote-wait-start" : "remote-wait-progress",
                         targetFrame,
                         targetFrame,
-                        G.LastSentInputFrame,
+                        G.InputRuntime.LastSentInputFrame,
                         waitedUs,
                         0,
                         0,
                         CurrentInputLeadLocked(
-                            G.LastSentInputFrame == kNoFrameLimit ? targetFrame : G.LastSentInputFrame),
+                            G.InputRuntime.LastSentInputFrame == kNoFrameLimit ? targetFrame : G.InputRuntime.LastSentInputFrame),
                         false,
                         false);
                 }
@@ -4024,25 +3953,25 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
                     loops,
                     G.Transport.IsConnected() ? 1 : 0,
                     G.Transport.IsConnecting() ? 1 : 0,
-                    G.LastSentInputFrame,
-                    G.LastReceivedInputFrame,
-                    CurrentInputLeadLocked(G.LastSentInputFrame == kNoFrameLimit ? targetFrame : G.LastSentInputFrame),
-                    G.LocalInputs.size(),
-                    G.RemoteInputs.size(),
+                    G.InputRuntime.LastSentInputFrame,
+                    G.InputRuntime.LastReceivedInputFrame,
+                    CurrentInputLeadLocked(G.InputRuntime.LastSentInputFrame == kNoFrameLimit ? targetFrame : G.InputRuntime.LastSentInputFrame),
+                    G.InputRuntime.LocalInputs.size(),
+                    G.InputRuntime.RemoteInputs.size(),
                     G.Delivery.PendingCount(),
-                    G.InputFrameLeadResendCount,
+                    G.InputRuntime.InputFrameLeadResendCount,
                     G.Connection.StartFrame,
                     G.Session.LocalReadyFrame().value_or(kNoFrameLimit),
                     G.Session.RemoteReadyFrame().value_or(kNoFrameLimit));
                 std::fflush(stdout);
                 G.HangRemoteWaitActive.store(0, std::memory_order_release);
-                TraceHangPhase("timeout", "remote-input-wait", -1, targetFrame, targetFrame, G.LastSentInputFrame);
+                TraceHangPhase("timeout", "remote-input-wait", -1, targetFrame, targetFrame, G.InputRuntime.LastSentInputFrame);
                 if (G.Connection.RemoteInputTimeoutFatal)
                     std::_Exit(70);
                 const auto waitedUs = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::steady_clock::now() - start).count();
                 const auto recordedWaitedUs = static_cast<unsigned long long>(std::max<long long>(0, waitedUs));
-                RecordRemoteInputWaitStats(recordedWaitedUs, loops);
+                G.InputRuntime.RecordRemoteInputWait(recordedWaitedUs, loops);
                 TraceRemoteInputWaitSpike(targetFrame, recordedWaitedUs, loops);
                 return NeutralInput();
             }
@@ -4074,13 +4003,15 @@ bool TryWaitForRollbackRemoteInputLocked(
         loops++;
         PumpNetworkLocked(nds, localFrame);
 
-        auto it = G.RemoteInputs.find(targetFrame);
-        if (it != G.RemoteInputs.end())
+        auto it = G.InputRuntime.RemoteInputs.find(targetFrame);
+        if (it != G.InputRuntime.RemoteInputs.end())
         {
             input = it->second;
             const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::steady_clock::now() - start).count();
-            RecordRemoteInputWaitStats(static_cast<unsigned long long>(std::max<long long>(0, elapsedUs)), loops);
+            G.InputRuntime.RecordRemoteInputWait(
+                static_cast<unsigned long long>(std::max<long long>(0, elapsedUs)),
+                loops);
             return true;
         }
 
@@ -4089,7 +4020,9 @@ bool TryWaitForRollbackRemoteInputLocked(
         const long long remainingUs = static_cast<long long>(G.Rollback.InputWaitUs) - elapsedUs;
         if (remainingUs <= 0)
         {
-            RecordRemoteInputWaitStats(static_cast<unsigned long long>(std::max<long long>(0, elapsedUs)), loops);
+            G.InputRuntime.RecordRemoteInputWait(
+                static_cast<unsigned long long>(std::max<long long>(0, elapsedUs)),
+                loops);
             if (G.Input.NetplayTrace)
             {
                 std::printf("NSMB Rollback: input wait timeout frame=%u waitedUs=%lld\n",
@@ -4328,8 +4261,8 @@ void WaitForRemoteNetplayStartReadyIfNeeded(melonDS::NDS* nds, melonDS::u32 sync
             SendNetplayStartReadyLocked(syncFrame);
             MaybeResendNetplayStartReadyLocked(true);
             const bool hasPostStartRemoteInput = SessionPolicy::HasPostStartRemoteInput(
-                G.LastReceivedInputFrame != kNoFrameLimit,
-                G.LastReceivedInputFrame,
+                G.InputRuntime.LastReceivedInputFrame != kNoFrameLimit,
+                G.InputRuntime.LastReceivedInputFrame,
                 G.Connection.StartFrame,
                 G.Connection.Delay);
             if (SessionPolicy::ShouldAcceptStartReady(
@@ -5410,10 +5343,10 @@ void EmitStartReadyEventLocked(const char* direction, melonDS::u32 localFrame, m
          << "\"remoteFrame\":" << remoteFrame << ","
          << "\"delta\":" << delta << ","
          << "\"logicalStart\":" << G.Connection.StartFrame << ","
-         << "\"lastSentInputFrame\":" << G.LastSentInputFrame << ","
-         << "\"lastReceivedInputFrame\":" << G.LastReceivedInputFrame << ","
-         << "\"localQueue\":" << G.LocalInputs.size() << ","
-         << "\"remoteQueue\":" << G.RemoteInputs.size() << ","
+         << "\"lastSentInputFrame\":" << G.InputRuntime.LastSentInputFrame << ","
+         << "\"lastReceivedInputFrame\":" << G.InputRuntime.LastReceivedInputFrame << ","
+         << "\"localQueue\":" << G.InputRuntime.LocalInputs.size() << ","
+         << "\"remoteQueue\":" << G.InputRuntime.RemoteInputs.size() << ","
          << "\"delayedInputs\":" << G.Delivery.PendingCount()
          << "}";
     WriteDiagnosticEventLocked(json.str());
@@ -5895,8 +5828,8 @@ void RecordDiagnosticSnapshotIfNeeded(int instanceID, melonDS::u32 frame, melonD
     snap.InputConsole1Held = nds->ARM9Read16(kInputConsoleKeysAddr + 0x4);
     snap.InputPlayer0Held = nds->ARM9Read16(kInputPlayerKeysHeldAddr + 0x0);
     snap.InputPlayer1Held = nds->ARM9Read16(kInputPlayerKeysHeldAddr + 0x2);
-    snap.LastSentInputFrame = G.LastSentInputFrame;
-    snap.LastReceivedInputFrame = G.LastReceivedInputFrame;
+    snap.LastSentInputFrame = G.InputRuntime.LastSentInputFrame;
+    snap.LastReceivedInputFrame = G.InputRuntime.LastReceivedInputFrame;
     snap.PlayerGlobalHash = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, 0xC0);
     snap.PlayerGlobalHash0 = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, 0x60);
     snap.PlayerGlobalHash1 = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr + 0x60, 0x60);
@@ -7028,7 +6961,7 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
     std::vector<melonDS::u8> latestMainRAM;
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
-        const auto pendingFrame = G.RollbackInputs.PendingRollbackFrame();
+        const auto pendingFrame = G.InputRuntime.RollbackInputs.PendingRollbackFrame();
         if (!pendingFrame)
             return false;
         mismatchFrame = *pendingFrame;
@@ -7040,7 +6973,7 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
                     frame);
                 std::fflush(stdout);
             }
-            G.RollbackInputs.ClearPendingRollback();
+            G.InputRuntime.RollbackInputs.ClearPendingRollback();
             return false;
         }
         if (mismatchFrame >= frame)
@@ -7063,7 +6996,7 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
                 mismatchFrame = cappedFrame;
             }
         }
-        const auto observedFrame = G.RollbackInputs.PendingRollbackObservedFrame();
+        const auto observedFrame = G.InputRuntime.RollbackInputs.PendingRollbackObservedFrame();
         if (G.Rollback.ResimulateDelayFrames > 0
             && observedFrame
             && frame < *observedFrame + static_cast<melonDS::u32>(G.Rollback.ResimulateDelayFrames))
@@ -7079,7 +7012,7 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
                 frame,
                 G.Rollback.Window,
                 G.Rollback.CheckpointInterval);
-            G.RollbackInputs.ClearPendingRollback();
+            G.InputRuntime.RollbackInputs.ClearPendingRollback();
             return false;
         }
         const bool restoreReady = IsRollbackPreimageBackend()
@@ -7092,10 +7025,10 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
                 mismatchFrame,
                 restoreFrame,
                 checkpoint.BaseFrame);
-            G.RollbackInputs.ClearPendingRollback();
+            G.InputRuntime.RollbackInputs.ClearPendingRollback();
             return false;
         }
-        G.RollbackInputs.ClearPendingRollback();
+        G.InputRuntime.RollbackInputs.ClearPendingRollback();
 
         G.RollbackStore.EraseAfter(restoreFrame);
     }
@@ -7132,8 +7065,8 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
         bool predictedRemote = false;
         {
             std::lock_guard<std::mutex> lock(G.Mutex);
-            auto localIt = G.LocalInputs.find(f);
-            if (localIt != G.LocalInputs.end())
+            auto localIt = G.InputRuntime.LocalInputs.find(f);
+            if (localIt != G.InputRuntime.LocalInputs.end())
                 localInput = localIt->second;
             GetRollbackRemoteInputLocked(f, remoteInput, predictedRemote);
         }
@@ -7247,7 +7180,7 @@ void ThrottleInputNetplayFrameLead(melonDS::NDS* nds, melonDS::u32 frame, melonD
             std::lock_guard<std::mutex> lock(G.Mutex);
             PumpNetworkLocked(nds, frame);
             MaybeResendNetplayStartReadyLocked();
-            remoteFrame = G.LastReceivedInputFrame;
+            remoteFrame = G.InputRuntime.LastReceivedInputFrame;
         }
 
         if (remoteFrame == kNoFrameLimit)
@@ -7264,11 +7197,11 @@ void ThrottleInputNetplayFrameLead(melonDS::NDS* nds, melonDS::u32 frame, melonD
                 const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::steady_clock::now() - start).count();
                 const auto waitedUs = static_cast<unsigned long long>(std::max<long long>(0, elapsedUs));
-                RecordFrameLeadThrottleStats(waitedUs, loops);
-                if (G.Input.HealthTrace && G.LastInputHealthThrottleResolvedFrame != frame)
+                G.InputRuntime.RecordFrameLeadThrottle(waitedUs, loops);
+                if (G.Input.HealthTrace && G.InputRuntime.LastInputHealthThrottleResolvedFrame != frame)
                 {
                     std::lock_guard<std::mutex> lock(G.Mutex);
-                    G.LastInputHealthThrottleResolvedFrame = frame;
+                    G.InputRuntime.LastInputHealthThrottleResolvedFrame = frame;
                     PrintInputHealthLineLocked(
                         "throttle-resolved",
                         frame,
@@ -7292,9 +7225,9 @@ void ThrottleInputNetplayFrameLead(melonDS::NDS* nds, melonDS::u32 frame, melonD
             MaybeResendLatestInputForFrameLeadLocked();
         }
 
-        if (G.Input.NetplayTrace && G.LastInputFrameThrottleTraceFrame != frame)
+        if (G.Input.NetplayTrace && G.InputRuntime.LastInputFrameThrottleTraceFrame != frame)
         {
-            G.LastInputFrameThrottleTraceFrame = frame;
+            G.InputRuntime.LastInputFrameThrottleTraceFrame = frame;
             std::printf("NSMB InputNetplay: frame throttle frame=%u sendFrame=%u remoteInputFrame=%u lead=%d maxLead=%d\n",
                 frame,
                 sendFrame,
@@ -7304,10 +7237,10 @@ void ThrottleInputNetplayFrameLead(melonDS::NDS* nds, melonDS::u32 frame, melonD
             std::fflush(stdout);
         }
 
-        if (G.Input.HealthTrace && G.LastInputHealthThrottleFrame != frame)
+        if (G.Input.HealthTrace && G.InputRuntime.LastInputHealthThrottleFrame != frame)
         {
             std::lock_guard<std::mutex> lock(G.Mutex);
-            G.LastInputHealthThrottleFrame = frame;
+            G.InputRuntime.LastInputHealthThrottleFrame = frame;
             PrintInputHealthLineLocked(
                 "throttle-blocked",
                 frame,
@@ -7341,7 +7274,9 @@ void ThrottleInputNetplayFrameLead(melonDS::NDS* nds, melonDS::u32 frame, melonD
                 {
                     const auto waitedUs = std::chrono::duration_cast<std::chrono::microseconds>(
                         std::chrono::steady_clock::now() - start).count();
-                    RecordFrameLeadThrottleStats(static_cast<unsigned long long>(std::max<long long>(0, waitedUs)), loops);
+                    G.InputRuntime.RecordFrameLeadThrottle(
+                        static_cast<unsigned long long>(std::max<long long>(0, waitedUs)),
+                        loops);
                 }
                 return;
             }
@@ -7426,15 +7361,15 @@ void WritePacketBridgeJitScratchIfNeeded(
             std::unique_lock<std::mutex> lock(G.Mutex);
             PumpNetworkLocked(nds, frame);
             SendMatchSeedLocked();
-            G.LocalInputs[sendFrame] = localInput;
+            G.InputRuntime.LocalInputs[sendFrame] = localInput;
             SendInputLocked(sendFrame, localInput);
             if (G.Input.NetplayOnly)
             {
-                auto localIt = G.LocalInputs.find(logicalFrame);
-                effectiveLocalInput = localIt != G.LocalInputs.end() ? localIt->second : NeutralInput();
+                auto localIt = G.InputRuntime.LocalInputs.find(logicalFrame);
+                effectiveLocalInput = localIt != G.InputRuntime.LocalInputs.end() ? localIt->second : NeutralInput();
             }
-            auto it = G.RemoteInputs.find(logicalFrame);
-            if (it != G.RemoteInputs.end())
+            auto it = G.InputRuntime.RemoteInputs.find(logicalFrame);
+            if (it != G.InputRuntime.RemoteInputs.end())
             {
                 remoteInput = it->second;
                 hasRemoteInput = true;
@@ -7517,11 +7452,11 @@ void WritePacketBridgeJitScratchIfNeeded(
     }
     if (G.Input.HealthTrace
         && G.Input.HealthTraceInterval > 0
-        && logicalFrame != G.LastInputHealthSummaryFrame
+        && logicalFrame != G.InputRuntime.LastInputHealthSummaryFrame
         && (logicalFrame % static_cast<melonDS::u32>(G.Input.HealthTraceInterval)) == 0)
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
-        G.LastInputHealthSummaryFrame = logicalFrame;
+        G.InputRuntime.LastInputHealthSummaryFrame = logicalFrame;
         PrintInputHealthLineLocked(
             "summary",
             frame,
@@ -9966,18 +9901,18 @@ PerformanceCounters GetPerformanceCounters()
     InitFromEnvironment();
     std::lock_guard<std::mutex> lock(G.Mutex);
     PerformanceCounters counters;
-    counters.RemoteInputWaitCount = G.RemoteInputWaitCount;
-    counters.RemoteInputWaitUs = G.RemoteInputWaitUs;
-    counters.RemoteInputWaitMaxUs = G.RemoteInputWaitMaxUs;
-    counters.FrameLeadThrottleCount = G.FrameLeadThrottleCount;
-    counters.FrameLeadThrottleUs = G.FrameLeadThrottleUs;
-    counters.FrameLeadThrottleMaxUs = G.FrameLeadThrottleMaxUs;
-    counters.LastSentInputFrame = G.LastSentInputFrame;
-    counters.LastReceivedInputFrame = G.LastReceivedInputFrame;
-    if (G.LastSentInputFrame != kNoFrameLimit && G.LastReceivedInputFrame != kNoFrameLimit)
+    counters.RemoteInputWaitCount = G.InputRuntime.RemoteInputWaitCount;
+    counters.RemoteInputWaitUs = G.InputRuntime.RemoteInputWaitUs;
+    counters.RemoteInputWaitMaxUs = G.InputRuntime.RemoteInputWaitMaxUs;
+    counters.FrameLeadThrottleCount = G.InputRuntime.FrameLeadThrottleCount;
+    counters.FrameLeadThrottleUs = G.InputRuntime.FrameLeadThrottleUs;
+    counters.FrameLeadThrottleMaxUs = G.InputRuntime.FrameLeadThrottleMaxUs;
+    counters.LastSentInputFrame = G.InputRuntime.LastSentInputFrame;
+    counters.LastReceivedInputFrame = G.InputRuntime.LastReceivedInputFrame;
+    if (G.InputRuntime.LastSentInputFrame != kNoFrameLimit && G.InputRuntime.LastReceivedInputFrame != kNoFrameLimit)
     {
-        counters.InputLead = static_cast<int>(G.LastSentInputFrame)
-            - static_cast<int>(G.LastReceivedInputFrame);
+        counters.InputLead = static_cast<int>(G.InputRuntime.LastSentInputFrame)
+            - static_cast<int>(G.InputRuntime.LastReceivedInputFrame);
     }
     return counters;
 }
@@ -10887,15 +10822,15 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         {
             const melonDS::u32 inputDelay = static_cast<melonDS::u32>(G.PacketBridge.LocalInputDelay);
             std::lock_guard<std::mutex> lock(G.Mutex);
-            G.LocalInputs.emplace(syncFrame + inputDelay, testInput);
-            auto delayed = G.LocalInputs.find(syncFrame);
-            packetBridgeInput = delayed != G.LocalInputs.end() ? delayed->second : NeutralInput();
+            G.InputRuntime.LocalInputs.emplace(syncFrame + inputDelay, testInput);
+            auto delayed = G.InputRuntime.LocalInputs.find(syncFrame);
+            packetBridgeInput = delayed != G.InputRuntime.LocalInputs.end() ? delayed->second : NeutralInput();
 
             const melonDS::u32 keepFrom = syncFrame > 180 ? syncFrame - 180 : 0;
-            for (auto it = G.LocalInputs.begin(); it != G.LocalInputs.end(); )
+            for (auto it = G.InputRuntime.LocalInputs.begin(); it != G.InputRuntime.LocalInputs.end(); )
             {
                 if (it->first < keepFrom)
-                    it = G.LocalInputs.erase(it);
+                    it = G.InputRuntime.LocalInputs.erase(it);
                 else
                     ++it;
             }
@@ -10947,8 +10882,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         if (netplaySendActive)
         {
             const melonDS::u32 effectiveFrame = syncFrame + delay;
-            G.LocalInputs.emplace(effectiveFrame, localInput);
-            for (const auto& [storedFrame, input] : G.LocalInputs)
+            G.InputRuntime.LocalInputs.emplace(effectiveFrame, localInput);
+            for (const auto& [storedFrame, input] : G.InputRuntime.LocalInputs)
                 SendInputLocked(storedFrame, input);
         }
     }
@@ -10977,7 +10912,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
             PumpNetworkLocked(nds, targetFrame);
             ApplyPendingNSMLPacketsLocked(nds);
             needsInitialRemoteInput =
-                !G.NetplayAnyLockstepStarted && G.RemoteInputs.find(targetFrame) == G.RemoteInputs.end();
+                !G.NetplayAnyLockstepStarted && G.InputRuntime.RemoteInputs.find(targetFrame) == G.InputRuntime.RemoteInputs.end();
         }
 
         if (needsInitialRemoteInput)
@@ -10994,10 +10929,10 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         if (targetFrame > 120)
-            PruneInputHistoryLocked(targetFrame - 120);
+            G.InputRuntime.PruneHistory(targetFrame - 120);
 
-        auto it = G.LocalInputs.find(targetFrame);
-        const InputState delayedLocalInput = it != G.LocalInputs.end() ? it->second : NeutralInput();
+        auto it = G.InputRuntime.LocalInputs.find(targetFrame);
+        const InputState delayedLocalInput = it != G.InputRuntime.LocalInputs.end() ? it->second : NeutralInput();
         if (!G.Connection.LocalWaitsForRemote)
             return ConvertStockXToTouch(delayedLocalInput);
         if (IsPastTestInputRange(targetFrame))
@@ -11015,8 +10950,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if (isLocal)
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
-        auto it = G.LocalInputs.find(targetFrame);
-        return ConvertStockXToTouch(it != G.LocalInputs.end() ? it->second : NeutralInput());
+        auto it = G.InputRuntime.LocalInputs.find(targetFrame);
+        return ConvertStockXToTouch(it != G.InputRuntime.LocalInputs.end() ? it->second : NeutralInput());
     }
 
     return ConvertStockXToTouch(remoteInput);
@@ -11403,14 +11338,14 @@ void TraceRollbackStatsIfNeeded(melonDS::u32 logFrame)
         G.Rollback.MainRAMPageSize,
         G.Rollback.CoreSkipMask,
         G.Rollback.TinyCoreFlags,
-        G.RollbackInputs.Predictions().size(),
-        G.RollbackInputs.PredictionCount(),
-        G.RollbackInputs.PredictionProbeCount(),
-        G.RollbackInputs.MismatchCount(),
+        G.InputRuntime.RollbackInputs.Predictions().size(),
+        G.InputRuntime.RollbackInputs.PredictionCount(),
+        G.InputRuntime.RollbackInputs.PredictionProbeCount(),
+        G.InputRuntime.RollbackInputs.MismatchCount(),
         G.RollbackRestoreCount,
         G.RollbackResimulateCount,
-        G.RollbackInputs.PendingRollbackFrame().value_or(kNoFrameLimit),
-        G.RollbackInputs.PendingRollbackObservedFrame().value_or(kNoFrameLimit));
+        G.InputRuntime.RollbackInputs.PendingRollbackFrame().value_or(kNoFrameLimit),
+        G.InputRuntime.RollbackInputs.PendingRollbackObservedFrame().value_or(kNoFrameLimit));
     std::fflush(stdout);
 }
 
@@ -11673,22 +11608,22 @@ bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
         }
         if (G.Enabled && G.Input.NetplayOnly)
         {
-            const double remoteAvgUs = G.RemoteInputWaitCount > 0
-                ? static_cast<double>(G.RemoteInputWaitUs) / static_cast<double>(G.RemoteInputWaitCount)
+            const double remoteAvgUs = G.InputRuntime.RemoteInputWaitCount > 0
+                ? static_cast<double>(G.InputRuntime.RemoteInputWaitUs) / static_cast<double>(G.InputRuntime.RemoteInputWaitCount)
                 : 0.0;
-            const double throttleAvgUs = G.FrameLeadThrottleCount > 0
-                ? static_cast<double>(G.FrameLeadThrottleUs) / static_cast<double>(G.FrameLeadThrottleCount)
+            const double throttleAvgUs = G.InputRuntime.FrameLeadThrottleCount > 0
+                ? static_cast<double>(G.InputRuntime.FrameLeadThrottleUs) / static_cast<double>(G.InputRuntime.FrameLeadThrottleCount)
                 : 0.0;
             std::printf(
                 "NSMB Test: input wait stats remoteWaitCount=%llu remoteWaitAvgUs=%.1f remoteWaitMaxUs=%llu remoteWaitLoops=%llu throttleCount=%llu throttleAvgUs=%.1f throttleMaxUs=%llu throttleLoops=%llu\n",
-                G.RemoteInputWaitCount,
+                G.InputRuntime.RemoteInputWaitCount,
                 remoteAvgUs,
-                G.RemoteInputWaitMaxUs,
-                G.RemoteInputWaitLoops,
-                G.FrameLeadThrottleCount,
+                G.InputRuntime.RemoteInputWaitMaxUs,
+                G.InputRuntime.RemoteInputWaitLoops,
+                G.InputRuntime.FrameLeadThrottleCount,
                 throttleAvgUs,
-                G.FrameLeadThrottleMaxUs,
-                G.FrameLeadThrottleLoops);
+                G.InputRuntime.FrameLeadThrottleMaxUs,
+                G.InputRuntime.FrameLeadThrottleLoops);
         }
         std::fflush(nullptr);
         if (G.Enabled && G.Bootstrap.QuitGraceMs > 0)

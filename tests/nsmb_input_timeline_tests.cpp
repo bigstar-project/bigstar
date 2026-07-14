@@ -141,6 +141,87 @@ void TestPredictionProbeAndPrune()
     CHECK(timeline.Predictions().count(7) == 1);
 }
 
+void TestRuntimeRemoteStorePrimeAndPrune()
+{
+    using NsmbNetplayPoC::InputTimeline::Runtime;
+    constexpr melonDS::u32 noFrameLimit = 0;
+    Runtime runtime;
+    const auto neutral = Input(0xFFF);
+
+    runtime.PrimeEpoch(100, 4, neutral, noFrameLimit);
+    CHECK(runtime.LocalInputs.size() == 4);
+    CHECK(runtime.RemoteInputs.size() == 4);
+    CHECK(runtime.LocalInputs.count(100) == 1);
+    CHECK(runtime.RemoteInputs.count(103) == 1);
+    CHECK(runtime.LastReceivedInputFrame == 103);
+
+    const auto stored = runtime.StoreRemote(105, Input(0xFFE), 106, false, noFrameLimit);
+    CHECK(stored.PreviousLastReceived == 103);
+    CHECK(runtime.LastReceivedInputFrame == 105);
+    CHECK(runtime.RemoteInputs.at(105).KeyMask == 0xFFE);
+
+    const auto older = runtime.StoreRemote(104, Input(0xFFD), 106, false, noFrameLimit);
+    CHECK(older.PreviousLastReceived == 105);
+    CHECK(runtime.LastReceivedInputFrame == 105);
+
+    runtime.LocalInputs.emplace(90, neutral);
+    runtime.RemoteInputs.emplace(90, neutral);
+    runtime.PruneHistory(100);
+    CHECK(runtime.LocalInputs.count(90) == 0);
+    CHECK(runtime.RemoteInputs.count(90) == 0);
+    CHECK(runtime.LocalInputs.count(100) == 1);
+    CHECK(runtime.RemoteInputs.count(105) == 1);
+    CHECK(runtime.Lead(110, noFrameLimit) == 5);
+}
+
+void TestRuntimeRestartContractAndStatistics()
+{
+    using NsmbNetplayPoC::InputTimeline::Runtime;
+    constexpr melonDS::u32 noFrameLimit = 0;
+    Runtime runtime;
+    const auto neutral = Input(0xFFF);
+    const auto actual = Input(0xFFE);
+
+    runtime.RollbackInputs.Resolve(10, runtime.RemoteInputs, neutral, {});
+    const auto stored = runtime.StoreRemote(10, actual, 12, true, noFrameLimit);
+    CHECK(stored.Confirmation.Mismatch);
+    CHECK(runtime.RollbackInputs.PendingRollbackFrame() == 10);
+    CHECK(runtime.RollbackInputs.MismatchCount() == 1);
+    runtime.LocalInputs.emplace(10, neutral);
+    runtime.LastSentInputFrame = 11;
+    runtime.LastTracedSentInputFrame = 11;
+    runtime.LastInputHealthSummaryFrame = 10;
+    runtime.LastInputFrameLeadResendAt = std::chrono::steady_clock::now();
+    runtime.InputFrameLeadResendCount = 2;
+    runtime.RecordRemoteInputWait(100, 3);
+    runtime.RecordFrameLeadThrottle(200, 5);
+
+    runtime.ResetForRestart(noFrameLimit);
+
+    CHECK(runtime.LocalInputs.empty());
+    CHECK(runtime.RemoteInputs.empty());
+    CHECK(runtime.RollbackInputs.Predictions().empty());
+    CHECK(runtime.RollbackInputs.PendingRollbackFrame() == 10);
+    CHECK(runtime.RollbackInputs.MismatchCount() == 1);
+    CHECK(runtime.LastSentInputFrame == noFrameLimit);
+    CHECK(runtime.LastReceivedInputFrame == noFrameLimit);
+    CHECK(runtime.LastTracedSentInputFrame == noFrameLimit);
+    CHECK(runtime.LastInputHealthSummaryFrame == noFrameLimit);
+    CHECK(runtime.LastInputFrameLeadResendAt == std::chrono::steady_clock::time_point{});
+    CHECK(runtime.InputFrameLeadResendCount == 0);
+    CHECK(runtime.RemoteInputWaitCount == 1);
+    CHECK(runtime.RemoteInputWaitLoops == 3);
+    CHECK(runtime.RemoteInputWaitUs == 100);
+    CHECK(runtime.RemoteInputWaitMaxUs == 100);
+    CHECK(runtime.FrameLeadThrottleCount == 1);
+    CHECK(runtime.FrameLeadThrottleLoops == 5);
+    CHECK(runtime.FrameLeadThrottleUs == 200);
+    CHECK(runtime.FrameLeadThrottleMaxUs == 200);
+
+    const auto afterRestart = runtime.RollbackInputs.Resolve(20, runtime.RemoteInputs, neutral, {});
+    CHECK(SameInput(afterRestart.Input, actual));
+}
+
 void TestButtonAndMaskParsing()
 {
     NsmbNetplayPoC::InputState input;
@@ -213,6 +294,8 @@ int main()
     TestPredictionAndConfirmation();
     TestPredictionMismatchScheduling();
     TestPredictionProbeAndPrune();
+    TestRuntimeRemoteStorePrimeAndPrune();
+    TestRuntimeRestartContractAndStatistics();
     TestButtonAndMaskParsing();
     TestTimelineTargetsTouchAndFirstMatch();
     TestParseErrorsAreClassified();

@@ -3,6 +3,7 @@
 
 #include "NsmbNetplayPoC.h"
 
+#include <chrono>
 #include <istream>
 #include <map>
 #include <optional>
@@ -81,6 +82,60 @@ private:
     melonDS::u32 PredictionCount_ = 0;
     melonDS::u32 PredictionProbeCount_ = 0;
     melonDS::u32 MismatchCount_ = 0;
+};
+
+struct RemoteInputStoreResult
+{
+    melonDS::u32 PreviousLastReceived = 0;
+    ConfirmedInputResult Confirmation;
+};
+
+class Runtime
+{
+public:
+    using InputMap = PredictionRuntime::InputMap;
+
+    void ResetForRestart(melonDS::u32 noFrameLimit);
+    RemoteInputStoreResult StoreRemote(
+        melonDS::u32 frame,
+        const InputState& input,
+        std::optional<melonDS::u32> localFrame,
+        bool confirmPrediction,
+        melonDS::u32 noFrameLimit);
+    void PruneHistory(melonDS::u32 keepFromFrame);
+    void PrimeEpoch(
+        melonDS::u32 startFrame,
+        melonDS::u32 delay,
+        const InputState& neutralInput,
+        melonDS::u32 noFrameLimit);
+    int Lead(melonDS::u32 sendFrame, melonDS::u32 noFrameLimit) const;
+    void RecordRemoteInputWait(unsigned long long elapsedUs, unsigned long long loops);
+    void RecordFrameLeadThrottle(unsigned long long elapsedUs, unsigned long long loops);
+
+    PredictionRuntime RollbackInputs;
+    InputMap LocalInputs;
+    InputMap RemoteInputs;
+    std::chrono::steady_clock::time_point LastInputFrameLeadResendAt;
+    int InputFrameLeadResendCount = 0;
+    melonDS::u32 LastTracedSentInputFrame = 0;
+    melonDS::u32 LastTracedReceivedInputFrame = 0;
+    melonDS::u32 LastReceivedInputFrame = 0;
+    melonDS::u32 LastSentInputFrame = 0;
+    melonDS::u32 LastInputHealthSummaryFrame = 0;
+    melonDS::u32 LastInputHealthRemoteWaitFrame = 0;
+    melonDS::u32 LastInputHealthThrottleFrame = 0;
+    melonDS::u32 LastInputHealthThrottleResolvedFrame = 0;
+    melonDS::u32 LastInputHealthReceiveGapFrame = 0;
+    melonDS::u32 LastInputHealthSendGapFrame = 0;
+    melonDS::u32 LastInputFrameThrottleTraceFrame = 0;
+    unsigned long long RemoteInputWaitCount = 0;
+    unsigned long long RemoteInputWaitLoops = 0;
+    unsigned long long RemoteInputWaitUs = 0;
+    unsigned long long RemoteInputWaitMaxUs = 0;
+    unsigned long long FrameLeadThrottleCount = 0;
+    unsigned long long FrameLeadThrottleLoops = 0;
+    unsigned long long FrameLeadThrottleUs = 0;
+    unsigned long long FrameLeadThrottleMaxUs = 0;
 };
 
 enum class ParseErrorKind

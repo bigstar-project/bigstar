@@ -208,6 +208,93 @@ melonDS::u32 PredictionRuntime::MismatchCount() const
     return MismatchCount_;
 }
 
+void Runtime::ResetForRestart(melonDS::u32 noFrameLimit)
+{
+    LocalInputs.clear();
+    RemoteInputs.clear();
+    RollbackInputs.ClearPredictions();
+    LastReceivedInputFrame = noFrameLimit;
+    LastSentInputFrame = noFrameLimit;
+    LastTracedSentInputFrame = noFrameLimit;
+    LastTracedReceivedInputFrame = noFrameLimit;
+    LastInputHealthSummaryFrame = noFrameLimit;
+    LastInputHealthRemoteWaitFrame = noFrameLimit;
+    LastInputHealthThrottleFrame = noFrameLimit;
+    LastInputHealthThrottleResolvedFrame = noFrameLimit;
+    LastInputHealthReceiveGapFrame = noFrameLimit;
+    LastInputHealthSendGapFrame = noFrameLimit;
+    LastInputFrameThrottleTraceFrame = noFrameLimit;
+    LastInputFrameLeadResendAt = {};
+    InputFrameLeadResendCount = 0;
+}
+
+RemoteInputStoreResult Runtime::StoreRemote(
+    melonDS::u32 frame,
+    const InputState& input,
+    std::optional<melonDS::u32> localFrame,
+    bool confirmPrediction,
+    melonDS::u32 noFrameLimit)
+{
+    RemoteInputStoreResult result;
+    result.PreviousLastReceived = LastReceivedInputFrame;
+    if (confirmPrediction)
+        result.Confirmation = RollbackInputs.Confirm(frame, input, localFrame);
+    RemoteInputs[frame] = input;
+    if (LastReceivedInputFrame == noFrameLimit || LastReceivedInputFrame < frame)
+        LastReceivedInputFrame = frame;
+    return result;
+}
+
+void Runtime::PruneHistory(melonDS::u32 keepFromFrame)
+{
+    LocalInputs.erase(LocalInputs.begin(), LocalInputs.lower_bound(keepFromFrame));
+    RemoteInputs.erase(RemoteInputs.begin(), RemoteInputs.lower_bound(keepFromFrame));
+}
+
+void Runtime::PrimeEpoch(
+    melonDS::u32 startFrame,
+    melonDS::u32 delay,
+    const InputState& neutralInput,
+    melonDS::u32 noFrameLimit)
+{
+    PruneHistory(startFrame);
+    const melonDS::u32 firstInputFrame = startFrame + delay;
+    for (melonDS::u32 frame = startFrame; frame < firstInputFrame; frame++)
+    {
+        LocalInputs.emplace(frame, neutralInput);
+        RemoteInputs.emplace(frame, neutralInput);
+    }
+    if (delay == 0)
+        return;
+
+    const melonDS::u32 primedThrough = firstInputFrame - 1;
+    if (LastReceivedInputFrame == noFrameLimit || LastReceivedInputFrame < primedThrough)
+        LastReceivedInputFrame = primedThrough;
+}
+
+int Runtime::Lead(melonDS::u32 sendFrame, melonDS::u32 noFrameLimit) const
+{
+    if (LastReceivedInputFrame == noFrameLimit)
+        return 0;
+    return static_cast<int>(sendFrame) - static_cast<int>(LastReceivedInputFrame);
+}
+
+void Runtime::RecordRemoteInputWait(unsigned long long elapsedUs, unsigned long long loops)
+{
+    RemoteInputWaitCount++;
+    RemoteInputWaitLoops += loops;
+    RemoteInputWaitUs += elapsedUs;
+    RemoteInputWaitMaxUs = std::max(RemoteInputWaitMaxUs, elapsedUs);
+}
+
+void Runtime::RecordFrameLeadThrottle(unsigned long long elapsedUs, unsigned long long loops)
+{
+    FrameLeadThrottleCount++;
+    FrameLeadThrottleLoops += loops;
+    FrameLeadThrottleUs += elapsedUs;
+    FrameLeadThrottleMaxUs = std::max(FrameLeadThrottleMaxUs, elapsedUs);
+}
+
 bool ParseInputSpec(const std::string& spec, InputState& input)
 {
     input = {};
