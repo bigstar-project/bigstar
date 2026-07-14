@@ -28,6 +28,7 @@ set(SOURCES_QT_SDL
     NsmbPacketClassifier.cpp
     NsmbPacketClassifier.h
     NsmbNetplayWire.h
+    NsmbGameState.cpp
     NsmbGameState.h
     NsmbAiObservation.cpp
     NsmbAiObservation.h
@@ -252,6 +253,23 @@ if (BUILD_TESTING)
         AUTORCC OFF
     )
     add_test(NAME nsmb-packet-classifier COMMAND nsmb_packet_classifier_tests)
+
+    add_executable(nsmb_game_state_tests
+        NsmbGameState.cpp
+        NsmbGameState.h
+        NsmbNetplayWire.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_game_state_tests.cpp
+    )
+    target_include_directories(nsmb_game_state_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_game_state_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-game-state COMMAND nsmb_game_state_tests)
 endif()
 
 add_subdirectory("../../net"

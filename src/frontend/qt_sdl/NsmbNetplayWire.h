@@ -7,6 +7,8 @@
 
 namespace NsmbNetplayPoC::WireProtocol {
 
+constexpr melonDS::u32 kMagic = 0x4C4D534E; // "NSML", little endian
+constexpr melonDS::u32 kVersion = 1;
 constexpr melonDS::u32 kWireKindState = 0x54415453;  // "STAT", little endian
 constexpr melonDS::u32 kWireKindPacket = 0x4B434150; // "PACK", little endian
 constexpr melonDS::u32 kWireKindPlayerState =

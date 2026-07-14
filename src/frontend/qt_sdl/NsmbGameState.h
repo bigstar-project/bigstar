@@ -1,6 +1,7 @@
 #ifndef NSMBGAMESTATE_H
 #define NSMBGAMESTATE_H
 
+#include "NsmbNetplayWire.h"
 #include "types.h"
 
 namespace NsmbNetplayPoC::GameStateModel {
@@ -587,6 +588,20 @@ struct GameStateSyncHashes {
   melonDS::u64 WifiCandidate = 0;
   melonDS::u64 RenderCandidate = 0;
 };
+
+struct DecodedGameState {
+  melonDS::u32 Frame = 0;
+  melonDS::u32 Instance = 0;
+  GameStateSample Sample;
+  GameStateSyncHashes Hashes;
+};
+
+WireProtocol::WireGameState
+EncodeWireGameState(melonDS::u32 frame, melonDS::u32 instance,
+                    const GameStateSample &sample,
+                    const GameStateSyncHashes &hashes);
+bool DecodeWireGameState(const WireProtocol::WireGameState &packet,
+                         DecodedGameState &decoded);
 
 } // namespace NsmbNetplayPoC::GameStateModel
 
