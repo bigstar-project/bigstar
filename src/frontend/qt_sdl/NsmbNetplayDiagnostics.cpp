@@ -113,6 +113,10 @@ struct Runtime::Impl {
   std::atomic<bool> FrameHeartbeatStop{false};
   bool FrameHeartbeatThreadStarted = false;
   std::thread FrameHeartbeatThread;
+  std::mutex HashLogMutex;
+  std::ofstream HashLog;
+  bool ScreenHashEnabled = false;
+  std::array<melonDS::u64, 16> LastHashFrame{};
   std::atomic<const char *> Phase{"startup"};
   std::atomic<const char *> Event{"startup"};
   std::atomic<std::uint64_t> PhaseUnixMs{0};
@@ -354,6 +358,58 @@ bool Runtime::PublishFrameHeartbeat(int instanceID, melonDS::u32 frame,
   return true;
 }
 
+bool Runtime::ConfigureHashLog(const std::string &path,
+                               bool screenHashEnabled) {
+  std::lock_guard<std::mutex> lock(State->HashLogMutex);
+  if (State->HashLog.is_open())
+    State->HashLog.close();
+  State->HashLog.clear();
+  State->ScreenHashEnabled = screenHashEnabled;
+  State->LastHashFrame.fill(0);
+  if (path.empty())
+    return true;
+
+  State->HashLog.open(path, std::ios::out | std::ios::trunc);
+  if (!State->HashLog)
+    return false;
+  State->HashLog << (screenHashEnabled
+                         ? "instance,frame,hash,screenHash\n"
+                         : "instance,frame,hash\n");
+  return true;
+}
+
+bool Runtime::RecordFrameHash(int instanceID, melonDS::u32 frame,
+                              melonDS::u64 stateHash,
+                              melonDS::u64 screenHash) {
+  std::lock_guard<std::mutex> lock(State->HashLogMutex);
+  if (instanceID < 0 ||
+      instanceID >= static_cast<int>(State->LastHashFrame.size()) ||
+      State->LastHashFrame[instanceID] == frame) {
+    return false;
+  }
+  State->LastHashFrame[instanceID] = frame;
+
+  if (State->ScreenHashEnabled) {
+    std::printf("NSMB PoC: inst=%d frame=%u hash=%016llX screen=%016llX\n",
+                instanceID, frame,
+                static_cast<unsigned long long>(stateHash),
+                static_cast<unsigned long long>(screenHash));
+  } else {
+    std::printf("NSMB PoC: inst=%d frame=%u hash=%016llX\n", instanceID,
+                frame, static_cast<unsigned long long>(stateHash));
+  }
+
+  if (State->HashLog) {
+    State->HashLog << instanceID << ',' << frame << ',' << std::hex
+                   << stateHash;
+    if (State->ScreenHashEnabled)
+      State->HashLog << ',' << screenHash;
+    State->HashLog << std::dec << '\n';
+    State->HashLog.flush();
+  }
+  return true;
+}
+
 void Runtime::StartHangDiagnostics(const Config::DiagnosticsConfig &config,
                                    bool host) {
   State->Config = config;
@@ -374,6 +430,12 @@ void Runtime::Stop() {
   }
 
   State->StopFrameHeartbeat();
+
+  {
+    std::lock_guard<std::mutex> lock(State->HashLogMutex);
+    if (State->HashLog.is_open())
+      State->HashLog.close();
+  }
 
   std::lock_guard<std::mutex> lock(State->LogMutex);
   if (State->WatchdogLog)

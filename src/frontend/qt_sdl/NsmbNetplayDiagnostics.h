@@ -20,6 +20,9 @@ public:
 
   bool ConfigureFrameHeartbeat(int interval, const std::string &path);
   bool PublishFrameHeartbeat(int instanceID, melonDS::u32 frame, bool active);
+  bool ConfigureHashLog(const std::string &path, bool screenHashEnabled);
+  bool RecordFrameHash(int instanceID, melonDS::u32 frame,
+                       melonDS::u64 stateHash, melonDS::u64 screenHash);
   void StartHangDiagnostics(const Config::DiagnosticsConfig &config, bool host);
   void Stop();
 

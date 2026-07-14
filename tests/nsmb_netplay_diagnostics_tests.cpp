@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <thread>
 #include <vector>
@@ -27,6 +28,12 @@ std::vector<melonDS::u32> ReadFrames(const std::filesystem::path &path) {
   while (input >> frame)
     frames.push_back(frame);
   return frames;
+}
+
+std::string ReadText(const std::filesystem::path &path) {
+  std::ifstream input(path);
+  return {std::istreambuf_iterator<char>(input),
+          std::istreambuf_iterator<char>()};
 }
 
 void TestFrameHeartbeatFileContract() {
@@ -72,11 +79,49 @@ void TestConsoleOnlyHeartbeatContract() {
   CHECK(!runtime.PublishFrameHeartbeat(0, 3, true));
 }
 
+void TestHashLogContract() {
+  const std::filesystem::path basicPath =
+      std::filesystem::temp_directory_path() /
+      "nsmb_netplay_diagnostics_hash_test.csv";
+  const std::filesystem::path screenPath =
+      std::filesystem::temp_directory_path() /
+      "nsmb_netplay_diagnostics_screen_hash_test.csv";
+  std::error_code error;
+  std::filesystem::remove(basicPath, error);
+  std::filesystem::remove(screenPath, error);
+
+  {
+    NsmbNetplayPoC::Diagnostics::Runtime runtime;
+    CHECK(runtime.ConfigureHashLog(basicPath.string(), false));
+    CHECK(!runtime.RecordFrameHash(-1, 60, 0x1, 0));
+    CHECK(!runtime.RecordFrameHash(0, 0, 0x1, 0));
+    CHECK(runtime.RecordFrameHash(0, 60, 0x1234, 0));
+    CHECK(!runtime.RecordFrameHash(0, 60, 0x9999, 0));
+    CHECK(runtime.RecordFrameHash(1, 60, 0xabcd, 0));
+    runtime.Stop();
+  }
+  CHECK(ReadText(basicPath) ==
+        "instance,frame,hash\n0,60,1234\n1,60,abcd\n");
+
+  {
+    NsmbNetplayPoC::Diagnostics::Runtime runtime;
+    CHECK(runtime.ConfigureHashLog(screenPath.string(), true));
+    CHECK(runtime.RecordFrameHash(0, 1, 0x1a, 0x2b));
+    runtime.Stop();
+  }
+  CHECK(ReadText(screenPath) ==
+        "instance,frame,hash,screenHash\n0,1,1a,2b\n");
+
+  std::filesystem::remove(basicPath, error);
+  std::filesystem::remove(screenPath, error);
+}
+
 } // namespace
 
 int main() {
   TestFrameHeartbeatFileContract();
   TestConsoleOnlyHeartbeatContract();
+  TestHashLogContract();
   if (Failures != 0) {
     std::printf("nsmb_netplay_diagnostics_tests: %d failure(s)\n", Failures);
     return 1;

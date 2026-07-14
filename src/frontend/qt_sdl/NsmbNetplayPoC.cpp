@@ -567,7 +567,6 @@ struct State
     std::string InputScriptPath;
     Config::RuntimePatchConfig RuntimePatch;
     Config::HarnessConfig Harness;
-    std::ofstream HashLog;
     GameStateTraceWriter GameStateTrace;
     std::ofstream DiagnosticEvents;
     std::ofstream AIPlayLog;
@@ -642,7 +641,6 @@ struct State
     melonDS::u32 LastPacketBridgeForcedTickFrame[16] {};
     std::vector<std::pair<melonDS::u32, melonDS::u32>> RamDumpRanges;
     std::vector<std::pair<melonDS::u32, melonDS::u32>> MemPatchRanges;
-    melonDS::u64 LastLoggedHashFrame[16] {};
     melonDS::u32 TestFrameCount[16] {};
     std::condition_variable InputCond;
     bool NetworkPumpThreadStarted = false;
@@ -7899,20 +7897,11 @@ void InitFromEnvironment()
             G.TestEnabled = false;
         }
 
-        if (!G.Diagnostics.HashLogPath.empty())
+        if (!G.DiagnosticsRuntime.ConfigureHashLog(
+                G.Diagnostics.HashLogPath,
+                G.Diagnostics.ScreenHashEnabled))
         {
-            G.HashLog.open(G.Diagnostics.HashLogPath, std::ios::out | std::ios::trunc);
-            if (!G.HashLog)
-            {
-                std::printf("NSMB Test: failed to open hash log: %s\n", G.Diagnostics.HashLogPath.c_str());
-            }
-            else
-            {
-                if (G.Diagnostics.ScreenHashEnabled)
-                    G.HashLog << "instance,frame,hash,screenHash\n";
-                else
-                    G.HashLog << "instance,frame,hash\n";
-            }
+            std::printf("NSMB Test: failed to open hash log: %s\n", G.Diagnostics.HashLogPath.c_str());
         }
 
         std::printf("NSMB Test: enabled tUnixMs=%llu frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d playerStateSync=%d playerStateApply=%d playerStateGlobals=%d playerStateInterval=%d playerStatePredict=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
@@ -9220,35 +9209,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     const melonDS::u64 hash = HashNDS(nds);
     const melonDS::u64 screenHash = G.Diagnostics.ScreenHashEnabled ? HashFramebuffers(nds) : 0;
-    if (G.LastLoggedHashFrame[instanceID] == logFrame) return;
-    G.LastLoggedHashFrame[instanceID] = logFrame;
-
-    if (G.Diagnostics.ScreenHashEnabled)
-    {
-        std::printf("NSMB PoC: inst=%d frame=%u hash=%016llX screen=%016llX\n",
-            instanceID,
-            logFrame,
-            static_cast<unsigned long long>(hash),
-            static_cast<unsigned long long>(screenHash));
-    }
-    else
-    {
-        std::printf("NSMB PoC: inst=%d frame=%u hash=%016llX\n",
-            instanceID,
-            logFrame,
-            static_cast<unsigned long long>(hash));
-    }
-
-    std::lock_guard<std::mutex> lock(G.Mutex);
-    if (G.HashLog)
-    {
-        G.HashLog << instanceID << ',' << logFrame << ','
-                  << std::hex << hash;
-        if (G.Diagnostics.ScreenHashEnabled)
-            G.HashLog << ',' << screenHash;
-        G.HashLog << std::dec << '\n';
-        G.HashLog.flush();
-    }
+    G.DiagnosticsRuntime.RecordFrameHash(instanceID, logFrame, hash, screenHash);
 }
 
 bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
@@ -9361,9 +9322,6 @@ void Shutdown()
     std::lock_guard<std::mutex> lock(G.Mutex);
 
     G.Transport.Shutdown();
-
-    if (G.HashLog)
-        G.HashLog.close();
 
     G.GameStateTrace.Close();
     if (G.AIPlayLog)
