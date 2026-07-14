@@ -1,5 +1,9 @@
 import { commands } from './bindings';
-import { maxMatchHistoryRecords } from './matchHistory';
+import {
+  previewHistoryDashboard,
+  previewHistoryOpponents,
+  queryPreviewMatchHistory,
+} from './matchHistory';
 import {
   previewDefaults,
   previewMatchHistory,
@@ -16,6 +20,8 @@ import type {
   LaunchRequest,
   LaunchResponse,
   LogArchiveResponse,
+  MatchHistoryFilter,
+  MatchHistoryPageRequest,
   MatchHistoryRecord,
   OpenAiReplayLogRequest,
   OpenAiReplayLogResponse,
@@ -30,6 +36,7 @@ import type {
   SaveDetailedLogsRequest,
   SaveDiagnosticEventsRequest,
   SaveNewRoomNotificationsRequest,
+  SavePerformanceLogsRequest,
   SavePlayerNameRequest,
   SaveRomPathsRequest,
   SessionStatus,
@@ -254,6 +261,15 @@ export function saveAiPlayLogEnabled(request: SaveAiPlayLogRequest) {
   return unwrapCommand(commands.saveAiPlayLogEnabled(request));
 }
 
+export function savePerformanceLogsEnabled(
+  request: SavePerformanceLogsRequest,
+) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(null);
+  }
+  return unwrapCommand(commands.savePerformanceLogsEnabled(request));
+}
+
 export function saveNewRoomNotificationsEnabled(
   request: SaveNewRoomNotificationsRequest,
 ) {
@@ -373,33 +389,67 @@ export function getSessionStatus() {
   return unwrapCommand(commands.sessionStatus());
 }
 
-export function loadMatchHistory() {
-  if (!isTauriRuntime()) {
-    try {
-      const raw = window.localStorage.getItem(previewMatchHistoryKey);
-      const stored = raw ? (JSON.parse(raw) as MatchHistoryRecord[]) : [];
-      if (stored.length > 0 || previewScenario() !== 'ready') {
-        return Promise.resolve<MatchHistoryRecord[]>(stored);
-      }
-      return Promise.resolve<MatchHistoryRecord[]>(previewMatchHistory());
-    } catch {
-      return Promise.resolve<MatchHistoryRecord[]>(
-        previewScenario() === 'ready' ? previewMatchHistory() : [],
-      );
-    }
+function storedPreviewMatchHistory() {
+  try {
+    const raw = window.localStorage.getItem(previewMatchHistoryKey);
+    if (raw) return JSON.parse(raw) as MatchHistoryRecord[];
+  } catch {
+    // 壊れたプレビューデータはサンプル履歴へフォールバックする。
   }
-  return unwrapCommand(commands.loadMatchHistory());
+  return previewScenario() === 'ready' ? previewMatchHistory() : [];
 }
 
-export function saveMatchHistory(matches: MatchHistoryRecord[]) {
+function storePreviewMatchHistory(matches: MatchHistoryRecord[]) {
+  window.localStorage.setItem(previewMatchHistoryKey, JSON.stringify(matches));
+}
+
+export function upsertMatchHistory(record: MatchHistoryRecord) {
   if (!isTauriRuntime()) {
-    window.localStorage.setItem(
-      previewMatchHistoryKey,
-      JSON.stringify(matches.slice(0, maxMatchHistoryRecords)),
+    const stored = storedPreviewMatchHistory();
+    storePreviewMatchHistory([
+      record,
+      ...stored.filter((match) => match.id !== record.id),
+    ]);
+    return Promise.resolve(null);
+  }
+  return unwrapCommand(commands.upsertMatchHistory(record));
+}
+
+export function deleteMatchHistory(matchId: string) {
+  if (!isTauriRuntime()) {
+    storePreviewMatchHistory(
+      storedPreviewMatchHistory().filter((match) => match.id !== matchId),
     );
     return Promise.resolve(null);
   }
-  return unwrapCommand(commands.saveMatchHistory(matches));
+  return unwrapCommand(commands.deleteMatchHistory(matchId));
+}
+
+export function queryMatchHistory(request: MatchHistoryPageRequest) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(
+      queryPreviewMatchHistory(storedPreviewMatchHistory(), request),
+    );
+  }
+  return unwrapCommand(commands.queryMatchHistory(request));
+}
+
+export function loadMatchHistoryDashboard(filter: MatchHistoryFilter) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(
+      previewHistoryDashboard(storedPreviewMatchHistory(), filter),
+    );
+  }
+  return unwrapCommand(commands.loadMatchHistoryDashboard(filter));
+}
+
+export function loadMatchHistoryOpponents() {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(
+      previewHistoryOpponents(storedPreviewMatchHistory()),
+    );
+  }
+  return unwrapCommand(commands.loadMatchHistoryOpponents());
 }
 
 export function openLogDir(path: string) {

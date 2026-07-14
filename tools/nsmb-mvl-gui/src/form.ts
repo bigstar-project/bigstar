@@ -29,6 +29,7 @@ export const initialForm: FormState = {
   diagnosticEventsEnabled: false,
   detailedLogsEnabled: false,
   aiPlayLogEnabled: false,
+  performanceLogsEnabled: false,
   newRoomNotificationsEnabled: true,
 };
 

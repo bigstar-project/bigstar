@@ -305,10 +305,6 @@ fn launcher_settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir(app)?.join("launcher-settings.json"))
 }
 
-fn match_history_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app_data_dir(app)?.join("match-history.json"))
-}
-
 pub(crate) fn load_launcher_settings(app: &AppHandle) -> Result<LauncherSettings, String> {
     let path = launcher_settings_path(app)?;
     if !path.exists() {
@@ -332,7 +328,6 @@ pub(crate) fn save_launcher_settings(
 }
 
 const CURRENT_MATCH_HISTORY_SCHEMA_VERSION: u32 = 2;
-const MAX_MATCH_HISTORY: usize = 1000;
 
 #[derive(serde::Deserialize)]
 struct MatchHistoryDocumentHeader {
@@ -348,29 +343,6 @@ struct MatchHistoryDocumentV1 {
 struct MatchHistoryDocumentV2 {
     schema_version: u32,
     matches: Vec<MatchHistoryRecord>,
-}
-
-pub(crate) fn load_match_history(app: &AppHandle) -> Result<Vec<MatchHistoryRecord>, String> {
-    let path = match_history_path(app)?;
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let content = fs::read_to_string(&path)
-        .map_err(|err| format!("match history を読み込めません: {err}"))?;
-    let (mut matches, migrated) = load_match_history_document_content(&content)?;
-    matches.truncate(MAX_MATCH_HISTORY);
-    if migrated {
-        write_match_history_document(&path, &matches)?;
-    }
-    Ok(matches)
-}
-
-pub(crate) fn save_match_history(
-    app: &AppHandle,
-    matches: &[MatchHistoryRecord],
-) -> Result<(), String> {
-    let path = match_history_path(app)?;
-    write_match_history_document(&path, matches)
 }
 
 pub(crate) fn load_match_history_document_content(
@@ -395,17 +367,6 @@ pub(crate) fn load_match_history_document_content(
             "未対応のmatch history schema_versionです: {version}"
         )),
     }
-}
-
-fn write_match_history_document(path: &Path, matches: &[MatchHistoryRecord]) -> Result<(), String> {
-    let document = MatchHistoryDocumentV2 {
-        schema_version: CURRENT_MATCH_HISTORY_SCHEMA_VERSION,
-        matches: matches.iter().take(MAX_MATCH_HISTORY).cloned().collect(),
-    };
-    let content = serde_json::to_string_pretty(&document)
-        .map_err(|err| format!("match history をJSON化できません: {err}"))?;
-    fs::write(path, format!("{content}\n"))
-        .map_err(|err| format!("match history を保存できません: {err}"))
 }
 
 fn migrate_match_history_v1_to_v2(matches: &mut [MatchHistoryRecord]) {

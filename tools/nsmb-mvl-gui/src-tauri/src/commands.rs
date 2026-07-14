@@ -10,18 +10,25 @@ use std::os::windows::process::CommandExt;
 
 use crate::config::{default_signal_url, DEFAULT_PORT, DEFAULT_ROOM_CODE};
 use crate::crash_report::create_user_log_archive;
+use crate::history_store::{
+    delete_match_history as delete_match_history_db,
+    load_match_history_dashboard as load_match_history_dashboard_db,
+    load_match_history_opponents as load_match_history_opponents_db,
+    query_match_history as query_match_history_db, upsert_match_history as upsert_match_history_db,
+};
 use crate::models::{
     CleanupDetailedLogsResponse, Defaults, GenerateRomRequest, GenerateRomResponse, LaunchRequest,
-    LaunchResponse, LogArchiveResponse, MatchHistoryRecord, SaveAiPlayLogRequest,
-    SaveDetailedLogsRequest, SaveDiagnosticEventsRequest, SaveNewRoomNotificationsRequest,
-    SavePlayerNameRequest, SaveRomPathsRequest, SessionStatus, ShowNewRoomNotificationRequest,
-    UploadLogArchiveRequest, UploadLogArchiveResponse,
+    LaunchResponse, LogArchiveResponse, MatchHistoryDashboard, MatchHistoryFilter,
+    MatchHistoryOpponent, MatchHistoryPage, MatchHistoryPageRequest, MatchHistoryRecord,
+    SaveAiPlayLogRequest, SaveDetailedLogsRequest, SaveDiagnosticEventsRequest,
+    SaveNewRoomNotificationsRequest, SavePerformanceLogsRequest, SavePlayerNameRequest,
+    SaveRomPathsRequest, SessionStatus, ShowNewRoomNotificationRequest, UploadLogArchiveRequest,
+    UploadLogArchiveResponse,
 };
 use crate::paths::{
     absolutize_existing, allowed_log_dir, app_data_dir, create_log_dir, find_bridge_binary,
     find_input_script, find_melonds_binary, fixed_generated_rom_paths, load_launcher_settings,
-    load_match_history as load_match_history_file, open_allowed_log_dir, save_launcher_settings,
-    save_match_history as save_match_history_file,
+    open_allowed_log_dir, save_launcher_settings,
 };
 use crate::processes::{
     remove_inherited_melonds_env_keys, session_status_inner, start_match_resolved,
@@ -39,6 +46,7 @@ const DETAILED_LOG_FILES: &[&str] = &[
     "melonds-events.jsonl",
     "melonds-game-state.csv",
     "melonds-hang.dmp",
+    "melonds-performance.jsonl",
     "melonds-phase-events.jsonl",
     "melonds.stdout.txt",
     "melonds-watchdog.jsonl",
@@ -74,6 +82,7 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
         diagnostic_events_enabled: saved.diagnostic_events_enabled,
         detailed_logs_enabled: saved.detailed_logs_enabled,
         ai_play_log_enabled: saved.ai_play_log_enabled,
+        performance_logs_enabled: saved.performance_logs_enabled,
         new_room_notifications_enabled: saved.new_room_notifications_enabled,
         log_archive_upload_token: std::env::var("NSMB_MVL_LOG_UPLOAD_TOKEN")
             .unwrap_or_default()
@@ -120,6 +129,17 @@ pub(crate) fn save_ai_play_log_enabled(
 ) -> Result<(), String> {
     let mut settings = load_launcher_settings(&app)?;
     settings.ai_play_log_enabled = request.enabled;
+    save_launcher_settings(&app, &settings)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn save_performance_logs_enabled(
+    app: AppHandle,
+    request: SavePerformanceLogsRequest,
+) -> Result<(), String> {
+    let mut settings = load_launcher_settings(&app)?;
+    settings.performance_logs_enabled = request.enabled;
     save_launcher_settings(&app, &settings)
 }
 
@@ -274,17 +294,43 @@ pub(crate) async fn upload_log_archive(
 
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn load_match_history(app: AppHandle) -> Result<Vec<MatchHistoryRecord>, String> {
-    load_match_history_file(&app)
+pub(crate) fn upsert_match_history(
+    app: AppHandle,
+    record: MatchHistoryRecord,
+) -> Result<(), String> {
+    upsert_match_history_db(&app, &record)
 }
 
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn save_match_history(
+pub(crate) fn delete_match_history(app: AppHandle, match_id: String) -> Result<(), String> {
+    delete_match_history_db(&app, &match_id)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn query_match_history(
     app: AppHandle,
-    matches: Vec<MatchHistoryRecord>,
-) -> Result<(), String> {
-    save_match_history_file(&app, &matches)
+    request: MatchHistoryPageRequest,
+) -> Result<MatchHistoryPage, String> {
+    query_match_history_db(&app, &request)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn load_match_history_dashboard(
+    app: AppHandle,
+    filter: MatchHistoryFilter,
+) -> Result<MatchHistoryDashboard, String> {
+    load_match_history_dashboard_db(&app, &filter)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn load_match_history_opponents(
+    app: AppHandle,
+) -> Result<Vec<MatchHistoryOpponent>, String> {
+    load_match_history_opponents_db(&app)
 }
 
 #[tauri::command]

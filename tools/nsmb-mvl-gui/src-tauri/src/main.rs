@@ -4,6 +4,7 @@ mod ai_workbench;
 mod commands;
 mod config;
 mod crash_report;
+mod history_store;
 mod models;
 mod paths;
 mod preflight;
@@ -49,6 +50,7 @@ fn specta_builder() -> SpectaBuilder<tauri::Wry> {
         commands::save_diagnostic_events_enabled,
         commands::save_detailed_logs_enabled,
         commands::save_ai_play_log_enabled,
+        commands::save_performance_logs_enabled,
         commands::save_new_room_notifications_enabled,
         commands::show_new_room_notification,
         commands::save_player_name,
@@ -59,8 +61,11 @@ fn specta_builder() -> SpectaBuilder<tauri::Wry> {
         commands::start_match,
         commands::stop_match,
         commands::session_status,
-        commands::load_match_history,
-        commands::save_match_history,
+        commands::upsert_match_history,
+        commands::delete_match_history,
+        commands::query_match_history,
+        commands::load_match_history_dashboard,
+        commands::load_match_history_opponents,
         commands::open_log_dir,
         commands::create_log_archive,
         commands::cleanup_detailed_logs,

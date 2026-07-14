@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { NuqsAdapter } from 'nuqs/adapters/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
@@ -71,7 +72,7 @@ const mocks = vi.hoisted(() => {
         melon_pid: 1001,
       }),
     ),
-    saveMatchHistoryMock: vi.fn(async () => null),
+    upsertMatchHistoryMock: vi.fn(async () => null),
     hostProfileId,
   };
 });
@@ -134,6 +135,7 @@ vi.mock('../tauriClient', () => ({
     diagnostic_events_enabled: false,
     detailed_logs_enabled: false,
     ai_play_log_enabled: false,
+    performance_logs_enabled: false,
     host_rom_path: 'C:\\roms\\host.nds',
     input_config_opened_once: true,
     log_archive_upload_token: '',
@@ -156,7 +158,7 @@ vi.mock('../tauriClient', () => ({
     webrtc: null,
   })),
   getStartupEnabled: vi.fn(async () => false),
-  loadMatchHistory: vi.fn(async () => []),
+  deleteMatchHistory: vi.fn(async () => null),
   cleanupDetailedLogs: vi.fn(async () => ({
     deleted_dirs: 1,
     deleted_files: 3,
@@ -177,7 +179,7 @@ vi.mock('../tauriClient', () => ({
   saveDiagnosticEventsEnabled: vi.fn(async () => null),
   saveDetailedLogsEnabled: vi.fn(async () => null),
   saveAiPlayLogEnabled: vi.fn(async () => null),
-  saveMatchHistory: mocks.saveMatchHistoryMock,
+  savePerformanceLogsEnabled: vi.fn(async () => null),
   saveNewRoomNotificationsEnabled: vi.fn(async () => null),
   savePlayerName: vi.fn(async () => null),
   saveRomPaths: vi.fn(async () => null),
@@ -185,6 +187,7 @@ vi.mock('../tauriClient', () => ({
   setStartupEnabled: vi.fn(async () => null),
   startMatch: mocks.startMatchMock,
   stopMatch: vi.fn(async () => {}),
+  upsertMatchHistory: mocks.upsertMatchHistoryMock,
   uploadLogArchive: vi.fn(async () => ({
     archive_path: 'C:\\logs\\run1\\nsmb-mvl-logs.zip',
     key: 'log-archives/test/nsmb-mvl-logs.zip',
@@ -196,7 +199,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.hostRoomEventHandlers = [];
   mocks.lobbyHandlers = [];
-  window.location.hash = '';
+  window.history.replaceState(null, '', window.location.pathname);
 });
 
 afterEach(() => {
@@ -234,7 +237,9 @@ function TestProviders({ children }: { children: ReactNode }) {
     },
   });
   return (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      <NuqsAdapter>{children}</NuqsAdapter>
+    </QueryClientProvider>
   );
 }
 
@@ -258,6 +263,13 @@ function LauncherHarness() {
       <output aria-label="room-count">
         {launcher.matchmakingRooms.rooms.length}
       </output>
+      <output aria-label="active-view">{launcher.activeView}</output>
+      <button type="button" onClick={() => launcher.changeView('history')}>
+        history
+      </button>
+      <button type="button" onClick={() => launcher.changeView('settings')}>
+        settings
+      </button>
       <button
         type="button"
         onClick={() => void launcher.actions.refreshRooms()}
@@ -269,6 +281,33 @@ function LauncherHarness() {
 }
 
 describe('useLauncherController', () => {
+  test('画面遷移を履歴に追加してpopstateで復元する', async () => {
+    const pushState = vi.spyOn(window.history, 'pushState');
+    const screen = await render(
+      <TestProviders>
+        <LauncherHarness />
+      </TestProviders>,
+    );
+
+    await screen.getByRole('button', { name: 'settings' }).click();
+    await vi.waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get('view')).toBe(
+        'settings',
+      ),
+    );
+    expect(pushState).toHaveBeenCalled();
+    await expect
+      .element(screen.getByLabelText('active-view'))
+      .toHaveTextContent('settings');
+
+    window.history.replaceState(null, '', '?view=battle');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    await expect
+      .element(screen.getByLabelText('active-view'))
+      .toHaveTextContent('battle');
+    pushState.mockRestore();
+  });
+
   test('hosted room auto launch clears matchmaking busy after startMatch resolves', async () => {
     let resolveStartMatch: (response: LaunchResponse) => void = () => {};
     mocks.startMatchMock.mockImplementationOnce(
@@ -340,7 +379,7 @@ describe('useLauncherController', () => {
   });
 
   test('lobby websocket snapshot updates rooms and notifies only rooms added after the initial snapshot', async () => {
-    window.location.hash = '#settings';
+    window.history.replaceState(null, '', '?view=settings');
     const screen = await render(
       <TestProviders>
         <LauncherHarness />
@@ -431,6 +470,7 @@ describe('useLauncherController', () => {
       diagnostic_events_enabled: false,
       detailed_logs_enabled: false,
       ai_play_log_enabled: false,
+      performance_logs_enabled: false,
       host_rom_path: 'C:\\roms\\host.nds',
       input_config_opened_once: true,
       log_archive_upload_token: '',

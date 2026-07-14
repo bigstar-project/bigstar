@@ -114,8 +114,8 @@ export default defineConfig({
             },
             panel: {
               value: {
-                _light: "{colors.gray.a3}",
-                _dark: "{colors.gray.a3}"
+                _light: "#0e0e199a",
+                _dark: "#40434800"
               }
             },
             panelStrong: {
@@ -126,8 +126,8 @@ export default defineConfig({
             },
             card: {
               value: {
-                _light: "#111113a4",
-                _dark: "#111113a4"
+                _light: "#0f0f1694",
+                _dark: "#292a2e73"
               }
             },
             sidebar: {

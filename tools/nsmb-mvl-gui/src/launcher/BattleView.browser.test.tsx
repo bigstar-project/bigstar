@@ -42,7 +42,6 @@ function actions(overrides: Partial<LauncherActions> = {}) {
     copyRoomCode: vi.fn(async () => {}),
     createLogArchive: vi.fn(async () => {}),
     createRoom: vi.fn(async () => {}),
-    deleteMatchHistory: vi.fn(async () => {}),
     joinRoom: vi.fn(async () => {}),
     openLogDir: vi.fn(async () => {}),
     openMelonds: vi.fn(async () => {}),
@@ -183,7 +182,6 @@ async function renderBattleView(
           roomCode: 'test-room',
           signalUrl: 'ws://127.0.0.1:8787/session',
         }}
-        lastLogDir="C:\\logs\\run1"
         matchmakingRooms={props.matchmakingRooms ?? rooms}
         currentMatch={props.currentMatch ?? null}
         summary={{ ...summary, ...props.summaryOverride }}
@@ -242,12 +240,35 @@ describe('対戦ビュー', () => {
     await expect.element(screen.getByText('Game 1')).not.toBeInTheDocument();
     await expect.element(screen.getByText('未プレイ')).not.toBeInTheDocument();
     await expect.element(screen.getByText('勝者')).toBeVisible();
-    await expect.element(screen.getByText('マリオ')).toBeVisible();
-    await expect.element(screen.getByText('ルイージ')).toBeVisible();
+    const headers = [...document.querySelectorAll('th')].map((header) =>
+      header.textContent?.trim(),
+    );
+    expect(headers.slice(3, 5)).toEqual(['Alice', 'Bob']);
     await expect.element(screen.getByText('C:\\logs\\run1')).toBeVisible();
     await expect.element(screen.getByText('5 / 0')).not.toBeInTheDocument();
     await expect.element(screen.getByText('3 / 2')).not.toBeInTheDocument();
     await expect.element(screen.getByText(/死亡/)).not.toBeInTheDocument();
+  });
+
+  test('参加側でも自身を左、相手を右に表示する', async () => {
+    const { screen } = await renderBattleView({
+      currentMatch: { ...currentMatch, role: 'client' },
+    });
+
+    await expect.element(screen.getByText('0 - 1')).toBeVisible();
+    await expect.element(screen.getByText('1 - 0')).not.toBeInTheDocument();
+
+    const leftPlayer = document.querySelector('[data-player-position="left"]');
+    const rightPlayer = document.querySelector(
+      '[data-player-position="right"]',
+    );
+    expect(leftPlayer?.textContent).toContain('Bob');
+    expect(rightPlayer?.textContent).toContain('Alice');
+
+    const headers = [...document.querySelectorAll('th')].map((header) =>
+      header.textContent?.trim(),
+    );
+    expect(headers.slice(3, 5)).toEqual(['Bob', 'Alice']);
   });
 
   test('公開ルームを手動更新する', async () => {
@@ -266,6 +287,23 @@ describe('対戦ビュー', () => {
     await expect
       .element(screen.getByLabelText('プレイヤーネーム'))
       .not.toBeInTheDocument();
+    await screen.getByRole('combobox', { name: 'コース' }).click();
+    const openSelect = document.querySelector<HTMLElement>(
+      '[data-scope="select"][data-part="content"][data-state="open"]',
+    );
+    const dialog = document.querySelector<HTMLElement>(
+      '[data-scope="dialog"][data-part="content"]',
+    );
+    expect(openSelect).not.toBeNull();
+    expect(dialog).not.toBeNull();
+    if (!openSelect || !dialog) throw new Error('浮遊レイヤーが見つかりません');
+    const selectRect = openSelect.getBoundingClientRect();
+    const topElement = document.elementFromPoint(
+      selectRect.left + selectRect.width / 2,
+      selectRect.top + selectRect.height / 2,
+    );
+    expect(openSelect.contains(topElement)).toBe(true);
+    await screen.getByRole('combobox', { name: 'コース' }).click();
     await screen.getByRole('button', { name: '作成して待機' }).click();
 
     expect(launcherActions.createRoom).toHaveBeenCalledTimes(1);
@@ -315,20 +353,7 @@ describe('対戦ビュー', () => {
       .toBeDisabled();
   });
 
-  test('手動開始、ロール更新、ログ操作の処理を呼ぶ', async () => {
-    const { launcherActions, screen, updateField } = await renderBattleView();
-
-    await screen.getByText('部屋コードとロールを編集').click();
-    await screen.getByRole('button', { name: 'answer側' }).click();
-    await screen.getByRole('button', { name: '対戦を開始' }).click();
-    await screen.getByRole('button', { name: 'ログを開く' }).click();
-
-    expect(updateField).toHaveBeenCalledWith('role', 'client');
-    expect(launcherActions.startMatch).toHaveBeenCalledTimes(1);
-    expect(launcherActions.openLogDir).toHaveBeenCalledTimes(1);
-  });
-
-  test('接続中はマッチメイキングエラーを表示して参加を無効化する', async () => {
+  test('接続中の取得エラーでは参加操作を表示しない', async () => {
     const { screen } = await renderBattleView({
       matchmakingRooms: {
         ...rooms,
@@ -338,11 +363,15 @@ describe('対戦ビュー', () => {
     });
 
     await expect
-      .element(screen.getByText('room is not joinable'))
+      .element(
+        screen.getByText(
+          '公開ルームを取得できませんでした。更新をお試しください。',
+        ),
+      )
       .toBeVisible();
     await expect
       .element(screen.getByRole('button', { name: '参加' }))
-      .toBeDisabled();
+      .not.toBeInTheDocument();
     await expect
       .element(screen.getByRole('button', { name: '停止' }))
       .toBeVisible();
@@ -368,9 +397,8 @@ describe('対戦ビュー', () => {
     });
 
     await expect
-      .element(screen.getByText('ミスマッチ', { exact: true }))
+      .element(screen.getByText('ゲーム状態ミスマッチ', { exact: true }))
       .toBeVisible();
-    await expect.element(screen.getByText('状態不一致を検出')).toBeVisible();
     await expect
       .element(screen.getByText(/NSMB PoC: game state mismatch/))
       .toBeVisible();

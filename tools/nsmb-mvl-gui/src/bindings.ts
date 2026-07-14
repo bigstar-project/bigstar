@@ -15,6 +15,7 @@ export const commands = {
 	saveDiagnosticEventsEnabled: (request: SaveDiagnosticEventsRequest) => typedError<null, string>(__TAURI_INVOKE("save_diagnostic_events_enabled", { request })),
 	saveDetailedLogsEnabled: (request: SaveDetailedLogsRequest) => typedError<null, string>(__TAURI_INVOKE("save_detailed_logs_enabled", { request })),
 	saveAiPlayLogEnabled: (request: SaveAiPlayLogRequest) => typedError<null, string>(__TAURI_INVOKE("save_ai_play_log_enabled", { request })),
+	savePerformanceLogsEnabled: (request: SavePerformanceLogsRequest) => typedError<null, string>(__TAURI_INVOKE("save_performance_logs_enabled", { request })),
 	saveNewRoomNotificationsEnabled: (request: SaveNewRoomNotificationsRequest) => typedError<null, string>(__TAURI_INVOKE("save_new_room_notifications_enabled", { request })),
 	showNewRoomNotification: (request: ShowNewRoomNotificationRequest) => typedError<boolean, string>(__TAURI_INVOKE("show_new_room_notification", { request })),
 	savePlayerName: (request: SavePlayerNameRequest) => typedError<null, string>(__TAURI_INVOKE("save_player_name", { request })),
@@ -25,8 +26,11 @@ export const commands = {
 	startMatch: (request: LaunchRequest_Deserialize) => typedError<LaunchResponse, string>(__TAURI_INVOKE("start_match", { request })),
 	stopMatch: () => typedError<null, string>(__TAURI_INVOKE("stop_match")),
 	sessionStatus: () => typedError<SessionStatus, string>(__TAURI_INVOKE("session_status")),
-	loadMatchHistory: () => typedError<MatchHistoryRecord[], string>(__TAURI_INVOKE("load_match_history")),
-	saveMatchHistory: (matches: MatchHistoryRecord[]) => typedError<null, string>(__TAURI_INVOKE("save_match_history", { matches })),
+	upsertMatchHistory: (record: MatchHistoryRecord) => typedError<null, string>(__TAURI_INVOKE("upsert_match_history", { record })),
+	deleteMatchHistory: (matchId: string) => typedError<null, string>(__TAURI_INVOKE("delete_match_history", { matchId })),
+	queryMatchHistory: (request: MatchHistoryPageRequest) => typedError<MatchHistoryPage, string>(__TAURI_INVOKE("query_match_history", { request })),
+	loadMatchHistoryDashboard: (filter: MatchHistoryFilter) => typedError<MatchHistoryDashboard, string>(__TAURI_INVOKE("load_match_history_dashboard", { filter })),
+	loadMatchHistoryOpponents: () => typedError<MatchHistoryOpponent[], string>(__TAURI_INVOKE("load_match_history_opponents")),
 	openLogDir: (path: string) => typedError<null, string>(__TAURI_INVOKE("open_log_dir", { path })),
 	createLogArchive: (logDir: string) => typedError<LogArchiveResponse, string>(__TAURI_INVOKE("create_log_archive", { logDir })),
 	cleanupDetailedLogs: () => typedError<CleanupDetailedLogsResponse, string>(__TAURI_INVOKE("cleanup_detailed_logs")),
@@ -97,6 +101,7 @@ export type Defaults = {
 	diagnostic_events_enabled: boolean,
 	detailed_logs_enabled: boolean,
 	ai_play_log_enabled: boolean,
+	performance_logs_enabled: boolean,
 	new_room_notifications_enabled: boolean,
 	log_archive_upload_token: string,
 };
@@ -150,6 +155,7 @@ export type LaunchRequest_Deserialize = {
 	diagnostic_events_enabled?: boolean,
 	detailed_logs_enabled?: boolean,
 	ai_play_log_enabled?: boolean,
+	performance_logs_enabled: boolean,
 	rom_identity?: RomIdentity | null,
 };
 
@@ -164,6 +170,7 @@ export type LaunchRequest_Serialize = {
 	diagnostic_events_enabled: boolean,
 	detailed_logs_enabled: boolean,
 	ai_play_log_enabled: boolean,
+	performance_logs_enabled: boolean,
 	rom_identity?: RomIdentity | null,
 };
 
@@ -180,6 +187,46 @@ export type LogArchiveResponse = {
 	size: number,
 };
 
+export type MatchHistoryCursor = {
+	startedAt: string,
+	id: string,
+};
+
+export type MatchHistoryDashboard = {
+	summary: MatchHistorySummary,
+	trend: MatchHistoryTrendPoint[],
+	stages: MatchHistoryStageStatistics[],
+};
+
+export type MatchHistoryFilter = {
+	recentMatches: number | null,
+	sinceStartedAt: string | null,
+	opponentPlayerId: string | null,
+	stage: number | null,
+	outcome: MatchHistoryOutcome | null,
+};
+
+export type MatchHistoryOpponent = {
+	playerId: string,
+	latestName: string,
+	matches: number,
+	lastPlayedAt: string,
+};
+
+export type MatchHistoryOutcome = "completed" | "win" | "loss" | "stopped";
+
+export type MatchHistoryPage = {
+	matches: MatchHistoryRecord[],
+	nextCursor: MatchHistoryCursor | null,
+	total: number,
+};
+
+export type MatchHistoryPageRequest = {
+	filter: MatchHistoryFilter,
+	cursor: MatchHistoryCursor | null,
+	limit: number,
+};
+
 export type MatchHistoryRecord = {
 	id: string,
 	logDir: string,
@@ -193,7 +240,33 @@ export type MatchHistoryRecord = {
 	status: MatchHistoryStatus,
 };
 
+export type MatchHistoryStageStatistics = {
+	stage: number,
+	wins: number,
+	losses: number,
+};
+
 export type MatchHistoryStatus = "running" | "completed" | "stopped";
+
+export type MatchHistoryStreakKind = "win" | "loss";
+
+export type MatchHistorySummary = {
+	wins: number,
+	losses: number,
+	stopped: number,
+	gameWins: number,
+	gameLosses: number,
+	streak: number,
+	streakKind: MatchHistoryStreakKind | null,
+};
+
+export type MatchHistoryTrendPoint = {
+	matchId: string,
+	startedAt: string,
+	opponentName: string,
+	won: boolean,
+	rollingWinRate: number | null,
+};
 
 export type MatchPlayerIds = {
 	mario: string,
@@ -334,6 +407,10 @@ export type SaveNewRoomNotificationsRequest = {
 	enabled: boolean,
 };
 
+export type SavePerformanceLogsRequest = {
+	enabled: boolean,
+};
+
 export type SavePlayerNameRequest = {
 	player_name: string,
 };
@@ -389,4 +466,3 @@ async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; dat
         return { status: "error", error: e as any };
     }
 }
-

@@ -18,7 +18,14 @@ export default defineConfig({
     'globalThis.__NSMB_MVL_BUILD_PROFILE__': JSON.stringify(buildProfile),
     __NSMB_MVL_GUI_VERSION__: JSON.stringify(packageJson.version),
   },
-  plugins: [react(), tsconfigPaths()],
+  plugins: [
+    react({
+      babel: {
+        plugins: ['babel-plugin-react-compiler'],
+      },
+    }),
+    tsconfigPaths(),
+  ],
   resolve: {
     alias: aiDevToolsEnabled
       ? []

@@ -7,9 +7,11 @@ import { dialog } from './dialog';
 import { field } from './field';
 import { group } from './group';
 import { input } from './input';
+import { kbd } from './kbd';
 import { numberInput } from './number-input';
 import { select } from './select';
 import { spinner } from './spinner';
+import { surface } from './surface';
 import { switchRecipe } from './switch';
 import { tabs } from './tabs';
 export const recipes = {
@@ -27,5 +29,7 @@ export const recipes = {
   dialog,
   collapsible,
   switchRecipe,
+  surface,
+  kbd,
 };
 export const slotRecipes = {};

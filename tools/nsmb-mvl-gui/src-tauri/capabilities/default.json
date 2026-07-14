@@ -6,6 +6,10 @@
   "permissions": [
     "autostart:default",
     "core:default",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-start-dragging",
+    "core:window:allow-toggle-maximize",
     "notification:default",
     "process:allow-restart",
     "updater:default"

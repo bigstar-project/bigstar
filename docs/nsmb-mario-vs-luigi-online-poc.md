@@ -7,8 +7,64 @@
   - The GUI setting `AI用プレイログ` controls `LaunchRequest.ai_play_log_enabled` and is persisted in launcher settings. Default is off.
   - When enabled, GUI melonDS launches pass `MELONDS_NSML_AI_OBSERVATION_V2_LOG=<logdir>\ai-observations-v2.jsonl`, `MELONDS_NSML_AI_PLAY_LOG_INTERVAL=1`, `MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL=300`, and `MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER=0`.
   - melonDS keeps v1 behavior unchanged. The v2 stage filter is optional; when set, v2 records are written only while the sampled runtime state is MvL stage group 9 and stage ID 0.
-- Verification target:
-  - Confirm host/Mario and client/Luigi GUI launches both create `ai-observations-v2.jsonl` on stage 0 when the setting is on, create no v2 file when off, and do not write non-stage-0 frames when the match sequence moves to other stages.
+- Current blocker: none in the implementation; end-to-end GUI play verification remains.
+- Next action: confirm host/Mario and client/Luigi GUI launches both create `ai-observations-v2.jsonl` on stage 0 when the setting is on, create no v2 file when off, and do not write non-stage-0 frames when the match sequence moves to other stages.
+- Verification status: after integrating the latest `main`, `cargo fmt`, all 46 Rust tests, `cargo clippy-all`, and the GUI `corepack pnpm run ci` suite pass (37 unit tests, 52 browser tests, and 2 Playwright tests). Manual online-match verification is not yet complete.
+
+## GUI target-wins=1 history recording fix - 2026-07-13
+
+- User report: matches configured for one required win on 2026-07-12 appeared to be missing from match history.
+- Confirmed two target-wins=1 host runs in the local app-data logs: `nsmb-mvl-gui-1783865347535-57548-2` and `nsmb-mvl-gui-1783865543931-57548-3`. Both launch manifests contain `wins: 1`, but both `melonds.stdout.txt` files contain zero `NSMB MvL auto restart: result` rows. Neither log directory appears in `match-history.sqlite3`.
+- Nearby target-wins=2/3 runs do contain result rows and were persisted as completed matches. The database contains the 23:32 target-wins=2 match and the subsequent target-wins=3 matches, confirming that the history database itself was writable.
+- Root cause:
+  - `tools/nsmb-mvl-gui/src-tauri/src/processes.rs` only sets `MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT=1` when `wins > 1`.
+  - `src/frontend/qt_sdl/NsmbNetplayPoC.cpp::RestartMvlAfterResultIfNeeded` also returns immediately when `MvlTargetWins <= 1`.
+  - Result logging and winner extraction are implemented inside that auto-restart function, so disabling restart for a one-win match also unintentionally disables result observation. The GUI consequently receives an empty stage-result list and does not persist a played history record.
+- Fix:
+  - The GUI launcher now enables `MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT` and its result-observation delay for every valid target win count, including one.
+  - melonDS now enters `RestartMvlAfterResultIfNeeded` for target-wins=1, reads and logs the result snapshot, then uses the existing `leadingWins >= MvlTargetWins` branch to stop without restarting the game.
+  - Added a Rust regression test verifying that a one-win launch enables result observation.
+  - Rebuilt melonDS and synced the GUI sidecar; synced melonDS sha256 is `cc192004051dfd1b77e8a782d2f67a73e5cb4723ee264432e663bbcb5292742b`.
+- Current blocker: none for the code path. The two historical runs remain intentionally unrecovered because they contain no result snapshot and the user did not request reconstruction.
+- Next action: manually play one target-wins=1 GUI match with the rebuilt app and confirm one result row is shown and persisted as a completed history entry without starting a rematch.
+- Verification status:
+  - `cargo fmt`, all 44 Rust tests, and `cargo clippy-all` passed in `tools/nsmb-mvl-gui/src-tauri`.
+  - `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passed. Existing unrelated `src/net/Netplay.cpp` format and linker warnings remain.
+  - `corepack pnpm sync:sidecars` passed.
+  - `corepack pnpm run ci` passed: TypeScript, Biome, 36 unit tests, 44 browser tests, and 2 Playwright tests.
+
+## GUI WAN 30-40 FPS investigation - 2026-07-10
+
+- User report: one otherwise high-spec gaming laptop falls to roughly 30-40 FPS during battles over povo tethering. Ping settles near 50 ms, raising input delay from 3 to 15 does not restore 60 FPS, switching software/OpenGL rendering does not change the symptom, and aggregate Task Manager CPU/GPU usage remains low. Another povo tethering setup usually sustains 60 FPS.
+- Reviewed three affected-machine GUI archives from 2026-07-09: `...6ZDE45...-3` and `...gHXhuU...-4` are client runs, while `...jXYVsG...-1` is a host run. All use input delay 3, max frame lead 4, rollback disabled, JIT enabled, normal logging, and an IPv6 STUN-selected direct route.
+- Current evidence:
+  - Unix timestamps on consecutive 120-frame `InputHealth` summaries give aggregate effective rates of about `38.15`, `36.74`, and `39.99` FPS. This confirms the reported rate in the logs rather than only in the window title.
+  - Remote-input waits do make individual intervals worse, but they do not explain the baseline slowdown. Intervals with no logged `remote-wait-resolved` event still have median rates of `38.83`, `37.07`, and `38.07` FPS.
+  - Logged resolved waits total only `58.39 s`, `43.58 s`, and `7.03 s`, about `3.3%`, `2.8%`, and `0.4%` of each measured span. Typical slow 120-frame intervals take about `3.0-3.4 s`; after subtracting the ideal `2.0 s` and logged waits, roughly `0.9-1.4 s` per interval remains unexplained.
+  - On the host run, 463/552 summaries have negative input lead, meaning remote inputs are already ahead of the local send frame while the local emulator is slow. Only 16/552 summary frames report a wait, and the sampled network pump cost stays below `0.269 ms`. This is the opposite of a machine spending most of its time blocked on missing packets.
+  - Input delay does not directly diagnose this case: in the current non-rollback lockstep path it changes the future input frame being sent, but cannot remove a local emulation/audio/scheduler stall. `InputMaxFrameLead` also remains 4.
+- Current interpretation:
+  - Primary suspect is local wall-clock blocking or scheduling inside the melonDS frame loop, especially `audioSync()`/the Windows audio callback or the fixed-timestep limiter's repeated `SDL_Delay(0)` yields. Either can produce low total CPU/GPU utilization while the single emulation thread misses frame deadlines.
+  - A single hot/slow core, laptop power or thermal policy, E-core scheduling, or a vendor utility remains possible even when aggregate CPU usage looks low.
+  - Antivirus is plausible as an amplifier, particularly because stdout is redirected directly to a file and many diagnostic paths call `fflush(stdout)`, but the current archives do not attribute the missing wall time to file I/O. It should not yet be called the root cause.
+  - Renderer/GPU throughput and average network latency are lower-priority causes for these captures. Transient network waits still exist, but are secondary to the persistent local baseline slowdown.
+- Performance logging implementation:
+  - GUI settings now has an independent `パフォーマンスログ` switch, persisted as `performance_logs_enabled` and defaulting off. It is separate from dense `詳細ログ` so an affected user can collect timing data without enabling per-input screenshots/traces.
+  - When enabled, the launcher passes `MELONDS_NSML_PERFORMANCE_LOG=<run>/melonds-performance.jsonl`; the launch manifest records both the request setting and path. The user log archive includes this file, and old-log cleanup removes it from inactive run directories.
+  - melonDS writes one `startup` JSON row with renderer/video driver, FPS limit/audio-sync settings, SDL audio driver/device/buffer, CPU identifier/logical processors, affinity/priority, and AC/battery state.
+  - Every 120 running frames it writes a `summary` row with effective FPS; frame wall/thread-CPU average, p95, and max; MP/input/before-hook/`RunFrame`/after-hook/draw/audio/limiter/unaccounted averages and maxima; audio queue state; CPU migration count; limiter requested wait, yield/sleep counts, maximum delay, and deadline lateness; plus cumulative/delta remote-input wait and frame-lead throttle data.
+  - Frames over 20 ms also produce at most one `slow_frame` row per second with the same per-frame phase split. Startup and summary rows flush explicitly so the useful prefix survives abnormal GUI shutdown, while slow-frame writes remain buffered until the next summary to limit logging impact. The next frame's `unaccounted_ms` includes any summary flush/post-frame scheduling cost.
+- Next action:
+  - Enable `パフォーマンスログ` on the affected PC, reproduce the 30-40 FPS period for at least several minutes, and collect its archive. Prefer collecting the paired opponent archive too.
+  - Classify the next capture by the dominant field: `run_frame_ms`/thread CPU for local compute, `audio_ms` for audio-driver blocking, `limit_ms` plus delay/deadline metrics for limiter scheduling, hook/netplay counters for sync waits, `draw_ms` for rendering, or high wall time with low thread CPU and high `unaccounted_ms` for OS preemption/logging/security software.
+- Current blocker: the new instrumentation works locally, but root-cause attribution still needs a reproduction from the affected gaming laptop.
+- Verification status:
+  - `cmake --build build\release-windows-x86_64 --config Release --target melonDS --parallel` passes. Existing unrelated `src/net/Netplay.cpp` format and linker warnings remain.
+  - `logs\codex-performance-log-smoke-20260710-c` produced valid parseable startup/slow-frame/summary JSONL for 300 frames. `logs\codex-performance-log-fixed-timestep-smoke-20260710` produced valid JSONL for 240 frames and recorded about 1.3 million `SDL_Delay(0)` yields per 120-frame summary together with maximum yield delay and deadline lateness.
+  - `cargo fmt`, all 36 Rust tests, and `cargo clippy-all` pass in `tools/nsmb-mvl-gui/src-tauri`.
+  - GUI typecheck, all 28 unit tests, all 34 browser tests, and all 3 Playwright tests pass. The Playwright manual-connect case turns `パフォーマンスログ` on and verifies that `start_match` receives `performance_logs_enabled=true`.
+  - `corepack pnpm run ci` was run but stops at Biome on the pre-existing CRLF formatting of three untouched files: `src/launcher/LauncherShell.tsx`, `src/launcher/OnboardingGate.tsx`, and `src/launcher/OnboardingGate.browser.test.tsx`. Biome checks pass for every file changed by this implementation, and the test stages skipped by the aggregate command pass separately.
+  - `corepack pnpm sync:sidecars` passes and syncs the instrumented `melonDS.exe` with sha256 `de32666dd0e4ff21c4314d988ee2a902ad25d3dac05e18d6a986409048314dec`.
 
 ## MvL auto-restart death-result winner fix - 2026-06-24
 

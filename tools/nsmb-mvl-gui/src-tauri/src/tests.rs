@@ -30,6 +30,7 @@ fn request(role: Role) -> LaunchRequest {
         diagnostic_events_enabled: false,
         detailed_logs_enabled: false,
         ai_play_log_enabled: false,
+        performance_logs_enabled: false,
         rom_identity: None,
         rom_path: "unused.nds".to_owned(),
         settings: GameSettings {
@@ -276,6 +277,7 @@ fn melon_env_carries_game_settings_and_netplay_start() {
     assert!(env["MELONDS_NSML_DIAGNOSTICS_FILE"].ends_with("melonds-diagnostics.json"));
     assert!(!env.contains_key("MELONDS_NSML_DIAGNOSTIC_EVENTS"));
     assert!(!env.contains_key("MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE"));
+    assert!(!env.contains_key("MELONDS_NSML_PERFORMANCE_LOG"));
     assert!(!env.contains_key("MELONDS_NSML_ROLLBACK"));
 }
 
@@ -309,6 +311,23 @@ fn melon_env_enables_ai_play_log_v2_for_client() {
     assert_eq!(env["MELONDS_NSML_ROLE"], "client");
     assert!(env["MELONDS_NSML_AI_OBSERVATION_V2_LOG"].ends_with("ai-observations-v2.jsonl"));
     assert_eq!(env["MELONDS_NSML_AI_OBSERVATION_V2_STAGE_FILTER"], "0");
+}
+
+#[test]
+fn melon_env_observes_results_for_single_win_matches() {
+    let mut request = request(Role::Host);
+    request.settings.wins = 1;
+    request.settings.course_stages = vec![2];
+    request.settings.rng_seeds = vec!["7".to_owned()];
+    let env = melon_env(
+        &request,
+        Path::new("bootstrap.inputs"),
+        Path::new("logs/nsmb-mvl-gui-test"),
+    );
+
+    assert_eq!(env["MELONDS_NSML_MVL_WINS"], "1");
+    assert_eq!(env["MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT"], "1");
+    assert_eq!(env["MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES"], "120");
 }
 
 #[test]
@@ -356,6 +375,20 @@ fn melon_env_enables_detailed_logs_when_requested() {
     assert_eq!(env["MELONDS_NSML_STATE_SYNC_INTERVAL"], "30");
     assert_eq!(env["MELONDS_NSML_DIAGNOSTIC_EVENTS"], "1");
     assert!(env["MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE"].ends_with("melonds-events.jsonl"));
+}
+
+#[test]
+fn melon_env_enables_performance_log_when_requested() {
+    let mut request = request(Role::Host);
+    request.performance_logs_enabled = true;
+    let env = melon_env(
+        &request,
+        Path::new("bootstrap.inputs"),
+        Path::new("logs/nsmb-mvl-gui-test"),
+    );
+
+    assert!(env["MELONDS_NSML_PERFORMANCE_LOG"].ends_with("melonds-performance.jsonl"));
+    assert!(!env.contains_key("MELONDS_NSML_PERF_SPIKE_PHASE_TRACE"));
 }
 
 #[test]
@@ -828,6 +861,8 @@ fn cleanup_detailed_logs_removes_only_heavy_detail_files_and_skips_active_log_di
     fs::write(old_run.join("melonds-events.jsonl"), "events").expect("write detailed event log");
     fs::write(old_run.join("bridge-events.jsonl"), "bridge").expect("write bridge event log");
     fs::write(old_run.join("melonds.stdout.txt"), "stdout").expect("write melon stdout");
+    fs::write(old_run.join("melonds-performance.jsonl"), "performance")
+        .expect("write performance log");
     fs::write(old_run.join("screens").join("frame.png"), "png").expect("write screenshot");
     fs::write(old_run.join("launcher.json"), "{}").expect("write retained launcher log");
     fs::write(old_run.join("nsmb-mvl-logs-existing.zip"), "zip").expect("write retained archive");
@@ -837,12 +872,13 @@ fn cleanup_detailed_logs_removes_only_heavy_detail_files_and_skips_active_log_di
 
     assert_eq!(response.scanned_log_dirs, 1);
     assert_eq!(response.skipped_active_log_dirs, 1);
-    assert_eq!(response.deleted_files, 4);
+    assert_eq!(response.deleted_files, 5);
     assert_eq!(response.deleted_dirs, 1);
     assert!(response.freed_bytes > 0);
     assert!(!old_run.join("melonds-events.jsonl").exists());
     assert!(!old_run.join("bridge-events.jsonl").exists());
     assert!(!old_run.join("melonds.stdout.txt").exists());
+    assert!(!old_run.join("melonds-performance.jsonl").exists());
     assert!(!old_run.join("screens").exists());
     assert!(old_run.join("launcher.json").exists());
     assert!(old_run.join("nsmb-mvl-logs-existing.zip").exists());
@@ -986,6 +1022,7 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
     );
     assert_eq!(launcher["request"]["detailed_logs_enabled"], false);
     assert_eq!(launcher["request"]["ai_play_log_enabled"], true);
+    assert_eq!(launcher["request"]["performance_logs_enabled"], false);
     assert_eq!(
         launcher["launch"]["melonds"]["env"]
             .as_object()

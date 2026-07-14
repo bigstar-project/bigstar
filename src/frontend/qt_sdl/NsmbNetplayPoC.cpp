@@ -9569,7 +9569,7 @@ int ResolveMvlResultWinner(const MvlResultSnapshot& result)
 
 bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (!G.MvlAutoRestartAfterResult || G.MvlTargetWins <= 1 || !nds || instanceID < 0 || instanceID >= 16)
+    if (!G.MvlAutoRestartAfterResult || G.MvlTargetWins < 1 || !nds || instanceID < 0 || instanceID >= 16)
         return false;
 
     constexpr melonDS::u16 kResultsScene = 0x000A;
@@ -18333,6 +18333,27 @@ bool IsEnabled()
 {
     InitFromEnvironment();
     return G.Enabled;
+}
+
+PerformanceCounters GetPerformanceCounters()
+{
+    InitFromEnvironment();
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    PerformanceCounters counters;
+    counters.RemoteInputWaitCount = G.RemoteInputWaitCount;
+    counters.RemoteInputWaitUs = G.RemoteInputWaitUs;
+    counters.RemoteInputWaitMaxUs = G.RemoteInputWaitMaxUs;
+    counters.FrameLeadThrottleCount = G.FrameLeadThrottleCount;
+    counters.FrameLeadThrottleUs = G.FrameLeadThrottleUs;
+    counters.FrameLeadThrottleMaxUs = G.FrameLeadThrottleMaxUs;
+    counters.LastSentInputFrame = G.LastSentInputFrame;
+    counters.LastReceivedInputFrame = G.LastReceivedInputFrame;
+    if (G.LastSentInputFrame != kNoFrameLimit && G.LastReceivedInputFrame != kNoFrameLimit)
+    {
+        counters.InputLead = static_cast<int>(G.LastSentInputFrame)
+            - static_cast<int>(G.LastReceivedInputFrame);
+    }
+    return counters;
 }
 
 void InitFromEnvironment()

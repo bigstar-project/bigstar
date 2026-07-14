@@ -1,6 +1,7 @@
 import { Portal } from '@ark-ui/react';
 import {
   CaretDown,
+  ChartLineUp,
   CircleNotch,
   CloudArrowUp,
   FileZip,
@@ -37,6 +38,7 @@ export function MatchRecordCollapsible({
   onDelete,
   onCreateLogArchive,
   onOpenLogDir,
+  onSelectOpponent,
   onUploadLogArchive,
   showStageDots = true,
   showStartedAt = true,
@@ -46,14 +48,17 @@ export function MatchRecordCollapsible({
   onCreateLogArchive?: () => Promise<void> | void;
   onDelete?: () => Promise<void> | void;
   onOpenLogDir?: () => Promise<void> | void;
+  onSelectOpponent?: (playerId: string, playerName: string) => void;
   onUploadLogArchive?: () => Promise<void> | void;
   showStageDots?: boolean;
   showStartedAt?: boolean;
 }) {
+  const [open, setOpen] = useState(defaultOpen);
   const latestStage = match.stages.at(-1);
-  const marioWins = latestStage?.mario_match_wins ?? 0;
-  const luigiWins = latestStage?.luigi_match_wins ?? 0;
   const selfSide = sideFromRole(match.role);
+  const opponentSide = oppositeSide(selfSide);
+  const selfWins = matchWinsFor(latestStage, selfSide);
+  const opponentWins = matchWinsFor(latestStage, opponentSide);
   const winner = matchWinner(match);
   const outcome = matchOutcome(match, selfSide);
   const playedStages = match.stages
@@ -69,13 +74,17 @@ export function MatchRecordCollapsible({
       className={css({
         borderBottomColor: 'gray.surface.border',
         borderBottomWidth: '1px',
+        containIntrinsicSize: '[auto 4.5rem]',
+        contentVisibility: 'auto',
         display: 'grid',
         _last: { borderBottomWidth: '0' },
         '&[data-state=open]': {
           bg: 'black.a3',
         },
       })}
-      defaultOpen={defaultOpen}
+      open={open}
+      lazyMount
+      onOpenChange={(details) => setOpen(details.open)}
     >
       <Collapsible.Trigger
         className={cx(
@@ -126,9 +135,10 @@ export function MatchRecordCollapsible({
           })}
         >
           <PlayerSummary
-            side="mario"
-            name={match.playerNames.mario}
-            isWinner={winner === 'mario'}
+            side={selfSide}
+            name={match.playerNames[selfSide]}
+            isWinner={winner === selfSide}
+            position="left"
           />
           <div
             className={css({
@@ -141,12 +151,13 @@ export function MatchRecordCollapsible({
               whiteSpace: 'nowrap',
             })}
           >
-            {marioWins} - {luigiWins}
+            {selfWins} - {opponentWins}
           </div>
           <PlayerSummary
-            side="luigi"
-            name={match.playerNames.luigi}
-            isWinner={winner === 'luigi'}
+            side={opponentSide}
+            name={match.playerNames[opponentSide]}
+            isWinner={winner === opponentSide}
+            position="right"
           />
         </div>
         {showStageDots ? <StageDots match={match} selfSide={selfSide} /> : null}
@@ -163,151 +174,182 @@ export function MatchRecordCollapsible({
       </Collapsible.Trigger>
       <Collapsible.Content
         className={css({
-          borderTopColor: 'gray.surface.border',
-          borderTopWidth: '1px',
-          display: 'grid',
-          gap: '2',
-          px: '4',
-          py: '3',
+          contain: 'layout paint',
         })}
       >
         <div
           className={css({
-            borderColor: 'gray.surface.border',
-            borderRadius: 'l2',
-            borderWidth: '1px',
-            overflowX: 'auto',
+            borderTopColor: 'gray.surface.border',
+            borderTopWidth: '1px',
+            display: 'grid',
+            gap: '2',
+            px: '4',
+            py: '3',
           })}
+          data-match-details-body=""
         >
-          <table
-            className={css({
-              borderCollapse: 'collapse',
-              minW: '[28rem]',
-              tableLayout: 'fixed',
-              textStyle: 'xs',
-              w: 'full',
-            })}
-          >
-            <colgroup>
-              <col className={css({ w: '[3.25rem]' })} />
-              <col className={css({ w: '[4.25rem]' })} />
-              <col className={css({ w: '[7rem]' })} />
-              <col className={css({ w: '[3.25rem]' })} />
-              <col className={css({ w: '[3.25rem]' })} />
-              <col className={css({ w: '[3.25rem]' })} />
-              <col className={css({ w: '[3.25rem]' })} />
-            </colgroup>
-            <thead>
-              <tr
-                className={css({
-                  bg: 'white.a1',
-                  color: 'fg.muted',
-                  fontWeight: 'black',
-                  textAlign: 'left',
-                })}
+          {onSelectOpponent ? (
+            <div
+              className={css({ display: 'flex', justifyContent: 'flex-end' })}
+            >
+              <Button
+                onClick={() => {
+                  const opponentSide = selfSide === 'mario' ? 'luigi' : 'mario';
+                  setOpen(false);
+                  onSelectOpponent(
+                    match.playerIds[opponentSide],
+                    match.playerNames[opponentSide],
+                  );
+                }}
+                size="xs"
+                variant="plain"
               >
-                <StageHeader rowSpan={2}>ゲーム</StageHeader>
-                <StageHeader rowSpan={2}>ステージ</StageHeader>
-                <StageHeader rowSpan={2}>勝者</StageHeader>
-                <StageHeader align="center" colSpan={2}>
-                  マリオ
-                </StageHeader>
-                <StageHeader align="center" colSpan={2}>
-                  ルイージ
-                </StageHeader>
-              </tr>
-              <tr
-                className={css({
-                  bg: 'white.a1',
-                  color: 'fg.muted',
-                  fontWeight: 'black',
-                  textAlign: 'left',
-                })}
-              >
-                <StageHeader align="center" compact>
-                  スター
-                </StageHeader>
-                <StageHeader align="center" compact>
-                  ライフ
-                </StageHeader>
-                <StageHeader align="center" compact>
-                  スター
-                </StageHeader>
-                <StageHeader align="center" compact>
-                  ライフ
-                </StageHeader>
-              </tr>
-            </thead>
-            <tbody>
-              {playedStages.map(({ index, result }) => (
-                <StageResultTableRow
-                  index={index}
-                  key={`${match.id}-${result.game_index}`}
-                  match={match}
-                  result={result}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {match.logDir || onDelete ? (
+                <ChartLineUp size={16} weight="bold" />
+                {match.playerNames[selfSide === 'mario' ? 'luigi' : 'mario']}
+                との戦績を見る
+              </Button>
+            </div>
+          ) : null}
           <div
             className={css({
-              alignItems: { base: 'stretch', md: 'center' },
-              display: 'grid',
-              gap: '2',
-              gridTemplateColumns: { base: '1fr', md: 'minmax(0, 1fr) auto' },
+              borderColor: 'gray.surface.border',
+              borderRadius: 'l2',
+              borderWidth: '1px',
+              overflowX: 'auto',
+              overflowY: 'hidden',
             })}
           >
-            {match.logDir ? (
-              <code
-                className={css({
-                  color: 'fg.subtle',
-                  fontFamily: 'mono',
-                  fontWeight: 'semibold',
-                  minW: '0',
-                  overflowWrap: 'anywhere',
-                  textStyle: 'xs',
-                })}
-              >
-                {match.logDir}
-              </code>
-            ) : (
-              <span />
-            )}
-            <div
+            <table
               className={css({
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: '2',
-                justifyContent: { base: 'flex-start', md: 'flex-end' },
+                borderCollapse: 'collapse',
+                minW: '[28rem]',
+                tableLayout: 'fixed',
+                textStyle: 'xs',
+                w: 'full',
               })}
             >
-              {match.logDir && onOpenLogDir ? (
-                <LogActionButton
-                  icon={<FolderOpen size={16} weight="bold" />}
-                  label="ログを開く"
-                  onClick={onOpenLogDir}
-                />
-              ) : null}
-              {match.logDir && onCreateLogArchive ? (
-                <LogActionButton
-                  icon={<FileZip size={16} weight="bold" />}
-                  label="zipを作成"
-                  onClick={onCreateLogArchive}
-                />
-              ) : null}
-              {match.logDir && onUploadLogArchive ? (
-                <LogActionButton
-                  icon={<CloudArrowUp size={16} weight="bold" />}
-                  label="ログを送信"
-                  onClick={onUploadLogArchive}
-                />
-              ) : null}
-              {onDelete ? <DeleteMatchButton onDelete={onDelete} /> : null}
-            </div>
+              <colgroup>
+                <col className={css({ w: '[3.25rem]' })} />
+                <col className={css({ w: '[4.25rem]' })} />
+                <col className={css({ w: '[7rem]' })} />
+                <col className={css({ w: '[3.25rem]' })} />
+                <col className={css({ w: '[3.25rem]' })} />
+                <col className={css({ w: '[3.25rem]' })} />
+                <col className={css({ w: '[3.25rem]' })} />
+              </colgroup>
+              <thead>
+                <tr
+                  className={css({
+                    bg: 'white.a1',
+                    color: 'fg.muted',
+                    fontWeight: 'black',
+                    textAlign: 'left',
+                  })}
+                >
+                  <StageHeader rowSpan={2}>ゲーム</StageHeader>
+                  <StageHeader rowSpan={2}>ステージ</StageHeader>
+                  <StageHeader rowSpan={2}>勝者</StageHeader>
+                  <StageHeader align="center" colSpan={2}>
+                    {match.playerNames[selfSide]}
+                  </StageHeader>
+                  <StageHeader align="center" colSpan={2}>
+                    {match.playerNames[opponentSide]}
+                  </StageHeader>
+                </tr>
+                <tr
+                  className={css({
+                    bg: 'white.a1',
+                    color: 'fg.muted',
+                    fontWeight: 'black',
+                    textAlign: 'left',
+                  })}
+                >
+                  <StageHeader align="center" compact>
+                    スター
+                  </StageHeader>
+                  <StageHeader align="center" compact>
+                    ライフ
+                  </StageHeader>
+                  <StageHeader align="center" compact>
+                    スター
+                  </StageHeader>
+                  <StageHeader align="center" compact>
+                    ライフ
+                  </StageHeader>
+                </tr>
+              </thead>
+              <tbody>
+                {playedStages.map(({ index, result }) => (
+                  <StageResultTableRow
+                    index={index}
+                    key={`${match.id}-${result.game_index}`}
+                    match={match}
+                    result={result}
+                    selfSide={selfSide}
+                  />
+                ))}
+              </tbody>
+            </table>
           </div>
-        ) : null}
+          {match.logDir || onDelete ? (
+            <div
+              className={css({
+                alignItems: { base: 'stretch', md: 'center' },
+                display: 'grid',
+                gap: '2',
+                gridTemplateColumns: { base: '1fr', md: 'minmax(0, 1fr) auto' },
+              })}
+            >
+              {match.logDir ? (
+                <code
+                  className={css({
+                    color: 'fg.subtle',
+                    fontFamily: 'mono',
+                    fontWeight: 'semibold',
+                    minW: '0',
+                    overflowWrap: 'anywhere',
+                    textStyle: 'xs',
+                  })}
+                >
+                  {match.logDir}
+                </code>
+              ) : (
+                <span />
+              )}
+              <div
+                className={css({
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '2',
+                  justifyContent: { base: 'flex-start', md: 'flex-end' },
+                })}
+              >
+                {match.logDir && onOpenLogDir ? (
+                  <LogActionButton
+                    icon={<FolderOpen size={16} weight="bold" />}
+                    label="ログを開く"
+                    onClick={onOpenLogDir}
+                  />
+                ) : null}
+                {match.logDir && onCreateLogArchive ? (
+                  <LogActionButton
+                    icon={<FileZip size={16} weight="bold" />}
+                    label="zipを作成"
+                    onClick={onCreateLogArchive}
+                  />
+                ) : null}
+                {match.logDir && onUploadLogArchive ? (
+                  <LogActionButton
+                    icon={<CloudArrowUp size={16} weight="bold" />}
+                    label="ログを送信"
+                    onClick={onUploadLogArchive}
+                  />
+                ) : null}
+                {onDelete ? <DeleteMatchButton onDelete={onDelete} /> : null}
+              </div>
+            </div>
+          ) : null}
+        </div>
       </Collapsible.Content>
     </Collapsible.Root>
   );
@@ -527,10 +569,12 @@ function OutcomeBadge({ outcome }: { outcome: MatchOutcome }) {
 function PlayerSummary({
   isWinner,
   name,
+  position,
   side,
 }: {
   isWinner: boolean;
   name: string;
+  position: 'left' | 'right';
   side: PlayerSide;
 }) {
   return (
@@ -539,14 +583,15 @@ function PlayerSummary({
         alignItems: 'center',
         display: 'flex',
         gap: '2',
-        justifyContent: side === 'mario' ? 'flex-end' : 'flex-start',
-        justifySelf: side === 'mario' ? 'end' : 'start',
+        justifyContent: position === 'left' ? 'flex-end' : 'flex-start',
+        justifySelf: position === 'left' ? 'end' : 'start',
         maxW: 'full',
         minW: '0',
         overflow: 'hidden',
         whiteSpace: 'nowrap',
         w: 'full',
       })}
+      data-player-position={position}
     >
       <img
         src={side === 'mario' ? playerMBadge : playerLBadge}
@@ -749,16 +794,21 @@ function StageResultTableRow({
   index,
   match,
   result,
+  selfSide,
 }: {
   index: number;
   match: BattleMatchRecord;
   result: MvlStageResult;
+  selfSide: PlayerSide;
 }) {
   const winner = sideFromWinner(result.winner);
   if (!winner) {
     return null;
   }
   const winnerName = match.playerNames[winner];
+  const opponentSide = oppositeSide(selfSide);
+  const selfResult = result[selfSide];
+  const opponentResult = result[opponentSide];
 
   return (
     <tr className={css({ _hover: { bg: 'white.a1' } })}>
@@ -787,31 +837,28 @@ function StageResultTableRow({
             style={{ height: 16, width: 16 }}
           />
           <span
-            className={css({
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            })}
+            className={css({ overflow: 'hidden', textOverflow: 'ellipsis' })}
           >
             {winnerName}
           </span>
         </span>
       </StageCell>
       <StageCell align="center">
-        <StageMetric type="star" value={result.mario.stars} />
+        <StageMetric type="star" value={selfResult.stars} />
       </StageCell>
       <StageCell align="center">
         <StageMetric
           type="life"
-          value={displayLives(result.mario.lives, result.mario.dead)}
+          value={displayLives(selfResult.lives, selfResult.dead)}
         />
       </StageCell>
       <StageCell align="center">
-        <StageMetric type="star" value={result.luigi.stars} />
+        <StageMetric type="star" value={opponentResult.stars} />
       </StageCell>
       <StageCell align="center">
         <StageMetric
           type="life"
-          value={displayLives(result.luigi.lives, result.luigi.dead)}
+          value={displayLives(opponentResult.lives, opponentResult.dead)}
         />
       </StageCell>
     </tr>
@@ -908,6 +955,16 @@ function matchWinner(match: BattleMatchRecord): PlayerSide | null {
 
 function sideFromRole(role: Role): PlayerSide {
   return role === 'host' ? 'mario' : 'luigi';
+}
+
+function oppositeSide(side: PlayerSide): PlayerSide {
+  return side === 'mario' ? 'luigi' : 'mario';
+}
+
+function matchWinsFor(result: MvlStageResult | undefined, side: PlayerSide) {
+  return side === 'mario'
+    ? (result?.mario_match_wins ?? 0)
+    : (result?.luigi_match_wins ?? 0);
 }
 
 function sideFromWinner(winner?: number | null): PlayerSide | null {

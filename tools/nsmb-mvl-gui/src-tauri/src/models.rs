@@ -18,6 +18,7 @@ pub(crate) struct LaunchRequest {
     pub(crate) detailed_logs_enabled: bool,
     #[serde(default)]
     pub(crate) ai_play_log_enabled: bool,
+    pub(crate) performance_logs_enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) rom_identity: Option<RomIdentity>,
 }
@@ -82,6 +83,7 @@ pub(crate) struct Defaults {
     pub(crate) diagnostic_events_enabled: bool,
     pub(crate) detailed_logs_enabled: bool,
     pub(crate) ai_play_log_enabled: bool,
+    pub(crate) performance_logs_enabled: bool,
     pub(crate) new_room_notifications_enabled: bool,
     pub(crate) log_archive_upload_token: String,
 }
@@ -97,6 +99,7 @@ pub(crate) struct LauncherSettings {
     pub(crate) diagnostic_events_enabled: bool,
     pub(crate) detailed_logs_enabled: bool,
     pub(crate) ai_play_log_enabled: bool,
+    pub(crate) performance_logs_enabled: bool,
     pub(crate) startup_configured: bool,
     pub(crate) startup_default_off_migration_applied: bool,
     #[serde(default = "default_new_room_notifications_enabled")]
@@ -118,6 +121,7 @@ impl Default for LauncherSettings {
             diagnostic_events_enabled: false,
             detailed_logs_enabled: false,
             ai_play_log_enabled: false,
+            performance_logs_enabled: false,
             startup_configured: false,
             startup_default_off_migration_applied: false,
             new_room_notifications_enabled: default_new_room_notifications_enabled(),
@@ -146,6 +150,12 @@ pub(crate) struct SaveDetailedLogsRequest {
 #[derive(Debug, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct SaveAiPlayLogRequest {
+    pub(crate) enabled: bool,
+}
+
+#[derive(Debug, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct SavePerformanceLogsRequest {
     pub(crate) enabled: bool,
 }
 
@@ -309,6 +319,102 @@ pub(crate) struct MatchHistoryRecord {
     pub(crate) stages: Vec<MvlStageResult>,
     pub(crate) started_at: String,
     pub(crate) status: MatchHistoryStatus,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MatchHistoryFilter {
+    pub(crate) recent_matches: Option<u32>,
+    pub(crate) since_started_at: Option<String>,
+    pub(crate) opponent_player_id: Option<String>,
+    pub(crate) stage: Option<u8>,
+    pub(crate) outcome: Option<MatchHistoryOutcome>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum MatchHistoryOutcome {
+    Completed,
+    Win,
+    Loss,
+    Stopped,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MatchHistoryCursor {
+    pub(crate) started_at: String,
+    pub(crate) id: String,
+}
+
+#[derive(Debug, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MatchHistoryPageRequest {
+    pub(crate) filter: MatchHistoryFilter,
+    pub(crate) cursor: Option<MatchHistoryCursor>,
+    pub(crate) limit: u32,
+}
+
+#[derive(Debug, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MatchHistoryPage {
+    pub(crate) matches: Vec<MatchHistoryRecord>,
+    pub(crate) next_cursor: Option<MatchHistoryCursor>,
+    pub(crate) total: u32,
+}
+
+#[derive(Debug, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MatchHistorySummary {
+    pub(crate) wins: u32,
+    pub(crate) losses: u32,
+    pub(crate) stopped: u32,
+    pub(crate) game_wins: u32,
+    pub(crate) game_losses: u32,
+    pub(crate) streak: u32,
+    pub(crate) streak_kind: Option<MatchHistoryStreakKind>,
+}
+
+#[derive(Debug, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum MatchHistoryStreakKind {
+    Win,
+    Loss,
+}
+
+#[derive(Debug, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MatchHistoryTrendPoint {
+    pub(crate) match_id: String,
+    pub(crate) started_at: String,
+    pub(crate) opponent_name: String,
+    pub(crate) won: bool,
+    pub(crate) rolling_win_rate: f64,
+}
+
+#[derive(Debug, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MatchHistoryStageStatistics {
+    pub(crate) stage: u8,
+    pub(crate) wins: u32,
+    pub(crate) losses: u32,
+}
+
+#[derive(Debug, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MatchHistoryDashboard {
+    pub(crate) summary: MatchHistorySummary,
+    pub(crate) trend: Vec<MatchHistoryTrendPoint>,
+    pub(crate) stages: Vec<MatchHistoryStageStatistics>,
+}
+
+#[derive(Debug, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MatchHistoryOpponent {
+    pub(crate) player_id: String,
+    pub(crate) latest_name: String,
+    pub(crate) matches: u32,
+    pub(crate) last_played_at: String,
 }
 
 #[derive(Debug, Deserialize)]

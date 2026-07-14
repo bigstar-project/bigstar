@@ -15,6 +15,7 @@ export const previewDefaults: Defaults = {
   diagnostic_events_enabled: false,
   detailed_logs_enabled: false,
   ai_play_log_enabled: false,
+  performance_logs_enabled: false,
   new_room_notifications_enabled: true,
   log_archive_upload_token: '',
   port: 8165,
@@ -41,7 +42,7 @@ export const previewRomIdentity = {
     '5555555555555555555555555555555555555555555555555555555555555555',
 };
 
-export const previewMatchHistoryKey = 'nsmb-mvl-preview-match-history-v2';
+export const previewMatchHistoryKey = 'nsmb-mvl-preview-match-history-v3';
 
 const previewMatchSettings = {
   big_stars: 10,

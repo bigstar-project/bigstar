@@ -23,7 +23,6 @@ async function renderSettingsView() {
     copyRoomCode: vi.fn(async () => {}),
     createLogArchive: vi.fn(async () => {}),
     createRoom: vi.fn(async () => {}),
-    deleteMatchHistory: vi.fn(async () => {}),
     joinRoom: vi.fn(async () => {}),
     openLogDir: vi.fn(async () => {}),
     openMelonds: vi.fn(async () => {}),
@@ -157,6 +156,14 @@ describe('設定ビュー', () => {
     await screen.getByText('AI用プレイログ').click();
 
     expect(updateField).toHaveBeenCalledWith('aiPlayLogEnabled', true);
+  });
+
+  test('パフォーマンスログをSwitchで切り替える', async () => {
+    const { screen, updateField } = await renderSettingsView();
+
+    await screen.getByText('パフォーマンスログ', { exact: true }).click();
+
+    expect(updateField).toHaveBeenCalledWith('performanceLogsEnabled', true);
   });
 
   test('古い詳細ログの削除を確認して実行する', async () => {

@@ -25,6 +25,9 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <chrono>
+#include <iomanip>
+#include <sstream>
 
 #include <SDL2/SDL.h>
 
@@ -65,6 +68,397 @@
 #include "NsmbNetplayPoC.h"
 
 using namespace melonDS;
+
+namespace
+{
+
+unsigned long long NsmlUnixMs()
+{
+    return static_cast<unsigned long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count());
+}
+
+double NsmlCurrentThreadCpuSeconds()
+{
+#ifdef _WIN32
+    FILETIME creationTime {};
+    FILETIME exitTime {};
+    FILETIME kernelTime {};
+    FILETIME userTime {};
+    if (!GetThreadTimes(GetCurrentThread(), &creationTime, &exitTime, &kernelTime, &userTime))
+        return 0.0;
+
+    ULARGE_INTEGER kernel {};
+    kernel.LowPart = kernelTime.dwLowDateTime;
+    kernel.HighPart = kernelTime.dwHighDateTime;
+    ULARGE_INTEGER user {};
+    user.LowPart = userTime.dwLowDateTime;
+    user.HighPart = userTime.dwHighDateTime;
+    return static_cast<double>(kernel.QuadPart + user.QuadPart) / 10000000.0;
+#else
+    return 0.0;
+#endif
+}
+
+int NsmlCurrentProcessorNumber()
+{
+#ifdef _WIN32
+    return static_cast<int>(GetCurrentProcessorNumber());
+#else
+    return -1;
+#endif
+}
+
+std::string NsmlJsonEscape(const char* value)
+{
+    std::string escaped;
+    if (!value)
+        return escaped;
+    for (const unsigned char ch : std::string(value))
+    {
+        switch (ch)
+        {
+        case '\\': escaped += "\\\\"; break;
+        case '"': escaped += "\\\""; break;
+        case '\n': escaped += "\\n"; break;
+        case '\r': escaped += "\\r"; break;
+        case '\t': escaped += "\\t"; break;
+        default:
+            if (ch >= 0x20)
+                escaped += static_cast<char>(ch);
+            break;
+        }
+    }
+    return escaped;
+}
+
+struct NsmlPerformanceSample
+{
+    melonDS::u32 Frame = 0;
+    double TotalMs = 0.0;
+    double ThreadCpuMs = 0.0;
+    double MpMs = 0.0;
+    double InputMs = 0.0;
+    double BeforeHookMs = 0.0;
+    double RunFrameMs = 0.0;
+    double AfterHookMs = 0.0;
+    double DrawMs = 0.0;
+    double AudioMs = 0.0;
+    double LimitMs = 0.0;
+    double UnaccountedMs = 0.0;
+    double LimitRequestedMs = 0.0;
+    double LimitMaxDelayMs = 0.0;
+    double DeadlineLateMs = 0.0;
+    unsigned int LimitYieldCalls = 0;
+    unsigned int LimitSleepCalls = 0;
+    melonDS::u32 AudioQueueBefore = 0;
+    melonDS::u32 AudioQueueAfter = 0;
+    int Processor = -1;
+    NsmbNetplayPoC::PerformanceCounters Netplay;
+};
+
+class NsmlPerformanceLog
+{
+public:
+    explicit NsmlPerformanceLog(const char* path)
+    {
+        if (path && *path)
+            File = Platform::OpenFile(path, Platform::FileMode::WriteText);
+    }
+
+    ~NsmlPerformanceLog()
+    {
+        if (!File)
+            return;
+        Platform::FileFlush(File);
+        Platform::CloseFile(File);
+    }
+
+    bool Enabled() const { return File != nullptr; }
+
+    void WriteStartup(
+        int instanceID,
+        bool useOpenGL,
+        int videoRenderer,
+        double targetFPS,
+        bool limitFPS,
+        bool audioSync,
+        int audioFrequency,
+        int audioBufferSize)
+    {
+        if (!File)
+            return;
+
+        int logicalProcessors = 0;
+        unsigned long long processAffinity = 0;
+        unsigned long long systemAffinity = 0;
+        unsigned long processPriority = 0;
+        int threadPriority = 0;
+        int acLineStatus = -1;
+        int batteryPercent = -1;
+#ifdef _WIN32
+        SYSTEM_INFO systemInfo {};
+        GetNativeSystemInfo(&systemInfo);
+        logicalProcessors = static_cast<int>(systemInfo.dwNumberOfProcessors);
+        DWORD_PTR processMask = 0;
+        DWORD_PTR systemMask = 0;
+        if (GetProcessAffinityMask(GetCurrentProcess(), &processMask, &systemMask))
+        {
+            processAffinity = static_cast<unsigned long long>(processMask);
+            systemAffinity = static_cast<unsigned long long>(systemMask);
+        }
+        processPriority = GetPriorityClass(GetCurrentProcess());
+        threadPriority = GetThreadPriority(GetCurrentThread());
+        SYSTEM_POWER_STATUS powerStatus {};
+        if (GetSystemPowerStatus(&powerStatus))
+        {
+            acLineStatus = powerStatus.ACLineStatus;
+            batteryPercent = powerStatus.BatteryLifePercent == 255
+                ? -1
+                : static_cast<int>(powerStatus.BatteryLifePercent);
+        }
+#endif
+        const char* audioDriver = SDL_GetCurrentAudioDriver();
+        const char* audioDevice = SDL_GetNumAudioDevices(0) > 0
+            ? SDL_GetAudioDeviceName(0, 0)
+            : nullptr;
+        const char* videoDriver = SDL_GetCurrentVideoDriver();
+        const char* processor = std::getenv("PROCESSOR_IDENTIFIER");
+        const char* role = std::getenv("MELONDS_NSML_ROLE");
+
+        std::ostringstream line;
+        line << std::fixed << std::setprecision(3)
+             << "{\"type\":\"startup\",\"unix_ms\":" << NsmlUnixMs()
+             << ",\"instance\":" << instanceID
+             << ",\"role\":\"" << NsmlJsonEscape(role) << "\""
+             << ",\"renderer\":\"" << (useOpenGL ? "opengl" : "software") << "\""
+             << ",\"video_renderer\":" << videoRenderer
+             << ",\"video_driver\":\"" << NsmlJsonEscape(videoDriver) << "\""
+             << ",\"target_fps\":" << targetFPS
+             << ",\"limit_fps\":" << (limitFPS ? "true" : "false")
+             << ",\"audio_sync\":" << (audioSync ? "true" : "false")
+             << ",\"audio_driver\":\"" << NsmlJsonEscape(audioDriver) << "\""
+             << ",\"audio_device\":\"" << NsmlJsonEscape(audioDevice) << "\""
+             << ",\"audio_frequency\":" << audioFrequency
+             << ",\"audio_buffer_size\":" << audioBufferSize
+             << ",\"processor\":\"" << NsmlJsonEscape(processor) << "\""
+             << ",\"logical_processors\":" << logicalProcessors
+             << ",\"process_affinity\":" << processAffinity
+             << ",\"system_affinity\":" << systemAffinity
+             << ",\"process_priority\":" << processPriority
+             << ",\"thread_priority\":" << threadPriority
+             << ",\"ac_line_status\":" << acLineStatus
+             << ",\"battery_percent\":" << batteryPercent
+             << "}\n";
+        Write(line.str(), true);
+    }
+
+    void Add(const NsmlPerformanceSample& sample)
+    {
+        if (!File)
+            return;
+        Samples.push_back(sample);
+
+        const unsigned long long now = NsmlUnixMs();
+        if (sample.TotalMs >= 20.0 && now >= LastSpikeUnixMs + 1000)
+        {
+            LastSpikeUnixMs = now;
+            WriteSample("slow_frame", now, sample);
+        }
+        if (Samples.size() >= 120)
+            WriteSummary(now);
+    }
+
+private:
+    template <typename Getter>
+    double Average(Getter getter) const
+    {
+        double total = 0.0;
+        for (const auto& sample : Samples)
+            total += getter(sample);
+        return Samples.empty() ? 0.0 : total / static_cast<double>(Samples.size());
+    }
+
+    template <typename Getter>
+    double Maximum(Getter getter) const
+    {
+        double maximum = 0.0;
+        for (const auto& sample : Samples)
+            maximum = std::max(maximum, getter(sample));
+        return maximum;
+    }
+
+    template <typename Getter>
+    double Percentile95(Getter getter) const
+    {
+        std::vector<double> values;
+        values.reserve(Samples.size());
+        for (const auto& sample : Samples)
+            values.push_back(getter(sample));
+        if (values.empty())
+            return 0.0;
+        std::sort(values.begin(), values.end());
+        const std::size_t index = std::min(
+            values.size() - 1,
+            static_cast<std::size_t>((values.size() - 1) * 0.95));
+        return values[index];
+    }
+
+    void WriteSummary(unsigned long long now)
+    {
+        const auto& first = Samples.front();
+        const auto& last = Samples.back();
+        unsigned int over16 = 0;
+        unsigned int over25 = 0;
+        unsigned int over33 = 0;
+        unsigned int processorMigrations = 0;
+        unsigned int yieldCalls = 0;
+        unsigned int sleepCalls = 0;
+        for (std::size_t i = 0; i < Samples.size(); i++)
+        {
+            const auto& sample = Samples[i];
+            over16 += sample.TotalMs > 16.667 ? 1 : 0;
+            over25 += sample.TotalMs > 25.0 ? 1 : 0;
+            over33 += sample.TotalMs > 33.334 ? 1 : 0;
+            yieldCalls += sample.LimitYieldCalls;
+            sleepCalls += sample.LimitSleepCalls;
+            if (i > 0 && sample.Processor != Samples[i - 1].Processor)
+                processorMigrations++;
+        }
+
+        const auto avg = [this](auto member) {
+            return Average([member](const NsmlPerformanceSample& sample) { return sample.*member; });
+        };
+        const auto max = [this](auto member) {
+            return Maximum([member](const NsmlPerformanceSample& sample) { return sample.*member; });
+        };
+        const auto p95 = [this](auto member) {
+            return Percentile95([member](const NsmlPerformanceSample& sample) { return sample.*member; });
+        };
+        const double averageTotalMs = avg(&NsmlPerformanceSample::TotalMs);
+        const auto remoteWaitCountDelta = last.Netplay.RemoteInputWaitCount
+            - LastSummaryNetplay.RemoteInputWaitCount;
+        const auto remoteWaitUsDelta = last.Netplay.RemoteInputWaitUs
+            - LastSummaryNetplay.RemoteInputWaitUs;
+        const auto throttleCountDelta = last.Netplay.FrameLeadThrottleCount
+            - LastSummaryNetplay.FrameLeadThrottleCount;
+        const auto throttleUsDelta = last.Netplay.FrameLeadThrottleUs
+            - LastSummaryNetplay.FrameLeadThrottleUs;
+
+        std::ostringstream line;
+        line << std::fixed << std::setprecision(3)
+             << "{\"type\":\"summary\",\"unix_ms\":" << now
+             << ",\"first_frame\":" << first.Frame
+             << ",\"last_frame\":" << last.Frame
+             << ",\"samples\":" << Samples.size()
+             << ",\"effective_fps\":" << (averageTotalMs > 0.0 ? 1000.0 / averageTotalMs : 0.0)
+             << ",\"total_ms\":{\"avg\":" << averageTotalMs
+             << ",\"p95\":" << p95(&NsmlPerformanceSample::TotalMs)
+             << ",\"max\":" << max(&NsmlPerformanceSample::TotalMs) << "}"
+             << ",\"thread_cpu_ms\":{\"avg\":" << avg(&NsmlPerformanceSample::ThreadCpuMs)
+             << ",\"p95\":" << p95(&NsmlPerformanceSample::ThreadCpuMs)
+             << ",\"max\":" << max(&NsmlPerformanceSample::ThreadCpuMs) << "}"
+             << ",\"phase_avg_ms\":{\"mp\":" << avg(&NsmlPerformanceSample::MpMs)
+             << ",\"input\":" << avg(&NsmlPerformanceSample::InputMs)
+             << ",\"before_hook\":" << avg(&NsmlPerformanceSample::BeforeHookMs)
+             << ",\"run_frame\":" << avg(&NsmlPerformanceSample::RunFrameMs)
+             << ",\"after_hook\":" << avg(&NsmlPerformanceSample::AfterHookMs)
+             << ",\"draw\":" << avg(&NsmlPerformanceSample::DrawMs)
+             << ",\"audio\":" << avg(&NsmlPerformanceSample::AudioMs)
+             << ",\"limit\":" << avg(&NsmlPerformanceSample::LimitMs)
+             << ",\"unaccounted\":" << avg(&NsmlPerformanceSample::UnaccountedMs) << "}"
+             << ",\"phase_max_ms\":{\"before_hook\":" << max(&NsmlPerformanceSample::BeforeHookMs)
+             << ",\"run_frame\":" << max(&NsmlPerformanceSample::RunFrameMs)
+             << ",\"after_hook\":" << max(&NsmlPerformanceSample::AfterHookMs)
+             << ",\"draw\":" << max(&NsmlPerformanceSample::DrawMs)
+             << ",\"audio\":" << max(&NsmlPerformanceSample::AudioMs)
+             << ",\"limit\":" << max(&NsmlPerformanceSample::LimitMs)
+             << ",\"unaccounted\":" << max(&NsmlPerformanceSample::UnaccountedMs) << "}"
+             << ",\"limiter\":{\"requested_avg_ms\":" << avg(&NsmlPerformanceSample::LimitRequestedMs)
+             << ",\"max_delay_ms\":" << max(&NsmlPerformanceSample::LimitMaxDelayMs)
+             << ",\"deadline_late_max_ms\":" << max(&NsmlPerformanceSample::DeadlineLateMs)
+             << ",\"yield_calls\":" << yieldCalls
+             << ",\"sleep_calls\":" << sleepCalls << "}"
+             << ",\"slow_frames\":{\"over_16ms\":" << over16
+             << ",\"over_25ms\":" << over25
+             << ",\"over_33ms\":" << over33 << "}"
+             << ",\"processor\":{\"last\":" << last.Processor
+             << ",\"migrations\":" << processorMigrations << "}"
+             << ",\"audio_queue\":{\"before_last\":" << last.AudioQueueBefore
+             << ",\"after_last\":" << last.AudioQueueAfter << "}"
+             << ",\"netplay\":{\"input_lead\":" << last.Netplay.InputLead
+             << ",\"last_sent\":" << last.Netplay.LastSentInputFrame
+             << ",\"last_received\":" << last.Netplay.LastReceivedInputFrame
+             << ",\"remote_wait_count_delta\":" << remoteWaitCountDelta
+             << ",\"remote_wait_ms_delta\":" << static_cast<double>(remoteWaitUsDelta) / 1000.0
+             << ",\"remote_wait_max_ms\":" << static_cast<double>(last.Netplay.RemoteInputWaitMaxUs) / 1000.0
+             << ",\"throttle_count_delta\":" << throttleCountDelta
+             << ",\"throttle_ms_delta\":" << static_cast<double>(throttleUsDelta) / 1000.0
+             << ",\"throttle_max_ms\":" << static_cast<double>(last.Netplay.FrameLeadThrottleMaxUs) / 1000.0
+             << "},\"previous_log_write_ms\":" << LastWriteMs
+             << "}\n";
+        Write(line.str(), true);
+        LastSummaryNetplay = last.Netplay;
+        Samples.clear();
+    }
+
+    void WriteSample(const char* type, unsigned long long now, const NsmlPerformanceSample& sample)
+    {
+        std::ostringstream line;
+        line << std::fixed << std::setprecision(3)
+             << "{\"type\":\"" << type << "\",\"unix_ms\":" << now
+             << ",\"frame\":" << sample.Frame
+             << ",\"total_ms\":" << sample.TotalMs
+             << ",\"thread_cpu_ms\":" << sample.ThreadCpuMs
+             << ",\"mp_ms\":" << sample.MpMs
+             << ",\"input_ms\":" << sample.InputMs
+             << ",\"before_hook_ms\":" << sample.BeforeHookMs
+             << ",\"run_frame_ms\":" << sample.RunFrameMs
+             << ",\"after_hook_ms\":" << sample.AfterHookMs
+             << ",\"draw_ms\":" << sample.DrawMs
+             << ",\"audio_ms\":" << sample.AudioMs
+             << ",\"limit_ms\":" << sample.LimitMs
+             << ",\"unaccounted_ms\":" << sample.UnaccountedMs
+             << ",\"limit_requested_ms\":" << sample.LimitRequestedMs
+             << ",\"limit_max_delay_ms\":" << sample.LimitMaxDelayMs
+             << ",\"deadline_late_ms\":" << sample.DeadlineLateMs
+             << ",\"limit_yield_calls\":" << sample.LimitYieldCalls
+             << ",\"limit_sleep_calls\":" << sample.LimitSleepCalls
+             << ",\"audio_queue_before\":" << sample.AudioQueueBefore
+             << ",\"audio_queue_after\":" << sample.AudioQueueAfter
+             << ",\"processor\":" << sample.Processor
+             << ",\"input_lead\":" << sample.Netplay.InputLead
+             << ",\"remote_wait_total_ms\":" << static_cast<double>(sample.Netplay.RemoteInputWaitUs) / 1000.0
+             << ",\"throttle_total_ms\":" << static_cast<double>(sample.Netplay.FrameLeadThrottleUs) / 1000.0
+             << "}\n";
+        Write(line.str(), false);
+    }
+
+    void Write(const std::string& line, bool flush)
+    {
+        const auto start = std::chrono::steady_clock::now();
+        const auto written = Platform::FileWrite(line.data(), 1, line.size(), File);
+        if (flush)
+            Platform::FileFlush(File);
+        LastWriteMs = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - start).count()) / 1000.0;
+        if (written != line.size())
+        {
+            std::printf("NSMB PerformanceLog: short write expected=%zu actual=%llu\n",
+                line.size(),
+                static_cast<unsigned long long>(written));
+            std::fflush(stdout);
+        }
+    }
+
+    Platform::FileHandle* File = nullptr;
+    std::vector<NsmlPerformanceSample> Samples;
+    unsigned long long LastSpikeUnixMs = 0;
+    double LastWriteMs = 0.0;
+    NsmbNetplayPoC::PerformanceCounters LastSummaryNetplay;
+};
+
+}
 
 
 EmuThread::EmuThread(EmuInstance* inst, QObject* parent) : QThread(parent)
@@ -158,9 +552,11 @@ void EmuThread::run()
     bool slowmo = false;
     emuInstance->fastForwardToggled = false;
     emuInstance->slowmoToggled = false;
+    NsmlPerformanceLog nsmlPerformanceLog(getenv("MELONDS_NSML_PERFORMANCE_LOG"));
+    const bool nsmlPerformanceLogEnabled = nsmlPerformanceLog.Enabled();
     const bool nsmlPerfBreakdown = getenv("MELONDS_NSML_PERF_BREAKDOWN") != nullptr;
     const bool nsmlPerfSpikePhaseTrace = getenv("MELONDS_NSML_PERF_SPIKE_PHASE_TRACE") != nullptr;
-    const bool nsmlPerfPhaseTiming = nsmlPerfBreakdown || nsmlPerfSpikePhaseTrace;
+    const bool nsmlPerfPhaseTiming = nsmlPerfBreakdown || nsmlPerfSpikePhaseTrace || nsmlPerformanceLogEnabled;
     const double nsmlPerfSpikePhaseThresholdMs = std::max(
         1.0,
         std::atof(getenv("MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS")
@@ -176,6 +572,22 @@ void EmuThread::run()
     double nsmlPerfPhaseLastFrameEnd = nsmlPerfPhaseTiming
         ? SDL_GetPerformanceCounter() * perfCountsSec
         : 0.0;
+    double nsmlPerfThreadCpuLast = nsmlPerformanceLogEnabled
+        ? NsmlCurrentThreadCpuSeconds()
+        : 0.0;
+    nsmlPerformanceLog.WriteStartup(
+        emuInstance->instanceID,
+        useOpenGL,
+        videoRenderer,
+        emuInstance->targetFPS,
+        emuInstance->doLimitFPS,
+        emuInstance->doAudioSync,
+        emuInstance->audioFreq,
+        emuInstance->audioBufSize);
+    if (nsmlPerfPhaseTiming)
+        nsmlPerfPhaseLastFrameEnd = SDL_GetPerformanceCounter() * perfCountsSec;
+    if (nsmlPerformanceLogEnabled)
+        nsmlPerfThreadCpuLast = NsmlCurrentThreadCpuSeconds();
 
     while (emuStatus != emuStatus_Exit)
     {
@@ -216,6 +628,13 @@ void EmuThread::run()
             double nsmlPhaseDraw = 0.0;
             double nsmlPhaseAudio = 0.0;
             double nsmlPhaseLimit = 0.0;
+            double nsmlLimitRequestedMs = 0.0;
+            double nsmlLimitMaxDelayMs = 0.0;
+            double nsmlDeadlineLateMs = 0.0;
+            unsigned int nsmlLimitYieldCalls = 0;
+            unsigned int nsmlLimitSleepCalls = 0;
+            melonDS::u32 nsmlAudioQueueBefore = 0;
+            melonDS::u32 nsmlAudioQueueAfter = 0;
 
             if (emuInstance->hotkeyPressed(HK_SolarSensorDecrease))
             {
@@ -480,8 +899,12 @@ void EmuThread::run()
             const double nsmlAudioStart = nsmlPerfPhaseTiming
                 ? SDL_GetPerformanceCounter() * perfCountsSec
                 : 0.0;
+            if (nsmlPerformanceLogEnabled)
+                nsmlAudioQueueBefore = emuInstance->nds->SPU.GetOutputSize();
             if (emuInstance->doAudioSync && !(fastforward || slowmo))
                 emuInstance->audioSync();
+            if (nsmlPerformanceLogEnabled)
+                nsmlAudioQueueAfter = emuInstance->nds->SPU.GetOutputSize();
             if (nsmlPerfPhaseTiming)
             {
                 nsmlPhaseAudio = SDL_GetPerformanceCounter() * perfCountsSec - nsmlAudioStart;
@@ -526,6 +949,7 @@ void EmuThread::run()
                     lastTime += frametimeStep;
                     if (lastTime < curtime - frametimeStep)
                         lastTime = curtime;
+                    nsmlLimitRequestedMs = std::max(0.0, (lastTime - curtime) * 1000.0);
                     for (;;)
                     {
                         curtime = SDL_GetPerformanceCounter() * perfCountsSec;
@@ -535,13 +959,22 @@ void EmuThread::run()
                         if (remaining > 0.003 && getenv("MELONDS_NSML_FIXED_FRAME_SLEEP"))
                         {
                             const Uint32 sleepMs = (Uint32)std::max(1.0, floor((remaining * 1000.0) - 1.0));
+                            const double delayStart = SDL_GetPerformanceCounter() * perfCountsSec;
                             SDL_Delay(sleepMs);
+                            const double delayMs = (SDL_GetPerformanceCounter() * perfCountsSec - delayStart) * 1000.0;
+                            nsmlLimitMaxDelayMs = std::max(nsmlLimitMaxDelayMs, delayMs);
+                            nsmlLimitSleepCalls++;
                         }
                         else if (remaining > 0.001)
                         {
+                            const double delayStart = SDL_GetPerformanceCounter() * perfCountsSec;
                             SDL_Delay(0);
+                            const double delayMs = (SDL_GetPerformanceCounter() * perfCountsSec - delayStart) * 1000.0;
+                            nsmlLimitMaxDelayMs = std::max(nsmlLimitMaxDelayMs, delayMs);
+                            nsmlLimitYieldCalls++;
                         }
                     }
+                    nsmlDeadlineLateMs = std::max(0.0, (curtime - lastTime) * 1000.0);
                     frameLimitError = 0.0;
                     if (nsmlPerfPhaseTiming)
                     {
@@ -590,11 +1023,17 @@ void EmuThread::run()
             }
 frame_limit_done:
 
+            const double nsmlPhaseEnd = nsmlPerfPhaseTiming
+                ? SDL_GetPerformanceCounter() * perfCountsSec
+                : 0.0;
+            const double nsmlPhaseTotal = nsmlPerfPhaseTiming
+                ? nsmlPhaseEnd - nsmlPerfPhaseLastFrameEnd
+                : 0.0;
+            if (nsmlPerfPhaseTiming)
+                nsmlPerfPhaseLastFrameEnd = nsmlPhaseEnd;
+
             if (nsmlPerfSpikePhaseTrace)
             {
-                const double nsmlPhaseEnd = SDL_GetPerformanceCounter() * perfCountsSec;
-                const double nsmlPhaseTotal = nsmlPhaseEnd - nsmlPerfPhaseLastFrameEnd;
-                nsmlPerfPhaseLastFrameEnd = nsmlPhaseEnd;
                 if (nsmlPhaseTotal * 1000.0 >= nsmlPerfSpikePhaseThresholdMs)
                 {
                     const double nsmlPhaseAccounted =
@@ -621,6 +1060,45 @@ frame_limit_done:
                         nsmlPhaseLimit * 1000.0,
                         std::max(0.0, nsmlPhaseTotal - nsmlPhaseAccounted) * 1000.0);
                 }
+            }
+
+            if (nsmlPerformanceLogEnabled)
+            {
+                const double threadCpuNow = NsmlCurrentThreadCpuSeconds();
+                const double threadCpuMs = std::max(0.0, threadCpuNow - nsmlPerfThreadCpuLast) * 1000.0;
+                nsmlPerfThreadCpuLast = threadCpuNow;
+                const double accountedMs = (
+                    nsmlPhaseMP
+                    + nsmlPhaseInput
+                    + nsmlPhaseBeforeHook
+                    + nsmlPhaseRunFrame
+                    + nsmlPhaseAfterHook
+                    + nsmlPhaseDraw
+                    + nsmlPhaseAudio
+                    + nsmlPhaseLimit) * 1000.0;
+                NsmlPerformanceSample sample;
+                sample.Frame = emuInstance->nds->NumFrames;
+                sample.TotalMs = nsmlPhaseTotal * 1000.0;
+                sample.ThreadCpuMs = threadCpuMs;
+                sample.MpMs = nsmlPhaseMP * 1000.0;
+                sample.InputMs = nsmlPhaseInput * 1000.0;
+                sample.BeforeHookMs = nsmlPhaseBeforeHook * 1000.0;
+                sample.RunFrameMs = nsmlPhaseRunFrame * 1000.0;
+                sample.AfterHookMs = nsmlPhaseAfterHook * 1000.0;
+                sample.DrawMs = nsmlPhaseDraw * 1000.0;
+                sample.AudioMs = nsmlPhaseAudio * 1000.0;
+                sample.LimitMs = nsmlPhaseLimit * 1000.0;
+                sample.UnaccountedMs = std::max(0.0, sample.TotalMs - accountedMs);
+                sample.LimitRequestedMs = nsmlLimitRequestedMs;
+                sample.LimitMaxDelayMs = nsmlLimitMaxDelayMs;
+                sample.DeadlineLateMs = nsmlDeadlineLateMs;
+                sample.LimitYieldCalls = nsmlLimitYieldCalls;
+                sample.LimitSleepCalls = nsmlLimitSleepCalls;
+                sample.AudioQueueBefore = nsmlAudioQueueBefore;
+                sample.AudioQueueAfter = nsmlAudioQueueAfter;
+                sample.Processor = NsmlCurrentProcessorNumber();
+                sample.Netplay = NsmbNetplayPoC::GetPerformanceCounters();
+                nsmlPerformanceLog.Add(sample);
             }
 
             if (nsmlPerfBreakdown)

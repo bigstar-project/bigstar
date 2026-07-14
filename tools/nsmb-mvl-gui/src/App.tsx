@@ -1,5 +1,7 @@
+import { css } from 'styled-system/css';
 import { AIReplayViewer } from '@/launcher/AIReplayViewer';
 import { areAiDevToolsEnabled } from './buildProfile';
+import { AppTitlebar } from './components/AppTitlebar';
 import { BattleView } from './launcher/BattleView';
 import { HistoryView } from './launcher/HistoryView';
 import { LauncherShell } from './launcher/LauncherShell';
@@ -18,9 +20,11 @@ export function App() {
   const onboardingOpen = onboardingMissing && launcher.activeView !== 'ai';
 
   return (
-    <>
+    <div className={css({ h: 'dvh', overflow: 'hidden' })}>
+      <AppTitlebar />
       <div
         aria-hidden={onboardingOpen ? true : undefined}
+        className={css({ h: '[calc(100dvh - 2rem)]', overflow: 'hidden' })}
         inert={onboardingOpen ? true : undefined}
       >
         <LauncherShell
@@ -41,7 +45,6 @@ export function App() {
               gameStateMismatch: launcher.gameStateMismatch,
             }}
             form={launcher.form}
-            lastLogDir={launcher.lastLogDir}
             matchmakingRooms={launcher.matchmakingRooms}
             currentMatch={launcher.currentMatch}
             summary={launcher.summary}
@@ -49,9 +52,7 @@ export function App() {
           />
           {aiDevToolsEnabled ? <AIReplayViewer /> : null}
           <HistoryView
-            matches={launcher.matchHistory}
             onCreateLogArchive={launcher.actions.createLogArchive}
-            onDeleteMatch={launcher.actions.deleteMatchHistory}
             onOpenLogDir={launcher.actions.openLogDir}
             onUploadLogArchive={launcher.actions.uploadLogArchive}
           />
@@ -74,6 +75,6 @@ export function App() {
         onOpenAi={() => launcher.changeView('ai')}
         updateField={launcher.updateField}
       />
-    </>
+    </div>
   );
 }

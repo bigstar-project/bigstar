@@ -15,8 +15,19 @@ export type {
   LaunchResponse,
   Lives,
   LogArchiveResponse,
+  MatchHistoryCursor,
+  MatchHistoryDashboard,
+  MatchHistoryFilter,
+  MatchHistoryOpponent,
+  MatchHistoryOutcome,
+  MatchHistoryPage,
+  MatchHistoryPageRequest,
   MatchHistoryRecord,
+  MatchHistoryStageStatistics,
   MatchHistoryStatus,
+  MatchHistoryStreakKind,
+  MatchHistorySummary,
+  MatchHistoryTrendPoint,
   MatchPlayerNames,
   MvlPlayerResult,
   MvlStageResult,
@@ -35,6 +46,7 @@ export type {
   SaveDetailedLogsRequest,
   SaveDiagnosticEventsRequest,
   SaveNewRoomNotificationsRequest,
+  SavePerformanceLogsRequest,
   SavePlayerNameRequest,
   SaveRomPathsRequest,
   SessionStatus,
@@ -67,5 +79,6 @@ export type FormState = {
   diagnosticEventsEnabled: boolean;
   detailedLogsEnabled: boolean;
   aiPlayLogEnabled: boolean;
+  performanceLogsEnabled: boolean;
   newRoomNotificationsEnabled: boolean;
 };

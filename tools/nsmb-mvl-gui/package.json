@@ -1,6 +1,6 @@
 {
   "name": "nsmb-mvl-gui",
-  "version": "0.6.5",
+  "version": "0.7.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -19,7 +19,7 @@
     "ci": "tsc --noEmit && biome check . && vitest --config vitest.config.ts run && vitest --config vitest.browser.config.ts run && playwright test",
     "vite:build": "vite build",
     "vite:dev": "vite --host 127.0.0.1",
-    "preview:browser": "vite --host 127.0.0.1"
+    "preview:browser": "vite --host 127.0.0.1 --port 1421"
   },
   "dependencies": {
     "@ark-ui/react": "^5.37.0",
@@ -33,8 +33,10 @@
     "@tauri-apps/plugin-window-state": "~2.4.1",
     "hono": "^4.12.23",
     "lucide-react": "^1.17.0",
+    "nuqs": "2.9.0",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "react-hotkeys-hook": "^5.3.3"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.12",
@@ -48,6 +50,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
     "@vitest/browser-playwright": "^4.1.8",
+    "babel-plugin-react-compiler": "1.0.0",
     "typescript": "^5.9.3",
     "vite": "^7.2.0",
     "vite-tsconfig-paths": "^6.1.1",

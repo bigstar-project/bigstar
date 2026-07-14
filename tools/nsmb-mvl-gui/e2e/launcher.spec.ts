@@ -99,6 +99,7 @@ async function installGuiDriver(
                 base_rom_path: state.romsPrepared ? 'C:\\roms\\base.nds' : '',
                 client_rom_path: 'C:\\roms\\client.nds',
                 detailed_logs_enabled: false,
+                performance_logs_enabled: false,
                 host_rom_path: 'C:\\roms\\host.nds',
                 input_config_opened_once: state.inputConfigOpened,
                 diagnostic_events_enabled: false,
@@ -160,6 +161,10 @@ async function installGuiDriver(
               return null;
             }
             if (command === 'save_detailed_logs_enabled') {
+              calls.push({ args: [args.request], name: command });
+              return null;
+            }
+            if (command === 'save_performance_logs_enabled') {
               calls.push({ args: [args.request], name: command });
               return null;
             }
@@ -372,43 +377,6 @@ test('初回セットアップでロム生成と入力設定を完了できる',
   const calls = await e2eCalls(page);
   expect(calls.map((call) => call.name)).toContain('generate_roms');
   expect(calls.map((call) => call.name)).toContain('open_melonds_input_config');
-});
-
-test('手動接続でクライアント起動ペイロードを作れる', async ({ page }) => {
-  await installGuiDriver(page);
-  await installRoomsApi(page);
-
-  await page.goto('/');
-  await waitForGuiReady(page);
-  await page.getByText('部屋コードとロールを編集').click();
-  await page.getByLabel('部屋コード').fill('manual-room');
-  await page
-    .locator('button[aria-pressed="false"]')
-    .filter({ hasText: 'answer側' })
-    .click();
-  await page.getByRole('button', { name: '対戦を開始' }).click();
-
-  await expect.poll(() => callNames(page)).toContain('start_match');
-
-  const calls = await e2eCalls(page);
-  const start = lastCall(calls, 'start_match');
-  expect(start?.args[0]).toMatchObject({
-    port: 8165,
-    role: 'client',
-    room_code: 'manual-room',
-    rom_path: 'C:\\roms\\client.nds',
-    diagnostic_events_enabled: false,
-    settings: {
-      big_stars: 10,
-      course_mode: 'random',
-      input_delay_frames: 3,
-      input_max_frame_lead: 4,
-      lives: '3',
-      rollback_enabled: false,
-      wins: 3,
-    },
-    signal_url: 'ws://127.0.0.1:8787/session',
-  });
 });
 
 test('公開ルーム参加でサーバー側の対戦設定を引き継いで起動する', async ({

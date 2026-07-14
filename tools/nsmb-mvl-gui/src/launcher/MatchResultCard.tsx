@@ -1,5 +1,6 @@
 import { Clock, Trophy } from '@phosphor-icons/react';
-import { css } from 'styled-system/css';
+import { css, cx } from 'styled-system/css';
+import { surface } from 'styled-system/recipes';
 import { Card } from '../components/ui';
 import { MatchRecordCollapsible } from './MatchRecordCollapsible';
 import type { BattleMatchRecord } from './types';
@@ -36,18 +37,7 @@ export function MatchResultCard({
         />
         {title}
       </div>
-      <div
-        className={css({
-          bg: 'app.card',
-          backdropFilter: 'auto',
-          backdropBlur: 'md',
-          backdropSaturate: '180%',
-          borderColor: 'gray.surface.border',
-          borderRadius: 'l2',
-          borderWidth: '1px',
-          overflow: 'hidden',
-        })}
-      >
+      <div className={cx(surface(), css({ overflow: 'hidden' }))}>
         <MatchRecordCollapsible
           defaultOpen
           match={match}
@@ -68,11 +58,8 @@ export function EmptyMatchResultCard({
 }) {
   return (
     <Card.Root
-      variant="outline"
+      variant="glass"
       css={{
-        bg: 'app.card',
-        backdropFilter: 'auto',
-        backdropBlur: 'md',
         display: 'grid',
         gap: '2',
         p: '3.5',

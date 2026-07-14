@@ -1,3 +1,4 @@
+import { Portal } from '@ark-ui/react';
 import type { ReactNode } from 'react';
 import { css, cx } from 'styled-system/css';
 import { Button, Field, Input, Select } from './ui';
@@ -273,6 +274,18 @@ export function SelectField({
   onChange: (value: string) => void;
 }) {
   const collection = Select.createListCollection({ items: options });
+  const menu = (
+    <Select.Positioner>
+      <Select.Content>
+        {options.map((option) => (
+          <Select.Item key={option.value} item={option}>
+            <Select.ItemText>{option.label}</Select.ItemText>
+            <Select.ItemIndicator />
+          </Select.Item>
+        ))}
+      </Select.Content>
+    </Select.Positioner>
+  );
 
   return (
     <div
@@ -330,18 +343,7 @@ export function SelectField({
             </Select.IndicatorGroup>
           </Select.Trigger>
         </Select.Control>
-        {/* <Portal> */}
-        <Select.Positioner>
-          <Select.Content>
-            {options.map((option) => (
-              <Select.Item key={option.value} item={option}>
-                <Select.ItemText>{option.label}</Select.ItemText>
-                <Select.ItemIndicator />
-              </Select.Item>
-            ))}
-          </Select.Content>
-        </Select.Positioner>
-        {/* </Portal> */}
+        <Portal>{menu}</Portal>
         <Select.HiddenSelect />
       </Select.Root>
     </div>
