@@ -13,6 +13,7 @@
 
 #include "NsmbNetplayPoC.h"
 #include "NsmbNetplayConfig.h"
+#include "NsmbInputDelivery.h"
 #include "NsmbInputProtocol.h"
 #include "NsmbInputTimeline.h"
 #include "NsmbImitationAI.h"
@@ -4750,7 +4751,11 @@ void FlushDelayedInputsLocked(melonDS::u32 frame)
 
     for (auto it = G.DelayedInputs.begin(); it != G.DelayedInputs.end(); )
     {
-        if (it->ReleaseFrame <= frame || std::chrono::steady_clock::now() >= it->ReleaseTime)
+        if (InputDelivery::ShouldReleaseDelayedInput(
+                frame,
+                std::chrono::steady_clock::now(),
+                it->ReleaseFrame,
+                it->ReleaseTime))
         {
             SendInputPayloadNowLocked(it->Payload.data(), it->Payload.size(), it->Flags);
             it = G.DelayedInputs.erase(it);
@@ -4764,20 +4769,11 @@ void FlushDelayedInputsLocked(melonDS::u32 frame)
 
 std::vector<char> BuildInputBundlePayloadLocked(melonDS::u32 frame, const InputState& input)
 {
-    const int history = std::clamp(G.InputBundleHistory, 0, 31);
-    std::vector<InputProtocol::FramedInput> entries;
-    entries.reserve(static_cast<size_t>(history + 1));
-    for (int offset = history; offset >= 0; offset--)
-    {
-        if (static_cast<melonDS::u32>(offset) > frame)
-            continue;
-        const melonDS::u32 entryFrame = frame - static_cast<melonDS::u32>(offset);
-        InputState entryInput = input;
-        auto existing = G.LocalInputs.find(entryFrame);
-        if (existing != G.LocalInputs.end())
-            entryInput = existing->second;
-        entries.push_back({ entryFrame, entryInput });
-    }
+    const std::vector<InputProtocol::FramedInput> entries = InputDelivery::SelectBundleInputs(
+        frame,
+        input,
+        G.InputBundleHistory,
+        G.LocalInputs);
     return InputProtocol::EncodeInputBundle(entries);
 }
 
@@ -4810,13 +4806,21 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
             false);
     }
 
-    const bool dropByModulo = G.InputDropModulo > 0
-        && (frame % static_cast<melonDS::u32>(G.InputDropModulo))
-            == static_cast<melonDS::u32>(G.InputDropOffset);
-    const bool dropByRange = G.InputDropStartFrame > 0
-        && frame >= G.InputDropStartFrame
-        && (G.InputDropEndFrame == 0 || frame <= G.InputDropEndFrame);
-    if (dropByModulo || dropByRange)
+    const InputDelivery::SendDecision sendDecision = InputDelivery::DecideSend(
+        frame,
+        {
+            G.InputUnreliable,
+            G.InputBundleHistory,
+            G.InputDropModulo,
+            G.InputDropOffset,
+            G.InputDropStartFrame,
+            G.InputDropEndFrame,
+            G.InputSendDelayFrames,
+            G.InputSendJitterFrames,
+            G.InputSendDelayStartFrame,
+            G.InputSendDelayEndFrame,
+        });
+    if (sendDecision.Drop)
     {
         if (G.InputNetplayTraceEnabled)
             std::printf("NSMB InputNetplay: dropped local input packet frame=%u modulo=%d offset=%d range=%u-%u\n",
@@ -4830,20 +4834,13 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
 
     const std::vector<char> inputPayload = InputProtocol::EncodeInput({ frame, input });
 
-    const bool sendBundle = G.InputUnreliable && G.InputBundleHistory > 0;
+    const bool sendBundle = sendDecision.Bundle;
     const std::vector<char> bundlePayload = sendBundle
         ? BuildInputBundlePayloadLocked(frame, input)
         : std::vector<char> {};
     const melonDS::u32 sendFlags = ENET_PACKET_FLAG_RELIABLE;
 
-    const bool sendDelayActive =
-        frame >= G.InputSendDelayStartFrame
-        && (G.InputSendDelayEndFrame == kNoFrameLimit
-            || frame <= G.InputSendDelayEndFrame);
-    const int jitterFrames = sendDelayActive && G.InputSendJitterFrames > 0
-        ? static_cast<int>(frame % static_cast<melonDS::u32>(G.InputSendJitterFrames + 1))
-        : 0;
-    const int sendDelayFrames = sendDelayActive ? G.InputSendDelayFrames + jitterFrames : 0;
+    const int sendDelayFrames = sendDecision.DelayFrames;
     if (sendDelayFrames > 0)
     {
         G.DelayedInputs.push_back({
