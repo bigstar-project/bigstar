@@ -14016,6 +14016,206 @@ void TraceGameplayHeartbeatIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
     std::fflush(stdout);
 }
 
+melonDS::u32 PrepareAfterFrameLogFrame(int instanceID, melonDS::u32 frame)
+{
+    if (!G.TestEnabled)
+        return frame;
+
+    const melonDS::u32 logFrame = ++G.TestFrameCount[instanceID];
+    if (logFrame == 1)
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        if (!G.TestTimerStarted)
+        {
+            G.TestTimerStarted = true;
+            G.TestTimerStart = std::chrono::steady_clock::now();
+        }
+    }
+    const melonDS::u32 activeStartFrame = G.ActiveFpsStartFrame != 0
+        ? G.ActiveFpsStartFrame
+        : (G.NetplayStartFrame != 0
+            ? G.NetplayStartFrame + 120
+            : 120);
+    if (!G.ActiveTimerStarted[instanceID] && logFrame >= activeStartFrame)
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        if (!G.ActiveTimerStarted[instanceID])
+        {
+            G.ActiveTimerStarted[instanceID] = true;
+            G.ActiveTimerStartFrame[instanceID] = logFrame;
+            G.ActiveTimerStart[instanceID] = std::chrono::steady_clock::now();
+        }
+    }
+    RecordActiveFrameTiming(instanceID, logFrame);
+    const bool heartbeatActive = G.ActiveTimerStarted[instanceID] || logFrame >= activeStartFrame;
+    if (G.FrameHeartbeatInterval > 0
+        && heartbeatActive
+        && logFrame != G.LastFrameHeartbeat[instanceID]
+        && (logFrame % static_cast<melonDS::u32>(G.FrameHeartbeatInterval)) == 0)
+    {
+        G.LastFrameHeartbeat[instanceID] = logFrame;
+        std::printf("NSMB Heartbeat: inst=%d frame=%u\n", instanceID, logFrame);
+        if (G.FrameHeartbeat)
+            G.PendingFrameHeartbeat.store(logFrame, std::memory_order_release);
+        else
+            std::fflush(stdout);
+    }
+    return logFrame;
+}
+
+void RunAfterFramePacketBridgePhase(melonDS::u32 logFrame, melonDS::NDS* nds)
+{
+    const bool bridgeNetworkActive =
+        !G.DeferNetworkUntilStart || G.NetplayStartFrame == 0 || logFrame >= G.NetplayStartFrame;
+    if (G.Enabled && G.PacketBridgeEnabled && bridgeNetworkActive)
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        PumpNSMLPacketBridgeLocked(nds, logFrame);
+        ForceNSMLGameLocalPlayerIDIfNeeded(logFrame, nds);
+        CaptureAndSendNSMLPacketLocked(logFrame, nds);
+    }
+    if (G.Enabled && G.PacketBridgeEnabled && bridgeNetworkActive)
+    {
+        ForceNSMLGameLocalPlayerIDIfNeeded(logFrame, nds);
+        melonDS::NSML_RefreshMarioVsLuigiPacketSlots(nds);
+        ForceNSMLGameLocalPlayerIDIfNeeded(logFrame, nds);
+    }
+    if (G.Enabled && G.PacketBridgeEnabled && bridgeNetworkActive)
+        ThrottleNSMLPacketBridgeFrameLead(nds, logFrame);
+}
+
+void TraceRollbackStatsIfNeeded(melonDS::u32 logFrame)
+{
+    if (!G.RollbackEnabled
+        || !G.InputNetplayTraceEnabled
+        || logFrame == G.LastRollbackTraceFrame
+        || (logFrame % 120) != 0)
+        return;
+
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    G.LastRollbackTraceFrame = logFrame;
+    const size_t avgBytes = G.RollbackCheckpointSaveCount == 0
+        ? 0
+        : static_cast<size_t>(G.RollbackCheckpointTotalBytes / G.RollbackCheckpointSaveCount);
+    const unsigned long long saveAvgUs = G.RollbackCheckpointSaveCount == 0
+        ? 0
+        : G.RollbackCheckpointSaveTotalUs / G.RollbackCheckpointSaveCount;
+    const unsigned long long restoreAvgUs = G.RollbackCheckpointRestoreOpCount == 0
+        ? 0
+        : G.RollbackCheckpointRestoreTotalUs / G.RollbackCheckpointRestoreOpCount;
+    const unsigned long long resimRunAvgUs = G.RollbackMeasuredResimFrameCount == 0
+        ? 0
+        : G.RollbackResimRunFrameTotalUs / G.RollbackMeasuredResimFrameCount;
+    const unsigned long long resimCheckpointSaveAvgUs = G.RollbackMeasuredResimFrameCount == 0
+        ? 0
+        : G.RollbackResimCheckpointSaveTotalUs / G.RollbackMeasuredResimFrameCount;
+    const unsigned long long resimTotalAvgUs = G.RollbackMeasuredResimOpCount == 0
+        ? 0
+        : G.RollbackResimCorrectionTotalUs / G.RollbackMeasuredResimOpCount;
+    size_t deltaCheckpoints = 0;
+    size_t keyframeCheckpoints = 0;
+    size_t preimageCheckpoints = 0;
+    size_t preimageBytes = 0;
+    size_t mainRAMCopyBytes = 0;
+    for (const auto& [storedFrame, stored] : G.RollbackStore.States())
+    {
+        (void)storedFrame;
+        if (stored.MainRAMDelta)
+            deltaCheckpoints++;
+        if (stored.MainRAMFramePreimage)
+        {
+            preimageCheckpoints++;
+            preimageBytes += stored.MainRAMPreimagePages.size() * sizeof(melonDS::u32)
+                + stored.MainRAMPreimage.size();
+        }
+        else if ((G.RollbackBackendMode == RollbackBackend::CoreDelta
+            || G.RollbackBackendMode == RollbackBackend::CoreFrameDelta)
+            && !stored.Buffer.empty())
+            keyframeCheckpoints++;
+        mainRAMCopyBytes += stored.MainRAMCopy.size();
+    }
+    std::printf(
+        "NSMB Rollback: frame=%u backend=%s checkpoints=%zu checkpointSaves=%u bytesLast=%zu bytesMin=%zu bytesMax=%zu bytesAvg=%zu saveAvgUs=%llu saveMaxUs=%llu restoreOps=%u restoreAvgUs=%llu restoreMaxUs=%llu resimOps=%u resimFrames=%llu resimRunAvgUs=%llu resimRunMaxUs=%llu resimSaveAvgUs=%llu resimSaveMaxUs=%llu resimTotalAvgUs=%llu resimTotalMaxUs=%llu delta=%zu keyframes=%zu preimages=%zu preimageBytes=%zu mainRAMCopies=%zu keyInt=%d page=%d coreSkip=0x%X tinyFlags=0x%X wide=%d deltaDiscovered=%d actorArena=%d arm9Stack=%d skipInput=%d restoreDiff=%d procList=%d heapScan=%d procObjs=%u procNodes=%u heapObjs=%u scanInt=%d heapScanInt=%d scanRefresh=%u scanCacheHits=%u heapScanRefresh=%u heapScanCacheHits=%u predicted=%zu predictions=%u predProbe=%u mismatches=%u restores=%u resims=%u pending=%u observed=%u\n",
+        logFrame,
+        RollbackBackendName(),
+        G.RollbackStore.Size(),
+        G.RollbackCheckpointSaveCount,
+        G.RollbackCheckpointLastBytes,
+        G.RollbackCheckpointMinBytes,
+        G.RollbackCheckpointMaxBytes,
+        avgBytes,
+        saveAvgUs,
+        G.RollbackCheckpointSaveMaxUs,
+        G.RollbackCheckpointRestoreOpCount,
+        restoreAvgUs,
+        G.RollbackCheckpointRestoreMaxUs,
+        G.RollbackMeasuredResimOpCount,
+        G.RollbackMeasuredResimFrameCount,
+        resimRunAvgUs,
+        G.RollbackResimRunFrameMaxUs,
+        resimCheckpointSaveAvgUs,
+        G.RollbackResimCheckpointSaveMaxUs,
+        resimTotalAvgUs,
+        G.RollbackResimCorrectionMaxUs,
+        deltaCheckpoints,
+        keyframeCheckpoints,
+        preimageCheckpoints,
+        preimageBytes,
+        mainRAMCopyBytes,
+        G.RollbackDeltaKeyframeInterval,
+        G.RollbackMainRAMPageSize,
+        G.RollbackCoreSkipMask,
+        G.RollbackTinyCoreFlags,
+        G.RollbackNSMBWideRanges ? 1 : 0,
+        G.RollbackNSMBDeltaDiscoveredRanges ? 1 : 0,
+        G.RollbackNSMBActorArenaRanges ? 1 : 0,
+        G.RollbackNSMBArm9StackRange ? 1 : 0,
+        G.RollbackNSMBSkipInputRanges ? 1 : 0,
+        G.RollbackNSMBRestoreDiffTrace ? 1 : 0,
+        G.RollbackNSMBProcessListRanges ? 1 : 0,
+        G.RollbackNSMBHeapScanRanges ? 1 : 0,
+        G.RollbackNSMBProcessListObjectCount,
+        G.RollbackNSMBProcessListNodeCount,
+        G.RollbackNSMBHeapScanObjectCount,
+        G.RollbackNSMBScanInterval,
+        G.RollbackNSMBHeapScanInterval,
+        G.RollbackNSMBRangeScanRefreshCount,
+        G.RollbackNSMBRangeCacheHitCount,
+        G.RollbackNSMBHeapScanRefreshCount,
+        G.RollbackNSMBHeapScanCacheHitCount,
+        G.PredictedRemoteInputs.size(),
+        G.RollbackPredictionCount,
+        G.RollbackPredictionProbeCount,
+        G.RollbackMismatchCount,
+        G.RollbackRestoreCount,
+        G.RollbackResimulateCount,
+        G.PendingRollbackFrame,
+        G.PendingRollbackObservedFrame);
+    std::fflush(stdout);
+}
+
+void RunAfterFrameRuntimePatchPhase(int instanceID, melonDS::u32 logFrame, melonDS::NDS* nds)
+{
+    if (!CanRunFrameHooks(instanceID, nds))
+        return;
+
+    ForcePlayerDeathCountersIfNeeded(instanceID, logFrame, nds);
+    NormalizeMvlEntranceSpawnStateIfNeeded(instanceID, logFrame, nds);
+    ForcePlayerPowerupsIfNeeded(instanceID, logFrame, nds);
+    ForcePlayerInventoryPowerupsIfNeeded(instanceID, logFrame, nds);
+    ForcePlayerStarCountersIfNeeded(instanceID, logFrame, nds);
+    PushScriptRemotePacketIfNeeded(instanceID, logFrame, nds);
+    SaveMvlAutoRestartCheckpointIfNeeded(instanceID, logFrame, nds);
+}
+
+void SaveAfterFrameArtifacts(int instanceID, melonDS::u32 logFrame, melonDS::NDS* nds)
+{
+    SaveState(instanceID, logFrame, nds);
+    SaveLocalMPState(logFrame);
+    SaveScreenshot(instanceID, logFrame, nds);
+    SaveRamDump(instanceID, logFrame, nds);
+}
+
 void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     const auto afterHookCallStart = std::chrono::steady_clock::now();
@@ -14025,53 +14225,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     if (instanceID < 0 || instanceID >= 16) return;
 
-    melonDS::u32 logFrame = frame;
-    if (G.TestEnabled)
-    {
-        logFrame = ++G.TestFrameCount[instanceID];
-        if (logFrame == 1)
-        {
-            std::lock_guard<std::mutex> lock(G.Mutex);
-            if (!G.TestTimerStarted)
-            {
-                G.TestTimerStarted = true;
-                G.TestTimerStart = std::chrono::steady_clock::now();
-            }
-        }
-        const melonDS::u32 activeStartFrame = G.ActiveFpsStartFrame != 0
-            ? G.ActiveFpsStartFrame
-            : (G.NetplayStartFrame != 0
-                ? G.NetplayStartFrame + 120
-                : 120);
-        if (!G.ActiveTimerStarted[instanceID] && logFrame >= activeStartFrame)
-        {
-            std::lock_guard<std::mutex> lock(G.Mutex);
-            if (!G.ActiveTimerStarted[instanceID])
-            {
-                G.ActiveTimerStarted[instanceID] = true;
-                G.ActiveTimerStartFrame[instanceID] = logFrame;
-                G.ActiveTimerStart[instanceID] = std::chrono::steady_clock::now();
-            }
-        }
-        RecordActiveFrameTiming(instanceID, logFrame);
-        const bool heartbeatActive = G.ActiveTimerStarted[instanceID] || logFrame >= activeStartFrame;
-        if (G.FrameHeartbeatInterval > 0
-            && heartbeatActive
-            && logFrame != G.LastFrameHeartbeat[instanceID]
-            && (logFrame % static_cast<melonDS::u32>(G.FrameHeartbeatInterval)) == 0)
-        {
-            G.LastFrameHeartbeat[instanceID] = logFrame;
-            std::printf("NSMB Heartbeat: inst=%d frame=%u\n", instanceID, logFrame);
-            if (G.FrameHeartbeat)
-            {
-                G.PendingFrameHeartbeat.store(logFrame, std::memory_order_release);
-            }
-            else
-            {
-                std::fflush(stdout);
-            }
-        }
-    }
+    const melonDS::u32 logFrame = PrepareAfterFrameLogFrame(instanceID, frame);
     const auto afterHeartbeat = std::chrono::steady_clock::now();
     TraceHangPhase("begin", "after-frame", instanceID, logFrame, logFrame, logFrame);
     UpdateHangGameSnapshot(instanceID, logFrame, nds);
@@ -14090,167 +14244,30 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if (G.Enabled)
         ApplyRemoteGameState(instanceID, logFrame, nds);
 
-    const bool bridgeNetworkActive =
-        !G.DeferNetworkUntilStart || G.NetplayStartFrame == 0 || logFrame >= G.NetplayStartFrame;
     TraceHangPhase("begin", "packet-bridge", instanceID, logFrame, logFrame, logFrame);
-    if (G.Enabled && G.PacketBridgeEnabled && bridgeNetworkActive)
-    {
-        std::lock_guard<std::mutex> lock(G.Mutex);
-        PumpNSMLPacketBridgeLocked(nds, logFrame);
-        ForceNSMLGameLocalPlayerIDIfNeeded(logFrame, nds);
-        CaptureAndSendNSMLPacketLocked(logFrame, nds);
-    }
-    if (G.Enabled && G.PacketBridgeEnabled && bridgeNetworkActive)
-    {
-        ForceNSMLGameLocalPlayerIDIfNeeded(logFrame, nds);
-        melonDS::NSML_RefreshMarioVsLuigiPacketSlots(nds);
-        ForceNSMLGameLocalPlayerIDIfNeeded(logFrame, nds);
-    }
-    if (G.Enabled && G.PacketBridgeEnabled && bridgeNetworkActive)
-        ThrottleNSMLPacketBridgeFrameLead(nds, logFrame);
+    RunAfterFramePacketBridgePhase(logFrame, nds);
     const auto afterBridge = std::chrono::steady_clock::now();
 
     TraceHangPhase("begin", "life-trace", instanceID, logFrame, logFrame, logFrame);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+    if (CanRunFrameHooks(instanceID, nds))
         TracePlayerLifeChanges(instanceID, logFrame, nds);
     const auto afterLifeTrace = std::chrono::steady_clock::now();
 
     TraceHangPhase("begin", "diagnostic-snapshot", instanceID, logFrame, logFrame, logFrame);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+    if (CanRunFrameHooks(instanceID, nds))
         RecordDiagnosticSnapshotIfNeeded(instanceID, logFrame, nds);
     const auto afterDiagnosticSnapshot = std::chrono::steady_clock::now();
 
     TraceHangPhase("begin", "rollback-trace", instanceID, logFrame, logFrame, logFrame);
-    if (G.RollbackEnabled
-        && G.InputNetplayTraceEnabled
-        && logFrame != G.LastRollbackTraceFrame
-        && (logFrame % 120) == 0)
-    {
-        std::lock_guard<std::mutex> lock(G.Mutex);
-        G.LastRollbackTraceFrame = logFrame;
-        const size_t avgBytes = G.RollbackCheckpointSaveCount == 0
-            ? 0
-            : static_cast<size_t>(G.RollbackCheckpointTotalBytes / G.RollbackCheckpointSaveCount);
-        const unsigned long long saveAvgUs = G.RollbackCheckpointSaveCount == 0
-            ? 0
-            : G.RollbackCheckpointSaveTotalUs / G.RollbackCheckpointSaveCount;
-        const unsigned long long restoreAvgUs = G.RollbackCheckpointRestoreOpCount == 0
-            ? 0
-            : G.RollbackCheckpointRestoreTotalUs / G.RollbackCheckpointRestoreOpCount;
-        const unsigned long long resimRunAvgUs = G.RollbackMeasuredResimFrameCount == 0
-            ? 0
-            : G.RollbackResimRunFrameTotalUs / G.RollbackMeasuredResimFrameCount;
-        const unsigned long long resimCheckpointSaveAvgUs = G.RollbackMeasuredResimFrameCount == 0
-            ? 0
-            : G.RollbackResimCheckpointSaveTotalUs / G.RollbackMeasuredResimFrameCount;
-        const unsigned long long resimTotalAvgUs = G.RollbackMeasuredResimOpCount == 0
-            ? 0
-            : G.RollbackResimCorrectionTotalUs / G.RollbackMeasuredResimOpCount;
-        size_t deltaCheckpoints = 0;
-        size_t keyframeCheckpoints = 0;
-        size_t preimageCheckpoints = 0;
-        size_t preimageBytes = 0;
-        size_t mainRAMCopyBytes = 0;
-        for (const auto& [storedFrame, stored] : G.RollbackStore.States())
-        {
-            (void)storedFrame;
-            if (stored.MainRAMDelta)
-                deltaCheckpoints++;
-            if (stored.MainRAMFramePreimage)
-            {
-                preimageCheckpoints++;
-                preimageBytes += stored.MainRAMPreimagePages.size() * sizeof(melonDS::u32)
-                    + stored.MainRAMPreimage.size();
-            }
-            else if ((G.RollbackBackendMode == RollbackBackend::CoreDelta
-                || G.RollbackBackendMode == RollbackBackend::CoreFrameDelta)
-                && !stored.Buffer.empty())
-                keyframeCheckpoints++;
-            mainRAMCopyBytes += stored.MainRAMCopy.size();
-        }
-        std::printf(
-            "NSMB Rollback: frame=%u backend=%s checkpoints=%zu checkpointSaves=%u bytesLast=%zu bytesMin=%zu bytesMax=%zu bytesAvg=%zu saveAvgUs=%llu saveMaxUs=%llu restoreOps=%u restoreAvgUs=%llu restoreMaxUs=%llu resimOps=%u resimFrames=%llu resimRunAvgUs=%llu resimRunMaxUs=%llu resimSaveAvgUs=%llu resimSaveMaxUs=%llu resimTotalAvgUs=%llu resimTotalMaxUs=%llu delta=%zu keyframes=%zu preimages=%zu preimageBytes=%zu mainRAMCopies=%zu keyInt=%d page=%d coreSkip=0x%X tinyFlags=0x%X wide=%d deltaDiscovered=%d actorArena=%d arm9Stack=%d skipInput=%d restoreDiff=%d procList=%d heapScan=%d procObjs=%u procNodes=%u heapObjs=%u scanInt=%d heapScanInt=%d scanRefresh=%u scanCacheHits=%u heapScanRefresh=%u heapScanCacheHits=%u predicted=%zu predictions=%u predProbe=%u mismatches=%u restores=%u resims=%u pending=%u observed=%u\n",
-            logFrame,
-            RollbackBackendName(),
-            G.RollbackStore.Size(),
-            G.RollbackCheckpointSaveCount,
-            G.RollbackCheckpointLastBytes,
-            G.RollbackCheckpointMinBytes,
-            G.RollbackCheckpointMaxBytes,
-            avgBytes,
-            saveAvgUs,
-            G.RollbackCheckpointSaveMaxUs,
-            G.RollbackCheckpointRestoreOpCount,
-            restoreAvgUs,
-            G.RollbackCheckpointRestoreMaxUs,
-            G.RollbackMeasuredResimOpCount,
-            G.RollbackMeasuredResimFrameCount,
-            resimRunAvgUs,
-            G.RollbackResimRunFrameMaxUs,
-            resimCheckpointSaveAvgUs,
-            G.RollbackResimCheckpointSaveMaxUs,
-            resimTotalAvgUs,
-            G.RollbackResimCorrectionMaxUs,
-            deltaCheckpoints,
-            keyframeCheckpoints,
-            preimageCheckpoints,
-            preimageBytes,
-            mainRAMCopyBytes,
-            G.RollbackDeltaKeyframeInterval,
-            G.RollbackMainRAMPageSize,
-            G.RollbackCoreSkipMask,
-            G.RollbackTinyCoreFlags,
-            G.RollbackNSMBWideRanges ? 1 : 0,
-            G.RollbackNSMBDeltaDiscoveredRanges ? 1 : 0,
-            G.RollbackNSMBActorArenaRanges ? 1 : 0,
-            G.RollbackNSMBArm9StackRange ? 1 : 0,
-            G.RollbackNSMBSkipInputRanges ? 1 : 0,
-            G.RollbackNSMBRestoreDiffTrace ? 1 : 0,
-            G.RollbackNSMBProcessListRanges ? 1 : 0,
-            G.RollbackNSMBHeapScanRanges ? 1 : 0,
-            G.RollbackNSMBProcessListObjectCount,
-            G.RollbackNSMBProcessListNodeCount,
-            G.RollbackNSMBHeapScanObjectCount,
-            G.RollbackNSMBScanInterval,
-            G.RollbackNSMBHeapScanInterval,
-            G.RollbackNSMBRangeScanRefreshCount,
-            G.RollbackNSMBRangeCacheHitCount,
-            G.RollbackNSMBHeapScanRefreshCount,
-            G.RollbackNSMBHeapScanCacheHitCount,
-            G.PredictedRemoteInputs.size(),
-            G.RollbackPredictionCount,
-            G.RollbackPredictionProbeCount,
-            G.RollbackMismatchCount,
-            G.RollbackRestoreCount,
-            G.RollbackResimulateCount,
-            G.PendingRollbackFrame,
-            G.PendingRollbackObservedFrame);
-        std::fflush(stdout);
-    }
+    TraceRollbackStatsIfNeeded(logFrame);
     const auto afterRollbackTrace = std::chrono::steady_clock::now();
 
     TraceHangPhase("begin", "runtime-force", instanceID, logFrame, logFrame, logFrame);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForcePlayerDeathCountersIfNeeded(instanceID, logFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        NormalizeMvlEntranceSpawnStateIfNeeded(instanceID, logFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForcePlayerPowerupsIfNeeded(instanceID, logFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForcePlayerInventoryPowerupsIfNeeded(instanceID, logFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForcePlayerStarCountersIfNeeded(instanceID, logFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        PushScriptRemotePacketIfNeeded(instanceID, logFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        SaveMvlAutoRestartCheckpointIfNeeded(instanceID, logFrame, nds);
+    RunAfterFrameRuntimePatchPhase(instanceID, logFrame, nds);
     const auto afterRuntimeForce = std::chrono::steady_clock::now();
 
     TraceHangPhase("begin", "artifacts", instanceID, logFrame, logFrame, logFrame);
-    SaveState(instanceID, logFrame, nds);
-    SaveLocalMPState(logFrame);
-    SaveScreenshot(instanceID, logFrame, nds);
-    SaveRamDump(instanceID, logFrame, nds);
+    SaveAfterFrameArtifacts(instanceID, logFrame, nds);
     const auto afterArtifacts = std::chrono::steady_clock::now();
     const auto afterPreSnapshot = std::chrono::steady_clock::now();
     TraceHangPhase("begin", "sync-world", instanceID, logFrame, logFrame, logFrame);
