@@ -15,6 +15,8 @@ set(SOURCES_QT_SDL
     NsmbNetplayPoC.h
     NsmbNetplayConfig.cpp
     NsmbNetplayConfig.h
+    NsmbInputTimeline.cpp
+    NsmbInputTimeline.h
     NsmbAiObservation.cpp
     NsmbAiObservation.h
     NsmbImitationAI.cpp
@@ -139,6 +141,23 @@ if (BUILD_TESTING)
         AUTORCC OFF
     )
     add_test(NAME nsmb-netplay-config COMMAND nsmb_netplay_config_tests)
+
+    add_executable(nsmb_input_timeline_tests
+        NsmbInputTimeline.cpp
+        NsmbInputTimeline.h
+        NsmbNetplayPoC.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_input_timeline_tests.cpp
+    )
+    target_include_directories(nsmb_input_timeline_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_input_timeline_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-input-timeline COMMAND nsmb_input_timeline_tests)
 endif()
 
 add_subdirectory("../../net"

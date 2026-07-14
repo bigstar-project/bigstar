@@ -9,10 +9,11 @@
 - 完了: CTestへ `nsmb_netplay_config_tests` を登録し、既存env valueのflag/int/double/u32/fallback semanticsをROMなし約0.1秒で検査できるようにした。`EnvFlag/EnvInt/EnvDouble/EnvU32/EnvCString/EnvHasValue` の実装は `NsmbNetplayConfig.cpp` へ抽出した。
 - 完了: process environmentを差し替え可能な `Config::Environment` とtyped `BootstrapConfig` を追加し、PoC/test有効化、test frame/instance、hash、wait/quit、input trace設定を `InitFromEnvironment` から抽出した。defaultとclampをfake environmentで直接検証する。
 - 完了: Clangの`unused-function/variable/const-variable`診断で未使用と確認した旧PoC定数4個と関数3個を削除した。削除対象は旧VSConnect submenu/course-select address、loose object scan/read helper、旧nearest hazard helper。`State`直下877 fieldは全て`G.<field>`参照があり、単純な未参照fieldは0件だった。
+- 完了: input script parserとtimeline適用を `NsmbInputTimeline.cpp` へ抽出した。ROM不要testでactive-low button/mask、instance/ALL target、touch clamp、重複spanの先勝ち、fallback、target/range/input/touch error分類を検査する。productionのfixture file loadも同じmoduleを通る。
 - 完了: `scripts/test-nsmb-netplay-refactor.ps1` にfast/standard/full tierを追加した。fastは専用の非対称入力fixture、固定match seed、stable host/client ROM、2-process ENet、JIT、実player actor更新、host/client semantic state比較を1,250 framesで実行する。standardは描画/screenshot込み3,000 frames、fullはstandardに加えてstar取得からresult sceneまでの6,000 frames smokeを実行する。
 - Current blocker: なし。fast goldenは現在のstable ROM hashも検査するため、ROM patchを意図的に変更する作業ではsemantic差分を確認してgoldenを明示更新する必要がある。
-- Next action: connection/input/rollback設定は既存の初期化順依存をcharacterization testで固定してからtyped configへ移す。古いPoC機能は、env設定→State field→実行hook→現行GUI/scriptの到達性を調べ、到達不能なfeature group単位で削除する。
-- Verification status: Release `melonDS` とunit targetのbuild成功。CTestはpass。旧binary baseline 2,300 framesはpass。新fast tierは15.5秒でpassし、固定seed後は独立2 runのhost/client semantic CSVと適用inputがbyte-for-byte一致。env lookup/`BootstrapConfig` 抽出後とunused code削除後のbinaryでもfast gameplay golden comparisonがpassし、Clang unused診断は0件になった。
+- Next action: wire input packet/bundle codecをraw ENet pumpから分離し、golden bytesとmalformed packet testを追加する。connection/input/rollback設定は既存の初期化順依存をcharacterization testで固定してからtyped configへ移す。古いPoC機能はenv→State→hook→launcherの到達性でfeature group単位に削除する。
+- Verification status: Release `melonDS` と2 unit targetのbuild成功。CTest 2件は合計約0.17秒でpass。旧binary baseline 2,300 framesはpass。固定seedのfast tierは独立runでbyte-for-byte一致し、env/`BootstrapConfig`、unused削除、input timeline抽出後もfast gameplay golden comparisonがpassした。Clang unused診断は0件。
 
 ## AI observation v3 / exact player hitbox - 2026-07-14
 

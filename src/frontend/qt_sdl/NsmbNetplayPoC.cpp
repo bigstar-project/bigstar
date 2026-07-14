@@ -13,6 +13,7 @@
 
 #include "NsmbNetplayPoC.h"
 #include "NsmbNetplayConfig.h"
+#include "NsmbInputTimeline.h"
 #include "NsmbImitationAI.h"
 #include "NsmbRuleAI.h"
 
@@ -2492,17 +2493,9 @@ struct State
     unsigned long long FrameLeadThrottleMaxUs = 0;
 };
 
-struct InputSpan
-{
-    int Instance = -1;
-    melonDS::u32 Start = 0;
-    melonDS::u32 End = 0;
-    InputState Input;
-};
-
 State G;
-std::vector<InputSpan> GInputScript;
-std::vector<InputSpan> GScriptRemotePacketInputScript;
+std::vector<InputTimeline::InputSpan> GInputScript;
+std::vector<InputTimeline::InputSpan> GScriptRemotePacketInputScript;
 
 void TraceHangPhase(const char* event, const char* phase, int instanceID = -1,
     melonDS::u32 frame = 0, melonDS::u32 logicalFrame = 0, melonDS::u32 sendFrame = 0);
@@ -3336,142 +3329,36 @@ bool ParseU32(const std::string& text, melonDS::u32& out)
     return true;
 }
 
-int ButtonBit(const std::string& name)
-{
-    const std::string key = Upper(name);
-    if (key == "A") return 0;
-    if (key == "B") return 1;
-    if (key == "SELECT") return 2;
-    if (key == "START") return 3;
-    if (key == "RIGHT") return 4;
-    if (key == "LEFT") return 5;
-    if (key == "UP") return 6;
-    if (key == "DOWN") return 7;
-    if (key == "R") return 8;
-    if (key == "L") return 9;
-    if (key == "X") return 10;
-    if (key == "Y") return 11;
-    return -1;
-}
-
-bool ParseInputSpec(const std::string& spec, InputState& input)
-{
-    input = NeutralInput();
-
-    if (spec.empty() || Upper(spec) == "NONE" || Upper(spec) == "NEUTRAL")
-        return true;
-
-    if (spec.rfind("mask=", 0) == 0 || spec.rfind("MASK=", 0) == 0)
-    {
-        melonDS::u32 mask = 0;
-        if (!ParseU32(spec.substr(5), mask)) return false;
-        input.KeyMask = mask & 0xFFF;
-        return true;
-    }
-
-    std::stringstream ss(spec);
-    std::string button;
-    while (std::getline(ss, button, '+'))
-    {
-        button = Trim(button);
-        const int bit = ButtonBit(button);
-        if (bit < 0) return false;
-        input.KeyMask &= ~(1u << bit);
-    }
-
-    return true;
-}
-
-bool LoadInputScriptFileLocked(const std::string& path, std::vector<InputSpan>& spans)
+bool LoadInputScriptFileLocked(
+    const std::string& path,
+    std::vector<InputTimeline::InputSpan>& spans)
 {
     if (path.empty()) return true;
 
-    spans.clear();
-    std::ifstream file(path);
-    if (!file)
+    InputTimeline::ParseError error;
+    if (!InputTimeline::LoadInputScriptFile(path, spans, error))
     {
-        std::printf("NSMB Test: failed to open input script: %s\n", path.c_str());
+        const char* message = "invalid input line";
+        switch (error.Kind)
+        {
+        case InputTimeline::ParseErrorKind::Open:
+            std::printf("NSMB Test: failed to open input script: %s\n", path.c_str());
+            return false;
+        case InputTimeline::ParseErrorKind::Target:
+            message = "invalid input target";
+            break;
+        case InputTimeline::ParseErrorKind::Range:
+            message = "invalid range";
+            break;
+        case InputTimeline::ParseErrorKind::Touch:
+            message = "invalid touch";
+            break;
+        case InputTimeline::ParseErrorKind::Input:
+        case InputTimeline::ParseErrorKind::None:
+            break;
+        }
+        std::printf("NSMB Test: %s at %s:%d\n", message, path.c_str(), error.Line);
         return false;
-    }
-
-    std::string line;
-    int lineNo = 0;
-    while (std::getline(file, line))
-    {
-        lineNo++;
-
-        const auto comment = line.find('#');
-        if (comment != std::string::npos)
-            line.resize(comment);
-        line = Trim(line);
-        if (line.empty()) continue;
-
-        std::stringstream ss(line);
-        std::string target;
-        std::string range;
-        std::string buttons;
-        std::string touch;
-        ss >> target >> range >> buttons >> touch;
-
-        InputSpan span;
-        if (target.find('-') != std::string::npos)
-        {
-            touch = buttons;
-            buttons = range;
-            range = target;
-        }
-        else
-        {
-            const std::string upperTarget = Upper(target);
-            if (upperTarget != "ALL")
-            {
-                const std::string prefix = "INST";
-                melonDS::u32 targetInstance = 0;
-                if (upperTarget.rfind(prefix, 0) != 0 ||
-                    !ParseU32(upperTarget.substr(prefix.size()), targetInstance) ||
-                    targetInstance >= 16)
-                {
-                    std::printf("NSMB Test: invalid input target at %s:%d\n", path.c_str(), lineNo);
-                    return false;
-                }
-                span.Instance = static_cast<int>(targetInstance);
-            }
-        }
-
-        const auto dash = range.find('-');
-        if (dash == std::string::npos)
-        {
-            std::printf("NSMB Test: invalid range at %s:%d\n", path.c_str(), lineNo);
-            return false;
-        }
-
-        if (!ParseU32(range.substr(0, dash), span.Start) ||
-            !ParseU32(range.substr(dash + 1), span.End) ||
-            span.End < span.Start ||
-            !ParseInputSpec(buttons, span.Input))
-        {
-            std::printf("NSMB Test: invalid input line at %s:%d\n", path.c_str(), lineNo);
-            return false;
-        }
-
-        if (!touch.empty())
-        {
-            const auto comma = touch.find(',');
-            melonDS::u32 x = 0;
-            melonDS::u32 y = 0;
-            if (comma == std::string::npos ||
-                !ParseU32(touch.substr(0, comma), x) ||
-                !ParseU32(touch.substr(comma + 1), y))
-            {
-                std::printf("NSMB Test: invalid touch at %s:%d\n", path.c_str(), lineNo);
-                return false;
-            }
-            span.Input.Touching = true;
-            span.Input.TouchX = static_cast<melonDS::u16>(std::min<melonDS::u32>(x, 255));
-            span.Input.TouchY = static_cast<melonDS::u16>(std::min<melonDS::u32>(y, 191));
-        }
-
-        spans.push_back(span);
     }
 
     std::printf("NSMB Test: loaded %zu input spans from %s\n",
@@ -3745,28 +3632,10 @@ void CompareGameStateLocked(int instanceID, melonDS::u32 frame)
         static_cast<unsigned long long>(rhs.RenderCandidate));
 }
 
-InputState ApplyInputSpans(
-    const std::vector<InputSpan>& spans,
-    int instanceID,
-    melonDS::u32 frame,
-    const InputState& fallback)
-{
-    if (spans.empty()) return fallback;
-
-    for (const InputSpan& span : spans)
-    {
-        if ((span.Instance < 0 || span.Instance == instanceID) &&
-            frame >= span.Start && frame <= span.End)
-            return span.Input;
-    }
-
-    return fallback;
-}
-
 InputState ApplyInputScript(int instanceID, melonDS::u32 frame, const InputState& fallback)
 {
     if (!G.TestEnabled) return fallback;
-    return ApplyInputSpans(GInputScript, instanceID, frame, fallback);
+    return InputTimeline::Apply(GInputScript, instanceID, frame, fallback);
 }
 
 InputState ApplyScriptRemotePacketInputScript(int instanceID, melonDS::u32 frame, const InputState& fallback)
@@ -3774,7 +3643,7 @@ InputState ApplyScriptRemotePacketInputScript(int instanceID, melonDS::u32 frame
     if (!G.TestEnabled) return fallback;
     if (GScriptRemotePacketInputScript.empty())
         return ApplyInputScript(instanceID, frame, fallback);
-    return ApplyInputSpans(GScriptRemotePacketInputScript, instanceID, frame, fallback);
+    return InputTimeline::Apply(GScriptRemotePacketInputScript, instanceID, frame, fallback);
 }
 
 NsmbRuleAI::Config RuleAIConfig()
