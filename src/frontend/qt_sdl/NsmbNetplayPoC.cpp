@@ -4119,6 +4119,92 @@ void HandleReceivedSessionLocked(const void* data, std::size_t size, melonDS::u3
     std::printf("NSMB InputNetplay: received start ready frame=%u\n", message.Value);
 }
 
+enum class ReceiveDisposition
+{
+    CleanupPacket,
+    SkipPacketCleanup,
+};
+
+void HandleReceivedNSMLPacketLocked(
+    const void* data,
+    std::size_t size,
+    melonDS::NDS* nds,
+    melonDS::u32 localFrame)
+{
+    WireNSMLPacket packet;
+    std::memcpy(&packet, data, size);
+    if (packet.Magic != kMagic || packet.Version != kVersion
+        || packet.Kind != kWireKindPacket || packet.Player > 1)
+    {
+        return;
+    }
+
+    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
+    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
+        return;
+    if (G.PacketBridgeEnabled && nds)
+        melonDS::NSML_PushMarioVsLuigiRemotePacket(nds, packet.Player, packet.Packet);
+    else
+        G.PendingNSMLPackets.push_back(packet);
+    const bool newTick = packet.Tick != G.LastReceivedNSMLPacketTick[packet.Player];
+    G.LastReceivedNSMLPacketTick[packet.Player] = packet.Tick;
+    G.LastReceivedNSMLPacketFrame[packet.Player] = packet.Frame;
+    if (G.PacketBridgeTraceEnabled && newTick)
+    {
+        const melonDS::u32 keys = packet.Packet[2] | (packet.Packet[3] << 8);
+        std::printf("NSMB PacketBridge: recv player=%u tick=0x%04X keys=0x%04X action=0x%02X b5=0x%02X b6=0x%02X b7=0x%02X bit=0x%02X remoteFrame=%u localFrame=%u pending=%zu\n",
+            packet.Player,
+            packet.Tick,
+            keys,
+            packet.Packet[4],
+            packet.Packet[5],
+            packet.Packet[6],
+            packet.Packet[7],
+            packet.Packet[0x29],
+            packet.Frame,
+            localFrame,
+            G.PendingNSMLPackets.size());
+    }
+}
+
+ReceiveDisposition HandleReceivedPlayerStateLocked(
+    const void* data,
+    std::size_t size,
+    melonDS::u32 localFrame)
+{
+    WirePlayerState packet;
+    std::memcpy(&packet, data, size);
+    if (packet.Magic != kMagic || packet.Version != kVersion
+        || packet.Kind != kWireKindPlayerState || packet.Player > 1)
+    {
+        return ReceiveDisposition::CleanupPacket;
+    }
+
+    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
+    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
+        return ReceiveDisposition::SkipPacketCleanup;
+    G.RemotePlayerStateSamples[PlayerStateKey(packet.Player, packet.Frame)] = packet;
+    while (G.RemotePlayerStateSamples.size() > 240)
+        G.RemotePlayerStateSamples.erase(G.RemotePlayerStateSamples.begin());
+    if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled)
+        && (G.InputTraceInterval <= 1
+            || (localFrame != kNoFrameLimit
+                && (localFrame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0)))
+    {
+        std::printf("NSMB PlayerState: recv localFrame=%u packetFrame=%u player=%u found=%u pos=%08X/%08X vel=%08X/%08X stored=%zu\n",
+            localFrame,
+            packet.Frame,
+            packet.Player,
+            packet.Found,
+            packet.PosX,
+            packet.PosY,
+            packet.VelX,
+            packet.VelY,
+            G.RemotePlayerStateSamples.size());
+    }
+    return ReceiveDisposition::CleanupPacket;
+}
+
 void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kNoFrameLimit)
 {
     if (!G.Host) return;
@@ -4195,67 +4281,21 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
             }
             else if (packetClass == PacketClassifier::PacketClass::NSMLPacket)
             {
-                WireNSMLPacket packet;
-                std::memcpy(&packet, event.packet->data, sizeof(packet));
-                if (packet.Magic == kMagic && packet.Version == kVersion && packet.Kind == kWireKindPacket
-                    && packet.Player <= 1)
-                {
-                    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
-                    if (restartCutoff == 0 || packet.Frame > restartCutoff)
-                    {
-                        if (G.PacketBridgeEnabled && nds)
-                            melonDS::NSML_PushMarioVsLuigiRemotePacket(nds, packet.Player, packet.Packet);
-                        else
-                            G.PendingNSMLPackets.push_back(packet);
-                        const bool newTick = packet.Tick != G.LastReceivedNSMLPacketTick[packet.Player];
-                        G.LastReceivedNSMLPacketTick[packet.Player] = packet.Tick;
-                        G.LastReceivedNSMLPacketFrame[packet.Player] = packet.Frame;
-                        if (G.PacketBridgeTraceEnabled && newTick)
-                        {
-                            const melonDS::u32 keys = packet.Packet[2] | (packet.Packet[3] << 8);
-                            std::printf("NSMB PacketBridge: recv player=%u tick=0x%04X keys=0x%04X action=0x%02X b5=0x%02X b6=0x%02X b7=0x%02X bit=0x%02X remoteFrame=%u localFrame=%u pending=%zu\n",
-                                packet.Player,
-                                packet.Tick,
-                                keys,
-                                packet.Packet[4],
-                                packet.Packet[5],
-                                packet.Packet[6],
-                                packet.Packet[7],
-                                packet.Packet[0x29],
-                                packet.Frame,
-                                localFrame,
-                                G.PendingNSMLPackets.size());
-                        }
-                    }
-                }
+                HandleReceivedNSMLPacketLocked(
+                    event.packet->data,
+                    event.packet->dataLength,
+                    nds,
+                    localFrame);
             }
             else if (packetClass == PacketClassifier::PacketClass::PlayerState)
             {
-                WirePlayerState packet;
-                std::memcpy(&packet, event.packet->data, sizeof(packet));
-                if (packet.Magic == kMagic && packet.Version == kVersion
-                    && packet.Kind == kWireKindPlayerState && packet.Player <= 1)
+                if (HandleReceivedPlayerStateLocked(
+                        event.packet->data,
+                        event.packet->dataLength,
+                        localFrame)
+                    == ReceiveDisposition::SkipPacketCleanup)
                 {
-                    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
-                    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
-                        break;
-                    G.RemotePlayerStateSamples[PlayerStateKey(packet.Player, packet.Frame)] = packet;
-                    while (G.RemotePlayerStateSamples.size() > 240)
-                        G.RemotePlayerStateSamples.erase(G.RemotePlayerStateSamples.begin());
-                    if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled) &&
-                        (G.InputTraceInterval <= 1 || (localFrame != kNoFrameLimit && (localFrame % static_cast<melonDS::u32>(G.InputTraceInterval)) == 0)))
-                    {
-                        std::printf("NSMB PlayerState: recv localFrame=%u packetFrame=%u player=%u found=%u pos=%08X/%08X vel=%08X/%08X stored=%zu\n",
-                            localFrame,
-                            packet.Frame,
-                            packet.Player,
-                            packet.Found,
-                            packet.PosX,
-                            packet.PosY,
-                            packet.VelX,
-                            packet.VelY,
-                            G.RemotePlayerStateSamples.size());
-                    }
+                    break;
                 }
             }
             else if (packetClass == PacketClassifier::PacketClass::WorldState)
