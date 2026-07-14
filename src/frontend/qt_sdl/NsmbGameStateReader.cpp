@@ -18,6 +18,7 @@ constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
 constexpr melonDS::u16 kVsMovingHazardObjectID = 0x0053;
 constexpr melonDS::u32 kVsMovingHazardSettings = 0x00000000;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
+constexpr melonDS::u16 kStageFXObjectID = 0x0012;
 constexpr melonDS::u32 kStageSceneUpdateDispatchTableAddr = 0x020CA378;
 constexpr melonDS::u32 kStageSceneRenderDispatchTableAddr = 0x020CA398;
 constexpr melonDS::u16 kStageActorManagerObjectID = 0x012F;
@@ -73,6 +74,19 @@ constexpr melonDS::u32 kCollisionMgrTileByteABOffset = 0xAB;
 constexpr melonDS::u32 kCollisionMgrModifierStateOffset = 0xB0;
 constexpr melonDS::u32 kCollisionMgrUnknownB1Offset = 0xB1;
 constexpr melonDS::u32 kPlayerBasePlayerIDOffset = 0x7B4;
+constexpr melonDS::u32 kGamePlayerPowerupAddr = 0x0208B324;
+constexpr melonDS::u32 kGamePlayerDeadAddr = 0x0208B328;
+constexpr melonDS::u32 kGamePlayerInventoryPowerupAddr = 0x0208B32C;
+constexpr melonDS::u32 kGamePlayerCharacterAddr = 0x0208B330;
+constexpr melonDS::u32 kGamePlayerTransitionStatusAddr = 0x0208B354;
+constexpr melonDS::u32 kGamePlayerCountAddr = 0x0208B348;
+constexpr melonDS::u32 kGamePlayerLivesAddr = 0x0208B364;
+constexpr melonDS::u32 kGamePlayerBattleStarsAddr = 0x0208B36C;
+constexpr melonDS::u32 kGamePlayerCoinsAddr = 0x0208B37C;
+constexpr melonDS::u32 kGamePlayerScoreAddr = 0x0208B384;
+constexpr melonDS::u32 kGamePlayerDisplayedStarsAddr = 0x0208B38C;
+constexpr melonDS::u32 kGamePlayerDeathsAddr = 0x0208B394;
+constexpr melonDS::u32 kGamePlayerCollectedStarsAddr = 0x0208B39C;
 using GameStateModel::AIPlayerTileProbeSample;
 using GameStateModel::AITileGridSample;
 using GameStateModel::AITileProbeSample;
@@ -1883,6 +1897,112 @@ ReadAIPlayerTileProbeSample(melonDS::NDS *nds, const ObjectScanSample &actor) {
     }
   }
   return probe;
+}
+
+void FillWireWorldActorState(
+    const ObjectScanSample &actor,
+    WireProtocol::WireWorldActorState &state) {
+  state.Found = actor.Found;
+  state.GUID = actor.GUID;
+  state.Settings = actor.Settings;
+  state.StateType = actor.StateType;
+  state.Flags = actor.Flags;
+  state.PosX = actor.PosX;
+  state.PosY = actor.PosY;
+  state.PosZ = actor.PosZ;
+  state.PrevX = actor.PrevX;
+  state.PrevY = actor.PrevY;
+  state.PrevZ = actor.PrevZ;
+  state.VelX = actor.VelX;
+  state.VelY = actor.VelY;
+  state.VelZ = actor.VelZ;
+  state.LastStepX = actor.LastStepX;
+  state.LastStepY = actor.LastStepY;
+  state.LastStepZ = actor.LastStepZ;
+  state.VelH = actor.VelH;
+  state.TargetVelH = actor.TargetVelH;
+  state.AccelV = actor.AccelV;
+  state.TargetVelV = actor.TargetVelV;
+  state.AccelH = actor.AccelH;
+  state.TargetVelX = actor.TargetVelX;
+  state.TargetVelY = actor.TargetVelY;
+  state.TargetVelZ = actor.TargetVelZ;
+}
+
+std::vector<WorldActorSnapshotCandidate>
+CollectWorldActorSnapshotCandidates(melonDS::NDS *nds) {
+  const auto isCandidate = [](const GameStateObjectScanEntry &entry) {
+    if (!entry.Actor.Found || entry.Actor.StateType == 0 ||
+        entry.Actor.StateType > 2 || entry.Actor.Flags >= 0x10000000)
+      return false;
+    switch (entry.ObjectID) {
+    case kPlayerObjectID:
+    case kVsBattleStarActorObjectID:
+    case kVsMovingHazardObjectID:
+    case kStageSceneObjectID:
+    case kStageFXObjectID:
+    case kStageActorManagerObjectID:
+    case kStageControllerObjectID:
+    case kMvlObject267ID:
+    case kVsConnectObjectID:
+    case kCourseSelectObjectID:
+    case kStageCameraObjectID:
+      return false;
+    default:
+      return entry.ObjectID != 0 && entry.ObjectID < 0x0300;
+    }
+  };
+
+  std::vector<WorldActorSnapshotCandidate> actors;
+  const GameStateObjectScanCache cache = BuildGameStateObjectScanCache(nds);
+  actors.reserve(
+      std::min(cache.Entries.size(), WireProtocol::kMaxWorldActorSnapshots));
+  for (const GameStateObjectScanEntry &entry : cache.Entries) {
+    if (isCandidate(entry))
+      actors.push_back({entry.ObjectID, entry.Actor});
+  }
+  std::sort(actors.begin(), actors.end(),
+            [](const WorldActorSnapshotCandidate &lhs,
+               const WorldActorSnapshotCandidate &rhs) {
+              if (lhs.ObjectID != rhs.ObjectID)
+                return lhs.ObjectID < rhs.ObjectID;
+              if (lhs.Actor.Settings != rhs.Actor.Settings)
+                return lhs.Actor.Settings < rhs.Actor.Settings;
+              if (lhs.Actor.PosX != rhs.Actor.PosX)
+                return lhs.Actor.PosX < rhs.Actor.PosX;
+              return lhs.Actor.GUID < rhs.Actor.GUID;
+            });
+  if (actors.size() > WireProtocol::kMaxWorldActorSnapshots)
+    actors.resize(WireProtocol::kMaxWorldActorSnapshots);
+  return actors;
+}
+
+void ReadPlayerGlobalState(melonDS::NDS *nds, melonDS::u32 player,
+                           WireProtocol::WirePlayerState &state) {
+  if (!nds || !nds->MainRAM || player > 1)
+    return;
+  state.PlayerCount = nds->ARM9Read32(kGamePlayerCountAddr);
+  state.Powerup = nds->ARM9Read8(kGamePlayerPowerupAddr + player);
+  state.InventoryPowerup =
+      nds->ARM9Read8(kGamePlayerInventoryPowerupAddr + player);
+  state.Dead = nds->ARM9Read8(kGamePlayerDeadAddr + player);
+  state.Character = nds->ARM9Read8(kGamePlayerCharacterAddr + player);
+  state.TransitionStatus = nds->ARM9Read32(
+      kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32) * player);
+  state.Lives = nds->ARM9Read32(kGamePlayerLivesAddr +
+                                sizeof(melonDS::u32) * player);
+  state.BattleStars = nds->ARM9Read32(
+      kGamePlayerBattleStarsAddr + sizeof(melonDS::u32) * player);
+  state.Coins = nds->ARM9Read32(kGamePlayerCoinsAddr +
+                                sizeof(melonDS::u32) * player);
+  state.Score = nds->ARM9Read32(kGamePlayerScoreAddr +
+                                sizeof(melonDS::u32) * player);
+  state.DisplayedStars = nds->ARM9Read32(
+      kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32) * player);
+  state.Deaths = nds->ARM9Read32(kGamePlayerDeathsAddr +
+                                 sizeof(melonDS::u32) * player);
+  state.CollectedStars = nds->ARM9Read32(
+      kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32) * player);
 }
 
 } // namespace NsmbNetplayPoC::GameStateReader

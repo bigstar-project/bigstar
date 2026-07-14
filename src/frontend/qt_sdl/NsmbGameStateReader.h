@@ -83,6 +83,11 @@ struct GameStateObjectScanCache {
   ObjectLifecycleSummary Lifecycle;
 };
 
+struct WorldActorSnapshotCandidate {
+  melonDS::u32 ObjectID = 0;
+  ObjectScanSample Actor;
+};
+
 class ScopedGameStateObjectScanCache {
 public:
   explicit ScopedGameStateObjectScanCache(
@@ -126,6 +131,13 @@ ObjectScanSample FindNewestActiveObjectByIDAndSettings(
     melonDS::NDS *nds, melonDS::u16 expectedObjectID,
     melonDS::u32 expectedSettings, bool includeStateType2 = false);
 ObjectLifecycleSummary SummarizeObjectLifecycle(melonDS::NDS *nds);
+void FillWireWorldActorState(
+    const ObjectScanSample &actor,
+    WireProtocol::WireWorldActorState &state);
+std::vector<WorldActorSnapshotCandidate>
+CollectWorldActorSnapshotCandidates(melonDS::NDS *nds);
+void ReadPlayerGlobalState(melonDS::NDS *nds, melonDS::u32 player,
+                           WireProtocol::WirePlayerState &state);
 
 void ReadCoreState(melonDS::NDS *nds, GameStateModel::GameStateSample &sample);
 void ReadBattleStarState(melonDS::NDS *nds,

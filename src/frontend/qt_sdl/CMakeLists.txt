@@ -27,7 +27,9 @@ set(SOURCES_QT_SDL
     NsmbNetplayTransport.h
     NsmbGameState.cpp
     NsmbGameStateReader.cpp
+    NsmbGameStateWriter.cpp
     NsmbGameState.h
+    NsmbGameStateWriter.h
     NsmbRollbackStore.cpp
     NsmbRollbackStore.h
     NsmbAiObservation.cpp
@@ -259,6 +261,7 @@ if (BUILD_TESTING)
     add_executable(nsmb_game_state_tests
         NsmbGameState.cpp
         NsmbGameState.h
+        NsmbGameStateWriter.h
         NsmbNetplayProtocol.h
         ${CMAKE_SOURCE_DIR}/tests/nsmb_game_state_tests.cpp
     )

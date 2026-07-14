@@ -1,4 +1,5 @@
 #include "NsmbGameState.h"
+#include "NsmbGameStateWriter.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -89,6 +90,32 @@ void TestGameStateHashes() {
   hashes.WifiCandidate = 0x2122232425262728ull;
   hashes.RenderCandidate = 0x3132333435363738ull;
   CHECK(CombinedGameStateHash(hashes) == 0x81FED12C6E7300F0ull);
+}
+
+void TestWorldActorPredictionContract() {
+  using namespace NsmbNetplayPoC;
+  WireProtocol::WireWorldActorState state{};
+  state.PosX = 0x00001000u;
+  state.PosY = 0xFFFFFF00u;
+  state.PosZ = 0x7FFFFFF0u;
+  state.PrevX = 0x00000800u;
+  state.PrevY = 0x00000400u;
+  state.PrevZ = 0xFFFFFFF0u;
+  state.VelX = 0x00000100u;
+  state.VelY = 0xFFFFFF80u;
+  state.VelZ = 0x00000020u;
+
+  const GameStateWriter::ObjectTransform predicted =
+      GameStateWriter::PredictWorldActorTransform(state, 4);
+  CHECK(predicted.PosX == 0x00001400u);
+  CHECK(predicted.PosY == 0xFFFFFD00u);
+  CHECK(predicted.PosZ == 0x80000070u);
+  CHECK(predicted.PrevX == 0x00000C00u);
+  CHECK(predicted.PrevY == 0x00000200u);
+  CHECK(predicted.PrevZ == 0x00000070u);
+  CHECK(predicted.VelX == state.VelX);
+  CHECK(predicted.VelY == state.VelY);
+  CHECK(predicted.VelZ == state.VelZ);
 }
 
 void TestRemoteStateStoreSelectionAndRestart() {
@@ -309,6 +336,7 @@ int main() {
   TestEveryWireWordRoundTrips();
   TestMalformedHeadersAreRejected();
   TestGameStateHashes();
+  TestWorldActorPredictionContract();
   TestRemoteStateStoreSelectionAndRestart();
   TestStateSyncRuntimeRestartContract();
   TestGameStateTraceRowFormatting();

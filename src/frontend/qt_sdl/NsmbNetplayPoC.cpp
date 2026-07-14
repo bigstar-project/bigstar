@@ -19,6 +19,7 @@
 #include "NsmbNetplayTransport.h"
 #include "NsmbGameState.h"
 #include "NsmbGameStateReader.h"
+#include "NsmbGameStateWriter.h"
 #include "NsmbRollbackStore.h"
 #include "NsmbInputTimeline.h"
 #include "NsmbImitationAI.h"
@@ -133,6 +134,10 @@ using GameStateReader::PlayerActorScanSample;
 using GameStateReader::ObjectLifecycleSummary;
 using GameStateReader::GameStateObjectScanCache;
 using GameStateReader::GameStateObjectScanEntry;
+using GameStateReader::WorldActorSnapshotCandidate;
+using GameStateReader::CollectWorldActorSnapshotCandidates;
+using GameStateReader::FillWireWorldActorState;
+using GameStateReader::ReadPlayerGlobalState;
 using GameStateReader::ScopedGameStateObjectScanCache;
 using GameStateReader::BuildGameStateObjectScanCache;
 using GameStateReader::FindActiveObjectsByIDAndSettings;
@@ -175,7 +180,6 @@ unsigned long long NowUnixMs()
 }
 constexpr melonDS::u32 kNetState5CAddr = 0x0208883C; // Net::errorState
 constexpr melonDS::u32 kNetGGIDAddr = 0x02088858;
-constexpr melonDS::u32 kNetRandomBranchAddressAddr = 0x0208885C;
 constexpr melonDS::u32 kNetPacketTickAddr = 0x020888E0;
 constexpr melonDS::u32 kNetPacketActionAddr = 0x020888E4;
 constexpr melonDS::u32 kNetPacketByte5Addr = 0x020888E5;
@@ -210,7 +214,6 @@ constexpr melonDS::u32 kGamePlayerScoreAddr = 0x0208B384;
 constexpr melonDS::u32 kGamePlayerDisplayedStarsAddr = 0x0208B38C;
 constexpr melonDS::u32 kGamePlayerDeathsAddr = 0x0208B394;
 constexpr melonDS::u32 kGamePlayerCollectedStarsAddr = 0x0208B39C;
-constexpr melonDS::u32 kGameVsCoinCountAddr = 0x0208B37C;
 constexpr melonDS::u32 kGameCandidateWifiBlockAddr = 0x0208B7A0;
 constexpr melonDS::u32 kGameCandidateRenderBlockAddr = 0x023F8300;
 constexpr melonDS::u16 kPlayerObjectID = 0x0015;
@@ -4380,39 +4383,6 @@ bool IsMainRAMAddress(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 size = 
     return offset < ramLen && size <= ramLen - offset;
 }
 
-bool ReadMainRAMU16(melonDS::NDS* nds, melonDS::u32 offset, melonDS::u16& value)
-{
-    if (!nds || !nds->MainRAM)
-        return false;
-    if (offset + sizeof(value) > nds->MainRAMMask + 1)
-        return false;
-
-    std::memcpy(&value, &nds->MainRAM[offset], sizeof(value));
-    return true;
-}
-
-bool ReadMainRAMU8(melonDS::NDS* nds, melonDS::u32 offset, melonDS::u8& value)
-{
-    if (!nds || !nds->MainRAM)
-        return false;
-    if (offset + sizeof(value) > nds->MainRAMMask + 1)
-        return false;
-
-    value = nds->MainRAM[offset];
-    return true;
-}
-
-bool ReadMainRAMU32(melonDS::NDS* nds, melonDS::u32 offset, melonDS::u32& value)
-{
-    if (!nds || !nds->MainRAM)
-        return false;
-    if (offset + sizeof(value) > nds->MainRAMMask + 1)
-        return false;
-
-    std::memcpy(&value, &nds->MainRAM[offset], sizeof(value));
-    return true;
-}
-
 bool WriteMainRAMU32(melonDS::NDS* nds, melonDS::u32 offset, melonDS::u32 value)
 {
     if (!nds || !nds->MainRAM)
@@ -4422,51 +4392,6 @@ bool WriteMainRAMU32(melonDS::NDS* nds, melonDS::u32 offset, melonDS::u32 value)
 
     std::memcpy(&nds->MainRAM[offset], &value, sizeof(value));
     return true;
-}
-
-bool WriteMainRAMU8(melonDS::NDS* nds, melonDS::u32 offset, melonDS::u8 value)
-{
-    if (!nds || !nds->MainRAM)
-        return false;
-    if (offset + sizeof(value) > nds->MainRAMMask + 1)
-        return false;
-
-    nds->MainRAM[offset] = value;
-    return true;
-}
-
-bool MainRAMOffsetFromAddr(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 size, melonDS::u32& offset)
-{
-    if (!nds || !nds->MainRAM || addr < kMainRAMBase)
-        return false;
-
-    offset = addr - kMainRAMBase;
-    return offset + size <= nds->MainRAMMask + 1;
-}
-
-bool WriteMainRAMAddrU8IfChanged(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u8 value)
-{
-    melonDS::u32 off = 0;
-    if (!MainRAMOffsetFromAddr(nds, addr, sizeof(value), off))
-        return false;
-
-    if (nds->MainRAM[off] == value)
-        return true;
-    return WriteMainRAMU8(nds, off, value);
-}
-
-bool WriteMainRAMAddrU32IfChanged(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 value)
-{
-    melonDS::u32 off = 0;
-    melonDS::u32 current = 0;
-    if (!MainRAMOffsetFromAddr(nds, addr, sizeof(value), off))
-        return false;
-    if (!ReadMainRAMU32(nds, off, current))
-        return false;
-
-    if (current == value)
-        return true;
-    return WriteMainRAMU32(nds, off, value);
 }
 
 bool WriteARM9U32(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 value)
@@ -6371,20 +6296,6 @@ void WriteObjectTransform(melonDS::NDS* nds, const ObjectScanSample& actor, melo
     }
 }
 
-bool WriteObjectWordByIDAndSettings(
-    melonDS::NDS* nds,
-    melonDS::u16 expectedObjectID,
-    melonDS::u32 expectedSettings,
-    melonDS::u32 relativeOffset,
-    melonDS::u32 value)
-{
-    const ObjectScanSample actor = FindObjectByIDAndSettings(nds, expectedObjectID, expectedSettings);
-    if (!actor.Found || actor.Base < kMainRAMBase)
-        return false;
-    WriteMainRAMU32(nds, actor.Base - kMainRAMBase + relativeOffset, value);
-    return true;
-}
-
 void ApplyPlayerStickToStar(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (G.RuntimePatch.PlayerStickToStarStartFrame == 0 && G.RuntimePatch.PlayerStickToStarEndFrame == 0) return;
@@ -7439,356 +7350,6 @@ void ClearMvlCameraInitHoldIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
     std::fflush(stdout);
 }
 
-bool WriteObjectPositionByGUID(melonDS::NDS* nds, melonDS::u32 guid, melonDS::u32 posX, melonDS::u32 posY, melonDS::u32 posZ)
-{
-    if (!nds || !nds->MainRAM || guid == 0)
-        return false;
-
-    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
-    if (ramLen < 0x120)
-        return false;
-
-    for (melonDS::u32 off = 0; off <= ramLen - 0x120; off += 4)
-    {
-        melonDS::u32 candidateGUID = 0;
-        if (!ReadMainRAMU32(nds, off + 4, candidateGUID) || candidateGUID != guid)
-            continue;
-
-        melonDS::u32 vtable = 0;
-        melonDS::u16 objectID = 0;
-        melonDS::u16 stateType = 0;
-        melonDS::u32 flags = 0;
-        if (!ReadMainRAMU32(nds, off, vtable) ||
-            !ReadMainRAMU16(nds, off + 0x0C, objectID) ||
-            !ReadMainRAMU16(nds, off + 0x0E, stateType) ||
-            !ReadMainRAMU32(nds, off + 0x10, flags))
-            continue;
-
-        if (vtable < kMainRAMBase || vtable >= kMainRAMBase + ramLen)
-            continue;
-        if (objectID == 0 || objectID >= 0x400)
-            continue;
-        if (stateType != 1 && stateType != 2 && stateType != 3)
-            continue;
-        if (flags >= 0x10000000)
-            continue;
-
-        WriteMainRAMU32(nds, off + 0x60, posX);
-        WriteMainRAMU32(nds, off + 0x64, posY);
-        WriteMainRAMU32(nds, off + 0x68, posZ);
-        return true;
-    }
-
-    return false;
-}
-
-bool WriteObjectPositionByIDAndSettings(
-    melonDS::NDS* nds,
-    melonDS::u16 expectedObjectID,
-    melonDS::u32 expectedSettings,
-    melonDS::u32 posX,
-    melonDS::u32 posY,
-    melonDS::u32 posZ)
-{
-    ObjectScanSample actor = FindObjectByIDAndSettings(nds, expectedObjectID, expectedSettings);
-    if (!actor.Found || actor.Base < kMainRAMBase)
-        return false;
-
-    const melonDS::u32 off = actor.Base - kMainRAMBase;
-    WriteMainRAMU32(nds, off + 0x60, posX);
-    WriteMainRAMU32(nds, off + 0x64, posY);
-    WriteMainRAMU32(nds, off + 0x68, posZ);
-    WriteMainRAMU32(nds, off + 0x70, posX);
-    WriteMainRAMU32(nds, off + 0x74, posY);
-    WriteMainRAMU32(nds, off + 0x78, posZ);
-    return true;
-}
-
-bool WriteVsBattleStarCandidatePosition(melonDS::NDS* nds, melonDS::u32 posX, melonDS::u32 posY, melonDS::u32 posZ)
-{
-    ObjectScanSample actor = FindVsBattleStarCandidate(nds);
-    if (!actor.Found || actor.Base < kMainRAMBase)
-        return false;
-
-    const melonDS::u32 off = actor.Base - kMainRAMBase;
-    WriteMainRAMU32(nds, off + 0x60, posX);
-    WriteMainRAMU32(nds, off + 0x64, posY);
-    WriteMainRAMU32(nds, off + 0x68, posZ);
-    WriteMainRAMU32(nds, off + 0x70, posX);
-    WriteMainRAMU32(nds, off + 0x74, posY);
-    WriteMainRAMU32(nds, off + 0x78, posZ);
-    return true;
-}
-
-bool WriteObjectTransformByGUID(
-    melonDS::NDS* nds,
-    melonDS::u32 guid,
-    melonDS::u32 posX,
-    melonDS::u32 posY,
-    melonDS::u32 posZ,
-    melonDS::u32 prevX,
-    melonDS::u32 prevY,
-    melonDS::u32 prevZ,
-    melonDS::u32 velX,
-    melonDS::u32 velY,
-    melonDS::u32 velZ)
-{
-    if (!nds || !nds->MainRAM || guid == 0)
-        return false;
-
-    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
-    if (ramLen < 0x120)
-        return false;
-
-    for (melonDS::u32 off = 0; off <= ramLen - 0x120; off += 4)
-    {
-        melonDS::u32 candidateGUID = 0;
-        if (!ReadMainRAMU32(nds, off + 4, candidateGUID) || candidateGUID != guid)
-            continue;
-
-        melonDS::u32 vtable = 0;
-        melonDS::u16 objectID = 0;
-        melonDS::u16 stateType = 0;
-        melonDS::u32 flags = 0;
-        if (!ReadMainRAMU32(nds, off, vtable) ||
-            !ReadMainRAMU16(nds, off + 0x0C, objectID) ||
-            !ReadMainRAMU16(nds, off + 0x0E, stateType) ||
-            !ReadMainRAMU32(nds, off + 0x10, flags))
-            continue;
-
-        if (vtable < kMainRAMBase || vtable >= kMainRAMBase + ramLen)
-            continue;
-        if (objectID == 0 || objectID >= 0x400)
-            continue;
-        if (stateType != 1 && stateType != 2 && stateType != 3)
-            continue;
-        if (flags >= 0x10000000)
-            continue;
-
-        WriteMainRAMU32(nds, off + 0x60, posX);
-        WriteMainRAMU32(nds, off + 0x64, posY);
-        WriteMainRAMU32(nds, off + 0x68, posZ);
-        WriteMainRAMU32(nds, off + 0x70, prevX);
-        WriteMainRAMU32(nds, off + 0x74, prevY);
-        WriteMainRAMU32(nds, off + 0x78, prevZ);
-        WriteMainRAMU32(nds, off + 0xD0, velX);
-        WriteMainRAMU32(nds, off + 0xD4, velY);
-        WriteMainRAMU32(nds, off + 0xD8, velZ);
-        return true;
-    }
-
-    return false;
-}
-
-bool WriteObjectTransformByBase(
-    melonDS::NDS* nds,
-    melonDS::u32 base,
-    melonDS::u32 posX,
-    melonDS::u32 posY,
-    melonDS::u32 posZ,
-    melonDS::u32 prevX,
-    melonDS::u32 prevY,
-    melonDS::u32 prevZ,
-    melonDS::u32 velX,
-    melonDS::u32 velY,
-    melonDS::u32 velZ)
-{
-    if (!nds || !nds->MainRAM || base < kMainRAMBase)
-        return false;
-
-    const melonDS::u32 off = base - kMainRAMBase;
-    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
-    if (off + 0xDC > ramLen)
-        return false;
-
-    WriteMainRAMU32(nds, off + 0x60, posX);
-    WriteMainRAMU32(nds, off + 0x64, posY);
-    WriteMainRAMU32(nds, off + 0x68, posZ);
-    WriteMainRAMU32(nds, off + 0x70, prevX);
-    WriteMainRAMU32(nds, off + 0x74, prevY);
-    WriteMainRAMU32(nds, off + 0x78, prevZ);
-    WriteMainRAMU32(nds, off + 0xD0, velX);
-    WriteMainRAMU32(nds, off + 0xD4, velY);
-    WriteMainRAMU32(nds, off + 0xD8, velZ);
-    return true;
-}
-
-void FillWireWorldActorState(const ObjectScanSample& actor, WireWorldActorState& state)
-{
-    state.Found = actor.Found;
-    state.GUID = actor.GUID;
-    state.Settings = actor.Settings;
-    state.StateType = actor.StateType;
-    state.Flags = actor.Flags;
-    state.PosX = actor.PosX;
-    state.PosY = actor.PosY;
-    state.PosZ = actor.PosZ;
-    state.PrevX = actor.PrevX;
-    state.PrevY = actor.PrevY;
-    state.PrevZ = actor.PrevZ;
-    state.VelX = actor.VelX;
-    state.VelY = actor.VelY;
-    state.VelZ = actor.VelZ;
-    state.LastStepX = actor.LastStepX;
-    state.LastStepY = actor.LastStepY;
-    state.LastStepZ = actor.LastStepZ;
-    state.VelH = actor.VelH;
-    state.TargetVelH = actor.TargetVelH;
-    state.AccelV = actor.AccelV;
-    state.TargetVelV = actor.TargetVelV;
-    state.AccelH = actor.AccelH;
-    state.TargetVelX = actor.TargetVelX;
-    state.TargetVelY = actor.TargetVelY;
-    state.TargetVelZ = actor.TargetVelZ;
-}
-
-bool IsWorldActorSnapshotCandidate(const GameStateObjectScanEntry& entry)
-{
-    if (!entry.Actor.Found || entry.Actor.StateType == 0 || entry.Actor.StateType > 2)
-        return false;
-    if (entry.Actor.Flags >= 0x10000000)
-        return false;
-
-    switch (entry.ObjectID)
-    {
-    case kPlayerObjectID:
-    case kVsBattleStarActorObjectID:
-    case kVsMovingHazardObjectID:
-    case kStageSceneObjectID:
-    case kStageFXObjectID:
-    case kStageActorManagerObjectID:
-    case kStageControllerObjectID:
-    case kMvlObject267ID:
-    case kVsConnectObjectID:
-    case kCourseSelectObjectID:
-    case kStageCameraObjectID:
-        return false;
-    default:
-        break;
-    }
-
-    return entry.ObjectID != 0 && entry.ObjectID < 0x0300;
-}
-
-struct WorldActorSnapshotCandidate
-{
-    melonDS::u32 ObjectID = 0;
-    ObjectScanSample Actor;
-};
-
-std::vector<WorldActorSnapshotCandidate> CollectWorldActorSnapshotCandidates(melonDS::NDS* nds)
-{
-    std::vector<WorldActorSnapshotCandidate> actors;
-    const GameStateObjectScanCache cache = BuildGameStateObjectScanCache(nds);
-    actors.reserve(std::min(cache.Entries.size(), kMaxWorldActorSnapshots));
-    for (const GameStateObjectScanEntry& entry : cache.Entries)
-    {
-        if (!IsWorldActorSnapshotCandidate(entry))
-            continue;
-
-        WorldActorSnapshotCandidate state {};
-        state.ObjectID = entry.ObjectID;
-        state.Actor = entry.Actor;
-        actors.push_back(state);
-    }
-
-    std::sort(actors.begin(), actors.end(), [](const WorldActorSnapshotCandidate& lhs, const WorldActorSnapshotCandidate& rhs) {
-        if (lhs.ObjectID != rhs.ObjectID)
-            return lhs.ObjectID < rhs.ObjectID;
-        if (lhs.Actor.Settings != rhs.Actor.Settings)
-            return lhs.Actor.Settings < rhs.Actor.Settings;
-        if (lhs.Actor.PosX != rhs.Actor.PosX)
-            return lhs.Actor.PosX < rhs.Actor.PosX;
-        return lhs.Actor.GUID < rhs.Actor.GUID;
-    });
-    if (actors.size() > kMaxWorldActorSnapshots)
-        actors.resize(kMaxWorldActorSnapshots);
-    return actors;
-}
-
-bool ApplyWireWorldActorState(
-    melonDS::NDS* nds,
-    const WireWorldActorState& state,
-    melonDS::u32 predictFrames,
-    melonDS::u32 localBase)
-{
-    if (!state.Found)
-        return false;
-
-    return WriteObjectTransformByBase(
-        nds,
-        localBase,
-        state.PosX + state.VelX * predictFrames,
-        state.PosY + state.VelY * predictFrames,
-        state.PosZ + state.VelZ * predictFrames,
-        state.PrevX + state.VelX * predictFrames,
-        state.PrevY + state.VelY * predictFrames,
-        state.PrevZ + state.VelZ * predictFrames,
-        state.VelX,
-        state.VelY,
-        state.VelZ);
-}
-
-bool ApplyWireWorldMovingHazardState(
-    melonDS::NDS* nds,
-    const WireWorldActorState& state,
-    melonDS::u32 predictFrames,
-    melonDS::u32 localBase)
-{
-    if (!state.Found)
-        return false;
-
-    nds->ARM9Write16(localBase + 0x0E, static_cast<melonDS::u16>(state.StateType));
-    nds->ARM9Write32(localBase + 0x10, state.Flags);
-
-    const melonDS::u32 posX = state.PosX + state.VelX * predictFrames;
-    const melonDS::u32 posY = state.PosY + state.VelY * predictFrames;
-    const melonDS::u32 posZ = state.PosZ + state.VelZ * predictFrames;
-    if (!WriteObjectTransformByBase(
-        nds,
-        localBase,
-        posX,
-        posY,
-        posZ,
-        posX,
-        posY,
-        posZ,
-        state.VelX,
-        state.VelY,
-        0))
-        return false;
-
-    nds->ARM9Write32(localBase + 0x80, state.LastStepX);
-    nds->ARM9Write32(localBase + 0x84, state.LastStepY);
-    nds->ARM9Write32(localBase + 0x88, state.LastStepZ);
-    nds->ARM9Write32(localBase + 0xB0, state.VelH);
-    nds->ARM9Write32(localBase + 0xB4, state.TargetVelH);
-    nds->ARM9Write32(localBase + 0xB8, state.AccelV);
-    nds->ARM9Write32(localBase + 0xBC, state.TargetVelV);
-    nds->ARM9Write32(localBase + 0xC0, state.AccelH);
-    nds->ARM9Write32(localBase + 0xE0, state.TargetVelX);
-    nds->ARM9Write32(localBase + 0xE4, state.TargetVelY);
-    nds->ARM9Write32(localBase + 0xE8, state.TargetVelZ);
-    return true;
-}
-
-melonDS::u64 WorldMovingHazardMatchDistance(
-    const WireWorldActorState& remoteActor,
-    const ObjectScanSample& localActor)
-{
-    const auto componentDistance = [](melonDS::u32 lhs, melonDS::u32 rhs)
-    {
-        const std::int64_t delta =
-            static_cast<std::int64_t>(static_cast<std::int32_t>(lhs)) -
-            static_cast<std::int64_t>(static_cast<std::int32_t>(rhs));
-        return static_cast<melonDS::u64>(delta < 0 ? -delta : delta);
-    };
-
-    return componentDistance(remoteActor.PosX, localActor.PosX) +
-        componentDistance(remoteActor.PosY, localActor.PosY) +
-        componentDistance(remoteActor.PosZ, localActor.PosZ);
-}
-
 void ApplyRemoteWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.Enabled || !G.StateSync.WorldApplyActorSnapshot || G.NetRole != Role::Client || !nds || !nds->MainRAM)
@@ -7865,7 +7426,7 @@ void ApplyRemoteWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melo
                 localActor.Actor.StateType > 2)
                 continue;
 
-            const melonDS::u64 distance = WorldMovingHazardMatchDistance(remoteActor.Actor, localActor.Actor);
+            const melonDS::u64 distance = GameStateWriter::WorldActorMatchDistance(remoteActor.Actor, localActor.Actor);
             if (distance < closestDistance ||
                 (distance == closestDistance &&
                     (closestIndex == localActors.size() ||
@@ -7894,7 +7455,7 @@ void ApplyRemoteWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melo
 
         const WireWorldObjectActorState& remoteActor = sample.Actors[i];
         const WorldActorSnapshotCandidate& localActor = localActors[localIndices[i]];
-        if (ApplyWireWorldActorState(nds, remoteActor.Actor, predictFrames, localActor.Actor.Base))
+        if (GameStateWriter::ApplyWireWorldActorState(nds, remoteActor.Actor, predictFrames, localActor.Actor.Base))
         {
             applied++;
             nextRemoteGUIDs[i] = remoteActor.Actor.GUID;
@@ -8035,7 +7596,7 @@ WorldItemApplyResult ApplyRemoteWorldItemLikeState(
         true);
     if (localItem.StateType == 1 || localItem.StateType == 2)
     {
-        result.Applied = ApplyWireWorldActorState(nds, sample, predictFrames, localItem.Base);
+        result.Applied = GameStateWriter::ApplyWireWorldActorState(nds, sample, predictFrames, localItem.Base);
         lastSpawnedRemoteGUID = sample.GUID;
         pendingRemoteGUID = 0;
         pendingFirstMissingFrame = 0;
@@ -8110,7 +7671,7 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
             G.StateSync.WorldApplyStarActor &&
             star.StateType == 1 &&
             sample.Star.StateType == 1 &&
-            ApplyWireWorldActorState(nds, sample.Star, predictFrames, star.Base);
+            GameStateWriter::ApplyWireWorldActorState(nds, sample.Star, predictFrames, star.Base);
     }
     WorldItemApplyResult worldItemResult {};
     WorldItemApplyResult neutralWorldItemResult {};
@@ -8256,7 +7817,7 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
                 continue;
 
             const melonDS::u64 distance =
-                WorldMovingHazardMatchDistance(remoteActor, localActors[localIndex]);
+                GameStateWriter::WorldActorMatchDistance(remoteActor, localActors[localIndex]);
             if (distance < closestDistance ||
                 (distance == closestDistance &&
                     (closestIndex == localActors.size() ||
@@ -8282,7 +7843,7 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
         mapChanged = mapChanged ||
             G.GameSync.WorldMovingHazardRemoteGUIDMaps[instanceID][i] != nextRemoteGUIDs[i] ||
             G.GameSync.WorldMovingHazardLocalGUIDMaps[instanceID][i] != nextLocalGUIDs[i];
-        ApplyWireWorldMovingHazardState(nds, remoteActor, predictFrames, localActor.Base);
+        GameStateWriter::ApplyWireWorldMovingHazardState(nds, remoteActor, predictFrames, localActor.Base);
     }
 
     for (std::size_t i = 0; i < kMaxWorldMovingHazards; i++)
@@ -8344,130 +7905,6 @@ void ApplyRemoteWorldEffectState(int instanceID, melonDS::u32 frame, melonDS::ND
     }
 }
 
-bool WritePlayerRuntimeStateByBase(melonDS::NDS* nds, melonDS::u32 base, const WirePlayerState& state)
-{
-    if (!nds || !nds->MainRAM || base < kMainRAMBase)
-        return false;
-
-    const melonDS::u32 off = base - kMainRAMBase;
-    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
-    if (off + kPlayerBaseVisibleFlagOffset + 1 > ramLen)
-        return false;
-
-    nds->ARM9Write32(base + kPlayerBaseActionFlagOffset, state.ActionFlag);
-    nds->ARM9Write32(base + kPlayerBaseSubActionFlagOffset, state.SubActionFlag);
-    nds->ARM9Write32(base + kPlayerBasePhysicsFlagOffset, state.PhysicsFlag);
-    nds->ARM9Write32(base + kPlayerBaseTransitionFlagOffset, state.TransitionFlag);
-    nds->ARM9Write32(base + kPlayerBaseCollisionFlagOffset, state.CollisionFlag);
-    nds->ARM9Write32(base + kPlayerBaseEnvironmentFlagOffset, state.EnvironmentFlag);
-    nds->ARM9Write16(base + kPlayerBaseDamageCooldownOffset, static_cast<melonDS::u16>(state.DamageCooldown & 0xFFFFu));
-    nds->ARM9Write8(base + kPlayerBaseUpdateLockedOffset, static_cast<melonDS::u8>(state.RuntimeFlags0 & 0xFFu));
-    nds->ARM9Write8(base + kPlayerBaseCharacterIDOffset, static_cast<melonDS::u8>((state.RuntimeFlags0 >> 8) & 0xFFu));
-    nds->ARM9Write8(base + kPlayerBaseTransitioningFlagOffset, static_cast<melonDS::u8>((state.RuntimeFlags0 >> 16) & 0xFFu));
-    nds->ARM9Write8(base + kPlayerBaseCameraFocusModeOffset, static_cast<melonDS::u8>((state.RuntimeFlags0 >> 24) & 0xFFu));
-    nds->ARM9Write8(base + kPlayerBaseDefeatedFlagOffset, static_cast<melonDS::u8>(state.RuntimeFlags1 & 0xFFu));
-    nds->ARM9Write8(base + kPlayerBasePlayerIDOffset, static_cast<melonDS::u8>((state.RuntimeFlags1 >> 8) & 0xFFu));
-    nds->ARM9Write8(base + kPlayerBaseVisibleFlagOffset, static_cast<melonDS::u8>((state.RuntimeFlags1 >> 16) & 0xFFu));
-    return true;
-}
-
-bool WritePlayerMinimalTransitionStateByBase(melonDS::NDS* nds, melonDS::u32 base, const WirePlayerState& state)
-{
-    if (!nds || !nds->MainRAM || base < kMainRAMBase)
-        return false;
-
-    bool ok = true;
-    ok = WriteMainRAMAddrU8IfChanged(
-        nds,
-        base + kPlayerBaseDefeatedFlagOffset,
-        static_cast<melonDS::u8>(state.RuntimeFlags1 & 0xFFu)) && ok;
-    ok = WriteMainRAMAddrU8IfChanged(
-        nds,
-        base + kPlayerBaseVisibleFlagOffset,
-        static_cast<melonDS::u8>((state.RuntimeFlags1 >> 16) & 0xFFu)) && ok;
-    return ok;
-}
-
-bool IsPlayerInActorTransition(melonDS::NDS* nds, melonDS::u32 base)
-{
-    if (!nds || !nds->MainRAM || base < kMainRAMBase)
-        return false;
-
-    const melonDS::u32 off = base - kMainRAMBase;
-    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
-    if (off + kPlayerBaseTransitionStepOffset + 1 > ramLen)
-        return false;
-
-    const melonDS::u8 transitionStep = nds->ARM9Read8(base + kPlayerBaseTransitionStepOffset);
-    return transitionStep != 1;
-}
-
-void ReadPlayerGlobalState(melonDS::NDS* nds, melonDS::u32 player, WirePlayerState& state)
-{
-    if (!nds || !nds->MainRAM || player > 1)
-        return;
-
-    state.PlayerCount = nds->ARM9Read32(kGamePlayerCountAddr);
-    state.Powerup = nds->ARM9Read8(kGamePlayerPowerupAddr + player);
-    state.InventoryPowerup = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr + player);
-    state.Dead = nds->ARM9Read8(kGamePlayerDeadAddr + player);
-    state.Character = nds->ARM9Read8(kGamePlayerCharacterAddr + player);
-    state.TransitionStatus = nds->ARM9Read32(kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32) * player);
-    state.Lives = nds->ARM9Read32(kGamePlayerLivesAddr + sizeof(melonDS::u32) * player);
-    state.BattleStars = nds->ARM9Read32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32) * player);
-    state.Coins = nds->ARM9Read32(kGamePlayerCoinsAddr + sizeof(melonDS::u32) * player);
-    state.Score = nds->ARM9Read32(kGamePlayerScoreAddr + sizeof(melonDS::u32) * player);
-    state.DisplayedStars = nds->ARM9Read32(kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32) * player);
-    state.Deaths = nds->ARM9Read32(kGamePlayerDeathsAddr + sizeof(melonDS::u32) * player);
-    state.CollectedStars = nds->ARM9Read32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32) * player);
-}
-
-bool WritePlayerGlobalState(melonDS::NDS* nds, const WirePlayerState& state)
-{
-    if (!nds || !nds->MainRAM || state.Player > 1)
-        return false;
-
-    const melonDS::u32 player = state.Player;
-    bool ok = true;
-
-    melonDS::u32 currentDeaths = 0;
-    melonDS::u8 currentDead = 0;
-    const melonDS::u32 deathsAddr = kGamePlayerDeathsAddr + sizeof(melonDS::u32) * player;
-    const melonDS::u32 deadAddr = kGamePlayerDeadAddr + player;
-    melonDS::u32 deathsOff = 0;
-    melonDS::u32 deadOff = 0;
-    if (MainRAMOffsetFromAddr(nds, deathsAddr, sizeof(currentDeaths), deathsOff))
-        ReadMainRAMU32(nds, deathsOff, currentDeaths);
-    if (MainRAMOffsetFromAddr(nds, deadAddr, sizeof(currentDead), deadOff))
-        ReadMainRAMU8(nds, deadOff, currentDead);
-
-    const bool deathEvent =
-        (state.Dead != 0) ||
-        (currentDead != 0) ||
-        (state.Deaths != currentDeaths);
-    const bool starEvent =
-        state.BattleStars != 0 ||
-        state.DisplayedStars != 0 ||
-        state.CollectedStars != 0;
-
-    if (state.Lives != 0)
-        ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerLivesAddr + sizeof(melonDS::u32) * player, state.Lives) && ok;
-    ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerCoinsAddr + sizeof(melonDS::u32) * player, state.Coins) && ok;
-    if (deathEvent)
-    {
-        ok = WriteMainRAMAddrU8IfChanged(nds, deadAddr, static_cast<melonDS::u8>(state.Dead & 0xFFu)) && ok;
-        ok = WriteMainRAMAddrU32IfChanged(nds, deathsAddr, state.Deaths) && ok;
-        ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32) * player, state.TransitionStatus) && ok;
-    }
-    if (starEvent)
-    {
-        ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerBattleStarsAddr + sizeof(melonDS::u32) * player, state.BattleStars) && ok;
-        ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32) * player, state.DisplayedStars) && ok;
-        ok = WriteMainRAMAddrU32IfChanged(nds, kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32) * player, state.CollectedStars) && ok;
-    }
-    return ok;
-}
-
 void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, bool preferFreshSample = false)
 {
     if (!G.Enabled || !G.StateSync.PlayerApplyEnabled) return;
@@ -8498,7 +7935,7 @@ void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
     const bool shouldApplyGlobals =
         G.StateSync.PlayerGlobalsEnabled &&
         sampleFrame > G.GameSync.LastAppliedPlayerGlobalsFrame[instanceID][remotePlayer];
-    const bool globalsApplied = shouldApplyGlobals && WritePlayerGlobalState(nds, sample);
+    const bool globalsApplied = shouldApplyGlobals && GameStateWriter::WritePlayerGlobalState(nds, sample);
     if (globalsApplied)
         G.GameSync.LastAppliedPlayerGlobalsFrame[instanceID][remotePlayer] = sampleFrame;
     if (!sample.Found)
@@ -8525,11 +7962,11 @@ void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
     const bool transitionMinimalApply =
         G.StateSync.PlayerGlobalsEnabled &&
         localActor.Found &&
-        IsPlayerInActorTransition(nds, localBase);
+        GameStateWriter::IsPlayerInActorTransition(nds, localBase);
     const melonDS::u32 predictFrames = std::min(
         frame - sampleFrame,
         static_cast<melonDS::u32>(std::max(0, G.StateSync.PlayerMaxPredictFrames)));
-    const bool transformApplied = !transitionMinimalApply && WriteObjectTransformByBase(
+    const bool transformApplied = !transitionMinimalApply && GameStateWriter::WriteObjectTransformByBase(
             nds,
             localBase,
             sample.PosX + sample.VelX * predictFrames,
@@ -8542,8 +7979,8 @@ void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
             sample.VelY,
             sample.VelZ);
     const bool runtimeApplied = transitionMinimalApply
-        ? WritePlayerMinimalTransitionStateByBase(nds, localBase, sample)
-        : (transformApplied && WritePlayerRuntimeStateByBase(nds, localBase, sample));
+        ? GameStateWriter::WritePlayerMinimalTransitionStateByBase(nds, localBase, sample)
+        : (transformApplied && GameStateWriter::WritePlayerRuntimeStateByBase(nds, localBase, sample));
 
     if ((G.Bootstrap.InputTraceEnabled || G.Input.NetplayTrace) &&
         (G.Bootstrap.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.Bootstrap.InputTraceInterval)) == 0))
@@ -8585,44 +8022,20 @@ void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             return;
     }
 
-    if (G.StateSync.GameApplyRemotePlayerOnly)
-    {
-        const int remotePlayer = CurrentPacketBridgeLocalPlayer() ^ 1;
-        const PlayerActorScanSample localPlayers = FindPlayerActors(nds);
-        bool applied = false;
-        if (remotePlayer == 0 && sample.PlayerActor0Found)
-        {
-            const melonDS::u32 localBase = localPlayers.Actor0.Found ? localPlayers.Actor0.Base : 0;
-            applied = WriteObjectTransformByBase(
-                nds,
-                localBase,
-                sample.PlayerActor0PosX,
-                sample.PlayerActor0PosY,
-                sample.PlayerActor0PosZ,
-                sample.PlayerActor0PrevX,
-                sample.PlayerActor0PrevY,
-                sample.PlayerActor0PrevZ,
-                sample.PlayerActor0VelX,
-                sample.PlayerActor0VelY,
-                sample.PlayerActor0VelZ);
-        }
-        else if (remotePlayer == 1 && sample.PlayerActor1Found)
-        {
-            const melonDS::u32 localBase = localPlayers.Actor1.Found ? localPlayers.Actor1.Base : 0;
-            applied = WriteObjectTransformByBase(
-                nds,
-                localBase,
-                sample.PlayerActor1PosX,
-                sample.PlayerActor1PosY,
-                sample.PlayerActor1PosZ,
-                sample.PlayerActor1PrevX,
-                sample.PlayerActor1PrevY,
-                sample.PlayerActor1PrevZ,
-                sample.PlayerActor1VelX,
-                sample.PlayerActor1VelY,
-                sample.PlayerActor1VelZ);
-        }
+    GameStateWriter::GameStateApplyOptions options;
+    options.RemotePlayerOnly = G.StateSync.GameApplyRemotePlayerOnly;
+    if (options.RemotePlayerOnly)
+        options.RemotePlayer = CurrentPacketBridgeLocalPlayer() ^ 1;
+    options.CriticalGlobals = G.StateSync.GameApplyCriticalGlobals;
+    options.StageObjects = G.StateSync.GameApplyStageObjects;
+    options.StarObjects = G.StateSync.GameApplyStarObjects;
+    options.PlayerActors = G.StateSync.GameApplyPlayerActors;
+    options.StageSceneSettings = G.MvlCurrentStageSceneSettings;
+    const GameStateWriter::GameStateApplyResult result =
+        GameStateWriter::ApplyGameState(nds, sample, options);
 
+    if (options.RemotePlayerOnly)
+    {
         if ((G.Bootstrap.InputTraceEnabled || G.Input.NetplayTrace) &&
             (G.Bootstrap.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.Bootstrap.InputTraceInterval)) == 0))
         {
@@ -8630,112 +8043,11 @@ void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                 instanceID,
                 frame,
                 sampleFrame,
-                remotePlayer,
-                applied ? 1 : 0);
+                options.RemotePlayer,
+                result.RemotePlayerApplied ? 1 : 0);
         }
         return;
     }
-
-    if (G.StateSync.GameApplyCriticalGlobals)
-    {
-        nds->ARM9Write32(kNetRandomValueAddr, sample.NetRandomValue);
-        nds->ARM9Write8(kNetRandomCallCountAddr, static_cast<melonDS::u8>(sample.NetRandomCallCount & 0xFF));
-        nds->ARM9Write32(kNetRandomBranchAddressAddr, sample.NetRandomBranchAddress);
-        nds->ARM9Write32(kGamePlayerCountAddr, sample.PlayerCount);
-        nds->ARM9Write32(kGamePlayerBattleStarsAddr, sample.Player0BattleStars);
-        nds->ARM9Write32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32), sample.Player1BattleStars);
-        nds->ARM9Write32(kGamePlayerCoinsAddr, sample.Player0Coins);
-        nds->ARM9Write32(kGamePlayerCoinsAddr + sizeof(melonDS::u32), sample.Player1Coins);
-        nds->ARM9Write32(kGamePlayerScoreAddr, sample.Player0Score);
-        nds->ARM9Write32(kGamePlayerScoreAddr + sizeof(melonDS::u32), sample.Player1Score);
-        nds->ARM9Write32(kGamePlayerDisplayedStarsAddr, sample.Player0DisplayedStars);
-        nds->ARM9Write32(kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32), sample.Player1DisplayedStars);
-        nds->ARM9Write32(kGamePlayerDeathsAddr, sample.Player0Deaths);
-        nds->ARM9Write32(kGamePlayerDeathsAddr + sizeof(melonDS::u32), sample.Player1Deaths);
-        nds->ARM9Write32(kGamePlayerCollectedStarsAddr, sample.Player0CollectedStars);
-        nds->ARM9Write32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32), sample.Player1CollectedStars);
-        nds->ARM9Write32(kGameVsCoinCountAddr, sample.VsCoinCount);
-    }
-
-    if (G.StateSync.GameApplyStageObjects && sample.StageCameraFound)
-    {
-        WriteObjectWordByIDAndSettings(nds, kStageCameraObjectID, 0, 0x190, sample.StageCameraWord190);
-        WriteObjectWordByIDAndSettings(nds, kStageCameraObjectID, 0, 0x194, sample.StageCameraWord194);
-        WriteObjectWordByIDAndSettings(nds, kStageCameraObjectID, 0, 0x19C, sample.StageCameraWord19C);
-        WriteObjectWordByIDAndSettings(nds, kStageCameraObjectID, 0, 0x1A0, sample.StageCameraWord1A0);
-    }
-    if (G.StateSync.GameApplyStageObjects && sample.StageSceneFound)
-    {
-        WriteObjectWordByIDAndSettings(nds, kStageSceneObjectID, G.MvlCurrentStageSceneSettings, 0x154, sample.StageSceneWord154);
-        WriteObjectWordByIDAndSettings(nds, kStageSceneObjectID, G.MvlCurrentStageSceneSettings, 0x160, sample.StageSceneWord160);
-    }
-    if (G.StateSync.GameApplyStageObjects && sample.MovingHazardFound)
-    {
-        WriteObjectTransformByGUID(
-            nds,
-            sample.MovingHazardGUID,
-            sample.MovingHazardPosX,
-            sample.MovingHazardPosY,
-            sample.MovingHazardPosZ,
-            sample.MovingHazardPosX,
-            sample.MovingHazardPosY,
-            sample.MovingHazardPosZ,
-            sample.MovingHazardVelX,
-            sample.MovingHazardVelY,
-            0);
-    }
-    if (G.StateSync.GameApplyStarObjects && sample.VsStarFound)
-    {
-        if (!WriteObjectPositionByGUID(nds, sample.VsStarGUID, sample.VsStarPosX, sample.VsStarPosY, sample.VsStarPosZ))
-            WriteVsBattleStarCandidatePosition(nds, sample.VsStarPosX, sample.VsStarPosY, sample.VsStarPosZ);
-    }
-    else if (G.StateSync.GameApplyStarObjects)
-    {
-        WriteVsBattleStarCandidatePosition(nds, 0, 0, 0);
-    }
-    if (G.StateSync.GameApplyStarObjects && sample.VsStarActorFound)
-    {
-        if (!WriteObjectPositionByGUID(nds, sample.VsStarActorGUID, sample.VsStarActorPosX, sample.VsStarActorPosY, sample.VsStarActorPosZ))
-        {
-            WriteObjectPositionByIDAndSettings(
-                nds,
-                kVsBattleStarActorObjectID,
-                kVsBattleStarActorSettings,
-                sample.VsStarActorPosX,
-                sample.VsStarActorPosY,
-                sample.VsStarActorPosZ);
-        }
-    }
-    else if (G.StateSync.GameApplyStarObjects)
-    {
-        WriteObjectPositionByIDAndSettings(nds, kVsBattleStarActorObjectID, kVsBattleStarActorSettings, 0, 0, 0);
-    }
-    if (G.StateSync.GameApplyPlayerActors && sample.PlayerActor0Found)
-        WriteObjectTransformByGUID(
-            nds,
-            sample.PlayerActor0GUID,
-            sample.PlayerActor0PosX,
-            sample.PlayerActor0PosY,
-            sample.PlayerActor0PosZ,
-            sample.PlayerActor0PrevX,
-            sample.PlayerActor0PrevY,
-            sample.PlayerActor0PrevZ,
-            sample.PlayerActor0VelX,
-            sample.PlayerActor0VelY,
-            sample.PlayerActor0VelZ);
-    if (G.StateSync.GameApplyPlayerActors && sample.PlayerActor1Found)
-        WriteObjectTransformByGUID(
-            nds,
-            sample.PlayerActor1GUID,
-            sample.PlayerActor1PosX,
-            sample.PlayerActor1PosY,
-            sample.PlayerActor1PosZ,
-            sample.PlayerActor1PrevX,
-            sample.PlayerActor1PrevY,
-            sample.PlayerActor1PrevZ,
-            sample.PlayerActor1VelX,
-            sample.PlayerActor1VelY,
-            sample.PlayerActor1VelZ);
 
     if (G.Bootstrap.InputTraceEnabled &&
         (G.Bootstrap.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.Bootstrap.InputTraceInterval)) == 0))
@@ -8746,7 +8058,6 @@ void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             sampleFrame);
     }
 }
-
 GameStateSample ReadGameStateSample(melonDS::NDS* nds)
 {
     GameStateSample sample;
