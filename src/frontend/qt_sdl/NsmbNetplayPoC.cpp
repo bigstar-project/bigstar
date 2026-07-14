@@ -392,20 +392,7 @@ enum class Role
     Client,
 };
 
-enum class RollbackBackend
-{
-    Savestate,
-    CoreLite,
-    CoreSparse,
-    CoreDelta,
-    CoreFrameDelta,
-    CorePreimage,
-    TinyCorePreimage,
-    NSMBRanges,
-    NSMBCoreRanges,
-    NSMBTinyCoreRanges,
-    ARM9RAM,
-};
+using RollbackBackend = Config::RollbackBackend;
 
 constexpr melonDS::u32 kRollbackMainRAMModeFull = 0;
 constexpr melonDS::u32 kRollbackMainRAMModeSparse = 1;
@@ -18864,94 +18851,42 @@ void InitFromEnvironment()
     G.NetworkPumpThreadEnabled = EnvFlag("MELONDS_NSML_NET_PUMP_THREAD");
     G.NetworkPumpSleepUs = std::clamp(EnvInt("MELONDS_NSML_NET_PUMP_SLEEP_US", 250), 50, 5000);
     G.InputWaitPollUs = inputConfig.WaitPollUs;
-    G.RollbackEnabled = EnvFlag("MELONDS_NSML_ROLLBACK");
-    G.RollbackResimulate = EnvFlag("MELONDS_NSML_ROLLBACK_RESIMULATE");
-    G.RollbackSkipRenderDuringResim = EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER");
-    G.RollbackSkipIntermediateResimCheckpoints =
-        EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS");
-    G.RollbackInputWaitUs = std::clamp(
-        EnvInt("MELONDS_NSML_ROLLBACK_INPUT_WAIT_US", 0), 0, 20000);
-    G.RollbackRestoreProbe = EnvFlag("MELONDS_NSML_ROLLBACK_RESTORE_PROBE");
-    G.RollbackPredictionProbeModulo = std::clamp(
-        EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_MODULO", 0), 0, 600);
-    G.RollbackPredictionProbeOffset = std::clamp(
-        EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_OFFSET", 0),
-        0,
-        std::max(0, G.RollbackPredictionProbeModulo - 1));
-    G.RollbackPredictionProbeLimit = std::clamp(
-        EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_LIMIT", -1), -1, 10000);
-    G.RollbackPredictionProbeStartFrame = static_cast<melonDS::u32>(
-        std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_START_FRAME", 0), 0, 1000000));
-    G.RollbackPredictionProbeEndFrame = static_cast<melonDS::u32>(
-        std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_END_FRAME", 0), 0, 1000000));
-    if (G.RollbackPredictionProbeEndFrame != kNoFrameLimit
-        && G.RollbackPredictionProbeEndFrame < G.RollbackPredictionProbeStartFrame)
-        G.RollbackPredictionProbeEndFrame = G.RollbackPredictionProbeStartFrame;
-    G.RollbackPredictionProbeKeyMask = static_cast<melonDS::u32>(
-        std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_KEY_MASK", 0x1), 1, 0xFFF));
-    const char* rollbackBackend = EnvCString("MELONDS_NSML_ROLLBACK_BACKEND", "savestate");
-    if (!std::strcmp(rollbackBackend, "corelite") || !std::strcmp(rollbackBackend, "core-lite"))
-        G.RollbackBackendMode = RollbackBackend::CoreLite;
-    else if (!std::strcmp(rollbackBackend, "coresparse") || !std::strcmp(rollbackBackend, "core-sparse"))
-        G.RollbackBackendMode = RollbackBackend::CoreSparse;
-    else if (!std::strcmp(rollbackBackend, "coredelta") || !std::strcmp(rollbackBackend, "core-delta"))
-        G.RollbackBackendMode = RollbackBackend::CoreDelta;
-    else if (!std::strcmp(rollbackBackend, "coreframedelta") || !std::strcmp(rollbackBackend, "core-frame-delta"))
-        G.RollbackBackendMode = RollbackBackend::CoreFrameDelta;
-    else if (!std::strcmp(rollbackBackend, "corepreimage") || !std::strcmp(rollbackBackend, "core-preimage"))
-        G.RollbackBackendMode = RollbackBackend::CorePreimage;
-    else if (!std::strcmp(rollbackBackend, "tinycorepreimage") || !std::strcmp(rollbackBackend, "tiny-core-preimage"))
-        G.RollbackBackendMode = RollbackBackend::TinyCorePreimage;
-    else if (!std::strcmp(rollbackBackend, "nsmbranges") || !std::strcmp(rollbackBackend, "nsmb-ranges"))
-        G.RollbackBackendMode = RollbackBackend::NSMBRanges;
-    else if (!std::strcmp(rollbackBackend, "nsmbcoreranges") || !std::strcmp(rollbackBackend, "nsmb-core-ranges"))
-        G.RollbackBackendMode = RollbackBackend::NSMBCoreRanges;
-    else if (!std::strcmp(rollbackBackend, "nsmbtinycore") || !std::strcmp(rollbackBackend, "nsmb-tiny-core"))
-        G.RollbackBackendMode = RollbackBackend::NSMBTinyCoreRanges;
-    else if (!std::strcmp(rollbackBackend, "arm9ram") || !std::strcmp(rollbackBackend, "ram"))
-        G.RollbackBackendMode = RollbackBackend::ARM9RAM;
-    else
-        G.RollbackBackendMode = RollbackBackend::Savestate;
-    G.RollbackWindow = std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_WINDOW", 20), 1, 180);
-    G.RollbackCheckpointInterval = std::clamp(
-        EnvInt("MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL", 1), 1, 30);
-    G.RollbackDeltaKeyframeInterval = std::clamp(
-        EnvInt("MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL", 10), 1, 60);
-    G.RollbackMainRAMPageSize = std::clamp(
-        EnvInt("MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE", 4096), 256, 4096);
-    if ((G.RollbackMainRAMPageSize & (G.RollbackMainRAMPageSize - 1)) != 0)
-        G.RollbackMainRAMPageSize = 4096;
-    G.RollbackCoreSkipMask = std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK", 0), 0, 31);
-    G.RollbackTinyCoreFlags = std::clamp(EnvInt("MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS", 0), 0, 2047);
-    G.RollbackNSMBWideRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_WIDE_RANGES");
-    G.RollbackNSMBDeltaDiscoveredRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES");
-    G.RollbackNSMBActorArenaRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES");
-    G.RollbackNSMBArm9StackRange = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE");
-    G.RollbackNSMBSkipInputRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_SKIP_INPUT_RANGES");
-    G.RollbackNSMBRestoreDiffTrace = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_RESTORE_DIFF_TRACE");
-    G.RollbackNSMBProcessListRanges = EnvFlag("MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES");
-    G.RollbackNSMBHeapScanRanges = EnvInt("MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES", 1) != 0;
-    G.RollbackNSMBScanInterval = std::clamp(
-        EnvInt("MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL", 1), 1, 600);
-    G.RollbackNSMBHeapScanInterval = std::clamp(
-        EnvInt("MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_INTERVAL", G.RollbackNSMBScanInterval), 1, 1800);
-    G.RollbackDeltaPageTrace = EnvFlag("MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE");
-    G.RollbackDeltaPageTraceStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE_START_FRAME", 0)));
-    G.RollbackDeltaPageTraceEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE_END_FRAME", 0)));
-    G.RollbackDeltaPageTraceMaxRuns = std::clamp(
-        EnvInt("MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE_MAX_RUNS", 12), 1, 80);
-    G.RollbackResimulateDelayFrames = std::clamp(
-        EnvInt("MELONDS_NSML_ROLLBACK_RESIMULATE_DELAY_FRAMES", 0), 0, 30);
-    G.RollbackMaxResimFrames = std::clamp(
-        EnvInt("MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES", 0), 0, 30);
-    if (G.RollbackEnabled && G.InputNetplayOnly)
-    {
-        G.LocalWaitsForRemote = false;
-        if (G.Delay > 2)
-            G.Delay = std::min(G.Delay, 2);
-    }
+    const Config::RollbackConfig rollbackConfig = Config::LoadRollbackConfig();
+    G.RollbackEnabled = rollbackConfig.Enabled;
+    G.RollbackResimulate = rollbackConfig.Resimulate;
+    G.RollbackSkipRenderDuringResim = rollbackConfig.SkipRenderDuringResim;
+    G.RollbackSkipIntermediateResimCheckpoints = rollbackConfig.SkipIntermediateResimCheckpoints;
+    G.RollbackInputWaitUs = rollbackConfig.InputWaitUs;
+    G.RollbackRestoreProbe = rollbackConfig.RestoreProbe;
+    G.RollbackPredictionProbeModulo = rollbackConfig.PredictionProbeModulo;
+    G.RollbackPredictionProbeOffset = rollbackConfig.PredictionProbeOffset;
+    G.RollbackPredictionProbeLimit = rollbackConfig.PredictionProbeLimit;
+    G.RollbackPredictionProbeStartFrame = rollbackConfig.PredictionProbeStartFrame;
+    G.RollbackPredictionProbeEndFrame = rollbackConfig.PredictionProbeEndFrame;
+    G.RollbackPredictionProbeKeyMask = rollbackConfig.PredictionProbeKeyMask;
+    G.RollbackBackendMode = rollbackConfig.Backend;
+    G.RollbackWindow = rollbackConfig.Window;
+    G.RollbackCheckpointInterval = rollbackConfig.CheckpointInterval;
+    G.RollbackDeltaKeyframeInterval = rollbackConfig.DeltaKeyframeInterval;
+    G.RollbackMainRAMPageSize = rollbackConfig.MainRAMPageSize;
+    G.RollbackCoreSkipMask = rollbackConfig.CoreSkipMask;
+    G.RollbackTinyCoreFlags = rollbackConfig.TinyCoreFlags;
+    G.RollbackNSMBWideRanges = rollbackConfig.NSMBWideRanges;
+    G.RollbackNSMBDeltaDiscoveredRanges = rollbackConfig.NSMBDeltaDiscoveredRanges;
+    G.RollbackNSMBActorArenaRanges = rollbackConfig.NSMBActorArenaRanges;
+    G.RollbackNSMBArm9StackRange = rollbackConfig.NSMBArm9StackRange;
+    G.RollbackNSMBSkipInputRanges = rollbackConfig.NSMBSkipInputRanges;
+    G.RollbackNSMBRestoreDiffTrace = rollbackConfig.NSMBRestoreDiffTrace;
+    G.RollbackNSMBProcessListRanges = rollbackConfig.NSMBProcessListRanges;
+    G.RollbackNSMBHeapScanRanges = rollbackConfig.NSMBHeapScanRanges;
+    G.RollbackNSMBScanInterval = rollbackConfig.NSMBScanInterval;
+    G.RollbackNSMBHeapScanInterval = rollbackConfig.NSMBHeapScanInterval;
+    G.RollbackDeltaPageTrace = rollbackConfig.DeltaPageTrace;
+    G.RollbackDeltaPageTraceStartFrame = rollbackConfig.DeltaPageTraceStartFrame;
+    G.RollbackDeltaPageTraceEndFrame = rollbackConfig.DeltaPageTraceEndFrame;
+    G.RollbackDeltaPageTraceMaxRuns = rollbackConfig.DeltaPageTraceMaxRuns;
+    G.RollbackResimulateDelayFrames = rollbackConfig.ResimulateDelayFrames;
+    G.RollbackMaxResimFrames = rollbackConfig.MaxResimFrames;
     G.ForceStageSceneStartGateStartFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_START_FRAME", 0)));
     G.ForceStageSceneStartGateEndFrame = static_cast<melonDS::u32>(

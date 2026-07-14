@@ -248,6 +248,101 @@ void TestInputConfigReadsClampsAndNormalizesRanges() {
   CHECK(config.WaitPollUs == 50);
 }
 
+void TestRollbackConfigDefaultsAndBackendAliases() {
+  using NsmbNetplayPoC::Config::RollbackBackend;
+  MapEnvironment environment;
+  auto config = NsmbNetplayPoC::Config::LoadRollbackConfig(environment);
+  CHECK(!config.Enabled);
+  CHECK(!config.Resimulate);
+  CHECK(config.InputWaitUs == 0);
+  CHECK(config.PredictionProbeModulo == 0);
+  CHECK(config.PredictionProbeOffset == 0);
+  CHECK(config.PredictionProbeLimit == -1);
+  CHECK(config.PredictionProbeKeyMask == 1u);
+  CHECK(config.Backend == RollbackBackend::Savestate);
+  CHECK(config.Window == 20);
+  CHECK(config.CheckpointInterval == 1);
+  CHECK(config.DeltaKeyframeInterval == 10);
+  CHECK(config.MainRAMPageSize == 4096);
+  CHECK(config.NSMBHeapScanRanges);
+  CHECK(config.NSMBScanInterval == 1);
+  CHECK(config.NSMBHeapScanInterval == 1);
+
+  const std::pair<const char *, RollbackBackend> aliases[] = {
+      {"core-lite", RollbackBackend::CoreLite},
+      {"coresparse", RollbackBackend::CoreSparse},
+      {"core-delta", RollbackBackend::CoreDelta},
+      {"coreframedelta", RollbackBackend::CoreFrameDelta},
+      {"core-preimage", RollbackBackend::CorePreimage},
+      {"tiny-core-preimage", RollbackBackend::TinyCorePreimage},
+      {"nsmb-ranges", RollbackBackend::NSMBRanges},
+      {"nsmbcoreranges", RollbackBackend::NSMBCoreRanges},
+      {"nsmb-tiny-core", RollbackBackend::NSMBTinyCoreRanges},
+      {"ram", RollbackBackend::ARM9RAM},
+      {"unknown", RollbackBackend::Savestate},
+  };
+  for (const auto &alias : aliases) {
+    environment.Values["MELONDS_NSML_ROLLBACK_BACKEND"] = alias.first;
+    config = NsmbNetplayPoC::Config::LoadRollbackConfig(environment);
+    CHECK(config.Backend == alias.second);
+  }
+}
+
+void TestRollbackConfigReadsClampsAndDependencies() {
+  MapEnvironment environment;
+  environment.Values = {
+      {"MELONDS_NSML_ROLLBACK", "1"},
+      {"MELONDS_NSML_ROLLBACK_RESIMULATE", "1"},
+      {"MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER", "1"},
+      {"MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS", "1"},
+      {"MELONDS_NSML_ROLLBACK_INPUT_WAIT_US", "99999"},
+      {"MELONDS_NSML_ROLLBACK_RESTORE_PROBE", "1"},
+      {"MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_MODULO", "7"},
+      {"MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_OFFSET", "20"},
+      {"MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_LIMIT", "20000"},
+      {"MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_START_FRAME", "100"},
+      {"MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_END_FRAME", "90"},
+      {"MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_KEY_MASK", "0"},
+      {"MELONDS_NSML_ROLLBACK_WINDOW", "999"},
+      {"MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL", "0"},
+      {"MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL", "99"},
+      {"MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE", "300"},
+      {"MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK", "99"},
+      {"MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS", "9999"},
+      {"MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES", "0"},
+      {"MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL", "77"},
+      {"MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE_MAX_RUNS", "0"},
+      {"MELONDS_NSML_ROLLBACK_RESIMULATE_DELAY_FRAMES", "99"},
+      {"MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES", "-1"},
+  };
+
+  const auto config = NsmbNetplayPoC::Config::LoadRollbackConfig(environment);
+  CHECK(config.Enabled);
+  CHECK(config.Resimulate);
+  CHECK(config.SkipRenderDuringResim);
+  CHECK(config.SkipIntermediateResimCheckpoints);
+  CHECK(config.InputWaitUs == 20000);
+  CHECK(config.RestoreProbe);
+  CHECK(config.PredictionProbeModulo == 7);
+  CHECK(config.PredictionProbeOffset == 6);
+  CHECK(config.PredictionProbeLimit == 10000);
+  CHECK(config.PredictionProbeStartFrame == 100u);
+  CHECK(config.PredictionProbeEndFrame == 100u);
+  CHECK(config.PredictionProbeKeyMask == 1u);
+  CHECK(config.Window == 180);
+  CHECK(config.CheckpointInterval == 1);
+  CHECK(config.DeltaKeyframeInterval == 60);
+  CHECK(config.MainRAMPageSize == 4096);
+  CHECK(config.CoreSkipMask == 31);
+  CHECK(config.TinyCoreFlags == 2047);
+  CHECK(!config.NSMBHeapScanRanges);
+  CHECK(config.NSMBScanInterval == 77);
+  CHECK(config.NSMBHeapScanInterval == 77);
+  CHECK(config.DeltaPageTraceMaxRuns == 1);
+  CHECK(config.ResimulateDelayFrames == 30);
+  CHECK(config.MaxResimFrames == 0);
+}
+
 } // namespace
 
 int main() {
@@ -262,6 +357,8 @@ int main() {
   TestConnectionConfigReadsExistingValuesAndClamps();
   TestInputConfigDefaultsPreserveLegacyInitializationOrder();
   TestInputConfigReadsClampsAndNormalizesRanges();
+  TestRollbackConfigDefaultsAndBackendAliases();
+  TestRollbackConfigReadsClampsAndDependencies();
 
   if (Failures != 0) {
     std::fprintf(stderr, "nsmb netplay config tests failed: %d\n", Failures);

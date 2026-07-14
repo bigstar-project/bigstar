@@ -199,6 +199,140 @@ InputConfig LoadInputConfig(bool netplayOnlyForMaxFrameLeadDefault) {
                          netplayOnlyForMaxFrameLeadDefault);
 }
 
+RollbackConfig LoadRollbackConfig(const Environment &environment) {
+  RollbackConfig config;
+  config.Enabled = ReadFlag(environment, "MELONDS_NSML_ROLLBACK");
+  config.Resimulate = ReadFlag(environment, "MELONDS_NSML_ROLLBACK_RESIMULATE");
+  config.SkipRenderDuringResim =
+      ReadFlag(environment, "MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER");
+  config.SkipIntermediateResimCheckpoints = ReadFlag(
+      environment, "MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS");
+  config.InputWaitUs = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_ROLLBACK_INPUT_WAIT_US", 0), 0, 20000);
+  config.RestoreProbe =
+      ReadFlag(environment, "MELONDS_NSML_ROLLBACK_RESTORE_PROBE");
+  config.PredictionProbeModulo = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_MODULO", 0),
+      0, 600);
+  config.PredictionProbeOffset = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_OFFSET", 0),
+      0, std::max(0, config.PredictionProbeModulo - 1));
+  config.PredictionProbeLimit = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_LIMIT", -1),
+      -1, 10000);
+  config.PredictionProbeStartFrame = static_cast<std::uint32_t>(std::clamp(
+      ReadInt(environment, "MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_START_FRAME",
+              0),
+      0, 1000000));
+  config.PredictionProbeEndFrame = static_cast<std::uint32_t>(
+      std::clamp(ReadInt(environment,
+                         "MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_END_FRAME", 0),
+                 0, 1000000));
+  if (config.PredictionProbeEndFrame != 0 &&
+      config.PredictionProbeEndFrame < config.PredictionProbeStartFrame)
+    config.PredictionProbeEndFrame = config.PredictionProbeStartFrame;
+  config.PredictionProbeKeyMask = static_cast<std::uint32_t>(std::clamp(
+      ReadInt(environment, "MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_KEY_MASK",
+              0x1),
+      1, 0xFFF));
+
+  const char *backend =
+      ReadCString(environment, "MELONDS_NSML_ROLLBACK_BACKEND", "savestate");
+  if (!std::strcmp(backend, "corelite") || !std::strcmp(backend, "core-lite"))
+    config.Backend = RollbackBackend::CoreLite;
+  else if (!std::strcmp(backend, "coresparse") ||
+           !std::strcmp(backend, "core-sparse"))
+    config.Backend = RollbackBackend::CoreSparse;
+  else if (!std::strcmp(backend, "coredelta") ||
+           !std::strcmp(backend, "core-delta"))
+    config.Backend = RollbackBackend::CoreDelta;
+  else if (!std::strcmp(backend, "coreframedelta") ||
+           !std::strcmp(backend, "core-frame-delta"))
+    config.Backend = RollbackBackend::CoreFrameDelta;
+  else if (!std::strcmp(backend, "corepreimage") ||
+           !std::strcmp(backend, "core-preimage"))
+    config.Backend = RollbackBackend::CorePreimage;
+  else if (!std::strcmp(backend, "tinycorepreimage") ||
+           !std::strcmp(backend, "tiny-core-preimage"))
+    config.Backend = RollbackBackend::TinyCorePreimage;
+  else if (!std::strcmp(backend, "nsmbranges") ||
+           !std::strcmp(backend, "nsmb-ranges"))
+    config.Backend = RollbackBackend::NSMBRanges;
+  else if (!std::strcmp(backend, "nsmbcoreranges") ||
+           !std::strcmp(backend, "nsmb-core-ranges"))
+    config.Backend = RollbackBackend::NSMBCoreRanges;
+  else if (!std::strcmp(backend, "nsmbtinycore") ||
+           !std::strcmp(backend, "nsmb-tiny-core"))
+    config.Backend = RollbackBackend::NSMBTinyCoreRanges;
+  else if (!std::strcmp(backend, "arm9ram") || !std::strcmp(backend, "ram"))
+    config.Backend = RollbackBackend::ARM9RAM;
+
+  config.Window = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_ROLLBACK_WINDOW", 20), 1, 180);
+  config.CheckpointInterval = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL", 1), 1,
+      30);
+  config.DeltaKeyframeInterval = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL", 10),
+      1, 60);
+  config.MainRAMPageSize = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE", 4096),
+      256, 4096);
+  if ((config.MainRAMPageSize & (config.MainRAMPageSize - 1)) != 0)
+    config.MainRAMPageSize = 4096;
+  config.CoreSkipMask = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK", 0), 0, 31);
+  config.TinyCoreFlags = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS", 0), 0,
+      2047);
+  config.NSMBWideRanges =
+      ReadFlag(environment, "MELONDS_NSML_ROLLBACK_NSMB_WIDE_RANGES");
+  config.NSMBDeltaDiscoveredRanges = ReadFlag(
+      environment, "MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES");
+  config.NSMBActorArenaRanges =
+      ReadFlag(environment, "MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES");
+  config.NSMBArm9StackRange =
+      ReadFlag(environment, "MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE");
+  config.NSMBSkipInputRanges =
+      ReadFlag(environment, "MELONDS_NSML_ROLLBACK_NSMB_SKIP_INPUT_RANGES");
+  config.NSMBRestoreDiffTrace =
+      ReadFlag(environment, "MELONDS_NSML_ROLLBACK_NSMB_RESTORE_DIFF_TRACE");
+  config.NSMBProcessListRanges =
+      ReadFlag(environment, "MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES");
+  config.NSMBHeapScanRanges =
+      ReadInt(environment, "MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES", 1) !=
+      0;
+  config.NSMBScanInterval = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL", 1), 1,
+      600);
+  config.NSMBHeapScanInterval = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_INTERVAL",
+              config.NSMBScanInterval),
+      1, 1800);
+  config.DeltaPageTrace =
+      ReadFlag(environment, "MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE");
+  config.DeltaPageTraceStartFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment,
+                 "MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE_START_FRAME", 0)));
+  config.DeltaPageTraceEndFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment,
+                 "MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE_END_FRAME", 0)));
+  config.DeltaPageTraceMaxRuns =
+      std::clamp(ReadInt(environment,
+                         "MELONDS_NSML_ROLLBACK_DELTA_PAGE_TRACE_MAX_RUNS", 12),
+                 1, 80);
+  config.ResimulateDelayFrames = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_ROLLBACK_RESIMULATE_DELAY_FRAMES", 0),
+      0, 30);
+  config.MaxResimFrames = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES", 0), 0, 30);
+  return config;
+}
+
+RollbackConfig LoadRollbackConfig() {
+  return LoadRollbackConfig(GetProcessEnvironment());
+}
+
 bool EnvFlag(const char *name) {
   return ReadFlag(GetProcessEnvironment(), name);
 }

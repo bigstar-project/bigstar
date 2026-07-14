@@ -59,6 +59,58 @@ struct InputConfig {
   int WaitPollUs = 100;
 };
 
+enum class RollbackBackend {
+  Savestate,
+  CoreLite,
+  CoreSparse,
+  CoreDelta,
+  CoreFrameDelta,
+  CorePreimage,
+  TinyCorePreimage,
+  NSMBRanges,
+  NSMBCoreRanges,
+  NSMBTinyCoreRanges,
+  ARM9RAM,
+};
+
+struct RollbackConfig {
+  bool Enabled = false;
+  bool Resimulate = false;
+  bool SkipRenderDuringResim = false;
+  bool SkipIntermediateResimCheckpoints = false;
+  int InputWaitUs = 0;
+  bool RestoreProbe = false;
+  int PredictionProbeModulo = 0;
+  int PredictionProbeOffset = 0;
+  int PredictionProbeLimit = -1;
+  std::uint32_t PredictionProbeStartFrame = 0;
+  std::uint32_t PredictionProbeEndFrame = 0;
+  std::uint32_t PredictionProbeKeyMask = 1;
+  RollbackBackend Backend = RollbackBackend::Savestate;
+  int Window = 20;
+  int CheckpointInterval = 1;
+  int DeltaKeyframeInterval = 10;
+  int MainRAMPageSize = 4096;
+  int CoreSkipMask = 0;
+  int TinyCoreFlags = 0;
+  bool NSMBWideRanges = false;
+  bool NSMBDeltaDiscoveredRanges = false;
+  bool NSMBActorArenaRanges = false;
+  bool NSMBArm9StackRange = false;
+  bool NSMBSkipInputRanges = false;
+  bool NSMBRestoreDiffTrace = false;
+  bool NSMBProcessListRanges = false;
+  bool NSMBHeapScanRanges = true;
+  int NSMBScanInterval = 1;
+  int NSMBHeapScanInterval = 1;
+  bool DeltaPageTrace = false;
+  std::uint32_t DeltaPageTraceStartFrame = 0;
+  std::uint32_t DeltaPageTraceEndFrame = 0;
+  int DeltaPageTraceMaxRuns = 12;
+  int ResimulateDelayFrames = 0;
+  int MaxResimFrames = 0;
+};
+
 bool ParseFlag(const char *value);
 const char *ValueOr(const char *value, const char *fallback);
 int ParseInt(const char *value, int fallback);
@@ -84,6 +136,8 @@ ConnectionConfig LoadConnectionConfig(bool testEnabled);
 InputConfig LoadInputConfig(const Environment &environment,
                             bool netplayOnlyForMaxFrameLeadDefault);
 InputConfig LoadInputConfig(bool netplayOnlyForMaxFrameLeadDefault);
+RollbackConfig LoadRollbackConfig(const Environment &environment);
+RollbackConfig LoadRollbackConfig();
 
 bool EnvFlag(const char *name);
 const char *EnvCString(const char *name, const char *fallback);
