@@ -1,8 +1,11 @@
 #include "NsmbGameState.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <sstream>
+#include <string>
 
 namespace {
 
@@ -16,6 +19,12 @@ void Check(bool condition, const char *expression, int line) {
 }
 
 #define CHECK(expression) Check((expression), #expression, __LINE__)
+
+bool EndsWith(const std::string &value, const std::string &suffix) {
+  return value.size() >= suffix.size() &&
+         value.compare(value.size() - suffix.size(), suffix.size(), suffix) ==
+             0;
+}
 
 void TestEveryWireWordRoundTrips() {
   using namespace NsmbNetplayPoC;
@@ -82,12 +91,58 @@ void TestGameStateHashes() {
   CHECK(CombinedGameStateHash(hashes) == 0x81FED12C6E7300F0ull);
 }
 
+void TestGameStateTraceRowFormatting() {
+  using namespace NsmbNetplayPoC::GameStateModel;
+  GameStateSample sample;
+  sample.StageID = 0xA1;
+  sample.ObjectActiveBase[kObjectTraceSlots - 1] = 0xB2;
+  sample.PlayerCount = 0xC3;
+  sample.PlayerActor1PowerupGainTimer = 0xD4;
+
+  std::ostringstream basic;
+  WriteGameStateTraceRow(basic, 3, 42, sample, nullptr);
+  const std::string basicRow = basic.str();
+  CHECK(basicRow.rfind("3,42,0xa1", 0) == 0);
+  CHECK(EndsWith(basicRow, ",0xb2\n"));
+  CHECK(basicRow.find("0xc3") == std::string::npos);
+  std::ostringstream basicHeader;
+  WriteGameStateTraceHeader(basicHeader, false);
+  const std::string basicHeaderText = basicHeader.str();
+  CHECK(basicHeaderText.rfind("instance,frame,stageID", 0) == 0);
+  CHECK(basicHeaderText.find("playerCount") == std::string::npos);
+  CHECK(std::count(basicHeaderText.begin(), basicHeaderText.end(), ',') ==
+        std::count(basicRow.begin(), basicRow.end(), ','));
+
+  GameStateTraceHashes hashes;
+  hashes.PlayerGlobal = 0x1111111111111111ull;
+  hashes.WifiCandidate = 0x2222222222222222ull;
+  hashes.RenderCandidate = 0x3333333333333333ull;
+  hashes.NetState = 0x4444444444444444ull;
+  std::ostringstream extended;
+  WriteGameStateTraceRow(extended, 3, 42, sample, &hashes);
+  const std::string extendedRow = extended.str();
+  CHECK(extendedRow.find(",0xb2,0xc3,") != std::string::npos);
+  CHECK(extendedRow.find(",0x1111111111111111,0x2222222222222222,"
+                         "0x3333333333333333,0x4444444444444444,") !=
+        std::string::npos);
+  CHECK(EndsWith(extendedRow, ",0xd4\n"));
+  std::ostringstream extendedHeader;
+  WriteGameStateTraceHeader(extendedHeader, true);
+  const std::string extendedHeaderText = extendedHeader.str();
+  CHECK(extendedHeaderText.find(",playerCount,") != std::string::npos);
+  CHECK(std::count(extendedHeaderText.begin(), extendedHeaderText.end(), ',') ==
+        std::count(extendedRow.begin(), extendedRow.end(), ','));
+  extended << 10;
+  CHECK(EndsWith(extended.str(), "\n10"));
+}
+
 } // namespace
 
 int main() {
   TestEveryWireWordRoundTrips();
   TestMalformedHeadersAreRejected();
   TestGameStateHashes();
+  TestGameStateTraceRowFormatting();
   if (Failures != 0) {
     std::fprintf(stderr, "nsmb game state tests failed: %d\n", Failures);
     return 1;

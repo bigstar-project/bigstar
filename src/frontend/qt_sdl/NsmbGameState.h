@@ -4,6 +4,8 @@
 #include "NsmbNetplayProtocol.h"
 #include "types.h"
 
+#include <iosfwd>
+
 namespace NsmbNetplayPoC::GameStateModel {
 
 constexpr int kAITileProbeCount = 17;
@@ -589,6 +591,13 @@ struct GameStateSyncHashes {
   melonDS::u64 RenderCandidate = 0;
 };
 
+struct GameStateTraceHashes {
+  melonDS::u64 PlayerGlobal = 0;
+  melonDS::u64 WifiCandidate = 0;
+  melonDS::u64 RenderCandidate = 0;
+  melonDS::u64 NetState = 0;
+};
+
 struct DecodedGameState {
   melonDS::u32 Frame = 0;
   melonDS::u32 Instance = 0;
@@ -605,6 +614,10 @@ EncodeWireGameState(melonDS::u32 frame, melonDS::u32 instance,
                     const GameStateSyncHashes &hashes);
 bool DecodeWireGameState(const WireProtocol::WireGameState &packet,
                          DecodedGameState &decoded);
+void WriteGameStateTraceRow(std::ostream &out, int instanceID,
+                            melonDS::u32 frame, const GameStateSample &sample,
+                            const GameStateTraceHashes *extendedHashes);
+void WriteGameStateTraceHeader(std::ostream &out, bool extended);
 
 } // namespace NsmbNetplayPoC::GameStateModel
 
