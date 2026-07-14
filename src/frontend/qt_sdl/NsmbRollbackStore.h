@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <map>
+#include <mutex>
 #include <vector>
 
 namespace NsmbNetplayPoC::RollbackStorage {
@@ -30,6 +31,57 @@ enum class DeltaMode {
 };
 
 std::size_t CheckpointBytes(const StoredState &checkpoint);
+
+struct StatisticsSnapshot {
+  melonDS::u32 RestoreCount = 0;
+  melonDS::u32 ResimulateCount = 0;
+  melonDS::u32 CheckpointSaveCount = 0;
+  std::size_t CheckpointLastBytes = 0;
+  std::size_t CheckpointMinBytes = 0;
+  std::size_t CheckpointMaxBytes = 0;
+  unsigned long long CheckpointTotalBytes = 0;
+  unsigned long long CheckpointSaveTotalUs = 0;
+  unsigned long long CheckpointSaveMaxUs = 0;
+  unsigned long long CheckpointRestoreTotalUs = 0;
+  unsigned long long CheckpointRestoreMaxUs = 0;
+  melonDS::u32 CheckpointRestoreOpCount = 0;
+  melonDS::u32 MeasuredResimOpCount = 0;
+  unsigned long long MeasuredResimFrameCount = 0;
+  unsigned long long ResimRunFrameTotalUs = 0;
+  unsigned long long ResimRunFrameMaxUs = 0;
+  unsigned long long ResimCheckpointSaveTotalUs = 0;
+  unsigned long long ResimCheckpointSaveMaxUs = 0;
+  unsigned long long ResimCorrectionTotalUs = 0;
+  unsigned long long ResimCorrectionMaxUs = 0;
+
+  std::size_t AverageCheckpointBytes() const;
+  unsigned long long AverageCheckpointSaveUs() const;
+  unsigned long long AverageCheckpointRestoreUs() const;
+  unsigned long long AverageResimRunFrameUs() const;
+  unsigned long long AverageResimCheckpointSaveUs() const;
+  unsigned long long AverageResimCorrectionUs() const;
+};
+
+class Statistics {
+public:
+  void RecordCheckpointSave(std::size_t bytes,
+                            unsigned long long elapsedUs);
+  void RecordCheckpointRestore(unsigned long long elapsedUs);
+  void RecordProbeRestore();
+  void RecordResimulation(melonDS::u32 frames,
+                          unsigned long long runFrameTotalUs,
+                          unsigned long long runFrameMaxUs,
+                          unsigned long long checkpointSaveTotalUs,
+                          unsigned long long checkpointSaveMaxUs,
+                          unsigned long long correctionTotalUs);
+  StatisticsSnapshot Snapshot() const;
+  bool ShouldTrace(melonDS::u32 frame, melonDS::u32 interval);
+
+private:
+  mutable std::mutex Mutex_;
+  StatisticsSnapshot Snapshot_;
+  melonDS::u32 LastTraceFrame_ = static_cast<melonDS::u32>(-1);
+};
 
 class Store {
 public:

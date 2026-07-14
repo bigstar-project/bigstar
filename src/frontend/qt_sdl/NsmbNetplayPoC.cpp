@@ -558,27 +558,7 @@ struct State
     melonDS::u32 PacketBridgeJitHelperPatchResumeFrame[16] {};
     Config::RollbackConfig Rollback;
     RollbackStorage::Store RollbackStore;
-    melonDS::u32 RollbackRestoreCount = 0;
-    melonDS::u32 RollbackResimulateCount = 0;
-    melonDS::u32 RollbackCheckpointSaveCount = 0;
-    size_t RollbackCheckpointLastBytes = 0;
-    size_t RollbackCheckpointMinBytes = 0;
-    size_t RollbackCheckpointMaxBytes = 0;
-    unsigned long long RollbackCheckpointTotalBytes = 0;
-    unsigned long long RollbackCheckpointSaveTotalUs = 0;
-    unsigned long long RollbackCheckpointSaveMaxUs = 0;
-    unsigned long long RollbackCheckpointRestoreTotalUs = 0;
-    unsigned long long RollbackCheckpointRestoreMaxUs = 0;
-    melonDS::u32 RollbackCheckpointRestoreOpCount = 0;
-    melonDS::u32 RollbackMeasuredResimOpCount = 0;
-    unsigned long long RollbackMeasuredResimFrameCount = 0;
-    unsigned long long RollbackResimRunFrameTotalUs = 0;
-    unsigned long long RollbackResimRunFrameMaxUs = 0;
-    unsigned long long RollbackResimCheckpointSaveTotalUs = 0;
-    unsigned long long RollbackResimCheckpointSaveMaxUs = 0;
-    unsigned long long RollbackResimCorrectionTotalUs = 0;
-    unsigned long long RollbackResimCorrectionMaxUs = 0;
-    melonDS::u32 LastRollbackTraceFrame = kNoFrameLimit;
+    RollbackStorage::Statistics RollbackStats;
     bool ClearMvlCameraInitHoldApplied[16] {};
     bool NetRandomPatchApplied[16] {};
     bool NetplayAnyLockstepStarted = false;
@@ -2111,50 +2091,11 @@ unsigned long long ElapsedUs(std::chrono::steady_clock::time_point start)
             std::chrono::steady_clock::now() - start).count());
 }
 
-void RecordRollbackCheckpointSaveLocked(size_t bytes, unsigned long long elapsedUs)
-{
-    G.RollbackCheckpointLastBytes = bytes;
-    if (G.RollbackCheckpointMinBytes == 0 || bytes < G.RollbackCheckpointMinBytes)
-        G.RollbackCheckpointMinBytes = bytes;
-    if (bytes > G.RollbackCheckpointMaxBytes)
-        G.RollbackCheckpointMaxBytes = bytes;
-    G.RollbackCheckpointTotalBytes += static_cast<unsigned long long>(bytes);
-    G.RollbackCheckpointSaveTotalUs += elapsedUs;
-    if (elapsedUs > G.RollbackCheckpointSaveMaxUs)
-        G.RollbackCheckpointSaveMaxUs = elapsedUs;
-}
-
-void RecordRollbackCheckpointRestoreLocked(unsigned long long elapsedUs)
-{
-    G.RollbackCheckpointRestoreOpCount++;
-    G.RollbackCheckpointRestoreTotalUs += elapsedUs;
-    if (elapsedUs > G.RollbackCheckpointRestoreMaxUs)
-        G.RollbackCheckpointRestoreMaxUs = elapsedUs;
-}
-
-void RecordRollbackResimTimingLocked(
-    melonDS::u32 frames,
-    unsigned long long runFrameTotalUs,
-    unsigned long long runFrameMaxUs,
-    unsigned long long checkpointSaveTotalUs,
-    unsigned long long checkpointSaveMaxUs,
-    unsigned long long correctionTotalUs)
-{
-    G.RollbackMeasuredResimOpCount++;
-    G.RollbackMeasuredResimFrameCount += frames;
-    G.RollbackResimRunFrameTotalUs += runFrameTotalUs;
-    if (runFrameMaxUs > G.RollbackResimRunFrameMaxUs)
-        G.RollbackResimRunFrameMaxUs = runFrameMaxUs;
-    G.RollbackResimCheckpointSaveTotalUs += checkpointSaveTotalUs;
-    if (checkpointSaveMaxUs > G.RollbackResimCheckpointSaveMaxUs)
-        G.RollbackResimCheckpointSaveMaxUs = checkpointSaveMaxUs;
-    G.RollbackResimCorrectionTotalUs += correctionTotalUs;
-    if (correctionTotalUs > G.RollbackResimCorrectionMaxUs)
-        G.RollbackResimCorrectionMaxUs = correctionTotalUs;
-}
-
 void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
 {
+    RollbackStorage::StatisticsSnapshot rollbackStats;
+    if (G.Diagnostics.ActiveFrameSpikeTrace)
+        rollbackStats = G.RollbackStats.Snapshot();
     const Diagnostics::Runtime::ActiveFrameSample sample =
         G.DiagnosticsRuntime.RecordActiveFrameTiming(
             instanceID,
@@ -2162,8 +2103,8 @@ void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
             std::chrono::steady_clock::now(),
             G.Diagnostics.ActiveFrameSpikeTrace,
             static_cast<std::uint64_t>(G.Diagnostics.ActiveFrameSpikeThresholdUs),
-            G.RollbackRestoreCount,
-            G.RollbackResimulateCount);
+            rollbackStats.RestoreCount,
+            rollbackStats.ResimulateCount);
     if (!sample.Spike)
         return;
 
@@ -2173,15 +2114,15 @@ void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
         frame,
         static_cast<unsigned long long>(sample.ElapsedUs),
         G.Diagnostics.ActiveFrameSpikeThresholdUs,
-        G.RollbackRestoreCount,
-        G.RollbackResimulateCount,
+        rollbackStats.RestoreCount,
+        rollbackStats.ResimulateCount,
         sample.RollbackRestoreDelta,
         sample.RollbackResimulateDelta,
-        G.RollbackCheckpointSaveMaxUs,
-        G.RollbackCheckpointRestoreMaxUs,
-        G.RollbackResimRunFrameMaxUs,
-        G.RollbackResimCheckpointSaveMaxUs,
-        G.RollbackResimCorrectionMaxUs);
+        rollbackStats.CheckpointSaveMaxUs,
+        rollbackStats.CheckpointRestoreMaxUs,
+        rollbackStats.ResimRunFrameMaxUs,
+        rollbackStats.ResimCheckpointSaveMaxUs,
+        rollbackStats.ResimCorrectionMaxUs);
 }
 
 void InvalidateMainRAMJIT(melonDS::NDS* nds, melonDS::u32 len)
@@ -2453,10 +2394,9 @@ void SaveRollbackCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
         std::lock_guard<std::mutex> lock(G.Mutex);
         const size_t checkpointBytes = G.RollbackStore.Put(frame, std::move(checkpoint));
         RefreshRollbackFrameDeltaShadowLocked(frame, nds);
-        RecordRollbackCheckpointSaveLocked(
+        G.RollbackStats.RecordCheckpointSave(
             checkpointBytes,
             ElapsedUs(saveStart));
-        G.RollbackCheckpointSaveCount++;
         PruneRollbackHistoryLocked(frame);
     }
 }
@@ -2493,10 +2433,9 @@ void SaveRollbackCheckpointNowLocked(melonDS::u32 frame, melonDS::NDS* nds, bool
     }
     const size_t checkpointBytes = G.RollbackStore.Put(frame, std::move(checkpoint));
     RefreshRollbackFrameDeltaShadowLocked(frame, nds);
-    RecordRollbackCheckpointSaveLocked(
+    G.RollbackStats.RecordCheckpointSave(
         checkpointBytes,
         ElapsedUs(saveStart));
-    G.RollbackCheckpointSaveCount++;
     PruneRollbackHistoryLocked(frame);
 }
 
@@ -2560,8 +2499,8 @@ bool RestoreRollbackCheckpointForProbeIfNeeded(int instanceID, melonDS::u32 fram
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         RefreshRollbackFrameDeltaShadowLocked(restoreFrame, nds);
-        RecordRollbackCheckpointRestoreLocked(restoreUs);
-        G.RollbackRestoreCount++;
+        G.RollbackStats.RecordCheckpointRestore(restoreUs);
+        G.RollbackStats.RecordProbeRestore();
     }
     std::printf("NSMB Rollback: restore probe loaded frame=%u at current=%u bytes=%zu\n",
         restoreFrame,
@@ -5939,15 +5878,14 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         RefreshRollbackFrameDeltaShadowLocked(frame, nds);
-        RecordRollbackCheckpointRestoreLocked(restoreUs);
-        RecordRollbackResimTimingLocked(
+        G.RollbackStats.RecordCheckpointRestore(restoreUs);
+        G.RollbackStats.RecordResimulation(
             resimulated,
             resimRunFrameTotalUs,
             resimRunFrameMaxUs,
             resimCheckpointSaveTotalUs,
             resimCheckpointSaveMaxUs,
             rollbackTotalUs);
-        G.RollbackResimulateCount++;
     }
     if (G.Input.NetplayTrace)
     {
@@ -8703,30 +8641,11 @@ void TraceRollbackStatsIfNeeded(melonDS::u32 logFrame)
 {
     if (!G.Rollback.Enabled
         || !G.Input.NetplayTrace
-        || logFrame == G.LastRollbackTraceFrame
-        || (logFrame % 120) != 0)
+        || !G.RollbackStats.ShouldTrace(logFrame, 120))
         return;
 
     std::lock_guard<std::mutex> lock(G.Mutex);
-    G.LastRollbackTraceFrame = logFrame;
-    const size_t avgBytes = G.RollbackCheckpointSaveCount == 0
-        ? 0
-        : static_cast<size_t>(G.RollbackCheckpointTotalBytes / G.RollbackCheckpointSaveCount);
-    const unsigned long long saveAvgUs = G.RollbackCheckpointSaveCount == 0
-        ? 0
-        : G.RollbackCheckpointSaveTotalUs / G.RollbackCheckpointSaveCount;
-    const unsigned long long restoreAvgUs = G.RollbackCheckpointRestoreOpCount == 0
-        ? 0
-        : G.RollbackCheckpointRestoreTotalUs / G.RollbackCheckpointRestoreOpCount;
-    const unsigned long long resimRunAvgUs = G.RollbackMeasuredResimFrameCount == 0
-        ? 0
-        : G.RollbackResimRunFrameTotalUs / G.RollbackMeasuredResimFrameCount;
-    const unsigned long long resimCheckpointSaveAvgUs = G.RollbackMeasuredResimFrameCount == 0
-        ? 0
-        : G.RollbackResimCheckpointSaveTotalUs / G.RollbackMeasuredResimFrameCount;
-    const unsigned long long resimTotalAvgUs = G.RollbackMeasuredResimOpCount == 0
-        ? 0
-        : G.RollbackResimCorrectionTotalUs / G.RollbackMeasuredResimOpCount;
+    const RollbackStorage::StatisticsSnapshot stats = G.RollbackStats.Snapshot();
     size_t deltaCheckpoints = 0;
     size_t keyframeCheckpoints = 0;
     size_t preimageCheckpoints = 0;
@@ -8754,24 +8673,24 @@ void TraceRollbackStatsIfNeeded(melonDS::u32 logFrame)
         logFrame,
         RollbackBackendName(),
         G.RollbackStore.Size(),
-        G.RollbackCheckpointSaveCount,
-        G.RollbackCheckpointLastBytes,
-        G.RollbackCheckpointMinBytes,
-        G.RollbackCheckpointMaxBytes,
-        avgBytes,
-        saveAvgUs,
-        G.RollbackCheckpointSaveMaxUs,
-        G.RollbackCheckpointRestoreOpCount,
-        restoreAvgUs,
-        G.RollbackCheckpointRestoreMaxUs,
-        G.RollbackMeasuredResimOpCount,
-        G.RollbackMeasuredResimFrameCount,
-        resimRunAvgUs,
-        G.RollbackResimRunFrameMaxUs,
-        resimCheckpointSaveAvgUs,
-        G.RollbackResimCheckpointSaveMaxUs,
-        resimTotalAvgUs,
-        G.RollbackResimCorrectionMaxUs,
+        stats.CheckpointSaveCount,
+        stats.CheckpointLastBytes,
+        stats.CheckpointMinBytes,
+        stats.CheckpointMaxBytes,
+        stats.AverageCheckpointBytes(),
+        stats.AverageCheckpointSaveUs(),
+        stats.CheckpointSaveMaxUs,
+        stats.CheckpointRestoreOpCount,
+        stats.AverageCheckpointRestoreUs(),
+        stats.CheckpointRestoreMaxUs,
+        stats.MeasuredResimOpCount,
+        stats.MeasuredResimFrameCount,
+        stats.AverageResimRunFrameUs(),
+        stats.ResimRunFrameMaxUs,
+        stats.AverageResimCheckpointSaveUs(),
+        stats.ResimCheckpointSaveMaxUs,
+        stats.AverageResimCorrectionUs(),
+        stats.ResimCorrectionMaxUs,
         deltaCheckpoints,
         keyframeCheckpoints,
         preimageCheckpoints,
@@ -8785,8 +8704,8 @@ void TraceRollbackStatsIfNeeded(melonDS::u32 logFrame)
         G.InputRuntime.RollbackInputs.PredictionCount(),
         G.InputRuntime.RollbackInputs.PredictionProbeCount(),
         G.InputRuntime.RollbackInputs.MismatchCount(),
-        G.RollbackRestoreCount,
-        G.RollbackResimulateCount,
+        stats.RestoreCount,
+        stats.ResimulateCount,
         G.InputRuntime.RollbackInputs.PendingRollbackFrame().value_or(kNoFrameLimit),
         G.InputRuntime.RollbackInputs.PendingRollbackObservedFrame().value_or(kNoFrameLimit));
     std::fflush(stdout);

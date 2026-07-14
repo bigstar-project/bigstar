@@ -12,6 +12,106 @@ std::size_t CheckpointBytes(const StoredState &checkpoint) {
          checkpoint.MainRAMPreimage.size();
 }
 
+std::size_t StatisticsSnapshot::AverageCheckpointBytes() const {
+  return CheckpointSaveCount == 0
+             ? 0
+             : static_cast<std::size_t>(CheckpointTotalBytes /
+                                        CheckpointSaveCount);
+}
+
+unsigned long long StatisticsSnapshot::AverageCheckpointSaveUs() const {
+  return CheckpointSaveCount == 0 ? 0
+                                  : CheckpointSaveTotalUs / CheckpointSaveCount;
+}
+
+unsigned long long StatisticsSnapshot::AverageCheckpointRestoreUs() const {
+  return CheckpointRestoreOpCount == 0
+             ? 0
+             : CheckpointRestoreTotalUs / CheckpointRestoreOpCount;
+}
+
+unsigned long long StatisticsSnapshot::AverageResimRunFrameUs() const {
+  return MeasuredResimFrameCount == 0
+             ? 0
+             : ResimRunFrameTotalUs / MeasuredResimFrameCount;
+}
+
+unsigned long long StatisticsSnapshot::AverageResimCheckpointSaveUs() const {
+  return MeasuredResimFrameCount == 0
+             ? 0
+             : ResimCheckpointSaveTotalUs / MeasuredResimFrameCount;
+}
+
+unsigned long long StatisticsSnapshot::AverageResimCorrectionUs() const {
+  return MeasuredResimOpCount == 0
+             ? 0
+             : ResimCorrectionTotalUs / MeasuredResimOpCount;
+}
+
+void Statistics::RecordCheckpointSave(std::size_t bytes,
+                                      unsigned long long elapsedUs) {
+  std::lock_guard<std::mutex> lock(Mutex_);
+  Snapshot_.CheckpointSaveCount++;
+  Snapshot_.CheckpointLastBytes = bytes;
+  if (Snapshot_.CheckpointMinBytes == 0 || bytes < Snapshot_.CheckpointMinBytes)
+    Snapshot_.CheckpointMinBytes = bytes;
+  Snapshot_.CheckpointMaxBytes =
+      std::max(Snapshot_.CheckpointMaxBytes, bytes);
+  Snapshot_.CheckpointTotalBytes += static_cast<unsigned long long>(bytes);
+  Snapshot_.CheckpointSaveTotalUs += elapsedUs;
+  Snapshot_.CheckpointSaveMaxUs =
+      std::max(Snapshot_.CheckpointSaveMaxUs, elapsedUs);
+}
+
+void Statistics::RecordCheckpointRestore(unsigned long long elapsedUs) {
+  std::lock_guard<std::mutex> lock(Mutex_);
+  Snapshot_.CheckpointRestoreOpCount++;
+  Snapshot_.CheckpointRestoreTotalUs += elapsedUs;
+  Snapshot_.CheckpointRestoreMaxUs =
+      std::max(Snapshot_.CheckpointRestoreMaxUs, elapsedUs);
+}
+
+void Statistics::RecordProbeRestore() {
+  std::lock_guard<std::mutex> lock(Mutex_);
+  Snapshot_.RestoreCount++;
+}
+
+void Statistics::RecordResimulation(
+    melonDS::u32 frames, unsigned long long runFrameTotalUs,
+    unsigned long long runFrameMaxUs,
+    unsigned long long checkpointSaveTotalUs,
+    unsigned long long checkpointSaveMaxUs,
+    unsigned long long correctionTotalUs) {
+  std::lock_guard<std::mutex> lock(Mutex_);
+  Snapshot_.ResimulateCount++;
+  Snapshot_.MeasuredResimOpCount++;
+  Snapshot_.MeasuredResimFrameCount += frames;
+  Snapshot_.ResimRunFrameTotalUs += runFrameTotalUs;
+  Snapshot_.ResimRunFrameMaxUs =
+      std::max(Snapshot_.ResimRunFrameMaxUs, runFrameMaxUs);
+  Snapshot_.ResimCheckpointSaveTotalUs += checkpointSaveTotalUs;
+  Snapshot_.ResimCheckpointSaveMaxUs =
+      std::max(Snapshot_.ResimCheckpointSaveMaxUs, checkpointSaveMaxUs);
+  Snapshot_.ResimCorrectionTotalUs += correctionTotalUs;
+  Snapshot_.ResimCorrectionMaxUs =
+      std::max(Snapshot_.ResimCorrectionMaxUs, correctionTotalUs);
+}
+
+StatisticsSnapshot Statistics::Snapshot() const {
+  std::lock_guard<std::mutex> lock(Mutex_);
+  return Snapshot_;
+}
+
+bool Statistics::ShouldTrace(melonDS::u32 frame, melonDS::u32 interval) {
+  if (interval == 0 || (frame % interval) != 0)
+    return false;
+  std::lock_guard<std::mutex> lock(Mutex_);
+  if (frame == LastTraceFrame_)
+    return false;
+  LastTraceFrame_ = frame;
+  return true;
+}
+
 bool Store::Empty() const { return States_.empty(); }
 
 std::size_t Store::Size() const { return States_.size(); }

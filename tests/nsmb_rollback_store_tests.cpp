@@ -11,6 +11,7 @@ using NsmbNetplayPoC::RollbackStorage::CheckpointBytes;
 using NsmbNetplayPoC::RollbackStorage::DeltaMode;
 using NsmbNetplayPoC::RollbackStorage::Store;
 using NsmbNetplayPoC::RollbackStorage::StoredState;
+using NsmbNetplayPoC::RollbackStorage::Statistics;
 
 void Require(bool condition, const std::string &message) {
   if (condition)
@@ -166,6 +167,66 @@ void TestLatestAndEraseAfter() {
           "future checkpoints erased before resimulation");
 }
 
+void TestStatistics() {
+  Statistics statistics;
+  auto snapshot = statistics.Snapshot();
+  Require(snapshot.AverageCheckpointBytes() == 0 &&
+              snapshot.AverageCheckpointSaveUs() == 0 &&
+              snapshot.AverageCheckpointRestoreUs() == 0 &&
+              snapshot.AverageResimRunFrameUs() == 0 &&
+              snapshot.AverageResimCheckpointSaveUs() == 0 &&
+              snapshot.AverageResimCorrectionUs() == 0,
+          "empty statistics averages are zero");
+
+  statistics.RecordCheckpointSave(100, 10);
+  statistics.RecordCheckpointSave(50, 30);
+  statistics.RecordCheckpointRestore(7);
+  statistics.RecordCheckpointRestore(13);
+  statistics.RecordProbeRestore();
+  statistics.RecordProbeRestore();
+  statistics.RecordResimulation(3, 90, 40, 30, 20, 200);
+  statistics.RecordResimulation(2, 50, 30, 10, 6, 100);
+
+  snapshot = statistics.Snapshot();
+  Require(snapshot.CheckpointSaveCount == 2 &&
+              snapshot.CheckpointLastBytes == 50 &&
+              snapshot.CheckpointMinBytes == 50 &&
+              snapshot.CheckpointMaxBytes == 100 &&
+              snapshot.CheckpointTotalBytes == 150 &&
+              snapshot.AverageCheckpointBytes() == 75,
+          "checkpoint byte statistics");
+  Require(snapshot.CheckpointSaveTotalUs == 40 &&
+              snapshot.CheckpointSaveMaxUs == 30 &&
+              snapshot.AverageCheckpointSaveUs() == 20,
+          "checkpoint save timing statistics");
+  Require(snapshot.CheckpointRestoreOpCount == 2 &&
+              snapshot.CheckpointRestoreTotalUs == 20 &&
+              snapshot.CheckpointRestoreMaxUs == 13 &&
+              snapshot.AverageCheckpointRestoreUs() == 10 &&
+              snapshot.RestoreCount == 2,
+          "checkpoint restore statistics");
+  Require(snapshot.ResimulateCount == 2 &&
+              snapshot.MeasuredResimOpCount == 2 &&
+              snapshot.MeasuredResimFrameCount == 5 &&
+              snapshot.ResimRunFrameTotalUs == 140 &&
+              snapshot.ResimRunFrameMaxUs == 40 &&
+              snapshot.AverageResimRunFrameUs() == 28,
+          "resimulation run statistics");
+  Require(snapshot.ResimCheckpointSaveTotalUs == 40 &&
+              snapshot.ResimCheckpointSaveMaxUs == 20 &&
+              snapshot.AverageResimCheckpointSaveUs() == 8 &&
+              snapshot.ResimCorrectionTotalUs == 300 &&
+              snapshot.ResimCorrectionMaxUs == 200 &&
+              snapshot.AverageResimCorrectionUs() == 150,
+          "resimulation checkpoint and total statistics");
+
+  Require(!statistics.ShouldTrace(120, 0), "zero trace interval disabled");
+  Require(!statistics.ShouldTrace(119, 120), "off-interval trace rejected");
+  Require(statistics.ShouldTrace(120, 120), "first interval frame traced");
+  Require(!statistics.ShouldTrace(120, 120), "duplicate frame suppressed");
+  Require(statistics.ShouldTrace(240, 120), "next interval frame traced");
+}
+
 } // namespace
 
 int main() {
@@ -175,6 +236,7 @@ int main() {
   TestPreimageRestoreAndPrune();
   TestPrunePreservesDeltaDependencies();
   TestLatestAndEraseAfter();
+  TestStatistics();
   std::cout << "NsmbRollbackStore tests passed\n";
   return 0;
 }
