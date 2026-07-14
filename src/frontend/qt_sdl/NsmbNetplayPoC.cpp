@@ -16,6 +16,7 @@
 #include "NsmbInputDelivery.h"
 #include "NsmbInputProtocol.h"
 #include "NsmbNetplayProtocol.h"
+#include "NsmbNetplayTransport.h"
 #include "NsmbGameState.h"
 #include "NsmbGameStateReader.h"
 #include "NsmbRollbackStore.h"
@@ -764,10 +765,7 @@ struct State
     std::vector<melonDS::u32> MatchSeedSequence;
     bool NetplayAnyLockstepStarted = false;
     bool NetplayLockstepStarted[16] {};
-    ENetHost* Host = nullptr;
-    ENetPeer* ConnectingPeer = nullptr;
-    ENetPeer* Peer = nullptr;
-    bool ENetInitialized = false;
+    NsmbNetplayTransport::Transport Transport;
     std::map<melonDS::u32, InputState> LocalInputs;
     std::map<melonDS::u32, InputState> RemoteInputs;
     std::map<melonDS::u64, GameStateSyncHashes> LocalGameStateHashes;
@@ -986,10 +984,8 @@ void UpdateHangNetplaySnapshotLocked(melonDS::u32 frameForLead)
     G.HangLocalQueue.store(G.LocalInputs.size(), std::memory_order_release);
     G.HangRemoteQueue.store(G.RemoteInputs.size(), std::memory_order_release);
     G.HangDelayedQueue.store(G.DelayedInputs.size(), std::memory_order_release);
-    G.HangPeerState.store(G.Peer ? static_cast<int>(G.Peer->state) : -1, std::memory_order_release);
-    G.HangConnectingPeerState.store(
-        G.ConnectingPeer ? static_cast<int>(G.ConnectingPeer->state) : -1,
-        std::memory_order_release);
+    G.HangPeerState.store(G.Transport.PeerState(), std::memory_order_release);
+    G.HangConnectingPeerState.store(G.Transport.ConnectingPeerState(), std::memory_order_release);
 }
 
 void WriteHangPhaseEventLocked(
@@ -2410,7 +2406,7 @@ void HandleReceivedGameStateLocked(const void* data, std::size_t size)
 
 void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kNoFrameLimit)
 {
-    if (!G.Host) return;
+    if (!G.Transport.HasHost()) return;
 
     TraceHangPhase("begin", "enet-service", -1, localFrame, localFrame, localFrame);
     FlushDelayedInputsLocked(localFrame);
@@ -2420,7 +2416,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
         G.PacketBridge.MaxPumpEvents, 1, Config::PacketBridgePumpEventLimit);
     for (int i = 0; i < maxEvents; i++)
     {
-        int result = enet_host_service(G.Host, &event, 0);
+        int result = G.Transport.Service(event);
         G.HangLastENetServiceResult.store(result, std::memory_order_release);
         if (result <= 0)
         {
@@ -2434,9 +2430,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
         switch (event.type)
         {
         case ENET_EVENT_TYPE_CONNECT:
-            G.Peer = event.peer;
-            if (G.ConnectingPeer == event.peer)
-                G.ConnectingPeer = nullptr;
+            G.Transport.HandleConnected(event.peer);
             G.MatchSeedSent = false;
             G.NetplayStartReadySent = false;
             G.RemoteNetplayStartReadyFrame = kNoFrameLimit;
@@ -2446,8 +2440,8 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
             std::printf("NSMB PoC: peer connected tUnixMs=%llu localFrame=%u peer=%d connectingPeer=%d lastSent=%u lastRecv=%u localQueue=%zu remoteQueue=%zu\n",
                 NowUnixMs(),
                 localFrame,
-                G.Peer ? 1 : 0,
-                G.ConnectingPeer ? 1 : 0,
+                G.Transport.IsConnected() ? 1 : 0,
+                G.Transport.IsConnecting() ? 1 : 0,
                 G.LastSentInputFrame,
                 G.LastReceivedInputFrame,
                 G.LocalInputs.size(),
@@ -2556,9 +2550,9 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
             std::printf("NSMB PoC: peer disconnected tUnixMs=%llu localFrame=%u eventPeerMatches=%d peerBefore=%d connectingPeer=%d lastSent=%u lastRecv=%u lead=%d localQueue=%zu remoteQueue=%zu delayed=%zu resendCount=%d netplayStart=%u localReady=%u remoteReady=%u remoteReadyAfterLocal=%d eventData=%u\n",
                 NowUnixMs(),
                 localFrame,
-                G.Peer == event.peer ? 1 : 0,
-                G.Peer ? 1 : 0,
-                G.ConnectingPeer ? 1 : 0,
+                G.Transport.IsPeer(event.peer) ? 1 : 0,
+                G.Transport.IsConnected() ? 1 : 0,
+                G.Transport.IsConnecting() ? 1 : 0,
                 G.LastSentInputFrame,
                 G.LastReceivedInputFrame,
                 CurrentInputLeadLocked(G.LastSentInputFrame == kNoFrameLimit ? localFrame : G.LastSentInputFrame),
@@ -2571,8 +2565,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                 G.RemoteNetplayStartReadyFrame,
                 G.RemoteNetplayStartReadyAfterLocal ? 1 : 0,
                 event.data);
-            if (G.Peer == event.peer) G.Peer = nullptr;
-            if (G.ConnectingPeer == event.peer) G.ConnectingPeer = nullptr;
+            G.Transport.HandleDisconnected(event.peer);
             UpdateHangNetplaySnapshotLocked(localFrame);
             std::fflush(stdout);
             break;
@@ -2582,7 +2575,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
         }
     }
 
-    enet_host_flush(G.Host);
+    G.Transport.Flush();
     TraceHangPhase("end", "enet-service", -1, localFrame, localFrame, localFrame);
 }
 
@@ -2673,36 +2666,32 @@ void StopNetworkPumpThread()
 
 void SendMatchSeedLocked()
 {
-    if (!G.Peer || G.NetRole != Role::Host || !G.MatchSeedConfigured || G.MatchSeedSent)
+    if (!G.Transport.IsConnected() || G.NetRole != Role::Host || !G.MatchSeedConfigured || G.MatchSeedSent)
         return;
 
     const std::vector<char> payload = SessionProtocol::Encode({
         SessionProtocol::MessageKind::MatchSeed,
         G.MatchSeed,
     });
-    ENetPacket* enetPacket = enet_packet_create(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE);
-    if (!enetPacket) return;
-
-    enet_peer_send(G.Peer, 0, enetPacket);
-    enet_host_flush(G.Host);
+    if (G.Transport.Send(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE, true)
+        == NsmbNetplayTransport::SendUnavailable)
+        return;
     G.MatchSeedSent = true;
     std::printf("NSMB PoC: sent match seed 0x%08X\n", G.MatchSeed);
 }
 
 void SendNetplayStartReadyLocked(melonDS::u32 frame, bool force = false)
 {
-    if (!G.Peer || (G.NetplayStartReadySent && !force))
+    if (!G.Transport.IsConnected() || (G.NetplayStartReadySent && !force))
         return;
 
     const std::vector<char> payload = SessionProtocol::Encode({
         SessionProtocol::MessageKind::StartReady,
         frame,
     });
-    ENetPacket* enetPacket = enet_packet_create(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE);
-    if (!enetPacket) return;
-
-    enet_peer_send(G.Peer, 0, enetPacket);
-    enet_host_flush(G.Host);
+    if (G.Transport.Send(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE, true)
+        == NsmbNetplayTransport::SendUnavailable)
+        return;
     G.NetplayStartReadySent = true;
     G.NetplayStartReadySendCount++;
     G.LastNetplayStartReadySentAt = std::chrono::steady_clock::now();
@@ -2720,7 +2709,7 @@ void MaybeResendNetplayStartReadyLocked(bool allowBeforeAccepted = false)
     const auto elapsedSinceLastSend = std::chrono::duration_cast<std::chrono::milliseconds>(
         now - G.LastNetplayStartReadySentAt).count();
     if (!SessionPolicy::ShouldResendStartReady({
-            G.Peer != nullptr,
+            G.Transport.IsConnected(),
             G.Input.NetplayOnly,
             allowBeforeAccepted,
             G.WaitedForPeerAtNetplayStart,
@@ -2742,24 +2731,22 @@ void MaybeResendNetplayStartReadyLocked(bool allowBeforeAccepted = false)
 
 void SendInputPayloadNowLocked(const void* data, size_t size, melonDS::u32 flags)
 {
-    if (!G.Peer) return;
+    if (!G.Transport.IsConnected()) return;
 
     TraceHangPhase("begin", "enet-send-input", -1, G.LastSentInputFrame, G.LastSentInputFrame, G.LastSentInputFrame);
-    ENetPacket* enetPacket = enet_packet_create(data, size, flags);
-    if (!enetPacket) return;
-
-    const int result = enet_peer_send(G.Peer, 0, enetPacket);
+    const int result = G.Transport.Send(data, size, flags, true);
+    if (result == NsmbNetplayTransport::SendUnavailable)
+        return;
     G.HangLastENetSendResult.store(result, std::memory_order_release);
     G.HangLastENetSendBytes.store(size, std::memory_order_release);
     G.HangLastENetSendUnixMs.store(NowUnixMs(), std::memory_order_release);
     UpdateHangNetplaySnapshotLocked(G.LastSentInputFrame);
-    enet_host_flush(G.Host);
     TraceHangPhase("end", "enet-send-input", -1, G.LastSentInputFrame, G.LastSentInputFrame, G.LastSentInputFrame);
 }
 
 void FlushDelayedInputsLocked(melonDS::u32 frame)
 {
-    if (!G.Peer || G.DelayedInputs.empty())
+    if (!G.Transport.IsConnected() || G.DelayedInputs.empty())
         return;
 
     for (auto it = G.DelayedInputs.begin(); it != G.DelayedInputs.end(); )
@@ -2792,7 +2779,7 @@ std::vector<char> BuildInputBundlePayloadLocked(melonDS::u32 frame, const InputS
 
 void SendInputLocked(melonDS::u32 frame, const InputState& input)
 {
-    if (!G.Peer) return;
+    if (!G.Transport.IsConnected()) return;
 
     SendMatchSeedLocked();
     MaybeResendNetplayStartReadyLocked();
@@ -2891,14 +2878,14 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
             CurrentInputLeadLocked(frame),
             sendBundle ? 1 : 0,
             sendDelayFrames,
-            G.Peer ? 1 : 0);
+            G.Transport.IsConnected() ? 1 : 0);
         std::fflush(stdout);
     }
 }
 
 void MaybeResendLatestInputForFrameLeadLocked()
 {
-    if (!G.Peer || !G.Input.NetplayOnly || G.LastSentInputFrame == kNoFrameLimit)
+    if (!G.Transport.IsConnected() || !G.Input.NetplayOnly || G.LastSentInputFrame == kNoFrameLimit)
         return;
 
     const auto now = std::chrono::steady_clock::now();
@@ -2942,7 +2929,7 @@ void MaybeResendLatestInputForFrameLeadLocked()
             G.LocalInputs.size(),
             G.RemoteInputs.size(),
             G.DelayedInputs.size(),
-            G.Peer ? 1 : 0);
+            G.Transport.IsConnected() ? 1 : 0);
         std::fflush(stdout);
     }
 }
@@ -3581,17 +3568,12 @@ void ApplyPendingNSMLPacketsLocked(melonDS::NDS* nds)
 
 void SendNSMLWirePacketNowLocked(const WireNSMLPacket& packet)
 {
-    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE);
-    if (!enetPacket)
-        return;
-
-    enet_peer_send(G.Peer, 0, enetPacket);
-    enet_host_flush(G.Host);
+    G.Transport.Send(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE, true);
 }
 
 void FlushDelayedNSMLPacketsLocked(melonDS::u32 frame)
 {
-    if (!G.PacketBridge.Enabled || !G.Peer || G.DelayedNSMLPackets.empty())
+    if (!G.PacketBridge.Enabled || !G.Transport.IsConnected() || G.DelayedNSMLPackets.empty())
         return;
 
     for (auto it = G.DelayedNSMLPackets.begin(); it != G.DelayedNSMLPackets.end(); )
@@ -3610,7 +3592,7 @@ void FlushDelayedNSMLPacketsLocked(melonDS::u32 frame)
 
 void SendNSMLPacketLocked(melonDS::u32 frame, melonDS::u32 player, melonDS::u32 tick, const melonDS::u8 packetBytes[52])
 {
-    if (!G.PacketBridge.Enabled || !G.Peer || !packetBytes || player > 1)
+    if (!G.PacketBridge.Enabled || !G.Transport.IsConnected() || !packetBytes || player > 1)
         return;
 
     SendMatchSeedLocked();
@@ -4058,8 +4040,8 @@ void PrintInputHealthLineLocked(
         hasRemoteInput ? 1 : 0,
         predictedRemoteInput ? 1 : 0,
         G.Rollback.Enabled ? 1 : 0,
-        G.Peer ? 1 : 0,
-        G.ConnectingPeer ? 1 : 0,
+        G.Transport.IsConnected() ? 1 : 0,
+        G.Transport.IsConnecting() ? 1 : 0,
         G.InputFrameLeadResendCount,
         G.Connection.StartFrame,
         G.LocalNetplayStartReadyFrame,
@@ -4254,8 +4236,8 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
                     G.Bootstrap.WaitTimeoutMs,
                     static_cast<long long>(elapsed),
                     loops,
-                    G.Peer ? 1 : 0,
-                    G.ConnectingPeer ? 1 : 0,
+                    G.Transport.IsConnected() ? 1 : 0,
+                    G.Transport.IsConnecting() ? 1 : 0,
                     G.LastSentInputFrame,
                     G.LastReceivedInputFrame,
                     CurrentInputLeadLocked(G.LastSentInputFrame == kNoFrameLimit ? targetFrame : G.LastSentInputFrame),
@@ -4372,7 +4354,8 @@ void WaitForMatchSeedIfNeeded()
 
 void WaitForPeerIfNeeded(bool force = false)
 {
-    if (!G.Enabled || (!force && !G.Harness.WaitForPeerBeforeStart) || G.NetRole != Role::Host || G.Peer)
+    if (!G.Enabled || (!force && !G.Harness.WaitForPeerBeforeStart) ||
+        G.NetRole != Role::Host || G.Transport.IsConnected())
         return;
 
     const auto start = std::chrono::steady_clock::now();
@@ -4381,7 +4364,7 @@ void WaitForPeerIfNeeded(bool force = false)
         {
             std::lock_guard<std::mutex> lock(G.Mutex);
             PumpNetworkLocked();
-            if (G.Peer)
+            if (G.Transport.IsConnected())
                 return;
         }
 
@@ -9885,16 +9868,14 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     G.LocalGameStateHashes[GameStateKey(instanceID, frame)] = hashes;
     CompareGameStateLocked(instanceID, frame);
 
-    if (!G.Peer) return;
+    if (!G.Transport.IsConnected()) return;
     const WireGameState packet = EncodeWireGameState(
         frame,
         static_cast<melonDS::u32>(instanceID),
         sample,
         hashes);
 
-    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE);
-    if (enetPacket)
-        enet_peer_send(G.Peer, 0, enetPacket);
+    G.Transport.Send(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE, false);
 }
 
 void SyncPlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -9954,7 +9935,7 @@ void SyncPlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     std::lock_guard<std::mutex> lock(G.Mutex);
     if (G.LastSentPlayerStateFrame[instanceID] == frame) return;
     G.LastSentPlayerStateFrame[instanceID] = frame;
-    if (!G.Peer)
+    if (!G.Transport.IsConnected())
     {
         if (G.Bootstrap.InputTraceEnabled &&
             (G.Bootstrap.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.Bootstrap.InputTraceInterval)) == 0))
@@ -9980,9 +9961,7 @@ void SyncPlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             packet.VelY);
     }
 
-    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), 0);
-    if (enetPacket)
-        enet_peer_send(G.Peer, 0, enetPacket);
+    G.Transport.Send(&packet, sizeof(packet), 0, false);
 }
 
 void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -10039,7 +10018,7 @@ void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     std::lock_guard<std::mutex> lock(G.Mutex);
     if (G.LastSentWorldStateFrame[instanceID] == frame) return;
     G.LastSentWorldStateFrame[instanceID] = frame;
-    if (!G.Peer) return;
+    if (!G.Transport.IsConnected()) return;
 
     if ((G.Bootstrap.InputTraceEnabled || G.Input.NetplayTrace) &&
         (G.Bootstrap.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.Bootstrap.InputTraceInterval)) == 0))
@@ -10056,9 +10035,7 @@ void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             packet.MovingHazard.PosY);
     }
 
-    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), 0);
-    if (enetPacket)
-        enet_peer_send(G.Peer, 0, enetPacket);
+    G.Transport.Send(&packet, sizeof(packet), 0, false);
 }
 
 void SyncWorldEffectState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -10092,11 +10069,9 @@ void SyncWorldEffectState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         return;
 
     std::lock_guard<std::mutex> lock(G.Mutex);
-    if (!G.Peer)
+    if (!G.Transport.IsConnected())
         return;
-    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), 0);
-    if (enetPacket)
-        enet_peer_send(G.Peer, 0, enetPacket);
+    G.Transport.Send(&packet, sizeof(packet), 0, false);
 }
 
 void SyncMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -10118,10 +10093,8 @@ void SyncMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
         FillWireWorldActorState(actors[i], packet.Actors[i]);
 
     std::lock_guard<std::mutex> lock(G.Mutex);
-    if (!G.Peer) return;
-    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), 0);
-    if (enetPacket)
-        enet_peer_send(G.Peer, 0, enetPacket);
+    if (!G.Transport.IsConnected()) return;
+    G.Transport.Send(&packet, sizeof(packet), 0, false);
 }
 
 void SyncWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -10154,11 +10127,9 @@ void SyncWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melonDS::ND
     }
 
     std::lock_guard<std::mutex> lock(G.Mutex);
-    if (!G.Peer)
+    if (!G.Transport.IsConnected())
         return;
-    ENetPacket* enetPacket = enet_packet_create(&packet, sizeof(packet), 0);
-    if (enetPacket)
-        enet_peer_send(G.Peer, 0, enetPacket);
+    G.Transport.Send(&packet, sizeof(packet), 0, false);
 }
 
 std::filesystem::path StatePath(const std::string& dir, int instanceID)
@@ -10914,43 +10885,27 @@ void InitFromEnvironment()
         G.NetRandomPatchValue = G.MatchSeed;
     }
 
-    if (enet_initialize() != 0)
+    const NsmbNetplayTransport::InitializeResult transportResult = G.Transport.Initialize({
+        G.NetRole == Role::Client,
+        static_cast<std::uint16_t>(G.Connection.Port),
+        G.Connection.PeerHost,
+    });
+    if (transportResult == NsmbNetplayTransport::InitializeResult::ENetInitializationFailed)
     {
         std::printf("NSMB PoC: ENet initialization failed\n");
         G.Enabled = false;
         return;
     }
-    G.ENetInitialized = true;
-
-    if (G.NetRole == Role::Host)
-    {
-        ENetAddress address {};
-        address.host = ENET_HOST_ANY;
-        address.port = G.Connection.Port;
-        G.Host = enet_host_create(&address, 1, 1, 0, 0);
-    }
-    else
-    {
-        G.Host = enet_host_create(nullptr, 1, 1, 0, 0);
-        if (G.Host)
-        {
-            ENetAddress address {};
-            enet_address_set_host(&address, G.Connection.PeerHost.c_str());
-            address.port = G.Connection.Port;
-            G.ConnectingPeer = enet_host_connect(G.Host, &address, 1, 0);
-            if (!G.ConnectingPeer)
-            {
-                std::printf("NSMB PoC: failed to queue peer connect\n");
-                std::fflush(stdout);
-            }
-        }
-    }
-
-    if (!G.Host)
+    if (transportResult == NsmbNetplayTransport::InitializeResult::HostCreationFailed)
     {
         std::printf("NSMB PoC: failed to create ENet host\n");
         G.Enabled = false;
         return;
+    }
+    if (G.NetRole == Role::Client && !G.Transport.IsConnecting())
+    {
+        std::printf("NSMB PoC: failed to queue peer connect\n");
+        std::fflush(stdout);
     }
 
     G.Ready = true;
@@ -12271,8 +12226,7 @@ bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
             while (std::chrono::steady_clock::now() < end)
             {
                 PumpNetworkLocked();
-                if (G.Host)
-                    enet_host_flush(G.Host);
+                G.Transport.Flush();
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
         }
@@ -12302,19 +12256,7 @@ void Shutdown()
 
     std::lock_guard<std::mutex> lock(G.Mutex);
 
-    if (G.Host)
-    {
-        enet_host_destroy(G.Host);
-        G.Host = nullptr;
-        G.ConnectingPeer = nullptr;
-        G.Peer = nullptr;
-    }
-
-    if (G.ENetInitialized)
-    {
-        enet_deinitialize();
-        G.ENetInitialized = false;
-    }
+    G.Transport.Shutdown();
 
     if (G.HashLog)
         G.HashLog.close();

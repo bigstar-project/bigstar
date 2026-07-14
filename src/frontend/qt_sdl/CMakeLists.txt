@@ -23,6 +23,8 @@ set(SOURCES_QT_SDL
     NsmbInputDelivery.h
     NsmbNetplayProtocol.cpp
     NsmbNetplayProtocol.h
+    NsmbNetplayTransport.cpp
+    NsmbNetplayTransport.h
     NsmbGameState.cpp
     NsmbGameStateReader.cpp
     NsmbGameState.h
@@ -308,6 +310,28 @@ endif()
 
 add_subdirectory("../../net"
     ${CMAKE_BINARY_DIR}/net)
+
+if (BUILD_TESTING)
+    add_executable(nsmb_netplay_transport_tests
+        NsmbNetplayTransport.cpp
+        NsmbNetplayTransport.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_netplay_transport_tests.cpp
+    )
+    target_include_directories(nsmb_netplay_transport_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    target_link_libraries(nsmb_netplay_transport_tests PRIVATE net-utils)
+    if (WIN32)
+        target_link_libraries(nsmb_netplay_transport_tests PRIVATE winmm)
+    endif()
+    set_target_properties(nsmb_netplay_transport_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-netplay-transport COMMAND nsmb_netplay_transport_tests)
+endif()
 
 target_link_libraries(melonDS PRIVATE net-utils)
 

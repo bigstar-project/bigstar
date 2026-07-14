@@ -27,7 +27,7 @@ endif()
 
 if (USE_VCPKG)
     find_package(unofficial-enet CONFIG REQUIRED)
-    target_link_libraries(net-utils PRIVATE unofficial::enet::enet)
+    target_link_libraries(net-utils PUBLIC unofficial::enet::enet)
 else()
     pkg_check_modules(ENet REQUIRED IMPORTED_TARGET libenet)
     fix_interface_includes(PkgConfig::ENet)
