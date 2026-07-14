@@ -105,6 +105,7 @@ struct RuntimePatchConfig {
 };
 
 struct HarnessConfig {
+  std::string InputScriptPath;
   bool FrameBarrierEnabled = false;
   bool SerialRunEnabled = false;
   int SeedWaitTimeoutMs = 10000;
@@ -136,6 +137,7 @@ struct PacketBridgeConfig {
   bool AllowPreGame = false;
   bool TraceEnabled = false;
   bool SendLocalPlayerOnly = true;
+  int LocalPlayerOverride = -1;
   bool WaitEnabled = false;
   int WaitTimeoutMs = 0;
   std::uint32_t WaitStartFrame = 0;
@@ -181,6 +183,7 @@ struct RollbackConfig {
   bool Resimulate = false;
   bool SkipRenderDuringResim = false;
   bool SkipIntermediateResimCheckpoints = false;
+  bool SkipJitReset = false;
   int InputWaitUs = 0;
   bool RestoreProbe = false;
   int PredictionProbeModulo = 0;
@@ -265,6 +268,7 @@ struct DiagnosticsConfig {
   std::string HashLogPath;
   std::string ScreenshotDir;
   int ScreenshotInterval = 0;
+  bool ScreenshotRegisterTrace = false;
   std::string RamDumpDir;
   int RamDumpInterval = 0;
   std::string RamDumpFrames;

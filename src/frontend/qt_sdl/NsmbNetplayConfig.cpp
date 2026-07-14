@@ -357,6 +357,8 @@ RuntimePatchConfig LoadRuntimePatchConfig() {
 
 HarnessConfig LoadHarnessConfig(const Environment &environment) {
   HarnessConfig config;
+  config.InputScriptPath =
+      ReadCString(environment, "MELONDS_NSML_INPUT_SCRIPT", "");
   config.FrameBarrierEnabled =
       ReadFlag(environment, "MELONDS_NSML_FRAME_BARRIER");
   config.SerialRunEnabled = ReadFlag(environment, "MELONDS_NSML_SERIAL_RUN");
@@ -421,6 +423,10 @@ PacketBridgeConfig LoadPacketBridgeConfig(const Environment &environment) {
       ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE_TRACE");
   config.SendLocalPlayerOnly =
       !ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE_SEND_ALL");
+  if (const char *localPlayer =
+          environment.Get("MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER")) {
+    config.LocalPlayerOverride = std::clamp(std::atoi(localPlayer), 0, 1);
+  }
   config.WaitEnabled = ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE_WAIT");
   config.WaitTimeoutMs = std::max(
       0, ReadInt(environment, "MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS", 0));
@@ -509,6 +515,8 @@ RollbackConfig LoadRollbackConfig(const Environment &environment) {
       ReadFlag(environment, "MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER");
   config.SkipIntermediateResimCheckpoints = ReadFlag(
       environment, "MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS");
+  config.SkipJitReset =
+      environment.Get("MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET") != nullptr;
   config.InputWaitUs = std::clamp(
       ReadInt(environment, "MELONDS_NSML_ROLLBACK_INPUT_WAIT_US", 0), 0, 20000);
   config.RestoreProbe =
@@ -757,6 +765,8 @@ DiagnosticsConfig LoadDiagnosticsConfig(const Environment &environment,
       ReadCString(environment, "MELONDS_NSML_SCREENSHOT_DIR", "");
   config.ScreenshotInterval =
       std::max(0, ReadInt(environment, "MELONDS_NSML_SCREENSHOT_INTERVAL", 0));
+  config.ScreenshotRegisterTrace =
+      ReadFlag(environment, "MELONDS_NSML_SCREENSHOT_REG_TRACE");
   config.RamDumpDir = ReadCString(environment, "MELONDS_NSML_RAM_DUMP_DIR", "");
   config.RamDumpInterval =
       std::max(0, ReadInt(environment, "MELONDS_NSML_RAM_DUMP_INTERVAL", 0));

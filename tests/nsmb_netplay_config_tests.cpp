@@ -376,6 +376,7 @@ void TestRuntimePatchConfigReadsAndClampsEnvironment() {
 void TestHarnessConfigDefaults() {
   const MapEnvironment environment;
   const auto config = NsmbNetplayPoC::Config::LoadHarnessConfig(environment);
+  CHECK(config.InputScriptPath.empty());
   CHECK(!config.FrameBarrierEnabled);
   CHECK(!config.SerialRunEnabled);
   CHECK(config.SeedWaitTimeoutMs == 10000);
@@ -402,6 +403,7 @@ void TestHarnessConfigDefaults() {
 void TestHarnessConfigReadsClampsAndPreservesPresence() {
   MapEnvironment environment;
   environment.Values = {
+      {"MELONDS_NSML_INPUT_SCRIPT", "inputs.txt"},
       {"MELONDS_NSML_FRAME_BARRIER", "1"},
       {"MELONDS_NSML_SERIAL_RUN", "1"},
       {"MELONDS_NSML_SEED_WAIT_TIMEOUT_MS", "-1"},
@@ -424,6 +426,7 @@ void TestHarnessConfigReadsClampsAndPreservesPresence() {
   };
 
   auto config = NsmbNetplayPoC::Config::LoadHarnessConfig(environment);
+  CHECK(config.InputScriptPath == "inputs.txt");
   CHECK(config.FrameBarrierEnabled);
   CHECK(config.SerialRunEnabled);
   CHECK(config.SeedWaitTimeoutMs == 0);
@@ -472,6 +475,7 @@ void TestPacketBridgeConfigDefaults() {
   CHECK(!config.AllowPreGame);
   CHECK(!config.TraceEnabled);
   CHECK(config.SendLocalPlayerOnly);
+  CHECK(config.LocalPlayerOverride == -1);
   CHECK(!config.WaitEnabled);
   CHECK(config.WaitTimeoutMs == 0);
   CHECK(config.WaitStartFrame == 0u);
@@ -511,6 +515,7 @@ void TestPacketBridgeConfigReadsAndClampsEnvironment() {
       {"MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME", "1"},
       {"MELONDS_NSML_PACKET_BRIDGE_TRACE", "1"},
       {"MELONDS_NSML_PACKET_BRIDGE_SEND_ALL", "1"},
+      {"MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER", "9"},
       {"MELONDS_NSML_PACKET_BRIDGE_WAIT", "1"},
       {"MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS", "-1"},
       {"MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME", "-2"},
@@ -548,6 +553,7 @@ void TestPacketBridgeConfigReadsAndClampsEnvironment() {
   CHECK(config.AllowPreGame);
   CHECK(config.TraceEnabled);
   CHECK(!config.SendLocalPlayerOnly);
+  CHECK(config.LocalPlayerOverride == 1);
   CHECK(config.WaitEnabled);
   CHECK(config.WaitTimeoutMs == 0);
   CHECK(config.WaitStartFrame == 0u);
@@ -583,6 +589,13 @@ void TestPacketBridgeConfigReadsAndClampsEnvironment() {
   config = NsmbNetplayPoC::Config::LoadPacketBridgeConfig(environment);
   CHECK(config.MaxPumpEvents == 1);
   CHECK(config.WaitTickAhead == 0);
+
+  environment.Values["MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER"] = "";
+  config = NsmbNetplayPoC::Config::LoadPacketBridgeConfig(environment);
+  CHECK(config.LocalPlayerOverride == 0);
+  environment.Values["MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER"] = "invalid";
+  config = NsmbNetplayPoC::Config::LoadPacketBridgeConfig(environment);
+  CHECK(config.LocalPlayerOverride == 0);
 }
 
 void TestRollbackConfigDefaultsAndBackendAliases() {
@@ -591,6 +604,7 @@ void TestRollbackConfigDefaultsAndBackendAliases() {
   auto config = NsmbNetplayPoC::Config::LoadRollbackConfig(environment);
   CHECK(!config.Enabled);
   CHECK(!config.Resimulate);
+  CHECK(!config.SkipJitReset);
   CHECK(config.InputWaitUs == 0);
   CHECK(config.PredictionProbeModulo == 0);
   CHECK(config.PredictionProbeOffset == 0);
@@ -627,6 +641,7 @@ void TestRollbackConfigReadsClampsAndDependencies() {
       {"MELONDS_NSML_ROLLBACK_RESIMULATE", "1"},
       {"MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER", "1"},
       {"MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS", "1"},
+      {"MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET", "0"},
       {"MELONDS_NSML_ROLLBACK_INPUT_WAIT_US", "99999"},
       {"MELONDS_NSML_ROLLBACK_RESTORE_PROBE", "1"},
       {"MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_MODULO", "7"},
@@ -650,6 +665,7 @@ void TestRollbackConfigReadsClampsAndDependencies() {
   CHECK(config.Resimulate);
   CHECK(config.SkipRenderDuringResim);
   CHECK(config.SkipIntermediateResimCheckpoints);
+  CHECK(config.SkipJitReset);
   CHECK(config.InputWaitUs == 20000);
   CHECK(config.RestoreProbe);
   CHECK(config.PredictionProbeModulo == 7);
@@ -816,6 +832,7 @@ void TestDiagnosticsConfigDefaults() {
   CHECK(config.HashLogPath.empty());
   CHECK(config.ScreenshotDir.empty());
   CHECK(config.ScreenshotInterval == 0);
+  CHECK(!config.ScreenshotRegisterTrace);
   CHECK(config.RamDumpDir.empty());
   CHECK(config.RamDumpInterval == 0);
   CHECK(config.RamDumpFrames.empty());
@@ -864,6 +881,7 @@ void TestDiagnosticsConfigReadsClampsAndPreservesPriority() {
       {"MELONDS_NSML_HASH_LOG", "hash.log"},
       {"MELONDS_NSML_SCREENSHOT_DIR", "screens"},
       {"MELONDS_NSML_SCREENSHOT_INTERVAL", "-1"},
+      {"MELONDS_NSML_SCREENSHOT_REG_TRACE", "1"},
       {"MELONDS_NSML_RAM_DUMP_DIR", "ram"},
       {"MELONDS_NSML_RAM_DUMP_INTERVAL", "-2"},
       {"MELONDS_NSML_RAM_DUMP_FRAMES", "10,20-30"},
@@ -909,6 +927,7 @@ void TestDiagnosticsConfigReadsClampsAndPreservesPriority() {
   CHECK(config.HashLogPath == "hash.log");
   CHECK(config.ScreenshotDir == "screens");
   CHECK(config.ScreenshotInterval == 0);
+  CHECK(config.ScreenshotRegisterTrace);
   CHECK(config.RamDumpDir == "ram");
   CHECK(config.RamDumpInterval == 0);
   CHECK(config.RamDumpFrames == "10,20-30");

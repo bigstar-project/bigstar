@@ -567,7 +567,6 @@ struct State
     int ImitationAIFeaturesFilled = 0;
     int ImitationAIFeaturesMissing = 0;
     bool DirectMvlBootApplied[16] {};
-    std::string InputScriptPath;
     Config::RuntimePatchConfig RuntimePatch;
     Config::HarnessConfig Harness;
     GameStateTraceWriter GameStateTrace;
@@ -660,12 +659,6 @@ void UpdateHangGameSnapshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
 void StartHangWatchdogIfNeeded();
 void StopDiagnostics();
 
-using Config::EnvCString;
-using Config::EnvDouble;
-using Config::EnvFlag;
-using Config::EnvHasValue;
-using Config::EnvInt;
-using Config::EnvU32;
 
 void UpdateHangNetplaySnapshotLocked(melonDS::u32 frameForLead)
 {
@@ -1009,7 +1002,7 @@ bool LoadInputScriptFileLocked(
 
 bool LoadInputScriptLocked()
 {
-    return LoadInputScriptFileLocked(G.InputScriptPath, GInputScript);
+    return LoadInputScriptFileLocked(G.Harness.InputScriptPath, GInputScript);
 }
 
 bool ParseFrameRanges(const char* value, std::vector<std::pair<melonDS::u32, melonDS::u32>>& out)
@@ -2275,8 +2268,7 @@ void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
 
 void InvalidateMainRAMJIT(melonDS::NDS* nds, melonDS::u32 len)
 {
-    static const bool skipInvalidation = std::getenv("MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET") != nullptr;
-    if (skipInvalidation || !nds || len == 0)
+    if (G.Rollback.SkipJitReset || !nds || len == 0)
         return;
     for (melonDS::u32 offset = 0; offset < len; offset += 0x1000)
     {
@@ -2668,16 +2660,9 @@ melonDS::u32 LocalPlayerID(melonDS::NDS* nds)
 
     if (G.PacketBridge.Enabled)
     {
-        static int packetBridgeLocalPlayer = -1;
-        if (packetBridgeLocalPlayer < 0)
-        {
-            if (const char* value = std::getenv("MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER"))
-                packetBridgeLocalPlayer = std::clamp(std::atoi(value), 0, 1);
-            else
-                packetBridgeLocalPlayer = 2;
-        }
-        if (packetBridgeLocalPlayer <= 1)
-            return static_cast<melonDS::u32>(packetBridgeLocalPlayer);
+        if (G.PacketBridge.LocalPlayerOverride >= 0
+            && G.PacketBridge.LocalPlayerOverride <= 1)
+            return static_cast<melonDS::u32>(G.PacketBridge.LocalPlayerOverride);
     }
 
     const bool inGameplay = IsMarioVsLuigiGameplay(nds);
@@ -6802,7 +6787,7 @@ void SaveScreenshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     void* bottomBuffer = nullptr;
     if (!nds->GPU.GetFramebuffers(&topBuffer, &bottomBuffer))
     {
-        if (EnvFlag("MELONDS_NSML_SCREENSHOT_REG_TRACE"))
+        if (G.Diagnostics.ScreenshotRegisterTrace)
         {
             std::printf("NSMB Test: screenshot skipped inst=%d frame=%u reason=no-framebuffer\n", instanceID, frame);
             std::fflush(stdout);
@@ -6811,7 +6796,7 @@ void SaveScreenshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     }
     if (!topBuffer || !bottomBuffer)
     {
-        if (EnvFlag("MELONDS_NSML_SCREENSHOT_REG_TRACE"))
+        if (G.Diagnostics.ScreenshotRegisterTrace)
         {
             std::printf(
                 "NSMB Test: screenshot skipped inst=%d frame=%u reason=null-buffer top=%p bottom=%p\n",
@@ -6873,7 +6858,7 @@ void SaveScreenshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             nds->ARM9Read16(0x0208883C));
         std::fflush(stdout);
     }
-    else if (EnvFlag("MELONDS_NSML_SCREENSHOT_REG_TRACE"))
+    else if (G.Diagnostics.ScreenshotRegisterTrace)
     {
         std::printf(
             "NSMB Test: screenshot regs inst=%d frame=%u dispcntA=0x%08X dispcntB=0x%08X bldcntA=0x%04X bldyA=0x%04X bldcntB=0x%04X bldyB=0x%04X netState=0x%02X netFlags=0x%04X blackSample=%d brightSample=%d\n",
@@ -7630,9 +7615,6 @@ void InitFromEnvironment()
             G.MvlCurrentStage);
     }
 
-    const char* inputScript = std::getenv("MELONDS_NSML_INPUT_SCRIPT");
-    if (inputScript && inputScript[0]) G.InputScriptPath = inputScript;
-
     if (!ParseFrameRanges(G.Diagnostics.RamDumpFrames.c_str(), G.RamDumpRanges))
     {
         std::printf("NSMB Test: invalid RAM dump frame list\n");
@@ -7810,7 +7792,7 @@ void InitFromEnvironment()
             G.Bootstrap.TestInstanceCount,
             G.Harness.FrameBarrierEnabled ? 1 : 0,
             G.Harness.SerialRunEnabled ? 1 : 0,
-            G.InputScriptPath.empty() ? "<none>" : G.InputScriptPath.c_str(),
+            G.Harness.InputScriptPath.empty() ? "<none>" : G.Harness.InputScriptPath.c_str(),
             G.Diagnostics.HashLogPath.empty() ? "<none>" : G.Diagnostics.HashLogPath.c_str(),
             G.Bootstrap.HashInterval,
             G.Diagnostics.ScreenshotDir.empty() ? "<none>" : G.Diagnostics.ScreenshotDir.c_str(),
