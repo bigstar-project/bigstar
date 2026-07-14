@@ -13,6 +13,7 @@
 
 #include "NsmbNetplayPoC.h"
 #include "NsmbNetplayConfig.h"
+#include "NsmbInputProtocol.h"
 #include "NsmbInputTimeline.h"
 #include "NsmbImitationAI.h"
 #include "NsmbRuleAI.h"
@@ -464,41 +465,6 @@ struct RollbackStoredState
     bool MainRAMFramePreimage = false;
 };
 
-struct WireInput
-{
-    melonDS::u32 Magic;
-    melonDS::u32 Version;
-    melonDS::u32 Frame;
-    melonDS::u32 KeyMask;
-    melonDS::u16 TouchX;
-    melonDS::u16 TouchY;
-    melonDS::u8 Touching;
-    melonDS::u8 Reserved[3];
-};
-
-static_assert(sizeof(WireInput) == 24);
-
-struct WireInputBundleHeader
-{
-    melonDS::u32 Magic;
-    melonDS::u32 Version;
-    melonDS::u32 Kind;
-    melonDS::u32 Count;
-};
-
-struct WireInputBundleEntry
-{
-    melonDS::u32 Frame;
-    melonDS::u32 KeyMask;
-    melonDS::u16 TouchX;
-    melonDS::u16 TouchY;
-    melonDS::u8 Touching;
-    melonDS::u8 Reserved[3];
-};
-
-static_assert(sizeof(WireInputBundleHeader) == 16);
-static_assert(sizeof(WireInputBundleEntry) == 16);
-
 struct WireSeed
 {
     melonDS::u32 Magic;
@@ -511,7 +477,6 @@ constexpr melonDS::u32 kWireKindSeed = 0x44454553; // "SEED", little endian
 constexpr melonDS::u32 kWireKindStartReady = 0x54525453; // "STRT", little endian
 constexpr melonDS::u32 kWireKindState = 0x54415453; // "STAT", little endian
 constexpr melonDS::u32 kWireKindPacket = 0x4B434150; // "PACK", little endian
-constexpr melonDS::u32 kWireKindInputBundle = 0x42504E49; // "INPB", little endian
 constexpr melonDS::u32 kWireKindPlayerState = 0x41545350; // "PSTA", little endian
 constexpr melonDS::u32 kWireKindWorldState = 0x41545357; // "WSTA", little endian
 constexpr melonDS::u32 kWireKindMovingHazardState = 0x415A4148; // "HAZA", little endian
@@ -4248,19 +4213,15 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
 
         case ENET_EVENT_TYPE_RECEIVE:
             G.HangLastENetRecvUnixMs.store(NowUnixMs(), std::memory_order_release);
-            if (event.packet->dataLength == sizeof(WireInput))
+            if (event.packet->dataLength == InputProtocol::kInputPacketSize)
             {
-                WireInput packet;
-                std::memcpy(&packet, event.packet->data, sizeof(packet));
-                if (packet.Magic == kMagic && packet.Version == kVersion)
+                InputProtocol::FramedInput packet;
+                if (InputProtocol::DecodeInput(
+                        event.packet->data,
+                        event.packet->dataLength,
+                        packet))
                 {
-                    const InputState receivedInput {
-                        packet.KeyMask,
-                        packet.Touching != 0,
-                        packet.TouchX,
-                        packet.TouchY,
-                    };
-                    StoreRemoteInputLocked(packet.Frame, receivedInput, localFrame);
+                    StoreRemoteInputLocked(packet.Frame, packet.Input, localFrame);
                 }
             }
             else if (event.packet->dataLength > sizeof(WireSeed)
@@ -4272,29 +4233,14 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                 && event.packet->dataLength != sizeof(WireWorldActorSnapshotState)
                 && event.packet->dataLength != sizeof(WireWorldEffectState))
             {
-                WireInputBundleHeader header;
-                std::memcpy(&header, event.packet->data, sizeof(header));
-                if (header.Magic == kMagic
-                    && header.Version == kVersion
-                    && header.Kind == kWireKindInputBundle
-                    && header.Count > 0
-                    && header.Count <= 32
-                    && event.packet->dataLength == sizeof(WireInputBundleHeader)
-                        + sizeof(WireInputBundleEntry) * header.Count)
+                std::vector<InputProtocol::FramedInput> entries;
+                if (InputProtocol::DecodeInputBundle(
+                        event.packet->data,
+                        event.packet->dataLength,
+                        entries))
                 {
-                    const auto* entries = reinterpret_cast<const WireInputBundleEntry*>(
-                        event.packet->data + sizeof(WireInputBundleHeader));
-                    for (melonDS::u32 entryIndex = 0; entryIndex < header.Count; entryIndex++)
-                    {
-                        const WireInputBundleEntry& entry = entries[entryIndex];
-                        const InputState receivedInput {
-                            entry.KeyMask,
-                            entry.Touching != 0,
-                            entry.TouchX,
-                            entry.TouchY,
-                        };
-                        StoreRemoteInputLocked(entry.Frame, receivedInput, localFrame);
-                    }
+                    for (const InputProtocol::FramedInput& entry : entries)
+                        StoreRemoteInputLocked(entry.Frame, entry.Input, localFrame);
                 }
             }
             else if (event.packet->dataLength == sizeof(WireSeed))
@@ -4797,11 +4743,6 @@ void SendInputPayloadNowLocked(const void* data, size_t size, melonDS::u32 flags
     TraceHangPhase("end", "enet-send-input", -1, G.LastSentInputFrame, G.LastSentInputFrame, G.LastSentInputFrame);
 }
 
-void SendInputWireNowLocked(const WireInput& packet)
-{
-    SendInputPayloadNowLocked(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE);
-}
-
 void FlushDelayedInputsLocked(melonDS::u32 frame)
 {
     if (!G.Peer || G.DelayedInputs.empty())
@@ -4824,7 +4765,7 @@ void FlushDelayedInputsLocked(melonDS::u32 frame)
 std::vector<char> BuildInputBundlePayloadLocked(melonDS::u32 frame, const InputState& input)
 {
     const int history = std::clamp(G.InputBundleHistory, 0, 31);
-    std::vector<WireInputBundleEntry> entries;
+    std::vector<InputProtocol::FramedInput> entries;
     entries.reserve(static_cast<size_t>(history + 1));
     for (int offset = history; offset >= 0; offset--)
     {
@@ -4835,27 +4776,9 @@ std::vector<char> BuildInputBundlePayloadLocked(melonDS::u32 frame, const InputS
         auto existing = G.LocalInputs.find(entryFrame);
         if (existing != G.LocalInputs.end())
             entryInput = existing->second;
-        entries.push_back({
-            entryFrame,
-            entryInput.KeyMask,
-            entryInput.TouchX,
-            entryInput.TouchY,
-            entryInput.Touching ? static_cast<melonDS::u8>(1) : static_cast<melonDS::u8>(0),
-            {},
-        });
+        entries.push_back({ entryFrame, entryInput });
     }
-
-    WireInputBundleHeader header {};
-    header.Magic = kMagic;
-    header.Version = kVersion;
-    header.Kind = kWireKindInputBundle;
-    header.Count = static_cast<melonDS::u32>(entries.size());
-
-    std::vector<char> payload(sizeof(header) + entries.size() * sizeof(WireInputBundleEntry));
-    std::memcpy(payload.data(), &header, sizeof(header));
-    if (!entries.empty())
-        std::memcpy(payload.data() + sizeof(header), entries.data(), entries.size() * sizeof(WireInputBundleEntry));
-    return payload;
+    return InputProtocol::EncodeInputBundle(entries);
 }
 
 void SendInputLocked(melonDS::u32 frame, const InputState& input)
@@ -4905,14 +4828,7 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
         return;
     }
 
-    WireInput packet {};
-    packet.Magic = kMagic;
-    packet.Version = kVersion;
-    packet.Frame = frame;
-    packet.KeyMask = input.KeyMask;
-    packet.TouchX = input.TouchX;
-    packet.TouchY = input.TouchY;
-    packet.Touching = input.Touching ? 1 : 0;
+    const std::vector<char> inputPayload = InputProtocol::EncodeInput({ frame, input });
 
     const bool sendBundle = G.InputUnreliable && G.InputBundleHistory > 0;
     const std::vector<char> bundlePayload = sendBundle
@@ -4936,8 +4852,7 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
                 (sendDelayFrames * 1000 + 59) / 60),
             sendBundle
                 ? bundlePayload
-                : std::vector<char>(reinterpret_cast<const char*>(&packet),
-                    reinterpret_cast<const char*>(&packet) + sizeof(packet)),
+                : inputPayload,
             sendFlags,
         });
     }
@@ -4946,7 +4861,10 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
         if (sendBundle)
             SendInputPayloadNowLocked(bundlePayload.data(), bundlePayload.size(), sendFlags);
         else
-            SendInputWireNowLocked(packet);
+            SendInputPayloadNowLocked(
+                inputPayload.data(),
+                inputPayload.size(),
+                ENET_PACKET_FLAG_RELIABLE);
     }
 
     if ((G.InputTraceEnabled || G.InputNetplayTraceEnabled)
@@ -4994,16 +4912,9 @@ void MaybeResendLatestInputForFrameLeadLocked()
     }
     else
     {
-        WireInput packet {};
-        packet.Magic = kMagic;
-        packet.Version = kVersion;
-        packet.Frame = G.LastSentInputFrame;
-        packet.KeyMask = input.KeyMask;
-        packet.TouchX = input.TouchX;
-        packet.TouchY = input.TouchY;
-        packet.Touching = input.Touching ? 1 : 0;
-        payloadBytes = sizeof(packet);
-        SendInputWireNowLocked(packet);
+        const std::vector<char> payload = InputProtocol::EncodeInput({ G.LastSentInputFrame, input });
+        payloadBytes = payload.size();
+        SendInputPayloadNowLocked(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE);
     }
 
     G.LastInputFrameLeadResendAt = now;

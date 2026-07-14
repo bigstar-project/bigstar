@@ -10,10 +10,11 @@
 - 完了: process environmentを差し替え可能な `Config::Environment` とtyped `BootstrapConfig` を追加し、PoC/test有効化、test frame/instance、hash、wait/quit、input trace設定を `InitFromEnvironment` から抽出した。defaultとclampをfake environmentで直接検証する。
 - 完了: Clangの`unused-function/variable/const-variable`診断で未使用と確認した旧PoC定数4個と関数3個を削除した。削除対象は旧VSConnect submenu/course-select address、loose object scan/read helper、旧nearest hazard helper。`State`直下877 fieldは全て`G.<field>`参照があり、単純な未参照fieldは0件だった。
 - 完了: input script parserとtimeline適用を `NsmbInputTimeline.cpp` へ抽出した。ROM不要testでactive-low button/mask、instance/ALL target、touch clamp、重複spanの先勝ち、fallback、target/range/input/touch error分類を検査する。productionのfixture file loadも同じmoduleを通る。
+- 完了: 24-byte input packetとinput history bundleのencode/decodeを `NsmbInputProtocol.cpp` へ抽出した。既存native little-endian wire layoutをgolden bytesで固定し、round-trip、magic/version/length/count不正、空/33-entry bundle拒否をunit test化した。fast gameplayは`InputUnreliable + InputBundleHistory=8`なのでproduction bundle送受信も実際に通る。
 - 完了: `scripts/test-nsmb-netplay-refactor.ps1` にfast/standard/full tierを追加した。fastは専用の非対称入力fixture、固定match seed、stable host/client ROM、2-process ENet、JIT、実player actor更新、host/client semantic state比較を1,250 framesで実行する。standardは描画/screenshot込み3,000 frames、fullはstandardに加えてstar取得からresult sceneまでの6,000 frames smokeを実行する。
 - Current blocker: なし。fast goldenは現在のstable ROM hashも検査するため、ROM patchを意図的に変更する作業ではsemantic差分を確認してgoldenを明示更新する必要がある。
-- Next action: wire input packet/bundle codecをraw ENet pumpから分離し、golden bytesとmalformed packet testを追加する。connection/input/rollback設定は既存の初期化順依存をcharacterization testで固定してからtyped configへ移す。古いPoC機能はenv→State→hook→launcherの到達性でfeature group単位に削除する。
-- Verification status: Release `melonDS` と2 unit targetのbuild成功。CTest 2件は合計約0.17秒でpass。旧binary baseline 2,300 framesはpass。固定seedのfast tierは独立runでbyte-for-byte一致し、env/`BootstrapConfig`、unused削除、input timeline抽出後もfast gameplay golden comparisonがpassした。Clang unused診断は0件。
+- Next action: input delay/drop/bundle-history selectionをpure policyとして抽出し、frame境界とpacket lossをunit test化する。connection/input/rollback設定は既存の初期化順依存をcharacterization testで固定してからtyped configへ移す。古いPoC機能はenv→State→hook→launcherの到達性でfeature group単位に削除する。
+- Verification status: Release `melonDS` と3 unit targetのbuild成功。CTest 3件は合計約0.14秒でpass。旧binary baseline 2,300 framesはpass。固定seedのfast tierは独立runでbyte-for-byte一致し、env/`BootstrapConfig`、unused削除、input timeline、input protocol抽出後もfast gameplay golden comparisonがpassした。Clang unused診断は0件。
 
 ## AI observation v3 / exact player hitbox - 2026-07-14
 
