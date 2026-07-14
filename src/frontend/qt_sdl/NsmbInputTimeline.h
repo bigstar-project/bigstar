@@ -3,9 +3,12 @@
 
 #include "NsmbNetplayPoC.h"
 
+#include <atomic>
 #include <chrono>
+#include <fstream>
 #include <istream>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -136,6 +139,40 @@ public:
     unsigned long long FrameLeadThrottleLoops = 0;
     unsigned long long FrameLeadThrottleUs = 0;
     unsigned long long FrameLeadThrottleMaxUs = 0;
+};
+
+class Recorder
+{
+public:
+    Recorder() = default;
+    ~Recorder();
+
+    Recorder(const Recorder&) = delete;
+    Recorder& operator=(const Recorder&) = delete;
+
+    bool Open(
+        const std::string& path,
+        melonDS::u32 startFrame,
+        melonDS::u32 endFrame,
+        int instanceID);
+    bool IsOpen() const;
+    void Record(int instanceID, melonDS::u32 frame, const InputState& input);
+    void Close();
+
+private:
+    void FlushSpanLocked();
+
+    mutable std::mutex Mutex_;
+    std::atomic<bool> Enabled_ { false };
+    std::ofstream Output_;
+    melonDS::u32 StartFrame_ = 0;
+    melonDS::u32 EndFrame_ = 0;
+    int InstanceID_ = -1;
+    bool HasSpan_ = false;
+    melonDS::u32 SpanStart_ = 0;
+    melonDS::u32 SpanEnd_ = 0;
+    InputState SpanInput_;
+    int PendingSpans_ = 0;
 };
 
 enum class ParseErrorKind
