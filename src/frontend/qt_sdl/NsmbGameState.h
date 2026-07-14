@@ -5,9 +5,11 @@
 #include "types.h"
 
 #include <cstddef>
+#include <fstream>
 #include <iosfwd>
 #include <map>
 #include <optional>
+#include <string>
 
 namespace NsmbNetplayPoC::GameStateModel {
 
@@ -601,6 +603,21 @@ struct GameStateTraceHashes {
   melonDS::u64 WifiCandidate = 0;
   melonDS::u64 RenderCandidate = 0;
   melonDS::u64 NetState = 0;
+};
+
+class GameStateTraceWriter {
+public:
+  bool Open(const std::string &path, bool extended);
+  bool IsOpen() const;
+  void ResetForRestart(int instanceID);
+  bool Write(int instanceID, melonDS::u32 frame,
+             const GameStateSample &sample,
+             const GameStateTraceHashes *extendedHashes);
+  void Close();
+
+private:
+  std::ofstream Output_;
+  melonDS::u64 LastWrittenFrame_[16]{};
 };
 
 struct DecodedGameState {

@@ -1,5 +1,6 @@
 #include "NsmbGameState.h"
 
+#include <algorithm>
 #include <iterator>
 #include <ostream>
 
@@ -790,6 +791,45 @@ void WriteGameStateTraceRow(std::ostream &out, int instanceID,
   }
 
   out << std::dec << '\n';
+}
+
+bool GameStateTraceWriter::Open(const std::string &path, bool extended) {
+  Close();
+  Output_.clear();
+  std::fill(std::begin(LastWrittenFrame_), std::end(LastWrittenFrame_), 0);
+  Output_.open(path, std::ios::out | std::ios::trunc);
+  if (!Output_)
+    return false;
+  WriteGameStateTraceHeader(Output_, extended);
+  return true;
+}
+
+bool GameStateTraceWriter::IsOpen() const {
+  return Output_.is_open() && Output_.good();
+}
+
+void GameStateTraceWriter::ResetForRestart(int instanceID) {
+  if (instanceID < 0 || instanceID >= 16)
+    return;
+  LastWrittenFrame_[instanceID] = 0;
+}
+
+bool GameStateTraceWriter::Write(
+    int instanceID, melonDS::u32 frame, const GameStateSample &sample,
+    const GameStateTraceHashes *extendedHashes) {
+  if (!IsOpen() || instanceID < 0 || instanceID >= 16 ||
+      LastWrittenFrame_[instanceID] == frame)
+    return false;
+
+  LastWrittenFrame_[instanceID] = frame;
+  WriteGameStateTraceRow(Output_, instanceID, frame, sample, extendedHashes);
+  Output_.flush();
+  return true;
+}
+
+void GameStateTraceWriter::Close() {
+  if (Output_.is_open())
+    Output_.close();
 }
 
 #undef NSMB_GAME_STATE_WIRE_FIELDS

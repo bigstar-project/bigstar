@@ -100,6 +100,7 @@ using GameStateModel::AIPlayerTileProbeSample;
 using GameStateModel::GameStateSample;
 using GameStateModel::GameStateSyncHashes;
 using GameStateModel::GameStateTraceHashes;
+using GameStateModel::GameStateTraceWriter;
 using GameStateModel::CombinedGameStateHash;
 using GameStateModel::ComputeBasicGameStateHash;
 using GameStateModel::DecodedGameState;
@@ -107,8 +108,6 @@ using GameStateModel::DecodeWireGameState;
 using GameStateModel::EncodeWireGameState;
 using GameStateModel::GameStateKey;
 using GameStateModel::StateSyncRuntime;
-using GameStateModel::WriteGameStateTraceRow;
-using GameStateModel::WriteGameStateTraceHeader;
 using GameStateModel::PlayerCollisionMgrSample;
 using GameStateModel::PlayerHitboxSample;
 using GameStateModel::kAITileGridCount;
@@ -569,7 +568,7 @@ struct State
     Config::RuntimePatchConfig RuntimePatch;
     Config::HarnessConfig Harness;
     std::ofstream HashLog;
-    std::ofstream GameStateTrace;
+    GameStateTraceWriter GameStateTrace;
     std::ofstream DiagnosticEvents;
     std::ofstream AIPlayLog;
     std::ofstream AIObservationV2Log;
@@ -644,7 +643,6 @@ struct State
     std::vector<std::pair<melonDS::u32, melonDS::u32>> RamDumpRanges;
     std::vector<std::pair<melonDS::u32, melonDS::u32>> MemPatchRanges;
     melonDS::u64 LastLoggedHashFrame[16] {};
-    melonDS::u64 LastLoggedGameStateFrame[16] {};
     melonDS::u32 TestFrameCount[16] {};
     std::condition_variable InputCond;
     bool NetworkPumpThreadStarted = false;
@@ -768,7 +766,7 @@ void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
     G.DiagnosticsRuntime.ResetNetplaySnapshot(kNoFrameLimit);
     G.Session.ResetStartHandshake();
 
-    G.LastLoggedGameStateFrame[instanceID] = 0;
+    G.GameStateTrace.ResetForRestart(instanceID);
 
     std::printf("NSMB MvL auto restart: reset sync caches inst=%d frame=%u cutoff=%u\n",
         instanceID,
@@ -7174,9 +7172,7 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     const GameStateSample sample = ReadGameStateSample(nds);
 
     std::lock_guard<std::mutex> lock(G.Mutex);
-    if (!G.GameStateTrace) return;
-    if (G.LastLoggedGameStateFrame[instanceID] == frame) return;
-    G.LastLoggedGameStateFrame[instanceID] = frame;
+    if (!G.GameStateTrace.IsOpen()) return;
 
     GameStateTraceHashes traceHashes;
     const GameStateTraceHashes* extendedHashes = nullptr;
@@ -7188,8 +7184,7 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         traceHashes.NetState = HashMainRAMRange(nds, kNetStateBaseAddr, 0x180);
         extendedHashes = &traceHashes;
     }
-    WriteGameStateTraceRow(G.GameStateTrace, instanceID, frame, sample, extendedHashes);
-    G.GameStateTrace.flush();
+    G.GameStateTrace.Write(instanceID, frame, sample, extendedHashes);
 }
 
 void WriteJsonHex(std::ostream& out, melonDS::u32 value, int width = 8)
@@ -7807,14 +7802,10 @@ void InitFromEnvironment()
 
     if ((G.TestEnabled || G.Enabled) && !G.Diagnostics.GameStateTracePath.empty())
     {
-        G.GameStateTrace.open(G.Diagnostics.GameStateTracePath, std::ios::out | std::ios::trunc);
-        if (!G.GameStateTrace)
+        if (!G.GameStateTrace.Open(G.Diagnostics.GameStateTracePath,
+                                  G.Diagnostics.GameStateTraceExtended))
         {
             std::printf("NSMB Test: failed to open game state trace: %s\n", G.Diagnostics.GameStateTracePath.c_str());
-        }
-        else
-        {
-            WriteGameStateTraceHeader(G.GameStateTrace, G.Diagnostics.GameStateTraceExtended);
         }
     }
     if ((G.TestEnabled || G.Enabled) && !G.Diagnostics.AIPlayLogPath.empty())
@@ -9374,8 +9365,7 @@ void Shutdown()
     if (G.HashLog)
         G.HashLog.close();
 
-    if (G.GameStateTrace)
-        G.GameStateTrace.close();
+    G.GameStateTrace.Close();
     if (G.AIPlayLog)
     {
         G.AIPlayLog.flush();

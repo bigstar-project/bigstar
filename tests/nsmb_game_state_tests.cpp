@@ -2,9 +2,12 @@
 #include "NsmbGameStateWriter.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <string>
 
@@ -330,6 +333,46 @@ void TestGameStateTraceRowFormatting() {
   CHECK(EndsWith(extended.str(), "\n10"));
 }
 
+void TestGameStateTraceWriterLifecycle() {
+  using namespace NsmbNetplayPoC::GameStateModel;
+  const auto unique = std::chrono::high_resolution_clock::now()
+                          .time_since_epoch()
+                          .count();
+  const std::filesystem::path path =
+      std::filesystem::temp_directory_path() /
+      ("nsmb_game_state_trace_" + std::to_string(unique) + ".csv");
+
+  GameStateTraceWriter writer;
+  CHECK(!writer.IsOpen());
+  CHECK(writer.Open(path.string(), false));
+  CHECK(writer.IsOpen());
+
+  GameStateSample sample;
+  sample.StageID = 0xA1;
+  CHECK(!writer.Write(-1, 42, sample, nullptr));
+  CHECK(!writer.Write(3, 0, sample, nullptr));
+  CHECK(writer.Write(3, 42, sample, nullptr));
+  CHECK(!writer.Write(3, 42, sample, nullptr));
+  CHECK(writer.Write(4, 42, sample, nullptr));
+  writer.ResetForRestart(3);
+  CHECK(!writer.Write(3, 0, sample, nullptr));
+  CHECK(writer.Write(3, 42, sample, nullptr));
+  writer.Close();
+  CHECK(!writer.IsOpen());
+
+  std::ifstream input(path);
+  const std::string contents((std::istreambuf_iterator<char>(input)),
+                             std::istreambuf_iterator<char>());
+  CHECK(contents.rfind("instance,frame,stageID", 0) == 0);
+  CHECK(std::count(contents.begin(), contents.end(), '\n') == 4);
+  CHECK(contents.find("3,42,0xa1") != std::string::npos);
+  CHECK(contents.find("4,42,0xa1") != std::string::npos);
+  input.close();
+  std::error_code removeError;
+  std::filesystem::remove(path, removeError);
+  CHECK(!removeError);
+}
+
 } // namespace
 
 int main() {
@@ -340,6 +383,7 @@ int main() {
   TestRemoteStateStoreSelectionAndRestart();
   TestStateSyncRuntimeRestartContract();
   TestGameStateTraceRowFormatting();
+  TestGameStateTraceWriterLifecycle();
   if (Failures != 0) {
     std::fprintf(stderr, "nsmb game state tests failed: %d\n", Failures);
     return 1;
