@@ -1899,6 +1899,105 @@ ReadAIPlayerTileProbeSample(melonDS::NDS *nds, const ObjectScanSample &actor) {
   return probe;
 }
 
+ObjectScanSample GetPlayerActorCached(
+    int instanceID, int player, melonDS::NDS *nds,
+    GameStateModel::StateSyncRuntime &runtime) {
+  ObjectScanSample actor;
+  if (instanceID < 0 || instanceID >= 16 || player < 0 || player > 1)
+    return actor;
+
+  const melonDS::u32 cachedBase =
+      runtime.PlayerActorBaseCache[instanceID][player];
+  const melonDS::u32 cachedGUID =
+      runtime.PlayerActorGUIDCache[instanceID][player];
+  if (cachedBase != 0 &&
+      ReadPlayerActorByBase(nds, cachedBase, cachedGUID, actor))
+    return actor;
+
+  const PlayerActorScanSample players = FindPlayerActors(nds);
+  actor = player == 0 ? players.Actor0 : players.Actor1;
+  runtime.PlayerActorBaseCache[instanceID][player] =
+      actor.Found ? actor.Base : 0;
+  runtime.PlayerActorGUIDCache[instanceID][player] =
+      actor.Found ? actor.GUID : 0;
+  return actor;
+}
+
+std::vector<ObjectScanSample> GetWorldMovingHazardsCached(
+    int instanceID, melonDS::u32 frame, melonDS::NDS *nds,
+    GameStateModel::StateSyncRuntime &runtime, int actorRescanInterval) {
+  std::vector<ObjectScanSample> actors;
+  if (instanceID < 0 || instanceID >= 16)
+    return actors;
+
+  const bool periodicRescan =
+      actorRescanInterval > 0 &&
+      frame % static_cast<melonDS::u32>(actorRescanInterval) == 0;
+  if (!periodicRescan) {
+    const melonDS::u32 count = std::min(
+        runtime.WorldMovingHazardCacheCounts[instanceID],
+        static_cast<melonDS::u32>(WireProtocol::kMaxWorldMovingHazards));
+    bool valid = count > 0;
+    for (melonDS::u32 index = 0; index < count; index++) {
+      ObjectScanSample actor;
+      if (!ReadObjectByBase(
+              nds, runtime.WorldMovingHazardBaseCaches[instanceID][index],
+              runtime.WorldMovingHazardGUIDCaches[instanceID][index],
+              kVsMovingHazardObjectID, kVsMovingHazardSettings, actor) ||
+          actor.StateType != 1) {
+        valid = false;
+        break;
+      }
+      actors.push_back(actor);
+    }
+    if (valid)
+      return actors;
+    actors.clear();
+  }
+
+  actors = FindActiveObjectsByIDAndSettings(
+      nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
+  if (actors.size() > WireProtocol::kMaxWorldMovingHazards)
+    actors.erase(actors.begin(),
+                 actors.end() - WireProtocol::kMaxWorldMovingHazards);
+  runtime.WorldMovingHazardCacheCounts[instanceID] =
+      static_cast<melonDS::u32>(actors.size());
+  for (std::size_t index = 0;
+       index < WireProtocol::kMaxWorldMovingHazards; index++) {
+    runtime.WorldMovingHazardBaseCaches[instanceID][index] =
+        index < actors.size() ? actors[index].Base : 0;
+    runtime.WorldMovingHazardGUIDCaches[instanceID][index] =
+        index < actors.size() ? actors[index].GUID : 0;
+  }
+  return actors;
+}
+
+ObjectScanSample GetWorldActorCached(
+    int instanceID, melonDS::u32 frame, melonDS::NDS *nds,
+    melonDS::u16 objectID, melonDS::u32 settings, melonDS::u32 *baseCache,
+    melonDS::u32 *guidCache, int actorRescanInterval) {
+  ObjectScanSample actor;
+  if (instanceID < 0 || instanceID >= 16)
+    return actor;
+
+  ObjectScanSample cachedActor;
+  const bool periodicRescan =
+      actorRescanInterval > 0 &&
+      frame % static_cast<melonDS::u32>(actorRescanInterval) == 0;
+  if (!periodicRescan && baseCache[instanceID] != 0 &&
+      ReadObjectByBase(nds, baseCache[instanceID], guidCache[instanceID],
+                       objectID, settings, cachedActor) &&
+      cachedActor.StateType == 1)
+    return cachedActor;
+
+  actor = FindNewestActiveObjectByIDAndSettings(nds, objectID, settings);
+  if (!actor.Found)
+    actor = cachedActor;
+  baseCache[instanceID] = actor.Found ? actor.Base : 0;
+  guidCache[instanceID] = actor.Found ? actor.GUID : 0;
+  return actor;
+}
+
 void FillWireWorldActorState(
     const ObjectScanSample &actor,
     WireProtocol::WireWorldActorState &state) {

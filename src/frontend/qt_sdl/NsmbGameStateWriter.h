@@ -52,6 +52,58 @@ struct GameStateApplyResult {
   bool RemotePlayerApplied = false;
 };
 
+struct ApplyTraceOptions {
+  bool Enabled = false;
+  int Interval = 1;
+
+  bool ShouldTrace(melonDS::u32 frame) const {
+    return Enabled &&
+           (Interval <= 1 ||
+            frame % static_cast<melonDS::u32>(Interval) == 0);
+  }
+};
+
+struct WorldActorSnapshotApplyOptions {
+  int InstanceID = 0;
+  melonDS::u32 Frame = 0;
+  int MaxPredictFrames = 0;
+  ApplyTraceOptions Trace;
+};
+
+struct WorldStateApplyOptions {
+  int InstanceID = 0;
+  melonDS::u32 Frame = 0;
+  int MaxPredictFrames = 0;
+  int ActorRescanInterval = 0;
+  bool Client = false;
+  bool ApplyStarActor = false;
+  bool SpawnItem = false;
+  bool TraceItems = false;
+  ApplyTraceOptions Trace;
+};
+
+struct MovingHazardApplyOptions {
+  int InstanceID = 0;
+  melonDS::u32 Frame = 0;
+  int MaxPredictFrames = 0;
+  int ActorRescanInterval = 0;
+  bool TraceMapping = false;
+};
+
+struct PlayerStateApplyOptions {
+  int InstanceID = 0;
+  int RemotePlayer = 0;
+  melonDS::u32 Frame = 0;
+  melonDS::u32 SampleFrame = 0;
+  int MaxPredictFrames = 0;
+  bool ApplyGlobals = false;
+  ApplyTraceOptions Trace;
+};
+
+using SpawnWorldItemCallback = bool (*)(
+    int instanceID, melonDS::u32 frame, melonDS::NDS *nds,
+    const WireProtocol::WireWorldActorState &state);
+
 bool WriteObjectTransformByBase(melonDS::NDS *nds, melonDS::u32 base,
                                 melonDS::u32 posX, melonDS::u32 posY,
                                 melonDS::u32 posZ, melonDS::u32 prevX,
@@ -81,6 +133,27 @@ bool WritePlayerGlobalState(melonDS::NDS *nds,
 GameStateApplyResult ApplyGameState(
     melonDS::NDS *nds, const GameStateModel::GameStateSample &sample,
     const GameStateApplyOptions &options);
+void ApplyWorldActorSnapshotState(
+    melonDS::NDS *nds,
+    const WireProtocol::WireWorldActorSnapshotState &sample,
+    GameStateModel::StateSyncRuntime &runtime,
+    const WorldActorSnapshotApplyOptions &options);
+void ApplyWorldState(melonDS::NDS *nds,
+                     const WireProtocol::WireWorldState &sample,
+                     GameStateModel::StateSyncRuntime &runtime,
+                     const WorldStateApplyOptions &options,
+                     SpawnWorldItemCallback spawnWorldItem);
+void ApplyMovingHazardState(
+    melonDS::NDS *nds, const WireProtocol::WireMovingHazardState &sample,
+    GameStateModel::StateSyncRuntime &runtime,
+    const MovingHazardApplyOptions &options);
+void ApplyWorldEffectState(
+    melonDS::NDS *nds,
+    const WireProtocol::WireWorldEffectState &sample);
+void ApplyPlayerState(melonDS::NDS *nds,
+                      const WireProtocol::WirePlayerState &sample,
+                      GameStateModel::StateSyncRuntime &runtime,
+                      const PlayerStateApplyOptions &options);
 
 } // namespace NsmbNetplayPoC::GameStateWriter
 

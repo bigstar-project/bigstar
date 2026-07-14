@@ -131,6 +131,16 @@ ObjectScanSample FindNewestActiveObjectByIDAndSettings(
     melonDS::NDS *nds, melonDS::u16 expectedObjectID,
     melonDS::u32 expectedSettings, bool includeStateType2 = false);
 ObjectLifecycleSummary SummarizeObjectLifecycle(melonDS::NDS *nds);
+ObjectScanSample GetPlayerActorCached(
+    int instanceID, int player, melonDS::NDS *nds,
+    GameStateModel::StateSyncRuntime &runtime);
+std::vector<ObjectScanSample> GetWorldMovingHazardsCached(
+    int instanceID, melonDS::u32 frame, melonDS::NDS *nds,
+    GameStateModel::StateSyncRuntime &runtime, int actorRescanInterval);
+ObjectScanSample GetWorldActorCached(
+    int instanceID, melonDS::u32 frame, melonDS::NDS *nds,
+    melonDS::u16 objectID, melonDS::u32 settings, melonDS::u32 *baseCache,
+    melonDS::u32 *guidCache, int actorRescanInterval);
 void FillWireWorldActorState(
     const ObjectScanSample &actor,
     WireProtocol::WireWorldActorState &state);
