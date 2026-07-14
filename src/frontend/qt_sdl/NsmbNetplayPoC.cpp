@@ -17,6 +17,7 @@
 #include "NsmbInputProtocol.h"
 #include "NsmbNetplayProtocol.h"
 #include "NsmbNetplayTransport.h"
+#include "NsmbNetplayDiagnostics.h"
 #include "NsmbGameState.h"
 #include "NsmbGameStateReader.h"
 #include "NsmbGameStateWriter.h"
@@ -52,14 +53,6 @@
 
 #include <QImage>
 #include <QString>
-
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#include <dbghelp.h>
-#endif
 
 #include <enet/enet.h>
 
@@ -500,6 +493,7 @@ struct State
     std::atomic<bool> EnvChecked { false };
     Config::BootstrapConfig Bootstrap;
     Config::DiagnosticsConfig Diagnostics;
+    Diagnostics::HangRuntime HangDiagnostics;
     bool Enabled = false;
     bool Ready = false;
     bool TestEnabled = false;
@@ -678,60 +672,6 @@ struct State
     bool NetworkPumpThreadStarted = false;
     bool NetworkPumpStop = false;
     std::thread NetworkPumpThread;
-    std::ofstream HangWatchdogLog;
-    std::ofstream HangPhaseEventsLog;
-    std::mutex HangLogMutex;
-    std::atomic<bool> HangWatchdogStop { false };
-    bool HangWatchdogThreadStarted = false;
-    std::thread HangWatchdogThread;
-    std::atomic<const char*> HangPhase { "startup" };
-    std::atomic<const char*> HangEvent { "startup" };
-    std::atomic<unsigned long long> HangPhaseUnixMs { 0 };
-    std::atomic<unsigned long long> HangProgressUnixMs { 0 };
-    std::atomic<unsigned long long> HangLastDumpUnixMs { 0 };
-    std::atomic<int> HangInstance { -1 };
-    std::atomic<melonDS::u32> HangFrame { 0 };
-    std::atomic<melonDS::u32> HangLogicalFrame { 0 };
-    std::atomic<melonDS::u32> HangSendFrame { 0 };
-    std::atomic<melonDS::u32> HangRemoteWaitTarget { 0 };
-    std::atomic<int> HangRemoteWaitActive { 0 };
-    std::atomic<unsigned long long> HangRemoteWaitStartUnixMs { 0 };
-    std::atomic<unsigned long long> HangRemoteWaitProgressUnixMs { 0 };
-    std::atomic<melonDS::u32> HangLastSentFrame { kNoFrameLimit };
-    std::atomic<melonDS::u32> HangLastRecvFrame { kNoFrameLimit };
-    std::atomic<int> HangLead { 0 };
-    std::atomic<std::size_t> HangLocalQueue { 0 };
-    std::atomic<std::size_t> HangRemoteQueue { 0 };
-    std::atomic<std::size_t> HangDelayedQueue { 0 };
-    std::atomic<int> HangPeerState { -1 };
-    std::atomic<int> HangConnectingPeerState { -1 };
-    std::atomic<unsigned long long> HangLastENetSendUnixMs { 0 };
-    std::atomic<unsigned long long> HangLastENetRecvUnixMs { 0 };
-    std::atomic<int> HangLastENetSendResult { 0 };
-    std::atomic<int> HangLastENetServiceResult { 0 };
-    std::atomic<int> HangLastENetEventType { 0 };
-    std::atomic<melonDS::u32> HangLastENetEventData { 0 };
-    std::atomic<std::size_t> HangLastENetSendBytes { 0 };
-    std::atomic<melonDS::u32> HangArm9PC { 0 };
-    std::atomic<melonDS::u32> HangArm9LR { 0 };
-    std::atomic<melonDS::u32> HangArm9SP { 0 };
-    std::atomic<melonDS::u32> HangArm9CPSR { 0 };
-    std::atomic<melonDS::u32> HangStageID { 0 };
-    std::atomic<melonDS::u32> HangStageGroup { 0 };
-    std::atomic<melonDS::u32> HangVsMode { 0 };
-    std::atomic<melonDS::u32> HangNetState14 { 0 };
-    std::atomic<melonDS::u32> HangNetState1C { 0 };
-    std::atomic<melonDS::u32> HangNetState20 { 0 };
-    std::atomic<melonDS::u32> HangNetState24 { 0 };
-    std::atomic<melonDS::u32> HangNetState5C { 0 };
-    std::atomic<melonDS::u32> HangNetPacketTick { 0 };
-    std::atomic<melonDS::u32> HangAppFrameLength { 0 };
-    std::atomic<melonDS::u32> HangAppUpdateTask { 0 };
-    std::atomic<melonDS::u32> HangAppSleeping { 0 };
-    std::atomic<melonDS::u32> HangStageSceneState { 0 };
-    std::atomic<melonDS::u32> HangPlayer0Transition { 0 };
-    std::atomic<melonDS::u32> HangPlayer1Transition { 0 };
-    std::atomic<unsigned long long> HangGameSnapshotUnixMs { 0 };
 };
 
 State G;
@@ -762,72 +702,18 @@ using Config::EnvHasValue;
 using Config::EnvInt;
 using Config::EnvU32;
 
-bool EnsureHangLogOpenLocked(std::ofstream& file, const std::string& path)
-{
-    if (path.empty())
-        return false;
-    if (file.is_open())
-        return true;
-
-    const std::filesystem::path logPath(path);
-    std::error_code ec;
-    if (logPath.has_parent_path())
-        std::filesystem::create_directories(logPath.parent_path(), ec);
-    file.open(logPath, std::ios::out | std::ios::app | std::ios::binary);
-    if (!file)
-    {
-        std::printf("NSMB HangDiagnostics: failed to open log: %s\n", logPath.string().c_str());
-        std::fflush(stdout);
-        return false;
-    }
-    return true;
-}
-
 void UpdateHangNetplaySnapshotLocked(melonDS::u32 frameForLead)
 {
-    if (!G.Diagnostics.HangDiagnosticsEnabled)
-        return;
-
-    G.HangLastSentFrame.store(G.InputRuntime.LastSentInputFrame, std::memory_order_release);
-    G.HangLastRecvFrame.store(G.InputRuntime.LastReceivedInputFrame, std::memory_order_release);
-    const int lead = (frameForLead == kNoFrameLimit || G.InputRuntime.LastReceivedInputFrame == kNoFrameLimit)
-        ? 0
-        : static_cast<int>(frameForLead) - static_cast<int>(G.InputRuntime.LastReceivedInputFrame);
-    G.HangLead.store(lead, std::memory_order_release);
-    G.HangLocalQueue.store(G.InputRuntime.LocalInputs.size(), std::memory_order_release);
-    G.HangRemoteQueue.store(G.InputRuntime.RemoteInputs.size(), std::memory_order_release);
-    G.HangDelayedQueue.store(G.Delivery.PendingCount(), std::memory_order_release);
-    G.HangPeerState.store(G.Transport.PeerState(), std::memory_order_release);
-    G.HangConnectingPeerState.store(G.Transport.ConnectingPeerState(), std::memory_order_release);
-}
-
-void WriteHangPhaseEventLocked(
-    unsigned long long now,
-    const char* event,
-    const char* phase,
-    int instanceID,
-    melonDS::u32 frame,
-    melonDS::u32 logicalFrame,
-    melonDS::u32 sendFrame)
-{
-    if (!EnsureHangLogOpenLocked(G.HangPhaseEventsLog, G.Diagnostics.HangPhaseEventsPath))
-        return;
-
-    G.HangPhaseEventsLog
-        << "{\"tUnixMs\":" << now
-        << ",\"event\":\"" << (event ? event : "phase") << "\""
-        << ",\"phase\":\"" << (phase ? phase : "unknown") << "\""
-        << ",\"instance\":" << instanceID
-        << ",\"frame\":" << frame
-        << ",\"logicalFrame\":" << logicalFrame
-        << ",\"sendFrame\":" << sendFrame
-        << ",\"lastSent\":" << G.HangLastSentFrame.load(std::memory_order_acquire)
-        << ",\"lastRecv\":" << G.HangLastRecvFrame.load(std::memory_order_acquire)
-        << ",\"lead\":" << G.HangLead.load(std::memory_order_acquire)
-        << ",\"remoteWaitActive\":" << G.HangRemoteWaitActive.load(std::memory_order_acquire)
-        << ",\"remoteWaitTarget\":" << G.HangRemoteWaitTarget.load(std::memory_order_acquire)
-        << "}\n";
-    G.HangPhaseEventsLog.flush();
+    G.HangDiagnostics.UpdateNetplaySnapshot(
+        G.InputRuntime.LastSentInputFrame,
+        G.InputRuntime.LastReceivedInputFrame,
+        frameForLead,
+        kNoFrameLimit,
+        G.InputRuntime.LocalInputs.size(),
+        G.InputRuntime.RemoteInputs.size(),
+        G.Delivery.PendingCount(),
+        G.Transport.PeerState(),
+        G.Transport.ConnectingPeerState());
 }
 
 void TraceHangPhase(
@@ -838,185 +724,17 @@ void TraceHangPhase(
     melonDS::u32 logicalFrame,
     melonDS::u32 sendFrame)
 {
-    if (!G.Diagnostics.HangDiagnosticsEnabled)
-        return;
-
-    const unsigned long long now = NowUnixMs();
-    G.HangEvent.store(event ? event : "phase", std::memory_order_release);
-    G.HangPhase.store(phase ? phase : "unknown", std::memory_order_release);
-    G.HangPhaseUnixMs.store(now, std::memory_order_release);
-    G.HangProgressUnixMs.store(now, std::memory_order_release);
-    G.HangInstance.store(instanceID, std::memory_order_release);
-    G.HangFrame.store(frame, std::memory_order_release);
-    G.HangLogicalFrame.store(logicalFrame, std::memory_order_release);
-    G.HangSendFrame.store(sendFrame, std::memory_order_release);
-
-    std::lock_guard<std::mutex> lock(G.HangLogMutex);
-    WriteHangPhaseEventLocked(now, event, phase, instanceID, frame, logicalFrame, sendFrame);
-}
-
-#ifdef _WIN32
-bool WriteHangMiniDump(const std::string& path)
-{
-    if (path.empty())
-        return false;
-
-    const std::filesystem::path dumpPath(path);
-    std::error_code ec;
-    if (dumpPath.has_parent_path())
-        std::filesystem::create_directories(dumpPath.parent_path(), ec);
-
-    HMODULE dbghelp = LoadLibraryA("Dbghelp.dll");
-    if (!dbghelp)
-        return false;
-
-    using MiniDumpWriteDumpFn = BOOL (WINAPI*)(
-        HANDLE, DWORD, HANDLE, MINIDUMP_TYPE,
-        PMINIDUMP_EXCEPTION_INFORMATION,
-        PMINIDUMP_USER_STREAM_INFORMATION,
-        PMINIDUMP_CALLBACK_INFORMATION);
-    auto miniDumpWriteDump = reinterpret_cast<MiniDumpWriteDumpFn>(
-        GetProcAddress(dbghelp, "MiniDumpWriteDump"));
-    if (!miniDumpWriteDump)
-    {
-        FreeLibrary(dbghelp);
-        return false;
-    }
-
-    HANDLE file = CreateFileA(
-        dumpPath.string().c_str(),
-        GENERIC_WRITE,
-        0,
-        nullptr,
-        CREATE_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr);
-    if (file == INVALID_HANDLE_VALUE)
-    {
-        FreeLibrary(dbghelp);
-        return false;
-    }
-
-    const BOOL ok = miniDumpWriteDump(
-        GetCurrentProcess(),
-        GetCurrentProcessId(),
-        file,
-        MiniDumpNormal,
-        nullptr,
-        nullptr,
-        nullptr);
-    CloseHandle(file);
-    FreeLibrary(dbghelp);
-    return ok != FALSE;
-}
-#else
-bool WriteHangMiniDump(const std::string&)
-{
-    return false;
-}
-#endif
-
-void HangWatchdogThreadMain()
-{
-    while (!G.HangWatchdogStop.load(std::memory_order_acquire))
-    {
-        std::this_thread::sleep_for(std::chrono::milliseconds(std::max(100, G.Diagnostics.HangWatchdogIntervalMs)));
-
-        const unsigned long long now = NowUnixMs();
-        const unsigned long long phaseUnixMs = G.HangPhaseUnixMs.load(std::memory_order_acquire);
-        const unsigned long long phaseAgeMs = phaseUnixMs == 0 || now < phaseUnixMs ? 0 : now - phaseUnixMs;
-        const bool stalled = G.Diagnostics.HangThresholdMs > 0 && phaseAgeMs >= static_cast<unsigned long long>(G.Diagnostics.HangThresholdMs);
-        bool dumpWritten = false;
-        if (stalled && !G.Diagnostics.HangDumpPath.empty() && G.HangLastDumpUnixMs.load(std::memory_order_acquire) == 0)
-        {
-            G.HangLastDumpUnixMs.store(now, std::memory_order_release);
-            dumpWritten = WriteHangMiniDump(G.Diagnostics.HangDumpPath);
-        }
-
-        std::lock_guard<std::mutex> lock(G.HangLogMutex);
-        if (!EnsureHangLogOpenLocked(G.HangWatchdogLog, G.Diagnostics.HangWatchdogPath))
-            continue;
-
-        G.HangWatchdogLog
-            << "{\"tUnixMs\":" << now
-            << ",\"event\":\"watchdog\""
-            << ",\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\""
-            << ",\"phase\":\"" << G.HangPhase.load(std::memory_order_acquire) << "\""
-            << ",\"phaseEvent\":\"" << G.HangEvent.load(std::memory_order_acquire) << "\""
-            << ",\"phaseAgeMs\":" << phaseAgeMs
-            << ",\"stalled\":" << (stalled ? 1 : 0)
-            << ",\"dumpWritten\":" << (dumpWritten ? 1 : 0)
-            << ",\"instance\":" << G.HangInstance.load(std::memory_order_acquire)
-            << ",\"frame\":" << G.HangFrame.load(std::memory_order_acquire)
-            << ",\"logicalFrame\":" << G.HangLogicalFrame.load(std::memory_order_acquire)
-            << ",\"sendFrame\":" << G.HangSendFrame.load(std::memory_order_acquire)
-            << ",\"lastSent\":" << G.HangLastSentFrame.load(std::memory_order_acquire)
-            << ",\"lastRecv\":" << G.HangLastRecvFrame.load(std::memory_order_acquire)
-            << ",\"lead\":" << G.HangLead.load(std::memory_order_acquire)
-            << ",\"localQueue\":" << G.HangLocalQueue.load(std::memory_order_acquire)
-            << ",\"remoteQueue\":" << G.HangRemoteQueue.load(std::memory_order_acquire)
-            << ",\"delayedQueue\":" << G.HangDelayedQueue.load(std::memory_order_acquire)
-            << ",\"remoteWaitActive\":" << G.HangRemoteWaitActive.load(std::memory_order_acquire)
-            << ",\"remoteWaitTarget\":" << G.HangRemoteWaitTarget.load(std::memory_order_acquire)
-            << ",\"remoteWaitStartUnixMs\":" << G.HangRemoteWaitStartUnixMs.load(std::memory_order_acquire)
-            << ",\"remoteWaitProgressUnixMs\":" << G.HangRemoteWaitProgressUnixMs.load(std::memory_order_acquire)
-            << ",\"peerState\":" << G.HangPeerState.load(std::memory_order_acquire)
-            << ",\"connectingPeerState\":" << G.HangConnectingPeerState.load(std::memory_order_acquire)
-            << ",\"lastENetSendUnixMs\":" << G.HangLastENetSendUnixMs.load(std::memory_order_acquire)
-            << ",\"lastENetRecvUnixMs\":" << G.HangLastENetRecvUnixMs.load(std::memory_order_acquire)
-            << ",\"lastENetSendResult\":" << G.HangLastENetSendResult.load(std::memory_order_acquire)
-            << ",\"lastENetServiceResult\":" << G.HangLastENetServiceResult.load(std::memory_order_acquire)
-            << ",\"lastENetEventType\":" << G.HangLastENetEventType.load(std::memory_order_acquire)
-            << ",\"lastENetEventData\":" << G.HangLastENetEventData.load(std::memory_order_acquire)
-            << ",\"lastENetSendBytes\":" << G.HangLastENetSendBytes.load(std::memory_order_acquire)
-            << ",\"arm9PC\":\"0x" << std::hex << G.HangArm9PC.load(std::memory_order_acquire)
-            << "\",\"arm9LR\":\"0x" << G.HangArm9LR.load(std::memory_order_acquire)
-            << "\",\"arm9SP\":\"0x" << G.HangArm9SP.load(std::memory_order_acquire)
-            << "\",\"arm9CPSR\":\"0x" << G.HangArm9CPSR.load(std::memory_order_acquire)
-            << "\",\"stageID\":\"0x" << G.HangStageID.load(std::memory_order_acquire)
-            << "\",\"stageGroup\":\"0x" << G.HangStageGroup.load(std::memory_order_acquire)
-            << "\",\"vsMode\":\"0x" << G.HangVsMode.load(std::memory_order_acquire)
-            << "\",\"netState14\":\"0x" << G.HangNetState14.load(std::memory_order_acquire)
-            << "\",\"netState1C\":\"0x" << G.HangNetState1C.load(std::memory_order_acquire)
-            << "\",\"netState20\":\"0x" << G.HangNetState20.load(std::memory_order_acquire)
-            << "\",\"netState24\":\"0x" << G.HangNetState24.load(std::memory_order_acquire)
-            << "\",\"netState5C\":\"0x" << G.HangNetState5C.load(std::memory_order_acquire)
-            << "\",\"netPacketTick\":\"0x" << G.HangNetPacketTick.load(std::memory_order_acquire)
-            << "\",\"appFrameLength\":\"0x" << G.HangAppFrameLength.load(std::memory_order_acquire)
-            << "\",\"appUpdateTask\":\"0x" << G.HangAppUpdateTask.load(std::memory_order_acquire)
-            << "\",\"appSleeping\":\"0x" << G.HangAppSleeping.load(std::memory_order_acquire)
-            << "\",\"stageSceneState\":\"0x" << G.HangStageSceneState.load(std::memory_order_acquire)
-            << "\",\"player0Transition\":\"0x" << G.HangPlayer0Transition.load(std::memory_order_acquire)
-            << "\",\"player1Transition\":\"0x" << G.HangPlayer1Transition.load(std::memory_order_acquire)
-            << "\",\"gameSnapshotUnixMs\":" << std::dec << G.HangGameSnapshotUnixMs.load(std::memory_order_acquire)
-            << "}\n";
-        G.HangWatchdogLog.flush();
-    }
+    G.HangDiagnostics.TracePhase(event, phase, instanceID, frame, logicalFrame, sendFrame);
 }
 
 void StartHangWatchdogIfNeeded()
 {
-    if (!G.Diagnostics.HangDiagnosticsEnabled || G.HangWatchdogThreadStarted)
-        return;
-    G.HangWatchdogStop.store(false, std::memory_order_release);
-    G.HangWatchdogThreadStarted = true;
-    G.HangWatchdogThread = std::thread(HangWatchdogThreadMain);
+    G.HangDiagnostics.Start(G.Diagnostics, G.NetRole == Role::Host);
 }
 
 void StopHangWatchdog()
 {
-    if (!G.HangWatchdogThreadStarted)
-        return;
-    G.HangWatchdogStop.store(true, std::memory_order_release);
-    if (G.HangWatchdogThread.joinable())
-        G.HangWatchdogThread.join();
-    G.HangWatchdogThreadStarted = false;
-
-    std::lock_guard<std::mutex> lock(G.HangLogMutex);
-    if (G.HangWatchdogLog)
-        G.HangWatchdogLog.close();
-    if (G.HangPhaseEventsLog)
-        G.HangPhaseEventsLog.close();
+    G.HangDiagnostics.Stop();
 }
 
 melonDS::u32 ComposeMvlSceneSettingsForStage(int stage)
@@ -1080,13 +798,7 @@ void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
     G.DelayedNSMLPackets.clear();
     G.Delivery.Clear();
     G.InputRuntime.ResetForRestart(kNoFrameLimit);
-    G.HangRemoteWaitActive.store(0, std::memory_order_release);
-    G.HangRemoteWaitTarget.store(0, std::memory_order_release);
-    G.HangLastSentFrame.store(kNoFrameLimit, std::memory_order_release);
-    G.HangLastRecvFrame.store(kNoFrameLimit, std::memory_order_release);
-    G.HangLocalQueue.store(0, std::memory_order_release);
-    G.HangRemoteQueue.store(0, std::memory_order_release);
-    G.HangDelayedQueue.store(0, std::memory_order_release);
+    G.HangDiagnostics.ResetNetplaySnapshot(kNoFrameLimit);
     G.Session.ResetStartHandshake();
 
     G.LastLoggedGameStateFrame[instanceID] = 0;
@@ -2113,15 +1825,14 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
     for (int i = 0; i < maxEvents; i++)
     {
         int result = G.Transport.Service(event);
-        G.HangLastENetServiceResult.store(result, std::memory_order_release);
+        G.HangDiagnostics.RecordENetService(result);
         if (result <= 0)
         {
             UpdateHangNetplaySnapshotLocked(localFrame);
             break;
         }
 
-        G.HangLastENetEventType.store(static_cast<int>(event.type), std::memory_order_release);
-        G.HangLastENetEventData.store(event.data, std::memory_order_release);
+        G.HangDiagnostics.RecordENetEvent(static_cast<int>(event.type), event.data);
 
         switch (event.type)
         {
@@ -2144,7 +1855,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
 
         case ENET_EVENT_TYPE_RECEIVE:
         {
-            G.HangLastENetRecvUnixMs.store(NowUnixMs(), std::memory_order_release);
+            G.HangDiagnostics.RecordENetReceive(NowUnixMs());
             const PacketClassifier::PacketClass packetClass = PacketClassifier::Classify(
                 event.packet->dataLength,
                 {
@@ -2434,9 +2145,7 @@ void SendInputPayloadNowLocked(const void* data, size_t size, melonDS::u32 flags
     const int result = G.Transport.Send(data, size, flags, true);
     if (result == NsmbNetplayTransport::SendUnavailable)
         return;
-    G.HangLastENetSendResult.store(result, std::memory_order_release);
-    G.HangLastENetSendBytes.store(size, std::memory_order_release);
-    G.HangLastENetSendUnixMs.store(NowUnixMs(), std::memory_order_release);
+    G.HangDiagnostics.RecordENetSend(result, size, NowUnixMs());
     UpdateHangNetplaySnapshotLocked(G.InputRuntime.LastSentInputFrame);
     TraceHangPhase("end", "enet-send-input", -1, G.InputRuntime.LastSentInputFrame, G.InputRuntime.LastSentInputFrame, G.InputRuntime.LastSentInputFrame);
 }
@@ -3732,10 +3441,7 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
     if (G.Diagnostics.HangDiagnosticsEnabled)
     {
         const unsigned long long now = NowUnixMs();
-        G.HangRemoteWaitActive.store(1, std::memory_order_release);
-        G.HangRemoteWaitTarget.store(targetFrame, std::memory_order_release);
-        G.HangRemoteWaitStartUnixMs.store(now, std::memory_order_release);
-        G.HangRemoteWaitProgressUnixMs.store(now, std::memory_order_release);
+        G.HangDiagnostics.BeginRemoteWait(targetFrame, now);
         TraceHangPhase("begin", "remote-input-wait", -1, targetFrame, targetFrame, targetFrame);
     }
     for (;;)
@@ -3773,7 +3479,7 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
                         true,
                         false);
                 }
-                G.HangRemoteWaitActive.store(0, std::memory_order_release);
+                G.HangDiagnostics.EndRemoteWait();
                 TraceHangPhase("end", "remote-input-wait", -1, targetFrame, targetFrame, G.InputRuntime.LastSentInputFrame);
                 return it->second;
             }
@@ -3786,7 +3492,7 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
                 const long long progressSecond = std::max<long long>(0, elapsedUs) / 1000000LL;
                 if (!waitTraceStarted || progressSecond > lastProgressSecond)
                 {
-                    G.HangRemoteWaitProgressUnixMs.store(NowUnixMs(), std::memory_order_release);
+                    G.HangDiagnostics.ProgressRemoteWait(NowUnixMs());
                     TraceHangPhase(
                         progressSecond == 0 ? "wait-start" : "wait-progress",
                         "remote-input-wait",
@@ -3838,7 +3544,7 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
                     G.Session.LocalReadyFrame().value_or(kNoFrameLimit),
                     G.Session.RemoteReadyFrame().value_or(kNoFrameLimit));
                 std::fflush(stdout);
-                G.HangRemoteWaitActive.store(0, std::memory_order_release);
+                G.HangDiagnostics.EndRemoteWait();
                 TraceHangPhase("timeout", "remote-input-wait", -1, targetFrame, targetFrame, G.InputRuntime.LastSentInputFrame);
                 if (G.Connection.RemoteInputTimeoutFatal)
                     std::_Exit(70);
@@ -7512,28 +7218,7 @@ void UpdateHangGameSnapshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
         return;
 
     const GameStateSample sample = ReadGameStateSample(nds);
-    G.HangInstance.store(instanceID, std::memory_order_release);
-    G.HangFrame.store(frame, std::memory_order_release);
-    G.HangArm9PC.store(sample.Arm9PC, std::memory_order_release);
-    G.HangArm9LR.store(sample.Arm9LR, std::memory_order_release);
-    G.HangArm9SP.store(sample.Arm9SP, std::memory_order_release);
-    G.HangArm9CPSR.store(sample.Arm9CPSR, std::memory_order_release);
-    G.HangStageID.store(sample.StageID, std::memory_order_release);
-    G.HangStageGroup.store(sample.StageGroup, std::memory_order_release);
-    G.HangVsMode.store(sample.VsMode, std::memory_order_release);
-    G.HangNetState14.store(sample.NetState14, std::memory_order_release);
-    G.HangNetState1C.store(sample.NetState1C, std::memory_order_release);
-    G.HangNetState20.store(sample.NetState20, std::memory_order_release);
-    G.HangNetState24.store(sample.NetState24, std::memory_order_release);
-    G.HangNetState5C.store(sample.NetState5C, std::memory_order_release);
-    G.HangNetPacketTick.store(sample.NetPacketTick, std::memory_order_release);
-    G.HangAppFrameLength.store(sample.AppFrameLength, std::memory_order_release);
-    G.HangAppUpdateTask.store(sample.AppUpdateTask, std::memory_order_release);
-    G.HangAppSleeping.store(sample.AppSleeping, std::memory_order_release);
-    G.HangStageSceneState.store(sample.StageSceneStateType, std::memory_order_release);
-    G.HangPlayer0Transition.store(sample.PlayerTransitionStatus0, std::memory_order_release);
-    G.HangPlayer1Transition.store(sample.PlayerTransitionStatus1, std::memory_order_release);
-    G.HangGameSnapshotUnixMs.store(NowUnixMs(), std::memory_order_release);
+    G.HangDiagnostics.UpdateGameSnapshot(instanceID, frame, sample, NowUnixMs());
 }
 
 void SaveScreenshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)

@@ -7,6 +7,8 @@ param(
     [int]$StallTimeoutMs = 0,
     [int]$FrameHeartbeatInterval = 120,
     [int]$GameplayHeartbeatInterval = 0,
+    [switch]$HangDiagnostics,
+    [int]$HangWatchdogIntervalMs = 100,
     [int]$StallStartFrame = 900,
     [int]$StallPollMs = 500,
     [string]$Exe = "build\debug-windows-x86_64\melonDS.exe",
@@ -761,6 +763,20 @@ function Start-MelonLANProcess {
     $env:MELONDS_NSML_TEST_FRAMES = "$roleFrames"
     $env:MELONDS_NSML_ROLE = $Role
     $env:MELONDS_NSML_INPUT_SCRIPT = $RoleInput
+    if ($HangDiagnostics) {
+        $env:MELONDS_NSML_HANG_DIAGNOSTICS = "1"
+        $env:MELONDS_NSML_WATCHDOG_INTERVAL_MS = "$([Math]::Max(100, $HangWatchdogIntervalMs))"
+        $env:MELONDS_NSML_WATCHDOG_FILE = "$Stdout.watchdog.jsonl"
+        $env:MELONDS_NSML_PHASE_EVENTS_FILE = "$Stdout.phase-events.jsonl"
+        Remove-Item Env:\MELONDS_NSML_HANG_DUMP_FILE -ErrorAction SilentlyContinue
+        Remove-Item -Force "$Stdout.watchdog.jsonl", "$Stdout.phase-events.jsonl" -ErrorAction SilentlyContinue
+    } else {
+        Remove-Item Env:\MELONDS_NSML_HANG_DIAGNOSTICS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WATCHDOG_INTERVAL_MS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_WATCHDOG_FILE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PHASE_EVENTS_FILE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_HANG_DUMP_FILE -ErrorAction SilentlyContinue
+    }
     $roleInputRecord = Get-RoleInputRecordPath -Role $Role
     if ($roleInputRecord) {
         $recordDir = Split-Path -Parent $roleInputRecord

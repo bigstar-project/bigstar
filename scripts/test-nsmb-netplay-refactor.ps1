@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("fast", "rollback", "standard", "full")]
+    [ValidateSet("fast", "rollback", "diagnostics", "standard", "full")]
     [string]$Tier = "fast",
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$Rom = "roms\nsmb-us.nds",
@@ -101,7 +101,7 @@ $params = @{
     LogDir = $LogDir
 }
 
-if ($Tier -eq "fast" -or $Tier -eq "rollback") {
+if ($Tier -eq "fast" -or $Tier -eq "rollback" -or $Tier -eq "diagnostics") {
     $params.InputScript = "tests\nsmb_us_direct_mvl_refactor_fast.inputs"
     $params.Frames = 1250
     $params.GameStateTraceInterval = 10
@@ -117,6 +117,9 @@ if ($Tier -eq "fast" -or $Tier -eq "rollback") {
         $params.Rollback = $true
         $params.RollbackBackend = "tinycorepreimage"
         $params.RollbackResimulate = $true
+    } elseif ($Tier -eq "diagnostics") {
+        $params.HangDiagnostics = $true
+        $params.HangWatchdogIntervalMs = 100
     }
 } else {
     $params.InputScript = "tests\nsmb_us_direct_mvl_both_different.inputs"
@@ -154,7 +157,44 @@ if ($Tier -eq "rollback") {
     Write-Host "NsmbNetplayPoC rollback checkpoint coverage passed"
 }
 
-if (($Tier -eq "fast" -or $Tier -eq "rollback") -and -not $SkipGolden) {
+if ($Tier -eq "diagnostics") {
+    $resolvedLogDir = if ([System.IO.Path]::IsPathRooted($LogDir)) {
+        $LogDir
+    } else {
+        Join-Path $repoRoot $LogDir
+    }
+    foreach ($role in @("host", "client")) {
+        $watchdogPath = Join-Path $resolvedLogDir "$role.stdout.txt.watchdog.jsonl"
+        $phasePath = Join-Path $resolvedLogDir "$role.stdout.txt.phase-events.jsonl"
+        foreach ($path in @($watchdogPath, $phasePath)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                throw "diagnostics smoke did not create log: $path"
+            }
+        }
+
+        $watchdogLines = @(Get-Content -LiteralPath $watchdogPath -Encoding UTF8)
+        $phaseLines = @(Get-Content -LiteralPath $phasePath -Encoding UTF8)
+        if ($watchdogLines.Count -lt 1 -or $phaseLines.Count -lt 100) {
+            throw "diagnostics smoke has insufficient coverage: role=$role watchdog=$($watchdogLines.Count) phase=$($phaseLines.Count)"
+        }
+
+        $watchdogFirst = $watchdogLines[0] | ConvertFrom-Json
+        $watchdogLast = $watchdogLines[-1] | ConvertFrom-Json
+        $phaseFirst = $phaseLines[0] | ConvertFrom-Json
+        $phaseLast = $phaseLines[-1] | ConvertFrom-Json
+        if ($watchdogFirst.event -ne "watchdog" -or $watchdogFirst.role -ne $role -or
+            $null -eq $watchdogLast.arm9PC -or $null -eq $watchdogLast.remoteWaitActive) {
+            throw "diagnostics watchdog schema mismatch: role=$role"
+        }
+        if (-not $phaseFirst.event -or -not $phaseFirst.phase -or
+            $null -eq $phaseLast.lastSent -or $null -eq $phaseLast.remoteWaitActive) {
+            throw "diagnostics phase schema mismatch: role=$role"
+        }
+    }
+    Write-Host "NsmbNetplayPoC hang diagnostics coverage passed"
+}
+
+if (($Tier -eq "fast" -or $Tier -eq "rollback" -or $Tier -eq "diagnostics") -and -not $SkipGolden) {
     $goldenPath = Join-Path $repoRoot "tests\nsmb_netplay_refactor_fast.golden"
     $golden = Get-Content -LiteralPath $goldenPath -Raw -Encoding UTF8 | ConvertFrom-StringData
     $resolvedLogDir = if ([System.IO.Path]::IsPathRooted($LogDir)) {

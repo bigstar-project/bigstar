@@ -25,6 +25,8 @@ set(SOURCES_QT_SDL
     NsmbNetplayProtocol.h
     NsmbNetplayTransport.cpp
     NsmbNetplayTransport.h
+    NsmbNetplayDiagnostics.cpp
+    NsmbNetplayDiagnostics.h
     NsmbGameState.cpp
     NsmbGameStateReader.cpp
     NsmbGameStateWriter.cpp
