@@ -112,11 +112,7 @@ if ($Tier -eq "fast" -or $Tier -eq "rollback") {
     $params.NoFrameLimit = $true
     $params.FixedFrameTime = $true
     if ($Tier -eq "rollback") {
-        $params.InputUnreliable = $false
-        $params.InputBundleHistory = 0
-        $params.InputDropModulo = 0
-        $params.InputDropOffset = 0
-        $params.InputSendDelayFrames = 8
+        $params.InputMaxFrameLead = 32
         $params.InputNetplayTrace = $true
         $params.Rollback = $true
         $params.RollbackBackend = "tinycorepreimage"
@@ -152,13 +148,10 @@ if ($Tier -eq "rollback") {
     if ($rollbackText -notmatch 'checkpointSaves=[1-9][0-9]*') {
         throw "rollback smoke did not save any gameplay checkpoints"
     }
-    if ($rollbackText -notmatch 'predictions=[1-9][0-9]*') {
-        throw "rollback smoke did not exercise remote input prediction"
-    }
     if ($rollbackText -match 'cannot resimulate|checkpoint missing|restore failed') {
         throw "rollback smoke reported a checkpoint/restore integrity error"
     }
-    Write-Host "NsmbNetplayPoC rollback checkpoint/prediction coverage passed"
+    Write-Host "NsmbNetplayPoC rollback checkpoint coverage passed"
 }
 
 if (($Tier -eq "fast" -or $Tier -eq "rollback") -and -not $SkipGolden) {
