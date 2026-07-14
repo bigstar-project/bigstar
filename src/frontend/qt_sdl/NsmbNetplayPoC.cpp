@@ -1586,7 +1586,7 @@ struct State
     melonDS::u32 MvlAutoRestartStartupFrameBase = 0;
     int LocalInstance = 0;
     int Port = 8065;
-    const char* PeerHost = "127.0.0.1";
+    std::string PeerHost = "127.0.0.1";
     melonDS::u32 NetplayStartFrame = 0;
     bool LocalWaitsForRemote = true;
     bool RemoteInputTimeoutFatal = false;
@@ -19366,23 +19366,20 @@ void InitFromEnvironment()
         std::fflush(stdout);
     }
 
-    const char* role = std::getenv("MELONDS_NSML_ROLE");
-    if (!role || !role[0])
-        role = std::getenv("MELONDS_NSML_LAN_ROLE");
-    G.NetRole = (role && std::strcmp(role, "client") == 0) ? Role::Client : Role::Host;
+    const Config::ConnectionConfig connectionConfig =
+        Config::LoadConnectionConfig(G.TestEnabled);
+    G.NetRole = connectionConfig.Client ? Role::Client : Role::Host;
 
     if (!G.Enabled) return;
 
-    G.Delay = std::max(0, EnvInt("MELONDS_NSML_DELAY", kDefaultDelay));
-    G.NetplayWarmupFrames = std::max(0, EnvInt("MELONDS_NSML_NETPLAY_WARMUP_FRAMES", G.TestEnabled ? G.Delay * 2 : 0));
-    G.Port = EnvInt("MELONDS_NSML_PORT", 8065);
-    G.LocalInstance = EnvInt("MELONDS_NSML_LOCAL_INSTANCE", G.NetRole == Role::Host ? 0 : 1);
-    G.NetplayStartFrame = static_cast<melonDS::u32>(std::max(0, EnvInt("MELONDS_NSML_NETPLAY_START_FRAME", 0)));
-    G.LocalWaitsForRemote = !EnvFlag("MELONDS_NSML_NO_LOCAL_WAIT");
-    G.RemoteInputTimeoutFatal = EnvFlag("MELONDS_NSML_REMOTE_INPUT_TIMEOUT_FATAL");
-
-    const char* peer = std::getenv("MELONDS_NSML_PEER");
-    if (peer && peer[0]) G.PeerHost = peer;
+    G.Delay = connectionConfig.Delay;
+    G.NetplayWarmupFrames = connectionConfig.WarmupFrames;
+    G.Port = connectionConfig.Port;
+    G.LocalInstance = connectionConfig.LocalInstance;
+    G.NetplayStartFrame = connectionConfig.StartFrame;
+    G.LocalWaitsForRemote = connectionConfig.LocalWaitsForRemote;
+    G.RemoteInputTimeoutFatal = connectionConfig.RemoteInputTimeoutFatal;
+    G.PeerHost = connectionConfig.PeerHost;
 
     if (G.NetRole == Role::Host && !G.MatchSeedConfigured)
     {
@@ -19420,7 +19417,7 @@ void InitFromEnvironment()
         if (G.Host)
         {
             ENetAddress address {};
-            enet_address_set_host(&address, G.PeerHost);
+            enet_address_set_host(&address, G.PeerHost.c_str());
             address.port = G.Port;
             G.ConnectingPeer = enet_host_connect(G.Host, &address, 1, 0);
             if (!G.ConnectingPeer)
@@ -19447,7 +19444,7 @@ void InitFromEnvironment()
         NowUnixMs(),
         G.NetRole == Role::Host ? "host" : "client",
         G.Port,
-        G.PeerHost,
+        G.PeerHost.c_str(),
         G.Delay,
         G.NetplayWarmupFrames,
         G.LocalInstance,

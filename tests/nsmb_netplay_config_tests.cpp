@@ -123,6 +123,61 @@ void TestBootstrapConfigReadsAndClampsEnvironment() {
   CHECK(config.InputTraceInterval == 1);
 }
 
+void TestConnectionConfigDefaultsAndRoleFallback() {
+  MapEnvironment environment;
+  auto config =
+      NsmbNetplayPoC::Config::LoadConnectionConfig(environment, false);
+  CHECK(!config.Client);
+  CHECK(config.Delay == 6);
+  CHECK(config.WarmupFrames == 0);
+  CHECK(config.Port == 8065);
+  CHECK(config.LocalInstance == 0);
+  CHECK(config.StartFrame == 0u);
+  CHECK(config.LocalWaitsForRemote);
+  CHECK(!config.RemoteInputTimeoutFatal);
+  CHECK(config.PeerHost == "127.0.0.1");
+
+  config = NsmbNetplayPoC::Config::LoadConnectionConfig(environment, true);
+  CHECK(config.WarmupFrames == 12);
+
+  environment.Values["MELONDS_NSML_LAN_ROLE"] = "client";
+  config = NsmbNetplayPoC::Config::LoadConnectionConfig(environment, false);
+  CHECK(config.Client);
+  CHECK(config.LocalInstance == 1);
+
+  environment.Values["MELONDS_NSML_ROLE"] = "host";
+  config = NsmbNetplayPoC::Config::LoadConnectionConfig(environment, false);
+  CHECK(!config.Client);
+  CHECK(config.LocalInstance == 0);
+}
+
+void TestConnectionConfigReadsExistingValuesAndClamps() {
+  MapEnvironment environment;
+  environment.Values = {
+      {"MELONDS_NSML_ROLE", "client"},
+      {"MELONDS_NSML_DELAY", "-3"},
+      {"MELONDS_NSML_NETPLAY_WARMUP_FRAMES", "-2"},
+      {"MELONDS_NSML_PORT", "9000"},
+      {"MELONDS_NSML_LOCAL_INSTANCE", "7"},
+      {"MELONDS_NSML_NETPLAY_START_FRAME", "-5"},
+      {"MELONDS_NSML_NO_LOCAL_WAIT", "1"},
+      {"MELONDS_NSML_REMOTE_INPUT_TIMEOUT_FATAL", "1"},
+      {"MELONDS_NSML_PEER", "192.0.2.10"},
+  };
+
+  const auto config =
+      NsmbNetplayPoC::Config::LoadConnectionConfig(environment, true);
+  CHECK(config.Client);
+  CHECK(config.Delay == 0);
+  CHECK(config.WarmupFrames == 0);
+  CHECK(config.Port == 9000);
+  CHECK(config.LocalInstance == 7);
+  CHECK(config.StartFrame == 0u);
+  CHECK(!config.LocalWaitsForRemote);
+  CHECK(config.RemoteInputTimeoutFatal);
+  CHECK(config.PeerHost == "192.0.2.10");
+}
+
 } // namespace
 
 int main() {
@@ -133,6 +188,8 @@ int main() {
   TestUnsignedParsingPreservesExistingInvalidValueBehavior();
   TestBootstrapConfigDefaults();
   TestBootstrapConfigReadsAndClampsEnvironment();
+  TestConnectionConfigDefaultsAndRoleFallback();
+  TestConnectionConfigReadsExistingValuesAndClamps();
 
   if (Failures != 0) {
     std::fprintf(stderr, "nsmb netplay config tests failed: %d\n", Failures);

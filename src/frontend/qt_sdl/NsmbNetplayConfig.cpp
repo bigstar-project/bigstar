@@ -110,6 +110,35 @@ BootstrapConfig LoadBootstrapConfig() {
   return LoadBootstrapConfig(GetProcessEnvironment());
 }
 
+ConnectionConfig LoadConnectionConfig(const Environment &environment,
+                                      bool testEnabled) {
+  ConnectionConfig config;
+  const char *role = environment.Get("MELONDS_NSML_ROLE");
+  if (!HasValue(role))
+    role = environment.Get("MELONDS_NSML_LAN_ROLE");
+  config.Client = HasValue(role) && std::strcmp(role, "client") == 0;
+
+  config.Delay = std::max(0, ReadInt(environment, "MELONDS_NSML_DELAY", 6));
+  config.WarmupFrames =
+      std::max(0, ReadInt(environment, "MELONDS_NSML_NETPLAY_WARMUP_FRAMES",
+                          testEnabled ? config.Delay * 2 : 0));
+  config.Port = ReadInt(environment, "MELONDS_NSML_PORT", 8065);
+  config.LocalInstance = ReadInt(environment, "MELONDS_NSML_LOCAL_INSTANCE",
+                                 config.Client ? 1 : 0);
+  config.StartFrame = static_cast<std::uint32_t>(
+      std::max(0, ReadInt(environment, "MELONDS_NSML_NETPLAY_START_FRAME", 0)));
+  config.LocalWaitsForRemote =
+      !ReadFlag(environment, "MELONDS_NSML_NO_LOCAL_WAIT");
+  config.RemoteInputTimeoutFatal =
+      ReadFlag(environment, "MELONDS_NSML_REMOTE_INPUT_TIMEOUT_FATAL");
+  config.PeerHost = ReadCString(environment, "MELONDS_NSML_PEER", "127.0.0.1");
+  return config;
+}
+
+ConnectionConfig LoadConnectionConfig(bool testEnabled) {
+  return LoadConnectionConfig(GetProcessEnvironment(), testEnabled);
+}
+
 bool EnvFlag(const char *name) {
   return ReadFlag(GetProcessEnvironment(), name);
 }

@@ -2,6 +2,7 @@
 #define NSMBNETPLAYCONFIG_H
 
 #include <cstdint>
+#include <string>
 
 namespace NsmbNetplayPoC::Config {
 
@@ -26,6 +27,18 @@ struct BootstrapConfig {
   int InputTraceInterval = 60;
 };
 
+struct ConnectionConfig {
+  bool Client = false;
+  int Delay = 6;
+  int WarmupFrames = 0;
+  int Port = 8065;
+  int LocalInstance = 0;
+  std::uint32_t StartFrame = 0;
+  bool LocalWaitsForRemote = true;
+  bool RemoteInputTimeoutFatal = false;
+  std::string PeerHost = "127.0.0.1";
+};
+
 bool ParseFlag(const char *value);
 const char *ValueOr(const char *value, const char *fallback);
 int ParseInt(const char *value, int fallback);
@@ -45,6 +58,9 @@ bool ReadHasValue(const Environment &environment, const char *name);
 
 BootstrapConfig LoadBootstrapConfig(const Environment &environment);
 BootstrapConfig LoadBootstrapConfig();
+ConnectionConfig LoadConnectionConfig(const Environment &environment,
+                                      bool testEnabled);
+ConnectionConfig LoadConnectionConfig(bool testEnabled);
 
 bool EnvFlag(const char *name);
 const char *EnvCString(const char *name, const char *fallback);
