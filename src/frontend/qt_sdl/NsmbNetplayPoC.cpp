@@ -11945,32 +11945,26 @@ void InitFromEnvironment()
     } markEnvironmentChecked;
 
     const Config::BootstrapConfig bootstrapConfig = Config::LoadBootstrapConfig();
+    const Config::DiagnosticsConfig diagnosticsConfig =
+        Config::LoadDiagnosticsConfig(static_cast<int>(kDiagnosticRingCapacity));
     G.Enabled = bootstrapConfig.Enabled;
     G.TestEnabled = bootstrapConfig.TestEnabled;
-    G.HangDiagnosticsEnabled = EnvFlag("MELONDS_NSML_HANG_DIAGNOSTICS");
-    G.HangWatchdogIntervalMs = std::clamp(EnvInt("MELONDS_NSML_WATCHDOG_INTERVAL_MS", 1000), 100, 60000);
-    G.HangThresholdMs = std::clamp(EnvInt("MELONDS_NSML_HANG_THRESHOLD_MS", 8000), 1000, 300000);
-    if (const char* watchdogPath = std::getenv("MELONDS_NSML_WATCHDOG_FILE"))
-        G.HangWatchdogPath = watchdogPath;
-    if (const char* phaseEventsPath = std::getenv("MELONDS_NSML_PHASE_EVENTS_FILE"))
-        G.HangPhaseEventsPath = phaseEventsPath;
-    if (const char* dumpPath = std::getenv("MELONDS_NSML_HANG_DUMP_FILE"))
-        G.HangDumpPath = dumpPath;
+    G.HangDiagnosticsEnabled = diagnosticsConfig.HangDiagnosticsEnabled;
+    G.HangWatchdogIntervalMs = diagnosticsConfig.HangWatchdogIntervalMs;
+    G.HangThresholdMs = diagnosticsConfig.HangThresholdMs;
+    G.HangWatchdogPath = diagnosticsConfig.HangWatchdogPath;
+    G.HangPhaseEventsPath = diagnosticsConfig.HangPhaseEventsPath;
+    G.HangDumpPath = diagnosticsConfig.HangDumpPath;
     G.TestFrames = bootstrapConfig.TestFrames;
     G.TestInstanceCount = bootstrapConfig.TestInstanceCount;
-    G.ActiveFpsStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_ACTIVE_FPS_START_FRAME", 0)));
-    G.ActiveFrameSpikeThresholdUs = std::clamp(
-        EnvInt("MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS", 25), 1, 1000) * 1000;
-    G.ActiveFrameSpikeTrace = EnvFlag("MELONDS_NSML_FPS_SPIKE_TRACE");
-    G.FrameHeartbeatInterval = std::clamp(
-        EnvInt("MELONDS_NSML_FRAME_HEARTBEAT_INTERVAL", 0), 0, 3600);
-    G.GameplayHeartbeatInterval = std::clamp(
-        EnvInt("MELONDS_NSML_GAMEPLAY_HEARTBEAT_INTERVAL", 0), 0, 3600);
-    const char* frameHeartbeatPath = std::getenv("MELONDS_NSML_FRAME_HEARTBEAT_FILE");
-    if (frameHeartbeatPath && frameHeartbeatPath[0])
+    G.ActiveFpsStartFrame = diagnosticsConfig.ActiveFpsStartFrame;
+    G.ActiveFrameSpikeThresholdUs = diagnosticsConfig.ActiveFrameSpikeThresholdUs;
+    G.ActiveFrameSpikeTrace = diagnosticsConfig.ActiveFrameSpikeTrace;
+    G.FrameHeartbeatInterval = diagnosticsConfig.FrameHeartbeatInterval;
+    G.GameplayHeartbeatInterval = diagnosticsConfig.GameplayHeartbeatInterval;
+    if (!diagnosticsConfig.FrameHeartbeatPath.empty())
     {
-        G.FrameHeartbeatPath = frameHeartbeatPath;
+        G.FrameHeartbeatPath = diagnosticsConfig.FrameHeartbeatPath;
         G.FrameHeartbeat.open(G.FrameHeartbeatPath, std::ios::out | std::ios::trunc);
         StartFrameHeartbeatThreadIfNeeded();
     }
@@ -11982,20 +11976,12 @@ void InitFromEnvironment()
     G.TestQuitGraceMs = bootstrapConfig.QuitGraceMs;
     G.InputTraceEnabled = bootstrapConfig.InputTraceEnabled;
     G.InputTraceInterval = bootstrapConfig.InputTraceInterval;
-    const char* inputRecord = std::getenv("MELONDS_NSML_INPUT_RECORD_FILE");
-    if (inputRecord && inputRecord[0])
+    if (!diagnosticsConfig.InputRecordPath.empty())
     {
-        G.InputRecordPath = inputRecord;
-        G.InputRecordStartFrame = static_cast<melonDS::u32>(
-            std::max(0, EnvInt("MELONDS_NSML_INPUT_RECORD_START_FRAME", 0)));
-        G.InputRecordEndFrame = static_cast<melonDS::u32>(
-            std::max(0, EnvInt("MELONDS_NSML_INPUT_RECORD_END_FRAME", 0)));
-        if (G.InputRecordEndFrame != kNoFrameLimit
-            && G.InputRecordEndFrame < G.InputRecordStartFrame)
-            G.InputRecordEndFrame = G.InputRecordStartFrame;
-        G.InputRecordInstance = EnvInt("MELONDS_NSML_INPUT_RECORD_INSTANCE", -1);
-        if (G.InputRecordInstance < 0 || G.InputRecordInstance >= 16)
-            G.InputRecordInstance = -1;
+        G.InputRecordPath = diagnosticsConfig.InputRecordPath;
+        G.InputRecordStartFrame = diagnosticsConfig.InputRecordStartFrame;
+        G.InputRecordEndFrame = diagnosticsConfig.InputRecordEndFrame;
+        G.InputRecordInstance = diagnosticsConfig.InputRecordInstance;
         G.InputRecord.open(G.InputRecordPath, std::ios::out | std::ios::trunc);
         if (G.InputRecord)
         {
@@ -12017,7 +12003,7 @@ void InitFromEnvironment()
                 G.InputRecordPath.c_str());
         }
     }
-    G.ScreenHashEnabled = EnvFlag("MELONDS_NSML_SCREEN_HASH");
+    G.ScreenHashEnabled = diagnosticsConfig.ScreenHashEnabled;
     G.SeedWaitTimeoutMs = std::max(0, EnvInt("MELONDS_NSML_SEED_WAIT_TIMEOUT_MS", 10000));
     G.WaitForPeerBeforeStart = EnvFlag("MELONDS_NSML_WAIT_FOR_PEER");
     G.WaitForPeerAtNetplayStart = EnvFlag("MELONDS_NSML_WAIT_FOR_PEER_AT_NETPLAY_START");
@@ -12113,8 +12099,6 @@ void InitFromEnvironment()
     if (scriptRemotePacketInputScript && scriptRemotePacketInputScript[0])
         G.ScriptRemotePacketInputScriptPath = scriptRemotePacketInputScript;
 
-    const Config::DiagnosticsConfig diagnosticsConfig =
-        Config::LoadDiagnosticsConfig(static_cast<int>(kDiagnosticRingCapacity));
     G.HashLogPath = diagnosticsConfig.HashLogPath;
     G.ScreenshotDir = diagnosticsConfig.ScreenshotDir;
     G.ScreenshotInterval = diagnosticsConfig.ScreenshotInterval;

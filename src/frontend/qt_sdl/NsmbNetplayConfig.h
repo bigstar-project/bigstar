@@ -175,6 +175,23 @@ struct MvlConfig {
 };
 
 struct DiagnosticsConfig {
+  bool HangDiagnosticsEnabled = false;
+  int HangWatchdogIntervalMs = 1000;
+  int HangThresholdMs = 8000;
+  std::string HangWatchdogPath;
+  std::string HangPhaseEventsPath;
+  std::string HangDumpPath;
+  std::uint32_t ActiveFpsStartFrame = 0;
+  int ActiveFrameSpikeThresholdUs = 25000;
+  bool ActiveFrameSpikeTrace = false;
+  int FrameHeartbeatInterval = 0;
+  int GameplayHeartbeatInterval = 0;
+  std::string FrameHeartbeatPath;
+  std::string InputRecordPath;
+  std::uint32_t InputRecordStartFrame = 0;
+  std::uint32_t InputRecordEndFrame = 0;
+  int InputRecordInstance = -1;
+  bool ScreenHashEnabled = false;
   std::string HashLogPath;
   std::string ScreenshotDir;
   int ScreenshotInterval = 0;

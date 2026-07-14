@@ -537,6 +537,53 @@ MvlConfig LoadMvlConfig() { return LoadMvlConfig(GetProcessEnvironment()); }
 DiagnosticsConfig LoadDiagnosticsConfig(const Environment &environment,
                                         int diagnosticRingCapacity) {
   DiagnosticsConfig config;
+  config.HangDiagnosticsEnabled =
+      ReadFlag(environment, "MELONDS_NSML_HANG_DIAGNOSTICS");
+  config.HangWatchdogIntervalMs = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_WATCHDOG_INTERVAL_MS", 1000), 100,
+      60000);
+  config.HangThresholdMs =
+      std::clamp(ReadInt(environment, "MELONDS_NSML_HANG_THRESHOLD_MS", 8000),
+                 1000, 300000);
+  config.HangWatchdogPath =
+      ReadCString(environment, "MELONDS_NSML_WATCHDOG_FILE", "");
+  config.HangPhaseEventsPath =
+      ReadCString(environment, "MELONDS_NSML_PHASE_EVENTS_FILE", "");
+  config.HangDumpPath =
+      ReadCString(environment, "MELONDS_NSML_HANG_DUMP_FILE", "");
+  config.ActiveFpsStartFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_ACTIVE_FPS_START_FRAME", 0)));
+  config.ActiveFrameSpikeThresholdUs =
+      std::clamp(
+          ReadInt(environment, "MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS", 25), 1,
+          1000) *
+      1000;
+  config.ActiveFrameSpikeTrace =
+      ReadFlag(environment, "MELONDS_NSML_FPS_SPIKE_TRACE");
+  config.FrameHeartbeatInterval = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_FRAME_HEARTBEAT_INTERVAL", 0), 0,
+      3600);
+  config.GameplayHeartbeatInterval = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_GAMEPLAY_HEARTBEAT_INTERVAL", 0), 0,
+      3600);
+  config.FrameHeartbeatPath =
+      ReadCString(environment, "MELONDS_NSML_FRAME_HEARTBEAT_FILE", "");
+  config.InputRecordPath =
+      ReadCString(environment, "MELONDS_NSML_INPUT_RECORD_FILE", "");
+  if (!config.InputRecordPath.empty()) {
+    config.InputRecordStartFrame = static_cast<std::uint32_t>(std::max(
+        0, ReadInt(environment, "MELONDS_NSML_INPUT_RECORD_START_FRAME", 0)));
+    config.InputRecordEndFrame = static_cast<std::uint32_t>(std::max(
+        0, ReadInt(environment, "MELONDS_NSML_INPUT_RECORD_END_FRAME", 0)));
+    if (config.InputRecordEndFrame != 0 &&
+        config.InputRecordEndFrame < config.InputRecordStartFrame)
+      config.InputRecordEndFrame = config.InputRecordStartFrame;
+    config.InputRecordInstance =
+        ReadInt(environment, "MELONDS_NSML_INPUT_RECORD_INSTANCE", -1);
+    if (config.InputRecordInstance < 0 || config.InputRecordInstance >= 16)
+      config.InputRecordInstance = -1;
+  }
+  config.ScreenHashEnabled = ReadFlag(environment, "MELONDS_NSML_SCREEN_HASH");
   config.HashLogPath = ReadCString(environment, "MELONDS_NSML_HASH_LOG", "");
   config.ScreenshotDir =
       ReadCString(environment, "MELONDS_NSML_SCREENSHOT_DIR", "");

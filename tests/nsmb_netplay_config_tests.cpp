@@ -557,6 +557,23 @@ void TestDiagnosticsConfigDefaults() {
   const MapEnvironment environment;
   const auto config =
       NsmbNetplayPoC::Config::LoadDiagnosticsConfig(environment, 720);
+  CHECK(!config.HangDiagnosticsEnabled);
+  CHECK(config.HangWatchdogIntervalMs == 1000);
+  CHECK(config.HangThresholdMs == 8000);
+  CHECK(config.HangWatchdogPath.empty());
+  CHECK(config.HangPhaseEventsPath.empty());
+  CHECK(config.HangDumpPath.empty());
+  CHECK(config.ActiveFpsStartFrame == 0u);
+  CHECK(config.ActiveFrameSpikeThresholdUs == 25000);
+  CHECK(!config.ActiveFrameSpikeTrace);
+  CHECK(config.FrameHeartbeatInterval == 0);
+  CHECK(config.GameplayHeartbeatInterval == 0);
+  CHECK(config.FrameHeartbeatPath.empty());
+  CHECK(config.InputRecordPath.empty());
+  CHECK(config.InputRecordStartFrame == 0u);
+  CHECK(config.InputRecordEndFrame == 0u);
+  CHECK(config.InputRecordInstance == -1);
+  CHECK(!config.ScreenHashEnabled);
   CHECK(config.HashLogPath.empty());
   CHECK(config.ScreenshotDir.empty());
   CHECK(config.ScreenshotInterval == 0);
@@ -588,6 +605,23 @@ void TestDiagnosticsConfigDefaults() {
 void TestDiagnosticsConfigReadsClampsAndPreservesPriority() {
   MapEnvironment environment;
   environment.Values = {
+      {"MELONDS_NSML_HANG_DIAGNOSTICS", "1"},
+      {"MELONDS_NSML_WATCHDOG_INTERVAL_MS", "1"},
+      {"MELONDS_NSML_HANG_THRESHOLD_MS", "999999"},
+      {"MELONDS_NSML_WATCHDOG_FILE", "watchdog.txt"},
+      {"MELONDS_NSML_PHASE_EVENTS_FILE", "phases.txt"},
+      {"MELONDS_NSML_HANG_DUMP_FILE", "hang.dmp"},
+      {"MELONDS_NSML_ACTIVE_FPS_START_FRAME", "-1"},
+      {"MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS", "1001"},
+      {"MELONDS_NSML_FPS_SPIKE_TRACE", "1"},
+      {"MELONDS_NSML_FRAME_HEARTBEAT_INTERVAL", "-1"},
+      {"MELONDS_NSML_GAMEPLAY_HEARTBEAT_INTERVAL", "9999"},
+      {"MELONDS_NSML_FRAME_HEARTBEAT_FILE", "heartbeat.txt"},
+      {"MELONDS_NSML_INPUT_RECORD_FILE", "input.txt"},
+      {"MELONDS_NSML_INPUT_RECORD_START_FRAME", "10"},
+      {"MELONDS_NSML_INPUT_RECORD_END_FRAME", "5"},
+      {"MELONDS_NSML_INPUT_RECORD_INSTANCE", "16"},
+      {"MELONDS_NSML_SCREEN_HASH", "1"},
       {"MELONDS_NSML_HASH_LOG", "hash.log"},
       {"MELONDS_NSML_SCREENSHOT_DIR", "screens"},
       {"MELONDS_NSML_SCREENSHOT_INTERVAL", "-1"},
@@ -616,6 +650,23 @@ void TestDiagnosticsConfigReadsClampsAndPreservesPriority() {
   };
 
   auto config = NsmbNetplayPoC::Config::LoadDiagnosticsConfig(environment, 720);
+  CHECK(config.HangDiagnosticsEnabled);
+  CHECK(config.HangWatchdogIntervalMs == 100);
+  CHECK(config.HangThresholdMs == 300000);
+  CHECK(config.HangWatchdogPath == "watchdog.txt");
+  CHECK(config.HangPhaseEventsPath == "phases.txt");
+  CHECK(config.HangDumpPath == "hang.dmp");
+  CHECK(config.ActiveFpsStartFrame == 0u);
+  CHECK(config.ActiveFrameSpikeThresholdUs == 1000000);
+  CHECK(config.ActiveFrameSpikeTrace);
+  CHECK(config.FrameHeartbeatInterval == 0);
+  CHECK(config.GameplayHeartbeatInterval == 3600);
+  CHECK(config.FrameHeartbeatPath == "heartbeat.txt");
+  CHECK(config.InputRecordPath == "input.txt");
+  CHECK(config.InputRecordStartFrame == 10u);
+  CHECK(config.InputRecordEndFrame == 10u);
+  CHECK(config.InputRecordInstance == -1);
+  CHECK(config.ScreenHashEnabled);
   CHECK(config.HashLogPath == "hash.log");
   CHECK(config.ScreenshotDir == "screens");
   CHECK(config.ScreenshotInterval == 0);
@@ -645,9 +696,11 @@ void TestDiagnosticsConfigReadsClampsAndPreservesPriority() {
 
   environment.Values["MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE"] = "custom.jsonl";
   environment.Values["MELONDS_NSML_DIAGNOSTIC_EVENTS_DISABLE"] = "1";
+  environment.Values["MELONDS_NSML_INPUT_RECORD_INSTANCE"] = "15";
   config = NsmbNetplayPoC::Config::LoadDiagnosticsConfig(environment, 720);
   CHECK(config.DiagnosticEventsPath == "custom.jsonl");
   CHECK(!config.DiagnosticEventsEnabled);
+  CHECK(config.InputRecordInstance == 15);
 }
 
 void TestStateSyncConfigDefaultsAndApplyModes() {
