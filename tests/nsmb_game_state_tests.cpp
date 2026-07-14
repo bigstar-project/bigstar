@@ -172,6 +172,92 @@ void TestRemoteStateStoreSelectionAndRestart() {
   CHECK(store.WorldEffectState() == nullptr);
 }
 
+void TestStateSyncRuntimeRestartContract() {
+  using namespace NsmbNetplayPoC;
+  GameStateModel::StateSyncRuntime runtime;
+  GameStateModel::GameStateSyncHashes hashes;
+  hashes.Basic = 1;
+  runtime.LocalGameStateHashes.emplace(GameStateModel::GameStateKey(3, 10),
+                                       hashes);
+  GameStateModel::DecodedGameState remote;
+  remote.Instance = 3;
+  remote.Frame = 10;
+  runtime.RemoteState.StoreGameState(remote);
+  runtime.GameStateMismatchSeen = true;
+  runtime.LastSentGameStateFrame[3] = 10;
+  runtime.LastSentPlayerStateFrame[3] = 11;
+  runtime.LastSentWorldStateFrame[3] = 12;
+  runtime.LastAppliedPlayerGlobalsFrame[3][1] = 13;
+  runtime.PlayerActorBaseCache[3][1] = 14;
+  runtime.PlayerActorGUIDCache[3][1] = 15;
+  runtime.WorldStarActorBaseCache[3] = 16;
+  runtime.WorldStarActorGUIDCache[3] = 17;
+  runtime.LastSpawnedWorldItemRemoteGUID[3] = 18;
+  runtime.LastConfirmedWorldItemRemoteGUID[3] = 19;
+  runtime.PendingWorldItemRemoteGUID[3] = 20;
+  runtime.PendingWorldItemFirstMissingFrame[3] = 21;
+  runtime.LastSpawnedNeutralWorldItemRemoteGUID[3] = 22;
+  runtime.LastConfirmedNeutralWorldItemRemoteGUID[3] = 23;
+  runtime.PendingNeutralWorldItemRemoteGUID[3] = 24;
+  runtime.PendingNeutralWorldItemFirstMissingFrame[3] = 25;
+  runtime.LastSpawnedDroppedStarItemRemoteGUID[3] = 26;
+  runtime.LastConfirmedDroppedStarItemRemoteGUID[3] = 27;
+  runtime.PendingDroppedStarItemRemoteGUID[3] = 28;
+  runtime.PendingDroppedStarItemFirstMissingFrame[3] = 29;
+  runtime.WorldMovingHazardBaseCache[3] = 30;
+  runtime.WorldMovingHazardGUIDCache[3] = 31;
+  runtime.WorldMovingHazardCacheCounts[3] = 1;
+  runtime.WorldMovingHazardBaseCaches[3][0] = 32;
+  runtime.WorldMovingHazardGUIDCaches[3][0] = 33;
+  runtime.WorldMovingHazardRemoteGUIDMaps[3][0] = 34;
+  runtime.WorldMovingHazardLocalGUIDMaps[3][0] = 35;
+  runtime.WorldActorSnapshotRemoteGUIDMaps[3][0] = 36;
+  runtime.WorldActorSnapshotLocalGUIDMaps[3][0] = 37;
+  runtime.LastTracedWorldMovingHazardsFrame[3] = 38;
+  runtime.LastTracedWorldEffectsFrame[3] = 39;
+  runtime.LastTracedWorldObjectLifecyclesFrame[3] = 40;
+  runtime.PlayerActorBaseCache[4][1] = 41;
+
+  runtime.ResetForRestart(3);
+
+  CHECK(runtime.LocalGameStateHashes.empty());
+  CHECK(runtime.RemoteState.FindGameState(3, 10) == nullptr);
+  CHECK(runtime.GameStateMismatchSeen);
+  CHECK(runtime.LastSentGameStateFrame[3] == 0);
+  CHECK(runtime.LastSentPlayerStateFrame[3] == 0);
+  CHECK(runtime.LastSentWorldStateFrame[3] == 0);
+  CHECK(runtime.LastAppliedPlayerGlobalsFrame[3][1] == 0);
+  CHECK(runtime.PlayerActorBaseCache[3][1] == 0);
+  CHECK(runtime.PlayerActorGUIDCache[3][1] == 0);
+  CHECK(runtime.WorldStarActorBaseCache[3] == 0);
+  CHECK(runtime.WorldStarActorGUIDCache[3] == 0);
+  CHECK(runtime.LastSpawnedWorldItemRemoteGUID[3] == 0);
+  CHECK(runtime.LastConfirmedWorldItemRemoteGUID[3] == 0);
+  CHECK(runtime.PendingWorldItemRemoteGUID[3] == 0);
+  CHECK(runtime.PendingWorldItemFirstMissingFrame[3] == 0);
+  CHECK(runtime.LastSpawnedNeutralWorldItemRemoteGUID[3] == 0);
+  CHECK(runtime.LastConfirmedNeutralWorldItemRemoteGUID[3] == 0);
+  CHECK(runtime.PendingNeutralWorldItemRemoteGUID[3] == 0);
+  CHECK(runtime.PendingNeutralWorldItemFirstMissingFrame[3] == 0);
+  CHECK(runtime.LastSpawnedDroppedStarItemRemoteGUID[3] == 0);
+  CHECK(runtime.LastConfirmedDroppedStarItemRemoteGUID[3] == 0);
+  CHECK(runtime.PendingDroppedStarItemRemoteGUID[3] == 0);
+  CHECK(runtime.PendingDroppedStarItemFirstMissingFrame[3] == 0);
+  CHECK(runtime.WorldMovingHazardBaseCache[3] == 0);
+  CHECK(runtime.WorldMovingHazardGUIDCache[3] == 0);
+  CHECK(runtime.WorldMovingHazardCacheCounts[3] == 0);
+  CHECK(runtime.WorldMovingHazardBaseCaches[3][0] == 0);
+  CHECK(runtime.WorldMovingHazardGUIDCaches[3][0] == 0);
+  CHECK(runtime.WorldMovingHazardRemoteGUIDMaps[3][0] == 0);
+  CHECK(runtime.WorldMovingHazardLocalGUIDMaps[3][0] == 0);
+  CHECK(runtime.WorldActorSnapshotRemoteGUIDMaps[3][0] == 0);
+  CHECK(runtime.WorldActorSnapshotLocalGUIDMaps[3][0] == 0);
+  CHECK(runtime.LastTracedWorldMovingHazardsFrame[3] == 38);
+  CHECK(runtime.LastTracedWorldEffectsFrame[3] == 39);
+  CHECK(runtime.LastTracedWorldObjectLifecyclesFrame[3] == 40);
+  CHECK(runtime.PlayerActorBaseCache[4][1] == 41);
+}
+
 void TestGameStateTraceRowFormatting() {
   using namespace NsmbNetplayPoC::GameStateModel;
   GameStateSample sample;
@@ -224,6 +310,7 @@ int main() {
   TestMalformedHeadersAreRejected();
   TestGameStateHashes();
   TestRemoteStateStoreSelectionAndRestart();
+  TestStateSyncRuntimeRestartContract();
   TestGameStateTraceRowFormatting();
   if (Failures != 0) {
     std::fprintf(stderr, "nsmb game state tests failed: %d\n", Failures);

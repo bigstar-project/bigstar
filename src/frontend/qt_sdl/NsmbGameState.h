@@ -657,6 +657,53 @@ private:
   std::optional<WireProtocol::WireWorldEffectState> WorldEffectState_;
 };
 
+class StateSyncRuntime {
+public:
+  void ResetForRestart(int instanceID);
+
+  RemoteStateStore RemoteState;
+  std::map<melonDS::u64, GameStateSyncHashes> LocalGameStateHashes;
+  bool GameStateMismatchSeen = false;
+  melonDS::u64 LastSentGameStateFrame[16]{};
+  melonDS::u64 LastSentPlayerStateFrame[16]{};
+  melonDS::u64 LastSentWorldStateFrame[16]{};
+  melonDS::u32 LastAppliedPlayerGlobalsFrame[16][2]{};
+  melonDS::u32 PlayerActorBaseCache[16][2]{};
+  melonDS::u32 PlayerActorGUIDCache[16][2]{};
+  melonDS::u32 WorldStarActorBaseCache[16]{};
+  melonDS::u32 WorldStarActorGUIDCache[16]{};
+  melonDS::u32 LastSpawnedWorldItemRemoteGUID[16]{};
+  melonDS::u32 LastConfirmedWorldItemRemoteGUID[16]{};
+  melonDS::u32 PendingWorldItemRemoteGUID[16]{};
+  melonDS::u32 PendingWorldItemFirstMissingFrame[16]{};
+  melonDS::u32 LastSpawnedNeutralWorldItemRemoteGUID[16]{};
+  melonDS::u32 LastConfirmedNeutralWorldItemRemoteGUID[16]{};
+  melonDS::u32 PendingNeutralWorldItemRemoteGUID[16]{};
+  melonDS::u32 PendingNeutralWorldItemFirstMissingFrame[16]{};
+  melonDS::u32 LastSpawnedDroppedStarItemRemoteGUID[16]{};
+  melonDS::u32 LastConfirmedDroppedStarItemRemoteGUID[16]{};
+  melonDS::u32 PendingDroppedStarItemRemoteGUID[16]{};
+  melonDS::u32 PendingDroppedStarItemFirstMissingFrame[16]{};
+  melonDS::u32 WorldMovingHazardBaseCache[16]{};
+  melonDS::u32 WorldMovingHazardGUIDCache[16]{};
+  melonDS::u32 WorldMovingHazardBaseCaches
+      [16][WireProtocol::kMaxWorldMovingHazards]{};
+  melonDS::u32 WorldMovingHazardGUIDCaches
+      [16][WireProtocol::kMaxWorldMovingHazards]{};
+  melonDS::u32 WorldMovingHazardRemoteGUIDMaps
+      [16][WireProtocol::kMaxWorldMovingHazards]{};
+  melonDS::u32 WorldMovingHazardLocalGUIDMaps
+      [16][WireProtocol::kMaxWorldMovingHazards]{};
+  melonDS::u32 WorldActorSnapshotRemoteGUIDMaps
+      [16][WireProtocol::kMaxWorldActorSnapshots]{};
+  melonDS::u32 WorldActorSnapshotLocalGUIDMaps
+      [16][WireProtocol::kMaxWorldActorSnapshots]{};
+  melonDS::u32 WorldMovingHazardCacheCounts[16]{};
+  melonDS::u32 LastTracedWorldMovingHazardsFrame[16]{};
+  melonDS::u32 LastTracedWorldEffectsFrame[16]{};
+  melonDS::u32 LastTracedWorldObjectLifecyclesFrame[16]{};
+};
+
 melonDS::u64 ComputeBasicGameStateHash(const GameStateSample &sample);
 melonDS::u64 CombinedGameStateHash(const GameStateSyncHashes &hashes);
 

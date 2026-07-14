@@ -1,5 +1,6 @@
 #include "NsmbGameState.h"
 
+#include <iterator>
 #include <ostream>
 
 namespace NsmbNetplayPoC::GameStateModel {
@@ -910,6 +911,52 @@ RemoteStateStore::WorldEffectState() const {
 
 std::size_t RemoteStateStore::PlayerStateCount() const {
   return PlayerStates_.size();
+}
+
+void StateSyncRuntime::ResetForRestart(int instanceID) {
+  if (instanceID < 0 || instanceID >= 16)
+    return;
+
+  LocalGameStateHashes.clear();
+  RemoteState.ResetForRestart();
+  LastSentGameStateFrame[instanceID] = 0;
+  LastSentPlayerStateFrame[instanceID] = 0;
+  LastSentWorldStateFrame[instanceID] = 0;
+  for (int player = 0; player < 2; player++) {
+    LastAppliedPlayerGlobalsFrame[instanceID][player] = 0;
+    PlayerActorBaseCache[instanceID][player] = 0;
+    PlayerActorGUIDCache[instanceID][player] = 0;
+  }
+
+  WorldStarActorBaseCache[instanceID] = 0;
+  WorldStarActorGUIDCache[instanceID] = 0;
+  LastSpawnedWorldItemRemoteGUID[instanceID] = 0;
+  LastConfirmedWorldItemRemoteGUID[instanceID] = 0;
+  PendingWorldItemRemoteGUID[instanceID] = 0;
+  PendingWorldItemFirstMissingFrame[instanceID] = 0;
+  LastSpawnedNeutralWorldItemRemoteGUID[instanceID] = 0;
+  LastConfirmedNeutralWorldItemRemoteGUID[instanceID] = 0;
+  PendingNeutralWorldItemRemoteGUID[instanceID] = 0;
+  PendingNeutralWorldItemFirstMissingFrame[instanceID] = 0;
+  LastSpawnedDroppedStarItemRemoteGUID[instanceID] = 0;
+  LastConfirmedDroppedStarItemRemoteGUID[instanceID] = 0;
+  PendingDroppedStarItemRemoteGUID[instanceID] = 0;
+  PendingDroppedStarItemFirstMissingFrame[instanceID] = 0;
+  WorldMovingHazardBaseCache[instanceID] = 0;
+  WorldMovingHazardGUIDCache[instanceID] = 0;
+  WorldMovingHazardCacheCounts[instanceID] = 0;
+  std::fill(std::begin(WorldMovingHazardBaseCaches[instanceID]),
+            std::end(WorldMovingHazardBaseCaches[instanceID]), 0);
+  std::fill(std::begin(WorldMovingHazardGUIDCaches[instanceID]),
+            std::end(WorldMovingHazardGUIDCaches[instanceID]), 0);
+  std::fill(std::begin(WorldMovingHazardRemoteGUIDMaps[instanceID]),
+            std::end(WorldMovingHazardRemoteGUIDMaps[instanceID]), 0);
+  std::fill(std::begin(WorldMovingHazardLocalGUIDMaps[instanceID]),
+            std::end(WorldMovingHazardLocalGUIDMaps[instanceID]), 0);
+  std::fill(std::begin(WorldActorSnapshotRemoteGUIDMaps[instanceID]),
+            std::end(WorldActorSnapshotRemoteGUIDMaps[instanceID]), 0);
+  std::fill(std::begin(WorldActorSnapshotLocalGUIDMaps[instanceID]),
+            std::end(WorldActorSnapshotLocalGUIDMaps[instanceID]), 0);
 }
 
 } // namespace NsmbNetplayPoC::GameStateModel
