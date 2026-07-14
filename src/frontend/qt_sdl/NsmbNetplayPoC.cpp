@@ -493,7 +493,6 @@ int CurrentPacketBridgeLocalPlayer();
 struct State
 {
     std::mutex Mutex;
-    std::mutex PerfMutex;
     std::atomic<bool> EnvChecked { false };
     Config::BootstrapConfig Bootstrap;
     Config::DiagnosticsConfig Diagnostics;
@@ -505,21 +504,6 @@ struct State
     Config::ConnectionConfig Connection;
     Role NetRole = Role::Host;
     melonDS::u32 MvlAutoRestartStartupFrameBase = 0;
-    bool TestTimerStarted = false;
-    std::chrono::steady_clock::time_point TestTimerStart;
-    bool ActiveTimerStarted[16] {};
-    melonDS::u32 ActiveTimerStartFrame[16] {};
-    std::chrono::steady_clock::time_point ActiveTimerStart[16];
-    bool ActiveFrameTimingStarted[16] {};
-    std::chrono::steady_clock::time_point ActiveFrameLastTime[16];
-    melonDS::u32 ActiveFrameSamples[16] {};
-    unsigned long long ActiveFrameTotalUs[16] {};
-    unsigned long long ActiveFrameMaxUs[16] {};
-    melonDS::u32 ActiveFrameMaxFrame[16] {};
-    melonDS::u32 ActiveFrameOver16ms[16] {};
-    melonDS::u32 ActiveFrameOver25ms[16] {};
-    melonDS::u32 ActiveFrameOver33ms[16] {};
-    melonDS::u32 LastGameplayHeartbeat[16] {};
     Config::StateSyncConfig StateSync;
     SessionPolicy::Runtime Session;
     Coordination::Runtime Coordinator;
@@ -576,8 +560,6 @@ struct State
     RollbackStorage::Store RollbackStore;
     melonDS::u32 RollbackRestoreCount = 0;
     melonDS::u32 RollbackResimulateCount = 0;
-    melonDS::u32 LastPerfSpikeRollbackRestoreCount[16] {};
-    melonDS::u32 LastPerfSpikeRollbackResimulateCount[16] {};
     melonDS::u32 RollbackCheckpointSaveCount = 0;
     size_t RollbackCheckpointLastBytes = 0;
     size_t RollbackCheckpointMinBytes = 0;
@@ -2173,64 +2155,33 @@ void RecordRollbackResimTimingLocked(
 
 void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
 {
-    if (instanceID < 0 || instanceID >= 16 || !G.ActiveTimerStarted[instanceID])
-        return;
-
-    const auto now = std::chrono::steady_clock::now();
-    std::lock_guard<std::mutex> lock(G.PerfMutex);
-    if (!G.ActiveFrameTimingStarted[instanceID])
-    {
-        G.ActiveFrameTimingStarted[instanceID] = true;
-        G.ActiveFrameLastTime[instanceID] = now;
-        return;
-    }
-
-    const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-        now - G.ActiveFrameLastTime[instanceID]).count();
-    G.ActiveFrameLastTime[instanceID] = now;
-    if (elapsed <= 0)
-        return;
-
-    const unsigned long long elapsedUs =
-        static_cast<unsigned long long>(elapsed);
-    G.ActiveFrameSamples[instanceID]++;
-    G.ActiveFrameTotalUs[instanceID] += elapsedUs;
-    if (elapsedUs > G.ActiveFrameMaxUs[instanceID])
-    {
-        G.ActiveFrameMaxUs[instanceID] = elapsedUs;
-        G.ActiveFrameMaxFrame[instanceID] = frame;
-    }
-    if (elapsedUs > 16667)
-        G.ActiveFrameOver16ms[instanceID]++;
-    if (elapsedUs > 25000)
-        G.ActiveFrameOver25ms[instanceID]++;
-    if (elapsedUs > 33334)
-        G.ActiveFrameOver33ms[instanceID]++;
-
-    if (G.Diagnostics.ActiveFrameSpikeTrace && elapsedUs >= static_cast<unsigned long long>(G.Diagnostics.ActiveFrameSpikeThresholdUs))
-    {
-        const melonDS::u32 restoreDelta =
-            G.RollbackRestoreCount - G.LastPerfSpikeRollbackRestoreCount[instanceID];
-        const melonDS::u32 resimDelta =
-            G.RollbackResimulateCount - G.LastPerfSpikeRollbackResimulateCount[instanceID];
-        G.LastPerfSpikeRollbackRestoreCount[instanceID] = G.RollbackRestoreCount;
-        G.LastPerfSpikeRollbackResimulateCount[instanceID] = G.RollbackResimulateCount;
-        std::printf(
-            "NSMB PerfSpike: inst=%d frame=%u frameTimeUs=%llu thresholdUs=%d rollbackRestores=%u rollbackResims=%u rollbackRestoreDelta=%u rollbackResimDelta=%u saveMaxUs=%llu restoreMaxUs=%llu resimRunMaxUs=%llu resimSaveMaxUs=%llu resimTotalMaxUs=%llu\n",
+    const Diagnostics::Runtime::ActiveFrameSample sample =
+        G.DiagnosticsRuntime.RecordActiveFrameTiming(
             instanceID,
             frame,
-            elapsedUs,
-            G.Diagnostics.ActiveFrameSpikeThresholdUs,
+            std::chrono::steady_clock::now(),
+            G.Diagnostics.ActiveFrameSpikeTrace,
+            static_cast<std::uint64_t>(G.Diagnostics.ActiveFrameSpikeThresholdUs),
             G.RollbackRestoreCount,
-            G.RollbackResimulateCount,
-            restoreDelta,
-            resimDelta,
-            G.RollbackCheckpointSaveMaxUs,
-            G.RollbackCheckpointRestoreMaxUs,
-            G.RollbackResimRunFrameMaxUs,
-            G.RollbackResimCheckpointSaveMaxUs,
-            G.RollbackResimCorrectionMaxUs);
-    }
+            G.RollbackResimulateCount);
+    if (!sample.Spike)
+        return;
+
+    std::printf(
+        "NSMB PerfSpike: inst=%d frame=%u frameTimeUs=%llu thresholdUs=%d rollbackRestores=%u rollbackResims=%u rollbackRestoreDelta=%u rollbackResimDelta=%u saveMaxUs=%llu restoreMaxUs=%llu resimRunMaxUs=%llu resimSaveMaxUs=%llu resimTotalMaxUs=%llu\n",
+        instanceID,
+        frame,
+        static_cast<unsigned long long>(sample.ElapsedUs),
+        G.Diagnostics.ActiveFrameSpikeThresholdUs,
+        G.RollbackRestoreCount,
+        G.RollbackResimulateCount,
+        sample.RollbackRestoreDelta,
+        sample.RollbackResimulateDelta,
+        G.RollbackCheckpointSaveMaxUs,
+        G.RollbackCheckpointRestoreMaxUs,
+        G.RollbackResimRunFrameMaxUs,
+        G.RollbackResimCheckpointSaveMaxUs,
+        G.RollbackResimCorrectionMaxUs);
 }
 
 void InvalidateMainRAMJIT(melonDS::NDS* nds, melonDS::u32 len)
@@ -8632,17 +8583,13 @@ void TracePlayerLifeChanges(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
 
 void TraceGameplayHeartbeatIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (G.Diagnostics.GameplayHeartbeatInterval <= 0 || !nds || !nds->MainRAM)
+    if (!nds || !nds->MainRAM ||
+        !G.DiagnosticsRuntime.ShouldTraceGameplayHeartbeat(
+            instanceID,
+            frame,
+            G.Connection.StartFrame,
+            G.Diagnostics.GameplayHeartbeatInterval))
         return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    if (frame < G.Connection.StartFrame)
-        return;
-    if (frame == G.LastGameplayHeartbeat[instanceID] ||
-        (frame % static_cast<melonDS::u32>(G.Diagnostics.GameplayHeartbeatInterval)) != 0)
-        return;
-
-    G.LastGameplayHeartbeat[instanceID] = frame;
     const GameStateObjectScanCache cache = BuildGameStateObjectScanCache(nds);
     const ScopedGameStateObjectScanCache scopedCache(cache);
     const PlayerActorScanSample players = FindPlayerActors(nds);
@@ -8714,31 +8661,19 @@ melonDS::u32 PrepareAfterFrameLogFrame(int instanceID, melonDS::u32 frame)
 
     const melonDS::u32 logFrame = ++G.TestFrameCount[instanceID];
     if (logFrame == 1)
-    {
-        std::lock_guard<std::mutex> lock(G.Mutex);
-        if (!G.TestTimerStarted)
-        {
-            G.TestTimerStarted = true;
-            G.TestTimerStart = std::chrono::steady_clock::now();
-        }
-    }
+        G.DiagnosticsRuntime.StartTestTimer(std::chrono::steady_clock::now());
     const melonDS::u32 activeStartFrame = G.Diagnostics.ActiveFpsStartFrame != 0
         ? G.Diagnostics.ActiveFpsStartFrame
         : (G.Connection.StartFrame != 0
             ? G.Connection.StartFrame + 120
             : 120);
-    if (!G.ActiveTimerStarted[instanceID] && logFrame >= activeStartFrame)
-    {
-        std::lock_guard<std::mutex> lock(G.Mutex);
-        if (!G.ActiveTimerStarted[instanceID])
-        {
-            G.ActiveTimerStarted[instanceID] = true;
-            G.ActiveTimerStartFrame[instanceID] = logFrame;
-            G.ActiveTimerStart[instanceID] = std::chrono::steady_clock::now();
-        }
-    }
+    if (logFrame >= activeStartFrame)
+        G.DiagnosticsRuntime.StartActiveTimer(
+            instanceID, logFrame, std::chrono::steady_clock::now());
     RecordActiveFrameTiming(instanceID, logFrame);
-    const bool heartbeatActive = G.ActiveTimerStarted[instanceID] || logFrame >= activeStartFrame;
+    const bool heartbeatActive =
+        G.DiagnosticsRuntime.IsActiveTimerStarted(instanceID) ||
+        logFrame >= activeStartFrame;
     G.DiagnosticsRuntime.PublishFrameHeartbeat(instanceID, logFrame, heartbeatActive);
     return logFrame;
 }
@@ -9040,10 +8975,8 @@ bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
     if (!G.TestAnnouncedQuit)
     {
         G.TestAnnouncedQuit = true;
-        const auto elapsedMs = G.TestTimerStarted
-            ? std::chrono::duration_cast<std::chrono::milliseconds>(
-                  std::chrono::steady_clock::now() - G.TestTimerStart).count()
-            : 0;
+        const std::int64_t elapsedMs = G.DiagnosticsRuntime.TestElapsedMs(
+            std::chrono::steady_clock::now());
         const double fps = elapsedMs > 0
             ? (static_cast<double>(G.Bootstrap.TestFrames) * 1000.0) / static_cast<double>(elapsedMs)
             : 0.0;
@@ -9052,37 +8985,38 @@ bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
             G.Bootstrap.TestInstanceCount,
             static_cast<long long>(elapsedMs),
             fps);
-        if (G.ActiveTimerStarted[instanceID] && G.Bootstrap.TestFrames > G.ActiveTimerStartFrame[instanceID])
+        const Diagnostics::Runtime::ActiveFrameSummary activeTiming =
+            G.DiagnosticsRuntime.ActiveFrameTimingSummary(
+                instanceID,
+                G.Bootstrap.TestFrames,
+                std::chrono::steady_clock::now());
+        if (activeTiming.Started && activeTiming.Frames > 0)
         {
-            const auto activeElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - G.ActiveTimerStart[instanceID]).count();
-            const melonDS::u32 activeFrames = G.Bootstrap.TestFrames - G.ActiveTimerStartFrame[instanceID];
-            const double activeFps = activeElapsedMs > 0
-                ? (static_cast<double>(activeFrames) * 1000.0) / static_cast<double>(activeElapsedMs)
+            const double activeFps = activeTiming.ElapsedMs > 0
+                ? (static_cast<double>(activeTiming.Frames) * 1000.0) / static_cast<double>(activeTiming.ElapsedMs)
                 : 0.0;
             std::printf("NSMB Test: active fps startFrame=%u frames=%u elapsedMs=%lld fps=%.2f\n",
-                G.ActiveTimerStartFrame[instanceID],
-                activeFrames,
-                static_cast<long long>(activeElapsedMs),
+                activeTiming.StartFrame,
+                activeTiming.Frames,
+                static_cast<long long>(activeTiming.ElapsedMs),
                 activeFps);
-            const melonDS::u32 timingSamples = G.ActiveFrameSamples[instanceID];
-            if (timingSamples > 0)
+            if (activeTiming.Samples > 0)
             {
                 const double avgFrameMs =
-                    static_cast<double>(G.ActiveFrameTotalUs[instanceID]) /
-                    static_cast<double>(timingSamples) / 1000.0;
+                    static_cast<double>(activeTiming.TotalUs) /
+                    static_cast<double>(activeTiming.Samples) / 1000.0;
                 const double maxFrameMs =
-                    static_cast<double>(G.ActiveFrameMaxUs[instanceID]) / 1000.0;
+                    static_cast<double>(activeTiming.MaxUs) / 1000.0;
                 std::printf(
                     "NSMB Test: active frame timing startFrame=%u samples=%u avgFrameMs=%.3f maxFrameMs=%.3f maxFrame=%u over16ms=%u over25ms=%u over33ms=%u spikeThresholdMs=%.3f\n",
-                    G.ActiveTimerStartFrame[instanceID],
-                    timingSamples,
+                    activeTiming.StartFrame,
+                    activeTiming.Samples,
                     avgFrameMs,
                     maxFrameMs,
-                    G.ActiveFrameMaxFrame[instanceID],
-                    G.ActiveFrameOver16ms[instanceID],
-                    G.ActiveFrameOver25ms[instanceID],
-                    G.ActiveFrameOver33ms[instanceID],
+                    activeTiming.MaxFrame,
+                    activeTiming.Over16ms,
+                    activeTiming.Over25ms,
+                    activeTiming.Over33ms,
                     static_cast<double>(G.Diagnostics.ActiveFrameSpikeThresholdUs) / 1000.0);
             }
         }

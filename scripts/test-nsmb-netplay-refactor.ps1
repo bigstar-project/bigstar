@@ -123,6 +123,7 @@ if ($Tier -eq "fast" -or $Tier -eq "rollback" -or $Tier -eq "diagnostics") {
         $params.HangWatchdogIntervalMs = 100
         $params.StallTimeoutMs = 10000
         $params.FrameHeartbeatInterval = 10
+        $params.GameplayHeartbeatInterval = 100
     }
 } else {
     $params.InputScript = "tests\nsmb_us_direct_mvl_both_different.inputs"
@@ -171,6 +172,7 @@ if ($Tier -eq "diagnostics") {
         $phasePath = Join-Path $resolvedLogDir "$role.stdout.txt.phase-events.jsonl"
         $heartbeatPath = Join-Path $resolvedLogDir "$role.stdout.txt.heartbeat"
         $eventsPath = Join-Path $resolvedLogDir "$role.stdout.txt.events.jsonl"
+        $stdoutPath = Join-Path $resolvedLogDir "$role.stdout.txt"
         foreach ($path in @($watchdogPath, $phasePath, $heartbeatPath, $eventsPath)) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
                 throw "diagnostics smoke did not create log: $path"
@@ -216,6 +218,20 @@ if ($Tier -eq "diagnostics") {
             if (($heartbeatFrames[$index] % 10) -ne 0 -or
                 ($index -gt 0 -and $heartbeatFrames[$index] -le $heartbeatFrames[$index - 1])) {
                 throw "diagnostics heartbeat sequence mismatch: role=$role index=$index frame=$($heartbeatFrames[$index])"
+            }
+        }
+
+        $stdout = Get-Content -LiteralPath $stdoutPath -Raw -Encoding UTF8
+        $gameplayHeartbeatMatches = [regex]::Matches(
+            $stdout,
+            'NSMB GameplayHeartbeat: role=.*? frame=(\d+) ')
+        if ($gameplayHeartbeatMatches.Count -lt 3) {
+            throw "diagnostics gameplay heartbeat has insufficient coverage: role=$role count=$($gameplayHeartbeatMatches.Count)"
+        }
+        foreach ($match in $gameplayHeartbeatMatches) {
+            $gameplayFrame = [int]$match.Groups[1].Value
+            if ($gameplayFrame -lt 900 -or ($gameplayFrame % 100) -ne 0) {
+                throw "diagnostics gameplay heartbeat sequence mismatch: role=$role frame=$gameplayFrame"
             }
         }
     }

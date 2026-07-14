@@ -142,6 +142,70 @@ void TestDiagnosticEventLogContract() {
   std::filesystem::remove_all(root, error);
 }
 
+void TestPerformanceRuntimeContract() {
+  using Runtime = NsmbNetplayPoC::Diagnostics::Runtime;
+  const Runtime::TimePoint start = Runtime::TimePoint{} + std::chrono::seconds(1);
+
+  Runtime runtime;
+  CHECK(runtime.TestElapsedMs(start) == 0);
+  runtime.StartTestTimer(start);
+  runtime.StartTestTimer(start + std::chrono::milliseconds(500));
+  CHECK(runtime.TestElapsedMs(start + std::chrono::milliseconds(1500)) ==
+        1500);
+
+  CHECK(!runtime.StartActiveTimer(-1, 100, start));
+  CHECK(runtime.StartActiveTimer(0, 100, start));
+  CHECK(!runtime.StartActiveTimer(0, 200, start));
+  CHECK(runtime.IsActiveTimerStarted(0));
+  CHECK(!runtime.IsActiveTimerStarted(16));
+
+  Runtime::ActiveFrameSample sample = runtime.RecordActiveFrameTiming(
+      0, 100, start + std::chrono::microseconds(1000), true, 20000, 0, 0);
+  CHECK(!sample.Recorded);
+  sample = runtime.RecordActiveFrameTiming(
+      0, 101, start + std::chrono::microseconds(17667), true, 20000, 1, 2);
+  CHECK(sample.Recorded);
+  CHECK(sample.ElapsedUs == 16667);
+  CHECK(!sample.Spike);
+  sample = runtime.RecordActiveFrameTiming(
+      0, 102, start + std::chrono::microseconds(34335), true, 20000, 2, 3);
+  CHECK(sample.Recorded);
+  CHECK(sample.ElapsedUs == 16668);
+  CHECK(!sample.Spike);
+  sample = runtime.RecordActiveFrameTiming(
+      0, 103, start + std::chrono::microseconds(59336), true, 20000, 5, 7);
+  CHECK(sample.Spike);
+  CHECK(sample.RollbackRestoreDelta == 5);
+  CHECK(sample.RollbackResimulateDelta == 7);
+  sample = runtime.RecordActiveFrameTiming(
+      0, 104, start + std::chrono::microseconds(92671), true, 20000, 8, 9);
+  CHECK(sample.Spike);
+  CHECK(sample.RollbackRestoreDelta == 3);
+  CHECK(sample.RollbackResimulateDelta == 2);
+
+  const Runtime::ActiveFrameSummary summary = runtime.ActiveFrameTimingSummary(
+      0, 105, start + std::chrono::milliseconds(100));
+  CHECK(summary.Started);
+  CHECK(summary.StartFrame == 100);
+  CHECK(summary.Frames == 5);
+  CHECK(summary.ElapsedMs == 100);
+  CHECK(summary.Samples == 4);
+  CHECK(summary.TotalUs == 91671);
+  CHECK(summary.MaxUs == 33335);
+  CHECK(summary.MaxFrame == 104);
+  CHECK(summary.Over16ms == 3);
+  CHECK(summary.Over25ms == 2);
+  CHECK(summary.Over33ms == 1);
+
+  CHECK(!runtime.ShouldTraceGameplayHeartbeat(-1, 20, 20, 10));
+  CHECK(!runtime.ShouldTraceGameplayHeartbeat(0, 10, 20, 10));
+  CHECK(runtime.ShouldTraceGameplayHeartbeat(0, 20, 20, 10));
+  CHECK(!runtime.ShouldTraceGameplayHeartbeat(0, 20, 20, 10));
+  CHECK(!runtime.ShouldTraceGameplayHeartbeat(0, 21, 20, 10));
+  CHECK(runtime.ShouldTraceGameplayHeartbeat(0, 30, 20, 10));
+  CHECK(runtime.ShouldTraceGameplayHeartbeat(1, 20, 20, 10));
+}
+
 } // namespace
 
 int main() {
@@ -149,6 +213,7 @@ int main() {
   TestConsoleOnlyHeartbeatContract();
   TestHashLogContract();
   TestDiagnosticEventLogContract();
+  TestPerformanceRuntimeContract();
   if (Failures != 0) {
     std::printf("nsmb_netplay_diagnostics_tests: %d failure(s)\n", Failures);
     return 1;

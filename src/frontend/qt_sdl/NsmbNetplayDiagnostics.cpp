@@ -98,6 +98,23 @@ bool WriteMiniDump(const std::string &) { return false; }
 } // namespace
 
 struct Runtime::Impl {
+  struct ActivePerformanceState {
+    std::atomic<bool> TimerStarted{false};
+    melonDS::u32 TimerStartFrame = 0;
+    TimePoint TimerStart;
+    bool FrameTimingStarted = false;
+    TimePoint LastFrameTime;
+    melonDS::u32 Samples = 0;
+    std::uint64_t TotalUs = 0;
+    std::uint64_t MaxUs = 0;
+    melonDS::u32 MaxFrame = 0;
+    melonDS::u32 Over16ms = 0;
+    melonDS::u32 Over25ms = 0;
+    melonDS::u32 Over33ms = 0;
+    melonDS::u32 LastSpikeRollbackRestoreCount = 0;
+    melonDS::u32 LastSpikeRollbackResimulateCount = 0;
+  };
+
   Config::DiagnosticsConfig Config;
   bool Host = true;
   std::ofstream WatchdogLog;
@@ -113,6 +130,11 @@ struct Runtime::Impl {
   std::atomic<bool> FrameHeartbeatStop{false};
   bool FrameHeartbeatThreadStarted = false;
   std::thread FrameHeartbeatThread;
+  mutable std::mutex PerformanceMutex;
+  bool TestTimerStarted = false;
+  TimePoint TestTimerStart;
+  std::array<ActivePerformanceState, 16> ActivePerformance{};
+  std::array<melonDS::u32, 16> LastGameplayHeartbeat{};
   std::mutex HashLogMutex;
   std::ofstream HashLog;
   bool ScreenHashEnabled = false;
@@ -443,6 +465,151 @@ bool Runtime::WriteDiagnosticEvent(const std::string &path,
   State->DiagnosticEventLog << json << '\n';
   State->DiagnosticEventLog.flush();
   return static_cast<bool>(State->DiagnosticEventLog);
+}
+
+void Runtime::StartTestTimer(TimePoint now) {
+  std::lock_guard<std::mutex> lock(State->PerformanceMutex);
+  if (State->TestTimerStarted)
+    return;
+  State->TestTimerStarted = true;
+  State->TestTimerStart = now;
+}
+
+std::int64_t Runtime::TestElapsedMs(TimePoint now) const {
+  std::lock_guard<std::mutex> lock(State->PerformanceMutex);
+  if (!State->TestTimerStarted)
+    return 0;
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             now - State->TestTimerStart)
+      .count();
+}
+
+bool Runtime::StartActiveTimer(int instanceID, melonDS::u32 frame,
+                               TimePoint now) {
+  if (instanceID < 0 ||
+      instanceID >= static_cast<int>(State->ActivePerformance.size())) {
+    return false;
+  }
+  Impl::ActivePerformanceState &active =
+      State->ActivePerformance[instanceID];
+  if (active.TimerStarted.load(std::memory_order_acquire))
+    return false;
+  std::lock_guard<std::mutex> lock(State->PerformanceMutex);
+  if (active.TimerStarted.load(std::memory_order_relaxed))
+    return false;
+  active.TimerStartFrame = frame;
+  active.TimerStart = now;
+  active.TimerStarted.store(true, std::memory_order_release);
+  return true;
+}
+
+bool Runtime::IsActiveTimerStarted(int instanceID) const {
+  return instanceID >= 0 &&
+         instanceID < static_cast<int>(State->ActivePerformance.size()) &&
+         State->ActivePerformance[instanceID].TimerStarted.load(
+             std::memory_order_acquire);
+}
+
+Runtime::ActiveFrameSample Runtime::RecordActiveFrameTiming(
+    int instanceID, melonDS::u32 frame, TimePoint now, bool traceSpikes,
+    std::uint64_t spikeThresholdUs, melonDS::u32 rollbackRestoreCount,
+    melonDS::u32 rollbackResimulateCount) {
+  std::lock_guard<std::mutex> lock(State->PerformanceMutex);
+  ActiveFrameSample sample;
+  if (instanceID < 0 ||
+      instanceID >= static_cast<int>(State->ActivePerformance.size())) {
+    return sample;
+  }
+
+  Impl::ActivePerformanceState &active =
+      State->ActivePerformance[instanceID];
+  if (!active.TimerStarted.load(std::memory_order_acquire))
+    return sample;
+  if (!active.FrameTimingStarted) {
+    active.FrameTimingStarted = true;
+    active.LastFrameTime = now;
+    return sample;
+  }
+
+  const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                           now - active.LastFrameTime)
+                           .count();
+  active.LastFrameTime = now;
+  if (elapsed <= 0)
+    return sample;
+
+  sample.Recorded = true;
+  sample.ElapsedUs = static_cast<std::uint64_t>(elapsed);
+  active.Samples++;
+  active.TotalUs += sample.ElapsedUs;
+  if (sample.ElapsedUs > active.MaxUs) {
+    active.MaxUs = sample.ElapsedUs;
+    active.MaxFrame = frame;
+  }
+  if (sample.ElapsedUs > 16667)
+    active.Over16ms++;
+  if (sample.ElapsedUs > 25000)
+    active.Over25ms++;
+  if (sample.ElapsedUs > 33334)
+    active.Over33ms++;
+
+  sample.Spike = traceSpikes && sample.ElapsedUs >= spikeThresholdUs;
+  if (sample.Spike) {
+    sample.RollbackRestoreDelta =
+        rollbackRestoreCount - active.LastSpikeRollbackRestoreCount;
+    sample.RollbackResimulateDelta =
+        rollbackResimulateCount - active.LastSpikeRollbackResimulateCount;
+    active.LastSpikeRollbackRestoreCount = rollbackRestoreCount;
+    active.LastSpikeRollbackResimulateCount = rollbackResimulateCount;
+  }
+  return sample;
+}
+
+Runtime::ActiveFrameSummary Runtime::ActiveFrameTimingSummary(
+    int instanceID, melonDS::u32 endFrame, TimePoint now) const {
+  std::lock_guard<std::mutex> lock(State->PerformanceMutex);
+  ActiveFrameSummary summary;
+  if (instanceID < 0 ||
+      instanceID >= static_cast<int>(State->ActivePerformance.size())) {
+    return summary;
+  }
+
+  const Impl::ActivePerformanceState &active =
+      State->ActivePerformance[instanceID];
+  if (!active.TimerStarted.load(std::memory_order_acquire))
+    return summary;
+  summary.Started = true;
+  summary.StartFrame = active.TimerStartFrame;
+  summary.Frames = endFrame > active.TimerStartFrame
+                       ? endFrame - active.TimerStartFrame
+                       : 0;
+  summary.ElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          now - active.TimerStart)
+                          .count();
+  summary.Samples = active.Samples;
+  summary.TotalUs = active.TotalUs;
+  summary.MaxUs = active.MaxUs;
+  summary.MaxFrame = active.MaxFrame;
+  summary.Over16ms = active.Over16ms;
+  summary.Over25ms = active.Over25ms;
+  summary.Over33ms = active.Over33ms;
+  return summary;
+}
+
+bool Runtime::ShouldTraceGameplayHeartbeat(int instanceID, melonDS::u32 frame,
+                                           melonDS::u32 startFrame,
+                                           int interval) {
+  if (interval <= 0 || instanceID < 0 ||
+      instanceID >= static_cast<int>(State->LastGameplayHeartbeat.size()) ||
+      frame < startFrame ||
+      (frame % static_cast<melonDS::u32>(interval)) != 0) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(State->PerformanceMutex);
+  if (frame == State->LastGameplayHeartbeat[instanceID])
+    return false;
+  State->LastGameplayHeartbeat[instanceID] = frame;
+  return true;
 }
 
 void Runtime::StartHangDiagnostics(const Config::DiagnosticsConfig &config,

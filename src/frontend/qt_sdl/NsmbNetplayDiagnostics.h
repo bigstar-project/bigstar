@@ -3,6 +3,7 @@
 #include "NsmbGameState.h"
 #include "NsmbNetplayConfig.h"
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -12,6 +13,30 @@ namespace NsmbNetplayPoC::Diagnostics {
 
 class Runtime {
 public:
+  using TimePoint = std::chrono::steady_clock::time_point;
+
+  struct ActiveFrameSample {
+    bool Recorded = false;
+    bool Spike = false;
+    std::uint64_t ElapsedUs = 0;
+    melonDS::u32 RollbackRestoreDelta = 0;
+    melonDS::u32 RollbackResimulateDelta = 0;
+  };
+
+  struct ActiveFrameSummary {
+    bool Started = false;
+    melonDS::u32 StartFrame = 0;
+    melonDS::u32 Frames = 0;
+    std::int64_t ElapsedMs = 0;
+    melonDS::u32 Samples = 0;
+    std::uint64_t TotalUs = 0;
+    std::uint64_t MaxUs = 0;
+    melonDS::u32 MaxFrame = 0;
+    melonDS::u32 Over16ms = 0;
+    melonDS::u32 Over25ms = 0;
+    melonDS::u32 Over33ms = 0;
+  };
+
   Runtime();
   ~Runtime();
 
@@ -25,6 +50,19 @@ public:
                        melonDS::u64 stateHash, melonDS::u64 screenHash);
   bool WriteDiagnosticEvent(const std::string &path,
                             const std::string &json);
+  void StartTestTimer(TimePoint now);
+  std::int64_t TestElapsedMs(TimePoint now) const;
+  bool StartActiveTimer(int instanceID, melonDS::u32 frame, TimePoint now);
+  bool IsActiveTimerStarted(int instanceID) const;
+  ActiveFrameSample RecordActiveFrameTiming(
+      int instanceID, melonDS::u32 frame, TimePoint now, bool traceSpikes,
+      std::uint64_t spikeThresholdUs, melonDS::u32 rollbackRestoreCount,
+      melonDS::u32 rollbackResimulateCount);
+  ActiveFrameSummary ActiveFrameTimingSummary(int instanceID,
+                                              melonDS::u32 endFrame,
+                                              TimePoint now) const;
+  bool ShouldTraceGameplayHeartbeat(int instanceID, melonDS::u32 frame,
+                                    melonDS::u32 startFrame, int interval);
   void StartHangDiagnostics(const Config::DiagnosticsConfig &config, bool host);
   void Stop();
 
