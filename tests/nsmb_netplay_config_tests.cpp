@@ -692,6 +692,18 @@ void TestMvlConfigDefaults() {
   CHECK(!config.AutoRestartAfterResult);
   CHECK(config.AutoRestartDelayFrames == 120u);
   CHECK(config.AutoRestartBootstrapFrame == 120u);
+  CHECK(!config.CameraInitHold.Enabled);
+  CHECK(!config.CameraInitHold.HostOnly);
+  CHECK(!config.CameraInitHold.ClientOnly);
+  CHECK(config.CameraInitHold.StartFrame == 840u);
+  CHECK(config.CameraInitHold.EndFrame == 0u);
+  CHECK(!config.NetRandom.Enabled);
+  CHECK(!config.NetRandom.Auto);
+  CHECK(config.NetRandom.Frame == 0u);
+  CHECK(config.NetRandom.Value == 0u);
+  CHECK(!config.MatchSeedConfigured);
+  CHECK(config.MatchSeed == 0u);
+  CHECK(config.MatchSeedSequence.empty());
 }
 
 void TestMvlConfigReadsClampsAndPreservesPriority() {
@@ -714,6 +726,16 @@ void TestMvlConfigReadsClampsAndPreservesPriority() {
       {"MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT", "1"},
       {"MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES", "-1"},
       {"MELONDS_NSML_MVL_AUTO_RESTART_BOOTSTRAP_FRAME", "2000000"},
+      {"MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD", "1"},
+      {"MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_HOST_ONLY", "1"},
+      {"MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_CLIENT_ONLY", "1"},
+      {"MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_START_FRAME", "-4"},
+      {"MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_END_FRAME", "-1"},
+      {"MELONDS_NSML_NET_RANDOM_VALUE", "0x111"},
+      {"MELONDS_NSML_NET_RANDOM_AUTO", "1"},
+      {"MELONDS_NSML_NET_RANDOM_FRAME", "-5"},
+      {"MELONDS_NSML_MATCH_SEED", "0x222"},
+      {"MELONDS_NSML_MATCH_SEED_SEQUENCE", "0x333, 0x444"},
   };
 
   auto config = NsmbNetplayPoC::Config::LoadMvlConfig(environment);
@@ -738,10 +760,36 @@ void TestMvlConfigReadsClampsAndPreservesPriority() {
   CHECK(config.AutoRestartAfterResult);
   CHECK(config.AutoRestartDelayFrames == 1u);
   CHECK(config.AutoRestartBootstrapFrame == 1000000u);
+  CHECK(config.CameraInitHold.Enabled);
+  CHECK(config.CameraInitHold.HostOnly);
+  CHECK(config.CameraInitHold.ClientOnly);
+  CHECK(config.CameraInitHold.StartFrame == 0u);
+  CHECK(config.CameraInitHold.EndFrame == 0u);
+  CHECK(config.NetRandom.Enabled);
+  CHECK(config.NetRandom.Auto);
+  CHECK(config.NetRandom.Frame == 0u);
+  CHECK(config.NetRandom.Value == 0x333u);
+  CHECK(config.MatchSeedConfigured);
+  CHECK(config.MatchSeed == 0x333u);
+  CHECK(config.MatchSeedSequence ==
+        std::vector<std::uint32_t>({0x333u, 0x444u}));
 
   environment.Values["MELONDS_NSML_MVL_SCENE_SETTINGS"] = "invalid";
   config = NsmbNetplayPoC::Config::LoadMvlConfig(environment);
   CHECK(config.StageSceneSettings == 0u);
+
+  environment.Values.erase("MELONDS_NSML_MATCH_SEED_SEQUENCE");
+  config = NsmbNetplayPoC::Config::LoadMvlConfig(environment);
+  CHECK(config.MatchSeed == 0x222u);
+  CHECK(config.NetRandom.Value == 0x111u);
+
+  environment.Values["MELONDS_NSML_NET_RANDOM_VALUE"] = "";
+  environment.Values.erase("MELONDS_NSML_MATCH_SEED");
+  config = NsmbNetplayPoC::Config::LoadMvlConfig(environment);
+  CHECK(!config.NetRandom.Enabled);
+  CHECK(!config.NetRandom.Auto);
+  CHECK(config.NetRandom.Frame == 0u);
+  CHECK(!config.MatchSeedConfigured);
 }
 
 void TestDiagnosticsConfigDefaults() {

@@ -660,6 +660,43 @@ MvlConfig LoadMvlConfig(const Environment &environment) {
                          "MELONDS_NSML_MVL_AUTO_RESTART_BOOTSTRAP_FRAME", 120),
                  0, 1000000));
 
+  config.CameraInitHold.Enabled =
+      ReadFlag(environment, "MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD");
+  config.CameraInitHold.HostOnly =
+      ReadFlag(environment, "MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_HOST_ONLY");
+  config.CameraInitHold.ClientOnly =
+      ReadFlag(environment, "MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_CLIENT_ONLY");
+  config.CameraInitHold.StartFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment,
+                 "MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_START_FRAME", 840)));
+  config.CameraInitHold.EndFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment,
+                 "MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_END_FRAME", 0)));
+
+  if (ReadHasValue(environment, "MELONDS_NSML_NET_RANDOM_VALUE")) {
+    config.NetRandom.Enabled = true;
+    config.NetRandom.Auto =
+        ReadFlag(environment, "MELONDS_NSML_NET_RANDOM_AUTO");
+    config.NetRandom.Value =
+        ReadU32(environment, "MELONDS_NSML_NET_RANDOM_VALUE", 0);
+    config.NetRandom.Frame = static_cast<std::uint32_t>(std::max(
+        0, ReadInt(environment, "MELONDS_NSML_NET_RANDOM_FRAME", 0)));
+    config.MatchSeed = config.NetRandom.Value;
+    config.MatchSeedConfigured = true;
+  }
+
+  if (ReadHasValue(environment, "MELONDS_NSML_MATCH_SEED")) {
+    config.MatchSeed = ReadU32(environment, "MELONDS_NSML_MATCH_SEED", 0);
+    config.MatchSeedConfigured = true;
+  }
+  config.MatchSeedSequence =
+      ReadU32List(environment, "MELONDS_NSML_MATCH_SEED_SEQUENCE");
+  if (!config.MatchSeedSequence.empty()) {
+    config.MatchSeed = config.MatchSeedSequence.front();
+    config.MatchSeedConfigured = true;
+    config.NetRandom.Value = config.MatchSeed;
+  }
+
   return config;
 }
 
@@ -992,10 +1029,6 @@ double EnvDouble(const char *name, double fallback) {
 
 std::uint32_t EnvU32(const char *name, std::uint32_t fallback) {
   return ReadU32(GetProcessEnvironment(), name, fallback);
-}
-
-std::vector<std::uint32_t> EnvU32List(const char *name) {
-  return ReadU32List(GetProcessEnvironment(), name);
 }
 
 bool EnvHasValue(const char *name) {

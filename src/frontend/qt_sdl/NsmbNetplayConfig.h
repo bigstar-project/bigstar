@@ -200,6 +200,21 @@ struct RollbackConfig {
   int MaxResimFrames = 0;
 };
 
+struct MvlCameraInitHoldConfig {
+  bool Enabled = false;
+  bool HostOnly = false;
+  bool ClientOnly = false;
+  std::uint32_t StartFrame = 840;
+  std::uint32_t EndFrame = 0;
+};
+
+struct MvlNetRandomConfig {
+  bool Enabled = false;
+  bool Auto = false;
+  std::uint32_t Frame = 0;
+  std::uint32_t Value = 0;
+};
+
 struct MvlConfig {
   bool DirectBootEnabled = false;
   bool DirectBootHostOnly = false;
@@ -222,6 +237,11 @@ struct MvlConfig {
   bool AutoRestartAfterResult = false;
   std::uint32_t AutoRestartDelayFrames = 120;
   std::uint32_t AutoRestartBootstrapFrame = 120;
+  MvlCameraInitHoldConfig CameraInitHold;
+  MvlNetRandomConfig NetRandom;
+  bool MatchSeedConfigured = false;
+  std::uint32_t MatchSeed = 0;
+  std::vector<std::uint32_t> MatchSeedSequence;
 };
 
 struct DiagnosticsConfig {
@@ -397,7 +417,6 @@ const char *EnvCString(const char *name, const char *fallback);
 int EnvInt(const char *name, int fallback);
 double EnvDouble(const char *name, double fallback);
 std::uint32_t EnvU32(const char *name, std::uint32_t fallback);
-std::vector<std::uint32_t> EnvU32List(const char *name);
 bool EnvHasValue(const char *name);
 
 } // namespace NsmbNetplayPoC::Config

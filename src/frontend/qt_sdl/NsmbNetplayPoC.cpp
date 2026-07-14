@@ -647,20 +647,8 @@ struct State
     unsigned long long RollbackResimCorrectionTotalUs = 0;
     unsigned long long RollbackResimCorrectionMaxUs = 0;
     melonDS::u32 LastRollbackTraceFrame = kNoFrameLimit;
-    bool ClearMvlCameraInitHoldEnabled = false;
-    bool ClearMvlCameraInitHoldHostOnly = false;
-    bool ClearMvlCameraInitHoldClientOnly = false;
-    melonDS::u32 ClearMvlCameraInitHoldStartFrame = 840;
-    melonDS::u32 ClearMvlCameraInitHoldEndFrame = 0;
     bool ClearMvlCameraInitHoldApplied[16] {};
-    bool NetRandomPatchEnabled = false;
-    bool NetRandomPatchAuto = false;
-    melonDS::u32 NetRandomPatchFrame = 0;
-    melonDS::u32 NetRandomPatchValue = 0;
     bool NetRandomPatchApplied[16] {};
-    bool MatchSeedConfigured = false;
-    melonDS::u32 MatchSeed = 0;
-    std::vector<melonDS::u32> MatchSeedSequence;
     bool NetplayAnyLockstepStarted = false;
     bool NetplayLockstepStarted[16] {};
     NsmbNetplayTransport::Transport Transport;
@@ -1050,8 +1038,8 @@ int MvlStageForGame(int instanceID)
     const int index = GameIndexForInstance(instanceID);
     if (!G.Mvl.StageSequence.empty())
         return G.Mvl.StageSequence[std::min(index, static_cast<int>(G.Mvl.StageSequence.size()) - 1)];
-    if (G.Mvl.CourseMode == "random" && G.MatchSeedConfigured)
-        return static_cast<int>((G.MatchSeed + static_cast<melonDS::u32>(index)) % 5u);
+    if (G.Mvl.CourseMode == "random" && G.Mvl.MatchSeedConfigured)
+        return static_cast<int>((G.Mvl.MatchSeed + static_cast<melonDS::u32>(index)) % 5u);
     return std::clamp(G.MvlCurrentStage, 0, 4);
 }
 
@@ -1067,9 +1055,9 @@ void RefreshMvlGameSelectionForInstance(int instanceID)
 melonDS::u32 MatchSeedForGame(int instanceID)
 {
     const int index = GameIndexForInstance(instanceID);
-    if (!G.MatchSeedSequence.empty())
-        return G.MatchSeedSequence[std::min(index, static_cast<int>(G.MatchSeedSequence.size()) - 1)];
-    return G.MatchSeed + static_cast<melonDS::u32>(index);
+    if (!G.Mvl.MatchSeedSequence.empty())
+        return G.Mvl.MatchSeedSequence[std::min(index, static_cast<int>(G.Mvl.MatchSeedSequence.size()) - 1)];
+    return G.Mvl.MatchSeed + static_cast<melonDS::u32>(index);
 }
 
 melonDS::u32 MvlRestartPacketCutoffFrame()
@@ -1145,8 +1133,8 @@ void RebaseMvlAutoRestartStartupFrames(int instanceID, melonDS::u32 restartFrame
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.RuntimePatch.ScriptRemotePacketStartFrame);
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.RuntimePatch.ScriptRemotePacketEndFrame);
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.ClearMvlCameraInitHoldStartFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.ClearMvlCameraInitHoldEndFrame);
+    RebaseMvlAutoRestartStartupFrame(restartFrame, G.Mvl.CameraInitHold.StartFrame);
+    RebaseMvlAutoRestartStartupFrame(restartFrame, G.Mvl.CameraInitHold.EndFrame);
 
     G.MvlAutoRestartStartupFrameBase = restartFrame;
     std::printf(
@@ -1198,8 +1186,8 @@ void RebaseMvlAutoRestartStartupFramesFromCheckpoint(
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.RuntimePatch.ScriptRemotePacketStartFrame);
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.RuntimePatch.ScriptRemotePacketEndFrame);
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.ClearMvlCameraInitHoldStartFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.ClearMvlCameraInitHoldEndFrame);
+    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Mvl.CameraInitHold.StartFrame);
+    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Mvl.CameraInitHold.EndFrame);
 
     G.MvlAutoRestartStartupFrameBase = restoreFrame > checkpointFrame ? restoreFrame - checkpointFrame : restoreFrame;
     std::printf(
@@ -1904,14 +1892,14 @@ void HandleReceivedSessionLocked(const void* data, std::size_t size, melonDS::u3
 
     if (message.Kind == SessionProtocol::MessageKind::MatchSeed)
     {
-        G.MatchSeed = message.Value;
-        G.MatchSeedConfigured = true;
+        G.Mvl.MatchSeed = message.Value;
+        G.Mvl.MatchSeedConfigured = true;
         G.InputCond.notify_all();
         if (G.Harness.StateLoadDir.empty() && !G.PacketBridge.Only)
         {
-            G.NetRandomPatchValue = message.Value;
-            G.NetRandomPatchEnabled = true;
-            G.NetRandomPatchAuto = true;
+            G.Mvl.NetRandom.Value = message.Value;
+            G.Mvl.NetRandom.Enabled = true;
+            G.Mvl.NetRandom.Auto = true;
         }
         std::printf("NSMB PoC: received match seed 0x%08X\n", message.Value);
         return;
@@ -2373,18 +2361,18 @@ void StopNetworkPumpThread()
 void SendMatchSeedLocked()
 {
     if (!G.Transport.IsConnected() || G.NetRole != Role::Host
-        || !G.MatchSeedConfigured || G.Session.MatchSeedSent())
+        || !G.Mvl.MatchSeedConfigured || G.Session.MatchSeedSent())
         return;
 
     const std::vector<char> payload = SessionProtocol::Encode({
         SessionProtocol::MessageKind::MatchSeed,
-        G.MatchSeed,
+        G.Mvl.MatchSeed,
     });
     if (G.Transport.Send(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE, true)
         == NsmbNetplayTransport::SendUnavailable)
         return;
     G.Session.MarkMatchSeedSent();
-    std::printf("NSMB PoC: sent match seed 0x%08X\n", G.MatchSeed);
+    std::printf("NSMB PoC: sent match seed 0x%08X\n", G.Mvl.MatchSeed);
 }
 
 void SendNetplayStartReadyLocked(melonDS::u32 frame, bool force = false)
@@ -3930,7 +3918,7 @@ bool TryWaitForRollbackRemoteInputLocked(
 
 void WaitForMatchSeedIfNeeded()
 {
-    if (!G.Enabled || G.NetRole != Role::Client || G.MatchSeedConfigured)
+    if (!G.Enabled || G.NetRole != Role::Client || G.Mvl.MatchSeedConfigured)
         return;
 
     const auto start = std::chrono::steady_clock::now();
@@ -3939,7 +3927,7 @@ void WaitForMatchSeedIfNeeded()
         {
             std::lock_guard<std::mutex> lock(G.Mutex);
             PumpNetworkLocked();
-            if (G.MatchSeedConfigured)
+            if (G.Mvl.MatchSeedConfigured)
                 return;
         }
 
@@ -4604,7 +4592,7 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
         0,
         1);
     const int scene = std::clamp(G.Mvl.DirectBootScene, 0, 0xFFFF);
-    if (G.Mvl.CourseMode == "random" && !G.MatchSeedConfigured && G.Mvl.StageSequence.empty())
+    if (G.Mvl.CourseMode == "random" && !G.Mvl.MatchSeedConfigured && G.Mvl.StageSequence.empty())
         return false;
     const int stage = std::clamp(MvlStageForGame(instanceID), 0, 4);
     G.MvlCurrentStage = stage;
@@ -4800,9 +4788,9 @@ bool RestoreMvlAutoRestartBootstrapCheckpoint(int instanceID, melonDS::u32 frame
     InvalidateMainRAMJIT(nds, nds->MainRAMMask + 1);
     melonDS::Platform::MP_Begin(nds->UserData);
     G.NetRandomPatchApplied[instanceID] = false;
-    G.NetRandomPatchValue = requestedSeed;
-    G.NetRandomPatchEnabled = true;
-    G.NetRandomPatchAuto = true;
+    G.Mvl.NetRandom.Value = requestedSeed;
+    G.Mvl.NetRandom.Enabled = true;
+    G.Mvl.NetRandom.Auto = true;
     if (G.NetRole == Role::Host)
         WriteARM9U32(nds, kNetLocalAidAddr, 0);
     else if (G.NetRole == Role::Client)
@@ -4833,10 +4821,10 @@ bool ResetMvlAutoRestartConsoleForNextMatch(int instanceID, melonDS::u32 frame, 
     melonDS::Platform::MP_Begin(nds->UserData);
     ApplyMvlRuntimeConfigIfNeeded(nds);
     WriteNetAndGameRandomSeed(nds, requestedSeed);
-    G.NetRandomPatchEnabled = true;
-    G.NetRandomPatchAuto = true;
+    G.Mvl.NetRandom.Enabled = true;
+    G.Mvl.NetRandom.Auto = true;
     G.NetRandomPatchApplied[instanceID] = false;
-    G.NetRandomPatchValue = requestedSeed;
+    G.Mvl.NetRandom.Value = requestedSeed;
     std::printf(
         "NSMB MvL auto restart: hard reset console for next match inst=%d frame=%u seed=0x%08X\n",
         instanceID,
@@ -7415,19 +7403,19 @@ void ApplyPacketBridgeJitHelperPatchIfNeeded(int instanceID, melonDS::u32 frame,
 
 void ClearMvlCameraInitHoldIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (!G.ClearMvlCameraInitHoldEnabled || !nds || !nds->MainRAM)
+    if (!G.Mvl.CameraInitHold.Enabled || !nds || !nds->MainRAM)
         return;
     if (instanceID < 0 || instanceID >= 16)
         return;
     if (G.ClearMvlCameraInitHoldApplied[instanceID])
         return;
-    if (frame < G.ClearMvlCameraInitHoldStartFrame)
+    if (frame < G.Mvl.CameraInitHold.StartFrame)
         return;
-    if (G.ClearMvlCameraInitHoldEndFrame != 0 && frame > G.ClearMvlCameraInitHoldEndFrame)
+    if (G.Mvl.CameraInitHold.EndFrame != 0 && frame > G.Mvl.CameraInitHold.EndFrame)
         return;
-    if (G.ClearMvlCameraInitHoldHostOnly && G.NetRole != Role::Host)
+    if (G.Mvl.CameraInitHold.HostOnly && G.NetRole != Role::Host)
         return;
-    if (G.ClearMvlCameraInitHoldClientOnly && G.NetRole != Role::Client)
+    if (G.Mvl.CameraInitHold.ClientOnly && G.NetRole != Role::Client)
         return;
     if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
         return;
@@ -9059,14 +9047,14 @@ bool WriteNetAndGameRandomSeed(melonDS::NDS* nds, melonDS::u32 seed)
 
 void ApplyNetRandomPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (!nds || !nds->MainRAM || !G.NetRandomPatchEnabled) return;
+    if (!nds || !nds->MainRAM || !G.Mvl.NetRandom.Enabled) return;
     if (instanceID < 0 || instanceID >= 16) return;
     if (G.NetRandomPatchApplied[instanceID]) return;
 
-    bool shouldPatch = frame == G.NetRandomPatchFrame;
+    bool shouldPatch = frame == G.Mvl.NetRandom.Frame;
     melonDS::u8 randomCallCountBeforePatch = 0;
     melonDS::u8 gameRandomCallCountBeforePatch = 0;
-    if (G.NetRandomPatchAuto)
+    if (G.Mvl.NetRandom.Auto)
     {
         const melonDS::u32 ggid = nds->ARM9Read32(kNetGGIDAddr);
         randomCallCountBeforePatch = nds->ARM9Read8(kNetRandomCallCountAddr);
@@ -9075,9 +9063,9 @@ void ApplyNetRandomPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     }
     if (!shouldPatch) return;
 
-    const melonDS::u32 patchValue = (!G.MatchSeedSequence.empty() || G.Mvl.AutoRestartAfterResult)
+    const melonDS::u32 patchValue = (!G.Mvl.MatchSeedSequence.empty() || G.Mvl.AutoRestartAfterResult)
         ? MatchSeedForGame(instanceID)
-        : G.NetRandomPatchValue;
+        : G.Mvl.NetRandom.Value;
     if (!WriteNetAndGameRandomSeed(nds, patchValue)) return;
     G.NetRandomPatchApplied[instanceID] = true;
 
@@ -9085,7 +9073,7 @@ void ApplyNetRandomPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         instanceID,
         frame,
         patchValue,
-        G.NetRandomPatchAuto ? 1 : 0,
+        G.Mvl.NetRandom.Auto ? 1 : 0,
         randomCallCountBeforePatch,
         gameRandomCallCountBeforePatch);
 }
@@ -9887,39 +9875,6 @@ void InitFromEnvironment()
         }
     }
     G.Rollback = Config::LoadRollbackConfig();
-    G.ClearMvlCameraInitHoldEnabled = EnvFlag("MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD");
-    G.ClearMvlCameraInitHoldHostOnly = EnvFlag("MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_HOST_ONLY");
-    G.ClearMvlCameraInitHoldClientOnly = EnvFlag("MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_CLIENT_ONLY");
-    G.ClearMvlCameraInitHoldStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_START_FRAME", 840)));
-    G.ClearMvlCameraInitHoldEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_END_FRAME", 0)));
-
-    const char* netRandomValue = std::getenv("MELONDS_NSML_NET_RANDOM_VALUE");
-    if (netRandomValue && netRandomValue[0])
-    {
-        G.NetRandomPatchEnabled = true;
-        G.NetRandomPatchAuto = EnvFlag("MELONDS_NSML_NET_RANDOM_AUTO");
-        G.NetRandomPatchValue = static_cast<melonDS::u32>(std::strtoul(netRandomValue, nullptr, 0));
-        G.NetRandomPatchFrame = static_cast<melonDS::u32>(
-            std::max(0, EnvInt("MELONDS_NSML_NET_RANDOM_FRAME", 0)));
-        G.MatchSeed = G.NetRandomPatchValue;
-        G.MatchSeedConfigured = true;
-    }
-
-    const char* matchSeed = std::getenv("MELONDS_NSML_MATCH_SEED");
-    if (matchSeed && matchSeed[0])
-    {
-        G.MatchSeed = static_cast<melonDS::u32>(std::strtoul(matchSeed, nullptr, 0));
-        G.MatchSeedConfigured = true;
-    }
-    G.MatchSeedSequence = Config::EnvU32List("MELONDS_NSML_MATCH_SEED_SEQUENCE");
-    if (!G.MatchSeedSequence.empty())
-    {
-        G.MatchSeed = G.MatchSeedSequence.front();
-        G.MatchSeedConfigured = true;
-        G.NetRandomPatchValue = G.MatchSeed;
-    }
 
     if ((G.TestEnabled || G.Enabled) && !G.Diagnostics.GameStateTracePath.empty())
     {
@@ -10067,10 +10022,10 @@ void InitFromEnvironment()
             G.Harness.MemPatchFile.empty() ? "<none>" : G.Harness.MemPatchFile.c_str(),
             G.Harness.MemPatchFrameSet ? G.Harness.MemPatchFrame : 0,
             G.MemPatchRanges.size(),
-            G.NetRandomPatchEnabled ? 1 : 0,
-            G.NetRandomPatchAuto ? 1 : 0,
-            G.NetRandomPatchFrame,
-            G.NetRandomPatchValue,
+            G.Mvl.NetRandom.Enabled ? 1 : 0,
+            G.Mvl.NetRandom.Auto ? 1 : 0,
+            G.Mvl.NetRandom.Frame,
+            G.Mvl.NetRandom.Value,
             G.Harness.StateSaveDir.empty() ? "<none>" : G.Harness.StateSaveDir.c_str(),
             G.Harness.StateSaveFrame,
             G.Harness.StateLoadDir.empty() ? "<none>" : G.Harness.StateLoadDir.c_str(),
@@ -10121,19 +10076,19 @@ void InitFromEnvironment()
     if (!G.Enabled) return;
 
 
-    if (G.NetRole == Role::Host && !G.MatchSeedConfigured)
+    if (G.NetRole == Role::Host && !G.Mvl.MatchSeedConfigured)
     {
-        G.MatchSeed = GenerateMatchSeed();
-        G.MatchSeedConfigured = true;
+        G.Mvl.MatchSeed = GenerateMatchSeed();
+        G.Mvl.MatchSeedConfigured = true;
     }
 
-    if (G.MatchSeedConfigured
+    if (G.Mvl.MatchSeedConfigured
         && G.Harness.StateLoadDir.empty()
         && !G.PacketBridge.Only)
     {
-        G.NetRandomPatchEnabled = true;
-        G.NetRandomPatchAuto = true;
-        G.NetRandomPatchValue = G.MatchSeed;
+        G.Mvl.NetRandom.Enabled = true;
+        G.Mvl.NetRandom.Auto = true;
+        G.Mvl.NetRandom.Value = G.Mvl.MatchSeed;
     }
 
     const NsmbNetplayTransport::InitializeResult transportResult = G.Transport.Initialize({
@@ -10223,8 +10178,8 @@ void InitFromEnvironment()
         G.Rollback.RestoreProbe ? 1 : 0,
         G.Rollback.PredictionProbeModulo,
         G.Rollback.PredictionProbeLimit,
-        G.MatchSeed,
-        G.MatchSeedConfigured ? 1 : 0,
+        G.Mvl.MatchSeed,
+        G.Mvl.MatchSeedConfigured ? 1 : 0,
         G.Mvl.DirectBootEnabled ? 1 : 0,
         G.Mvl.DirectBootFrame,
         G.Mvl.DirectBootScene,
