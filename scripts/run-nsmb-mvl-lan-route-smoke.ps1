@@ -214,19 +214,6 @@ param(
     [int]$PacketBridgeMaxFrameLead = -1,
     [int]$PacketBridgeThrottleTimeoutMs = 5000,
     [int]$PacketBridgeThrottleStartFrame = 0,
-    [switch]$ForcePlayerCount,
-    [switch]$ForcePlayerCountHostOnly,
-    [switch]$ForcePlayerCountClientOnly,
-    [int]$ForcePlayerCountStartFrame = 0,
-    [int]$ForcePlayerCountEndFrame = 0,
-    [int]$ForcePlayerCountValue = 2,
-    [switch]$ForceStageSceneRuntimeWords,
-    [switch]$ForceStageSceneRuntimeWordsHostOnly,
-    [switch]$ForceStageSceneRuntimeWordsClientOnly,
-    [int]$ForceStageSceneRuntimeWordsStartFrame = 0,
-    [int]$ForceStageSceneRuntimeWordsEndFrame = 0,
-    [string]$ForceStageSceneWord154 = "1",
-    [string]$ForceStageSceneWord160 = "0xDA",
     [switch]$ForceStageCameraSlot,
     [switch]$ForceStageCameraSlotVerticalOnly,
     [int]$ForceStageCameraSlotStartFrame = 0,
@@ -247,11 +234,6 @@ param(
     [int]$ForceStageFXSettingsStartFrame = 0,
     [int]$ForceStageFXSettingsEndFrame = 0,
     [string]$ForceStageFXSettingsValue = "0x8000",
-    [switch]$ForceStageSceneActive,
-    [switch]$ForceStageSceneActiveHostOnly,
-    [switch]$ForceStageSceneActiveClientOnly,
-    [int]$ForceStageSceneActiveStartFrame = 0,
-    [int]$ForceStageSceneActiveEndFrame = 0,
     [switch]$ForceStageActorFreezeFlag,
     [switch]$ForceStageActorFreezeFlagHostOnly,
     [switch]$ForceStageActorFreezeFlagClientOnly,
@@ -319,22 +301,6 @@ param(
     [int]$TraceStageCameraStartFrame = 0,
     [int]$TraceStageCameraEndFrame = 0,
     [int]$TraceStageCameraInterval = 1,
-    [switch]$ForcePlayerSignalUnlock,
-    [switch]$ForcePlayerSignalUnlockHostOnly,
-    [switch]$ForcePlayerSignalUnlockClientOnly,
-    [int]$ForcePlayerSignalUnlockStartFrame = 0,
-    [int]$ForcePlayerSignalUnlockEndFrame = 0,
-    [switch]$ForceStageSceneStartGate,
-    [switch]$ForceStageSceneStartGateHostOnly,
-    [switch]$ForceStageSceneStartGateClientOnly,
-    [switch]$ForceStageSceneFadeReady,
-    [switch]$ForceStageSceneInputLatch,
-    [int]$ForceNetLocalAid = -1,
-    [int]$ForceNetLocalAidStartFrame = 0,
-    [int]$ForceNetLocalAidEndFrame = 0,
-    [int]$ForceWifiCommunicatingCount = -1,
-    [int]$ForceWifiCommunicatingStartFrame = 0,
-    [int]$ForceWifiCommunicatingEndFrame = 0,
     [switch]$PacketBridgeArmOnly,
     [switch]$ScriptRemotePacket,
     [int]$ScriptRemotePacketPlayer = -1,
@@ -344,41 +310,6 @@ param(
     [int]$ScriptRemotePacketEndFrame = 0,
     [switch]$PacketBridgeJitHelperPatch,
     [int]$PacketBridgeJitHelperPatchFrame = 0,
-    [int]$ForceStageSceneStartGateStartFrame = 0,
-    [int]$ForceStageSceneStartGateEndFrame = 0,
-    [string]$ForceStageSceneStartGateValue = "1",
-    [switch]$ForceStageSceneContinueGate,
-    [switch]$ForceStageSceneContinueGateHostOnly,
-    [switch]$ForceStageSceneContinueGateClientOnly,
-    [int]$ForceStageSceneContinueGateStartFrame = 0,
-    [int]$ForceStageSceneContinueGateEndFrame = 0,
-    [string]$ForceStageSceneContinueGateValue = "1",
-    [switch]$ForceStageSceneState3Gate,
-    [switch]$ForceStageSceneState3GateHostOnly,
-    [switch]$ForceStageSceneState3GateClientOnly,
-    [int]$ForceStageSceneState3GateStartFrame = 0,
-    [int]$ForceStageSceneState3GateEndFrame = 0,
-    [string]$ForceStageSceneState3GateValue = "1",
-    [switch]$ForceStageSceneEventFlags,
-    [switch]$ForceStageSceneEventFlagsHostOnly,
-    [switch]$ForceStageSceneEventFlagsClientOnly,
-    [int]$ForceStageSceneEventFlagsStartFrame = 0,
-    [int]$ForceStageSceneEventFlagsEndFrame = 0,
-    [string]$ForceStageSceneEventFlagsValue = "0",
-    [switch]$ForceMvlPlayerReady,
-    [switch]$ForceMvlPlayerReadyHostOnly,
-    [switch]$ForceMvlPlayerReadyClientOnly,
-    [int]$ForceMvlPlayerReadyStartFrame = 0,
-    [int]$ForceMvlPlayerReadyEndFrame = 0,
-    [string]$ForceMvlPlayerReadyValue = "0xFF00",
-    [switch]$ForceMvlPlayerReadySetA8EC,
-    [string]$ForceMvlPlayerReadyA8ECValue = "0xFF",
-    [switch]$ForceMvlRuntimeState,
-    [switch]$ForceMvlRuntimeStateHostOnly,
-    [switch]$ForceMvlRuntimeStateClientOnly,
-    [int]$ForceMvlRuntimeStateStartFrame = 0,
-    [int]$ForceMvlRuntimeStateEndFrame = 0,
-    [string]$ForceMvlRuntimeStateValue = "3",
     [switch]$ClearMvlCameraInitHold,
     [switch]$ClearMvlCameraInitHoldHostOnly,
     [switch]$ClearMvlCameraInitHoldClientOnly,
@@ -1238,38 +1169,6 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_NET_RANDOM_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_NET_RANDOM_AUTO -ErrorAction SilentlyContinue
     }
-    if ($ForcePlayerCount) {
-        $env:MELONDS_NSML_FORCE_PLAYER_COUNT = "1"
-        if ($ForcePlayerCountHostOnly) { $env:MELONDS_NSML_FORCE_PLAYER_COUNT_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COUNT_HOST_ONLY -ErrorAction SilentlyContinue }
-        if ($ForcePlayerCountClientOnly) { $env:MELONDS_NSML_FORCE_PLAYER_COUNT_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COUNT_CLIENT_ONLY -ErrorAction SilentlyContinue }
-        $env:MELONDS_NSML_FORCE_PLAYER_COUNT_START_FRAME = "$ForcePlayerCountStartFrame"
-        $env:MELONDS_NSML_FORCE_PLAYER_COUNT_END_FRAME = "$ForcePlayerCountEndFrame"
-        $env:MELONDS_NSML_FORCE_PLAYER_COUNT_VALUE = "$ForcePlayerCountValue"
-    } else {
-        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COUNT -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COUNT_HOST_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COUNT_CLIENT_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COUNT_START_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COUNT_END_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COUNT_VALUE -ErrorAction SilentlyContinue
-    }
-    if ($ForceStageSceneRuntimeWords) {
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS = "1"
-        if ($ForceStageSceneRuntimeWordsHostOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_HOST_ONLY -ErrorAction SilentlyContinue }
-        if ($ForceStageSceneRuntimeWordsClientOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_CLIENT_ONLY -ErrorAction SilentlyContinue }
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_START_FRAME = "$ForceStageSceneRuntimeWordsStartFrame"
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_END_FRAME = "$ForceStageSceneRuntimeWordsEndFrame"
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_WORD154 = "$ForceStageSceneWord154"
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_WORD160 = "$ForceStageSceneWord160"
-    } else {
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_HOST_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_CLIENT_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_START_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_END_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_WORD154 -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_WORD160 -ErrorAction SilentlyContinue
-    }
     if ($ForceStageCameraSlot) {
         $env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT = "1"
         $env:MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_START_FRAME = "$ForceStageCameraSlotStartFrame"
@@ -1326,19 +1225,6 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_DYNAMIC_CAMERA_BASE_STEP -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_DYNAMIC_CAMERA_MAX_STEP -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_DYNAMIC_CAMERA_VELOCITY_THRESHOLD -ErrorAction SilentlyContinue
-    }
-    if ($ForceStageSceneActive) {
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE = "1"
-        if ($ForceStageSceneActiveHostOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_HOST_ONLY -ErrorAction SilentlyContinue }
-        if ($ForceStageSceneActiveClientOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_CLIENT_ONLY -ErrorAction SilentlyContinue }
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_START_FRAME = "$ForceStageSceneActiveStartFrame"
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_END_FRAME = "$ForceStageSceneActiveEndFrame"
-    } else {
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_HOST_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_CLIENT_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_START_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_END_FRAME -ErrorAction SilentlyContinue
     }
     if ($ForceStageActorFreezeFlag) {
         $env:MELONDS_NSML_FORCE_STAGE_ACTOR_FREEZE_FLAG = "1"
@@ -1508,129 +1394,35 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_TRACE_STAGE_CAMERA_END_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_TRACE_STAGE_CAMERA_INTERVAL -ErrorAction SilentlyContinue
     }
-    if ($ForcePlayerSignalUnlock) {
-        $env:MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK = "1"
-        if ($ForcePlayerSignalUnlockHostOnly) { $env:MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_HOST_ONLY -ErrorAction SilentlyContinue }
-        if ($ForcePlayerSignalUnlockClientOnly) { $env:MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_CLIENT_ONLY -ErrorAction SilentlyContinue }
-        $env:MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_START_FRAME = "$ForcePlayerSignalUnlockStartFrame"
-        $env:MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_END_FRAME = "$ForcePlayerSignalUnlockEndFrame"
+    if ($PacketBridgeArmOnly) {
+        $env:MELONDS_NSML_PACKET_BRIDGE_ARM_ONLY = "1"
+        if ($PacketBridgeTrace) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_TRACE = "1"
+            $env:MELONDS_NSML_PACKET_REPLAY_LOG = "$Stdout.packet-replay.csv"
+        }
     } else {
-        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_HOST_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_CLIENT_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_START_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ARM_ONLY -ErrorAction SilentlyContinue
     }
-    if ($ForceStageSceneStartGate) {
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE = "1"
-        if ($ForceStageSceneStartGateHostOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_HOST_ONLY -ErrorAction SilentlyContinue }
-        if ($ForceStageSceneStartGateClientOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_CLIENT_ONLY -ErrorAction SilentlyContinue }
-        if ($ForceStageSceneFadeReady) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_FADE_READY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_FADE_READY -ErrorAction SilentlyContinue }
-        if ($ForceStageSceneInputLatch) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_INPUT_LATCH = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_INPUT_LATCH -ErrorAction SilentlyContinue }
-        if ($ForceNetLocalAid -ge 0) {
-            $env:MELONDS_NSML_FORCE_NET_LOCAL_AID = "$ForceNetLocalAid"
-            $env:MELONDS_NSML_FORCE_NET_LOCAL_AID_START_FRAME = "$ForceNetLocalAidStartFrame"
-            $env:MELONDS_NSML_FORCE_NET_LOCAL_AID_END_FRAME = "$ForceNetLocalAidEndFrame"
+    if ($ScriptRemotePacket) {
+        $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET = "1"
+        $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_PLAYER = "$ScriptRemotePacketPlayer"
+        $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_INSTANCE = "$ScriptRemotePacketInputInstance"
+        if ($ScriptRemotePacketInputScript) {
+            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT = (Resolve-Path $ScriptRemotePacketInputScript).Path
+        } elseif ($Role -eq "host") {
+            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT = (Resolve-Path $clientInput).Path
         } else {
-            Remove-Item Env:\MELONDS_NSML_FORCE_NET_LOCAL_AID -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_FORCE_NET_LOCAL_AID_START_FRAME -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_FORCE_NET_LOCAL_AID_END_FRAME -ErrorAction SilentlyContinue
+            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT = (Resolve-Path $hostInput).Path
         }
-        if ($ForceWifiCommunicatingCount -ge 0) {
-            $env:MELONDS_NSML_FORCE_WIFI_COMMUNICATING_COUNT = "$ForceWifiCommunicatingCount"
-            $env:MELONDS_NSML_FORCE_WIFI_COMMUNICATING_START_FRAME = "$ForceWifiCommunicatingStartFrame"
-            $env:MELONDS_NSML_FORCE_WIFI_COMMUNICATING_END_FRAME = "$ForceWifiCommunicatingEndFrame"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_FORCE_WIFI_COMMUNICATING_COUNT -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_FORCE_WIFI_COMMUNICATING_START_FRAME -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_FORCE_WIFI_COMMUNICATING_END_FRAME -ErrorAction SilentlyContinue
-        }
-        if ($PacketBridgeArmOnly) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_ARM_ONLY = "1"
-            if ($PacketBridgeTrace) {
-                $env:MELONDS_NSML_PACKET_BRIDGE_TRACE = "1"
-                $env:MELONDS_NSML_PACKET_REPLAY_LOG = "$Stdout.packet-replay.csv"
-            }
-        } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ARM_ONLY -ErrorAction SilentlyContinue }
-        if ($ScriptRemotePacket) {
-            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET = "1"
-            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_PLAYER = "$ScriptRemotePacketPlayer"
-            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_INSTANCE = "$ScriptRemotePacketInputInstance"
-            if ($ScriptRemotePacketInputScript) {
-                $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT = (Resolve-Path $ScriptRemotePacketInputScript).Path
-            } elseif ($Role -eq "host") {
-                $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT = (Resolve-Path $clientInput).Path
-            } else {
-                $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT = (Resolve-Path $hostInput).Path
-            }
-            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_START_FRAME = "$ScriptRemotePacketStartFrame"
-            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_END_FRAME = "$ScriptRemotePacketEndFrame"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_PLAYER -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_INSTANCE -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_START_FRAME -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_END_FRAME -ErrorAction SilentlyContinue
-        }
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_START_FRAME = "$ForceStageSceneStartGateStartFrame"
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_END_FRAME = "$ForceStageSceneStartGateEndFrame"
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_VALUE = "$ForceStageSceneStartGateValue"
+        $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_START_FRAME = "$ScriptRemotePacketStartFrame"
+        $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_END_FRAME = "$ScriptRemotePacketEndFrame"
     } else {
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_HOST_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_CLIENT_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_FADE_READY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_INPUT_LATCH -ErrorAction SilentlyContinue
-        if ($ForceNetLocalAid -ge 0) {
-            $env:MELONDS_NSML_FORCE_NET_LOCAL_AID = "$ForceNetLocalAid"
-            $env:MELONDS_NSML_FORCE_NET_LOCAL_AID_START_FRAME = "$ForceNetLocalAidStartFrame"
-            $env:MELONDS_NSML_FORCE_NET_LOCAL_AID_END_FRAME = "$ForceNetLocalAidEndFrame"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_FORCE_NET_LOCAL_AID -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_FORCE_NET_LOCAL_AID_START_FRAME -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_FORCE_NET_LOCAL_AID_END_FRAME -ErrorAction SilentlyContinue
-        }
-        if ($ForceWifiCommunicatingCount -ge 0) {
-            $env:MELONDS_NSML_FORCE_WIFI_COMMUNICATING_COUNT = "$ForceWifiCommunicatingCount"
-            $env:MELONDS_NSML_FORCE_WIFI_COMMUNICATING_START_FRAME = "$ForceWifiCommunicatingStartFrame"
-            $env:MELONDS_NSML_FORCE_WIFI_COMMUNICATING_END_FRAME = "$ForceWifiCommunicatingEndFrame"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_FORCE_WIFI_COMMUNICATING_COUNT -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_FORCE_WIFI_COMMUNICATING_START_FRAME -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_FORCE_WIFI_COMMUNICATING_END_FRAME -ErrorAction SilentlyContinue
-        }
-        if ($PacketBridgeArmOnly) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_ARM_ONLY = "1"
-            if ($PacketBridgeTrace) {
-                $env:MELONDS_NSML_PACKET_BRIDGE_TRACE = "1"
-                $env:MELONDS_NSML_PACKET_REPLAY_LOG = "$Stdout.packet-replay.csv"
-            }
-        } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ARM_ONLY -ErrorAction SilentlyContinue }
-        if ($ScriptRemotePacket) {
-            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET = "1"
-            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_PLAYER = "$ScriptRemotePacketPlayer"
-            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_INSTANCE = "$ScriptRemotePacketInputInstance"
-            if ($ScriptRemotePacketInputScript) {
-                $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT = (Resolve-Path $ScriptRemotePacketInputScript).Path
-            } elseif ($Role -eq "host") {
-                $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT = (Resolve-Path $clientInput).Path
-            } else {
-                $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT = (Resolve-Path $hostInput).Path
-            }
-            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_START_FRAME = "$ScriptRemotePacketStartFrame"
-            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_END_FRAME = "$ScriptRemotePacketEndFrame"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_PLAYER -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_INSTANCE -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_START_FRAME -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_END_FRAME -ErrorAction SilentlyContinue
-        }
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_START_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_END_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_VALUE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_PLAYER -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_INSTANCE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_END_FRAME -ErrorAction SilentlyContinue
     }
     if ($PacketBridgeJitHelperPatch) {
         $env:MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH = "1"
@@ -1638,85 +1430,6 @@ function Start-MelonLANProcess {
     } else {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH_FRAME -ErrorAction SilentlyContinue
-    }
-    if ($ForceStageSceneContinueGate) {
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE = "1"
-        if ($ForceStageSceneContinueGateHostOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_HOST_ONLY -ErrorAction SilentlyContinue }
-        if ($ForceStageSceneContinueGateClientOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_CLIENT_ONLY -ErrorAction SilentlyContinue }
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_START_FRAME = "$ForceStageSceneContinueGateStartFrame"
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_END_FRAME = "$ForceStageSceneContinueGateEndFrame"
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_VALUE = "$ForceStageSceneContinueGateValue"
-    } else {
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_HOST_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_CLIENT_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_START_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_END_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_VALUE -ErrorAction SilentlyContinue
-    }
-    if ($ForceStageSceneState3Gate) {
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE = "1"
-        if ($ForceStageSceneState3GateHostOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_HOST_ONLY -ErrorAction SilentlyContinue }
-        if ($ForceStageSceneState3GateClientOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_CLIENT_ONLY -ErrorAction SilentlyContinue }
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_START_FRAME = "$ForceStageSceneState3GateStartFrame"
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_END_FRAME = "$ForceStageSceneState3GateEndFrame"
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_VALUE = "$ForceStageSceneState3GateValue"
-    } else {
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_HOST_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_CLIENT_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_START_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_END_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_VALUE -ErrorAction SilentlyContinue
-    }
-    if ($ForceStageSceneEventFlags) {
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS = "1"
-        if ($ForceStageSceneEventFlagsHostOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_HOST_ONLY -ErrorAction SilentlyContinue }
-        if ($ForceStageSceneEventFlagsClientOnly) { $env:MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_CLIENT_ONLY -ErrorAction SilentlyContinue }
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_START_FRAME = "$ForceStageSceneEventFlagsStartFrame"
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_END_FRAME = "$ForceStageSceneEventFlagsEndFrame"
-        $env:MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_VALUE = "$ForceStageSceneEventFlagsValue"
-    } else {
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_HOST_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_CLIENT_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_START_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_END_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_VALUE -ErrorAction SilentlyContinue
-    }
-    if ($ForceMvlPlayerReady) {
-        $env:MELONDS_NSML_FORCE_MVL_PLAYER_READY = "1"
-        if ($ForceMvlPlayerReadyHostOnly) { $env:MELONDS_NSML_FORCE_MVL_PLAYER_READY_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY_HOST_ONLY -ErrorAction SilentlyContinue }
-        if ($ForceMvlPlayerReadyClientOnly) { $env:MELONDS_NSML_FORCE_MVL_PLAYER_READY_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY_CLIENT_ONLY -ErrorAction SilentlyContinue }
-        $env:MELONDS_NSML_FORCE_MVL_PLAYER_READY_START_FRAME = "$ForceMvlPlayerReadyStartFrame"
-        $env:MELONDS_NSML_FORCE_MVL_PLAYER_READY_END_FRAME = "$ForceMvlPlayerReadyEndFrame"
-        $env:MELONDS_NSML_FORCE_MVL_PLAYER_READY_VALUE = "$ForceMvlPlayerReadyValue"
-        if ($ForceMvlPlayerReadySetA8EC) { $env:MELONDS_NSML_FORCE_MVL_PLAYER_READY_SET_A8EC = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY_SET_A8EC -ErrorAction SilentlyContinue }
-        $env:MELONDS_NSML_FORCE_MVL_PLAYER_READY_A8EC_VALUE = "$ForceMvlPlayerReadyA8ECValue"
-    } else {
-        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY_HOST_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY_CLIENT_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY_START_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY_END_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY_VALUE -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY_SET_A8EC -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_PLAYER_READY_A8EC_VALUE -ErrorAction SilentlyContinue
-    }
-    if ($ForceMvlRuntimeState) {
-        $env:MELONDS_NSML_FORCE_MVL_RUNTIME_STATE = "1"
-        if ($ForceMvlRuntimeStateHostOnly) { $env:MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_HOST_ONLY -ErrorAction SilentlyContinue }
-        if ($ForceMvlRuntimeStateClientOnly) { $env:MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_CLIENT_ONLY -ErrorAction SilentlyContinue }
-        $env:MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_START_FRAME = "$ForceMvlRuntimeStateStartFrame"
-        $env:MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_END_FRAME = "$ForceMvlRuntimeStateEndFrame"
-        $env:MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_VALUE = "$ForceMvlRuntimeStateValue"
-    } else {
-        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_RUNTIME_STATE -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_HOST_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_CLIENT_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_START_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_END_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_VALUE -ErrorAction SilentlyContinue
     }
     if ($ClearMvlCameraInitHold) {
         $env:MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD = "1"

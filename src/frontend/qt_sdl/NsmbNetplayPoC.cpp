@@ -154,8 +154,6 @@ constexpr melonDS::u32 kGameVsModeAddr = 0x02085A84;
 constexpr melonDS::u32 kGameWrapXAddr = 0x02085AA4;
 constexpr melonDS::u32 kNetStateBaseAddr = 0x020887E8;
 constexpr melonDS::u32 kNetLocalAidAddr = 0x020887F0;
-constexpr melonDS::u32 kWifiCommunicatingConsoleCountAddr = 0x02085200;
-constexpr melonDS::u32 kWifiCommunicatingConsolesAddr = 0x0208B848;
 constexpr melonDS::u32 kNetState14Addr = 0x020887FC; // Net::connectionState
 constexpr melonDS::u32 kNetState1CAddr = 0x02088804; // Net::connectedConsoleCount
 constexpr melonDS::u32 kNetState20Addr = 0x02088808;
@@ -906,27 +904,6 @@ struct State
     melonDS::u32 PlayerStickToStarStartFrame = 0;
     melonDS::u32 PlayerStickToStarEndFrame = 0;
     int PlayerStickToStarSlot = 0;
-    bool ForcePlayerCountEnabled = false;
-    bool ForcePlayerCountHostOnly = false;
-    bool ForcePlayerCountClientOnly = false;
-    melonDS::u32 ForcePlayerCountStartFrame = 0;
-    melonDS::u32 ForcePlayerCountEndFrame = 0;
-    melonDS::u32 ForcePlayerCountValue = 2;
-    bool ForcePlayerCountLogged[16] {};
-    bool ForceStageSceneRuntimeWordsEnabled = false;
-    bool ForceStageSceneRuntimeWordsHostOnly = false;
-    bool ForceStageSceneRuntimeWordsClientOnly = false;
-    melonDS::u32 ForceStageSceneRuntimeWordsStartFrame = 0;
-    melonDS::u32 ForceStageSceneRuntimeWordsEndFrame = 0;
-    melonDS::u32 ForceStageSceneWord154 = 1;
-    melonDS::u32 ForceStageSceneWord160 = 0xDA;
-    bool ForceStageSceneRuntimeWordsLogged[16] {};
-    bool ForceStageSceneActiveEnabled = false;
-    bool ForceStageSceneActiveHostOnly = false;
-    bool ForceStageSceneActiveClientOnly = false;
-    melonDS::u32 ForceStageSceneActiveStartFrame = 0;
-    melonDS::u32 ForceStageSceneActiveEndFrame = 0;
-    bool ForceStageSceneActiveLogged[16] {};
     bool ForceStageCameraSlotEnabled = false;
     bool ForceStageCameraSlotVerticalOnly = false;
     melonDS::u32 ForceStageCameraSlotStartFrame = 0;
@@ -995,25 +972,6 @@ struct State
     bool TracePlayerLifeChanges = false;
     bool LastPlayerLifeSampleValid[16] {};
     GameStateSample LastPlayerLifeSample[16] {};
-    bool ForcePlayerSignalUnlockEnabled = false;
-    bool ForcePlayerSignalUnlockHostOnly = false;
-    bool ForcePlayerSignalUnlockClientOnly = false;
-    melonDS::u32 ForcePlayerSignalUnlockStartFrame = 0;
-    melonDS::u32 ForcePlayerSignalUnlockEndFrame = 0;
-    bool ForcePlayerSignalUnlockLogged[16] {};
-    bool ForceStageSceneStartGateEnabled = false;
-    bool ForceStageSceneStartGateHostOnly = false;
-    bool ForceStageSceneStartGateClientOnly = false;
-    bool ForceStageSceneFadeReady = false;
-    bool ForceStageSceneInputLatchEnabled = false;
-    int ForceNetLocalAid = -1;
-    melonDS::u32 ForceNetLocalAidStartFrame = 0;
-    melonDS::u32 ForceNetLocalAidEndFrame = 0;
-    bool ForceNetLocalAidLogged[16] {};
-    int ForceWifiCommunicatingCount = -1;
-    melonDS::u32 ForceWifiCommunicatingStartFrame = 0;
-    melonDS::u32 ForceWifiCommunicatingEndFrame = 0;
-    bool ForceWifiCommunicatingLogged[16] {};
     bool ScriptRemotePacketEnabled = false;
     int ScriptRemotePacketPlayer = -1;
     int ScriptRemotePacketInputInstance = -1;
@@ -1106,48 +1064,6 @@ struct State
     unsigned long long RollbackResimCorrectionTotalUs = 0;
     unsigned long long RollbackResimCorrectionMaxUs = 0;
     melonDS::u32 LastRollbackTraceFrame = kNoFrameLimit;
-    melonDS::u32 ForceStageSceneStartGateStartFrame = 0;
-    melonDS::u32 ForceStageSceneStartGateEndFrame = 0;
-    melonDS::u32 ForceStageSceneStartGateValue = 1;
-    bool ForceStageSceneStartGateLogged[16] {};
-    bool ForceStageSceneContinueGateEnabled = false;
-    bool ForceStageSceneContinueGateHostOnly = false;
-    bool ForceStageSceneContinueGateClientOnly = false;
-    melonDS::u32 ForceStageSceneContinueGateStartFrame = 0;
-    melonDS::u32 ForceStageSceneContinueGateEndFrame = 0;
-    melonDS::u32 ForceStageSceneContinueGateValue = 1;
-    bool ForceStageSceneContinueGateLogged[16] {};
-    bool ForceStageSceneState3GateEnabled = false;
-    bool ForceStageSceneState3GateHostOnly = false;
-    bool ForceStageSceneState3GateClientOnly = false;
-    melonDS::u32 ForceStageSceneState3GateStartFrame = 0;
-    melonDS::u32 ForceStageSceneState3GateEndFrame = 0;
-    melonDS::u32 ForceStageSceneState3GateValue = 1;
-    bool ForceStageSceneState3GateLogged[16] {};
-    bool ForceStageSceneEventFlagsEnabled = false;
-    bool ForceStageSceneEventFlagsHostOnly = false;
-    bool ForceStageSceneEventFlagsClientOnly = false;
-    melonDS::u32 ForceStageSceneEventFlagsStartFrame = 0;
-    melonDS::u32 ForceStageSceneEventFlagsEndFrame = 0;
-    melonDS::u32 ForceStageSceneEventFlagsValue = 0;
-    bool ForceStageSceneEventFlagsLogged[16] {};
-    bool ForceMvlPlayerReadyEnabled = false;
-    bool ForceMvlPlayerReadyHostOnly = false;
-    bool ForceMvlPlayerReadyClientOnly = false;
-    melonDS::u32 ForceMvlPlayerReadyStartFrame = 0;
-    melonDS::u32 ForceMvlPlayerReadyEndFrame = 0;
-    melonDS::u32 ForceMvlPlayerReadyValue = 0xFF00;
-    bool ForceMvlPlayerReadySetA8EC = false;
-    melonDS::u32 ForceMvlPlayerReadyA8ECValue = 0xFF;
-    bool ForceMvlPlayerReadyLogged[16] {};
-    bool ForceMvlPlayerReadyMissingLogged[16] {};
-    bool ForceMvlRuntimeStateEnabled = false;
-    bool ForceMvlRuntimeStateHostOnly = false;
-    bool ForceMvlRuntimeStateClientOnly = false;
-    melonDS::u32 ForceMvlRuntimeStateStartFrame = 0;
-    melonDS::u32 ForceMvlRuntimeStateEndFrame = 0;
-    melonDS::u32 ForceMvlRuntimeStateValue = 3;
-    bool ForceMvlRuntimeStateLogged[16] {};
     bool ClearMvlCameraInitHoldEnabled = false;
     bool ClearMvlCameraInitHoldHostOnly = false;
     bool ClearMvlCameraInitHoldClientOnly = false;
@@ -1788,10 +1704,6 @@ void RebaseMvlAutoRestartStartupFrames(int instanceID, melonDS::u32 restartFrame
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.InputSendDelayStartFrame);
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.InputSendDelayEndFrame);
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.DirectMvlBootFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.ForceNetLocalAidStartFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.ForceNetLocalAidEndFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.ForceWifiCommunicatingStartFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.ForceWifiCommunicatingEndFrame);
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.ScriptRemotePacketStartFrame);
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.ScriptRemotePacketEndFrame);
     RebaseMvlAutoRestartStartupFrame(restartFrame, G.PacketBridgeJitHelperPatchFrame);
@@ -1845,10 +1757,6 @@ void RebaseMvlAutoRestartStartupFramesFromCheckpoint(
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.InputSendDelayStartFrame);
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.InputSendDelayEndFrame);
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.DirectMvlBootFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.ForceNetLocalAidStartFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.ForceNetLocalAidEndFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.ForceWifiCommunicatingStartFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.ForceWifiCommunicatingEndFrame);
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.ScriptRemotePacketStartFrame);
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.ScriptRemotePacketEndFrame);
     RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridgeJitHelperPatchFrame);
@@ -1876,8 +1784,6 @@ void ResetMvlAutoRestartStartupHookState(int instanceID)
     G.PacketBridgeJitHelperPatchApplied[instanceID] = false;
     G.PacketBridgeJitHelperPatchResumeFrame[instanceID] = 0;
     G.LastPacketBridgeForcedTickFrame[instanceID] = 0;
-    G.ForceNetLocalAidLogged[instanceID] = false;
-    G.ForceWifiCommunicatingLogged[instanceID] = false;
     G.ScriptRemotePacketLogged[instanceID] = false;
     G.ClearMvlCameraInitHoldApplied[instanceID] = false;
     G.LocalNetplayStartReadyFrame = kNoFrameLimit;
@@ -8496,126 +8402,6 @@ void ApplyPlayerStickToStar(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
     }
 }
 
-void ForcePlayerCountIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.ForcePlayerCountEnabled || !nds)
-        return;
-    if (frame < G.ForcePlayerCountStartFrame)
-        return;
-    if (G.ForcePlayerCountEndFrame != 0 && frame > G.ForcePlayerCountEndFrame)
-        return;
-    if (G.ForcePlayerCountHostOnly && G.NetRole != Role::Host)
-        return;
-    if (G.ForcePlayerCountClientOnly && G.NetRole != Role::Client)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-
-    nds->ARM9Write32(kGamePlayerCountAddr, G.ForcePlayerCountValue);
-    if (!G.ForcePlayerCountLogged[instanceID])
-    {
-        std::printf("NSMB Test: force playerCount inst=%d frame=%u value=%u range=%u-%u\n",
-            instanceID,
-            frame,
-            G.ForcePlayerCountValue,
-            G.ForcePlayerCountStartFrame,
-            G.ForcePlayerCountEndFrame);
-        G.ForcePlayerCountLogged[instanceID] = true;
-    }
-}
-
-void ForceStageSceneRuntimeWordsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.ForceStageSceneRuntimeWordsEnabled || !nds || !nds->MainRAM)
-        return;
-    if (frame < G.ForceStageSceneRuntimeWordsStartFrame)
-        return;
-    if (G.ForceStageSceneRuntimeWordsEndFrame != 0 && frame > G.ForceStageSceneRuntimeWordsEndFrame)
-        return;
-    if (G.ForceStageSceneRuntimeWordsHostOnly && G.NetRole != Role::Host)
-        return;
-    if (G.ForceStageSceneRuntimeWordsClientOnly && G.NetRole != Role::Client)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-
-    const bool wrote154 = WriteObjectWordByIDAndSettings(
-        nds,
-        kStageSceneObjectID,
-        G.MvlStageSceneSettings,
-        0x154,
-        G.ForceStageSceneWord154);
-    const bool wrote160 = WriteObjectWordByIDAndSettings(
-        nds,
-        kStageSceneObjectID,
-        G.MvlStageSceneSettings,
-        0x160,
-        G.ForceStageSceneWord160);
-    if (!G.ForceStageSceneRuntimeWordsLogged[instanceID])
-    {
-        std::printf("NSMB Test: force stage scene runtime words inst=%d frame=%u range=%u-%u word154=0x%08X word160=0x%08X wrote=%d/%d\n",
-            instanceID,
-            frame,
-            G.ForceStageSceneRuntimeWordsStartFrame,
-            G.ForceStageSceneRuntimeWordsEndFrame,
-            G.ForceStageSceneWord154,
-            G.ForceStageSceneWord160,
-            wrote154 ? 1 : 0,
-            wrote160 ? 1 : 0);
-        G.ForceStageSceneRuntimeWordsLogged[instanceID] = true;
-    }
-}
-
-void ForceStageSceneActiveIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.ForceStageSceneActiveEnabled || !nds || !nds->MainRAM)
-        return;
-    if (frame < G.ForceStageSceneActiveStartFrame)
-        return;
-    if (G.ForceStageSceneActiveEndFrame != 0 && frame > G.ForceStageSceneActiveEndFrame)
-        return;
-    if (G.ForceStageSceneActiveHostOnly && G.NetRole != Role::Host)
-        return;
-    if (G.ForceStageSceneActiveClientOnly && G.NetRole != Role::Client)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
-        return;
-
-    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, G.MvlStageSceneSettings);
-    if (!stageScene.Found || !IsARM9MainRAMAddress(stageScene.Base))
-    {
-        if (!G.ForceStageSceneActiveLogged[instanceID])
-        {
-            std::printf("NSMB Test: force stage scene active skipped inst=%d frame=%u no stage scene\n",
-                instanceID,
-                frame);
-            G.ForceStageSceneActiveLogged[instanceID] = true;
-        }
-        return;
-    }
-
-    nds->ARM9Write8(stageScene.Base + 0x0E, 1);
-    nds->ARM9Write8(stageScene.Base + 0x13, 0);
-    nds->ARM9Write32(stageScene.Base + 0x154, G.ForceStageSceneWord154);
-    nds->ARM9Write32(stageScene.Base + 0x160, G.ForceStageSceneWord160);
-
-    if (!G.ForceStageSceneActiveLogged[instanceID])
-    {
-        std::printf(
-            "NSMB Test: force stage scene active inst=%d frame=%u range=%u-%u base=%08X word154=0x%08X word160=0x%08X\n",
-            instanceID,
-            frame,
-            G.ForceStageSceneActiveStartFrame,
-            G.ForceStageSceneActiveEndFrame,
-            stageScene.Base,
-            G.ForceStageSceneWord154,
-            G.ForceStageSceneWord160);
-        G.ForceStageSceneActiveLogged[instanceID] = true;
-    }
-}
-
 void ForceStageCameraSlotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.ForceStageCameraSlotEnabled || !nds || !nds->MainRAM)
@@ -8993,195 +8779,6 @@ void ForcePlayerStarCountersIfNeeded(int instanceID, melonDS::u32 frame, melonDS
     }
 }
 
-void ForcePlayerSignalUnlockIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.ForcePlayerSignalUnlockEnabled || !nds || !nds->MainRAM)
-        return;
-    if (frame < G.ForcePlayerSignalUnlockStartFrame)
-        return;
-    if (G.ForcePlayerSignalUnlockEndFrame != 0 && frame > G.ForcePlayerSignalUnlockEndFrame)
-        return;
-    if (G.ForcePlayerSignalUnlockHostOnly && G.NetRole != Role::Host)
-        return;
-    if (G.ForcePlayerSignalUnlockClientOnly && G.NetRole != Role::Client)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
-        return;
-
-    // Diagnostic equivalent of PlayerBase::signalUnlocked(): clear the global
-    // player lock bits and each Player actor's local lock flags.
-    const melonDS::u8 global9280 = nds->ARM9Read8(0x020C9280);
-    const melonDS::u8 global9298 = nds->ARM9Read8(0x020C9298);
-    nds->ARM9Write8(0x020C9280, static_cast<melonDS::u8>(global9280 & ~0x10));
-    nds->ARM9Write8(0x020C9298, static_cast<melonDS::u8>(global9298 & ~0x40));
-
-    const melonDS::u32 ramLen = std::min<melonDS::u32>(nds->MainRAMMask + 1, 0x400000);
-    int clearedPlayers = 0;
-    for (melonDS::u32 off = 0; off + 0x7C4 <= ramLen; off += 4)
-    {
-        melonDS::u32 vtable = 0;
-        melonDS::u16 objectID = 0;
-        melonDS::u16 stateType = 0;
-        melonDS::u32 flags = 0;
-        if (!ReadMainRAMU32(nds, off, vtable) ||
-            !ReadMainRAMU16(nds, off + 0x0C, objectID) ||
-            !ReadMainRAMU16(nds, off + 0x0E, stateType) ||
-            !ReadMainRAMU32(nds, off + 0x10, flags))
-            continue;
-        if (objectID != kPlayerObjectID)
-            continue;
-        if (vtable < kMainRAMBase || vtable >= kMainRAMBase + ramLen)
-            continue;
-        if (stateType != 1 && stateType != 2 && stateType != 3)
-            continue;
-        if (flags >= 0x10000000)
-            continue;
-
-        const melonDS::u32 base = kMainRAMBase + off;
-        nds->ARM9Write8(base + 0x75C, 0);
-        const melonDS::u8 flag192 = nds->ARM9Read8(base + 0x192);
-        nds->ARM9Write8(base + 0x192, static_cast<melonDS::u8>(flag192 & ~0x01));
-        clearedPlayers++;
-    }
-
-    if (!G.ForcePlayerSignalUnlockLogged[instanceID])
-    {
-        std::printf(
-            "NSMB Test: force player signal unlock inst=%d frame=%u range=%u-%u players=%d global9280=%02X->%02X global9298=%02X->%02X\n",
-            instanceID,
-            frame,
-            G.ForcePlayerSignalUnlockStartFrame,
-            G.ForcePlayerSignalUnlockEndFrame,
-            clearedPlayers,
-            global9280,
-            nds->ARM9Read8(0x020C9280),
-            global9298,
-            nds->ARM9Read8(0x020C9298));
-        G.ForcePlayerSignalUnlockLogged[instanceID] = true;
-    }
-}
-
-void ForceStageSceneStartGateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.ForceStageSceneStartGateEnabled || !nds || !nds->MainRAM)
-        return;
-    if (frame < G.ForceStageSceneStartGateStartFrame)
-        return;
-    if (G.ForceStageSceneStartGateEndFrame != 0 && frame > G.ForceStageSceneStartGateEndFrame)
-        return;
-    if (G.ForceStageSceneStartGateHostOnly && G.NetRole != Role::Host)
-        return;
-    if (G.ForceStageSceneStartGateClientOnly && G.NetRole != Role::Client)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
-        return;
-
-    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, G.MvlStageSceneSettings);
-    if (!stageScene.Found || !IsARM9MainRAMAddress(stageScene.Base))
-    {
-        if (!G.ForceStageSceneStartGateLogged[instanceID])
-        {
-            std::printf("NSMB Test: force stage scene start gate skipped inst=%d frame=%u no stage scene\n",
-                instanceID,
-                frame);
-            G.ForceStageSceneStartGateLogged[instanceID] = true;
-        }
-        return;
-    }
-
-    if (G.ForceStageSceneFadeReady)
-    {
-        nds->ARM9Write32(stageScene.Base + 0x561C, 1);
-        nds->ARM9Write32(stageScene.Base + 0x563C, 0x1000);
-    }
-    if (G.ForceStageSceneInputLatchEnabled)
-    {
-        nds->ARM9Write8(0x020C9280, 0);
-        nds->ARM9Write8(stageScene.Base + 0x5645, 1);
-        nds->ARM9Write8(0x020C928C, 0);
-    }
-    nds->ARM9Write8(stageScene.Base + 0x5649, static_cast<melonDS::u8>(G.ForceStageSceneStartGateValue & 0xFF));
-
-    if (!G.ForceStageSceneStartGateLogged[instanceID])
-    {
-        std::printf(
-            "NSMB Test: force stage scene start gate inst=%d frame=%u range=%u-%u base=%08X value=0x%02X fadeReady=%d inputLatch=%d\n",
-            instanceID,
-            frame,
-            G.ForceStageSceneStartGateStartFrame,
-            G.ForceStageSceneStartGateEndFrame,
-            stageScene.Base,
-            G.ForceStageSceneStartGateValue & 0xFF,
-            G.ForceStageSceneFadeReady ? 1 : 0,
-            G.ForceStageSceneInputLatchEnabled ? 1 : 0);
-        G.ForceStageSceneStartGateLogged[instanceID] = true;
-    }
-}
-
-void ForceNetLocalAidIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (G.ForceNetLocalAid < 0 || !nds || !nds->MainRAM)
-        return;
-    if (G.ForceNetLocalAid > 3)
-        return;
-    if (frame < G.ForceNetLocalAidStartFrame)
-        return;
-    if (G.ForceNetLocalAidEndFrame != 0 && frame > G.ForceNetLocalAidEndFrame)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-
-    nds->ARM9Write32(kNetLocalAidAddr, static_cast<melonDS::u32>(G.ForceNetLocalAid));
-
-    if (!G.ForceNetLocalAidLogged[instanceID])
-    {
-        std::printf("NSMB Test: force net local AID inst=%d frame=%u range=%u-%u value=%d\n",
-            instanceID,
-            frame,
-            G.ForceNetLocalAidStartFrame,
-            G.ForceNetLocalAidEndFrame,
-            G.ForceNetLocalAid);
-        G.ForceNetLocalAidLogged[instanceID] = true;
-    }
-}
-
-void ForceWifiCommunicatingIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (G.ForceWifiCommunicatingCount < 0 || !nds || !nds->MainRAM)
-        return;
-    if (G.ForceWifiCommunicatingCount < 1 || G.ForceWifiCommunicatingCount > 4)
-        return;
-    if (frame < G.ForceWifiCommunicatingStartFrame)
-        return;
-    if (G.ForceWifiCommunicatingEndFrame != 0 && frame > G.ForceWifiCommunicatingEndFrame)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-
-    nds->ARM9Write16(kWifiCommunicatingConsoleCountAddr,
-        static_cast<melonDS::u16>(G.ForceWifiCommunicatingCount));
-    for (int i = 0; i < 4; i++)
-    {
-        nds->ARM9Write32(kWifiCommunicatingConsolesAddr + static_cast<melonDS::u32>(i * sizeof(melonDS::u32)),
-            i < G.ForceWifiCommunicatingCount ? 1u : 0u);
-    }
-
-    if (!G.ForceWifiCommunicatingLogged[instanceID])
-    {
-        std::printf("NSMB Test: force wifi communicating inst=%d frame=%u range=%u-%u count=%d\n",
-            instanceID,
-            frame,
-            G.ForceWifiCommunicatingStartFrame,
-            G.ForceWifiCommunicatingEndFrame,
-            G.ForceWifiCommunicatingCount);
-        G.ForceWifiCommunicatingLogged[instanceID] = true;
-    }
-}
-
 void PushScriptRemotePacketIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.ScriptRemotePacketEnabled || !nds || !nds->MainRAM)
@@ -9242,8 +8839,6 @@ void PushScriptRemotePacketIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
 
 int CurrentPacketBridgeLocalPlayer()
 {
-    if (G.ForceNetLocalAid >= 0 && G.ForceNetLocalAid <= 1)
-        return G.ForceNetLocalAid;
     if (G.NetRole == Role::Client)
         return 1;
     return 0;
@@ -9353,11 +8948,6 @@ void WritePacketBridgeJitScratchInputs(
     }
 }
 
-void ForceStageSceneContinueGateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
-void ForceStageSceneState3GateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
-void ForceStageSceneEventFlagsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
-void ForceMvlPlayerReadyIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
-void ForceMvlRuntimeStateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
 void ClearMvlCameraInitHoldIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
 
 void ApplyRollbackResimFramePatches(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -9368,23 +8958,15 @@ void ApplyRollbackResimFramePatches(int instanceID, melonDS::u32 frame, melonDS:
     ApplyMvlRuntimeConfigIfNeeded(nds);
     ForceNSMLPacketBridgeNetReadyIfNeeded(instanceID, frame, nds);
     ForceNSMLGameLocalPlayerIDIfNeeded(frame, nds);
-    ForceWifiCommunicatingIfNeeded(instanceID, frame, nds);
-    ForceNetLocalAidIfNeeded(instanceID, frame, nds);
-    ForceStageSceneContinueGateIfNeeded(instanceID, frame, nds);
-    ForceMvlPlayerReadyIfNeeded(instanceID, frame, nds);
-    ForceMvlRuntimeStateIfNeeded(instanceID, frame, nds);
     NormalizeMvlEntranceSpawnStateIfNeeded(instanceID, frame, nds);
     ClearMvlCameraInitHoldIfNeeded(instanceID, frame, nds);
-    ForceStageSceneEventFlagsIfNeeded(instanceID, frame, nds);
     ForceStageCameraSlotIfNeeded(instanceID, frame, nds);
     ForceStageCameraObjectXIfNeeded(instanceID, frame, nds);
-    ForceStageSceneState3GateIfNeeded(instanceID, frame, nds);
     ForceStageActorFreezeFlagIfNeeded(instanceID, frame, nds);
     ForcePlayerDeathCountersIfNeeded(instanceID, frame, nds);
     ForcePlayerInventoryPowerupsIfNeeded(instanceID, frame, nds);
     ForcePlayerStarCountersIfNeeded(instanceID, frame, nds);
     ForceStageFXSettingsIfNeeded(instanceID, frame, nds);
-    ForcePlayerSignalUnlockIfNeeded(instanceID, frame, nds);
 }
 
 void ApplyRollbackResimPostFramePatches(melonDS::u32 frame, melonDS::NDS* nds)
@@ -9977,218 +9559,6 @@ void ApplyPacketBridgeJitHelperPatchIfNeeded(int instanceID, melonDS::u32 frame,
         instanceID,
         frame,
         kPacketBridgeJitScratchBaseAddr);
-}
-
-void ForceStageSceneContinueGateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.ForceStageSceneContinueGateEnabled || !nds || !nds->MainRAM)
-        return;
-    if (frame < G.ForceStageSceneContinueGateStartFrame)
-        return;
-    if (G.ForceStageSceneContinueGateEndFrame != 0 && frame > G.ForceStageSceneContinueGateEndFrame)
-        return;
-    if (G.ForceStageSceneContinueGateHostOnly && G.NetRole != Role::Host)
-        return;
-    if (G.ForceStageSceneContinueGateClientOnly && G.NetRole != Role::Client)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
-        return;
-
-    const ObjectScanSample stageScene = FindObjectByIDAndSettingsLoose(nds, kStageSceneObjectID, G.MvlStageSceneSettings);
-    if (!stageScene.Found || !IsARM9MainRAMAddress(stageScene.Base))
-    {
-        if (!G.ForceStageSceneContinueGateLogged[instanceID])
-        {
-            std::printf("NSMB Test: force stage scene continue gate skipped inst=%d frame=%u no stage scene\n",
-                instanceID,
-                frame);
-            G.ForceStageSceneContinueGateLogged[instanceID] = true;
-        }
-        return;
-    }
-
-    nds->ARM9Write8(stageScene.Base + 0x5649, static_cast<melonDS::u8>(G.ForceStageSceneContinueGateValue & 0xFF));
-    if (!G.ForceStageSceneContinueGateLogged[instanceID])
-    {
-        std::printf(
-            "NSMB Test: force stage scene continue gate inst=%d frame=%u range=%u-%u base=%08X state=%u value=0x%02X\n",
-            instanceID,
-            frame,
-            G.ForceStageSceneContinueGateStartFrame,
-            G.ForceStageSceneContinueGateEndFrame,
-            stageScene.Base,
-            nds->ARM9Read32(stageScene.Base + 0x5618),
-            G.ForceStageSceneContinueGateValue & 0xFF);
-        G.ForceStageSceneContinueGateLogged[instanceID] = true;
-    }
-}
-
-void ForceStageSceneState3GateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.ForceStageSceneState3GateEnabled || !nds || !nds->MainRAM)
-        return;
-    if (frame < G.ForceStageSceneState3GateStartFrame)
-        return;
-    if (G.ForceStageSceneState3GateEndFrame != 0 && frame > G.ForceStageSceneState3GateEndFrame)
-        return;
-    if (G.ForceStageSceneState3GateHostOnly && G.NetRole != Role::Host)
-        return;
-    if (G.ForceStageSceneState3GateClientOnly && G.NetRole != Role::Client)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
-        return;
-
-    const melonDS::u32 oldValue = nds->ARM9Read32(0x020C92C0);
-    nds->ARM9Write32(0x020C92C0, G.ForceStageSceneState3GateValue);
-
-    if (!G.ForceStageSceneState3GateLogged[instanceID])
-    {
-        std::printf(
-            "NSMB Test: force stage scene state3 gate inst=%d frame=%u range=%u-%u old=0x%08X value=0x%08X\n",
-            instanceID,
-            frame,
-            G.ForceStageSceneState3GateStartFrame,
-            G.ForceStageSceneState3GateEndFrame,
-            oldValue,
-            G.ForceStageSceneState3GateValue);
-        G.ForceStageSceneState3GateLogged[instanceID] = true;
-    }
-}
-
-void ForceStageSceneEventFlagsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.ForceStageSceneEventFlagsEnabled || !nds || !nds->MainRAM)
-        return;
-    if (frame < G.ForceStageSceneEventFlagsStartFrame)
-        return;
-    if (G.ForceStageSceneEventFlagsEndFrame != 0 && frame > G.ForceStageSceneEventFlagsEndFrame)
-        return;
-    if (G.ForceStageSceneEventFlagsHostOnly && G.NetRole != Role::Host)
-        return;
-    if (G.ForceStageSceneEventFlagsClientOnly && G.NetRole != Role::Client)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
-        return;
-
-    const melonDS::u32 oldValue = nds->ARM9Read32(0x020C92D0);
-    const melonDS::u32 newValue = oldValue | G.ForceStageSceneEventFlagsValue;
-    nds->ARM9Write32(0x020C92D0, newValue);
-
-    if (!G.ForceStageSceneEventFlagsLogged[instanceID])
-    {
-        std::printf(
-            "NSMB Test: force stage scene event flags inst=%d frame=%u range=%u-%u old=0x%08X or=0x%08X new=0x%08X\n",
-            instanceID,
-            frame,
-            G.ForceStageSceneEventFlagsStartFrame,
-            G.ForceStageSceneEventFlagsEndFrame,
-            oldValue,
-            G.ForceStageSceneEventFlagsValue,
-            newValue);
-        G.ForceStageSceneEventFlagsLogged[instanceID] = true;
-    }
-}
-
-void ForceMvlPlayerReadyIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.ForceMvlPlayerReadyEnabled || !nds || !nds->MainRAM)
-        return;
-    if (frame < G.ForceMvlPlayerReadyStartFrame)
-        return;
-    if (G.ForceMvlPlayerReadyEndFrame != 0 && frame > G.ForceMvlPlayerReadyEndFrame)
-        return;
-    if (G.ForceMvlPlayerReadyHostOnly && G.NetRole != Role::Host)
-        return;
-    if (G.ForceMvlPlayerReadyClientOnly && G.NetRole != Role::Client)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
-        return;
-
-    const melonDS::u32 managerBase = nds->ARM9Read32(0x020CAD40);
-    if (!IsARM9MainRAMAddress(managerBase))
-    {
-        if (!G.ForceMvlPlayerReadyMissingLogged[instanceID])
-        {
-            std::printf("NSMB Test: force MvL player ready skipped inst=%d frame=%u invalid manager=%08X\n",
-                instanceID,
-                frame,
-                managerBase);
-            G.ForceMvlPlayerReadyMissingLogged[instanceID] = true;
-        }
-        return;
-    }
-
-    const melonDS::u16 value = static_cast<melonDS::u16>(G.ForceMvlPlayerReadyValue & 0xFFFF);
-    const melonDS::u16 old0 = nds->ARM9Read16(managerBase + 0x494);
-    const melonDS::u16 old1 = nds->ARM9Read16(managerBase + 0x4A0);
-    const melonDS::u8 oldA8EC = nds->ARM9Read8(managerBase + 0xA8EC);
-    nds->ARM9Write16(managerBase + 0x494, value);
-    nds->ARM9Write16(managerBase + 0x4A0, value);
-    if (G.ForceMvlPlayerReadySetA8EC)
-        nds->ARM9Write8(managerBase + 0xA8EC, static_cast<melonDS::u8>(G.ForceMvlPlayerReadyA8ECValue & 0xFF));
-
-    if (!G.ForceMvlPlayerReadyLogged[instanceID])
-    {
-        std::printf(
-            "NSMB Test: force MvL player ready inst=%d frame=%u range=%u-%u manager=%08X old0=0x%04X old1=0x%04X value=0x%04X oldA8EC=0x%02X setA8EC=%u a8ecValue=0x%02X state=%u\n",
-            instanceID,
-            frame,
-            G.ForceMvlPlayerReadyStartFrame,
-            G.ForceMvlPlayerReadyEndFrame,
-            managerBase,
-            old0,
-            old1,
-            value,
-            oldA8EC,
-            G.ForceMvlPlayerReadySetA8EC ? 1 : 0,
-            G.ForceMvlPlayerReadyA8ECValue & 0xFF,
-            nds->ARM9Read8(0x020C9670));
-        G.ForceMvlPlayerReadyLogged[instanceID] = true;
-    }
-}
-
-void ForceMvlRuntimeStateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.ForceMvlRuntimeStateEnabled || !nds || !nds->MainRAM)
-        return;
-    if (frame < G.ForceMvlRuntimeStateStartFrame)
-        return;
-    if (G.ForceMvlRuntimeStateEndFrame != 0 && frame > G.ForceMvlRuntimeStateEndFrame)
-        return;
-    if (G.ForceMvlRuntimeStateHostOnly && G.NetRole != Role::Host)
-        return;
-    if (G.ForceMvlRuntimeStateClientOnly && G.NetRole != Role::Client)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
-        return;
-
-    constexpr melonDS::u32 kMvlRuntimeStateAddr = 0x020CA6AC;
-    const melonDS::u8 oldValue = nds->ARM9Read8(kMvlRuntimeStateAddr);
-    const melonDS::u8 newValue = static_cast<melonDS::u8>(G.ForceMvlRuntimeStateValue & 0xFF);
-    nds->ARM9Write8(kMvlRuntimeStateAddr, newValue);
-
-    if (!G.ForceMvlRuntimeStateLogged[instanceID])
-    {
-        std::printf(
-            "NSMB Test: force MvL runtime state inst=%d frame=%u range=%u-%u old=0x%02X value=0x%02X\n",
-            instanceID,
-            frame,
-            G.ForceMvlRuntimeStateStartFrame,
-            G.ForceMvlRuntimeStateEndFrame,
-            oldValue,
-            newValue);
-        G.ForceMvlRuntimeStateLogged[instanceID] = true;
-    }
 }
 
 void ClearMvlCameraInitHoldIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -13596,35 +12966,6 @@ void InitFromEnvironment()
     if (G.PlayerStickToStarEndFrame < G.PlayerStickToStarStartFrame)
         std::swap(G.PlayerStickToStarStartFrame, G.PlayerStickToStarEndFrame);
     G.PlayerStickToStarSlot = std::clamp(EnvInt("MELONDS_NSML_PLAYER_STICK_TO_STAR_SLOT", 0), 0, 1);
-    G.ForcePlayerCountEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_COUNT");
-    G.ForcePlayerCountHostOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_COUNT_HOST_ONLY");
-    G.ForcePlayerCountClientOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_COUNT_CLIENT_ONLY");
-    G.ForcePlayerCountStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_COUNT_START_FRAME", 0)));
-    G.ForcePlayerCountEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_COUNT_END_FRAME", 0)));
-    G.ForcePlayerCountValue = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_COUNT_VALUE", 2)));
-    G.ForceStageSceneRuntimeWordsEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS");
-    G.ForceStageSceneRuntimeWordsHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_HOST_ONLY");
-    G.ForceStageSceneRuntimeWordsClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_CLIENT_ONLY");
-    G.ForceStageSceneRuntimeWordsStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_START_FRAME", 0)));
-    G.ForceStageSceneRuntimeWordsEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_RUNTIME_WORDS_END_FRAME", 0)));
-    G.ForceStageSceneWord154 = static_cast<melonDS::u32>(
-        std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_WORD154")
-            ? std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_WORD154") : "1", nullptr, 0));
-    G.ForceStageSceneWord160 = static_cast<melonDS::u32>(
-        std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_WORD160")
-            ? std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_WORD160") : "0xDA", nullptr, 0));
-    G.ForceStageSceneActiveEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE");
-    G.ForceStageSceneActiveHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_HOST_ONLY");
-    G.ForceStageSceneActiveClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_CLIENT_ONLY");
-    G.ForceStageSceneActiveStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_START_FRAME", 0)));
-    G.ForceStageSceneActiveEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_ACTIVE_END_FRAME", 0)));
     G.ForceStageCameraSlotEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT");
     G.ForceStageCameraSlotVerticalOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_CAMERA_SLOT_VERTICAL_ONLY");
     G.ForceStageCameraSlotStartFrame = static_cast<melonDS::u32>(
@@ -13724,28 +13065,6 @@ void InitFromEnvironment()
     G.ForcePlayerCollectedStars1 = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_COLLECTED_STARS1", 0)));
     G.TracePlayerLifeChanges = EnvFlag("MELONDS_NSML_TRACE_PLAYER_LIFE_CHANGES");
-    G.ForcePlayerSignalUnlockEnabled = EnvFlag("MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK");
-    G.ForcePlayerSignalUnlockHostOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_HOST_ONLY");
-    G.ForcePlayerSignalUnlockClientOnly = EnvFlag("MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_CLIENT_ONLY");
-    G.ForcePlayerSignalUnlockStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_START_FRAME", 0)));
-    G.ForcePlayerSignalUnlockEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_PLAYER_SIGNAL_UNLOCK_END_FRAME", 0)));
-    G.ForceStageSceneStartGateEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE");
-    G.ForceStageSceneStartGateHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_HOST_ONLY");
-    G.ForceStageSceneStartGateClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_CLIENT_ONLY");
-    G.ForceStageSceneFadeReady = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_FADE_READY");
-    G.ForceStageSceneInputLatchEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_INPUT_LATCH");
-    G.ForceNetLocalAid = EnvInt("MELONDS_NSML_FORCE_NET_LOCAL_AID", -1);
-    G.ForceNetLocalAidStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_NET_LOCAL_AID_START_FRAME", 0)));
-    G.ForceNetLocalAidEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_NET_LOCAL_AID_END_FRAME", 0)));
-    G.ForceWifiCommunicatingCount = EnvInt("MELONDS_NSML_FORCE_WIFI_COMMUNICATING_COUNT", -1);
-    G.ForceWifiCommunicatingStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_WIFI_COMMUNICATING_START_FRAME", 0)));
-    G.ForceWifiCommunicatingEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_WIFI_COMMUNICATING_END_FRAME", 0)));
     G.ScriptRemotePacketEnabled = EnvFlag("MELONDS_NSML_SCRIPT_REMOTE_PACKET");
     G.ScriptRemotePacketPlayer = EnvInt("MELONDS_NSML_SCRIPT_REMOTE_PACKET_PLAYER", -1);
     G.ScriptRemotePacketInputInstance = EnvInt("MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_INSTANCE", -1);
@@ -13904,67 +13223,6 @@ void InitFromEnvironment()
     G.RollbackDeltaPageTraceMaxRuns = rollbackConfig.DeltaPageTraceMaxRuns;
     G.RollbackResimulateDelayFrames = rollbackConfig.ResimulateDelayFrames;
     G.RollbackMaxResimFrames = rollbackConfig.MaxResimFrames;
-    G.ForceStageSceneStartGateStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_START_FRAME", 0)));
-    G.ForceStageSceneStartGateEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_END_FRAME", 0)));
-    G.ForceStageSceneStartGateValue = static_cast<melonDS::u32>(
-        std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_VALUE")
-            ? std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_START_GATE_VALUE") : "1", nullptr, 0));
-    G.ForceStageSceneContinueGateEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE");
-    G.ForceStageSceneContinueGateHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_HOST_ONLY");
-    G.ForceStageSceneContinueGateClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_CLIENT_ONLY");
-    G.ForceStageSceneContinueGateStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_START_FRAME", 0)));
-    G.ForceStageSceneContinueGateEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_END_FRAME", 0)));
-    G.ForceStageSceneContinueGateValue = static_cast<melonDS::u32>(
-        std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_VALUE")
-            ? std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_CONTINUE_GATE_VALUE") : "1", nullptr, 0));
-    G.ForceStageSceneState3GateEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE");
-    G.ForceStageSceneState3GateHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_HOST_ONLY");
-    G.ForceStageSceneState3GateClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_CLIENT_ONLY");
-    G.ForceStageSceneState3GateStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_START_FRAME", 0)));
-    G.ForceStageSceneState3GateEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_END_FRAME", 0)));
-    G.ForceStageSceneState3GateValue = static_cast<melonDS::u32>(
-        std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_VALUE")
-            ? std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_STATE3_GATE_VALUE") : "1", nullptr, 0));
-    G.ForceStageSceneEventFlagsEnabled = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS");
-    G.ForceStageSceneEventFlagsHostOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_HOST_ONLY");
-    G.ForceStageSceneEventFlagsClientOnly = EnvFlag("MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_CLIENT_ONLY");
-    G.ForceStageSceneEventFlagsStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_START_FRAME", 0)));
-    G.ForceStageSceneEventFlagsEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_END_FRAME", 0)));
-    G.ForceStageSceneEventFlagsValue = static_cast<melonDS::u32>(
-        std::strtoul(std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_VALUE")
-            ? std::getenv("MELONDS_NSML_FORCE_STAGE_SCENE_EVENT_FLAGS_VALUE") : "0", nullptr, 0));
-    G.ForceMvlPlayerReadyEnabled = EnvFlag("MELONDS_NSML_FORCE_MVL_PLAYER_READY");
-    G.ForceMvlPlayerReadyHostOnly = EnvFlag("MELONDS_NSML_FORCE_MVL_PLAYER_READY_HOST_ONLY");
-    G.ForceMvlPlayerReadyClientOnly = EnvFlag("MELONDS_NSML_FORCE_MVL_PLAYER_READY_CLIENT_ONLY");
-    G.ForceMvlPlayerReadyStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_MVL_PLAYER_READY_START_FRAME", 0)));
-    G.ForceMvlPlayerReadyEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_MVL_PLAYER_READY_END_FRAME", 0)));
-    G.ForceMvlPlayerReadyValue = static_cast<melonDS::u32>(
-        std::strtoul(std::getenv("MELONDS_NSML_FORCE_MVL_PLAYER_READY_VALUE")
-            ? std::getenv("MELONDS_NSML_FORCE_MVL_PLAYER_READY_VALUE") : "0xFF00", nullptr, 0));
-    G.ForceMvlPlayerReadySetA8EC = EnvFlag("MELONDS_NSML_FORCE_MVL_PLAYER_READY_SET_A8EC");
-    G.ForceMvlPlayerReadyA8ECValue = static_cast<melonDS::u32>(
-        std::strtoul(std::getenv("MELONDS_NSML_FORCE_MVL_PLAYER_READY_A8EC_VALUE")
-            ? std::getenv("MELONDS_NSML_FORCE_MVL_PLAYER_READY_A8EC_VALUE") : "0xFF", nullptr, 0));
-    G.ForceMvlRuntimeStateEnabled = EnvFlag("MELONDS_NSML_FORCE_MVL_RUNTIME_STATE");
-    G.ForceMvlRuntimeStateHostOnly = EnvFlag("MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_HOST_ONLY");
-    G.ForceMvlRuntimeStateClientOnly = EnvFlag("MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_CLIENT_ONLY");
-    G.ForceMvlRuntimeStateStartFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_START_FRAME", 0)));
-    G.ForceMvlRuntimeStateEndFrame = static_cast<melonDS::u32>(
-        std::max(0, EnvInt("MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_END_FRAME", 0)));
-    G.ForceMvlRuntimeStateValue = static_cast<melonDS::u32>(
-        std::strtoul(std::getenv("MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_VALUE")
-            ? std::getenv("MELONDS_NSML_FORCE_MVL_RUNTIME_STATE_VALUE") : "3", nullptr, 0));
     G.ClearMvlCameraInitHoldEnabled = EnvFlag("MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD");
     G.ClearMvlCameraInitHoldHostOnly = EnvFlag("MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_HOST_ONLY");
     G.ClearMvlCameraInitHoldClientOnly = EnvFlag("MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_CLIENT_ONLY");
@@ -14669,37 +13927,15 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         ApplyPlayerStickToStar(instanceID, inputFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::TestSnap);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForcePlayerCountIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForceStageSceneRuntimeWordsIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForceStageSceneActiveIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForceStageSceneStartGateIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForceWifiCommunicatingIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForceNetLocalAidIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         PushScriptRemotePacketIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForceStageSceneContinueGateIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForceMvlPlayerReadyIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForceMvlRuntimeStateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         NormalizeMvlEntranceSpawnStateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ClearMvlCameraInitHoldIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForceStageSceneEventFlagsIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageCameraSlotIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageCameraObjectXIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForceStageSceneState3GateIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageActorFreezeFlagIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
@@ -14712,8 +13948,6 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         ForcePlayerStarCountersIfNeeded(instanceID, inputFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForceStageFXSettingsIfNeeded(instanceID, inputFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForcePlayerSignalUnlockIfNeeded(instanceID, inputFrame, nds);
 
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Setup);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
@@ -15406,10 +14640,6 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         ForcePlayerInventoryPowerupsIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         ForcePlayerStarCountersIfNeeded(instanceID, logFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForceWifiCommunicatingIfNeeded(instanceID, logFrame, nds);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ForceNetLocalAidIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         PushScriptRemotePacketIfNeeded(instanceID, logFrame, nds);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
