@@ -4,6 +4,18 @@ namespace NsmbNetplayPoC::GameStateModel {
 
 namespace {
 
+void MixGameStateValue(melonDS::u64 &hash, melonDS::u32 value) {
+  for (int index = 0; index < 4; index++) {
+    hash ^= (value >> (index * 8)) & 0xFF;
+    hash *= 1099511628211ull;
+  }
+}
+
+void MixGameStateValue(melonDS::u64 &hash, melonDS::u64 value) {
+  MixGameStateValue(hash, static_cast<melonDS::u32>(value & 0xFFFFFFFFu));
+  MixGameStateValue(hash, static_cast<melonDS::u32>(value >> 32));
+}
+
 #define NSMB_GAME_STATE_WIRE_FIELDS(X)                                         \
   X(StageID)                                                                   \
   X(StageGroup)                                                                \
@@ -89,6 +101,160 @@ namespace {
   X(MovingHazardVelY)
 
 } // namespace
+
+melonDS::u64 ComputeBasicGameStateHash(const GameStateSample &sample) {
+  melonDS::u64 hash = 1469598103934665603ull;
+  MixGameStateValue(hash, sample.StageID);
+  MixGameStateValue(hash, sample.StageGroup);
+  MixGameStateValue(hash, sample.VsMode);
+  MixGameStateValue(hash, sample.LocalPlayerID);
+  MixGameStateValue(hash, sample.GGID);
+  MixGameStateValue(hash, sample.NetState14);
+  MixGameStateValue(hash, sample.NetState1C);
+  MixGameStateValue(hash, sample.NetState20);
+  MixGameStateValue(hash, sample.NetState24);
+  MixGameStateValue(hash, sample.NetState5C);
+  MixGameStateValue(hash, sample.NetPacketTick);
+  MixGameStateValue(hash, sample.NetPacketKeys);
+  MixGameStateValue(hash, sample.NetPacketAction);
+  MixGameStateValue(hash, sample.NetPacketByte5);
+  MixGameStateValue(hash, sample.NetPacketByte6);
+  MixGameStateValue(hash, sample.NetPacketByte7);
+  MixGameStateValue(hash, sample.NetRandomValue);
+  MixGameStateValue(hash, sample.NetRandomCallCount);
+  MixGameStateValue(hash, sample.NetRandomBranchAddress);
+  MixGameStateValue(hash, sample.InputConsole0Held);
+  MixGameStateValue(hash, sample.InputConsole0Pressed);
+  MixGameStateValue(hash, sample.InputConsole1Held);
+  MixGameStateValue(hash, sample.InputConsole1Pressed);
+  MixGameStateValue(hash, sample.InputPlayer0Held);
+  MixGameStateValue(hash, sample.InputPlayer1Held);
+  MixGameStateValue(hash, sample.InputPlayer0Pressed);
+  MixGameStateValue(hash, sample.InputPlayer1Pressed);
+  MixGameStateValue(hash, sample.StageActorFreezeFlag);
+  MixGameStateValue(hash, sample.VsStarFound);
+  MixGameStateValue(hash, sample.VsStarGUID);
+  MixGameStateValue(hash, sample.VsStarSettings);
+  MixGameStateValue(hash, sample.VsStarStateType);
+  MixGameStateValue(hash, sample.VsStarFlags);
+  MixGameStateValue(hash, sample.VsStarPosX);
+  MixGameStateValue(hash, sample.VsStarPosY);
+  MixGameStateValue(hash, sample.VsStarPosZ);
+  MixGameStateValue(hash, sample.VsStarActorFound);
+  MixGameStateValue(hash, sample.VsStarActorGUID);
+  MixGameStateValue(hash, sample.VsStarActorSettings);
+  MixGameStateValue(hash, sample.VsStarActorStateType);
+  MixGameStateValue(hash, sample.VsStarActorFlags);
+  MixGameStateValue(hash, sample.VsStarActorPosX);
+  MixGameStateValue(hash, sample.VsStarActorPosY);
+  MixGameStateValue(hash, sample.VsStarActorPosZ);
+  MixGameStateValue(hash, sample.PlayerActor0Found);
+  MixGameStateValue(hash, sample.PlayerActor0GUID);
+  MixGameStateValue(hash, sample.PlayerActor0Settings);
+  MixGameStateValue(hash, sample.PlayerActor0PosX);
+  MixGameStateValue(hash, sample.PlayerActor0PosY);
+  MixGameStateValue(hash, sample.PlayerActor0PosZ);
+  MixGameStateValue(hash, sample.PlayerActor0PrevX);
+  MixGameStateValue(hash, sample.PlayerActor0PrevY);
+  MixGameStateValue(hash, sample.PlayerActor0PrevZ);
+  MixGameStateValue(hash, sample.PlayerActor0VelX);
+  MixGameStateValue(hash, sample.PlayerActor0VelY);
+  MixGameStateValue(hash, sample.PlayerActor0VelZ);
+  MixGameStateValue(hash, sample.PlayerActor1Found);
+  MixGameStateValue(hash, sample.PlayerActor1GUID);
+  MixGameStateValue(hash, sample.PlayerActor1Settings);
+  MixGameStateValue(hash, sample.PlayerActor1PosX);
+  MixGameStateValue(hash, sample.PlayerActor1PosY);
+  MixGameStateValue(hash, sample.PlayerActor1PosZ);
+  MixGameStateValue(hash, sample.PlayerActor1PrevX);
+  MixGameStateValue(hash, sample.PlayerActor1PrevY);
+  MixGameStateValue(hash, sample.PlayerActor1PrevZ);
+  MixGameStateValue(hash, sample.PlayerActor1VelX);
+  MixGameStateValue(hash, sample.PlayerActor1VelY);
+  MixGameStateValue(hash, sample.PlayerActor1VelZ);
+  MixGameStateValue(hash, sample.PlayerCount);
+  MixGameStateValue(hash, sample.Player0Powerup);
+  MixGameStateValue(hash, sample.Player1Powerup);
+  MixGameStateValue(hash, sample.Player0InventoryPowerup);
+  MixGameStateValue(hash, sample.Player1InventoryPowerup);
+  MixGameStateValue(hash, sample.Player0Dead);
+  MixGameStateValue(hash, sample.Player1Dead);
+  MixGameStateValue(hash, sample.Player0Character);
+  MixGameStateValue(hash, sample.Player1Character);
+  MixGameStateValue(hash, sample.Player0Lives);
+  MixGameStateValue(hash, sample.Player1Lives);
+  MixGameStateValue(hash, sample.Player0BattleStars);
+  MixGameStateValue(hash, sample.Player1BattleStars);
+  MixGameStateValue(hash, sample.Player0Coins);
+  MixGameStateValue(hash, sample.Player1Coins);
+  MixGameStateValue(hash, sample.Player0Score);
+  MixGameStateValue(hash, sample.Player1Score);
+  MixGameStateValue(hash, sample.Player0DisplayedStars);
+  MixGameStateValue(hash, sample.Player1DisplayedStars);
+  MixGameStateValue(hash, sample.Player0Deaths);
+  MixGameStateValue(hash, sample.Player1Deaths);
+  MixGameStateValue(hash, sample.Player0CollectedStars);
+  MixGameStateValue(hash, sample.Player1CollectedStars);
+  MixGameStateValue(hash, sample.VsCoinCount);
+  MixGameStateValue(hash, sample.StageCameraFound);
+  MixGameStateValue(hash, sample.StageCameraWord190);
+  MixGameStateValue(hash, sample.StageCameraWord194);
+  MixGameStateValue(hash, sample.StageCameraWord19C);
+  MixGameStateValue(hash, sample.StageCameraWord1A0);
+  MixGameStateValue(hash, sample.StageSceneFound);
+  MixGameStateValue(hash, sample.StageSceneWord154);
+  MixGameStateValue(hash, sample.StageSceneWord160);
+  MixGameStateValue(hash, sample.VsConnectFound);
+  MixGameStateValue(hash, sample.VsConnectWord078);
+  MixGameStateValue(hash, sample.VsConnectWord07C);
+  MixGameStateValue(hash, sample.VsConnectWord114);
+  MixGameStateValue(hash, sample.VsConnectWord118);
+  MixGameStateValue(hash, sample.VsConnectWord120);
+  MixGameStateValue(hash, sample.VsConnectWord128);
+  MixGameStateValue(hash, sample.VsConnectWord144);
+  MixGameStateValue(hash, sample.VsConnectWord148);
+  MixGameStateValue(hash, sample.VsConnectWord154);
+  MixGameStateValue(hash, sample.CourseSelectFound);
+  MixGameStateValue(hash, sample.CourseSelectSettings);
+  MixGameStateValue(hash, sample.CourseSelectWord060);
+  MixGameStateValue(hash, sample.CourseSelectWord064);
+  MixGameStateValue(hash, sample.CourseSelectWord068);
+  MixGameStateValue(hash, sample.CourseSelectWord06C);
+  MixGameStateValue(hash, sample.CourseSelectWord070);
+  MixGameStateValue(hash, sample.CourseSelectWord074);
+  MixGameStateValue(hash, sample.CourseSelectWord078);
+  MixGameStateValue(hash, sample.CourseSelectWord07C);
+  MixGameStateValue(hash, sample.CourseSelectWord080);
+  MixGameStateValue(hash, sample.CourseSelectWord084);
+  MixGameStateValue(hash, sample.CourseSelectWord088);
+  MixGameStateValue(hash, sample.CourseSelectWord08C);
+  MixGameStateValue(hash, sample.CourseSelectWord090);
+  MixGameStateValue(hash, sample.StageActorManagerFound);
+  MixGameStateValue(hash, sample.StageActorManagerStateType);
+  MixGameStateValue(hash, sample.StageControllerFound);
+  MixGameStateValue(hash, sample.StageControllerStateType);
+  MixGameStateValue(hash, sample.MvlObject267Found);
+  MixGameStateValue(hash, sample.MvlObject267StateType);
+  MixGameStateValue(hash, sample.MovingHazardFound);
+  MixGameStateValue(hash, sample.MovingHazardGUID);
+  MixGameStateValue(hash, sample.MovingHazardSettings);
+  MixGameStateValue(hash, sample.MovingHazardStateType);
+  MixGameStateValue(hash, sample.MovingHazardFlags);
+  MixGameStateValue(hash, sample.MovingHazardPosX);
+  MixGameStateValue(hash, sample.MovingHazardPosY);
+  MixGameStateValue(hash, sample.MovingHazardPosZ);
+  MixGameStateValue(hash, sample.MovingHazardVelX);
+  MixGameStateValue(hash, sample.MovingHazardVelY);
+  return hash;
+}
+
+melonDS::u64 CombinedGameStateHash(const GameStateSyncHashes &hashes) {
+  melonDS::u64 combined = hashes.Basic;
+  MixGameStateValue(combined, hashes.PlayerGlobal);
+  MixGameStateValue(combined, hashes.WifiCandidate);
+  MixGameStateValue(combined, hashes.RenderCandidate);
+  return combined;
+}
 
 WireProtocol::WireGameState
 EncodeWireGameState(melonDS::u32 frame, melonDS::u32 instance,

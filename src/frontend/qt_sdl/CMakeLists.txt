@@ -24,6 +24,7 @@ set(SOURCES_QT_SDL
     NsmbNetplayProtocol.cpp
     NsmbNetplayProtocol.h
     NsmbGameState.cpp
+    NsmbGameStateReader.cpp
     NsmbGameState.h
     NsmbAiObservation.cpp
     NsmbAiObservation.h

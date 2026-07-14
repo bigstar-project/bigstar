@@ -596,6 +596,9 @@ struct DecodedGameState {
   GameStateSyncHashes Hashes;
 };
 
+melonDS::u64 ComputeBasicGameStateHash(const GameStateSample &sample);
+melonDS::u64 CombinedGameStateHash(const GameStateSyncHashes &hashes);
+
 WireProtocol::WireGameState
 EncodeWireGameState(melonDS::u32 frame, melonDS::u32 instance,
                     const GameStateSample &sample,

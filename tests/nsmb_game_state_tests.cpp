@@ -59,11 +59,35 @@ void TestMalformedHeadersAreRejected() {
   CHECK(!GameStateModel::DecodeWireGameState(invalid, decoded));
 }
 
+void TestGameStateHashes() {
+  using namespace NsmbNetplayPoC::GameStateModel;
+  GameStateSample sample;
+  const melonDS::u64 emptyHash = ComputeBasicGameStateHash(sample);
+  CHECK(emptyHash == 0xE8381D02137D9773ull);
+
+  sample.StageID = 0x01020304;
+  CHECK(ComputeBasicGameStateHash(sample) != emptyHash);
+  sample.StageID = 0;
+  sample.MovingHazardVelY = 0xA1A2A3A4;
+  CHECK(ComputeBasicGameStateHash(sample) != emptyHash);
+  sample.MovingHazardVelY = 0;
+  sample.Hash = 0xFFFFFFFFFFFFFFFFull;
+  CHECK(ComputeBasicGameStateHash(sample) == emptyHash);
+
+  GameStateSyncHashes hashes;
+  hashes.Basic = 0x0102030405060708ull;
+  hashes.PlayerGlobal = 0x1112131415161718ull;
+  hashes.WifiCandidate = 0x2122232425262728ull;
+  hashes.RenderCandidate = 0x3132333435363738ull;
+  CHECK(CombinedGameStateHash(hashes) == 0x81FED12C6E7300F0ull);
+}
+
 } // namespace
 
 int main() {
   TestEveryWireWordRoundTrips();
   TestMalformedHeadersAreRejected();
+  TestGameStateHashes();
   if (Failures != 0) {
     std::fprintf(stderr, "nsmb game state tests failed: %d\n", Failures);
     return 1;

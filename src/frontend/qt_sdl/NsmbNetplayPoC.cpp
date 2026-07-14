@@ -17,6 +17,7 @@
 #include "NsmbInputProtocol.h"
 #include "NsmbNetplayProtocol.h"
 #include "NsmbGameState.h"
+#include "NsmbGameStateReader.h"
 #include "NsmbInputTimeline.h"
 #include "NsmbImitationAI.h"
 #include "NsmbRuleAI.h"
@@ -101,6 +102,8 @@ using GameStateModel::AITileProbeSample;
 using GameStateModel::AIPlayerTileProbeSample;
 using GameStateModel::GameStateSample;
 using GameStateModel::GameStateSyncHashes;
+using GameStateModel::CombinedGameStateHash;
+using GameStateModel::ComputeBasicGameStateHash;
 using GameStateModel::DecodedGameState;
 using GameStateModel::DecodeWireGameState;
 using GameStateModel::EncodeWireGameState;
@@ -125,7 +128,6 @@ constexpr melonDS::u32 kGameLocalPlayerIDAddr = 0x02085A7C;
 constexpr melonDS::u32 kGameVsModeAddr = 0x02085A84;
 constexpr melonDS::u32 kGameWrapXAddr = 0x02085AA4;
 constexpr melonDS::u32 kNetStateBaseAddr = 0x020887E8;
-constexpr melonDS::u32 kNetCurrentLanguageAddr = 0x020887E8;
 constexpr melonDS::u32 kNetLocalAidAddr = 0x020887F0;
 constexpr melonDS::u32 kWifiCommunicatingConsoleCountAddr = 0x02085200;
 constexpr melonDS::u32 kWifiCommunicatingConsolesAddr = 0x0208B848;
@@ -133,10 +135,6 @@ constexpr melonDS::u32 kNetState14Addr = 0x020887FC; // Net::connectionState
 constexpr melonDS::u32 kNetState1CAddr = 0x02088804; // Net::connectedConsoleCount
 constexpr melonDS::u32 kNetState20Addr = 0x02088808;
 constexpr melonDS::u32 kNetState24Addr = 0x0208880C; // Net::expectedConsoleCount
-constexpr melonDS::u32 kNetExpectedConsoleCountAddr = 0x0208880C;
-constexpr melonDS::u32 kNetMultiBootSessionAddr = 0x02088810;
-constexpr melonDS::u32 kNetSessionStateAddr = 0x02088814;
-constexpr melonDS::u32 kNetModuleStateAddr = 0x02088818;
 
 unsigned long long NowUnixMs()
 {
@@ -144,13 +142,10 @@ unsigned long long NowUnixMs()
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count());
 }
-constexpr melonDS::u32 kNetMaxSessionChildrenAddr = 0x0208881C;
-constexpr melonDS::u32 kNetMaxConsoleCountAddr = 0x0208882C;
 constexpr melonDS::u32 kNetState5CAddr = 0x0208883C; // Net::errorState
 constexpr melonDS::u32 kNetGGIDAddr = 0x02088858;
 constexpr melonDS::u32 kNetRandomBranchAddressAddr = 0x0208885C;
 constexpr melonDS::u32 kNetPacketTickAddr = 0x020888E0;
-constexpr melonDS::u32 kNetPacketKeysAddr = 0x020888E2;
 constexpr melonDS::u32 kNetPacketActionAddr = 0x020888E4;
 constexpr melonDS::u32 kNetPacketByte5Addr = 0x020888E5;
 constexpr melonDS::u32 kNetPacketByte6Addr = 0x020888E6;
@@ -166,7 +161,6 @@ constexpr melonDS::u32 kGameRandomCallCountAddr = 0x02085A54;
 constexpr melonDS::u32 kGameRandomValueAddr = 0x02085A70;
 constexpr melonDS::u32 kInputConsoleKeysAddr = 0x02087650;
 constexpr melonDS::u32 kInputPlayerKeysHeldAddr = 0x02087660;
-constexpr melonDS::u32 kInputPlayerKeysPressedAddr = 0x02087664;
 constexpr melonDS::u32 kInputKeyXMask = 1u << 10;
 constexpr melonDS::u16 kMvlStockItemTouchX = 217;
 constexpr melonDS::u16 kMvlStockItemTouchY = 153;
@@ -187,7 +181,6 @@ constexpr melonDS::u32 kGamePlayerPowerupAddr = 0x0208B324;
 constexpr melonDS::u32 kGamePlayerDeadAddr = 0x0208B328;
 constexpr melonDS::u32 kGamePlayerInventoryPowerupAddr = 0x0208B32C;
 constexpr melonDS::u32 kGamePlayerCharacterAddr = 0x0208B330;
-constexpr melonDS::u32 kGamePlayerDamageGuardTimerAddr = 0x0208B344;
 constexpr melonDS::u32 kGamePlayerTransitionStatusAddr = 0x0208B354; // Game::playerVSPipeState
 constexpr melonDS::u32 kGamePlayerCountAddr = 0x0208B348;
 constexpr melonDS::u32 kGamePlayerLivesAddr = 0x0208B364;
@@ -200,16 +193,6 @@ constexpr melonDS::u32 kGamePlayerCollectedStarsAddr = 0x0208B39C;
 constexpr melonDS::u32 kGameVsCoinCountAddr = 0x0208B37C;
 constexpr melonDS::u32 kGameCandidateWifiBlockAddr = 0x0208B7A0;
 constexpr melonDS::u32 kGameCandidateRenderBlockAddr = 0x023F8300;
-constexpr melonDS::u32 kAppFrameLengthAddr = 0x02039810;
-constexpr melonDS::u32 kAppUpdateTaskAddr = 0x02039824;
-constexpr melonDS::u32 kAppSleepPhaseAddr = 0x0208596C;
-constexpr melonDS::u32 kAppSleepControlAddr = 0x02085974;
-constexpr melonDS::u32 kAppSleepingAddr = 0x02085978;
-constexpr melonDS::u32 kAppSleepPhaseTimerAddr = 0x0208597C;
-constexpr melonDS::u32 kAppSleepWakeUpTimerAddr = 0x02085980;
-constexpr melonDS::u32 kAppBootParamAddr = 0x0208598C;
-constexpr melonDS::u32 kAppBootTargetAddr = 0x02085990;
-constexpr melonDS::u32 kAppBootSceneAddr = 0x02085994;
 constexpr melonDS::u16 kPlayerObjectID = 0x0015;
 constexpr melonDS::u32 kPlayerBaseActionFlagOffset = 0x778;
 constexpr melonDS::u32 kPlayerBaseSubActionFlagOffset = 0x77C;
@@ -294,7 +277,6 @@ constexpr melonDS::u32 kWorldEffectWordStart = 0x04;
 constexpr melonDS::u32 kWorldEffectWordEnd = 0xAC;
 static_assert(kWorldEffectWordCount ==
     ((kWorldEffectWordEnd - kWorldEffectWordStart) / sizeof(melonDS::u32)) + 1);
-constexpr melonDS::u32 kFireballsActiveCountAddr = 0x02129480;
 constexpr melonDS::u32 kFireballsHandlerAddr = 0x02129484;
 constexpr melonDS::u32 kProjectilesHandlerAddr = 0x0212A680;
 
@@ -306,16 +288,8 @@ bool IsVsDroppedStarActorSettings(melonDS::u32 settings)
         normalized == 0x00001102u ||
         normalized == 0x00001112u;
 }
-constexpr melonDS::u32 kAIFireballSlotBaseOffset = 0x04;
-constexpr melonDS::u32 kAIFireballSlotStride = 0x8C;
-constexpr melonDS::u32 kAIFireballSlotPosOffset = 0x10;
-constexpr melonDS::u32 kAIFireballSlotPrevPosOffset = 0x20;
-constexpr melonDS::u32 kAIFireballSlotVelOffset = 0x30;
 constexpr melonDS::u32 kAIFireballSlotActiveOffset = 0x80;
 // Fireball::create stores the spawn kind at +0x81. For player fireballs, kind 0/1 is the owner player id.
-constexpr melonDS::u32 kAIFireballSlotKindOffset = 0x81;
-constexpr melonDS::u32 kAIFireballSlotStateOffset = 0x83;
-constexpr melonDS::u32 kAIFireballSlotFacingOffset = 0x85;
 constexpr melonDS::u32 kAIFireballSlotDebugWordOffset = 0x40;
 constexpr int kAITileGridMinRelX = -16;
 constexpr int kAITileGridMinRelY = -10;
@@ -360,12 +334,6 @@ constexpr melonDS::u32 kStageCameraXAddr = 0x020CAE1C;
 constexpr melonDS::u32 kStageCameraYAddr = 0x020CAD94;
 constexpr melonDS::u32 kStageCameraWidthAddr = 0x020CADA4;
 constexpr melonDS::u32 kStageCameraHeightAddr = 0x020CAD8C;
-constexpr melonDS::u32 kPlayerCameraFocusPosXAddr = 0x020CAEBC;
-constexpr melonDS::u32 kPlayerCameraFocusPosYAddr = 0x020CAEC0;
-constexpr melonDS::u32 kPlayerCameraFocusPosZAddr = 0x020CAEC4;
-constexpr melonDS::u32 kPlayerCameraFocusVelXAddr = 0x020CAEEC;
-constexpr melonDS::u32 kPlayerCameraFocusVelYAddr = 0x020CAEF0;
-constexpr melonDS::u32 kPlayerCameraFocusVelZAddr = 0x020CAEF4;
 constexpr melonDS::u32 kStageDisplayCameraXAddr = 0x02085AB4;
 constexpr melonDS::u32 kA2DJGameLoadLevelAddr = 0x020068A8;
 constexpr melonDS::u32 kA2DJVSConnectCreateLoadGameSMAddr = 0x021520A0;
@@ -2505,8 +2473,6 @@ bool ParsePacketBridgeSubMenuSchedule(const char* value, std::vector<State::Pack
     return true;
 }
 
-void MixGameStateValue(melonDS::u64& hash, melonDS::u64 value);
-
 melonDS::u64 GameStateKey(int instanceID, melonDS::u32 frame)
 {
     return (static_cast<melonDS::u64>(static_cast<melonDS::u32>(instanceID)) << 32) | frame;
@@ -2515,15 +2481,6 @@ melonDS::u64 GameStateKey(int instanceID, melonDS::u32 frame)
 melonDS::u64 PlayerStateKey(melonDS::u32 player, melonDS::u32 frame)
 {
     return (static_cast<melonDS::u64>(player) << 32) | frame;
-}
-
-melonDS::u64 CombinedGameStateHash(const GameStateSyncHashes& hashes)
-{
-    melonDS::u64 combined = hashes.Basic;
-    MixGameStateValue(combined, hashes.PlayerGlobal);
-    MixGameStateValue(combined, hashes.WifiCandidate);
-    MixGameStateValue(combined, hashes.RenderCandidate);
-    return combined;
 }
 
 std::string JsonEscape(const std::string& value)
@@ -7756,21 +7713,6 @@ bool IsMainRAMAddress(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 size = 
     const melonDS::u32 offset = addr - kMainRAMBase;
     const melonDS::u32 ramLen = nds->MainRAMMask + 1;
     return offset < ramLen && size <= ramLen - offset;
-}
-
-void MixGameStateValue(melonDS::u64& hash, melonDS::u32 value)
-{
-    for (int i = 0; i < 4; i++)
-    {
-        hash ^= (value >> (i * 8)) & 0xFF;
-        hash *= 1099511628211ull;
-    }
-}
-
-void MixGameStateValue(melonDS::u64& hash, melonDS::u64 value)
-{
-    MixGameStateValue(hash, static_cast<melonDS::u32>(value & 0xFFFFFFFFu));
-    MixGameStateValue(hash, static_cast<melonDS::u32>(value >> 32));
 }
 
 bool ReadMainRAMU16(melonDS::NDS* nds, melonDS::u32 offset, melonDS::u16& value)
@@ -14387,61 +14329,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     const GameStateObjectScanCache objectScanCache = BuildGameStateObjectScanCache(nds);
     const ScopedGameStateObjectScanCache scopedObjectScanCache(objectScanCache);
 
-    sample.StageID = nds->ARM9Read32(kGameStageIDAddr);
-    sample.StageGroup = nds->ARM9Read32(kGameStageGroupAddr);
-    sample.VsMode = nds->ARM9Read32(kGameVsModeAddr);
-    sample.LocalPlayerID = nds->ARM9Read32(kGameLocalPlayerIDAddr);
-    sample.Arm9PC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
-    sample.Arm9LR = nds->ARM9.R[14];
-    sample.Arm9SP = nds->ARM9.R[13];
-    sample.Arm9CPSR = nds->ARM9.CPSR;
-    sample.AppFrameLength = nds->ARM9Read8(kAppFrameLengthAddr);
-    sample.AppUpdateTask = nds->ARM9Read32(kAppUpdateTaskAddr);
-    sample.AppSleepPhase = nds->ARM9Read8(kAppSleepPhaseAddr);
-    sample.AppSleepControl = nds->ARM9Read8(kAppSleepControlAddr);
-    sample.AppSleeping = nds->ARM9Read8(kAppSleepingAddr);
-    sample.AppSleepPhaseTimer = nds->ARM9Read16(kAppSleepPhaseTimerAddr);
-    sample.AppSleepWakeUpTimer = nds->ARM9Read16(kAppSleepWakeUpTimerAddr);
-    sample.AppBootParam = nds->ARM9Read32(kAppBootParamAddr);
-    sample.AppBootTarget = nds->ARM9Read32(kAppBootTargetAddr);
-    sample.AppBootScene = nds->ARM9Read32(kAppBootSceneAddr);
-    sample.GGID = nds->ARM9Read32(kNetGGIDAddr);
-    sample.NetCurrentLanguage = nds->ARM9Read32(kNetCurrentLanguageAddr);
-    sample.NetLocalAid = nds->ARM9Read32(kNetLocalAidAddr);
-    sample.NetState14 = nds->ARM9Read32(kNetState14Addr);
-    sample.NetState1C = nds->ARM9Read32(kNetState1CAddr);
-    sample.NetState20 = nds->ARM9Read32(kNetState20Addr);
-    sample.NetState24 = nds->ARM9Read32(kNetState24Addr);
-    sample.NetExpectedConsoleCount = nds->ARM9Read32(kNetExpectedConsoleCountAddr);
-    sample.NetMultiBootSession = nds->ARM9Read32(kNetMultiBootSessionAddr);
-    sample.NetSessionState = nds->ARM9Read32(kNetSessionStateAddr);
-    sample.NetModuleState = nds->ARM9Read32(kNetModuleStateAddr);
-    sample.NetMaxSessionChildren = nds->ARM9Read32(kNetMaxSessionChildrenAddr);
-    sample.NetMaxConsoleCount = nds->ARM9Read32(kNetMaxConsoleCountAddr);
-    sample.NetState5C = nds->ARM9Read16(kNetState5CAddr);
-    sample.NetPacketTick = nds->ARM9Read16(kNetPacketTickAddr);
-    sample.NetPacketKeys = nds->ARM9Read16(kNetPacketKeysAddr);
-    sample.NetPacketAction = nds->ARM9Read8(kNetPacketActionAddr);
-    sample.NetPacketByte5 = nds->ARM9Read8(kNetPacketByte5Addr);
-    sample.NetPacketByte6 = nds->ARM9Read8(kNetPacketByte6Addr);
-    sample.NetPacketByte7 = nds->ARM9Read8(kNetPacketByte7Addr);
-    sample.NetRandomValue = nds->ARM9Read32(kNetRandomValueAddr);
-    sample.NetRandomCallCount = nds->ARM9Read8(kNetRandomCallCountAddr);
-    sample.NetRandomBranchAddress = nds->ARM9Read32(kNetRandomBranchAddressAddr);
-    sample.InputConsole0Held = nds->ARM9Read16(kInputConsoleKeysAddr + 0x0);
-    sample.InputConsole0Pressed = nds->ARM9Read16(kInputConsoleKeysAddr + 0x2);
-    sample.InputConsole1Held = nds->ARM9Read16(kInputConsoleKeysAddr + 0x4);
-    sample.InputConsole1Pressed = nds->ARM9Read16(kInputConsoleKeysAddr + 0x6);
-    sample.InputPlayer0Held = nds->ARM9Read16(kInputPlayerKeysHeldAddr + 0x0);
-    sample.InputPlayer1Held = nds->ARM9Read16(kInputPlayerKeysHeldAddr + 0x2);
-    sample.InputPlayer0Pressed = nds->ARM9Read16(kInputPlayerKeysPressedAddr + 0x0);
-    sample.InputPlayer1Pressed = nds->ARM9Read16(kInputPlayerKeysPressedAddr + 0x2);
-    sample.StageActorFreezeFlag = nds->ARM9Read8(kStageActorFreezeFlagAddr);
-    sample.SceneIsSceneActive = nds->ARM9Read32(kSceneIsSceneActiveAddr);
-    sample.ScenePreviousSceneID = nds->ARM9Read16(kScenePreviousSceneIDAddr);
-    sample.SceneNextSceneID = nds->ARM9Read16(kSceneNextSceneIDAddr);
-    sample.SceneCurrentSceneID = nds->ARM9Read16(kSceneCurrentSceneIDAddr);
-    sample.SceneNextSceneSettings = nds->ARM9Read32(kSceneNextSceneSettingsAddr);
+    GameStateReader::ReadCoreState(nds, sample);
 
     const ObjectScanSample star = FindVsBattleStarCandidate(nds);
     sample.VsStarFound = star.Found;
@@ -14692,70 +14580,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         sample.PlayerActor1PowerupTimer,
         sample.PlayerActor1PowerupGainTimer);
 
-    sample.PlayerCount = nds->ARM9Read32(kGamePlayerCountAddr);
-    sample.PlayerTransitionStatus0 = nds->ARM9Read32(kGamePlayerTransitionStatusAddr);
-    sample.PlayerTransitionStatus1 = nds->ARM9Read32(kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32));
-    sample.EntranceSpawnID0 = nds->ARM9Read8(kEntranceSpawnEntranceIDAddr);
-    sample.EntranceSpawnID1 = nds->ARM9Read8(kEntranceSpawnEntranceIDAddr + 1);
-    sample.EntranceTransitionFlags0 = nds->ARM9Read8(kEntranceTransitionFlagsAddr);
-    sample.EntranceTransitionFlags1 = nds->ARM9Read8(kEntranceTransitionFlagsAddr + 1);
-    sample.EntranceSpawnPtr0 = nds->ARM9Read32(kEntranceSpawnEntranceAddr);
-    sample.EntranceSpawnPtr1 = nds->ARM9Read32(kEntranceSpawnEntranceAddr + sizeof(melonDS::u32));
-    sample.Player0Powerup = nds->ARM9Read8(kGamePlayerPowerupAddr);
-    sample.Player1Powerup = nds->ARM9Read8(kGamePlayerPowerupAddr + 1);
-    sample.Player0InventoryPowerup = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr);
-    sample.Player1InventoryPowerup = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr + 1);
-    sample.Player0DamageGuardTimer = nds->ARM9Read16(kGamePlayerDamageGuardTimerAddr);
-    sample.Player1DamageGuardTimer = nds->ARM9Read16(kGamePlayerDamageGuardTimerAddr + sizeof(melonDS::u16));
-    sample.Player0Dead = nds->ARM9Read8(kGamePlayerDeadAddr);
-    sample.Player1Dead = nds->ARM9Read8(kGamePlayerDeadAddr + 1);
-    sample.Player0Character = nds->ARM9Read8(kGamePlayerCharacterAddr);
-    sample.Player1Character = nds->ARM9Read8(kGamePlayerCharacterAddr + 1);
-    sample.Player0Lives = nds->ARM9Read32(kGamePlayerLivesAddr);
-    sample.Player1Lives = nds->ARM9Read32(kGamePlayerLivesAddr + sizeof(melonDS::u32));
-    sample.Player0BattleStars = nds->ARM9Read32(kGamePlayerBattleStarsAddr);
-    sample.Player1BattleStars = nds->ARM9Read32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32));
-    sample.Player0Coins = nds->ARM9Read32(kGamePlayerCoinsAddr);
-    sample.Player1Coins = nds->ARM9Read32(kGamePlayerCoinsAddr + sizeof(melonDS::u32));
-    sample.Player0Score = nds->ARM9Read32(kGamePlayerScoreAddr);
-    sample.Player1Score = nds->ARM9Read32(kGamePlayerScoreAddr + sizeof(melonDS::u32));
-    sample.Player0DisplayedStars = nds->ARM9Read32(kGamePlayerDisplayedStarsAddr);
-    sample.Player1DisplayedStars = nds->ARM9Read32(kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32));
-    sample.Player0Deaths = nds->ARM9Read32(kGamePlayerDeathsAddr);
-    sample.Player1Deaths = nds->ARM9Read32(kGamePlayerDeathsAddr + sizeof(melonDS::u32));
-    sample.Player0CollectedStars = nds->ARM9Read32(kGamePlayerCollectedStarsAddr);
-    sample.Player1CollectedStars = nds->ARM9Read32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32));
-    sample.VsCoinCount = nds->ARM9Read32(kGameVsCoinCountAddr);
-
-    sample.StageCameraGlobalX0 = nds->ARM9Read32(kStageCameraXAddr);
-    sample.StageCameraGlobalX1 = nds->ARM9Read32(kStageCameraXAddr + sizeof(melonDS::u32));
-    sample.StageCameraGlobalY0 = nds->ARM9Read32(kStageCameraYAddr);
-    sample.StageCameraGlobalY1 = nds->ARM9Read32(kStageCameraYAddr + sizeof(melonDS::u32));
-    sample.StageCameraGlobalWidth0 = nds->ARM9Read32(kStageCameraWidthAddr);
-    sample.StageCameraGlobalWidth1 = nds->ARM9Read32(kStageCameraWidthAddr + sizeof(melonDS::u32));
-    sample.StageCameraGlobalHeight0 = nds->ARM9Read32(kStageCameraHeightAddr);
-    sample.StageCameraGlobalHeight1 = nds->ARM9Read32(kStageCameraHeightAddr + sizeof(melonDS::u32));
-    sample.PlayerCameraFocusPosX0 = nds->ARM9Read32(kPlayerCameraFocusPosXAddr);
-    sample.PlayerCameraFocusPosX1 = nds->ARM9Read32(kPlayerCameraFocusPosXAddr + 0x10);
-    sample.PlayerCameraFocusPosY0 = nds->ARM9Read32(kPlayerCameraFocusPosYAddr);
-    sample.PlayerCameraFocusPosY1 = nds->ARM9Read32(kPlayerCameraFocusPosYAddr + 0x10);
-    sample.PlayerCameraFocusPosZ0 = nds->ARM9Read32(kPlayerCameraFocusPosZAddr);
-    sample.PlayerCameraFocusPosZ1 = nds->ARM9Read32(kPlayerCameraFocusPosZAddr + 0x10);
-    sample.PlayerCameraFocusVelX0 = nds->ARM9Read32(kPlayerCameraFocusVelXAddr);
-    sample.PlayerCameraFocusVelX1 = nds->ARM9Read32(kPlayerCameraFocusVelXAddr + 0x10);
-    sample.PlayerCameraFocusVelY0 = nds->ARM9Read32(kPlayerCameraFocusVelYAddr);
-    sample.PlayerCameraFocusVelY1 = nds->ARM9Read32(kPlayerCameraFocusVelYAddr + 0x10);
-    sample.PlayerCameraFocusVelZ0 = nds->ARM9Read32(kPlayerCameraFocusVelZAddr);
-    sample.PlayerCameraFocusVelZ1 = nds->ARM9Read32(kPlayerCameraFocusVelZAddr + 0x10);
-    sample.StageDisplayCameraX = nds->ARM9Read32(kStageDisplayCameraXAddr);
-    sample.CameraDbgCA880 = nds->ARM9Read32(0x020CA880);
-    sample.CameraDbgCAE04 = nds->ARM9Read32(0x020CAE04);
-    sample.CameraDbgCAE14 = nds->ARM9Read32(0x020CAE14);
-    sample.CameraDbgCAD6C = nds->ARM9Read32(0x020CAD6C);
-    sample.CameraDbgCAD8C = nds->ARM9Read32(0x020CAD8C);
-    sample.CameraDbgCADB4 = nds->ARM9Read32(0x020CADB4);
-    sample.CameraDbgCAE60 = nds->ARM9Read32(0x020CAE60);
-    sample.CameraDbgCAE64 = nds->ARM9Read32(0x020CAE64);
+    GameStateReader::ReadPlayerAndCameraGlobals(nds, sample);
 
     ObjectScanSample stageCamera = FindObjectByIDAndSettings(nds, kStageCameraObjectID, 0);
     if (!stageCamera.Found)
@@ -14900,49 +14725,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.MvlObject267RightPosX = mvlObject267Pair.Right.PosX;
     sample.MvlObject267RightPosY = mvlObject267Pair.Right.PosY;
     sample.MvlObject267RightPosZ = mvlObject267Pair.Right.PosZ;
-    sample.MvlGlobal965C = nds->ARM9Read8(0x020CA698);
-    sample.MvlGlobal9670 = nds->ARM9Read8(0x020CA6AC);
-    sample.MvlGlobal9674 = nds->ARM9Read8(0x020CA6B0);
-    sample.MvlGlobal9694_0 = nds->ARM9Read8(0x020CA6D0);
-    sample.MvlGlobal9694_1 = nds->ARM9Read8(0x020CA6D1);
-    // StageLayout::onUpdate has an MvL-specific branch gated by these globals.
-    // They are not named in NSMB-Code-Reference yet, so keep the address suffix.
-    sample.MvlStageLayoutGateCAC6C = nds->ARM9Read8(0x020CAC6C);
-    sample.MvlStageLayoutGateCAC74 = nds->ARM9Read8(0x020CAC74);
-    sample.MvlStageLayoutGateCAC7C = nds->ARM9Read8(0x020CAC7C);
-    sample.MvlStageLayoutGateCACDC = nds->ARM9Read8(0x020CACDC);
-    sample.MvlStageLayoutGateCAE80 = nds->ARM9Read32(0x020CAE80);
-    sample.MvlStageLayoutGateCAE74 = nds->ARM9Read8(0x020CAE74);
-    sample.MvlStageLayoutGateCAEB8 = nds->ARM9Read32(0x020CAEB8);
-    sample.MvlStageLayoutGateCAF20 = nds->ARM9Read32(0x020CAF20);
-    sample.MvlStageLayoutGateCAF40 = nds->ARM9Read32(0x020CAF40);
-    sample.MvlStageLayoutGateCA8C0 = nds->ARM9Read8(0x020CA8C0);
-    sample.MvlStageLayoutGateCA8D0 = nds->ARM9Read8(0x020CA8D0);
-    sample.MvlStageLayoutGateCAD30 = nds->ARM9Read8(0x020CAD30);
-    sample.MvlManagerBase = nds->ARM9Read32(0x020CAD40);
-    if (IsARM9MainRAMAddress(sample.MvlManagerBase))
-    {
-        sample.MvlManagerVTable = nds->ARM9Read32(sample.MvlManagerBase + 0x00);
-        sample.MvlManagerGUID = nds->ARM9Read32(sample.MvlManagerBase + 0x04);
-        sample.MvlManagerSettings = nds->ARM9Read32(sample.MvlManagerBase + 0x08);
-        sample.MvlManagerObjectID = nds->ARM9Read16(sample.MvlManagerBase + 0x0C);
-        sample.MvlManagerStateType = nds->ARM9Read16(sample.MvlManagerBase + 0x0E);
-        sample.MvlManagerFlags = nds->ARM9Read32(sample.MvlManagerBase + 0x10);
-        sample.MvlManagerUnk54 = nds->ARM9Read32(sample.MvlManagerBase + 0x54);
-        sample.MvlManagerResourcesHeap = nds->ARM9Read32(sample.MvlManagerBase + 0x58);
-        sample.MvlManagerWordA8CC = nds->ARM9Read32(sample.MvlManagerBase + 0xA8CC);
-        sample.MvlManagerWordA8D0 = nds->ARM9Read32(sample.MvlManagerBase + 0xA8D0);
-        sample.MvlManagerWordA8D4 = nds->ARM9Read32(sample.MvlManagerBase + 0xA8D4);
-        sample.MvlManagerWordA8D8 = nds->ARM9Read32(sample.MvlManagerBase + 0xA8D8);
-        sample.MvlManagerWordA8DC = nds->ARM9Read32(sample.MvlManagerBase + 0xA8DC);
-        sample.MvlManagerWordA8E0 = nds->ARM9Read32(sample.MvlManagerBase + 0xA8E0);
-        sample.MvlManagerWordA8E4 = nds->ARM9Read32(sample.MvlManagerBase + 0xA8E4);
-        sample.MvlManagerHalfA8E8 = nds->ARM9Read16(sample.MvlManagerBase + 0xA8E8);
-        sample.MvlManagerHalfA8EA = nds->ARM9Read16(sample.MvlManagerBase + 0xA8EA);
-        sample.MvlManagerByteA8EC = nds->ARM9Read8(sample.MvlManagerBase + 0xA8EC);
-        sample.MvlManagerHalf494 = nds->ARM9Read16(sample.MvlManagerBase + 0x494);
-        sample.MvlManagerHalf4A0 = nds->ARM9Read16(sample.MvlManagerBase + 0x4A0);
-    }
+    GameStateReader::ReadMvlGlobals(nds, sample);
     const ObjectScanSample movingHazard =
         FindNewestActiveObjectByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
     sample.MovingHazardFound = movingHazard.Found;
@@ -14967,56 +14750,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
     sample.MovingHazardTargetVelY = movingHazard.TargetVelY;
     sample.MovingHazardTargetVelZ = movingHazard.TargetVelZ;
 
-    if (IsARM9MainRAMAddress(kFireballsActiveCountAddr))
-        sample.FireballsActiveCount = nds->ARM9Read32(kFireballsActiveCountAddr);
-    if (IsARM9MainRAMAddress(kFireballsHandlerAddr))
-        sample.FireballsHandlerPtr = nds->ARM9Read32(kFireballsHandlerAddr);
-    for (int i = 0; i < kAISpecialHandlerWordCount; i++)
-    {
-        const melonDS::u32 fireballWordAddr = kFireballsHandlerAddr + sizeof(melonDS::u32) * i;
-        const melonDS::u32 projectileWordAddr = kProjectilesHandlerAddr + sizeof(melonDS::u32) * i;
-        if (IsARM9MainRAMAddress(fireballWordAddr))
-            sample.FireballsHandlerWords[i] = nds->ARM9Read32(fireballWordAddr);
-        if (IsARM9MainRAMAddress(projectileWordAddr))
-            sample.ProjectilesHandlerWords[i] = nds->ARM9Read32(projectileWordAddr);
-    }
-    if (IsARM9MainRAMAddress(sample.FireballsHandlerPtr))
-    {
-        for (int i = 0; i < kAIFireballSlotCount; i++)
-        {
-            const melonDS::u32 slot = sample.FireballsHandlerPtr + kAIFireballSlotBaseOffset + kAIFireballSlotStride * i;
-            if (!IsARM9MainRAMAddress(slot + kAIFireballSlotActiveOffset))
-                continue;
-            sample.FireballSlotActive[i] = nds->ARM9Read8(slot + kAIFireballSlotActiveOffset);
-            if (sample.FireballSlotActive[i] == 0)
-                continue;
-            sample.FireballSlotKind[i] = nds->ARM9Read8(slot + kAIFireballSlotKindOffset);
-            sample.FireballSlotState[i] = nds->ARM9Read8(slot + kAIFireballSlotStateOffset);
-            sample.FireballSlotFacing[i] = nds->ARM9Read8(slot + kAIFireballSlotFacingOffset);
-            sample.FireballSlotPosX[i] = nds->ARM9Read32(slot + kAIFireballSlotPosOffset);
-            sample.FireballSlotPosY[i] = nds->ARM9Read32(slot + kAIFireballSlotPosOffset + sizeof(melonDS::u32));
-            sample.FireballSlotPosZ[i] = nds->ARM9Read32(slot + kAIFireballSlotPosOffset + sizeof(melonDS::u32) * 2);
-            sample.FireballSlotPrevX[i] = nds->ARM9Read32(slot + kAIFireballSlotPrevPosOffset);
-            sample.FireballSlotPrevY[i] = nds->ARM9Read32(slot + kAIFireballSlotPrevPosOffset + sizeof(melonDS::u32));
-            sample.FireballSlotPrevZ[i] = nds->ARM9Read32(slot + kAIFireballSlotPrevPosOffset + sizeof(melonDS::u32) * 2);
-            sample.FireballSlotVelX[i] = nds->ARM9Read32(slot + kAIFireballSlotVelOffset);
-            sample.FireballSlotVelY[i] = nds->ARM9Read32(slot + kAIFireballSlotVelOffset + sizeof(melonDS::u32));
-            sample.FireballSlotVelZ[i] = nds->ARM9Read32(slot + kAIFireballSlotVelOffset + sizeof(melonDS::u32) * 2);
-            for (int j = 0; j < kAIFireballSlotStateByteCount; j++)
-            {
-                const melonDS::u32 byteAddr = slot + kAIFireballSlotActiveOffset + static_cast<melonDS::u32>(j);
-                if (IsARM9MainRAMAddress(byteAddr))
-                    sample.FireballSlotStateBytes[i][j] = nds->ARM9Read8(byteAddr);
-            }
-            for (int j = 0; j < kAIFireballSlotDebugWordCount; j++)
-            {
-                const melonDS::u32 wordAddr =
-                    slot + kAIFireballSlotDebugWordOffset + sizeof(melonDS::u32) * static_cast<melonDS::u32>(j);
-                if (IsARM9MainRAMAddress(wordAddr))
-                    sample.FireballSlotDebugWords[i][j] = nds->ARM9Read32(wordAddr);
-            }
-        }
-    }
+    GameStateReader::ReadProjectileGlobals(nds, sample);
 
     const ObjectLifecycleSummary objectSummary = SummarizeObjectLifecycle(nds);
     sample.ObjectScanTotal = objectSummary.Total;
@@ -15038,148 +14772,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
         sample.ObjectActiveBase[i] = objectSummary.ActiveBase[i];
     }
 
-    sample.Hash = 1469598103934665603ull;
-    MixGameStateValue(sample.Hash, sample.StageID);
-    MixGameStateValue(sample.Hash, sample.StageGroup);
-    MixGameStateValue(sample.Hash, sample.VsMode);
-    MixGameStateValue(sample.Hash, sample.LocalPlayerID);
-    MixGameStateValue(sample.Hash, sample.GGID);
-    MixGameStateValue(sample.Hash, sample.NetState14);
-    MixGameStateValue(sample.Hash, sample.NetState1C);
-    MixGameStateValue(sample.Hash, sample.NetState20);
-    MixGameStateValue(sample.Hash, sample.NetState24);
-    MixGameStateValue(sample.Hash, sample.NetState5C);
-    MixGameStateValue(sample.Hash, sample.NetPacketTick);
-    MixGameStateValue(sample.Hash, sample.NetPacketKeys);
-    MixGameStateValue(sample.Hash, sample.NetPacketAction);
-    MixGameStateValue(sample.Hash, sample.NetPacketByte5);
-    MixGameStateValue(sample.Hash, sample.NetPacketByte6);
-    MixGameStateValue(sample.Hash, sample.NetPacketByte7);
-    MixGameStateValue(sample.Hash, sample.NetRandomValue);
-    MixGameStateValue(sample.Hash, sample.NetRandomCallCount);
-    MixGameStateValue(sample.Hash, sample.NetRandomBranchAddress);
-    MixGameStateValue(sample.Hash, sample.InputConsole0Held);
-    MixGameStateValue(sample.Hash, sample.InputConsole0Pressed);
-    MixGameStateValue(sample.Hash, sample.InputConsole1Held);
-    MixGameStateValue(sample.Hash, sample.InputConsole1Pressed);
-    MixGameStateValue(sample.Hash, sample.InputPlayer0Held);
-    MixGameStateValue(sample.Hash, sample.InputPlayer1Held);
-    MixGameStateValue(sample.Hash, sample.InputPlayer0Pressed);
-    MixGameStateValue(sample.Hash, sample.InputPlayer1Pressed);
-    MixGameStateValue(sample.Hash, sample.StageActorFreezeFlag);
-    MixGameStateValue(sample.Hash, sample.VsStarFound);
-    MixGameStateValue(sample.Hash, sample.VsStarGUID);
-    MixGameStateValue(sample.Hash, sample.VsStarSettings);
-    MixGameStateValue(sample.Hash, sample.VsStarStateType);
-    MixGameStateValue(sample.Hash, sample.VsStarFlags);
-    MixGameStateValue(sample.Hash, sample.VsStarPosX);
-    MixGameStateValue(sample.Hash, sample.VsStarPosY);
-    MixGameStateValue(sample.Hash, sample.VsStarPosZ);
-    MixGameStateValue(sample.Hash, sample.VsStarActorFound);
-    MixGameStateValue(sample.Hash, sample.VsStarActorGUID);
-    MixGameStateValue(sample.Hash, sample.VsStarActorSettings);
-    MixGameStateValue(sample.Hash, sample.VsStarActorStateType);
-    MixGameStateValue(sample.Hash, sample.VsStarActorFlags);
-    MixGameStateValue(sample.Hash, sample.VsStarActorPosX);
-    MixGameStateValue(sample.Hash, sample.VsStarActorPosY);
-    MixGameStateValue(sample.Hash, sample.VsStarActorPosZ);
-    MixGameStateValue(sample.Hash, sample.PlayerActor0Found);
-    MixGameStateValue(sample.Hash, sample.PlayerActor0GUID);
-    MixGameStateValue(sample.Hash, sample.PlayerActor0Settings);
-    MixGameStateValue(sample.Hash, sample.PlayerActor0PosX);
-    MixGameStateValue(sample.Hash, sample.PlayerActor0PosY);
-    MixGameStateValue(sample.Hash, sample.PlayerActor0PosZ);
-    MixGameStateValue(sample.Hash, sample.PlayerActor0PrevX);
-    MixGameStateValue(sample.Hash, sample.PlayerActor0PrevY);
-    MixGameStateValue(sample.Hash, sample.PlayerActor0PrevZ);
-    MixGameStateValue(sample.Hash, sample.PlayerActor0VelX);
-    MixGameStateValue(sample.Hash, sample.PlayerActor0VelY);
-    MixGameStateValue(sample.Hash, sample.PlayerActor0VelZ);
-    MixGameStateValue(sample.Hash, sample.PlayerActor1Found);
-    MixGameStateValue(sample.Hash, sample.PlayerActor1GUID);
-    MixGameStateValue(sample.Hash, sample.PlayerActor1Settings);
-    MixGameStateValue(sample.Hash, sample.PlayerActor1PosX);
-    MixGameStateValue(sample.Hash, sample.PlayerActor1PosY);
-    MixGameStateValue(sample.Hash, sample.PlayerActor1PosZ);
-    MixGameStateValue(sample.Hash, sample.PlayerActor1PrevX);
-    MixGameStateValue(sample.Hash, sample.PlayerActor1PrevY);
-    MixGameStateValue(sample.Hash, sample.PlayerActor1PrevZ);
-    MixGameStateValue(sample.Hash, sample.PlayerActor1VelX);
-    MixGameStateValue(sample.Hash, sample.PlayerActor1VelY);
-    MixGameStateValue(sample.Hash, sample.PlayerActor1VelZ);
-    MixGameStateValue(sample.Hash, sample.PlayerCount);
-    MixGameStateValue(sample.Hash, sample.Player0Powerup);
-    MixGameStateValue(sample.Hash, sample.Player1Powerup);
-    MixGameStateValue(sample.Hash, sample.Player0InventoryPowerup);
-    MixGameStateValue(sample.Hash, sample.Player1InventoryPowerup);
-    MixGameStateValue(sample.Hash, sample.Player0Dead);
-    MixGameStateValue(sample.Hash, sample.Player1Dead);
-    MixGameStateValue(sample.Hash, sample.Player0Character);
-    MixGameStateValue(sample.Hash, sample.Player1Character);
-    MixGameStateValue(sample.Hash, sample.Player0Lives);
-    MixGameStateValue(sample.Hash, sample.Player1Lives);
-    MixGameStateValue(sample.Hash, sample.Player0BattleStars);
-    MixGameStateValue(sample.Hash, sample.Player1BattleStars);
-    MixGameStateValue(sample.Hash, sample.Player0Coins);
-    MixGameStateValue(sample.Hash, sample.Player1Coins);
-    MixGameStateValue(sample.Hash, sample.Player0Score);
-    MixGameStateValue(sample.Hash, sample.Player1Score);
-    MixGameStateValue(sample.Hash, sample.Player0DisplayedStars);
-    MixGameStateValue(sample.Hash, sample.Player1DisplayedStars);
-    MixGameStateValue(sample.Hash, sample.Player0Deaths);
-    MixGameStateValue(sample.Hash, sample.Player1Deaths);
-    MixGameStateValue(sample.Hash, sample.Player0CollectedStars);
-    MixGameStateValue(sample.Hash, sample.Player1CollectedStars);
-    MixGameStateValue(sample.Hash, sample.VsCoinCount);
-    MixGameStateValue(sample.Hash, sample.StageCameraFound);
-    MixGameStateValue(sample.Hash, sample.StageCameraWord190);
-    MixGameStateValue(sample.Hash, sample.StageCameraWord194);
-    MixGameStateValue(sample.Hash, sample.StageCameraWord19C);
-    MixGameStateValue(sample.Hash, sample.StageCameraWord1A0);
-    MixGameStateValue(sample.Hash, sample.StageSceneFound);
-    MixGameStateValue(sample.Hash, sample.StageSceneWord154);
-    MixGameStateValue(sample.Hash, sample.StageSceneWord160);
-    MixGameStateValue(sample.Hash, sample.VsConnectFound);
-    MixGameStateValue(sample.Hash, sample.VsConnectWord078);
-    MixGameStateValue(sample.Hash, sample.VsConnectWord07C);
-    MixGameStateValue(sample.Hash, sample.VsConnectWord114);
-    MixGameStateValue(sample.Hash, sample.VsConnectWord118);
-    MixGameStateValue(sample.Hash, sample.VsConnectWord120);
-    MixGameStateValue(sample.Hash, sample.VsConnectWord128);
-    MixGameStateValue(sample.Hash, sample.VsConnectWord144);
-    MixGameStateValue(sample.Hash, sample.VsConnectWord148);
-    MixGameStateValue(sample.Hash, sample.VsConnectWord154);
-    MixGameStateValue(sample.Hash, sample.CourseSelectFound);
-    MixGameStateValue(sample.Hash, sample.CourseSelectSettings);
-    MixGameStateValue(sample.Hash, sample.CourseSelectWord060);
-    MixGameStateValue(sample.Hash, sample.CourseSelectWord064);
-    MixGameStateValue(sample.Hash, sample.CourseSelectWord068);
-    MixGameStateValue(sample.Hash, sample.CourseSelectWord06C);
-    MixGameStateValue(sample.Hash, sample.CourseSelectWord070);
-    MixGameStateValue(sample.Hash, sample.CourseSelectWord074);
-    MixGameStateValue(sample.Hash, sample.CourseSelectWord078);
-    MixGameStateValue(sample.Hash, sample.CourseSelectWord07C);
-    MixGameStateValue(sample.Hash, sample.CourseSelectWord080);
-    MixGameStateValue(sample.Hash, sample.CourseSelectWord084);
-    MixGameStateValue(sample.Hash, sample.CourseSelectWord088);
-    MixGameStateValue(sample.Hash, sample.CourseSelectWord08C);
-    MixGameStateValue(sample.Hash, sample.CourseSelectWord090);
-    MixGameStateValue(sample.Hash, sample.StageActorManagerFound);
-    MixGameStateValue(sample.Hash, sample.StageActorManagerStateType);
-    MixGameStateValue(sample.Hash, sample.StageControllerFound);
-    MixGameStateValue(sample.Hash, sample.StageControllerStateType);
-    MixGameStateValue(sample.Hash, sample.MvlObject267Found);
-    MixGameStateValue(sample.Hash, sample.MvlObject267StateType);
-    MixGameStateValue(sample.Hash, sample.MovingHazardFound);
-    MixGameStateValue(sample.Hash, sample.MovingHazardGUID);
-    MixGameStateValue(sample.Hash, sample.MovingHazardSettings);
-    MixGameStateValue(sample.Hash, sample.MovingHazardStateType);
-    MixGameStateValue(sample.Hash, sample.MovingHazardFlags);
-    MixGameStateValue(sample.Hash, sample.MovingHazardPosX);
-    MixGameStateValue(sample.Hash, sample.MovingHazardPosY);
-    MixGameStateValue(sample.Hash, sample.MovingHazardPosZ);
-    MixGameStateValue(sample.Hash, sample.MovingHazardVelX);
-    MixGameStateValue(sample.Hash, sample.MovingHazardVelY);
+    sample.Hash = ComputeBasicGameStateHash(sample);
     return sample;
 }
 
