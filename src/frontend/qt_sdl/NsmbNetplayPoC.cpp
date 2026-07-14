@@ -341,14 +341,10 @@ constexpr melonDS::u32 kA2DJLoadMvsLFilesThreadAddr = 0x02152E04;
 constexpr melonDS::u32 kA2DJCreateThreadAddr = 0x02004BFC;
 constexpr melonDS::u32 kA2DJVSConnectScheduleSubMenuChangeAddr = 0x021528A0;
 constexpr melonDS::u32 kA2DJVSConnectLoadGameSMSubMenuAddr = 0x02156624;
-constexpr melonDS::u32 kA2DJVSConnectPostLoadGameSMSubMenuAddr = 0x02156640;
-constexpr melonDS::u32 kA2DJVSConnectStageStartSMSubMenuAddr = 0x02156678;
-constexpr melonDS::u32 kA2DJVSConnectClientConfirmSMSubMenuAddr = 0x02156694;
 constexpr melonDS::u32 kA2DJVSConnectOnUpdateAddr = 0x021529FC;
 constexpr melonDS::u32 kA2DJFSCacheLoadFileAddr = 0x02009C64;
 constexpr melonDS::u32 kA2DJFSCacheLoadDataAddr = 0x02009BC8;
 constexpr melonDS::u32 kA2DJVSCreateCourseSelectAddr = 0x0214F858;
-constexpr melonDS::u32 kA2DJCourseSelectFactoryAddr = 0x020130A8;
 constexpr melonDS::u32 kA2DJApplySceneRequestAddr = 0x02007ACC;
 constexpr melonDS::u32 kA2DJStartSceneTransitionAddr = 0x02011CE8;
 constexpr melonDS::u32 kA2DJCreateObjectAddr = 0x0204BF8C;
@@ -10261,54 +10257,6 @@ ObjectScanSample FindObjectByID(melonDS::NDS* nds, melonDS::u16 expectedObjectID
     return sample;
 }
 
-ObjectScanSample FindObjectByIDLoose(melonDS::NDS* nds, melonDS::u16 expectedObjectID)
-{
-    ObjectScanSample sample;
-    if (!nds || !nds->MainRAM)
-        return sample;
-    if (ActiveGameStateObjectScanCache)
-        return FindCachedObject(expectedObjectID, false, 0, false);
-
-    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
-    if (ramLen < 0x120)
-        return sample;
-
-    for (melonDS::u32 off = 0; off <= ramLen - 0x120; off += 4)
-    {
-        melonDS::u32 vtable = 0;
-        melonDS::u32 guid = 0;
-        melonDS::u32 settings = 0;
-        melonDS::u16 objectID = 0;
-        melonDS::u16 stateType = 0;
-        melonDS::u32 flags = 0;
-        if (!ReadMainRAMU32(nds, off, vtable) ||
-            !ReadMainRAMU32(nds, off + 4, guid) ||
-            !ReadMainRAMU32(nds, off + 8, settings) ||
-            !ReadMainRAMU16(nds, off + 0x0C, objectID) ||
-            !ReadMainRAMU16(nds, off + 0x0E, stateType) ||
-            !ReadMainRAMU32(nds, off + 0x10, flags))
-            continue;
-
-        if (vtable < kMainRAMBase || vtable >= kMainRAMBase + ramLen)
-            continue;
-        if (guid == 0 || guid >= 0x10000)
-            continue;
-        if (objectID != expectedObjectID)
-            continue;
-
-        sample.Found = 1;
-        sample.GUID = guid;
-        sample.Base = kMainRAMBase + off;
-        sample.Settings = settings;
-        sample.StateType = stateType;
-        sample.Flags = flags;
-        ReadObjectTransform(nds, off, sample);
-        return sample;
-    }
-
-    return sample;
-}
-
 ObjectScanSample FindObjectByIDAndSettingsLoose(melonDS::NDS* nds, melonDS::u16 expectedObjectID, melonDS::u32 expectedSettings)
 {
     ObjectScanSample sample;
@@ -12223,19 +12171,6 @@ void ForcePlayerActorPositionIfNeeded(int instanceID, melonDS::u32 frame, melonD
             G.ForcePlayerActorPositionPlayerIDSet ? 1 : 0,
             G.ForcePlayerActorPositionPlayerID);
     }
-}
-
-bool ReadObjectWordByIDAndSettings(
-    melonDS::NDS* nds,
-    melonDS::u16 expectedObjectID,
-    melonDS::u32 expectedSettings,
-    melonDS::u32 relativeOffset,
-    melonDS::u32& value)
-{
-    const ObjectScanSample actor = FindObjectByIDAndSettings(nds, expectedObjectID, expectedSettings);
-    if (!actor.Found || actor.Base < kMainRAMBase)
-        return false;
-    return ReadMainRAMU32(nds, actor.Base - kMainRAMBase + relativeOffset, value);
 }
 
 bool WriteObjectWordByIDAndSettings(

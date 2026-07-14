@@ -2225,48 +2225,6 @@ bool RuntimeHazardFeature(
     return true;
 }
 
-const GameStateObjectScanEntry* NearestRuntimeHazard(
-    const GameStateObjectScanCache& objectScanCache,
-    melonDS::u32 selfX,
-    melonDS::u32 selfY,
-    std::int64_t horizontalRange,
-    std::int64_t verticalRange,
-    std::int64_t& outDx,
-    std::int64_t& outDy)
-{
-    const GameStateObjectScanEntry* nearest = nullptr;
-    std::int64_t nearestDist2 = 0;
-    auto abs64 = [](std::int64_t value) {
-        return value < 0 ? -value : value;
-    };
-    for (const GameStateObjectScanEntry& entry : objectScanCache.Entries)
-    {
-        if (entry.LifecycleState != 1)
-            continue;
-        const char* category = AIObjectCategory(entry.ObjectID, entry.Actor.Settings);
-        if (std::strcmp(category, "moving_hazard") != 0 &&
-            std::strcmp(category, "hazard") != 0 &&
-            std::strcmp(category, "enemy_goomba") != 0 &&
-            std::strcmp(category, "enemy_koopa") != 0)
-        {
-            continue;
-        }
-        const std::int64_t dx = AIWrappedDeltaX(SignedU32(entry.Actor.PosX), SignedU32(selfX));
-        const std::int64_t dy = static_cast<std::int64_t>(SignedU32(entry.Actor.PosY)) - SignedU32(selfY);
-        if (abs64(dx) > horizontalRange || abs64(dy) > verticalRange)
-            continue;
-        const std::int64_t dist2 = dx * dx + dy * dy;
-        if (!nearest || dist2 < nearestDist2)
-        {
-            nearest = &entry;
-            nearestDist2 = dist2;
-            outDx = dx;
-            outDy = dy;
-        }
-    }
-    return nearest;
-}
-
 bool ApplyImitationAIHazardGuard(
     const GameStateSample& sample,
     const GameStateObjectScanCache& objectScanCache,

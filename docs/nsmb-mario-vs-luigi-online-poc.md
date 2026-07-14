@@ -8,10 +8,11 @@
 - テスト方針: ROM不要のunit/contract testを常時実行し、local ROM/savestateを使うdeterministic replayと2-process loopback smokeを上位層に置く。全RAM hashだけに依存せず、stage、player座標/状態、stars/lives、scene遷移、同期eventなどのsemantic traceをgolden比較する。ROMを配布できないCIではunit testを必須、ROM統合テストはlocalまたはself-hosted/nightly gateにする。
 - 完了: CTestへ `nsmb_netplay_config_tests` を登録し、既存env valueのflag/int/double/u32/fallback semanticsをROMなし約0.1秒で検査できるようにした。`EnvFlag/EnvInt/EnvDouble/EnvU32/EnvCString/EnvHasValue` の実装は `NsmbNetplayConfig.cpp` へ抽出した。
 - 完了: process environmentを差し替え可能な `Config::Environment` とtyped `BootstrapConfig` を追加し、PoC/test有効化、test frame/instance、hash、wait/quit、input trace設定を `InitFromEnvironment` から抽出した。defaultとclampをfake environmentで直接検証する。
+- 完了: Clangの`unused-function/variable/const-variable`診断で未使用と確認した旧PoC定数4個と関数3個を削除した。削除対象は旧VSConnect submenu/course-select address、loose object scan/read helper、旧nearest hazard helper。`State`直下877 fieldは全て`G.<field>`参照があり、単純な未参照fieldは0件だった。
 - 完了: `scripts/test-nsmb-netplay-refactor.ps1` にfast/standard/full tierを追加した。fastは専用の非対称入力fixture、固定match seed、stable host/client ROM、2-process ENet、JIT、実player actor更新、host/client semantic state比較を1,250 framesで実行する。standardは描画/screenshot込み3,000 frames、fullはstandardに加えてstar取得からresult sceneまでの6,000 frames smokeを実行する。
 - Current blocker: なし。fast goldenは現在のstable ROM hashも検査するため、ROM patchを意図的に変更する作業ではsemantic差分を確認してgoldenを明示更新する必要がある。
-- Next action: connection/input/rollback設定は既存の初期化順依存をcharacterization testで固定してからtyped configへ移す。同時に未参照の設定/State field/functionを参照解析し、削除候補ごとにbuild、unit、fast gameplay goldenを通す。
-- Verification status: Release `melonDS` とunit targetのbuild成功。CTestはpass。旧binary baseline 2,300 framesはpass。新fast tierは15.5秒でpassし、固定seed後は独立2 runのhost/client semantic CSVと適用inputがbyte-for-byte一致。env lookup/`BootstrapConfig` 抽出後binaryでもfast gameplay golden comparisonがpassした。
+- Next action: connection/input/rollback設定は既存の初期化順依存をcharacterization testで固定してからtyped configへ移す。古いPoC機能は、env設定→State field→実行hook→現行GUI/scriptの到達性を調べ、到達不能なfeature group単位で削除する。
+- Verification status: Release `melonDS` とunit targetのbuild成功。CTestはpass。旧binary baseline 2,300 framesはpass。新fast tierは15.5秒でpassし、固定seed後は独立2 runのhost/client semantic CSVと適用inputがbyte-for-byte一致。env lookup/`BootstrapConfig` 抽出後とunused code削除後のbinaryでもfast gameplay golden comparisonがpassし、Clang unused診断は0件になった。
 
 ## AI observation v3 / exact player hitbox - 2026-07-14
 
