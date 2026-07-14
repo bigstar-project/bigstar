@@ -192,6 +192,7 @@ if (BUILD_TESTING)
     add_executable(nsmb_input_delivery_tests
         NsmbInputDelivery.cpp
         NsmbInputDelivery.h
+        NsmbInputProtocol.cpp
         NsmbInputProtocol.h
         NsmbNetplayPoC.h
         ${CMAKE_SOURCE_DIR}/tests/nsmb_input_delivery_tests.cpp

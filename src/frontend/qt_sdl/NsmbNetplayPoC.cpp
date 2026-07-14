@@ -402,21 +402,6 @@ struct DelayedWireNSMLPacket
     WireNSMLPacket Packet {};
 };
 
-struct DelayedWireInput
-{
-    melonDS::u32 ReleaseFrame = 0;
-    std::chrono::steady_clock::time_point ReleaseTime {};
-    std::vector<char> Payload {};
-    melonDS::u32 Flags = ENET_PACKET_FLAG_RELIABLE;
-};
-
-
-
-
-
-
-
-
 AITerrainDerivedSummary DeriveAITerrainSummaryFromGrid(
     const AIPlayerTileProbeSample& probe,
     bool contactGround,
@@ -619,7 +604,7 @@ struct State
     Config::InputConfig Input;
     std::map<melonDS::u32, InputState> PacketBridgePacketInputs;
     std::vector<DelayedWireNSMLPacket> DelayedNSMLPackets;
-    std::vector<DelayedWireInput> DelayedInputs;
+    InputDelivery::Runtime Delivery;
     Config::MvlConfig Mvl;
     int MvlCurrentStage = 0;
     melonDS::u32 MvlCurrentStageSceneSettings = kMvlStageSceneDefaultSettings;
@@ -976,7 +961,7 @@ void UpdateHangNetplaySnapshotLocked(melonDS::u32 frameForLead)
     G.HangLead.store(lead, std::memory_order_release);
     G.HangLocalQueue.store(G.LocalInputs.size(), std::memory_order_release);
     G.HangRemoteQueue.store(G.RemoteInputs.size(), std::memory_order_release);
-    G.HangDelayedQueue.store(G.DelayedInputs.size(), std::memory_order_release);
+    G.HangDelayedQueue.store(G.Delivery.PendingCount(), std::memory_order_release);
     G.HangPeerState.store(G.Transport.PeerState(), std::memory_order_release);
     G.HangConnectingPeerState.store(G.Transport.ConnectingPeerState(), std::memory_order_release);
 }
@@ -1265,7 +1250,7 @@ void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
     G.PendingNSMLPackets.clear();
     G.PacketBridgePacketInputs.clear();
     G.DelayedNSMLPackets.clear();
-    G.DelayedInputs.clear();
+    G.Delivery.Clear();
     G.LocalInputs.clear();
     G.RemoteInputs.clear();
     G.RollbackInputs.ClearPredictions();
@@ -2536,7 +2521,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                 CurrentInputLeadLocked(G.LastSentInputFrame == kNoFrameLimit ? localFrame : G.LastSentInputFrame),
                 G.LocalInputs.size(),
                 G.RemoteInputs.size(),
-                G.DelayedInputs.size(),
+                G.Delivery.PendingCount(),
                 G.InputFrameLeadResendCount,
                 G.Connection.StartFrame,
                 G.LocalNetplayStartReadyFrame,
@@ -2724,35 +2709,18 @@ void SendInputPayloadNowLocked(const void* data, size_t size, melonDS::u32 flags
 
 void FlushDelayedInputsLocked(melonDS::u32 frame)
 {
-    if (!G.Transport.IsConnected() || G.DelayedInputs.empty())
+    if (!G.Transport.IsConnected() || G.Delivery.PendingCount() == 0)
         return;
 
-    for (auto it = G.DelayedInputs.begin(); it != G.DelayedInputs.end(); )
-    {
-        if (InputDelivery::ShouldReleaseDelayedInput(
-                frame,
-                std::chrono::steady_clock::now(),
-                it->ReleaseFrame,
-                it->ReleaseTime))
-        {
-            SendInputPayloadNowLocked(it->Payload.data(), it->Payload.size(), it->Flags);
-            it = G.DelayedInputs.erase(it);
-        }
-        else
-        {
-            ++it;
-        }
-    }
-}
-
-std::vector<char> BuildInputBundlePayloadLocked(melonDS::u32 frame, const InputState& input)
-{
-    const std::vector<InputProtocol::FramedInput> entries = InputDelivery::SelectBundleInputs(
+    G.Delivery.DrainDue(
         frame,
-        input,
-        G.Input.BundleHistory,
-        G.LocalInputs);
-    return InputProtocol::EncodeInputBundle(entries);
+        std::chrono::steady_clock::now(),
+        [](const std::vector<char>& payload) {
+            SendInputPayloadNowLocked(
+                payload.data(),
+                payload.size(),
+                ENET_PACKET_FLAG_RELIABLE);
+        });
 }
 
 void SendInputLocked(melonDS::u32 frame, const InputState& input)
@@ -2784,8 +2752,9 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
             false);
     }
 
-    const InputDelivery::SendDecision sendDecision = InputDelivery::DecideSend(
+    const InputDelivery::PreparedSend prepared = G.Delivery.Prepare(
         frame,
+        input,
         {
             G.Input.UseHistoryBundle,
             G.Input.BundleHistory,
@@ -2797,8 +2766,10 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
             G.Input.SendJitterFrames,
             G.Input.SendDelayStartFrame,
             G.Input.SendDelayEndFrame,
-        });
-    if (sendDecision.Drop)
+        },
+        G.LocalInputs,
+        std::chrono::steady_clock::now());
+    if (prepared.Decision.Drop)
     {
         if (G.Input.NetplayTrace)
             std::printf("NSMB InputNetplay: dropped local input packet frame=%u modulo=%d offset=%d range=%u-%u\n",
@@ -2810,36 +2781,14 @@ void SendInputLocked(melonDS::u32 frame, const InputState& input)
         return;
     }
 
-    const std::vector<char> inputPayload = InputProtocol::EncodeInput({ frame, input });
-
-    const bool sendBundle = sendDecision.Bundle;
-    const std::vector<char> bundlePayload = sendBundle
-        ? BuildInputBundlePayloadLocked(frame, input)
-        : std::vector<char> {};
-    const melonDS::u32 sendFlags = ENET_PACKET_FLAG_RELIABLE;
-
-    const int sendDelayFrames = sendDecision.DelayFrames;
-    if (sendDelayFrames > 0)
+    const bool sendBundle = prepared.Decision.Bundle;
+    const int sendDelayFrames = prepared.Decision.DelayFrames;
+    if (!prepared.ImmediatePayload.empty())
     {
-        G.DelayedInputs.push_back({
-            frame + static_cast<melonDS::u32>(sendDelayFrames),
-            std::chrono::steady_clock::now() + std::chrono::milliseconds(
-                (sendDelayFrames * 1000 + 59) / 60),
-            sendBundle
-                ? bundlePayload
-                : inputPayload,
-            sendFlags,
-        });
-    }
-    else
-    {
-        if (sendBundle)
-            SendInputPayloadNowLocked(bundlePayload.data(), bundlePayload.size(), sendFlags);
-        else
-            SendInputPayloadNowLocked(
-                inputPayload.data(),
-                inputPayload.size(),
-                ENET_PACKET_FLAG_RELIABLE);
+        SendInputPayloadNowLocked(
+            prepared.ImmediatePayload.data(),
+            prepared.ImmediatePayload.size(),
+            ENET_PACKET_FLAG_RELIABLE);
     }
 
     if ((G.Bootstrap.InputTraceEnabled || G.Input.NetplayTrace)
@@ -2878,19 +2827,13 @@ void MaybeResendLatestInputForFrameLeadLocked()
         return;
 
     const InputState& input = it->second;
-    size_t payloadBytes = 0;
-    if (G.Input.BundleHistory > 0)
-    {
-        const std::vector<char> payload = BuildInputBundlePayloadLocked(G.LastSentInputFrame, input);
-        payloadBytes = payload.size();
-        SendInputPayloadNowLocked(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE);
-    }
-    else
-    {
-        const std::vector<char> payload = InputProtocol::EncodeInput({ G.LastSentInputFrame, input });
-        payloadBytes = payload.size();
-        SendInputPayloadNowLocked(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE);
-    }
+    const std::vector<char> payload = G.Delivery.BuildPayload(
+        G.LastSentInputFrame,
+        input,
+        G.Input.BundleHistory,
+        G.LocalInputs);
+    const size_t payloadBytes = payload.size();
+    SendInputPayloadNowLocked(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE);
 
     G.LastInputFrameLeadResendAt = now;
     G.InputFrameLeadResendCount++;
@@ -2906,7 +2849,7 @@ void MaybeResendLatestInputForFrameLeadLocked()
             CurrentInputLeadLocked(G.LastSentInputFrame),
             G.LocalInputs.size(),
             G.RemoteInputs.size(),
-            G.DelayedInputs.size(),
+            G.Delivery.PendingCount(),
             G.Transport.IsConnected() ? 1 : 0);
         std::fflush(stdout);
     }
@@ -3977,7 +3920,7 @@ void PrintInputHealthLineLocked(
         lead,
         G.LocalInputs.size(),
         G.RemoteInputs.size(),
-        G.DelayedInputs.size(),
+        G.Delivery.PendingCount(),
         static_cast<double>(waitedUs) / 1000.0,
         static_cast<double>(throttleUs) / 1000.0,
         static_cast<double>(networkUs) / 1000.0,
@@ -4187,7 +4130,7 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
                     CurrentInputLeadLocked(G.LastSentInputFrame == kNoFrameLimit ? targetFrame : G.LastSentInputFrame),
                     G.LocalInputs.size(),
                     G.RemoteInputs.size(),
-                    G.DelayedInputs.size(),
+                    G.Delivery.PendingCount(),
                     G.InputFrameLeadResendCount,
                     G.Connection.StartFrame,
                     G.LocalNetplayStartReadyFrame,
@@ -5575,7 +5518,7 @@ void EmitStartReadyEventLocked(const char* direction, melonDS::u32 localFrame, m
          << "\"lastReceivedInputFrame\":" << G.LastReceivedInputFrame << ","
          << "\"localQueue\":" << G.LocalInputs.size() << ","
          << "\"remoteQueue\":" << G.RemoteInputs.size() << ","
-         << "\"delayedInputs\":" << G.DelayedInputs.size()
+         << "\"delayedInputs\":" << G.Delivery.PendingCount()
          << "}";
     WriteDiagnosticEventLocked(json.str());
 }

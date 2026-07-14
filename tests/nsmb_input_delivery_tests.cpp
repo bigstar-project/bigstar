@@ -20,6 +20,7 @@ void Check(bool condition, const char* expression, int line)
 #define CHECK(expression) Check((expression), #expression, __LINE__)
 
 using NsmbNetplayPoC::InputDelivery::DecideSend;
+using NsmbNetplayPoC::InputDelivery::Runtime;
 using NsmbNetplayPoC::InputDelivery::SendConfig;
 
 void TestDefaultDecision()
@@ -113,6 +114,89 @@ void TestDelayedInputReleaseUsesFrameOrWallClock()
         9, releaseTime, 10, releaseTime));
 }
 
+void TestRuntimePreparesWirePayloads()
+{
+    Runtime runtime;
+    std::map<melonDS::u32, NsmbNetplayPoC::InputState> localInputs;
+    NsmbNetplayPoC::InputState current;
+    current.KeyMask = 0xFFE;
+    const auto now = Runtime::Clock::time_point(std::chrono::seconds(10));
+
+    auto prepared = runtime.Prepare(4, current, {}, localInputs, now);
+    CHECK(!prepared.Decision.Drop);
+    CHECK(!prepared.Decision.Bundle);
+    NsmbNetplayPoC::InputProtocol::FramedInput single;
+    CHECK(NsmbNetplayPoC::InputProtocol::DecodeInput(
+        prepared.ImmediatePayload.data(), prepared.ImmediatePayload.size(), single));
+    CHECK(single.Frame == 4);
+    CHECK(single.Input.KeyMask == 0xFFE);
+
+    localInputs[2].KeyMask = 0xFFB;
+    localInputs[3].KeyMask = 0xFF7;
+    SendConfig bundle;
+    bundle.UseHistoryBundle = true;
+    bundle.BundleHistory = 2;
+    prepared = runtime.Prepare(4, current, bundle, localInputs, now);
+    std::vector<NsmbNetplayPoC::InputProtocol::FramedInput> entries;
+    CHECK(prepared.Decision.Bundle);
+    CHECK(NsmbNetplayPoC::InputProtocol::DecodeInputBundle(
+        prepared.ImmediatePayload.data(), prepared.ImmediatePayload.size(), entries));
+    CHECK(entries.size() == 3);
+    CHECK(entries[0].Frame == 2 && entries[0].Input.KeyMask == 0xFFB);
+    CHECK(entries[1].Frame == 3 && entries[1].Input.KeyMask == 0xFF7);
+    CHECK(entries[2].Frame == 4 && entries[2].Input.KeyMask == 0xFFE);
+
+    SendConfig drop;
+    drop.DropModulo = 1;
+    prepared = runtime.Prepare(5, current, drop, localInputs, now);
+    CHECK(prepared.Decision.Drop);
+    CHECK(prepared.ImmediatePayload.empty());
+    CHECK(runtime.PendingCount() == 0);
+}
+
+void TestRuntimeOwnsDelayedQueue()
+{
+    Runtime runtime;
+    std::map<melonDS::u32, NsmbNetplayPoC::InputState> localInputs;
+    NsmbNetplayPoC::InputState current;
+    current.KeyMask = 0xFDF;
+    SendConfig config;
+    config.DelayFrames = 3;
+    const auto now = Runtime::Clock::time_point(std::chrono::seconds(10));
+
+    const auto prepared = runtime.Prepare(10, current, config, localInputs, now);
+    CHECK(prepared.ImmediatePayload.empty());
+    CHECK(prepared.Decision.DelayFrames == 3);
+    CHECK(runtime.PendingCount() == 1);
+    std::vector<std::vector<char>> due;
+    const auto collect = [&due](const std::vector<char>& payload) {
+        due.push_back(payload);
+    };
+    runtime.DrainDue(12, now + std::chrono::milliseconds(49), collect);
+    CHECK(due.empty());
+
+    runtime.DrainDue(13, now, collect);
+    CHECK(due.size() == 1);
+    CHECK(runtime.PendingCount() == 0);
+    NsmbNetplayPoC::InputProtocol::FramedInput decoded;
+    CHECK(NsmbNetplayPoC::InputProtocol::DecodeInput(
+        due[0].data(), due[0].size(), decoded));
+    CHECK(decoded.Frame == 10 && decoded.Input.KeyMask == 0xFDF);
+
+    runtime.Prepare(20, current, config, localInputs, now);
+    due.clear();
+    runtime.DrainDue(20, now + std::chrono::milliseconds(50), collect);
+    CHECK(due.size() == 1);
+    runtime.Prepare(30, current, config, localInputs, now);
+    runtime.Prepare(31, current, config, localInputs, now);
+    due.clear();
+    runtime.DrainDue(33, now, collect);
+    CHECK(due.size() == 1);
+    CHECK(runtime.PendingCount() == 1);
+    runtime.Clear();
+    CHECK(runtime.PendingCount() == 0);
+}
+
 }
 
 int main()
@@ -122,6 +206,8 @@ int main()
     TestBundleAndDelayBoundaries();
     TestBundleInputSelection();
     TestDelayedInputReleaseUsesFrameOrWallClock();
+    TestRuntimePreparesWirePayloads();
+    TestRuntimeOwnsDelayedQueue();
 
     if (Failures != 0)
     {

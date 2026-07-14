@@ -1,6 +1,7 @@
 #include "NsmbInputDelivery.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace NsmbNetplayPoC::InputDelivery
 {
@@ -63,6 +64,81 @@ bool ShouldReleaseDelayedInput(
     std::chrono::steady_clock::time_point releaseTime)
 {
     return releaseFrame <= currentFrame || now >= releaseTime;
+}
+
+PreparedSend Runtime::Prepare(
+    melonDS::u32 frame,
+    const InputState& input,
+    const SendConfig& config,
+    const std::map<melonDS::u32, InputState>& localInputs,
+    Clock::time_point now)
+{
+    PreparedSend prepared;
+    prepared.Decision = DecideSend(frame, config);
+    if (prepared.Decision.Drop)
+        return prepared;
+
+    std::vector<char> payload = prepared.Decision.Bundle
+        ? BuildPayload(frame, input, prepared.Decision.BundleHistory, localInputs)
+        : InputProtocol::EncodeInput({ frame, input });
+    if (prepared.Decision.DelayFrames <= 0)
+    {
+        prepared.ImmediatePayload = std::move(payload);
+        return prepared;
+    }
+
+    const int delayFrames = prepared.Decision.DelayFrames;
+    Pending_.push_back({
+        frame + static_cast<melonDS::u32>(delayFrames),
+        now + std::chrono::milliseconds((delayFrames * 1000 + 59) / 60),
+        std::move(payload),
+    });
+    return prepared;
+}
+
+void Runtime::DrainDue(
+    melonDS::u32 currentFrame,
+    Clock::time_point now,
+    const std::function<void(const std::vector<char>&)>& send)
+{
+    for (auto pending = Pending_.begin(); pending != Pending_.end();)
+    {
+        if (ShouldReleaseDelayedInput(
+                currentFrame,
+                now,
+                pending->ReleaseFrame,
+                pending->ReleaseTime))
+        {
+            send(pending->Payload);
+            pending = Pending_.erase(pending);
+        }
+        else
+        {
+            ++pending;
+        }
+    }
+}
+
+std::vector<char> Runtime::BuildPayload(
+    melonDS::u32 frame,
+    const InputState& input,
+    int bundleHistory,
+    const std::map<melonDS::u32, InputState>& localInputs) const
+{
+    if (bundleHistory <= 0)
+        return InputProtocol::EncodeInput({ frame, input });
+    return InputProtocol::EncodeInputBundle(
+        SelectBundleInputs(frame, input, bundleHistory, localInputs));
+}
+
+void Runtime::Clear()
+{
+    Pending_.clear();
+}
+
+std::size_t Runtime::PendingCount() const
+{
+    return Pending_.size();
 }
 
 }
