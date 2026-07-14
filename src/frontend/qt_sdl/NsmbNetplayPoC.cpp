@@ -18315,32 +18315,18 @@ void InitFromEnvironment()
         0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_SEND_DELAY_FRAMES", 0));
     G.PacketBridgeSendJitterFrames = std::max(
         0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_SEND_JITTER_FRAMES", 0));
-    G.InputSendDelayFrames = std::max(
-        0, EnvInt("MELONDS_NSML_INPUT_SEND_DELAY_FRAMES", 0));
-    G.InputSendJitterFrames = std::max(
-        0, EnvInt("MELONDS_NSML_INPUT_SEND_JITTER_FRAMES", 0));
-    G.InputSendDelayStartFrame = static_cast<melonDS::u32>(
-        std::clamp(EnvInt("MELONDS_NSML_INPUT_SEND_DELAY_START_FRAME", 0), 0, 1000000));
-    G.InputSendDelayEndFrame = static_cast<melonDS::u32>(
-        std::clamp(EnvInt("MELONDS_NSML_INPUT_SEND_DELAY_END_FRAME", 0), 0, 1000000));
-    if (G.InputSendDelayEndFrame != kNoFrameLimit
-        && G.InputSendDelayEndFrame < G.InputSendDelayStartFrame)
-        G.InputSendDelayEndFrame = G.InputSendDelayStartFrame;
-    G.InputUnreliable = EnvFlag("MELONDS_NSML_INPUT_UNRELIABLE");
-    G.InputBundleHistory = std::clamp(
-        EnvInt("MELONDS_NSML_INPUT_BUNDLE_HISTORY", 0), 0, 31);
-    G.InputDropModulo = std::max(0, EnvInt("MELONDS_NSML_INPUT_DROP_MODULO", 0));
-    G.InputDropOffset = std::max(0, EnvInt("MELONDS_NSML_INPUT_DROP_OFFSET", 0));
-    if (G.InputDropModulo > 0)
-        G.InputDropOffset %= G.InputDropModulo;
-    G.InputDropStartFrame = static_cast<melonDS::u32>(
-        std::clamp(EnvInt("MELONDS_NSML_INPUT_DROP_START_FRAME", 0), 0, 1000000));
-    G.InputDropEndFrame = static_cast<melonDS::u32>(
-        std::clamp(EnvInt("MELONDS_NSML_INPUT_DROP_END_FRAME", 0), 0, 1000000));
-    if (G.InputDropEndFrame > 0 && G.InputDropEndFrame < G.InputDropStartFrame)
-        G.InputDropEndFrame = G.InputDropStartFrame;
-    G.InputNetplayMaxFrameLead =
-        EnvInt("MELONDS_NSML_INPUT_MAX_FRAME_LEAD", G.InputNetplayOnly ? 2 : -1);
+    const Config::InputConfig inputConfig = Config::LoadInputConfig(G.InputNetplayOnly);
+    G.InputSendDelayFrames = inputConfig.SendDelayFrames;
+    G.InputSendJitterFrames = inputConfig.SendJitterFrames;
+    G.InputSendDelayStartFrame = inputConfig.SendDelayStartFrame;
+    G.InputSendDelayEndFrame = inputConfig.SendDelayEndFrame;
+    G.InputUnreliable = inputConfig.UseHistoryBundle;
+    G.InputBundleHistory = inputConfig.BundleHistory;
+    G.InputDropModulo = inputConfig.DropModulo;
+    G.InputDropOffset = inputConfig.DropOffset;
+    G.InputDropStartFrame = inputConfig.DropStartFrame;
+    G.InputDropEndFrame = inputConfig.DropEndFrame;
+    G.InputNetplayMaxFrameLead = inputConfig.MaxFrameLead;
     G.DirectMvlBootEnabled = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT");
     G.DirectMvlBootHostOnly = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_HOST_ONLY");
     G.DirectMvlBootClientOnly = EnvFlag("MELONDS_NSML_DIRECT_MVL_BOOT_CLIENT_ONLY");
@@ -18766,13 +18752,11 @@ void InitFromEnvironment()
     G.PacketBridgeJitHelperPatchEnabled = EnvFlag("MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH");
     G.PacketBridgeJitHelperPatchFrame = static_cast<melonDS::u32>(
         std::max(0, EnvInt("MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH_FRAME", 0)));
-    G.InputNetplayOnly = EnvFlag("MELONDS_NSML_INPUT_NETPLAY_ONLY");
-    G.InputNetplayTraceEnabled = EnvFlag("MELONDS_NSML_INPUT_NETPLAY_TRACE");
-    G.InputHealthTraceEnabled = EnvFlag("MELONDS_NSML_INPUT_HEALTH_TRACE");
-    G.InputHealthTraceInterval = std::clamp(
-        EnvInt("MELONDS_NSML_INPUT_HEALTH_TRACE_INTERVAL", 120), 1, 3600);
-    G.InputHealthTraceWaitThresholdMs = std::clamp(
-        EnvInt("MELONDS_NSML_INPUT_HEALTH_TRACE_WAIT_THRESHOLD_MS", 16), 1, 5000);
+    G.InputNetplayOnly = inputConfig.NetplayOnly;
+    G.InputNetplayTraceEnabled = inputConfig.NetplayTrace;
+    G.InputHealthTraceEnabled = inputConfig.HealthTrace;
+    G.InputHealthTraceInterval = inputConfig.HealthTraceInterval;
+    G.InputHealthTraceWaitThresholdMs = inputConfig.HealthTraceWaitThresholdMs;
     G.RuleAIEnabled = EnvFlag("MELONDS_NSML_RULE_AI");
     G.RuleAIHostOnly = EnvFlag("MELONDS_NSML_RULE_AI_HOST_ONLY");
     G.RuleAIClientOnly = EnvFlag("MELONDS_NSML_RULE_AI_CLIENT_ONLY");
@@ -18879,7 +18863,7 @@ void InitFromEnvironment()
     }
     G.NetworkPumpThreadEnabled = EnvFlag("MELONDS_NSML_NET_PUMP_THREAD");
     G.NetworkPumpSleepUs = std::clamp(EnvInt("MELONDS_NSML_NET_PUMP_SLEEP_US", 250), 50, 5000);
-    G.InputWaitPollUs = std::clamp(EnvInt("MELONDS_NSML_INPUT_WAIT_POLL_US", 100), 50, 5000);
+    G.InputWaitPollUs = inputConfig.WaitPollUs;
     G.RollbackEnabled = EnvFlag("MELONDS_NSML_ROLLBACK");
     G.RollbackResimulate = EnvFlag("MELONDS_NSML_ROLLBACK_RESIMULATE");
     G.RollbackSkipRenderDuringResim = EnvFlag("MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER");

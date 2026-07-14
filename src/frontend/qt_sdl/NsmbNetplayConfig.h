@@ -39,6 +39,26 @@ struct ConnectionConfig {
   std::string PeerHost = "127.0.0.1";
 };
 
+struct InputConfig {
+  int SendDelayFrames = 0;
+  int SendJitterFrames = 0;
+  std::uint32_t SendDelayStartFrame = 0;
+  std::uint32_t SendDelayEndFrame = 0;
+  bool UseHistoryBundle = false;
+  int BundleHistory = 0;
+  int DropModulo = 0;
+  int DropOffset = 0;
+  std::uint32_t DropStartFrame = 0;
+  std::uint32_t DropEndFrame = 0;
+  int MaxFrameLead = -1;
+  bool NetplayOnly = false;
+  bool NetplayTrace = false;
+  bool HealthTrace = false;
+  int HealthTraceInterval = 120;
+  int HealthTraceWaitThresholdMs = 16;
+  int WaitPollUs = 100;
+};
+
 bool ParseFlag(const char *value);
 const char *ValueOr(const char *value, const char *fallback);
 int ParseInt(const char *value, int fallback);
@@ -61,6 +81,9 @@ BootstrapConfig LoadBootstrapConfig();
 ConnectionConfig LoadConnectionConfig(const Environment &environment,
                                       bool testEnabled);
 ConnectionConfig LoadConnectionConfig(bool testEnabled);
+InputConfig LoadInputConfig(const Environment &environment,
+                            bool netplayOnlyForMaxFrameLeadDefault);
+InputConfig LoadInputConfig(bool netplayOnlyForMaxFrameLeadDefault);
 
 bool EnvFlag(const char *name);
 const char *EnvCString(const char *name, const char *fallback);

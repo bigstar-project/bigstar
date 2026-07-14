@@ -178,6 +178,76 @@ void TestConnectionConfigReadsExistingValuesAndClamps() {
   CHECK(config.PeerHost == "192.0.2.10");
 }
 
+void TestInputConfigDefaultsPreserveLegacyInitializationOrder() {
+  MapEnvironment environment;
+  auto config = NsmbNetplayPoC::Config::LoadInputConfig(environment, false);
+  CHECK(config.SendDelayFrames == 0);
+  CHECK(config.SendJitterFrames == 0);
+  CHECK(config.SendDelayStartFrame == 0u);
+  CHECK(config.SendDelayEndFrame == 0u);
+  CHECK(!config.UseHistoryBundle);
+  CHECK(config.BundleHistory == 0);
+  CHECK(config.DropModulo == 0);
+  CHECK(config.DropOffset == 0);
+  CHECK(config.DropStartFrame == 0u);
+  CHECK(config.DropEndFrame == 0u);
+  CHECK(config.MaxFrameLead == -1);
+  CHECK(!config.NetplayOnly);
+  CHECK(!config.NetplayTrace);
+  CHECK(!config.HealthTrace);
+  CHECK(config.HealthTraceInterval == 120);
+  CHECK(config.HealthTraceWaitThresholdMs == 16);
+  CHECK(config.WaitPollUs == 100);
+
+  environment.Values["MELONDS_NSML_INPUT_NETPLAY_ONLY"] = "1";
+  config = NsmbNetplayPoC::Config::LoadInputConfig(environment, false);
+  CHECK(config.NetplayOnly);
+  CHECK(config.MaxFrameLead == -1);
+  config = NsmbNetplayPoC::Config::LoadInputConfig(environment, true);
+  CHECK(config.MaxFrameLead == 2);
+}
+
+void TestInputConfigReadsClampsAndNormalizesRanges() {
+  MapEnvironment environment;
+  environment.Values = {
+      {"MELONDS_NSML_INPUT_SEND_DELAY_FRAMES", "-2"},
+      {"MELONDS_NSML_INPUT_SEND_JITTER_FRAMES", "4"},
+      {"MELONDS_NSML_INPUT_SEND_DELAY_START_FRAME", "100"},
+      {"MELONDS_NSML_INPUT_SEND_DELAY_END_FRAME", "90"},
+      {"MELONDS_NSML_INPUT_UNRELIABLE", "1"},
+      {"MELONDS_NSML_INPUT_BUNDLE_HISTORY", "99"},
+      {"MELONDS_NSML_INPUT_DROP_MODULO", "11"},
+      {"MELONDS_NSML_INPUT_DROP_OFFSET", "25"},
+      {"MELONDS_NSML_INPUT_DROP_START_FRAME", "200"},
+      {"MELONDS_NSML_INPUT_DROP_END_FRAME", "150"},
+      {"MELONDS_NSML_INPUT_MAX_FRAME_LEAD", "7"},
+      {"MELONDS_NSML_INPUT_NETPLAY_TRACE", "1"},
+      {"MELONDS_NSML_INPUT_HEALTH_TRACE", "1"},
+      {"MELONDS_NSML_INPUT_HEALTH_TRACE_INTERVAL", "0"},
+      {"MELONDS_NSML_INPUT_HEALTH_TRACE_WAIT_THRESHOLD_MS", "9000"},
+      {"MELONDS_NSML_INPUT_WAIT_POLL_US", "1"},
+  };
+
+  const auto config =
+      NsmbNetplayPoC::Config::LoadInputConfig(environment, false);
+  CHECK(config.SendDelayFrames == 0);
+  CHECK(config.SendJitterFrames == 4);
+  CHECK(config.SendDelayStartFrame == 100u);
+  CHECK(config.SendDelayEndFrame == 100u);
+  CHECK(config.UseHistoryBundle);
+  CHECK(config.BundleHistory == 31);
+  CHECK(config.DropModulo == 11);
+  CHECK(config.DropOffset == 3);
+  CHECK(config.DropStartFrame == 200u);
+  CHECK(config.DropEndFrame == 200u);
+  CHECK(config.MaxFrameLead == 7);
+  CHECK(config.NetplayTrace);
+  CHECK(config.HealthTrace);
+  CHECK(config.HealthTraceInterval == 1);
+  CHECK(config.HealthTraceWaitThresholdMs == 5000);
+  CHECK(config.WaitPollUs == 50);
+}
+
 } // namespace
 
 int main() {
@@ -190,6 +260,8 @@ int main() {
   TestBootstrapConfigReadsAndClampsEnvironment();
   TestConnectionConfigDefaultsAndRoleFallback();
   TestConnectionConfigReadsExistingValuesAndClamps();
+  TestInputConfigDefaultsPreserveLegacyInitializationOrder();
+  TestInputConfigReadsClampsAndNormalizesRanges();
 
   if (Failures != 0) {
     std::fprintf(stderr, "nsmb netplay config tests failed: %d\n", Failures);

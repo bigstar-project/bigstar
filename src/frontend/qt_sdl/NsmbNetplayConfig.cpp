@@ -139,6 +139,66 @@ ConnectionConfig LoadConnectionConfig(bool testEnabled) {
   return LoadConnectionConfig(GetProcessEnvironment(), testEnabled);
 }
 
+InputConfig LoadInputConfig(const Environment &environment,
+                            bool netplayOnlyForMaxFrameLeadDefault) {
+  InputConfig config;
+  config.SendDelayFrames = std::max(
+      0, ReadInt(environment, "MELONDS_NSML_INPUT_SEND_DELAY_FRAMES", 0));
+  config.SendJitterFrames = std::max(
+      0, ReadInt(environment, "MELONDS_NSML_INPUT_SEND_JITTER_FRAMES", 0));
+  config.SendDelayStartFrame = static_cast<std::uint32_t>(std::clamp(
+      ReadInt(environment, "MELONDS_NSML_INPUT_SEND_DELAY_START_FRAME", 0), 0,
+      1000000));
+  config.SendDelayEndFrame = static_cast<std::uint32_t>(std::clamp(
+      ReadInt(environment, "MELONDS_NSML_INPUT_SEND_DELAY_END_FRAME", 0), 0,
+      1000000));
+  if (config.SendDelayEndFrame != 0 &&
+      config.SendDelayEndFrame < config.SendDelayStartFrame)
+    config.SendDelayEndFrame = config.SendDelayStartFrame;
+
+  config.UseHistoryBundle =
+      ReadFlag(environment, "MELONDS_NSML_INPUT_UNRELIABLE");
+  config.BundleHistory = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_INPUT_BUNDLE_HISTORY", 0), 0, 31);
+  config.DropModulo =
+      std::max(0, ReadInt(environment, "MELONDS_NSML_INPUT_DROP_MODULO", 0));
+  config.DropOffset =
+      std::max(0, ReadInt(environment, "MELONDS_NSML_INPUT_DROP_OFFSET", 0));
+  if (config.DropModulo > 0)
+    config.DropOffset %= config.DropModulo;
+  config.DropStartFrame = static_cast<std::uint32_t>(
+      std::clamp(ReadInt(environment, "MELONDS_NSML_INPUT_DROP_START_FRAME", 0),
+                 0, 1000000));
+  config.DropEndFrame = static_cast<std::uint32_t>(
+      std::clamp(ReadInt(environment, "MELONDS_NSML_INPUT_DROP_END_FRAME", 0),
+                 0, 1000000));
+  if (config.DropEndFrame > 0 && config.DropEndFrame < config.DropStartFrame)
+    config.DropEndFrame = config.DropStartFrame;
+
+  config.MaxFrameLead =
+      ReadInt(environment, "MELONDS_NSML_INPUT_MAX_FRAME_LEAD",
+              netplayOnlyForMaxFrameLeadDefault ? 2 : -1);
+  config.NetplayOnly = ReadFlag(environment, "MELONDS_NSML_INPUT_NETPLAY_ONLY");
+  config.NetplayTrace =
+      ReadFlag(environment, "MELONDS_NSML_INPUT_NETPLAY_TRACE");
+  config.HealthTrace = ReadFlag(environment, "MELONDS_NSML_INPUT_HEALTH_TRACE");
+  config.HealthTraceInterval = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_INPUT_HEALTH_TRACE_INTERVAL", 120), 1,
+      3600);
+  config.HealthTraceWaitThresholdMs = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_INPUT_HEALTH_TRACE_WAIT_THRESHOLD_MS",
+              16),
+      1, 5000);
+  config.WaitPollUs = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_INPUT_WAIT_POLL_US", 100), 50, 5000);
+  return config;
+}
+
+InputConfig LoadInputConfig(bool netplayOnlyForMaxFrameLeadDefault) {
+  return LoadInputConfig(GetProcessEnvironment(),
+                         netplayOnlyForMaxFrameLeadDefault);
+}
+
 bool EnvFlag(const char *name) {
   return ReadFlag(GetProcessEnvironment(), name);
 }
