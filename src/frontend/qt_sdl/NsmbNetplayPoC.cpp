@@ -498,6 +498,7 @@ struct State
     std::mutex PerfMutex;
     std::atomic<bool> EnvChecked { false };
     Config::BootstrapConfig Bootstrap;
+    Config::DiagnosticsConfig Diagnostics;
     bool Enabled = false;
     bool Ready = false;
     bool TestEnabled = false;
@@ -510,7 +511,6 @@ struct State
     bool ActiveTimerStarted[16] {};
     melonDS::u32 ActiveTimerStartFrame[16] {};
     std::chrono::steady_clock::time_point ActiveTimerStart[16];
-    melonDS::u32 ActiveFpsStartFrame = 0;
     bool ActiveFrameTimingStarted[16] {};
     std::chrono::steady_clock::time_point ActiveFrameLastTime[16];
     melonDS::u32 ActiveFrameSamples[16] {};
@@ -520,36 +520,21 @@ struct State
     melonDS::u32 ActiveFrameOver16ms[16] {};
     melonDS::u32 ActiveFrameOver25ms[16] {};
     melonDS::u32 ActiveFrameOver33ms[16] {};
-    int ActiveFrameSpikeThresholdUs = 25000;
-    bool ActiveFrameSpikeTrace = false;
-    int FrameHeartbeatInterval = 0;
     melonDS::u32 LastFrameHeartbeat[16] {};
-    int GameplayHeartbeatInterval = 0;
     melonDS::u32 LastGameplayHeartbeat[16] {};
-    std::string FrameHeartbeatPath;
     std::ofstream FrameHeartbeat;
     std::atomic<melonDS::u32> PendingFrameHeartbeat { 0 };
     std::atomic<bool> FrameHeartbeatStop { false };
     bool FrameHeartbeatThreadStarted = false;
     std::thread FrameHeartbeatThread;
     bool InputRecordEnabled = false;
-    std::string InputRecordPath;
     std::ofstream InputRecord;
     std::mutex InputRecordMutex;
-    melonDS::u32 InputRecordStartFrame = 0;
-    melonDS::u32 InputRecordEndFrame = kNoFrameLimit;
-    int InputRecordInstance = -1;
     bool InputRecordHasSpan = false;
     melonDS::u32 InputRecordSpanStart = 0;
     melonDS::u32 InputRecordSpanEnd = 0;
     InputState InputRecordSpanInput;
     int InputRecordFlushPendingSpans = 0;
-    bool ScreenHashEnabled = false;
-    bool GameStateTraceExtended = false;
-    melonDS::u32 GameStateTraceStartFrame = 0;
-    melonDS::u32 GameStateTraceEndFrame = 0;
-    melonDS::u32 AIPlayLogStartFrame = 0;
-    melonDS::u32 AIPlayLogEndFrame = 0;
     Config::StateSyncConfig StateSync;
     SessionPolicy::Runtime Session;
     std::chrono::steady_clock::time_point LastInputFrameLeadResendAt;
@@ -602,23 +587,12 @@ struct State
     std::string InputScriptPath;
     Config::RuntimePatchConfig RuntimePatch;
     Config::HarnessConfig Harness;
-    std::string HashLogPath;
-    std::string ScreenshotDir;
-    std::string RamDumpDir;
-    std::string GameStateTracePath;
-    std::string DiagnosticsPath;
-    std::string DiagnosticEventsPath;
-    std::string AIPlayLogPath;
-    std::string AIObservationV2Path;
-    std::string AIObservationV3Path;
     std::ofstream HashLog;
     std::ofstream GameStateTrace;
     std::ofstream DiagnosticEvents;
     std::ofstream AIPlayLog;
     std::ofstream AIObservationV2Log;
     std::ofstream AIObservationV3Log;
-    bool DiagnosticEventsEnabled = false;
-    int DiagnosticRingFrames = 360;
     melonDS::u32 DiagnosticPostTriggerUntilFrame[16] {};
     melonDS::u32 LastDiagnosticMismatchFrame[16] {};
     melonDS::u32 LastDiagnosticLifeEventFrame[16][2] {};
@@ -634,18 +608,9 @@ struct State
     int AIPlayLogFireballOwner[16][kAIFireballSlotCount] {};
     int AIPlayLogFireballOwnerConfidence[16][kAIFireballSlotCount] {};
     int AIPlayLogFireballOwnerHeuristic[16][kAIFireballSlotCount] {};
-    int ScreenshotInterval = 0;
-    int RamDumpInterval = 0;
-    int GameStateTraceInterval = 60;
-    int AIPlayLogInterval = 1;
-    int AIPlayLogFlushInterval = 60;
     int AIPlayLogLinesSinceFlush = 0;
     int AIObservationV2LinesSinceFlush = 0;
     int AIObservationV3LinesSinceFlush = 0;
-    int AIPlayLogMaxObjects = 32;
-    int AIObservationV2StageFilter = -1;
-    int AIObservationV3StageFilter = -1;
-    bool AIPlayLogGameplayOnly = true;
     bool MemPatchApplied[16] {};
     bool ForcePlayerDeathCountersLogged[16] {};
     bool ForcePlayerPowerupsLogged[16] {};
@@ -784,12 +749,6 @@ struct State
     bool NetworkPumpStop = false;
     int InputWaitPollUs = 100;
     std::thread NetworkPumpThread;
-    bool HangDiagnosticsEnabled = false;
-    int HangWatchdogIntervalMs = 1000;
-    int HangThresholdMs = 8000;
-    std::string HangWatchdogPath;
-    std::string HangPhaseEventsPath;
-    std::string HangDumpPath;
     std::ofstream HangWatchdogLog;
     std::ofstream HangPhaseEventsLog;
     std::mutex HangLogMutex;
@@ -905,7 +864,7 @@ bool EnsureHangLogOpenLocked(std::ofstream& file, const std::string& path)
 
 void UpdateHangNetplaySnapshotLocked(melonDS::u32 frameForLead)
 {
-    if (!G.HangDiagnosticsEnabled)
+    if (!G.Diagnostics.HangDiagnosticsEnabled)
         return;
 
     G.HangLastSentFrame.store(G.LastSentInputFrame, std::memory_order_release);
@@ -930,7 +889,7 @@ void WriteHangPhaseEventLocked(
     melonDS::u32 logicalFrame,
     melonDS::u32 sendFrame)
 {
-    if (!EnsureHangLogOpenLocked(G.HangPhaseEventsLog, G.HangPhaseEventsPath))
+    if (!EnsureHangLogOpenLocked(G.HangPhaseEventsLog, G.Diagnostics.HangPhaseEventsPath))
         return;
 
     G.HangPhaseEventsLog
@@ -958,7 +917,7 @@ void TraceHangPhase(
     melonDS::u32 logicalFrame,
     melonDS::u32 sendFrame)
 {
-    if (!G.HangDiagnosticsEnabled)
+    if (!G.Diagnostics.HangDiagnosticsEnabled)
         return;
 
     const unsigned long long now = NowUnixMs();
@@ -1040,21 +999,21 @@ void HangWatchdogThreadMain()
 {
     while (!G.HangWatchdogStop.load(std::memory_order_acquire))
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds(std::max(100, G.HangWatchdogIntervalMs)));
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::max(100, G.Diagnostics.HangWatchdogIntervalMs)));
 
         const unsigned long long now = NowUnixMs();
         const unsigned long long phaseUnixMs = G.HangPhaseUnixMs.load(std::memory_order_acquire);
         const unsigned long long phaseAgeMs = phaseUnixMs == 0 || now < phaseUnixMs ? 0 : now - phaseUnixMs;
-        const bool stalled = G.HangThresholdMs > 0 && phaseAgeMs >= static_cast<unsigned long long>(G.HangThresholdMs);
+        const bool stalled = G.Diagnostics.HangThresholdMs > 0 && phaseAgeMs >= static_cast<unsigned long long>(G.Diagnostics.HangThresholdMs);
         bool dumpWritten = false;
-        if (stalled && !G.HangDumpPath.empty() && G.HangLastDumpUnixMs.load(std::memory_order_acquire) == 0)
+        if (stalled && !G.Diagnostics.HangDumpPath.empty() && G.HangLastDumpUnixMs.load(std::memory_order_acquire) == 0)
         {
             G.HangLastDumpUnixMs.store(now, std::memory_order_release);
-            dumpWritten = WriteHangMiniDump(G.HangDumpPath);
+            dumpWritten = WriteHangMiniDump(G.Diagnostics.HangDumpPath);
         }
 
         std::lock_guard<std::mutex> lock(G.HangLogMutex);
-        if (!EnsureHangLogOpenLocked(G.HangWatchdogLog, G.HangWatchdogPath))
+        if (!EnsureHangLogOpenLocked(G.HangWatchdogLog, G.Diagnostics.HangWatchdogPath))
             continue;
 
         G.HangWatchdogLog
@@ -1116,7 +1075,7 @@ void HangWatchdogThreadMain()
 
 void StartHangWatchdogIfNeeded()
 {
-    if (!G.HangDiagnosticsEnabled || G.HangWatchdogThreadStarted)
+    if (!G.Diagnostics.HangDiagnosticsEnabled || G.HangWatchdogThreadStarted)
         return;
     G.HangWatchdogStop.store(false, std::memory_order_release);
     G.HangWatchdogThreadStarted = true;
@@ -1515,11 +1474,11 @@ void RecordInputIfNeeded(int instanceID, melonDS::u32 frame, const InputState& i
 {
     if (!G.InputRecordEnabled)
         return;
-    if (G.InputRecordInstance >= 0 && G.InputRecordInstance != instanceID)
+    if (G.Diagnostics.InputRecordInstance >= 0 && G.Diagnostics.InputRecordInstance != instanceID)
         return;
-    if (frame < G.InputRecordStartFrame)
+    if (frame < G.Diagnostics.InputRecordStartFrame)
         return;
-    if (G.InputRecordEndFrame != kNoFrameLimit && frame > G.InputRecordEndFrame)
+    if (G.Diagnostics.InputRecordEndFrame != kNoFrameLimit && frame > G.Diagnostics.InputRecordEndFrame)
         return;
 
     std::lock_guard<std::mutex> lock(G.InputRecordMutex);
@@ -1714,10 +1673,10 @@ std::string Hex64(melonDS::u64 value)
 
 void WriteDiagnosticsJson(const std::string& json)
 {
-    if (G.DiagnosticsPath.empty())
+    if (G.Diagnostics.DiagnosticsPath.empty())
         return;
 
-    const std::filesystem::path path(G.DiagnosticsPath);
+    const std::filesystem::path path(G.Diagnostics.DiagnosticsPath);
     const std::filesystem::path tmp = path.string() + ".tmp";
     std::error_code ec;
     if (path.has_parent_path())
@@ -2943,7 +2902,7 @@ void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
     if (elapsedUs > 33334)
         G.ActiveFrameOver33ms[instanceID]++;
 
-    if (G.ActiveFrameSpikeTrace && elapsedUs >= static_cast<unsigned long long>(G.ActiveFrameSpikeThresholdUs))
+    if (G.Diagnostics.ActiveFrameSpikeTrace && elapsedUs >= static_cast<unsigned long long>(G.Diagnostics.ActiveFrameSpikeThresholdUs))
     {
         const melonDS::u32 restoreDelta =
             G.RollbackRestoreCount - G.LastPerfSpikeRollbackRestoreCount[instanceID];
@@ -2956,7 +2915,7 @@ void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
             instanceID,
             frame,
             elapsedUs,
-            G.ActiveFrameSpikeThresholdUs,
+            G.Diagnostics.ActiveFrameSpikeThresholdUs,
             G.RollbackRestoreCount,
             G.RollbackResimulateCount,
             restoreDelta,
@@ -3935,8 +3894,8 @@ void RecordRemoteInputWaitStats(unsigned long long elapsedUs, unsigned long long
 
 void TraceRemoteInputWaitSpike(melonDS::u32 targetFrame, unsigned long long elapsedUs, unsigned long long loops)
 {
-    if (!G.ActiveFrameSpikeTrace
-        || elapsedUs < static_cast<unsigned long long>(std::min(G.ActiveFrameSpikeThresholdUs, 10000)))
+    if (!G.Diagnostics.ActiveFrameSpikeTrace
+        || elapsedUs < static_cast<unsigned long long>(std::min(G.Diagnostics.ActiveFrameSpikeThresholdUs, 10000)))
     {
         return;
     }
@@ -3967,7 +3926,7 @@ InputState WaitForRemoteInput(melonDS::u32 targetFrame)
     unsigned long long loops = 0;
     bool waitTraceStarted = false;
     long long lastProgressSecond = -1;
-    if (G.HangDiagnosticsEnabled)
+    if (G.Diagnostics.HangDiagnosticsEnabled)
     {
         const unsigned long long now = NowUnixMs();
         G.HangRemoteWaitActive.store(1, std::memory_order_release);
@@ -5408,12 +5367,12 @@ std::string Hex32(melonDS::u32 value)
 
 bool EnsureDiagnosticEventsOpenLocked()
 {
-    if (!G.DiagnosticEventsEnabled || G.DiagnosticEventsPath.empty())
+    if (!G.Diagnostics.DiagnosticEventsEnabled || G.Diagnostics.DiagnosticEventsPath.empty())
         return false;
     if (G.DiagnosticEvents.is_open())
         return true;
 
-    const std::filesystem::path path(G.DiagnosticEventsPath);
+    const std::filesystem::path path(G.Diagnostics.DiagnosticEventsPath);
     std::error_code ec;
     if (path.has_parent_path())
         std::filesystem::create_directories(path.parent_path(), ec);
@@ -5421,7 +5380,7 @@ bool EnsureDiagnosticEventsOpenLocked()
     if (!G.DiagnosticEvents)
     {
         std::printf("NSMB Diagnostics: failed to open event log: %s\n", path.string().c_str());
-        G.DiagnosticEventsEnabled = false;
+        G.Diagnostics.DiagnosticEventsEnabled = false;
         return false;
     }
     return true;
@@ -5437,7 +5396,7 @@ void WriteDiagnosticEventLocked(const std::string& json)
 
 void EmitStartReadyEventLocked(const char* direction, melonDS::u32 localFrame, melonDS::u32 remoteFrame)
 {
-    if (!G.DiagnosticEventsEnabled)
+    if (!G.Diagnostics.DiagnosticEventsEnabled)
         return;
 
     const long long delta = (localFrame == kNoFrameLimit || remoteFrame == kNoFrameLimit)
@@ -5462,18 +5421,18 @@ void EmitStartReadyEventLocked(const char* direction, melonDS::u32 localFrame, m
 
 void EmitDiagnosticStartupEvent()
 {
-    if (!G.DiagnosticEventsEnabled)
+    if (!G.Diagnostics.DiagnosticEventsEnabled)
         return;
 
     std::ostringstream json;
     json << "{\"event\":\"diagnostic_started\","
          << "\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\","
-         << "\"ringFrames\":" << G.DiagnosticRingFrames << ","
+         << "\"ringFrames\":" << G.Diagnostics.DiagnosticRingFrames << ","
          << "\"stateSync\":" << (G.StateSync.GameEnabled ? "true" : "false") << ","
          << "\"stateSyncExtended\":" << (G.StateSync.GameExtended ? "true" : "false") << ","
          << "\"stateSyncInterval\":" << G.StateSync.GameInterval << ","
-         << "\"diagnosticsFile\":\"" << JsonEscape(G.DiagnosticsPath) << "\","
-         << "\"eventsFile\":\"" << JsonEscape(G.DiagnosticEventsPath) << "\""
+         << "\"diagnosticsFile\":\"" << JsonEscape(G.Diagnostics.DiagnosticsPath) << "\","
+         << "\"eventsFile\":\"" << JsonEscape(G.Diagnostics.DiagnosticEventsPath) << "\""
          << "}";
     WriteDiagnosticEventLocked(json.str());
 }
@@ -5635,7 +5594,7 @@ void AppendDiagnosticRingJson(std::ostream& out, int instanceID)
     {
         bool first = true;
         const std::size_t ringFrames = static_cast<std::size_t>(
-            std::clamp(G.DiagnosticRingFrames, 1, static_cast<int>(kDiagnosticRingCapacity)));
+            std::clamp(G.Diagnostics.DiagnosticRingFrames, 1, static_cast<int>(kDiagnosticRingCapacity)));
         const std::size_t next = G.DiagnosticRingNext[instanceID] % kDiagnosticRingCapacity;
         for (std::size_t i = 0; i < ringFrames; i++)
         {
@@ -5770,7 +5729,7 @@ void EmitDiagnosticPitTransitionEvent(
     const DiagnosticFrameSnapshot* previous,
     int player)
 {
-    if (!G.DiagnosticEventsEnabled || instanceID < 0 || instanceID >= 16 || player < 0 || player > 1)
+    if (!G.Diagnostics.DiagnosticEventsEnabled || instanceID < 0 || instanceID >= 16 || player < 0 || player > 1)
         return;
     if (snap.Player[player].TransitFunc != kPlayerPitDeathTransitStateAddr)
         return;
@@ -5809,7 +5768,7 @@ void EmitDiagnosticPositionAnomalyEvent(
     const DiagnosticFrameSnapshot* previous,
     int player)
 {
-    if (!G.DiagnosticEventsEnabled || instanceID < 0 || instanceID >= 16 || player < 0 || player > 1)
+    if (!G.Diagnostics.DiagnosticEventsEnabled || instanceID < 0 || instanceID >= 16 || player < 0 || player > 1)
         return;
     if (!DiagnosticPlayerScreenPositionAnomalous(snap, previous, player))
         return;
@@ -5913,7 +5872,7 @@ void ReadDiagnosticPlayerSnapshot(
 
 void RecordDiagnosticSnapshotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (!G.DiagnosticEventsEnabled || !nds || !nds->MainRAM)
+    if (!G.Diagnostics.DiagnosticEventsEnabled || !nds || !nds->MainRAM)
         return;
     if (instanceID < 0 || instanceID >= 16)
         return;
@@ -6029,7 +5988,7 @@ void EmitGameStateMismatchEventLocked(
     const GameStateSyncHashes& local,
     const GameStateSyncHashes& remote)
 {
-    if (!G.DiagnosticEventsEnabled || instanceID < 0 || instanceID >= 16)
+    if (!G.Diagnostics.DiagnosticEventsEnabled || instanceID < 0 || instanceID >= 16)
         return;
     if (local.PlayerGlobal == remote.PlayerGlobal)
         return;
@@ -6152,7 +6111,7 @@ void EmitPlayerLifeEvent(
     const GameStateSample& sample,
     melonDS::NDS* nds)
 {
-    if (!G.DiagnosticEventsEnabled || instanceID < 0 || instanceID >= 16 || player < 0 || player > 1)
+    if (!G.Diagnostics.DiagnosticEventsEnabled || instanceID < 0 || instanceID >= 16 || player < 0 || player > 1)
         return;
     const bool transitionOnly = reason && std::strcmp(reason, "death-transition") == 0;
     if (G.LastDiagnosticLifeEventFrame[instanceID][player] == frame)
@@ -7414,7 +7373,7 @@ void WritePacketBridgeJitScratchIfNeeded(
     if (G.RuntimePatch.ScriptRemotePacketEndFrame != 0 && frame > G.RuntimePatch.ScriptRemotePacketEndFrame)
         return;
 
-    const bool traceScratch = G.ActiveFrameSpikeTrace;
+    const bool traceScratch = G.Diagnostics.ActiveFrameSpikeTrace;
     const auto scratchStart = std::chrono::steady_clock::now();
     unsigned long long peerStartWaitUs = 0;
     unsigned long long networkUs = 0;
@@ -7535,7 +7494,7 @@ void WritePacketBridgeJitScratchIfNeeded(
     {
         const unsigned long long totalUs = static_cast<unsigned long long>(ElapsedUs(scratchStart));
         const unsigned long long thresholdUs = static_cast<unsigned long long>(
-            std::min(G.ActiveFrameSpikeThresholdUs, 10000));
+            std::min(G.Diagnostics.ActiveFrameSpikeThresholdUs, 10000));
         if (totalUs >= thresholdUs)
         {
             std::printf(
@@ -9060,7 +9019,7 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
 
 void UpdateHangGameSnapshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (!G.HangDiagnosticsEnabled || !nds || !nds->MainRAM || instanceID < 0 || instanceID >= 16)
+    if (!G.Diagnostics.HangDiagnosticsEnabled || !nds || !nds->MainRAM || instanceID < 0 || instanceID >= 16)
         return;
 
     const GameStateSample sample = ReadGameStateSample(nds);
@@ -9090,8 +9049,8 @@ void UpdateHangGameSnapshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
 
 void SaveScreenshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (G.ScreenshotDir.empty() || G.ScreenshotInterval <= 0) return;
-    if ((frame % static_cast<melonDS::u32>(G.ScreenshotInterval)) != 0) return;
+    if (G.Diagnostics.ScreenshotDir.empty() || G.Diagnostics.ScreenshotInterval <= 0) return;
+    if ((frame % static_cast<melonDS::u32>(G.Diagnostics.ScreenshotInterval)) != 0) return;
 
     void* topBuffer = nullptr;
     void* bottomBuffer = nullptr;
@@ -9120,11 +9079,11 @@ void SaveScreenshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     }
 
     std::error_code ec;
-    std::filesystem::create_directories(G.ScreenshotDir, ec);
+    std::filesystem::create_directories(G.Diagnostics.ScreenshotDir, ec);
     if (ec)
     {
         std::printf("NSMB Test: failed to create screenshot dir: %s (%s)\n",
-            G.ScreenshotDir.c_str(),
+            G.Diagnostics.ScreenshotDir.c_str(),
             ec.message().c_str());
         return;
     }
@@ -9189,18 +9148,18 @@ void SaveScreenshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     char filename[256];
     std::snprintf(filename, sizeof(filename), "inst%d_frame%06u.png", instanceID, frame);
-    const std::filesystem::path path = std::filesystem::path(G.ScreenshotDir) / filename;
+    const std::filesystem::path path = std::filesystem::path(G.Diagnostics.ScreenshotDir) / filename;
     if (!image.save(QString::fromStdWString(path.wstring())))
         std::printf("NSMB Test: failed to save screenshot: %ls\n", path.c_str());
 }
 
 void SaveRamDump(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (G.RamDumpDir.empty()) return;
+    if (G.Diagnostics.RamDumpDir.empty()) return;
 
     bool shouldDump = false;
-    if (G.RamDumpInterval > 0 &&
-        (frame % static_cast<melonDS::u32>(G.RamDumpInterval)) == 0)
+    if (G.Diagnostics.RamDumpInterval > 0 &&
+        (frame % static_cast<melonDS::u32>(G.Diagnostics.RamDumpInterval)) == 0)
         shouldDump = true;
 
     for (const auto& [start, end] : G.RamDumpRanges)
@@ -9216,18 +9175,18 @@ void SaveRamDump(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if (!nds->MainRAM) return;
 
     std::error_code ec;
-    std::filesystem::create_directories(G.RamDumpDir, ec);
+    std::filesystem::create_directories(G.Diagnostics.RamDumpDir, ec);
     if (ec)
     {
         std::printf("NSMB Test: failed to create RAM dump dir: %s (%s)\n",
-            G.RamDumpDir.c_str(),
+            G.Diagnostics.RamDumpDir.c_str(),
             ec.message().c_str());
         return;
     }
 
     char filename[256];
     std::snprintf(filename, sizeof(filename), "inst%d_frame%06u_mainram.bin", instanceID, frame);
-    const std::filesystem::path path = std::filesystem::path(G.RamDumpDir) / filename;
+    const std::filesystem::path path = std::filesystem::path(G.Diagnostics.RamDumpDir) / filename;
 
     const melonDS::u32 len = std::min<melonDS::u32>(nds->MainRAMMask + 1, 0x400000);
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
@@ -9354,12 +9313,12 @@ void ApplyNetRandomPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
 void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (G.GameStateTracePath.empty()) return;
+    if (G.Diagnostics.GameStateTracePath.empty()) return;
     if (!nds || !nds->MainRAM) return;
     if (instanceID < 0 || instanceID >= 16) return;
-    if (frame < G.GameStateTraceStartFrame) return;
-    if (G.GameStateTraceEndFrame != 0 && frame > G.GameStateTraceEndFrame) return;
-    if ((frame % static_cast<melonDS::u32>(G.GameStateTraceInterval)) != 0) return;
+    if (frame < G.Diagnostics.GameStateTraceStartFrame) return;
+    if (G.Diagnostics.GameStateTraceEndFrame != 0 && frame > G.Diagnostics.GameStateTraceEndFrame) return;
+    if ((frame % static_cast<melonDS::u32>(G.Diagnostics.GameStateTraceInterval)) != 0) return;
     if ((kNetRandomValueAddr - kMainRAMBase) + sizeof(melonDS::u32) > nds->MainRAMMask + 1) return;
 
     const GameStateSample sample = ReadGameStateSample(nds);
@@ -9371,7 +9330,7 @@ void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     GameStateTraceHashes traceHashes;
     const GameStateTraceHashes* extendedHashes = nullptr;
-    if (G.GameStateTraceExtended)
+    if (G.Diagnostics.GameStateTraceExtended)
     {
         traceHashes.PlayerGlobal = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, 0xC0);
         traceHashes.WifiCandidate = HashMainRAMRange(nds, kGameCandidateWifiBlockAddr, 0x2200);
@@ -10037,56 +9996,38 @@ void InitFromEnvironment()
     } markEnvironmentChecked;
 
     G.Bootstrap = Config::LoadBootstrapConfig();
-    const Config::DiagnosticsConfig diagnosticsConfig =
-        Config::LoadDiagnosticsConfig(static_cast<int>(kDiagnosticRingCapacity));
+    G.Diagnostics = Config::LoadDiagnosticsConfig(static_cast<int>(kDiagnosticRingCapacity));
     G.Harness = Config::LoadHarnessConfig();
     G.Enabled = G.Bootstrap.Enabled;
     G.TestEnabled = G.Bootstrap.TestEnabled;
-    G.HangDiagnosticsEnabled = diagnosticsConfig.HangDiagnosticsEnabled;
-    G.HangWatchdogIntervalMs = diagnosticsConfig.HangWatchdogIntervalMs;
-    G.HangThresholdMs = diagnosticsConfig.HangThresholdMs;
-    G.HangWatchdogPath = diagnosticsConfig.HangWatchdogPath;
-    G.HangPhaseEventsPath = diagnosticsConfig.HangPhaseEventsPath;
-    G.HangDumpPath = diagnosticsConfig.HangDumpPath;
-    G.ActiveFpsStartFrame = diagnosticsConfig.ActiveFpsStartFrame;
-    G.ActiveFrameSpikeThresholdUs = diagnosticsConfig.ActiveFrameSpikeThresholdUs;
-    G.ActiveFrameSpikeTrace = diagnosticsConfig.ActiveFrameSpikeTrace;
-    G.FrameHeartbeatInterval = diagnosticsConfig.FrameHeartbeatInterval;
-    G.GameplayHeartbeatInterval = diagnosticsConfig.GameplayHeartbeatInterval;
-    if (!diagnosticsConfig.FrameHeartbeatPath.empty())
+    if (!G.Diagnostics.FrameHeartbeatPath.empty())
     {
-        G.FrameHeartbeatPath = diagnosticsConfig.FrameHeartbeatPath;
-        G.FrameHeartbeat.open(G.FrameHeartbeatPath, std::ios::out | std::ios::trunc);
+        G.FrameHeartbeat.open(G.Diagnostics.FrameHeartbeatPath, std::ios::out | std::ios::trunc);
         StartFrameHeartbeatThreadIfNeeded();
     }
-    if (!diagnosticsConfig.InputRecordPath.empty())
+    if (!G.Diagnostics.InputRecordPath.empty())
     {
-        G.InputRecordPath = diagnosticsConfig.InputRecordPath;
-        G.InputRecordStartFrame = diagnosticsConfig.InputRecordStartFrame;
-        G.InputRecordEndFrame = diagnosticsConfig.InputRecordEndFrame;
-        G.InputRecordInstance = diagnosticsConfig.InputRecordInstance;
-        G.InputRecord.open(G.InputRecordPath, std::ios::out | std::ios::trunc);
+        G.InputRecord.open(G.Diagnostics.InputRecordPath, std::ios::out | std::ios::trunc);
         if (G.InputRecord)
         {
             G.InputRecordEnabled = true;
             G.InputRecord << "# NSMB input recording generated by melonDS NSML PoC\n";
-            G.InputRecord << "# startFrame=" << G.InputRecordStartFrame
-                << " endFrame=" << G.InputRecordEndFrame
-                << " instance=" << G.InputRecordInstance << "\n";
+            G.InputRecord << "# startFrame=" << G.Diagnostics.InputRecordStartFrame
+                << " endFrame=" << G.Diagnostics.InputRecordEndFrame
+                << " instance=" << G.Diagnostics.InputRecordInstance << "\n";
             G.InputRecord.flush();
             std::printf("NSMB Test: recording input to %s start=%u end=%u instance=%d\n",
-                G.InputRecordPath.c_str(),
-                G.InputRecordStartFrame,
-                G.InputRecordEndFrame,
-                G.InputRecordInstance);
+                G.Diagnostics.InputRecordPath.c_str(),
+                G.Diagnostics.InputRecordStartFrame,
+                G.Diagnostics.InputRecordEndFrame,
+                G.Diagnostics.InputRecordInstance);
         }
         else
         {
             std::printf("NSMB Test: failed to open input record file: %s\n",
-                G.InputRecordPath.c_str());
+                G.Diagnostics.InputRecordPath.c_str());
         }
     }
-    G.ScreenHashEnabled = diagnosticsConfig.ScreenHashEnabled;
     G.PacketBridge = Config::LoadPacketBridgeConfig();
     G.Input = Config::LoadInputConfig(false);
     G.RuntimePatch = Config::LoadRuntimePatchConfig();
@@ -10103,41 +10044,16 @@ void InitFromEnvironment()
     const char* inputScript = std::getenv("MELONDS_NSML_INPUT_SCRIPT");
     if (inputScript && inputScript[0]) G.InputScriptPath = inputScript;
 
-    G.HashLogPath = diagnosticsConfig.HashLogPath;
-    G.ScreenshotDir = diagnosticsConfig.ScreenshotDir;
-    G.ScreenshotInterval = diagnosticsConfig.ScreenshotInterval;
-    G.RamDumpDir = diagnosticsConfig.RamDumpDir;
-    G.RamDumpInterval = diagnosticsConfig.RamDumpInterval;
-    if (!ParseFrameRanges(diagnosticsConfig.RamDumpFrames.c_str(), G.RamDumpRanges))
+    if (!ParseFrameRanges(G.Diagnostics.RamDumpFrames.c_str(), G.RamDumpRanges))
     {
         std::printf("NSMB Test: invalid RAM dump frame list\n");
         G.RamDumpRanges.clear();
     }
-    G.GameStateTracePath = diagnosticsConfig.GameStateTracePath;
-    G.DiagnosticsPath = diagnosticsConfig.DiagnosticsPath;
-    G.DiagnosticEventsPath = diagnosticsConfig.DiagnosticEventsPath;
-    G.DiagnosticEventsEnabled = diagnosticsConfig.DiagnosticEventsEnabled;
-    G.DiagnosticRingFrames = diagnosticsConfig.DiagnosticRingFrames;
-    if (G.DiagnosticEventsEnabled && !G.DiagnosticEventsPath.empty())
+    if (G.Diagnostics.DiagnosticEventsEnabled && !G.Diagnostics.DiagnosticEventsPath.empty())
     {
         std::error_code ec;
-        std::filesystem::remove(G.DiagnosticEventsPath, ec);
+        std::filesystem::remove(G.Diagnostics.DiagnosticEventsPath, ec);
     }
-    G.GameStateTraceInterval = diagnosticsConfig.GameStateTraceInterval;
-    G.GameStateTraceStartFrame = diagnosticsConfig.GameStateTraceStartFrame;
-    G.GameStateTraceEndFrame = diagnosticsConfig.GameStateTraceEndFrame;
-    G.GameStateTraceExtended = diagnosticsConfig.GameStateTraceExtended;
-    G.AIPlayLogPath = diagnosticsConfig.AIPlayLogPath;
-    G.AIObservationV2Path = diagnosticsConfig.AIObservationV2Path;
-    G.AIObservationV3Path = diagnosticsConfig.AIObservationV3Path;
-    G.AIPlayLogInterval = diagnosticsConfig.AIPlayLogInterval;
-    G.AIPlayLogFlushInterval = diagnosticsConfig.AIPlayLogFlushInterval;
-    G.AIPlayLogStartFrame = diagnosticsConfig.AIPlayLogStartFrame;
-    G.AIPlayLogEndFrame = diagnosticsConfig.AIPlayLogEndFrame;
-    G.AIPlayLogMaxObjects = diagnosticsConfig.AIPlayLogMaxObjects;
-    G.AIObservationV2StageFilter = diagnosticsConfig.AIObservationV2StageFilter;
-    G.AIObservationV3StageFilter = diagnosticsConfig.AIObservationV3StageFilter;
-    G.AIPlayLogGameplayOnly = diagnosticsConfig.AIPlayLogGameplayOnly;
     G.StateSync = Config::LoadStateSyncConfig();
 
     if (!ParseFrameRanges(G.Harness.MemPatchRanges.c_str(), G.MemPatchRanges))
@@ -10226,96 +10142,96 @@ void InitFromEnvironment()
         G.NetRandomPatchValue = G.MatchSeed;
     }
 
-    if ((G.TestEnabled || G.Enabled) && !G.GameStateTracePath.empty())
+    if ((G.TestEnabled || G.Enabled) && !G.Diagnostics.GameStateTracePath.empty())
     {
-        G.GameStateTrace.open(G.GameStateTracePath, std::ios::out | std::ios::trunc);
+        G.GameStateTrace.open(G.Diagnostics.GameStateTracePath, std::ios::out | std::ios::trunc);
         if (!G.GameStateTrace)
         {
-            std::printf("NSMB Test: failed to open game state trace: %s\n", G.GameStateTracePath.c_str());
+            std::printf("NSMB Test: failed to open game state trace: %s\n", G.Diagnostics.GameStateTracePath.c_str());
         }
         else
         {
-            WriteGameStateTraceHeader(G.GameStateTrace, G.GameStateTraceExtended);
+            WriteGameStateTraceHeader(G.GameStateTrace, G.Diagnostics.GameStateTraceExtended);
         }
     }
-    if ((G.TestEnabled || G.Enabled) && !G.AIPlayLogPath.empty())
+    if ((G.TestEnabled || G.Enabled) && !G.Diagnostics.AIPlayLogPath.empty())
     {
         std::error_code dirError;
-        const std::filesystem::path aiPlayLogPath(G.AIPlayLogPath);
+        const std::filesystem::path aiPlayLogPath(G.Diagnostics.AIPlayLogPath);
         const std::filesystem::path aiPlayLogParent = aiPlayLogPath.parent_path();
         if (!aiPlayLogParent.empty())
             std::filesystem::create_directories(aiPlayLogParent, dirError);
-        G.AIPlayLog.open(G.AIPlayLogPath, std::ios::out | std::ios::trunc);
+        G.AIPlayLog.open(G.Diagnostics.AIPlayLogPath, std::ios::out | std::ios::trunc);
         if (!G.AIPlayLog)
         {
-            std::printf("NSMB AIPlayLog: failed to open path=%s\n", G.AIPlayLogPath.c_str());
+            std::printf("NSMB AIPlayLog: failed to open path=%s\n", G.Diagnostics.AIPlayLogPath.c_str());
         }
         else
         {
             G.AIPlayLogLinesSinceFlush = 0;
             std::printf(
                 "NSMB AIPlayLog: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d gameplayOnly=%d\n",
-                G.AIPlayLogPath.c_str(),
-                G.AIPlayLogInterval,
-                G.AIPlayLogFlushInterval,
-                G.AIPlayLogStartFrame,
-                G.AIPlayLogEndFrame,
-                G.AIPlayLogMaxObjects,
-                G.AIPlayLogGameplayOnly ? 1 : 0);
+                G.Diagnostics.AIPlayLogPath.c_str(),
+                G.Diagnostics.AIPlayLogInterval,
+                G.Diagnostics.AIPlayLogFlushInterval,
+                G.Diagnostics.AIPlayLogStartFrame,
+                G.Diagnostics.AIPlayLogEndFrame,
+                G.Diagnostics.AIPlayLogMaxObjects,
+                G.Diagnostics.AIPlayLogGameplayOnly ? 1 : 0);
         }
     }
-    if ((G.TestEnabled || G.Enabled) && !G.AIObservationV2Path.empty())
+    if ((G.TestEnabled || G.Enabled) && !G.Diagnostics.AIObservationV2Path.empty())
     {
         std::error_code dirError;
-        const std::filesystem::path observationPath(G.AIObservationV2Path);
+        const std::filesystem::path observationPath(G.Diagnostics.AIObservationV2Path);
         const std::filesystem::path observationParent = observationPath.parent_path();
         if (!observationParent.empty())
             std::filesystem::create_directories(observationParent, dirError);
-        G.AIObservationV2Log.open(G.AIObservationV2Path, std::ios::out | std::ios::trunc);
+        G.AIObservationV2Log.open(G.Diagnostics.AIObservationV2Path, std::ios::out | std::ios::trunc);
         if (!G.AIObservationV2Log)
         {
-            std::printf("NSMB AIObservationV2: failed to open path=%s\n", G.AIObservationV2Path.c_str());
+            std::printf("NSMB AIObservationV2: failed to open path=%s\n", G.Diagnostics.AIObservationV2Path.c_str());
         }
         else
         {
             G.AIObservationV2LinesSinceFlush = 0;
             std::printf(
                 "NSMB AIObservationV2: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d stageFilter=%d gameplayOnly=%d\n",
-                G.AIObservationV2Path.c_str(),
-                G.AIPlayLogInterval,
-                G.AIPlayLogFlushInterval,
-                G.AIPlayLogStartFrame,
-                G.AIPlayLogEndFrame,
-                G.AIPlayLogMaxObjects,
-                G.AIObservationV2StageFilter,
-                G.AIPlayLogGameplayOnly ? 1 : 0);
+                G.Diagnostics.AIObservationV2Path.c_str(),
+                G.Diagnostics.AIPlayLogInterval,
+                G.Diagnostics.AIPlayLogFlushInterval,
+                G.Diagnostics.AIPlayLogStartFrame,
+                G.Diagnostics.AIPlayLogEndFrame,
+                G.Diagnostics.AIPlayLogMaxObjects,
+                G.Diagnostics.AIObservationV2StageFilter,
+                G.Diagnostics.AIPlayLogGameplayOnly ? 1 : 0);
         }
     }
-    if ((G.TestEnabled || G.Enabled) && !G.AIObservationV3Path.empty())
+    if ((G.TestEnabled || G.Enabled) && !G.Diagnostics.AIObservationV3Path.empty())
     {
         std::error_code dirError;
-        const std::filesystem::path observationPath(G.AIObservationV3Path);
+        const std::filesystem::path observationPath(G.Diagnostics.AIObservationV3Path);
         const std::filesystem::path observationParent = observationPath.parent_path();
         if (!observationParent.empty())
             std::filesystem::create_directories(observationParent, dirError);
-        G.AIObservationV3Log.open(G.AIObservationV3Path, std::ios::out | std::ios::trunc);
+        G.AIObservationV3Log.open(G.Diagnostics.AIObservationV3Path, std::ios::out | std::ios::trunc);
         if (!G.AIObservationV3Log)
         {
-            std::printf("NSMB AIObservationV3: failed to open path=%s\n", G.AIObservationV3Path.c_str());
+            std::printf("NSMB AIObservationV3: failed to open path=%s\n", G.Diagnostics.AIObservationV3Path.c_str());
         }
         else
         {
             G.AIObservationV3LinesSinceFlush = 0;
             std::printf(
                 "NSMB AIObservationV3: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d stageFilter=%d gameplayOnly=%d\n",
-                G.AIObservationV3Path.c_str(),
-                G.AIPlayLogInterval,
-                G.AIPlayLogFlushInterval,
-                G.AIPlayLogStartFrame,
-                G.AIPlayLogEndFrame,
-                G.AIPlayLogMaxObjects,
-                G.AIObservationV3StageFilter,
-                G.AIPlayLogGameplayOnly ? 1 : 0);
+                G.Diagnostics.AIObservationV3Path.c_str(),
+                G.Diagnostics.AIPlayLogInterval,
+                G.Diagnostics.AIPlayLogFlushInterval,
+                G.Diagnostics.AIPlayLogStartFrame,
+                G.Diagnostics.AIPlayLogEndFrame,
+                G.Diagnostics.AIPlayLogMaxObjects,
+                G.Diagnostics.AIObservationV3StageFilter,
+                G.Diagnostics.AIPlayLogGameplayOnly ? 1 : 0);
         }
     }
 
@@ -10329,16 +10245,16 @@ void InitFromEnvironment()
             G.TestEnabled = false;
         }
 
-        if (!G.HashLogPath.empty())
+        if (!G.Diagnostics.HashLogPath.empty())
         {
-            G.HashLog.open(G.HashLogPath, std::ios::out | std::ios::trunc);
+            G.HashLog.open(G.Diagnostics.HashLogPath, std::ios::out | std::ios::trunc);
             if (!G.HashLog)
             {
-                std::printf("NSMB Test: failed to open hash log: %s\n", G.HashLogPath.c_str());
+                std::printf("NSMB Test: failed to open hash log: %s\n", G.Diagnostics.HashLogPath.c_str());
             }
             else
             {
-                if (G.ScreenHashEnabled)
+                if (G.Diagnostics.ScreenHashEnabled)
                     G.HashLog << "instance,frame,hash,screenHash\n";
                 else
                     G.HashLog << "instance,frame,hash\n";
@@ -10352,15 +10268,15 @@ void InitFromEnvironment()
             G.Harness.FrameBarrierEnabled ? 1 : 0,
             G.Harness.SerialRunEnabled ? 1 : 0,
             G.InputScriptPath.empty() ? "<none>" : G.InputScriptPath.c_str(),
-            G.HashLogPath.empty() ? "<none>" : G.HashLogPath.c_str(),
+            G.Diagnostics.HashLogPath.empty() ? "<none>" : G.Diagnostics.HashLogPath.c_str(),
             G.Bootstrap.HashInterval,
-            G.ScreenshotDir.empty() ? "<none>" : G.ScreenshotDir.c_str(),
-            G.ScreenshotInterval,
-            G.RamDumpDir.empty() ? "<none>" : G.RamDumpDir.c_str(),
-            G.RamDumpInterval,
+            G.Diagnostics.ScreenshotDir.empty() ? "<none>" : G.Diagnostics.ScreenshotDir.c_str(),
+            G.Diagnostics.ScreenshotInterval,
+            G.Diagnostics.RamDumpDir.empty() ? "<none>" : G.Diagnostics.RamDumpDir.c_str(),
+            G.Diagnostics.RamDumpInterval,
             G.RamDumpRanges.size(),
-            G.GameStateTracePath.empty() ? "<none>" : G.GameStateTracePath.c_str(),
-            G.GameStateTraceInterval,
+            G.Diagnostics.GameStateTracePath.empty() ? "<none>" : G.Diagnostics.GameStateTracePath.c_str(),
+            G.Diagnostics.GameStateTraceInterval,
             G.StateSync.GameEnabled ? 1 : 0,
             G.StateSync.GameApplyEnabled ? 1 : 0,
             G.StateSync.GameInterval,
@@ -10413,10 +10329,10 @@ void InitFromEnvironment()
             G.Mvl.CourseMode.c_str(),
             G.Mvl.BigStarTarget);
         std::printf("NSMB Diagnostics: events=%d path=%s ringFrames=%d diagnosticsFile=%s\n",
-            G.DiagnosticEventsEnabled ? 1 : 0,
-            G.DiagnosticEventsPath.empty() ? "<none>" : G.DiagnosticEventsPath.c_str(),
-            G.DiagnosticRingFrames,
-            G.DiagnosticsPath.empty() ? "<none>" : G.DiagnosticsPath.c_str());
+            G.Diagnostics.DiagnosticEventsEnabled ? 1 : 0,
+            G.Diagnostics.DiagnosticEventsPath.empty() ? "<none>" : G.Diagnostics.DiagnosticEventsPath.c_str(),
+            G.Diagnostics.DiagnosticRingFrames,
+            G.Diagnostics.DiagnosticsPath.empty() ? "<none>" : G.Diagnostics.DiagnosticsPath.c_str());
         std::fflush(stdout);
     }
 
@@ -10653,7 +10569,7 @@ public:
     };
 
     BeforeHookPhaseTrace(int instanceID, melonDS::u32 frame)
-        : Enabled(G.ActiveFrameSpikeTrace)
+        : Enabled(G.Diagnostics.ActiveFrameSpikeTrace)
         , InstanceID(instanceID)
         , Frame(frame)
         , Start(std::chrono::steady_clock::now())
@@ -10669,7 +10585,7 @@ public:
         const auto now = std::chrono::steady_clock::now();
         const auto tailUs = ElapsedUs(Last, now);
         const auto totalUs = ElapsedUs(Start, now);
-        if (totalUs < std::min(G.ActiveFrameSpikeThresholdUs, 10000))
+        if (totalUs < std::min(G.Diagnostics.ActiveFrameSpikeThresholdUs, 10000))
             return;
 
         std::printf(
@@ -11108,7 +11024,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
 void TracePlayerLifeChanges(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if ((!G.RuntimePatch.TracePlayerLifeChanges && !G.DiagnosticEventsEnabled) || !nds || !nds->MainRAM) return;
+    if ((!G.RuntimePatch.TracePlayerLifeChanges && !G.Diagnostics.DiagnosticEventsEnabled) || !nds || !nds->MainRAM) return;
     if (instanceID < 0 || instanceID >= 16) return;
 
     GameStateSample& last = G.LastPlayerLifeSample[instanceID];
@@ -11262,14 +11178,14 @@ void TracePlayerLifeChanges(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
 
 void TraceGameplayHeartbeatIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    if (G.GameplayHeartbeatInterval <= 0 || !nds || !nds->MainRAM)
+    if (G.Diagnostics.GameplayHeartbeatInterval <= 0 || !nds || !nds->MainRAM)
         return;
     if (instanceID < 0 || instanceID >= 16)
         return;
     if (frame < G.Connection.StartFrame)
         return;
     if (frame == G.LastGameplayHeartbeat[instanceID] ||
-        (frame % static_cast<melonDS::u32>(G.GameplayHeartbeatInterval)) != 0)
+        (frame % static_cast<melonDS::u32>(G.Diagnostics.GameplayHeartbeatInterval)) != 0)
         return;
 
     G.LastGameplayHeartbeat[instanceID] = frame;
@@ -11352,8 +11268,8 @@ melonDS::u32 PrepareAfterFrameLogFrame(int instanceID, melonDS::u32 frame)
             G.TestTimerStart = std::chrono::steady_clock::now();
         }
     }
-    const melonDS::u32 activeStartFrame = G.ActiveFpsStartFrame != 0
-        ? G.ActiveFpsStartFrame
+    const melonDS::u32 activeStartFrame = G.Diagnostics.ActiveFpsStartFrame != 0
+        ? G.Diagnostics.ActiveFpsStartFrame
         : (G.Connection.StartFrame != 0
             ? G.Connection.StartFrame + 120
             : 120);
@@ -11369,10 +11285,10 @@ melonDS::u32 PrepareAfterFrameLogFrame(int instanceID, melonDS::u32 frame)
     }
     RecordActiveFrameTiming(instanceID, logFrame);
     const bool heartbeatActive = G.ActiveTimerStarted[instanceID] || logFrame >= activeStartFrame;
-    if (G.FrameHeartbeatInterval > 0
+    if (G.Diagnostics.FrameHeartbeatInterval > 0
         && heartbeatActive
         && logFrame != G.LastFrameHeartbeat[instanceID]
-        && (logFrame % static_cast<melonDS::u32>(G.FrameHeartbeatInterval)) == 0)
+        && (logFrame % static_cast<melonDS::u32>(G.Diagnostics.FrameHeartbeatInterval)) == 0)
     {
         G.LastFrameHeartbeat[instanceID] = logFrame;
         std::printf("NSMB Heartbeat: inst=%d frame=%u\n", instanceID, logFrame);
@@ -11621,11 +11537,11 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     const auto afterSyncPlayer = std::chrono::steady_clock::now();
     TraceHangPhase("end", "after-frame", instanceID, logFrame, logFrame, logFrame);
 
-    if (G.ActiveFrameSpikeTrace)
+    if (G.Diagnostics.ActiveFrameSpikeTrace)
     {
         const auto totalUs = std::chrono::duration_cast<std::chrono::microseconds>(
             afterSyncPlayer - afterHookCallStart).count();
-        if (totalUs >= std::min(G.ActiveFrameSpikeThresholdUs, 10000))
+        if (totalUs >= std::min(G.Diagnostics.ActiveFrameSpikeThresholdUs, 10000))
         {
             const auto elapsedMs = [](auto start, auto end) {
                 return std::chrono::duration<double, std::milli>(end - start).count();
@@ -11660,11 +11576,11 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if ((logFrame % static_cast<melonDS::u32>(G.Bootstrap.HashInterval)) != 0) return;
 
     const melonDS::u64 hash = HashNDS(nds);
-    const melonDS::u64 screenHash = G.ScreenHashEnabled ? HashFramebuffers(nds) : 0;
+    const melonDS::u64 screenHash = G.Diagnostics.ScreenHashEnabled ? HashFramebuffers(nds) : 0;
     if (G.LastLoggedHashFrame[instanceID] == logFrame) return;
     G.LastLoggedHashFrame[instanceID] = logFrame;
 
-    if (G.ScreenHashEnabled)
+    if (G.Diagnostics.ScreenHashEnabled)
     {
         std::printf("NSMB PoC: inst=%d frame=%u hash=%016llX screen=%016llX\n",
             instanceID,
@@ -11685,7 +11601,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     {
         G.HashLog << instanceID << ',' << logFrame << ','
                   << std::hex << hash;
-        if (G.ScreenHashEnabled)
+        if (G.Diagnostics.ScreenHashEnabled)
             G.HashLog << ',' << screenHash;
         G.HashLog << std::dec << '\n';
         G.HashLog.flush();
@@ -11752,7 +11668,7 @@ bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
                     G.ActiveFrameOver16ms[instanceID],
                     G.ActiveFrameOver25ms[instanceID],
                     G.ActiveFrameOver33ms[instanceID],
-                    static_cast<double>(G.ActiveFrameSpikeThresholdUs) / 1000.0);
+                    static_cast<double>(G.Diagnostics.ActiveFrameSpikeThresholdUs) / 1000.0);
             }
         }
         if (G.Enabled && G.Input.NetplayOnly)

@@ -2992,7 +2992,7 @@ void AppendAICompactRuntimeEntities(
     {
         if (entry.LifecycleState != 1)
             continue;
-        if (writtenObjects >= G.AIPlayLogMaxObjects)
+        if (writtenObjects >= G.Diagnostics.AIPlayLogMaxObjects)
             break;
         const char* category = AIObjectCategory(entry.ObjectID, entry.Actor.Settings);
         const auto kind = RuntimeItemKindAndConfidence(entry, category, visualPowerup);
@@ -3856,7 +3856,7 @@ void WriteAIObservationV2Record(std::ostream& out, int instanceID, melonDS::u32 
     {
         if (entry.LifecycleState != 1)
             continue;
-        if (writtenObjects >= G.AIPlayLogMaxObjects)
+        if (writtenObjects >= G.Diagnostics.AIPlayLogMaxObjects)
             break;
         if (!firstEntity)
             record << ",";
@@ -3879,20 +3879,20 @@ void WriteAIObservationV2Record(std::ostream& out, int instanceID, melonDS::u32 
 
 void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    const bool writeV1 = !G.AIPlayLogPath.empty() && G.AIPlayLog;
-    const bool writeV2 = !G.AIObservationV2Path.empty() && G.AIObservationV2Log;
-    const bool writeV3 = !G.AIObservationV3Path.empty() && G.AIObservationV3Log;
+    const bool writeV1 = !G.Diagnostics.AIPlayLogPath.empty() && G.AIPlayLog;
+    const bool writeV2 = !G.Diagnostics.AIObservationV2Path.empty() && G.AIObservationV2Log;
+    const bool writeV3 = !G.Diagnostics.AIObservationV3Path.empty() && G.AIObservationV3Log;
     if ((!writeV1 && !writeV2 && !writeV3) || !nds || !nds->MainRAM)
         return;
-    if (frame < G.AIPlayLogStartFrame)
+    if (frame < G.Diagnostics.AIPlayLogStartFrame)
         return;
-    if (G.AIPlayLogEndFrame != 0 && frame > G.AIPlayLogEndFrame)
+    if (G.Diagnostics.AIPlayLogEndFrame != 0 && frame > G.Diagnostics.AIPlayLogEndFrame)
         return;
-    if ((frame % static_cast<melonDS::u32>(G.AIPlayLogInterval)) != 0)
+    if ((frame % static_cast<melonDS::u32>(G.Diagnostics.AIPlayLogInterval)) != 0)
         return;
 
     const bool inGameplay = IsMarioVsLuigiGameplay(nds);
-    if (G.AIPlayLogGameplayOnly && !inGameplay)
+    if (G.Diagnostics.AIPlayLogGameplayOnly && !inGameplay)
         return;
 
     const GameStateSample sample = ReadGameStateSample(nds);
@@ -3900,18 +3900,18 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     const int localPlayer = CurrentPacketBridgeLocalPlayer();
     PrepareAIPlayLogFireballOwnerTracking(instanceID, sample);
 
-    const bool v2StageAllowed = G.AIObservationV2StageFilter < 0 ||
-        (sample.StageGroup == 9 && sample.StageID == static_cast<melonDS::u32>(G.AIObservationV2StageFilter));
-    const bool v3StageAllowed = G.AIObservationV3StageFilter < 0 ||
-        (sample.StageGroup == 9 && sample.StageID == static_cast<melonDS::u32>(G.AIObservationV3StageFilter));
+    const bool v2StageAllowed = G.Diagnostics.AIObservationV2StageFilter < 0 ||
+        (sample.StageGroup == 9 && sample.StageID == static_cast<melonDS::u32>(G.Diagnostics.AIObservationV2StageFilter));
+    const bool v3StageAllowed = G.Diagnostics.AIObservationV3StageFilter < 0 ||
+        (sample.StageGroup == 9 && sample.StageID == static_cast<melonDS::u32>(G.Diagnostics.AIObservationV3StageFilter));
 
     if (writeV2 && v2StageAllowed)
     {
         WriteAIObservationV2Record(G.AIObservationV2Log, instanceID, frame, sample, objectScanCache, localPlayer, false);
-        if (G.AIPlayLogFlushInterval > 0)
+        if (G.Diagnostics.AIPlayLogFlushInterval > 0)
         {
             G.AIObservationV2LinesSinceFlush++;
-            if (G.AIObservationV2LinesSinceFlush >= G.AIPlayLogFlushInterval)
+            if (G.AIObservationV2LinesSinceFlush >= G.Diagnostics.AIPlayLogFlushInterval)
             {
                 G.AIObservationV2Log.flush();
                 G.AIObservationV2LinesSinceFlush = 0;
@@ -3922,10 +3922,10 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if (writeV3 && v3StageAllowed)
     {
         WriteAIObservationV2Record(G.AIObservationV3Log, instanceID, frame, sample, objectScanCache, localPlayer, true);
-        if (G.AIPlayLogFlushInterval > 0)
+        if (G.Diagnostics.AIPlayLogFlushInterval > 0)
         {
             G.AIObservationV3LinesSinceFlush++;
-            if (G.AIObservationV3LinesSinceFlush >= G.AIPlayLogFlushInterval)
+            if (G.AIObservationV3LinesSinceFlush >= G.Diagnostics.AIPlayLogFlushInterval)
             {
                 G.AIObservationV3Log.flush();
                 G.AIObservationV3LinesSinceFlush = 0;
@@ -4143,7 +4143,7 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     {
         if (entry.LifecycleState != 1)
             continue;
-        if (writtenObjects >= G.AIPlayLogMaxObjects)
+        if (writtenObjects >= G.Diagnostics.AIPlayLogMaxObjects)
             break;
         if (writtenObjects != 0)
             G.AIPlayLog << ",";
@@ -4153,10 +4153,10 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     G.AIPlayLog << "],\"hash\":";
     WriteJsonHex(G.AIPlayLog, static_cast<melonDS::u32>(sample.Hash & 0xFFFFFFFFull));
     G.AIPlayLog << "}\n";
-    if (G.AIPlayLogFlushInterval > 0)
+    if (G.Diagnostics.AIPlayLogFlushInterval > 0)
     {
         G.AIPlayLogLinesSinceFlush++;
-        if (G.AIPlayLogLinesSinceFlush >= G.AIPlayLogFlushInterval)
+        if (G.AIPlayLogLinesSinceFlush >= G.Diagnostics.AIPlayLogFlushInterval)
         {
             G.AIPlayLog.flush();
             G.AIPlayLogLinesSinceFlush = 0;
