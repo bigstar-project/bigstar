@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { css } from 'styled-system/css';
 import { AIReplayViewer } from '@/launcher/AIReplayViewer';
 import { areAiDevToolsEnabled } from './buildProfile';
@@ -12,6 +13,12 @@ import { useLauncherController } from './launcher/useLauncherController';
 export function App() {
   const launcher = useLauncherController();
   const aiDevToolsEnabled = areAiDevToolsEnabled();
+  const [aiViewerMounted, setAiViewerMounted] = useState(
+    launcher.activeView === 'ai',
+  );
+  useEffect(() => {
+    if (launcher.activeView === 'ai') setAiViewerMounted(true);
+  }, [launcher.activeView]);
   const onboardingMissing =
     launcher.onboarding.loaded &&
     (!launcher.onboarding.romsPrepared ||
@@ -50,7 +57,7 @@ export function App() {
             summary={launcher.summary}
             updateField={launcher.updateField}
           />
-          {aiDevToolsEnabled ? <AIReplayViewer /> : null}
+          {aiDevToolsEnabled && aiViewerMounted ? <AIReplayViewer /> : null}
           <HistoryView
             onCreateLogArchive={launcher.actions.createLogArchive}
             onOpenLogDir={launcher.actions.openLogDir}

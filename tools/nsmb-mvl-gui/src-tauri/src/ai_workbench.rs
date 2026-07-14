@@ -125,7 +125,11 @@ pub(crate) struct RunAiToolResponse {
 
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn list_ai_artifacts() -> Result<Vec<AiArtifact>, String> {
+pub(crate) async fn list_ai_artifacts() -> Result<Vec<AiArtifact>, String> {
+    run_ai_worker("AI成果物一覧", list_ai_artifacts_inner).await
+}
+
+fn list_ai_artifacts_inner() -> Result<Vec<AiArtifact>, String> {
     let root = repo_root()?;
     let mut artifacts = Vec::new();
     for relative in ["logs", "datasets", "models"] {
@@ -145,7 +149,16 @@ pub(crate) fn list_ai_artifacts() -> Result<Vec<AiArtifact>, String> {
 
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn read_ai_text_file(
+pub(crate) async fn read_ai_text_file(
+    request: ReadAiTextFileRequest,
+) -> Result<ReadAiTextFileResponse, String> {
+    run_ai_worker("AIテキスト読み込み", move || {
+        read_ai_text_file_inner(request)
+    })
+    .await
+}
+
+fn read_ai_text_file_inner(
     request: ReadAiTextFileRequest,
 ) -> Result<ReadAiTextFileResponse, String> {
     let path = resolve_user_path(&request.path)?;
@@ -181,7 +194,16 @@ pub(crate) fn read_ai_text_file(
 
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn open_ai_replay_log(
+pub(crate) async fn open_ai_replay_log(
+    request: OpenAiReplayLogRequest,
+) -> Result<OpenAiReplayLogResponse, String> {
+    run_ai_worker("AIリプレイ展開・索引作成", move || {
+        open_ai_replay_log_inner(request)
+    })
+    .await
+}
+
+fn open_ai_replay_log_inner(
     request: OpenAiReplayLogRequest,
 ) -> Result<OpenAiReplayLogResponse, String> {
     let source_path = resolve_user_path(&request.path)?;
@@ -214,7 +236,16 @@ pub(crate) fn open_ai_replay_log(
 
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn read_ai_replay_frame(
+pub(crate) async fn read_ai_replay_frame(
+    request: ReadAiReplayFrameRequest,
+) -> Result<ReadAiReplayFrameResponse, String> {
+    run_ai_worker("AIリプレイフレーム読み込み", move || {
+        read_ai_replay_frame_inner(request)
+    })
+    .await
+}
+
+fn read_ai_replay_frame_inner(
     request: ReadAiReplayFrameRequest,
 ) -> Result<ReadAiReplayFrameResponse, String> {
     let data_path = resolve_user_path(&request.data_path)?;
@@ -254,9 +285,17 @@ pub(crate) fn select_ai_log_file(current_path: String) -> Result<Option<String>,
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn run_ai_tool(request: RunAiToolRequest) -> Result<RunAiToolResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || run_ai_tool_inner(request))
+    run_ai_worker("AI tool", move || run_ai_tool_inner(request)).await
+}
+
+async fn run_ai_worker<T, F>(label: &str, worker: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(worker)
         .await
-        .map_err(|err| format!("AI tool worker が停止しました: {err}"))?
+        .map_err(|err| format!("{label} worker が停止しました: {err}"))?
 }
 
 fn run_ai_tool_inner(request: RunAiToolRequest) -> Result<RunAiToolResponse, String> {
