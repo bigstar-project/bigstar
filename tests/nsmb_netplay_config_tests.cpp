@@ -449,8 +449,6 @@ void TestPacketBridgeConfigDefaults() {
   CHECK(config.ForceGameLocalPlayerID == -1);
   CHECK(config.ForceGameLocalPlayerIDStartFrame == 0u);
   CHECK(!config.ForceGameLocalPlayerIDEarly);
-  CHECK(config.MaxPumpEvents ==
-        NsmbNetplayPoC::Config::PacketBridgePumpEventLimit);
   CHECK(config.MaxFrameLead == -1);
   CHECK(config.ThrottleTimeoutMs == 5000);
   CHECK(config.ThrottleStartFrame == 0u);
@@ -478,7 +476,6 @@ void TestPacketBridgeConfigReadsAndClampsEnvironment() {
       {"MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_START_FRAME",
        "-8"},
       {"MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_EARLY", "1"},
-      {"MELONDS_NSML_PACKET_BRIDGE_MAX_PUMP_EVENTS", "999"},
       {"MELONDS_NSML_PACKET_BRIDGE_MAX_FRAME_LEAD", "10"},
       {"MELONDS_NSML_PACKET_BRIDGE_THROTTLE_TIMEOUT_MS", "-11"},
       {"MELONDS_NSML_PACKET_BRIDGE_THROTTLE_START_FRAME", "-12"},
@@ -503,8 +500,6 @@ void TestPacketBridgeConfigReadsAndClampsEnvironment() {
   CHECK(config.ForceGameLocalPlayerID == 7);
   CHECK(config.ForceGameLocalPlayerIDStartFrame == 0u);
   CHECK(config.ForceGameLocalPlayerIDEarly);
-  CHECK(config.MaxPumpEvents ==
-        NsmbNetplayPoC::Config::PacketBridgePumpEventLimit);
   CHECK(config.MaxFrameLead == 10);
   CHECK(config.ThrottleTimeoutMs == 0);
   CHECK(config.ThrottleStartFrame == 0u);
@@ -513,10 +508,6 @@ void TestPacketBridgeConfigReadsAndClampsEnvironment() {
   CHECK(config.PreserveLocalTouch);
   CHECK(config.SendDelayFrames == 0);
   CHECK(config.SendJitterFrames == 15);
-
-  environment.Values["MELONDS_NSML_PACKET_BRIDGE_MAX_PUMP_EVENTS"] = "0";
-  config = NsmbNetplayPoC::Config::LoadPacketBridgeConfig(environment);
-  CHECK(config.MaxPumpEvents == 1);
 
   environment.Values["MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER"] = "";
   config = NsmbNetplayPoC::Config::LoadPacketBridgeConfig(environment);

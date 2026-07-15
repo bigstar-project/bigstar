@@ -459,10 +459,6 @@ PacketBridgeConfig LoadPacketBridgeConfig(const Environment &environment) {
   config.ForceGameLocalPlayerIDEarly =
       ReadFlag(environment,
                "MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_EARLY");
-  config.MaxPumpEvents = std::clamp(
-      ReadInt(environment, "MELONDS_NSML_PACKET_BRIDGE_MAX_PUMP_EVENTS",
-              PacketBridgePumpEventLimit),
-      1, PacketBridgePumpEventLimit);
   config.MaxFrameLead =
       ReadInt(environment, "MELONDS_NSML_PACKET_BRIDGE_MAX_FRAME_LEAD", -1);
   config.ThrottleTimeoutMs = std::max(

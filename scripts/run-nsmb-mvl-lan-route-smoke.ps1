@@ -108,15 +108,11 @@ param(
     [switch]$PacketBridgeForceTick,
     [int]$PacketBridgeForceTickStartFrame = 0,
     [int]$PacketBridgeForceTickBase = -1,
-    [int]$HostPacketBridgeForceTickBase = -1,
-    [int]$ClientPacketBridgeForceTickBase = -1,
     [int]$PacketBridgeLookupTickDelay = 0,
-    [int]$PacketBridgeLocalInputDelay = -1,
     [switch]$PacketBridgeNeutralizeLocalInput,
     [switch]$PacketBridgePreserveLocalTouch,
     [int]$PacketBridgeSendDelayFrames = 0,
     [int]$PacketBridgeSendJitterFrames = 0,
-    [int]$PacketBridgeMaxPumpEvents = 64,
     [switch]$PacketBridgeSuppressDisconnect,
     [switch]$PacketBridgeBypassNetDisconnect,
     [int]$PacketBridgeBypassNetDisconnectStartFrame = 0,
@@ -1206,14 +1202,8 @@ function Start-MelonLANProcess {
         if ($PacketBridgeForceTick) {
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK = "1"
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME = "$PacketBridgeForceTickStartFrame"
-            $roleForceTickBase = $PacketBridgeForceTickBase
-            if ($Role -eq "host" -and $HostPacketBridgeForceTickBase -ge 0) {
-                $roleForceTickBase = $HostPacketBridgeForceTickBase
-            } elseif ($Role -eq "client" -and $ClientPacketBridgeForceTickBase -ge 0) {
-                $roleForceTickBase = $ClientPacketBridgeForceTickBase
-            }
-            if ($roleForceTickBase -ge 0) {
-                $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE = "$roleForceTickBase"
+            if ($PacketBridgeForceTickBase -ge 0) {
+                $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE = "$PacketBridgeForceTickBase"
             } else {
                 Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE -ErrorAction SilentlyContinue
             }
@@ -1227,12 +1217,8 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LOOKUP_TICK_DELAY -ErrorAction SilentlyContinue
         }
-        $effectivePacketBridgeLocalInputDelay = $PacketBridgeLocalInputDelay
-        if ($effectivePacketBridgeLocalInputDelay -lt 0) {
-            $effectivePacketBridgeLocalInputDelay = $PacketBridgeLookupTickDelay
-        }
-        if ($effectivePacketBridgeLocalInputDelay -gt 0) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_LOCAL_INPUT_DELAY = "$effectivePacketBridgeLocalInputDelay"
+        if ($PacketBridgeLookupTickDelay -gt 0) {
+            $env:MELONDS_NSML_PACKET_BRIDGE_LOCAL_INPUT_DELAY = "$PacketBridgeLookupTickDelay"
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOCAL_INPUT_DELAY -ErrorAction SilentlyContinue
         }
@@ -1255,11 +1241,6 @@ function Start-MelonLANProcess {
             $env:MELONDS_NSML_PACKET_BRIDGE_SEND_JITTER_FRAMES = "$PacketBridgeSendJitterFrames"
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_SEND_JITTER_FRAMES -ErrorAction SilentlyContinue
-        }
-        if ($PacketBridgeMaxPumpEvents -gt 0) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_MAX_PUMP_EVENTS = "$PacketBridgeMaxPumpEvents"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAX_PUMP_EVENTS -ErrorAction SilentlyContinue
         }
         if ($PacketBridgeSuppressDisconnect) {
             $env:MELONDS_NSML_PACKET_BRIDGE_SUPPRESS_DISCONNECT = "1"
@@ -1486,7 +1467,6 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LOOKUP_TICK_DELAY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAX_PUMP_EVENTS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_SUPPRESS_DISCONNECT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT_MODE -ErrorAction SilentlyContinue

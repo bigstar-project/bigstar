@@ -21,6 +21,7 @@
 #include "NsmbNetplayProtocol.h"
 #include "NsmbNetplayTransport.h"
 #include "NsmbNetplayDiagnostics.h"
+#include "NsmbTestStateHarness.h"
 #include "NsmbGameState.h"
 #include "NsmbGameStateReader.h"
 #include "NsmbGameStateWriter.h"
@@ -44,7 +45,6 @@
 #include <iomanip>
 #include <mutex>
 #include <filesystem>
-#include <iterator>
 #include <limits>
 #include <random>
 #include <set>
@@ -59,8 +59,6 @@
 #include "NDS.h"
 #include "ARM.h"
 #include "Savestate.h"
-#include "LocalMP.h"
-#include "MPInterface.h"
 #include "Platform.h"
 
 namespace NsmbNetplayPoC
@@ -71,6 +69,7 @@ namespace
 
 constexpr melonDS::u32 kMagic = 0x4C4D534E; // "NSML", little endian
 constexpr melonDS::u32 kVersion = 1;
+constexpr int kPacketBridgePumpEventLimit = 64;
 constexpr std::size_t kTrackedWorldMovingHazardCount = 4;
 using WireProtocol::WireGameState;
 using WireProtocol::WireNSMLPacket;
@@ -1080,9 +1079,7 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
     FlushDelayedInputsLocked(localFrame);
 
     ENetEvent event;
-    const int maxEvents = std::clamp(
-        G.PacketBridge.MaxPumpEvents, 1, Config::PacketBridgePumpEventLimit);
-    for (int i = 0; i < maxEvents; i++)
+    for (int i = 0; i < kPacketBridgePumpEventLimit; i++)
     {
         int result = G.Transport.Service(event);
         G.DiagnosticsRuntime.RecordENetService(result);
@@ -4819,264 +4816,6 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     G.Transport.Send(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE, false);
 }
 
-std::filesystem::path StatePath(const std::string& dir, int instanceID)
-{
-    char filename[64];
-    std::snprintf(filename, sizeof(filename), "inst%d.mln", instanceID);
-    return std::filesystem::path(dir) / filename;
-}
-
-std::filesystem::path LocalMPStatePath(const std::string& dir)
-{
-    return std::filesystem::path(dir) / "localmp.bin";
-}
-
-bool SaveState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (G.Harness.StateSaveDir.empty() || G.Harness.StateSaveFrame == 0) return false;
-    if (frame != G.Harness.StateSaveFrame || G.Coordinator.IsStateSaved(instanceID)) return false;
-
-    std::error_code ec;
-    std::filesystem::create_directories(G.Harness.StateSaveDir, ec);
-    if (ec)
-    {
-        std::printf("NSMB Test: failed to create state save dir: %s (%s)\n",
-            G.Harness.StateSaveDir.c_str(),
-            ec.message().c_str());
-        return false;
-    }
-
-    melonDS::Savestate state;
-    if (state.Error || !nds->DoSavestate(&state) || state.Error)
-    {
-        std::printf("NSMB Test: failed to create savestate inst=%d frame=%u\n", instanceID, frame);
-        return false;
-    }
-
-    const std::filesystem::path path = StatePath(G.Harness.StateSaveDir, instanceID);
-    std::ofstream file(path, std::ios::binary | std::ios::trunc);
-    if (!file)
-    {
-        std::printf("NSMB Test: failed to open savestate for write: %ls\n", path.c_str());
-        return false;
-    }
-
-    file.write(reinterpret_cast<const char*>(state.Buffer()), state.Length());
-    if (!file)
-    {
-        std::printf("NSMB Test: failed to write savestate: %ls\n", path.c_str());
-        return false;
-    }
-
-    G.Coordinator.MarkStateSaved(instanceID);
-    std::printf("NSMB Test: saved state inst=%d frame=%u path=%ls bytes=%u\n",
-        instanceID,
-        frame,
-        path.c_str(),
-        state.Length());
-    return true;
-}
-
-bool SaveLocalMPState(melonDS::u32 frame)
-{
-    if (G.Harness.StateSaveDir.empty() || G.Harness.StateSaveFrame == 0) return false;
-    if (frame != G.Harness.StateSaveFrame) return false;
-    if (!G.Coordinator.TryBeginLocalMPSave(G.Bootstrap.TestInstanceCount)) return false;
-    const std::string stateSaveDir = G.Harness.StateSaveDir;
-
-    if (melonDS::MPInterface::GetType() != melonDS::MPInterface_Local)
-    {
-        std::printf("NSMB Test: LocalMP snapshot skipped because MPInterface is not Local\n");
-        return false;
-    }
-
-    auto* localMP = dynamic_cast<melonDS::LocalMP*>(&melonDS::MPInterface::Get());
-    if (!localMP)
-    {
-        std::printf("NSMB Test: LocalMP snapshot failed because LocalMP cast failed\n");
-        return false;
-    }
-
-    std::vector<melonDS::u8> buffer;
-    if (!localMP->SnapshotForTest(buffer) || buffer.empty())
-    {
-        std::printf("NSMB Test: LocalMP snapshot failed\n");
-        return false;
-    }
-
-    const std::filesystem::path path = LocalMPStatePath(stateSaveDir);
-    std::ofstream file(path, std::ios::binary | std::ios::trunc);
-    if (!file)
-    {
-        std::printf("NSMB Test: failed to open LocalMP state for write: %ls\n", path.c_str());
-        return false;
-    }
-
-    file.write(reinterpret_cast<const char*>(buffer.data()), static_cast<std::streamsize>(buffer.size()));
-    if (!file)
-    {
-        std::printf("NSMB Test: failed to write LocalMP state: %ls\n", path.c_str());
-        return false;
-    }
-
-    std::printf("NSMB Test: saved LocalMP state frame=%u path=%ls bytes=%zu\n",
-        frame,
-        path.c_str(),
-        buffer.size());
-    return true;
-}
-
-bool WaitForStateLoadBarrier(int instanceID)
-{
-    if (G.Bootstrap.TestInstanceCount <= 1) return true;
-
-    const auto start = std::chrono::steady_clock::now();
-    for (;;)
-    {
-        if (G.Coordinator.AllStatesLoaded(G.Bootstrap.TestInstanceCount)) return true;
-
-        if (G.Bootstrap.WaitTimeoutMs > 0)
-        {
-            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - start).count();
-            if (elapsed >= G.Bootstrap.WaitTimeoutMs)
-            {
-                std::printf("NSMB Test: state load barrier timeout inst=%d waitedMs=%d\n",
-                    instanceID,
-                    G.Bootstrap.WaitTimeoutMs);
-                return false;
-            }
-        }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-}
-
-bool WaitForLocalMPLoadFinished(int instanceID)
-{
-    const auto start = std::chrono::steady_clock::now();
-    for (;;)
-    {
-        const auto [finished, loaded] = G.Coordinator.LocalMPLoadStatus();
-        if (finished)
-            return loaded;
-
-        if (G.Bootstrap.WaitTimeoutMs > 0)
-        {
-            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - start).count();
-            if (elapsed >= G.Bootstrap.WaitTimeoutMs)
-            {
-                std::printf("NSMB Test: LocalMP load barrier timeout inst=%d waitedMs=%d\n",
-                    instanceID,
-                    G.Bootstrap.WaitTimeoutMs);
-                return false;
-            }
-        }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-}
-
-bool LoadLocalMPStateOnce(int instanceID)
-{
-    if (G.Harness.StateLoadDir.empty() || !G.Harness.StateLoadFrameSet) return false;
-    const std::string stateLoadDir = G.Harness.StateLoadDir;
-    const bool shouldLoad = G.Coordinator.TryBeginLocalMPLoad();
-
-    if (!shouldLoad)
-        return WaitForLocalMPLoadFinished(instanceID);
-
-    bool loaded = false;
-    const std::filesystem::path path = LocalMPStatePath(stateLoadDir);
-    std::ifstream file(path, std::ios::binary);
-    if (!file)
-    {
-        std::printf("NSMB Test: failed to open LocalMP state for read: %ls\n", path.c_str());
-    }
-    else
-    {
-        std::vector<melonDS::u8> buffer(
-            (std::istreambuf_iterator<char>(file)),
-            std::istreambuf_iterator<char>());
-
-        if (melonDS::MPInterface::GetType() != melonDS::MPInterface_Local)
-        {
-            std::printf("NSMB Test: LocalMP restore skipped because MPInterface is not Local\n");
-        }
-        else if (auto* localMP = dynamic_cast<melonDS::LocalMP*>(&melonDS::MPInterface::Get()))
-        {
-            loaded = localMP->RestoreForTest(buffer.data(), buffer.size());
-            std::printf("NSMB Test: loaded LocalMP state path=%ls bytes=%zu ok=%d\n",
-                path.c_str(),
-                buffer.size(),
-                loaded ? 1 : 0);
-        }
-        else
-        {
-            std::printf("NSMB Test: LocalMP restore failed because LocalMP cast failed\n");
-        }
-    }
-
-    G.Coordinator.FinishLocalMPLoad(loaded);
-    return loaded;
-}
-
-bool LoadState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    std::string stateLoadDir;
-    melonDS::u32 stateLoadFrame = 0;
-    {
-        std::lock_guard<std::mutex> lock(G.Mutex);
-        if (G.Harness.StateLoadDir.empty() || !G.Harness.StateLoadFrameSet) return false;
-        if (frame != G.Harness.StateLoadFrame || G.Coordinator.IsStateLoaded(instanceID)) return false;
-        stateLoadDir = G.Harness.StateLoadDir;
-        stateLoadFrame = G.Harness.StateLoadFrame;
-    }
-
-    const std::filesystem::path path = StatePath(stateLoadDir, instanceID);
-    std::ifstream file(path, std::ios::binary);
-    if (!file)
-    {
-        std::printf("NSMB Test: failed to open savestate for read: %ls\n", path.c_str());
-        return false;
-    }
-
-    std::vector<char> buffer(
-        (std::istreambuf_iterator<char>(file)),
-        std::istreambuf_iterator<char>());
-    if (buffer.empty())
-    {
-        std::printf("NSMB Test: savestate is empty: %ls\n", path.c_str());
-        return false;
-    }
-
-    melonDS::Savestate state(buffer.data(), static_cast<melonDS::u32>(buffer.size()), false);
-    if (state.Error || !nds->DoSavestate(&state) || state.Error)
-    {
-        std::printf("NSMB Test: failed to load savestate inst=%d frame=%u path=%ls\n",
-            instanceID,
-            stateLoadFrame,
-            path.c_str());
-        return false;
-    }
-
-    // NDS savestate loading restores Wifi::PowerOn before Wifi::SetPowerCnt()
-    // runs, so the normal power-on side effect can be skipped. Re-register the
-    // instance with LocalMP before restoring the shared LocalMP queue snapshot.
-    melonDS::Platform::MP_Begin(nds->UserData);
-
-    G.Coordinator.MarkStateLoaded(instanceID);
-    std::printf("NSMB Test: loaded state inst=%d frame=%u path=%ls bytes=%zu\n",
-        instanceID,
-        stateLoadFrame,
-        path.c_str(),
-        buffer.size());
-    WaitForStateLoadBarrier(instanceID);
-    LoadLocalMPStateOnce(instanceID);
-    return true;
-}
-
 }
 
 bool IsEnabled()
@@ -5501,7 +5240,13 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::StartSync);
 
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && nds)
-        LoadState(instanceID, inputFrame, nds);
+    {
+        TestStateHarness::LoadState(
+            {G.Harness, G.Bootstrap, G.Coordinator, G.Mutex},
+            instanceID,
+            inputFrame,
+            nds);
+    }
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::LoadState);
 
     RunBeforeFrameRuntimeConfigPhase(instanceID, nds);
@@ -6096,8 +5841,10 @@ void CaptureScreenshotIfNeeded(int instanceID, melonDS::u32 frame,
 
 void SaveAfterFrameArtifacts(int instanceID, melonDS::u32 logFrame, melonDS::NDS* nds)
 {
-    SaveState(instanceID, logFrame, nds);
-    SaveLocalMPState(logFrame);
+    const TestStateHarness::Context stateHarness{
+        G.Harness, G.Bootstrap, G.Coordinator, G.Mutex};
+    TestStateHarness::SaveState(stateHarness, instanceID, logFrame, nds);
+    TestStateHarness::SaveLocalMPState(stateHarness, logFrame);
     CaptureScreenshotIfNeeded(instanceID, logFrame, nds);
     Diagnostics::CaptureRamDumpIfNeeded(
         G.Diagnostics, G.RamDumpRanges, instanceID, logFrame,

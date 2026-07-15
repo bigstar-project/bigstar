@@ -121,8 +121,6 @@ struct HarnessConfig {
   bool StateLoadFrameSet = false;
 };
 
-inline constexpr int PacketBridgePumpEventLimit = 64;
-
 struct PacketBridgeConfig {
   bool Enabled = false;
   bool Only = false;
@@ -137,7 +135,6 @@ struct PacketBridgeConfig {
   int ForceGameLocalPlayerID = -1;
   std::uint32_t ForceGameLocalPlayerIDStartFrame = 0;
   bool ForceGameLocalPlayerIDEarly = false;
-  int MaxPumpEvents = PacketBridgePumpEventLimit;
   int MaxFrameLead = -1;
   int ThrottleTimeoutMs = 5000;
   std::uint32_t ThrottleStartFrame = 0;

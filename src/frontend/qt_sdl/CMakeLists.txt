@@ -33,6 +33,8 @@ set(SOURCES_QT_SDL
     NsmbNetplayDiagnostics.h
     NsmbNetplayCoordinator.cpp
     NsmbNetplayCoordinator.h
+    NsmbTestStateHarness.cpp
+    NsmbTestStateHarness.h
     NsmbGameState.cpp
     NsmbGameStateReader.cpp
     NsmbGameStateWriter.cpp
